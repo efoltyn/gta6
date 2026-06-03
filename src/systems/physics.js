@@ -165,7 +165,7 @@
         playerChar.group.rotation.x += D.spin * dt;
         playerChar.group.rotation.z += D.spin2 * dt;
       } else {
-        player.pos.y = floorY;
+        player.pos.y = floorY + 0.3;   // a body lying FLAT must rest ON the ground, not be centered IN it (was sinking through)
         playerChar.group.position.copy(player.pos);
         playerChar.group.rotation.x = CBZ.damp(playerChar.group.rotation.x, -Math.PI / 2, 7, dt);
         playerChar.group.rotation.z = CBZ.damp(playerChar.group.rotation.z, 0.22 * Math.sin(D.seed * 1.7), 9, dt);
@@ -181,7 +181,7 @@
       player.crouch = false;
       player.vy -= T.gravity * dt;
       player.pos.y += player.vy * dt;
-      const floorD = groundAt(player.pos.x, player.pos.z, player.pos.y);
+      const floorD = groundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
       if (player.pos.y <= floorD) { player.pos.y = floorD; player.vy = 0; player.grounded = true; }
       playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
       playerChar.group.rotation.z = CBZ.damp(playerChar.group.rotation.z, Math.PI / 2, 11, dt);

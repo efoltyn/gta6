@@ -34,9 +34,55 @@
   // you can drive straight THROUGH the hole — while a few glass shards rain
   // down. One shared translucent material + shard geometry keep it cheap.
   const cityGlass = [], cityShards = [];
-  let _gmat = null, _shardGeo = null;
+  let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
   function glassMat() { return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.46 })); }
   function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.22, 0.3, 0.05)); }
+  function shardGeoBig() { return _shardGeoBig || (_shardGeoBig = new THREE.BoxGeometry(0.4, 0.52, 0.05)); }
+  // a radial SPIDER-CRACK texture (white fracture lines on transparent) painted
+  // over a pane the instant a bullet hits it — the pane lingers cracked for a
+  // beat, reading as "about to shatter", then bursts. One shared texture/material.
+  function crackTex() {
+    if (_crackTex) return _crackTex;
+    const c = document.createElement("canvas"); c.width = 128; c.height = 128;
+    const x = c.getContext("2d");
+    x.clearRect(0, 0, 128, 128);
+    const cxp = 64, cyp = 64;
+    x.strokeStyle = "rgba(240,250,255,0.92)"; x.lineCap = "round";
+    // radial fracture spokes, each kinked to look like real glass
+    const spokes = 11;
+    for (let i = 0; i < spokes; i++) {
+      const a = (i / spokes) * Math.PI * 2 + (i * 0.37);
+      const len = 40 + (i * 13 % 24);
+      x.lineWidth = 2.2 - (i % 3) * 0.5;
+      x.beginPath(); x.moveTo(cxp, cyp);
+      const mx = cxp + Math.cos(a) * len * 0.55 + Math.cos(a + 1.3) * 6;
+      const my = cyp + Math.sin(a) * len * 0.55 + Math.sin(a + 1.3) * 6;
+      x.lineTo(mx, my);
+      x.lineTo(cxp + Math.cos(a) * len, cyp + Math.sin(a) * len);
+      x.stroke();
+    }
+    // concentric web rings linking the spokes
+    x.lineWidth = 1.1;
+    for (const rr of [12, 24, 38]) {
+      x.beginPath();
+      for (let i = 0; i <= spokes; i++) {
+        const a = (i / spokes) * Math.PI * 2 + (i * 0.37);
+        const px = cxp + Math.cos(a) * (rr + (i % 2) * 4), py = cyp + Math.sin(a) * (rr + (i % 2) * 4);
+        if (i === 0) x.moveTo(px, py); else x.lineTo(px, py);
+      }
+      x.stroke();
+    }
+    // bright impact pit
+    x.fillStyle = "rgba(255,255,255,0.95)"; x.beginPath(); x.arc(cxp, cyp, 4, 0, 7); x.fill();
+    const t = new THREE.CanvasTexture(c); t.transparent = true;
+    _crackTex = t; return t;
+  }
+  function crackMat() {
+    // each crack fades independently, so each gets its own cheap material
+    // (shared canvas texture though) — capped at a couple dozen live cracks.
+    return new THREE.MeshBasicMaterial({ map: crackTex(), transparent: true, depthWrite: false, opacity: 0.96 });
+  }
+  const crackQuads = [];   // pooled spider-crack decals fading toward a burst
 
   // register a pane; group/local coords mirror lbox, (ox,oz) → world. opts.solid
   // makes it a height-gated collider (showroom walls) tracked so a burst frees it.
@@ -53,18 +99,49 @@
     cityGlass.push(rec); if (list) list.push(rec);
     return m;
   }
+  // lay a fading spider-crack decal flat over a pane (just before it bursts).
+  // Cheap: a single quad on a shared material, pooled and capped.
+  function crackPane(gp, hx, hy, hz) {
+    if (gp.shattered || gp.cracked || crackQuads.length > 24) return;
+    gp.cracked = true;
+    const horiz = gp.hd < gp.hw;   // pane wider in X than Z → faces ±Z
+    const sz = Math.min(1.5, Math.max(0.7, gp.span));
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz), crackMat());
+    const px = hx != null ? hx : gp.x, py = hy != null ? hy : gp.y, pz = hz != null ? hz : gp.z;
+    if (horiz) { q.position.set(px, py, gp.z + (gp.z >= 0 ? 0.05 : -0.05)); }
+    else { q.position.set(gp.x + (gp.x >= 0 ? 0.05 : -0.05), py, pz); q.rotation.y = Math.PI / 2; }
+    q.renderOrder = 3;
+    CBZ.scene.add(q);
+    crackQuads.push({ mesh: q, gp, life: 0.45 + Math.random() * 0.25, fade: 0 });
+  }
   function burstPane(gp) {
     if (gp.shattered) return;
     gp.shattered = true; gp.mesh.visible = false;
     if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
-    if (cityShards.length > 320) return;
-    const n = 4 + ((Math.random() * 4) | 0);
-    for (let i = 0; i < n; i++) {
-      const sh = new THREE.Mesh(shardGeo(), glassMat());
+    // clear any lingering crack decal for this pane
+    for (let i = crackQuads.length - 1; i >= 0; i--) if (crackQuads[i].gp === gp) { CBZ.scene.remove(crackQuads[i].mesh); crackQuads.splice(i, 1); }
+    if (cityShards.length > 360) return;
+    // raining shards: a mix of big jagged plates and small chips, span-scaled,
+    // biased to fall outward from the pane plane for a real "blown out" look.
+    const big = Math.max(2, Math.min(7, Math.round(gp.span * 1.6)));
+    const small = 3 + ((Math.random() * 4) | 0);
+    const horiz = gp.hd < gp.hw, outN = horiz ? (gp.z >= 0 ? 1 : -1) : (gp.x >= 0 ? 1 : -1);
+    for (let i = 0; i < big + small; i++) {
+      const isBig = i < big;
+      const sh = new THREE.Mesh(isBig ? shardGeoBig() : shardGeo(), glassMat());
+      const sc = isBig ? 0.8 + Math.random() * 0.7 : 0.6 + Math.random() * 0.5;
+      sh.scale.set(sc, sc * (0.7 + Math.random() * 0.8), 1);
       sh.position.set(gp.x + (Math.random() - 0.5) * gp.span * 2, gp.y + (Math.random() - 0.5) * Math.max(0.7, gp.span), gp.z + (Math.random() - 0.5) * 0.4);
       sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
       CBZ.scene.add(sh);
-      cityShards.push({ mesh: sh, vx: (Math.random() - 0.5) * 3, vy: 1 + Math.random() * 2.6, vz: (Math.random() - 0.5) * 3, spin: (Math.random() - 0.5) * 9, life: 1.3 });
+      const lateral = horiz ? 0 : (Math.random() - 0.5) * 3, lateralZ = horiz ? (Math.random() - 0.5) * 3 : 0;
+      cityShards.push({
+        mesh: sh,
+        vx: lateral + (horiz ? (Math.random() - 0.5) * 3 : outN * (0.8 + Math.random() * 2.2)),
+        vy: 0.8 + Math.random() * 3.0,
+        vz: lateralZ + (horiz ? outN * (0.8 + Math.random() * 2.2) : (Math.random() - 0.5) * 3),
+        spin: (Math.random() - 0.5) * 11, life: 1.2 + Math.random() * 0.8,
+      });
     }
   }
   // burst every intact pane within r of (x,z) — called on car crashes etc.
@@ -76,12 +153,16 @@
       if (dx * dx + dz * dz <= r2) { burstPane(gp); if (++n > 50) break; }
     }
     if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
+    // a hard impact (big radius shatter = a car ploughing a storefront) also
+    // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
+    if (r >= 7 && CBZ.cityChunk) CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.8, z, { count: 2 + ((Math.random() * 2) | 0), force: 3 });
     return n;
   };
   // SHOOTING a window: ray-test (origin, dir) against every intact pane and burst
   // the NEAREST one the bullet actually passes through, within maxDist. Glass has
   // no collider in the gun's wall raycast, so the shot passes through it invisibly —
   // this is what makes the pane you fired through actually break. Returns the rec.
+  let bestHX = 0, bestHY = 0, bestHZ = 0;   // impact point of the last ray-shatter
   CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist) {
     const nl = Math.hypot(dx, dy, dz) || 1; dx /= nl; dy /= nl; dz /= nl;
     const lim = maxDist != null ? maxDist : 1e9;
@@ -97,11 +178,28 @@
       else { let a = ((gp.z - gp.hd) - oz) / dz, b = ((gp.z + gp.hd) - oz) / dz; if (a > b) { const s = a; a = b; b = s; } if (a > tmin) tmin = a; if (b < tmax) tmax = b; }
       if (tmax < tmin || tmax < 0) continue;            // miss / entirely behind the muzzle
       const t = tmin > 0 ? tmin : 0;                    // entry distance (0 if muzzle inside the pane)
-      if (t < bestT) { bestT = t; best = gp; }
+      if (t < bestT) { bestT = t; best = gp; bestHX = ox + dx * t; bestHY = oy + dy * t; bestHZ = oz + dz * t; }
     }
-    if (best) { burstPane(best); if (CBZ.sfx) CBZ.sfx("glass"); }
+    if (best) {
+      // first bullet spider-cracks the pane (and chips a glass shard); a second
+      // hit — or a solid showroom pane — blows it fully out.
+      if (best.cracked || best.col) { burstPane(best); if (CBZ.sfx) CBZ.sfx("glass"); }
+      else { crackPane(best, bestHX, bestHY, bestHZ); if (CBZ.sfx) CBZ.sfx("glass"); spawnGlassChip(bestHX, bestHY, bestHZ); }
+    }
     return best;
   };
+  // one or two tiny shards spit off the impact point of a single bullet
+  function spawnGlassChip(x, y, z) {
+    if (cityShards.length > 360) return;
+    const n = 1 + ((Math.random() * 2) | 0);
+    for (let i = 0; i < n; i++) {
+      const sh = new THREE.Mesh(shardGeo(), glassMat());
+      sh.scale.setScalar(0.5 + Math.random() * 0.4);
+      sh.position.set(x, y, z); sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      CBZ.scene.add(sh);
+      cityShards.push({ mesh: sh, vx: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 1.4, vz: (Math.random() - 0.5) * 2, spin: (Math.random() - 0.5) * 10, life: 0.9 });
+    }
+  }
   // re-glaze the whole city for a new game (restore panes + their colliders)
   CBZ.cityGlassReset = function () {
     for (const gp of cityGlass) {
@@ -109,13 +207,33 @@
         gp.shattered = false; gp.mesh.visible = true;
         if (gp.col && CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
       }
+      gp.cracked = false;
     }
     for (const s of cityShards) CBZ.scene.remove(s.mesh);
     cityShards.length = 0;
+    for (const cq of crackQuads) { CBZ.scene.remove(cq.mesh); if (cq.mesh.material) cq.mesh.material.dispose(); cq.mesh.geometry.dispose(); }
+    crackQuads.length = 0;
+    CBZ.cityDamageReset && CBZ.cityDamageReset();
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
-  // shard physics (cheap; only does work while shards exist)
+  // shard physics + crack-decal lifecycle (cheap; only works while any exist)
   CBZ.onAlways(9, function (dt) {
+    // spider cracks: a cracked pane that is left alone re-heals (clears its
+    // decal) so the world doesn't accumulate cracks; a fresh decal stays put
+    // briefly then fades out. (Bursting clears it via burstPane.)
+    if (crackQuads.length) {
+      for (let i = crackQuads.length - 1; i >= 0; i--) {
+        const cq = crackQuads[i]; cq.life -= dt;
+        if (cq.life < 0.2) { cq.fade += dt; cq.mesh.material.opacity = Math.max(0, 0.96 - cq.fade * 4); }
+        if (cq.life <= 0) {
+          CBZ.scene.remove(cq.mesh);
+          if (cq.mesh.material) cq.mesh.material.dispose();
+          cq.mesh.geometry.dispose();
+          if (cq.gp) cq.gp.cracked = false;   // pane re-heals (decal gone)
+          crackQuads.splice(i, 1);
+        }
+      }
+    }
     if (!cityShards.length) return;
     const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
     for (let i = cityShards.length - 1; i >= 0; i--) {
@@ -126,6 +244,171 @@
       const fl = (CBZ.floorAt ? CBZ.floorAt(p.x, p.z) : 0) + 0.04;
       if (p.y <= fl) { p.y = fl; s.vy = 0; s.vx *= 0.3; s.vz *= 0.3; s.spin *= 0.3; }
       if (s.life <= 0) { CBZ.scene.remove(s.mesh); cityShards.splice(i, 1); }
+    }
+  });
+
+  // ---- BUILDING DAMAGE: bullet holes, scorch marks, knocked-off chunks ----
+  // A fixed POOL of dark decal quads. Each impact reuses the oldest slot once
+  // the cap is hit (FPS-style decal budget) so memory/draw cost stays flat. One
+  // shared dark material + one shared scorch material; chunks share box geo.
+  const BULLET_CAP = 110, SCORCH_CAP = 40;
+  const bulletPool = [], scorchPool = [];
+  let bulletIdx = 0, scorchIdx = 0;
+  let _holeGeo = null, _holeMat = null, _scorchTex = null, _scorchMat = null, _chunkGeo = null, _chunkMat = null;
+  const cityChunks = [];
+  function holeGeo() { return _holeGeo || (_holeGeo = new THREE.PlaneGeometry(0.3, 0.3)); }
+  // a soft dark bullet-pit texture (dark core + cracked ring) painted once
+  function holeMat() {
+    if (_holeMat) return _holeMat;
+    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(32, 32, 1, 32, 32, 30);
+    g.addColorStop(0, "rgba(8,8,10,0.95)"); g.addColorStop(0.45, "rgba(20,20,24,0.8)");
+    g.addColorStop(0.7, "rgba(40,40,46,0.35)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    x.strokeStyle = "rgba(15,15,18,0.5)"; x.lineWidth = 1.4; x.lineCap = "round";
+    for (let i = 0; i < 7; i++) { const a = i / 7 * 6.28 + i; x.beginPath(); x.moveTo(32, 32); x.lineTo(32 + Math.cos(a) * (16 + i * 2), 32 + Math.sin(a) * (16 + i * 2)); x.stroke(); }
+    const t = new THREE.CanvasTexture(c);
+    _holeMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    return _holeMat;
+  }
+  function scorchMat() {
+    if (_scorchMat) return _scorchMat;
+    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(32, 32, 2, 32, 32, 31);
+    g.addColorStop(0, "rgba(6,6,7,0.92)"); g.addColorStop(0.5, "rgba(18,16,15,0.7)");
+    g.addColorStop(0.8, "rgba(35,28,24,0.3)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    // a few soot licks
+    x.fillStyle = "rgba(10,9,8,0.55)";
+    for (let i = 0; i < 9; i++) { const a = i / 9 * 6.28 + i * 0.7, r = 18 + (i * 7 % 12); x.beginPath(); x.ellipse(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 5, 9, a, 0, 6.3); x.fill(); }
+    const t = new THREE.CanvasTexture(c);
+    _scorchMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    return _scorchMat;
+  }
+  function chunkGeo() { return _chunkGeo || (_chunkGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4)); }
+  function chunkMat() { return _chunkMat || (_chunkMat = new THREE.MeshLambertMaterial({ color: 0x7c828b })); }
+  // orient a decal quad so its +Z faces along the surface normal (nx,ny,nz)
+  const _nrm = new THREE.Vector3(), _q = new THREE.Quaternion(), _zAxis = new THREE.Vector3(0, 0, 1);
+  function aimDecal(mesh, nx, ny, nz) {
+    _nrm.set(nx, ny, nz); if (_nrm.lengthSq() < 1e-6) _nrm.set(0, 0, 1); _nrm.normalize();
+    _q.setFromUnitVectors(_zAxis, _nrm); mesh.quaternion.copy(_q);
+  }
+
+  // PUBLIC: pool a small dark bullet-hole decal on a wall at (x,y,z) facing the
+  // surface normal (nx,ny,nz). Called by the shooting/impact code when a shot
+  // hits a building surface (not glass). Reuses the oldest decal past the cap.
+  CBZ.cityBulletHole = function (x, y, z, nx, ny, nz) {
+    if (!CBZ.scene) return null;
+    let m;
+    if (bulletPool.length < BULLET_CAP) {
+      m = new THREE.Mesh(holeGeo(), holeMat());
+      m.renderOrder = 4; CBZ.scene.add(m); bulletPool.push(m);
+    } else {
+      m = bulletPool[bulletIdx]; bulletIdx = (bulletIdx + 1) % BULLET_CAP; m.visible = true;
+    }
+    // nudge a hair off the wall along the normal so it never z-fights
+    const off = 0.02;
+    m.position.set(x + (nx || 0) * off, y + (ny || 0) * off, z + (nz || 0) * off);
+    aimDecal(m, nx || 0, ny || 0, nz || 1);
+    const s = 0.7 + Math.random() * 0.7; m.scale.set(s, s, s);
+    m.rotateZ(Math.random() * Math.PI);
+    return m;
+  };
+
+  // PUBLIC: lay scorch marks from an explosion at (x,z) within radius r — a big
+  // soot disc on the ground + soot on any building walls the blast can reach.
+  CBZ.cityScorch = function (x, z, r) {
+    if (!CBZ.scene) return;
+    const place = (px, py, pz, nx, ny, nz, scale) => {
+      let m;
+      if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
+      else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
+      m.position.set(px, py, pz); aimDecal(m, nx, ny, nz); m.rotateZ(Math.random() * Math.PI);
+      m.scale.set(scale, scale, scale);
+    };
+    // ground scorch (faces up)
+    const fy = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.03;
+    place(x, fy, z, 0, 1, 0, (r || 3) * 1.6 + 2);
+    // soot a few of the nearest wall colliders that face the blast
+    const r2 = (r || 3) * (r || 3) * 2.2; let n = 0;
+    for (let i = 0; i < CBZ.colliders.length && n < 4; i++) {
+      const c = CBZ.colliders[i]; if (c.y1 == null) continue;
+      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+      const dx = cx - x, dz = cz - z, dd = dx * dx + dz * dz;
+      if (dd > r2 || dd < 0.5) continue;
+      const wx = c.maxX - c.minX, wz = c.maxZ - c.minZ;
+      // pick the broad face nearest the blast as the scorch plane
+      let nx = 0, nz = 0, sx = cx, sz = cz;
+      if (wx >= wz) { nz = dz < 0 ? -1 : 1; sz = nz < 0 ? c.minZ - 0.05 : c.maxZ + 0.05; sx = Math.max(c.minX, Math.min(c.maxX, x)); }
+      else { nx = dx < 0 ? -1 : 1; sx = nx < 0 ? c.minX - 0.05 : c.maxX + 0.05; sz = Math.max(c.minZ, Math.min(c.maxZ, z)); }
+      const sy = Math.max(c.y0 + 0.4, Math.min(c.y1 - 0.4, fy + 1.0));
+      place(sx, sy, sz, nx, 0, nz, (r || 3) * 0.7 + 1.4); n++;
+    }
+  };
+
+  // PUBLIC: knock physical concrete CHUNKS off a surface on a big hit (blast /
+  // ram). Cheap pooled debris boxes that tumble and settle, capped.
+  CBZ.cityChunk = function (x, y, z, opts) {
+    opts = opts || {};
+    if (cityChunks.length > 60) return;
+    const n = opts.count || (2 + ((Math.random() * 3) | 0));
+    const col = opts.color != null ? opts.color : 0x7c828b;
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(chunkGeo(), col === 0x7c828b ? chunkMat() : new THREE.MeshLambertMaterial({ color: col }));
+      const s = 0.25 + Math.random() * 0.55; m.scale.set(s, s * (0.6 + Math.random()), s);
+      m.position.set(x + (Math.random() - 0.5) * 0.5, y + (Math.random() - 0.5) * 0.5, z + (Math.random() - 0.5) * 0.5);
+      m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      m.castShadow = true; CBZ.scene.add(m);
+      const dirx = opts.dirx != null ? opts.dirx : (Math.random() - 0.5) * 2;
+      const dirz = opts.dirz != null ? opts.dirz : (Math.random() - 0.5) * 2;
+      const sp = opts.force || 3;
+      cityChunks.push({ mesh: m, vx: dirx * sp * (0.5 + Math.random()), vy: 2 + Math.random() * 3, vz: dirz * sp * (0.5 + Math.random()), spin: (Math.random() - 0.5) * 12, life: 2.2 + Math.random() * 1.5, dispose: col !== 0x7c828b });
+    }
+  };
+
+  CBZ.cityDamageReset = function () {
+    for (const m of bulletPool) m.visible = false;
+    for (const m of scorchPool) m.visible = false;
+    bulletIdx = scorchIdx = 0;
+    for (const c of cityChunks) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); }
+    cityChunks.length = 0;
+  };
+
+  // DECORATE the explosion so blasts leave scorch marks on the ground + nearby
+  // walls and blow concrete chunks outward — without touching crashfx.js. We
+  // wrap once, lazily, the first time the city updates (after all modules load),
+  // preserving the original behaviour exactly. Idempotent.
+  let _explosionWrapped = false;
+  function wrapExplosion() {
+    if (_explosionWrapped || typeof CBZ.cityExplosion !== "function") return;
+    _explosionWrapped = true;
+    const orig = CBZ.cityExplosion;
+    CBZ.cityExplosion = function (x, z, opts) {
+      const r = orig.call(this, x, z, opts);
+      try {
+        const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
+        CBZ.cityScorch(x, z, R * 0.5);
+        CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.6, z, { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
+      } catch (e) {}
+      return r;
+    };
+  }
+  CBZ.onUpdate(0.01, function () { if (CBZ.game.mode !== "city") return; wrapExplosion(); });
+
+  // chunk physics (only runs while chunks exist)
+  CBZ.onAlways(9, function (dt) {
+    if (!cityChunks.length) return;
+    const G = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
+    for (let i = cityChunks.length - 1; i >= 0; i--) {
+      const c = cityChunks[i]; c.life -= dt; c.vy -= G * dt;
+      const p = c.mesh.position;
+      p.x += c.vx * dt; p.y += c.vy * dt; p.z += c.vz * dt;
+      c.mesh.rotation.x += c.spin * dt; c.mesh.rotation.y += c.spin * 0.7 * dt;
+      const fl = (CBZ.floorAt ? CBZ.floorAt(p.x, p.z) : 0) + 0.08;
+      if (p.y <= fl) { p.y = fl; c.vy = -c.vy * 0.18; c.vx *= 0.55; c.vz *= 0.55; c.spin *= 0.55; if (Math.abs(c.vy) < 0.6) c.vy = 0; }
+      if (c.life <= 0) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); cityChunks.splice(i, 1); }
     }
   });
 
@@ -410,7 +693,16 @@
     // ---- always-on dressing: floor mat + lit ceiling fixture ----
     const matP = pt(2.4, 0, 0.5);                  // just inside the doorway
     if (matP) b.lbox(matP.x, 0.005, matP.z, along ? 0.05 + 1.8 : 2.0, 0.05, along ? 2.0 : 0.05 + 1.8, 0x33373f, { cast: false });
-    b.lbox(0, FHl - 0.32, 0, along ? 0.5 : 3.2, 0.08, along ? 3.2 : 0.5, 0xffe9a8, { emissive: 0xffcf66, ei: 0.42, cast: false });
+    // mood-tinted ceiling fixture per trade — bars/casinos run a moody saturated
+    // glow, clinical trades (bank/hospital) cold-white, the rest warm shop light.
+    const MOOD = { bar: [0xe85d8a, 0.6], casino: [0xc9a227, 0.62], drugs: [0x4caf6e, 0.4], bank: [0xdfe8ff, 0.5],
+      cityhall: [0xdfe8ff, 0.5], hospital: [0xf2faff, 0.55], gym: [0x66d9c0, 0.45], guns: [0xbfd0a8, 0.4],
+      jewelry: [0xffe08a, 0.55], pawn: [0xffe08a, 0.5], electronics: [0x39d0c0, 0.45], security: [0x49a0c0, 0.45] };
+    const mood = MOOD[kind] || [0xffcf66, 0.42];
+    b.lbox(0, FHl - 0.32, 0, along ? 0.5 : 3.2, 0.08, along ? 3.2 : 0.5, mood[0], { emissive: mood[0], ei: mood[1], cast: false });
+    // a second, dimmer back-of-room fixture so deep rooms aren't black
+    const bf = pt(2 * halfIn - 3.2, 0, 1.2);
+    if (bf) b.lbox(bf.x, FHl - 0.32, bf.z, along ? 0.5 : 2.6, 0.07, along ? 2.6 : 0.5, mood[0], { emissive: mood[0], ei: mood[1] * 0.6, cast: false });
 
     // ---- the register on the back counter the caller already placed ----
     // (counter centre ≈ inDepth = 2*halfIn-2.8 in this frame; nudge a register
@@ -470,10 +762,20 @@
             }
           }
         }
-        // a glass pistol display case as a freestanding island
-        island(2 * halfIn - 5.2, halfTan - 2.2, along ? 1.0 : 2.6, 1.0, along ? 2.6 : 1.0, 0x2a2f37, { cast: false });
-        const isl = pt(2 * halfIn - 5.2, halfTan - 2.2, 0.8);
-        if (isl) decor(isl, 0.92, along ? 0.9 : 2.4, 0.55, along ? 2.4 : 0.9, GLASS);
+        // TWO lit glass pistol display cases as freestanding islands, pistols inside
+        for (const sideLat of [halfTan - 2.2, -(halfTan - 2.2)]) {
+          const inD = 2 * halfIn - 5.2;
+          island(inD, sideLat, along ? 1.0 : 2.6, 1.0, along ? 2.6 : 1.0, 0x2a2f37, { cast: false });
+          const isl = pt(inD, sideLat, 0.8);
+          if (isl) {
+            decor(isl, 0.92, along ? 0.9 : 2.4, 0.55, along ? 2.4 : 0.9, GLASS);
+            glow({ x: isl.x, z: isl.z }, 1.02, along ? 0.8 : 2.2, 0.04, along ? 2.2 : 0.8, 0x7ed957, 0.3);   // case under-light
+            for (let g = -1; g <= 1; g++) { const lat = g * (along ? 0 : 0.6); const lx = isl.x + tx * (along ? g * 0.6 : 0), lz = isl.z + tz * (along ? 0 : g * 0.6); b.lbox(lx, 0.95, lz, along ? 0.5 : 0.07, 0.06, along ? 0.07 : 0.5, 0x1c1f22, { cast: false }); }  // pistols
+          }
+        }
+        // stacked ammo CRATES against the back wall
+        const ac = pt(2 * halfIn - 2.2, -(halfTan - 1.4), 0.7);
+        if (ac) { decor(ac, 0.3, 1.2, 0.6, 0.8, 0x4a5232); decor(ac, 0.85, 0.9, 0.5, 0.6, 0x5a6240); }
         break;
       }
       case "jewelry":
@@ -486,15 +788,40 @@
       }
       case "bar":
       case "casino": {
-        // back bar with bottle wall; bar stools; (casino adds glowing tables)
+        // back bar with a lit BOTTLE WALL; bar stools; neon accent strip
         wallShelves({ body: 0x2a1f16, top: 0x3a2a1c, h: 1.8, count: 3, span: 2.4 });
         for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.95 + r * 0.55, across: st.across }, [0x6fbf73, 0xbf6f6f, 0xc7b06f, 0x6f9fbf, 0xbf6fb0], 6, 0.14, 0.42);
+        // NEON back-bar strip glowing behind the bottles (the trade accent colour)
+        const neon = kind === "casino" ? 0xc9a227 : 0xe85d8a;
+        const np = pt(2 * halfIn - 2.0, 0, 0.6);
+        if (np) glow(np, 2.3, along ? 0.06 : halfTan * 1.4, 0.14, along ? halfTan * 1.4 : 0.06, neon, 0.95);
         // a row of bar stools facing the back counter
         for (let i = -1; i <= 1; i++) { const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (p) { decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); } }
-        if (kind === "casino") {
+        if (kind === "bar") {
+          // a POOL TABLE mid-room: felt top, dark rails, six pocket dots, racked balls
+          const pp = pt(halfIn - 0.6, -(halfTan - 2.6), 1.0) || pt(halfIn, 0, 1.0);
+          if (pp) {
+            decor(pp, 0.42, along ? 1.5 : 2.8, 0.1, along ? 2.8 : 1.5, 0x6b4a2a);   // table body
+            decor(pp, 0.78, along ? 1.6 : 2.9, 0.16, along ? 2.9 : 1.6, 0x274a30);   // rail frame
+            glow(pp, 0.8, along ? 1.4 : 2.6, 0.04, along ? 2.6 : 1.4, 0x1f8a4d, 0.4); // felt
+            const balls = [0xffd400, 0x0050c8, 0xd40000, 0x6a0dad, 0xff7000, 0x0a7d3a];
+            for (let g = 0; g < 6; g++) { const a = g / 6 * 6.28, lx = pp.x + Math.cos(a) * 0.4, lz = pp.z + Math.sin(a) * 0.4; b.lbox(lx, 0.86, lz, 0.12, 0.12, 0.12, balls[g], { cast: false }); }
+            // overhead pool lamp
+            b.lbox(pp.x, FHl - 0.7, pp.z, along ? 0.4 : 1.6, 0.2, along ? 1.6 : 0.4, 0xfff0c0, { emissive: 0xffe39a, ei: 0.7, cast: false });
+          }
+        } else {
+          // CASINO: a couple of glowing felt TABLES + a row of SLOT MACHINES
           for (const lat of [-(halfTan - 2.4), halfTan - 2.4]) {
             const p = island(halfIn, lat, along ? 1.6 : 2.6, 0.95, along ? 2.6 : 1.6, 0x1f4d33, { cast: false });
             if (p) glow(p, 0.99, along ? 1.4 : 2.4, 0.04, along ? 2.4 : 1.4, 0x39d07a, 0.55);   // felt glow
+          }
+          // slot machine bank along one side wall, screens glowing gold/red
+          const slotLat = halfTan - 0.85, scols = [0xffd400, 0xff3b3b, 0x39d0ff, 0xffd400];
+          for (let i = 0; i < 4; i++) {
+            const p = pt(5.0 + i * 1.6, slotLat, 0.6);
+            if (!p) continue;
+            decor(p, 0.7, along ? 0.5 : 1.0, 1.4, along ? 1.0 : 0.5, 0x2a2f37);                 // cabinet
+            b.lbox(p.x, 1.15, p.z, along ? 0.06 : 0.6, 0.5, along ? 0.6 : 0.06, scols[i % scols.length], { emissive: scols[i % scols.length], ei: 0.7, cast: false });  // lit screen
           }
         }
         break;
@@ -503,11 +830,22 @@
         // diner: produce/serving tables down the room + a back kitchen line
         wallShelves({ body: 0x6b7078, top: 0xe8e8ee, h: 1.0, count: 3, span: 2.2 });
         for (const st of shelfTops) stockRow(st, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0xff9a5a], 5, 0.2, 0.22);   // produce
-        for (let i = 0; i < 2; i++) {                                          // two booth tables
+        for (let i = 0; i < 2; i++) {                                          // two booth tables w/ bench seats
           for (const side of [-1, 1]) {
             const p = pt(5.0 + i * 3.2, side * (halfTan - 1.7), 0.8);
-            if (p) { decor(p, 0.45, 1.0, 0.1, 0.7, 0x9aa0a8); decor(p, 0.22, 0.6, 0.44, 0.06, 0x6b4a2a); decor(p, 0.55, 1.0, 0.08, 0.7, 0xe8e8ee); }
+            if (p) {
+              decor(p, 0.45, 1.0, 0.1, 0.7, 0x9aa0a8); decor(p, 0.22, 0.6, 0.44, 0.06, 0x6b4a2a); decor(p, 0.55, 1.0, 0.08, 0.7, 0xe8e8ee);  // top
+              // a red vinyl bench on the wall side of each booth
+              const bp = pt(5.0 + i * 3.2, side * (halfTan - 0.7), 0.8);
+              if (bp) { decor(bp, 0.45, 1.2, 0.5, 0.4, 0xb23b3b); decor(bp, 0.95, 1.2, 0.5, 0.16, 0xc14b4b); }
+            }
           }
+        }
+        // a glowing back-lit MENU BOARD above the counter (diner classic)
+        const mb = pt(2 * halfIn - 1.8, 0, 0.6);
+        if (mb) {
+          glow(mb, 2.5, along ? 0.08 : halfTan * 1.3, 0.9, along ? halfTan * 1.3 : 0.08, 0xffae5a, 0.55);
+          for (let i = -1; i <= 1; i++) { const lat = i * (halfTan * 0.4); const lx = mb.x + tx * lat, lz = mb.z + tz * lat; b.lbox(lx, 2.5, lz + (along ? 0 : 0), along ? 0.05 : 0.5, 0.18, along ? 0.5 : 0.05, 0x2a2018, { cast: false }); }  // menu lines
         }
         break;
       }
@@ -522,8 +860,20 @@
           decor(p, 1.9, 1.5, 1.0, 0.06, GLASS);            // teller glass
           glow({ x: p.x, z: p.z }, 1.0, 0.3, 0.1, 0.06, 0x5b8bff, 0.7);  // counter screen
         }
-        // a velvet queue rope (two short posts) by the entrance
+        // a velvet queue rope (two short posts + a sagging rope) by the entrance
         for (const side of [-1, 1]) { const p = pt(4.6, side * 1.4, 0.6); if (p) { decor(p, 0.5, 0.16, 1.0, 0.16, 0xcaa64a); decor(p, 1.02, 0.22, 0.18, 0.22, 0x2a2f37); } }
+        { const rp = pt(4.6, 0, 0.6); if (rp) decor(rp, 0.85, along ? 0.04 : 2.6, 0.06, along ? 2.6 : 0.04, 0x8a1f2b); }   // the rope span
+        if (kind === "bank") {
+          // a steel VAULT recessed into the back corner: thick frame + round door
+          const vp = pt(2 * halfIn - 1.6, halfTan - 1.9, 0.7);
+          if (vp) {
+            solidBox(vp, 1.4, along ? 0.4 : 2.6, 2.8, along ? 2.6 : 0.4, 0x39414d);      // vault wall
+            decor(vp, 1.4, along ? 0.12 : 2.0, 2.0, along ? 2.0 : 0.12, 0x6a7480);        // door face
+            b.lbox(vp.x, 1.4, vp.z + (along ? 0 : 0.0), 0.34, 0.34, 0.34, 0xb9c0c8, { cast: false });  // wheel handle hub
+            for (let s = 0; s < 4; s++) { const a = s / 4 * 6.28; b.lbox(vp.x + Math.cos(a) * 0.45, 1.4 + Math.sin(a) * 0.45, vp.z, 0.1, 0.4, 0.1, 0xb9c0c8, { cast: false }); }  // spokes
+            glow({ x: vp.x, z: vp.z }, 1.4, 0.12, 0.12, 0.12, 0x5b8bff, 0.6);            // lock light
+          }
+        }
         break;
       }
       case "gym": {
@@ -537,8 +887,13 @@
         // a back dumbbell rack
         const dr = pt(2 * halfIn - 3.4, halfTan - 1.6, 0.7);
         if (dr) { decor(dr, 0.5, along ? 0.6 : 2.4, 1.0, along ? 2.4 : 0.6, 0x32363d); for (let i = -2; i <= 2; i++) { const lx = dr.x + tx * i * 0.45, lz = dr.z + tz * i * 0.45; b.lbox(lx, 0.85, lz, 0.18, 0.18, 0.5, 0x6a7078, { cast: false }); } }
-        // a wall mirror strip
-        const mp = pt(8.0, -(halfTan - 0.55), 0.9); if (mp) decor(mp, 1.5, along ? 0.04 : 3.0, 2.4, along ? 3.0 : 0.04, 0xb9e6f7);
+        // a full wall MIRROR strip (gyms are wall-to-wall mirrors)
+        const mp = pt(8.0, -(halfTan - 0.55), 0.9); if (mp) decor(mp, 1.5, along ? 0.04 : 3.6, 2.6, along ? 3.6 : 0.04, 0xc6ecf7);
+        // rubber FLOOR MATS down the centre of the gym floor
+        for (let i = 0; i < 3; i++) {
+          const fp = pt(5.5 + i * 2.6, 0, 0.9);
+          if (fp) b.lbox(fp.x, 0.02, fp.z, along ? 1.6 : 1.8, 0.04, along ? 1.8 : 1.6, [0x222931, 0x2a323a][i % 2], { cast: false });
+        }
         break;
       }
       case "clothing":
@@ -555,6 +910,14 @@
           }
           wallShelves({ body: 0x55606e, top: 0x8a939c, h: 1.6, count: 3, span: 2.0 });
           for (const st of shelfTops) stockRow(st, [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e], 4, 0.3, 0.16);  // folded stacks
+          // a pair of dressed MANNEQUINS flanking the entrance display
+          for (const side of [-1, 1]) {
+            const p = pt(4.4, side * (halfTan - 1.4), 0.7);
+            if (!p) continue;
+            decor(p, 0.1, 0.5, 0.2, 0.5, 0x2a2f37);                 // base
+            decor(p, 0.95, 0.34, 1.5, 0.22, side > 0 ? 0xc792ea : 0x5b8bff);  // torso/outfit
+            decor(p, 1.85, 0.2, 0.26, 0.2, 0xd8c2a8);               // head
+          }
         } else {
           // barber: two chairs facing wall mirrors
           for (const side of [-1, 1]) {

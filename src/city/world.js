@@ -212,6 +212,122 @@
       },
     };
 
+    // =====================================================================
+    //  ROAD + SIDEWALK SURFACE DETAIL — cheap flat geometry that makes the
+    //  streets read as REAL: raised curbs along every block, painted stop-bars
+    //  at intersections, manhole covers + storm-drain grates, sidewalk
+    //  expansion joints, and a sprinkle of asphalt patches/oil stains. All
+    //  decor: no colliders, nothing placed in a driving lane.
+    // =====================================================================
+    (function roadDetail() {
+      // shared materials so hundreds of marks cost almost nothing
+      const M = new Map();
+      function dm(color, basic) {
+        let m = M.get(color + "|" + (basic ? 1 : 0));
+        if (!m) { m = basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }); M.set(color + "|" + (basic ? 1 : 0), m); }
+        return m;
+      }
+      // a flat decal quad lying on the ground
+      function decal(x, z, w, d, color, y, basic, rotY) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), dm(color, basic));
+        m.rotation.x = -Math.PI / 2; if (rotY) m.rotation.z = rotY;
+        m.position.set(x, y == null ? 0.085 : y, z);
+        m.receiveShadow = !basic; root.add(m);
+        return m;
+      }
+      // a low raised curb box (a sliver of height so it reads as a kerb edge)
+      const curbM = dm(0xb9ad88);
+      function curb(x, z, len, vertical) {
+        const w = vertical ? 0.34 : len, d = vertical ? len : 0.34;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.22, d), curbM);
+        m.position.set(x, 0.11, z); m.receiveShadow = true; root.add(m);
+      }
+
+      // ---- 1) curbs ringing every block (just inside the sidewalk band) ----
+      // The sidewalk slab is BLK+4 wide; the kerb runs along the road-facing edge
+      // a touch in from the asphalt so cars visibly mount it but it never blocks.
+      const sidewalkHalf = (BLK + 4) / 2;
+      for (const lot of lots) {
+        const cx2 = lot.cx, cz2 = lot.cz, e = sidewalkHalf - 0.2, span = BLK + 3.2;
+        curb(cx2, cz2 - e, span, false);
+        curb(cx2, cz2 + e, span, false);
+        curb(cx2 - e, cz2, span, true);
+        curb(cx2 + e, cz2, span, true);
+        // sidewalk expansion-joint lines (subtle scored concrete grid)
+        for (let s = -1; s <= 1; s += 2) {
+          for (let j = -1; j <= 1; j += 1) {
+            if (j === 0) continue;
+            decal(cx2 + j * (BLK / 4), cz2 + s * (sidewalkHalf - 1.0), 0.06, 2.2, 0xa89e7c, 0.088, true);
+            decal(cx2 + s * (sidewalkHalf - 1.0), cz2 + j * (BLK / 4), 2.2, 0.06, 0xa89e7c, 0.088, true);
+          }
+        }
+      }
+
+      // ---- 2) painted STOP-BAR at every intersection approach --------------
+      const stopOff = ROAD / 2 + 2.6;
+      intersections.forEach((it) => {
+        // thick white bar across each of the four entries, set back behind the zebra
+        decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.072, true);
+        decal(it.x + ROAD / 4, it.z + stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.072, true);
+        decal(it.x - stopOff, it.z + ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.072, true);
+        decal(it.x + stopOff, it.z - ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.072, true);
+      });
+
+      // ---- 3) manhole covers + storm-drain grates -------------------------
+      // covers down the centre of avenues; grates hug the kerb at corners where
+      // gutter water would drain. Both are flush decals.
+      const manholeG = new THREE.CircleGeometry(0.55, 12);
+      const manM = dm(0x35383d), grateM = dm(0x202327);
+      function manhole(x, z) {
+        const m = new THREE.Mesh(manholeG, manM);
+        m.rotation.x = -Math.PI / 2; m.position.set(x, 0.066, z); root.add(m);
+        // a couple of concentric scribe rings via thin ring decals
+        decal(x, z, 0.84, 0.84, 0x2a2d32, 0.067, true);
+      }
+      for (const r of roads) {
+        const n = Math.max(1, Math.floor(r.len / 40));
+        for (let i = 1; i < n; i++) {
+          if (rng() > 0.6) continue;
+          const t = -r.len / 2 + i * (r.len / n) + (rng() - 0.5) * 6;
+          const x = r.vertical ? r.x + (rng() - 0.5) * 1.2 : r.x + t;
+          const z = r.vertical ? r.z + t : r.z + (rng() - 0.5) * 1.2;
+          if (Math.abs(x) < 9990) manhole(x, z);
+        }
+      }
+      // gutter grates near intersection corners
+      intersections.forEach((it) => {
+        for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
+          if (rng() > 0.5) continue;
+          const gx = it.x + sx * (ROAD / 2 + 0.5), gz = it.z + sz * (ROAD / 2 + 0.5);
+          const g = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), grateM);
+          g.rotation.x = -Math.PI / 2; g.position.set(gx, 0.066, gz); root.add(g);
+        }
+      });
+
+      // ---- 4) asphalt patches + oil stains + tyre marks (grime/realism) ----
+      const patchCols = [0x1b1d22, 0x222429, 0x303236];
+      for (const r of roads) {
+        const n = Math.max(2, Math.floor(r.len / 30));
+        for (let i = 0; i < n; i++) {
+          if (rng() > 0.55) continue;
+          const t = -r.len / 2 + (i + rng()) * (r.len / n);
+          const lane = (rng() - 0.5) * (ROAD - 2);
+          const x = r.vertical ? r.x + lane : r.x + t;
+          const z = r.vertical ? r.z + t : r.z + lane;
+          if (Math.abs(x) > 9990) continue;
+          const w = 1.5 + rng() * 3, d = 1.0 + rng() * 2.5;
+          decal(x, z, r.vertical ? d : w, r.vertical ? w : d, patchCols[(rng() * patchCols.length) | 0], 0.055 + rng() * 0.006, false, (rng() - 0.5) * 0.4);
+        }
+      }
+      // skid/oil stains right in the intersection boxes (where cars launch off)
+      intersections.forEach((it) => {
+        if (rng() > 0.5) return;
+        for (let s = 0; s < 2; s++) {
+          decal(it.x + (rng() - 0.5) * ROAD * 0.5, it.z + (rng() - 0.5) * ROAD * 0.5, 0.18, 1.4 + rng() * 1.2, 0x141519, 0.058, true, (rng() - 0.5) * 1.4);
+        }
+      });
+    })();
+
     // ---- let sibling modules furnish the city (buildings, props, lights) ----
     if (CBZ.cityBuildings) try { CBZ.cityBuildings(city); } catch (e) { console.error("[city buildings]", e); }
     if (CBZ.cityExpansion) try { CBZ.cityExpansion(city); } catch (e) { console.error("[city expansion]", e); }

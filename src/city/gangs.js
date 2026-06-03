@@ -25,7 +25,18 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
   CBZ.cityGangs = CBZ.cityGangs || [];
-  let warT = 0;
+  let warT = 0;          // ambient rival-vs-rival war director cooldown
+  let incomeT = 0;       // territory payday cooldown (GTA: turf = money)
+  let reprisalT = 0;     // escalation tick for provoked gangs hunting the player
+  let driveT = 0;        // global drive-by cadence limiter
+  let activeDrivebys = 0;// hard cap so phones survive
+
+  // GTA San Andreas turf logic: more held blocks = more income + a deeper bench.
+  // We model a gang TREASURY that fills from held turf and funds bigger raids,
+  // and a WAR has an INTENSITY the player can read + exploit.
+  const TURF_PAYDAY = 30;          // seconds between paydays
+  const TURF_INCOME_PER_LOT = 42;  // base $ per held block per payday
+  const MAX_DRIVEBYS = 2;          // concurrent gang cars strafing
 
   function gangColor(id) { const def = (CBZ.CITY.gangs || []).find((x) => x.id === id); return def ? def.color : 0xb079ea; }
 
@@ -45,8 +56,14 @@
     const aband = (A.abandonedLots || []).slice();
     if (!aband.length) return;
 
-    // build the gang records
-    const gangs = defs.map((d) => ({ ...d, turf: [], center: { x: 0, z: 0 }, provoke: 0, members: [], warWith: null, warRemain: 0 }));
+    // build the gang records. treasury funds raids; hostility/strikes track how
+    // hard the crew is hunting the PLAYER after a provocation (escalation ladder).
+    const gangs = defs.map((d) => ({
+      ...d, turf: [], center: { x: 0, z: 0 }, provoke: 0, members: [],
+      warWith: null, warRemain: 0, warIntensity: 0,
+      treasury: 200 + ((rng() * 400) | 0),   // seed war chest
+      hostility: 0, strikeT: 0, lostTurfT: 0, peakTurf: 0,
+    }));
     // hand each derelict to a gang, clustering by nearest existing turf so a
     // faction tends to hold a contiguous block
     aband.forEach((lot, i) => {
@@ -65,6 +82,7 @@
       let sx = 0, sz = 0;
       for (const l of gang.turf) { sx += l.cx; sz += l.cz; }
       gang.center.x = sx / gang.turf.length; gang.center.z = sz / gang.turf.length;
+      gang.peakTurf = gang.turf.length;
       // ---- the gang BOSS: a named, tougher, always-armed lieutenant anchoring
       //      the crew's main turf. Defeating one is a real prize + heavy heat. ----
       {
@@ -125,34 +143,248 @@
 
   function gangById(id) { return CBZ.cityGangs.find((x) => x.id === id); }
 
-  function launchWar(a, b) {
+  function launchWar(a, b, opts) {
     if (!a || !b || a === b || !b.turf.length) return 0;
     if (a.isPlayer) return 0;   // your gang only raids on YOUR orders, never on its own
-    const targetLot = b.turf[(rng() * b.turf.length) | 0];
-    const count = 2 + ((rng() * 3) | 0);
+    opts = opts || {};
+    const targetLot = opts.lot || b.turf[(rng() * b.turf.length) | 0];
+    // BIGGER set-piece battles: a flush treasury / hot war buys a deeper push.
+    // GTA SA scales wave size with how heavily a hood is defended; here the
+    // attacker's WAR CHEST and current intensity decide how many it commits.
+    const warMul = 1 + Math.min(1.4, (a.warIntensity || 0) * 0.5 + (a.treasury || 0) / 2200);
+    const base = opts.assault ? 4 : 2;
+    const count = Math.min(8, Math.round((base + ((rng() * 3) | 0)) * warMul));
     let sent = 0;
+    // spend the chest to field the squad — a poor gang can't mount a big raid
+    const cost = count * 40;
+    if (!opts.free && (a.treasury || 0) < cost * 0.5) return 0;
+    a.treasury = Math.max(0, (a.treasury || 0) - cost);
     for (const m of a.members) {
       if (sent >= count) break;
       if (m.dead || m.rage || m.inCar || m.raidT > 0) continue;
       m.homeGuard = m.homeGuard || m.guard;
       m.guard = { x: targetLot.cx, z: targetLot.cz };
       m.target.set(targetLot.cx + (rng() - 0.5) * 5, 0, targetLot.cz + (rng() - 0.5) * 5);
-      m.pause = 0; m.path = null; m.raidT = 22 + rng() * 12; m.raidGang = b.id;
+      m.pause = 0; m.path = null; m.raidT = 22 + rng() * 14; m.raidGang = b.id;
+      m.raidLot = targetLot;
       sent++;
     }
     if (sent) {
       a.warWith = b.id; b.warWith = a.id;
       a.warRemain = b.warRemain = 26 + rng() * 14;
-      CBZ.city && CBZ.city.note("Gang war: " + a.name + " raid " + b.name + " turf.", 2.4);
+      a.warIntensity = Math.min(3, (a.warIntensity || 0) + 1);
+      b.warIntensity = Math.min(3, (b.warIntensity || 0) + 0.6);
+      a._raidTarget = targetLot;   // contested lot, used for capture resolution
+      const big = sent >= 5;
+      CBZ.city && CBZ.city.note((big ? "⚔ TURF WAR: " : "Gang war: ") + a.name + " hit " + b.name + " turf (" + sent + ").", big ? 3 : 2.4);
+      // a heavy assault also rolls a drive-by car into the rival block
+      if (big && rng() < 0.6) spawnDriveby(a, { x: targetLot.cx, z: targetLot.cz }, b);
       // raiding YOUR block? rally your gang to defend it
       if (b.isPlayer && CBZ.cityPlayerGangDefendTurf) {
         CBZ.cityPlayerGangDefendTurf(targetLot.cx, targetLot.cz);
         CBZ.city && CBZ.city.big("⚠ " + a.name + " RAIDING YOUR TURF");
+        if (CBZ.sfx) CBZ.sfx("siren");
       }
+    } else {
+      a.treasury += cost;   // refund — nobody was free to go
     }
     return sent;
   }
   CBZ.cityStartGangWar = launchWar;
+
+  // ---- TURF CAPTURE: resolve a contested rival block after a raid ----
+  // GTA SA flips a hood when the attacker clears the defenders. We approximate:
+  // if the attacker has bodies on the lot and the defender has none nearby, the
+  // block changes hands (NPC vs NPC only — player turf is handled by playergang).
+  function liveOnLot(gang, lot, r) {
+    const r2 = (r || 11) * (r || 11); let n = 0;
+    for (const m of gang.members) {
+      if (m.dead || m.ko) continue;
+      const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz;
+      if (dx * dx + dz * dz < r2) n++;
+    }
+    return n;
+  }
+
+  function captureLot(winner, loser, lot) {
+    if (!winner || !loser || winner.isPlayer || loser.isPlayer) return false;  // player turf is sacred to this path
+    const i = loser.turf.indexOf(lot); if (i < 0) return false;
+    loser.turf.splice(i, 1);
+    winner.turf.push(lot);
+    lot.building.gang = winner.id;
+    lot.building.gangColor = winner.color;
+    if (lot.building.stash) lot.building.stash.gang = winner.id;
+    if (lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
+      try { lot.building.stash.mesh.material.emissive.setHex(winner.color); } catch (e) {}
+    }
+    // re-home any winner members who raided here so they hold the new ground
+    for (const m of winner.members) {
+      if (m.raidLot === lot && !m.dead) { m.homeGuard = { x: lot.cx, z: lot.cz }; m.guard = { x: lot.cx, z: lot.cz }; m.raidT = 0; m.raidGang = null; m.raidLot = null; }
+    }
+    recenter(winner); recenter(loser);
+    loser.lostTurfT = 8;
+    if (nearPlayer(lot.cx, lot.cz, 90)) {
+      CBZ.city && CBZ.city.note("🚩 " + winner.name + " seized a block from " + loser.name + ".", 2.6);
+    }
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    return true;
+  }
+  CBZ.cityGangCaptureLot = captureLot;
+
+  function recenter(gang) {
+    if (!gang.turf.length) { gang.center.x = 0; gang.center.z = 0; return; }
+    let sx = 0, sz = 0; for (const l of gang.turf) { sx += l.cx; sz += l.cz; }
+    gang.center.x = sx / gang.turf.length; gang.center.z = sz / gang.turf.length;
+  }
+
+  function nearPlayer(x, z, r) {
+    const P = CBZ.player; if (!P || !P.pos) return false;
+    const dx = P.pos.x - x, dz = P.pos.z - z; return dx * dx + dz * dz < r * r;
+  }
+  function playerActor() { return CBZ.city && CBZ.city.playerActor; }
+
+  // ============================================================
+  //  DRIVE-BY SHOOTINGS — a gang car rolls a target and the passenger
+  //  hangs out the window strafing tracers (GTA III introduced this; we
+  //  model the classic "any SMG → lean and spray" pass). Fully self-contained
+  //  so it never touches the traffic AI in another file. Pooled + capped.
+  // ============================================================
+  const drivebys = [];
+  let _dbGeo = null, _dbWheelGeo = null;
+  function dbCarGeo() {
+    if (!_dbGeo) {
+      _dbGeo = new THREE.BoxGeometry(2.0, 0.9, 4.2); _dbGeo._shared = true;
+      _dbWheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.34, 8); _dbWheelGeo._shared = true;
+      _dbWheelGeo.rotateZ(Math.PI / 2);
+    }
+    return _dbGeo;
+  }
+  function buildDbCar(color) {
+    const grp = new THREE.Group();
+    const body = new THREE.Mesh(dbCarGeo(), new THREE.MeshLambertMaterial({ color: 0x16181d }));
+    body.position.y = 0.75; grp.add(body);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 2.0), new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: 0.18 }));
+    cabin.position.set(0, 1.45, -0.2); grp.add(cabin);
+    const wm = new THREE.MeshLambertMaterial({ color: 0x0a0a0c });
+    for (const wx of [-0.95, 0.95]) for (const wz of [1.35, -1.35]) {
+      const w = new THREE.Mesh(_dbWheelGeo, wm); w.position.set(wx, 0.42, wz); grp.add(w);
+    }
+    grp._cabinMat = cabin.material;
+    return grp;
+  }
+
+  function spawnDriveby(gang, aim, victimGang) {
+    if (activeDrivebys >= MAX_DRIVEBYS || g.mode !== "city") return false;
+    const A = CBZ.city && CBZ.city.arena; if (!A || !A.root) return false;
+    // approach from a road edge a comfortable distance out, on the side the
+    // player can see it coming (more readable / fairer than spawning on top).
+    const tx = aim.x, tz = aim.z;
+    const ang = rng() * 6.28, R = 34 + rng() * 10;
+    let sx = tx + Math.cos(ang) * R, sz = tz + Math.sin(ang) * R;
+    if (A.clampToCity) { const p = { x: sx, z: sz }; A.clampToCity(p, 2); sx = p.x; sz = p.z; }
+    const grp = buildDbCar(gang.color || 0xb079ea);
+    grp.position.set(sx, 0, sz); A.root.add(grp);
+    const db = {
+      grp, gang, victimGang: victimGang || null,
+      x: sx, z: sz, heading: 0, v: 0,
+      aimX: tx, aimZ: tz, passes: 0, maxPasses: 1 + ((rng() * 2) | 0),
+      shootCD: 0, life: 16 + rng() * 6, state: "approach",
+      crew: 1 + ((rng() * 2) | 0),   // bodies that bail if it's wrecked (flavour)
+    };
+    drivebys.push(db); activeDrivebys++;
+    if (nearPlayer(sx, sz, 70)) {
+      CBZ.city && CBZ.city.note("🚙 " + gang.name + " rolling up...", 1.6);
+      if (CBZ.sfx) CBZ.sfx("whoosh");
+    }
+    return true;
+  }
+  CBZ.cityGangDriveby = spawnDriveby;
+
+  function despawnDriveby(db, idx) {
+    if (db.grp && db.grp.parent) db.grp.parent.remove(db.grp);
+    if (db.grp) db.grp.traverse(function (o) {
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) o.geometry.dispose();
+      if (o.material && !o.material._shared && o.material.dispose) o.material.dispose();
+    });
+    drivebys.splice(idx, 1); activeDrivebys = Math.max(0, activeDrivebys - 1);
+  }
+
+  // pick who the gun in the car points at: the player if they're the cause,
+  // else the nearest rival gangster near the aim point.
+  function drivebyVictim(db) {
+    const P = CBZ.player, PA = playerActor();
+    // hunting the player (reprisal) — only if reasonably close to the route
+    if (db.huntPlayer && PA && P && !P.dead) {
+      const dx = P.pos.x - db.x, dz = P.pos.z - db.z;
+      if (dx * dx + dz * dz < 24 * 24) return PA;
+    }
+    // otherwise spray a rival gangster
+    let best = null, bd = 22 * 22;
+    for (const p of CBZ.cityPeds) {
+      if (p.dead || !p.gang || p.gang === db.gang.id) continue;
+      if (db.victimGang && p.gang !== db.victimGang.id) continue;
+      const dx = p.pos.x - db.x, dz = p.pos.z - db.z, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = p; }
+    }
+    return best;
+  }
+
+  function updateDrivebys(dt) {
+    for (let i = drivebys.length - 1; i >= 0; i--) {
+      const db = drivebys[i];
+      db.life -= dt; db.shootCD -= dt;
+      if (db.life <= 0 || db.passes > db.maxPasses) { despawnDriveby(db, i); continue; }
+      // steer toward / past the aim point
+      const ddx = db.aimX - db.x, ddz = db.aimZ - db.z;
+      const dist = Math.hypot(ddx, ddz) || 0.001;
+      const want = Math.atan2(ddx, ddz);
+      // ease heading
+      let dh = want - db.heading; while (dh > Math.PI) dh -= 6.283; while (dh < -Math.PI) dh += 6.283;
+      db.heading += dh * Math.min(1, dt * 2.4);
+      const target = db.state === "approach" ? 14 : 11;
+      db.v += (target - db.v) * Math.min(1, dt * 1.5);
+      const nx = db.x + Math.sin(db.heading) * db.v * dt;
+      const nz = db.z + Math.cos(db.heading) * db.v * dt;
+      db.x = nx; db.z = nz;
+      const A = CBZ.city && CBZ.city.arena;
+      if (A && A.clampToCity) { const p = { x: db.x, z: db.z }; A.clampToCity(p, 1.6); db.x = p.x; db.z = p.z; }
+      db.grp.position.set(db.x, 0, db.z); db.grp.rotation.y = db.heading;
+      // close pass → it's "alongside", start spraying; then it loops for another pass
+      if (dist < 16) {
+        db.state = "strafe";
+        if (db.shootCD <= 0) {
+          const v = drivebyVictim(db);
+          if (v && !v.dead) {
+            db.shootCD = 0.22 + rng() * 0.18;
+            const from = { x: db.x + Math.cos(db.heading) * 1.0, y: 1.3, z: db.z - Math.sin(db.heading) * 1.0 };
+            const to = { x: v.pos.x, y: v.isPlayer ? 1.55 : 1.3, z: v.pos.z };
+            if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 0.9 });
+            if (CBZ.sfx) CBZ.sfx("shoot_smg");
+            const dd = Math.hypot(v.pos.x - db.x, v.pos.z - db.z);
+            if (rng() < Math.max(0.18, 0.62 - dd * 0.02)) {
+              const dmg = 10 + rng() * 9;
+              if (v.isPlayer) { if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, db.x, db.z, "killed in a drive-by", false, db.gang.name, false); }
+              else {
+                v.hp -= dmg; v.alarmed = Math.max(v.alarmed || 0, 6);
+                if (v.hp <= 0) { if (CBZ.cityKillPed) CBZ.cityKillPed(v, { fromX: db.x, fromZ: db.z, byPlayer: false, force: 5, fling: 4 }, "drive-by"); }
+                else if (CBZ.body && CBZ.body.hit) CBZ.body.hit(v, { fromX: db.x, fromZ: db.z, force: 1.5 });
+              }
+            }
+          }
+        }
+      }
+      // passed it: pick a fresh aim point on the far side for the next loop
+      if (dist < 3.5 && db.state === "strafe") {
+        db.passes++;
+        if (db.passes <= db.maxPasses) {
+          const a2 = rng() * 6.28, r2 = 26 + rng() * 8;
+          db.aimX += Math.cos(a2) * r2; db.aimZ += Math.sin(a2) * r2;
+          if (A && A.clampToCity) { const p = { x: db.aimX, z: db.aimZ }; A.clampToCity(p, 2); db.aimX = p.x; db.aimZ = p.z; }
+          db.state = "approach";
+        }
+      }
+    }
+  }
 
   // which gang's turf is (x,z) inside? returns the gang record or null
   CBZ.cityGangOf = function (x, z) {
@@ -167,12 +399,26 @@
   CBZ.cityGangProvoke = function (id, amount) { const gang = gangById(id); if (gang) gang.provoke = Math.min(1, gang.provoke + (amount || 0.3)); };
   CBZ.cityGangProvoked = function (id) { const gang = gangById(id); return gang ? gang.provoke : 0; };
 
-  // a member went down — the crew takes it personally
+  // a member went down — the crew takes it personally. ESCALATION LADDER:
+  // each kill the player racks up against a crew raises HOSTILITY, which the
+  // reprisal director reads to send hunter squads + drive-bys after the player.
   CBZ.cityGangMemberDown = function (ped, imp) {
     const gang = gangById(ped.gang); if (!gang) return;
     const byPlayer = !imp || imp.byPlayer !== false;
     gang.provoke = Math.min(1, gang.provoke + (byPlayer ? 0.5 : 0.25));
-    if (byPlayer) { CBZ.city && CBZ.city.addRespect(3); }
+    if (byPlayer) {
+      CBZ.city && CBZ.city.addRespect(3);
+      gang.hostility = Math.min(5, (gang.hostility || 0) + 1);   // they remember
+      gang.strikeT = Math.min(gang.strikeT || 0, 6);             // first reprisal comes soon
+    } else {
+      // a RIVAL did this on/near our turf → it counts toward an active war,
+      // softening this crew so the killer's gang can move on the block.
+      const killer = imp && imp.attacker;
+      if (killer && killer.gang && killer.gang !== gang.id) {
+        const ag = gangById(killer.gang);
+        if (ag && !ag.isPlayer) ag.warIntensity = Math.min(3, (ag.warIntensity || 0) + 0.25);
+      }
+    }
     // the BOSS going down to the player is a takeover opportunity — the player
     // can CLAIM the crew (city/playergang.js). Only the kingpin's death counts.
     if ((ped.isBoss || ped.rank === "boss" || ped === gang.boss) && byPlayer && !gang.isPlayer) {
@@ -181,6 +427,38 @@
       CBZ.city && CBZ.city.addRespect(20);
     }
   };
+
+  // crew "strength" = live bodies, used by the war director to find the weak
+  // gang a rival (or the player) can exploit, and to gate big assaults.
+  function gangStrength(gang) {
+    let n = 0; for (const m of gang.members) if (!m.dead && !m.ko) n++;
+    return n;
+  }
+  CBZ.cityGangStrength = gangStrength;
+
+  // send a REPRISAL squad of a provoked crew to hunt the player on foot —
+  // GTA gangs that you cross come looking for you, not just defend turf.
+  function sendReprisal(gang) {
+    const P = CBZ.player, PA = playerActor();
+    if (!P || !PA || P.dead || gang.isPlayer) return 0;
+    const count = Math.min(6, 1 + Math.round((gang.hostility || 1)));
+    let sent = 0;
+    for (const m of gang.members) {
+      if (sent >= count) break;
+      if (m.dead || m.inCar || m.companion) continue;
+      // pull them off the post to hunt — they path to the player and engage
+      m.homeGuard = m.homeGuard || m.guard;
+      m.rage = PA; m.state = "fight";
+      m.target.set(P.pos.x, 0, P.pos.z);
+      m.raidT = 18 + rng() * 10; m.raidGang = null; m.pause = 0; m.path = null;
+      m.hunting = true;
+      sent++;
+    }
+    if (sent && nearPlayer(gang.center.x, gang.center.z, 220)) {
+      CBZ.city && CBZ.city.big("⚠ " + gang.name + " sent a hit squad after you");
+    }
+    return sent;
+  }
 
   // expose a lookup so the player-gang hub can find a rival by id/record
   CBZ.cityGangById = gangById;
@@ -215,7 +493,10 @@
   };
 
   CBZ.cityGangsReset = function () {
-    CBZ.cityGangs.length = 0; warT = 0;
+    CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0;
+    // clear any in-flight drive-by cars
+    for (let i = drivebys.length - 1; i >= 0; i--) despawnDriveby(drivebys[i], i);
+    activeDrivebys = 0;
     // stashes persist on the building metadata — un-loot them for a fresh run
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.abandonedLots) for (const lot of A.abandonedLots) {
@@ -224,33 +505,116 @@
     }
   };
 
-  // ---- provoke decay + a light gang-war director ----
+  // ---- per-gang upkeep: provoke/hostility decay, war timers, raider return ----
   CBZ.onUpdate(34.5, function (dt) {
     if (g.mode !== "city") return;
+    updateDrivebys(dt);
     for (const gang of CBZ.cityGangs) {
       if (gang.provoke > 0) gang.provoke = Math.max(0, gang.provoke - dt * 0.03);
+      // hostility cools slowly — cross a crew and they stay sore for a while
+      if (gang.hostility > 0) gang.hostility = Math.max(0, gang.hostility - dt * 0.012);
+      if (gang.warIntensity > 0) gang.warIntensity = Math.max(0, gang.warIntensity - dt * 0.02);
+      if (gang.lostTurfT > 0) gang.lostTurfT -= dt;
+      if (gang.strikeT > 0) gang.strikeT -= dt;
       if (gang.warRemain > 0) {
         gang.warRemain -= dt;
-        if (gang.warRemain <= 0) gang.warWith = null;
+        if (gang.warRemain <= 0) { gang.warWith = null; gang._raidTarget = null; }
       }
       for (const m of gang.members) {
         if (!(m.raidT > 0)) continue;
         m.raidT -= dt;
         if (m.raidT <= 0 && m.homeGuard && !m.dead) {
           m.guard = { x: m.homeGuard.x, z: m.homeGuard.z };
-          m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null; m.raidGang = null;
+          m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null; m.raidGang = null; m.raidLot = null; m.hunting = false;
         }
       }
     }
+
+    // ---- TERRITORY INCOME (GTA SA: every held block prints money) ----
+    // NPC crews bank a TREASURY that funds wars; the player's gang gets a real
+    // payday into the city bank, so holding turf finally MATTERS.
+    incomeT -= dt;
+    if (incomeT <= 0) {
+      incomeT = TURF_PAYDAY;
+      for (const gang of CBZ.cityGangs) {
+        const lots = gang.turf.length; if (!lots) continue;
+        const take = lots * TURF_INCOME_PER_LOT;
+        if (gang.isPlayer) {
+          // player payday — scaled by crew (more soldiers = more collected)
+          const crew = gangStrength(gang);
+          const pay = Math.round(take * (0.6 + Math.min(1, crew / 8)));
+          if (pay > 0) {
+            g.cityBank = (g.cityBank || 0) + pay;
+            if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+            CBZ.city && CBZ.city.note("💵 Turf payday: +$" + pay + " (" + lots + " blocks) → bank", 2.2);
+          }
+        } else {
+          gang.treasury = Math.min(6000, (gang.treasury || 0) + take * 0.5);
+        }
+      }
+    }
+
+    // ---- DYNAMIC RIVAL-vs-RIVAL WAR DIRECTOR ----
+    // A flush, aggressive crew picks on the WEAKEST nearby rival (exploitable:
+    // bait two gangs into each other, then walk into the thinned-out turf).
     warT -= dt;
     if (warT <= 0) {
-      warT = 24 + rng() * 18;
-      const live = CBZ.cityGangs.filter((x) => x.members.some((m) => !m.dead));
+      warT = 18 + rng() * 16;
+      const live = CBZ.cityGangs.filter((x) => !x.isPlayer && x.turf.length && gangStrength(x) >= 2);
       if (live.length >= 2) {
-        const a = live[(rng() * live.length) | 0];
-        const rivals = live.filter((x) => x !== a);
-        const b = rivals[(rng() * rivals.length) | 0];
-        launchWar(a, b);
+        // attacker bias: richest / most aggrieved crew presses first
+        live.sort((p, q) => ((q.treasury || 0) + (q.hostility || 0) * 300 + (q.warIntensity || 0) * 200) - ((p.treasury || 0) + (p.hostility || 0) * 300 + (p.warIntensity || 0) * 200));
+        const a = live[0];
+        const rivals = CBZ.cityGangs.filter((x) => x !== a && x.turf.length && !x.isPlayer);
+        if (rivals.length) {
+          // target the WEAKEST rival (fewest live bodies) — wars snowball
+          rivals.sort((p, q) => gangStrength(p) - gangStrength(q));
+          const b = rivals[0];
+          const assault = (a.treasury || 0) > 900 || (a.warIntensity || 0) >= 1;
+          launchWar(a, b, { assault });
+        }
+      }
+    }
+
+    // ---- TURF CAPTURE resolution: a raid that cleared the lot flips it ----
+    for (const a of CBZ.cityGangs) {
+      if (a.isPlayer || !a.warWith || !a._raidTarget) continue;
+      const lot = a._raidTarget, b = gangById(a.warWith);
+      if (!b || b.isPlayer) { a._raidTarget = null; continue; }
+      if (b.turf.indexOf(lot) < 0) { a._raidTarget = null; continue; }
+      const atk = liveOnLot(a, lot, 11), def = liveOnLot(b, lot, 13);
+      if (atk >= 2 && def === 0) {
+        captureLot(a, b, lot);
+        a._raidTarget = null;
+        a.treasury = (a.treasury || 0) + 250;   // spoils
+      }
+    }
+
+    // ---- ESCALATING RETALIATION against the PLAYER ----
+    // Provoked crews don't just wait on their turf: they send foot hit squads
+    // and drive-by cars after the player, scaling with how hard you've hit them.
+    reprisalT -= dt; driveT -= dt;
+    if (reprisalT <= 0) {
+      reprisalT = 5 + rng() * 4;
+      const P = CBZ.player;
+      if (P && !P.dead) {
+        for (const gang of CBZ.cityGangs) {
+          if (gang.isPlayer) continue;
+          const heat = Math.max(gang.provoke * 1.4, (gang.hostility || 0) * 0.5);
+          if (heat < 0.6 || gang.strikeT > 0) continue;
+          gang.strikeT = 14 + rng() * 10 - Math.min(8, (gang.hostility || 0) * 1.5);  // sorer = faster
+          // close enough to react on foot? send a hit squad.
+          if (nearPlayer(gang.center.x, gang.center.z, 130) || (gang.hostility || 0) >= 2) {
+            sendReprisal(gang);
+          }
+          // a hot crew also rolls a DRIVE-BY at the player (cadence-limited)
+          if ((gang.hostility || 0) >= 2 && driveT <= 0 && activeDrivebys < MAX_DRIVEBYS && rng() < 0.7) {
+            driveT = 9 + rng() * 6;
+            if (spawnDriveby(gang, { x: P.pos.x, z: P.pos.z }, null)) {
+              const db = drivebys[drivebys.length - 1]; if (db) db.huntPlayer = true;
+            }
+          }
+        }
       }
     }
   });

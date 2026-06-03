@@ -322,6 +322,203 @@
   function crashBurst(x, z, speed, hard, catastrophic) {
     if (CBZ.cityCrashFX) CBZ.cityCrashFX(x, z, { speed, hard, catastrophic });
   }
+
+  // ============================================================
+  //  MULTI-STAGE VEHICLE DAMAGE  —  intact → dented → SMOKING → FIRE → EXPLODE
+  //  Engine HP (100 → 0) is the master health. Crashes, gunfire and ramming
+  //  chip it. Thresholds (per the GTA wisp→flame→fireball model):
+  //    < 45  : SMOKING  (engine wisps, light grey)
+  //    <= 15 : ON FIRE  (orange flames, ticking burn HP + driver damage)
+  //    <= 0  : EXPLODE  (cityExplosion fireball, car removed)
+  //  Visuals are a tiny pooled-sprite emitter LOCAL to this module (crashfx's
+  //  puff pool is private), so it stays cheap: only burning/smoking cars emit,
+  //  capped, distance-culled, and reusing one shared radial texture.
+  // ============================================================
+  const SMOKE_AT = 45, FIRE_AT = 15;
+  // shared soft radial texture for all car smoke/flame sprites
+  let _vfxTex = null;
+  function vfxTex() {
+    if (_vfxTex) return _vfxTex;
+    const cv = document.createElement("canvas"); cv.width = cv.height = 48;
+    const ctx = cv.getContext("2d"), r = 24, gr = ctx.createRadialGradient(r, r, 0, r, r, r);
+    gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.4, "rgba(255,255,255,0.5)");
+    gr.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, 48, 48);
+    _vfxTex = new THREE.Texture(cv); _vfxTex.needsUpdate = true; return _vfxTex;
+  }
+  const _vparts = [], _vpool = [];
+  function getVPart(additive) {
+    let p = _vpool.pop();
+    if (!p) {
+      const m = new THREE.SpriteMaterial({ map: vfxTex(), depthWrite: false, transparent: true, opacity: 0 });
+      p = new THREE.Sprite(m); p.renderOrder = 9; CBZ.scene.add(p);
+    }
+    p.material.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+    p.visible = true; return p;
+  }
+  // emit one smoke / flame / tyre puff. type: "smoke" | "fire" | "tire"
+  function spawnVPart(x, y, z, type) {
+    if (_vparts.length > 140) return;             // hard cap — never flood the GPU
+    const fire = type === "fire";
+    const p = getVPart(fire);
+    p.position.set(x, y, z);
+    const base = type === "tire" ? 0.5 : (fire ? 0.7 : 0.9);
+    p.scale.set(base, base, 1); p.material.opacity = 0;
+    p.material.rotation = Math.random() * 6.28;
+    _vparts.push({
+      s: p, age: 0,
+      life: type === "tire" ? 0.5 + Math.random() * 0.3 : (fire ? 0.45 + Math.random() * 0.35 : 1.1 + Math.random() * 0.7),
+      base, pop: type === "tire" ? 1.4 : (fire ? 2.0 + Math.random() : 2.6 + Math.random() * 1.4),
+      vy: type === "tire" ? 0.2 : (fire ? 2.2 + Math.random() * 1.4 : 1.3 + Math.random() * 0.8),
+      vx: (Math.random() - 0.5) * (fire ? 0.5 : 1.0), vz: (Math.random() - 0.5) * (fire ? 0.5 : 1.0),
+      type, maxOp: type === "tire" ? 0.32 : (fire ? 0.95 : 0.42),
+    });
+  }
+  function emitTireSmoke(car) {
+    const a = car.heading, hx = Math.sin(a), hz = Math.cos(a), sx = Math.cos(a), sz = -Math.sin(a);
+    const side = Math.random() < 0.5 ? 1 : -1;
+    spawnVPart(car.pos.x - hx * 1.3 + sx * side * 0.95, 0.3, car.pos.z - hz * 1.3 + sz * side * 0.95, "tire");
+  }
+  // per-frame: float + fade every live car particle. Cheap; runs only when any exist.
+  CBZ.onAlways(9.6, function (dt) {
+    if (g.mode !== "city" || !_vparts.length) return;
+    for (let i = _vparts.length - 1; i >= 0; i--) {
+      const p = _vparts[i]; p.age += dt;
+      const t = p.age / p.life;
+      if (t >= 1) { p.s.visible = false; _vpool.push(p.s); _vparts.splice(i, 1); continue; }
+      const sc = p.base + (p.pop - p.base) * (1 - (1 - t) * (1 - t));
+      p.s.scale.set(sc, sc, 1);
+      p.s.position.x += p.vx * dt; p.s.position.y += p.vy * dt; p.s.position.z += p.vz * dt;
+      p.s.material.opacity = (t < 0.12 ? t / 0.12 : 1 - (t - 0.12) / 0.88) * p.maxOp;
+      const col = p.s.material.color;
+      if (p.type === "fire") {
+        // white-hot → orange → dark over the puff's short life
+        col.setRGB(1, 0.85 - t * 0.55, 0.25 - t * 0.22);
+      } else col.setRGB(0.22 - (p.type === "tire" ? 0 : 0.05), 0.21, 0.2);  // grey-ish smoke
+    }
+  });
+
+  // apply mechanical damage to a car's engine. fromGun/explosion may ignite or
+  // pop it instantly at high amounts; crashes feed in here too.
+  function damageEngine(car, amount, fromGun) {
+    if (!car || car.dead) return;
+    if (car.engineHp == null) car.engineHp = 100;
+    car.engineHp = Math.max(-50, car.engineHp - amount);
+    if (car.engineHp <= 0 && !car._exploded) { explodeCar(car); return; }
+    if (car.engineHp <= FIRE_AT && !car._onFire) igniteCar(car);
+    if (fromGun && car.engineHp <= SMOKE_AT) car._smoking = true;
+  }
+  function igniteCar(car) {
+    if (car._onFire || car.dead || car._exploded) return;
+    car._onFire = true; car._smoking = true;
+    // a FUSE: a burning car cooks off in a few seconds (sooner the more it's hurt)
+    car._fuse = 2.4 + Math.random() * 2.2;
+    if (CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("🔥 The car's on fire — bail out!", 1.1);
+  }
+  function explodeCar(car) {
+    if (car._exploded) return;
+    car._exploded = true; car.dead = true; car._onFire = false; car._smoking = false;
+    const x = car.pos.x, z = car.pos.z;
+    if (car.npcDriver) killNpcDriverInCar(car);
+    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: !!(car._burnByPlayer || car.player) });
+    // if the PLAYER was still inside, the blast handles their damage; eject them
+    if (car.player && CBZ.player.driving) { CBZ.cityExitVehicle(); }
+    // remove the wreck mesh now; DEFER the array splice to the reaper so we never
+    // mutate cityCars mid-iteration (explodeCar fires from inside the AI loop).
+    if (car.group && car.group.parent) car.group.parent.remove(car.group);
+    if (car.group) car.group.traverse(function (o) {
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) o.geometry.dispose();
+      if (o.material && !o.material._shared && o.material.dispose) o.material.dispose();
+    });
+    car._reap = true;
+  }
+  // damage-stage tick for EVERY non-player car (smoke/fire/explode progresses
+  // for ambient + abandoned wrecks too, independent of the AI lane logic), then
+  // reap exploded wrecks — AFTER every per-car pass has finished this frame so we
+  // never mutate cityCars mid-iteration.
+  CBZ.onUpdate(38, function (dt) {
+    if (g.mode !== "city") return;
+    const cars = CBZ.cityCars;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (c.player || c.dead || c.engineHp == null) continue;
+      tickDamageStage(c, dt);
+    }
+    for (let i = cars.length - 1; i >= 0; i--) if (cars[i]._reap) cars.splice(i, 1);
+  });
+  function nearCam(car, r) {
+    const cm = CBZ.camera.position, dx = car.pos.x - cm.x, dz = car.pos.z - cm.z;
+    return dx * dx + dz * dz < r * r;
+  }
+  // run the smoke/fire/explosion lifecycle for ONE car for this frame. Called for
+  // the player's car (every frame) and for AI cars (time-sliced in the AI loop).
+  function tickDamageStage(car, dt) {
+    if (car.dead || car._exploded) return;
+    if (car.engineHp == null) return;          // never damaged → nothing to do
+    const visible = car.player || nearCam(car, 95);
+    // SMOKING — engine wisps once the motor's hurt
+    if (car._smoking || car.engineHp < SMOKE_AT) {
+      car._smoking = true;
+      if (visible) {
+        car._smkT = (car._smkT || 0) + dt;
+        const rate = car._onFire ? 0.05 : 0.16;   // fire smokes harder
+        if (car._smkT > rate) {
+          car._smkT = 0;
+          const a = car.heading, hx = Math.sin(a) * 1.7, hz = Math.cos(a) * 1.7;
+          spawnVPart(car.pos.x + hx + (Math.random() - 0.5) * 0.6, 1.1, car.pos.z + hz + (Math.random() - 0.5) * 0.6, "smoke");
+        }
+      }
+    }
+    // ON FIRE — flames off the hood + a ticking burn that finishes the engine,
+    // hurts the driver, and finally cooks off into the explosion.
+    if (car._onFire) {
+      car._burnByPlayer = car._burnByPlayer || car.player;
+      car._fuse -= dt;
+      // burn keeps eating the engine so even a parked burning car eventually blows
+      car.engineHp -= 7 * dt;
+      if (visible) {
+        car._fireT = (car._fireT || 0) + dt;
+        if (car._fireT > 0.06) {
+          car._fireT = 0;
+          const a = car.heading, hx = Math.sin(a) * 1.7, hz = Math.cos(a) * 1.7;
+          spawnVPart(car.pos.x + hx + (Math.random() - 0.5) * 0.7, 1.0, car.pos.z + hz + (Math.random() - 0.5) * 0.7, "fire");
+        }
+      }
+      // tick damage to whoever's inside while it burns
+      if (car.player && CBZ.cityHurtPlayer) {
+        car._burnTickCD = (car._burnTickCD || 0) - dt;
+        if (car._burnTickCD <= 0) { car._burnTickCD = 0.5; CBZ.cityHurtPlayer(6, car.pos.x, car.pos.z, "burned in the car", false, null, true); if (CBZ.player.dead) return; }
+      }
+      if (car._fuse <= 0 || car.engineHp <= 0) { explodeCar(car); return; }
+    }
+  }
+
+  // ---- PUBLIC: take damage from bullets / explosions elsewhere (combat, cops).
+  //      amount is in engine-HP points; opts.byPlayer attributes the kill. A
+  //      direct hit on an already-smoking car can light it; big hits pop it. ----
+  CBZ.cityDamageCar = function (car, amount, opts) {
+    if (!car || car.dead) return;
+    opts = opts || {};
+    if (opts.byPlayer) car._burnByPlayer = true;
+    if (car.engineHp == null) car.engineHp = 100;
+    // tracer hits also visibly spark/dent the hull a touch
+    if (opts.crumple) crumpleCar(car, Math.min(0.2, amount * 0.004));
+    damageEngine(car, amount, true);
+  };
+  // PUBLIC: force a car to catch fire now (e.g. molotov, fuel-line shot)
+  CBZ.cityCarIgnite = function (car, byPlayer) {
+    if (!car || car.dead) return;
+    if (car.engineHp == null || car.engineHp > FIRE_AT) car.engineHp = FIRE_AT;
+    if (byPlayer) car._burnByPlayer = true;
+    igniteCar(car);
+  };
+  // PUBLIC: read damage stage for HUD/minimap. 0 intact,1 dented,2 smoke,3 fire
+  CBZ.cityCarStage = function (car) {
+    if (!car || car.engineHp == null) return (car && car.crumple > 0.25) ? 1 : 0;
+    if (car._onFire) return 3;
+    if (car.engineHp < SMOKE_AT) return 2;
+    return car.crumple > 0.25 ? 1 : 0;
+  };
   // a driver dies AT THE WHEEL (a fast crash into a building/post): the body
   // drops out and the now-driverless car careens to a dead stop and is abandoned.
   function killNpcDriverInCar(car) {
@@ -398,28 +595,100 @@
     }
   });
 
+  // ---- per-car DYNAMICS, derived from the model + how wrecked it is ---------
+  // GTA-style arcade handling: a body type sets the base feel (a coupe darts,
+  // an SUV/pickup is heavy & numb), the model's rarity (s) scales top speed +
+  // grunt, and accumulated DAMAGE (engine HP) eats accel/grip/top-speed and
+  // adds a bent-axle pull so a beat-up car drives like a beat-up car.
+  function bodyKind(car) {
+    if (car._bk) return car._bk;
+    const nm = car.model ? car.model.name : "";
+    let bk = "sedan";
+    if (/F-150|Caravan|truck|pickup/i.test(nm)) bk = "pickup";
+    else if (/Cherokee|SUV|Model X|Model Y|Cybertruck/i.test(nm)) bk = "suv";
+    else if (/Corvette|911|370Z|Aventador|Enzo|Veyron|coupe|Charger/i.test(nm)) bk = "coupe";
+    car._bk = bk; return bk;
+  }
+  // 0 = pristine, 1 = totalled. engineHp starts at 100 and only falls.
+  function carDmg(car) { return 1 - Math.max(0, Math.min(100, car.engineHp == null ? 100 : car.engineHp)) / 100; }
+  function carDynamics(car) {
+    const bk = bodyKind(car);
+    const s = car.model ? car.model.s : 1;
+    // base profile per body type: [accel, topSpeed, turn, grip, brake]
+    let accel = 30, top = 33, turn = 2.5, grip = 7.0, brake = 30;
+    if (bk === "coupe") { accel = 40; top = 42; turn = 2.95; grip = 9.0; brake = 36; }
+    else if (bk === "sedan") { accel = 31; top = 35; turn = 2.55; grip = 7.2; brake = 31; }
+    else if (bk === "suv") { accel = 26; top = 31; turn = 2.15; grip = 5.8; brake = 27; }
+    else if (bk === "pickup") { accel = 27; top = 32; turn = 2.05; grip = 5.4; brake = 26; }
+    // rarer/sportier models (higher s) get more grunt + a higher top end
+    const sm = 0.82 + s * 0.26;
+    top *= sm; accel *= (0.9 + s * 0.18);
+    // DAMAGE degrades it: a smoking/burning car is gutless and squirrelly
+    const d = carDmg(car);
+    accel *= 1 - d * 0.55; top *= 1 - d * 0.42; grip *= 1 - d * 0.5; turn *= 1 - d * 0.28;
+    return { accel, top, turn, grip, brake, dmg: d };
+  }
+
   // ---- player driving (order 11) ----
   CBZ.onUpdate(11, function (dt) {
     if (g.mode !== "city") return;
     const P = CBZ.player;
     if (!P.driving || !P._vehicle || P.dead) return;
     const car = P._vehicle, k = CBZ.keys;
-    const ACCEL = 26, MAXV = 34 * (car.model ? (0.8 + car.model.s * 0.2) : 1), REV = 12, TURN = 2.2;
+    const D = carDynamics(car);
+    const ACCEL = D.accel, MAXV = D.top, REV = 13, TURN = D.turn;
+    // ---- throttle / braking ----
     let throttle = 0;
     if (k["w"]) throttle += 1;
     if (k["s"]) throttle -= 1;
-    if (throttle > 0) car.v += ACCEL * dt;
-    else if (throttle < 0) car.v -= ACCEL * dt;
-    if (throttle === 0) car.v *= Math.pow(0.4, dt);
+    const handbrake = !!k[" "];   // SPACE = handbrake → break grip and DRIFT
+    if (throttle > 0) {
+      if (car.v < 0) car.v += D.brake * dt;           // brake out of reverse first
+      else car.v += ACCEL * dt * (1 - Math.min(0.7, car.v / MAXV));   // accel tapers near top end
+    } else if (throttle < 0) {
+      if (car.v > 0.5) car.v -= D.brake * dt;         // S brakes hard when rolling forward
+      else car.v -= (ACCEL * 0.55) * dt;              // then backs up
+    }
+    if (throttle === 0) car.v *= Math.pow(0.5, dt);   // engine braking / coast-down
+    if (handbrake) car.v *= Math.pow(0.34, dt);       // handbrake bleeds forward speed
     car.v = Math.max(-REV, Math.min(MAXV, car.v));
+    // ---- steering: speed-sensitive (twitchy off the line, planted at speed),
+    //      a bent-axle PULL when badly damaged, extra rotation while drifting ----
     let steer = 0;
     if (k["a"]) steer += 1;
     if (k["d"]) steer -= 1;
     const vmag = Math.abs(car.v);
-    if (vmag > 0.3) car.heading += steer * TURN * dt * Math.sign(car.v) * Math.min(1, vmag / 10);
-    const vx = Math.sin(car.heading) * car.v, vz = Math.cos(car.heading) * car.v;
-    car.vx = vx; car.vz = vz;
-    car.pos.x += vx * dt; car.pos.z += vz * dt;
+    const steerAuthority = vmag > 0.3 ? Math.min(1, 0.45 + vmag / 14) * (1 - Math.min(0.5, vmag / MAXV * 0.5)) : 0;
+    if (vmag > 0.3) {
+      car.heading += steer * TURN * dt * Math.sign(car.v) * steerAuthority * (handbrake ? 1.5 : 1);
+      if (D.dmg > 0.45) {                              // damaged axle drags the nose to one side
+        if (car._pull == null) car._pull = (car._cside || 1) * (0.18 + Math.random() * 0.12);
+        car.heading += car._pull * (D.dmg - 0.45) * dt * Math.min(1, vmag / 8);
+      }
+    }
+    // ---- GRIP model: split the PREVIOUS velocity into forward + lateral
+    //      (relative to the now-steered heading), bleed the lateral slip down by
+    //      grip, then rebuild velocity = engine-forward + the surviving slip. Low
+    //      grip (handbrake / a steered hard turn / a worn car) lets the rear step
+    //      out and the car holds a power-slide instead of running on rails. ----
+    const fwdX = Math.sin(car.heading), fwdZ = Math.cos(car.heading);
+    const prevX = car.vx == null ? fwdX * car.v : car.vx;
+    const prevZ = car.vz == null ? fwdZ * car.v : car.vz;
+    const latDot = prevX * fwdX + prevZ * fwdZ;        // forward component of old vel
+    let latX = prevX - fwdX * latDot, latZ = prevZ - fwdZ * latDot;   // sideways slip
+    // grip = how fast lateral slip decays. handbrake / power-steer keeps it alive.
+    const gripFactor = handbrake ? 1.0 : (D.grip + (steer && vmag > 8 ? -2.0 : 0));
+    const latKeep = handbrake ? 0.93 : Math.max(0, 1 - Math.max(0.5, gripFactor) * dt);
+    latX *= latKeep; latZ *= latKeep;
+    const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
+    const slip = Math.hypot(latX, latZ);
+    car._drift = slip;
+    if (slip > 2.4 && vmag > 6) {                      // tyre smoke off the rears
+      car._tireT = (car._tireT || 0) + dt;
+      if (car._tireT > 0.12) { car._tireT = 0; emitTireSmoke(car); }
+    }
+    car.vx = velX; car.vz = velZ;
+    car.pos.x += velX * dt; car.pos.z += velZ * dt;
     const before = { x: car.pos.x, z: car.pos.z };
     if (CBZ.collide) CBZ.collide(car.pos, CAR_R);
     const moved = Math.hypot(car.pos.x - before.x, car.pos.z - before.z);
@@ -429,6 +698,9 @@
       // crunch, and shatter / drive-through any storefront glass ahead.
       const hard = vmag >= CRASH.wallHard, catastrophic = vmag >= CRASH.wallCatastrophic;
       car.v *= catastrophic ? 0.06 : (hard ? 0.16 : 0.52);
+      car.vx = car.vz = 0;                  // kill the slide so the slam reads as a dead stop
+      // the impact ALSO guts the engine — enough hard hits → smoke → fire → boom
+      damageEngine(car, catastrophic ? 60 : (hard ? 28 : 6), false);
       const back = Math.min(catastrophic ? 2.2 : 1.35, vmag * (catastrophic ? 0.075 : 0.05));
       car.pos.x -= Math.sin(car.heading) * back; car.pos.z -= Math.cos(car.heading) * back;
       car.heading += (Math.random() - 0.5) * Math.min(catastrophic ? 1.8 : 0.95, vmag * (catastrophic ? 0.07 : 0.045));
@@ -467,6 +739,8 @@
     }
     // chop shop: idle a stolen/owned car in the bay to cash it out
     chopCheck(car, vmag, dt);
+    // multi-stage damage: smoke → fire → explode (ticking burn under the player)
+    tickDamageStage(car, dt);
   });
 
   // ---- SOLID car-vs-car collision + crashes (every car pair, once a frame).
@@ -492,6 +766,15 @@
     const heavy = catastrophic ? 0.92 : (hard ? 0.62 : 0.26);
     const light = catastrophic ? 0.6 : (hard ? 0.34 : 0.12);
     crumpleCar(a, aRammer ? light : heavy); crumpleCar(b, aRammer ? heavy : light);
+    // engine HP: a collision guts the motor; the rammed car takes the worst of it,
+    // so repeated rams build a struck car toward smoking → fire → blowing up. (The
+    // catastrophic path below already fireballs both, so only feed the lighter hits.)
+    if (!catastrophic) {
+      const eHeavy = hard ? 30 : 9, eLight = hard ? 16 : 4;
+      damageEngine(a, aRammer ? eLight : eHeavy, false);
+      damageEngine(b, aRammer ? eHeavy : eLight, false);
+      if ((a.player || b.player)) { if (a.player) a._burnByPlayer = true; if (b.player) b._burnByPlayer = true; }
+    }
     const kick = Math.min(catastrophic ? 3.6 : 2.4, speed * (catastrophic ? 0.12 : 0.09));
     const shove = Math.min(catastrophic ? 15 : 9, speed * 0.62);   // knock the struck car away with real speed
     if (!a.player) { a.pos.x -= nx * kick; a.pos.z -= nz * kick; if (!aRammer) { a.v = Math.max(Math.abs(a.v || 0), shove); a.heading = Math.atan2(-nx, -nz); a.wreckT = Math.max(a.wreckT || 0, 1.2); } }
@@ -696,6 +979,7 @@
         if (pushed > 0.05 && c.v > 11) {
           const catastrophic = c.v >= CRASH.npcDriverLethal, hard = c.v >= CRASH.wallHard;
           crumpleCar(c, catastrophic ? 0.7 : (hard ? 0.42 : 0.16));
+          damageEngine(c, catastrophic ? 55 : (hard ? 26 : 8), false);
           crashBurst(c.pos.x, c.pos.z, c.v, hard, catastrophic);
           if (hard && CBZ.cityShatter) CBZ.cityShatter(c.pos.x, c.pos.z, catastrophic ? 8 : 4.5);
           const cm = CBZ.camera.position;
@@ -927,7 +1211,12 @@
     c.pullover = 0; c.npcWanted = 0; c.v = 0; c.baseV = Math.max(2, c.baseV * 0.5); c.reckless = false; c.driver.aggr = 0.2;
     if (c.npcDriver) { const ped = c.npcDriver; ejectNpcDriver(c); if (ped && CBZ.cityNpcArrest) CBZ.cityNpcArrest(ped); }
   }
-  CBZ.cityVehiclesReset = function () { npcDrivers = 0; };
+  CBZ.cityVehiclesReset = function () {
+    npcDrivers = 0;
+    // retire any live smoke/flame sprites to the pool so a reset starts clean
+    for (let i = _vparts.length - 1; i >= 0; i--) { _vparts[i].s.visible = false; _vpool.push(_vparts[i].s); }
+    _vparts.length = 0;
+  };
   // let police flag a car for a stop
   CBZ.cityCarPullover = function (c) { if (c && !c.player && c.pullover === 0) c.pullover = 1; };
 })();

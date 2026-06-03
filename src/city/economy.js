@@ -131,47 +131,206 @@
 
   function drip() { let s = 0; const inv = g.cityInv || {}; for (const k in inv) { const it = ITEMS[k]; if (it && it.drip) s += it.drip; } return s; }
 
-  function buyPrice(name) { const it = ITEMS[name]; return it ? Math.round(it.value * 1.0) : 0; }
+  function buyPrice(name) {
+    const it = ITEMS[name]; if (!it) return 0;
+    // Drugs you buy at the trap house track the wholesale market: when product
+    // is OVERSUPPLIED (a district dumped, or a glut event) it's cheap to stock
+    // up — buy low. Everything else is flat retail.
+    if (it.tag === "drug") return wholesalePrice(name);
+    return Math.round(it.value * 1.0);
+  }
   function sellPrice(name, kind) {
     const it = ITEMS[name]; if (!it) return 0;
     let mul = 0.45;
     if (kind === "pawn") mul = it.tag === "valuable" ? 0.65 : 0.5;
     if (kind === "jewelry" && it.tag === "wearable") mul = 0.6;
     if (kind === "electronics" && it.tag === "valuable") mul = 0.62;
+    // a fenced item is worth more when you've built a rep with the fences
+    // (a real money sink to chase): higher Fence Rep = a smaller haircut.
+    const fence = fenceBonus();
+    if (it.tag === "valuable" || it.tag === "wearable") mul = Math.min(0.92, mul + fence);
     return Math.max(1, Math.round(it.value * mul));
   }
+  // Pawn/fence loyalty: each fence sale nudges a hidden rep up; it bumps your
+  // resale multiplier (capped). This rewards the buy-low/sell-high loop without
+  // ever paying more than the item's clean value.
+  function fenceBonus() { return Math.min(0.18, (g.cityFenceRep || 0) * 0.012); }
+  function bumpFenceRep(n) { g.cityFenceRep = Math.min(40, (g.cityFenceRep || 0) + (n || 1)); }
 
-  // ---- the floating street drug market -------------------------------------
-  // Per-drug price multiplier that mean-reverts to 1; selling floods the local
-  // market (price drops), heat scares buyers, and there's day-to-day noise.
+  // ============================================================
+  //  THE LIVING STREET DRUG MARKET  (supply & demand, per district)
+  // ------------------------------------------------------------
+  //  Real economics, GTA:Chinatown-Wars style. Each of the city's DISTRICTS
+  //  has its own price level per drug that mean-reverts to a baseline "demand"
+  //  that varies by neighbourhood (the projects love cheap highs; downtown
+  //  pays top dollar for coke). Selling FLOODS that district's price down;
+  //  buying (you draining stock, or NPC demand) lifts it. Scarcity + a hot
+  //  "tip" event spike prices for a short window — sell into the spike. Heat
+  //  scares buyers everywhere. Prices recover toward baseline over time.
+  // ============================================================
+  const DRUGS = ["Weed", "Coke", "Meth", "Pills"];
+
+  // Districts are derived from world position (see districtAt). Each has a
+  // demand profile: a per-drug baseline multiplier. >1 = pays a premium here,
+  // <1 = saturated / low demand. Tuned so a smart dealer arbitrages between
+  // them (buy coke cheap uptown, sell it downtown).
+  const DISTRICTS = {
+    downtown:  { name: "Downtown",   tier: 1.00, demand: { Weed: 0.9, Coke: 1.45, Meth: 0.8,  Pills: 1.25 } },
+    projects:  { name: "The Projects", tier: 0.78, demand: { Weed: 1.3, Coke: 0.85, Meth: 1.5, Pills: 1.05 } },
+    waterfront:{ name: "Waterfront", tier: 0.92, demand: { Weed: 1.1, Coke: 1.2,  Meth: 1.15, Pills: 0.9 } },
+    uptown:    { name: "Uptown",     tier: 1.15, demand: { Weed: 0.8, Coke: 1.6,  Meth: 0.7,  Pills: 1.4 } },
+    island:    { name: "The Island", tier: 1.30, demand: { Weed: 1.0, Coke: 1.7,  Meth: 0.9,  Pills: 1.55 } },
+  };
+  const DISTRICT_KEYS = Object.keys(DISTRICTS);
+
+  // figure out which district a world (x,z) sits in. Mainland is split into
+  // quadrants around the city centre; the connected annex is "island".
+  function districtAt(x, z) {
+    const A = CBZ.city && CBZ.city.annex;
+    if (A && Math.hypot(x - A.cx, z - A.cz) <= A.radius + 6) return "island";
+    const c = CBZ.city && CBZ.city.center;
+    if (!c) return "downtown";
+    const dx = x - c.x, dz = z - c.z;
+    // NE = uptown (rich), SW = projects (poor), NW = downtown, SE = waterfront
+    if (dx >= 0 && dz < 0) return "uptown";
+    if (dx < 0 && dz >= 0) return "projects";
+    if (dx >= 0 && dz >= 0) return "waterfront";
+    return "downtown";
+  }
+  function districtAtPos(p) { p = p || (CBZ.player && CBZ.player.pos) || { x: 0, z: 0 }; return districtAt(p.x, p.z); }
+  function districtName(key) { const d = DISTRICTS[key || playerDistrict()]; return d ? d.name : "the city"; }
+  function playerDistrict() { return districtAtPos(CBZ.player && CBZ.player.pos); }
+
+  // Per-district, per-drug live price-level state (mean-reverts to baseline).
   function initMarket() {
-    g.cityDrugMkt = { Weed: 1, Coke: 1, Meth: 1, Pills: 1 };
+    g.cityDrugMkt = { Weed: 1, Coke: 1, Meth: 1, Pills: 1 };   // legacy global (kept for compat)
     g.cityDrugNoise = 1;
+    const lvl = {};
+    for (const dk of DISTRICT_KEYS) { lvl[dk] = {}; for (const d of DRUGS) lvl[dk][d] = 1; }
+    g.cityDrugDist = lvl;
+    // a rolling "hot tip": one district pays a big premium for one drug for a
+    // limited window (Chinatown-Wars dealer tip-offs). null until first event.
+    g.cityDrugTip = null;
+    g.cityMktClock = 0;
   }
-  // what a street buyer will pay you for one unit right now
-  function streetPrice(drug) {
-    const it = ITEMS[drug]; if (!it || it.tag !== "drug") return 0;
-    if (!g.cityDrugMkt) initMarket();
-    const mkt = g.cityDrugMkt[drug] != null ? g.cityDrugMkt[drug] : 1;
-    const heat = 1 - 0.05 * (g.wanted | 0);                    // hot streets = wary buyers
-    const noise = 0.85 + rng() * 0.5;                          // per-deal haggling
-    const retail = 2.1;                                        // street markup over wholesale
-    return Math.max(1, Math.round(it.value * retail * mkt * Math.max(0.4, heat) * noise));
+  function distLevels(dk) {
+    if (!g.cityDrugDist) initMarket();
+    if (!g.cityDrugDist[dk]) { g.cityDrugDist[dk] = {}; for (const d of DRUGS) g.cityDrugDist[dk][d] = 1; }
+    return g.cityDrugDist[dk];
   }
-  // dumping product in one area pushes the price down (recovers over time)
-  function recordSale(drug, n) {
-    if (!g.cityDrugMkt) initMarket();
-    const flood = (E.drugFlood || 0.14) * (n || 1);
-    g.cityDrugMkt[drug] = Math.max(0.35, (g.cityDrugMkt[drug] != null ? g.cityDrugMkt[drug] : 1) - flood);
-  }
-  // wholesale price the trap house charges you to buy product
-  function wholesalePrice(drug) { const it = ITEMS[drug]; return it ? Math.max(1, Math.round(it.value * 0.8)) : 0; }
 
+  // The wholesale (buy) price you pay the trap house — also district-aware and
+  // supply-driven, so a glutted district is cheap to source from. Baseline is
+  // 0.8× value; oversupply (level<1) drops it, scarcity (level>1) raises it.
+  function wholesalePrice(drug, dk) {
+    const it = ITEMS[drug]; if (!it || it.tag !== "drug") return it ? Math.round(it.value * 0.8) : 0;
+    dk = dk || playerDistrict();
+    const lv = distLevels(dk)[drug] != null ? distLevels(dk)[drug] : 1;
+    // wholesale tracks the level but is dampened (the supplier keeps a margin)
+    const supply = 0.6 + 0.4 * lv;
+    return Math.max(1, Math.round(it.value * 0.8 * supply));
+  }
+
+  // What a street buyer pays you for one unit, here & now. Combines:
+  //   value × retail markup × district demand × live level × heat × tip × noise
+  function streetPrice(drug, dk) {
+    const it = ITEMS[drug]; if (!it || it.tag !== "drug") return 0;
+    dk = dk || playerDistrict();
+    const D = DISTRICTS[dk] || DISTRICTS.downtown;
+    const lv = distLevels(dk)[drug] != null ? distLevels(dk)[drug] : 1;
+    const demand = (D.demand[drug] || 1) * D.tier;             // neighbourhood appetite + wealth
+    const heat = 1 - 0.045 * (g.wanted | 0);                   // hot streets = wary buyers
+    const noise = 0.86 + rng() * 0.42;                         // per-deal haggling
+    const retail = 2.15;                                       // street markup over wholesale
+    let tip = 1;
+    const t = g.cityDrugTip;
+    if (t && t.dk === dk && t.drug === drug && (CBZ.now == null || CBZ.now < t.until)) tip = t.mult;
+    const p = it.value * retail * demand * lv * Math.max(0.4, heat) * tip * noise;
+    return Math.max(1, Math.round(p));
+  }
+
+  // Selling DUMPS product into the local district: price level drops (more so
+  // for bigger dumps — diminishing the deeper you flood). Recovers over time.
+  function recordSale(drug, n, dk) {
+    if (!g.cityDrugDist) initMarket();
+    dk = dk || playerDistrict();
+    n = n || 1;
+    const lvl = distLevels(dk);
+    const cur = lvl[drug] != null ? lvl[drug] : 1;
+    const flood = (E.drugFlood || 0.14) * n * (0.5 + 0.5 * cur);   // bites harder near baseline
+    lvl[drug] = Math.max(0.32, cur - flood);
+    // a small ripple to neighbouring districts (regional glut)
+    for (const k of DISTRICT_KEYS) if (k !== dk) { const v = distLevels(k); v[drug] = Math.max(0.4, (v[drug] != null ? v[drug] : 1) - flood * 0.18); }
+    // dumping a big load with heat on you risks a bust tip-off (handled by
+    // careers.js); record demand satisfaction so prices sag here.
+    g.cityDrugMkt[drug] = Math.max(0.35, (g.cityDrugMkt[drug] != null ? g.cityDrugMkt[drug] : 1) - (E.drugFlood || 0.14) * n);
+  }
+  // Buying wholesale DRAINS supply here → local scarcity lifts the level a bit
+  // (so panic-buying a district's whole stock pushes prices up).
+  function recordBuy(drug, n, dk) {
+    if (!g.cityDrugDist) initMarket();
+    dk = dk || playerDistrict();
+    n = n || 1;
+    const lvl = distLevels(dk);
+    const cur = lvl[drug] != null ? lvl[drug] : 1;
+    lvl[drug] = Math.min(2.4, cur + (E.drugFlood || 0.14) * 0.5 * n);
+  }
+
+  // The best place to OFF-LOAD a drug right now (for HUD hints / tips).
+  function bestMarket(drug) {
+    let best = null, bp = -1;
+    for (const dk of DISTRICT_KEYS) { const p = streetPriceNoNoise(drug, dk); if (p > bp) { bp = p; best = dk; } }
+    return { dk: best, name: districtName(best), price: bp };
+  }
+  function streetPriceNoNoise(drug, dk) {
+    const it = ITEMS[drug]; if (!it || it.tag !== "drug") return 0;
+    const D = DISTRICTS[dk] || DISTRICTS.downtown;
+    const lv = distLevels(dk)[drug] != null ? distLevels(dk)[drug] : 1;
+    const demand = (D.demand[drug] || 1) * D.tier;
+    let tip = 1; const t = g.cityDrugTip;
+    if (t && t.dk === dk && t.drug === drug && (CBZ.now == null || CBZ.now < t.until)) tip = t.mult;
+    return Math.round(it.value * 2.15 * demand * lv * tip);
+  }
+  // current tip-off, if active (careers/HUD can surface it as "word on the street")
+  function activeTip() {
+    const t = g.cityDrugTip;
+    if (t && (CBZ.now == null || CBZ.now < t.until)) return t;
+    return null;
+  }
+
+  // ---- market drift: recovery + boom/bust events + rolling hot tips --------
   CBZ.onUpdate(30, function (dt) {
     if (g.mode !== "city") return;
-    if (!g.cityDrugMkt) return;
+    if (!g.cityDrugDist) return;
     const drift = (E.drugDrift || 0.05) * dt;
+    // every district recovers toward its demand-shaped fair level (≈1)
+    for (const dk of DISTRICT_KEYS) {
+      const lvl = g.cityDrugDist[dk];
+      for (const d of DRUGS) lvl[d] += (1 - lvl[d]) * drift;
+    }
+    // keep the legacy global level alive too (other code may read it)
     for (const k in g.cityDrugMkt) g.cityDrugMkt[k] += (1 - g.cityDrugMkt[k]) * drift;
+
+    // expire / roll a hot tip-off. A new one fires every ~35–70s: one district
+    // suddenly pays a premium for one drug for ~20–40s. Sell into the spike.
+    g.cityMktClock = (g.cityMktClock || 0) + dt;
+    const tip = g.cityDrugTip;
+    const expired = !tip || (CBZ.now != null && CBZ.now >= tip.until);
+    if (expired && g.cityMktClock > (tip ? 12 : 8)) {
+      if (rng() < dt * 0.06) {            // sparse: a real "word on the street" moment
+        const dk = DISTRICT_KEYS[(rng() * DISTRICT_KEYS.length) | 0];
+        const drug = DRUGS[(rng() * DRUGS.length) | 0];
+        const mult = 1.6 + rng() * 1.1;   // 1.6×–2.7× premium
+        const dur = (20 + rng() * 22) * 1000;   // CBZ.now is in ms
+        g.cityDrugTip = { dk, drug, mult, until: (CBZ.now || 0) + dur, started: CBZ.now || 0 };
+        g.cityMktClock = 0;
+        // also create the scarcity that justifies the premium
+        const lvl = distLevels(dk); lvl[drug] = Math.min(2.6, lvl[drug] + 0.6);
+        if (CBZ.city && CBZ.city.note) {
+          CBZ.city.note("Word on the street: " + DISTRICTS[dk].name + " is paying big for " + drug + ".", 2.6);
+        }
+      }
+    }
   });
 
   // ---- realistic cash on a person, by wealth tier (0 poor .. 1 rich) -------
@@ -184,6 +343,119 @@
     if (wealth < 0.6) return 8 + ((rng() * 55) | 0);            // average
     if (wealth < 0.88) return 40 + ((rng() * 180) | 0);         // comfortable
     return 120 + ((rng() * 520) | 0);                          // wealthy
+  }
+
+  // ============================================================
+  //  WEALTH TIERS, FAUCETS & SINKS — make money MEANINGFUL
+  // ------------------------------------------------------------
+  //  A player's total NET WORTH (cash + bank + property + cars + worn ice)
+  //  places them in a tier: broke → hustler → comfortable → rich → KINGPIN.
+  //  Tiers gate flavour, drive the cost of luxury sinks (which scale with how
+  //  rich you are, the elastic-sink trick that keeps high earners spending),
+  //  and let other modules react ("the kingpin walks in"). NET WORTH is the
+  //  scoreboard, not raw cash.
+  // ============================================================
+  const TIERS = [
+    { id: "broke",       name: "Broke",        min: 0,        color: "#8a93a3" },
+    { id: "hustler",     name: "Hustler",      min: 2500,     color: "#9fd07e" },
+    { id: "comfortable", name: "Comfortable",  min: 25000,    color: "#7fd0ff" },
+    { id: "rich",        name: "Rich",         min: 150000,   color: "#ffd166" },
+    { id: "baller",      name: "Baller",       min: 600000,   color: "#ff9e6b" },
+    { id: "kingpin",     name: "KINGPIN",      min: 2500000,  color: "#ff5d7e" },
+  ];
+  // total value of items the player is carrying (jewellery, valuables, drugs)
+  function invWorth() {
+    const inv = g.cityInv || {}; let s = 0;
+    for (const k in inv) { const it = ITEMS[k]; if (it && it.value) s += it.value * inv[k] * (it.tag === "drug" ? 1.5 : 1); }
+    return s | 0;
+  }
+  // property + business equity, asked from zillow/empire if present
+  function holdingsWorth() {
+    let s = 0;
+    if (CBZ.cityZillow && CBZ.cityZillow.portfolioValue) s += CBZ.cityZillow.portfolioValue() | 0;
+    else if (g.cityProps) { for (const p of g.cityProps) s += (p.equity || p.value || 0); }
+    if (CBZ.cityEmpire && CBZ.cityEmpire.bizValue) s += CBZ.cityEmpire.bizValue() | 0;
+    if (g.cityGarage) { for (const c of g.cityGarage) { const car = carByName(c.name || c); if (car) s += (car.value * 0.85) | 0; } }
+    return s | 0;
+  }
+  function netWorth() {
+    return ((g.cash || 0) + (g.cityBank || 0) + invWorth() + holdingsWorth()) | 0;
+  }
+  function wealthTier(nw) {
+    nw = nw == null ? netWorth() : nw;
+    let t = TIERS[0];
+    for (const x of TIERS) if (nw >= x.min) t = x;
+    return t;
+  }
+  // 0..1 progress toward the NEXT tier (for a HUD bar)
+  function tierProgress(nw) {
+    nw = nw == null ? netWorth() : nw;
+    let cur = TIERS[0], next = null;
+    for (let i = 0; i < TIERS.length; i++) { if (nw >= TIERS[i].min) { cur = TIERS[i]; next = TIERS[i + 1] || null; } }
+    if (!next) return 1;
+    return Math.max(0, Math.min(1, (nw - cur.min) / (next.min - cur.min)));
+  }
+
+  // ---- HIGH-VALUE FAUCETS (let a hustler actually get filthy rich) ---------
+  // A risk-scaled cash drop for big scores (heist, robbery, kill bounty). The
+  // payout scales with how RISKY it was (heat) and your respect (rep = access
+  // to bigger jobs), so a kingpin's scores dwarf a rookie's. This is the faucet
+  // that funds the climb — other modules call it for their reward amounts.
+  function scoreReward(base, opts) {
+    opts = opts || {};
+    const heatMul = 1 + 0.10 * (g.wanted | 0);                 // riskier = richer
+    const repMul = 1 + Math.min(1.4, (g.respect || 0) / 400);  // rep unlocks bigger paydays
+    const luck = 0.85 + rng() * 0.4;
+    let v = base * heatMul * repMul * luck;
+    if (opts.tier) v *= (1 + 0.25 * (wealthTier().min > 0 ? TIERS.indexOf(wealthTier()) : 0));
+    return Math.max(1, Math.round(v));
+  }
+
+  // ---- SERIOUS MONEY SINKS (so wealth stays meaningful) --------------------
+  // Luxury / vanity sinks PRICE UP with your net worth (an elastic sink — the
+  // richer you are, the more it costs to flex), which keeps draining whales so
+  // money never becomes infinite & worthless. Other modules query these.
+  const SINKS = {
+    // a night out / bottle service / flexing — pure vanity drain
+    bottleService(nw) { nw = nw == null ? netWorth() : nw; return Math.max(250, Math.round(250 + nw * 0.01)); },
+    // daily property TAX as a fraction of holdings (recurring drain on the rich)
+    propertyTaxRate: 0.0008,   // per payTick on total holdings value
+    // bribing the cops scales with how much you're worth (they smell money)
+    bribeCost(stars, nw) {
+      nw = nw == null ? netWorth() : nw;
+      const base = (E.bribeBase || 150) * Math.max(1, stars || 1);
+      return Math.round(base * (1 + Math.min(3, nw / 400000)));
+    },
+    // hospital / repair / re-arm after a death — a sink that bites the careless
+    medicalBill(nw) { nw = nw == null ? netWorth() : nw; return Math.max(200, Math.round(200 + nw * 0.004)); },
+    // launder dirty cash: you lose a cut but it becomes safe (bank). The cut
+    // SHRINKS as you build laundering infrastructure (businesses) — a real sink
+    // that also rewards investing in the empire.
+    launderCut() {
+      let cut = 0.25;
+      if (CBZ.cityEmpire && CBZ.cityEmpire.laundromats) cut -= 0.03 * (CBZ.cityEmpire.laundromats() | 0);
+      return Math.max(0.06, cut);
+    },
+  };
+  // Recurring tax/upkeep drain on the wealthy — called by the wage/income tick
+  // (careers.js). Returns the $ to deduct this tick; keeps the rich spending.
+  function upkeepDue() {
+    const h = holdingsWorth();
+    if (h <= 0) return 0;
+    return Math.round(h * SINKS.propertyTaxRate);
+  }
+  // Convert dirty street cash to safe banked cash, minus a laundering haircut.
+  // Returns { banked, lost } and applies it. A core sink for drug profits.
+  function launder(amount) {
+    amount = Math.max(0, amount | 0);
+    if (amount <= 0) return { banked: 0, lost: 0 };
+    const cut = SINKS.launderCut();
+    const lost = Math.round(amount * cut);
+    const banked = amount - lost;
+    if (CBZ.city && CBZ.city.spend) CBZ.city.spend(amount); else g.cash = Math.max(0, (g.cash || 0) - amount);
+    g.cityBank = (g.cityBank || 0) + banked;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return { banked, lost };
   }
   // a wallet/phone you might lift in addition to loose cash
   function rollWallet(wealth) {
@@ -259,12 +531,36 @@
     stepPropMarket(dt);
   });
 
+  // ---- recurring upkeep/tax drain on the wealthy (a real money SINK) -------
+  // Once you own property/business, you owe upkeep + tax every payTick. This
+  // keeps the rich from sitting on a static pile — money must keep MOVING.
+  CBZ.onUpdate(30.4, function (dt) {
+    if (g.mode !== "city") return;
+    g._upkeepClock = (g._upkeepClock || 0) + dt;
+    const tick = (E.payTick || 6);
+    if (g._upkeepClock < tick) return;
+    g._upkeepClock -= tick;
+    const due = upkeepDue();
+    if (due > 0) {
+      const bank = g.cityBank || 0;
+      if (bank >= due) { g.cityBank = bank - due; }
+      else { g.cityBank = 0; if (CBZ.city && CBZ.city.spend) CBZ.city.spend(due - bank); }
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    }
+  });
+
   CBZ.cityEcon = {
     ITEMS, SHOP_STOCK, CARS, rng,
     add, has, count, take, drip, buyPrice, sellPrice, wholesalePrice,
     stockFor(kind) { return SHOP_STOCK[kind] || []; },
-    streetPrice, recordSale, initMarket,
+    streetPrice, recordSale, recordBuy, initMarket,
     rollCash, rollWallet, pickCar, carByName,
+    // --- living street market (supply & demand, per district) ---
+    DISTRICTS, districtAt, districtAtPos, districtName, playerDistrict,
+    bestMarket, activeTip, fenceBonus, bumpFenceRep,
+    // --- wealth tiers, faucets & sinks ---
+    TIERS, netWorth, invWorth, holdingsWorth, wealthTier, tierProgress,
+    scoreReward, SINKS, upkeepDue, launder,
     // property market: a drifting macro index Zillow multiplies prices by
     propIndex, propMarket, initPropMarket, FINANCE,
     propTrend() { return propMarket().trend; },

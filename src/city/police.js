@@ -30,6 +30,34 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
   const carSuspects = [];     // fleeing cars the police are after
+  const pursuers = [];        // traffic cars drafted into PIT pursuit of the player car
+
+  // ---- line-of-sight: do buildings block this cop's view? (GTA cops lose you
+  //      behind cover and switch to SEARCH). One shared ray, throttled per-cop. --
+  const _ray = new THREE.Raycaster();
+  _ray.far = 60;
+  const _o = new THREE.Vector3(), _d = new THREE.Vector3();
+  function losClear(ax, az, bx, bz) {
+    const blk = CBZ.losBlockers;
+    if (!blk || !blk.length) return true;
+    _o.set(ax, 1.4, az);
+    _d.set(bx - ax, 0, bz - az);
+    const len = _d.length(); if (len < 0.5) return true;
+    _d.multiplyScalar(1 / len);
+    _ray.set(_o, _d); _ray.far = len;
+    const hits = _ray.intersectObjects(blk, false);
+    return hits.length === 0;
+  }
+
+  function playerArmed() {
+    const w = g.cityWeapon;
+    return !!(w && CBZ.cityEcon && CBZ.cityEcon.ITEMS[w] && CBZ.cityEcon.ITEMS[w].gun);
+  }
+
+  // a roadblock cruiser + PIT chaser are real cars borrowed from vehicles.js; we
+  // only flag them here. The chopper is a cheap mesh w/ a sweeping spotlight.
+  let chopper = null, roadblockCD = 0, pitCD = 0;
+  const roadblocks = [];   // parked cruisers forming a wall; released when heat drops
 
   function makeCop(x, z, swat, ambient) {
     const ch = makeCharacter({
@@ -81,10 +109,125 @@
     }
     CBZ.cityCops.length = 0;
     carSuspects.length = 0;
+    for (const c of pursuers) if (c && !c.dead && !c.player) { c._pursuit = false; c.ai = true; c.reckless = false; }
+    pursuers.length = 0;
+    for (const c of roadblocks) if (c && !c.dead) { c._roadblock = 0; c.ai = true; c.abandoned = false; }
+    roadblocks.length = 0;
+    if (typeof despawnChopper === "function") despawnChopper();
+    roadblockCD = 0; pitCD = 0;
   };
 
   function liveCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead) n++; return n; }
   function liveAmbient() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && c.ambient) n++; return n; }
+  function liveSwat() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && c.swat) n++; return n; }
+
+  // ---- POLICE HELICOPTER (3+ stars): a maverick that orbits your last-known and
+  //      paints you with a searchlight, keeping cops fed your position. ----------
+  function makeChopper() {
+    const A = CBZ.city.arena; if (!A) return null;
+    const grp = new THREE.Group();
+    const matBody = CBZ.mat ? CBZ.mat(0x1a1d24, { ei: 0.02 }) : new THREE.MeshStandardMaterial({ color: 0x1a1d24 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.1, 4.4), matBody);
+    body.castShadow = false; grp.add(body);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 3.0), matBody);
+    tail.position.set(0, 0.2, -3.4); grp.add(tail);
+    const skidMat = CBZ.mat ? CBZ.mat(0x2a2e36) : matBody;
+    const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 3.4), skidMat); skidL.position.set(-0.8, -0.7, 0); grp.add(skidL);
+    const skidR = skidL.clone(); skidR.position.x = 0.8; grp.add(skidR);
+    // main rotor — a thin spinning blade plane (cheap)
+    const rotor = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.05, 0.5),
+      new THREE.MeshBasicMaterial({ color: 0x101216, transparent: true, opacity: 0.55, depthWrite: false }));
+    rotor.position.y = 0.85; grp.add(rotor);
+    // belly searchlight: a visible cone + a ground pool (like searchlight.js)
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 5.5, 1, 16, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    grp.add(cone);
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(5, 22),
+      new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.24, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2; pool.position.y = 0.07;
+    A.root.add(pool);
+    A.root.add(grp);
+    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite("AIR-1", { color: "#7fd0ff" }) : null;
+    if (tag) { tag.position.y = 2.2; tag.scale.set(3, 0.8, 1); grp.add(tag); }
+    const sp = A.randomRoadPoint();
+    grp.position.set(sp.x, 34, sp.z);
+    return {
+      group: grp, body, rotor, cone, pool, tag,
+      pos: grp.position, target: new THREE.Vector3(sp.x, 0, sp.z),
+      heading: 0, orbit: rng() * 6.28, shootCD: 1.2, leaveT: 0, spotR: 5,
+    };
+  }
+  // is the player currently painted by the chopper spotlight? cops + wanted.js
+  // can treat that as a live sighting.
+  CBZ.cityChopperPaints = function () {
+    if (!chopper) return false;
+    const P = CBZ.player; if (!P || P.dead) return false;
+    const dx = P.pos.x - chopper.pool.position.x, dz = P.pos.z - chopper.pool.position.z;
+    const r = chopper.spotR * (P.crouch ? 0.7 : 1);
+    return dx * dx + dz * dz < r * r;
+  };
+  function despawnChopper() {
+    if (!chopper) return;
+    if (chopper.group && chopper.group.parent) chopper.group.parent.remove(chopper.group);
+    if (chopper.pool && chopper.pool.parent) chopper.pool.parent.remove(chopper.pool);
+    // free the chopper's own (non-shared) geometry + materials — sprites share an
+    // r128 geometry singleton, so leave those alone (same rule as clearCityCops).
+    const disp = function (o) {
+      if (!o || o.isSprite) return;
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
+      const m = o.material; if (m && !m._shared && m.dispose) { try { m.dispose(); } catch (e) {} }
+    };
+    if (chopper.group) chopper.group.traverse(disp);
+    disp(chopper.pool);
+    chopper = null;
+  }
+  function updateChopper(dt) {
+    const stars = g.wanted | 0;
+    if (stars < 3 || g.state !== "playing") { if (chopper) { chopper.leaveT += dt; if (chopper.leaveT > 4) despawnChopper(); } return; }
+    if (!chopper) { chopper = makeChopper(); if (!chopper) return; }
+    chopper.leaveT = 0;
+    const P = CBZ.player;
+    const lk = g.cityLastKnown;
+    // orbit the suspect's last-known position; tighter + faster the more stars
+    const cx = lk ? lk.x : P.pos.x, cz = lk ? lk.z : P.pos.z;
+    chopper.orbit += dt * (0.45 + stars * 0.07);
+    const R = 18 - stars * 1.5;
+    const tx = cx + Math.cos(chopper.orbit) * R, tz = cz + Math.sin(chopper.orbit) * R;
+    const ty = 30 - stars;
+    chopper.pos.x += (tx - chopper.pos.x) * Math.min(1, dt * 1.4);
+    chopper.pos.z += (tz - chopper.pos.z) * Math.min(1, dt * 1.4);
+    chopper.pos.y += (ty - chopper.pos.y) * Math.min(1, dt * 1.2);
+    chopper.heading = Math.atan2(tx - chopper.pos.x, tz - chopper.pos.z);
+    chopper.group.rotation.y += (chopper.heading - chopper.group.rotation.y) * Math.min(1, dt * 3) * 0.3 + 0;
+    chopper.group.rotation.z = Math.sin(chopper.orbit) * 0.12;
+    chopper.rotor.rotation.y += dt * 40;
+    // spotlight tracks toward the player but lags (so you can outrun the beam)
+    const beam = chopper.pool.position;
+    beam.x += (P.pos.x - beam.x) * Math.min(1, dt * (0.7 + stars * 0.18));
+    beam.z += (P.pos.z - beam.z) * Math.min(1, dt * (0.7 + stars * 0.18));
+    chopper.spotR = 6 + stars * 0.5;
+    chopper.pool.scale.setScalar(chopper.spotR / 5);
+    // visible light cone hangs from the belly down to the ground (cheap: a local
+    // downward cylinder; the wide bottom radius reads as a spreading beam).
+    const len = Math.max(2, chopper.pos.y - 0.07);
+    chopper.cone.position.set(0, -len / 2 - 0.4, 0);
+    chopper.cone.rotation.set(0, 0, 0);
+    chopper.cone.scale.set(1, len, 1);
+    // PAINTED: the chopper relays your position → feeds last-known + lets cops see
+    if (CBZ.cityChopperPaints && CBZ.cityChopperPaints() && !P.dead) {
+      g.cityLastKnown = { x: P.pos.x, z: P.pos.z, t: CBZ.now };
+      // at 4+ stars the door gunner takes potshots from above
+      if (stars >= 4) { chopper.shootCD -= dt; if (chopper.shootCD <= 0) { chopper.shootCD = 0.9 + rng() * 0.6; chopperFire(); } }
+    } else if (chopper.shootCD > 0) chopper.shootCD -= dt;
+  }
+  function chopperFire() {
+    const P = CBZ.player; if (!P || P.dead || !chopper) return;
+    const from = { x: chopper.pos.x, y: chopper.pos.y - 0.5, z: chopper.pos.z };
+    if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * 2, y: 1.5, z: P.pos.z + (rng() - 0.5) * 2 }, { muzzleScale: 1.2 });
+    if (CBZ.sfx) CBZ.sfx("report");
+    if (rng() < 0.45 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
+  }
+  CBZ.cityClearChopper = despawnChopper;
 
   // ---- NPC offender registry (the city polices its own) -------------------
   CBZ.cityNpcOffense = function (ped, heat, type) {
@@ -129,22 +272,134 @@
     } else if (CBZ.body && imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 3 });
   };
 
+  // GTA wanted-tier ramp: how many of the responders to you should be SWAT/NOOSE.
+  // 0-1★ none, 2★ a token, 3★ a couple, 4★ half, 5★ mostly heavy units.
+  const SWAT_FRAC = [0, 0, 0.12, 0.3, 0.55, 0.75];
+
   // ---- maintain the right number of cops --------------------------------
   function maintain(dt) {
     maintainT -= dt;
     if (maintainT > 0) return;
     maintainT = 1.1;
+    const stars = g.wanted | 0;
     const ambientWant = CBZ.CITY.ambientCops || 0;
     const playerWant = g.cityCopTarget || 0;
     const offenders = offenderCount() + carSuspects.length;
     const total = ambientWant + playerWant + Math.min(6, offenders);
     const have = liveCops();
-    if (have < total) { const swat = (g.wanted | 0) >= 4; spawnCop(swat, liveAmbient() < ambientWant); if (have + 1 < total) spawnCop(swat, false); }
-    else if (have > total) {
+    if (have < total) {
+      // escalation ramp: at higher stars, fill the new slot with a SWAT unit so
+      // the force gets tougher AND bigger as your stars climb.
+      const wantSwat = liveSwat();
+      const swatTarget = Math.round(playerWant * (SWAT_FRAC[Math.min(5, stars)] || 0));
+      const fillAmbient = liveAmbient() < ambientWant;          // patrol slot open?
+      // patrol fills are always regular beat cops; only player-response slots are SWAT
+      const newIsSwat = !fillAmbient && stars >= 2 && wantSwat < swatTarget;
+      spawnCop(newIsSwat, fillAmbient);
+      if (have + 1 < total) spawnCop(stars >= 2 && (wantSwat + (newIsSwat ? 1 : 0)) < swatTarget, false);
+    } else if (have > total) {
       // retire surplus non-ambient cops when the heat is gone
-      for (const c of CBZ.cityCops) if (!c.dead && !c.ambient && !c.npcTarget && (g.wanted | 0) === 0) { c.giveUp = true; break; }
+      for (const c of CBZ.cityCops) if (!c.dead && !c.ambient && !c.npcTarget && stars === 0) { c.giveUp = true; break; }
+    }
+
+    // ---- vehicle responses to a DRIVING suspect (3★ PIT, 4★ roadblock) -------
+    const P = CBZ.player;
+    if (roadblockCD > 0) roadblockCD -= 1.1;
+    if (pitCD > 0) pitCD -= 1.1;
+    if (P && P.driving && P._vehicle && stars >= 3 && g.state === "playing") {
+      if (pitCD <= 0) { pitCD = 4 + rng() * 3; tryPIT(P._vehicle, stars); }
+      if (stars >= 4 && roadblockCD <= 0) { roadblockCD = 12 + rng() * 6; tryRoadblock(P._vehicle, stars); }
     }
   }
+
+  // PIT: draft a real traffic car into a pursuit cruiser that rams a fleeing
+  // player car off the road. We take the car off vehicles.js's lane AI (ai=false)
+  // and steer it ourselves toward the player's rear quarter; the car-car
+  // collision pass (vehicles.js order 37.6) does the crumple — a faster rammer
+  // wrecks the slower car, exactly a PIT.
+  function tryPIT(targetCar, stars) {
+    if (!CBZ.cityNearestCar || !targetCar) return;
+    if (pursuers.length >= (stars >= 5 ? 4 : 3)) return;     // cap the chaos
+    const sp = CBZ.cityNearestCar(targetCar.pos.x, targetCar.pos.z, 55);
+    if (!sp || sp.player || sp.dead || sp._pursuit || sp._roadblock) return;
+    sp._pursuit = true; sp.reckless = true; sp.ai = false; sp.npcDriver = null; sp.abandoned = false;
+    sp.baseV = (targetCar.baseV || 12) * 1.18 + stars * 0.8;   // a touch faster so it can catch up
+    pursuers.push(sp);
+    if (CBZ.city && CBZ.city.note && rng() < 0.5) CBZ.city.note("🚓 Pursuit unit moving to intercept!", 1.0);
+  }
+  function updatePursuers(dt) {
+    const P = CBZ.player;
+    const tgt = (P && P.driving && P._vehicle && !P._vehicle.dead && (g.wanted | 0) >= 3) ? P._vehicle : null;
+    for (let i = pursuers.length - 1; i >= 0; i--) {
+      const c = pursuers[i];
+      if (!c || c.dead || c.player || c._roadblock || c.wreckT > 0 || !tgt) {
+        if (c && !c.dead && !c.player) { c._pursuit = false; c.ai = true; c.reckless = false; c.abandoned = false; }
+        pursuers.splice(i, 1); continue;
+      }
+      // steer toward the suspect's rear quarter (the PIT contact point): aim a bit
+      // behind + to one side of the target so contact is on the back corner.
+      const side = (i % 2) ? 1 : -1;
+      const px = -Math.cos(tgt.heading || 0), pz = Math.sin(tgt.heading || 0);   // perpendicular to target heading
+      const behX = -Math.sin(tgt.heading || 0), behZ = -Math.cos(tgt.heading || 0);
+      const aimX = tgt.pos.x + behX * 1.2 + px * side * 1.1;
+      const aimZ = tgt.pos.z + behZ * 1.2 + pz * side * 1.1;
+      const dx = aimX - c.pos.x, dz = aimZ - c.pos.z, d = Math.hypot(dx, dz) || 1;
+      const want = Math.atan2(dx / d, dz / d);
+      c.heading = lerpAngle(c.heading || 0, want, 1 - Math.pow(0.0006, dt));
+      // accelerate up to pursuit speed; ease near contact so it nudges, not teleports
+      const cruise = c.baseV;
+      c.v = c.v + Math.max(-22 * dt, Math.min(16 * dt, cruise - (c.v || 0)));
+      c.v = Math.max(2, c.v);
+      c.pos.x += Math.sin(c.heading) * c.v * dt;
+      c.pos.z += Math.cos(c.heading) * c.v * dt;
+      if (CBZ.collide) CBZ.collide(c.pos, 1.0);
+      if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, 1.0);
+      c.group.position.set(c.pos.x, 0, c.pos.z);
+      c.group.rotation.y = c.heading;
+    }
+  }
+
+  // ROADBLOCK: park a couple of cruisers across the road ahead of the suspect's
+  // travel so they have to brake/swerve. Cheap: reuse parked traffic cars.
+  function tryRoadblock(targetCar, stars) {
+    if (!CBZ.cityNearestCar || !targetCar) return;
+    const A = CBZ.city.arena; if (!A) return;
+    // project ahead along the car's velocity to a point down the road
+    const vx = targetCar.v != null ? Math.sin(targetCar.heading || 0) : 0;
+    const vz = targetCar.v != null ? Math.cos(targetCar.heading || 0) : 1;
+    const ahead = 38;
+    const it = A.nearestIntersection(targetCar.pos.x + vx * ahead, targetCar.pos.z + vz * ahead);
+    if (!it) return;
+    const n = stars >= 5 ? 3 : 2;
+    let placed = 0;
+    for (let i = 0; i < n; i++) {
+      const car = CBZ.cityNearestCar(it.x, it.z, 70);
+      if (!car || car.player || car.dead || car._roadblock || car._pursuit) continue;
+      // perpendicular spread across the lane to form a wall
+      const off = (i - (n - 1) / 2) * 3.2;
+      const px = it.x + (-vz) * off, pz = it.z + (vx) * off;
+      car.pos.x = px; car.pos.z = pz; car.v = 0; car.baseV = 0;
+      car.heading = Math.atan2(-vz, vx); // park sideways across the road
+      car.group.position.set(px, 0, pz);
+      car.group.rotation.y = car.heading;
+      car._roadblock = CBZ.now; car.npcDriver = null; car.ai = false; car.abandoned = true; car.v = 0;
+      roadblocks.push(car);
+      // a cop crouches at each car for cover-fire
+      CBZ.citySpawnCop && CBZ.citySpawnCop(px + (rng() - 0.5) * 2, pz + (rng() - 0.5) * 2, stars >= 4 && rng() < 0.5);
+      placed++;
+    }
+    if (placed && CBZ.city && CBZ.city.note) CBZ.city.note("🚧 ROADBLOCK ahead!", 1.4);
+  }
+  // when the heat clears, hand roadblock cars back to ambient traffic
+  function releaseRoadblocks() {
+    for (let i = roadblocks.length - 1; i >= 0; i--) {
+      const c = roadblocks[i];
+      if (!c || c.dead) { roadblocks.splice(i, 1); continue; }
+      c._roadblock = 0; c.ai = true; c.abandoned = false; c.baseV = Math.max(4, (TR_cruise() * 0.7));
+      roadblocks.splice(i, 1);
+    }
+  }
+  function TR_cruise() { try { const t = CBZ.CITY.traf; return (t && t.cruise && t.cruise[1]) || 10; } catch (e) { return 10; } }
 
   // pick the best target for a cop: the player (if wanted) or an NPC offender
   function chooseTarget(cop) {
@@ -190,9 +445,11 @@
       if (c.retarget > 0) c.retarget -= dt;
       if (c.shootCD > 0) c.shootCD -= dt;
 
-      // (re)choose a target periodically
-      if (c.retarget <= 0) { c.retarget = 0.6; c.curTarget = chooseTarget(c); }
-      let tgt = c.curTarget;
+      // (re)choose a target periodically — but DON'T re-lock onto the player while
+      // we're mid-SEARCH (we lost sight; go investigate the last-known spot, not
+      // beeline to their live position). We only re-acquire when we can see again.
+      if (c.retarget <= 0 && !(c.searchT > 0)) { c.retarget = 0.6; c.curTarget = chooseTarget(c); }
+      let tgt = c.searchT > 0 ? null : c.curTarget;
       // a car suspect overrides if one is near + this cop is free
       if (!c.npcTarget && (!tgt || tgt === CBZ.city.playerActor && stars === 0)) {
         const cs = nearestCarSuspect(c.pos);
@@ -222,29 +479,101 @@
         const isPlayer = tgt === CBZ.city.playerActor;
         const tx = tgt.pos.x, tz = tgt.pos.z;
         const dx = tx - c.pos.x, dz = tz - c.pos.z, dist = Math.hypot(dx, dz);
-        c.sees = dist < 48;
-        if (c.sees && isPlayer) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
+
+        // real LINE OF SIGHT: within range AND not blocked by a building. The
+        // chopper painting you also counts as a sighting that feeds every cop.
+        // (losClear is throttled per-cop so the raycast cost stays cheap.)
+        if (c._losCD == null) c._losCD = rng() * 0.25;
+        c._losCD -= dt;
+        if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = dist < 48 && losClear(c.pos.x, c.pos.z, tx, tz); }
+        const painted = isPlayer && CBZ.cityChopperPaints && CBZ.cityChopperPaints();
+        c.sees = dist < 48 && (c._losClear || painted || dist < 4);
+        if (c.sees) {
+          c.lostT = 0;
+          c.lkx = tx; c.lkz = tz;                    // remember where we last saw them
+          if (isPlayer) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
+        } else {
+          // lost sight — count down toward a SEARCH at the last-known spot
+          c.lostT = (c.lostT || 0) + dt;
+          if (c.lostT > (stars >= 4 ? 6 : 4)) { c.curTarget = null; c.retarget = 0.4; goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz }); continue; }
+        }
 
         const npcThreat = !isPlayer && (tgt.armed || tgt.aggr >= 0.85 || (tgt.npcWanted | 0) >= 2);
         const wantArrest = isPlayer ? (stars <= 2 && !P.driving) : !npcThreat;
         const wantShoot = isPlayer ? stars >= 2 : npcThreat;
 
-        // ARREST: close in and cuff
+        // assign each cop a FLANK lane so they don't bunch up — left/right/center
+        // by index so a squad surrounds you instead of conga-lining single file.
+        if (c._flank == null) c._flank = ((i % 3) - 1);   // -1 left, 0 center, +1 right
+
+        // ---- ARREST: only when we actually see them + are right on top ----
         if (wantArrest && c.sees && dist < 1.9) {
           if (isPlayer) {
-            if (P.speed < 2.4 && !P._fighting) { c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust(); return; } if (near) animChar(c.char, 0, dt); continue; }
-            else c.arrestT = 0;
+            if (P.speed < 2.4 && !P._fighting) {
+              if (c.arrestT === 0 && CBZ.city && CBZ.city.note) CBZ.city.note("🚔 \"FREEZE! Hands where I can see them!\"", 1.0);
+              c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust(); return; } if (near) animChar(c.char, 0, dt); continue;
+            } else c.arrestT = 0;
           } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
         } else c.arrestT = 0;
 
-        // SHOOT
+        // ---- SHOOT (only with LOS) — and DUCK FOR COVER between bursts ----
         if (wantShoot && c.sees && dist < 30) {
-          if (c.shootCD <= 0) { c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3; fireAt(c, tgt, dist); }
+          if (c.shootCD <= 0) {
+            c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;
+            fireAt(c, tgt, dist);
+            // after a burst, an armed target may make a cop break to cover briefly
+            if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
+          }
         }
 
+        // taking cover: sidestep perpendicular to the target, then peek back out
+        if (c._coverT > 0) {
+          c._coverT -= dt;
+          const px = -dz / (dist || 1), pz = dx / (dist || 1);   // perpendicular
+          stepTo(c, px * c._coverDir * 4 + dx * 0.15, pz * c._coverDir * 4 + dz * 0.15, c.baseSpeed * 1.1, dt, near);
+          continue;
+        }
+
+        // approach with a FLANK offset so the squad encircles, and hold a
+        // firing-line distance once we're a threat-range shooter.
+        const flankAmt = c._flank * (isPlayer && stars >= 3 ? 7 : 4);
+        const px = -dz / (dist || 1), pz = dx / (dist || 1);
+        const gx = dx + px * flankAmt, gz = dz + pz * flankAmt;
         const stop = (wantShoot && dist < (isPlayer ? (stars >= 3 ? 9 : 4) : 8)) ? (isPlayer && stars >= 3 ? 8 : 5) : 1.5;
-        if (dist > stop) stepTo(c, dx, dz, c.baseSpeed, dt, near);
+        const spd = c.baseSpeed * (c.sees ? 1 : 1.12);     // sprint a touch when chasing blind
+        if (dist > stop) stepTo(c, gx, gz, spd, dt, near);
         else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); if (near) animChar(c.char, 0, dt); finalizeMove(c); }
+        continue;
+      }
+
+      // ---- SEARCH: go to last-known, then sweep nearby before giving up ----
+      if (c.searchT > 0 && (stars >= 1 || c.npcSearch)) {
+        c.searchT -= dt;
+        // RE-ACQUIRE: if we catch sight of the wanted player again mid-sweep, drop
+        // the search and resume the hunt (GTA: spotted you again → back to chase).
+        if (stars >= 1 && !CBZ.player.dead) {
+          const pdx = CBZ.player.pos.x - c.pos.x, pdz = CBZ.player.pos.z - c.pos.z, pd = Math.hypot(pdx, pdz);
+          const painted = CBZ.cityChopperPaints && CBZ.cityChopperPaints();
+          if (pd < 30 && (painted || losClear(c.pos.x, c.pos.z, CBZ.player.pos.x, CBZ.player.pos.z))) {
+            c.searchT = 0; c.searchGoal = null; c._sweepGoal = null; c.curTarget = CBZ.city.playerActor; c.retarget = 0.5; c.sees = true; c.lostT = 0;
+            if (CBZ.city && CBZ.city.note && rng() < 0.4) CBZ.city.note("🚨 \"I've got eyes on the suspect!\"", 0.9);
+            continue;
+          }
+        }
+        c.sees = false;
+        const sg = c.searchGoal || g.cityLastKnown;
+        if (sg) {
+          const sdx = sg.x - c.pos.x, sdz = sg.z - c.pos.z, sd = Math.hypot(sdx, sdz);
+          if (sd < 3) {
+            // reached it — pick a new nearby sweep point (wander, hoping to re-spot)
+            if (!c._sweepGoal || Math.hypot(c.pos.x - c._sweepGoal.x, c.pos.z - c._sweepGoal.z) < 2.5) {
+              const ang = rng() * 6.28, rad = 6 + rng() * 10;
+              c._sweepGoal = { x: sg.x + Math.cos(ang) * rad, z: sg.z + Math.sin(ang) * rad };
+            }
+            stepTo(c, c._sweepGoal.x - c.pos.x, c._sweepGoal.z - c.pos.z, c.baseSpeed * 0.7, dt, near);
+          } else stepTo(c, sdx, sdz, c.baseSpeed, dt, near);
+        }
+        if (c.searchT <= 0) { c.searchGoal = null; c._sweepGoal = null; c.npcSearch = false; if (stars === 0 && !c.ambient) c.giveUp = true; }
         continue;
       }
 
@@ -253,7 +582,20 @@
       if (!c.patrolGoal || Math.hypot(c.pos.x - c.patrolGoal.x, c.pos.z - c.patrolGoal.z) < 4) { const rp = A.randomRoadPoint(); c.patrolGoal = { x: rp.x, z: rp.z }; }
       stepTo(c, c.patrolGoal.x - c.pos.x, c.patrolGoal.z - c.pos.z, c.baseSpeed * 0.6, dt, near);
     }
+
+    updateChopper(dt);
+    updatePursuers(dt);
+    if (stars === 0 && roadblocks.length) releaseRoadblocks();
   });
+
+  // enter SEARCH mode aimed at the last-known position (GTA "?" investigate).
+  function goSearch(c, last) {
+    if (!last || last.x == null) { c.giveUp = (g.wanted | 0) === 0 && !c.ambient; return; }
+    c.searchT = 6 + rng() * 4;
+    c.searchGoal = { x: last.x, z: last.z };
+    c._sweepGoal = null;
+    c.npcSearch = !((g.wanted | 0) >= 1);   // searching for an NPC offender, not you
+  }
 
   function nearestCarSuspect(pos) {
     let best = null, bd = 70 * 70;
@@ -293,5 +635,10 @@
     }
   }
 
-  CBZ.citySpawnCop = spawnCop;
+  // NOTE: CBZ.citySpawnCop intentionally stays the POSITIONAL (x, z, swat) spawner
+  // defined above — empire.js raids + the roadblock both need a cop AT a spot.
+  // (The old trailing `= spawnCop` clobbered it with a (swat, ambient) signature,
+  // which silently spawned raid/roadblock cops at random road points.) Internal
+  // ambient/wanted spawns call the local spawnCop() directly, so nothing relies
+  // on the public name carrying the (swat, ambient) form.
 })();

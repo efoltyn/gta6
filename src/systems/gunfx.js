@@ -95,6 +95,117 @@
     return m;
   };
 
+  // ---- JUICY bullet impacts: a short-lived burst of debris streaks that fly
+  // out along the surface normal (GTA/Max-Payne style stretched billboards),
+  // plus a flat scorch puff. Pooled, additive sparks + soft dust. Drive with
+  // CBZ.bulletImpact(pos, normal, {kind, power}). kind: "spark" (metal/stone,
+  // bright orange sparks) | "dust" (concrete/dirt, brown puff) | "wood".
+  const _v0 = new THREE.Vector3();
+  const _v1 = new THREE.Vector3();
+  const _vn = new THREE.Vector3();
+  const _vt = new THREE.Vector3();
+  const _vb = new THREE.Vector3();
+  const UP = new THREE.Vector3(0, 1, 0);
+
+  function makeSparkTex() {
+    const c = document.createElement("canvas"); c.width = c.height = 32;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, "rgba(255,255,235,1)");
+    g.addColorStop(0.4, "rgba(255,196,96,0.9)");
+    g.addColorStop(1, "rgba(180,60,10,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    return new THREE.CanvasTexture(c);
+  }
+  function makePuffTex() {
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(32, 32, 1, 32, 32, 31);
+    g.addColorStop(0, "rgba(220,210,190,0.9)");
+    g.addColorStop(0.5, "rgba(150,135,110,0.5)");
+    g.addColorStop(1, "rgba(120,105,80,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  }
+  let sparkTex = null, puffTex = null;
+
+  // streak particles (thin stretched boxes) for flying sparks/debris
+  const streakGeo = new THREE.BoxGeometry(1, 1, 1);
+  const streaks = [];
+  let streakIdx = 0;
+  for (let i = 0; i < 56; i++) {
+    const m = new THREE.Mesh(streakGeo, new THREE.MeshBasicMaterial({
+      color: 0xffc864, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    m.visible = false; m.frustumCulled = false; m.renderOrder = 9;
+    scene.add(m);
+    streaks.push({ mesh: m, vel: new THREE.Vector3(), life: 0, max: 0.001, grav: 0, len: 0, w: 0 });
+  }
+  // flat scorch/dust puffs that bloom and fade at the impact point
+  const puffs = [];
+  let puffIdx = 0;
+  for (let i = 0; i < 16; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+    }));
+    s.visible = false; s.renderOrder = 8;
+    scene.add(s);
+    puffs.push({ spr: s, life: 0, max: 0.001, grow: 1 });
+  }
+
+  CBZ.bulletImpact = function (pos, normal, opts) {
+    opts = opts || {};
+    if (!sparkTex) { sparkTex = makeSparkTex(); puffTex = makePuffTex(); }
+    const kind = opts.kind || "spark";
+    const power = opts.power != null ? opts.power : 1;
+    _vn.set(normal ? normal.x : 0, normal ? normal.y : 1, normal ? normal.z : 0);
+    if (_vn.lengthSq() < 1e-6) _vn.set(0, 1, 0); else _vn.normalize();
+    // tangent basis on the surface for cone-spread debris
+    _vt.crossVectors(_vn, UP);
+    if (_vt.lengthSq() < 1e-5) _vt.set(1, 0, 0); else _vt.normalize();
+    _vb.crossVectors(_vn, _vt).normalize();
+
+    const dust = kind === "dust" || kind === "wood";
+    const baseColor = kind === "wood" ? 0xb98b50 : dust ? 0xc8b48c : 0xffc864;
+    const count = Math.min(10, Math.round((dust ? 4 : 6) * power) + 2);
+    for (let i = 0; i < count; i++) {
+      const p = streaks[streakIdx];
+      streakIdx = (streakIdx + 1) % streaks.length;
+      // ricochet cone hugging the normal, with random tangential scatter
+      const a = Math.random() * Math.PI * 2;
+      const spread = 0.35 + Math.random() * 0.75;
+      const speed = (dust ? 2.2 : 5.5) + Math.random() * (dust ? 2.5 : 7) * power;
+      p.vel.copy(_vn).multiplyScalar(0.6 + Math.random() * 0.5)
+        .addScaledVector(_vt, Math.cos(a) * spread)
+        .addScaledVector(_vb, Math.sin(a) * spread)
+        .normalize().multiplyScalar(speed);
+      p.mesh.position.copy(pos).addScaledVector(_vn, 0.02);
+      p.mesh.material.color.setHex(baseColor);
+      p.mesh.material.opacity = dust ? 0.7 : 1;
+      p.mesh.material.blending = dust ? THREE.NormalBlending : THREE.AdditiveBlending;
+      p.len = dust ? 0.05 : (0.14 + Math.random() * 0.22);
+      p.w = dust ? 0.05 : 0.018;
+      p.grav = dust ? 1.5 : 16;
+      p.life = dust ? (0.16 + Math.random() * 0.12) : (0.1 + Math.random() * 0.14);
+      p.max = p.life;
+      p.mesh.visible = true;
+    }
+    // a flat puff at the surface
+    const f = puffs[puffIdx];
+    puffIdx = (puffIdx + 1) % puffs.length;
+    f.spr.material.map = dust ? puffTex : sparkTex;
+    f.spr.material.color.setHex(dust ? 0xffffff : 0xffd28c);
+    f.spr.material.blending = dust ? THREE.NormalBlending : THREE.AdditiveBlending;
+    f.spr.position.copy(pos).addScaledVector(_vn, 0.03);
+    const s0 = (dust ? 0.28 : 0.2) * (0.8 + power * 0.4);
+    f.spr.scale.set(s0, s0, s0);
+    f.spr.material.opacity = dust ? 0.75 : 1;
+    f.spr.visible = true;
+    f.life = dust ? 0.22 : 0.1;
+    f.max = f.life;
+    f.grow = dust ? 4.5 : 2;
+  };
+
   // one always-updater fades + recycles every transient (runs in all modes,
   // like the rig/facial layers, so brief bursts never freeze mid-fade).
   CBZ.onAlways(54, function (dt) {
@@ -109,6 +220,31 @@
       f.life -= dt;
       f.spr.material.opacity = Math.max(0, f.life / f.max);
       if (f.life <= 0) { f.spr.visible = false; flashPool.push(f.spr); liveFlashes.splice(i, 1); }
+    }
+    // bullet-impact streaks: integrate velocity + gravity, stretch along motion
+    for (let i = 0; i < streaks.length; i++) {
+      const p = streaks[i];
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      if (p.life <= 0) { p.mesh.visible = false; continue; }
+      p.vel.y -= p.grav * dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      const sp = p.vel.length();
+      if (sp > 0.01) {
+        _v0.copy(p.vel).multiplyScalar(1 / sp);
+        p.mesh.quaternion.setFromUnitVectors(UP, _v0);
+      }
+      p.mesh.scale.set(p.w, p.len + Math.min(0.4, sp * 0.012), p.w);
+      p.mesh.material.opacity = Math.max(0, p.life / p.max) * (p.grav > 5 ? 1 : 0.7);
+    }
+    for (let i = 0; i < puffs.length; i++) {
+      const f = puffs[i];
+      if (f.life <= 0) continue;
+      f.life -= dt;
+      if (f.life <= 0) { f.spr.visible = false; continue; }
+      const k = 1 + f.grow * dt;
+      f.spr.scale.multiplyScalar(k);
+      f.spr.material.opacity = Math.max(0, f.life / f.max) * (f.spr.material.blending === THREE.NormalBlending ? 0.75 : 1);
     }
   });
 })();

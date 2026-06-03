@@ -100,6 +100,9 @@
     shotCD = 0;
     dryCD = 0;
     triggerHeld = false;
+    recoil = 0; recoilSide = 0; bloom = 0; recoilHold = 0;
+    hitMarkerT = 0;
+    if (hitMarker && hitMarker.wrap) hitMarker.wrap.style.display = "none";
     syncAmmo();
     setAmmoHud();
   }
@@ -272,6 +275,12 @@
 
   let recoil = 0, recoilSide = 0, vmPunch = 0, bobPhase = 0, muzzleT = 0, worldMuzzleT = 0, pumpT = 0;
   let punchT = 0;
+  // BLOOM: an extra spread term (radians) that GROWS while moving + auto-firing
+  // and TIGHTENS back toward the weapon's base cone when you stand still. This
+  // is the "fire discipline" reward — tap or hold still for laser shots, run-
+  // and-gun and the cone opens up. recoilHold delays recoil recovery slightly
+  // for a snappier kick-then-settle (instead of an instant rubber-band).
+  let bloom = 0, recoilHold = 0;
   const PUNCH_DUR = 0.26;
   let shotCD = 0, dryCD = 0, triggerHeld = false, reloadWeapon = 0;
 
@@ -448,6 +457,58 @@
   const cross = document.getElementById("crosshair");
   const ammoEl = document.getElementById("ammo");
   const stripEl = document.getElementById("weaponStrip");
+
+  // ---- HIT MARKER ----------------------------------------------------------
+  // Built entirely in JS (no index.html/CSS edits): four angled ticks that
+  // splay out around the crosshair on a connecting shot (GTA/CoD feel). A plain
+  // hit is a white flash; a KILL turns the marker red and spins it slightly
+  // into an X (the GTA "you got 'em" tell); a headshot adds a sharper snap.
+  const hitMarker = (function () {
+    const wrap = document.createElement("div");
+    wrap.id = "hitMarker";
+    wrap.style.cssText =
+      "position:absolute;left:50%;top:50%;width:34px;height:34px;" +
+      "transform:translate(-50%,-50%);pointer-events:none;display:none;" +
+      "opacity:0;z-index:30;will-change:transform,opacity;";
+    // four ticks, each a short bar pointing diagonally out from centre
+    const ticks = [];
+    const angles = [45, 135, 225, 315];
+    for (let i = 0; i < 4; i++) {
+      const t = document.createElement("div");
+      t.style.cssText =
+        "position:absolute;left:50%;top:50%;width:2.2px;height:9px;" +
+        "background:#fff;border-radius:1px;box-shadow:0 0 3px rgba(0,0,0,.85);" +
+        "transform-origin:50% 50%;";
+      wrap.appendChild(t);
+      ticks.push(t);
+    }
+    function placeTicks(spread) {
+      for (let i = 0; i < 4; i++) {
+        const a = angles[i] * Math.PI / 180;
+        const dx = Math.cos(a) * spread, dy = Math.sin(a) * spread;
+        ticks[i].style.transform =
+          "translate(-50%,-50%) translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px) rotate(" + (angles[i]) + "deg)";
+      }
+    }
+    if (cross && cross.parentNode) cross.parentNode.insertBefore(wrap, cross.nextSibling);
+    else document.body.appendChild(wrap);
+    return { wrap, ticks, placeTicks };
+  })();
+  let hitMarkerT = 0, hitMarkerDur = 0.001, hitMarkerKill = false;
+
+  function flashHitMarker(kill, head) {
+    const col = kill ? "#ff3b30" : (head ? "#fff0b0" : "#ffffff");
+    for (let i = 0; i < hitMarker.ticks.length; i++) {
+      hitMarker.ticks[i].style.background = col;
+      hitMarker.ticks[i].style.height = (kill ? 11 : head ? 10 : 8.5).toFixed(1) + "px";
+    }
+    hitMarkerKill = !!kill;
+    hitMarkerDur = kill ? 0.42 : 0.18;
+    hitMarkerT = hitMarkerDur;
+    hitMarker.wrap.style.display = "block";
+    hitMarker.wrap.style.opacity = "1";
+  }
+  CBZ.fpsHitMarker = flashHitMarker;
 
   function setAmmoHud() {
     if (!ammoEl) return;
@@ -723,6 +784,10 @@
     const RK = 0.6;   // global recoil dampener — the guns were kicking too hard
     recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK);
     recoilSide += (Math.random() * 2 - 1) * w.sideKick * RK;
+    recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
+    // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
+    // capped so even mag-dumps stay usable. moving adds extra below in the loop.
+    bloom = Math.min(w.spread * 2.6, bloom + w.spread * (w.auto ? 0.9 : 0.45));
     if (fps.active) fps.fp = Math.min(1.3, fps.fp + (w.climb + Math.random() * w.climb * 0.45) * RK);
     else CBZ.cam.pitch = Math.min(1.15, CBZ.cam.pitch + w.climb * 0.36 * RK);
     CBZ.cam.yaw += (Math.random() * 2 - 1) * w.sideKick * 0.55 * RK;
@@ -753,9 +818,15 @@
     const origin = muzzleWorld(tmp2);
     aimForward(fwd);
     const pellets = w.pellets || 1;
+    // effective cone = base spread, opened by recoil + accumulated bloom, with
+    // a hipfire/movement penalty (moving fast while shooting throws shots wide).
+    // Standing still + tapping ≈ the gun's tight base cone for precise shots.
+    const moving = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
+    const moveBloom = w.spread * moving * 1.4;
+    const cone = w.spread * (1 + recoil * 0.18) + bloom + moveBloom;
     let head = false, down = false, hitSomething = false;
     for (let i = 0; i < pellets; i++) {
-      spreadDir(fwd, w.spread * (1 + recoil * 0.18), shotDir);
+      spreadDir(fwd, cone, shotDir);
       const hit = resolveShot(w, shotDir);
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
       if (i < 5 || pellets === 1) fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
@@ -769,16 +840,32 @@
         head = head || r.head;
         down = down || r.down;
         spawnImpact(hit.point, true, w.key === "shotgun");
+        // a real wet blood puff on flesh (the survival gore kit) — directional,
+        // sprayed away from the shooter along the bullet path.
+        if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
+          dir: shotDir, amount: (r.head ? 1.4 : 0.8) * (w.key === "shotgun" ? 1.5 : 1), player: true,
+        });
       } else if (hit.crowd != null) {
         // shot an ambient crowd member (the far NPCs that used to be unkillable)
         hitSomething = true;
         if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); down = true; }
         head = head || hit.head;
         spawnImpact(hit.point, true, w.key === "shotgun");
+        if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: shotDir, amount: hit.head ? 1.2 : 0.7, player: true });
       } else if (hit.wall) {
         spawnImpact(hit.point, false, w.key === "shotgun");
+        // surface normal of the struck wall (faces back toward the shooter):
+        // walls in this game are near-vertical, so reflect the shot dir onto the
+        // horizontal plane for a believable ricochet cone + a persistent hole.
+        const nx = -shotDir.x, nz = -shotDir.z;
+        const nl = Math.hypot(nx, nz) || 1;
+        const wnx = nx / nl, wnz = nz / nl;
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: w.key === "shotgun" ? 1.5 : 1 });
+        if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
       }
     }
+    // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
+    if (hitSomething) flashHitMarker(down, head);
     if (head) { CBZ.sfx && CBZ.sfx("headshot"); if (CBZ.flashHint) CBZ.flashHint(down ? "HEADSHOT KILL" : "HEADSHOT", 1.0); }
     else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); if (down && CBZ.flashHint) CBZ.flashHint("TARGET DOWN", 0.9); }
     // discharging a firearm in the city is a witnessed crime (city wanted system)
@@ -999,6 +1086,25 @@
       if (worldMuzzleT <= 0) worldMuzzle.visible = false;
     }
 
+    // HIT MARKER animation: ticks punch OUT from centre on the hit, then ease
+    // back in while fading. A kill marker also rotates the whole cluster a few
+    // degrees into an X and lingers longer. Runs unconditionally so it always
+    // finishes its fade even if you lower the gun the instant after a kill.
+    if (hitMarkerT > 0) {
+      hitMarkerT = Math.max(0, hitMarkerT - dt);
+      const k = hitMarkerT / hitMarkerDur;             // 1 -> 0
+      const e = k * k;                                  // ease-out fade
+      // splay snaps wide (~9px) then settles to ~5px as it fades
+      const spread = 5 + e * 5;
+      hitMarker.placeTicks(spread);
+      const spin = hitMarkerKill ? (1 - k) * 14 : 0;    // tilt into an X on a kill
+      const sc = 0.85 + e * 0.35;
+      hitMarker.wrap.style.transform =
+        "translate(-50%,-50%) rotate(" + spin.toFixed(1) + "deg) scale(" + sc.toFixed(2) + ")";
+      hitMarker.wrap.style.opacity = Math.min(1, k * 1.6).toFixed(3);
+      if (hitMarkerT <= 0) hitMarker.wrap.style.display = "none";
+    }
+
     if (!aiming) {
       carriedGun.visible = false;
       return;
@@ -1028,10 +1134,28 @@
       CBZ.camera.lookAt(tmp);
     }
 
-    recoil += (0 - recoil) * Math.min(1, 11 * dt);
-    recoilSide += (0 - recoilSide) * Math.min(1, 10 * dt);
+    // SMOOTHER recoil RECOVERY: after a brief hold (so the kick reads), the gun
+    // springs back toward true centre with an ease that's gentle near zero —
+    // no abrupt rubber-band snap, no lingering offset. recoilSide settles a bit
+    // faster (horizontal kick should self-correct first, like real muzzle climb
+    // recovery). Pulling the muzzle climb (fp/pitch) back down is what makes a
+    // mag-dump return to where you were aiming instead of drifting up the wall.
+    if (recoilHold > 0) recoilHold = Math.max(0, recoilHold - dt);
+    else {
+      const rk = 1 - Math.pow(0.0016, dt);          // ~smooth critically-damped feel
+      recoil += (0 - recoil) * rk;
+      // bleed the upward climb back toward neutral so sustained fire recenters
+      if (fps.active) fps.fp += (0 - fps.fp) * (1 - Math.pow(0.55, dt)) * Math.min(1, recoil * 4 + 0.15);
+    }
+    recoilSide += (0 - recoilSide) * Math.min(1, 13 * dt);
     vmPunch += (0 - vmPunch) * Math.min(1, 10 * dt);
     pumpT = Math.max(0, pumpT - dt * 4.5);
+    // BLOOM tightens back toward zero when not firing; faster while standing
+    // still (the discipline reward). triggerHeld auto-fire keeps it propped up.
+    {
+      const settleSpeed = (CBZ.player.speed || 0) < 0.6 && CBZ.player.grounded !== false ? 6.5 : 3.2;
+      bloom = Math.max(0, bloom - bloom * Math.min(1, settleSpeed * dt) - 0.0008 * dt);
+    }
 
     if (!armed()) animFists(dt);
 
@@ -1116,8 +1240,12 @@
 
     if (cross) {
       const aim = aimedActor(armed() ? w.range : MELEE);
+      // reticle breathes with the live cone: tight at rest, blooms with recoil,
+      // bloom accumulation and movement — so the crosshair HONESTLY shows where
+      // shots will land (the AAA contract between reticle and spread).
+      const mv = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
       const size = armed()
-        ? 18 + w.spread * 280 + recoil * 34 + (fps.reloading > 0 ? 8 : 0)
+        ? 18 + w.spread * 280 + bloom * 300 + recoil * 34 + mv * 10 + (fps.reloading > 0 ? 8 : 0)
         : 22;
       cross.style.width = size.toFixed(1) + "px";
       cross.style.height = size.toFixed(1) + "px";

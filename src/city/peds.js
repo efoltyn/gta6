@@ -188,6 +188,38 @@
     }
   };
 
+  // ---- CROWD PANIC: a loud, scary event (gunfire, explosion, a body dropping)
+  //      sends a shockwave of fear through the nearby crowd — people scatter,
+  //      scream, and the panic ripples outward as fleeing peds alarm the next
+  //      ring out. Cheaper + punchier than cityAlarm: it forces a FLEE state and
+  //      a clear escape heading away from the blast so the street empties fast,
+  //      GTA-style. `power` scales radius + how hard they bolt. ----
+  let _lastPanicFrame = -1;
+  CBZ.cityPanic = function (x, z, power, offender) {
+    power = power || 1;
+    const radius = 16 + power * 10, r2 = radius * radius;
+    let scattered = 0;
+    for (const p of CBZ.cityPeds) {
+      if (p.dead || p.vendor || p.companion || p.controlled || p._parked || p.recruited) continue;
+      const dx = p.pos.x - x, dz = p.pos.z - z, dd = dx * dx + dz * dz;
+      if (dd >= r2) continue;
+      const close = 1 - Math.sqrt(dd) / radius;            // 0 at edge, 1 at centre
+      p.alarmed = Math.max(p.alarmed, 5 + power * 3 * close);
+      p.fear = Math.min(10, p.fear + (4 + power * 4) * close);
+      if (offender && offender !== p && offender.pos) p.mem = p.mem || offender;
+      // the meek & wary in range bolt right now; the bold just get jumpy
+      if (p.aggr < (A0().crook || 0.72) && !p.rage && p.state !== "fight") {
+        p.state = "flee"; p.path = null;
+        const m = Math.sqrt(dd) || 1;
+        p.target.set(p.pos.x + (dx / m) * 24, 0, p.pos.z + (dz / m) * 24);
+        scattered++;
+      }
+    }
+    // a couple of nearby screams for the audio punch (throttled to one per frame)
+    if (scattered && CBZ.sfx && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.7) CBZ.sfx("whoosh"); }
+    return scattered;
+  };
+
   // tag everyone in sight of a crime as a witness who can phone it in (the
   // ONLY way the player gets stars — RDR2 style). `sev` = crime weight.
   CBZ.cityTagWitnesses = function (x, z, sev, type) {
@@ -255,6 +287,7 @@
     const byPlayer = imp ? imp.byPlayer !== false : true;
     const offender = att && att !== CBZ.city.playerActor ? att : (byPlayer ? CBZ.city.playerActor : null);
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 22, 1.4, offender);
+    if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, 1.3, offender);   // a body drops → the street scatters
     if (ped.gang && byPlayer && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
     if (att && att !== CBZ.city.playerActor) {
       if (att.kind !== "cop" && !lawfulSecurityAct(att, ped) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 90, "murder");   // lawful responders are not criminals
@@ -394,14 +427,67 @@
 
   function band(a) { const B = A0(); return a < (B.flee || 0.3) ? "meek" : a < (B.bold || 0.5) ? "wary" : a < (B.crook || 0.72) ? "bold" : a < (B.violent || 0.88) ? "crook" : "violent"; }
 
+  // ---- a cheap internal day clock so the crowd has a believable RHYTHM.
+  //      No real sun system exists, so peds run their own loose 24h loop
+  //      (~6 real-min day). It only nudges WHICH routine destinations they
+  //      favour — work in the day, home/leisure at night — it never forces a
+  //      ped anywhere, so it coexists with aigoals.js' EARN/DRUGS/etc. layer.
+  let _dayClock = 9.5;                 // start mid-morning
+  const DAY_LEN = 360;                 // seconds per in-city day
+  CBZ.cityHour = function () { return _dayClock; };           // 0..24, for other modules
+  function dayPhase() {                                       // coarse phase of life
+    const h = _dayClock;
+    if (h < 6 || h >= 22) return "night";    // sparse, head home
+    if (h < 9) return "morning";             // commute to work/shops
+    if (h < 12) return "work";
+    if (h < 14) return "lunch";              // food/bars/errands
+    if (h < 18) return "work";
+    return "evening";                        // leisure: bars, parks, home
+  }
+
+  // pick a destination weighted by the ped's archetype + the time of day.
+  // Returns a goal {x,z,enter?} or null to fall through to the default roll.
+  function scheduledGoal(ped, A) {
+    if (!A.shopLots || !A.shopLots.length) return null;
+    const phase = dayPhase();
+    const homeward = phase === "night" || (phase === "evening" && rng() < 0.5);
+    // residents have a "home" lot they drift back to after dark
+    if (homeward && A.homeLots && A.homeLots.length) {
+      if (!ped._home) ped._home = A.homeLots[(rng() * A.homeLots.length) | 0];
+      const h = ped._home;
+      const door = h.building && h.building.door;
+      if (door) return { x: door.x, z: door.z, enter: true };
+      return { x: h.cx + (rng() - 0.5) * (h.w || 6), z: h.cz + (rng() - 0.5) * (h.d || 6) };
+    }
+    // by day, gravitate to the kind of place that fits the hour / archetype
+    let prefer = null;
+    if (phase === "lunch") prefer = rng() < 0.6 ? "food" : "bar";
+    else if (phase === "evening") prefer = ["bar", "casino", "food", "gym"][(rng() * 4) | 0];
+    else if (phase === "morning" || phase === "work") {
+      const a = ped.archetype;
+      if (a === "merchant") return null;        // vendors are posted; don't pull them
+      prefer = ["clothing", "electronics", "food", "gym", "barber", "hardware", "bank"][(rng() * 7) | 0];
+    }
+    if (prefer) {
+      const matches = A.shopLots.filter((l) => l.kind === prefer);
+      if (matches.length) {
+        const l = matches[(rng() * matches.length) | 0];
+        return { x: l.building.door.x, z: l.building.door.z, enter: true };
+      }
+    }
+    return null;
+  }
+
   // ---- routine waypoint picking (route through an intersection to cross) ----
   function pickRoutineGoal(ped) {
     const A = CBZ.city.arena;
     const r = rng();
-    let goal;
-    if (r < 0.25 && A.shopLots && A.shopLots.length) { const l = A.shopLots[(rng() * A.shopLots.length) | 0]; goal = { x: l.building.door.x, z: l.building.door.z, enter: true }; }
-    else if (r < 0.4 && A.lots) { const l = A.lots[(rng() * A.lots.length) | 0]; goal = { x: l.cx + (rng() - 0.5) * l.w, z: l.cz + (rng() - 0.5) * l.d }; }
-    else { const p = A.randomSidewalkPoint(); goal = { x: p.x, z: p.z }; }
+    let goal = scheduledGoal(ped, A);     // try a time-of-day destination first
+    if (!goal) {
+      if (r < 0.25 && A.shopLots && A.shopLots.length) { const l = A.shopLots[(rng() * A.shopLots.length) | 0]; goal = { x: l.building.door.x, z: l.building.door.z, enter: true }; }
+      else if (r < 0.4 && A.lots) { const l = A.lots[(rng() * A.lots.length) | 0]; goal = { x: l.cx + (rng() - 0.5) * l.w, z: l.cz + (rng() - 0.5) * l.d }; }
+      else { const p = A.randomSidewalkPoint(); goal = { x: p.x, z: p.z }; }
+    }
     ped.finalGoal = goal;
     // 2-hop route: cross at the nearest intersection first if the goal is far
     const dGoal = Math.hypot(goal.x - ped.pos.x, goal.z - ped.pos.z);
@@ -503,11 +589,23 @@
     const threatened = ped.alarmed > 0 || (playerThreat && dpl < 14);
     if (threatened) {
       if (bnd === "meek" || bnd === "wary") {
-        ped.state = bnd === "wary" && rng() < 0.4 ? "film" : "flee";
-        if (ped.state === "flee") fleeFrom(ped, px, pz);
-        else { ped.speed = 0; }
-        // report the offender to the cops after a beat of panic
-        if (ped.callT <= 0 && ped.alarmed > 2 && rng() < 0.5) {
+        // origin of the threat: a remembered offender if we have one, else the player
+        const thx = (ped.mem && ped.mem.pos) ? ped.mem.pos.x : px;
+        const thz = (ped.mem && ped.mem.pos) ? ped.mem.pos.z : pz;
+        const dThreat = Math.hypot(ped.pos.x - thx, ped.pos.z - thz);
+        // a wary bystander films from a safe-ish distance; high fear always bolts.
+        const wantFilm = bnd === "wary" && ped.fear < 7 && dThreat > 7 && rng() < 0.4;
+        if (wantFilm) {
+          ped.state = "film"; ped.speed = 0;
+          ped.group.rotation.y = Math.atan2(thx - ped.pos.x, thz - ped.pos.z);   // hold the phone up at it
+        } else {
+          // FLEE — and if a wall/cover is right beside the threat, duck behind it
+          ped.state = "flee";
+          fleeFrom(ped, thx, thz);
+        }
+        // report to the cops once they've put some DISTANCE between them and the
+        // danger (people don't call 911 point-blank) — RDR2/GTA-style witness call.
+        if (ped.callT <= 0 && ped.alarmed > 2 && (dThreat > 11 || ped.state === "film") && rng() < 0.6) {
           ped.callT = 6;
           const off = ped.mem;
           if (off === CBZ.city.playerActor) { if (CBZ.cityReport) CBZ.cityReport(ped.witnessSev || 20, { x: px, z: pz, type: ped.witnessType }); ped.witnessSev = 0; ped.witnessType = null; CBZ.city && CBZ.city.note("🗣️ " + ped.name + " called the cops!", 1.4); }
@@ -589,6 +687,33 @@
 
     // ---- default: routine ----
     if (ped.state === "confront" || ped.state === "fight" || ped.state === "flee" || ped.state === "loot") ped.state = "walk";
+
+    // ---- NOTICE THE PLAYER: a calm bystander reacts to you even when not yet in
+    //      danger — a brandished gun makes the meek edge away; otherwise the
+    //      curious stop and gawk / film the armed stranger walking past (GTA vibe).
+    if (active && !P.dead && dpl < 12 && (ped._notedT || 0) <= 0) {
+      if (playerArmed && dpl < 9 && (bnd === "meek" || (bnd === "wary" && rng() < 0.4))) {
+        // gun out and pointing-ish your way: the timid back off without a full panic
+        ped._notedT = 2.5 + rng() * 2;
+        ped.state = "flee"; fleeFrom(ped, px, pz); ped.fear = Math.min(ped.fear + 1.5, 6);
+        return;
+      }
+      if (playerArmed && rng() < 0.5) {
+        // film the armed stranger from a distance — phone up, frozen, gawking
+        ped._notedT = 3 + rng() * 3;
+        ped.state = "film"; ped.speed = 0; ped.pause = 1.2 + rng() * 1.5;
+        ped.group.rotation.y = Math.atan2(px - ped.pos.x, pz - ped.pos.z);
+        return;
+      }
+      if (rng() < 0.35) {
+        // just clock you and stare for a beat as you pass
+        ped._notedT = 4 + rng() * 4;
+        ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(px - ped.pos.x, pz - ped.pos.z), 0.5);
+        ped.pause = Math.max(ped.pause, 0.6 + rng() * 0.8); ped.speed = 0;
+      }
+    }
+    if (ped._notedT > 0) ped._notedT -= dt;
+
     // social: idle peds near each other pause to chat
     if (ped.chatT <= 0 && rng() < 0.04) {
       const mate = nearestActor(ped, 3.2, (p) => p.kind === "civilian" && !p.vendor && (p.state === "walk" || p.state === "idle"));
@@ -597,10 +722,87 @@
     if (ped.pause <= 0 && (!ped.path || !ped.path.length)) pickRoutineGoal(ped);
   }
 
+  // is a candidate destination point clear of walls along the way? (cheap probe:
+  // sample one point a few metres out and ask the world collider if it's open)
+  function dirClear(ped, ux, uz, dist) {
+    const tx = ped.pos.x + ux * dist, tz = ped.pos.z + uz * dist;
+    tmp.set(tx, ped.pos.y, tz);
+    if (CBZ.collide) { const before = tmp.x, beforez = tmp.z; CBZ.collide(tmp, PED_R, ped.pos.y, ped.pos.y + 1.7); if (Math.abs(tmp.x - before) > 0.05 || Math.abs(tmp.z - beforez) > 0.05) return false; }
+    if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) { const cx = tmp.x, cz = tmp.z; CBZ.city.arena.clampToCity(tmp, PED_R); if (Math.abs(tmp.x - cx) > 0.05 || Math.abs(tmp.z - cz) > 0.05) return false; }
+    return true;
+  }
+
+  // FLEE along a CLEAR path: sample several headings biased away from the threat
+  // and pick the most open one, so a panicked ped doesn't sprint into a wall.
+  // Also screams and looks for cover the first time it bolts.
   function fleeFrom(ped, x, z) {
     ped.state = "flee"; ped.path = null;
-    const m = Math.hypot(ped.pos.x - x, ped.pos.z - z) || 1;
-    ped.target.set(ped.pos.x + ((ped.pos.x - x) / m) * 22, 0, ped.pos.z + ((ped.pos.z - z) / m) * 22);
+    const ax = ped.pos.x - x, az = ped.pos.z - z, m = Math.hypot(ax, az) || 1;
+    const baseAng = Math.atan2(ax / m, az / m);    // straight away from the threat
+    // try the straight-away heading, then progressively wider sidesteps
+    const offs = [0, 0.5, -0.5, 1.0, -1.0, 1.7, -1.7, 2.6];
+    let bx = ped.pos.x + (ax / m) * 22, bz = ped.pos.z + (az / m) * 22, found = false;
+    for (let k = 0; k < offs.length; k++) {
+      const a = baseAng + offs[k];
+      const ux = Math.sin(a), uz = Math.cos(a);
+      if (dirClear(ped, ux, uz, 7)) { bx = ped.pos.x + ux * 22; bz = ped.pos.z + uz * 22; found = true; break; }
+    }
+    ped.target.set(bx, 0, bz);
+    if (!found && CBZ.city && CBZ.city.arena) { const p = CBZ.city.arena.randomSidewalkPoint(); ped.target.set(p.x, 0, p.z); }
+    // scream the first time panic hits (throttled), like a startled GTA crowd
+    if (ped.fear >= 6 && (ped._screamT || 0) <= 0 && CBZ.sfx) { ped._screamT = 3 + rng() * 4; if (rng() < 0.5) CBZ.sfx("whoosh"); }
+  }
+
+  // ---- LOCAL STEERING: a short look-ahead probe + separation from neighbours,
+  //      blended into the move vector so the crowd flows AROUND walls and each
+  //      other instead of clumping/clipping (Reynolds steering, cheap version).
+  //      Returns a small {x,z} steering offset to add to the desired heading. ----
+  const _steer = { x: 0, z: 0 };
+  function steering(ped, dx, dz, dist, active) {
+    _steer.x = 0; _steer.z = 0;
+    if (dist < 0.001) return _steer;
+    const hx = dx / dist, hz = dz / dist;       // desired heading (unit)
+    // 1) OBSTACLE LOOK-AHEAD: probe a point ahead; if blocked, veer to whichever
+    //    side is open. Only the near/active crowd pays for this (LOD).
+    if (active) {
+      const ahead = Math.min(2.6, 1.2 + ped.speed * 0.4);
+      if (!dirClear(ped, hx, hz, ahead)) {
+        // pick the clearer side to slip past
+        const lx = hz, lz = -hx, rx = -hz, rz = hx;     // left / right perpendiculars
+        const leftOpen = dirClear(ped, hx * 0.4 + lx, hz * 0.4 + lz, ahead);
+        const rightOpen = dirClear(ped, hx * 0.4 + rx, hz * 0.4 + rz, ahead);
+        if (leftOpen && !rightOpen) { _steer.x += lx * 1.4; _steer.z += lz * 1.4; }
+        else if (rightOpen && !leftOpen) { _steer.x += rx * 1.4; _steer.z += rz * 1.4; }
+        else {
+          // both (or neither) open — deterministic tie-break by id so it commits
+          const sgn = ((ped.slice || 0) & 1) ? 1 : -1;
+          _steer.x += hz * 1.0 * sgn; _steer.z += -hx * 1.0 * sgn;
+        }
+      }
+    }
+    // 2) SEPARATION: push away from nearby peds so they don't stack into one body.
+    //    Cheap bounded scan, only run for the active crowd, time-thinned by frame.
+    if (active && (ped._sepT || 0) <= 0) {
+      ped._sepT = 0.12;
+      const peds = CBZ.cityPeds, SEP = 1.5, SEP2 = SEP * SEP;
+      let sx = 0, sz = 0, n = 0;
+      for (let i = 0; i < peds.length; i++) {
+        const o = peds[i];
+        if (o === ped || o.dead || o.inCar || o._parked || o.enterT > 0) continue;
+        const ox = ped.pos.x - o.pos.x, oz = ped.pos.z - o.pos.z, od2 = ox * ox + oz * oz;
+        if (od2 > SEP2 || od2 < 0.0004) continue;
+        const od = Math.sqrt(od2), w = (SEP - od) / SEP;      // closer = stronger
+        sx += (ox / od) * w; sz += (oz / od) * w; n++;
+        if (n >= 4) break;                                    // bounded cost
+      }
+      if (n) { ped._sepX = sx; ped._sepZ = sz; } else { ped._sepX = 0; ped._sepZ = 0; }
+    }
+    if (ped._sepX || ped._sepZ) {
+      // separation matters less when fighting (you want to close in) than fleeing
+      const w = ped.state === "fight" ? 0.35 : ped.state === "flee" ? 1.1 : 0.8;
+      _steer.x += ped._sepX * w; _steer.z += ped._sepZ * w;
+    }
+    return _steer;
   }
 
   // is there an intruder in this gangster's turf they should attack?
@@ -644,7 +846,7 @@
     let spd = ped.baseSpeed;
     if (st === "flee") spd = ped.baseSpeed * 2.2;
     else if (st === "fight" || st === "confront") spd = ped.baseSpeed * 1.7;
-    else if (st === "chat" || st === "idle") spd = 0;
+    else if (st === "chat" || st === "idle" || st === "film" || st === "surrender") spd = 0;
     if (ped.drugUser && ped.erratic > 0 && spd > 0) spd *= 1 + ped.erratic * 0.16;
 
     // engagement: attack when in range
@@ -660,13 +862,20 @@
       if (di >= 0) { const d = CBZ.cityDrops[di]; ped.armed = true; ped.weapon = d.weapon; ped.ammo = d.ammo; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); removeDrop(di); ped.state = "walk"; }
     }
 
+    if (ped._sepT > 0) ped._sepT -= dt;
+    if (ped._screamT > 0) ped._screamT -= dt;
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
     if (ped.pause > 0) ped.pause -= dt;
     const _px0 = ped.pos.x, _pz0 = ped.pos.z, _trying = spd > 0 && dist > 0.5;
     if (spd > 0 && dist > 0.5) {
-      ped.pos.x += (dx / dist) * spd * dt;
-      ped.pos.z += (dz / dist) * spd * dt;
-      ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0009, dt));
+      // blend the desired heading with local steering (look-ahead + separation)
+      // so the crowd flows around walls and each other (no clumping/clipping).
+      let mx = dx / dist, mz = dz / dist;
+      const s = steering(ped, dx, dz, dist, animate);
+      if (s.x || s.z) { mx += s.x; mz += s.z; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml; }
+      ped.pos.x += mx * spd * dt;
+      ped.pos.z += mz * spd * dt;
+      ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(mx, mz), 1 - Math.pow(0.0009, dt));
       ped.speed = spd;
     } else {
       ped.speed = 0;
@@ -711,6 +920,8 @@
   CBZ.onUpdate(34, function (dt) {
     if (g.mode !== "city") return;
     frame++;
+    // advance the cheap internal day clock (loops 0..24); drives loose schedules
+    _dayClock = (_dayClock + (dt * 24 / DAY_LEN)) % 24;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
     for (let i = 0; i < peds.length; i++) {

@@ -13,7 +13,8 @@
 
   const STYLE_ORDER = [
     "ferrari", "enzo", "veyron", "aventador", "porsche", "muscle", "lowrider",
-    "tesla-s", "tesla-3", "tesla-x", "tesla-y", "hatch", "cybertruck",
+    "tesla-s", "tesla-3", "tesla-x", "tesla-y", "hatch", "suv", "van",
+    "cybertruck", "motorcycle", "helicopter", "boat",
   ];
   const STYLE_LABEL = {
     ferrari: "Ferrari",
@@ -28,8 +29,41 @@
     "tesla-x": "Tesla Model X",
     "tesla-y": "Tesla Model Y",
     hatch: "Hot Hatch",
+    suv: "SUV",
+    van: "Cargo Van",
     cybertruck: "Cybertruck",
+    motorcycle: "Superbike",
+    helicopter: "Helicopter",
+    boat: "Speedboat",
   };
+
+  // ---- per-style HANDLING FEEL hooks (GTA vehicle-class inspired) ----
+  // Multipliers the driving sim can read off car._playerCarFeel. Numbers are
+  // tuned from GTA class behaviour: Super/Sports = grippy + fast, Muscle =
+  // grunty but loose tail, Lowrider = floaty soft, SUV/Van = heavy & numb with
+  // tippy body roll, Motorcycle = razor turn + low grip wheelspin. Helicopter
+  // and Boat are flagged aircraft/marine so movement code can branch.
+  const FEEL = {
+    ferrari:    { class: "super",  accel: 1.18, top: 1.20, turn: 1.12, grip: 1.16, brake: 1.12, drift: 0.9, roll: 0.4 },
+    enzo:       { class: "super",  accel: 1.20, top: 1.22, turn: 1.10, grip: 1.18, brake: 1.12, drift: 0.9, roll: 0.4 },
+    veyron:     { class: "super",  accel: 1.24, top: 1.28, turn: 1.04, grip: 1.20, brake: 1.10, drift: 0.85, roll: 0.35 },
+    aventador:  { class: "super",  accel: 1.16, top: 1.18, turn: 1.14, grip: 1.16, brake: 1.10, drift: 0.95, roll: 0.4 },
+    porsche:    { class: "sports", accel: 1.12, top: 1.12, turn: 1.16, grip: 1.14, brake: 1.10, drift: 0.95, roll: 0.45 },
+    muscle:     { class: "muscle", accel: 1.14, top: 1.10, turn: 0.92, grip: 0.88, brake: 0.95, drift: 1.35, roll: 0.7 },
+    lowrider:   { class: "lowrider", accel: 0.92, top: 0.96, turn: 0.90, grip: 0.92, brake: 0.92, drift: 1.2, roll: 1.1 },
+    "tesla-s":  { class: "sports", accel: 1.20, top: 1.08, turn: 1.04, grip: 1.10, brake: 1.05, drift: 0.9, roll: 0.5 },
+    "tesla-3":  { class: "sedan",  accel: 1.10, top: 1.00, turn: 1.02, grip: 1.04, brake: 1.0, drift: 0.95, roll: 0.6 },
+    "tesla-x":  { class: "suv",    accel: 1.02, top: 0.96, turn: 0.86, grip: 0.92, brake: 0.95, drift: 1.0, roll: 1.0 },
+    "tesla-y":  { class: "suv",    accel: 1.04, top: 0.98, turn: 0.90, grip: 0.94, brake: 0.96, drift: 1.0, roll: 0.95 },
+    hatch:      { class: "compact", accel: 1.0, top: 0.94, turn: 1.10, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 },
+    suv:        { class: "suv",    accel: 0.96, top: 0.94, turn: 0.84, grip: 0.86, brake: 0.92, drift: 1.05, roll: 1.15 },
+    van:        { class: "van",    accel: 0.86, top: 0.88, turn: 0.78, grip: 0.82, brake: 0.86, drift: 1.1, roll: 1.3 },
+    cybertruck: { class: "suv",    accel: 1.06, top: 1.0, turn: 0.82, grip: 0.9, brake: 0.95, drift: 1.0, roll: 1.05 },
+    motorcycle: { class: "motorcycle", accel: 1.22, top: 1.14, turn: 1.4, grip: 0.84, brake: 0.9, drift: 1.5, roll: 1.0, twoWheel: true },
+    helicopter: { class: "helicopter", accel: 1.0, top: 1.3, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.0, air: true },
+    boat:       { class: "boat",   accel: 1.0, top: 1.1, turn: 1.0, grip: 1.0, brake: 0.7, drift: 1.4, roll: 0.6, marine: true },
+  };
+  const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
 
   const mats = new Map();
   const boxes = new Map();
@@ -240,13 +274,208 @@
     return root;
   }
 
+  // --- a tall boxy 3-box SUV: high greenhouse, roof rails, beefy fenders. ---
+  function makeSUV() {
+    const root = new THREE.Group();
+    const paint = sharedMat("suv-paint", 0x2e3a4a);
+    const dark = sharedMat("suv-glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
+    const trim = sharedMat("suv-trim", 0x14171c);
+    const rail = sharedMat("suv-rail", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
+    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
+    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.7 });
+    const w = 2.16, len = 5.1, wheelR = 0.56, baseH = 0.92;
+    addBox(root, w, baseH, len, 0, wheelR + baseH * 0.5, 0, paint);
+    addBox(root, w + 0.06, 0.22, len * 0.96, 0, wheelR + 0.12, 0, trim);   // wide fender flares
+    // tall upright greenhouse cab set back over rear seats
+    addPrism(root, w * 0.9, [[-1.7, 0], [-1.2, 0.96], [1.0, 0.96], [1.6, 0]], wheelR + baseH, dark);
+    addBox(root, w * 0.78, 0.1, len * 0.5, 0, wheelR + baseH + 0.96, -0.1, paint);   // flat roof
+    addBox(root, 0.07, 0.07, len * 0.46, w * 0.4, wheelR + baseH + 1.02, -0.1, rail);  // roof rails
+    addBox(root, 0.07, 0.07, len * 0.46, -w * 0.4, wheelR + baseH + 1.02, -0.1, rail);
+    addBox(root, w * 0.9, 0.16, 0.08, 0, wheelR + baseH * 0.55, len * 0.5 + 0.04, white);
+    addBox(root, w * 0.9, 0.18, 0.08, 0, wheelR + baseH * 0.6, -len * 0.5 - 0.04, red);
+    addBox(root, w * 0.7, 0.4, 0.12, 0, wheelR + 0.18, len * 0.5 + 0.06, trim);   // brush-guard bumper
+    addWheels(root, w + 0.14, len, wheelR, 0.42);
+    return root;
+  }
+
+  // --- a tall long cargo van: flat slab sides (sliding-door crease), short hood. ---
+  function makeVan() {
+    const root = new THREE.Group();
+    const paint = sharedMat("van-paint", 0xe9ebee);
+    const dark = sharedMat("van-glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
+    const trim = sharedMat("van-trim", 0x202428);
+    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
+    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.7 });
+    const w = 2.18, len = 5.6, wheelR = 0.5, boxH = 1.5;
+    // big slab cargo box
+    addBox(root, w, boxH, len * 0.74, 0, wheelR + boxH * 0.5, -len * 0.1, paint);
+    // sliding-door crease line + lower rocker trim down the slab
+    addBox(root, w + 0.02, 0.05, len * 0.7, 0, wheelR + boxH * 0.62, -len * 0.1, trim);
+    addBox(root, w + 0.02, 0.18, len * 0.72, 0, wheelR + 0.1, -len * 0.1, trim);
+    // sloped short hood up front
+    addPrism(root, w * 0.96, [[len * 0.18, 0], [len * 0.18, 0.62], [len * 0.5, 0.62], [len * 0.5, 0.2]], wheelR + 0.06, paint);
+    addPrism(root, w * 0.9, [[len * 0.16, 0], [len * 0.16, 0.5], [len * 0.46, 0.5]], wheelR + 0.62, dark);  // windshield
+    addBox(root, w * 0.86, 0.5, 0.04, 0, wheelR + boxH - 0.3, len * 0.5 - 0.02, dark);   // cab side glass front
+    addBox(root, w * 0.9, 0.18, 0.07, 0, wheelR + 0.32, len * 0.5 + 0.02, white);
+    addBox(root, w * 0.92, 0.22, 0.07, 0, wheelR + boxH - 0.1, -len * 0.42 - 0.02, red);   // tall rear doors lights
+    addWheels(root, w + 0.1, len, wheelR, 0.4);
+    return root;
+  }
+
+  // --- superbike: two fat wheels, fuel tank, low clip-on bars, tail cowl, rider. ---
+  function makeMotorcycle() {
+    const root = new THREE.Group();
+    const paint = sharedMat("moto-paint", 0x16a0e0);
+    const black = sharedMat("moto-black", 0x101317);
+    const chrome = sharedMat("moto-chrome", 0xb9c0c8, { emissive: 0x1f242a, ei: 0.35 });
+    const seat = sharedMat("moto-seat", 0x18191c);
+    const rider = sharedMat("moto-rider", 0x20242c);
+    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.8 });
+    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.8 });
+    const wheelR = 0.42, wb = 0.78;   // wheelbase half-length
+    // two in-line wheels (front/back along z)
+    [[wb, 0.46], [-wb, 0.5]].forEach(function (p) {
+      const wheel = new THREE.Mesh(wheelGeo(wheelR, p[1]), black);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(0, wheelR, p[0]);
+      wheel.castShadow = true;
+      wheel.userData.playerWheel = true;
+      root.add(wheel);
+      const disc = new THREE.Mesh(wheelGeo(wheelR * 0.45, p[1] + 0.02), chrome);
+      wheel.add(disc);
+    });
+    // engine block + tank + tail, set low between the wheels
+    addBox(root, 0.4, 0.42, 0.9, 0, wheelR + 0.18, -0.05, black);   // engine/gearbox mass
+    addPrism(root, 0.46, [[0.45, 0.1], [0.2, 0.62], [-0.35, 0.55], [-0.45, 0.1]], wheelR + 0.36, paint);  // tank
+    addBox(root, 0.34, 0.12, 0.5, 0, wheelR + 0.62, -0.42, seat);   // seat
+    addPrism(root, 0.3, [[-0.3, 0.0], [-0.55, 0.34], [-0.7, 0.12]], wheelR + 0.62, paint);  // tail cowl
+    // front fork + fairing + headlamp, raked forward over the front wheel
+    addBox(root, 0.12, 0.95, 0.12, 0, wheelR + 0.5, wb - 0.05, chrome);   // fork tubes
+    addPrism(root, 0.42, [[wb + 0.06, 0.0], [wb - 0.18, 0.62], [wb - 0.4, 0.2]], wheelR + 0.2, paint);  // front fairing
+    addBox(root, 0.34, 0.18, 0.08, 0, wheelR + 0.55, wb + 0.04, white);   // headlamp
+    addBox(root, 0.5, 0.06, 0.06, 0, wheelR + 0.95, wb - 0.18, black);   // clip-on bars
+    addBox(root, 0.26, 0.14, 0.07, 0, wheelR + 0.68, -wb + 0.06, red);   // tail light
+    // a hunched rider so it reads as ridden, not a parked bike
+    const r = new THREE.Group();
+    addBox(r, 0.42, 0.6, 0.34, 0, wheelR + 1.06, -0.18, rider);   // torso
+    addBox(r, 0.24, 0.24, 0.24, 0, wheelR + 1.46, -0.05, sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }));  // helmet
+    addBox(r, 0.5, 0.16, 0.5, 0, wheelR + 0.74, -0.42, rider);   // legs/hips
+    r.name = "moto_rider";
+    root.add(r);
+    root.userData.leanRider = r;
+    return root;
+  }
+
+  // --- light helicopter: fuselage pod, tail boom, skids, animated main + tail rotor. ---
+  function makeHelicopter() {
+    const root = new THREE.Group();
+    const body = sharedMat("heli-body", 0x1b2b3c);
+    const glass = sharedMat("heli-glass", 0x132330, { emissive: 0x0a141d, ei: 0.4 });
+    const dark = sharedMat("heli-dark", 0x14171c);
+    const blade = sharedMat("heli-blade", 0x202428);
+    const tail = sharedMat("heli-tail", 0xd14a2a);
+    const groundY = 0.34;   // skid clearance above the ground plane
+    // rounded cockpit pod
+    addPrism(root, 1.5, [[-1.4, 0], [-1.1, 1.0], [0.9, 1.0], [1.7, 0.55], [1.55, 0]], groundY, body);
+    addPrism(root, 1.36, [[-0.4, 0.08], [0.2, 0.92], [1.4, 0.5], [1.3, 0.1]], groundY + 0.02, glass);  // bubble canopy
+    // tapered tail boom reaching back
+    addBox(root, 0.34, 0.34, 2.6, 0, groundY + 0.95, -2.4, body);
+    addPrism(root, 0.4, [[0, 0.0], [0, 0.7], [-0.7, 0.5], [-0.6, 0.0]], groundY + 0.95, tail);  // tail fin
+    // skids
+    const skidY = 0.06;
+    addBox(root, 0.08, 0.08, 2.0, 0.75, skidY, 0.2, dark);
+    addBox(root, 0.08, 0.08, 2.0, -0.75, skidY, 0.2, dark);
+    addBox(root, 0.1, 0.4, 0.1, 0.62, skidY + 0.22, 0.7, dark);   // skid struts
+    addBox(root, 0.1, 0.4, 0.1, -0.62, skidY + 0.22, 0.7, dark);
+    addBox(root, 0.1, 0.4, 0.1, 0.62, skidY + 0.22, -0.3, dark);
+    addBox(root, 0.1, 0.4, 0.1, -0.62, skidY + 0.22, -0.3, dark);
+    // main rotor: hub + 3 long blades, spins about Y
+    const mast = groundY + 1.4;
+    addBox(root, 0.18, 0.5, 0.18, 0, mast - 0.2, 0.1, dark);   // mast
+    const mainRotor = new THREE.Group();
+    mainRotor.position.set(0, mast, 0.1);
+    const hub = new THREE.Mesh(boxGeo(0.3, 0.12, 0.3), dark); mainRotor.add(hub);
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(boxGeo(6.4, 0.05, 0.26), blade);
+      b.rotation.y = (i / 3) * Math.PI * 2;
+      mainRotor.add(b);
+    }
+    mainRotor.name = "heli_mainRotor";
+    root.add(mainRotor);
+    root.userData.mainRotor = mainRotor;
+    // tail rotor: 2 blades, spins about X at the tail
+    const tailRotor = new THREE.Group();
+    tailRotor.position.set(0.22, groundY + 1.05, -3.55);
+    for (let i = 0; i < 2; i++) {
+      const b = new THREE.Mesh(boxGeo(0.06, 1.5, 0.16), blade);
+      b.rotation.x = i * Math.PI / 2;
+      tailRotor.add(b);
+    }
+    tailRotor.name = "heli_tailRotor";
+    root.add(tailRotor);
+    root.userData.tailRotor = tailRotor;
+    return root;
+  }
+
+  // --- speedboat: V-hull, raked windshield, seats, outboard, animated prop wake. ---
+  function makeBoat() {
+    const root = new THREE.Group();
+    const hull = sharedMat("boat-hull", 0xeceff2);
+    const stripe = sharedMat("boat-stripe", 0x1574d6);
+    const deck = sharedMat("boat-deck", 0x6b4a2c);
+    const glass = sharedMat("boat-glass", 0x18303f, { emissive: 0x0a161f, ei: 0.4 });
+    const dark = sharedMat("boat-dark", 0x101317);
+    const chrome = sharedMat("boat-chrome", 0xb9c0c8, { emissive: 0x1f242a, ei: 0.35 });
+    const w = 2.1, len = 6.2;
+    const baseY = 0.25;
+    // pointed planing V-hull (prism profile along z gives the bow rake)
+    addPrism(root, w, [[len * 0.5, 0.0], [len * 0.2, 0.55], [-len * 0.5, 0.55], [-len * 0.5, 0.0]], baseY, hull);
+    addBox(root, w + 0.02, 0.14, len * 0.7, 0, baseY + 0.34, -len * 0.06, stripe);   // waterline stripe
+    addBox(root, w * 0.82, 0.06, len * 0.6, 0, baseY + 0.56, -len * 0.08, deck);   // open deck
+    // raked windshield + low console mid-ship
+    addPrism(root, w * 0.7, [[len * 0.08, 0.0], [len * 0.08, 0.4], [len * 0.24, 0.0]], baseY + 0.56, glass);
+    addBox(root, w * 0.7, 0.22, 0.5, 0, baseY + 0.68, len * 0.04, dark);   // dash console
+    // two bucket seats
+    addBox(root, 0.5, 0.36, 0.5, w * 0.22, baseY + 0.74, -len * 0.06, dark);
+    addBox(root, 0.5, 0.36, 0.5, -w * 0.22, baseY + 0.74, -len * 0.06, dark);
+    // chrome bow rail
+    addBox(root, w * 0.6, 0.05, 0.05, 0, baseY + 0.62, len * 0.34, chrome);
+    // outboard engine at the transom + animated screw
+    addBox(root, 0.46, 0.7, 0.5, 0, baseY + 0.4, -len * 0.5 - 0.1, dark);
+    const prop = new THREE.Group();
+    prop.position.set(0, baseY + 0.05, -len * 0.5 - 0.28);
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(boxGeo(0.05, 0.5, 0.16), chrome);
+      b.rotation.z = (i / 3) * Math.PI * 2;
+      prop.add(b);
+    }
+    prop.name = "boat_prop";
+    root.add(prop);
+    root.userData.boatProp = prop;
+    return root;
+  }
+
   function makeProcedural(style) {
     let template = procTemplates.get(style);
     if (!template) {
-      template = style === "cybertruck" ? makeCybertruck() : makeRoadCar(style);
+      if (style === "cybertruck") template = makeCybertruck();
+      else if (style === "suv") template = makeSUV();
+      else if (style === "van") template = makeVan();
+      else if (style === "motorcycle") template = makeMotorcycle();
+      else if (style === "helicopter") template = makeHelicopter();
+      else if (style === "boat") template = makeBoat();
+      else template = makeRoadCar(style);
       procTemplates.set(style, template);
     }
-    return template.clone(true);
+    const clone = template.clone(true);
+    // clone(true) copies userData by reference, so animated-group handles still
+    // point at the (hidden) template. Re-resolve them against the clone by name
+    // so the per-frame update spins THIS instance's rotors/prop/rider.
+    if (template.userData.mainRotor) clone.userData.mainRotor = clone.getObjectByName("heli_mainRotor");
+    if (template.userData.tailRotor) clone.userData.tailRotor = clone.getObjectByName("heli_tailRotor");
+    if (template.userData.boatProp) clone.userData.boatProp = clone.getObjectByName("boat_prop");
+    if (template.userData.leanRider) clone.userData.leanRider = clone.getObjectByName("moto_rider");
+    return clone;
   }
 
   function markFerrariShared(root) {
@@ -327,6 +556,8 @@
     car.group.add(visual);
     car._playerCarVisual = visual;
     car._playerCarActualStyle = style;
+    // publish the handling-feel hook so the driving sim can read it per style.
+    car._playerCarFeel = FEEL[style] || DEFAULT_FEEL;
     active = car;
     placeholder(car, true);
     return true;
@@ -340,7 +571,12 @@
     if (/charger|mustang|camaro|challenger/i.test(name)) return "muscle";
     if (/impala|cadillac|low\s*rider/i.test(name)) return "lowrider";
     if (/corvette|370z/i.test(name)) return "porsche";
-    if (/f-150|cherokee/i.test(name)) return "cybertruck";
+    if (/harley|ducati|bike|moto|superbike|chopper/i.test(name)) return "motorcycle";
+    if (/heli|chopper|buzzard|maverick/i.test(name)) return "helicopter";
+    if (/boat|speedboat|jetmax|yacht|dinghy/i.test(name)) return "boat";
+    if (/van|transit|sprinter|cargo/i.test(name)) return "van";
+    if (/cybertruck/i.test(name)) return "cybertruck";
+    if (/f-150|cherokee|escalade|suburban|tahoe|suv|range/i.test(name)) return "suv";
     if (/mercedes/i.test(name)) return "tesla-s";
     if (/prius|civic|golf|hatch/i.test(name)) return "hatch";
     if (/caravan/i.test(name)) return "tesla-y";
@@ -362,8 +598,23 @@
   CBZ.cityUpdatePlayerCarVisual = function (car, dt) {
     const visual = car && car._playerCarVisual;
     if (!visual) return;
-    const list = visual.userData.playerWheels || [];
+    const ud = visual.userData;
+    const list = ud.playerWheels || [];
     for (let i = 0; i < list.length; i++) list[i].rotation.x -= car.v * dt * 1.6;
+    // motorcycle leans into the turn — read steering from heading change.
+    if (ud.leanRider) {
+      const dh = car.heading - (car._lastHeading == null ? car.heading : car._lastHeading);
+      let d = dh; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+      const bank = Math.max(-0.55, Math.min(0.55, (d / Math.max(dt, 0.001)) * 0.18 * Math.sign(car.v || 1)));
+      visual.rotation.z += (bank - visual.rotation.z) * Math.min(1, dt * 8);
+    }
+    car._lastHeading = car.heading;
+    // spinning rotors/props: faster with throttle, idle when parked. Blade blur
+    // sells "running"; we keep the same mesh so draw cost is unchanged.
+    const spin = (4 + Math.abs(car.v) * 0.5) * dt;
+    if (ud.mainRotor) ud.mainRotor.rotation.y -= spin * 6;
+    if (ud.tailRotor) ud.tailRotor.rotation.x -= spin * 10;
+    if (ud.boatProp) ud.boatProp.rotation.z -= spin * 8;
   };
 
   CBZ.cityCyclePlayerCarStyle = function () {
@@ -376,6 +627,11 @@
   };
 
   CBZ.cityPlayerCarStyles = STYLE_ORDER.slice();
+  // public handling-feel lookup so the driving sim / other systems can branch on
+  // vehicle class (e.g. air/marine/twoWheel flags) and apply the multipliers.
+  CBZ.cityPlayerCarFeel = function (style) {
+    return FEEL[style] || (active && active._playerCarFeel) || DEFAULT_FEEL;
+  };
   preloadFerrari();
 
   addEventListener("keydown", function (e) {
