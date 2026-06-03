@@ -127,6 +127,7 @@
 
   function launchWar(a, b) {
     if (!a || !b || a === b || !b.turf.length) return 0;
+    if (a.isPlayer) return 0;   // your gang only raids on YOUR orders, never on its own
     const targetLot = b.turf[(rng() * b.turf.length) | 0];
     const count = 2 + ((rng() * 3) | 0);
     let sent = 0;
@@ -143,6 +144,11 @@
       a.warWith = b.id; b.warWith = a.id;
       a.warRemain = b.warRemain = 26 + rng() * 14;
       CBZ.city && CBZ.city.note("Gang war: " + a.name + " raid " + b.name + " turf.", 2.4);
+      // raiding YOUR block? rally your gang to defend it
+      if (b.isPlayer && CBZ.cityPlayerGangDefendTurf) {
+        CBZ.cityPlayerGangDefendTurf(targetLot.cx, targetLot.cz);
+        CBZ.city && CBZ.city.big("⚠ " + a.name + " RAIDING YOUR TURF");
+      }
     }
     return sent;
   }
@@ -167,7 +173,17 @@
     const byPlayer = !imp || imp.byPlayer !== false;
     gang.provoke = Math.min(1, gang.provoke + (byPlayer ? 0.5 : 0.25));
     if (byPlayer) { CBZ.city && CBZ.city.addRespect(3); }
+    // the BOSS going down to the player is a takeover opportunity — the player
+    // can CLAIM the crew (city/playergang.js). Only the kingpin's death counts.
+    if ((ped.isBoss || ped.rank === "boss" || ped === gang.boss) && byPlayer && !gang.isPlayer) {
+      gang.bossDead = true;
+      if (CBZ.cityPlayerGangBossKilled) CBZ.cityPlayerGangBossKilled(gang);
+      CBZ.city && CBZ.city.addRespect(20);
+    }
   };
+
+  // expose a lookup so the player-gang hub can find a rival by id/record
+  CBZ.cityGangById = gangById;
 
   // ---- rob a gang's stash (interact.js [I] near the stash duffel) ----
   CBZ.cityRobStash = function (lot) {

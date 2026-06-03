@@ -12,8 +12,8 @@
   const THREE = window.THREE;
 
   const STYLE_ORDER = [
-    "ferrari", "enzo", "veyron", "aventador", "porsche", "tesla-s", "tesla-3",
-    "tesla-x", "tesla-y", "cybertruck",
+    "ferrari", "enzo", "veyron", "aventador", "porsche", "muscle", "lowrider",
+    "tesla-s", "tesla-3", "tesla-x", "tesla-y", "hatch", "cybertruck",
   ];
   const STYLE_LABEL = {
     ferrari: "Ferrari",
@@ -21,10 +21,13 @@
     veyron: "Bugatti Veyron",
     aventador: "Aventador",
     porsche: "Porsche 911",
+    muscle: "Muscle Car",
+    lowrider: "Lowrider",
     "tesla-s": "Tesla Model S",
     "tesla-3": "Tesla Model 3",
     "tesla-x": "Tesla Model X",
     "tesla-y": "Tesla Model Y",
+    hatch: "Hot Hatch",
     cybertruck: "Cybertruck",
   };
 
@@ -155,6 +158,7 @@
       "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6,
       "tesla-y": 0x1470e3, porsche: 0xf3cf39, aventador: 0xf28c28,
       enzo: 0xe02025, veyron: 0x202225,
+      muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6,
     })[style] || 0xd1262f);
     const dark = sharedMat("glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
     const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
@@ -169,6 +173,12 @@
     if (style === "aventador") { w = 2.08; len = 4.72; wheelR = 0.48; baseH = 0.49; cabin = [[-1.08, 0], [-0.55, 0.57], [0.25, 0.57], [1.08, 0]]; }
     if (style === "enzo") { w = 2.03; len = 4.7; wheelR = 0.47; baseH = 0.5; cabin = [[-1.05, 0], [-0.55, 0.6], [0.28, 0.6], [1.08, 0]]; }
     if (style === "veyron") { w = 2.08; len = 4.55; wheelR = 0.5; baseH = 0.58; cabin = [[-1.2, 0], [-0.66, 0.68], [0.5, 0.68], [1.2, 0]]; }
+    // long-hood American muscle: wide, low, a fat greenhouse set back
+    if (style === "muscle") { w = 2.06; len = 4.95; wheelR = 0.5; baseH = 0.6; cabin = [[-1.35, 0], [-0.92, 0.66], [0.18, 0.66], [0.78, 0]]; }
+    // lowrider: dropped ride height, long body, narrow chopped roofline
+    if (style === "lowrider") { w = 2.04; len = 5.05; wheelR = 0.4; baseH = 0.56; cabin = [[-1.4, 0], [-0.86, 0.6], [0.42, 0.6], [1.3, 0]]; }
+    // hot hatch: short, tall, upright greenhouse over a stubby body
+    if (style === "hatch") { w = 1.84; len = 4.0; wheelR = 0.44; baseH = 0.66; cabin = [[-1.18, 0], [-0.74, 0.84], [0.86, 0.84], [1.36, 0]]; }
 
     addBox(root, w, baseH, len, 0, wheelR + baseH * 0.45, 0, paint);
     addPrism(root, w * 0.84, cabin, wheelR + baseH * 0.68, dark);
@@ -185,6 +195,28 @@
       const orange = sharedMat("veyron-orange", 0xff6b20);
       addBox(root, w + 0.02, 0.17, len * 0.94, 0, wheelR + 0.12, 0, orange);
       addBox(root, w * 0.74, 0.12, 0.14, 0, wheelR + baseH + 0.16, -len * 0.42, paint);
+    }
+    if (style === "muscle") {
+      const black = sharedMat("muscle-black", 0x0c0e12);
+      // hood scoop + twin racing stripes up the long hood
+      addBox(root, w * 0.34, 0.14, 0.6, 0, wheelR + baseH + 0.06, len * 0.28, black);
+      addBox(root, 0.18, 0.02, len * 0.9, -0.28, wheelR + baseH * 0.95, 0, black);
+      addBox(root, 0.18, 0.02, len * 0.9, 0.28, wheelR + baseH * 0.95, 0, black);
+      // chunky rear wing
+      addBox(root, w * 0.78, 0.08, 0.16, 0, wheelR + baseH + 0.26, -len * 0.46, black);
+    }
+    if (style === "lowrider") {
+      const chrome = sharedMat("low-chrome", 0xc9ccd2, { emissive: 0x2a2d33, ei: 0.4 });
+      const roof = sharedMat("low-roof", 0xf2f3f6);
+      // chrome rocker trim down both sides + a painted hardtop roof cap
+      addBox(root, w + 0.06, 0.07, len * 0.92, 0, wheelR + 0.05, 0, chrome);
+      addBox(root, w * 0.7, 0.07, len * 0.32, 0, wheelR + baseH + cabin[1][1] * 0.86, -0.1, roof);
+    }
+    if (style === "hatch") {
+      const black = sharedMat("hatch-black", 0x14171c);
+      // roof-edge spoiler over the tailgate + a black A-pillar wrap
+      addBox(root, w * 0.82, 0.06, 0.14, 0, wheelR + baseH + cabin[1][1] + 0.02, -len * 0.46, black);
+      addBox(root, w * 0.86, 0.05, len * 0.94, 0, wheelR + baseH - 0.04, 0, black);
     }
     addWheels(root, w + 0.08, len, wheelR, 0.34);
     return root;
@@ -305,9 +337,12 @@
     if (model && model.detailStyle) return model.detailStyle;
     const name = model ? model.name : "";
     if (/ferrari/i.test(name)) return "ferrari";
+    if (/charger|mustang|camaro|challenger/i.test(name)) return "muscle";
+    if (/impala|cadillac|low\s*rider/i.test(name)) return "lowrider";
     if (/corvette|370z/i.test(name)) return "porsche";
     if (/f-150|cherokee/i.test(name)) return "cybertruck";
     if (/mercedes/i.test(name)) return "tesla-s";
+    if (/prius|civic|golf|hatch/i.test(name)) return "hatch";
     if (/caravan/i.test(name)) return "tesla-y";
     return "tesla-3";
   }

@@ -174,10 +174,19 @@
     ped.tagColor = "#7ed957";
     g.cityCrew = (g.cityCrew || 0) + 1;
     CBZ.city.addRespect(3);
-    CBZ.city.note("Recruited " + ped.name + " (" + (ped.kind === "crew" ? "bodyguard" : ped.kind) + "). Crew: " + g.cityCrew, 2.4);
+    // if you already run a gang, a new bodyguard joins it as a Soldier under
+    // your colours (city/playergang.js); otherwise it's a free-agent bodyguard
+    // and 3 of them unlock FOUNDing a gang via the [O] orders menu.
+    if (ped.kind === "crew" && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && CBZ.cityPlayerGangEnlist) {
+      CBZ.cityPlayerGangEnlist(ped, "soldier");
+      CBZ.city.note("Recruited " + ped.name + " into the " + g.playerGang.name + ". Crew: " + g.cityCrew, 2.4);
+    } else {
+      CBZ.city.note("Recruited " + ped.name + " (" + (ped.kind === "crew" ? "bodyguard" : ped.kind) + "). Crew: " + g.cityCrew +
+        (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " — press [O] to FOUND a gang!" : ""), 2.6);
+    }
   };
 
-  CBZ.cityCareersReset = function () { g.cityJob = null; g.cityCrew = 0; g.cityBank = g.cityBank || 0; clearBeacon(); payT = 0; };
+  CBZ.cityCareersReset = function () { g.cityJob = null; g.cityCrew = 0; g.cityBank = g.cityBank || 0; clearBeacon(); payT = 0; if (CBZ.cityPlayerGangReset) CBZ.cityPlayerGangReset(); if (CBZ.cityStoryReset) CBZ.cityStoryReset(); };
 
   // ---- per-frame: job progress + passive income ----
   CBZ.onUpdate(38, function (dt) {
@@ -208,7 +217,7 @@
       if (crew.length) {
         const wage = crew.length * (E.crewSalary || 14);
         if ((g.cash || 0) >= wage) { g.cash -= wage; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("💸 Couldn't make payroll — " + q.name + " walked off.", 2.6); }
+        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("💸 Couldn't make payroll — " + q.name + " walked off.", 2.6); }
       }
       if (g.career === "security") {
         if ((g.wanted | 0) === 0) { CBZ.city.addCash(E.securityWage || 14); }

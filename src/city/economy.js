@@ -206,12 +206,69 @@
   }
   function carByName(name) { return CARS.find((c) => c.name === name) || CARS[0]; }
 
+  // ---- the city PROPERTY market index --------------------------------------
+  // A single macro index that drifts like a real housing market: a slow
+  // mean-reverting random walk around 1.0, with the occasional boom / bust
+  // shock. Zillow multiplies every listing's base Zestimate by this index so
+  // prices visibly rise and fall over a run. A separate momentum term makes
+  // moves trend (a rising market keeps rising for a while) so it feels alive,
+  // not like pure noise. Owned property is worth more in a boom — buy low.
+  const MKT = {
+    floor: 0.72, ceil: 1.42,     // hard bounds so prices stay sane
+    revert: 0.012,               // pull back toward fair value (1.0) per tick
+    vol: 0.018,                  // base random-walk volatility per tick
+    momentumDecay: 0.92,         // how much trend carries to the next tick
+  };
+  function initPropMarket() {
+    g.cityPropMkt = { index: 1, momentum: 0, trend: "steady", shockT: 24 + rng() * 40, history: [1] };
+  }
+  function propMarket() { if (!g.cityPropMkt) initPropMarket(); return g.cityPropMkt; }
+  // current macro multiplier applied to every property's base value
+  function propIndex() { return propMarket().index; }
+  function stepPropMarket(dt) {
+    const m = propMarket();
+    // mean reversion toward 1.0
+    let v = (1 - m.index) * MKT.revert;
+    // momentum (trends persist), refreshed by a small random impulse
+    m.momentum = m.momentum * MKT.momentumDecay + (rng() - 0.5) * MKT.vol;
+    v += m.momentum;
+    // occasional boom / bust shock
+    m.shockT -= dt;
+    if (m.shockT <= 0) {
+      m.shockT = 30 + rng() * 70;
+      const shock = (rng() - 0.45) * 0.16;   // slight upward bias (inflation)
+      m.momentum += shock;
+    }
+    m.index = Math.max(MKT.floor, Math.min(MKT.ceil, m.index + v));
+    m.trend = m.momentum > 0.004 ? "rising" : m.momentum < -0.004 ? "falling" : "steady";
+    if (CBZ.now != null) {
+      const h = m.history;
+      if (!h._t || CBZ.now - h._t > 6) { h._t = CBZ.now; h.push(m.index); if (h.length > 40) h.shift(); }
+    }
+  }
+  // mortgage / finance terms (used by zillow.js for financed buys)
+  const FINANCE = {
+    minDownFrac: 0.20,    // smallest down payment on a financed purchase
+    rate: 0.06,           // periodic interest charged on the outstanding balance
+    minPaymentFrac: 0.04, // minimum principal+interest payment per finance tick
+    maxLTV: 0.80,         // most you can borrow vs. value (1 - minDown)
+  };
+
+  CBZ.onUpdate(30.2, function (dt) {
+    if (g.mode !== "city") return;
+    stepPropMarket(dt);
+  });
+
   CBZ.cityEcon = {
     ITEMS, SHOP_STOCK, CARS, rng,
     add, has, count, take, drip, buyPrice, sellPrice, wholesalePrice,
     stockFor(kind) { return SHOP_STOCK[kind] || []; },
     streetPrice, recordSale, initMarket,
     rollCash, rollWallet, pickCar, carByName,
+    // property market: a drifting macro index Zillow multiplies prices by
+    propIndex, propMarket, initPropMarket, FINANCE,
+    propTrend() { return propMarket().trend; },
+    propHistory() { return propMarket().history.slice(); },
     randomLoot(rich) {
       const pool = rich
         ? ["Phone", "Wallet", "Cash Stack", "Gold Chain", "Rolex", "Laptop", "Diamond Ring"]

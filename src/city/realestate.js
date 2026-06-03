@@ -44,7 +44,14 @@
     homes.sort((a, b) => a.building.home.price - b.building.home.price);
     for (const lot of homes) {
       const h = lot.building.home;
+      const renting = CBZ.cityZillow && CBZ.cityZillow.isRentingLot && CBZ.cityZillow.isRentingLot(lot);
+      if (renting) { html += ""; continue; }   // already leasing this one
       actions.push({ label: "Buy " + h.name + (h.garage ? " (garage ×" + h.garage + ")" : "") + (h.elevator ? " + elevator" : "") + " — " + money(h.price), fn: () => buyHome(lot) });
+      // RENT this residence instead of buying — low deposit, recurring rent, and
+      // (if you have no home) it becomes your respawn point. Delegates to Zillow
+      // so the lease is the same record the property tick charges + can evict.
+      const rentPer = zillowRentEstimate(lot);
+      if (rentPer != null) actions.push({ label: "Rent " + h.name + " — ~" + money(rentPer) + "/period", fn: () => rentResidence(lot) });
     }
     actions.forEach((a, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
     if (g.cityHome) html += "<div style='font-size:12px;color:#7ed957;margin-top:8px'>Owned: " + g.cityHome.name + "</div>";
@@ -75,6 +82,15 @@
     open(html);
   };
   CBZ.cityHomeMenuRefresh = function () { if (panel && panel.style.display === "block") { if (mode === "home") CBZ.cityOpenHome(); else CBZ.cityHomeMenu(); } };
+
+  // delegate residence renting to Zillow (single source of lease truth)
+  function zillowRentEstimate(lot) {
+    return (CBZ.cityZillow && CBZ.cityZillow.rentEstimateForLot) ? CBZ.cityZillow.rentEstimateForLot(lot) : null;
+  }
+  function rentResidence(lot) {
+    if (CBZ.cityZillow && CBZ.cityZillow.rentByLot) CBZ.cityZillow.rentByLot(lot);
+    CBZ.cityHomeMenuRefresh();
+  }
 
   function rentRoom() {
     const room = (C().homes || [])[0]; if (!room) return;
@@ -166,6 +182,18 @@
       const lot = CBZ.cityHomeNear(CBZ.player.pos.x, CBZ.player.pos.z);
       if (lot) { e.preventDefault(); CBZ.cityOpenHome(); }
     }
+  });
+
+  // ---- property-empire economy tick (Zillow owns the portfolio data) -------
+  // We run the single rent/income/mortgage tick HERE (careers.js owns the wage
+  // pay-tick and is off-limits). zillow.js exposes CBZ.cityZillowTick(dt) which
+  // revalues listings with the market, pays rent-out income, charges property
+  // tax + mortgage payments, and collects the rent the player owes (evicting on
+  // a miss). Keeping it on the engine clock means it runs even with the panel
+  // closed, so an empire earns / bleeds whether or not you're looking at it.
+  CBZ.onUpdate(38.4, function (dt) {
+    if (g.mode !== "city") return;
+    if (CBZ.cityZillowTick) CBZ.cityZillowTick(dt);
   });
 
   // ---- rent / property-tax sink ----

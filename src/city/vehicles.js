@@ -34,22 +34,180 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   const TR = () => (CBZ.CITY && CBZ.CITY.traf) || {};
 
+  // ---- ambient car MODEL builder ----------------------------------------
+  // Cars read as real vehicles: a low body with a chamfered roof/hood, a
+  // separate glass-tinted greenhouse (windshield + side windows), four dark
+  // wheels at the corners, pale emissive headlights + red taillights, and one
+  // of four BODY TYPES (sedan / SUV / pickup / sports coupe) with distinct
+  // proportions. crumpleCar animates userData.body + userData.cabin, so those
+  // two meshes stay the deformable hull (low at y≈0.78) and roof (y≈1.45).
+  const WHEEL_GEO = new THREE.CylinderGeometry(0.45, 0.45, 0.42, 12);
+  WHEEL_GEO._shared = true;
+  const HUB_GEO = new THREE.CylinderGeometry(0.2, 0.2, 0.44, 8);
+  HUB_GEO._shared = true;
+  // a flat-topped wedge prism (a chamfered slab) used for the hull + roof so
+  // the body isn't a plain box — tapered top, full-width bottom.
+  function wedgeGeo(w, h, d, topFrac, noseFrac, tailFrac) {
+    topFrac = topFrac == null ? 0.82 : topFrac;
+    const tw = (w * topFrac) / 2, bw = w / 2;
+    const fz = (d * (noseFrac == null ? 1 : noseFrac)) / 2;   // front (+z) length
+    const rz = (d * (tailFrac == null ? 1 : tailFrac)) / 2;   // rear  (-z) length
+    const tf = fz * topFrac, tr = rz * topFrac;
+    const y0 = -h / 2, y1 = h / 2;
+    // 8 verts: bottom (full) then top (tapered, shorter)
+    const v = [
+      [-bw, y0, -rz], [bw, y0, -rz], [bw, y0, fz], [-bw, y0, fz],   // 0-3 bottom
+      [-tw, y1, -tr], [tw, y1, -tr], [tw, y1, tf], [-tw, y1, tf],   // 4-7 top
+    ];
+    const faces = [
+      [0, 1, 2], [0, 2, 3],   // bottom
+      [4, 6, 5], [4, 7, 6],   // top
+      [3, 2, 6], [3, 6, 7],   // front
+      [1, 0, 4], [1, 4, 5],   // back
+      [0, 3, 7], [0, 7, 4],   // left
+      [2, 1, 5], [2, 5, 6],   // right
+    ];
+    const pos = [];
+    for (const f of faces) for (const i of f) pos.push(v[i][0], v[i][1], v[i][2]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  function addWheels(grp, halfTrack, wz, r) {
+    const wmat = mat(0x131417, { emissive: 0x060708, ei: 0.2 });
+    const hmat = mat(0x70767e, { emissive: 0x24272b, ei: 0.3 });
+    [[halfTrack, wz], [-halfTrack, wz], [halfTrack, -wz], [-halfTrack, -wz]].forEach(([wx, wzz]) => {
+      const wh = new THREE.Mesh(WHEEL_GEO, wmat);
+      wh.rotation.z = Math.PI / 2; wh.position.set(wx, r, wzz);
+      wh.scale.set(r / 0.45, 1, r / 0.45); wh.castShadow = true; grp.add(wh);
+      const hub = new THREE.Mesh(HUB_GEO, hmat);
+      hub.rotation.z = Math.PI / 2; hub.position.set(wx + (wx > 0 ? 0.01 : -0.01), r, wzz);
+      hub.scale.set(r / 0.45, 1.02, r / 0.45); grp.add(hub);
+    });
+  }
+
+  // headlights (front, pale) + taillights (rear, red), as small emissive bars
+  function addLights(grp, w, hullTopY, frontZ, rearZ) {
+    const head = mat(0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
+    const tail = mat(0xff3038, { emissive: 0xff2630, ei: 0.8 });
+    const lx = w * 0.34;
+    [lx, -lx].forEach((hx) => {
+      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.06), head);
+      hl.position.set(hx, hullTopY, frontZ + 0.02); grp.add(hl);
+    });
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(w * 0.86, 0.16, 0.07), tail);
+    tl.position.set(0, hullTopY, rearZ - 0.02); grp.add(tl);
+  }
+
+  // tinted-glass greenhouse: a thin windshield slab + two side-window slabs
+  // wrapped around the cabin so the cabin reads as a windowed passenger box.
+  function addGlass(grp, cabinW, cabinD, cabinY, cabinH, raked) {
+    const glass = mat(0x16242e, { emissive: 0x0a151c, ei: 0.45 });
+    const half = cabinD / 2;
+    // windshield (front, raked back) + rear glass
+    const wsW = cabinW * 0.9;
+    [half + 0.01, -half - 0.01].forEach((zz, i) => {
+      const gw = new THREE.Mesh(new THREE.BoxGeometry(wsW, cabinH * 0.7, 0.05), glass);
+      gw.position.set(0, cabinY, zz);
+      gw.rotation.x = (i === 0 ? -1 : 1) * (raked ? 0.5 : 0.32);
+      grp.add(gw);
+    });
+    // side windows
+    [cabinW / 2 + 0.005, -cabinW / 2 - 0.005].forEach((xx) => {
+      const sw = new THREE.Mesh(new THREE.BoxGeometry(0.04, cabinH * 0.6, cabinD * 0.84), glass);
+      sw.position.set(xx, cabinY, 0); grp.add(sw);
+    });
+  }
+
+  // the four body archetypes, returned as { build } closures keyed by id
+  const BODY_TYPES = ["sedan", "suv", "pickup", "coupe"];
+
   function buildCar(model) {
     const grp = new THREE.Group();
-    const len = 4.2 * (model ? model.s : 1);
+    const s = model ? model.s : 1;
+    const len = 4.2 * s;
     const color = model ? model.color : 0x3c6fd6;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, len), mat(color));
+    // a steered palette: dim/lighten the model colour a touch per-car so a
+    // row of the same model still varies, plus a clearcoat-ish emissive sheen.
+    const tint = 0.86 + rng() * 0.28;
+    const c3 = new THREE.Color(color).multiplyScalar(tint);
+    const paintHex = c3.getHex();
+    const paint = mat(paintHex, { emissive: c3.clone().multiplyScalar(0.18).getHex(), ei: 0.5 });
+    const trim = mat(0x16181c, { emissive: 0x070809, ei: 0.25 });
+
+    // pick a body type. honour a hint on the model name so trucks/SUVs read
+    // right, otherwise random across the four archetypes.
+    let bt;
+    const nm = model ? model.name : "";
+    if (/F-150|Caravan|truck|pickup/i.test(nm)) bt = "pickup";
+    else if (/Cherokee|SUV|Model X|Model Y|Cybertruck/i.test(nm)) bt = "suv";
+    else if (/Corvette|911|370Z|Aventador|Enzo|Veyron|coupe|Charger/i.test(nm)) bt = "coupe";
+    else bt = BODY_TYPES[(rng() * BODY_TYPES.length) | 0];
+
+    // shared dimensions, tuned per body type below
+    let w = 2.0, hullH = 0.62, hullY = 0.7, wheelR = 0.45, halfTrack = 0.98;
+    let roofW = 1.62, roofH = 0.66, roofD = len * 0.42, roofY = 1.45, roofZ = -0.1;
+    let topFrac = 0.8, raked = false;
+
+    if (bt === "sedan") {
+      w = 1.96; hullH = 0.66; hullY = 0.72; wheelR = 0.46;
+      roofW = 1.58; roofH = 0.62; roofD = len * 0.4; roofY = 1.42; roofZ = -0.15; topFrac = 0.84;
+    } else if (bt === "suv") {
+      w = 2.08; hullH = 0.86; hullY = 0.82; wheelR = 0.52; halfTrack = 1.04;
+      roofW = 1.78; roofH = 0.82; roofD = len * 0.5; roofY = 1.7; roofZ = -0.06; topFrac = 0.9;
+    } else if (bt === "pickup") {
+      w = 2.06; hullH = 0.8; hullY = 0.8; wheelR = 0.52; halfTrack = 1.04;
+      // cab sits forward; an open bed sits behind it
+      roofW = 1.7; roofH = 0.74; roofD = len * 0.34; roofY = 1.62; roofZ = len * 0.16; topFrac = 0.92;
+    } else { // coupe — sports car: low, wide, raked
+      w = 2.04; hullH = 0.5; hullY = 0.58; wheelR = 0.47; halfTrack = 1.0;
+      roofW = 1.5; roofH = 0.52; roofD = len * 0.34; roofY = 1.18; roofZ = -0.16; topFrac = 0.74; raked = true;
+    }
+
+    // ---- HULL (the deformable body the crumpler caves in). chamfered wedge,
+    //      kept centred at y≈0.78 so crumpleCar's 0.78-baseline math still lands. ----
+    const body = new THREE.Mesh(wedgeGeo(w, hullH, len, topFrac, bt === "coupe" ? 0.92 : 1, 1), paint);
     body.position.y = 0.78; body.castShadow = true; grp.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.72, len * 0.5), mat(0x223038, { emissive: 0x0c141a, ei: 0.35 }));
-    cabin.position.set(0, 1.45, -0.2); grp.add(cabin);
-    grp.userData.body = body; grp.userData.cabin = cabin;   // for crash crumpling
-    const wgeo = new THREE.CylinderGeometry(0.45, 0.45, 0.42, 10), wmat = mat(0x14161a);
-    const wz = len * 0.32;
-    [[0.98, wz], [-0.98, wz], [0.98, -wz], [-0.98, -wz]].forEach(([wx, wzz]) => {
-      const wh = new THREE.Mesh(wgeo, wmat); wh.rotation.z = Math.PI / 2; wh.position.set(wx, 0.45, wzz); grp.add(wh);
-    });
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.2, 0.08), mat(0xff3b3b, { emissive: 0xff3b3b, ei: 0.4 }));
-    tl.position.set(0, 0.8, len * 0.5); grp.add(tl);
+    // raise/lower the visual hull to its type's ride height without breaking the
+    // crumpler baseline (it sets body.position.y = 0.78 - c*0.14): nudge via the
+    // group children offset instead — keep body at 0.78 and float a skirt.
+    if (hullY !== 0.7) body.position.y = 0.78 + (hullY - 0.72);
+
+    // ---- ROOF / CABIN (the deformable greenhouse). ----
+    const cabin = new THREE.Mesh(wedgeGeo(roofW, roofH, roofD, topFrac * 0.94, raked ? 0.6 : 0.8, 0.95), paint);
+    cabin.position.set(0, roofY, roofZ); grp.add(cabin);
+    grp.userData.body = body; grp.userData.cabin = cabin;   // crash crumpling
+
+    // glass on the greenhouse
+    addGlass(grp, roofW, roofD, roofY, roofH, raked);
+
+    // a contrasting belt-line / bumpers so the body isn't one flat colour
+    const beltY = 0.78 + (hullY - 0.72) - hullH * 0.18;
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, 0.16, len * 0.96), trim);
+    belt.position.set(0, Math.max(0.5, beltY), 0); grp.add(belt);
+
+    // pickup bed walls (an open box behind the cab)
+    if (bt === "pickup") {
+      const bedY = 0.78 + (hullY - 0.72) + hullH * 0.32;
+      const bedmat = paint;
+      const sideD = len * 0.42;
+      [w / 2 - 0.06, -w / 2 + 0.06].forEach((bx) => {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.26, sideD), bedmat);
+        wall.position.set(bx, bedY + 0.13, -len * 0.22); grp.add(wall);
+      });
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(w - 0.1, 0.26, 0.1), bedmat);
+      tail.position.set(0, bedY + 0.13, -len * 0.44); grp.add(tail);
+    }
+    // coupe rear spoiler
+    if (bt === "coupe") {
+      const spoiler = new THREE.Mesh(new THREE.BoxGeometry(w * 0.74, 0.07, 0.2), trim);
+      spoiler.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.42, -len * 0.46); grp.add(spoiler);
+    }
+
+    addWheels(grp, halfTrack, len * 0.32, wheelR);
+    addLights(grp, w, 0.78 + (hullY - 0.72) + hullH * 0.05, len * 0.5, -len * 0.5);
     return grp;
   }
 

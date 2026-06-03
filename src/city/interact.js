@@ -91,11 +91,29 @@
   }
   function pedOpts(p) {
     const nm = p.name || "them";
-    const opts = [{ label: "Mug " + nm, key: "i", bad: true, fn: () => CBZ.cityRobPed(p) }];
-    opts.push({ label: "Beat " + nm + " down", key: "j", bad: true, fn: () => attack(p) });
     const econ = CBZ.cityEcon, inv = g.cityInv || {};
     const hasDrugs = Object.keys(inv).some((k) => econ.ITEMS[k] && econ.ITEMS[k].tag === "drug");
+    const inMyGang = CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p);
+
+    // ---- YOUR gang member: command/promote them instead of robbing them ----
+    if (inMyGang) {
+      const opts = [];
+      opts.push({ label: (p.rank === "lt" ? nm + " (Lieutenant)" : "Promote " + nm + " → Lt."), key: "i", fn: () => (p.rank === "lt" ? talk() : CBZ.cityPlayerGangPromote(p)) });
+      opts.push({ label: "Tell " + nm + " to HOLD here", key: "j", fn: () => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.homeGuard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); CBZ.city.note(nm + " holds this spot.", 1.6); } } });
+      opts.push({ label: nm + " FOLLOW me", key: "k", fn: () => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm + " falls in.", 1.4); } });
+      opts.push({ label: "Talk to " + nm, key: "l", fn: talk });
+      return opts;
+    }
+
+    const opts = [{ label: "Mug " + nm, key: "i", bad: true, fn: () => CBZ.cityRobPed(p) }];
+    opts.push({ label: "Beat " + nm + " down", key: "j", bad: true, fn: () => attack(p) });
     if (p === g.cityPartner) opts.push({ label: g.citySpouse ? "Sweet-talk " + nm : "Propose to " + nm + " 💍", key: "k", fn: () => (g.citySpouse ? talk() : CBZ.cityPropose(p)) });
+    // ---- a rival whose BOSS you dropped: claim the whole crew ----
+    else if (p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled)
+      opts.push({ label: "Claim the " + p.gang + " 👑", key: "k", fn: () => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Open [O] → Claim to take over.", 2.2); } });
+    // ---- recruit straight into YOUR founded gang ----
+    else if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100))))
+      opts.push({ label: "Recruit " + nm + " to the gang 🔫", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
     else if (p.gang && !g.career) opts.push({ label: "Run with the " + p.gang, key: "k", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("gangster") });
     else if (g.career === "dealer" && hasDrugs) opts.push({ label: "Sell " + nm + " product", key: "k", bad: true, fn: () => CBZ.cityDealTo(p) });
     else if (!p.recruited && !p.gang && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)))) opts.push({ label: "Recruit " + nm + " 🔫", key: "k", fn: () => CBZ.cityRecruit(p) });

@@ -372,28 +372,299 @@
     return { x: ox + w / 2, z: oz, nx: -1, nz: 0 };
   }
 
-  // ---- interior furnishing (cheap boxes; only the counter is a collider) ----
-  function furnishShop(b, lot, door) {
-    const cx = -door.nx * (b.w / 2 - 4), cz = -door.nz * (b.d / 2 - 4);   // toward the door area
-    // Product shelving hugs both side walls and leaves the reserved entrance
-    // aisle open. This makes stores read as rooms instead of empty boxes.
-    const dx0 = -door.nx * b.w / 2, dz0 = -door.nz * b.d / 2;
-    const cross = (door.nz ? b.w : b.d) / 2 - 1.15;
-    for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
-      const depth = 5.5 + i * 2.7;
-      const sx = dx0 + door.nx * depth + door.nz * side * cross;
-      const sz = dz0 + door.nz * depth - door.nx * side * cross;
-      if (!b.clearFloorPoint || b.clearFloorPoint(sx, sz, 0.9)) {
-        const sw = door.nz ? 0.65 : 2.0, sd = door.nz ? 2.0 : 0.65;
-        b.lbox(sx, 0.7, sz, sw, 1.4, sd, 0x6a7078, { cast: false });
-        b.lbox(sx, 1.45, sz, sw, 0.1, sd, 0x8a939c, { cast: false });
+  // ---- interior furnishing ------------------------------------------------
+  // A real, kind-specific room: a back COUNTER (placed by the caller) gets a
+  // register; wall SHELVES/cases are stocked with kind-appropriate props; a
+  // floor mat + an emissive ceiling strip give the room a lit feel. Everything
+  // is gated by b.clearFloorPoint so the door->stair aisle stays walkable, and
+  // only large pieces collide (decor is non-solid so you can brush past it).
+  //
+  // Local axis convention (matches makeBuilding & the caller's counter math):
+  //   IN  = direction from door into the room  =  (door.nx, door.nz)
+  //   the BACK wall sits at  IN*roomHalf;  side walls run along the TANGENT.
+  function furnishInterior(b, kind, door) {
+    const W = b.w, D = b.d, FHl = b.FH;
+    const inx = door.nx, inz = door.nz;            // inward unit (one axis is 0)
+    const tx = -inz, tz = inx;                     // tangent (perpendicular) unit
+    const along = Math.abs(inx) > 0.5;             // door faces ±X → room spans Z
+    const halfIn = (along ? W : D) / 2;            // distance door-wall→centre along IN
+    const halfTan = (along ? D : W) / 2;           // half-width along the tangent
+
+    // place a (lx,lz) point: `inDepth` from the door wall along IN, `lat`
+    // sideways along the tangent. Returns null if it lands on the aisle/stairs.
+    function pt(inDepth, lat, pad) {
+      const lx = inx * (-halfIn + inDepth) + tx * lat;
+      const lz = inz * (-halfIn + inDepth) + tz * lat;
+      if (b.clearFloorPoint && !b.clearFloorPoint(lx, lz, pad == null ? 0.7 : pad)) return null;
+      return { x: lx, z: lz };
+    }
+    // a box whose footprint we orient with the tangent (w = across-aisle span)
+    function box(p, y, across, h, deep, col, o) {
+      const bw = along ? deep : across, bd = along ? across : deep;
+      return b.lbox(p.x, y, p.z, bw, h, bd, col, o);
+    }
+    function decor(p, y, across, h, deep, col) { return box(p, y, across, h, deep, col, { cast: false }); }
+    function solidBox(p, y, across, h, deep, col) { return box(p, y, across, h, deep, col, { solid: true, cast: false }); }
+    function glow(p, y, across, h, deep, col, ei) { return box(p, y, across, h, deep, col, { emissive: col, ei: ei || 0.5, cast: false }); }
+
+    // ---- always-on dressing: floor mat + lit ceiling fixture ----
+    const matP = pt(2.4, 0, 0.5);                  // just inside the doorway
+    if (matP) b.lbox(matP.x, 0.005, matP.z, along ? 0.05 + 1.8 : 2.0, 0.05, along ? 2.0 : 0.05 + 1.8, 0x33373f, { cast: false });
+    b.lbox(0, FHl - 0.32, 0, along ? 0.5 : 3.2, 0.08, along ? 3.2 : 0.5, 0xffe9a8, { emissive: 0xffcf66, ei: 0.42, cast: false });
+
+    // ---- the register on the back counter the caller already placed ----
+    // (counter centre ≈ inDepth = 2*halfIn-2.8 in this frame; nudge a register
+    //  block + a small glowing screen onto its top so it reads as a sales desk.)
+    const regP = pt(2 * halfIn - 2.8, -0.7, 0.4) || pt(2 * halfIn - 2.8, 0, 0.4);
+    if (regP) { decor(regP, 1.32, 0.7, 0.28, 0.5, 0x2a2f37); glow({ x: regP.x, z: regP.z }, 1.46, 0.4, 0.12, 0.06, kindAccent(kind), 0.7); }
+
+    // ---- wall SHELVES / cases along BOTH side walls (off the aisle) ----
+    // returns the list of placed shelf tops so the stocker can fill them.
+    const shelfTops = [];
+    function wallShelves(opt) {
+      opt = opt || {};
+      const lat = halfTan - (opt.deep || 0.7) - 0.05;   // hug the wall
+      const colBody = opt.body || 0x6a7078, colTop = opt.top || 0x8a939c;
+      const sh = opt.h || 1.4, deep = opt.deep || 0.7, span = opt.span || 2.0;
+      for (const side of [-1, 1]) for (let i = 0; i < (opt.count || 3); i++) {
+        const inDepth = (opt.start || 5.6) + i * (opt.step || 2.6);
+        if (inDepth > 2 * halfIn - 1.4) break;          // don't punch the back wall
+        const p = pt(inDepth, side * lat, 0.8);
+        if (!p) continue;
+        decor(p, sh / 2, span, sh, deep, colBody);
+        decor(p, sh + 0.05, span, 0.1, deep, colTop);
+        if (opt.glassFront) decor(p, sh * 0.62, span, sh * 0.7, 0.05, GLASS);
+        shelfTops.push({ p, top: sh + 0.1, side, across: span, deep });
       }
     }
-    // floor mat at the entrance
-    b.lbox(cx * 0.4, -0.0, cz * 0.4, 2.2, 0.04, 2.2, lot.building && lot.building.sign ? 0x3a3f47 : 0x3a3f47, { cast: false });
-    // cheap ceiling strip: one mesh gives the otherwise boxy room a focal point
-    b.lbox(0, b.FH - 0.35, 0, door.nz ? 3.4 : 0.55, 0.08, door.nz ? 0.55 : 3.4, 0xffe9a8, { emissive: 0xffcf66, ei: 0.38, cast: false });
+    // a free-standing floor RACK/island (e.g. clothing rounders, produce tables)
+    function island(inDepth, lat, w2, h2, d2, col, o) {
+      const p = pt(inDepth, lat, 0.8); if (!p) return null;
+      box(p, h2 / 2, w2, h2, d2, col, o || { cast: false }); return p;
+    }
+    // stock props sitting on a shelf top: a tidy row of little coloured blocks
+    function stockRow(st, col, n, size, h) {
+      n = n || 4; size = size || 0.22; h = h || 0.3;
+      const gap = (st.across - 0.3) / n;
+      for (let i = 0; i < n; i++) {
+        const lat = -st.across / 2 + 0.25 + i * gap;
+        const lx = st.p.x + tx * lat, lz = st.p.z + tz * lat;
+        const c = Array.isArray(col) ? col[i % col.length] : col;
+        b.lbox(lx, st.top + h / 2, lz, size, h, size, c, { cast: false });
+      }
+    }
+
+    // dispatch to the trade-specific dresser
+    switch (kind) {
+      case "guns": {
+        // gun racks: tall pegboard cabinets with stylised rifles hung in rows
+        wallShelves({ body: 0x32363d, top: 0x44505c, h: 2.2, count: 3, glassFront: true });
+        for (const st of shelfTops) {
+          for (let r = 0; r < 2; r++) {
+            const y = 0.85 + r * 0.7, n = 3, gap = (st.across - 0.4) / n;
+            for (let i = 0; i < n; i++) {
+              const lat = -st.across / 2 + 0.3 + i * gap;
+              const lx = st.p.x + tx * lat, lz = st.p.z + tz * lat;
+              b.lbox(lx, y, lz - 0, along ? 0.06 : 0.9, 0.1, along ? 0.9 : 0.06, 0x2b2f33, { cast: false });   // rifle body
+              b.lbox(lx, y - 0.12, lz, 0.1, 0.18, 0.1, 0x6b4a2a, { cast: false });                              // grip
+            }
+          }
+        }
+        // a glass pistol display case as a freestanding island
+        island(2 * halfIn - 5.2, halfTan - 2.2, along ? 1.0 : 2.6, 1.0, along ? 2.6 : 1.0, 0x2a2f37, { cast: false });
+        const isl = pt(2 * halfIn - 5.2, halfTan - 2.2, 0.8);
+        if (isl) decor(isl, 0.92, along ? 0.9 : 2.4, 0.55, along ? 2.4 : 0.9, GLASS);
+        break;
+      }
+      case "jewelry":
+      case "pawn": {
+        // lit GLASS display cases along the walls, sparkling stock on top
+        wallShelves({ body: 0x3a2f1c, top: 0xcaa64a, h: 1.1, count: 3, glassFront: true, span: 2.2 });
+        for (const st of shelfTops) { glow(st.p, st.top + 0.05, st.across, 0.06, st.deep, 0xffe08a, 0.6); stockRow(st, [0xfff2b0, 0x9fe0ff, 0xff9ad0, 0xb9ffb0], 5, 0.16, 0.18); }
+        if (kind === "pawn") island(2 * halfIn - 5.4, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.3, along ? 2.4 : 1.0, 0x55606e, { cast: false }); // pawned junk pile
+        break;
+      }
+      case "bar":
+      case "casino": {
+        // back bar with bottle wall; bar stools; (casino adds glowing tables)
+        wallShelves({ body: 0x2a1f16, top: 0x3a2a1c, h: 1.8, count: 3, span: 2.4 });
+        for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.95 + r * 0.55, across: st.across }, [0x6fbf73, 0xbf6f6f, 0xc7b06f, 0x6f9fbf, 0xbf6fb0], 6, 0.14, 0.42);
+        // a row of bar stools facing the back counter
+        for (let i = -1; i <= 1; i++) { const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (p) { decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); } }
+        if (kind === "casino") {
+          for (const lat of [-(halfTan - 2.4), halfTan - 2.4]) {
+            const p = island(halfIn, lat, along ? 1.6 : 2.6, 0.95, along ? 2.6 : 1.6, 0x1f4d33, { cast: false });
+            if (p) glow(p, 0.99, along ? 1.4 : 2.4, 0.04, along ? 2.4 : 1.4, 0x39d07a, 0.55);   // felt glow
+          }
+        }
+        break;
+      }
+      case "food": {
+        // diner: produce/serving tables down the room + a back kitchen line
+        wallShelves({ body: 0x6b7078, top: 0xe8e8ee, h: 1.0, count: 3, span: 2.2 });
+        for (const st of shelfTops) stockRow(st, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0xff9a5a], 5, 0.2, 0.22);   // produce
+        for (let i = 0; i < 2; i++) {                                          // two booth tables
+          for (const side of [-1, 1]) {
+            const p = pt(5.0 + i * 3.2, side * (halfTan - 1.7), 0.8);
+            if (p) { decor(p, 0.45, 1.0, 0.1, 0.7, 0x9aa0a8); decor(p, 0.22, 0.6, 0.44, 0.06, 0x6b4a2a); decor(p, 0.55, 1.0, 0.08, 0.7, 0xe8e8ee); }
+          }
+        }
+        break;
+      }
+      case "bank":
+      case "cityhall": {
+        // a row of TELLER windows: a long counter the player faces, glass above
+        const lat0 = -(halfTan - 1.8);
+        for (let i = 0; i < 3; i++) {
+          const p = pt(2 * halfIn - 3.0, lat0 + i * 1.8, 0.5);
+          if (!p) continue;
+          decor(p, 0.8, 1.5, 1.6, 0.6, 0x44505c);          // teller desk
+          decor(p, 1.9, 1.5, 1.0, 0.06, GLASS);            // teller glass
+          glow({ x: p.x, z: p.z }, 1.0, 0.3, 0.1, 0.06, 0x5b8bff, 0.7);  // counter screen
+        }
+        // a velvet queue rope (two short posts) by the entrance
+        for (const side of [-1, 1]) { const p = pt(4.6, side * 1.4, 0.6); if (p) { decor(p, 0.5, 0.16, 1.0, 0.16, 0xcaa64a); decor(p, 1.02, 0.22, 0.18, 0.22, 0x2a2f37); } }
+        break;
+      }
+      case "gym": {
+        // weight benches + a rack of dumbbells + a couple of machines
+        for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
+          const p = pt(5.4 + i * 3.0, side * (halfTan - 1.8), 0.9);
+          if (!p) continue;
+          decor(p, 0.45, 0.5, 0.16, 1.7, 0x2a2f37);                 // bench pad
+          for (const e of [-1, 1]) { const lx = p.x + tx * 0, lz = p.z + tz * 0; b.lbox(lx + (along ? e * 0.85 : 0), 0.7, lz + (along ? 0 : e * 0.85), 0.34, 0.34, 0.34, 0x44505c, { cast: false }); } // plates
+        }
+        // a back dumbbell rack
+        const dr = pt(2 * halfIn - 3.4, halfTan - 1.6, 0.7);
+        if (dr) { decor(dr, 0.5, along ? 0.6 : 2.4, 1.0, along ? 2.4 : 0.6, 0x32363d); for (let i = -2; i <= 2; i++) { const lx = dr.x + tx * i * 0.45, lz = dr.z + tz * i * 0.45; b.lbox(lx, 0.85, lz, 0.18, 0.18, 0.5, 0x6a7078, { cast: false }); } }
+        // a wall mirror strip
+        const mp = pt(8.0, -(halfTan - 0.55), 0.9); if (mp) decor(mp, 1.5, along ? 0.04 : 3.0, 2.4, along ? 3.0 : 0.04, 0xb9e6f7);
+        break;
+      }
+      case "clothing":
+      case "barber": {
+        if (kind === "clothing") {
+          // round clothing racks (rounders) down the room, stocked with garments
+          for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
+            const p = pt(5.2 + i * 3.0, side * (halfTan - 1.9), 0.9);
+            if (!p) continue;
+            decor(p, 0.75, 0.1, 1.5, 0.1, 0x8a939c);                    // post
+            decor(p, 1.5, 1.4, 0.08, 1.4, 0x6a7078);                    // ring bar
+            const cols = [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e, 0xe85d8a];
+            for (let g = 0; g < 6; g++) { const a = g / 6 * Math.PI * 2, lx = p.x + Math.cos(a) * 0.6, lz = p.z + Math.sin(a) * 0.6; b.lbox(lx, 1.0, lz, 0.22, 0.9, 0.1, cols[g % cols.length], { cast: false }); }
+          }
+          wallShelves({ body: 0x55606e, top: 0x8a939c, h: 1.6, count: 3, span: 2.0 });
+          for (const st of shelfTops) stockRow(st, [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e], 4, 0.3, 0.16);  // folded stacks
+        } else {
+          // barber: two chairs facing wall mirrors
+          for (const side of [-1, 1]) {
+            const p = pt(6.0, side * (halfTan - 1.6), 0.9);
+            if (!p) continue;
+            decor(p, 0.45, 0.7, 0.9, 0.7, 0x32363d);            // chair base
+            decor(p, 1.0, 0.6, 0.5, 0.6, 0x6b1f1f);            // seat
+            const mp = pt(6.0, side * (halfTan - 0.5), 0.9); if (mp) decor(mp, 1.4, along ? 0.04 : 1.4, 1.8, along ? 1.4 : 0.04, 0xb9e6f7);
+          }
+        }
+        break;
+      }
+      case "drugs": {
+        // trap house: a beat couch, a low table with baggies, stash shelves
+        const cp = pt(2 * halfIn - 4.0, halfTan - 1.7, 0.9);
+        if (cp) { decor(cp, 0.4, along ? 0.9 : 2.4, 0.5, along ? 2.4 : 0.9, 0x4a423a); decor(cp, 0.75, along ? 0.9 : 2.4, 0.4, along ? 2.4 : 0.9, 0x3a352e); }
+        const tp = pt(2 * halfIn - 6.0, halfTan - 2.4, 0.9);
+        if (tp) { decor(tp, 0.4, 1.2, 0.1, 0.8, 0x2a2f37); stockRow({ p: tp, top: 0.45, across: 1.0 }, [0x4caf6e, 0xffffff, 0x4caf6e], 4, 0.14, 0.1); }
+        wallShelves({ body: 0x3a352e, top: 0x4a423a, h: 1.6, count: 2 });
+        for (const st of shelfTops) stockRow(st, [0x4caf6e, 0xe0e0e0, 0x6b4a2a], 4, 0.2, 0.2);
+        break;
+      }
+      case "electronics": {
+        wallShelves({ body: 0x2b2f33, top: 0x44505c, h: 1.7, count: 3, glassFront: true });
+        for (const st of shelfTops) for (let r = 0; r < 2; r++) {           // glowing screens on two levels
+          const lat0 = -st.across / 2 + 0.3, gap = (st.across - 0.6) / 3;
+          for (let i = 0; i < 3; i++) { const lat = lat0 + i * gap, lx = st.p.x + tx * lat, lz = st.p.z + tz * lat, y = 0.8 + r * 0.55; b.lbox(lx, y, lz, along ? 0.05 : 0.34, 0.26, along ? 0.34 : 0.05, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.6, cast: false }); }
+        }
+        break;
+      }
+      case "hardware": {
+        // tall industrial racks with crates/cans
+        wallShelves({ body: 0x4a4034, top: 0x6b5a3a, h: 2.0, count: 3, span: 2.4 });
+        for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.65, across: st.across }, [0xffd166, 0x8a5a2b, 0xb9bec6, 0x66d9c0], 5, 0.26, 0.34);
+        island(2 * halfIn - 5.0, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.1, along ? 2.4 : 1.0, 0x6b5a3a, { cast: false });
+        break;
+      }
+      case "hospital": {
+        // reception + two beds with curtains + a supply shelf
+        for (let i = 0; i < 2; i++) {
+          const p = pt(5.6 + i * 3.2, -(halfTan - 1.9), 0.9);
+          if (!p) continue;
+          decor(p, 0.45, 1.0, 0.16, 2.0, 0xe8e8ee);          // bed
+          decor(p, 0.75, 1.0, 0.25, 0.5, 0xbfd8e6);          // pillow end
+          const cp = pt(5.6 + i * 3.2, -(halfTan - 0.6), 0.9); if (cp) decor(cp, 1.4, along ? 0.05 : 2.2, 2.0, along ? 2.2 : 0.05, 0xbfe6d8);  // curtain
+        }
+        wallShelves({ body: 0xd8dde2, top: 0xffffff, h: 1.6, count: 2 });
+        for (const st of shelfTops) stockRow(st, [0xff5a5a, 0x5aff8a, 0xffffff, 0x5a8aff], 4, 0.2, 0.2);
+        break;
+      }
+      case "gas": {
+        // convenience aisles inside + a cooler wall (showroom front handled outside)
+        wallShelves({ body: 0x44505c, top: 0x6a7078, h: 1.5, count: 3, span: 2.2 });
+        for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.55, across: st.across }, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0x5a8aff], 5, 0.18, 0.34);
+        // a glowing cooler against the back wall
+        const cp = pt(2 * halfIn - 2.6, 0, 0.6);
+        if (cp) glow(cp, 1.1, along ? 0.4 : 3.0, 2.0, along ? 3.0 : 0.4, 0x9fe0ff, 0.4);
+        break;
+      }
+      case "carlot":
+      case "chop":
+      case "realtor": {
+        if (kind === "realtor") {
+          // a couple of agent desks with little house models + a listings wall
+          for (const side of [-1, 1]) {
+            const p = pt(6.0, side * (halfTan - 1.9), 0.9);
+            if (!p) continue;
+            decor(p, 0.4, 1.4, 0.1, 0.8, 0x6b4a2a); decor(p, 0.6, 0.5, 0.3, 0.5, 0xeeeeee);  // desk + monitor
+          }
+          const lp = pt(2 * halfIn - 2.6, 0, 0.6);
+          if (lp) glow(lp, 1.6, along ? 0.05 : 3.2, 1.6, along ? 3.2 : 0.05, 0x4fd0a0, 0.4);   // listings board
+        } else {
+          // car lot / chop shop showroom: keep the centre clear for a vehicle,
+          // line the walls with tyres/tool benches only.
+          wallShelves({ body: 0x3a352e, top: 0x55606e, h: 1.4, count: 2, span: 2.0 });
+          for (const st of shelfTops) stockRow(st, [0x2a2f37, 0x44505c], 4, 0.3, 0.3);   // tyre/part stacks
+        }
+        break;
+      }
+      case "security": {
+        // a wall of glowing CCTV monitors + an equipment shelf
+        const mp = pt(2 * halfIn - 2.6, 0, 0.6);
+        if (mp) for (let r = 0; r < 2; r++) for (let i = -1; i <= 1; i++) { const lat = i * 0.9; const lx = mp.x + tx * lat, lz = mp.z + tz * lat, y = 1.3 + r * 0.7; b.lbox(lx, y, lz, along ? 0.05 : 0.7, 0.5, along ? 0.7 : 0.05, 0x49a0c0, { emissive: 0x49a0c0, ei: 0.55, cast: false }); }
+        wallShelves({ body: 0x32363d, top: 0x49566b, h: 1.6, count: 2 });
+        for (const st of shelfTops) stockRow(st, [0x49566b, 0x2a2f37, 0x6a7078], 4, 0.22, 0.24);
+        break;
+      }
+      default: {
+        // generic store: tidy stocked shelving on both walls + display island
+        wallShelves({ count: 3 });
+        for (const st of shelfTops) stockRow(st, [0xff9e6b, 0x6bb6ff, 0x4caf6e, 0xc792ea], 4, 0.24, 0.24);
+      }
+    }
   }
+
+  // a small accent colour per trade (register screen / glow tint)
+  function kindAccent(kind) {
+    const A = { guns: 0x7ed957, jewelry: 0xffe08a, pawn: 0xffe08a, bar: 0xe85d8a, bank: 0x5b8bff,
+      food: 0xff9e6b, gym: 0x66d9c0, clothing: 0xc792ea, drugs: 0x4caf6e, electronics: 0x39d0c0,
+      hardware: 0xffd166, hospital: 0xff6b6b, gas: 0xe24b4b, security: 0x49a0c0, casino: 0xc9a227,
+      barber: 0x6bb6ff, realtor: 0x4fd0a0, carlot: 0xe88a3c, chop: 0xd0a23c, cityhall: 0xd8dde8 };
+    return A[kind] || 0x9fd8ee;
+  }
+
+  // public hook (and back-compat wrapper) — every shop building gets dressed
+  function furnishShop(b, lot, door) {
+    const kind = (lot.building && lot.building.shop && lot.building.shop.kind) || (lot.kind) || "store";
+    furnishInterior(b, kind, door);
+  }
+  CBZ.cityFurnishInterior = function (b, kind, door) { furnishInterior(b, kind, door); };
 
   function furnishHome(b, rng) {
     // ground-floor living space: a bed, a couch, a table, a kitchen counter

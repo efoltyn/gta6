@@ -325,6 +325,7 @@
     // (skip when an NPC/explosion you didn't cause did the killing — opts.noCrime)
     if (CBZ.cityCrime && !opts.noCrime) CBZ.cityCrime(opts.byCar ? 150 : 200, { x: x, z: z, type: opts.byCar ? "vehicular homicide" : "murder" });
     if (CBZ.game) CBZ.game.cityKills = (CBZ.game.cityKills || 0) + 1;
+    if (CBZ.city && CBZ.city.addKill) CBZ.city.addKill();   // count crowd kills toward story/leaderboard too
     return true;
   };
   // everyone within r of (x,z) gets run down (car mowing through a crowd).
