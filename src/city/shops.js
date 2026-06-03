@@ -367,7 +367,7 @@
     look().swagger = Math.max(0, (look().swagger || 0) - prevSwag + s.swag);
     if (kind === "barber") look().hair = s.name; else look().outfit = s.name;
     CBZ.city.addRespect(Math.max(1, Math.round(s.swag / 2)));
-    if (CBZ.sfx) CBZ.sfx(kind === "barber" ? "whoosh" : "coin");
+    if (CBZ.sfx) CBZ.sfx("coin");   // real payment-confirm sound (was a DIY "whoosh" for cuts)
     CBZ.city.note((kind === "barber" ? "💈 Fresh cut: " : "🧥 New fit: ") + s.name + " (+" + s.swag + " swagger)", 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
