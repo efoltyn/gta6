@@ -1,0 +1,36 @@
+export const meta = {
+  name: 'gang-life-wave2-retry',
+  description: 'Wave 2 retry: free-text build agents, disjoint files, deepen fighting/shooting/vehicles/exterior/AI/economy/interiors',
+  phases: [{ title: 'Build' }],
+}
+
+const ROOT = '/Users/elifoltyn/Downloads/game'
+const base = [
+  'CELL BLOCK Z / "Gang Life" at ' + ROOT + ': no-build Three.js r128, vanilla JS, ~140 IIFE modules on window.CBZ, booted by ordered script tags in index.html. Focus = CITY mode (g.mode==="city"). Per-frame work registers via CBZ.onUpdate(order,fn) (plays-only) or CBZ.onAlways(order,fn); gate with if (CBZ.game.mode!=="city") return;.',
+  '',
+  'HARD RULES:',
+  '- ONLY edit the files assigned to you. index.html and src/config.js are OFF LIMITS (lazy-init: g.x = g.x || ...). Editing another file corrupts a parallel agent.',
+  '- LIVE working game: PRESERVE existing behavior and public CBZ functions; extend surgically, do not rewrite. Match code style.',
+  '- CRITICAL: after EVERY edit run node --check on the file and FIX any error before finishing. Your files MUST parse. If you research, keep it brief (1-2 quick WebSearches max) then implement.',
+  '- End with a 2-3 sentence plain-text summary of what you changed and confirm node --check passed.',
+  '',
+  'KEY CONTRACTS: CBZ.game(=g){cash,cityBank,respect,wanted,cityKills,cityWeapon,cityInv,mode,state}. CBZ.player.pos/.driving/.hp/.maxHp/.stamina. CBZ.city.note(msg,s)/.big/.addCash/.addRespect. CBZ.cityHudDirty(). CBZ.cityPeds[] ped{pos,name,kind,aggr,hp,maxHp,dead,ko,state,target,finalGoal,path,rage,guard,companion,armed,weapon,ammo,archetype,wealth,gang,rank}. CBZ.cityCops[]. CBZ.cityCars[] car{pos,v,heading,player,npcDriver,group,userData.body,userData.cabin,crumple,wreckT}. CBZ.city.arena{shopLots,lots,randomSidewalkPoint(),nearestIntersection(),clampToCity(pos,r),root}. CBZ.cityEcon{ITEMS,SHOP_STOCK,CARS,rollCash,buyPrice,sellPrice,streetPrice,recordSale,propIndex}. CBZ.cityWorldEnsure()/cityEvent(). CBZ.collide(pos,r,y0,y1). CBZ.shake(m)/doHitstop(s)/doSlowmo(s). CBZ.gore(x,y,z,opts). CBZ.cityExplosion(x,z,{power,radius,byPlayer}). CBZ.tracer(from,to,opts)/muzzleFlash. CBZ.sfx(name) real recorded m4a only (existing: shoot_pistol/smg/carbine/shotgun, punch, hit, ko, headshot, whoosh, step, glass, explosion, coin); do NOT invent audio names. CBZ.makeLabelSprite(text).',
+].join('\n')
+
+const DOMAINS = [
+  { key: 'fighting', files: 'src/city/combat.js', task: 'Make 3rd-person MELEE in city/combat.js feel GOOD: light/heavy attacks, a 3-hit COMBO with timing windows, HIT-STOP on connect (CBZ.doHitstop ~0.05-0.09s), knockback/stagger on the target, a block/counter for tough NPCs, player stamina drain, and punch (CBZ.shake + sfx punch/hit/ko + a brief slow-mo on a KO). Keep existing melee/punch/beat APIs working. Briefly research good brawler feel timings, then implement.' },
+  { key: 'shooting', files: 'src/systems/fpsmode.js, src/systems/gunfx.js', task: 'Improve FPS GUNPLAY FEEL in systems/fpsmode.js + systems/gunfx.js. Add: a HIT MARKER (brief crosshair flash on a connecting shot), smoother recoil RECOVERY back to center, bloom that tightens when standing still and grows when moving/auto-firing, and juicier impacts (gunfx sparks/dust). PRESERVE: muzzleWorld + every weapon userData.muzzle (bullets come from the barrel), the RK=0.6 recoil dampener, cityCrowdRayHit/cityCrowdKill (ambient-crowd hits), and the forward gun pose. Read both files FIRST, be surgical, keep guns controllable. node --check both.' },
+  { key: 'vehicles', files: 'src/city/vehicles.js, src/city/crashfx.js', task: 'Deepen DRIVING + DAMAGE in city/vehicles.js + city/crashfx.js. Tune accel/grip/steering for satisfying arcade handling and add a handbrake/drift; make damage degrade handling. Multi-stage damage: intact, dented, SMOKING, on FIRE, EXPLODE (reuse CBZ.cityExplosion); a badly damaged car emits smoke then ignites then blows. Build on the existing asymmetric crash damage (do not undo it). PRESERVE: makeCar visual model + grp.userData.body/cabin, runOver/resolveCars/wreckCar/crumpleCar/traffic logic, the CRASH tune object, companion hooks. Read both files FIRST. node --check both.' },
+  { key: 'exterior', files: 'src/city/props.js, src/city/world.js', task: 'Add real, intentional EXTERIOR decoration in city/props.js (and city/world.js for road/sidewalk detail if needed). Place street furniture that BELONGS: lamp posts (lit emissive head), fire hydrants, mailboxes, trash cans, bus-stop shelters, billboards, planters with low-poly trees, traffic cones, rooftop AC units, A-frame sidewalk shop signs. NO filler benches. CHEAP: shared geometry/material, distance LOD, hundreds of placements. Do not block roads/sidewalks (big props collide, decor does not). Read props.js + world.js FIRST. node --check.' },
+  { key: 'ai', files: 'src/city/peds.js', task: 'Make NPC AI SMARTER in city/peds.js (the time-sliced city ped brain think/move at onUpdate 34). Add: look-ahead obstacle avoidance + separation (no clumping/clipping; build on the existing stuck-detection reroute), smarter threat reactions (flee along clear paths, take cover, call cops at a believable distance), better sidewalk flow, a light utility decision so peds pick sensible routines. PRESERVE: companionThink (bodyguard/gang brain), the stuck-detection, npcAttack, and the external goal hooks from aigoals.js (it sets ped.finalGoal/target/rage; coexist, do not override an active fight/flee/companion). Cheap + time-sliced. Read peds.js FIRST (large and central; be careful). node --check.' },
+  { key: 'economy', files: 'src/city/economy.js', task: 'Overhaul the ECONOMY MATH in city/economy.js to be FUN and REAL. Living market: drug/item street prices respond to SUPPLY and DEMAND (dumping product floods and drops the price; scarcity raises it; prices recover toward a baseline over time), optional per-district variance, money SINKS so cash stays meaningful, and heat/risk affecting drug price. Make buy-low/sell-high a real loop. PRESERVE existing exports: ITEMS, SHOP_STOCK, CARS, buyPrice/sellPrice/streetPrice/recordSale/rollCash, and the wave-1 property market (propIndex/FINANCE); extend and coexist. Drive market drift from an onUpdate at a FREE order. Briefly research game-economy supply/demand design, then implement. node --check.' },
+  { key: 'interior', files: 'src/city/buildings.js', task: 'Expand shop INTERIORS in city/buildings.js. Wave 1 added a furnishInterior pass; DEEPEN it with per-business character: bar (stools, neon, bottles, pool table), bank (teller line, vault door, queue ropes), gun store (wall gun racks, glass cases), gym (weight racks, mirrors, mats), clothing (racks, mannequins, mirrors), food (booths, counter, menu board), casino (slot machines, tables). Interior lighting mood (emissive accents), wall/floor materials, a back room where it fits. Keep the door-to-stair aisle CLEAR, colliders sane, cheap (shared geo/mat). PRESERVE wave-1 furnishInterior and the window/platform/collider systems. Read buildings.js FIRST. node --check.' },
+]
+
+const summaries = await parallel(DOMAINS.map((d) => () =>
+  agent(base + '\n\nYOUR FILES (own exclusively): ' + d.files + '\n\nTASK: ' + d.task, { label: 'build:' + d.key })
+))
+
+const report = {}
+DOMAINS.forEach((d, i) => { report[d.key] = summaries[i] || '(no result)' })
+return report
