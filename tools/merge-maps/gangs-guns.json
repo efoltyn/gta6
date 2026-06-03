@@ -1,0 +1,191 @@
+{
+ "summary": "CELL BLOCK Z currently has two separate gang systems: (1) JAIL escape mode with two gangs (Red Hook/gang 0 and Blues/gang 1) defined as hardcoded NPC crews with crewRoles (shotcaller, collector, lookout, enforcer, runner) but NO wealth differentiation and NO guns\u2014only melee/shivs; and (2) CITY mode with dynamic gangs, bosses, and gang members that are clearly ARMED with rank-based weapons (bosses: SMG or Pistol at wealth 0.92; enforcers: Pistol or Bat based on armed-fraction). The jail economy.js completely separates guns into the warden's loadout (25% chance \"Gun\" item, epic rarity, value 50 cigs), while city gangs spawn WITH weapons by default. To unify this: define a shared gang hierarchy (boss\u2192shooter\u2192soldier), give all jail gang members rank-scaled wealth\u2192guns mapping (boss carries SMG+cash, shooter carries Pistol+modest cash, soldier carries Bat/melee), and redirect most jail gun availability from warden loot to city economy pickups/shops.",
+ "keyFiles": [
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/gangs.js",
+   "role": "City gang spawning with armed bosses (line 70-86, wealth 0.92, weapon/ammo assignment), enforcers (line 96-106, armed-fraction-based weapons), and gang war logic. Shows desired pattern: rank\u2192wealth\u2192weapons."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+   "role": "Jail NPC crew spawning (line 267-299): Red Hook (gang 0, shotcaller/collector/lookout) and Blues (gang 1, shotcaller/runner/enforcer) with crewRoles but NO wealth/weapon assignment. This is the escape-mode gang definition."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/economy.js",
+   "role": "Jail economy with rollLoadout() (line 520-558): warden carries 'Gun' (25% rarity epic); gang members get +cigs and Shiv (40% chance) but NO firearms. Guards and warden own all guns."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/intimidate.js",
+   "role": "Gun prevalence logic: decideGun() (line 65-78) assigns hasGun based on crewRole (shotcaller/enforcer/collector +20%), fighting rating (>78: +20%), behavior (predator/bully/hothead +12%), and nerve. City gangs bypass this; jail crewRoles exist but weapon assignment is loot-only, not role-linked."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/economy.js",
+   "role": "City guns fully gated in ITEMS (line 27-30): Pistol $350, SMG $1200, Shotgun $900, Rifle $2600 with shop_stock guns array. City bosses carry weapons at spawn. Jail has no gun shops\u2014only warden loot."
+  }
+ ],
+ "findings": [
+  {
+   "title": "Jail Gang Hierarchy Is Role-Named But Unfunded",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+   "lines": "269-299",
+   "detail": "Two gangs spawned: Red Hook (gang 0) with crewRoles shotcaller (Red Hook, line 270), collector (Mack, line 272), lookout (Peep, line 274); Blues (gang 1) with shotcaller (Blue Ace, line 276), runner (Dice, line 278), enforcer (Stone, line 280). All spawn with identical prison orange skin (line 288-291), identical role='inmate', and identical offer pools. NO wealth field; crewRole is metadata only. None carry guns in rollLoadout.",
+   "apis": [
+    "makeNpc()",
+    "CBZ.npcs",
+    "crewRole"
+   ]
+  },
+  {
+   "title": "City Gangs Define Wealth\u2192Weapon Mapping Precisely",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/gangs.js",
+   "lines": "70-86, 96-106",
+   "detail": "Boss: wealth 0.92, armed: true, weapon: rng() < 0.5 ? 'SMG' : 'Pistol', hp: 220, ammo: 40. Enforcer: wealth 0.5, armed: rng() < armedFrac (0.55), weapon: armed ? (rng() < 0.25 ? 'SMG' : 'Pistol') : 'Bat'. Pattern: high wealth\u2192SMG/Pistol, low wealth\u2192Bat, with ammo explicitly set. No equivalent in jail.",
+   "apis": [
+    "CBZ.cityMakePed()",
+    "wealth",
+    "armed",
+    "weapon",
+    "ammo"
+   ]
+  },
+  {
+   "title": "Gun Availability in Jail is Warden-Only Loot",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/economy.js",
+   "lines": "534",
+   "detail": "Only warden rollLoadout line 534 includes 'Gun': maybe('Gun-Room Key', 0.7); maybe('Gun', 0.25). No other inmate role carries firearms. Gang members (line 552) get +cigs, Shiv (0.4), Cash Roll (0.25), Burner SIM (0.2)\u2014all non-firearm. Gun is tag: 'key', rarity: 'epic', value: 50 cigs\u2014treated as a KEY item, not a weapon.",
+   "apis": [
+    "rollLoadout()",
+    "ITEMS['Gun']",
+    "actor.gang >= 0"
+   ]
+  },
+  {
+   "title": "Gun Carrying Logic Exists But Unused in Jail",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/intimidate.js",
+   "lines": "65-78",
+   "detail": "decideGun(n) function calculates gun-carry probability: base 5%, +12% for any gang, +20% for crewRole shotcaller/enforcer/collector, +20% for fighting > 78, +12% for bold behaviors. Called in initN (line 82): n.hasGun = decideGun(n). Code exists but crewRoles are never fed to decideGun\u2014they're in n.crewRole but logic only checks n.gang and basic stats.",
+   "apis": [
+    "decideGun()",
+    "n.hasGun",
+    "n.crewRole",
+    "initN()"
+   ]
+  },
+  {
+   "title": "Jail Guns Never Spawned on Crew Members",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/economy.js",
+   "lines": "552",
+   "detail": "Line 552: if (actor.gang >= 0) { cigs += 2 + Math.floor(rng() * 6); maybe('Shiv', 0.4); ... } Gang members get extra cigs and melee shiv but zero weapons. The decideGun() result is never reflected in rollLoadout items because rollLoadout never checks hasGun flag.",
+   "apis": [
+    "rollLoadout()",
+    "initN in intimidate.js"
+   ]
+  },
+  {
+   "title": "Crew Roles Are Defined But Weapon Authority Unmapped",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "~2250-2290",
+   "detail": "ai.js crewRoleScore function scores shotcaller(5.2), collector(5.6), lookout(5.4), enforcer(4.7), runner(4.8) for different request kinds. This hierarchy exists but is NEVER consulted by weapon/wealth assignment. Jail crewRoles are narrative only; city gangs ignore crewRoles entirely and use wealth scalars instead.",
+   "apis": [
+    "crewRole()",
+    "crewRoleScore()"
+   ]
+  },
+  {
+   "title": "City Economy Guns Are Priced and Shop-Gated",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/economy.js",
+   "lines": "27-30, 63-80",
+   "detail": "ITEMS: Pistol ($350), SMG ($1200), Shotgun ($900), Rifle ($2600). SHOP_STOCK guns array lists all four weapons plus ammo. Guns are buyable from gun shops. Jail economy has no shop system; guns are ONE-TIME WARDEN LOOT or pickpocket-able, not tradeable or farmable.",
+   "apis": [
+    "ITEMS",
+    "SHOP_STOCK",
+    "buyPrice()"
+   ]
+  },
+  {
+   "title": "Jail NPC Wealth Is Never Set",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+   "lines": "269-299",
+   "detail": "Jail NPC crew spawn has NO wealth field. City gangs explicitly pass wealth: 0.92 (boss) and 0.5 (enforcer). Jail NPCs have no wealth attribute, so they use defaults. This breaks any wealth\u2192weapons mapping\u2014even if implemented, there's no wealth tier to index.",
+   "apis": [
+    "makeNpc()",
+    "wealth parameter"
+   ]
+  }
+ ],
+ "mergePlan": [
+  {
+   "step": "1. Define a shared gang hierarchy schema in src/config.js: { rank: 'boss' | 'shooter' | 'soldier', wealth: 0.92 | 0.65 | 0.35, guns: ['SMG', 'Pistol'] | ['Pistol'] | [], cash: 80-120 | 40-60 | 10-30 }. Map crewRoles to ranks: shotcaller\u2192boss, collector/enforcer\u2192shooter, lookout/runner\u2192soldier.",
+   "files": [
+    "src/config.js"
+   ],
+   "risk": "Breaking change if existing code hardcodes wealth values. Must audit all wealth comparisons (city/gangs.js line 74, 100; economy.js rollCash())."
+  },
+  {
+   "step": "2. Refactor jail NPC crew spawn (src/entities/npc.js lines 269-299) to include wealth field per rank. Red Hook boss (shotcaller) wealth: 0.92; collector 0.65; lookout 0.35. Same for Blues. Pass wealth into makeNpc opts.",
+   "files": [
+    "src/entities/npc.js"
+   ],
+   "risk": "Changes data passed to makeNpc; verify it does not break rendering or AI scoring."
+  },
+  {
+   "step": "3. Enhance decideGun() in src/systems/intimidate.js (line 65-78) to check n.crewRole and n.wealth. Shotcallers always carry (prob 0.8+), shooters carry (prob 0.6-0.7), soldiers rarely carry (prob 0.2-0.3). Overhaul probability curve to use wealth+crewRole instead of just gang membership.",
+   "files": [
+    "src/systems/intimidate.js"
+   ],
+   "risk": "Changes gun-carry likelihood; may require rebalancing combat/intimidation difficulty."
+  },
+  {
+   "step": "4. Refactor rollLoadout() in src/systems/economy.js (line 520-558) to inject 'Gun' items for jail gang members based on rank. If (actor.gang >= 0 && actor.crewRole) then map rank\u2192gun: shotcaller\u2192'Gun', collector/enforcer\u2192'Gun', lookout\u2192maybe('Gun', 0.3). Call decideGun early and reflect hasGun in items list.",
+   "files": [
+    "src/systems/economy.js"
+   ],
+   "risk": "Prisoners gain firearms earlier; must adjust encounter difficulty and ensure guns are balanced against limited ammo."
+  },
+  {
+   "step": "5. Remove 'Gun' from warden loadout (src/systems/economy.js line 534) or reduce chance (0.25 \u2192 0.05). Guns should now come from gang members OR city economy. Warden keeps Gun-Room Key but not the firearm itself.",
+   "files": [
+    "src/systems/economy.js"
+   ],
+   "risk": "Warden becomes less heavily armed; may require jail AI/guard difficulty rebalance."
+  },
+  {
+   "step": "6. Move gun item definitions from jail economy.js (ITEMS['Gun']) into city economy.js and make them city-only. Or create a unified gun-item registry mapped to FPS_WEAPONS ids. In jail, replace 'Gun' loot with role-specific weapons or leave as rare key-only drop.",
+   "files": [
+    "src/systems/economy.js",
+    "src/city/economy.js",
+    "src/weapons/weapon-data.js"
+   ],
+   "risk": "Guns become rare/unavailable in jail; may break player progression if player expects gun access."
+  },
+  {
+   "step": "7. Unify wealth-to-cash mapping in src/systems/economy.js rollCash() (line 164-173). Ensure jail gang members use same wealth\u2192cash curve as city. Document: boss (0.92) rolls 120-520 cigs, shooter (0.65) rolls 40-180, soldier (0.35) rolls 8-55.",
+   "files": [
+    "src/systems/economy.js"
+   ],
+   "risk": "Gang member cash may increase; balance economywide cig inflation."
+  },
+  {
+   "step": "8. Update intimidate.js decideGun() to align with new jail gang firearms. Shotcallers return true 80%, collectors/enforcers 60%, lookouts/runners 30%. Test that standoff/draw logic triggers realistically for each rank.",
+   "files": [
+    "src/systems/intimidate.js"
+   ],
+   "risk": "Jail combat encounters may become more lethal; guards and player need balancing."
+  },
+  {
+   "step": "9. Ensure city gangs remain unchanged: bosses spawn with wealth 0.92 and armed weapons, enforcers with wealth 0.5 and armed-fraction-gated weapons. Confirm jail system now mirrors city design.",
+   "files": [
+    "src/city/gangs.js"
+   ],
+   "risk": "None; city gangs are already correct. This verifies new jail system matches city pattern."
+  },
+  {
+   "step": "10. Test end-to-end: spawn jail game, observe gang members carrying guns appropriate to rank. Loot them, confirm guns appear in loadout. Verify player can pick up guns from downed gang members and use in intimidate/FPS modes. Confirm city gangs still work.",
+   "files": [
+    "src/entities/npc.js",
+    "src/systems/economy.js",
+    "src/systems/intimidate.js"
+   ],
+   "risk": "Integration breakage if any system relied on jail being gun-free; debug with console logs for hasGun flag and loadout items."
+  }
+ ]
+}

@@ -1,0 +1,268 @@
+{
+ "summary": "CELL BLOCK Z is a Three.js r128 game with three modes (escape/jail, survival, city), each with distinct interaction systems. The critical problem: IJKL keys are double-bound as both contextual interaction slots AND other functions (especially L = leaderboard in city, I = inventory in all modes). This creates collisions\u2014when both a leaderboard and an interaction menu are open in city mode, users cannot close the leaderboard because L is consumed by the interaction menu system. \n\nThe core systems are: systems/interact.js (jail contextual options, keys I/J/K/L/U/O for 6 verb slots), src/city/interact.js (city contextual options, same key mapping), src/city/leaderboard.js (L or Tab toggles), systems/inventory.js (I opens/closes stash), systems/dashboard.js (Tab or L cycles). Overlays (leaderboard, inventory, dashboard, fullmap, shops, careers) use Escape or custom keys, but some grab IJKL before the overlay system can react. The fix requires making IJKL the SOLE interaction slots everywhere, with no other bindings, and moving all conflicting overlays to non-IJKL keys (e.g., inventory to E, leaderboard to Tab-only).\n\nAll three modes share the interaction menu HTML element (#interact) and key listeners, so a unified fix must work across all modes simultaneously.",
+ "keyFiles": [
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/interact.js",
+   "role": "Escape mode: defines OPT_KEYS = [i,j,k,l,u,o] for 6 interaction options; keydown listener at line 434 consumes these; CBZ.interactionMenuOpen() gate at line 410"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/interact.js",
+   "role": "City mode: mirrors jail OPT_KEYS binding; keydown listener at line 275 consumes IJKL; checks CBZ.cityMenuOpen at line 277; NO interactionMenuOpen() gate, allowing collision"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/inventory.js",
+   "role": "All modes: keydown 'i' toggles stash at line 211; line 211 checks CBZ.interactionMenuOpen() but still does nothing to prevent collision; line 72 hint says 'I or Esc to close'"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js",
+   "role": "City mode: keydown Tab or 'L'/'l' toggles board at line 64; gate is CBZ.cityMenuOpen at line 63; NO check for CBZ.interactionMenuOpen()"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js",
+   "role": "Escape mode: keydown Tab or 'L'/'l' cycles at line 171; gate checks interaction menu at line 170 but ONLY for 'l'/'L', not Tab; Escape closes at line 175"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/fullmap.js",
+   "role": "All modes: 'M' opens/closes map at line 426; Escape closes map at line 427; Backspace/Delete clears waypoint at line 428"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/survival_interact.js",
+   "role": "Survival mode: same OPT_KEYS = [i,j,k,l,u,o] at line 28; keydown listener at line 85; no check for CBZ.interactionMenuOpen(), always returns early if !shown at line 86"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+   "role": "All modes: F fires/punches at line 881; R reloads at line 875; Q swaps weapon (polled at line 911); V toggles FPS at line 874; no IJKL conflict but gate on FPS.active/shoulderActive"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/touch.js",
+   "role": "Mobile: buttons recreate keyboard events; on-screen interaction buttons use touchstart; no IJKL key bindings here"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js",
+   "role": "City mode: L key at line 64; leaderboard is a fixed-size overlay, not tied to CBZ.cityMenuOpen like inventory/shops"
+  }
+ ],
+ "findings": [
+  {
+   "title": "COLLISION: L = Leaderboard AND Interaction Slot 4",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/interact.js, /Users/elifoltyn/Downloads/game/src/city/interact.js, /Users/elifoltyn/Downloads/game/src/city/leaderboard.js",
+   "lines": "interact.js:407, city/interact.js:104, leaderboard.js:64",
+   "detail": "Both systems listen for 'L' keydown. jail interact.js OPT_KEYS[3]='l' (line 407) fires option 3 when CBZ.interactionMenuOpen() is true. city/leaderboard.js toggles leaderboard at line 64. In city mode with both panels open, L is consumed by interact.js and leaderboard.js has no chance to close.",
+   "apis": [
+    "CBZ.interactionMenuOpen()",
+    "OPT_KEYS[3]"
+   ]
+  },
+  {
+   "title": "COLLISION: I = Inventory AND Interaction Slot 0",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/inventory.js, /Users/elifoltyn/Downloads/game/src/systems/interact.js, /Users/elifoltyn/Downloads/game/src/city/interact.js",
+   "lines": "inventory.js:211, interact.js:407, city/interact.js:94",
+   "detail": "inventory.js 'i' toggles stash at line 211 and checks CBZ.interactionMenuOpen() but proceeds regardless (line 211 checks && returns early only if menu IS open). interact.js OPT_KEYS[0]='i' (line 407) fires option 0 when menu is open. If a panel is being dismissed and inventory is triggering, I cannot select the first interaction option.",
+   "apis": [
+    "CBZ.interactionMenuOpen()",
+    "OPT_KEYS[0]"
+   ]
+  },
+  {
+   "title": "COLLISION: L = Dashboard AND Interaction Slot 4 (Escape/Jail mode)",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js, /Users/elifoltyn/Downloads/game/src/systems/interact.js",
+   "lines": "dashboard.js:171, interact.js:407",
+   "detail": "dashboard.js 'l'/'L' cycles rankings at line 171; checks CBZ.interactionMenuOpen() at line 170 ONLY for the 'l'/'L' key, NOT for Tab. interact.js OPT_KEYS[3]='l' (line 407). When jail interaction menu is open, L is consumed by interact.js and dashboard cannot toggle.",
+   "apis": [
+    "CBZ.interactionMenuOpen()"
+   ]
+  },
+  {
+   "title": "Escape/Pause Menu Handling is Inconsistent Across Overlays",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js, /Users/elifoltyn/Downloads/game/src/systems/dashboard.js, /Users/elifoltyn/Downloads/game/src/systems/inventory.js, /Users/elifoltyn/Downloads/game/src/systems/fullmap.js",
+   "lines": "leaderboard.js:64, dashboard.js:175, inventory.js:213, fullmap.js:427",
+   "detail": "leaderboard closes on nothing (no escape key handler); dashboard closes on Escape at line 175; inventory closes on Escape at line 213; fullmap closes on Escape at line 427. When multiple overlays are stacked, Escape may close the wrong one or trap the player.",
+   "apis": [
+    "e.key === 'Escape'"
+   ]
+  },
+  {
+   "title": "city/leaderboard.js NOT Gated by CBZ.cityMenuOpen (unlike shops/careers/inventory)",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js",
+   "lines": "leaderboard.js:63",
+   "detail": "Line 63 checks '!open' (is it NOT already open) but does NOT respect CBZ.cityMenuOpen. shops.js, careers.js, realestate.js all check CBZ.cityMenuOpen at keydown (line 278 in shops.js, line 93 in careers.js). leaderboard has no such gate, so Tab/L keydown is processed even when a shop/career overlay is active.",
+   "apis": [
+    "CBZ.cityMenuOpen"
+   ]
+  },
+  {
+   "title": "Survival Mode: OPT_KEYS [i,j,k,l,u,o] Same as Jail, No Collision Logic",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/survival_interact.js",
+   "lines": "survival_interact.js:28, 85-89",
+   "detail": "survival_interact.js defines OPT_KEYS [i,j,k,l,u,o] (line 28, same as jail). keydown listener at line 85 checks only CBZ.game.mode and !shown (line 86), with no check for other overlays. Since survival has fullmap, no inventory, and no leaderboard, collisions are minimal but the pattern is inconsistent.",
+   "apis": [
+    "OPT_KEYS"
+   ]
+  },
+  {
+   "title": "No Cross-Modal Overlay Coordination: All Use Shared #interact HTML Element",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/interact.js, /Users/elifoltyn/Downloads/game/src/city/interact.js, /Users/elifoltyn/Downloads/game/src/systems/survival_interact.js",
+   "lines": "interact.js:15, city/interact.js:22-28, survival_interact.js:20-25",
+   "detail": "All three modes attach keydown listeners to the same #interact element (el.interact, el.interactOpts delegated click). When jail AND city are both loaded (mode switching mid-session), both keydown listeners are active and both may fire. The 'mode !== city' check at city/interact.js:276 prevents city from firing in jail, but both listeners remain registered.",
+   "apis": [
+    "el.interact, el.interactOpts"
+   ]
+  },
+  {
+   "title": "Inventory 'I' Guard is Reversed: Does Nothing When Menu IS Open",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/inventory.js",
+   "lines": "inventory.js:210-212",
+   "detail": "Line 211: 'if (k === \"i\" && CBZ.interactionMenuOpen && CBZ.interactionMenuOpen()) return;' returns EARLY if interaction menu IS open, preventing inventory toggle. But if menu is not open, line 212 'if (k === \"i\") { toggle(); return; }' proceeds. This is the CORRECT logic (don't toggle inventory while selecting interaction options), but it doesn't prevent city/leaderboard.js from consuming L.",
+   "apis": [
+    "CBZ.interactionMenuOpen()"
+   ]
+  },
+  {
+   "title": "Dashboard L-Key Check Incomplete: Only Gates 'L', Not 'Tab'",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js",
+   "lines": "dashboard.js:166-178",
+   "detail": "Lines 170-171 check 'if ((k === \"l\" || k === \"L\") && CBZ.interactionMenuOpen())' THEN return (skip the toggle). Tab has no such check. So pressing Tab cycles dashboard even if interaction menu is open, but pressing L does not. This inconsistency violates the intent that interaction menu options should have exclusive control of their keys.",
+   "apis": [
+    "CBZ.interactionMenuOpen()"
+   ]
+  },
+  {
+   "title": "City Interact Does NOT Check CBZ.interactionMenuOpen() Like Jail Does",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/interact.js",
+   "lines": "interact.js:439-442, city/interact.js:275-303",
+   "detail": "jail systems/interact.js line 439: 'if (!CBZ.interactionMenuOpen()) return;' gates the entire option-firing logic. city/interact.js line 275-303 has NO such gate at the top of the keydown listener. It checks 'if (g.mode !== \"city\" || g.state !== \"playing\") return' but never guards against key consumption by competing overlays.",
+   "apis": [
+    "CBZ.interactionMenuOpen()"
+   ]
+  },
+  {
+   "title": "Leaderboard 'L' Consumed Even When Interaction Menu Should Own It",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js, /Users/elifoltyn/Downloads/game/src/city/interact.js",
+   "lines": "leaderboard.js:61-65, interact.js:301",
+   "detail": "leaderboard.js line 61-65 keydown listener fires BEFORE city/interact.js can check if a live target is nearby. Both listeners are registered globally. No priority or consumption model prevents double-firing. In city mode with a nearby target (interaction panel open), pressing L toggles leaderboard AND fires option 3, potentially selecting an action unintentionally.",
+   "apis": [
+    "e.preventDefault()"
+   ]
+  },
+  {
+   "title": "Inventory Hint Says 'I or Esc to Close' But Esc Alone Closes (Line 72)",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/inventory.js",
+   "lines": "inventory.js:72",
+   "detail": "hint.textContent says 'I or Esc to close' but only line 213 'if (k === \"escape\" && invOpen) { close(); return; }' is reactive. Pressing I while invOpen doesn't toggle (toggle() at line 202 checks invOpen first at line 189). So the hint is misleading; only Esc and clicking the X close the stash. This is a UX bug independent of IJKL collision but related.",
+   "apis": [
+    "CBZ.toggleInventory()"
+   ]
+  },
+  {
+   "title": "Tab Handled by BOTH Dashboard and Leaderboard (City Mode)",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js, /Users/elifoltyn/Downloads/game/src/city/leaderboard.js",
+   "lines": "dashboard.js:171, leaderboard.js:64",
+   "detail": "In city mode, both systems have Tab listeners. dashboard.js line 171 checks 'k === \"Tab\" || k === \"l\" || k === \"L\"'. leaderboard.js line 64 checks 'e.key === \"Tab\"'. Both preventDefault() and toggle. First one wins, but in jails/escape mode only dashboard handles Tab. Leaderboard doesn't exist there so the two are NOT simultaneously active in jail, but in city they are.",
+   "apis": [
+    "e.key === 'Tab'"
+   ]
+  }
+ ],
+ "mergePlan": [
+  {
+   "step": "1. Create unified overlay state manager (CBZ.overlays or CBZ.ui.overlayStack)",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/interact.js (add stack tracking)",
+    "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js (adopt stack)",
+    "/Users/elifoltyn/Downloads/game/src/systems/fullmap.js (adopt stack)",
+    "/Users/elifoltyn/Downloads/game/src/systems/inventory.js (adopt stack)",
+    "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js (adopt stack)"
+   ],
+   "risk": "HIGH: Requires refactoring 5+ keydown listeners and modal state tracking. Risk of breaking modal interactions if stack logic is wrong. Must ensure Escape pops the stack correctly."
+  },
+  {
+   "step": "2. Make IJKL exclusively for interaction menu options (no other bindings anywhere)",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/interact.js (already done, line 407-442)",
+    "/Users/elifoltyn/Downloads/game/src/city/interact.js (line 275-303)",
+    "/Users/elifoltyn/Downloads/game/src/systems/survival_interact.js (line 85-89)",
+    "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js (line 64: REMOVE 'l' handler, keep Tab)",
+    "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js (line 171: REMOVE 'l' handler, keep Tab)"
+   ],
+   "risk": "MEDIUM: Removing L from leaderboard/dashboard is correct but verify no user documentation references L=leaderboard/dashboard. Tab remains as the primary toggle key. Must test both jail + city modes."
+  },
+  {
+   "step": "3. Move Inventory from 'I' to 'E' (contextual: E=sabotage/vent in jail, E=shop in city, E=grab in survival)",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/inventory.js (line 211-212: change 'i' to 'e')",
+    "/Users/elifoltyn/Downloads/game/src/systems/interactions.js (line 91, 158: VERIFY E is not used for breaker/vent)",
+    "/Users/elifoltyn/Downloads/game/src/city/shops.js (line 153: already uses E for shop, add check for invOpen)",
+    "/Users/elifoltyn/Downloads/game/src/systems/grapple.js (line for E: verify grab does not conflict with inventory)"
+   ],
+   "risk": "HIGH: E is already used by breaker/vent/shop/grab in different modes. Must add mode-specific guards so inventory.js E only works in modes where E has no conflicting use, OR repurpose a different key like '`' (backtick) or '\\' instead of E."
+  },
+  {
+   "step": "4. Establish Escape as universal overlay close key with stack-based priority",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js (line 175: already done)",
+    "/Users/elifoltyn/Downloads/game/src/systems/fullmap.js (line 427: already done)",
+    "/Users/elifoltyn/Downloads/game/src/systems/inventory.js (line 213: already done)",
+    "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js (line 61-65: ADD 'escape' handler)",
+    "/Users/elifoltyn/Downloads/game/src/city/shops.js (line 153: already uses escape)",
+    "/Users/elifoltyn/Downloads/game/src/city/careers.js (line 93: already uses escape)",
+    "/Users/elifoltyn/Downloads/game/src/city/realestate.js (line 160: already uses escape)",
+    "/Users/elifoltyn/Downloads/game/src/city/zillow.js (line 496: already uses escape)"
+   ],
+   "risk": "MEDIUM: Some overlays already handle Escape correctly; leaderboard must be updated. Verify that Escape in a stacked modal closes ONLY the top modal, not all. May need preventDefault() to avoid bubbling."
+  },
+  {
+   "step": "5. Add CBZ.interactionMenuOpen() gate to city/leaderboard.js and city/shops.js keydown listeners",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js (line 61-65: add check at top)",
+    "/Users/elifoltyn/Downloads/game/src/city/shops.js (line 153: add check before processing)",
+    "/Users/elifoltyn/Downloads/game/src/city/careers.js (line 93: add check)",
+    "/Users/elifoltyn/Downloads/game/src/city/realestate.js (line 160: add check)"
+   ],
+   "risk": "LOW: These are defensive checks that skip processing if interaction menu is open. Will prevent spurious toggle during menu selection."
+  },
+  {
+   "step": "6. Ensure city/interact.js checks CBZ.cityMenuOpen for all overlay collisions",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/interact.js (line 275-303: add checks for inventory/leaderboard/shops/careers open state)"
+   ],
+   "risk": "MEDIUM: city/interact.js already checks CBZ.cityMenuOpen, but verify that leaderboard, shops, careers, realestate use that same flag or have their own. May need CBZ.ui.leaderboardOpen, CBZ.ui.shopsOpen, etc. flags."
+  },
+  {
+   "step": "7. Test mode switching and verify no duplicate keydown listeners",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/interact.js (line 434: check addEventListener count)",
+    "/Users/elifoltyn/Downloads/game/src/city/interact.js (line 275: check addEventListener count)",
+    "/Users/elifoltyn/Downloads/game/src/systems/survival_interact.js (line 85: check addEventListener count)"
+   ],
+   "risk": "MEDIUM: If the game doesn't unregister listeners when switching modes, three listeners may fire simultaneously. Add explicit cleanup (removeEventListener) or check e.repeat/CBZ.game.mode guards."
+  },
+  {
+   "step": "8. Update UX hints and help text to reflect new bindings",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/inventory.js (line 72: update hint to 'E or Esc' instead of 'I or Esc')",
+    "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js (line 144: verify hint text 'Tab / L')",
+    "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js (line 49: change 'Tab to close' if leaderboard is no longer L-togglable)",
+    "/Users/elifoltyn/Downloads/game/src/systems/interact.js (line 401: verify OPT_KEYS hint for i/j/k/l)"
+   ],
+   "risk": "LOW: Text-only changes; if missed, user experience is degraded but code continues to work."
+  },
+  {
+   "step": "9. Consolidate Tab handling: dashboard in jail, leaderboard in city, guard mutual exclusion",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/dashboard.js (line 171: keep Tab, move L removal here)",
+    "/Users/elifoltyn/Downloads/game/src/city/leaderboard.js (line 64: keep Tab, remove L, add CBZ.game.mode check to prevent Tab in jail)"
+   ],
+   "risk": "MEDIUM: Tab must be contextual (toggle dashboard in jail, toggle leaderboard in city). Add 'if (CBZ.game.mode !== \"city\") return;' guard in leaderboard.js Tab handler to prevent firing in jail."
+  },
+  {
+   "step": "10. Define canonical layout for all IJKL bindings: ONLY interaction options, never reused",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/interact.js (line 407, OPT_KEYS defn)",
+    "/Users/elifoltyn/Downloads/game/src/city/interact.js (define same OPT_KEYS, link to interact.js version)",
+    "/Users/elifoltyn/Downloads/game/src/systems/survival_interact.js (line 28, use same OPT_KEYS constant)",
+    "Create /Users/elifoltyn/Downloads/game/src/systems/keybindings.js (centralized registry of all key->action mappings for documentation)"
+   ],
+   "risk": "LOW: Creating a shared OPT_KEYS constant is a refactoring improvement. Verify all three modes import/reference the same array."
+  }
+ ]
+}

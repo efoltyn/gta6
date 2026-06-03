@@ -1,0 +1,247 @@
+{
+ "summary": "CELL BLOCK Z audio system is now 100% real recordings (CC0/PD via Wikimedia, Kenney, or dedicated sources \u2014 all .ogg converted to .m4a for iOS). Three game modes: ESCAPE/JAIL (prison stealth), SURVIVAL (100-player disaster battle royale), and CITY (open-world crime). The BANK holds 30+ indexed SFX keyed to ~150 call sites across both per-mode systems and shared mechanics. LOOPS only defines diegetic real-time audio: car engine loop (city driving), wanted_siren (city heat), lockdown klaxon (prison max heat). CRITICAL ISSUE: music.js (line 22) references \"prison_score\", \"survival_score\", \"city_score\" keys that do NOT exist in LOOPS \u2014 these are no-op calls that fail silently. No background music beds exist. Secondary issues: weapon-specific SFX (\"shoot_taser\" mapped at audio.js:65-72) only used in escape mode (capture.js line 130); city mode has no taser. Several cosmetic/ambient events (guard idle speech, footstep cues in crowds, hunger/fatigue feedback) fire generic SFX that may not match intent.",
+ "keyFiles": [
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/audio.js",
+   "role": "Master audio bank + loop engine. BANK def lines 22-99. LOOPS def lines 106-110. setAudioLoop() lines 247-267. Preload + cooldown logic."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/music.js",
+   "role": "Score beds manager. Lines 14-26: calls setAudioLoop('score', key, ...) with NO-OP keys 'prison_score'/'survival_score'/'city_score' that don't exist in LOOPS."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/lockdown.js",
+   "role": "Escape mode lockdown (heat=99+). Line 153: setAudioLoop('lockdown', 'lockdown') \u2014 correctly uses LOOPS key. Line 164: stopAudioLoop fade-out."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/disasters.js",
+   "role": "Survival mode disaster roster. sound() calls at lines 47,63,131,183,234,280,292,309,323,368,378,398,414,432,501,505,512,580,607,690,766 for rumble/alarm/water/wind/fire/siren/thunder/explosion/collapse."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+   "role": "FPS weaponry + ammo SFX. Lines 26,62,709: w.sfx (defaults to 'shoot'). Lines 399,619,625,637,648,655,666,675: shell, rack, reload, step per-weapon. Lines 738-739: headshot/hit on target down."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/combat.js",
+   "role": "Prison melee (escape/city). Lines 191,203,218,227,237,258: step, punch, ko + cooldown gating."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/capture.js",
+   "role": "Guard escort/taser capture (escape mode only). Lines 73,110,151: 'alarm'. Lines 130,133: 'tase'/'punch' on subdue escalation."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/economy.js",
+   "role": "Prison loot/item economy. coin (280,304,364,386,430), alarm (408), door (469), jump (513), loot (583), key (585). No distinction between loot types."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/assets/audio",
+   "role": "6 subdirs: kenney/ (interface/impact/rpg CC0), oga/ (freesound CC0 loops + SFX), rse/ (freeware synth/samples), firearms/ (dedicated pistol/carbine/shotgun/smg/taser CC0), web/ (real recordings: disaster_siren, lockdown_alarm, police_siren)."
+  }
+ ],
+ "findings": [
+  {
+   "title": "Dead score loop keys in music.js",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/music.js",
+   "lines": "22",
+   "detail": "setAudioLoop('score', key) references 'prison_score', 'survival_score', 'city_score' (line 22) but LOOPS only defines car_engine, wanted_siren, lockdown. These keys fail silently \u2014 no music beds play. music.js then becomes a no-op in all three modes.",
+   "apis": [
+    "CBZ.setAudioLoop()"
+   ]
+  },
+  {
+   "title": "Taser sound only in escape mode, unused in city",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/capture.js",
+   "lines": "130",
+   "detail": "CBZ.sfx('tase') fires on subdue escalation (escape prison guards). City mode has taser weapon (weapon-data.js line 51-58: sfx 'shoot_taser'), but city combat (src/city/combat.js) never enters capture.js \u2014 it uses punch/ko only. Taser SFX defined but acoustically orphaned in city.",
+   "apis": [
+    "CBZ.sfx('tase')",
+    "CBZ.sfx('shoot_taser')"
+   ]
+  },
+  {
+   "title": "Disaster-mode sirens use 'siren' but no variant control",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/disasters.js",
+   "lines": "501,505",
+   "detail": "Disaster nuke + volcanic warning both call sound('siren') indiscriminately. Only one 'siren' in BANK (audio.js:33, file W+'disaster_siren.m4a'). No nuke-vs-volcano acoustic differentiation \u2014 both sound identical.",
+   "apis": [
+    "sound('siren')",
+    "CBZ.sfx('siren')"
+   ]
+  },
+  {
+   "title": "Ambient prison footsteps + clank fired continuously",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/ambient.js",
+   "lines": "18,23",
+   "detail": "If player.walking (idle walk loop in prison), fires step SFX every 2s by stride accumulation. Also fires clank every 8-20s (line 23). Non-diegetic \u2014 purely for ambiance. May conflict with real player footsteps during deliberate movement.",
+   "apis": [
+    "CBZ.sfx('step')",
+    "CBZ.sfx('clank')"
+   ]
+  },
+  {
+   "title": "Economy generic coin SFX for all item pickups",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/economy.js",
+   "lines": "280,304,364,386,430",
+   "detail": "All loot events (money pickup, contraband loot, prison jobs, earned rep) fire 'coin' SFX (kenney handleCoins variants). No acoustic distinction: picking up a cigarette butt, $500, or a keycard all sound like coins jingling. Loot variety is silent.",
+   "apis": [
+    "CBZ.sfx('coin')"
+   ]
+  },
+  {
+   "title": "City vehicle collision uses generic punch/ko, no crash SFX",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/vehicles.js",
+   "lines": "280,338,522",
+   "detail": "Vehicle-to-pedestrian/vehicle hits fire punch or ko (velocity-gated). No dedicated 'crash' or 'skid' or 'tire_screech' SFX. City traffic is acoustically silent except for hit impact + ragdoll grunt.",
+   "apis": [
+    "CBZ.sfx('punch')",
+    "CBZ.sfx('ko')"
+   ]
+  },
+  {
+   "title": "Wanted level HUD has no audio event",
+   "file": "/Users/elifoltyn/Downloads/game/src/city",
+   "lines": "N/A",
+   "detail": "City wanted level meter UI updates (src/city/wanted.js) but fires no sfx call. Only the wanted_siren LOOP plays while wanted>0 in audio.js line 286. No alert tone when wanted level JUMPS. No decrease tone when it drops.",
+   "apis": [
+    "No sound events"
+   ]
+  },
+  {
+   "title": "Lockdown siren is a true loop, alarm SFX retriggering elsewhere is outdated pattern",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/lockdown.js",
+   "lines": "153",
+   "detail": "lockdown.js correctly uses setAudioLoop('lockdown', 'lockdown') (line 153) for continuous prison lockdown siren. But historical comment (line 7) says '(CBZ.sfx(\"alarm\") re-fired every ~1.2s)' \u2014 this was old synth pattern. The code now uses the correct diegetic loop. But scattered alarm calls remain: safezone.js, disasters.js, capture.js, reinforcements.js fire CBZ.sfx('alarm') as instant pings, not loops.",
+   "apis": [
+    "CBZ.setAudioLoop()",
+    "CBZ.sfx('alarm')"
+   ]
+  },
+  {
+   "title": "Prison job + heist completions fire 'win' chime",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/careers.js",
+   "lines": "102",
+   "detail": "Job completion fires CBZ.sfx('win') \u2014 a musical jingle (rse chime1/chime2/jingle3). This is a UI victory tone, not diegetic. Consistent with arcade-y feedback but breaks the 'real recordings only, diegetic' rule.",
+   "apis": [
+    "CBZ.sfx('win')"
+   ]
+  },
+  {
+   "title": "Guard reinforcements trigger generic alarm SFX, not siren loop",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/reinforcements.js",
+   "lines": "144",
+   "detail": "CBZ.sfx('alarm') called instantly when reinforcements arrive (line 144). Should this be a siren LOOP or remain an instant alert beep? Unclear if alarms stack or replace.",
+   "apis": [
+    "CBZ.sfx('alarm')"
+   ]
+  },
+  {
+   "title": "No audio for player stamina/hunger/fatigue depletion",
+   "file": "/Users/elifoltyn/Downloads/game/src",
+   "lines": "N/A",
+   "detail": "City mode has hunger/fatigue systems (src/city/hunger.js) but no low-stamina or out-of-energy SFX. Player can collapse silently from exhaustion or starvation. Survival mode has stamina bar but no depletion warning sound.",
+   "apis": [
+    "No sound events"
+   ]
+  },
+  {
+   "title": "Weapon switch/holster has generic switch SFX, no weapon-specific racks",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+   "lines": "771",
+   "detail": "Switching between FPS weapons fires 'switch' SFX (kenney cloth/click variants). No weapon-specific sound: pistol holster, carbine shouldering, or shotgun pump \u2014 all identical click.",
+   "apis": [
+    "CBZ.sfx('switch')"
+   ]
+  },
+  {
+   "title": "Shell ejection timing may desync from actual reload",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+   "lines": "399",
+   "detail": "Shell casing SFX fired via setTimeout(0.09-0.17s delay) after fire (line 399) to simulate ejection lag. If network or frame-skip occurs, timing drifts. No visual shell model yet (line comment suggests future work).",
+   "apis": [
+    "CBZ.sfx('shell')"
+   ]
+  }
+ ],
+ "mergePlan": [
+  {
+   "step": "CRITICAL: Add missing music score loops to LOOPS definition in audio.js or remove dead references in music.js",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/audio.js (lines 106-110)",
+    "/Users/elifoltyn/Downloads/game/src/systems/music.js (line 22)"
+   ],
+   "risk": "HIGH: If loops are added, all three mode music beds begin playing \u2014 may conflict with existing ambient SFX or feel anachronistic if the recordings aren't curated. If removed, no background music/atmosphere at all (current state). Decision: Either find/create 3 real recording loop files (search Wikimedia Commons 'prison ambience', 'ambient loop', 'city underground'), or delete music.js to confirm 'no background beds' is intentional."
+  },
+  {
+   "step": "Consolidate alarm/siren SFX calls: decide diegetic vs. UI tone",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/safezone.js (line 85)",
+    "/Users/elifoltyn/Downloads/game/src/systems/disasters.js (line 500)",
+    "/Users/elifoltyn/Downloads/game/src/systems/capture.js (lines 73,110,151)",
+    "/Users/elifoltyn/Downloads/game/src/systems/reinforcements.js (line 144)",
+    "/Users/elifoltyn/Downloads/game/src/systems/economy.js (line 408)"
+   ],
+   "risk": "MEDIUM: Currently alarm SFX (rse alarm1/alarm4) fires as instant pings. Prison lockdown now uses a proper siren LOOP. City has police_siren loop for wanted level. But prison guard reinforcement, disaster warnings, and capture moments all trigger the old pattern. Either: (a) keep as instant alerts (acceptable for non-loop events), or (b) centralize to 3 distinct diegetic loops: 'prison_alarm', 'city_alarm', 'disaster_warning'. Recommend KEEP instant for now (simpler, less overlap risk)."
+  },
+  {
+   "step": "Replace or remove 'win' chime (careers.js) to honor diegetic-only rule",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/careers.js (line 102)"
+   ],
+   "risk": "LOW: 'win' SFX (rse jingle/chime) is UI-y, not diegetic. Options: (1) remove entirely (silent job complete), (2) replace with a diegetic sound (e.g., guard saying 'well done' or money register ding), (3) keep as intentional feedback (minor rule break). Recommend: remove or replace with a quiet 'coin' variant."
+  },
+  {
+   "step": "Add taser-specific SFX to city combat if capture is ever extended to city mode",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/combat.js",
+    "/Users/elifoltyn/Downloads/game/src/weapons/weapon-data.js (lines 51-58)"
+   ],
+   "risk": "LOW: City taser exists in weapon data but is never used (no city capture escalation). If city mode ever gains guard captures, the 'shoot_taser' SFX (audio.js:65-72, rse resonance2 + click6/7) is already defined. No action needed unless city combat adds captures."
+  },
+  {
+   "step": "Add unique disaster-specific siren/horn SFX and UI tones",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/disasters.js (lines 501,505)",
+    "/Users/elifoltyn/Downloads/game/assets/audio/web"
+   ],
+   "risk": "MEDIUM: Currently all disaster warnings use the same 'siren' (disaster_siren.m4a). Nuke finale and volcanic eruption are acoustically identical. Recommendation: Add 2 new files to audio/web: 'nuke_alarm.m4a' (electronic klaxon or warhead tone from Wikimedia Commons CC0: search 'nuclear siren' or 'air raid'), 'volcano_rumble.m4a' (geological low-frequency from 'underground rumble' or 'seismic recording'). Then add to BANK as 'nuke_alarm' and 'volcano_siren', and update disasters.js lines 501/505 to call sound('nuke_alarm') and sound('volcano_siren')."
+  },
+  {
+   "step": "Add low-stamina warning tone for both modes",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/hunger.js",
+    "/Users/elifoltyn/Downloads/game/src/modes/survival.js (stamina bar)"
+   ],
+   "risk": "LOW: Currently no audio when player stamina drops below 20% (city) or survival health critical. Recommendation: Add a quiet, repeating 'beep' or 'warning' SFX when stamina <20. Search Wikimedia Commons: 'warning beep' or 'alert tone'. Add to BANK as 'low_stamina', call from relevant tick functions only once per 2s (cooldown) to avoid spam."
+  },
+  {
+   "step": "Remove or rename ambient prison clank if it conflicts with real footsteps",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/ambient.js (lines 18,23)"
+   ],
+   "risk": "MEDIUM: If ambient clank (random metallic jingles) fires while player is walking, it muddies the soundscape. Either: (1) disable clank entirely (prison is quieter), (2) only fire clank when player is STILL (not moving), (3) reduce frequency (every 20-40s instead of 8-20s). Recommend option (2): add check 'if (player.speed < 0.1) then clank', so it only jingles during idle."
+  },
+  {
+   "step": "Differentiate loot types with distinct SFX",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/economy.js (lines 280,304,364,386,430,583,585)"
+   ],
+   "risk": "LOW: All pickups use 'coin'. Recommendation: (1) money drops -> 'coin' (current), (2) cigarettes/contraband -> 'loot' (already defined), (3) keycards -> 'key' (already defined), (4) tools -> different variant. Update economy.js calls to: CBZ.sfx(type === 'money' ? 'coin' : type === 'card' ? 'key' : type === 'contraband' ? 'loot' : 'pickup')."
+  },
+  {
+   "step": "Add vehicle skid/tire screech and collision impact SFX for city",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/vehicles.js (lines 280,338,522)",
+    "/Users/elifoltyn/Downloads/game/src/city/crashfx.js"
+   ],
+   "risk": "MEDIUM: City traffic is acoustically flat. Vehicle hits use punch/ko (body impact) but no tire screech, skid, or engine strain SFX. Recommendation: Add to BANK: 'tire_screech' (search Wikimedia Commons 'tire screech CC0' or 'car skid'), 'vehicle_crash' (search 'car crash impact'). Then update vehicles.js to fire CBZ.sfx('tire_screech') when vehicle velocity exceeds 20, and 'vehicle_crash' on collision (in crashfx.js)."
+  },
+  {
+   "step": "Confirm wanted level SFX if meter transitions should audio-cue",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/wanted.js",
+    "/Users/elifoltyn/Downloads/game/src/systems/audio.js (line 286)"
+   ],
+   "risk": "LOW: Currently no instant SFX when wanted jumps (e.g., 0->1, 2->3). Police siren loop only plays while wanted>0. Decision: (1) keep silent (wanted level is purely visual), or (2) add a quick alert tone when wanted JUMPS (e.g., CBZ.sfx('alarm') or a short 'police_alert' on transition). Recommend option (1) \u2014 the siren loop is sufficient feedback."
+  }
+ ]
+}

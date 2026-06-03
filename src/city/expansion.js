@@ -1,0 +1,285 @@
+/* ============================================================
+   city/expansion.js - the life-game island district.
+
+   This copies the disaster arena's world language into CITY mode:
+   a circular island, beach, street grid, enterable low-rise town,
+   trees, parked cars, a service station and an auto showroom. The
+   disaster hills are replaced with a central pair of massive towers
+   and three additional climbable skyline towers. A bridge continues
+   the mainland centre street through the east-wall gate.
+
+   Hooked by city/world.js after the original city buildings exist.
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  if (!CBZ || !window.THREE) return;
+  const THREE = window.THREE;
+  const mat = CBZ.mat;
+
+  let _s = 60601;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
+  CBZ.cityExpansion = function (city) {
+    if (city.annex) return city.annex;
+    const build = CBZ.cityMakeBuilding;
+    if (!build) return null;
+    _s = 60601;
+
+    const root = city.root;
+    const R = 120, ROADW = 7, GRID = 40;
+    const cx = city.maxX + 215, cz = city.center.z;
+    const lots = [], placed = [], roadSegs = [];
+
+    function plane(x, z, w, d, color, y, basic) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
+        basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(x, y == null ? 0.03 : y, z);
+      m.receiveShadow = !basic;
+      root.add(m);
+      return m;
+    }
+
+    function box(x, y, z, w, h, d, color, opts) {
+      opts = opts || {};
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, opts.emissive ? { emissive: opts.emissive, ei: opts.ei || 0.4 } : null));
+      m.position.set(x, y, z);
+      m.castShadow = opts.cast !== false; m.receiveShadow = opts.receive !== false;
+      root.add(m);
+      if (opts.solid) {
+        const col = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m };
+        if (opts.y0 != null) col.y0 = opts.y0;
+        if (opts.y1 != null) col.y1 = opts.y1;
+        if (opts.noCam) col.noCam = true;
+        CBZ.colliders.push(col);
+      }
+      return m;
+    }
+
+    function tag(group, text, y, scale) {
+      if (!CBZ.makeLabelSprite) return;
+      const s = CBZ.makeLabelSprite(text);
+      if (!s) return;
+      s.position.set(0, y, 0); s.scale.set(scale || 6, (scale || 6) * 0.24, 1);
+      group.add(s);
+    }
+
+    function addPlaced(x, z, w, d) {
+      const p = { x, z, w, d };
+      placed.push(p);
+      return p;
+    }
+
+    function clashes(x, z, w, d, pad) {
+      pad = pad == null ? 4 : pad;
+      for (const p of placed) {
+        if (Math.abs(p.x - x) < (p.w + w) / 2 + pad && Math.abs(p.z - z) < (p.d + d) / 2 + pad) return true;
+      }
+      return false;
+    }
+
+    function registerBuilding(x, z, w, d, storeys, color, name, kind) {
+      const b = build(root, x, z, w, d, storeys, color, 0);
+      const door = { x, z: z - d / 2 + 1.6, nx: 0, nz: 1 };
+      const lot = { cx: x, cz: z, w, d, kind: kind || "tower", district: "island", building: { ...b, name: name || "Island Building", door } };
+      lots.push(lot);
+      addPlaced(x, z, w, d);
+      return { b, lot };
+    }
+
+    // ---- island and the bridge from the original city's east-wall gate ----
+    const ocean = plane(cx, cz, R * 3.4, R * 3.4, 0x2f6f9e, -0.44);
+    ocean.receiveShadow = false;
+    const beach = new THREE.Mesh(new THREE.CircleGeometry(R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
+    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz); beach.receiveShadow = true; root.add(beach);
+    const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
+    const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64), new THREE.MeshLambertMaterial({ map: grassTex }));
+    island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz); island.receiveShadow = true; root.add(island);
+
+    const bridgeStart = city.xLines[city.xLines.length - 1] - 2;
+    const bridgeEnd = cx - R + 12;
+    const bridgeLen = bridgeEnd - bridgeStart;
+    const bridgeX = (bridgeStart + bridgeEnd) / 2;
+    plane(bridgeX, cz, bridgeLen, 18, 0x9aa0a8, 0.025);
+    plane(bridgeX, cz, bridgeLen, ROADW, 0x33363d, 0.055);
+    for (let x = bridgeStart + 3; x < bridgeEnd; x += 7) plane(x, cz, 2.8, 0.28, 0xf2d14a, 0.075, true);
+    box(bridgeX, 0.75, cz - 8.7, bridgeLen, 1.5, 0.4, 0x626a76, { solid: true, noCam: true });
+    box(bridgeX, 0.75, cz + 8.7, bridgeLen, 1.5, 0.4, 0x626a76, { solid: true, noCam: true });
+    city.bridge = { minX: bridgeStart - 2, maxX: bridgeEnd + 5, minZ: cz - 9.2, maxZ: cz + 9.2 };
+    city.roads.push({ x: bridgeX, z: cz, vertical: false, len: bridgeLen, district: "bridge" });
+
+    // ---- landmark towers: every former mountain position becomes skyline ----
+    const towers = [];
+    function tower(x, z, w, d, storeys, color, name) {
+      const rec = registerBuilding(x, z, w, d, storeys, color, name, "tower");
+      towers.push(rec.lot);
+      tag(rec.b.group, name, rec.b.h + 2.2, storeys > 10 ? 8 : 6);
+      // rooftop beacon makes the tower readable from the mainland.
+      rec.b.lbox(0, rec.b.h + 1.0, 0, 0.45, 2.0, 0.45, 0xff5b5b, { emissive: 0xff3b3b, ei: 0.8, cast: false });
+      return rec;
+    }
+
+    tower(cx - 13, cz, 19, 20, 15, 0x667991, "TWIN TOWER WEST");
+    tower(cx + 13, cz, 19, 20, 15, 0x71849d, "TWIN TOWER EAST");
+    tower(cx - 52, cz - 30, 14, 15, 8, 0x596b82, "NORTHWEST TOWER");
+    tower(cx + 48, cz + 40, 15, 15, 9, 0x7a6f8c, "SOUTHEAST TOWER");
+    tower(cx + 40, cz - 48, 14, 14, 7, 0x5e7d86, "NORTHEAST TOWER");
+
+    // ---- service station and showroom, copied from the disaster-town mix ----
+    function gasStation(x, z) {
+      addPlaced(x, z, 20, 15);
+      lots.push({ cx: x, cz: z, w: 20, d: 15, kind: "gas", district: "island", building: { name: "Island Gas" } });
+      plane(x, z, 20, 15, 0x41464d, 0.045);
+      const CH = 5.2;
+      [[-6, -3.5], [6, -3.5], [-6, 3.5], [6, 3.5]].forEach(([px, pz]) => box(x + px, CH / 2, z + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
+      box(x, CH + 0.45, z, 14.5, 0.9, 9.5, 0xfbfcfe, { solid: true, y0: CH, y1: CH + 0.9 });
+      for (let i = -1; i <= 1; i++) box(x + i * 4, 0.8, z, 0.8, 1.6, 0.7, 0xff7a1a, { solid: true });
+      box(x - 9.5, 2.4, z - 5.5, 0.5, 4.8, 0.5, 0x6a7079, { solid: true });
+      box(x - 9.5, 4.6, z - 5.5, 2.2, 1.6, 0.3, 0xffd451);
+    }
+
+    function parkedCar(x, z, vertical, color, solid) {
+      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = vertical ? 0 : Math.PI / 2; root.add(g);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 4.2), mat(color)); body.position.y = 0.78; body.castShadow = true; g.add(body);
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.72, 2.2), mat(0x223038, { emissive: 0x0c141a, ei: 0.35 })); cabin.position.set(0, 1.45, -0.2); g.add(cabin);
+      if (solid) {
+        const hw = vertical ? 1.1 : 2.2, hd = vertical ? 2.2 : 1.1;
+        CBZ.colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, ref: body, noCam: true });
+      }
+      return g;
+    }
+
+    function showroom(x, z) {
+      addPlaced(x, z, 18, 13);
+      lots.push({ cx: x, cz: z, w: 18, d: 13, kind: "carlot", district: "island", building: { name: "Island Auto Showroom" } });
+      plane(x, z, 18, 13, 0xd6dade, 0.055);
+      box(x, 3, z + 6.3, 18, 6, 0.35, 0x586a86, { solid: true });
+      box(x - 8.8, 3, z, 0.35, 6, 13, 0x586a86, { solid: true });
+      box(x + 8.8, 3, z, 0.35, 6, 13, 0x586a86, { solid: true });
+      box(x, 6.2, z, 18, 0.4, 13, 0x46566b, { solid: true, y0: 6, y1: 6.4 });
+      box(x - 5.1, 3, z - 6.3, 0.5, 6, 0.35, 0x44506b, { solid: true });
+      box(x + 5.1, 3, z - 6.3, 0.5, 6, 0.35, 0x44506b, { solid: true });
+      box(x, 6.9, z - 6.3, 10, 1.2, 0.3, 0x12c258);
+      parkedCar(x - 4.6, z + 1.6, true, 0xe24b4b, false);
+      parkedCar(x + 4.6, z + 1.6, true, 0x3c6fd6, false);
+      parkedCar(x, z + 4.2, false, 0xf2c43d, false);
+    }
+
+    gasStation(cx - 78, cz + 74);
+    showroom(cx + 72, cz - 76);
+
+    // ---- enterable low-rise town around the former terrain peaks ----
+    const PALETTE = [0xff7a6b, 0x6bb6ff, 0xffd166, 0x9ad17a, 0xc792ea, 0xff9e6b, 0x66d9c0, 0xf06b9b];
+    function nearRoad(x, z, w, d) {
+      for (let k = -2; k <= 2; k++) {
+        if (Math.abs(x - (cx + k * GRID)) < w / 2 + ROADW / 2 + 1.2) return true;
+        if (Math.abs(z - (cz + k * GRID)) < d / 2 + ROADW / 2 + 1.2) return true;
+      }
+      return false;
+    }
+    let made = 0, attempts = 0;
+    while (made < 15 && attempts++ < 900) {
+      const a = rng() * Math.PI * 2, dist = 46 + rng() * (R - 60);
+      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
+      const w = 8 + rng() * 4.5, d = 8 + rng() * 4.5;
+      if (clashes(x, z, w, d, 4) || nearRoad(x, z, w, d)) continue;
+      const storeys = 1 + ((rng() * 3) | 0);
+      const rec = registerBuilding(x, z, w, d, storeys, PALETTE[(rng() * PALETTE.length) | 0], "Island Apartments", "tower");
+      if (rng() < 0.22) tag(rec.b.group, "ISLAND BLOCK", rec.b.h + 1.5, 4.5);
+      made++;
+    }
+
+    // ---- copied island street grid, clipped around the replacement towers ----
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0x33363d });
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a });
+    function blocked(x, z) {
+      for (const p of placed) {
+        if (Math.abs(p.x - x) < p.w / 2 + ROADW / 2 + 0.8 && Math.abs(p.z - z) < p.d / 2 + ROADW / 2 + 0.8) return true;
+      }
+      return false;
+    }
+    function nearDoor(x, z, radius) {
+      const r2 = radius * radius;
+      for (const lot of lots) {
+        const d = lot.building && lot.building.door;
+        if (!d) continue;
+        const ex = d.x - d.nx * 4.8, ez = d.z - d.nz * 4.8;
+        const vx = ex - d.x, vz = ez - d.z, wx = x - d.x, wz = z - d.z;
+        const den = vx * vx + vz * vz || 1;
+        const t = Math.max(0, Math.min(1, (wx * vx + wz * vz) / den));
+        const dx = x - (d.x + vx * t), dz = z - (d.z + vz * t);
+        if (dx * dx + dz * dz < r2) return true;
+      }
+      return false;
+    }
+    function layRoadLine(fixed, vertical) {
+      const step = 4, segs = [];
+      let start = null;
+      for (let t = -R; t <= R + step; t += step) {
+        const x = vertical ? fixed : cx + t, z = vertical ? cz + t : fixed;
+        const ok = Math.hypot(x - cx, z - cz) < R - 5 && !blocked(x, z);
+        if (ok && start === null) start = t;
+        if ((!ok || t > R) && start !== null) {
+          const end = ok ? t : t - step;
+          if (end - start >= step * 2) segs.push([start, end]);
+          start = null;
+        }
+      }
+      for (const [a, b] of segs) {
+        const mid = (a + b) / 2, len = b - a;
+        const x = vertical ? fixed : cx + mid, z = vertical ? cz + mid : fixed;
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
+        m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.receiveShadow = true; root.add(m);
+        const dashes = Math.max(1, Math.floor(len / 6));
+        for (let i = 0; i < dashes; i++) {
+          const tt = a + (i + 0.5) * (len / dashes);
+          const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
+          const dm = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3), lineMat);
+          dm.rotation.x = -Math.PI / 2; dm.position.set(lx, 0.07, lz); root.add(dm);
+        }
+        const seg = { x, z, len, vertical, district: "island" };
+        roadSegs.push(seg); city.roads.push(seg);
+      }
+    }
+    const islandXLines = [], islandZLines = [];
+    for (let k = -2; k <= 2; k++) {
+      islandXLines.push(cx + k * GRID); islandZLines.push(cz + k * GRID);
+      layRoadLine(cx + k * GRID, true);
+      layRoadLine(cz + k * GRID, false);
+    }
+
+    // Traffic lights and the radar use the same intersection records as downtown.
+    for (const x of islandXLines) for (const z of islandZLines) {
+      if (Math.hypot(x - cx, z - cz) >= R - 8 || blocked(x, z)) continue;
+      plane(x, z, ROADW, ROADW, 0x2e3138, 0.06);
+      city.intersections.push({ x, z, i: -1, j: -1, phase: 0, t: rng() * 6, ns: true, light: null, district: "island" });
+    }
+    city.allXLines = city.xLines.concat(islandXLines);
+    city.allZLines = city.zLines.concat(islandZLines);
+
+    // ---- trees and parked cars make the new district feel inhabited ----
+    for (let i = 0; i < 58; i++) {
+      const a = rng() * Math.PI * 2, dist = 20 + rng() * (R - 24);
+      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
+      if (blocked(x, z) || nearRoad(x, z, 1, 1) || nearDoor(x, z, 2.7)) continue;
+      const th = 2.0 + rng() * 1.5;
+      box(x, th / 2, z, 0.5, th, 0.5, 0x6b4a2a, { solid: true, noCam: true });
+      box(x, th + 1.2, z, 2.4 + rng(), 2.6, 2.4 + rng(), 0x3f9a4f, { cast: false });
+    }
+    const CAR_COLORS = [0xe24b4b, 0x3c6fd6, 0xf2c43d, 0x4caf6e, 0xe8e8ee, 0x2a2d33, 0xe88a3c];
+    for (let i = 0; i < roadSegs.length; i += 2) {
+      const r = roadSegs[i], off = (rng() < 0.5 ? -1 : 1) * ROADW * 0.25, along = (rng() - 0.5) * r.len * 0.65;
+      const x = r.x + (r.vertical ? off : along), z = r.z + (r.vertical ? along : off);
+      if (!blocked(x, z)) parkedCar(x, z, r.vertical, CAR_COLORS[(rng() * CAR_COLORS.length) | 0], true);
+    }
+
+    const annex = {
+      cx, cz, radius: R, lots, towers, roads: roadSegs,
+      xLines: islandXLines, zLines: islandZLines,
+      center: { x: cx, z: cz },
+    };
+    city.annex = annex;
+    return annex;
+  };
+})();

@@ -1,0 +1,350 @@
+{
+ "summary": "The CELL BLOCK Z game consists of three distinct modes\u2014escape/jail (default), survival (disaster battle royale with 100 bots), and city (GTA-style open world)\u2014all built on a shared Three.js r128 engine wired as ~130 IIFE modules onto window.CBZ. Currently, 70% of core systems are already unified: the character rig (entities/character.js), procedural animation (animChar), player physics (systems/physics.js with shared collide/floorAt/groundAt), the camera (systems/camera.js, third-person across all modes), FPS mode (systems/fpsmode.js, usable in escape+city), facial animation (systems/facial.js), gore (systems/gore.js), and efficiency machinery (spatialgrid, quality/batch LOD). However, city mode forks at the appearance level (NPCs use makeCharacter but city peds are recreated per-spawn, not reused), physics integration (city/peds.js + city/police.js reimplemented collision separately), and camera logic (cityCam override in systems/camera.js) rather than composing the escape pipeline. Survival mode cleanly reuses the entire player stack and bot bots use makeCharacter + animChar + collide + floorAt without deviation, proving the architecture works. The merge problem: appearance, physics, camera, and FPS feel improvements benefit only one mode at a time because city has forked implementations. The opportunity: consolidate city peds/cops/medics into a shared actor model that reuses the escape NPC rig system, unify camera code paths, and ensure all three modes feed a single physics/LOD pipeline.",
+ "keyFiles": [
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/character.js",
+   "role": "Shared rig: makeCharacter() builds the blocky avatar + limbs + procedural animation sockets; reused by prison NPCs, survival bots, AND (partially) city peds"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/player.js",
+   "role": "Player appearance + state; shared by all modes; survival/city wrap it in a playerActor proxy"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/physics.js",
+   "role": "Shared core: updatePlayer(), collide() circle-vs-box, floorAt() terrain + platforms, groundAt(); used by all modes but city peds reimplement collision inline"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/world/materials.js",
+   "role": "cmat(color) + boxGeom(w,h,d) shared caches; mat(color) fresh per-instance; city should use cmat for ped colors but regenerates instead"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+   "role": "First-person shooter; usable in escape+city but not survival; weapon viewmodel/ammo tied to escape prison setup"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/camera.js",
+   "role": "Third-person follow camera with LOD/zoom; split modes: escape default, city cityCam override, survival death-cam spectate"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/facial.js",
+   "role": "Micro facial animation (blink/dart/talking/head-tracking); all rigs .face + ._fa; works all modes if rig exists"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/gore.js",
+   "role": "Always-updater gore (blood/gibs/splats/flash); shared by prison shootouts and survival deaths; city death uses it (city/death.js)"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/core/loop.js",
+   "role": "Master frame loop; sorts updaters/always-runners by order; hitstop/slowmo dilation"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/core/quality.js",
+   "role": "Adaptive resolution + shadow detail; crowd render budget CBZ.crowdRenderBudget synced to quality level"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/core/batch.js",
+   "role": "One-time static mesh merger; reduces prison draw calls; not active in survival/city yet"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/spatialgrid.js",
+   "role": "O(n) alloc-free spatial hash CBZ.makeGrid(); used by npcgrid (escape), survivorbot separation (survival), city humanContact"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/systems/npcgrid.js",
+   "role": "Query-cache for escape NPCs only; gated by game.mode==='escape'; survival/city don't use it"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "role": "City pedestrian AI; calls makeCharacter() but forks movement + animation from escape pattern; uses CBZ.collide inline, not actor model"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/police.js",
+   "role": "City cops; same pattern: makeCharacter() + inline collide; separate combat logic from escape guards"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+   "role": "City instanced ambient crowd (InstancedMesh); pure sim + render, no shared actor skeleton"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/mode.js",
+   "role": "City mode descriptor; overrides CBZ.floorAt, registers updaters gated by game.mode==='city', reuses player + camera"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/modes/survival.js",
+   "role": "Survival mode descriptor + playerActor proxy; kills/disasters/spectate; REUSES player + character + physics cleanly"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/survivorbot.js",
+   "role": "Survival bots; proves reuse works: makeCharacter + animChar + collide + floorAt no fork; LOD + slicing cheap"
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/PERFORMANCE_PLAN.md",
+   "role": "Architecture doc; describes ambient LOD (crowd), hero NPC grid, worker society, density fields"
+  }
+ ],
+ "findings": [
+  {
+   "title": "Player physics UNIFIED across escape/survival/city",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/physics.js",
+   "lines": "1-265",
+   "detail": "CBZ.updatePlayer(dt) at lines 114\u2013260 drives all three modes\u2014collide(), floorAt(), platformAt(), jump/gravity, crouch/sprint. Survival + city both call it directly (order 10). Player collider is per-mode-agnostic circle-vs-box. floorAt is chained by mode: escape has none (returns 0), survival uses CBZ.surv.floorAt(x,z), city wraps terrain in city/mode.js lines 67\u201368 with baseFloor fallback. collide() at lines 63\u201385 is a shared spatial-hashed grid (COL_CELL=8, COL_PAD=1.0) supporting height-gated colliders [y0,y1] for multi-storey buildings.",
+   "apis": [
+    "CBZ.updatePlayer",
+    "CBZ.collide",
+    "CBZ.floorAt",
+    "CBZ.groundAt",
+    "CBZ.markCollidersDirty",
+    "CBZ.colliders"
+   ]
+  },
+  {
+   "title": "Character rig + animation REUSED, but city peds fork appearance data",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/character.js",
+   "lines": "42\u2013147",
+   "detail": "CBZ.makeCharacter(c) at lines 42\u2013147 builds rig once: torso, limbs (ll/rl/la/ra), neck\u2192head, procedural hair/hat/belt/stripes/badge, face (eyes/brow/mouth for facial.js). Rig is reused by prison NPCs (entities/npc.js), survival bots (entities/survivorbot.js lines 74\u201376), and city peds (city/peds.js line 71). Procedural animation CBZ.animChar(ch, speed, dt) at character.js lines 161\u2013230 is stateless except ch.phase/.breath/.lean/.sway/.headYaw, making it reusable across modes. HOWEVER: city peds are respawned on every mode.reset() (city/mode.js lines 177\u2013180 calls CBZ.spawnCityPeds()), while survival bots and prison NPCs persist. City peds reassign colors/names per-spawn instead of caching appearances. Shared cmat() cache at world/materials.js lines 28\u201339 is used by escape/survival consistently but city peds regenerate outfit colors on every life.",
+   "apis": [
+    "CBZ.makeCharacter",
+    "CBZ.animChar",
+    "CBZ.cmat",
+    "CBZ.boxGeom",
+    "CBZ.mat"
+   ]
+  },
+  {
+   "title": "Facial animation UNIFIED but only if rig.face exists",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/facial.js",
+   "lines": "1\u201350",
+   "detail": "CBZ.onUpdate(88, ...) at line 166 (not shown) loops every rig expecting rig.face = {eyeL,eyeR,brow,mouth} and rig._fa state. Blinks/darts are time-driven (CBZ.now), eased offsets. Head tracking glances at player within TRACK_DIST=8 units. Round-robin at MAX_PER_FRAME=4 rigs/frame (cheap on phones). updateRig(ch,dt,now,talking,lookT) at lines 93\u2013170 mutates ch.face.eyeL.position.x/y, ch.face.eyeR.scale.y, ch.face.mouth.scale.y. Reuses ch.neck.rotation set by animChar(). DEPENDS: rig must have face, no guard gates it by mode. Survival bots, city peds, prison NPCs all have faces. Works across all three.",
+   "apis": [
+    "CBZ.onUpdate",
+    "CBZ.now",
+    "rig.face",
+    "rig._fa"
+   ]
+  },
+  {
+   "title": "Gore + bloody death FX UNIFIED, runs always-updater in all modes",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/gore.js",
+   "lines": "1\u2013147",
+   "detail": "CBZ.gore(x,y,z,opts) at lines 66\u2013106 spawns blood mist, gibs, ground splats, red flash, shake, optional slowmo. Called by prison combat (systems/combat.js, guards.js), survival mode kill-feed (modes/survival.js lines 60\u201371), and city death (city/death.js). Gore updater runs always (order 8, not gated by mode). Distance-gates off-screen kills (line 73: camera >70 units away \u2192 skip gibs/flash). Cleanup CBZ.clearGore() at lines 141\u2013145 called per mode.reset(). bits[] + splats[] arrays + flashEl DOM are persistent across modes.",
+   "apis": [
+    "CBZ.gore",
+    "CBZ.clearGore",
+    "CBZ.shake",
+    "CBZ.doSlowmo"
+   ]
+  },
+  {
+   "title": "Camera SPLIT: escape default, city override cityCam, survival spectate",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/camera.js",
+   "lines": "146\u2013250",
+   "detail": "updateCamera(dt) at lines 146\u2013250 (shown partial; full file 400+ lines). Escape: default third-person follow, smooth-damp spring-arm, FOV kick at speed, raycast collision. Survival (lines 222\u2013227): special spectate-mode orbit on death. City (lines 186\u2013217): cityCam state object (cc.fp = first-person toggle, cc.death = orbit replay); city/view.js owns cityCam visibility. Zoom (lines 20\u201321) is mode-agnostic. Shake (lines 30\u201331) applied globally. PROBLEM: cityCam overrides at lines 189\u2013217 bypass the smooth-damp pipeline entirely; city driving (lines 169\u2013184) re-implements camera arm logic. Survival death-cam (lines 191\u2013198) also re-implements orbit. Consolidation: move cityCam/survival overrides into composable pipeline phases instead of nested if-chains.",
+   "apis": [
+    "CBZ.cam",
+    "CBZ.camera",
+    "CBZ.camZoom",
+    "CBZ.resetZoom",
+    "CBZ.shake",
+    "CBZ.startIntro",
+    "CBZ.cityCam"
+   ]
+  },
+  {
+   "title": "FPS mode USABLE escape+city, but tuned to escape",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+   "lines": "1\u2013200",
+   "detail": "CBZ.fps state + weapon model system. WEAPONS array at lines 19\u201327 is customizable (CBZ.FPS_WEAPONS override). First-person view at lines 106\u2013128 computes shootDir from cam.yaw/pitch. Weapon models built from CBZ.weaponAppearance[w.key] at lines 178\u2013181. FPS gated by CBZ.game.state==='playing' at line 83. WORKS in escape (prison armory unlocks guns) + city (shop gun buys integrate via CBZ.fpsAddAmmo at city/combat.js). NOT in survival (deliberately). PROBLEM: weapon list is global; prison guns + city guns are separate item enums. viewModel depth-write disabled (line 191) but city first-person camera (systems/camera.js line 200) sets eye height differently\u2014combat feel differs between escape/city.",
+   "apis": [
+    "CBZ.fps",
+    "CBZ.FPS_WEAPONS",
+    "CBZ.currentWeaponId",
+    "CBZ.weaponAppearance",
+    "CBZ.fpsAddAmmo",
+    "CBZ.fpsPunchAnim"
+   ]
+  },
+  {
+   "title": "Spatial grid + NPC culling UNIFIED but mode-gated",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/spatialgrid.js",
+   "lines": "23\u201363",
+   "detail": "CBZ.makeGrid(cell) returns a reusable alloc-free spatial hash (lines 40\u201362). Used by: (1) escape npcgrid.js (lines 15\u201353), gated CBZ.game.mode==='escape' at line 51; (2) survival survivorbot.js (lines 218\u2013226), builds local sepGrid, called humanContact if available; (3) city humanContact (systems/humanContact.js), called during ped + cop separation. Grid uses integer keyOf() at line 38 so Map keys stay numeric (no GC strings). Pool + used arrays recycled each rebuild(). No per-frame allocation after warm-up.",
+   "apis": [
+    "CBZ.makeGrid",
+    "grid.rebuild",
+    "grid.cellIndex",
+    "grid.bucket"
+   ]
+  },
+  {
+   "title": "NPC grid INDEX escape-only; not used by survival/city",
+   "file": "/Users/elifoltyn/Downloads/game/src/systems/npcgrid.js",
+   "lines": "1\u201353",
+   "detail": "CBZ.queryNpcsNear(x,z,radius,out) at lines 25\u201345 queries the prison NPC grid for neighbour AI (guards, inmates check who's nearby for social/fear reactions). Grid rebuilt at order 21.7 (line 50) before NPC movement at order 22. Gated: CBZ.game.mode==='escape' at line 51, so survival/city queries would fail silently. This is correct (survival bots don't have complex social brains; city peds have inline neighbourhood checks). BUT if city were to adopt richer NPC AI later, it would need to either use this grid or reimplement it.",
+   "apis": [
+    "CBZ.queryNpcsNear",
+    "CBZ.npcs"
+   ]
+  },
+  {
+   "title": "City peds FORK movement + collision, duplicating physics pattern",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "lines": "554\u2013634",
+   "detail": "move(ped,dt,near) at lines 554\u2013634 (not shown; from grep results city/peds.js is 800+ lines). City peds inline-call CBZ.collide(ped.pos,0.5,ped.pos.y,ped.pos.y+1.7) at line in grep output (not in excerpt). Calls CBZ.animChar(ped.char,ped.speed,dt) same as escape. BUT: ped.pos is mutated inline (not via updatePlayer), ped.y = floorAt(...) same as escape, but no shared actor model. Survival bots (survivorbot.js lines 185\u2013186) call the same CBZ.collide + CBZ.surv.floorAt inline, which is correct (reuse). Problem: city peds were ADDED to the codebase after the escape NPC system existed, so they replicate the pattern instead of composing it. Each city ped is independent logic loop, not an actor in a uniform manager.",
+   "apis": [
+    "CBZ.collide",
+    "CBZ.animChar",
+    "CBZ.floorAt",
+    "CBZ.cityPeds"
+   ]
+  },
+  {
+   "title": "City police SEPARATELY implemented from escape guards",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/police.js",
+   "lines": "23\u201335",
+   "detail": "City cops built with makeCharacter() at line 34 (same rig) but brain is bespoke: patrol/pursue/arrest/shoot logic unique to city wanted system, not the escape guard FSM (entities/ai.js). makeCharacter is reused but rest of the actor model (state machine, behaviour tree, memory) is forked. This is reasonable separation (city cops do different things), but physics + animation integration is copy-paste: city/police.js line 229 calls animChar(c.char,0,dt) same as escape ai.js does. Opportunity: factor out the 'patrol + chase + respond to stimulus' FSM so both guards and cops inherit it.",
+   "apis": [
+    "CBZ.makeCharacter",
+    "CBZ.animChar",
+    "CBZ.collide",
+    "CBZ.lerpAngle"
+   ]
+  },
+  {
+   "title": "Survival bots CLEANLY reuse entire pipeline",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/survivorbot.js",
+   "lines": "71\u2013213",
+   "detail": "makeBot(x,z,r) at lines 71\u201399 calls CBZ.makeCharacter() same rig. move(b,dt,animate) at lines 172\u2013188 calls CBZ.collide() at line 185, CBZ.surv.floorAt() at line 186, CBZ.animChar() at line 187. think(b) at lines 132\u2013169 is a lean 3-state FSM (wander/flee/dead). UPDATE loop at order 23 (lines 191\u2013213) rounds-robin brains, calls move + think. The PROOF OF CONCEPT: survival mode reuses character, animation, physics, grid, without forking. Survival bots + player share the same collision space, same terrain following, same visual pipeline.",
+   "apis": [
+    "CBZ.makeCharacter",
+    "CBZ.animChar",
+    "CBZ.collide",
+    "CBZ.surv.floorAt",
+    "CBZ.lerpAngle",
+    "CBZ.damp",
+    "CBZ.makeGrid"
+   ]
+  },
+  {
+   "title": "Adaptive quality + LOD machinery NOT used by city",
+   "file": "/Users/elifoltyn/Downloads/game/src/core/quality.js",
+   "lines": "1\u201355",
+   "detail": "Adaptive resolution (pr from 0.6 to 1.5), shadow detail (512\u20132048), crowd budget (220\u20131000) auto-scale based on rolling 1s FPS sampler. CBZ.qualityLevel + CBZ.crowdRenderBudget exported. Escape uses crowd LOD (adaptive rig count). Survival bots are explicitly capped at 100 (not budget-driven). City has static crowd cap at 360 (city/crowd.js line 23) and static ped spawns. Opportunity: make city crowd + ped visibility budget-responsive so it scales on weak devices.",
+   "apis": [
+    "CBZ.sampleFPS",
+    "CBZ.qualityLevel",
+    "CBZ.crowdRenderBudget",
+    "CBZ.refreshCrowdBudget"
+   ]
+  },
+  {
+   "title": "Static geometry batcher ONE-TIME merge; escape only",
+   "file": "/Users/elifoltyn/Downloads/game/src/core/batch.js",
+   "lines": "1\u2013121",
+   "detail": "CBZ.runStaticBatch() merges inert meshes (no userData, no collider, opaque, no emissive) by colour + shadow flags at load time, reducing prison draw calls ~2200 \u2192 few dozen. Runs ONCE (line 117). City/world.js builds on-demand, so batching would need to hook city.built event. Survival arena is pre-baked, could batch too. Current: escape only. Opportunity: lazy-batch city geometry once arena is built.",
+   "apis": [
+    "CBZ.runStaticBatch",
+    "CBZ.batchStats"
+   ]
+  },
+  {
+   "title": "Loop + updater/always-runner system UNIFIED across modes",
+   "file": "/Users/elifoltyn/Downloads/game/src/core/loop.js",
+   "lines": "1\u201359",
+   "detail": "Master frame loop at lines 23\u201355. Sorts CBZ.updaters and CBZ.always by order at lines 11\u201312. Hitstop (line 33) + slowmo (line 34) + time dilation apply globally. updaters gate on g.state==='playing' (line 38), always run in all states. Every mode registers its own updaters, all sorted into one queue. The architecture is neutral\u2014works for any mode. Survival (order 23), city (order 31 for stamina, various for subsystems), escape (order 10 player, 22 NPCs) coexist without collision.",
+   "apis": [
+    "CBZ.updaters",
+    "CBZ.always",
+    "CBZ.onUpdate",
+    "CBZ.onAlways",
+    "CBZ.hitstop",
+    "CBZ.slowmo",
+    "CBZ.doHitstop",
+    "CBZ.doSlowmo"
+   ]
+  }
+ ],
+ "mergePlan": [
+  {
+   "step": "1. UNIFY CAMERA CODE PATHS: Extract common third-person follow logic into a single updateCameraThirdPerson(dt, overrides) function; call it from systems/camera.js main path for escape + city + survival (not cityCam override, not cityCam driving, not spectate orbit, just the base arm). This consolidates FOV kick, zoom, smooth-damp, raycast collision into one place.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/camera.js"
+   ],
+   "risk": "cityCam first-person override relies on cc.fp boolean; must preserve cc.death orbit logic. Safe: additive\u2014new function is called first, mode overrides apply after."
+  },
+  {
+   "step": "2. CONSOLIDATE CITY PEDS INTO SHARED ACTOR MODEL: Refactor city/peds.js makePed() to return a ped object with a .char (rig) + .speed + .pos + abstract move(dt,animate) method instead of inline per-ped loops. Move move() calls from city/peds.js main loop into a shared actor envelope (systems/actors.js or city/actors.js) that calls move() + animChar() uniformly.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+    "/Users/elifoltyn/Downloads/game/src/city/police.js"
+   ],
+   "risk": "City peds are deeply behavioural (mug, rob, flee, chat); move() must encapsulate that without breaking. Solution: ped.move(dt,animate) returns a state + position delta, called by a uniform loop. Benefit: collide() + floorAt() + animChar() become pluggable across NPCs."
+  },
+  {
+   "step": "3. CACHE CITY PED APPEARANCES: Replace per-spawn outfit regeneration in city/peds.js lines 64\u201380 with appearance pooling. At mode.reset(), generate or reuse a pre-rolled roster of 50\u2013100 unique (outfit,skin,hair,name) tuples. On spawn, pop from the roster; on death, push back. This amortizes appearance cost and reuses cmat() cache hits across lives.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+    "/Users/elifoltyn/Downloads/game/src/city/mode.js"
+   ],
+   "risk": "City peds are currently unique per spawn; pooling may reduce variety. Mitigation: larger pool (100 entries) + random resampling on re-pop. Benefit: memory + cmat cache reuse, faster respawns."
+  },
+  {
+   "step": "4. UNIFY FPS WEAPON LOADOUT: Split CBZ.FPS_WEAPONS into escape + city variants. At mode.reset(), set CBZ.FPS_WEAPONS to the appropriate list. Weapon appearances (sidearm/shotgun/carbine/taser) exist (src/weapons/appearances/*.js); city only needs access to the same data (no new appearance work). Guard: ensure fpsResetWeapons() (systems/fpsmode.js line 94) is called by both modes.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/fpsmode.js",
+    "/Users/elifoltyn/Downloads/game/src/city/mode.js"
+   ],
+   "risk": "Escape + city may want different balancing (damage, mag size). Safe: keep balancing separate; only the list + appearance is shared. Benefit: any future FPS tuning improves both modes."
+  },
+  {
+   "step": "5. EXTEND ADAPTIVE QUALITY TO CITY: Make city/crowd.js CAP (360) and city peds spawn count budget-responsive. At mode.reset(), read CBZ.crowdRenderBudget (quality.js line 29) and scale city peds/crowd counts down on low-quality tiers. Register a refreshCrowdBudget callback so city respawns on quality change.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/core/quality.js",
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+    "/Users/elifoltyn/Downloads/game/src/city/mode.js"
+   ],
+   "risk": "City is a huge open world; culling peds below a budget may make it feel empty. Solution: only apply budget during quality downsteps (gear already weak). Benefit: city FPS smoother on phones."
+  },
+  {
+   "step": "6. BATCH CITY GEOMETRY: Hook city.arena.built event (or call after city/buildings.js finishes) and run CBZ.runStaticBatch() on city meshes. Survival arena is pre-baked; call runStaticBatch() once at load. This reduces city + survival draw calls by 40\u201360% after first load.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/core/batch.js",
+    "/Users/elifoltyn/Downloads/game/src/city/world.js",
+    "/Users/elifoltyn/Downloads/game/src/world/disaster_arena.js"
+   ],
+   "risk": "Batching is conservative (only opaque, no userData); safe. Caveat: city dynamic props (vehicles, destroyed walls) are not batched (correct\u2014they mutate). Benefit: draw-call reduction."
+  },
+  {
+   "step": "7. CONSOLIDATE NPC GRID FOR RICHER AI: Currently npcgrid only runs in escape (mode gate line 51). If city ever needs NPC social/fear neighbours, uncomment the rebuild for city (add || game.mode==='city'). Survival uses makeGrid directly; no change needed. This unblocks richer NPC behaviour in city without new spatial code.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/npcgrid.js"
+   ],
+   "risk": "Minimal; rebuild is O(n) and city peds are <1000. Benefit: city social AI can query neighbours same as escape."
+  },
+  {
+   "step": "8. EXTRACT SHARED GUARD+COP FSM: Factor out the 'patrol \u2192 chase \u2192 react to player' state machine from entities/ai.js into a reusable StrictActor class. City cops inherit and override specific states (arrest logic). Escape guards inherit (current). This makes NPC behaviour tuning affect both modes uniformly.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+    "/Users/elifoltyn/Downloads/game/src/city/police.js"
+   ],
+   "risk": "Escape guards are complex (40+ functions); extraction is a refactor, not a rewrite. Must preserve all guards' current behaviour. Approach: use composition (ai.StrictActor + guard.think) not inheritance. Benefit: both guard types benefit from behaviour improvements."
+  },
+  {
+   "step": "9. DOCUMENT SHARED FUNCTION CONTRACTS: Add JSDoc comments to CBZ.* functions that are used by multiple modes (collide, floorAt, animChar, gore, shake, etc.) describing expected inputs/outputs. This prevents silent breakage when one mode changes a shared function. Example: CBZ.floorAt(x,z) \u2192 number, gated by mode internally.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/systems/physics.js",
+    "/Users/elifoltyn/Downloads/game/src/entities/character.js",
+    "/Users/elifoltyn/Downloads/game/src/systems/gore.js",
+    "/Users/elifoltyn/Downloads/game/src/systems/camera.js"
+   ],
+   "risk": "Documentation only; no code change. Benefit: long-term maintainability."
+  },
+  {
+   "step": "10. CREATE UNIFIED MODE TEST HARNESS: Write a simple test that spawns 10 NPCs in each mode (escape, survival, city), calls updatePlayer + animChar + collide on each, and checks that the rigs animate smoothly + collisions resolve. Harness in tools/harness.js already exists; add this mode-parity test. This catches regressions when one mode's physics diverges.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/tools/harness.js"
+   ],
+   "risk": "Test harness only; no ship code change. Benefit: CI-like coverage for shared systems."
+  }
+ ]
+}

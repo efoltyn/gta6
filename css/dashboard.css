@@ -1,0 +1,123 @@
+/* ============================================================
+   dashboard.css — the YARD RANKINGS overlay (systems/dashboard.js)
+============================================================ */
+#dashboard{
+  position:fixed; inset:0; z-index:40; display:none;
+  align-items:center; justify-content:center; pointer-events:none;
+  font-family:Fredoka, system-ui, sans-serif; color:#eaf3ff;
+}
+#dashboard.show{ display:flex; }
+
+/* the panel itself catches pointer events; the backdrop doesn't block play */
+#dashboard .dpanel{
+  pointer-events:auto;
+  width:min(940px, 94vw); max-height:88vh; display:flex; flex-direction:column;
+  background:rgba(14,22,36,.86); backdrop-filter:blur(10px);
+  border:2px solid rgba(255,255,255,.16); border-radius:20px;
+  box-shadow:0 18px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+  padding:16px 18px 14px; overflow:hidden;
+}
+
+/* header */
+#dashboard .dhead{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; }
+#dashboard .dtitle{ font-size:21px; font-weight:700; letter-spacing:2px; }
+#dashboard .dtitle .z{ color:#ff4d4d; text-shadow:0 0 12px rgba(255,60,60,.5); }
+#dashboard .dtabs{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+#dashboard .dtab{
+  font-size:12px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+  padding:5px 11px; border-radius:11px; background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12); color:#aeb9c8;
+}
+#dashboard .dtab.on{ background:var(--orange,#ff7a1a); color:#161616; border-color:transparent; box-shadow:0 3px 0 rgba(0,0,0,.25); }
+#dashboard .dhint{ font-size:10px; font-weight:600; letter-spacing:.5px; color:#7e8aa0; opacity:.6; margin-left:4px; }
+
+/* summary stat strip */
+#dashboard .dsummary{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 6px; }
+#dashboard .dstat{
+  flex:1 1 90px; min-width:80px; text-align:center; padding:7px 4px;
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09); border-radius:12px;
+}
+#dashboard .dstat b{ display:block; font-size:20px; font-weight:700; color:#fff; line-height:1; }
+#dashboard .dstat span{ font-size:10px; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:#9fb0c4; }
+#dashboard .dsub{ font-size:11px; color:#9fb0c4; margin:4px 2px 8px; line-height:1.35; }
+#dashboard .dsub b{ color:#ffd451; font-weight:700; }
+
+/* shared column template for header + rows */
+#dashboard .dcols, #dashboard .drow{
+  display:grid; align-items:center; gap:8px;
+  grid-template-columns:28px minmax(96px,1.5fr) 70px 116px 84px 56px 56px 52px 70px 78px;
+  padding:5px 8px;
+}
+#dashboard .dcols{
+  font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase;
+  color:#8da0b6; border-bottom:1px solid rgba(255,255,255,.12); position:sticky; top:0;
+}
+#dashboard .dlist{ overflow-y:auto; overflow-x:hidden; }
+#dashboard .dlist::-webkit-scrollbar{ width:8px; }
+#dashboard .dlist::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.16); border-radius:8px; }
+
+#dashboard .drow{
+  font-size:13px; border-radius:9px; border:1px solid transparent;
+}
+#dashboard .drow:nth-child(odd){ background:rgba(255,255,255,.035); }
+#dashboard .drow.me{ background:rgba(255,122,26,.16); border-color:rgba(255,122,26,.55); }
+#dashboard .drow.gone{ opacity:.42; }
+
+#dashboard .drank{ font-weight:700; color:#ffd451; text-align:center; font-variant-numeric:tabular-nums; }
+#dashboard .dname{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#dashboard .dbeh{ font-size:12px; color:#d7e4f3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* faction chips */
+#dashboard .dfac{
+  font-size:10px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+  text-align:center; padding:3px 0; border-radius:8px;
+}
+#dashboard .f-red{ background:rgba(255,80,80,.18); color:#ff9a9a; }
+#dashboard .f-blue{ background:rgba(90,140,255,.18); color:#9fc3ff; }
+#dashboard .f-loner{ background:rgba(220,220,220,.1); color:#cfd6dc; }
+#dashboard .f-staff{ background:rgba(255,212,81,.16); color:#ffd451; }
+#dashboard .f-bent{ background:rgba(176,122,255,.18); color:#cda6ff; }
+#dashboard .f-you{ background:rgba(255,122,26,.22); color:#ffb877; }
+
+/* capability bars */
+#dashboard .dcap{ display:flex; align-items:center; gap:5px; }
+#dashboard .dbt{ flex:1; height:7px; border-radius:5px; background:rgba(0,0,0,.4); overflow:hidden; min-width:14px; }
+#dashboard .dbt i{ display:block; height:100%; border-radius:5px; }
+#dashboard .dbt i.cf{ background:linear-gradient(90deg,#ff7a1a,#ff3b3b); }
+#dashboard .dbt i.ct{ background:linear-gradient(90deg,#3b7bff,#6fb7ff); }
+#dashboard .dbt i.cs{ background:linear-gradient(90deg,#2f9e6a,#8dff9f); }
+#dashboard .dbv{ font-size:10px; font-weight:700; color:#cfd6dc; width:18px; text-align:right; font-variant-numeric:tabular-nums; }
+
+#dashboard .dpow{ font-weight:700; color:#fff; text-align:center; font-variant-numeric:tabular-nums; }
+#dashboard .drec{ font-size:12px; color:#aeb9c8; white-space:nowrap; font-variant-numeric:tabular-nums; }
+#dashboard .drec .k{ color:#ff7a7a; }
+#dashboard .drec small{ font-size:9px; opacity:.6; }
+
+/* status pills */
+#dashboard .dstatus{
+  font-size:10px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+  text-align:center; padding:3px 0; border-radius:8px;
+}
+#dashboard .s-ok{ color:#8dff9f; }
+#dashboard .s-fight{ background:rgba(255,80,60,.18); color:#ff9a7a; }
+#dashboard .s-hurt{ color:#ffd451; }
+#dashboard .s-flee{ color:#9fc3ff; }
+#dashboard .s-ko{ color:#ffb877; }
+#dashboard .s-dead{ background:rgba(0,0,0,.3); color:#ff7a7a; }
+#dashboard .s-esc{ background:rgba(57,255,136,.16); color:#7dffb0; }
+
+/* HUD open button */
+#dashBtn{
+  position:absolute; right:18px; top:18px; transform:translateY(120px);
+  pointer-events:auto; cursor:pointer; display:flex; align-items:center; gap:7px;
+  padding:8px 12px; font-family:Fredoka,sans-serif; font-weight:700; font-size:12px;
+  letter-spacing:1px; text-transform:uppercase; color:#eaf3ff;
+}
+#dashBtn .rk{ font-size:14px; }
+
+/* tighten on small screens: drop the toughness/speed bars + record column
+   (hidden in BOTH header and rows so the 7 remaining cells stay aligned) */
+@media (max-width:720px){
+  #dashboard .dcols, #dashboard .drow{ grid-template-columns:24px minmax(70px,1.4fr) 56px 92px 80px 46px 70px; gap:6px; font-size:12px; }
+  #dashboard .dcap-t, #dashboard .dcap-s, #dashboard .drec{ display:none; }
+}

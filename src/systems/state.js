@@ -1,0 +1,239 @@
+/* ============================================================
+   systems/state.js — screen/state machine, reset, win, and the
+   button wiring for title / pause / win screens.
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  const { player, playerChar, el, keycard, cam } = CBZ;
+  const g = CBZ.game;
+
+  const screens = {
+    title: document.getElementById("title"),
+    pause: document.getElementById("pause"),
+    win: document.getElementById("win"),
+    survwin: document.getElementById("survwin"),
+    survlose: document.getElementById("survlose"),
+  };
+  const roleButtons = Array.from(document.querySelectorAll(".role-btn"));
+  const modeButtons = Array.from(document.querySelectorAll(".mode-btn"));
+
+  function setState(s) {
+    g.state = s;
+    document.body.classList.toggle("state-playing", s === "playing");
+    const surv = g.mode === "survival";
+    screens.title.classList.toggle("hidden", s !== "title");
+    screens.pause.classList.toggle("hidden", s !== "paused");
+    screens.win.classList.toggle("hidden", !(s === "won" && !surv));
+    if (screens.survwin) screens.survwin.classList.toggle("hidden", !(s === "won" && surv));
+    if (screens.survlose) screens.survlose.classList.toggle("hidden", s !== "lost");
+  }
+
+  function setRole(role) {
+    g.role = role === "cop" ? "cop" : "inmate";
+    roleButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.role === g.role));
+  }
+
+  function setMode(id) {
+    g.mode = id === "survival" ? "survival" : (id === "city" ? "city" : "escape");
+    if (g.mode !== "escape" && CBZ.setSimulationView) CBZ.setSimulationView(false);
+    modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === g.mode));
+    document.body.classList.toggle("mode-survival", g.mode === "survival");
+    document.body.classList.toggle("mode-city", g.mode === "city");
+    const m = CBZ.modes[g.mode];
+    if ((g.mode === "survival" || g.mode === "city") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
+    if (g.mode !== "survival" && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = false;
+    if (g.mode !== "city" && CBZ.city && CBZ.city.arena) CBZ.city.arena.root.visible = false;
+  }
+  CBZ.setMode = setMode;
+
+  function resetGame() {
+    const mode = g.mode === "survival" ? "survival" : (g.mode === "city" ? "city" : "escape");
+    if (CBZ.setSimulationView) CBZ.setSimulationView(false);
+    if (CBZ.clearGore) CBZ.clearGore();   // wipe blood/gibs from the prior match
+    g.detection = 0; g.invuln = 0; g.elapsed = 0;
+    document.body.classList.toggle("mode-survival", mode === "survival");
+    document.body.classList.toggle("mode-city", mode === "city");
+    if (mode === "escape") {
+    const role = g.role === "cop" ? "cop" : "inmate";
+    g.cigs = 0; g.caughtCount = 0; g.trades = 0; g.hasKey = false;
+    g.complaints = 0; g.role = role;
+    g.gangStanding = [0, 0];
+    g.gangDebt = [0, 0];
+    g.gangProtection = [0, 0];
+    g.gangJob = null;
+    g.lowProfileT = 0;
+    g.racketProtectionT = 0; g.racketGuard = null; g.racketDebt = 0; g.racketStanding = 0; g.racketPressureT = 0; g.racketHintT = 0;
+    g.blockRumor = null; g.socialDirectorT = 0; g.socialDirectorLast = null; g.watcherDirectorT = 0; g.watcherLast = null; g.gossipHuddleT = 0; g.gangTierT = [0, 0]; g.turfCheckpointT = [0, 0];
+    g.socialProfile = { paid: 0, threatened: 0, refused: 0, helped: 0, listened: 0, bargained: 0, exploited: 0, last: "" };
+    g.witnessReportT = 0; g.snitchReports = 0; g.lastKnown = null; g.caseSearchCD = 0;
+    g.caseFile = { heat: 0, reports: [], lastSource: "", lastType: "", corrupt: 0 };
+    g.snitchIntelT = 0;
+    g.inventory = {}; g.koLog = {}; g.stealsDone = 0;
+    g.kos = 0; g.deaths = 0; g.gossipNoticeT = 0; g.gangNoticeT = 0;
+    if (CBZ.econ.reseed) CBZ.econ.reseed();   // fresh prison every run (no identical carnage)
+    el.cigText.textContent = "0";
+    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory(role);
+    CBZ.refreshInventory();
+    el.keycard.classList.remove("have");
+    el.bar.style.width = "0%";
+    el.vignette.style.boxShadow = "inset 0 0 200px 40px rgba(220,30,40,0)";
+    CBZ.setObjective(role === "cop" ? "Patrol the block, break up fights, and raid the armory." : "Find a keycard for checkpoints, or scout vents and tunnels for another way out.");
+
+    const spawn = role === "cop" ? CBZ.COP_SPAWN : CBZ.SPAWN;
+    player.pos.copy(spawn); player.vy = 0; player.grounded = true;
+    player.hp = 100; player.dead = false; player.ko = 0;
+    player.stun = 0; player.subdue = 0; player.gang = null; player.captureState = "normal"; player.captureT = 0;
+    if (CBZ.applyPlayerRole) CBZ.applyPlayerRole(role);
+    if (player._bandMesh) player._bandMesh.visible = false; // drop gang colours
+    if (playerChar.cuffed) playerChar.cuffed = false;
+    playerChar.group.position.copy(spawn);
+    playerChar.group.rotation.z = 0;
+    cam.yaw = 0; cam.pitch = CBZ.CAM_DEFAULT_PITCH || 0.28;
+    if (CBZ.resetZoom) CBZ.resetZoom();
+    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
+    if (CBZ.killstreakReset) CBZ.killstreakReset();
+
+    keycard.collected = false; keycard.group.visible = true;
+    keycard.group.scale.setScalar(1); keycard.ring.visible = true;
+
+    CBZ.coins.forEach((c) => {
+      c.collected = false; c.anim = 0; c.group.visible = true;
+      c.group.scale.setScalar(1); c.group.position.y = c.baseY;
+      if (c.ring) c.ring.visible = true;
+    });
+
+    CBZ.closeDoor();
+
+    // reset the armory gate
+    if (CBZ.armory) {
+      const a = CBZ.armory; a.open = false; a.t = 0; a.gate.position.y = 3;
+      a.lamp.material.color.setHex(0xff3b3b); a.lamp.material.emissive.setHex(0xff0000);
+      if (CBZ.colliders.indexOf(a.collider) === -1) CBZ.colliders.push(a.collider);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (a.resetSlots) a.resetSlots();
+    }
+
+    CBZ.guards.forEach((gd) => {
+      gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.approach = null; gd.investigate = null; gd.approachCD = 3 + Math.random() * 5;
+      gd.group.position.copy(gd.start); gd.group.rotation.z = 0; gd.flashlightOn = false; gd.flashlightReason = ""; gd.wedge.visible = false;
+    });
+    CBZ.npcs.forEach((n) => {
+      n.bribed = 0; n.ko = 0; n.rep = 0; n.quest = null; n._loot = 0;
+      n.group.rotation.z = 0;
+    });
+    if (CBZ.aiReset) CBZ.aiReset();
+    if (CBZ.resetCrowd) CBZ.resetCrowd();
+    
+    // reset breaker box and security cameras
+    if (CBZ.breaker) {
+      const b = CBZ.breaker;
+      b.sabotaged = false;
+      b.timer = 0;
+      b.light.material.color.setHex(0x39ff88);
+      b.light.material.emissive.setHex(0x14c258);
+      if (CBZ.ceilingLamp) {
+        CBZ.ceilingLamp.material.color.setHex(0xffe9a8);
+        CBZ.ceilingLamp.material.emissive.setHex(0xffcf66);
+      }
+    }
+    if (CBZ.resetCameras) CBZ.resetCameras();
+    } // end escape-only reset
+
+    const m = CBZ.modes[mode];
+    if (m && m.reset) { try { m.reset(g); } catch (e) { console.error("[mode reset]", e); } }
+
+    CBZ.hideHint();
+  }
+
+  function setText(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+
+  function fillSurvResult(win) {
+    const st = (CBZ.surv && CBZ.surv.stats) || { placement: 1, total: 1, disastersSurvived: 0 };
+    const time = CBZ.fmtTime(g.elapsed);
+    if (win) {
+      setText("swPlace", "#1"); setText("swTotal", "of " + st.total);
+      setText("swTime", time); setText("swDis", st.disastersSurvived);
+    } else {
+      setText("slPlace", "#" + (st.placement || 1)); setText("slTotal", "of " + st.total);
+      setText("slTime", time); setText("slDis", st.disastersSurvived);
+    }
+  }
+
+  function loseGame(reason) {
+    if (g.state === "won" || g.state === "lost") return;
+    setState("lost"); if (CBZ.sfx) CBZ.sfx("ko");
+    fillSurvResult(false);
+  }
+  CBZ.loseGame = loseGame;
+
+  function winGame(reason, actor) {
+    if (g.state === "won") return;
+    setState("won"); CBZ.sfx("win");
+    if (g.mode === "survival") { fillSurvResult(true); if (CBZ.recordSurvWin) CBZ.recordSurvWin(); return; }
+    if (g.mode === "escape" && g.cityWorld && CBZ.cityEvent) {
+      CBZ.cityEvent("jail-escape", { respect: 4, panic: 2 }, { noWanted: true });
+    }
+    const who = actor ? actor.data.name.replace(/^the |^a |^an /, "") : "Someone";
+    const sub = reason === "befriend" ? `${who} walked you out`
+      : reason === "romance" ? `${who} busted you out for love 💘`
+      : reason === "nuke" ? "Tactical nuke ended the run"
+      : reason === "route" ? "Through a hidden escape route"
+      : "Through the gate";
+    document.getElementById("wReason").textContent = sub;
+    document.getElementById("wTime").textContent = CBZ.fmtTime(g.elapsed);
+    document.getElementById("wCigs").textContent = g.cigs;
+    document.getElementById("wKos").textContent = g.kos || 0;
+    document.getElementById("wCaught").textContent = g.caughtCount;
+    if (CBZ.recordWin) CBZ.recordWin();
+  }
+
+  CBZ.setState = setState;
+  CBZ.setRole = setRole;
+  CBZ.resetGame = resetGame;
+  CBZ.winGame = winGame;
+
+  // ---- button wiring ----
+  roleButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setRole(btn.dataset.role));
+  });
+  setRole(g.role || "inmate");
+  modeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setMode(btn.dataset.mode));
+  });
+  setMode(g.mode || "escape");
+
+  function bindButton(id, fn) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    let last = 0;
+    const run = (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      const t = performance.now();
+      if (t - last < 180) return;
+      last = t;
+      fn(e);
+    };
+    btn.addEventListener("click", run);
+    btn.addEventListener("pointerup", run);
+  }
+
+  function startRun() {
+    CBZ.initAudio(); resetGame(); setState("playing");
+    screens.title.classList.add("hidden");
+    if (g.mode === "escape" && CBZ.armFPSAfterIntro) CBZ.armFPSAfterIntro();
+    CBZ.startIntro(); CBZ.requestLock();
+  }
+  CBZ.startRun = startRun;
+  bindButton("playBtn", startRun);
+  bindButton("resumeBtn", () => { CBZ.requestLock(); });
+  bindButton("againBtn", startRun);
+  // survival result screens
+  bindButton("survAgainBtn", startRun);
+  bindButton("loseAgainBtn", startRun);
+  bindButton("survMenuBtn", () => setState("title"));
+  bindButton("loseMenuBtn", () => setState("title"));
+  CBZ.canvas.addEventListener("click", () => {
+    if ((g.state === "playing" || g.state === "paused") && !(CBZ.surv && CBZ.surv.spectating)) CBZ.requestLock();
+  });
+})();

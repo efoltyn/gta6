@@ -1,0 +1,16 @@
+/* ============================================================
+   base.css — root variables, reset, canvas
+============================================================ */
+:root{
+  --ink:#16202e;
+  --orange:#ff7a1a;
+  --orange-d:#e85d00;
+  --green:#3ad17a;
+  --green-d:#1f9f55;
+  --paper:#fff7ec;
+  --shadow:0 8px 0 rgba(0,0,0,.18), 0 14px 30px rgba(0,0,0,.28);
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{height:100%; overflow:hidden; background:#0b1622; font-family:'Fredoka',system-ui,sans-serif;}
+#game{position:fixed; inset:0;}
+canvas{display:block;}

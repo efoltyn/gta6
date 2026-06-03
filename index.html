@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Gang Life</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- styles, split by concern -->
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/hud.css?v=route1">
+<link rel="stylesheet" href="css/screens.css?v=ctrl3">
+<link rel="stylesheet" href="css/mobile.css?v=ctrl1">
+<link rel="stylesheet" href="css/dashboard.css?v=ranks1">
+<link rel="stylesheet" href="css/inventory.css?v=ctrl1">
+<link rel="stylesheet" href="css/city.css?v=city1">
+</head>
+<body>
+<div id="game"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="objective" class="panel"><span class="tag">Objective</span><div id="objText">Escape your cell and find the keycard.</div></div>
+  <div id="topright">
+    <div id="timer" class="pill panel">00:00</div>
+    <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
+  </div>
+  <div id="keycard" class="panel"><span class="card"></span><span>Keycard</span></div>
+  <div id="inventory" class="panel"><span class="tag">Stash</span><span id="invList">—</span></div>
+
+  <div id="hint" class="panel"></div>
+
+  <!-- contextual interaction menu (shown when near an actor) -->
+  <div id="interact" class="panel">
+    <div id="interactName">INMATE</div>
+    <div id="interactNote">Rep ♥ 0</div>
+    <div id="interactOpts"></div>
+  </div>
+
+  <div id="detectWrap" class="panel">
+    <div class="lab"><span>Wanted</span><span id="detectState">Clear</span></div>
+    <div id="detectBarBg"><div id="detectBar"></div></div>
+  </div>
+
+  <div id="gangHud" class="panel"></div>
+  <div id="compass" class="panel"><div id="compassArrow">▲</div><span id="compassDist">--</span></div>
+
+  <canvas id="minimap" class="panel" width="112" height="168"></canvas>
+  <div id="simHud" class="panel"></div>
+
+  <div id="dashBtn" class="panel"><span class="rk">🏆</span><span>Ranks</span></div>
+
+  <!-- SURVIVAL mode HUD (shown only in disaster mode) -->
+  <div id="survTop" class="panel"><b id="aliveCount">100</b><span>ALIVE</span></div>
+  <div id="survZone" class="panel"><span id="survZoneText"></span></div>
+  <div id="survBars">
+    <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
+    <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
+  </div>
+  <div id="disasterBanner"></div>
+
+  <div id="toast"></div>
+  <div id="hitfx"></div>
+  <div id="crosshair"></div>
+  <div id="ammo"></div>
+  <div id="weaponStrip" class="panel"></div>
+</div>
+<div id="vignette"></div>
+<div id="flash"></div>
+<div id="survFlash"></div>
+<div id="spray"></div>
+<div id="fade"></div>
+
+<!-- live yard rankings overlay (systems/dashboard.js) -->
+<div id="dashboard"></div>
+
+<!-- shared full-screen navigation map (systems/fullmap.js) -->
+<div id="fullMap" aria-hidden="true">
+  <div class="fullmap-shell panel">
+    <div class="fullmap-head">
+      <div><b id="fullMapTitle">AREA MAP</b><span>Click or right-click to place a waypoint</span></div>
+      <button id="fullMapClose" type="button" aria-label="Close map">Close [M]</button>
+    </div>
+    <canvas id="fullMapCanvas" width="960" height="620"></canvas>
+    <div id="fullMapLegend" class="fullmap-legend"></div>
+    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><span>[Backspace] clear waypoint</span></div>
+  </div>
+</div>
+<div id="waypointGuide" class="panel">
+  <span id="waypointArrow">▲</span><span id="waypointDist">--</span><span id="waypointLabel">Waypoint</span><span class="waypoint-mapkey">[M] map</span>
+</div>
+
+<!-- Title -->
+<div id="title" class="screen">
+  <div class="card-box">
+    <!-- mode selector -->
+    <div id="modeSelect" class="mode-select" aria-label="Choose game mode">
+      <button class="mode-btn active" type="button" data-mode="city"><span>Gang Life</span><small>Turf, gangs, cops</small></button>
+      <button class="mode-btn" type="button" data-mode="escape"><span>🚔 Prison Escape</span><small>Stealth &amp; survival</small></button>
+      <button class="mode-btn" type="button" data-mode="survival"><span>🌪️ Disaster Survival</span><small>100 players · last alive</small></button>
+    </div>
+
+    <!-- ESCAPE mode -->
+    <div class="mode-escape-only">
+      <div class="logo">CELL BLOCK <span class="z">Z</span></div>
+      <div class="sub">Prison Escape</div>
+      <div class="keys">
+        <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Crouch &amp; sneak</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Space</span></span><span class="lab">Jump</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch (unarmed) — chain for combos</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Interaction options (talk / trade…)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">1–9</span></span><span class="lab">Hotbar — select / use item</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Sabotage / Crawl in vent</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">Open stash (when not interacting)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">F</span></span><span class="lab">Fire weapon</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Q</span></span><span class="lab">Swap gun</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Raise &amp; aim gun</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">N</span></span><span class="lab">Tactical Nuke (25 streak)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person mode</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Yard Rankings</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">B</span></span><span class="lab">Bird's-eye mass simulation</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Full map · click to set waypoint</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">+ / -</span></span><span class="lab">Society time speed (overview)</span></div>
+      </div>
+      <div id="roleSelect" class="role-select" aria-label="Choose role">
+        <button class="role-btn active" type="button" data-role="inmate">
+          <span>Inmate</span><small>Escape the block</small>
+        </button>
+        <button class="role-btn" type="button" data-role="cop">
+          <span>Cop</span><small>Patrol with gear</small>
+        </button>
+      </div>
+    </div>
+
+    <!-- SURVIVAL mode -->
+    <div class="mode-survival-only">
+      <div class="logo">DISASTER <span class="z">ZONE</span></div>
+      <div class="sub">Natural Disaster Survival</div>
+      <div class="keys">
+        <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Space</span></span><span class="lab">Jump</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Push (shove)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab &amp; hold · release to set down</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Throw (while holding)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Interact menu (grab / punch / shove)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person · climb to high ground</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Full map · click to set waypoint</span></div>
+      </div>
+    </div>
+
+    <!-- CITY mode -->
+    <div class="mode-city-only">
+      <div class="logo">GANG <span class="z">LIFE</span></div>
+      <div class="sub">Open-world turf war</div>
+      <div class="keys">
+        <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch / fire weapon</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Mug · attack · deal/recruit · pickpocket</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Shop / rob register / eat food</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">X</span></span><span class="lab">Do drugs (buff)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">F</span></span><span class="lab">Steal / enter / exit a car</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">1–9 · 0</span></span><span class="lab">Shop: buy items · sell all</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Leaderboard (cash · kills · respect)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow — buy/sell any property or business</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">H</span></span><span class="lab">At your door: safehouse (heal · save · garage)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">E</span> @ Auto lot</span><span class="lab">Open a car-resale yard · drive stolen cars in to flip</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">K</span></span><span class="lab">Recruit a crew (they defend you in police raids)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Full map · click to set waypoint</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">Y</span></span><span class="lab">Gang Life board — jobs, bets, contracts, handoffs</span></div>
+      </div>
+    </div>
+
+    <button class="btn" id="playBtn">Play</button>
+    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Brawl, steal, or trespass and the heat rises — then they hunt. Bent cops look the other way for cheap.</div>
+    <div class="smallnote mode-city-only">Make money any way you can — hustle, deal, steal cars, take contracts, or go legit. Obey the lights or run them. Cops escalate to 5 stars; get cuffed and you're hauled to the jail game.</div>
+    <div class="smallnote mode-escape-only" id="bestStat"></div>
+    <div class="smallnote mode-survival-only">Reach the mountain when the water rises. Watch the ground markers. The storm closes in — and so does everyone else.</div>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="font-size:clamp(32px,6vw,46px)">PAUSED</div>
+    <p class="blurb">Click below to dive back in.</p>
+    <button class="btn" id="resumeBtn">Resume</button>
+  </div>
+</div>
+
+<!-- Win -->
+<div id="win" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">YOU'RE OUT!</div>
+    <div class="sub" id="wReason" style="color:#3c7a52">Freedom</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="wTime">--</div><div class="l">Escape Time</div></div>
+      <div class="stat"><div class="v" id="wCigs">0</div><div class="l">Cigarettes</div></div>
+      <div class="stat"><div class="v" id="wKos">0</div><div class="l">Knockouts</div></div>
+      <div class="stat"><div class="v" id="wCaught">0</div><div class="l">Times Caught</div></div>
+    </div>
+    <button class="btn" id="againBtn">Escape Again</button>
+  </div>
+</div>
+
+<!-- Survival: Victory -->
+<div id="survwin" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">VICTORY ROYALE</div>
+    <div class="sub" style="color:#3c7a52">Last one standing</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="swPlace">#1</div><div class="l" id="swTotal">of 100</div></div>
+      <div class="stat"><div class="v" id="swTime">--</div><div class="l">Survived</div></div>
+      <div class="stat"><div class="v" id="swDis">0</div><div class="l">Disasters</div></div>
+    </div>
+    <button class="btn" id="survAgainBtn">Play Again</button>
+    <button class="btn" id="survMenuBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Main Menu</button>
+  </div>
+</div>
+
+<!-- Survival: Eliminated -->
+<div id="survlose" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:#ff5b5b;text-shadow:0 4px 0 #b11226,0 6px 0 #7c0c1a">ELIMINATED</div>
+    <div class="sub" style="color:#b06868">The disasters claimed you</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="slPlace">#--</div><div class="l" id="slTotal">of 100</div></div>
+      <div class="stat"><div class="v" id="slTime">--</div><div class="l">Survived</div></div>
+      <div class="stat"><div class="v" id="slDis">0</div><div class="l">Disasters</div></div>
+    </div>
+    <button class="btn" id="loseAgainBtn">Try Again</button>
+    <button class="btn" id="loseMenuBtn" style="background:#6b7686;box-shadow:0 6px 0 #4a5562,0 10px 18px rgba(0,0,0,.25)">Main Menu</button>
+  </div>
+</div>
+
+<!-- Three.js (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+<!-- ============================================================
+     Game modules — loaded in dependency order. Each is a tiny
+     IIFE that wires itself onto window.CBZ. Keep this order:
+     config → core → world → entities → systems → loop → main.
+============================================================ -->
+
+<!-- 0. namespace + constants -->
+<script src="src/config.js?v=roof1"></script>
+
+<!-- 1. core engine -->
+<script src="src/core/scene.js"></script>
+<script src="src/core/renderer.js?v=scale3"></script>
+<script src="src/core/lights.js"></script>
+<script src="src/core/sky.js?v=surv2"></script>
+<script src="src/core/daynight.js"></script>
+
+<!-- 2. world geometry -->
+<script src="src/world/materials.js?v=scale1"></script>
+<script src="src/world/ground.js"></script>
+<script src="src/world/cellblock.js"></script>
+<script src="src/world/yard.js"></script>
+<script src="src/world/razorwire.js?v=mapflow2"></script>
+<script src="src/world/graffiti.js"></script>
+<script src="src/world/towers.js"></script>
+<script src="src/world/crates.js"></script>
+<script src="src/world/props.js"></script>
+<script src="src/world/clutter.js"></script>
+<script src="src/world/door.js?v=scale2"></script>
+<script src="src/world/exit.js"></script>
+
+<!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
+
+<!-- 3. entities -->
+<script src="src/entities/character.js?v=scale1"></script>
+<script src="src/entities/player.js?v=scale1"></script>
+<script src="src/entities/coins.js"></script>
+<script src="src/entities/decals.js"></script>
+<script src="src/entities/security.js"></script>
+
+<!-- 4. systems — economy/quests load before actors that reference them -->
+<script src="src/systems/audio.js?v=samples3"></script>
+<script src="src/systems/hud.js?v=gore1"></script>
+<script src="src/systems/economy.js?v=pick1"></script>
+
+<!-- weapon tuning/appearances are data-only and also feed the armory room -->
+<script src="src/weapons/weapon-data.js"></script>
+<script src="src/weapons/appearances/sidearm.js"></script>
+<script src="src/weapons/appearances/shotgun.js"></script>
+<script src="src/weapons/appearances/carbine.js"></script>
+<script src="src/weapons/appearances/smg.js"></script>
+<script src="src/weapons/appearances/taser.js"></script>
+<script src="src/systems/actorweapons.js?v=gunorigin1"></script>
+
+<!-- 2c. rooms (use addBox + addPack) -->
+<script src="src/world/roombuild.js"></script>
+<script src="src/world/cafeteria.js"></script>
+<script src="src/world/lounge.js"></script>
+<script src="src/world/gunroom.js?v=scale2"></script>
+<script src="src/world/ventilation.js"></script>
+<script src="src/world/escape_routes.js?v=mapflow2"></script>
+<script src="src/world/southblock.js?v=bigmap1"></script>
+
+<!-- 3b. actors that depend on economy -->
+<script src="src/entities/vision.js"></script>
+<script src="src/entities/guards.js?v=scale1"></script>
+<script src="src/entities/searchlight.js"></script>
+<script src="src/entities/ambientlife.js"></script>
+<script src="src/entities/keycard.js"></script>
+<script src="src/entities/npc.js?v=scale4"></script>
+<script src="src/entities/ai.js?v=gore1"></script>
+
+<!-- 4b. remaining systems -->
+<script src="src/systems/quests.js"></script>
+<script src="src/systems/input.js"></script>
+<script src="src/systems/spatialgrid.js?v=scale3"></script>
+<script src="src/systems/npcgrid.js?v=scale2"></script>
+<script src="src/systems/camera.js?v=cityfix1"></script>
+<script src="src/systems/physics.js?v=map1"></script>
+<script src="src/systems/actorcollide.js?v=contact1"></script>
+<script src="src/entities/ambientstate.js?v=contact1"></script>
+<script src="src/entities/crowd.js?v=skin1"></script>
+<script src="src/systems/simulation.js?v=scale7"></script>
+<script src="src/systems/detection.js?v=npcgoal51"></script>
+<script src="src/systems/capture.js?v=npc-react1"></script>
+<script src="src/systems/markers.js?v=npcgoal54"></script>
+<script src="src/systems/music.js?v=samples1"></script>
+<script src="src/systems/reinforcements.js"></script>
+<script src="src/systems/lockdown.js"></script>
+<script src="src/systems/difficulty.js"></script>
+<script src="src/systems/reactions.js?v=scale2"></script>
+<script src="src/systems/facial.js?v=glance1"></script>
+<script src="src/systems/ambient.js"></script>
+<script src="src/systems/weather.js?v=samples1"></script>
+<script src="src/systems/compass.js"></script>
+<script src="src/systems/minimap.js?v=route1"></script>
+<script src="src/systems/dashboard.js?v=ranks1"></script>
+<script src="src/systems/combat.js?v=phys1"></script>
+<script src="src/systems/killstreaks.js"></script>
+<script src="src/systems/interact.js?v=lines2"></script>
+<script src="src/systems/interactions.js?v=mapflow2"></script>
+<script src="src/systems/inventory.js?v=loot1"></script>
+<script src="src/systems/state.js?v=gore1"></script>
+<script src="src/systems/save.js"></script>
+<script src="src/systems/touch.js?v=camera14"></script>
+<script src="src/systems/fpsmode.js?v=crash6"></script>
+<script src="src/systems/gunfx.js?v=npc-react1"></script>
+<script src="src/systems/intimidate.js?v=npc-react1"></script>
+
+<!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
+     Additive: registers its own updaters (gated by game.mode) and builds
+     its world lazily, so the prison game above is untouched. Must load
+     BEFORE loop.js so its frame-work is included in the sort. -->
+<script src="src/systems/fx.js?v=glass1"></script>
+<script src="src/world/disaster_arena.js?v=samples1"></script>
+<script src="src/systems/grapple.js?v=crash5"></script>
+<script src="src/entities/survivorbot.js?v=contact1"></script>
+<script src="src/modes/survival.js?v=gore1"></script>
+<script src="src/systems/disasters.js?v=samples1"></script>
+<script src="src/systems/survival_interact.js?v=ctrl1"></script>
+<script src="src/systems/survivalhud.js?v=route1"></script>
+
+<!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
+     registers its own updaters (gated by game.mode==="city") and builds its
+     world lazily far from the other two. Must load BEFORE loop.js so its
+     frame-work is included in the sort. mode.js defines CBZ.city first; the
+     rest augment it. -->
+<script src="src/city/world.js?v=cityfix1"></script>
+<script src="src/city/buildings.js?v=samples1"></script>
+<script src="src/city/expansion.js?v=citysec1"></script>
+<script src="src/city/props.js?v=citysec1"></script>
+<script src="src/city/mode.js?v=citysec1"></script>
+<script src="src/city/economy.js?v=cars1"></script>
+<script src="src/city/hunger.js?v=roof1"></script>
+<script src="src/city/wanted.js?v=city3"></script>
+<script src="src/city/worldstate.js?v=hub1"></script>
+<script src="src/city/gangs.js?v=citysec1"></script>
+<script src="src/city/social.js?v=city3"></script>
+<script src="src/city/realestate.js?v=city3"></script>
+<script src="src/city/view.js?v=cityfix2"></script>
+<script src="src/systems/casttraits.js?v=citysec1"></script>
+<script src="src/city/peds.js?v=citysec1"></script>
+<script src="src/city/crowd.js?v=crowd1"></script>
+<script src="src/city/medics.js?v=medic1"></script>
+<script src="src/city/security.js?v=citysec1"></script>
+<script src="src/city/police.js?v=city3"></script>
+<script src="src/city/traffic.js?v=city3"></script>
+<script src="src/city/playercars.js?v=playercars1"></script>
+<script src="src/city/crashfx.js?v=crash7"></script>
+<script src="src/city/vehicles.js?v=crash7"></script>
+<script src="src/city/shops.js?v=city3"></script>
+<script src="src/city/careers.js?v=citysec1"></script>
+<script src="src/city/activities.js?v=hub1"></script>
+<script src="src/city/interact.js?v=citysec1"></script>
+<script src="src/city/combat.js?v=city4"></script>
+<script src="src/city/death.js?v=crash7"></script>
+<script src="src/city/leaderboard.js?v=city3"></script>
+<script src="src/city/zillow.js?v=zillow1"></script>
+<script src="src/city/empire.js?v=empire1"></script>
+<script src="src/city/hud.js?v=route1"></script>
+<script src="src/systems/humancontact.js?v=contact2"></script>
+<script src="src/systems/navigation.js?v=route1"></script>
+<script src="src/systems/fullmap.js?v=route1"></script>
+
+<!-- cinematic death gore — shared by both games; loads before loop.js so its
+     always-updater is in the sort -->
+<script src="src/systems/gore.js?v=gore1"></script>
+
+<!-- 5. quality + loop + boot -->
+<script src="src/core/quality.js?v=scale2"></script>
+<script src="src/core/batch.js"></script>
+<script src="src/core/loop.js?v=scale1"></script>
+<script src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+{
+ "summary": "CELL BLOCK Z has TWO separate NPC AI systems: (1) Jail mode (escape/jail) uses a 4995-line comprehensive brain (CBZ.aiThink at ai.js:3200) with 16+ states (wander, fight, flee, snitch, pressure, approach, tail, intercept, etc.), time-sliced evaluation (stride 1-16 frames based on distance/importance), personality/ratings decoupling, gang economy (standing/debt/protection), witness chains, social reputation tracking, and full decision trees. (2) City mode (src/city/peds.js) runs a far simpler single \"think(p,dt,active)\" function that only handles basic states (walk, rage, vendoring) with no comparable social/approach mechanics, no gang economy, no witness system, and shallow behavior (just aggr spectrum from meek-to-violent). The merge goal is to port jail's richer brain into city NPCs and unify both under a shared system. Key structural difference: jail NPCs run CBZ.aiThink (lines 3200\u20133667, a ~467-line state machine) called from updateNpc via time-slicing (line 181, npc.js:22 priority), while city peds call think() inline (line 673, peds.js:34 priority) with no slicing. Both use CBZ.onUpdate for frame callbacks but at different orders: jail=22, guards=20, city-cops=35, city-peds=34.",
+ "keyFiles": [
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "role": "JAIL BRAIN: 5018-line main AI module. Core is aiThink() function at line 3200 (state machine: wander/fight/flee/snitch/approach/pressure/tail/intercept/socialize/rumorHuddle/shadowPlayer/diversion/escape). Handles intimidate, gang retaliation, approach mechanics, snitching logic, gang protection, case pressure, witness reports, rumors, combat (startFight/exchangeBlows), gang jobs, player interactions. Personality 4-trait (greed/nerve/loyalty/snitch). Ratings 6-trait (fighting/toughness/speed/stealth/marksman/cunning). Exposed: CBZ.aiThink, CBZ.provokeGang, CBZ.sendNpcToSnitch, CBZ.npcWitnessCrime, CBZ.behaviorOf, CBZ.addGangStanding, CBZ.gangStanding, CBZ.gangDebt, etc."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+   "role": "JAIL NPC ENTITY: 470-line spawner. Makes inmates (merchant/dealer/thief/inmate roles), cast, crowd (procedural). Structure: makeNpc() factory \u2192 ratings/behavior/gang/personality merged from factory opts + ensureCombatProfile(). Each NPC: char (Three.js rig), group, stats (hp/ko/dead), AI state vars, slice (round-robin phase for time-slicing). updateNpc() at line 136: LOD-gates mesh/detail/animation, runs CBZ.aiThink on stride (1/3/7/16 frames, line 181), animates, moves toward target. Registered CBZ.onUpdate(22,...) line 462."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/guards.js",
+   "role": "JAIL GUARDS: 936 lines. Guards + warden (makeGuard factory). AI: updateGuard() line 767 (wander waypoints \u2192 alert \u2192 hunt \u2192 approach/payoff/investigate). No full state machine like NPCs; simpler flow. guardSees() line 900 raycast LOS test. Payoff approaches (racketOffer/witnessBlackmail/snitchIntel). Registered CBZ.onUpdate(20,...) line 930 (escape mode only). Exposes CBZ.updateGuard, CBZ.guardSees, CBZ.resolveGuardApproach."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "role": "CITY PEDS: 691 lines. Civilians, vendors, gangs. Simple brain: makePed() factory \u2192 aggr/wealth/armed/traits. Single think(p,dt,active) function (not exposed in this excerpt) called inline at line 673 (time-sliced on stride 4/10/20 based on importance). Ped states: walk/rage/vendoring/dead/KO. Far simpler than jail: no approaches, no witness chains, no gang economy, only aggr spectrum (0\u20131 meek\u2192violent). Registered CBZ.onUpdate(34,...) line 637 (city mode only). Exposes CBZ.cityMakePed, CBZ.spawnCityPeds, CBZ.cityAlarm, CBZ.cityTagWitnesses, CBZ.cityKOPed, CBZ.cityKillPed, CBZ.cityRobPed."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/police.js",
+   "role": "CITY COPS: 291 lines. Police patrols, SWAT, ambient. makeCop() factory. updateCop()-like flow inside onUpdate loop (line 164): maintain cop count, choose target (player/NPC offender/car suspect), arrest/shoot/patrol. Simpler than jail guards: no payoff system, no interrogation, focus is hunting wanted player + NPC offenders. Registered CBZ.onUpdate(35,...) line 164 (city mode only). Exposes CBZ.citySpawnCop, CBZ.cityNpcOffense, CBZ.cityNpcArrest, CBZ.cityHurtCop."
+  }
+ ],
+ "findings": [
+  {
+   "title": "Jail aiThink() is a 467-line state machine (ai.js:3200\u20133667)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "3200\u20133667",
+   "detail": "aiThink(n, dt) reads n.aiState and dispatches to 16+ cases: wander (lines 3642\u20133664, random fight/socialize/escape pick), fight (3613\u20133623, exchange blows w/ foe), flee (3625\u20133630, sprint to corners), snitch (3522\u20133551, run to nearest guard, report player), shadowPlayer (3553\u20133575, protect player from threats), socialize (3596\u20133611, pair chat + gossip), approachPlayer (3280\u20133304, walk to player, deliver offer), pressurePlayer (3306\u20133365, backups form tactic-shape around player), tailPlayer (3367\u20133462, shadow & watch, potentially extort), interceptThreat (3464\u20133496, stop a snitch), rumorHuddle (3498\u20133520, pairs gossip), diversion (3577\u20133594, distract guard), escape (3632\u20133640, rush exit), + gunpoint/retaliation checks (lines 3232\u20133274). Returns speed (0 frozen \u2192 baseSpeed*1.85 sprint). Entry point: called from updateNpc (npc.js:181) via time-slice gating.",
+   "apis": [
+    "CBZ.aiThink",
+    "CBZ.intimidate.think",
+    "CBZ.npcPickTarget",
+    "CBZ.lerpAngle",
+    "CBZ.flashHint"
+   ]
+  },
+  {
+   "title": "Jail AI has personality + ratings (decoupled from temperament)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "75\u2013110, 126\u2013158",
+   "detail": "ensureCombatProfile(n) at line 95 rolls 6 capability ratings (fighting 28\u201383, toughness 28\u201383, speed 30\u201381, stealth 20\u201381, marksman 12\u201357, cunning 24\u201381) + merges n.personality (greed/nerve/loyalty/snitch \u2208 [0,1], line 132\u2013137). behaviorOf(n) at line 78 reads n.behavior (temperament preset: defensive/hothead/pacifist/predator/bully/protector/opportunist/unpredictable) from CBZ.BEHAVIORS dict, returns {init, retaliate, fleeHurt, picksWeak, guts, label, emoji}. Decoupling: a 'pacifist' can have 96 fighting (Tiny); a 'predator' can have 34 fighting (Mad Dog Mickey). Ratings drive baseSpeed (line 129: speed*0.82 + ratings.speed*0.42), combat odds (fightOdds() line 121), maxHp (line 109: 58 + toughness*1.05).",
+   "apis": [
+    "CBZ.BEHAVIORS",
+    "CBZ.ensureCombatProfile",
+    "CBZ.behaviorOf",
+    "CBZ.fightOdds",
+    "CBZ.combatPower"
+   ]
+  },
+  {
+   "title": "Jail AI has gang economy: standing/debt/protection",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "181\u2013214",
+   "detail": "Global gang state: CBZ.game.gangStanding (2 gangs: [0,1]), gangDebt, gangProtection (timers). gangStanding(gang) line 181 returns signed int (\u2212100\u2026+100). addGangStanding(gang, amount) line 186 clamps. addGangDebt(gang, amount) line 197 returns clamped debt. addGangProtection(gang, seconds) line 209 sets protection timer. noteGangIncident(actor, kind, severity, opts) line 215 (120+ lines) broadcasts incident to crew (witnesses), rivals, and updates buzz (fear/wealth/heat/badge/snitch/debt). Used by: combat (startFight provokeGang \u2192 huntPlayer + standing\u221210), approaches (NPCs offer tax/crewDues/gangJob), gang protection purchase.",
+   "apis": [
+    "CBZ.gangStanding",
+    "CBZ.addGangStanding",
+    "CBZ.gangDebt",
+    "CBZ.addGangDebt",
+    "CBZ.gangProtection",
+    "CBZ.addGangProtection",
+    "CBZ.noteGangIncident"
+   ]
+  },
+  {
+   "title": "Jail AI has witness/snitch chain (reportedPlayer* fields)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "1346\u20131426",
+   "detail": "markPlayerReported(n, amount, meta, guard, lead) at line 1346 stamps reportedPlayerT (timer), reportedPlayerAmount, reportedPlayerKind (complaint/noise/witness), reportedPlayerGuard, reportedPlayerCred (credibility 0\u20131), reportedPlayerDoubt, reportedPlayerLastKnown (pos+type). spreadReportGossip(reporter, amount, meta) line 1378 ripples to nearby NPCs, marking them with rememberBlockRead(). npcWitnessCrime(n, amount, meta) at line 1696 sets n.memory (crime witnessed), triggers snitchThreat approach or sendNpcToSnitch(). In aiThink snitch case (line 3522): n.aiState='snitch', rushes to nearest guard, calls recordWitnessReport/markPlayerReported. Used by: npc.js line 209 (thief pickpocket), detections (crime system).",
+   "apis": [
+    "CBZ.markPlayerReported",
+    "CBZ.sendNpcToSnitch",
+    "CBZ.npcWitnessCrime",
+    "CBZ.rememberBlockRead",
+    "CBZ.spreadReportGossip"
+   ]
+  },
+  {
+   "title": "Jail AI has approach system (asks player for cigs/favors)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "1080\u20131116, 3280\u20133304",
+   "detail": "startApproach(n, kind, cost, extra) at line 1080 sets n.approach = {kind, cost, t, msg, motive} + n.aiState='approachPlayer'. Kinds: tax/snitchThreat/turfWarning/gangJob/crewDues/stickUp/lookout/favor/deal/gangParley/jobThreat/heatWarning/alibiDeal/witnessFix/infoSell/coverStory/coverDebt/racketCover/crewBackup/buyItem/diversion/gangInvite/copBribe/copTip/copPlea/copTaunt/reputation/rumor. approachPlayer state (line 3280): walks to player (within APPROACH_FAR=13.5), greets at APPROACH_NEAR=2.35, waits. Called by: considerPlayerApproach(n,dt) (line 1723, huge decision tree ~2000 lines), rippleApproach (line 389, watchers), gang pressure callback (line 728).",
+   "apis": [
+    "CBZ.startApproach",
+    "CBZ.resolveNpcApproach",
+    "CBZ.clearApproach",
+    "CBZ.hurryApproach"
+   ]
+  },
+  {
+   "title": "Jail AI time-slices brain by LOD + importance (npc.js:136\u2013212)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+   "lines": "136\u2013212, 462\u2013468",
+   "detail": "updateNpc(n,dt,cx,cz) applies LOD at line 144 (distance\u00b2 from camera): d\u00b2<55\u00b2=ANIM2 near, d\u00b2<95\u00b2=FAR2 far. important(n) line 112: true if intimidMode/huntPlayer/fight/approach/snitch/pressure/tail/intercept/diversion \u2192 forces full detail. At line 178, stride = imp?1 : near?3 : d\u00b2<FAR2?7 : 16. Line 180: aiThink only runs if (frame+n.slice)%stride==0, else reuses n._spd. This keeps crowd cost flat: near NPCs think every frame, far ones every 7\u201316 frames, important ones always. Registered CBZ.onUpdate(22,...) line 462 (priority 22, AFTER gang/social directors at 42\u201344).",
+   "apis": [
+    "CBZ.npcPickTarget",
+    "CBZ.updateNpc",
+    "CBZ.onUpdate"
+   ]
+  },
+  {
+   "title": "Jail AI handles gunpoint surrender (intimidate system)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "3232\u20133238",
+   "detail": "Lines 3235\u20133237 check CBZ.intimidate.think(n,dt) and return early if it returns non-null speed (surrender/draw/stand-off behavior owned by intimidate.js, not aiThink). This gates gunpoint behavior independent of AI state.",
+   "apis": [
+    "CBZ.intimidate"
+   ]
+  },
+  {
+   "title": "City peds use simple aggr spectrum + inline think() (peds.js:28\u201350)",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "lines": "28\u201350, 48\u2013111",
+   "detail": "makePed(x,z,r,opts) at line 64 rolls aggr \u2208 [0,1] via rollAggr() (line 48, bell curve around mean). City behavioral bands (implied in peds.js:3\u201319): aggr<flee \u2192 flees / <bold \u2192 stands ground / <crook \u2192 petty crime / <violent \u2192 attacks weak / \u2265violent \u2192 rampage. Ped fields: kind (civilian/vendor/gang/cop), aggr, wealth (affects cash/loot). No BEHAVIORS dict, no personality traits, no ratings. Simpler state: walk/rage/vendoring/dead/KO. think(p,dt,active) called inline at line 673 (not exposed in read, impl elsewhere; likely updates p.state, p.target, p.rage, p.fear). Registered CBZ.onUpdate(34,...) at line 637.",
+   "apis": [
+    "CBZ.cityMakePed",
+    "CBZ.spawnCityPeds"
+   ]
+  },
+  {
+   "title": "City peds lack approach/witness/gang-economy systems",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "lines": "1\u201320",
+   "detail": "City peds have NO equivalent to: approaches (tax/snitchThreat/favor/etc), witness chains (reportedPlayer*), gang standing/debt/protection economy, social profile (paid/threatened/refused/helped), blockRead (heat/snitch/wealth rumors), memory/copMarked/tailT, gang jobs, snitch-to-cop mechanics, pressure tactics, socialize state, tailing, intercepting snitches, diversion. City NPC actions: rob/KO/kill (CBZ.cityRobPed/cityKOPed/cityKillPed at lines 200\u2013258), alarm (CBZ.cityAlarm at line 169), witness tagging (CBZ.cityTagWitnesses at line 185), drop weapons (line 293). City cops (police.js) hunt offenders by npcWanted heat, but no social leverage.",
+   "apis": [
+    "CBZ.cityAlarm",
+    "CBZ.cityTagWitnesses",
+    "CBZ.cityRobPed",
+    "CBZ.cityKOPed",
+    "CBZ.cityKillPed",
+    "CBZ.cityNpcOffense"
+   ]
+  },
+  {
+   "title": "Frame pipeline: jail callbacks at 18/20/22/42\u201344; city at 34\u201335",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "5006\u20135017",
+   "detail": "Jail updates (escape mode only, via esc() gate at line 5006): onUpdate(18) gangProtection decay + updateGangJob (line 5007). onUpdate(20) updateGuard loop (guards.js:930). onUpdate(22) updateNpc loop (npc.js:462). onUpdate(42) updateGangPresence (ai.js:5012). onUpdate(42.2) updateTurfCheckpoints (5013). onUpdate(42.4) updateGangThresholds (5014). onUpdate(43) updateSocialDirector (5015). onUpdate(43.5) updateWatcherDirector (5016). onUpdate(44) updateBlockRumors (5017). City (city mode only): onUpdate(34) peds loop (peds.js:637). onUpdate(35) cops loop (police.js:164).",
+   "apis": [
+    "CBZ.onUpdate"
+   ]
+  },
+  {
+   "title": "Jail AI has complex decision tree in considerPlayerApproach (1723 lines total, 1723\u20132200 shown)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+   "lines": "1723\u20132200",
+   "detail": "considerPlayerApproach(n,dt) at line 1723 is a massive branching tree (~500 lines, lines 1723\u20132230 in full file). Reads: n.approachCD (cooldown), n.blockRead (rumor memory), n.coverDebt, n.memory, personality, gang standing/debt/protection, player gang, case pressure (cprof), social profile (payer/scary/helper reads), stash pressure (cigs/inventory visibility), buzzwords. Decides which approach to start based on all these inputs. Example: if wealth rumor + cigs\u22658 + greed>0.42 + (thief OR rivalGang OR standing<\u221212) \u2192 stickUp. Or if heat rumor + same-gang + loyalty>0.25 \u2192 coverStory. This decision tree is what makes jail AI reactive and nuanced.",
+   "apis": [
+    "CBZ.startApproach"
+   ]
+  },
+  {
+   "title": "Jail guards use simpler flow (no state machine like NPCs)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/guards.js",
+   "lines": "767\u2013895",
+   "detail": "updateGuard(g,dt) at line 767: if dead \u2192 flop, if KO \u2192 stand up, if bribed/alert/hunt/investigate/approach \u2192 handle that, else patrol waypoints. No 16-state FSM; just sequential if-blocks. approach state (line 795) lasts ~10s, walks to player, tries to bribe/payoff. hunt state (line 824) chases player at 1.7x speed. investigate state (line 843) searches last-known, questions nearby NPCs (guards only, not jail inmates, though questionNpcDuringSearch at line 630 exists for questioning inmates). Consider approach cooldown (line 270) triggers payoff (racketOffer/witnessBlackmail/snitchIntel) based on heat/racketDebt/snitchReports.",
+   "apis": [
+    "CBZ.updateGuard",
+    "CBZ.resolveGuardApproach"
+   ]
+  }
+ ],
+ "mergePlan": [
+  {
+   "step": "1. Extract jail aiThink() state machine (ai.js:3200\u20133667) into a shared module CBZ.npcThink() with mode/kind gates",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/ai.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "aiThink has 16+ states + 4900+ line context (gang economy, witness chains, approaches). Must port intact: wander\u2192fight/flee/snitch/socialize/approach/pressure/tail/intercept/diversion/shadowPlayer/rumorHuddle/escape logic. City mode currently has NO equivalent states. Risk: accidentally breaking jail mechanics during refactor. Mitigation: extract to shared but call with if(CBZ.game.mode==='escape') initially, run jail tests in escape mode to verify behavior identical."
+  },
+  {
+   "step": "2. Unify NPC entity schema: city.ped + jail.npc \u2192 shared CBZ.ped with mode-specific fields",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "City peds currently LACK: ratings/personality/behavior/aiState/baseSpeed/slice/gang/playerTrust/playerGrudge/playerFear/playerGun/bribed/huntPlayer/fleeT/tailT/intimidMode/memory/blockRead/coverDebt/reportedPlayer*/copMarked/approach. Adding 30+ fields to every city ped = memory bloat (10k peds\u00d730 fields). Mitigation: lazy-initialize fields only if mode==='escape' or ped.archetype in ['gang','thief','dealer']. Keep city civilians minimal."
+  },
+  {
+   "step": "3. Merge personality/ratings into city peds; decouple from aggr spectrum",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "City peds currently: aggr \u2208 [0,1] \u2192 behavior bands (flee/bold/crook/violent/rampage). Jail peds: BEHAVIORS dict (defensive/hothead/opportunist/etc) + 6 capability ratings. Merging: city peds get personality (greed/nerve/loyalty/snitch) + ratings, but aggr still drives basic fleeing. Risk: both systems might conflict (aggr says 'flee', but ratings.nerve says 'stand ground'). Mitigation: aggr becomes input to behavior.init; ratings modulate decision weights, not override state."
+  },
+  {
+   "step": "4. Port gang economy (standing/debt/protection) into city; create city-specific gang turf/jobs",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/gangs.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "Jail gangs: 2 static turfs (TURF array at ai.js:21) + shotcallers/runners/enforcers. City gangs (gangs.js) already exist but lack full economy. Must add CBZ.game.cityGangStanding[gang], cityGangDebt, cityGangProtection. Jail uses standing for approach costs (line 1086\u20131096, 'unpaid' costs more). Risk: city-gang pricing breaks if standing system new. Mitigation: reuse all gang-economy math from jail (addGangStanding, addGangDebt, addGangProtection functions), apply to city.game state."
+  },
+  {
+   "step": "5. Port witness/snitch chain into city; integrate with city crime system",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+    "/Users/elifoltyn/Downloads/game/src/city/wanted.js"
+   ],
+   "risk": "Jail: reportedPlayerT/reportedPlayerAmount/reportedPlayerKind/reportedPlayerCred fields + spreadReportGossip ripple. City has witnesses but simpler: cityTagWitnesses() only marks p.mem (memory of player). Merging: city witnesses get full reportedPlayer* tracking + snitch state (air.js:3522, p.aiState='snitch' \u2192 run to cop). Risk: jail uses snitches to trigger HEAT (guards start hunt), city uses wanted-stars (instant cop spawn). Must decide: does city snitch run to cop (wanted) or just add to case-pressure system? Mitigation: city snitch \u2192 add to wanted (instant response), jail snitch \u2192 add to detection (slower guard response)."
+  },
+  {
+   "step": "6. Port approach system into city; create city equivalents (street tax/deal/info-sell/heatWarning)",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "Jail has 30+ approach kinds (tax/snitchThreat/gangJob/favor/deal/etc). City NPCs DO NOT approach player (p.approach field doesn't exist). Porting: each NPC.approach = {kind, cost, t, msg} at various triggers. City versions: street-gang tax instead of prison gang tax; info-sell gossip instead of hidden-guard warning; street-rumor instead of case-pressure. Risk: ~2000-line decision tree (considerPlayerApproach) needs city-specific costs/triggers (city has no 'detection' heat, no 'witnessReportT'). Mitigation: create CBZ.considerCityApproach() alongside jail version, share structure but city uses wanted-level + crime-severity instead of detection."
+  },
+  {
+   "step": "7. Create shared CBZ.npcThink(actor, dt, isJail) that gates jail-only vs city-only logic",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/ai.js"
+   ],
+   "risk": "aiThink is 467 lines + deeply embedded constants (GANG_NAMES, emoteTex, nearbyNpcs spatial query, TURF, APPROACH_NEAR/FAR, DELIVERY_TARGETS, pressure tactics, etc). Shared version needs: isJail flag at entry, branch on gang/witness/protection logic. City ped may skip snitch-to-guard, or handle it differently (wanted). Risk: 16-state FSM must work for both; jail has complex rumor huddles (line 3498) city doesn't. Mitigation: city peds skip undefined states (rumorHuddle/tailPlayer if !n.tailT), treat as wander. Expose a config CBZ.NPC_MODES = {escape: {...}, city: {...}} with per-state behavior overrides."
+  },
+  {
+   "step": "8. Unify update loops: create CBZ.updateActors(dt, mode) that calls updateNpc/updateCityPed with shared code",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "Currently: updateNpc (npc.js:136) handles LOD, time-slicing, animation, movement for jail. updateCityPed (inline peds.js:673) does LOD, time-slicing, think() call inline. Both have duplicated LOD thresholds (ANIM_D2=55\u00b2, TAG_D2=26\u00b2, RIG_D2=52\u00b2 vs ANIM_D2=58\u00b2, TAG_D2=26\u00b2, VIS_D2=150\u00b2). Merging: create CBZ.updateActor(actor, dt, cx, cz, isJail) that: (1) LOD gate (shared math), (2) time-slice stride (shared), (3) call CBZ.npcThink or CBZ.cityThink (separate), (4) move+animate (shared). Risk: jail has mesh detail LOD (face/hair), city doesn't; jail has rigidity checks (.group.visible = wantRig). Mitigation: check for detail before toggling (if(actor.char.detail) ...); move city LOD constants into shared CBZ.LOD_DEFAULTS."
+  },
+  {
+   "step": "9. Create mode-gated on-update callbacks; replace (18/20/22/42\u201344) and (34\u201335) with shared registrations",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/ai.js"
+   ],
+   "risk": "Jail: CBZ.onUpdate(22) npc loop; (42) social director; (43) snitch director. City: CBZ.onUpdate(34) peds loop; (35) cops loop. Merging: register updateActors at priority 22 with mode gate; registerSocialDirector at 42 with mode gate (both jail social + city gangs). Risk: city social systems (social.js) already exist; must not duplicate. Jail social (ai.js:5015 updateSocialDirector) drives gossip/socialize state. City social (social.js, not fully visible) handles partner/family. Mitigation: city social stays in city/social.js; jail social in ai.js; both register at same priority but mode-gated."
+  },
+  {
+   "step": "10. Data mapping: npc \u2192 ped field renames; ensure backward-compat for quest/story systems that read NPC fields",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/npc.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "Jail NPC field names: .char, .group, .kind, .role, .gang, .personality, .ratings, .behavior, .hp, .ko, .dead, .aiState, .approach, .huntPlayer, etc. City ped: .char, .group, .kind, .pos, .aggr, .wealth, .armed, .npcHeat, .ko, .dead, .state (not aiState), etc. Many reads: if(n.kind==='guard') or if(n.role==='thief'). Merging: guarantee unified schema + backward-compat accessors (e.g., Object.defineProperty(ped, 'role', {get: ()=>ped.kind})) or systematic rename. Risk: breaking quests that query npc.role or npc.gang. Mitigation: audit all reads in systems/ for n.role, n.gang, n.aiState, n.hp; use shared schema from day 1."
+  },
+  {
+   "step": "11. Test in mode-isolated way: jail mode uses shared CBZ.npcThink with isJail=true; city mode uses isJail=false with fallback to simpler logic until city logic mature",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/entities/ai.js"
+   ],
+   "risk": "If shared code has bugs, both modes break. Mitigation: (1) initially keep jail ai.js untouched, export aiThink as CBZ.npcThink, city doesn't use it. (2) Write CBZ.cityNpcThink as copy of jail branch, comment out jail-only features (gang/approach/witness), verify city still works. (3) Once city works, gradual merge branches. (4) Regression test each mode after merge steps."
+  }
+ ]
+}

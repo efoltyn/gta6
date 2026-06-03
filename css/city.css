@@ -1,0 +1,124 @@
+/* ============================================================
+   css/city.css — title-screen section switching for the CITY mode,
+   plus hiding the prison/survival HUD while city mode is active (the
+   city draws its own overlay in src/city/hud.js).
+============================================================ */
+
+/* title-screen mode sections */
+.mode-city-only { display: none; }
+body.mode-city .mode-city-only { display: block; }
+body.mode-city .mode-escape-only,
+body.mode-city .mode-survival-only { display: none; }
+
+/* hide the prison + survival HUD panels in the city (city has its own) */
+body.mode-city #objective,
+body.mode-city #topright,
+body.mode-city #keycard,
+body.mode-city #inventory,
+body.mode-city #detectWrap,
+body.mode-city #gangHud,
+body.mode-city #compass,
+body.mode-city #minimap,
+body.mode-city #simHud,
+body.mode-city #dashBtn,
+body.mode-city #weaponStrip,
+body.mode-city #ammo,
+body.mode-city #survTop,
+body.mode-city #survZone,
+body.mode-city #survBars,
+body.mode-city #disasterBanner { display: none !important; }
+
+/* the contextual interact panel is reused by the city — keep it readable */
+body.mode-city #interact { display: none; }
+
+/* ============================================================
+   Zillow — the city property + business marketplace ([Z])
+============================================================ */
+#cityZillow.zwrap {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 60; display: none; flex-direction: column;
+  width: min(680px, 94vw); height: min(80vh, 760px);
+  background: rgba(14, 18, 24, .97); border: 2px solid #2f3a44; border-radius: 16px;
+  color: #e8eef7; font-family: Fredoka, system-ui, sans-serif;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .6); pointer-events: auto; overflow: hidden;
+}
+#cityZillow .zhead { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 6px; }
+#cityZillow .ztitle { font-size: 22px; font-weight: 700; }
+#cityZillow .ztag { font-size: 12px; font-weight: 500; color: #8a93a3; margin-left: 8px; }
+#cityZillow .zx { background: none; border: none; color: #8a93a3; font-size: 20px; cursor: pointer; padding: 2px 8px; border-radius: 8px; }
+#cityZillow .zx:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+#cityZillow .zstats { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 18px 8px; font-size: 12.5px; color: #9fb0c6; }
+#cityZillow .zstats b { color: #ffd166; }
+#cityZillow .zflash { margin: 0 16px 8px; padding: 7px 12px; border-radius: 9px; font-size: 13px; font-weight: 500; }
+#cityZillow .zflash-ok { background: rgba(46, 158, 79, .16); color: #9be8b4; border: 1px solid rgba(46, 158, 79, .4); }
+#cityZillow .zflash-bad { background: rgba(226, 87, 75, .14); color: #ff9e90; border: 1px solid rgba(226, 87, 75, .4); }
+#cityZillow .ztabs { display: flex; gap: 6px; padding: 4px 14px 10px; border-bottom: 1px solid #232b34; }
+#cityZillow .ztab { flex: 1; background: rgba(255, 255, 255, .04); border: 1px solid #2a323c; color: #aeb8c6;
+  padding: 7px 6px; border-radius: 10px; font-family: inherit; font-size: 13px; cursor: pointer; transition: .12s; }
+#cityZillow .ztab:hover { background: rgba(255, 255, 255, .09); color: #e8eef7; }
+#cityZillow .ztab.on { background: #2f6fed; border-color: #4f8bff; color: #fff; font-weight: 600; }
+#cityZillow .zlist { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+#cityZillow .zlist::-webkit-scrollbar { width: 9px; }
+#cityZillow .zlist::-webkit-scrollbar-thumb { background: #39434f; border-radius: 6px; }
+#cityZillow .zhint { font-size: 12px; color: #8a93a3; padding: 2px 2px 4px; }
+#cityZillow .zempty { color: #7f8794; text-align: center; padding: 40px 10px; }
+
+#cityZillow .zcard { display: flex; gap: 12px; align-items: stretch;
+  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 12px; padding: 10px 12px; }
+#cityZillow .zcard:hover { border-color: #3a4654; background: rgba(255, 255, 255, .06); }
+#cityZillow .zicon { font-size: 30px; width: 42px; display: flex; align-items: center; justify-content: center; }
+#cityZillow .zmeta { flex: 1; min-width: 0; }
+#cityZillow .zname { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+#cityZillow .zaddr { font-size: 12px; color: #9fb0c6; }
+#cityZillow .zsub { font-size: 11.5px; color: #7f8794; margin-top: 1px; text-transform: capitalize; }
+#cityZillow .zowner { font-size: 11.5px; color: #8a93a3; margin-top: 2px; }
+#cityZillow .zright { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 3px; min-width: 116px; }
+#cityZillow .zval { font-size: 17px; font-weight: 700; color: #7ed957; }
+#cityZillow .zrent { font-size: 11px; color: #ffb870; }
+#cityZillow .zacts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+#cityZillow .zbtn { border: none; border-radius: 8px; padding: 6px 12px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: .12s; }
+#cityZillow .zbtn-buy { background: #2f9e4f; color: #fff; }
+#cityZillow .zbtn-buy:hover { background: #38b85c; }
+#cityZillow .zbtn-sell { background: #b8553a; color: #fff; }
+#cityZillow .zbtn-sell:hover { background: #d0653f; }
+#cityZillow .zbtn-home { background: #3a4658; color: #cfe0f5; }
+#cityZillow .zbtn-home:hover { background: #47566b; }
+#cityZillow .znope { font-size: 11px; color: #7f8794; font-style: italic; }
+
+#cityZillow .zbadge { font-size: 10px; font-weight: 700; letter-spacing: .4px; padding: 2px 7px; border-radius: 999px; }
+#cityZillow .zb-sale { background: rgba(46, 158, 79, .2); color: #7ed957; }
+#cityZillow .zb-own { background: rgba(91, 139, 255, .22); color: #8fb6ff; }
+#cityZillow .zb-illegal { background: rgba(226, 87, 75, .2); color: #ff8a7a; }
+
+#cityZillow .zrank { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 10px; font-size: 14px; }
+#cityZillow .zrank.me { border-color: #4f8bff; background: rgba(47, 111, 237, .14); }
+#cityZillow .zrnum { width: 34px; color: #ffd166; font-weight: 700; }
+#cityZillow .zrname { flex: 1; font-weight: 600; }
+#cityZillow .zrcount { font-size: 12px; color: #8a93a3; }
+#cityZillow .zrval { font-weight: 700; color: #7ed957; min-width: 92px; text-align: right; }
+#cityZillow .zfoot { padding: 8px 16px; border-top: 1px solid #232b34; font-size: 11px; color: #6b7480; text-align: center; }
+
+/* ============================================================
+   City activity directory ([Y])
+============================================================ */
+#cityActivities {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 62; display: none; width: min(760px, 94vw); max-height: min(82vh, 760px);
+  background: rgba(13, 16, 22, .97); border: 2px solid #2f3a44; border-radius: 14px;
+  color: #e8eef7; font-family: Fredoka, system-ui, sans-serif;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .62); pointer-events: auto; overflow: hidden;
+}
+#cityActivities .ca-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px 8px; }
+#cityActivities .ca-title { font-size: 22px; font-weight: 700; }
+#cityActivities .ca-sub { font-size: 12px; color: #8a93a3; margin-top: 2px; }
+#cityActivities .ca-close { border: 0; background: rgba(255,255,255,.06); color: #aeb8c6; border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
+#cityActivities .ca-tabs { display: flex; gap: 6px; padding: 0 14px 10px; border-bottom: 1px solid #26313a; overflow-x: auto; }
+#cityActivities .ca-tab { flex: 0 0 auto; border: 1px solid #2d3843; background: rgba(255,255,255,.04); color: #aeb8c6; border-radius: 8px; padding: 7px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+#cityActivities .ca-tab.on { background: #2f6fed; border-color: #4f8bff; color: #fff; font-weight: 700; }
+#cityActivities .ca-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 9px; padding: 12px 14px 14px; overflow-y: auto; max-height: 58vh; }
+#cityActivities .ca-card { text-align: left; border: 1px solid #28313b; background: rgba(255,255,255,.04); color: #e8eef7; border-radius: 10px; padding: 10px 11px; cursor: pointer; font: inherit; }
+#cityActivities .ca-card:hover { border-color: #4f8bff; background: rgba(79,139,255,.12); }
+#cityActivities .ca-name { font-size: 15px; font-weight: 700; }
+#cityActivities .ca-desc { font-size: 12px; color: #9fb0c6; margin: 2px 0 7px; line-height: 1.25; }
+#cityActivities .ca-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: #7ed957; }

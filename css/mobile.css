@@ -1,0 +1,61 @@
+/* ============================================================
+   mobile.css — on-screen touch controls + responsive HUD.
+   Touch controls live in #touch and only matter on `body.touch`.
+============================================================ */
+html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
+
+#touch { position: fixed; inset: 0; z-index: 22; pointer-events: none; display: none; }
+#touch button, #tstick { pointer-events: auto; }
+
+/* dynamic left-thumb joystick (recenters to where you press) */
+#tstick {
+  position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px;
+  border-radius: 50%; border: 2px solid rgba(255,255,255,.22);
+  background: rgba(255,255,255,.06); opacity: 0; transition: opacity .1s;
+  touch-action: none;
+}
+#tstick.on { opacity: 1; }
+#tknob {
+  position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px;
+  border-radius: 50%; background: rgba(255,255,255,.32);
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
+
+/* right-hand button cluster */
+#tbtns { position: fixed; right: 16px; bottom: 22px; display: flex; flex-direction: column-reverse; gap: 12px; }
+.tbtn {
+  pointer-events: auto; width: 70px; height: 70px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.3); background: rgba(20,30,46,.55);
+  color: #fff; font-family: inherit; font-weight: 700; font-size: 12px; letter-spacing: 1px;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  box-shadow: 0 4px 0 rgba(0,0,0,.3); transition: transform .06s, background .1s;
+}
+.tbtn.tbig { width: 88px; height: 88px; font-size: 15px; background: rgba(58,209,122,.45); border-color: rgba(58,209,122,.6); }
+.tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.6); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+
+/* HUD tweaks while on touch: declutter + reachable interaction panel */
+body.touch #compass { display: none; }
+body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height: 128px; }
+body.touch #interact {
+  left: 50%; right: auto; bottom: 168px; margin-left: -118px; width: 236px;
+  pointer-events: auto; transform: translateY(8px) scale(.96);
+}
+body.touch #interact.show { transform: translateY(0) scale(1); }
+body.touch .iopt { padding: 7px 4px; }     /* fatter tap targets */
+body.touch .ikey { width: 24px; height: 24px; }
+
+/* ---- responsive scaling for small / portrait screens ---- */
+@media (max-width: 820px) {
+  #objective { font-size: 14px; max-width: 56vw; padding: 9px 12px; }
+  #topright .pill { font-size: 15px; padding: 8px 11px; }
+  #inventory { font-size: 12px; max-width: 200px; }
+  #detectWrap { width: min(240px, 46vw); top: 60px; }
+  #hitfx { font-size: 42px; }
+  #toast { font-size: 44px; }
+  .card-box { padding: 24px 20px 22px; }
+}
+@media (max-width: 520px) {
+  #objective { max-width: 58vw; font-size: 13px; }
+  #inventory { transform: translateY(104px); font-size: 11px; max-width: 160px; }
+  #keycard { transform: translateY(58px); }
+}

@@ -1,0 +1,404 @@
+/* ============================================================
+   systems/camera.js — third-person follow camera.
+   Techniques (researched): Unity-style critically-damped SmoothDamp
+   so the camera lags then settles without overshoot, velocity-based
+   look-ahead so you see where you're going, a subtle FOV kick at
+   speed, smoothed crouch height, and raycast collision so it never
+   clips through walls.
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  const { camera, canvas, player } = CBZ;
+  const SENS = CBZ.TUNE.sens;
+
+  // ---- zoom (scroll wheel / pinch). default sits wide; clamps in [MIN,MAX] ----
+  const ZMIN = 5.2, ZMAX = 16, DEF = CBZ.TUNE.camDist;
+  let camDist = DEF;        // smoothed actual distance
+  let zoomTarget = DEF;     // where zoom wants to be
+  function clampZoom(v) { return Math.max(ZMIN, Math.min(ZMAX, v)); }
+  CBZ.camZoom = function (d) { zoomTarget = clampZoom(zoomTarget + d); };
+  CBZ.resetZoom = function () { zoomTarget = DEF; camDist = DEF; };
+
+  const MIN_PITCH = -0.18, MAX_PITCH = 0.72;
+  const DEFAULT_PITCH = 0.46;   // lower angle — less of a top-down "high" view
+  CBZ.CAM_DEFAULT_PITCH = DEFAULT_PITCH;
+  const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
+  CBZ.cam = cam;
+
+  // screen shake — punches/KOs call CBZ.shake(magnitude)
+  let shakeAmt = 0;
+  CBZ.shake = function (m) { shakeAmt = Math.max(shakeAmt, m); };
+
+  CBZ.requestLock = function () {
+    if (CBZ.touchMode) return; // phones drive the camera via on-screen look-pad
+    try {
+      const req = canvas.requestPointerLock && canvas.requestPointerLock();
+      if (req && req.catch) req.catch(() => {});
+    } catch (_) {}
+  };
+
+  document.addEventListener("pointerlockchange", () => {
+    cam.locked = document.pointerLockElement === canvas;
+    // don't pause while spectating a death — the cursor is intentionally free
+    // so you can click the Play Again / Menu buttons, and the world keeps going
+    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
+    else if (cam.locked && CBZ.game.state === "paused") CBZ.setState("playing");
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!cam.locked) return;
+    cam.yaw -= e.movementX * SENS;
+    cam.pitch -= e.movementY * SENS;
+    cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
+  });
+  // scroll wheel zooms the third-person camera (ignored in first-person)
+  addEventListener("wheel", (e) => {
+    if ((CBZ.simView && CBZ.simView.active) || (CBZ.fullMap && CBZ.fullMap.active)) return; // overview/map owns the pointer
+    if ((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) return;
+    CBZ.camZoom(e.deltaY * 0.012);
+  }, { passive: true });
+
+  // ---- Unity-style SmoothDamp (per scalar) ----
+  function smoothDamp(cur, target, vel, smoothTime, dt) {
+    smoothTime = Math.max(0.0001, smoothTime);
+    const omega = 2 / smoothTime;
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    let change = cur - target;
+    const temp = (vel.v + omega * change) * dt;
+    vel.v = (vel.v - omega * temp) * exp;
+    return target + (change + temp) * exp;
+  }
+
+  // smoothed state
+  const camV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };
+  const look = new THREE.Vector3(player.pos.x, player.pos.y + 1.4, player.pos.z);
+  const lookV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };
+  let fov = 62, fovV = { v: 0 }, heightV = { v: 0 };
+  let height = 1.4;
+  const prev = new THREE.Vector3().copy(player.pos);
+  const vel = new THREE.Vector3();
+
+  const raycaster = new THREE.Raycaster();
+  const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
+
+  // cinematic spawn intro: far reveal -> push in -> 180 orbit handoff
+  let introT = 0;
+  let introYaw0 = 0;
+  const INTRO = 3.55;
+  const introLook = new THREE.Vector3();
+  const introPos = new THREE.Vector3();
+  const introEye = new THREE.Vector3();
+  const introAim = new THREE.Vector3();
+  CBZ.startIntro = function () {
+    introT = INTRO;
+    introYaw0 = cam.yaw;
+    const spawn = CBZ.player ? CBZ.player.pos : CBZ.SPAWN;
+    // snap to a much farther establishing shot so frame one feels deliberate
+    camera.position.set(spawn.x - 24, spawn.y + 34, spawn.z + 58);
+    camera.lookAt(spawn.x, spawn.y + 1.18, spawn.z);
+  };
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  function keepIntroCamInRoom(baseX, baseY, baseZ, pos) {
+    _ro.set(baseX, baseY, baseZ);
+    _rd.copy(pos).sub(_ro);
+    const d = _rd.length();
+    if (d > 0.001) {
+      _rd.normalize();
+      raycaster.set(_ro, _rd);
+      raycaster.far = d;
+      const hit = raycaster.intersectObjects(CBZ.losBlockers, false);
+      if (hit.length > 0 && hit[0].distance < d) {
+        pos.copy(_ro).addScaledVector(_rd, Math.max(1.5, hit[0].distance - 0.45));
+      }
+    }
+    pos.y = Math.max(pos.y, 0.8);
+    return pos;
+  }
+
+  // Swept-sphere (approx boxcast) of the camera arm against every solid
+  // collider. Returns the nearest distance along the normalized ray (ox,oy,oz)+
+  // t*(dx,dy,dz) at which a collider — expanded by the camera radius — is hit,
+  // clamped to `dist`. Colliders carry an optional [y0,y1] vertical span (the
+  // survival buildings); prison walls have none and act full-height. Tree
+  // trunks opt out via noCam so they don't jostle the camera.
+  function sweepColliders(ox, oy, oz, dx, dy, dz, dist, rad) {
+    let best = dist;
+    const cs = CBZ.colliders;
+    for (let i = 0; i < cs.length; i++) {
+      const c = cs[i];
+      if (c.noCam) continue;
+      const minX = c.minX - rad, maxX = c.maxX + rad, minZ = c.minZ - rad, maxZ = c.maxZ + rad;
+      const minY = (c.y0 != null ? c.y0 : -1e4) - rad, maxY = (c.y1 != null ? c.y1 : 1e4) + rad;
+      let t0 = 0, t1 = best, ta, tb, tmp;
+      if (dx > -1e-8 && dx < 1e-8) { if (ox < minX || ox > maxX) continue; }
+      else { ta = (minX - ox) / dx; tb = (maxX - ox) / dx; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+      if (dy > -1e-8 && dy < 1e-8) { if (oy < minY || oy > maxY) continue; }
+      else { ta = (minY - oy) / dy; tb = (maxY - oy) / dy; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+      if (dz > -1e-8 && dz < 1e-8) { if (oz < minZ || oz > maxZ) continue; }
+      else { ta = (minZ - oz) / dz; tb = (maxZ - oz) / dz; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+      if (t0 > 0.001 && t0 < best) best = t0;   // t0<=0 → pivot already inside; ignore
+    }
+    return best;
+  }
+
+  function updateCamera(dt) {
+    // BIRD'S-EYE SOCIETY VIEW: a strategic camera for the math-only mass
+    // simulation. It intentionally bypasses spring-arm collision and close
+    // camera effects; the player remains frozen while the prison keeps living.
+    const sv = CBZ.simView;
+    if (sv && sv.active && CBZ.game.mode === "escape") {
+      introT = 0;
+      prev.copy(player.pos); // prevent a false velocity spike on hand-off
+      shakeAmt = 0;
+      const targetX = sv.x, targetY = sv.height, targetZ = sv.z + sv.height * 0.16;
+      camera.position.x = smoothDamp(camera.position.x, targetX, camV.x, 0.16, dt);
+      camera.position.y = smoothDamp(camera.position.y, targetY, camV.y, 0.16, dt);
+      camera.position.z = smoothDamp(camera.position.z, targetZ, camV.z, 0.16, dt);
+      look.set(sv.x, 0, sv.z);
+      camera.lookAt(look);
+      fov = smoothDamp(fov, 52, fovV, 0.16, dt);
+      if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      return;
+    }
+
+    // CITY DRIVING: a high GTA-style chase — well BEHIND and ABOVE the car,
+    // looking down the road ahead — so you read the whole car, not the hood.
+    // (Yaw is auto-steered behind the car by city/vehicles.js.)
+    if (CBZ.game.mode === "city" && player.driving && !player.dead) {
+      introT = 0; prev.copy(player.pos);
+      const cfx = -Math.sin(cam.yaw), cfz = -Math.cos(cam.yaw);   // = the car's forward
+      const back = 9.5, up = 10.0, ahead = 6.0;
+      const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
+      camera.position.x = smoothDamp(camera.position.x, tx, camV.x, 0.12, dt);
+      camera.position.y = smoothDamp(camera.position.y, ty, camV.y, 0.12, dt);
+      camera.position.z = smoothDamp(camera.position.z, tz, camV.z, 0.12, dt);
+      look.x = smoothDamp(look.x, player.pos.x + cfx * ahead, lookV.x, 0.10, dt);
+      look.y = smoothDamp(look.y, player.pos.y + 0.6, lookV.y, 0.10, dt);
+      look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, 0.10, dt);
+      camera.lookAt(look);
+      if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, dt); if (shakeAmt < 0.01) shakeAmt = 0; }
+      fov = smoothDamp(fov, 66, fovV, 0.18, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      return;
+    }
+
+    // CITY camera: first-person by default, a third-person cinematic orbit on
+    // death (the "WASTED" replay), and plain third-person when you toggle it or
+    // hop in a car. city/view.js owns the cityCam state + rig visibility.
+    if (CBZ.game.mode === "city" && CBZ.cityCam) {
+      const cc = CBZ.cityCam;
+      if (cc.death) {                              // cinematic death replay: orbit the body
+        introT = 0; shakeAmt = 0; cc.death.t += dt;
+        const ang = (cc.death.ang0 || 0) + cc.death.t * 0.8;
+        const r = 5.5, h = 3.0;
+        camera.position.set(player.pos.x + Math.cos(ang) * r, player.pos.y + h, player.pos.z + Math.sin(ang) * r);
+        look.set(player.pos.x, player.pos.y + 0.7, player.pos.z); camera.lookAt(look);
+        fov = smoothDamp(fov, 48, fovV, 0.2, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+        return;
+      }
+      if (cc.fp && !player.dead && !player.driving) {   // first-person
+        introT = 0; prev.copy(player.pos);
+        const eye = player.pos.y + (player.crouch ? 1.22 : 1.66);
+        const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+        const fX = -Math.sin(cam.yaw), fZ = -Math.cos(cam.yaw);
+        // sit AT the head (not ahead of it) and keep horizontal follow tight so
+        // looking around is responsive, but EASE the eye height so stair treads
+        // and the door-step don't jolt the whole view up and down.
+        camera.position.x = player.pos.x;
+        camera.position.z = player.pos.z;
+        camera.position.y = smoothDamp(camera.position.y, eye, camV.y, 0.06, dt);
+        const ey = camera.position.y;
+        look.set(player.pos.x + fX * cp * 6, ey - sp * 6, player.pos.z + fZ * cp * 6);
+        camera.lookAt(look);
+        if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, dt); if (shakeAmt < 0.01) shakeAmt = 0; }
+        fov = smoothDamp(fov, 70, fovV, 0.18, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+        return;
+      }
+    }
+
+    // SPECTATE death-cam: slowly orbit the fallen body, drift to a higher,
+    // pulled-back framing so you watch the chaos play out.
+    if (CBZ.surv && CBZ.surv.spectating) {
+      cam.yaw += dt * 0.22;
+      cam.pitch += (0.52 - cam.pitch) * Math.min(1, dt * 1.5);
+      zoomTarget = clampZoom(zoomTarget + (12.5 - zoomTarget) * Math.min(1, dt * 1.2));
+    }
+    cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
+
+    // player velocity (planar) for look-ahead + FOV kick
+    vel.set((player.pos.x - prev.x) / Math.max(dt, 1e-4), 0, (player.pos.z - prev.z) / Math.max(dt, 1e-4));
+    prev.copy(player.pos);
+    const spd = Math.hypot(vel.x, vel.z);
+
+    if ((CBZ.meleeFocusT || 0) > 0) CBZ.meleeFocusT = Math.max(0, CBZ.meleeFocusT - dt);
+    const shoulder = !!(CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive());
+    const meleeFocus = !shoulder && (CBZ.meleeFocusT || 0) > 0;
+    // driving a car in the city → a wider, higher GTA-style chase (yaw is
+    // auto-steered behind the car by city/vehicles.js).
+    const driving = CBZ.game.mode === "city" && !!player.driving;
+
+    // ease the zoom distance toward its target. Normal third person is
+    // a wider chase camera; armed third person becomes readable over-shoulder.
+    const desiredZoom = driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget));
+    camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, dt));
+
+    // smoothed rig height (crouch dips the whole rig). Survival frames the
+    // player higher — disasters need you to read the ground around you — and
+    // sprinting lifts it a touch more instead of letting it sag low.
+    const surv = CBZ.game.mode === "survival";
+    const sprinting = surv && !!player.sprint;
+    const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))));
+    height = smoothDamp(height, baseHeight, heightV, 0.18, dt);
+    const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
+    const rightX = Math.cos(cam.yaw), rightZ = -Math.sin(cam.yaw);
+    const fwdX = -Math.sin(cam.yaw), fwdZ = -Math.cos(cam.yaw);
+    const targetSide = shoulder ? 0.26 : (meleeFocus ? 0.12 : 0);
+    const camSide = shoulder ? 0.86 : (meleeFocus ? 0.32 : 0);
+    const baseX = tx + rightX * targetSide;
+    const baseY = ty + (shoulder ? 0.08 : 0);
+    const baseZ = tz + rightZ * targetSide;
+
+    // orbit offset from yaw/pitch
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const ox = Math.sin(cam.yaw) * cp * camDist;
+    const oy = sp * camDist;
+    const oz = Math.cos(cam.yaw) * cp * camDist;
+    let dx = baseX + ox + rightX * camSide;
+    let dy = baseY + oy + (shoulder ? -0.05 : (meleeFocus ? 0.02 : (surv ? 0.34 : 0.14)));
+    let dz = baseZ + oz + rightZ * camSide;
+
+    // ---- camera collision (spring-arm): pull the camera in to just before
+    // the nearest solid between the player and the desired cam position, so a
+    // wall behind you never sits between the camera and the character. We test
+    // BOTH the LOS meshes AND a swept-sphere against EVERY solid collider —
+    // many walls (the whole prison) aren't LOS-flagged, which is exactly why
+    // the camera used to clip straight through them. The sphere radius pads the
+    // near-plane so thin walls can't poke through. (Standard third-person
+    // camera-collision / boxcast technique.)
+    _ro.set(baseX, baseY, baseZ);
+    _rd.set(dx - baseX, dy - baseY, dz - baseZ);
+    const rayDist = _rd.length();
+    _rd.normalize();
+    let occ = rayDist;
+    raycaster.set(_ro, _rd); raycaster.far = rayDist;
+    const hit = raycaster.intersectObjects(CBZ.losBlockers, false);
+    if (hit.length > 0 && hit[0].distance < occ) occ = hit[0].distance;
+    occ = Math.min(occ, sweepColliders(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.34));
+    if (occ < rayDist) {
+      // The DENSE city boxes the camera in on all sides; with a 0.28 floor it
+      // slammed to your back every step (a broken first-person feel). Keep a
+      // usable third-person distance there — accept a touch of wall clip over a
+      // collapsed camera. The open prison/island rarely trigger this, so they
+      // keep their tight 0.28 pull-in.
+      const minCam = (CBZ.game.mode === "city" && !player.driving) ? 2.4 : 0.28;
+      const d = Math.max(minCam, occ - 0.16);
+      dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
+    }
+    // never drop below the surface you're standing on (no looking up through floors)
+    dy = Math.max(dy, player.pos.y + 0.35, 0.6);
+
+    // look target leads the player in the direction of travel. In survival we
+    // ease the forward lead (a long lead drops the player low in frame when
+    // sprinting) and raise the look height so you sit centred, not bottom-third.
+    const lead = shoulder ? 0.05 : (meleeFocus ? 0.08 : 0.08);
+    const aimLead = driving ? 8.5 : (shoulder ? 12.0 : (meleeFocus ? 2.2 : (surv ? 2.4 : 3.6)));
+    const ltx = tx + vel.x * lead + rightX * targetSide + fwdX * aimLead;
+    const ltz = tz + vel.z * lead + rightZ * targetSide + fwdZ * aimLead;
+    const lty = player.pos.y + (player.crouch ? 1.24 : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (surv ? 2.06 : 1.88)))));
+
+    // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
+    if (introT > 0) {
+      introT -= dt;
+      const p = 1 - introT / INTRO;
+      const introDist = Math.min(camDist, 7.6);
+      const frontPitch = Math.max(cam.pitch, 0.18);
+      const frontCp = Math.cos(frontPitch), frontSp = Math.sin(frontPitch);
+      if (p < 0.62) {
+        const k = p < 0.10 ? 0 : easeInOut((p - 0.10) / 0.52);
+        const wx = player.pos.x - 24, wy = player.pos.y + 34, wz = player.pos.z + 58;
+        const frontX = baseX + Math.sin(introYaw0) * frontCp * introDist;
+        const frontY = baseY + frontSp * introDist + 0.35;
+        const frontZ = baseZ + Math.cos(introYaw0) * frontCp * introDist;
+        introPos.set(frontX, frontY, frontZ);
+        keepIntroCamInRoom(baseX, baseY, baseZ, introPos);
+        camera.position.set(lerp(wx, introPos.x, k), lerp(wy, introPos.y, k), lerp(wz, introPos.z, k));
+        look.set(lerp(player.pos.x, ltx, k), lerp(player.pos.y + 1.18, lty, k), lerp(player.pos.z, ltz, k));
+      } else {
+        const k = easeInOut((p - 0.62) / 0.38);
+        const orbitYaw = introYaw0 + Math.PI * k;
+        const orbitRightX = Math.cos(orbitYaw), orbitRightZ = -Math.sin(orbitYaw);
+        const ocp = Math.cos(frontPitch), osp = Math.sin(frontPitch);
+        const oox = Math.sin(orbitYaw) * ocp * introDist;
+        const ooy = osp * introDist;
+        const ooz = Math.cos(orbitYaw) * ocp * introDist;
+        introLook.set(ltx, lty, ltz);
+        introPos.set(
+          baseX + oox + orbitRightX * camSide,
+          baseY + ooy + 0.22 - (shoulder ? 0.34 : (meleeFocus ? 0.16 : 0.06)),
+          baseZ + ooz + orbitRightZ * camSide
+        );
+        keepIntroCamInRoom(baseX, baseY, baseZ, introPos);
+        const handoff = easeInOut(Math.max(0, Math.min(1, (k - 0.70) / 0.30)));
+        if (handoff > 0) {
+          const finalYaw = introYaw0 + Math.PI;
+          const fpPitch = Math.max(-0.05, Math.min(0.26, cam.pitch * 0.55));
+          const fcp = Math.cos(fpPitch);
+          introEye.set(player.pos.x, player.pos.y + (player.crouch ? 1.45 : 2.05), player.pos.z);
+          introAim.set(
+            introEye.x - Math.sin(finalYaw) * fcp,
+            introEye.y + Math.sin(fpPitch),
+            introEye.z - Math.cos(finalYaw) * fcp
+          );
+          introPos.lerp(introEye, handoff);
+          introLook.lerp(introAim, handoff);
+        }
+        camera.position.copy(introPos);
+        look.copy(introLook);
+      }
+      camera.lookAt(look);
+      // keep smoothdamp state synced so the hand-off doesn't jolt
+      camV.x.v = camV.y.v = camV.z.v = 0; lookV.x.v = lookV.y.v = lookV.z.v = 0;
+      if (introT <= 0) {
+        introT = 0;
+        cam.yaw = introYaw0 + Math.PI;
+        if (CBZ.onIntroComplete) CBZ.onIntroComplete();
+      }
+      return;
+    }
+
+    // SmoothDamp the camera toward the desired position. Shorter smooth-times
+    // than before so the camera tracks tightly — less "lag" between input and
+    // what you see, which reads as a snappier, faster game.
+    camera.position.x = smoothDamp(camera.position.x, dx, camV.x, 0.085, dt);
+    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, 0.10, dt);
+    camera.position.z = smoothDamp(camera.position.z, dz, camV.z, 0.085, dt);
+
+    look.x = smoothDamp(look.x, ltx, lookV.x, 0.07, dt);
+    look.y = smoothDamp(look.y, lty, lookV.y, 0.085, dt);
+    look.z = smoothDamp(look.z, ltz, lookV.z, 0.07, dt);
+    camera.lookAt(look);
+
+    // screen shake offset, decaying (applied after positioning)
+    if (shakeAmt > 0.001) {
+      const s = shakeAmt;
+      camera.position.x += (Math.random() - 0.5) * s;
+      camera.position.y += (Math.random() - 0.5) * s;
+      camera.position.z += (Math.random() - 0.5) * s;
+      shakeAmt *= Math.pow(0.0006, dt); // fast decay
+      if (shakeAmt < 0.01) shakeAmt = 0;
+    }
+
+    // FOV kick at speed for a sense of pace — wider base + a bigger kick make
+    // movement feel quicker without changing the actual move speed.
+    const targetFov = shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6);
+    fov = smoothDamp(fov, targetFov, fovV, 0.18, dt);
+    if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  }
+
+  CBZ.updateCamera = updateCamera;
+  CBZ.onAlways(50, updateCamera);
+
+  camera.position.set(CBZ.SPAWN.x, 3.0, CBZ.SPAWN.z + 7);
+  camera.lookAt(CBZ.SPAWN.x, 1.0, CBZ.SPAWN.z);
+})();

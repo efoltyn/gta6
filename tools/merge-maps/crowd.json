@@ -1,0 +1,258 @@
+{
+ "summary": "The CELL BLOCK Z codebase has TWO fundamentally different crowd/population systems: the jail **mass-crowd** (excellent, sophisticated) and the city **peds** (basic, limited). The jail system is a three-tier population engine: (1) **ambient tier** using typed arrays + hidden movement (src/entities/ambientstate.js), (2) **instanced-mesh tier** for ~360 nearby bodies (src/entities/crowd.js), and (3) **face-rig tier** for up to 40 closest agents with full character rigs + skinning + interaction (CBZ.makeCharacter). Each tier has distinct rendering: ambient uses Points clouds (density view) or InstancedMesh boxes (overview), instanced uses 11 per-agent meshes (torso, head, hair, 4 limbs, eyes, mouth, valuable), and face-rigs are full CBZ.npcs with makeCharacter. The city crowds are shallow: src/city/crowd.js has 360 agents using only 6 InstancedMesh parts (no faces, no inventory, no loot, faceless boxes), and src/city/peds.js has ~90+ NPCs rendered as full rigs but with limited features (no cell-based society sim, no worker, no persistent grudges across demotion). The gap is appearance + data richness: jail agents get skin/hair color, visible valuables, persistent identity + memories + relationships via a Web Worker, while city peds are rendered-only with basic aggression spectrum. The merge target: retire src/city/crowd.js and src/city/peds.js duplication, adopt src/entities/ambientstate.js + src/entities/crowd.js infrastructure (swapping prison zones for city blocks), and optionally attach a lightweight society worker for city NPC autonomy and memory.",
+ "keyFiles": [
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/ambientstate.js",
+   "role": "Jail ambient-tier data model: ~400 typed arrays holding position/velocity/personality/inventory for all agents (TOTAL population). Hidden movement uses route segments; materialize() interpolates position on-demand. Zones [yard0, yard1, south] + 3 personality spectra (nerve, empathy, greed) + role (drifter 0..mediator 5) + faction (+1 gang, 0 neutral, -1 enemy). Skin/hair procedurally chosen. Inventory: cigs + 1 visible valuable (chain=gold, watch=silver, etc). Core: promote(id, now) \u2192 moves to instanced-mesh slots; demote(id, now) \u2192 back to math. CBZ.ambient = S exported."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js",
+   "role": "Jail render + close-range interaction layer. THREE.InstancedMesh (RIG_CAP\u22641600 slots) with 11 meshes per agent (torso orange, head+hair tinted, 4 limbs, eyes/mouth dark, valuable). Selects nearest ~RIG_CAP agents from CBZ.ambient.live via heap-sort distance. Face-rig pool (CROWD_FACE_RIGS\u224840) promotes nearest agents into full CBZ.makeCharacter rigs. syncFaceRigs() drives animations + KO/death persistence. chooseNearby() performs LOD selection. Instanced meshes auto-hide when face-rig active (rigOf[id]\u22650). Also renders Points cloud (overview mode) + density cells (altitude view). Worker driven from here (society consequences)."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/workers/crowd-worker.js",
+   "role": "Background (hidden) population: off-screen agents in cells, memories (3 slots per agent: GOSSIP/DEAL/THREAT/CALM/PLAYER_SEEN), relationships (3 slots per agent: score \u00b1100), moods, roles \u2192 encounter behaviors. Rumormill: lookouts/runners broadcast facts. Traders build deals. Enforcers create threats. Mediators calm. Patches mood/role/memory-kind back to main thread via postMessage. Position snaps rare (every 1.2\u20136 sec). Heap event queue for scheduled future interactions."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/entities/character.js",
+   "role": "Procedure avatar rig: makeCharacter(c) returns {group, body, neck, head, parts:{ll, rl, la, ra}, sockets:{leftHand, rightHand}, skinSlots:{torso, collar, legs, shoes, arms, hands, head, hair, stripes, belt, badge, cap}, detail:[faces+hair]} + animChar(ch, speed, dt) for layered sine-wave animation (gait, bob, sway, lean, punch). Per-rig unshared materials for emissive flashing on hit. Used by jail NPCs + crowd face-rigs + city peds."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+   "role": "City ambient crowd: simple InstancedMesh tier only (no ambient data layer, no hidden-movement math). 360 agents walking between sidewalk waypoints, NO FACES, NO PERSONALITY, NO LOOT. Six meshes: torso (tinted shirt), head+arms (tinted skin), legL/legR (dark pants). Pure simulation: walk toward goal, repick on arrival, stride swing animation. No worker, no relationships, no visible inventory. Render-only."
+  },
+  {
+   "path": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "role": "City interactive layer: ~90+ full makeCharacter rigs per spawned cohort (civilians, vendors, gang, cops, security). Each has {aggr \u2208 [0,1], wealth, armed, weapon, cash, loot, memories (mem=one-shot), state (walk/fight/flee/etc)} but NO PERSISTENT MEMORY SYSTEM (single reference, not matrix). Brain runs per-frame with LOD (ANIM_D2=58\u00b2, TAG_D2=26\u00b2, VIS_D2=150\u00b2, FAR_D2=110\u00b2). Time-sliced ai (stride \u221d distance). Think() recomputes from scratch each tick (no agent memories carried across frames in a worker). Move() handles path-finding to intersections + stores + benches."
+  }
+ ],
+ "findings": [
+  {
+   "title": "Jail Crowd: Multi-Tier Rendering Architecture",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js",
+   "lines": "1\u201350, 80\u201388, 380\u2013410",
+   "apis": [
+    "THREE.InstancedMesh",
+    "setColorAt()",
+    "renderRigs()",
+    "makeCharacter()"
+   ],
+   "detail": "Three-tier rendering: (1) INSTANCEDMESH (11 meshes \u00d7 RIG_CAP slots): torso/head/hair + 4 limbs + eyes/mouth + valuable item (orange/tinted). Each agent \u2264 POINT_CAP (12000 default) auto-rendered with per-instance setColorAt(). Geometry: unit box with white color attr for tinting. (2) Points cloud (overview: altitude \u2265220px height): dense cells (DENSITY_W \u00d7 DENSITY_H grid, 8-unit cells) colored by faction. (3) Face-rig pool (40 agents): promoted to full makeCharacter rigs (cached inside crowd root), repositioned Y=0 (visible) or Y=-1000 (hidden). When promoted, corresponding instanced slot shrinks to 0.0001 scale (hides behind root dummy). Faces are cached pool, reused: see makeFaceEntry @line 122\u2013142, setRigSkin @144\u2013148, assignRig @149\u2013169."
+  },
+  {
+   "title": "Jail Crowd: Appearance Pipeline (Faces \u2192 Valuables)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js",
+   "lines": "122\u2013169, 389\u2013408",
+   "apis": [
+    "setRigSkin()",
+    "assignRig()",
+    "S.skin[id]",
+    "S.itemColor()"
+   ],
+   "detail": "Face-rig assignment: assignRig(e, id) pulls from CBZ.ambient: S.skin[id] (SKIN palette [0xffe0c4...0x573b26], 11 tones), S.hair[id] (8 colors), S.itemColor(id) (visible valuable color or 0). Face has eyes/brow/mouth (all dark, shared material). Head/hair/hands get skin/hair tones via setRigSkin(rig, skin, hair) \u2192 rig.head.material.color.setHex(skin), rig.skinSlots.hair[].material.color.setHex(hair). Valuable (chain/watch/tooth/cash) rendered as a 0.36\u00d70.12\u00d70.07 box at chest position (z+0.225), only if S.itemColor(id)\u22600 (i.e., item carried). Non-carriers shrink valuable to 0.0001. Instanced crowd (not promoted) show faces via renderRigs(): put(head, slot, 0, 2.18, 0, 0.54, 0.54, 0.54) tinted at S.skin[id], put(valuable, slot, ...) tinted at S.itemColor(id)."
+  },
+  {
+   "title": "Jail Crowd: Data Model \u2014 Ambient Typed Arrays",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ambientstate.js",
+   "lines": "53\u201388",
+   "apis": [
+    "Float32Array",
+    "Uint8Array",
+    "rollInventory()"
+   ],
+   "detail": "CBZ.ambient = S: { total, rigCapacity, zones[], posX/Z, prevX/Z, velX/Z, heading, speed, brainT, panic, avoidX/Z, goal*, route*, zone, role, faction, nerve, empathy, greed, mood, facts, reactivity, grudge, item, cigs, dead, skin, hair, rng, densityCell, densityPopulation, densityFaction, sharedPositionBuffers, sharedPositionMeta }. All Float32Array except role/faction/nerve/empathy/greed/mood/reactivity/grudge/item/cigs/dead/zone (Uint8Array or Int8Array). No shared buffers by default unless canShare (crossOriginIsolated + SharedArrayBuffer). Initialized: zone (random 0\u20132), speed (1.25+rnd\u00d71.35), role (rnd-weighted 0\u20135), faction (rnd \u00b11 or 0), personality (nerve/empathy/greed 0\u2013100), skin/hair from palettes. rollInventory() \u2192 item = visible-rare (1=chain, 2=watch, ..., 0=nothing) + cigs (1\u20137)."
+  },
+  {
+   "title": "Jail Crowd: Hidden Movement Logic (Route Segments)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ambientstate.js",
+   "lines": "156\u2013174, 176\u2013200",
+   "apis": [
+    "planRoute()",
+    "materialize()",
+    "promote()",
+    "demote()"
+   ],
+   "detail": "planRoute(id, now, x, z): picks next zone (11% chance) or new point in same zone. Stores routeX0/Z0 (start), routeX1/Z1 (end), routeNextZone, routeStart/Arrival (times). Travel time = max(0.75, dist / speed). materialize(id, now): if not explicit[id], resolves completed routes (loops up to 3 times for large time-skips), then interpolates current position: if arrival > now, t = (now - routeStart) / (arrival - routeStart), posX[id] = routeX0 + (routeX1 \u2212 routeX0) \u00d7 t. Updates density cell. promote(id, now) calls materialize, sets explicit[id]=1, clears avoidance, picks a goal in zone (for the brain loop). demote(id, now) clears explicit[id], calls planRoute to hide the agent. No per-frame movement cost for hidden agents \u2014 only materialization + cell updates on query."
+  },
+  {
+   "title": "Jail Crowd: Face-Rig Promotion/Demotion (LOD)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js",
+   "lines": "115\u2013142, 149\u2013181, 186\u2013209",
+   "apis": [
+    "syncFaceRigs()",
+    "freeRig()",
+    "assignRig()"
+   ],
+   "detail": "FACE_RIGS constant (40 default), FACE_DIST2 (30\u00b2 = 900). syncFaceRigs(alpha, dt): (1) scan activeId list (promoted agents within FACE_DIST2 of player) \u2192 collect in faceTmpId/faceTmpD2 heap. (2) release rigs whose agent dropped out of range: freeRig(e) moves rig.position.y to FAR_AWAY (-1000), restores S.posX/Z from rig position (persist movement), clears rig.group.visible, marks rigOf[id]=-1. (3) assign free rigs: assignRig(e, id) pulls S.skin/hair/item/name/loadout/nerve/greed/reactivity/grudge/downT, paints rig, flags synced=false. (4) drive assigned rigs: if a.dead, ragdoll (corpseT-=dt, set visible=false on timeout), else if a.ko, lay down (rotation.z\u2192\u03c0/2), else upright + animate. Casting a.chain.visible based on S.itemColor(id). Persist grudge/downT back: S.grudge[id] = max(S.grudge[id], a.playerGrudge\u00d732), S.downT[id] = max(...)."
+  },
+  {
+   "title": "Jail Crowd: Appearance in Instanced View (Non-Promoted)",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js",
+   "lines": "380\u2013408",
+   "apis": [
+    "renderRigs()",
+    "put()",
+    "setColorAt()"
+   ],
+   "detail": "renderRigs(alpha): for each activeCount agent (except those with rigOf[id]\u22650, which are hidden), render 11 per-instance matrices (torso at local 0,1.42,0; head at 0,2.18,0 tinted S.skin[id]; hair at 0,2.50,0 tinted S.hair[id]; legs+arms with swing; eyes/mouth at face positions; valuable at chest). Heads/hair use tintUnit (BoxGeometry + white color attribute) so setColorAt() multiplies properly. Valuables only rendered if vcol=S.itemColor(id)\u22600, else scale to 0.0001. Eyes/mouth always dark (no per-instance tint). This gives every instanced agent the appearance of a small colored head + body, not faceless boxes."
+  },
+  {
+   "title": "City Crowd: Appearance Pipeline (Faceless Boxes)",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+   "lines": "29\u201374, 141\u2013157",
+   "apis": [
+    "tintBox()",
+    "InstancedMesh",
+    "paintColors()"
+   ],
+   "detail": "City crowd: 360 agents, 6 InstancedMesh parts (torso, head, armL, armR, legL, legR), NO FACES (no eyes, no mouth), NO VISIBLE VALUABLES, NO INVENTORY. Geometries: tintBox() = BoxGeometry + white color attribute for tinting. torso = 0.6\u00d70.8\u00d70.34 tinted shirt color (SHIRTS[shirt[i]]). head = 0.36\u00d70.36\u00d70.36 tinted skin color. arms 0.15\u00d70.62\u00d70.15 tinted skin. legs 0.2\u00d70.78\u00d70.22 dark pants (no tint, single global color 0x2c3038). render(): for i in 0..count, setPart() constructs per-agent matrix (position px[i]/pz[i], scale 1), stride swing = sin(phase[i])\u00d70.5 applied to arms/legs. No bob-animation for head (only torso+bob for simple rotation). Result: boxes with a shirt, a skin-tone head, skin arms, dark legs. No person-ness (no face, no inventory, no identity)."
+  },
+  {
+   "title": "City Peds: Character Appearance (Full Rigs, Faceless Inventory)",
+   "file": "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "lines": "64\u2013111, 563\u2013633",
+   "apis": [
+    "makePed()",
+    "makeCharacter()"
+   ],
+   "detail": "makePed(x, z, r, opts) calls makeCharacter({legs, torso, collar, arms, skin, hair, shoes}) \u2192 full rig with animations. Each ped has {outfit (torso color), skin, hair (8 colors), aggr, wealth, armed, weapon (Pistol/Carbine), cash, loot (single item, not array)}. No visible jewelry/chain on ped (unlike jail), so loot is invisible (brain-only, not rendered). move() animates at near distance (d2 < ANIM_D2=58\u00b2), LOD freezes animation beyond. body.hit() for knockdown physics. Death ragdolls via physics (owner: ped, not crowd system). Individual NPCs but no persistent social graph; mem is a single reference to one offender, refreshed each cycle."
+  },
+  {
+   "title": "Jail Society Worker: Memory + Relationship Persistence",
+   "file": "/Users/elifoltyn/Downloads/game/src/workers/crowd-worker.js",
+   "lines": "1\u201350, 131\u2013176, 189\u2013244",
+   "apis": [
+    "memory slots",
+    "relationships",
+    "encounter()",
+    "playerWitness()"
+   ],
+   "detail": "Off-screen population: crowd-worker.js maintains per-agent: memories (3 slots \u00d7 total: memoryKind, memoryStrength 0\u2013100, memoryTTL in sec, memorySource id, memoryX/Z quantized), relationships (3 slots \u00d7 total: relationId, relationScore \u00b1100), mood 0\u2013100, facts (witness/dealer/injured/faction-action bitmask). Encounter(a, b, weight): if trader-role, forge deals; if enforcer, create threats; if mediator, calm; else gossip rumor. Rumormill spreads strongest memory via lookouts/runners. playerWitness(id): if player armed/hot within 13 units, agent records PLAYER_SEEN memory (mind you, even hidden agents record this when pos snapped to worker). decay(id): mood drifts toward 50; memories expire (memoryTTL-=drift). Grid-cell spatial index (9\u00d79 units) for fast encounter sampling. Event heap for scheduled future interactions. Main thread snaps positions every 1.2\u20136 sec (sync via sharedPositionBuffers if available). Worker patches back mood/role/memory-kind every patch."
+  },
+  {
+   "title": "Instancing Approach: Jail vs City",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js vs /Users/elifoltyn/Downloads/game/src/city/crowd.js",
+   "lines": "37\u201347 jail vs 49\u201372 city",
+   "apis": [
+    "InstancedMesh",
+    "setMatrixAt()",
+    "setColorAt()"
+   ],
+   "detail": "Jail: 11 InstancedMesh meshes per body (discrete parts: torso, head, hair, 4 limbs, eyes, mouth, valuable). Each mesh has its own instanceMatrix + (if tinted) instanceColor buffer. Per-instance tint via setColorAt(mesh, slot, color) for skin/hair/valuable. Eyes/mouth shared dark material (no per-instance color). renderRigs() builds compound per-agent transform (bob, swing, bob-pitch) applied to rootDummy, then multiplies per-part local matrices to get world position per part per slot. Expensive: 11 matrix uploads per agent per frame, but enables rich visual detail + inventory display. City: 6 InstancedMesh (torso, head, armL, armR, legL, legR). Single global material per part (shirt for torso, skin for head/arms, dark for legs). Per-instance tint only on torso/head/arms (pantsMat has no instanceColor). Simpler: 6 matrices per agent, but no face detail, no item visibility. Jail meshes scale to 0.0001 when promoted to face-rigs; city has no such hierarchy."
+  },
+  {
+   "title": "LOD (Levels of Detail) Strategy",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js vs /Users/elifoltyn/Downloads/game/src/city/peds.js",
+   "lines": "115\u2013118 jail FACE_RIGS/FACE_DIST2 vs 30\u201331 city PED_R/ANIM_D2/TAG_D2/VIS_D2/FAR_D2",
+   "apis": [
+    "syncFaceRigs()",
+    "chooseNearby()",
+    "time-slicing"
+   ],
+   "detail": "Jail: (1) hidden agents (explicit=0): no render, no update. (2) active agents (slotOf[id]\u22650, promoted): InstancedMesh render + per-frame physics/animation. (3) face agents (rigOf[id]\u22650, within FACE_DIST2): full rig visible, synced every frame. Visibility: meshes.visible = !overview (overview mode hides instanced rigs, shows points/density instead). Nearby selection: chooseNearby() max-heaps DESIRED_RIGS agents by distance; demotes far ones, promotes near ones. City: (1) tag visible iff d2 < TAG_D2=26\u00b2. (2) animation iff d2 < ANIM_D2=58\u00b2 OR important (ped.rage || ped.guard || controlled || npcWanted || armed). (3) group visible iff d2 < VIS_D2=150\u00b2 OR important. (4) brain time-sliced: stride=(frame+ped.slice)%stride, stride=active?4:(far?20:10). No separate face-rig tier; all rigs are interactable but unshared. No hidden-math tier; all AI reruns per-frame."
+  },
+  {
+   "title": "Inventory Visibility",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/ambientstate.js + crowd.js vs city/peds.js",
+   "lines": "ambientstate.js 93\u2013105, crowd.js 397\u2013402 vs peds.js 64\u201380",
+   "apis": [
+    "S.itemColor()",
+    "S.itemName()",
+    "ped.loot"
+   ],
+   "detail": "Jail: visible valuables rendered as a box (0.34\u00d70.12\u00d70.07) at the chest (y=1.60, z=0.225) IF S.itemColor(id)\u22600. Color-coded: 0xffd451=gold chain, 0xd6dde8=silver watch, 0xffe27a=gold tooth, 0x57c264=green cash. Instanced crowd shows this directly (put(valuable, slot, ...)). Face-rig wears a _chain mesh (similar box) at rig.body position (1.46, 0.26) colored per item. Easy loot hook: see a guy with a gold chain, steal from him. City: NO VISIBLE INVENTORY. Ped.loot/armed/weapon/cash all brain-only. Interaction menu reveals them (talk/rob via CBZ.cityRobPed which reads ped.cash, ped.loot). Appearance motivation is purely cosmetic (outfit color), not economic signal."
+  },
+  {
+   "title": "Performance: Ambient Math Cost vs Render Cost",
+   "file": "/Users/elifoltyn/Downloads/game/src/entities/crowd.js + workers/crowd-worker.js vs city/peds.js",
+   "lines": "crowd.js 563\u2013589 (fixedStep) vs peds.js 637\u2013689",
+   "apis": [
+    "fixedStep()",
+    "think()",
+    "move()"
+   ],
+   "detail": "Jail: (1) Main thread: fixedStep(FIXED=0.05) physics for active agents only (~100\u2013400 agents), no per-frame rethink. Worker runs off-thread (hidden agents). Overhead \u221d activeCount, not TOTAL. (2) Worker: event-driven encounters (contacts scheduled by grid scan, not all-pairs). Memory slots 3\u00d7TOTAL but sparse updates (only changed agents patch back). (3) Render: 11 InstancedMesh uploads if overview, else just matrix updates (fast). City: (1) Main thread: move(ped, dt, animate) + think(ped, dt, active) for EVERY ped every frame, sliced stride=(frame+slice)%(active?4:far?20:10). Overhead \u221d CBZ.cityPeds.length. (2) No worker. (3) Render: every rig visible updates per frame (no hidden math). Cost: brain reruns \u2248 ~300 peds \u00d7 (1/4 to 1/20) \u2248 75\u2013300 think() calls/frame. For >500 peds, city grid becomes expensive. Jail scales to 6000+ with hidden math free."
+  }
+ ],
+ "mergePlan": [
+  {
+   "step": "1. Duplicate src/entities/ambientstate.js into src/city/ambientstate.js, adapt zones to city blocks (8\u00d78 blocks covering city arena), replace ZONES array with city block bounds, set MASS_CROWD to city population (e.g., 6000), initialize per-block densities instead of yard 3-zone.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/ambientstate.js",
+    "/Users/elifoltyn/Downloads/game/src/city/world.js"
+   ],
+   "risk": "Arena bounds must be known at module load time (or lazy-init ambientstate after buildCity()). SKIN/HAIR/FIRST/LAST palettes can stay (reused from jail). RNG must seed per mode to avoid dups between escape/city runs. Initial spawn logic: instead of randomPoint(id, zoneId), call arena.randomSidewalkPoint()."
+  },
+  {
+   "step": "2. Create src/city/crowd.js (new, replacing old), adapt entities/crowd.js logic: read ambientstate from city namespace (CBZ.city.ambient instead of CBZ.ambient), use same InstancedMesh 11-part pipeline, but remove worker integration (city has no background simulation layer yet; can add later). Keep chooseNearby(), syncFaceRigs(), renderRigs() identical. Face-rig pool reuses makeCharacter. Change isEscape = CBZ.game.mode==='escape' to isCity = CBZ.game.mode==='city'.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+    "/Users/elifoltyn/Downloads/game/src/city/ambientstate.js"
+   ],
+   "risk": "Face-rig promotion logic must map city ambient agents to city peds (CBZ.cityPeds). Currently CBZ.npcs (escape mode). Create CBZ.city.peds = [] or rename CBZ.cityPeds to be the face-rig pool. Interaction systems already expect CBZ.city.peds or cityPeds; no change needed if we use the same property."
+  },
+  {
+   "step": "3. Retire old src/city/peds.js ambient-only crowd spawner (CBZ.spawnCityCrowd, the 360 faceless boxes), fold its role into new crowd.js: CBZ.spawnCityCrowd() now calls CBZ.city.ambient.init() and builds the instanced-mesh layer. Old CBZ.cityMakePed() (the full-rig spawner) stays but receives assignments from syncFaceRigs() instead of standalone spawn loops.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js",
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js"
+   ],
+   "risk": "CBZ.spawnCityPeds() spawns ~80 peds + vendors + gangs + cops. These are NOT the ambient crowd; they're named/special roles. Keep them. Only retire the 360-agent ambient spawn that city/crowd.js currently owns."
+  },
+  {
+   "step": "4. Adapt face-rig assignment to city context: in new crowd.js syncFaceRigs(), instead of promoting to CBZ.npcs, promote to CBZ.cityPeds (the named peds + ambient promotions). assignRig(e, id) should: fetch ambient data (name via S.nameOf(id), skin/hair/item/personality via S array), check if CBZ.cityPeds already has an entry for this id (marked _crowd=true), else create a stub ped entry mimicking CBZ.cityMakePed() output but without the full init.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "City peds have {aggr, wealth, armed, weapon, gang, guard} that ambient agents don't have. Decide: (a) derive aggr from ambient personality (nerve/empathy/greed combo \u2192 aggression score), or (b) roll random aggr on promote. Option (a) is richer: high greed + low empathy \u2192 high aggr (crook/violent). Ambient data must expand or crowd.js must compute."
+  },
+  {
+   "step": "5. Swap rendering: new crowd.js renders ambient instanced-mesh tier (torso+head+hair+limbs+eyes+mouth+valuable), and face-rigs render via their full makeCharacter rigs. Turn OFF old city/crowd.js ambient 360-agent rendering (6-part faceless boxes). Verify InstancedMesh visibility gating (overview mode, render distance, promoted\u2192hide instanced slot).",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+    "/Users/elifoltyn/Downloads/game/src/city/mode.js"
+   ],
+   "risk": "Overview/density mode may not exist in city (city has no simView). Simplify: overview modes off, always render instanced+face-rigs. Or adapt simView for city if desired (altitude overview of blocks)."
+  },
+  {
+   "step": "6. Adapt interaction flow: face-rig peds now carry ambient identity (S.nameOf(id), S.skin[id], S.item[id]). When player interacts (city/interact.js), query the ped._id to fetch ambient inventory (S.cigs[ped._id], S.item[ped._id]). Loot/rob now reads ambient arrays. Murder sets S.dead[id]=1, preventing re-promotion. Grudges persist via S.grudge[id].",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/interact.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "Old city logic reads ped.cash, ped.loot, ped.name directly. New logic must dual-source: if ped._crowd, read ambient S[]; else read ped.* (for named vendors/gangs). Transition: mark all promoted peds _crowd=true, all hand-spawned peds _crowd=false."
+  },
+  {
+   "step": "7. Adapt brain/movement: old city/peds.js think() + move() runs full brain each frame for all CBZ.cityPeds. With new crowd, keep hand-spawned peds (vendors, cops, named gang members) running full brain, but DEMOTE non-essential peds if far from player (fixedStep lod, like jail). Or: run movement in main ambient arrays (posX/Z/velX/Z updated every frame via simple physics), sync movement back from arrays to ped.group.position on render.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js",
+    "/Users/elifoltyn/Downloads/game/src/city/peds.js"
+   ],
+   "risk": "Ambient array physics (velocity integration) must use city arena colliders (not jail obstacles). Arena.js must export collider list. Current peds.js does not integrate physics (only sets pos via path-following); adopting ambient physics is a behavior change (inertia, collide() calls)."
+  },
+  {
+   "step": "8. (Optional) Add lightweight city society worker: fork workers/crowd-worker.js into src/city/crowd-worker.js, strip out jail role-specific behaviors (trader/enforcer/mediator), keep basic memory + relationship matrix + grid scan for encounters. City focus: aggr-spectrum reactions (meek talks, bold stands ground, crook mobs, violent fights), gang turf conflicts, witness reporting.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/crowd-worker.js",
+    "/Users/elifoltyn/Downloads/game/src/city/crowd.js"
+   ],
+   "risk": "City NPC counts (500+) will fill worker memory fast. Cap hidden agents or purge old memories aggressively. Worker overhead \u221d visible peds (grid scan), not total, so scales reasonably. Opt-in via CBZ.CITY.crowdWorker flag."
+  },
+  {
+   "step": "9. Update index.html boot order: move new src/city/ambientstate.js load to BEFORE src/city/mode.js (so CBZ.city.ambient exists). Move new src/city/crowd.js AFTER src/city/peds.js (crowd depends on makeCharacter + scene). Retire old city/crowd.js script tag.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/index.html"
+   ],
+   "risk": "Boot order is critical. Test in headless + browser to catch undefined references."
+  },
+  {
+   "step": "10. Testing + perf validation: (a) Spawn city with N=1000 agents, verify frame rate (target 60 fps with ~100 face-rigs visible). (b) Interact with a ped, verify inventory reads ambient S.cigs/S.item. (c) Loot a ped, verify S.dead[id]=1 persists. (d) Switch modes escape\u2194city, verify ambient stays/resets. (e) Visual regression: city peds should now have visible faces (eyes+brow+mouth) + skin-tone heads + visible valuables. (f) Perf: ambient physics loop (fixedStep) << instanced render (11 matrices per agent); measure CBZ.crowdPerformance.simTimeMs vs renderTimeMs.",
+   "files": [
+    "/Users/elifoltyn/Downloads/game/src/city/*.js",
+    "/Users/elifoltyn/Downloads/game/src/entities/ambientstate.js"
+   ],
+   "risk": "Face appearance in city may surprise (peds look different). Item visibility (valuables on chest) changes robbery tactics (see the rich marks). City brain time-slicing (stride) is new, may cause lag spikes if poorly tuned."
+  }
+ ]
+}
