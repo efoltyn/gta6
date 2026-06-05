@@ -18,46 +18,92 @@
   const g = CBZ.game;
   const C = () => CBZ.CITY || {};
 
-  let panel = null, mode = "buy", payT = 0, actions = [];
+  let panel = null, mode = "buy", payT = 0, actions = [], rpage = 0;
+  const RPAGE = 4;          // realtor home rows per page — keeps numeric keys ≤ 9 and one screen
 
   function el() {
     if (panel) return panel;
     panel = document.createElement("div");
     panel.id = "cityRealty";
-    panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:340px;max-width:460px;background:rgba(16,20,26,.95);border:2px solid #2f3a44;border-radius:16px;padding:16px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
+    panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;min-width:360px;max-width:480px;background:rgba(16,20,26,.96);border:2px solid #2f3a44;border-radius:16px;padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
     document.body.appendChild(panel);
     return panel;
   }
-  function money(n) { return "$" + (n | 0).toLocaleString(); }
+  function money(n) { n = Math.round(+n); if (!isFinite(n)) n = 0; return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(); }
+
+  // district + controlling gang chip for a home lot (the gang-takeover tie):
+  // green = your turf (cheaper at Zillow + earns more), red = a rival's.
+  function zoneChip(lot) {
+    const z = CBZ.cityZoneAt ? CBZ.cityZoneAt(lot.cx || 0, lot.cz || 0) : null;
+    const nm = z ? z.name : "the city";
+    const owner = z ? z.owner : null;
+    const mine = (g.playerGang && g.playerGang.founded) ? g.playerGang.id : null;
+    if (owner && (owner === mine || owner === "player")) return " <span style='color:#7ed957'>· " + nm + " (yours)</span>";
+    if (owner) {
+      const og = CBZ.cityGangById ? CBZ.cityGangById(owner) : null;
+      return " <span style='color:#ff8a7a'>· " + nm + " (" + (og && og.name ? og.name : "rival") + ")</span>";
+    }
+    return " <span style='color:#8a93a3'>· " + nm + "</span>";
+  }
 
   // ---- realtor: rent the room or buy any unowned residence ----
+  // ONE-SCREEN: compact rows, paginated (the homeLots list can be long). Each
+  // home shows its DISTRICT + controlling gang so you can buy in turf you hold
+  // (cheaper at Zillow, earns more). Buy + Rent share a row to save height.
   CBZ.cityHomeMenu = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     mode = "buy"; actions = [];
-    const homes = (CBZ.city.arena.homeLots || []).filter((l) => l.building.home && !l.building.home.owned);
-    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>🏠 Keystone Realty</div>";
-    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Cash " + money(g.cash) + " · Bank " + money(g.cityBank || 0) + " · [Esc] leave</div>";
+    const homes = (CBZ.city.arena.homeLots || []).filter((l) => l.building.home && !l.building.home.owned
+      && !(CBZ.cityZillow && CBZ.cityZillow.isRentingLot && CBZ.cityZillow.isRentingLot(l)));
+    homes.sort((a, b) => a.building.home.price - b.building.home.price);
+
+    // build the row "entries" first so we can paginate, THEN flatten the visible
+    // page into the `actions[]` array the [1-9] keys index into.
+    const entries = [];
     if (!g.cityRentTier && !g.cityHome) {
       const room = (C().homes || [])[0];
-      if (room) { actions.push({ label: "Rent " + room.name + " — " + money(room.rent) + "/period", fn: () => rentRoom() }); }
+      if (room) entries.push({ html: "🛏️ Rent " + room.name + " — " + money(room.rent) + "/period", fns: [{ key: "rent room", fn: () => rentRoom() }] });
     }
-    homes.sort((a, b) => a.building.home.price - b.building.home.price);
     for (const lot of homes) {
       const h = lot.building.home;
-      const renting = CBZ.cityZillow && CBZ.cityZillow.isRentingLot && CBZ.cityZillow.isRentingLot(lot);
-      if (renting) { html += ""; continue; }   // already leasing this one
-      actions.push({ label: "Buy " + h.name + (h.garage ? " (garage ×" + h.garage + ")" : "") + (h.elevator ? " + elevator" : "") + " — " + money(h.price), fn: () => buyHome(lot) });
-      // RENT this residence instead of buying — low deposit, recurring rent, and
-      // (if you have no home) it becomes your respawn point. Delegates to Zillow
-      // so the lease is the same record the property tick charges + can evict.
+      const tags = (h.garage ? " ·🚗×" + h.garage : "") + (h.elevator ? " ·🛗" : "");
+      const fns = [{ key: "Buy " + money(h.price), fn: () => buyHome(lot) }];
       const rentPer = zillowRentEstimate(lot);
-      if (rentPer != null) actions.push({ label: "Rent " + h.name + " — ~" + money(rentPer) + "/period", fn: () => rentResidence(lot) });
+      if (rentPer != null) fns.push({ key: "Rent ~" + money(rentPer), fn: () => rentResidence(lot) });
+      entries.push({ html: "🏠 " + h.name + tags + zoneChip(lot), fns });
     }
-    actions.forEach((a, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
-    if (g.cityHome) html += "<div style='font-size:12px;color:#7ed957;margin-top:8px'>Owned: " + g.cityHome.name + "</div>";
-    html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select · [Esc] close</div>";
+
+    const pages = Math.max(1, Math.ceil(entries.length / RPAGE));
+    rpage = Math.max(0, Math.min(pages - 1, rpage));
+    const slice = entries.slice(rpage * RPAGE, rpage * RPAGE + RPAGE);
+
+    let html = "<div style='font-size:19px;font-weight:700;margin-bottom:4px'>🏠 Keystone Realty</div>";
+    html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:9px'>Cash " + money(g.cash) + " · Bank " + money(g.cityBank || 0) + (g.cityHome ? " · Home: " + g.cityHome.name : "") + "</div>";
+
+    let n = 0;
+    for (const ent of slice) {
+      html += "<div style='padding:3px 0;font-size:13px;display:flex;justify-content:space-between;gap:10px;align-items:center'>"
+        + "<span style='min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>" + ent.html + "</span>"
+        + "<span style='flex:0 0 auto'>";
+      for (const f of ent.fns) {
+        actions.push({ label: f.key, fn: f.fn });
+        html += "<b style='color:#ffd166'>[" + actions.length + "]</b> <span style='color:#cfe0f5'>" + f.key + "</span>&nbsp;&nbsp;";
+      }
+      html += "</span></div>";
+      n++;
+    }
+    if (!slice.length) html += "<div style='font-size:12px;color:#8a93a3;padding:8px 0'>No homes on the market right now.</div>";
+
+    if (pages > 1) {
+      // pager uses [ / ] (and arrow keys) so numeric slots stay item-only (≤9)
+      html += "<div style='margin-top:8px;font-size:12px;color:#9fb0c6'>"
+        + "[<b style='color:#ffd166'>&larr;</b>] Prev &nbsp; [<b style='color:#ffd166'>&rarr;</b>] Next &nbsp; · Page <b style='color:#ffd166'>" + (rpage + 1) + "</b>/" + pages + " (" + entries.length + " listings)</div>";
+    }
+    html += "<div style='font-size:11px;color:#6b7480;margin-top:8px'>[1–" + actions.length + "] select · [Esc] close · more at Zillow [Z]</div>";
     open(html);
+    realtyPages = pages;
   };
+  let realtyPages = 1;
 
   // ---- standing at your own home: the safehouse menu ----
   CBZ.cityHomeNear = function (x, z) {
@@ -163,7 +209,7 @@
 
   CBZ.cityRealEstateReset = function () {
     g.cityHome = null; g.cityRentTier = null; g.cityGarage = []; g.citySpawnPoint = null;
-    payT = (C().rentTick || 90);
+    payT = (C().rentTick || 90); rpage = 0;
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.homeLots) for (const l of A.homeLots) if (l.building.home) l.building.home.owned = false;
     if (panel) panel.style.display = "none";
@@ -174,6 +220,13 @@
     if (panel && panel.style.display === "block") {
       const k = e.key.toLowerCase();
       if (k === "escape") { e.preventDefault(); close(); return; }
+      // page the realtor list (only when it's the buy menu and has >1 page)
+      if (mode === "buy" && realtyPages > 1 && (k === "arrowleft" || k === "[" || k === "arrowright" || k === "]")) {
+        e.preventDefault();
+        rpage = (k === "arrowleft" || k === "[") ? (rpage - 1 + realtyPages) % realtyPages : (rpage + 1) % realtyPages;
+        CBZ.cityHomeMenu();
+        return;
+      }
       if (k >= "1" && k <= "9") { e.preventDefault(); const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); }
       return;
     }
@@ -196,7 +249,11 @@
     if (CBZ.cityZillowTick) CBZ.cityZillowTick(dt);
   });
 
-  // ---- rent / property-tax sink ----
+  // ---- legacy FLOPHOUSE-room rent sink (the cheap C().homes[0] starter room) -
+  // NOTE: owned-home PROPERTY TAX is charged by the Zillow tick (38.4) on every
+  // owned unit including your residence — we must NOT tax g.cityHome again here
+  // or you'd pay double. This tick only collects rent on the legacy rented room
+  // (g.cityRentTier), which Zillow's lease system doesn't manage.
   CBZ.onUpdate(38.5, function (dt) {
     if (g.mode !== "city") return;
     payT -= dt;
@@ -208,11 +265,6 @@
         if (CBZ.city.spend(room.rent)) CBZ.city.note("🏠 Rent due: -" + money(room.rent), 2);
         else { g.cityRentTier = null; g.citySpawnPoint = null; CBZ.city.note("Evicted — couldn't make rent.", 2.4); }
       }
-    }
-    if (g.cityHome) {
-      const h = g.cityHome.lot.building.home;
-      const tax = Math.round(h.price * (C().taxRate || 0.0008));
-      if (tax > 0) { if (!CBZ.city.spend(tax)) { /* tax slides if broke; no eviction for owned */ } else if (tax > 10) CBZ.city.note("🏠 Property tax: -" + money(tax), 1.8); }
     }
   });
 })();

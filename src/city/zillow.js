@@ -1,25 +1,27 @@
 /* ============================================================
    city/zillow.js — "Zillow": the city-wide property + business market.
 
-   Press [Z] in city mode to open a scrollable marketplace that lists
-   EVERY lot in the city (downtown + the island) — shops, residences,
-   parks and gang-run derelicts — each with a Zestimate value.
+   Press [Z] in city mode to open a ONE-SCREEN marketplace (no scrolling —
+   compact rows + pagination) that lists every lot in the city: shops,
+   residences, parks and gang-run derelicts, each with a live Zestimate.
 
-   • LEGAL property (homes, vacant land) and LEGAL businesses (the shops)
-     are FOR SALE. Buying a business hands you its building AND its trade,
-     so it pays you rent / profit every cycle (minus property tax).
-   • ILLEGAL businesses (the Trap House, the chop shop, gang turf) are
-     listed but CANNOT be bought on the open market — they show their
-     crew + an estimated street value so the board doubles as a
-     "who's the biggest" empire ranking (you vs. holding companies vs.
-     the gangs).
-   • Sell anything you own back to the market for a small realtor cut.
+   • LEGAL property + businesses are FOR SALE. Buying a business hands you
+     its building AND its trade, so it pays you rent / profit every cycle
+     (minus property tax). Prices BREATHE with a macro market index AND with
+     each district's gang control + heat — a real buy-low / sell-high flip.
+   • DISTRICT CONTROL is the gang tie: property in a zone YOUR gang holds is
+     cheaper to buy and yields MORE; rivals' zones cost a premium and earn
+     less. Buying a district's property pushes your INFLUENCE there (helps the
+     takeover), and you can SEIZE a property cheap once you control its zone.
+   • ILLEGAL operations (Trap House, chop shop, gang turf) are listed for the
+     "who's the biggest" empire ranking but can't be bought on the market —
+     take them by force.
 
-   Ownership is per-life (resets each run). Static facts (value, address,
-   legality, the business name) are computed ONCE when the city is built
-   and memoised on the arena, so a listing's price never wobbles.
+   Ownership is per-life (resets each run). A listing's BASE value is computed
+   once when the city is built and memoised; the displayed value floats.
 
-   Exposes: CBZ.cityOpenZillow, CBZ.cityZillow, CBZ.cityZillowReset.
+   Exposes: CBZ.cityOpenZillow, CBZ.cityZillow, CBZ.cityZillowReset,
+            CBZ.cityOwnsLot, CBZ.cityZillowTick.
 ============================================================ */
 (function () {
   "use strict";
@@ -38,19 +40,23 @@
   const YIELD = { residence: 0.0035, commercial: 0.005, land: 0.0018, illegal: 0 };
   const PORTFOLIO_DRAG = 0.05;   // net income /= (1 + DRAG × number of income properties)
   // ---- RENT (you renting FROM the market) ----------------------------------
-  // Renting costs little/nothing upfront but a recurring charge; miss it and
-  // you're evicted. The rent/cycle is a fraction of the *current* value.
   const RENT_FRAC = { residence: 0.012, commercial: 0.018, land: 0.006 };
   const RENT_DEPOSIT = 0.5;      // upfront deposit = RENT_DEPOSIT × first rent
   // ---- RENT OUT (NPC tenants in property YOU own) --------------------------
-  // A scaling, better-than-workers passive income with occasional vacancies.
   const TENANT_YIELD = { residence: 0.011, commercial: 0.016, land: 0.004 };
   const VACANCY_BASE = 0.10;     // base chance a unit sits empty (no income) per cycle
+  // ---- GANG-CONTROL economics (the takeover tie) ---------------------------
+  // Property in a district YOUR gang owns is a HOME-FIELD bargain that earns
+  // more; a rival-held district charges a premium and pays you less (you're an
+  // outsider). Neutral districts sit in between. These multiply price + yield.
+  const CTRL = {
+    mineBuy: 0.82,   minePay: 1.30,   // your turf: 18% off to buy, +30% income
+    rivalBuy: 1.22,  rivalPay: 0.72,  // rival turf: 22% premium, −28% income
+    neutralBuy: 1.0, neutralPay: 1.0,
+  };
+  const PAGE_SIZE = 6;             // listing rows per page (keeps it ONE screen)
 
   // the named business magnates who own the city's legit businesses & rentals
-  // at the start of every life — every business has a real OWNER. Buying
-  // transfers a property to YOU; selling hands it back to one of them. They're
-  // the rivals on the empire leaderboard ("who's the biggest").
   const CORPS = [
     { id: "corp_castellano", name: "Don Castellano", color: 0x5b8bff },
     { id: "corp_vance",      name: "Marla Vance",    color: 0xf2c43d },
@@ -72,7 +78,6 @@
   const ILLEGAL_BASE = { drugs: 60000, chop: 44000 };   // street value of the operation
   const ILLEGAL_KINDS = { drugs: 1, chop: 1, abandoned: 1 };
 
-  // friendly trade labels for the card subtitle
   const KIND_LABEL = {
     bank: "Bank", jewelry: "Jeweler", carlot: "Auto Dealer", hospital: "Hospital",
     guns: "Gun Store", electronics: "Electronics", bar: "Nightclub", security: "Security Firm",
@@ -85,17 +90,15 @@
     "Industrial Row", "Park Pl", "Harbor Way", "Crest Dr", "Madison Ave", "Dover Ln", "Kingsway"];
 
   // ---- property TIERS (variety / status badges on listings) -----------------
-  // A value-banded tier gives the board real range — from a Tier-1 starter to a
-  // Tier-5 trophy asset — and drives a flavour adjective on the card subtitle.
   const TIERS = [
-    { min: 0,       name: "Starter",   tag: "🟢 Tier 1" },
-    { min: 18000,   name: "Standard",  tag: "🔵 Tier 2" },
-    { min: 45000,   name: "Premium",   tag: "🟣 Tier 3" },
-    { min: 90000,   name: "Luxury",    tag: "🟠 Tier 4" },
-    { min: 160000,  name: "Trophy",    tag: "🔴 Tier 5" },
+    { min: 0,       name: "Starter",   tag: "T1" },
+    { min: 18000,   name: "Standard",  tag: "T2" },
+    { min: 45000,   name: "Premium",   tag: "T3" },
+    { min: 90000,   name: "Luxury",    tag: "T4" },
+    { min: 160000,  name: "Trophy",    tag: "T5" },
   ];
-  function tierFor(value) { let t = TIERS[0]; for (const x of TIERS) if (value >= x.min) t = x; return t; }
-  // a tiny bit of per-lot character so subtitles aren't all identical
+  const TIER_COL = ["#7ed957", "#5bb0ff", "#b18bff", "#ffb05c", "#ff5d7e"];
+  function tierIdx(value) { let n = 0; for (let i = 0; i < TIERS.length; i++) if (value >= TIERS[i].min) n = i; return n; }
   const RES_FLAVOR = ["renovated", "sun-filled", "corner-unit", "loft-style", "park-view", "quiet-street", "modern", "classic"];
   const COM_FLAVOR = ["high-traffic", "established", "turnkey", "flagship", "well-known", "busy-corner"];
 
@@ -106,9 +109,11 @@
     s = s >>> 0;
     return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
   }
-  function round500(n) { return Math.max(0, Math.round(n / 500) * 500); }
-  function money(n) { return "$" + (n | 0).toLocaleString(); }
+  function round500(n) { n = +n; if (!isFinite(n)) n = 0; return Math.max(0, Math.round(n / 500) * 500); }
+  function round5(n) { n = +n; if (!isFinite(n)) n = 0; return Math.max(0, Math.round(n / 5) * 5); }
+  function money(n) { n = Math.round(+n); if (!isFinite(n)) n = 0; return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(); }
   function corpFor(rnd) { return CORPS[(rnd() * CORPS.length) | 0]; }
+  function colHex(c) { return "#" + ("000000" + ((c | 0) >>> 0).toString(16)).slice(-6); }
   function ownerInfo(id) {
     if (id === "player") return PLAYER;
     if (id === "city") return CITYHALL;
@@ -120,7 +125,77 @@
       const live = (CBZ.cityGangs || []).find((x) => x.id === gd.id);
       return { id: gd.id, name: gd.name + (live && live.bossName ? " — " + live.bossName : ""), color: gd.color };
     }
+    // a live gang that isn't in config (e.g. the player gang treated as a gang)
+    const live = (CBZ.cityGangs || []).find((x) => x.id === id);
+    if (live) return { id, name: live.name || "Crew", color: live.color || 0xb0606e };
     return UNDERWORLD;
+  }
+
+  // ---- GANG / DISTRICT CONTROL helpers --------------------------------------
+  // Resolve who controls the ZONE a lot sits in (the takeover meta). Returns a
+  // gang id ("player" if your gang holds it) or null (neutral / contested).
+  function zoneOf(rec) {
+    if (!CBZ.cityZoneAt) return null;
+    return CBZ.cityZoneAt(rec.lot.cx || 0, rec.lot.cz || 0) || null;
+  }
+  function zoneOwnerOf(rec) {
+    const z = zoneOf(rec);
+    if (z) return z.owner || null;
+    return CBZ.cityZoneOwner ? CBZ.cityZoneOwner(rec.lot.cx || 0, rec.lot.cz || 0) : null;
+  }
+  function myGangId() { return (g.playerGang && g.playerGang.founded) ? g.playerGang.id : null; }
+  // control class for a listing: "mine" | "rival" | "neutral". Cached per-lot
+  // with a short TTL — zone ownership shifts slowly (the takeover director runs
+  // on its own clock), so recomputing it every frame for every listing would be
+  // wasteful on phones. CBZ.now is ms; refresh the cache ~every 2s.
+  let _ctrlAt = -1e9, _ctrlSig = "";
+  function controlClass(rec) {
+    const now = (CBZ.now != null) ? CBZ.now : 0;
+    // bust the cache on a TTL OR whenever the player's gang / its turf changes
+    // (founding a gang or claiming a block can flip a district to "yours").
+    const pg = g.playerGang;
+    const sig = (pg && pg.founded ? pg.id + ":" + (pg.turf ? pg.turf.length : 0) : "-");
+    if (now - _ctrlAt > 1500 || sig !== _ctrlSig) {
+      _ctrlAt = now; _ctrlSig = sig;
+      const r = reg(); if (r) for (const x of r.listings) x._ctrl = null;
+    }
+    if (rec._ctrl) return rec._ctrl;
+    const owner = zoneOwnerOf(rec);
+    const mine = myGangId();
+    let c = "neutral";
+    if (owner) { if ((mine && owner === mine) || owner === "player") c = "mine"; else c = "rival"; }
+    rec._ctrl = c;
+    return c;
+  }
+  function ctrlBuyMul(rec) { const c = controlClass(rec); return c === "mine" ? CTRL.mineBuy : c === "rival" ? CTRL.rivalBuy : CTRL.neutralBuy; }
+  function ctrlPayMul(rec) { const c = controlClass(rec); return c === "mine" ? CTRL.minePay : c === "rival" ? CTRL.rivalPay : CTRL.neutralPay; }
+  // short, glanceable district + controller chip for a row
+  function zoneChip(rec) {
+    const z = zoneOf(rec);
+    const name = z ? z.name : (rec.district === "island" ? "Bay Island" : "Downtown");
+    const cls = controlClass(rec);
+    if (cls === "mine") return "<span style='color:#7ed957'>" + name + " · yours</span>";
+    if (cls === "rival") {
+      const oi = ownerInfo(zoneOwnerOf(rec));
+      const nm = (oi.name || "rival").split(" — ")[0];
+      return "<span style='color:#ff8a7a'>" + name + " · " + nm + "</span>";
+    }
+    return "<span style='color:#9fb0c6'>" + name + " · neutral</span>";
+  }
+
+  // Buying a district's property pushes your INFLUENCE there: we nudge the
+  // player gang to claim the nearest contested (abandoned) block to the lot you
+  // just bought, so snapping up a district's real estate helps you FLIP the
+  // zone in the takeover war. Only when your gang is actually founded; the
+  // playergang hook claims the nearest derelict turf to a world position and
+  // re-derives zone ownership itself. Safe no-op otherwise.
+  function pushInfluence(rec) {
+    if (!myGangId()) return;
+    try {
+      if (CBZ.cityPlayerGangClaimTurf) CBZ.cityPlayerGangClaimTurf(rec.lot.cx || 0, rec.lot.cz || 0);
+    } catch (e) {}
+    if (CBZ.cityRefreshTurfHud) try { CBZ.cityRefreshTurfHud(); } catch (e) {}
+    _ctrlAt = -1e9;   // force the control cache to re-derive (a zone may have flipped)
   }
 
   // ---- build the static registry once, memoised on the arena -----------------
@@ -131,7 +206,6 @@
 
     const center = A.center || { x: 0, z: 0 };
     const lots = [].concat(A.lots || [], (A.annex && A.annex.lots) || []);
-    // farthest lot from centre → normalises the downtown location premium
     let maxD = 1;
     for (const l of lots) { const d = Math.hypot((l.cx || 0) - center.x, (l.cz || 0) - center.z); if (d > maxD) maxD = d; }
 
@@ -155,7 +229,6 @@
         name = "Public Park";
         ownerId = "city";
       } else if (ILLEGAL_KINDS[kind]) {
-        // illegal operation — listed for the rankings, never for sale
         category = "illegal"; legal = false;
         if (kind === "abandoned") {
           const st = b && b.stash;
@@ -167,7 +240,7 @@
           name = (b && b.name) || KIND_LABEL[kind] || "Illegal Business";
           business = { name, kind };
         }
-        ownerId = "underworld";   // resolved to the live gang at render time
+        ownerId = "underworld";
       } else if (b && b.shop || COMMERCIAL_BASE[kind] || kind === "gas" || kind === "carlot") {
         category = "commercial";
         const base = COMMERCIAL_BASE[kind] || 30000;
@@ -176,7 +249,6 @@
         business = { name, kind };
         ownerId = corpFor(rnd).id;
       } else {
-        // residence / tower
         category = "residence";
         const home = b && b.home;
         if (home && home.price > 0) value = round500(home.price * (0.95 + rnd() * 0.18));
@@ -184,6 +256,7 @@
         name = (home && home.name) || (b && b.name) || (island ? "Island Tower" : "Apartments");
         ownerId = corpFor(rnd).id;
       }
+      if (!(value > 0)) value = round500(8000 * loc);   // never NaN / zero
 
       const num = 100 + (((lot.i | 0) * 17 + (lot.j | 0) * 7 + idx * 3) % 89) * 10;
       const street = STREETS[(idx + (lot.i | 0)) % STREETS.length];
@@ -197,9 +270,10 @@
         kind, category, legal, base: value, value, name, address: addr,
         beds: (b && b.home && b.home.beds) || 0,
         storeys, business, flavor,
-        // a stable per-lot "beta": how much this property swings with the market
-        beta: 0.7 + rnd() * 0.6,
+        beta: 0.7 + rnd() * 0.6,            // stable per-lot market "beta"
         initialOwnerId: ownerId, ownerId,
+        initialLegal: legal, initialCategory: category,   // restored on per-life reset
+        boughtAt: 0,                        // what YOU paid (flip P&L)
         rent: round5(value * (YIELD[category] || 0)),
       };
       listings.push(rec); byId[rec.id] = rec;
@@ -208,89 +282,90 @@
     A.realty = { listings, byId };
     return A.realty;
   }
-  function round5(n) { return Math.max(0, Math.round(n / 5) * 5); }
 
   function reg() { return ensureRegistry(); }
   function ownedSet() { return (g.cityRealtyOwned = g.cityRealtyOwned || {}); }
   function homeObj(rec) { return rec.lot.building && rec.lot.building.home; }
 
-  // ---- LIVE market value: base × macro index (scaled by the lot's beta) ------
-  // Zillow shows a Zestimate that breathes with the housing market. A property's
-  // *base* is fixed at build time; the displayed value floats with the city
-  // index so a buy-low/sell-high game exists. Owned value updates too.
-  function marketIndex() { return (CBZ.cityEcon && CBZ.cityEcon.propIndex) ? CBZ.cityEcon.propIndex() : 1; }
-  function mval(rec) {
+  // ---- LIVE market value: base × macro index (beta) × district control ------
+  function marketIndex() { const i = (CBZ.cityEcon && CBZ.cityEcon.propIndex) ? CBZ.cityEcon.propIndex() : 1; return isFinite(i) && i > 0 ? i : 1; }
+  // raw Zestimate before the control/heat tilt (what the macro market says)
+  function baseVal(rec) {
     const idx = marketIndex();
-    const swing = 1 + (idx - 1) * (rec.beta || 1);      // beta scales the swing
-    rec.value = round500((rec.base || rec.value || 0) * Math.max(0.5, swing));
+    const swing = 1 + (idx - 1) * (rec.beta || 1);
+    return round500((rec.base || rec.value || 0) * Math.max(0.5, swing));
+  }
+  // displayed value: macro × district-control tilt. A district your gang holds
+  // is HOTTER property (worth more once you control it — the flip reward); a
+  // rival's district is depressed for you. Clamped so it never runs away.
+  function mval(rec) {
+    let v = baseVal(rec);
+    const c = controlClass(rec);
+    if (rec.legal) {
+      if (c === "mine") v *= 1.12;          // your turf appreciates (control premium)
+      else if (c === "rival") v *= 0.92;    // rival turf is discounted for you
+    }
+    rec.value = round500(v);
     return rec.value;
   }
+  // the PRICE you actually pay to buy (value × your control discount/premium)
+  function buyPriceOf(rec) { return round500(mval(rec) * ctrlBuyMul(rec)); }
   function refreshAllValues() { const r = reg(); if (r) for (const rec of r.listings) mval(rec); }
   function trendTag() {
     const t = (CBZ.cityEcon && CBZ.cityEcon.propTrend) ? CBZ.cityEcon.propTrend() : "steady";
     const idx = marketIndex();
     const pct = Math.round((idx - 1) * 100);
-    if (t === "rising") return "📈 Market hot " + (pct >= 0 ? "+" : "") + pct + "%";
-    if (t === "falling") return "📉 Market cooling " + pct + "%";
-    return "➖ Market flat " + (pct >= 0 ? "+" : "") + pct + "%";
+    if (t === "rising") return "📈 Hot " + (pct >= 0 ? "+" : "") + pct + "%";
+    if (t === "falling") return "📉 Cooling " + pct + "%";
+    return "➖ Flat " + (pct >= 0 ? "+" : "") + pct + "%";
   }
 
   // ---- RENT (player renting FROM the market) --------------------------------
-  // g.cityRentals: { recId: { rent, sinceTick, isHome } } — what you rent.
   function rentals() { return (g.cityRentals = g.cityRentals || {}); }
   function isRenting(rec) { return !!rentals()[rec.id]; }
   function rentFor(rec) { return round5(mval(rec) * (RENT_FRAC[rec.category] || 0.012)); }
 
   // ---- FINANCE / mortgage (financed buys) -----------------------------------
-  // g.cityMortgages: { recId: { balance, orig, rate } } — debt against a buy.
   function mortgages() { return (g.cityMortgages = g.cityMortgages || {}); }
   function mortgageOf(rec) { return mortgages()[rec.id] || null; }
   function FIN() { return (CBZ.cityEcon && CBZ.cityEcon.FINANCE) || { minDownFrac: 0.2, rate: 0.06, minPaymentFrac: 0.04, maxLTV: 0.8 }; }
-  // equity you actually hold in a property = value − outstanding mortgage
   function equity(rec) { const m = mortgageOf(rec); return Math.max(0, mval(rec) - (m ? m.balance : 0)); }
 
   // ---- RENT OUT (NPC tenants in property YOU own) ---------------------------
-  // g.cityTenants: { recId: { occupied:bool, name, nextCheck } } lazily filled.
   function tenants() { return (g.cityTenants = g.cityTenants || {}); }
   function TENANT_NAMES() { return ["the Ramirez family", "a young couple", "a startup", "a retiree", "a barista", "a remote worker", "a corner store", "a nail salon", "a med student"]; }
-  // SINGLE SOURCE OF TRUTH for ownership: a residence's `home.owned` flag is shared
-  // with city/realestate.js (the realtor + the [H] safehouse), so Zillow and the
-  // realtor can never disagree about who owns a house — buy at either, it shows
-  // OWNED in both; "move up" at the realtor releases the old place in both.
-  // Businesses / land / island towers (no home object) live in Zillow's ownedSet.
   function isOwned(rec) { const h = homeObj(rec); return h ? !!h.owned : !!ownedSet()[rec.id]; }
   function isHome(rec) { return !!(g.cityHome && g.cityHome.lot === rec.lot); }
 
-  // effective owner of a listing right now (drives the rankings)
   function effOwnerId(rec) {
     if (isOwned(rec)) return "player";
     if (!rec.legal) {
-      const live = rec.lot.building && rec.lot.building.gang;   // gangs.js tags this on reset
+      const live = rec.lot.building && rec.lot.building.gang;
       return live || rec.initialOwnerId || "underworld";
     }
     return rec.ownerId;
   }
   function statusOf(rec) {
     if (isOwned(rec)) {
-      if (isHome(rec)) return "YOUR HOME";
+      if (isHome(rec)) return "HOME";
       return mortgageOf(rec) ? "FINANCED" : "OWNED";
     }
-    if (isRenting(rec)) return rentals()[rec.id].isHome ? "RENTED (HOME)" : "RENTED";
-    if (!rec.legal) return "NOT FOR SALE";
+    if (isRenting(rec)) return rentals()[rec.id].isHome ? "LEASED·HOME" : "LEASED";
+    if (!rec.legal) return "SEIZE-ONLY";
     return "FOR SALE";
   }
   function canBuy(rec) { return rec.legal && !isOwned(rec) && !isRenting(rec); }
   function canRent(rec) { return rec.legal && rec.category !== "land" && !isOwned(rec) && !isRenting(rec); }
-  function canFinance(rec) { return canBuy(rec) && mval(rec) >= 8000; }
+  function canFinance(rec) { return canBuy(rec) && buyPriceOf(rec) >= 8000; }
+  // you can SEIZE an illegal op cheap once your gang controls its zone
+  function canSeize(rec) { return !rec.legal && rec.kind !== "abandoned" && !isOwned(rec) && controlClass(rec) === "mine"; }
+  function seizePrice(rec) { return round500(mval(rec) * 0.35); }   // a steal — you run the streets here
 
   // ---- transactions ---------------------------------------------------------
-  // feedback while the panel is up (the engine toast is occluded by the overlay)
   let lastMsg = "", lastTone = "ok";
   function flash(msg, tone) { lastMsg = msg; lastTone = tone || "ok"; }
 
   // ---- persistence: mirror the portfolio into the world ledger --------------
-  // cityWorldEnsure().assets.properties is the durable record (survives runs);
-  // g.* holds the live per-run state realestate.js ticks against.
   function persist() {
     if (!CBZ.cityWorldEnsure) return;
     const w = CBZ.cityWorldEnsure(); if (!w || !w.assets) return;
@@ -312,15 +387,14 @@
     w.assets.properties = list;
   }
 
-  // pull `amt` from cash first, then bank. Returns false (no charge) if short.
   function charge(amt) {
+    amt = Math.max(0, Math.round(+amt) || 0);
     if (((g.cash || 0) + (g.cityBank || 0)) < amt) return false;
     let owe = amt; const fromCash = Math.min(g.cash || 0, owe);
     g.cash = (g.cash || 0) - fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
     return true;
   }
 
-  // finalise ownership of a residence (home record + respawn for the first one)
   function takeResidence(rec) {
     if (rec.category === "residence" && rec.lot.building && rec.lot.building.home) {
       rec.lot.building.home.owned = true;
@@ -331,15 +405,20 @@
   function buy(id) {
     const r = reg(); if (!r) return;
     const rec = r.byId[id]; if (!rec) return;
-    if (!rec.legal) { flash("⛔ " + rec.name + " is an illegal operation — take it by force, not by cheque.", "bad"); CBZ.city.note("That's an illegal operation — not for sale.", 2.2); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return; }
+    if (!rec.legal) {
+      if (canSeize(rec)) return seize(id);
+      flash("⛔ " + rec.name + " is an illegal op — take it by force (control its zone, then Seize).", "bad");
+      CBZ.city.note("That's an illegal operation — not for sale.", 2.2); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
+    }
     if (isOwned(rec)) { flash("You already own " + rec.name + ".", "bad"); refresh(); return; }
-    if (isRenting(rec)) { endRent(id, true); }   // buying out your own rental
-    const price = mval(rec);
+    if (isRenting(rec)) endRent(id, true);
+    const price = buyPriceOf(rec);
     if (((g.cash || 0) + (g.cityBank || 0)) < price) { flash("⛔ Need " + money(price) + " (cash + bank) to close. Try Finance.", "bad"); CBZ.city.note("Need " + money(price) + " to close.", 2); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return; }
     charge(price);
     delete mortgages()[rec.id];
-    ownedSet()[rec.id] = true; rec.ownerId = "player";
+    ownedSet()[rec.id] = true; rec.ownerId = "player"; rec.boughtAt = price;
     takeResidence(rec);
+    pushInfluence(rec);
     CBZ.city.addRespect(Math.max(1, Math.min(40, Math.round(price / 8000))));
     const headline = (rec.business ? "🏢 Acquired " + rec.business.name : "🏠 Bought " + rec.name) + "!";
     flash("✅ " + headline + " for " + money(price), "ok"); CBZ.city.big(headline);
@@ -348,20 +427,37 @@
     refresh();
   }
 
-  // ---- finance: put a down payment, carry a mortgage on the rest ------------
+  // SEIZE an illegal op in a district your gang controls — a fraction of value.
+  function seize(id) {
+    const r = reg(); if (!r) return;
+    const rec = r.byId[id]; if (!rec || !canSeize(rec)) { flash("Can't seize that — control its district first.", "bad"); refresh(); return; }
+    const price = seizePrice(rec);
+    if (((g.cash || 0) + (g.cityBank || 0)) < price) { flash("⛔ Need " + money(price) + " to muscle in.", "bad"); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return; }
+    charge(price);
+    ownedSet()[rec.id] = true; rec.ownerId = "player"; rec.boughtAt = price; rec.legal = true; rec.category = "commercial";
+    pushInfluence(rec);
+    CBZ.city.addRespect(25);
+    flash("🩸 Seized " + rec.name + " for " + money(price) + " — it runs under your flag now.", "ok");
+    CBZ.city.big("🩸 Took over " + rec.name);
+    if (CBZ.sfx) CBZ.sfx("win");
+    persist(); if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    refresh();
+  }
+
   function financeBuy(id) {
     const r = reg(); if (!r) return;
     const rec = r.byId[id]; if (!rec) return;
     if (!canFinance(rec)) { flash("Can't finance that.", "bad"); refresh(); return; }
     const f = FIN();
-    const price = mval(rec);
+    const price = buyPriceOf(rec);
     const down = round500(price * f.minDownFrac);
     if (((g.cash || 0) + (g.cityBank || 0)) < down) { flash("⛔ Need " + money(down) + " down (20%) to finance.", "bad"); CBZ.city.note("Need " + money(down) + " down.", 2); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return; }
     charge(down);
-    const bal = price - down;
+    const bal = Math.max(0, price - down);
     mortgages()[rec.id] = { balance: bal, orig: bal, rate: f.rate };
-    ownedSet()[rec.id] = true; rec.ownerId = "player";
+    ownedSet()[rec.id] = true; rec.ownerId = "player"; rec.boughtAt = price;
     takeResidence(rec);
+    pushInfluence(rec);
     CBZ.city.addRespect(Math.max(1, Math.min(20, Math.round(down / 8000))));
     flash("🏦 Financed " + (rec.business ? rec.business.name : rec.name) + " — " + money(down) + " down, " + money(bal) + " owed.", "ok");
     CBZ.city.big("🏦 Financed " + rec.name);
@@ -369,7 +465,6 @@
     persist(); if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     refresh();
   }
-  // pay down a chunk of an outstanding mortgage (or clear it)
   function payMortgage(id, frac) {
     const r = reg(); if (!r) return;
     const rec = r.byId[id]; const m = rec && mortgageOf(rec); if (!m) return;
@@ -386,7 +481,6 @@
     refresh();
   }
 
-  // ---- rent (player rents FROM the market) ---------------------------------
   function rent(id) {
     const r = reg(); if (!r) return;
     const rec = r.byId[id]; if (!rec || !canRent(rec)) { flash("Can't rent that.", "bad"); refresh(); return; }
@@ -396,7 +490,6 @@
     if (deposit > 0) charge(deposit);
     const isHomeRental = rec.category === "residence";
     rentals()[rec.id] = { rent: per, isHome: isHomeRental, missed: 0 };
-    // renting a HOME gives you a respawn point, just like owning, if you have none
     if (isHomeRental && !g.cityHome && rec.lot.building) {
       const door = rec.lot.building.door || { x: rec.lot.cx, z: rec.lot.cz };
       g.citySpawnPoint = { x: door.x, z: door.z };
@@ -418,7 +511,6 @@
     }
     if (!quiet) { flash("📦 Ended your lease on " + rec.name + ".", "ok"); persist(); refresh(); }
   }
-  // make a residence you RENT your respawn home (no garage/safe — that needs ownership)
   function rentSetHome(id) {
     const rec = reg() && reg().byId[id]; if (!rec) return;
     const lease = rentals()[rec.id]; if (!lease || !lease.isHome) { flash("Only a rented residence can be your home base.", "bad"); refresh(); return; }
@@ -436,34 +528,33 @@
     const rec = r.byId[id]; if (!rec || !isOwned(rec)) return;
     const gross = round500(mval(rec) * SELL_CUT);
     const m = mortgageOf(rec);
-    const payoff = m ? Math.round(m.balance) : 0;     // the bank gets paid first
+    const payoff = m ? Math.round(m.balance) : 0;
     const got = Math.max(0, gross - payoff);
+    const pl = rec.boughtAt ? gross - rec.boughtAt : 0;      // flip profit/loss vs. what you paid
     CBZ.city.addCash(got);
     delete ownedSet()[rec.id];
     delete mortgages()[rec.id];
     delete tenants()[rec.id];
-    rec.ownerId = rec.initialOwnerId;
+    rec.ownerId = rec.initialOwnerId; rec.boughtAt = 0;
     if (rec.lot.building && rec.lot.building.home) rec.lot.building.home.owned = false;
     if (isHome(rec)) { g.cityHome = null; g.citySpawnPoint = null; CBZ.city.note("Sold your home — no respawn point until you buy another.", 2.6); }
-    const note = payoff > 0 ? "💸 Sold " + rec.name + " for " + money(gross) + " (−" + money(payoff) + " mortgage = +" + money(got) + ")." : "💸 Sold " + rec.name + " for " + money(got) + ".";
+    const plTxt = pl ? " (" + (pl >= 0 ? "+" : "") + money(pl) + " flip)" : "";
+    const note = payoff > 0 ? "💸 Sold " + rec.name + " for " + money(gross) + " (−" + money(payoff) + " mortgage = +" + money(got) + ")" + plTxt + "." : "💸 Sold " + rec.name + " for " + money(got) + plTxt + ".";
     flash(note, "ok"); CBZ.city.big("SOLD " + rec.name + " — +" + money(got));
     if (CBZ.sfx) CBZ.sfx("coin");
     persist(); if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     refresh();
   }
 
-  // make an owned residence the safehouse (respawn / heal / garage via [H])
   function setAsHome(rec, quiet) {
     if (!rec || !isOwned(rec)) return;
     const b = rec.lot.building, home = b && b.home;
     if (!home) { flash("Only a residence can be your home.", "bad"); CBZ.city.note("Only a residence can be your home.", 1.8); refresh(); return; }
-    // moving residency keeps the old place owned as a RENTAL (you paid for it) —
-    // it just stops being your respawn/safehouse and starts earning rent.
     const movedFrom = (g.cityHome && g.cityHome.lot !== rec.lot) ? g.cityHome.name : null;
     home.owned = true;
     g.cityHome = { lot: rec.lot, tier: home.tier, id: home.id, name: home.name };
     g.cityRentTier = null;
-    g.cityRentedHome = null;   // an owned home supersedes any rented home base
+    g.cityRentedHome = null;
     const door = (b.door || { x: rec.lot.cx, z: rec.lot.cz });
     g.citySpawnPoint = { x: door.x, z: door.z };
     if (!quiet) {
@@ -482,8 +573,7 @@
       const o = tally[id] || (tally[id] = { id, count: 0, value: 0 });
       o.count++; o.value += value;
     }
-    for (const rec of r.listings) bump(effOwnerId(rec), rec.value);
-    // make sure the player + every faction appear even with nothing
+    for (const rec of r.listings) bump(effOwnerId(rec), mval(rec));
     if (!tally.player) tally.player = { id: "player", count: 0, value: 0 };
     const rows = Object.keys(tally).map((id) => {
       const info = ownerInfo(id);
@@ -504,49 +594,39 @@
   }
 
   // ---- the property economy TICK (driven by realestate.js at order 38.4) ----
-  // Revalue with the market, then settle, per income cycle:
-  //   • rent-out income from owned non-home units (scaling, with vacancies)
-  //   • property tax on everything you own
-  //   • mortgage interest + minimum payment on financed properties
-  //   • the rent YOU owe on properties you lease (eviction if you can't pay)
-  // Returns true if any UI-visible change happened (so the panel refreshes).
   let incomeT = INCOME_TICK;
   function economyTick(dt) {
-    refreshAllValues();                    // every listing's Zestimate breathes
-    if (isOpen()) refresh();               // keep the market panel live
+    refreshAllValues();
+    if (isOpen()) refresh();
     incomeT -= dt; if (incomeT > 0) return;
     incomeT = INCOME_TICK;
     const r = reg(); if (!r) return;
     let net = 0, n = 0, vac = 0, evicted = null;
 
-    // --- properties YOU own: rent-out income, tax, mortgage service ---
     for (const rec of r.listings) {
       if (!isOwned(rec)) continue;
       const v = mval(rec);
-      const tax = Math.round(v * TAX_PER_TICK);
+      const tax = Math.max(0, Math.round(v * TAX_PER_TICK));
       const m = mortgageOf(rec);
       if (m && m.balance > 0) {
-        // interest accrues; a minimum payment (always > interest, so the loan
-        // actually amortizes down) is auto-deducted toward principal.
         const interest = Math.round(m.balance * m.rate);
         m.balance += interest;
         const minPay = Math.min(m.balance, Math.max(interest + 50, Math.round(m.orig * FIN().minPaymentFrac)));
         if (charge(minPay)) m.balance = Math.max(0, m.balance - minPay);
-        // else can't service: balance just grows (no eviction; mortgage compounds)
         if (m.balance <= 1) delete mortgages()[rec.id];
       }
-      if (isHome(rec)) { net -= tax; continue; }   // your residence pays tax, earns no rent
+      if (isHome(rec)) { net -= tax; continue; }
       n++;
-      // rent-out: an NPC tenant pays scaling rent unless the unit is vacant
       const t = tenants()[rec.id] || (tenants()[rec.id] = { occupied: true, name: "" });
-      // re-roll occupancy each cycle: bigger places have lower vacancy
       const vacChance = VACANCY_BASE * (rec.category === "commercial" ? 1.2 : 1) * (0.6 + 600 / Math.max(600, v));
       if (Math.random() < vacChance) { t.occupied = false; t.name = ""; vac++; }
       else if (!t.occupied) { t.occupied = true; t.name = TENANT_NAMES()[(Math.random() * 9) | 0]; }
-      const income = t.occupied ? round5(v * (TENANT_YIELD[rec.category] || 0.01)) : 0;
+      // GANG TIE: income is scaled by who controls the district (your turf pays
+      // more, a rival's turf pays less). This makes the takeover feed the wallet.
+      const income = t.occupied ? round5(v * (TENANT_YIELD[rec.category] || 0.01) * ctrlPayMul(rec)) : 0;
       net += income - tax;
     }
-    if (n > 0 && net > 0) net = Math.round(net / (1 + PORTFOLIO_DRAG * n));   // empire diminishing returns
+    if (n > 0 && net > 0) net = Math.round(net / (1 + PORTFOLIO_DRAG * n));
 
     if (net > 0) { CBZ.city.addCash(net); CBZ.city.note("🏢 Portfolio +" + money(net) + " (" + n + " unit" + (n === 1 ? "" : "s") + (vac ? ", " + vac + " vacant" : "") + ")", 2); }
     else if (net < 0) {
@@ -556,7 +636,6 @@
       CBZ.city.note("🏢 Property upkeep -" + money(-net), 1.8);
     }
 
-    // --- properties YOU rent: pay the landlord or get evicted ---
     const rs = rentals();
     for (const id in rs) {
       const lease = rs[id]; const rec = r.byId[id]; if (!rec) { delete rs[id]; continue; }
@@ -573,26 +652,30 @@
     persist();
     if (isOpen()) refresh();
   }
-  // expose so realestate.js can drive the single property tick
   CBZ.cityZillowTick = economyTick;
 
   // ---- reset per life --------------------------------------------------------
   CBZ.cityZillowReset = function () {
     g.cityRealtyOwned = {};
     g.cityRentals = {}; g.cityMortgages = {}; g.cityTenants = {}; g.cityRentedHome = null;
-    incomeT = INCOME_TICK;
+    incomeT = INCOME_TICK; page = 0;
     if (CBZ.cityEcon && CBZ.cityEcon.initPropMarket) CBZ.cityEcon.initPropMarket();
     const A = CBZ.city && CBZ.city.arena;
-    if (A && A.realty) for (const rec of A.realty.listings) { rec.ownerId = rec.initialOwnerId; rec.value = rec.base; }
-    if (open_) { CBZ.cityMenuOpen = false; }   // a reset while the market was up releases the screen
+    if (A && A.realty) for (const rec of A.realty.listings) {
+      rec.ownerId = rec.initialOwnerId; rec.value = rec.base; rec.boughtAt = 0; rec._ctrl = null;
+      if (rec.initialLegal != null) rec.legal = rec.initialLegal;          // un-seize: ops go back to the crews
+      if (rec.initialCategory != null) rec.category = rec.initialCategory;
+    }
+    _ctrlAt = -1e9;
+    if (open_) { CBZ.cityMenuOpen = false; }
     open_ = false;
     if (panel) panel.style.display = "none";
   };
 
   // ==========================================================================
-  //  UI
+  //  UI  — one screen, compact rows, paginated (NO scrolling)
   // ==========================================================================
-  let panel = null, tab = "sale", open_ = false;
+  let panel = null, tab = "sale", open_ = false, page = 0, expanded = null;
 
   function el() {
     if (panel) return panel;
@@ -600,13 +683,15 @@
     panel.id = "cityZillow";
     panel.className = "zwrap";
     document.body.appendChild(panel);
-    // one delegated click handler survives every re-render
     panel.addEventListener("click", function (e) {
       const t = e.target.closest ? e.target.closest("[data-act]") : null;
       if (!t) return;
       const act = t.getAttribute("data-act"), id = t.getAttribute("data-id");
-      if (act === "tab") { tab = id; refresh(); return; }
+      if (act === "tab") { tab = id; page = 0; expanded = null; refresh(); return; }
+      if (act === "page") { setPage(parseInt(id, 10)); return; }
+      if (act === "expand") { expanded = expanded === id ? null : id; refresh(); return; }
       if (act === "buy") buy(id);
+      else if (act === "seize") seize(id);
       else if (act === "finance") financeBuy(id);
       else if (act === "rent") rent(id);
       else if (act === "endrent") endRent(id, false);
@@ -624,9 +709,8 @@
   function badge(rec) {
     const s = statusOf(rec);
     let cls = "zb-sale";
-    if (s === "OWNED" || s === "YOUR HOME" || s === "FINANCED") cls = "zb-own";
-    else if (s === "NOT FOR SALE") cls = "zb-illegal";
-    else if (s === "RENTED" || s === "RENTED (HOME)") cls = "zb-own";
+    if (s === "OWNED" || s === "HOME" || s === "FINANCED" || s === "LEASED" || s === "LEASED·HOME") cls = "zb-own";
+    else if (s === "SEIZE-ONLY") cls = "zb-illegal";
     return "<span class='zbadge " + cls + "'>" + s + "</span>";
   }
   function icon(rec) {
@@ -635,71 +719,78 @@
     if (!rec.legal) return rec.kind === "abandoned" ? "🏚️" : "💊";
     return "🏪";
   }
-
-  // inline-styled buttons for the new actions (CSS file is owned elsewhere; we
-  // reuse .zbtn for layout and only tint via inline background)
   function btn(act, id, label, bg) {
-    return "<button class='zbtn' style='background:" + bg + ";color:#fff' data-act='" + act + "' data-id='" + id + "'>" + label + "</button>";
+    return "<button class='zbtn' style='background:" + bg + ";color:#fff;padding:5px 10px;font-size:12px' data-act='" + act + "' data-id='" + id + "'>" + label + "</button>";
   }
 
-  function card(rec) {
+  // a COMPACT one-line row: icon · name+badge · district/gang · tier · yield · value
+  // The row's primary button is inline; clicking the row name expands extra
+  // actions (finance/rent/sell/home) so the list stays a single tidy line.
+  function row(rec) {
     const v = mval(rec);
-    const owner = ownerInfo(effOwnerId(rec));
-    const tier = tierFor(rec.base || v);
-    const flav = rec.flavor ? rec.flavor.replace(/-/g, " ") + " · " : "";
-    const sub = flav + (rec.business ? KIND_LABEL[rec.kind] || "Business" : (rec.category === "land" ? "vacant land" : (rec.beds ? rec.beds + "-bed home" : "residence")))
-      + " · " + rec.storeys + (rec.storeys === 1 ? " floor" : " floors") + " · " + rec.district;
-    const tierLine = "<div class='zsub' style='color:#9aa7bb'>" + tier.tag + " " + tier.name + "</div>";
+    const tIdx = tierIdx(rec.base || v);
+    const tcol = TIER_COL[tIdx];
+    const ttag = TIERS[tIdx].tag;
+    const name = rec.business ? rec.business.name : rec.name;
+    const yieldPct = (TENANT_YIELD[rec.category] || 0) * ctrlPayMul(rec) - TAX_PER_TICK;
+    const yldTxt = rec.legal && rec.category !== "land"
+      ? "<span style='color:" + (yieldPct > 0 ? "#9be8b4" : "#ff9e90") + ";font-size:11px'>" + (yieldPct >= 0 ? "+" : "") + (yieldPct * 100).toFixed(2) + "%/cyc</span>"
+      : "<span style='color:#7f8794;font-size:11px'>—</span>";
 
-    let actions = "", info = "";
+    // primary action (right side)
+    let primary = "";
     const m = mortgageOf(rec);
     if (isOwned(rec)) {
-      const eq = equity(rec);
       const netSale = Math.max(0, round500(v * SELL_CUT) - (m ? Math.round(m.balance) : 0));
-      actions += btn("sell", rec.id, "Sell " + money(netSale), "#b8553a");
-      if (m) {
-        actions += btn("payhalf", rec.id, "Pay ½", "#3a6ea5");
-        actions += btn("payoff", rec.id, "Pay off", "#2f6fed");
-        info = "<span class='zrent' style='color:#ff9e90'>Mortgage " + money(Math.round(m.balance)) + " @ " + Math.round(m.rate * 100) + "%</span>"
-          + "<span class='zrent' style='color:#8fb6ff'>Equity " + money(eq) + "</span>";
-      }
-      if (rec.category === "residence" && homeObj(rec) && !isHome(rec)) actions += "<button class='zbtn zbtn-home' data-act='home' data-id='" + rec.id + "'>Set as home</button>";
-      if (!isHome(rec)) {
-        const t = tenants()[rec.id];
-        const tincome = round5(v * (TENANT_YIELD[rec.category] || 0.01));
-        const occLabel = t && t.occupied === false ? "🚪 VACANT" : (t && t.name ? "🧍 " + t.name : "🧍 leased");
-        info += "<span class='zrent'>" + occLabel + " · +" + money(tincome) + "/cyc</span>";
-      }
+      primary = btn("sell", rec.id, "Sell " + money(netSale), "#b8553a");
     } else if (isRenting(rec)) {
-      const lease = rentals()[rec.id];
-      actions += btn("endrent", rec.id, "End lease", "#6b7480");
-      if (lease.isHome && g.cityRentedHome !== rec.id && !g.cityHome) actions += btn("rhome", rec.id, "Set as home", "#3a4658");
-      info = "<span class='zrent'>Rent " + money(rentFor(rec)) + "/cycle</span>";
+      primary = btn("endrent", rec.id, "End lease", "#6b7480");
+    } else if (canSeize(rec)) {
+      primary = btn("seize", rec.id, "Seize " + money(seizePrice(rec)), "#a8324b");
     } else if (canBuy(rec)) {
-      actions += btn("buy", rec.id, "Buy " + money(v), "#2f9e4f");
-      if (canFinance(rec)) actions += btn("finance", rec.id, "Finance " + money(round500(v * FIN().minDownFrac)) + " ↓", "#2f6fed");
-      if (canRent(rec)) actions += btn("rent", rec.id, "Rent " + money(rentFor(rec)) + "/cyc", "#7a5cc0");
-      // ROI: what owning it nets per cycle vs. its price (rough annualish guide)
-      const yld = (TENANT_YIELD[rec.category] || 0) - TAX_PER_TICK;
-      const perCyc = Math.round(v * Math.max(0, yld));
-      if (perCyc > 0) info = "<span class='zrent' style='color:#9be8b4'>ROI +" + money(perCyc) + "/cyc (" + (yld * 100).toFixed(2) + "%)</span>";
+      primary = btn("buy", rec.id, "Buy " + money(buyPriceOf(rec)), "#2f9e4f");
     } else {
-      actions += "<span class='znope'>Off market</span>";
+      primary = "<span class='znope'>Off market</span>";
     }
 
-    return "<div class='zcard'>"
-      + "<div class='zicon'>" + icon(rec) + "</div>"
+    // expandable secondary actions / detail
+    let extra = "";
+    if (expanded === rec.id) {
+      let acts = "";
+      if (isOwned(rec)) {
+        if (m) { acts += btn("payhalf", rec.id, "Pay ½", "#3a6ea5") + btn("payoff", rec.id, "Pay off " + money(Math.round(m.balance)), "#2f6fed"); }
+        if (rec.category === "residence" && homeObj(rec) && !isHome(rec)) acts += btn("home", rec.id, "Set as home", "#3a4658");
+        const t = tenants()[rec.id];
+        const occ = isHome(rec) ? "your residence (no rent)" : (t && t.occupied === false ? "🚪 vacant" : (t && t.name ? "🧍 " + t.name : "🧍 leased"));
+        const pl = rec.boughtAt ? "<span style='color:" + (v * SELL_CUT - rec.boughtAt >= 0 ? "#9be8b4" : "#ff9e90") + "'> · flip " + (v * SELL_CUT - rec.boughtAt >= 0 ? "+" : "") + money(v * SELL_CUT - rec.boughtAt) + "</span>" : "";
+        extra = "<div class='zsub'>" + occ + (m ? " · mortgage " + money(Math.round(m.balance)) + " · equity " + money(equity(rec)) : "") + pl + "</div>";
+      } else if (isRenting(rec)) {
+        const lease = rentals()[rec.id];
+        if (lease.isHome && g.cityRentedHome !== rec.id && !g.cityHome) acts += btn("rhome", rec.id, "Set as home", "#3a4658");
+        extra = "<div class='zsub'>Rent " + money(rentFor(rec)) + "/cycle · pay it or you're evicted.</div>";
+      } else if (canBuy(rec)) {
+        if (canFinance(rec)) acts += btn("finance", rec.id, "Finance " + money(round500(buyPriceOf(rec) * FIN().minDownFrac)) + "↓", "#2f6fed");
+        if (canRent(rec)) acts += btn("rent", rec.id, "Rent " + money(rentFor(rec)) + "/cyc", "#7a5cc0");
+        const oi = ownerInfo(effOwnerId(rec));
+        extra = "<div class='zsub'>" + (rec.flavor ? rec.flavor.replace(/-/g, " ") + " · " : "") + (rec.beds ? rec.beds + "-bed · " : "") + rec.storeys + (rec.storeys === 1 ? " floor" : " floors") + " · seller " + (oi.name || "—").split(" — ")[0] + "</div>";
+      } else if (canSeize(rec)) {
+        extra = "<div class='zsub'>Illegal op in YOUR district — muscle in cheap and fly your flag.</div>";
+      }
+      if (acts) extra += "<div class='zacts' style='flex-direction:row;flex-wrap:wrap'>" + acts + "</div>";
+    }
+
+    return "<div class='zcard' style='padding:7px 11px;gap:9px;cursor:pointer' data-act='expand' data-id='" + rec.id + "'>"
+      + "<div class='zicon' style='font-size:22px;width:28px'>" + icon(rec) + "</div>"
       + "<div class='zmeta'>"
-      + "<div class='zname'>" + (rec.business ? rec.business.name : rec.name) + " " + badge(rec) + "</div>"
-      + "<div class='zaddr'>" + rec.address + "</div>"
-      + "<div class='zsub'>" + sub + "</div>"
-      + tierLine
-      + "<div class='zowner'>Owner: <b style='color:#" + ("000000" + owner.color.toString(16)).slice(-6) + "'>" + owner.name + "</b></div>"
+      + "<div class='zname' style='font-size:14px'>" + name + " " + badge(rec)
+      + " <span style='color:" + tcol + ";font-size:10px;font-weight:700'>" + ttag + "</span></div>"
+      + "<div class='zaddr' style='font-size:11px'>" + rec.address + " · " + zoneChip(rec) + "</div>"
+      + extra
       + "</div>"
-      + "<div class='zright'>"
-      + "<div class='zval'>" + money(v) + "</div>"
-      + info
-      + "<div class='zacts'>" + actions + "</div>"
+      + "<div class='zright' style='min-width:118px;gap:1px'>"
+      + "<div class='zval' style='font-size:15px'>" + money(v) + "</div>"
+      + yldTxt
+      + "<div class='zacts' style='margin-top:2px'>" + primary + "</div>"
       + "</div>"
       + "</div>";
   }
@@ -707,13 +798,21 @@
   function listFor(which) {
     const r = reg(); if (!r) return [];
     let arr = r.listings.slice();
-    if (which === "sale") arr = arr.filter((x) => canBuy(x));
+    if (which === "sale") arr = arr.filter((x) => canBuy(x) || canSeize(x));
     else if (which === "owned") arr = arr.filter((x) => isOwned(x));
     else if (which === "rented") arr = arr.filter((x) => isRenting(x));
     else if (which === "illegal") arr = arr.filter((x) => !x.legal);
-    // sort: for-sale cheapest first (a ladder), others priciest first
     arr.sort((a, b) => which === "sale" ? mval(a) - mval(b) : mval(b) - mval(a));
     return arr;
+  }
+
+  function pageCount(len) { return Math.max(1, Math.ceil(len / PAGE_SIZE)); }
+  function setPage(p) {
+    const arr = listFor(tab);
+    const pc = pageCount(arr.length);
+    page = Math.max(0, Math.min(pc - 1, p));
+    expanded = null;
+    refresh();
   }
 
   function render() {
@@ -724,57 +823,78 @@
     const myRank = ranks.findIndex((x) => x.you) + 1;
     const nRented = Object.keys(rentals()).length;
     let html = "";
-    // header
     html += "<div class='zhead'>"
-      + "<div class='ztitle'>🏠 Zillow <span class='ztag'>City Property &amp; Business Market</span></div>"
+      + "<div class='ztitle' style='font-size:19px'>🏠 Zillow <span class='ztag'>Property &amp; Business · " + trendTag() + "</span></div>"
       + "<button class='zx' data-act='close' data-id='x'>✕</button>"
       + "</div>";
     html += "<div class='zstats'>"
       + "<span>Cash <b>" + money(g.cash || 0) + "</b></span>"
       + "<span>Bank <b>" + money(g.cityBank || 0) + "</b></span>"
       + "<span>Empire <b>" + money(emp.value) + "</b> (" + emp.count + ")</span>"
-      + (emp.debt > 0 ? "<span>Equity <b>" + money(emp.equity) + "</b> · debt <b style='color:#ff9e90'>" + money(emp.debt) + "</b></span>" : "")
-      + "<span>Rank <b>#" + (myRank || "—") + "</b> of " + ranks.length + "</span>"
-      + "<span style='color:#cfe0f5'>" + trendTag() + "</span>"
+      + (emp.debt > 0 ? "<span>Equity <b>" + money(emp.equity) + "</b>·debt <b style='color:#ff9e90'>" + money(emp.debt) + "</b></span>" : "")
+      + "<span>Rank <b>#" + (myRank || "—") + "</b>/" + ranks.length + "</span>"
       + "</div>";
-    if (lastMsg) html += "<div class='zflash " + (lastTone === "bad" ? "zflash-bad" : "zflash-ok") + "'>" + lastMsg + "</div>";
-    // tabs
-    const tabs = [["sale", "For Sale"], ["owned", "Owned (" + emp.count + ")"], ["rented", "Renting (" + nRented + ")"], ["illegal", "Black Market"], ["ranks", "Empires"]];
+    if (lastMsg) html += "<div class='zflash " + (lastTone === "bad" ? "zflash-bad" : "zflash-ok") + "' style='padding:5px 12px;font-size:12px'>" + lastMsg + "</div>";
+
+    const tabs = [["sale", "Buy"], ["owned", "Owned " + emp.count], ["rented", "Rent " + nRented], ["illegal", "Streets"], ["ranks", "Empires"]];
     html += "<div class='ztabs'>";
-    for (const [id, label] of tabs) html += "<button class='ztab" + (tab === id ? " on" : "") + "' data-act='tab' data-id='" + id + "'>" + label + "</button>";
+    for (const [id, label] of tabs) html += "<button class='ztab" + (tab === id ? " on" : "") + "' style='padding:6px 4px;font-size:12px' data-act='tab' data-id='" + id + "'>" + label + "</button>";
     html += "</div>";
 
-    html += "<div class='zlist'>";
+    html += "<div class='zlist' style='gap:6px'>";
     if (tab === "ranks") {
-      html += "<div class='zhint'>Total property + business value held by each player. Buy, finance or rent-out to climb.</div>";
-      ranks.forEach((row, i) => {
-        const col = "#" + ("000000" + row.color.toString(16)).slice(-6);
-        html += "<div class='zrank" + (row.you ? " me" : "") + "'>"
-          + "<span class='zrnum'>#" + (i + 1) + "</span>"
-          + "<span class='zrname' style='color:" + col + "'>" + row.name + (row.you ? " (you)" : "") + "</span>"
-          + "<span class='zrcount'>" + row.count + " propert" + (row.count === 1 ? "y" : "ies") + "</span>"
-          + "<span class='zrval'>" + money(row.value) + "</span>"
+      html += "<div class='zhint'>Total property + business value held by each player. Control districts + buy them up to climb.</div>";
+      const pc = pageCount(ranks.length);
+      page = Math.min(page, pc - 1);
+      const slice = ranks.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+      slice.forEach((rowd, i) => {
+        const gi = page * PAGE_SIZE + i;
+        html += "<div class='zrank" + (rowd.you ? " me" : "") + "' style='padding:7px 11px;font-size:13px'>"
+          + "<span class='zrnum'>#" + (gi + 1) + "</span>"
+          + "<span class='zrname' style='color:" + colHex(rowd.color) + "'>" + rowd.name + (rowd.you ? " (you)" : "") + "</span>"
+          + "<span class='zrcount'>" + rowd.count + " prop" + (rowd.count === 1 ? "" : "s") + "</span>"
+          + "<span class='zrval'>" + money(rowd.value) + "</span>"
           + "</div>";
       });
+      html += pager(ranks.length);
     } else {
-      if (tab === "sale") html += "<div class='zhint'>Buy outright, FINANCE with 20% down + a mortgage, or RENT for a low deposit. Prices move with the market — buy in a dip.</div>";
-      else if (tab === "owned") html += "<div class='zhint'>Owned units you don't live in auto-lease to tenants for scaling passive income (with the odd vacancy). Pay off mortgages to keep more.</div>";
-      else if (tab === "rented") html += "<div class='zhint'>Rent is charged every income cycle — miss it and you're evicted. A rented home gives you a respawn point.</div>";
-      else if (tab === "illegal") html += "<div class='zhint'>Illegal operations can't be bought on the market — they're held by the crews. Listed so you can see who runs the streets.</div>";
+      const hints = {
+        sale: "Tap a row for Finance/Rent. Prices float with the market + gang control — buy in YOUR district for a discount, in a rival's for a premium.",
+        owned: "Units you don't live in auto-lease to tenants (your district pays more). Tap to pay off mortgages or set a home.",
+        rented: "Rent is charged every cycle — miss it and you're evicted. A rented home is a respawn point.",
+        illegal: "Illegal ops belong to the crews. Take a district with your gang, then Seize the op cheap.",
+      };
+      html += "<div class='zhint'>" + (hints[tab] || "") + "</div>";
       const arr = listFor(tab);
-      if (!arr.length) html += "<div class='zempty'>" + (tab === "owned" ? "You don't own anything yet. Hit the For Sale tab." : tab === "rented" ? "You're not renting anything. Lease a place from For Sale." : "Nothing here.") + "</div>";
-      for (const rec of arr) html += card(rec);
+      const pc = pageCount(arr.length);
+      page = Math.min(page, pc - 1);
+      const slice = arr.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+      if (!slice.length) html += "<div class='zempty'>" + (tab === "owned" ? "You own nothing yet. Hit Buy." : tab === "rented" ? "You're not renting. Lease one from Buy." : tab === "illegal" ? "The streets are quiet." : "Nothing for sale.") + "</div>";
+      for (const rec of slice) html += row(rec);
+      html += pager(arr.length);
     }
     html += "</div>";
-    html += "<div class='zfoot'>[Z]/[Esc] close · [1-5] switch tabs · Buy / Finance / Rent · prices float with the market</div>";
+    html += "<div class='zfoot'>[Z]/[Esc] close · [1-5] tabs · [←/→] page · tap a row for more</div>";
     el().innerHTML = html;
+  }
+
+  // pager: Prev · "Page X/Y (N listings)" · Next  — only when >1 page
+  function pager(total) {
+    const pc = pageCount(total);
+    if (pc <= 1) return "";
+    const hidden = total - PAGE_SIZE;
+    return "<div style='display:flex;align-items:center;justify-content:center;gap:10px;padding:4px 0 2px;font-size:12px;color:#9fb0c6'>"
+      + "<button class='zbtn' style='background:" + (page > 0 ? "#2f6fed" : "#2a323c") + ";color:#fff;padding:4px 12px' data-act='page' data-id='" + (page - 1) + "'>‹ Prev</button>"
+      + "<span>Page <b style='color:#ffd166'>" + (page + 1) + "</b>/" + pc + " · " + total + " listings</span>"
+      + "<button class='zbtn' style='background:" + (page < pc - 1 ? "#2f6fed" : "#2a323c") + ";color:#fff;padding:4px 12px' data-act='page' data-id='" + (page + 1) + "'>Next ›</button>"
+      + "</div>";
   }
   function refresh() { if (open_) render(); }
 
   function open() {
-    if (CBZ.cityMenuOpen) return;        // another city menu owns the screen
+    if (CBZ.cityMenuOpen) return;
     if (!reg()) { CBZ.city && CBZ.city.note("Property market not ready.", 1.4); return; }
-    open_ = true; tab = "sale"; lastMsg = ""; CBZ.cityMenuOpen = true;
+    open_ = true; tab = "sale"; lastMsg = ""; page = 0; expanded = null; CBZ.cityMenuOpen = true;
     el().style.display = "flex";
     render();
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
@@ -785,26 +905,35 @@
     if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
   }
   CBZ.cityOpenZillow = open;
-  // does the player own the business/building on this lot? (used by city/empire.js)
   CBZ.cityOwnsLot = function (lot) { const r = reg(); if (!r || !lot) return false; const rec = r.listings.find((x) => x.lot === lot); return rec ? isOwned(rec) : false; };
   function recForLot(lot) { const r = reg(); if (!r || !lot) return null; return r.listings.find((x) => x.lot === lot) || null; }
+
+  // total equity in the player's portfolio (consumed by economy.js net worth)
+  function portfolioValue() {
+    const r = reg(); if (!r) return 0;
+    let eq = 0;
+    for (const rec of r.listings) if (isOwned(rec)) eq += equity(rec);
+    return Math.round(eq);
+  }
+
   CBZ.cityZillow = {
-    open, close, buy, finance: financeBuy, rent, sell, setHome, rankings, playerEmpire,
-    ownsLot: CBZ.cityOwnsLot, listings: () => reg() && reg().listings, isOpen,
+    open, close, buy, finance: financeBuy, rent, sell, setHome, seize, rankings, playerEmpire,
+    ownsLot: CBZ.cityOwnsLot, listings: () => reg() && reg().listings, isOpen, portfolioValue,
     isRenting: (id) => { const rec = reg() && reg().byId[id]; return rec ? isRenting(rec) : false; },
-    // by-lot helpers so the Keystone Realty menu (realestate.js) can offer Rent
     rentByLot: (lot) => { const rec = recForLot(lot); if (rec) rent(rec.id); },
     rentEstimateForLot: (lot) => { const rec = recForLot(lot); return rec && canRent(rec) ? rentFor(rec) : null; },
     isRentingLot: (lot) => { const rec = recForLot(lot); return rec ? isRenting(rec) : false; },
   };
 
-  // ---- key: [Z] toggles the market -----------------------------------------
+  // ---- key: [Z] toggles the market; arrows page; 1-5 switch tabs ------------
   addEventListener("keydown", function (e) {
     if (g.mode !== "city" || g.state !== "playing") return;
     const k = (e.key || "").toLowerCase();
     if (open_) {
       if (k === "escape" || k === "z") { e.preventDefault(); close(); return; }
-      if (k >= "1" && k <= "5") { e.preventDefault(); tab = ["sale", "owned", "rented", "illegal", "ranks"][parseInt(k, 10) - 1]; render(); return; }
+      if (k >= "1" && k <= "5") { e.preventDefault(); tab = ["sale", "owned", "rented", "illegal", "ranks"][parseInt(k, 10) - 1]; page = 0; expanded = null; render(); return; }
+      if (k === "arrowleft" || k === "[") { e.preventDefault(); setPage(page - 1); return; }
+      if (k === "arrowright" || k === "]") { e.preventDefault(); setPage(page + 1); return; }
       return;
     }
     if (k === "z" && !e.repeat && !CBZ.cityMenuOpen && !(CBZ.player && CBZ.player.driving)) {
