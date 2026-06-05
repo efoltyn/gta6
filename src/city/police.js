@@ -238,10 +238,17 @@
   addEventListener("keydown", function (e) {
     if (g.mode !== "city" || g.state !== "playing" || e.repeat) return;
     if ((e.key || "").toLowerCase() !== "q") return;
-    if (!g._copStow && !g.cityStowedWeapon) return;       // nothing stowed → let fpsmode have Q
     if (CBZ.player.driving || CBZ.player.dead || CBZ.cityMenuOpen || stopActive()) return;
-    e.preventDefault();
-    CBZ.cityRedrawWeapon();
+    // [Q] = holster/draw toggle. Your gun STAYS OUT by default — this just lets you
+    // put it away if you want, and bring it back. Stowed → re-draw. Armed with a
+    // SINGLE gun → voluntarily holster (there's nothing to swap to anyway, so fpsmode's
+    // Q is a no-op there). With 2+ guns, [Q] stays the weapon-swap key (fpsmode owns it).
+    if (g._copStow || g.cityStowedWeapon) { e.preventDefault(); CBZ.cityRedrawWeapon(); return; }
+    if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
+      e.preventDefault();
+      if (CBZ.city) CBZ.city.note("Holstered. · [Q] to draw", 1.6);
+      if (CBZ.sfx) CBZ.sfx("door");
+    }
   });
 
   // capture-phase key handler: while a stop is live, I/J/K/L drive the stop FIRST
