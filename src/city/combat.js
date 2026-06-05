@@ -273,6 +273,10 @@
   const _origHurt = CBZ.cityHurtPlayer;
   if (typeof _origHurt === "function") {
     CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal) {
+      // NPC-fire LOS gate: an armed NPC whose muzzle was walled off this shot
+      // can't land a round on you through the building. Their gun got lowered in
+      // the actorMuzzle wrap; here we make the damage agree with the visual.
+      if (attacker && attacker._losBlocked && fromX != null && !attacker.isPlayer) return;
       // only melee-range threats are parryable/blockable (guns/cars unaffected)
       const meleeRange = (fromX != null) && (Math.hypot((fromX) - P.pos.x, (fromZ) - P.pos.z) < 3.2);
       if (guardT > 0 && !headshot && meleeRange && !P.dead) {
@@ -298,6 +302,129 @@
       return _origHurt.call(this, dmg, fromX, fromZ, reason, headshot, attacker, nonlethal);
     };
   }
+
+  // ============================================================
+  //  NPC-FIRE LINE-OF-SIGHT GATE (city)
+  //  Armed peds / gang members fire through CBZ.tracer + CBZ.actorMuzzle
+  //  from several call-sites (peds.js npcAttack, empire.js crewDefend,
+  //  playergang.js). None of them gate on a wall, so rounds (and the gun
+  //  prop itself) used to poke straight THROUGH buildings. Cops already
+  //  self-gate via clearLineOfFire; we extend the SAME discipline to every
+  //  armed NPC by wrapping the shared firing primitives once, here:
+  //    • actorAimAt   → remember WHO an actor is shooting at,
+  //    • actorMuzzle  → at the muzzle the shot leaves from, test LOS to that
+  //                     target; if a wall is in the way flag _losBlocked and
+  //                     LOWER the gun prop (mirrors police.js _gunLowered),
+  //    • tracer       → never draw a city NPC tracer that crosses a wall,
+  //    • cityHurtCop / cityHurtPlayer → drop damage from a walled-off muzzle.
+  //  Player & cop shots already have a clear line by construction, so these
+  //  wraps are no-ops for them.
+  // ============================================================
+  const _mz = new THREE.Vector3();
+
+  // is this actor a city NPC that fires through the shared primitives?
+  function isCityNpc(a) {
+    return !!(a && !a.isPlayer && a.pos && (a.kind !== "cop"));   // cops self-gate in police.js
+  }
+
+  // lower / stow an armed NPC's gun prop so it stops clipping the wall it
+  // can't shoot past (re-shown automatically the next clear shot).
+  function lowerGun(a) {
+    if (!a) return;
+    a._losBlocked = true;
+    a._gunLowered = true;
+    if (a._weaponProp && a._weaponProp.visible) a._weaponProp.visible = false;
+  }
+  function raiseGun(a) {
+    if (!a) return;
+    a._losBlocked = false;
+    a._gunLowered = false;
+  }
+
+  // PUBLIC GATE: true if NPC `att` has a clear muzzle→target line right now.
+  // Callers may use it to hold fire / reposition; we also use it internally.
+  // Side-effect: lowers/raises the gun prop to match (so it never pokes a wall).
+  CBZ.cityNpcCanFire = function (att, tgt) {
+    if (!att || !tgt || !tgt.pos) return true;
+    if (g.mode !== "city") return true;
+    if (!CBZ.clearLineOfFire) return true;
+    _muzGate = true;   // suppress the muzzle wrap's own LOS test (we do it here)
+    const m = (CBZ.actorMuzzle ? CBZ.actorMuzzle(att, _mz) : null) || { x: att.pos.x, y: 1.42, z: att.pos.z };
+    _muzGate = false;
+    const ty = tgt.isPlayer ? 1.55 : 1.3;
+    const clear = CBZ.clearLineOfFire(m.x, m.y != null ? m.y : 1.42, m.z, tgt.pos.x, ty, tgt.pos.z);
+    if (clear) raiseGun(att); else lowerGun(att);
+    return clear;
+  };
+
+  // --- wrap actorAimAt: stash the aim target so the muzzle/tracer wraps know
+  //     who this actor is firing at (the firing paths aim immediately before
+  //     they grab the muzzle + draw the tracer). -----------------------------
+  const _origAim = CBZ.actorAimAt;
+  if (typeof _origAim === "function") {
+    CBZ.actorAimAt = function (actor, target, dt) {
+      if (actor && target && target.pos && isCityNpc(actor)) { actor._fireTgt = target; actor._fireTgtT = 0.5; }
+      return _origAim.call(this, actor, target, dt);
+    };
+  }
+
+  // --- wrap actorMuzzle: the muzzle is exactly the point a shot leaves from,
+  //     so test LOS to the remembered target HERE. This is the cheapest place
+  //     (the firing path already calls it once per shot) and lets us lower the
+  //     gun before the tracer/damage even run. Re-entrant-safe via _muzGate. --
+  let _muzGate = false;
+  const _origMuzzle = CBZ.actorMuzzle;
+  if (typeof _origMuzzle === "function") {
+    CBZ.actorMuzzle = function (actor, out) {
+      const res = _origMuzzle.call(this, actor, out);
+      if (!_muzGate && g.mode === "city" && isCityNpc(actor) && actor && actor._fireTgt && (actor._fireTgtT || 0) > 0) {
+        const t = actor._fireTgt;
+        if (t && t.pos && !t.dead && CBZ.clearLineOfFire && res) {
+          const ty = t.isPlayer ? 1.55 : 1.3;
+          if (CBZ.clearLineOfFire(res.x, res.y != null ? res.y : 1.42, res.z, t.pos.x, ty, t.pos.z)) raiseGun(actor);
+          else lowerGun(actor);
+        }
+      }
+      return res;
+    };
+  }
+
+  // --- wrap tracer: never render a city NPC bullet streak that crosses a wall.
+  //     Player/cop tracers are clear by construction; a blocked line only ever
+  //     comes from an un-gated NPC shot, and a tracer through a building reads
+  //     as a bug, so dropping it is always correct. Cheap LOS test, city-only.
+  const _origTracer = CBZ.tracer;
+  if (typeof _origTracer === "function") {
+    CBZ.tracer = function (from, to, opts) {
+      if (g.mode === "city" && from && to && CBZ.clearLineOfFire &&
+          !CBZ.clearLineOfFire(from.x, from.y, from.z, to.x, to.y, to.z)) {
+        return null;   // walled-off shot → no streak, no muzzle flash poking through
+      }
+      return _origTracer.call(this, from, to, opts);
+    };
+  }
+
+  // --- wrap cityHurtCop: an armed NPC that just got walled-off (empire crew,
+  //     rival gang) can't put a round into a cop through the building either. -
+  const _origHurtCop = CBZ.cityHurtCop;
+  if (typeof _origHurtCop === "function") {
+    CBZ.cityHurtCop = function (cop, dmg, imp) {
+      const att = imp && imp.attacker;
+      if (att && att._losBlocked && !att.isPlayer && imp && imp.fromX != null) return;
+      return _origHurtCop.call(this, cop, dmg, imp);
+    };
+  }
+
+  // age out the stale aim-target memory so a wandering ped doesn't keep a
+  // long-dead "I was shooting at X" flag (cheap, sliced across the crowd).
+  CBZ.onUpdate(13, function (dt) {
+    if (g.mode !== "city") return;
+    const lists = [CBZ.cityPeds, CBZ.cityCops];
+    for (let li = 0; li < lists.length; li++) {
+      const L = lists[li]; if (!L) continue;
+      for (let i = 0; i < L.length; i++) { const a = L[i]; if (a && a._fireTgtT > 0) a._fireTgtT -= dt; }
+    }
+  });
 
   // cooldown + stance + combo-window tick
   CBZ.onUpdate(12, function (dt) {

@@ -71,7 +71,7 @@ for (let i = 0; i < 40; i++) agents.push(CBZ.cityCrowdAgent(i));
 // run a few ticks; pool should build (14 parked peds added to cityPeds)
 for (let t = 0; t < 3; t++) tick(0.05);
 const pooled = cityPeds.filter((p) => p._crowd);
-ok(pooled.length === 14, "pool of 14 interactive peds created (got " + pooled.length + ")");
+ok(pooled.length === 18, "pool of 18 interactive peds created (got " + pooled.length + ")");
 const promotedNow = cityPeds.filter((p) => p._crowd && !p._parked).length;
 ok(promotedNow > 0, "agents near origin got promoted to real peds (got " + promotedNow + " active)");
 
@@ -97,7 +97,7 @@ CBZ.clearCityPeds();
 ok(cityPeds.length === 0, "clearCityPeds drops pool peds too");
 CBZ.spawnCityCrowd(40);
 for (let t = 0; t < 2; t++) tick(0.05);
-ok(cityPeds.filter((p) => p._crowd).length === 14, "pool rebuilt cleanly after reset");
+ok(cityPeds.filter((p) => p._crowd).length === 18, "pool rebuilt cleanly after reset");
 
 console.log("\n" + (fail === 0 ? "ALL " + pass + " CHECKS PASSED ✓" : pass + " passed, " + fail + " FAILED"));
 process.exit(fail === 0 ? 0 : 1);

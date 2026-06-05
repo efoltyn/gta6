@@ -45,8 +45,16 @@
   // work on them) as you walk up, then get parked back to instanced density
   // when you walk away. Without this the city crowd was render-only and dead to
   // interaction — you could walk into someone and nothing happened.
-  const PROMO = 14;                              // pool of interactive peds kept near you
-  const PROMO_IN2 = 12 * 12, PROMO_OUT2 = 16 * 16;   // hysteresis (promote in / demote out)
+  const PROMO = 18;                              // pool of interactive peds kept near you
+  const PROMO_IN2 = 22 * 22;                     // promote-in radius (any direction)
+  // FAR REACH: an agent in your sightline (ahead of the camera) gets promoted to a
+  // real, shoot/run-over-able ped from much farther out, so anyone you can SEE down
+  // the street is fully real before you reach them — not a phantom that pops in.
+  const PROMO_AHEAD2 = 40 * 40;                  // promote-in distance for agents in front of you
+  const AHEAD_DOT = 0.35;                        // cone half-width for "ahead of the camera"
+  // demote-out must sit BEYOND the farthest promote-in (the ahead range) so a
+  // body promoted way down the street doesn't instantly flicker back to density.
+  const PROMO_OUT2 = 48 * 48;                    // hysteresis: park only past this
   const PARK = -4000;                            // where parked pool peds wait, off-map
   const promotedBy = new Int32Array(CAP);        // crowd index -> pool slot (or -1)
   const deadAgent = new Uint8Array(CAP);         // agent fully removed (corpse faded)
@@ -123,7 +131,7 @@
     if (ready) render(0);                 // place them so frame 0 isn't a pile at the origin
     return count;
   };
-  CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 280)); };
+  CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 320)); };
   // tiny debug accessors (used by the headless harness; cheap, read-only)
   CBZ.cityCrowdCount = function () { return count; };
   CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i] }; };
@@ -185,8 +193,14 @@
         for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
         continue;
       }
-      if (corpseT[i] > 0) {                            // freshly killed → lie flat on the ground
-        rootD.position.set(px[i], 0.25, pz[i]);
+      if (corpseT[i] > 0) {                            // freshly killed → lie flat ON the ground
+        // Rotating the standing rig 90° about X lays it on its back: each part's
+        // local +Z (body depth) becomes the world-vertical extent. The thickest
+        // parts (head/torso, ~0.27 half-depth) set how high the whole body must
+        // ride so NOTHING sinks below the surface — lift the lying body to ~0.42
+        // above the floor so it rests cleanly ON the ground, not bisected by it.
+        const fy = (CBZ.floorAt ? CBZ.floorAt(px[i], pz[i]) : 0) + 0.42;
+        rootD.position.set(px[i], fy, pz[i]);
         rootD.rotation.set(Math.PI / 2, heading[i], 0);
         rootD.scale.set(1, 1, 1);
         rootD.updateMatrix();
@@ -272,19 +286,71 @@
       if (P.dead || P.driving || dx * dx + dz * dz > PROMO_OUT2) { promotedBy[i] = -1; park(e); }   // walked away → back to density
     }
     if (P.dead || P.driving) return;
-    // 2) promote the nearest free agents into any free slots
+    // camera facing (city look dir): used to extend promotion reach for agents
+    // you're looking AT, so distant NPCs down your sightline are real by the time
+    // you draw a bead on them — you can shoot or run anyone you can see.
+    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    // 2) promote agents into any free slots: nearby in any direction, OR farther
+    //    out but inside the forward cone. Score = squared distance, but agents in
+    //    front get their effective range pushed out to PROMO_AHEAD2.
     for (let s = 0; s < pool.length; s++) {
       const e = pool[s]; if (e.idx >= 0) continue;
-      let best = -1, bd = PROMO_IN2;
+      let best = -1, bd = PROMO_AHEAD2;
       for (let i = 0; i < count; i++) {
         if (promotedBy[i] >= 0 || deadAgent[i]) continue;
         const dx = px[i] - ppx, dz = pz[i] - ppz, d2 = dx * dx + dz * dz;
-        if (d2 < bd) { bd = d2; best = i; }
+        if (d2 >= bd) continue;
+        // near in any direction, OR ahead of the camera within the far range
+        const dn = Math.sqrt(d2) || 1;
+        const ahead = (dx / dn) * fx + (dz / dn) * fz >= AHEAD_DOT;
+        const range = ahead ? PROMO_AHEAD2 : PROMO_IN2;
+        if (d2 < range && d2 < bd) { bd = d2; best = i; }
       }
       if (best < 0) break;
       assign(e, s, best);
     }
   }
+  // ---- AHEAD RESEED: bias density toward where the player is looking/heading ----
+  // Agents wander randomly across the whole city, so the street ahead of you can
+  // end up sparse — a ghost world. Each frame we cheaply recycle a FEW distant,
+  // non-promoted, living agents to fresh sidewalk points out in front of the
+  // camera (just past promotion reach, so they're real-and-ready as you advance).
+  // No new bodies are spawned (cap is fixed); we just teleport far ones forward.
+  const AHEAD_NEAR = 30, AHEAD_FAR = 64;          // ring out in front to seed into
+  const RESEED_BEHIND2 = 70 * 70;                 // only recycle agents this far away
+  let reseedScan = 0;
+  function aheadReseed() {
+    const P = CBZ.player; if (!P || P.dead) return;
+    const A = arena(); if (!A || !A.randomSidewalkPoint) return;
+    const ppx = P.pos.x, ppz = P.pos.z;
+    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    let moved = 0, scanned = 0;
+    // walk a rolling window of agents (a few per frame) so the cost is bounded
+    for (let n = 0; n < count && scanned < 40 && moved < 2; n++) {
+      const i = reseedScan; reseedScan = (reseedScan + 1) % Math.max(1, count); scanned++;
+      if (deadAgent[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
+      const dx = px[i] - ppx, dz = pz[i] - ppz, d2 = dx * dx + dz * dz;
+      if (d2 < RESEED_BEHIND2) continue;          // already close enough to matter
+      // is this far agent BEHIND / off to the side? if so, recycle it ahead.
+      const dn = Math.sqrt(d2) || 1;
+      if ((dx / dn) * fx + (dz / dn) * fz > 0.2) continue;  // already roughly ahead → leave it
+      // find a sidewalk point inside the forward ring (a few tries)
+      for (let t = 0; t < 4; t++) {
+        const p = A.randomSidewalkPoint();
+        const rx = p.x - ppx, rz = p.z - ppz, rd = Math.hypot(rx, rz) || 1;
+        if (rd < AHEAD_NEAR || rd > AHEAD_FAR) continue;
+        if ((rx / rd) * fx + (rz / rd) * fz < AHEAD_DOT) continue;
+        if (A.clampToCity) A.clampToCity(p, 0.6);
+        px[i] = p.x; pz[i] = p.z;
+        pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;
+        heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+        moved++; break;
+      }
+    }
+  }
+
   // ---- COMBAT: the ambient crowd is now shootable + run-over-able ----
   // (previously only the ~14 promoted peds could be hit; far NPCs were phantoms).
   function shootable(i) { return !deadAgent[i] && corpseT[i] <= 0 && promotedBy[i] < 0; }
@@ -318,7 +384,7 @@
     opts = opts || {};
     if (i < 0 || i >= count || !shootable(i)) return false;
     const x = px[i], z = pz[i];
-    corpseT[i] = 7;                                    // lie on the ground for a few seconds, then fade
+    corpseT[i] = 28;                                   // lie on the ground a good long while, then fade
     if (CBZ.gore) try { CBZ.gore(x, 1.4, z, { dir: opts.fromX != null ? { x: x - opts.fromX, z: z - opts.fromZ } : null, amount: opts.head ? 1.4 : 1.0, player: false }); } catch (e) {}
     if (CBZ.sfx && !opts.quiet) CBZ.sfx(opts.byCar ? "ko" : (opts.head ? "headshot" : "hit"));
     // a killed civilian is a witnessed crime → routes through the city wanted system
@@ -349,8 +415,9 @@
   CBZ.onUpdate(23.7, function (dt) {
     if (CBZ.game.mode !== "city") { if (root) { root.visible = false; } if (poolBuilt) releaseAll(); return; }
     if (root) root.visible = true;
-    if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 280);
+    if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 320);
     sim(dt);
+    aheadReseed();        // pull distant bodies into the street ahead of you
     updatePromotion();
     render();
   });

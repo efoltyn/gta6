@@ -114,15 +114,16 @@
     const t = new THREE.Texture(c); t.needsUpdate = true; return t;
   }
   const scorchGeo = new THREE.PlaneGeometry(1, 1); scorchGeo._shared = true;
-  function addScorch(x, z, radius) {
+  function addScorch(x, z, radius, hold) {
     if (!scorchTex) scorchTex = makeScorchTexture();
-    while (scorches.length > 10) { const o = scorches.shift(); scene.remove(o.mesh); o.mesh.material.dispose(); }
+    while (scorches.length > 12) { const o = scorches.shift(); scene.remove(o.mesh); o.mesh.material.dispose(); }
     const mat = new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
     const mesh = new THREE.Mesh(scorchGeo, mat);
     mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = Math.random() * 6.28;
     mesh.position.set(x, 0.045, z); mesh.scale.setScalar(radius * 2);
     mesh.renderOrder = 1; scene.add(mesh);
-    scorches.push({ mesh, mat, t: 0, hold: 6 + Math.random() * 4, grow: 0 });
+    // scorch marks linger as black road stains; airstrikes pass a longer hold
+    scorches.push({ mesh, mat, t: 0, hold: (hold || 11) + Math.random() * 5, grow: 0 });
   }
 
   // ---- soft additive FIREBALL sprites (the good-looking explosion) ----
@@ -236,9 +237,28 @@
     if (hard) pointBurst(x, z, catastrophic ? 30 : 16, 0xcfe6ff, 0.09, 3 + speed * 0.16, catastrophic ? 0.8 : 0.6, false);
     if (hard && CBZ.sfx) CBZ.sfx("glass");
     if (hard) {
-      ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.55 : 0.45 });
+      ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.7 : 0.55 });
       addChunks(x, z, catastrophic ? 9 : 4, 2.5 + speed * 0.1, false);
-      if (catastrophic) { addScorch(x, z, 3); if (CBZ.shake) CBZ.shake(1.6); }
+      if (catastrophic) {
+        addScorch(x, z, 3, 9); if (CBZ.shake) CBZ.shake(1.6);
+        // a clutch of small lingering flames + a thin smoke wisp so a wrecked car
+        // looks like it's actually cooking, not just sparking for a frame.
+        for (let i = 0; i < 5; i++) {
+          const a = Math.random() * 6.2832, rr = Math.random() * 1.1;
+          spawnPuff(x + Math.cos(a) * rr, 0.45, z + Math.sin(a) * rr,
+            { additive: true, base: 0.4, pop: 1.6 + Math.random() * 0.9, life: 1.1 + Math.random() * 0.9,
+              maxOp: 0.85, spin: (Math.random() - 0.5) * 2, vy: 0.5 + Math.random() * 0.7,
+              delay: Math.random() * 0.2 });
+        }
+        for (let i = 0; i < 4; i++) {
+          const a = Math.random() * 6.2832, dr = 0.3 + Math.random() * 0.5;
+          spawnPuff(x + (Math.random() - 0.5) * 1.2, 0.9 + Math.random() * 0.5, z + (Math.random() - 0.5) * 1.2,
+            { additive: false, smoke: true, base: 1.2, pop: 4 + Math.random() * 2,
+              life: 2.4 + Math.random() * 1.4, maxOp: 0.34, shade: 0.15, spin: (Math.random() - 0.5),
+              vx: Math.cos(a) * dr, vy: 1.0 + Math.random() * 0.6, vz: Math.sin(a) * dr,
+              delay: 0.15 + Math.random() * 0.3 });
+        }
+      }
     }
   };
 
@@ -262,15 +282,24 @@
     for (let i = 0; i < nFire; i++) {
       const a = Math.random() * 6.2832, rr = Math.random() * 0.9 * P, sp = (1.0 + Math.random() * 2.2);
       spawnPuff(x + Math.cos(a) * rr, cy + (Math.random() - 0.15) * P, z + Math.sin(a) * rr,
-        { additive: true, base: 0.6, pop: (3.4 + Math.random() * 1.8) * P, life: 0.42 + Math.random() * 0.5,
+        { additive: true, base: 0.6, pop: (3.4 + Math.random() * 1.8) * P, life: 0.7 + Math.random() * 0.75,
           maxOp: 1, spin: (Math.random() - 0.5) * 3,
           vx: Math.cos(a) * sp, vy: 0.4 + Math.random() * 1.2, vz: Math.sin(a) * sp });
     }
     // a few low fireballs that hug the ground (blast spreading along the road)
     for (let i = 0; i < Math.round(5 * P); i++) {
       const a = Math.random() * 6.2832, sp = 3 + Math.random() * 4 * P;
-      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + Math.random()) * P, life: 0.3 + Math.random() * 0.3,
+      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + Math.random()) * P, life: 0.5 + Math.random() * 0.45,
         maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.2, vz: Math.sin(a) * sp });
+    }
+    // lingering low FLAMES that keep licking up from the blast seat for a beat
+    // after the fireball collapses — sells a "still burning" crater cheaply.
+    for (let i = 0; i < Math.round(4 * P); i++) {
+      const a = Math.random() * 6.2832, rr = Math.random() * 0.7 * P;
+      spawnPuff(x + Math.cos(a) * rr, 0.5, z + Math.sin(a) * rr,
+        { additive: true, base: 0.4, pop: (1.4 + Math.random() * 0.8) * P, life: 1.0 + Math.random() * 0.8,
+          maxOp: 0.85, spin: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 0.7,
+          delay: 0.12 + Math.random() * 0.25 });
     }
 
     // ---- LAYER 3: SMOKE — lumpy dark plume that emerges as the flame cools,
@@ -281,7 +310,7 @@
       const a = Math.random() * 6.2832, dr = 0.4 + Math.random() * 0.6;
       spawnPuff(x + (Math.random() - 0.5) * 1.4 * P, cy + 0.3 + Math.random() * 0.6, z + (Math.random() - 0.5) * 1.4 * P,
         { additive: false, smoke: true, base: 1.6, pop: (5.5 + Math.random() * 3) * P,
-          life: 1.5 + Math.random() * 1.2, maxOp: 0.42, shade: 0.13 + Math.random() * 0.06,
+          life: 2.6 + Math.random() * 1.8, maxOp: 0.42, shade: 0.13 + Math.random() * 0.06,
           spin: (Math.random() - 0.5) * 1.2,
           vx: Math.cos(a) * dr, vy: 1.1 + Math.random() * 0.8, vz: Math.sin(a) * dr,
           delay: 0.08 + Math.random() * 0.18 });
@@ -290,7 +319,7 @@
     for (let i = 0; i < Math.round(4 * P); i++) {
       const a = Math.random() * 6.2832, sp = 1.4 + Math.random() * 1.6;
       spawnPuff(x, 0.6, z, { additive: false, smoke: true, base: 1.2, pop: (4 + Math.random() * 2) * P,
-        life: 1.2 + Math.random() * 0.8, maxOp: 0.3, shade: 0.15, spin: (Math.random() - 0.5),
+        life: 2.2 + Math.random() * 1.3, maxOp: 0.3, shade: 0.15, spin: (Math.random() - 0.5),
         vx: Math.cos(a) * sp, vy: 0.4 + Math.random() * 0.5, vz: Math.sin(a) * sp, delay: 0.05 + Math.random() * 0.12 });
     }
 
@@ -306,7 +335,7 @@
     for (let i = 0; i < nEmber; i++) {
       const a = Math.random() * 6.2832, sp = 1.5 + Math.random() * 3.5 * P;
       spawnPuff(x + Math.cos(a) * 0.5, cy + Math.random() * 0.8, z + Math.sin(a) * 0.5,
-        { additive: true, base: 0.18 + Math.random() * 0.16, pop: 0.1, life: 0.7 + Math.random() * 0.9,
+        { additive: true, base: 0.18 + Math.random() * 0.16, pop: 0.1, life: 1.0 + Math.random() * 1.1,
           maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + Math.random() * 4, vz: Math.sin(a) * sp });
     }
     addChunks(x, z, Math.round(10 * P), 6 + 5 * power, true);          // chunky glowing debris
@@ -318,13 +347,135 @@
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.34);
     if (CBZ.doHitstop) CBZ.doHitstop(0.18);
     try { const fl = CBZ.el && CBZ.el.flash; if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
-    // blast damage in radius — crowd, peds, cops, and the player
+    // blast damage in radius — crowd, peds, cops, and the player (shared path)
+    applyBlastDamage(x, z, R, power, byPlayer);
+    if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
+  };
+
+  // Shared blast-damage application — the SAME path cityExplosion always used:
+  // crowd circle-kill, peds, cops, and the player, scaled by distance/power.
+  // Both cityExplosion and cityAirstrikeExplosion route through this so they hurt
+  // people identically. (force/fling let an airstrike fling bodies harder.)
+  function applyBlastDamage(x, z, R, power, byPlayer, force, fling) {
+    force = force == null ? 9 : force; fling = fling == null ? 6 : fling;
     if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, R, { byCar: true, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer });
-    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= R * R && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: 9, fling: 6, byPlayer: byPlayer }, "explosion"); }
-    for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= R * R && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: 9, fling: 6, byPlayer: byPlayer }); }
+    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= R * R && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, "explosion"); }
+    for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= R * R && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
     const PL = CBZ.player;
     if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, "caught in an explosion", false, null, false); } }
-    if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
+  }
+
+  // ============================================================
+  // AIRSTRIKE / MISSILE blast — a BIGGER, LONGER, taller variant of
+  // cityExplosion for incoming missiles and called-in airstrikes. Same pooled
+  // sprite system, same shared damage path; just dialed up: a larger white-hot
+  // fireball that balloons up into a mushroom head, a tall lingering black smoke
+  // COLUMN, more debris + sparks, a heavier shake and a touch more slow-mo.
+  // opts: { power, radius, byPlayer, y } — y = optional detonation height (air-burst).
+  // ============================================================
+  CBZ.cityAirstrikeExplosion = function (x, z, opts) {
+    opts = opts || {};
+    const power = opts.power || 2, R = (opts.radius || 12) * power, byPlayer = !!opts.byPlayer;
+    const P = Math.min(3.4, power * 1.35);     // bigger visual ceiling than a car blast
+    // detonation seat: air-bursts (missile caught a wall) sit higher, ground hits low
+    const seat = Math.max(0, (opts.y || 0));
+    const cy = 1.2 + seat * 0.5;
+
+    // ---- FLASH: a huge blinding white-hot core, brighter + a beat longer ----
+    spawnPuff(x, cy + 0.3, z, { additive: true, base: 10 * P, pop: 11 * P, life: 0.14, maxOp: 1 });
+    spawnPuff(x, cy + 0.3, z, { additive: true, base: 1.5, pop: 7 * P, life: 0.3, maxOp: 1 });
+
+    // ---- FIREBALL: a dense cluster that punches out then BALLOONS upward into a
+    // mushroom head (buoyant rise). White→yellow→orange→deep-red, longer life. ----
+    const nFire = Math.round(22 * P);
+    for (let i = 0; i < nFire; i++) {
+      const a = Math.random() * 6.2832, rr = Math.random() * 1.2 * P, sp = (1.4 + Math.random() * 3.0);
+      spawnPuff(x + Math.cos(a) * rr, cy + (Math.random() - 0.1) * 1.4 * P, z + Math.sin(a) * rr,
+        { additive: true, base: 0.8, pop: (4.2 + Math.random() * 2.4) * P, life: 1.0 + Math.random() * 1.0,
+          maxOp: 1, spin: (Math.random() - 0.5) * 3,
+          vx: Math.cos(a) * sp, vy: 1.0 + Math.random() * 2.4, vz: Math.sin(a) * sp });
+    }
+    // the rising MUSHROOM HEAD — a few big slow fireballs that climb and bloom
+    for (let i = 0; i < Math.round(5 * P); i++) {
+      const a = Math.random() * 6.2832, dr = 0.4 + Math.random() * 0.7;
+      spawnPuff(x + Math.cos(a) * dr * P, cy + 1.2 * P, z + Math.sin(a) * dr * P,
+        { additive: true, base: 1.2, pop: (5 + Math.random() * 3) * P, life: 1.3 + Math.random() * 0.9,
+          maxOp: 1, spin: (Math.random() - 0.5) * 1.5,
+          vx: Math.cos(a) * 0.8, vy: 3.2 + Math.random() * 2.2, vz: Math.sin(a) * 0.8,
+          delay: 0.05 + Math.random() * 0.12 });
+    }
+    // low fireballs spreading along the ground (blast wash)
+    for (let i = 0; i < Math.round(8 * P); i++) {
+      const a = Math.random() * 6.2832, sp = 4 + Math.random() * 6 * P;
+      spawnPuff(x, 0.6, z, { additive: true, base: 0.6, pop: (2.6 + Math.random() * 1.4) * P, life: 0.6 + Math.random() * 0.5,
+        maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp });
+    }
+    // lingering flames cooking in the crater after the fireball collapses
+    for (let i = 0; i < Math.round(7 * P); i++) {
+      const a = Math.random() * 6.2832, rr = Math.random() * 1.0 * P;
+      spawnPuff(x + Math.cos(a) * rr, 0.5, z + Math.sin(a) * rr,
+        { additive: true, base: 0.5, pop: (1.8 + Math.random() * 1.1) * P, life: 1.4 + Math.random() * 1.1,
+          maxOp: 0.88, spin: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 0.8,
+          delay: 0.15 + Math.random() * 0.35 });
+    }
+
+    // ---- SMOKE: a tall black COLUMN — many puffs with strong upward velocity and
+    // long life so the plume towers and lingers, plus wide low billows for girth. ----
+    const nSmoke = Math.round(10 * P);
+    for (let i = 0; i < nSmoke; i++) {
+      const a = Math.random() * 6.2832, dr = 0.3 + Math.random() * 0.6;
+      spawnPuff(x + (Math.random() - 0.5) * 1.6 * P, cy + 0.4 + Math.random() * 1.0, z + (Math.random() - 0.5) * 1.6 * P,
+        { additive: false, smoke: true, base: 1.8, pop: (6.5 + Math.random() * 3.5) * P,
+          life: 4.2 + Math.random() * 2.6, maxOp: 0.5, shade: 0.1 + Math.random() * 0.05,
+          spin: (Math.random() - 0.5) * 1.0,
+          vx: Math.cos(a) * dr, vy: 2.2 + Math.random() * 1.6, vz: Math.sin(a) * dr,
+          delay: 0.06 + Math.random() * 0.2 });
+    }
+    // the column's upper reaches — slower, darker, the longest-lived smoke
+    for (let i = 0; i < Math.round(5 * P); i++) {
+      spawnPuff(x + (Math.random() - 0.5) * 1.0 * P, cy + 2.0 + Math.random() * 1.5, z + (Math.random() - 0.5) * 1.0 * P,
+        { additive: false, smoke: true, base: 2.2, pop: (7 + Math.random() * 3) * P,
+          life: 5.0 + Math.random() * 3.0, maxOp: 0.42, shade: 0.09,
+          spin: (Math.random() - 0.5) * 0.8, vy: 1.6 + Math.random() * 1.2,
+          delay: 0.25 + Math.random() * 0.5 });
+    }
+    // wide low billows rolling out at the base
+    for (let i = 0; i < Math.round(6 * P); i++) {
+      const a = Math.random() * 6.2832, sp = 1.8 + Math.random() * 2.2;
+      spawnPuff(x, 0.7, z, { additive: false, smoke: true, base: 1.4, pop: (5 + Math.random() * 2.5) * P,
+        life: 3.0 + Math.random() * 1.6, maxOp: 0.34, shade: 0.14, spin: (Math.random() - 0.5),
+        vx: Math.cos(a) * sp, vy: 0.5 + Math.random() * 0.6, vz: Math.sin(a) * sp, delay: 0.05 + Math.random() * 0.15 });
+    }
+
+    // ---- SHOCKWAVE: a bigger, faster bright ground ring + a slower glowing rim ----
+    ring(x, z, R * 1.2, 0xffe7b0, { additive: true, opacity: 0.9, inner: 1.05, spd: 6.0, life: 0.5, flat: true, y: 0.06, r0: 0.7 });
+    ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.65, inner: 0.78, spd: 2.8, life: 0.7, y: 0.1 });
+    ring(x, z, R * 0.7, 0xfff2cc, { additive: true, opacity: 0.7, inner: 0.9, spd: 7.5, life: 0.4, flat: true, y: 0.08, r0: 0.5 });
+
+    // ---- SPARKS + EMBERS + DEBRIS ----
+    pointBurst(x, z, Math.round(40 * P), 0xffe08a, 0.18, 12 + 8 * power, 0.7, false); // fast bright sparks
+    pointBurst(x, z, Math.round(20 * P), 0xfff0c0, 0.12, 16 + 9 * power, 0.5, false); // white-hot spray
+    pointBurst(x, z, Math.round(26 * P), 0x8b8175, 0.5, 2 + power * 0.4, 1.1, true);  // big dust kick-up
+    const nEmber = Math.round(26 * P);
+    for (let i = 0; i < nEmber; i++) {
+      const a = Math.random() * 6.2832, sp = 2 + Math.random() * 5 * P;
+      spawnPuff(x + Math.cos(a) * 0.6, cy + Math.random() * 1.0, z + Math.sin(a) * 0.6,
+        { additive: true, base: 0.2 + Math.random() * 0.18, pop: 0.1, life: 1.3 + Math.random() * 1.4,
+          maxOp: 1, vx: Math.cos(a) * sp, vy: 4 + Math.random() * 6, vz: Math.sin(a) * sp });
+    }
+    addChunks(x, z, Math.round(18 * P), 9 + 7 * power, true);   // lots of chunky glowing debris
+    addScorch(x, z, R * 0.55, 16);                              // big, long-lasting crater scorch
+
+    // ---- IMPACT FEEDBACK: bigger boom, harder shake, more slow-mo, screen flash --
+    if (CBZ.sfx) CBZ.sfx("explosion");
+    if (CBZ.shake) CBZ.shake(5.5 * Math.min(2.4, power));
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
+    if (CBZ.doHitstop) CBZ.doHitstop(0.26);
+    try { const fl = CBZ.el && CBZ.el.flash; if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
+
+    // blast damage — SAME shared path as cityExplosion, just flings bodies harder
+    applyBlastDamage(x, z, R, power, byPlayer, 14, 10);
+    if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power }, { silent: true, noWanted: true });
   };
 
   CBZ.onAlways(9.5, function (dt) {

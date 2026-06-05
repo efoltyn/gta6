@@ -54,7 +54,7 @@
     const after = rankIdx();
     if (after > before) {
       CBZ.city.big("RANK UP · " + RANKS[after].name);
-      CBZ.city.note("Your name rings out — you're a " + RANKS[after].name + " now. Bigger jobs, bigger pay.", 3.2);
+      CBZ.city.note("Your name carries weight now — a " + RANKS[after].name + ". Heavier jobs hit the board, and they pay.", 3.2);
       if (CBZ.sfx) CBZ.sfx("win");
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -221,10 +221,10 @@
     g.career = kind;
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     const msg = {
-      dealer: "You're a dealer now. Buy WHOLESALE at the trap house ([U] near a dealer), then [I] Deal on the street. Build regulars and watch the heat.",
-      security: "Hired as a Security Guard. Stay clean (0 stars) and earn a salary. KO criminals for bonuses.",
-      pimp: "Running the night crew. [K] Recruit people — they'll earn you money over time.",
-      gangster: "Building a crew. [K] Recruit fighters — they ride with you.",
+      dealer: "You're slinging now. Cop WHOLESALE at the trap house ([U] near a dealer), then [I] Deal on the street. Turn buyers into regulars, keep the heat off your back.",
+      security: "On the books as a Security Guard. Keep your record clean (0 stars) for the salary; drop criminals for bonus pay.",
+      pimp: "You run the night crew now. [K] Recruit earners — they kick up to you while you sleep.",
+      gangster: "Putting a crew together. [K] Recruit shooters — they ride with you and answer your orders [O].",
     }[kind] || ("Career: " + kind);
     CBZ.city.note(msg, 3.5);
   };
@@ -396,10 +396,10 @@
     // and 3 of them unlock FOUNDing a gang via the [O] orders menu.
     if (ped.kind === "crew" && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && CBZ.cityPlayerGangEnlist) {
       CBZ.cityPlayerGangEnlist(ped, "soldier");
-      CBZ.city.note("Recruited " + ped.name + " into the " + g.playerGang.name + ". Crew: " + g.cityCrew, 2.4);
+      CBZ.city.note(ped.name + " patched into the " + g.playerGang.name + " as a Soldier. Crew: " + g.cityCrew, 2.4);
     } else {
-      CBZ.city.note("Recruited " + ped.name + " (" + (ped.kind === "crew" ? "bodyguard" : ped.kind) + "). Crew: " + g.cityCrew +
-        (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " — press [O] to FOUND a gang!" : ""), 2.6);
+      CBZ.city.note(ped.name + " is on your payroll (" + (ped.kind === "crew" ? "shooter" : ped.kind) + "). Crew: " + g.cityCrew +
+        (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " — press [O] to FOUND your own gang." : ""), 2.6);
     }
   };
 

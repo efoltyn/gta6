@@ -63,53 +63,151 @@
   }
 
   // ---- shared advertising / poster canvas textures ------------------------
-  // Billboards + bus-shelter ad panels + A-frame signs read from a tiny pool of
-  // generated poster textures. One CanvasTexture per slogan, reused everywhere.
-  const adCache = new Map();
-  const AD_SLOGANS = [
-    ["FLEECA", "your money, our problem", "#0a3d2c", "#37d39a"],
-    ["SPRUNK", "drink the difference", "#0b2d6b", "#ffd23a"],
-    ["eCola", "taste the corp", "#7a0d14", "#ffe9e9"],
-    ["PISWASSER", "a real man's beer", "#5a3a12", "#f0c060"],
-    ["VINEWOOD", "now casting nobodies", "#2a1133", "#ff7ad9"],
-    ["LIFEINVADER", "stalk your friends", "#10202c", "#3fd0ff"],
-    ["AMMU-NATION", "rights, ammo, more", "#1c1c1c", "#ff5a2c"],
-    ["BIGNESS", "supersize your debt", "#3a0f0f", "#ffcf3a"],
-    ["TINKLE", "smart-ish phones", "#062a2a", "#7affd0"],
-    ["LOST MC", "ride or rot", "#101010", "#c0c0c0"],
+  // Billboards + bus-shelter ad panels read from a pool of generated poster
+  // textures. Content is RELEVANT to OUR city — the real gangs that hold turf,
+  // the real shops you can walk into, mock local brands, our own radio stations,
+  // and the occasional WANTED poster keyed to YOUR notoriety. One CanvasTexture
+  // per ad, reused everywhere.
+  //
+  // Each ad entry: [HEADLINE, tagline, bgHex, fgHex, opts?]
+  //   opts.kind  — "ad" (default) | "radio" | "gang" | "wanted" | "shop"
+  //   opts.tag   — tiny corner label ("AD","FM","TURF","WANTED","NOW OPEN")
+  // The gang ads pull their colours straight from CBZ.CITY.gangs so a Vipers
+  // board is always Vipers-green; if the player founds/owns a gang we surface
+  // that too. WANTED boards read the live wanted star count.
+
+  function gangDefs() { return (CBZ.CITY && CBZ.CITY.gangs) || []; }
+  function hex(n) { return "#" + ("000000" + ((n | 0) & 0xffffff).toString(16)).slice(-6); }
+  // a darkened version of a colour for poster backgrounds (so the headline pops)
+  function darken(n, f) {
+    const r = ((n >> 16) & 255) * f, gg = ((n >> 8) & 255) * f, b = (n & 255) * f;
+    return "#" + ("000000" + (((r << 16) | (gg << 8) | b) | 0).toString(16)).slice(-6);
+  }
+
+  // ---- STATIC pool: local brands, our shops, radio stations, gang slogans ----
+  // Mock local brands + funny in-world ads (kept ours, not a clone — these tie
+  // into things you actually do in the city: cash, guns, cars, drip, casino).
+  const BRAND_ADS = [
+    ["SPRUNK", "carbonated with regret", 0x0b2d6b, 0xffd23a],
+    ["CLUCKIN' DINER", "27 herbs, 0 questions", 0x7a3a0d, 0xffce7a, { tag: "EAT" }],
+    ["PISSWASSER", "the beer you've earned", 0x5a3a12, 0xf0c060],
+    ["eCOLA", "now 30% more cola", 0x7a0d14, 0xffe9e9],
+    ["VOLT ELECTRONICS", "phones smarter than you", 0x062a2a, 0x39d0c0],
+    ["KEYSTONE REALTY", "own the block — press Z", 0x0d3a2c, 0x4fd0a0, { tag: "Z" }],
+    ["GRAND CASINO", "the house misses you", 0x2a1a05, 0xc9a227],
+    ["BIGNESS BURGER", "supersize your debt", 0x3a0f0f, 0xffcf3a],
+    ["BENNY'S CHOP SHOP", "no plate? no problem", 0x2a2308, 0xd0a23c],
+    ["IRON GYM", "lift heavy, hit harder", 0x0d2a26, 0x66d9c0],
+    ["VINEWOOD", "now casting nobodies", 0x2a1133, 0xff7ad9],
+    ["LIFEINVADER", "we already read this", 0x10202c, 0x3fd0ff],
   ];
-  function adTexture(idx) {
-    let t = adCache.get(idx);
+  // Our shops you can literally walk into — "advertised" so the city points at them.
+  const SHOP_ADS = [
+    ["AMMU-NATION", "rights. ammo. respect.", 0x1c2414, 0xff5a2c, { tag: "GUNS" }],
+    ["BLING JEWELERS", "drip = respect", 0x2a2205, 0xffe08a, { tag: "DRIP" }],
+    ["THREADS & DRIP", "look like money", 0x2a113a, 0xc792ea, { tag: "FITS" }],
+    ["PREMIUM AUTOS", "test drive forever", 0x2a1805, 0xe88a3c, { tag: "CARS" }],
+    ["PAWN & LOAN", "we buy hot junk", 0x2a1c0d, 0xc89a5a, { tag: "FENCE" }],
+    ["VELVET CLUB", "after dark, anything", 0x2a0d1a, 0xe85d8a, { tag: "OPEN" }],
+    ["THE TRAP HOUSE", "ask for the special", 0x0d2a18, 0x4caf6e, { tag: "??" }],
+    ["FRESH CUTS", "lineup of your life", 0x0d1f2a, 0x6bb6ff, { tag: "STYLE" }],
+  ];
+  // OUR radio dial — invented stations with our own DJ/flavour (in-world humour).
+  const RADIO_ADS = [
+    ["98.4 BLOK FM", "all trap, all turf", 0x140c2a, 0xb079ea, { kind: "radio", tag: "FM" }],
+    ["K-RAGE 101.1", "drive angry", 0x2a0c0c, 0xff6a4a, { kind: "radio", tag: "FM" }],
+    ["SIREN AM 88", "police scanner & jazz", 0x0c1a2a, 0x5b8bff, { kind: "radio", tag: "AM" }],
+    ["LOWRIDE 96.9", "bounce all night", 0x0c2a1a, 0x49c46e, { kind: "radio", tag: "FM" }],
+    ["GHOST CITY RADIO", "nobody's listening", 0x14171d, 0x9fb0c6, { kind: "radio", tag: "FM" }],
+    ["VINEWOOD GOLD", "songs your boss likes", 0x2a2205, 0xf2c43d, { kind: "radio", tag: "AM" }],
+  ];
+
+  // a board material per ad-record (so each poster can glow a touch at night).
+  // adMat now takes an ad ARRAY (not an index) and caches by a content key so
+  // dynamic gang/wanted boards rebuild only when their text changes.
+  const adCache = new Map();      // key -> CanvasTexture
+  const adMatCache = new Map();   // key -> MeshLambertMaterial
+  function adKey(ad) { return ad[0] + "|" + ad[1] + "|" + ((ad[4] && ad[4].kind) || "ad"); }
+
+  function adTextureFor(ad) {
+    const key = adKey(ad);
+    let t = adCache.get(key);
     if (t) return t;
-    const s = AD_SLOGANS[idx % AD_SLOGANS.length];
+    const head = ad[0], tag = ad[1], bg = ad[2], fg = ad[3], opt = ad[4] || {};
+    const kind = opt.kind || "ad";
     const c = document.createElement("canvas");
     c.width = 256; c.height = 128;
     const x = c.getContext("2d");
-    x.fillStyle = s[2]; x.fillRect(0, 0, 256, 128);
-    // a stylised colour band + headline + small print
-    x.fillStyle = "rgba(255,255,255,.08)"; x.fillRect(0, 14, 256, 4); x.fillRect(0, 110, 256, 4);
-    x.fillStyle = s[3];
-    x.font = "bold 40px Fredoka, Arial, sans-serif";
-    x.textAlign = "center"; x.textBaseline = "middle";
-    x.fillText(s[0], 128, 52);
-    x.fillStyle = "rgba(255,255,255,.85)";
-    x.font = "16px Fredoka, Arial, sans-serif";
-    x.fillText(s[1], 128, 90);
+    // background — a flat fill plus a subtle top/bottom gradient band so it
+    // doesn't read as a single dead rectangle.
+    const bgCss = typeof bg === "number" ? hex(bg) : bg;
+    x.fillStyle = bgCss; x.fillRect(0, 0, 256, 128);
+    x.fillStyle = "rgba(255,255,255,.07)"; x.fillRect(0, 0, 256, 26);
+    x.fillStyle = "rgba(0,0,0,.18)"; x.fillRect(0, 104, 256, 24);
+    const fgCss = typeof fg === "number" ? hex(fg) : fg;
+
+    if (kind === "wanted") {
+      // a mock police WANTED poster — big WANTED banner, the player's "name",
+      // a star row for the live wanted level and a bounty.
+      x.fillStyle = fgCss;
+      x.font = "bold 30px Fredoka, Arial, sans-serif";
+      x.textAlign = "center"; x.textBaseline = "middle";
+      x.fillText("✦ WANTED ✦", 128, 26);
+      x.font = "bold 22px Fredoka, Arial, sans-serif";
+      x.fillText(head, 128, 64);                 // headline = the perp line
+      x.font = "16px Fredoka, Arial, sans-serif";
+      x.fillStyle = "rgba(255,255,255,.92)";
+      x.fillText(tag, 128, 96);                   // tagline = bounty line
+    } else {
+      // accent rules + corner tag
+      x.fillStyle = fgCss;
+      x.fillRect(0, 14, 256, 3); x.fillRect(0, 110, 256, 3);
+      // big headline
+      x.font = "bold 38px Fredoka, Arial, sans-serif";
+      x.textAlign = "center"; x.textBaseline = "middle";
+      // shrink long headlines to fit the board
+      let fs = 38; x.font = "bold " + fs + "px Fredoka, Arial, sans-serif";
+      while (x.measureText(head).width > 238 && fs > 18) { fs -= 2; x.font = "bold " + fs + "px Fredoka, Arial, sans-serif"; }
+      x.fillText(head, 128, 52);
+      x.fillStyle = "rgba(255,255,255,.88)";
+      x.font = "16px Fredoka, Arial, sans-serif";
+      x.fillText(tag, 128, 90);
+      // corner tag chip (AD / FM / GUNS / TURF ...)
+      const corner = opt.tag || (kind === "radio" ? "FM" : (kind === "gang" ? "TURF" : (kind === "shop" ? "OPEN" : "AD")));
+      x.font = "bold 12px Fredoka, Arial, sans-serif";
+      const cw = x.measureText(corner).width + 12;
+      x.fillStyle = fgCss; x.fillRect(256 - cw - 6, 6, cw, 18);
+      x.fillStyle = bgCss; x.textBaseline = "middle"; x.textAlign = "center";
+      x.fillText(corner, 256 - cw / 2 - 6, 16);
+    }
     t = new THREE.CanvasTexture(c);
     t.anisotropy = 4;
-    adCache.set(idx, t);
+    adCache.set(key, t);
     return t;
   }
-  // a board material per ad (so the poster glows a touch at night)
-  const adMatCache = new Map();
-  function adMat(idx) {
-    let m = adMatCache.get(idx);
+  function adMatFor(ad) {
+    const key = adKey(ad);
+    let m = adMatCache.get(key);
     if (!m) {
-      m = new THREE.MeshLambertMaterial({ map: adTexture(idx), emissive: 0xffffff, emissiveMap: adTexture(idx), emissiveIntensity: 0 });
+      const tex = adTextureFor(ad);
+      m = new THREE.MeshLambertMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0 });
       m._ad = true;
-      adMatCache.set(idx, m);
+      adMatCache.set(key, m);
     }
     return m;
+  }
+
+  // ---- a per-gang TURF board, coloured straight from the gang definition ----
+  // Built on demand so the board always matches CBZ.CITY.gangs (and any gang
+  // the player founds/recolours). Slogans are ours, not a clone.
+  function gangAd(d) {
+    const slogans = {
+      vipers: "green means GO",
+      kings: "ice in our veins",
+      reapers: "steel never sleeps",
+      saints: "pray we don't find you",
+    };
+    return [d.name.toUpperCase(), slogans[d.id] || "this block is ours", darken(d.color, 0.16), hex(d.color), { kind: "gang", tag: "TURF" }];
   }
 
   CBZ.cityProps = function (city) {
@@ -119,6 +217,62 @@
     // panels, shelter ad-lights, neon shop signs). Driven once/frame in city mode.
     const nightLamps = city._nightLamps = city._nightLamps || [];
     const nightAds = city._nightAds = city._nightAds || [];
+    // boards whose ad CONTENT is live (e.g. the player WANTED poster). Each
+    // entry is { mesh, dyn, lastKey } so the driver re-skins only the few that
+    // actually change, never every frame.
+    const dynAds = city._dynAds = city._dynAds || [];
+
+    // ---- ad picker: bias gang/wanted boards where they belong --------------
+    const gangAdRecords = gangDefs().map(gangAd);
+    function gangNear(x, z) {
+      // closest gang turf centre, if any registered (gangs.js sets gang.center)
+      const list = CBZ.cityGangs || [];
+      let best = null, bd = 70 * 70;
+      for (const gg of list) {
+        if (!gg.center) continue;
+        const dx = gg.center.x - x, dz = gg.center.z - z, d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; best = gg; }
+      }
+      return best;
+    }
+    // the live WANTED poster — reads the player's notoriety so the city literally
+    // puts your face up as the heat climbs. Returns null when you're clean.
+    const WANTED_NAMES = ["THE KINGPIN", "PUBLIC ENEMY", "THE GHOST", "THAT GUY", "THE MENACE"];
+    function wantedAd() {
+      const gm = CBZ.game; if (!gm) return null;
+      const wl = (gm.wanted | 0);
+      if (wl <= 0) return null;
+      const stars = "★".repeat(Math.min(5, wl)) + "☆".repeat(Math.max(0, 5 - wl));
+      const who = gm.playerGang && gm.playerGang.name ? gm.playerGang.name.toUpperCase() + " BOSS" : WANTED_NAMES[Math.min(WANTED_NAMES.length - 1, wl - 1)];
+      const bounty = "BOUNTY $" + (wl * 2500 + (gm.cityKills | 0) * 250).toLocaleString() + "   " + stars;
+      return [who, bounty, 0x1a0d0d, 0xffe2a0, { kind: "wanted", tag: "WANTED" }];
+    }
+    // returns an ad record for a board at (x,z): mostly static brand/shop/radio,
+    // but a roadside board near a gang's turf shows THAT gang, and a fraction of
+    // boards become live WANTED posters once you have heat. `register` lets the
+    // caller flag a board as dynamic (gets re-skinned later).
+    function pickAd(x, z, opts) {
+      opts = opts || {};
+      const r = rng();
+      // 1 in ~7 big boards is a (potential) live WANTED poster
+      if (opts.allowWanted && r < 0.14) {
+        return { ad: wantedAd() || BRAND_ADS[(rng() * BRAND_ADS.length) | 0], dyn: "wanted" };
+      }
+      // near gang turf, prefer that gang's board
+      const ng = gangNear(x, z);
+      if (ng && rng() < 0.5) {
+        const def = gangDefs().find((d) => d.id === ng.id);
+        if (def) return { ad: gangAd(def), dyn: null };
+      }
+      // otherwise a weighted mix of our own world content
+      const roll = rng();
+      let pool;
+      if (roll < 0.42) pool = BRAND_ADS;
+      else if (roll < 0.72) pool = SHOP_ADS;
+      else if (roll < 0.9) pool = RADIO_ADS;
+      else pool = gangAdRecords.length ? gangAdRecords : BRAND_ADS;
+      return { ad: pool[(rng() * pool.length) | 0] || BRAND_ADS[0], dyn: null };
+    }
 
     // a tidy collider for solid props (cars crash, peds can't pass). noCam so the
     // chase camera never snaps in on a thin pole.
@@ -382,13 +536,17 @@
       }
     }
 
-    // ----- A-FRAME SIDEWALK SHOP SIGN (sandwich board) ---------------------
-    function aFrameSign(x, z, yaw, adIdx) {
+    // ----- A-FRAME SANDWICH BOARD (sparse generic only) --------------------
+    // NOTE: per-shop sidewalk signs were REMOVED — the store's name now lives ON
+    // the building facade (buildings agent), not on a board out on the kerb. We
+    // keep a *sparse* sandwich board as generic street decor carrying a city
+    // brand/radio ad, never a "this is shop X" sign in front of a door.
+    function aFrameSign(x, z, yaw, ad) {
       const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
       const panelG = geo("aframePanel", () => new THREE.PlaneGeometry(0.7, 0.9));
-      const front = new THREE.Mesh(panelG, adMat(adIdx));
+      const front = new THREE.Mesh(panelG, adMatFor(ad));
       front.position.set(0, 0.55, 0.12); front.rotation.x = 0.18; g.add(front);
-      const back = new THREE.Mesh(panelG, adMat((adIdx + 3) % AD_SLOGANS.length));
+      const back = new THREE.Mesh(panelG, adMatFor(ad));
       back.position.set(0, 0.55, -0.12); back.rotation.x = -0.18; back.rotation.y = Math.PI; g.add(back);
       const footG = geo("aframeFoot", () => new THREE.BoxGeometry(0.74, 0.04, 0.5));
       const foot = new THREE.Mesh(footG, smat(0x2a2a2a)); foot.position.y = 0.02; g.add(foot);
@@ -412,11 +570,13 @@
       bench.position.set(0, 0.55, -0.35); bench.castShadow = true; g.add(bench);
       const legG = geo("shelterBenchLeg", () => new THREE.BoxGeometry(0.1, 0.5, 0.4));
       for (const lx of [-1.1, 1.1]) { const l = new THREE.Mesh(legG, shelterPostM); l.position.set(lx, 0.25, -0.35); g.add(l); }
-      // lit advertising panel on one end (glows at night)
-      const adIdx = (rng() * AD_SLOGANS.length) | 0;
-      const ad = new THREE.Mesh(geo("shelterAd", () => new THREE.PlaneGeometry(1.0, 1.7)), adMat(adIdx));
+      // lit advertising panel on one end (glows at night). Bus shelters carry
+      // our brand/shop/radio + gang ads (no wanted posters at street level).
+      const pick = pickAd(x, z, { allowWanted: false });
+      const adM = adMatFor(pick.ad);
+      const ad = new THREE.Mesh(geo("shelterAd", () => new THREE.PlaneGeometry(1.0, 1.7)), adM);
       ad.position.set(1.74, 1.2, 0); ad.rotation.y = -Math.PI / 2; g.add(ad);
-      nightAds.push(adMat(adIdx));
+      nightAds.push(adM);
       // bus-stop sign pole at the end
       const sp = new THREE.Mesh(geo("shelterSignPole", () => new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6)), shelterPostM);
       sp.position.set(2.1, 1.3, 0); g.add(sp);
@@ -441,11 +601,17 @@
       brace.position.set(0, post * 0.55, 0); g.add(brace);
       const frame = new THREE.Mesh(geo("billFrame" + (big ? "B" : "S"), () => new THREE.BoxGeometry(W + 0.4, H + 0.4, 0.3)), billFrameM);
       frame.position.set(0, post + H / 2, 0); g.add(frame);
-      const adIdx = (rng() * AD_SLOGANS.length) | 0;
+      // each face gets its OWN ad record. Big roadside boards may show a live
+      // WANTED poster (your face goes up with your heat); both faces glow at night.
+      const pickF = pickAd(x, z, { allowWanted: big });
+      const pickB = pickAd(x, z, { allowWanted: false });
       const boardG = geo("billBoard" + (big ? "B" : "S"), () => new THREE.PlaneGeometry(W, H));
-      const front = new THREE.Mesh(boardG, adMat(adIdx)); front.position.set(0, post + H / 2, 0.18); g.add(front);
-      const back = new THREE.Mesh(boardG, adMat((adIdx + 5) % AD_SLOGANS.length)); back.position.set(0, post + H / 2, -0.18); back.rotation.y = Math.PI; g.add(back);
-      nightAds.push(adMat(adIdx), adMat((adIdx + 5) % AD_SLOGANS.length));
+      const front = new THREE.Mesh(boardG, adMatFor(pickF.ad)); front.position.set(0, post + H / 2, 0.18); g.add(front);
+      const back = new THREE.Mesh(boardG, adMatFor(pickB.ad)); back.position.set(0, post + H / 2, -0.18); back.rotation.y = Math.PI; g.add(back);
+      nightAds.push(adMatFor(pickF.ad), adMatFor(pickB.ad));
+      // register the front face if it's a live WANTED poster so the driver can
+      // re-skin its material when the player's wanted level changes.
+      if (pickF.dyn === "wanted") dynAds.push({ mesh: front, dyn: "wanted", lastKey: adKey(pickF.ad) });
       // walkway light bar under the board
       const bar = new THREE.Mesh(geo("billBar" + (big ? "B" : "S"), () => new THREE.BoxGeometry(W, 0.1, 0.4)), smat(0xfff4d0, { emissive: 0xfff4d0, ei: 0 }));
       bar.position.set(0, post - 0.1, 0.4); g.add(bar);
@@ -509,12 +675,15 @@
           planterTree(p.x, p.z, rng() < 0.65);
         }
       }
-      // 6) an A-frame shop sign near a shop door
-      if (lot.building && lot.building.shop && rng() < 0.7) {
-        const d = lot.building.door;
-        if (d) {
-          const sx = d.x - d.nx * 3.2 + d.nz * 1.4, sz = d.z - d.nz * 3.2 - d.nx * 1.4;
-          aFrameSign(sx, sz, Math.atan2(d.nx, d.nz) + Math.PI, (lotIdx * 3) % AD_SLOGANS.length);
+      // 6) RARELY a generic sandwich board out on the sidewalk (NOT a per-shop
+      //    door sign — those are gone; the store name lives on the facade now).
+      //    Carries a city brand/radio ad, placed on a clear kerb away from doors.
+      if (rng() < 0.06) {
+        const edge = (rng() * 4) | 0;
+        const p = edgePoint(lot, edge, (rng() - 0.5) * lot.w * 0.5, 1.2);
+        if (!nearDoor(p.x, p.z, 2.6)) {
+          const mix = rng() < 0.5 ? BRAND_ADS : RADIO_ADS;
+          aFrameSign(p.x, p.z, p.yaw, mix[(rng() * mix.length) | 0]);
         }
       }
       // 7) a bus shelter occasionally, on a long clear edge
@@ -613,6 +782,40 @@
         glowM.opacity = on * 0.55;
         for (const glow of nightLamps) { if (glow.material === glowM) continue; if (glow.material.emissive) glow.material.emissiveIntensity = on * 0.9; }
         for (const am of nightAds) { am.emissiveIntensity = 0.06 + on * 0.6; }
+      });
+    }
+
+    // =====================================================================
+    //  LIVE WANTED-POSTER DRIVER — re-skins the handful of billboards that
+    //  carry a WANTED poster whenever your wanted level (or kill count) shifts.
+    //  Runs at ~1 Hz, only swaps a material map on the rare boards that change,
+    //  so it costs nothing the rest of the time. City mode only.
+    // =====================================================================
+    if (CBZ.onAlways && dynAds.length && !city._propWantedHooked) {
+      city._propWantedHooked = true;
+      let acc = 0, lastSig = "";
+      CBZ.onAlways(8, function (dt) {
+        const g = CBZ.game;
+        if (!g || g.mode !== "city" || !root.visible) return;
+        acc += (dt || 0.016);
+        if (acc < 1.0) return; acc = 0;
+        const sig = (g.wanted | 0) + ":" + (g.cityKills | 0) + ":" + (g.playerGang && g.playerGang.name || "");
+        if (sig === lastSig) return;                // nothing the posters care about changed
+        lastSig = sig;
+        const wAd = wantedAd();
+        const fallback = BRAND_ADS[0];
+        const ad = wAd || fallback;                 // clean record → generic brand
+        const mat2 = adMatFor(ad);
+        const lit = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
+        for (const e of dynAds) {
+          if (e.dyn !== "wanted") continue;
+          const key = adKey(ad);
+          if (key === e.lastKey) continue;          // this board already shows it
+          e.lastKey = key;
+          e.mesh.material = mat2;                   // swap to the live poster material
+          mat2.emissiveIntensity = 0.06 + lit * 0.6;
+          if (nightAds.indexOf(mat2) < 0) nightAds.push(mat2);
+        }
       });
     }
   };

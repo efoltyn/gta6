@@ -214,6 +214,7 @@
     for (const cq of crackQuads) { CBZ.scene.remove(cq.mesh); if (cq.mesh.material) cq.mesh.material.dispose(); cq.mesh.geometry.dispose(); }
     crackQuads.length = 0;
     CBZ.cityDamageReset && CBZ.cityDamageReset();
+    CBZ.cityDoorsReset && CBZ.cityDoorsReset();
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
   // shard physics + crack-decal lifecycle (cheap; only works while any exist)
@@ -368,6 +369,64 @@
     }
   };
 
+  // PUBLIC: CINEMATIC STRUCTURAL DAMAGE at an impact point (missiles, rockets,
+  // big blasts). Called by the aircraft + explosion agents. At (x,y,z) it:
+  //   1) finds the nearest building WALL face so debris/scorch fling OUTWARD,
+  //   2) knocks off concrete CHUNKS scaled by `power`,
+  //   3) stamps a scorch/impact decal on that wall face (or the ground),
+  //   4) BURSTS every window pane within blast radius (spider-cracks → out),
+  //   5) on a big hit, a couple of bullet-pit gouges around the impact.
+  // Pooled + capped throughout. `power` ~0.5 (light) … 3 (heavy ordnance).
+  CBZ.cityDamageBuilding = function (x, y, z, power) {
+    power = power || 1;
+    if (y == null) y = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4;
+    // locate the nearest tall wall collider to derive an outward normal + a
+    // surface point to scorch (so the decal sits ON the facade, not floating).
+    let best = null, bestD = 1e9, bnx = 0, bnz = 1, bsx = x, bsz = z, bsy = y;
+    const searchR2 = 36;   // 6m: a wall right at the impact
+    for (let i = 0; i < CBZ.colliders.length; i++) {
+      const c = CBZ.colliders[i]; if (c.y1 == null || c.y1 < y - 1.2) continue;
+      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+      const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
+      const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
+      if (dd > searchR2 || dd >= bestD) continue;
+      bestD = dd; best = c;
+      const wx = c.maxX - c.minX, wz = c.maxZ - c.minZ;
+      // outward normal = the broad face nearest the impact
+      if (wx >= wz) { bnz = (z - cz) < 0 ? -1 : 1; bnx = 0; bsz = bnz < 0 ? c.minZ - 0.04 : c.maxZ + 0.04; bsx = sx; }
+      else { bnx = (x - cx) < 0 ? -1 : 1; bnz = 0; bsx = bnx < 0 ? c.minX - 0.04 : c.maxX + 0.04; bsz = sz; }
+      bsy = Math.max(c.y0 + 0.4, Math.min(c.y1 - 0.4, y));
+    }
+    const onWall = !!best;
+    // (2) concrete chunks blown outward from the wall (or all around if open air)
+    CBZ.cityChunk(onWall ? bsx : x, onWall ? bsy : y, onWall ? bsz : z, {
+      count: Math.round(3 + 3 * power), force: 4 + 2.5 * power,
+      dirx: onWall ? bnx : null, dirz: onWall ? bnz : null,
+    });
+    // (3) scorch/impact decal on the wall face (or a ground scorch if open air)
+    if (onWall && scorchPool != null) {
+      let m;
+      if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
+      else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
+      m.position.set(bsx + bnx * 0.03, bsy, bsz + bnz * 0.03); aimDecal(m, bnx, 0, bnz); m.rotateZ(Math.random() * Math.PI);
+      const sc = 1.6 + power * 1.4; m.scale.set(sc, sc, sc);
+      // a few smaller bullet-pit gouges ringing the blast crater
+      const ng = Math.min(4, 1 + (power | 0));
+      for (let g = 0; g < ng; g++) {
+        const a = Math.random() * 6.28, rr = 0.5 + Math.random() * (0.8 + power * 0.5);
+        const gx = bsx + (bnx !== 0 ? 0 : Math.cos(a) * rr), gz = bsz + (bnz !== 0 ? 0 : Math.cos(a) * rr);
+        CBZ.cityBulletHole(gx, bsy + Math.sin(a) * rr, gz, bnx, 0, bnz);
+      }
+    } else {
+      CBZ.cityScorch(x, z, 1.4 + power);
+    }
+    // (4) shatter every pane within the blast radius (cracked → blown out)
+    CBZ.cityShatter(x, z, 4.0 + power * 2.2);
+    // (5) feedback
+    if (CBZ.shake) CBZ.shake(Math.min(1.2, 0.3 + power * 0.3));
+    return { x: onWall ? bsx : x, y: onWall ? bsy : y, z: onWall ? bsz : z, nx: bnx, nz: bnz, onWall };
+  };
+
   CBZ.cityDamageReset = function () {
     for (const m of bulletPool) m.visible = false;
     for (const m of scorchPool) m.visible = false;
@@ -391,6 +450,9 @@
         const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
         CBZ.cityScorch(x, z, R * 0.5);
         CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.6, z, { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
+        // if the blast is hard against a wall, add the full structural-damage
+        // pass (facade scorch + outward chunks + gouges + nearby panes burst).
+        CBZ.cityDamageBuilding(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4, z, Math.min(3, power));
       } catch (e) {}
       return r;
     };
@@ -411,6 +473,120 @@
       if (c.life <= 0) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); cityChunks.splice(i, 1); }
     }
   });
+
+  // ---- OPENABLE STORE DOORS ----------------------------------------------
+  // Every real doorway gets a swinging glass-and-frame panel on a hinge pivot.
+  // Closed, the panel is a height-gated collider that fills the gap (so you
+  // can't just walk through a "closed" shop). When the player (or a ped/car)
+  // comes within range the door SWINGS open (and its collider is pulled so the
+  // doorway is passable), then closes itself a beat after everyone leaves.
+  // One shared frame/glass material, capped, pooled-free (fixed at worldgen).
+  const cityDoors = [];
+  let _doorGlassMat = null, _doorFrameMat = null;
+  let _helipad = null;   // {x,y,z} world centre of the rooftop helipad (one per city)
+  function doorGlassMat() { return _doorGlassMat || (_doorGlassMat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x2f6f86, emissiveIntensity: 0.35, transparent: true, opacity: 0.5 })); }
+  function doorFrameMat() { return _doorFrameMat || (_doorFrameMat = new THREE.MeshLambertMaterial({ color: 0x2a2f37 })); }
+
+  // Build a hinged door leaf filling the DOORW-wide gap at localDoor (group-local
+  // coords; door.nx/nz is the inward normal). Pivot sits at one jamb so the leaf
+  // swings inward like a real shop door. Registered globally for the auto-opener.
+  function makeDoorPanel(bgroup, ox, oz, localDoor, panelW) {
+    const dw = (panelW || DOORW) - 0.18, dh = FH - 0.85;
+    const nx = localDoor.nx, nz = localDoor.nz;
+    const tx = -nz, tz = nx;                       // tangent along the doorway
+    const hingeSign = (nx !== 0 ? nx : nz) >= 0 ? 1 : -1;   // deterministic jamb
+    // pivot group at the hinge jamb (local), leaf offset half-width along tangent
+    const pivot = new THREE.Group();
+    const hx = localDoor.x + tx * (dw / 2) * hingeSign;
+    const hz = localDoor.z + tz * (dw / 2) * hingeSign;
+    pivot.position.set(hx, dh / 2 + 0.05, hz);
+    bgroup.add(pivot);
+    const along = Math.abs(nx) > 0.5;              // door faces ±X → leaf spans Z
+    // frame border + a big glass insert (push-bar handle) — the leaf
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.12 : dw, dh, along ? dw : 0.12), doorFrameMat());
+    frame.position.set(-tx * (dw / 2) * hingeSign, 0, -tz * (dw / 2) * hingeSign);
+    frame.castShadow = false; pivot.add(frame);
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.08 : dw - 0.22, dh - 0.4, along ? dw - 0.22 : 0.08), doorGlassMat());
+    glass.position.copy(frame.position); glass.renderOrder = 1; pivot.add(glass);
+    // a horizontal push-bar so it reads as a storefront door
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.1 : dw * 0.7, 0.12, along ? dw * 0.7 : 0.1), doorFrameMat());
+    bar.position.set(frame.position.x + nx * 0.09, -0.1, frame.position.z + nz * 0.09);
+    bar.castShadow = false; pivot.add(bar);
+    // collider that exactly fills the CLOSED doorway gap (height-gated)
+    const wx = ox + localDoor.x, wz = oz + localDoor.z;
+    const half = dw / 2 + 0.06;
+    const col = along
+      ? { minX: wx - 0.2, maxX: wx + 0.2, minZ: wz - half, maxZ: wz + half, ref: frame, y0: 0.0, y1: dh + 0.1 }
+      : { minX: wx - half, maxX: wx + half, minZ: wz - 0.2, maxZ: wz + 0.2, ref: frame, y0: 0.0, y1: dh + 0.1 };
+    CBZ.colliders.push(col);
+    CBZ.losBlockers.push(glass);
+    // open swing is INWARD (toward the room): sign chosen so the leaf clears the
+    // doorway rather than swinging into the wall. ~95° travel.
+    const openSign = -hingeSign;                   // swing the free edge inward
+    const rec = {
+      pivot, col, wx, wz, t: 0, open: false, hold: 0,
+      maxAng: openSign * 1.66, colIn: true,
+      inx: nx, inz: nz,                            // inward normal (for proximity test)
+    };
+    cityDoors.push(rec);
+    return rec;
+  }
+
+  // proximity-driven auto-opener: open when the player or any nearby ped/car is
+  // close to a door's OUTSIDE; ease the swing; pull/restore the collider as it
+  // passes ~35% open; close after a short hold once everyone has left. Cheap:
+  // distance-culled to doors near the player and only animates moving doors.
+  CBZ.onUpdate(34.3, function (dt) {
+    if (CBZ.game.mode !== "city" || !cityDoors.length) return;
+    const P = CBZ.player && CBZ.player.pos;
+    const px = P ? P.x : 0, pz = P ? P.z : 0;
+    for (let i = 0; i < cityDoors.length; i++) {
+      const dr = cityDoors[i];
+      const dxp = dr.wx - px, dzp = dr.wz - pz;
+      const farFromPlayer = dxp * dxp + dzp * dzp > 900;   // 30m: skip distant doors entirely
+      let near = false;
+      if (!farFromPlayer) {
+        // player within ~3.2m of the doorway opens it
+        if (dxp * dxp + dzp * dzp < 10.2) near = true;
+        // a ped standing in/at the doorway also triggers it (so NPCs use shops)
+        if (!near && CBZ.cityPeds) {
+          for (let k = 0; k < CBZ.cityPeds.length; k++) {
+            const pd = CBZ.cityPeds[k]; if (!pd || pd.dead || !pd.pos) continue;
+            const ex = dr.wx - pd.pos.x, ez = dr.wz - pd.pos.z;
+            if (ex * ex + ez * ez < 6.0) { near = true; break; }
+          }
+        }
+      }
+      if (near) { dr.open = true; dr.hold = 1.4; }
+      else if (dr.hold > 0) { dr.hold -= dt; if (dr.hold <= 0) dr.open = false; }
+      // ease the swing toward target (open=1 / closed=0)
+      const target = dr.open ? 1 : 0;
+      if (Math.abs(dr.t - target) > 0.001) {
+        dr.t += (target - dr.t) * Math.min(1, dt * 6.5);
+        if (Math.abs(dr.t - target) < 0.01) dr.t = target;
+        dr.pivot.rotation.y = dr.t * dr.maxAng;
+        // collider: drop it once the leaf is open enough to walk through; restore
+        // when it swings back nearly shut.
+        if (dr.colIn && dr.t > 0.32) {
+          const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
+          dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+          if (CBZ.sfx) CBZ.sfx("door");
+        } else if (!dr.colIn && dr.t < 0.28) {
+          if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col);
+          dr.colIn = true; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        }
+      }
+    }
+  });
+
+  // restore every door to CLOSED for a new game (collider back in place)
+  CBZ.cityDoorsReset = function () {
+    for (const dr of cityDoors) {
+      dr.open = false; dr.hold = 0; dr.t = 0; dr.pivot.rotation.y = 0;
+      if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
+    }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  };
 
   // Business catalogue. `sign` = awning/sign colour; `name` shown on the
   // door + HUD; `kind` = the shop kind city/shops.js switches on.
@@ -572,6 +748,9 @@
             lbox(f.x, ly, DOORW / 2 + side / 2, WT, FH, side, color, wallOpt);
             lbox(f.x, FH - 0.35, 0, WT, 0.7, DOORW, color, { los: true });
           }
+          // hang an OPENABLE swinging glass door in the gap (real shops/homes
+          // only — derelicts stay gaping). Abandoned (boarded) buildings skip it.
+          if (!opts.showroom && !opts.boarded) makeDoorPanel(bgroup, ox, oz, localDoor, DOORW);
         } else {
           lbox(f.x, ly, f.z, f.w, FH, f.dd, color, wallOpt);
           // window band — glass glow on real buildings, boarded planks on derelicts
@@ -1092,7 +1271,7 @@
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;
     const placed = [], abandonedLots = [], homeLots = [];
-    let chopShop = null, realtor = null, luxury = null;
+    let chopShop = null, realtor = null, luxury = null, luxBuilding = null;
 
     // shuffle the shop list, then float the gameplay-critical trades to the
     // front so they ALWAYS get placed; the rest fill in only sometimes, leaving
@@ -1212,6 +1391,7 @@
         homeLots.push(lot);
         if (isLux) {
           luxury = lot;
+          luxBuilding = b;
           // ground-floor garage zone beside the door
           lot.building.garage = { x: door.x + door.nx * 4.5, z: door.z + door.nz * 4.5, spots: [] };
           lot.building.elevatorPad = { x: lot.cx - (w / 2 - 2.0), z: lot.cz, floorY: (storeys - 1) * FH };
@@ -1219,6 +1399,10 @@
       }
       placed.push(lot);
     }
+
+    // ROOFTOP HELIPAD on the flagship luxury tower (the tallest building) — a
+    // marked landing pad the aircraft agent flies to. cityHelipad() returns it.
+    if (luxBuilding) makeHelipad(luxBuilding, luxury);
 
     city.shopLots = placed.filter((l) => l.building && l.building.shop);
     city.abandonedLots = abandonedLots;
@@ -1228,23 +1412,76 @@
     city.luxuryLot = luxury;
   };
 
-  // a real STOREFRONT: lit sign board + canopy awning + display windows flanking
-  // the door + a door frame. `along` = the facade runs perpendicular to the door
-  // normal, so detail is laid out left/right of the entrance.
+  // pick black or white text for the best contrast against a sign colour
+  function readableText(hex) {
+    const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.55 ? "#15181d" : "#ffffff";
+  }
+  // PAINTED FACADE SIGN: the shop name baked onto a panel texture (bright, with
+  // a dark drop-shadow so it reads from across the street), tinted for contrast
+  // against the sign colour. Cached per name|color so repeated names are free.
+  const signTexCache = new Map();
+  function signFaceTex(name, signHex) {
+    const key = name + "|" + signHex;
+    let t = signTexCache.get(key); if (t) return t;
+    const c = document.createElement("canvas"); c.width = 512; c.height = 128;
+    const x = c.getContext("2d");
+    // sign panel ground = the trade colour, with a subtle vignette
+    const base = "#" + ("000000" + signHex.toString(16)).slice(-6);
+    x.fillStyle = base; x.fillRect(0, 0, 512, 128);
+    const grad = x.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0, "rgba(255,255,255,0.18)"); grad.addColorStop(0.5, "rgba(0,0,0,0)"); grad.addColorStop(1, "rgba(0,0,0,0.28)");
+    x.fillStyle = grad; x.fillRect(0, 0, 512, 128);
+    // a thin bright border so the board pops
+    x.strokeStyle = readableText(signHex) === "#ffffff" ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.5)";
+    x.lineWidth = 6; x.strokeRect(6, 6, 500, 116);
+    // the NAME, auto-shrunk to fit, with a hard drop shadow for legibility
+    let fs = 62; x.textAlign = "center"; x.textBaseline = "middle";
+    do { x.font = "900 " + fs + "px Fredoka, Arial Black, sans-serif"; fs -= 4; } while (x.measureText(name).width > 470 && fs > 22);
+    x.fillStyle = "rgba(0,0,0,0.55)"; x.fillText(name, 258, 68);     // shadow
+    x.fillStyle = readableText(signHex); x.fillText(name, 256, 64);  // face text
+    t = new THREE.CanvasTexture(c); signTexCache.set(key, t); return t;
+  }
+
+  // a real STOREFRONT: a BIG illuminated sign board carrying the shop NAME baked
+  // right onto the facade (no freestanding sidewalk sign), a canopy awning, a
+  // perpendicular BLADE sign readable down the street, and display windows.
+  // `along` = the facade runs perpendicular to the door normal.
   function signAwning(b, side, w, d, color, name) {
     const di = doorInfo(0, 0, w, d, side);
     const along = Math.abs(di.nx) > 0.5;          // door faces ±X → storefront spans Z
     const tx = along ? 0 : 1, tz = along ? 1 : 0; // facade tangent
-    const sw = DOORW + 2.4;
+    const facade = along ? d : w;                  // width available across the storefront
+    const sw = Math.min(facade - 0.6, DOORW + 4.2); // sign board spans most of the facade
     const fx = (lw, h, ld) => (along ? [ld, h, lw] : [lw, h, ld]);   // size helper (swap by facing)
     // CANOPY awning over the door (angled colour band)
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw, 0.32, 1.1)), mat(color, { emissive: color, ei: 0.4 }));
+    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.32, 1.1)), mat(color, { emissive: color, ei: 0.4 }));
     awn.position.set(di.x + di.nx * 0.75, FH - 0.7, di.z + di.nz * 0.75); awn.rotation[along ? "x" : "z"] = -0.22 * (along ? -di.nx || 1 : 1);
     b.group.add(awn);
-    // LIT SIGN BOARD across the facade above the awning
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw + 0.8, 1.0, 0.18)), mat(color, { emissive: color, ei: 0.85 }));
-    sign.position.set(di.x + di.nx * 0.18, FH + 0.35, di.z + di.nz * 0.18);
+    // LIT SIGN BOARD across the facade above the awning — a glowing backing panel
+    // (the trade colour) with the NAME painted on its front face.
+    const signH = 1.2, signY = FH + 0.45;
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw, signH, 0.22)), mat(color, { emissive: color, ei: 0.9 }));
+    sign.position.set(di.x + di.nx * 0.12, signY, di.z + di.nz * 0.12);
     b.group.add(sign);
+    // the painted name plate sitting just proud of the board face (front + back
+    // so it reads from either approach), tinted for contrast.
+    const nameMat = new THREE.MeshBasicMaterial({ map: signFaceTex(name, color), transparent: true });
+    for (const fdir of [1, -1]) {
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(sw - 0.2, signH - 0.18), nameMat);
+      plate.position.set(di.x + di.nx * (0.12 + fdir * 0.13), signY, di.z + di.nz * (0.12 + fdir * 0.13));
+      if (along) plate.rotation.y = di.nx > 0 ? (fdir > 0 ? Math.PI / 2 : -Math.PI / 2) : (fdir > 0 ? -Math.PI / 2 : Math.PI / 2);
+      else if (di.nz > 0) { if (fdir < 0) plate.rotation.y = Math.PI; }
+      else { if (fdir > 0) plate.rotation.y = Math.PI; }
+      plate.renderOrder = 2; b.group.add(plate);
+    }
+    // PERPENDICULAR BLADE SIGN — a small projecting sign so the store is readable
+    // looking down the sidewalk (classic GTA storefront). Bracket + lit panel.
+    const bladeOut = 0.9;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.12, 0.9, 0.9)), mat(color, { emissive: color, ei: 0.8 }));
+    blade.position.set(di.x + tx * (sw / 2 - 0.4) + di.nx * bladeOut, FH - 0.2, di.z + tz * (sw / 2 - 0.4) + di.nz * bladeOut);
+    b.group.add(blade);
     // DISPLAY WINDOWS flanking the entrance + a dark DOOR FRAME
     const frame = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 0.5, 3.0, 0.22)), mat(0x20242b));
     frame.position.set(di.x + di.nx * 0.06, 1.5, di.z + di.nz * 0.06); b.group.add(frame);
@@ -1255,11 +1492,89 @@
       const sill = new THREE.Mesh(new THREE.BoxGeometry(...fx(2.5, 0.18, 0.26)), mat(0x2a2f37));
       sill.position.set(di.x + ox2 + di.nx * 0.04, 0.45, di.z + oz2 + di.nz * 0.04); b.group.add(sill);
     }
+    // a floating crisp name sprite above the board too (always faces the camera),
+    // tinted bright for a from-a-distance read.
     if (CBZ.makeLabelSprite) {
-      const s = CBZ.makeLabelSprite(name);
-      if (s) { s.position.set(di.x + di.nx * 0.6, FH + 1.5, di.z + di.nz * 0.6); s.scale.set(8, 2.0, 1); b.group.add(s); }
+      const s = CBZ.makeLabelSprite(name, { color: spriteTint(color) });
+      if (s) { s.position.set(di.x + di.nx * 0.6, FH + 1.7, di.z + di.nz * 0.6); s.scale.set(9, 2.25, 1); b.group.add(s); }
     }
   }
+  // a bright, readable sprite tint derived from the sign colour (push it light)
+  function spriteTint(hex) {
+    let r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+    r = Math.round(r * 0.5 + 170); g = Math.round(g * 0.5 + 170); b = Math.round(b * 0.5 + 170);
+    return "#" + ((1 << 24) + (Math.min(255, r) << 16) + (Math.min(255, g) << 8) + Math.min(255, b)).toString(16).slice(1);
+  }
+
+  // ---- ROOFTOP HELIPAD -----------------------------------------------------
+  // A flat painted landing pad (white H inside a TLOF circle) on the roof of the
+  // tallest tower, ringed with blinking marker lights. cityHelipad() hands the
+  // aircraft agent the world {x,y,z} of the pad surface. One canvas texture.
+  let _helipadTex = null;
+  function helipadTex() {
+    if (_helipadTex) return _helipadTex;
+    const c = document.createElement("canvas"); c.width = 256; c.height = 256;
+    const x = c.getContext("2d");
+    // dark asphalt pad
+    x.fillStyle = "#1c2026"; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = "#23282f"; for (let i = 0; i < 256; i += 32) x.fillRect(i, 0, 2, 256);
+    // outer TLOF boundary circle (real helipads mark this ring)
+    x.strokeStyle = "#e8edf2"; x.lineWidth = 10;
+    x.beginPath(); x.arc(128, 128, 100, 0, 6.2832); x.stroke();
+    // yellow caution ring just inside
+    x.strokeStyle = "#ffd23b"; x.lineWidth = 4;
+    x.beginPath(); x.arc(128, 128, 88, 0, 6.2832); x.stroke();
+    // the big white H
+    x.fillStyle = "#f2f6fa";
+    x.fillRect(86, 70, 22, 116);     // left leg
+    x.fillRect(148, 70, 22, 116);    // right leg
+    x.fillRect(86, 117, 84, 22);     // crossbar
+    const t = new THREE.CanvasTexture(c);
+    _helipadTex = t; return t;
+  }
+  function makeHelipad(b, lot) {
+    const cx = b.roofCx != null ? b.roofCx : b.ox, cz = b.roofCz != null ? b.roofCz : b.oz;
+    const py = b.h + 0.12;                          // a hair above the roof slab
+    const pad = Math.min(b.w, b.d) * 0.42;          // pad radius footprint
+    // the painted pad (flat quad facing up)
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(pad * 2, pad * 2),
+      new THREE.MeshLambertMaterial({ map: helipadTex(), emissive: 0x222a30, emissiveIntensity: 0.25 }));
+    plane.rotation.x = -Math.PI / 2; plane.position.set(cx, py, cz);
+    plane.receiveShadow = true; CBZ.scene.add(plane);
+    // a low raised lip so the pad reads as a real deck
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(pad * 2 + 0.4, 0.18, pad * 2 + 0.4), mat(0x2a3138));
+    lip.position.set(cx, b.h - 0.02, cz); lip.castShadow = false; CBZ.scene.add(lip);
+    // blinking corner/edge marker lights (emissive cubes) + their pulse loop
+    const lights = [];
+    const lmat = new THREE.MeshLambertMaterial({ color: 0xff5a3b, emissive: 0xff3b1f, emissiveIntensity: 1.0 });
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2;
+      const lx = cx + Math.cos(a) * (pad + 0.2), lz = cz + Math.sin(a) * (pad + 0.2);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), lmat);
+      m.position.set(lx, py + 0.18, lz); CBZ.scene.add(m); lights.push(m);
+    }
+    // a tall "H" beacon mast with a green winsock-style light so it's findable
+    const mast = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.4, 0.18), mat(0xb9bec6));
+    mast.position.set(cx + pad - 0.3, py + 1.2, cz + pad - 0.3); CBZ.scene.add(mast);
+    const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4),
+      new THREE.MeshLambertMaterial({ color: 0x39ff88, emissive: 0x14c258, emissiveIntensity: 1.0 }));
+    beacon.position.set(cx + pad - 0.3, py + 2.5, cz + pad - 0.3); CBZ.scene.add(beacon);
+    _helipad = { x: cx, y: py, z: cz, r: pad };
+    _helipadLmat = lmat; _helipadBeacon = beacon;
+    if (lot && lot.building) lot.building.helipad = _helipad;
+  }
+  // a single cheap strobe loop for the (one) helipad's marker lights, registered
+  // ONCE at module load so rebuilding the city never stacks hooks.
+  let _helipadLmat = null, _helipadBeacon = null, _helipadBlinkT = 0;
+  CBZ.onUpdate(34.4, function (dt) {
+    if (CBZ.game.mode !== "city" || !_helipadLmat) return;
+    _helipadBlinkT += dt;
+    _helipadLmat.emissiveIntensity = (_helipadBlinkT % 1.0) < 0.5 ? 1.2 : 0.15;
+    if (_helipadBeacon) _helipadBeacon.material.emissiveIntensity = 0.6 + 0.5 * (Math.sin(_helipadBlinkT * 3) * 0.5 + 0.5);
+  });
+  // PUBLIC: where the rooftop helipad is (the aircraft agent lands here). Returns
+  // {x,y,z,r} or null if no city is built yet.
+  CBZ.cityHelipad = function () { return _helipad; };
 
   function makePark(root, lot, rng) {
     for (let i = 0; i < 4; i++) {

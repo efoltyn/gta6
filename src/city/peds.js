@@ -45,6 +45,19 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   function name(r) { return pick(FIRST, r()) + " " + LAST[(r() * LAST.length) | 0] + "."; }
 
+  // ---- a REAL scream (never the "whoosh" placeholder). Globally throttled so a
+  //      panicking crowd doesn't machine-gun the sample, and a no-op if the bank
+  //      hasn't got a "scream" sample loaded yet (wrapped → missing is harmless).
+  const _haveScream = function () { return !!(CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.scream); };
+  let _lastScreamT = -1e9;
+  function scream() {
+    if (!CBZ.sfx) return;
+    const t = (CBZ.now != null ? CBZ.now : (performance.now() * 0.001));
+    if (t - _lastScreamT < 0.9) return;          // at most ~1 scream / 0.9s city-wide
+    _lastScreamT = t;
+    if (_haveScream()) { try { CBZ.sfx("scream"); } catch (e) {} }
+  }
+
   // a normal-ish draw on the spectrum around a mean, clamped
   function rollAggr(mean, spread) {
     const r = (rng() + rng() + rng()) / 3;     // ~bell
@@ -104,6 +117,14 @@
       baseSpeed: 1.5 + r() * 1.0, speed: 0,
       target: new THREE.Vector3(x, 0, z), finalGoal: null, path: null,
       pause: 0, state: "walk", fear: 0, callT: 0, alarmed: 0,
+      // SNITCH trait: how readily this person rats. Most people mind their own
+      // business; a rare hardwired snitch rats anywhere, fast. Gang members keep
+      // omerta (low). Reactions read this in the witness-decision logic below.
+      snitch: opts.snitch != null ? opts.snitch : (opts.gang ? r() * 0.18 : (r() < 0.12 ? 0.7 + r() * 0.3 : r() * 0.45)),
+      // witness-report state machine (decide → phone/run → land). Owned here.
+      reportState: null, reportT: 0, reportTarget: null, phoneSprite: null,
+      // social-reaction cadence so a ped reacts to YOU at most every few seconds
+      reactCD: 0,
       rage: null, mem: null, attackCD: 0, enterT: 0, chatT: 0,
       vendor: opts.vendor || null, slice: (r() * 8) | 0, isPlayer: false,
     };
@@ -215,8 +236,10 @@
         scattered++;
       }
     }
-    // a couple of nearby screams for the audio punch (throttled to one per frame)
-    if (scattered && CBZ.sfx && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.7) CBZ.sfx("whoosh"); }
+    // one nearby scream for the audio punch — a REAL scream sample, never the
+    // "whoosh" placeholder, and globally throttled so a big panic isn't a wall of
+    // noise (the scream() helper enforces a multi-second-ish city-wide cooldown).
+    if (scattered && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.5) scream(); }
     return scattered;
   };
 
@@ -256,6 +279,7 @@
 
   CBZ.cityKOPed = function (ped, fromX, fromZ) {
     if (!ped || ped.dead) return;
+    if (ped.reportState) cancelReport(ped);    // knocked out mid-call → no report lands
     ped.ko = 8; ped.alarmed = 6;
     if (CBZ.body) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
@@ -265,6 +289,7 @@
 
   CBZ.cityKillPed = function (ped, imp, cause) {
     if (!ped || ped.dead) return;
+    if (ped.reportState) cancelReport(ped);    // killed mid-call → the report dies with them
     ped.dead = true; ped.deadT = 0; ped.hp = 0;
     // an armed ped drops their gun where they fall (anyone can grab it)
     if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo);
@@ -541,6 +566,249 @@
   }
   CBZ.cityCompanionThink = companionThink;
 
+  // ============================================================
+  //  WITNESS REPORTING — the ONLY path to a wanted level. wanted.js tags
+  //  nearby peds (witnessSev/witnessType/mem=playerActor) when YOU commit a
+  //  crime; this code decides whether each tagged ped actually SNITCHES, and if
+  //  so makes them physically pull a phone (a timer + a visible tell) OR RUN to
+  //  the nearest cop. Only on completion do we call cityReport(). Kill or scare
+  //  the reporter before it lands and the report never happens (RDR2-style).
+  // ============================================================
+
+  // a small floating emoji tell over a ped's head (phone / snitch), reusing the
+  // shared sprite path. Cheap: one extra sprite, only while reporting.
+  function showTell(ped, emoji) {
+    if (!CBZ.makeLabelSprite) return;
+    if (ped.phoneSprite) { if (ped.phoneSprite.parent) ped.phoneSprite.parent.remove(ped.phoneSprite); ped.phoneSprite = null; }
+    const s = CBZ.makeLabelSprite(emoji);
+    if (!s) return;
+    s.position.y = 3.5; s.scale.set(1.1, 1.1, 1); s.userData.transient = true;
+    ped.group.add(s); ped.phoneSprite = s;
+  }
+  function clearTell(ped) {
+    if (ped.phoneSprite) { if (ped.phoneSprite.parent) ped.phoneSprite.parent.remove(ped.phoneSprite); ped.phoneSprite = null; }
+  }
+
+  // nearest live cop to a point (for run-to-report)
+  function nearestCop(x, z, maxd) {
+    let best = null, bd = (maxd || 200) * (maxd || 200);
+    const cops = CBZ.cityCops || [];
+    for (let i = 0; i < cops.length; i++) { const c = cops[i]; if (c.dead) continue; const dd = (c.pos.x - x) * (c.pos.x - x) + (c.pos.z - z) * (c.pos.z - z); if (dd < bd) { bd = dd; best = c; } }
+    return best;
+  }
+
+  // how willing is THIS witness to call it in, given WHERE the crime happened?
+  // 0..~1.2 propensity. Driven by: neighborhood (gang turf / "the hood" → omerta,
+  // people hate the cops), the ped's hardwired snitch trait, and personality.
+  function snitchPropensity(ped, x, z) {
+    let p = 0.45;
+    // base personality: the meek call cops (it's their only defence); brave/violent
+    // people handle it themselves or don't care. Snitch trait shifts hard.
+    p += (0.55 - ped.aggr) * 0.5;          // meek → more likely to phone it in
+    p += (ped.snitch - 0.3) * 0.9;         // dedicated snitch rats anywhere
+    p += Math.min(ped.fear, 8) * 0.04;     // scared people want the law NOW
+    // NEIGHBORHOOD: on gang turf almost nobody calls — no-snitch code, and they
+    // hate the police as much as the robber. A gang member NEVER rats their own.
+    const hoodGang = CBZ.cityGangOf ? CBZ.cityGangOf(x, z) : null;
+    if (hoodGang) {
+      p -= 0.55;                            // the hood doesn't call 911
+      if (ped.gang && ped.gang === hoodGang.id) p -= 1;   // omerta on home turf
+    }
+    // a gang member rats only a RIVAL, never the player/their own unless a true snitch
+    if (ped.gang && !(ped.snitch > 0.85)) p -= 0.35;
+    // wealthy / clean-area residents call fast (no hood gang nearby + money around)
+    if (!hoodGang && ped.wealth > 0.65) p += 0.2;
+    return p;
+  }
+
+  // BEGIN a report: the ped commits to phoning OR running to a cop. Sets the
+  // state-machine fields; the actual landing happens in tickReport().
+  function beginReport(ped, x, z) {
+    const cop = nearestCop(ped.pos.x, ped.pos.z, 90);
+    const dCop = cop ? Math.hypot(cop.pos.x - ped.pos.x, cop.pos.z - ped.pos.z) : 1e9;
+    // a cop close by → run and tell them in person (faster, dramatic); otherwise
+    // pull out a phone and dial 911 (a few seconds, interruptible).
+    if (cop && dCop < 45 && rng() < 0.7) {
+      ped.reportState = "run"; ped.reportTarget = cop; ped.reportT = 16;   // hard cap
+      showTell(ped, "🏃");
+    } else {
+      ped.reportState = "phone"; ped.reportTarget = null;
+      ped.reportT = 2.6 + rng() * 2.2;                                     // dialing time
+      showTell(ped, "📱");
+      ped.speed = 0;   // stand and dial
+    }
+    CBZ.city && CBZ.city.note("👀 " + ped.name + " saw that...", 1.2);
+  }
+
+  // land the report: convert the witness's tag into actual stars (or punish an
+  // NPC offender). Clears the witness so they don't double-report.
+  function landReport(ped) {
+    const off = ped.mem;
+    const sev = ped.witnessSev || 20, type = ped.witnessType;
+    if (off === CBZ.city.playerActor) {
+      if (CBZ.cityReport) CBZ.cityReport(sev, { x: ped.pos.x, z: ped.pos.z, type: type });
+      CBZ.city && CBZ.city.note("🗣️ " + ped.name + " reported you!", 1.5);
+    } else if (off && CBZ.cityNpcOffense) {
+      CBZ.cityNpcOffense(off, 14, "reported");
+    }
+    ped.witnessSev = 0; ped.witnessType = null;
+    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0;
+    ped.callT = 8;            // won't immediately re-report
+    clearTell(ped);
+  }
+
+  // abort an in-progress report (scared off, hurt, lost the cop, fled too far)
+  function cancelReport(ped) {
+    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0;
+    clearTell(ped);
+  }
+  CBZ.cityCancelReport = cancelReport;   // combat.js can stop a snitch by force
+
+  // advance an in-progress report each frame. Returns true if the ped is BUSY
+  // reporting (think() should let move() carry the run/dial out).
+  function tickReport(ped, dt) {
+    if (!ped.reportState) return false;
+    // if the witness no longer remembers a crime (scared into forgetting), drop it
+    if (!ped.mem || !(ped.witnessSev > 0)) { cancelReport(ped); return false; }
+    ped.reportT -= dt;
+    if (ped.reportState === "phone") {
+      ped.state = "film"; ped.speed = 0;               // frozen, phone up (reuse film pose)
+      // face roughly where the crime was (the player) for the tell to read
+      const P = CBZ.player;
+      if (P) ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+      if (ped.reportT <= 0) { landReport(ped); return false; }
+      return true;
+    }
+    if (ped.reportState === "run") {
+      const cop = ped.reportTarget;
+      if (!cop || cop.dead) {                           // cop gone — find another or give up
+        const nc = nearestCop(ped.pos.x, ped.pos.z, 70);
+        if (nc) { ped.reportTarget = nc; } else { cancelReport(ped); return false; }
+      }
+      const c = ped.reportTarget;
+      ped.state = "walk";
+      ped.target.set(c.pos.x, 0, c.pos.z);
+      ped.speed = ped.baseSpeed * 2.0;
+      const d = Math.hypot(c.pos.x - ped.pos.x, c.pos.z - ped.pos.z);
+      if (d < 3.2 || ped.reportT <= 0) { landReport(ped); return false; }
+      return true;
+    }
+    return false;
+  }
+
+  // ============================================================
+  //  UNIVERSAL REACTIVITY — a believable, emergent reaction to the PLAYER, so the
+  //  city isn't a ghost world of dumb walkers. Only fires for a calm-ish nearby
+  //  ped that ISN'T already fleeing/fighting/guarding/reporting. Picks ONE intent
+  //  from a personality+context spectrum and drives it into existing states:
+  //    KILL (rage) · BEAT-DOWN (fists rage) · STEAL/pickpocket (sneak→lift cash) ·
+  //    WORK-for-you (walk up + offer) · DEAL/trade · TALK/favor · FLEE · IGNORE.
+  //  Behaviour-first + throttled (reactCD) so it's varied, never spam.
+  // ============================================================
+  function citySayBark(ped, txt, secs) {
+    // a brief player-facing line; cheap, throttled by the caller via reactCD.
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + ped.name + ": " + txt, secs || 1.6);
+  }
+  // a ped that reached the player lifts some cash (the NPC-initiated mirror of the
+  // player's own pickpocket verb in interact.js). Light touch; turns you hot-ish.
+  function pedSteal(ped) {
+    const P = CBZ.player;
+    const have = g.cash | 0;
+    const take = Math.max(5, Math.min(have, 15 + ((rng() * 60) | 0)));
+    if (take > 0 && CBZ.city) { CBZ.city.addCash(-take); ped.cash = (ped.cash || 0) + take; }
+    ped.stoleT = 0;
+    CBZ.city && CBZ.city.note("💸 " + ped.name + " lifted $" + take + " off you!", 1.8);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    // now they BOLT with your money; chase them down to get it back
+    ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z); ped.reactCD = 8;
+    ped.snitch = Math.min(ped.snitch, 0.1);   // a thief won't also call the cops on you
+  }
+
+  // returns true if a reaction was chosen (think() should return immediately).
+  function reactToPlayer(ped, dpl, playerArmed, bnd) {
+    const P = CBZ.player, B = A0();
+    if (P.dead) { ped.approach = null; return false; }
+    // a reaction "intent" already in flight: an approacher walking up to you.
+    // (runs even on cooldown — the cooldown only gates picking a NEW intent.)
+    if (ped.approach) {
+      if (dpl > 16) { ped.approach = null; return false; }   // you walked off — drop it
+      // a timid approacher (not here to BEAT you) bails if you suddenly draw a gun
+      if (playerArmed && ped.approach !== "beat" && ped.aggr < (B.crook || 0.72)) {
+        ped.approach = null; ped.reactCD = 6; ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z); return true;
+      }
+      ped.path = null; ped.pause = 0;
+      ped.target.set(P.pos.x, 0, P.pos.z); ped.state = "walk";
+      ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z), 0.4);
+      ped._approachT -= 0.12;
+      if (dpl < 2.2 || ped._approachT <= 0) {
+        const intent = ped.approach; ped.approach = null; ped.speed = 0;
+        ped.reactCD = 6 + rng() * 6;
+        if (dpl >= 2.6) return true;          // never reached you — give up quietly
+        if (intent === "steal") { pedSteal(ped); return true; }
+        if (intent === "beat") { ped.rage = CBZ.city.playerActor; ped.state = "fight"; if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "assault"); return true; }
+        if (intent === "work") {
+          ped.wantsWork = 12;                 // interact.js can read this; bark either way
+          citySayBark(ped, pick(["You hiring? I'll run with you.", "Put me on. I need the work.", "Let me earn with your crew."], rng()), 2.2);
+          return true;
+        }
+        if (intent === "deal") {
+          citySayBark(ped, pick(["Got that good-good if you're buying.", "You need anything? I got product.", "Best prices in the city, my friend."], rng()), 2.2);
+          ped.offersDeal = 10; return true;
+        }
+        // talk / favor
+        citySayBark(ped, pick(["You see what happened over there?", "Spare a few bucks?", "Watch yourself out here.", "You that one from the news?", "Crazy day, right?"], rng()), 2.0);
+        return true;
+      }
+      return true;
+    }
+
+    // ---- pick a fresh intent (one shot, then a long cooldown) ----
+    if (dpl > 13 || ped.reactCD > 0) return false;
+    const hot = (g.wanted | 0) >= 1;
+    const respect = g.respect || 0;
+    const prov = (ped.gang && CBZ.cityGangProvoked) ? CBZ.cityGangProvoked(ped.gang) : 0;
+    const r = rng();
+
+    // KILL: an armed/violent ped that has a reason — provoked gang, you're a hot
+    // armed threat in their space, or pure aggression — opens fire / charges.
+    if (ped.aggr >= (B.violent || 0.88) && r < 0.5 && (prov > 0.3 || (hot && playerArmed) || ped.armed) && dpl < 11) {
+      ped.rage = CBZ.city.playerActor; ped.state = "fight"; ped.reactCD = 10;
+      if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.2);
+      return true;
+    }
+    // BEAT-DOWN: a crook with no gun fancies their chances against an UNARMED player
+    // (won't melee-charge a drawn gun). Walks up, then throws hands.
+    if (ped.aggr >= (B.crook || 0.72) && !ped.armed && !playerArmed && r < 0.28 && dpl < 9) {
+      ped.approach = "beat"; ped._approachT = 3.5; ped.reactCD = 8;
+      citySayBark(ped, pick(["The hell you looking at?", "Wrong block, pal.", "You want some?"], rng()), 1.6);
+      return true;
+    }
+    // STEAL / pickpocket: an opportunist (light-fingered, not a fighter) sneaks up to
+    // a DISTRACTED player and lifts cash — more tempting if you're visibly loaded.
+    const opportunist = ped.snitch < 0.35 && ped.aggr < (B.crook || 0.72) && ped.aggr >= (B.flee || 0.3);
+    if (opportunist && !ped.armed && !hot && (g.cash | 0) > 40 && r < 0.10 + (g.cash > 1000 ? 0.08 : 0) && dpl < 8) {
+      ped.approach = "steal"; ped._approachT = 4; ped.reactCD = 14;
+      return true;
+    }
+    // WORK FOR YOU: a have-respect-for-you, broke, willing soul offers to run with
+    // you (you've made a name / have a gang). Walks up and pitches.
+    if (!ped.gang && !ped.recruited && respect >= 4 && ped.wealth < 0.45 && !hot && r < 0.06 && dpl < 9) {
+      ped.approach = "work"; ped._approachT = 4; ped.reactCD = 25;
+      return true;
+    }
+    // DEAL / trade: a dealer-ish ped sidles up to sell when you're not a threat.
+    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && r < 0.08 && dpl < 8) {
+      ped.approach = "deal"; ped._approachT = 4; ped.reactCD = 18;
+      return true;
+    }
+    // TALK / ask a favor: a friendly local just wants a word (most common, cheap).
+    if (bnd !== "violent" && !playerArmed && r < 0.05 && dpl < 7) {
+      ped.approach = "talk"; ped._approachT = 4; ped.reactCD = 16;
+      return true;
+    }
+    return false;
+  }
+
   // ---- the brain (time-sliced) ----
   function think(ped, dt, active) {
     if (ped.companion) { companionThink(ped, dt, active); return; }
@@ -552,6 +820,19 @@
     const playerArmed = !!g.cityWeapon && CBZ.cityEcon && CBZ.cityEcon.ITEMS[g.cityWeapon] && CBZ.cityEcon.ITEMS[g.cityWeapon].gun;
     const playerThreat = !P.dead && (((g.wanted | 0) >= 1 && playerArmed) || P._fighting > 0);
     const bnd = band(ped.aggr);
+    if (ped.reactCD > 0) ped.reactCD -= dt;
+
+    // ---- IN-PROGRESS WITNESS REPORT: a committed snitch is busy dialing / running
+    //      to a cop. The player can STOP it: get close with a gun out and a timid
+    //      witness panics, drops the phone and bolts (report dies). Otherwise the
+    //      report ticks toward landing. (tickReport returns true while still busy.)
+    if (ped.reportState) {
+      if (ped.reportState === "phone" && playerArmed && dpl < 6 && rng() < 0.5) {
+        cancelReport(ped); ped.fear = 10; ped.alarmed = Math.max(ped.alarmed, 5);
+        ped.state = "flee"; fleeFrom(ped, px, pz); return;       // scared off the call
+      }
+      if (tickReport(ped, dt)) return;
+    }
 
     // ---- if currently raging at someone, keep engaging until they're gone ----
     if (ped.rage) {
@@ -603,14 +884,22 @@
           ped.state = "flee";
           fleeFrom(ped, thx, thz);
         }
-        // report to the cops once they've put some DISTANCE between them and the
-        // danger (people don't call 911 point-blank) — RDR2/GTA-style witness call.
-        if (ped.callT <= 0 && ped.alarmed > 2 && (dThreat > 11 || ped.state === "film") && rng() < 0.6) {
-          ped.callT = 6;
-          const off = ped.mem;
-          if (off === CBZ.city.playerActor) { if (CBZ.cityReport) CBZ.cityReport(ped.witnessSev || 20, { x: px, z: pz, type: ped.witnessType }); ped.witnessSev = 0; ped.witnessType = null; CBZ.city && CBZ.city.note("🗣️ " + ped.name + " called the cops!", 1.4); }
-          else if (off && CBZ.cityNpcOffense) CBZ.cityNpcOffense(off, 14, "reported");
-          // unknown offender → a 911 call, but the player's wanted level is unaffected
+        // DECIDE whether to snitch — only if this ped actually WITNESSED a crime
+        // (carries a witnessSev). They report once they've put some DISTANCE between
+        // them and the danger (nobody calls 911 point-blank) OR while filming from
+        // afar. The decision is scaled by neighborhood + snitch trait + nerve; a
+        // ped that commits then PHONES or RUNS to a cop (see beginReport), and only
+        // THEN does it land — the player can still stop it before it does.
+        if (!ped.reportState && ped.callT <= 0 && (ped.witnessSev || 0) > 0 &&
+            ped.alarmed > 1.5 && (dThreat > 11 || ped.state === "film")) {
+          const prop = snitchPropensity(ped, thx, thz);
+          // a dedicated snitch reports fast even close; everyone else needs distance + nerve
+          if (rng() < Math.max(0, Math.min(0.95, prop))) {
+            beginReport(ped, thx, thz);
+          } else {
+            ped.callT = 4 + rng() * 4;     // decided NOT to call (omerta / minding own business) — don't re-roll constantly
+            // on gang turf, a hostile local might instead just flip you off and leave; nothing happens
+          }
         }
         return;
       }
@@ -688,6 +977,14 @@
     // ---- default: routine ----
     if (ped.state === "confront" || ped.state === "fight" || ped.state === "flee" || ped.state === "loot") ped.state = "walk";
 
+    // ---- UNIVERSAL REACTIVITY: any nearby calm ped may pick a believable reaction
+    //      to YOU (kill / beat / steal / work / deal / talk / flee) from personality
+    //      + context. Only the near/active crowd pays for it. Supersedes the simple
+    //      gawk below when it fires.
+    if (active && !P.dead && (ped.wantsWork || 0) > 0) ped.wantsWork -= dt;
+    if (active && !P.dead && (ped.offersDeal || 0) > 0) ped.offersDeal -= dt;
+    if (active && !P.dead && reactToPlayer(ped, dpl, playerArmed, bnd)) return;
+
     // ---- NOTICE THE PLAYER: a calm bystander reacts to you even when not yet in
     //      danger — a brandished gun makes the meek edge away; otherwise the
     //      curious stop and gawk / film the armed stranger walking past (GTA vibe).
@@ -722,13 +1019,22 @@
     if (ped.pause <= 0 && (!ped.path || !ped.path.length)) pickRoutineGoal(ped);
   }
 
-  // is a candidate destination point clear of walls along the way? (cheap probe:
-  // sample one point a few metres out and ask the world collider if it's open)
+  // is the path ahead clear of walls? Probes a short RAY (not just the endpoint):
+  // we sample a couple of points along the look-ahead direction and ask the world
+  // collider / city-clamp if any is blocked — so a thin wall partway along the ray
+  // is caught and the ped steers around it BEFORE it grinds into it. Cheap: at most
+  // 2 collide() calls, and only the near/active crowd runs it (see steering()).
+  function probeBlocked(x, z, y) {
+    tmp.set(x, y, z);
+    if (CBZ.collide) { const bx = tmp.x, bz = tmp.z; CBZ.collide(tmp, PED_R, y, y + 1.7); if (Math.abs(tmp.x - bx) > 0.05 || Math.abs(tmp.z - bz) > 0.05) return true; }
+    if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) { const cx = tmp.x, cz = tmp.z; CBZ.city.arena.clampToCity(tmp, PED_R); if (Math.abs(tmp.x - cx) > 0.05 || Math.abs(tmp.z - cz) > 0.05) return true; }
+    return false;
+  }
   function dirClear(ped, ux, uz, dist) {
-    const tx = ped.pos.x + ux * dist, tz = ped.pos.z + uz * dist;
-    tmp.set(tx, ped.pos.y, tz);
-    if (CBZ.collide) { const before = tmp.x, beforez = tmp.z; CBZ.collide(tmp, PED_R, ped.pos.y, ped.pos.y + 1.7); if (Math.abs(tmp.x - before) > 0.05 || Math.abs(tmp.z - beforez) > 0.05) return false; }
-    if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) { const cx = tmp.x, cz = tmp.z; CBZ.city.arena.clampToCity(tmp, PED_R); if (Math.abs(tmp.x - cx) > 0.05 || Math.abs(tmp.z - cz) > 0.05) return false; }
+    const y = ped.pos.y;
+    // sample the far point and a mid point along the ray (catches a wall between)
+    if (probeBlocked(ped.pos.x + ux * dist, ped.pos.z + uz * dist, y)) return false;
+    if (dist > 1.6 && probeBlocked(ped.pos.x + ux * dist * 0.55, ped.pos.z + uz * dist * 0.55, y)) return false;
     return true;
   }
 
@@ -749,8 +1055,10 @@
     }
     ped.target.set(bx, 0, bz);
     if (!found && CBZ.city && CBZ.city.arena) { const p = CBZ.city.arena.randomSidewalkPoint(); ped.target.set(p.x, 0, p.z); }
-    // scream the first time panic hits (throttled), like a startled GTA crowd
-    if (ped.fear >= 6 && (ped._screamT || 0) <= 0 && CBZ.sfx) { ped._screamT = 3 + rng() * 4; if (rng() < 0.5) CBZ.sfx("whoosh"); }
+    // scream the first time real panic hits, like a startled GTA crowd — RARE per
+    // ped (long per-ped cooldown) and routed through scream() (a REAL "scream"
+    // sample, city-wide throttled), never the "whoosh" placeholder.
+    if (ped.fear >= 6 && (ped._screamT || 0) <= 0) { ped._screamT = 8 + rng() * 8; if (rng() < 0.3) scream(); }
   }
 
   // ---- LOCAL STEERING: a short look-ahead probe + separation from neighbours,
@@ -767,10 +1075,13 @@
     if (active) {
       const ahead = Math.min(2.6, 1.2 + ped.speed * 0.4);
       if (!dirClear(ped, hx, hz, ahead)) {
-        // pick the clearer side to slip past
+        // pick the clearer side to slip past — probe a forward-diagonal each way,
+        // normalized so the look-ahead distance stays consistent.
         const lx = hz, lz = -hx, rx = -hz, rz = hx;     // left / right perpendiculars
-        const leftOpen = dirClear(ped, hx * 0.4 + lx, hz * 0.4 + lz, ahead);
-        const rightOpen = dirClear(ped, hx * 0.4 + rx, hz * 0.4 + rz, ahead);
+        let dlx = hx * 0.5 + lx, dlz = hz * 0.5 + lz; let n = Math.hypot(dlx, dlz) || 1; dlx /= n; dlz /= n;
+        let drx = hx * 0.5 + rx, drz = hz * 0.5 + rz; n = Math.hypot(drx, drz) || 1; drx /= n; drz /= n;
+        const leftOpen = dirClear(ped, dlx, dlz, ahead);
+        const rightOpen = dirClear(ped, drx, drz, ahead);
         if (leftOpen && !rightOpen) { _steer.x += lx * 1.4; _steer.z += lz * 1.4; }
         else if (rightOpen && !leftOpen) { _steer.x += rx * 1.4; _steer.z += rz * 1.4; }
         else {
@@ -845,6 +1156,7 @@
     const st = ped.state;
     let spd = ped.baseSpeed;
     if (st === "flee") spd = ped.baseSpeed * 2.2;
+    else if (ped.reportState === "run") spd = ped.baseSpeed * 2.0;   // sprint to the cop to snitch
     else if (st === "fight" || st === "confront") spd = ped.baseSpeed * 1.7;
     else if (st === "chat" || st === "idle" || st === "film" || st === "surrender") spd = 0;
     if (ped.drugUser && ped.erratic > 0 && spd > 0) spd *= 1 + ped.erratic * 0.16;
@@ -949,7 +1261,7 @@
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(p)) continue;
       if (p.ko > 0) { p.speed = 0; if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
       const near = d2 < ANIM_D2;
-      const important = p.rage || p.guard || p.controlled || (p.npcWanted | 0) >= 1 || p.armed;
+      const important = p.rage || p.guard || p.controlled || (p.npcWanted | 0) >= 1 || p.armed || p.reportState || p.approach;
       const active = near || important;
       // render LOD: peds far from the camera stop drawing entirely (the single
       // biggest GPU saving with ~90 rigs). enterT owns visibility while inside.

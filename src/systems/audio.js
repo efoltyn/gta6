@@ -54,6 +54,13 @@
       part([W + "thud_real.m4a"], 0.42, 0.84, 0.96, 0.03),
     ], 0.09),
     whoosh: fx([O + "sfx100v2_air_02.m4a", O + "sfx100v2_air_03.m4a"], 0.4, 0.05),
+    // REAL human screams (CC BY-SA 4.0, Raspberry Pi Foundation / Andy Oakley) —
+    // three short variants so a panicking crowd doesn't repeat the same yelp.
+    // Pitch is randomized fairly wide so the same clip reads as different people;
+    // ~0.7s cooldown backs the city-wide throttle in peds.js. Tasteful volume.
+    scream: layers([
+      part([W + "scream-c.m4a", W + "scream-d.m4a", W + "scream-e.m4a"], 0.5, 0.9, 1.18),
+    ], 0.7),
     headshot: layers([
       part([K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.66, 1.08, 1.18),
       part([O + "sfx100v2_misc_04.m4a", K + "impactMetal_light_001.m4a"], 0.26, 1.1, 1.24, 0.012),

@@ -53,6 +53,295 @@
     const w = g.cityWeapon;
     return !!(w && CBZ.cityEcon && CBZ.cityEcon.ITEMS[w] && CBZ.cityEcon.ITEMS[w].gun);
   }
+  // OPENLY carrying = a firearm is your equipped city weapon AND it isn't stowed.
+  // COMPLY (below) stows the loadout (g.cityStowedWeapon / g._copStow) so the streets
+  // calm down — peds.js and this file both read g.cityWeapon, so clearing it puts the
+  // piece away city-wide; the engine viewmodel goes to fists too (empty inventory).
+  function openCarry() { return playerArmed() && !g.cityStowedWeapon; }
+
+  // ============================================================
+  //  GUN STOP — a cop spots an openly-carried firearm on a CLEAN record and
+  //  walks up to CHALLENGE you (GTA: drawing on the law spikes heat; brandishing
+  //  draws a stop). Reuses the #interact HUD panel + I/J/K/L plumbing (the same
+  //  rows interact.js uses) without breaking pointer-lock, so the stand-off is
+  //  LIVE and tense: you can talk your way out, COMPLY (put it away), or EXECUTE
+  //  (draw and drop the officer → instant heat).
+  // ============================================================
+  const STOP = { cop: null, t: 0, susp: 0, asked: 0, panel: null, name: null, note: null, opts: null, optList: null, key: "" };
+
+  function stopDom() {
+    if (STOP.panel !== null) return STOP.panel;
+    STOP.panel = document.getElementById("interact");
+    STOP.name = document.getElementById("interactName");
+    STOP.note = document.getElementById("interactNote");
+    STOP.opts = document.getElementById("interactOpts");
+    return STOP.panel;
+  }
+  function stopShow() { const p = stopDom(); if (p) { p.style.display = "block"; p.classList.add("show"); } }
+  function stopHide() { const p = stopDom(); if (p) { p.style.display = "none"; p.classList.remove("show"); } STOP.key = ""; }
+
+  function stopActive() { return !!(STOP.cop && !STOP.cop.dead); }
+
+  // how believable an excuse is: a low-suspicion stop + your street respect help;
+  // every time you've been re-asked makes the officer less patient.
+  function stopTalkChance(base) {
+    const respect = Math.min(0.25, (g.respect || 0) * 0.01);
+    return Math.max(0.05, base - STOP.susp * 0.18 - STOP.asked * 0.12 + respect);
+  }
+
+  function stopOpts() {
+    return [
+      { key: "i", label: "“It's licensed — I've got a permit.”", fn: stopExcuseLicense },
+      { key: "j", label: "“Just heading to the range, officer.”", fn: stopExcuseRange },
+      { key: "k", label: "Put the weapon away (comply)", fn: stopComply },
+      { key: "l", label: "Draw and shoot the officer", bad: true, fn: stopExecute },
+    ];
+  }
+  function stopNote() {
+    const s = STOP.susp;
+    if (s >= 2.2) return "👮 Last warning — drop it NOW";
+    if (s >= 1.2) return "👮 Getting suspicious · talk fast";
+    return "👮 \"Is that a weapon? Let me see your hands.\"";
+  }
+  function stopRefreshPanel() {
+    const c = STOP.cop; if (!c) return;
+    STOP.optList = stopOpts();
+    const note = stopNote();
+    if (STOP.name) STOP.name.textContent = "👮 " + (c.name || "Officer");
+    if (STOP.note) STOP.note.textContent = note;
+    if (STOP.opts) STOP.opts.innerHTML = STOP.optList.map((o, i) =>
+      `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
+      `<span class="ilab"${o.bad ? " style=\"color:#ff9a9a\"" : ""}>${o.label}</span></div>`
+    ).join("");
+    STOP.key = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
+  }
+
+  function beginStop(cop) {
+    STOP.cop = cop; STOP.t = 0; STOP.susp = 0; STOP.asked = 1; STOP.key = "";
+    cop.state = "gunstop"; cop.gunstop = true; cop.npcTarget = null; cop.curTarget = null;
+    cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("👮 \"Hey! Hold up — is that a firearm?\"", 1.8);
+    if (CBZ.sfx) CBZ.sfx("whoosh");
+    stopRefreshPanel();
+    stopShow();
+  }
+  function endStop(calm) {
+    const c = STOP.cop;
+    if (c) {
+      c.gunstop = false; c._gunLowered = false;   // free the gun rig for normal hunt/patrol logic
+      if (c.state === "gunstop") c.state = "patrol";
+      c.arrestT = 0; c.retarget = calm ? 2.5 : 0;
+    }
+    STOP.cop = null; STOP.t = 0; STOP.susp = 0; STOP.asked = 0;
+    stopHide();
+  }
+
+  // talk-out: success backs the cop off; failure ratchets suspicion (and a third
+  // strike turns the stop into a real stand-off — he draws and calls it in).
+  function stopAttempt(chance, sellLine) {
+    const c = STOP.cop; if (!c) return;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(sellLine, 1.6);
+    STOP.asked++;
+    if (Math.random() < chance) {
+      if (CBZ.city) { CBZ.city.note("“…alright. Keep it holstered. Move along.”", 2.2); CBZ.city.addRespect(1); }
+      if (c.armed && CBZ.syncActorWeapon) { c._gunLowered = true; }
+      endStop(true);
+    } else {
+      STOP.susp += 1;
+      if (STOP.susp >= 3) {
+        // brandishing call goes out → a 1-star stop becomes real; he squares up
+        if (CBZ.city) CBZ.city.note("“That's it — hands! HANDS!”", 1.8);
+        if (CBZ.cityCrime) CBZ.cityCrime(45, { instant: true, x: c.pos.x, z: c.pos.z, type: "shots-fired" });
+        c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.5;
+        endStop(false);
+      } else {
+        if (CBZ.city) CBZ.city.note("“Don't lie to me. Put it AWAY.”", 1.8);
+        stopRefreshPanel();
+      }
+    }
+  }
+  function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed — I carry legal.”"); }
+  function stopExcuseRange()   { stopAttempt(stopTalkChance(0.5), "“On my way to the range, that's all.”"); }
+
+  // COMPLY — actually PUT THE GUN AWAY. We stow both the city-layer weapon label
+  // (g.cityWeapon, which peds/HUD/crime read) AND the engine loadout
+  // (CBZ.weaponInventory / currentWeaponId, which the first-person viewmodel reads:
+  // fpsmode shows fists when the inventory is empty). You still OWN the guns — they're
+  // snapshotted on g._copStow and re-drawn via CBZ.cityRedrawWeapon(). Calms the cop,
+  // calms the street, costs no heat.
+  function stowGuns() {
+    if (g.cityStowedWeapon || (g._copStow && g._copStow.inv)) return false;   // already away
+    const snap = { name: g.cityWeapon || null, inv: (CBZ.weaponInventory || []).slice(), cur: CBZ.currentWeaponId || null };
+    g.cityStowedWeapon = g.cityWeapon || "Gun";
+    g._copStow = snap;
+    g.cityWeapon = null;
+    if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
+    CBZ.currentWeaponId = null;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  function stopComply() {
+    const c = STOP.cop;
+    stowGuns();
+    if (CBZ.city) CBZ.city.note("You put the piece away. “Good. Stay out of trouble.” · [Q] to re-draw", 2.6);
+    if (CBZ.sfx) CBZ.sfx("door");
+    if (c) { c._gunLowered = true; }
+    endStop(true);
+  }
+  CBZ.cityStowedWeapon = function () { return g.cityStowedWeapon || null; };
+  // re-draw the stowed loadout (the player still owns it; bring it back out).
+  CBZ.cityRedrawWeapon = function () {
+    const snap = g._copStow;
+    if (!snap && !g.cityStowedWeapon) return false;
+    if (snap) {
+      if (CBZ.weaponInventory && snap.inv) { CBZ.weaponInventory.length = 0; for (const id of snap.inv) CBZ.weaponInventory.push(id); }
+      CBZ.currentWeaponId = snap.cur || CBZ.currentWeaponId;
+      g.cityWeapon = snap.name || g.cityStowedWeapon;
+      if (CBZ.onWeaponInventoryChanged && CBZ.currentWeaponId) CBZ.onWeaponInventoryChanged(CBZ.currentWeaponId, false);
+    } else {
+      g.cityWeapon = g.cityStowedWeapon;
+    }
+    g.cityStowedWeapon = null; g._copStow = null;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (CBZ.city) CBZ.city.note("Weapon out.", 1.0);
+    return true;
+  };
+
+  // EXECUTE — draw on the cop. fpsmode still owns the actual shot if you fire, but
+  // pulling on the law during a stop is itself the crime: instant cop-kill heat if
+  // it drops him, else assault-on-an-officer.
+  function stopExecute() {
+    const c = STOP.cop; if (!c) { endStop(false); return; }
+    const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
+    const from = CBZ.playerMuzzleWorld ? CBZ.playerMuzzleWorld() : { x: fx, y: 1.45, z: fz };
+    if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
+    if (CBZ.sfx) CBZ.sfx("report");
+    if (CBZ.shake) CBZ.shake(0.4);
+    const it = g.cityWeapon && CBZ.cityEcon.ITEMS[g.cityWeapon];
+    const dmg = it && it.dmg ? it.dmg * 1.5 + 30 : 80;
+    STOP.cop = null; stopHide();    // the stop is over the instant you pull
+    if (CBZ.cityHurtCop) CBZ.cityHurtCop(c, dmg, { fromX: fx, fromZ: fz });
+    if (!c.dead) {
+      // didn't kill him — he's now hunting you for assaulting an officer
+      if (CBZ.cityCrime) CBZ.cityCrime(70, { instant: true, x: c.pos.x, z: c.pos.z, type: "assault-officer" });
+      c.gunstop = false; c._gunLowered = false; c.state = "patrol"; c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.2;
+    } else {
+      // cityHurtCop already routed a cop-kill → 5 stars; just clear his stop flags
+      c.gunstop = false; c._gunLowered = false;
+    }
+  }
+
+  // RE-DRAW the stowed loadout with [Q] — the same key fpsmode uses to swap guns.
+  // fpsmode's Q is gated on armed(), so while your guns are STOWED (inventory empty)
+  // it does nothing; we step in there to bring the piece back out. No new key: it's
+  // the natural "draw/swap weapon" control, just covering the empty-handed case.
+  addEventListener("keydown", function (e) {
+    if (g.mode !== "city" || g.state !== "playing" || e.repeat) return;
+    if ((e.key || "").toLowerCase() !== "q") return;
+    if (!g._copStow && !g.cityStowedWeapon) return;       // nothing stowed → let fpsmode have Q
+    if (CBZ.player.driving || CBZ.player.dead || CBZ.cityMenuOpen || stopActive()) return;
+    e.preventDefault();
+    CBZ.cityRedrawWeapon();
+  });
+
+  // capture-phase key handler: while a stop is live, I/J/K/L drive the stop FIRST
+  // (and we swallow the event so interact.js doesn't also act on it). Cheap; only
+  // does anything when a stop is actually on screen.
+  addEventListener("keydown", function (e) {
+    if (!stopActive() || g.mode !== "city" || g.state !== "playing") return;
+    if (CBZ.player.driving || CBZ.cityMenuOpen) return;
+    const k = (e.key || "").toLowerCase();
+    if (k !== "i" && k !== "j" && k !== "k" && k !== "l") return;
+    const o = STOP.optList && STOP.optList.find((x) => x.key === k);
+    if (o) { e.preventDefault(); e.stopImmediatePropagation(); o.fn(); }
+  }, true);
+  // tap/click the rows too (mobile + mouse), same as the jail/interact panel
+  (function bindStopClicks() {
+    const el = document.getElementById("interactOpts");
+    if (!el) { setTimeout(bindStopClicks, 60); return; }
+    el.addEventListener("click", function (e) {
+      if (!stopActive() || g.mode !== "city" || CBZ.player.driving) return;
+      const row = e.target.closest && e.target.closest(".iopt");
+      if (!row || row.dataset.i == null) return;
+      const o = STOP.optList && STOP.optList[+row.dataset.i];
+      if (o && o.fn) { e.stopImmediatePropagation(); o.fn(); }
+    }, true);
+  })();
+
+  // pick a cop to run the stop, drive the approach, and bail on the right cues.
+  // Only ONE stop runs at a time; an ambient beat cop nearest you is chosen.
+  function updateGunStop(dt) {
+    // the stow is only "live" while the gun is actually away. If anything re-arms
+    // you (buy/loot a gun → combat.js cityGiveWeapon sets g.cityWeapon AND
+    // unlockWeapon refills weaponInventory), drop the stale stow snapshot so it reads
+    // as open carry again — otherwise a fresh draw would never get stopped.
+    if ((g.cityStowedWeapon || g._copStow) && (g.cityWeapon || (CBZ.weaponInventory && CBZ.weaponInventory.length))) { g.cityStowedWeapon = null; g._copStow = null; }
+    // SAFETY: never carry a stow across a death/bust (the next life would start
+    // unarmed with a stale snapshot). Hand the loadout back so the run resets clean.
+    if (g._copStow && (CBZ.player.dead || g.busted)) CBZ.cityRedrawWeapon();
+
+    if (stopActive()) {
+      const c = STOP.cop, P = CBZ.player;
+      // the stop dies if you get wanted some OTHER way, holster, drive off, die, or
+      // simply walk away far enough that he gives up the contact.
+      const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z, d = Math.hypot(dx, dz);
+      if ((g.wanted | 0) >= 1 || !openCarry() || P.driving || P.dead || c.dead || d > 16) { endStop((g.wanted | 0) >= 1 ? false : true); return; }
+      // approach to challenge distance and square up on you (gun lowered, not aimed)
+      STOP.t += dt;
+      c._gunLowered = true;                     // muzzle DOWN — he's challenging, not firing
+      if (d > 3.0) stepTo(c, -dx, -dz, c.baseSpeed * 0.85, dt, true);
+      else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(-dx, -dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (CBZ.animChar) CBZ.animChar(c.char, 0, dt); }
+      // suspicion creeps up the longer you stand there openly armed and ignore him
+      STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
+      const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
+      if (wantKey !== STOP.key) stopRefreshPanel();
+      // ignore him too long and he forces it (draws + calls a brandishing stop)
+      if (STOP.t > 16) { if (CBZ.city) CBZ.city.note("“You've been warned!”", 1.6); if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "shots-fired" }); c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false); }
+      return;
+    }
+
+    // ---- look for a stop to start ----
+    if (g.state !== "playing") return;
+    const P = CBZ.player;
+    if (!openCarry() || (g.wanted | 0) >= 1 || P.driving || P.dead || g.busted) return;
+    if (g.cityMenuOpen) return;
+    gunStopScanT -= dt;
+    if (gunStopScanT > 0) return;
+    gunStopScanT = 0.5;
+    // nearest free ambient beat cop who can SEE the gun and isn't busy/hunting
+    let best = null, bd = 13;
+    for (const c of CBZ.cityCops) {
+      if (c.dead || c.gunstop || c.swat || c.giveUp || c.npcTarget) continue;
+      if (c.curTarget && c.curTarget !== CBZ.city.playerActor) continue;
+      if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;
+      const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
+      if (d > bd) continue;
+      if (!losClear(c.pos.x, c.pos.z, P.pos.x, P.pos.z)) continue;   // can't see the gun through a wall
+      bd = d; best = c;
+    }
+    if (best) beginStop(best);
+  }
+  let gunStopScanT = 0;
+
+  // interact.js (order 39) writes the SAME #interact panel when you stand next to
+  // the cop — it would clobber the gun-stop rows. We re-assert ours at order 40
+  // (after it) so the stand-off menu always wins while a stop is live; the moment
+  // the stop ends we let interact.js own the panel again.
+  let _stopReassertT = 0;
+  CBZ.onUpdate(40, function (dt) {
+    if (g.mode !== "city") return;
+    if (!(stopActive() && g.state === "playing" && !CBZ.player.driving && !CBZ.player.dead)) return;
+    _stopReassertT -= dt; if (_stopReassertT > 0) { stopShow(); return; }
+    _stopReassertT = 0.1;
+    // re-stamp the rows + force-show (interact.js @39 may have overwritten them)
+    if (STOP.name) STOP.name.textContent = "👮 " + (STOP.cop.name || "Officer");
+    if (STOP.note) STOP.note.textContent = stopNote();
+    if (STOP.opts && STOP.optList) STOP.opts.innerHTML = STOP.optList.map((o, i) =>
+      `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
+      `<span class="ilab"${o.bad ? " style=\"color:#ff9a9a\"" : ""}>${o.label}</span></div>`
+    ).join("");
+    stopShow();
+  });
 
   // a roadblock cruiser + PIT chaser are real cars borrowed from vehicles.js; we
   // only flag them here. The chopper is a cheap mesh w/ a sweeping spotlight.
@@ -99,6 +388,7 @@
   };
 
   CBZ.clearCityCops = function () {
+    if (STOP.cop) { STOP.cop = null; stopHide(); }   // tear down any live gun stop first
     for (const c of CBZ.cityCops) {
       if (c.group && c.group.parent) c.group.parent.remove(c.group);
       if (c.group) c.group.traverse(function (o) {
@@ -298,8 +588,9 @@
       spawnCop(newIsSwat, fillAmbient);
       if (have + 1 < total) spawnCop(stars >= 2 && (wantSwat + (newIsSwat ? 1 : 0)) < swatTarget, false);
     } else if (have > total) {
-      // retire surplus non-ambient cops when the heat is gone
-      for (const c of CBZ.cityCops) if (!c.dead && !c.ambient && !c.npcTarget && stars === 0) { c.giveUp = true; break; }
+      // retire surplus non-ambient cops when the heat is gone (never a cop who's
+      // mid gun-stop — let the stand-off resolve first)
+      for (const c of CBZ.cityCops) if (!c.dead && !c.ambient && !c.npcTarget && !c.gunstop && stars === 0) { c.giveUp = true; break; }
     }
 
     // ---- vehicle responses to a DRIVING suspect (3★ PIT, 4★ roadblock) -------
@@ -442,6 +733,9 @@
         continue;
       }
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) { c.sees = false; continue; }
+      // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
+      // normal hunt/arrest logic so he just stands you down over the weapon.
+      if (c.gunstop) { c.sees = false; continue; }
       if (c.retarget > 0) c.retarget -= dt;
       if (c.shootCD > 0) c.shootCD -= dt;
 
@@ -516,11 +810,14 @@
           } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
         } else c.arrestT = 0;
 
-        // ---- SHOOT (only with LOS) — and DUCK FOR COVER between bursts ----
+        // ---- SHOOT (only with a REAL line of fire) — and DUCK FOR COVER between
+        //      bursts. The c.sees flag already proves a torso-height sightline; here
+        //      we re-check from the actual MUZZLE so a barrel poking past a corner
+        //      can't squeeze a shot through a wall the body can't see through.
         if (wantShoot && c.sees && dist < 30) {
           if (c.shootCD <= 0) {
             c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;
-            fireAt(c, tgt, dist);
+            fireAt(c, tgt, dist);   // fireAt does the final muzzle→target clearLineOfFire gate
             // after a burst, an armed target may make a cop break to cover briefly
             if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
           }
@@ -531,6 +828,20 @@
           c._coverT -= dt;
           const px = -dz / (dist || 1), pz = dx / (dist || 1);   // perpendicular
           stepTo(c, px * c._coverDir * 4 + dx * 0.15, pz * c._coverDir * 4 + dz * 0.15, c.baseSpeed * 1.1, dt, near);
+          continue;
+        }
+
+        // ---- NO LINE OF FIRE → FLANK to a real angle instead of pressing into the
+        //      wall. A wanted shooter who can't see the target picks a side and
+        //      slides perpendicular to peek around cover (alternating sides if one
+        //      side stays blocked), so cops round corners instead of wallhacking.
+        if (wantShoot && !c.sees && dist < 42) {
+          c._flankT = (c._flankT || 0) - dt;
+          if (c._flankT <= 0 || c._flankSide == null) { c._flankT = 1.2 + rng() * 0.8; c._flankSide = (c._flankSide === 1) ? -1 : 1; }
+          const px = -dz / (dist || 1), pz = dx / (dist || 1);
+          // move mostly sideways (to clear the corner) with a little closing bias
+          const fx = px * c._flankSide * 5 + dx * 0.35, fz = pz * c._flankSide * 5 + dz * 0.35;
+          stepTo(c, fx, fz, c.baseSpeed * 1.05, dt, near);
           continue;
         }
 
@@ -585,6 +896,8 @@
 
     updateChopper(dt);
     updatePursuers(dt);
+    updateGunStop(dt);
+    hideOccludedGuns(dt);
     if (stars === 0 && roadblocks.length) releaseRoadblocks();
   });
 
@@ -618,10 +931,47 @@
     c.pos.y = 0;
   }
 
+  // ---- GUN-PROP VISIBILITY (no muzzle poking through walls) ----------------
+  // Runs at order 35, BEFORE actorweapons.js poseList @36 (which only re-poses
+  // props that are still .visible). We HIDE a cop's gun whenever he has no live
+  // line of sight to a shoot target (lost you behind cover, or just patrolling)
+  // or is lowering it during a GUN STOP; we re-show it the moment he can see and
+  // wants to fire. Cheap: just toggles the existing prop, no raycasts here (the
+  // per-cop LOS was already computed in the behaviour pass via c.sees/_losClear).
+  let gunVisT = 0;
+  function hideOccludedGuns(dt) {
+    gunVisT -= dt; if (gunVisT > 0) return; gunVisT = 0.12;
+    const cops = CBZ.cityCops;
+    for (let i = 0; i < cops.length; i++) {
+      const c = cops[i];
+      if (c.dead || !c.armed) continue;
+      if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;   // ragdoll owns the rig
+      // SHOW the gun only when he's actively a threat with a clear sightline; a
+      // lowered (challenge) gun or a blind/patrolling cop carries it stowed so it
+      // never clips through a building.
+      const wantShow = !c._gunLowered && !c.gunstop && c.sees && !!c.curTarget && c.state !== "leave";
+      if (wantShow) {
+        if (CBZ.syncActorWeapon && (!c._weaponProp || !c._weaponProp.visible)) CBZ.syncActorWeapon(c);
+      } else if (c._weaponProp && c._weaponProp.visible) {
+        c._weaponProp.visible = false;
+      }
+    }
+  }
+
   function fireAt(c, tgt, dist) {
+    // the gun is OUT and aimed now (clear any challenge/occlusion lowering)
+    c._gunLowered = false;
+    if (c.armed && CBZ.syncActorWeapon) CBZ.syncActorWeapon(c);
     if (CBZ.actorAimAt) CBZ.actorAimAt(c, tgt);
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(c, tmp) : { x: c.pos.x, y: 1.4, z: c.pos.z };
-    if (CBZ.tracer) CBZ.tracer(from, { x: tgt.pos.x, y: (tgt.isPlayer ? 1.55 : 1.3), z: tgt.pos.z }, { muzzleScale: c.swat ? 1.15 : 0.95 });
+    // FINAL line-of-fire gate from the real muzzle: never put a round through a
+    // wall even if the torso-height sightline cleared (barrel past a corner, etc.).
+    const ty = tgt.isPlayer ? 1.55 : 1.3;
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y != null ? from.y : 1.4, from.z, tgt.pos.x, ty, tgt.pos.z)) {
+      c.sees = false; c.lostT = (c.lostT || 0) + 0.25;   // treat as a momentary loss → flank/reposition
+      return;
+    }
+    if (CBZ.tracer) CBZ.tracer(from, { x: tgt.pos.x, y: ty, z: tgt.pos.z }, { muzzleScale: c.swat ? 1.15 : 0.95 });
     if (CBZ.sfx) CBZ.sfx("report");
     const hitP = Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
     if (Math.random() >= hitP) return;

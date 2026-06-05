@@ -40,12 +40,34 @@
 
   function gangColor(id) { const def = (CBZ.CITY.gangs || []).find((x) => x.id === id); return def ? def.color : 0xb079ea; }
 
-  // ---- gang BOSS names (every gang has a named boss) ----
-  const BOSS_FIRST = ["Sal", "Vince", "Marcus", "Dmitri", "Tyrone", "Eddie", "Ray", "Omar", "Carlos", "Nico"];
+  // ---- shared real-name pool. Every gangster gets a proper First-Last name
+  //      (same human style as the rest of the city's peds) — the RANK is DATA on
+  //      the ped, never jammed into the surname. The boss alone wears a street
+  //      nickname in quotes, the way a kingpin would. ----
+  const FIRST = ["Marcus", "Vince", "Dmitri", "Tyrone", "Eddie", "Ray", "Omar", "Carlos", "Nico", "Sal", "Jax", "Trey", "Dee", "Boon", "Rex", "Marlo", "Dro", "Cyd", "Lola", "Rosa", "Mona", "Kira", "Nia", "Val", "Esi", "Otis", "Hank", "Pim"];
+  const LAST = ["Romano", "Cruz", "Vega", "Petrov", "Banks", "Mensah", "Hollis", "Okoro", "Diaz", "Stone", "Castle", "Reyes", "Sava", "Doyle", "Marsh", "Quinn", "Vance", "Boyd", "Salas", "Tran", "Abara", "Costa", "Ngata", "Webb"];
   const BOSS_NICK = ["Snake", "Ghost", "Scars", "Iron", "Big", "Mad", "Slick", "Cold", "Reaper", "King"];
-  const BOSS_LAST = ["Romano", "Cruz", "Vega", "Petrov", "Banks", "Mensah", "Hollis", "Okoro", "Diaz", "Stone"];
   function pick(a) { return a[(rng() * a.length) | 0]; }
-  function makeBossName() { return pick(BOSS_FIRST) + " '" + pick(BOSS_NICK) + "' " + pick(BOSS_LAST); }
+  function makeName() { return pick(FIRST) + " " + pick(LAST); }
+  function makeBossName() { return pick(FIRST) + " '" + pick(BOSS_NICK) + "' " + pick(LAST); }
+
+  // rank ladder shown as a small PIP suffix on the name tag — the rank is read
+  // from ped.rank (data), so the tag says e.g. "Marcus Vance · Lt." not a surname.
+  const RANK_PIP = { boss: "Boss", lt: "Lt.", soldier: "Soldier" };
+  // rebuild a member's floating name tag so it reads "<Name> · <Rank>" in the
+  // gang colour. Mirrors playergang.js styleMember: swap the cached label sprite,
+  // keep its transform, leave it hidden until the ped's LOD shows it.
+  function tagWithRank(ped, color) {
+    if (!ped || !ped.tag || !ped.char || !ped.char.group || !CBZ.makeLabelSprite) return;
+    const pip = RANK_PIP[ped.rank] || "";
+    const txt = (ped.name || "Crew") + (pip ? " · " + pip : "");
+    const col = "#" + ("000000" + ((color >>> 0).toString(16))).slice(-6);
+    const lbl = CBZ.makeLabelSprite(txt, { color: col });
+    lbl.position.y = ped.tag.position.y || 3.0; lbl.scale.copy(ped.tag.scale);
+    if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
+    ped.char.group.add(lbl); ped.tag = lbl; ped.tag.visible = false;
+    ped.tagColor = col;
+  }
 
   CBZ.spawnCityGangs = function () {
     const A = CBZ.city && CBZ.city.arena; if (!A) return;
@@ -98,6 +120,7 @@
         boss.homeGuard = { x: blot.cx, z: blot.cz };
         boss.isBoss = true; boss.rank = "boss"; boss.maxHp = 240; boss.ammo = 50;
         gang.boss = boss; gang.bossName = boss.name;
+        tagWithRank(boss, gang.color);   // "<Name> '<Nick>' <Last> · Boss"
         A.root.add(boss.group);
         CBZ.cityPeds.push(boss);
         gang.members.push(boss);
@@ -114,6 +137,8 @@
           // clear rank ladder under the boss: the first holder of each lot is a
           // LIEUTENANT (richer, SMG-capable), the rest are SOLDIERS. EVERY member
           // is strapped — guns are a city thing now, and a gang without them is nothing.
+          // Each gets a REAL First-Last name; the rank lives on ped.rank and shows
+          // as a pip on the tag (tagWithRank), never as a fake surname.
           const lt = (k === 0);
           const ped = CBZ.cityMakePed(x, z, rng, {
             kind: "gang", gang: gang.id, faction: gang.id,
@@ -123,12 +148,12 @@
             archetype: "gangster", job: lt ? "gang lieutenant" : "gang soldier",
             armed: true, weapon: lt ? (rng() < 0.5 ? "SMG" : "Pistol") : "Pistol",
             hp: lt ? 160 : 120,
-            name: gang.name.split(" ")[0] + " " + (lt ? "Lt." : (rng() < 0.5 ? "OG" : "Soldier")),
+            name: makeName(),
           });
           ped.rank = lt ? "lt" : "soldier";
           ped.ammo = lt ? 40 : 30;
           ped.homeGuard = { x: lot.cx, z: lot.cz };
-          if (ped.tag && ped.tag.material) { /* tag colour is baked; leave default */ }
+          tagWithRank(ped, gang.color);   // "<Name> · Lt." / "<Name> · Soldier"
           A.root.add(ped.group);
           CBZ.cityPeds.push(ped);
           gang.members.push(ped);
@@ -294,7 +319,8 @@
     drivebys.push(db); activeDrivebys++;
     if (nearPlayer(sx, sz, 70)) {
       CBZ.city && CBZ.city.note("🚙 " + gang.name + " rolling up...", 1.6);
-      if (CBZ.sfx) CBZ.sfx("whoosh");
+      // no engine sample in the bank; the first drive-by burst (shoot_smg) is the
+      // real audio cue, so we don't fake a roll-up with an unrelated "whoosh".
     }
     return true;
   }

@@ -345,27 +345,23 @@
       if (moving2 < 0.04 && p.shock < 0.05) p.settle = Math.min(1, p.settle + dt * 1.4);
       else p.settle = Math.max(0, p.settle - dt * 4);
 
-      // CITY: keep a downed/dead body resting ON the ground, not bisected by it
-      // — a flat body's centre sits at floor level, so half of it sinks under.
-      // Track the floor and lift by the flop amount (full when flat, none when
-      // upright, so a getting-up body never floats). Survival is left as-is.
-      if (CBZ.game.mode === "city") {
-        grp.position.y = floorAt(grp.position.x, grp.position.z) + 0.35 * Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
-      }
     }
 
     // knockback / slope slide — decays fast, and ALWAYS follows the terrain
     // (no airborne fall off smooth ground). Genuine building falls are the
     // player's department (physics.js, which tracks platforms); bots ride the
     // ground field, so a slide just rides the slope down and settles.
+    const cityDown = CBZ.game.mode === "city" && p.down > 0;
     if (Math.abs(p.kx) > 0.02 || Math.abs(p.kz) > 0.02) {
       grp.position.x += p.kx * dt; grp.position.z += p.kz * dt;
       const dec = Math.pow(0.0009, dt);
       p.kx *= dec; p.kz *= dec;
       if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
-      grp.position.y = floorAt(grp.position.x, grp.position.z);
+      // city downed/dead bodies rest ON the surface (lifted by flatness); other
+      // sliding bodies hug the floor exactly. Applied LAST so nothing sinks them.
+      grp.position.y = cityDown ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z);
     } else if (p.down > 0) {
-      grp.position.y = floorAt(grp.position.x, grp.position.z);   // keep the corpse grounded
+      grp.position.y = cityDown ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z);
     }
     if (p.fl > 0) p.fl = Math.max(0, p.fl - dt);
     poseActor(a, p, dt);
@@ -375,6 +371,18 @@
   function near(pos, r) {
     const c = CBZ.camera.position; const dx = pos.x - c.x, dz = pos.z - c.z;
     return dx * dx + dz * dz < r * r;
+  }
+
+  // CITY: a downed/dead rig laid flat (rotation.x ≈ ±90°) has its mid-height at
+  // floor level, so the lower half of the body sinks UNDER the street. Lift the
+  // group by the body half-thickness, scaled by how flat it is (full lift when
+  // flat, none when upright so a getting-up body never floats). Matches the
+  // ambient-crowd corpse lift in city/crowd.js so promoted + instanced bodies
+  // rest at the SAME height. Returns the resting Y. Survival is left untouched.
+  const FLAT_LIFT = 0.42;
+  function cityRestY(grp) {
+    const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
+    return floorAt(grp.position.x, grp.position.z) + FLAT_LIFT * flat;
   }
 
   // ---- aiming: nearest living bot in front of the player ----

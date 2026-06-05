@@ -32,49 +32,49 @@
   //      objective text, a met(world) predicate, and a reward beat. ----
   const MILESTONES = [
     {
-      id: "firstCash", chapter: 1, obj: "Get your money up — stack your first $1,000.",
+      id: "firstCash", chapter: 1, obj: "Stack your first $1,000.",
       met: () => bank() >= 1000,
       big: "💵 FIRST BAND", note: "A grand to your name. Word travels — you're a hustler now.",
       cash: 250, respect: 4,
     },
     {
-      id: "firstGun", chapter: 2, obj: "Get strapped — buy or grab a gun.",
+      id: "firstGun", chapter: 2, obj: "Get a gun — buy one or take one.",
       met: () => hasGun(),
       big: "🔫 STRAPPED", note: "Heat in your hand. Nobody talks down to you now.",
       respect: 6,
     },
     {
-      id: "firstKill", chapter: 2, obj: "Put in work — make your first kill.",
+      id: "firstKill", chapter: 2, obj: "Make your first kill.",
       met: () => (g.kills || 0) >= 1,
       big: "☠️ BODY DROPPED", note: "First body. The street learns your name the hard way.",
       cash: 300, respect: 10,
     },
     {
-      id: "crew", chapter: 3, obj: "Build a crew — recruit 3 soldiers (aim a gun at a ped to recruit).",
+      id: "crew", chapter: 3, obj: "Recruit 3 to your crew — aim a gun at a ped.",
       met: () => crewSize() >= 3,
       big: "👥 YOU GOT GOONS", note: "Three deep and loyal. You give orders now.",
       cash: 500, respect: 12,
     },
     {
-      id: "property", chapter: 4, obj: "Plant a flag — own or rent a property [Z].",
+      id: "property", chapter: 4, obj: "Claim a property — buy or rent [Z].",
       met: (w) => propCount(w) >= 1,
       big: "🏠 A SPOT OF YOUR OWN", note: "Four walls you control. The empire starts here.",
       cash: 800, respect: 10,
     },
     {
-      id: "gang", chapter: 4, obj: "Found your own gang — stand on a block with your crew.",
+      id: "gang", chapter: 4, obj: "Start your own gang with your crew.",
       met: () => CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists(),
       big: "🚩 SET CLAIMED", note: "Your colors fly over the block. You answer to nobody.",
       cash: 1500, respect: 25,
     },
     {
-      id: "rich", chapter: 5, obj: "Get heavy — reach $100k net worth (cash, bank & assets).",
+      id: "rich", chapter: 5, obj: "Reach $100k net worth.",
       met: () => netWorth() >= 100000,
       big: "💰 SIX FIGURES", note: "A hundred bands deep. The whole city feels you.",
       cash: 5000, respect: 40,
     },
     {
-      id: "takeover", chapter: 6, obj: "Take a throne — kill a rival boss and absorb their gang.",
+      id: "takeover", chapter: 6, obj: "Kill a rival boss and take their gang.",
       met: () => tookOverRival(),
       big: "👑 KINGPIN", note: "You took a rival's crown. This city is yours now.",
       cash: 15000, respect: 100,
@@ -153,7 +153,10 @@
     if (bar) return bar;
     bar = document.createElement("div");
     bar.id = "cityObjective";
-    bar.style.cssText = "position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:38;display:none;max-width:90vw;padding:7px 16px;background:rgba(12,14,20,.82);border:1px solid #2c3140;border-left:4px solid #ffd166;border-radius:9px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;font-size:13px;text-align:center;box-shadow:0 8px 22px rgba(0,0,0,.4);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+    // A quiet slim line tucked under the radar block (radar ~14..204, turf 212,
+    // home 232) on the left. Never overlaps radar/money/wanted/ammo/speed — it's
+    // a nudge you can ignore. Subtle pill, no heavy box.
+    bar.style.cssText = "position:fixed;left:16px;top:256px;z-index:18;display:none;max-width:230px;padding:3px 9px 3px 7px;background:rgba(10,12,18,.42);border-left:2px solid rgba(255,209,102,.65);border-radius:4px;color:#cdd6e3;font-family:Fredoka,system-ui,sans-serif;font-size:11px;line-height:1.35;letter-spacing:.2px;text-align:left;text-shadow:0 1px 2px rgba(0,0,0,.7);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9";
     document.body.appendChild(bar);
     return bar;
   }
@@ -172,9 +175,9 @@
     const s = ensure();
     let txt;
     if (m) {
-      txt = "<span style='color:#ffd166;font-weight:700'>" + CHAPTERS[s.chapter] + "</span> · " + m.obj;
+      txt = "<span style='color:#ffd166;font-weight:700;font-size:9px;letter-spacing:1px;opacity:.85'>" + CHAPTERS[s.chapter].toUpperCase() + "</span>&nbsp; " + m.obj;
     } else {
-      txt = "<span style='color:#7ed957;font-weight:700'>KINGPIN</span> · The city is yours. Defend the throne.";
+      txt = "<span style='color:#7ed957;font-weight:700;font-size:9px;letter-spacing:1px'>KINGPIN</span>&nbsp; Hold the throne.";
     }
     if (txt !== lastObjText) { el.innerHTML = txt; lastObjText = txt; }
     el.style.display = (CBZ.cityMenuOpen ? "none" : "block");

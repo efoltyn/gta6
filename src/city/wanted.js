@@ -96,8 +96,19 @@
   CBZ.cityForceStars = forceStars;
   CBZ.cityCopKilled = function () { report(9999, { type: "_copkill", x: CBZ.player.pos.x, z: CBZ.player.pos.z }); };
 
+  // does a LIVE cop actually SEE the crime happen? close enough AND a clear line of
+  // sight (no building between them) — a cop behind a wall can't ID you, so no
+  // instant report. This is the only "instant" star path that isn't face-to-face.
   function copWitness(x, z) {
-    for (const c of CBZ.cityCops) { if (c.dead) continue; if (Math.hypot(c.pos.x - x, c.pos.z - z) < 30) return true; }
+    const cops = CBZ.cityCops;
+    for (let i = 0; i < cops.length; i++) {
+      const c = cops[i];
+      if (c.dead) continue;
+      if (Math.hypot(c.pos.x - x, c.pos.z - z) >= 30) continue;
+      // ray from the officer's eyeline to the crime spot; if a wall blocks it, they
+      // didn't see it (cheap — only runs the instant a crime is committed).
+      if (!CBZ.clearLineOfFire || CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.5, c.pos.z, x, 1.0, z)) return true;
+    }
     return false;
   }
 
