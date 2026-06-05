@@ -46,7 +46,10 @@
   //      nickname in quotes, the way a kingpin would. ----
   const FIRST = ["Marcus", "Vince", "Dmitri", "Tyrone", "Eddie", "Ray", "Omar", "Carlos", "Nico", "Sal", "Jax", "Trey", "Dee", "Boon", "Rex", "Marlo", "Dro", "Cyd", "Lola", "Rosa", "Mona", "Kira", "Nia", "Val", "Esi", "Otis", "Hank", "Pim"];
   const LAST = ["Romano", "Cruz", "Vega", "Petrov", "Banks", "Mensah", "Hollis", "Okoro", "Diaz", "Stone", "Castle", "Reyes", "Sava", "Doyle", "Marsh", "Quinn", "Vance", "Boyd", "Salas", "Tran", "Abara", "Costa", "Ngata", "Webb"];
-  const BOSS_NICK = ["Snake", "Ghost", "Scars", "Iron", "Big", "Mad", "Slick", "Cold", "Reaper", "King"];
+  // boss handles riffing on famous gangsters — Lucky (Luciano), Scarface/Big (Capone),
+  // Teflon (Gotti), Bugsy (Siegel), Dutch (Schultz), Whitey (Bulger), Sosa, Rico.
+  const BOSS_NICK = ["Lucky", "Scarface", "Teflon", "Big", "Diamond", "Capo", "Sosa",
+    "Rico", "Cash", "Bugsy", "Dutch", "Whitey", "Ghost", "Iron", "Slick", "Cold", "Reaper", "King", "Snake"];
   function pick(a) { return a[(rng() * a.length) | 0]; }
   function makeName() { return pick(FIRST) + " " + pick(LAST); }
   function makeBossName() { return pick(FIRST) + " '" + pick(BOSS_NICK) + "' " + pick(LAST); }

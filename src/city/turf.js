@@ -222,13 +222,23 @@
   CBZ.cityForgeAlliance = function (a, b) { setRel(a, b, Math.max(getRel(a, b), 0.55)); hudDirty = true; };
   CBZ.cityDeclareWar = function (a, b) { setRel(a, b, Math.min(getRel(a, b), -0.6)); hudDirty = true; };
 
+  // a gang's NATION (people / folk / neutral) — the real-world alliance bloc.
+  function nationOf(id) {
+    const c = ((CBZ.CITY && CBZ.CITY.gangs) || []).find((x) => x.id === id);
+    return c ? (c.nation || "neutral") : "neutral";
+  }
   function seedAlliances() {
     for (const k in rel) delete rel[k];
     const gangs = (CBZ.cityGangs || []).filter((x) => !x.isPlayer);
     for (let i = 0; i < gangs.length; i++)
       for (let j = i + 1; j < gangs.length; j++) {
-        // start mildly cool but mostly neutral; a couple of pairings lean ally/war
-        const r = (rng() - 0.5) * 0.9;
+        // Authentic blocs: same NATION → allies, rival nations (People vs Folk) →
+        // at war, anyone neutral → a mild random lean. Relations still DRIFT later.
+        const na = nationOf(gangs[i].id), nb = nationOf(gangs[j].id);
+        let r;
+        if (na !== "neutral" && na === nb) r = 0.5 + rng() * 0.25;          // brothers under one Nation
+        else if (na !== "neutral" && nb !== "neutral") r = -0.5 - rng() * 0.25; // People vs Folk
+        else r = (rng() - 0.5) * 0.5;                                        // neutral crew
         setRel(gangs[i].id, gangs[j].id, r);
       }
   }
