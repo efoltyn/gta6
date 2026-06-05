@@ -47,6 +47,21 @@
   function rnd() { return Math.random(); }
   function pick(a) { return a[(rnd() * a.length) | 0]; }
   function hex6(n) { return "#" + ("000000" + (n >>> 0).toString(16)).slice(-6); }
+  function shortGang(n) { if (!n) return "them"; const w = n.split(" "); return w.length > 1 ? w[w.length - 1] : n; }
+
+  // nearest LIVE rival gang record (an actual faction, not the player's) — used
+  // by the orders menu to offer alliance / war with whoever's closest.
+  function nearestRival() {
+    const P = CBZ.player; if (!P || !CBZ.cityGangs) return null;
+    let best = null, bd = Infinity;
+    for (const gn of CBZ.cityGangs) {
+      if (!gn || gn.isPlayer || gn.absorbed || gn.id === "player" || !gn.turf || !gn.turf.length) continue;
+      const c = gn.center || gn.turf[0];
+      const d = Math.hypot((c.x != null ? c.x : c.cx) - P.pos.x, (c.z != null ? c.z : c.cz) - P.pos.z);
+      if (d < bd) { bd = d; best = gn; }
+    }
+    return best;
+  }
 
   // ---- lazy state ----
   function ensure() {
@@ -152,6 +167,7 @@
     // also register us in CBZ.cityGangs so cityGangOf()/turf HUD/the war
     // director see player turf like any other faction's
     registerInGangList();
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();   // re-derive zone ownership/colour
     CBZ.city && CBZ.city.note("Claimed this block for the " + pg.name + ".", 2.2);
     CBZ.cityHudDirty && CBZ.cityHudDirty();
   }
@@ -202,6 +218,7 @@
     const i = CBZ.cityGangs ? CBZ.cityGangs.indexOf(rec) : -1;
     if (i >= 0) CBZ.cityGangs.splice(i, 1);
     registerInGangList();
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();   // zones now fly your colour
     g.career = "gangster";
     g.cityCrew = liveMembers().length;
     pendingClaim = null;
@@ -392,6 +409,19 @@
       add("disperse", "🚶 DISPERSE to turf");
       add("promote", "⬆ PROMOTE nearest crew → Lieutenant", "#7fd0ff");
       add("claimturf", "📍 CLAIM this block as turf");
+      // ---- takeover meta (turf.js): buy a weakly-held district, broker pacts ----
+      if (CBZ.cityPlayerBuyZone) {
+        const z = CBZ.cityZoneAt && CBZ.cityZoneAt(CBZ.player.pos.x, CBZ.player.pos.z);
+        if (z && z.owner !== "player") add("buyzone", "💰 BUY OUT this district (" + (z.name || "?") + ")", "#ffd166");
+      }
+      // ally with / declare war on the nearest rival gang
+      const rivalNear = nearestRival();
+      if (rivalNear && CBZ.cityAreAllied) {
+        if (CBZ.cityAreAllied("player", rivalNear.id))
+          add("warrival", "⚔ DECLARE WAR on " + shortGang(rivalNear.name), "#ff9a9a");
+        else
+          add("allyrival", "🤝 ALLY with " + shortGang(rivalNear.name), "#9be564");
+      }
     }
     html += "<div style='font-size:12px;color:#8a93a3;margin-top:10px'>[1–" + menuActs.length + "] choose · [O]/[Esc] close</div>";
     menuEl.innerHTML = html;
@@ -416,6 +446,9 @@
       if (best) CBZ.cityPlayerGangPromote(best);
       else CBZ.city.note("No soldier nearby to promote.", 1.8);
     }
+    else if (act === "buyzone") { if (CBZ.cityPlayerBuyZone) CBZ.cityPlayerBuyZone(); }
+    else if (act === "allyrival") { const r = nearestRival(); if (r && CBZ.cityPlayerSetRelation) CBZ.cityPlayerSetRelation(r.id, "ally"); }
+    else if (act === "warrival") { const r = nearestRival(); if (r && CBZ.cityPlayerSetRelation) CBZ.cityPlayerSetRelation(r.id, "war"); }
   }
 
   // ---- keys ----

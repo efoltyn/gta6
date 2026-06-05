@@ -17,6 +17,7 @@
   const g = CBZ.game;
 
   let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl;
+  let popEl, popBarEl, killEl;
   let dirty = true;
 
   function build() {
@@ -30,8 +31,25 @@
         "@keyframes cDeltaUp{0%{opacity:0;transform:translateY(6px)}18%{opacity:1}100%{opacity:0;transform:translateY(-16px)}}" +
         "@keyframes cStarFlash{0%,100%{opacity:1}50%{opacity:.35}}" +
         "@keyframes cFeedIn{0%{opacity:0;transform:translateX(-14px)}100%{opacity:1;transform:translateX(0)}}" +
+        "@keyframes cKillIn{0%{opacity:0;transform:translateX(12px)}100%{opacity:1;transform:translateX(0)}}" +
+        "@keyframes cPopPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}" +
         "#cHud .cPanel{background:rgba(10,13,20,.42);border:1px solid rgba(255,255,255,.10);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}" +
-        "#cHud .cFeedRow{animation:cFeedIn .22s ease-out;background:rgba(8,11,17,.55);border-left:3px solid #7ed957;border-radius:4px;padding:4px 9px;margin-top:5px;color:#e8eef7;font-size:13px;line-height:1.25;max-width:300px;box-shadow:0 2px 6px rgba(0,0,0,.35)}";
+        "#cHud .cFeedRow{animation:cFeedIn .22s ease-out;background:rgba(8,11,17,.55);border-left:3px solid #7ed957;border-radius:4px;padding:4px 9px;margin-top:5px;color:#e8eef7;font-size:13px;line-height:1.25;max-width:300px;box-shadow:0 2px 6px rgba(0,0,0,.35)}" +
+        // population headcount pill — the battle-royale-style live count
+        "#cHud .cPop{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:9px;background:rgba(8,11,17,.55);border:1px solid rgba(255,255,255,.10);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
+        "#cHud .cPop .dot{width:8px;height:8px;border-radius:50%;background:#ff5b5b;box-shadow:0 0 7px rgba(255,91,91,.8)}" +
+        "#cHud .cPop b{font-size:18px;font-weight:700;color:#fff;letter-spacing:.4px}" +
+        "#cHud .cPop .tot{font-size:12px;color:#8a93a3}" +
+        "#cHud .cPopBar{height:4px;border-radius:3px;background:rgba(255,255,255,.10);overflow:hidden;margin-top:4px}" +
+        "#cHud .cPopBar>i{display:block;height:100%;background:linear-gradient(90deg,#ff5b5b,#ffb36b);transition:width .4s ease}" +
+        // hud-local kill feed (fallback when turf.js's feed isn't mounted)
+        "#cHud .cKillRow{animation:cKillIn .2s ease-out;background:rgba(8,11,17,.6);border-right:3px solid #c33;border-radius:4px;padding:2px 9px;margin-top:4px;color:#dfe6f0;font-size:12px;line-height:1.3;text-align:right;box-shadow:0 2px 6px rgba(0,0,0,.4)}" +
+        "#cHud .cKillRow b{color:#fff}" +
+        "#cHud .cKillRow.you{border-right-color:#ffd166;background:rgba(40,30,8,.7)}" +
+        // coordinate with turf.js's overlays (loaded BEFORE us): nudge its kill
+        // feed down so it clears our top-right money/pop stack, and cap its width
+        // so a long name never reaches the centre. One cohesive, non-overlapping HUD.
+        "#cKillFeed{top:230px !important;width:212px !important}";
       document.head.appendChild(st);
     }
     root = document.createElement("div");
@@ -39,14 +57,19 @@
     root.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:20;display:none;font-family:Fredoka,system-ui,sans-serif";
     root.innerHTML =
       "<div id='cHud' style='position:absolute;inset:0'>" +
-      "<div style='position:absolute;top:14px;right:16px;text-align:right'>" +
-      "  <div style='position:relative;display:inline-block'>" +
+      // top-right stack — dropped to top:54px so it never collides with the
+      // takeover meta bar (turf.js #cTurfMeta sits at top:6px, ~48px tall).
+      "<div style='position:absolute;top:54px;right:16px;text-align:right;max-width:248px'>" +
+      "  <div class='cPop' id='cPop' style='display:none'><span class='dot'></span><b id='cPopN'>0</b><span class='tot' id='cPopTot'></span></div>" +
+      "  <div class='cPopBar' id='cPopBar' style='display:none;width:148px;margin-left:auto'><i style='width:100%'></i></div>" +
+      "  <div style='position:relative;display:inline-block;margin-top:6px'>" +
       "    <div id='cMoney' style='font-size:32px;font-weight:700;color:#7ed957;text-shadow:0 2px 0 #1f5a2a,0 0 14px rgba(126,217,87,.35)'>$0</div>" +
       "    <div id='cDelta' style='position:absolute;right:0;top:-6px;font-size:18px;font-weight:700;opacity:0;pointer-events:none'></div>" +
       "  </div>" +
       "  <div id='cStarsWrap' style='display:none;margin-top:4px;padding:2px 8px;border-radius:8px;background:rgba(8,11,17,.5)'><span id='cStars' style='font-size:23px;letter-spacing:3px'></span></div>" +
       "  <div id='cCrew' style='font-size:13px;color:#9fb0c6;margin-top:3px'></div>" +
       "  <div id='cWorld' style='font-size:12px;color:#ffd166;margin-top:2px'></div>" +
+      "  <div id='cKill' style='margin-top:7px;display:none'></div>" +
       "</div>" +
       "<div style='position:absolute;left:16px;bottom:16px;width:230px'>" +
       "  <div style='font-size:11px;color:#ffb3b3;font-weight:600;letter-spacing:.5px'>HEALTH</div><div style='height:12px;background:rgba(0,0,0,.45);border-radius:6px;overflow:hidden;margin-bottom:5px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div>" +
@@ -70,6 +93,7 @@
     wpnEl = root.querySelector("#cWpn"); jobEl = root.querySelector("#cJob");
     radar = root.querySelector("#cRadar"); turfEl = root.querySelector("#cTurf"); homeLineEl = root.querySelector("#cHomeLine");
     feedEl = root.querySelector("#cFeed"); speedEl = root.querySelector("#cSpeed");
+    popEl = root.querySelector("#cPop"); popBarEl = root.querySelector("#cPopBar"); killEl = root.querySelector("#cKill");
   }
 
   // ---- the city event feed: a tidy stack of recent street events down the
@@ -101,9 +125,63 @@
     if (changed) renderFeed();
   }
 
+  // ---- live POPULATION headcount (battle-royale-style alive count) + a hud-local
+  //      KILL FEED. Both feature-detect the engine: population reads
+  //      CBZ.cityPopulation() -> {alive,total}; the feed reads CBZ.cityRecentDeaths.
+  //      turf.js already mounts its OWN takeover meta-bar + kill feed; to avoid a
+  //      double feed we only render the hud-local feed when turf's (#cKillFeed)
+  //      isn't on screen, so the two systems read as ONE cohesive HUD. ----
+  let lastPopN = -1, popPulseT = 0;
+  function renderPop() {
+    if (!popEl) return;
+    if (!CBZ.cityPopulation) { popEl.style.display = "none"; if (popBarEl) popBarEl.style.display = "none"; return; }
+    const p = CBZ.cityPopulation();
+    if (!p || !p.total) { popEl.style.display = "none"; if (popBarEl) popBarEl.style.display = "none"; return; }
+    popEl.style.display = "inline-flex";
+    if (popBarEl) popBarEl.style.display = "block";
+    const n = p.alive | 0;
+    const nEl = popEl.querySelector("#cPopN"), totEl = popEl.querySelector("#cPopTot");
+    if (nEl) nEl.textContent = n.toLocaleString();
+    if (totEl) totEl.textContent = "/" + (p.total | 0) + " alive";
+    if (popBarEl) { const bar = popBarEl.querySelector("i"); if (bar) bar.style.width = Math.max(0, Math.min(100, (n / p.total) * 100)) + "%"; }
+    // a quick pulse whenever the count drops, so a massacre reads at a glance
+    if (lastPopN >= 0 && n < lastPopN) { popEl.style.animation = "none"; void popEl.offsetWidth; popEl.style.animation = "cPopPulse .4s ease-out"; }
+    lastPopN = n;
+  }
+
+  // hud-local kill feed (fallback). Mirrors turf.js's <Name> — <cause> rows.
+  let killSig = "";
+  function turfFeedLive() {
+    const tf = document.getElementById("cKillFeed");
+    return !!(tf && tf.style.display !== "none");
+  }
+  function renderKill() {
+    if (!killEl) return;
+    const deaths = CBZ.cityRecentDeaths;
+    // defer to turf.js's feed when it's the one on screen (no duplicate)
+    if (!deaths || !deaths.length || turfFeedLive()) {
+      if (killEl.style.display !== "none") { killEl.style.display = "none"; killEl.innerHTML = ""; killSig = ""; }
+      return;
+    }
+    const recent = deaths.slice(-5);
+    let sig = "";
+    for (let i = 0; i < recent.length; i++) { const d = recent[i]; sig += (d.name || "") + "~" + (d.cause || "") + "~" + (d.t || "") + "|"; }
+    if (sig === killSig) return;
+    killSig = sig;
+    let html = "";
+    for (let i = 0; i < recent.length; i++) {
+      const d = recent[i];
+      const cls = d.you ? "cKillRow you" : "cKillRow";
+      html += "<div class='" + cls + "'><b>" + esc(d.name || "Someone") + "</b> — " + esc(d.cause || "killed") + "</div>";
+    }
+    killEl.innerHTML = html;
+    killEl.style.display = "block";
+  }
+  function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
+
   // ---- the city minimap: a north-up radar that clearly marks every building
   //      by what it is, plus cars/cops/crew and your objective. ----
-  let radarAcc = 0;
+  let radarAcc = 0, popAcc = 0;
   const LOT_COL = { shop: "#7ed957", tower: "#5b8bff", abandoned: "#e2574b", park: "#3f9a4f" };
   function drawRadar() {
     if (!radar) return;
@@ -317,6 +395,10 @@
         if (sn) { sn.textContent = mph; sn.style.color = mph > 100 ? "#ff9e6b" : "#e8eef7"; }
       } else speedEl.style.display = "none";
     }
+    // population headcount + kill feed (throttled — they change steadily, not
+    // every frame; ~4Hz keeps phones smooth)
+    popAcc += 1 / 60;
+    if (popAcc >= 0.25) { popAcc = 0; renderPop(); renderKill(); }
     // radar (throttled), turf + home/partner status
     radarAcc += 1 / 60;
     if (radarAcc >= 1 / 14) { radarAcc = 0; drawRadar(); }

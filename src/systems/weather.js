@@ -107,6 +107,53 @@
   rain.visible = false;
   scene.add(rain);
 
+  // ---- indoor suppression ---------------------------------------------
+  // The cloud is camera-centred and "never runs dry", so without a guard it
+  // rains INSIDE buildings too. Detect "under a roof" cheaply and hide the
+  // cloud while indoors, re-showing it the instant we step back outside.
+  // Mirrors src/city/death.js isIndoors(): a building floor/roof slab is
+  // registered both as a CBZ.platforms entry (with `top` + footprint) AND as a
+  // CBZ.losBlockers mesh, so a footprint test + a short up-ray cover both.
+  // The test is THROTTLED to a few times/sec (not per-drop, not per-frame).
+  let indoors = false;
+  let indoorCD = 0;             // seconds until next indoor re-test
+  const _upRay = new THREE.Raycaster();
+  const _upOrigin = new THREE.Vector3(), _upDir = new THREE.Vector3(0, 1, 0);
+
+  function testIndoors() {
+    // Only meaningful in the open-city mode (the only place with building
+    // interiors/roofs); elsewhere there's no roof to be under, so weather is
+    // always "outdoors" and behaves exactly as before.
+    const g = CBZ.game;
+    if (!g || g.mode !== "city") return false;
+    // In a car you're effectively outside the building-interior system (cars
+    // drive on streets), so don't bother — keeps the rain on the windscreen.
+    const P = CBZ.player;
+    if (P && P.driving) return false;
+
+    const px = cam.position.x, py = cam.position.y, pz = cam.position.z;
+
+    // 1) overhead floor/roof slab covering us (cheap footprint scan)
+    const plats = CBZ.platforms;
+    if (plats) {
+      const headY = py + 0.3; // camera already sits near head height
+      for (let i = 0; i < plats.length; i++) {
+        const p = plats[i];
+        if (p.top == null) continue;
+        if (p.top > headY && p.top < py + 28 &&
+            px >= p.minX && px <= p.maxX && pz >= p.minZ && pz <= p.maxZ) return true;
+      }
+    }
+    // 2) backstop: short up-ray hits a roof/ceiling LOS mesh
+    const blk = CBZ.losBlockers;
+    if (blk && blk.length) {
+      _upOrigin.set(px, py + 0.2, pz);
+      _upRay.set(_upOrigin, _upDir); _upRay.far = 26;
+      if (_upRay.intersectObjects(blk, false).length) return true;
+    }
+    return false;
+  }
+
   // ---- fog tinting ----------------------------------------------------
   // daynight.js rewrites scene.fog.color every frame, so we don't fight it
   // by storing a base — instead we darken whatever colour it currently is,
@@ -173,12 +220,21 @@
     wind += (windTarget - wind) * Math.min(1, dt * 0.25);
     if (intensity < 0.002) intensity = 0;
 
+    // ---- indoor check (throttled ~5x/sec, never per-drop) ----
+    indoorCD -= dt;
+    if (indoorCD <= 0) {
+      indoors = testIndoors();
+      indoorCD = 0.2;
+    }
+
     // ---- how many drops are live this frame ----
     const live = Math.round(intensity * MAX);
-    rain.visible = live > 0;
+    // suppress the cloud entirely while under a roof — re-shows the instant the
+    // next throttled test clears `indoors` after stepping back outside.
+    rain.visible = live > 0 && !indoors;
     mat.opacity = Math.min(0.55, 0.18 + intensity * 0.5);
 
-    if (live > 0) {
+    if (live > 0 && !indoors) {
       const cx = cam.position.x, cz = cam.position.z;
       const driftX = windAxis === 0 ? wind : wind * 0.35;
       const driftZ = windAxis === 1 ? wind : wind * 0.35;

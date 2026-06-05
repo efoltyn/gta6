@@ -31,6 +31,47 @@
   const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 26 * 26, VIS_D2 = 150 * 150, FAR_D2 = 110 * 110;
   let frame = 0;
 
+  // ============================================================
+  //  FINITE, NON-REGENERATING POPULATION (the "headcount").
+  //  The city starts with a fixed living total and only ever goes DOWN as people
+  //  die — there is no respawning. Both death paths (cityKillPed here for named
+  //  rigs, cityCrowdKill in crowd.js for the ambient instanced mass) decrement the
+  //  same `_alive` counter, and the ambient crowd's target density is derived FROM
+  //  the remaining living count (crowd.js reads CBZ.cityPopulation()), so the
+  //  streets visibly THIN after a massacre instead of magically refilling.
+  //  Total is initialized lazily on first city spawn from the configured ped +
+  //  crowd counts (a few hundred), so it tracks however busy the city is built.
+  // ============================================================
+  let _popTotal = 0, _popDead = 0, _popInit = false;
+  function _ensurePop() {
+    if (_popInit) return;
+    _popInit = true;
+    const named = (CBZ.CITY && CBZ.CITY.peds) || 160;
+    const crowd = (CBZ.CITY && CBZ.CITY.crowd != null) ? CBZ.CITY.crowd : 280;
+    // a believable city headcount: the named rigs + the ambient mass + a little
+    // unseen slack (people indoors / off-screen) so it reads as a population, not
+    // exactly the number of bodies currently rendered.
+    _popTotal = named + crowd + 120;
+    _popDead = 0;
+  }
+  // reset the roster for a fresh run (called from spawnCityPeds, the canonical
+  // "new city" entry point). Total may grow if config changed; dead resets to 0.
+  CBZ.cityPopulationReset = function () {
+    _popInit = false; _popDead = 0; _ensurePop();
+  };
+  // ONE death recorded against the finite roster (never lets alive go below 0).
+  CBZ.cityPopulationDie = function (n) {
+    _ensurePop();
+    _popDead = Math.min(_popTotal, _popDead + (n || 1));
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();   // headcount changed → refresh the HUD
+  };
+  // {alive,total,dead} — the live battle-royale-style headcount for the HUD /
+  // kill feed. alive NEVER rises on its own; it only falls as deaths accrue.
+  CBZ.cityPopulation = function () {
+    _ensurePop();
+    return { alive: Math.max(0, _popTotal - _popDead), total: _popTotal, dead: _popDead };
+  };
+
   // weapon pickups dropped in the world (cops/gangsters that get downed).
   CBZ.cityDrops = CBZ.cityDrops || [];
 
@@ -45,15 +86,18 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   function name(r) { return pick(FIRST, r()) + " " + LAST[(r() * LAST.length) | 0] + "."; }
 
-  // ---- a REAL scream (never the "whoosh" placeholder). Globally throttled so a
-  //      panicking crowd doesn't machine-gun the sample, and a no-op if the bank
-  //      hasn't got a "scream" sample loaded yet (wrapped → missing is harmless).
+  // ---- a REAL scream (never the "whoosh" placeholder). Screams must PUNCTUATE
+  //      danger, not spam it: the raw sample is loud and annoying if it fires
+  //      often, so the whole city shares a HARD several-second cooldown here on
+  //      top of the per-ped cooldown + low per-event chance at every call site.
+  //      No-op if the bank hasn't loaded a "scream" sample yet (missing→harmless).
   const _haveScream = function () { return !!(CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.scream); };
   let _lastScreamT = -1e9;
+  const SCREAM_GAP = 6;                           // city-wide minimum seconds between screams
   function scream() {
     if (!CBZ.sfx) return;
     const t = (CBZ.now != null ? CBZ.now : (performance.now() * 0.001));
-    if (t - _lastScreamT < 0.9) return;          // at most ~1 scream / 0.9s city-wide
+    if (t - _lastScreamT < SCREAM_GAP) return;    // at most ~1 scream / 6s city-wide
     _lastScreamT = t;
     if (_haveScream()) { try { CBZ.sfx("scream"); } catch (e) {} }
   }
@@ -136,6 +180,7 @@
 
   CBZ.spawnCityPeds = function (n) {
     CBZ.clearCityPeds();
+    CBZ.cityPopulationReset();          // fresh city → reset the finite headcount
     const A = CBZ.buildCity();
     _s = 555 + n;
     if (CBZ.cityEcon && CBZ.cityEcon.initMarket) CBZ.cityEcon.initMarket();
@@ -236,10 +281,11 @@
         scattered++;
       }
     }
-    // one nearby scream for the audio punch — a REAL scream sample, never the
-    // "whoosh" placeholder, and globally throttled so a big panic isn't a wall of
-    // noise (the scream() helper enforces a multi-second-ish city-wide cooldown).
-    if (scattered && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.5) scream(); }
+    // a SINGLE punctuating scream on a genuinely scary event (gunfire / explosion
+    // / a body dropping caused this panic). Small chance even then, and the
+    // scream() helper enforces the hard city-wide cooldown — so a big panic is one
+    // scream, not a wall of noise. Only worth it when real fear actually landed.
+    if (scattered >= 2 && _lastPanicFrame !== frame) { _lastPanicFrame = frame; if (rng() < 0.18) scream(); }
     return scattered;
   };
 
@@ -291,6 +337,13 @@
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // killed mid-call → the report dies with them
     ped.dead = true; ped.deadT = 0; ped.hp = 0;
+    // FINITE POPULATION: a named rig just died → tick the city headcount DOWN.
+    // Promoted crowd rigs (ped._crowd) die through HERE (they're real peds);
+    // un-promoted ambient agents die through cityCrowdKill (crowd.js) — the two
+    // paths are mutually exclusive per individual, so every distinct death
+    // decrements the roster EXACTLY once. Cops aren't part of the civilian
+    // populace and never route through cityKillPed, so the headcount stays clean.
+    if (CBZ.cityPopulationDie) CBZ.cityPopulationDie(1);
     // an armed ped drops their gun where they fall (anyone can grab it)
     if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo);
     ped.armed = false; ped.weapon = null; ped.ammo = 0;
@@ -1055,10 +1108,11 @@
     }
     ped.target.set(bx, 0, bz);
     if (!found && CBZ.city && CBZ.city.arena) { const p = CBZ.city.arena.randomSidewalkPoint(); ped.target.set(p.x, 0, p.z); }
-    // scream the first time real panic hits, like a startled GTA crowd — RARE per
-    // ped (long per-ped cooldown) and routed through scream() (a REAL "scream"
-    // sample, city-wide throttled), never the "whoosh" placeholder.
-    if (ped.fear >= 6 && (ped._screamT || 0) <= 0) { ped._screamT = 8 + rng() * 8; if (rng() < 0.3) scream(); }
+    // a RARE scream when genuine terror hits (high fear — gunfire/explosion/a body
+    // dropping right by them, which is what drives fear that high). LONG per-ped
+    // cooldown AND a small chance, on top of the hard city-wide gap in scream(),
+    // so it only PUNCTUATES the worst moments instead of every startled bolt.
+    if (ped.fear >= 8 && (ped._screamT || 0) <= 0) { ped._screamT = 18 + rng() * 14; if (rng() < 0.12) scream(); }
   }
 
   // ---- LOCAL STEERING: a short look-ahead probe + separation from neighbours,

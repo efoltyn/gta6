@@ -103,61 +103,169 @@
     if (board) return board;
     board = document.createElement("div");
     board.id = "cityBoard";
-    board.style.cssText = "position:fixed;left:50%;top:6%;transform:translateX(-50%);z-index:47;display:none;min-width:560px;max-width:94vw;background:rgba(12,14,20,.96);border:2px solid #2c3140;border-radius:14px;padding:14px 18px;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 14px 44px rgba(0,0,0,.55)";
+    // ONE-SCREEN, NO-SCROLL: the panel is capped to the viewport (max-height
+    // 88vh) and overflow is HIDDEN — render() scales rows/fonts so content
+    // always fits inside, and overflow rows collapse into a "+N more" line.
+    board.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:47;display:none;width:min(620px,94vw);max-height:88vh;overflow:hidden;background:rgba(12,14,20,.97);border:2px solid #2c3140;border-radius:14px;padding:14px 18px;box-sizing:border-box;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 14px 44px rgba(0,0,0,.6)";
     document.body.appendChild(board);
     return board;
   }
 
-  const COLS = "28px 1fr 92px 78px 44px 50px 50px 56px 46px";
+  function hex6(n) { return "#" + ("000000" + ((n >>> 0).toString(16))).slice(-6); }
+
   function fmt(n) {
     n = Math.round(n || 0);
     if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1) + "M";
     if (n >= 1000) return (n / 1000).toFixed(n >= 100000 ? 0 : 1) + "k";
     return "" + n;
   }
+  function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
+
+  // ---- GANG STANDINGS (the takeover board): each gang with its colour, zones
+  //      held, live crew, and a control bar; sorted by who's winning the city.
+  //      Feature-detects CBZ.cityZoneControl/cityZones/cityGangs so it degrades
+  //      gracefully if the turf meta isn't loaded. ----
+  function gangStandings() {
+    const gangs = (CBZ.cityGangs || []).filter(function (x) { return x && !x.absorbed; });
+    if (!gangs.length) return null;
+    const ctrl = CBZ.cityZoneControl ? CBZ.cityZoneControl() : { byGang: {}, neutral: 0, total: 0 };
+    const rows = [];
+    for (const gn of gangs) {
+      const zones = (ctrl.byGang && ctrl.byGang[gn.id]) || 0;
+      let crew = 0;
+      if (CBZ.cityGangStrength) crew = CBZ.cityGangStrength(gn);
+      else if (gn.members) { for (const m of gn.members) if (m && !m.dead && !m.ko) crew++; }
+      rows.push({
+        id: gn.id, name: gn.isPlayer ? "Your Gang" : (gn.name || "Crew"),
+        color: gn.color != null ? gn.color : 0x8a93a3,
+        zones: zones, crew: crew, isPlayer: !!gn.isPlayer,
+        // takeover score = zones dominate, crew breaks ties
+        score: zones * 1000 + crew,
+      });
+    }
+    rows.sort(function (a, b) { return b.score - a.score; });
+    return { rows: rows, total: ctrl.total || 0, neutral: ctrl.neutral || 0 };
+  }
 
   function render() {
+    const el = boardEl();
+
+    // -------- TOP BANNER: who's winning the city + your rank + population --------
+    const leader = CBZ.cityTakeoverLeader ? CBZ.cityTakeoverLeader() : null;
+    const pop = CBZ.cityPopulation ? CBZ.cityPopulation() : null;
+    let winLine;
+    if (leader) {
+      const isYou = leader.id === "player";
+      const lc = CBZ.cityGangById ? CBZ.cityGangById(leader.id) : null;
+      const lcol = lc ? hex6(lc.color) : "#ffd166";
+      winLine = "<b style='color:" + lcol + "'>" + (isYou ? "YOU" : esc(leader.name || "?")) + "</b> leading · " +
+        leader.zones + "/" + leader.total + " districts";
+    } else winLine = "City up for grabs — no one holds a district";
+
+    let html = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px'>" +
+      "<div style='font-size:18px;font-weight:700'>🏴 City Takeover</div>" +
+      "<div style='font-size:12px;color:#aeb6c2'>" + winLine + "</div></div>";
+
+    // -------- GANG STANDINGS (the heart of the board) --------
+    const st = gangStandings();
+    const GCOLS = "26px 1fr 70px 64px 1.1fr";
+    if (st && st.rows.length) {
+      // scale row size to the gang count so even a crowded board fits one screen
+      const nG = st.rows.length;
+      const gFont = nG > 11 ? 11 : nG > 8 ? 12 : 13;
+      const gPad = nG > 11 ? "1px 4px" : "2px 5px";
+      // cap visible gang rows; collapse the rest into a "+N more" summary line
+      const GCAP = 9;
+      const shown = st.rows.slice(0, GCAP);
+      const hidden = st.rows.slice(GCAP);
+
+      html += "<div style='display:grid;grid-template-columns:" + GCOLS + ";gap:5px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
+        "<span>#</span><span>Gang</span><span style='text-align:right'>Zones</span><span style='text-align:right'>Crew</span><span>Control</span></div>";
+
+      const maxZ = st.total || (st.rows[0] ? Math.max(1, st.rows[0].zones) : 1);
+      shown.forEach(function (r, i) {
+        const col = hex6(r.color);
+        const hl = r.isPlayer ? "background:rgba(126,217,87,.15);border-radius:5px;font-weight:700" : "";
+        const medal = i === 0 ? "👑" : (i + 1);
+        const barW = Math.round((r.zones / Math.max(1, maxZ)) * 100);
+        html += "<div style='display:grid;grid-template-columns:" + GCOLS + ";gap:5px;align-items:center;font-size:" + gFont + "px;padding:" + gPad + "'>" +
+          "<span style='" + hl + "'>" + medal + "</span>" +
+          "<span style='color:" + (r.isPlayer ? "#7ed957" : "#e3e9f2") + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" +
+          "<span style='display:inline-block;width:9px;height:9px;border-radius:2px;background:" + col + ";margin-right:6px;vertical-align:middle'></span>" + esc(r.name) + "</span>" +
+          "<span style='text-align:right;color:#ffd166;font-weight:700'>" + r.zones + "</span>" +
+          "<span style='text-align:right;color:#9fe6c8'>" + r.crew + "</span>" +
+          "<span style='height:8px;border-radius:4px;background:rgba(255,255,255,.07);overflow:hidden'>" +
+          "<span style='display:block;height:100%;width:" + barW + "%;background:" + col + "'></span></span>" +
+          "</div>";
+      });
+      if (hidden.length) {
+        let hz = 0, hc = 0;
+        for (const r of hidden) { hz += r.zones; hc += r.crew; }
+        html += "<div style='font-size:11px;color:#6b7480;padding:2px 5px'>+" + hidden.length + " more crews · " + hz + " zones · " + hc + " crew</div>";
+      }
+      if (st.total) {
+        html += "<div style='font-size:11px;color:#8a93a3;margin-top:3px;display:flex;justify-content:space-between'>" +
+          "<span>" + (st.total - st.neutral) + "/" + st.total + " districts held</span>" +
+          (st.neutral ? "<span style='color:#6b7480'>" + st.neutral + " neutral — up for grabs</span>" : "<span></span>") + "</div>";
+      }
+    }
+
+    // -------- YOUR STANDING + the live POPULATION headcount --------
+    const rk = CBZ.cityLeaderboardRank ? CBZ.cityLeaderboardRank() : null;
+    let foot = "<div style='display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:7px;border-top:1px solid #2c3140;font-size:12px'>";
+    if (pop && pop.total) {
+      foot += "<span><span style='color:#ff7b6b;font-weight:700'>" + (pop.alive | 0).toLocaleString() + "</span>" +
+        "<span style='color:#8a93a3'>/" + (pop.total | 0).toLocaleString() + " alive</span></span>";
+    } else foot += "<span></span>";
+    if (rk) {
+      foot += "<span style='color:#7ed957'>Net worth #" + rk.rank + "/" + rk.total + " · $" + fmt(rk.score) + "</span>";
+    }
+    foot += "</div>";
+    html += foot;
+
+    // -------- compact RICH LIST (secondary; capped + scaled so it never scrolls) --------
     const me = playerRow();
-    const all = rivals.map((r) => ({
-      name: r.name, cash: r.cash, bank: r.bank, kills: r.kills,
-      respect: r.respect, props: r.props, crew: r.crew, notoriety: r.notoriety,
-      score: netWorth(r),
-    }));
-    all.push(me);
-    all.sort((a, b) => b.score - a.score);
-    const myRank = all.indexOf(me) + 1;
-
-    let html = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px'>" +
-      "<div style='font-size:18px;font-weight:700'>🏆 City Rich List</div>" +
-      "<div style='font-size:13px;color:#7ed957'>You're #" + myRank + " of " + all.length +
-      " · net worth $" + fmt(me.score) + "</div></div>";
-
-    const head = (t) => "<span style='text-align:right'>" + t + "</span>";
-    html += "<div style='display:grid;grid-template-columns:" + COLS + ";gap:4px;font-size:11px;color:#8a93a3;margin-bottom:4px;border-bottom:1px solid #2c3140;padding-bottom:3px'>" +
-      "<span>#</span><span>Name</span>" + head("Net Worth") + head("Cash") + head("Kills") +
-      head("Resp") + head("Notor") + head("Prop") + head("Crew") + "</div>";
-
-    all.forEach((r, i) => {
-      const hl = r.you ? "background:rgba(126,217,87,.16);border-radius:6px;font-weight:700" : "";
-      const nameCol = r.you ? "#7ed957" : "#dfe6f0";
-      const medal = i === 0 ? "👑" : (i === 1 ? "🥈" : (i === 2 ? "🥉" : (i + 1)));
-      const cell = (v, c) => "<span style='text-align:right;color:" + c + "'>" + v + "</span>";
-      html += "<div style='display:grid;grid-template-columns:" + COLS + ";gap:4px;font-size:13px;padding:2px 4px;align-items:center;" + hl + "'>" +
-        "<span>" + medal + "</span>" +
-        "<span style='color:" + nameCol + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + r.name + "</span>" +
-        cell("$" + fmt(r.score), "#ffd166") +
-        cell("$" + fmt(r.cash + r.bank), "#cfe8b8") +
-        cell(r.kills, "#ff8a8a") +
-        cell(r.respect, "#7fd0ff") +
-        cell(r.notoriety, "#ff9a5a") +
-        cell(r.props, "#c9b6ff") +
-        cell(r.crew, "#9fe6c8") +
-        "</div>";
+    const all = rivals.map(function (r) {
+      return { name: r.name, score: netWorth(r), cash: r.cash, bank: r.bank, kills: r.kills, crew: r.crew };
     });
+    all.push(me);
+    all.sort(function (a, b) { return b.score - a.score; });
+    const myRank = all.indexOf(me) + 1;
+    // show the top few + ALWAYS the player's row, summarise the rest
+    const RCAP = 5;
+    const top = all.slice(0, RCAP);
+    if (top.indexOf(me) < 0) top[top.length - 1] = me;     // guarantee YOU appear
+    const RCOLS = "20px 1fr 70px 56px 40px";
+    html += "<div style='margin-top:8px'>" +
+      "<div style='font-size:11px;color:#8a93a3;margin-bottom:2px'>💰 Rich List — you're #" + myRank + "/" + all.length + "</div>" +
+      "<div style='display:grid;grid-template-columns:" + RCOLS + ";gap:5px;align-items:center;font-size:11px'>";
+    top.forEach(function (r, i) {
+      const idx = all.indexOf(r) + 1;
+      const isYou = r.you;
+      const medal = idx === 1 ? "👑" : idx;
+      html += "<span style='" + (isYou ? "color:#7ed957;font-weight:700" : "color:#8a93a3") + "'>" + medal + "</span>" +
+        "<span style='color:" + (isYou ? "#7ed957" : "#dfe6f0") + ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + esc(isYou ? "YOU" : r.name) + "</span>" +
+        "<span style='text-align:right;color:#ffd166'>$" + fmt(r.score) + "</span>" +
+        "<span style='text-align:right;color:#cfe8b8'>$" + fmt((r.cash || 0) + (r.bank || 0)) + "</span>" +
+        "<span style='text-align:right;color:#ff8a8a'>" + (r.kills || 0) + "</span>";
+    });
+    html += "</div></div>";
 
     html += "<div style='font-size:11px;color:#6b7480;margin-top:8px;display:flex;justify-content:space-between'>" +
-      "<span>Rivals grind in real time — keep your spot.</span><span>Tab / Esc to close</span></div>";
-    boardEl().innerHTML = html;
+      "<span>Own every district to take the city.</span><span>Tab / Esc to close</span></div>";
+
+    el.innerHTML = html;
+    fitToScreen(el);
+  }
+
+  // last-ditch guarantee against scroll: if the rendered panel still exceeds the
+  // viewport on a tiny screen, shrink its font until it fits (no scrollbars ever).
+  function fitToScreen(el) {
+    el.style.fontSize = "";
+    let guard = 0, fs = 100;
+    while (el.scrollHeight > el.clientHeight + 1 && fs > 70 && guard++ < 10) {
+      fs -= 6; el.style.fontSize = fs + "%";
+    }
   }
 
   let open = false;

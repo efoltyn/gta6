@@ -518,8 +518,13 @@
     return best;
   };
 
+  // the takeover meta (turf.js) lazily provides this; default to a no-op so the
+  // capture path here never errors before turf.js has wired its recompute in.
+  CBZ.cityRefreshTurfHud = CBZ.cityRefreshTurfHud || function () {};
+
   CBZ.cityGangsReset = function () {
     CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0;
+    if (CBZ.cityTurfReset) CBZ.cityTurfReset();   // clear the zone/alliance meta for a fresh run
     // clear any in-flight drive-by cars
     for (let i = drivebys.length - 1; i >= 0; i--) despawnDriveby(drivebys[i], i);
     activeDrivebys = 0;

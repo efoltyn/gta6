@@ -83,6 +83,49 @@
     if (P.hp <= 0) CBZ.cityKillPlayer(reason || "killed", { fromX, fromZ });
   };
 
+  // ---- did an EXPLOSION kill us? (car blast / airstrike / missile) ----
+  // All player blast damage in crashfx.js routes through ONE path with the
+  // reason "caught in an explosion"; airstrikes/missiles share it. Match that
+  // plus any obvious blast wording so the cinematic fires on every boom.
+  function isExplosionCause(reason) {
+    if (!reason) return false;
+    const r = ("" + reason).toLowerCase();
+    return r.indexOf("explos") >= 0 || r.indexOf("blast") >= 0 ||
+           r.indexOf("airstrike") >= 0 || r.indexOf("missile") >= 0 ||
+           r.indexOf("blown up") >= 0;
+  }
+
+  // ---- are we under a ROOF (inside a building)? ----
+  // Building floor/roof slabs are registered as CBZ.platforms (with `top`) AND
+  // as CBZ.losBlockers meshes. Cheap test first: any platform whose footprint
+  // covers us and whose top sits above head height = a ceiling overhead. Then a
+  // single short up-ray against the LOS meshes as a backstop (covers roofs that
+  // only exist as meshes). No per-frame cost — only runs once, on death.
+  const _upRay = new THREE.Raycaster();
+  const _upOrigin = new THREE.Vector3(), _upDir = new THREE.Vector3(0, 1, 0);
+  function isIndoors(px, py, pz) {
+    // overhead platform (floor/roof slab above the player)
+    const plats = CBZ.platforms;
+    if (plats) {
+      const headY = py + 1.6;
+      for (let i = 0; i < plats.length; i++) {
+        const p = plats[i];
+        if (p.top == null) continue;
+        if (p.top > headY && p.top < py + 28 &&
+            px >= p.minX && px <= p.maxX && pz >= p.minZ && pz <= p.maxZ) return true;
+      }
+    }
+    // backstop: short up-ray hits a roof/ceiling LOS mesh
+    const blk = CBZ.losBlockers;
+    if (blk && blk.length) {
+      _upOrigin.set(px, py + 1.5, pz);
+      _upRay.set(_upOrigin, _upDir); _upRay.far = 26;
+      const hit = _upRay.intersectObjects(blk, false);
+      if (hit.length) return true;
+    }
+    return false;
+  }
+
   // ---- WASTED ----
   CBZ.cityKillPlayer = function (reason, imp) {
     const P = CBZ.player;
@@ -90,6 +133,21 @@
     P.dead = true; P.hp = 0; dying = true;
     // cinematic third-person replay: orbit the body (camera.js reads cityCam)
     if (CBZ.cityCam) CBZ.cityCam.death = { t: 0, ang0: Math.random() * 6.28 };
+
+    // CINEMATIC EXTERIOR DEATH CAM: killed by an explosion while INSIDE a
+    // building → first cut to a street-level shot looking back at the building +
+    // the blast, hold a beat, THEN the normal orbit + fade-to-WASTED. Outdoor or
+    // non-explosion deaths skip this and keep the stock behaviour.
+    let extBeat = 0;
+    if (isExplosionCause(reason) && imp && imp.fromX != null &&
+        CBZ.cityCam && CBZ.cityCam.death && CBZ.cityCam.beginExteriorDeathCam &&
+        isIndoors(P.pos.x, P.pos.y, P.pos.z)) {
+      extBeat = 1.5;
+      CBZ.cityCam.beginExteriorDeathCam({
+        bx: imp.fromX, bz: imp.fromZ, by: P.pos.y + 0.6,
+        px: P.pos.x, pz: P.pos.z, dur: extBeat,
+      });
+    }
     if (CBZ.playerChar) CBZ.playerChar.group.visible = true;
     if (P.driving && CBZ.cityExitVehicle) { CBZ.cityExitVehicle(); }
     // spinning ragdoll fling (physics.js handles player._death in non-escape modes)
@@ -112,11 +170,14 @@
     const killer = (g._cityKiller && (CBZ.now || 0) - (g._cityKillerT || 0) < 6) ? g._cityKiller : null;
     const line = killer ? ("Killed by " + killer) : (reason ? ("You were " + reason) : "You died");
     // hold the WASTED title back ~1.8s so the ragdoll fling plays out first, THEN
-    // it fades in — no jarring instant pop on the exact frame you die.
+    // it fades in — no jarring instant pop on the exact frame you die. When the
+    // exterior cinematic plays, hold the title until the street shot has done its
+    // job (the full beat + a touch of the orbit hand-off) so the reveal lands.
     pendingWasted = line + "  ·  respawning at " + where + "…";
-    wastedT = 1.8;
+    const titleDelay = extBeat > 0 ? (extBeat + 0.6) : 1.8;
+    wastedT = titleDelay;
     g._cityKiller = null;
-    respawnT = 4.6 + 1.8;       // keep the title on screen its full duration after the delay
+    respawnT = 4.6 + titleDelay;   // keep the title on screen its full duration after the delay
   };
 
   function respawn() {
@@ -176,4 +237,119 @@
     };
     setTimeout(tick, 50);
   };
+
+  // ---- CINEMATIC EXTERIOR DEATH CAM (self-contained fallback) ----
+  // The primary home for this is city/camera.js, but if that module isn't loaded
+  // we install the exact same exterior-shot plumbing here so the feature still
+  // works. systems/camera.js positions the death ORBIT at onAlways(50); this
+  // override runs at 51 and, ONLY during the authored exterior beat
+  // (CBZ.cityCam.death.ext), takes the camera over — pulling it out to the street
+  // and looking back at the building + blast — without clipping into walls, then
+  // releases cleanly to the orbit. Guarded so it never double-installs.
+  (function installExteriorDeathCam() {
+    const cc = CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
+    if (cc._extHookInstalled) return;            // camera.js already owns it
+    cc._extHookInstalled = true;
+
+    const camera = CBZ.camera;
+    if (!camera) return;
+    const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
+    const _eye = new THREE.Vector3(), _look = new THREE.Vector3();
+    const ray = new THREE.Raycaster();
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    function unclip(ox, oy, oz, px, py, pz) {
+      _ro.set(ox, oy, oz);
+      _rd.set(px - ox, py - oy, pz - oz);
+      let d = _rd.length();
+      if (d < 0.001) return null;
+      _rd.multiplyScalar(1 / d);
+      let best = d;
+      ray.set(_ro, _rd); ray.far = d;
+      const blk = CBZ.losBlockers;
+      if (blk && blk.length) { const hit = ray.intersectObjects(blk, false); if (hit.length && hit[0].distance < best) best = hit[0].distance; }
+      const rad = 0.34, cs = CBZ.colliders;
+      if (cs) {
+        for (let i = 0; i < cs.length; i++) {
+          const c = cs[i]; if (c.noCam) continue;
+          const minX = c.minX - rad, maxX = c.maxX + rad, minZ = c.minZ - rad, maxZ = c.maxZ + rad;
+          const minY = (c.y0 != null ? c.y0 : -1e4) - rad, maxY = (c.y1 != null ? c.y1 : 1e4) + rad;
+          let t0 = 0, t1 = best, ta, tb, tmp; const dx = _rd.x, dy = _rd.y, dz = _rd.z;
+          if (dx > -1e-8 && dx < 1e-8) { if (ox < minX || ox > maxX) continue; }
+          else { ta = (minX - ox) / dx; tb = (maxX - ox) / dx; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+          if (dy > -1e-8 && dy < 1e-8) { if (oy < minY || oy > maxY) continue; }
+          else { ta = (minY - oy) / dy; tb = (maxY - oy) / dy; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+          if (dz > -1e-8 && dz < 1e-8) { if (oz < minZ || oz > maxZ) continue; }
+          else { ta = (minZ - oz) / dz; tb = (maxZ - oz) / dz; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
+          if (t0 > 0.001 && t0 < best) best = t0;
+        }
+      }
+      if (best < d) { const dd = Math.max(2.0, best - 0.4); _eye.set(ox + _rd.x * dd, oy + _rd.y * dd, oz + _rd.z * dd); return _eye; }
+      _eye.set(px, py, pz); return _eye;
+    }
+
+    function resolveLot(x, z) {
+      const A = CBZ.city && CBZ.city.arena;
+      if (!A || !A.lots) return null;
+      let best = null, bestD = 1e9;
+      for (let i = 0; i < A.lots.length; i++) {
+        const l = A.lots[i]; if (!l || !l.building) continue;
+        const hw = (l.w || 8) / 2 + 1.5, hd = (l.d || 8) / 2 + 1.5;
+        if (Math.abs(x - l.cx) <= hw && Math.abs(z - l.cz) <= hd) return l;
+        const dx = x - l.cx, dz = z - l.cz, dd = dx * dx + dz * dz;
+        if (dd < bestD) { bestD = dd; best = l; }
+      }
+      return bestD < 36 * 36 ? best : null;
+    }
+
+    cc.beginExteriorDeathCam = function (opts) {
+      if (!cc.death) return;
+      opts = opts || {};
+      const bx = opts.bx != null ? opts.bx : (opts.px || 0);
+      const bz = opts.bz != null ? opts.bz : (opts.pz || 0);
+      const px = opts.px != null ? opts.px : bx;
+      const pz = opts.pz != null ? opts.pz : bz;
+      const by = opts.by != null ? opts.by : 1.4;
+      let nx = 0, nz = 0;
+      const lot = resolveLot(px, pz);
+      if (lot && lot.building && lot.building.door && lot.building.door.nx != null) { nx = lot.building.door.nx; nz = lot.building.door.nz; }
+      if (nx === 0 && nz === 0) {
+        const A = CBZ.city && CBZ.city.arena;
+        const ccx = (A && A.cx != null) ? A.cx : 0, ccz = (A && A.cz != null) ? A.cz : 0;
+        nx = px - ccx; nz = pz - ccz; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+      }
+      const out = 13.5, side = 5.5, height = 3.4;
+      const sx = -nz, sz = nx;
+      const camX = bx + nx * out + sx * side, camZ = bz + nz * out + sz * side;
+      cc.death.ext = {
+        px: camX, py: height, pz: camZ,
+        lx: bx, ly: by + 1.2, lz: bz,
+        ox: bx, oy: by + 1.0, oz: bz,
+        t: 0, dur: opts.dur != null ? opts.dur : 1.4, fov: 44, _bx: null,
+      };
+      cc.death.ang0 = Math.atan2(camZ - bz, camX - bx);
+    };
+
+    CBZ.onAlways(51, function (dt) {
+      if (g.mode !== "city") return;
+      if (!cc.death || !cc.death.ext) return;
+      const ex = cc.death.ext;
+      ex.t = (ex.t || 0) + dt;
+      if (ex.t >= ex.dur) { cc.death.ext = null; return; }
+      const clamped = unclip(ex.ox, ex.oy, ex.oz, ex.px, ex.py, ex.pz);
+      let cx = ex.px, cy = ex.py, cz = ex.pz;
+      if (clamped) { cx = clamped.x; cy = clamped.y; cz = clamped.z; }
+      cy = Math.max(cy, 0.9);
+      const k = easeOut(Math.min(1, ex.t / 0.45));
+      const creep = Math.min(1, ex.t / ex.dur) * 0.6;
+      _eye.set(lerp(cx, ex.ox, creep * 0.06), cy, lerp(cz, ex.oz, creep * 0.06));
+      if (ex._bx == null) { ex._bx = camera.position.x; ex._by = camera.position.y; ex._bz = camera.position.z; }
+      camera.position.set(lerp(ex._bx, _eye.x, k), lerp(ex._by, _eye.y, k), lerp(ex._bz, _eye.z, k));
+      _look.set(ex.lx, ex.ly, ex.lz);
+      camera.lookAt(_look);
+      const wantFov = ex.fov || 46;
+      if (Math.abs(camera.fov - wantFov) > 0.02) { camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 4.5); camera.updateProjectionMatrix(); }
+    });
+  })();
 })();

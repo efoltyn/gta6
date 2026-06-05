@@ -59,7 +59,15 @@
   const promotedBy = new Int32Array(CAP);        // crowd index -> pool slot (or -1)
   const deadAgent = new Uint8Array(CAP);         // agent fully removed (corpse faded)
   const corpseT = new Float32Array(CAP);         // >0 = freshly killed, lying as a body for this many sec
-  let pool = [], poolBuilt = false;
+  // THINNING: as the finite city population is killed off, a growing share of the
+  // surviving ambient agents go "off-street" (suppressed) so the rendered density
+  // tracks the remaining headcount — the streets EMPTY after a massacre instead of
+  // staying magically full. Suppressed agents aren't dead (they don't reduce the
+  // living total); they're parked off-map and skipped by sim/render/reseed/promote
+  // until the target density says the street should hold more people again.
+  const suppressed = new Uint8Array(CAP);
+  let liveTarget = CAP;                           // how many agents should be ON the street
+  let pool = [], poolBuilt = false;               // interactive-promotion pool (declaration was dropped when thinning was added)
   promotedBy.fill(-1);
 
   // a UNIT (1×1×1) box scaled per-part at render time, jail-crowd style. Tinted
@@ -116,7 +124,8 @@
     const A = arena(); if (!A) { count = 0; return 0; }
     count = Math.max(0, Math.min(CAP, n | 0));
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
-    promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0);
+    promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
+    liveTarget = count;                          // full street at the start of a run
     for (let i = 0; i < count; i++) {
       pickWaypoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
       pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;
@@ -152,6 +161,7 @@
     for (let i = 0; i < count; i++) {
       if (deadAgent[i]) continue;
       if (corpseT[i] > 0) { corpseT[i] -= dt; if (corpseT[i] <= 0) deadAgent[i] = 1; continue; }  // lying dead → fade out
+      if (suppressed[i]) continue;                        // off-street (thinned out) → don't walk it
       if (promotedBy[i] >= 0) continue;                   // a real promoted ped owns this one
       let dx = tx[i] - px[i], dz = tz[i] - pz[i], d = Math.hypot(dx, dz);
       if (d < 1.4) { pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z; dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
@@ -188,7 +198,7 @@
   function render() {
     if (!ready || !count) return;
     for (let i = 0; i < count; i++) {
-      if (deadAgent[i] || promotedBy[i] >= 0) {        // faded corpse, or promoted to a real rig → collapse the instanced body
+      if (deadAgent[i] || suppressed[i] || promotedBy[i] >= 0) {  // faded corpse, thinned off-street, or promoted to a real rig → collapse the instanced body
         wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
         for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
         continue;
@@ -298,7 +308,7 @@
       const e = pool[s]; if (e.idx >= 0) continue;
       let best = -1, bd = PROMO_AHEAD2;
       for (let i = 0; i < count; i++) {
-        if (promotedBy[i] >= 0 || deadAgent[i]) continue;
+        if (promotedBy[i] >= 0 || deadAgent[i] || suppressed[i]) continue;
         const dx = px[i] - ppx, dz = pz[i] - ppz, d2 = dx * dx + dz * dz;
         if (d2 >= bd) continue;
         // near in any direction, OR ahead of the camera within the far range
@@ -330,7 +340,7 @@
     // walk a rolling window of agents (a few per frame) so the cost is bounded
     for (let n = 0; n < count && scanned < 40 && moved < 2; n++) {
       const i = reseedScan; reseedScan = (reseedScan + 1) % Math.max(1, count); scanned++;
-      if (deadAgent[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
+      if (deadAgent[i] || corpseT[i] > 0 || promotedBy[i] >= 0 || suppressed[i]) continue;
       const dx = px[i] - ppx, dz = pz[i] - ppz, d2 = dx * dx + dz * dz;
       if (d2 < RESEED_BEHIND2) continue;          // already close enough to matter
       // is this far agent BEHIND / off to the side? if so, recycle it ahead.
@@ -353,7 +363,7 @@
 
   // ---- COMBAT: the ambient crowd is now shootable + run-over-able ----
   // (previously only the ~14 promoted peds could be hit; far NPCs were phantoms).
-  function shootable(i) { return !deadAgent[i] && corpseT[i] <= 0 && promotedBy[i] < 0; }
+  function shootable(i) { return !deadAgent[i] && !suppressed[i] && corpseT[i] <= 0 && promotedBy[i] < 0; }
   // distance along a (normalised) ray at which it first enters a sphere, or -1.
   function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r, maxT) {
     const mx = ox - cx, my = oy - cy, mz = oz - cz;
@@ -392,6 +402,10 @@
     if (CBZ.cityCrime && !opts.noCrime) CBZ.cityCrime(opts.byCar ? 150 : 200, { x: x, z: z, type: opts.byCar ? "vehicular homicide" : "murder" });
     if (CBZ.game) CBZ.game.cityKills = (CBZ.game.cityKills || 0) + 1;
     if (CBZ.city && CBZ.city.addKill) CBZ.city.addKill();   // count crowd kills toward story/leaderboard too
+    // FINITE POPULATION: an ambient agent just died → tick the city headcount
+    // DOWN (peds.js owns the roster). Un-promoted agents only ever die through
+    // here; promoted rigs die via cityKillPed — exactly one decrement each.
+    if (CBZ.cityPopulationDie) CBZ.cityPopulationDie(1);
     return true;
   };
   // everyone within r of (x,z) gets run down (car mowing through a crowd).
@@ -408,7 +422,65 @@
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {
     const _clear = CBZ.clearCityPeds;
-    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; promotedBy.fill(-1); deadAgent.fill(0); return _clear.apply(this, arguments); };
+    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
+  }
+
+  // ---- DENSITY THINNING: keep the on-street agent count in step with the finite
+  //      city headcount. liveTarget = full crowd × (alive / total); as people are
+  //      killed off, the fraction falls and we PARK surplus living agents off-map
+  //      (suppress) so the streets get visibly emptier — and never re-park more
+  //      than the math says, so a massacre stays a massacre (no magic refill).
+  //      Cheap: a couple of park/un-park flips per call, biased AWAY from the
+  //      player so bodies don't pop in/out right in your face. ----
+  let _thinT = 0, _thinScan = 0;
+  function recountAgents() {                     // living, on-street (not dead/suppressed/corpse)
+    let live = 0, sup = 0;
+    for (let i = 0; i < count; i++) {
+      if (deadAgent[i] || corpseT[i] > 0) continue;
+      if (suppressed[i]) sup++; else live++;
+    }
+    return { live: live, sup: sup };
+  }
+  function thin(dt) {
+    _thinT -= dt; if (_thinT > 0) return;
+    _thinT = 0.5;                                // re-evaluate ~twice a second (cheap)
+    if (!CBZ.cityPopulation) return;
+    const pop = CBZ.cityPopulation();
+    const frac = pop.total > 0 ? pop.alive / pop.total : 1;
+    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)));
+    const c = recountAgents();
+    const P = CBZ.player;
+    const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
+    // FAR bias so density changes happen off-screen, never popping at your feet
+    const FAR2 = 60 * 60;
+    if (c.live > liveTarget) {
+      // too many on the street → suppress a few FAR, non-promoted, living agents
+      let need = Math.min(6, c.live - liveTarget), scanned = 0;
+      while (need > 0 && scanned < count) {
+        const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
+        if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
+        const dx = px[i] - ppx, dz = pz[i] - ppz;
+        if (dx * dx + dz * dz < FAR2) continue;  // close enough to see → leave it alone
+        suppressed[i] = 1; need--;
+      }
+    } else if (c.live < liveTarget && c.sup > 0) {
+      // population didn't drop further (or a fresh run) → let a few back onto the
+      // street, re-seeded at a FAR sidewalk point so they walk IN, not blink in.
+      const A = arena();
+      let add = Math.min(4, liveTarget - c.live), scanned = 0;
+      while (add > 0 && scanned < count) {
+        const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
+        if (!suppressed[i] || deadAgent[i]) continue;
+        suppressed[i] = 0;
+        if (A && A.randomSidewalkPoint) {        // place them somewhere fresh on the map
+          const p = A.randomSidewalkPoint(); if (A.clampToCity) A.clampToCity(p, 0.6);
+          px[i] = p.x; pz[i] = p.z;
+          pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;
+          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+        }
+        add--;
+      }
+    }
   }
 
   // ambient layer: runs during city play (own order, independent of peds @34).
@@ -417,6 +489,7 @@
     if (root) root.visible = true;
     if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 320);
     sim(dt);
+    thin(dt);             // keep on-street density in step with the finite headcount
     aheadReseed();        // pull distant bodies into the street ahead of you
     updatePromotion();
     render();
