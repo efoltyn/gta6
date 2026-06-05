@@ -225,7 +225,7 @@
     sprintMul: 1.7,
     staminaMax: 100, staminaDrain: 22, staminaRegen: 14,
     // wanted: heat needed to reach each star, and the cop response per star
-    starHeat: [0, 100, 240, 440, 700, 1000],
+    starHeat: [0, 110, 300, 650, 1500, 4000],
     heatDecay: 2.2,        // heat bled off per second when unseen
 
     // ---- world composition: every lot is one of these (buildings.js) -------

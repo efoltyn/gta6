@@ -32,7 +32,10 @@
     alarm: fx([R + "alarm1.mp3", R + "alarm4.mp3"], 0.58, 0.48),
     siren: fx([W + "disaster_siren.m4a"], 0.62, 1.8),
     lockdown: fx([W + "lockdown_brief.m4a"], 0.6, 1.0),   // BRIEF jail-lockdown siren (one-shot, not a loop)
-    report: fx([K + "switch_003.m4a", R + "click7.mp3"], 0.38, 0.12),
+    // NPC/cop GUNFIRE. Was wired to UI click samples (switch/click) — that tinny
+    // "ding" was the xylophone/bell heard every firefight. Now a real pistol crack,
+    // a touch quieter + wider-pitched than the player's so it reads as "incoming".
+    report: fx([F + "pistol-1.m4a", F + "pistol-2.m4a", F + "pistol-3.m4a"], 0.52, 0.07),
 
     step: fx([
       K + "footstep_concrete_000.m4a", K + "footstep_concrete_001.m4a",
@@ -59,7 +62,7 @@
     // Pitch is randomized fairly wide so the same clip reads as different people;
     // ~0.7s cooldown backs the city-wide throttle in peds.js. Tasteful volume.
     scream: layers([
-      part([W + "scream-c.m4a", W + "scream-d.m4a", W + "scream-e.m4a"], 0.5, 0.9, 1.18),
+      part([W + "scream-c.m4a", W + "scream-d.m4a", W + "scream-e.m4a"], 0.26, 0.9, 1.18),
     ], 0.7),
     headshot: layers([
       part([K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.66, 1.08, 1.18),

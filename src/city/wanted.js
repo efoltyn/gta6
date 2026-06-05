@@ -68,7 +68,16 @@
     }
     const info = crimeInfo(opts.type, sev);
     let target = info.stars;
-    if (info.kill) { g.cityMurders = (g.cityMurders || 0) + 1; target = g.cityMurders > 3 ? 5 : (g.cityMurders > 1 ? 4 : 3); }
+    // 5★ is meant to be RARE + earned — it scrambles the gunship + airstrikes, so it
+    // must be REALLY hard to reach. A single killing (even a cop) tops out at 4★;
+    // only a sustained SPREE gets you to 5★. Terrorism stays an instant 5★ (it's a
+    // deliberate mass-casualty act). Cops weigh 5× a civilian toward the spree.
+    if (opts.type === "_copkill" || info.kill) {
+      if (opts.type === "_copkill") g.cityCopKills = (g.cityCopKills || 0) + 1;
+      else g.cityMurders = (g.cityMurders || 0) + 1;
+      const spree = (g.cityMurders || 0) + (g.cityCopKills || 0) * 5;
+      target = spree >= 15 ? 5 : (spree >= 4 ? 4 : 3);
+    }
     lastCrimeT = CBZ.now;
     g.cityLastKnown = { x: opts.x != null ? opts.x : CBZ.player.pos.x, z: opts.z != null ? opts.z : CBZ.player.pos.z, t: CBZ.now };
     const prev = g.wanted | 0;
@@ -126,7 +135,7 @@
   }
 
   function addHeat(n) { g.heat = Math.max(0, (g.heat || 0) + n); g.wanted = starsFromHeat(g.heat); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-  function clearWanted() { g.heat = 0; g.wanted = 0; g.cityMurders = 0; g.cityCrimeLabel = null; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+  function clearWanted() { g.heat = 0; g.wanted = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
 
   // ---- DISGUISE: pull a mask up and witnesses can't ID you (no stars). [T] ----
   addEventListener("keydown", function (e) {
@@ -179,7 +188,7 @@
       const rate = CBZ.CITY.heatDecay * (g.wanted >= 4 ? 0.6 : 1);
       g.heat = Math.max(0, g.heat - rate * dt);
       g.wanted = starsFromHeat(g.heat);
-      if (g.heat <= 0) { g.cityMurders = 0; g.cityCrimeLabel = null; }   // cleared → fresh slate
+      if (g.heat <= 0) { g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null; }   // cleared → fresh slate
     }
     g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -187,7 +196,7 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityMasked = false; g.cityCrimeLabel = null; };
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; };
   function augment() { if (CBZ.city) { CBZ.city.crime = crime; CBZ.city.report = report; CBZ.city.addHeat = addHeat; CBZ.city.clearWanted = clearWanted; CBZ.city.stars = function () { return g.wanted | 0; }; } }
   if (CBZ.city) augment(); else { const iv = setInterval(function () { if (CBZ.city) { augment(); clearInterval(iv); } }, 0); }
 })();

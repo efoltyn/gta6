@@ -201,7 +201,7 @@
     // prefer the dedicated airstrike blast (crashfx agent provides it — bigger,
     // longer, with shockwave); fall back to a beefed-up car explosion.
     if (CBZ.cityAirstrikeExplosion) {
-      CBZ.cityAirstrikeExplosion(x, z, { power: 2.4, radius: 13, byPlayer: false, y: y });
+      CBZ.cityAirstrikeExplosion(x, z, { power: 3.0, radius: 16, byPlayer: false, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
     } else if (CBZ.cityExplosion) {
       CBZ.cityExplosion(x, z, { power: 2.2, radius: 11, byPlayer: false });
     }

@@ -376,7 +376,7 @@
   CBZ.cityAirstrikeExplosion = function (x, z, opts) {
     opts = opts || {};
     const power = opts.power || 2, R = (opts.radius || 12) * power, byPlayer = !!opts.byPlayer;
-    const P = Math.min(3.4, power * 1.35);     // bigger visual ceiling than a car blast
+    const P = Math.min(4.6, power * 1.35);     // bigger visual ceiling than a car blast (airstrike = huge)
     // detonation seat: air-bursts (missile caught a wall) sit higher, ground hits low
     const seat = Math.max(0, (opts.y || 0));
     const cy = 1.2 + seat * 0.5;
