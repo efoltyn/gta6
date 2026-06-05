@@ -736,34 +736,20 @@
 
   function renderHeadAndAllies() {
     if (!headEl) return;
-    const pop = liveHeadcount();
     const ctrl = CBZ.cityZoneControl();
-    headEl.innerHTML = "ALIVE <b>" + pop + "</b> · " + (ctrl.total - ctrl.neutral) + "/" + ctrl.total + " districts held";
-    // leader line
+    // minimal: just districts held (the alive headcount is the top-right pill).
+    headEl.innerHTML = "<b>" + (ctrl.total - ctrl.neutral) + "/" + ctrl.total + "</b> districts held";
+    // leader line (concise — the full standings live on the Tab board)
     const ldr = CBZ.cityTakeoverLeader();
     if (leadEl) {
       if (ldr) {
         const isYou = ldr.id === "player";
-        leadEl.innerHTML = "Leading: <b style='color:" + hex6(gangColorOf(ldr.id)) + "'>" + (isYou ? "YOU" : ldr.name) + "</b> (" + ldr.zones + "/" + ldr.total + ")";
-      } else leadEl.textContent = "City up for grabs — no one holds a district.";
+        leadEl.innerHTML = "Leading: <b style='color:" + hex6(gangColorOf(ldr.id)) + "'>" + (isYou ? "YOU" : ldr.name) + "</b> " + ldr.zones + "/" + ldr.total;
+      } else leadEl.textContent = "City up for grabs.";
     }
-    // alliance strip: list each gang with its zone count + a couple of relations
-    if (allyEl) {
-      const gangs = (CBZ.cityGangs || []).filter((x) => !x.absorbed);
-      let html = "";
-      for (const gn of gangs) {
-        const zc = ctrl.byGang[gn.id] || 0;
-        html += "<span style='color:" + hex6(gn.color) + "'>" + (gn.isPlayer ? "You" : shortName(gn.name)) + " " + zc + "</span>";
-      }
-      // one shifting-pact highlight (most-allied + most-warring pair)
-      const pacts = CBZ.cityAlliances();
-      let ally = null, war = null;
-      for (const p of pacts) { if (p.status === "ally" && (!ally || p.rel > ally.rel)) ally = p; if (p.status === "war" && (!war || p.rel < war.rel)) war = p; }
-      let line2 = "";
-      if (ally) line2 += "🤝 " + shortName(gangName(ally.a)) + "+" + shortName(gangName(ally.b)) + " ";
-      if (war) line2 += "⚔ " + shortName(gangName(war.a)) + "v" + shortName(gangName(war.b));
-      allyEl.innerHTML = html + (line2 ? "<br><span style='color:#8a93a3'>" + line2 + "</span>" : "");
-    }
+    // per-gang scores + the alliance strip were too wordy for an always-on HUD —
+    // they now live ONLY on the Tab takeover board. Keep the bar clean.
+    if (allyEl) allyEl.innerHTML = "";
   }
   function shortName(n) { if (!n) return "?"; const w = n.split(" "); return w.length > 1 ? w[w.length - 1] : n; }
 

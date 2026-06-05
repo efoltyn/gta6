@@ -234,10 +234,11 @@
 
     // ---- gangs: factions that own the abandoned blocks (city/gangs.js) -----
     gangs: [
-      { id: "vipers",  name: "Vipers",         color: 0x49c46e, accent: 0x1c5e30 },
-      { id: "kings",   name: "Diamond Kings",  color: 0xb079ea, accent: 0x4a2c6e },
-      { id: "reapers", name: "Steel Reapers",  color: 0x5b8bff, accent: 0x223a6e },
-      { id: "saints",  name: "Ashland Saints", color: 0xe2574b, accent: 0x6e221c },
+      // Real gangs only. ids kept stable (internal); names/colors are what show.
+      { id: "saints",  name: "Bloods",       color: 0xc0392b, accent: 0x6e1c1c },  // red
+      { id: "reapers", name: "Crips",        color: 0x2f6bd6, accent: 0x1a3a6e },  // blue
+      { id: "kings",   name: "Latin Kings",  color: 0xe0b020, accent: 0x6e5210 },  // gold
+      { id: "vipers",  name: "Trinitarios",  color: 0x2faa55, accent: 0x143b22 },  // green
     ],
     gangPerTurf: [2, 4],   // members spawned to hold each controlled building
     gangArmedFrac: 0.55,   // share of gang members packing a firearm

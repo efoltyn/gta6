@@ -260,14 +260,11 @@
 
   CBZ.cityWorldSummary = function () {
     const w = ensure();
-    const bits = [];
-    if ((w.debt || 0) > 0) bits.push("debt $" + Math.round(w.debt));
-    if ((w.world.panic || 0) > 2) bits.push("panic " + Math.round(w.world.panic));
-    if ((w.world.emergency || 0) > 2) bits.push("emergency " + Math.round(w.world.emergency));
-    if ((w.transport.delays || 0) > 0.5) bits.push("transit delay " + Math.round(w.transport.delays));
-    if ((w.politics.scandal || 0) > 1) bits.push("scandal " + Math.round(w.politics.scandal));
-    if (!bits.length) bits.push("city stable");
-    return bits.join("   ");
+    // Only surface ACTIONABLE state on the always-on HUD — debt you owe. The raw
+    // panic/emergency/transit/scandal meters were HUD clutter (panic lingers maxed
+    // for minutes); they live in the world/politics screens, not the corner readout.
+    if ((w.debt || 0) > 0) return "debt $" + Math.round(w.debt);
+    return "";
   };
 
   CBZ.onUpdate(32.4, function (dt) {
