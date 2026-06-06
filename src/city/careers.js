@@ -85,6 +85,251 @@
     return Math.max(50, Math.round(v / 10) * 10);
   }
 
+  // ============================================================
+  //  GANG CONTRACTS — the work your CREW puts you on.
+  //
+  //  This is what makes joining a gang and climbing the ladder mean
+  //  something. The crew you belong to (CBZ.cityMembership — joined
+  //  someone else's set, OR your own founded gang via g.playerGang)
+  //  hands you JOBS. Finishing them pays CASH + RANK PROGRESS routed
+  //  through the real hierarchy: cityMemberPutInWork("body"/"cash")
+  //  feeds your standing inside an NPC crew (so you actually get bumped
+  //  up Prospect→Lookout→…→Lt.), and when you're the boss of your own
+  //  set it banks treasury + respect.
+  //
+  //  Contracts (GTA SA turf / GTA Online crew-job flavour):
+  //    HIT      — clip a marked rival member (or their Lieutenant: harder, richer)
+  //    TAKE     — seize/hold a rival or neutral BLOCK for the set
+  //    COLLECT  — shake a debt out of a marked ped (rob/drop them)
+  //    RUN      — courier PRODUCT across town without getting it taken
+  //    DEFEND   — hold your own turf through a rival raid window
+  //  Each has a target/location, a payout + rank reward scaled to risk,
+  //  a TIME WINDOW, and a clean success/fail. Researched against GTA San
+  //  Andreas gang turf wars (kill rivals to take a hood, defend to keep
+  //  it) and GTA Online crew/sell-mission structure.
+  // ============================================================
+  let gcOffered = [];
+  const GC_ICON = { gcHit: "🔫", gcTake: "🚩", gcCollect: "💵", gcRun: "🎒", gcDefend: "🛡️" };
+
+  // who do you ride with? returns { kind:"member"|"boss", gangId, rank, name }
+  // — works whether you JOINED an NPC crew or FOUNDED your own.
+  function myCrew() {
+    const pg = g.playerGang;
+    if (pg && pg.founded) return { kind: "boss", gangId: "player", rank: "boss", rec: pg, name: pg.name || "your gang" };
+    const m = (CBZ.cityMembership && CBZ.cityMembership()) || null;
+    if (m && m.gangId) {
+      const rec = (CBZ.cityGangs || []).find((x) => x.id === m.gangId) || null;
+      return { kind: "member", gangId: m.gangId, rank: m.rank, rec: rec, memb: m, name: rec ? rec.name : "the crew" };
+    }
+    return null;
+  }
+  CBZ.cityInCrew = function () { return !!myCrew(); };
+
+  // crew rank tier 0..6 (gates which contracts the set trusts you with) —
+  // a boss of his own set is treated as top-tier.
+  const GC_RANK_TIER = { prospect: 0, lookout: 1, runner: 2, soldier: 3, enforcer: 4, lt: 5, lieutenant: 5, capo: 5, underboss: 6, boss: 6 };
+  function crewTier(c) { return c ? (GC_RANK_TIER[c.rank] != null ? GC_RANK_TIER[c.rank] : 0) : 0; }
+
+  // a rival member of a DIFFERENT, non-allied crew (optionally a lieutenant).
+  function findRivalMember(myGangId, wantLt) {
+    let best = null, bd = Infinity, anyLt = null, anyLtd = Infinity;
+    const P = CBZ.player ? CBZ.player.pos : { x: 0, z: 0 };
+    for (const p of CBZ.cityPeds) {
+      if (!p || p.dead || !p.gang || p.gang === myGangId || p.gang === "player") continue;
+      if (CBZ.cityAreAllied && CBZ.cityAreAllied(myGangId, p.gang)) continue;
+      const d = Math.hypot(p.pos.x - P.x, p.pos.z - P.z);
+      const isLt = p.isBoss || p.rank === "lt" || p.rank === "enforcer";
+      if (isLt && d < anyLtd) { anyLtd = d; anyLt = p; }
+      if (d < bd) { bd = d; best = p; }
+    }
+    return (wantLt && anyLt) ? anyLt : best;
+  }
+
+  // a rival / neutral ZONE the crew would want to take (not already yours/the set's).
+  function findTakeZone(myGangId) {
+    if (!CBZ.cityZones) return null;
+    const P = CBZ.player ? CBZ.player.pos : { x: 0, z: 0 };
+    let best = null, bd = Infinity;
+    for (const z of CBZ.cityZones()) {
+      if (z.owner === myGangId) continue;
+      if (myGangId !== "player" && z.owner === "player") continue;
+      if (z.owner && CBZ.cityAreAllied && CBZ.cityAreAllied(myGangId, z.owner)) continue;
+      const d = Math.hypot(z.cx - P.x, z.cz - P.z);
+      if (d < bd) { bd = d; best = z; }
+    }
+    return best;
+  }
+
+  // a YOUR-side zone to defend (only meaningful for a boss of a founded set).
+  function findOwnZone(myGangId) {
+    if (!CBZ.cityZones) return null;
+    for (const z of CBZ.cityZones()) if (z.owner === myGangId) return z;
+    return null;
+  }
+
+  // roll a believable slate of crew jobs for the set you ride with. Heavier
+  // work (lieutenant hits, taking blocks, defending) unlocks as your in-crew
+  // RANK climbs — the set doesn't put a fresh Prospect on a hit squad.
+  function rollGangContracts() {
+    const c = myCrew(); if (!c) return [];
+    const tier = crewTier(c);
+    const jobs = [];
+
+    // HIT a rival — always on the table; at higher rank it's their Lieutenant.
+    const wantLt = tier >= 4;
+    const mark = findRivalMember(c.gangId, wantLt);
+    if (mark) {
+      const isLt = mark.isBoss || mark.rank === "lt" || mark.rank === "enforcer";
+      jobs.push({
+        type: "gcHit", target: mark, lt: isLt, t: 150,
+        reward: payout(isLt ? 1100 : 380, isLt ? 600 : 500),
+        body: isLt ? 3 : 1, kick: isLt ? 0.30 : 0.22, respect: isLt ? 14 : 6,
+        desc: (isLt ? "HIT (Lt.): clip " : "HIT: clip ") + (mark.name || "a rival") + (mark.gang ? " · rival set" : ""),
+      });
+    }
+
+    // COLLECT a debt — shake down a marked ped (rob OR drop them to clear it).
+    const civs = aliveCivilians().filter((p) => !p.gang && !p.recruited && !p.companion && !p.robbed);
+    if (civs.length) {
+      const debtor = pick(civs);
+      const owed = 200 + ((rng() * 500) | 0);
+      jobs.push({
+        type: "gcCollect", target: debtor, owed: owed, t: 150,
+        reward: payout(260, 300), kick: 0.35, respect: 5,
+        desc: "COLLECT: lean on " + (debtor.name || "a debtor") + " for the $" + owed + " they owe",
+      });
+    }
+
+    // RUN PRODUCT — courier the set's stash across town clean (lose it if you
+    // get too hot carrying it). A driving job; clean drops pay a wheel bonus.
+    const lots = CBZ.city.arena.lots.filter((l) => l.building);
+    if (lots.length && tier >= 1) {
+      const a = randSpot(), b = lotDoor(pick(lots));
+      jobs.push({
+        type: "gcRun", pickup: a, dest: b, got: false, t: 180,
+        reward: payout(700, 700), kick: 0.28, respect: 7,
+        desc: "RUN PRODUCT: grab the package, run it clean across town",
+      });
+    }
+
+    // TAKE A BLOCK — seize a rival/neutral zone for the set (be on it; if a
+    // rival holds it, thin out their bodies there to flip it).
+    if (tier >= 2) {
+      const z = findTakeZone(c.gangId);
+      if (z) {
+        const held = !!z.owner;
+        jobs.push({
+          type: "gcTake", zoneId: z.id, x: z.cx, z: z.cz, held: held, hits: 0,
+          need: held ? 3 : 0, t: 220,
+          reward: payout(held ? 1300 : 800, 700), body: held ? 2 : 0, kick: 0.25, respect: held ? 16 : 9,
+          desc: (held ? "TAKE: run the " : "CLAIM: plant the flag on the ") + (z.name || "block") + (held ? " set off their corner" : ""),
+        });
+      }
+    }
+
+    // DEFEND TURF — only if you're the BOSS of a set that actually holds turf:
+    // hold a block through a live rival raid window.
+    if (c.kind === "boss") {
+      const z = findOwnZone(c.gangId);
+      if (z) {
+        jobs.push({
+          type: "gcDefend", zoneId: z.id, x: z.cx, z: z.cz, t: 60, raided: false,
+          reward: payout(900, 500), kick: 0.20, respect: 12,
+          desc: "DEFEND: hold " + (z.name || "your block") + " — a raid is coming",
+        });
+      }
+    }
+
+    return jobs;
+  }
+  CBZ.cityRollGangContracts = rollGangContracts;
+
+  // accept a gang contract: stash it on g.cityJob, drop a beacon, kick off
+  // the live bits (defend spawns the raid; take/run point the marker).
+  function acceptGangContract(j) {
+    if (!j) return;
+    g.cityJob = j;
+    const c = myCrew();
+    j.gangId = c ? c.gangId : null;
+    if (j.type === "gcHit" && j.target) makeBeacon(j.target.pos.x, j.target.pos.z, 0xff5b5b);
+    else if (j.type === "gcCollect" && j.target) makeBeacon(j.target.pos.x, j.target.pos.z, 0xffd166);
+    else if (j.type === "gcRun") makeBeacon(j.pickup.x, j.pickup.z, 0xffd166);
+    else if (j.type === "gcTake") makeBeacon(j.x, j.z, 0x7de7ff);
+    else if (j.type === "gcDefend") {
+      makeBeacon(j.x, j.z, 0x7ed957);
+      // muster your own crew on the block and call the raid in
+      if (CBZ.cityPlayerGangDefendTurf) CBZ.cityPlayerGangDefendTurf(j.x, j.z);
+      CBZ.city.note("Get to the block and HOLD it — they're rolling up.", 2.8);
+    }
+    if (CBZ.city.big) CBZ.city.big("CONTRACT · " + (c ? c.name : "the set"));
+    CBZ.city.note(j.desc + " · $" + j.reward, 2.6);
+    closeBoard();
+  }
+  CBZ.cityAcceptGangContract = acceptGangContract;
+
+  // pay out a finished crew contract: cash + respect, and — crucially — RANK
+  // progress through the real hierarchy so the work actually promotes you.
+  function finishGangContract(j, bonus) {
+    if (!j) return;
+    const c = myCrew();
+    const total = j.reward + (bonus || 0);
+    CBZ.city.addCash(total);
+    if (j.respect) CBZ.city.addRespect(j.respect);
+    CBZ.city.big("CREW PAID + $" + total);
+    // notoriety on the street still grows (your name carries)
+    gainNotoriety(Math.round(j.reward * 0.45) + 30);
+    // climb the crew ladder: bodies + cash kicked up = the promotion currency
+    if (c && c.kind === "member" && CBZ.cityMemberPutInWork) {
+      if (j.body) CBZ.cityMemberPutInWork("body", j.body);
+      CBZ.cityMemberPutInWork("cash", Math.round(total * (j.kick || 0.25)));
+      CBZ.cityMemberPutInWork("standing", 0.12);
+    } else if (c && c.kind === "boss" && c.rec) {
+      // you're the boss: the work feeds your own war chest + reputation
+      c.rec.treasury = (c.rec.treasury || 0) + Math.round(total * (j.kick || 0.25));
+    }
+    g.cityGangJobsDone = (g.cityGangJobsDone || 0) + 1;
+    if (CBZ.sfx) CBZ.sfx("win");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    g.cityJob = null; clearBeacon();
+  }
+  function failGangContract(j, why) {
+    if (!j) return;
+    CBZ.city.note("Crew job blown — " + (why || "you lost it") + ". The set won't be happy.", 2.6);
+    // a botched job sours the crew a touch (they trust you less)
+    const c = myCrew();
+    if (c && c.kind === "member" && c.memb) c.memb.loyalty = Math.max(0, (c.memb.loyalty || 0.6) - 0.06);
+    g.cityJob = null; clearBeacon();
+  }
+  CBZ.cityGangContractFail = failGangContract;
+
+  // open the CREW CONTRACTS board (also folded into the main Job Board below,
+  // and callable on its own so a gang member / [Y] hub can surface it).
+  function isGangJob(t) { return t && t.indexOf && t.indexOf("gc") === 0; }
+  CBZ.cityGangContracts = function () {
+    const c = myCrew();
+    if (!c) { CBZ.city.note("You're not in a crew. Prospect a set (or found your own) to pick up contracts.", 3); return; }
+    if (CBZ.cityCloseShop) CBZ.cityCloseShop();
+    gcOffered = rollGangContracts();
+    offered = gcOffered.slice();   // share the [1-9] accept handler
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>🩸 " + c.name + " · Contracts</div>";
+    html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>You: " +
+      (CBZ.cityRankName ? CBZ.cityRankName(c.rank) : c.rank) +
+      " <span style='color:#8a93a3'>· finish jobs to climb the ranks</span></div>";
+    if (!gcOffered.length) html += "<div style='color:#8a93a3'>No work right now — check back after the heat dies down.</div>";
+    gcOffered.forEach((j, i) => {
+      html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " +
+        (GC_ICON[j.type] || "•") + " " + j.desc +
+        " <span style='color:#7ed957'>$" + j.reward + "</span>" +
+        (j.respect ? " <span style='color:#c792ea'>+" + j.respect + " rep</span>" : "") + "</div>";
+    });
+    html += "<div style='font-size:12px;color:#8a93a3;margin-top:8px'>[1–" + Math.max(1, gcOffered.length) + "] accept · [0] freelance hustles · [Esc] close</div>";
+    boardEl().innerHTML = html;
+    board.style.display = "block";
+    board._gang = true;
+    CBZ.cityMenuOpen = true;
+    if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
+  };
+
   // ---- job offers ----
   // A rotating contract board. Always offers a couple of starter gigs; the
   // heavier scores (smuggling, getaway, protection rackets, multi-target hits)
@@ -155,7 +400,12 @@
   const ICON = { hit: "🎯", delivery: "📦", heist: "💰", smuggle: "🚚", getaway: "🏎️", protection: "💼", vandal: "🔨" };
   CBZ.cityJobBoard = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
+    // if you ride with a crew, the board opens straight onto YOUR set's
+    // contracts (the climb-the-ranks work); [0] swaps to freelance hustles.
+    const crew = myCrew();
+    if (crew) { CBZ.cityGangContracts(); return; }
     offered = rollJobs();
+    if (board) board._gang = false;
     const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>📋 Contract Board</div>";
     html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
@@ -167,9 +417,11 @@
     CBZ.cityMenuOpen = true;
     if (document.exitPointerLock) try { document.exitPointerLock(); } catch (e) {}
   };
-  function closeBoard() { if (board) board.style.display = "none"; CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
+  function closeBoard() { if (board) { board.style.display = "none"; board._gang = false; } CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
   function accept(i) {
     const j = offered[i]; if (!j) return;
+    // gang contracts route through the crew-job path (beacon + rank reward)
+    if (isGangJob(j.type)) { acceptGangContract(j); return; }
     g.cityJob = j;
     if (j.type === "smuggle") makeBeacon(j.pickup.x, j.pickup.z, 0xffd166);
     else if (j.type === "getaway") makeBeacon(j.rdv.x, j.rdv.z, 0x7de7ff);
@@ -181,10 +433,28 @@
     closeBoard();
   }
 
+  // freelance hustle view, forced (used by [0] to leave the crew board)
+  function openFreelanceBoard() {
+    offered = rollJobs();
+    if (board) board._gang = false;
+    const r = rankInfo(), nxt = RANKS[rankIdx() + 1];
+    let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>📋 Freelance Hustles</div>";
+    html += "<div style='font-size:12px;color:#ffd166;margin-bottom:8px'>Notoriety: " + r.name +
+      (nxt ? " <span style='color:#8a93a3'>(" + (notoriety()) + "/" + nxt.xp + " → " + nxt.name + ")</span>" : " <span style='color:#7ed957'>· MAX</span>") +
+      (myCrew() ? " <span style='color:#8a93a3'>· [0] crew contracts</span>" : "") + "</div>";
+    offered.forEach((j, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + (ICON[j.type] || "•") + " " + j.desc + " <span style='color:#7ed957'>$" + j.reward + "</span></div>"; });
+    html += "<div style='font-size:12px;color:#8a93a3;margin-top:8px'>[1–" + offered.length + "] accept · [Esc] close</div>";
+    boardEl().innerHTML = html;
+    board.style.display = "block";
+    CBZ.cityMenuOpen = true;
+  }
+
   addEventListener("keydown", function (e) {
     if (!board || board.style.display !== "block") return;
     const k = e.key.toLowerCase();
     if (k === "escape") { e.preventDefault(); closeBoard(); return; }
+    // [0] toggles between the crew contract board and freelance hustles
+    if (k === "0" && myCrew()) { e.preventDefault(); if (board._gang) openFreelanceBoard(); else CBZ.cityGangContracts(); return; }
     if (k >= "1" && k <= "9") { e.preventDefault(); accept(parseInt(k, 10) - 1); }
   });
 
@@ -434,11 +704,103 @@
     }
   };
 
+  // count live hostile rival members standing on/near a block (used by TAKE).
+  function rivalsOnBlock(myGangId, x, z, r) {
+    let n = 0; const rr = r * r;
+    for (const p of CBZ.cityPeds) {
+      if (!p || p.dead || !p.gang || p.gang === myGangId || p.gang === "player") continue;
+      if (CBZ.cityAreAllied && CBZ.cityAreAllied(myGangId, p.gang)) continue;
+      if (p.surrender || p.state === "flee") continue;     // cleared / routed don't count
+      const dx = p.pos.x - x, dz = p.pos.z - z;
+      if (dx * dx + dz * dz <= rr) n++;
+    }
+    return n;
+  }
+
+  // per-frame progress for a CREW CONTRACT. Each type tracks its own window +
+  // success/fail; payouts route through finishGangContract (rank progress).
+  function gangContractTick(j, P, dt) {
+    // every crew contract is on a clock — blow the window and the job's dead.
+    if (j.t != null) {
+      j.t -= dt;
+      if (j.t <= 0 && j.type !== "gcDefend") { failGangContract(j, "you ran out of time"); return; }
+    }
+    if (j.type === "gcHit") {
+      if (beacon && j.target && !j.target.dead) beacon.position.set(j.target.pos.x, 15, j.target.pos.z);
+      if (j.target && j.target.dead) { CBZ.city.note("Mark's down. The set noticed.", 1.8); finishGangContract(j, 0); }
+    } else if (j.type === "gcCollect") {
+      if (beacon && j.target && !j.target.dead) beacon.position.set(j.target.pos.x, 15, j.target.pos.z);
+      // collected = you robbed them (took the debt) OR put them in the ground
+      if (j.target && (j.target.robbed || j.target.dead)) {
+        const clean = j.target.robbed && !j.target.dead;
+        CBZ.city.note(clean ? "Debt squeezed out clean." : "Debt settled the hard way.", 1.8);
+        finishGangContract(j, clean ? Math.round(j.reward * 0.2) : 0);   // a clean shakedown pays a touch more
+      }
+    } else if (j.type === "gcRun") {
+      if (!j.got) {
+        if (Math.hypot(P.x - j.pickup.x, P.z - j.pickup.z) < 4) {
+          j.got = true; makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
+          CBZ.city.note("Product's on you. Run it to the drop — don't get hot.", 2.4);
+        }
+      } else {
+        if ((g.wanted | 0) >= 4) { failGangContract(j, "you got too hot carrying the load"); }
+        else if (Math.hypot(P.x - j.dest.x, P.z - j.dest.z) < 4) {
+          CBZ.city.note("Product dropped — clean run.", 1.6);
+          finishGangContract(j, CBZ.player.driving && (g.wanted | 0) === 0 ? 150 : 0);
+        }
+      }
+    } else if (j.type === "gcTake") {
+      const onBlock = Math.hypot(P.x - j.x, P.z - j.z) < 16;
+      if (!onBlock) { j.plant = 0; return; }
+      const rivals = rivalsOnBlock(j.gangId, j.x, j.z, 16);
+      if (j.held && rivals > 0) {
+        // a rival corner: you have to run their bodies off before it flips
+        j.plant = 0;
+        if (CBZ.now - (j._noteT || 0) > 4000) { j._noteT = CBZ.now; CBZ.city.note(rivals + " still holding the corner — run them off.", 1.6); }
+        return;
+      }
+      // corner is clear (or it was always neutral): plant the flag to claim it
+      j.plant = (j.plant || 0) + dt;
+      if (j.plant >= (j.held ? 2 : 3)) {
+        // a BOSS of his own set actually flips the zone to his colours; a member
+        // taking it for an NPC crew just clears it for them (NPC turf is theirs).
+        if (j.gangId === "player" && CBZ.cityPlayerGangClaimTurf) CBZ.cityPlayerGangClaimTurf(j.x, j.z);
+        CBZ.city.note("Block taken — it flies the colours now.", 2.0);
+        finishGangContract(j, 0);
+      } else if (CBZ.now - (j._noteT || 0) > 2200) {
+        j._noteT = CBZ.now; CBZ.city.note("Hold the corner… " + Math.ceil((j.held ? 2 : 3) - j.plant) + "s", 1.0);
+      }
+    } else if (j.type === "gcDefend") {
+      const onBlock = Math.hypot(P.x - j.x, P.z - j.z) < 18;
+      // the raid: bodies coming for the block. We just need the player present
+      // and the block still ours when the window closes.
+      if (!j.raided && j.t < 50) {
+        j.raided = true;
+        if (CBZ.cityCrime) CBZ.cityCrime(60, { x: j.x, z: j.z, type: "robbery" });
+        CBZ.city.note("They're here — hold the block!", 2.0);
+      }
+      if (!onBlock && CBZ.now - (j._noteT || 0) > 3000) {
+        j._noteT = CBZ.now; CBZ.city.note("Get back on the block — you can't defend it from across town!", 1.8);
+      }
+      // lost the block? (a rival flipped the zone) → fail
+      if (j.zoneId != null && CBZ.cityZoneOwner && CBZ.cityZoneOwner(j.x, j.z) !== j.gangId) {
+        // only fail if it's actually been taken by a rival, not merely neutral churn
+        const own = CBZ.cityZoneOwner(j.x, j.z);
+        if (own && own !== j.gangId) { failGangContract(j, "they overran the block"); return; }
+      }
+      if (j.t <= 0) {
+        if (onBlock) { CBZ.city.note("Held it. The block's still ours.", 2.0); finishGangContract(j, 0); }
+        else { failGangContract(j, "you weren't there to hold it"); }
+      }
+    }
+  }
+
   CBZ.cityCareersReset = function () {
     g.cityJob = null; g.cityCrew = 0; g.cityBank = g.cityBank || 0; clearBeacon(); payT = 0;
     // notoriety + sales tallies are a CAREER — they persist a new life like the
     // story arc. We only clear transient regular flags off live peds.
     g.cityNotoriety = g.cityNotoriety || 0;
+    g.cityGangJobsDone = g.cityGangJobsDone || 0;   // crew-contract CV persists too
     g.cityCustomers = 0; g.cityDrugSales = g.cityDrugSales || 0;
     g.cityPostedUp = false; g.cityPostX = 0; g.cityPostZ = 0;
     for (const p of (CBZ.cityPeds || [])) { p.regular = false; p.reUpT = 0; p.loyalty = 0; p.seekPlayer = false; }
@@ -508,6 +870,8 @@
             finishJob();
           }
         }
+      } else if (isGangJob(j.type)) {
+        gangContractTick(j, P, dt);
       }
     }
 

@@ -560,6 +560,7 @@
       const byPlayer = imp ? imp.byPlayer !== false : true;
       if (att && att !== CBZ.city.playerActor) { if (att.kind !== "cop" && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 140, "cop-killer"); }
       else if (byPlayer) {
+        g._cityKillDetail = { cop: true, armed: true, victim: cop.name || "officer" };
         CBZ.city && CBZ.city.addKill();
         CBZ.city && CBZ.city.addRespect(8);
         if (CBZ.cityCopKilled) CBZ.cityCopKilled();          // → 5 stars, instantly

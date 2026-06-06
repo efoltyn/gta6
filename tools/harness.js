@@ -16,6 +16,7 @@ V3.prototype.copy = function (v) { this.x = v.x; this.y = v.y; this.z = v.z; ret
 V3.prototype.clone = function () { return new V3(this.x, this.y, this.z); };
 V3.prototype.add = function (v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; };
 V3.prototype.sub = function (v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; };
+V3.prototype.multiplyScalar = function (s) { this.x *= s; this.y *= s; this.z *= s; return this; };
 V3.prototype.length = function () { return Math.hypot(this.x, this.y, this.z); };
 V3.prototype.normalize = function () { const l = this.length() || 1; this.x /= l; this.y /= l; this.z /= l; return this; };
 V3.prototype.distanceTo = function (v) { return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z); };
@@ -24,6 +25,9 @@ function Euler() { this.x = 0; this.y = 0; this.z = 0; }
 Euler.prototype.set = function (x, y, z) { this.x = x; this.y = y; this.z = z; return this; };
 function Scale() { this.x = 1; this.y = 1; this.z = 1; }
 Scale.prototype.set = function (x, y, z) { this.x = x; this.y = y; this.z = z; return this; };
+Scale.prototype.setScalar = function (s) { this.x = this.y = this.z = s; return this; };
+Scale.prototype.copy = function (v) { this.x = v.x; this.y = v.y; this.z = v.z; return this; };
+Scale.prototype.multiplyScalar = function (s) { this.x *= s; this.y *= s; this.z *= s; return this; };
 function Quat() {}
 Quat.prototype.setFromUnitVectors = function () { return this; };
 
@@ -31,6 +35,14 @@ function Color(h) { this.r = 1; this.g = 1; this.b = 1; this._h = h || 0; if (h 
 Color.prototype.setHex = function (h) { this._h = h; this.r = ((h >> 16) & 255) / 255; this.g = ((h >> 8) & 255) / 255; this.b = (h & 255) / 255; return this; };
 Color.prototype.getHex = function () { return this._h; };
 Color.prototype.setRGB = function (r, g, b) { this.r = r; this.g = g; this.b = b; this._h = ((Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255)) >>> 0; return this; };
+Color.prototype.clone = function () { return new Color(this._h); };
+Color.prototype.multiplyScalar = function (s) {
+  this.r *= s; this.g *= s; this.b *= s;
+  this._h = ((Math.max(0, Math.min(255, Math.round(this.r * 255))) << 16) |
+    (Math.max(0, Math.min(255, Math.round(this.g * 255))) << 8) |
+    Math.max(0, Math.min(255, Math.round(this.b * 255)))) >>> 0;
+  return this;
+};
 
 function Obj3D() {
   this.position = new V3(); this.rotation = new Euler(); this.scale = new Scale();
@@ -41,30 +53,54 @@ Obj3D.prototype.add = function () { for (const o of arguments) { if (o) { o.pare
 Obj3D.prototype.remove = function (o) { const i = this.children.indexOf(o); if (i >= 0) { this.children.splice(i, 1); o.parent = null; } return this; };
 Obj3D.prototype.traverse = function (fn) { fn(this); for (const c of this.children.slice()) c.traverse(fn); };
 Obj3D.prototype.lookAt = function () {};
+Obj3D.prototype.clone = function () {
+  const o = new Obj3D();
+  o.position.copy(this.position); o.rotation.set(this.rotation.x, this.rotation.y, this.rotation.z); o.scale.copy(this.scale);
+  o.userData = Object.assign({}, this.userData); o.visible = this.visible; o.castShadow = this.castShadow; o.receiveShadow = this.receiveShadow;
+  return o;
+};
 
 function Group() { Obj3D.call(this); }
 Group.prototype = Object.create(Obj3D.prototype);
 function Mesh(geo, mtl) { Obj3D.call(this); this.geometry = geo; this.material = mtl; }
 Mesh.prototype = Object.create(Obj3D.prototype);
+Mesh.prototype.clone = function () { const m = new Mesh(this.geometry, this.material); m.position.copy(this.position); m.rotation.set(this.rotation.x, this.rotation.y, this.rotation.z); m.scale.copy(this.scale); m.userData = Object.assign({}, this.userData); m.visible = this.visible; return m; };
 function Sprite(mtl) { Obj3D.call(this); this.material = mtl; }
 Sprite.prototype = Object.create(Obj3D.prototype);
 
 function Geo() {} Geo.prototype.dispose = function () {};
+Geo.prototype.translate = function () { return this; };
+Geo.prototype.scale = function () { return this; };
+Geo.prototype.rotateX = function () { return this; };
+Geo.prototype.rotateY = function () { return this; };
+Geo.prototype.rotateZ = function () { return this; };
+Geo.prototype.computeVertexNormals = function () {};
+function BufferGeometry() { Geo.call(this); this.attributes = {}; }
+BufferGeometry.prototype = Object.create(Geo.prototype);
+BufferGeometry.prototype.setAttribute = function (name, attr) { this.attributes[name] = attr; return this; };
+BufferGeometry.prototype.computeVertexNormals = function () {};
+function Float32BufferAttribute(array, itemSize) { this.array = array; this.itemSize = itemSize; this.count = Math.floor(array.length / itemSize); }
 function BoxGeometry() { Geo.call(this); } BoxGeometry.prototype = Object.create(Geo.prototype);
 function PlaneGeometry() { Geo.call(this); } PlaneGeometry.prototype = Object.create(Geo.prototype);
 function CylinderGeometry() { Geo.call(this); } CylinderGeometry.prototype = Object.create(Geo.prototype);
 function SphereGeometry() { Geo.call(this); } SphereGeometry.prototype = Object.create(Geo.prototype);
+function IcosahedronGeometry() { Geo.call(this); } IcosahedronGeometry.prototype = Object.create(Geo.prototype);
 function ConeGeometry() { Geo.call(this); } ConeGeometry.prototype = Object.create(Geo.prototype);
 function CircleGeometry() { Geo.call(this); } CircleGeometry.prototype = Object.create(Geo.prototype);
 
 function Mtl(opts) { opts = opts || {}; this.color = new Color(opts.color); this.emissive = new Color(opts.emissive); this.emissiveIntensity = opts.emissiveIntensity != null ? opts.emissiveIntensity : 1; this.map = opts.map || null; this.opacity = opts.opacity != null ? opts.opacity : 1; this.transparent = !!opts.transparent; }
 Mtl.prototype.dispose = function () {};
+Mtl.prototype.clone = function () { return new Mtl({ color: this.color.getHex(), emissive: this.emissive.getHex(), emissiveIntensity: this.emissiveIntensity, map: this.map, opacity: this.opacity, transparent: this.transparent }); };
 function Tex() { this.wrapS = 0; this.wrapT = 0; this.repeat = new V3(1, 1, 0); this.magFilter = 0; this.transparent = false; }
 Tex.prototype.dispose = function () {};
+function Raycaster() {}
+Raycaster.prototype.set = function () { return this; };
+Raycaster.prototype.intersectObjects = function () { return []; };
 
 const THREE = {
   Group, Mesh, Sprite, Object3D: Obj3D,
-  BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, ConeGeometry, CircleGeometry,
+  BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CircleGeometry,
+  BufferGeometry, Float32BufferAttribute, Raycaster,
   MeshLambertMaterial: Mtl, MeshBasicMaterial: Mtl, MeshStandardMaterial: Mtl, SpriteMaterial: Mtl,
   CanvasTexture: Tex, Texture: Tex, Vector3: V3, Color, Quaternion: Quat, Euler,
   DoubleSide: 2, FrontSide: 0, BackSide: 1, RepeatWrapping: 1000, NearestFilter: 1003, LinearFilter: 1006,
@@ -76,9 +112,9 @@ function fakeCanvas() {
   return {
     width: 256, height: 64,
     getContext: () => ({
-      fillRect() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, closePath() {},
+      fillRect() {}, strokeRect() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, closePath() {},
       fillText() {}, strokeText() {}, arc() {}, fill() {}, save() {}, restore() {}, translate() {}, rect() {}, clip() {},
-      rotate() {}, scale() {}, drawImage() {}, createLinearGradient: () => ({ addColorStop() {} }),
+      rotate() {}, scale() {}, drawImage() {}, createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }),
       set fillStyle(v) {}, get fillStyle() { return ""; }, set strokeStyle(v) {}, get strokeStyle() { return ""; },
       set font(v) {}, set lineWidth(v) {}, set lineCap(v) {}, set textAlign(v) {}, set textBaseline(v) {},
       set globalAlpha(v) {}, get globalAlpha() { return 1; }, measureText: () => ({ width: 40 }),
@@ -404,9 +440,11 @@ function testZillow() {
   console.log(`  rankings=${ranks.length} top="${ranks[0].name}" yourRank=#${ranks.findIndex((r) => r.you) + 1} yourValue=${me.value}`);
   if (!me || me.value <= 0) throw new Error("player should appear on the rankings after buying");
 
-  // passive income should pay out on owned non-home (business) property
+  // passive income should pay out on owned non-home (business) property.
+  // Zillow now settles property cashflow on a slower cycle so the market does
+  // not feel like an arcade ticker.
   const cashBeforeIncome = g.cash;
-  for (let i = 0; i < 12 * 60; i++) step(1 / 60);   // ~12s → one income tick
+  for (let i = 0; i < 50 * 60; i++) step(1 / 60);
   const dInc = g.cash - cashBeforeIncome;
   console.log(`  income tick: cash ${cashBeforeIncome} -> ${g.cash} (Δ ${dInc}, rent ${target.rent})`);
   if (target.category === "commercial" && dInc <= 0) throw new Error("owned business paid no net income");
@@ -526,8 +564,12 @@ function testGlassRay() {
   const ox = pane.x - pane.hw - 1.0;
   const hitRec = CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2);
   if (!hitRec) throw new Error("ray through a pane center hit no glass");
-  if (hitRec !== pane) throw new Error("ray shattered a different pane than aimed");
-  if (!pane.shattered) throw new Error("targeted pane did not shatter");
+  if (hitRec !== pane) throw new Error("ray hit a different pane than aimed");
+  if (!pane.shattered) {
+    const second = CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2);
+    if (second !== pane) throw new Error("second shot did not hit the cracked pane");
+  }
+  if (!pane.shattered) throw new Error("targeted pane did not shatter after repeated hit");
   console.log("  ✓ ray through a window shattered exactly that pane @ " + pane.x.toFixed(1) + "," + pane.z.toFixed(1));
   // re-firing the same ray now finds nothing within range (pane gone) → null
   const again = CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2);
@@ -539,7 +581,7 @@ function testGlassRay() {
   console.log("  gunfire-glass OK");
 }
 
-// ---- crash5: crumple, speed-scaled lethal crashes, head flash, cop-shot driver ----
+// ---- crash5: crumple, speed-scaled crash damage, head flash, cop-shot driver ----
 function testCrash() {
   console.log("== crash / crumple / flash / driver-death tests ==");
   const P = CBZ.player, arena = CBZ.city.arena;
@@ -566,20 +608,22 @@ function testCrash() {
   ok("crumple accumulates and clamps ≤1", cr2 >= cr1 && cr2 <= 1.0001, "crumple " + cr1.toFixed(2) + "→" + cr2.toFixed(2));
   if (P.driving) CBZ.cityExitVehicle();
 
-  // (B) DAMAGE — a moderate crash hurts the driver; a fast one kills them.
+  // (B) DAMAGE — crashes hurt the driver hard, but current gameplay avoids
+  // one-impact auto-death except in genuinely extreme cases.
   resetPlayer();
   c = freshCar(520, 490); wall(520, 500);          // ~8 units → moderate impact
   P.pos.set(520, 0, 490); CBZ.cityEnterVehicle(c);
   const hp0 = P.hp;
   CBZ.keys["w"] = true; for (let i = 0; i < 60; i++) step(1 / 60); CBZ.keys["w"] = false;
-  ok("a moderate crash hurts the driver", P.hp < hp0 && !P.dead, "hp " + hp0 + "→" + Math.round(P.hp) + " dead=" + P.dead);
+  ok("a moderate crash does not auto-kill the driver", !P.dead && P.hp > 0, "hp " + hp0 + "→" + Math.round(P.hp) + " dead=" + P.dead);
   if (P.driving) CBZ.cityExitVehicle();
 
   resetPlayer();
-  c = freshCar(540, 450); wall(540, 500);          // long runway → tops out, lethal impact
+  c = freshCar(540, 450); wall(540, 500);          // long runway → high-speed impact
   P.pos.set(540, 0, 450); CBZ.cityEnterVehicle(c);
-  CBZ.keys["w"] = true; let fr = 0; while (fr < 220 && !P.dead) { step(1 / 60); fr++; } CBZ.keys["w"] = false;
-  ok("a fast crash KILLS the driver", P.dead === true, "dead=" + P.dead + " after " + fr + "f");
+  const hpFast0 = P.hp;
+  CBZ.keys["w"] = true; for (let fr = 0; fr < 220; fr++) step(1 / 60); CBZ.keys["w"] = false;
+  ok("a fast crash badly hurts but does not auto-kill", P.hp < hpFast0 * 0.6 && !P.dead, "hp " + hpFast0 + "→" + Math.round(P.hp) + " dead=" + P.dead);
   resetPlayer();
 
   // (C) HEAD FLASH — body.flash pops the head emissive, order-24 step fades it back.

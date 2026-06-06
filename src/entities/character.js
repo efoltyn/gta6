@@ -251,6 +251,26 @@
       ch.body.rotation.y = damp(ch.body.rotation.y, 0, 10, dt);
     }
 
+    // Hands-up surrender/intimidation pose. This is a late animation layer so
+    // gunpoint victims do not keep idle-swimming their arms while frozen.
+    if (ch.surrender || ch.handsUp) {
+      if (ch.parts.la) {
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -2.5, 18, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0.16, 14, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.62, 14, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.22, 14, dt);
+      }
+      if (ch.parts.ra) {
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -2.5, 18, dt);
+        ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, -0.16, 14, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.62, 14, dt);
+        ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.22, 14, dt);
+      }
+      ch.body.rotation.x = damp(ch.body.rotation.x, -0.07, 10, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, 12, dt);
+      ch.body.rotation.z = damp(ch.body.rotation.z, 0, 12, dt);
+    }
+
     // ---- head: subtle counter-bob + breathing tilt, keeps eyes level ----
     if (ch.neck) {
       ch.neck.rotation.x = damp(ch.neck.rotation.x, -ch.lean * 0.7 + (moving ? Math.sin(ch.phase * 2) * 0.02 : 0), 9, dt);

@@ -49,7 +49,8 @@
       r.kills * 240 +
       r.props * 14000 +
       r.crew * 4200 +
-      r.notoriety * 350
+      r.notoriety * 350 +
+      (r.streetXp || 0) * 42
     );
   }
 
@@ -84,7 +85,7 @@
       name: "YOU", you: true,
       cash: g.cash || 0, bank: g.cityBank || 0,
       kills: g.kills || 0, respect: g.respect || 0,
-      props, crew, notoriety,
+      props, crew, notoriety, streetXp: g.cityStreetXp || 0,
     };
     me.score = netWorth(me);
     return me;

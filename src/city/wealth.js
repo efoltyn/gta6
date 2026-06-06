@@ -83,7 +83,7 @@
     const out = [];
     for (const id in g.cityEmpireBiz) {
       const b = g.cityEmpireBiz[id], def = BIZ_BY_ID[id]; if (!def) continue;
-      out.push({ id, name: def.name, tier: b.tier | 0, value: bizValue(id) });
+      out.push({ id, name: def.name, tier: b.tier | 0, sec: b.secLevel | 0, value: bizValue(id) });
     }
     w.assets.businesses = out;
     // luxury lives in our own ledger field so it survives runs too
@@ -100,7 +100,7 @@
     if (w.assets && w.assets.businesses) {
       for (const rec of w.assets.businesses) {
         if (!BIZ_BY_ID[rec.id]) continue;
-        if (!g.cityEmpireBiz[rec.id]) g.cityEmpireBiz[rec.id] = { tier: rec.tier | 0, supply: 0, lastTick: now() };
+        if (!g.cityEmpireBiz[rec.id]) g.cityEmpireBiz[rec.id] = { tier: rec.tier | 0, secLevel: rec.sec | 0, supply: 0, lastTick: now() };
       }
     }
     if (w.luxury) { for (const k in w.luxury) g.cityLuxury[k] = w.luxury[k]; }
@@ -139,6 +139,24 @@
 
   function owns(id) { return !!(state().cityEmpireBiz[id]); }
   function rec(id) { return state().cityEmpireBiz[id] || null; }
+  // ---- raid security upgrade (a money SINK that buys raid protection) --------
+  // secLevel 0..SEC_MAX on each owned biz; each level shaves raid odds AND adds
+  // its own crew of paid guards to the defense roll. Cost scales with biz cost.
+  const SEC_MAX = 3;
+  function secLevel(id) { const r = rec(id); return r ? (r.secLevel | 0) : 0; }
+  function secCost(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return Math.round(b.cost * 0.4 * Math.pow(1.7, r.secLevel | 0)); }
+  function upgradeSecurity(id) {
+    const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return;
+    if ((r.secLevel | 0) >= SEC_MAX) { note(b.name + " security is already maxed.", 1.8); return; }
+    const cost = secCost(id);
+    if (!canAfford(cost)) { note("⛔ Security upgrade costs " + money(cost) + ".", 2); sfx("hit"); return; }
+    charge(cost);
+    r.secLevel = (r.secLevel | 0) + 1;
+    big("🛡️ " + b.name + " — security Lvl " + r.secLevel);
+    note("Reinforced doors & paid guards. Far less likely to get hit now.", 2.6);
+    sfx("coin");
+    persist(); if (open_) render();
+  }
   // tier multiplier: tier 0 = 1×, each tier ≈ +60% (so 5 tiers ≈ 10×)
   function tierMul(tier) { return 1 + 0.6 * (tier | 0); }
   function bizRate(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return b.rate * tierMul(r.tier) * empireSynergy() * tierPerk("passiveMul"); }
@@ -410,6 +428,88 @@
   }
 
   // ============================================================
+  //  RAID / ROBBERY RISK  (the money-sink pressure on the rich)
+  // ------------------------------------------------------------
+  //  GTA business-raid model: when your HEAT is high, the cops (or a rival
+  //  crew) hit one of your earning fronts to seize the accrued stock. Your
+  //  defense is your live CREW + paid security + bodyguard-perk; if defense
+  //  beats the raid strength you HOLD and keep everything (and earn respect),
+  //  otherwise they grab a chunk of that business's supply pool. Heavy fronts
+  //  (lab/club/casino) draw bigger raids. Security upgrades shrink the odds and
+  //  add guards. This only fires for businesses actually holding product, so a
+  //  freshly-collected empire is safe — collect often to limit exposure.
+  // ============================================================
+  // live, helping crew on the street (the empire.js crewCount convention +
+  // recruited gang members / companions). Cheap: bounded by ped count, only
+  // called when a raid actually rolls.
+  function liveCrew() {
+    let n = 0;
+    if (CBZ.cityPeds) for (const p of CBZ.cityPeds) {
+      if (!p || p.dead) continue;
+      if ((p.recruited && (p.kind === "crew" || p.gang === "player")) || p.companion) n++;
+    }
+    if (!n && g.cityCrew) n = Math.min(6, g.cityCrew | 0);   // fallback to the crew count
+    return n;
+  }
+  // defense strength: crew + paid security on the hit biz + a bodyguard-perk
+  // bump (richer kingpins keep better-armed protection).
+  function defenseStrength(id) {
+    const crew = liveCrew();
+    const sec = secLevel(id) * 1.6;                 // each security level ≈ 1.6 guards
+    const perk = 1 + tierPerk("bodyguardDisc") * 2; // up to ~1.8× for kingpin
+    return (crew + sec + 0.5) * perk;
+  }
+  // how strong the raid is: base on heat (stars) + the biz "heat profile"
+  // (supply/lab/casino-class fronts are juicier) + a touch of notoriety.
+  function raidStrength(id) {
+    const b = BIZ_BY_ID[id];
+    const stars = clamp(g.wanted | 0, 0, 5);
+    const profile = (b.kind === "supply" || b.kind === "casino") ? 1.4 : (b.kind === "club" || b.kind === "invest") ? 1.2 : 1.0;
+    const noto = Math.min(2, (g.cityNotoriety || 0) / 120);
+    return (1.5 + stars * 1.1 + noto) * profile;
+  }
+  // resolve a raid on one business: returns true if you held it.
+  function resolveRaid(id) {
+    const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return true;
+    const def = defenseStrength(id), atk = raidStrength(id);
+    // probabilistic hold: your defense vs their attack (logistic-ish)
+    const hold = rng() < clamp(def / (def + atk), 0.08, 0.94);
+    if (hold) {
+      big("🛡️ Crew held off the raid on " + b.name + "!");
+      note("Your people protected the stock. Respect on the street.", 2.8);
+      sfx("win"); if (CBZ.shake) CBZ.shake(0.18);
+      if (CBZ.city) CBZ.city.addRespect(clamp(Math.round(b.cost / 18000), 3, 40));
+      bumpNotoriety(2);
+      // a held raid still spends a little of their heat scrutiny
+    } else {
+      // they seize a chunk of the accrued pool (more if poorly defended)
+      const sevFrac = clamp(0.45 + (atk - def) * 0.06, 0.3, 0.9);
+      const lost = Math.floor((r.supply || 0) * sevFrac);
+      r.supply = Math.max(0, (r.supply || 0) - lost);
+      big("🚨 " + b.name + " GOT HIT — lost " + money(lost) + " in stock");
+      note(secLevel(id) < SEC_MAX ? "Buy a Security upgrade (Empire menu) to harden it." : "Even maxed security can't stop everything when you run this hot.", 3.2);
+      sfx("explosion"); if (CBZ.shake) CBZ.shake(0.32);
+      bumpNotoriety(3);
+    }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    persist(); if (open_) render();
+    return hold;
+  }
+  // per-business raid CHANCE this roll: only meaningful when hot & the biz is
+  // actually holding stock; security levels and a held supply each tune it.
+  function raidChance(id) {
+    const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0;
+    const stars = g.wanted | 0;
+    if (stars < 3) return 0;                                  // need real heat
+    const pool = r.supply || 0, cap = bizCap(id) || 1;
+    if (pool < cap * 0.2) return 0;                           // nothing worth raiding
+    let base = 0.10 + (stars - 3) * 0.10;                     // 3★≈10% .. 5★≈30% per roll
+    base *= (1 - 0.27 * secLevel(id));                        // security shaves it
+    base *= clamp(pool / cap, 0.4, 1);                        // fuller pool = juicier target
+    return clamp(base, 0, 0.45);
+  }
+
+  // ============================================================
   //  PASSIVE INCOME TICK  (the faucet) — order 41 is free
   // ------------------------------------------------------------
   //  Product/cash accrues into each business's supply pool, capped. A nightclub-
@@ -449,7 +549,21 @@
       warnedFull -= dt;
       if (warnedFull <= 0) { warnedFull = 28; note("💼 A business is at capacity — collect from the Empire menu (Shift+B).", 2.2); }
     }
+    // ---- RAID ROLL (throttled): when you run hot, your earning fronts get hit.
+    // One roll every ~18s of play; at most one business raided per roll so it's
+    // a pressure, not a wipe. Skipped entirely below 3★ (the early game is safe).
+    raidTimer -= dt;
+    if (raidTimer <= 0) {
+      raidTimer = 18;
+      if ((g.wanted | 0) >= 3) {
+        for (const id in biz) {
+          const ch = raidChance(id);
+          if (ch > 0 && rng() < ch) { resolveRaid(id); break; }   // one per roll
+        }
+      }
+    }
   });
+  let raidTimer = 12;   // first possible roll a few seconds in
 
   // ============================================================
   //  THE "EMPIRE" OVERLAY  (full menu UI)
@@ -492,6 +606,11 @@
       if (ti.zones > 0) h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:8px'>🏴 Turf tax — <b style='color:#ff9e6b'>" + money(ti.perSec) + "/sec</b> from <b>" + ti.zones + "</b> block" + (ti.zones === 1 ? "" : "s") + " held · ×" + tierPerk("turfMul").toFixed(2) + " status</div>";
       else h += "<div style='font-size:12px;color:#8a7d5a;margin-bottom:8px'>🏴 Take turf with your crew to collect street tax (passive $/sec).</div>";
     }
+    // raid-pressure banner — connect HIGH HEAT to the risk on your fronts.
+    if ((g.wanted | 0) >= 3) {
+      let exposed = 0; for (const id in state().cityEmpireBiz) if (raidChance(id) > 0) exposed++;
+      if (exposed > 0) h += "<div style='font-size:12px;color:#ff6b6b;margin-bottom:8px;background:rgba(120,30,30,.18);border:1px solid #5a2a2a;border-radius:8px;padding:6px 9px'>🚨 You're at " + (g.wanted | 0) + "★ — " + exposed + " front" + (exposed === 1 ? "" : "s") + " can be RAIDED. Collect stock, lay low, or buy 🛡️ Security. Your crew (" + liveCrew() + ") will defend.</div>";
+    }
     h += "<div style='text-align:right;margin-bottom:4px'>" + btn("C", "COLLECT ALL", "#1f4a2a") + " " + btn("L", "Launder cash", "#3a2a4a") + " " + btn("P", "Bottle service", "#4a2a3a") + "</div>";
     let i = 1;
     for (const b of BUSINESSES) {
@@ -501,10 +620,13 @@
         const pct = Math.round((r.supply / Math.max(1, bizCap(b.id))) * 100);
         right = "<div style='color:#7ed957'>" + money(Math.floor(r.supply)) + "</div>" +
           "<div style='font-size:11px;color:#a99b78'>" + money(bizRate(b.id)) + "/s · T" + r.tier + "/" + b.maxTier + "</div>";
+        const sl = secLevel(b.id);
         sub = "Pool " + pct + "% of " + money(bizCap(b.id)) + (r.tier < b.maxTier ? " · upgrade " + money(upgradeCost(b.id)) : " · MAXED") +
-          (b.launder ? " · 🧺 front" : "");
+          (b.launder ? " · 🧺 front" : "") + " · 🛡️" + sl + "/" + SEC_MAX +
+          ((g.wanted | 0) >= 3 && raidChance(b.id) > 0 ? " · ⚠️ raid risk " + Math.round(raidChance(b.id) * 100) + "%" : "");
         const acts = (Math.floor(r.supply) >= 1 ? btn(keyLabel(i), "collect", "#1f4a2a") : "") +
-          (r.tier < b.maxTier ? btn("U", "upgrade", "#2a3a4a") : "");
+          (r.tier < b.maxTier ? btn("U", "upgrade", "#2a3a4a") : "") +
+          (sl < SEC_MAX ? btn("S", "security " + money(secCost(b.id)), "#2a2a4a") : "");
         right += "<div style='margin-top:3px'>" + acts + "</div>";
       } else {
         const locked = tierIndex() < (b.minTier || 0);
@@ -587,7 +709,7 @@
     bar += "</div>";
     let body = tab === "biz" ? renderBiz() : tab === "lux" ? renderLux() : tab === "ops" ? renderOps() : renderPerks();
     let foot = "<div style='font-size:11px;color:#8a7d5a;margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
-      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act on the list · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
+      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>S</b> security · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
     el().innerHTML = head + bar + body + foot;
   }
 
@@ -639,6 +761,7 @@
         if (k === "l") { e.preventDefault(); launderAll(); return; }
         if (k === "p") { e.preventDefault(); partySpend(); return; }
         if (k === "u") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && r.tier < b.maxTier) { upgradeBiz(b.id); break; } } return; }
+        if (k === "s") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return; }
       }
       // number keys act on the visible list row (0 = the 10th row)
       if (k >= "0" && k <= "9") { e.preventDefault(); actNum(parseInt(k, 10)); return; }
@@ -666,6 +789,7 @@
     open, close, isOpen: () => open_,
     BUSINESSES, LUXURY, OPS, PERKS,
     buyBiz, upgradeBiz, collectBiz, collectAll, bizRate, bizCap, bizValue,
+    upgradeSecurity, secLevel, secCost, raidChance, resolveRaid, defenseStrength, liveCrew, SEC_MAX,
     buyLux, luxPrice, ownsLux, partySpend, launderAll,
     runOp, opCooldown,
     tierPerk, hasVIP, flexLevel, incomePerSec,

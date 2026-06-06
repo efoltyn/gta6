@@ -184,6 +184,7 @@
       if (CBZ.cityCareersReset) CBZ.cityCareersReset();
       if (CBZ.cityEmpireReset) CBZ.cityEmpireReset();
       if (CBZ.cityLeaderboardReset) CBZ.cityLeaderboardReset();
+      if (CBZ.cityPromotionReset) CBZ.cityPromotionReset();
 
       // place the player — on a rooftop (wealth-scaled), falling back to the
       // street spawn only if no buildings exist yet.

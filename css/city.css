@@ -37,52 +37,68 @@ body.mode-city #interact { display: none; }
 #cityZillow.zwrap {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   z-index: 60; display: none; flex-direction: column;
-  width: min(680px, 94vw); height: min(80vh, 760px);
-  background: rgba(14, 18, 24, .97); border: 2px solid #2f3a44; border-radius: 16px;
+  width: min(920px, 96vw); height: min(78vh, 700px);
+  background: rgba(13, 16, 20, .97); border: 2px solid #303841; border-radius: 8px;
   color: #e8eef7; font-family: Fredoka, system-ui, sans-serif;
   box-shadow: 0 22px 60px rgba(0, 0, 0, .6); pointer-events: auto; overflow: hidden;
 }
-#cityZillow .zhead { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 6px; }
-#cityZillow .ztitle { font-size: 22px; font-weight: 700; }
+#cityZillow .zhead { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 6px; }
+#cityZillow .ztitle { font-size: 20px; font-weight: 700; }
 #cityZillow .ztag { font-size: 12px; font-weight: 500; color: #8a93a3; margin-left: 8px; }
-#cityZillow .zx { background: none; border: none; color: #8a93a3; font-size: 20px; cursor: pointer; padding: 2px 8px; border-radius: 8px; }
+#cityZillow .zx { background: none; border: none; color: #8a93a3; font-size: 19px; cursor: pointer; padding: 2px 8px; border-radius: 8px; }
 #cityZillow .zx:hover { color: #fff; background: rgba(255, 255, 255, .08); }
-#cityZillow .zstats { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 18px 8px; font-size: 12.5px; color: #9fb0c6; }
+#cityZillow .zstats { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 16px 7px; font-size: 12px; color: #9fb0c6; }
 #cityZillow .zstats b { color: #ffd166; }
-#cityZillow .zflash { margin: 0 16px 8px; padding: 7px 12px; border-radius: 9px; font-size: 13px; font-weight: 500; }
+#cityZillow .zflash { margin: 0 14px 7px; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 500; }
 #cityZillow .zflash-ok { background: rgba(46, 158, 79, .16); color: #9be8b4; border: 1px solid rgba(46, 158, 79, .4); }
 #cityZillow .zflash-bad { background: rgba(226, 87, 75, .14); color: #ff9e90; border: 1px solid rgba(226, 87, 75, .4); }
-#cityZillow .ztabs { display: flex; gap: 6px; padding: 4px 14px 10px; border-bottom: 1px solid #232b34; }
-#cityZillow .ztab { flex: 1; background: rgba(255, 255, 255, .04); border: 1px solid #2a323c; color: #aeb8c6;
-  padding: 7px 6px; border-radius: 10px; font-family: inherit; font-size: 13px; cursor: pointer; transition: .12s; }
+#cityZillow .ztabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 4px 14px 8px; border-bottom: 1px solid #232b34; }
+#cityZillow .ztab { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(255, 255, 255, .04); border: 1px solid #2a323c; color: #aeb8c6;
+  padding: 7px 9px; border-radius: 8px; font-family: inherit; font-size: 13px; cursor: pointer; transition: .12s; }
+#cityZillow .ztab b { color: #ffd166; font-size: 11px; font-weight: 700; }
 #cityZillow .ztab:hover { background: rgba(255, 255, 255, .09); color: #e8eef7; }
 #cityZillow .ztab.on { background: #2f6fed; border-color: #4f8bff; color: #fff; font-weight: 600; }
-#cityZillow .zlist { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
-#cityZillow .zlist::-webkit-scrollbar { width: 9px; }
-#cityZillow .zlist::-webkit-scrollbar-thumb { background: #39434f; border-radius: 6px; }
+#cityZillow .ztab.on b { color: #fff; }
+#cityZillow .ztools { display: grid; grid-template-columns: minmax(190px, 1fr) 130px 132px auto; gap: 8px; padding: 8px 14px 6px; border-bottom: 1px solid #232b34; }
+#cityZillow .zsearch,
+#cityZillow .zselect { min-width: 0; height: 32px; border-radius: 8px; border: 1px solid #313b45; background: rgba(255,255,255,.055); color: #e8eef7; font: inherit; font-size: 12px; padding: 0 10px; }
+#cityZillow .zsearch::placeholder { color: #737d8a; }
+#cityZillow .zselect { color: #cdd6e2; }
+#cityZillow .zclear { height: 32px; background: #343c46; color: #d6dee9; padding: 0 12px; }
+#cityZillow .zlist { flex: 1; overflow: hidden; padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 #cityZillow .zhint { font-size: 12px; color: #8a93a3; padding: 2px 2px 4px; }
 #cityZillow .zempty { color: #7f8794; text-align: center; padding: 40px 10px; }
 
-#cityZillow .zcard { display: flex; gap: 12px; align-items: stretch;
-  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 12px; padding: 10px 12px; }
+#cityZillow .zcard { display: flex; gap: 10px; align-items: center; min-height: 52px;
+  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 8px; padding: 7px 10px; }
 #cityZillow .zcard:hover { border-color: #3a4654; background: rgba(255, 255, 255, .06); }
-#cityZillow .zicon { font-size: 30px; width: 42px; display: flex; align-items: center; justify-content: center; }
+#cityZillow .zicon { flex: 0 0 32px; width: 32px; height: 30px; display: flex; align-items: center; justify-content: center; border: 1px solid #384552; border-radius: 6px; color: #ffd166; font-size: 11px; font-weight: 800; }
 #cityZillow .zmeta { flex: 1; min-width: 0; }
-#cityZillow .zname { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-#cityZillow .zaddr { font-size: 12px; color: #9fb0c6; }
-#cityZillow .zsub { font-size: 11.5px; color: #7f8794; margin-top: 1px; text-transform: capitalize; }
+#cityZillow .zname { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cityZillow .ztier { font-size: 10px; font-weight: 800; }
+#cityZillow .zaddr { font-size: 11px; color: #9fb0c6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cityZillow .zsub { font-size: 11px; color: #7f8794; margin-top: 1px; text-transform: capitalize; }
 #cityZillow .zowner { font-size: 11.5px; color: #8a93a3; margin-top: 2px; }
-#cityZillow .zright { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 3px; min-width: 116px; }
-#cityZillow .zval { font-size: 17px; font-weight: 700; color: #7ed957; }
+#cityZillow .zright { display: grid; grid-template-columns: 112px minmax(88px, 120px) minmax(156px, auto); align-items: center; justify-items: end; gap: 8px; min-width: 360px; }
+#cityZillow .zval { font-size: 15px; font-weight: 700; color: #7ed957; }
+#cityZillow .zincome { font-size: 11px; white-space: nowrap; }
+#cityZillow .zincome.up { color: #9be8b4; }
+#cityZillow .zincome.down { color: #ff9e90; }
+#cityZillow .zincome.muted { color: #7f8794; }
 #cityZillow .zrent { font-size: 11px; color: #ffb870; }
 #cityZillow .zacts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
-#cityZillow .zbtn { border: none; border-radius: 8px; padding: 6px 12px; font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: .12s; }
+#cityZillow .zacts-inline { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; margin-top: 0; }
+#cityZillow .zbtn { border: none; border-radius: 8px; padding: 5px 9px; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: .12s; white-space: nowrap; }
 #cityZillow .zbtn-buy { background: #2f9e4f; color: #fff; }
 #cityZillow .zbtn-buy:hover { background: #38b85c; }
 #cityZillow .zbtn-sell { background: #b8553a; color: #fff; }
 #cityZillow .zbtn-sell:hover { background: #d0653f; }
 #cityZillow .zbtn-home { background: #3a4658; color: #cfe0f5; }
 #cityZillow .zbtn-home:hover { background: #47566b; }
+#cityZillow .zbtn-neutral { background: #343c46; color: #d6dee9; }
+#cityZillow .zbtn-neutral:hover { background: #414b57; color: #fff; }
+#cityZillow .zbtn-warn { background: #8a3f4d; color: #fff; }
+#cityZillow .zbtn-disabled { background: #252b33; color: #6f7884; cursor: default; }
 #cityZillow .znope { font-size: 11px; color: #7f8794; font-style: italic; }
 
 #cityZillow .zbadge { font-size: 10px; font-weight: 700; letter-spacing: .4px; padding: 2px 7px; border-radius: 999px; }
@@ -91,13 +107,29 @@ body.mode-city #interact { display: none; }
 #cityZillow .zb-illegal { background: rgba(226, 87, 75, .2); color: #ff8a7a; }
 
 #cityZillow .zrank { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
-  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 10px; font-size: 14px; }
+  background: rgba(255, 255, 255, .035); border: 1px solid #28313b; border-radius: 8px; font-size: 14px; }
 #cityZillow .zrank.me { border-color: #4f8bff; background: rgba(47, 111, 237, .14); }
 #cityZillow .zrnum { width: 34px; color: #ffd166; font-weight: 700; }
 #cityZillow .zrname { flex: 1; font-weight: 600; }
 #cityZillow .zrcount { font-size: 12px; color: #8a93a3; }
 #cityZillow .zrval { font-weight: 700; color: #7ed957; min-width: 92px; text-align: right; }
 #cityZillow .zfoot { padding: 8px 16px; border-top: 1px solid #232b34; font-size: 11px; color: #6b7480; text-align: center; }
+#cityZillow .zpager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 4px 0 0; font-size: 12px; color: #9fb0c6; }
+#cityZillow .zpager b { color: #ffd166; }
+
+@media (max-width: 640px) {
+  #cityZillow.zwrap { width: 98vw; height: 88vh; }
+  #cityZillow .zhead { padding: 10px 12px 5px; }
+  #cityZillow .ztag { display: block; margin-left: 0; margin-top: 2px; }
+  #cityZillow .zstats { gap: 8px; padding: 0 12px 6px; }
+  #cityZillow .ztools { grid-template-columns: 1fr 1fr; padding: 8px 10px 6px; }
+  #cityZillow .zsearch { grid-column: 1 / -1; }
+  #cityZillow .zcard { gap: 8px; padding: 7px; align-items: flex-start; }
+  #cityZillow .zicon { flex-basis: 28px; width: 28px; height: 28px; }
+  #cityZillow .zname { flex-wrap: wrap; gap: 4px; white-space: normal; }
+  #cityZillow .zright { grid-template-columns: 1fr; justify-items: end; min-width: 96px; gap: 2px; }
+  #cityZillow .zbtn { padding: 5px 8px; }
+}
 
 /* ============================================================
    City activity directory ([Y])

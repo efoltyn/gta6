@@ -226,6 +226,7 @@
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) continue;
+      if (a.surrender || (a.surrenderT || 0) > 0 || (a.char && (a.char.surrender || a.char.handsUp))) continue;
       if (!a._weaponProp || !a._weaponProp.visible) continue;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(a)) continue;   // ragdoll owns the pose
       setReadyPose(a.char, a._weaponProp.userData && a._weaponProp.userData.weaponSlot === "long");
