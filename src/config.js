@@ -238,12 +238,12 @@
       // (Bloods, Latin Kings, Black P. Stones ride PEOPLE; Crips + Gangster
       // Disciples ride FOLK) — turf.js seeds alliances off `nation`. ids kept
       // stable where they were; names/colors/nation are what the game uses.
-      { id: "saints",    name: "Bloods",             color: 0xc0392b, accent: 0x6e1c1c, nation: "people"  }, // red
-      { id: "reapers",   name: "Crips",              color: 0x2f6bd6, accent: 0x1a3a6e, nation: "folk"    }, // blue
-      { id: "kings",     name: "Latin Kings",        color: 0xe0b020, accent: 0x6e5210, nation: "people"  }, // gold
-      { id: "stones",    name: "Black P. Stones",    color: 0x2f9e4f, accent: 0x123d22, nation: "people"  }, // green
-      { id: "disciples", name: "Gangster Disciples", color: 0x3a4150, accent: 0x141820, nation: "folk"    }, // charcoal
-      { id: "vipers",    name: "Trinitarios",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral" }, // teal
+      { id: "saints",    name: "Bloods",             color: 0xc0392b, accent: 0x6e1c1c, nation: "people",  ethnicity: "black"  }, // red
+      { id: "reapers",   name: "Crips",              color: 0x2f6bd6, accent: 0x1a3a6e, nation: "folk",    ethnicity: "black"  }, // blue
+      { id: "kings",     name: "Latin Kings",        color: 0xe0b020, accent: 0x6e5210, nation: "people",  ethnicity: "latino" }, // gold
+      { id: "stones",    name: "Black P. Stones",    color: 0x2f9e4f, accent: 0x123d22, nation: "people",  ethnicity: "black"  }, // green
+      { id: "disciples", name: "Gangster Disciples", color: 0x3a4150, accent: 0x141820, nation: "folk",    ethnicity: "black"  }, // charcoal
+      { id: "vipers",    name: "Trinitarios",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral", ethnicity: "latino" }, // teal (Dominican)
     ],
     gangPerTurf: [2, 4],   // members spawned to hold each controlled building
     gangArmedFrac: 0.55,   // share of gang members packing a firearm

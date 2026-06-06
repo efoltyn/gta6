@@ -51,8 +51,19 @@
   const BOSS_NICK = ["Lucky", "Scarface", "Teflon", "Big", "Diamond", "Capo", "Sosa",
     "Rico", "Cash", "Bugsy", "Dutch", "Whitey", "Ghost", "Iron", "Slick", "Cold", "Reaper", "King", "Snake"];
   function pick(a) { return a[(rng() * a.length) | 0]; }
-  function makeName() { return pick(FIRST) + " " + pick(LAST); }
-  function makeBossName() { return pick(FIRST) + " '" + pick(BOSS_NICK) + "' " + pick(LAST); }
+  // member names match each gang's ETHNICITY (config gangs carry `ethnicity`):
+  // Latin Kings + Trinitarios = Hispanic; Bloods/Crips/GDs/Black P. Stones = Black.
+  const FIRST_BLACK = ["Marcus", "DeShawn", "Tyrone", "Jamal", "Darnell", "Maurice", "Terrell", "Andre", "Rashad", "Jerome", "Malik", "Demetrius", "Cedric", "Reggie", "Dontae", "Trey", "Keon", "Marlo", "Dre", "Avon", "Lamar", "Tremaine", "Quan", "Deon"];
+  const LAST_BLACK = ["Washington", "Banks", "Jefferson", "Booker", "Coleman", "Mosley", "Pruitt", "Carter", "Hollis", "Freeman", "Dawson", "Greer", "Mack", "Tate", "Childs", "Means", "Gaines", "Stroud", "Pickett", "Boyd"];
+  const FIRST_LATINO = ["Carlos", "Miguel", "Jose", "Luis", "Jesus", "Angel", "Hector", "Rafael", "Diego", "Javier", "Ramon", "Emilio", "Nico", "Mateo", "Tito", "Beto", "Marco", "Cesar", "Rey", "Flaco", "Chuy", "Eddie", "Junior"];
+  const LAST_LATINO = ["Reyes", "Cruz", "Vega", "Morales", "Rivera", "Castillo", "Guzman", "Herrera", "Ramirez", "Delgado", "Salazar", "Mendoza", "Ortiz", "Vargas", "Santos", "Pena", "Rosario", "Tavarez", "Nunez", "Batista"];
+  function poolFor(eth) {
+    if (eth === "latino") return [FIRST_LATINO, LAST_LATINO];
+    if (eth === "black") return [FIRST_BLACK, LAST_BLACK];
+    return [FIRST, LAST];   // mixed default (player crew / neutral / fallback)
+  }
+  function makeName(eth) { const p = poolFor(eth); return pick(p[0]) + " " + pick(p[1]); }
+  function makeBossName(eth) { const p = poolFor(eth); return pick(p[0]) + " '" + pick(BOSS_NICK) + "' " + pick(p[1]); }
 
   // rank ladder shown as a small PIP suffix on the name tag — the rank is read
   // from ped.rank (data), so the tag says e.g. "Marcus Vance · Lt." not a surname.
@@ -118,7 +129,7 @@
           aggr: clamp(rollGang(ag) + 0.08, 0.8, 1),
           archetype: "gangster", job: "gang boss",
           armed: true, weapon: "SMG", hp: 240,     // the boss is always the most heavily strapped
-          name: makeBossName(),
+          name: makeBossName(gang.ethnicity),
         });
         boss.homeGuard = { x: blot.cx, z: blot.cz };
         boss.isBoss = true; boss.rank = "boss"; boss.maxHp = 240; boss.ammo = 50;
@@ -151,7 +162,7 @@
             archetype: "gangster", job: lt ? "gang lieutenant" : "gang soldier",
             armed: true, weapon: lt ? (rng() < 0.5 ? "SMG" : "Pistol") : "Pistol",
             hp: lt ? 160 : 120,
-            name: makeName(),
+            name: makeName(gang.ethnicity),
           });
           ped.rank = lt ? "lt" : "soldier";
           ped.ammo = lt ? 40 : 30;
