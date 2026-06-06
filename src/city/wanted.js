@@ -184,7 +184,7 @@
     let seen = false;
     const cops = CBZ.cityCops;
     for (let i = 0; i < cops.length; i++) { if (!cops[i].dead && cops[i].sees) { seen = true; break; } }
-    if (!seen && sinceCrime > 3 && (g.heat || 0) > 0) {
+    if (!seen && sinceCrime > 3000 && (g.heat || 0) > 0) {   // 3s grace (CBZ.now is ms) before heat bleeds — not 3ms
       const rate = CBZ.CITY.heatDecay * (g.wanted >= 4 ? 0.6 : 1);
       g.heat = Math.max(0, g.heat - rate * dt);
       g.wanted = starsFromHeat(g.heat);

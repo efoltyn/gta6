@@ -368,10 +368,10 @@
   //  stops spamming. These are the "endgame jobs" the super-rich chase.
   // ============================================================
   const OPS = [
-    { id: "stocks",  name: "Insider Stock Play",   emoji: "📈", stake: 50000,   odds: 0.62, lo: 0.4, hi: 2.6, heat: 0, minTier: 2, cd: 45, blurb: "A tip from the trading floor. Front the position, ride the spike." },
-    { id: "fight",   name: "Fix the Big Fight",    emoji: "🥊", stake: 120000,  odds: 0.55, lo: 0.0, hi: 3.4, heat: 1, minTier: 3, cd: 60, blurb: "Bribe the fighters, bet the house. If it leaks, you're exposed." },
-    { id: "heist",   name: "Casino Vault Heist",   emoji: "💎", stake: 400000,  odds: 0.5,  lo: 0.0, hi: 4.2, heat: 3, minTier: 4, cd: 120, blurb: "Front the crew & gear. Hit the vault. Cops come HARD if it goes loud." },
-    { id: "cartel",  name: "Cartel Shipment",      emoji: "🚢", stake: 900000,  odds: 0.48, lo: 0.0, hi: 4.8, heat: 4, minTier: 5, cd: 150, blurb: "Finance a freighter of product. The biggest score — or the DEA's." },
+    { id: "stocks",  name: "Insider Stock Play",   emoji: "📈", stake: 50000,   odds: 0.58, lo: 0.4, hi: 2.2, heat: 0, minTier: 2, cd: 45, blurb: "A tip from the trading floor. Front the position, ride the spike." },
+    { id: "fight",   name: "Fix the Big Fight",    emoji: "🥊", stake: 120000,  odds: 0.5, lo: 0.0, hi: 2.2, heat: 1, minTier: 3, cd: 60, blurb: "Bribe the fighters, bet the house. If it leaks, you're exposed." },
+    { id: "heist",   name: "Casino Vault Heist",   emoji: "💎", stake: 400000,  odds: 0.46, lo: 0.0, hi: 2.6, heat: 3, minTier: 4, cd: 120, blurb: "Front the crew & gear. Hit the vault. Cops come HARD if it goes loud." },
+    { id: "cartel",  name: "Cartel Shipment",      emoji: "🚢", stake: 900000,  odds: 0.44, lo: 0.0, hi: 2.8, heat: 4, minTier: 5, cd: 150, blurb: "Finance a freighter of product. The biggest score — or the DEA's." },
   ];
   const OP_BY_ID = {}; for (const o of OPS) OP_BY_ID[o.id] = o;
   function opCooldown(id) {
@@ -389,11 +389,12 @@
     g.cityOpCD[id] = now() + o.cd * 1000;   // o.cd is SECONDS, CBZ.now is ms
     const e = E();
     // odds nudged up a touch by respect (rep = better connections)
-    const win = rng() < clamp(o.odds + Math.min(0.12, (g.respect || 0) / 5000), 0.2, 0.9);
+    const win = rng() < clamp(o.odds + Math.min(0.06, (g.respect || 0) / 8000), 0.2, 0.9);
     if (win) {
       const mult = o.lo > 0 ? (o.lo + rng() * (o.hi - o.lo)) : (1 + rng() * (o.hi - 1));
       let payout = Math.round(o.stake * mult);
-      if (e.scoreReward) payout = e.scoreReward(payout, { tier: true });   // heat/rep juice
+      // NB: no scoreReward juice on ops — that compounding turned them into +EV
+      // money PUMPS. Ops are pure stake×mult GAMBLES now (with a house edge below).
       if (CBZ.city) { CBZ.city.addCash(payout); CBZ.city.addRespect(clamp(Math.round(payout / 8000), 4, 80)); }
       state().cityWealthLog.opsDone++;
       bumpNotoriety(Math.round(o.heat * 3));

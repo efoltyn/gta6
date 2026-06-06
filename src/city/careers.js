@@ -71,7 +71,7 @@
   }
   function clearBeacon() { if (beacon) { if (beacon.parent) beacon.parent.remove(beacon); if (beacon.geometry) beacon.geometry.dispose(); if (beacon.material) beacon.material.dispose(); beacon = null; } }
 
-  function aliveCivilians() { return CBZ.cityPeds.filter((p) => !p.dead && !p.vendor); }
+  function aliveCivilians() { return (CBZ.cityPeds || []).filter((p) => !p.dead && !p.vendor); }
   function lotDoor(l) { return { x: l.building.door.x, z: l.building.door.z }; }
   function randSpot() {
     const a = CBZ.city.arena;
@@ -544,7 +544,7 @@
   // ---- the live customer base. Each successful sale can convert a ped into a
   // REGULAR who knows your face: they re-up, pay a loyalty premium, and tip you
   // off to the best market. Bigger base = more passive street demand.
-  function regulars() { return CBZ.cityPeds.filter((p) => p.regular && !p.dead); }
+  function regulars() { return (CBZ.cityPeds || []).filter((p) => p.regular && !p.dead); }
   // send a ped walking to (x,z) the same way the ped AI does (sets finalGoal,
   // a 2-hop path via the nearest intersection if far, target + a short pause so
   // the routine picker doesn't immediately override it).
@@ -588,6 +588,8 @@
     const econ = CBZ.cityEcon, inv = g.cityInv || {};
     const drugs = Object.keys(inv).filter((k) => econ.ITEMS[k] && econ.ITEMS[k].tag === "drug");
     if (!drugs.length) { CBZ.city.note("No product to sell. Buy WHOLESALE at the trap house.", 2.0); return; }
+    if (CBZ.now - (g._lastDealT || 0) < 700) return;   // global anti-spam: one street sale at a time (no fan-the-crowd faucet)
+    g._lastDealT = CBZ.now;
     if (ped.boughtT && CBZ.now - ped.boughtT < 8000) { CBZ.city.note(ped.name + " isn't interested right now.", 1.4); return; }
     // a regular wants their drug of choice if you have it; else best earner
     let drug = (ped.regular && ped.favDrug && inv[ped.favDrug]) ? ped.favDrug : null;
@@ -614,7 +616,7 @@
     // price: market street price × territory factor × loyalty premium
     let price = econ.streetPrice ? econ.streetPrice(drug) : Math.round(econ.ITEMS[drug].value * 2.2);
     price = Math.round(price * turf.mult * (ped.regular ? 1 + 0.25 * (ped.loyalty || 0.1) : 1));
-    econ.take(drug, 1);
+    if (!econ.take(drug, 1)) { CBZ.city.note(ped.name + " — you're out of that product.", 1.4); return; }   // only pay for a unit actually removed
     if (econ.recordSale) econ.recordSale(drug, 1);
     CBZ.city.addCash(price); CBZ.city.addRespect(1);
     g.cityDrugSales = (g.cityDrugSales || 0) + 1;
@@ -666,7 +668,7 @@
     } else {
       CBZ.city.note("Off the corner. You're moving again.", 1.6);
       // release any seekers so they get on with their own lives
-      for (const p of CBZ.cityPeds) if (p.seekPlayer) { p.seekPlayer = false; }
+      for (const p of (CBZ.cityPeds || [])) if (p.seekPlayer) { p.seekPlayer = false; }
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return g.cityPostedUp;
@@ -828,7 +830,8 @@
         if (Math.hypot(P.x - j.dest.x, P.z - j.dest.z) < 4) { CBZ.city.note("Package delivered.", 1.6); finishJob(CBZ.player.driving ? 80 : 0); }
       } else if (j.type === "heist" && j.lot) {
         const ped = j.lot.building.vendor;
-        if (ped && ped.robbed) { CBZ.city.note("Register cleared.", 1.6); finishJob(); }
+        if (ped && j._robBase === undefined) j._robBase = !!ped.robbed;   // baseline at activation
+        if (ped && ped.robbed && !j._robBase) { CBZ.city.note("Register cleared.", 1.6); finishJob(); }   // only a FRESH rob counts — a pre-robbed store can't instant-complete
       } else if (j.type === "smuggle") {
         if (!j.got) {
           if (Math.hypot(P.x - j.pickup.x, P.z - j.pickup.z) < 4) {
