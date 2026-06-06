@@ -1,27 +1,36 @@
 /* ============================================================
-   city/aigoals.js — purpose for the crowd (ADDITIVE goal layer)
+   city/aigoals.js — PURPOSE for the crowd (a real utility-AI need layer)
 
-   The ped brain (city/peds.js) already WANDERS and REACTS, but on its
-   own a calm ped just hops between random waypoints. This layer hands
-   the crowd a reason to be where they're going — without touching the
-   brain. It only SETS the same goal fields move()/think() already
-   honour (finalGoal / target / path / state / rage), then steps back
-   and lets peds.js carry them there.
+   The ped brain (city/peds.js) WANDERS and REACTS, but on its own a calm
+   ped just hops between random waypoints. This layer gives every NPC a
+   believable REASON to be where it's going — an inner life of DRIVES that
+   decay over time and get satisfied by acting. It NEVER touches the brain;
+   it only SETS the same fields move()/think() already honour (finalGoal /
+   path / target / state / rage / pause), then steps back and lets peds.js
+   carry the ped there.
+
+   Researched + stolen from real sims:
+     • UTILITY AI (F.E.A.R./The Sims line): score EVERY candidate goal by
+       "how badly do I need this × is the opportunity here", pick the best.
+       Not scripted constants — behaviour EMERGES from need + context.
+     • THE SIMS' decaying MOTIVES: each ped carries needs that drain with
+       time and are topped up by the matching activity. A starved need
+       dominates the score, so a broke ped goes earning, a jonesing addict
+       hunts a dealer, an ambitious soldier puts in work for the gang.
+     • GTA street economy: dealers POST UP and serve buyers; addicts seek a
+       fix and PAY; workers commute; gangsters patrol/expand turf; grudges
+       between peds boil over into a real NPC-vs-NPC feud.
+
+   The streets become an economy of behaviour: money actually changes hands
+   NPC↔NPC (a user pays a dealer, the dealer kicks up to his gang), feeds
+   the gang-promotion currency, and acts on the relationship grudges other
+   systems record. Cheap: a tiny slice of the crowd is scored each frame,
+   no per-frame allocations, all scans bounded.
 
    Runs at onUpdate order 33 — one tick BEFORE peds @34 — so a freshly
-   assigned goal is acted on the very same frame. City-mode only, and
-   time-sliced: each frame it only looks at a thin slice (~1/30) of the
-   crowd, so even a packed city stays cheap.
-
-   Four pursuits, chosen by archetype / aggr / wealth:
-     EARN     ordinary folk commute to a shop/workplace and "work"
-     DRUGS    dealers & users gravitate to each other / the Trap House
-     HUNT     the truly violent occasionally pick a weak or rival mark
-     JOYRIDE  a few bold souls sprint across town (brief speed nudge)
-
-   It NEVER overrides a ped that's already fighting, fleeing or
-   surrendering, and skips companions / hostages / drivers / vendors /
-   the dead. Spice, not chaos: HUNT in particular is kept rare.
+   chosen goal is acted on the same frame. City-mode only. It defers to the
+   brain whenever a ped is fighting, fleeing, surrendering, being hunted,
+   guarding, or is a companion/hostage/driver/vendor/dead.
 ============================================================ */
 (function () {
   "use strict";
@@ -29,6 +38,7 @@
   if (!CBZ || !window.THREE) return;
   const g = CBZ.game;
   const A0 = () => (CBZ.CITY && CBZ.CITY.aggro) || {};
+  const now = () => CBZ.now || 0;
 
   // a tiny independent PRNG so we never disturb peds.js' deterministic stream
   let _s = 13371;
@@ -37,17 +47,67 @@
   // rolling cursor through CBZ.cityPeds so each frame handles a fresh slice
   let cursor = 0;
 
-  // ---- goal helpers: only SET fields, let the ped brain do the walking ----
+  // ============================================================
+  //  NEEDS — the decaying motives that drive every ped (lazy-attached)
+  // ------------------------------------------------------------
+  //  Each is 0..1, where HIGH = satisfied, LOW = urgent. They drain over
+  //  (sim) time and are topped up when the ped does the matching activity.
+  //  Drain rates come from PERSONALITY, never hardcoded outcomes:
+  //    money    — everyone needs cash; the poor & greedy crave it hardest
+  //    high     — only drug users; addicts drain fast and chase a fix
+  //    social   — the human pull to be around others (light)
+  //    safety   — eroded by fear; a scared ped's only goal is to be safe
+  //    ambition — gang members' drive to climb; fed by putting in work
+  // ============================================================
+  function needs(ped) {
+    let N = ped._needs;
+    if (!N) {
+      const greed = 0.4 + ped.aggr * 0.5 + (1 - (ped.wealth || 0.4)) * 0.4; // poor/aggressive want money
+      N = ped._needs = {
+        money: 0.45 + rng() * 0.4,
+        high: ped.drugUser ? (0.3 + rng() * 0.4) : 1,
+        social: 0.5 + rng() * 0.4,
+        ambition: ped.gang ? (0.4 + rng() * 0.3) : 0.6,
+        // per-ped drain rates (units per second of sim time), personality-shaped
+        kMoney: (0.006 + 0.010 * greed) * (0.7 + rng() * 0.6),
+        kHigh: ped.drugUser ? (0.010 + 0.018 * (ped.erratic || 0.2)) : 0,
+        kSocial: 0.004 + rng() * 0.004,
+        kAmb: ped.gang ? (0.005 + 0.008 * ped.aggr) : 0,
+        t: now(),
+      };
+    }
+    return N;
+  }
+  // decay needs by the elapsed sim-time since we last looked at this ped
+  function decayNeeds(ped) {
+    const N = needs(ped);
+    const dt = Math.min(20, Math.max(0, now() - N.t)); // cap so a long LOD gap doesn't nuke it
+    N.t = now();
+    if (dt <= 0) return N;
+    N.money = clamp01(N.money - N.kMoney * dt);
+    if (ped.drugUser) N.high = clamp01(N.high - N.kHigh * dt);
+    N.social = clamp01(N.social - N.kSocial * dt);
+    if (ped.gang) N.ambition = clamp01(N.ambition - N.kAmb * dt);
+    return N;
+  }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function satisfy(N, key, amt) { N[key] = clamp01((N[key] || 0) + amt); }
 
-  // pick a shop/workplace lot to head to (door-based, like pickRoutineGoal)
+  // ============================================================
+  //  goal helpers — only SET fields, let the ped brain do the walking
+  // ============================================================
+
+  // pick a shop/workplace lot to head to (optionally by kind)
   function shopByKind(A, kind) {
     if (!A.shopLots || !A.shopLots.length) return null;
     if (kind) { const m = A.shopLots.filter((l) => l.kind === kind); if (m.length) return m[(rng() * m.length) | 0]; return null; }
     return A.shopLots[(rng() * A.shopLots.length) | 0];
   }
 
-  // route a ped to a {x,z} goal, crossing at the nearest intersection if far
-  // (mirrors peds.js pickRoutineGoal so movement looks identical to the brain's)
+  // route a ped to a {x,z} goal, crossing at the nearest intersection if far.
+  // Mirrors peds.js pickRoutineGoal so the movement reads identical to the
+  // brain's, and stamps a short pause so the routine picker won't instantly
+  // override the goal we just set.
   function routeTo(ped, A, goal) {
     ped.finalGoal = goal;
     ped.path = null;
@@ -60,125 +120,331 @@
     }
     ped.target.set(ped.path[0].x, 0, ped.path[0].z);
     ped.state = "walk";
-    ped.pause = 0;
+    ped.pause = 0.4;
   }
 
-  // nearest living non-companion ped matching a test (cheap, bounded scan)
+  // nearest living, drivable ped matching a test (cheap, bounded squared-dist scan)
   function nearestPed(self, maxd, test) {
     let best = null, bd = maxd * maxd;
     const peds = CBZ.cityPeds;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       if (p === self || p.dead || p.companion || p.controlled || p._parked) continue;
-      if (!test(p)) continue;
       const dx = p.pos.x - self.pos.x, dz = p.pos.z - self.pos.z, dd = dx * dx + dz * dz;
-      if (dd < bd) { bd = dd; best = p; }
+      if (dd >= bd) continue;
+      if (!test(p)) continue;
+      bd = dd; best = p;
     }
     return best;
   }
 
-  // ---- the four pursuits ----
+  // is THIS ped a dealer the crowd can score from?
+  function isDealerPed(p) { return (p.archetype === "dealer" || (p.gang && p.aggr >= (A0().crook || 0.72))) && !p.vendor; }
 
-  // EARN: ordinary peds commute to a shop and clock in (idle a beat at the door)
-  function goEarn(ped, A) {
+  // ============================================================
+  //  the goals — each returns true if it managed to set one
+  // ============================================================
+
+  // EARN: ordinary peds commute to a shop/workplace and clock in. A greedier
+  // or harder ped instead HUSTLES the rich — shadows a wealthy mark to lift
+  // their wallet (a real NPC mugging via the offense pipeline).
+  function goEarn(ped, A, N) {
+    // greedy/bold peds will rob the rich when one is nearby (utility: high
+    // money-need + a fat opportunity walking past).
+    if (ped.aggr >= (A0().crook || 0.72)) {
+      const mark = nearestPed(ped, 26, (p) => !p.vendor && p.kind === "civilian" && (p.wealth || 0) > 0.55 && (p.cash | 0) > 40 && p.aggr < ped.aggr && !p.surrender && p.state !== "flee");
+      if (mark) {
+        ped.rage = mark; ped.state = "fight";
+        ped.target.set(mark.pos.x, 0, mark.pos.z);
+        if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "mugging");
+        // the victim now has a reason to hate the robber — a feud may follow
+        CBZ.cityNpcGrudge(mark, ped);
+        ped._goalKind = "rob";
+        return true;
+      }
+    }
     const lot = shopByKind(A, null);
     if (!lot || !lot.building || !lot.building.door) return false;
     const d = lot.building.door;
     routeTo(ped, A, { x: d.x, z: d.z, enter: true });
-    // a longer "shift" idle once they arrive — believable, no mechanics
-    ped.pause = 0;
+    ped._goalKind = "work";
+    // mark a payday at the door so EARN actually feeds the money need (below)
+    ped._payAt = { x: d.x, z: d.z };
     return true;
   }
 
-  // DRUGS: dealers post up / users seek a dealer, both fall back to the Trap House
-  function goDrugs(ped, A, isDealer) {
-    if (isDealer) {
-      // a dealer looks for a user to meet; otherwise sets up shop at the trap
-      const user = nearestPed(ped, 40, (p) => p.drugUser && !p.vendor && p.kind === "civilian");
-      if (user) { routeTo(ped, A, { x: user.pos.x, z: user.pos.z }); return true; }
-    } else {
-      // a user looks for a dealer to score from
-      const dealer = nearestPed(ped, 50, (p) => (p.archetype === "dealer") && !p.vendor);
-      if (dealer) { routeTo(ped, A, { x: dealer.pos.x, z: dealer.pos.z }); return true; }
+  // DEAL: a dealer POSTS UP and serves buyers. If a user with a craving is
+  // nearby, the dealer meets them and a sale closes (money flows user→dealer,
+  // the dealer kicks a cut up to his gang's treasury = promotion currency).
+  // Otherwise the dealer holds a corner near the trap so buyers can find him.
+  function goDeal(ped, A, N) {
+    const buyer = nearestPed(ped, 38, (p) => p.drugUser && !p.vendor && p.kind !== "cop" && p._needs && p._needs.high < 0.5 && !p.rage && p.state !== "flee");
+    if (buyer) {
+      routeTo(ped, A, { x: buyer.pos.x, z: buyer.pos.z });
+      ped._goalKind = "deal"; ped._dealTo = buyer;
+      return true;
+    }
+    // no buyer in range — post up on a corner near the trap (a dealer's spot)
+    const trap = shopByKind(A, "drugs");
+    const spot = trap && trap.building && trap.building.door
+      ? { x: trap.building.door.x + (rng() - 0.5) * 8, z: trap.building.door.z + (rng() - 0.5) * 8 }
+      : A.randomSidewalkPoint();
+    routeTo(ped, A, spot);
+    ped._goalKind = "post";
+    return true;
+  }
+
+  // SCORE: an addict with a craving hunts a dealer and pays for a fix. If no
+  // dealer is in range, they drift to the trap house to wait for product.
+  function goScore(ped, A, N) {
+    const dealer = nearestPed(ped, 55, (p) => isDealerPed(p) && !p.rage && p.state !== "flee");
+    if (dealer) {
+      routeTo(ped, A, { x: dealer.pos.x, z: dealer.pos.z });
+      ped._goalKind = "score"; ped._scoreFrom = dealer;
+      return true;
     }
     const trap = shopByKind(A, "drugs");
     if (trap && trap.building && trap.building.door) {
       routeTo(ped, A, { x: trap.building.door.x, z: trap.building.door.z, enter: true });
+      ped._goalKind = "score"; ped._scoreFrom = null;
       return true;
     }
     return false;
   }
 
-  // HUNT: a violent ped marks a weak civilian or a rival gangster for the brain
-  // to attack. KEPT RARE so it reads as menace, not a citywide bloodbath.
-  function goHunt(ped) {
-    const B = A0();
-    // prefer a rival-gang member if this ped is a gangster; else a weak civilian
-    let mark = null;
-    if (ped.gang) {
-      mark = nearestPed(ped, 22, (p) => p.gang && p.gang !== ped.gang && p.kind !== "cop");
+  // CLIMB: an ambitious gang member puts in WORK — patrols/holds his gang's
+  // turf, and takes out a rival if one's around (real promotion currency via
+  // the hierarchy's scored hook). This is how a soldier earns his stripes.
+  function goClimb(ped, A, N) {
+    // a rival gangster nearby is a chance to put a body in for the crew
+    const rival = nearestPed(ped, 24, (p) => p.gang && p.gang !== ped.gang && p.kind !== "cop" && !p.surrender);
+    if (rival) {
+      ped.rage = rival; ped.state = "fight";
+      ped.target.set(rival.pos.x, 0, rival.pos.z);
+      if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 14, "assault");
+      ped._goalKind = "warwork";
+      return true;
     }
-    if (!mark) {
-      mark = nearestPed(ped, 16, (p) =>
-        !p.vendor && p.kind === "civilian" && p.aggr < (ped.aggr - 0.2) &&
-        !p.surrender && p.state !== "flee");
+    // else patrol the gang's turf — head toward its centre / a held block
+    const gang = ped.gang && CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
+    if (gang && gang.center) {
+      const c = gang.center;
+      routeTo(ped, A, { x: c.x + (rng() - 0.5) * 26, z: c.z + (rng() - 0.5) * 26 });
+      ped._goalKind = "patrol";
+      // patrolling on home turf slowly proves reliability (seniority/loyalty)
+      return true;
     }
-    if (!mark) return false;
-    ped.rage = mark;          // the brain takes it from here (state -> fight)
-    ped.state = "fight";
-    ped.target.set(mark.pos.x, 0, mark.pos.z);
-    if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 16, "assault");
+    return false;
+  }
+
+  // FEUD: act on a GRUDGE the relationship system recorded between two peds.
+  // A ped who hates someone (their wallet got lifted, their friend got hurt,
+  // a rival shoved them) and is bold enough will go settle it — a real,
+  // emergent NPC-vs-NPC feud, not the player ambush (social.js owns that).
+  function goFeud(ped) {
+    const foe = ped._grudgeOn;
+    if (!foe || foe.dead || foe.companion || Math.hypot(foe.pos.x - ped.pos.x, foe.pos.z - ped.pos.z) > 30) { ped._grudgeOn = null; return false; }
+    ped.rage = foe; ped.state = "fight";
+    ped.target.set(foe.pos.x, 0, foe.pos.z);
+    if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "assault");
+    ped._goalKind = "feud";
     return true;
   }
 
-  // JOYRIDE: a bold ped strides fast to a far corner of town. We can't grant a
-  // car here (that's vehicles.js), so we just give a brief baseSpeed nudge and a
-  // distant destination — purposeful, hurried foot traffic that fills the grid.
-  function goJoyride(ped, A) {
+  // CHILL: satisfy the social need — drift toward a knot of other peds, or
+  // take a brisk cross-town stroll (fills the grid with purposeful traffic).
+  function goChill(ped, A, N) {
+    if (N.social < 0.35) {
+      const mate = nearestPed(ped, 22, (p) => p.kind === "civilian" && !p.vendor && (p.state === "walk" || p.state === "idle"));
+      if (mate) {
+        routeTo(ped, A, { x: mate.pos.x + (rng() - 0.5) * 3, z: mate.pos.z + (rng() - 0.5) * 3 });
+        ped._goalKind = "social";
+        return true;
+      }
+    }
+    // a bold soul strides somewhere far (brief speed nudge, restored on lapse)
     const p = A.randomSidewalkPoint();
-    // bias toward somewhere genuinely far so they actually traverse the map
-    if (Math.hypot(p.x - ped.pos.x, p.z - ped.pos.z) < A.step * 2) {
-      const it = A.nearestIntersection(A.maxX, A.maxZ);
-      p.x = it.x; p.z = it.z;
+    if (ped.aggr >= (A0().bold || 0.5) && Math.hypot(p.x - ped.pos.x, p.z - ped.pos.z) < A.step * 2) {
+      const it = A.nearestIntersection(A.maxX, A.maxZ); p.x = it.x; p.z = it.z;
+      if (!ped._joyT) { ped._baseSpeed0 = ped.baseSpeed; ped.baseSpeed = ped.baseSpeed * 1.6; }
+      ped._joyT = 6 + rng() * 6;
     }
     routeTo(ped, A, { x: p.x, z: p.z });
-    // brief speed boost, restored by tick() when the timer lapses
-    if (!ped._joyT) { ped._baseSpeed0 = ped.baseSpeed; ped.baseSpeed = ped.baseSpeed * 1.7; }
-    ped._joyT = 7 + rng() * 6;
+    ped._goalKind = "wander";
     return true;
   }
 
-  // ---- assign ONE goal to a ped (returns true if it set one) ----
+  // ============================================================
+  //  UTILITY PICK — score every goal by need × opportunity × fit, take the
+  //  best (small jitter breaks ties so the crowd doesn't move in lockstep).
+  // ============================================================
   function assign(ped, A) {
     const B = A0();
-    const isDealer = ped.archetype === "dealer";
+    const N = decayNeeds(ped);
     const r = rng();
 
-    // violent peds: rare hunt (spice). gated hard so it stays uncommon.
-    if (ped.aggr >= (B.violent || 0.88) && r < 0.06) {
-      if (goHunt(ped)) { ped._goalCD = 8 + rng() * 8; return; }
-    }
+    // ---- score each goal: urgency (1-need) shaped by opportunity & personality ----
+    // FEUD: a live grudge target overrides almost everything (it's personal)
+    let sFeud = 0;
+    if (ped._grudgeOn && !ped._grudgeOn.dead) sFeud = 0.95;
 
-    // dealers / drug users gravitate to the trade
-    if ((isDealer || ped.drugUser) && r < 0.5) {
-      if (goDrugs(ped, A, isDealer)) { ped._goalCD = 10 + rng() * 12; return; }
-    }
+    // SCORE (get high): only users; the lower the high-need, the harder the pull
+    let sScore = 0;
+    if (ped.drugUser) sScore = (1 - N.high) * 1.1;
 
-    // a few bold (but not openly violent) peds head off on a brisk cross-town trek
-    if (ped.aggr >= (B.bold || 0.5) && ped.aggr < (B.violent || 0.88) && r < 0.14) {
-      if (goJoyride(ped, A)) { ped._goalCD = 12 + rng() * 10; return; }
-    }
+    // DEAL: dealers want to move product; stronger when a buyer is craving nearby
+    let sDeal = 0;
+    if (isDealerPed(ped)) sDeal = 0.4 + (1 - N.money) * 0.7;
 
-    // everyone else: go EARN — commute to a shop and put in a shift
-    if (r < 0.55) {
-      if (goEarn(ped, A)) { ped._goalCD = 14 + rng() * 14; return; }
-    }
+    // CLIMB: gang members with ambition + aggression put in work
+    let sClimb = 0;
+    if (ped.gang && ped.aggr >= (B.bold || 0.5)) sClimb = (1 - N.ambition) * (0.6 + ped.aggr * 0.5);
 
-    // nothing assigned this pass: short retry so we don't spin every frame
+    // EARN: the universal money drive (poor/greedy score it highest)
+    let sEarn = (1 - N.money) * 0.95;
+
+    // CHILL: the social fallback, plus a baseline so nobody freezes
+    let sChill = 0.15 + (1 - N.social) * 0.45;
+
+    // small per-goal jitter so equal scores diverge across the crowd
+    sFeud *= 1; sScore *= (0.85 + r * 0.3); sDeal *= (0.85 + rng() * 0.3);
+    sClimb *= (0.85 + rng() * 0.3); sEarn *= (0.85 + rng() * 0.3); sChill *= (0.85 + rng() * 0.3);
+
+    // rank the goals, try the best first; fall through if its opportunity isn't
+    // actually there right now (e.g. no dealer to score from) to the next best.
+    const order = [
+      ["feud", sFeud], ["score", sScore], ["deal", sDeal],
+      ["climb", sClimb], ["earn", sEarn], ["chill", sChill],
+    ].sort((a, b) => b[1] - a[1]);
+
+    for (let i = 0; i < order.length; i++) {
+      const kind = order[i][0], score = order[i][1];
+      if (score <= 0.04) continue;
+      let ok = false;
+      if (kind === "feud") ok = goFeud(ped);
+      else if (kind === "score") ok = goScore(ped, A, N);
+      else if (kind === "deal") ok = goDeal(ped, A, N);
+      else if (kind === "climb") ok = goClimb(ped, A, N);
+      else if (kind === "earn") ok = goEarn(ped, A, N);
+      else if (kind === "chill") ok = goChill(ped, A, N);
+      if (ok) {
+        // cooldown scales with how urgent the chosen goal was (urgent = recheck sooner)
+        ped._goalCD = (kind === "feud" ? 5 : 9 + (1 - score) * 12) + rng() * 5;
+        return;
+      }
+    }
+    // nothing landed this pass: short retry so we don't spin every frame
     ped._goalCD = 3 + rng() * 4;
   }
 
-  // a ped the brain is mid-action on — never stomp it
+  // ============================================================
+  //  ARRIVAL EFFECTS — when a ped reaches/acts on its goal, the need is
+  //  satisfied and (for trades) real value moves. Checked cheaply per slice;
+  //  no walking is driven here, only the payoff of a goal the brain carried.
+  // ============================================================
+  function resolve(ped, N) {
+    const kind = ped._goalKind;
+    if (!kind) return;
+
+    // WORK payday: arrived at the workplace door → earn a wage, fill money need
+    if (kind === "work" && ped._payAt) {
+      if (Math.hypot(ped.pos.x - ped._payAt.x, ped.pos.z - ped._payAt.z) < 4.5) {
+        satisfy(N, "money", 0.4 + rng() * 0.3);
+        satisfy(N, "social", 0.12);
+        ped._payAt = null; ped._goalKind = null;
+      }
+      return;
+    }
+
+    // DEAL: dealer reached the buyer → close a street sale (NPC↔NPC economy)
+    if (kind === "deal" && ped._dealTo) {
+      const b = ped._dealTo;
+      if (b.dead || !b._needs) { ped._dealTo = null; ped._goalKind = null; return; }
+      if (Math.hypot(ped.pos.x - b.pos.x, ped.pos.z - b.pos.z) < 3.2) {
+        npcDrugSale(ped, b, N);
+        ped._dealTo = null; ped._goalKind = null;
+        ped.pause = Math.max(ped.pause, 1.0 + rng()); // linger a beat after the hand-off
+      }
+      return;
+    }
+
+    // SCORE: addict reached a dealer → buy a fix (handled from the dealer side
+    // above, but cover the case the buyer arrives first)
+    if (kind === "score" && ped._scoreFrom) {
+      const d = ped._scoreFrom;
+      if (d.dead) { ped._scoreFrom = null; ped._goalKind = null; return; }
+      if (Math.hypot(ped.pos.x - d.pos.x, ped.pos.z - d.pos.z) < 3.2) {
+        npcDrugSale(d, ped, needs(d));
+        ped._scoreFrom = null; ped._goalKind = null;
+        ped.pause = Math.max(ped.pause, 0.8 + rng());
+      }
+      return;
+    }
+
+    // PATROL: time on home turf slowly feeds ambition + proves reliability
+    if (kind === "patrol") {
+      const gang = ped.gang && CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
+      if (gang && gang.center && Math.hypot(ped.pos.x - gang.center.x, ped.pos.z - gang.center.z) < 30) {
+        satisfy(N, "ambition", 0.06);
+        if (ped.gstat) ped.gstat.served = (ped.gstat.served || 0) + 2;
+      }
+      ped._goalKind = null;
+      return;
+    }
+
+    // SOCIAL / WANDER: just being out among people tops up the social need
+    if (kind === "social" || kind === "wander") {
+      satisfy(N, "social", 0.18 + rng() * 0.12);
+      ped._goalKind = null;
+      return;
+    }
+  }
+
+  // close a drug sale between two NPCs. The buyer pays from their wallet, the
+  // dealer banks it (and kicks a cut to his gang treasury — the promotion
+  // currency the hierarchy reads). Both needs get satisfied; the buyer is
+  // marked as having a fresh fix so they stop hunting for a while.
+  function npcDrugSale(dealer, buyer, dealerN) {
+    const econ = CBZ.cityEcon;
+    // price tracks the LIVE street market at the buyer's spot (district demand)
+    let price = 30;
+    if (econ && econ.streetPrice) {
+      const drug = ["Weed", "Coke", "Meth", "Pills"][(rng() * 4) | 0];
+      price = econ.streetPrice(drug, null);
+    }
+    const wallet = buyer.cash | 0;
+    const pay = Math.max(8, Math.min(wallet > 0 ? wallet : 40, Math.round(price * (0.4 + rng() * 0.4))));
+    // move the cash NPC→NPC (buyer broke = a fronted bag, smaller satisfaction)
+    if (wallet > 0) { buyer.cash = Math.max(0, wallet - pay); dealer.cash = (dealer.cash || 0) + pay; }
+    // satisfy the buyer's craving; a meth/coke hit makes them briefly erratic
+    const bN = buyer._needs || needs(buyer);
+    satisfy(bN, "high", 0.6 + rng() * 0.3);
+    buyer.tweakT = 0; buyer.erratic = Math.max(buyer.erratic || 0, 0.18);
+    // satisfy the dealer's money need + bank promotion currency for his gang
+    if (dealerN) satisfy(dealerN, "money", 0.18 + rng() * 0.18);
+    if (dealer.gang && dealer.gstat) dealer.gstat.contrib = (dealer.gstat.contrib || 0) + pay;
+    const gang = dealer.gang && CBZ.cityGangById ? CBZ.cityGangById(dealer.gang) : null;
+    if (gang) gang.treasury = (gang.treasury || 0) + Math.round(pay * 0.4);
+    // face each other for the hand-off so it reads as a deal, not a bump
+    if (dealer.group) dealer.group.rotation.y = Math.atan2(buyer.pos.x - dealer.pos.x, buyer.pos.z - dealer.pos.z);
+    if (buyer.group) buyer.group.rotation.y = Math.atan2(dealer.pos.x - buyer.pos.x, dealer.pos.z - buyer.pos.z);
+  }
+
+  // ============================================================
+  //  PUBLIC: stamp an NPC-vs-NPC grudge so a feud can ignite. Other systems
+  //  (combat, social) can call this when one ped wrongs another; the wronged
+  //  ped, if bold, will hunt the offender down later (acted on in goFeud).
+  // ============================================================
+  CBZ.cityNpcGrudge = function (victim, offender) {
+    if (!victim || !offender || victim === offender || victim.dead || offender.dead) return;
+    if (victim.companion || victim.controlled) return;
+    // only bold-enough peds carry a grudge into action (the meek just fear it)
+    if ((victim.aggr || 0.3) < (A0().bold || 0.5)) return;
+    victim._grudgeOn = offender;
+    victim._grudgeT = now() + 60 + rng() * 60; // a window to act, then it cools
+  };
+
+  // a ped the brain is mid-action on, or that isn't ours to drive — never stomp
   function busy(ped) {
     if (ped.rage) return true;                       // already engaged
     const s = ped.state;
@@ -190,7 +456,9 @@
     return false;
   }
 
-  // ---- per-frame: process a thin slice of the crowd ----
+  // ============================================================
+  //  per-frame: process a thin slice of the crowd (~1/30), rolling cursor
+  // ============================================================
   CBZ.onUpdate(33, function (dt) {
     if (g.mode !== "city") return;
     const A = CBZ.city && CBZ.city.arena;
@@ -199,7 +467,6 @@
     const n = peds.length;
     if (!n) return;
 
-    // ~1/30 of the crowd per frame (min 1), rolling through the array
     const slice = Math.max(1, Math.ceil(n / 30));
     if (cursor >= n) cursor = 0;
 
@@ -208,20 +475,26 @@
       const ped = peds[cursor++];
       if (!ped) continue;
 
-      // tick down the joyride speed boost regardless (so it's always restored)
+      // tick down the cross-town speed boost regardless (so it's always restored)
       if (ped._joyT > 0) {
         ped._joyT -= dt;
         if (ped._joyT <= 0 && ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; ped._joyT = 0; }
       }
-
-      // cooldown between goal assignments
-      if (ped._goalCD == null) ped._goalCD = rng() * 6;   // stagger first pass
-      if (ped._goalCD > 0) { ped._goalCD -= dt; continue; }
+      // expire a stale grudge so feuds cool off if never acted on
+      if (ped._grudgeOn && ped._grudgeT && now() > ped._grudgeT) { ped._grudgeOn = null; }
 
       // never touch anyone the brain is busy driving, or who isn't ours to drive
       if (ped.dead || ped.vendor || ped.companion || ped.controlled ||
           ped.inCar || ped.ko > 0 || ped._parked) { ped._goalCD = 4; continue; }
       if (busy(ped)) { ped._goalCD = 2 + rng() * 3; continue; }
+
+      // resolve the PAYOFF of whatever goal this ped is currently pursuing
+      // (cheap: just a distance check + need top-up when they've arrived)
+      if (ped._goalKind) resolve(ped, decayNeeds(ped));
+
+      // cooldown between fresh goal decisions
+      if (ped._goalCD == null) ped._goalCD = rng() * 6;   // stagger first pass
+      if (ped._goalCD > 0) { ped._goalCD -= dt; continue; }
 
       assign(ped, A);
     }

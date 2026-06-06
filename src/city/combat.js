@@ -53,6 +53,75 @@
   const PARRY_WINDOW = 0.30;   // a just-raised guard parries
   const KINDS = ["jab", "cross", "hook"];   // 3-hit cadence
 
+  // ---- POSTURE / POISE (Sekiro-style stagger) -----------------------------
+  // Every blow you land builds a target's POSTURE. A blocked/deflected blow
+  // builds it less; a perfect PARRY pumps it hard. When posture caps, the foe
+  // is GUARD-BROKEN: dropped guard, frozen, wide open — and a close FINISHER
+  // becomes a one-shot DEATHBLOW. Max posture is EMERGENT, not hardcoded: it
+  // scales off the foe's toughness (rank, armed, aggression, max-hp), so a
+  // street nobody crumples in two hits while a boss takes a real beating.
+  // YOU have posture too — eating blocks/counters/heavies builds it, and a
+  // full bar staggers YOU (guard drops, brief exposed window). This turns
+  // melee from HP-attrition into a back-and-forth fight to break the guard.
+  const POSTURE_REGEN = 14;        // posture/sec recovered when not being hit
+  const POSTURE_REGEN_DELAY = 1.1; // sec after last posture hit before regen
+  const BROKEN_TIME = 2.6;         // how long a guard-break stun lasts
+  let pPosture = 0;                // player posture (0..pPostureMax)
+  let pPostNoHit = 0;             // sec since player last took posture dmg
+  let pBrokenT = 0;               // player guard-broken stun timer
+  function pPostureMax() {
+    // tougher when fresh / well-fed; shrinks as you take HP damage (emergent)
+    const hp = P.hp == null ? 100 : P.hp, mhp = P.maxHp || 100;
+    return 80 + 40 * (hp / mhp);
+  }
+
+  // a foe's MAX posture, derived from what they are (no magic table)
+  function postureMax(a) {
+    if (!a) return 60;
+    let m = 50 + (a.maxHp || 100) * 0.35;       // bigger/tougher = sturdier guard
+    if (a.kind === "cop") m += 50;
+    if (a.kind === "guard" || a.kind === "security" || a.kind === "warden") m += 40;
+    if (a.armed) m += 25;
+    if (a.gang) m += 18 * (1 + (a.rank || 0));   // rank-and-file < lieutenants < bosses
+    m += (a.aggr || 0) * 30;
+    return m;
+  }
+  // posture a foe currently carries (lazy field, regens in the tick)
+  function posture(a) { return a._posture || 0; }
+  // add posture damage; returns true if it just BROKE their guard this hit
+  function addPosture(a, amt) {
+    if (!a || a.dead) return false;
+    if (a._broken > 0) return false;            // already broken
+    const max = a._postMax || (a._postMax = postureMax(a));
+    a._posture = Math.min(max, (a._posture || 0) + amt);
+    a._postNoHit = 0;
+    if (a._posture >= max) { breakGuard(a); return true; }
+    return false;
+  }
+  // GUARD BREAK: a foe's posture capped → they reel, drop their guard, and are
+  // wide open. peds.js already animates a hands-down/stunned look via .stun +
+  // we flag .ko-light so the brain pauses; the FINISHER prompt lights up.
+  function breakGuard(a) {
+    if (!a || a.dead) return;
+    a._broken = BROKEN_TIME;
+    a._posture = a._postMax || postureMax(a);
+    a._blockT = 0;                               // guard's gone
+    a.stun = Math.max(a.stun || 0, BROKEN_TIME); // generic stun flag (any reader)
+    // freeze their offense for the whole break: peds.js gates every swing/shot on
+    // attackCD, so holding it high keeps a guard-broken foe from retaliating while
+    // you line up the finisher (a no-touch "stunned & open" state).
+    a.attackCD = Math.max(a.attackCD || 0, BROKEN_TIME);
+    a.pause = Math.max(a.pause || 0, BROKEN_TIME);
+    a.alarmed = Math.max(a.alarmed || 0, 6);
+    if (a.char) { a.char.guardBroke = 1; a.char.handsUp = false; }
+    if (CBZ.body && CBZ.body.hit) CBZ.body.hit(a, { fromX: P.pos.x, fromZ: P.pos.z, force: 2.2, knockdown: 0 });
+    if (CBZ.city) CBZ.city.note("GUARD BROKEN — FINISH HIM", 1.1);
+    if (CBZ.sfx) CBZ.sfx("ko");
+    if (CBZ.doHitstop) CBZ.doHitstop(0.11);
+    if (CBZ.shake) CBZ.shake(0.45);
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.22);
+  }
+
   function lookDir() { const y = CBZ.cam ? CBZ.cam.yaw : 0; return { x: -Math.sin(y), z: -Math.cos(y) }; }
 
   // ---- stamina (0..100 in city) -------------------------------------------
@@ -67,6 +136,20 @@
     if (a.armed) return true;
     if (a.gang && (a.rank || 0) >= 1) return true;
     return (a.aggr || 0) >= 0.65;
+  }
+
+  // melee weapon "feel" profile — emergent from the equipped item, not a swing
+  // constant. Heavy blunt (Bat) → huge posture damage + knockback; a blade
+  // (Knife) → fast, deep HP/bleed, light posture; fists → balanced.
+  function weaponFeel() {
+    const w = it();
+    if (!w || !w.melee) return { post: 1.0, kb: 1.0, bleed: 0, reach: 0, name: "fists" };
+    const n = (g.cityWeapon || "").toLowerCase();
+    if (n.indexOf("bat") >= 0 || n.indexOf("pipe") >= 0 || n.indexOf("club") >= 0 || n.indexOf("crowbar") >= 0)
+      return { post: 1.9, kb: 1.7, bleed: 0, reach: 0.6, name: "blunt" };
+    if (n.indexOf("knife") >= 0 || n.indexOf("machete") >= 0 || n.indexOf("blade") >= 0 || n.indexOf("sword") >= 0)
+      return { post: 0.7, kb: 0.8, bleed: 0.5, reach: 0.3, name: "blade" };
+    return { post: 1.3, kb: 1.2, bleed: 0.1, reach: 0.4, name: "melee" };
   }
 
   // best target in a forward cone within range (melee only — guns use fpsmode)
@@ -134,6 +217,29 @@
     if (CBZ.sfx) CBZ.sfx("step");
   }
 
+  // build the PLAYER's posture (eating blocks, counters, heavy blows). Cap it
+  // and YOUR guard shatters: you drop, exposed, for BROKEN_TIME — the same
+  // win-condition your foes face, applied to you. Stamina cushions it: a fresh
+  // fighter resets posture faster (handled in the regen tick).
+  function addSelfPosture(amt) {
+    if (pBrokenT > 0) return;
+    pPosture = Math.min(pPostureMax(), pPosture + amt);
+    pPostNoHit = 0;
+    if (pPosture >= pPostureMax()) {
+      pBrokenT = BROKEN_TIME * 0.7;             // a touch shorter than NPC stun
+      pPosture = pPostureMax();
+      staggerT = Math.max(staggerT, pBrokenT);
+      guardT = 0; parryT = 0; P._blocking = 0;  // guard's gone
+      P.stun = Math.max(P.stun || 0, pBrokenT * 0.6);
+      if (CBZ.city) CBZ.city.big ? CBZ.city.big("GUARD BROKEN!") : CBZ.city.note("GUARD BROKEN!", 1.2);
+      if (CBZ.sfx) CBZ.sfx("ko");
+      if (CBZ.shake) CBZ.shake(0.5);
+      if (CBZ.doHitstop) CBZ.doHitstop(0.1);
+    }
+  }
+  // expose posture state for the HUD (read-only snapshot, no allocations/frame)
+  CBZ.cityPosture = function () { return { p: pPosture, max: pPostureMax(), broken: pBrokenT > 0 }; };
+
   // ---- the connect: shared damage + juice for a single landed blow --------
   // tier: "light" | "heavy" | "finisher".  Returns true if it connected.
   function land(t, dmg, tier, opts) {
@@ -141,15 +247,23 @@
     const fx = P.pos.x, fz = P.pos.z;
     const heavy = tier !== "light";
     const finisher = tier === "finisher";
+    const feel = weaponFeel();
+    const broken = (t._broken || 0) > 0;        // foe is guard-broken & wide open
 
-    // tough NPCs can block a LIGHT jab (not a heavy/finisher) — and counter you
-    if (!heavy && isTough(t) && !t.ko && !(t.hp <= (t.maxHp || 100) * 0.3)) {
-      const blockChance = t.kind === "cop" ? 0.34 : (t.gang ? 0.30 : 0.22);
+    // tough NPCs can block a LIGHT jab (not a heavy/finisher) — UNLESS their
+    // guard is already broken (then nothing connects but raw punishment).
+    if (!broken && !heavy && isTough(t) && !t.ko && !(t.hp <= (t.maxHp || 100) * 0.3)) {
+      // a foe near posture-break guards more desperately (emergent tell)
+      const pf = posture(t) / (t._postMax || postureMax(t));
+      let blockChance = (t.kind === "cop" ? 0.34 : (t.gang ? 0.30 : 0.22)) * (1 - pf * 0.4);
       if (Math.random() < blockChance && !(CBZ.body && CBZ.body.busy && CBZ.body.busy(t))) {
         t._blockT = 0.7;                       // they're in a block → punish with heavy
+        // a BLOCKED blow still chips their posture (Sekiro: blocking isn't free)
+        addPosture(t, dmg * 0.22 * feel.post);
         if (CBZ.city) CBZ.city.note("Blocked!", 0.6);
         if (CBZ.sfx) CBZ.sfx("hit");
-        // they jab back — stagger you a touch (no real damage from a block)
+        // they jab back — builds YOUR posture & may stagger you a touch
+        addSelfPosture(10);
         if (Math.random() < 0.5) selfStagger(0.30);
         combo = 0; comboT = 0;
         return false;
@@ -157,8 +271,19 @@
     }
 
     // punishing a blocking/guarding enemy with a heavy = COUNTER (bonus dmg + KD)
-    const counter = heavy && t._blockT > 0;
+    const counter = heavy && t._blockT > 0 && !broken;
     if (counter) { dmg = Math.round(dmg * 1.6); t._blockT = 0; if (CBZ.city) CBZ.city.note("COUNTER!", 0.7); }
+    // a broken foe eats EVERYTHING amplified — this is the payoff window
+    if (broken) dmg = Math.round(dmg * 1.55);
+
+    // --- POSTURE damage: how much this blow batters their guard. Heavies and
+    // the finisher pump it hard; the weapon profile scales it (a bat shatters
+    // a guard, a knife barely dents it). Capping it = GUARD BREAK (handled in
+    // addPosture → breakGuard). This is the real "win condition" of a fight.
+    if (!broken && !(t.hp - dmg <= 0)) {
+      const postDmg = (finisher ? 34 : (counter ? 40 : (heavy ? 26 : 11 + combo * 3))) * feel.post;
+      addPosture(t, postDmg);
+    }
 
     // --- HIT-STOP: the crunch of contact (light ~0.05, heavy ~0.09, KO 0.14)
     const lethal = (t.kind === "cop") ? null : (t.hp - dmg <= 0);
@@ -169,26 +294,29 @@
     if (t.kind === "cop") {
       CBZ.cityHurtCop(t, dmg, { fromX: fx, fromZ: fz });
       if (!t.dead && CBZ.body) {
-        const force = finisher ? 9 : (heavy ? 6.5 : 4);
-        if (finisher || counter) CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: 1.1 });
+        const force = (finisher ? 9 : (heavy ? 6.5 : 4)) * feel.kb;
+        // a guard-broken or finisher blow always sends them sprawling
+        if (finisher || counter || broken) CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: 1.1 });
         else CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: heavy && Math.random() < 0.5 ? 1.0 : 0 });
       }
     } else {
       t.hp -= dmg;
       if (t.hp <= 0) {
         // a heavy/finisher kills outright; a light blow that drops them = a clean KO
-        if (heavy || finisher || opts.lethalIntent) {
-          CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: finisher ? 9 : 6, fling: finisher ? 4 : 3 }, "beaten");
+        if (heavy || finisher || broken || opts.lethalIntent) {
+          CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: (finisher ? 9 : 6) * feel.kb, fling: finisher ? 4 : 3 }, feel.name === "blade" ? "stabbed" : "beaten");
         } else {
           t.hp = 1; CBZ.cityKOPed(t, fx, fz);   // light blows knock out rather than execute
         }
       } else {
         if (CBZ.body) {
-          const force = finisher ? 8.5 : (heavy ? 6 : 4);
-          const kd = finisher || counter ? 1.0 : (heavy && Math.random() < 0.45 ? 0.9 : 0);
+          const force = (finisher ? 8.5 : (heavy ? 6 : 4)) * feel.kb;
+          const kd = finisher || counter || broken ? 1.0 : (heavy && Math.random() < 0.45 ? 0.9 : 0);
           CBZ.body.hit(t, { fromX: fx, fromZ: fz, force, knockdown: kd });
           if (kd) { t.ko = Math.max(t.ko || 0, 5); t.alarmed = 6; }
         }
+        // a blade leaves a BLEED — damage-over-time ticked in the combat loop
+        if (feel.bleed > 0) { t._bleed = (t._bleed || 0) + dmg * feel.bleed; t._bleedSrcX = fx; t._bleedSrcZ = fz; }
         // provoke / alarm so the world reacts to a non-lethal beating
         if (t.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(t.gang, 0.4);
         CBZ.cityCrime && CBZ.cityCrime(heavy ? 60 : 40, { x: t.pos.x, z: t.pos.z, type: "assault" });
@@ -208,9 +336,50 @@
     return true;
   }
 
+  // find a guard-broken OR downed foe in finisher range (close, in front)
+  function finisherTarget() {
+    const t = aimTarget(2.6, 0.1);
+    if (!t) return null;
+    const open = (t._broken || 0) > 0 || (t.ko > 0 && !t.dead) ||
+                 (CBZ.body && CBZ.body.busy && CBZ.body.busy(t) && t.hp <= (t.maxHp || 100) * 0.45);
+    return open ? t : null;
+  }
+
+  // ---- DEATHBLOW / FINISHER: a single brutal execution on an open foe ------
+  // Triggered automatically when you swing at a guard-broken or downed enemy.
+  // Cinematic: hard hit-stop, slow-mo, max knockback ragdoll, lethal intent.
+  function doFinisher(t) {
+    if (!t || t.dead) return;
+    markFighting();
+    combo = 0; comboT = 0;
+    spend(7);
+    const feel = weaponFeel();
+    animSwing(feel.name === "blade" ? "cross" : "upper", true);
+    if (CBZ.sfx) CBZ.sfx("whoosh");
+    const fx = P.pos.x, fz = P.pos.z;
+    if (CBZ.city) CBZ.city.note(feel.name === "blade" ? "EXECUTED" : "FINISHED", 1.0);
+    if (CBZ.doSlowmo) CBZ.doSlowmo(0.55);
+    if (CBZ.doHitstop) CBZ.doHitstop(0.16);
+    if (CBZ.shake) CBZ.shake(0.8);
+    if (t.kind === "cop") {
+      CBZ.cityHurtCop(t, 9999, { fromX: fx, fromZ: fz });
+      if (!t.dead && CBZ.body) CBZ.body.hit(t, { fromX: fx, fromZ: fz, force: 11 * feel.kb, knockdown: 1.3 });
+    } else {
+      CBZ.cityKillPed(t, { fromX: fx, fromZ: fz, force: 11 * feel.kb, fling: 5 }, feel.name === "blade" ? "executed" : "finished off");
+    }
+    if (CBZ.sfx) CBZ.sfx("ko");
+    if (CBZ.city) CBZ.city.addRespect && CBZ.city.addRespect(2);   // a brutal finish earns respect
+    lastTarget = null;
+    fireCD = 0.55; heavyCD = 0.3;
+  }
+
   // ---- LIGHT attack: chains jab → cross → hook (3rd = finisher) -----------
   function lightAttack() {
+    if (pBrokenT > 0) return;                    // you're guard-broken, can't swing
     if (staggerT > 0 || tired()) { if (tired() && CBZ.city) CBZ.city.note("Winded", 0.6); return; }
+    // an open foo in front → DEATHBLOW instead of a jab
+    const fin = finisherTarget();
+    if (fin) { doFinisher(fin); return; }
     markFighting();
     // advance the combo if we're inside the window, else start fresh
     if (comboT > 0 && combo < 3) combo++; else combo = 1;
@@ -235,8 +404,12 @@
 
   // ---- HEAVY attack: slow, costly, staggers/knocks down -------------------
   function heavyAttack() {
+    if (pBrokenT > 0) return;                    // guard-broken — can't swing
     if (heavyCD > 0 || staggerT > 0) return;
     if (tired()) { if (CBZ.city) CBZ.city.note("Too winded for a heavy", 0.8); return; }
+    // a heavy on an open foe is also a finisher
+    const fin = finisherTarget();
+    if (fin) { doFinisher(fin); return; }
     markFighting();
     combo = 0; comboT = 0;
     animSwing("upper", true);                 // a big rising/overhand blow
@@ -279,26 +452,40 @@
       if (attacker && attacker._losBlocked && fromX != null && !attacker.isPlayer) return;
       // only melee-range threats are parryable/blockable (guns/cars unaffected)
       const meleeRange = (fromX != null) && (Math.hypot((fromX) - P.pos.x, (fromZ) - P.pos.z) < 3.2);
-      if (guardT > 0 && !headshot && meleeRange && !P.dead) {
+      if (guardT > 0 && !headshot && meleeRange && !P.dead && pBrokenT <= 0) {
         if (parryT > 0) {
-          // PERFECT PARRY → negate, riposte the attacker, brief bullet-time
+          // PERFECT PARRY / DEFLECT → negate, slam the attacker's POSTURE (Sekiro:
+          // a deflect barely dents you but wrecks them), riposte, bullet-time.
           parryT = 0; guardT = Math.max(guardT, 0.25);
+          pPosture = Math.max(0, pPosture - 20);     // a clean deflect steadies you
           if (CBZ.city) CBZ.city.note("PARRY!", 0.8);
           if (CBZ.sfx) { CBZ.sfx("hit"); }
           if (CBZ.shake) CBZ.shake(0.4);
           if (CBZ.doHitstop) CBZ.doHitstop(0.08);
           if (CBZ.doSlowmo) CBZ.doSlowmo(0.22);
           if (attacker && attacker.pos && !attacker.dead) {
+            attacker._windup = 0;                     // their swing is spent
+            // a deflect alone deals heavy posture damage — repeated parries break them
+            addPosture(attacker, 38 + weaponFeel().post * 18);
             const base = (it() && it().dmg) || 16;
             land(attacker, Math.round(base * 1.8), "heavy", { lethalIntent: true });
           }
           return;   // blow fully negated
         }
-        // normal BLOCK → big chip reduction + no knockdown, costs stamina
+        // normal BLOCK → big chip reduction + no knockdown, costs stamina, and
+        // it builds YOUR posture (a held guard erodes — you must parry, not turtle).
         dmg *= 0.3; spend(10);
+        addSelfPosture(16 + dmg * 0.25);
         if (CBZ.shake) CBZ.shake(0.2);
         if (CBZ.sfx) CBZ.sfx("hit");
+        // (reduced dmg falls through to the original handler below)
+      } else if (meleeRange && !headshot && attacker && attacker.pos && !attacker.isCar && pBrokenT <= 0 && dmg < 40) {
+        // an unguarded ped/cop melee hit (not a car/heavy source) nudges your
+        // posture, so a sustained flurry can break your guard even if you don't block.
+        addSelfPosture(8);
       }
+      // taking damage while guard-broken stings extra (you're reeling, exposed)
+      if (pBrokenT > 0 && meleeRange && !headshot) dmg *= 1.35;
       return _origHurt.call(this, dmg, fromX, fromZ, reason, headshot, attacker, nonlethal);
     };
   }
@@ -426,6 +613,92 @@
     }
   });
 
+  // ---- NPC posture/bleed/break maintenance (time-sliced across the crowd) --
+  // Only actors that have actually been hit carry these fields, so the common
+  // case is a couple of cheap field checks. We slice the ped list so a packed
+  // city stays smooth on phones.
+  let _pSlice = 0;
+  CBZ.onUpdate(14, function (dt) {
+    if (g.mode !== "city") return;
+    const peds = CBZ.cityPeds, cops = CBZ.cityCops;
+    const tickActor = function (a, full) {
+      if (!a || a.dead) return;
+      // guard-break stun winds down → posture resets, brain resumes
+      if (a._broken > 0) {
+        a._broken -= dt;
+        if (a._broken <= 0) { a._posture = 0; a._postNoHit = 0; if (a.char) a.char.guardBroke = 0; }
+      } else if (a._posture > 0) {
+        a._postNoHit = (a._postNoHit || 0) + dt;
+        if (a._postNoHit >= POSTURE_REGEN_DELAY) {
+          a._posture = Math.max(0, a._posture - POSTURE_REGEN * 0.9 * dt);
+        }
+      }
+      // BLEED damage-over-time from a blade (drains slowly, can finish them off)
+      if (a._bleed > 0) {
+        const tick = Math.min(a._bleed, 6 * dt);
+        a._bleed -= tick;
+        if (full) {
+          a.hp -= tick;
+          if (a.hp <= 0 && !a.dead) {
+            if (a.kind === "cop") CBZ.cityHurtCop && CBZ.cityHurtCop(a, 9999, { fromX: a._bleedSrcX, fromZ: a._bleedSrcZ });
+            else CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: a._bleedSrcX, fromZ: a._bleedSrcZ, force: 2 }, "bled out");
+            a._bleed = 0;
+          } else if (CBZ.gore && a.pos && Math.random() < 0.3) {
+            CBZ.gore(a.pos.x, a.pos.y + 0.9, a.pos.z, { amount: 0.15, skin: a.skin, cloth: a.outfit });
+          }
+        }
+      }
+    };
+    // cops: small list, do all every frame (posture matters most for them)
+    if (cops) for (let i = 0; i < cops.length; i++) tickActor(cops[i], true);
+    // peds: full bleed/posture only on this slice, light decay otherwise
+    if (peds && peds.length) {
+      const N = peds.length, SLICES = 4;
+      for (let i = 0; i < N; i++) {
+        const a = peds[i];
+        const full = (i % SLICES) === (_pSlice % SLICES);
+        if (a && (a._broken > 0 || a._posture > 0 || a._bleed > 0)) tickActor(a, full);
+      }
+      _pSlice++;
+    }
+  });
+
+  // ---- INCOMING-MELEE TELEGRAPH (so the parry is a SKILL, not a guess) -----
+  // peds.js lands its melee instantly with no wind-up, which makes the parry
+  // window pure luck. We can't touch peds.js — so we read its public state and
+  // RAISE A TELL ourselves: the nearest aggressive, in-range, facing-you melee
+  // foe whose attackCD is about to come up gets a `_windup` flag (their rig can
+  // wind back) and we flash a PARRY prompt. Cheap: one nearest-scan per frame.
+  let _telegraphT = 0;
+  CBZ.onUpdate(15, function (dt) {
+    if (g.mode !== "city" || g.state !== "playing" || P.dead) return;
+    if (_telegraphT > 0) _telegraphT -= dt;
+    let threat = null, bd = 2.9 * 2.9;
+    const scan = function (a) {
+      if (!a || a.dead || a.ko > 0 || a.surrender || a.armed && a.ammo > 0) return;
+      if (a._broken > 0 || a.stun > 0) return;
+      const aggressive = (a.rage === CBZ.city.playerActor) || (a.finalGoal && a.finalGoal._chase) || (a.aggr || 0) >= 0.7;
+      if (!aggressive) return;
+      const dx = P.pos.x - a.pos.x, dz = P.pos.z - a.pos.z, dd = dx * dx + dz * dz;
+      if (dd > bd) return;
+      // only a foe whose swing is imminent (cooldown almost elapsed) tells
+      if ((a.attackCD || 0) > 0.28) return;
+      bd = dd; threat = a;
+    };
+    const peds = CBZ.cityPeds;
+    if (peds) for (let i = 0; i < peds.length; i++) scan(peds[i]);
+    if (threat) {
+      threat._windup = 0.25;                        // rig can read this to cock back
+      if (threat.char) threat.char.windup = 0.25;
+      if (_telegraphT <= 0 && !CBZ.cityHasGun() && CBZ.city) {
+        CBZ.city.note("⚠ Parry! (hold RMB)", 0.45);
+        _telegraphT = 0.9;                           // don't spam the prompt
+      }
+    }
+    // decay windup flags we set last frame
+    if (peds) for (let i = 0; i < peds.length; i++) { const a = peds[i]; if (a && a._windup > 0) { a._windup -= dt; if (a.char && a.char.windup > 0) a.char.windup -= dt; } }
+  });
+
   // cooldown + stance + combo-window tick
   CBZ.onUpdate(12, function (dt) {
     if (g.mode !== "city") return;
@@ -435,6 +708,19 @@
     if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
     if (parryT > 0) parryT -= dt;
     if (P._fighting > 0) P._fighting -= dt;
+
+    // PLAYER posture: recovers after a grace period; recovers faster with
+    // stamina to spare. Guard-break stun winds down and resets your posture.
+    if (pBrokenT > 0) {
+      pBrokenT -= dt;
+      if (pBrokenT <= 0) { pPosture = 0; pPostNoHit = 0; if (CBZ.city) CBZ.city.note("Guard recovered", 0.6); }
+    } else if (pPosture > 0) {
+      pPostNoHit += dt;
+      if (pPostNoHit >= POSTURE_REGEN_DELAY) {
+        const sf = 0.7 + (stam() / 100) * 0.8;     // fresh = faster recovery
+        pPosture = Math.max(0, pPosture - POSTURE_REGEN * sf * dt);
+      }
+    }
 
     // GUARD stance: RMB held (no gun, on foot) raises a block; while up you're
     // a touch slower and protected. We keep g.invuln OFF (so the wrapped

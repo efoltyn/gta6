@@ -150,8 +150,19 @@
     return Math.round(v * 0.8);   // resale-ish equity (held value)
   }
   // SYNERGY: like GTA's nightclub feeding off your other businesses — the more
-  // you own, the better everything runs (a small empire-wide multiplier).
-  function empireSynergy() { let n = 0; for (const id in state().cityEmpireBiz) n++; return 1 + 0.06 * Math.max(0, n - 1); }
+  // you own, the better everything runs (a small empire-wide multiplier). The
+  // more TURF your crew controls, the smoother your fronts operate too (cops
+  // paid off, suppliers protected) — a light bonus that rewards the takeover.
+  function turfSynergy() {
+    if (!CBZ.cityZoneControl) return 0;
+    const e = E(); const me = e.playerGangId ? e.playerGangId() : (g.playerGang && g.playerGang.founded ? (g.playerGang.id || "player") : g.playerGangId);
+    if (!me) return 0;
+    const ctrl = CBZ.cityZoneControl();
+    const owned = (ctrl.byGang && ctrl.byGang[me]) || 0;
+    const total = ctrl.total || 1;
+    return 0.25 * (owned / total);   // up to +25% when you own the whole city
+  }
+  function empireSynergy() { let n = 0; for (const id in state().cityEmpireBiz) n++; return 1 + 0.06 * Math.max(0, n - 1) + turfSynergy(); }
   function laundromats() { let n = 0; for (const id in state().cityEmpireBiz) { if (BIZ_BY_ID[id] && BIZ_BY_ID[id].launder) n++; } return n; }
   // total business equity (economy.js holdingsWorth() reads this)
   function bizValueTotal() { let s = 0; for (const id in state().cityEmpireBiz) s += bizValue(id); return s; }
@@ -310,13 +321,16 @@
   //               broke  hustler comfort  rich   baller  kingpin
   const PERKS = {
     passiveMul:   [1.00,  1.05,   1.12,    1.22,  1.38,   1.60],
+    // turfMul: how much harder your tax collectors squeeze the blocks you hold
+    // (economy.js turfIncome reads this) — a feared kingpin skims more.
+    turfMul:      [1.00,  1.08,   1.18,    1.32,  1.55,   1.85],
     luxDiscount:  [0.00,  0.00,   0.04,    0.08,  0.14,   0.22],
     bribeDisc:    [0.00,  0.05,   0.10,    0.18,  0.28,   0.40],
     bodyguardDisc:[0.00,  0.05,   0.10,    0.18,  0.28,   0.40],
     vip:          [false, false,  false,   true,  true,   true],
   };
   const PERK_LABELS = {
-    passiveMul: "Business income", luxDiscount: "Luxury discount", bribeDisc: "Cheaper bribes",
+    passiveMul: "Business income", turfMul: "Turf tax take", luxDiscount: "Luxury discount", bribeDisc: "Cheaper bribes",
     bodyguardDisc: "Cheaper crew", vip: "VIP access",
   };
   function tierPerk(name) {
@@ -470,6 +484,14 @@
     const inc = incomePerSec();
     h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:6px'>Passive empire — <b style='color:#7ed957'>" + money(inc) + "/sec</b> · " +
       laundromats() + " laundering front" + (laundromats() === 1 ? "" : "s") + " · synergy ×" + empireSynergy().toFixed(2) + "</div>";
+    // turf street-tax faucet (economy.js) — shown so the player connects taking
+    // territory to passive income, the heart of the takeover loop.
+    const e0 = E();
+    if (e0.turfIncomeInfo) {
+      const ti = e0.turfIncomeInfo();
+      if (ti.zones > 0) h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:8px'>🏴 Turf tax — <b style='color:#ff9e6b'>" + money(ti.perSec) + "/sec</b> from <b>" + ti.zones + "</b> block" + (ti.zones === 1 ? "" : "s") + " held · ×" + tierPerk("turfMul").toFixed(2) + " status</div>";
+      else h += "<div style='font-size:12px;color:#8a7d5a;margin-bottom:8px'>🏴 Take turf with your crew to collect street tax (passive $/sec).</div>";
+    }
     h += "<div style='text-align:right;margin-bottom:4px'>" + btn("C", "COLLECT ALL", "#1f4a2a") + " " + btn("L", "Launder cash", "#3a2a4a") + " " + btn("P", "Bottle service", "#4a2a3a") + "</div>";
     let i = 1;
     for (const b of BUSINESSES) {
@@ -525,6 +547,7 @@
     h += "<div style='font-size:11px;color:#a99b78;margin-bottom:12px'>" + (next ? Math.round(prog * 100) + "% to " + next.name + " (" + money(next.min) + ")" : "Top tier reached — you run this city.") + "</div>";
     h += "<div style='font-size:12px;color:#c9b98a;margin-bottom:6px'>YOUR PERKS AT THIS TIER</div>";
     h += row("💰 " + PERK_LABELS.passiveMul, "<b style='color:#7ed957'>×" + tierPerk("passiveMul").toFixed(2) + "</b>", "Multiplies all business output", "#7ed957");
+    h += row("🏴 " + PERK_LABELS.turfMul, "<b style='color:#7ed957'>×" + tierPerk("turfMul").toFixed(2) + "</b>", "Bigger cut of the turf you hold", "#ff9e6b");
     h += row("🛍️ " + PERK_LABELS.luxDiscount, "<b style='color:#7ed957'>−" + Math.round(tierPerk("luxDiscount") * 100) + "%</b>", "Off every luxury purchase", "#ffd166");
     h += row("👮 " + PERK_LABELS.bribeDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bribeDisc") * 100) + "%</b>", "Cheaper to pay off the cops", "#7fd0ff");
     h += row("🛡️ " + PERK_LABELS.bodyguardDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bodyguardDisc") * 100) + "%</b>", "Cheaper crew & bodyguards", "#9fd07e");

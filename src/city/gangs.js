@@ -65,9 +65,59 @@
   function makeName(eth) { const p = poolFor(eth); return pick(p[0]) + " " + pick(p[1]); }
   function makeBossName(eth) { const p = poolFor(eth); return pick(p[0]) + " '" + pick(BOSS_NICK) + "' " + pick(p[1]); }
 
+  // ============================================================
+  //  REAL GANG RANK LADDER (researched: NY/Chicago "corporate pyramid")
+  //  Prospect -> Lookout -> Runner -> Soldier -> Enforcer -> Lieutenant -> Boss.
+  //  A rank is DATA on the ped (ped.rank). RANKS holds, per tier:
+  //    key       internal id stored on ped.rank (legacy "lt"/"soldier"/"boss" kept)
+  //    pip       label shown on the floating tag
+  //    tier      0..6 ordering (chain of command + income share scale off this)
+  //    needBody  bodies (kills for the gang) to be ELIGIBLE for the next rung
+  //    needContrib  $ kicked up to the treasury to be ELIGIBLE
+  //    cut       share-of-payday weight (skewed: leaders earn far more — Levitt/
+  //              Venkatesh: foot soldiers below min wage, the dream of the top cut
+  //              is what keeps them loyal)
+  //    hp / weapon  gear that rank unlocks when a member climbs
+  // ============================================================
+  const RANKS = [
+    { key: "prospect", pip: "Prospect", tier: 0, needBody: 0, needContrib: 0,   cut: 0.35, hp: 100, weapon: "Pistol" },
+    { key: "lookout",  pip: "Lookout",  tier: 1, needBody: 0, needContrib: 60,  cut: 0.5,  hp: 110, weapon: "Pistol" },
+    { key: "runner",   pip: "Runner",   tier: 2, needBody: 1, needContrib: 180, cut: 0.7,  hp: 120, weapon: "Pistol" },
+    { key: "soldier",  pip: "Soldier",  tier: 3, needBody: 2, needContrib: 420, cut: 1.0,  hp: 140, weapon: "Pistol" },
+    { key: "enforcer", pip: "Enforcer", tier: 4, needBody: 5, needContrib: 900, cut: 1.5,  hp: 175, weapon: "SMG" },
+    { key: "lt",       pip: "Lt.",      tier: 5, needBody: 9, needContrib: 1700, cut: 2.4, hp: 210, weapon: "SMG" },
+    { key: "boss",     pip: "Boss",     tier: 6, needBody: 0, needContrib: 0,   cut: 5.0,  hp: 260, weapon: "SMG" },
+  ];
+  const RANK_BY_KEY = {}; RANKS.forEach((r, i) => { RANK_BY_KEY[r.key] = r; r.idx = i; });
+  function rankDef(key) { return RANK_BY_KEY[key] || RANK_BY_KEY.soldier; }
+  function rankTier(ped) { return ped ? (rankDef(ped.rank).tier) : 0; }
+  CBZ.cityRankLadder = function () { return RANKS.map((r) => ({ key: r.key, pip: r.pip, tier: r.tier })); }; // read-only view
+  CBZ.cityRankName = function (key) { return (RANK_BY_KEY[key] || {}).pip || "Crew"; };
+
+  // give a member their stat sheet the first time we touch them. This is the
+  // LIFECYCLE record the whole hierarchy runs on — nothing here is hardcoded;
+  // promotion, pay, loyalty + defection all read these tracked numbers.
+  function memStats(m) {
+    if (!m.gstat) {
+      m.gstat = {
+        bodies: 0,        // kills put in for the gang (promotion currency)
+        contrib: 0,       // $ kicked up to the treasury (promotion currency)
+        served: 0,        // seconds in the crew (seniority)
+        orders: 0,        // orders completed (raids held / hits done)
+        loyalty: 0.55 + rng() * 0.2,  // 0..1; pay/wins raise it, losses/disrespect drop it
+        earned: 0,        // lifetime cut paid to them (their "wages")
+        joined: "spawn",  // how they got in: spawn / jumped / work / poach / defect
+      };
+    }
+    return m.gstat;
+  }
+  CBZ.cityMemberStats = memStats;
+  // public loyalty read for HUD / other systems
+  CBZ.cityMemberLoyalty = function (m) { return m && m.gstat ? m.gstat.loyalty : (m && m.loyalty != null ? m.loyalty : 0.5); };
+
   // rank ladder shown as a small PIP suffix on the name tag — the rank is read
   // from ped.rank (data), so the tag says e.g. "Marcus Vance · Lt." not a surname.
-  const RANK_PIP = { boss: "Boss", lt: "Lt.", soldier: "Soldier" };
+  const RANK_PIP = { boss: "Boss", lt: "Lt.", enforcer: "Enforcer", soldier: "Soldier", runner: "Runner", lookout: "Lookout", prospect: "Prospect" };
   // rebuild a member's floating name tag so it reads "<Name> · <Rank>" in the
   // gang colour. Mirrors playergang.js styleMember: swap the cached label sprite,
   // keep its transform, leave it hidden until the ped's LOD shows it.
@@ -133,6 +183,7 @@
         });
         boss.homeGuard = { x: blot.cx, z: blot.cz };
         boss.isBoss = true; boss.rank = "boss"; boss.maxHp = 240; boss.ammo = 50;
+        const bs = memStats(boss); bs.loyalty = 1; bs.bodies = 12 + ((rng() * 8) | 0); bs.joined = "founder";
         gang.boss = boss; gang.bossName = boss.name;
         tagWithRank(boss, gang.color);   // "<Name> '<Nick>' <Last> · Boss"
         A.root.add(boss.group);
@@ -148,26 +199,29 @@
         for (let k = 0; k < n; k++) {
           const ang = rng() * 6.28, rad = 2.5 + rng() * 5;
           const x = lot.cx + Math.cos(ang) * rad, z = lot.cz + Math.sin(ang) * rad;
-          // clear rank ladder under the boss: the first holder of each lot is a
-          // LIEUTENANT (richer, SMG-capable), the rest are SOLDIERS. EVERY member
-          // is strapped — guns are a city thing now, and a gang without them is nothing.
-          // Each gets a REAL First-Last name; the rank lives on ped.rank and shows
-          // as a pip on the tag (tagWithRank), never as a fake surname.
-          const lt = (k === 0);
+          // a REAL pyramid under the boss: the first holder of each lot is a
+          // LIEUTENANT, then an Enforcer, then the bench fills Soldier/Runner/
+          // Lookout — a believable spread of veterans + low men who'll climb on
+          // merit over the run. EVERY member is strapped. Each gets a REAL
+          // First-Last name; rank lives on ped.rank + shows as a tag pip.
+          const rk = k === 0 ? "lt" : k === 1 ? "enforcer" : (k <= 3 ? "soldier" : (rng() < 0.5 ? "runner" : "lookout"));
+          const rd = rankDef(rk);
           const ped = CBZ.cityMakePed(x, z, rng, {
             kind: "gang", gang: gang.id, faction: gang.id,
             guard: { x: lot.cx, z: lot.cz },
-            outfit: gang.color, wealth: lt ? 0.74 : 0.42,
+            outfit: gang.color, wealth: 0.3 + rd.tier * 0.08,
             aggr: clamp(rollGang(ag), 0.6, 1),
-            archetype: "gangster", job: lt ? "gang lieutenant" : "gang soldier",
-            armed: true, weapon: lt ? (rng() < 0.5 ? "SMG" : "Pistol") : "Pistol",
-            hp: lt ? 160 : 120,
+            archetype: "gangster", job: "gang " + rd.pip.toLowerCase().replace(".", ""),
+            armed: true, weapon: rd.weapon === "SMG" ? (rng() < 0.5 ? "SMG" : "Pistol") : "Pistol",
+            hp: rd.hp,
             name: makeName(gang.ethnicity),
           });
-          ped.rank = lt ? "lt" : "soldier";
-          ped.ammo = lt ? 40 : 30;
+          ped.rank = rk;
+          ped.ammo = rd.weapon === "SMG" ? 40 : 30;
           ped.homeGuard = { x: lot.cx, z: lot.cz };
-          tagWithRank(ped, gang.color);   // "<Name> · Lt." / "<Name> · Soldier"
+          // seed a plausible career so they're partway up the merit track already
+          const ms = memStats(ped); ms.bodies = (rd.tier) + ((rng() * 2) | 0); ms.contrib = rd.tier * 120 * rng(); ms.served = 30 + rng() * 120;
+          tagWithRank(ped, gang.color);   // "<Name> · Lt." etc.
           A.root.add(ped.group);
           CBZ.cityPeds.push(ped);
           gang.members.push(ped);
@@ -181,6 +235,188 @@
   function rollGang(ag) { const r = (rng() + rng()) / 2; return (ag.meanGang != null ? ag.meanGang : 0.8) + (r - 0.5) * 2 * (ag.spreadGang || 0.14); }
 
   function gangById(id) { return CBZ.cityGangs.find((x) => x.id === id); }
+
+  // ============================================================
+  //  HIERARCHY ENGINE — promotion on merit, income split by rank,
+  //  loyalty/discipline, defection + boss succession. All driven off the
+  //  tracked memStats() record, never hardcoded outcomes.
+  // ============================================================
+
+  // apply a rank's gear when a member climbs (or is created at a tier)
+  function applyRankGear(m, gang) {
+    const rd = rankDef(m.rank);
+    m.maxHp = Math.max(m.maxHp || 0, rd.hp);
+    m.hp = Math.max(m.hp || 1, Math.min(m.maxHp, m.hp + 30));
+    m.armed = true;
+    // higher rank tends to upgrade the gun; never downgrade an existing better one
+    const wantSmg = rd.weapon === "SMG";
+    if (wantSmg && (!m.weapon || m.weapon === "Pistol" || m.weapon === "Bat") && rng() < 0.75) m.weapon = "SMG";
+    if (!m.weapon || m.weapon === "Bat") m.weapon = rd.weapon;
+    m.ammo = Math.max(m.ammo || 0, rd.weapon === "SMG" ? 50 : 30);
+    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(m);
+  }
+
+  // can this member climb one rung? eligibility is EARNED — bodies + cash kicked
+  // up to the treasury must both clear the next tier's bar, plus a little time.
+  function eligibleForPromotion(m) {
+    const cur = rankDef(m.rank);
+    const next = RANKS[cur.idx + 1];
+    if (!next || next.key === "boss") return null;     // only succession makes a boss
+    const s = memStats(m);
+    if (s.bodies < next.needBody) return null;
+    if (s.contrib < next.needContrib) return null;
+    if (s.served < 18 + next.tier * 8) return null;     // minimum seniority per rung
+    return next;
+  }
+
+  // promote one NPC member up the ladder (boss promotes from below — chain of
+  // command). Pure data + gear; the brain reads ped.rank for everything else.
+  function promoteMember(gang, m, toKey) {
+    if (!m || m.dead) return false;
+    const cur = rankDef(m.rank);
+    const next = toKey ? rankDef(toKey) : RANKS[cur.idx + 1];
+    if (!next || next.idx <= cur.idx) return false;
+    m.rank = next.key;
+    applyRankGear(m, gang);
+    tagWithRank(m, gang.color);
+    const s = memStats(m); s.loyalty = Math.min(1, s.loyalty + 0.12);   // promotion buys loyalty
+    if (gang.isPlayer && CBZ.city && nearPlayer(m.pos.x, m.pos.z, 60)) {
+      CBZ.city.note("⬆ " + (m.name || "Crew") + " earned " + next.pip + ".", 2.2);
+    }
+    return true;
+  }
+  CBZ.cityGangRankUp = function (m, toKey) {
+    const gang = m && m.gang ? gangById(m.gang) : null;
+    return promoteMember(gang || { color: 0x7ed957 }, m, toKey);
+  };
+
+  // record a body put in for the crew + the respect it earns toward the ladder.
+  // gangs.js cityGangMemberDown already fires when a member dies; THIS is the
+  // mirror for when a member KILLS for the gang (peds.js routes kills through
+  // cityKillPed -> we hook the attacker here via cityGangMemberScored).
+  CBZ.cityGangMemberScored = function (attacker, victim) {
+    if (!attacker || !attacker.gang) return;
+    const gang = gangById(attacker.gang); if (!gang) return;
+    const s = memStats(attacker);
+    s.bodies++; s.loyalty = Math.min(1, s.loyalty + 0.03);
+    // a body against a RIVAL on contested ground is worth more standing
+    const rivalKill = victim && victim.gang && victim.gang !== attacker.gang;
+    if (rivalKill) gang.warIntensity = Math.min(3, (gang.warIntensity || 0) + 0.15);
+  };
+
+  // discipline: a member who fails / flees / loses badly takes a loyalty hit;
+  // chronic low loyalty triggers a real consequence (defect or get clipped).
+  function disciplineHit(gang, m, amt) {
+    const s = memStats(m);
+    s.loyalty = Math.max(0, s.loyalty - amt);
+  }
+
+  // ---- DEFECTION + DISCIPLINE sweep (called from the slow upkeep tick) ----
+  // A disgruntled member (low loyalty) eyes a stronger / richer rival and walks.
+  // A boss who can't pay (broke treasury during a war) bleeds loyalty crew-wide.
+  function bestPoachTarget(forGang, m) {
+    // the most attractive rival to defect to: more bodies + fuller war chest,
+    // and NOT at war with where you'd be running from being clipped on the way.
+    let best = null, bs = -1;
+    for (const o of CBZ.cityGangs) {
+      if (o === forGang || o.absorbed || !o.turf || !o.turf.length) continue;
+      const str = gangStrength(o);
+      const score = str * 8 + (o.treasury || 0) / 60 - (o.isPlayer ? 0 : 0);
+      // must be meaningfully stronger/richer than home to be worth the risk
+      const homeScore = gangStrength(forGang) * 8 + (forGang.treasury || 0) / 60;
+      if (score > homeScore * 1.25 && score > bs) { bs = score; best = o; }
+    }
+    return best;
+  }
+
+  function defectMember(fromGang, m, toGang) {
+    if (!m || m.dead || !toGang) return false;
+    // pull from old roster
+    const i = fromGang.members.indexOf(m); if (i >= 0) fromGang.members.splice(i, 1);
+    if (toGang.isPlayer && CBZ.cityPlayerGangEnlist) {
+      CBZ.cityPlayerGangEnlist(m, "prospect");   // join the player at the bottom
+    } else {
+      m.gang = toGang.id; m.faction = toGang.id; m.rank = "prospect";
+      m.outfit = toGang.color; m.homeGuard = toGang.center ? { x: toGang.center.x, z: toGang.center.z } : m.homeGuard;
+      m.guard = m.homeGuard; toGang.members.push(m);
+      applyRankGear(m, toGang); tagWithRank(m, toGang.color);
+    }
+    const s = memStats(m); s.loyalty = 0.5; s.joined = "defect"; s.bodies = 0; s.contrib = 0;
+    if (nearPlayer(m.pos.x, m.pos.z, 90)) {
+      CBZ.city && CBZ.city.note("🏳 " + (m.name || "A soldier") + " defected from " + fromGang.name + " to " + toGang.name + ".", 2.4);
+    }
+    return true;
+  }
+
+  // BOSS SUCCESSION — kingpin down, the crew doesn't just evaporate. The top
+  // surviving member by rank+merit rises; if the bench is thin the gang fractures
+  // (loyalty crashes, defections spike) — researched attrition shaping the pyramid.
+  function succeedBoss(gang) {
+    if (!gang || gang.isPlayer) return;
+    // if the PLAYER rides with this crew as a senior member, the succession is
+    // theirs to seize — defer to playergang.js (don't crown an NPC out from under
+    // them). g.cityMembership is the player's patch into an NPC gang.
+    const pm = g.cityMembership;
+    if (pm && pm.gangId === gang.id && (pm.rank === "lt" || pm.rank === "enforcer")) return;
+    const live = gang.members.filter((m) => m && !m.dead && m !== gang.boss);
+    if (!live.length) { gang.boss = null; gang.leaderless = true; return; }
+    // rank the bench: tier, then bodies, then loyalty, then contribution
+    live.sort((a, b) => {
+      const ta = rankTier(a), tb = rankTier(b);
+      if (tb !== ta) return tb - ta;
+      const sa = memStats(a), sb = memStats(b);
+      if (sb.bodies !== sa.bodies) return sb.bodies - sa.bodies;
+      if (sb.loyalty !== sa.loyalty) return sb.loyalty - sa.loyalty;
+      return sb.contrib - sa.contrib;
+    });
+    const heir = live[0];
+    const wasStrong = rankTier(heir) >= 4;     // an Enforcer/Lt rising = clean handover
+    heir.rank = "boss"; heir.isBoss = true; gang.boss = heir; gang.bossName = heir.name;
+    heir.name = heir.name && heir.name.indexOf("'") < 0 ? makeBossName(gang.ethnicity) : heir.name;
+    applyRankGear(heir, gang); tagWithRank(heir, gang.color);
+    gang.bossDead = false; gang.leaderless = false;
+    // a weak handover fractures morale — everyone wobbles, some will walk
+    const moraleHit = wasStrong ? 0.05 : 0.22;
+    for (const m of live) disciplineHit(gang, m, moraleHit);
+    if (nearPlayer(gang.center.x, gang.center.z, 160)) {
+      CBZ.city && CBZ.city.note("👑 " + heir.name + " seized control of " + gang.name + (wasStrong ? "." : " — the crew's shaky."), 3);
+    }
+  }
+  CBZ.cityGangSucceed = succeedBoss;
+
+  // periodic merit review + loyalty economy for one NPC crew. Promotes who's
+  // earned it, kicks pay up the chain, defects the disloyal, clips dead weight.
+  function reviewGang(gang, dt) {
+    if (!gang || gang.isPlayer || gang.absorbed) return;
+    let promotedThisPass = 0;
+    // iterate a SNAPSHOT — defection/clipping mutate gang.members mid-pass
+    const roster = gang.members.slice();
+    for (const m of roster) {
+      if (!m || m.dead || m === gang.boss) continue;
+      const s = memStats(m);
+      s.served += dt;
+      // earn loyalty just by being paid + winning; lose it during a losing war
+      if (gang.lostTurfT > 0) s.loyalty = Math.max(0, s.loyalty - dt * 0.02);
+      // merit promotion (chain of command: capped per pass so it's gradual)
+      if (promotedThisPass < 1) {
+        const next = eligibleForPromotion(m);
+        // only promote up to one tier below the boss for NPC crews (Lt is the ceiling)
+        if (next && rankDef(m.rank).idx < rankDef("lt").idx) {
+          if (promoteMember(gang, m)) { promotedThisPass++; s.bodies = Math.max(0, s.bodies - next.needBody); }
+        }
+      }
+      // DEFECTION: chronically disloyal -> walk to a stronger crew, or get clipped
+      if (s.loyalty < 0.18 && rng() < dt * 0.05) {
+        const dest = bestPoachTarget(gang, m);
+        if (dest) { defectMember(gang, m, dest); }
+        else if (rng() < 0.3) {
+          // nowhere to run + no loyalty: the crew clips the dead weight (discipline)
+          m.hp = 0;
+          if (CBZ.cityKillPed) CBZ.cityKillPed(m, { fromX: gang.center.x, fromZ: gang.center.z, byPlayer: false, force: 3 }, "discipline");
+        }
+      }
+    }
+  }
 
   function launchWar(a, b, opts) {
     if (!a || !b || a === b || !b.turf.length) return 0;
@@ -436,8 +672,22 @@
     return best;
   };
 
-  CBZ.cityGangProvoke = function (id, amount) { const gang = gangById(id); if (gang) gang.provoke = Math.min(1, gang.provoke + (amount || 0.3)); };
+  CBZ.cityGangProvoke = function (id, amount) {
+    const gang = gangById(id);
+    // a crew the player rides with doesn't turn on them for ambient heat
+    if (gang && gang.playerFriendly) return;
+    if (gang) gang.provoke = Math.min(1, gang.provoke + (amount || 0.3));
+  };
   CBZ.cityGangProvoked = function (id) { const gang = gangById(id); return gang ? gang.provoke : 0; };
+
+  // mark a crew as FRIENDLY to the player (they joined it). Clears hostility and
+  // tells the reprisal/turf systems to leave the player be while they ride.
+  CBZ.cityGangSetPlayerFriendly = function (id, on) {
+    const gang = gangById(id); if (!gang) return;
+    gang.playerFriendly = !!on;
+    if (on) { gang.provoke = 0; gang.hostility = 0; gang.strikeT = 9e9; }
+    else gang.strikeT = 0;
+  };
 
   // a member went down — the crew takes it personally. ESCALATION LADDER:
   // each kill the player racks up against a crew raises HOSTILITY, which the
@@ -446,6 +696,11 @@
     const gang = gangById(ped.gang); if (!gang) return;
     const byPlayer = !imp || imp.byPlayer !== false;
     gang.provoke = Math.min(1, gang.provoke + (byPlayer ? 0.5 : 0.25));
+    const wasBoss = (ped.isBoss || ped.rank === "boss" || ped === gang.boss);
+    // losing a brother shakes the surviving crew — a real morale/loyalty hit,
+    // sharper if it was the boss. This is what makes a hammered gang fracture.
+    const moraleHit = wasBoss ? 0.18 : 0.05;
+    for (const m of gang.members) { if (m !== ped && !m.dead) disciplineHit(gang, m, moraleHit); }
     if (byPlayer) {
       CBZ.city && CBZ.city.addRespect(3);
       gang.hostility = Math.min(5, (gang.hostility || 0) + 1);   // they remember
@@ -457,14 +712,20 @@
       if (killer && killer.gang && killer.gang !== gang.id) {
         const ag = gangById(killer.gang);
         if (ag && !ag.isPlayer) ag.warIntensity = Math.min(3, (ag.warIntensity || 0) + 0.25);
+        // the killer PUT IN WORK — credit a body toward their climb up the ladder
+        CBZ.cityGangMemberScored(killer, ped);
       }
     }
-    // the BOSS going down to the player is a takeover opportunity — the player
-    // can CLAIM the crew (city/playergang.js). Only the kingpin's death counts.
-    if ((ped.isBoss || ped.rank === "boss" || ped === gang.boss) && byPlayer && !gang.isPlayer) {
+    // remove the body from the live roster so strength/income/pyramid update
+    const ri = gang.members.indexOf(ped); if (ri >= 0 && ped.dead) { /* keep ref for kill feed; reviewGang skips dead */ }
+    // BOSS down → succession (NPC) or a player takeover prize. Flag it either way
+    // so the upkeep tick promotes the heir for rival-on-rival kingpin kills too.
+    if (wasBoss && !gang.isPlayer) {
       gang.bossDead = true;
-      if (CBZ.cityPlayerGangBossKilled) CBZ.cityPlayerGangBossKilled(gang);
-      CBZ.city && CBZ.city.addRespect(20);
+      if (byPlayer) {
+        if (CBZ.cityPlayerGangBossKilled) CBZ.cityPlayerGangBossKilled(gang);
+        CBZ.city && CBZ.city.addRespect(20);
+      }
     }
   };
 
@@ -551,9 +812,26 @@
   };
 
   // ---- per-gang upkeep: provoke/hostility decay, war timers, raider return ----
+  let reviewT = 0;   // merit-review / loyalty-economy cadence (cheap, time-sliced)
   CBZ.onUpdate(34.5, function (dt) {
     if (g.mode !== "city") return;
     updateDrivebys(dt);
+
+    // ---- HIERARCHY upkeep: succession + a slow merit/loyalty review ----
+    // A boss who died mid-frame leaves a power vacuum; the bench takes over.
+    for (const gang of CBZ.cityGangs) {
+      if (gang.isPlayer || gang.absorbed) continue;
+      if (gang.boss && gang.boss.dead && !gang.bossDead) gang.bossDead = true;
+      if ((gang.bossDead || !gang.boss || gang.boss.dead) && !gang.absorbed && gang.members.some((m) => !m.dead)) {
+        succeedBoss(gang);
+      }
+    }
+    reviewT -= dt;
+    if (reviewT <= 0) {
+      reviewT = 6;
+      for (const gang of CBZ.cityGangs.slice()) reviewGang(gang, 6);   // snapshot: defection can add/remove gangs
+    }
+
     for (const gang of CBZ.cityGangs) {
       if (gang.provoke > 0) gang.provoke = Math.max(0, gang.provoke - dt * 0.03);
       // hostility cools slowly — cross a crew and they stay sore for a while
@@ -593,8 +871,42 @@
             if (CBZ.cityHudDirty) CBZ.cityHudDirty();
             CBZ.city && CBZ.city.note("💵 Turf payday: +$" + pay + " (" + lots + " blocks) → bank", 2.2);
           }
+          // credit each soldier's "earned" by their rank cut so YOUR crew also
+          // climbs on merit (autoPromotePlayerCrew reads gstat.earned). A bigger
+          // payday = faster promotions, mirroring the NPC economy.
+          let wsum = 0; for (const m of gang.members) { if (!m.dead) wsum += rankDef(m.rank).cut; }
+          if (wsum > 0) for (const m of gang.members) {
+            if (m.dead || m.isBoss) continue;
+            const s = memStats(m); s.earned += pay * (rankDef(m.rank).cut / wsum) * 0.5; s.loyalty = Math.min(1, s.loyalty + 0.01);
+          }
         } else {
-          gang.treasury = Math.min(6000, (gang.treasury || 0) + take * 0.5);
+          // GTA/Levitt economics: turf prints money, but it's split SKEWED. Half
+          // banks to the war chest; the rest is paid DOWN THE CHAIN by rank cut,
+          // and every member kicks a tax UP — fattening contrib (promotion fuel)
+          // and loyalty. A WAR collapses the take (price war), souring the crew.
+          const atWar = gang.warRemain > 0;
+          const gross = take * (atWar ? 0.45 : 1);
+          gang.treasury = Math.min(8000, (gang.treasury || 0) + gross * 0.5);
+          const pool = gross * 0.5;
+          let wsum = 0;
+          for (const m of gang.members) { if (!m.dead) wsum += rankDef(m.rank).cut; }
+          if (wsum > 0) {
+            for (const m of gang.members) {
+              if (m.dead) continue;
+              const s = memStats(m);
+              const share = pool * (rankDef(m.rank).cut / wsum);
+              s.earned += share;
+              // they kick a cut UP to the boss (counts as contribution = merit)
+              const kickUp = share * (0.18 + rankDef(m.rank).tier * 0.02);
+              s.contrib += kickUp; gang.treasury = Math.min(8000, gang.treasury + kickUp);
+              // getting paid buys loyalty; a dry/war payday erodes it (the dream
+              // of the top cut is all that keeps a foot soldier in — they earn
+              // below the legit wage day to day, exactly per the research)
+              if (atWar) s.loyalty = Math.max(0, s.loyalty - 0.04);
+              else if (m === gang.boss) s.loyalty = 1;
+              else s.loyalty = Math.min(1, s.loyalty + (share > 8 ? 0.03 : 0.01));
+            }
+          }
         }
       }
     }
@@ -644,7 +956,7 @@
       const P = CBZ.player;
       if (P && !P.dead) {
         for (const gang of CBZ.cityGangs) {
-          if (gang.isPlayer) continue;
+          if (gang.isPlayer || gang.playerFriendly) continue;   // your own crew won't hunt you
           const heat = Math.max(gang.provoke * 1.4, (gang.hostility || 0) * 0.5);
           if (heat < 0.6 || gang.strikeT > 0) continue;
           gang.strikeT = 14 + rng() * 10 - Math.min(8, (gang.hostility || 0) * 1.5);  // sorer = faster

@@ -358,6 +358,14 @@
     ped.tweakT = 0;
     if (ped.archetype === "resident") ped.archetype = "customer";
     ped.erratic = Math.max(ped.erratic || 0, drug === "Meth" ? 0.48 : 0.16);
+    // satisfy the buyer's craving (the NPC need system) so they walk off content
+    // instead of immediately hunting another fix; release them from seeking you.
+    if (ped._needs) ped._needs.high = Math.min(1, (ped._needs.high || 0.3) + 0.6 + (drug === "Meth" ? 0.2 : 0));
+    ped.seekPlayer = false;
+    // a player sale on YOUR turf banks promotion currency for your own gang
+    if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && g.playerGang) {
+      g.playerGang.treasury = (g.playerGang.treasury || 0) + Math.round(price * 0.2);
+    }
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.city.note("Sold " + drug + " to " + ped.name + " for $" + price + (turf.where === "home" ? " (your turf)" : "") + ".", 1.8);
   };
@@ -368,7 +376,30 @@
     let units = 0; for (const d of DRUGS) units += (inv[d] || 0);
     const cust = regulars().length;
     const best = econ.bestMarket ? econ.bestMarket(pick(DRUGS)) : null;
-    return { units, customers: cust, sales: g.cityDrugSales || 0, best };
+    const district = econ.playerDistrict ? econ.playerDistrict() : null;
+    return { units, customers: cust, sales: g.cityDrugSales || 0, best, posted: !!g.cityPostedUp, district };
+  };
+
+  // ---- POST UP: hold a corner like a real street dealer. While posted, nearby
+  // addicts — your regulars AND any ped with a live craving (the NPC need
+  // system in aigoals) — walk straight up to you to score. Stop moving much
+  // and the trade comes to you; the better your block's demand, the more buyers
+  // drift over. (GTA San Andreas crack-corner / GTA Online street-dealer vibe.)
+  CBZ.cityPostUp = function () {
+    if (g.career !== "dealer") { CBZ.city.note("Start dealing first — cop product at the trap house.", 2.0); return false; }
+    g.cityPostedUp = !g.cityPostedUp;
+    if (g.cityPostedUp) {
+      g.cityPostX = CBZ.player.pos.x; g.cityPostZ = CBZ.player.pos.z;
+      const econ = CBZ.cityEcon;
+      const dn = econ && econ.districtName ? econ.districtName(econ.playerDistrict ? econ.playerDistrict() : null) : "this block";
+      CBZ.city.note("Posted up on " + dn + ". Word's out — buyers will come to you. [I] to deal, post up again to move on.", 2.8);
+    } else {
+      CBZ.city.note("Off the corner. You're moving again.", 1.6);
+      // release any seekers so they get on with their own lives
+      for (const p of CBZ.cityPeds) if (p.seekPlayer) { p.seekPlayer = false; }
+    }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return g.cityPostedUp;
   };
 
   // recruit a ped as crew (gangster) or worker (pimp/entrepreneur)
@@ -409,6 +440,7 @@
     // story arc. We only clear transient regular flags off live peds.
     g.cityNotoriety = g.cityNotoriety || 0;
     g.cityCustomers = 0; g.cityDrugSales = g.cityDrugSales || 0;
+    g.cityPostedUp = false; g.cityPostX = 0; g.cityPostZ = 0;
     for (const p of (CBZ.cityPeds || [])) { p.regular = false; p.reUpT = 0; p.loyalty = 0; p.seekPlayer = false; }
     if (CBZ.cityPlayerGangReset) CBZ.cityPlayerGangReset();
     if (CBZ.cityStoryReset) CBZ.cityStoryReset();
@@ -497,24 +529,48 @@
         if ((g.wanted | 0) === 0) { CBZ.city.addCash(E.securityWage || 14); }
         else { g.career = null; CBZ.city.note("Security: you went wanted — you're FIRED.", 2.2); }
       }
-      // CUSTOMER BASE: regulars who are due to re-up will seek YOU out. Nearby
-      // ones path to the player so the deal comes to you (passive street demand
-      // that grows with your base). Far ones just idle until they're in range.
+      // CUSTOMER BASE + WALK-UP DEMAND: regulars who are due to re-up seek YOU
+      // out, and — when you're POSTED UP on a corner — fresh addicts with a live
+      // craving (the NPC need system) drift over to score too. Either way the
+      // deal comes to you, passive street demand that scales with your base and
+      // the block's appetite. (GTA street-dealer corner economics.)
       if (g.career === "dealer") {
         const inv = g.cityInv || {}; let units = 0; for (const d of DRUGS) units += (inv[d] || 0);
-        const reg = regulars();
-        if (reg.length) {
-          let seekers = 0;
-          for (const p of reg) {
-            if (p.reUpT && CBZ.now >= p.reUpT) {
-              const dx = p.pos.x - CBZ.player.pos.x, dz = p.pos.z - CBZ.player.pos.z;
-              const near = (dx * dx + dz * dz) < (60 * 60);
-              if (near && units > 0 && !p.rage && p.state !== "flee") { sendPedTo(p, CBZ.player.pos.x, CBZ.player.pos.z); p.seekPlayer = true; seekers++; }
-              else if (!near) { p.reUpT = CBZ.now + 25; } // check back later
-            }
-          }
-          if (seekers > 0 && units > 0) CBZ.city.note(seekers + " regular" + (seekers > 1 ? "s are" : " is") + " looking to re-up — [I] to deal.", 1.8);
+        const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
+        // if you've wandered off your posted corner, you're effectively unposted
+        if (g.cityPostedUp && (Math.abs(px - (g.cityPostX || px)) > 14 || Math.abs(pz - (g.cityPostZ || pz)) > 14)) {
+          g.cityPostX = px; g.cityPostZ = pz; // re-anchor to where you stopped
         }
+        let seekers = 0;
+        // 1) regulars re-upping (works whether or not you're posted)
+        const reg = regulars();
+        for (const p of reg) {
+          if (p.reUpT && CBZ.now >= p.reUpT) {
+            const dx = p.pos.x - px, dz = p.pos.z - pz;
+            const near = (dx * dx + dz * dz) < (60 * 60);
+            if (near && units > 0 && !p.rage && p.state !== "flee" && !p.surrender) { sendPedTo(p, px, pz); p.seekPlayer = true; seekers++; }
+            else if (!near) { p.reUpT = CBZ.now + 25; } // check back later
+          }
+        }
+        // 2) posted-up walk-up trade: nearby craving addicts come find you. The
+        // hotter the block's demand for what you carry, the more drift over.
+        if (g.cityPostedUp && units > 0) {
+          const econ = CBZ.cityEcon;
+          const demand = econ && econ.streetPrice ? Math.min(1.6, econ.streetPrice(DRUGS[0]) / 60) : 1;
+          let drawn = 0, cap = 2 + Math.round(demand);   // a small, believable trickle
+          for (const p of CBZ.cityPeds) {
+            if (drawn >= cap) break;
+            if (p.dead || p.vendor || p.companion || p.controlled || p.recruited || p.seekPlayer) continue;
+            if (!p.drugUser || p.rage || p.surrender || p.state === "flee") continue;
+            const crave = p._needs ? p._needs.high : 0.3;     // a real craving from aigoals
+            if (crave > 0.45) continue;                       // only the jonesing come over
+            const dx = p.pos.x - px, dz = p.pos.z - pz;
+            if ((dx * dx + dz * dz) > (45 * 45)) continue;     // within a block
+            sendPedTo(p, px, pz); p.seekPlayer = true; drawn++;
+          }
+          seekers += drawn;
+        }
+        if (seekers > 0 && units > 0) CBZ.city.note(seekers + " buyer" + (seekers > 1 ? "s are" : " is") + " coming to score — [I] to deal.", 1.8);
       }
       // banked cash earns a little interest (the safe, slow way to grow money)
       if ((g.cityBank || 0) > 0 && E.bankRate) { const gain = Math.floor(g.cityBank * E.bankRate * (E.payTick || 6)); if (gain > 0) { g.cityBank += gain; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); } }

@@ -31,6 +31,216 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
   let beacon = null, kidnapCD = 0;
+  let relTickT = 1, relTickCur = 0, _wrapped = false;
+
+  // ===========================================================================
+  //  PERSONAL RELATIONSHIPS — a multi-axis CONTINUUM each NPC holds toward the
+  //  player, the way Tyranny tracks Loyalty/Fear and RimWorld decays opinion
+  //  from remembered events. Every axis 0..100; they push and pull each other
+  //  (respect dampens fear, grudge corrodes loyalty) and they DRIVE real ped
+  //  behaviour by writing the flags city/peds.js already reads — snitch nerve,
+  //  fear/surrender, recruit-willingness, and a delayed grudge AMBUSH.
+  //    ped.relPlayer = { respect, fear, loyalty, affection, grudge, seen, t }
+  //  We never edit peds.js; we set its inputs (ped.snitch, ped.fear, ped.rage,
+  //  ped.mem, ped.surrenderT, ped.state) and expose reads other systems pull.
+  // ===========================================================================
+  const REL_KEYS = ["respect", "fear", "loyalty", "affection", "grudge"];
+  function clamp100(v) { return v < 0 ? 0 : v > 100 ? 100 : v; }
+
+  // lazily attach + return a ped's relationship record toward the player. We
+  // seed it once from the ped's existing disposition so a hardened gang-banger
+  // doesn't start out neutral and a meek civilian isn't pre-loaded with fear.
+  CBZ.cityRel = function (ped) {
+    if (!ped) return null;
+    let r = ped.relPlayer;
+    if (!r) {
+      r = ped.relPlayer = {
+        respect: 0, fear: 0, loyalty: 0,
+        affection: ped.affection || 0,
+        grudge: 0, seen: 0, t: 0, ambushT: 0,
+      };
+      // gangs respect strength but resist loyalty; the timid carry latent fear.
+      if (ped.gang) r.respect = 8 + (ped.aggr || 0.5) * 10;
+      if ((ped.aggr || 0.3) < 0.32) r.fear = 6;
+    }
+    return r;
+  };
+
+  // a single SIGNED read of the bond: loved (+) ⟷ hated (−). Loyalty+respect+
+  // affection pull positive; grudge+(unearned)fear pull negative. Other systems
+  // (recruiting, shop prices, witness) ask for this one number.
+  function bondOf(ped) {
+    const r = CBZ.cityRel(ped); if (!r) return 0;
+    const pos = r.loyalty * 1.1 + r.respect * 0.8 + r.affection * 0.7;
+    const neg = r.grudge * 1.3 + Math.max(0, r.fear - r.respect * 0.5) * 0.6;
+    return (pos - neg) / 100;   // roughly -1.5 .. +2 in practice
+  }
+  CBZ.cityBond = bondOf;
+
+  // EVENT → axis deltas. The heart of the sim: an action means different things
+  // on different axes at once (paying someone buys loyalty AND respect AND a
+  // little affection; killing their friend is pure fear+grudge, zero loyalty).
+  // Amounts are scaled by the caller's `amt` (default 1) so a big favour lands
+  // harder than a small one. These mirror real reputation-sim event tables.
+  const REL_EVENTS = {
+    helped:    { respect: +6, loyalty: +9, affection: +3, fear: -3, grudge: -4 },
+    paid:      { respect: +7, loyalty: +11, affection: +5, fear: -2, grudge: -6 },
+    gift:      { respect: +5, loyalty: +8, affection: +9, grudge: -5 },
+    defended:  { respect: +12, loyalty: +14, affection: +4, fear: -5, grudge: -8 },
+    healed:    { respect: +8, loyalty: +10, affection: +6, fear: -6, grudge: -7 },
+    flirted:   { affection: +10, loyalty: +3, respect: +2 },
+    dated:     { affection: +16, loyalty: +6, respect: +3 },
+    recruited: { loyalty: +18, respect: +8, fear: -4 },
+    rescued:   { loyalty: +24, respect: +14, affection: +12, grudge: -20, fear: -10 },
+    spared:    { fear: +6, respect: +5, grudge: -3, loyalty: +2 },   // hands-up, let live
+    greeted:   { affection: +2, loyalty: +1 },
+
+    intimidated: { fear: +14, respect: +4, grudge: +6, loyalty: -4 },
+    robbed:    { fear: +16, grudge: +20, respect: +3, loyalty: -10, affection: -8 },
+    pickpocket:{ fear: +4, grudge: +10, loyalty: -3 },
+    extorted:  { fear: +22, grudge: +24, respect: +2, loyalty: -12 },
+    beaten:    { fear: +24, grudge: +26, respect: +5, loyalty: -16, affection: -14 },
+    threatened:{ fear: +12, grudge: +5, loyalty: -4 },
+    friendHurt:{ fear: +8, grudge: +16, loyalty: -8, affection: -6 },   // someone they love
+    friendKilled:{ fear: +12, grudge: +40, loyalty: -22, affection: -16, respect: +6 },
+    snubbed:   { affection: -6, loyalty: -4, grudge: +3 },
+    betrayed:  { grudge: +44, loyalty: -40, fear: +10, respect: -6 },   // attacked your own crew
+  };
+
+  // apply a raw delta map to ONE ped's record (the atomic mutation). Cross-axis
+  // coupling lives here: high respect makes fear curdle into respect not panic;
+  // fresh grudge eats loyalty. Returns the new signed bond for convenience.
+  function applyDelta(ped, d, scale) {
+    const r = CBZ.cityRel(ped); if (!r) return 0;
+    scale = scale == null ? 1 : scale;
+    for (const k of REL_KEYS) if (d[k]) r[k] = clamp100(r[k] + d[k] * scale);
+    // coupling
+    if (r.grudge > 55) r.loyalty = clamp100(r.loyalty - 0.15 * (r.grudge - 55));
+    if (r.respect > 50 && r.fear > r.respect) r.fear = clamp100(r.fear - (r.fear - r.respect) * 0.2);
+    r.affection = Math.max(r.affection, ped.affection || 0);  // keep legacy field in sync
+    ped.affection = r.affection;
+    ped.knowsHero = Math.min(1, Math.max(ped.knowsHero || 0, (r.respect + r.grudge + r.fear) / 240));
+    r.seen = 1; r.t = 0;
+    return bondOf(ped);
+  }
+
+  // PUBLIC: shift a ped's relationship by a named event kind. This is the single
+  // entry point every other system (and our own hooks) uses. It also ripples
+  // through the LIVING WEB — partner/clique/gang feel a fraction of it — and
+  // immediately re-derives the behaviour flags so the change takes effect now.
+  CBZ.cityRelShift = function (ped, kind, amt) {
+    if (!ped || ped.dead) return 0;
+    const d = REL_EVENTS[kind]; if (!d) return 0;
+    const bond = applyDelta(ped, d, amt == null ? 1 : amt);
+    driveFlags(ped);
+    // ripple to the social circle — hurting/helping one is felt by their people.
+    if (RIPPLE[kind]) rippleToCircle(ped, kind, (amt == null ? 1 : amt) * RIPPLE[kind]);
+    return bond;
+  };
+
+  // which events ripple to friends/partner/gang, and how strongly (0..1). Harm
+  // ripples hardest (grudges are contagious); kindness spreads softer goodwill.
+  const RIPPLE = {
+    beaten: 0.45, robbed: 0.4, extorted: 0.45, friendKilled: 0.6, betrayed: 0.7,
+    defended: 0.4, healed: 0.3, paid: 0.25, gift: 0.25, rescued: 0.5, recruited: 0.2,
+  };
+  // turn a direct event into the circle's POV (a witnessed harm becomes
+  // "friendHurt"/"friendKilled"; a witnessed kindness becomes mild respect).
+  function rippleToCircle(ped, kind, w) {
+    const harm = REL_EVENTS[kind] && (REL_EVENTS[kind].grudge || 0) > 0;
+    const circ = [];
+    if (ped.partner && !ped.partner.dead) circ.push(ped.partner);
+    if (ped.friends) for (const f of ped.friends) if (f && !f.dead) circ.push(f);
+    // gang-mates share loyalty to the gang: a few same-gang peds nearby feel it
+    if (ped.gang) {
+      let n = 0;
+      for (const q of CBZ.cityPeds) {
+        if (n >= 4) break;
+        if (q === ped || q.dead || q.gang !== ped.gang) continue;
+        const dx = q.pos.x - ped.pos.x, dz = q.pos.z - ped.pos.z;
+        if (dx * dx + dz * dz < 30 * 30) { circ.push(q); n++; }
+      }
+    }
+    const evt = harm ? "friendHurt" : "spared";   // POV remap (friendHurt for harm, mild goodwill otherwise)
+    for (const c of circ) {
+      const d = REL_EVENTS[evt]; if (!d) continue;
+      applyDelta(c, d, w);
+      driveFlags(c);
+    }
+  }
+
+  // ===========================================================================
+  //  CONSEQUENCES — write the relationship back onto the ped's BRAIN inputs so
+  //  city/peds.js (which we do NOT touch) acts on how this person feels. This is
+  //  the whole point: feelings have teeth.
+  //    • respect  → calmer around you, won't snitch, may greet/discount
+  //    • loyalty  → recruitable, fights FOR you, ignores your crimes
+  //    • fear     → flinches, surrenders, hands over cash, snitches faster
+  //    • grudge   → snitches, refuses, and (delayed) AMBUSHES you
+  // ===========================================================================
+  function driveFlags(ped) {
+    if (!ped || ped.dead) return;
+    const r = ped.relPlayer; if (!r || !r.seen) return;
+    const bond = bondOf(ped);
+    // SNITCH nerve: peds.js reads ped.snitch (0..1). Respect/loyalty buys your
+    // silence; grudge/fear makes them eager to rat. We nudge toward a target so
+    // we never stomp the ped's hardwired baseline, just bend it.
+    if (ped._snitch0 == null) ped._snitch0 = ped.snitch != null ? ped.snitch : 0.3;
+    let target = ped._snitch0;
+    target -= (r.respect + r.loyalty) / 100 * 0.5;     // earns silence
+    target += (r.grudge / 100) * 0.6 + (r.fear / 100) * 0.15;
+    if (r.loyalty > 60) target = Math.min(target, 0.05);   // your people never rat you
+    ped.snitch = Math.max(0, Math.min(1, target));
+    // LOYAL peds in your orbit won't flee/panic from you and treat you as kin
+    if (r.loyalty > 55 && !ped.gang) { ped.fear = Math.min(ped.fear || 0, 1); }
+    // FEAR floor: a frightened person stays jumpy even between shoves
+    if (r.fear > 60 && (ped.fear || 0) < 4) ped.fear = 4;
+    ped._bond = bond;
+  }
+
+  // RECRUITING gate — peds.js/careers read this to decide if someone will join.
+  // High loyalty/respect = a willing patch-in; a grudge means "never". Returns
+  // 0..1 willingness; the recruit cost/respect check still applies on top.
+  CBZ.cityRelWillRecruit = function (ped) {
+    if (!ped) return 0.5;
+    const r = CBZ.cityRel(ped);
+    if (r.grudge > 45) return 0;                       // they hate you — no chance
+    let w = 0.35 + (r.loyalty + r.respect) / 200 + (r.affection / 300);
+    w += (r.fear / 100) * 0.25;                        // intimidation works a little
+    return Math.max(0, Math.min(1, w));
+  };
+
+  // SHOP PRICE modifier — a multiplier on buy price (lower = nicer). Vendors who
+  // respect/like you cut you a deal; ones who fear you give "scared discounts";
+  // a grudge-holding clerk gouges you. shops.js can fold this in if it likes.
+  CBZ.cityRelPriceMod = function (ped) {
+    if (!ped) return 1;
+    const r = CBZ.cityRel(ped);
+    let m = 1 - (r.respect + r.loyalty + r.affection) / 100 * 0.08 - (r.fear / 100) * 0.05;
+    m += (r.grudge / 100) * 0.12;
+    return Math.max(0.7, Math.min(1.25, m));
+  };
+
+  // WITNESS / snitch read for other systems: would this ped rat on you right
+  // now, given the relationship? (peds.js owns the final call; this is a hint.)
+  CBZ.cityRelWouldSnitch = function (ped) {
+    if (!ped) return true;
+    const r = CBZ.cityRel(ped);
+    if (r.loyalty > 50 || r.respect > 60) return false;   // bought silence
+    return (r.grudge > 30) || (r.fear > 60);
+  };
+
+  // a friendly text read for HUD/interact ("loves you", "wants you dead", …).
+  CBZ.cityRelLabel = function (ped) {
+    const r = CBZ.cityRel(ped); const b = bondOf(ped);
+    if (r.grudge > 60) return "wants you dead";
+    if (b > 1.0) return "loves you";
+    if (b > 0.4) return "likes you";
+    if (r.fear > 55) return "terrified of you";
+    if (r.respect > 45) return "respects you";
+    if (b < -0.3) return "hates you";
+    return "neutral";
+  };
 
   // ===========================================================================
   //  AMBIENT SOCIAL LIFE — relationships, families, friend cliques, daily
@@ -114,10 +324,18 @@
     }
     // base personality fields
     for (const p of civ) { p.mood = 0; p.knowsHero = 0; p.opinion = 0; }
+    // clear any stale relationship records from a previous life + wrap the
+    // action APIs so every meaningful deed feeds the relationship axes.
+    for (const p of CBZ.cityPeds) { p.relPlayer = null; p._snitch0 = null; }
+    relTickT = 1; relTickCur = 0;
+    wrapActionHooks();
   };
 
   CBZ.cityIsRomance = function (ped) {
-    return ped && !ped.dead && ped.kind === "civilian" && !ped.vendor && !ped.gang && ped !== g.cityPartner && !ped.partner;
+    if (!(ped && !ped.dead && ped.kind === "civilian" && !ped.vendor && !ped.gang && ped !== g.cityPartner && !ped.partner)) return false;
+    // someone holding a real grudge won't be charmed — feelings gate romance.
+    const r = ped.relPlayer; if (r && r.grudge > 40) return false;
+    return true;
   };
 
   // ---- dating ----
@@ -149,10 +367,13 @@
     const gain = (S().affectionPerDate || 22) * (0.7 + (1 - Math.abs(ped.aggr - 0.3)) * 0.5 + repBonus + richBonus);
     ped.affection = (ped.affection || 0) + gain;
     ped.mood = 1; ped.knowsHero = Math.min(1, (ped.knowsHero || 0) + 0.3); ped.opinion = Math.min(1, (ped.opinion || 0) + 0.25);
+    // a successful date deepens the multi-axis bond, scaled by how well it went
+    CBZ.cityRelShift(ped, "dated", 0.6 + gain / 30);
     if (CBZ.sfx) CBZ.sfx("coin");
     say(ped, FLIRT_LINES[(rng() * FLIRT_LINES.length) | 0], "#ff8bd0", 2);
     if (ped.affection >= (S().partnerAt || 60)) {
       g.cityPartner = ped; ped.companion = true; ped.controlled = true; ped.romance = true; ped.together = 1;
+      CBZ.cityRelShift(ped, "dated", 2);   // committing locks in deep loyalty+affection
       CBZ.city.big("💕 " + ped.name + " is now your partner!");
       CBZ.city.addRespect(2);
       // word gets out — their friends now know (and like) you a little
@@ -169,6 +390,7 @@
     if (g.citySpouse) { CBZ.city.note("You're already married 💍", 1.6); return; }
     if (!econ.has(ring)) { CBZ.city.note("You need a " + ring + " to propose.", 2); return; }
     econ.take(ring, 1); g.citySpouse = true;
+    CBZ.cityRelShift(ped, "gift", 4);     // a ring is the ultimate gift → max affection/loyalty
     CBZ.city.big("💍 You married " + ped.name + "!");
     CBZ.city.addRespect(10);
   };
@@ -180,6 +402,7 @@
     if (!armed) { CBZ.city.note("Need a gun to take a hostage.", 1.6); return; }
     if (g.cityHostage) { CBZ.city.note("You already have a hostage.", 1.4); return; }
     g.cityHostage = ped; ped.controlled = true; ped.hostage = true; ped.fear = 10; ped.rage = null;
+    CBZ.cityRelShift(ped, "intimidated", 1.5);   // grabbed at gunpoint → terror + grudge
     CBZ.city.big("HOSTAGE TAKEN");
     CBZ.cityCrime && CBZ.cityCrime(40, { x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
   };
@@ -190,8 +413,11 @@
     if (ransom) {
       const pay = 200 + ((ped.wealth || 0.3) * 800) | 0;
       CBZ.city.addCash(pay); CBZ.city.big("RANSOM PAID + $" + pay);
+      CBZ.cityRelShift(ped, "extorted", 1.5);          // bled for cash → lasting hatred
       CBZ.cityCrime && CBZ.cityCrime(30, { type: "extortion" });
     } else {
+      // letting them walk unharmed earns a sliver of respect back (you spared them)
+      CBZ.cityRelShift(ped, "spared", 1);
       CBZ.city.note("You let " + ped.name + " go.", 1.6);
       if (CBZ.city.addHeat) CBZ.city.addHeat(-30);     // letting them go cools things slightly
     }
@@ -229,6 +455,13 @@
     for (const b of BUBBLES) retireBubble(b);
     BUBBLES.length = 0; RUMORS.length = 0;
     gossipT = 2; eventT = 6; routineT = 1.5; clubT = 0; queueT = 0;
+    // wipe relationship records + restore each ped's hardwired snitch baseline
+    for (const p of (CBZ.cityPeds || [])) {
+      p.relPlayer = null;
+      if (p._snitch0 != null) { p.snitch = p._snitch0; p._snitch0 = null; }
+      p._bond = 0;
+    }
+    relTickT = 1; relTickCur = 0;
   };
 
   function clearBeacon() { if (beacon) { if (beacon.parent) beacon.parent.remove(beacon); if (beacon.geometry) beacon.geometry.dispose(); if (beacon.material) beacon.material.dispose(); beacon = null; } }
@@ -327,9 +560,14 @@
       if (byPlayer) {
         m.opinion = Math.max(-1, (m.opinion || 0) - 0.9);
         m.knowsHero = 1;
-        // grief turns to either rage (bold) or flight (meek)
-        if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; say(m, "“YOU KILLED THEM!”", "#ff6b6b", 2.6); }
-        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); say(m, "💔", "#9bb0ff", 2.6); }
+        // you killed someone they love — a deep, durable grudge is born here,
+        // and it will SEEK its revenge later (the ambush director below).
+        CBZ.cityRelShift(m, "friendKilled", 1);
+        const r = CBZ.cityRel(m);
+        // grief turns to either rage (bold) or flight (meek); a big grudge will
+        // also keep them hunting you long after they've calmed from this moment.
+        if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; r.ambushT = 0; say(m, "“YOU KILLED THEM!”", "#ff6b6b", 2.6); }
+        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "💔", "#9bb0ff", 2.6); }
       } else {
         m.fear = Math.max(m.fear || 0, 6); say(m, "💔", "#9bb0ff", 2.2);
       }
@@ -498,6 +736,20 @@
         a.pause = Math.max(a.pause || 0, 1.2); a.speed = 0;
       }
     }
+    // PERSONAL recognition: a ped who has a real relationship with the player
+    // reacts to THEM specifically — a friend greets, an admirer fawns, a
+    // grudge-holder mutters a threat, the frightened shrink away. This makes the
+    // relationship visible on the street, not just a hidden number.
+    for (const cand of near) {
+      const r = cand.relPlayer; if (!r || !r.seen) continue;
+      if (rng() > 0.35) continue;                       // don't have everyone pipe up at once
+      const b = bondOf(cand);
+      if (r.grudge > 55) { say(cand, ["“I see you…”", "“You'll get yours.”", "😠"][(rng() * 3) | 0], "#ff6b6b", 2.2); cand.mood = -1; }
+      else if (b > 0.9) { say(cand, ["“Hey, it's you! 😄”", "“My friend!”", "“Good to see you 🙌”"][(rng() * 3) | 0], "#7ed957", 2.2); cand.mood = 1; }
+      else if (b > 0.35) { say(cand, ["“'Sup. 👋”", "“Respect.”", "“Lookin' good.”"][(rng() * 3) | 0], "#bfe0ff", 2); }
+      else if (r.fear > 55) { say(cand, ["“…please, I don't want trouble.”", "“Just leave me be.”", "😰"][(rng() * 3) | 0], "#cfd6e6", 2.2); cand.fear = Math.max(cand.fear || 0, 4); }
+      break;                                            // one reaction per vignette pass
+    }
     // if the player is famous/rich and near, an onlooker may recognize them
     if (rng() < 0.25 && ((g.respect || 0) > 40 || (g.cash || 0) > 8000)) {
       const fan = near[(rng() * near.length) | 0];
@@ -510,6 +762,158 @@
   }
 
   // ===========================================================================
+  //  ACTION HOOKS — we WRAP (never replace) the public deed APIs so every crime
+  //  or kindness the player commits on a ped feeds that ped's relationship axes.
+  //  Each wrapped fn calls the ORIGINAL first (preserving every side effect),
+  //  then records the relationship event. Wrapped once, idempotently, at init.
+  // ===========================================================================
+  function wrap(name, kind, amtFn) {
+    const orig = CBZ[name];
+    if (typeof orig !== "function" || orig._relWrapped) return;
+    const w = function (ped) {
+      const ret = orig.apply(this, arguments);
+      try {
+        if (ped && ped.pos && !ped.vendor) {
+          const amt = amtFn ? amtFn(ped, ret) : 1;
+          if (amt > 0) CBZ.cityRelShift(ped, kind, amt);
+        }
+      } catch (e) { /* never let a relationship hiccup break a core action */ }
+      return ret;
+    };
+    w._relWrapped = true; w._relOrig = orig;
+    CBZ[name] = w;
+  }
+  function wrapActionHooks() {
+    if (_wrapped) return; _wrapped = true;
+    // crimes against a person → fear + grudge (scaled by how much was taken)
+    wrap("cityRobPed", "robbed", (ped, ret) => 1 + (ret && ret.cash ? Math.min(1, ret.cash / 200) : 0));
+    wrap("cityKOPed", "beaten", () => 0.8);
+    wrap("cityDealTo", "paid", () => 0.6);   // a customer you serve warms up a touch
+    // RECRUITING: someone who HATES you flat-out refuses; otherwise it's a bond
+    // of trust → big loyalty. We gate BEFORE the original so a grudge holds.
+    const orec = CBZ.cityRecruit;
+    if (typeof orec === "function" && !orec._relWrapped) {
+      const w = function (ped) {
+        if (ped && !ped.dead && CBZ.cityRelWillRecruit(ped) <= 0.05) {
+          CBZ.city && CBZ.city.note((ped.name || "They") + " won't run with you — too much bad blood.", 2);
+          say(ped, "“After what you did? Never.”", "#ff9b8b", 2.2);
+          return;
+        }
+        const ret = orec.apply(this, arguments);
+        try { if (ped && ped.recruited) CBZ.cityRelShift(ped, "recruited", 1); } catch (e) {}
+        return ret;
+      };
+      w._relWrapped = true; w._relOrig = orec; CBZ.cityRecruit = w;
+    }
+    // killing is special: the VICTIM is dead, so the shift goes to their circle
+    // via citySocialWitnessKill (already wired). We additionally wrap cityKillPed
+    // to make sure a player kill always seeds the witness/grudge web even when
+    // the victim had no partner (peds.js only auto-calls citySocialDeath then).
+    const ok = CBZ.cityKillPed;
+    if (typeof ok === "function" && !ok._relWrapped) {
+      const w = function (ped, imp, cause) {
+        const wasNoPartner = ped && !ped.partner;
+        const ret = ok.apply(this, arguments);
+        try {
+          const byPlayer = !imp || imp.byPlayer !== false;
+          // peds.js calls citySocialDeath only when ped.partner existed; cover
+          // the rest (friends/clique/gang) so a witnessed murder still lands.
+          if (ped && byPlayer && wasNoPartner && CBZ.citySocialWitnessKill) {
+            const P = CBZ.player;
+            const near = P && !P.dead && ped.pos && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 26;
+            if (near) CBZ.citySocialWitnessKill(ped, true);
+          }
+        } catch (e) {}
+        return ret;
+      };
+      w._relWrapped = true; w._relOrig = ok; CBZ.cityKillPed = w;
+    }
+    // pickpocket + ransom-demand live in interact.js as locals (no public fn),
+    // so they aren't wrapped here; the dominant person-crimes (mug/beat/KO/kill)
+    // and kindnesses (recruit/deal/date/rescue) ARE, which is where the bond
+    // moves most. Other modules can call cityRelShift directly for the rest.
+  }
+
+  // ===========================================================================
+  //  RELATIONSHIP DIRECTOR — per-second upkeep:
+  //   • DECAY: hot feelings (fear, fresh grudge) cool over time; loyalty,
+  //     respect and deep grudges fade much slower (RimWorld-style memory decay).
+  //   • LOYALTY DEFENSE: a high-loyalty civilian nearby will JUMP IN to fight
+  //     someone attacking YOU (they pick up your enemy as their rage target).
+  //   • GRUDGE AMBUSH (delayed consequence): a ped nursing a big grudge, once
+  //     its timer elapses and it spots you, turns hostile — a payback attack.
+  //  Time-sliced across the ped array so it stays cheap on a phone.
+  // ===========================================================================
+  function tickRelationships(dt) {
+    relTickT -= dt; if (relTickT > 0) return;
+    const step = relTickT + 1; relTickT = 1;           // ~1Hz, dt-corrected decay
+    const peds = CBZ.cityPeds, n = peds.length;
+    if (!n) return;
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+    // who is currently attacking the player? (so loyal peds can defend)
+    let aggressor = null;
+    // process a window of the array per tick (256 covers a big crowd in a few s)
+    relTickCur = relTickCur % n;
+    const end = Math.min(n, relTickCur + 256);
+    for (let i = relTickCur; i < end; i++) {
+      const p = peds[i]; if (!p || p.dead) continue;
+      const r = p.relPlayer; if (!r || !r.seen) continue;
+      r.t += step;
+      // ---- decay (different half-lives per axis) ----
+      r.fear = clamp100(r.fear - step * 1.6);                 // fear fades fastest
+      if (r.grudge < 30) r.grudge = clamp100(r.grudge - step * 0.8);   // petty grudges cool
+      else r.grudge = clamp100(r.grudge - step * 0.12);                // deep ones linger
+      r.respect = clamp100(r.respect - step * 0.15);
+      r.loyalty = clamp100(r.loyalty - step * 0.05);          // loyalty is sticky
+      r.affection = clamp100(r.affection - step * 0.03);
+      p.affection = r.affection;
+      // ---- the grudge AMBUSH timer ----
+      if (r.ambushT > 0) r.ambushT -= step;
+      // re-derive behaviour flags from the decayed values (cheap; this window)
+      driveFlags(p);
+      if (!P || P.dead) continue;
+      const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d2 = dx * dx + dz * dz;
+      // ---- LOYALTY DEFENSE: a devoted civ near you fights your attacker ----
+      if (r.loyalty > 60 && !p.gang && !p.recruited && !p.controlled && d2 < 22 * 22 && !p.rage) {
+        if (!aggressor) aggressor = findPlayerAttacker(P, PA);
+        if (aggressor && aggressor !== p && !aggressor.dead) {
+          p.rage = aggressor; p.state = "fight"; r.t = 0;
+          if (rng() < 0.5) say(p, ["“Leave them ALONE!”", "“I got your back!”", "“Back OFF!”"][(rng() * 3) | 0], "#7ed957", 2.2);
+        }
+      }
+      // ---- GRUDGE AMBUSH: timer elapsed + they can see you → payback ----
+      else if (r.grudge > 45 && r.ambushT <= 0 && !p.controlled && !p.recruited && !p.rage && d2 < 24 * 24) {
+        // bold grudge-holders attack; meek ones snitch hard + flee toward a cop
+        if ((p.aggr || 0.3) > 0.45 && (r.grudge > 60 || (p.aggr || 0.3) > 0.6)) {
+          p.rage = PA || P; p.state = "fight"; p.mem = PA || P;
+          p.alarmed = Math.max(p.alarmed || 0, 6);
+          say(p, ["“Remember ME?!”", "“This is for them!”", "“You're DEAD.”"][(rng() * 3) | 0], "#ff6b6b", 2.4);
+          r.ambushT = 45 + rng() * 40;   // if they survive, they'll try again later
+        } else {
+          // a coward's revenge: become a committed witness against you
+          p.snitch = 1; p.mem = PA || P; p.alarmed = Math.max(p.alarmed || 0, 4);
+          if ((p.witnessSev || 0) < 60) { p.witnessSev = 60; p.witnessType = p.witnessType || "the gunman"; }
+          r.ambushT = 30 + rng() * 30;
+        }
+      }
+    }
+    relTickCur = end >= n ? 0 : end;
+  }
+  // find a live ped/cop currently targeting the player (their rage is the
+  // player actor or the player object) — the one a loyalist will defend against.
+  function findPlayerAttacker(P, PA) {
+    let best = null, bd = 26 * 26;
+    for (const q of CBZ.cityPeds) {
+      if (q.dead || q.controlled || q.recruited) continue;
+      if (q.rage === PA || q.rage === P) {
+        const dx = q.pos.x - P.pos.x, dz = q.pos.z - P.pos.z, d2 = dx * dx + dz * dz;
+        if (d2 < bd) { bd = d2; best = q; }
+      }
+    }
+    return best;
+  }
+
+  // ===========================================================================
   //  the social tick: bubbles + gossip + routines + ambient events. Runs only
   //  in city mode, all internally throttled so it's cheap on phones.
   // ===========================================================================
@@ -519,6 +923,7 @@
     tickGossip(dt);
     tickRoutines(dt);
     tickEvents(dt);
+    tickRelationships(dt);
   });
 
   // ---- per-frame: companion/hostage/kidnap movement + the kidnap director ----
@@ -582,6 +987,7 @@
   function freePartner(ped) {
     ped.kidnapped = false; ped.companion = true; ped.controlled = true;
     ped.mood = 1; ped.opinion = 1;
+    CBZ.cityRelShift(ped, "rescued", 1.5);   // saving them is the deepest loyalty there is
     clearBeacon();
     CBZ.city.big("💕 Rescued " + ped.name + "!");
     CBZ.city.addRespect(6);

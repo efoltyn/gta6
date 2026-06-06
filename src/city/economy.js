@@ -201,6 +201,77 @@
   function districtName(key) { const d = DISTRICTS[key || playerDistrict()]; return d ? d.name : "the city"; }
   function playerDistrict() { return districtAtPos(CBZ.player && CBZ.player.pos); }
 
+  // ---- TERRITORY → MARGINS (Chinatown-Wars inter-gang arbitrage) ------------
+  // Each district maps to a representative world point so we can ask the turf
+  // system who CONTROLS the ground there. Dealing on turf you (or an ally) own
+  // is safer and FATTER; dealing on a rival's block is hostile, low-margin
+  // ground. The classic play: source product cheap on one crew's turf, haul it
+  // to a rival district that pays a premium. We cache the (x,z) anchor once.
+  function districtAnchor(dk) {
+    const c = (CBZ.city && CBZ.city.center) || { x: 0, z: 0 };
+    const A = CBZ.city && CBZ.city.annex;
+    const R = 70;   // step out from centre into the quadrant
+    switch (dk) {
+      case "uptown":     return { x: c.x + R, z: c.z - R };
+      case "projects":   return { x: c.x - R, z: c.z + R };
+      case "waterfront": return { x: c.x + R, z: c.z + R };
+      case "island":     return A ? { x: A.cx, z: A.cz } : { x: c.x, z: c.z };
+      default:           return { x: c.x - R, z: c.z - R };   // downtown
+    }
+  }
+  // Who owns the player's current crew? (turf uses the string id "player".)
+  function playerGangId() {
+    const pg = g.playerGang;
+    if (pg && pg.founded) return pg.id || "player";
+    return g.playerGangId || null;
+  }
+  // Turf relationship of a district to the player: "home" (you own it),
+  // "allied", "rival" (an enemy crew holds it), or "neutral".
+  function turfStanding(dk) {
+    if (!CBZ.cityZoneOwner) return "neutral";
+    const a = districtAnchor(dk);
+    const owner = CBZ.cityZoneOwner(a.x, a.z);
+    if (!owner) return "neutral";
+    const me = playerGangId();
+    if (me && owner === me) return "home";
+    if (me && CBZ.cityAreAllied && CBZ.cityAreAllied(me, owner)) return "allied";
+    if (me && CBZ.cityAtWar && CBZ.cityAtWar(me, owner)) return "rival";
+    // any non-player owner with no explicit relation: mildly hostile ground
+    return owner === "player" ? "home" : "rival";
+  }
+  // Sell-side margin multiplier for a district given who controls it. Home turf
+  // pays you the best (your protection, your prices, no tax to a rival); a rival
+  // block skims you. This is the real reward for TAKING territory.
+  function turfSellMult(dk) {
+    switch (turfStanding(dk)) {
+      case "home":   return 1.22;   // your block, your cut
+      case "allied": return 1.08;   // friendly ground
+      case "rival":  return 0.82;   // they tax outsiders / squeeze you
+      default:       return 1.0;
+    }
+  }
+  // Buy-side: sourcing wholesale on turf you control is cheaper (your supplier,
+  // your terms); a rival's connect gouges you. Inverse-ish of the sell side, so
+  // owning supply districts cheap + selling on demand districts is the loop.
+  function turfBuyMult(dk) {
+    switch (turfStanding(dk)) {
+      case "home":   return 0.86;   // friends-and-family wholesale
+      case "allied": return 0.94;
+      case "rival":  return 1.18;   // rival connect taxes you hard
+      default:       return 1.0;
+    }
+  }
+  // bust-risk multiplier other modules (careers.js) can fold in: rival ground is
+  // dangerous, your own block is covered.
+  function turfRiskMult(dk) {
+    switch (turfStanding(dk || playerDistrict())) {
+      case "home":   return 0.5;
+      case "allied": return 0.8;
+      case "rival":  return 1.9;
+      default:       return 1.0;
+    }
+  }
+
   // Per-district, per-drug live price-level state (mean-reverts to baseline).
   function initMarket() {
     g.cityDrugMkt = { Weed: 1, Coke: 1, Meth: 1, Pills: 1 };   // legacy global (kept for compat)
@@ -226,9 +297,13 @@
     const it = ITEMS[drug]; if (!it || it.tag !== "drug") return it ? Math.round(it.value * 0.8) : 0;
     dk = dk || playerDistrict();
     const lv = distLevels(dk)[drug] != null ? distLevels(dk)[drug] : 1;
-    // wholesale tracks the level but is dampened (the supplier keeps a margin)
+    // wholesale tracks the level but is dampened (the supplier keeps a margin):
+    // a GLUTTED block (lv<1) dumps cheap, a DRY block (lv>1) charges scarcity.
     const supply = 0.6 + 0.4 * lv;
-    return Math.max(1, Math.round(it.value * 0.8 * supply));
+    // Territory: your own supply connect is cheap, a rival's gouges you. This is
+    // half the arbitrage — buy where you control, sell where they pay.
+    const turf = turfBuyMult(dk);
+    return Math.max(1, Math.round(it.value * 0.8 * supply * turf));
   }
 
   // What a street buyer pays you for one unit, here & now. Combines:
@@ -239,13 +314,19 @@
     const D = DISTRICTS[dk] || DISTRICTS.downtown;
     const lv = distLevels(dk)[drug] != null ? distLevels(dk)[drug] : 1;
     const demand = (D.demand[drug] || 1) * D.tier;             // neighbourhood appetite + wealth
-    const heat = 1 - 0.045 * (g.wanted | 0);                   // hot streets = wary buyers
+    // HEAT as a RISK PREMIUM: a hot block has fewer dealers willing to work it,
+    // so product on the street gets SCARCER and pricier — up to a point. Past a
+    // few stars the buyers themselves get spooked and it caves. Net: a gentle
+    // bump (risk premium) then a fall (panic), so working hot is a real gamble.
+    const w = g.wanted | 0;
+    const risk = w <= 3 ? (1 + 0.06 * w) : (1.18 - 0.10 * (w - 3));
     const noise = 0.86 + rng() * 0.42;                         // per-deal haggling
     const retail = 2.15;                                       // street markup over wholesale
+    const turf = turfSellMult(dk);                             // your block pays best
     let tip = 1;
     const t = g.cityDrugTip;
     if (t && t.dk === dk && t.drug === drug && (CBZ.now == null || CBZ.now < t.until)) tip = t.mult;
-    const p = it.value * retail * demand * lv * Math.max(0.4, heat) * tip * noise;
+    const p = it.value * retail * demand * lv * Math.max(0.45, risk) * turf * tip * noise;
     return Math.max(1, Math.round(p));
   }
 
@@ -287,9 +368,10 @@
     const D = DISTRICTS[dk] || DISTRICTS.downtown;
     const lv = distLevels(dk)[drug] != null ? distLevels(dk)[drug] : 1;
     const demand = (D.demand[drug] || 1) * D.tier;
+    const turf = turfSellMult(dk);
     let tip = 1; const t = g.cityDrugTip;
     if (t && t.dk === dk && t.drug === drug && (CBZ.now == null || CBZ.now < t.until)) tip = t.mult;
-    return Math.round(it.value * 2.15 * demand * lv * tip);
+    return Math.round(it.value * 2.15 * demand * lv * turf * tip);
   }
   // current tip-off, if active (careers/HUD can surface it as "word on the street")
   function activeTip() {
@@ -396,6 +478,77 @@
     return Math.max(0, Math.min(1, (nw - cur.min) / (next.min - cur.min)));
   }
 
+  // ============================================================
+  //  TURF INCOME — protection / taxes off the blocks you CONTROL
+  // ------------------------------------------------------------
+  //  Every zone your crew holds pays a daily street tax: shops kick up
+  //  protection, dealers pay rent on the corner, residents pay "insurance".
+  //  Per-zone take scales with the DISTRICT'S WEALTH (uptown/island blocks are
+  //  worth far more than the projects), your CREW SIZE (more soldiers = more
+  //  collectors working the doors), your GANG RANK (a boss skims the whole
+  //  operation; a soldier just gets a cut), and HEAT (a hot block earns less —
+  //  people lie low, cops sniff around). This is the backbone faucet that makes
+  //  TAKING TERRITORY the point of the game. Other modules read turfIncome().
+  // ------------------------------------------------------------
+  //  Map a zone's centre to the richest-matching district tier so its tax tracks
+  //  neighbourhood wealth even though zones are finer-grained than districts.
+  function zoneWealthMul(cx, cz) {
+    const D = DISTRICTS[districtAt(cx, cz)] || DISTRICTS.downtown;
+    return D.tier;                          // 0.78 (projects) .. 1.30 (island)
+  }
+  // crew multiplier: 1 soldier ~ base; it scales sub-linearly so a huge crew
+  // doesn't print infinite money (diminishing collectors).
+  function crewMul() {
+    let n = 0;
+    if (CBZ.cityPlayerGangMembers) { const m = CBZ.cityPlayerGangMembers(); n = (m && m.length) || 0; }
+    else n = (g.cityCrew | 0);
+    return 1 + 0.5 * Math.sqrt(Math.max(0, n));   // 0 crew→1×, 4→2×, 16→3×
+  }
+  // rank multiplier: a member of an NPC crew skims less than a boss of their own.
+  function rankMul() {
+    const pg = g.playerGang;
+    if (pg && pg.founded) return 1.0;             // you ARE the boss → full take
+    const mem = g.cityMembership;
+    if (mem) {
+      const r = mem.rank;
+      if (r === "boss" || r === "underboss") return 0.85;
+      if (r === "lt" || r === "lieutenant" || r === "capo") return 0.45;
+      return 0.22;                                // soldier's cut of the street tax
+    }
+    return 0;                                      // no crew → no turf income
+  }
+  // $/sec the player earns right now from every zone their crew controls.
+  function turfIncome() {
+    if (!CBZ.cityZoneControl || !CBZ.cityZones) return 0;
+    const me = playerGangId();
+    if (!me) return 0;
+    const ctrl = CBZ.cityZoneControl();
+    const owned = (ctrl.byGang && ctrl.byGang[me]) || 0;
+    if (owned <= 0) return 0;
+    const rank = rankMul(); if (rank <= 0) return 0;
+    const base = (E.turfTaxPerZone || 4.5);       // $/sec per held zone, baseline
+    const crew = crewMul();
+    const heatPenalty = Math.max(0.4, 1 - 0.06 * (g.wanted | 0));
+    // weight each held zone by its neighbourhood wealth
+    let wealthSum = 0, n = 0;
+    for (const z of CBZ.cityZones()) {
+      if (z.owner === me) { wealthSum += zoneWealthMul(z.cx, z.cz); n++; }
+    }
+    const wealthAvg = n > 0 ? wealthSum / n : 1;
+    // wealth-TIER perk: a tighter, more feared operation skims more off the
+    // blocks (a kingpin's tax collectors don't get shorted). Feature-detected
+    // from wealth.js so economy.js stays standalone.
+    const perk = (CBZ.cityWealth && CBZ.cityWealth.tierPerk) ? (CBZ.cityWealth.tierPerk("turfMul") || 1) : 1;
+    return base * owned * wealthAvg * crew * rank * heatPenalty * perk;
+  }
+  // a HUD-friendly breakdown of where the turf money comes from
+  function turfIncomeInfo() {
+    const me = playerGangId();
+    const ctrl = (me && CBZ.cityZoneControl) ? CBZ.cityZoneControl() : { byGang: {}, total: 0 };
+    const owned = (ctrl.byGang && ctrl.byGang[me]) || 0;
+    return { zones: owned, total: ctrl.total || 0, perSec: Math.round(turfIncome()), crewMul: crewMul(), rankMul: rankMul() };
+  }
+
   // ---- HIGH-VALUE FAUCETS (let a hustler actually get filthy rich) ---------
   // A risk-scaled cash drop for big scores (heist, robbery, kill bounty). The
   // payout scales with how RISKY it was (heat) and your respect (rep = access
@@ -419,12 +572,17 @@
     // a night out / bottle service / flexing — pure vanity drain
     bottleService(nw) { nw = nw == null ? netWorth() : nw; return Math.max(250, Math.round(250 + nw * 0.01)); },
     // daily property TAX as a fraction of holdings (recurring drain on the rich)
-    propertyTaxRate: 0.0008,   // per payTick on total holdings value
-    // bribing the cops scales with how much you're worth (they smell money)
+    propertyTaxRate: 0.00008,  // light background upkeep; Zillow owns property cashflow
+    // bribing the cops scales with how much you're worth (they smell money) —
+    // but your wealth-TIER perk (bribeDisc, from wealth.js) shaves it down: a
+    // kingpin has cops on payroll, so money literally talks.
     bribeCost(stars, nw) {
       nw = nw == null ? netWorth() : nw;
       const base = (E.bribeBase || 150) * Math.max(1, stars || 1);
-      return Math.round(base * (1 + Math.min(3, nw / 400000)));
+      let cost = base * (1 + Math.min(3, nw / 400000));
+      const disc = (CBZ.cityWealth && CBZ.cityWealth.tierPerk) ? (CBZ.cityWealth.tierPerk("bribeDisc") || 0) : 0;
+      cost *= (1 - Math.min(0.6, disc));
+      return Math.max(1, Math.round(cost));
     },
     // hospital / repair / re-arm after a death — a sink that bites the careless
     medicalBill(nw) { nw = nw == null ? netWorth() : nw; return Math.max(200, Math.round(200 + nw * 0.004)); },
@@ -479,43 +637,45 @@
   function carByName(name) { return CARS.find((c) => c.name === name) || CARS[0]; }
 
   // ---- the city PROPERTY market index --------------------------------------
-  // A single macro index that drifts like a real housing market: a slow
-  // mean-reverting random walk around 1.0, with the occasional boom / bust
-  // shock. Zillow multiplies every listing's base Zestimate by this index so
-  // prices visibly rise and fall over a run. A separate momentum term makes
-  // moves trend (a rising market keeps rising for a while) so it feels alive,
-  // not like pure noise. Owned property is worth more in a boom — buy low.
+  // A single macro index that drifts slowly around 1.0. Zillow multiplies every
+  // listing's base estimate by this index so values can move over a run without
+  // twitching every frame.
   const MKT = {
-    floor: 0.72, ceil: 1.42,     // hard bounds so prices stay sane
-    revert: 0.012,               // pull back toward fair value (1.0) per tick
-    vol: 0.018,                  // base random-walk volatility per tick
-    momentumDecay: 0.92,         // how much trend carries to the next tick
+    floor: 0.90, ceil: 1.14,     // housing should drift, not arcade-pulse
+    sample: 18,                  // seconds between market samples
+    revert: 0.018,               // pull back toward fair value per sample
+    vol: 0.004,                  // small sample impulse
+    momentumDecay: 0.62,
   };
   function initPropMarket() {
-    g.cityPropMkt = { index: 1, momentum: 0, trend: "steady", shockT: 24 + rng() * 40, history: [1] };
+    g.cityPropMkt = { index: 1, momentum: 0, trend: "steady", sampleT: 0, shockT: 240 + rng() * 180, history: [1] };
   }
   function propMarket() { if (!g.cityPropMkt) initPropMarket(); return g.cityPropMkt; }
   // current macro multiplier applied to every property's base value
   function propIndex() { return propMarket().index; }
   function stepPropMarket(dt) {
     const m = propMarket();
+    m.sampleT = (m.sampleT || 0) + dt;
+    if (m.sampleT < MKT.sample) return;
+    const elapsed = Math.min(90, m.sampleT);
+    m.sampleT = 0;
+    const scale = Math.max(0.25, Math.min(2, elapsed / 60));
     // mean reversion toward 1.0
-    let v = (1 - m.index) * MKT.revert;
-    // momentum (trends persist), refreshed by a small random impulse
-    m.momentum = m.momentum * MKT.momentumDecay + (rng() - 0.5) * MKT.vol;
+    let v = (1 - m.index) * MKT.revert * scale;
+    m.momentum = m.momentum * MKT.momentumDecay + (rng() - 0.5) * MKT.vol * scale;
     v += m.momentum;
-    // occasional boom / bust shock
-    m.shockT -= dt;
+    // rare, mild neighborhood headline. No boom/bust slot-machine swings.
+    m.shockT -= elapsed;
     if (m.shockT <= 0) {
-      m.shockT = 30 + rng() * 70;
-      const shock = (rng() - 0.45) * 0.16;   // slight upward bias (inflation)
+      m.shockT = 240 + rng() * 240;
+      const shock = (rng() - 0.5) * 0.018;
       m.momentum += shock;
     }
     m.index = Math.max(MKT.floor, Math.min(MKT.ceil, m.index + v));
-    m.trend = m.momentum > 0.004 ? "rising" : m.momentum < -0.004 ? "falling" : "steady";
+    m.trend = m.momentum > 0.0015 ? "rising" : m.momentum < -0.0015 ? "falling" : "steady";
     if (CBZ.now != null) {
       const h = m.history;
-      if (!h._t || CBZ.now - h._t > 6) { h._t = CBZ.now; h.push(m.index); if (h.length > 40) h.shift(); }
+      if (!h._t || CBZ.now - h._t > 30000) { h._t = CBZ.now; h.push(m.index); if (h.length > 40) h.shift(); }
     }
   }
   // mortgage / finance terms (used by zillow.js for financed buys)
@@ -549,6 +709,35 @@
     }
   });
 
+  // ---- TURF INCOME PAYOUT (the protection/tax faucet) ----------------------
+  // Pay out the held-turf street tax every payTick. Accumulates fractional cash
+  // so even a one-zone crew eventually gets paid, and surfaces a one-line note
+  // on the first collection so the player learns the loop. CHEAP: one timer,
+  // gated to city mode + actually holding turf.
+  let _turfShown = false;
+  CBZ.onUpdate(30.6, function (dt) {
+    if (g.mode !== "city") return;
+    const rate = turfIncome();
+    if (rate <= 0) { g._turfAcc = 0; return; }
+    g._turfClock = (g._turfClock || 0) + dt;
+    const tick = (E.payTick || 6);
+    if (g._turfClock < tick) return;
+    g._turfClock -= tick;
+    g._turfAcc = (g._turfAcc || 0) + rate * tick;
+    const pay = Math.floor(g._turfAcc);
+    if (pay >= 1) {
+      g._turfAcc -= pay;
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay);
+      g.cityTurfEarned = (g.cityTurfEarned || 0) + pay;
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      if (!_turfShown && CBZ.city && CBZ.city.note) {
+        _turfShown = true;
+        const info = turfIncomeInfo();
+        CBZ.city.note("💰 Street tax from your " + info.zones + " block" + (info.zones === 1 ? "" : "s") + ": +$" + pay + " (" + info.perSec + "/s). Take more turf, earn more.", 3);
+      }
+    }
+  });
+
   CBZ.cityEcon = {
     ITEMS, SHOP_STOCK, CARS, rng,
     add, has, count, take, drip, buyPrice, sellPrice, wholesalePrice,
@@ -558,6 +747,9 @@
     // --- living street market (supply & demand, per district) ---
     DISTRICTS, districtAt, districtAtPos, districtName, playerDistrict,
     bestMarket, activeTip, fenceBonus, bumpFenceRep,
+    // --- territory → margins + risk + the turf-tax faucet ---
+    turfStanding, turfSellMult, turfBuyMult, turfRiskMult, playerGangId,
+    turfIncome, turfIncomeInfo,
     // --- wealth tiers, faucets & sinks ---
     TIERS, netWorth, invWorth, holdingsWorth, wealthTier, tierProgress,
     scoreReward, SINKS, upkeepDue, launder,
