@@ -121,8 +121,31 @@
     });
   }
 
-  // the four body archetypes, returned as { build } closures keyed by id
-  const BODY_TYPES = ["sedan", "suv", "pickup", "coupe"];
+  // the body archetypes — distinct silhouettes so traffic reads as a real mix:
+  // sedan / SUV / pickup / coupe(sports) / muscle / van. Ambient spawns weight
+  // toward the everyday three; muscle & van also appear so the street has variety.
+  const BODY_TYPES = ["sedan", "sedan", "suv", "pickup", "coupe", "muscle", "van"];
+  function modelBodyKind(model) {
+    const nm = model ? model.name : "";
+    if (/F-150|Caravan|Sprinter|Transit|truck|pickup/i.test(nm)) return /Caravan|Sprinter|Transit|van/i.test(nm) ? "van" : "pickup";
+    if (/van|cargo/i.test(nm)) return "van";
+    if (/Charger|Mustang|Camaro|Challenger|muscle/i.test(nm)) return "muscle";
+    if (/Cherokee|SUV|Model X|Model Y|Cybertruck|Escalade|Tahoe|Range/i.test(nm)) return "suv";
+    if (/Corvette|911|370Z|Aventador|Enzo|Veyron|coupe|Ferrari|Porsche/i.test(nm)) return "coupe";
+    return BODY_TYPES[(rng() * BODY_TYPES.length) | 0];
+  }
+  function vehicleProfile(model, body) {
+    const s = model ? model.s || 1 : 1;
+    const bk = body || modelBodyKind(model);
+    let mass = 1.05, armor = 0.05, repair = 1.0;
+    if (bk === "coupe") { mass = 0.9; armor = 0.02; repair = 1.18; }
+    else if (bk === "muscle") { mass = 1.12; armor = 0.08; repair = 1.1; }
+    else if (bk === "suv") { mass = 1.36; armor = 0.16; repair = 1.12; }
+    else if (bk === "pickup") { mass = 1.44; armor = 0.2; repair = 0.98; }
+    else if (bk === "van") { mass = 1.5; armor = 0.18; repair = 0.94; }
+    if (s > 1.35) { mass *= 0.94; repair *= 1.25; }     // exotics are lighter and expensive to fix
+    return { mass, armor, repair };
+  }
 
   function buildCar(model) {
     const grp = new THREE.Group();
@@ -139,12 +162,7 @@
 
     // pick a body type. honour a hint on the model name so trucks/SUVs read
     // right, otherwise random across the four archetypes.
-    let bt;
-    const nm = model ? model.name : "";
-    if (/F-150|Caravan|truck|pickup/i.test(nm)) bt = "pickup";
-    else if (/Cherokee|SUV|Model X|Model Y|Cybertruck/i.test(nm)) bt = "suv";
-    else if (/Corvette|911|370Z|Aventador|Enzo|Veyron|coupe|Charger/i.test(nm)) bt = "coupe";
-    else bt = BODY_TYPES[(rng() * BODY_TYPES.length) | 0];
+    let bt = modelBodyKind(model);
 
     // shared dimensions, tuned per body type below
     let w = 2.0, hullH = 0.62, hullY = 0.7, wheelR = 0.45, halfTrack = 0.98;
@@ -152,17 +170,23 @@
     let topFrac = 0.8, raked = false;
 
     if (bt === "sedan") {
-      w = 1.96; hullH = 0.66; hullY = 0.72; wheelR = 0.46;
-      roofW = 1.58; roofH = 0.62; roofD = len * 0.4; roofY = 1.42; roofZ = -0.15; topFrac = 0.84;
+      w = 1.94; hullH = 0.64; hullY = 0.72; wheelR = 0.46; halfTrack = 0.99;
+      roofW = 1.56; roofH = 0.62; roofD = len * 0.42; roofY = 1.42; roofZ = -0.12; topFrac = 0.84;
     } else if (bt === "suv") {
-      w = 2.08; hullH = 0.86; hullY = 0.82; wheelR = 0.52; halfTrack = 1.04;
-      roofW = 1.78; roofH = 0.82; roofD = len * 0.5; roofY = 1.7; roofZ = -0.06; topFrac = 0.9;
+      w = 2.1; hullH = 0.9; hullY = 0.86; wheelR = 0.54; halfTrack = 1.06;
+      roofW = 1.82; roofH = 0.84; roofD = len * 0.52; roofY = 1.78; roofZ = -0.04; topFrac = 0.92;
     } else if (bt === "pickup") {
-      w = 2.06; hullH = 0.8; hullY = 0.8; wheelR = 0.52; halfTrack = 1.04;
+      w = 2.08; hullH = 0.82; hullY = 0.82; wheelR = 0.54; halfTrack = 1.06;
       // cab sits forward; an open bed sits behind it
-      roofW = 1.7; roofH = 0.74; roofD = len * 0.34; roofY = 1.62; roofZ = len * 0.16; topFrac = 0.92;
+      roofW = 1.72; roofH = 0.76; roofD = len * 0.32; roofY = 1.66; roofZ = len * 0.18; topFrac = 0.94;
+    } else if (bt === "muscle") { // long-hood American muscle: wide, low, fat rear
+      w = 2.06; hullH = 0.6; hullY = 0.66; wheelR = 0.5; halfTrack = 1.03;
+      roofW = 1.6; roofH = 0.56; roofD = len * 0.3; roofY = 1.3; roofZ = -0.2; topFrac = 0.8;
+    } else if (bt === "van") { // tall slab-sided cargo box, short hood
+      w = 2.14; hullH = 1.36; hullY = 1.06; wheelR = 0.5; halfTrack = 1.06;
+      roofW = 1.96; roofH = 0.5; roofD = len * 0.4; roofY = 2.02; roofZ = len * 0.18; topFrac = 0.98;
     } else { // coupe — sports car: low, wide, raked
-      w = 2.04; hullH = 0.5; hullY = 0.58; wheelR = 0.47; halfTrack = 1.0;
+      w = 2.04; hullH = 0.5; hullY = 0.58; wheelR = 0.47; halfTrack = 1.01;
       roofW = 1.5; roofH = 0.52; roofD = len * 0.34; roofY = 1.18; roofZ = -0.16; topFrac = 0.74; raked = true;
     }
 
@@ -205,9 +229,32 @@
       const spoiler = new THREE.Mesh(new THREE.BoxGeometry(w * 0.74, 0.07, 0.2), trim);
       spoiler.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.42, -len * 0.46); grp.add(spoiler);
     }
+    // muscle: a black hood scoop + a low ducktail wing so it reads aggressive
+    if (bt === "muscle") {
+      const scoop = new THREE.Mesh(new THREE.BoxGeometry(w * 0.36, 0.13, len * 0.18), trim);
+      scoop.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.5, len * 0.26); grp.add(scoop);
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.08, 0.16), trim);
+      wing.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.5, -len * 0.46); grp.add(wing);
+    }
+    // van: a side-crease + a roof cap so the tall slab doesn't read as a brick
+    if (bt === "van") {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(roofW + 0.06, 0.1, roofD), paint);
+      cap.position.set(0, roofY + roofH * 0.5, roofZ); grp.add(cap);
+    }
 
-    addWheels(grp, halfTrack, len * 0.32, wheelR);
+    // shared FRONT FASCIA: a dark grille + a slim bumper bar so every nose has a
+    // face (and a chrome-ish bumper at the tail). Cheap boxes; one trim material.
+    const noseY = 0.78 + (hullY - 0.72) - hullH * 0.05;
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, hullH * 0.55, 0.08), trim);
+    grille.position.set(0, noseY, len * 0.5 - 0.03); grp.add(grille);
+    [len * 0.5 + 0.02, -len * 0.5 - 0.02].forEach((bz) => {
+      const bump = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.18, 0.12), trim);
+      bump.position.set(0, 0.78 + (hullY - 0.72) - hullH * 0.38, bz); grp.add(bump);
+    });
+
+    addWheels(grp, halfTrack, len * (bt === "van" ? 0.34 : 0.32), wheelR);
     addLights(grp, w, 0.78 + (hullY - 0.72) + hullH * 0.05, len * 0.5, -len * 0.5);
+    grp.userData.bodyKind = bt;
     return grp;
   }
 
@@ -215,6 +262,7 @@
     const grp = buildCar(model);
     grp.position.set(x, 0, z); grp.rotation.y = heading;
     CBZ.city.arena.root.add(grp);
+    const prof = vehicleProfile(model, grp.userData && grp.userData.bodyKind);
     const c = {
       group: grp, pos: grp.position, heading, vertical, model: model || null,
       v: 0, vx: 0, vz: 0, color: model ? model.color : 0x3c6fd6, stolen: false, player: false, ai: true,
@@ -222,6 +270,7 @@
       driver: { aggr: aggr != null ? aggr : 0.3 },
       pullover: 0, ranRedCD: 0, turnCD: 1 + rng() * 2, npcWanted: 0, npcDriver: null, dwell: 0, stopT: 0,
       roadRageTarget: null, roadRageT: 0, playerHitCD: 0,
+      _bk: grp.userData && grp.userData.bodyKind, mass: prof.mass, armor: prof.armor, repair: prof.repair,
     };
     CBZ.cityCars.push(c);
     return c;
@@ -319,8 +368,8 @@
     if (ud && ud.body) { ud.body.rotation.z = c * 0.28 * car._cside; ud.body.position.y = 0.78 - c * 0.14; }
     if (ud && ud.cabin) { ud.cabin.rotation.x = -c * 0.34; ud.cabin.rotation.z = c * 0.16 * car._cside; ud.cabin.position.y = 1.45 - c * 0.45; }
   }
-  function crashBurst(x, z, speed, hard, catastrophic) {
-    if (CBZ.cityCrashFX) CBZ.cityCrashFX(x, z, { speed, hard, catastrophic });
+  function crashBurst(x, z, speed, hard, catastrophic, dir) {
+    if (CBZ.cityCrashFX) CBZ.cityCrashFX(x, z, { speed, hard, catastrophic, dir });
   }
 
   // ============================================================
@@ -403,6 +452,8 @@
   function damageEngine(car, amount, fromGun) {
     if (!car || car.dead) return;
     if (car.engineHp == null) car.engineHp = 100;
+    const armor = Math.max(0, Math.min(0.35, car.armor || 0));
+    amount *= Math.max(0.55, 1 - armor * (fromGun ? 1.25 : 0.85));
     car.engineHp = Math.max(-50, car.engineHp - amount);
     if (car.engineHp <= 0 && !car._exploded) { explodeCar(car); return; }
     if (car.engineHp <= FIRE_AT && !car._onFire) igniteCar(car);
@@ -560,6 +611,8 @@
     P.driving = false; P._vehicle = null;
     if (car) {
       car.player = false; car.v = 0; car.vx = car.vz = 0; car.ai = false;
+      car._pitch = car._roll = 0;
+      if (car.group) car.group.rotation.set(0, car.heading, 0);   // drop the weight-transfer lean
       if (CBZ.cityDemotePlayerCar) CBZ.cityDemotePlayerCar(car);
     }
     CBZ.playerChar.group.visible = true;
@@ -602,31 +655,61 @@
   // adds a bent-axle pull so a beat-up car drives like a beat-up car.
   function bodyKind(car) {
     if (car._bk) return car._bk;
-    const nm = car.model ? car.model.name : "";
-    let bk = "sedan";
-    if (/F-150|Caravan|truck|pickup/i.test(nm)) bk = "pickup";
-    else if (/Cherokee|SUV|Model X|Model Y|Cybertruck/i.test(nm)) bk = "suv";
-    else if (/Corvette|911|370Z|Aventador|Enzo|Veyron|coupe|Charger/i.test(nm)) bk = "coupe";
-    car._bk = bk; return bk;
+    car._bk = modelBodyKind(car.model); return car._bk;
   }
   // 0 = pristine, 1 = totalled. engineHp starts at 100 and only falls.
   function carDmg(car) { return 1 - Math.max(0, Math.min(100, car.engineHp == null ? 100 : car.engineHp)) / 100; }
+  function vehicleCondition(car) {
+    const engine = Math.max(0, Math.min(100, !car || car.engineHp == null ? 100 : car.engineHp));
+    const cr = Math.max(0, Math.min(1, (car && car.crumple) || 0));
+    const burn = car && car._onFire ? 0.35 : 0;
+    const pct = Math.max(0, Math.min(1, engine / 100 - cr * 0.35 - burn));
+    const label = car && car._onFire ? "on fire"
+      : pct > 0.82 ? "clean"
+      : pct > 0.62 ? "dented"
+      : pct > 0.38 ? "wrecked"
+      : pct > 0.12 ? "barely running"
+      : "totaled";
+    const valueMul = Math.max(0.12, 0.42 + pct * 0.68 - cr * 0.22);
+    return { pct, label, valueMul, engine, crumple: cr };
+  }
+  CBZ.cityVehicleCondition = vehicleCondition;
   function carDynamics(car) {
     const bk = bodyKind(car);
     const s = car.model ? car.model.s : 1;
-    // base profile per body type: [accel, topSpeed, turn, grip, brake]
+    // base profile per body type: [accel, topSpeed, turn, grip, brake]. Tuned from
+    // GTA vehicle-class feel — super/sports grip + accel high, muscle grunty but
+    // loose-tailed, SUV/van/pickup heavy & numb with weaker brakes.
     let accel = 30, top = 33, turn = 2.5, grip = 7.0, brake = 30;
-    if (bk === "coupe") { accel = 40; top = 42; turn = 2.95; grip = 9.0; brake = 36; }
-    else if (bk === "sedan") { accel = 31; top = 35; turn = 2.55; grip = 7.2; brake = 31; }
-    else if (bk === "suv") { accel = 26; top = 31; turn = 2.15; grip = 5.8; brake = 27; }
-    else if (bk === "pickup") { accel = 27; top = 32; turn = 2.05; grip = 5.4; brake = 26; }
+    if (bk === "coupe") { accel = 42; top = 44; turn = 3.0; grip = 9.4; brake = 38; }
+    else if (bk === "muscle") { accel = 40; top = 41; turn = 2.45; grip = 6.6; brake = 30; }   // fast in a line, tail steps out
+    else if (bk === "sedan") { accel = 32; top = 35; turn = 2.6; grip = 7.4; brake = 32; }
+    else if (bk === "suv") { accel = 26; top = 31; turn = 2.1; grip = 5.6; brake = 27; }
+    else if (bk === "pickup") { accel = 27; top = 32; turn = 2.0; grip = 5.2; brake = 26; }
+    else if (bk === "van") { accel = 23; top = 29; turn = 1.85; grip = 4.8; brake = 24; }
     // rarer/sportier models (higher s) get more grunt + a higher top end
     const sm = 0.82 + s * 0.26;
     top *= sm; accel *= (0.9 + s * 0.18);
+    // the promoted player-car STYLE layers its GTA-class feel on top (a Veyron
+    // grips and rockets, a van wallows) so swapping style ([C]) actually drives
+    // differently — published by playercars.js as car._playerCarFeel.
+    const feel = car.player ? car._playerCarFeel : null;
+    let roll = 0.6, drift = 1.0;
+    if (feel) {
+      accel *= feel.accel; top *= feel.top; turn *= feel.turn; grip *= feel.grip; brake *= feel.brake;
+      roll = feel.roll == null ? 0.6 : feel.roll; drift = feel.drift == null ? 1.0 : feel.drift;
+      if (feel.twoWheel) roll = 0;   // a bike leans via its own rider rig, not whole-body roll
+    } else {
+      if (bk === "coupe") { roll = 0.4; drift = 0.9; }
+      else if (bk === "muscle") { roll = 0.7; drift = 1.35; }
+      else if (bk === "suv") { roll = 1.1; drift = 1.05; }
+      else if (bk === "pickup") { roll = 1.0; drift = 1.05; }
+      else if (bk === "van") { roll = 1.3; drift = 1.1; }
+    }
     // DAMAGE degrades it: a smoking/burning car is gutless and squirrelly
     const d = carDmg(car);
     accel *= 1 - d * 0.55; top *= 1 - d * 0.42; grip *= 1 - d * 0.5; turn *= 1 - d * 0.28;
-    return { accel, top, turn, grip, brake, dmg: d };
+    return { accel, top, turn, grip, brake, dmg: d, roll, drift };
   }
 
   // ---- player driving (order 11) ----
@@ -677,40 +760,72 @@
     const latDot = prevX * fwdX + prevZ * fwdZ;        // forward component of old vel
     let latX = prevX - fwdX * latDot, latZ = prevZ - fwdZ * latDot;   // sideways slip
     // grip = how fast lateral slip decays. handbrake / power-steer keeps it alive.
-    const gripFactor = handbrake ? 1.0 : (D.grip + (steer && vmag > 8 ? -2.0 : 0));
-    const latKeep = handbrake ? 0.93 : Math.max(0, 1 - Math.max(0.5, gripFactor) * dt);
+    // loose-tailed cars (muscle, van — D.drift>1) let the rear step out sooner; a
+    // grippy super (D.drift<1) stays planted. throttle-on in a hard turn also
+    // breaks traction a touch (power-oversteer) so muscle cars feel rowdy.
+    const driftMul = D.drift || 1;
+    const power = throttle > 0 && vmag > 10 ? 1.4 * driftMul : 0;
+    const gripFactor = handbrake ? 1.0 : Math.max(0.5, (D.grip + (steer && vmag > 8 ? -2.4 * driftMul : 0) - power));
+    const latKeep = handbrake ? Math.min(0.95, 0.9 + driftMul * 0.02) : Math.max(0, 1 - gripFactor * dt);
     latX *= latKeep; latZ *= latKeep;
     const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
     const slip = Math.hypot(latX, latZ);
     car._drift = slip;
     if (slip > 2.4 && vmag > 6) {                      // tyre smoke off the rears
       car._tireT = (car._tireT || 0) + dt;
-      if (car._tireT > 0.12) { car._tireT = 0; emitTireSmoke(car); }
+      if (car._tireT > 0.1) { car._tireT = 0; emitTireSmoke(car); }
     }
+    // ---- WEIGHT TRANSFER (visual game-feel): the body PITCHES (squat on
+    //      throttle, dive on brake) and ROLLS into a turn, eased so it reads as
+    //      mass shifting. softer cars (high D.roll) lean more. Touches only the
+    //      group rotation x/z, which the crash crumple leaves alone. ----
+    const accelG = throttle > 0 ? -1 : (throttle < 0 && car.v > 0.5 ? 1.3 : 0);
+    const pitchTarget = Math.max(-0.07, Math.min(0.09, accelG * 0.05 * Math.min(1, vmag / 14)));
+    // body leans OUTWARD of the turn: steering at speed plus any tail-out slip.
+    const latG = steer * Math.min(1, vmag / 12) + (latX * fwdZ - latZ * fwdX) * 0.16;
+    const rollTarget = Math.max(-0.16, Math.min(0.16, latG * 0.06 * (D.roll || 0.6)));
+    car._pitch = (car._pitch || 0) + (pitchTarget - (car._pitch || 0)) * Math.min(1, dt * 7);
+    car._roll = (car._roll || 0) + (rollTarget - (car._roll || 0)) * Math.min(1, dt * 6);
     car.vx = velX; car.vz = velZ;
     car.pos.x += velX * dt; car.pos.z += velZ * dt;
     const before = { x: car.pos.x, z: car.pos.z };
     if (CBZ.collide) CBZ.collide(car.pos, CAR_R);
     const moved = Math.hypot(car.pos.x - before.x, car.pos.z - before.z);
     if (moved > 0.05 && vmag > 5) {
-      // CRASH — far cooler at speed: kill the momentum, bounce back and spin
-      // out, a big speed-scaled shake (plus a hitstop punch on a hard hit), a
-      // crunch, and shatter / drive-through any storefront glass ahead.
+      // CRASH — far cooler at speed: the car PILES INTO the wall, sheds nearly all
+      // its forward momentum but RICOCHETS back along the surface (keeps a chunk of
+      // the slide so it slews sideways instead of dead-stopping), spins out, jolts
+      // the driver, throws a big speed-scaled shake + hitstop, a metal crunch, and
+      // shatters / drives through any storefront glass ahead.
       const hard = vmag >= CRASH.wallHard, catastrophic = vmag >= CRASH.wallCatastrophic;
-      car.v *= catastrophic ? 0.06 : (hard ? 0.16 : 0.52);
-      car.vx = car.vz = 0;                  // kill the slide so the slam reads as a dead stop
+      // approximate the wall normal from how the collider pushed the car back
+      let nwx = before.x - car.pos.x, nwz = before.z - car.pos.z;
+      const nl = Math.hypot(nwx, nwz) || 1; nwx /= nl; nwz /= nl;
+      car.v *= catastrophic ? 0.05 : (hard ? 0.14 : 0.48);
+      // momentum transfer into the wall: bleed the velocity, reflect a little of it
+      // back off the surface so the hull slews + scrubs rather than freezing.
+      const bounce = catastrophic ? 0.12 : (hard ? 0.2 : 0.35);
+      const vdotn = car.vx * nwx + car.vz * nwz;
+      car.vx = (car.vx - 2 * vdotn * nwx) * bounce; car.vz = (car.vz - 2 * vdotn * nwz) * bounce;
       // the impact ALSO guts the engine — enough hard hits → smoke → fire → boom
       damageEngine(car, catastrophic ? 60 : (hard ? 28 : 6), false);
       const back = Math.min(catastrophic ? 2.2 : 1.35, vmag * (catastrophic ? 0.075 : 0.05));
-      car.pos.x -= Math.sin(car.heading) * back; car.pos.z -= Math.cos(car.heading) * back;
-      car.heading += (Math.random() - 0.5) * Math.min(catastrophic ? 1.8 : 0.95, vmag * (catastrophic ? 0.07 : 0.045));
-      if (CBZ.shake) CBZ.shake(catastrophic ? 2.1 : (hard ? 1.15 : 0.3));
-      if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.14 : (hard ? 0.075 : 0.025));
+      car.pos.x += nwx * back; car.pos.z += nwz * back;
+      // a glancing hit SPINS the car off the wall toward the surface tangent; a
+      // square hit just shudders. scaled by speed so a fast clip whips it around.
+      const tang = car.vx * -nwz + car.vz * nwx;     // sideways component along the wall
+      const spinKick = Math.sign(tang || (Math.random() - 0.5)) * Math.min(catastrophic ? 2.0 : 1.1, vmag * (catastrophic ? 0.08 : 0.05));
+      car.heading += spinKick + (Math.random() - 0.5) * (catastrophic ? 0.5 : 0.2);
+      // JOLT the driver: a sharp camera punch back from the impact (weighty stop)
+      if (CBZ.cam) { CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.25, vmag * 0.012); }
+      if (CBZ.shake) CBZ.shake(catastrophic ? 2.4 : (hard ? 1.3 : 0.34));
+      if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.16 : (hard ? 0.085 : 0.028));
       if (catastrophic && CBZ.doSlowmo) CBZ.doSlowmo(0.34);
-      if (CBZ.sfx) CBZ.sfx(hard ? "ko" : "punch");
+      if (CBZ.sfx) { CBZ.sfx(hard ? "ko" : "clank"); if (hard) CBZ.sfx("punch"); }
       const ix = car.pos.x + Math.sin(car.heading) * 2.2, iz = car.pos.z + Math.cos(car.heading) * 2.2;
-      crashBurst(ix, iz, vmag, hard, catastrophic);
+      crashBurst(ix, iz, vmag, hard, catastrophic, { x: -nwx, z: -nwz });   // debris sprays into the wall
       if (hard && CBZ.cityShatter) CBZ.cityShatter(ix, iz, catastrophic ? 10 : 6);
+      if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed: vmag, hard, catastrophic, wall: true, car });
       // the car visibly CRUMPLES (the building/post is only lightly scuffed)
       crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.08));
       // Medium crashes hurt but are explicitly non-lethal. Only a truly
@@ -726,7 +841,7 @@
     }
     if (CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, CAR_R);
     car.group.position.set(car.pos.x, 0, car.pos.z);
-    car.group.rotation.y = car.heading;
+    car.group.rotation.set(car._pitch || 0, car.heading, car._roll || 0);   // y=heading, x/z = weight-transfer lean
     if (vmag > 6) runOver(car, vmag);
     P.pos.set(car.pos.x, 0, car.pos.z);
     CBZ.playerChar.group.position.copy(P.pos);
@@ -747,42 +862,79 @@
   //      Cars can no longer phase through each other; a fast impact WRECKS the
   //      AI cars (spin off-rails, smoke, lose control) and dramatically shakes
   //      the screen. The player keeps the wheel but loses most of their speed. ----
-  function wreckCar(c, speed, dir) {
+  function carVel(car) {
+    if (car && Number.isFinite(car.vx) && Number.isFinite(car.vz) && (Math.abs(car.vx) + Math.abs(car.vz)) > 0.01) {
+      return { x: car.vx, z: car.vz };
+    }
+    const v = car ? car.v || 0 : 0, h = car ? car.heading || 0 : 0;
+    return { x: Math.sin(h) * v, z: Math.cos(h) * v };
+  }
+  function wreckCar(c, speed, dir, rammer) {
     const hard = speed >= CRASH.carHard, catastrophic = speed >= CRASH.carCatastrophic;
-    if (c.player) { c.v *= catastrophic ? 0.34 : (hard ? 0.6 : 0.72); return; }   // you keep momentum and PLOW through, not a dead stop
+    if (c.player) {
+      // the player keeps the wheel and PLOWS through, not a dead stop — but a
+      // ram still scrubs real speed (more if you were the one struck) and slews
+      // the slide so a side-impact knocks you off your line, plus a driver jolt.
+      const keep = rammer ? (catastrophic ? 0.42 : (hard ? 0.62 : 0.74)) : (catastrophic ? 0.24 : (hard ? 0.46 : 0.62));
+      c.v *= keep;
+      if (c.vx != null) { c.vx *= keep; c.vz *= keep; }
+      if (!rammer && hard && CBZ.cam) CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.18, speed * 0.008);
+      return;
+    }
     c.wreckT = Math.max(c.wreckT || 0, catastrophic ? 2.8 : (hard ? 1.8 : 0.72));
     c.v *= catastrophic ? 0.07 : (hard ? 0.16 : 0.56);
-    c.spin = (c.spin || 0) + (Math.random() - 0.5) * Math.min(catastrophic ? 8 : 5.5, speed * 0.4) + dir * Math.min(catastrophic ? 4 : 2.4, speed * 0.13);
+    // spin scales with impact + the struck side: a T-bone whips the car around,
+    // a glancing tap just nudges it — heavier on the car that got rammed.
+    const spinMag = (rammer ? 0.55 : 1) * Math.min(catastrophic ? 9 : 6, speed * 0.45);
+    c.spin = (c.spin || 0) + (Math.random() - 0.5) * spinMag + dir * Math.min(catastrophic ? 4.5 : 2.8, speed * 0.15);
     c.pullover = 0; c.turning = false;     // abandon whatever it was doing
   }
   function carCrash(a, b, speed, nx, nz) {
     const hard = speed >= CRASH.carHard, catastrophic = speed >= CRASH.carCatastrophic;
     a._crashCD = 0.6; b._crashCD = 0.6;
-    wreckCar(a, speed, -1); wreckCar(b, speed, 1);
     // ASYMMETRIC damage: whoever's going faster (the rammer) deals more than they
     // take — the struck car crumples HARD and gets shoved away with momentum, so
     // ramming actually wrecks the other car instead of a soft bounce.
-    const aRammer = a.player || (Math.abs(a.v || 0) >= Math.abs(b.v || 0));
-    const heavy = catastrophic ? 0.92 : (hard ? 0.62 : 0.26);
-    const light = catastrophic ? 0.6 : (hard ? 0.34 : 0.12);
+    const av = carVel(a), bv = carVel(b);
+    const aSpeed = Math.hypot(av.x, av.z), bSpeed = Math.hypot(bv.x, bv.z);
+    const aRammer = a.player || (aSpeed >= bSpeed);
+    wreckCar(a, speed, -1, aRammer); wreckCar(b, speed, 1, !aRammer);
+    const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1);
+    const massAvg = Math.max(0.8, Math.min(1.65, (am + bm) * 0.5));
+    const heavy = (catastrophic ? 0.92 : (hard ? 0.62 : 0.26)) * massAvg;
+    const light = (catastrophic ? 0.6 : (hard ? 0.34 : 0.12)) * massAvg;
     crumpleCar(a, aRammer ? light : heavy); crumpleCar(b, aRammer ? heavy : light);
     // engine HP: a collision guts the motor; the rammed car takes the worst of it,
     // so repeated rams build a struck car toward smoking → fire → blowing up. (The
     // catastrophic path below already fireballs both, so only feed the lighter hits.)
     if (!catastrophic) {
       const eHeavy = hard ? 30 : 9, eLight = hard ? 16 : 4;
-      damageEngine(a, aRammer ? eLight : eHeavy, false);
-      damageEngine(b, aRammer ? eHeavy : eLight, false);
+      damageEngine(a, (aRammer ? eLight : eHeavy) * (b.mass || 1), false);
+      damageEngine(b, (aRammer ? eHeavy : eLight) * (a.mass || 1), false);
       if ((a.player || b.player)) { if (a.player) a._burnByPlayer = true; if (b.player) b._burnByPlayer = true; }
     }
+    // MOMENTUM TRANSFER: the shove on each car is scaled by the OTHER car's mass
+    // (a heavy SUV launches a light coupe; the coupe barely budges the SUV) so the
+    // exchange reads with real weight. The struck car gets flung off with speed +
+    // a fresh heading down the contact normal; both get a positional kick apart.
     const kick = Math.min(catastrophic ? 3.6 : 2.4, speed * (catastrophic ? 0.12 : 0.09));
-    const shove = Math.min(catastrophic ? 15 : 9, speed * 0.62);   // knock the struck car away with real speed
-    if (!a.player) { a.pos.x -= nx * kick; a.pos.z -= nz * kick; if (!aRammer) { a.v = Math.max(Math.abs(a.v || 0), shove); a.heading = Math.atan2(-nx, -nz); a.wreckT = Math.max(a.wreckT || 0, 1.2); } }
-    if (!b.player) { b.pos.x += nx * kick; b.pos.z += nz * kick; if (aRammer) { b.v = Math.max(Math.abs(b.v || 0), shove); b.heading = Math.atan2(nx, nz); b.wreckT = Math.max(b.wreckT || 0, 1.2); } }
+    const shove = Math.min(catastrophic ? 16 : 10, speed * 0.62);
+    const aMassFac = Math.max(0.5, Math.min(1.8, bm / am));   // how hard A is shoved (by B's mass)
+    const bMassFac = Math.max(0.5, Math.min(1.8, am / bm));
+    if (!a.player) { a.pos.x -= nx * kick * aMassFac; a.pos.z -= nz * kick * aMassFac; if (!aRammer) { a.v = Math.max(Math.abs(a.v || 0), shove * aMassFac); a.heading = Math.atan2(-nx, -nz); a.wreckT = Math.max(a.wreckT || 0, 1.2); } }
+    if (!b.player) { b.pos.x += nx * kick * bMassFac; b.pos.z += nz * kick * bMassFac; if (aRammer) { b.v = Math.max(Math.abs(b.v || 0), shove * bMassFac); b.heading = Math.atan2(nx, nz); b.wreckT = Math.max(b.wreckT || 0, 1.2); } }
+    // the player car gets a positional nudge + shake-jolt too so a wreck reads
+    if (a.player) { a.pos.x -= nx * kick * 0.4 * aMassFac; a.pos.z -= nz * kick * 0.4 * aMassFac; }
+    if (b.player) { b.pos.x += nx * kick * 0.4 * bMassFac; b.pos.z += nz * kick * 0.4 * bMassFac; }
     const cx = (a.pos.x + b.pos.x) / 2, cz = (a.pos.z + b.pos.z) / 2;
     const cam = CBZ.camera.position, cd2 = (cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z);
     if (a.player || b.player || cd2 < 75 * 75) {
-      crashBurst(cx, cz, speed, hard, catastrophic);
+      if (a.player || b.player) {
+        const playerCar = a.player ? a : b;
+        playerCar.lastCrashScore = Math.max(playerCar.lastCrashScore || 0, Math.round(speed * massAvg));
+        if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed, hard, catastrophic, carA: a, carB: b });
+      }
+      crashBurst(cx, cz, speed, hard, catastrophic, { x: nx, z: nz });
       if (catastrophic && CBZ.cityExplosion) {
         // super-fast smash → the wreck goes up in a fireball (no more boring bump)
         a.abandoned = b.abandoned = true; a.wreckT = b.wreckT = Math.max(2, a.wreckT || 0);
@@ -810,13 +962,16 @@
         if (d2 >= HIT2 || d2 < 1e-5) continue;
         const d = Math.sqrt(d2), nx = dx / d, nz = dz / d, overlap = HIT - d;
         // SOLID separation — they cannot occupy the same space
-        const aw = a.player ? 0.32 : 0.5, bw = b.player ? 0.32 : 0.5;
+        const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1), tm = am + bm;
+        const aw = a.player ? 0.24 : Math.max(0.24, Math.min(0.74, bm / tm));
+        const bw = b.player ? 0.24 : Math.max(0.24, Math.min(0.74, am / tm));
         a.pos.x -= nx * overlap * aw; a.pos.z -= nz * overlap * aw;
         b.pos.x += nx * overlap * bw; b.pos.z += nz * overlap * bw;
         // closing speed along the contact normal
-        const rel = (Math.sin(a.heading) * a.v - Math.sin(b.heading) * b.v) * nx
-                  + (Math.cos(a.heading) * a.v - Math.cos(b.heading) * b.v) * nz;
-        if (rel > 2 && a._crashCD <= 0 && b._crashCD <= 0) carCrash(a, b, rel, nx, nz);
+        const va = carVel(a), vb = carVel(b);
+        const rel = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
+        const closing = Math.abs(rel);
+        if (closing > 2 && a._crashCD <= 0 && b._crashCD <= 0) carCrash(a, b, closing, rel >= 0 ? nx : -nx, rel >= 0 ? nz : -nz);
         else { a.v *= 0.92; b.v *= 0.92; }     // gentle bumper kiss
         // keep visuals (and the player's position/camera) in sync this frame
         a.group.position.set(a.pos.x, 0, a.pos.z); b.group.position.set(b.pos.x, 0, b.pos.z);
@@ -937,12 +1092,14 @@
     const E = (CBZ.CITY && CBZ.CITY.econ) || {};
     const base = car.model ? car.model.value : 3000;
     const frac = car.owned ? (E.chopOwned || 0.85) : (E.chopStolen || 0.42);
-    const pay = Math.round(base * frac);
+    const cond = vehicleCondition(car);
+    const pay = Math.round(base * frac * cond.valueMul);
     CBZ.cityExitVehicle();
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
     CBZ.city.addCash(pay); CBZ.city.addRespect(2);
     CBZ.city.big("CHOPPED " + (car.model ? car.model.name : "car") + " + $" + pay.toLocaleString());
+    CBZ.city.note("Condition: " + cond.label + " · payout adjusted", 1.5);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (!car.owned && anyWitness(CBZ.player.pos.x, CBZ.player.pos.z, 26)) CBZ.cityCrime && CBZ.cityCrime((CBZ.CITY.econ && CBZ.CITY.econ.chopHeat) || 14, { type: "chop" });
   }

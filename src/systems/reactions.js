@@ -140,7 +140,9 @@
       if (CBZ.knockback) CBZ.knockback(a, p.x, p.z, SHOVE);
     }
     r.dir = dir;
-    if (CBZ.alertCrowd && a.group) {
+    // alertCrowd drives the JAIL ambient crowd; in city mode peds run their own
+    // panic (cityPanic), so don't cross the wires here.
+    if (CBZ.alertCrowd && a.group && CBZ.game && CBZ.game.mode !== "city") {
       const gp = a.group.position;
       CBZ.alertCrowd(gp.x, gp.z, 10, 1);
     }
@@ -173,12 +175,40 @@
 
     const guards = CBZ.guards || [];
     const npcs = CBZ.npcs || [];
+    // CITY peds get the SAME expressive arm reactions as the jail crowd: a third
+    // pass, only while in city mode, over CBZ.cityPeds. They drive the identical
+    // hands-up / cower / flinch / aim-back / flash code below via their own pose
+    // flags (poseHandsUp/poseAimBack/poseCower, set in city/peds.js) and a "flee"
+    // state. The jail/survival passes (guards/npcs) are untouched. ----
+    const inCity = game.mode === "city";
+    const cityPeds = inCity ? (CBZ.cityPeds || []) : null;
+    const passes = cityPeds ? 3 : 2;
+    // city LOD: only pose peds the camera can actually see — the pose work is
+    // purely visual, so far rigs (already render-culled) just bleed their timers.
+    const cam = CBZ.camera ? CBZ.camera.position : null;
+    const CITY_LOD2 = 150 * 150;
 
-    for (let pass = 0; pass < 2; pass++) {
-      const list = pass === 0 ? guards : npcs;
+    for (let pass = 0; pass < passes; pass++) {
+      const list = pass === 0 ? guards : pass === 1 ? npcs : cityPeds;
+      const isCity = pass === 2;
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
         if (!a || !a.group || !a.char) continue;
+        // city: skip pooled/off-map and player-driven rigs cheaply
+        if (isCity) {
+          if (a._parked || a.culled || a.controlled) continue;
+          // far + nothing animating to see → don't pay for the pose math. Clear any
+          // stored additive offset (without allocating a record) so the ped doesn't
+          // back out a phantom offset the frame it re-enters range.
+          if (cam && !a.dead) {
+            const ddx = a.pos.x - cam.x, ddz = a.pos.z - cam.z;
+            if (ddx * ddx + ddz * ddz > CITY_LOD2) {
+              const old = R.get(a);
+              if (old) { old.laOff = 0; old.raOff = 0; old.cowerLean = 0; }
+              continue;
+            }
+          }
+        }
 
         // ---- velocity-based KNOCKBACK from the shared body layer: hits set
         //      a._phys.kx/kz (combat.js / fpsmode.js / grapple.js), and we
@@ -240,8 +270,11 @@
         //               over the head + a hunch, reading as scared/cowering.
         // Both ease the ARM pitch via the back-out/re-add dance (animChar
         // damps that channel), so they sit cleanly on the fresh base.
+        // a "fleeing/scared" signal covers both the jail npc (aiState) and the
+        // city ped (state), plus the city's brief gunfire/blast cringe (poseCower).
+        const scared = a.aiState === "flee" || (isCity && (a.state === "flee" || (a.poseCower || 0) > 0));
         const aimBack = !down && a.poseAimBack && parts && body;
-        const handsUp = !down && !aimBack && (a.poseHandsUp || a.aiState === "flee") && parts && body;
+        const handsUp = !down && !aimBack && (a.poseHandsUp || scared) && parts && body;
         if (aimBack) {
           if (parts.ra) {
             const before = parts.ra.rotation.x;

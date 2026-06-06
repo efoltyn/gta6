@@ -86,21 +86,9 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   function name(r) { return pick(FIRST, r()) + " " + LAST[(r() * LAST.length) | 0] + "."; }
 
-  // ---- a REAL scream (never the "whoosh" placeholder). Screams must PUNCTUATE
-  //      danger, not spam it: the raw sample is loud and annoying if it fires
-  //      often, so the whole city shares a HARD several-second cooldown here on
-  //      top of the per-ped cooldown + low per-event chance at every call site.
-  //      No-op if the bank hasn't loaded a "scream" sample yet (missing→harmless).
-  const _haveScream = function () { return !!(CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.scream); };
-  let _lastScreamT = -1e9;
-  const SCREAM_GAP = 6;                           // city-wide minimum seconds between screams
-  function scream() {
-    if (!CBZ.sfx) return;
-    const t = (CBZ.now != null ? CBZ.now : (performance.now() * 0.001));
-    if (t - _lastScreamT < SCREAM_GAP) return;    // at most ~1 scream / 6s city-wide
-    _lastScreamT = t;
-    if (_haveScream()) { try { CBZ.sfx("scream"); } catch (e) {} }
-  }
+  // Scream audio is intentionally disabled. Panic/fear behavior still runs, but
+  // the human scream sample was too intrusive during city chaos.
+  function scream() {}
 
   // a normal-ish draw on the spectrum around a mean, clamped
   function rollAggr(mean, spread) {
@@ -273,6 +261,10 @@
       p.alarmed = Math.max(p.alarmed, 5 + power * 3 * close);
       p.fear = Math.min(10, p.fear + (4 + power * 4) * close);
       if (offender && offender !== p && offender.pos) p.mem = p.mem || offender;
+      // a brief CRINGE: throw arms up / hunch away from the blast for a beat, like
+      // the jail crowd flinching at gunfire. reactions.js reads poseCower to drive
+      // it; even peds too bold to bolt visibly recoil. Scaled by proximity.
+      p.poseCower = Math.max(p.poseCower || 0, 0.5 + 0.8 * close);
       // the meek & wary in range bolt right now; the bold just get jumpy
       if (p.aggr < (A0().crook || 0.72) && !p.rage && p.state !== "fight") {
         p.state = "flee"; p.path = null;
@@ -336,6 +328,7 @@
   CBZ.cityKillPed = function (ped, imp, cause) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // killed mid-call → the report dies with them
+    const wasArmed = !!ped.armed;
     ped.dead = true; ped.deadT = 0; ped.hp = 0;
     // FINITE POPULATION: a named rig just died → tick the city headcount DOWN.
     // Promoted crowd rigs (ped._crowd) die through HERE (they're real peds);
@@ -371,6 +364,12 @@
       if (att.kind !== "cop" && !lawfulSecurityAct(att, ped) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 90, "murder");   // lawful responders are not criminals
     } else if (byPlayer) {
       CBZ.cityCrime && CBZ.cityCrime(250, { x: ped.pos.x, z: ped.pos.z, type: "murder" });
+      g._cityKillDetail = {
+        gang: ped.gang || null,
+        boss: !!(ped.isBoss || ped.rank === "boss"),
+        armed: wasArmed,
+        victim: ped.name || "civilian",
+      };
       CBZ.city && CBZ.city.addKill();
       if (CBZ.cityCountMayhem) CBZ.cityCountMayhem();
     }
@@ -902,14 +901,17 @@
     // ---- GUNPOINT (reuses the jail's intimidate logic): if the player is
     //      pointing a gun at this person, the meek SURRENDER (hands up, frozen,
     //      robbable) and the bold/armed DRAW and fight back — a stand-off. ----
-    ped.surrender = false;
+    if ((ped.surrenderT || 0) <= 0) {
+      ped.surrender = false;
+      if (ped.state === "surrender") ped.state = playerArmed && dpl < 11 ? "flee" : "walk";
+    }
     if (playerArmed && dpl < 9) {
       const cy = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(cy), fz = -Math.cos(cy);
       const m = dpl || 1, dot = ((px - ped.pos.x) / m) * -fx + ((pz - ped.pos.z) / m) * -fz; // player→ped vs facing
       const aimedAtMe = (((ped.pos.x - px) / m) * fx + ((ped.pos.z - pz) / m) * fz) > 0.62;
       if (aimedAtMe) {
         if (ped.aggr < (B.crook || 0.72) || (!ped.armed && ped.aggr < (B.violent || 0.88))) {
-          ped.surrender = true; ped.state = "surrender"; ped.speed = 0; ped.fear = 10; ped.robbable = true;
+          markGunpoint(ped, 0.75);
           return;
         }
         // bold + (usually armed): draw and fight back — a Mexican stand-off
@@ -1183,6 +1185,102 @@
     return null;
   }
 
+  function markGunpoint(ped, hold) {
+    if (!ped || ped.dead || ped.ko > 0 || ped.vendor || ped.controlled) return false;
+    const B = A0();
+    const boldEnough = ped.aggr >= (B.crook || 0.72) && (ped.armed || ped.aggr >= (B.violent || 0.88));
+    if (boldEnough) return false;
+    ped.surrenderT = Math.max(ped.surrenderT || 0, hold || 0.55);
+    ped.surrender = true;
+    ped.state = "surrender";
+    ped.speed = 0;
+    ped.pause = Math.max(ped.pause || 0, 0.35);
+    ped.fear = Math.max(ped.fear || 0, 10);
+    ped.alarmed = Math.max(ped.alarmed || 0, 2.5);
+    ped.robbable = true;
+    ped.rage = null;
+    // reactions.js reads poseHandsUp to drive the rich arm pose + fear face for
+    // city peds (mirrors the jail npc flag); char.handsUp keeps the base pose.
+    ped.poseHandsUp = true; ped.poseAimBack = false;
+    if (ped.reportState) cancelReport(ped);
+    if (ped.group && CBZ.player && CBZ.player.pos) {
+      const dx = CBZ.player.pos.x - ped.pos.x, dz = CBZ.player.pos.z - ped.pos.z;
+      if (dx * dx + dz * dz > 0.04) ped.group.rotation.y = Math.atan2(dx, dz);
+    }
+    if (ped.char) { ped.char.surrender = true; ped.char.handsUp = true; }
+    return true;
+  }
+  CBZ.cityMarkGunpoint = markGunpoint;
+
+  // ============================================================
+  //  GUNPOINT SWEEP (every frame, cheap) — give the WHOLE near crowd the jail's
+  //  expressive HANDS-UP the instant the player points a gun at them, instead of
+  //  waiting for the time-sliced think() to come around (which lagged + only
+  //  surrendered ONE ped per pass). We do a cone test from the camera aim each
+  //  frame for peds in range and:
+  //    • meek/non-bold  → markGunpoint (hands up, frozen, robbable) — held while
+  //                       covered, then RELAXED a moment after you look away.
+  //    • bold + armed   → poseAimBack (gun arm levelled at you) for the stand-off,
+  //                       handled by reactions.js; their fight logic stays in think.
+  //  This sets the pose flags reactions.js consumes; the existing think() gunpoint
+  //  branch (surrender/fight decision) is preserved untouched.
+  // ============================================================
+  function gunpointSweep(dt) {
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving) { _clearGunpointPoses(); return; }
+    const playerArmed = !!g.cityWeapon && CBZ.cityEcon && CBZ.cityEcon.ITEMS[g.cityWeapon] && CBZ.cityEcon.ITEMS[g.cityWeapon].gun;
+    if (!playerArmed) { _clearGunpointPoses(); return; }
+    const B = A0();
+    const cy = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(cy), fz = -Math.cos(cy);
+    const px = P.pos.x, pz = P.pos.z;
+    const peds = CBZ.cityPeds;
+    for (let i = 0; i < peds.length; i++) {
+      const ped = peds[i];
+      if (!ped || ped.dead || ped.vendor || ped.ko > 0 || ped.controlled || ped.companion || ped._parked || ped.recruited) continue;
+      const dx = ped.pos.x - px, dz = ped.pos.z - pz, d2 = dx * dx + dz * dz;
+      if (d2 > 121) {                                  // out of 11m gunpoint range → relax
+        if (ped._covered) { _relaxGunpoint(ped, dt); }
+        continue;
+      }
+      const d = Math.sqrt(d2) || 1;
+      const aimedAtMe = (dx / d) * fx + (dz / d) * fz > 0.66;   // ped inside the aim cone
+      if (aimedAtMe) {
+        ped._coverGrace = 0.6;                          // hold the pose for a beat after look-away
+        ped._covered = true;
+        const boldEnough = ped.aggr >= (B.crook || 0.72) && (ped.armed || ped.aggr >= (B.violent || 0.88));
+        if (boldEnough) {
+          // armed tough guy: square up and level the gun back (a stand-off). Don't
+          // override an active fight; just supply the aim-back pose for reactions.js.
+          if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
+        } else {
+          // meek/scared: throw hands up + freeze. markGunpoint owns the full state.
+          markGunpoint(ped, 0.4);
+        }
+      } else if (ped._covered) {
+        _relaxGunpoint(ped, dt);
+      }
+    }
+  }
+  // ease a ped out of a gunpoint pose once you stop aiming at it (after a grace
+  // window), letting it return to whatever it was doing.
+  function _relaxGunpoint(ped, dt) {
+    if ((ped._coverGrace -= dt) > 0) return;
+    ped._covered = false; ped._coverGrace = 0;
+    ped.poseAimBack = false;
+    if (ped.poseHandsUp && (ped.surrenderT || 0) <= 0) {
+      ped.poseHandsUp = false;
+      if (ped.char) { ped.char.handsUp = false; ped.char.surrender = false; }
+      if (ped.state === "surrender") ped.state = "walk";
+    }
+  }
+  function _clearGunpointPoses() {
+    const peds = CBZ.cityPeds;
+    for (let i = 0; i < peds.length; i++) {
+      const ped = peds[i];
+      if (ped && ped._covered) { ped._coverGrace = 0; _relaxGunpoint(ped, 999); }
+    }
+  }
+
   // ---- movement / engagement ----
   function move(ped, dt, animate) {
     // walked up to interact? they at least turn and LOOK at you (flag refreshed
@@ -1206,13 +1304,29 @@
     if (ped.chatT > 0) { ped.chatT -= dt; ped.speed = 0; if (animate) animChar(ped.char, 0, dt); if (ped.chatT <= 0) ped.state = "walk"; return; }
     if (ped.attackCD > 0) ped.attackCD -= dt;
     if (ped.shootCD > 0) ped.shootCD -= dt;
+    if (ped.surrenderT > 0) {
+      ped.surrenderT = Math.max(0, ped.surrenderT - dt);
+      ped.surrender = true;
+    }
 
     const st = ped.state;
+    const surrendering = st === "surrender" || ped.surrender || ped.surrenderT > 0;
+    if (ped.char) {
+      ped.char.surrender = surrendering;
+      ped.char.handsUp = surrendering || ped.poseHandsUp || false;
+    }
+    // keep the reactions.js pose flag in lock-step with the actual surrender state:
+    // a ped that's surrendering has hands up; one whose surrender lapsed AND isn't
+    // currently covered at gunpoint drops them (the gunpoint sweep owns the covered
+    // case). This is what eases the arms back down when you look away / walk off.
+    if (surrendering) ped.poseHandsUp = true;
+    else if (ped.poseHandsUp && !ped._covered) ped.poseHandsUp = false;
     let spd = ped.baseSpeed;
     if (st === "flee") spd = ped.baseSpeed * 2.2;
     else if (ped.reportState === "run") spd = ped.baseSpeed * 2.0;   // sprint to the cop to snitch
     else if (st === "fight" || st === "confront") spd = ped.baseSpeed * 1.7;
     else if (st === "chat" || st === "idle" || st === "film" || st === "surrender") spd = 0;
+    if (surrendering) spd = 0;
     if (ped.drugUser && ped.erratic > 0 && spd > 0) spd *= 1 + ped.erratic * 0.16;
 
     // engagement: attack when in range
@@ -1288,12 +1402,16 @@
     frame++;
     // advance the cheap internal day clock (loops 0..24); drives loose schedules
     _dayClock = (_dayClock + (dt * 24 / DAY_LEN)) % 24;
+    // GUNPOINT: raise hands across the near crowd the moment you aim a gun at them
+    // (every frame, so it's instant + covers everyone, not just one per think pass).
+    gunpointSweep(dt);
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       if (p._parked) continue;     // pooled crowd-promotion ped waiting off-map; not in play
       if (p.alarmed > 0) p.alarmed -= dt;
+      if (p.poseCower > 0) p.poseCower -= dt;   // brief flinch/cringe at gunfire+blasts
       if (p.tweakT > 0) p.tweakT -= dt;
       if (p.npcHeat > 0) { p.npcHeat = Math.max(0, p.npcHeat - dt * 4); }
       if (p.offenseT > 0) p.offenseT -= dt;

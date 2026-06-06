@@ -67,11 +67,14 @@
     });
   }
 
-  function addChunks(x, z, count, force, hot) {
+  // dir (optional {x,z} unit vector) biases the spray DOWNRANGE of the impact so
+  // a head-on crash throws panels forward off the hit instead of a flat ring.
+  function addChunks(x, z, count, force, hot, dir) {
     while (chunks.length > 56) {
       const old = chunks.shift();
       scene.remove(old.mesh);
     }
+    const dx = dir ? dir.x : 0, dz = dir ? dir.z : 0, biased = !!dir;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       // mostly charred grey, a few glowing-hot shards on an explosion
@@ -84,9 +87,11 @@
       // debris flies fast then arcs down under gravity (slightly damped so it
       // hangs a touch longer like AAA shrapnel), heavier shards thrown lower
       const up = hot ? (3 + Math.random() * 6) : (2 + Math.random() * 4);
+      const sp = force * (0.4 + Math.random() * 1.0);
+      let vx = Math.cos(a) * sp, vz = Math.sin(a) * sp;
+      if (biased) { vx += dx * force * (0.6 + Math.random() * 0.8); vz += dz * force * (0.6 + Math.random() * 0.8); }
       chunks.push({
-        mesh, vx: Math.cos(a) * force * (0.4 + Math.random() * 1.0),
-        vy: up, vz: Math.sin(a) * force * (0.4 + Math.random() * 1.0),
+        mesh, vx, vy: up, vz,
         spin: (Math.random() - 0.5) * 16, t: 0, life: 1.2 + Math.random() * 1.1,
         trail: glow ? 0 : -1, // glowing shards drip a tiny ember trail
       });
@@ -226,11 +231,12 @@
     opts = opts || {};
     const speed = opts.speed || 8;
     const hard = !!opts.hard, catastrophic = !!opts.catastrophic;
+    const dir = opts.dir || null;   // downrange impact direction, for biased debris
     if ((hard || catastrophic) && CBZ.cityEvent) CBZ.cityEvent("crash", { x, z, damage: catastrophic ? 6 : 2, panic: catastrophic ? 7 : 3 }, { silent: true, noWanted: true, throttle: 0.9 });
     // hot orange impact sparks (additive) that shoot out fast and die quick
-    pointBurst(x, z, catastrophic ? 54 : (hard ? 34 : 12), 0xff9a38, catastrophic ? 0.18 : 0.13, 2 + speed * 0.18, catastrophic ? 0.7 : 0.48, false);
+    pointBurst(x, z, catastrophic ? 58 : (hard ? 38 : 12), 0xff9a38, catastrophic ? 0.19 : 0.13, 2 + speed * 0.2, catastrophic ? 0.7 : 0.48, false);
     // a tight WHITE-hot spark spray at the contact point (metal grinding)
-    pointBurst(x, z, catastrophic ? 26 : (hard ? 16 : 6), 0xfff0c0, 0.1, 4 + speed * 0.22, catastrophic ? 0.45 : 0.32, false);
+    pointBurst(x, z, catastrophic ? 30 : (hard ? 18 : 6), 0xfff0c0, 0.1, 4 + speed * 0.25, catastrophic ? 0.45 : 0.32, false);
     // kicked-up dust
     pointBurst(x, z, catastrophic ? 34 : (hard ? 22 : 8), 0x8b8175, catastrophic ? 0.44 : 0.3, 1 + speed * 0.07, catastrophic ? 0.9 : 0.62, true);
     // shattered GLASS — pale blue-white shimmering shards (additive twinkle)
@@ -238,9 +244,10 @@
     if (hard && CBZ.sfx) CBZ.sfx("glass");
     if (hard) {
       ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.7 : 0.55 });
-      addChunks(x, z, catastrophic ? 9 : 4, 2.5 + speed * 0.1, false);
+      addChunks(x, z, catastrophic ? 10 : 5, 2.5 + speed * 0.12, false, dir);
+      addScorch(x, z, catastrophic ? 3 : 1.4, catastrophic ? 9 : 5);   // a scuff/skid stain even on a hard (non-fatal) wall hit
       if (catastrophic) {
-        addScorch(x, z, 3, 9); if (CBZ.shake) CBZ.shake(1.6);
+        if (CBZ.shake) CBZ.shake(1.6);
         // a clutch of small lingering flames + a thin smoke wisp so a wrecked car
         // looks like it's actually cooking, not just sparking for a frame.
         for (let i = 0; i < 5; i++) {

@@ -217,8 +217,14 @@
     addBox(root, w, baseH, len, 0, wheelR + baseH * 0.45, 0, paint);
     addPrism(root, w * 0.84, cabin, wheelR + baseH * 0.68, dark);
     addBox(root, w * 0.72, 0.08, len * 0.28, 0, wheelR + baseH + cabin[1][1] * 0.74, -0.16, paint);
-    addBox(root, w * 0.84, 0.16, 0.07, 0, wheelR + baseH * 0.47, len * 0.5 + 0.04, white);
-    addBox(root, w * 0.82, 0.15, 0.07, 0, wheelR + baseH * 0.5, -len * 0.5 - 0.04, red);
+    // sculpted lower body: a contrasting rocker/sill down each flank + a slim
+    // front splitter so the nose reads as a real bumper, not a flat box face.
+    const sill = sharedMat("sill-" + style, 0x14171c);
+    addBox(root, w + 0.04, 0.14, len * 0.9, 0, wheelR + 0.08, 0, sill);
+    addBox(root, w * 0.96, 0.1, 0.18, 0, wheelR + 0.06, len * 0.5 - 0.04, sill);   // front splitter
+    addBox(root, w * 0.68, 0.2, 0.06, 0, wheelR + baseH * 0.36, len * 0.5 + 0.03, sill);   // grille
+    addBox(root, w * 0.84, 0.16, 0.07, 0, wheelR + baseH * 0.52, len * 0.5 + 0.05, white);
+    addBox(root, w * 0.82, 0.15, 0.07, 0, wheelR + baseH * 0.54, -len * 0.5 - 0.04, red);
     if (style === "aventador") addBox(root, w * 0.76, 0.12, 0.16, 0, wheelR + baseH + 0.18, -len * 0.42, paint);
     if (style === "porsche") addBox(root, w * 0.72, 0.1, 0.14, 0, wheelR + baseH + 0.14, -len * 0.44, paint);
     if (style === "enzo") {

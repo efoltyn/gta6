@@ -532,10 +532,44 @@
     return rec;
   }
 
-  // proximity-driven auto-opener: open when the player or any nearby ped/car is
-  // close to a door's OUTSIDE; ease the swing; pull/restore the collider as it
-  // passes ~35% open; close after a short hold once everyone has left. Cheap:
-  // distance-culled to doors near the player and only animates moving doors.
+  function doorNearActor(dr, x, z, radius) {
+    const ax = x - dr.wx, az = z - dr.wz;
+    const across = ax * dr.inx + az * dr.inz;            // + = inside the building
+    const side = ax * -dr.inz + az * dr.inx;             // along the door width
+    const lat = Math.abs(side), r = radius || 1.0;
+    if (lat < 1.65 + r * 0.45 && across > -2.8 - r && across < 4.6 + r) return true;
+    return ax * ax + az * az < r * r;
+  }
+  function carDoorRadius(car) {
+    const w = car && car.model && car.model.w ? car.model.w : 1.9;
+    const l = car && car.model && car.model.l ? car.model.l : 4.2;
+    return Math.max(3.6, Math.min(6.2, (w + l) * 0.58));
+  }
+  function doorOccupied(dr, includeCars) {
+    const P = CBZ.player && CBZ.player.pos;
+    if (P && doorNearActor(dr, P.x, P.z, CBZ.player.driving ? 4.6 : 1.7)) return true;
+    if (includeCars && CBZ.cityCars) {
+      for (let k = 0; k < CBZ.cityCars.length; k++) {
+        const c = CBZ.cityCars[k]; if (!c || c.dead || !c.pos) continue;
+        const dx = c.pos.x - dr.wx, dz = c.pos.z - dr.wz;
+        if (dx * dx + dz * dz > 48) continue;
+        if (doorNearActor(dr, c.pos.x, c.pos.z, carDoorRadius(c))) return true;
+      }
+    }
+    if (CBZ.cityPeds) {
+      for (let k = 0; k < CBZ.cityPeds.length; k++) {
+        const pd = CBZ.cityPeds[k]; if (!pd || pd.dead || !pd.pos || pd.enterT > 0) continue;
+        const dx = pd.pos.x - dr.wx, dz = pd.pos.z - dr.wz;
+        if (dx * dx + dz * dz > 22) continue;
+        if (doorNearActor(dr, pd.pos.x, pd.pos.z, 1.25)) return true;
+      }
+    }
+    return false;
+  }
+
+  // proximity-driven auto-opener: open when the player, peds or cars approach
+  // the doorway; ease the swing; pull/restore the collider only when the passage
+  // is clear. Cheap: still culled to doors near the player unless a door is open.
   CBZ.onUpdate(34.3, function (dt) {
     if (CBZ.game.mode !== "city" || !cityDoors.length) return;
     const P = CBZ.player && CBZ.player.pos;
@@ -543,35 +577,36 @@
     for (let i = 0; i < cityDoors.length; i++) {
       const dr = cityDoors[i];
       const dxp = dr.wx - px, dzp = dr.wz - pz;
-      const farFromPlayer = dxp * dxp + dzp * dzp > 900;   // 30m: skip distant doors entirely
-      let near = false;
-      if (!farFromPlayer) {
-        // player within ~3.2m of the doorway opens it
-        if (dxp * dxp + dzp * dzp < 10.2) near = true;
-        // a ped standing in/at the doorway also triggers it (so NPCs use shops)
-        if (!near && CBZ.cityPeds) {
-          for (let k = 0; k < CBZ.cityPeds.length; k++) {
-            const pd = CBZ.cityPeds[k]; if (!pd || pd.dead || !pd.pos) continue;
-            const ex = dr.wx - pd.pos.x, ez = dr.wz - pd.pos.z;
-            if (ex * ex + ez * ez < 6.0) { near = true; break; }
-          }
-        }
-      }
-      if (near) { dr.open = true; dr.hold = 1.4; }
+      const farFromPlayer = dxp * dxp + dzp * dzp > 1600;   // 40m: skip cold distant doors
+      if (farFromPlayer && !dr.open && dr.t <= 0.001) continue;
+      const near = doorOccupied(dr, true);
+      if (near) { dr.open = true; dr.hold = 1.8; }
       else if (dr.hold > 0) { dr.hold -= dt; if (dr.hold <= 0) dr.open = false; }
+
       // ease the swing toward target (open=1 / closed=0)
       const target = dr.open ? 1 : 0;
       if (Math.abs(dr.t - target) > 0.001) {
         dr.t += (target - dr.t) * Math.min(1, dt * 6.5);
         if (Math.abs(dr.t - target) < 0.01) dr.t = target;
         dr.pivot.rotation.y = dr.t * dr.maxAng;
-        // collider: drop it once the leaf is open enough to walk through; restore
-        // when it swings back nearly shut.
-        if (dr.colIn && dr.t > 0.32) {
-          const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
-          dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-          if (CBZ.sfx) CBZ.sfx("door");
-        } else if (!dr.colIn && dr.t < 0.28) {
+      }
+
+      // Collider sync is evaluated EVERY frame (not only mid-swing) so the
+      // doorway is reliably passable while open and reliably solid once shut.
+      //  - drop the collider as soon as the leaf has swung clear (t > 0.30) so
+      //    you can actually walk through the gap you can see is open;
+      //  - restore it only once the leaf is essentially shut AND nobody is in
+      //    the doorway, so the door never snaps a wall back onto an actor.
+      if (dr.colIn && dr.t > 0.30) {
+        const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
+        dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        if (CBZ.sfx) CBZ.sfx("door");
+      } else if (!dr.colIn && dr.t < 0.12) {
+        // leaf is shut. If someone is still standing in the gap, hold it open a
+        // beat longer rather than trapping them; otherwise re-solidify the wall.
+        if (doorOccupied(dr, true)) {
+          dr.open = true; dr.hold = Math.max(dr.hold, 0.4);
+        } else {
           if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col);
           dr.colIn = true; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
         }
