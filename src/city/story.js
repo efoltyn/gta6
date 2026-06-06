@@ -211,10 +211,28 @@
   CBZ.cityStoryReset = function () {
     // a "new life" keeps the persisted arc (it's a career), but re-binds state.
     g.cityStory = null;
+    g.cityWon = false;
     ensure();
     lastObjText = "";
   };
   CBZ.cityStoryChapter = function () { const s = ensure(); return { idx: s.chapter, name: CHAPTERS[s.chapter] }; };
+
+  // ---- WIN CONDITION: own every district. The whole game IS the takeover, so
+  //      this is the real payoff — turf.js calls it once you hold the map. A
+  //      triumphant beat + a kingpin tribute, guarded so it can't re-fire. ----
+  CBZ.cityWin = function (how) {
+    if (g.cityWon) return;
+    g.cityWon = true;
+    if (CBZ.doSlowmo) { try { CBZ.doSlowmo(0.45); } catch (e) {} }
+    if (CBZ.sfx) { try { CBZ.sfx("win"); } catch (e) {} }
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 YOU OWN THE CITY");
+    const tribute = 50000;
+    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(tribute);
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(150);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Every block flies your colors — kingpin of the whole map. +$" + tribute.toLocaleString() + " tribute, +150 respect.", 6);
+    if (CBZ.cityEvent) { try { CBZ.cityEvent("story", { label: "TOOK THE CITY (" + (how || "takeover") + ")" }, { silent: true }); } catch (e) {} }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  };
 
   // ---- the driver: check milestones in order each tick ----
   let scanT = 0;
