@@ -423,7 +423,7 @@
     const vg = detail.gang || null;
     // a player kill that satisfies an open WORK CONTRACT → flag it so the tick
     // only patches you in on YOUR hit (not a rival happening to drop the mark)
-    if (workContract && workContract.target && workContract.target.dead) workContract._byPlayer = true;
+    if (workContract && workContract.target && detail.ped === workContract.target) workContract._byPlayer = true;
     // PROSPECTING: dropping a rival is "putting in work" → big standing jump
     if (prospecting && !memb()) {
       if (isHostileTo(prospecting.gangId, vg) || (vg == null && detail.armed)) {
@@ -828,12 +828,20 @@
         for (const m of rec.members) { if (m && (m.rage === PA || (m.rage && m.rage.isPlayer))) { m.rage = null; if (m.state === "fight") m.state = "walk"; } }
         // your boss died → you can step into the SUCCESSION if you're senior
         if ((rec.bossDead || !rec.boss || rec.boss.dead) && (M.rank === "lt" || M.rank === "enforcer")) {
-          rec.bossDead = false;
-          // you take the throne: convert membership into OWNING the gang
-          if (!exists()) { claimRivalGang(rec); }
-          g.cityMembership = null;
-          CBZ.city.big("👑 YOU TOOK THE CROWN");
-          CBZ.city.note("The boss is dead. You stepped up — the " + (rec.name || "gang") + " is YOURS.", 4);
+          if (!exists()) {
+            // you take the throne: convert membership into OWNING the gang
+            rec.bossDead = false;
+            claimRivalGang(rec);
+            g.cityMembership = null;
+            CBZ.city.big("👑 YOU TOOK THE CROWN");
+            CBZ.city.note("The boss is dead. You stepped up — the " + (rec.name || "gang") + " is YOURS.", 4);
+          } else {
+            // you already run your own crew → you PASS on the throne: clear your
+            // patch and let the NPC succession crown the next in line (succeedBoss
+            // deferred to you while you were senior, so trigger it now).
+            g.cityMembership = null;
+            if (CBZ.cityGangSucceed) CBZ.cityGangSucceed(rec);
+          }
         }
       }
       tryMemberPromote();

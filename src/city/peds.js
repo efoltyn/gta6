@@ -365,6 +365,7 @@
     } else if (byPlayer) {
       CBZ.cityCrime && CBZ.cityCrime(250, { x: ped.pos.x, z: ped.pos.z, type: "murder" });
       g._cityKillDetail = {
+        ped: ped,
         gang: ped.gang || null,
         boss: !!(ped.isBoss || ped.rank === "boss"),
         armed: wasArmed,

@@ -299,7 +299,7 @@
       ped.loyalty = Math.min(1, (ped.loyalty || 0.1) + 0.08);
       if (drug) ped.favDrug = drug;
     }
-    ped.reUpT = CBZ.now + (40 + rng() * 50); // when they'll want to re-up
+    ped.reUpT = CBZ.now + (40 + rng() * 50) * 1000; // ms: when they'll want to re-up
   }
 
   // territory factor: dealing on YOUR gang's turf is safer & a touch richer;
@@ -318,7 +318,7 @@
     const econ = CBZ.cityEcon, inv = g.cityInv || {};
     const drugs = Object.keys(inv).filter((k) => econ.ITEMS[k] && econ.ITEMS[k].tag === "drug");
     if (!drugs.length) { CBZ.city.note("No product to sell. Buy WHOLESALE at the trap house.", 2.0); return; }
-    if (ped.boughtT && CBZ.now - ped.boughtT < 8) { CBZ.city.note(ped.name + " isn't interested right now.", 1.4); return; }
+    if (ped.boughtT && CBZ.now - ped.boughtT < 8000) { CBZ.city.note(ped.name + " isn't interested right now.", 1.4); return; }
     // a regular wants their drug of choice if you have it; else best earner
     let drug = (ped.regular && ped.favDrug && inv[ped.favDrug]) ? ped.favDrug : null;
     if (!drug) { let bp = -1; for (const d of drugs) { const p = econ.streetPrice ? econ.streetPrice(d) : econ.ITEMS[d].value * 2; if (p > bp) { bp = p; drug = d; } } }
@@ -549,7 +549,7 @@
             const dx = p.pos.x - px, dz = p.pos.z - pz;
             const near = (dx * dx + dz * dz) < (60 * 60);
             if (near && units > 0 && !p.rage && p.state !== "flee" && !p.surrender) { sendPedTo(p, px, pz); p.seekPlayer = true; seekers++; }
-            else if (!near) { p.reUpT = CBZ.now + 25; } // check back later
+            else if (!near) { p.reUpT = CBZ.now + 25000; } // ms: check back later
           }
         }
         // 2) posted-up walk-up trade: nearby craving addicts come find you. The

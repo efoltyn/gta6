@@ -81,7 +81,7 @@
   // decay needs by the elapsed sim-time since we last looked at this ped
   function decayNeeds(ped) {
     const N = needs(ped);
-    const dt = Math.min(20, Math.max(0, now() - N.t)); // cap so a long LOD gap doesn't nuke it
+    const dt = Math.min(20, Math.max(0, (now() - N.t) / 1000)); // ms->s; cap so a long LOD gap doesn't nuke it
     N.t = now();
     if (dt <= 0) return N;
     N.money = clamp01(N.money - N.kMoney * dt);
@@ -441,7 +441,7 @@
     // only bold-enough peds carry a grudge into action (the meek just fear it)
     if ((victim.aggr || 0.3) < (A0().bold || 0.5)) return;
     victim._grudgeOn = offender;
-    victim._grudgeT = now() + 60 + rng() * 60; // a window to act, then it cools
+    victim._grudgeT = now() + (60 + rng() * 60) * 1000; // ms: a 60-120s window to act, then it cools
   };
 
   // a ped the brain is mid-action on, or that isn't ours to drive — never stomp

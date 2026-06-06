@@ -359,7 +359,7 @@
   function opCooldown(id) {
     if (!g.cityOpCD) g.cityOpCD = {};
     const t = g.cityOpCD[id] || 0;
-    return Math.max(0, t - now());
+    return Math.max(0, (t - now()) / 1000);   // seconds remaining (CBZ.now is ms)
   }
   function runOp(id) {
     const o = OP_BY_ID[id]; if (!o) return;
@@ -368,7 +368,7 @@
     if (!canAfford(o.stake)) { note("⛔ This needs " + money(o.stake) + " up front. Come back richer.", 2.6); sfx("hit"); return; }
     charge(o.stake);
     if (!g.cityOpCD) g.cityOpCD = {};
-    g.cityOpCD[id] = now() + o.cd;
+    g.cityOpCD[id] = now() + o.cd * 1000;   // o.cd is SECONDS, CBZ.now is ms
     const e = E();
     // odds nudged up a touch by respect (rep = better connections)
     const win = rng() < clamp(o.odds + Math.min(0.12, (g.respect || 0) / 5000), 0.2, 0.9);

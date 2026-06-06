@@ -717,7 +717,7 @@
       }
     }
     // remove the body from the live roster so strength/income/pyramid update
-    const ri = gang.members.indexOf(ped); if (ri >= 0 && ped.dead) { /* keep ref for kill feed; reviewGang skips dead */ }
+    const ri = gang.members.indexOf(ped); if (ri >= 0 && ped.dead) gang.members.splice(ri, 1);   // drop the corpse from the live roster (kill feed already captured it)
     // BOSS down → succession (NPC) or a player takeover prize. Flag it either way
     // so the upkeep tick promotes the heir for rival-on-rival kingpin kills too.
     if (wasBoss && !gang.isPlayer) {
