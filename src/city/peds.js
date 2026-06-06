@@ -1190,7 +1190,7 @@
     if (!ped || ped.dead || ped.ko > 0 || ped.vendor || ped.controlled) return false;
     const B = A0();
     const boldEnough = ped.aggr >= (B.crook || 0.72) && (ped.armed || ped.aggr >= (B.violent || 0.88));
-    if (boldEnough) return false;
+    if (ped.armed || boldEnough) return false;   // armed peds draw + aim back, never surrender
     ped.surrenderT = Math.max(ped.surrenderT || 0, hold || 0.55);
     ped.surrender = true;
     ped.state = "surrender";
@@ -1208,7 +1208,10 @@
       const dx = CBZ.player.pos.x - ped.pos.x, dz = CBZ.player.pos.z - ped.pos.z;
       if (dx * dx + dz * dz > 0.04) ped.group.rotation.y = Math.atan2(dx, dz);
     }
-    if (ped.char) { ped.char.surrender = true; ped.char.handsUp = true; }
+    // NB: do NOT set ped.char.surrender/handsUp — that makes character.js ALSO
+    // pose the arms (forward + a slight lean), fighting reactions.js and producing
+    // the "bowing" look. reactions.js owns the city hands-up pose via poseHandsUp;
+    // the ped-level freeze (ped.surrender/state) above is what holds them still.
     return true;
   }
   CBZ.cityMarkGunpoint = markGunpoint;
@@ -1248,10 +1251,11 @@
       if (aimedAtMe) {
         ped._coverGrace = 0.6;                          // hold the pose for a beat after look-away
         ped._covered = true;
-        const boldEnough = ped.aggr >= (B.crook || 0.72) && (ped.armed || ped.aggr >= (B.violent || 0.88));
-        if (boldEnough) {
-          // armed tough guy: square up and level the gun back (a stand-off). Don't
-          // override an active fight; just supply the aim-back pose for reactions.js.
+        // ANYONE holding a gun squares up and levels it BACK — a guy with a gun
+        // never throws his hands up. A fearless unarmed bruiser also stands his
+        // ground. Everyone else (unarmed, not fearless) throws their hands up.
+        const drawsBack = ped.armed || ped.aggr >= (B.violent || 0.88);
+        if (drawsBack) {
           if (ped.state !== "fight") { ped.poseAimBack = true; ped.poseHandsUp = false; }
         } else {
           // meek/scared: throw hands up + freeze. markGunpoint owns the full state.
@@ -1313,8 +1317,12 @@
     const st = ped.state;
     const surrendering = st === "surrender" || ped.surrender || ped.surrenderT > 0;
     if (ped.char) {
-      ped.char.surrender = surrendering;
-      ped.char.handsUp = surrendering || ped.poseHandsUp || false;
+      // reactions.js owns the city surrender / hands-up / aim-back POSE (via the
+      // poseHandsUp / poseAimBack flags). Do NOT also drive character.js's built-in
+      // surrender pose — running BOTH pushed the arms forward + leaned the body (the
+      // "bowing" look). Keep character.js's pose layer OFF for city peds.
+      ped.char.surrender = false;
+      ped.char.handsUp = false;
     }
     // keep the reactions.js pose flag in lock-step with the actual surrender state:
     // a ped that's surrendering has hands up; one whose surrender lapsed AND isn't

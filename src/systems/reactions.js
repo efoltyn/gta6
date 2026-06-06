@@ -61,6 +61,7 @@
   const COWER_ARM = -2.2;       // target arm pitch when cowering (overhead)
   const COWER_LEAN = 0.4;       // extra forward hunch when cowering
   const AIM_ARM = -1.45;        // gun-arm pitch when an armed inmate aims back
+  const SURRENDER_ARM = -2.85;  // arms clearly OVERHEAD for a gunpoint surrender (upright, not the forward cower)
 
   // per-actor reaction record, keyed by the actor object.
   //   hp        : last frame's hp (to detect a drop)
@@ -288,22 +289,33 @@
           }
           setFearFace(a, 0.4);                    // tense, not full terror
         } else if (handsUp) {
-          // ease the arms overhead; store the delta we added so we can back
-          // it out of the damped base next frame.
+          // A true gunpoint SURRENDER (poseHandsUp) stands UPRIGHT with both arms
+          // thrown clearly OVERHEAD — NOT the hunched, arms-forward cower (that one
+          // is for someone merely scared by nearby gunfire). Store the delta we add
+          // so we can back it out of the damped base next frame.
+          const surr = !!a.poseHandsUp;
+          const armT = surr ? SURRENDER_ARM : COWER_ARM;
           if (parts.la) {
             const before = parts.la.rotation.x;
-            const want = damp(before, COWER_ARM, 12, dt);
+            const want = damp(before, armT, 12, dt);
             r.laOff = want - before; parts.la.rotation.x = want;
           }
           if (parts.ra) {
             const before = parts.ra.rotation.x;
-            const want = damp(before, COWER_ARM, 12, dt);
+            const want = damp(before, armT, 12, dt);
             r.raOff = want - before; parts.ra.rotation.x = want;
           }
-          // hunch the body forward a touch (added on top of any recoil)
-          r.cowerLean = damp(r.cowerLean, COWER_LEAN, 8, dt);
-          bodyOff += r.cowerLean;
-          if (a.poseHandsUp) setFearFace(a, 1);   // gunpoint surrender = pure terror
+          if (surr) {
+            // hands high, head up — NO forward hunch. Ease any existing lean out.
+            const next = damp(r.cowerLean, 0, 8, dt);
+            r.cowerLean = next < 0.002 ? 0 : next;
+            if (!down) bodyOff += r.cowerLean;
+            setFearFace(a, 1);                       // gunpoint = pure terror
+          } else {
+            // a frightened cower hunches forward to protect.
+            r.cowerLean = damp(r.cowerLean, COWER_LEAN, 8, dt);
+            bodyOff += r.cowerLean;
+          }
         } else if (r.cowerLean) {
           // ease the hunch back out when no longer fleeing
           const next = damp(r.cowerLean, 0, 8, dt);
