@@ -7,6 +7,12 @@
    non-escape mode), a hard shake, slow-mo, a blood burst, and a big
    WASTED title. A few seconds later you respawn at the nearest hospital
    (lighter wallet, lower heat) — the run continues, GTA-style.
+
+   The fling MATCHES the killing force (why: the body's flight should sell
+   what hit it): cityHurtPlayer forwards the final damage of the killing
+   blow, so a close shotgun blast hurls + spins you away from the shooter
+   while bleeding out is a weak slump; headshots/run-overs carry their
+   flags into CBZ.gore for the head-pop / road-smear treatments.
 ============================================================ */
 (function () {
   "use strict";
@@ -108,7 +114,10 @@
     // INJURY: a surviving flesh hit can leave a lasting wound (limp / bleeding /
     // shaky aim) so a firefight has consequences beyond a number ticking down.
     if (dmg > 0 && P.hp > 0) applyWound(dmg, reason, headshot, fromX, fromZ);
-    if (P.hp <= 0) CBZ.cityKillPlayer(reason || "killed", { fromX, fromZ });
+    // the FINAL damage of the killing blow rides the impact: cityKillPlayer
+    // scales the ragdoll fling from it (a close shotgun blast hurls you, a
+    // pistol tap just drops you) and the headshot flag drives the head-pop gore.
+    if (P.hp <= 0) CBZ.cityKillPlayer(reason || "killed", { fromX, fromZ, dmg, headshot });
   };
 
   // ============================================================
@@ -179,7 +188,7 @@
       _bleedSpray -= dt;
       if (_bleedSpray <= 0 && CBZ.gore && P.pos) { _bleedSpray = 0.5 + Math.random() * 0.6; CBZ.gore(P.pos.x, P.pos.y + 0.4, P.pos.z, { amount: 0.3 * rate, player: true }); }
       if (CBZ.hitFlash && Math.random() < rate * dt * 4) CBZ.hitFlash();
-      if (P.hp <= 0) { CBZ.cityKillPlayer("bled out", { fromX: P._bleedX, fromZ: P._bleedZ }); return; }
+      if (P.hp <= 0) { CBZ.cityKillPlayer("bled out", { fromX: P._bleedX, fromZ: P._bleedZ, dmg: 8 }); return; }   // tiny dmg → a weak slump, not a launch
     }
     // WOUNDS decay (the body recovers); faster while you're resting (not moving,
     // not in combat). Full leg wound ~ 22s to walk off, quicker if you hole up.
@@ -289,20 +298,34 @@
     // fling: you've already hit the ground at speed, so the body crumples at the
     // spot in a spreading blood pool instead of launching back into the air.
     const splatDeath = isImpactCause(reason);
-    // spinning ragdoll fling (physics.js handles player._death in non-escape modes)
+    // THE FLING MATCHES THE KILLING FORCE: cityHurtPlayer forwards the final
+    // damage of the killing blow on the impact (a close shotgun blast lands
+    // ~3x a pistol tap; a car at speed more still), so a big hit HURLS the
+    // body and spins it harder while bleeding out is just a weak slump.
+    const fK = imp && imp.dmg != null ? Math.max(0.55, Math.min(2.2, imp.dmg / 55)) : 1;
+    // and it flings AWAY from the shooter (jittered), not in a random direction —
+    // the body's flight line tells you where the shot came from.
     const a = Math.random() * 6.28;
+    let fx = Math.cos(a), fz = Math.sin(a);
+    if (!splatDeath && imp && imp.fromX != null) {
+      const ddx = P.pos.x - imp.fromX, ddz = P.pos.z - imp.fromZ, dl = Math.hypot(ddx, ddz);
+      if (dl > 0.01) { fx = ddx / dl + (Math.random() - 0.5) * 0.5; fz = ddz / dl + (Math.random() - 0.5) * 0.5; }
+    }
+    // spinning ragdoll fling (physics.js handles player._death in non-escape modes)
     P._death = splatDeath ? {
       // low, flat crumple — barely leaves the ground, lands almost immediately
       vx: Math.cos(a) * (1.2 + Math.random() * 1.5), vz: Math.sin(a) * (1.2 + Math.random() * 1.5),
       vy: 1.0 + Math.random() * 1.0, spin: (Math.random() * 2 - 1) * 9, spin2: (Math.random() * 2 - 1) * 7,
       t: 0, landed: false, seed: Math.random() * 6.28,
     } : {
-      vx: Math.cos(a) * (3 + Math.random() * 3), vz: Math.sin(a) * (3 + Math.random() * 3),
-      vy: 6 + Math.random() * 3, spin: (Math.random() * 2 - 1) * 7, spin2: (Math.random() * 2 - 1) * 5,
+      vx: fx * (3 + Math.random() * 3) * fK, vz: fz * (3 + Math.random() * 3) * fK,
+      vy: Math.min(11.5, (6 + Math.random() * 3) * (0.7 + 0.4 * fK)),
+      spin: (Math.random() * 2 - 1) * 7 * (0.7 + 0.5 * fK),
+      spin2: (Math.random() * 2 - 1) * 5 * (0.7 + 0.5 * fK),
       t: 0, landed: false, seed: Math.random() * 6.28,
     };
     if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
-    if (CBZ.shake) CBZ.shake(splatDeath ? 1.9 : 1.2);
+    if (CBZ.shake) CBZ.shake(splatDeath ? 1.9 : Math.min(1.8, 0.85 + 0.35 * fK));
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doSlowmo) CBZ.doSlowmo(splatDeath ? 0.55 : 0.5);
     if (CBZ.doHitstop && splatDeath) CBZ.doHitstop(0.2);
@@ -312,7 +335,14 @@
       // seated right where the body hits. cityImpactSplat itself calls CBZ.gore.
       CBZ.cityImpactSplat(P.pos.x, P.pos.y + 0.6, P.pos.z, { player: true, speed: P._fellSpeed || 24, dir: gdir });
     } else if (CBZ.gore) {
-      CBZ.gore(P.pos.x, P.pos.y + 1.0, P.pos.z, { dir: gdir, amount: 1.4, player: true });
+      // the burst scales with the killing force too; a fatal headshot pops
+      // (skull frags + instant wall paint), a fatal run-over drags a smear.
+      const ranOver = ("" + (reason || "")).toLowerCase().indexOf("run over") >= 0;
+      CBZ.gore(P.pos.x, P.pos.y + 1.0, P.pos.z, {
+        dir: gdir, amount: Math.min(2, 1.05 + fK * 0.35), player: true,
+        head: !!(imp && imp.headshot),
+        smear: ranOver, smearLen: ranOver ? 3 + fK * 2.5 : 0,
+      });
     }
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     const where = g.citySpawnPoint ? "home" : "the hospital";

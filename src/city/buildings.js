@@ -1107,7 +1107,7 @@
     }
 
     return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, colliders: cols, platforms: plats, windows, lbox, FH,
-      hasStairs, stairW, clearFloorPoint,
+      hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
   }
   // The connected island district reuses the exact same enterable shell and
@@ -2224,6 +2224,34 @@
     // ROOFTOP HELIPAD on the flagship luxury tower (the tallest building) — a
     // marked landing pad the aircraft agent flies to. cityHelipad() returns it.
     if (luxBuilding) makeHelipad(luxBuilding, luxury);
+
+    // ---- VERTICAL-ACCESS REGISTRY (rigs built by city/elevators.js) --------
+    // WHY: height is status — the property ladder ends on a roof with a
+    // helipad, so getting UP has to feel like arriving. The lot POLICY lives
+    // here with the lots: the few TALLEST towers rate a real street-level
+    // ELEVATOR to the roof (the flagship mega-tower first), and a handful of
+    // mid-rises get exterior FIRE-ESCAPE stairs — the loud chase route up.
+    // elevators.js consumes these lists and owns the meshes/colliders/platforms.
+    {
+      const rigged = placed.filter((l) => l.building && l.building.group && l.building.hasStairs && !l.building.park);
+      // elevators: real (non-derelict) towers only, tallest first, capped at 5
+      const evPool = rigged.filter((l) => !l.building.abandoned && l.building.storeys >= 3)
+        .sort((a, b) => (b.building.h || 0) - (a.building.h || 0));
+      city.elevatorLots = evPool.slice(0, 5);
+      const served = new Set(city.elevatorLots);
+      // fire escapes climb the +x face (the -x strip is the open interior stair
+      // shaft — a bridge there would dump you DOWN it), so +x-door lots are out.
+      // Derelicts are welcome: gang roofs make the best escape routes. Picks are
+      // spread across the lot list so the routes aren't clustered in one corner.
+      const fePool = rigged.filter((l) => !served.has(l) &&
+        l.building.storeys >= 2 && l.building.storeys <= 4 && l.building.side !== 3);
+      city.fireEscapeLots = [];
+      const nFE = Math.min(4, fePool.length);
+      for (let t = 0; t < nFE; t++) {
+        const pick = fePool[Math.min(fePool.length - 1, Math.floor((t + 0.5) / nFE * fePool.length))];
+        if (city.fireEscapeLots.indexOf(pick) === -1) city.fireEscapeLots.push(pick);
+      }
+    }
 
     city.shopLots = placed.filter((l) => l.building && l.building.shop);
     city.abandonedLots = abandonedLots;

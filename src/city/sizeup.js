@@ -9,17 +9,19 @@
    LEVEL number (level.js) stops being decoration and starts being PHYSICS:
 
      • citySizeUp(tgt, att)   — pure read: does tgt DARE fight att? Compares
-       effective levels (own level + half the levels of nearby allies, so a
-       crew at your back literally makes you bigger). Bolder temperaments
-       dare bigger gaps; the violent and the unhinged fear nothing.
+       effective levels (own level + a third of the levels of nearby allies,
+       so a crew at your back literally makes you bigger — but four friends
+       don't make a Lv.5 nobody fearless on the 1-100 scale). Bolder
+       temperaments dare bigger gaps; the violent and the unhinged fear
+       nothing.
      • citySizeUpFold(tgt)    — the outclassed response: hands up under a
        gun (the read says "don't even try"), or break and run.
      • citySizeUpHit(tgt,att) — the on-hit hook (peds.js hurtActor, combat.js
        player melee): rallies a gang victim's crew (you NEVER fight one
        ganger — you fight the block), then folds or lets the brain rage.
      • cityKillRespect(victim)— respect is earned UP the ladder. Dropping
-       someone above your level makes a name; stomping a level-1 busker
-       makes you a bully nobody respects (0).
+       someone above your level makes a name; stomping a single-digit busker
+       once you read Lv.20+ makes you a bully nobody respects (0).
 
    Everything is derived from live state — no new fields to save, no knobs
    a designer has to remember to set per-ped.
@@ -52,7 +54,10 @@
     return sum;
   }
 
-  function effLevel(a) { return lvl(a) + 0.5 * backupLevels(a, !!a.isPlayer); }
+  // 0.35x: on the 1-100 scale raw ally levels run big (gang brass 40-70), so
+  // a full-weight sum would make any 4-man corner crew read like an army —
+  // backup should EMBOLDEN, not erase the read.
+  function effLevel(a) { return lvl(a) + 0.35 * backupLevels(a, !!a.isPlayer); }
 
   // ---- the read: dare I fight this person? ---------------------------------
   CBZ.citySizeUp = function (tgt, att) {
@@ -101,10 +106,13 @@
   };
 
   // ---- respect is earned UP the ladder --------------------------------------
+  // Levels run 1-100 but respect still pays in the same 0..14 band the economy
+  // is balanced around (mode.js addKill) — so the per-level terms are ~2.5x
+  // smaller than the old 1-40 scale, and the gap term is damped the same way.
   CBZ.cityKillRespect = function (victim) {
     const pl = lvl(CBZ.city && CBZ.city.playerActor ? CBZ.city.playerActor : { isPlayer: true });
-    const vl = victim ? lvl(victim) : 2;                // anonymous extras read ~2
-    if (vl <= 2 && pl >= 8) return 0;                   // stomping a nobody impresses no one
-    return Math.max(1, Math.min(14, Math.round(1 + vl * 0.4 + Math.max(0, vl - pl))));
+    const vl = victim ? lvl(victim) : 4;                // anonymous extras read ~4
+    if (vl <= 5 && pl >= 20) return 0;                  // stomping a nobody impresses no one
+    return Math.max(1, Math.min(14, Math.round(1 + vl * 0.16 + Math.max(0, vl - pl) * 0.4)));
   };
 })();

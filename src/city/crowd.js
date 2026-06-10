@@ -14,6 +14,18 @@
    tint and a cheap leg/arm stride. The whole thing is ONE Group toggled
    by mode; the simulation is pure math (testable headlessly), and the
    render no-ops where THREE.InstancedMesh is unavailable.
+
+   DISTRICT DENSITY + WARDROBE: this layer IS the visible street
+   population, so it must carry the district field (config CITY.districts
+   via world.js) or busy-vs-quiet never reads — packed Midtown sidewalks
+   are the "loud money" tell (marks, witnesses, cops) and a near-empty
+   Dockyard is the "do crime here" tell. Spawn/reseed positions draw from
+   world.js weightedSidewalkPoint (pop-weighted, core ~4× the docks) and
+   strolls are biased to STAY in the walker's home district, so the
+   density gradient holds instead of diffusing flat. Shirt tints cast by
+   district kind (bright tourist colour downtown, hi-vis/drab work gear
+   on the industrial end) — per-instance colour on the SAME shared
+   materials, zero new draw calls, total agent count unchanged.
 ============================================================ */
 (function () {
   "use strict";
@@ -30,8 +42,23 @@
   const skin = new Int32Array(CAP), shirt = new Int32Array(CAP), hairC = new Int32Array(CAP);
 
   const SKINS = [0xf1c9a5, 0xe0a878, 0xc68642, 0x8d5524, 0xffdbac, 0xa66a3c];
-  const SHIRTS = [0x3a6ea5, 0x9c3b3b, 0x4a7a44, 0xb8973f, 0x6a4a8a, 0x444a52, 0xb06a3a, 0x2f8a8a, 0xcfcfcf, 0x356b9a];
+  // 0-9: the everyday base palette. 10-14: BRIGHT tourist/money colours
+  // (downtown casting). 15-18: hi-vis + drab canvas work gear (industrial).
+  // Plain hex values tinted per-instance — no new materials.
+  const SHIRTS = [0x3a6ea5, 0x9c3b3b, 0x4a7a44, 0xb8973f, 0x6a4a8a, 0x444a52, 0xb06a3a, 0x2f8a8a, 0xcfcfcf, 0x356b9a,
+                  0xe8e4da, 0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0,
+                  0xe8821a, 0xc6d435, 0x4e453a, 0x5a5e52];
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
+  // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads
+  // moneyed (tourists in colour = walking wallets you can SEE), commercial
+  // reads office, industrial reads shift-work, projects read broke/muted.
+  // residential (and unknown) falls through to the full base palette.
+  const KIND_SHIRTS = {
+    core:       [10, 11, 12, 13, 14, 8, 0, 3],
+    commercial: [8, 9, 0, 5, 3, 10, 12],
+    industrial: [15, 16, 17, 18, 5, 6, 9],
+    projects:   [5, 6, 17, 18, 1, 4],
+  };
 
   let root, wm = null;
   // full body + FACE so the city crowd reads as PEOPLE, not short faceless boxes —
@@ -113,11 +140,63 @@
   function arena() { return CBZ.city && CBZ.city.arena; }
   const _tmp = { x: 0, z: 0 };
   const _col = { x: 0, z: 0 };            // scratch for building collision in sim()
-  function pickWaypoint(out) {            // a sidewalk point, kept inside the city
+
+  // ---- DISTRICT-AWARE WAYPOINTS ----
+  // lots grouped by district quadrant, built lazily per arena (world.js stamps
+  // l.district once at build; deterministic — no rng spent here).
+  let _dlA = null, _dlMap = null;
+  function districtLots(A) {
+    if (_dlA === A && _dlMap) return _dlMap;
+    _dlA = A; _dlMap = {};
+    if (A.lots) for (let k = 0; k < A.lots.length; k++) {
+      const l = A.lots[k], q = l.district;
+      if (q == null || typeof q !== "number") continue;     // annex/island lots: unstamped
+      (_dlMap[q] || (_dlMap[q] = [])).push(l);
+    }
+    return _dlMap;
+  }
+  function sidewalkOnLot(l, out) {        // same ring math as world.js sidewalkOf
+    const edge = (Math.random() * 4) | 0, t = (Math.random() - 0.5) * l.w;
+    const off = l.w / 2 + 1.6;
+    if (edge === 0) { out.x = l.cx + t; out.z = l.cz - off; }
+    else if (edge === 1) { out.x = l.cx + t; out.z = l.cz + off; }
+    else if (edge === 2) { out.x = l.cx - off; out.z = l.cz + t; }
+    else { out.x = l.cx + off; out.z = l.cz + t; }
+  }
+  // a downtown walker strolls DOWNTOWN: most repicks stay in the walker's home
+  // district; the rest fall through to the city-wide pop-weighted draw, so a
+  // little cross-district flow remains and the global density gradient holds.
+  const STAY = 0.8;
+  // pickWaypoint(out)         → pop-weighted city-wide point (spawn/reseed)
+  // pickWaypoint(out, ax, az) → stroll target biased into (ax,az)'s district
+  function pickWaypoint(out, ax, az) {
     const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
-    const p = A.randomSidewalkPoint();
+    if (ax !== undefined && A.districtAt && A.lots && Math.random() < STAY) {
+      const home = A.districtAt(ax, az);
+      const ls = home ? districtLots(A)[home.q] : null;
+      if (ls && ls.length) {
+        sidewalkOnLot(ls[(Math.random() * ls.length) | 0], out);
+        if (A.clampToCity) A.clampToCity(out, 0.6);
+        return;
+      }
+    }
+    const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(Math.random) : A.randomSidewalkPoint();
     if (A.clampToCity) A.clampToCity(p, 0.6);
     out.x = p.x; out.z = p.z;
+  }
+  // cast the shirt for wherever this agent stands (district wardrobe above);
+  // skin/hair stay city-wide. Used at spawn and when a body is recycled into
+  // a NEW district (it walks in as a local, not a teleported stranger).
+  function castTint(i, x, z) {
+    const A = arena();
+    const d = A && A.districtAt ? A.districtAt(x, z) : null;
+    const pool = d && KIND_SHIRTS[d.kind];
+    shirt[i] = pool ? pool[(Math.random() * pool.length) | 0] : ((Math.random() * 10) | 0);
+  }
+  function repaintShirt(i) {              // recolour one recycled body in-place
+    if (!ready) return;
+    col.setHex(SHIRTS[shirt[i]]); torso.setColorAt(i, col);
+    if (torso.instanceColor) torso.instanceColor.needsUpdate = true;
   }
 
   CBZ.spawnCityCrowd = function (n) {
@@ -128,13 +207,15 @@
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
     liveTarget = count;                          // full street at the start of a run
     for (let i = 0; i < count; i++) {
+      // pop-weighted spawn (Midtown packed, Dockyard thin), then a stroll
+      // target inside the home district so the gradient survives the walking.
       pickWaypoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
-      pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;
+      pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
       heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
       spd[i] = 1.0 + Math.random() * 1.6;
       phase[i] = Math.random() * 6.2832;
       skin[i] = (Math.random() * SKINS.length) | 0;
-      shirt[i] = (Math.random() * SHIRTS.length) | 0;
+      castTint(i, px[i], pz[i]);
       hairC[i] = (Math.random() * HAIRS.length) | 0;
     }
     paintColors();
@@ -167,7 +248,7 @@
       if (suppressed[i]) continue;                        // off-street (thinned out) → don't walk it
       if (promotedBy[i] >= 0) continue;                   // a real promoted ped owns this one
       let dx = tx[i] - px[i], dz = tz[i] - pz[i], d = Math.hypot(dx, dz);
-      if (d < 1.4) { pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z; dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
+      if (d < 1.4) { pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z; dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
       const inv = 1 / (d || 1);
       const want = Math.atan2(dx, dz);
       heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], want, 1 - Math.pow(0.0015, dt)) : want;
@@ -195,7 +276,7 @@
         }
         if (_col.x !== px[i] || _col.z !== pz[i]) {
           px[i] = _col.x; pz[i] = _col.z;            // shoved out of the wall
-          pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;   // repick so it doesn't grind back in
+          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;   // repick so it doesn't grind back in
         }
       }
     }
@@ -378,15 +459,20 @@
       // is this far agent BEHIND / off to the side? if so, recycle it ahead.
       const dn = Math.sqrt(d2) || 1;
       if ((dx / dn) * fx + (dz / dn) * fz > 0.2) continue;  // already roughly ahead → leave it
-      // find a sidewalk point inside the forward ring (a few tries)
+      // find a sidewalk point inside the forward ring (a few tries). The draw
+      // is POP-WEIGHTED, so what fills in ahead of you follows the district
+      // field: walk Midtown and the street ahead packs out; walk the Dockyard
+      // and most draws land elsewhere and fail the ring test — quiet STAYS
+      // quiet instead of magically filling because you looked at it.
       for (let t = 0; t < 4; t++) {
-        const p = A.randomSidewalkPoint();
+        const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(Math.random) : A.randomSidewalkPoint();
         const rx = p.x - ppx, rz = p.z - ppz, rd = Math.hypot(rx, rz) || 1;
         if (rd < AHEAD_NEAR || rd > AHEAD_FAR) continue;
         if ((rx / rd) * fx + (rz / rd) * fz < AHEAD_DOT) continue;
         if (A.clampToCity) A.clampToCity(p, 0.6);
         px[i] = p.x; pz[i] = p.z;
-        pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;
+        castTint(i, px[i], pz[i]); repaintShirt(i);   // recycled body dresses like a LOCAL
+        pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
         heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
         moved++; break;
       }
@@ -504,10 +590,10 @@
         const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
         if (!suppressed[i] || deadAgent[i]) continue;
         suppressed[i] = 0;
-        if (A && A.randomSidewalkPoint) {        // place them somewhere fresh on the map
-          const p = A.randomSidewalkPoint(); if (A.clampToCity) A.clampToCity(p, 0.6);
-          px[i] = p.x; pz[i] = p.z;
-          pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;
+        if (A && A.randomSidewalkPoint) {        // fresh pop-weighted spot, dressed for it
+          pickWaypoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
+          castTint(i, px[i], pz[i]); repaintShirt(i);
+          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
           heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
         }
         add--;

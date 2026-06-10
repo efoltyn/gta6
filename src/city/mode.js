@@ -257,6 +257,7 @@
       if (CBZ.cityClubReset) CBZ.cityClubReset();        // tear down the velvet-club line/bouncer
       if (CBZ.cityRealEstateReset) CBZ.cityRealEstateReset();
       if (CBZ.cityZillowReset) CBZ.cityZillowReset();
+      if (CBZ.cityAdBoardsReset) CBZ.cityAdBoardsReset();  // skyline starts neutral with the books
       if (CBZ.cityVehiclesReset) CBZ.cityVehiclesReset();
       if (CBZ.cityGlassReset) CBZ.cityGlassReset();   // re-glaze every shattered window
 

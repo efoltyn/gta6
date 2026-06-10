@@ -1,5 +1,5 @@
 /* ============================================================
-   city/level.js — THE STREET READS YOU: "CROOK · 3" floats over every head.
+   city/level.js — THE STREET READS YOU: "Lv.3 Crook" floats over every head.
 
    WHY a title + a level instead of a name
    ---------------------------------------
@@ -7,124 +7,140 @@
    bulge under the jacket, who's standing behind them. Names tell you nothing
    (you learn a name by TALKING to someone — interact.js still shows it).
    The tag is that street-read made legible in TWO beats: the TITLE says WHAT
-   someone is (OFFICER, DEALER, MOB BOSS, OLD MONEY), the NUMBER says how
+   someone is (Officer, Dealer, Mob Boss, Old Money), the NUMBER says how
    heavy. Both are NEVER stored or ground out — they are DERIVED, live, from
-   real state, so "why does he read ENFORCER · 14?" always has an answer:
-   he's a strapped gang enforcer with bodies on him. The pairing is the whole
-   robbery/respect game at a glance: "OLD MONEY · 11" unarmed = a payday;
-   "SWAT · 14" = a wall; dropping a "MOB BOSS · 24" = a story.
+   real state, so "why does he read Lv.57 Enforcer?" always has an answer:
+   he's a strapped gang enforcer with bodies on him.
+
+   WHY the scale runs 1→100 (not 1→40): the GAP is the show-off. "Lv.4 vs
+   Lv.62" reads like two different universes — a civilian is single digits,
+   a strapped crook is teens, a cop is 20, SWAT 35, gang brass 60-90, and
+   only a maxed kingpin walks the street at 100. The pairing is the whole
+   robbery/respect game at a glance: "Lv.8 Old Money" unarmed = a payday;
+   "Lv.35 SWAT" = a wall; dropping a "Lv.85 Mob Boss" = a story.
 
    What the number feeds (the level is information, not decoration):
      • sizeup.js  — NPCs compare levels before swinging: outclassed peds fold
        (hands up / run), peers fight, crews rally. Team fights read like life.
      • respect    — dropping someone ABOVE you earns real respect; stomping a
-       level-1 busker impresses nobody (mode.js addKill → cityKillRespect).
+       Lv.1 busker impresses nobody (mode.js addKill → cityKillRespect).
      • robbery    — wealth raises a level, so the number doubles as a mark-
        finder: a HIGH level that isn't armed and isn't gang-coloured is a
        walking payday. Reading the street correctly = the robbery skill.
 
-   Perf note: makeLabelSprite caches materials by (text|color), so "CROOK · 3"
+   Perf note: makeLabelSprite caches materials by (text|color), so "Lv.3 Crook"
    is ONE shared texture across every level-3 crook — far cheaper than the old
    one-unique-name-texture-per-ped. Swapping a tag = swapping a material ref.
-   Titles come from a small FIXED vocabulary (~25 strings), so the cache stays
-   bounded: titles × 40 levels × a handful of allegiance colours.
+   Titles come from a small FIXED vocabulary (~25 strings) and each title only
+   occupies its own band of the 1-100 range, so the cache stays bounded:
+   ~25 titles × the levels actually seen × a handful of allegiance colours.
    ============================================================ */
 (function () {
   const CBZ = window.CBZ;
   if (!CBZ) return;
   const g = CBZ.game;
 
-  // gang ladder → how heavy a rank reads on the street (gangs.js rank keys)
-  const RANK_LVL = { prospect: 1, lookout: 1, runner: 2, soldier: 3, enforcer: 5, lt: 7, boss: 10, kin: 2 };
-  // long guns read scarier than a pocket pistol
-  const HEAVY = { SMG: 1, Carbine: 1, Rifle: 1, Shotgun: 1, AK: 1, Bazooka: 1 };
+  // gang ladder → how heavy a rank reads on the street (gangs.js rank keys).
+  // Brass IS the number: an enforcer outreads any cop, a boss outreads SWAT —
+  // because on this block the state isn't the biggest gang.
+  // boss caps at 66 so even a decked-out don reads ~90s — Lv.100 is the summit
+  // only a maxed PLAYER kingpin walks at.
+  const RANK_LVL = { prospect: 13, lookout: 13, runner: 17, soldier: 25, enforcer: 44, lt: 50, boss: 66, kin: 15 };
+  // long guns read scarier than a pocket pistol (names from combat.js/gangs.js)
+  const HEAVY = { SMG: 1, Carbine: 1, Rifle: 1, Shotgun: 1, "AK-47": 1, LMG: 1, Sniper: 1, Bazooka: 1, "Rocket Launcher": 1 };
 
-  // money is power, but quietly: visible wealth (the watch, the coat) reads in tiers
-  function wealthLvl(w) { return w >= 0.985 ? 6 : w >= 0.88 ? 4 : w >= 0.7 ? 2 : w >= 0.5 ? 1 : 0; }
+  // money is power, but quietly: visible wealth (the watch, the coat) reads in
+  // tiers — a plain civilian spans Lv.1-8 on the coat alone.
+  function wealthLvl(w) { return w >= 0.985 ? 7 : w >= 0.88 ? 5 : w >= 0.7 ? 3 : w >= 0.5 ? 1 : 0; }
 
-  // ---- the one read: any actor → integer level ----------------------------
+  // ---- the one read: any actor → integer level (1..100) -------------------
   CBZ.cityLevel = function (a) {
     if (!a) return 1;
     if (a.isPlayer) return playerLevel();
-    if (a.kind === "cop") return a.swat ? 14 : 8;       // trained, armed, backed by the state
-    if (a.kind === "security") return 6;                // uniform + sidearm, no cavalry
+    if (a.kind === "cop") return a.swat ? 35 : 20;      // trained, armed, backed by the state
+    if (a.kind === "security") return 14;               // uniform + sidearm, no cavalry
     let lvl = 1 + wealthLvl(a.wealth || 0);
-    if (a.armed) lvl += a.weapon && HEAVY[a.weapon] ? 3 : 2;
-    else if (a.weapon) lvl += 1;                        // bat / blade tucked away
-    if (a.gang) lvl += RANK_LVL[a.rank] || 2;
-    if (a.gstat) lvl += Math.min(6, a.gstat.bodies | 0); // bodies follow a person around
-    if (a.bounty > 0) lvl += a.bounty >= 1000000 ? 9 : 5; // a price on your head IS a read
-    if ((a.aggr || 0) >= 0.88) lvl += 2;                // the crazy eyes
-    if (a.rampage) lvl += 4;
-    if (a.companion || a.recruited) lvl += 1;           // runs with somebody
-    return Math.max(1, Math.min(40, Math.round(lvl)));
+    if (a.armed) lvl += a.weapon && HEAVY[a.weapon] ? 12 : 9; // a gun jumps a civilian into the teens
+    else if (a.weapon) lvl += 3;                        // bat / blade tucked away
+    if (a.gang) lvl += RANK_LVL[a.rank] || 17;
+    if (a.gstat) lvl += Math.min(12, (a.gstat.bodies | 0) * 2); // bodies follow a person around
+    if (a.bounty > 0) lvl += a.bounty >= 1000000 ? 23 : 12; // a price on your head IS a read
+    if ((a.aggr || 0) >= 0.88) lvl += 4;                // the crazy eyes
+    if (a.rampage) lvl += 10;
+    if (a.companion || a.recruited) lvl += 3;           // runs with somebody
+    return Math.max(1, Math.min(100, Math.round(lvl)));
   };
 
   // your own read: the same physics applied to YOU — net worth, the gun on
   // your hip, the crew at your back, the bodies, the stars. Show off = walk
-  // a high number through a street of LEVEL 1s.
+  // Lv.100 through a street of single digits. Every term has real headroom
+  // because the CLIMB is the game: broke nobody → strapped hustler → kingpin.
   function playerLevel() {
     const econ = CBZ.cityEcon;
     let lvl = 1;
     const nw = econ && econ.netWorth ? econ.netWorth() : (g.cash || 0);
-    lvl += nw >= 5e6 ? 8 : nw >= 1e6 ? 6 : nw >= 2e5 ? 4 : nw >= 5e4 ? 3 : nw >= 1e4 ? 2 : nw >= 2e3 ? 1 : 0;
+    lvl += nw >= 5e6 ? 25 : nw >= 1e6 ? 18 : nw >= 2e5 ? 12 : nw >= 5e4 ? 8 : nw >= 1e4 ? 5 : nw >= 2e3 ? 2 : 0;
     if (CBZ.cityHasGun && CBZ.cityHasGun()) {
       const n = CBZ.cityCurrentWeaponName ? CBZ.cityCurrentWeaponName() : "";
-      lvl += HEAVY[n] ? 3 : 2;
+      lvl += HEAVY[n] ? 12 : 9;
     }
-    lvl += Math.min(6, ((g.kills | 0) / 4) | 0);
-    lvl += Math.min(6, Math.ceil((g.cityCrew | 0) / 2));
-    if (g.playerGang) lvl += 4;                                    // you run your own crew
-    else if (g.cityMembership) lvl += RANK_LVL[g.cityMembership.rank] || 1;
-    lvl += Math.min(5, ((g.respect | 0) / 25) | 0);
-    lvl += g.wanted | 0;                                           // infamy reads too
-    return Math.max(1, Math.min(40, Math.round(lvl)));
+    lvl += Math.min(15, ((g.kills | 0) / 2) | 0);
+    lvl += Math.min(15, (g.cityCrew | 0) * 2);
+    if (g.playerGang) lvl += 35;                                   // you run your own set
+    else if (g.cityMembership) lvl += Math.min(30, RANK_LVL[g.cityMembership.rank] || 13); // borrowed colors never outread your own flag
+    lvl += Math.min(10, ((g.respect | 0) / 25) | 0);
+    lvl += (g.wanted | 0) * 2;                                     // infamy reads too
+    return Math.max(1, Math.min(100, Math.round(lvl)));
   }
   CBZ.cityPlayerLevel = playerLevel;
 
   // ---- the street TITLE: what the number is attached to --------------------
   // Same physics as the level: derived from real state, never stored. Every
   // string is in-world (what a local would mutter, not a stat sheet) and the
-  // vocabulary is FIXED so the label-material cache stays small.
+  // vocabulary is FIXED so the label-material cache stays small. Title Case —
+  // a tag is a read, not a shout.
+  function titleCase(s) { return String(s).toLowerCase().replace(/(^|[\s\-'])\S/g, (c) => c.toUpperCase()); }
   // bountyTag strings come from peds.js rollBounty — map them to one-word reads.
-  const BOUNTY_TITLE = { "WANTED TERRORIST": "TERRORIST", "ARMED & DANGEROUS": "GUNMAN", FUGITIVE: "FUGITIVE", WANTED: "WANTED" };
+  const BOUNTY_TITLE = { "WANTED TERRORIST": "Terrorist", "ARMED & DANGEROUS": "Gunman", FUGITIVE: "Fugitive", WANTED: "Wanted" };
   // gangs.js rank keys → spoken rank, used only if CBZ.cityRankName isn't loaded.
-  const RANK_TITLE = { prospect: "PROSPECT", lookout: "LOOKOUT", runner: "RUNNER", soldier: "SOLDIER", enforcer: "ENFORCER", lt: "LIEUTENANT", boss: "BOSS" };
+  const RANK_TITLE = { prospect: "Prospect", lookout: "Lookout", runner: "Runner", soldier: "Soldier", enforcer: "Enforcer", lt: "Lieutenant", boss: "Boss" };
   // archetype vocabulary that actually exists (peds.js / economy.js casting).
   const ARCH_TITLE = {
-    dealer: "DEALER", mobster: "MOBSTER", made: "MADE MAN", boss: "MOB BOSS",
-    tycoon: "TYCOON", billionaire: "MAGNATE", socialite: "SOCIALITE", heiress: "HEIRESS",
+    dealer: "Dealer", mobster: "Mobster", made: "Made Man", boss: "Mob Boss",
+    tycoon: "Tycoon", billionaire: "Magnate", socialite: "Socialite", heiress: "Heiress",
   };
   // YOUR name on the street is earned by the same number everyone else reads —
-  // climb the ladder by getting richer, deadlier, better-backed.
-  const LADDER = [[2, "NOBODY"], [5, "CROOK"], [8, "HUSTLER"], [12, "SOLDIER"], [16, "ENFORCER"], [21, "SHOT CALLER"], [27, "MOB BOSS"]];
+  // climb the ladder by getting richer, deadlier, better-backed. Bands match
+  // the 1-100 world: Crook = strapped-civilian range, Enforcer = gang-brass
+  // range, Kingpin = the air only a maxed player breathes.
+  const LADDER = [[5, "Nobody"], [12, "Crook"], [20, "Hustler"], [35, "Soldier"], [50, "Enforcer"], [65, "Shot Caller"], [85, "Mob Boss"]];
   function ladderTitle(n) {
     for (let i = 0; i < LADDER.length; i++) if (n <= LADDER[i][0]) return LADDER[i][1];
-    return "KINGPIN";
+    return "Kingpin";
   }
   CBZ.cityPlayerTitle = function () { return ladderTitle(playerLevel()); };
 
   CBZ.cityTitle = function (a) {
-    if (!a) return "CIVILIAN";
+    if (!a) return "Civilian";
     if (a.isPlayer) return ladderTitle(playerLevel());
-    if (a.kind === "cop") return a.swat ? "SWAT" : "OFFICER";
-    if (a.kind === "security") return "SECURITY";
-    if (a.rampage) return "MANIAC";                     // mid-snap, nothing else matters
-    if (a.bounty > 0) return BOUNTY_TITLE[a.bountyTag] || "WANTED";
+    if (a.kind === "cop") return a.swat ? "SWAT" : "Officer"; // SWAT stays an acronym — "Swat" reads like a typo
+    if (a.kind === "security") return "Security";
+    if (a.rampage) return "Maniac";                     // mid-snap, nothing else matters
+    if (a.bounty > 0) return BOUNTY_TITLE[a.bountyTag] || "Wanted";
     if (a.gang) {
       if (CBZ.cityRankName && a.rank) {
         const pip = CBZ.cityRankName(a.rank);
-        if (pip) return String(pip).toUpperCase();      // "Lt." → "LT.", "Boss" → "BOSS"
+        if (pip) return titleCase(pip);                 // "Lt." → "Lt.", "boss" → "Boss"
       }
-      return RANK_TITLE[a.rank] || "SOLDIER";
+      return RANK_TITLE[a.rank] || "Soldier";
     }
     const t = ARCH_TITLE[a.archetype];
     if (t) return t;
     // plain civilians still read: the eyes, the temper, the coat.
-    if ((a.aggr || 0) >= 0.88) return "PSYCHO";
-    if ((a.aggr || 0) >= 0.72) return "CROOK";
-    if ((a.wealth || 0) >= 0.88) return "OLD MONEY";
-    return "CIVILIAN";
+    if ((a.aggr || 0) >= 0.88) return "Psycho";
+    if ((a.aggr || 0) >= 0.72) return "Crook";
+    if ((a.wealth || 0) >= 0.88) return "Old Money";
+    return "Civilian";
   };
 
   // ---- tag colour: the read keeps its allegiances --------------------------
@@ -139,7 +155,7 @@
     return "#eef4ff";
   }
 
-  // swap a tag's material to the cached TITLE · LEVEL label. Other systems
+  // swap a tag's material to the cached "Lv.N Title" label. Other systems
   // (gangs.js rank re-tags, bounty prefixes) still create NAME sprites — this
   // loop self-heals them back within a tick because the material ref no
   // longer matches. The sprite OBJECT is never replaced, so every existing
@@ -148,7 +164,7 @@
     if (!a || !a.tag || a.dead) return;
     const lvl = CBZ.cityLevel(a), col = colorFor(a), title = CBZ.cityTitle(a);
     if (a._lvlShown === lvl && a._lvlTitle === title && a._lvlCol === col && a._lvlMat === a.tag.material) return;
-    const s = CBZ.makeLabelSprite(title + " · " + lvl, { color: col });
+    const s = CBZ.makeLabelSprite("Lv." + lvl + " " + title, { color: col });
     a.tag.material = s.material;
     a._lvlShown = lvl; a._lvlTitle = title; a._lvlCol = col; a._lvlMat = s.material;
   }
@@ -171,7 +187,7 @@
       if (lvlEl) {
         const pl = playerLevel();
         // ladderTitle is a pure function of pl, so the level compare covers both.
-        if (pl !== lvlShown) { lvlShown = pl; lvlEl.textContent = "LEVEL " + pl + " · " + ladderTitle(pl); }
+        if (pl !== lvlShown) { lvlShown = pl; lvlEl.textContent = "Lv." + pl + " " + ladderTitle(pl); }
       }
     }
   });

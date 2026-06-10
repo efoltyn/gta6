@@ -15,10 +15,27 @@
    pooled, hard-capped, distance-LOD'd, driven by one always-updater so prison
    shootouts, survival deaths and city murders all end bloody.
 
+   THE KILL TELLS ITS OWN STORY (why: deaths are the game's exclamation
+   points — they must land hard, read directional, and leave evidence):
+     • a lazy tap on CBZ.cityKillPed reads the CAUSE of every city kill, so
+       gore knows HOW someone died without any caller changing a line:
+       - HEADSHOT  → a distinct heavier pop: tighter/faster exit spray, dry
+         skull-fragment gibs, and an INSTANT wall splat behind the head
+       - BLUNT melee (beaten) → teeth + spit fly, then a DELAYED bleed-out
+         pool spreads under the body a couple of seconds later
+       - BLADE melee (stabbed/executed) → 2-3 timed ARTERIAL spurts arc out
+         of the corpse as the heart dies
+       - RUN OVER  → a long tire-smear streak decal drawn along the car's
+         travel line (the wheel drags the blood with it)
+     • ground pools GROW over a few seconds and linger MUCH longer near the
+       player (evidence you walk past), and a corpse lying in a pool slowly
+       soaks dark — one cheap shared-material swap, never a per-frame tint.
+
    PRESERVED public API: CBZ.gore(x,y,z,opts), CBZ.clearGore().
 
    opts: { dir:{x,z}, amount:0.5..2, skin, cloth, slowmo:secs,
-           player:bool, sfx:bool|string, head:bool, explosion:bool }
+           player:bool, sfx:bool|string, head:bool, explosion:bool,
+           melee:"blunt"|"blade", smear:bool, smearLen:units }
 ============================================================ */
 (function () {
   "use strict";
@@ -28,10 +45,33 @@
 
   const GRAV = 24;
   const BLOOD = 0x8a0b10, BLOOD_D = 0x5e070b, BLOOD_BRT = 0xb01218;
+  const BONE = 0xe6ddc8, BONE_D = 0xcfc3ad, TOOTH = 0xf2ead8;
   const bits = [];     // flying gibs + blood droplets + mist
-  const splats = [];   // ground blood pools
+  const splats = [];   // ground blood pools + tire-smear streaks
   const walls = [];    // vertical wall/surface splatter decals
+  const later = [];    // delayed gore beats (arterial spurts, bleed-out pools)
   let flashEl = null, flashV = 0;
+
+  // ---- KILL-CONTEXT TAP -----------------------------------------------------
+  // peds.js loads after us and calls CBZ.gore from inside cityKillPed without
+  // saying HOW the victim died. Wrapping cityKillPed (lazily, once it exists)
+  // hands gore the victim + impact + cause for the duration of that one call,
+  // so cause-aware gore needs zero changes at any kill site. Consumed once per
+  // kill (the explosion-stump second gore call keeps stock treatment).
+  let killCtx = null, killTapped = false;
+  function installKillTap() {
+    const orig = CBZ.cityKillPed;
+    if (!orig || orig._goreTap) { killTapped = !!orig; return; }
+    CBZ.cityKillPed = function (ped, imp, cause) {
+      killCtx = { ped, imp, cause, used: false };
+      try { return orig(ped, imp, cause); } finally { killCtx = null; }
+    };
+    CBZ.cityKillPed._goreTap = true;
+    killTapped = true;
+  }
+
+  // schedule a delayed gore beat; hard-capped so spam can't queue a flood
+  function after(t, fn) { if (later.length > 24) return; later.push({ t, fn }); }
 
   function scene() { return CBZ.scene; }
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
@@ -87,7 +127,7 @@
 
   function spawnBit(x, y, z, vx, vy, vz, size, color, kind) {
     const cap = kind === "mist" ? 620 : 520;
-    if (bits.length > cap) return;     // hard cap so a nuke can't flood the scene
+    if (bits.length > cap) return null;  // hard cap so a nuke can't flood the scene
     let geo, mat;
     if (kind === "gib") { geo = G_GIB; mat = lambert(color); }
     else if (kind === "mist") { geo = G_MIST; mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }); }
@@ -98,12 +138,14 @@
     else m.scale.setScalar(size);
     m.position.set(x, y, z); m.castShadow = false; m.renderOrder = kind === "mist" ? 5 : 0;
     scene().add(m);
-    bits.push({
+    const rec = {
       m, vx, vy, vz, kind, mat: kind === "mist" ? mat : null, mistFade: 0,
       sx: (Math.random() - 0.5) * 18, sy: (Math.random() - 0.5) * 18, sz: (Math.random() - 0.5) * 18,
       landed: false, bled: false, baseScale: size,
       life: kind === "blood" ? 0.7 + Math.random() * 0.8 : (kind === "mist" ? 0.45 + Math.random() * 0.45 : 7 + Math.random() * 6),
-    });
+    };
+    bits.push(rec);
+    return rec;
   }
 
   function spawnSplat(x, z, grow, color, linger) {
@@ -115,13 +157,41 @@
     m.position.set(x, floorAt(x, z) + 0.04 + Math.random() * 0.02, z);
     m.renderOrder = 3; m.scale.set(0.1, 0.1, 1);
     scene().add(m);
-    splats.push({ m, t: 0, grow, max: grow, hold: linger ? 30 : 12, fade: linger ? 14 : 8 });
+    // pools GROW over a few seconds (a body keeps draining) and the ones near
+    // the PLAYER linger far longer — that's the evidence you walk back past.
+    // Far pools keep the short clock so the cap budget stays where it matters.
+    const near = dist2Cam(x, z) < 24 * 24;
+    splats.push({
+      m, t: 0, grow, max: grow, growT: linger ? 3.4 : 0.5,
+      hold: linger ? (near ? 75 : 26) : (near ? 16 : 10), fade: linger ? 16 : 8,
+    });
+  }
+
+  // a long, thin blood smear dragged along a travel line (run-over kills):
+  // the wheel pulls the pool with it, so the decal stretches out over ~half a
+  // second along the car's direction instead of blooming in place.
+  function spawnStreak(x0, z0, dx, dz, len) {
+    if (splats.length > 170) { rm(splats.shift().m); }
+    const m = new THREE.Mesh(G_PLANE,
+      new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2;
+    m.rotation.z = Math.atan2(-dx, -dz);          // local +y axis → world (dx,dz)
+    m.position.set(x0, floorAt(x0, z0) + 0.045, z0);
+    m.renderOrder = 3; m.scale.set(0.55, 0.1, 1);
+    scene().add(m);
+    const near = dist2Cam(x0, z0) < 24 * 24;
+    splats.push({
+      m, streak: true, x0, z0, dx, dz, t: 0, grow: len, max: len,
+      w: 0.55 + Math.random() * 0.25, hold: near ? 60 : 28, fade: 14,
+    });
   }
 
   // stamp a vertical blood decal on a wall/surface that sits just behind the
   // victim along the impact direction (dir points AWAY from shooter). Cheap:
   // a single AABB scan of CBZ.colliders, no raycaster, capped + distance-gated.
-  function spawnWallSplat(x, y, z, dx, dz, amt) {
+  // `instant` (headshot): the decal arrives pre-grown — the brain hits the wall
+  // the same frame as the shot, it doesn't bloom politely afterwards.
+  function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
     const cols = CBZ.colliders;
     if (!cols || !cols.length || walls.length > 48) return;
     const MAXD = 3.4;
@@ -157,7 +227,7 @@
     const sz = 0.7 + amt * 0.7;
     m.scale.set(0.1, 0.1, 1);
     scene().add(m);
-    walls.push({ m, t: 0, grow: sz, hold: 26, fade: 12 });
+    walls.push({ m, t: instant ? 0.4 : 0, grow: sz, hold: 26, fade: 12 });
     // a couple of drip streaks running down from the splat
     const drips = Math.min(3, 1 + Math.round(amt));
     for (let d = 0; d < drips; d++) {
@@ -169,6 +239,119 @@
       dm.scale.set(0.04, 0.1, 1);
       scene().add(dm);
       walls.push({ m: dm, t: 0, grow: 0, hold: 26, fade: 12, drip: 0.3 + Math.random() * 0.7, dripY: m.position.y });
+    }
+  }
+
+  // ---- HEADSHOT: dry skull fragments riding the exit line --------------------
+  // bone doesn't bleed — fragments are flagged "bled" so landing leaves no pool,
+  // they just skitter and settle as hard evidence of where the head came apart.
+  function skullFrags(x, y, z, dx, dz, lod) {
+    const n = 3 + Math.round(2 * lod);
+    for (let i = 0; i < n; i++) {
+      const b = spawnBit(x, y + 1.1, z,        // y already arrives chest-high — +1.1 = the head
+        dx * (6 + Math.random() * 4.5) + (Math.random() - 0.5) * 3,
+        3.5 + Math.random() * 4,
+        dz * (6 + Math.random() * 4.5) + (Math.random() - 0.5) * 3,
+        0.06 + Math.random() * 0.07, i % 3 === 2 ? BONE_D : BONE, "gib");
+      if (b) b.bled = true;
+    }
+  }
+
+  // ---- BLUNT KILL: teeth + spit knocked loose by the killing blow ------------
+  // tiny dry gibs (teeth scatter and STAY — they're the receipt of a beating)
+  // plus a couple of bright spit-blood droplets; the pool comes LATER, below.
+  function bluntBurst(x, y, z, dx, dz, hasDir) {
+    const n = 4 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < n; i++) {
+      const fx = hasDir ? dx * (2.5 + Math.random() * 2.5) : (Math.random() - 0.5) * 4;
+      const fz = hasDir ? dz * (2.5 + Math.random() * 2.5) : (Math.random() - 0.5) * 4;
+      const b = spawnBit(x, y + 1.1, z,        // y already arrives chest-high — +1.1 = the mouth
+        fx + (Math.random() - 0.5) * 2, 2.5 + Math.random() * 3, fz + (Math.random() - 0.5) * 2,
+        0.045 + Math.random() * 0.035, TOOTH, "gib");
+      if (b) b.bled = true;          // teeth are dry — no pool where one lands
+    }
+    for (let i = 0; i < 3; i++) {
+      spawnBit(x, y + 1.05, z,
+        (hasDir ? dx * 2 : 0) + (Math.random() - 0.5) * 3, 2 + Math.random() * 2.5,
+        (hasDir ? dz * 2 : 0) + (Math.random() - 0.5) * 3,
+        0.05 + Math.random() * 0.04, BLOOD_BRT, "blood");
+    }
+  }
+
+  // a beaten body doesn't gush — it BLEEDS OUT: the pool arrives in waves a
+  // couple of seconds after the body drops, spreading under wherever it lies.
+  function delayedBleedPool(ped) {
+    after(1.5, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 0.9, BLOOD_D, true); });
+    after(3.3, function () { if (ped && ped.pos && !ped.culled) spawnSplat(ped.pos.x, ped.pos.z, 1.5, BLOOD_D, true); });
+  }
+
+  // ---- BLADE KILL: 2-3 timed ARTERIAL spurts as the heart dies ----------------
+  // each spurt arcs up and out of the corpse (tracking wherever the ragdoll
+  // ended up), weaker each beat; every droplet stamps its own landing splat.
+  function arterialArcs(ped, dx, dz) {
+    for (let s = 0; s < 3; s++) {
+      (function (idx) {
+        after(0.3 + idx * 0.45, function () {
+          if (!ped || !ped.pos || ped.culled) return;
+          const px = ped.pos.x, pz = ped.pos.z, py = ped.pos.y + (idx === 0 ? 1.3 : 0.55);
+          const fade = 1 - idx * 0.24;
+          const n = 7 - idx * 2;
+          for (let i = 0; i < n; i++) {
+            spawnBit(px, py, pz,
+              dx * (2.2 + Math.random() * 2.4) * fade + (Math.random() - 0.5) * 1.6,
+              (4.6 + Math.random() * 2.6) * fade,
+              dz * (2.2 + Math.random() * 2.4) * fade + (Math.random() - 0.5) * 1.6,
+              0.055 + Math.random() * 0.06, Math.random() < 0.6 ? BLOOD_BRT : BLOOD, "blood");
+          }
+        });
+      })(s);
+    }
+  }
+
+  // ---- CORPSE STAIN: a body lying in a pool slowly soaks dark -----------------
+  // ONE cheap shared-material swap per corpse (never a per-frame tint): torso/
+  // legs/arms switch to a cached darkened-blood lambert from the same matCache
+  // the gibs use (tagged _shared, so the rig disposal sweep never frees it).
+  // Throttled scan, camera-gated, dead+settled bodies only.
+  const stainCache = new Map();
+  function stainHex(hex) {
+    let s = stainCache.get(hex);
+    if (s == null) {
+      const r = Math.min(255, (((hex >> 16) & 255) * 0.38 + 46) | 0);
+      const gr = Math.min(255, (((hex >> 8) & 255) * 0.26 + 8) | 0);
+      const b = Math.min(255, ((hex & 255) * 0.26 + 10) | 0);
+      s = (r << 16) | (gr << 8) | b; stainCache.set(hex, s);
+    }
+    return s;
+  }
+  function stainCorpse(ped) {
+    ped._goreStained = true;
+    const ch = ped.char; if (!ch || !ch.skinSlots) return;
+    const slots = ch.skinSlots;
+    const lists = [slots.torso, slots.legs, slots.arms, slots.collar];
+    for (let li = 0; li < lists.length; li++) {
+      const list = lists[li]; if (!list) continue;
+      for (let mi = 0; mi < list.length; mi++) {
+        const mesh = list[mi];
+        if (!mesh || !mesh.material || !mesh.material.color) continue;
+        mesh.material = lambert(stainHex(mesh.material.color.getHex()));
+      }
+    }
+  }
+  let stainT = 0;
+  function stainScan() {
+    const peds = CBZ.cityPeds;
+    if (!peds || !splats.length) return;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || !p.dead || p._goreStained || p.culled || !p.pos || (p.deadT || 0) < 2.5) continue;
+      if (dist2Cam(p.pos.x, p.pos.z) > 45 * 45) continue;     // only stain where it can be seen
+      for (let j = 0; j < splats.length; j++) {
+        const s = splats[j];
+        if (s.streak || s.max < 0.85 || s.t < 1.2) continue;  // settled kill-pools only
+        const dx = s.m.position.x - p.pos.x, dz = s.m.position.z - p.pos.z;
+        if (dx * dx + dz * dz < 1.8) { stainCorpse(p); break; }
+      }
     }
   }
 
@@ -192,11 +375,21 @@
     const lod = far ? 0.5 : 1;
 
     const amt = opts.amount != null ? opts.amount : 1;
+    // the kill-context tap (one per cityKillPed call) tells us HOW they died —
+    // consumed once so the explosion-stump second burst keeps stock treatment.
+    let ctx = null;
+    if (killCtx && !killCtx.used) { killCtx.used = true; ctx = killCtx; }
+    const cause = ctx ? ("" + (ctx.cause || "")).toLowerCase() : "";
     // headshot / explosion get a heavier, mistier, gorier treatment. Callers
     // signal a headshot either explicitly (opts.head) or with a fat amount(>=1.3).
-    const head = !!opts.head || amt >= 1.3;
+    const head = !!opts.head || amt >= 1.3 || cause === "headshot";
     const boom = !!opts.explosion;
     const big = head || boom;
+    // melee kills read by their weapon: blunt knocks teeth loose then bleeds
+    // out slow; a blade opens an artery. Run-overs drag a smear down the road.
+    const blade = opts.melee === "blade" || cause === "stabbed" || cause === "executed";
+    const blunt = opts.melee === "blunt" || cause === "beaten" || cause === "finished off";
+    const ranOver = !!opts.smear || cause === "run over";
 
     let dx = 0, dz = 0, hasDir = false;
     if (opts.dir) { dx = opts.dir.x || 0; dz = opts.dir.z || 0; hasDir = (dx || dz); }
@@ -207,20 +400,25 @@
     const cloth = opts.cloth != null ? opts.cloth : 0xd24a32;
 
     // --- LAYER 1: directional SPRAY — fast droplets flung AWAY from impact ---
-    // forward-biased fan; tighter cone for a clean headshot, wide burst for boom.
-    const spread = boom ? 1.0 : (head ? 0.5 : 0.7);
-    const fwd = boom ? 1.5 : (head ? 7 : 5);   // forward push along dir (exit wound)
-    const nb = Math.round(16 * amt * lod);
+    // forward-biased fan, leaning HARD into the shot line so the exit wound
+    // reads which way the bullet went; tighter+faster for a clean headshot,
+    // omnidirectional only for boom. Sideways fan stays narrow vs the forward
+    // push so the spray is a LINE on the ground, not a blot.
+    const spread = boom ? 1.0 : (head ? 0.42 : 0.6);
+    const fwd = boom ? 1.5 : (head ? 9 : 6.5);  // forward push along dir (exit wound)
+    const nb = Math.round((head ? 24 : 16) * amt * lod);
     for (let i = 0; i < nb; i++) {
       const side = (Math.random() - 0.5) * 2;          // -1..1 across the fan
-      const fanX = dx * (fwd + Math.random() * 5) + px * side * spread * (4 + Math.random() * 5);
-      const fanZ = dz * (fwd + Math.random() * 5) + pz * side * spread * (4 + Math.random() * 5);
+      const fanX = dx * (fwd + Math.random() * 6) + px * side * spread * (2.5 + Math.random() * 3.5);
+      const fanZ = dz * (fwd + Math.random() * 6) + pz * side * spread * (2.5 + Math.random() * 3.5);
       // boom has no preferred direction → omnidirectional ring
       const omni = boom || !hasDir;
       const a = Math.random() * 6.28, sp = 2 + Math.random() * 8;
+      // a directed shot throws blood FLATTER (it travels, then lands down-range);
+      // only boom lofts it high.
       spawnBit(x, y + 0.3 + Math.random() * 1.2, z,
         omni ? Math.cos(a) * sp * 0.7 : fanX,
-        3 + Math.random() * 7 + (boom ? 4 : 0),
+        (omni ? 3 + Math.random() * 7 : 2 + Math.random() * 5) + (boom ? 4 : 0),
         omni ? Math.sin(a) * sp * 0.7 : fanZ,
         0.07 + Math.random() * 0.11, Math.random() < 0.5 ? BLOOD : BLOOD_D, "blood");
     }
@@ -252,12 +450,33 @@
     }
 
     // --- LAYER 4: ground POOL — lingers, spreads, biased forward of the body --
+    // a blunt kill barely pools NOW (the bleed-out arrives in waves, below);
+    // everything else drains immediately and forward of the body.
     const pgx = hasDir ? x + dx * 0.4 : x, pgz = hasDir ? z + dz * 0.4 : z;
-    spawnSplat(pgx, pgz, 1.1 + amt * 0.9 + (big ? 0.6 : 0), BLOOD_D, true);
+    spawnSplat(pgx, pgz, blunt ? 0.45 : (1.1 + amt * 0.9 + (big ? 0.6 : 0)), BLOOD_D, true);
     if (big) spawnSplat(x - dx * 0.5, z - dz * 0.5, 0.6 + amt * 0.4, BLOOD, true);
 
     // --- LAYER 5: WALL SPLATTER — vertical decal on a surface behind the body -
-    if (hasDir && !far) spawnWallSplat(x, y + 0.5, z, dx, dz, amt);
+    // headshots paint the wall INSTANTLY (pre-grown decal) and half-again bigger.
+    if (hasDir && !far) spawnWallSplat(x, y + 0.5, z, dx, dz, head ? amt * 1.6 : amt, head);
+
+    // --- CAUSE BEATS: the kill's signature (skipped at distance — pure LOD) ---
+    if (!far) {
+      if (head && hasDir) skullFrags(x, y, z, dx, dz, lod);
+      if (blade && ctx && ctx.ped) arterialArcs(ctx.ped, dx, dz);
+      if (blunt) {
+        bluntBurst(x, y, z, dx, dz, hasDir);
+        if (ctx && ctx.ped) delayedBleedPool(ctx.ped);
+      }
+    }
+    // run-over smear: the streak starts under the body and is dragged down-range
+    // along the car's travel line. Length scales with the impact fling (≈speed).
+    if (ranOver && hasDir) {
+      let sl = opts.smearLen || 0;
+      if (!sl && ctx && ctx.imp && ctx.imp.fling) sl = 2.2 + Math.min(6.5, ctx.imp.fling * 0.55);
+      if (!sl) sl = 4;
+      spawnStreak(x - dx * 0.8, z - dz * 0.8, dx, dz, sl);
+    }
 
     if (CBZ.shake) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
     flashV = Math.max(flashV, 0.32 * amt + (opts.player ? 0.18 : 0));
@@ -268,8 +487,19 @@
   // one always-updater drives gibs + mist + pools + wall splats + the red jolt
   CBZ.onAlways(8, function (dt) {
     if (dt <= 0) return;
+    if (!killTapped) installKillTap();   // peds.js loads after us — tap once it exists
     if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
     else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
+
+    // delayed gore beats (arterial spurts / bleed-out pools)
+    for (let i = later.length - 1; i >= 0; i--) {
+      const L = later[i]; L.t -= dt;
+      if (L.t <= 0) { later.splice(i, 1); try { L.fn(); } catch (e) {} }
+    }
+
+    // throttled corpse-stain scan: bodies lying in a pool soak dark, once each
+    stainT -= dt;
+    if (stainT <= 0) { stainT = 0.85; stainScan(); }
 
     for (let i = bits.length - 1; i >= 0; i--) {
       const b = bits[i], m = b.m;
@@ -300,8 +530,21 @@
 
     for (let i = splats.length - 1; i >= 0; i--) {
       const s = splats[i]; s.t += dt;
-      const sc = Math.min(s.grow, s.t * 5 * s.grow);
-      s.m.scale.set(Math.max(0.1, sc), Math.max(0.1, sc), 1);
+      if (s.streak) {
+        // tire smear: stretches down the travel line over ~half a second,
+        // its centre sliding forward so the streak is DRAWN, not stamped.
+        const k = Math.min(1, s.t / 0.45);
+        const L = Math.max(0.2, s.grow * k);
+        s.m.scale.set(s.w, L, 1);
+        s.m.position.x = s.x0 + s.dx * L * 0.5;
+        s.m.position.z = s.z0 + s.dz * L * 0.5;
+      } else {
+        // pools GROW over seconds: a fast initial blot, then a slow creep out
+        // to full size as the body drains (growT: ~3.4s for kill pools).
+        const k = Math.min(1, s.t / (s.growT || 0.5));
+        const sc = s.grow * (0.34 + 0.66 * Math.sqrt(k));
+        s.m.scale.set(Math.max(0.1, sc), Math.max(0.1, sc), 1);
+      }
       const fadeIn = Math.min(1, s.t * 4);
       const fadeOut = s.t > s.hold ? Math.max(0, 1 - (s.t - s.hold) / s.fade) : 1;
       s.m.material.opacity = 0.66 * fadeIn * fadeOut;
@@ -331,6 +574,7 @@
     for (const b of bits) rm(b.m); bits.length = 0;
     for (const s of splats) rm(s.m); splats.length = 0;
     for (const w of walls) rm(w.m); walls.length = 0;
+    later.length = 0; killCtx = null;
     flashV = 0; if (flashEl) flashEl.style.opacity = "0";
   };
 })();

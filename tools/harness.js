@@ -723,10 +723,10 @@ function testLevels() {
   const civ = peds.find((p) => !p.dead && !p.gang && !p.armed && !p.weapon && !p.recruited && !p.companion &&
                                (p.wealth || 0) < 0.5 && !(p.bounty > 0) && (p.aggr || 0) < 0.85);
   const ganger = peds.find((p) => !p.dead && p.gang && (p.rank === "enforcer" || p.rank === "lt" || p.rank === "boss"));
-  if (civ) ok("ordinary civilian reads low", CBZ.cityLevel(civ) <= 3, "lvl=" + CBZ.cityLevel(civ));
-  if (ganger) ok("ranked gang member reads high", CBZ.cityLevel(ganger) >= 6, ganger.rank + " lvl=" + CBZ.cityLevel(ganger));
+  if (civ) ok("ordinary civilian reads low", CBZ.cityLevel(civ) <= 8, "lvl=" + CBZ.cityLevel(civ));
+  if (ganger) ok("ranked gang member reads high", CBZ.cityLevel(ganger) >= 40, ganger.rank + " lvl=" + CBZ.cityLevel(ganger));
   const cop = CBZ.cityCops.find((c) => !c.dead);
-  if (cop) ok("cop reads trained", CBZ.cityLevel(cop) >= 8, "lvl=" + CBZ.cityLevel(cop));
+  if (cop) ok("cop reads trained", CBZ.cityLevel(cop) >= 20, "lvl=" + CBZ.cityLevel(cop));
   // the slow sweep ran during the 1200 frames — tags should read LEVEL N now
   const tagged = peds.filter((p) => p.tag && !p.dead);
   const swept = tagged.filter((p) => p._lvlShown > 0);
@@ -744,8 +744,8 @@ function testLevels() {
     ok("outclassed civilian won't dare", CBZ.citySizeUp(civ, pa) === false, "civLvl=" + CBZ.cityLevel(civ) + " plLvl=" + CBZ.cityLevel(pa));
     CBZ.citySizeUpFold(civ, pa);
     ok("outclassed civilian folds", civ.surrender === true || civ.state === "flee", "state=" + civ.state + " surrender=" + !!civ.surrender);
-    if (CBZ.cityLevel(civ) <= 2) ok("no respect for stomping a nobody", CBZ.cityKillRespect(civ) === 0, "resp=" + CBZ.cityKillRespect(civ));
-    if (ganger) ok("respect paid for a real one", CBZ.cityKillRespect(ganger) >= 2, "resp=" + CBZ.cityKillRespect(ganger));
+    if (CBZ.cityLevel(civ) <= 5) ok("no respect for stomping a nobody", CBZ.cityKillRespect(civ) === 0, "resp=" + CBZ.cityKillRespect(civ));
+    if (ganger) ok("respect paid for a real one", CBZ.cityKillRespect(ganger) >= 3, "resp=" + CBZ.cityKillRespect(ganger));
   }
   const violent = peds.find((p) => !p.dead && (p.aggr || 0) >= 0.88);
   if (violent && CBZ.citySizeUp) { g.cash = 6e6; ok("the violent fear nothing", CBZ.citySizeUp(violent, pa) === true); }

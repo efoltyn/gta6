@@ -428,6 +428,8 @@
   // world bullet/tracer/casing origin is held steady.
   const _muzM = new THREE.Matrix4();
   // camera-space bounds: down-and-right of the lens, out in front, never at the eye.
+  // FIRST-PERSON ONLY — this box is "the gun region" solely when the camera IS the
+  // shooter's eye. The shoulder cam clamps to the gun HAND instead (see below).
   const MUZ_UP = [-0.78, -0.16], MUZ_RIGHT = [0.1, 0.62], MUZ_FWD = [0.45, 3.2];
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   function clampMuzzleBelowEye(out) {
@@ -445,6 +447,26 @@
       cam.position.z + fz * f + uz * u + rz * r);
   }
 
+  // THIRD-PERSON (shoulder cam) clamp: the camera-space box above is wrong out
+  // here — the lens hangs 5–16m BEHIND the player (camera.js zoom clamp), so
+  // "0.45–3.2m in front of the lens, just under its eye-line" is a point in
+  // mid-air behind the character that projects EXACTLY onto his head on screen.
+  // That's the filmed bug: every clamped round poured from the skull. From the
+  // shoulder the truth anchor is the GUN HAND — bound the origin to a sphere of
+  // THIS gun's barrel length (+slack) around the carried-gun root. A healthy
+  // pose sits exactly at barrel length, so this is a pure safety net (no-op
+  // every normal frame) that catches degenerate rigs/unparented guns instead of
+  // ever relocating the stream. Rounds pour from the muzzle, tap or mag-dump.
+  const _handPos = new THREE.Vector3();
+  function clampMuzzleToHand(out, model) {
+    carriedGun.getWorldPosition(_handPos);   // r128: refreshes parent matrices itself
+    const sc = (model.scale && model.scale.x) || 1;
+    const r = model.userData.muzzle.length() * sc + 0.5;  // bazooka 1.4*1.05 ≈ 1.47 still passes
+    const d = out.distanceTo(_handPos);
+    if (d > r) out.sub(_handPos).multiplyScalar(r / d).add(_handPos);
+    return out;
+  }
+
   function muzzleWorld(out) {
     if (shoulderActive()) {
       const model = carriedModels[fps.weapon];
@@ -458,7 +480,8 @@
           if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.updateMatrixWorld(true);
           model.updateMatrixWorld(true);
         }
-        return clampMuzzleBelowEye(model.localToWorld(out.copy(model.userData.muzzle)));
+        // hand-anchored clamp (NOT the camera box — see clampMuzzleToHand)
+        return clampMuzzleToHand(model.localToWorld(out.copy(model.userData.muzzle)), model);
       }
     }
     if (fps.active) {
@@ -476,8 +499,16 @@
       }
     }
     // last-resort fallback: drop it to GUN height/forward (down + out from the
-    // eye) so a tracer never visibly streaks out of the player's head.
-    forward(fwd); buildBasis(fwd);
+    // eye) so a tracer never visibly streaks out of the player's head. From the
+    // shoulder cam the lens is metres BEHIND the player (a tracer from there
+    // would streak THROUGH the body), so anchor at the gun-side chest instead.
+    aimForward(fwd); buildBasis(fwd);
+    if (shoulderActive() && CBZ.player && CBZ.player.pos) {
+      const pp = CBZ.player.pos;
+      return out.set(pp.x, pp.y + 1.45, pp.z)
+        .addScaledVector(right, 0.24)
+        .addScaledVector(fwd, 0.5);
+    }
     return out.copy(CBZ.camera.position)
       .addScaledVector(right, 0.18)
       .addScaledVector(aimUp, -0.34)
@@ -1267,7 +1298,9 @@
       if (fps.reloading <= 0) finishReloadStep();
       else setAmmoHud();
     }
-    if (triggerHeld && weapon().auto) shoot();
+    // NOTE: held-trigger auto fire moved BELOW the pose updates — see end of
+    // this callback. Firing here read last frame's camera/rig mid-recoil-swing,
+    // which is the other half of "sustained fire creeps off the barrel".
 
     let bobY = 0, bobX = 0;
     const p = CBZ.player;
@@ -1394,6 +1427,14 @@
       muzzle.material.opacity = Math.max(0, muzzleT / (w.key === "shotgun" ? 0.065 : 0.04));
       if (muzzleT <= 0) muzzle.visible = false;
     }
+
+    // HELD-TRIGGER auto fire — AFTER this frame's camera + viewmodel +
+    // carried-gun/arm pose are final, so every round of a burst samples the
+    // SAME fresh matrices a single tap does (taps fire post-render from the
+    // mouse event). The flash sprite, tracer and casing all read muzzleWorld
+    // off the pose that's about to be RENDERED, keeping the stream visually
+    // welded to the barrel through a whole mag-dump.
+    if (triggerHeld && w.auto) shoot();
 
     if (cross) {
       const aim = aimedActor(armed() ? w.range : MELEE);

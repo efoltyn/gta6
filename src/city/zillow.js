@@ -722,7 +722,9 @@
       else if (!t.occupied) { t.occupied = true; }
       // GANG TIE: income is scaled by who controls the district (your turf pays
       // more, a rival's turf pays less). This makes the takeover feed the wallet.
-      const income = t.occupied ? round5(v * (TENANT_YIELD[rec.category] || 0.01) * ctrlPayMul(rec)) : 0;
+      // AD TIE (adboard.js): billboards you rent that push THIS business bump
+      // its take — owning the skyline literally pays the till.
+      const income = t.occupied ? round5(v * (TENANT_YIELD[rec.category] || 0.01) * ctrlPayMul(rec) * (CBZ.cityAdBoost ? CBZ.cityAdBoost(rec) : 1)) : 0;
       net += income - tax;
     }
     if (n > 0 && net > 0) net = Math.round(net / (1 + PORTFOLIO_DRAG * n));

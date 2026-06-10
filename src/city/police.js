@@ -10,6 +10,12 @@
      toward your last-known position and cuff you (→ jail) or open fire.
    • Cops can be DISARMED: a downed officer drops their gun, which the
      player — or a bold enough ped — can snatch.
+   • 0★ PROCEDURE LAYER: beats walk in PAIRS with the sidearm ON THE BELT,
+     escalations get CALLED IN on the shoulder mic before the response rolls,
+     and street nuisances (a corpse, a brawl, a rough sleeper) draw a
+     move-along that waves the block off. WHY: the wanted ramp only lands if
+     the baseline cop reads as a working officer — then 5★ feels like the
+     SAME force turning on you, not drones spawning.
 
    Targets are chosen by threat: each cop locks the nearest high-priority
    offender (you or an NPC). cop.npcTarget points at the ped it's hunting
@@ -55,6 +61,132 @@
   // OPENLY carrying = the shared engine loadout is currently drawn.
   // COMPLY snapshots and empties that loadout, so every city system sees fists.
   function openCarry() { return playerArmed() && !g.cityStowedWeapon; }
+
+  // ============================================================
+  //  0★ PROCEDURE LAYER — paired beats, holstered sidearms, radio discipline,
+  //  move-alongs. All cheap + bounded: one global bark cooldown, one citywide
+  //  move-along at a time, one dispatch caller per escalation step.
+  // ============================================================
+  let copClock = 0;            // module clock for cheap cooldown stamps (vagrant shoo timers)
+  let barkCD = 0;              // ONE global small-talk cooldown → barks stay rare, never spam
+  let dutyScanT = 0, dutyIdx = 0, dutyCop = null;          // single move-along assignment
+  let dispatchHoldT = 0, radioNoteCD = 0, lastStars = 0, lastWant = 0;   // radio-beat state
+
+  // beat small-talk — strictly diegetic procedure/street flavor, only worth
+  // SAYING when the player is close enough to overhear it.
+  const BEAT_LINES = [
+    "Quiet block tonight. Stay on it.",
+    "Dispatch wants us visible on this strip.",
+    "Watch that corner — it's been hot all week.",
+    "We loop the block, then check the storefronts.",
+    "Payday weekend. Keep your eyes open.",
+  ];
+  function copBark(c, lines) {
+    if (barkCD > 0 || !lines || !lines.length) return;
+    const P = CBZ.player; if (!P || P.dead) return;
+    if (Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z) > 13) return;   // overheard, not broadcast
+    barkCD = 26 + rng() * 20;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + (c.name || "Officer") + ": " + lines[(rng() * lines.length) | 0], 1.8);
+  }
+
+  // ---- HOLSTER / DRAW -------------------------------------------------------
+  // WHY: a beat cop with the pistol perpetually out reads as a drone — the belt
+  // is the 0★ baseline, so the DRAW itself becomes the escalation cue. actor
+  // .armed is THE flag the shared rig reads: with it false, actorweapons.js
+  // syncActorWeapon hides the prop AND poseList @36 skips the gun-ready arm
+  // pose, so the whole body relaxes. The prop object is KEPT on the socket so a
+  // re-draw is a visibility flip, not a geometry rebuild (we're draw-call bound).
+  function holsterGun(c) {
+    if (c.dead || !c.armed) return;
+    c._beltGun = c.weapon || (c.swat ? "SMG" : "Pistol");   // remember what rides the belt
+    c.armed = false;
+    if (c._weaponProp) c._weaponProp.visible = false;
+    c._weaponPropId = null;
+  }
+  function drawGun(c) {
+    if (c.dead || c.armed) return;
+    c.armed = true; c.weapon = c.weapon || c._beltGun || (c.swat ? "SMG" : "Pistol");
+    if (c._weaponProp && c._weaponProp.userData && c._weaponProp.userData.weaponId) {
+      c._weaponProp.visible = true;
+      c._weaponPropId = c._weaponProp.userData.weaponId;    // same gun → no rebuild
+    } else if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(c);
+    c._calmT = 0;
+  }
+
+  // left hand up to the shoulder mic — set AFTER animChar so the idle damp
+  // doesn't fight it; when the call ends animChar eases the arm back down.
+  function radioPose(ch) {
+    if (!ch || !ch.parts || !ch.parts.la) return;
+    ch.parts.la.rotation.set(-1.95, 0.55, -0.30);
+    ch.parts.la.position.z = 0.12;
+  }
+
+  function standIdle(c, faceY, dt, near) {
+    c.speed = 0;
+    c.group.rotation.y = lerpAngle(c.group.rotation.y, faceY, 1 - Math.pow(0.01, dt));
+    finalizeMove(c);
+    if (near) animChar(c.char, 0, dt);
+  }
+
+  // beats walk in TWOS: a mate-less ambient cop claims the nearest free single.
+  // Pure refs over existing patrollers — never a new spawn. The lead picks the
+  // route; the partner holds the right-shoulder slot.
+  function pairUp(c) {
+    let best = null, bd = 80 * 80;            // don't cross the whole map to meet up
+    for (const o of CBZ.cityCops) {
+      if (o === c || o.dead || !o.ambient || o._mate || o.giveUp || o.gunstop || o.swat) continue;
+      const dd = (o.pos.x - c.pos.x) * (o.pos.x - c.pos.x) + (o.pos.z - c.pos.z) * (o.pos.z - c.pos.z);
+      if (dd < bd) { bd = dd; best = o; }
+    }
+    if (!best) return;
+    c._mate = best; best._mate = c;
+    c._lead = true; best._lead = false;
+  }
+
+  // ---- MOVE-ALONG (0★ only): a beat cop spots a corpse, a street brawl, or a
+  // vagrant camped on the block, walks the scene, and waves the block off.
+  // Vagrants get SHOOED (peds.js:482 flags them for exactly this) — never shot;
+  // an offender with real heat is chooseTarget's hunt, never a shoo.
+  function findIssueNear(c) {
+    let best = null, bd = 26;
+    for (const p of CBZ.cityPeds) {
+      const d = Math.hypot(p.pos.x - c.pos.x, p.pos.z - c.pos.z);
+      if (d >= bd) continue;
+      if (p.dead) { if (!p._copSecured) { best = { kind: "corpse", ped: p }; bd = d; } continue; }
+      if ((p.npcWanted | 0) >= 1 || p.rampage || p.ko > 0) continue;   // a hunt / already down — not a shoo
+      if (p.state === "fight" || p.rage) { best = { kind: "brawl", ped: p }; bd = d; continue; }
+      if (p.vagrant && !(p._shooUntil > copClock) && p.state !== "flee") { best = { kind: "vagrant", ped: p }; bd = d; }
+    }
+    return best;
+  }
+  function scanDuty(dt) {
+    if (dutyCop && (dutyCop.dead || dutyCop.giveUp || !dutyCop._duty)) dutyCop = null;
+    dutyScanT -= dt;
+    if (dutyScanT > 0 || dutyCop || (g.wanted | 0) !== 0 || g.state !== "playing") return;
+    dutyScanT = 1.7;
+    const cops = CBZ.cityCops; if (!cops.length) return;
+    const c = cops[dutyIdx++ % cops.length];   // ONE candidate per tick — bounded
+    if (!c || c.dead || !c.ambient || c.gunstop || c.giveUp || c.curTarget || c.npcTarget || c.chaseCar || c.searchT > 0 || c._radioT > 0 || c._duty) return;
+    if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) return;
+    const issue = findIssueNear(c);
+    if (issue) { c._duty = issue; dutyCop = c; }
+  }
+  // wave the block off: bystanders near the scene get the documented flee/fear
+  // fields (peds.js owns the actual movement via cityFleeFrom's vetted heading).
+  // fear is capped LOW — shooed, not terrorized (screams only fire at fear≥8).
+  function disperse(cop, atX, atZ, kind) {
+    for (const p of CBZ.cityPeds) {
+      if (p.dead || p.vendor || p.companion || p.controlled) continue;
+      const dx = p.pos.x - atX, dz = p.pos.z - atZ;
+      if (dx * dx + dz * dz > 56) continue;                      // ~7.5m scene radius
+      if ((p.npcWanted | 0) >= 1 || p.rampage) continue;         // real offenders are a HUNT
+      if (kind === "brawl" && p.rage) p.rage = null;             // the uniform cools a street scrap
+      if (p.vagrant) p._shooUntil = copClock + 55;               // rousted — not again this shift
+      p.alarmed = Math.max(p.alarmed || 0, 3);
+      p.fear = Math.min(6, (p.fear || 0) + 2);
+      if (CBZ.cityFleeFrom) CBZ.cityFleeFrom(p, cop.pos.x, cop.pos.z);
+    }
+  }
 
   // ============================================================
   //  GUN STOP — a cop spots an openly-carried firearm on a CLEAN record and
@@ -117,6 +249,8 @@
     STOP.cop = cop; STOP.t = 0; STOP.susp = 0; STOP.asked = 1; STOP.key = "";
     cop.state = "gunstop"; cop.gunstop = true; cop.npcTarget = null; cop.curTarget = null;
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
+    cop._duty = null;            // the open carry outranks a move-along
+    drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
     if (CBZ.city && CBZ.city.note) CBZ.city.note("👮 \"Hey! Hold up — is that a firearm?\"", 1.8);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     stopRefreshPanel();
@@ -312,6 +446,7 @@
     let best = null, bd = 13;
     for (const c of CBZ.cityCops) {
       if (c.dead || c.gunstop || c.swat || c.giveUp || c.npcTarget) continue;
+      if (c._radioT > 0 || c._duty) continue;   // mid-call / working a scene — not free for a stop
       if (c.curTarget && c.curTarget !== CBZ.city.playerActor) continue;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;
       const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
@@ -374,6 +509,9 @@
     let x, z, tries = 0;
     do { const p = A.randomRoadPoint(); x = p.x; z = p.z; tries++; } while (tries < 8 && !ambient && Math.hypot(x - P.pos.x, z - P.pos.z) < 24);
     const c = makeCop(x, z, swat, ambient);
+    // 0★ baseline: a fresh beat cop hits the street with the sidearm ON THE BELT
+    // (response units at 1★+ arrive already drawn — the city is hunting someone)
+    if (ambient && !swat && (g.wanted | 0) === 0) holsterGun(c);
     A.root.add(c.group);
     CBZ.cityCops.push(c);
     return c;
@@ -405,6 +543,7 @@
     roadblocks.length = 0;
     if (typeof despawnChopper === "function") despawnChopper();
     roadblockCD = 0; pitCD = 0;
+    dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
   };
 
   function liveCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead) n++; return n; }
@@ -613,6 +752,36 @@
     const stars = g.wanted | 0;
     const ambientWant = CBZ.CITY.ambientCops || 0;
     const playerWant = g.cityCopTarget || 0;
+
+    // ---- RADIO BEAT: escalation gets CALLED IN before the response rolls.
+    // Each time the heat steps up a tier, the nearest free street cop stops,
+    // keys the shoulder mic (~1.5s), and only THEN do new RESPONSE units arrive
+    // — one breath of procedure that sells dispatch as a system, not a spawner.
+    // Bounded: one caller per step, the hold spans ≤2 maintain ticks, and with
+    // no cop nearby there's no hold at all (dispatch heard the shots itself).
+    if (dispatchHoldT > 0) dispatchHoldT -= 1.1;
+    if (radioNoteCD > 0) radioNoteCD -= 1.1;
+    const escalated = stars > lastStars || (playerWant | 0) > (lastWant | 0);
+    lastStars = stars; lastWant = playerWant;
+    if (escalated && stars >= 1 && g.state === "playing" && dispatchHoldT <= 0) {
+      const Pp = CBZ.player;
+      let caller = null, cd = 55;
+      for (const c of CBZ.cityCops) {
+        if (c.dead || c.gunstop || c.giveUp || c.swat || c._radioT > 0) continue;
+        if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;
+        const d = Math.hypot(c.pos.x - Pp.pos.x, c.pos.z - Pp.pos.z);
+        if (d < cd) { cd = d; caller = c; }
+      }
+      if (caller) {
+        caller._radioT = 1.5; caller._duty = null;
+        dispatchHoldT = 1.5;
+        if (radioNoteCD <= 0 && cd < 32 && CBZ.city && CBZ.city.note) {
+          radioNoteCD = 9;
+          CBZ.city.note("📻 \"" + (stars >= 3 ? "Shots fired — all units, " : "Dispatch, ") + "suspect in the area. Requesting backup.\"", 1.7);
+        }
+      }
+    }
+
     const offenders = offenderCount() + carSuspects.length;
     const total = ambientWant + playerWant + Math.min(6, offenders);
     const have = liveCops();
@@ -622,10 +791,13 @@
       const wantSwat = liveSwat();
       const swatTarget = Math.round(playerWant * (SWAT_FRAC[Math.min(5, stars)] || 0));
       const fillAmbient = liveAmbient() < ambientWant;          // patrol slot open?
-      // patrol fills are always regular beat cops; only player-response slots are SWAT
-      const newIsSwat = !fillAmbient && stars >= 2 && wantSwat < swatTarget;
-      spawnCop(newIsSwat, fillAmbient);
-      if (have + 1 < total) spawnCop(stars >= 2 && (wantSwat + (newIsSwat ? 1 : 0)) < swatTarget, false);
+      // patrol fills are always regular beat cops; only player-response slots are
+      // SWAT — and RESPONSE units wait out the call-in beat (patrol fills never do).
+      if (dispatchHoldT <= 0 || fillAmbient) {
+        const newIsSwat = !fillAmbient && stars >= 2 && wantSwat < swatTarget;
+        spawnCop(newIsSwat, fillAmbient);
+        if (have + 1 < total && dispatchHoldT <= 0) spawnCop(stars >= 2 && (wantSwat + (newIsSwat ? 1 : 0)) < swatTarget, false);
+      }
     } else if (have > total) {
       // retire surplus non-ambient cops when the heat is gone (never a cop who's
       // mid gun-stop — let the stand-off resolve first)
@@ -775,6 +947,22 @@
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.
       if (c.gunstop) { c.sees = false; continue; }
+      // ---- RADIO BEAT: stopped, eyes toward the trouble, hand on the shoulder
+      // mic. He is briefly NOT advancing — visible (exploitable) procedure; the
+      // reinforcement hold in maintain() releases as this call ends.
+      if (c._radioT > 0) {
+        c._radioT -= dt;
+        c.sees = false;
+        const lk = g.cityLastKnown;
+        const nearR = (c.pos.x - camx) * (c.pos.x - camx) + (c.pos.z - camz) * (c.pos.z - camz) < ANIM_D2;
+        standIdle(c, lk ? Math.atan2(lk.x - c.pos.x, lk.z - c.pos.z) : c.group.rotation.y, dt, nearR);
+        if (nearR) radioPose(c.char);
+        continue;
+      }
+      // stars out = guns out: the call is in, leather clears. (The 0★ holstering
+      // lives in the patrol branch below, behind a calm-hysteresis, so the belt
+      // can never flap mid-fight.)
+      if ((stars >= 1 || c.swat) && !c.armed) drawGun(c);
       if (c.retarget > 0) c.retarget -= dt;
       if (c.shootCD > 0) c.shootCD -= dt;
 
@@ -834,6 +1022,11 @@
         const npcThreat = !isPlayer && (tgt.armed || tgt.aggr >= 0.85 || (tgt.npcWanted | 0) >= 2);
         const wantArrest = isPlayer ? (stars <= 2 && !P.driving) : !npcThreat;
         const wantShoot = isPlayer ? stars >= 2 : npcThreat;
+        // PROCEDURE: the gun leaves the belt only when the stop calls for it —
+        // an armed suspect (or gunfire-grade heat nearby) gets drawn on; a plain
+        // 0★ collar of an unarmed brawler stays hands-on, holster snapped.
+        if (wantShoot || tgt.armed) drawGun(c);
+        c._calmT = 0;
 
         // assign each cop a FLANK lane so they don't bunch up — left/right/center
         // by index so a squad surrounds you instead of conga-lining single file.
@@ -927,8 +1120,67 @@
         continue;
       }
 
-      // ---- patrol (ambient, no target) ----
+      // ---- patrol (ambient, no target) — BEAT PROCEDURE, not wandering drones --
       c.sees = false; c.npcTarget = null;
+      // calm streets: after a few quiet seconds the sidearm goes back on the belt
+      if (stars === 0 && !c.swat && c.armed) { c._calmT = (c._calmT || 0) + dt; if (c._calmT > 2.5) holsterGun(c); }
+
+      // MOVE-ALONG duty: walk the scene (corpse / brawl / rough sleeper), say the
+      // line, wave the block off, hold it a beat. Assigned by scanDuty — one
+      // citywide at a time, 0★ only. Vagrants are shooed, never targeted.
+      if (c._duty) {
+        const D = c._duty, p = D.ped;
+        const stale = stars !== 0 || !p || (D.kind === "corpse" ? p._copSecured : (p.dead || (p.npcWanted | 0) >= 1));
+        if (stale) { c._duty = null; if (dutyCop === c) dutyCop = null; }
+        else {
+          const ddx = p.pos.x - c.pos.x, ddz = p.pos.z - c.pos.z, dd = Math.hypot(ddx, ddz);
+          if (dd > 2.4 && D.hold == null) { stepTo(c, ddx, ddz, c.baseSpeed * 0.85, dt, near); continue; }
+          if (D.hold == null) {
+            D.hold = 2.6;
+            copBark(c, D.kind === "corpse" ? ["Step back — this is a scene now.", "Nothing to see here. Keep it moving."]
+              : D.kind === "brawl" ? ["HEY! Break it up — NOW.", "Hands off each other. Walk away."]
+                : ["You can't camp here. Move along.", "Off the block. There's a shelter east side."]);
+            disperse(c, p.pos.x, p.pos.z, D.kind);
+          }
+          D.hold -= dt;
+          standIdle(c, Math.atan2(ddx, ddz), dt, near);
+          if (D.hold <= 0) {
+            if (D.kind === "corpse") p._copSecured = true;   // scene secured — one visit per body
+            c._duty = null; if (dutyCop === c) dutyCop = null;
+          }
+          continue;
+        }
+      }
+
+      // PAIR UP: foot beats walk in twos (real procedure). Lead strolls the
+      // route; the partner holds the right-shoulder slot and stops when he stops.
+      if (c.ambient && !c.swat) {
+        if (c._mate && (c._mate.dead || c._mate.giveUp || c._mate.culled)) { c._mate = null; c._lead = false; }
+        c._pairT = (c._pairT || 0) - dt;
+        if (!c._mate && c._pairT <= 0) { c._pairT = 3; pairUp(c); }
+      }
+      const M = c._mate;
+      const mateBusy = M && (M.curTarget || M.npcTarget || M.chaseCar || M.searchT > 0 || M.gunstop || M._radioT > 0 || M._duty || (CBZ.body && CBZ.body.busy && CBZ.body.busy(M)));
+      if (M && !c._lead && !mateBusy) {
+        // FOLLOWER: formation just off the lead's right shoulder
+        c._pauseT = 0;                                   // the lead owns the pauses
+        if (M._pauseT > 0) { standIdle(c, M.group.rotation.y, dt, near); continue; }
+        const h = M.group.rotation.y;
+        const gx = M.pos.x + Math.cos(h) * 1.2 - Math.sin(h) * 0.5 - c.pos.x;
+        const gz = M.pos.z - Math.sin(h) * 1.2 - Math.cos(h) * 0.5 - c.pos.z;
+        const gd = Math.hypot(gx, gz);
+        if (gd > 0.8) stepTo(c, gx, gz, gd > 6 ? c.baseSpeed : Math.min(c.baseSpeed, Math.max(1.6, (M.speed || 0) * 1.25)), dt, near);
+        else standIdle(c, h, dt, near);
+        continue;
+      }
+
+      // LEAD (or solo): stroll the beat with an occasional stop-and-look pause —
+      // which is where the (rare, overheard-only) small talk happens.
+      if (c._pauseT > 0) { c._pauseT -= dt; standIdle(c, c.group.rotation.y, dt, near); continue; }
+      if (c.ambient) {
+        c._beatT = (c._beatT == null ? 8 + rng() * 14 : c._beatT - dt);
+        if (c._beatT <= 0) { c._beatT = 16 + rng() * 20; c._pauseT = 2.2 + rng() * 2.4; if (M && !mateBusy) copBark(c, BEAT_LINES); continue; }
+      }
       if (!c.patrolGoal || Math.hypot(c.pos.x - c.patrolGoal.x, c.pos.z - c.patrolGoal.z) < 4) { const rp = A.randomRoadPoint(); c.patrolGoal = { x: rp.x, z: rp.z }; }
       stepTo(c, c.patrolGoal.x - c.pos.x, c.patrolGoal.z - c.pos.z, c.baseSpeed * 0.6, dt, near);
     }
@@ -937,6 +1189,9 @@
     updatePursuers(dt);
     updateGunStop(dt);
     hideOccludedGuns(dt);
+    copClock += dt;
+    if (barkCD > 0) barkCD -= dt;
+    scanDuty(dt);
     if (stars === 0 && roadblocks.length) releaseRoadblocks();
   });
 
@@ -998,8 +1253,10 @@
   }
 
   function fireAt(c, tgt, dist) {
-    // the gun is OUT and aimed now (clear any challenge/occlusion lowering)
+    // the gun is OUT and aimed now (clear any challenge/occlusion lowering;
+    // a still-holstered cop forced into a fire path ALWAYS clears leather first)
     c._gunLowered = false;
+    drawGun(c);
     if (c.armed && CBZ.syncActorWeapon) CBZ.syncActorWeapon(c);
     if (CBZ.actorAimAt) CBZ.actorAimAt(c, tgt);
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(c, tmp) : { x: c.pos.x, y: 1.4, z: c.pos.z };

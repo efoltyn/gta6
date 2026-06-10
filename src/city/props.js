@@ -163,6 +163,31 @@
       x.font = "16px Fredoka, Arial, sans-serif";
       x.fillStyle = "rgba(255,255,255,.92)";
       x.fillText(tag, 128, 96);                   // tagline = bounty line
+    } else if (kind === "yours") {
+      // the OWNER creative — gold double frame + a stylized mug (head, shades,
+      // chain). city/adboard.js puts these up when YOU rent the board: the whole
+      // money loop ends with the skyline wearing your name, so it must read as
+      // YOURS from a block away, not as one more brand poster.
+      x.strokeStyle = fgCss; x.lineWidth = 5; x.strokeRect(6, 6, 244, 116);
+      x.lineWidth = 2; x.strokeRect(13, 13, 230, 102);
+      x.fillStyle = fgCss;
+      x.beginPath(); x.arc(44, 54, 18, 0, 6.3); x.fill();                 // head
+      x.fillStyle = bgCss; x.fillRect(28, 45, 32, 8);                     // shades
+      x.fillStyle = fgCss;
+      for (let ci = 0; ci < 5; ci++) { x.beginPath(); x.arc(34 + ci * 5, 80 - Math.abs(ci - 2) * 2, 2.2, 0, 6.3); x.fill(); }  // chain
+      // headline + tagline to the right of the face (shrink-to-fit)
+      x.textAlign = "center"; x.textBaseline = "middle";
+      let yfs = 26; x.font = "bold " + yfs + "px Fredoka, Arial, sans-serif";
+      while (x.measureText(head).width > 158 && yfs > 13) { yfs -= 2; x.font = "bold " + yfs + "px Fredoka, Arial, sans-serif"; }
+      x.fillText(head, 158, 50);
+      x.font = "13px Fredoka, Arial, sans-serif";
+      x.fillStyle = "rgba(255,255,255,.85)";
+      x.fillText(tag, 158, 86);
+      const yCorner = opt.tag || "YOURS";
+      x.font = "bold 12px Fredoka, Arial, sans-serif";
+      const ycw = x.measureText(yCorner).width + 12;
+      x.fillStyle = fgCss; x.fillRect(256 - ycw - 10, 10, ycw, 16);
+      x.fillStyle = bgCss; x.fillText(yCorner, 256 - ycw / 2 - 10, 18);
     } else {
       // accent rules + corner tag
       x.fillStyle = fgCss;
@@ -201,6 +226,11 @@
     }
     return m;
   }
+  // SHARED with city/adboard.js (the rentable-board market): the SAME cached
+  // generator renders the player's own creatives, so a rented board looks
+  // native to the city and costs zero extra materials when reused.
+  CBZ.cityAdMatFor = adMatFor;
+  CBZ.cityAdKey = adKey;
 
   // ---- a per-gang TURF board, coloured straight from the gang definition ----
   // Built on demand so the board always matches CBZ.CITY.gangs (and any gang
@@ -226,6 +256,12 @@
     // entry is { mesh, dyn, lastKey } so the driver re-skins only the few that
     // actually change, never every frame.
     const dynAds = city._dynAds = city._dynAds || [];
+    // RENTABLE AD SURFACES — every billboard face / shelter panel / rooftop
+    // board placed below registers here so city/adboard.js can put it on the
+    // market (money → skyline visibility → show-off). Each record carries the
+    // mesh(es) to re-skin, the walk-up point, the surface class for pricing,
+    // and the original material(s) to restore when a lease lapses.
+    const adBoards = CBZ.cityAdBoards = [];
 
     // ---- ad picker: bias gang/wanted boards where they belong --------------
     const gangAdRecords = gangDefs().map(gangAd);
@@ -674,6 +710,8 @@
       const ad = new THREE.Mesh(geo("shelterAd", () => new THREE.PlaneGeometry(1.0, 1.7)), adM);
       ad.position.set(1.74, 1.2, 0); ad.rotation.y = -Math.PI / 2; g.add(ad);
       nightAds.push(adM);
+      // rentable: walk-up point is the PANEL end of the shelter (world coords)
+      adBoards.push({ mesh: ad, x: x + Math.cos(yaw) * 1.74, z: z - Math.sin(yaw) * 1.74, y: 0, kind: "shelter", mat0: adM });
       // bus-stop sign pole at the end
       const sp = new THREE.Mesh(geo("shelterSignPole", () => new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6)), shelterPostM);
       sp.position.set(2.1, 1.3, 0); g.add(sp);
@@ -709,6 +747,8 @@
       // register the front face if it's a live WANTED poster so the driver can
       // re-skin its material when the player's wanted level changes.
       if (pickF.dyn === "wanted") dynAds.push({ mesh: front, dyn: "wanted", lastKey: adKey(pickF.ad) });
+      // rentable: a lease takes BOTH faces (the flex reads from either direction)
+      adBoards.push({ mesh: front, mesh2: back, x, z, y: 0, kind: big ? "bill" : "small", mat0: adMatFor(pickF.ad), mat0b: adMatFor(pickB.ad) });
       // walkway light bar under the board
       const bar = new THREE.Mesh(geo("billBar" + (big ? "B" : "S"), () => new THREE.BoxGeometry(W, 0.1, 0.4)), smat(0xfff4d0, { emissive: 0xfff4d0, ei: 0 }));
       bar.position.set(0, post - 0.1, 0.4); g.add(bar);
@@ -843,6 +883,42 @@
       billboard(mnX + 6, mnZ + bbStepZ * k, Math.PI / 2, true);
       billboard(mxX - 6, mnZ + bbStepZ * k, -Math.PI / 2, k === 2 ? false : true);
     }
+
+    // ----- CORE-AVENUE BILLBOARDS: the priciest faces in the city ----------
+    // Perimeter boards only catch the ring road; the REAL eyeballs are on the
+    // two central avenues. Stand a big board on each side of both, turned
+    // square at oncoming traffic — these are the district-core surfaces
+    // adboard.js prices at multiples of the docks (busyness = rent).
+    const cAvX = (mnX + mxX) / 2, cAvZ = (mnZ + mxZ) / 2;
+    let vAve = null, hAve = null, bvd = 1e9, bhd = 1e9;
+    for (const r of city.roads) {
+      if (r.vertical) { const d = Math.abs(r.x - cAvX); if (d < bvd) { bvd = d; vAve = r; } }
+      else { const d = Math.abs(r.z - cAvZ); if (d < bhd) { bhd = d; hAve = r; } }
+    }
+    // a board may not stand inside a lot footprint (it would clip the facade)
+    function insideLot(x, z) {
+      for (const lot of doorLots()) {
+        const hw = lot.w / 2 + 1.0, hd = (lot.d != null ? lot.d : lot.w) / 2 + 1.0;
+        if (Math.abs(x - lot.cx) < hw && Math.abs(z - lot.cz) < hd) return true;
+      }
+      return false;
+    }
+    const coreBand = city.ROAD / 2 + 2.6;     // sidewalk stand-off from the kerb
+    function coreBoard(road, s) {
+      if (!road) return;
+      // try a few stand-offs from the centre; take the first spot that's on
+      // real sidewalk (not a cross-street, not a lot, not blocking a door).
+      for (const t of [30, 44, 58]) {
+        if (inCrossRoad(s * t, road.vertical, road)) continue;
+        const bx = road.vertical ? road.x + s * coreBand : road.x + s * t;
+        const bz = road.vertical ? road.z + s * t : road.z + s * coreBand;
+        if (insideLot(bx, bz) || nearDoor(bx, bz, 4)) continue;
+        const yaw = road.vertical ? (s > 0 ? -Math.PI / 2 : Math.PI / 2) : (s > 0 ? Math.PI : 0);
+        billboard(bx, bz, yaw, true);
+        return;
+      }
+    }
+    for (const s of [-1, 1]) { coreBoard(vAve, s); coreBoard(hAve, s); }
 
     // ----- ROOFTOP DETAIL: AC, vents, tanks, dishes, stair-hut, skylights,
     //       antenna masts, parapet rails + a RARE rooftop billboard -----------
@@ -983,6 +1059,9 @@
         board.position.set(0, 3.4, 0.14); bg.add(board);
         nightAds.push(adM);
         if (pick.dyn === "wanted") dynAds.push({ mesh: board, dyn: "wanted", lastKey: adKey(pick.ad) });
+        // rentable from THIS roof (y gates the walk-up): the apex flex — your
+        // name over the skyline, reachable via the building's elevator.
+        adBoards.push({ mesh: board, x: bg.position.x, z: bg.position.z, y: h, kind: "roof", mat0: adM });
         root.add(bg);
       }
     }
@@ -1034,6 +1113,7 @@
         const lit = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
         for (const e of dynAds) {
           if (e.dyn !== "wanted") continue;
+          if (e.mesh.userData.adLease) continue;    // the player RENTS this face (adboard.js) — their creative outranks the precinct's poster
           const key = adKey(ad);
           if (key === e.lastKey) continue;          // this board already shows it
           e.lastKey = key;

@@ -24,6 +24,16 @@
    shared materials for the whole fleet (a bright clone per distinct
    tail material), swapped by pointer only when a car's braking state
    actually changes. No new meshes, so the model audit stays intact.
+
+   HOLE-PROOFING: cars are the most-looked-at prop in a driving game — a
+   visible gap reads as broken art (USER-FILMED BUG: "weird holes"). Every
+   visual is passed through sealSeams (thin panels get epsilon-overlap;
+   deck slabs riding a sloped hull get skirted DOWN into the body) plus
+   ONE dark interior-shell box reusing a material the car already draws
+   (merges into an existing batch bucket → zero extra draw calls), so a
+   residual crack shows cabin-dark interior/floor pan, never daylight.
+   crumpleCar clamps panel offsets so deformation can't tear the hull
+   away from the merged static grille/bumpers/glass.
 ============================================================ */
 (function () {
   "use strict";
@@ -148,6 +158,81 @@
     });
     grp.userData.sourceParts = sourceParts;
     grp.userData.drawMeshes = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
+  }
+
+  // ---- HOLE-PROOFING (USER-FILMED BUG: "some cars have weird holes in them").
+  //      Systematic, not per-model — runs on every visual BEFORE batching:
+  //      • deck slabs (hood/trunk breaks, tonneau, roof caps) ride the body
+  //        prism's SLOPING nose/tail, so their leading edge floats with an open
+  //        slit under it → extend the box DOWN into the hull (the buried part
+  //        is invisible; the exposed part reads as a proper panel edge).
+  //      • racing stripes were authored ~0.19 above the hood line → settle
+  //        them onto the deck and skirt them down a touch.
+  //      • every other thin box (door seams, plates, lamps, glass slabs) gets
+  //        a few cm of epsilon-overlap on its thin axes so abutting panels
+  //        interpenetrate — backface culling can no longer show daylight
+  //        through an exact-contact seam at grazing angles.
+  //      Touches mesh.scale/position only (geometries are shared caches), and
+  //      everything still merges into the same per-material buckets.
+  function extendBoxDown(mesh, by) {
+    const p = mesh.geometry.parameters, h = p.height;
+    by = Math.min(by, mesh.position.y - h / 2 - 0.12);   // never punch below the floor pan
+    if (by <= 0) return;
+    mesh.scale.y *= (h + by) / h;
+    mesh.position.y -= by / 2;                            // top edge stays put, bottom drops
+  }
+  function sealSeams(root, dims) {
+    const hullW = (dims && dims.width) || 2;
+    for (const o of root.children) {
+      if (!o.geometry || !o.material || Array.isArray(o.material)) continue;
+      if (o.userData && o.userData.playerWheel) continue;
+      const p = o.geometry.parameters;
+      if (!p || p.width == null || p.height == null || p.depth == null) continue;   // boxes only
+      const flat = !o.rotation.x && !o.rotation.y && !o.rotation.z;
+      // wide flat deck panel narrower than the hull → skirt it into the body
+      if (flat && p.height <= 0.1 && p.width >= 1 && p.width < hullW && p.depth >= 0.4) {
+        extendBoxDown(o, 0.45);
+        continue;
+      }
+      // long thin hood stripe floated above the deck → settle + skirt
+      if (flat && p.height <= 0.03 && p.width <= 0.3 && p.depth >= 2) {
+        o.position.y -= 0.19;
+        extendBoxDown(o, 0.18);
+        continue;
+      }
+      if (p.width <= 0.09) o.scale.x *= (p.width + 0.04) / p.width;
+      if (p.height <= 0.09) o.scale.y *= (p.height + 0.04) / p.height;
+      if (p.depth <= 0.09) o.scale.z *= (p.depth + 0.04) / p.depth;
+    }
+  }
+  // ONE dark interior shell + floor pan per car: whatever hairline seam
+  // survives now shows a dark cabin/undercarriage instead of seeing clean
+  // through the body from a low camera. It reuses the darkest opaque material
+  // the car ALREADY draws, so it merges into that existing bucket — zero extra
+  // draw calls, one extra source box (the allowed budget).
+  function addInteriorShell(root, dims, fallbackMat) {
+    const sw = ((dims && dims.width) || 2) * 0.78;
+    const top = (dims && dims.shellTop) || (((dims && dims.height) || 1.5) * 0.55);
+    const sd = ((dims && dims.length) || 4.4) * 0.78;
+    let donor = null, lum = 9;
+    for (const o of root.children) {
+      const m = o.material;
+      if (!o.geometry || !m || Array.isArray(m) || (o.userData && o.userData.playerWheel)) continue;
+      if (!m.color || m.color.r == null) continue;
+      // skip lamps: judge by actual GLOW (emissive luminance × intensity) —
+      // dark trim has default intensity 1 but a black emissive, so it passes.
+      const glow = m.emissive && m.emissive.r != null
+        ? (m.emissive.r + m.emissive.g + m.emissive.b) * (m.emissiveIntensity == null ? 1 : m.emissiveIntensity) : 0;
+      if (glow > 0.8) continue;
+      const l = m.color.r + m.color.g + m.color.b;
+      if (l < lum) { lum = l; donor = o; }
+    }
+    const m = donor ? donor.material : fallbackMat;
+    if (!m || top - 0.14 <= 0.05) return;
+    const shell = boxMesh(sw, top - 0.14, sd, m);
+    shell.position.set(0, (top + 0.14) / 2, 0);
+    if (donor) { shell.castShadow = donor.castShadow; shell.receiveShadow = donor.receiveShadow; }
+    root.add(shell);
   }
 
   function addWheels(grp, halfTrack, wz, r) {
@@ -368,13 +453,20 @@
     // bound (core/profile.js), and an unmerged hero mesh per car would blow that.
     const keep = new Set();
     visual.traverse(function (o) { if (o.userData && o.userData.playerWheel) keep.add(o); });
+    const dims = visual.userData.vehicleDims ||
+      { width: 2, length: 4.4 * s, height: 1.5, wheelbase: 2.7 };
+    // hole-proof the panel work before it gets baked into the merge buckets
+    // (bikes/aircraft/boats have open frames by design — no shell, no sealing)
+    if (!/motorcycle|helicopter|boat/.test(style)) {
+      sealSeams(visual, dims);
+      addInteriorShell(visual, dims, null);
+    }
     if (mergeStaticCarParts) mergeStaticCarParts(visual, keep);
     grp.userData.carVisual = visual;
     grp.userData.carStyle = style;
     grp.userData.bodyKind = bt;
     grp.userData.designStyle = (model && model.designStyle) || bt;
-    grp.userData.vehicleDims = visual.userData.vehicleDims ||
-      { width: 2, length: 4.4 * s, height: 1.5, wheelbase: 2.7 };
+    grp.userData.vehicleDims = dims;
     return grp;
   }
 
@@ -536,6 +628,10 @@
     grp.userData.bodyKind = bt;
     grp.userData.designStyle = model && model.designStyle || bt;
     grp.userData.vehicleDims = { width: w, length: len, height: roofY + roofH * 0.5, wheelbase: len * (bt === "van" ? 0.68 : 0.64) };
+    // same hole-proofing as the unified visual: seal thin-panel seams and drop
+    // a dark interior shell inside the hull (merges into the trim/tire bucket)
+    sealSeams(grp, { width: w });
+    addInteriorShell(grp, { width: w, length: len, shellTop: 0.78 + (hullY - 0.72) + hullH * 0.45 }, trim);
     mergeStaticCarParts(grp, new Set([body, cabin]));
     return grp;
   }
@@ -665,18 +761,23 @@
       if (Math.abs(f) >= Math.abs(s)) { if (f > 0) front = c; else rear = c; }
       else side = c * Math.sign(s || car._cside);
     } else side = c * car._cside;
+    // Deformation stays CLAMPED to panel contact (USER-FILMED BUG: the old
+    // bigger offsets tore the deformable hull/cabin away from the merged
+    // STATIC panels — grille/bumpers/glass floated free with see-through
+    // holes between them). These maxima keep every neighbour overlapping the
+    // hull at full crumple, so a wreck reads caved-in, never hollowed-out.
     if (ud && ud.body) {
-      ud.body.rotation.z = (side || c * car._cside) * 0.28;
+      ud.body.rotation.z = (side || c * car._cside) * 0.18;
       ud.body.position.y = base.bodyY - c * 0.14;
-      ud.body.position.z = base.bodyZ + (rear - front) * 0.16;
-      ud.body.scale.x = 1 - Math.abs(side) * 0.16;
-      ud.body.scale.z = 1 - (front + rear) * 0.2;
+      ud.body.position.z = base.bodyZ + (rear - front) * 0.08;
+      ud.body.scale.x = 1 - Math.abs(side) * 0.1;
+      ud.body.scale.z = 1 - (front + rear) * 0.12;
     }
     if (ud && ud.cabin) {
-      ud.cabin.rotation.x = -front * 0.34 + rear * 0.18;
-      ud.cabin.rotation.z = (side || c * car._cside) * 0.16;
-      ud.cabin.position.y = base.cabinY - c * 0.45;
-      ud.cabin.position.z = base.cabinZ + (rear - front) * 0.12;
+      ud.cabin.rotation.x = -front * 0.22 + rear * 0.12;
+      ud.cabin.rotation.z = (side || c * car._cside) * 0.12;
+      ud.cabin.position.y = base.cabinY - c * 0.26;
+      ud.cabin.position.z = base.cabinZ + (rear - front) * 0.08;
     }
   }
   function crashBurst(x, z, speed, hard, catastrophic, dir) {
