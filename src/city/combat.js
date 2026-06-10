@@ -174,6 +174,8 @@
     };
     for (const c of CBZ.cityCops) consider(c);
     for (const p of CBZ.cityPeds) if (!p.vendor) consider(p);
+    // multiplayer: remote players + host-synced puppet NPCs take punches too
+    if (CBZ.net && CBZ.net.active && CBZ.net.targetList) for (const a of CBZ.net.targetList()) consider(a);
     return best;
   }
 
@@ -273,6 +275,9 @@
   // tier: "light" | "heavy" | "finisher".  Returns true if it connected.
   function land(t, dmg, tier, opts) {
     opts = opts || {};
+    // multiplayer target (remote player / synced puppet): authority is over the
+    // wire — net code routes the damage and plays the local juice.
+    if (t.netKind && CBZ.net && CBZ.net.localMeleeHit) return CBZ.net.localMeleeHit(t, dmg, tier);
     const fx = P.pos.x, fz = P.pos.z;
     const heavy = tier !== "light";
     const finisher = tier === "finisher";
@@ -430,6 +435,11 @@
       const ok = land(t, dmg, finisher ? "finisher" : "light");
       if (!ok) { /* blocked → combo already reset in land() */ }
       else if (finisher) { combo = 0; comboT = 0; }
+    } else if (CBZ.cityShatterRay) {
+      // a swing that hits no one can hit a WINDOW: first punch spider-cracks
+      // it, the next blows it out (cityShatterRay's two-stage default)
+      const L2 = lookDir();
+      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z, finisher ? 3.1 : 2.7);
     }
     fireCD = finisher ? 0.34 : 0.22;
   }
@@ -452,6 +462,11 @@
     const base = it() ? it().dmg : 16;
     const dmg = Math.round(base * 2.4);
     if (t) land(t, dmg, "heavy");
+    else if (CBZ.cityShatterRay) {
+      // a heavy (bat/pipe-class swing) puts a window straight through
+      const L2 = lookDir();
+      CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z, 3.0, true);
+    }
     heavyCD = 0.6;
     fireCD = 0.5;
   }

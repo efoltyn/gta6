@@ -494,23 +494,31 @@
       // darken the skyline too), stepped darker so it reads as buildings,
       // never white paper. Dusk flips it to dark backlit silhouettes; night
       // goes near-black and hands the view to the window lights.
-      _rn.copy(fog).multiplyScalar(0.92); desat(_rn, 0.35);
-      _rf.copy(fog).multiplyScalar(0.955); desat(_rf, 0.22);
+      _rn.copy(fog).multiplyScalar(0.85); desat(_rn, 0.4);   // a real step darker than
+      _rf.copy(fog).multiplyScalar(0.91); desat(_rf, 0.28);  // the haze they stand in
       _rn.lerp(PAL.dusk.ringNear, duskness * 0.9).lerp(PAL.night.ringNear, kNight);
       _rf.lerp(PAL.dusk.ringFar, duskness * 0.85).lerp(PAL.night.ringFar, kNight);
       nearRing.material.color.copy(_rn);
       farRing.material.color.copy(_rf);
       // by clear day the whole ring goes a touch translucent — barely-there haze
       const pureDay = kDay * (1 - duskness);
-      nearRing.material.opacity = 1 - 0.08 * pureDay;
-      farRing.material.opacity = 1 - 0.18 * pureDay;
+      // ALTITUDE: rings are camera-centered, so from a rooftop/chopper the near
+      // radius reads as a visible CIRCLE of slabs. As the camera climbs, the
+      // painted skyline dissolves into pure atmosphere (sea + haze have no
+      // curvature to betray) and the haze band deepens the way a real horizon
+      // thickens from altitude. Street level is untouched (altK==1 below y≈45).
+      const altK = Math.max(0, 1 - Math.max(0, cam.y - 45) / 130);
+      nearRing.material.opacity = (1 - 0.08 * pureDay) * altK;
+      farRing.material.opacity = (1 - 0.18 * pureDay) * Math.max(altK, 0.3);
+      hazeRing.scale.y = 1 + Math.min(2.4, Math.max(0, cam.y - 45) * 0.035);
       hazeRing.material.color.copy(fog); // the band IS the fog, melted upward
     }
     // window dots: on at night, and warming up through dusk as the sun dips
     const winK = Math.max(night, duskness * civil);
     lightsRing.visible = city && winK > 0.04;
     if (lightsRing.visible) {
-      lightsRing.material.opacity = Math.min(1, winK * 1.15);
+      const altW = Math.max(0, 1 - Math.max(0, cam.y - 45) / 130);
+      lightsRing.material.opacity = Math.min(1, winK * 1.15) * altW;
       _winC.setRGB(1, 1, 1).lerp(PAL.dusk.win, duskness * 0.8);
       lightsRing.material.color.copy(_winC);
     }

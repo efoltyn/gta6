@@ -192,9 +192,9 @@
       if (a.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(a.gang, 0.4);
       a.hp -= m.dmg;
       if (a.hp <= 0) {
-        CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: 6, fling: 3 }, m.head ? "headshot" : "shot");
+        CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: m.melee ? 7 : 6, fling: m.melee ? 4 : 3 }, m.melee ? "beaten to death" : (m.head ? "headshot" : "shot"));
       } else {
-        CBZ.body && CBZ.body.hit && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: m.head ? 6.5 : 4.5 });
+        CBZ.body && CBZ.body.hit && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: m.melee ? 5 : (m.head ? 6.5 : 4.5), knockdown: m.melee && Math.random() < 0.3 ? 1 : 0 });
         const B = (CBZ.CITY && CBZ.CITY.aggro) || {};
         if (!a.rage && R) {
           if (a.armed || a.aggr >= (B.bold || 0.5)) { a.rage = R; a.state = "fight"; a.alarmed = Math.max(a.alarmed || 0, 6); }
@@ -202,9 +202,9 @@
         }
       }
     }
-    // gunfire near witnesses raises the SHARED heat, attributed at the shooter's spot
-    if (CBZ.cityCrime) CBZ.cityCrime(m.k === "cop" ? 110 : 45, { x: fx, z: fz, type: "shots-fired" });
-    if (CBZ.cityAlarm && R) CBZ.cityAlarm(a.pos.x, a.pos.z, 16, 1, R);
+    // violence near witnesses raises the SHARED heat, attributed at the attacker's spot
+    if (CBZ.cityCrime) CBZ.cityCrime(m.k === "cop" ? 110 : (m.melee ? 22 : 45), { x: fx, z: fz, type: m.melee ? "assault" : "shots-fired" });
+    if (CBZ.cityAlarm && R && !m.melee) CBZ.cityAlarm(a.pos.x, a.pos.z, 16, 1, R);
   });
 
   // car ownership requests
@@ -348,10 +348,21 @@
     g.wanted = m.w | 0;
   });
 
-  // puppet interpolation/animation
+  // puppet interpolation/animation (+ capped extrapolation past the newest
+  // sample so a late snapshot reads as motion, not a stutter-freeze)
   function sample(buf, t) {
     if (!buf.length) return null;
     if (buf.length === 1 || t <= buf[0].t) return buf[0];
+    const last = buf[buf.length - 1];
+    if (t > last.t) {
+      const prev = buf[buf.length - 2];
+      const span = Math.max(1, last.t - prev.t);
+      const k = Math.min(250, t - last.t) / span;
+      let dh = (last.h - prev.h) % (Math.PI * 2);
+      if (dh > Math.PI) dh -= Math.PI * 2;
+      if (dh < -Math.PI) dh += Math.PI * 2;
+      return { x: last.x + (last.x - prev.x) * k, z: last.z + (last.z - prev.z) * k, h: last.h + dh * Math.min(1, k), s: last.s, v: last.v };
+    }
     for (let i = buf.length - 1; i >= 0; i--) {
       if (buf[i].t <= t) {
         const a = buf[i], b = buf[i + 1];
@@ -429,7 +440,10 @@
     if (CBZ.city && CBZ.city.note) CBZ.city.note("Someone beat you to that car", 1.4);
   });
 
-  // returning the car to the host sim on exit
+  // returning the car to the host sim on exit. The car you step out of stays
+  // VISIBLE as a local "ghost" until the host's re-created car shows up in the
+  // snapshot stream (or 2.5s passes) — no blink-out-of-existence.
+  let ghost = null; // {group, x, z, until}
   function hookExit() {
     if (!CBZ.cityExitVehicle || CBZ.cityExitVehicle._netWrapped) return;
     const orig = CBZ.cityExitVehicle;
@@ -440,7 +454,10 @@
         net.sendEv({ e: "carRel", to: net.hostId, m: car.model ? car.model.name : 0, x: car.pos.x, z: car.pos.z, h: car.heading || 0 });
         const idx = (CBZ.cityCars || []).indexOf(car);
         if (idx >= 0) CBZ.cityCars.splice(idx, 1);
-        if (car.group && car.group.parent) car.group.parent.remove(car.group);
+        if (car.group) {
+          if (ghost && ghost.group && ghost.group.parent) ghost.group.parent.remove(ghost.group);
+          ghost = { group: car.group, x: car.pos.x, z: car.pos.z, until: performance.now() + 2500 };
+        }
       }
     };
     wrapped._netWrapped = true;
@@ -448,4 +465,96 @@
   }
   if (typeof addEventListener === "function") addEventListener("load", hookExit);
   setTimeout(hookExit, 0);
+
+  function dropGhostIfCovered(now) {
+    if (!ghost) return;
+    let covered = now > ghost.until;
+    if (!covered) {
+      for (const C of pup.cars.values()) {
+        const dx = C.group.position.x - ghost.x, dz = C.group.position.z - ghost.z;
+        if (dx * dx + dz * dz < 16) { covered = true; break; }
+      }
+    }
+    if (covered) {
+      if (ghost.group && ghost.group.parent) ghost.group.parent.remove(ghost.group);
+      ghost = null;
+    }
+  }
+
+  // ---- COLLISIONS: networked bodies are SOLID -------------------------------
+  // The local sim never sees puppet cars / remote players, so without this you
+  // phase through your friend and through every host-synced car — the #1
+  // "feels glitchy" read. Cheap push-outs after movement resolves:
+  //   on foot: circle-vs-remote-player + circle-vs-oriented-car-box (puppet
+  //   cars on guests, every remote driver's car everywhere) — and a FAST car
+  //   that catches you runs you down for real.
+  let runOverCD = 0;
+  function pushOutOfCar(P, cx, cz, h, dims, v) {
+    const hw = ((dims && dims.width) || 2.0) * 0.5 + 0.42;   // + player radius
+    const hl = ((dims && dims.length) || 4.4) * 0.5 + 0.42;
+    const s = Math.sin(h), c = Math.cos(h);
+    const dx = P.pos.x - cx, dz = P.pos.z - cz;
+    // world -> car-local frame (inverse of a Three.js rotation.y by h)
+    const lx = dx * c - dz * s;
+    const lz = dx * s + dz * c;
+    if (Math.abs(lx) >= hw || Math.abs(lz) >= hl) return false;
+    // push along the axis of least penetration, rotated back to world
+    const px = hw - Math.abs(lx), pz = hl - Math.abs(lz);
+    if (px < pz) {
+      const d = lx >= 0 ? px : -px;
+      P.pos.x += d * c;
+      P.pos.z += -d * s;
+    } else {
+      const d = lz >= 0 ? pz : -pz;
+      P.pos.x += d * s;
+      P.pos.z += d * c;
+    }
+    // a fast car that reaches you = run down
+    if (Math.abs(v || 0) > 7 && runOverCD <= 0) {
+      runOverCD = 0.9;
+      const vmag = Math.abs(v);
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(150, 10 + vmag * 4.5), cx, cz, "run over", false, null, vmag < 16);
+      if (CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && !CBZ.body.busy(CBZ.city.playerActor)) {
+        CBZ.body.knockdown(CBZ.city.playerActor, { fromX: cx, fromZ: cz, force: Math.min(10, vmag * 0.5), t: 1.1 });
+      }
+    }
+    return true;
+  }
+
+  if (CBZ.onUpdate) CBZ.onUpdate(45.6, function (dt) {
+    if (!net.active || g.mode !== "city") return;
+    runOverCD -= dt;
+    dropGhostIfCovered(performance.now());
+    const P = CBZ.player;
+    if (P.dead || P.driving) return;
+    // remote players are solid
+    if (CBZ.netRemoteList) {
+      for (const R of CBZ.netRemoteList([])) {
+        if (R.dead || R.driving || !R.group) continue;
+        const dx = P.pos.x - R.group.position.x, dz = P.pos.z - R.group.position.z;
+        const d2 = dx * dx + dz * dz;
+        const min = 0.8;
+        if (d2 > 0.0001 && d2 < min * min) {
+          const d = Math.sqrt(d2), push = (min - d);
+          P.pos.x += (dx / d) * push;
+          P.pos.z += (dz / d) * push;
+        }
+      }
+      // a remote driver's car is solid AND dangerous
+      for (const R of CBZ.netRemoteList([])) {
+        if (!R.driving || !R.carVis) continue;
+        const dims = R.carVis.userData && R.carVis.userData.vehicleDims;
+        const last = R.carBuf && R.carBuf.length ? R.carBuf[R.carBuf.length - 1] : null;
+        pushOutOfCar(P, R.carVis.position.x, R.carVis.position.z, R.carVis.rotation.y, dims, last ? last.v : 0);
+      }
+    }
+    // puppet traffic is solid (guests; the host's real cars already collide)
+    if (net.guest()) {
+      for (const C of pup.cars.values()) {
+        const dims = C.group.userData && C.group.userData.vehicleDims;
+        const last = C.buf.length ? C.buf[C.buf.length - 1] : null;
+        pushOutOfCar(P, C.group.position.x, C.group.position.z, C.group.rotation.y, dims, last ? last.v : 0);
+      }
+    }
+  });
 })();

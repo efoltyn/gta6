@@ -680,6 +680,10 @@
     if (CBZ.spawnCityGangs) CBZ.spawnCityGangs();
     if (CBZ.spawnCitySecurity) CBZ.spawnCitySecurity();
     if (CBZ.citySocialInit) CBZ.citySocialInit();
+    // VIP principals + protection details (city/vips.js): drafts/dresses bodies
+    // that already exist, so the citywide rig count stays flat. Guarded —
+    // everything still works if the file isn't loaded.
+    if (CBZ.spawnCityVips) CBZ.spawnCityVips();
     // fresh city → clear the lone-wolf rampage director + any stale spree flags
     // (aigoals.js owns the director state; guarded in case load order shifts).
     if (CBZ.cityRampageReset) CBZ.cityRampageReset();
@@ -1278,6 +1282,15 @@
   // 1 rival / 2 at open war. Cheap, fully guarded.
   function gangHostility(ped) {
     if (!ped.gang) return 0;
+    // FLYING COLORS (outfits.js): cloth reads before allegiance. Wearing a
+    // set's colors makes that set read you as kin — and their enemies read
+    // you as one of THEM, even if you've never thrown a punch in your life.
+    const fly = CBZ.cityOutfitGangId ? CBZ.cityOutfitGangId() : null;
+    if (fly) {
+      if (ped.gang === fly) return -1;
+      if (CBZ.cityAtWar && CBZ.cityAtWar(fly, ped.gang)) return 2;
+      if (!playerGangId()) return 1;   // no real crew — the colors ARE your read
+    }
     const mine = playerGangId();
     if (!mine) return 0;
     if (ped.gang === mine) return -1;                                  // same crew

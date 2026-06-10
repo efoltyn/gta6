@@ -40,6 +40,9 @@ const DEFAULT_CFG = {
     { id: "taxi", label: "Taxi Driver" },
     { id: "crook", label: "Crook" },
   ],
+  // Optional: extra ICE servers for proximity voice (your own TURN server, etc.)
+  // Default is a public STUN server; most home/NAT setups work with just that.
+  iceServers: [],
   // Optional: URL of a directory server to announce to (see server/directory.js)
   directory: "",
   // Optional: the public URL players use to reach this server (for directory listings)
@@ -241,7 +244,7 @@ function onConnection(conn, req) {
         t: "welcome",
         id: p.id,
         hostId,
-        server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers },
+        server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers, iceServers: cfg.iceServers || [] },
         players: [...players.values()].filter((q) => q.id !== p.id).map((q) => ({ id: q.id, name: q.name, role: q.role })),
       });
       // the host is an admin on their own server

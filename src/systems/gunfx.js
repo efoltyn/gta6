@@ -11,6 +11,15 @@
      CBZ.tracer(from, to, opts)  — a fading line + (by default) a
                                    muzzle flash at `from`.
      CBZ.muzzleFlash(pos, opts)  — a brief additive glow.
+
+   INCOMING FIRE READS (owner demand: "make it clearer when you're
+   getting shot" — with NO UI): tracer() detects a round travelling
+   AT the player and answers with a bigger/brighter/longer two-layer
+   muzzle flash at the shooter plus a thick additive BOLT down the
+   shot line (a head-on 1px line foreshortens to a dot; a cylinder
+   still reads). All of it swells after dark, when the flash is the
+   only thing visible at 40u. The flash IS the "you're being shot"
+   indicator.
      CBZ.bulletImpact(pos,n,o)   — debris burst; o.power scales it by
                                    CALIBER, o.kind "chip" + o.color =
                                    paint flecks in a shot car's coat.
@@ -83,26 +92,105 @@
     s.position.set(pos.x, pos.y, pos.z);
     const sc = (opts.scale || 1) * (0.7 + Math.random() * 0.5);
     s.scale.set(sc, sc, sc);
-    s.material.opacity = 1;
+    // pooled sprites keep their last tint/peak — reset both every take
+    s.material.color.setHex(opts.color != null ? opts.color : 0xffffff);
+    const peak = opts.peak != null ? opts.peak : 1;
+    s.material.opacity = peak;
     s.visible = true;
     const life = opts.life || 0.06;
-    liveFlashes.push({ spr: s, life: life, max: life });
+    liveFlashes.push({ spr: s, life: life, max: life, peak: peak });
     return s;
   };
 
+  // ---- INCOMING-fire bolt pool: thin additive cylinders. A head-on tracer
+  // LINE foreshortens to a single pixel, which is why you couldn't tell who
+  // was shooting at you — a cylinder keeps its radius from every angle. ----
+  const beamGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
+  beamGeo._shared = true;
+  const beams = [];
+  let beamIdx = 0;
+  function takeBeam() {
+    let b;
+    if (beams.length < 10) {
+      const bm = new THREE.MeshBasicMaterial({
+        color: 0xffe9b8, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      bm._shared = true;
+      b = { mesh: new THREE.Mesh(beamGeo, bm), life: 0, max: 0.001, peak: 1 };
+      b.mesh.visible = false; b.mesh.frustumCulled = false; b.mesh.renderOrder = 9;
+      scene.add(b.mesh);
+      beams.push(b);
+    } else {
+      b = beams[beamIdx];
+      beamIdx = (beamIdx + 1) % beams.length;
+    }
+    return b;
+  }
+  const _beamDir = new THREE.Vector3();
+  function fireIncomingBeam(from, to, inc, night) {
+    _beamDir.set(to.x - from.x, to.y - from.y, to.z - from.z);
+    const len = _beamDir.length();
+    if (len < 2.5) return;
+    _beamDir.multiplyScalar(1 / len);
+    const L = Math.max(2, len - 2.2);   // stop short of the lens — never a screen-filling smear
+    const b = takeBeam();
+    b.mesh.position.set(from.x + _beamDir.x * L * 0.5, from.y + _beamDir.y * L * 0.5, from.z + _beamDir.z * L * 0.5);
+    b.mesh.quaternion.setFromUnitVectors(UP, _beamDir);
+    // thicker with range + after dark so it still reads head-on at 40u
+    const r = 0.035 + len * 0.0014 + night * 0.025;
+    b.mesh.scale.set(r, L, r);
+    b.peak = 0.55 + inc * 0.3 + night * 0.15;
+    b.mesh.material.opacity = b.peak;
+    b.mesh.visible = true;
+    b.life = b.max = 0.09 + inc * 0.05 + night * 0.05;
+  }
+
   CBZ.tracer = function (from, to, opts) {
     opts = opts || {};
+    // ---- is this round travelling AT the player? Closest approach of the
+    // shot segment to the player's chest line decides; the boost scales with
+    // how dead-on the shot is (inc 0..1). Player-origin / point-blank-adjacent
+    // shots are excluded so your own allies' barrels don't flare in your face.
+    let inc = 0;
+    const P = CBZ.player;
+    if (P && P.pos && from && to) {
+      const px = P.pos.x, py = P.pos.y + 1.45, pz = P.pos.z;
+      const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+      const len2 = dx * dx + dy * dy + dz * dz;
+      const ox = px - from.x, oy = py - from.y, oz = pz - from.z;
+      if (len2 > 16 && ox * ox + oy * oy + oz * oz > 16) {
+        let t = (ox * dx + oy * dy + oz * dz) / len2;
+        if (t > 0.45) {            // travelling toward the player's half of the line
+          if (t > 1) t = 1;
+          const mx = from.x + dx * t - px, my = from.y + dy * t - py, mz = from.z + dz * t - pz;
+          const miss = Math.sqrt(mx * mx + my * my + mz * mz);
+          if (miss < 3.4) inc = 1 - miss / 3.4;            // 1 = dead-on
+        }
+      }
+    }
+    const night = inc > 0 ? Math.min(1, CBZ.nightAmount || 0) : 0;
+
     const m = takeLine();
     const p = m.geometry.attributes.position.array;
     p[0] = from.x; p[1] = from.y; p[2] = from.z;
     p[3] = to.x;   p[4] = to.y;   p[5] = to.z;
     m.geometry.attributes.position.needsUpdate = true;
-    m.material.color.setHex(opts.color != null ? opts.color : 0xfff2b0);
+    m.material.color.setHex(opts.color != null ? opts.color : (inc > 0 ? 0xfff7d6 : 0xfff2b0));
     m.material.opacity = 0.95;
     m.visible = true;
-    const life = opts.life || 0.07;
+    const life = opts.life || (inc > 0 ? 0.07 + inc * 0.05 : 0.07);
     liveLines.push({ mesh: m, life: life, max: life });
-    if (opts.muzzle !== false) CBZ.muzzleFlash(from, { scale: opts.muzzleScale || 0.9 });
+    if (opts.muzzle !== false) {
+      if (inc > 0) {
+        const base = opts.muzzleScale || 0.9;
+        // hot core — bigger, brighter, a beat longer than an outgoing flash
+        CBZ.muzzleFlash(from, { scale: base * (1.9 + inc * 0.9 + night * 0.8), life: 0.1 + inc * 0.05 + night * 0.05 });
+        // wide pale halo blooming around it — the "that one's aimed at YOU" flare
+        CBZ.muzzleFlash(from, { scale: base * (3.1 + inc * 1.5 + night * 1.4), life: 0.16 + night * 0.07, color: 0xfff4da, peak: 0.4 + night * 0.25 });
+        // the round itself: a hot volumetric bolt down the shot line at you
+        fireIncomingBeam(from, to, inc, night);
+      } else CBZ.muzzleFlash(from, { scale: opts.muzzleScale || 0.9 });
+    }
     return m;
   };
 
@@ -314,8 +402,16 @@
     for (let i = liveFlashes.length - 1; i >= 0; i--) {
       const f = liveFlashes[i];
       f.life -= dt;
-      f.spr.material.opacity = Math.max(0, f.life / f.max);
+      f.spr.material.opacity = Math.max(0, f.life / f.max) * (f.peak != null ? f.peak : 1);
       if (f.life <= 0) { f.spr.visible = false; flashPool.push(f.spr); liveFlashes.splice(i, 1); }
+    }
+    // incoming-fire bolts fade fast (round's already landed)
+    for (let i = 0; i < beams.length; i++) {
+      const b = beams[i];
+      if (b.life <= 0) continue;
+      b.life -= dt;
+      b.mesh.material.opacity = Math.max(0, b.life / b.max) * b.peak;
+      if (b.life <= 0) b.mesh.visible = false;
     }
     // bullet-impact streaks: integrate velocity + gravity, stretch along motion
     for (let i = 0; i < streaks.length; i++) {

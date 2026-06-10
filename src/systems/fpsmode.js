@@ -60,6 +60,7 @@
   const hitPoint = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
   const ray = new THREE.Raycaster();
+  const wallQ = new THREE.Quaternion();   // rocket impacts: raycast face normal → world
 
   function weaponIdOf(i) { return WEAPONS[i] && (WEAPONS[i].id || WEAPONS[i].key); }
   function weaponIndex(id) {
@@ -467,7 +468,12 @@
   // camera-space bounds: down-and-right of the lens, out in front, never at the eye.
   // FIRST-PERSON ONLY — this box is "the gun region" solely when the camera IS the
   // shooter's eye. The shoulder cam clamps to the gun HAND instead (see below).
-  const MUZ_UP = [-0.78, -0.16], MUZ_RIGHT = [0.1, 0.62], MUZ_FWD = [0.45, 3.2];
+  // WIDE enough that every healthy rest pose passes through UNTOUCHED — the
+  // old box (up max -0.16, right max 0.62) was tighter than the current
+  // viewmodels' real barrel tips, so the clamp engaged at REST and shifted the
+  // bullet origin up-left of the visible muzzle (user-filmed ~cm overlap).
+  // Recoil drift this box exists for flings way beyond these bounds.
+  const MUZ_UP = [-1.05, -0.1], MUZ_RIGHT = [0.04, 0.9], MUZ_FWD = [0.45, 3.2];
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   function clampMuzzleBelowEye(out) {
     const cam = CBZ.camera; if (!cam) return out;
@@ -828,6 +834,7 @@
     return {
       actor: null,
       wall: !!wall,
+      wallHit: wall || null,   // raw raycast hit (face/object) — rockets stamp the struck face
       dist: wall ? wall.distance : w.range,
       point: wall ? wall.point.clone() : eye.clone().addScaledVector(dir, w.range),
     };
@@ -1068,17 +1075,45 @@
       const pt = eye.clone().addScaledVector(fwd, detT);
       fireTracer(origin, pt, w.tracer, 0.07);
       if (CBZ.game.mode === "city") {
-        if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true });
+        const groundHit = pt.y < 3.5;   // the blast actually couples to the street
+        // the fireball/smoke/damage bloom AT the impact height — a tower hit
+        // 30u up no longer pops at the kerb below it (crashfx reads opts.y)
+        if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
         // wreck the storefront HARD — shatter a wide radius of glass (was +2)
         if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
-        if (CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
+        if (groundHit && CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
         // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
         // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in)
-        if (CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
+        if (groundHit && CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
+        // detonated ON a building face → the facade REACTS (crashfx): blackened
+        // blast scar on the wall, debris avalanche pouring down the facade, a
+        // lingering smoke column from the wound, a parapet block near the roof-
+        // line. Composes WITH the ground breach on a ground-floor wall hit.
+        if (hit.wall && hit.wallHit && hit.dist <= detT + 0.6 && CBZ.cityBlastWall) {
+          // wall-face normal: the raycast's struck face rotated to world (the
+          // exact face-entry normal, same idea as findCarHit's AABB slabs);
+          // falls back to the reflected horizontal shot direction.
+          shotDir.set(-fwd.x, 0, -fwd.z);
+          if (shotDir.lengthSq() < 1e-6) shotDir.set(0, 1, 0); else shotDir.normalize();
+          const wf = hit.wallHit.face, wo = hit.wallHit.object;
+          if (wf && wo && wo.getWorldQuaternion) {
+            tmp.copy(wf.normal).applyQuaternion(wo.getWorldQuaternion(wallQ));
+            if (tmp.lengthSq() > 0.25) {
+              if (tmp.dot(fwd) > 0) tmp.multiplyScalar(-1);   // always face the shooter
+              shotDir.copy(tmp.normalize());
+            }
+          }
+          // MIN_DET can push pt past a point-blank wall — stamp at the wall point
+          CBZ.cityBlastWall(hit.dist < detT - 0.05 ? hit.point : pt, shotDir, { power: w.blastPower || 1.4 });
+        }
         // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
         if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
       }
-      CBZ.shake && CBZ.shake((w.shake || 1) + 0.6);
+      // kick scales with how close the blast is to the lens — a rocket at your
+      // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
+      // its own explosion shake the same way)
+      const camD = CBZ.camera ? CBZ.camera.position.distanceTo(pt) : 0;
+      CBZ.shake && CBZ.shake(((w.shake || 1) + 0.6) * Math.max(0.3, Math.min(1, 1.25 - camD / 130)));
       CBZ.doHitstop && CBZ.doHitstop(0.05);
       // firing still raises wanted: replicate the witnessed-crime block below so
       // launching a rocket is at least as loud as discharging a firearm.
@@ -1113,7 +1148,7 @@
       if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
         const reach = hit.dist != null ? hit.dist + 0.5 : w.range;
         CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z,
-          heavyRound(w) ? reach : Math.min(reach, GLASS_PISTOL_REACH));
+          heavyRound(w) ? reach : Math.min(reach, GLASS_PISTOL_REACH), true);
       }
       if (hit.actor) {
         hitSomething = true;
@@ -1384,7 +1419,9 @@
       if (fps.active) setActive(false);
       resetWeapons();
       // a fresh run starts on unmarked streets — wipe last run's bullet pocks
+      // and rocket scars/smoking wounds
       if (CBZ.bulletHolesReset) CBZ.bulletHolesReset();
+      if (CBZ.cityBlastFxReset) CBZ.cityBlastFxReset();
       shudders.length = 0;
     }
     lastElapsed = el;

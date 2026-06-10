@@ -87,6 +87,10 @@
     { name: "Mohawk", cost: 60, swag: 4 },
     { name: "Clean Shave + Lineup", cost: 30, swag: 2 },
   ];
+  // LEGACY fitting-room list — only used if city/outfits.js (the canonical
+  // wardrobe) isn't loaded. With outfits.js live, the rack is catalog-driven:
+  // street basics up to the MIDNIGHT TUXEDO (the apex status purchase — worn
+  // cloth that opens the Velvet's rope by itself).
   const OUTFITS = [
     { name: "Tracksuit", cost: 180, swag: 3 },
     { name: "Tailored Suit", cost: 900, swag: 8 },
@@ -95,6 +99,17 @@
     { name: "Leather Jacket", cost: 520, swag: 6 },
     { name: "All Black Tactical", cost: 700, swag: 7 },
   ];
+  // the boutique RACK from the canonical catalog: every fit with a price tag,
+  // cheapest → the tuxedo. Mapped onto the legacy {name,cost,swag} shape so the
+  // render/keys code stays one path; `id` marks a catalog fit (drip, not swagger).
+  function outfitRack() {
+    const cat = CBZ.cityOutfitCatalog && CBZ.cityOutfitCatalog();
+    if (!cat) return OUTFITS;
+    const out = [];
+    for (const k in cat) { const o = cat[k]; if (o.price > 0) out.push({ name: o.name, cost: o.price, swag: o.drip, id: o.id }); }
+    out.sort((a, b) => a.cost - b.cost);
+    return out.slice(0, 9);
+  }
 
   function el() {
     if (panel) return panel;
@@ -320,16 +335,31 @@
           "</span><span style='color:#7ed957'>" + line + "</span></div>";
       });
     }
-    // BARBER chair / CLOTHING styling (real cosmetic restyle that nudges swagger)
+    // BARBER chair / CLOTHING rack. The rack sells whole OUTFITS (the canonical
+    // wardrobe): each shows its DRIP — worn status, the same number the bouncer
+    // reads — and an owned fit re-wears FREE. The tuxedo tops the list: cloth
+    // priced like a car, because the rope opens for it.
     const styles = styleMenu(kind);
     if (styles.length) {
       const label = kind === "barber" ? "BARBER CHAIR" : "FITTING ROOM";
+      const cur = kind === "barber" ? look().hair
+        : ((CBZ.cityOutfitGet && CBZ.cityOutfitGet().name) || look().outfit);
       html += "<div style='font-size:12px;color:#9fb0c6;margin:8px 0 2px'>" + label +
-        " <span style='color:#7f8794'>· current: " + (kind === "barber" ? look().hair : look().outfit) + "</span></div>";
+        " <span style='color:#7f8794'>· wearing: " + cur + "</span></div>";
+      const letters = styleLetters(kind);
+      const ownedFits = g.cityOutfitsOwned || {};
+      const wornId = g.cityOutfitId || "";
       styles.forEach((s, i) => {
-        const letter = String.fromCharCode(97 + i);  // a,b,c...
+        const letter = letters[i]; if (!letter) return;
+        const isFit = !!s.id;                                     // catalog outfit (drip) vs haircut (swagger)
+        const wornNow = isFit && s.id === wornId;
+        const owned = isFit && !!ownedFits[s.id];
+        const tag = isFit ? "+" + s.swag + " drip" : "+" + s.swag + " swagger";
+        const price = wornNow ? "" : (owned ? "<span style='color:#7fd0ff'>owned · wear</span>" : "<span style='color:#7ed957'>" + fmt$(s.cost) + "</span>");
         html += "<div style='display:flex;justify-content:space-between;padding:2px 0'><span><b style='color:#7fd0ff'>" + letter.toUpperCase() + "</b> " +
-          s.name + " <span style='color:#7f8794;font-size:11px'>(+" + s.swag + " swagger)</span></span><span style='color:#7ed957'>" + fmt$(s.cost) + "</span></div>";
+          s.name + " <span style='color:#7f8794;font-size:11px'>(" + tag + ")</span>" +
+          (wornNow ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : "") +
+          "</span><span>" + price + "</span></div>";
       });
     }
     // services
@@ -360,11 +390,28 @@
     el().innerHTML = html;
   }
 
-  // styling menus (cosmetic restyle that grants a small standing swagger bonus)
+  // styling menus: the barber chair (swagger) and the clothing rack (whole
+  // OUTFITS — identity/status fits from the canonical wardrobe when present)
   function styleMenu(kind) {
     if (kind === "barber") return HAIRCUTS;
-    if (kind === "clothing") return OUTFITS;
+    if (kind === "clothing") return outfitRack();
     return [];
+  }
+  // letters for the style rows, SKIPPING service keys + the closet key so a
+  // fit can never be shadowed by the job board (the old a..z mapping silently
+  // ate any style whose letter doubled as a service key).
+  function styleLetters(kind) {
+    const used = {};
+    for (const s of services(kind)) used[s.key] = true;
+    const ck = closetKey(kind); if (ck) used[ck] = true;
+    const list = styleMenu(kind), out = [];
+    let c = 97;
+    for (let i = 0; i < list.length && c < 123; i++) {
+      while (used[String.fromCharCode(c)]) c++;
+      if (c >= 123) break;
+      out.push(String.fromCharCode(c)); c++;
+    }
+    return out;
   }
 
   function services(kind) {
@@ -599,6 +646,9 @@
   // ---- styling (barber / clothing fitting room) ------------------------------
   function restyle(kind, idx) {
     const list = styleMenu(kind); const s = list[idx]; if (!s) return;
+    // a CATALOG fit routes through the wardrobe: pay once, own it, the rig
+    // recolors on the spot and the drip lands (outfits.js owns the whole beat).
+    if (s.id && CBZ.cityBuyOutfit) { CBZ.cityBuyOutfit(s.id); render(); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return; }
     const cur = kind === "barber" ? look().hair : look().outfit;
     if (cur === s.name) { CBZ.city.note("You're already rocking that.", 1.4); return; }
     if (!CBZ.city.spend(s.cost)) { CBZ.city.note("Need " + fmt$(s.cost) + " for that.", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
@@ -721,14 +771,12 @@
     if (k === "r" && canRobTill(openLot.kind) && !services(openLot.kind).some((s) => s.key === "r")) {
       e.preventDefault(); robTill(); return;
     }
-    // barber / clothing restyle (letters a..g map to the style list)
+    // barber / clothing restyle — letters come from styleLetters(), which
+    // already skips service keys + the closet key, so they can't collide.
     const styles = styleMenu(openLot.kind);
     if (styles.length && k >= "a" && k <= "z") {
-      const idx = k.charCodeAt(0) - 97;
-      if (idx < styles.length) {
-        // don't hijack a letter that's also a service key
-        if (!services(openLot.kind).some((s) => s.key === k)) { e.preventDefault(); restyle(openLot.kind, idx); return; }
-      }
+      const idx = styleLetters(openLot.kind).indexOf(k);
+      if (idx >= 0 && idx < styles.length) { e.preventDefault(); restyle(openLot.kind, idx); return; }
     }
     const svc = services(openLot.kind).find((s) => s.key === k);
     if (svc) { e.preventDefault(); svc.fn(); }

@@ -68,6 +68,7 @@
     if ((a.aggr || 0) >= 0.88) lvl += 4;                // the crazy eyes
     if (a.rampage) lvl += 10;
     if (a.companion || a.recruited) lvl += 3;           // runs with somebody
+    if (a.vipLvl) lvl = Math.max(lvl, a.vipLvl);        // vips.js: the whale's read IS the read
     return Math.max(1, Math.min(100, Math.round(lvl)));
   };
 
@@ -123,6 +124,7 @@
   CBZ.cityTitle = function (a) {
     if (!a) return "Civilian";
     if (a.isPlayer) return ladderTitle(playerLevel());
+    if (a.vipTitle) return a.vipTitle;                  // vips.js: Magnate / Don / Senator...
     if (a.kind === "cop") return a.swat ? "SWAT" : "Officer"; // SWAT stays an acronym — "Swat" reads like a typo
     if (a.kind === "security") return "Security";
     if (a.rampage) return "Maniac";                     // mid-snap, nothing else matters

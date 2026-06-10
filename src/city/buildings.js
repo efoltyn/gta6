@@ -323,7 +323,11 @@
   // no collider in the gun's wall raycast, so the shot passes through it invisibly —
   // this is what makes the pane you fired through actually break. Returns the rec.
   let bestHX = 0, bestHY = 0, bestHZ = 0;   // impact point of the last ray-shatter
-  CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist) {
+  // force=true (bullets) blows the pane out on the FIRST hit — a fired round
+  // through a window should never read as "nothing happened". Default (melee)
+  // keeps the two-stage crack-then-burst, so punching a window takes a couple
+  // of swings.
+  CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist, force) {
     const nl = Math.hypot(dx, dy, dz) || 1; dx /= nl; dy /= nl; dz /= nl;
     const lim = maxDist != null ? maxDist : 1e9;
     let best = null, bestT = lim;
@@ -341,9 +345,9 @@
       if (t < bestT) { bestT = t; best = gp; bestHX = ox + dx * t; bestHY = oy + dy * t; bestHZ = oz + dz * t; }
     }
     if (best) {
-      // first bullet spider-cracks the pane (and chips a glass shard); a second
-      // hit — or a solid showroom pane — blows it fully out.
-      if (best.cracked || best.col) { burstPane(best); if (CBZ.sfx) CBZ.sfx("glass"); }
+      // a bullet (force) or a second hit — or a solid showroom pane — blows it
+      // fully out; otherwise spider-crack it (and chip a shard off the point).
+      if (force || best.cracked || best.col) { burstPane(best); if (CBZ.sfx) CBZ.sfx("glass"); }
       else { crackPane(best, bestHX, bestHY, bestHZ); if (CBZ.sfx) CBZ.sfx("glass"); spawnGlassChip(bestHX, bestHY, bestHZ); }
     }
     return best;
@@ -1107,6 +1111,11 @@
     // trim palette: darks derived from the wall colour (shared palettes →
     // shared colour buckets, so the batcher still collapses trim city-wide)
     const MULL = 0x262b31;                 // mullion-frame dark
+    const SKY = 0xd6e6f2;                  // interior window "daylight" backing —
+    // the wall behind every pane is a SOLID box, so without this bright slab a
+    // window reads as blank wall from INSIDE the room. One extra colour bucket
+    // in the merged deco pass (≈1 mesh/building pre-batch), it scene-lights
+    // down with the sun so night interiors dim naturally.
     const TRIM = shadeHex(color, 0.72);    // cornice / sill / parapet coping
     const BASE = shadeHex(color, 0.55);    // ground-floor plinth
     const PIL = shadeHex(color, 0.85);     // corner pilasters
@@ -1274,10 +1283,20 @@
             // STOREFRONT GLASS flanking the entrance — on the STREET side of the
             // wall (the old +0.22 offset put it just inside the room, hidden
             // behind the opaque facade) so shops read as glassed storefronts.
-            const goff = (f.s === 0 ? -1 : 1) * (WT / 2 + 0.06), gph = FH * 0.5, gy = ly + 0.1;
+            // Pane back face sits 0.06 PROUD of the facade (was 0.035 — close
+            // enough to depth-alias into a moiré shimmer at distance).
+            const osn = (f.s === 0 ? -1 : 1);                 // toward the street
+            const goff = osn * (WT / 2 + 0.085), gph = FH * 0.5, gy = ly + 0.1;
             if (side > 1.2) {
-              addCityGlass(bgroup, fcx, gy, f.z + goff, side * 0.7, gph, 0.05, ox, oz, { tint: tintIdx }, windows);
-              addCityGlass(bgroup, fcx2, gy, f.z + goff, side * 0.7, gph, 0.05, ox, oz, { tint: tintIdx }, windows);
+              for (const fc of [fcx, fcx2]) {
+                addCityGlass(bgroup, fc, gy, f.z + goff, side * 0.7, gph, 0.05, ox, oz, { tint: tintIdx }, windows);
+                // INTERIOR read: the wall is a solid box, so from inside the
+                // shop these windows were blank wall. A bright SKY slab just
+                // proud of the room face + a room-side pane = the storefront
+                // reads (and shatters) from both sides.
+                dbox(fc, gy, f.z - osn * (WT / 2 + 0.025), side * 0.74, gph + 0.12, 0.03, SKY);
+                addCityGlass(bgroup, fc, gy, f.z - osn * (WT / 2 + 0.105), side * 0.7, gph, 0.05, ox, oz, { tint: tintIdx }, windows);
+              }
             }
           } else {
             const side = (d - DOORW) / 2;
@@ -1285,10 +1304,15 @@
             lbox(f.x, ly, fcz, WT, FH, side, color, wallOpt);
             lbox(f.x, ly, fcz2, WT, FH, side, color, wallOpt);
             lbox(f.x, (DOORH + FH) / 2, 0, WT, FH - DOORH, DOORW, color, { los: true });   // header fills DOORH..FH
-            const goff = (f.s === 2 ? -1 : 1) * (WT / 2 + 0.06), gph = FH * 0.5, gy = ly + 0.1;
+            const osn = (f.s === 2 ? -1 : 1);                 // toward the street
+            const goff = osn * (WT / 2 + 0.085), gph = FH * 0.5, gy = ly + 0.1;
             if (side > 1.2) {
-              addCityGlass(bgroup, f.x + goff, gy, fcz, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
-              addCityGlass(bgroup, f.x + goff, gy, fcz2, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
+              for (const fc of [fcz, fcz2]) {
+                addCityGlass(bgroup, f.x + goff, gy, fc, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
+                // interior counterpart (see the horiz branch for WHY)
+                dbox(f.x - osn * (WT / 2 + 0.025), gy, fc, 0.03, gph + 0.12, side * 0.74, SKY);
+                addCityGlass(bgroup, f.x - osn * (WT / 2 + 0.105), gy, fc, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
+              }
             }
           }
           // hang an OPENABLE swinging glass door in the gap (real shops/homes
@@ -1333,24 +1357,43 @@
               // lower band sits low, upper band high; both clear of the floor belts
               bands = [ly - FH * 0.16, ly + FH * 0.22];
             }
+            // DEPTH STACK (street side, per-face epsilon so nothing is ever
+            // coplanar with the wall plane or each other — coplanar/near-
+            // coplanar layers were depth-aliasing into shimmer at distance):
+            //   wall face 0 → MULL slab 0.01..0.07 → sill 0.01..0.14 (below the
+            //   band) → pane 0.08..0.13. Visible parallel faces stay ≥0.06 apart.
+            // INTERIOR (room side): the wall is a SOLID box, so these windows
+            // read as blank wall from inside. Mirror the band into the room —
+            // bright SKY slab (daylight) + dark mullion strips in the exterior
+            // panes' gaps + ONE full-span room-side pane (1 extra instance per
+            // band, same pools) — so every room says "this wall has windows",
+            // glows warm if the band is lit at night, and shatters from inside.
             const gtint = { tint: tintIdx };
             if (f.horiz) {
               const faceZ = f.z + outSgn * (WT / 2);     // the street-side wall plane
-              const zz = faceZ + outSgn * 0.09, span = w - 1.1;
+              const inZ = f.z - outSgn * (WT / 2);       // the room-side wall plane
+              const zz = faceZ + outSgn * 0.105, span = w - 1.1;
               const nn = Math.max(4, Math.min(8, Math.round(w / 1.6))), step = span / nn;
               for (let b = 0; b < bands.length; b++) {
-                dbox(0, bands[b], faceZ + outSgn * 0.03, span + 0.18, ph + 0.16, 0.06, MULL);
-                dbox(0, bands[b] - ph / 2 - 0.1, faceZ + outSgn * 0.065, span + 0.3, 0.1, 0.13, TRIM);
+                dbox(0, bands[b], faceZ + outSgn * 0.04, span + 0.18, ph + 0.16, 0.06, MULL);
+                dbox(0, bands[b] - ph / 2 - 0.1, faceZ + outSgn * 0.075, span + 0.3, 0.1, 0.13, TRIM);
                 for (let i = 0; i < nn; i++) addCityGlass(bgroup, -span / 2 + (i + 0.5) * step, bands[b], zz, step * 0.84, ph, 0.05, ox, oz, gtint, windows);
+                dbox(0, bands[b], inZ - outSgn * 0.025, span + 0.18, ph + 0.16, 0.03, SKY);
+                for (let i = 1; i < nn; i++) dbox(-span / 2 + i * step, bands[b], inZ - outSgn * 0.06, step * 0.18, ph + 0.1, 0.02, MULL);
+                addCityGlass(bgroup, 0, bands[b], inZ - outSgn * 0.105, span, ph, 0.05, ox, oz, gtint, windows);
               }
             } else {
               const faceX = f.x + outSgn * (WT / 2);
-              const xx = faceX + outSgn * 0.09, span = d - 1.1;
+              const inX = f.x - outSgn * (WT / 2);
+              const xx = faceX + outSgn * 0.105, span = d - 1.1;
               const nn = Math.max(4, Math.min(8, Math.round(d / 1.6))), step = span / nn;
               for (let b = 0; b < bands.length; b++) {
-                dbox(faceX + outSgn * 0.03, bands[b], 0, 0.06, ph + 0.16, span + 0.18, MULL);
-                dbox(faceX + outSgn * 0.065, bands[b] - ph / 2 - 0.1, 0, 0.13, 0.1, span + 0.3, TRIM);
+                dbox(faceX + outSgn * 0.04, bands[b], 0, 0.06, ph + 0.16, span + 0.18, MULL);
+                dbox(faceX + outSgn * 0.075, bands[b] - ph / 2 - 0.1, 0, 0.13, 0.1, span + 0.3, TRIM);
                 for (let i = 0; i < nn; i++) addCityGlass(bgroup, xx, bands[b], -span / 2 + (i + 0.5) * step, 0.05, ph, step * 0.84, ox, oz, gtint, windows);
+                dbox(inX - outSgn * 0.025, bands[b], 0, 0.03, ph + 0.16, span + 0.18, SKY);
+                for (let i = 1; i < nn; i++) dbox(inX - outSgn * 0.06, bands[b], -span / 2 + i * step, 0.02, ph + 0.1, step * 0.18, MULL);
+                addCityGlass(bgroup, inX - outSgn * 0.105, bands[b], 0, 0.05, ph, span, ox, oz, gtint, windows);
               }
             }
           }
@@ -2701,7 +2744,11 @@
         // expose everything in WORLD coords so club.js needs no geometry math.
         if (shop.kind === "bar") {
           clubLot = lot;
-          const nx = door.nx, nz = door.nz, tx = -nz, tz = nx;   // out-normal + sidewalk tangent
+          // doorInfo's nx/nz is the INWARD normal — negate it: the rope, the
+          // queue and the bouncer all live on the SIDEWALK (the old +n maths
+          // formed the whole line INSIDE the bar and put insideSpot outside).
+          const inx = door.nx, inz = door.nz;
+          const nx = -inx, nz = -inz, tx = -nz, tz = nx;         // out-normal + sidewalk tangent
           const dx = door.x, dz = door.z;                        // door-wall centre (world)
           // the rope sits right at the threshold; the bouncer holds the inside
           // edge of it (one step toward the door), facing OUT at the line.
@@ -2716,11 +2763,11 @@
           }
           lot.building.club = {
             name: shop.name,
-            door: { x: door.x + nx * 1.2, z: door.z + nz * 1.2, nx, nz },   // step INTO the club
+            door: { x: door.x + inx * 1.2, z: door.z + inz * 1.2, nx: inx, nz: inz },   // step INTO the club
             // bouncer stands at the rope, just OUTSIDE the door, facing the line
             bouncerSpot: { x: ropeX, z: ropeZ, face: Math.atan2(nx, nz) },
             // where an ADMITTED VIP lands once the rope opens (just inside)
-            insideSpot: { x: dx - nx * 3.2, z: dz - nz * 3.2 },
+            insideSpot: { x: dx + inx * 3.2, z: dz + inz * 3.2 },
             // the rope itself (so club.js can flash/open it) + the line anchors
             ropePost: { x: ropeX, z: ropeZ },
             queue,
@@ -2872,57 +2919,60 @@
     const facade = along ? d : w;                  // width available across the storefront
     const sw = Math.min(facade - 0.6, DOORW + 4.2); // sign board spans most of the facade
     const fx = (lw, h, ld) => (along ? [ld, h, lw] : [lw, h, ld]);   // size helper (swap by facing)
+    // NOTE: doorInfo's nx/nz is the INWARD normal — every offset below uses
+    // -n (toward the STREET). The old +n offsets hung this whole storefront
+    // INSIDE the shop/wall: the sign board sat buried in the facade and the two
+    // "display windows" straddled the wall plane exactly coplanar with it — the
+    // filmed dithered/moiré panels flanking every shop door.
+    const onx = -di.nx, onz = -di.nz;             // outward (street) normal
     // per-kind storefront variety: the awning band picks up the trade accent and
     // the neon trim glows that accent so each storefront reads differently.
     const accent = kindAccent(kind);
     const awnCol = (kind === "bank" || kind === "cityhall" || kind === "hospital") ? color : accent;
-    // CANOPY awning over the door (angled colour band, kind-tinted)
+    // CANOPY awning over the door (angled colour band, kind-tinted). The pitch
+    // rotates about the FACADE-TANGENT axis (x for a ±z door, z for a ±x door —
+    // the old axes were swapped, rolling the band sideways instead of pitching
+    // its street edge down).
     const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.32, 1.1)), mat(awnCol, { emissive: awnCol, ei: 0.4 }));
-    awn.position.set(di.x + di.nx * 0.75, DOORH, di.z + di.nz * 0.75); awn.rotation[along ? "x" : "z"] = -0.22 * (along ? -di.nx || 1 : 1);   // hugs the DOOR opening, not the floor line
+    awn.position.set(di.x + onx * 0.75, DOORH, di.z + onz * 0.75);   // hugs the DOOR opening, not the floor line
+    awn.rotation[along ? "z" : "x"] = along ? 0.22 * di.nx : -0.22 * di.nz;   // street edge dips
     b.group.add(awn);
     // EMISSIVE NEON TRIM strip under the awning lip (cheap glowing accent line)
     const trim = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.06, 0.1)), mat(accent, { emissive: accent, ei: 0.95 }));
-    trim.position.set(di.x + di.nx * 1.3, DOORH - 0.18, di.z + di.nz * 1.3); trim.castShadow = false;
+    trim.position.set(di.x + onx * 1.3, DOORH - 0.18, di.z + onz * 1.3); trim.castShadow = false;
     b.group.add(trim);
     // LIT SIGN BOARD across the facade above the awning — a glowing backing panel
-    // (the trade colour) with the NAME painted on its front face.
+    // (the trade colour) with the NAME painted on its street face. Board back
+    // face rides 0.03 PROUD of the facade (real separation, no depth aliasing).
     const signH = 1.2, signY = FH + 0.45;
     const sign = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw, signH, 0.22)), mat(color, { emissive: color, ei: 0.9 }));
-    sign.position.set(di.x + di.nx * 0.12, signY, di.z + di.nz * 0.12);
+    sign.position.set(di.x + onx * 0.14, signY, di.z + onz * 0.14);
     b.group.add(sign);
-    // the painted name plate sitting just proud of the board face (front + back
-    // so it reads from either approach), tinted for contrast.
+    // the painted name plate just proud of the board's street face. ONE plate:
+    // with the board out on the facade there is no walkable side behind it.
     const nameMat = new THREE.MeshBasicMaterial({ map: signFaceTex(name, color), transparent: true });
-    for (const fdir of [1, -1]) {
-      const plate = new THREE.Mesh(new THREE.PlaneGeometry(sw - 0.2, signH - 0.18), nameMat);
-      plate.position.set(di.x + di.nx * (0.12 + fdir * 0.13), signY, di.z + di.nz * (0.12 + fdir * 0.13));
-      if (along) plate.rotation.y = di.nx > 0 ? (fdir > 0 ? Math.PI / 2 : -Math.PI / 2) : (fdir > 0 ? -Math.PI / 2 : Math.PI / 2);
-      else if (di.nz > 0) { if (fdir < 0) plate.rotation.y = Math.PI; }
-      else { if (fdir > 0) plate.rotation.y = Math.PI; }
-      plate.renderOrder = 2; b.group.add(plate);
-    }
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(sw - 0.2, signH - 0.18), nameMat);
+    plate.position.set(di.x + onx * 0.27, signY, di.z + onz * 0.27);
+    if (along) plate.rotation.y = di.nx > 0 ? -Math.PI / 2 : Math.PI / 2;
+    else if (di.nz > 0) plate.rotation.y = Math.PI;
+    plate.renderOrder = 2; b.group.add(plate);
     // PERPENDICULAR BLADE SIGN — a small projecting sign so the store is readable
     // looking down the sidewalk (classic GTA storefront). Bracket + lit panel.
     // The blade glows the kind accent so trades read apart down the street.
     const bladeOut = 0.9;
     const blade = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.12, 0.9, 0.9)), mat(accent, { emissive: accent, ei: 0.85 }));
-    blade.position.set(di.x + tx * (sw / 2 - 0.4) + di.nx * bladeOut, FH - 0.2, di.z + tz * (sw / 2 - 0.4) + di.nz * bladeOut);
+    blade.position.set(di.x + tx * (sw / 2 - 0.4) + onx * bladeOut, FH - 0.2, di.z + tz * (sw / 2 - 0.4) + onz * bladeOut);
     b.group.add(blade);
-    // DISPLAY WINDOWS flanking the entrance. (REMOVED: the old dark "DOOR FRAME"
-    // slab that sat over the doorway — it was a SECOND, static door covering the
-    // real swinging one. The wall opening + the swinging leaf are all the door needs.)
-    for (const s of [-1, 1]) {
-      const ox2 = tx * s * (DOORW * 0.5 + 1.5), oz2 = tz * s * (DOORW * 0.5 + 1.5);
-      const win = new THREE.Mesh(new THREE.BoxGeometry(...fx(2.2, 2.4, 0.1)), glassMat());
-      win.position.set(di.x + ox2 + di.nx * 0.05, 1.7, di.z + oz2 + di.nz * 0.05); b.group.add(win);
-      const sill = new THREE.Mesh(new THREE.BoxGeometry(...fx(2.5, 0.18, 0.26)), mat(0x2a2f37));
-      sill.position.set(di.x + ox2 + di.nx * 0.04, 0.45, di.z + oz2 + di.nz * 0.04); b.group.add(sill);
-    }
+    // (DISPLAY WINDOWS REMOVED: two raw glass boxes used to sit flush in the
+    // wall here, their street faces EXACTLY coplanar with the facade — the
+    // z-fighting panels the player filmed. makeBuilding already glazes the
+    // door flanks with pooled, shatterable storefront panes; these were
+    // redundant, un-shatterable, and 4 extra meshes per shop.)
     // a floating crisp name sprite above the board too (always faces the camera),
     // tinted bright for a from-a-distance read.
     if (CBZ.makeLabelSprite) {
       const s = CBZ.makeLabelSprite(name, { color: spriteTint(color) });
-      if (s) { s.position.set(di.x + di.nx * 0.6, FH + 1.7, di.z + di.nz * 0.6); s.scale.set(9, 2.25, 1); b.group.add(s); }
+      if (s) { s.position.set(di.x + onx * 0.6, FH + 1.7, di.z + onz * 0.6); s.scale.set(9, 2.25, 1); b.group.add(s); }
     }
   }
   // ---- THE VELVET CLUB ENTRANCE: a real rope line out front ----------------
@@ -2937,7 +2987,9 @@
     const di = doorInfo(0, 0, w, d, side);
     const along = Math.abs(di.nx) > 0.5;          // door faces ±X → entrance spans Z
     const tx = along ? 0 : 1, tz = along ? 1 : 0; // tangent across the doorway
-    const nx = di.nx, nz = di.nz;                 // outward normal (local)
+    // doorInfo's nx/nz points INWARD — negate for the outward (street) normal.
+    // The old +n offsets set the whole rope line up INSIDE the club.
+    const nx = -di.nx, nz = -di.nz;               // outward normal (local)
     const VELVET = 0x8a1f2b, BRASS = 0xcaa64a, RUNNER = 0x7a141f, GLOW = 0xe85d8a;
     const fx = (lw, h, ld) => (along ? new THREE.BoxGeometry(ld, h, lw) : new THREE.BoxGeometry(lw, h, ld));
     const add = (geo, col, x, y, z, opt) => { const m = new THREE.Mesh(geo, mat(col, opt || {})); m.position.set(x, y, z); m.castShadow = false; b.group.add(m); return m; };
@@ -2999,35 +3051,41 @@
     const fx = (lw, h, ld) => (along ? [ld, h, lw] : [lw, h, ld]);   // swap by facing
     const g = b.group, ox = b.ox, oz = b.oz;
     const darkTrim = 0x2a2f37;
+    // NOTE: doorInfo's nx/nz is the INWARD normal — every offset below uses
+    // -n (toward the STREET). The old +n offsets buried this entire frontage:
+    // stoop/canopy/posts INSIDE the lobby, the house-number plate and fire
+    // escape inside the wall, the transom glass entombed in the door header.
+    const onx = -di.nx, onz = -di.nz;             // outward (street) normal
     // ENTRY STOOP: a low step slab just outside the door
     const stoop = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 1.0, 0.28, 1.4)), mat(0x8a8f97));
-    stoop.position.set(di.x + di.nx * 0.7, 0.14, di.z + di.nz * 0.7); stoop.castShadow = false; g.add(stoop);
+    stoop.position.set(di.x + onx * 0.7, 0.14, di.z + onz * 0.7); stoop.castShadow = false; g.add(stoop);
     // CANOPY over the entrance (trim-coloured, slight lip) — door-anchored:
     // it shelters the DOORWAY, so it rides DOORH, not the floor line above.
     const canopy = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 1.4, 0.18, 1.3)), mat(darkTrim));
-    canopy.position.set(di.x + di.nx * 0.6, DOORH + 0.1, di.z + di.nz * 0.6); canopy.castShadow = false; g.add(canopy);
+    canopy.position.set(di.x + onx * 0.6, DOORH + 0.1, di.z + onz * 0.6); canopy.castShadow = false; g.add(canopy);
     for (const s of [-1, 1]) {                    // two thin support posts
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, DOORH - 0.1, 0.12), mat(darkTrim));
-      post.position.set(di.x + di.nx * 1.15 + tx * s * (DOORW * 0.5 + 0.4), (DOORH - 0.1) / 2, di.z + di.nz * 1.15 + tz * s * (DOORW * 0.5 + 0.4));
+      post.position.set(di.x + onx * 1.15 + tx * s * (DOORW * 0.5 + 0.4), (DOORH - 0.1) / 2, di.z + onz * 1.15 + tz * s * (DOORW * 0.5 + 0.4));
       post.castShadow = false; g.add(post);
     }
-    // HOUSE-NUMBER plate beside the door (sprite plane, both not needed — one face)
+    // HOUSE-NUMBER plate beside the door (one street-facing plane, 0.07 proud)
     const num = 100 + ((((lot.i | 0) * 17 + (lot.j | 0) * 7) % 89) * 10);
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45),
       new THREE.MeshBasicMaterial({ map: houseNumTex(num), transparent: true }));
-    plate.position.set(di.x + di.nx * 0.06 + tx * (DOORW * 0.5 + 0.5), 2.3, di.z + di.nz * 0.06 + tz * (DOORW * 0.5 + 0.5));
-    if (along) plate.rotation.y = di.nx > 0 ? Math.PI / 2 : -Math.PI / 2;
+    plate.position.set(di.x + onx * 0.07 + tx * (DOORW * 0.5 + 0.5), 2.3, di.z + onz * 0.07 + tz * (DOORW * 0.5 + 0.5));
+    if (along) plate.rotation.y = di.nx > 0 ? -Math.PI / 2 : Math.PI / 2;
     else if (di.nz > 0) plate.rotation.y = Math.PI;
     plate.renderOrder = 2; g.add(plate);
     // AC WINDOW UNIT jutting from a first-floor window (boxy grey unit),
     // offset along the facade tangent away from the door.
     const ac = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.8, 0.5, 0.5)), mat(0xb9bec6));
-    ac.position.set(di.x + di.nx * 0.2 + tx * (along ? d : w) * 0.28, FH + 0.55, di.z + di.nz * 0.2 + tz * (along ? d : w) * 0.28);
+    ac.position.set(di.x + onx * 0.2 + tx * (along ? d : w) * 0.28, FH + 0.55, di.z + onz * 0.2 + tz * (along ? d : w) * 0.28);
     ac.castShadow = false; g.add(ac);
     // FIRE-ESCAPE LADDER rig up one side of the door face (rails + rungs + a
-    // small landing) — purely cosmetic, hung on the building group.
-    const fox = di.x + di.nx * 0.16 - tx * (along ? d : w) * 0.30;
-    const foz = di.z + di.nz * 0.16 - tz * (along ? d : w) * 0.30;
+    // small landing) — purely cosmetic, hung on the building group. 0.24 proud:
+    // clear of the window panes (≤0.13) so the rails cross IN FRONT of glass.
+    const fox = di.x + onx * 0.24 - tx * (along ? d : w) * 0.30;
+    const foz = di.z + onz * 0.24 - tz * (along ? d : w) * 0.30;
     const ladTop = Math.min(b.h - 0.5, FH * 2.2);
     for (const s of [-0.25, 0.25]) {              // two vertical rails
       const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.08, ladTop, 0.08)), mat(0x3a3f46));
@@ -3040,9 +3098,11 @@
     }
     // a small landing platform at first floor
     const land = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.9, 0.08, 0.7)), mat(0x44505c));
-    land.position.set(fox + di.nx * 0.25, FH - 0.2, foz + di.nz * 0.25); land.castShadow = false; g.add(land);
-    // a small shatterable glass transom just over the DOOR opening (DOORH-anchored)
-    addCityGlass(g, di.x + di.nx * 0.05, DOORH + 0.25, di.z + di.nz * 0.05, along ? 0.06 : DOORW * 0.9, 0.5, along ? DOORW * 0.9 : 0.06, ox, oz, null, b.windows);
+    land.position.set(fox + onx * 0.25, FH - 0.2, foz + onz * 0.25); land.castShadow = false; g.add(land);
+    // a small shatterable glass transom over the DOOR opening — PROUD of the
+    // facade (0.07..0.13) and above the canopy lip, so it actually shows
+    // (the old +n*0.05 buried it inside the solid header wall).
+    addCityGlass(g, di.x + onx * 0.1, DOORH + 0.5, di.z + onz * 0.1, along ? 0.06 : DOORW * 0.9, 0.5, along ? DOORW * 0.9 : 0.06, ox, oz, null, b.windows);
   }
 
   // ---- ROOFTOP HELIPAD -----------------------------------------------------

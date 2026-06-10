@@ -37,6 +37,10 @@ Color.prototype.setHex = function (h) { this._h = h; this.r = ((h >> 16) & 255) 
 Color.prototype.getHex = function () { return this._h; };
 Color.prototype.setRGB = function (r, g, b) { this.r = r; this.g = g; this.b = b; this._h = ((Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255)) >>> 0; return this; };
 Color.prototype.clone = function () { return new Color(this._h); };
+Color.prototype.copy = function (c) { return this.setRGB(c.r || 0, c.g || 0, c.b || 0); };
+Color.prototype.lerp = function (c, k) { return this.setRGB(this.r + (c.r - this.r) * k, this.g + (c.g - this.g) * k, this.b + (c.b - this.b) * k); };
+Color.prototype.lerpColors = function (a, b, k) { return this.setRGB(a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k); };
+Color.prototype.set = function (v) { return typeof v === "number" ? this.setHex(v) : (v && v.r != null ? this.copy(v) : this); };
 Color.prototype.multiplyScalar = function (s) {
   this.r *= s; this.g *= s; this.b *= s;
   this._h = ((Math.max(0, Math.min(255, Math.round(this.r * 255))) << 16) |
@@ -54,6 +58,9 @@ Obj3D.prototype.add = function () { for (const o of arguments) { if (o) { o.pare
 Obj3D.prototype.remove = function (o) { const i = this.children.indexOf(o); if (i >= 0) { this.children.splice(i, 1); o.parent = null; } return this; };
 Obj3D.prototype.traverse = function (fn) { fn(this); for (const c of this.children.slice()) c.traverse(fn); };
 Obj3D.prototype.lookAt = function () {};
+Obj3D.prototype.updateMatrix = function () { if (!this.matrix) this.matrix = new Matrix4(); return this.matrix; };
+Obj3D.prototype.updateMatrixWorld = function () {};
+Obj3D.prototype.getWorldPosition = function (v) { if (v && v.copy) v.copy(this.position); return v; };
 Obj3D.prototype.clone = function () {
   const o = new Obj3D();
   o.position.copy(this.position); o.rotation.set(this.rotation.x, this.rotation.y, this.rotation.z); o.scale.copy(this.scale);
@@ -69,7 +76,9 @@ Mesh.prototype.clone = function () { const m = new Mesh(this.geometry, this.mate
 function Sprite(mtl) { Obj3D.call(this); this.material = mtl; }
 Sprite.prototype = Object.create(Obj3D.prototype);
 
-function Geo() {} Geo.prototype.dispose = function () {};
+function Geo() { this.attributes = { position: new BufferAttribute(new Float32Array(0), 3), normal: new BufferAttribute(new Float32Array(0), 3), uv: new BufferAttribute(new Float32Array(0), 2) }; }
+Geo.prototype.dispose = function () {};
+Geo.prototype.setAttribute = function (name, attr) { this.attributes[name] = attr; return this; };
 Geo.prototype.translate = function () { return this; };
 Geo.prototype.scale = function () { return this; };
 Geo.prototype.rotateX = function () { return this; };
@@ -81,6 +90,13 @@ BufferGeometry.prototype = Object.create(Geo.prototype);
 BufferGeometry.prototype.setAttribute = function (name, attr) { this.attributes[name] = attr; return this; };
 BufferGeometry.prototype.computeVertexNormals = function () {};
 function Float32BufferAttribute(array, itemSize) { this.array = array; this.itemSize = itemSize; this.count = Math.floor(array.length / itemSize); }
+function BufferAttribute(array, itemSize) { this.array = array; this.itemSize = itemSize; this.count = Math.floor((array && array.length || 0) / (itemSize || 1)); this.needsUpdate = false; }
+BufferAttribute.prototype.setUsage = function () { return this; };
+BufferAttribute.prototype.setXYZ = function () { return this; };
+BufferAttribute.prototype.setX = function () { return this; };
+BufferAttribute.prototype.getX = function (i) { return this.array[i * this.itemSize] || 0; };
+BufferAttribute.prototype.getY = function (i) { return this.array[i * this.itemSize + 1] || 0; };
+BufferAttribute.prototype.getZ = function (i) { return this.array[i * this.itemSize + 2] || 0; };
 function BoxGeometry() { Geo.call(this); } BoxGeometry.prototype = Object.create(Geo.prototype);
 function PlaneGeometry() { Geo.call(this); } PlaneGeometry.prototype = Object.create(Geo.prototype);
 function CylinderGeometry() { Geo.call(this); } CylinderGeometry.prototype = Object.create(Geo.prototype);
@@ -99,10 +115,42 @@ function Raycaster() {}
 Raycaster.prototype.set = function () { return this; };
 Raycaster.prototype.intersectObjects = function () { return []; };
 
+// Matrix4 + InstancedMesh stubs (city buildings/crowd pool instanced parts)
+function Matrix4() { this.elements = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; }
+Matrix4.prototype.identity = function () { return this; };
+Matrix4.prototype.compose = function () { return this; };
+Matrix4.prototype.decompose = function () { return this; };
+Matrix4.prototype.copy = function () { return this; };
+Matrix4.prototype.clone = function () { return new Matrix4(); };
+Matrix4.prototype.multiply = function () { return this; };
+Matrix4.prototype.makeRotationY = function () { return this; };
+Matrix4.prototype.makeRotationX = function () { return this; };
+Matrix4.prototype.makeRotationZ = function () { return this; };
+Matrix4.prototype.makeTranslation = function () { return this; };
+Matrix4.prototype.makeScale = function () { return this; };
+Matrix4.prototype.setPosition = function () { return this; };
+Matrix4.prototype.scale = function () { return this; };
+Matrix4.prototype.multiplyMatrices = function () { return this; };
+Matrix4.prototype.premultiply = function () { return this; };
+Matrix4.prototype.invert = function () { return this; };
+Matrix4.prototype.extractRotation = function () { return this; };
+Matrix4.prototype.lookAt = function () { return this; };
+function InstancedMesh(geo, mtl, count) {
+  Mesh.call(this, geo, mtl);
+  this.count = count;
+  this.instanceMatrix = { needsUpdate: false, setUsage() {} };
+  this.instanceColor = { needsUpdate: false };
+}
+InstancedMesh.prototype = Object.create(Mesh.prototype);
+InstancedMesh.prototype.setMatrixAt = function () {};
+InstancedMesh.prototype.getMatrixAt = function () {};
+InstancedMesh.prototype.setColorAt = function () { this.instanceColor = this.instanceColor || { needsUpdate: false }; };
+
 const THREE = {
   Group, Mesh, Sprite, Object3D: Obj3D,
   BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CircleGeometry,
-  BufferGeometry, Float32BufferAttribute, Raycaster,
+  BufferGeometry, Float32BufferAttribute, BufferAttribute, Raycaster, Matrix4, InstancedMesh,
+  DynamicDrawUsage: 35048, StaticDrawUsage: 35044,
   MeshLambertMaterial: Mtl, MeshBasicMaterial: Mtl, MeshStandardMaterial: Mtl, SpriteMaterial: Mtl,
   CanvasTexture: Tex, Texture: Tex, Vector3: V3, Color, Quaternion: Quat, Euler,
   DoubleSide: 2, FrontSide: 0, BackSide: 1, RepeatWrapping: 1000, NearestFilter: 1003, LinearFilter: 1006,

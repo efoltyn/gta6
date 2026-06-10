@@ -41,16 +41,19 @@
   };
   CBZ.netVoice = voice;
 
+  // Voice gets its OWN AudioContext (decoupled from the game's sfx context,
+  // which may not exist yet when the welcome packet lands). Browsers start a
+  // context created outside a click suspended — resume it on the next gesture.
   let ctx = null;
   function audioCtx() {
     if (ctx) return ctx;
-    ctx = CBZ.getAudioCtx && CBZ.getAudioCtx();
-    if (!ctx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) ctx = new AC();
-    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) ctx = new AC();
     return ctx;
   }
+  function tryResume() { if (ctx && ctx.state === "suspended") ctx.resume().catch(function () {}); }
+  addEventListener("click", tryResume, true);
+  addEventListener("keydown", tryResume, true);
 
   function iceServers() {
     const s = net.server && net.server.iceServers;

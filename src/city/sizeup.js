@@ -47,7 +47,11 @@
       const o = peds[i];
       if (o === a || o.dead || o.ko > 0) continue;
       const mine = isPlayer ? (o.companion || o.recruited || (pgid && o.gang === pgid))
-                            : (a.gang ? o.gang === a.gang : false);
+                            : (a.gang ? o.gang === a.gang
+                               // a VIP's paid detail backs the principal (vips.js):
+                               // the magnate reads untouchable BECAUSE of the suits
+                               // (proximity is the link — the detail walks WITH them)
+                               : (a.vipLvl ? !!o._vipGuard : false));
       if (!mine) continue;
       const dx = o.pos.x - ax, dz = o.pos.z - az;
       if (dx * dx + dz * dz >= R2) continue;

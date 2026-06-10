@@ -64,6 +64,42 @@
   const TALK = ["You lost?", "Nice day, huh.", "Got a light?", "Move along.", "I know you?", "Crazy out here lately.", "Spare some change?"];
   function talk() { CBZ.city.note("“" + TALK[(Math.random() * TALK.length) | 0] + "”", 1.6); }
 
+  // ---- CORPSE WARDROBE: a body whose CLOTHES you can take (city/outfits.js).
+  // Loot is automatic (walk over it); the FIT is a choice — swap outfits with
+  // the dead. WHY: a cop's uniform makes the law read you as one of theirs, a
+  // crew's colors flip turf hostility, a tycoon's tuxedo is pure worn status.
+  // Scans full-rig bodies only (peds + fallen officers — both keep skinSlots).
+  function nearestDressedBody(px, pz) {
+    if (!CBZ.cityOutfitSwapWithCorpse) return null;
+    let best = null, bd = REACH;
+    const scan = (list) => {
+      if (!list) return;
+      for (const p of list) {
+        if (!p || !p.dead || p._clothesTaken || p.culled) continue;
+        if (!p.char || !p.char.skinSlots) continue;
+        const d = dist(p, px, pz);
+        if (d < bd) { bd = d; best = p; }
+      }
+    };
+    scan(CBZ.cityPeds);
+    scan(CBZ.cityCops);
+    return best;
+  }
+  // the WHY line for a fit, read off what it buys you on the street
+  function bodyFitNote(fit) {
+    if (!fit) return "Their clothes could fit you";
+    if (fit.cop) return "A uniform — the law reads its own colors";
+    if (fit.gang) return "Their colors — that set would read you as kin";
+    if (fit.id === "tuxedo") return "A tuxedo — ropes open for cloth like this";
+    return "A clean change of clothes";
+  }
+  function bodyOpts(b, fit) {
+    return [{
+      label: "Take their clothes" + (fit ? " — " + fit.name : ""), key: "i", bad: true,
+      fn: () => { if (CBZ.cityOutfitSwapWithCorpse(b)) hide(); },
+    }];
+  }
+
   // ---- valuables / pawn helpers (Tasks 1-4) -------------------------------
   // Everything reads from the shared econ catalog so the player can judge a
   // haul: a Patek (clean $350k) pawns FAT, a Wallet ($40) is scraps. All
@@ -550,6 +586,16 @@
     //    option list rebuilds the moment membership, prospect standing, or this
     //    ped's standing toward you crosses a tier (otherwise it'd go stale).
     if (!target) { const p = nearest(CBZ.cityPeds, px, pz, (q) => !q.vendor && !q.dead); if (p) { target = p; key = "p:" + tag(p) + ":" + pedCtxTag(p); opts = pedOpts(p); label = ((p.nameKnown || p.recruited || p.companion || p === g.cityPartner) ? p.name : "A stranger") + (p.gang ? " (" + p.gang + ")" : ""); note = ped$(p); } }
+    // 6b) a BODY whose clothes you can take (loot is automatic; the FIT is the
+    //     choice — uniform/colors/tuxedo are disguise + status, see outfits.js)
+    if (!target && !((g.cityOutfitChanging || 0) > 0)) {
+      const b = nearestDressedBody(px, pz);
+      if (b) {
+        const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null;
+        target = b; key = "body:" + tag(b); opts = bodyOpts(b, fit);
+        label = "🧥 " + (b.name || "A body"); note = bodyFitNote(fit);
+      }
+    }
     // 6) a car you can jack
     if (!target && CBZ.cityNearestCar) { const car = CBZ.cityNearestCar(px, pz, REACH); if (car) { const cond = CBZ.cityVehicleCondition ? CBZ.cityVehicleCondition(car) : null; target = car; key = "car:" + (cond ? cond.label : ""); opts = [{ label: "Steal car [F]", key: "i", bad: true, fn: () => CBZ.cityEnterVehicle(car) }]; label = "🚗 " + (car.model ? car.model.name : "Car"); note = (cond ? cond.label + " · " : "") + "Boost it · chop shop pays by condition"; } }
 

@@ -175,6 +175,16 @@
   // it radios immediately; opts.instant reports now (used for face-to-face acts).
   function crime(amount, opts) {
     opts = opts || {};
+    // THE UNIFORM READS (outfits.js): police colors buy trust on the street —
+    // civilians don't call the law on "an officer" doing minor work. VIOLENCE
+    // in uniform blows the costume, and impersonation makes the charge burn
+    // hotter. (A manhunt at 2★+ outranks any costume — copTrust handles that.)
+    if (CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust()) {
+      if (amount >= 60) {
+        if (CBZ.cityOutfitBlow) CBZ.cityOutfitBlow();
+        amount = Math.round(amount * (CBZ.cityOutfitHeatMult ? CBZ.cityOutfitHeatMult() : 1.5));
+      } else return;   // minor crime in uniform: witnesses saw "police work"
+    }
     const x = opts.x != null ? opts.x : CBZ.player.pos.x;
     const z = opts.z != null ? opts.z : CBZ.player.pos.z;
     if (CBZ.cityEvent) CBZ.cityEvent("crime", { crime: (CRIME[opts.type] && CRIME[opts.type].label) || opts.type || "crime", severity: amount, x, z, panic: Math.min(5, amount / 40) }, { silent: true, noWanted: true });

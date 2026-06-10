@@ -888,6 +888,97 @@
     } else gang.strikeT = 0;
   };
 
+  // ---- THE SET ONLY AVENGES WHAT IT KNOWS ----------------------------------
+  // A body only comes back on you if the crew FINDS OUT. Drop a member with a
+  // brother of his close enough to see it and that witness RUNS for the set's
+  // block — when he gets there (or enough time passes that word travels), the
+  // whole set goes hunting. Put the runner down before he reports and the hit
+  // stays clean. Your OWN crew is different: no set-wide vendetta — the ones
+  // who LOVED the dead man weigh their loyalty against your respect, and only
+  // those who come up loyal ride on you. Bury them all and the set falls in line.
+  const snitches = [];                       // gang witnesses running to report
+  const avengers = { list: [], victim: null }; // own-crew loyalists out for you
+  function nearestGangWitness(gang, victim) {
+    let best = null, bd = 30 * 30;
+    for (const m of gang.members) {
+      if (m === victim || !m || m.dead || m.ko > 0) continue;
+      const dx = m.pos.x - victim.pos.x, dz = m.pos.z - victim.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = m; }
+    }
+    return best;
+  }
+  function setVendetta(gang) {
+    const dW = gang.defendW || 1;
+    gang.hostility = Math.min(5, Math.max(gang.hostility || 0, 3 * dW)); // the WHOLE set hunts
+    gang.provoke = 1;
+    gang.strikeT = 0;                                                    // first squad rolls NOW
+    if (CBZ.cityFeed) CBZ.cityFeed("🔪 Word reached the " + gang.name + ". The whole set is out for you.", "#ff7a7a");
+  }
+  function startSnitchRun(gang, w, victim) {
+    w._snitchT = 20 + Math.random() * 18;    // word travels even if he hides
+    w._snitchGangId = gang.id;
+    w.rage = null; w.state = "flee";
+    w.alarmed = Math.max(w.alarmed || 0, 9);
+    if (gang.hq && w.target && w.target.set) { w.target.set(gang.hq.x, 0, gang.hq.z); w.finalGoal = null; }
+    snitches.push(w);
+    if (CBZ.cityFeed) CBZ.cityFeed("👁 " + (w.name || "One of theirs") + " saw it — he's running to tell the " + gang.name + ".", "#ffce7a");
+  }
+  function loyaltyBattle(gang, victim) {
+    const PA = playerActor(); if (!PA) return;
+    // how much love the dead man had: rank carries weight, then each member's
+    // own loyalty stat + a personal roll, stared down by YOUR respect.
+    const rankW = (victim === gang.boss || victim.isBoss || victim.rank === "boss") ? 0.45
+      : (victim.rank === "lt" || victim.rank === "enforcer") ? 0.25 : 0.05;
+    const sway = Math.min(1, ((g.respect || 0) / 140));
+    let turned = 0;
+    for (const m of gang.members) {
+      if (m === victim || !m || m.dead || m.ko > 0) continue;
+      const love = (CBZ.cityMemberLoyalty ? CBZ.cityMemberLoyalty(m) : 0.5) + rankW + Math.random() * 0.25;
+      if (love > 0.72 + sway * 0.45) {
+        m.rage = PA; m.state = "fight"; m.alarmed = Math.max(m.alarmed || 0, 8);
+        m._avenges = victim.name || "him";
+        avengers.list.push(m); turned++;
+      }
+    }
+    avengers.victim = victim.name || "him";
+    if (CBZ.cityFeed) {
+      if (turned) CBZ.cityFeed("⚔ " + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect — settle it.", "#ffce7a");
+      else CBZ.cityFeed("The crew looks away. " + (victim.name || "He") + " didn't have the love.", "#9aa6bd");
+    }
+  }
+  CBZ.cityVendettaReset = function () { snitches.length = 0; avengers.list.length = 0; avengers.victim = null; };
+  CBZ.onUpdate(34.6, function (dt) {
+    if (g.mode !== "city") return;
+    for (let i = snitches.length - 1; i >= 0; i--) {
+      const w = snitches[i];
+      if (!w || w._snitchGangId == null) { snitches.splice(i, 1); continue; }
+      if (w.dead || w.ko > 0) {
+        snitches.splice(i, 1); w._snitchGangId = null;
+        if (CBZ.cityFeed) CBZ.cityFeed("🤫 The witness never made it. The street stays quiet.", "#9aa6bd");
+        continue;
+      }
+      const sg = gangById(w._snitchGangId);
+      if (!sg) { snitches.splice(i, 1); continue; }
+      w._snitchT -= dt;
+      const nearHQ = sg.hq && Math.hypot(w.pos.x - sg.hq.x, w.pos.z - sg.hq.z) < 10;
+      if (w._snitchT <= 0 || nearHQ) {
+        snitches.splice(i, 1); w._snitchGangId = null;
+        setVendetta(sg);
+      }
+    }
+    // the loyalty battle settles when the last avenger drops
+    if (avengers.list.length) {
+      let live = 0;
+      for (const m of avengers.list) if (m && !m.dead) live++;
+      if (!live) {
+        const who = avengers.victim || "him";
+        avengers.list.length = 0; avengers.victim = null;
+        if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(6);
+        if (CBZ.cityFeed) CBZ.cityFeed("👑 You buried everyone who rode for " + who + ". The set falls in line.", "#7fe0a0");
+      }
+    }
+  });
+
   // a member went down — the crew takes it personally. ESCALATION LADDER:
   // each kill the player racks up against a crew raises HOSTILITY, which the
   // reprisal director reads to send hunter squads + drive-bys after the player.
@@ -901,14 +992,22 @@
     const moraleHit = wasBoss ? 0.18 : 0.05;
     for (const m of gang.members) { if (m !== ped && !m.dead) disciplineHit(gang, m, moraleHit); }
     if (byPlayer) {
-      // the grudge always lands — drop one of their crew and they hunt you, and
-      // your STANDING with the victim's own crew always sinks (you killed kin).
-      // ARCHETYPE flavour: a cartel/syndicate (high defendW) takes it harder —
-      // more hostility per body + a faster first reprisal — so crossing them
-      // bites back noticeably more than poking a scrappy street set.
-      const dW = gang.defendW || 1;
-      gang.hostility = Math.min(5, (gang.hostility || 0) + 1 * dW);   // they remember
-      gang.strikeT = Math.min(gang.strikeT || 0, 6 / dW);             // first reprisal comes soon
+      // WITNESS-GATED grudge: the set only hunts you if one of theirs saw it
+      // (and lives long enough to report). Your OWN crew runs the loyalty
+      // battle instead. STANDING always sinks — kin is kin, the books know.
+      const mem = g.cityMembership;
+      const myGangId = (mem && mem.gangId) || g.playerGangId || g.playerGangAffiliation || null;
+      const own = gang.isPlayer || gang.playerFriendly || gang.id === myGangId;
+      const w = nearestGangWitness(gang, ped);
+      if (own) {
+        if (wasBoss) { /* killing your own boss = the takeover path below owns it */ }
+        else if (w) loyaltyBattle(gang, ped);
+        else if (CBZ.cityFeed) CBZ.cityFeed("Nobody from the set saw " + (ped.name || "him") + " drop.", "#9aa6bd");
+      } else if (w) {
+        startSnitchRun(gang, w, ped);
+      } else if (CBZ.cityFeed) {
+        CBZ.cityFeed("No one who'd talk saw it. Clean.", "#9aa6bd");
+      }
       CBZ.cityGangAddStanding(ped.gang, -8);
       // REWARD only a SANCTIONED kill (a rival of the crew you ride with — the
       // same task signal playergang.creditPlayerKill scores). A random member
@@ -1320,6 +1419,7 @@
     // drop any HIT/HQ waypoint we dropped on the full map so it doesn't bleed runs.
     if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
     CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0; shapeT = 0;
+    if (CBZ.cityVendettaReset) CBZ.cityVendettaReset();   // no stale snitch runs / loyalty feuds
     if (CBZ.cityTurfReset) CBZ.cityTurfReset();   // clear the zone/alliance meta for a fresh run
     // clear any in-flight drive-by cars
     for (let i = drivebys.length - 1; i >= 0; i--) despawnDriveby(drivebys[i], i);

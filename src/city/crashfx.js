@@ -19,14 +19,17 @@
   const chunkMatHot = new THREE.MeshBasicMaterial({ color: 0x6b3a22 }); // charred / glowing edge
   chunkMatHot._shared = true;
 
-  function pointBurst(x, z, count, color, size, speed, life, dust) {
+  // y0 (optional) seats the burst at an impact HEIGHT (rocket on a tower face)
+  // instead of the default street level.
+  function pointBurst(x, z, count, color, size, speed, life, dust, y0) {
     const pos = new Float32Array(count * 3);
     const vel = new Float32Array(count * 3);
+    const baseY = y0 != null ? y0 : 0.35;
     for (let i = 0; i < count; i++) {
       const o = i * 3, a = Math.random() * Math.PI * 2;
       const sp = speed * (0.35 + Math.random() * 0.8);
       pos[o] = x + (Math.random() - 0.5) * 0.8;
-      pos[o + 1] = 0.35 + Math.random() * (dust ? 0.5 : 1.0);
+      pos[o + 1] = baseY + Math.random() * (dust ? 0.5 : 1.0);
       pos[o + 2] = z + (Math.random() - 0.5) * 0.8;
       vel[o] = Math.cos(a) * sp;
       vel[o + 1] = (dust ? 0.9 : 2.5) + Math.random() * (dust ? 1.7 : 4.5);
@@ -69,18 +72,22 @@
 
   // dir (optional {x,z} unit vector) biases the spray DOWNRANGE of the impact so
   // a head-on crash throws panels forward off the hit instead of a flat ring.
-  function addChunks(x, z, count, force, hot, dir) {
+  // y0 (optional) spawns the debris at an elevated impact seat; life stretches
+  // to cover the fall so chunks reach the street instead of vanishing mid-air.
+  function addChunks(x, z, count, force, hot, dir, y0) {
     while (chunks.length > 56) {
       const old = chunks.shift();
       scene.remove(old.mesh);
     }
     const dx = dir ? dir.x : 0, dz = dir ? dir.z : 0, biased = !!dir;
+    const baseY = y0 != null ? y0 : 0.4;
+    const fall = y0 != null ? Math.sqrt(Math.max(0.5, y0) / 8.8) : 0;   // grav*0.8 fall time to street
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       // mostly charred grey, a few glowing-hot shards on an explosion
       const glow = hot && Math.random() < 0.5;
       const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      mesh.position.set(x, 0.4 + Math.random() * 0.8, z);
+      mesh.position.set(x, baseY + Math.random() * 0.8, z);
       mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
       mesh.scale.setScalar((0.65 + Math.random() * 0.8) * (hot ? 1.1 : 1));
       scene.add(mesh);
@@ -92,7 +99,7 @@
       if (biased) { vx += dx * force * (0.6 + Math.random() * 0.8); vz += dz * force * (0.6 + Math.random() * 0.8); }
       chunks.push({
         mesh, vx, vy: up, vz,
-        spin: (Math.random() - 0.5) * 16, t: 0, life: 1.2 + Math.random() * 1.1,
+        spin: (Math.random() - 0.5) * 16, t: 0, life: fall + 1.2 + Math.random() * 1.1,
         trail: glow ? 0 : -1, // glowing shards drip a tiny ember trail
       });
     }
@@ -341,7 +348,13 @@
     opts = opts || {};
     const power = opts.power || 1, R = (opts.radius || 6) * power, byPlayer = !!opts.byPlayer;
     const P = Math.min(2.2, power);            // visual scale is clamped so huge blasts stay cheap
-    const cy = 1.0;
+    // opts.y = detonation HEIGHT. A rocket that lands 30u up a tower face must
+    // bloom THERE — not pop at the kerb below it (the filmed "dumb" hit). Every
+    // ground-level caller passes no y and keeps the exact old seat; elevated
+    // blasts skip the ground-coupled layers (rings/scorch/road-wash) and their
+    // damage only reaches the street if the blast sphere actually does.
+    const cy = opts.y != null ? Math.max(1.0, opts.y) : 1.0;
+    const elevated = cy > 3;
 
     // ---- LAYER 1: FLASH (t=0) — a blinding white-hot core that snaps in and
     // dies in ~0.1s; this is the muzzle of the blast that backlights everything.
@@ -359,17 +372,18 @@
           maxOp: 1, spin: (Math.random() - 0.5) * 3,
           vx: Math.cos(a) * sp, vy: 0.4 + Math.random() * 1.2, vz: Math.sin(a) * sp });
     }
-    // a few low fireballs that hug the ground (blast spreading along the road)
-    for (let i = 0; i < Math.round(5 * P); i++) {
+    // a few low fireballs that hug the ground (blast spreading along the road —
+    // meaningless 30u up a facade, so elevated blasts skip the road wash)
+    if (!elevated) for (let i = 0; i < Math.round(5 * P); i++) {
       const a = Math.random() * 6.2832, sp = 3 + Math.random() * 4 * P;
       spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + Math.random()) * P, life: 0.5 + Math.random() * 0.45,
         maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.2, vz: Math.sin(a) * sp });
     }
-    // lingering low FLAMES that keep licking up from the blast seat for a beat
+    // lingering FLAMES that keep licking up from the blast seat for a beat
     // after the fireball collapses — sells a "still burning" crater cheaply.
     for (let i = 0; i < Math.round(4 * P); i++) {
       const a = Math.random() * 6.2832, rr = Math.random() * 0.7 * P;
-      spawnPuff(x + Math.cos(a) * rr, 0.5, z + Math.sin(a) * rr,
+      spawnPuff(x + Math.cos(a) * rr, elevated ? cy - 0.4 : 0.5, z + Math.sin(a) * rr,
         { additive: true, base: 0.4, pop: (1.4 + Math.random() * 0.8) * P, life: 1.0 + Math.random() * 0.8,
           maxOp: 0.85, spin: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 0.7,
           delay: 0.12 + Math.random() * 0.25 });
@@ -388,8 +402,8 @@
           vx: Math.cos(a) * dr, vy: 1.1 + Math.random() * 0.8, vz: Math.sin(a) * dr,
           delay: 0.08 + Math.random() * 0.18 });
     }
-    // low rolling billows that spread outward at the base
-    for (let i = 0; i < Math.round(4 * P); i++) {
+    // low rolling billows that spread outward at the base (ground blasts only)
+    if (!elevated) for (let i = 0; i < Math.round(4 * P); i++) {
       const a = Math.random() * 6.2832, sp = 1.4 + Math.random() * 1.6;
       spawnPuff(x, 0.6, z, { additive: false, smoke: true, base: 1.2, pop: (4 + Math.random() * 2) * P,
         life: 2.2 + Math.random() * 1.3, maxOp: 0.3, shade: 0.15, spin: (Math.random() - 0.5),
@@ -398,11 +412,14 @@
 
     // ---- LAYER 4: SHOCKWAVE — a fast thin bright additive ring on the ground
     // that races out JUST AFTER the flash, plus a slower glowing hot rim.
-    ring(x, z, R * 1.15, 0xffe7b0, { additive: true, opacity: 0.85, inner: 1.05, spd: 5.0, life: 0.42, flat: true, y: 0.06, r0: 0.6 });
-    ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.6, inner: 0.78, spd: 2.4, life: 0.55, y: 0.1 });
+    // (an elevated blast never touched the road — no ground ring/scorch)
+    if (!elevated) {
+      ring(x, z, R * 1.15, 0xffe7b0, { additive: true, opacity: 0.85, inner: 1.05, spd: 5.0, life: 0.42, flat: true, y: 0.06, r0: 0.6 });
+      ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.6, inner: 0.78, spd: 2.4, life: 0.55, y: 0.1 });
+    }
 
     // ---- LAYER 5: SPARKS + EMBERS + DEBRIS (nearest layer) ----
-    pointBurst(x, z, Math.round(28 * P), 0xffe08a, 0.16, 9 + 7 * power, 0.6, false); // fast bright sparks
+    pointBurst(x, z, Math.round(28 * P), 0xffe08a, 0.16, 9 + 7 * power, 0.6, false, elevated ? cy : null); // fast bright sparks
     // glowing embers that arc up and rain down, lingering longer than sparks
     const nEmber = Math.round(16 * P);
     for (let i = 0; i < nEmber; i++) {
@@ -411,17 +428,31 @@
         { additive: true, base: 0.18 + Math.random() * 0.16, pop: 0.1, life: 1.0 + Math.random() * 1.1,
           maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + Math.random() * 4, vz: Math.sin(a) * sp });
     }
-    addChunks(x, z, Math.round(10 * P), 6 + 5 * power, true);          // chunky glowing debris
-    addScorch(x, z, R * 0.5);                                          // lasting ground scorch
+    addChunks(x, z, Math.round(10 * P), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris
+    if (!elevated) addScorch(x, z, R * 0.5);                           // lasting ground scorch
 
-    // ---- IMPACT FEEDBACK: sound, heavy shake, slow-mo, screen flash ----
+    // ---- IMPACT FEEDBACK: sound, shake, slow-mo, screen flash. Shake/stop
+    // scale with how close the blast is to the LENS — a rocket at your feet
+    // rattles the camera, one landing 120u up a tower only rumbles. ----
     if (CBZ.sfx) CBZ.sfx("explosion");
-    if (CBZ.shake) CBZ.shake(3.2 * Math.min(2, power));
-    if (CBZ.doSlowmo) CBZ.doSlowmo(0.34);
-    if (CBZ.doHitstop) CBZ.doHitstop(0.18);
-    try { const fl = CBZ.el && CBZ.el.flash; if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
-    // blast damage in radius — crowd, peds, cops, and the player (shared path)
-    applyBlastDamage(x, z, R, power, byPlayer);
+    let att = 1;
+    const cam = CBZ.camera;
+    if (cam && cam.position) {
+      const cd = Math.hypot(x - cam.position.x, cy - cam.position.y, z - cam.position.z);
+      att = Math.max(0.25, Math.min(1, 1.25 - cd / 130));
+    }
+    if (CBZ.shake) CBZ.shake(3.2 * Math.min(2, power) * att);
+    if (CBZ.doSlowmo && att > 0.5) CBZ.doSlowmo(0.34);
+    if (CBZ.doHitstop && att > 0.5) CBZ.doHitstop(0.18);
+    try { const fl = CBZ.el && CBZ.el.flash; if (fl && att > 0.4) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
+    // blast damage in radius — crowd, peds, cops, and the player (shared path).
+    // An elevated blast only reaches the street where its SPHERE does: the
+    // ground footprint shrinks with height (and vanishes past the radius).
+    if (!opts.noDamage) {
+      const drop = elevated ? cy - 1.2 : 0;   // height above a standing chest
+      const gR = elevated ? Math.sqrt(Math.max(0, R * R - drop * drop)) : R;
+      if (gR > 0.4) applyBlastDamage(x, z, gR, power, byPlayer);
+    }
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
   };
 
@@ -551,8 +582,181 @@
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power }, { silent: true, noWanted: true });
   };
 
+  // ============================================================
+  // RPG ON A BUILDING — the facade REACTS at the impact point (owner filmed a
+  // rocket hit a tower and "a few windows popped"). CBZ.cityBlastWall(pt, n, o)
+  // composes, at pt on a wall face with outward normal n:
+  //   1) a big blackened BLAST SCAR decal (pooled, 2–4u, the scorch gradient)
+  //      stamped on the face — the building remembers the rocket like walls
+  //      remember 7.62 (gunfx bullet pocks),
+  //   2) a debris AVALANCHE: concrete chunks + a sheet of pale dust cascading
+  //      DOWN the facade from the wound (shared chunk pool, downward bias),
+  //   3) a LINGERING smoke column seeping from the wound for 60–90s (pooled
+  //      sprite emitter ~2/s — the show-off plume reads across the district),
+  //   4) near the roofline: ONE parapet block knocked loose, tumbling the whole
+  //      way down (collider tops locate the roof).
+  // Ground-floor hits still breach (buildings.js cityBreach) — this layers on.
+  // ============================================================
+  const scars = [], wounds = [];
+  const SCAR_CAP = 8;
+  const _scarZ = new THREE.Vector3(0, 0, 1);
+  const _scarN = new THREE.Vector3();
+  function addWallScar(x, y, z, nx, ny, nz, size) {
+    if (!scorchTex) scorchTex = makeScorchTexture();
+    while (scars.length >= SCAR_CAP) { const o = scars.shift(); scene.remove(o.mesh); o.mat.dispose(); }
+    const mat = new THREE.MeshBasicMaterial({
+      map: scorchTex, transparent: true, opacity: 0, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+    });
+    const mesh = new THREE.Mesh(scorchGeo, mat);
+    _scarN.set(nx, ny, nz);
+    if (_scarN.lengthSq() < 1e-6) _scarN.set(0, 0, 1); else _scarN.normalize();
+    mesh.quaternion.setFromUnitVectors(_scarZ, _scarN);
+    mesh.rotateZ(Math.random() * Math.PI * 2);
+    mesh.position.set(x + _scarN.x * 0.08, y + _scarN.y * 0.08, z + _scarN.z * 0.08);
+    mesh.scale.set(size, size, 1);
+    mesh.renderOrder = 3;
+    scene.add(mesh);
+    scars.push({ mesh, mat, t: 0, hold: 80 + Math.random() * 40 });
+  }
+
+  // debris + dust knocked off the face, biased DOWN the wall (an avalanche,
+  // not the radial fountain a ground blast throws). tangent = along the wall.
+  function facadeAvalanche(x, y, z, nx, nz, power) {
+    let tx = -nz, tz = nx;
+    const tl = Math.hypot(tx, tz);
+    if (tl < 1e-4) { tx = 1; tz = 0; } else { tx /= tl; tz /= tl; }
+    while (chunks.length > 56) { const old = chunks.shift(); scene.remove(old.mesh); }
+    const n = Math.round(7 + 5 * power);
+    const fall = Math.sqrt(Math.max(0.5, y) / 8.8);   // time to reach the street under chunk gravity
+    for (let i = 0; i < n; i++) {
+      const glow = Math.random() < 0.25;
+      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
+      const along = (Math.random() - 0.5) * 2.4;
+      mesh.position.set(x + tx * along + nx * 0.3, y + (Math.random() - 0.3) * 1.6, z + tz * along + nz * 0.3);
+      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      mesh.scale.setScalar(0.7 + Math.random() * 1.1);
+      scene.add(mesh);
+      chunks.push({
+        mesh,
+        vx: nx * (0.8 + Math.random() * 2.4) + tx * (Math.random() - 0.5) * 3,
+        vy: 0.5 - Math.random() * 3,                  // DOWNWARD bias — it pours off the wound
+        vz: nz * (0.8 + Math.random() * 2.4) + tz * (Math.random() - 0.5) * 3,
+        spin: (Math.random() - 0.5) * 14, t: 0, life: fall + 1.3 + Math.random() * 0.9,
+        trail: glow ? 0 : -1,
+      });
+    }
+    // pale concrete dust sheeting down the face below the wound, staggered so
+    // it visibly CASCADES instead of appearing all at once
+    const drop = Math.min(Math.max(2, y - 0.5), 14);
+    const nd = Math.round(7 + 4 * power);
+    for (let i = 0; i < nd; i++) {
+      const f = i / nd;
+      spawnPuff(x + tx * (Math.random() - 0.5) * 2 + nx * 0.5, y - f * drop, z + tz * (Math.random() - 0.5) * 2 + nz * 0.5, {
+        additive: false, smoke: true, base: 1.0, pop: 3.2 + Math.random() * 2.2,
+        life: 1.7 + Math.random(), maxOp: 0.42, shade: 0.4 + Math.random() * 0.08,
+        spin: (Math.random() - 0.5),
+        vx: nx * 0.7 + tx * (Math.random() - 0.5), vy: -(1.5 + Math.random() * 2.5), vz: nz * 0.7 + tz * (Math.random() - 0.5),
+        delay: f * 0.5 + Math.random() * 0.08,
+      });
+    }
+  }
+
+  function addBlastWound(x, y, z, nx, ny, nz, dur) {
+    while (wounds.length >= 3) wounds.shift();   // 3 live wounds max — the oldest stops smoking
+    wounds.push({ x, y, z, nx, ny, nz, t: 0, dur, acc: 0.2 });
+  }
+
+  function parapetChunk(x, topY, z, nx, nz) {
+    while (chunks.length > 56) { const old = chunks.shift(); scene.remove(old.mesh); }
+    const mesh = new THREE.Mesh(chunkGeo, chunkMat);
+    mesh.scale.set(4 + Math.random() * 2.5, 3 + Math.random() * 2, 4 + Math.random() * 2.5);  // a ~1.2–1.8u coping block
+    mesh.position.set(x + nx * 0.8, topY + 0.5, z + nz * 0.8);
+    mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    scene.add(mesh);
+    chunks.push({
+      mesh, vx: nx * (1.5 + Math.random() * 2), vy: 1.2 + Math.random() * 1.5, vz: nz * (1.5 + Math.random() * 2),
+      spin: (Math.random() - 0.5) * 6, t: 0, life: Math.sqrt(Math.max(1, topY) / 8.8) + 2.2, trail: -1,
+    });
+  }
+
+  CBZ.cityBlastWall = function (pt, normal, opts) {
+    opts = opts || {};
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const power = Math.min(2.4, opts.power || 1.4);
+    const x = pt.x, y = Math.max(0.6, pt.y || 0), z = pt.z;
+    let nx = normal ? normal.x : 0, ny = normal ? normal.y : 0, nz = normal ? normal.z : 1;
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-4) { nx = 0; ny = 0; nz = 1; } else { nx /= nl; ny /= nl; nz /= nl; }
+    const roof = ny > 0.6;
+    // (1) the blackened scar — 2–4u with the round's power
+    addWallScar(x, y, z, nx, ny, nz, 2.2 + power * 0.85);
+    // (2) avalanche down the facade (roof hits just scatter debris on the deck)
+    if (roof) addChunks(x, z, Math.round(5 + 4 * power), 3.5, false, null, y);
+    else facadeAvalanche(x, y, z, nx, nz, power);
+    // a breath of concrete dust out of the wound itself
+    pointBurst(x, z, Math.round(16 + 10 * power), 0x9a9082, 0.42, 3.5 + power, 1.0, true, y);
+    // (3) the wound smokes for a minute-plus — visible across the district
+    addBlastWound(x, y, z, nx, ny, nz, 60 + Math.random() * 30);
+    // (4) a hit near the roofline knocks a parapet block loose. Collider tops
+    // under the impact point locate the roof (the same wall AABBs cityScorch /
+    // cityBreach search).
+    let topY = -1;
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y1 == null) continue;
+      if (x < c.minX - 0.9 || x > c.maxX + 0.9 || z < c.minZ - 0.9 || z > c.maxZ + 0.9) continue;
+      if (c.y1 > topY) topY = c.y1;
+    }
+    if (topY > 7 && (roof || y > topY - 3.2)) {
+      let px = nx, pz = nz;
+      if (Math.hypot(px, pz) < 0.3) { const a = Math.random() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
+      parapetChunk(x, topY, z, px, pz);
+    }
+  };
+
+  // fresh run → cold facades (fpsmode's reset path calls this with the pocks)
+  CBZ.cityBlastFxReset = function () {
+    wounds.length = 0;
+    for (const s of scars) { scene.remove(s.mesh); s.mat.dispose(); }
+    scars.length = 0;
+  };
+
   CBZ.onAlways(9.5, function (dt) {
     if (puffs.length) updatePuffs(dt);
+    // wall-blast scars: snap in, hold ~80–120s, fade out
+    for (let i = scars.length - 1; i >= 0; i--) {
+      const s = scars[i]; s.t += dt;
+      if (s.t < 0.2) s.mat.opacity = (s.t / 0.2) * 0.95;
+      else if (s.t < s.hold) s.mat.opacity = 0.95;
+      else {
+        s.mat.opacity = Math.max(0, 0.95 * (1 - (s.t - s.hold) / 8));
+        if (s.t - s.hold >= 8) { scene.remove(s.mesh); s.mat.dispose(); scars.splice(i, 1); }
+      }
+    }
+    // wounded facades keep smoking: ~2 puffs/s drifting up + out of the hole,
+    // thinning as the wound cools; the first beats still cook with flame licks
+    for (let i = wounds.length - 1; i >= 0; i--) {
+      const w = wounds[i]; w.t += dt;
+      if (w.t >= w.dur) { wounds.splice(i, 1); continue; }
+      w.acc -= dt;
+      if (w.acc > 0) continue;
+      w.acc = 0.45 + Math.random() * 0.35;
+      const cool = 1 - w.t / w.dur;
+      spawnPuff(w.x + w.nx * 0.6 + (Math.random() - 0.5) * 0.5, w.y + 0.3, w.z + w.nz * 0.6 + (Math.random() - 0.5) * 0.5, {
+        additive: false, smoke: true, base: 0.9, pop: (3.2 + Math.random() * 2.2) * (0.55 + 0.45 * cool),
+        life: 3.6 + Math.random() * 1.6, maxOp: 0.32 * (0.45 + 0.55 * cool), shade: 0.12 + Math.random() * 0.04,
+        spin: (Math.random() - 0.5) * 0.8,
+        vx: w.nx * (0.5 + Math.random() * 0.4) + (Math.random() - 0.5) * 0.3,
+        vy: 1.1 + Math.random() * 0.8,
+        vz: w.nz * (0.5 + Math.random() * 0.4) + (Math.random() - 0.5) * 0.3,
+      });
+      if (w.t < 6) spawnPuff(w.x + w.nx * 0.3, w.y, w.z + w.nz * 0.3, {
+        additive: true, base: 0.35, pop: 1.1 + Math.random() * 0.7, life: 0.6 + Math.random() * 0.4,
+        maxOp: 0.85, vy: 0.7, spin: (Math.random() - 0.5) * 2,
+      });
+    }
     const grav = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
     for (let i = bursts.length - 1; i >= 0; i--) {
       const b = bursts[i]; b.t += dt;

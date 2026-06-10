@@ -447,6 +447,10 @@
     gunStopScanT -= dt;
     if (gunStopScanT > 0) return;
     gunStopScanT = 0.5;
+    // THE UNIFORM READS (outfits.js): a "cop" carrying iron is just a cop —
+    // beat officers don't gun-stop their own. But one who gets CLOSE clocks
+    // the face under the cap and the costume stops working for a while.
+    const trusted = !!(CBZ.cityOutfitCopTrust && CBZ.cityOutfitCopTrust());
     // nearest free ambient beat cop who can SEE the gun and isn't busy/hunting
     let best = null, bd = 13;
     for (const c of CBZ.cityCops) {
@@ -457,6 +461,11 @@
       const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
       if (d > bd) continue;
       if (!losClear(c.pos.x, c.pos.z, P.pos.x, P.pos.z)) continue;   // can't see the gun through a wall
+      if (trusted) {
+        // inside arm's reach the costume fails the face check — otherwise waved past
+        if (d < 3.2 && CBZ.cityOutfitBlow) CBZ.cityOutfitBlow(c);
+        continue;
+      }
       bd = d; best = c;
     }
     if (best) beginStop(best);

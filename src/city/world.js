@@ -88,7 +88,9 @@
       // keep the near-black city base tone over the photo grain
       g2.globalAlpha = 0.55; g2.fillStyle = "#26292e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
     });
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 80, spanZ + 80),
+    // ground stops just past the seawall line (bounds+26): the city meets the
+    // WATER, not an endless gray apron — the +29 edge tucks under the rip-rap
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 58, spanZ + 58),
       baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45));
     ground.rotation.x = -Math.PI / 2; ground.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     ground.receiveShadow = true; root.add(ground);
@@ -265,10 +267,15 @@
     // every grass yard in ONE textured mesh (the batch pass skips maps)
     if (grassRects.length) quadField(grassRects, grassMat, 0.10);
 
-    // ---- perimeter wall colliders so you can't wander into the void ----
+    // ---- perimeter: a WATERFRONT, not a wall. The collider line is identical
+    //      (you still can't wander off the map) but the visual is a knee-high
+    //      concrete seawall cap with the sea right behind it — what a coastal
+    //      city actually has at its edge. No more 6m gray prison walls. ----
     function wall(x, z, w, d) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 6, d), mat(0x4a4f57));
-      m.position.set(x, 3, z); m.castShadow = false; m.receiveShadow = true; root.add(m);
+      // visible cap: full length along the seawall, 1.4m thick, knee-high
+      const vw = w >= d ? w : 1.4, vd = d > w ? d : 1.4;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(vw, 0.55, vd), mat(0x9aa0a6));
+      m.position.set(x, 0.275, z); m.castShadow = false; m.receiveShadow = true; root.add(m);
       const pad = 22;
       CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m });
       return pad;
@@ -649,6 +656,44 @@
       boat(EEx + 34, cz - 26, 0.35, 0x9e3434);
       boat(EEx + 46, cz + 24, -0.5, 0x2f5d8a);
       boat(EEx + 38, cz + 44, 0.15, 0x9e3434);
+
+      // ---- THE WATERFRONT RING: the other three coasts get the same harbor
+      //      treatment (the east already has it) — rip-rap rock armour where
+      //      the quay meets the water, mooring bollards along the promenade,
+      //      a few hulls riding offshore. Decor only, outside the seawall
+      //      colliders; same shared materials, ~70 small meshes total. ----
+      const WQ = minX - 26, SQ = minZ - 26, NQ = maxZ + 26;   // seawall lines
+      const bollM = hmat(0x2e3238);
+      function bollard(x, z) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.42), bollM);
+        b.position.set(x, 0.35, z); b.castShadow = false; b.receiveShadow = true; root.add(b);
+      }
+      function riprap(x, z, count, vertical) {
+        for (let i = 0; i < count; i++) {
+          const s = 1.0 + hr() * 1.8;
+          const along = (i / count - 0.5) * (vertical ? (NQ - SQ) - 18 : (EEx - WQ) - 18);
+          const out = 1.6 + hr() * 3.2;
+          const rx = vertical ? x + (x < cx ? -out : out) : x + along;
+          const rz = vertical ? z + along : z + (z < cz ? -out : out);
+          const r = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.7, s * 1.15), rockM);
+          r.position.set(rx, -0.45 + hr() * 0.55, rz);
+          r.rotation.y = hr() * Math.PI; r.rotation.z = (hr() - 0.5) * 0.35;
+          r.castShadow = false; r.receiveShadow = true; root.add(r);
+        }
+      }
+      riprap(cx, SQ, 14, false);   // south shore
+      riprap(cx, NQ, 14, false);   // north shore
+      riprap(WQ, cz, 14, true);    // west shore
+      for (let i = 0; i < 7; i++) {  // bollards every ~30m, set in from the cap
+        const t = (i / 6 - 0.5) * ((EEx - WQ) - 30);
+        bollard(cx + t, SQ + 2.0);
+        bollard(cx + t, NQ - 2.0);
+        const tz = (i / 6 - 0.5) * ((NQ - SQ) - 30);
+        bollard(WQ + 2.0, cz + tz);
+      }
+      boat(WQ - 18, cz - 40, 2.0, 0x2f5d8a);   // hulls riding the other coasts
+      boat(cx - 60, SQ - 16, 1.25, 0x9e3434);
+      boat(cx + 70, NQ + 17, -1.0, 0xd9a13a);
     })();
 
     root.visible = false;     // hidden until city mode activates
