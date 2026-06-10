@@ -120,7 +120,7 @@
     a.alarmed = Math.max(a.alarmed || 0, 6);
     if (a.char) { a.char.guardBroke = 1; a.char.handsUp = false; }
     if (CBZ.body && CBZ.body.hit) CBZ.body.hit(a, { fromX: P.pos.x, fromZ: P.pos.z, force: 2.2, knockdown: 0 });
-    if (CBZ.city) CBZ.city.note("GUARD BROKEN — FINISH HIM", 1.1);
+    if (CBZ.city) CBZ.city.note("He's wide open", 1.1);
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doHitstop) CBZ.doHitstop(0.11);
     if (CBZ.shake) CBZ.shake(0.45);
@@ -301,7 +301,7 @@
 
     // punishing a blocking/guarding enemy with a heavy = COUNTER (bonus dmg + KD)
     const counter = heavy && t._blockT > 0 && !broken;
-    if (counter) { dmg = Math.round(dmg * 1.6); t._blockT = 0; if (CBZ.city) CBZ.city.note("COUNTER!", 0.7); }
+    if (counter) { dmg = Math.round(dmg * 1.6); t._blockT = 0; if (CBZ.city) CBZ.city.note("Caught him cold", 0.7); }
     // a broken foe eats EVERYTHING amplified — this is the payoff window
     if (broken) dmg = Math.round(dmg * 1.55);
 
@@ -429,7 +429,7 @@
     if (t) {
       const ok = land(t, dmg, finisher ? "finisher" : "light");
       if (!ok) { /* blocked → combo already reset in land() */ }
-      else if (finisher) { combo = 0; comboT = 0; if (CBZ.city) CBZ.city.note("3-HIT COMBO!", 0.8); }
+      else if (finisher) { combo = 0; comboT = 0; }
     }
     fireCD = finisher ? 0.34 : 0.22;
   }
@@ -490,7 +490,7 @@
           // a deflect barely dents you but wrecks them), riposte, bullet-time.
           parryT = 0; guardT = Math.max(guardT, 0.25);
           pPosture = Math.max(0, pPosture - 20);     // a clean deflect steadies you
-          if (CBZ.city) CBZ.city.note("PARRY!", 0.8);
+          // (no toast — the hitstop + slowmo + riposte SELL the parry)
           if (CBZ.sfx) { CBZ.sfx("hit"); }
           if (CBZ.shake) CBZ.shake(0.4);
           if (CBZ.doHitstop) CBZ.doHitstop(0.08);
@@ -723,8 +723,9 @@
       threat._windup = 0.25;                        // rig can read this to cock back
       if (threat.char) threat.char.windup = 0.25;
       if (_telegraphT <= 0 && !CBZ.cityHasGun() && CBZ.city) {
-        CBZ.city.note("⚠ Parry! (hold RMB)", 0.45);
-        _telegraphT = 0.9;                           // don't spam the prompt
+        // (no toast — the wind-up animation IS the telegraph; mid-fight key
+        // lectures broke the street voice. Timer kept to pace the windup flags.)
+        _telegraphT = 0.9;
       }
     }
     // decay windup flags we set last frame

@@ -3,6 +3,12 @@
    sun's angle/intensity/colour, the ambient hemisphere, fog colour,
    a tint on the sky dome, and cranks the tower searchlights up after
    dark (which is exactly when the stealth gets tense).
+   Publishes the sky clock for core/sky.js: CBZ.sunAngle (where the
+   sun/moon discs sit) and CBZ.sunTint (the blended sun colour — read
+   here, not from CBZ.sun.color, because city/mode.js overwrites the
+   light). The horizon seam itself is closed in sky.js at order 99,
+   which repaints the dome's horizon stop to the FINAL scene.fog.color
+   after every mode override has run.
 ============================================================ */
 (function () {
   "use strict";
@@ -27,6 +33,7 @@
 
     // sun arcs across the sky; height drives "how day" it is
     const ang = t * Math.PI * 2;
+    CBZ.sunAngle = ang; // core/sky.js places the sun/moon discs from this
     sun.position.set(Math.cos(ang) * 80, Math.sin(ang) * 95, -10);
     const up = Math.sin(ang);                 // -1 night .. 1 noon
     const dayness = Math.max(0, up);          // 0 at/under horizon
@@ -42,6 +49,9 @@
     }
 
     sun.color.copy(sunC);
+    // the sky's sun DISC reads this (CBZ.sun.color gets overwritten by the
+    // city's constant-light override at @94, so it can't be the source)
+    (CBZ.sunTint || (CBZ.sunTint = new THREE.Color())).copy(sunC);
     sun.intensity = night.si + (day.si - night.si) * dayness;
     hemi.intensity = night.hi + (day.hi - night.hi) * dayness;
     if (scene.fog) scene.fog.color.copy(fogC);

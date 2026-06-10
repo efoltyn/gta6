@@ -251,7 +251,7 @@
     [[halfTrack, wz], [-halfTrack, wz], [halfTrack, -wz], [-halfTrack, -wz]].forEach(([wx, wzz]) => {
       const wh = new THREE.Mesh(WHEEL_GEO, wmat);
       wh.rotation.z = Math.PI / 2; wh.position.set(wx, r, wzz);
-      wh.scale.set(r / 0.45, 1, r / 0.45); wh.castShadow = true; grp.add(wh);
+      wh.scale.set(r / 0.45, 1, r / 0.45); wh.castShadow = false; grp.add(wh);   // blob shadows ground cars
       const hub = new THREE.Mesh(HUB_GEO, hmat);
       hub.rotation.z = Math.PI / 2; hub.position.set(wx + (wx > 0 ? 0.01 : -0.01), r, wzz);
       hub.scale.set(r / 0.45, 1.02, r / 0.45); grp.add(hub);
@@ -528,7 +528,7 @@
     // ---- HULL (the deformable body the crumpler caves in). chamfered wedge,
     //      kept centred at y≈0.78 so crumpleCar's 0.78-baseline math still lands. ----
     const body = new THREE.Mesh(wedgeGeo(w, hullH, len, topFrac, bt === "coupe" ? 0.92 : 1, 1), paint);
-    body.position.y = 0.78; body.castShadow = true; grp.add(body);
+    body.position.y = 0.78; body.castShadow = false; grp.add(body);   // blob shadows ground cars
     // raise/lower the visual hull to its type's ride height without breaking the
     // crumpler baseline (it sets body.position.y = 0.78 - c*0.14): nudge via the
     // group children offset instead — keep body at 0.78 and float a skirt.

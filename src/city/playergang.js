@@ -136,7 +136,7 @@
     if (pg.founded) { CBZ.city.note("You already run the " + pg.name + ".", 1.8); return false; }
     // FOUNDing your own crew is a LATE-game move: you must have been patched into
     // a real crew first (prospect → initiation → membership is the primary path).
-    if (!g.cityWasMember) { CBZ.city.note("Prove yourself first — get patched into a crew before you found your own. [O] → Prospect.", 3); return false; }
+    if (!g.cityWasMember) { CBZ.city.note("Prove yourself first — get patched into a crew before you found your own. · O prospect", 3); return false; }
     const crew = CBZ.cityPeds.filter((p) => p.companion && p.recruited && !p.dead && p.kind === "crew");
     if (crew.length < 3) { CBZ.city.note("Need 3 crew to found a gang (you have " + crew.length + "). Recruit more 🔫.", 2.6); return false; }
     pg.name = name || (pick(NAME_A) + " " + pick(NAME_B));
@@ -152,7 +152,7 @@
     pg.order = "follow"; applyOrder();
     g.cityCrew = liveMembers().length;
     CBZ.city.big("🩸 " + pg.name + " FOUNDED");
-    CBZ.city.note("You run the " + pg.name + " now. [O] to give orders.", 3.2);
+    CBZ.city.note("You run the " + pg.name + " now. · O orders", 3.2);
     CBZ.city.addRespect(15);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-founded", { members: crew.length });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -206,7 +206,7 @@
     if (!gangRec || gangRec.isPlayer || gangRec.id === "player") return;
     pendingClaim = { rec: gangRec, t: 20 };
     CBZ.city.big("👑 " + (gangRec.name || "Gang") + " BOSS DOWN");
-    CBZ.city.note("Press [O] → Claim the " + (gangRec.name || "gang") + " (defect its crew to you).", 4);
+    CBZ.city.note("Claim the " + (gangRec.name || "gang") + " — their crew defects to you. · O", 4);
   };
 
   function claimRivalGang(rec) {
@@ -381,13 +381,13 @@
     if (T.idx < T.list.length - 1) {
       T.idx++;
       const labels = { trust: "EARN TRUST", work: "PUT IN WORK", biz: "HANDLE BUSINESS", rival: "HIT A RIVAL" };
-      CBZ.city.big("✓ " + (labels[t ? t.id : ""] || "TASK") + " DONE");
+      CBZ.city.big("✓ " + (labels[t ? t.id : ""] || "WORK") + " DONE");
       activateTask(rec);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     } else {
       // all four done → initiation unlocked
-      CBZ.city.big("✓ INITIATION UNLOCKED");
-      CBZ.city.note(gangShort(rec) + " have seen enough. [O] → get patched in.", 3.4);
+      CBZ.city.big("They'll get you made — find the boss.");
+      CBZ.city.note(gangShort(rec) + " have seen enough — get patched in. · O", 3.4);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
@@ -398,7 +398,7 @@
     if (!rec) { CBZ.city.note("No crew nearby to prospect. Find a gang's turf.", 2.2); return false; }
     if (exists()) { CBZ.city.note("You already run your own gang.", 2); return false; }
     if (memb()) { CBZ.city.note("You're already patched into a crew.", 2); return false; }
-    if (prospecting && prospecting.gangId === rec.id) { CBZ.city.note("Already prospecting " + gangShort(rec) + ". [O] for your tasks.", 2.4); return false; }
+    if (prospecting && prospecting.gangId === rec.id) { CBZ.city.note("Already prospecting " + gangShort(rec) + " — your tasks are waiting. · O", 2.4); return false; }
     if (CBZ.cityAtWar && CBZ.cityAtWar("player", rec.id)) { CBZ.city.note(gangShort(rec) + " are at war with you. Make peace first.", 2.4); return false; }
     prospecting = { gangId: rec.id, t: 0, tasks: makeTasks() };
     CBZ.city.big("PROSPECTING: " + (rec.name || "gang"));
@@ -411,7 +411,7 @@
   };
 
   // current prospect standing 0..1 (legacy read used by interact.js for the
-  // "courting NN%" line) — now the OVERALL task-sequence progress.
+  // "they're warming to you" standing line) — the OVERALL task-sequence progress.
   CBZ.cityProspectStanding = function () {
     if (!prospecting || !prospecting.tasks) return 0;
     const T = prospecting.tasks, n = T.list.length;
@@ -518,7 +518,7 @@
     if (CBZ.cityGangSetPlayerFriendly) CBZ.cityGangSetPlayerFriendly(rec.id, true);
     g.career = g.career || "gangster";
     CBZ.city.big("🩸 PATCHED IN — " + (rec.name || "gang"));
-    CBZ.city.note("You're a Prospect in the " + (rec.name || "gang") + " (" + (how === "jumped" ? "jumped in" : "put in work") + "). Climb on merit. [O] for crew.", 4.5);
+    CBZ.city.note("You're a Prospect in the " + (rec.name || "gang") + " (" + (how === "jumped" ? "jumped in" : "put in work") + "). Climb on merit. · O", 4.5);
     CBZ.city.addRespect(12);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("gang-joined", { gang: rec, how });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

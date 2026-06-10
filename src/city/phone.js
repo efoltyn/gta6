@@ -83,11 +83,12 @@
     } else {
       inner += "<div style='font-size:11px;color:" + RED + ";margin-top:4px'>MAXED OUT — the whole city is hunting you.</div>";
     }
-    // flavor answering "why is 5★ hard?"
+    // flavor answering "why is 5★ hard?" (BUG FIX: the old "helicopter circling"
+    // line was assigned first and then ALWAYS overwritten by this if/else —
+    // a dead branch. Folded into the 4★ arm so the chopper actually shows.)
     let flavor = "";
-    if (w >= 4) flavor = "🚁 Helicopter circling overhead.";
     if (w >= 5) flavor = "✈️ AIRSTRIKE inbound — 5★ takes relentless carnage to hold.";
-    else if (w === 4) flavor = "🚁 One more spree and they call in an airstrike (5★).";
+    else if (w === 4) flavor = "🚁 Helicopter circling overhead — one more spree and they call in an airstrike (5★).";
     if (flavor) inner += "<div style='font-size:11px;color:" + DIM + ";margin-top:4px'>" + esc(flavor) + "</div>";
     return card("🚨 WANTED", inner);
   }

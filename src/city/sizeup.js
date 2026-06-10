@@ -18,7 +18,9 @@
        gun (the read says "don't even try"), or break and run.
      • citySizeUpHit(tgt,att) — the on-hit hook (peds.js hurtActor, combat.js
        player melee): rallies a gang victim's crew (you NEVER fight one
-       ganger — you fight the block), then folds or lets the brain rage.
+       ganger — you fight the block) and has it take fighting SHAPE on the
+       spot (gangs.js cityGangShapeUp: firing arc / pairs / a caller), then
+       folds or lets the brain rage.
      • cityKillRespect(victim)— respect is earned UP the ladder. Dropping
        someone above your level makes a name; stomping a single-digit busker
        once you read Lv.20+ makes you a bully nobody respects (0).
@@ -99,6 +101,9 @@
     if (tgt.gang && CBZ.cityRallyGang && (tgt._rallyT || 0) <= 0 && att.gang !== tgt.gang) {
       CBZ.cityRallyGang(tgt, att);
       tgt._rallyT = 6;
+      // …and the set arrives with SHAPE, not as a blob (gangs.js war-shape:
+      // shooters fan to a firing arc, melee press in pairs, top rank calls it)
+      if (CBZ.cityGangShapeUp) CBZ.cityGangShapeUp(tgt.gang);
     }
     const dare = CBZ.citySizeUp(tgt, att);
     if (!dare) CBZ.citySizeUpFold(tgt, att);

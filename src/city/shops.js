@@ -213,7 +213,7 @@
     if (equipItem(nm)) {
       const after = playerDrip();
       if (CBZ.sfx) CBZ.sfx("door");
-      CBZ.city.note("👕 Put on " + nm + " — DRIP " + before + "→" + after, 1.6);
+      CBZ.city.note("👕 Put on " + nm + " — sharper already.", 1.6);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
     render();
@@ -227,7 +227,7 @@
     const before = playerDrip();
     SLOTS.forEach((s) => { if (o[s]) unequipItem(s); });
     const after = playerDrip();
-    CBZ.city.note("Stripped down — DRIP " + before + "→" + after, 1.6);
+    CBZ.city.note("Stripped down — back to basics.", 1.6);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -500,12 +500,11 @@
     const CLUB = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, VIP = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
     // crossing a threshold by buying this piece is a moment — headline it.
     if (before < CLUB && after >= CLUB && after < VIP && CBZ.city.big) {
-      CBZ.city.big("💎 DRIP " + before + "→" + after + " — you'd clear the rope now!");
+      CBZ.city.big("💎 That fit turns heads — the Velvet's rope would open for you.");
     } else if (before < VIP && after >= VIP && CBZ.city.big) {
-      CBZ.city.big("✦ DRIP " + before + "→" + after + " — VIP-tier fit!");
+      CBZ.city.big("✦ Dressed like money — the Velvet's elite lounge would wave you up.");
     } else {
-      CBZ.city.note("💎 Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") +
-        " — DRIP " + before + "→" + after, 1.8);
+      CBZ.city.note("💎 Now wearing " + name + (replaced ? " (over " + replaced + ")" : "") + ".", 1.8);
     }
   }
 
@@ -609,7 +608,7 @@
     if (kind === "barber") look().hair = s.name; else look().outfit = s.name;
     CBZ.city.addRespect(Math.max(1, Math.round(s.swag / 2)));
     if (CBZ.sfx) CBZ.sfx("coin");   // real payment-confirm sound (was a DIY "whoosh" for cuts)
-    CBZ.city.note((kind === "barber" ? "💈 Fresh cut: " : "🧥 New fit: ") + s.name + " (+" + s.swag + " swagger)", 2);
+    CBZ.city.note((kind === "barber" ? "💈 Fresh cut: " : "🧥 New fit: ") + s.name, 2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     render();
   }
@@ -627,7 +626,7 @@
     if (!CBZ.city.spend(cost)) { CBZ.city.note("Need " + fmt$(cost) + ".", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
     g.cityPhoneTier = (g.cityPhoneTier || 0) + 1;
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("📱 Phone upgraded to tier " + g.cityPhoneTier + " — better deals & street intel.", 2.2);
+    CBZ.city.note("📱 New phone — better deals & street intel.", 2.2);
     render();
   }
 
@@ -677,6 +676,10 @@
 
   // ---- open / close + input ----
   function open(lot) {
+    // a clerk you've ROBBED remembers (social.js shopkeeper memory) — the till
+    // stays shut to YOU until the heat of it fades.
+    const _v = lot && lot.building && lot.building.vendor;
+    if (CBZ.cityVendorRefuses && CBZ.cityVendorRefuses(_v)) { CBZ.city.note("🚫 “We're closed. To YOU. Get out.”", 2.2); return; }
     openLot = lot; CBZ.cityMenuOpen = true;
     qty = 1; haggle = 0; haggleTried = false; closetOpen = false;   // reset per visit
     el().style.display = "block";

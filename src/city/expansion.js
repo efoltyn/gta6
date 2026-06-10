@@ -8,6 +8,13 @@
    and three additional climbable skyline towers. A bridge continues
    the mainland centre street through the east-wall gate.
 
+   ROOMS WORTH ENTERING (why: the island shells were built BARE — the
+   bridge ride over should end somewhere worth walking into):
+   every storey of every island building is dressed through the shared
+   CBZ.cityFurnishApartment dresser (clearFloorPoint-gated, opaque,
+   batch-merged), and the gas station / showroom get real interiors
+   (kiosk counter + stocked racks; sales desk + tyre wall + plinth).
+
    Hooked by city/world.js after the original city buildings exist.
 ============================================================ */
 (function () {
@@ -85,12 +92,24 @@
       const lot = { cx: x, cz: z, w, d, kind: kind || "tower", district: "island", building: { ...b, name: name || "Island Building", door } };
       lots.push(lot);
       addPlaced(x, z, w, d);
+      // ROOMS WORTH ENTERING: the mainland pass dresses every interior, but
+      // these shells were registered bare. EVERY storey gets the shared
+      // apartment dresser (stair strip + door aisle stay clear via the
+      // building's own clearFloorPoint; opaque boxes → batch-merged), so the
+      // landmark towers and low-rises are worth climbing, not just facades.
+      if (CBZ.cityFurnishApartment) {
+        const fh = b.FH || 4;
+        for (let k = 0; k < storeys; k++) CBZ.cityFurnishApartment(b, k * fh, (((x | 0) + (z | 0)) >> 2) + k);
+      }
       return { b, lot };
     }
 
     // ---- island and the bridge from the original city's east-wall gate ----
     const ocean = plane(cx, cz, R * 3.4, R * 3.4, 0x2f6f9e, -0.44);
     ocean.receiveShadow = false;
+    // ONE sea: share the mainland's day/night-tinted water material so the
+    // island ocean and the new coast-to-horizon plane read as the same water.
+    if (CBZ.city && CBZ.city.seaMat) ocean.material = CBZ.city.seaMat;
     const beach = new THREE.Mesh(new THREE.CircleGeometry(R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
     beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz); beach.receiveShadow = true; root.add(beach);
     const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
@@ -137,6 +156,18 @@
       for (let i = -1; i <= 1; i++) box(x + i * 4, 0.8, z, 0.8, 1.6, 0.7, 0xff7a1a, { solid: true });
       box(x - 9.5, 2.4, z - 5.5, 0.5, 4.8, 0.5, 0x6a7079, { solid: true });
       box(x - 9.5, 4.6, z - 5.5, 2.2, 1.6, 0.3, 0xffd451);
+      // THE KIOSK along the back of the pad: a grab-and-go counter, two
+      // stocked snack racks and a lit drinks cooler — the stop is a real
+      // business you walk through, not just pumps under a roof.
+      box(x - 6.2, 0.55, z + 5.4, 2.6, 1.1, 0.9, 0x55606e, { solid: true });           // counter
+      box(x - 6.2, 1.14, z + 5.4, 2.7, 0.08, 1.0, 0xe6e8ee, { cast: false });          // worktop
+      for (const off of [-2.4, 0.4]) {
+        box(x + off, 0.7, z + 5.6, 1.7, 1.4, 0.6, 0x44505c, { cast: false });          // rack body
+        for (let i = 0; i < 4; i++)
+          box(x + off - 0.55 + i * 0.38, 1.55, z + 5.6, 0.28, 0.3, 0.28,
+            [0xff6b5a, 0x6bbf4a, 0xffc94a, 0x5a8aff][i], { cast: false });             // snack stock
+      }
+      box(x + 3.4, 1.0, z + 5.6, 1.2, 2.0, 0.8, 0x9fe0ff, { emissive: 0x9fe0ff, ei: 0.45, cast: false });  // drinks cooler
     }
 
     function parkedCar(x, z, vertical, color, solid) {
@@ -161,6 +192,17 @@
       box(x - 5.1, 3, z - 6.3, 0.5, 6, 0.35, 0x44506b, { solid: true });
       box(x + 5.1, 3, z - 6.3, 0.5, 6, 0.35, 0x44506b, { solid: true });
       box(x, 6.9, z - 6.3, 10, 1.2, 0.3, 0x12c258);
+      // SALES FLOOR dressing: a manager's desk with a lit terminal by the
+      // glass, tyre stacks + a parts shelf along the back wall, and a pale
+      // display plinth under the feature car — a showroom you'd browse (and
+      // a reason to believe the cars are FOR SALE, i.e. worth taking).
+      box(x - 6.6, 0.5, z - 3.4, 2.0, 1.0, 0.9, 0x44505c, { solid: true });            // sales desk
+      box(x - 6.6, 1.06, z - 3.4, 2.1, 0.08, 1.0, 0xe6e8ee, { cast: false });          // desktop
+      box(x - 6.2, 1.4, z - 3.4, 0.5, 0.45, 0.08, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.5, cast: false }); // terminal
+      for (const off of [5.6, 7.2]) for (let i = 0; i < 3; i++)
+        box(x + off, 0.26 + i * 0.45, z + 5.3, 0.9 - i * 0.12, 0.42, 0.9 - i * 0.12, 0x23262b, { cast: false }); // tyre stacks
+      box(x - 7.4, 0.8, z + 5.4, 2.2, 1.6, 0.7, 0x3a352e, { cast: false });            // parts shelf
+      box(x, 0.1, z + 4.2, 5.2, 0.2, 3.0, 0xc8ccd4, { cast: false });                  // feature-car plinth
       parkedCar(x - 4.6, z + 1.6, true, 0xe24b4b, false);
       parkedCar(x + 4.6, z + 1.6, true, 0x3c6fd6, false);
       parkedCar(x, z + 4.2, false, 0xf2c43d, false);

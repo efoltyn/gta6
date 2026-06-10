@@ -1,10 +1,13 @@
 /* ============================================================
    screens.css — title / pause / win overlay screens
+   (token pass: overlay text uses --hud-ink from css/hud.css instead of
+   pure #fff — same softened bright as the in-game HUDs; stat counters
+   get tabular numerals so totals line up.)
 ============================================================ */
 .screen{
   position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
   background:radial-gradient(120% 120% at 50% 0%, #2a5fb0 0%, #16335f 48%, #0b1c38 100%);
-  z-index:30; text-align:center; color:#fff; padding:24px;
+  z-index:30; text-align:center; color:var(--hud-ink,#e8ecf2); padding:24px;
 }
 .screen.hidden{display:none;}
 .card-box{
@@ -58,7 +61,7 @@
 .btn:active{transform:translateY(4px); box-shadow:0 2px 0 var(--green-d);}
 .stats{display:flex; gap:14px; justify-content:center; margin:20px auto 4px; flex-wrap:wrap;}
 .stat{background:#fff; border:2px solid #efe3d2; border-radius:14px; padding:12px 20px; min-width:120px;}
-.stat .v{font-size:30px; font-weight:700; color:var(--orange); line-height:1;}
+.stat .v{font-size:30px; font-weight:700; color:var(--orange); line-height:1; font-variant-numeric:tabular-nums;}
 .stat .l{font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:#8a7a66; margin-top:6px;}
 .smallnote{margin-top:14px; font-size:12px; color:#9a8a76; font-weight:500;}
 

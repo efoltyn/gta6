@@ -100,10 +100,10 @@
       const vertical = Math.abs(v.vz || 0) > Math.abs(v.vx || 0);
       if (CBZ.cityIsRed(vertical) && ticketCD <= 0) {
         ticketCD = 4;
-        // only a problem if a cop is around to see it; otherwise just a warning
+        // only a problem if a cop is around to see it (unseen = no narration —
+        // the red light you blew through tells its own story)
         const seen = anyCopNear(P.pos.x, P.pos.z, 34);
-        if (seen) { CBZ.cityCrime && CBZ.cityCrime(22, { type: "red-light" }); CBZ.city && CBZ.city.note("🚦 Ran a red light — wanted!", 2); }
-        else CBZ.city && CBZ.city.note("🚦 You ran a red light", 1.4);
+        if (seen) { CBZ.cityCrime && CBZ.cityCrime(22, { type: "red-light" }); CBZ.city && CBZ.city.note("🚦 A cop saw you run the light.", 2); }
       }
     }
     prevInside = inside;
@@ -375,7 +375,7 @@
               c.reckless = true;
               honkAt(c);
               if (CBZ.sfx) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 40 * 40) CBZ.sfx("clank"); }
-              if (CBZ.city) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 30 * 30) CBZ.city.note("😡 Road rage — aggressive overtake!", 1.0); }
+              // (no toast — the horn + swerve ARE the road rage)
             }
           }
         }
@@ -521,14 +521,14 @@
       const f = findFireIncident();
       if (f) {
         const e = spawnEmergency("firetruck", f.pos.x, f.pos.z);
-        if (e) { e.target = f; f._emgClaimed = true; if (CBZ.city) CBZ.city.note("🚒 Fire truck dispatched", 1.2); }
+        if (e) { e.target = f; f._emgClaimed = true; }   // (no toast — the siren announces it)
       }
     }
     if (countKind("ambulance") < EMG_MAX.ambulance) {
       const b = findBodyIncident();
       if (b) {
         const e = spawnEmergency("ambulance", b.pos.x, b.pos.z);
-        if (e) { e.target = b; b._emgClaimed = true; if (CBZ.city) CBZ.city.note("🚑 Ambulance dispatched", 1.2); }
+        if (e) { e.target = b; b._emgClaimed = true; }   // (no toast — the siren announces it)
       }
     }
   }
@@ -573,8 +573,8 @@
         if (c.engineHp != null) c.engineHp = Math.max(c.engineHp, 35);
         c._onFire = false; c._smoking = false; c._fuse = 0;
         if (CBZ.cityShatter) {}  // (no glass needed)
-        if (CBZ.city) CBZ.city.note("🧯 Fire extinguished", 1.2);
-      } else if (CBZ.city) CBZ.city.note("🚒 Too late — wreck cooled", 0.9);
+        // (no toast either way — the smoke clearing / the cold wreck tells it)
+      }
     } else {
       // ambulance: flag nearby bodies for pickup NOW so medics.js dispatches the
       // stretcher team immediately (the dramatic roll-up + the on-foot lift).
@@ -587,7 +587,7 @@
           if (dd < 12 * 12) p.needsPickup = true;
         }
       }
-      if (CBZ.city) CBZ.city.note("🚑 Paramedics on scene", 1.0);
+      // (no toast — the stretcher team rolling up IS the scene)
     }
   }
 

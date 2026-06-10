@@ -193,7 +193,7 @@
         type: "gcHit", target: mark, lt: isLt, t: 150,
         reward: payout(isLt ? 1100 : 380, isLt ? 600 : 500),
         body: isLt ? 3 : 1, kick: isLt ? 0.30 : 0.22, respect: isLt ? 14 : 6,
-        desc: (isLt ? "HIT (Lt.): clip " : "HIT: clip ") + (mark.name || "a rival") + (mark.gang ? " · rival set" : ""),
+        desc: "Clip " + (mark.name || "a rival") + (isLt ? " — their lieutenant" : (mark.gang ? " — rival set" : "")),
       });
     }
 
@@ -205,7 +205,7 @@
       jobs.push({
         type: "gcCollect", target: debtor, owed: owed, t: 150,
         reward: payout(260, 300), kick: 0.35, respect: 5,
-        desc: "COLLECT: lean on " + (debtor.name || "a debtor") + " for the $" + owed + " they owe",
+        desc: "Lean on " + (debtor.name || "a debtor") + " — they owe $" + owed,
       });
     }
 
@@ -217,7 +217,7 @@
       jobs.push({
         type: "gcRun", pickup: a, dest: b, got: false, t: 180,
         reward: payout(700, 700), kick: 0.28, respect: 7,
-        desc: "RUN PRODUCT: grab the package, run it clean across town",
+        desc: "Grab the package and run it clean across town",
       });
     }
 
@@ -231,7 +231,7 @@
           type: "gcTake", zoneId: z.id, x: z.cx, z: z.cz, held: held, hits: 0,
           need: held ? 3 : 0, t: 220,
           reward: payout(held ? 1300 : 800, 700), body: held ? 2 : 0, kick: 0.25, respect: held ? 16 : 9,
-          desc: (held ? "TAKE: run the " : "CLAIM: plant the flag on the ") + (z.name || "block") + (held ? " set off their corner" : ""),
+          desc: (held ? "Run the " : "Plant the flag on the ") + (z.name || "block") + (held ? " set off their corner" : ""),
         });
       }
     }
@@ -244,7 +244,7 @@
         jobs.push({
           type: "gcDefend", zoneId: z.id, x: z.cx, z: z.cz, t: 60, raided: false,
           reward: payout(900, 500), kick: 0.20, respect: 12,
-          desc: "DEFEND: hold " + (z.name || "your block") + " — a raid is coming",
+          desc: "Hold " + (z.name || "your block") + " — a raid is coming",
         });
       }
     }
@@ -271,7 +271,7 @@
       CBZ.city.note("Get to the block and HOLD it — they're rolling up.", 2.8);
     }
     if (CBZ.city.big) CBZ.city.big("CONTRACT · " + (c ? c.name : "the set"));
-    CBZ.city.note(j.desc + " · $" + j.reward, 2.6);
+    // (no third toast — the big + the HUD job line already carry it)
     closeBoard();
   }
   CBZ.cityAcceptGangContract = acceptGangContract;
@@ -367,21 +367,21 @@
       if (multi) {
         const n = 2 + ((rng() * 2) | 0);
         const targets = []; for (let i = 0; i < n && i < civ.length; i++) targets.push(pick(civ));
-        jobs.push({ type: "hit", targets: targets.slice(), target: targets[0], reward: payout(900, 700), desc: "SWEEP: take out " + targets.length + " marks" });
+        jobs.push({ type: "hit", targets: targets.slice(), target: targets[0], reward: payout(900, 700), desc: "Take out " + targets.length + " marks — a clean sweep" });
       } else {
         const t = pick(civ);
-        jobs.push({ type: "hit", target: t, reward: payout(300, 700), desc: "HIT: take out " + t.name });
+        jobs.push({ type: "hit", target: t, reward: payout(300, 700), desc: "Clip " + t.name });
       }
     }
     // DELIVERY — courier a package; driving pays a clean bonus
     if (lots.length) {
       const dst = pick(lots);
-      jobs.push({ type: "delivery", dest: lotDoor(dst), reward: payout(180, 320), desc: "DELIVERY: run a package across town" });
+      jobs.push({ type: "delivery", dest: lotDoor(dst), reward: payout(180, 320), desc: "Run a package across town" });
     }
     // HEIST — knock over a store register
     if (shops.length) {
       const s = pick(shops);
-      jobs.push({ type: "heist", lot: s, reward: payout(400, 900), desc: "HEIST: knock over " + s.building.name });
+      jobs.push({ type: "heist", lot: s, reward: payout(400, 900), desc: "Knock over " + s.building.name });
     }
     // DEAD DROP — a fence pays you to place/retrieve a package at a NAMED roof
     // dead-drop (the lifts + fire escapes that just opened the skyline). The
@@ -400,8 +400,8 @@
         jobs.push({
           type: "deaddrop", roof: r, place, fence, stage: "foot",
           reward: Math.max(50, Math.round(payout(place ? 420 : 520, 380) * (0.45 + 0.55 * tier) / 10) * 10),
-          desc: place ? ("DEAD DROP: stash a package on the " + r.name + " roof")
-                      : ("DEAD DROP: lift a package off the " + r.name + " roof, walk it back"),
+          desc: place ? ("Stash a package on the " + r.name + " roof")
+                      : ("Lift a package off the " + r.name + " roof, walk it back"),
         });
       }
     }
@@ -409,19 +409,19 @@
     // it (drop it / get busted en route and it's blown). A driving job at heart.
     if (lots.length >= 2 && ri >= 1) {
       const a = randSpot(), b = lotDoor(pick(lots));
-      jobs.push({ type: "smuggle", pickup: a, dest: b, got: false, heat: 0, reward: payout(650, 700), desc: "SMUGGLING: grab the stash, run it clean across town" });
+      jobs.push({ type: "smuggle", pickup: a, dest: b, got: false, heat: 0, reward: payout(650, 700), desc: "Grab the stash, run it clean across town" });
     }
     // GETAWAY DRIVER — be in a car at the rendezvous before the timer, then
     // shake the heat. Pure wheelman work (GTA Online getaway role).
     if (ri >= 1) {
       const a = randSpot();
-      jobs.push({ type: "getaway", rdv: a, phase: "drive", t: 45, reward: payout(550, 600), desc: "GETAWAY: be the wheelman at the marker, then lose the law" });
+      jobs.push({ type: "getaway", rdv: a, phase: "drive", t: 45, reward: payout(550, 600), desc: "Be the wheelman at the marker, then lose the law" });
     }
     // PROTECTION RACKET — lean on a business for the boss. Collect at the door;
     // they may not pay quietly. Repeatable shakedown for steady respect + cash.
     if (shops.length && ri >= 2) {
       const s = pick(shops);
-      jobs.push({ type: "protection", lot: s, reward: payout(500, 500), desc: "RACKET: collect protection from " + s.building.name });
+      jobs.push({ type: "protection", lot: s, reward: payout(500, 500), desc: "Collect protection money from " + s.building.name });
     }
     // (The old MAYHEM "rob or drop N people" spree gig is GONE — it was pure
     //  body-count filler. Progression is gang membership + contracts now, not a
@@ -531,10 +531,10 @@
     g.career = kind;
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     const msg = {
-      dealer: "You're slinging now. Cop WHOLESALE at the trap house ([U] near a dealer), then [I] Deal on the street. Turn buyers into regulars, keep the heat off your back.",
+      dealer: "You're slinging now. Cop wholesale at the trap house, then deal on the street — turn buyers into regulars, keep the heat off your back. · U buy · I deal",
       security: "On the books as a Security Guard. Keep your record clean (0 stars) for the salary; drop criminals for bonus pay.",
-      pimp: "You run the night crew now. [K] Recruit earners — they kick up to you while you sleep.",
-      gangster: "Putting a crew together. [K] Recruit shooters — they ride with you and answer your orders [O].",
+      pimp: "You run the night crew now. Recruit earners — they kick up to you while you sleep. · K recruit",
+      gangster: "Putting a crew together. Recruit shooters — they ride with you and answer your orders. · K recruit · O orders",
     }[kind] || ("Career: " + kind);
     CBZ.city.note(msg, 3.5);
   };
@@ -704,7 +704,7 @@
       g.cityPostX = CBZ.player.pos.x; g.cityPostZ = CBZ.player.pos.z;
       const econ = CBZ.cityEcon;
       const dn = econ && econ.districtName ? econ.districtName(econ.playerDistrict ? econ.playerDistrict() : null) : "this block";
-      CBZ.city.note("Posted up on " + dn + ". Word's out — buyers will come to you. [I] to deal, post up again to move on.", 2.8);
+      CBZ.city.note("Posted up on " + dn + ". Word's out — buyers will come to you. · I deal", 2.8);
     } else {
       CBZ.city.note("Off the corner. You're moving again.", 1.6);
       // release any seekers so they get on with their own lives
@@ -742,7 +742,7 @@
       CBZ.city.note(ped.name + " patched into the " + g.playerGang.name + " as a Soldier. Crew: " + g.cityCrew, 2.4);
     } else {
       CBZ.city.note(ped.name + " is on your payroll (" + (ped.kind === "crew" ? "shooter" : ped.kind) + "). Crew: " + g.cityCrew +
-        (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " — press [O] to FOUND your own gang." : ""), 2.6);
+        (ped.kind === "crew" && g.cityCrew >= 3 && !(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) ? " That's enough muscle to found your own gang. · O" : ""), 2.6);
     }
   };
 
@@ -1017,7 +1017,7 @@
           }
           seekers += drawn;
         }
-        if (seekers > 0 && units > 0) CBZ.city.note(seekers + " buyer" + (seekers > 1 ? "s are" : " is") + " coming to score — [I] to deal.", 1.8);
+        if (seekers > 0 && units > 0) CBZ.city.note(seekers + " buyer" + (seekers > 1 ? "s are" : " is") + " coming to score. · I deal", 1.8);
       }
       // banked cash earns a little interest (the safe, slow way to grow money)
       if ((g.cityBank || 0) > 0 && E.bankRate) { const gain = Math.floor(g.cityBank * E.bankRate * (E.payTick || 6)); if (gain > 0) { g.cityBank += gain; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); } }

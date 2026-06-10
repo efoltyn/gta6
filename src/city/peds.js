@@ -1737,13 +1737,21 @@
   // BEGIN a report: the ped commits to phoning OR running to a cop. Sets the
   // state-machine fields; the actual landing happens in tickReport().
   function beginReport(ped, x, z) {
+    // SNITCH MOMENT (the street remembers): a witness nursing a real grudge
+    // against the player doesn't hide behind a phone — if a cop is on the block
+    // (~40u) they MARCH straight to them and point you out in person. Revenge
+    // beats the no-snitch code. (relPlayer is written by city/social.js.)
+    const rel = ped.relPlayer;
+    const vendetta = !!(rel && rel.grudge > 40 && ped.mem === CBZ.city.playerActor);
     const cop = nearestCop(ped.pos.x, ped.pos.z, 90);
     const dCop = cop ? Math.hypot(cop.pos.x - ped.pos.x, cop.pos.z - ped.pos.z) : 1e9;
     // a cop close by → run and tell them in person (faster, dramatic); otherwise
     // pull out a phone and dial 911 (a few seconds, interruptible).
-    if (cop && dCop < 45 && rng() < 0.7) {
+    if (cop && (vendetta ? dCop < 40 : (dCop < 45 && rng() < 0.7))) {
       ped.reportState = "run"; ped.reportTarget = cop; ped.reportT = 16;   // hard cap
+      ped._vendetta = vendetta;                                            // lands as a point-out
       showTell(ped, "🏃");
+      if (vendetta && CBZ.citySay) CBZ.citySay(ped, "“Officer! OFFICER!”", "#ffd27b", 2.2);
     } else {
       ped.reportState = "phone"; ped.reportTarget = null;
       ped.reportT = 2.6 + rng() * 2.2;                                     // dialing time
@@ -1760,10 +1768,22 @@
     const sev = ped.witnessSev || 8, type = ped.witnessType;
     if (off === CBZ.city.playerActor) {
       if (CBZ.cityReport) CBZ.cityReport(sev, { x: ped.pos.x, z: ped.pos.z, type: type });
-      CBZ.city && CBZ.city.note("🗣️ " + ped.name + " reported you!", 1.5);
+      if (ped._vendetta) {
+        // a grudge witness reached the officer: they stop, turn, and POINT you
+        // out in person. (posePoint is set for reactions.js to raise the arm —
+        // a no-op until that hook lands; the turn + line carry it meanwhile.)
+        ped.posePoint = 1.4;
+        const P = CBZ.player;
+        if (P && !P.dead) ped.group.rotation.y = Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+        if (CBZ.citySay) CBZ.citySay(ped, "“Right there. That's the one.”", "#ffd27b", 2.4);
+        CBZ.city && CBZ.city.note("🗣️ " + ped.name + " pointed you out to the law!", 1.8);
+      } else {
+        CBZ.city && CBZ.city.note("🗣️ " + ped.name + " reported you!", 1.5);
+      }
     } else if (off && CBZ.cityNpcOffense) {
       CBZ.cityNpcOffense(off, 14, "reported");
     }
+    ped._vendetta = false;
     ped.witnessSev = 0; ped.witnessType = null;
     ped.reportState = null; ped.reportTarget = null; ped.reportT = 0;
     ped.callT = 8;            // won't immediately re-report
@@ -1772,7 +1792,7 @@
 
   // abort an in-progress report (scared off, hurt, lost the cop, fled too far)
   function cancelReport(ped) {
-    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0;
+    ped.reportState = null; ped.reportTarget = null; ped.reportT = 0; ped._vendetta = false;
     clearTell(ped);
   }
   CBZ.cityCancelReport = cancelReport;   // combat.js can stop a snitch by force
@@ -1888,6 +1908,45 @@
     const host = gangHostility(ped);                 // -1 ally · 0 none · 1 rival · 2 war
     const standing = playerStandingWith(ped);        // earned rep with their crew
     const witnessedKill = ped.witnessType === "murder" && ped.mem === CBZ.city.playerActor;
+
+    // ---- THE STREET REMEMBERS (relationship web, social.js writes ped.relPlayer) ----
+    const rel = ped.relPlayer;
+    // AVOIDANCE: someone you've robbed/beaten/extorted SPOTS you and crosses the
+    // street — a deliberate arc away from your line (not a panic flee), muttering.
+    // Their people catch the warning and steer off too (cityStreetParts ripple) —
+    // the street visibly parts around a known predator. Civilians only (a gang
+    // member with a grudge resolves through the stance/ambush machinery instead);
+    // the timid only — a bold grudge-holder would rather settle it (branches below).
+    // thresholds sit against social.js's decay curves: fear>25 = the fresh-victim
+    // window (fear cools ~1.6/s), grudge>20 reaches into the durable >30 band so a
+    // man you robbed YESTERDAY still crosses the street; second-hand "warned" fear
+    // (~5) never qualifies, so the ripple can't chain-react the whole block.
+    if (rel && rel.seen && !ped.gang && (rel.fear > 25 || rel.grudge > 20) &&
+        ped.aggr < (B.crook || 0.72) && r < 0.7) {
+      ped.reactCD = 13 + rng() * 8;
+      ped.path = null; ped.pause = 3; ped._notedT = 6;     // own the next few steps (no gawk/goal override)
+      const im = dpl || 1, ax = (ped.pos.x - P.pos.x) / im, az = (ped.pos.z - P.pos.z) / im;
+      const side = rng() < 0.5 ? 1 : -1;                   // pick a kerb to cross to
+      ped.target.set(ped.pos.x + ax * 6 - az * side * 9, 0, ped.pos.z + az * 6 + ax * side * 9);
+      ped.state = "walk";
+      if (CBZ.citySay) CBZ.citySay(ped, pick(["“Not again—”", "“Keep walking. Keep walking.”", "“Not today. Not me.”"], rng()), "#cfd6e6", 2);
+      if (CBZ.cityStreetParts) CBZ.cityStreetParts(ped);   // warn the people around them
+      return true;
+    }
+    // RECOGNITION: someone who genuinely rates you (earned loyalty/respect, no
+    // grudge) greets you by the name the street gave you — they know YOU; their
+    // name you only learn by talking to them. Never mid-war with their set.
+    if (rel && rel.seen && rel.grudge < 30 && (rel.loyalty > 45 || rel.respect > 55) &&
+        host < 2 && dpl < 9 && r < 0.45) {
+      ped.reactCD = 16 + rng() * 10;
+      ped.pause = Math.max(ped.pause, 0.8 + rng() * 0.7); ped.speed = 0;
+      ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z), 0.5);
+      const title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "big man";
+      const line = pick(["“Yo, " + title + "!”", "“Ayy — " + title + "! Good to see you.”", "“" + title + "! You good out here?”"], rng());
+      if (CBZ.citySay) CBZ.citySay(ped, line, "#7ed957", 2.2); else citySayBark(ped, line, 1.8);
+      if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
+      return true;
+    }
     // HOSTILE CHARGE: a gang member whose crew you rival/war with, or whose blood
     // you've spilled (provoke + witnessed your murder), squares up and attacks —
     // a war reads louder (lower aggression needed, won't bail). Charges with fists
@@ -2138,11 +2197,17 @@
         // afar. The decision is scaled by neighborhood + snitch trait + nerve; a
         // ped that commits then PHONES or RUNS to a cop (see beginReport), and only
         // THEN does it land — the player can still stop it before it does.
+        // …UNLESS this witness carries a real grudge against the player (the
+        // street remembers): a vendetta witness needs no distance and no nerve
+        // roll — seeing you commit a NEW crime IS their moment (beginReport then
+        // marches them to a cop in person when one's within ~40u).
+        const relW = ped.relPlayer;
+        const vendetta = !!(relW && relW.grudge > 40 && ped.mem === CBZ.city.playerActor);
         if (!ped.reportState && ped.callT <= 0 && (ped.witnessSev || 0) > 0 &&
-            ped.alarmed > 1.5 && (dThreat > 11 || ped.state === "film")) {
+            ped.alarmed > 1.5 && (dThreat > 11 || ped.state === "film" || vendetta)) {
           const prop = snitchPropensity(ped, thx, thz);
           // a dedicated snitch reports fast even close; everyone else needs distance + nerve
-          if (rng() < Math.max(0, Math.min(0.95, prop))) {
+          if (vendetta || rng() < Math.max(0, Math.min(0.95, prop))) {
             beginReport(ped, thx, thz);
           } else {
             ped.callT = 4 + rng() * 4;     // decided NOT to call (omerta / minding own business) — don't re-roll constantly
@@ -2648,6 +2713,7 @@
 
     if (ped._sepT > 0) ped._sepT -= dt;
     if (ped._screamT > 0) ped._screamT -= dt;
+    if (ped.posePoint > 0) ped.posePoint -= dt;   // the snitch point-out gesture window
     if (ped._probeT > 0) ped._probeT -= dt;   // far-walker wall-probe rate gate
     if (ped._rampT > 0) ped._rampT -= dt;      // rampager re-target / re-arm cadence
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
@@ -2773,7 +2839,9 @@
       if (p.enterT <= 0) p.group.visible = vis;
       // far rigs stop casting shadows (their shadow is sub-pixel anyway); flip
       // only on a threshold crossing so the per-frame cost is a single compare.
-      const wantShadow = vis && d2 < SHADOW_D2;
+      // blob shadows (city/blobshadows.js) ground rigs now — rigs never enter
+      // the sun shadow pass at all (the pass was the draw-call bottleneck).
+      const wantShadow = false;
       if (p._shadowOn !== wantShadow) { setRigShadow(p.char, wantShadow); p._shadowOn = wantShadow; }
       const far = d2 > FAR_D2;
       const stride = active ? 4 : (far ? 20 : 10);

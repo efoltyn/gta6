@@ -133,16 +133,36 @@
   //      (daynight.js @2 and survival's override @93 both run first; we sit
   //      after them at @94 and take over whenever city mode is active). ----
   let cityShadow = false;
+  // REAL NIGHTS (bug fix): this override used to pin the city sun to noon
+  // (fixed 1.05 / 0.95 / 0xfff4e0) so the neon, lamps and camp fires shipped
+  // but night never actually ARRIVED. Scale by CBZ.dayness (daynight.js @2)
+  // instead — we still re-aim the sun onto the far-off city, but intensity
+  // and colour now ride the same cycle as the sky. Fog COLOUR is left to
+  // daynight (set @2, never touched here) so the horizon stays seamless.
+  const _sunNight = new window.THREE.Color(0x6f86c0);   // daynight's night sun tone
+  const _sunDay = new window.THREE.Color(0xfff4e0);     // daynight's day sun tone
+  const _sunDusk = new window.THREE.Color(0xff8a3a);    // daynight's dusk push
+  const _sunC = new window.THREE.Color();
   CBZ.onAlways(94, function () {
     if (g.mode !== "city") { cityShadow = false; return; }
     const A = city.arena; if (!A) return;
     // The life-game map now extends across a bridge onto a second island.
     // Follow the player so shadows stay useful in either district.
     const focus = CBZ.player && CBZ.player.pos ? CBZ.player.pos : A.center;
-    if (CBZ.sun) { CBZ.sun.position.set(focus.x + 70, 150, focus.z - 50); CBZ.sun.color.setHex(0xfff4e0); CBZ.sun.intensity = 1.05; }
+    const k = CBZ.dayness != null ? CBZ.dayness : 1;       // 0 night .. 1 noon
+    const dusk = CBZ.duskness || 0;
+    if (CBZ.sun) {
+      CBZ.sun.position.set(focus.x + 70, 150, focus.z - 50);
+      CBZ.sun.intensity = 0.16 + (1.05 - 0.16) * k;
+      _sunC.copy(_sunNight).lerp(_sunDay, k);
+      if (dusk > 0) _sunC.lerp(_sunDusk, dusk * 0.7);      // same warm push daynight gives
+      CBZ.sun.color.copy(_sunC);
+    }
     if (CBZ.sunTarget) CBZ.sunTarget.position.set(focus.x, 4, focus.z);
-    if (CBZ.hemi) { CBZ.hemi.intensity = 0.95; }
-    if (CBZ.scene.fog) { CBZ.scene.fog.near = 60; CBZ.scene.fog.far = 620; }
+    if (CBZ.hemi) { CBZ.hemi.intensity = 0.38 + (0.95 - 0.38) * k; }
+    // fog pulled IN (60/620 → 80/460): the skyline rings at r≈430-560 must
+    // melt into the fog so the city reads as endless instead of walled.
+    if (CBZ.scene.fog) { CBZ.scene.fog.near = 80; CBZ.scene.fog.far = 460; }
     if (!cityShadow && CBZ.sun && CBZ.sun.shadow) {
       cityShadow = true;
       const sc = 190, cam = CBZ.sun.shadow.camera;

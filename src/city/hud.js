@@ -10,6 +10,20 @@
    crew + cop-direction blips + a speedometer when driving, and a tidy
    city event feed (CBZ.cityFeed) stacks recent street events down the
    left without fighting the engine's global toast.
+
+   PROFESSIONAL PASS — WHY: mixed opacities, emoji-stat wallpaper and
+   duplicate readouts are the #1 amateur tell, and screen space belongs to
+   the world. Tokens (css/hud.css :root, mirrored on #cityHud): one inset
+   (--hud-pad + safe-area), ONE panel rgba, one radius, EXACTLY three
+   opacity levels (chrome .55 / content .85 / alert 1), single-purpose
+   semantic colors (money-green = cash ONLY, gold = wanted/rank ONLY) and
+   one cyan accent for anything interactive. Counters use tabular numerals;
+   a value that CHANGES brightens then settles back to chrome
+   (flashThenFade). De-fluffed: crew chip is a labeled count only (respect/
+   bank live on the phone + leaderboard), no always-on DRIP line (the
+   boutique/rope owns it), no population bar under the count, no melee
+   caption under the lit chip, no "(40%)" text beside the objective's own
+   fill bar, no ✨/• chip decorations, no star suffix on dispatch calls.
 ============================================================ */
 (function () {
   "use strict";
@@ -19,10 +33,9 @@
   let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl;
   let slotsEl, ammoLineEl, lootEl;   // weapon hotbar (slots + ammo) + carried-loot row
   let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // gang-join objective line
-  let popEl, popBarEl, killEl;
+  let popEl, killEl;
   // wave-5 depth surfaces (all contextual — hidden unless currently relevant)
   let turfPayEl;            // tiny "+$x/min" tag under the money readout
-  let dripEl;               // ✨ DRIP status readout (CBZ.cityPlayerDrip) — the club gate feedback
   let membEl, membFillEl;   // gang-membership badge + its promotion sliver
   let relEl;                // single-ped relationship chip (aim/near target)
   let postWrap, postYouEl, postFoeEl, postFoeNameEl;  // melee posture bars
@@ -35,77 +48,94 @@
       const st = document.createElement("style");
       st.id = "cHudCss";
       st.textContent =
+        // ---- design TOKENS — mirror of css/hud.css :root, scoped onto the
+        //      overlay root so the city HUD stays coherent whatever the sheet
+        //      order. ONE inset, ONE panel rgba, ONE radius, ONE interactive
+        //      accent (cyan), and EXACTLY three opacity levels: chrome .55
+        //      (always-on furniture), content .85 (live readouts), alert 1
+        //      (act-now). Semantic colors are single-purpose — money-green is
+        //      cash ONLY, gold is wanted/rank ONLY, red health, blue armor.
+        "#cityHud{--hud-pad:14px;--hud-pad-t:calc(var(--hud-pad) + env(safe-area-inset-top,0px));--hud-pad-r:calc(var(--hud-pad) + env(safe-area-inset-right,0px));--hud-pad-b:calc(var(--hud-pad) + env(safe-area-inset-bottom,0px));--hud-pad-l:calc(var(--hud-pad) + env(safe-area-inset-left,0px));--panel-bg:rgba(8,11,17,.55);--radius:9px;--hud-line:rgba(232,236,242,.12);--hud-ink:#e8ecf2;--hud-dim:#9fb0c6;--hud-accent:#7de7ff;--money:#7ed957;--gold:#ffd166;--health:#ff5b5b;--armor:#7fd0ff;--o-chrome:.55;--o-content:.85;--o-alert:1}" +
+        // tabular numerals so money/ammo/level/speed counters never jitter
+        "#cHud{font-variant-numeric:tabular-nums}" +
+        // the ONLY three opacity levels in the HUD (flashThenFade lifts a changed
+        // value to alert, then lets it settle back to its resting class)
+        "#cHud .oC{opacity:var(--o-chrome,.55)}" +
+        "#cHud .oM{opacity:var(--o-content,.85)}" +
+        "#cHud .oA{opacity:var(--o-alert,1)}" +
         "@keyframes cMoneyPulse{0%{transform:scale(1)}35%{transform:scale(1.14)}100%{transform:scale(1)}}" +
         "@keyframes cDeltaUp{0%{opacity:0;transform:translateY(6px)}18%{opacity:1}100%{opacity:0;transform:translateY(-16px)}}" +
         "@keyframes cStarFlash{0%,100%{opacity:1}50%{opacity:.35}}" +
         "@keyframes cFeedIn{0%{opacity:0;transform:translateX(-14px)}100%{opacity:1;transform:translateX(0)}}" +
         "@keyframes cKillIn{0%{opacity:0;transform:translateX(12px)}100%{opacity:1;transform:translateX(0)}}" +
         "@keyframes cPopPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}" +
-        "#cHud .cPanel{background:rgba(10,13,20,.42);border:1px solid rgba(255,255,255,.10);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}" +
-        "#cHud .cFeedRow{animation:cFeedIn .22s ease-out;background:rgba(8,11,17,.55);border-left:3px solid #7ed957;border-radius:4px;padding:4px 9px;margin-top:5px;color:#e8eef7;font-size:13px;line-height:1.25;max-width:300px;box-shadow:0 2px 6px rgba(0,0,0,.35)}" +
-        // population headcount pill — the battle-royale-style live count
-        "#cHud .cPop{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:9px;background:rgba(8,11,17,.55);border:1px solid rgba(255,255,255,.10);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
-        "#cHud .cPop .dot{width:8px;height:8px;border-radius:50%;background:#ff5b5b;box-shadow:0 0 7px rgba(255,91,91,.8)}" +
-        "#cHud .cPop b{font-size:18px;font-weight:700;color:#fff;letter-spacing:.4px}" +
-        "#cHud .cPop .tot{font-size:12px;color:#8a93a3}" +
-        "#cHud .cPopBar{height:4px;border-radius:3px;background:rgba(255,255,255,.10);overflow:hidden;margin-top:4px}" +
-        "#cHud .cPopBar>i{display:block;height:100%;background:linear-gradient(90deg,#ff5b5b,#ffb36b);transition:width .4s ease}" +
+        "#cHud .cPanel{background:var(--panel-bg);border:1px solid var(--hud-line);border-radius:var(--radius);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}" +
+        "#cHud .cFeedRow{animation:cFeedIn .22s ease-out;background:var(--panel-bg);border-left:3px solid var(--hud-dim);border-radius:4px;padding:4px 9px;margin-top:5px;color:var(--hud-ink);font-size:13px;line-height:1.25;max-width:300px;box-shadow:0 2px 6px rgba(0,0,0,.35)}" +
+        // population headcount pill — the battle-royale-style live count (the
+        // count alone is the signal; the old bar under it was wallpaper — F4)
+        "#cHud .cPop{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
+        "#cHud .cPop .dot{width:8px;height:8px;border-radius:50%;background:var(--health);box-shadow:0 0 7px rgba(255,91,91,.8)}" +
+        "#cHud .cPop b{font-size:18px;font-weight:700;color:var(--hud-ink);letter-spacing:.4px}" +
+        "#cHud .cPop .tot{font-size:12px;color:var(--hud-dim)}" +
         // hud-local kill feed (fallback when turf.js's feed isn't mounted)
-        "#cHud .cKillRow{animation:cKillIn .2s ease-out;background:rgba(8,11,17,.6);border-right:3px solid #c33;border-radius:4px;padding:2px 9px;margin-top:4px;color:#dfe6f0;font-size:12px;line-height:1.3;text-align:right;box-shadow:0 2px 6px rgba(0,0,0,.4)}" +
-        "#cHud .cKillRow b{color:#fff}" +
-        "#cHud .cKillRow.you{border-right-color:#ffd166;background:rgba(40,30,8,.7)}" +
+        "#cHud .cKillRow{animation:cKillIn .2s ease-out;background:var(--panel-bg);border-right:3px solid #c33;border-radius:4px;padding:2px 9px;margin-top:4px;color:var(--hud-dim);font-size:12px;line-height:1.3;text-align:right;box-shadow:0 2px 6px rgba(0,0,0,.4)}" +
+        "#cHud .cKillRow b{color:var(--hud-ink)}" +
+        "#cHud .cKillRow.you{border-right-color:var(--gold)}" +
         // --- wave-5 depth surfaces: gang badge, turf-pay tag, rel chip, posture ---
-        // turf passive-income tag — a thin green "+$x/min" right under the money.
-        "#cHud .cTurfPay{display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:1px 7px;border-radius:7px;background:rgba(8,11,17,.5);font-size:12px;font-weight:600;color:#7ed957;text-shadow:0 1px 2px rgba(0,0,0,.6)}" +
+        // turf passive-income tag — the rate in cash green, right under the money.
+        "#cHud .cTurfPay{display:inline-flex;align-items:center;gap:4px;margin-top:2px;padding:1px 7px;border-radius:var(--radius);background:var(--panel-bg);font-size:12px;font-weight:600;color:var(--money);text-shadow:0 1px 2px rgba(0,0,0,.6)}" +
         // gang-membership badge: a small chip with the gang colour, your rank, and
         // a hair-thin promotion sliver toward the next rung. Hidden when unaffiliated.
-        "#cHud .cMemb{display:inline-flex;flex-direction:column;gap:3px;padding:5px 9px;border-radius:9px;background:rgba(8,11,17,.55);border:1px solid rgba(255,255,255,.10);box-shadow:0 2px 8px rgba(0,0,0,.4);max-width:200px}" +
+        "#cHud .cMemb{display:inline-flex;flex-direction:column;gap:3px;padding:5px 9px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4);max-width:200px}" +
         "#cHud .cMemb .row{display:flex;align-items:center;gap:6px;font-size:12px;line-height:1.1;white-space:nowrap}" +
         "#cHud .cMemb .gdot{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 6px rgba(0,0,0,.5)}" +
-        "#cHud .cMemb .gnm{font-weight:700;color:#fff;letter-spacing:.3px;overflow:hidden;text-overflow:ellipsis;max-width:118px}" +
-        "#cHud .cMemb .rnk{color:#ffd451;font-weight:700}" +
-        "#cHud .cMemb .pslot{height:3px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden}" +
-        "#cHud .cMemb .pslot>i{display:block;height:100%;background:linear-gradient(90deg,#ffd451,#7ed957);transition:width .4s ease}" +
+        "#cHud .cMemb .gnm{font-weight:700;color:var(--hud-ink);letter-spacing:.3px;overflow:hidden;text-overflow:ellipsis;max-width:118px}" +
+        "#cHud .cMemb .rnk{color:var(--gold);font-weight:700}" +
+        // progress slivers are interactive-chrome accent (a gold→green gradient
+        // here used to borrow BOTH reserved semantics at once)
+        "#cHud .cMemb .pslot{height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden}" +
+        "#cHud .cMemb .pslot>i{display:block;height:100%;background:var(--hud-accent);transition:width .4s ease}" +
         // single-ped relationship chip (contextual to the ONE ped you target)
-        "#cHud .cRel{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:10px;background:rgba(8,11,17,.6);border:1px solid rgba(255,255,255,.10);font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.45);white-space:nowrap}" +
-        "#cHud .cRel .nm{color:#cdd6e2;font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis}" +
+        "#cHud .cRel{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.45);white-space:nowrap}" +
+        "#cHud .cRel .nm{color:var(--hud-ink);font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis}" +
         "#cHud .cRel .lab{font-weight:700}" +
         // melee posture bars (you vs current foe) — slim, only during a fight
-        "#cHud .cPost{display:flex;flex-direction:column;gap:5px;padding:6px 10px;border-radius:10px;background:rgba(8,11,17,.55);border:1px solid rgba(255,255,255,.10);box-shadow:0 2px 8px rgba(0,0,0,.45);min-width:150px}" +
-        "#cHud .cPost .lbl{font-size:10px;font-weight:700;letter-spacing:.6px;color:#9fb0c6;display:flex;justify-content:space-between;align-items:baseline}" +
-        "#cHud .cPost .pbar{height:6px;border-radius:4px;background:rgba(255,255,255,.10);overflow:hidden}" +
+        "#cHud .cPost{display:flex;flex-direction:column;gap:5px;padding:6px 10px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.45);min-width:150px}" +
+        "#cHud .cPost .lbl{font-size:10px;font-weight:700;letter-spacing:.6px;color:var(--hud-dim);display:flex;justify-content:space-between;align-items:baseline}" +
+        "#cHud .cPost .pbar{height:6px;border-radius:4px;background:var(--hud-line);overflow:hidden}" +
         "#cHud .cPost .pbar>i{display:block;height:100%;transition:width .12s linear}" +
         "#cHud .cPost .you>i{background:linear-gradient(90deg,#39c0d0,#7fe0ff)}" +
         "#cHud .cPost .foe>i{background:linear-gradient(90deg,#ff8b3c,#ffd166)}" +
         "#cHud .cPost .brk>i{background:linear-gradient(90deg,#ff5b5b,#ff9e6b)!important;animation:cStarFlash .5s steps(1,end) infinite}" +
-        // --- WEAPON HOTBAR (bottom-right): jail-clear loadout. A row of slots, one
+        // --- WEAPON HOTBAR (bottom-centre): jail-clear loadout. A row of slots, one
         // per OWNED gun (+ a Fists slot when unarmed), the held one lit, with the
         // engine's live mag/reserve ammo for the equipped weapon underneath. ------
         "#cHud .cBar{display:flex;flex-direction:column;align-items:center;gap:5px}" +
         "#cHud .cSlots{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;max-width:560px}" +
-        "#cHud .cSlot{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:9px;background:rgba(8,11,17,.55);border:1px solid rgba(255,255,255,.12);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
-        "#cHud .cSlot .s{font-size:14px;font-weight:700;color:#cdd6e2;line-height:1.1;letter-spacing:.3px}" +
-        "#cHud .cSlot .a{font-size:10px;color:#8a93a3;line-height:1.1;margin-top:1px}" +
+        "#cHud .cSlot{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
+        "#cHud .cSlot .s{font-size:14px;font-weight:700;color:var(--hud-dim);line-height:1.1;letter-spacing:.3px}" +
+        "#cHud .cSlot .a{font-size:10px;color:var(--hud-dim);line-height:1.1;margin-top:1px}" +
         "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
-        "#cHud .cSlot.held{background:rgba(40,52,30,.78);border-color:#7ed957;box-shadow:0 0 0 1px rgba(126,217,87,.5),0 2px 10px rgba(0,0,0,.5)}" +
-        "#cHud .cSlot.held .s{color:#fff;text-shadow:0 0 8px rgba(126,217,87,.55)}" +
-        "#cHud .cSlot.held .a{color:#bfe9a3}" +
-        "#cHud .cSlot.melee.held{background:rgba(52,40,30,.78);border-color:#ffb37a;box-shadow:0 0 0 1px rgba(255,179,122,.5),0 2px 10px rgba(0,0,0,.5)}" +
-        "#cHud .cSlot.melee.held .s{text-shadow:0 0 8px rgba(255,179,122,.55)}" +
+        // the held slot is a SELECTION (interactive chrome) → the one cyan accent,
+        // same for guns and melee. The old green/orange split spent the cash and
+        // heat semantics on a highlight that just means "in hand".
+        "#cHud .cSlot.held{border-color:var(--hud-accent);box-shadow:0 0 0 1px rgba(125,231,255,.35),0 2px 10px rgba(0,0,0,.5)}" +
+        "#cHud .cSlot.held .s{color:var(--hud-ink);text-shadow:0 0 8px rgba(125,231,255,.4)}" +
+        "#cHud .cSlot.held .a{color:var(--hud-ink)}" +
         // the equipped-weapon ammo line under the slots: big mag / reserve, jail-style.
-        "#cHud .cAmmo{font-size:13px;color:#e8eef7;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.7)}" +
-        "#cHud .cAmmo b{font-size:20px;color:#fff;font-weight:700}" +
-        "#cHud .cAmmo .res{color:#9fb0c6;font-weight:600}" +
-        "#cHud .cAmmo .rl{color:#ffd166}" +
-        "#cHud .cAmmo .arm{color:#7fd0ff}" +
-        // --- carried LOOT readout (bottom-right, above the hotbar): drugs / valuables
-        // / consumables you're holding, with counts. Compact chips; hidden when empty.
+        "#cHud .cAmmo{font-size:13px;color:var(--hud-ink);font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.7)}" +
+        "#cHud .cAmmo b{font-size:20px;color:var(--hud-ink);font-weight:700}" +
+        "#cHud .cAmmo .res{color:var(--hud-dim);font-weight:600}" +
+        "#cHud .cAmmo .rl{color:var(--gold)}" +
+        "#cHud .cAmmo .arm{color:var(--armor)}" +
+        // --- carried LOOT readout (above the hotbar): drugs / valuables /
+        // consumables you're holding, with counts. Compact chips; hidden when empty.
         // one line, NEVER wraps — a second row used to climb into the centre
         // toast ("Wallet" floating over dispatch lines). Tail rolls into "+N".
         "#cHud .cLoot{display:flex;gap:5px;justify-content:center;flex-wrap:nowrap;max-width:520px;margin-bottom:1px;white-space:nowrap}" +
-        "#cHud .cLoot .it{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:8px;background:rgba(8,11,17,.5);border:1px solid rgba(255,255,255,.10);font-size:12px;color:#dfe6f0;box-shadow:0 1px 5px rgba(0,0,0,.35)}" +
-        "#cHud .cLoot .it b{color:#fff;font-weight:700}" +
-        "#cHud .cLoot .it .x{color:#8a93a3;font-weight:600}" +
+        "#cHud .cLoot .it{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);font-size:12px;color:var(--hud-ink);box-shadow:0 1px 5px rgba(0,0,0,.35)}" +
+        "#cHud .cLoot .it b{color:var(--hud-ink);font-weight:700}" +
+        "#cHud .cLoot .it .x{color:var(--hud-dim);font-weight:600}" +
         // coordinate with turf.js's overlays (loaded BEFORE us): nudge its kill
         // feed down so it clears our top-right money/pop stack, and cap its width
         // so a long name never reaches the centre. One cohesive, non-overlapping HUD.
@@ -116,7 +146,7 @@
         "  #cHud .cLoot{max-width:340px;gap:4px}" +
         "  #cHud .cLoot .it{font-size:10px;padding:1px 6px;gap:3px}" +
         "  #cHud .cSlots{gap:4px;max-width:380px}" +
-        "  #cHud .cSlot{min-width:38px;height:34px;padding:2px 5px;border-radius:7px}" +
+        "  #cHud .cSlot{min-width:38px;height:34px;padding:2px 5px}" +
         "  #cHud .cSlot .s{font-size:11px}" +
         "  #cHud .cAmmo{font-size:11px}" +
         "  #cHud .cAmmo b{font-size:15px}" +
@@ -131,76 +161,75 @@
       "<div id='cHud' style='position:absolute;inset:0'>" +
       // top-right stack — dropped to top:54px so it never collides with the
       // takeover meta bar (turf.js #cTurfMeta sits at top:6px, ~48px tall).
-      "<div style='position:absolute;top:54px;right:16px;text-align:right;max-width:248px'>" +
-      "  <div class='cPop' id='cPop' style='display:none'><span class='dot'></span><b id='cPopN'>0</b><span class='tot' id='cPopTot'></span></div>" +
-      "  <div class='cPopBar' id='cPopBar' style='display:none;width:148px;margin-left:auto'><i style='width:100%'></i></div>" +
+      // The whole column idles at chrome opacity; money lifts on change.
+      "<div style='position:absolute;top:54px;right:var(--hud-pad-r);text-align:right;max-width:248px'>" +
+      "  <div class='cPop oM' id='cPop' style='display:none'><span class='dot'></span><b id='cPopN'>0</b><span class='tot' id='cPopTot'></span></div>" +
       "  <div style='position:relative;display:inline-block;margin-top:6px'>" +
-      "    <div id='cMoney' style='font-size:32px;font-weight:700;color:#7ed957;text-shadow:0 2px 0 #1f5a2a,0 0 14px rgba(126,217,87,.35)'>$0</div>" +
+      "    <div id='cMoney' class='oC' style='font-size:32px;font-weight:700;color:var(--money);text-shadow:0 2px 0 #1f5a2a,0 0 14px rgba(126,217,87,.35)'>$0</div>" +
       "    <div id='cDelta' style='position:absolute;right:0;top:-6px;font-size:18px;font-weight:700;opacity:0;pointer-events:none'></div>" +
       "  </div>" +
-      "  <div id='cTurfPay' class='cTurfPay' style='display:none'></div>" +
-      "  <div id='cStarsWrap' style='display:none;margin-top:4px;padding:2px 8px;border-radius:8px;background:rgba(8,11,17,.5)'><span id='cStars' style='font-size:23px;letter-spacing:3px'></span></div>" +
-      "  <div id='cCrew' style='font-size:13px;color:#9fb0c6;margin-top:3px'></div>" +
+      "  <div id='cTurfPay' class='cTurfPay oC' style='display:none'></div>" +
+      "  <div id='cStarsWrap' class='oA' style='display:none;margin-top:4px;padding:2px 8px;border-radius:var(--radius);background:var(--panel-bg)'><span id='cStars' style='font-size:23px;letter-spacing:3px'></span></div>" +
+      // crew headcount only, labeled (F1) — respect + bank read on the phone /
+      // leaderboard, where they're actionable; an always-on ★ here clashed with
+      // the wanted ★ a few px away.
+      "  <div id='cCrew' class='oC' style='font-size:13px;color:var(--hud-dim);margin-top:3px'></div>" +
       // YOUR street read (level.js): the same LEVEL N the city floats over
       // everyone else's head, derived live from worth/heat/crew/bodies.
-      "  <div id='cLvl' style='font-size:14px;font-weight:800;color:#fff;letter-spacing:1px;margin-top:2px;text-shadow:0 1px 3px rgba(0,0,0,.6)'></div>" +
-      // DRIP readout — your visible STATUS (CBZ.cityPlayerDrip): the club's gate.
-      // Tints green once you clear CLUB_DRIP, gold at VIP. Self-hides if drip is
-      // unavailable. Teaches the player that dressing up (clothes) opens the rope.
-      "  <div id='cDrip' style='font-size:13px;font-weight:700;color:#9fb0c6;margin-top:2px'></div>" +
-      "  <div id='cWorld' style='font-size:12px;color:#ffd166;margin-top:2px'></div>" +
-      "  <div id='cKill' style='margin-top:7px;display:none'></div>" +
+      "  <div id='cLvl' class='oC' style='font-size:14px;font-weight:800;color:var(--hud-ink);letter-spacing:1px;margin-top:2px;text-shadow:0 1px 3px rgba(0,0,0,.6)'></div>" +
+      "  <div id='cWorld' class='oC' style='font-size:12px;color:var(--hud-dim);margin-top:2px'></div>" +
+      "  <div id='cKill' class='oM' style='margin-top:7px;display:none'></div>" +
       "</div>" +
-      "<div style='position:absolute;left:16px;bottom:16px;width:230px'>" +
+      "<div class='oM' style='position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:230px'>" +
       "  <div style='font-size:11px;color:#ffb3b3;font-weight:600;letter-spacing:.5px'>HEALTH</div><div style='height:12px;background:rgba(0,0,0,.45);border-radius:6px;overflow:hidden;margin-bottom:5px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div>" +
       "  <div style='font-size:11px;color:#ffd9a8;font-weight:600;letter-spacing:.5px'>FOOD</div><div style='height:12px;background:rgba(0,0,0,.45);border-radius:6px;overflow:hidden;margin-bottom:5px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div>" +
       "  <div style='font-size:11px;color:#a8e0ff;font-weight:600;letter-spacing:.5px'>STAMINA</div><div style='height:8px;background:rgba(0,0,0,.45);border-radius:5px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div>" +
       "</div>" +
-      // WEAPON HOTBAR + carried-loot readout (bottom-right). The hotbar is the
+      // WEAPON HOTBAR + carried-loot readout (bottom-centre). The hotbar is the
       // jail-clarity loadout: every gun you OWN as a slot, the held one lit, live
-      // mag/reserve underneath. The loot row sits just above it.
-      "<div id='cWpn' class='cBar' style='position:absolute;left:50%;bottom:14px;transform:translateX(-50%)'>" +
-      "  <div id='cLoot' class='cLoot' style='display:none'></div>" +
-      "  <div id='cSlots' class='cSlots'></div>" +
-      "  <div id='cAmmo' class='cAmmo'></div>" +
+      // mag/reserve underneath. The loot row sits just above it. Slots + loot are
+      // chrome; the live ammo line is content.
+      "<div id='cWpn' class='cBar' style='position:absolute;left:50%;bottom:var(--hud-pad-b);transform:translateX(-50%)'>" +
+      "  <div id='cLoot' class='cLoot oC' style='display:none'></div>" +
+      "  <div id='cSlots' class='cSlots oC'></div>" +
+      "  <div id='cAmmo' class='cAmmo oM'></div>" +
       "</div>" +
-      "<div id='cSpeed' style='position:absolute;right:16px;bottom:74px;text-align:right;color:#e8eef7;display:none'><span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span><span style='font-size:12px;color:#9fb0c6'> mph</span></div>" +
-      "<div id='cJob' class='cPanel' style='position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;color:#ffd166;font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
+      "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span><span style='font-size:12px;color:var(--hud-dim)'> mph</span></div>" +
+      "<div id='cJob' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
       // OBJECTIVE line — the active gang-join task when no city job is running. A
       // one-tap [ROUTE] affordance (pointer-events:auto) drops an HQ waypoint, and a
       // thin prospect-standing fill mirrors renderMemb/renderRel styling.
-      "<div id='cObj' class='cPanel' style='position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;color:#ffd166;font-size:14px;max-width:62%;padding:5px 14px;display:none'>" +
-      "  <span id='cObjTxt'></span> <span id='cObjRoute' style='pointer-events:auto;cursor:pointer;color:#7de7ff;font-weight:700;margin-left:6px'>↳ ROUTE</span>" +
-      "  <div id='cObjSlot' style='height:3px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;margin-top:5px'><i id='cObjFill' style='display:block;height:100%;width:0%;background:linear-gradient(90deg,#ffd451,#7ed957);transition:width .4s ease'></i></div>" +
+      "<div id='cObj' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:62%;padding:5px 14px;display:none'>" +
+      "  <span id='cObjTxt'></span> <span id='cObjRoute' style='pointer-events:auto;cursor:pointer;color:var(--hud-accent);font-weight:700;margin-left:6px'>↳ ROUTE</span>" +
+      "  <div id='cObjSlot' style='height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden;margin-top:5px'><i id='cObjFill' style='display:block;height:100%;width:0%;background:var(--hud-accent);transition:width .4s ease'></i></div>" +
       "</div>" +
-      "<canvas id='cRadar' width='190' height='190' style='position:absolute;left:14px;top:14px;border-radius:50%;box-shadow:0 4px 14px rgba(0,0,0,.45)'></canvas>" +
-      "<div id='cFeed' style='position:absolute;left:212px;top:14px;width:300px'></div>" +
-      "<div id='cTurf' style='position:absolute;left:16px;top:212px;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)'></div>" +
-      "<div id='cHomeLine' style='position:absolute;left:16px;top:232px;font-size:12px;color:#9fb0c6;text-shadow:0 1px 2px rgba(0,0,0,.7)'></div>" +
+      "<canvas id='cRadar' class='oM' width='190' height='190' style='position:absolute;left:var(--hud-pad-l);top:var(--hud-pad-t);border-radius:50%;box-shadow:0 4px 14px rgba(0,0,0,.45)'></canvas>" +
+      "<div id='cFeed' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 198px);top:var(--hud-pad-t);width:300px'></div>" +
+      "<div id='cTurf' class='oC' style='position:absolute;left:var(--hud-pad-l);top:212px;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)'></div>" +
+      "<div id='cHomeLine' class='oC' style='position:absolute;left:var(--hud-pad-l);top:232px;font-size:12px;color:var(--hud-dim);text-shadow:0 1px 2px rgba(0,0,0,.7)'></div>" +
       // gang-membership badge (left column, below the turf/home lines; clears the
       // 190px radar which ends ~204px). Hidden entirely unless patched into a crew.
-      "<div id='cMemb' class='cMemb' style='position:absolute;left:16px;top:254px;display:none'>" +
+      "<div id='cMemb' class='cMemb oC' style='position:absolute;left:var(--hud-pad-l);top:254px;display:none'>" +
       "  <div class='row'><span class='gdot' id='cMembDot'></span><span class='gnm' id='cMembNm'></span><span class='rnk' id='cMembRnk'></span></div>" +
       "  <div class='pslot' id='cMembSlot'><i id='cMembFill' style='width:0%'></i></div>" +
       "</div>" +
       // bottom-centre contextual zone: the relationship chip (when targeting one
-      // ped) and the melee posture bars (only mid-fight). Sits between the
-      // bottom-left health stack and the bottom-right weapon — no overlap.
+      // ped) and the melee posture bars (only mid-fight, so alert level). Sits
+      // between the bottom-left health stack and the hotbar — no overlap.
       "<div style='position:absolute;left:50%;bottom:122px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none'>" +
-      "  <div id='cPost' class='cPost' style='display:none'>" +
+      "  <div id='cPost' class='cPost oA' style='display:none'>" +
       "    <div class='lbl'><span>YOU</span><span id='cPostFoeNm' style='color:#ffb37a'></span></div>" +
       "    <div class='pbar you' id='cPostYou'><i style='width:0%'></i></div>" +
       "    <div class='pbar foe' id='cPostFoe'><i style='width:0%'></i></div>" +
       "  </div>" +
-      "  <div id='cRel' class='cRel' style='display:none'><span class='nm' id='cRelNm'></span><span class='lab' id='cRelLab'></span></div>" +
+      "  <div id='cRel' class='cRel oM' style='display:none'><span class='nm' id='cRelNm'></span><span class='lab' id='cRelLab'></span></div>" +
       "</div>" +
-      "<div id='cCross' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(255,255,255,.85);border-radius:50%;display:none'></div>" +
+      "<div id='cCross' class='oA' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
       "</div>";
     document.body.appendChild(root);
     cashEl = root.querySelector("#cMoney"); deltaEl = root.querySelector("#cDelta");
     starsEl = root.querySelector("#cStars"); starsWrap = root.querySelector("#cStarsWrap");
     crewEl = root.querySelector("#cCrew"); worldEl = root.querySelector("#cWorld");
-    dripEl = root.querySelector("#cDrip");
     hpBar = root.querySelector("#cHp"); hungerBar = root.querySelector("#cFood"); stamBar = root.querySelector("#cStam");
     wpnEl = root.querySelector("#cWpn"); jobEl = root.querySelector("#cJob");
     slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo"); lootEl = root.querySelector("#cLoot");
@@ -209,7 +238,7 @@
     if (objRouteEl) objRouteEl.addEventListener("click", routeToProspectHQ);
     radar = root.querySelector("#cRadar"); turfEl = root.querySelector("#cTurf"); homeLineEl = root.querySelector("#cHomeLine");
     feedEl = root.querySelector("#cFeed"); speedEl = root.querySelector("#cSpeed");
-    popEl = root.querySelector("#cPop"); popBarEl = root.querySelector("#cPopBar"); killEl = root.querySelector("#cKill");
+    popEl = root.querySelector("#cPop"); killEl = root.querySelector("#cKill");
     turfPayEl = root.querySelector("#cTurfPay");
     membEl = root.querySelector("#cMemb"); membFillEl = root.querySelector("#cMembFill");
     relEl = root.querySelector("#cRel");
@@ -240,7 +269,8 @@
       return;
     }
     if (opts && opts.collapseOnly) return;   // throttled note, nothing to collapse onto
-    feed.push({ msg: msg, base: base, count: 1, color: color || "#7ed957", t: CBZ.now || 0, born: nowMs });
+    // default edge is neutral — money-green is reserved for actual cash events
+    feed.push({ msg: msg, base: base, count: 1, color: color || "#9fb0c6", t: CBZ.now || 0, born: nowMs });
     if (feed.length > 5) feed.shift();
     renderFeed();
   };
@@ -272,17 +302,16 @@
   let lastPopN = -1, popPulseT = 0;
   function renderPop() {
     if (!popEl) return;
-    if (!CBZ.cityPopulation) { popEl.style.display = "none"; if (popBarEl) popBarEl.style.display = "none"; return; }
+    if (!CBZ.cityPopulation) { popEl.style.display = "none"; return; }
     const p = CBZ.cityPopulation();
-    if (!p || !p.total) { popEl.style.display = "none"; if (popBarEl) popBarEl.style.display = "none"; return; }
+    if (!p || !p.total) { popEl.style.display = "none"; return; }
     popEl.style.display = "inline-flex";
-    if (popBarEl) popBarEl.style.display = "block";
     const n = p.alive | 0;
     const nEl = popEl.querySelector("#cPopN"), totEl = popEl.querySelector("#cPopTot");
     if (nEl) nEl.textContent = n.toLocaleString();
     if (totEl) totEl.textContent = "/" + (p.total | 0) + " alive";
-    if (popBarEl) { const bar = popBarEl.querySelector("i"); if (bar) bar.style.width = Math.max(0, Math.min(100, (n / p.total) * 100)) + "%"; }
     // a quick pulse whenever the count drops, so a massacre reads at a glance
+    // (the count IS the signal — the old bar under it restated the same number)
     if (lastPopN >= 0 && n < lastPopN) { popEl.style.animation = "none"; void popEl.offsetWidth; popEl.style.animation = "cPopPulse .4s ease-out"; }
     lastPopN = n;
   }
@@ -330,7 +359,9 @@
     const perSec = info ? (info.perSec || 0) : 0;
     if (!info || perSec <= 0 || !(info.zones > 0)) { turfPayEl.style.display = "none"; return; }
     const perMin = Math.round(perSec * 60);
-    turfPayEl.innerHTML = "🏴 +$" + perMin.toLocaleString() + "/min <span style='color:#8a93a3;font-weight:500'>· " + info.zones + " turf</span>";
+    // the RATE is the payoff; the zone count lives on the [M] territory board
+    // where holding/taking turf is actually played (F5)
+    turfPayEl.textContent = "+$" + perMin.toLocaleString() + "/min";
     turfPayEl.style.display = "inline-flex";
   }
 
@@ -396,9 +427,11 @@
     }
     return best;
   }
+  // sentiment tints deliberately avoid the reserved semantics (money-green,
+  // armor-blue, wanted-gold) so a glance never lies about WHAT a color means
   const REL_COL = {
     "wants you dead": "#ff5b5b", "hates you": "#ff8b6b", "terrified of you": "#c9a0ff",
-    "loves you": "#ff8bd0", "likes you": "#7ed957", "respects you": "#7fd0ff",
+    "loves you": "#ff8bd0", "likes you": "#5ad17a", "respects you": "#8fb6ff",
     "neutral": "#9fb0c6",
   };
   function renderRel() {
@@ -654,7 +687,7 @@
     ctx.fillStyle = cg; ctx.beginPath(); ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, coneR, -Math.PI / 2 - coneH, -Math.PI / 2 + coneH); ctx.closePath(); ctx.fill();
     ctx.restore();
-    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 1.4;
+    ctx.fillStyle = "#e8ecf2"; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx + 5.5, cy + 6); ctx.lineTo(cx, cy + 2.5); ctx.lineTo(cx - 5.5, cy + 6); ctx.closePath();
     ctx.fill(); ctx.stroke();
   }
@@ -715,7 +748,9 @@
     let standing = 0;
     try { if (CBZ.cityProspectStanding) standing = CBZ.cityProspectStanding(); } catch (e) { standing = 0; }
     const pct = Math.round(Math.max(0, Math.min(1, standing)) * 100);
-    if (objTxtEl) objTxtEl.innerHTML = "🎯 " + esc(task.label) + " <span style='color:#9fb0c6'>(" + pct + "%)</span>";
+    // the fill bar below carries the % — printing "(40%)" beside a 40% bar said
+    // the same thing twice (F3)
+    if (objTxtEl) objTxtEl.innerHTML = "🎯 " + esc(task.label);
     // [ROUTE] only makes sense when there's a place to go (a live target, or a
     // resolvable HQ); otherwise hide it so the line doesn't dangle a dead button.
     if (objRouteEl) {
@@ -798,13 +833,12 @@
       } else if (m) { cur = m.w.mag || 0; mag = m.w.mag || 0; res = m.w.reserve || 0; }
       if (reloading) line = "<span class='rl'>RELOADING…</span> ";
       line += "<b>" + cur + "</b><span class='res'> / " + mag + " · " + res + " res</span>";
-    } else if (melee) {
-      line = "<span class='res'>" + esc(melee) + " — melee</span>";
-    } else {
-      line = "<span class='res'>unarmed</span>";
     }
+    // melee / fists show NOTHING here — the lit chip already names them; a
+    // "Bat — melee" caption under a lit Bat chip was the HUD reading itself
+    // aloud (F6).
     const armor = (CBZ.player && CBZ.player._armor) || 0;
-    if (armor > 0) line += " <span class='arm'>🛡 " + Math.round(armor) + "</span>";
+    if (armor > 0) line += (line ? " " : "") + "<span class='arm'>🛡 " + Math.round(armor) + "</span>";
     if (ammoLineEl) ammoLineEl.innerHTML = line;
   }
 
@@ -837,8 +871,9 @@
       // guns + their ammo are the hotbar's job; melee weapons live in the hotbar
       // (as the held melee chip) too — keep loot to carry-able valuables/consumables.
       if (tag === "weapon" || tag === "ammo") continue;
-      const icon = LOOT_ITEM_ICON[name] || (tag && LOOT_ICON[tag]) || "•";
-      rows.push({ name: name, n: n, icon: icon, val: (it && it.value) || 0, luxe: !!(it && it.luxe) });
+      // unknown items go bare — a meaningless "•" placeholder is noise (F11)
+      const icon = LOOT_ITEM_ICON[name] || (tag && LOOT_ICON[tag]) || "";
+      rows.push({ name: name, n: n, icon: icon, val: (it && it.value) || 0 });
     }
     if (!rows.length) { lootEl.style.display = "none"; lootEl.innerHTML = ""; return; }
     // lead with the most valuable loot; cap the row so it never sprawls across the
@@ -848,9 +883,10 @@
     let html = "";
     for (let i = 0; i < rows.length && i < MAX; i++) {
       const r = rows[i];
-      const nm = esc(r.name) + (r.luxe ? " ✨" : "");
+      // name only — the ✨ luxe suffix was decoration; value-sorting already
+      // puts the jackpot first (F11)
       const cnt = r.n > 1 ? " <span class='x'>×" + r.n + "</span>" : "";
-      html += "<span class='it'>" + r.icon + " <b>" + nm + "</b>" + cnt + "</span>";
+      html += "<span class='it'>" + (r.icon ? r.icon + " " : "") + "<b>" + esc(r.name) + "</b>" + cnt + "</span>";
     }
     if (rows.length > MAX) html += "<span class='it'><span class='x'>+" + (rows.length - MAX) + " more</span></span>";
     lootEl.innerHTML = html;
@@ -879,7 +915,24 @@
     renderHotbar();
   }
 
-  // money delta: flash a floating +$/-$ when cash changes, GTA-style
+  // ---- contextual reveal: a value that CHANGED brightens to alert level, then
+  //      settles back to quiet chrome. The HUD speaks when something happened
+  //      and idles as faint furniture the rest of the time — persistent
+  //      elements stay minimal, attention goes to the world. ----
+  function flashThenFade(el, holdMs) {
+    if (!el) return;
+    if (el._ftf) { clearTimeout(el._ftf); el._ftf = 0; }
+    el.style.transition = "none";
+    el.style.opacity = "var(--o-alert,1)";
+    el._ftf = setTimeout(function () {
+      el.style.transition = "opacity .8s ease";
+      el.style.opacity = "";   // fall back to the element's resting opacity class
+      el._ftf = 0;
+    }, holdMs || 1400);
+  }
+
+  // money delta: flash a floating +$/-$ when cash changes, GTA-style; the big
+  // counter lifts to full brightness with it, then settles back to chrome.
   let lastCash = null;
   function showMoney() {
     const c = g.cash || 0;
@@ -887,11 +940,12 @@
     if (lastCash != null && c !== lastCash && deltaEl) {
       const d = c - lastCash;
       deltaEl.textContent = (d > 0 ? "+$" : "-$") + Math.abs(d).toLocaleString();
-      deltaEl.style.color = d > 0 ? "#7ed957" : "#ff6b6b";
+      deltaEl.style.color = d > 0 ? "var(--money,#7ed957)" : "#ff6b6b";
       deltaEl.style.animation = "none"; void deltaEl.offsetWidth;   // restart
       deltaEl.style.animation = "cDeltaUp 1.1s ease-out forwards";
       cashEl.style.animation = "none"; void cashEl.offsetWidth;
       cashEl.style.animation = "cMoneyPulse .4s ease-out";
+      flashThenFade(cashEl);
     }
     lastCash = c;
   }
@@ -905,38 +959,17 @@
     if (w > 0) {
       starsWrap.style.display = "inline-block";
       let s = "";
-      for (let i = 1; i <= 5; i++) s += i <= w ? "<span style='color:#ffd166;text-shadow:0 0 8px rgba(255,209,102,.6)'>★</span>" : "<span style='color:#4a4f57'>★</span>";
+      for (let i = 1; i <= 5; i++) s += i <= w ? "<span style='color:var(--gold,#ffd166);text-shadow:0 0 8px rgba(255,209,102,.6)'>★</span>" : "<span style='color:#4a4f57'>★</span>";
       starsEl.innerHTML = s;
       const hot = (g.heat || 0) > 0 && w >= (g._wantedPeak || 0);
       starsWrap.style.animation = hot ? "cStarFlash .7s steps(1,end) infinite" : "none";
     } else { starsWrap.style.display = "none"; starsWrap.style.animation = "none"; }
-    const crew = g.cityCrew || 0, bank = g.cityBank || 0, resp = g.respect || 0;
-    // The street-rank ladder is retired (promotion.js cityStreetRank() now returns
-    // null). The gang-membership BADGE (renderMemb) is the single rank/standing
-    // surface, so the old 🏷 chip is gone — this chip only carries crew / respect /
-    // bank now, and self-hides (empty string) when none of those exist.
-    crewEl.innerHTML =
-      (crew ? "<span style='color:#ffd451'>👥 " + crew + "</span>   " : "") +
-      (resp ? "<span style='color:#c9a0ff'>★ " + Math.round(resp) + "</span>   " : "") +
-      (bank ? "<span style='color:#7ed957'>🏦 $" + bank.toLocaleString() + "</span>" : "");
-    // DRIP — your visible status, the club's velvet-rope gate. Reads the EQUIPPED
-    // outfit via CBZ.cityPlayerDrip (economy.js, guarded); equipping clothes fires
-    // cityHudDirty() so this re-runs the moment a fit changes. Tints by how it sits
-    // against the bouncer's thresholds so the number TEACHES the player to dress up:
-    //   grey  = under CLUB_DRIP (turned away)   green = clears the rope   gold = VIP.
-    if (dripEl) {
-      if (CBZ.cityPlayerDrip) {
-        const drip = CBZ.cityPlayerDrip() | 0;
-        const club = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30, vip = (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70;
-        const col = drip >= vip ? "#ffd451" : drip >= club ? "#7ed957" : "#9fb0c6";
-        const tag = drip >= vip ? "  <span style='color:#ffd451'>VIP</span>" : drip >= club ? "  <span style='color:#7ed957'>✓</span>" : "";
-        dripEl.style.color = col;
-        dripEl.innerHTML = "✨ DRIP " + drip + tag;
-        dripEl.style.display = "block";
-      } else {
-        dripEl.style.display = "none";
-      }
-    }
+    // crew headcount only, labeled (F1/F2): respect + bank read on the phone /
+    // leaderboard and DRIP reads at the boutique mirror + the club rope — the
+    // always-on duplicates here were stat wallpaper, and a second ★ two inches
+    // from the wanted meter read as heat.
+    const crew = g.cityCrew || 0;
+    crewEl.textContent = crew ? "crew " + crew : "";
     if (worldEl) worldEl.textContent = CBZ.cityWorldSummary ? CBZ.cityWorldSummary() : "";
     // WEAPON HOTBAR + carried loot — reads the engine's authoritative weapon state
     // (CBZ.weaponInventory / currentWeaponId / CBZ.fps ammo) so the city loadout is
@@ -951,7 +984,7 @@
       let dist = "";
       if (j.dest) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.dest.x, CBZ.player.pos.z - j.dest.z)) + "m";
       else if ((j.type === "hit" || j.type === "hitman") && j.target && !j.target.dead) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.target.pos.x, CBZ.player.pos.z - j.target.pos.z)) + "m";
-      jobEl.innerHTML = "🎯 " + j.desc + " <span style='color:#7ed957'>($" + j.reward + ")</span>" + (dist ? "<span style='color:#9fb0c6'>" + dist + "</span>" : "");
+      jobEl.innerHTML = "🎯 " + j.desc + " <span style='color:var(--money,#7ed957)'>($" + j.reward + ")</span>" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist + "</span>" : "");
       jobEl.style.display = "block";
       if (objEl) objEl.style.display = "none";   // a real job pre-empts the gang-join objective
     } else {
@@ -988,7 +1021,7 @@
         const mph = Math.round(Math.abs(car.v || 0) * 3);   // world units/s → rough mph (top coupe ~50u/s ≈ 150)
         speedEl.style.display = "block";
         const sn = speedEl.querySelector("#cSpeedN");
-        if (sn) { sn.textContent = mph; sn.style.color = mph > 100 ? "#ff9e6b" : "#e8eef7"; }
+        if (sn) { sn.textContent = mph; sn.style.color = mph > 100 ? "#ff9e6b" : "#e8ecf2"; }
       } else speedEl.style.display = "none";
     }
     // population headcount + kill feed (throttled — they change steadily, not
@@ -1057,8 +1090,10 @@
   function showDispatch(star) {
     const d = DISPATCH[Math.max(1, Math.min(5, star))]; if (!d) return;
     const e = dispatchBanner();
-    e.innerHTML = "<div style='font-size:13px;font-weight:700;letter-spacing:3px;color:" + d.c + "'>📻 " + d.t + " — " + star + "★</div>" +
-      "<div style='font-size:16px;font-weight:600;color:#f2f6ff;margin-top:2px'>" + d.m + "</div>";
+    // the wanted meter owns the star count — repeating "3★" here doubled the
+    // readout (M12); the call sign + message carry the escalation.
+    e.innerHTML = "<div style='font-size:13px;font-weight:700;letter-spacing:3px;color:" + d.c + "'>📻 " + d.t + "</div>" +
+      "<div style='font-size:16px;font-weight:600;color:#e8ecf2;margin-top:2px'>" + d.m + "</div>";
     e.style.opacity = "1"; e.style.transform = "translate(-50%,0)";
     dispT = 3.4;
     if (CBZ.sfx) CBZ.sfx(star >= 4 ? "alarm" : "radio");

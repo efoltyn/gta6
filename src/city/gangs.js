@@ -12,7 +12,8 @@
    ambient war director sends bounded raid squads into a rival's block.
 
    Exposes: CBZ.cityGangs, spawnCityGangs, cityGangOf(x,z),
-   cityGangProvoke/Provoked, cityGangMemberDown, cityRobStash, reset.
+   cityGangProvoke/Provoked, cityGangMemberDown, cityRobStash, reset,
+   cityGangShapeUp (sizeup.js: a rallied set takes fighting SHAPE now).
 ============================================================ */
 (function () {
   "use strict";
@@ -545,6 +546,13 @@
     const cost = count * 32;
     if (!opts.free && (a.treasury || 0) < cost * 0.5) return 0;
     a.treasury = Math.max(0, (a.treasury || 0) - cost);
+    // the push AXIS: our block -> theirs. The squad arrives as a FRONT facing the
+    // defenders down that street (shooters arced off the lot, melee straight in)
+    // instead of a single converging dot that scrums on the stash.
+    let axx = targetLot.cx - a.center.x, axz = targetLot.cz - a.center.z;
+    const axl = Math.hypot(axx, axz) || 1; axx /= axl; axz /= axl;
+    const tnx = -axz, tnz = axx;
+    let lane = 0, callLead = null;
     for (const m of a.members) {
       if (sent >= count) break;
       if (m.dead || m.rage || m.inCar || m.raidT > 0) continue;
@@ -557,13 +565,40 @@
         if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(m);
       }
       m.homeGuard = m.homeGuard || m.guard;
-      m.guard = { x: targetLot.cx, z: targetLot.cz };
-      m.target.set(targetLot.cx + (rng() - 0.5) * 5, 0, targetLot.cz + (rng() - 0.5) * 5);
+      // (1) ROLES AT FORMATION — who you are in the squad is what you carry.
+      // The guard point IS the role: peds.js holds a gangster near his guard
+      // and rages him at rivals around it, so an arc of guard points becomes
+      // a real firing line with zero per-frame shepherding from this file.
+      const hasGun = !!(m.armed && (m.ammo == null || m.ammo > 0));
+      let gx, gz;
+      if (hasGun) {
+        // shooters fan to a LOOSE FIRING ARC 8-14u off the lot, spread sideways
+        // along the front so the raid reads as a line, not a pile
+        const back = 8 + rng() * 6, side = ((lane % 5) - 2) * 3.1 + (rng() - 0.5) * 1.4; lane++;
+        gx = targetLot.cx - axx * back + tnx * side; gz = targetLot.cz - axz * back + tnz * side;
+        m._wRole = "arc";
+      } else {
+        // melee presses straight in (the war-shape pass pairs them on a mark)
+        gx = targetLot.cx + (rng() - 0.5) * 4; gz = targetLot.cz + (rng() - 0.5) * 4;
+        m._wRole = "press";
+      }
+      m._wT = 20 + rng() * 6; m._wHadGun = hasGun;
+      m.guard = { x: gx, z: gz };
+      m.target.set(gx, 0, gz);
       m.pause = 0; m.path = null; m.raidT = 22 + rng() * 14; m.raidGang = b.id;
       m.raidLot = targetLot;
+      if (!callLead || rankTier(m) > rankTier(callLead)) callLead = m;
       sent++;
     }
     if (sent) {
+      // the highest rank on the push CALLS it — a bark, then he holds the
+      // centre-back of his own arc instead of leading the charge.
+      if (callLead) {
+        callLead._wRole = "call";
+        const cbx = targetLot.cx - axx * 17, cbz = targetLot.cz - axz * 17;
+        callLead.guard = { x: cbx, z: cbz }; callLead.target.set(cbx, 0, cbz);
+        wbark(a, callLead, BARK_CALL);
+      }
       a.warWith = b.id; b.warWith = a.id;
       a.warRemain = b.warRemain = 26 + rng() * 14;
       a.warIntensity = Math.min(3, (a.warIntensity || 0) + 1);
@@ -614,7 +649,7 @@
     }
     // re-home any winner members who raided here so they hold the new ground
     for (const m of winner.members) {
-      if (m.raidLot === lot && !m.dead) { m.homeGuard = { x: lot.cx, z: lot.cz }; m.guard = { x: lot.cx, z: lot.cz }; m.raidT = 0; m.raidGang = null; m.raidLot = null; }
+      if (m.raidLot === lot && !m.dead) { m.homeGuard = { x: lot.cx, z: lot.cz }; m.guard = { x: lot.cx, z: lot.cz }; m.raidT = 0; m.raidGang = null; m.raidLot = null; clearWarRole(m); }
     }
     recenter(winner); recenter(loser);
     loser.lostTurfT = 8;
@@ -937,6 +972,273 @@
     return sent;
   }
 
+  // ============================================================
+  //  WAR SHAPE — crews fight with ROLES, not as a blob. WHY: a war you can
+  //  READ is a war you can beat — someone presses, someone hangs back on a
+  //  firing line, the hurt fall back, a leader calls the push. Everything here
+  //  drives ONLY fields peds.js already honors (guard/rage/state/target):
+  //  the guard point is the brain's own anchor (it loiters a gangster there
+  //  and rages him at rivals around it), so an arc of guard points becomes a
+  //  front line with no per-frame shepherding. Cadenced at ~0.7s over the
+  //  gang rosters (a few hundred cheap reads), never per-frame-per-actor.
+  //  All fields are transient (_wRole/_wT/_wHadGun) and the existing
+  //  raidT/homeGuard return infra restores every post we move.
+  // ============================================================
+  let shapeT = 0;
+  const BARK_CALL = ["Spread out — keep 'em boxed in!", "Push! Hold this line!", "On me — don't bunch up!", "Squeeze 'em from both sides!"];
+  const BARK_DRY = ["I'm dry!", "I'm out — cover me!", "Gun's empty!"];
+  const BARK_HIT = ["I'm hit — pulling back!", "I'm bleeding, I'm out!", "Can't stay up — falling back!"];
+  const BARK_BAG = ["Grab the iron before the law shows.", "Pick that piece up — it's ours now.", "Sweep the street, take it all."];
+  function violentBar() { const ag = (CBZ.CITY && CBZ.CITY.aggro) || {}; return ag.violent || 0.88; }
+
+  // a short, human line over a fighter's head — per-gang throttled, and only
+  // when the player can actually see/hear it (nobody pays for off-screen theatre)
+  function wbark(gang, m, lines) {
+    if (!m || m.dead || !CBZ.citySay) return;
+    if (gang && gang._barkT > 0) return;
+    if (!nearPlayer(m.pos.x, m.pos.z, 70)) return;
+    if (gang) gang._barkT = 4 + rng() * 3;
+    CBZ.citySay(m, "“" + lines[(rng() * lines.length) | 0] + "”", m.tagColor || "#ffb37b", 2.2);
+  }
+
+  function clearWarRole(m) { m._wRole = null; m._wT = 0; m._wHadGun = false; }
+  function saveHome(m) { if (!m.homeGuard && m.guard) m.homeGuard = { x: m.guard.x, z: m.guard.z }; }
+
+  // put a fighter on a point via the brain's own anchor (guard) + a first step
+  // (target). breakRage is a ONE-TIME release so they route to the slot — we
+  // never clear rage twice for the same role, so there's no tug-of-war with
+  // the brain re-engaging them (that's the brain's call from here on).
+  function assignPoint(m, role, x, z, breakRage) {
+    const A = CBZ.city && CBZ.city.arena;
+    if (A && A.clampToCity) { const p = { x, z }; A.clampToCity(p, 1.5); x = p.x; z = p.z; }
+    m._wRole = role; m._wT = 16 + rng() * 6;
+    saveHome(m);
+    m.guard = { x, z };
+    if (!(m.raidT > 0)) m.raidT = 14 + rng() * 8;   // the existing return walks them home after
+    if (breakRage) {
+      m.rage = null; m.state = "walk"; m.path = null; m.pause = 0;
+      if (m.target) m.target.set(x, 0, z);
+    }
+  }
+
+  // (2)+(3) the hurt and the dry disengage BACKWARD — behind their own arc,
+  // still facing the scene — instead of evaporating in a random sprint.
+  function fallBack(m, E, dist) {
+    let bx = m.pos.x - E.x, bz = m.pos.z - E.z; const bl = Math.hypot(bx, bz) || 1; bx /= bl; bz /= bl;
+    let px = m.pos.x + bx * dist, pz = m.pos.z + bz * dist;
+    const A = CBZ.city && CBZ.city.arena;
+    if (A && A.clampToCity) { const p = { x: px, z: pz }; A.clampToCity(p, 1.5); px = p.x; pz = p.z; }
+    m._wRole = "back"; m._wT = 12;
+    saveHome(m);
+    m.guard = { x: px, z: pz };
+    if (!(m.raidT > 0)) m.raidT = 10 + rng() * 6;
+    m.rage = null; m.state = "flee"; m.path = null; m.pause = 0;
+    if (m.target) m.target.set(px, 0, pz);
+    m.fear = Math.max(m.fear || 0, 5); m.alarmed = Math.max(m.alarmed || 0, 4);
+    // one last look at the threat as they peel off (flee owns the legs after)
+    if (m.group) m.group.rotation.y = Math.atan2(E.x - m.pos.x, E.z - m.pos.z);
+  }
+
+  // nearest live member of the engaged ENEMY gang (or the player) near a fighter
+  function engageFoe(eng, m) {
+    if (!eng.foe) return null;        // no known enemy side → never pick on randoms
+    if (eng.foe === "player") {
+      const P = CBZ.player, PA = playerActor();
+      if (P && !P.dead && PA) {
+        const dx = P.pos.x - m.pos.x, dz = P.pos.z - m.pos.z;
+        if (dx * dx + dz * dz < 14 * 14) return PA;
+      }
+      return null;
+    }
+    let best = null, bd = 14 * 14;
+    for (const p of CBZ.cityPeds) {
+      if (!p || p.dead || p.ko > 0 || p.gang !== eng.foe) continue;
+      const dx = p.pos.x - m.pos.x, dz = p.pos.z - m.pos.z, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = p; }
+    }
+    return best;
+  }
+
+  // (1)+(4) assign roles to a live squad: shooters fan to a firing arc spread
+  // PERPENDICULAR to the squad→enemy axis — when two squads shape against each
+  // other their arcs become OPPOSING LINES down the street (the axis between
+  // the two centroids), not a scrum. Melee presses in pairs; top rank calls it.
+  function shapeSquad(gang, eng, fighters, E, S) {
+    let ax = E.x - S.x, az = E.z - S.z; const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+    const tx = -az, tz = ax;
+    // the highest rank present CALLS the push, then holds centre-back
+    let lead = null;
+    for (const m of fighters) if (!lead || rankTier(m) > rankTier(lead)) lead = m;
+    if (lead && !eng.called) {
+      if (lead._wRole === "call") eng.called = true;     // pre-assigned by launchWar
+      else if (!lead._wRole && !lead.hunting && fighters.length >= 3) {
+        eng.called = true;
+        assignPoint(lead, "call", E.x - ax * 17 + tx * (rng() - 0.5) * 3, E.z - az * 17 + tz * (rng() - 0.5) * 3, true);
+        wbark(gang, lead, BARK_CALL);
+      }
+    }
+    for (const m of fighters) {
+      if (m._wRole || m === lead) continue;     // already has a job in this fight
+      if (m.hunting) continue;                  // reprisal hunters keep raw pursuit
+      m._wHadGun = !!(m.armed && (m.ammo == null || m.ammo > 0));
+      if (m._wHadGun) {
+        // SHOOTERS: a loose arc 8-14u off the enemy, laned along the front.
+        // Only break their charge while they're still far out; in the pocket
+        // we just anchor the slot and let the brain own the gunfight.
+        const back = 8 + rng() * 6;
+        const side = ((eng.lane % 5) - 2) * 3.1 + (rng() - 0.5) * 1.4; eng.lane++;
+        const far = Math.hypot(m.pos.x - E.x, m.pos.z - E.z) > 10;
+        assignPoint(m, "arc", E.x - ax * back + tx * side, E.z - az * back + tz * side, far);
+      } else {
+        // MELEE: press in PAIRS — two bodies share one mark, straight in
+        m._wRole = "press"; m._wT = 16 + rng() * 6;
+        saveHome(m);
+        m.guard = { x: E.x + (rng() - 0.5) * 4, z: E.z + (rng() - 0.5) * 4 };
+        if (!(m.raidT > 0)) m.raidT = 14 + rng() * 8;
+        if (eng.pairOpen && eng.mark && !eng.mark.dead) { m.rage = eng.mark; m.state = "fight"; eng.pairOpen = false; }
+        else if (m.rage && !m.rage.dead) { eng.mark = m.rage; eng.pairOpen = true; }
+      }
+    }
+  }
+
+  // per-fighter upkeep each pass: the dry transition, the wounded fallback,
+  // arc shooters opening up, the aftermath bagger staying on his pick-up.
+  function tendFighter(gang, eng, m, E) {
+    if (m.surrender || m.state === "surrender") { clearWarRole(m); return; }
+    // re-armed (looted a piece off the street) → back on the ammo watch
+    if (!m._wHadGun && m.armed && (m.ammo | 0) > 0) m._wHadGun = true;
+    // (3) AMMO DISCIPLINE: peds.js already strips an empty gun (npcAttack);
+    // here the MAN reacts — bark, then steel if he's violent, or the arc rear.
+    if (m._wHadGun && (!m.armed || (m.ammo | 0) <= 0)) {
+      m._wHadGun = false;
+      wbark(gang, m, BARK_DRY);
+      if ((m.aggr || 0) >= violentBar()) {
+        // the violent draw steel and keep pressing (the brain melees them in)
+        if (!m.weapon) { m.weapon = gangType(gang).melee || "Bat"; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(m); }
+        m._wRole = "press"; m._wT = Math.max(m._wT || 0, 10);
+      } else fallBack(m, E, 8);   // the brain's own loot-a-drop instinct can re-arm them back there
+      return;
+    }
+    // (2) WOUNDED FALL BACK: under 35% and not a maniac → backward, facing it
+    if (m._wRole !== "back" && m._wRole !== "bag" && m.hp < (m.maxHp || 100) * 0.35 && (m.aggr || 0) < violentBar()) {
+      fallBack(m, E, 9);
+      wbark(gang, m, BARK_HIT);
+      return;
+    }
+    // an arc shooter holding his slot opens up when an enemy is in reach —
+    // from here the brain owns the duel (armed peds hold + shoot at 9u).
+    if (m._wRole === "arc" && !m.rage) {
+      const foe = engageFoe(eng, m);
+      if (foe && !foe.dead) { m.rage = foe; m.state = "fight"; }
+    }
+    // (5) aftermath gun-bagger: think() demotes "loot" on calm passes — keep
+    // him on the job until the piece is in hand or the street is clean.
+    if (m._wRole === "bag") {
+      let best = null, bd = 24 * 24;
+      for (const d of CBZ.cityDrops || []) {
+        const dx = d.x - m.pos.x, dz = d.z - m.pos.z, dd = dx * dx + dz * dz;
+        if (dd < bd) { bd = dd; best = d; }
+      }
+      if (!best || m.armed) { clearWarRole(m); return; }   // got one / nothing left
+      m.state = "loot"; m.pause = 0;
+      if (m.target) m.target.set(best.x, 0, best.z);
+    }
+  }
+
+  // one cadenced pass for one crew: find its live fighters, shape new ones,
+  // tend the rest. Roster-bounded; engagement state lives on gang._eng.
+  function shapeGangPass(gang, step) {
+    let fighters = null, ex = 0, ez = 0, en = 0, sx = 0, sz = 0, foeKey = null, raidLot = null;
+    for (const m of gang.members) {
+      if (!m || m.dead) { if (m && m._wRole) clearWarRole(m); continue; }
+      if (m.ko > 0 || m.inCar || m.companion || m.controlled) { if (m._wRole) clearWarRole(m); continue; }
+      if (m._wT > 0) m._wT -= step;
+      const R = m.rage;
+      const raging = !!(R && !R.dead && (!R.gang || R.gang !== gang.id));
+      if (!raging && !(m._wRole && m._wT > 0)) { if (m._wRole) clearWarRole(m); continue; }
+      (fighters || (fighters = [])).push(m);
+      sx += m.pos.x; sz += m.pos.z;
+      if (!foeKey && m.raidGang) foeKey = m.raidGang;    // raiders know their mark en route
+      if (!raidLot && m.raidLot) raidLot = m.raidLot;
+      if (raging) {
+        ex += R.pos.x; ez += R.pos.z; en++;
+        const fk = R.isPlayer ? "player" : (R.gang || "street");
+        if (!foeKey || fk === "player") foeKey = fk;   // stable: player headline, else first-seen
+      }
+    }
+    if (!fighters) { gang._eng = null; return; }
+    const n = fighters.length;
+    const S = { x: sx / n, z: sz / n };
+    // enemy locus: live rage marks, else the contested lot, else last-known, else home
+    let E = en ? { x: ex / en, z: ez / en }
+      : raidLot ? { x: raidLot.cx, z: raidLot.cz }
+      : (gang._eng && gang._eng.E) || S;
+    if (!gang._eng || (foeKey && gang._eng.foe !== foeKey)) {
+      gang._eng = { foe: foeKey, lane: 0, called: false, pairOpen: false, mark: null, E };
+    }
+    const eng = gang._eng; eng.E = E;
+    // only a real squad fight (3+ committed, vs a gang or the player) earns
+    // SHAPE; lone scuffles and brawls with randoms stay raw.
+    const shapeable = en >= 1 && n >= 3 && (foeKey === "player" || !!gangById(foeKey));
+    if (shapeable) shapeSquad(gang, eng, fighters, E, S);
+    for (const m of fighters) tendFighter(gang, eng, m, E);
+  }
+
+  function shapeAllGangs(step) {
+    for (const gang of CBZ.cityGangs) {
+      if (gang._barkT > 0) gang._barkT -= step;
+      if (gang.isPlayer || gang.absorbed) continue;
+      shapeGangPass(gang, step);
+    }
+  }
+
+  // sizeup.js calls this the instant a set RALLIES, so the crew takes shape NOW
+  // instead of on the next cadence tick (which would still catch it in ~0.7s).
+  CBZ.cityGangShapeUp = function (gangId) {
+    const gang = gangById(gangId);
+    if (gang && !gang.isPlayer && !gang.absorbed && g.mode === "city") shapeGangPass(gang, 0);
+  };
+
+  // (5) WAR AFTERMATH — the war timer runs out and the street SHOWS it:
+  // survivors regroup to their block (the existing raidT return walks them),
+  // the badly hurt sink down for a beat before limping off, and one body
+  // sweeps the dropped guns. Bounded, cosmetic, cleared by the same timers
+  // that already govern raids.
+  function warAftermath(gang) {
+    if (!gang || gang.isPlayer) return;
+    let bagger = null;
+    for (const m of gang.members) {
+      if (!m || m.dead || m.inCar || m.companion || m.controlled) continue;
+      const fought = m.raidT > 0 || m._wRole || m.hunting;
+      if (!fought) continue;
+      clearWarRole(m);
+      m.rage = null;
+      if (m.raidT > 0) m.raidT = Math.min(m.raidT, 2 + rng() * 3);   // head home soon
+      if (m.hp < (m.maxHp || 100) * 0.5 && !(m.ko > 0)) {
+        // the wounded drop to the ground and catch their breath (ko-style pause)
+        m.ko = 2 + rng() * 2.5;
+        if (CBZ.body && CBZ.body.hit) CBZ.body.hit(m, { fromX: m.pos.x + 0.6, fromZ: m.pos.z, force: 2.5, knockdown: true });
+      } else if (!bagger || rankTier(m) < rankTier(bagger)) bagger = m;   // lowest rank sweeps
+    }
+    // one survivor bags the iron lying in the street (drops age out on their own)
+    if (bagger && CBZ.cityDrops && CBZ.cityDrops.length) {
+      let best = null, bd = 30 * 30;
+      for (const d of CBZ.cityDrops) {
+        const dx = d.x - bagger.pos.x, dz = d.z - bagger.pos.z, dd = dx * dx + dz * dz;
+        if (dd < bd) { bd = dd; best = d; }
+      }
+      if (best) {
+        bagger._wRole = "bag"; bagger._wT = 9;
+        saveHome(bagger);
+        bagger.guard = { x: best.x, z: best.z };
+        bagger.raidT = Math.max(bagger.raidT || 0, 8);   // then back to the block
+        bagger.state = "loot"; bagger.path = null; bagger.pause = 0; bagger.attackCD = 0;
+        if (bagger.target) bagger.target.set(best.x, 0, best.z);
+        wbark(gang, bagger, BARK_BAG);
+      }
+    }
+  }
+
   // expose a lookup so the player-gang hub can find a rival by id/record
   CBZ.cityGangById = gangById;
 
@@ -1017,7 +1319,7 @@
     }
     // drop any HIT/HQ waypoint we dropped on the full map so it doesn't bleed runs.
     if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
-    CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0;
+    CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0; shapeT = 0;
     if (CBZ.cityTurfReset) CBZ.cityTurfReset();   // clear the zone/alliance meta for a fresh run
     // clear any in-flight drive-by cars
     for (let i = drivebys.length - 1; i >= 0; i--) despawnDriveby(drivebys[i], i);
@@ -1063,7 +1365,9 @@
       if (gang.strikeT > 0) gang.strikeT -= dt;
       if (gang.warRemain > 0) {
         gang.warRemain -= dt;
-        if (gang.warRemain <= 0) { gang.warWith = null; gang._raidTarget = null; }
+        // war's over → the AFTERMATH plays out: regroup, the hurt kneel, one
+        // body bags the dropped iron (both sides run their own, on their own timer)
+        if (gang.warRemain <= 0) { gang.warWith = null; gang._raidTarget = null; warAftermath(gang); }
       }
       for (const m of gang.members) {
         if (!(m.raidT > 0)) continue;
@@ -1071,9 +1375,14 @@
         if (m.raidT <= 0 && m.homeGuard && !m.dead) {
           m.guard = { x: m.homeGuard.x, z: m.homeGuard.z };
           m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null; m.raidGang = null; m.raidLot = null; m.hunting = false;
+          if (m._wRole !== "bag") clearWarRole(m);   // a mid-sweep bagger finishes; tend clears him
         }
       }
     }
+
+    // ---- WAR SHAPE: give live fights roles + front lines (cadenced pass) ----
+    shapeT -= dt;
+    if (shapeT <= 0) { shapeT = 0.7; shapeAllGangs(0.7); }
 
     // ---- TERRITORY INCOME (GTA SA: every held block prints money) ----
     // NPC crews bank a TREASURY that funds wars; the player's gang gets a real
@@ -1178,7 +1487,8 @@
       const lot = a._raidTarget, b = gangById(a.warWith);
       if (!b || b.isPlayer) { a._raidTarget = null; continue; }
       if (b.turf.indexOf(lot) < 0) { a._raidTarget = null; continue; }
-      const atk = liveOnLot(a, lot, 11), def = liveOnLot(b, lot, 13);
+      // attackers count from arc range (the firing line stands 8-14u off the lot)
+      const atk = liveOnLot(a, lot, 15), def = liveOnLot(b, lot, 13);
       if (atk >= 2 && def === 0) {
         captureLot(a, b, lot);
         a._raidTarget = null;

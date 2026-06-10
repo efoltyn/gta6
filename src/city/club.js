@@ -287,7 +287,7 @@
     if (!S.everIn) {
       S.everIn = true;
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(vip ? 12 : 6);
-      note("+" + (vip ? 12 : 6) + " respect — you're somebody now.", 1.8);
+      note("You're somebody now.", 1.8);
     }
     S.admitted_vip = vip;
     S.bottleCD = 6;
@@ -296,8 +296,7 @@
   function rejectPlayer(drip, need) {
     S.rejectCD = 3.2;
     big("🚫 NOT TONIGHT");
-    note('Bouncer: "Not in those rags. Come back when you\'re dressed." (drip ' +
-      Math.round(drip) + " / need " + need + " — go buy some CLOTHES)", 3.2);
+    note('"Not in those rags." Come back sharper.', 3.2);
   }
 
   function setAdmitted(v) {

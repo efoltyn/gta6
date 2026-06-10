@@ -366,9 +366,9 @@
     }
     g.cityOwnsJet = true;
     placeJet();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 F-22 RAPTOR ACQUIRED");
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 THE RAPTOR IS YOURS");
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(40);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Your F-22 is on the deck. Stand near it and press [F] to fly.", 3.0);
+    // (no second toast — the big + the jet sitting on your deck carry it)
     return true;
   }
   CBZ.cityBuyJet = tryBuyJet;

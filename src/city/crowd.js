@@ -38,6 +38,14 @@
    victim. All of it rides the EXISTING suppress/reseed machinery
    (teleports far from the camera, a few per tick) — no meshes are ever
    created or destroyed, and dawn reverses the whole thing.
+
+   EVERYTHING TOUCHES THE GROUND: the mass crowd never cast real sun
+   shadows (castShadow=false — 320 casters would double the shadow
+   pass), so the bodies visually FLOATED. One more InstancedMesh of
+   ground-flattened radial-gradient blob quads (shared texture/material
+   with city/blobshadows.js via CBZ.blobShadowMat) rides the exact same
+   per-agent matrix loop: every walker is glued to the pavement, corpses
+   get a long smear, and the whole layer is ONE extra draw call.
 ============================================================ */
 (function () {
   "use strict";
@@ -112,7 +120,41 @@
   // full body + FACE so the city crowd reads as PEOPLE, not short faceless boxes —
   // same parts + proportions as the jail mass-crowd (entities/crowd.js).
   let torso, hd, hair, armL, armR, legL, legR, eyeL, eyeR, mouth, meshes = null;
+  // EVERYTHING TOUCHES THE GROUND: one extra InstancedMesh of ground-flattened
+  // blob quads — every walker drops a soft contact shadow, ALL ~320 of them in
+  // ONE draw call. The crowd never casts real sun shadows (castShadow=false on
+  // every part below), so this blob IS what glues the mass to the pavement.
+  let shadowQ = null;
   const rootD = new THREE.Object3D(), partD = new THREE.Object3D(), col = new THREE.Color();
+  const shadD = new THREE.Object3D();    // shadow-quad matrix compose scratch (zero per-frame alloc)
+
+  // ---- ONE shared blob-shadow texture/material for the whole city ----
+  // (city/blobshadows.js draws the full-rig ped/car blobs with the SAME
+  // material — defined guarded in both files so script order doesn't matter;
+  // first caller builds it, everyone else reuses CBZ._blobShadowMat.)
+  CBZ.blobShadowMat = CBZ.blobShadowMat || function () {
+    if (CBZ._blobShadowMat !== undefined) return CBZ._blobShadowMat;
+    let tex = null;
+    if (typeof document !== "undefined" && document.createElement && THREE.CanvasTexture) {
+      const c = document.createElement("canvas"); c.width = c.height = 64;
+      const ctx = c.getContext && c.getContext("2d");
+      if (ctx) {
+        const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 31);
+        grad.addColorStop(0, "rgba(0,0,0,0.55)");
+        grad.addColorStop(0.6, "rgba(0,0,0,0.34)");
+        grad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, 64, 64);
+        tex = new THREE.CanvasTexture(c);
+      }
+    }
+    // headless / no-DOM: no texture → no material (callers guard on null)
+    if (!tex || !THREE.MeshBasicMaterial) return (CBZ._blobShadowMat = null);
+    CBZ._blobShadowMat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, depthWrite: false,            // never occludes, never z-buffers
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,   // floats clear of the road plane
+    });
+    return CBZ._blobShadowMat;
+  };
 
   // ---- ON-DEMAND PROMOTION (same idea as the jail mass-crowd face-rigs) ----
   // The nearest ambient agents become REAL, fully interactive city peds (added
@@ -182,6 +224,19 @@
     legL = part(pants, unitP); legR = part(pants, unitP);
     eyeL = part(dark, unitP); eyeR = part(dark, unitP); mouth = part(dark, unitP);
     meshes = [torso, hd, hair, armL, armR, legL, legR, eyeL, eyeR, mouth];
+    // the ground-contact blob layer: one more instanced draw for the whole mass
+    const smat = CBZ.blobShadowMat ? CBZ.blobShadowMat() : null;
+    if (smat && THREE.PlaneGeometry) {
+      shadowQ = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), smat, CAP);
+      shadowQ.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      shadowQ.castShadow = false; shadowQ.receiveShadow = false; shadowQ.frustumCulled = false;
+      // park ALL slots off-map up front: instances ≥ count would otherwise sit
+      // as identity matrices — visible dark quads stacked at the origin.
+      wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
+      for (let i = 0; i < CAP; i++) shadowQ.setMatrixAt(i, wm);
+      shadowQ.instanceMatrix.needsUpdate = true;
+      root.add(shadowQ);
+    }
     ready = true;
   }
 
@@ -380,6 +435,7 @@
       if (deadAgent[i] || suppressed[i] || promotedBy[i] >= 0) {  // faded corpse, thinned off-street, or promoted to a real rig → collapse the instanced body
         wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
         for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
+        if (shadowQ) shadowQ.setMatrixAt(i, wm);   // blob collapses with the body
         continue;
       }
       if (corpseT[i] > 0) {                            // freshly killed → lie flat ON the ground
@@ -394,15 +450,32 @@
         rootD.scale.set(1, 1, 1);
         rootD.updateMatrix();
         drawParts(i, 0, 0);
+        if (shadowQ) {                               // the dead still touch the ground:
+          shadD.position.set(px[i], fy - 0.38, pz[i]);   // floor + 0.04 (fy carries the 0.42 lying lift)
+          shadD.rotation.set(-Math.PI / 2, 0, heading[i]);   // long smear aligned under the lying body
+          shadD.scale.set(1.5, 2.3, 1);
+          shadD.updateMatrix();
+          shadowQ.setMatrixAt(i, shadD.matrix);
+        }
         continue;
       }
       rootD.position.set(px[i], 0, pz[i]);
       rootD.rotation.set(0, heading[i], 0);
       rootD.scale.set(1, 1, 1);
       rootD.updateMatrix();
-      drawParts(i, Math.sin(phase[i]) * 0.5, Math.abs(Math.cos(phase[i])) * 0.05);
+      const sn = Math.sin(phase[i]);
+      drawParts(i, sn * 0.5, Math.abs(Math.cos(phase[i])) * 0.05);
+      if (shadowQ) {
+        shadD.position.set(px[i], 0.04, pz[i]);      // a hair above the pavement (+ polygonOffset)
+        shadD.rotation.set(-Math.PI / 2, 0, 0);
+        const ss = 1.18 + Math.abs(sn) * 0.22;       // stride spreads the contact patch — reads as WALK
+        shadD.scale.set(ss, ss * 0.94, 1);
+        shadD.updateMatrix();
+        shadowQ.setMatrixAt(i, shadD.matrix);
+      }
     }
     for (let m = 0; m < meshes.length; m++) meshes[m].instanceMatrix.needsUpdate = true;
+    if (shadowQ) shadowQ.instanceMatrix.needsUpdate = true;
   }
 
   // ---- promotion pool: real makeCharacter peds reused as you move ----

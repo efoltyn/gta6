@@ -17,6 +17,17 @@
    connected island district, shops, props and traffic lights are added
    by sibling modules through the hooks at the end of buildCity().
 
+   WHY the coast + ground identity (this pass): the map edge used to be
+   raw void — now ONE huge day/night-tinted sea plane sits under city +
+   island so every edge reads as coastline, the bridge gap reads as a
+   working harbor (sand, rip-rap, moored hulls), and the GROUND tells
+   you where the money is without a map: grass yards (the island's own
+   checker) in residential/projects, poured plazas downtown, stained
+   sidewalks + work-yard dirt in projects/industrial, double-yellow
+   arterials + painted turn arrows through the Midtown core, red fire
+   curbs at hydrants. Photo textures (assets/textures/*.jpg) layer into
+   the procedural canvases when present — procedural stays the fallback.
+
    CBZ.buildCity() builds once and returns the city descriptor.
 ============================================================ */
 (function () {
@@ -51,13 +62,56 @@
     const minZ = zLines[0] - ROAD / 2, maxZ = zLines[N] + ROAD / 2;
     const spanX = maxX - minX, spanZ = maxZ - minZ;
 
+    // PHOTO LAYER: when assets/textures/*.jpg exist, draw the photo into an
+    // existing procedural canvas texture, then let `after` re-tint it so the
+    // game palette survives the photo grain. Missing file / tainted canvas →
+    // the procedural pattern simply stays. Full fallback, no error path.
+    function photoLayer(tex, url, after) {
+      if (!tex || !tex.image || !tex.image.getContext) return;
+      const img = new Image();
+      img.onload = function () {
+        try {
+          const c = tex.image, g2 = c.getContext("2d");
+          g2.drawImage(img, 0, 0, c.width, c.height);
+          if (after) after(g2, c);
+          tex.magFilter = THREE.LinearFilter;
+          tex.needsUpdate = true;
+        } catch (e) { /* keep the procedural fallback */ }
+      };
+      img.src = url;
+    }
+
     // ---- ground: asphalt base, then sidewalk + lot slabs on top ----
     const baseTex = CBZ.checkerTex ? CBZ.checkerTex("#2b2e33", "#26292e", 2) : null;   // dark asphalt base
     if (baseTex) baseTex.repeat.set(spanX / 8, spanZ / 8);
+    photoLayer(baseTex, "assets/textures/asphalt512.jpg", function (g2, c) {
+      // keep the near-black city base tone over the photo grain
+      g2.globalAlpha = 0.55; g2.fillStyle = "#26292e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
+    });
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 80, spanZ + 80),
       baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45));
     ground.rotation.x = -Math.PI / 2; ground.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
     ground.receiveShadow = true; root.add(ground);
+
+    // ---- THE SEA: one giant water plane under city + island, so every map
+    //      edge reads as COASTLINE instead of void (the perimeter wall becomes
+    //      a seawall; the east bridge crosses a real harbor). ONE Lambert
+    //      material with fog:true so the horizon melts into the daynight fog;
+    //      its colour is lerped per-frame from the daynight cycle — a single
+    //      material write, effectively free. It deliberately shares the island
+    //      ocean's exact colour/shadow flags (expansion.js) so the batch pass
+    //      folds both planes into one mesh still driven by THIS material. ----
+    const seaMat = new THREE.MeshLambertMaterial({ color: 0x2f6f9e, fog: true });
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), seaMat);
+    sea.rotation.x = -Math.PI / 2; sea.position.set(cx + 170, -0.5, cz);   // shifted east so the island sits well inside
+    sea.receiveShadow = false; root.add(sea);
+    const seaDay = new THREE.Color(0x2f6f9e), seaNight = new THREE.Color(0x0e2233), seaDusk = new THREE.Color(0x6b5a78);
+    CBZ.onAlways(93, function () {
+      if (!root.visible) return;                 // city hidden → other modes untouched
+      const k = CBZ.dayness != null ? CBZ.dayness : 1;
+      seaMat.color.copy(seaNight).lerp(seaDay, k);
+      if (CBZ.duskness) seaMat.color.lerp(seaDusk, CBZ.duskness * 0.5);
+    });
 
     // flat plane helper (decor, no collider)
     function plane(x, z, w, d, color, y, basic) {
@@ -68,27 +122,86 @@
       return m;
     }
 
+    // merged QUAD FIELD: many ground rects → ONE textured mesh. The batch
+    // pass (core/batch.js) deliberately skips textured materials, so any
+    // surface that wants a map must pre-merge here or pay a draw call per
+    // rect. UVs are world-scaled (~8 m per texture repeat) so one repeating
+    // texture fits every rect size.
+    function quadField(rects, material, y) {
+      const n = rects.length;
+      const pos = new Float32Array(n * 18), nrm = new Float32Array(n * 18), uvA = new Float32Array(n * 12);
+      let p = 0, u = 0;
+      for (const r of rects) {
+        const x0 = r.x - r.w / 2, x1 = r.x + r.w / 2, z0 = r.z - r.d / 2, z1 = r.z + r.d / 2;
+        const ux = r.w / 8, uz = r.d / 8;
+        const V = [[x0, z0, 0, uz], [x0, z1, 0, 0], [x1, z1, ux, 0], [x0, z0, 0, uz], [x1, z1, ux, 0], [x1, z0, ux, uz]];
+        for (const v of V) {
+          pos[p] = v[0]; pos[p + 1] = y; pos[p + 2] = v[1];
+          nrm[p] = 0; nrm[p + 1] = 1; nrm[p + 2] = 0; p += 3;
+          uvA[u] = v[2]; uvA[u + 1] = v[3]; u += 2;
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+      geo.setAttribute("uv", new THREE.BufferAttribute(uvA, 2));
+      const m = new THREE.Mesh(geo, material);
+      m.receiveShadow = true; m.matrixAutoUpdate = false; root.add(m);
+      return m;
+    }
+
     // ---- roads: one strip per grid line, full span ----
-    const roadColor = 0x282a30, lineColor = 0xf2c83a;   // black asphalt + yellow lane line
+    // Surface: ONE shared asphalt canvas (photo-layered when the jpg exists,
+    // flat #282a30 otherwise) across two merged quad-field meshes — 14 strips
+    // cost 2 draw calls instead of 14 unmergeable textured planes.
+    const roadCv = document.createElement("canvas"); roadCv.width = roadCv.height = 256;
+    const roadCg = roadCv.getContext("2d"); roadCg.fillStyle = "#282a30"; roadCg.fillRect(0, 0, 256, 256);
+    const roadTex = new THREE.CanvasTexture(roadCv);
+    roadTex.wrapS = roadTex.wrapT = THREE.RepeatWrapping;
+    photoLayer(roadTex, "assets/textures/asphalt512.jpg", function (g2, c) {
+      g2.globalAlpha = 0.42; g2.fillStyle = "#26282e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
+    });
+    const roadMat = new THREE.MeshLambertMaterial({ map: roadTex });
     const roads = [];     // {x,z,vertical,len} drivable centre-line segments
-    function laneDashes(x, z, vertical, len) {
+    // LANE PAINT: dashed WHITE on ordinary streets; the two avenues FRAMING
+    // the Midtown core (xLines[2] / xLines[4]) carry solid DOUBLE-YELLOW so
+    // the main drags read as arterials at a glance — you know you're downtown
+    // (where the money is) without opening the map. Shared geometry+materials.
+    const dashMat = new THREE.MeshBasicMaterial({ color: 0xeef1f5 });
+    const dblYellowMat = new THREE.MeshBasicMaterial({ color: 0xf2c83a });
+    const dashGeoV = new THREE.PlaneGeometry(0.28, 2.6), dashGeoH = new THREE.PlaneGeometry(2.6, 0.28);
+    function laneDashes(x, z, vertical, len, core) {
+      if (core) {       // solid double-yellow centreline, full length
+        for (let s = -1; s <= 1; s += 2) {
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? 0.18 : len, vertical ? len : 0.18), dblYellowMat);
+          m.rotation.x = -Math.PI / 2;
+          m.position.set(vertical ? x + s * 0.26 : x, 0.06, vertical ? z : z + s * 0.26);
+          root.add(m);
+        }
+        return;
+      }
       const n = Math.max(1, Math.floor(len / 7));
       for (let i = 0; i < n; i++) {
         const t = -len / 2 + (i + 0.5) * (len / n);
-        const lx = vertical ? x : x + t, lz = vertical ? z + t : z;
-        plane(lx, lz, vertical ? 0.28 : 2.6, vertical ? 2.6 : 0.28, lineColor, 0.06, true);
+        const m = new THREE.Mesh(vertical ? dashGeoV : dashGeoH, dashMat);
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(vertical ? x : x + t, 0.06, vertical ? z + t : z);
+        root.add(m);
       }
     }
-    xLines.forEach((x) => {                 // avenues (run along z)
-      plane(x, (minZ + maxZ) / 2, ROAD, spanZ, roadColor, 0.04);
-      laneDashes(x, (minZ + maxZ) / 2, true, spanZ);
+    const aveRects = [], crossRects = [];
+    xLines.forEach((x, i) => {              // avenues (run along z)
+      aveRects.push({ x, z: (minZ + maxZ) / 2, w: ROAD, d: spanZ });
+      laneDashes(x, (minZ + maxZ) / 2, true, spanZ, i === 2 || i === 4);
       roads.push({ x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ });
     });
     zLines.forEach((z) => {                 // cross-streets (run along x)
-      plane((minX + maxX) / 2, z, spanX, ROAD, roadColor, 0.045);
+      crossRects.push({ x: (minX + maxX) / 2, z, w: spanX, d: ROAD });
       laneDashes((minX + maxX) / 2, z, false, spanX);
       roads.push({ x: (minX + maxX) / 2, z, vertical: false, len: spanX });
     });
+    quadField(aveRects, roadMat, 0.04);
+    quadField(crossRects, roadMat, 0.045);
 
     // ---- intersections + crosswalk stripes ----
     const intersections = [];
@@ -104,20 +217,53 @@
       intersections.push({ x, z, i, j, phase: (i + j) % 2 === 0 ? 0 : 1, t: rng() * 6, ns: true, light: null });
     }));
 
-    // ---- blocks: a sidewalk slab + a slightly higher lot pad ----
-    const lots = [];
+    // ---- blocks: a sidewalk slab + a DISTRICT-flavoured lot pad ----
+    // GROUND IDENTITY (why: you should know WHERE you are — and where the
+    // money is — without the map): residential + projects keep grass yards
+    // wearing the island's exact checker (the two landmasses read as one
+    // world), the core + commercial blocks get poured concrete plazas,
+    // industrial gets an oil-stained work yard, and projects/industrial
+    // sidewalks run darker (stained, unwashed) than downtown's bright beige.
+    // (district field hoisted here — the lot pads need it at build time;
+    // the spawn-weight pickers further down reuse these same definitions)
+    const DISTRICTS = (C.districts && C.districts.length) ? C.districts : [];
+    const dSpan = Math.ceil(N / 3);
+    function districtQ(i, j) {
+      const di = Math.min(2, (i / dSpan) | 0), dj = Math.min(2, (j / dSpan) | 0);
+      return dj * 3 + di;
+    }
+    const grassTex = CBZ.checkerTex ? CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2) : null;
+    if (grassTex) photoLayer(grassTex, "assets/textures/grass512.jpg", function (g2, c) {
+      // keep the island's checker identity visible over the photo grain
+      const s = c.width / 2; g2.globalAlpha = 0.38;
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+        g2.fillStyle = (i + j) % 2 ? CBZ.COL.GRASS_A : CBZ.COL.GRASS_B;
+        g2.fillRect(i * s, j * s, s, s);
+      }
+      g2.globalAlpha = 1;
+    });
+    const grassMat = grassTex ? new THREE.MeshLambertMaterial({ map: grassTex })
+                              : new THREE.MeshLambertMaterial({ color: 0x55903f });
+    const lots = [], grassRects = [];
     for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
       const bx = (xLines[i] + xLines[i + 1]) / 2;
       const bz = (zLines[j] + zLines[j + 1]) / 2;
-      // sidewalk ring (BEIGE concrete) frames the block but must NOT pave over
+      const dq = districtQ(i, j);
+      const dk = (DISTRICTS[dq] && DISTRICTS[dq].kind) || "";
+      // sidewalk ring (concrete) frames the block but must NOT pave over
       // the road gap — BLK+ROAD covered the streets, so the dark asphalt read as
       // beige/white. Keep it to the block + a ~2m walk so the roads show.
-      plane(bx, bz, BLK + 4, BLK + 4, 0xc2b896, 0.08);
-      // GRASS lot/yard pad in the centre (buildings sit on it)
+      plane(bx, bz, BLK + 4, BLK + 4,
+        (dk === "projects" || dk === "industrial") ? 0xa39a7e : 0xc2b896, 0.08);
+      // lot/yard pad in the centre (buildings sit on it)
       const lotW = BLK - 1.5, lotD = BLK - 1.5;
-      plane(bx, bz, lotW, lotD, 0x55903f, 0.10);
-      lots.push({ cx: bx, cz: bz, w: lotW, d: lotD, i, j, kind: null, building: null });
+      if (dk === "core" || dk === "commercial") plane(bx, bz, lotW, lotD, 0xaab0b6, 0.10);   // poured plaza
+      else if (dk === "industrial") plane(bx, bz, lotW, lotD, 0x767064, 0.10);               // dusty work yard
+      else grassRects.push({ x: bx, z: bz, w: lotW, d: lotD });                              // grass yard
+      lots.push({ cx: bx, cz: bz, w: lotW, d: lotD, i, j, district: dq, kind: null, building: null });
     }
+    // every grass yard in ONE textured mesh (the batch pass skips maps)
+    if (grassRects.length) quadField(grassRects, grassMat, 0.10);
 
     // ---- perimeter wall colliders so you can't wander into the void ----
     function wall(x, z, w, d) {
@@ -171,13 +317,8 @@
     // takeover map and the population field agree. All weights live in
     // config; the pickers below are deterministic from the caller's rng,
     // so the harness world stays stable.
-    const DISTRICTS = (C.districts && C.districts.length) ? C.districts : [];
-    const dSpan = Math.ceil(N / 3);
-    function districtQ(i, j) {
-      const di = Math.min(2, (i / dSpan) | 0), dj = Math.min(2, (j / dSpan) | 0);
-      return dj * 3 + di;
-    }
-    for (const l of lots) l.district = districtQ(l.i, l.j);   // stamp once
+    // (DISTRICTS / districtQ now live ABOVE the lot loop — the lot pads need
+    // the district kind at build time, and each lot is stamped at push.)
     function districtAt(x, z) {
       const i = Math.max(0, Math.min(N - 1, ((x - xLines[0]) / step) | 0));
       const j = Math.max(0, Math.min(N - 1, ((z - zLines[0]) / step) | 0));
@@ -263,6 +404,9 @@
       root, center: { x: cx, z: cz },
       N, step, BLK, ROAD, xLines, zLines, minX, maxX, minZ, maxZ,
       lots, roads, intersections, rng,
+      // the day/night-tinted water material — expansion.js's island ocean can
+      // share it so the whole sea shifts tone together
+      seaMat,
       groundHeightAt() { return 0; },
       lotAt, randomSidewalkPoint, randomRoadPoint, nearestIntersection, clampToCity,
       // district personality field (peds/crowd density, casting, cop beats)
@@ -292,6 +436,7 @@
     //  expansion joints, and a sprinkle of asphalt patches/oil stains. All
     //  decor: no colliders, nothing placed in a driving lane.
     // =====================================================================
+    let paintRedCurb = null;   // set inside roadDetail; used after the props hook
     (function roadDetail() {
       // shared materials so hundreds of marks cost almost nothing
       const M = new Map();
@@ -399,12 +544,112 @@
           decal(it.x + (rng() - 0.5) * ROAD * 0.5, it.z + (rng() - 0.5) * ROAD * 0.5, 0.18, 1.4 + rng() * 1.2, 0x141519, 0.058, true, (rng() - 0.5) * 1.4);
         }
       });
+
+      // ---- 5) painted TURN ARROWS at the Midtown-core intersections --------
+      //  (why: managed, money-side streets — the core LOOKS administered).
+      //  Shared geometry + the dm() cache; no rng draws, so everything the
+      //  sibling modules build from city.rng stays byte-identical.
+      const arrowM = dm(0xeef1f5, true);
+      const shaftGV = new THREE.PlaneGeometry(0.26, 1.5), shaftGH = new THREE.PlaneGeometry(1.5, 0.26);
+      const headG = new THREE.CircleGeometry(0.42, 3);   // 3-segment circle = clean triangle head
+      function turnArrow(x, z, fx, fz, rotZ) {
+        // shaft along the lane; the head sits at the shaft's front, rotated
+        // 90° toward the curb — reads as a right-turn lane marking
+        const sM = new THREE.Mesh(fx ? shaftGH : shaftGV, arrowM);
+        sM.rotation.x = -Math.PI / 2; sM.position.set(x, 0.072, z); root.add(sM);
+        const h = new THREE.Mesh(headG, arrowM);
+        h.rotation.x = -Math.PI / 2; h.rotation.z = rotZ;
+        h.position.set(x + fx * 0.95, 0.072, z + fz * 0.95); root.add(h);
+      }
+      const aOff = stopOff + 1.7, laneOff = ROAD * 0.25;
+      intersections.forEach((it) => {
+        if (it.i < 2 || it.i > 4 || it.j < 2 || it.j > 4) return;   // the Midtown frame only
+        turnArrow(it.x + laneOff, it.z - aOff, 0, 1, 0);              // south approach → head +x
+        turnArrow(it.x - laneOff, it.z + aOff, 0, -1, Math.PI);       // north approach → head -x
+        turnArrow(it.x - aOff, it.z - laneOff, 1, 0, Math.PI / 2);    // west approach → head -z
+        turnArrow(it.x + aOff, it.z + laneOff, -1, 0, -Math.PI / 2);  // east approach → head +z
+      });
+
+      // ---- 6) RED CURB painter (fire lanes) --------------------------------
+      //  props.js places hydrants AFTER this pass, so expose a painter the
+      //  post-props pass at the bottom of buildCity uses. A slightly larger
+      //  box wraps the existing curb segment — no z-fight, pure decor.
+      paintRedCurb = function (x, z, vertical) {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(vertical ? 0.38 : 4.2, 0.24, vertical ? 4.2 : 0.38), dm(0xc23434));
+        m.position.set(x, 0.115, z); m.receiveShadow = true; root.add(m);
+      };
     })();
 
     // ---- let sibling modules furnish the city (buildings, props, lights) ----
     if (CBZ.cityBuildings) try { CBZ.cityBuildings(city); } catch (e) { console.error("[city buildings]", e); }
     if (CBZ.cityExpansion) try { CBZ.cityExpansion(city); } catch (e) { console.error("[city expansion]", e); }
     if (CBZ.cityProps) try { CBZ.cityProps(city); } catch (e) { console.error("[city props]", e); }
+
+    // ---- RED CURBS at hydrants (props.js just placed them): paint the curb
+    //      beside every other hydrant — the fire lane explains itself and
+    //      blocks stop reading copy-paste identical. Runs AFTER the hooks
+    //      because hydrants don't exist until cityProps; draws no rng. ----
+    if (paintRedCurb && city.streetProps) {
+      const e = (BLK + 4) / 2 - 0.2;   // the curb line's offset from a lot centre
+      let painted = 0, idx = 0;
+      for (const p of city.streetProps) {
+        if (p.type !== "hydrant") continue;
+        if ((idx++ & 1) || painted >= 8) continue;     // every other one, max 8
+        let lot = null, bd = 1e9;
+        for (const l of lots) {
+          const d = Math.abs(p.x - l.cx) + Math.abs(p.z - l.cz);
+          if (d < bd) { bd = d; lot = l; }
+        }
+        if (!lot) break;
+        const dx = p.x - lot.cx, dz = p.z - lot.cz;
+        if (Math.abs(dx) > Math.abs(dz)) paintRedCurb(lot.cx + Math.sign(dx) * e, p.z, true);
+        else paintRedCurb(p.x, lot.cz + Math.sign(dz) * e, false);
+        painted++;
+      }
+    }
+
+    // ---- EAST HARBOR: the bridge-approach gap used to be bare void over
+    //      nothing. A sand shoulder under the seawall, rip-rap armour at the
+    //      waterline (it also hides the ground apron's hard edge) and a few
+    //      moored hulls make the crossing READ as a working harbor. Decor
+    //      only — it all sits OUTSIDE the perimeter wall, so no colliders.
+    //      LOCAL rng: the shared city/runtime stream stays untouched. ----
+    (function eastHarbor() {
+      let hs = 70707;
+      function hr() { hs = (hs * 1103515245 + 12345) & 0x7fffffff; return hs / 0x7fffffff; }
+      const hm = new Map();
+      function hmat(c) { let m = hm.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); hm.set(c, m); } return m; }
+      const EEx = maxX + 26;                  // the east seawall line
+      // sand shoulder either side of the bridge gate
+      const sand = new THREE.Mesh(new THREE.PlaneGeometry(20, 150), hmat(0xe6d49a));
+      sand.rotation.x = -Math.PI / 2; sand.position.set(EEx + 10, 0.02, cz);
+      sand.receiveShadow = true; root.add(sand);
+      // rip-rap: rock armour where the sand meets the water
+      const rockM = hmat(0x6a7076);
+      for (let i = 0; i < 16; i++) {
+        const s = 1.1 + hr() * 1.9;
+        const rx = EEx + 17.5 + hr() * 4.5, ry = -0.4 + hr() * 0.5;
+        const rz = cz - 72 + i * 9 + (hr() - 0.5) * 4;
+        const yaw = hr() * Math.PI, tilt = (hr() - 0.5) * 0.3;
+        if (Math.abs(rz - cz) < 12) continue;          // keep the bridge span clear
+        const r = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.8, s * 1.2), rockM);
+        r.position.set(rx, ry, rz); r.rotation.y = yaw; r.rotation.z = tilt;
+        r.castShadow = false; r.receiveShadow = true; root.add(r);
+      }
+      // moored hulls riding the gap, clear of the bridge's z-band
+      function boat(x, z, yaw, hullC) {
+        const b = new THREE.Group(); b.position.set(x, 0, z); b.rotation.y = yaw; root.add(b);
+        const hull = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.1, 7.0), hmat(hullC));
+        hull.position.y = -0.05; hull.castShadow = true; b.add(hull);
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.25, 6.2), hmat(0xd9d2bd));
+        deck.position.y = 0.55; b.add(deck);
+        const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 2.0), hmat(0xe8ebee));
+        cab.position.set(0, 1.15, -1.2); cab.castShadow = true; b.add(cab);
+      }
+      boat(EEx + 34, cz - 26, 0.35, 0x9e3434);
+      boat(EEx + 46, cz + 24, -0.5, 0x2f5d8a);
+      boat(EEx + 38, cz + 44, 0.15, 0x9e3434);
+    })();
 
     root.visible = false;     // hidden until city mode activates
     return city;

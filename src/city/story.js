@@ -202,7 +202,7 @@
     if (m.chapter > 0) {
       const title = CHAPTERS[s.chapter];
       setTimeout(function () {
-        if (g.mode === "city" && CBZ.city && CBZ.city.note) CBZ.city.note("📈 New status: " + title, 3.0);
+        if (g.mode === "city" && CBZ.city && CBZ.city.note) CBZ.city.note("Word on the street: you're a " + title + " now.", 3.0);
       }, 1100);
     }
     persist();

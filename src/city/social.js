@@ -111,6 +111,9 @@
     friendKilled:{ fear: +12, grudge: +40, loyalty: -22, affection: -16, respect: +6 },
     snubbed:   { affection: -6, loyalty: -4, grudge: +3 },
     betrayed:  { grudge: +44, loyalty: -40, fear: +10, respect: -6 },   // attacked your own crew
+    // word-of-mouth: a friend just dodged the player in the street and warned
+    // you off — second-hand fear (plus the grim respect a predator's name buys).
+    warned:    { fear: +8, respect: +1 },
 
     // GANG-FAVOR kinds — earning a faction's trust by running their work,
     // backing them in a fight, clipping a rival, or bringing a cut. Each lands
@@ -309,6 +312,10 @@
     const m = b.sprite.material;
     if (m && !m._shared && m.dispose) m.dispose();    // free the per-bubble clone
   }
+  // peds.js leans on the same pooled bubbles for its relationship barks (the
+  // cross-street mutter, the by-name greeting, the snitch point-out) — same
+  // budget, same near-camera gate, so it can never out-spend the pool.
+  CBZ.citySay = say;
 
   // ---- relationship / reputation graph (lazy, lives on each ped) ----
   //   ped.friends[]  — clique members (mutual)
@@ -448,8 +455,8 @@
     for (const p of civ) { p.mood = 0; p.knowsHero = 0; p.opinion = 0; }
     // clear any stale relationship records from a previous life + wrap the
     // action APIs so every meaningful deed feeds the relationship axes.
-    for (const p of CBZ.cityPeds) { p.relPlayer = null; p._snitch0 = null; }
-    relTickT = 1; relTickCur = 0;
+    for (const p of CBZ.cityPeds) { p.relPlayer = null; p._snitch0 = null; p._refuseUntil = 0; p.nameKnown = false; }
+    relTickT = 1; relTickCur = 0; partsCD = 0;
     wrapActionHooks();
     // AFTER the civilian couples/cliques: give the IMPORTANT people (bosses,
     // tycoons, socialites) a real, wealthy, co-located family (spouse + maybe kid).
@@ -491,6 +498,7 @@
     const richBonus = Math.min(0.5, (g.cash || 0) / 40000);
     const gain = (S().affectionPerDate || 22) * (0.7 + (1 - Math.abs(ped.aggr - 0.3)) * 0.5 + repBonus + richBonus);
     ped.affection = (ped.affection || 0) + gain;
+    ped.nameKnown = true;                     // a date is a conversation — you have their name now
     ped.mood = 1; ped.knowsHero = Math.min(1, (ped.knowsHero || 0) + 0.3); ped.opinion = Math.min(1, (ped.opinion || 0) + 0.25);
     // a successful date deepens the multi-axis bond, scaled by how well it went
     CBZ.cityRelShift(ped, "dated", 0.6 + gain / 30);
@@ -555,6 +563,7 @@
     const repBonus = Math.min(0.6, r.respect / 300);
     const gain = 0.7 + repBonus;
     const bond = CBZ.cityRelShift(ped, "ranWork", gain);
+    ped.nameKnown = true;                     // running work together — you know each other now
     ped.knowsHero = Math.min(1, (ped.knowsHero || 0) + 0.25);
     ped.opinion = Math.min(1, (ped.opinion || 0) + 0.2);
     ped.mood = Math.max(ped.mood || 0, 0.6);
@@ -637,9 +646,9 @@
     for (const p of (CBZ.cityPeds || [])) {
       p.relPlayer = null;
       if (p._snitch0 != null) { p.snitch = p._snitch0; p._snitch0 = null; }
-      p._bond = 0;
+      p._bond = 0; p._refuseUntil = 0; p.nameKnown = false;
     }
-    relTickT = 1; relTickCur = 0;
+    relTickT = 1; relTickCur = 0; partsCD = 0;
   };
 
   function clearBeacon() { if (beacon) { if (beacon.parent) beacon.parent.remove(beacon); if (beacon.geometry) beacon.geometry.dispose(); if (beacon.material) beacon.material.dispose(); beacon = null; } }
@@ -754,6 +763,77 @@
       }
     }
     if (byPlayer && victim.pos) CBZ.cityGossip(victim.pos.x, victim.pos.z, "heroKilled", 0.8);
+  };
+
+  // ===========================================================================
+  //  THE STREET REMEMBERS — the relationship web made VISIBLE on the pavement.
+  //   • cityStreetParts: when a marked ped dodges the player (peds.js calls this
+  //     on the cross-street break), the people around them catch the warning —
+  //     a small second-hand fear bump through the web, and ONE visibly steers
+  //     their partner/friend off the same way. The street parts around a known
+  //     predator; infamy you can SEE. Event-driven, globally rate-gated (no
+  //     per-frame scan; it piggybacks peds.js's existing reaction pass).
+  //   • vendor memory: a clerk you've stuck up refuses you service for a long
+  //     window (shops.js asks cityVendorRefuses at the door — see hooksNeeded).
+  //   • cityMeet: you learn an NPC's NAME only by talking to them.
+  // ===========================================================================
+  let partsCD = 0, _clock = 0;
+  CBZ.cityStreetParts = function (ped) {
+    if (!ped || ped.dead || partsCD > 0) return;
+    partsCD = 4.5;                                   // one visible street-part show per ~5s
+    let shown = false, n = 0;
+    for (const q of CBZ.cityPeds) {
+      if (n >= 4) break;                             // bounded: a couple of bystanders, not the block
+      if (q === ped || q.dead || q.vendor || q.gang || q.controlled || q.companion || q.recruited) continue;
+      if (q.state === "flee" || q.state === "fight" || q.rage || q.surrender) continue;
+      const dx = q.pos.x - ped.pos.x, dz = q.pos.z - ped.pos.z;
+      if (dx * dx + dz * dz > 12 * 12) continue;
+      n++;
+      applyDelta(q, REL_EVENTS.warned, 0.7); driveFlags(q);   // the warning lands as feeling
+      // one of them grabs their partner's arm and steers off with the dodger
+      if (!shown && rng() < 0.75) {
+        shown = true;
+        q.path = null; q.pause = 3; q._notedT = 6; q.state = "walk";
+        q.target.set(ped.target.x + (rng() - 0.5) * 2.5, 0, ped.target.z + (rng() - 0.5) * 2.5);
+        say(q, ["“Don't look. Walk.”", "“Come on. Other side.”", "“Eyes down — keep moving.”"][(rng() * 3) | 0], "#cfd6e6", 2.2);
+        const arm = (q.partner && !q.partner.dead && q.partner !== ped) ? q.partner
+          : (q.friends || []).find((f) => f && !f.dead && f !== ped && !f.controlled && !f.companion
+              && Math.hypot(f.pos.x - q.pos.x, f.pos.z - q.pos.z) < 5);
+        if (arm && !arm.controlled && !arm.companion && !arm.gang && arm.state !== "fight") {
+          arm.path = null; arm.pause = 3; arm._notedT = 6; arm.state = "walk";
+          arm.target.set(q.target.x + 0.9, 0, q.target.z + 0.9);
+        }
+      }
+    }
+  };
+
+  // ---- SHOPKEEPER MEMORY: "We're closed. To YOU." -------------------------
+  // A vendor you've robbed refuses you service for a long window. shops.js
+  // gates its open() on cityVendorRefuses (one-line hook); we stamp the window
+  // from BOTH robbery paths: cityRobPed on the clerk (wrap below) and the till
+  // stick-up (robTill is a shops.js local, so we watch the one public signal it
+  // always sends — cityCrime type "store robbery" at the till's coordinates).
+  const REFUSE_SECS = 420;                           // most of an in-game day
+  function markVendorRobbed(v) {
+    if (!v || v.dead) return;
+    v._refuseUntil = _clock + REFUSE_SECS;
+    try { applyDelta(v, REL_EVENTS.robbed, 1); driveFlags(v); } catch (e) {}
+    say(v, "“Get OUT. And don't come back.”", "#ff9b8b", 2.4);
+  }
+  CBZ.cityVendorRefuses = function (ped) {
+    return !!(ped && !ped.dead && (ped._refuseUntil || 0) > _clock);
+  };
+
+  // ---- you learn THEIR name only by talking. interact.js calls this from its
+  // Talk verb (see hooksNeeded); flirting with / doing a favor for someone
+  // counts as talking too (wired in cityFlirt/cityDoFavor).
+  CBZ.cityMeet = function (ped) {
+    if (!ped || ped.dead) return;
+    if (!ped.nameKnown) {
+      ped.nameKnown = true;
+      if (CBZ.city && ped.name) CBZ.city.note("They go by " + ped.name + ".", 1.6);
+    }
+    CBZ.cityRelShift(ped, "greeted", 0.5);
   };
 
   // ===========================================================================
@@ -926,7 +1006,11 @@
       if (rng() > 0.35) continue;                       // don't have everyone pipe up at once
       const b = bondOf(cand);
       if (r.grudge > 55) { say(cand, ["“I see you…”", "“You'll get yours.”", "😠"][(rng() * 3) | 0], "#ff6b6b", 2.2); cand.mood = -1; }
-      else if (b > 0.9) { say(cand, ["“Hey, it's you! 😄”", "“My friend!”", "“Good to see you 🙌”"][(rng() * 3) | 0], "#7ed957", 2.2); cand.mood = 1; }
+      else if (b > 0.9) {
+        // they know you by the name the street gave you
+        const ttl = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : "friend";
+        say(cand, ["“Yo, " + ttl + "! 😄”", "“My friend!”", "“Good to see you 🙌”"][(rng() * 3) | 0], "#7ed957", 2.2); cand.mood = 1;
+      }
       else if (b > 0.35) { say(cand, ["“'Sup. 👋”", "“Respect.”", "“Lookin' good.”"][(rng() * 3) | 0], "#bfe0ff", 2); }
       else if (r.fear > 55) { say(cand, ["“…please, I don't want trouble.”", "“Just leave me be.”", "😰"][(rng() * 3) | 0], "#cfd6e6", 2.2); cand.fear = Math.max(cand.fear || 0, 4); }
       break;                                            // one reaction per vignette pass
@@ -957,6 +1041,8 @@
         if (ped && ped.pos && !ped.vendor) {
           const amt = amtFn ? amtFn(ped, ret) : 1;
           if (amt > 0) CBZ.cityRelShift(ped, kind, amt);
+        } else if (ped && ped.vendor && kind === "robbed") {
+          markVendorRobbed(ped);     // stuck up the clerk in person — they remember
         }
       } catch (e) { /* never let a relationship hiccup break a core action */ }
       return ret;
@@ -1028,6 +1114,31 @@
         return ret;
       };
       w._relWrapped = true; w._relOrig = ok; CBZ.cityKillPed = w;
+    }
+    // STORE ROBBERY → the CLERK remembers. robTill lives inside shops.js as a
+    // local, so we watch the one public signal every till stick-up sends —
+    // cityCrime with type "store robbery" at the till's coordinates — and stamp
+    // the nearest live vendor's refusal window. Bounded shop-lot scan, only on
+    // the (rare) event itself.
+    const ocrime = CBZ.cityCrime;
+    if (typeof ocrime === "function" && !ocrime._relWrapped) {
+      const wc = function (amount, opts) {
+        const ret = ocrime.apply(this, arguments);
+        try {
+          if (opts && opts.type === "store robbery" && opts.x != null) {
+            const A = CBZ.city && CBZ.city.arena;
+            let v = null, bd = 24 * 24;
+            if (A && A.shopLots) for (const l of A.shopLots) {
+              const b = l.building; if (!b || !b.vendor || b.vendor.dead) continue;
+              const dx = l.cx - opts.x, dz = l.cz - opts.z, d2 = dx * dx + dz * dz;
+              if (d2 < bd) { bd = d2; v = b.vendor; }
+            }
+            if (v) markVendorRobbed(v);
+          }
+        } catch (e) { /* the wanted system must never break on a memory hiccup */ }
+        return ret;
+      };
+      wc._relWrapped = true; wc._relOrig = ocrime; CBZ.cityCrime = wc;
     }
     // pickpocket + ransom-demand live in interact.js as locals (no public fn),
     // so they aren't wrapped here; the dominant person-crimes (mug/beat/KO/kill)
@@ -1120,6 +1231,8 @@
   // ===========================================================================
   CBZ.onUpdate(34.5, function (dt) {
     if (g.mode !== "city") return;
+    _clock += dt;                                    // city-time clock (vendor refusal windows)
+    if (partsCD > 0) partsCD -= dt;                  // street-parts show rate gate
     tickBubbles(dt);
     tickGossip(dt);
     tickRoutines(dt);

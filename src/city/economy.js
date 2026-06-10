@@ -993,7 +993,7 @@
       if (!_turfShown && CBZ.city && CBZ.city.note) {
         _turfShown = true;
         const info = turfIncomeInfo();
-        CBZ.city.note("💰 Street tax from your " + info.zones + " block" + (info.zones === 1 ? "" : "s") + ": +$" + pay + " (" + info.perSec + "/s). Take more turf, earn more.", 3);
+        CBZ.city.note("💰 Street tax from your " + info.zones + " block" + (info.zones === 1 ? "" : "s") + ": +$" + pay + ".", 3);
       }
     }
   });

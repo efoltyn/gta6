@@ -314,7 +314,7 @@
   function stopComply() {
     const c = STOP.cop;
     stowGuns();
-    if (CBZ.city) CBZ.city.note("You put the piece away. “Good. Stay out of trouble.” · [Q] to re-draw", 2.6);
+    if (CBZ.city) CBZ.city.note("You put the piece away. “Good. Stay out of trouble.” · Q re-draw", 2.6);
     if (CBZ.sfx) CBZ.sfx("door");
     if (c) { c._gunLowered = true; }
     endStop(true);
@@ -379,7 +379,7 @@
     }
     if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
       e.preventDefault();
-      if (CBZ.city) CBZ.city.note("Holstered. · [Q] to draw", 1.6);
+      if (CBZ.city) CBZ.city.note("Holstered. · Q draw", 1.6);
       if (CBZ.sfx) CBZ.sfx("door");
     }
   });
@@ -505,6 +505,9 @@
       npcTarget: null, patrolGoal: null, retarget: 0, armed: true, weapon: swat ? "SMG" : "Pistol",
     };
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
+    // cops ride blob shadows (city/blobshadows.js) — swept AFTER the weapon
+    // sync so the holstered gun mesh leaves the sun shadow pass too.
+    ch.group.traverse(function (o) { if (o.isMesh) o.castShadow = false; });
     return cop;
   }
 

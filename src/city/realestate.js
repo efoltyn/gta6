@@ -132,7 +132,7 @@
     // hangar (→ F-22) is a separate add-on offered here once you own the tower.
     const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
     if (isPent && g.cityOwnsHangar) {
-      actions.push({ label: "🛩 Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and press [F] to fly it (left-click = missiles), or call an airstrike from your phone. The chopper waits on the helipad.", 3.2); } });
+      actions.push({ label: "🛩 Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
     } else if (isPent) {
       actions.push({ label: "🛩 Buy the HANGAR — " + money(hangarPrice()) + " (unlocks a fighter jet)", fn: buyHangar });
     }

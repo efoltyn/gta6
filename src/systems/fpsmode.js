@@ -1183,8 +1183,9 @@
     else if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
     // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
     if (hitSomething) flashHitMarker(down, head);
-    if (head) { CBZ.sfx && CBZ.sfx("headshot"); if (CBZ.flashHint) CBZ.flashHint(down ? "HEADSHOT KILL" : "HEADSHOT", 1.0); }
-    else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); if (down && CBZ.flashHint) CBZ.flashHint("TARGET DOWN", 0.9); }
+    // (no "HEADSHOT"/"TARGET DOWN" text — the red hit marker, gore and foley own the kill)
+    if (head) { CBZ.sfx && CBZ.sfx("headshot"); }
+    else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
     // discharging a firearm in the city is a witnessed crime (city wanted system)
     if (CBZ.game.mode === "city" && CBZ.cityCrime) {
       CBZ.cityCrime(w.nonlethal ? 20 : (hitSomething ? 100 : 55), { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
@@ -1325,7 +1326,7 @@
     if (first && !fps.active && CBZ.game.state === "playing" && CBZ.game.mode !== "survival" && CBZ.game.mode !== "city") {
       setActive(true);
       fps.fp = Math.max(fps.fp, 0.06);
-      CBZ.flashHint && CBZ.flashHint("🔫 Weapon up — first-person", 1.4);
+      // (no announcement — the camera dropping into first person IS the message)
     }
   };
 

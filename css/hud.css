@@ -1,6 +1,38 @@
 /* ============================================================
    hud.css — in-game heads-up display
 ============================================================ */
+
+/* ---- HUD design TOKENS (canonical definition; mirrored onto #cityHud in
+   src/city/hud.js so the overlay stays coherent whatever the sheet order).
+   WHY: one inset, ONE panel rgba, one radius and EXACTLY three opacity
+   levels (chrome .55 / content .85 / alert 1) is what separates a shipped
+   HUD from a debug overlay. Semantic colors are single-purpose — money-green
+   is cash ONLY, gold is wanted/rank ONLY, red health, blue armor — and the
+   one interactive accent is cyan. Never pure #fff: --hud-ink is the bright.
+   NOTE: names are namespaced (--hud-*) because base.css already owns --ink /
+   --orange / --green for the paper title cards. Vars only — adds nothing
+   visual to the jail / survival HUDs. */
+:root{
+  --hud-pad:14px;
+  --hud-pad-t:calc(var(--hud-pad) + env(safe-area-inset-top, 0px));
+  --hud-pad-r:calc(var(--hud-pad) + env(safe-area-inset-right, 0px));
+  --hud-pad-b:calc(var(--hud-pad) + env(safe-area-inset-bottom, 0px));
+  --hud-pad-l:calc(var(--hud-pad) + env(safe-area-inset-left, 0px));
+  --panel-bg:rgba(8,11,17,.55);
+  --radius:9px;
+  --hud-line:rgba(232,236,242,.12);
+  --hud-ink:#e8ecf2;
+  --hud-dim:#9fb0c6;
+  --hud-accent:#7de7ff;
+  --money:#7ed957;
+  --gold:#ffd166;
+  --health:#ff5b5b;
+  --armor:#7fd0ff;
+  --o-chrome:.55;
+  --o-content:.85;
+  --o-alert:1;
+}
+
 #hud{position:fixed; inset:0; pointer-events:none; color:#fff; user-select:none;}
 .panel{
   background:rgba(20,30,46,.62);

@@ -159,7 +159,7 @@
   function addBox(root, w, h, d, x, y, z, material) {
     const mesh = new THREE.Mesh(boxGeo(w, h, d), material);
     mesh.position.set(x || 0, y || 0, z || 0);
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     root.add(mesh);
     return mesh;
   }
@@ -167,7 +167,7 @@
   function addPrism(root, width, profile, y, material) {
     const mesh = new THREE.Mesh(prismGeo(width, profile), material);
     mesh.position.y = y || 0;
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     root.add(mesh);
     return mesh;
   }
@@ -176,7 +176,7 @@
     const mesh = new THREE.Mesh(sphereGeo(radius), material);
     mesh.position.set(x || 0, y || 0, z || 0);
     mesh.scale.set(sx || 1, sy || 1, sz || 1);
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     root.add(mesh);
     return mesh;
   }
@@ -189,7 +189,7 @@
       const wheel = new THREE.Mesh(wheelGeo(radius, wheelWidth), tire);
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(p[0], radius, p[1]);
-      wheel.castShadow = true;
+      wheel.castShadow = false;
       wheel.userData.playerWheel = true;
       root.add(wheel);
       const cap = new THREE.Mesh(wheelGeo(radius * 0.57, wheelWidth + 0.02), hub);
@@ -440,7 +440,7 @@
       const wheel = new THREE.Mesh(wheelGeo(wheelR, p[1]), black);
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(0, wheelR, p[0]);
-      wheel.castShadow = true;
+      wheel.castShadow = false;
       wheel.userData.playerWheel = true;
       root.add(wheel);
       const disc = new THREE.Mesh(wheelGeo(wheelR * 0.45, p[1] + 0.02), chrome);
