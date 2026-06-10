@@ -391,9 +391,9 @@
       put(legR, slot, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -swing); put(armL, slot, -0.55, 1.40, 0, 0.24, 0.78, 0.24, -swing * 0.82);
       put(armR, slot, 0.55, 1.40, 0, 0.24, 0.78, 0.24, swing * 0.82);
       // FACE — two eyes + a mouth on the front of the head (z+ = forward)
-      put(eyeL, slot, -0.12, 2.235, 0.235, 0.10, 0.13, 0.06, 0);
-      put(eyeR, slot, 0.12, 2.235, 0.235, 0.10, 0.13, 0.06, 0);
-      put(mouth, slot, 0, 2.045, 0.235, 0.20, 0.05, 0.05, 0);
+      put(eyeL, slot, -0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);
+      put(eyeR, slot, 0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);
+      put(mouth, slot, 0, 2.045, 0.255, 0.22, 0.055, 0.10, 0);
       // a worn VALUABLE (chain/watch/tooth/cash) at the chest, only if carried —
       // this is the "see a guy with a chain" hook; non-carriers shrink to nothing.
       const vcol = S.itemColor ? S.itemColor(id) : 0;

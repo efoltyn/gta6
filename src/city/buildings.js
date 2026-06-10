@@ -57,7 +57,19 @@
   const THREE = window.THREE;
   const mat = CBZ.mat;
 
-  const FH = 4.0;      // floor-to-floor
+  // FLOOR-TO-FLOOR — sized off the CHARACTER, not habit. The rig in
+  // entities/character.js crowns at ~2.5 (head top 2.48, hair/cap ~2.6), so a
+  // storey needs ~1.7-1.9x that in CLEAR air to read as a real floor: 4.6
+  // minus the 0.2 interior slab = 4.4 clear ≈ 1.76x. (The old 4.0 left ~1.5x —
+  // ceilings grazed heads and towers read as stacked shoeboxes next to people.)
+  // Mirrored by city/elevators.js (fire-escape flights); everything in this
+  // file derives from FH — never hardcode a multiple of it.
+  const FH = 4.6;      // floor-to-floor
+  // pedestrian DOORWAY/HEADER height — PERSON-scaled on purpose, so it does
+  // NOT ride FH: a door ~1.3x the 2.5 person reads right whatever the ceiling
+  // does. 3.3 equals the old FH-0.7 opening, so door leafs, colliders and the
+  // entrance dressing all sit exactly where they always did.
+  const DOORH = 3.3;
   const WT = 0.4;      // wall thickness
   const SW = 5.6;      // two generous stair lanes; narrow stairs snag characters at speed
   const DOORW = 2.2;   // doorway width
@@ -860,7 +872,9 @@
     opts = opts || {};
     const gap = (panelW || DOORW);                 // the doorway opening width
     const dw = gap - 0.16;                          // leaf a hair narrower so it swings free
-    const frameH = opts.frameH != null ? opts.frameH : FH;
+    // default frame rides the person-scaled DOORH (not FH): leaf = DOORH-0.15,
+    // seating just under the wall header that fills DOORH..FH above it.
+    const frameH = opts.frameH != null ? opts.frameH : DOORH + 0.7;
     const dh = frameH - 0.85;                        // leaf height (header sits above it)
     const nx = localDoor.nx, nz = localDoor.nz;
     const tx = -nz, tz = nx;                         // tangent along the doorway width
@@ -1256,7 +1270,7 @@
             const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
             lbox(fcx, ly, f.z, side, FH, WT, color, wallOpt);
             lbox(fcx2, ly, f.z, side, FH, WT, color, wallOpt);
-            lbox(0, FH - 0.35, f.z, DOORW, 0.7, WT, color, { los: true });
+            lbox(0, (DOORH + FH) / 2, f.z, DOORW, FH - DOORH, WT, color, { los: true });   // header fills DOORH..FH (door opening stays person-scale)
             // STOREFRONT GLASS flanking the entrance — on the STREET side of the
             // wall (the old +0.22 offset put it just inside the room, hidden
             // behind the opaque facade) so shops read as glassed storefronts.
@@ -1270,7 +1284,7 @@
             const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
             lbox(f.x, ly, fcz, WT, FH, side, color, wallOpt);
             lbox(f.x, ly, fcz2, WT, FH, side, color, wallOpt);
-            lbox(f.x, FH - 0.35, 0, WT, 0.7, DOORW, color, { los: true });
+            lbox(f.x, (DOORH + FH) / 2, 0, WT, FH - DOORH, DOORW, color, { los: true });   // header fills DOORH..FH
             const goff = (f.s === 2 ? -1 : 1) * (WT / 2 + 0.06), gph = FH * 0.5, gy = ly + 0.1;
             if (side > 1.2) {
               addCityGlass(bgroup, f.x + goff, gy, fcz, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
@@ -1365,8 +1379,11 @@
     dbox(slabCx, rTop + pp + 0.05, -d / 2 + WT / 2, slabW + 0.1, 0.1, WT + 0.16, TRIM);
     dbox(-w / 2 + WT / 2, rTop + pp + 0.05, slabCz, WT + 0.16, 0.1, slabD + 0.1, TRIM);
 
-    // switchback stairs (two lanes alternating; ported from disaster_arena)
-    const nSteps = 9, LD = 1.1, zA = izMin + 0.3, zB = izMax - 0.3, laneW = stairW / 2;
+    // switchback stairs (two lanes alternating; ported from disaster_arena).
+    // Step COUNT derives from FH at the proven ~0.44 rise (the old 4.0/9): a
+    // taller floor gets MORE steps, never taller ones — the climb is really the
+    // ramp platform, but the treads must keep reading like legal stairs.
+    const nSteps = Math.round(FH / 0.45), LD = 1.1, zA = izMin + 0.3, zB = izMax - 0.3, laneW = stairW / 2;
     for (let k = 0; hasStairs && k < storeys; k++) {
       const dir = (k % 2 === 0) ? 1 : -1;
       const startZ = dir > 0 ? zA : zB, endZ = dir > 0 ? zB : zA;
@@ -2182,7 +2199,7 @@
     const partW = 0.4, gap = DOORW;
     for (const s of [-1, 1]) {
       const pz = phDoorLocal.z + s * (gap / 2 + 1.4 + partW / 2);
-      b.lbox(phDoorLocal.x, topY + (FH - 0.85) / 2 + 0.02, pz, partW, FH - 0.85, 2.8, 0x2a323c, { solid: true });
+      b.lbox(phDoorLocal.x, topY + (DOORH - 0.15) / 2 + 0.02, pz, partW, DOORH - 0.15, 2.8, 0x2a323c, { solid: true });   // partition matches the person-scaled leaf height
     }
     // build the standard clean leaf+frame, then lift the whole rig (jambs, header,
     // pivot, collider) up to the penthouse floor via makeDoorPanelAtY.
@@ -2332,7 +2349,8 @@
   function derelictExterior(b) {
     const vh = Math.abs(Math.sin(b.ox * 17.23 + b.oz * 91.7) * 43758.5453) % 1;
     // soot bleeding down from the boarded upper window bands (band bottom sits
-    // ~k*FH+1.8, so the streak hangs just under it), patchy per face/floor.
+    // ~k*FH + FH/2 - 0.31, so the streak hangs just under it — tracked off FH,
+    // not a frozen offset, so it stays glued to the boards), patchy per face/floor.
     const sm = sootStreakMat();
     let made = 0;
     for (let k = 1; k < b.storeys && made < 4; k++) {
@@ -2340,7 +2358,7 @@
         if ((((vh * 977) | 0) + k * 13 + f * 29) % 3 === 0) continue;   // skip ~1/3, varies per lot
         const span = Math.min((f < 2 ? b.w : b.d) * 0.55, 4.6);
         const p = new THREE.Mesh(new THREE.PlaneGeometry(span, 1.6), sm);
-        const y = k * FH + 1.05;
+        const y = k * FH + FH / 2 - 0.95;
         if (f === 0) { p.position.set(0, y, -b.d / 2 - 0.03); p.rotation.y = Math.PI; }
         else if (f === 1) { p.position.set(0, y, b.d / 2 + 0.03); }
         else if (f === 2) { p.position.set(-b.w / 2 - 0.03, y, 0); p.rotation.y = -Math.PI / 2; }
@@ -2860,11 +2878,11 @@
     const awnCol = (kind === "bank" || kind === "cityhall" || kind === "hospital") ? color : accent;
     // CANOPY awning over the door (angled colour band, kind-tinted)
     const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.32, 1.1)), mat(awnCol, { emissive: awnCol, ei: 0.4 }));
-    awn.position.set(di.x + di.nx * 0.75, FH - 0.7, di.z + di.nz * 0.75); awn.rotation[along ? "x" : "z"] = -0.22 * (along ? -di.nx || 1 : 1);
+    awn.position.set(di.x + di.nx * 0.75, DOORH, di.z + di.nz * 0.75); awn.rotation[along ? "x" : "z"] = -0.22 * (along ? -di.nx || 1 : 1);   // hugs the DOOR opening, not the floor line
     b.group.add(awn);
     // EMISSIVE NEON TRIM strip under the awning lip (cheap glowing accent line)
     const trim = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.06, 0.1)), mat(accent, { emissive: accent, ei: 0.95 }));
-    trim.position.set(di.x + di.nx * 1.3, FH - 0.88, di.z + di.nz * 1.3); trim.castShadow = false;
+    trim.position.set(di.x + di.nx * 1.3, DOORH - 0.18, di.z + di.nz * 1.3); trim.castShadow = false;
     b.group.add(trim);
     // LIT SIGN BOARD across the facade above the awning — a glowing backing panel
     // (the trade colour) with the NAME painted on its front face.
@@ -2941,7 +2959,7 @@
       add(fx(1.6, 0.07, 0.07), VELVET, rx, sag, rz, { emissive: VELVET, ei: 0.25 });
     }
     // a soft pink ENTRANCE GLOW washing the threshold (the club's signature light)
-    add(fx(3.0, 0.06, 0.5), GLOW, di.x + nx * 0.5, FH - 0.5, di.z + nz * 0.5, { emissive: GLOW, ei: 0.9 });
+    add(fx(3.0, 0.06, 0.5), GLOW, di.x + nx * 0.5, DOORH + 0.2, di.z + nz * 0.5, { emissive: GLOW, ei: 0.9 });   // washes the doorway, so it rides DOORH
     // a small floating VELVET CLUB rope-line label so the spot is unmistakable
     if (CBZ.makeLabelSprite) {
       const s = CBZ.makeLabelSprite("🍷 VELVET — VIP ONLY");
@@ -2984,12 +3002,13 @@
     // ENTRY STOOP: a low step slab just outside the door
     const stoop = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 1.0, 0.28, 1.4)), mat(0x8a8f97));
     stoop.position.set(di.x + di.nx * 0.7, 0.14, di.z + di.nz * 0.7); stoop.castShadow = false; g.add(stoop);
-    // CANOPY over the entrance (trim-coloured, slight lip)
+    // CANOPY over the entrance (trim-coloured, slight lip) — door-anchored:
+    // it shelters the DOORWAY, so it rides DOORH, not the floor line above.
     const canopy = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 1.4, 0.18, 1.3)), mat(darkTrim));
-    canopy.position.set(di.x + di.nx * 0.6, FH - 0.6, di.z + di.nz * 0.6); canopy.castShadow = false; g.add(canopy);
+    canopy.position.set(di.x + di.nx * 0.6, DOORH + 0.1, di.z + di.nz * 0.6); canopy.castShadow = false; g.add(canopy);
     for (const s of [-1, 1]) {                    // two thin support posts
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, FH - 0.8, 0.12), mat(darkTrim));
-      post.position.set(di.x + di.nx * 1.15 + tx * s * (DOORW * 0.5 + 0.4), (FH - 0.8) / 2, di.z + di.nz * 1.15 + tz * s * (DOORW * 0.5 + 0.4));
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, DOORH - 0.1, 0.12), mat(darkTrim));
+      post.position.set(di.x + di.nx * 1.15 + tx * s * (DOORW * 0.5 + 0.4), (DOORH - 0.1) / 2, di.z + di.nz * 1.15 + tz * s * (DOORW * 0.5 + 0.4));
       post.castShadow = false; g.add(post);
     }
     // HOUSE-NUMBER plate beside the door (sprite plane, both not needed — one face)
@@ -3014,15 +3033,16 @@
       const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.08, ladTop, 0.08)), mat(0x3a3f46));
       rail.position.set(fox + tx * s, ladTop / 2 + 0.6, foz + tz * s); rail.castShadow = false; g.add(rail);
     }
-    for (let r = 0; r < 5; r++) {                  // rungs
+    const nRungs = 1 + Math.round((FH - 0.4) / 0.9);   // same 0.9 rung pitch, count rides FH (5 at the old 4.0)
+    for (let r = 0; r < nRungs; r++) {             // rungs
       const rung = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.6, 0.06, 0.06)), mat(0x3a3f46));
       rung.position.set(fox, 1.0 + r * 0.9, foz); rung.castShadow = false; g.add(rung);
     }
     // a small landing platform at first floor
     const land = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.9, 0.08, 0.7)), mat(0x44505c));
     land.position.set(fox + di.nx * 0.25, FH - 0.2, foz + di.nz * 0.25); land.castShadow = false; g.add(land);
-    // a small shatterable glass transom over the door (kept through addCityGlass)
-    addCityGlass(g, di.x + di.nx * 0.05, FH - 0.45, di.z + di.nz * 0.05, along ? 0.06 : DOORW * 0.9, 0.5, along ? DOORW * 0.9 : 0.06, ox, oz, null, b.windows);
+    // a small shatterable glass transom just over the DOOR opening (DOORH-anchored)
+    addCityGlass(g, di.x + di.nx * 0.05, DOORH + 0.25, di.z + di.nz * 0.05, along ? 0.06 : DOORW * 0.9, 0.5, along ? DOORW * 0.9 : 0.06, ox, oz, null, b.windows);
   }
 
   // ---- ROOFTOP HELIPAD -----------------------------------------------------

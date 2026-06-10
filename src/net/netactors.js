@@ -97,6 +97,21 @@
     for (const R of remotes.values()) if (R.group && !R.dead && !R.driving) out.push(R);
     return out;
   };
+  // EVERY remote (incl. drivers) — collisions, mow-downs, voice positioning
+  CBZ.netRemoteList = function (out) {
+    for (const R of remotes.values()) out.push(R);
+    return out;
+  };
+  // proximity-voice 🔊 pip over the speaker's head (netvoice.js drives this)
+  CBZ.netSetSpeaking = function (R, on) {
+    if (on && !R.speakTag && R.group && CBZ.makeLabelSprite) {
+      R.speakTag = CBZ.makeLabelSprite("🔊", { color: "#7fe0a0" });
+      R.speakTag.position.y = 3.7;
+      R.speakTag.scale.set(0.9, 0.9, 1);
+      R.group.add(R.speakTag);
+    }
+    if (R.speakTag) R.speakTag.visible = !!on && !R.dead;
+  };
 
   // ---- incoming state ------------------------------------------------------
   net.on("state", function (m) {
@@ -121,6 +136,7 @@
     const wkey = m.w || null;
     R.weapon = wkey && wkey !== "fists" ? wkey : null;
     R.armed = !!R.weapon;
+    R.aim = !!m.aim;   // holding a gun out (host turns this into NPC gunpoint fear)
   });
 
   net.on("leave", function (m) {
@@ -133,9 +149,26 @@
   });
 
   // ---- interpolation + animation ------------------------------------------
+  // Past the newest sample we EXTRAPOLATE (dead reckoning, capped 250ms) so a
+  // late packet reads as a player jogging on, not a freeze-then-teleport.
   function sample(buf, t) {
     if (!buf.length) return null;
     if (buf.length === 1 || t <= buf[0].t) return buf[0];
+    const last = buf[buf.length - 1];
+    if (t > last.t) {
+      const prev = buf[buf.length - 2];
+      const span = Math.max(1, last.t - prev.t);
+      const k = Math.min(250, t - last.t) / span;
+      let dh = (last.h - prev.h) % (Math.PI * 2);
+      if (dh > Math.PI) dh -= Math.PI * 2;
+      if (dh < -Math.PI) dh += Math.PI * 2;
+      return {
+        x: last.x + (last.x - prev.x) * k,
+        y: (last.y || 0) + ((last.y || 0) - (prev.y || 0)) * k,
+        z: last.z + (last.z - prev.z) * k,
+        h: last.h + dh * Math.min(1, k), s: last.s, v: last.v,
+      };
+    }
     for (let i = buf.length - 1; i >= 0; i--) {
       if (buf[i].t <= t) {
         const a = buf[i], b = buf[i + 1];

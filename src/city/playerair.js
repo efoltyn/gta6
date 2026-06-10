@@ -34,7 +34,7 @@
   const rng = Math.random;
 
   // ---- tunables -------------------------------------------------------------
-  const CRUISE_Y    = 42;     // ride cruise altitude (clears the Spire roof)
+  const CRUISE_Y    = 48;     // ride cruise altitude (clears every core-tower parapet at FH=4.6)
   const HELI_SPEED  = 30;     // m/s lateral (a personal heli is quick)
   const HELI_CLIMB  = 14;     // m/s vertical
   const BOARD_DIST  = 3.2;    // walk this close to a landed chopper to board
@@ -56,7 +56,6 @@
   function player() { const P = CBZ.player; return P && !P.dead ? P : null; }
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
   function note(m, t) { if (CBZ.city && CBZ.city.note) CBZ.city.note(m, t || 2.6); }
-  function big(m) { if (CBZ.city && CBZ.city.big) CBZ.city.big(m); }
   function money(n) { return "$" + Math.round(n).toLocaleString(); }
 
   // home ownership → airbase capabilities. realestate.js is the single source of
@@ -213,7 +212,8 @@
         if (d < BOARD_DIST) {
           c.phase = "ride"; c.dest = rideDest(); c.rideT = 0;
           g.cityChopperRide = true;
-          big("🚁 BOARDED");
+          // (CUT: the "🚁 BOARDED" centre flash — you can SEE you're in the
+          // bird. The note keeps the one thing you can't see: where it's headed.)
           note("Flying to " + (c.dest.label || "destination") + "…", 3);
           if (CBZ.sfx) CBZ.sfx("whoosh");
           return;
@@ -250,7 +250,8 @@
         if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
         g.cityChopperRide = false;
         c.phase = "leaving";
-        note("🚁 Dropped at " + (D.label || "destination") + ".", 2.4);
+        // (CUT: "🚁 Dropped at X." — your feet are on the ground and the bird
+        // is climbing away over your head; the world already said it.)
       }
       return;
     }
@@ -326,6 +327,21 @@
     const step = STRIKE_SPD * dt;
     j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
     if (j.burn) j.burn.scale.z = 1.4 + Math.sin(j.life * 30) * 0.4;
+    // THE JET IS THE ALERT: a repeating engine roar keyed to its true distance
+    // from the player — sfx's dist handling attenuates it and swaps to the
+    // muffled far-field bus past 60u, so it starts as a far-off rumble at the
+    // city edge and swells into a hard overhead roar on the pass. force+ghost
+    // so the 0.55s cadence never starves (or is starved by) other rumbles.
+    if (CBZ.sfx) {
+      j._sndT = (j._sndT == null ? 0 : j._sndT) - dt;
+      if (j._sndT <= 0) {
+        j._sndT = 0.55;
+        const P = CBZ.player;
+        const d = P ? Math.hypot(j.pos.x - P.pos.x, j.pos.z - P.pos.z) : 999;
+        CBZ.sfx("rumble", { dist: d, volume: 0.9, force: true, ghost: true });
+        if (d < 55) CBZ.sfx("wind", { dist: d, volume: 1.0, force: true, ghost: true });  // close pass: the air itself tears
+      }
+    }
     // release the bomb near the run-in to the target
     if (!j.dropped) {
       const dx = j.pos.x - j.target.x, dz = j.pos.z - j.target.z;
@@ -377,8 +393,12 @@
     strike = makeStrikeJet(tgt);
     // calling in military ordnance is a felony spectacle — the law notices.
     if (CBZ.city && CBZ.city.addHeat) CBZ.city.addHeat(260);
-    big("🎯 AIRSTRIKE INBOUND");
-    note("Jet running in on " + (tgt.label || "target") + " — clear the blast.", 3.4);
+    // (CUT: the "🎯 AIRSTRIKE INBOUND" centre flash. In real life nothing pops
+    // up to tell you a jet is coming — you HEAR it: updateStrike() drives a
+    // swelling engine roar from the moment it crosses the city edge. The only
+    // words are the read-back below — YOUR pilot confirming YOUR tasking, a
+    // notification from a person, on the quiet feed.)
+    note("📻 Pilot: \"Copy — running in on " + (tgt.label || "the mark") + ". Keep your head down.\"", 3);
     return true;
   };
 

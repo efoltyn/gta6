@@ -364,7 +364,7 @@
     if (heli.pool) heli.pool.visible = false;
     if (CBZ.sfx) CBZ.sfx("explosion");
     if (CBZ.shake) CBZ.shake(0.4);
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🚁 GUNSHIP DOWN");
+    // (no banner — the falling fireball IS the message)
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(50);
     if (CBZ.cityFeed) CBZ.cityFeed("You shot down a police gunship!", "#ff8b6b");
   }
@@ -484,7 +484,7 @@
         // launch from a wing pod, lead the target a touch toward last-known
         const t = aimPoint();
         launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t);
-        if (CBZ.city && CBZ.city.note && rng() < 0.5) CBZ.city.note("Gunship missile inbound!", 1.6);
+        // (no text — the missile has a smoke trail you can see)
       }
     }
   }
@@ -556,7 +556,8 @@
           j.fired = true;
           const t = aimPoint();
           launchMissile(j.pos.x, j.pos.y - 0.5, j.pos.z, t);
-          if (CBZ.city && CBZ.city.big && rng() < 0.4) CBZ.city.big("AIRSTRIKE");
+          // (no banner — you HEAR the jet; diegetic roar below)
+          if (CBZ.sfx && CBZ.player) { const dj = Math.hypot(j.pos.x - CBZ.player.pos.x, j.pos.z - CBZ.player.pos.z); CBZ.sfx("rumble", { dist: dj, ghost: true }); }
         }
       }
       // reap once well past / too long aloft (despawn if heat dropped)

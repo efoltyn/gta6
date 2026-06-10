@@ -1182,6 +1182,7 @@
   // spawnCityPeds (peds.js) so a new city never inherits an old spree.
   CBZ.cityRampageReset = function () {
     _rampagers = [];
+    _rampTipT = -1e9;            // a new run starts with a quiet phone
     _rampCD = 12 + rng() * 18;   // a short grace before the first shooter pops
     // a fresh run also clears the somewhere-to-be street furniture: queues/
     // pairs/moments hold refs/budgets from the OLD city, bubbles hold sprites.
@@ -1192,6 +1193,29 @@
       p.rampage = false; p._rampArmed = 0; p._rampHeatT = 0; p._rampT = 0; p._rampPanicT = 0;
     }
   };
+  // a contact TEXTS you about a spree — never a broadcast. The shooting itself
+  // is the alert: gunfire carries (gunVoice attenuates with distance), the
+  // crowd screams and scatters, sirens follow. Words only reach you when
+  //   (a) the spree is too FAR to hear (otherwise the text is narration), and
+  //   (b) somebody is actually IN your phone (crew or your partner) — a nobody
+  //       with no network gets no tips; they hear it when they're near it.
+  // One quiet feed line, rate-limited hard so back-to-back waves stay silent.
+  let _rampTipT = -1e9;          // ms stamp of the last contact text
+  function rampagePhoneTip(ped) {
+    const P = CBZ.player; if (!P || P.dead || !ped.pos) return;
+    if (Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 110) return;  // you can hear this one yourself
+    const t = (CBZ.now != null ? CBZ.now : 0);
+    if (t - _rampTipT < 90000) return;       // your people aren't a police scanner
+    let who = null;
+    for (const p of (CBZ.cityPeds || [])) { if (p && !p.dead && (p.recruited || p.companion) && p.name) { who = p.name; break; } }
+    if (!who && g.cityPartner && !g.cityPartner.dead) who = g.cityPartner.name;
+    if (!who) return;
+    _rampTipT = t;
+    const E = CBZ.cityEcon;
+    const where = (E && E.districtAt && E.districtName) ? E.districtName(E.districtAt(ped.pos.x, ped.pos.z)) : "the city";
+    if (CBZ.cityFeed) CBZ.cityFeed("📱 " + who + ": somebody's spraying up " + where + " — stay clear.", "#9fb0c6");
+  }
+
   // expose a manual trigger (debug / scripted events can force a spree on a ped)
   CBZ.cityStartRampage = function (ped) {
     if (!ped || ped.dead || ped.rampage) return false;
@@ -1199,7 +1223,9 @@
     if (_rampagers.indexOf(ped) < 0) _rampagers.push(ped);
     if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 90, "active-shooter");
     if ((ped.npcWanted | 0) < 3) ped.npcWanted = 3;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("⚠️ Active shooter reported nearby!", 3);
+    // NO on-screen alert (cut: "⚠️ Active shooter reported nearby!" — it spammed
+    // the centre flash up to 5×/wave and told you nothing the street doesn't).
+    rampagePhoneTip(ped);
     if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, 1.6, ped);
     return true;
   };

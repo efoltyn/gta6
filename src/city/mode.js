@@ -160,9 +160,11 @@
     }
     if (CBZ.sunTarget) CBZ.sunTarget.position.set(focus.x, 4, focus.z);
     if (CBZ.hemi) { CBZ.hemi.intensity = 0.38 + (0.95 - 0.38) * k; }
-    // fog pulled IN (60/620 → 80/460): the skyline rings at r≈430-560 must
-    // melt into the fog so the city reads as endless instead of walled.
-    if (CBZ.scene.fog) { CBZ.scene.fog.near = 80; CBZ.scene.fog.far = 460; }
+    // fog pulled IN (60/620 → 80/430): far == the near skyline ring radius,
+    // so the SEA and ground are 100% dissolved into fog exactly where the
+    // painted silhouettes + haze band (core/sky.js) take over — at 460 a
+    // not-quite-fogged blue water strip stayed visible between the rings.
+    if (CBZ.scene.fog) { CBZ.scene.fog.near = 80; CBZ.scene.fog.far = 430; }
     if (!cityShadow && CBZ.sun && CBZ.sun.shadow) {
       cityShadow = true;
       const sc = 190, cam = CBZ.sun.shadow.camera;

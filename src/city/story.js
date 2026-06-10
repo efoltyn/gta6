@@ -157,7 +157,7 @@
     // A quiet slim line tucked under the radar block (radar ~14..204, turf 212,
     // home 232) on the left. Never overlaps radar/money/wanted/ammo/speed — it's
     // a nudge you can ignore. Subtle pill, no heavy box.
-    bar.style.cssText = "position:fixed;left:16px;top:256px;z-index:18;display:none;max-width:230px;padding:3px 9px 3px 7px;background:rgba(10,12,18,.42);border-left:2px solid rgba(255,209,102,.65);border-radius:4px;color:#cdd6e3;font-family:Fredoka,system-ui,sans-serif;font-size:11px;line-height:1.35;letter-spacing:.2px;text-align:left;text-shadow:0 1px 2px rgba(0,0,0,.7);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9";
+    bar.style.cssText = "position:fixed;left:16px;top:256px;z-index:18;display:none;max-width:230px;padding:3px 9px 3px 7px;background:rgba(10,12,18,.42);border-left:2px solid rgba(255,209,102,.65);border-radius:4px;color:#cdd6e3;font-family:Fredoka,system-ui,sans-serif;font-size:11px;line-height:1.35;letter-spacing:.2px;text-align:left;text-shadow:0 1px 2px rgba(0,0,0,.7);pointer-events:none;white-space:normal;opacity:.9";
     document.body.appendChild(bar);
     return bar;
   }
@@ -176,9 +176,12 @@
     const s = ensure();
     let txt;
     if (m) {
-      txt = "<span style='color:#ffd166;font-weight:700;font-size:9px;letter-spacing:1px;opacity:.85'>" + CHAPTERS[s.chapter].toUpperCase() + "</span>&nbsp; " + m.obj;
+      // one clean human sentence — the fame-rank prefix read as gibberish welded
+      // to a truncated task ("NAME RINGING Recruit 3 to your crew —…"). The rank
+      // already lives in the HUD level line; the task speaks for itself.
+      txt = m.obj;
     } else {
-      txt = "<span style='color:#7ed957;font-weight:700;font-size:9px;letter-spacing:1px'>KINGPIN</span>&nbsp; Hold the throne.";
+      txt = "Hold the throne.";
     }
     if (txt !== lastObjText) { el.innerHTML = txt; lastObjText = txt; }
     el.style.display = (CBZ.cityMenuOpen ? "none" : "block");

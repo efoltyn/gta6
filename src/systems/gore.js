@@ -391,6 +391,14 @@
     const blunt = opts.melee === "blunt" || cause === "beaten" || cause === "finished off";
     const ranOver = !!opts.smear || cause === "run over";
 
+    // the corpse CARRIES its killing hit (systems/wounds.js): the kill tap
+    // already knows WHO died and HOW, so kills arriving from ANY pipeline
+    // (player, ped-vs-ped, cops) stamp an entry wound + clothing soak with
+    // zero changes at the kill sites. Guarded + self-gating (distance/caps).
+    if (ctx && ctx.ped && CBZ.bodyWound) {
+      CBZ.bodyWound(ctx.ped, { x, y, z }, { head, cal: amt, melee: blunt ? "blunt" : (blade ? "blade" : null) });
+    }
+
     let dx = 0, dz = 0, hasDir = false;
     if (opts.dir) { dx = opts.dir.x || 0; dz = opts.dir.z || 0; hasDir = (dx || dz); }
     const dm = Math.hypot(dx, dz) || 1; dx /= dm; dz /= dm;

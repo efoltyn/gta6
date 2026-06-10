@@ -1063,6 +1063,8 @@
     }
     // ped vs ped
     tgt.hp -= dmg;
+    // the body CARRIES the hit (wounds.js): entry wound + blood soak on the clothing
+    if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.05 + Math.random() * 0.55, z: tgt.pos.z }, melee ? { melee: "blunt", fromX: fx, fromZ: fz } : { fromX: fx, fromZ: fz });
     tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
     // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
     // (hands up / run), and returns whether this person DARES to fight back.

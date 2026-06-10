@@ -69,18 +69,16 @@
   // it in, or a cop sees it). If you're MASKED, nobody can ID you → no stars.
   function report(sev, opts) {
     opts = opts || {};
-    if (g.cityMasked) {                              // shiesty/bandana on → unidentified
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("🎭 A masked suspect was reported — not ID'd as you.", 1.4);
-      return;
-    }
+    if (g.cityMasked) return;                        // shiesty/bandana on → unidentified
+    // (CUT: "🎭 A masked suspect was reported — not ID'd as you." — you can't
+    // hear a stranger's phone call. The mask's [T] toggle line already taught
+    // the mechanic; the stars not climbing IS the feedback.)
     const T = CBZ.CITY.starHeat;
     const info = crimeInfo(opts.type, sev);
     // a non-crime (unknown/"Disturbance") never charges heat or grants a star —
-    // it's just ambient noise on the feed. Bail before any heat math runs.
-    if (info.stars <= 0) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Disturbance reported", 1.2);
-      return;
-    }
+    // and it prints NOTHING ("Disturbance reported" cut: a phone call you
+    // can't hear, about nothing, going nowhere). Bail before any heat math.
+    if (info.stars <= 0) return;
     const x = opts.x != null ? opts.x : CBZ.player.pos.x;
     const z = opts.z != null ? opts.z : CBZ.player.pos.z;
     let target = info.stars;
@@ -133,8 +131,11 @@
     g.wanted = starsFromHeat(g.heat);
     lastReport = { t: CBZ.now, x: x, z: z, stars: target };
     g.cityCrimeLabel = info.label;
+    // the centre flash fires ONLY when a star is actually GAINED (that's direct
+    // personal danger — the response just got heavier). A same-tier report no
+    // longer prints "Reported: <crime>": you can't overhear a witness's call,
+    // and the heat ring/star meter already carry the pressure.
     if (g.wanted > prev) CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED · " + info.label);
-    else if (CBZ.city && CBZ.city.note) CBZ.city.note("Reported: " + info.label, 1.3);
     if (CBZ.cityEvent) CBZ.cityEvent("crime-reported", { crime: info.label, severity: sev, panic: Math.min(8, want * 1.4), wantedPeak: g.wanted }, { silent: true, noWanted: true });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }

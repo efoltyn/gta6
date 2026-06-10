@@ -1059,50 +1059,12 @@
     }
   });
 
-  // ============================================================
-  //  POLICE DISPATCH BANNER — the wanted ladder, EXPLAINED on screen.
-  //  WHY: a star meter ticking up is abstract; a police-radio call that names
-  //  the response makes the escalation legible and dread-building, and it answers
-  //  the player's own question — "why is 5★ so hard?" Because each rung sends a
-  //  heavier counter: foot units → cruisers → roadblocks (bridge sealed) → a
-  //  helicopter → an AIRSTRIKE. It reads as a diegetic dispatch (the cops talking
-  //  on the radio), never a fourth-wall tutorial popup.
-  // ============================================================
-  const DISPATCH = [
-    null,
-    { t: "DISPATCH", m: "All units — suspect on foot. Move in.", c: "#ffd451" },
-    { t: "DISPATCH", m: "Cruisers responding. Box him in.", c: "#ffb14a" },
-    { t: "ROADBLOCKS", m: "Set up blocks. Seal the bridge.", c: "#ff8b3c" },
-    { t: "AIR SUPPORT", m: "Chopper dispatched — eyes in the sky.", c: "#ff6a4a" },
-    { t: "⚠ CODE BLACK", m: "Airstrike authorized. Level the block.", c: "#ff3b30" },
-  ];
-  let dispEl = null, lastStar = 0, dispT = 0;
-  function dispatchBanner() {
-    if (dispEl) return dispEl;
-    dispEl = document.createElement("div");
-    dispEl.id = "cDispatch";
-    dispEl.style.cssText = "position:fixed;left:50%;top:84px;transform:translate(-50%,-12px);z-index:22;" +
-      "pointer-events:none;opacity:0;transition:opacity .3s ease, transform .3s ease;" +
-      "text-align:center;font-family:Fredoka,system-ui,sans-serif;text-shadow:0 2px 8px rgba(0,0,0,.8)";
-    document.body.appendChild(dispEl);
-    return dispEl;
-  }
-  function showDispatch(star) {
-    const d = DISPATCH[Math.max(1, Math.min(5, star))]; if (!d) return;
-    const e = dispatchBanner();
-    // the wanted meter owns the star count — repeating "3★" here doubled the
-    // readout (M12); the call sign + message carry the escalation.
-    e.innerHTML = "<div style='font-size:13px;font-weight:700;letter-spacing:3px;color:" + d.c + "'>📻 " + d.t + "</div>" +
-      "<div style='font-size:16px;font-weight:600;color:#e8ecf2;margin-top:2px'>" + d.m + "</div>";
-    e.style.opacity = "1"; e.style.transform = "translate(-50%,0)";
-    dispT = 3.4;
-    if (CBZ.sfx) CBZ.sfx(star >= 4 ? "alarm" : "radio");
-  }
-  CBZ.onUpdate(46.5, function (dt) {
-    if (g.mode !== "city") { if (dispEl) dispEl.style.opacity = "0"; lastStar = 0; return; }
-    const star = Math.floor((g.wanted || 0) + 1e-6);
-    if (star > lastStar && star >= 1) showDispatch(star);   // only on ESCALATION
-    lastStar = star;
-    if (dispT > 0) { dispT -= dt; if (dispT <= 0 && dispEl) { dispEl.style.opacity = "0"; dispEl.style.transform = "translate(-50%,-12px)"; } }
-  });
+  // (CUT: the POLICE DISPATCH BANNER — "📻 DISPATCH / ⚠ CODE BLACK: Airstrike
+  //  authorized. Level the block." etc. flashing centre-screen on every star
+  //  step. You are the SUSPECT, not a unit on the radio net — nothing in the
+  //  world delivers that text to you. The escalation already announces itself
+  //  diegetically: sirens and extra cruisers at 1-2★, a visible light-bar wall
+  //  across the road at 3★, the chopper's rotor + radar blip at 4★, and at 5★
+  //  you HEAR the jet scream in before anything explodes. The star meter owns
+  //  the abstract readout; no popup needed.)
 })();

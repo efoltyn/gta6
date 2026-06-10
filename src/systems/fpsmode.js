@@ -1126,6 +1126,10 @@
         if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
           dir: shotDir, amount: (r.head ? 1.4 : 0.8) * (w.key === "shotgun" ? 1.5 : 1), player: true,
         });
+        // the body CARRIES the hit: a dark entry wound stamped on the struck
+        // part + blood soaking into the clothing (systems/wounds.js). Per
+        // pellet — a shotgun blast scatters wounds (wounds.js caps the burst).
+        if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal });
       } else if (hit.crowd != null) {
         // shot an ambient crowd member (the far NPCs that used to be unkillable)
         hitSomething = true;

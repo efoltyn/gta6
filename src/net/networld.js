@@ -113,10 +113,55 @@
 
     net.send({ t: "world", pd: packPeds(CBZ.cityPeds || []), cp: packPeds(CBZ.cityCops || []), cr: packCars(), w: g.wanted | 0 });
 
-    // remote drivers mow down host-simulated peds (their car isn't in our
-    // collision sim, so do the one check that matters: fast car vs body)
-    for (const R of (CBZ.netRemoteTargetsAll ? CBZ.netRemoteTargetsAll() : [])) { /* reserved */ }
+    hostRemoteInteractions();
   });
+
+  // The host makes remote players REAL to the NPC world beyond bullets:
+  //  - a remote driver's car mows down peds in its path (their car isn't in
+  //    our collision sim, so do the one check that matters: fast car vs body)
+  //  - a remote player holding a gun out makes nearby unarmed peds surrender
+  //    (the same hands-up read the local player gets)
+  function hostRemoteInteractions() {
+    if (!CBZ.netRemoteList) return;
+    const remotes = CBZ.netRemoteList([]);
+    for (const R of remotes) {
+      if (R.dead) continue;
+      // ---- mow-down ----
+      if (R.driving && R.carBuf && R.carBuf.length) {
+        const c = R.carBuf[R.carBuf.length - 1];
+        const v = Math.abs(c.v || 0);
+        if (v > 7) {
+          const dirx = -Math.sin(c.h), dirz = -Math.cos(c.h);
+          for (const p of CBZ.cityPeds || []) {
+            if (p.dead || p.ko > 0) continue;
+            const dx = p.pos.x - c.x, dz = p.pos.z - c.z;
+            if (dx * dx + dz * dz > 6.5) continue;
+            if (CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: c.x - dirx * 2, fromZ: c.z - dirz * 2, force: Math.min(11, v * 0.55), fling: 4 }, "run down");
+            if (CBZ.cityCrime) CBZ.cityCrime(70, { x: c.x, z: c.z, type: "hit-and-run" });
+          }
+          for (const cop of CBZ.cityCops || []) {
+            if (cop.dead) continue;
+            const dx = cop.pos.x - c.x, dz = cop.pos.z - c.z;
+            if (dx * dx + dz * dz > 6.5) continue;
+            if (CBZ.cityHurtCop) CBZ.cityHurtCop(cop, Math.min(160, v * 7), { fromX: c.x, fromZ: c.z });
+            if (CBZ.cityCrime) CBZ.cityCrime(110, { x: c.x, z: c.z, type: "hit-and-run" });
+          }
+        }
+      }
+      // ---- gunpoint: hands up for a remote's drawn gun ----
+      if (!R.driving && R.aim && R.armed && R.group && CBZ.cityMarkGunpoint) {
+        const h = R.group.rotation.y;
+        const fx = -Math.sin(h), fz = -Math.cos(h);
+        for (const p of CBZ.cityPeds || []) {
+          if (p.dead || p.vendor) continue;
+          const dx = p.pos.x - R.pos.x, dz = p.pos.z - R.pos.z;
+          const d = Math.hypot(dx, dz);
+          if (d > 7 || d < 0.4) continue;
+          if ((dx / d) * fx + (dz / d) * fz > 0.6) CBZ.cityMarkGunpoint(p, 1.0);
+        }
+      }
+    }
+  }
 
   // full meta for late joiners
   net.on("join", function (m) {

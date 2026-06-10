@@ -207,6 +207,8 @@
 
     const dmg = attack.dmg;
     actor.hp -= dmg;
+    // punches BRUISE (wounds.js) — the face you beat carries it
+    if (CBZ.bodyWound) CBZ.bodyWound(actor, { x: actor.pos.x, y: (actor.pos.y || 0) + 1.55, z: actor.pos.z }, { melee: "blunt", fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
     stamina = Math.min(1, stamina + 0.05);
     showHP(actor);
 

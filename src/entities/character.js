@@ -79,15 +79,20 @@
     // its emissive per-actor on hits, so it must not be a shared cache entry.
     const head = new THREE.Mesh(boxGeom(0.6, 0.6, 0.6), mat(c.skin));
     head.position.y = 0.3; head.castShadow = true;
-    const eyeMat = cmat(0x1a1a1a);
-    const le = new THREE.Mesh(boxGeom(0.1, 0.13, 0.05), eyeMat);
-    const re = new THREE.Mesh(boxGeom(0.1, 0.13, 0.05), eyeMat);
-    le.position.set(-0.14, 0.34, 0.31); re.position.set(0.14, 0.34, 0.31);
+    // FACE READS AT RANGE: slightly bigger, darker, prouder features so a face
+    // is legible at 20-40u (street distance), not just in a close-up. Deeper
+    // boxes wrap back into the head so the features hold up at oblique angles
+    // instead of vanishing edge-on. facial.js owns eye x/y + mouth y at runtime
+    // (it rewrites them every frame); z and geometry size are ours to set here.
+    const eyeMat = cmat(0x101010);
+    const le = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
+    const re = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
+    le.position.set(-0.14, 0.34, 0.315); re.position.set(0.14, 0.34, 0.315);
     // a brow line + a small mouth for expression (animated by systems/facial.js)
-    const brow = new THREE.Mesh(boxGeom(0.46, 0.05, 0.04), cmat(0x2a2018));
-    brow.position.set(0, 0.46, 0.31);
-    const mouth = new THREE.Mesh(boxGeom(0.2, 0.05, 0.04), cmat(0x5a3030));
-    mouth.position.set(0, 0.16, 0.31);
+    const brow = new THREE.Mesh(boxGeom(0.46, 0.06, 0.06), cmat(0x1c150e));
+    brow.position.set(0, 0.46, 0.315);
+    const mouth = new THREE.Mesh(boxGeom(0.22, 0.06, 0.06), cmat(0x4a2528));
+    mouth.position.set(0, 0.16, 0.315);
     neck.add(head, le, re, brow, mouth);
     body.add(neck);
 

@@ -27,7 +27,7 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  const FH = 4.0;                 // floor-to-floor (mirrors buildings.js)
+  const FH = 4.6;                 // floor-to-floor (mirrors buildings.js — storeys sized to the ~2.5-tall character)
   const PAR_H = 0.7;              // parapet height (mirrors the visual rim)
   const REACH = 2.5;              // [E] call-panel reach
 

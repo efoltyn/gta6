@@ -385,8 +385,9 @@
       activateTask(rec);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     } else {
-      // all four done → initiation unlocked
-      CBZ.city.big("They'll get you made — find the boss.");
+      // all four done → initiation unlocked. One quiet line FROM the crew —
+      // (the old centre flash "They'll get you made — find the boss." said the
+      // same thing twice, as an instruction popup.)
       CBZ.city.note(gangShort(rec) + " have seen enough — get patched in. · O", 3.4);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
@@ -642,7 +643,8 @@
     else { ped.rank = next; ped.maxHp = Math.max(ped.maxHp || 160, 200); ped.hp = ped.maxHp; }
     styleMember(ped, g.playerGang.color);
     const pip = rankPip(next);
-    CBZ.city.big("⬆ " + (ped.name || "Crew") + " → " + pip.toUpperCase());
+    // (CUT: the "⬆ NAME → RANK" centre flash — you just picked it from the
+    // menu; the quiet note below carries the same word.)
     CBZ.city.note((ped.name || "They") + " made " + pip + "." + (next === "lt" ? " Tell them to HOLD a block and lead a squad." : ""), 3);
     CBZ.city.addRespect(4);
     if (CBZ.cityRankEvent) CBZ.cityRankEvent("promote", { ped });
@@ -701,11 +703,14 @@
     const mem = liveMembers();
     if (!mem.length) { CBZ.city.note("No crew to command.", 1.6); return; }
     pg.order = kind; pg.orderTarget = null;
+    // (CUT: the "⚔ ATTACK" / "🛡 HOLD HERE" / "🏃 FOLLOW" / "🚶 DISPERSE"
+    // centre flashes — a popup restating the button YOU just pressed. The
+    // quiet note reads like your own call going out, and the crew visibly
+    // moving on it + the orders chip ARE the confirmation.)
     if (kind === "attack") {
       const foe = aimedEnemy();
       if (!foe) { CBZ.city.note("No enemy in sight to attack.", 1.8); pg.order = "follow"; applyOrder(); return; }
       pg.orderTarget = foe;
-      CBZ.city.big("⚔ ATTACK");
       CBZ.city.note("Crew attacks " + (foe.name || (foe.kind === "cop" ? "the cop" : "the target")) + "!", 2);
       // attacking the cops openly is a crime spree
       if (foe.kind === "cop") CBZ.cityCrime && CBZ.cityCrime(60, { x: foe.pos.x, z: foe.pos.z, type: "gang-assault" });
@@ -713,13 +718,10 @@
     } else if (kind === "hold") {
       const P = CBZ.player; pg.holdPoint = { x: P.pos.x, z: P.pos.z };
       claimTurfAt(P.pos.x, P.pos.z);
-      CBZ.city.big("🛡 HOLD HERE");
       CBZ.city.note("Crew posts up and holds this block.", 2);
     } else if (kind === "follow") {
-      CBZ.city.big("🏃 FOLLOW");
       CBZ.city.note("Crew falls in with you.", 1.6);
     } else if (kind === "disperse") {
-      CBZ.city.big("🚶 DISPERSE");
       CBZ.city.note("Crew melts back to the turf.", 1.6);
     }
     applyOrder();

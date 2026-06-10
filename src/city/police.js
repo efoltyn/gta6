@@ -75,7 +75,7 @@
   let copClock = 0;            // module clock for cheap cooldown stamps (vagrant shoo timers)
   let barkCD = 0;              // ONE global small-talk cooldown → barks stay rare, never spam
   let dutyScanT = 0, dutyIdx = 0, dutyCop = null;          // single move-along assignment
-  let dispatchHoldT = 0, radioNoteCD = 0, lastStars = 0, lastWant = 0;   // radio-beat state
+  let dispatchHoldT = 0, lastStars = 0, lastWant = 0;   // radio-beat state
 
   // beat small-talk — strictly diegetic procedure/street flavor, only worth
   // SAYING when the player is close enough to overhear it.
@@ -331,7 +331,7 @@
     }
     g.cityStowedWeapon = null; g._copStow = null;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    if (CBZ.city) CBZ.city.note("Weapon out.", 1.0);
+    // (no "Weapon out." note — the gun filling your hands says it)
     return true;
   };
 
@@ -374,7 +374,7 @@
     if (g._copStow || g.cityStowedWeapon) { e.preventDefault(); CBZ.cityRedrawWeapon(); return; }
     if (g.cityMeleeWeapon && CBZ.cityDrawGun && CBZ.cityDrawGun()) {
       e.preventDefault();
-      if (CBZ.city) CBZ.city.note("Weapon out.", 1.0);
+      // (no "Weapon out." note — you can see the swap in your own hands)
       return;
     }
     if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
@@ -598,7 +598,7 @@
   // Cruise altitude of the searchlight chopper. The tallest tower (The Spire,
   // 9 storeys @4m) tops out near y≈36 and a player on its roof sits ~y38, so the
   // chopper flies WELL above that — it is never below a rooftop target it hunts.
-  const CHOP_Y = 44;
+  const CHOP_Y = 49;   // floors grew to FH=4.6 — tallest walk-up roof ≈37.9; keep a real down-angle
   // a target this far BELOW the chopper is a plausible down/level shot; a player
   // higher than the chopper can't be hit (a door gunner can't fire straight up).
   const CHOP_FIRE_MARGIN = 3;
@@ -770,7 +770,6 @@
     // Bounded: one caller per step, the hold spans ≤2 maintain ticks, and with
     // no cop nearby there's no hold at all (dispatch heard the shots itself).
     if (dispatchHoldT > 0) dispatchHoldT -= 1.1;
-    if (radioNoteCD > 0) radioNoteCD -= 1.1;
     const escalated = stars > lastStars || (playerWant | 0) > (lastWant | 0);
     lastStars = stars; lastWant = playerWant;
     if (escalated && stars >= 1 && g.state === "playing" && dispatchHoldT <= 0) {
@@ -785,10 +784,10 @@
       if (caller) {
         caller._radioT = 1.5; caller._duty = null;
         dispatchHoldT = 1.5;
-        if (radioNoteCD <= 0 && cd < 32 && CBZ.city && CBZ.city.note) {
-          radioNoteCD = 9;
-          CBZ.city.note("📻 \"" + (stars >= 3 ? "Shots fired — all units, " : "Dispatch, ") + "suspect in the area. Requesting backup.\"", 1.7);
-        }
+        // (CUT: the 📻 "requesting backup" subtitle — you're not on the police
+        // net. The call-in still HAPPENS: the cop visibly stops and keys his
+        // shoulder mic (_radioT drives the pose), and the response that rolls
+        // in after the hold IS the message.)
       }
     }
 
@@ -836,7 +835,8 @@
     sp._pursuit = true; sp.reckless = true; sp.ai = false; sp.npcDriver = null; sp.abandoned = false;
     sp.baseV = (targetCar.baseV || 12) * 1.18 + stars * 0.8;   // a touch faster so it can catch up
     pursuers.push(sp);
-    if (CBZ.city && CBZ.city.note && rng() < 0.5) CBZ.city.note("🚓 Pursuit unit moving to intercept!", 1.0);
+    // (CUT: "🚓 Pursuit unit moving to intercept!" — radio chatter you can't
+    // hear, about a cruiser you're about to SEE in your mirror.)
   }
   function updatePursuers(dt) {
     const P = CBZ.player;
@@ -1067,7 +1067,9 @@
     }
     RB.x = bx; RB.z = bz; RB.ux = ux; RB.uz = uz;
     RB.state = 1; RB.age = 0; RB.flashT = 0;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("📻 \"All units — shut the street down ahead of him. Wall it off.\"", 2.0);
+    // (CUT: the 📻 "wall it off" subtitle — police-net traffic the suspect
+    // can't hear. The wall sells itself: the siren below, then a row of
+    // light-bars strobing across the lane ahead of you.)
     if (CBZ.sfx) CBZ.sfx("siren");
     return true;
   }
@@ -1440,7 +1442,8 @@
           const painted = CBZ.cityChopperPaints && CBZ.cityChopperPaints();
           if (pd < 30 && (painted || losClear(c.pos.x, c.pos.z, CBZ.player.pos.x, CBZ.player.pos.z))) {
             c.searchT = 0; c.searchGoal = null; c._sweepGoal = null; c.curTarget = CBZ.city.playerActor; c.retarget = 0.5; c.sees = true; c.lostT = 0;
-            if (CBZ.city && CBZ.city.note && rng() < 0.4) CBZ.city.note("🚨 \"I've got eyes on the suspect!\"", 0.9);
+            // a SHOUT, not radio-speak — he's within 30u, you'd genuinely hear it
+            if (CBZ.city && CBZ.city.note && rng() < 0.4) CBZ.city.note("👮 \"There he is!\"", 0.9);
             continue;
           }
         }
@@ -1634,6 +1637,7 @@
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", Math.random() < 0.012, c);
     } else {
       tgt.hp -= dmg;
+      if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.0 + Math.random() * 0.6, z: tgt.pos.z }, { cal: c.swat ? 1.1 : 0.85, fromX: c.pos.x, fromZ: c.pos.z });
       if (tgt.hp <= 0) CBZ.cityKillPed && CBZ.cityKillPed(tgt, { fromX: c.pos.x, fromZ: c.pos.z, attacker: c, byPlayer: false, force: 5, fling: 4 }, "shot by police");
       else if (CBZ.body) CBZ.body.hit(tgt, { fromX: c.pos.x, fromZ: c.pos.z, force: 3 });
     }

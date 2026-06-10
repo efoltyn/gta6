@@ -345,7 +345,17 @@
       hairC[i] = (Math.random() * HAIRS.length) | 0;
     }
     paintColors();
-    if (ready) render(0);                 // place them so frame 0 isn't a pile at the origin
+    if (ready) {
+      // park EVERY slot ≥ count across ALL body parts + the blob, so a re-seed
+      // to a smaller crowd can never strand stale frozen bodies (or detached
+      // face parts) from a previous, larger run — render() only writes 0..count-1.
+      wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
+      for (let i = count; i < CAP; i++) {
+        for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
+        if (shadowQ) shadowQ.setMatrixAt(i, wm);
+      }
+      render(0);                 // place them so frame 0 isn't a pile at the origin
+    }
     return count;
   };
   CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 320)); };
@@ -425,9 +435,15 @@
     put(legR, i, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -sw);
     put(armL, i, -0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, -sw * 0.82);
     put(armR, i, 0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, sw * 0.82);
-    put(eyeL, i, -0.12, 2.235 + bob, 0.235, 0.10, 0.13, 0.06, 0);
-    put(eyeR, i, 0.12, 2.235 + bob, 0.235, 0.10, 0.13, 0.06, 0);
-    put(mouth, i, 0, 2.045 + bob, 0.235, 0.20, 0.05, 0.05, 0);
+    // FACE — the head box is 0.54 deep (front face at local z 0.27). The old
+    // z 0.235 + 0.06-deep eyes put the face's FRONT at 0.265 — fully BURIED
+    // inside the head, so the whole instanced crowd read as faceless mannequins.
+    // Deep boxes centred at z 0.25 stick ~0.04 proud of the face AND wrap back
+    // into the head, so eyes/mouth read from any reasonable angle, not just
+    // dead-on. Same instances, zero new draw calls.
+    put(eyeL, i, -0.12, 2.235 + bob, 0.25, 0.11, 0.14, 0.12, 0);
+    put(eyeR, i, 0.12, 2.235 + bob, 0.25, 0.11, 0.14, 0.12, 0);
+    put(mouth, i, 0, 2.045 + bob, 0.255, 0.22, 0.055, 0.10, 0);
   }
   function render() {
     if (!ready || !count) return;

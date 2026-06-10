@@ -140,6 +140,11 @@
       cr: P.crouch ? 1 : 0,
       w: weaponKey(),
     };
+    // proximity-voice speaking flag (netvoice.js) — drives the 🔊 pip over heads
+    if (net.voiceSpeaking && net.voiceSpeaking()) m.v = 1;
+    // holding a gun (host turns this into NPC gunpoint reactions near you)
+    const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
+    if (it && it.gun && !P.dead && !P.driving) m.aim = 1;
     if (P.driving && P._vehicle) {
       const c = P._vehicle;
       m.car = [
@@ -183,13 +188,39 @@
     return { head: hit.head, down: false, dmg };
   };
 
-  // incoming PvP damage (someone shot ME)
+  // incoming PvP damage (someone shot/struck ME)
   net.onEv("pvp", function (m) {
     const from = net.players.get(m.id);
     const who = from ? from.name : "another player";
     const A = CBZ.netRemoteActor ? CBZ.netRemoteActor(m.id) : null;
-    if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(m.dmg, A ? A.pos.x : CBZ.player.pos.x + 1, A ? A.pos.z : CBZ.player.pos.z, "shot by " + who, !!m.head, A, !!m.nl);
+    const fx = A ? A.pos.x : CBZ.player.pos.x + 1, fz = A ? A.pos.z : CBZ.player.pos.z;
+    if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(m.dmg, fx, fz, (m.melee ? "beaten down by " : "shot by ") + who, !!m.head, A, !!m.nl);
+    if (m.melee) {
+      // show their swing + a real chance the blow knocks you off your feet
+      if (A && A.ch) { A.ch.punchT = 0.001; A.ch.punchDur = 0.22; }
+      if (CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && Math.random() < 0.3 && !CBZ.body.busy(CBZ.city.playerActor)) {
+        CBZ.body.knockdown(CBZ.city.playerActor, { fromX: fx, fromZ: fz, force: 7, t: 1.0 });
+      }
+    }
   });
+
+  // Melee swing landing on a NET target (remote player or synced puppet) —
+  // called from city/combat.js land() before any local damage is applied.
+  net.localMeleeHit = function (a, dmg, tier) {
+    const heavy = tier !== "light";
+    if (a.netKind === "player") {
+      net.sendEv({ e: "pvp", to: a.netId, dmg: Math.round(dmg), melee: 1, heavy: heavy ? 1 : 0 });
+    } else {
+      net.sendEv({ e: "hit", to: net.hostId, k: a.netKind, nid: a.nid, dmg: Math.round(dmg), melee: 1 });
+    }
+    if (CBZ.body) {
+      try { CBZ.body.hit(a, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: heavy ? 5 : 3.5 }); } catch (e) {}
+      try { CBZ.body.flash(a); } catch (e) {}
+    }
+    if (CBZ.sfx) CBZ.sfx(heavy ? "punch2" : "punch");
+    if (CBZ.doHitstop) CBZ.doHitstop(heavy ? 0.07 : 0.045);
+    return true;
+  };
 
   // incoming NPC damage routed from the host (a cop/ped on the host shot ME)
   net.onEv("nhurt", function (m) {
