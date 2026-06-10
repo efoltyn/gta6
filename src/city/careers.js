@@ -64,11 +64,14 @@
   }
   CBZ.cityGainNotoriety = gainNotoriety;
 
-  function makeBeacon(x, z, color) {
+  // topY (optional): stretch the column to reach a ROOF objective — a dead-drop
+  // point 40m up still needs a beam you can see from the street.
+  function makeBeacon(x, z, color, topY) {
     clearBeacon();
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 30, 12, 1, true),
+    const hgt = Math.max(30, (topY || 0) + 8);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, hgt, 12, 1, true),
       new THREE.MeshBasicMaterial({ color: color || 0xffd166, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false }));
-    m.position.set(x, 15, z); m.userData.transient = true;
+    m.position.set(x, hgt / 2, z); m.userData.transient = true;
     CBZ.city.arena.root.add(m);
     beacon = m;
   }
@@ -380,6 +383,28 @@
       const s = pick(shops);
       jobs.push({ type: "heist", lot: s, reward: payout(400, 900), desc: "HEIST: knock over " + s.building.name });
     }
+    // DEAD DROP — a fence pays you to place/retrieve a package at a NAMED roof
+    // dead-drop (the lifts + fire escapes that just opened the skyline). The
+    // chain: foot of the way up → the drop point ON the roof (→ back to the
+    // fence on a retrieve). Pay scales with district busyness — sneaking a
+    // package over downtown heads is worth more than a quiet dockside roof.
+    if (CBZ.cityRoofAccess) {
+      const roofs = CBZ.cityRoofAccess();
+      if (roofs && roofs.length) {
+        const r = pick(roofs);
+        const e = CBZ.cityEcon;
+        const dk = e && e.districtAt ? e.districtAt(r.drop.x, r.drop.z) : null;
+        const tier = (dk && e.DISTRICTS && e.DISTRICTS[dk]) ? e.DISTRICTS[dk].tier : 1;
+        const place = rng() < 0.55;
+        const fence = randSpot();
+        jobs.push({
+          type: "deaddrop", roof: r, place, fence, stage: "foot",
+          reward: Math.max(50, Math.round(payout(place ? 420 : 520, 380) * (0.45 + 0.55 * tier) / 10) * 10),
+          desc: place ? ("DEAD DROP: stash a package on the " + r.name + " roof")
+                      : ("DEAD DROP: lift a package off the " + r.name + " roof, walk it back"),
+        });
+      }
+    }
     // SMUGGLING — pick up a stash at point A, run it to point B without losing
     // it (drop it / get busted en route and it's blown). A driving job at heart.
     if (lots.length >= 2 && ri >= 1) {
@@ -415,7 +440,7 @@
     return board;
   }
   let offered = [];
-  const ICON = { hit: "🎯", delivery: "📦", heist: "💰", smuggle: "🚚", getaway: "🏎️", protection: "💼" };
+  const ICON = { hit: "🎯", delivery: "📦", heist: "💰", smuggle: "🚚", getaway: "🏎️", protection: "💼", deaddrop: "🪜" };
   CBZ.cityJobBoard = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     // if you ride with a crew, the board opens straight onto YOUR set's
@@ -442,6 +467,7 @@
     if (isGangJob(j.type)) { acceptGangContract(j); return; }
     g.cityJob = j;
     if (j.type === "smuggle") makeBeacon(j.pickup.x, j.pickup.z, 0xffd166);
+    else if (j.type === "deaddrop") makeBeacon(j.roof.foot.x, j.roof.foot.z, 0xc792ea);
     else if (j.type === "getaway") makeBeacon(j.rdv.x, j.rdv.z, 0x7de7ff);
     else if (j.type === "protection" && j.lot) makeBeacon(j.lot.building.door.x, j.lot.building.door.z, 0xffd166);
     else if (j.dest) makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
@@ -811,6 +837,44 @@
     }
   }
 
+  // per-frame progress for a DEAD-DROP run. The chain the fence buys: get to
+  // the FOOT of the way up (lift lobby / fire-escape flight), make the roof
+  // point, work the drop for a beat — and on a retrieve, walk the package back
+  // down to the fence. Carrying for a fence demands a LOW PROFILE: spike to
+  // 4 stars and the deal is off (same heat rule the smuggle run lives by).
+  function deadDropTick(j, P, dt) {
+    const r = j.roof;
+    if ((g.wanted | 0) >= 4) { failJob("too hot — the fence called it off"); return; }
+    if (j.stage === "foot") {
+      if (Math.hypot(P.x - r.foot.x, P.z - r.foot.z) < 5) {
+        j.stage = "roof";
+        makeBeacon(r.drop.x, r.drop.z, 0xc792ea, r.drop.y);
+        CBZ.city.note((r.via === "lift" ? "Ride the lift up" : "Take the fire escape up") + " — the drop point's on the roof.", 2.4);
+      }
+    } else if (j.stage === "roof") {
+      const onSpot = Math.abs(CBZ.player.pos.y - r.drop.y) < 2.5 && Math.hypot(P.x - r.drop.x, P.z - r.drop.z) < 2.6;
+      if (!onSpot) { j.work = 0; return; }
+      j.work = (j.work || 0) + dt;
+      if (j.work >= 1.2) {
+        if (j.place) {
+          CBZ.city.note("Package tucked in behind the vents. Nobody on the street saw a thing.", 2.2);
+          finishJob((g.wanted | 0) === 0 ? 60 : 0);   // a clean, unseen drop earns the quiet bonus
+        } else {
+          j.stage = "fence"; j.work = 0;
+          makeBeacon(j.fence.x, j.fence.z, 0x7ed957);
+          CBZ.city.note("Got the package — get back down and walk it to the fence.", 2.4);
+        }
+      } else if (CBZ.now - (j._noteT || 0) > 900) {
+        j._noteT = CBZ.now; CBZ.city.note("Working the drop… " + Math.ceil(1.2 - j.work) + "s", 0.9);
+      }
+    } else { // fence: hand the lifted package over
+      if (Math.hypot(P.x - j.fence.x, P.z - j.fence.z) < 4) {
+        CBZ.city.note("The fence pockets it and peels off your cut.", 2.0);
+        finishJob((g.wanted | 0) === 0 ? 60 : 0);
+      }
+    }
+  }
+
   CBZ.cityCareersReset = function () {
     g.cityJob = null; g.cityCrew = 0; g.cityBank = g.cityBank || 0; clearBeacon(); payT = 0;
     // notoriety + sales tallies are a CAREER — they persist a new life like the
@@ -871,6 +935,8 @@
           if (!CBZ.player.driving) { /* bailing on foot is risky but allowed */ }
           if ((g.wanted | 0) === 0) { CBZ.city.note("Clean getaway.", 1.6); finishJob(CBZ.player.driving ? 100 : 0); }
         }
+      } else if (j.type === "deaddrop") {
+        deadDropTick(j, P, dt);
       } else if (j.type === "protection" && j.lot) {
         const d = j.lot.building.door;
         if (Math.hypot(P.x - d.x, P.z - d.z) < 4 && !j.collecting) {

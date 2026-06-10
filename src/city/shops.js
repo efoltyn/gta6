@@ -236,7 +236,14 @@
     const econ = CBZ.cityEcon, lot = openLot; if (!lot) return;
     const kind = lot.kind, name = lot.building.name;
     const stock = econ.stockFor(kind);
-    listItems = stock.slice(0, 9);
+    // THE GUN WALL (city/gunstore.js): when the walk-in armory is live, the
+    // counter menu stops listing the firearms themselves — every gun hangs on
+    // the wall as its REAL model and is bought eye-to-iron with [E] at the
+    // rack. The clerk's counter keeps the consumables (ammo/armor/grenades/
+    // melee). One price source for both paths: cityEcon.buyPrice. Feature-
+    // detected: no gunstore.js → this menu sells everything, as before.
+    const wallLive = kind === "guns" && CBZ.cityGunWallLive && CBZ.cityGunWallLive(lot);
+    listItems = (wallLive ? stock.filter((n) => !(econ.ITEMS[n] && econ.ITEMS[n].gun)) : stock).slice(0, 9);
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:2px'>" + name + "</div>";
     const disc = shopDiscount(qty);
     // HEADER: cash/bank + your CURRENT DRIP (the club gate). In a boutique we
@@ -254,6 +261,12 @@
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:6px'>Cash " + fmt$(g.cash) + " · " +
       (g.cityBank ? "Bank " + fmt$(g.cityBank) + " · " : "") +
       dripBadge + " · [Esc]/[E] leave</div>";
+
+    // the walk-in routing line: the WALL sells the guns, the counter the rest.
+    if (wallLive) {
+      html += "<div style='font-size:12px;color:#9fb0c6;margin:2px 0 6px'>🔫 The pieces are <b style='color:#ffd166'>on the wall</b> — " +
+        "walk up to one and press <b style='color:#ffd166'>E</b> to take it off the rack. The counter's got the ammo.</div>";
+    }
 
     // BOUTIQUE CLOSET: a compact "change clothes" view — equip/unequip from the
     // wearables you already OWN (separate from buying). Toggled with [G]; while

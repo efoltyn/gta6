@@ -34,6 +34,16 @@
    residual crack shows cabin-dark interior/floor pan, never daylight.
    crumpleCar clamps panel offsets so deformation can't tear the hull
    away from the merged static grille/bumpers/glass.
+
+   DRIVING JUICE (PLAYER car only — AI traffic keeps just its brake
+   lights): the getaway IS the show. A synthesized ENGINE VOICE
+   (systems/audio.js CBZ.carAudio) revs with speed+throttle through
+   fake gear steps; the [SPACE] handbrake breaks the rear loose for
+   slides with a tyre screech; hard slip lays real RUBBER (one
+   80-segment ring-buffer mesh = ONE draw call, oldest overwritten)
+   and boils white smoke off the rear wheels. WHY: a corner you can
+   hear taken flat and then read in skid marks afterwards is showing
+   off — the game's whole point — without one extra HUD pixel.
 ============================================================ */
 (function () {
   "use strict";
@@ -834,16 +844,86 @@
       base, pop: type === "tire" ? 1.4 : (fire ? 2.0 + Math.random() : 2.6 + Math.random() * 1.4),
       vy: type === "tire" ? 0.2 : (fire ? 2.2 + Math.random() * 1.4 : 1.3 + Math.random() * 0.8),
       vx: (Math.random() - 0.5) * (fire ? 0.5 : 1.0), vz: (Math.random() - 0.5) * (fire ? 0.5 : 1.0),
-      type, maxOp: type === "tire" ? 0.32 : (fire ? 0.95 : 0.42),
+      type, maxOp: type === "tire" ? 0.4 : (fire ? 0.95 : 0.42),
     });
   }
-  function emitTireSmoke(car) {
+  function emitTireSmoke(car, side) {
     const a = car.heading, hx = Math.sin(a), hz = Math.cos(a), sx = Math.cos(a), sz = -Math.sin(a);
-    const side = Math.random() < 0.5 ? 1 : -1;
+    if (side == null) side = Math.random() < 0.5 ? 1 : -1;   // a slide boils BOTH rears (caller passes ±1)
     spawnVPart(car.pos.x - hx * 1.3 + sx * side * 0.95, 0.3, car.pos.z - hz * 1.3 + sz * side * 0.95, "tire");
+  }
+
+  // ---- SKID MARKS — rubber the PLAYER's rear wheels leave under slides,
+  //      handbrake lock-ups and burnouts. WHY: marks are the receipt a
+  //      power-slide writes on the asphalt — you look back after the corner
+  //      and SEE you drove it sideways (and a burnout outside the club is
+  //      showing off in rubber). COST: every segment lives in ONE
+  //      pre-allocated mesh with ONE shared material (a single draw call,
+  //      ever) — a ring buffer of 80 quads, oldest silently overwritten;
+  //      laying a strip is an 18-float write, zero allocation. Quads sit at
+  //      y≈0.08, ABOVE the road paint stack (asphalt 0.04 → crosswalks
+  //      0.072) because real rubber covers lane lines. AI cars never lay. ----
+  const SKID_MAX = 80, SKID_W = 0.3;
+  let skidMesh = null, skidPosArr = null, skidRing = 0, skidDead = false;
+  function ensureSkidMesh() {
+    if (skidMesh || skidDead) return;
+    try {
+      skidPosArr = new Float32Array(SKID_MAX * 18);          // 2 tris × 3 verts × xyz per segment
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(skidPosArr, 3));
+      geo.computeBoundingSphere();
+      const m = new THREE.MeshBasicMaterial({ color: 0x0c0d10, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide });
+      m._shared = true;
+      skidMesh = new THREE.Mesh(geo, m);
+      skidMesh.frustumCulled = false;                        // verts span blocks; 1 call is cheaper than reculling
+      skidMesh.matrixAutoUpdate = false;
+      skidMesh.renderOrder = 2;
+      CBZ.scene.add(skidMesh);
+    } catch (e) { skidDead = true; }                          // stub renderer (headless) — marks just skip
+  }
+  function laySkidSegment(x0, z0, x1, z1) {
+    ensureSkidMesh();
+    if (!skidMesh) return;
+    const dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz);
+    if (len < 0.05) return;
+    const px = (-dz / len) * SKID_W * 0.5, pz = (dx / len) * SKID_W * 0.5;
+    const y = 0.078 + (skidRing % 5) * 0.0012;               // micro-stagger: crossing marks never z-fight
+    const o = skidRing * 18; skidRing = (skidRing + 1) % SKID_MAX;
+    const p = skidPosArr;
+    p[o] = x0 + px; p[o + 1] = y; p[o + 2] = z0 + pz;
+    p[o + 3] = x0 - px; p[o + 4] = y; p[o + 5] = z0 - pz;
+    p[o + 6] = x1 - px; p[o + 7] = y; p[o + 8] = z1 - pz;
+    p[o + 9] = x0 + px; p[o + 10] = y; p[o + 11] = z0 + pz;
+    p[o + 12] = x1 - px; p[o + 13] = y; p[o + 14] = z1 - pz;
+    p[o + 15] = x1 + px; p[o + 16] = y; p[o + 17] = z1 + pz;
+    skidMesh.geometry.attributes.position.needsUpdate = true;
+  }
+  // lay strips under both rear wheels while the tyres are working hard. Anchors
+  // per-wheel previous positions on the car; a gap (respawn/teleport/slide end)
+  // re-anchors instead of drawing one long false stripe across the city.
+  function laySkids(car, amt, fwdX, fwdZ) {
+    if (amt <= 0.25 || Math.abs(car.v) < 3) { if (car._skid) car._skid.on = false; return; }
+    const cm = CBZ.camera.position;
+    const ddx = car.pos.x - cm.x, ddz = car.pos.z - cm.z;
+    if (ddx * ddx + ddz * ddz > 60 * 60) { if (car._skid) car._skid.on = false; return; }   // beyond 60u nobody reads rubber
+    const d = vehicleDims(car);
+    const rb = (d.wheelbase || 2.7) * 0.45;                  // rear axle behind centre
+    const two = car._playerCarFeel && car._playerCarFeel.twoWheel;
+    const tw = two ? 0 : (d.width || 2) * 0.4;               // a bike lays ONE centre stripe
+    const lx = car.pos.x - fwdX * rb + fwdZ * tw, lz = car.pos.z - fwdZ * rb - fwdX * tw;
+    const rx = car.pos.x - fwdX * rb - fwdZ * tw, rz = car.pos.z - fwdZ * rb + fwdX * tw;
+    const S = car._skid || (car._skid = { lx: 0, lz: 0, rx: 0, rz: 0, on: false });
+    const moved = Math.hypot(lx - S.lx, lz - S.lz);
+    if (!S.on || moved > 3.5) S.on = true;                   // (re)anchor this frame, draw from the next
+    else if (moved > 0.55) {
+      laySkidSegment(S.lx, S.lz, lx, lz);
+      if (!two) laySkidSegment(S.rx, S.rz, rx, rz);
+    } else return;                                           // not far enough yet — keep the anchor
+    S.lx = lx; S.lz = lz; S.rx = rx; S.rz = rz;
   }
   // per-frame: float + fade every live car particle. Cheap; runs only when any exist.
   CBZ.onAlways(9.6, function (dt) {
+    if (skidMesh && skidMesh.visible !== (g.mode === "city")) skidMesh.visible = g.mode === "city";   // rubber is city asphalt only
     if (g.mode !== "city" || !_vparts.length) return;
     for (let i = _vparts.length - 1; i >= 0; i--) {
       const p = _vparts[i]; p.age += dt;
@@ -857,7 +937,8 @@
       if (p.type === "fire") {
         // white-hot → orange → dark over the puff's short life
         col.setRGB(1, 0.85 - t * 0.55, 0.25 - t * 0.22);
-      } else col.setRGB(0.22 - (p.type === "tire" ? 0 : 0.05), 0.21, 0.2);  // grey-ish smoke
+      } else if (p.type === "tire") col.setRGB(0.82, 0.82, 0.84);   // burnout smoke is WHITE — vaporized rubber, not engine oil
+      else col.setRGB(0.17, 0.21, 0.2);  // grey-ish engine smoke
     }
   });
 
@@ -969,6 +1050,11 @@
     // tracer hits also visibly spark/dent the hull a touch
     if (opts.crumple) crumpleCar(car, Math.min(0.2, amount * 0.004));
     damageEngine(car, amount, true);
+    // a driver taking fire doesn't keep cruising the speed limit — they FLOOR it
+    if (opts.byPlayer && car.ai && !car.dead && !car.npcDriver) {
+      car.reckless = true;
+      car.baseV = Math.max(car.baseV || 0, ((CBZ.CITY.traf && CBZ.CITY.traf.cruise) || [7, 12])[1] * 1.5);
+    }
   };
   // PUBLIC: force a car to catch fire now (e.g. molotov, fuel-line shot)
   CBZ.cityCarIgnite = function (car, byPlayer) {
@@ -1016,6 +1102,7 @@
     CBZ.playerChar.group.visible = false;
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.sfx) CBZ.sfx("door");
+    if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
     CBZ.city && CBZ.city.note("Driving" + worth + " — [F] out  [C] car style", 1.8);
     return true;
@@ -1023,6 +1110,8 @@
   CBZ.cityExitVehicle = function () {
     const P = CBZ.player, car = P._vehicle;
     P.driving = false; P._vehicle = null;
+    if (CBZ.carAudio) CBZ.carAudio.stop();    // key off — the engine voice dies with the seat
+    if (car && car._skid) car._skid.on = false;
     if (car) {
       car.player = false; car.v = 0; car.vx = car.vz = 0; car.ai = false;
       car._pitch = car._roll = 0;
@@ -1139,6 +1228,27 @@
   function vehicleDims(car) {
     return (car && (car._visualDims || car.dims)) || { width: 2, length: 4.4, wheelbase: 2.7 };
   }
+  // ---- ENGINE VOICE class + fake gearbox ----------------------------------
+  // The audio synth (systems/audio.js CBZ.carAudio) has five crank voices; map
+  // whatever you're sitting in onto one so a stolen Veyron SOUNDS exotic and a
+  // work van sounds like a work van. Re-checked every frame (string compare,
+  // free) so the [C] style-cycler retunes the motor the moment the body swaps.
+  function engineFlavor(car) {
+    const feel = car._playerCarFeel, cls = feel && feel.class;
+    if (cls === "motorcycle") return "bike";
+    if (cls === "super" || cls === "sports") return "sports";
+    if (cls === "muscle" || cls === "lowrider") return "muscle";
+    if (cls === "suv" || cls === "van" || cls === "boat" || cls === "helicopter") return "truck";
+    const bk = bodyKind(car);
+    if (bk === "coupe") return "sports";
+    if (bk === "muscle") return "muscle";
+    if (bk === "suv" || bk === "pickup" || bk === "van") return "truck";
+    return "sedan";
+  }
+  // top-of-gear points as fractions of the car's own top speed: revs climb
+  // through each band and DROP on the shift — five fake gears read as a real
+  // box without simulating one.
+  const GEAR_TOP = [0.14, 0.30, 0.50, 0.74, 1.01];
   function wallRadius(car) {
     const d = vehicleDims(car);
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
@@ -1239,9 +1349,35 @@
     const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
     const slip = Math.hypot(latX, latZ);
     car._drift = slip;
-    if (slip > 2.4 && vmag > 6) {                      // tyre smoke off the rears
+    // ---- DRIVING JUICE: one number — how hard are the rear tyres working?
+    //      Slides (lateral slip), handbrake lock-ups, a full-brake stop from
+    //      speed and a hard launch in something powerful all count. It drives
+    //      the screech volume, the white smoke and the rubber on the road. ----
+    const burnout = throttle > 0 && vmag > 0.6 && vmag < 7 && D.accel > 32;   // a strong motor lights them up off the line
+    const skidAmt = Math.max(
+      slip > 2.2 && vmag > 6 ? Math.min(1, slip / 8) : 0,
+      handbrake && vmag > 6 ? 0.85 : 0,
+      throttle < 0 && car.v > Math.max(14, MAXV * 0.55) ? 0.55 : 0,           // locked-up panic stop
+      burnout ? 0.6 : 0
+    );
+    if (skidAmt > 0.3) {                               // white smoke boils off BOTH rears
       car._tireT = (car._tireT || 0) + dt;
-      if (car._tireT > 0.1) { car._tireT = 0; emitTireSmoke(car); }
+      if (car._tireT > 0.13 - skidAmt * 0.06) { car._tireT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
+    }
+    laySkids(car, skidAmt, fwdX, fwdZ);
+    // ---- ENGINE VOICE: revs climb through the fake gear band, snap down on
+    //      the upshift. Reverse whines low; revving at a standstill screams. ----
+    if (CBZ.carAudio) {
+      const sN = Math.min(1, vmag / Math.max(1, MAXV));
+      let gear = 0; while (gear < GEAR_TOP.length - 1 && sN >= GEAR_TOP[gear]) gear++;
+      const glo = gear === 0 ? 0 : GEAR_TOP[gear - 1];
+      let rev = car.v < 0 ? Math.min(1, vmag / REV) * 0.4
+        : (sN - glo) / Math.max(0.05, GEAR_TOP[gear] - glo);
+      rev = 0.06 + Math.max(0, Math.min(1, rev)) * 0.9;
+      if (throttle > 0 && vmag < 2.5) rev = Math.max(rev, 0.5);   // revving it off the line / mid-burnout
+      const shifted = car._gear != null && gear > car._gear && throttle > 0;
+      car._gear = gear;
+      CBZ.carAudio.update(rev, throttle > 0 ? 1 : 0, skidAmt, engineFlavor(car), shifted);
     }
     // ---- WEIGHT TRANSFER (visual game-feel): the body PITCHES (squat on
     //      throttle, dive on brake) and ROLLS into a turn, eased so it reads as
@@ -1936,6 +2072,9 @@
   }
   CBZ.cityVehiclesReset = function () {
     npcDrivers = 0;
+    if (CBZ.carAudio) CBZ.carAudio.stop();   // a fresh run never inherits an orphaned motor
+    // wipe the rubber: a new run starts on clean asphalt (zeroed quads are degenerate = invisible)
+    if (skidPosArr) { skidPosArr.fill(0); skidRing = 0; if (skidMesh) skidMesh.geometry.attributes.position.needsUpdate = true; }
     // retire any live smoke/flame sprites to the pool so a reset starts clean
     for (let i = _vparts.length - 1; i >= 0; i--) { _vparts[i].s.visible = false; _vpool.push(_vparts[i].s); }
     _vparts.length = 0;

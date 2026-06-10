@@ -1992,7 +1992,7 @@
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;
     const placed = [], abandonedLots = [], homeLots = [];
-    let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null;
+    let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null, gunLot = null;
 
     // shuffle the shop list, then float the gameplay-critical trades to the
     // front so they ALWAYS get placed; the rest fill in only sometimes, leaving
@@ -2137,6 +2137,37 @@
           lot.building.chopZone = { x: door.x + door.nx * 5, z: door.z + door.nz * 5, r: 5.5 };
         }
         if (shop.realtor) realtor = lot;
+        // ===== THE GUN STORE — the walk-in armory (city/gunstore.js) =====
+        // The shell already exists (door, counter, clerk vendor, furnished
+        // guns interior); what the walk-in needs is WHERE to hang the REAL
+        // purchasable weapon models. Stamp a WORLD-frame descriptor — the
+        // back-wall rack line behind the clerk, the actual counter slab for
+        // the glass pistol case, and the walkable room bounds for the browse
+        // gate — so gunstore.js does zero geometry math. The clubLot pattern,
+        // applied to iron.
+        if (shop.kind === "guns") {
+          gunLot = lot;
+          const inx = door.nx, inz = door.nz, tgx = -inz, tgz = inx;   // inward + wall-tangent units
+          const halfIn = (inx !== 0 ? w : d) / 2;                       // door wall → room centre
+          const halfTan = (inx !== 0 ? d : w) / 2;
+          lot.building.gunstore = {
+            name: shop.name,
+            // the walkable interior footprint ("you're in the store")
+            bounds: { minX: lot.cx - w / 2 + WT, maxX: lot.cx + w / 2 - WT, minZ: lot.cz - d / 2 + WT, maxZ: lot.cz + d / 2 - WT },
+            // BACK-WALL RACK face behind the clerk: centre + the normal facing
+            // back INTO the room (toward the door) + the wall tangent. span is
+            // capped so the wall of guns reads dense, not scattered.
+            rack: {
+              x: lot.cx + inx * (halfIn - WT - 0.18),
+              z: lot.cz + inz * (halfIn - WT - 0.18),
+              nx: -inx, nz: -inz, tx: tgx, tz: tgz,
+              span: Math.min(12, Math.max(5, 2 * halfTan - 4)),
+            },
+            // the REAL counter slab (top = 1.2: the 0.6-centre, 1.2-tall box
+            // above) — gunstore.js sets its glass display case on this top.
+            counter: { x: lot.cx + ccx, z: lot.cz + ccz, w: cw, d: cd, top: 1.2, tx: tgx, tz: tgz },
+          };
+        }
         // ===== THE VELVET CLUB — the city's one EXCLUSIVE nightclub =====
         // The single "bar" shop IS the marquee club: a velvet rope across the
         // door, a bouncer who stands just inside it, and a queue lane snaking
@@ -2260,6 +2291,7 @@
     city.realtor = realtor;
     city.luxuryLot = luxury;
     city.clubLot = clubLot;          // THE Velvet Club lot (city/club.js reads its .building.club)
+    city.gunShopLot = gunLot;        // the walk-in armory lot (city/gunstore.js hangs the real stock here)
   };
 
   // pick black or white text for the best contrast against a sign colour

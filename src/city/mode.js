@@ -258,6 +258,7 @@
       if (CBZ.cityRealEstateReset) CBZ.cityRealEstateReset();
       if (CBZ.cityZillowReset) CBZ.cityZillowReset();
       if (CBZ.cityAdBoardsReset) CBZ.cityAdBoardsReset();  // skyline starts neutral with the books
+      if (CBZ.cityRoofLootReset) CBZ.cityRoofLootReset();  // roofs restock with the fresh run
       if (CBZ.cityVehiclesReset) CBZ.cityVehiclesReset();
       if (CBZ.cityGlassReset) CBZ.cityGlassReset();   // re-glaze every shattered window
 

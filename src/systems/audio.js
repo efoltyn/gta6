@@ -13,6 +13,16 @@
    money), shotgun = chest-thump boom with a rolling tail. Gunfire
    that's far away (>60u) routes through one shared muffle+slap-echo
    bus so distant gang wars read as city ambience, not as "incoming".
+
+   ENGINE VOICE (CBZ.carAudio): the ONE deliberately-synthesized sound
+   left — the player's own motor. WHY: a recording can't follow a
+   throttle. Three cheap oscillators (saw fundamental + half-freq
+   square thump + detuned saw shimmer through one lowpass) CAN: pitch
+   rides the revs, gear-steps snap, the throttle opens the filter, and
+   a sports car / truck / bike each get their own crank pitch. Plus a
+   vibrato'd bandpass squeal for tyre screech under slides. Driven
+   per-frame by city/vehicles.js; player-car only, watchdogged so it
+   can never drone after you leave the wheel.
 ============================================================ */
 (function () {
   "use strict";
@@ -139,11 +149,10 @@
 
   // Looping beds. Per user direction: NO bullshit background drone / music.
   // The only loops are diegetic, real recordings tied to a game state:
-  //   car_engine  -> while you're actually driving
   //   wanted_siren-> real police siren while you have a wanted level (city)
-  //   lockdown    -> real klaxon while the prison is on lockdown
+  // (the old car_engine recording is retired — your motor is now the
+  //  synthesized ENGINE VOICE below, which actually revs and shifts)
   const LOOPS = {
-    car_engine: { file: O + "car-engine-mid.m4a", volume: 0.22 },
     wanted_siren: { file: W + "police_siren.m4a", volume: 0.5 },
     // (jail lockdown siren is now a BRIEF one-shot in BANK, not a sustained loop)
   };
@@ -245,6 +254,95 @@
     const fb = ctx.createGain(); fb.gain.value = 0.32;
     const wet = ctx.createGain(); wet.gain.value = 0.5;
     farIn.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(lp);
+  }
+
+  // ============================================================
+  //  PLAYER ENGINE VOICE + TYRE SCREECH (CBZ.carAudio)
+  //  city/vehicles.js feeds update(rev, throttle, skid, flavor, shifted)
+  //  every driven frame. One persistent oscillator rig (built on enter,
+  //  torn down on exit) — never per-frame node churn. WHY each knob:
+  //    idle/max = crank fundamental Hz — a truck IDLES lower than a
+  //               superbike REVS, so you hear what you stole;
+  //    sub      = half-frequency square weight (big-displacement thump);
+  //    det      = detuned-saw weight (mechanical shimmer/rasp);
+  //    lp*      = how much top-end the voice opens up as it revs;
+  //    vol      = presence (muscle/truck LOUD and proud, sedan polite).
+  // ============================================================
+  const ENGINES = {
+    sports: { idle: 92, max: 560, vol: 0.24, lpBase: 420, lpSpan: 2600, sub: 0.45, det: 0.55, q: 1.1 },
+    muscle: { idle: 54, max: 310, vol: 0.30, lpBase: 280, lpSpan: 1500, sub: 0.95, det: 0.40, q: 1.4 },
+    sedan:  { idle: 72, max: 390, vol: 0.19, lpBase: 320, lpSpan: 1800, sub: 0.60, det: 0.40, q: 1.0 },
+    truck:  { idle: 42, max: 220, vol: 0.30, lpBase: 220, lpSpan: 1000, sub: 1.05, det: 0.35, q: 1.5 },
+    bike:   { idle: 125, max: 900, vol: 0.21, lpBase: 520, lpSpan: 3400, sub: 0.30, det: 0.60, q: 1.0 },
+  };
+  let eng = null, engFed = 0, engFlavorKey = "";
+  function engineStart() {
+    if (eng || !ctx || !loopBus || !sfxBus) return;
+    const e = {};
+    // motor: oscA(saw) + oscB(square @ half) + oscC(detuned saw) -> lowpass -> gain
+    e.gain = ctx.createGain(); e.gain.gain.value = 0.0001; e.gain.connect(loopBus);
+    e.lp = ctx.createBiquadFilter(); e.lp.type = "lowpass"; e.lp.frequency.value = 600; e.lp.Q.value = 1.2; e.lp.connect(e.gain);
+    e.oscA = ctx.createOscillator(); e.oscA.type = "sawtooth"; e.oscA.frequency.value = 70; e.oscA.connect(e.lp);
+    e.subGain = ctx.createGain(); e.subGain.gain.value = 0.6; e.subGain.connect(e.lp);
+    e.oscB = ctx.createOscillator(); e.oscB.type = "square"; e.oscB.frequency.value = 35; e.oscB.connect(e.subGain);
+    e.detGain = ctx.createGain(); e.detGain.gain.value = 0.45; e.detGain.connect(e.lp);
+    e.oscC = ctx.createOscillator(); e.oscC.type = "sawtooth"; e.oscC.frequency.value = 70; e.oscC.detune.value = 14; e.oscC.connect(e.detGain);
+    e.oscA.start(); e.oscB.start(); e.oscC.start();
+    // tyre screech: saw with a fast vibrato through a resonant bandpass = squeal
+    e.skidGain = ctx.createGain(); e.skidGain.gain.value = 0.0001; e.skidGain.connect(sfxBus);
+    e.skidBp = ctx.createBiquadFilter(); e.skidBp.type = "bandpass"; e.skidBp.frequency.value = 1280; e.skidBp.Q.value = 4.5; e.skidBp.connect(e.skidGain);
+    e.skidOsc = ctx.createOscillator(); e.skidOsc.type = "sawtooth"; e.skidOsc.frequency.value = 1150; e.skidOsc.connect(e.skidBp);
+    e.skidLfoGain = ctx.createGain(); e.skidLfoGain.gain.value = 130; e.skidLfoGain.connect(e.skidOsc.frequency);
+    e.skidLfo = ctx.createOscillator(); e.skidLfo.type = "sine"; e.skidLfo.frequency.value = 29; e.skidLfo.connect(e.skidLfoGain);
+    e.skidOsc.start(); e.skidLfo.start();
+    engFed = performance.now() * 0.001;
+    engFlavorKey = "";
+    eng = e;
+  }
+  function engineStop() {
+    if (!eng) return;
+    const e = eng; eng = null;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    try {
+      e.gain.gain.cancelScheduledValues(t);
+      e.gain.gain.setTargetAtTime(0.0001, t, 0.07);          // key-off, not a click
+      e.skidGain.gain.cancelScheduledValues(t);
+      e.skidGain.gain.setTargetAtTime(0.0001, t, 0.04);
+      [e.oscA, e.oscB, e.oscC, e.skidOsc, e.skidLfo].forEach(function (o) { o.stop(t + 0.45); });
+    } catch (err) {}
+  }
+  function engineUpdate(rev, throttle, skid, flavor, shifted) {
+    if (!ctx || ctx.state === "suspended") return;
+    if (!eng) engineStart();                                  // first frame at the wheel
+    if (!eng) return;
+    engFed = performance.now() * 0.001;
+    const F = ENGINES[flavor] || ENGINES.sedan;
+    const e = eng, t = ctx.currentTime;
+    if (flavor !== engFlavorKey) {                            // retune the static voicing once per car class
+      engFlavorKey = flavor;
+      e.subGain.gain.setTargetAtTime(F.sub, t, 0.1);
+      e.detGain.gain.setTargetAtTime(F.det, t, 0.1);
+      e.lp.Q.value = F.q;
+    }
+    rev = Math.max(0, Math.min(1.15, rev || 0));
+    const hz = F.idle + rev * (F.max - F.idle);
+    // short time-constants: an upshift's rev DROP must read as a snap, not a glide
+    e.oscA.frequency.setTargetAtTime(hz, t, 0.045);
+    e.oscB.frequency.setTargetAtTime(hz * 0.5, t, 0.045);
+    e.oscC.frequency.setTargetAtTime(hz, t, 0.055);
+    e.lp.frequency.setTargetAtTime(F.lpBase + rev * F.lpSpan + (throttle ? 500 : 0), t, 0.07);
+    const vol = F.vol * (0.36 + rev * 0.34 + (throttle ? 0.32 : 0));
+    if (shifted) {
+      // the gear change: a momentary throttle-cut dip while the "clutch" is in
+      e.gain.gain.cancelScheduledValues(t);
+      e.gain.gain.setTargetAtTime(vol * 0.3, t, 0.015);
+      e.gain.gain.setTargetAtTime(vol, t + 0.08, 0.05);
+    } else e.gain.gain.setTargetAtTime(vol, t, 0.07);
+    // tyre screech scales with slip² (moderate slip whispers, a slide HOWLS)
+    skid = Math.max(0, Math.min(1, skid || 0));
+    e.skidGain.gain.setTargetAtTime(skid * skid * 0.5, t, skid > 0.05 ? 0.035 : 0.09);
+    if (skid > 0.05) e.skidOsc.frequency.setTargetAtTime(1000 + skid * 320 + Math.random() * 160, t, 0.06);
   }
 
   function playLoaded(file, buffer, p, opts) {
@@ -392,17 +490,15 @@
     const g = CBZ.game || {};
     const playing = g.state === "playing";
     if (!playing) {
-      stopAudioLoop("engine");
+      engineStop();
       stopAudioLoop("wanted");
       return;
     }
     // NO background bed/music — only diegetic, real loops tied to game state.
-    const P = CBZ.player;
-    // car engine while actually driving
-    if (g.mode === "city" && P && P.driving && P._vehicle) {
-      const speed = Math.abs(P._vehicle.v || 0);
-      setAudioLoop("engine", "car_engine", 0.11 + Math.min(0.17, speed * 0.008), 0.72 + Math.min(0.8, speed * 0.035));
-    } else stopAudioLoop("engine");
+    // ENGINE VOICE watchdog: city/vehicles.js feeds carAudio.update() every
+    // driven frame. If the feed stops for any reason (left the car, died,
+    // busted, a mode switch ate the exit hook) the motor must not drone on.
+    if (eng && performance.now() * 0.001 - engFed > 0.4) engineStop();
     // (REMOVED per user request: the global "you're wanted" police-siren loop that
     // played + swelled as your stars rose. Always off now.)
     stopAudioLoop("wanted");
@@ -410,6 +506,8 @@
 
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
+  // your car's voice: start on enter, update every driven frame, stop on exit
+  CBZ.carAudio = { start: engineStart, stop: engineStop, update: engineUpdate };
   CBZ.gunVoice = gunVoice;
   CBZ.gunVoiceName = voiceFor; // weapon name -> bank voice, for player-fired call sites (full volume via CBZ.sfx)
   CBZ.getAudioCtx = function () { return ctx; };

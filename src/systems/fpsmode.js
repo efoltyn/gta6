@@ -5,6 +5,16 @@
    flat debug pistol: a sidearm, pump shotgun, and carbine with distinct
    magazines, reserve ammo, recoil, spread, fire cadence, tracers,
    impact puffs, shell ejection, reload behavior, and viewmodel motion.
+
+   BULLETS MARK THE WORLD BY CALIBER (owner's rule: a gun that exists
+   must AFFECT buildings and cars). Every impact is threaded with the
+   firing weapon's round weight: 7.62/12g visibly chew concrete (bigger
+   bursts, dust, the odd knocked-off chunk, deeper thuds), punch car
+   panels (real engine damage + crumple + a panel shudder + paint chips
+   in the car's own coat) and blow out glass at ANY range — while a 9mm
+   stays light and only breaks panes up close. Persistent pooled pock
+   decals (gunfx.js CBZ.bulletHole) keep the evidence on walls AND on
+   the cars you sprayed — the aftermath of a firefight is half its drama.
 ============================================================ */
 (function () {
   "use strict";
@@ -85,6 +95,33 @@
   }
   function shoulderActive() { return !fps.active && armed() && CBZ.game.state === "playing"; }
   function maxHpOf(a) { return (a.kind === "guard" || a.kind === "warden") ? 140 : 100; }
+
+  // ---- CALIBER: how hard each round MARKS the world -----------------------
+  // One scalar per weapon threaded into every surface impact: burst size,
+  // debris, decal diameter, thud depth, car damage, glass reach. WHY: buying
+  // the AK has to SHOW — the street it shot up must read differently from a
+  // street a 9mm shot up, or the price tag bought nothing visible.
+  const CAL = {
+    sniper: 1.9, ak47: 1.6, shotgun: 1.5, lmg: 1.35, deagle: 1.3,
+    carbine: 1.2, revolver: 1.15, smg: 0.85, sidearm: 0.8, uzi: 0.7, taser: 0.25,
+  };
+  function caliber(w) { return CAL[w.key] != null ? CAL[w.key] : (w.damage >= 30 ? 1.2 : 0.8); }
+  // rifle-class rounds keep their authority at range (full-distance glass
+  // breaks, deep marks); pocket calibers shed energy fast.
+  function heavyRound(w) { return caliber(w) >= 1.0; }
+  const GLASS_PISTOL_REACH = 28;   // a 9mm/SMG slug only breaks a pane this close
+
+  // per-weapon impact THUD (reused opts object — no per-shot allocation; far
+  // must be re-cleared because audio.js sets it on the object for far hits)
+  const thudSfxOpts = { pitch: 1, volume: 1, dist: null, far: false };
+  function surfaceThud(name, cal, dist) {
+    if (!CBZ.sfx) return;
+    thudSfxOpts.pitch = Math.max(0.6, 1.18 - cal * 0.3) * (0.95 + Math.random() * 0.1);  // heavier round = deeper smack
+    thudSfxOpts.volume = 0.35 + cal * 0.4;
+    thudSfxOpts.dist = dist;
+    thudSfxOpts.far = false;
+    CBZ.sfx(name, thudSfxOpts);
+  }
 
   function syncAmmo() {
     const w = weapon();
@@ -629,6 +666,93 @@
     return hits.length ? hits[0] : null;
   }
 
+  // ---- ray vs the CAR fleet (cars were invisible to bullets before this) ----
+  // WHY: cars are the street furniture of every firefight — they must take the
+  // round (panel hole, paint chips, engine damage) AND act as real cover so a
+  // ped crouched behind a sedan is actually safe. Cheap sphere broad-phase per
+  // car, then a slab test in the car's yaw-local frame; tracks WHICH face the
+  // bullet entered so the decal/debris hug the actual panel.
+  function findCarHit(origin, dir, maxT) {
+    if (CBZ.game.mode !== "city" || !CBZ.cityCars || !CBZ.cityCars.length) return null;
+    const cars = CBZ.cityCars;
+    let best = null, bestT = maxT, bnx = 0, bny = 0, bnz = 0;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || c.dead || !c.group || (c.player && CBZ.player.driving)) continue;
+      const dims = c.dims;
+      const hy = dims ? dims.height * 0.5 : 0.95;
+      const cx = c.pos.x, cy = hy, cz = c.pos.z;
+      // broad phase: closest approach of the ray to the car centre
+      const ox = cx - origin.x, oy = cy - origin.y, oz = cz - origin.z;
+      const tc = ox * dir.x + oy * dir.y + oz * dir.z;
+      const rad = (dims ? dims.length : 4.6) * 0.6 + 0.6;
+      if (tc < -rad || tc - rad > bestT) continue;
+      const px = ox - dir.x * tc, py = oy - dir.y * tc, pz = oz - dir.z * tc;
+      if (px * px + py * py + pz * pz > rad * rad) continue;
+      // narrow phase: slab test in the car's local frame (yaw = heading)
+      const h = c.heading || 0, ch = Math.cos(h), sh = Math.sin(h);
+      const lox = ch * -ox - sh * -oz, loy = -oy, loz = sh * -ox + ch * -oz;  // origin rel. centre, un-yawed
+      const ldx = ch * dir.x - sh * dir.z, ldy = dir.y, ldz = sh * dir.x + ch * dir.z;
+      const hx = (dims ? dims.width : 2.2) * 0.5 + 0.05;
+      const hz = (dims ? dims.length : 4.6) * 0.5 + 0.05;
+      let tmin = 0.05, tmax = bestT, axis = -1, sign = 1;
+      let miss = false;
+      // x slab
+      if (Math.abs(ldx) < 1e-8) { if (Math.abs(lox) > hx) continue; }
+      else {
+        let t0 = (-hx - lox) / ldx, t1 = (hx - lox) / ldx;
+        if (t0 > t1) { const s = t0; t0 = t1; t1 = s; }
+        if (t0 > tmin) { tmin = t0; axis = 0; sign = ldx > 0 ? -1 : 1; }
+        if (t1 < tmax) tmax = t1;
+        if (tmin > tmax) continue;
+      }
+      // y slab (box sits feet-to-roof: centre cy, half height hy)
+      if (Math.abs(ldy) < 1e-8) { if (Math.abs(loy) > hy) miss = true; }
+      else {
+        let t0 = (-hy - loy) / ldy, t1 = (hy - loy) / ldy;
+        if (t0 > t1) { const s = t0; t0 = t1; t1 = s; }
+        if (t0 > tmin) { tmin = t0; axis = 1; sign = ldy > 0 ? -1 : 1; }
+        if (t1 < tmax) tmax = t1;
+        if (tmin > tmax) miss = true;
+      }
+      if (miss) continue;
+      // z slab
+      if (Math.abs(ldz) < 1e-8) { if (Math.abs(loz) > hz) continue; }
+      else {
+        let t0 = (-hz - loz) / ldz, t1 = (hz - loz) / ldz;
+        if (t0 > t1) { const s = t0; t0 = t1; t1 = s; }
+        if (t0 > tmin) { tmin = t0; axis = 2; sign = ldz > 0 ? -1 : 1; }
+        if (t1 < tmax) tmax = t1;
+        if (tmin > tmax) continue;
+      }
+      if (axis < 0 || tmin >= bestT) continue;   // started inside / not nearest
+      // entry-face normal, yawed back to world
+      const lnx = axis === 0 ? sign : 0, lny = axis === 1 ? sign : 0, lnz = axis === 2 ? sign : 0;
+      best = c; bestT = tmin;
+      bnx = ch * lnx + sh * lnz; bny = lny; bnz = -sh * lnx + ch * lnz;
+    }
+    return best ? { car: best, dist: bestT, normal: { x: bnx, y: bny, z: bnz } } : null;
+  }
+
+  // ---- PANEL SHUDDER: a shot car's hull jolts for a beat -------------------
+  // Tiny decaying rotation.x wobble on the deformable body mesh (crumpleCar
+  // owns rotation.z/position — rotation.x is exclusively ours, restored to 0
+  // when done so the wreck pose is untouched). Bounded to 6 live shudders.
+  const shudders = [];
+  function carShudder(car, cal) {
+    const ud = car.group && car.group.userData;
+    if (!ud || !ud.body) return;
+    for (let i = 0; i < shudders.length; i++) {
+      if (shudders[i].car === car) { shudders[i].t = 0; shudders[i].amp = Math.max(shudders[i].amp, 0.015 + cal * 0.02); return; }
+    }
+    if (shudders.length >= 6) {
+      const old = shudders.shift();
+      const oud = old.car.group && old.car.group.userData;
+      if (oud && oud.body) oud.body.rotation.x = 0;
+    }
+    shudders.push({ car, t: 0, dur: 0.18, amp: 0.015 + cal * 0.02 });
+  }
+
   // Hitboxes tuned to the ACTUAL character model (feet at y≈0): the head
   // cube sits ~y2.15, the torso ~y1.4, the legs ~y0.65. The head sphere is
   // checked FIRST and wins outright — if the ray passes through it the shot
@@ -689,13 +813,18 @@
   function resolveShot(w, dir) {
     eye.copy(CBZ.camera.position);
     const wall = wallDistance(eye, dir, w.range);
-    const maxT = wall ? Math.max(0.1, wall.distance - 0.04) : w.range;
+    let maxT = wall ? Math.max(0.1, wall.distance - 0.04) : w.range;
+    // CARS are hard cover AND targets: the nearest car along the ray clamps the
+    // search so a ped ducked behind a sedan is safe — the panel eats the round.
+    const carHit = findCarHit(eye, dir, maxT);
+    if (carHit) maxT = Math.max(0.1, carHit.dist - 0.04);
     const hit = findActorHit(eye, dir, maxT, w);
     // the police gunship overhead is a valid target — ray-test it (no damage here;
     // the shoot loop / rocket splash applies it) and take it if it's the nearest.
     const air = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
     if (hit && (!air || hit.dist <= air.dist)) return hit;
     if (air) return { actor: null, aircraft: true, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) };
+    if (carHit) return { actor: null, car: carHit.car, normal: carHit.normal, dist: carHit.dist, point: eye.clone().addScaledVector(dir, carHit.dist) };
     return {
       actor: null,
       wall: !!wall,
@@ -970,15 +1099,21 @@
     // run-and-gun harder than the 1.4 default — plant your feet for the payoff.
     const moveBloom = w.spread * moving * (w.moveSpread || 1.4);
     const cone = w.spread * (1 + recoil * 0.18) + bloom + moveBloom;
+    const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
+    let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
     for (let i = 0; i < pellets; i++) {
       spreadDir(fwd, cone, shotDir);
       const hit = resolveShot(w, shotDir);
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
       if (i < 5 || pellets === 1) fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
-      // city: a window anywhere in this pellet's path shatters (glass never blocks the shot)
+      // city: a window in this pellet's path shatters (glass never blocks the
+      // shot) — but CALIBER decides REACH: a rifle slug still carries pane-
+      // breaking energy across the block, a 9mm/SMG round only up close.
       if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
-        CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z, hit.dist != null ? hit.dist + 0.5 : w.range);
+        const reach = hit.dist != null ? hit.dist + 0.5 : w.range;
+        CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z,
+          heavyRound(w) ? reach : Math.min(reach, GLASS_PISTOL_REACH));
       }
       if (hit.actor) {
         hitSomething = true;
@@ -1004,18 +1139,48 @@
         if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
         spawnImpact(hit.point, false, true);
         if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
+      } else if (hit.car) {
+        // CALIBER vs SHEET METAL: real engine damage (rifle rounds punch panels
+        // ~2x harder than a 9mm; heavy rounds also dent), a panel shudder, paint
+        // chips in THIS car's coat, and a persistent hole that RIDES the panel.
+        const car = hit.car;
+        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, (w.pellets ? 1.7 : 4.2) * cal, { byPlayer: true, crumple: cal >= 1.0 });
+        spawnImpact(hit.point, false, cal >= 1.3);
+        if (CBZ.bulletImpact) {
+          CBZ.bulletImpact(hit.point, hit.normal, { kind: "spark", power: cal });
+          if (hit.dist < 45) CBZ.bulletImpact(hit.point, hit.normal, { kind: "chip", power: cal * 0.8, color: car.color });
+        }
+        if (CBZ.bulletHole && car.group) CBZ.bulletHole(hit.point, hit.normal, { size: 0.12 + cal * 0.1, parent: car.group, dist: hit.dist });
+        carShudder(car, cal);
+        if (carThudDist < 0) carThudDist = hit.dist;
       } else if (hit.wall) {
-        spawnImpact(hit.point, false, w.key === "shotgun");
+        spawnImpact(hit.point, false, cal >= 1.3);
         // surface normal of the struck wall (faces back toward the shooter):
         // walls in this game are near-vertical, so reflect the shot dir onto the
         // horizontal plane for a believable ricochet cone + a persistent hole.
         const nx = -shotDir.x, nz = -shotDir.z;
         const nl = Math.hypot(nx, nz) || 1;
         const wnx = nx / nl, wnz = nz / nl;
-        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: w.key === "shotgun" ? 1.5 : 1 });
-        if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
+        if (CBZ.bulletImpact) {
+          CBZ.bulletImpact(hit.point, { x: wnx, y: 0.18, z: wnz }, { kind: "spark", power: cal });
+          // heavy rounds CHEW concrete: a second dust kick + the odd chunk
+          // knocked clean off the face (LOD: only worth drawing inside ~45u)
+          if (cal >= 1.2 && hit.dist < 45) {
+            CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3 });
+            if (CBZ.cityChunk && Math.random() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
+          }
+        }
+        // persistent pock — the wall you magdumped STAYS pocked, 7.62 > 9mm
+        if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, { size: 0.15 + cal * 0.13, dist: hit.dist });
+        else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
+        if (wallThudDist < 0) wallThudDist = hit.dist;
       }
     }
+    // impact THUD by caliber — a 7.62 lands a deeper, louder smack on whatever
+    // it chewed (concrete thud / car-panel clank). Once per trigger pull, and
+    // never over the flesh-hit foley below.
+    if (carThudDist >= 0) surfaceThud("clank", cal, carThudDist);
+    else if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
     // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
     if (hitSomething) flashHitMarker(down, head);
     if (head) { CBZ.sfx && CBZ.sfx("headshot"); if (CBZ.flashHint) CBZ.flashHint(down ? "HEADSHOT KILL" : "HEADSHOT", 1.0); }
@@ -1213,6 +1378,9 @@
     if (el + 0.001 < lastElapsed) {
       if (fps.active) setActive(false);
       resetWeapons();
+      // a fresh run starts on unmarked streets — wipe last run's bullet pocks
+      if (CBZ.bulletHolesReset) CBZ.bulletHolesReset();
+      shudders.length = 0;
     }
     lastElapsed = el;
   }
@@ -1267,6 +1435,19 @@
         }
         if (c.life <= 0) c.mesh.visible = false;
       }
+    }
+
+    // PANEL SHUDDER decay: shot cars wobble then settle dead-flat. Runs here
+    // (above the !aiming early-out) so a shudder finishes even if the player
+    // holsters the instant after the burst.
+    for (let i = shudders.length - 1; i >= 0; i--) {
+      const s = shudders[i];
+      s.t += dt;
+      const ud = s.car.group && s.car.group.userData;
+      if (!ud || !ud.body || s.car.dead) { shudders.splice(i, 1); continue; }
+      const k = s.t / s.dur;
+      if (k >= 1) { ud.body.rotation.x = 0; shudders.splice(i, 1); continue; }
+      ud.body.rotation.x = Math.sin(s.t * 72) * s.amp * (1 - k);
     }
 
     if (worldMuzzleT > 0) {

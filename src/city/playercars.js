@@ -412,7 +412,7 @@
     addPrism(root, w * 0.9, [[len * 0.16, 0], [len * 0.16, 0.5], [len * 0.46, 0.5]], wheelR + 0.62, dark);  // windshield
     addBox(root, w * 0.86, 0.5, 0.04, 0, wheelR + boxH - 0.3, len * 0.5 - 0.02, dark);   // cab side glass front
     addBox(root, w * 0.9, 0.18, 0.07, 0, wheelR + 0.32, len * 0.5 + 0.02, white);
-    addBox(root, w * 0.92, 0.22, 0.07, 0, wheelR + boxH - 0.1, -len * 0.42 - 0.02, red);   // tall rear doors lights
+    addBox(root, w * 0.92, 0.22, 0.07, 0, wheelR + boxH - 0.1, -len * 0.47 - 0.04, red);   // tall rear-door lights ON the cargo-box rear face (box ends at -len*0.47; the old -len*0.42 buried them INSIDE the box — invisible, so the van showed no tail/brake lights)
     [1, -1].forEach(function (side) {
       addBox(root, 0.035, 0.52, len * 0.16, side * (w * 0.505), wheelR + boxH * 0.68, len * 0.27, dark);
       addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), wheelR + boxH * 0.51, -len * 0.1, trim);

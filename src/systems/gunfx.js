@@ -11,6 +11,17 @@
      CBZ.tracer(from, to, opts)  — a fading line + (by default) a
                                    muzzle flash at `from`.
      CBZ.muzzleFlash(pos, opts)  — a brief additive glow.
+     CBZ.bulletImpact(pos,n,o)   — debris burst; o.power scales it by
+                                   CALIBER, o.kind "chip" + o.color =
+                                   paint flecks in a shot car's coat.
+     CBZ.bulletHole(pos, n, o)   — PERSISTENT pocked decal (pooled,
+                                   64 cap, oldest recycled, skipped
+                                   past 50u). o.parent mounts it on a
+                                   car body so the hole RIDES the car.
+
+   WHY the holes: the evidence a firefight leaves is half its drama —
+   a wall you magdumped must STAY pocked, and a 7.62 hole must read
+   bigger than a 9mm (o.size carries the caliber).
 
    `from`/`to` are any {x,y,z}. opts: {color, life, muzzle:false,
    muzzleScale, scale}.
@@ -166,15 +177,20 @@
     _vb.crossVectors(_vn, _vt).normalize();
 
     const dust = kind === "dust" || kind === "wood";
-    const baseColor = kind === "wood" ? 0xb98b50 : dust ? 0xc8b48c : 0xffc864;
-    const count = Math.min(10, Math.round((dust ? 4 : 6) * power) + 2);
+    // "chip": solid (non-glowing) flecks in the SURFACE's own colour — paint
+    // off a shot car panel. opts.color carries the coat; heavier rounds throw more.
+    const chip = kind === "chip";
+    const baseColor = opts.color != null ? opts.color
+      : (kind === "wood" ? 0xb98b50 : dust ? 0xc8b48c : 0xffc864);
+    // power is the round's CALIBER dial: an AK burst chews visibly harder than 9mm
+    const count = Math.min(12, Math.round((dust ? 4 : chip ? 5 : 6) * power) + 2);
     for (let i = 0; i < count; i++) {
       const p = streaks[streakIdx];
       streakIdx = (streakIdx + 1) % streaks.length;
       // ricochet cone hugging the normal, with random tangential scatter
       const a = Math.random() * Math.PI * 2;
       const spread = 0.35 + Math.random() * 0.75;
-      const speed = (dust ? 2.2 : 5.5) + Math.random() * (dust ? 2.5 : 7) * power;
+      const speed = (dust ? 2.2 : chip ? 3.4 : 5.5) + Math.random() * (dust ? 2.5 : chip ? 3 : 7) * power;
       p.vel.copy(_vn).multiplyScalar(0.6 + Math.random() * 0.5)
         .addScaledVector(_vt, Math.cos(a) * spread)
         .addScaledVector(_vb, Math.sin(a) * spread)
@@ -182,28 +198,108 @@
       p.mesh.position.copy(pos).addScaledVector(_vn, 0.02);
       p.mesh.material.color.setHex(baseColor);
       p.mesh.material.opacity = dust ? 0.7 : 1;
-      p.mesh.material.blending = dust ? THREE.NormalBlending : THREE.AdditiveBlending;
-      p.len = dust ? 0.05 : (0.14 + Math.random() * 0.22);
-      p.w = dust ? 0.05 : 0.018;
-      p.grav = dust ? 1.5 : 16;
-      p.life = dust ? (0.16 + Math.random() * 0.12) : (0.1 + Math.random() * 0.14);
+      p.mesh.material.blending = (dust || chip) ? THREE.NormalBlending : THREE.AdditiveBlending;
+      p.len = dust ? 0.05 : chip ? 0.09 : (0.14 + Math.random() * 0.22);
+      p.w = dust ? 0.05 : chip ? 0.032 : 0.018;
+      p.grav = dust ? 1.5 : chip ? 11 : 16;
+      p.life = dust ? (0.16 + Math.random() * 0.12) : chip ? (0.13 + Math.random() * 0.1) : (0.1 + Math.random() * 0.14);
       p.max = p.life;
       p.mesh.visible = true;
     }
-    // a flat puff at the surface
+    // a flat puff at the surface (chips kick a small grey paint-powder puff)
+    const soft = dust || chip;
     const f = puffs[puffIdx];
     puffIdx = (puffIdx + 1) % puffs.length;
-    f.spr.material.map = dust ? puffTex : sparkTex;
-    f.spr.material.color.setHex(dust ? 0xffffff : 0xffd28c);
-    f.spr.material.blending = dust ? THREE.NormalBlending : THREE.AdditiveBlending;
+    f.spr.material.map = soft ? puffTex : sparkTex;
+    f.spr.material.color.setHex(dust ? 0xffffff : chip ? 0xb9b9b9 : 0xffd28c);
+    f.spr.material.blending = soft ? THREE.NormalBlending : THREE.AdditiveBlending;
     f.spr.position.copy(pos).addScaledVector(_vn, 0.03);
-    const s0 = (dust ? 0.28 : 0.2) * (0.8 + power * 0.4);
+    const s0 = (dust ? 0.28 : chip ? 0.18 : 0.2) * (0.8 + power * 0.4);
     f.spr.scale.set(s0, s0, s0);
-    f.spr.material.opacity = dust ? 0.75 : 1;
+    f.spr.material.opacity = dust ? 0.75 : chip ? 0.6 : 1;
     f.spr.visible = true;
-    f.life = dust ? 0.22 : 0.1;
+    f.life = soft ? 0.22 : 0.1;
     f.max = f.life;
-    f.grow = dust ? 4.5 : 2;
+    f.grow = dust ? 4.5 : chip ? 3.5 : 2;
+  };
+
+  // ---- PERSISTENT BULLET HOLES — the world REMEMBERS the firefight ---------
+  // A fixed pool of small dark pock decals (cap 64, oldest recycled) stamped at
+  // the hit point along the surface normal. opts.size carries CALIBER (an AK
+  // pock reads visibly bigger than a 9mm), opts.parent mounts the decal on a
+  // moving body (a car group) so the hole rides the panel it punched. LOD: a
+  // pock you can't see isn't worth a slot — skipped beyond 50u of the camera.
+  // The shared geo/material are flagged _shared so vehicles.js' teardown
+  // traversal (explodeCar/clearCars disposes non-shared resources) spares them.
+  const HOLE_CAP = 64, HOLE_LOD = 50;
+  const holes = [];
+  let holeIdx = 0, holeGeo = null, holeMat = null;
+  const _zAxis = new THREE.Vector3(0, 0, 1);
+  const _hq = new THREE.Quaternion();
+  const _hp = new THREE.Vector3();
+  const _hn = new THREE.Vector3();
+  function makeHoleMat() {
+    const c = document.createElement("canvas"); c.width = c.height = 32;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(16, 16, 1, 16, 16, 15);
+    g.addColorStop(0, "rgba(6,6,8,0.96)");
+    g.addColorStop(0.42, "rgba(16,16,20,0.85)");
+    g.addColorStop(0.72, "rgba(36,36,42,0.3)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+    const m = new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+    m._shared = true;
+    return m;
+  }
+  CBZ.bulletHole = function (pos, normal, opts) {
+    opts = opts || {};
+    const cam = CBZ.camera;
+    const d = opts.dist != null ? opts.dist
+      : (cam ? Math.hypot(pos.x - cam.position.x, pos.y - cam.position.y, pos.z - cam.position.z) : 0);
+    if (d > HOLE_LOD) return null;
+    if (!holeMat) {
+      holeMat = makeHoleMat();
+      holeGeo = new THREE.PlaneGeometry(1, 1);
+      holeGeo._shared = true;
+    }
+    let m;
+    if (holes.length < HOLE_CAP) {
+      m = new THREE.Mesh(holeGeo, holeMat);
+      m.renderOrder = 4;
+      holes.push(m);
+    } else {
+      m = holes[holeIdx];
+      holeIdx = (holeIdx + 1) % HOLE_CAP;
+    }
+    const parent = opts.parent || scene;
+    if (m.parent !== parent) parent.add(m);   // .add() detaches from any old parent
+    m.visible = true;
+    _hn.set(normal ? normal.x : 0, normal ? normal.y : 0, normal ? normal.z : 1);
+    if (_hn.lengthSq() < 1e-6) _hn.set(0, 0, 1); else _hn.normalize();
+    _hp.set(pos.x, pos.y, pos.z);
+    if (parent !== scene) {
+      // mount in the parent's LOCAL frame so the pock moves with the panel
+      if (parent.updateWorldMatrix) parent.updateWorldMatrix(true, false);
+      parent.worldToLocal(_hp);
+      parent.getWorldQuaternion(_hq);
+      _hn.applyQuaternion(_hq.invert()).normalize();
+    }
+    m.position.copy(_hp).addScaledVector(_hn, 0.025);  // nudge off the surface — no z-fight
+    m.quaternion.setFromUnitVectors(_zAxis, _hn);
+    m.rotateZ(Math.random() * Math.PI);
+    const s = (opts.size || 0.24) * (0.85 + Math.random() * 0.3);
+    m.scale.set(s, s, 1);
+    return m;
+  };
+  // wipe every pock (new run / world rebuild) — pool survives, marks don't
+  CBZ.bulletHolesReset = function () {
+    for (let i = 0; i < holes.length; i++) {
+      holes[i].visible = false;
+      if (holes[i].parent !== scene) scene.add(holes[i]);  // un-mount from dead cars
+    }
   };
 
   // one always-updater fades + recycles every transient (runs in all modes,
