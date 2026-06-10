@@ -175,7 +175,7 @@
     CBZ.city.arena.root.add(s);
     liveHonks.push({ s, t: 0, life: 0.8 });
     // a faint metallic stab stands in for the horn (real recorded foley only)
-    if (dd < 34 * 34 && CBZ.sfx && Math.random() < 0.6) CBZ.sfx("clank");
+    if (dd < 34 * 34 && CBZ.sfx && Math.random() < 0.6) CBZ.sfx("horn", { dist: Math.sqrt(dd) });   // a real two-note horn, distance-attenuated
   }
   function updateHonks(dt) {
     for (let i = liveHonks.length - 1; i >= 0; i--) {

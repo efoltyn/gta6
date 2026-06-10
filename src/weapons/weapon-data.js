@@ -55,7 +55,7 @@
       spread: 0.004, bodyRadius: 0.62, headRadius: 0.33,
       recoil: 0.42, maxRecoil: 0.8, climb: 0.05, sideKick: 0.02,
       shake: 0.5, heat: 52, knock: 2.4, flash: 0.5,
-      sfx: "shoot_pistol", tracer: 0.02, auto: false,
+      sfx: "shoot_deagle", tracer: 0.02, auto: false,   // big-bore voice (real .45 recording)
     },
     {
       id: "deagle", key: "deagle", label: ".50 DESERT EAGLE", short: "50AE", slot: "pistol",
@@ -65,7 +65,7 @@
       spread: 0.0045, bodyRadius: 0.62, headRadius: 0.33,
       recoil: 0.5, maxRecoil: 0.86, climb: 0.058, sideKick: 0.026,
       shake: 0.56, heat: 56, knock: 2.7, flash: 0.56,
-      sfx: "shoot_pistol", tracer: 0.022, auto: false,
+      sfx: "shoot_deagle", tracer: 0.022, auto: false,  // big-bore voice (real .45 recording)
     },
     {
       // The status rifle: out-damages the carbine per round but handles LAZY —
@@ -98,7 +98,7 @@
       spread: 0.0015, bodyRadius: 0.6, headRadius: 0.34,
       recoil: 0.6, maxRecoil: 0.95, climb: 0.07, sideKick: 0.01,
       shake: 0.66, heat: 70, knock: 3.0, flash: 0.6,
-      sfx: "shoot_carbine", tracer: 0.02, auto: false,
+      sfx: "shoot_sniper", tracer: 0.02, auto: false,   // dedicated long-boom voice (Mosin recording)
     },
     {
       id: "lmg", key: "lmg", label: "M249 LMG", short: "LMG", slot: "auto",
@@ -108,7 +108,7 @@
       spread: 0.014, bodyRadius: 0.62, headRadius: 0.32,
       recoil: 0.16, maxRecoil: 0.88, climb: 0.018, sideKick: 0.034,
       shake: 0.3, heat: 50, knock: 1.3, flash: 0.55,
-      sfx: "shoot_carbine", tracer: 0.014, auto: true,
+      sfx: "shoot_lmg", tracer: 0.014, auto: true,      // dedicated belt-fed voice
     },
     {
       id: "bazooka", key: "bazooka", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
