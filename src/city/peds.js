@@ -28,7 +28,27 @@
   const A0 = () => (CBZ.CITY && CBZ.CITY.aggro) || {};
   const tmp = new THREE.Vector3();
 
-  const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 26 * 26, VIS_D2 = 150 * 150, FAR_D2 = 110 * 110;
+  const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 26 * 26, FAR_D2 = 110 * 110;
+  // Full-rig render distance. The instanced ambient crowd covers everything past
+  // this, so drawing 16-mesh rigs out to 150u was pure waste — tightened to 95u.
+  // Adaptive quality (core/quality.js -> CBZ.pedLOD) scales it down further on
+  // weak GPUs. SHADOW_D2: rigs past ~42u stop casting shadows (a rig 50u away is
+  // a few px tall — its shadow is invisible, but it doubled its cost in the
+  // shadow pass). Toggled only on threshold crossings, so it's ~free per frame.
+  let VIS_D2 = 95 * 95, SHADOW_D2 = 42 * 42;
+  // core/quality.js publishes a tier LOD here; re-derive the squared cutoffs.
+  CBZ.refreshPedLOD = function () {
+    const lod = CBZ.pedLOD;
+    if (!lod) return;
+    if (lod.vis != null) VIS_D2 = lod.vis * lod.vis;
+    if (lod.shadow != null) SHADOW_D2 = lod.shadow * lod.shadow;
+  };
+  // flip castShadow across a rig's meshes — only called when a ped crosses the
+  // shadow distance threshold (a handful per second), never every frame.
+  function setRigShadow(ch, on) {
+    const g = ch && ch.group; if (!g) return;
+    g.traverse(function (o) { if (o.isMesh) o.castShadow = on; });
+  }
   let frame = 0;
 
   // ============================================================
@@ -107,6 +127,97 @@
     return r() * 0.6;                            // the rest: ordinary
   }
 
+  // ============================================================
+  //  WEALTH / BOUNTY ASSIGNMENT (econ helpers from Agent 1, fully guarded)
+  // ------------------------------------------------------------
+  //  WHO a ped is decides what they carry. Most people stay modest; a small slice
+  //  of the well-dressed crowd are secret WHALES (a tycoon with a Patek, a
+  //  socialite with a 7-figure ring) so robbing/looting/killing is occasionally a
+  //  jackpot — never the norm. A rare ped is a wanted FUGITIVE worth a bounty paid
+  //  to YOU on their death (you can get insanely rich killing the right person, even
+  //  by accident). All econ calls are guarded (rollCashFor/rollValuables are added
+  //  by economy.js; we fall back to the older rollCash + a name list if absent).
+  // ============================================================
+  // module-level fugitive tally so we can keep the jackpot bounty city-wide-rare
+  // (reset each spawnCityPeds). At most ONE mega-bounty ($5M terrorist) per city.
+  let _fugitives = 0, _megaFugitiveSpawned = false;
+
+  // luxury-watch jackpot pool used by the FALLBACK rollValuables (econ owns the
+  // canonical one). These names must exist in economy.js ITEMS as valuables.
+  const LUX_WATCH = ["Audemars Piguet", "Patek Philippe", "Richard Mille"];
+
+  // FALLBACK cash-by-who (used only if econ.rollCashFor is absent). Mirrors the
+  // shared contract's tiers: poor → boss/tycoon.
+  function fallbackCashFor(archetype, wealth, r) {
+    const a = archetype || "resident";
+    if (a === "boss" || a === "tycoon" || a === "billionaire") return 10000 + ((r() * 80000) | 0);
+    if (a === "mobster" || a === "made") return 5000 + ((r() * 35000) | 0);
+    if (a === "dealer") return 1500 + ((r() * 13500) | 0);
+    if (a === "socialite") return 800 + ((r() * 4000) | 0);
+    const econ = CBZ.cityEcon;
+    return econ ? econ.rollCash(wealth) : (5 + ((r() * 45) | 0));
+  }
+
+  // FALLBACK valuables-by-who (used only if econ.rollValuables is absent). Keeps
+  // the mega-items RARE so "occasionally insanely rich" stays a jackpot.
+  function fallbackValuables(archetype, wealth, r) {
+    const a = archetype || "resident", out = [];
+    if (a === "tycoon" || a === "billionaire") {
+      out.push(LUX_WATCH[(r() * LUX_WATCH.length) | 0]);
+      if (r() < 0.4) out.push("Briefcase of Cash");
+      if (r() < 0.15) out.push("Bearer Bonds");
+    } else if (a === "socialite") {
+      out.push("Engagement Ring");
+      if (r() < 0.6) out.push("Designer Bag");
+      if (r() < 0.3) out.push("Tennis Bracelet");
+    } else if (a === "boss" || a === "mobster" || a === "made") {
+      out.push("Gold Chain");
+      if (r() < 0.5) out.push(r() < 0.3 ? "Rolex" : "Omega");
+      if (r() < 0.12) out.push("Briefcase of Cash");
+    } else if (a === "dealer") {
+      out.push("Gold Chain");
+      if (r() < 0.3) out.push("Cash Stack");
+    } else {
+      // ordinary folk: usually nothing of note, sometimes a phone/wallet, and the
+      // genuinely well-off occasionally pack a real piece.
+      if (r() < 0.35) out.push(r() < 0.6 ? "Phone" : "Wallet");
+      if (wealth > 0.85 && r() < 0.25) out.push(r() < 0.5 ? "Omega" : "Designer Bag");
+      if (wealth > 0.95 && r() < 0.12) out.push("Rolex");
+    }
+    return out;
+  }
+
+  // roll an upgraded RARE high-wealth archetype off a generic well-dressed ped.
+  // Returns a tycoon/billionaire/socialite tag (with matching wealth bump) a small
+  // % of the time, else null (keep MOST peds modest). Deterministic stream (r).
+  function rollRareArchetype(baseArch, wealth, r) {
+    // only the visibly well-off get promoted, and even then rarely.
+    if (wealth < 0.8) return null;
+    const x = r();
+    if (x < 0.06) return { archetype: r() < 0.5 ? "tycoon" : "billionaire", wealth: 0.97 + r() * 0.03 };
+    if (x < 0.14) return { archetype: "socialite", wealth: 0.93 + r() * 0.06 };
+    return null;
+  }
+
+  // roll a bounty for a rare FUGITIVE. Mostly modest $5k–50k; an exceedingly rare
+  // jackpot up to $5,000,000 ("a wanted terrorist with a price on their head").
+  // Capped to ONE mega-bounty per city. Returns {bounty, tag} or null.
+  function rollBounty(r) {
+    // ~1.2% of peds are wanted; keep the count city-wide-rare.
+    if (r() >= 0.012 || _fugitives >= 14) return null;
+    _fugitives++;
+    // the once-per-city terrorist: a price on their head that changes your life.
+    if (!_megaFugitiveSpawned && r() < 0.06) {
+      _megaFugitiveSpawned = true;
+      return { bounty: 1500000 + ((r() * 3500000) | 0), tag: "WANTED TERRORIST" };
+    }
+    const x = r();
+    const tag = x < 0.5 ? "WANTED" : (x < 0.85 ? "FUGITIVE" : "ARMED & DANGEROUS");
+    // modest tier: $5k–50k, with an uncommon $50k–250k "high-value target".
+    const bounty = r() < 0.85 ? (5000 + ((r() * 45000) | 0)) : (50000 + ((r() * 200000) | 0));
+    return { bounty, tag };
+  }
+
   function makePed(x, z, r, opts) {
     opts = opts || {};
     const ag = A0();
@@ -121,21 +232,60 @@
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
     if (tag) { tag.position.y = 3.0; tag.scale.set(3, 0.75, 1); tag.visible = false; ch.group.add(tag); }
     const aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
-    const cash = opts.cash != null ? opts.cash : (econ ? econ.rollCash(wealth) : (5 + ((r() * 45) | 0)));
+    // WHO this ped is drives WHAT they carry. A boss/dealer carries mobster-tier
+    // cash; a rare well-dressed ped is a secret tycoon/socialite WHALE. Resolve the
+    // effective archetype + final wealth FIRST so cash/valuables/bounty all agree.
+    let archetype = opts.archetype || "resident";
+    let mWealth = wealth;
+    // gang members carry crew-tier money + ice: the BOSS reads boss-tier (set via
+    // opts.isBoss/rank, or the "gang boss" job gangs.js stamps before flipping the
+    // flag post-construct), made men mobster-tier, the rest dealer-tier. Dealers
+    // (anywhere) carry dealer-tier. This drives the cash + valuables (chain/watch).
+    const _madeJob = /\b(lt|enforcer)\b/i.test(opts.job || "");   // gangs.js stamps "gang lt"/"gang enforcer"
+    if (opts.isBoss || opts.rank === "boss" || opts.job === "gang boss") archetype = "boss";
+    else if (opts.archetype === "dealer") archetype = "dealer";
+    else if (opts.gang) archetype = (opts.rank === "lt" || opts.rank === "enforcer" || _madeJob) ? "mobster" : "dealer";
+    if (opts.archetype == null && !opts.gang && !opts.vendor) {
+      // a small slice of the visibly well-off become RARE jackpot archetypes.
+      const rare = rollRareArchetype(archetype, wealth, r);
+      if (rare) { archetype = rare.archetype; mWealth = rare.wealth; }
+    }
+    // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
+    // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
+    const cash = opts.cash != null ? opts.cash
+      : (econ && econ.rollCashFor ? econ.rollCashFor(archetype, mWealth, r) : fallbackCashFor(archetype, mWealth, r));
+    // valuables: array of item NAMES this ped carries (watch/ring/chain/etc). Most
+    // people none/Phone; the whales carry a luxury jackpot. Guarded per contract.
+    const valuables = opts.valuables != null ? opts.valuables
+      : (econ && econ.rollValuables ? (econ.rollValuables(archetype, mWealth, r) || []) : fallbackValuables(archetype, mWealth, r));
     let loot = opts.loot || null;
-    if (!loot && econ && r() < (wealth > 0.7 ? 0.6 : 0.22)) loot = econ.randomLoot(wealth > 0.7);
+    if (!loot && econ && r() < (mWealth > 0.7 ? 0.6 : 0.22)) loot = econ.randomLoot(mWealth > 0.7);
+    // BOUNTY: a rare ped is a wanted fugitive worth $ paid to YOU on their death.
+    // Skip vendors/gang/explicit spawns (those identities are fixed elsewhere).
+    let bounty = opts.bounty || 0, bountyTag = opts.bountyTag || null;
+    if (!bounty && !opts.gang && !opts.vendor && opts.archetype == null) {
+      const b = rollBounty(r);
+      if (b) { bounty = b.bounty; bountyTag = b.tag; }
+    }
     // Concealed carry is a possession roll, not a temperament roll. A meek
-    // civilian can own a gun and a violent civilian can still be empty-handed.
-    const armed = opts.armed != null ? opts.armed : r() < (0.035 + wealth * 0.025);
+    // civilian can own a gun and a violent civilian can still be empty-handed. The
+    // street is HEAVILY armed now (mass-shooting energy): a real share of people are
+    // packing — a fugitive nearly always is, and the rich more often.
+    const armed = opts.armed != null ? opts.armed
+      : (bounty > 0 ? r() < 0.85 : r() < (0.14 + mWealth * 0.10));
+    // a RARE jackpot archetype (tycoon/socialite/billionaire) isn't part of the
+    // castTraits vocabulary — pin it so the trait roll can't wash it back to a plain
+    // resident. Otherwise let castTraits derive the social archetype as before.
+    const rareArch = (archetype === "tycoon" || archetype === "billionaire" || archetype === "socialite") ? archetype : null;
     const traits = CBZ.castTraits ? CBZ.castTraits.rollCity(r, {
-      aggr, archetype: opts.archetype, job: opts.job, behavior: opts.behavior,
+      aggr, archetype: rareArch || opts.archetype, job: opts.job, behavior: opts.behavior,
       reactivity: opts.reactivity, drugUser: opts.drugUser,
     }) : {};
     const ped = {
       char: ch, group: ch.group, pos: ch.group.position, name: nm,
       tag, outfit, skin, kind: opts.kind || "civilian",
-      aggr, wealth,
-      archetype: traits.archetype || opts.archetype || "resident",
+      aggr, wealth: mWealth, valuables, bounty, bountyTag,
+      archetype: rareArch || traits.archetype || opts.archetype || "resident",
       job: traits.job || opts.job || "between jobs",
       behavior: traits.behavior || opts.behavior || null,
       reactivity: traits.reactivity != null ? traits.reactivity : aggr,
@@ -146,6 +296,14 @@
       npcHeat: 0, npcWanted: 0, offenseT: 0, witnessSev: 0, deadLoot: null,
       gang: opts.gang || null, guard: opts.guard || null, faction: opts.faction || null,
       partner: null, family: null,
+      // FAMILY OF A POWER: when this ped is the spouse/kin of a gang BOSS (or other
+      // important head), social.js links them and stamps protectGang = the head's
+      // gang id + protectedBy = the head ped. Harming them enrages that whole crew
+      // (cityFamilyHarmed below). isFamily marks them as a protected family member.
+      protectGang: opts.protectGang || null, protectedBy: opts.protectedBy || null, isFamily: !!opts.isFamily,
+      // persistent ROUTINE lots (assigned lazily by scheduledGoal; re-validated
+      // against the live arena so a stale ref from a recycled body self-heals).
+      _home: null, _work: null,
       baseSpeed: 1.5 + r() * 1.0, speed: 0,
       target: new THREE.Vector3(x, 0, z), finalGoal: null, path: null,
       pause: 0, state: "walk", fear: 0, callT: 0, alarmed: 0,
@@ -161,14 +319,88 @@
       vendor: opts.vendor || null, slice: (r() * 8) | 0, isPlayer: false,
     };
     if (ped.vendor) ped.kind = "vendor";
+    // FUGITIVE flavor: re-label a wanted ped so the tag reads as a recognizable
+    // mark ("☠ WANTED · Marcus V." / "☠ WANTED TERRORIST · …"). Cheap: rebuild the
+    // one sprite once at spawn. Pure cosmetic — the bounty itself is the payoff.
+    if (ped.bounty > 0 && ped.tag && CBZ.makeLabelSprite) {
+      const label = "☠ " + (ped.bountyTag || "WANTED") + " · " + nm;
+      const old = ped.tag;
+      const ns = CBZ.makeLabelSprite(label);
+      if (ns) {
+        ns.position.copy(old.position); ns.scale.copy(old.scale); ns.scale.x *= 1.35; ns.visible = false;
+        if (old.parent) old.parent.remove(old);
+        ch.group.add(ns); ped.tag = ns;
+      }
+    }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
     return ped;
   }
   CBZ.cityMakePed = makePed;        // used by gangs.js / social.js
 
+  // ---- NPC DRIP: an NPC's visible STATUS, read by club.js's bouncer ---------
+  // The velvet rope only works if MOST people fail it. cityPedDrip(ped) scores a
+  // ped from WHO THEY ARE — wealth + archetype + the jewellery/valuables they
+  // visibly carry — so an ordinary/poor ped lands well UNDER CBZ.CITY.CLUB_DRIP
+  // (turned away) and only the visibly-rich (tycoon/socialite/boss, iced out)
+  // clear it. Tuned against the same wearable drip values economy.js uses for the
+  // player, so the line reads consistently with the player's own fit.
+  //
+  // Distribution intent (CLUB_DRIP 30 / VIP_DRIP 70):
+  //   • a plain resident (wealth ~0.2-0.5, no ice)  → ~5-13   (REJECTED)
+  //   • a well-off generic (wealth ~0.85, a Rolex)  → ~25-35  (borderline)
+  //   • a dealer/mobster w/ a gold chain            → ~22-34
+  //   • a tycoon/socialite/boss w/ luxe valuables   → ~45-80+ (clears, often VIP)
+  //
+  // Cheap + deterministic: the result is cached on ped._drip (keyed to the
+  // valuables list length so a re-roll / loot change re-computes). Pure read —
+  // no allocation on the hot path, safe to call from the club's per-frame line.
+  const ARCH_DRIP = {
+    // visibly elite — a fit + ice that reads RICH on sight
+    tycoon: 22, billionaire: 26, socialite: 20, mobwife: 24, "mob-wife": 24,
+    bosswife: 22, kingpinwife: 24, tycoonwife: 22, heiress: 20, richwoman: 18, "rich woman": 18,
+    boss: 16, underboss: 14, kingpin: 16, capo: 11, made: 11,
+    // street money — some flash, not velvet-rope flash
+    mobster: 8, dealer: 7, trapper: 7, merchant: 6, tourist: 4,
+  };
+  // valuables with no `drip` field still read as status: a luxe watch / necklace
+  // on a ped is obviously money. Give the big-ticket non-drip valuables a flat
+  // status bump (their pawn `value` is huge; we don't want a linear blowup).
+  function valuableDrip(name) {
+    const econ = CBZ.cityEcon; if (!econ || !name) return 0;
+    const it = econ.ITEMS && econ.ITEMS[name];
+    if (!it) return 0;
+    if (it.drip) return it.drip;                 // Gold Chain 7, Rolex 14, Diamond Ring 10 …
+    if (it.tag === "valuable") {
+      if (it.luxe) return 16;                    // AP / Patek / Engagement Ring etc. — obvious wealth
+      if (it.value >= 30000) return 10;          // Tennis Bracelet, Designer Bag tier
+      if (it.value >= 3000) return 5;            // Omega, Gold Bar tier
+      if (it.value >= 300) return 1;             // Phone/Laptop — barely registers
+    }
+    return 0;
+  }
+  CBZ.cityPedDrip = function (ped) {
+    if (!ped) return 0;
+    const vals = ped.valuables;
+    const vKey = vals ? vals.length : 0;
+    // cache: recompute only if uncached or the valuables count changed (a robbery
+    // strips ice → the ped reads poorer next time).
+    if (ped._drip != null && ped._dripKey === vKey) return ped._drip;
+    const base = (CBZ.CITY && CBZ.CITY.BASE_DRIP) || 4;
+    const w = ped.wealth != null ? ped.wealth : 0.4;
+    // wealth curve: super-linear so the poor stay LOW and the rich pull ahead.
+    // w=0.3 → ~2, w=0.5 → ~5, w=0.85 → ~14, w=1.0 → ~20.
+    let d = base + Math.round(w * w * 20);
+    d += ARCH_DRIP[ped.archetype] || 0;
+    if (vals) for (let i = 0; i < vals.length; i++) d += valuableDrip(vals[i]);
+    if (d < 0) d = 0;
+    ped._drip = d; ped._dripKey = vKey;
+    return d;
+  };
+
   CBZ.spawnCityPeds = function (n) {
     CBZ.clearCityPeds();
     CBZ.cityPopulationReset();          // fresh city → reset the finite headcount
+    _fugitives = 0; _megaFugitiveSpawned = false;   // fresh fugitive roster (bounties re-roll)
     const A = CBZ.buildCity();
     _s = 555 + n;
     if (CBZ.cityEcon && CBZ.cityEcon.initMarket) CBZ.cityEcon.initMarket();
@@ -200,6 +432,9 @@
     if (CBZ.spawnCityGangs) CBZ.spawnCityGangs();
     if (CBZ.spawnCitySecurity) CBZ.spawnCitySecurity();
     if (CBZ.citySocialInit) CBZ.citySocialInit();
+    // fresh city → clear the lone-wolf rampage director + any stale spree flags
+    // (aigoals.js owns the director state; guarded in case load order shifts).
+    if (CBZ.cityRampageReset) CBZ.cityRampageReset();
   };
 
   function vendorName(lot) {
@@ -249,9 +484,15 @@
   //      a clear escape heading away from the blast so the street empties fast,
   //      GTA-style. `power` scales radius + how hard they bolt. ----
   let _lastPanicFrame = -1;
-  CBZ.cityPanic = function (x, z, power, offender) {
+  // `blast` (4th arg) marks an actual EXPLOSION (vs a body-drop). On a blast even
+  // the violent/raging back off the blast SEAT for a beat — nobody, however
+  // fearless, walks INTO a fresh fireball — so a bazooka never gets a suicidal
+  // charge. Without it the old behaviour stands (bold peds just get jumpy).
+  CBZ.cityPanic = function (x, z, power, offender, blast) {
     power = power || 1;
     const radius = 16 + power * 10, r2 = radius * radius;
+    // close-in "blast danger" ring: inside this even the fearless retreat
+    const dangerR = blast ? (8 + power * 4) : 0, dangerR2 = dangerR * dangerR;
     let scattered = 0;
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.vendor || p.companion || p.controlled || p._parked || p.recruited) continue;
@@ -265,11 +506,17 @@
       // the jail crowd flinching at gunfire. reactions.js reads poseCower to drive
       // it; even peds too bold to bolt visibly recoil. Scaled by proximity.
       p.poseCower = Math.max(p.poseCower || 0, 0.5 + 0.8 * close);
+      // BLAST SEAT: anyone (even a violent ped or one raging at the player) bolts
+      // away from a fresh fireball they're standing on top of — never charge it.
+      if (blast && dd < dangerR2) {
+        p.rage = null;
+        fleeFrom(p, x, z);            // vetted away-heading (won't bolt through a wall)
+        p.fear = 10; scattered++;
+        continue;
+      }
       // the meek & wary in range bolt right now; the bold just get jumpy
       if (p.aggr < (A0().crook || 0.72) && !p.rage && p.state !== "fight") {
-        p.state = "flee"; p.path = null;
-        const m = Math.sqrt(dd) || 1;
-        p.target.set(p.pos.x + (dx / m) * 24, 0, p.pos.z + (dz / m) * 24);
+        fleeFrom(p, x, z);            // vetted away-heading
         scattered++;
       }
     }
@@ -298,6 +545,47 @@
     }
   };
 
+  // ---- CONSEQUENCE: harming a POWER's family ----
+  // A gang boss's WIFE / kin is PROTECTED. Touch her and the whole crew comes for
+  // you: heavy provoke (so the reprisal director sends a hit squad), a hostility
+  // bump via cityGangMemberDown's ladder (she counts as one of theirs to them),
+  // and on a KILL, a direct war push if the war hook exists. The boss himself, if
+  // alive nearby, drops everything and rages. Bounded + city-gated + fully guarded.
+  // Called from cityKillPed / cityKOPed / cityRobPed and (for non-lethal harm)
+  // social.js. `lethal` makes the crew take it hardest. Returns true if it fired.
+  CBZ.cityFamilyHarmed = function (ped, byPlayer, lethal) {
+    if (g.mode !== "city" || !ped || byPlayer === false) return false;
+    const gid = ped.protectGang; if (!gid) return false;
+    // heavy crew rage — a wife/kin hit is near the top of the provoke scale.
+    if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(gid, lethal ? 0.95 : 0.7);
+    // route through the member-down ladder so hostility climbs + a reprisal squad
+    // gets dispatched (the wife "counts" as crew to the grieving gang).
+    if (lethal && CBZ.cityGangMemberDown) {
+      try { CBZ.cityGangMemberDown({ gang: gid, rank: "kin", dead: true, pos: ped.pos }, { byPlayer: true }); } catch (e) {}
+    }
+    // the head himself, alive + nearby, turns on you in person.
+    const head = ped.protectedBy;
+    if (head && !head.dead && head.pos && CBZ.city && CBZ.city.playerActor) {
+      head.rage = CBZ.city.playerActor; head.state = "fight";
+      head.alarmed = Math.max(head.alarmed || 0, 8); head.fear = 0;
+      head.mem = CBZ.city.playerActor;   // he remembers WHO did it
+    }
+    // a kill is a declaration of war: push the crew onto the player's block if the
+    // gang record + war hook exist (guarded; no-op if the war layer is absent).
+    if (lethal && CBZ.cityStartGangWar && CBZ.cityGangById && CBZ.player && !CBZ.player.dead) {
+      const gang = CBZ.cityGangById(gid);
+      const pg = g.playerGang;
+      if (gang && pg && pg.founded && pg.turf && pg.turf.length) {
+        try { CBZ.cityStartGangWar(gang, pg, { assault: true, free: true }); } catch (e) {}
+      }
+    }
+    if (CBZ.city && CBZ.city.big) {
+      CBZ.city.big(lethal ? "☠ You killed the boss's family — the crew is coming"
+                          : "⚠ You crossed the boss's family");
+    }
+    return true;
+  };
+
   // ---- rob / KO / kill (player-facing verbs reused by interact + combat) ----
   CBZ.cityRobPed = function (ped) {
     if (!ped || ped.dead || ped.robbed) return null;
@@ -308,6 +596,8 @@
     if (ped.loot && econ) { econ.add(ped.loot, 1); item = ped.loot; ped.loot = null; }
     ped.robbed = true; ped.alarmed = 8; ped.fear = 10;
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 16, 1, CBZ.city.playerActor);
+    // robbing a boss's wife of her millions is a personal insult to the crew.
+    if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);
     CBZ.cityCrime && CBZ.cityCrime(60, { x: ped.pos.x, z: ped.pos.z, type: "robbery" });
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.city && CBZ.city.addRespect(1);
@@ -321,6 +611,8 @@
     ped.ko = 8; ped.alarmed = 6;
     if (CBZ.body) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
+    // laying hands on a boss's wife/kin brings the crew (non-lethal harm).
+    if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 14, 0.8, CBZ.city.playerActor);
     CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
   };
@@ -346,11 +638,43 @@
     if (CBZ.gore && ped.pos) {
       let dir = null;
       if (imp && imp.fromX != null) dir = { x: ped.pos.x - imp.fromX, z: ped.pos.z - imp.fromZ };
-      CBZ.gore(ped.pos.x, ped.pos.y + 1.0, ped.pos.z, { dir, amount: 1.0, cloth: ped.outfit, skin: ped.skin });
+      // an explosion tears a body apart — heavier mist/spray/gibs than a clean shot.
+      const goreAmt = cause === "explosion" ? 1.9 : 1.0;
+      CBZ.gore(ped.pos.x, ped.pos.y + 1.0, ped.pos.z, { dir, amount: goreAmt, cloth: ped.outfit, skin: ped.skin });
+      // ---- EXPLOSION DISMEMBERMENT: a blast can tear a limb clean off. Hide it on
+      // the corpse + spray a second gore burst at the stump (a torn limb flung from
+      // the wound). LEAK-SAFE: a dead rig is never revived — pooled corpses are
+      // replaced by a fresh makeCharacter (crowd.js:313) and standalone corpses are
+      // disposed, so no living ped ever inherits a missing limb. Real, gruesome,
+      // INTENTIONAL — the limb-loss you saw is now a designed effect, not a glitch.
+      if (cause === "explosion" && ped.char && ped.char.parts && Math.random() < 0.5) {
+        const LIMBS = ["ll", "rl", "la", "ra"];                 // legs read most dramatic
+        const key = LIMBS[(Math.random() * LIMBS.length) | 0];
+        const limb = ped.char.parts[key];
+        if (limb && limb.visible !== false) {
+          limb.visible = false;                                  // blown clean off
+          ped._lostLimb = key;
+          const stumpY = (key.charAt(1) === "l") ? 0.55 : 1.4;   // leg low, arm high
+          CBZ.gore(ped.pos.x, ped.pos.y + stumpY, ped.pos.z, { dir, amount: 1.5, cloth: ped.outfit, skin: ped.skin });
+        }
+      }
     }
+    // GROUNDING HANDOFF: a kill MUST arm the ragdoll so grapple (onUpdate 24) takes
+    // ownership and grounds the corpse via cityRestY — otherwise a dead rig would
+    // keep standing/sinking (peds.js skips downed bodies; nothing would lay it flat).
+    // Both fling paths launch the body → it lands → grapple sets _phys.down=9999
+    // (dead stay sprawled), which makes CBZ.body.busy(ped) true forever, so the main
+    // loop's `if (CBZ.body.busy(p)) continue;` keeps move() from ever stomping the
+    // grounded Y. The knockdown fallback below guarantees a downed state even on the
+    // off-chance a fling can't resolve (e.g. body already at floor), so we never
+    // depend on the airborne path alone.
     if (CBZ.body) {
       if (imp && imp.fromX != null) CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, force: imp.force || 7, fling: imp.fling || 4 });
       else { const a = rng() * 6.28; CBZ.body.hit(ped, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 3, fling: 5 }); }
+      // belt-and-braces: force a hard knockdown too. hit(knockdown) sets _phys.down,
+      // so even if the fling lands the same frame the body is already flagged DOWN
+      // and grapple owns it — a dead ped can never be left upright or half-sunk.
+      if (CBZ.body.knockdown) CBZ.body.knockdown(ped, { dir: { x: 0, z: 1 }, force: 1, t: 9999 });
     }
     // attribute the kill: a real actor (player or NPC) is the offender; a
     // driverless run-over has none (just a death, nobody to blame/witness).
@@ -358,7 +682,9 @@
     const byPlayer = imp ? imp.byPlayer !== false : true;
     const offender = att && att !== CBZ.city.playerActor ? att : (byPlayer ? CBZ.city.playerActor : null);
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 22, 1.4, offender);
-    if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, 1.3, offender);   // a body drops → the street scatters
+    // a body drops → the street scatters. If this death was an EXPLOSION, flag it
+    // so cityPanic clears the blast seat (even violent peds won't charge a bazooka).
+    if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, cause === "explosion" ? 1.6 : 1.3, offender, cause === "explosion");
     if (ped.gang && byPlayer && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
     if (att && att !== CBZ.city.playerActor) {
       if (att.kind !== "cop" && !lawfulSecurityAct(att, ped) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 90, "murder");   // lawful responders are not criminals
@@ -373,18 +699,42 @@
       };
       CBZ.city && CBZ.city.addKill();
       if (CBZ.cityCountMayhem) CBZ.cityCountMayhem();
+      // BOUNTY CLAIMED: this ped was a wanted fugitive with a price on their head —
+      // killing them (even by accident) pays out. The terrorist jackpot ($5M) can
+      // turn one stray bullet into a fortune. Paid ONCE (clear the bounty).
+      if (ped.bounty > 0) {
+        const amt = ped.bounty | 0; ped.bounty = 0;
+        if (CBZ.city) {
+          CBZ.city.addCash(amt);
+          CBZ.city.big("🎯 BOUNTY CLAIMED: $" + amt.toLocaleString() + " — " + (ped.bountyTag || "WANTED") + " " + (ped.name || ""));
+          CBZ.city.addRespect(amt >= 1000000 ? 25 : 5);
+        }
+        if (CBZ.sfx) CBZ.sfx("coin");
+      }
     }
     if (ped.gang && CBZ.cityGangMemberDown) CBZ.cityGangMemberDown(ped, imp);
+    // KILLED A POWER'S FAMILY (boss's wife/kin): the whole crew now hunts you. The
+    // wife herself has no .gang, so this is the path that makes clipping her
+    // DANGEROUS — a jackpot in jewellery, paid for with the gang on your back.
+    if (ped.protectGang && byPlayer) CBZ.cityFamilyHarmed(ped, true, true);
     if (ped.partner && CBZ.citySocialDeath) CBZ.citySocialDeath(ped);
+    // CHAINED FEUD: an NPC killer earns the dead ped's partner/crew as enemies
+    // (the player has the wanted/gang-provoke systems already — chain NPC↔NPC only).
+    if (att && att !== CBZ.city.playerActor && CBZ.cityNpcFriendDeath) CBZ.cityNpcFriendDeath(ped, att);
     if (CBZ.pushKill) CBZ.pushKill((ped.name || "A civilian") + " was killed", "#ff6b6b");
   };
 
-  // bodies carry a real haul — cash plus whatever they were holding
+  // bodies carry a real haul — cash plus whatever they were holding. The big one:
+  // a dead ped's CARRIED VALUABLES (their watch/ring/chain — assigned by who they
+  // are in makePed) drop to the corpse, so killing the right rich person and looting
+  // them is occasionally a life-changing fortune (a Patek / a 7-figure ring).
   function rollDeadLoot(ped) {
     const econ = CBZ.cityEcon;
     let cash = (ped.cash || 0) + (econ ? econ.rollCash(ped.wealth) : 20) + (ped.gang ? 60 + ((rng() * 240) | 0) : 0);
     const items = [];
     if (ped.loot) items.push(ped.loot);
+    // fold in everything they were carrying — these are the jackpots.
+    if (ped.valuables && ped.valuables.length) for (const v of ped.valuables) if (v) items.push(v);
     if (econ) {
       if (rng() < 0.6) items.push(econ.randomLoot(ped.wealth > 0.6 || ped.gang));
       if (ped.gang) { items.push(rng() < 0.5 ? "Coke" : "Weed"); if (rng() < 0.4) items.push("Ammo Box"); }
@@ -440,8 +790,9 @@
     if (!tgt || tgt.dead) return;
     const fx = att.pos.x, fz = att.pos.z;
     if (tgt.isPlayer) {
-      const who = att.name ? (att.name + (att.gang ? " of the " + att.gang : "")) : (att.kind === "cop" ? "the police" : "a stranger");
-      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street", false, who);
+      // pass the ATTACKER ACTOR (not just its name) so city/death.js can SPECTATE
+      // your killer after WASTED; cityHurtPlayer derives the display name from it.
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street", false, att);
       // a melee beatdown can knock you off your feet (physics.js owns the get-up)
       if (melee && CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor &&
           !((CBZ.game.invuln || 0) > 0) && !CBZ.body.busy(CBZ.city.playerActor) && Math.random() < 0.33) {
@@ -464,6 +815,50 @@
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
   }
 
+  // ---- CROSSFIRE: a fired round that doesn't cleanly hit its mark can catch an
+  //      innocent BYSTANDER near the line of fire. Real GTA chaos: get caught in a
+  //      shootout and you bleed. Cheap + bounded: only runs when a shot is actually
+  //      fired, scans an n-capped slice of nearby peds, takes the FIRST one close to
+  //      the shot path (perp distance small, roughly between shooter + target), and
+  //      hits them at a low per-shot chance. A downed bystander → panic + witnesses,
+  //      and the shooter racks NPC heat (hurtActor's ped-vs-ped path already does the
+  //      offense bookkeeping). The actual target is excluded. ----
+  function crossfire(att, tgt, missed) {
+    // missed shots are the usual culprit; a hit can still over-penetrate (rare).
+    const chance = missed ? 0.16 : 0.05;
+    if (rng() >= chance) return;
+    const ax = att.pos.x, az = att.pos.z;
+    let dx = tgt.pos.x - ax, dz = tgt.pos.z - az;
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len; dz /= len;                                   // unit shot direction
+    const peds = CBZ.cityPeds;
+    let scanned = 0;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (p === att || p === tgt || p.dead || p._parked || p.isPlayer || p.inCar) continue;
+      const rx = p.pos.x - ax, rz = p.pos.z - az;
+      const along = rx * dx + rz * dz;                      // distance projected onto the shot line
+      if (along < 1.5 || along > len + 3) continue;          // behind shooter / well past target
+      // cheap pre-cull by gross distance before the perp math (keeps the scan tight)
+      if (Math.abs(rx) > 30 || Math.abs(rz) > 30) continue;
+      const perp = Math.abs(rx * dz - rz * dx);              // signed perp distance to the line
+      if (perp > 1.6) continue;                              // not in the path of the round
+      // n-cap: only consider a handful of candidates near the line, then stop.
+      if (++scanned > 6) break;
+      // struck a bystander — they take a real round.
+      hurtActor(att, p, 12 + rng() * 12, false);
+      if (CBZ.tracer) {
+        const f = { x: ax, y: 1.4, z: az }, t2 = { x: p.pos.x, y: 1.3, z: p.pos.z };
+        CBZ.tracer(f, t2, { muzzleScale: 0.0 });
+      }
+      // a stray hit on an innocent terrifies the block (panic → witnesses scatter +
+      // remember the shooter). hurtActor already racked the shooter's NPC heat via
+      // its ped-vs-ped assault/murder offense, so cops respond. One victim per shot.
+      if (CBZ.cityPanic) CBZ.cityPanic(p.pos.x, p.pos.z, 1.1, att);
+      return;
+    }
+  }
+
   function npcAttack(att, tgt) {
     if (att.attackCD > 0 || !tgt || tgt.dead) return;
     const d = Math.hypot(att.pos.x - tgt.pos.x, att.pos.z - tgt.pos.z);
@@ -478,6 +873,9 @@
       if (CBZ.sfx) CBZ.sfx("report");
       const hit = rng() < Math.max(0.2, 0.8 - d * 0.025);
       if (hit) hurtActor(att, tgt, 14 + rng() * 10, false);
+      // CROSSFIRE: a missed round (or rarely an over-penetrating hit) can catch a
+      // bystander near the line of fire. Only when a shot is actually fired.
+      crossfire(att, tgt, !hit);
       if (att.ammo <= 0) { att.armed = false; att.weapon = null; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(att); }
     } else if (d < 2.4) {
       // melee
@@ -505,6 +903,106 @@
 
   function band(a) { const B = A0(); return a < (B.flee || 0.3) ? "meek" : a < (B.bold || 0.5) ? "wary" : a < (B.crook || 0.72) ? "bold" : a < (B.violent || 0.88) ? "crook" : "violent"; }
 
+  // who is attacking `who`? returns the attacker actor (a ped raging at them, or
+  // the player if the player is mid-fight near them). Cheap bounded scan.
+  function attackerOf(who) {
+    if (!who || who.dead) return null;
+    const peds = CBZ.cityPeds;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (p === who || p.dead) continue;
+      if (p.rage === who) {
+        const dx = p.pos.x - who.pos.x, dz = p.pos.z - who.pos.z;
+        if (dx * dx + dz * dz < 18 * 18) return p;
+      }
+    }
+    const P = CBZ.player;
+    if (P && !P.dead && P._fighting > 0 && CBZ.city && CBZ.city.playerActor) {
+      const dx = P.pos.x - who.pos.x, dz = P.pos.z - who.pos.z;
+      if (dx * dx + dz * dz < 12 * 12) return CBZ.city.playerActor;
+    }
+    return null;
+  }
+
+  // GROUP REACTION: a ped whose PARTNER/FAMILY is under attack joins in — bold
+  // ones rage at the attacker, the meek flee with them. And when several bold
+  // peds already share a threat, they mob/flee as a CLUSTER (shared target) so a
+  // street fight reads as a crowd, not isolated duels. Bounded + active-gated.
+  function groupReact(ped, B) {
+    // 1) partner / family in danger
+    const kin = ped.partner && !ped.partner.dead ? ped.partner
+      : (ped.family && ped.family.length && !ped.family[0].dead ? ped.family[0] : null);
+    if (kin) {
+      const att = (kin.rage && !kin.rage.dead && kin.rage !== ped) ? kin.rage : attackerOf(kin);
+      if (att && att !== ped && !att.dead) {
+        const dk = Math.hypot(kin.pos.x - ped.pos.x, kin.pos.z - ped.pos.z);
+        if (dk < 26) {
+          if (ped.aggr >= (B.bold || 0.5)) {
+            ped.rage = att; ped.state = "fight"; ped.target.set(att.pos.x, 0, att.pos.z);
+            if (att.isPlayer && ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.15);
+          } else {
+            ped.fear = Math.min(10, ped.fear + 3); ped.alarmed = Math.max(ped.alarmed, 4);
+            ped.state = "flee"; fleeFrom(ped, att.pos.x, att.pos.z);
+          }
+          return true;
+        }
+      }
+    }
+    // 2) cluster mob: ≥3 bold peds already raging at the SAME threat near me →
+    //    pile on the shared target (only if I'm bold and not already engaged).
+    if (ped.aggr >= (B.bold || 0.5) && !ped.rage) {
+      const peds = CBZ.cityPeds, R2 = 14 * 14;
+      let shared = null, n = 0;
+      for (let i = 0; i < peds.length; i++) {
+        const o = peds[i];
+        if (o === ped || o.dead || !o.rage || o.rage.dead || o.state !== "fight") continue;
+        if (o.aggr < (B.bold || 0.5)) continue;
+        const dx = o.pos.x - ped.pos.x, dz = o.pos.z - ped.pos.z;
+        if (dx * dx + dz * dz >= R2) continue;
+        if (!shared) shared = o.rage;
+        if (o.rage === shared) { n++; if (n >= 3) break; }
+      }
+      if (shared && n >= 3 && !shared.dead) {
+        const ds = Math.hypot(shared.pos.x - ped.pos.x, shared.pos.z - ped.pos.z);
+        if (ds < 22) { ped.rage = shared; ped.state = "fight"; ped.target.set(shared.pos.x, 0, shared.pos.z); return true; }
+      }
+    }
+    return false;
+  }
+
+  // ---- GANG / REPUTATION awareness (all guarded; null/0 when the gang layer
+  //      isn't present). Used by reactToPlayer + turfIntruder to colour how a
+  //      ped reads the player: defer to a famous boss, charge a rival, etc. ----
+  // the gang id the PLAYER rides with (patched-in membership, founded crew, or
+  // a loose affiliation) — null if unaffiliated. All reads guarded.
+  function playerGangId() {
+    const m = g.cityMembership;
+    if (m && m.gangId) return m.gangId;
+    if (g.playerGangId) return g.playerGangId;
+    if (g.playerGang && g.playerGang.founded) return g.playerGang.id;
+    return g.playerGangAffiliation || null;
+  }
+  // is THIS ped's gang hostile to the player's crew? -1 ally / 0 neutral|none /
+  // 1 rival / 2 at open war. Cheap, fully guarded.
+  function gangHostility(ped) {
+    if (!ped.gang) return 0;
+    const mine = playerGangId();
+    if (!mine) return 0;
+    if (ped.gang === mine) return -1;                                  // same crew
+    if (CBZ.cityAreAllied && CBZ.cityAreAllied(mine, ped.gang)) return -1;
+    if (CBZ.cityAtWar && CBZ.cityAtWar(mine, ped.gang)) return 2;       // open war
+    return 1;                                                          // a rival by default
+  }
+  // did the player recently kill THIS ped's crew? (the gang carries a provoke
+  // level the player's violence raises) — combined with witness memory.
+  function provokedAtPlayer(ped) {
+    return (ped.gang && CBZ.cityGangProvoked) ? CBZ.cityGangProvoked(ped.gang) : 0;
+  }
+  // standing the player has earned with this ped's gang (-100..100), guarded.
+  function playerStandingWith(ped) {
+    return (ped.gang && CBZ.cityGangStanding) ? CBZ.cityGangStanding(ped.gang) : 0;
+  }
+
   // ---- a cheap internal day clock so the crowd has a believable RHYTHM.
   //      No real sun system exists, so peds run their own loose 24h loop
   //      (~6 real-min day). It only nudges WHICH routine destinations they
@@ -523,29 +1021,128 @@
     return "evening";                        // leisure: bars, parks, home
   }
 
+  // ============================================================
+  //  ARCHETYPE ROLES — give every ped a LEGIBLE life. The aggr brain + aigoals
+  //  needs-layer already cover the "economic" lives (dealer/addict/worker/gangster
+  //  via archetype + needs). This adds the social/flavour roles aigoals doesn't —
+  //  jogger, busker, tourist, panhandler, cop-watcher — plus a clean commuter
+  //  read, each with a soft purpose LOOP run from think()/microBehaviour. A role
+  //  is assigned ONCE (lazily, derived from the existing archetype + personality)
+  //  and only SETS goals/pauses/facing — it never hard-forces, defers to the brain,
+  //  and never touches handsUp/surrender. Re-derived fresh after a parked recycle
+  //  (we clear ped._role there) so a recycled body gets a new life.
+  // ------------------------------------------------------------
+  //  roles: commuter (the default working life) · vendor (posted) · dealer ·
+  //         junkie · jogger · busker · tourist · panhandler · watcher (cop-watcher)
+  // ============================================================
+  function pedRole(ped) {
+    if (ped._role) return ped._role;
+    // vendors & gang members keep their hard identity — they're posted / on turf.
+    if (ped.vendor) return (ped._role = "vendor");
+    if (ped.gang) return (ped._role = ped.archetype === "dealer" ? "dealer" : "gangster");
+    const a = ped.archetype;
+    // map the existing archetype vocabulary onto a legible street role first
+    if (a === "dealer") return (ped._role = "dealer");
+    if ((a === "tweaker" || ped.drugUser) && ped.aggr < (A0().crook || 0.72)) return (ped._role = "junkie");
+    // otherwise roll a flavour role off personality (deterministic stream). Most
+    // people are plain commuters; a sprinkling get a distinctive public life.
+    const r = rng();
+    if (ped.aggr < (A0().flee || 0.3) && r < 0.10) return (ped._role = "panhandler");   // meek, lingers + begs
+    if (r < 0.14) return (ped._role = "jogger");                                          // laps the blocks
+    if (r < 0.20 && ped.wealth > 0.5) return (ped._role = "tourist");                     // gawks at landmarks
+    if (r < 0.24) return (ped._role = "busker");                                          // posts at a plaza
+    if (r < 0.30 && ped.aggr >= (A0().bold || 0.5) && ped.snitch > 0.35) return (ped._role = "watcher"); // cop-watcher
+    return (ped._role = "commuter");
+  }
+  CBZ.cityPedRole = pedRole;     // social.js / hud can read a ped's life
+
+  // nearest lot of a kind (park/plaza/landmark proxy) — cheap bounded scan. Parks
+  // double as plazas (buskers draw crowds, tourists photograph, people sit). A
+  // "landmark" is just a notable lot: a park, or a tall tower the tourist gawks at.
+  function nearestLotKind(A, x, z, kinds, maxd) {
+    const lots = A.lots || A.shopLots; if (!lots) return null;
+    let best = null, bd = (maxd || 60) * (maxd || 60);
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i]; if (kinds.indexOf(l.kind) < 0) continue;
+      const lx = l.cx != null ? l.cx : (l.building && l.building.door ? l.building.door.x : null);
+      const lz = l.cz != null ? l.cz : (l.building && l.building.door ? l.building.door.z : null);
+      if (lx == null) continue;
+      const dd = (lx - x) * (lx - x) + (lz - z) * (lz - z);
+      if (dd < bd) { bd = dd; best = l; }
+    }
+    return best;
+  }
+
+  // assign-once a persistent HOME lot a resident drifts back to after dark. Ties
+  // to whatever residence is theirs (and, when that building has an owner record,
+  // remembers it so the ped reads as a distinct life rather than a random walker).
+  function homeLot(ped, A) {
+    // re-validate against the LIVE arena: a recycled/respawned body (crowd.js
+    // reuses a parked rig) or a new run must not keep a stale lot reference.
+    if (ped._home && ped._home.building && A.homeLots && A.homeLots.indexOf(ped._home) >= 0) return ped._home;
+    ped._home = null;
+    if (!A.homeLots || !A.homeLots.length) return null;
+    ped._home = A.homeLots[(rng() * A.homeLots.length) | 0];
+    return ped._home;
+  }
+  // assign-once a persistent WORK lot. Vendors are posted at their own shop; the
+  // rest get a fixed workplace fitting their archetype. When a candidate lot has
+  // an owner record (buildings.js stamps lot.building.owner) we keep it tied so
+  // the routine reads as "this person works HERE", not a fresh random door daily.
+  function workLot(ped, A) {
+    if (ped.vendor) { ped._work = ped.vendor; return ped._work; }
+    // re-validate the cached workplace still belongs to the live arena (recycled
+    // body / new run) before trusting it; otherwise reassign from scratch.
+    if (ped._work && ped._work.building && A.shopLots && A.shopLots.indexOf(ped._work) >= 0) return ped._work;
+    ped._work = null;
+    if (!A.shopLots || !A.shopLots.length) return null;
+    // bias the workplace KIND by archetype so lives differ (a trainer works the
+    // gym, a hustler the corner, etc). Falls through to any shop if none match.
+    const a = ped.archetype;
+    const want = a === "merchant" ? null
+      : a === "dealer" ? "drugs"
+      : a === "addict" ? "drugs"
+      : a === "laborer" ? ["hardware", "chop", "carlot"]
+      : a === "professional" ? ["bank", "cityhall", "realtor"]
+      : a === "student" ? ["electronics", "barber", "clothing"]
+      : ["clothing", "food", "gym", "hardware", "electronics"];
+    let pool = A.shopLots;
+    if (want) {
+      const kinds = Array.isArray(want) ? want : [want];
+      const m = A.shopLots.filter((l) => kinds.indexOf(l.kind) >= 0 && l.building && l.building.door);
+      if (m.length) pool = m;
+    }
+    pool = pool.filter((l) => l.building && l.building.door);
+    if (!pool.length) return null;
+    ped._work = pool[(rng() * pool.length) | 0];
+    return ped._work;
+  }
+
   // pick a destination weighted by the ped's archetype + the time of day.
   // Returns a goal {x,z,enter?} or null to fall through to the default roll.
   function scheduledGoal(ped, A) {
     if (!A.shopLots || !A.shopLots.length) return null;
     const phase = dayPhase();
     const homeward = phase === "night" || (phase === "evening" && rng() < 0.5);
-    // residents have a "home" lot they drift back to after dark
-    if (homeward && A.homeLots && A.homeLots.length) {
-      if (!ped._home) ped._home = A.homeLots[(rng() * A.homeLots.length) | 0];
-      const h = ped._home;
-      const door = h.building && h.building.door;
-      if (door) return { x: door.x, z: door.z, enter: true };
-      return { x: h.cx + (rng() - 0.5) * (h.w || 6), z: h.cz + (rng() - 0.5) * (h.d || 6) };
+    // residents have a persistent "home" lot they drift back to after dark
+    if (homeward) {
+      const h = homeLot(ped, A);
+      if (h) {
+        const door = h.building && h.building.door;
+        if (door) return { x: door.x, z: door.z, enter: true };
+        return { x: h.cx + (rng() - 0.5) * (h.w || 6), z: h.cz + (rng() - 0.5) * (h.d || 6) };
+      }
+    }
+    // work hours: commute to YOUR fixed workplace (not a fresh random door)
+    if (phase === "morning" || phase === "work") {
+      if (ped.archetype === "merchant") return null;   // vendors are posted; don't pull them
+      const w = workLot(ped, A);
+      if (w && w.building && w.building.door) return { x: w.building.door.x, z: w.building.door.z, enter: true };
     }
     // by day, gravitate to the kind of place that fits the hour / archetype
     let prefer = null;
     if (phase === "lunch") prefer = rng() < 0.6 ? "food" : "bar";
     else if (phase === "evening") prefer = ["bar", "casino", "food", "gym"][(rng() * 4) | 0];
-    else if (phase === "morning" || phase === "work") {
-      const a = ped.archetype;
-      if (a === "merchant") return null;        // vendors are posted; don't pull them
-      prefer = ["clothing", "electronics", "food", "gym", "barber", "hardware", "bank"][(rng() * 7) | 0];
-    }
     if (prefer) {
       const matches = A.shopLots.filter((l) => l.kind === prefer);
       if (matches.length) {
@@ -556,11 +1153,162 @@
     return null;
   }
 
+  // CHEAP MICRO-BEHAVIOURS: tiny soft idle flavour, branched by archetype, so the
+  // crowd reads as distinct lives (pause + face a food vendor, sit by a bench,
+  // window-shop). Soft only — it sets a short pause / facing, NEVER forces a goal,
+  // and bails the instant the ped has anything more important going on. Returns
+  // true if it consumed the beat. Runs only for the near/active crowd, rate-gated.
+  function microBehaviour(ped, A) {
+    if (ped.rage || ped.state === "flee" || ped.state === "fight" || ped.surrender) return false;
+    if ((ped._microT || 0) > 0) return false;
+    ped._microT = 5 + rng() * 7;                          // long gate: incidental, not constant
+    const a = ped.archetype;
+    // ---- ROLE FLAVOUR: a legible beat for the distinctive lives. Soft (a pause +
+    //      facing, sometimes a queue/chat); always yields, never forces a goal. ----
+    const role = pedRole(ped);
+    if (role === "busker" && ped._stage) {
+      // perform at the stage spot: face the crowd direction + hold; nearby idle
+      // peds get nudged to stop and watch (a small gathering, GTA street act).
+      const d = Math.hypot(ped.pos.x - ped._stage.x, ped.pos.z - ped._stage.z);
+      if (d < 8) {
+        ped.pause = Math.max(ped.pause, 2.0 + rng() * 2.0); ped.speed = 0;
+        // draw a couple of nearby walkers in to watch (bounded, soft pause only)
+        const peds = CBZ.cityPeds; let drawn = 0;
+        for (let i = 0; i < peds.length && drawn < 3; i++) {
+          const o = peds[i];
+          if (o === ped || o.dead || o.vendor || o.rage || o.state === "flee" || o.state === "fight" || o.surrender) continue;
+          if (o.guard || o.controlled || o.companion || (o.npcWanted | 0) >= 1) continue;   // don't yank a busy ped off task
+          const dx = o.pos.x - ped.pos.x, dz = o.pos.z - ped.pos.z, dd = dx * dx + dz * dz;
+          if (dd > 64 || dd < 1) continue;
+          o.group.rotation.y = Math.atan2(ped.pos.x - o.pos.x, ped.pos.z - o.pos.z);
+          o.pause = Math.max(o.pause || 0, 1.2 + rng() * 1.4); o.speed = 0; drawn++;
+        }
+        return true;
+      }
+    }
+    if (role === "tourist" && ped._snapAt) {
+      // stop to "photograph" the landmark: face it, hold a beat (phone-up vibe).
+      const d = Math.hypot(ped.pos.x - ped._snapAt.x, ped.pos.z - ped._snapAt.z);
+      if (d < 16 && rng() < 0.7) {
+        ped.group.rotation.y = Math.atan2(ped._snapAt.x - ped.pos.x, ped._snapAt.z - ped.pos.z);
+        ped.state = "film"; ped.pause = Math.max(ped.pause, 1.4 + rng() * 1.6); ped.speed = 0;
+        return true;
+      }
+    }
+    if (role === "panhandler" && ped._beg) {
+      // linger and beg: barely moves, faces passers-by, occasional bark via social.
+      ped.pause = Math.max(ped.pause, 2.5 + rng() * 2.5); ped.speed = 0;
+      const mate = nearestActor(ped, 6, (p) => p.kind === "civilian" && !p.vendor && p.state !== "flee");
+      if (mate) ped.group.rotation.y = Math.atan2(mate.pos.x - ped.pos.x, mate.pos.z - ped.pos.z);
+      return true;
+    }
+    if (role === "watcher") {
+      // cop-watcher: keep eyes on the nearest cop, hold a beat (observing).
+      const cop = nearestCop(ped.pos.x, ped.pos.z, 30);
+      if (cop && rng() < 0.5) {
+        ped.group.rotation.y = Math.atan2(cop.pos.x - ped.pos.x, cop.pos.z - ped.pos.z);
+        ped.pause = Math.max(ped.pause, 0.8 + rng() * 1.2); ped.speed = 0;
+        return true;
+      }
+    }
+    // who is the nearest food lot / bench-y leisure lot? cheap bounded scan.
+    let foodDoor = null, bd = 16 * 16;
+    if (A.shopLots) {
+      for (let i = 0; i < A.shopLots.length; i++) {
+        const l = A.shopLots[i];
+        if (l.kind !== "food" && l.kind !== "bar") continue;
+        const d = l.building && l.building.door; if (!d) continue;
+        const dd = (d.x - ped.pos.x) * (d.x - ped.pos.x) + (d.z - ped.pos.z) * (d.z - ped.pos.z);
+        if (dd < bd) { bd = dd; foodDoor = d; }
+      }
+    }
+    // peckish residents / students linger and face a food spot (smell the grill)
+    if (foodDoor && (a === "resident" || a === "student" || a === "laborer") && rng() < 0.5) {
+      ped.group.rotation.y = Math.atan2(foodDoor.x - ped.pos.x, foodDoor.z - ped.pos.z);
+      ped.pause = Math.max(ped.pause, 1.2 + rng() * 1.5); ped.speed = 0;
+      return true;
+    }
+    // a professional / older soul takes a seat near a park bench (drift to a park
+    // edge and rest a beat); others occasionally just stop to people-watch.
+    if (rng() < 0.35) {
+      // face a nearby park if there is one; else just hold and look around
+      let parkC = null, pd = 22 * 22;
+      const lots = A.lots || A.shopLots;
+      if (lots) for (let i = 0; i < lots.length; i++) {
+        const l = lots[i]; if (l.kind !== "park") continue;
+        const dd = (l.cx - ped.pos.x) * (l.cx - ped.pos.x) + (l.cz - ped.pos.z) * (l.cz - ped.pos.z);
+        if (dd < pd) { pd = dd; parkC = l; }
+      }
+      if (parkC) ped.group.rotation.y = Math.atan2(parkC.cx - ped.pos.x, parkC.cz - ped.pos.z);
+      ped.pause = Math.max(ped.pause, 0.8 + rng() * 1.4); ped.speed = 0;
+      return true;
+    }
+    return false;
+  }
+
+  // ROLE PURPOSE LOOP: where does THIS archetype want to be right now? Returns a
+  // goal {x,z,enter?} for the flavour roles aigoals doesn't drive, or null to fall
+  // through to the schedule / random roll. Pure SET — the brain carries the walk.
+  function roleGoal(ped, A) {
+    const role = pedRole(ped);
+    switch (role) {
+      case "jogger": {
+        // laps the blocks: hop to a far intersection at a brisk clip (the jog speed
+        // boost is applied in move() off the role, so nothing to restore later).
+        if (!A.intersections || !A.intersections.length) return null;
+        const it = A.intersections[(rng() * A.intersections.length) | 0];
+        return { x: it.x + (rng() - 0.5) * 4, z: it.z + (rng() - 0.5) * 4 };
+      }
+      case "busker": {
+        // posts up at the nearest plaza/park and performs (draws a small crowd via
+        // the micro-loop). Holds the spot; only re-picks if there's no park at all.
+        const park = nearestLotKind(A, ped.pos.x, ped.pos.z, ["park"], 90);
+        if (park) { ped._stage = { x: park.cx, z: park.cz }; return { x: park.cx + (rng() - 0.5) * 5, z: park.cz + (rng() - 0.5) * 5 }; }
+        return null;
+      }
+      case "tourist": {
+        // ambles between landmarks (parks + towers) to "photograph" them. Picks a
+        // notable lot a little away so they actually traverse the city.
+        const lm = nearestLotKind(A, ped.pos.x, ped.pos.z, ["park", "tower"], 120);
+        if (lm) {
+          const lx = lm.cx != null ? lm.cx : lm.building.door.x, lz = lm.cz != null ? lm.cz : lm.building.door.z;
+          ped._snapAt = { x: lx, z: lz };
+          return { x: lx + (rng() - 0.5) * 8, z: lz + (rng() - 0.5) * 8 };
+        }
+        return null;
+      }
+      case "panhandler": {
+        // lingers near a busy spot (a shop door / plaza) and begs — barely moves.
+        const spot = nearestLotKind(A, ped.pos.x, ped.pos.z, ["park"], 50)
+          || (A.shopLots && A.shopLots.length ? A.shopLots[(rng() * A.shopLots.length) | 0] : null);
+        if (spot) {
+          const sx = spot.cx != null ? spot.cx : spot.building.door.x, sz = spot.cz != null ? spot.cz : spot.building.door.z;
+          ped._beg = { x: sx, z: sz };
+          return { x: sx + (rng() - 0.5) * 6, z: sz + (rng() - 0.5) * 6 };
+        }
+        return null;
+      }
+      case "watcher": {
+        // cop-watcher / vigilante: drifts toward the nearest cop or a recent crime
+        // to keep an eye on the street. The reactive crime-response lives in think().
+        const cop = nearestCop(ped.pos.x, ped.pos.z, 70);
+        if (cop) return { x: cop.pos.x + (rng() - 0.5) * 10, z: cop.pos.z + (rng() - 0.5) * 10 };
+        return null;
+      }
+      default: return null;     // commuter / vendor / dealer / junkie → schedule+brain
+    }
+  }
+
   // ---- routine waypoint picking (route through an intersection to cross) ----
   function pickRoutineGoal(ped) {
     const A = CBZ.city.arena;
     const r = rng();
-    let goal = scheduledGoal(ped, A);     // try a time-of-day destination first
+    // a flavour-role destination first (jogger laps / busker stage / tourist
+    // landmark / panhandler corner / watcher near a cop); falls through to the
+    // day-schedule, then the generic random roll. Roles only win some of the time
+    // so they still keep the commute rhythm and don't feel on rails.
+    let goal = (rng() < 0.7 ? roleGoal(ped, A) : null);
+    if (!goal) goal = scheduledGoal(ped, A);     // try a time-of-day destination
     if (!goal) {
       if (r < 0.25 && A.shopLots && A.shopLots.length) { const l = A.shopLots[(rng() * A.shopLots.length) | 0]; goal = { x: l.building.door.x, z: l.building.door.z, enter: true }; }
       else if (r < 0.4 && A.lots) { const l = A.lots[(rng() * A.lots.length) | 0]; goal = { x: l.cx + (rng() - 0.5) * l.w, z: l.cz + (rng() - 0.5) * l.d }; }
@@ -697,7 +1445,7 @@
   // NPC offender). Clears the witness so they don't double-report.
   function landReport(ped) {
     const off = ped.mem;
-    const sev = ped.witnessSev || 20, type = ped.witnessType;
+    const sev = ped.witnessSev || 8, type = ped.witnessType;
     if (off === CBZ.city.playerActor) {
       if (CBZ.cityReport) CBZ.cityReport(sev, { x: ped.pos.x, z: ped.pos.z, type: type });
       CBZ.city && CBZ.city.note("🗣️ " + ped.name + " reported you!", 1.5);
@@ -819,8 +1567,45 @@
     if (dpl > 13 || ped.reactCD > 0) return false;
     const hot = (g.wanted | 0) >= 1;
     const respect = g.respect || 0;
-    const prov = (ped.gang && CBZ.cityGangProvoked) ? CBZ.cityGangProvoked(ped.gang) : 0;
+    const prov = provokedAtPlayer(ped);
     const r = rng();
+
+    // ---- GANG / REPUTATION STANCE (the smarter read): resolve how this ped sees
+    //      the player from gang allegiance, who they've killed, and reputation,
+    //      and let the strongest stance pre-empt the generic talk/steal/deal. ----
+    const host = gangHostility(ped);                 // -1 ally · 0 none · 1 rival · 2 war
+    const standing = playerStandingWith(ped);        // earned rep with their crew
+    const witnessedKill = ped.witnessType === "murder" && ped.mem === CBZ.city.playerActor;
+    // HOSTILE CHARGE: a gang member whose crew you rival/war with, or whose blood
+    // you've spilled (provoke + witnessed your murder), squares up and attacks —
+    // a war reads louder (lower aggression needed, won't bail). Charges with fists
+    // if unarmed; opens fire if strapped. Won't melee-charge a drawn gun unarmed.
+    if (host >= 1 && ped.aggr >= (B.bold || 0.5) && dpl < 12) {
+      const grievance = host === 2 || prov > 0.3 || witnessedKill;   // a reason to start it
+      const willMelee = ped.armed || (!playerArmed && ped.aggr >= (B.crook || 0.72));
+      const odds = host === 2 ? 0.7 : 0.42;
+      if (grievance && willMelee && r < odds) {
+        ped.rage = CBZ.city.playerActor; ped.state = "fight"; ped.reactCD = 10;
+        if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, host === 2 ? 0.3 : 0.15);
+        citySayBark(ped, host === 2 ? pick(["Wrong block, opp!", "You're a dead man here.", "Light him up!"], rng())
+                                    : pick(["You don't belong here.", "Off our turf.", "Bold move, comin' round here."], rng()), 1.6);
+        return true;
+      }
+    }
+    // DEFER / RESPECT-BARK: a member of YOUR crew (or an allied one), or anyone
+    // when you're a high-standing famous name, gives you props and stands down
+    // instead of starting trouble. Never a fight; a quick nod, then a long CD.
+    if (!ped.surrender && (host < 0 || standing >= 35 || respect >= 12) && dpl < 11) {
+      const fam = host < 0;                          // your own / allied crew
+      if (fam || r < 0.5) {                          // ambient peds only sometimes bark
+        ped.reactCD = 12 + rng() * 8;
+        ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z), 0.5);
+        ped.pause = Math.max(ped.pause, 0.7 + rng() * 0.8); ped.speed = 0;
+        citySayBark(ped, fam ? pick(["We move when you say, boss.", "Respect. You run this.", "Need anything, I'm on it."], rng())
+                              : pick(["That's the one from the news right there.", "Big respect — heard about you.", "We good, we good. No problems here."], rng()), 1.8);
+        return true;
+      }
+    }
 
     // KILL: an armed/violent ped that has a reason — provoked gang, you're a hot
     // armed threat in their space, or pure aggression — opens fire / charges.
@@ -862,6 +1647,84 @@
     return false;
   }
 
+  // ============================================================
+  //  LONE-WOLF RAMPAGE brain — a ped that SNAPPED into an active-shooter spree.
+  //  Set ped.rampage = true (the director in aigoals.js does this rarely). From
+  //  then on this owns the ped: it arms itself (its own gun, a dropped gun nearby,
+  //  or fists/knife), keeps a hard self-wanted level so cops hunt it relentlessly,
+  //  and relentlessly attacks the NEAREST living soul (civilian or cop) — killing
+  //  as many as it can. It does NOT flee at low HP; it goes until it's put down.
+  //  Reuses the existing violent plumbing (npcAttack, cityNpcOffense/npcWanted,
+  //  cityPanic, cityTagWitnesses). Cheap: a bounded nearest-target scan on a per-ped
+  //  rate timer (_rampT), and it leans on the same per-frame move() to carry it.
+  // ============================================================
+  function rampageThink(ped, dt, active) {
+    if (ped.dead) { ped.rampage = false; return; }
+    ped.surrender = false; ped.surrenderT = 0; ped.fear = 0;     // a rampager knows no fear
+    ped.poseHandsUp = false; ped.poseAimBack = false;
+    // ARM UP: pull its own gun, or grab a dropped one nearby, or commit to fists.
+    if (!ped.armed) {
+      const di = nearestDrop(ped.pos.x, ped.pos.z, 22);
+      if (di >= 0) {
+        const d = CBZ.cityDrops[di];
+        // close enough to scoop it up; else walk onto it (loot state carries the walk)
+        if (Math.hypot(d.x - ped.pos.x, d.z - ped.pos.z) < 1.6) {
+          ped.armed = true; ped.weapon = d.weapon; ped.ammo = d.ammo;
+          if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); removeDrop(di);
+        } else { ped.state = "loot"; ped.target.set(d.x, 0, d.z); return; }
+      } else if (!ped._rampArmed) {
+        // no gun to be found → snaps with a blade/fists. Give it a pistol if the
+        // roll said this one came strapped (the director biases armed picks); else
+        // it brawls. Either way it keeps attacking with whatever it has.
+        ped._rampArmed = 1;
+        if (rng() < 0.5) { ped.armed = true; ped.weapon = "Pistol"; ped.ammo = 12 + ((rng() * 18) | 0); if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped); }
+      }
+    }
+    // keep the cops on it HARD (active-shooter response). cityNpcOffense raises its
+    // npcWanted; re-poke it periodically so the heat never fully decays mid-spree.
+    if ((ped._rampHeatT || 0) <= 0) {
+      ped._rampHeatT = 2.5;
+      if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 60, "active-shooter");
+      if ((ped.npcWanted | 0) < 3) ped.npcWanted = 3;
+    } else ped._rampHeatT -= dt;
+
+    // TARGET the nearest living soul — civilian or cop — and bear down on them. Only
+    // re-scan on the rate timer (cheap); keep charging the current target between.
+    if (!ped.rage || ped.rage.dead || (ped._rampT || 0) <= 0) {
+      ped._rampT = 0.4 + rng() * 0.4;
+      const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+      // prefer the closest of: any nearby civilian/cop, or the player if right here
+      let tgt = nearestActor(ped, 60, (p) => !p.dead && !p.rampage && (p.kind === "cop" || (p.kind === "civilian" && !p.companion && !p.controlled)));
+      if (P && !P.dead && PA) {
+        const dP = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+        if (dP < 20 && (!tgt || dP < Math.hypot(tgt.pos.x - ped.pos.x, tgt.pos.z - ped.pos.z))) tgt = PA;
+      }
+      if (tgt) { ped.rage = tgt; }
+    }
+    if (ped.rage && !ped.rage.dead) {
+      ped.state = "fight";
+      ped.target.set(ped.rage.pos.x, 0, ped.rage.pos.z);
+      // keep the street terrified + tagging witnesses around the shooter (active only,
+      // bounded). This is what makes it read as a city-wide event the player can stop.
+      if (active && (ped._rampPanicT || 0) <= 0) {
+        ped._rampPanicT = 1.2;
+        if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, 1.4, ped);
+        if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(ped.pos.x, ped.pos.z, 80, "active-shooter");
+      } else if (ped._rampPanicT > 0) ped._rampPanicT -= dt;
+    } else {
+      // nobody in reach — prowl toward the densest part of the map (the centre) to
+      // find more victims rather than standing still.
+      ped.rage = null; ped.state = "walk";
+      const A = CBZ.city && CBZ.city.arena;
+      if (A && (!ped.path || !ped.path.length) && ped.pause <= 0) {
+        const c = A.center || { x: 0, z: 0 };
+        ped.target.set(c.x + (rng() - 0.5) * 40, 0, c.z + (rng() - 0.5) * 40);
+        ped.pause = 0.3;
+      }
+    }
+  }
+  CBZ.cityRampageThink = rampageThink;   // exposed for the director to validate the hook
+
   // ---- the brain (time-sliced) ----
   function think(ped, dt, active) {
     if (ped.companion) { companionThink(ped, dt, active); return; }
@@ -870,10 +1733,16 @@
     const B = A0();
     const P = CBZ.player, px = P.pos.x, pz = P.pos.z;
     const ddx = ped.pos.x - px, ddz = ped.pos.z - pz, dpl = Math.hypot(ddx, ddz);
-    const playerArmed = !!g.cityWeapon && CBZ.cityEcon && CBZ.cityEcon.ITEMS[g.cityWeapon] && CBZ.cityEcon.ITEMS[g.cityWeapon].gun;
+    const playerArmed = !!(CBZ.cityHasGun && CBZ.cityHasGun());
     const playerThreat = !P.dead && (((g.wanted | 0) >= 1 && playerArmed) || P._fighting > 0);
     const bnd = band(ped.aggr);
     if (ped.reactCD > 0) ped.reactCD -= dt;
+
+    // ---- LONE-WOLF RAMPAGE: a ped that SNAPPED. Owns the brain completely — arms
+    //      up, hunts the nearest soul, kills as many as it can, and NEVER backs off
+    //      (no flee at low HP). It only stops when killed. Handled here, first, so
+    //      nothing else (flee/surrender/routine) can override the spree.
+    if (ped.rampage) { rampageThink(ped, dt, active); return; }
 
     // ---- IN-PROGRESS WITNESS REPORT: a committed snitch is busy dialing / running
     //      to a cop. The player can STOP it: get close with a gun out and a timid
@@ -897,6 +1766,14 @@
         if (ped.hp < ped.maxHp * 0.3 && ped.aggr < (B.violent || 0.88)) { ped.rage = null; ped.state = "flee"; fleeFrom(ped, ped.pos.x + ddx, ped.pos.z + ddz); }
         return;
       }
+    }
+
+    // ---- GROUP: a ped whose partner/family is attacked rallies with them, and a
+    //      knot of bold peds piles onto a shared threat (mob). Active crowd only
+    //      (bounded scans), rate-gated so it's cheap; never fires while surrendering.
+    if (active && !ped.surrender && (ped._groupT || 0) <= 0) {
+      ped._groupT = 0.6 + rng() * 0.6;
+      if ((ped.partner || (ped.family && ped.family.length) || ped.aggr >= (B.bold || 0.5)) && groupReact(ped, B)) return;
     }
 
     // ---- GUNPOINT (reuses the jail's intimidate logic): if the player is
@@ -1072,6 +1949,10 @@
       const mate = nearestActor(ped, 3.2, (p) => p.kind === "civilian" && !p.vendor && (p.state === "walk" || p.state === "idle"));
       if (mate) { ped.state = "chat"; ped.chatT = 2 + rng() * 3; ped.speed = 0; ped.group.rotation.y = Math.atan2(mate.pos.x - ped.pos.x, mate.pos.z - ped.pos.z); return; }
     }
+    // cheap archetype micro-flavour (linger at a food stall, rest near a bench) so
+    // the crowd reads as distinct lives — soft, never forces a goal (active only).
+    if (active && !ped.vendor && ped.pause <= 0 && (!ped.path || !ped.path.length) &&
+        CBZ.city && CBZ.city.arena && microBehaviour(ped, CBZ.city.arena)) return;
     if (ped.pause <= 0 && (!ped.path || !ped.path.length)) pickRoutineGoal(ped);
   }
 
@@ -1100,17 +1981,58 @@
   function fleeFrom(ped, x, z) {
     ped.state = "flee"; ped.path = null;
     const ax = ped.pos.x - x, az = ped.pos.z - z, m = Math.hypot(ax, az) || 1;
-    const baseAng = Math.atan2(ax / m, az / m);    // straight away from the threat
+    let baseAng = Math.atan2(ax / m, az / m);      // straight away from the threat
+    // BIAS the meek/wary toward HELP rather than a blind away-vector: run to the
+    // nearest cop (running TO police is a louder call for help) or duck into the
+    // nearest shop door (shelter). Only when that refuge is roughly away from the
+    // threat (never run THROUGH the danger), and the clear-path sampling below
+    // still vets the actual heading so they don't sprint into a wall.
+    if (ped.aggr < (A0().bold || 0.5) && ped.fear > 3 && (ped._refugeT || 0) <= 0) {
+      ped._refugeT = 2.5;
+      let refuge = null;
+      const cop = nearestCop(ped.pos.x, ped.pos.z, 50);
+      if (cop) refuge = { x: cop.pos.x, z: cop.pos.z };
+      else {
+        const A = CBZ.city && CBZ.city.arena;
+        if (A && A.shopLots && A.shopLots.length) {
+          let bd = 40 * 40, best = null;
+          for (let i = 0; i < A.shopLots.length; i++) {
+            const d = A.shopLots[i].building && A.shopLots[i].building.door; if (!d) continue;
+            const dd = (d.x - ped.pos.x) * (d.x - ped.pos.x) + (d.z - ped.pos.z) * (d.z - ped.pos.z);
+            if (dd < bd) { bd = dd; best = d; }
+          }
+          if (best) refuge = { x: best.x, z: best.z };
+        }
+      }
+      if (refuge) {
+        const rx = refuge.x - ped.pos.x, rz = refuge.z - ped.pos.z, rm = Math.hypot(rx, rz) || 1;
+        // only steer toward the refuge if it isn't back toward the threat
+        if ((rx / rm) * (ax / m) + (rz / rm) * (az / m) > -0.2) baseAng = Math.atan2(rx / rm, rz / rm);
+      }
+    }
     // try the straight-away heading, then progressively wider sidesteps
     const offs = [0, 0.5, -0.5, 1.0, -1.0, 1.7, -1.7, 2.6];
-    let bx = ped.pos.x + (ax / m) * 22, bz = ped.pos.z + (az / m) * 22, found = false;
+    let bx = ped.pos.x + Math.sin(baseAng) * 22, bz = ped.pos.z + Math.cos(baseAng) * 22, found = false;
     for (let k = 0; k < offs.length; k++) {
       const a = baseAng + offs[k];
       const ux = Math.sin(a), uz = Math.cos(a);
       if (dirClear(ped, ux, uz, 7)) { bx = ped.pos.x + ux * 22; bz = ped.pos.z + uz * 22; found = true; break; }
     }
     ped.target.set(bx, 0, bz);
-    if (!found && CBZ.city && CBZ.city.arena) { const p = CBZ.city.arena.randomSidewalkPoint(); ped.target.set(p.x, 0, p.z); }
+    // EVERY sampled away-heading was blocked: fall back to a sidewalk point, but
+    // VET it with dirClear so we don't just pick a fresh target straight through a
+    // building. Try a few; if none is reachable, hold position (better to freeze a
+    // beat than to bolt into a wall — the next think pass re-picks).
+    if (!found && CBZ.city && CBZ.city.arena) {
+      const A = CBZ.city.arena;
+      let placed = false;
+      for (let t = 0; t < 4; t++) {
+        const p = A.randomSidewalkPoint();
+        const ux = p.x - ped.pos.x, uz = p.z - ped.pos.z, um = Math.hypot(ux, uz) || 1;
+        if (dirClear(ped, ux / um, uz / um, Math.min(7, um))) { ped.target.set(p.x, 0, p.z); placed = true; break; }
+      }
+      if (!placed) ped.target.set(ped.pos.x, 0, ped.pos.z);
+    }
     // a RARE scream when genuine terror hits (high fear — gunfire/explosion/a body
     // dropping right by them, which is what drives fear that high). LONG per-ped
     // cooldown AND a small chance, on top of the hard city-wide gap in scream(),
@@ -1122,16 +2044,26 @@
   //      blended into the move vector so the crowd flows AROUND walls and each
   //      other instead of clumping/clipping (Reynolds steering, cheap version).
   //      Returns a small {x,z} steering offset to add to the desired heading. ----
-  const _steer = { x: 0, z: 0 };
+  const _steer = { x: 0, z: 0, blocked: 0 };
   function steering(ped, dx, dz, dist, active) {
-    _steer.x = 0; _steer.z = 0;
+    _steer.x = 0; _steer.z = 0; _steer.blocked = 0;
     if (dist < 0.001) return _steer;
     const hx = dx / dist, hz = dz / dist;       // desired heading (unit)
     // 1) OBSTACLE LOOK-AHEAD: probe a point ahead; if blocked, veer to whichever
-    //    side is open. Only the near/active crowd pays for this (LOD).
-    if (active) {
-      const ahead = Math.min(2.6, 1.2 + ped.speed * 0.4);
+    //    side is open. The ACTIVE/near crowd probes every steering tick. EVERY OTHER
+    //    MOVING ped that's heading toward a FAR goal also probes — but only on a
+    //    cheap per-ped rate timer (_probeT) so a distant walker still steers around
+    //    a building BEFORE grinding into it, without paying a couple of collide()
+    //    probes every frame for all ~90 rigs. (Near a goal, dist is small and the
+    //    body-collision pass alone is enough, so we skip the probe there.)
+    let doProbe = active;
+    if (!doProbe && dist > 3) {
+      if ((ped._probeT || 0) <= 0) { ped._probeT = 0.25 + (ped.slice & 3) * 0.05; doProbe = true; }
+    }
+    if (doProbe) {
+      const ahead = Math.min(2.6, 1.2 + (ped.speed || ped.baseSpeed) * 0.4);
       if (!dirClear(ped, hx, hz, ahead)) {
+        _steer.blocked = 1;                              // straight ahead is a wall
         // pick the clearer side to slip past — probe a forward-diagonal each way,
         // normalized so the look-ahead distance stays consistent.
         const lx = hz, lz = -hx, rx = -hz, rz = hx;     // left / right perpendiculars
@@ -1173,16 +2105,53 @@
     return _steer;
   }
 
+  // RALLY: a gangster who spots an intruder calls in nearby SAME-GANG members so
+  // the whole block converges on the threat (GTA-style turf swarm). Bounded scan
+  // (~25m, n-capped); only flips calm members so we never stomp a busy brain. The
+  // response is louder when the gangs are at open war (more bodies, even the wary).
+  function rallyGang(ped, intruder) {
+    if (!intruder || intruder.dead) return;
+    const peds = CBZ.cityPeds, R2 = 25 * 25;
+    // is the intruder's gang at war with ours? → a bigger, angrier turnout
+    const iGang = intruder.gang || (intruder.isPlayer ? playerGangId() : null);
+    const war = !!(iGang && CBZ.cityAtWar && CBZ.cityAtWar(ped.gang, iGang));
+    const cap = war ? 6 : 4;
+    let called = 0;
+    for (let i = 0; i < peds.length && called < cap; i++) {
+      const o = peds[i];
+      if (o === ped || o.dead || o.vendor || o.ko > 0 || o.controlled || o.companion) continue;
+      if (o.gang !== ped.gang) continue;                          // only our own crew
+      if (o.rage || o.state === "fight" || o.surrender) continue; // already busy
+      // war pulls the wary too; a normal incursion only rouses the bold+
+      if (o.aggr < (war ? (A0().bold || 0.5) : (A0().crook || 0.72))) continue;
+      const dx = o.pos.x - ped.pos.x, dz = o.pos.z - ped.pos.z;
+      if (dx * dx + dz * dz >= R2) continue;
+      o.rage = intruder; o.state = "fight";
+      o.alarmed = Math.max(o.alarmed, 6);
+      o.target.set(intruder.pos.x, 0, intruder.pos.z);
+      called++;
+    }
+  }
+
   // is there an intruder in this gangster's turf they should attack?
   function turfIntruder(ped, px, pz, playerArmed) {
     const G = ped.guard, R2 = 13 * 13;
     // the player, if hot/armed/provoked the gang, standing in turf
     const dP = (px - G.x) * (px - G.x) + (pz - G.z) * (pz - G.z);
     const prov = CBZ.cityGangProvoked ? CBZ.cityGangProvoked(ped.gang) : 0;
-    if (!CBZ.player.dead && dP < R2 && (prov > 0.4 || (playerArmed && (CBZ.game.wanted | 0) >= 1))) return CBZ.city.playerActor;
+    if (!CBZ.player.dead && dP < R2 && (prov > 0.4 || (playerArmed && (CBZ.game.wanted | 0) >= 1))) {
+      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor); ped._rallyT = 6; }
+      return CBZ.city.playerActor;
+    }
     // a rival gangster in turf
     const rival = nearestActor(ped, 12, (p) => p.gang && p.gang !== ped.gang);
-    if (rival) { const dr = (rival.pos.x - G.x) * (rival.pos.x - G.x) + (rival.pos.z - G.z) * (rival.pos.z - G.z); if (dr < R2 * 1.6) return rival; }
+    if (rival) {
+      const dr = (rival.pos.x - G.x) * (rival.pos.x - G.x) + (rival.pos.z - G.z) * (rival.pos.z - G.z);
+      if (dr < R2 * 1.6) {
+        if ((ped._rallyT || 0) <= 0) { rallyGang(ped, rival); ped._rallyT = 6; }
+        return rival;
+      }
+    }
     return null;
   }
 
@@ -1232,7 +2201,7 @@
   function gunpointSweep(dt) {
     const P = CBZ.player;
     if (!P || P.dead || P.driving) { _clearGunpointPoses(); return; }
-    const playerArmed = !!g.cityWeapon && CBZ.cityEcon && CBZ.cityEcon.ITEMS[g.cityWeapon] && CBZ.cityEcon.ITEMS[g.cityWeapon].gun;
+    const playerArmed = !!(CBZ.cityHasGun && CBZ.cityHasGun());
     if (!playerArmed) { _clearGunpointPoses(); return; }
     const B = A0();
     const cy = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(cy), fz = -Math.cos(cy);
@@ -1317,12 +2286,18 @@
     const st = ped.state;
     const surrendering = st === "surrender" || ped.surrender || ped.surrenderT > 0;
     if (ped.char) {
-      // reactions.js owns the city surrender / hands-up / aim-back POSE (via the
-      // poseHandsUp / poseAimBack flags). Do NOT also drive character.js's built-in
-      // surrender pose — running BOTH pushed the arms forward + leaned the body (the
-      // "bowing" look). Keep character.js's pose layer OFF for city peds.
+      // HANDS-UP must be HELD by animChar (character.js), exactly like the jail
+      // crowd — animChar hard-damps the arms to the overhead surrender pose and
+      // KEEPS them there. The old approach (leave char.handsUp OFF and let
+      // reactions.js add the pose) decayed: animChar damps the arm channel back
+      // toward idle every frame, and reactions' back-out/re-add additive can't
+      // win that tug-of-war, so the hands shot up for a frame then sagged back
+      // down (the "hands-up glitches back down" bug). Driving char.handsUp lets
+      // animChar own the arms; reactions still adds the fear face + a tiny offset
+      // on the already-raised base (no double-drive bow, because the poseHandsUp
+      // SURRENDER branch adds no forward lean).
       ped.char.surrender = false;
-      ped.char.handsUp = false;
+      ped.char.handsUp = !!surrendering;
     }
     // keep the reactions.js pose flag in lock-step with the actual surrender state:
     // a ped that's surrendering has hands up; one whose surrender lapsed AND isn't
@@ -1337,6 +2312,9 @@
     else if (st === "chat" || st === "idle" || st === "film" || st === "surrender") spd = 0;
     if (surrendering) spd = 0;
     if (ped.drugUser && ped.erratic > 0 && spd > 0) spd *= 1 + ped.erratic * 0.16;
+    // a jogger keeps a brisk clip on its normal walk (derived from the role, so it
+    // costs nothing to clean up — never persisted onto baseSpeed).
+    if (spd > 0 && (st === "walk" || st === "wander") && ped._role === "jogger") spd *= 1.5;
 
     // engagement: attack when in range
     if (st === "fight" && ped.rage && !ped.rage.dead) {
@@ -1353,6 +2331,8 @@
 
     if (ped._sepT > 0) ped._sepT -= dt;
     if (ped._screamT > 0) ped._screamT -= dt;
+    if (ped._probeT > 0) ped._probeT -= dt;   // far-walker wall-probe rate gate
+    if (ped._rampT > 0) ped._rampT -= dt;      // rampager re-target / re-arm cadence
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
     if (ped.pause > 0) ped.pause -= dt;
     const _px0 = ped.pos.x, _pz0 = ped.pos.z, _trying = spd > 0 && dist > 0.5;
@@ -1360,10 +2340,16 @@
       // blend the desired heading with local steering (look-ahead + separation)
       // so the crowd flows around walls and each other (no clumping/clipping).
       let mx = dx / dist, mz = dz / dist;
-      const s = steering(ped, dx, dz, dist, animate);
+      const s = steering(ped, dx, dz, dist, animate || dist > 3);
       if (s.x || s.z) { mx += s.x; mz += s.z; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml; }
-      ped.pos.x += mx * spd * dt;
-      ped.pos.z += mz * spd * dt;
+      // ANTI-TUNNEL: when the path straight ahead is a wall, the steer above turns
+      // us toward the open side — but a fast step can still carry the body INTO the
+      // corner before the turn finishes. Cut the forward step hard this frame so we
+      // ease around the obstacle instead of punching through it (the multi-pass
+      // collide below catches whatever overlap remains). Only bites when blocked.
+      const stepMul = s.blocked ? 0.25 : 1;
+      ped.pos.x += mx * spd * dt * stepMul;
+      ped.pos.z += mz * spd * dt * stepMul;
       ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(mx, mz), 1 - Math.pow(0.0009, dt));
       ped.speed = spd;
     } else {
@@ -1383,8 +2369,24 @@
     // "entered" a building: hide briefly then re-emerge (cheap life)
     if (ped.enterT > 0) { ped.enterT -= dt; ped.group.visible = false; ped.speed = 0; if (ped.enterT <= 0) ped.group.visible = true; return; }
 
-    if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7);
-    if (CBZ.city && CBZ.city.arena) CBZ.city.arena.clampToCity(ped.pos, PED_R);
+    // ANTI-TUNNEL DEPENETRATION: CBZ.collide is a SINGLE-PASS circle-vs-box push
+    // (shared with the player — do not edit it). One pass at a corner can shove the
+    // body OUT of one wall and INTO the adjacent one, leaving it half-clipped; a
+    // fast or non-active ped can then squeeze straight through. So we run it 2–3
+    // times: each pass resolves whatever the previous push created, and we stop
+    // early once a pass no longer moves the body (fully resolved). The clamp runs
+    // between passes too so a building edge + the city bounds both settle.
+    if (CBZ.collide) {
+      for (let pass = 0; pass < 3; pass++) {
+        const bx = ped.pos.x, bz = ped.pos.z;
+        CBZ.collide(ped.pos, PED_R, ped.pos.y, ped.pos.y + 1.7);
+        if (CBZ.city && CBZ.city.arena) CBZ.city.arena.clampToCity(ped.pos, PED_R);
+        // converged: the last pass didn't push us anywhere → no overlap left
+        if (Math.abs(ped.pos.x - bx) < 0.002 && Math.abs(ped.pos.z - bz) < 0.002) break;
+      }
+    } else if (CBZ.city && CBZ.city.arena) {
+      CBZ.city.arena.clampToCity(ped.pos, PED_R);
+    }
     ped.pos.y = 0;
     // STUCK DETECTION: a ped that tried to move but got shoved back by a wall is
     // grinding into it — reroute instead of standing there forever (smarter AI).
@@ -1420,6 +2422,10 @@
       const p = peds[i];
       if (p._parked) continue;     // pooled crowd-promotion ped waiting off-map; not in play
       if (p.alarmed > 0) p.alarmed -= dt;
+      if (p._rallyT > 0) p._rallyT -= dt;       // turf-rally re-call cooldown
+      if (p._refugeT > 0) p._refugeT -= dt;     // flee-toward-refuge recompute gate
+      if (p._microT > 0) p._microT -= dt;       // archetype micro-behaviour gate
+      if (p._groupT > 0) p._groupT -= dt;       // group/mob reaction recheck gate
       if (p.poseCower > 0) p.poseCower -= dt;   // brief flinch/cringe at gunfire+blasts
       if (p.tweakT > 0) p.tweakT -= dt;
       if (p.npcHeat > 0) { p.npcHeat = Math.max(0, p.npcHeat - dt * 4); }
@@ -1446,10 +2452,17 @@
       const active = near || important;
       // render LOD: peds far from the camera stop drawing entirely (the single
       // biggest GPU saving with ~90 rigs). enterT owns visibility while inside.
-      if (p.enterT <= 0) p.group.visible = active || d2 < VIS_D2;
+      const vis = active || d2 < VIS_D2;
+      if (p.enterT <= 0) p.group.visible = vis;
+      // far rigs stop casting shadows (their shadow is sub-pixel anyway); flip
+      // only on a threshold crossing so the per-frame cost is a single compare.
+      const wantShadow = vis && d2 < SHADOW_D2;
+      if (p._shadowOn !== wantShadow) { setRigShadow(p.char, wantShadow); p._shadowOn = wantShadow; }
       const far = d2 > FAR_D2;
       const stride = active ? 4 : (far ? 20 : 10);
-      if ((frame + p.slice) % stride === 0) think(p, dt * stride, active);
+      if ((frame + p.slice) % stride === 0) {
+        think(p, dt * stride, active);
+      }
       move(p, dt, near || important);
     }
 

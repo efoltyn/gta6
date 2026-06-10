@@ -287,10 +287,9 @@
       const speed = Math.abs(P._vehicle.v || 0);
       setAudioLoop("engine", "car_engine", 0.11 + Math.min(0.17, speed * 0.008), 0.72 + Math.min(0.8, speed * 0.035));
     } else stopAudioLoop("engine");
-    // real police siren wailing in the city while you have a wanted level
-    if (g.mode === "city" && (g.wanted | 0) > 0) {
-      setAudioLoop("wanted", "wanted_siren", 0.32 + Math.min(0.28, (g.wanted | 0) * 0.06));
-    } else stopAudioLoop("wanted");
+    // (REMOVED per user request: the global "you're wanted" police-siren loop that
+    // played + swelled as your stars rose. Always off now.)
+    stopAudioLoop("wanted");
   }
 
   CBZ.initAudio = initAudio;

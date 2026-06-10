@@ -80,7 +80,9 @@
     }
   }
   function weapon() { normalizeWeapon(); return WEAPONS[fps.weapon] || WEAPONS[0]; }
-  function armed() { return availableIndices().length > 0; }
+  function armed() {
+    return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
+  }
   function shoulderActive() { return !fps.active && armed() && CBZ.game.state === "playing"; }
   function maxHpOf(a) { return (a.kind === "guard" || a.kind === "warden") ? 140 : 100; }
 
@@ -411,21 +413,62 @@
     if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + Math.random() * 80);
   }
 
+  // The bullet ORIGIN must stay pinned to the GUN, not swing with recoil. The
+  // viewmodel kicks up AND rolls sideways under sustained fire, and with the
+  // barrel tip ~2m out on that pivot the muzzle socket flings far up + left after
+  // the first burst — so tracers streak out of your head / two feet to your left.
+  // The first burst looks perfect because recoil is zero; the fix is to BOUND the
+  // origin to a tight gun-region BOX in camera space, so the clean rest-pose
+  // values pass through untouched but recoil drift is clamped to the box edge.
+  // The gun model + muzzle FLASH still climb (they read the raw socket); only the
+  // world bullet/tracer/casing origin is held steady.
+  const _muzM = new THREE.Matrix4();
+  // camera-space bounds: down-and-right of the lens, out in front, never at the eye.
+  const MUZ_UP = [-0.78, -0.16], MUZ_RIGHT = [0.1, 0.62], MUZ_FWD = [0.45, 3.2];
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function clampMuzzleBelowEye(out) {
+    const cam = CBZ.camera; if (!cam) return out;
+    if (cam.updateWorldMatrix) cam.updateWorldMatrix(true, false);
+    const e = _muzM.extractRotation(cam.matrixWorld).elements;
+    const rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
+    const dx = out.x - cam.position.x, dy = out.y - cam.position.y, dz = out.z - cam.position.z;
+    const f = clamp(dx * fx + dy * fy + dz * fz, MUZ_FWD[0], MUZ_FWD[1]);
+    const u = clamp(dx * ux + dy * uy + dz * uz, MUZ_UP[0], MUZ_UP[1]);
+    const r = clamp(dx * rx + dy * ry + dz * rz, MUZ_RIGHT[0], MUZ_RIGHT[1]);
+    return out.set(
+      cam.position.x + fx * f + ux * u + rx * r,
+      cam.position.y + fy * f + uy * u + ry * r,
+      cam.position.z + fz * f + uz * u + rz * r);
+  }
+
   function muzzleWorld(out) {
     if (shoulderActive()) {
       const model = carriedModels[fps.weapon];
       if (model && model.userData.muzzle) {
-        if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.updateMatrixWorld(true);
-        model.updateMatrixWorld(true);
-        return model.localToWorld(out.copy(model.userData.muzzle));
+        attachCarriedGun();
+        // A shot can happen between render frames. Force every parent transform
+        // current before converting the barrel socket, otherwise stale hand/rig
+        // matrices make tracers appear to leave the player's chest.
+        if (model.updateWorldMatrix) model.updateWorldMatrix(true, false);
+        else {
+          if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.updateMatrixWorld(true);
+          model.updateMatrixWorld(true);
+        }
+        return clampMuzzleBelowEye(model.localToWorld(out.copy(model.userData.muzzle)));
       }
     }
     if (fps.active) {
       const model = weaponModels[fps.weapon];
       if (model && model.userData.muzzle) {
-        if (CBZ.camera) CBZ.camera.updateMatrixWorld(true);
-        model.updateMatrixWorld(true);
-        return model.localToWorld(out.copy(model.userData.muzzle));
+        // The viewmodel is parented camera -> vm -> gun -> model. Updating only
+        // the leaf can leave vm/gun stale on the input event, which visually
+        // launches the tracer from the camera/face instead of the barrel.
+        if (model.updateWorldMatrix) model.updateWorldMatrix(true, false);
+        else {
+          if (CBZ.camera) CBZ.camera.updateMatrixWorld(true);
+          model.updateMatrixWorld(true);
+        }
+        return clampMuzzleBelowEye(model.localToWorld(out.copy(model.userData.muzzle)));
       }
     }
     // last-resort fallback: drop it to GUN height/forward (down + out from the
@@ -439,9 +482,13 @@
 
   function setMuzzleSpriteFromModel(sprite, model) {
     if (!model || !model.userData.muzzle) return false;
-    if (CBZ.camera) CBZ.camera.updateMatrixWorld(true);
-    model.updateMatrixWorld(true);
-    gun.updateMatrixWorld(true);
+    if (model.updateWorldMatrix) model.updateWorldMatrix(true, false);
+    else {
+      if (CBZ.camera) CBZ.camera.updateMatrixWorld(true);
+      model.updateMatrixWorld(true);
+    }
+    if (gun.updateWorldMatrix) gun.updateWorldMatrix(true, false);
+    else gun.updateMatrixWorld(true);
     model.localToWorld(tmpMuzzle.copy(model.userData.muzzle));
     gun.worldToLocal(tmpMuzzle);
     sprite.position.copy(tmpMuzzle);
@@ -607,7 +654,11 @@
     const wall = wallDistance(eye, dir, w.range);
     const maxT = wall ? Math.max(0.1, wall.distance - 0.04) : w.range;
     const hit = findActorHit(eye, dir, maxT, w);
-    if (hit) return hit;
+    // the police gunship overhead is a valid target — ray-test it (no damage here;
+    // the shoot loop / rocket splash applies it) and take it if it's the nearest.
+    const air = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    if (hit && (!air || hit.dist <= air.dist)) return hit;
+    if (air) return { actor: null, aircraft: true, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) };
     return {
       actor: null,
       wall: !!wall,
@@ -648,9 +699,14 @@
       else {
         CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, 16, 1, CBZ.city.playerActor);
         CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: hit.head ? 6.5 : 4.5 });
-        // getting shot provokes the same fight-or-flight an NPC bullet would
+        // getting shot provokes fight-or-flight. ANYONE HOLDING A GUN shoots BACK —
+        // a person who's strapped and gets hit draws and returns fire (self-defence),
+        // even a normally-meek civilian. Only the UNARMED + non-bold flee.
         const B = (CBZ.CITY && CBZ.CITY.aggro) || {};
-        if (!a.rage) { if (a.aggr >= (B.bold || 0.5)) { a.rage = CBZ.city.playerActor; a.state = "fight"; } else { a.state = "flee"; a.alarmed = Math.max(a.alarmed || 0, 6); } }
+        if (!a.rage) {
+          if (a.armed || a.aggr >= (B.bold || 0.5)) { a.rage = CBZ.city.playerActor; a.state = "fight"; a.alarmed = Math.max(a.alarmed || 0, 6); }
+          else { a.state = "flee"; a.alarmed = Math.max(a.alarmed || 0, 6); }
+        }
       }
     }
     // every connecting shot pops the target's head (same juice as the prison) —
@@ -817,6 +873,47 @@
 
     const origin = muzzleWorld(tmp2);
     aimForward(fwd);
+
+    // EXPLOSIVE (RPG/bazooka): a hitscan-to-impact rocket. Resolve where the
+    // shot lands, draw a tracer there, then detonate via the city explosion +
+    // glass-shatter systems (CITY-ONLY — escape/survival never see these). The
+    // BLAST is the kill, so we skip the normal per-pellet damage loop entirely.
+    if (w.explosive) {
+      const MIN_DET = 4;
+      const hit = resolveShot(w, fwd);   // sets `eye` to the camera; resolves wall/actor along fwd
+      // Detonate at the NEAREST of: what the ray HIT (wall/NPC), where it crosses
+      // the STREET, or max range. The ground-crossing is the key "far-away" fix —
+      // a rocket aimed down a block at distant targets used to fly OVER them (their
+      // rigs LOD-culled, so findActorHit missed) and pop in empty air at max range.
+      // Now it lands ON the street among them, and the big blast radius does the rest.
+      let detT = hit.point ? Math.max(0.1, hit.dist || w.range) : w.range;
+      if (fwd.y < -0.01) { const gt = (0 - eye.y) / fwd.y; if (gt > 0 && gt < detT) detT = gt; }  // ground (street ≈ y0)
+      detT = Math.max(MIN_DET, Math.min(detT, w.range));   // never on the shooter, never past range
+      const pt = eye.clone().addScaledVector(fwd, detT);
+      fireTracer(origin, pt, w.tracer, 0.07);
+      if (CBZ.game.mode === "city") {
+        if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true });
+        // wreck the storefront HARD — shatter a wide radius of glass (was +2)
+        if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
+        if (CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
+        // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
+        // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in)
+        if (CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
+        // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
+        if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
+      }
+      CBZ.shake && CBZ.shake((w.shake || 1) + 0.6);
+      CBZ.doHitstop && CBZ.doHitstop(0.05);
+      // firing still raises wanted: replicate the witnessed-crime block below so
+      // launching a rocket is at least as loud as discharging a firearm.
+      if (CBZ.game.mode === "city" && CBZ.cityCrime) {
+        CBZ.cityCrime(120, { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
+        CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: 4, damage: 0.3 }, { silent: true, noWanted: true });
+        CBZ.cityAlarm && CBZ.cityAlarm(CBZ.player.pos.x, CBZ.player.pos.z, 40, 1.6, CBZ.city.playerActor);
+      }
+      return;
+    }
+
     const pellets = w.pellets || 1;
     // effective cone = base spread, opened by recoil + accumulated bloom, with
     // a hipfire/movement penalty (moving fast while shooting throws shots wide).
@@ -852,6 +949,12 @@
         head = head || hit.head;
         spawnImpact(hit.point, true, w.key === "shotgun");
         if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: shotDir, amount: hit.head ? 1.2 : 0.7, player: true });
+      } else if (hit.aircraft) {
+        // bullets chip the gunship — sparks off the hull, damage routed to the heli
+        hitSomething = true;
+        if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
+        spawnImpact(hit.point, false, true);
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
       } else if (hit.wall) {
         spawnImpact(hit.point, false, w.key === "shotgun");
         // surface normal of the struck wall (faces back toward the shooter):
@@ -903,7 +1006,40 @@
     CBZ.sfx && CBZ.sfx("switch");
     CBZ.flashHint && CBZ.flashHint(weapon().label, 0.85);
     setAmmoHud();
+    if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
+
+  // DIRECT SLOT SELECT (number keys 1-9) — pick the Nth weapon in the hotbar,
+  // in the SAME order the city HUD draws them, so [1]..[9] map to what you see.
+  // WHY: scrolling/Q through a growing arsenal is clumsy; an RPG, an AK and a
+  // sidearm should each be one keypress (GTA/CS muscle memory). 0-based slot.
+  function selectWeaponSlot(slot) {
+    const av = availableIndices();
+    if (slot < 0 || slot >= av.length) return false;
+    const idx = av[slot];
+    if (idx === fps.weapon) return true;
+    fps.weapon = idx;
+    CBZ.currentWeaponId = weaponIdOf(fps.weapon);
+    fps.reloading = 0; shotCD = Math.min(shotCD, 0.08);
+    syncAmmo();
+    weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
+    carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
+    if (weaponModels[fps.weapon] && weaponModels[fps.weapon].userData.muzzle) muzzle.position.copy(weaponModels[fps.weapon].userData.muzzle);
+    CBZ.sfx && CBZ.sfx("switch");
+    CBZ.flashHint && CBZ.flashHint(weapon().label, 0.85);
+    setAmmoHud();
+    if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  CBZ.fpsSelectSlot = selectWeaponSlot;
+  // number-key hotbar in CITY (jail keeps its own stash-hotbar in inventory.js).
+  // Gated so it never fires while a menu/map is up or you're typing in a panel.
+  addEventListener("keydown", function (e) {
+    if (e.repeat || CBZ.game.mode !== "city" || CBZ.game.state !== "playing") return;
+    if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
+    const n = "123456789".indexOf(e.key);
+    if (n >= 0 && armed()) { if (selectWeaponSlot(n)) e.preventDefault(); }
+  });
 
   function setActive(on) {
     fps.active = on;
@@ -965,6 +1101,7 @@
     weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     setAmmoHud();
+    if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
     // Auto-drop into FIRST-PERSON the moment you actually pick up a gun in
     // third person — FPS-with-a-gun is the intended way to shoot. Only on a
     // brand-new acquisition (first), only mid-play, never in survival.

@@ -108,6 +108,17 @@
       sfx: "shoot_carbine", tracer: 0.014, auto: true,
     },
     {
+      id: "bazooka", key: "bazooka", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
+      appearanceFactory: "bazooka", magSize: 1, fireMode: "single", fireDelay: 1.4, reloadTime: 1.4,
+      mag: 1, reserve: 4, reload: 1.4, interval: 1.4, range: 200,
+      damage: 1, headMult: 1.0, dropStart: 200, minDamage: 1.0,
+      spread: 0.004, bodyRadius: 0.62, headRadius: 0.33,
+      recoil: 0.9, maxRecoil: 1.0, climb: 0.08, sideKick: 0.02,
+      shake: 1.1, heat: 70, knock: 3.0, flash: 0.9,
+      sfx: "explosion", tracer: 0.03, auto: false,
+      explosive: true, blastPower: 1.9, blastRadius: 13,
+    },
+    {
       id: "taser", key: "taser", label: "X26 TASER", short: "TASER", slot: "utility",
       appearanceFactory: "taser", magSize: 2, fireMode: "stun", fireDelay: 0.92, reloadTime: 1.05,
       mag: 2, reserve: 10, reload: 1.05, interval: 0.92, range: 22,
@@ -159,6 +170,10 @@
     return CBZ.weaponInventory.length > 0;
   }
 
+  function equippedWeapon() {
+    return hasWeapon(CBZ.currentWeaponId) ? weaponById(CBZ.currentWeaponId) : null;
+  }
+
   function setCurrentWeapon(id) {
     const nid = normalizeId(id);
     if (!nid || !hasWeapon(nid)) return false;
@@ -180,6 +195,7 @@
   CBZ.unlockWeapon = unlockWeapon;
   CBZ.hasWeapon = hasWeapon;
   CBZ.hasAnyWeapon = hasAnyWeapon;
+  CBZ.equippedWeapon = equippedWeapon;
   CBZ.setCurrentWeapon = setCurrentWeapon;
   CBZ.resetWeaponInventory = resetWeaponInventory;
 })();

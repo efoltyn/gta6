@@ -44,6 +44,9 @@
     if ((g.mode === "survival" || g.mode === "city") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
     if (g.mode !== "survival" && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = false;
     if (g.mode !== "city" && CBZ.city && CBZ.city.arena) CBZ.city.arena.root.visible = false;
+    // leaving city cleanly cancels any in-progress WASTED/spectate state so the
+    // kill-cam HUD + global respawn listeners can't leak into another mode.
+    if (g.mode !== "city" && CBZ.cityDeathReset) CBZ.cityDeathReset();
   }
   CBZ.setMode = setMode;
 

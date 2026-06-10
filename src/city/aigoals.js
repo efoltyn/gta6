@@ -251,6 +251,60 @@
     return true;
   }
 
+  // DEFEND-TURF: a gang member whose block is being pressed (the player has
+  // provoked his crew) converges on the THREAT — the player if they're standing
+  // in/near the gang's turf, else holds the line at the turf centre. Scales with
+  // how provoked the gang is. All gang globals guarded; defers to the brain.
+  function goDefendTurf(ped, A, N) {
+    if (!ped.gang) return false;
+    const gang = CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
+    if (!gang) return false;
+    const center = gang.center || (CBZ.cityGangHQ && CBZ.cityGangHQ(ped.gang)) || null;
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+    // is the player a live threat sitting on our turf? (guarded turf lookup)
+    if (P && !P.dead && PA && center) {
+      const onTurf = CBZ.cityGangOf ? (CBZ.cityGangOf(P.pos.x, P.pos.z) === gang) : false;
+      const dC = Math.hypot(P.pos.x - center.x, P.pos.z - center.z);
+      if ((onTurf || dC < 28) && Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z) < 30) {
+        ped.rage = PA; ped.state = "fight";
+        ped.target.set(P.pos.x, 0, P.pos.z);
+        if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.1);
+        ped._goalKind = "defend";
+        return true;
+      }
+    }
+    // no live intruder — muster on the block (hold the line) until it cools
+    if (center) {
+      routeTo(ped, A, { x: center.x + (rng() - 0.5) * 16, z: center.z + (rng() - 0.5) * 16 });
+      ped._goalKind = "patrol";
+      return true;
+    }
+    return false;
+  }
+
+  // PROVE / JOIN: an unaffiliated, ambitious soul who's heard of the player's crew
+  // walks UP to pitch joining (only fires when the player actually HAS a gang and
+  // some respect/standing). Sets an approach the player can read; the brain
+  // carries the walk. Purely a SET — never fights, never stomps.
+  function goProve(ped, A, N) {
+    if (ped.gang || ped.recruited) return false;
+    const pg = g.playerGang;
+    if (!pg || !pg.founded) return false;
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+    if (!P || P.dead || !PA) return false;
+    if ((g.wanted | 0) >= 1) return false;                 // won't pitch a hot player
+    const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+    if (d > 30 || d < 2.5) return false;                   // only worth it from a believable range
+    // walk over and pitch — reuse the brain's approach intent so peds.js carries
+    // it (and interact.js can read wantsWork). We only SET, never fight.
+    ped.approach = "work"; ped._approachT = 4.5; ped.reactCD = 20;
+    ped.finalGoal = { x: P.pos.x, z: P.pos.z };
+    ped.target.set(P.pos.x, 0, P.pos.z);
+    ped.state = "walk"; ped.path = null; ped.pause = 0.3;
+    ped._goalKind = "prove";
+    return true;
+  }
+
   // CHILL: satisfy the social need — drift toward a knot of other peds, or
   // take a brisk cross-town stroll (fills the grid with purposeful traffic).
   function goChill(ped, A, N) {
@@ -300,21 +354,54 @@
     let sClimb = 0;
     if (ped.gang && ped.aggr >= (B.bold || 0.5)) sClimb = (1 - N.ambition) * (0.6 + ped.aggr * 0.5);
 
+    // DEFEND-TURF: a gang member whose crew the PLAYER has provoked drops what
+    // they're doing to hold the block. Scales with the gang's provoke level vs
+    // the player; only meaningful when actually riled. (guarded gang globals)
+    let sDefend = 0;
+    if (ped.gang && CBZ.cityGangProvoked) {
+      const prov = CBZ.cityGangProvoked(ped.gang) || 0;
+      if (prov > 0.25) sDefend = Math.min(1.4, prov * 1.3) * (0.5 + ped.aggr * 0.6);
+    }
+
+    // PROVE/JOIN: an unaffiliated, ambitious, willing soul seeks out the PLAYER's
+    // crew (only when the player founded a gang and has earned a reputation). The
+    // hungrier (low money) + bolder, the stronger the pull. One pitch, long CD.
+    let sProve = 0;
+    if (!ped.gang && !ped.recruited && g.playerGang && g.playerGang.founded &&
+        (g.respect || 0) >= 4 && (g.wanted | 0) < 1 && ped.aggr >= (B.bold || 0.5)) {
+      sProve = (0.5 + (1 - N.money) * 0.5) * (0.5 + ped.aggr * 0.4);
+    }
+
     // EARN: the universal money drive (poor/greedy score it highest)
     let sEarn = (1 - N.money) * 0.95;
 
     // CHILL: the social fallback, plus a baseline so nobody freezes
     let sChill = 0.15 + (1 - N.social) * 0.45;
 
+    // ---- ARCHETYPE / ROLE WEIGHTING: nudge the scores so each ped pursues the
+    //      life its role implies. A commuter chases the wage; a jogger/tourist/
+    //      busker would rather be OUT among the city (chill/wander); a panhandler
+    //      lingers (chill) and barely earns; a watcher hangs back and observes. This
+    //      only TILTS the utility race — the urgent needs (a craving, a grudge, a
+    //      provoked crew) still win, so behaviour stays emergent, not scripted. ----
+    const role = CBZ.cityPedRole ? CBZ.cityPedRole(ped) : (ped._role || ped.archetype);
+    if (role === "commuter" || role === "vendor") sEarn *= 1.25;
+    else if (role === "jogger" || role === "tourist" || role === "busker") { sChill *= 1.7; sEarn *= 0.65; }
+    else if (role === "panhandler") { sChill *= 1.5; sEarn *= 0.4; }
+    else if (role === "watcher") { sChill *= 1.3; }
+    else if (role === "dealer") sDeal *= 1.3;
+    else if (role === "junkie") sScore *= 1.25;
+
     // small per-goal jitter so equal scores diverge across the crowd
     sFeud *= 1; sScore *= (0.85 + r * 0.3); sDeal *= (0.85 + rng() * 0.3);
     sClimb *= (0.85 + rng() * 0.3); sEarn *= (0.85 + rng() * 0.3); sChill *= (0.85 + rng() * 0.3);
+    sDefend *= (0.9 + rng() * 0.2); sProve *= (0.85 + rng() * 0.3);
 
     // rank the goals, try the best first; fall through if its opportunity isn't
     // actually there right now (e.g. no dealer to score from) to the next best.
     const order = [
-      ["feud", sFeud], ["score", sScore], ["deal", sDeal],
-      ["climb", sClimb], ["earn", sEarn], ["chill", sChill],
+      ["feud", sFeud], ["defend", sDefend], ["score", sScore], ["deal", sDeal],
+      ["climb", sClimb], ["prove", sProve], ["earn", sEarn], ["chill", sChill],
     ].sort((a, b) => b[1] - a[1]);
 
     for (let i = 0; i < order.length; i++) {
@@ -322,14 +409,16 @@
       if (score <= 0.04) continue;
       let ok = false;
       if (kind === "feud") ok = goFeud(ped);
+      else if (kind === "defend") ok = goDefendTurf(ped, A, N);
       else if (kind === "score") ok = goScore(ped, A, N);
       else if (kind === "deal") ok = goDeal(ped, A, N);
       else if (kind === "climb") ok = goClimb(ped, A, N);
+      else if (kind === "prove") ok = goProve(ped, A, N);
       else if (kind === "earn") ok = goEarn(ped, A, N);
       else if (kind === "chill") ok = goChill(ped, A, N);
       if (ok) {
         // cooldown scales with how urgent the chosen goal was (urgent = recheck sooner)
-        ped._goalCD = (kind === "feud" ? 5 : 9 + (1 - score) * 12) + rng() * 5;
+        ped._goalCD = ((kind === "feud" || kind === "defend") ? 5 : 9 + (1 - score) * 12) + rng() * 5;
         return;
       }
     }
@@ -444,9 +533,40 @@
     victim._grudgeT = now() + (60 + rng() * 60) * 1000; // ms: a 60-120s window to act, then it cools
   };
 
+  // DYNAMIC RELATIONSHIPS: when a ped is KILLED, those close to them inherit a
+  // fresh grudge against the killer — chained feuds (you down a man, his partner
+  // / crew comes for you). Cheap, expiring, bounded: only the partner + a couple
+  // of same-gang/nearby bold peds, and never the player's own crew on the player.
+  // Skips if the killer isn't an NPC actor we can hunt (e.g. a faceless car).
+  CBZ.cityNpcFriendDeath = function (victim, killer) {
+    if (!victim || !killer || !killer.pos || killer.dead) return;
+    if (killer === victim) return;
+    // partner / family first (the strongest tie)
+    const kin = [];
+    if (victim.partner && !victim.partner.dead) kin.push(victim.partner);
+    if (victim.family) for (let i = 0; i < victim.family.length && kin.length < 3; i++) {
+      const f = victim.family[i]; if (f && !f.dead && kin.indexOf(f) < 0) kin.push(f);
+    }
+    for (let i = 0; i < kin.length; i++) CBZ.cityNpcGrudge(kin[i], killer);
+    // a couple of nearby SAME-GANG crew also take it personally (bounded n-cap)
+    if (victim.gang) {
+      const peds = CBZ.cityPeds, R2 = 22 * 22;
+      let n = 0;
+      for (let i = 0; i < peds.length && n < 2; i++) {
+        const p = peds[i];
+        if (p === victim || p === killer || p.dead || p.gang !== victim.gang) continue;
+        if (p.companion || p.controlled || kin.indexOf(p) >= 0) continue;
+        const dx = p.pos.x - victim.pos.x, dz = p.pos.z - victim.pos.z;
+        if (dx * dx + dz * dz >= R2) continue;
+        CBZ.cityNpcGrudge(p, killer); n++;
+      }
+    }
+  };
+
   // a ped the brain is mid-action on, or that isn't ours to drive — never stomp
   function busy(ped) {
     if (ped.rage) return true;                       // already engaged
+    if (ped.approach) return true;                   // walking up to the player (brain owns it)
     const s = ped.state;
     if (s === "fight" || s === "flee" || s === "confront" ||
         s === "surrender" || s === "loot" || s === "chat") return true;
@@ -483,9 +603,32 @@
       // expire a stale grudge so feuds cool off if never acted on
       if (ped._grudgeOn && ped._grudgeT && now() > ped._grudgeT) { ped._grudgeOn = null; }
 
+      // RESPAWN HYGIENE: crowd.js recycles a PARKED rig into a fresh person. The
+      // frame it returns to play (parked→active), wipe every per-ped DRIVE/state
+      // this layer attached so a new life never inherits the old one's needs,
+      // grudge, goal or stance. (peds.js' _home/_work self-heal against the live
+      // arena, so those don't need clearing here.) One-shot, gated by _wasParked.
+      if (ped._parked) { ped._wasParked = true; ped._goalCD = 4; continue; }
+      if (ped._wasParked) {
+        ped._wasParked = false;
+        ped._needs = null; ped._grudgeOn = null; ped._grudgeT = 0;
+        ped._goalKind = null; ped._goalCD = rng() * 3;
+        ped._dealTo = null; ped._scoreFrom = null; ped._payAt = null;
+        ped._joyT = 0; if (ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; }
+        // brain-side transients a fresh body shouldn't inherit (crowd.park leaves
+        // these set); clearing here is safe — aigoals runs one tick before peds.
+        ped.approach = null; ped.reactCD = 0; ped.witnessSev = 0; ped.witnessType = null;
+        // peds.js ROLE + RAMPAGE per-ped state: a recycled body must shed its old
+        // life (re-derive a fresh role) and never inherit a stale spree. _role is
+        // nulled so pedRole() re-rolls; the role micro anchors + rampage flags clear.
+        ped._role = null; ped._probeT = 0; ped._stage = null; ped._snapAt = null; ped._beg = null;
+        ped.rampage = false; ped._rampArmed = 0; ped._rampHeatT = 0; ped._rampT = 0; ped._rampPanicT = 0;
+        { const ri = _rampagers.indexOf(ped); if (ri >= 0) _rampagers.splice(ri, 1); }   // drop a recycled body from the director's live list
+      }
+
       // never touch anyone the brain is busy driving, or who isn't ours to drive
       if (ped.dead || ped.vendor || ped.companion || ped.controlled ||
-          ped.inCar || ped.ko > 0 || ped._parked) { ped._goalCD = 4; continue; }
+          ped.inCar || ped.ko > 0) { ped._goalCD = 4; continue; }
       if (busy(ped)) { ped._goalCD = 2 + rng() * 3; continue; }
 
       // resolve the PAYOFF of whatever goal this ped is currently pursuing
@@ -497,6 +640,111 @@
       if (ped._goalCD > 0) { ped._goalCD -= dt; continue; }
 
       assign(ped, A);
+    }
+  });
+
+  // ============================================================
+  //  LONE-WOLF RAMPAGE DIRECTOR — a dramatic "active shooter" event. On a
+  //  random cooldown, a ped SNAPS (ped.rampage = true) and goes on a killing
+  //  spree (the spree brain lives in peds.js rampageThink). Now the city feels
+  //  DANGEROUS: more shooters, more often, biased hard toward ARMED peds so a
+  //  rampage is a real shooting — but still BOUNDED so it stays an EVENT, not a
+  //  constant bloodbath:
+  //    • up to RAMP_MAX_ACTIVE active rampagers at once (2-3);
+  //    • a fresh one is gated by a shared cooldown that shortens with how few
+  //      are currently active, so they erupt in waves, not all at once;
+  //    • the pick is BIASED toward ARMED / high-aggr peds (armed → a real
+  //      mass-shooting) but ANY ped can still snap.
+  //  The spree draws a heavy police response (the rampager self-wanteds hard), so
+  //  the streets erupt — the player can stop it (respect) or flee. City-gated; all
+  //  cross-cluster calls guarded; module state reset on a new run.
+  // ------------------------------------------------------------
+  const RAMP_MAX_ACTIVE = 5;     // hard cap on concurrent active shooters (was 3/1) — the city should regularly have several gunmen lighting people up
+  let _rampagers = [];           // the live rampaging peds (bounded to RAMP_MAX_ACTIVE)
+  let _rampCD = 0;               // seconds until the next rampager is eligible
+  const RAMP_GAP_MIN = 22, RAMP_GAP_SPAN = 30;   // short calm between waves (~22-52s) — shootings are frequent now
+
+  // fresh run: clear the director + any lingering rampage flags. Called from
+  // spawnCityPeds (peds.js) so a new city never inherits an old spree.
+  CBZ.cityRampageReset = function () {
+    _rampagers = [];
+    _rampCD = 12 + rng() * 18;   // a short grace before the first shooter pops
+    for (const p of (CBZ.cityPeds || [])) {
+      p.rampage = false; p._rampArmed = 0; p._rampHeatT = 0; p._rampT = 0; p._rampPanicT = 0;
+    }
+  };
+  // expose a manual trigger (debug / scripted events can force a spree on a ped)
+  CBZ.cityStartRampage = function (ped) {
+    if (!ped || ped.dead || ped.rampage) return false;
+    ped.rampage = true;
+    if (_rampagers.indexOf(ped) < 0) _rampagers.push(ped);
+    if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 90, "active-shooter");
+    if ((ped.npcWanted | 0) < 3) ped.npcWanted = 3;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("⚠️ Active shooter reported nearby!", 3);
+    if (CBZ.cityPanic) CBZ.cityPanic(ped.pos.x, ped.pos.z, 1.6, ped);
+    return true;
+  };
+
+  // is THIS ped eligible to snap? (alive, ours to drive, not already special)
+  function rampageEligible(p) {
+    if (!p || p.dead || p.rampage) return false;
+    if (p.vendor || p.companion || p.controlled || p.recruited || p._parked) return false;
+    if (p.inCar || p.ko > 0 || p.kind === "cop") return false;
+    if (p.guard) return false;                       // posted guards stay on post
+    return true;
+  }
+
+  CBZ.onUpdate(35, function (dt) {
+    if (g.mode !== "city") return;
+    const peds = CBZ.cityPeds;
+    if (!peds || !peds.length) return;
+
+    // prune any rampager that's done (killed / culled / flag cleared). When ALL
+    // are down the gap resets long; while some are still live the next slot opens
+    // sooner — so a wave of shooters can erupt, then the streets cool.
+    let cleared = false;
+    for (let i = _rampagers.length - 1; i >= 0; i--) {
+      const r = _rampagers[i];
+      if (!r || r.dead || !r.rampage || r.culled) {
+        if (r) r.rampage = false;
+        _rampagers.splice(i, 1);
+        cleared = true;
+      }
+    }
+    if (cleared && !_rampagers.length) {
+      // last one down → a full cooldown before the city erupts again
+      _rampCD = RAMP_GAP_MIN + rng() * RAMP_GAP_SPAN;
+    }
+
+    // already at the active cap? hold — never exceed RAMP_MAX_ACTIVE at once.
+    if (_rampagers.length >= RAMP_MAX_ACTIVE) return;
+
+    if (_rampCD > 0) { _rampCD -= dt; return; }
+    // re-roll cadence while waiting; a thin active list lets the next one come
+    // faster (waves), a fuller one slows the trickle (so it's not nonstop).
+    _rampCD = 4 + rng() * 6 + _rampagers.length * 6;
+
+    // pick a candidate, BIASED HARD toward ARMED peds (a rampage should be a real
+    // SHOOTING now that armed peds are common) but still open to anyone. Scan a
+    // bounded sample (n-capped) and score; the best eligible one snaps.
+    const B = A0();
+    const n = peds.length;
+    let best = null, bestScore = -1, scanned = 0;
+    const start = (rng() * n) | 0;
+    for (let i = 0; i < n && scanned < 50; i++) {
+      const p = peds[(start + i) % n];
+      if (!rampageEligible(p)) continue;
+      scanned++;
+      // weight: ARMED dominates (a strapped shooter = a real mass-shooting),
+      // plus aggression + a small floor so a meek soul can still snap.
+      let s = 0.1 + (p.aggr || 0.2) * 0.8 + (p.armed ? 1.2 : 0) + (p.drugUser ? 0.2 : 0);
+      s *= 0.6 + rng() * 0.8;                         // jitter so it isn't always the same profile
+      if (s > bestScore) { bestScore = s; best = p; }
+    }
+    // higher base chance once eligible (sprees erupt more readily), and an ARMED
+    // pick almost always goes — an unarmed one is rarer, so most are real shootings.
+    if (best && rng() < (best.armed ? 0.85 : 0.4)) {
+      CBZ.cityStartRampage(best);
     }
   });
 })();

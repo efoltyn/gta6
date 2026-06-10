@@ -36,7 +36,7 @@
   // and a WAR has an INTENSITY the player can read + exploit.
   const TURF_PAYDAY = 30;          // seconds between paydays
   const TURF_INCOME_PER_LOT = 42;  // base $ per held block per payday
-  const MAX_DRIVEBYS = 2;          // concurrent gang cars strafing
+  const MAX_DRIVEBYS = 3;          // concurrent gang cars strafing (raised: more action, still phone-safe)
 
   function gangColor(id) { const def = (CBZ.CITY.gangs || []).find((x) => x.id === id); return def ? def.color : 0xb079ea; }
 
@@ -133,6 +133,59 @@
     ped.tagColor = col;
   }
 
+  // ============================================================
+  //  GANG ARCHETYPES — the config gangs each carry a `type`; this table turns
+  //  that type into how the faction SPAWNS + FIGHTS so the six crews actually
+  //  play differently (instead of six identical pistol mobs). Every knob is
+  //  read at spawn / in the director, never per-frame-scanned.
+  //
+  //    crewMul     multiplier on members-per-turf (config gangPerTurf) — bench size
+  //    armedFrac   share of the bench that packs a FIREARM (rest brawl / melee)
+  //    rifleFrac   of the ARMED, share that carry a long gun (Carbine) vs SMG/pistol
+  //    smgFrac     of the ARMED, share that carry an SMG (the rest = Pistol)
+  //    hpMul       member HP multiplier (tanky brawlers vs glass-cannon shooters)
+  //    aggrAdd     additive nudge to the aggression roll (brawlers/cartel ride hot)
+  //    wealthMul   member wealth multiplier (cartel/syndicate are richer to rob)
+  //    melee       a melee weapon brawlers carry instead of a gun ("Machete"/"Bat")
+  //    defend      turf-defence weight: how hard the crew retaliates / wars (>1 = harder)
+  //    expand      expansion weight: how land-hungry the war/takeover director is
+  //    roam        roam/brawl flavour: bikers freelance street crime more
+  //    bossWeapon  what the boss is strapped with
+  //    label       short archetype tag (HUD/debug + flavour notes)
+  // ============================================================
+  const GANG_TYPES = {
+    street: {    // balanced corner crew — the baseline GTA gang
+      label: "Street Gang", crewMul: 1.0, armedFrac: 0.7, rifleFrac: 0.0, smgFrac: 0.3,
+      hpMul: 1.0, aggrAdd: 0.0, wealthMul: 1.0, melee: null,
+      defend: 1.0, expand: 1.0, roam: 1.0, bossWeapon: "SMG",
+    },
+    cartel: {    // rich, rifle-heavy, drug money, land-hungry, hits hard
+      label: "Cartel", crewMul: 1.1, armedFrac: 0.95, rifleFrac: 0.55, smgFrac: 0.35,
+      hpMul: 1.15, aggrAdd: 0.05, wealthMul: 1.5, melee: null,
+      defend: 1.35, expand: 1.4, roam: 0.85, bossWeapon: "Carbine",
+    },
+    syndicate: { // few but heavily-armed high earners — protection racket, retaliates hardest
+      label: "Syndicate", crewMul: 0.7, armedFrac: 1.0, rifleFrac: 0.25, smgFrac: 0.6,
+      hpMul: 1.2, aggrAdd: 0.04, wealthMul: 1.8, melee: null,
+      defend: 1.6, expand: 0.8, roam: 0.7, bossWeapon: "Carbine",
+    },
+    set: {       // scrappy big bench, lighter weapons — more bodies than guns
+      label: "Set", crewMul: 1.45, armedFrac: 0.5, rifleFrac: 0.0, smgFrac: 0.18,
+      hpMul: 0.9, aggrAdd: 0.0, wealthMul: 0.8, melee: "Bat",
+      defend: 0.9, expand: 1.05, roam: 1.1, bossWeapon: "SMG",
+    },
+    brawlers: {  // a melee mob — machetes over guns, tanky, roams + brawls
+      label: "Brawlers", crewMul: 1.25, armedFrac: 0.22, rifleFrac: 0.0, smgFrac: 0.1,
+      hpMul: 1.4, aggrAdd: 0.08, wealthMul: 0.9, melee: "Machete",
+      defend: 1.1, expand: 1.0, roam: 1.5, bossWeapon: "SMG",
+    },
+  };
+  function gangType(def) { return (def && GANG_TYPES[def.type]) || GANG_TYPES.street; }
+  CBZ.cityGangArchetype = function (gangId) {
+    const g0 = gangById(gangId); const t = g0 ? gangType(g0) : null;
+    return t ? { type: g0.type || "street", label: t.label, defend: t.defend, expand: t.expand } : null;
+  };
+
   CBZ.spawnCityGangs = function () {
     const A = CBZ.city && CBZ.city.arena; if (!A) return;
     _s = 99173;
@@ -149,6 +202,8 @@
       warWith: null, warRemain: 0, warIntensity: 0,
       treasury: 200 + ((rng() * 400) | 0),   // seed war chest
       hostility: 0, strikeT: 0, lostTurfT: 0, peakTurf: 0,
+      hq: null,        // {x,z,lot,name} — the crew's home block (set at boss spawn)
+      standing: 0,     // per-faction PLAYER standing, seeded 0, clamp -100..100
     }));
     // hand each derelict to a gang, clustering by nearest existing turf so a
     // faction tends to hold a contiguous block
@@ -161,28 +216,39 @@
     });
     // turf centre + member spawn
     const [lo, hi] = CBZ.CITY.gangPerTurf || [3, 6];
-    const armedFrac = CBZ.CITY.gangArmedFrac != null ? CBZ.CITY.gangArmedFrac : 0.55;
     const ag = CBZ.CITY.aggro || {};
     for (const gang of gangs) {
       if (!gang.turf.length) continue;
+      // ---- this crew's ARCHETYPE drives its whole roster (see GANG_TYPES) ----
+      const tt = gangType(gang);
+      gang.type = gang.type || "street"; gang.archLabel = tt.label;
+      // expose the defend/expand weights on the record so the directors can read
+      // them without re-looking-up the type table every tick.
+      gang.defendW = tt.defend; gang.expandW = tt.expand; gang.roamW = tt.roam;
       let sx = 0, sz = 0;
       for (const l of gang.turf) { sx += l.cx; sz += l.cz; }
       gang.center.x = sx / gang.turf.length; gang.center.z = sz / gang.turf.length;
       gang.peakTurf = gang.turf.length;
+      // a cartel/syndicate seeds a fatter war chest (drug money / rackets)
+      gang.treasury = Math.round((gang.treasury || 200) * tt.wealthMul);
       // ---- the gang BOSS: a named, tougher, always-armed lieutenant anchoring
       //      the crew's main turf. Defeating one is a real prize + heavy heat. ----
       {
         const blot = gang.turf[0];
+        const bossHp = Math.round(240 * tt.hpMul);
         const boss = CBZ.cityMakePed(blot.cx + 1.5, blot.cz, rng, {
           kind: "gang", gang: gang.id, faction: gang.id, guard: { x: blot.cx, z: blot.cz },
-          outfit: gang.color, wealth: 0.96,        // top of the ladder — rich, robbing him is a real score
-          aggr: clamp(rollGang(ag) + 0.08, 0.8, 1),
+          outfit: gang.color, wealth: Math.min(0.99, 0.96 * tt.wealthMul), // top of the ladder — rich, robbing him is a real score
+          aggr: clamp(rollGang(ag) + 0.08 + tt.aggrAdd, 0.8, 1),
           archetype: "gangster", job: "gang boss",
-          armed: true, weapon: "SMG", hp: 240,     // the boss is always the most heavily strapped
+          armed: true, weapon: tt.bossWeapon, hp: bossHp, // strapped per the crew's archetype (cartel/syndicate boss = rifle)
           name: makeBossName(gang.ethnicity),
         });
         boss.homeGuard = { x: blot.cx, z: blot.cz };
-        boss.isBoss = true; boss.rank = "boss"; boss.maxHp = 240; boss.ammo = 50;
+        boss.isBoss = true; boss.rank = "boss"; boss.maxHp = bossHp; boss.ammo = 50;
+        // the gang's HQ anchors on the boss's home lot — a real map target for
+        // waypoints / rival-HQ hunts. boss.pos overrides this while he's alive.
+        gang.hq = { x: blot.cx, z: blot.cz, lot: blot, name: gang.name + " HQ" };
         const bs = memStats(boss); bs.loyalty = 1; bs.bodies = 12 + ((rng() * 8) | 0); bs.joined = "founder";
         gang.boss = boss; gang.bossName = boss.name;
         tagWithRank(boss, gang.color);   // "<Name> '<Nick>' <Last> · Boss"
@@ -192,32 +258,60 @@
       }
       // recolour this turf's graffiti hint (stash glow) toward the gang colour
       for (const lot of gang.turf) {
+        // the buildings cluster stamps lot.building.owner on every building — if
+        // it's there, claim this derelict for the gang (guard: owner may not exist).
+        if (lot.building && lot.building.owner) { lot.building.owner.id = gang.id; lot.building.owner.type = "gang"; }
         if (lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
           try { lot.building.stash.mesh.material.emissive.setHex(gang.color); } catch (e) {}
         }
-        const n = lo + ((rng() * (hi - lo + 1)) | 0);
+        // bench size scales with the archetype: a SET / BRAWLER mob is deeper,
+        // a SYNDICATE holds the same block with a handful of heavy earners.
+        const baseN = lo + ((rng() * (hi - lo + 1)) | 0);
+        const n = Math.max(1, Math.round(baseN * tt.crewMul));
         for (let k = 0; k < n; k++) {
           const ang = rng() * 6.28, rad = 2.5 + rng() * 5;
           const x = lot.cx + Math.cos(ang) * rad, z = lot.cz + Math.sin(ang) * rad;
           // a REAL pyramid under the boss: the first holder of each lot is a
           // LIEUTENANT, then an Enforcer, then the bench fills Soldier/Runner/
           // Lookout — a believable spread of veterans + low men who'll climb on
-          // merit over the run. EVERY member is strapped. Each gets a REAL
-          // First-Last name; rank lives on ped.rank + shows as a tag pip.
+          // merit over the run. Each gets a REAL First-Last name; rank lives on
+          // ped.rank + shows as a tag pip.
           const rk = k === 0 ? "lt" : k === 1 ? "enforcer" : (k <= 3 ? "soldier" : (rng() < 0.5 ? "runner" : "lookout"));
           const rd = rankDef(rk);
+          const leader = rd.tier >= 4;   // Lt / Enforcer — the made men of the block
+          // ---- ARCHETYPE LOADOUT: who's strapped, and with what. Leaders are
+          //      (almost) always armed; the rest pack a gun only at the crew's
+          //      armedFrac. A cartel block bristles with rifles; a brawler block
+          //      is mostly machetes + fists, a deep but lightly-gunned mob. ----
+          let armed, weapon, ammo;
+          const packs = leader ? (rng() < 0.9) : (rng() < tt.armedFrac);
+          if (packs) {
+            const r = rng();
+            // leaders skew up a tier; rifles only where the archetype fields them
+            if (r < tt.rifleFrac || (leader && rng() < tt.rifleFrac + 0.15)) weapon = "Carbine";
+            else if (r < tt.rifleFrac + tt.smgFrac || (leader && rng() < 0.6)) weapon = "SMG";
+            else weapon = "Pistol";
+            armed = true;
+            ammo = weapon === "Carbine" ? 60 : weapon === "SMG" ? 40 : 30;
+          } else {
+            // unarmed for gun purposes → the brain makes them BRAWL. They carry the
+            // archetype's melee tool (machete/bat) as flavour; tankier HP makes the
+            // brawler mob a real melee threat instead of a free kill.
+            armed = false; weapon = tt.melee || null; ammo = 0;
+          }
           const ped = CBZ.cityMakePed(x, z, rng, {
             kind: "gang", gang: gang.id, faction: gang.id,
             guard: { x: lot.cx, z: lot.cz },
-            outfit: gang.color, wealth: 0.3 + rd.tier * 0.08,
-            aggr: clamp(rollGang(ag), 0.6, 1),
+            outfit: gang.color, wealth: Math.min(0.97, (0.3 + rd.tier * 0.08) * tt.wealthMul),
+            aggr: clamp(rollGang(ag) + tt.aggrAdd, 0.6, 1),
             archetype: "gangster", job: "gang " + rd.pip.toLowerCase().replace(".", ""),
-            armed: true, weapon: rd.weapon === "SMG" ? (rng() < 0.5 ? "SMG" : "Pistol") : "Pistol",
-            hp: rd.hp,
+            armed, weapon,
+            hp: Math.round(rd.hp * tt.hpMul),
             name: makeName(gang.ethnicity),
           });
           ped.rank = rk;
-          ped.ammo = rd.weapon === "SMG" ? 40 : 30;
+          ped.ammo = ammo;
+          ped.maxHp = Math.round(rd.hp * tt.hpMul);
           ped.homeGuard = { x: lot.cx, z: lot.cz };
           // seed a plausible career so they're partway up the merit track already
           const ms = memStats(ped); ms.bodies = (rd.tier) + ((rng() * 2) | 0); ms.contrib = rd.tier * 120 * rng(); ms.served = 30 + rng() * 120;
@@ -426,12 +520,14 @@
     // BIGGER set-piece battles: a flush treasury / hot war buys a deeper push.
     // GTA SA scales wave size with how heavily a hood is defended; here the
     // attacker's WAR CHEST and current intensity decide how many it commits.
-    const warMul = 1 + Math.min(1.4, (a.warIntensity || 0) * 0.5 + (a.treasury || 0) / 2200);
-    const base = opts.assault ? 4 : 2;
-    const count = Math.min(8, Math.round((base + ((rng() * 3) | 0)) * warMul));
+    const warMul = 1 + Math.min(1.6, (a.warIntensity || 0) * 0.5 + (a.treasury || 0) / 2000);
+    // BIGGER pushes: more aggressive / expansionist crews commit a deeper squad.
+    const base = (opts.assault ? 5 : 3) + ((a.expandW || 1) > 1.2 ? 1 : 0);
+    const count = Math.min(10, Math.round((base + ((rng() * 3) | 0)) * warMul));
     let sent = 0;
-    // spend the chest to field the squad — a poor gang can't mount a big raid
-    const cost = count * 40;
+    // spend the chest to field the squad — a poor gang can't mount a big raid.
+    // Cheaper per body so wars erupt more readily without bankrupting the economy.
+    const cost = count * 32;
     if (!opts.free && (a.treasury || 0) < cost * 0.5) return 0;
     a.treasury = Math.max(0, (a.treasury || 0) - cost);
     for (const m of a.members) {
@@ -452,8 +548,9 @@
       a._raidTarget = targetLot;   // contested lot, used for capture resolution
       const big = sent >= 5;
       CBZ.city && CBZ.city.note((big ? "⚔ TURF WAR: " : "Gang war: ") + a.name + " hit " + b.name + " turf (" + sent + ").", big ? 3 : 2.4);
-      // a heavy assault also rolls a drive-by car into the rival block
-      if (big && rng() < 0.6) spawnDriveby(a, { x: targetLot.cx, z: targetLot.cz }, b);
+      // a war push rolls a drive-by car into the rival block — common on a heavy
+      // assault, a real chance on any raid (capped in spawnDriveby so it's safe).
+      if ((big && rng() < 0.8) || (!big && rng() < 0.35)) spawnDriveby(a, { x: targetLot.cx, z: targetLot.cz }, b);
       // raiding YOUR block? rally your gang to defend it
       if (b.isPlayer && CBZ.cityPlayerGangDefendTurf) {
         CBZ.cityPlayerGangDefendTurf(targetLot.cx, targetLot.cz);
@@ -517,6 +614,22 @@
     const dx = P.pos.x - x, dz = P.pos.z - z; return dx * dx + dz * dz < r * r;
   }
   function playerActor() { return CBZ.city && CBZ.city.playerActor; }
+
+  // is the player riding with / courting a crew this victim's gang is hostile to?
+  // A SANCTIONED kill = a body that satisfies an active player-gang task: the
+  // victim belongs to a rival of the gang the player is patched into (g.cityMembership),
+  // runs (g.playerGangId), or has defected to (g.playerGangAffiliation). Allies +
+  // your own crew never count. playergang.creditPlayerKill computes the same signal
+  // for its task ladder; this mirror lets the kill REWARD (respect/standing) gate on it.
+  function killSanctioned(victimGangId) {
+    if (!victimGangId || victimGangId === "player") return false;
+    const m = g.cityMembership;
+    const myGang = (m && m.gangId) || g.playerGangId || g.playerGangAffiliation || null;
+    if (!myGang) return false;
+    if (victimGangId === myGang) return false;                          // never your own crew
+    if (CBZ.cityAreAllied && CBZ.cityAreAllied(myGang, victimGangId)) return false;
+    return true;   // a rival of the crew you ride with = a sanctioned body
+  }
 
   // ============================================================
   //  DRIVE-BY SHOOTINGS — a gang car rolls a target and the passenger
@@ -672,6 +785,24 @@
     return best;
   };
 
+  // ---- per-faction PLAYER STANDING (-100..100). Friendly acts raise it,
+  //      clipping their crew (off the books) drops it. The HUD reads this. ----
+  CBZ.cityGangStanding = function (gangId) { const gang = gangById(gangId); return gang ? (gang.standing || 0) : 0; };
+  CBZ.cityGangAddStanding = function (gangId, amt) {
+    const gang = gangById(gangId); if (!gang || !amt) return 0;
+    gang.standing = clamp((gang.standing || 0) + amt, -100, 100);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return gang.standing;
+  };
+
+  // ---- MARK A HIT: drop a waypoint on a target ped (playergang's put-in-work
+  //      contract calls this). No-op until the full map's waypoint API exists. ----
+  CBZ.cityMarkTarget = function (ped) {
+    if (ped && ped.pos && CBZ.fullMap && CBZ.fullMap.setWaypoint) {
+      CBZ.fullMap.setWaypoint(ped.pos.x, ped.pos.z, "HIT: " + (ped.name || "target"));
+    }
+  };
+
   CBZ.cityGangProvoke = function (id, amount) {
     const gang = gangById(id);
     // a crew the player rides with doesn't turn on them for ambient heat
@@ -685,8 +816,11 @@
   CBZ.cityGangSetPlayerFriendly = function (id, on) {
     const gang = gangById(id); if (!gang) return;
     gang.playerFriendly = !!on;
-    if (on) { gang.provoke = 0; gang.hostility = 0; gang.strikeT = 9e9; }
-    else gang.strikeT = 0;
+    if (on) {
+      gang.provoke = 0; gang.hostility = 0; gang.strikeT = 9e9;
+      // riding with a crew is a standing windfall (nudge toward allied)
+      CBZ.cityGangAddStanding(id, 30);
+    } else gang.strikeT = 0;
   };
 
   // a member went down — the crew takes it personally. ESCALATION LADDER:
@@ -702,9 +836,19 @@
     const moraleHit = wasBoss ? 0.18 : 0.05;
     for (const m of gang.members) { if (m !== ped && !m.dead) disciplineHit(gang, m, moraleHit); }
     if (byPlayer) {
-      CBZ.city && CBZ.city.addRespect(3);
-      gang.hostility = Math.min(5, (gang.hostility || 0) + 1);   // they remember
-      gang.strikeT = Math.min(gang.strikeT || 0, 6);             // first reprisal comes soon
+      // the grudge always lands — drop one of their crew and they hunt you, and
+      // your STANDING with the victim's own crew always sinks (you killed kin).
+      // ARCHETYPE flavour: a cartel/syndicate (high defendW) takes it harder —
+      // more hostility per body + a faster first reprisal — so crossing them
+      // bites back noticeably more than poking a scrappy street set.
+      const dW = gang.defendW || 1;
+      gang.hostility = Math.min(5, (gang.hostility || 0) + 1 * dW);   // they remember
+      gang.strikeT = Math.min(gang.strikeT || 0, 6 / dW);             // first reprisal comes soon
+      CBZ.cityGangAddStanding(ped.gang, -8);
+      // REWARD only a SANCTIONED kill (a rival of the crew you ride with — the
+      // same task signal playergang.creditPlayerKill scores). A random member
+      // dropped off the books earns NO respect, just the grudge + standing hit.
+      if (killSanctioned(ped.gang)) CBZ.city && CBZ.city.addRespect(3);
     } else {
       // a RIVAL did this on/near our turf → it counts toward an active war,
       // softening this crew so the killer's gang can move on the block.
@@ -723,8 +867,10 @@
     if (wasBoss && !gang.isPlayer) {
       gang.bossDead = true;
       if (byPlayer) {
+        // the takeover prize hook always fires (succession/player-takeover);
+        // the big respect bump only lands on a SANCTIONED kingpin hit.
         if (CBZ.cityPlayerGangBossKilled) CBZ.cityPlayerGangBossKilled(gang);
-        CBZ.city && CBZ.city.addRespect(20);
+        if (killSanctioned(ped.gang)) CBZ.city && CBZ.city.addRespect(20);
       }
     }
   };
@@ -764,6 +910,37 @@
   // expose a lookup so the player-gang hub can find a rival by id/record
   CBZ.cityGangById = gangById;
 
+  // ---- GANG HQ: the home block a crew anchors on. The live boss IS the HQ
+  //      while he stands; if he's down it falls back to the seeded home lot,
+  //      then the crew's shifting centre, then the first held lot. ----
+  function gangHQ(gangId) {
+    const gang = gangById(gangId); if (!gang) return null;
+    const nm = (gang.name || "Gang") + " HQ";
+    if (gang.boss && !gang.boss.dead && gang.boss.pos) return { x: gang.boss.pos.x, z: gang.boss.pos.z, name: nm };
+    if (gang.hq) return { x: gang.hq.x, z: gang.hq.z, name: gang.hq.name || nm };
+    if (gang.center && (gang.center.x || gang.center.z)) return { x: gang.center.x, z: gang.center.z, name: nm };
+    if (gang.turf && gang.turf.length) return { x: gang.turf[0].cx, z: gang.turf[0].cz, name: nm };
+    return null;
+  }
+  CBZ.cityGangHQ = gangHQ;
+
+  // nearest RIVAL crew's HQ to (x,z) — skips the player's own crew + any
+  // absorbed/leaderless gang that's been pushed to a {0,0} dead centre.
+  CBZ.cityNearestRivalHQ = function (x, z, excludeId) {
+    let best = null, bd = Infinity;
+    for (const gang of CBZ.cityGangs) {
+      if (!gang || gang.isPlayer) continue;
+      if (excludeId != null && gang.id === excludeId) continue;
+      if (gang.absorbed) continue;
+      // a leaderless/absorbed crew whose centre collapsed to {0,0} has no real HQ
+      if ((!gang.turf || !gang.turf.length) && gang.center && !gang.center.x && !gang.center.z) continue;
+      const hq = gangHQ(gang.id); if (!hq) continue;
+      const dx = hq.x - x, dz = hq.z - z, dd = dx * dx + dz * dz;
+      if (dd < bd) { bd = dd; best = { id: gang.id, x: hq.x, z: hq.z, name: hq.name }; }
+    }
+    return best;
+  };
+
   // ---- rob a gang's stash (interact.js [I] near the stash duffel) ----
   CBZ.cityRobStash = function (lot) {
     const st = lot && lot.building && lot.building.stash;
@@ -798,6 +975,18 @@
   CBZ.cityRefreshTurfHud = CBZ.cityRefreshTurfHud || function () {};
 
   CBZ.cityGangsReset = function () {
+    // wipe per-gang standing + HQ before the roster clears (spawn rebuilds hq).
+    // archetype-derived fields (type/archLabel/defendW/expandW/roamW) are
+    // re-stamped from config on the next spawn, but clear them here too so a
+    // stale record can never leak its old weights into a fresh run.
+    for (const gang of CBZ.cityGangs) {
+      if (gang) {
+        gang.standing = 0; gang.hq = null;
+        gang.archLabel = null; gang.defendW = 1; gang.expandW = 1; gang.roamW = 1;
+      }
+    }
+    // drop any HIT/HQ waypoint we dropped on the full map so it doesn't bleed runs.
+    if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
     CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0;
     if (CBZ.cityTurfReset) CBZ.cityTurfReset();   // clear the zone/alliance meta for a fresh run
     // clear any in-flight drive-by cars
@@ -833,10 +1022,13 @@
     }
 
     for (const gang of CBZ.cityGangs) {
-      if (gang.provoke > 0) gang.provoke = Math.max(0, gang.provoke - dt * 0.03);
+      // a high-defendW archetype (cartel/syndicate) NURSES a grudge — its heat
+      // cools slower, so it keeps retaliating long after a scrappy set has moved on.
+      const coolMul = 1 / (gang.defendW || 1);
+      if (gang.provoke > 0) gang.provoke = Math.max(0, gang.provoke - dt * 0.03 * coolMul);
       // hostility cools slowly — cross a crew and they stay sore for a while
-      if (gang.hostility > 0) gang.hostility = Math.max(0, gang.hostility - dt * 0.012);
-      if (gang.warIntensity > 0) gang.warIntensity = Math.max(0, gang.warIntensity - dt * 0.02);
+      if (gang.hostility > 0) gang.hostility = Math.max(0, gang.hostility - dt * 0.012 * coolMul);
+      if (gang.warIntensity > 0) gang.warIntensity = Math.max(0, gang.warIntensity - dt * 0.02 * coolMul);
       if (gang.lostTurfT > 0) gang.lostTurfT -= dt;
       if (gang.strikeT > 0) gang.strikeT -= dt;
       if (gang.warRemain > 0) {
@@ -916,19 +1108,36 @@
     // bait two gangs into each other, then walk into the thinned-out turf).
     warT -= dt;
     if (warT <= 0) {
-      warT = 18 + rng() * 16;
+      // FAR more frequent turf wars so the player regularly stumbles onto two
+      // crews shooting it out (was 18-34s). Still cadence-limited + treasury-gated
+      // in launchWar so it never spawns unbounded squads or bankrupts the economy.
+      warT = 8 + rng() * 9;
       const live = CBZ.cityGangs.filter((x) => !x.isPlayer && x.turf.length && gangStrength(x) >= 2);
       if (live.length >= 2) {
-        // attacker bias: richest / most aggrieved crew presses first
-        live.sort((p, q) => ((q.treasury || 0) + (q.hostility || 0) * 300 + (q.warIntensity || 0) * 200) - ((p.treasury || 0) + (p.hostility || 0) * 300 + (p.warIntensity || 0) * 200));
-        const a = live[0];
+        // attacker bias: richest / most aggrieved crew presses first — and an
+        // EXPANSIONIST archetype (cartel: high expandW) weighs in heavier, so
+        // the land-hungry crews start the most wars (visibly more aggressive map).
+        const press = (x) => ((x.treasury || 0) + (x.hostility || 0) * 300 + (x.warIntensity || 0) * 200) * (x.expandW || 1);
+        live.sort((p, q) => press(q) - press(p));
+        // pick from the top couple of pressers (not always the single richest) so
+        // wars don't always involve the same crew — more varied flashpoints.
+        const a = (live.length > 2 && rng() < 0.4) ? live[1] : live[0];
         const rivals = CBZ.cityGangs.filter((x) => x !== a && x.turf.length && !x.isPlayer);
         if (rivals.length) {
           // target the WEAKEST rival (fewest live bodies) — wars snowball
           rivals.sort((p, q) => gangStrength(p) - gangStrength(q));
           const b = rivals[0];
-          const assault = (a.treasury || 0) > 900 || (a.warIntensity || 0) >= 1;
+          // a cartel / expansionist crew mounts a full ASSAULT more readily (lower
+          // treasury bar) so the land-hungry factions wage real, visible wars.
+          const assault = (a.treasury || 0) > 650 || (a.warIntensity || 0) >= 1 || (a.expandW || 1) > 1.2;
           launchWar(a, b, { assault });
+          // a flush, land-hungry aggressor can open a SECOND front the same tick —
+          // two simultaneous wars across the map (guarded so it never cascades:
+          // only when rich + expansionist, and only one extra).
+          if ((a.expandW || 1) > 1.25 && (a.treasury || 0) > 1100 && rivals.length > 1 && rng() < 0.5) {
+            const b2 = rivals[1];
+            if (b2 && b2 !== b) launchWar(a, b2, { assault: false });
+          }
         }
       }
     }

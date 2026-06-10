@@ -34,30 +34,93 @@
     "AK-47":       { value: 3200, tag: "weapon", gun: "ak47",    dmg: 34, rof: 0.097,ammo: 30 },
     LMG:           { value: 6500, tag: "weapon", gun: "lmg",     dmg: 27, rof: 0.075,ammo: 100 },
     Sniper:        { value: 5200, tag: "weapon", gun: "sniper",  dmg: 130,rof: 1.25, ammo: 5 },
+    Bazooka:       { value: 9000, tag: "weapon", gun: "bazooka", dmg: 1,  rof: 1.4,  ammo: 1 },
+    // "Rocket Launcher" is the same engine launcher as the Bazooka (gun:'bazooka'
+    // → fpsmode explosive shoot()), surfaced under the name players asked for so it
+    // shows up & buys/equips/fires/explodes through the exact same RPG chain.
+    "Rocket Launcher": { value: 9500, tag: "weapon", gun: "bazooka", dmg: 1, rof: 1.4, ammo: 1 },
     Bat:           { value: 80,   tag: "weapon", melee: true, dmg: 26 },
     Knife:         { value: 120,  tag: "weapon", melee: true, dmg: 40 },
+    // --- throwables (lobbed, arcing — see city/combat.js grenade system) ---
+    // a real area weapon: power/radius a bit under the RPG. Carried as a COUNT in
+    // g.cityGrenades; thrown with [T]. tag:'throwable' so shops stock/sell it.
+    Grenade:       { value: 250,  tag: "throwable", throwable: "grenade", blastPower: 1.0, blastRadius: 5.5 },
     // --- ammo ---
     "Ammo Box":    { value: 60,   tag: "ammo", rounds: 60 },
+    // AIRPOWER resupply: a crate of air-to-ground missiles that rearms your F-22
+    // / attack chopper (playeraircraft.js spends this to top up its salvo). Priced
+    // as a serious munition — owning airpower means paying to keep it armed.
+    "Air-to-Ground Missile": { value: 25000, tag: "ammo", missiles: 4, airmunition: true },
     // --- drugs (float per the street market below) ---
     Weed:          { value: 30,   tag: "drug" },
     Coke:          { value: 120,  tag: "drug" },
     Meth:          { value: 90,   tag: "drug" },
     Pills:         { value: 45,   tag: "drug" },
-    // --- wearables (drip → respect; stealable) ---
-    "Gold Chain":  { value: 600,  tag: "wearable", drip: 6 },
-    "Diamond Ring":{ value: 1500, tag: "wearable", drip: 10 },
-    Rolex:         { value: 2200, tag: "wearable", drip: 14 },
-    "Designer Jacket": { value: 450, tag: "wearable", drip: 5 },
-    Sneakers:      { value: 220,  tag: "wearable", drip: 3 },
-    Sunglasses:    { value: 140,  tag: "wearable", drip: 2 },
-    "Diamond Grill": { value: 1800, tag: "wearable", drip: 12 },
-    Earrings:      { value: 320,  tag: "wearable", drip: 3 },
+    // --- wearables → DRIP (your visible STATUS; the club's gate). Each has a
+    //   'slot' so an outfit is one item per slot (hat/top/outer/bottom/shoes/
+    //   glasses/chain/watch/ring) and 'drip' the status it adds when WORN. Three
+    //   tiers: cheap STREETWEAR (1-4), mid DESIGNER (5-10), LUXURY (12-30). Money
+    //   → clothes → drip → past the rope. Existing pieces kept, now slotted. ----
+    //   STREETWEAR — cheap, low drip (a broke fit stays well under CLUB_DRIP):
+    Snapback:        { value: 45,   tag: "wearable", slot: "hat",     drip: 1 },
+    "Beanie":        { value: 35,   tag: "wearable", slot: "hat",     drip: 1 },
+    Hoodie:          { value: 90,   tag: "wearable", slot: "top",     drip: 2 },
+    Tee:             { value: 40,   tag: "wearable", slot: "top",     drip: 1 },
+    Tracksuit:       { value: 180,  tag: "wearable", slot: "outer",   drip: 3 },
+    "Cargo Pants":   { value: 70,   tag: "wearable", slot: "bottom",  drip: 2 },
+    "Ripped Jeans":  { value: 80,   tag: "wearable", slot: "bottom",  drip: 2 },
+    Sneakers:      { value: 220,  tag: "wearable", slot: "shoes",   drip: 3 },
+    Jordans:         { value: 280,  tag: "wearable", slot: "shoes",   drip: 4 },
+    Sunglasses:    { value: 140,  tag: "wearable", slot: "glasses", drip: 2 },
+    Earrings:      { value: 320,  tag: "wearable", slot: "chain",   drip: 3 },
+    //   DESIGNER — mid drip (a full designer fit clears CLUB_DRIP, not VIP):
+    "Bomber Jacket": { value: 650,  tag: "wearable", slot: "outer",   drip: 6 },
+    "Silk Shirt":    { value: 520,  tag: "wearable", slot: "top",     drip: 6 },
+    "Designer Jeans":{ value: 480,  tag: "wearable", slot: "bottom",  drip: 5 },
+    Loafers:         { value: 560,  tag: "wearable", slot: "shoes",   drip: 6 },
+    "Designer Shades":{ value: 420, tag: "wearable", slot: "glasses", drip: 5 },
+    "Fedora":        { value: 380,  tag: "wearable", slot: "hat",     drip: 5 },
+    "Designer Jacket": { value: 450, tag: "wearable", slot: "outer", drip: 5 },
+    "Gold Chain":  { value: 600,  tag: "wearable", slot: "chain",   drip: 7 },
+    "Diamond Ring":{ value: 1500, tag: "wearable", slot: "ring",    drip: 10 },
+    //   LUXURY — high drip (only a luxury fit reaches VIP_DRIP):
+    "Tailored Suit": { value: 4200, tag: "wearable", slot: "outer",   drip: 18 },
+    "Velvet Blazer": { value: 3200, tag: "wearable", slot: "outer",   drip: 15 },
+    "Dress Shoes":   { value: 1100, tag: "wearable", slot: "shoes",   drip: 9 },
+    Rolex:         { value: 2200, tag: "wearable", slot: "watch",   drip: 14 },
+    "Iced Watch":    { value: 12000,tag: "wearable", slot: "watch",   drip: 24 },
+    "Iced Chain":    { value: 8500, tag: "wearable", slot: "chain",   drip: 22 },
+    "Diamond Grill": { value: 1800, tag: "wearable", slot: "glasses",drip: 12 },
+    "Diamond Pinky": { value: 9000, tag: "wearable", slot: "ring",    drip: 20 },
+    Fur:             { value: 6000, tag: "wearable", slot: "outer",   drip: 16 },
     // --- valuables (loot → fence at pawn) ---
     Wallet:        { value: 40,   tag: "valuable" },
     Phone:         { value: 110,  tag: "valuable" },
     Laptop:        { value: 380,  tag: "valuable" },
     "Cash Stack":  { value: 500,  tag: "valuable" },
     "Gold Bar":    { value: 3000, tag: "valuable" },
+    // --- LUXURY VALUABLES (the wealth catalog: the jackpot fences) ----------
+    // tag:"valuable" with a real pawn `value`. `luxe:true` marks the >=$90k
+    // mega-items so other systems can gate their rarity + flag them as jackpots.
+    // Watches climb from the everyday Omega up to the obscene Richard Mille.
+    "Designer Bag":      { value: 6000,    tag: "valuable" },
+    Omega:               { value: 4000,    tag: "valuable" },
+    // (note: "Rolex" also exists as a wearable wristpiece; this valuable is the
+    // lifted-loot version that fences at the pawn for its pawn value.)
+    "Audemars Piguet":   { value: 90000,   tag: "valuable", luxe: true },
+    "Patek Philippe":    { value: 350000,  tag: "valuable", luxe: true },
+    "Richard Mille":     { value: 900000,  tag: "valuable", luxe: true },
+    "Tennis Bracelet":   { value: 60000,   tag: "valuable" },
+    "Diamond Necklace":  { value: 250000,  tag: "valuable", luxe: true },
+    // a tiara only a mob wife / heiress wears — part of her seven-figure set.
+    // Kept RARE in rollValuables so it stays a jackpot, not a common drop.
+    "Diamond Tiara":     { value: 1200000, tag: "valuable", luxe: true },
+    // the crown jewel: a rare ring is a life-changing score. The truly absurd
+    // 5,000,000 stone is gated even rarer in rollValuables.
+    "Engagement Ring":   { value: 5000000, tag: "valuable", luxe: true },
+    "Briefcase of Cash": { value: 80000,   tag: "valuable" },
+    "Bearer Bonds":      { value: 500000,  tag: "valuable", luxe: true },
+    "Art Piece":         { value: 200000,  tag: "valuable", luxe: true },
     // --- tools ---
     Lockpick:      { value: 90,   tag: "tool" },
     Crowbar:       { value: 70,   tag: "tool" },
@@ -67,17 +130,22 @@
   };
 
   const SHOP_STOCK = {
-    guns:        ["Pistol", "Revolver", "Desert Eagle", "SMG", "Uzi", "Shotgun", "Rifle", "AK-47", "LMG", "Sniper", "Ammo Box", "Body Armor", "Knife", "Bat"],
-    jewelry:     ["Gold Chain", "Diamond Ring", "Rolex", "Diamond Grill", "Earrings"],
+    guns:        ["Pistol", "Revolver", "Desert Eagle", "SMG", "Uzi", "Shotgun", "Rifle", "AK-47", "LMG", "Sniper", "Bazooka", "Rocket Launcher", "Grenade", "Ammo Box", "Body Armor", "Knife", "Bat"],
+    jewelry:     ["Gold Chain", "Diamond Ring", "Rolex", "Diamond Grill", "Earrings", "Iced Chain", "Iced Watch", "Diamond Pinky"],
     pawn:        ["Lockpick", "Crowbar", "Burner Phone", "Knife"],
-    clothing:    ["Designer Jacket", "Sneakers", "Sunglasses"],
+    // the boutique: streetwear → designer → luxury, every wearable slot covered.
+    clothing:    ["Snapback", "Beanie", "Hoodie", "Tee", "Tracksuit", "Cargo Pants", "Ripped Jeans", "Sneakers", "Jordans", "Sunglasses",
+                  "Bomber Jacket", "Silk Shirt", "Designer Jeans", "Loafers", "Designer Shades", "Fedora", "Designer Jacket",
+                  "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
+    boutique:    ["Silk Shirt", "Designer Jeans", "Bomber Jacket", "Loafers", "Designer Shades", "Fedora",
+                  "Tailored Suit", "Velvet Blazer", "Dress Shoes", "Fur"],
     food:        ["Burger", "Hotdog", "Pizza Slice", "Soda", "Fries", "Energy Drink"],
     gas:         ["Soda", "Energy Drink", "Hotdog", "Ammo Box", "Burner Phone"],
     drugs:       ["Weed", "Pills"],
     hardware:    ["Crowbar", "Lockpick", "Bat", "Medkit"],
     electronics: ["Phone", "Laptop", "Burner Phone"],
     gym:         ["Energy Drink", "Medkit"],
-    barber:      ["Sunglasses", "Earrings"],
+    barber:      ["Sunglasses", "Earrings", "Snapback", "Beanie", "Fedora", "Designer Shades"],
     security:    ["Body Armor", "Ammo Box", "Pistol"],
     bank:        [],
     hospital:    ["Medkit", "Body Armor"],
@@ -89,7 +157,7 @@
     paintball:   ["Energy Drink", "Medkit"],
     transit:     ["Soda", "Hotdog", "Burner Phone"],
     cityhall:    [],
-    airfield:    ["Body Armor", "Medkit"],
+    airfield:    ["Body Armor", "Medkit", "Air-to-Ground Missile"],
     racepark:    [],
   };
 
@@ -98,27 +166,27 @@
   // The NAME tells you the tier (a Prius is clearly a shitbox, a Ferrari clearly
   // isn't) — the actual $ value stays HIDDEN until you chop it at the shop.
   const CARS = [
-    { name: "Toyota Prius",   value: 1200,  rarity: 0.0,  color: 0x6b6f78, s: 1.0 },
-    { name: "Honda Civic",    value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92 },
-    { name: "Yellow Cab",     value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0 },
-    { name: "Chevy Malibu",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05 },
-    { name: "Dodge Caravan",  value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12 },
-    { name: "Ford F-150",     value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15 },
-    { name: "Nissan 370Z",    value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98 },
-    { name: "Jeep Cherokee",  value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18 },
-    { name: "Dodge Charger",  value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08 },
-    { name: "Chevy Corvette", value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96 },
-    { name: "Mercedes S-Class", value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1 },
-    { name: "Tesla Model 3",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0, detailStyle: "tesla-3" },
-    { name: "Tesla Model Y",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, detailStyle: "tesla-y" },
-    { name: "Tesla Model S",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, detailStyle: "tesla-s" },
-    { name: "Tesla Model X",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, detailStyle: "tesla-x" },
-    { name: "Cybertruck",     value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, detailStyle: "cybertruck" },
-    { name: "Porsche 911 Turbo", value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, detailStyle: "porsche" },
-    { name: "Lamborghini Aventador", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, detailStyle: "aventador" },
-    { name: "Ferrari 488",    value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, detailStyle: "ferrari" },
-    { name: "Ferrari Enzo",   value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, detailStyle: "enzo" },
-    { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, detailStyle: "veyron" },
+    { name: "Toyota Prius",   value: 1200,  rarity: 0.0,  color: 0x6b6f78, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "prius" },
+    { name: "Honda Civic",    value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "civic" },
+    { name: "Yellow Cab",     value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  livery: "taxi", designStyle: "cab" },
+    { name: "Chevy Malibu",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  designStyle: "malibu" },
+    { name: "Dodge Caravan",  value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "caravan" },
+    { name: "Ford F-150",     value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", designStyle: "f150" },
+    { name: "Nissan 370Z",    value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "370z" },
+    { name: "Jeep Cherokee",  value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "cherokee" },
+    { name: "Dodge Charger",  value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "charger" },
+    { name: "Chevy Corvette", value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "corvette" },
+    { name: "Mercedes S-Class", value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1, body: "sedan", detailStyle: "tesla-s", designStyle: "sclass" },
+    { name: "Tesla Model 3",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan", detailStyle: "tesla-3", designStyle: "model3" },
+    { name: "Tesla Model Y",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",   detailStyle: "tesla-y", designStyle: "modely" },
+    { name: "Tesla Model S",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan", detailStyle: "tesla-s", designStyle: "models" },
+    { name: "Tesla Model X",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",   detailStyle: "tesla-x", designStyle: "modelx" },
+    { name: "Cybertruck",     value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "cybertruck" },
+    { name: "Porsche 911 Turbo", value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe", detailStyle: "porsche", designStyle: "porsche" },
+    { name: "Lamborghini Aventador", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe", detailStyle: "aventador", designStyle: "aventador" },
+    { name: "Ferrari 488",    value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe", detailStyle: "ferrari", designStyle: "ferrari" },
+    { name: "Ferrari Enzo",   value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "enzo" },
+    { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "veyron" },
   ];
 
   let _seed = 1357913 & 0x7fffffff;
@@ -129,7 +197,58 @@
   function count(name) { return (g.cityInv && g.cityInv[name]) || 0; }
   function take(name, n) { n = n || 1; if (count(name) < n) return false; g.cityInv[name] -= n; if (g.cityInv[name] <= 0) delete g.cityInv[name]; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return true; }
 
+  // LEGACY whole-inventory drip: sums drip across everything you OWN. Kept so any
+  // older caller keeps working — but the PLAYER's club status now comes from the
+  // equipped outfit (cityPlayerDrip), not from owning a pile of chains.
   function drip() { let s = 0; const inv = g.cityInv || {}; for (const k in inv) { const it = ITEMS[k]; if (it && it.drip) s += it.drip; } return s; }
+
+  // ============================================================
+  //  THE OUTFIT — what you're WEARING (distinct from what you OWN).
+  // ------------------------------------------------------------
+  //  g.cityOutfit maps a clothing SLOT -> the item name worn there. You can only
+  //  ever wear ONE item per slot, so dressing up is a real choice (the iced
+  //  chain or the gold one). cityPlayerDrip() sums the drip of the worn pieces +
+  //  a baseline; THAT number is your visible STATUS — the club's bouncer reads it
+  //  against CBZ.CITY.CLUB_DRIP / VIP_DRIP. Equipping doesn't consume the item
+  //  (it's worn, still owned); you must OWN it (in g.cityInv) to put it on.
+  // ============================================================
+  const SLOTS = ["hat", "top", "outer", "bottom", "shoes", "glasses", "chain", "watch", "ring"];
+  function outfit() { if (!g.cityOutfit) g.cityOutfit = {}; return g.cityOutfit; }
+  function resetOutfit() { g.cityOutfit = {}; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+  function slotOf(name) { const it = ITEMS[name]; return it && it.tag === "wearable" ? (it.slot || null) : null; }
+  // Equip a wearable into its slot (replaces whatever was there). Must own it.
+  function equip(name) {
+    const it = ITEMS[name];
+    if (!it || it.tag !== "wearable" || !it.slot) return false;
+    if (count(name) <= 0) return false;                 // you have to OWN it to wear it
+    outfit()[it.slot] = name;                            // worn, not consumed
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  }
+  // Take off whatever is in a slot (or a named item's slot).
+  function unequip(slotOrName) {
+    const o = outfit();
+    let slot = slotOrName;
+    if (!SLOTS.includes(slotOrName)) { const s = slotOf(slotOrName); if (s) slot = s; }
+    if (slot && o[slot]) { delete o[slot]; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return true; }
+    return false;
+  }
+  function isEquipped(name) { const o = g.cityOutfit; if (!o) return false; for (const s in o) if (o[s] === name) return true; return false; }
+  // The player's STATUS number = baseline + sum of drip over the WORN outfit.
+  // A worn piece you no longer own (impossible normally — equipping requires
+  // ownership) is skipped defensively. This REPLACES "sum all inventory" as the
+  // club's read on the player.
+  function playerDrip() {
+    const base = (CBZ.CITY && CBZ.CITY.BASE_DRIP) || 0;
+    let s = base;
+    const o = g.cityOutfit || {};
+    for (const slot in o) {
+      const name = o[slot];
+      const it = ITEMS[name];
+      if (it && it.drip && count(name) > 0) s += it.drip;
+    }
+    return Math.round(s);
+  }
 
   function buyPrice(name) {
     const it = ITEMS[name]; if (!it) return 0;
@@ -145,10 +264,19 @@
     if (kind === "pawn") mul = it.tag === "valuable" ? 0.65 : 0.5;
     if (kind === "jewelry" && it.tag === "wearable") mul = 0.6;
     if (kind === "electronics" && it.tag === "valuable") mul = 0.62;
+    // LUXE valuables (Patek, Engagement Ring, Bearer Bonds, Art…) fence FAT at a
+    // proper jeweller/pawn: a fence who can move a $350k watch takes a thinner
+    // cut, so pawning one nets a real fortune (a jackpot, not a haircut to dust).
+    if (it.luxe && (kind === "pawn" || kind === "jewelry")) mul = Math.max(mul, 0.80);
     // a fenced item is worth more when you've built a rep with the fences
     // (a real money sink to chase): higher Fence Rep = a smaller haircut.
     const fence = fenceBonus();
-    if (it.tag === "valuable" || it.tag === "wearable") mul = Math.min(0.92, mul + fence);
+    if (it.tag === "valuable" || it.tag === "wearable") {
+      // luxe goods earn the rep bonus on top of their already-fat base, capped
+      // a touch higher so a maxed-rep fence on a Patek pays close to clean value.
+      const cap = it.luxe ? 0.95 : 0.92;
+      mul = Math.min(cap, mul + fence);
+    }
     return Math.max(1, Math.round(it.value * mul));
   }
   // Pawn/fence loyalty: each fence sale nudges a hidden rep up; it bumps your
@@ -425,6 +553,138 @@
     if (wealth < 0.6) return 8 + ((rng() * 55) | 0);            // average
     if (wealth < 0.88) return 40 + ((rng() * 180) | 0);         // comfortable
     return 120 + ((rng() * 520) | 0);                          // wealthy
+  }
+
+  // ============================================================
+  //  THE WEALTH CATALOG — realistic cash + carried valuables BY WHO YOU ARE
+  // ------------------------------------------------------------
+  //  Two helpers peds.js calls when it spawns a person: rollCashFor (loose cash
+  //  in their pocket, keyed to their archetype) and rollValuables (the array of
+  //  jewellery/loot they're carrying). The whole point: most people are broke
+  //  and carry nothing worth fencing — but a rare tycoon is walking around with
+  //  a Richard Mille, and a socialite with a ring you could retire on. The MEGA
+  //  items stay RARE so getting insanely rich is a JACKPOT, not the norm.
+  // ------------------------------------------------------------
+  //  Both accept an optional `rng` (a function returning [0,1)) so a caller can
+  //  drive them off its own deterministic stream; otherwise they use ours.
+  // ============================================================
+  function archKey(archetype) { return ("" + (archetype || "")).toLowerCase(); }
+  function randIn(R, lo, hi) { return lo + ((R() * (hi - lo + 1)) | 0); }
+
+  // Cash on a person, by who they are. Archetype wins when it implies wealth;
+  // otherwise we fall back to the wealth tier (0 poor .. 1 rich). Ranges follow
+  // the contract: poor $5–40, normal $20–200, well-off $300–2000, dealer
+  // $1.5k–15k, mobster/made $5k–40k, boss/tycoon $10k–90k.
+  function rollCashFor(archetype, wealth, rng2) {
+    const R = (typeof rng2 === "function") ? rng2 : rng;
+    const a = archKey(archetype);
+    // a boss's / tycoon's WIFE carries head-of-household money too (fat clutch of
+    // cash on top of the seven-figure jewellery), so she's boss-tier to rob.
+    if (a === "mobwife" || a === "mob-wife" || a === "bosswife" || a === "kingpinwife" || a === "tycoonwife")
+      return randIn(R, 8000, 60000);
+    if (a === "tycoon" || a === "billionaire" || a === "boss" || a === "kingpin")
+      return randIn(R, 10000, 90000);
+    if (a === "mobster" || a === "made" || a === "underboss" || a === "capo")
+      return randIn(R, 5000, 40000);
+    if (a === "dealer" || a === "kingpin" || a === "trapper")
+      return randIn(R, 1500, 15000);
+    if (a === "socialite" || a === "tourist" || a === "merchant" || a === "watcher")
+      return randIn(R, 300, 2000);           // well-off
+    if (a === "panhandler" || a === "junkie" || a === "homeless")
+      return randIn(R, 5, 40);               // poor
+    // generic resident/jogger/busker etc.: let wealth decide the tier.
+    if (wealth != null) {
+      if (wealth >= 0.97) return randIn(R, 10000, 90000);   // a hidden whale
+      if (wealth >= 0.88) return randIn(R, 300, 2000);      // well-off
+      if (wealth >= 0.6)  return randIn(R, 40, 300);        // comfortable
+      if (wealth < 0.15)  return randIn(R, 5, 40);          // broke
+    }
+    return randIn(R, 20, 200);               // normal
+  }
+
+  // The array of VALUABLE item NAMES a ped is carrying. Most people: none, or a
+  // Phone/Wallet at low wealth. The luxury archetypes carry the catalog's crown
+  // jewels — but the mega-items (Patek/RM/Engagement Ring/Bearer Bonds) are RARE
+  // rolls so they stay a jackpot. Returns [] for the broke majority.
+  function rollValuables(archetype, wealth, rng2) {
+    const R = (typeof rng2 === "function") ? rng2 : rng;
+    const a = archKey(archetype);
+    const out = [];
+    const w = wealth == null ? 0.4 : wealth;
+
+    // TYCOON / BILLIONAIRE → a luxury WATCH. Omega common, AP rarer, Patek rare,
+    // Richard Mille the rarest of all (a true once-in-a-run jackpot). Plus a
+    // chance at a Briefcase of Cash, and a slim shot at Bearer Bonds / Art.
+    if (a === "tycoon" || a === "billionaire") {
+      const r = R();
+      if (r < 0.015) out.push("Richard Mille");        // 1.5% — the unicorn
+      else if (r < 0.07) out.push("Patek Philippe");   // ~5.5%
+      else if (r < 0.27) out.push("Audemars Piguet");  // ~20%
+      else out.push("Omega");                          // the rest: still a $4k watch
+      if (R() < 0.12) out.push("Briefcase of Cash");
+      if (R() < 0.03) out.push("Bearer Bonds");        // rare mega
+      if (R() < 0.04) out.push("Art Piece");
+      return out;
+    }
+
+    // MOB WIFE / KINGPIN'S WIFE → the JACKPOT target. The wife of a mob boss (or a
+    // tycoon's spouse) is a walking vault: she carries the $5M Engagement Ring, a
+    // Diamond Necklace AND a Tennis Bracelet for certain, plus a strong shot at a
+    // $1.2M Diamond Tiara and a Designer Bag. Clipping/robbing her is several
+    // million in ice in one go — but (see social.js) the whole crew hunts you for
+    // it. Her wealth is proportional to her husband: she's loaded BECAUSE he is.
+    if (a === "mobwife" || a === "mob-wife" || a === "bosswife" || a === "kingpinwife") {
+      out.push("Engagement Ring");                     // the $5M rock — guaranteed
+      out.push("Diamond Necklace");                    // +$250k
+      out.push("Tennis Bracelet");                     // +$60k
+      if (R() < 0.5) out.push("Diamond Tiara");        // +$1.2M, half the time
+      if (R() < 0.7) out.push("Designer Bag");         // +$6k
+      return out;
+    }
+
+    // SOCIALITE / RICH WOMAN → an Engagement Ring (mega, kept RARE) + sometimes a
+    // Designer Bag and a Diamond Necklace. A tycoon's WIFE rolls richer than a
+    // street socialite — she's far likelier to be carrying the ring + the tiara.
+    if (a === "socialite" || a === "richwoman" || a === "rich woman" || a === "heiress" || a === "tycoonwife") {
+      const wife = (a === "tycoonwife");
+      if (R() < (wife ? 0.55 : 0.06)) out.push("Engagement Ring");     // tycoon's wife: usually carries the rock
+      else if (R() < 0.30) out.push("Diamond Necklace");
+      else if (R() < 0.50) out.push("Tennis Bracelet");
+      if (wife && R() < 0.30) out.push("Diamond Tiara");
+      if (R() < 0.45) out.push("Designer Bag");
+      return out;
+    }
+
+    // DEALER / MOBSTER / MADE / BOSS → street ice: a Gold Chain, maybe a Rolex,
+    // and the bosses sometimes a Briefcase of Cash.
+    if (a === "dealer" || a === "mobster" || a === "made" || a === "boss" ||
+        a === "underboss" || a === "capo" || a === "trapper" || a === "kingpin") {
+      if (R() < 0.7) out.push("Gold Chain");
+      if (R() < 0.35) out.push("Rolex");
+      const bossish = (a === "boss" || a === "underboss" || a === "kingpin" || a === "made");
+      if (bossish && R() < 0.18) out.push("Briefcase of Cash");
+      if (bossish && R() < 0.04) out.push("Diamond Necklace");
+      return out;
+    }
+
+    // WELL-OFF generic (high wealth, ordinary archetype) → maybe a Rolex or a
+    // Diamond Necklace, occasionally a Tennis Bracelet. Rarely a hidden whale's
+    // Audemars.
+    if (w >= 0.88 || a === "merchant" || a === "tourist") {
+      const r = R();
+      if (r < 0.03 && w >= 0.95) out.push("Audemars Piguet");  // hidden whale
+      else if (r < 0.10) out.push("Diamond Necklace");
+      else if (r < 0.22) out.push("Rolex");
+      else if (r < 0.34) out.push("Tennis Bracelet");
+      if (R() < 0.30) out.push("Phone");
+      return out;
+    }
+
+    // EVERYONE ELSE: mostly nothing. A Phone is the common "score"; the broke
+    // sometimes have a Wallet (the truly poor have neither).
+    if (w >= 0.4 && R() < 0.35) out.push("Phone");
+    else if (R() < 0.18) out.push(w < 0.2 ? "Wallet" : "Phone");
+    return out;
   }
 
   // ============================================================
@@ -738,12 +998,41 @@
     }
   });
 
+  // --- the EQUIPPED-OUTFIT / DRIP API (the foundation everything else reads) --
+  // Top-level globals so club.js (bouncer), shops.js (boutique equips on buy),
+  // and hud.js (DRIP stat) can call them directly. cityPlayerDrip is the
+  // PLAYER's status (equipped outfit); econ.drip stays the legacy whole-inv sum.
+  CBZ.cityEquip = function (name) { return equip(name); };
+  CBZ.cityUnequip = function (slotOrName) { return unequip(slotOrName); };
+  CBZ.cityPlayerDrip = function () { return playerDrip(); };
+  CBZ.cityIsEquipped = function (name) { return isEquipped(name); };
+  CBZ.cityOutfitSlots = function () { return SLOTS.slice(); };
+  // Reset hook for a new run (mode.js / worldstate reset should call this so the
+  // worn outfit clears with the rest of city state — see "issues").
+  CBZ.cityResetOutfit = function () { resetOutfit(); };
+
+  // ============================================================
+  //  AIRPOWER PRICES — the apex of the empire.
+  // ------------------------------------------------------------
+  //  The F-22 RAPTOR is the most expensive thing in the game: a $3M jet you can
+  //  only base once you own the penthouse + its HANGAR. The actual purchase
+  //  charge lives in playeraircraft.js / realestate (they read JET_PRICE here);
+  //  economy.js just owns the number so the price is consistent everywhere.
+  //  MISSILE_RESUPPLY is the cost to rearm one "Air-to-Ground Missile" crate.
+  // ============================================================
+  const JET_PRICE = 3000000;                              // $3,000,000 — the F-22 Raptor
+  const MISSILE_RESUPPLY = ITEMS["Air-to-Ground Missile"].value;   // $/crate to rearm airpower
+
   CBZ.cityEcon = {
     ITEMS, SHOP_STOCK, CARS, rng,
+    // --- airpower prices (the F-22 + its rearm) ---
+    JET_PRICE, MISSILE_RESUPPLY,
     add, has, count, take, drip, buyPrice, sellPrice, wholesalePrice,
+    // equipped-outfit drip model
+    SLOTS, equip, unequip, slotOf, isEquipped, outfit, resetOutfit, playerDrip,
     stockFor(kind) { return SHOP_STOCK[kind] || []; },
     streetPrice, recordSale, recordBuy, initMarket,
-    rollCash, rollWallet, pickCar, carByName,
+    rollCash, rollCashFor, rollValuables, rollWallet, pickCar, carByName,
     // --- living street market (supply & demand, per district) ---
     DISTRICTS, districtAt, districtAtPos, districtName, playerDistrict,
     bestMarket, activeTip, fenceBonus, bumpFenceRep,

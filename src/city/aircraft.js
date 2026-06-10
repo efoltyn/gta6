@@ -26,12 +26,19 @@
   // ---- tunables (kept conservative so phones survive a 5-star firefight) ----
   const HELI_STAR   = 4;      // attack heli joins at 4 stars
   const JET_STAR    = 5;      // jets + missiles at 5 stars
-  const HELI_Y      = 26;     // cruise altitude of the gunship
+  // The tallest tower (The Spire, 9 storeys @4m) tops out near y≈36 and a player
+  // standing on its roof is ~y38, so cruise altitudes sit WELL above that: a
+  // gunship/jet is never below a rooftop target it's hunting.
+  const HELI_Y      = 44;     // cruise altitude of the gunship (clears the tallest roof + a player on it)
   const HELI_R      = 22;     // orbit radius around last-known
   const HELI_SPEED  = 14;     // m/s lateral chase toward orbit point
   const MISSILE_SPD = 46;     // m/s missile travel
   const MAX_MISSILES = 6;     // hard cap on live projectiles (pool size)
-  const JET_Y       = 30;     // jet pass altitude
+  const JET_Y       = 52;     // jet pass altitude (highest — screams overhead)
+  // a target this much below the aircraft's nose is a plausible down/level shot;
+  // anything higher (player up on a roof above the heli) means the gunner would
+  // have to fire straight up — physically can't, so the aircraft must REPOSITION.
+  const FIRE_MARGIN = 3;      // metres the player must be BELOW the aircraft to be hittable
   const JET_SPEED   = 95;     // m/s — jets are FAST (a single screaming pass)
   const MAX_JETS    = 2;
 
@@ -106,6 +113,22 @@
     return P ? { x: P.pos.x, y: 1.2, z: P.pos.z } : null;
   }
 
+  // Can an aircraft sitting at (ax,ay,az) realistically put fire on the player?
+  // TWO conditions, both required:
+  //   1) GEOMETRY — the player must be meaningfully BELOW the aircraft. A door
+  //      gunner / missile pod fires down or level, never straight up, so a player
+  //      standing on a roof that is HIGHER than the heli is simply out of arc.
+  //   2) LINE OF FIRE — nothing solid between the muzzle and the player (reuse the
+  //      shared LOS helper the ground units already self-gate on).
+  // Returns false → the aircraft must reposition (climb/circle) before engaging.
+  function canEngage(ax, ay, az, P) {
+    if (!P) return false;
+    const py = (P.pos.y || 0) + 1.4;                 // aim ~chest height of the player
+    if (py > ay - FIRE_MARGIN) return false;         // player is at/above us → can't fire up
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(ax, ay, az, P.pos.x, py, P.pos.z)) return false;
+    return true;
+  }
+
   // an edge/helipad spawn point for an inbound aircraft, biased toward an angle
   function edgePoint(angle, y) {
     const arena = CBZ.city && CBZ.city.arena;
@@ -138,19 +161,67 @@
     if (missilePool.length < MAX_MISSILES) missilePool.push(m);
   }
 
-  function launchMissile(fx, fy, fz, target) {
+  // Internal launcher. `byPlayer` flags the projectile as the player's (so its
+  // blast counts as a player crime + does player-attributed damage). The gunship
+  // / jets pass no flag → false (unchanged). The PUBLIC player entry below
+  // (CBZ.cityFireMissile) routes here with byPlayer:true.
+  function launchMissile(fx, fy, fz, target, byPlayer) {
     if (!target) return;
     const r = root(); if (!r) return;
     const m = getMissile(); if (!m) return;
     m.group.position.set(fx, fy, fz);
     m.dir.set(target.x - fx, (target.y || 1) - fy, target.z - fz).normalize();
-    m.life = 0; m.byPlayer = false;
+    m.life = 0; m.byPlayer = !!byPlayer;
     // orient nose along travel dir
     m.group.lookAt(fx + m.dir.x, fy + m.dir.y, fz + m.dir.z);
     r.add(m.group);
     if (missiles.indexOf(m) < 0) missiles.push(m);
     if (CBZ.sfx) CBZ.sfx("whoosh");
+    return m;
   }
+
+  // ---- PUBLIC: player-fired missile (the F-22 / chopper salvo) --------------
+  // Fire a REAL missile from (x,y,z) travelling along the direction (dx,dy,dz).
+  // It reuses the exact gunship missile pool + trail + detonate(cityExplosion)
+  // chain, so it flies, smokes, and blows on the first building / ground / actor
+  // it reaches — identical FX to the military's rockets. opts.byPlayer (default
+  // TRUE here, since the only caller is the player's aircraft) flags the blast as
+  // the player's crime. Returns true if a missile actually launched (false when
+  // the MAX_MISSILES pool is saturated — the cap is respected so a mashing player
+  // can't flood the scene). City-gated; a no-op outside city mode.
+  //
+  // We have a DIR, not a target point, so we project a target far down the ray and
+  // hand it to launchMissile — the updateMissiles loop then detonates it the
+  // instant it strikes geometry/ground, well before that far point.
+  CBZ.cityFireMissile = function (x, y, z, dx, dy, dz, opts) {
+    if (!g || g.mode !== "city") return false;
+    opts = opts || {};
+    // normalize the supplied direction (defend against a non-unit vector)
+    let nx = dx || 0, ny = dy || 0, nz = dz || 0;
+    let len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len < 1e-5) return false;              // no direction → nothing to fire
+    nx /= len; ny /= len; nz /= len;
+    // a target FAR along the dir — the missile self-destructs at life 3.2s
+    // (≈150m at MISSILE_SPD) anyway, so 400m guarantees it's never "reached".
+    const FAR = 400;
+    const target = { x: x + nx * FAR, y: y + ny * FAR, z: z + nz * FAR };
+    const byPlayer = opts.byPlayer !== false;  // default TRUE for the player entry
+    const m = launchMissile(x, y, z, target, byPlayer);
+    return !!m;                                // false ⇒ pool was at MAX_MISSILES
+  };
+
+  // ---- PUBLIC: missile/blast tuning (so a player salvo reads punchy) --------
+  // Read-only-ish knobs the player aircraft can consult. MISSILE_SPD/MAX_MISSILES
+  // are the shared pool's tunables; the blast power/radius mirror detonate()'s
+  // airstrike call so the FLIGHT agent can size its own UI/recoil to the hit.
+  CBZ.cityMissileTuning = {
+    speed: MISSILE_SPD,
+    maxLive: MAX_MISSILES,
+    blastPower: 3.0,
+    blastRadius: 16,
+    // how many missiles are live right now (a caller can pace its fire-rate)
+    liveCount() { return missiles.length; },
+  };
 
   function updateMissiles(dt, r) {
     const a = assets();
@@ -178,7 +249,7 @@
       if (p.y <= 0.6) { hit = true; hy = 0.4; }
       if (!hit && m.life > 3.2) hit = true;        // safety self-destruct
       if (!hit && hitsBlocker(p)) hit = true;
-      if (hit) { detonate(hx, hy, hz); freeMissile(m); missiles.splice(i, 1); }
+      if (hit) { detonate(hx, hy, hz, m.byPlayer); freeMissile(m); missiles.splice(i, 1); }
     }
   }
 
@@ -197,13 +268,17 @@
     return false;
   }
 
-  function detonate(x, y, z) {
+  // byPlayer (default false) marks this detonation as the player's — the blast
+  // is then a player crime + does player-attributed kills. Gunship/jet missiles
+  // pass nothing → false (police fire, no crime on you).
+  function detonate(x, y, z, byPlayer) {
+    byPlayer = !!byPlayer;
     // prefer the dedicated airstrike blast (crashfx agent provides it — bigger,
     // longer, with shockwave); fall back to a beefed-up car explosion.
     if (CBZ.cityAirstrikeExplosion) {
-      CBZ.cityAirstrikeExplosion(x, z, { power: 3.0, radius: 16, byPlayer: false, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
+      CBZ.cityAirstrikeExplosion(x, z, { power: 3.0, radius: 16, byPlayer: byPlayer, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
     } else if (CBZ.cityExplosion) {
-      CBZ.cityExplosion(x, z, { power: 2.2, radius: 11, byPlayer: false });
+      CBZ.cityExplosion(x, z, { power: 2.2, radius: 11, byPlayer: byPlayer });
     }
     // cinematic structural damage on a building hit (buildings agent provides it)
     if (y > 1.5 && CBZ.cityDamageBuilding) {
@@ -245,6 +320,8 @@
       group: grp, rotor, trotor, cone, pool, tag,
       pos: grp.position, orbit: rng() * 6.28,
       missileCD: 3.5, gunCD: 1.0, leaveT: 0, spotR: 6, climb: 0,
+      hp: 140, maxHp: 140, downed: false,           // armoured — ~2 rockets / a sustained burst
+      spin: 0, vy: 0, yawRate: 0, smokeCD: 0,
     };
   }
 
@@ -267,7 +344,79 @@
     });
   }
 
+  // ---- SHOOT-DOWN: the gunship is armoured but killable. Bullets chip it, a
+  //      rocket nearly halves it. WHY: a 4★ air threat you can only run from is
+  //      a wall; one you can FIGHT (and watch spin out of the sky into a
+  //      fireball) is a power fantasy + a reason to carry the RPG. ----
+  function damageHeli(dmg, fromX, fromZ) {
+    if (!heli || heli.downed) return;
+    heli.hp -= dmg;
+    if (CBZ.bulletImpact && heli.pos) { try { CBZ.bulletImpact({ x: heli.pos.x, y: heli.pos.y, z: heli.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.2 }); } catch (e) {} }
+    if (heli.hp <= 0) downHeli();
+  }
+  function downHeli() {
+    if (!heli || heli.downed) return;
+    heli.downed = true;
+    heli.vy = 2.5;                                          // a sick upward lurch, then it drops
+    heli.yawRate = (rng() < 0.5 ? -1 : 1) * (3.5 + rng() * 3);   // tail-rotor-loss death spin
+    heli.gunCD = heli.missileCD = 9999;                    // weapons dead
+    if (heli.cone) heli.cone.visible = false;
+    if (heli.pool) heli.pool.visible = false;
+    if (CBZ.sfx) CBZ.sfx("explosion");
+    if (CBZ.shake) CBZ.shake(0.4);
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("🚁 GUNSHIP DOWN");
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(50);
+    if (CBZ.cityFeed) CBZ.cityFeed("You shot down a police gunship!", "#ff8b6b");
+  }
+  function fallHeli(dt) {
+    if (!heli) return;
+    heli.vy -= 17 * dt;                                     // gravity takes over
+    heli.pos.y += heli.vy * dt;
+    heli.group.rotation.y += heli.yawRate * dt;             // flat spin
+    heli.group.rotation.z += dt * 1.7;                      // roll belly-up as it dies
+    heli.group.rotation.x = Math.sin((heli.spin += dt * 4) * 0.6) * 0.45;   // pitch lurch
+    if (heli.rotor) heli.rotor.rotation.y += dt * 16;       // rotor windmilling down
+    if (heli.trotor) heli.trotor.rotation.x += dt * 7;
+    // black smoke trail + the odd flame lick
+    heli.smokeCD -= dt;
+    if (heli.smokeCD <= 0) {
+      heli.smokeCD = 0.045;
+      if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(heli.pos.x, heli.pos.y, heli.pos.z); } catch (e) {} }
+      else if (CBZ.cityExplosion && rng() < 0.12) { try { CBZ.cityExplosion(heli.pos.x, heli.pos.z, { power: 0.2, radius: 1.5, byPlayer: false, y: heli.pos.y, noDamage: true }); } catch (e) {} }
+    }
+    // ground / rooftop impact → detonate where it lands (the explode-on-landing the
+    // player asked for: it rides down THEN blows, it doesn't pop in mid-air).
+    const ground = CBZ.floorAt ? CBZ.floorAt(heli.pos.x, heli.pos.z) : 0;
+    if (heli.pos.y <= ground + 1.3) {
+      const ix = heli.pos.x, iz = heli.pos.z, iy = ground + 1.0;
+      detonate(ix, iy, iz);
+      if (CBZ.shake) CBZ.shake(0.85);
+      despawnHeli();
+    }
+  }
+  // ray-test the gunship for the player's hitscan (NO damage — the shoot loop
+  // applies it, so a shotgun's pellets each count). dir must be normalized.
+  CBZ.cityAircraftRayTest = function (ox, oy, oz, dx, dy, dz, range) {
+    if (!heli || heli.downed || !heli.pos) return null;
+    const cx = heli.pos.x - ox, cy = heli.pos.y - oy, cz = heli.pos.z - oz;
+    const t = cx * dx + cy * dy + cz * dz;                  // projection onto the ray
+    if (t < 0 || t > range) return null;
+    const ex = ox + dx * t - heli.pos.x, ey = oy + dy * t - heli.pos.y, ez = oz + dz * t - heli.pos.z;
+    const RAD = 3.6;                                        // generous hitbox (it's far + moving)
+    if (ex * ex + ey * ey + ez * ez > RAD * RAD) return null;
+    return { x: ox + dx * t, y: oy + dy * t, z: oz + dz * t, dist: t };
+  };
+  CBZ.cityAircraftDamage = function (dmg, fromX, fromZ) { damageHeli(dmg, fromX, fromZ); };
+  // explosion splash (rocket / blast near the heli) — damages if in radius.
+  CBZ.cityAircraftSplash = function (x, y, z, radius, dmg) {
+    if (!heli || heli.downed || !heli.pos) return false;
+    const dx = heli.pos.x - x, dy = heli.pos.y - y, dz = heli.pos.z - z;
+    if (dx * dx + dy * dy + dz * dz > radius * radius) return false;
+    damageHeli(dmg, x, z); return true;
+  };
+
   function updateHeli(dt, r) {
+    if (heli && heli.downed) { fallHeli(dt); return; }     // a dying heli ignores all AI
     const stars = g.wanted | 0;
     if (stars < HELI_STAR || g.state !== "playing") {
       if (heli) { heli.leaveT += dt; heli.pos.y += dt * 6; if (heli.leaveT > 4) despawnHeli(); }
@@ -281,7 +430,12 @@
     heli.orbit += dt * (0.5 + (stars - HELI_STAR) * 0.12);
     const R = HELI_R - (stars - HELI_STAR) * 3;
     const tx = cx + Math.cos(heli.orbit) * R, tz = cz + Math.sin(heli.orbit) * R;
-    const ty = HELI_Y - (stars - HELI_STAR) * 2;
+    // base cruise — kept high so we clear the tallest tower. If the player has
+    // climbed ABOVE us (on a rooftop), CLIMB to get back over them before we can
+    // shoot (a gunner can't fire straight up). This is the "reposition" behaviour.
+    const P0 = player();
+    const needY = P0 ? (P0.pos.y || 0) + 1.4 + FIRE_MARGIN + 6 : 0;   // stay this far over the player
+    const ty = Math.max(HELI_Y - (stars - HELI_STAR) * 2, needY);
     const lat = Math.min(1, dt * (HELI_SPEED / Math.max(R, 6)));
     heli.pos.x += (tx - heli.pos.x) * lat;
     heli.pos.z += (tz - heli.pos.z) * lat;
@@ -309,16 +463,22 @@
     const painted = CBZ.cityChopperPaints ? CBZ.cityChopperPaints() : true;
     const dx = beam.x - P.pos.x, dz = beam.z - P.pos.z;
     const onTarget = (dx * dx + dz * dz) < (heli.spotR * heli.spotR);
+    // REALISTIC SHOT GATE: the player must be below us (down/level arc) AND we must
+    // have a clear line of fire from the gun (just below the body) to them. If not,
+    // hold fire — the climb above (ty/needY) is already repositioning us to regain
+    // the altitude + angle. A player who is HIGHER than the heli is safe until we
+    // climb over them. We still cool the timers down so the first valid shot is fast.
+    const canHit = canEngage(heli.pos.x, heli.pos.y - 0.6, heli.pos.z, P);
     // door gun: rapid tracer fire whenever the beam is roughly on you (4+ stars)
     heli.gunCD -= dt;
-    if (heli.gunCD <= 0 && onTarget) {
+    if (heli.gunCD <= 0 && onTarget && canHit) {
       heli.gunCD = 0.55 + rng() * 0.4;
       heliGun(P);
     }
     // missiles: only at 5 stars, on a long cooldown, with eyes on you
     if (stars >= JET_STAR) {
       heli.missileCD -= dt;
-      if (heli.missileCD <= 0 && (painted || onTarget)) {
+      if (heli.missileCD <= 0 && (painted || onTarget) && canHit) {
         heli.missileCD = 4.5 + rng() * 2.5;
         const side = rng() < 0.5 ? -1.5 : 1.5;
         // launch from a wing pod, lead the target a touch toward last-known

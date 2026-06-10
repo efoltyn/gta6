@@ -111,6 +111,56 @@
 
   function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + 0.25, player.pos.y + BODY_H); }
 
+  // ---- CITY fall damage -------------------------------------------------
+  // Falling used to be free: you'd land and vy just zeroed. In CITY mode a hard
+  // landing now HURTS, scaled to the speed you hit the ground at. A normal jump
+  // (vy≈T.jumpVel on landing) and any short step-down are well under the safe
+  // threshold and do nothing; ~2 storeys takes a real chunk; a rooftop or tower
+  // fall is LETHAL — and a lethal fall reads as a gory splat (death.js dials the
+  // gore up for reason "fell"). Gated to g.mode==="city" so escape/survival fall
+  // behaviour stays byte-identical.
+  //
+  // We track the player's PEAK downward speed in the air (impact speed at the
+  // floor underestimates it if a collision clipped vy on the way down) and arm
+  // the landing once we're moving down fast enough to matter.
+  const FALL_SAFE = 11.0;     // m/s — clears a full jump (lands ≈ jumpVel 8.2) + small drops
+  const FALL_K = 0.95;        // quadratic scale on the excess speed → damage (a ~6-storey rooftop is lethal; a tower is gibbing-certain)
+  function cityFallLand(impactSpeed) {
+    // impactSpeed is a positive m/s. Use the worst of (this) and the tracked peak.
+    let v = impactSpeed;
+    if (player._fallPeak && player._fallPeak > v) v = player._fallPeak;
+    player._fallPeak = 0;
+    if (CBZ.game.mode !== "city") return;        // escape/survival: no fall damage
+    if (player.dead || (CBZ.game.invuln || 0) > 0) return;
+    if (v <= FALL_SAFE) return;                  // a hop / step-down / normal jump
+    const excess = v - FALL_SAFE;
+    // quadratic-ish in the excess speed: gentle near the threshold, brutal high up.
+    // pre-DR (death.js halves it via CITY_DR), so a tower fall blows past max HP.
+    let dmg = FALL_K * excess * excess + excess * 2.0;
+    const hard = v > FALL_SAFE + 4;              // ~1.5 storeys+: a real crunch, not a stumble
+    // juicy feedback: a speed-scaled shake + a bone-crunch on a hard landing
+    if (CBZ.shake) CBZ.shake(Math.min(1.4, 0.25 + excess * 0.05));
+    if (hard && CBZ.sfx) { CBZ.sfx("ko"); CBZ.sfx("hit"); }
+    if (CBZ.doHitstop && excess > 8) CBZ.doHitstop(Math.min(0.14, 0.04 + excess * 0.006));
+    if (CBZ.cityHurtPlayer) {
+      // hand the impact speed to death.js so the splat FX scales to the fall.
+      player._fellSpeed = v;
+      // "fell" reason so death.js's WASTED path can render the gory splat.
+      CBZ.cityHurtPlayer(dmg, player.pos.x, player.pos.z, "fell", false, null, false);
+    }
+  }
+
+  // Cheap NPC fall damage: a ped that lands hard from height splats too. We only
+  // reach here if the existing ped physics already handed us a clean impact speed
+  // (peds.js calls this), so it's just the damage routing — no extra per-frame work.
+  CBZ.cityPedFallImpact = function (ped, impactSpeed) {
+    if (CBZ.game.mode !== "city" || !ped || ped.dead) return;
+    if (impactSpeed <= FALL_SAFE + 3) return;    // peds shrug off small drops
+    const excess = impactSpeed - FALL_SAFE;
+    if (impactSpeed > 22 && CBZ.cityKillPed) { CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z }, "fell"); return; }
+    if (ped.hp != null) { ped.hp -= FALL_K * excess * excess; if (ped.hp <= 0 && CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: ped.pos.x, fromZ: ped.pos.z }, "fell"); }
+  };
+
   function updatePlayer(dt) {
     // ---- driving: a city vehicle owns the player's transform this frame.
     //      The city vehicle controller (city/vehicles.js) moves player.pos and
@@ -213,7 +263,10 @@
     player.crouch = !overview && !mapOpen && !surv && !stunned && !!keys["shift"];
     player.sprint = !mapOpen && surv && !stunned && !!keys["shift"] && len > 0 && (player.stamina === undefined || player.stamina > 0);
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
-    const moveSpeed = player.crouch ? T.crouchSpeed : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed);
+    // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
+    // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
+    const woundScale = player._moveScale != null ? player._moveScale : 1;
+    const moveSpeed = (player.crouch ? T.crouchSpeed : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale;
     let desX = 0, desZ = 0;
     if (len > 0) { mx /= len; mz /= len; desX = mx * moveSpeed; desZ = mz * moveSpeed; }
     player.pos.x += desX * dt;
@@ -228,19 +281,21 @@
         // close enough to the surface under us — stick to it. This follows
         // slopes DOWN, climbs a stair tread UP, and steps down a short ledge,
         // all without a hover or a bounce.
-        player.pos.y = support; player.vy = 0;
+        player.pos.y = support; player.vy = 0; player._fallPeak = 0;
       } else {
         // walked off an edge taller than a stair (a roof rim, a balcony) —
         // hand off to gravity so you actually fall instead of snapping down.
         player.grounded = false;
         player.vy -= T.gravity * dt;
         player.pos.y += player.vy * dt;
-        if (player.pos.y <= support) { player.pos.y = support; player.vy = 0; player.grounded = true; }
+        if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;
+        if (player.pos.y <= support) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); }
       }
     } else {
       player.vy -= T.gravity * dt;
       player.pos.y += player.vy * dt;
-      if (player.pos.y <= support && player.vy <= 0) { player.pos.y = support; player.vy = 0; player.grounded = true; } // landed
+      if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;   // track peak downward speed this fall
+      if (player.pos.y <= support && player.vy <= 0) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); } // landed
     }
 
     resolveCollisions();

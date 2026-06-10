@@ -147,7 +147,8 @@
     if (near || playerInvolved) {
       CBZ.city && CBZ.city.note("🏴 " + nm + " took " + z.name + ".", 2.4);
     }
-    if (newId === "player") { CBZ.city && CBZ.city.addRespect(12); if (CBZ.sfx) CBZ.sfx("win"); }
+    // turf flip toward the player: respect, but NO jingle (no-jingle rule).
+    if (newId === "player") { CBZ.city && CBZ.city.addRespect(12); }
     hudDirty = true;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -262,7 +263,7 @@
     if (owned >= zones.length && zones.length > 0) {
       won = true;
       if (CBZ.city) { CBZ.city.big("👑 YOU OWN THE CITY"); CBZ.city.note("Every district flies your colours. The city is yours.", 5); }
-      if (CBZ.sfx) CBZ.sfx("win");
+      // no jingle here (no-jingle rule); cityWin owns the real victory payoff/fanfare.
       if (CBZ.cityWin) CBZ.cityWin("takeover");
     }
   }
@@ -850,8 +851,11 @@
       // one aggressive gang makes a takeover move this tick
       const live = (CBZ.cityGangs || []).filter((x) => !x.isPlayer && !x.absorbed && x.turf.length && liveStrength(x) >= 3);
       if (live.length) {
-        // bias to the gang with the most treasury/intensity (it can afford to push)
-        live.sort((a, b) => ((b.treasury || 0) + (b.warIntensity || 0) * 300) - ((a.treasury || 0) + (a.warIntensity || 0) * 300));
+        // bias to the gang that can afford to push — treasury + war intensity,
+        // weighted by its ARCHETYPE expand drive (gangs.js expandW: a cartel is
+        // land-hungry, a syndicate sits tight) so the takeover map reflects type.
+        const drive = (x) => ((x.treasury || 0) + (x.warIntensity || 0) * 300) * (x.expandW || 1);
+        live.sort((a, b) => drive(b) - drive(a));
         directExpand(live[0]);
       }
       resolveNeutralGrabs();

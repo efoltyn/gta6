@@ -77,7 +77,7 @@
   }
 
   // do you have a gun? armed jobs go smoother / are required for the big scores.
-  function hasGun() { return !!(CBZ.cityHasGun && CBZ.cityHasGun()) || !!(g.cityWeapon); }
+  function hasGun() { return !!(CBZ.cityOwnsGun && CBZ.cityOwnsGun()); }
 
   // ------------------------------------------------------------ the score ladder
   // Each TIER is a real escalation in take, setup cost, heat, and crew need.
@@ -486,7 +486,7 @@
     const yourCut = Math.round(take * h.cut);
     const crewCut = take - yourCut;
     CBZ.city.addCash(yourCut);
-    sfx("coin"); sfx("win");
+    sfx("coin");
     // crew cut → up to the player's gang treasury (funds wars/expansion)
     if (crewCut > 0 && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && g.playerGang) {
       g.playerGang.treasury = (g.playerGang.treasury || 0) + crewCut;

@@ -188,12 +188,18 @@
     // hop in a car. city/view.js owns the cityCam state + rig visibility.
     if (CBZ.game.mode === "city" && CBZ.cityCam) {
       const cc = CBZ.cityCam;
-      if (cc.death) {                              // cinematic death replay: orbit the body
+      if (cc.death) {                              // cinematic death replay: orbit your body — or your KILLER while spectating
         introT = 0; shakeAmt = 0; cc.death.t += dt;
-        const ang = (cc.death.ang0 || 0) + cc.death.t * 0.8;
-        const r = 5.5, h = 3.0;
-        camera.position.set(player.pos.x + Math.cos(ang) * r, player.pos.y + h, player.pos.z + Math.sin(ang) * r);
-        look.set(player.pos.x, player.pos.y + 0.7, player.pos.z); camera.lookAt(look);
+        // city/death.js sets cc.death.spectate to the live actor that killed you
+        // (Fortnite-style kill-cam). Orbit THEM — a touch wider + slower — else
+        // orbit your fallen body exactly as before.
+        const spec = cc.death.spectate;
+        const subj = (spec && spec.pos && !spec.culled && !spec._parked) ? spec.pos : player.pos;
+        const watching = subj !== player.pos;
+        const ang = (cc.death.ang0 || 0) + cc.death.t * (watching ? 0.45 : 0.8);
+        const r = watching ? 6.6 : 5.5, h = watching ? 3.4 : 3.0, ly = watching ? 1.1 : 0.7;
+        camera.position.set(subj.x + Math.cos(ang) * r, subj.y + h, subj.z + Math.sin(ang) * r);
+        look.set(subj.x, subj.y + ly, subj.z); camera.lookAt(look);
         fov = smoothDamp(fov, 48, fovV, 0.2, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
         return;
       }

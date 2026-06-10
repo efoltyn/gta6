@@ -34,7 +34,12 @@
   const P = CBZ.player;
 
   // city weapon name → engine (fpsmode) weapon id
-  const GUN_MAP = { Pistol: "sidearm", SMG: "smg", Shotgun: "shotgun", Rifle: "carbine", Revolver: "revolver", "Desert Eagle": "deagle", "AK-47": "ak47", Uzi: "uzi", Sniper: "sniper", LMG: "lmg" };
+  const GUN_MAP = { Pistol: "sidearm", SMG: "smg", Shotgun: "shotgun", Carbine: "carbine", Rifle: "carbine", Revolver: "revolver", "Desert Eagle": "deagle", "AK-47": "ak47", Uzi: "uzi", Sniper: "sniper", LMG: "lmg", Bazooka: "bazooka", "Rocket Launcher": "bazooka" };
+  const CITY_NAME = {};
+  Object.keys(GUN_MAP).forEach((name) => { CITY_NAME[GUN_MAP[name]] = name; });
+  CITY_NAME.carbine = "Rifle";
+  CITY_NAME.taser = "Taser";
+  CITY_NAME.bazooka = "Rocket Launcher";   // the launcher reads as a Rocket Launcher in the city HUD
 
   let fireCD = 0;
 
@@ -144,7 +149,7 @@
   function weaponFeel() {
     const w = it();
     if (!w || !w.melee) return { post: 1.0, kb: 1.0, bleed: 0, reach: 0, name: "fists" };
-    const n = (g.cityWeapon || "").toLowerCase();
+    const n = (g.cityMeleeWeapon || "").toLowerCase();
     if (n.indexOf("bat") >= 0 || n.indexOf("pipe") >= 0 || n.indexOf("club") >= 0 || n.indexOf("crowbar") >= 0)
       return { post: 1.9, kb: 1.7, bleed: 0, reach: 0.6, name: "blunt" };
     if (n.indexOf("knife") >= 0 || n.indexOf("machete") >= 0 || n.indexOf("blade") >= 0 || n.indexOf("sword") >= 0)
@@ -173,23 +178,47 @@
   }
 
   // ---- weapon-acquisition bridge to the engine gun system ----
+  function currentGunName() {
+    if (g.cityMeleeWeapon) return null;
+    const gun = CBZ.equippedWeapon && CBZ.equippedWeapon();
+    return gun ? (CITY_NAME[gun.id || gun.key] || gun.label || gun.id || gun.key) : null;
+  }
+  function currentWeaponName() { return g.cityMeleeWeapon || currentGunName() || null; }
+  function currentWeaponItem() {
+    const name = currentWeaponName();
+    return name && CBZ.cityEcon ? CBZ.cityEcon.ITEMS[name] || null : null;
+  }
   function giveWeapon(name) {
-    const it = CBZ.cityEcon && CBZ.cityEcon.ITEMS[name];
-    if (!it) return;
-    g.cityWeapon = name;                       // for the city HUD + interact (hostage/aim) display
+    const item = CBZ.cityEcon && CBZ.cityEcon.ITEMS[name];
     const id = GUN_MAP[name];
-    if (id && CBZ.unlockWeapon) CBZ.unlockWeapon(id, { select: true });   // the EXACT jail gun, now yours
+    if (!item && !id) return;
+    if (id && CBZ.unlockWeapon) {
+      g.cityMeleeWeapon = null;
+      CBZ.unlockWeapon(id, { select: true });   // the EXACT jail gun, now yours
+    } else if (item.melee) {
+      g.cityMeleeWeapon = name;
+    }
     if (CBZ.city) CBZ.city.note("Equipped " + name, 1.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   CBZ.cityGiveWeapon = giveWeapon;
   CBZ.cityAddAmmo = function (n) {
     if (CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(n);
-    else { g.cityAmmo = (g.cityAmmo || 0) + n; }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   };
-  CBZ.cityCurrentWeapon = function () { return g.cityWeapon ? CBZ.cityEcon.ITEMS[g.cityWeapon] : null; };
-  CBZ.cityHasGun = function () { return !!(CBZ.hasAnyWeapon && CBZ.hasAnyWeapon()); };
+  CBZ.cityCurrentWeaponName = currentWeaponName;
+  CBZ.cityCurrentWeapon = currentWeaponItem;
+  CBZ.cityHasGun = function () { return !g.cityMeleeWeapon && !!(CBZ.equippedWeapon && CBZ.equippedWeapon()); };
+  CBZ.cityOwnsGun = function () {
+    return !!((CBZ.weaponInventory && CBZ.weaponInventory.length) || (g._copStow && g._copStow.inv && g._copStow.inv.length));
+  };
+  CBZ.cityDrawGun = function () {
+    if (!g.cityMeleeWeapon || !(CBZ.equippedWeapon && CBZ.equippedWeapon())) return false;
+    g.cityMeleeWeapon = null;
+    if (CBZ.onWeaponInventoryChanged && CBZ.currentWeaponId) CBZ.onWeaponInventoryChanged(CBZ.currentWeaponId, false);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
+  };
 
   function markFighting() { P._fighting = 1.5; }
 
@@ -424,7 +453,7 @@
     fireCD = 0.5;
   }
 
-  function it() { return g.cityWeapon ? CBZ.cityEcon.ITEMS[g.cityWeapon] : null; }
+  function it() { return currentWeaponItem(); }
 
   // ---- legacy entry points (PRESERVED public behavior) -------------------
   // old code / other systems may still call these; keep them swinging.
@@ -770,5 +799,183 @@
     // a quick RMB tap (short hold) = a HEAVY swing; a long hold was just a guard
     if (rmbT < 0.22 && active() && !CBZ.cityHasGun() && !CBZ.cityMenuOpen) heavyAttack();
     guardT = Math.min(guardT, 0.06);
+  });
+
+  // ============================================================
+  //  THROWABLE GRENADES — an arcing, fused area weapon ([T] to throw)
+  // ------------------------------------------------------------
+  //  fpsmode.js is pure hitscan with no projectile loop, so the lobbed
+  //  grenade lives here. You carry a COUNT (g.cityInv["Grenade"], populated by
+  //  the gun shop's normal buy path + mirrored to g.cityGrenades for HUD
+  //  readers). [T], in city mode + not driving + count>0, spawns a small mesh
+  //  at your hand, gives it an ARC velocity along the aim (cam yaw/pitch) +
+  //  gravity, integrates it each frame (CBZ.onAlways), bounces/settles on the
+  //  floor (CBZ.floorAt), and after a ~1.5s FUSE detonates through the EXACT
+  //  same city blast chain as the RPG — cityExplosion + cityShatter — plus the
+  //  city's witnessed-crime + alarm. Power/radius sit a touch under the RPG.
+  //
+  //  CITY-GATED everywhere (the explosion calls are city-only), so escape/
+  //  survival are byte-identical to before. Live grenades are capped + cleared
+  //  on a new run. Lazily allocates THREE temporaries (none on load).
+  //  (THREE is the same global already used above at the LOS-gate wraps.)
+  // ============================================================
+  const GREN = {
+    fuse: 1.5,          // seconds from throw to boom
+    maxLive: 6,         // hard cap on simultaneous live grenades
+    gravity: 18,        // m/s^2 downward on the arc
+    speed: 15,          // launch speed along the aim
+    up: 3.2,            // extra upward toss so it arcs even on a flat aim
+    bounce: 0.42,       // floor restitution
+    friction: 0.7,      // horizontal damping per bounce
+    power: 1.0, radius: 5.5,   // a bit smaller than the RPG (1.4 / 7)
+    throwCD: 0.35,      // debounce the throw key
+  };
+  const live = [];      // active grenades: { mesh, vx, vy, vz, x, y, z, t, spin }
+  let throwCD = 0;
+
+  function grenCount() { return (CBZ.cityEcon && CBZ.cityEcon.count) ? CBZ.cityEcon.count("Grenade") : (g.cityInv && g.cityInv.Grenade) || 0; }
+  function syncGrenadeHud() { g.cityGrenades = grenCount(); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+
+  function clearGrenades() {
+    for (let i = 0; i < live.length; i++) {
+      const gr = live[i];
+      if (gr && gr.mesh && gr.mesh.parent) gr.mesh.parent.remove(gr.mesh);
+    }
+    live.length = 0;
+  }
+  CBZ.cityClearGrenades = clearGrenades;
+
+  // a fresh run resets the carried count + clears any live grenades
+  let _lastGrenElapsed = 0;
+  function grenadeCheckReset() {
+    const el = (g.elapsed || 0);
+    if (el + 0.001 < _lastGrenElapsed) { clearGrenades(); g.cityGrenades = grenCount(); }
+    _lastGrenElapsed = el;
+  }
+
+  // aim direction from the look (works in BOTH first-person and third-person):
+  // yaw is the shared cam yaw; pitch is fps.fp while in FPS, else cam.pitch.
+  function aimVec() {
+    const yaw = (CBZ.cam && CBZ.cam.yaw) || 0;
+    const pitch = (CBZ.fps && CBZ.fps.active) ? (CBZ.fps.fp || 0) : ((CBZ.cam && CBZ.cam.pitch) || 0);
+    const cp = Math.cos(pitch);
+    return { x: -Math.sin(yaw) * cp, y: Math.sin(pitch), z: -Math.cos(yaw) * cp };
+  }
+
+  // Detonate one grenade at (x,z): the SAME city blast chain the RPG fires, so
+  // it kills, shatters glass, and is a witnessed crime. CITY-ONLY.
+  function detonate(x, z) {
+    if (g.mode !== "city") return;
+    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: GREN.power, radius: GREN.radius, byPlayer: true });
+    if (CBZ.cityShatter) CBZ.cityShatter(x, z, GREN.radius + 2);
+    if (CBZ.shake) CBZ.shake(1.2);
+    if (CBZ.doHitstop) CBZ.doHitstop(0.05);
+    // throwing a frag is at least as loud as discharging a firearm
+    if (CBZ.cityCrime) CBZ.cityCrime(120, { x, z, type: "shots-fired" });
+    if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(x, z, 40, 1.6, CBZ.city.playerActor);
+    if (CBZ.cityEvent) CBZ.cityEvent("bullet-impact", { weapon: "grenade", panic: 4, damage: 0.3 }, { silent: true, noWanted: true });
+  }
+
+  // Spawn + lob a grenade from (x,y,z) along unit dir (dirx,diry,dirz). Public
+  // so the rampager AI (another cluster) can hurl explosives too. Guard-safe:
+  // no-ops outside city / when capped / when THREE is missing.
+  function lobExplosive(x, y, z, dirx, diry, dirz, opts) {
+    if (g.mode !== "city" || !THREE) return false;
+    if (live.length >= GREN.maxLive) return false;
+    opts = opts || {};
+    const dl = Math.hypot(dirx, diry, dirz) || 1;
+    const ux = dirx / dl, uy = diry / dl, uz = dirz / dl;
+    const sp = opts.speed || GREN.speed;
+    const gr = {
+      x, y, z,
+      vx: ux * sp,
+      vy: uy * sp + (opts.up != null ? opts.up : GREN.up),
+      vz: uz * sp,
+      t: 0,
+      spin: (Math.random() - 0.5) * 8,
+      mesh: null,
+    };
+    if (CBZ.grenadeMesh) {
+      const m = CBZ.grenadeMesh(THREE);
+      if (m) { m.position.set(x, y, z); if (CBZ.scene) CBZ.scene.add(m); gr.mesh = m; }
+    }
+    live.push(gr);
+    return true;
+  }
+  // expose under both names other clusters might look for
+  CBZ.cityLobExplosive = lobExplosive;
+  CBZ.cityThrowGrenade = function (x, z, dirx, dirz, opts) {
+    const fy = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+    return lobExplosive(x, (fy || 0) + 1.2, z, dirx || 0, 0.25, dirz || 0, opts);
+  };
+
+  // PLAYER throw: consume one carried grenade, lob it from the hand along the aim.
+  function throwGrenade() {
+    if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving) return;
+    if ((P.stun || 0) > 0) return;
+    if (grenCount() <= 0) { if (CBZ.city) CBZ.city.note("No grenades — buy them at the gun shop", 1.4); return; }
+    if (live.length >= GREN.maxLive) return;
+    if (!(CBZ.cityEcon && CBZ.cityEcon.take && CBZ.cityEcon.take("Grenade"))) return;
+    const dir = aimVec();
+    // launch from the player's hand: a bit forward + up from the chest
+    const ox = P.pos.x + dir.x * 0.6;
+    const oz = P.pos.z + dir.z * 0.6;
+    const oy = P.pos.y + 1.55;
+    lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, {});
+    syncGrenadeHud();
+    if (CBZ.sfx) CBZ.sfx("whoosh");
+    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // a quick throwing arm swing
+    throwCD = GREN.throwCD;
+  }
+  CBZ.cityThrowFromInventory = throwGrenade;
+  CBZ.cityGrenadeCount = grenCount;
+
+  // [G] = throw a grenade. (T was taken by the mask/disguise toggle in wanted.js,
+  // so grenades live on G.) Never fires while a menu is open, while driving, or
+  // out of city mode.
+  addEventListener("keydown", function (e) {
+    if (e.repeat) return;
+    if ((e.key || "").toLowerCase() !== "g") return;
+    if (g.mode !== "city" || g.state !== "playing") return;
+    if (CBZ.cityMenuOpen || (CBZ.player && CBZ.player.driving)) return;
+    if (throwCD > 0) return;
+    throwGrenade();
+  });
+
+  // integrate live grenades every frame (CBZ.onAlways so it runs regardless of
+  // pause-state gating; itself city-gated). Arc → bounce/settle → fuse → boom.
+  CBZ.onAlways(53.5, function (dt) {
+    if (throwCD > 0) throwCD = Math.max(0, throwCD - dt);
+    grenadeCheckReset();
+    if (g.mode !== "city" || !live.length) return;
+    for (let i = live.length - 1; i >= 0; i--) {
+      const gr = live[i];
+      gr.t += dt;
+      // ballistic step
+      gr.vy -= GREN.gravity * dt;
+      gr.x += gr.vx * dt;
+      gr.y += gr.vy * dt;
+      gr.z += gr.vz * dt;
+      const floor = (CBZ.floorAt ? CBZ.floorAt(gr.x, gr.z) : 0) || 0;
+      const rest = floor + 0.12;
+      if (gr.y <= rest) {
+        gr.y = rest;
+        if (gr.vy < 0) {
+          gr.vy = -gr.vy * GREN.bounce;
+          gr.vx *= GREN.friction; gr.vz *= GREN.friction;
+          if (gr.vy < 0.6) gr.vy = 0;   // settle once it stops bouncing
+        }
+      }
+      if (gr.mesh) {
+        gr.mesh.position.set(gr.x, gr.y, gr.z);
+        gr.mesh.rotation.x += gr.spin * dt;
+        gr.mesh.rotation.z += gr.spin * 0.6 * dt;
+      }
+      if (gr.t >= GREN.fuse) {
+        detonate(gr.x, gr.z);
+        if (gr.mesh && gr.mesh.parent) gr.mesh.parent.remove(gr.mesh);
+        live.splice(i, 1);
+      }
+    }
   });
 })();

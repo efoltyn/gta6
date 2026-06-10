@@ -22,9 +22,10 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const mat = CBZ.mat;
+  const cmat = CBZ.cmat || mat;
+  const boxGeo = CBZ.boxGeom || function (w, h, d) { return new THREE.BoxGeometry(w, h, d); };
   const g = CBZ.game;
 
-  const CAR_R = 1.5;
   const CRASH = CBZ.cityCrashTune = {
     wallHard: 18, wallCatastrophic: 27,
     carHard: 8, carCatastrophic: 24,    // a normal-speed ram now counts as a real (hard) crash, not a trivial bump
@@ -32,23 +33,28 @@
   };
   let _s = 1234;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  let _trafficStopNoteT = 0;   // global cooldown for the ambient "traffic stop nearby" feed line
   const TR = () => (CBZ.CITY && CBZ.CITY.traf) || {};
 
   // ---- ambient car MODEL builder ----------------------------------------
   // Cars read as real vehicles: a low body with a chamfered roof/hood, a
   // separate glass-tinted greenhouse (windshield + side windows), four dark
   // wheels at the corners, pale emissive headlights + red taillights, and one
-  // of four BODY TYPES (sedan / SUV / pickup / sports coupe) with distinct
+  // of seven BODY TYPES (hatch / sedan / SUV / pickup / van / muscle / coupe) with distinct
   // proportions. crumpleCar animates userData.body + userData.cabin, so those
   // two meshes stay the deformable hull (low at y≈0.78) and roof (y≈1.45).
   const WHEEL_GEO = new THREE.CylinderGeometry(0.45, 0.45, 0.42, 12);
   WHEEL_GEO._shared = true;
   const HUB_GEO = new THREE.CylinderGeometry(0.2, 0.2, 0.44, 8);
   HUB_GEO._shared = true;
+  const WEDGE_GEOS = new Map();
+  function boxMesh(w, h, d, material) { return new THREE.Mesh(boxGeo(w, h, d), material); }
   // a flat-topped wedge prism (a chamfered slab) used for the hull + roof so
   // the body isn't a plain box — tapered top, full-width bottom.
   function wedgeGeo(w, h, d, topFrac, noseFrac, tailFrac) {
     topFrac = topFrac == null ? 0.82 : topFrac;
+    const key = [w, h, d, topFrac, noseFrac == null ? 1 : noseFrac, tailFrac == null ? 1 : tailFrac].join("|");
+    const cached = WEDGE_GEOS.get(key); if (cached) return cached;
     const tw = (w * topFrac) / 2, bw = w / 2;
     const fz = (d * (noseFrac == null ? 1 : noseFrac)) / 2;   // front (+z) length
     const rz = (d * (tailFrac == null ? 1 : tailFrac)) / 2;   // rear  (-z) length
@@ -72,12 +78,72 @@
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     geo.computeVertexNormals();
+    geo._shared = true;
+    WEDGE_GEOS.set(key, geo);
     return geo;
   }
 
+  function mergeGeometryCopies(geos) {
+    let vertices = 0;
+    for (const geo of geos) vertices += geo.attributes.position.count;
+    const pos = new Float32Array(vertices * 3);
+    const nrm = new Float32Array(vertices * 3);
+    let pi = 0;
+    for (const geo of geos) {
+      pos.set(geo.attributes.position.array, pi);
+      if (geo.attributes.normal) nrm.set(geo.attributes.normal.array, pi);
+      pi += geo.attributes.position.array.length;
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    out.computeBoundingSphere();
+    return out;
+  }
+
+  // Ambient-car parts never animate independently, except for the deformable
+  // hull and cabin. Bake the rest into a few per-material meshes so richer car
+  // silhouettes do not cost dozens of draw calls per traffic vehicle.
+  function mergeStaticCarParts(grp, keep) {
+    const isMesh = (o) => !!(o && o.geometry && o.material);
+    const sourceParts = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
+    const buckets = new Map();
+    for (const mesh of grp.children.slice()) {
+      if (!isMesh(mesh) || keep.has(mesh) || Array.isArray(mesh.material)) continue;
+      const key = [mesh.material.id, mesh.castShadow ? 1 : 0, mesh.receiveShadow ? 1 : 0].join("|");
+      (buckets.get(key) || buckets.set(key, []).get(key)).push(mesh);
+    }
+    buckets.forEach((meshes) => {
+      if (meshes.length < 2) return;
+      const proto = meshes[0];
+      let mergedGeo;
+      if (proto.updateMatrix && proto.geometry.attributes && proto.geometry.attributes.position && proto.geometry.clone && proto.geometry.applyMatrix4) {
+        const copies = meshes.map((mesh) => {
+          mesh.updateMatrix();
+          const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+          geo.applyMatrix4(mesh.matrix);
+          return geo;
+        });
+        mergedGeo = mergeGeometryCopies(copies);
+        copies.forEach((geo) => geo.dispose && geo.dispose());
+      } else {
+        // Lightweight test renderers do not implement BufferGeometry baking.
+        mergedGeo = proto.geometry;
+      }
+      const merged = new THREE.Mesh(mergedGeo, proto.material);
+      merged.castShadow = proto.castShadow;
+      merged.receiveShadow = proto.receiveShadow;
+      merged.matrixAutoUpdate = false;
+      grp.add(merged);
+      meshes.forEach((mesh) => grp.remove(mesh));
+    });
+    grp.userData.sourceParts = sourceParts;
+    grp.userData.drawMeshes = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
+  }
+
   function addWheels(grp, halfTrack, wz, r) {
-    const wmat = mat(0x131417, { emissive: 0x060708, ei: 0.2 });
-    const hmat = mat(0x70767e, { emissive: 0x24272b, ei: 0.3 });
+    const wmat = cmat(0x131417, { emissive: 0x060708, ei: 0.2 });
+    const hmat = cmat(0x70767e, { emissive: 0x24272b, ei: 0.3 });
     [[halfTrack, wz], [-halfTrack, wz], [halfTrack, -wz], [-halfTrack, -wz]].forEach(([wx, wzz]) => {
       const wh = new THREE.Mesh(WHEEL_GEO, wmat);
       wh.rotation.z = Math.PI / 2; wh.position.set(wx, r, wzz);
@@ -90,49 +156,117 @@
 
   // headlights (front, pale) + taillights (rear, red), as small emissive bars
   function addLights(grp, w, hullTopY, frontZ, rearZ) {
-    const head = mat(0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
-    const tail = mat(0xff3038, { emissive: 0xff2630, ei: 0.8 });
+    const head = cmat(0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
+    const tail = cmat(0xff3038, { emissive: 0xff2630, ei: 0.8 });
     const lx = w * 0.34;
     [lx, -lx].forEach((hx) => {
-      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.06), head);
+      const hl = boxMesh(0.4, 0.18, 0.06, head);
       hl.position.set(hx, hullTopY, frontZ + 0.02); grp.add(hl);
     });
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(w * 0.86, 0.16, 0.07), tail);
+    const tl = boxMesh(w * 0.86, 0.16, 0.07, tail);
     tl.position.set(0, hullTopY, rearZ - 0.02); grp.add(tl);
   }
 
   // tinted-glass greenhouse: a thin windshield slab + two side-window slabs
   // wrapped around the cabin so the cabin reads as a windowed passenger box.
   function addGlass(grp, cabinW, cabinD, cabinY, cabinH, raked) {
-    const glass = mat(0x16242e, { emissive: 0x0a151c, ei: 0.45 });
+    const glass = cmat(0x16242e, { emissive: 0x0a151c, ei: 0.45 });
     const half = cabinD / 2;
     // windshield (front, raked back) + rear glass
     const wsW = cabinW * 0.9;
     [half + 0.01, -half - 0.01].forEach((zz, i) => {
-      const gw = new THREE.Mesh(new THREE.BoxGeometry(wsW, cabinH * 0.7, 0.05), glass);
+      const gw = boxMesh(wsW, cabinH * 0.7, 0.05, glass);
       gw.position.set(0, cabinY, zz);
       gw.rotation.x = (i === 0 ? -1 : 1) * (raked ? 0.5 : 0.32);
       grp.add(gw);
     });
     // side windows
     [cabinW / 2 + 0.005, -cabinW / 2 - 0.005].forEach((xx) => {
-      const sw = new THREE.Mesh(new THREE.BoxGeometry(0.04, cabinH * 0.6, cabinD * 0.84), glass);
+      const sw = boxMesh(0.04, cabinH * 0.6, cabinD * 0.84, glass);
       sw.position.set(xx, cabinY, 0); grp.add(sw);
     });
   }
 
-  // the body archetypes — distinct silhouettes so traffic reads as a real mix:
-  // sedan / SUV / pickup / coupe(sports) / muscle / van. Ambient spawns weight
-  // toward the everyday three; muscle & van also appear so the street has variety.
-  const BODY_TYPES = ["sedan", "sedan", "suv", "pickup", "coupe", "muscle", "van"];
+  function addModelIdentity(grp, model, d) {
+    const style = model && model.designStyle;
+    if (!style) return;
+    const { w, len, hullH, hullY, roofW, roofH, roofY, roofZ, paint, trim } = d;
+    const bodyY = 0.78 + (hullY - 0.72);
+    const front = len * 0.5 + 0.055, rear = -len * 0.5 - 0.055;
+    const chrome = cmat(0xaeb7c0, { emissive: 0x24292e, ei: 0.3 });
+    const head = cmat(0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
+    const tail = cmat(0xff3038, { emissive: 0xff2630, ei: 0.8 });
+    const add = (ww, hh, dd, x, y, z, material) => {
+      const mesh = boxMesh(ww, hh, dd, material);
+      mesh.position.set(x, y, z); grp.add(mesh); return mesh;
+    };
+
+    if (style === "prius") {
+      [1, -1].forEach((side) => add(0.12, roofH * 0.62, 0.065, side * w * 0.39, roofY - roofH * 0.08, rear, tail));
+    } else if (style === "civic") {
+      [1, -1].forEach((side) => add(0.18, 0.12, 0.16, side * w * 0.28, bodyY - hullH * 0.32, rear, chrome));
+    } else if (style === "malibu") {
+      [-0.1, 0.1].forEach((yy) => add(w * 0.58, 0.035, 0.035, 0, bodyY + yy, front, chrome));
+    } else if (style === "caravan") {
+      [1, -1].forEach((side) => {
+        add(0.05, 0.05, len * 0.64, side * roofW * 0.45, roofY + roofH * 0.55, roofZ - len * 0.04, trim);
+        add(0.035, 0.035, len * 0.44, side * w * 0.505, bodyY + hullH * 0.24, -len * 0.12, trim);
+      });
+    } else if (style === "f150") {
+      [1, -1].forEach((side) => add(0.07, 0.08, len * 0.38, side * w * 0.46, bodyY + hullH * 0.62, -len * 0.22, trim));
+      [-0.13, 0.13].forEach((yy) => add(w * 0.62, 0.045, 0.04, 0, bodyY + yy, front, chrome));
+    } else if (style === "370z") {
+      add(roofW * 0.68, 0.035, len * 0.2, 0, roofY + roofH * 0.52, roofZ - len * 0.02, trim);
+      [1, -1].forEach((side) => add(0.18, 0.1, 0.14, side * w * 0.3, bodyY - hullH * 0.28, rear, chrome));
+    } else if (style === "cherokee") {
+      [1, -1].forEach((side) => add(0.055, 0.06, len * 0.58, side * roofW * 0.43, roofY + roofH * 0.54, roofZ, trim));
+      for (let i = -3; i <= 3; i++) add(0.055, hullH * 0.42, 0.04, i * w * 0.075, bodyY, front, trim);
+    } else if (style === "charger") {
+      [1, -1].forEach((side) => add(w * 0.16, 0.035, len * 0.34, side * w * 0.19, bodyY + hullH * 0.53, len * 0.18, trim));
+    } else if (style === "corvette") {
+      [1, -1].forEach((side) => {
+        add(0.18, 0.1, 0.14, side * w * 0.28, bodyY - hullH * 0.3, rear, chrome);
+        add(w * 0.1, 0.035, len * 0.44, side * w * 0.12, bodyY + hullH * 0.5, len * 0.1, trim);
+      });
+    } else if (style === "sclass") {
+      [-0.12, 0, 0.12].forEach((yy) => add(w * 0.56, 0.035, 0.035, 0, bodyY + yy, front, chrome));
+      add(0.035, 0.18, 0.035, 0, bodyY + hullH * 0.62, len * 0.38, chrome);
+    } else if (style === "models") {
+      add(w * 0.7, 0.055, 0.09, 0, bodyY + hullH * 0.47, rear, paint);
+    } else if (style === "modelx") {
+      [1, -1].forEach((side) => add(0.04, roofH * 0.48, 0.04, side * roofW * 0.5, roofY, roofZ, trim));
+    } else if (style === "porsche") {
+      [1, -1].forEach((side) => add(0.26, 0.24, 0.07, side * w * 0.29, bodyY + hullH * 0.45, front, head));
+    } else if (style === "aventador") {
+      [1, -1].forEach((side) => {
+        const lamp = add(w * 0.24, 0.08, 0.075, side * w * 0.3, bodyY + hullH * 0.42, front, head);
+        lamp.rotation.z = side * -0.18;
+      });
+      add(w * 0.74, 0.07, 0.18, 0, bodyY + hullH * 0.65, -len * 0.43, trim);
+    } else if (style === "ferrari") {
+      [1, -1].forEach((side) => add(w * 0.13, 0.05, len * 0.24, side * w * 0.18, bodyY + hullH * 0.52, len * 0.13, trim));
+    } else if (style === "enzo") {
+      [1, -1].forEach((side) => add(w * 0.14, 0.055, len * 0.32, side * w * 0.2, bodyY + hullH * 0.5, len * 0.12, trim));
+      add(w * 0.16, 0.06, len * 0.38, 0, bodyY + hullH * 0.53, len * 0.12, paint);
+    } else if (style === "veyron") {
+      add(w * 0.24, 0.045, len * 0.66, 0, bodyY + hullH * 0.53, -len * 0.02, chrome);
+      [1, -1].forEach((side) => add(0.18, 0.16, 0.06, side * w * 0.2, bodyY, front, trim));
+    }
+  }
+
+  // Every named model has a stable body class. The old random fallback could
+  // turn a Prius or a Yellow Cab into a pickup/van, which made the traffic mix
+  // look broken rather than varied. Unknown models fall back to a normal sedan.
   function modelBodyKind(model) {
+    if (model && model.body) return model.body;
     const nm = model ? model.name : "";
     if (/F-150|Caravan|Sprinter|Transit|truck|pickup/i.test(nm)) return /Caravan|Sprinter|Transit|van/i.test(nm) ? "van" : "pickup";
     if (/van|cargo/i.test(nm)) return "van";
     if (/Charger|Mustang|Camaro|Challenger|muscle/i.test(nm)) return "muscle";
     if (/Cherokee|SUV|Model X|Model Y|Cybertruck|Escalade|Tahoe|Range/i.test(nm)) return "suv";
     if (/Corvette|911|370Z|Aventador|Enzo|Veyron|coupe|Ferrari|Porsche/i.test(nm)) return "coupe";
-    return BODY_TYPES[(rng() * BODY_TYPES.length) | 0];
+    if (/Prius|Civic|Golf|hatch/i.test(nm)) return "hatch";
+    return "sedan";
   }
   function vehicleProfile(model, body) {
     const s = model ? model.s || 1 : 1;
@@ -143,11 +277,46 @@
     else if (bk === "suv") { mass = 1.36; armor = 0.16; repair = 1.12; }
     else if (bk === "pickup") { mass = 1.44; armor = 0.2; repair = 0.98; }
     else if (bk === "van") { mass = 1.5; armor = 0.18; repair = 0.94; }
+    else if (bk === "hatch") { mass = 0.96; armor = 0.04; repair = 0.9; }
     if (s > 1.35) { mass *= 0.94; repair *= 1.25; }     // exotics are lighter and expensive to fix
     return { mass, armor, repair };
   }
 
+  // UNIFIED car visual: build the SAME detailed model the player drives, painted
+  // for THIS car, so it looks identical parked, in traffic, and while driven —
+  // no more swap-on-entry (a car was a small box rig until you stole it, then
+  // popped into a different hero mesh of a different colour). Falls back to the
+  // lightweight box rig when the visual system isn't loaded (headless / gallery).
   function buildCar(model) {
+    if (!CBZ.cityBuildPlayerCarVisual || !CBZ.cityInferCarStyle) return buildCarBox(model);
+    const grp = new THREE.Group();
+    const bt = modelBodyKind(model);
+    const s = model ? (model.s || 1) : 1;
+    const baseColor = model ? model.color : 0x3c6fd6;
+    // per-car clearcoat tint so a row of one model still reads as varied
+    const tint = 0.86 + rng() * 0.28;
+    const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
+    const style = CBZ.cityInferCarStyle(model) || "tesla-3";
+    let visual = null;
+    try { visual = CBZ.cityBuildPlayerCarVisual(style, paintHex); } catch (e) { visual = null; }
+    if (!visual) return buildCarBox(model);
+    grp.add(visual);
+    // Wheels stay as individual meshes (tagged playerWheel) so the driven car can
+    // spin them; everything else merges into a few meshes — the city is draw-call
+    // bound (core/profile.js), and an unmerged hero mesh per car would blow that.
+    const keep = new Set();
+    visual.traverse(function (o) { if (o.userData && o.userData.playerWheel) keep.add(o); });
+    if (mergeStaticCarParts) mergeStaticCarParts(visual, keep);
+    grp.userData.carVisual = visual;
+    grp.userData.carStyle = style;
+    grp.userData.bodyKind = bt;
+    grp.userData.designStyle = (model && model.designStyle) || bt;
+    grp.userData.vehicleDims = visual.userData.vehicleDims ||
+      { width: 2, length: 4.4 * s, height: 1.5, wheelbase: 2.7 };
+    return grp;
+  }
+
+  function buildCarBox(model) {
     const grp = new THREE.Group();
     const s = model ? model.s : 1;
     const len = 4.2 * s;
@@ -158,10 +327,9 @@
     const c3 = new THREE.Color(color).multiplyScalar(tint);
     const paintHex = c3.getHex();
     const paint = mat(paintHex, { emissive: c3.clone().multiplyScalar(0.18).getHex(), ei: 0.5 });
-    const trim = mat(0x16181c, { emissive: 0x070809, ei: 0.25 });
+    const trim = cmat(0x16181c, { emissive: 0x070809, ei: 0.25 });
 
-    // pick a body type. honour a hint on the model name so trucks/SUVs read
-    // right, otherwise random across the four archetypes.
+    // Use the model's stable body class so named traffic always reads correctly.
     let bt = modelBodyKind(model);
 
     // shared dimensions, tuned per body type below
@@ -172,6 +340,9 @@
     if (bt === "sedan") {
       w = 1.94; hullH = 0.64; hullY = 0.72; wheelR = 0.46; halfTrack = 0.99;
       roofW = 1.56; roofH = 0.62; roofD = len * 0.42; roofY = 1.42; roofZ = -0.12; topFrac = 0.84;
+    } else if (bt === "hatch") {
+      w = 1.84; hullH = 0.66; hullY = 0.72; wheelR = 0.44; halfTrack = 0.94;
+      roofW = 1.52; roofH = 0.74; roofD = len * 0.53; roofY = 1.48; roofZ = -0.2; topFrac = 0.88;
     } else if (bt === "suv") {
       w = 2.1; hullH = 0.9; hullY = 0.86; wheelR = 0.54; halfTrack = 1.06;
       roofW = 1.82; roofH = 0.84; roofD = len * 0.52; roofY = 1.78; roofZ = -0.04; topFrac = 0.92;
@@ -203,13 +374,14 @@
     const cabin = new THREE.Mesh(wedgeGeo(roofW, roofH, roofD, topFrac * 0.94, raked ? 0.6 : 0.8, 0.95), paint);
     cabin.position.set(0, roofY, roofZ); grp.add(cabin);
     grp.userData.body = body; grp.userData.cabin = cabin;   // crash crumpling
+    grp.userData.crashBase = { bodyY: body.position.y, bodyZ: body.position.z, cabinY: cabin.position.y, cabinZ: cabin.position.z };
 
     // glass on the greenhouse
     addGlass(grp, roofW, roofD, roofY, roofH, raked);
 
     // a contrasting belt-line / bumpers so the body isn't one flat colour
     const beltY = 0.78 + (hullY - 0.72) - hullH * 0.18;
-    const belt = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, 0.16, len * 0.96), trim);
+    const belt = boxMesh(w + 0.04, 0.16, len * 0.96, trim);
     belt.position.set(0, Math.max(0.5, beltY), 0); grp.add(belt);
 
     // pickup bed walls (an open box behind the cab)
@@ -218,43 +390,91 @@
       const bedmat = paint;
       const sideD = len * 0.42;
       [w / 2 - 0.06, -w / 2 + 0.06].forEach((bx) => {
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.26, sideD), bedmat);
+        const wall = boxMesh(0.1, 0.26, sideD, bedmat);
         wall.position.set(bx, bedY + 0.13, -len * 0.22); grp.add(wall);
       });
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(w - 0.1, 0.26, 0.1), bedmat);
+      const tail = boxMesh(w - 0.1, 0.26, 0.1, bedmat);
       tail.position.set(0, bedY + 0.13, -len * 0.44); grp.add(tail);
     }
     // coupe rear spoiler
     if (bt === "coupe") {
-      const spoiler = new THREE.Mesh(new THREE.BoxGeometry(w * 0.74, 0.07, 0.2), trim);
+      const spoiler = boxMesh(w * 0.74, 0.07, 0.2, trim);
       spoiler.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.42, -len * 0.46); grp.add(spoiler);
     }
     // muscle: a black hood scoop + a low ducktail wing so it reads aggressive
     if (bt === "muscle") {
-      const scoop = new THREE.Mesh(new THREE.BoxGeometry(w * 0.36, 0.13, len * 0.18), trim);
+      const scoop = boxMesh(w * 0.36, 0.13, len * 0.18, trim);
       scoop.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.5, len * 0.26); grp.add(scoop);
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.08, 0.16), trim);
+      const wing = boxMesh(w * 0.8, 0.08, 0.16, trim);
       wing.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.5, -len * 0.46); grp.add(wing);
     }
     // van: a side-crease + a roof cap so the tall slab doesn't read as a brick
     if (bt === "van") {
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(roofW + 0.06, 0.1, roofD), paint);
+      const cap = boxMesh(roofW + 0.06, 0.1, roofD, paint);
       cap.position.set(0, roofY + roofH * 0.5, roofZ); grp.add(cap);
     }
+    if (bt === "hatch") {
+      const spoiler = boxMesh(roofW * 0.92, 0.07, 0.16, trim);
+      spoiler.position.set(0, roofY + roofH * 0.52, -len * 0.43); grp.add(spoiler);
+    }
+
+    // Small universal cues matter at traffic distance: mirrors, door cuts and a
+    // rear plate make the silhouette read as a vehicle instead of stacked boxes.
+    [1, -1].forEach((side) => {
+      const mirror = boxMesh(0.18, 0.12, 0.26, trim);
+      mirror.position.set(side * (roofW * 0.56), roofY - roofH * 0.18, roofZ + roofD * 0.28); grp.add(mirror);
+      const seam = boxMesh(0.025, hullH * 0.68, 0.035, trim);
+      seam.position.set(side * (w * 0.505), 0.78 + (hullY - 0.72) + hullH * 0.1, -len * 0.05); grp.add(seam);
+    });
+    const plate = boxMesh(w * 0.28, 0.14, 0.025, cmat(0xe8edf2, { emissive: 0x25282c, ei: 0.25 }));
+    plate.position.set(0, 0.78 + (hullY - 0.72) - hullH * 0.08, -len * 0.5 - 0.085); grp.add(plate);
+
+    if (model && model.livery === "taxi") {
+      const sign = boxMesh(0.72, 0.22, 0.34, cmat(0xf8e46b, { emissive: 0x5a4a14, ei: 0.45 }));
+      sign.position.set(0, roofY + roofH * 0.62, roofZ); grp.add(sign);
+      const check = boxMesh(w + 0.025, 0.1, len * 0.48, trim);
+      check.position.set(0, 0.78 + (hullY - 0.72) + hullH * 0.28, -len * 0.05); grp.add(check);
+    }
+    const detail = model && model.detailStyle;
+    if (detail && /^tesla-/.test(detail)) {
+      const roofGlass = boxMesh(roofW * 0.72, 0.035, roofD * 0.5, cmat(0x111d26, { emissive: 0x061018, ei: 0.35 }));
+      roofGlass.position.set(0, roofY + roofH * 0.51, roofZ - roofD * 0.04); grp.add(roofGlass);
+      const cleanNose = boxMesh(w * 0.72, 0.06, 0.03, paint);
+      cleanNose.position.set(0, 0.78 + (hullY - 0.72) - hullH * 0.05, len * 0.5 + 0.02); grp.add(cleanNose);
+    }
+    if (detail === "cybertruck") {
+      const cyberGlass = cmat(0x111d26, { emissive: 0x061018, ei: 0.35 });
+      const tonneau = boxMesh(w * 0.86, 0.08, len * 0.34, trim);
+      tonneau.position.set(0, roofY - roofH * 0.2, -len * 0.28); grp.add(tonneau);
+      [1, -1].forEach((side) => {
+        const sideGlass = boxMesh(0.035, roofH * 0.52, roofD * 0.7, cyberGlass);
+        sideGlass.position.set(side * roofW * 0.51, roofY, roofZ); grp.add(sideGlass);
+      });
+    }
+    if (detail && /ferrari|enzo|veyron|aventador|porsche/.test(detail)) {
+      [1, -1].forEach((side) => {
+        const intake = boxMesh(0.035, 0.18, len * 0.2, trim);
+        intake.position.set(side * w * 0.505, 0.78 + (hullY - 0.72), -len * 0.05); grp.add(intake);
+      });
+    }
+    addModelIdentity(grp, model, { w, len, hullH, hullY, roofW, roofH, roofY, roofZ, paint, trim });
 
     // shared FRONT FASCIA: a dark grille + a slim bumper bar so every nose has a
     // face (and a chrome-ish bumper at the tail). Cheap boxes; one trim material.
     const noseY = 0.78 + (hullY - 0.72) - hullH * 0.05;
-    const grille = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, hullH * 0.55, 0.08), trim);
+    const grille = boxMesh(w * 0.7, hullH * 0.55, 0.08, trim);
     grille.position.set(0, noseY, len * 0.5 - 0.03); grp.add(grille);
     [len * 0.5 + 0.02, -len * 0.5 - 0.02].forEach((bz) => {
-      const bump = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.18, 0.12), trim);
+      const bump = boxMesh(w * 0.96, 0.18, 0.12, trim);
       bump.position.set(0, 0.78 + (hullY - 0.72) - hullH * 0.38, bz); grp.add(bump);
     });
 
     addWheels(grp, halfTrack, len * (bt === "van" ? 0.34 : 0.32), wheelR);
     addLights(grp, w, 0.78 + (hullY - 0.72) + hullH * 0.05, len * 0.5, -len * 0.5);
     grp.userData.bodyKind = bt;
+    grp.userData.designStyle = model && model.designStyle || bt;
+    grp.userData.vehicleDims = { width: w, length: len, height: roofY + roofH * 0.5, wheelbase: len * (bt === "van" ? 0.68 : 0.64) };
+    mergeStaticCarParts(grp, new Set([body, cabin]));
     return grp;
   }
 
@@ -270,11 +490,19 @@
       driver: { aggr: aggr != null ? aggr : 0.3 },
       pullover: 0, ranRedCD: 0, turnCD: 1 + rng() * 2, npcWanted: 0, npcDriver: null, dwell: 0, stopT: 0,
       roadRageTarget: null, roadRageT: 0, playerHitCD: 0,
-      _bk: grp.userData && grp.userData.bodyKind, mass: prof.mass, armor: prof.armor, repair: prof.repair,
+      _bk: grp.userData && grp.userData.bodyKind, dims: grp.userData && grp.userData.vehicleDims,
+      mass: prof.mass, armor: prof.armor, repair: prof.repair,
     };
     CBZ.cityCars.push(c);
     return c;
   }
+
+  // Lightweight inspection hooks used by the vehicle audit/gallery tools.
+  CBZ.cityVehicleBodyKind = modelBodyKind;
+  CBZ.cityBuildAmbientCarVisual = function (modelName) {
+    const model = CBZ.cityEcon && CBZ.cityEcon.carByName ? CBZ.cityEcon.carByName(modelName) : null;
+    return buildCar(model);
+  };
 
   CBZ.spawnCityTraffic = function (n) {
     clearCars();
@@ -360,13 +588,33 @@
   //      accumulates, so a worse hit (or a second one) deforms it further. Only
   //      group SCALE + child rotations are touched (the AI rewrites group
   //      position/heading.y every frame but never these), so the wreck persists. ----
-  function crumpleCar(car, sev) {
+  function crumpleCar(car, sev, impact) {
     car.crumple = Math.min(1, (car.crumple || 0) + sev);
     if (car._cside == null) car._cside = Math.random() < 0.5 ? -1 : 1;
     const c = car.crumple, grp = car.group, ud = grp.userData;
     grp.scale.set(1 - c * 0.14, 1 - c * 0.32, 1 - c * 0.12);
-    if (ud && ud.body) { ud.body.rotation.z = c * 0.28 * car._cside; ud.body.position.y = 0.78 - c * 0.14; }
-    if (ud && ud.cabin) { ud.cabin.rotation.x = -c * 0.34; ud.cabin.rotation.z = c * 0.16 * car._cside; ud.cabin.position.y = 1.45 - c * 0.45; }
+    const base = ud && ud.crashBase ? ud.crashBase : { bodyY: 0.78, bodyZ: 0, cabinY: 1.45, cabinZ: 0 };
+    let front = 0, rear = 0, side = 0;
+    if (impact) {
+      const fx = Math.sin(car.heading || 0), fz = Math.cos(car.heading || 0);
+      const sx = Math.cos(car.heading || 0), sz = -Math.sin(car.heading || 0);
+      const f = impact.x * fx + impact.z * fz, s = impact.x * sx + impact.z * sz;
+      if (Math.abs(f) >= Math.abs(s)) { if (f > 0) front = c; else rear = c; }
+      else side = c * Math.sign(s || car._cside);
+    } else side = c * car._cside;
+    if (ud && ud.body) {
+      ud.body.rotation.z = (side || c * car._cside) * 0.28;
+      ud.body.position.y = base.bodyY - c * 0.14;
+      ud.body.position.z = base.bodyZ + (rear - front) * 0.16;
+      ud.body.scale.x = 1 - Math.abs(side) * 0.16;
+      ud.body.scale.z = 1 - (front + rear) * 0.2;
+    }
+    if (ud && ud.cabin) {
+      ud.cabin.rotation.x = -front * 0.34 + rear * 0.18;
+      ud.cabin.rotation.z = (side || c * car._cside) * 0.16;
+      ud.cabin.position.y = base.cabinY - c * 0.45;
+      ud.cabin.position.z = base.cabinZ + (rear - front) * 0.12;
+    }
   }
   function crashBurst(x, z, speed, hard, catastrophic, dir) {
     if (CBZ.cityCrashFX) CBZ.cityCrashFX(x, z, { speed, hard, catastrophic, dir });
@@ -676,20 +924,30 @@
   CBZ.cityVehicleCondition = vehicleCondition;
   function carDynamics(car) {
     const bk = bodyKind(car);
-    const s = car.model ? car.model.s : 1;
-    // base profile per body type: [accel, topSpeed, turn, grip, brake]. Tuned from
+    const rarity = car.model ? Math.max(0, Math.min(1, car.model.rarity || 0)) : 0.35;
+    // Base profile per body type. Wheelbase + steering lock feed a bicycle-model
+    // yaw approximation; drag/rolling resistance control coast-down separately
+    // from braking, so letting off the throttle no longer feels like braking.
     // GTA vehicle-class feel — super/sports grip + accel high, muscle grunty but
     // loose-tailed, SUV/van/pickup heavy & numb with weaker brakes.
     let accel = 30, top = 33, turn = 2.5, grip = 7.0, brake = 30;
+    let wheelbase = 2.62, steerLock = 0.56, drag = 0.0065, rolling = 1.15;
     if (bk === "coupe") { accel = 42; top = 44; turn = 3.0; grip = 9.4; brake = 38; }
     else if (bk === "muscle") { accel = 40; top = 41; turn = 2.45; grip = 6.6; brake = 30; }   // fast in a line, tail steps out
     else if (bk === "sedan") { accel = 32; top = 35; turn = 2.6; grip = 7.4; brake = 32; }
     else if (bk === "suv") { accel = 26; top = 31; turn = 2.1; grip = 5.6; brake = 27; }
     else if (bk === "pickup") { accel = 27; top = 32; turn = 2.0; grip = 5.2; brake = 26; }
     else if (bk === "van") { accel = 23; top = 29; turn = 1.85; grip = 4.8; brake = 24; }
-    // rarer/sportier models (higher s) get more grunt + a higher top end
-    const sm = 0.82 + s * 0.26;
-    top *= sm; accel *= (0.9 + s * 0.18);
+    else if (bk === "hatch") { accel = 29; top = 31; turn = 2.85; grip = 7.2; brake = 31; wheelbase = 2.42; steerLock = 0.6; }
+    if (bk === "coupe") { wheelbase = 2.48; steerLock = 0.58; drag = 0.0055; rolling = 0.9; }
+    else if (bk === "muscle") { wheelbase = 2.78; steerLock = 0.52; rolling = 1.05; }
+    else if (bk === "suv") { wheelbase = 2.9; steerLock = 0.48; drag = 0.008; rolling = 1.4; }
+    else if (bk === "pickup") { wheelbase = 3.08; steerLock = 0.46; drag = 0.0085; rolling = 1.5; }
+    else if (bk === "van") { wheelbase = 3.18; steerLock = 0.44; drag = 0.009; rolling = 1.6; }
+    // Performance follows the model's market tier, not its visual length. The
+    // old use of `s` accidentally made long vans faster than short sports cars.
+    top *= 0.88 + rarity * 0.28;
+    accel *= 0.9 + rarity * 0.22;
     // the promoted player-car STYLE layers its GTA-class feel on top (a Veyron
     // grips and rockets, a van wallows) so swapping style ([C]) actually drives
     // differently — published by playercars.js as car._playerCarFeel.
@@ -709,8 +967,33 @@
     // DAMAGE degrades it: a smoking/burning car is gutless and squirrelly
     const d = carDmg(car);
     accel *= 1 - d * 0.55; top *= 1 - d * 0.42; grip *= 1 - d * 0.5; turn *= 1 - d * 0.28;
-    return { accel, top, turn, grip, brake, dmg: d, roll, drift };
+    return { accel, top, turn, grip, brake, dmg: d, roll, drift, wheelbase, steerLock, drag, rolling };
   }
+  function vehicleDims(car) {
+    return (car && (car._visualDims || car.dims)) || { width: 2, length: 4.4, wheelbase: 2.7 };
+  }
+  function wallRadius(car) {
+    const d = vehicleDims(car);
+    return Math.max(1.05, Math.min(1.6, d.width * 0.58));
+  }
+  function collideVehicle(car) {
+    if (!CBZ.collide || !car || !car.pos) return 0;
+    const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
+    CBZ.collide(car.pos, radius);
+    const d = vehicleDims(car);
+    const reach = Math.max(0, d.length * 0.5 - radius * 0.45);
+    if (reach > 0.2) {
+      const sign = (car.v || 0) < -0.1 ? -1 : 1;
+      const fx = Math.sin(car.heading || 0) * sign, fz = Math.cos(car.heading || 0) * sign;
+      const probe = { x: car.pos.x + fx * reach, y: car.pos.y || 0, z: car.pos.z + fz * reach };
+      const px = probe.x, pz = probe.z;
+      CBZ.collide(probe, radius * 0.75);
+      car.pos.x += probe.x - px;
+      car.pos.z += probe.z - pz;
+    }
+    return Math.hypot(car.pos.x - ox, car.pos.z - oz);
+  }
+  CBZ.cityCollideVehicle = collideVehicle;
 
   // ---- player driving (order 11) ----
   CBZ.onUpdate(11, function (dt) {
@@ -732,18 +1015,29 @@
       if (car.v > 0.5) car.v -= D.brake * dt;         // S brakes hard when rolling forward
       else car.v -= (ACCEL * 0.55) * dt;              // then backs up
     }
-    if (throttle === 0) car.v *= Math.pow(0.5, dt);   // engine braking / coast-down
+    if (throttle === 0) {
+      const coast = (D.rolling + D.drag * car.v * car.v) * dt;
+      if (car.v > 0) car.v = Math.max(0, car.v - coast);
+      else if (car.v < 0) car.v = Math.min(0, car.v + coast);
+    }
     if (handbrake) car.v *= Math.pow(0.34, dt);       // handbrake bleeds forward speed
     car.v = Math.max(-REV, Math.min(MAXV, car.v));
-    // ---- steering: speed-sensitive (twitchy off the line, planted at speed),
-    //      a bent-axle PULL when badly damaged, extra rotation while drifting ----
+    // ---- steering: smooth input + speed-sensitive bicycle-model yaw. This
+    //      keeps low-speed parking controllable and removes instant high-speed
+    //      direction changes while preserving arcade authority. ----
     let steer = 0;
     if (k["a"]) steer += 1;
     if (k["d"]) steer -= 1;
     const vmag = Math.abs(car.v);
-    const steerAuthority = vmag > 0.3 ? Math.min(1, 0.45 + vmag / 14) * (1 - Math.min(0.5, vmag / MAXV * 0.5)) : 0;
+    const steerRate = steer ? 7.5 : 10.5;
+    car._steerInput = (car._steerInput || 0) + (steer - (car._steerInput || 0)) * Math.min(1, dt * steerRate);
+    const speedNorm = Math.min(1, vmag / Math.max(1, MAXV));
+    const lock = D.steerLock * (1 - speedNorm * 0.48);
+    const bicycleYaw = (car.v / Math.max(1.8, D.wheelbase)) * Math.tan(car._steerInput * lock);
+    const yawLimit = TURN * (1 - speedNorm * 0.42) * (handbrake ? 1.35 : 1);
+    const yaw = Math.max(-yawLimit, Math.min(yawLimit, bicycleYaw));
     if (vmag > 0.3) {
-      car.heading += steer * TURN * dt * Math.sign(car.v) * steerAuthority * (handbrake ? 1.5 : 1);
+      car.heading += yaw * dt;
       if (D.dmg > 0.45) {                              // damaged axle drags the nose to one side
         if (car._pull == null) car._pull = (car._cside || 1) * (0.18 + Math.random() * 0.12);
         car.heading += car._pull * (D.dmg - 0.45) * dt * Math.min(1, vmag / 8);
@@ -765,7 +1059,12 @@
     // breaks traction a touch (power-oversteer) so muscle cars feel rowdy.
     const driftMul = D.drift || 1;
     const power = throttle > 0 && vmag > 10 ? 1.4 * driftMul : 0;
-    const gripFactor = handbrake ? 1.0 : Math.max(0.5, (D.grip + (steer && vmag > 8 ? -2.4 * driftMul : 0) - power));
+    const rawSlip = Math.hypot(latX, latZ);
+    const slipRatio = rawSlip / Math.max(3, vmag);
+    // Tire force peaks at modest slip, then falls once the tire is sliding. It
+    // makes a drift recoverable without the rear snapping unrealistically back.
+    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(0.38, 1 - (slipRatio - 0.18) * 1.75);
+    const gripFactor = handbrake ? 0.75 : Math.max(0.42, (D.grip + (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0) - power) * slideGrip);
     const latKeep = handbrake ? Math.min(0.95, 0.9 + driftMul * 0.02) : Math.max(0, 1 - gripFactor * dt);
     latX *= latKeep; latZ *= latKeep;
     const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
@@ -782,15 +1081,14 @@
     const accelG = throttle > 0 ? -1 : (throttle < 0 && car.v > 0.5 ? 1.3 : 0);
     const pitchTarget = Math.max(-0.07, Math.min(0.09, accelG * 0.05 * Math.min(1, vmag / 14)));
     // body leans OUTWARD of the turn: steering at speed plus any tail-out slip.
-    const latG = steer * Math.min(1, vmag / 12) + (latX * fwdZ - latZ * fwdX) * 0.16;
+    const latG = car._steerInput * Math.min(1, vmag / 12) + (latX * fwdZ - latZ * fwdX) * 0.16;
     const rollTarget = Math.max(-0.16, Math.min(0.16, latG * 0.06 * (D.roll || 0.6)));
     car._pitch = (car._pitch || 0) + (pitchTarget - (car._pitch || 0)) * Math.min(1, dt * 7);
     car._roll = (car._roll || 0) + (rollTarget - (car._roll || 0)) * Math.min(1, dt * 6);
     car.vx = velX; car.vz = velZ;
     car.pos.x += velX * dt; car.pos.z += velZ * dt;
     const before = { x: car.pos.x, z: car.pos.z };
-    if (CBZ.collide) CBZ.collide(car.pos, CAR_R);
-    const moved = Math.hypot(car.pos.x - before.x, car.pos.z - before.z);
+    const moved = collideVehicle(car);
     if (moved > 0.05 && vmag > 5) {
       // CRASH — far cooler at speed: the car PILES INTO the wall, sheds nearly all
       // its forward momentum but RICOCHETS back along the surface (keeps a chunk of
@@ -827,7 +1125,7 @@
       if (hard && CBZ.cityShatter) CBZ.cityShatter(ix, iz, catastrophic ? 10 : 6);
       if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed: vmag, hard, catastrophic, wall: true, car });
       // the car visibly CRUMPLES (the building/post is only lightly scuffed)
-      crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.08));
+      crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.08), { x: -nwx, z: -nwz });
       // Medium crashes hurt but are explicitly non-lethal. Only a truly
       // catastrophic top-speed slam is allowed to kill the driver.
       if (hard && CBZ.cityHurtPlayer) {
@@ -839,7 +1137,7 @@
         if (P.dead) return;                  // death.js ejects + ragdolls the driver
       }
     }
-    if (CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, CAR_R);
+    if (CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
     car.group.position.set(car.pos.x, 0, car.pos.z);
     car.group.rotation.set(car._pitch || 0, car.heading, car._roll || 0);   // y=heading, x/z = weight-transfer lean
     if (vmag > 6) runOver(car, vmag);
@@ -858,7 +1156,7 @@
     tickDamageStage(car, dt);
   });
 
-  // ---- SOLID car-vs-car collision + crashes (every car pair, once a frame).
+  // ---- SOLID car-vs-car collision + crashes (spatially-near pairs, once a frame).
   //      Cars can no longer phase through each other; a fast impact WRECKS the
   //      AI cars (spin off-rails, smoke, lose control) and dramatically shakes
   //      the screen. The player keeps the wheel but loses most of their speed. ----
@@ -869,20 +1167,41 @@
     const v = car ? car.v || 0 : 0, h = car ? car.heading || 0 : 0;
     return { x: Math.sin(h) * v, z: Math.cos(h) * v };
   }
-  function wreckCar(c, speed, dir, rammer) {
-    const hard = speed >= CRASH.carHard, catastrophic = speed >= CRASH.carCatastrophic;
+  function setCrashVelocity(car, x, z, offRails) {
+    car.vx = x; car.vz = z;
+    const speed = Math.hypot(x, z);
+    if (car.player) {
+      const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+      car.v = x * fx + z * fz;
+    } else if (offRails) {
+      car.v = speed;
+      if (speed > 0.1) car.heading = Math.atan2(x, z);
+    } else {
+      const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+      car.v = Math.max(0, x * fx + z * fz);
+    }
+  }
+  function collisionImpulse(a, b, av, bv, nx, nz, closing, hard, catastrophic) {
+    const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1);
+    const restitution = catastrophic ? 0.04 : (hard ? 0.1 : 0.2);
+    const impulse = (1 + restitution) * closing / (1 / am + 1 / bm);
+    const ax = av.x - nx * impulse / am, az = av.z - nz * impulse / am;
+    const bx = bv.x + nx * impulse / bm, bz = bv.z + nz * impulse / bm;
+    const deltaA = Math.hypot(ax - av.x, az - av.z);
+    const deltaB = Math.hypot(bx - bv.x, bz - bv.z);
+    setCrashVelocity(a, ax, az, hard);
+    setCrashVelocity(b, bx, bz, hard);
+    return { deltaA, deltaB, am, bm };
+  }
+  function wreckCar(c, speed, dir, rammer, hard, catastrophic) {
     if (c.player) {
-      // the player keeps the wheel and PLOWS through, not a dead stop — but a
-      // ram still scrubs real speed (more if you were the one struck) and slews
-      // the slide so a side-impact knocks you off your line, plus a driver jolt.
-      const keep = rammer ? (catastrophic ? 0.42 : (hard ? 0.62 : 0.74)) : (catastrophic ? 0.24 : (hard ? 0.46 : 0.62));
-      c.v *= keep;
-      if (c.vx != null) { c.vx *= keep; c.vz *= keep; }
+      // The impulse owns the actual velocity change. The player keeps control,
+      // but a side impact now slews the car instead of being overwritten by a
+      // canned speed multiplier.
       if (!rammer && hard && CBZ.cam) CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.18, speed * 0.008);
       return;
     }
     c.wreckT = Math.max(c.wreckT || 0, catastrophic ? 2.8 : (hard ? 1.8 : 0.72));
-    c.v *= catastrophic ? 0.07 : (hard ? 0.16 : 0.56);
     // spin scales with impact + the struck side: a T-bone whips the car around,
     // a glancing tap just nudges it — heavier on the car that got rammed.
     const spinMag = (rammer ? 0.55 : 1) * Math.min(catastrophic ? 9 : 6, speed * 0.45);
@@ -890,93 +1209,122 @@
     c.pullover = 0; c.turning = false;     // abandon whatever it was doing
   }
   function carCrash(a, b, speed, nx, nz) {
-    const hard = speed >= CRASH.carHard, catastrophic = speed >= CRASH.carCatastrophic;
-    a._crashCD = 0.6; b._crashCD = 0.6;
-    // ASYMMETRIC damage: whoever's going faster (the rammer) deals more than they
-    // take — the struck car crumples HARD and gets shoved away with momentum, so
-    // ramming actually wrecks the other car instead of a soft bounce.
     const av = carVel(a), bv = carVel(b);
     const aSpeed = Math.hypot(av.x, av.z), bSpeed = Math.hypot(bv.x, bv.z);
-    const aRammer = a.player || (aSpeed >= bSpeed);
-    wreckCar(a, speed, -1, aRammer); wreckCar(b, speed, 1, !aRammer);
     const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1);
+    const reducedMass = (am * bm) / (am + bm);
+    const severity = speed * Math.sqrt(Math.max(0.5, reducedMass * 2));
+    const hard = severity >= CRASH.carHard, catastrophic = severity >= CRASH.carCatastrophic;
+    a._crashCD = hard ? 0.6 : 0.24; b._crashCD = hard ? 0.6 : 0.24;
+    // The rammer is whichever vehicle contributes more velocity into the contact
+    // normal. A stationary player hit from the side is no longer blamed as the rammer.
+    const aInto = Math.max(0, av.x * nx + av.z * nz);
+    const bInto = Math.max(0, -(bv.x * nx + bv.z * nz));
+    const aRammer = aInto >= bInto;
+    const imp = collisionImpulse(a, b, av, bv, nx, nz, speed, hard, catastrophic);
+    wreckCar(a, severity, -1, aRammer, hard, catastrophic);
+    wreckCar(b, severity, 1, !aRammer, hard, catastrophic);
     const massAvg = Math.max(0.8, Math.min(1.65, (am + bm) * 0.5));
     const heavy = (catastrophic ? 0.92 : (hard ? 0.62 : 0.26)) * massAvg;
     const light = (catastrophic ? 0.6 : (hard ? 0.34 : 0.12)) * massAvg;
-    crumpleCar(a, aRammer ? light : heavy); crumpleCar(b, aRammer ? heavy : light);
+    crumpleCar(a, aRammer ? light : heavy, { x: nx, z: nz });
+    crumpleCar(b, aRammer ? heavy : light, { x: -nx, z: -nz });
     // engine HP: a collision guts the motor; the rammed car takes the worst of it,
-    // so repeated rams build a struck car toward smoking → fire → blowing up. (The
-    // catastrophic path below already fireballs both, so only feed the lighter hits.)
-    if (!catastrophic) {
-      const eHeavy = hard ? 30 : 9, eLight = hard ? 16 : 4;
-      damageEngine(a, (aRammer ? eLight : eHeavy) * (b.mass || 1), false);
-      damageEngine(b, (aRammer ? eHeavy : eLight) * (a.mass || 1), false);
-      if ((a.player || b.player)) { if (a.player) a._burnByPlayer = true; if (b.player) b._burnByPlayer = true; }
+    // so repeated/major rams build toward smoke → fire → explosion instead of
+    // every high-speed collision instantly turning both cars into a fireball.
+    const eHeavy = catastrophic ? 68 : (hard ? 30 : 8);
+    const eLight = catastrophic ? 42 : (hard ? 16 : 4);
+    damageEngine(a, Math.min(82, (aRammer ? eLight : eHeavy) * Math.max(0.75, bm)), false);
+    damageEngine(b, Math.min(82, (aRammer ? eHeavy : eLight) * Math.max(0.75, am)), false);
+    if ((a.player || b.player)) { if (a.player) a._burnByPlayer = true; if (b.player) b._burnByPlayer = true; }
+    // Occupant injury follows delta-v, the quantity people actually feel in a
+    // collision. Normal bumps do nothing; a hard side/T-bone hit hurts badly.
+    if (hard && CBZ.cityHurtPlayer) {
+      const playerCar = a.player ? a : (b.player ? b : null);
+      const deltaV = a.player ? imp.deltaA : imp.deltaB;
+      if (playerCar && deltaV > 4.5) {
+        const protection = Math.max(0.68, 1 - (playerCar.armor || 0) * 0.75);
+        const dmg = Math.min(catastrophic ? 165 : 88, Math.round((deltaV - 4.5) * (catastrophic ? 7.2 : 4.5) * protection));
+        if (dmg > 0) CBZ.cityHurtPlayer(dmg, playerCar.pos.x, playerCar.pos.z, "car crash", false, null, !catastrophic);
+      }
     }
-    // MOMENTUM TRANSFER: the shove on each car is scaled by the OTHER car's mass
-    // (a heavy SUV launches a light coupe; the coupe barely budges the SUV) so the
-    // exchange reads with real weight. The struck car gets flung off with speed +
-    // a fresh heading down the contact normal; both get a positional kick apart.
-    const kick = Math.min(catastrophic ? 3.6 : 2.4, speed * (catastrophic ? 0.12 : 0.09));
-    const shove = Math.min(catastrophic ? 16 : 10, speed * 0.62);
+    // A small contact-position kick prevents the meshes from immediately
+    // re-colliding; velocity transfer itself is handled by the impulse above.
+    const kick = Math.min(catastrophic ? 1.6 : 0.9, severity * (catastrophic ? 0.05 : 0.035));
     const aMassFac = Math.max(0.5, Math.min(1.8, bm / am));   // how hard A is shoved (by B's mass)
     const bMassFac = Math.max(0.5, Math.min(1.8, am / bm));
-    if (!a.player) { a.pos.x -= nx * kick * aMassFac; a.pos.z -= nz * kick * aMassFac; if (!aRammer) { a.v = Math.max(Math.abs(a.v || 0), shove * aMassFac); a.heading = Math.atan2(-nx, -nz); a.wreckT = Math.max(a.wreckT || 0, 1.2); } }
-    if (!b.player) { b.pos.x += nx * kick * bMassFac; b.pos.z += nz * kick * bMassFac; if (aRammer) { b.v = Math.max(Math.abs(b.v || 0), shove * bMassFac); b.heading = Math.atan2(nx, nz); b.wreckT = Math.max(b.wreckT || 0, 1.2); } }
-    // the player car gets a positional nudge + shake-jolt too so a wreck reads
-    if (a.player) { a.pos.x -= nx * kick * 0.4 * aMassFac; a.pos.z -= nz * kick * 0.4 * aMassFac; }
-    if (b.player) { b.pos.x += nx * kick * 0.4 * bMassFac; b.pos.z += nz * kick * 0.4 * bMassFac; }
+    a.pos.x -= nx * kick * aMassFac; a.pos.z -= nz * kick * aMassFac;
+    b.pos.x += nx * kick * bMassFac; b.pos.z += nz * kick * bMassFac;
     const cx = (a.pos.x + b.pos.x) / 2, cz = (a.pos.z + b.pos.z) / 2;
     const cam = CBZ.camera.position, cd2 = (cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z);
     if (a.player || b.player || cd2 < 75 * 75) {
       if (a.player || b.player) {
         const playerCar = a.player ? a : b;
-        playerCar.lastCrashScore = Math.max(playerCar.lastCrashScore || 0, Math.round(speed * massAvg));
-        if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed, hard, catastrophic, carA: a, carB: b });
+        playerCar.lastCrashScore = Math.max(playerCar.lastCrashScore || 0, Math.round(severity * massAvg));
+        if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed: severity, hard, catastrophic, carA: a, carB: b });
       }
-      crashBurst(cx, cz, speed, hard, catastrophic, { x: nx, z: nz });
-      if (catastrophic && CBZ.cityExplosion) {
-        // super-fast smash → the wreck goes up in a fireball (no more boring bump)
-        a.abandoned = b.abandoned = true; a.wreckT = b.wreckT = Math.max(2, a.wreckT || 0);
-        CBZ.cityExplosion(cx, cz, { power: Math.min(1.6, 0.9 + (speed - CRASH.carCatastrophic) * 0.04), byPlayer: !!(a.player || b.player), radius: 6 });
-        // a driver caught in the blast goes with it
-        if (a.npcDriver) killNpcDriverInCar(a);
-        if (b.npcDriver) killNpcDriverInCar(b);
-      } else {
-        if (CBZ.shake) CBZ.shake(hard ? 0.95 : 0.26);
-        if (CBZ.doHitstop) CBZ.doHitstop(hard ? 0.06 : 0.02);
-        if (CBZ.sfx) CBZ.sfx(hard ? "ko" : "punch");
-      }
+      crashBurst(cx, cz, severity, hard, catastrophic, { x: nx, z: nz });
+      if (CBZ.shake) CBZ.shake(catastrophic ? 1.45 : (hard ? 0.95 : 0.26));
+      if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.1 : (hard ? 0.06 : 0.02));
+      if (CBZ.sfx) CBZ.sfx(hard ? "ko" : "punch");
       if (hard && CBZ.cityShatter) CBZ.cityShatter(cx, cz, catastrophic ? 8 : 4.5);
     }
   }
-  const HIT = 3.4, HIT2 = HIT * HIT;
+  function collisionSupport(car, nx, nz) {
+    const d = vehicleDims(car), h = car.heading || 0;
+    const fx = Math.sin(h), fz = Math.cos(h), sx = Math.cos(h), sz = -Math.sin(h);
+    return Math.abs(nx * fx + nz * fz) * d.length * 0.5 + Math.abs(nx * sx + nz * sz) * d.width * 0.5;
+  }
+  function collisionBound(car) {
+    const d = vehicleDims(car);
+    return Math.hypot(d.width, d.length) * 0.5;
+  }
+  const CAR_GRID_CELL = 9;
+  const carGrid = new Map();
   function resolveCars(dt) {
     const cars = CBZ.cityCars, n = cars.length;
+    carGrid.clear();
     for (let i = 0; i < n; i++) {
       const a = cars[i]; if (a.dead) continue;
       if (a._crashCD > 0) a._crashCD -= dt;
-      for (let j = i + 1; j < n; j++) {
-        const b = cars[j]; if (b.dead) continue;
-        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
-        if (d2 >= HIT2 || d2 < 1e-5) continue;
-        const d = Math.sqrt(d2), nx = dx / d, nz = dz / d, overlap = HIT - d;
+      const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
+      const key = gx + "," + gz, bucket = carGrid.get(key);
+      if (bucket) bucket.push(i); else carGrid.set(key, [i]);
+    }
+    for (let i = 0; i < n; i++) {
+      const a = cars[i]; if (a.dead) continue;
+      const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
+      for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+        const bucket = carGrid.get((gx + ox) + "," + (gz + oz)); if (!bucket) continue;
+        for (let bi = 0; bi < bucket.length; bi++) {
+          const j = bucket[bi]; if (j <= i) continue;
+          const b = cars[j]; if (b.dead) continue;
+          const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
+          const broadHit = collisionBound(a) + collisionBound(b);
+          if (d2 > broadHit * broadHit) continue;
+          const d = Math.sqrt(Math.max(1e-6, d2));
+          const nx = d2 < 1e-6 ? (i & 1 ? 1 : -1) : dx / d, nz = d2 < 1e-6 ? 0 : dz / d;
+          const hit = collisionSupport(a, nx, nz) + collisionSupport(b, nx, nz);
+          if (d >= hit) continue;
+          const overlap = hit - d;
         // SOLID separation — they cannot occupy the same space
-        const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1), tm = am + bm;
-        const aw = a.player ? 0.24 : Math.max(0.24, Math.min(0.74, bm / tm));
-        const bw = b.player ? 0.24 : Math.max(0.24, Math.min(0.74, am / tm));
-        a.pos.x -= nx * overlap * aw; a.pos.z -= nz * overlap * aw;
-        b.pos.x += nx * overlap * bw; b.pos.z += nz * overlap * bw;
+          const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1), tm = am + bm;
+          const aw = bm / tm, bw = am / tm;
+          a.pos.x -= nx * overlap * aw; a.pos.z -= nz * overlap * aw;
+          b.pos.x += nx * overlap * bw; b.pos.z += nz * overlap * bw;
         // closing speed along the contact normal
-        const va = carVel(a), vb = carVel(b);
-        const rel = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
-        const closing = Math.abs(rel);
-        if (closing > 2 && a._crashCD <= 0 && b._crashCD <= 0) carCrash(a, b, closing, rel >= 0 ? nx : -nx, rel >= 0 ? nz : -nz);
-        else { a.v *= 0.92; b.v *= 0.92; }     // gentle bumper kiss
+          const va = carVel(a), vb = carVel(b);
+          const closing = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
+          if (closing > 2 && (a._crashCD || 0) <= 0 && (b._crashCD || 0) <= 0) carCrash(a, b, closing, nx, nz);
+          else if (closing > 0.25) {
+            const imp = collisionImpulse(a, b, va, vb, nx, nz, closing, false, false);
+            if (imp.deltaA < 0.01 && imp.deltaB < 0.01) { a.v *= 0.98; b.v *= 0.98; }
+          }
         // keep visuals (and the player's position/camera) in sync this frame
-        a.group.position.set(a.pos.x, 0, a.pos.z); b.group.position.set(b.pos.x, 0, b.pos.z);
-        if (a.player) { CBZ.player.pos.set(a.pos.x, 0, a.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
-        if (b.player) { CBZ.player.pos.set(b.pos.x, 0, b.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
+          a.group.position.set(a.pos.x, 0, a.pos.z); b.group.position.set(b.pos.x, 0, b.pos.z);
+          if (a.player) { CBZ.player.pos.set(a.pos.x, 0, a.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
+          if (b.player) { CBZ.player.pos.set(b.pos.x, 0, b.pos.z); CBZ.playerChar.group.position.copy(CBZ.player.pos); }
+        }
       }
     }
   }
@@ -1026,7 +1374,11 @@
           if (CBZ.body) CBZ.body.hit(p, { fromX: car.pos.x, fromZ: car.pos.z, force: 5 + vmag * 0.45, knockdown: true });
           if (car.player) {
             CBZ.cityAlarm && CBZ.cityAlarm(p.pos.x, p.pos.z, 14, 0.8, CBZ.city.playerActor);
-            CBZ.cityCrime && CBZ.cityCrime(28, { x: p.pos.x, z: p.pos.z, type: "vehicular-assault" });
+            // only a genuinely HARD impact is the 2★ vehicular-assault; a light
+            // nudge (rolling into someone) is just 1★ reckless driving at low sev,
+            // so it can't climb past the star-1 floor.
+            if (vmag >= CRASH.carHard) CBZ.cityCrime && CBZ.cityCrime(28, { x: p.pos.x, z: p.pos.z, type: "vehicular-assault" });
+            else CBZ.cityCrime && CBZ.cityCrime(15, { x: p.pos.x, z: p.pos.z, type: "reckless" });
           } else if (car.npcDriver && CBZ.cityNpcOffense) CBZ.cityNpcOffense(car.npcDriver, 22, "vehicular-assault");
         }
         if (CBZ.shake) CBZ.shake((car.player ? 0.2 : 0.12) + Math.min(0.7, vmag * 0.025));
@@ -1067,8 +1419,8 @@
     car.v = Math.max(0, car.v);
     car.pos.x += Math.sin(car.heading) * car.v * dt;
     car.pos.z += Math.cos(car.heading) * car.v * dt;
-    if (CBZ.collide) CBZ.collide(car.pos, CAR_R);
-    if (arena) arena.clampToCity(car.pos, CAR_R);
+    collideVehicle(car);
+    if (arena) arena.clampToCity(car.pos, wallRadius(car));
     car.group.position.set(car.pos.x, 0, car.pos.z);
     car.group.rotation.y = car.heading;
     if (car.npcDriver && car.npcDriver.pos) car.npcDriver.pos.set(car.pos.x, 0, car.pos.z);
@@ -1105,12 +1457,37 @@
   }
 
   // ---- ambient traffic AI (order 37) ----
+  // FAR-CAR LOD: full traffic AI is costly per car — world-collision raycasts
+  // against ~1000 colliders AND a scan of every ped to brake for. A car BEYOND
+  // the render-visibility cull (the player literally can't see it) doesn't need
+  // that every frame, so we step it on a 1-in-3 stride with accumulated dt;
+  // its straight-line motion stays continuous and it snaps back to full-rate
+  // simulation the instant it matters (turning, wrecked, wanted, fleeing, or
+  // back on screen). This is the single biggest CPU saving in the traffic loop.
+  let _vframe = 0, _vslice = 0;
+  const FARCAR_D2 = 150 * 150;     // == the group-visibility cull distance below
   CBZ.onUpdate(37, function (dt) {
     if (g.mode !== "city") return;
     const A = CBZ.city.arena; if (!A) return;
     const lane = TR().lane != null ? TR().lane : 2.2;
+    const baseDt = dt;
+    const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
+    _vframe++;
     for (const c of CBZ.cityCars) {
+      dt = baseDt;     // reset each car (a strided far car overrides this below)
       if (c.player || c.dead || !c.ai || !c.road) continue;
+      // off-screen, non-critical cars: skip 2 of every 3 frames, banking dt so
+      // they still cover the same ground when they do tick.
+      const _cdx = c.pos.x - camx, _cdz = c.pos.z - camz;
+      // a DEAD driver at the wheel must be handled EVERY frame (eject + wreck), or
+      // the far-car LOD skip below ghost-drives the corpse until its slice comes up.
+      const _critical = c.turning || c.wreckT > 0 || (c.npcWanted | 0) >= 1 || c.pullover || c.roadRageTarget || c.abandoned || (c.npcDriver && c.npcDriver.dead);
+      if (!_critical && (_cdx * _cdx + _cdz * _cdz) > FARCAR_D2) {
+        if (c._vsl == null) c._vsl = (_vslice++ & 3);
+        c._acc = (c._acc || 0) + baseDt;
+        if ((_vframe + c._vsl) % 3 !== 0) continue;     // skipped this frame
+        dt = c._acc; c._acc = 0;                         // catch-up step
+      }
       // DRIVER SHOT DEAD AT THE WHEEL (cops / gunfire): drop the body out and let
       // the now-driverless car careen to a stop — no more ghost-driving a corpse.
       if (c.npcDriver && c.npcDriver.dead) {
@@ -1127,15 +1504,13 @@
         c.heading += c.spin * dt;
         c.pos.x += Math.sin(c.heading) * c.v * dt;
         c.pos.z += Math.cos(c.heading) * c.v * dt;
-        const px = c.pos.x, pz = c.pos.z;
-        if (CBZ.collide) CBZ.collide(c.pos, CAR_R);
-        const pushed = Math.hypot(c.pos.x - px, c.pos.z - pz);
-        if (A.clampToCity) A.clampToCity(c.pos, CAR_R);
+        const pushed = collideVehicle(c);
+        if (A.clampToCity) A.clampToCity(c.pos, wallRadius(c));
         // slammed a building / lamppost mid-spin: crumple the car (the structure
         // only sheds some glass), and a fast hit kills whoever's driving.
         if (pushed > 0.05 && c.v > 11) {
           const catastrophic = c.v >= CRASH.npcDriverLethal, hard = c.v >= CRASH.wallHard;
-          crumpleCar(c, catastrophic ? 0.7 : (hard ? 0.42 : 0.16));
+          crumpleCar(c, catastrophic ? 0.7 : (hard ? 0.42 : 0.16), { x: -Math.sin(c.heading), z: -Math.cos(c.heading) });
           damageEngine(c, catastrophic ? 55 : (hard ? 26 : 8), false);
           crashBurst(c.pos.x, c.pos.z, c.v, hard, catastrophic);
           if (hard && CBZ.cityShatter) CBZ.cityShatter(c.pos.x, c.pos.z, catastrophic ? 8 : 4.5);
@@ -1184,16 +1559,21 @@
       const distToInt = r.vertical ? (it.z - c.pos.z) * c.dirSign : (it.x - c.pos.x) * c.dirSign;
       const red = CBZ.cityIsRed(r.vertical);
       const stopGap = TR().stopGap || 6.5;
+      const redLookahead = stopGap + 5 + Math.min(11, c.v * 0.75);
       // calm drivers ANTICIPATE the red — ease to a smooth stop at the line from
       // further out (reads clearly as obeying the signal). Reckless ones gamble.
-      if (red && distToInt > 1.2 && distToInt < stopGap + 5) {
-        if (!c.reckless || c.driver.aggr < 0.8) target = Math.min(target, Math.max(0, (distToInt - 1.6) * 1.4));
+      if (red && distToInt > 1.2 && distToInt < redLookahead) {
+        if (!c.reckless || c.driver.aggr < 0.8) target = Math.min(target, Math.max(0, (distToInt - 1.6) * 1.25));
       }
 
-      // car-following: never rear-end the car ahead in your lane
+      // Car-following uses bumper gap + speed headway. Fixed centre-to-centre
+      // spacing made long vans overlap and made fast cautious drivers brake late.
       const ahead = carAhead(c);
       if (ahead) {
-        const gap = ahead.gap, follow = (TR().follow || 8) * (c.reckless ? 0.55 : 1);
+        const gap = ahead.gap;
+        const staticGap = Math.max(2.4, (TR().follow || 8) * 0.45);
+        const headway = c.reckless ? 0.3 : (c.driver.aggr < 0.25 ? 0.9 : 0.62);
+        const follow = staticGap + c.v * headway;
         if (gap < follow) target = Math.min(target, Math.max(0, ahead.v * (gap < follow * 0.4 ? 0.3 : 0.85)));
       }
 
@@ -1216,15 +1596,17 @@
       // mows them over — the personality spectrum's extreme is a maniac.
       if ((!c.reckless || c.driver.aggr < 0.8) && c.pullover !== 4) {
         const fwx = r.vertical ? 0 : c.dirSign, fwz = r.vertical ? c.dirSign : 0;
+        const pedLookahead = Math.min(19, 7 + c.v * 0.7);
+        const dangerGap = 2.5 + c.v * 0.22;
         let brake = 0;
         for (let i = 0; i < CBZ.cityPeds.length && brake < 1; i++) {
           const p = CBZ.cityPeds[i]; if (p.dead || p.inCar) continue;
           const dx = p.pos.x - c.pos.x, dz = p.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
-          if (ah > 0.5 && ah < 8 && Math.abs(dx * -fwz + dz * fwx) < 2.0) brake = ah < 4 ? 1 : Math.max(brake, 0.5);
+          if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
         }
         if (brake < 1 && !CBZ.player.driving && !CBZ.player.dead) {
           const dx = CBZ.player.pos.x - c.pos.x, dz = CBZ.player.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
-          if (ah > 0.5 && ah < 8 && Math.abs(dx * -fwz + dz * fwx) < 2.0) brake = ah < 4 ? 1 : Math.max(brake, 0.5);
+          if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
         }
         if (brake >= 1) target = 0; else if (brake > 0) target = Math.min(target, c.v * 0.3);
       }
@@ -1292,7 +1674,8 @@
       if (o === c || o.dead || o.road !== c.road || o.dirSign !== c.dirSign) continue;
       const along = c.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
       const lat = c.vertical ? Math.abs(o.pos.x - c.pos.x) : Math.abs(o.pos.z - c.pos.z);
-      if (along > 0 && lat < 2.4 && along < bg) { bg = along; best = o; }
+      const bumperGap = along - (vehicleDims(c).length + vehicleDims(o).length) * 0.5;
+      if (along > 0 && lat < 2.4 && bumperGap < bg) { bg = bumperGap; best = o; }
     }
     return best ? { v: best.v, gap: bg } : null;
   }
@@ -1354,7 +1737,15 @@
     const cop = copNear(c.pos.x, c.pos.z, 30);
     if (cop) {
       if (c.driver.aggr >= 0.6) { startFlee(c); }
-      else { c.pullover = 1; CBZ.city && CBZ.city.note("🚓 Traffic stop nearby", 0.8); }
+      else {
+        c.pullover = 1;
+        // only surface this ambient line when it's actually near the player AND
+        // not more than once every several seconds (complements the feed cooldown).
+        if (nearCam(c, 60) && (CBZ.now || 0) - _trafficStopNoteT > 6000) {
+          _trafficStopNoteT = CBZ.now || 0;
+          CBZ.city && CBZ.city.note("🚓 Traffic stop nearby", 0.8);
+        }
+      }
     }
   }
   function startFlee(c) {

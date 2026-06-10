@@ -69,6 +69,7 @@
   const boxes = new Map();
   const prisms = new Map();
   const wheels = new Map();
+  const spheres = new Map();
   const procTemplates = new Map();
   let ferrariTemplate = null;
   let ferrariLoading = false;
@@ -145,6 +146,16 @@
     return geo;
   }
 
+  function sphereGeo(radius) {
+    let geo = spheres.get(radius);
+    if (!geo) {
+      geo = new THREE.SphereGeometry(radius, 10, 6);
+      geo._shared = true;
+      spheres.set(radius, geo);
+    }
+    return geo;
+  }
+
   function addBox(root, w, h, d, x, y, z, material) {
     const mesh = new THREE.Mesh(boxGeo(w, h, d), material);
     mesh.position.set(x || 0, y || 0, z || 0);
@@ -156,6 +167,15 @@
   function addPrism(root, width, profile, y, material) {
     const mesh = new THREE.Mesh(prismGeo(width, profile), material);
     mesh.position.y = y || 0;
+    mesh.castShadow = true;
+    root.add(mesh);
+    return mesh;
+  }
+
+  function addSphere(root, radius, x, y, z, material, sx, sy, sz) {
+    const mesh = new THREE.Mesh(sphereGeo(radius), material);
+    mesh.position.set(x || 0, y || 0, z || 0);
+    mesh.scale.set(sx || 1, sy || 1, sz || 1);
     mesh.castShadow = true;
     root.add(mesh);
     return mesh;
@@ -186,20 +206,70 @@
     root.userData.playerWheels = out;
   }
 
+  function addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, glass, trim, white, red) {
+    const bodyY = wheelR * 0.55, bodyTop = bodyY + baseH;
+    const plate = sharedMat("plate", 0xe8edf2, { emissive: 0x202428, ei: 0.3 });
+    const chrome = sharedMat("road-chrome", 0xabb3bc, { emissive: 0x252a30, ei: 0.35 });
+    const noGrille = /^tesla/.test(style);
+
+    // Hood/trunk breaks, mirrors, door cuts and wheel-arch brows give every
+    // silhouette readable vehicle anatomy before model-specific trim is added.
+    addBox(root, w * 0.78, 0.035, len * 0.27, 0, bodyTop + 0.02, len * 0.31, paint);
+    addBox(root, w * 0.74, 0.035, len * 0.18, 0, bodyTop + 0.02, -len * 0.39, paint);
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.18, 0.12, 0.28, side * (w * 0.53), bodyTop + cabin[1][1] * 0.34, len * 0.15, trim);
+      [-len * 0.14, len * 0.12].forEach(function (z) {
+        addBox(root, 0.025, baseH * 0.72, 0.028, side * (w * 0.505), bodyY + baseH * 0.57, z, trim);
+      });
+      [len * 0.32, -len * 0.32].forEach(function (z) {
+        addBox(root, 0.06, 0.09, len * 0.2, side * (w * 0.505), wheelR * 1.66, z, trim);
+      });
+    });
+    addBox(root, w * 0.28, 0.13, 0.025, 0, bodyY + baseH * 0.45, -len * 0.5 - 0.075, plate);
+    addBox(root, w * 0.96, 0.12, 0.16, 0, bodyY + 0.04, len * 0.5 - 0.03, trim);
+    addBox(root, w * 0.96, 0.13, 0.14, 0, bodyY + 0.05, -len * 0.5 + 0.02, trim);
+    if (!noGrille) addBox(root, w * 0.56, 0.2, 0.055, 0, bodyY + baseH * 0.38, len * 0.5 + 0.035, trim);
+    else addBox(root, w * 0.5, 0.07, 0.045, 0, bodyY + baseH * 0.25, len * 0.5 + 0.03, trim);
+
+    if (style === "porsche") {
+      addSphere(root, 0.18, w * 0.3, bodyY + baseH * 0.72, len * 0.48, white, 1.2, 0.72, 0.38);
+      addSphere(root, 0.18, -w * 0.3, bodyY + baseH * 0.72, len * 0.48, white, 1.2, 0.72, 0.38);
+    } else {
+      [1, -1].forEach(function (side) {
+        const lightW = style === "aventador" || style === "enzo" ? w * 0.25 : w * 0.3;
+        const light = addBox(root, lightW, 0.13, 0.065, side * w * 0.28, bodyY + baseH * 0.66, len * 0.5 + 0.045, white);
+        if (style === "aventador" || style === "enzo") light.rotation.z = side * -0.16;
+      });
+    }
+    if (/tesla|veyron/.test(style)) addBox(root, w * 0.82, 0.1, 0.06, 0, bodyY + baseH * 0.68, -len * 0.5 - 0.035, red);
+    else [1, -1].forEach(function (side) {
+      addBox(root, w * 0.28, 0.14, 0.065, side * w * 0.29, bodyY + baseH * 0.64, -len * 0.5 - 0.035, red);
+    });
+
+    if (/ferrari|enzo|aventador|porsche|veyron/.test(style)) {
+      [1, -1].forEach(function (side) {
+        addBox(root, 0.2, 0.12, 0.16, side * w * 0.25, bodyY + 0.11, -len * 0.5 - 0.06, chrome);
+      });
+    }
+    root.userData.vehicleDims = { width: w, length: len, height: bodyTop + cabin[1][1], wheelbase: len * 0.64 };
+  }
+
   function makeRoadCar(style) {
     const root = new THREE.Group();
     const paint = sharedMat("paint-" + style, ({
       "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6,
       "tesla-y": 0x1470e3, porsche: 0xf3cf39, aventador: 0xf28c28,
-      enzo: 0xe02025, veyron: 0x202225,
+      ferrari: 0xd1262f, enzo: 0xe02025, veyron: 0x202225,
       muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6,
     })[style] || 0xd1262f);
+    paint._bodyPaint = true;   // per-car recolour (city/vehicles.js) targets this
     const dark = sharedMat("glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
     const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
     const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.7 });
     let w = 2.0, len = 4.8, wheelR = 0.46, baseH = 0.62;
     let cabin = [[-1.48, 0], [-0.93, 0.75], [0.62, 0.75], [1.5, 0]];
 
+    if (style === "ferrari") { w = 2.02; len = 4.62; wheelR = 0.47; baseH = 0.51; cabin = [[-1.1, 0], [-0.58, 0.61], [0.3, 0.61], [1.08, 0]]; }
     if (style === "tesla-3") { w = 1.92; len = 4.55; cabin = [[-1.42, 0], [-0.82, 0.77], [0.48, 0.77], [1.45, 0]]; }
     if (style === "tesla-x") { w = 2.08; len = 5.0; wheelR = 0.52; baseH = 0.76; cabin = [[-1.57, 0], [-1.0, 0.98], [0.58, 0.98], [1.58, 0]]; }
     if (style === "tesla-y") { w = 2.02; len = 4.72; wheelR = 0.5; baseH = 0.73; cabin = [[-1.47, 0], [-0.88, 0.88], [0.52, 0.88], [1.5, 0]]; }
@@ -214,17 +284,22 @@
     // hot hatch: short, tall, upright greenhouse over a stubby body
     if (style === "hatch") { w = 1.84; len = 4.0; wheelR = 0.44; baseH = 0.66; cabin = [[-1.18, 0], [-0.74, 0.84], [0.86, 0.84], [1.36, 0]]; }
 
-    addBox(root, w, baseH, len, 0, wheelR + baseH * 0.45, 0, paint);
-    addPrism(root, w * 0.84, cabin, wheelR + baseH * 0.68, dark);
-    addBox(root, w * 0.72, 0.08, len * 0.28, 0, wheelR + baseH + cabin[1][1] * 0.74, -0.16, paint);
+    const bodyY = wheelR * 0.55, bodyTop = bodyY + baseH;
+    const bodyProfile = [[-len * 0.5, 0], [-len * 0.5, baseH * 0.62], [-len * 0.37, baseH], [len * 0.34, baseH], [len * 0.5, baseH * 0.58], [len * 0.5, 0]];
+    addPrism(root, w, bodyProfile, bodyY, paint);
+    addPrism(root, w * 0.84, cabin, bodyTop - 0.04, dark);
+    addBox(root, w * 0.72, 0.08, len * 0.28, 0, bodyTop + cabin[1][1] * 0.74, -0.16, paint);
     // sculpted lower body: a contrasting rocker/sill down each flank + a slim
     // front splitter so the nose reads as a real bumper, not a flat box face.
     const sill = sharedMat("sill-" + style, 0x14171c);
     addBox(root, w + 0.04, 0.14, len * 0.9, 0, wheelR + 0.08, 0, sill);
     addBox(root, w * 0.96, 0.1, 0.18, 0, wheelR + 0.06, len * 0.5 - 0.04, sill);   // front splitter
-    addBox(root, w * 0.68, 0.2, 0.06, 0, wheelR + baseH * 0.36, len * 0.5 + 0.03, sill);   // grille
-    addBox(root, w * 0.84, 0.16, 0.07, 0, wheelR + baseH * 0.52, len * 0.5 + 0.05, white);
-    addBox(root, w * 0.82, 0.15, 0.07, 0, wheelR + baseH * 0.54, -len * 0.5 - 0.04, red);
+    addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, dark, sill, white, red);
+    if (style === "ferrari") {
+      addBox(root, w * 0.22, 0.22, 0.08, -w * 0.29, bodyY + baseH * 0.38, len * 0.5 + 0.04, sill);
+      addBox(root, w * 0.22, 0.22, 0.08, w * 0.29, bodyY + baseH * 0.38, len * 0.5 + 0.04, sill);
+      addBox(root, w * 0.34, 0.18, 0.08, 0, bodyY + baseH * 0.34, len * 0.5 + 0.05, paint);
+    }
     if (style === "aventador") addBox(root, w * 0.76, 0.12, 0.16, 0, wheelR + baseH + 0.18, -len * 0.42, paint);
     if (style === "porsche") addBox(root, w * 0.72, 0.1, 0.14, 0, wheelR + baseH + 0.14, -len * 0.44, paint);
     if (style === "enzo") {
@@ -264,7 +339,7 @@
 
   function makeCybertruck() {
     const root = new THREE.Group();
-    const silver = sharedMat("cyber-silver", 0xa8afb2);
+    const silver = sharedMat("cyber-silver", 0xa8afb2); silver._bodyPaint = true;
     const trim = sharedMat("cyber-trim", 0x20262a);
     const glass = sharedMat("cyber-glass", 0x17242b, { emissive: 0x081116, ei: 0.35 });
     const red = sharedMat("cyber-rear", 0xff3344, { emissive: 0xff2233, ei: 0.8 });
@@ -276,14 +351,22 @@
     addPrism(root, w * 0.84, [[-1.62, 0], [-0.66, 0.93], [0.25, 0.93], [1.38, 0]], 1.2, glass);
     addBox(root, w * 0.88, 0.13, 0.09, 0, 1.02, len * 0.5 + 0.05, white);
     addBox(root, w * 0.88, 0.14, 0.09, 0, 1.06, -len * 0.5 - 0.05, red);
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), 0.68, 0, trim);
+      addBox(root, 0.025, 0.74, 0.03, side * (w * 0.505), 1.12, -0.28, trim);
+      addBox(root, 0.035, 0.5, len * 0.34, side * (w * 0.47), 1.48, 0.28, glass);
+      addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), 1.3, 0.85, trim);
+    });
+    addBox(root, w * 0.84, 0.08, len * 0.3, 0, 1.58, -len * 0.29, trim);   // dark tonneau cover
     addWheels(root, w + 0.13, len, wheelR, 0.43);
+    root.userData.vehicleDims = { width: w, length: len, height: 2.3, wheelbase: len * 0.68 };
     return root;
   }
 
   // --- a tall boxy 3-box SUV: high greenhouse, roof rails, beefy fenders. ---
   function makeSUV() {
     const root = new THREE.Group();
-    const paint = sharedMat("suv-paint", 0x2e3a4a);
+    const paint = sharedMat("suv-paint", 0x2e3a4a); paint._bodyPaint = true;
     const dark = sharedMat("suv-glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
     const trim = sharedMat("suv-trim", 0x14171c);
     const rail = sharedMat("suv-rail", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
@@ -300,14 +383,20 @@
     addBox(root, w * 0.9, 0.16, 0.08, 0, wheelR + baseH * 0.55, len * 0.5 + 0.04, white);
     addBox(root, w * 0.9, 0.18, 0.08, 0, wheelR + baseH * 0.6, -len * 0.5 - 0.04, red);
     addBox(root, w * 0.7, 0.4, 0.12, 0, wheelR + 0.18, len * 0.5 + 0.06, trim);   // brush-guard bumper
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.035, 0.58, len * 0.43, side * (w * 0.455), wheelR + baseH + 0.49, -0.08, dark);
+      addBox(root, 0.18, 0.14, 0.28, side * (w * 0.54), wheelR + baseH + 0.42, len * 0.22, trim);
+    });
+    addSphere(root, 0.46, 0, wheelR + baseH * 0.58, -len * 0.52, trim, 1, 1, 0.34);   // rear spare
     addWheels(root, w + 0.14, len, wheelR, 0.42);
+    root.userData.vehicleDims = { width: w, length: len, height: wheelR + baseH + 1.08, wheelbase: len * 0.66 };
     return root;
   }
 
   // --- a tall long cargo van: flat slab sides (sliding-door crease), short hood. ---
   function makeVan() {
     const root = new THREE.Group();
-    const paint = sharedMat("van-paint", 0xe9ebee);
+    const paint = sharedMat("van-paint", 0xe9ebee); paint._bodyPaint = true;
     const dark = sharedMat("van-glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
     const trim = sharedMat("van-trim", 0x202428);
     const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
@@ -324,7 +413,14 @@
     addBox(root, w * 0.86, 0.5, 0.04, 0, wheelR + boxH - 0.3, len * 0.5 - 0.02, dark);   // cab side glass front
     addBox(root, w * 0.9, 0.18, 0.07, 0, wheelR + 0.32, len * 0.5 + 0.02, white);
     addBox(root, w * 0.92, 0.22, 0.07, 0, wheelR + boxH - 0.1, -len * 0.42 - 0.02, red);   // tall rear doors lights
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.035, 0.52, len * 0.16, side * (w * 0.505), wheelR + boxH * 0.68, len * 0.27, dark);
+      addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), wheelR + boxH * 0.51, -len * 0.1, trim);
+      addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), wheelR + boxH * 0.7, len * 0.35, trim);
+    });
+    addBox(root, 0.035, boxH * 0.74, 0.04, 0, wheelR + boxH * 0.5, -len * 0.47, trim);   // split rear doors
     addWheels(root, w + 0.1, len, wheelR, 0.4);
+    root.userData.vehicleDims = { width: w, length: len, height: wheelR + boxH, wheelbase: len * 0.68 };
     return root;
   }
 
@@ -369,6 +465,7 @@
     r.name = "moto_rider";
     root.add(r);
     root.userData.leanRider = r;
+    root.userData.vehicleDims = { width: 0.72, length: wb * 2 + 0.85, height: 1.9, wheelbase: wb * 2 };
     return root;
   }
 
@@ -420,6 +517,7 @@
     tailRotor.name = "heli_tailRotor";
     root.add(tailRotor);
     root.userData.tailRotor = tailRotor;
+    root.userData.vehicleDims = { width: 2.1, length: 5.8, height: 2.1, wheelbase: 2.8 };
     return root;
   }
 
@@ -458,10 +556,34 @@
     prop.name = "boat_prop";
     root.add(prop);
     root.userData.boatProp = prop;
+    root.userData.vehicleDims = { width: w, length: len, height: 1.25, wheelbase: len * 0.6 };
     return root;
   }
 
-  function makeProcedural(style) {
+  // Recolour the body PAINT of a freshly-cloned visual to `color`, leaving every
+  // accent material (glass, trim, sills, stripes, chrome, lights) untouched. The
+  // template's paint material is tagged `_bodyPaint`; clone(true) shares material
+  // refs, so we swap those meshes onto a per-car cloned material (one per unique
+  // source paint) and tag it `_playerCarOwned` so detach()/dispose can clean up.
+  function recolorBody(root, color) {
+    const c = new THREE.Color(color);
+    const swapped = new Map();
+    root.traverse(function (o) {
+      const m = o.material;
+      if (!m || Array.isArray(m) || !m._bodyPaint) return;
+      let nm = swapped.get(m.id);
+      if (!nm) {
+        nm = m.clone();
+        nm.color = c.clone();
+        if (nm.emissive) nm.emissive = c.clone().multiplyScalar(0.16);
+        nm._shared = false; nm._bodyPaint = false; nm._playerCarOwned = true;
+        swapped.set(m.id, nm);
+      }
+      o.material = nm;
+    });
+  }
+
+  function makeProcedural(style, color) {
     let template = procTemplates.get(style);
     if (!template) {
       if (style === "cybertruck") template = makeCybertruck();
@@ -481,6 +603,7 @@
     if (template.userData.tailRotor) clone.userData.tailRotor = clone.getObjectByName("heli_tailRotor");
     if (template.userData.boatProp) clone.userData.boatProp = clone.getObjectByName("boat_prop");
     if (template.userData.leanRider) clone.userData.leanRider = clone.getObjectByName("moto_rider");
+    if (color != null) recolorBody(clone, color);
     return clone;
   }
 
@@ -522,6 +645,7 @@
     root.scale.setScalar(scale);
     if (size.x > size.z) root.rotation.y = -Math.PI / 2;
     root.position.y = -bounds.min.y * scale;
+    root.userData.vehicleDims = { width: Math.min(size.x, size.z) * scale, length: Math.max(size.x, size.z) * scale, height: size.y * scale, wheelbase: 2.65 };
     const body = root.getObjectByName("body");
     if (body && body.material && body.material.clone) {
       body.material = body.material.clone();
@@ -547,6 +671,7 @@
       car.group.remove(car._playerCarVisual);
       car._playerCarVisual = null;
     }
+    car._visualDims = null;
     placeholder(car, false);
   }
 
@@ -562,6 +687,7 @@
     car.group.add(visual);
     car._playerCarVisual = visual;
     car._playerCarActualStyle = style;
+    car._visualDims = visual.userData.vehicleDims || car.dims || null;
     // publish the handling-feel hook so the driving sim can read it per style.
     car._playerCarFeel = FEEL[style] || DEFAULT_FEEL;
     active = car;
@@ -569,10 +695,14 @@
     return true;
   }
 
+  // Resolve a procedural STYLE for a car or a raw model. Named models carry a
+  // valid `detailStyle` (e.g. "suv","muscle","tesla-3"); otherwise fall back to
+  // the name, then the body class, then a clean sedan. Used for BOTH the driven
+  // car AND every ambient car now (city/vehicles.js builds the same visual).
   function inferStyle(car) {
-    const model = car && car.model;
-    if (model && model.detailStyle) return model.detailStyle;
-    const name = model ? model.name : "";
+    const model = car && (car.model || car);   // accept a car OR a model directly
+    if (model && model.detailStyle && STYLE_LABEL[model.detailStyle]) return model.detailStyle;
+    const name = model ? (model.name || "") : "";
     if (/ferrari/i.test(name)) return "ferrari";
     if (/charger|mustang|camaro|challenger/i.test(name)) return "muscle";
     if (/impala|cadillac|low\s*rider/i.test(name)) return "lowrider";
@@ -586,20 +716,73 @@
     if (/mercedes/i.test(name)) return "tesla-s";
     if (/prius|civic|golf|hatch/i.test(name)) return "hatch";
     if (/caravan/i.test(name)) return "tesla-y";
+    // body-class fallback so generic traffic still gets a fitting silhouette
+    const body = model && model.body;
+    if (body === "muscle") return "muscle";
+    if (body === "suv") return "suv";
+    if (body === "van") return "van";
+    if (body === "pickup") return "cybertruck";
+    if (body === "coupe") return "porsche";
+    if (body === "hatch") return "hatch";
     return "tesla-3";
   }
+  CBZ.cityInferCarStyle = inferStyle;
 
+  // Promotion no longer SWAPS the body — every car (city/vehicles.js) is already
+  // built with its detailed, per-car-coloured visual. Promotion just registers
+  // this car as the active one so the driving sim spins ITS wheels and reads its
+  // handling feel. (Legacy fallback: a car built without a unified visual — e.g.
+  // the headless box rig — still gets a hero overlay via attach.)
   CBZ.cityPromotePlayerCar = function (car) {
     if (!car) return;
+    const grp = car.group, ud = grp && grp.userData;
+    const visual = ud && ud.carVisual;
+    if (visual) {
+      collectWheels(visual);
+      car._playerCarVisual = visual;
+      car.detailStyle = ud.carStyle || inferStyle(car);
+      car._playerCarFeel = FEEL[car.detailStyle] || DEFAULT_FEEL;
+      car._visualDims = visual.userData.vehicleDims || car.dims || null;
+      active = car;
+      return;
+    }
     car.detailStyle = car.detailStyle || inferStyle(car);
     if (car.detailStyle === "ferrari") preloadFerrari();
     attach(car, car.detailStyle);
   };
 
   CBZ.cityDemotePlayerCar = function (car) {
-    detach(car);
+    // Only tear down a LEGACY overlay (one that hid a box rig). The unified
+    // visual IS the car's permanent body — leave it in place when you step out.
+    if (car && car._cityPlaceholder) detach(car);
     if (active === car) active = null;
   };
+
+  // Rebuild a car's unified visual for a new style, keeping its colour. Used by
+  // the [C] style-cycler AND any system that re-skins a car in place.
+  function setUnifiedVisual(car, style) {
+    const grp = car && car.group; if (!grp) return false;
+    const ud = grp.userData;
+    const old = ud.carVisual;
+    if (old) {
+      old.traverse(function (o) {
+        const list = Array.isArray(o.material) ? o.material : [o.material];
+        list.forEach(function (m) { if (m && m._playerCarOwned && m.dispose) m.dispose(); });
+      });
+      grp.remove(old);
+    }
+    if (style === "ferrari") preloadFerrari();
+    const visual = makeProcedural(style, car.color);
+    grp.add(visual);
+    ud.carVisual = visual; ud.carStyle = style;
+    collectWheels(visual);
+    car.detailStyle = style;
+    car._playerCarVisual = visual;
+    car._playerCarFeel = FEEL[style] || DEFAULT_FEEL;
+    car._visualDims = visual.userData.vehicleDims || car._visualDims || car.dims || null;
+    return true;
+  }
+  CBZ.citySetCarVisual = setUnifiedVisual;
 
   CBZ.cityUpdatePlayerCarVisual = function (car, dt) {
     const visual = car && car._playerCarVisual;
@@ -626,13 +809,21 @@
   CBZ.cityCyclePlayerCarStyle = function () {
     if (!active) return;
     const at = Math.max(0, STYLE_ORDER.indexOf(active.detailStyle));
-    active.detailStyle = STYLE_ORDER[(at + 1) % STYLE_ORDER.length];
-    if (active.detailStyle === "ferrari") preloadFerrari();
-    attach(active, active.detailStyle);
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Car style: " + STYLE_LABEL[active.detailStyle], 1.2);
+    const style = STYLE_ORDER[(at + 1) % STYLE_ORDER.length];
+    // unified path when the car carries a permanent visual; else legacy overlay.
+    if (active.group && active.group.userData && active.group.userData.carVisual) setUnifiedVisual(active, style);
+    else { active.detailStyle = style; if (style === "ferrari") preloadFerrari(); attach(active, style); }
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Car style: " + STYLE_LABEL[style], 1.2);
   };
 
   CBZ.cityPlayerCarStyles = STYLE_ORDER.slice();
+  CBZ.cityPlayerCarStyleLabels = Object.assign({}, STYLE_LABEL);
+  CBZ.cityBuildPlayerCarVisual = function (style, color) {
+    // The gallery uses the lightweight fallback so auditing all styles never
+    // blocks on the optional high-poly GLB/network decoder. `color` (optional)
+    // paints THIS instance's body without touching the shared style template.
+    return makeProcedural(style, color);
+  };
   // public handling-feel lookup so the driving sim / other systems can branch on
   // vehicle class (e.g. air/marine/twoWheel flags) and apply the multipliers.
   CBZ.cityPlayerCarFeel = function (style) {

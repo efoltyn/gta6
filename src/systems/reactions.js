@@ -215,8 +215,16 @@
         //      a._phys.kx/kz (combat.js / fpsmode.js / grapple.js), and we
         //      slide + decay it here so a punch/shot shoves them back over a
         //      few frames instead of teleporting. ----
+        //   CITY: grapple.js (order 24) ALREADY integrates kx/kz for every city
+        //   ped/cop AND grounds them on the surface. Doing it AGAIN here (order 89)
+        //   double-applies the slide — the body skids twice as far, decays twice as
+        //   fast, and the second collide() can fight the first, producing the stiff,
+        //   weightless shove the city had. So for the city pass we leave the
+        //   knockback to grapple (single, weighty integrator) and only do the
+        //   cosmetic recoil/flash/pose below. Jail (guards/npcs) aren't touched by
+        //   grapple, so they keep integrating it here exactly as before — UNCHANGED.
         const pp = a._phys;
-        if (pp && (Math.abs(pp.kx) > 0.02 || Math.abs(pp.kz) > 0.02)) {
+        if (!isCity && pp && (Math.abs(pp.kx) > 0.02 || Math.abs(pp.kz) > 0.02)) {
           a.group.position.x += pp.kx * dt; a.group.position.z += pp.kz * dt;
           const dec = Math.pow(0.0009, dt); pp.kx *= dec; pp.kz *= dec;
           if (CBZ.collide) CBZ.collide(a.group.position, 0.5);
@@ -277,15 +285,27 @@
         const aimBack = !down && a.poseAimBack && parts && body;
         const handsUp = !down && !aimBack && (a.poseHandsUp || scared) && parts && body;
         if (aimBack) {
-          if (parts.ra) {
-            const before = parts.ra.rotation.x;
-            const want = damp(before, AIM_ARM, 14, dt);
-            r.raOff = want - before; parts.ra.rotation.x = want;
-          }
-          if (parts.la) {
-            const before = parts.la.rotation.x;
-            const want = damp(before, AIM_ARM * 0.5, 13, dt);
-            r.laOff = want - before; parts.la.rotation.x = want;
+          // ONE ARM DRIVER for the gun arm: a CITY ped that is actually holding a
+          // visible weapon already has its gun arm leveled FORWARD every frame by
+          // systems/actorweapons.js (order 36, AFTER animChar). Adding our additive
+          // AIM_ARM write on top (order 89) double-drives the same channel and can
+          // fight/over-rotate the muzzle. So when the weapon system owns the arm,
+          // SKIP the additive arm posing here (let actorweapons hold the level) and
+          // only do the tense fear face below. An armed ped WITHOUT a built prop, or
+          // a fearless-but-unarmed bruiser squaring up, still gets the arm pose from
+          // this path. Gated to city; jail aim-back (guards/npcs) is UNCHANGED.
+          const weaponOwnsArm = isCity && a.armed && a._weaponProp && a._weaponProp.visible;
+          if (!weaponOwnsArm) {
+            if (parts.ra) {
+              const before = parts.ra.rotation.x;
+              const want = damp(before, AIM_ARM, 14, dt);
+              r.raOff = want - before; parts.ra.rotation.x = want;
+            }
+            if (parts.la) {
+              const before = parts.la.rotation.x;
+              const want = damp(before, AIM_ARM * 0.5, 13, dt);
+              r.laOff = want - before; parts.la.rotation.x = want;
+            }
           }
           setFearFace(a, 0.4);                    // tense, not full terror
         } else if (handsUp) {
@@ -295,15 +315,27 @@
           // so we can back it out of the damped base next frame.
           const surr = !!a.poseHandsUp;
           const armT = surr ? SURRENDER_ARM : COWER_ARM;
-          if (parts.la) {
-            const before = parts.la.rotation.x;
-            const want = damp(before, armT, 12, dt);
-            r.laOff = want - before; parts.la.rotation.x = want;
-          }
-          if (parts.ra) {
-            const before = parts.ra.rotation.x;
-            const want = damp(before, armT, 12, dt);
-            r.raOff = want - before; parts.ra.rotation.x = want;
+          // ONE ARM DRIVER: when animChar already HOLDS the overhead surrender pose
+          // (city/peds.js sets char.handsUp so character.js hard-damps the arms to
+          // -2.5 and keeps them there), our additive arm write would stack on top
+          // and over-rotate the arms past vertical (the "bowing"/double-drive). So
+          // if animChar owns the arms, SKIP the additive arm posing entirely (laOff/
+          // raOff stay 0) and let animChar be the sole arm driver. We STILL do the
+          // fear face + body lean-ease below, and the flash/recoil run regardless.
+          // Jail (guards/npcs) never set char.handsUp here, so this never trips for
+          // them — their hands-up keeps coming from this additive path, UNCHANGED.
+          const animOwnsArms = !!(a.char && (a.char.handsUp || a.char.surrender));
+          if (!animOwnsArms) {
+            if (parts.la) {
+              const before = parts.la.rotation.x;
+              const want = damp(before, armT, 12, dt);
+              r.laOff = want - before; parts.la.rotation.x = want;
+            }
+            if (parts.ra) {
+              const before = parts.ra.rotation.x;
+              const want = damp(before, armT, 12, dt);
+              r.raOff = want - before; parts.ra.rotation.x = want;
+            }
           }
           if (surr) {
             // hands high, head up — NO forward hunch. Ease any existing lean out.

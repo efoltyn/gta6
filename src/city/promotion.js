@@ -36,7 +36,11 @@
       progress: next ? Math.max(0, Math.min(1, (xp - cur.xp) / (next.xp - cur.xp))) : 1,
     };
   }
-  CBZ.cityStreetRank = state;
+  // The "kill your way to the top" street-rank ladder is RETIRED. Progression
+  // now comes from gang membership + completing gang tasks/contracts, not body
+  // count. We return null so the HUD rank chip null-guards and self-hides.
+  CBZ.cityStreetRank = function () { return null; };
+  void state; // kept for shape; no longer surfaced to the HUD
 
   function applyCrewPerks(idx) {
     if (!CBZ.cityPlayerGangMembers) return;
@@ -52,51 +56,27 @@
     }
   }
 
+  // The street-XP ladder is retired: progression comes from gang membership +
+  // contracts, not body count. grant() is kept as a harmless no-op shim so any
+  // remaining caller / wrap doesn't crash — it banks NOTHING, shows no PROMOTED
+  // banner and plays no rank-up jingle.
   function grant(amount, reason, data) {
-    amount = Math.max(0, Math.round(amount || 0));
-    if (!amount) return state();
-    const before = state();
-    g.cityStreetXp = Math.max(0, (g.cityStreetXp || 0) + amount);
-    const after = state();
-    g.cityStreetRankIdx = after.index;
-    if (after.index > before.index) {
-      applyCrewPerks(after.index);
-      if (CBZ.city) {
-        CBZ.city.big("PROMOTED: " + after.title);
-        CBZ.city.note(after.perk + " · +" + amount + " rank XP" + (reason ? " from " + reason : ""), 3);
-        CBZ.city.addRespect && CBZ.city.addRespect(5 + after.index * 2);
-      }
-      if (CBZ.sfx) CBZ.sfx("win");
-    } else if (data && data.loud && CBZ.city) {
-      CBZ.city.note("+" + amount + " rank XP" + (reason ? " · " + reason : ""), 1.6);
-    }
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    return after;
+    void amount; void reason; void data; void applyCrewPerks;
+    return state();
   }
   CBZ.cityGrantStreetXp = grant;
 
+  // cityRankEvent STILL FIRES on every kill — playergang.js wraps it to credit
+  // gang-membership work (a body put in for the crew you ride with) — but it no
+  // longer grants any STREET XP. Random violence (kills, cop kills, gang kills,
+  // boss kills, armed marks, crashes, takeovers, turf, promotions) advances
+  // NOTHING here; rank now comes from membership + completing gang tasks. We
+  // keep the function defined and returning state() so callers/wraps don't crash.
   CBZ.cityRankEvent = function (type, data) {
     data = data || {};
-    if (type === "kill") {
-      let xp = 16, reason = "kill";
-      if (data.cop) { xp += 44; reason = "cop kill"; }
-      if (data.gang) { xp += 22; reason = "gang kill"; }
-      if (data.boss) {
-        xp += 170; reason = "boss kill";
-        g.cityBossKills = (g.cityBossKills || 0) + 1;
-      }
-      if (data.armed) xp += 8;
-      return grant(xp, reason, { loud: !!(data.boss || data.gang) });
-    }
-    if (type === "takeover") return grant(190 + ((data.defected || 0) * 12), "takeover", { loud: true });
-    if (type === "gang-founded") return grant(85, "founding a gang", { loud: true });
-    if (type === "turf") return grant(42, "claiming turf", { loud: true });
-    if (type === "promote") return grant(28, "promoting crew", { loud: false });
-    if (type === "crash") {
-      if (!data.hard && !data.catastrophic) return state();
-      return grant(data.catastrophic ? 32 : 12, data.wall ? "hard crash" : "car crash", { loud: !!data.catastrophic });
-    }
-    return grant(data.amount || 0, type || "street work", data);
+    // still tally boss kills (read elsewhere as a stat), just grant no XP for it.
+    if (type === "kill" && data.boss) g.cityBossKills = (g.cityBossKills || 0) + 1;
+    return state();
   };
 
   function wrapAddKill() {

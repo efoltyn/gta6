@@ -35,7 +35,10 @@
       debt: 0,
       respect: 0,
       inventory: {},
-      weapon: null,
+      weapon: null,               // legacy single city-name save
+      weapons: [],                // shared engine weapon ids
+      currentWeapon: null,
+      meleeWeapon: null,
       assets: { properties: [], businesses: [], vehicles: [], weapons: [] },
       injuries: 0,
       criminalRecord: { wantedPeak: 0, heatPeak: 0, arrests: 0, charges: [] },
@@ -89,7 +92,11 @@
     w.debt = g.cityDebt || w.debt || 0;
     w.respect = g.respect || 0;
     w.inventory = copy(g.cityInv || {});
-    w.weapon = g.cityWeapon || null;
+    const stowed = g._copStow;
+    w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
+    w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
+    w.meleeWeapon = g.cityMeleeWeapon || null;
+    w.weapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || w.meleeWeapon || null;
     w.criminalRecord.wantedPeak = Math.max(w.criminalRecord.wantedPeak || 0, g.wanted || 0);
     w.criminalRecord.heatPeak = Math.max(w.criminalRecord.heatPeak || 0, g.heat || 0);
     save(w);
@@ -105,11 +112,17 @@
     g.cityDebt = w.debt || 0;
     g.respect = w.respect || 0;
     g.cityInv = copy(w.inventory || {});
-    g.cityWeapon = restoreWeapon;
+    g.cityMeleeWeapon = w.meleeWeapon || null;
     g.cityTransport = w.transport;
     g.cityPolitics = w.politics;
     g.cityFactions = w.factions;
-    if (restoreWeapon && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(restoreWeapon);
+    const weapons = Array.isArray(w.weapons) ? w.weapons : [];
+    if (weapons.length && CBZ.unlockWeapon) {
+      for (let i = 0; i < weapons.length; i++) CBZ.unlockWeapon(weapons[i], { select: false });
+      if (w.currentWeapon && CBZ.setCurrentWeapon) CBZ.setCurrentWeapon(w.currentWeapon);
+    } else if (restoreWeapon && CBZ.cityGiveWeapon) {
+      CBZ.cityGiveWeapon(restoreWeapon);     // migrate legacy single-name saves
+    }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return w;
   }

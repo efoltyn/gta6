@@ -16,6 +16,24 @@
 
   let overlay = null, titleEl = null, subEl = null;
   let respawnT = 0, dying = false, wastedT = 0, pendingWasted = null;
+  // ---- SPECTATE (Fortnite-style kill-cam): WASTED plays unchanged, THEN — if a
+  //      real on-map actor killed you — the camera leaves your corpse and follows
+  //      your KILLER, showing their live state, until you respawn. ----
+  let spectating = false, specKiller = null, pendingSpecKiller = null;
+  let specT = 0, specMax = 10, specKillerMax = 100;
+  let specHUD = null, specName = null, specHpFill = null, specHpTxt = null, specStateEl = null, specFoot = null;
+
+  // a killer can arrive as an ACTOR (NPC/cop — has .pos, spectatable) or a plain
+  // NAME string (chopper, gang, "the police"). This always yields the display
+  // string that the WASTED title + killfeed.js read.
+  function killerName(a) {
+    if (!a) return null;
+    if (typeof a === "string") return a;
+    if (a.swat) return "a SWAT officer";
+    if (a.kind === "cop") return "the police";
+    if (a.name) return a.name + (a.gang ? " of the " + a.gang : "");
+    return "a stranger";
+  }
 
   function buildOverlay() {
     if (overlay) return;
@@ -44,7 +62,7 @@
     titleEl.style.opacity = "0"; titleEl.style.transform = "scale(1.25)"; subEl.style.opacity = "0";
   }
 
-  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; };
+  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; };
 
   // a red damage flash (the engine never defined CBZ.hitFlash) — drives the
   // existing #hitfx overlay so getting shot reads dramatically.
@@ -69,7 +87,14 @@
   CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal) {
     const P = CBZ.player;
     if (P.dead || (g.invuln || 0) > 0) return;
-    if (attacker) { g._cityKiller = attacker; g._cityKillerT = CBZ.now || 0; }
+    if (attacker) {
+      // an ACTOR (has .pos) can be SPECTATED after WASTED; a bare string just names
+      // the killer. g._cityKiller STAYS a display string either way (killfeed.js +
+      // the WASTED title read it as text); the actor rides on g._cityKillerActor.
+      if (typeof attacker === "object" && attacker.pos) { g._cityKillerActor = attacker; g._cityKiller = killerName(attacker); }
+      else { g._cityKiller = attacker; g._cityKillerActor = null; }
+      g._cityKillerT = CBZ.now || 0;
+    }
     if (headshot) dmg = Math.max(dmg, (P.maxHp || 200) * HEADSHOT_FRAC);
     dmg *= CITY_DR;
     // Bumps and medium-speed traffic impacts can hurt badly, but should not
@@ -80,8 +105,106 @@
     P._hurtT = 3.5;                     // pause regen briefly, then it ramps back
     if (CBZ.hitFlash) CBZ.hitFlash();
     if (CBZ.shake) CBZ.shake(Math.min(0.4, 0.12 + dmg * 0.01));
+    // INJURY: a surviving flesh hit can leave a lasting wound (limp / bleeding /
+    // shaky aim) so a firefight has consequences beyond a number ticking down.
+    if (dmg > 0 && P.hp > 0) applyWound(dmg, reason, headshot, fromX, fromZ);
     if (P.hp <= 0) CBZ.cityKillPlayer(reason || "killed", { fromX, fromZ });
   };
+
+  // ============================================================
+  //  PLAYER INJURY MODEL — getting shot LEAVES A MARK.
+  //  WHY: damage that's just an HP number has no texture; a leg shot that makes
+  //  you limp (slower, can't sprint away), an arm shot that shakes your aim, and
+  //  bleeding that ticks you down until you find cover/heal turns every wound
+  //  into a tactical decision. Wounds are probabilistic per hit (the engine
+  //  doesn't track which limb of YOU got hit), decay over time, and clear on a
+  //  hospital respawn. Bullets/blades wound; explosions/falls/cars don't (those
+  //  have their own brutal feedback). Read by physics (limp), fpsmode (sway),
+  //  the minimap/phone (status), and the bleed-out tick below.
+  // ============================================================
+  function isFleshHit(reason) {
+    if (isExplosionCause(reason) || isImpactCause(reason)) return false;
+    const r = ("" + (reason || "")).toLowerCase();
+    if (r.indexOf("car") >= 0 || r.indexOf("traffic") >= 0 || r.indexOf("crash") >= 0 ||
+        r.indexOf("run over") >= 0 || r.indexOf("drown") >= 0 || r.indexOf("starv") >= 0) return false;
+    return true;   // gunfire, stabs, beatings → a wound is plausible
+  }
+  function applyWound(dmg, reason, headshot, fromX, fromZ) {
+    const P = CBZ.player;
+    if (headshot || !isFleshHit(reason)) { bleedFrom(dmg * 0.5, fromX, fromZ); return; }
+    const maxHp = P.maxHp || 200;
+    const sev = Math.min(1, dmg / (maxHp * 0.5));        // 0..1 by how hard the hit was
+    // roll a hit location: legs are a big target (limp), arms next (aim sway),
+    // the rest is body (just bleeding + stagger).
+    const roll = Math.random();
+    if (roll < 0.34) {
+      P._legSide = Math.random() < 0.5 ? 1 : -1;
+      P._legWound = Math.min(1, (P._legWound || 0) + 0.35 + sev * 0.55);
+      if (CBZ.flashHint && (P._legWound > 0.45)) CBZ.flashHint("🦵 LEG HIT — you're limping", 1.6);
+    } else if (roll < 0.55) {
+      P._armWound = Math.min(1, (P._armWound || 0) + 0.3 + sev * 0.5);
+    } else {
+      P.stun = Math.max(P.stun || 0, 0.08 + sev * 0.12);   // a body shot staggers you a beat
+    }
+    bleedFrom(dmg, fromX, fromZ);
+    if (CBZ.gore && P.pos) CBZ.gore(P.pos.x, P.pos.y + 1.1, P.pos.z, { amount: 0.5 + sev * 0.6, player: true, dir: (fromX != null ? { x: P.pos.x - fromX, z: P.pos.z - fromZ } : null) });
+  }
+  function bleedFrom(dmg, fromX, fromZ) {
+    const P = CBZ.player, maxHp = P.maxHp || 200;
+    P._bleeding = Math.min(1, (P._bleeding || 0) + Math.min(0.6, dmg / maxHp));   // a bleed RATE that clots over time
+    if (fromX != null) { P._bleedX = fromX; P._bleedZ = fromZ; }
+  }
+  CBZ.cityApplyWound = applyWound;
+  // healing & reset hooks
+  CBZ.cityHealWounds = function () { const P = CBZ.player; P._legWound = 0; P._armWound = 0; P._bleeding = 0; P._moveScale = 1; };
+  const _injReset = CBZ.cityDeathReset;
+  CBZ.cityDeathReset = function () { if (_injReset) _injReset(); CBZ.cityHealWounds(); };
+
+  // ---- the injury TICK: clot bleeding (DOT), decay wounds, publish the limp
+  //      move-scale, and drive a limp hitch on the model on top of the walk. ----
+  let _bleedSpray = 0;
+  CBZ.onUpdate(10.6, function (dt) {
+    if (g.mode !== "city") return;
+    const P = CBZ.player; if (!P) return;
+    if (P.dead) { P._moveScale = 1; return; }
+    const maxHp = P.maxHp || 200;
+    // BLEEDING: drains HP while it lasts, then clots. Standing still clots faster
+    // (you're applying pressure); sprinting keeps it open. A red vignette pulses.
+    if ((P._bleeding || 0) > 0.01) {
+      const rate = P._bleeding;
+      P.hp -= rate * 3.4 * dt;                       // ~lethal only if you ignore it
+      P._hurtT = Math.max(P._hurtT || 0, 0.5);       // bleeding suppresses regen
+      const moving = (P.speed || 0) > 1;
+      P._bleeding = Math.max(0, P._bleeding - dt * (moving ? 0.045 : 0.11));   // clot
+      _bleedSpray -= dt;
+      if (_bleedSpray <= 0 && CBZ.gore && P.pos) { _bleedSpray = 0.5 + Math.random() * 0.6; CBZ.gore(P.pos.x, P.pos.y + 0.4, P.pos.z, { amount: 0.3 * rate, player: true }); }
+      if (CBZ.hitFlash && Math.random() < rate * dt * 4) CBZ.hitFlash();
+      if (P.hp <= 0) { CBZ.cityKillPlayer("bled out", { fromX: P._bleedX, fromZ: P._bleedZ }); return; }
+    }
+    // WOUNDS decay (the body recovers); faster while you're resting (not moving,
+    // not in combat). Full leg wound ~ 22s to walk off, quicker if you hole up.
+    const resting = (P.speed || 0) < 0.6 && (P._hurtT || 0) <= 0;
+    const heal = dt * (resting ? 0.09 : 0.045);
+    if (P._legWound > 0) P._legWound = Math.max(0, P._legWound - heal);
+    if (P._armWound > 0) P._armWound = Math.max(0, P._armWound - heal);
+    // publish the limp move-scale for physics (a bad leg = you can't run).
+    const lw = P._legWound || 0;
+    P._moveScale = 1 - lw * 0.5;
+    if (lw > 0.4) P.sprint = false;                  // can't sprint on a blown leg
+    // LIMP HITCH on the model, layered over the walk anim (which already ran at
+    // order 10). Only when actually moving so the idle pose stays clean.
+    const ch = CBZ.playerChar;
+    if (lw > 0.06 && ch && ch.parts && (P.speed || 0) > 0.4 && ch.group) {
+      const ph = ch.phase || 0, side = P._legSide || 1;
+      const leg = side > 0 ? ch.parts.rl : ch.parts.ll;
+      if (leg) leg.rotation.x = leg.rotation.x * (1 - lw * 0.55) - lw * 0.2;   // stiff, dragging leg
+      if (ch.body) {
+        // favour the good side + dip when the bad leg takes the weight
+        ch.body.rotation.z = (ch.body.rotation.z || 0) + Math.sin(ph) * side * lw * 0.14;
+        ch.body.position.y -= Math.max(0, Math.sin(ph) * side) * lw * 0.07;
+      }
+    }
+  });
 
   // ---- did an EXPLOSION kill us? (car blast / airstrike / missile) ----
   // All player blast damage in crashfx.js routes through ONE path with the
@@ -93,6 +216,18 @@
     return r.indexOf("explos") >= 0 || r.indexOf("blast") >= 0 ||
            r.indexOf("airstrike") >= 0 || r.indexOf("missile") >= 0 ||
            r.indexOf("blown up") >= 0;
+  }
+
+  // ---- did a HARD IMPACT kill us? (a lethal fall, or a worded splat/crash) ----
+  // physics.js routes fatal fall damage through cityHurtPlayer with reason "fell".
+  // We also catch any obvious splat/impact wording so the gory crumple fires on
+  // every ground-impact death, not just falls.
+  function isImpactCause(reason) {
+    if (!reason) return false;
+    const r = ("" + reason).toLowerCase();
+    return r.indexOf("fell") >= 0 || r.indexOf("fall") >= 0 ||
+           r.indexOf("splat") >= 0 || r.indexOf("impact") >= 0 ||
+           r.indexOf("pavement") >= 0;
   }
 
   // ---- are we under a ROOF (inside a building)? ----
@@ -150,25 +285,49 @@
     }
     if (CBZ.playerChar) CBZ.playerChar.group.visible = true;
     if (P.driving && CBZ.cityExitVehicle) { CBZ.cityExitVehicle(); }
+    // A LETHAL FALL / hard impact reads as a brutal SPLAT, not a high arcing
+    // fling: you've already hit the ground at speed, so the body crumples at the
+    // spot in a spreading blood pool instead of launching back into the air.
+    const splatDeath = isImpactCause(reason);
     // spinning ragdoll fling (physics.js handles player._death in non-escape modes)
     const a = Math.random() * 6.28;
-    P._death = {
+    P._death = splatDeath ? {
+      // low, flat crumple — barely leaves the ground, lands almost immediately
+      vx: Math.cos(a) * (1.2 + Math.random() * 1.5), vz: Math.sin(a) * (1.2 + Math.random() * 1.5),
+      vy: 1.0 + Math.random() * 1.0, spin: (Math.random() * 2 - 1) * 9, spin2: (Math.random() * 2 - 1) * 7,
+      t: 0, landed: false, seed: Math.random() * 6.28,
+    } : {
       vx: Math.cos(a) * (3 + Math.random() * 3), vz: Math.sin(a) * (3 + Math.random() * 3),
       vy: 6 + Math.random() * 3, spin: (Math.random() * 2 - 1) * 7, spin2: (Math.random() * 2 - 1) * 5,
       t: 0, landed: false, seed: Math.random() * 6.28,
     };
     if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
-    if (CBZ.shake) CBZ.shake(1.2);
+    if (CBZ.shake) CBZ.shake(splatDeath ? 1.9 : 1.2);
     if (CBZ.sfx) CBZ.sfx("ko");
-    if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
-    if (CBZ.gore) {
-      let dir = imp && imp.fromX != null ? { x: P.pos.x - imp.fromX, z: P.pos.z - imp.fromZ } : null;
-      CBZ.gore(P.pos.x, P.pos.y + 1.0, P.pos.z, { dir, amount: 1.4, player: true });
+    if (CBZ.doSlowmo) CBZ.doSlowmo(splatDeath ? 0.55 : 0.5);
+    if (CBZ.doHitstop && splatDeath) CBZ.doHitstop(0.2);
+    let gdir = imp && imp.fromX != null ? { x: P.pos.x - imp.fromX, z: P.pos.z - imp.fromZ } : null;
+    if (splatDeath && CBZ.cityImpactSplat) {
+      // the gory landing splat (blood pool + crimson sheet + gibs + bone-crunch),
+      // seated right where the body hits. cityImpactSplat itself calls CBZ.gore.
+      CBZ.cityImpactSplat(P.pos.x, P.pos.y + 0.6, P.pos.z, { player: true, speed: P._fellSpeed || 24, dir: gdir });
+    } else if (CBZ.gore) {
+      CBZ.gore(P.pos.x, P.pos.y + 1.0, P.pos.z, { dir: gdir, amount: 1.4, player: true });
     }
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     const where = g.citySpawnPoint ? "home" : "the hospital";
     const killer = (g._cityKiller && (CBZ.now || 0) - (g._cityKillerT || 0) < 6) ? g._cityKiller : null;
-    const line = killer ? ("Killed by " + killer) : (reason ? ("You were " + reason) : "You died");
+    // a live, on-map NPC actor we can SPECTATE after the WASTED beat (only set when
+    // an actor — not a string — dealt the blow). Held for the post-WASTED kill-cam.
+    pendingSpecKiller = (g._cityKillerActor && g._cityKillerActor.pos && !g._cityKillerActor.culled &&
+                         (CBZ.now || 0) - (g._cityKillerT || 0) < 6) ? g._cityKillerActor : null;
+    // tell crowd.js to NOT park this killer off-map during the death beat (its
+    // park-on-death sweep would otherwise banish a crowd-pool killer to (-4000),
+    // leaving the kill-cam orbiting empty space). Lives until respawn.
+    g._citySpecTarget = pendingSpecKiller;
+    const line = killer ? ("Killed by " + killer)
+      : splatDeath ? "You hit the pavement"
+      : (reason ? ("You were " + reason) : "You died");
     // hold the WASTED title back ~1.8s so the ragdoll fling plays out first, THEN
     // it fades in — no jarring instant pop on the exact frame you die. When the
     // exterior cinematic plays, hold the title until the street shot has done its
@@ -176,13 +335,107 @@
     pendingWasted = line + "  ·  respawning at " + where + "…";
     const titleDelay = extBeat > 0 ? (extBeat + 0.6) : 1.8;
     wastedT = titleDelay;
-    g._cityKiller = null;
+    g._cityKiller = null; g._cityKillerActor = null;
     respawnT = 4.6 + titleDelay;   // keep the title on screen its full duration after the delay
   };
+
+  // ============================================================
+  //  SPECTATE — Fortnite-style kill-cam. The WASTED screen plays UNCHANGED; only
+  //  AFTER its full beat, if a real on-map actor killed you, the camera leaves your
+  //  corpse and follows your KILLER (camera.js orbits cc.death.spectate) while a
+  //  live card shows who they are, their health, and what they're doing. Auto-
+  //  respawn after a beat, or SPACE / click to go now. String / explosion / fall
+  //  deaths have no one to watch, so they keep the stock instant respawn.
+  // ============================================================
+  function buildSpecHUD() {
+    if (specHUD) return;
+    specHUD = document.createElement("div");
+    specHUD.id = "citySpectate";
+    specHUD.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:54;display:none;flex-direction:column;align-items:center;padding:0 0 30px;pointer-events:none;font-family:Fredoka,system-ui,sans-serif";
+    const card = document.createElement("div");
+    card.style.cssText = "min-width:300px;max-width:78vw;background:linear-gradient(180deg,rgba(10,13,20,.82),rgba(10,13,20,.93));border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:12px 20px 14px;box-shadow:0 8px 30px rgba(0,0,0,.55);text-align:center";
+    const top = document.createElement("div");
+    top.style.cssText = "font-size:12px;letter-spacing:3px;color:#9fb0c6;font-weight:600";
+    top.textContent = "▶ SPECTATING YOUR KILLER";
+    specName = document.createElement("div");
+    specName.style.cssText = "font-size:26px;font-weight:700;color:#fff;margin:3px 0 9px;text-shadow:0 2px 8px rgba(0,0,0,.6)";
+    const hpWrap = document.createElement("div");
+    hpWrap.style.cssText = "position:relative;height:16px;border-radius:8px;background:rgba(255,255,255,.12);overflow:hidden;margin:0 auto;width:260px";
+    specHpFill = document.createElement("i");
+    specHpFill.style.cssText = "position:absolute;left:0;top:0;bottom:0;width:100%;background:linear-gradient(90deg,#37d67a,#7ed957);transition:width .18s ease,background .3s";
+    specHpTxt = document.createElement("span");
+    specHpTxt.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#06121a;text-shadow:0 1px 0 rgba(255,255,255,.25)";
+    hpWrap.appendChild(specHpFill); hpWrap.appendChild(specHpTxt);
+    specStateEl = document.createElement("div");
+    specStateEl.style.cssText = "font-size:14px;color:#cdd6e2;margin-top:9px;font-weight:600";
+    specFoot = document.createElement("div");
+    specFoot.style.cssText = "font-size:12px;color:#8a93a3;margin-top:11px";
+    card.appendChild(top); card.appendChild(specName); card.appendChild(hpWrap); card.appendChild(specStateEl); card.appendChild(specFoot);
+    specHUD.appendChild(card);
+    document.body.appendChild(specHUD);
+  }
+  function killerStateText(k) {
+    if (!k) return "";
+    if (k.dead) return "💀 Down — dropped right after they got you";
+    if (k.rampage) return "🔫 On a rampage";
+    if (k.state === "fight" || k.rage) return "🔫 In a firefight";
+    if (k.state === "flee") return "🏃 On the run";
+    if (k.kind === "cop") return "🚔 Back on patrol";
+    if (k.armed) return "🔫 Armed & roaming";
+    return "🚶 Walking it off";
+  }
+  // a killer is watchable while it still exists on the map: not culled, not parked
+  // off-map in the crowd pool (crowd.js banishes promoted peds to (-4000,-4000) the
+  // instant you die — g._citySpecTarget keeps YOUR killer exempt, but guard anyway),
+  // and its rig still parented.
+  function specValid(k) { return !!(k && k.pos && !k.culled && !k._parked && (!k.group || k.group.parent)); }
+  function beginSpectate(k) {
+    spectating = true; specKiller = k; specT = 0; specMax = 10;
+    // cops carry only .hp (no .maxHp) — use their known full HP as the bar baseline
+    // so a wounded cop's bar doesn't read 100% at, say, 85 HP.
+    specKillerMax = k.maxHp || (k.kind === "cop" ? (k.swat ? 160 : 110) : (k.hp || 100));
+    hideOverlay();                                   // retire the big WASTED title
+    buildSpecHUD(); specHUD.style.display = "flex";
+    // keep the death-cam alive and tell camera.js to orbit THEM, not your corpse.
+    if (CBZ.cityCam) { CBZ.cityCam.death = CBZ.cityCam.death || { t: 0, ang0: Math.random() * 6.28 }; CBZ.cityCam.death.spectate = k; }
+  }
+  function endSpectate() {
+    spectating = false; specKiller = null;
+    if (specHUD) specHUD.style.display = "none";
+    if (CBZ.cityCam && CBZ.cityCam.death) CBZ.cityCam.death.spectate = null;
+    respawn();
+  }
+  function tickSpectate(dt) {
+    specT += dt;
+    const k = specKiller;
+    if (!specValid(k)) { endSpectate(); return; }     // killer left the world → just respawn
+    if (k.dead && specMax > specT + 3) specMax = specT + 3;   // they dropped → hold a beat, then go
+    const hp = Math.max(0, k.hp || 0), ratio = Math.max(0, Math.min(1, hp / (specKillerMax || 1)));
+    if (specName) specName.textContent = killerName(k) || "your killer";
+    if (specHpFill) { specHpFill.style.width = (ratio * 100).toFixed(0) + "%"; specHpFill.style.background = ratio > 0.5 ? "linear-gradient(90deg,#37d67a,#7ed957)" : ratio > 0.22 ? "linear-gradient(90deg,#e7a93a,#ffd451)" : "linear-gradient(90deg,#c9202a,#ff5a4a)"; }
+    if (specHpTxt) specHpTxt.textContent = Math.ceil(hp) + " HP";
+    if (specStateEl) specStateEl.textContent = killerStateText(k);
+    if (specFoot) specFoot.textContent = "Press [SPACE] or click to respawn  ·  auto in " + Math.max(0, Math.ceil(specMax - specT)) + "s";
+    if (specT >= specMax) { endSpectate(); return; }
+  }
+  // SPACE / Enter / click ends the kill-cam early (Fortnite "respawn now")
+  function specSkip(e) {
+    if (!spectating || g.mode !== "city") return;
+    if (e.type === "keydown") {
+      const k = (e.key || "").toLowerCase(), c = e.code || "";
+      if (k !== " " && k !== "spacebar" && k !== "enter" && c !== "Space" && c !== "Enter") return;
+      e.preventDefault();
+    }
+    endSpectate();
+  }
+  addEventListener("keydown", specSkip);
+  addEventListener("mousedown", specSkip);
 
   function respawn() {
     const P = CBZ.player;
     dying = false; hideOverlay();
+    spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null;
+    if (specHUD) specHUD.style.display = "none";
     if (CBZ.cityCam) CBZ.cityCam.death = null;          // end the cinematic, back to FP
     // own a home? respawn there for free. Otherwise the ER patches you up for a bill.
     const A = CBZ.city.arena;
@@ -196,7 +449,7 @@
     if (CBZ.clearCityCops) CBZ.clearCityCops();
     P.pos.set(spot.x, 0, spot.z);
     P.vy = 0; P.grounded = true; P.dead = false; P.maxHp = P.maxHp || 200; P.hp = P.maxHp; P.ko = 0; P.stun = 0; P._hurtT = 0;
-    P._death = null; P._armor = Math.max(0, (P._armor || 0));
+    P._death = null; P._armor = Math.max(0, (P._armor || 0)); P._fellSpeed = 0; P._fallPeak = 0;
     g.hunger = Math.max(40, g.hunger || 0);
     if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
     CBZ.playerChar.group.visible = true;
@@ -216,7 +469,15 @@
     if (g.invuln > 0) g.invuln = Math.max(0, g.invuln - dt);
     if (dying) {
       if (pendingWasted && wastedT > 0) { wastedT -= dt; if (wastedT <= 0) { showOverlay("WASTED", pendingWasted, "#c9202a"); pendingWasted = null; } }
-      respawnT -= dt; if (respawnT <= 0) respawn(); return;
+      if (spectating) { tickSpectate(dt); return; }
+      respawnT -= dt;
+      if (respawnT <= 0) {
+        // the WASTED beat is done — if a real person did this, SPECTATE them now
+        // instead of snapping straight to the hospital. Nothing to watch → respawn.
+        if (pendingSpecKiller && specValid(pendingSpecKiller)) { beginSpectate(pendingSpecKiller); pendingSpecKiller = null; return; }
+        respawn();
+      }
+      return;
     }
     // out-of-combat health regen (GTA-style) so a flesh wound isn't a death
     const P = CBZ.player;

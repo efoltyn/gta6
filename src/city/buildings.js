@@ -433,6 +433,144 @@
     bulletIdx = scorchIdx = 0;
     for (const c of cityChunks) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); }
     cityChunks.length = 0;
+    resetBreaches();
+  };
+
+  // ---- RPG WALL BREACHES -------------------------------------------------
+  // A direct rocket / heavy blast against a GROUND-FLOOR wall blasts a real,
+  // WALKABLE hole through it — "like a car smashing through". With no CSG / no
+  // BufferGeometryUtils in r128 we fake the boolean the same proven way the
+  // DOOR system does: hide the solid wall, drop its collider from the broadphase
+  // (markCollidersDirty), and rebuild the SURVIVING flanks as two thin remnant
+  // boxes (each with its own height-gated collider) so only the GAP is passable.
+  // A dark scorched backing quad makes the interior read through the hole, with
+  // rubble blown inward + nearby panes burst. Every created mesh/collider is
+  // tracked so a new run fully undoes the breach (wall restored, flanks removed).
+  const cityBreaches = [];   // [{wall, col, remnCols:[], extras:[], wallWasLos}]
+  function resetBreaches() {
+    if (!cityBreaches.length) return;
+    let dirty = false;
+    for (const b of cityBreaches) {
+      // remove the dressing meshes (remnant flanks, backing quad, etc.)
+      for (const m of b.extras) {
+        if (m.parent) m.parent.remove(m); else CBZ.scene.remove(m);
+        if (m.geometry) m.geometry.dispose();
+        if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(m); if (li >= 0) CBZ.losBlockers.splice(li, 1); }   // drop any remnant LOS ref
+      }
+      // pull every remnant collider back out of the broadphase
+      for (const rc of b.remnCols) { const i = CBZ.colliders.indexOf(rc); if (i >= 0) { CBZ.colliders.splice(i, 1); dirty = true; } }
+      // restore the original wall mesh + its collider
+      if (b.wall) { b.wall.visible = true; b.wall._breached = false; if (CBZ.losBlockers && b.wallWasLos && CBZ.losBlockers.indexOf(b.wall) === -1) CBZ.losBlockers.push(b.wall); }
+      if (b.col && CBZ.colliders.indexOf(b.col) === -1) { CBZ.colliders.push(b.col); dirty = true; }
+    }
+    cityBreaches.length = 0;
+    if (dirty && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
+  // PUBLIC: blast a passable hole through the nearest ground-floor wall to (x,z).
+  // `r` ~ the breach half-reach in metres (an RPG blastRadius 13 → r≈3.6, a
+  // satisfying car-sized hole). Returns true if a wall actually opened.
+  CBZ.cityBreach = function (x, z, r) {
+    r = r || 1.6;
+    if (!CBZ.scene || !CBZ.colliders) return false;
+    // --- find the nearest GROUND-FLOOR tall wall (reuses cityDamageBuilding's
+    //     nearest-wall search, but restricted to ground-floor solid walls that
+    //     back-point to a real mesh we can hide/split). ---
+    let best = null, bestD = 1e9;
+    const searchR2 = 25;   // 5m: a wall right at the impact
+    for (let i = 0; i < CBZ.colliders.length; i++) {
+      const c = CBZ.colliders[i];
+      if (c.y1 == null || !c.ref) continue;                 // not a wall-style AABB w/ a mesh
+      if (!(c.y0 <= 0.2 && c.y1 >= 2.0)) continue;          // ground-floor full-height wall only
+      const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
+      const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
+      if (dd > searchR2 || dd >= bestD) continue;
+      bestD = dd; best = c;
+    }
+    const wall = best && best.ref;
+    // nothing to breach (open air, or the wall was already opened) → just scorch.
+    if (!wall || wall._breached) { CBZ.cityScorch(x, z, (r || 1.6) * 0.9 + 1.2); return false; }
+    wall._breached = true;
+
+    const c = best;
+    const parent = wall.parent;                             // the building group (its position offsets locals)
+    const px = parent ? parent.position.x : 0, pz = parent ? parent.position.z : 0;
+    const horiz = (c.maxX - c.minX) >= (c.maxZ - c.minZ);   // wall runs along X if wider in X
+    const minU = horiz ? c.minX : c.minZ, maxU = horiz ? c.maxX : c.maxZ;   // wall extent (world) along its axis
+    const len = maxU - minU;
+    const thick = horiz ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
+    const fixed = horiz ? (c.minZ + c.maxZ) / 2 : (c.minX + c.maxX) / 2;    // world coord on the off-axis
+    const y0 = c.y0, y1 = c.y1, ymid = (y0 + y1) / 2, hgt = y1 - y0;
+    const hit = horiz ? x : z;                              // where the blast struck along the wall axis
+    // gap = the opening centred on the hit, clamped within the wall, sized to the blast
+    const gapW = Math.min(len * 0.8, r * 2);
+    let u0 = Math.max(minU, hit - gapW / 2), u1 = Math.min(maxU, hit + gapW / 2);
+    if (u1 - u0 < 0.4) { u0 = Math.max(minU, (minU + maxU) / 2 - gapW / 2); u1 = Math.min(maxU, (minU + maxU) / 2 + gapW / 2); }
+
+    const wmat = wall.material;
+    const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false };
+
+    // hide the solid wall mesh + remove it from LOS (cops can see/shoot through)
+    wall.visible = false;
+    if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(wall); if (li >= 0) { CBZ.losBlockers.splice(li, 1); rec.wallWasLos = true; } }
+
+    // --- SURVIVING FLANKS: rebuild the wall either side of the gap as thin
+    //     remnant boxes (parented to the building group so they inherit its
+    //     transform — local coords subtract the parent position). Each gets its
+    //     own height-gated collider; a flank thinner than ~0.3m is skipped. ---
+    function addRemnant(a, b) {
+      const fw = b - a; if (fw < 0.3) return;
+      const ucen = (a + b) / 2;
+      const wx = horiz ? ucen : fixed, wz = horiz ? fixed : ucen;
+      const bw = horiz ? fw : thick, bd = horiz ? thick : fw;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(bw, hgt, bd), wmat);
+      // parent-local position = world minus parent offset (parent has y=0 offset)
+      m.position.set(wx - px, ymid, wz - pz);
+      m.castShadow = true; m.receiveShadow = true;
+      if (parent) parent.add(m); else CBZ.scene.add(m);
+      rec.extras.push(m);
+      const col = { minX: wx - bw / 2, maxX: wx + bw / 2, minZ: wz - bd / 2, maxZ: wz + bd / 2, ref: m, y0: y0, y1: y1 };
+      CBZ.colliders.push(col); rec.remnCols.push(col);
+      if (rec.wallWasLos && CBZ.losBlockers) CBZ.losBlockers.push(m);
+    }
+    addRemnant(minU, u0);   // left flank
+    addRemnant(u1, maxU);   // right flank
+
+    // OPEN THE COLLIDER: splice the original wall AABB out + rebuild broadphase
+    const ci = CBZ.colliders.indexOf(c); if (ci >= 0) CBZ.colliders.splice(ci, 1);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+
+    // --- DRESS the hole: a dark scorched backing quad spanning the gap so the
+    //     interior reads dark, set a hair INSIDE the wall plane on both sides. ---
+    const gapU = u1 - u0, gapCen = (u0 + u1) / 2;
+    const inN = (() => {
+      // inward normal ≈ toward the blast origin's opposite? use side the blast hit
+      const off = horiz ? (z - fixed) : (x - fixed);
+      return off >= 0 ? 1 : -1;   // +1 if blast on +side of the wall, push backing to the other side
+    })();
+    for (const sgn of [-1, 1]) {                            // a quad facing each way so the hole reads from in + out
+      const q = new THREE.Mesh(new THREE.PlaneGeometry(gapU * 0.96, hgt * 0.96), scorchMat());
+      const qx = horiz ? gapCen : fixed, qz = horiz ? fixed : gapCen;
+      q.position.set(qx - px + (horiz ? 0 : sgn * 0.04), ymid, qz - pz + (horiz ? sgn * 0.04 : 0));
+      aimDecal(q, horiz ? 0 : sgn, 0, horiz ? sgn : 0);
+      q.renderOrder = 2;
+      if (parent) parent.add(q); else CBZ.scene.add(q);
+      rec.extras.push(q);
+    }
+
+    cityBreaches.push(rec);
+
+    // rubble blown INWARD through the hole, scorch, burst nearby panes, feedback
+    const blastDir = inN;   // push debris away from the side the rocket came from
+    const dxr = horiz ? 0 : -blastDir, dzr = horiz ? -blastDir : 0;
+    const rubX = horiz ? gapCen : fixed, rubZ = horiz ? fixed : gapCen;
+    CBZ.cityChunk(rubX, ymid - hgt * 0.2, rubZ,
+      { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr });
+    CBZ.cityScorch(x, z, (r || 1.6) * 0.9 + 1.4);
+    CBZ.cityShatter(x, z, (r || 1.6) * 2 + 4);
+    if (CBZ.shake) CBZ.shake(0.6);
+    if (CBZ.sfx) CBZ.sfx("glass");
+    return true;
   };
 
   // DECORATE the explosion so blasts leave scorch marks on the ground + nearby
@@ -482,47 +620,81 @@
   // doorway is passable), then closes itself a beat after everyone leaves.
   // One shared frame/glass material, capped, pooled-free (fixed at worldgen).
   const cityDoors = [];
-  let _doorGlassMat = null, _doorFrameMat = null;
+  let _doorLeafMat = null, _doorVisionMat = null, _doorFrameMat = null, _doorBarMat = null;
   let _helipad = null;   // {x,y,z} world centre of the rooftop helipad (one per city)
-  function doorGlassMat() { return _doorGlassMat || (_doorGlassMat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x2f6f86, emissiveIntensity: 0.35, transparent: true, opacity: 0.5 })); }
-  function doorFrameMat() { return _doorFrameMat || (_doorFrameMat = new THREE.MeshLambertMaterial({ color: 0x2a2f37 })); }
+  // THE DOOR LEAF reads SOLID so a CLOSED door obviously looks shut. The old leaf
+  // was a ~0.5-opacity glass panel — you saw straight through it, so a closed
+  // door read "open AND closed at once". Now the leaf is a near-opaque slab
+  // (opacity 0.97) with only a small clear VISION WINDOW inset, a clear dark
+  // FRAME, and a bright push-BAR — the unambiguous closed/open states the door
+  // literature (Liz England's "door problem") calls for.
+  function doorLeafMat() { return _doorLeafMat || (_doorLeafMat = new THREE.MeshLambertMaterial({ color: 0x9aa6b4, emissive: 0x1a2026, emissiveIntensity: 0.18, transparent: true, opacity: 0.97 })); }
+  function doorVisionMat() { return _doorVisionMat || (_doorVisionMat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x2f6f86, emissiveIntensity: 0.4, transparent: true, opacity: 0.55 })); }
+  function doorFrameMat() { return _doorFrameMat || (_doorFrameMat = new THREE.MeshLambertMaterial({ color: 0x21262d })); }
+  function doorBarMat() { return _doorBarMat || (_doorBarMat = new THREE.MeshLambertMaterial({ color: 0xc8ccd2, emissive: 0x44484e, emissiveIntensity: 0.3 })); }
 
-  // Build a hinged door leaf filling the DOORW-wide gap at localDoor (group-local
-  // coords; door.nx/nz is the inward normal). Pivot sits at one jamb so the leaf
-  // swings inward like a real shop door. Registered globally for the auto-opener.
-  function makeDoorPanel(bgroup, ox, oz, localDoor, panelW) {
-    const dw = (panelW || DOORW) - 0.18, dh = FH - 0.85;
+  // Build ONE clean hinged door for the DOORW-wide gap at localDoor (group-local
+  // coords; door.nx/nz is the inward normal). The build is:
+  //   • an OVERSIZED clean FRAME (two jambs + a header) ringing the doorway so the
+  //     opening has breathing room and the closed leaf has something to seat into;
+  //   • ONE solid LEAF on a hinge pivot at one jamb, with a small glass vision
+  //     window + a vertical push-bar handle, that fills the gap FLUSH when closed;
+  //   • a full CLEAN ~95° INWARD swing that tucks the leaf flat against the inner
+  //     wall (clearly out of the doorway), verified to clear the gap and not clip.
+  // Registered globally for the proximity auto-opener. opts.frameH lets a taller
+  // shell (the mega-tower lobby) raise the header.
+  function makeDoorPanel(bgroup, ox, oz, localDoor, panelW, opts) {
+    opts = opts || {};
+    const gap = (panelW || DOORW);                 // the doorway opening width
+    const dw = gap - 0.16;                          // leaf a hair narrower so it swings free
+    const frameH = opts.frameH != null ? opts.frameH : FH;
+    const dh = frameH - 0.85;                        // leaf height (header sits above it)
     const nx = localDoor.nx, nz = localDoor.nz;
-    const tx = -nz, tz = nx;                       // tangent along the doorway
-    const hingeSign = (nx !== 0 ? nx : nz) >= 0 ? 1 : -1;   // deterministic jamb
-    // pivot group at the hinge jamb (local), leaf offset half-width along tangent
+    const tx = -nz, tz = nx;                         // tangent along the doorway width
+    const along = Math.abs(nx) > 0.5;               // door faces ±X → leaf spans Z
+    const hingeSign = (nx !== 0 ? nx : nz) >= 0 ? 1 : -1;   // deterministic jamb side
+
+    // (NO chunky frame jambs/header — they read as "weird props" stuck around the
+    // doorway. The wall opening already frames the door; just hang the clean leaf.)
+
+    // ---- the LEAF on its hinge pivot ----
+    // pivot group at the hinge jamb (local); the leaf hangs from it, its centre
+    // offset back to the doorway centre so the CLOSED leaf sits FLUSH in the gap.
     const pivot = new THREE.Group();
     const hx = localDoor.x + tx * (dw / 2) * hingeSign;
     const hz = localDoor.z + tz * (dw / 2) * hingeSign;
     pivot.position.set(hx, dh / 2 + 0.05, hz);
     bgroup.add(pivot);
-    const along = Math.abs(nx) > 0.5;              // door faces ±X → leaf spans Z
-    // frame border + a big glass insert (push-bar handle) — the leaf
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.12 : dw, dh, along ? dw : 0.12), doorFrameMat());
-    frame.position.set(-tx * (dw / 2) * hingeSign, 0, -tz * (dw / 2) * hingeSign);
-    frame.castShadow = false; pivot.add(frame);
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.08 : dw - 0.22, dh - 0.4, along ? dw - 0.22 : 0.08), doorGlassMat());
-    glass.position.copy(frame.position); glass.renderOrder = 1; pivot.add(glass);
-    // a horizontal push-bar so it reads as a storefront door
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.1 : dw * 0.7, 0.12, along ? dw * 0.7 : 0.1), doorFrameMat());
-    bar.position.set(frame.position.x + nx * 0.09, -0.1, frame.position.z + nz * 0.09);
+    const leafOffX = -tx * (dw / 2) * hingeSign, leafOffZ = -tz * (dw / 2) * hingeSign;
+    // SOLID leaf slab (near-opaque) — a closed door obviously looks SHUT
+    const slabT = 0.1;                               // leaf thickness
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT : dw, dh, along ? dw : slabT), doorLeafMat());
+    leaf.position.set(leafOffX, 0, leafOffZ); leaf.castShadow = false; pivot.add(leaf);
+    // a small CLEAR VISION WINDOW inset high on the leaf (so it still reads as a
+    // glass shop door, but only a small pane — the bulk stays solid/shut-looking)
+    const vw = dw * 0.5, vh = dh * 0.32;
+    const vision = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT + 0.02 : vw, vh, along ? vw : slabT + 0.02), doorVisionMat());
+    vision.position.set(leafOffX, dh * 0.18, leafOffZ); vision.renderOrder = 1; pivot.add(vision);
+    // a vertical PUSH-BAR / pull handle on the free-edge side, proud of the leaf
+    const handleLat = -(dw / 2 - 0.18) * hingeSign;  // toward the free (latch) edge
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.07, dh * 0.55, 0.07), doorBarMat());
+    bar.position.set(leafOffX + tx * handleLat + nx * (slabT / 2 + 0.05), -0.05, leafOffZ + tz * handleLat + nz * (slabT / 2 + 0.05));
     bar.castShadow = false; pivot.add(bar);
+
     // collider that exactly fills the CLOSED doorway gap (height-gated)
     const wx = ox + localDoor.x, wz = oz + localDoor.z;
     const half = dw / 2 + 0.06;
     const col = along
-      ? { minX: wx - 0.2, maxX: wx + 0.2, minZ: wz - half, maxZ: wz + half, ref: frame, y0: 0.0, y1: dh + 0.1 }
-      : { minX: wx - half, maxX: wx + half, minZ: wz - 0.2, maxZ: wz + 0.2, ref: frame, y0: 0.0, y1: dh + 0.1 };
+      ? { minX: wx - 0.2, maxX: wx + 0.2, minZ: wz - half, maxZ: wz + half, ref: leaf, y0: 0.0, y1: dh + 0.1 }
+      : { minX: wx - half, maxX: wx + half, minZ: wz - 0.2, maxZ: wz + 0.2, ref: leaf, y0: 0.0, y1: dh + 0.1 };
     CBZ.colliders.push(col);
-    CBZ.losBlockers.push(glass);
-    // open swing is INWARD (toward the room): sign chosen so the leaf clears the
-    // doorway rather than swinging into the wall. ~95° travel.
-    const openSign = -hingeSign;                   // swing the free edge inward
+    CBZ.losBlockers.push(leaf);
+    // OPEN SWING is INWARD (toward the room) so the leaf tucks flat against the
+    // inner wall, clearly out of the doorway. The leaf's free edge sits on the
+    // -hingeSign tangent side; working THREE's Y-rotation matrix through, the
+    // pivot must turn by -hingeSign·θ to carry that free edge toward +n (into the
+    // room). A full ~95° (1.66 rad) lands the leaf flat along the inner wall.
+    const openSign = -hingeSign;
     const rec = {
       pivot, col, wx, wz, t: 0, open: false, hold: 0,
       maxAng: openSign * 1.66, colIn: true,
@@ -537,7 +709,9 @@
     const across = ax * dr.inx + az * dr.inz;            // + = inside the building
     const side = ax * -dr.inz + az * dr.inx;             // along the door width
     const lat = Math.abs(side), r = radius || 1.0;
-    if (lat < 1.65 + r * 0.45 && across > -2.8 - r && across < 4.6 + r) return true;
+    // widened the OUTSIDE reach (-3.4 vs -2.8) so a shop door begins easing open
+    // a stride earlier as the player walks up to it, instead of popping at the jamb.
+    if (lat < 1.65 + r * 0.45 && across > -3.4 - r && across < 4.6 + r) return true;
     return ax * ax + az * az < r * r;
   }
   function carDoorRadius(car) {
@@ -547,6 +721,9 @@
   }
   function doorOccupied(dr, includeCars) {
     const P = CBZ.player && CBZ.player.pos;
+    // a door pinned to an upper floor (the penthouse) only responds when an actor
+    // is near in Y too — otherwise standing on the deck far below would flap it.
+    if (dr.doorY != null && P && Math.abs(P.y - dr.doorY) > 3.0) return false;
     if (P && doorNearActor(dr, P.x, P.z, CBZ.player.driving ? 4.6 : 1.7)) return true;
     if (includeCars && CBZ.cityCars) {
       for (let k = 0; k < CBZ.cityCars.length; k++) {
@@ -595,13 +772,17 @@
       // doorway is reliably passable while open and reliably solid once shut.
       //  - drop the collider as soon as the leaf has swung clear (t > 0.30) so
       //    you can actually walk through the gap you can see is open;
-      //  - restore it only once the leaf is essentially shut AND nobody is in
-      //    the doorway, so the door never snaps a wall back onto an actor.
+      //  - restore it once the leaf is MOSTLY shut (t < 0.25) AND nobody is in
+      //    the doorway. Re-adding at 0.25 (not the old 0.12) closes the gap
+      //    where the leaf looked nearly shut but the wall collider was still
+      //    pulled — you could ghost through a door that visually read closed.
+      //    The doorOccupied guard below still prevents snapping a wall onto an
+      //    actor lingering in the gap, so this is safe to tighten.
       if (dr.colIn && dr.t > 0.30) {
         const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
         dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
         if (CBZ.sfx) CBZ.sfx("door");
-      } else if (!dr.colIn && dr.t < 0.12) {
+      } else if (!dr.colIn && dr.t < 0.25) {
         // leaf is shut. If someone is still standing in the gap, hold it open a
         // beat longer rather than trapping them; otherwise re-solidify the wall.
         if (doorOccupied(dr, true)) {
@@ -760,6 +941,40 @@
       }
     }
 
+    // WRAPAROUND PARKING DECK (opts.garageGround): the flagship's whole ground
+    // floor is an open garage you can drive into from ANY side. Each face gets a
+    // wide central drive-in bay (corner posts + a header to duck under) flanked
+    // by floor-to-ceiling glass — so it reads as glassed-in parking on all four
+    // sides, not a sealed lobby. No swinging door; the bays ARE the entrances.
+    function garageBay(f) {
+      const ly = FH / 2;
+      const span = f.horiz ? w : d;
+      const GW = Math.min(5.0, span * 0.52);     // drive-in opening width
+      const HDR = FH - 0.85;                       // header bottom (clearance)
+      const post = 0.85;
+      if (f.horiz) {
+        const zz = f.z;
+        lbox(-w / 2 + post / 2, ly, zz, post, FH, WT, color, wallOpt);
+        lbox(w / 2 - post / 2, ly, zz, post, FH, WT, color, wallOpt);
+        lbox(0, HDR + (FH - HDR) / 2, zz, GW + 0.6, FH - HDR, WT, color, { solid: true, los: true });
+        const a = -w / 2 + post, bb = -GW / 2 - 0.2, cxL = (a + bb) / 2, wL = bb - a;
+        if (wL > 0.5) {
+          addCityGlass(bgroup, cxL, ly, zz, wL, FH * 0.84, 0.06, ox, oz, { solid: true }, windows);
+          addCityGlass(bgroup, -cxL, ly, zz, wL, FH * 0.84, 0.06, ox, oz, { solid: true }, windows);
+        }
+      } else {
+        const xx = f.x;
+        lbox(xx, ly, -d / 2 + post / 2, WT, FH, post, color, wallOpt);
+        lbox(xx, ly, d / 2 - post / 2, WT, FH, post, color, wallOpt);
+        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, GW + 0.6, color, { solid: true, los: true });
+        const a = -d / 2 + post, bb = -GW / 2 - 0.2, czL = (a + bb) / 2, dL = bb - a;
+        if (dL > 0.5) {
+          addCityGlass(bgroup, xx, ly, czL, 0.06, FH * 0.84, dL, ox, oz, { solid: true }, windows);
+          addCityGlass(bgroup, xx, ly, -czL, 0.06, FH * 0.84, dL, ox, oz, { solid: true }, windows);
+        }
+      }
+    }
+
     for (let k = 0; k < storeys; k++) {
       const ly = k * FH + FH / 2;
       const faces = [
@@ -769,19 +984,35 @@
         { s: 3, x: w / 2 - WT / 2, z: 0, w: WT, dd: d, horiz: false },
       ];
       for (const f of faces) {
+        if (opts.garageGround && k === 0) { garageBay(f); continue; }
         if (k === 0 && f.s === doorSide) {
           if (opts.showroom) {
             showroomFront(f);
           } else if (f.horiz) {
             const side = (w - DOORW) / 2;
-            lbox(-(DOORW / 2 + side / 2), ly, f.z, side, FH, WT, color, wallOpt);
-            lbox(DOORW / 2 + side / 2, ly, f.z, side, FH, WT, color, wallOpt);
+            const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
+            lbox(fcx, ly, f.z, side, FH, WT, color, wallOpt);
+            lbox(fcx2, ly, f.z, side, FH, WT, color, wallOpt);
             lbox(0, FH - 0.35, f.z, DOORW, 0.7, WT, color, { los: true });
+            // STOREFRONT GLASS flanking the entrance: the door facade used to be
+            // bare wall either side of the door. Give each flank a big shop window
+            // (thin, non-solid → no collider) so shops read as glassed storefronts.
+            const goff = f.s === 0 ? 0.22 : -0.22, gph = FH * 0.5, gy = ly + 0.1;
+            if (side > 1.2) {
+              addCityGlass(bgroup, fcx, gy, f.z + goff, side * 0.7, gph, 0.05, ox, oz, null, windows);
+              addCityGlass(bgroup, fcx2, gy, f.z + goff, side * 0.7, gph, 0.05, ox, oz, null, windows);
+            }
           } else {
             const side = (d - DOORW) / 2;
-            lbox(f.x, ly, -(DOORW / 2 + side / 2), WT, FH, side, color, wallOpt);
-            lbox(f.x, ly, DOORW / 2 + side / 2, WT, FH, side, color, wallOpt);
+            const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
+            lbox(f.x, ly, fcz, WT, FH, side, color, wallOpt);
+            lbox(f.x, ly, fcz2, WT, FH, side, color, wallOpt);
             lbox(f.x, FH - 0.35, 0, WT, 0.7, DOORW, color, { los: true });
+            const goff = f.s === 2 ? 0.22 : -0.22, gph = FH * 0.5, gy = ly + 0.1;
+            if (side > 1.2) {
+              addCityGlass(bgroup, f.x + goff, gy, fcz, 0.05, gph, side * 0.7, ox, oz, null, windows);
+              addCityGlass(bgroup, f.x + goff, gy, fcz2, 0.05, gph, side * 0.7, ox, oz, null, windows);
+            }
           }
           // hang an OPENABLE swinging glass door in the gap (real shops/homes
           // only — derelicts stay gaping). Abandoned (boarded) buildings skip it.
@@ -799,17 +1030,39 @@
                 f.horiz ? bw2 : 0.06, 0.22, f.horiz ? 0.06 : bd2, BOARD, { cast: false });
             }
           } else {
-            // big shatterable glass — a row of tall panes (a real modern window
-            // band; even taller/wider on tall "modern" towers → a glass curtain wall)
-            const wy2 = ly + 0.2, ph = FH * (modern ? 0.74 : 0.56), off = 0.22;
+            // big shatterable glass — rows of panes (a real modern window band;
+            // even taller/wider on tall "modern" towers → a glass curtain wall).
+            //
+            // The user wanted facades far less bare, so we now:
+            //  - pack MORE panes per row: clamp 3..6 (was 2..4) for a denser grid;
+            //  - on NORMAL (non-modern) storeys split the wall into TWO stacked
+            //    bands (a lower + an upper row) instead of one mid-height strip,
+            //    so even short shops read as having proper windows top & bottom;
+            //  - modern towers keep their single floor-to-ceiling curtain band
+            //    (no vertical room for two without overlapping the floor belts),
+            //    just with the higher pane count.
+            // Depth stays thin (0.05) and panes are NEVER solid → no colliders.
+            const off = 0.22;
+            // pane height + the y-centres of each band we draw on this storey
+            let bands, ph;
+            if (modern) {
+              ph = FH * 0.74;
+              bands = [ly + 0.2];                       // one tall curtain-wall band
+            } else {
+              ph = FH * 0.30;                            // shorter so two fit cleanly
+              // lower band sits low, upper band high; both clear of the floor belts
+              bands = [ly - FH * 0.16, ly + FH * 0.22];
+            }
             if (f.horiz) {
               const zz = f.z + (f.s === 0 ? off : -off), span = w - 1.1;
-              const nn = Math.max(2, Math.min(4, Math.round(w / 2.6))), step = span / nn;
-              for (let i = 0; i < nn; i++) addCityGlass(bgroup, -span / 2 + (i + 0.5) * step, wy2, zz, step * 0.84, ph, 0.05, ox, oz, null, windows);
+              const nn = Math.max(3, Math.min(6, Math.round(w / 2.0))), step = span / nn;
+              for (let b = 0; b < bands.length; b++)
+                for (let i = 0; i < nn; i++) addCityGlass(bgroup, -span / 2 + (i + 0.5) * step, bands[b], zz, step * 0.84, ph, 0.05, ox, oz, null, windows);
             } else {
               const xx = f.x + (f.s === 2 ? off : -off), span = d - 1.1;
-              const nn = Math.max(2, Math.min(4, Math.round(d / 2.6))), step = span / nn;
-              for (let i = 0; i < nn; i++) addCityGlass(bgroup, xx, wy2, -span / 2 + (i + 0.5) * step, 0.05, ph, step * 0.84, ox, oz, null, windows);
+              const nn = Math.max(3, Math.min(6, Math.round(d / 2.0))), step = span / nn;
+              for (let b = 0; b < bands.length; b++)
+                for (let i = 0; i < nn; i++) addCityGlass(bgroup, xx, bands[b], -span / 2 + (i + 0.5) * step, 0.05, ph, step * 0.84, ox, oz, null, windows);
             }
           }
         }
@@ -907,6 +1160,14 @@
     // ---- always-on dressing: floor mat + lit ceiling fixture ----
     const matP = pt(2.4, 0, 0.5);                  // just inside the doorway
     if (matP) b.lbox(matP.x, 0.005, matP.z, along ? 0.05 + 1.8 : 2.0, 0.05, along ? 2.0 : 0.05 + 1.8, 0x33373f, { cast: false });
+    // a thin interior FLOOR-COVERING plane tinted per trade (just one cheap slab
+    // covering the room centre at y~0.02) for material variety underfoot.
+    const FLOOR_TINT = { bar: 0x2a1f2a, casino: 0x2a2418, drugs: 0x2e2c24, bank: 0x3a4250,
+      cityhall: 0x3a4250, hospital: 0x3f4a52, gym: 0x24282e, guns: 0x303529, jewelry: 0x342c1c,
+      pawn: 0x342c1c, electronics: 0x232a2c, security: 0x282e34, food: 0x3a322a, clothing: 0x352e38,
+      barber: 0x2c3036, hardware: 0x342e26, gas: 0x2c3138 };
+    const ftint = FLOOR_TINT[kind] || 0x2e3238;
+    b.lbox(0, 0.02, 0, W - 1.2, 0.04, D - 1.2, ftint, { cast: false });
     // mood-tinted ceiling fixture per trade — bars/casinos run a moody saturated
     // glow, clinical trades (bank/hospital) cold-white, the rest warm shop light.
     const MOOD = { bar: [0xe85d8a, 0.6], casino: [0xc9a227, 0.62], drugs: [0x4caf6e, 0.4], bank: [0xdfe8ff, 0.5],
@@ -960,6 +1221,30 @@
       }
     }
 
+    // ---- shared BASE CLUTTER every shop gets (stools/chair, waste bin, a wall
+    // clock plane, a potted plant, an emissive ceiling-tile strip). Cheap, and
+    // every piece is gated by pt()'s clearFloorPoint so the aisle stays open.
+    function baseClutter(accent) {
+      // an emissive ceiling-tile STRIP running the room (extra light line)
+      const cs = pt(halfIn, 0, 1.4);
+      if (cs) b.lbox(cs.x, FHl - 0.18, cs.z, along ? 0.22 : halfTan * 1.2, 0.05, along ? halfTan * 1.2 : 0.22, 0xf2f4f8, { emissive: 0xf2f4f8, ei: 0.3, cast: false });
+      // a potted PLANT in a front corner (planter box + green foliage cube)
+      const pl = pt(4.4, halfTan - 1.1, 0.7);
+      if (pl) { decor(pl, 0.25, 0.5, 0.5, 0.5, 0x6b4a2a); decor(pl, 0.85, 0.6, 0.7, 0.6, 0x3f9a4f); }
+      // a WASTE BIN by the far front corner
+      const wb = pt(4.0, -(halfTan - 0.9), 0.6);
+      if (wb) decor(wb, 0.32, 0.42, 0.64, 0.42, 0x3a4048);
+      // a WALL-CLOCK plane high on a side wall (white face, accent ring)
+      const wc = pt(halfIn + 1.2, -(halfTan - 0.18), 0.6);
+      if (wc) { decor(wc, 2.6, along ? 0.03 : 0.7, 0.7, along ? 0.7 : 0.03, 0xeef2f6); glow(wc, 2.6, along ? 0.02 : 0.78, 0.78, along ? 0.78 : 0.02, accent || 0x9fd8ee, 0.25); }
+      // a couple of customer STOOLS / a waiting CHAIR near the entrance
+      for (const side of [-1, 1]) {
+        const s = pt(3.4, side * (halfTan - 1.0), 0.6);
+        if (s) { decor(s, 0.45, 0.5, 0.9, 0.5, 0x2a2f37); decor(s, 0.92, 0.55, 0.1, 0.55, accent || 0x55606e); }
+      }
+    }
+    baseClutter(kindAccent(kind));
+
     // dispatch to the trade-specific dresser
     switch (kind) {
       case "guns": {
@@ -1012,17 +1297,48 @@
         // a row of bar stools facing the back counter
         for (let i = -1; i <= 1; i++) { const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (p) { decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); } }
         if (kind === "bar") {
-          // a POOL TABLE mid-room: felt top, dark rails, six pocket dots, racked balls
-          const pp = pt(halfIn - 0.6, -(halfTan - 2.6), 1.0) || pt(halfIn, 0, 1.0);
-          if (pp) {
-            decor(pp, 0.42, along ? 1.5 : 2.8, 0.1, along ? 2.8 : 1.5, 0x6b4a2a);   // table body
-            decor(pp, 0.78, along ? 1.6 : 2.9, 0.16, along ? 2.9 : 1.6, 0x274a30);   // rail frame
-            glow(pp, 0.8, along ? 1.4 : 2.6, 0.04, along ? 2.6 : 1.4, 0x1f8a4d, 0.4); // felt
-            const balls = [0xffd400, 0x0050c8, 0xd40000, 0x6a0dad, 0xff7000, 0x0a7d3a];
-            for (let g = 0; g < 6; g++) { const a = g / 6 * 6.28, lx = pp.x + Math.cos(a) * 0.4, lz = pp.z + Math.sin(a) * 0.4; b.lbox(lx, 0.86, lz, 0.12, 0.12, 0.12, balls[g], { cast: false }); }
-            // overhead pool lamp
-            b.lbox(pp.x, FHl - 0.7, pp.z, along ? 0.4 : 1.6, 0.2, along ? 1.6 : 0.4, 0xfff0c0, { emissive: 0xffe39a, ei: 0.7, cast: false });
+          // ===== THE VELVET CLUB — a real VIP nightclub interior =====
+          // a glowing multi-colour DANCE FLOOR mid-room, VIP velvet BOOTHS down
+          // the walls, a DJ booth lit with neon, a mirror-ball ceiling glow and a
+          // little interior velvet cordon so inside reads as the status apex. (The
+          // exclusive ENTRANCE / rope / bouncer line is set up by clubRope + run
+          // by city/club.js; this is the payoff you get once you're past it.)
+          const FLOORCOLS = [0xe85d8a, 0x8a4fff, 0x39d0ff, 0xffd400];
+          const dfP = pt(halfIn + 0.4, 0, 1.2) || pt(halfIn, 0, 1.2);
+          if (dfP) {
+            // a 3×3 checker of softly glowing floor panels = the dance floor
+            for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
+              const lat = gx * 0.95, dep = gz * 0.95;
+              const lx = dfP.x + tx * lat + inx * dep, lz = dfP.z + tz * lat + inz * dep;
+              const c = FLOORCOLS[(gx + gz + 2) % FLOORCOLS.length];
+              b.lbox(lx, 0.04, lz, 0.9, 0.06, 0.9, c, { emissive: c, ei: 0.85, cast: false });
+            }
+            // a glinting MIRROR-BALL: a bright cube high over the floor + a wash glow
+            b.lbox(dfP.x, FHl - 0.55, dfP.z, 0.4, 0.4, 0.4, 0xcfd6e0, { emissive: 0xbcd0ff, ei: 0.7, cast: false });
+            b.lbox(dfP.x, FHl - 0.3, dfP.z, along ? 0.5 : 3.0, 0.05, along ? 3.0 : 0.5, 0x8a4fff, { emissive: 0x8a4fff, ei: 0.55, cast: false });
           }
+          // VIP BOOTHS hugging the side walls: a velvet bench + a low cocktail
+          // table glowing with bottle-service light. Two per side, off the aisle.
+          for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
+            const bp = pt(5.4 + i * 3.2, side * (halfTan - 1.1), 0.8);
+            if (!bp) continue;
+            decor(bp, 0.5, 2.0, 0.9, 0.7, 0x6a1622);                          // velvet booth back+seat
+            decor(bp, 0.95, 2.0, 0.16, 0.7, 0x8a1f2b);                        // padded top trim
+            const tp = pt(5.4 + i * 3.2, side * (halfTan - 2.3), 0.6);
+            if (tp) { decor(tp, 0.55, 0.7, 0.1, 0.7, 0x1c1f24); glow({ x: tp.x, z: tp.z }, 0.62, 0.5, 0.05, 0.5, 0xffd166, 0.6); }   // lit cocktail table
+          }
+          // the DJ BOOTH at the back beside the bar: a raised console, two glowing
+          // decks, and a tall neon backdrop strip (the club's signature pink).
+          const djP = pt(2 * halfIn - 3.6, -(halfTan - 1.6), 0.8);
+          if (djP) {
+            decor(djP, 0.6, along ? 1.0 : 2.0, 1.2, along ? 2.0 : 1.0, 0x20242b);   // console body
+            for (const e of [-0.45, 0.45]) { const lx = djP.x + tx * e, lz = djP.z + tz * e; b.lbox(lx, 1.24, lz, 0.36, 0.06, 0.36, 0x39d0ff, { emissive: 0x39d0ff, ei: 0.8, cast: false }); }  // decks
+            b.lbox(djP.x + inx * 0.4, 1.8, djP.z + inz * 0.4, along ? 0.06 : 1.8, 1.4, along ? 1.8 : 0.06, 0xe85d8a, { emissive: 0xe85d8a, ei: 0.8, cast: false });   // neon backdrop
+          }
+          // an interior VELVET CORDON marking the elite back lounge (just a couple
+          // of brass posts + a red span) so the VIP area reads as roped-off too.
+          for (const side of [-1, 1]) { const cp = pt(2 * halfIn - 5.6, side * 1.3, 0.6); if (cp) decor(cp, 0.5, 0.14, 1.0, 0.14, 0xcaa64a); }
+          { const cp = pt(2 * halfIn - 5.6, 0, 0.6); if (cp) glow(cp, 0.82, along ? 0.05 : 2.4, 0.06, along ? 2.4 : 0.05, 0x8a1f2b, 0.5); }
         } else {
           // CASINO: a couple of glowing felt TABLES + a row of SLOT MACHINES
           for (const lat of [-(halfTan - 2.4), halfTan - 2.4]) {
@@ -1160,6 +1476,11 @@
           const lat0 = -st.across / 2 + 0.3, gap = (st.across - 0.6) / 3;
           for (let i = 0; i < 3; i++) { const lat = lat0 + i * gap, lx = st.p.x + tx * lat, lz = st.p.z + tz * lat, y = 0.8 + r * 0.55; b.lbox(lx, y, lz, along ? 0.05 : 0.34, 0.26, along ? 0.34 : 0.05, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.6, cast: false }); }
         }
+        // a big BIG-SCREEN TV demo wall + a glass gadget island in the middle
+        const bs = pt(2 * halfIn - 1.8, 0, 0.6);
+        if (bs) { decor(bs, 1.6, along ? 0.08 : 3.0, 1.8, along ? 3.0 : 0.08, 0x14171c); glow(bs, 1.6, along ? 0.05 : 2.7, 1.5, along ? 2.7 : 0.05, 0x39d0c0, 0.7); }
+        const gi = pt(halfIn, 0, 1.0);
+        if (gi) { decor(gi, 0.5, along ? 1.0 : 2.0, 1.0, along ? 2.0 : 1.0, 0x2a2f37); decor(gi, 1.04, along ? 0.95 : 1.9, 0.06, along ? 1.9 : 0.95, GLASS); }
         break;
       }
       case "hardware": {
@@ -1167,6 +1488,11 @@
         wallShelves({ body: 0x4a4034, top: 0x6b5a3a, h: 2.0, count: 3, span: 2.4 });
         for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.65, across: st.across }, [0xffd166, 0x8a5a2b, 0xb9bec6, 0x66d9c0], 5, 0.26, 0.34);
         island(2 * halfIn - 5.0, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.1, along ? 2.4 : 1.0, 0x6b5a3a, { cast: false });
+        // a leaning STACK OF LUMBER + a hung tool pegboard on a side wall
+        const lb = pt(6.6, halfTan - 1.2, 0.7);
+        if (lb) for (let i = 0; i < 4; i++) decor({ x: lb.x, z: lb.z }, 0.18 + i * 0.16, along ? 0.34 : 2.6, 0.14, along ? 2.6 : 0.34, [0x8a5a2b, 0xa9743a][i % 2]);
+        const pb = pt(halfIn, -(halfTan - 0.2), 0.6);
+        if (pb) { decor(pb, 1.5, along ? 0.03 : 2.4, 1.4, along ? 2.4 : 0.03, 0x55452e); glow(pb, 1.5, along ? 0.02 : 2.5, 1.5, along ? 2.5 : 0.02, 0xffd166, 0.2); }
         break;
       }
       case "hospital": {
@@ -1189,6 +1515,10 @@
         // a glowing cooler against the back wall
         const cp = pt(2 * halfIn - 2.6, 0, 0.6);
         if (cp) glow(cp, 1.1, along ? 0.4 : 3.0, 2.0, along ? 3.0 : 0.4, 0x9fe0ff, 0.4);
+        // a SNACK ENDCAP island + a coffee/slushie machine on a side counter
+        island(halfIn, 0, along ? 1.0 : 2.0, 1.2, along ? 2.0 : 1.0, 0x44505c, { cast: false });
+        const cm = pt(2 * halfIn - 4.4, halfTan - 1.2, 0.7);
+        if (cm) { decor(cm, 0.55, 0.6, 1.1, 0.6, 0x2a2f37); glow(cm, 1.05, 0.5, 0.18, 0.5, 0xff7a3b, 0.4); }
         break;
       }
       case "carlot":
@@ -1203,6 +1533,14 @@
           }
           const lp = pt(2 * halfIn - 2.6, 0, 0.6);
           if (lp) glow(lp, 1.6, along ? 0.05 : 3.2, 1.6, along ? 3.2 : 0.05, 0x4fd0a0, 0.4);   // listings board
+          // a SCALE-MODEL development on a centre table + a SOLD sign by the door
+          const mt = pt(halfIn, 0, 1.0);
+          if (mt) {
+            decor(mt, 0.42, along ? 1.2 : 2.2, 0.1, along ? 2.2 : 1.2, 0x6b4a2a);    // table
+            for (let g = -1; g <= 1; g++) { const lx = mt.x + tx * g * 0.6, lz = mt.z + tz * g * 0.6; b.lbox(lx, 0.72, lz, 0.4, 0.5, 0.4, [0xc8cdd4, 0xa9b0b8][(g + 1) % 2], { cast: false }); }
+          }
+          const ss = pt(4.6, halfTan - 1.0, 0.7);
+          if (ss) { decor(ss, 0.85, 0.08, 1.7, 0.08, 0x8a939c); glow(ss, 1.5, along ? 0.05 : 1.0, 0.5, along ? 1.0 : 0.05, 0x4fd0a0, 0.5); }
         } else {
           // car lot / chop shop showroom: keep the centre clear for a vehicle,
           // line the walls with tyres/tool benches only.
@@ -1243,18 +1581,288 @@
   }
   CBZ.cityFurnishInterior = function (b, kind, door) { furnishInterior(b, kind, door); };
 
-  function furnishHome(b, rng) {
-    // ground-floor living space: a bed, a couch, a table, a kitchen counter
-    const W = b.w, D = b.d;
+  function furnishHome(b, rng, tier) {
+    // a real living space dressed to the home's TIER so each rung of the ladder
+    // feels DISTINCT and lived-in — a bare studio at the bottom, a richly
+    // appointed aerie near the top. Every piece is gated by clearFloorPoint so the
+    // door->stair aisle never gets blocked. Draw-call-cheap: higher tiers add a
+    // handful more cached-material boxes, not a denser per-floor furnish.
+    //   t1 studio : bed, kitchenette, one chair, a lamp, a rug, basic art.
+    //   t2 flat   : + a real couch + coffee table + TV, a bookshelf, a plant.
+    //   t3 loft   : + a dining set, a media console, area rugs, more greenery/art.
+    //   t4 aerie  : + premium finishes — a sectional, a bar cart, statement art,
+    //               accent uplighting, a console table — the "glass perch" look.
+    const W = b.w, D = b.d, FHl = b.FH || FH;
+    const beds = (tier && tier.beds) || 1;
+    const t = (tier && tier.tier) || 1;
     const cz = D / 2 - 2.0;
     function decor(x, y, z, w, h, d, color, pad) {
-      if (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad)) b.lbox(x, y, z, w, h, d, color, { cast: false });
+      if (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad)) { b.lbox(x, y, z, w, h, d, color, { cast: false }); return true; }
+      return false;
     }
-    decor(-W / 2 + 2.0, 0.4, -D / 2 + 2.2, 2.0, 0.5, 1.2, 0x6b7da0, 1.1);   // bed base
-    decor(-W / 2 + 2.0, 0.85, -D / 2 + 1.7, 2.0, 0.25, 0.5, 0xe8e8ee, 1.1); // pillow
-    decor(W / 2 - 2.4, 0.45, -D / 2 + 2.4, 2.4, 0.6, 1.0, 0x8a5a2b, 1.2);    // couch
-    decor(0, 0.4, 0, 1.4, 0.5, 0.9, 0x9aa0a8, 1.0);                          // coffee table
-    decor(W / 2 - 1.6, 0.6, cz, 1.0, 1.0, Math.min(D - 3, 4), 0x55606e, 1.0); // kitchen counter
+    function glowAt(x, y, z, w, h, d, color, ei, pad) {
+      if (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad)) b.lbox(x, y, z, w, h, d, color, { emissive: color, ei: ei || 0.5, cast: false });
+    }
+    // emissive CEILING FIXTURE (warm) — homes read lit. Higher tiers add a second
+    // back-of-room fixture so the bigger spaces aren't dark in the corners.
+    b.lbox(0, FHl - 0.3, 0, 2.0, 0.1, 0.5, 0xffd9a0, { emissive: 0xffd9a0, ei: 0.42, cast: false });
+    if (t >= 3) glowAt(-W / 2 + 2.6, FHl - 0.3, cz, 1.6, 0.1, 0.5, 0xffe6c0, 0.4, 1.0);
+
+    // a HARDWOOD/tinted FLOOR slab so each tier reads a different finish underfoot.
+    const FLOORHEX = [0x3a322a, 0x3a322a, 0x33373f, 0x2e2f36, 0x2a2c34][Math.min(4, t)];
+    b.lbox(0, 0.02, 0, W - 1.4, 0.04, D - 1.4, FLOORHEX, { cast: false });
+
+    // PRIMARY BED in the back corner (base + mattress + pillow). Linen colour +
+    // a headboard richen with tier.
+    const linen = [0x6b7da0, 0x6b7da0, 0x5a6f9a, 0x7a6f8c, 0x8a6f9c][Math.min(4, t)];
+    decor(-W / 2 + 2.0, 0.35, -D / 2 + 2.2, 2.0, 0.4, 1.3, 0x4a4036, 1.1);   // frame
+    decor(-W / 2 + 2.0, 0.62, -D / 2 + 2.2, 1.9, 0.2, 1.25, linen, 1.1);     // mattress
+    decor(-W / 2 + 2.0, 0.8, -D / 2 + 1.7, 1.9, 0.22, 0.5, 0xe8e8ee, 1.1);   // pillow
+    if (t >= 2) decor(-W / 2 + 2.0, 1.1, -D / 2 + 2.8, 2.0, 0.9, 0.16, [0x55606e, 0x6b4a2a, 0x5a1622][Math.min(2, t - 2)], 1.1);  // headboard
+    if (t >= 3) { decor(-W / 2 + 0.9, 0.45, -D / 2 + 2.2, 0.5, 0.5, 0.5, 0x55452e, 1.1); glowAt(-W / 2 + 0.9, 0.85, -D / 2 + 2.2, 0.4, 0.16, 0.4, 0xffe6b0, 0.5, 1.1); }  // nightstand + lamp
+    // a SECOND bed for multi-bed tiers
+    if (beds >= 2) {
+      decor(-W / 2 + 2.0, 0.35, D / 2 - 2.4, 1.8, 0.4, 1.2, 0x4a4036, 1.1);
+      decor(-W / 2 + 2.0, 0.62, D / 2 - 2.4, 1.7, 0.2, 1.15, 0x7a6f8c, 1.1);
+      decor(-W / 2 + 2.0, 0.8, D / 2 - 1.95, 1.7, 0.22, 0.5, 0xe8e8ee, 1.1);
+    }
+
+    // KITCHEN counter along the back wall (every tier gets a real kitchen). Higher
+    // tiers upgrade to a stone worktop + an island.
+    decor(W / 2 - 1.6, 0.6, cz, 1.0, 1.0, Math.min(D - 3, 4), 0x55606e, 1.0);
+    if (t >= 2) decor(W / 2 - 1.6, 1.12, cz, 1.1, 0.08, Math.min(D - 3, 4), 0xe6e8ee, 1.0);   // stone worktop
+    if (t >= 3) { decor(W / 2 - 3.4, 0.55, cz, 1.6, 1.0, 2.4, 0x49505b, 1.0); decor(W / 2 - 3.4, 1.08, cz, 1.7, 0.08, 2.5, 0xc8ccd4, 1.0); }  // kitchen island
+
+    // ---- a STUDIO (t1) keeps it sparse: a single chair + a small rug + a lamp ----
+    if (t <= 1) {
+      decor(W / 2 - 2.4, 0.45, -D / 2 + 2.6, 0.9, 0.5, 0.9, 0x6b5a4a, 1.0);          // armchair seat
+      decor(W / 2 - 2.4, 0.95, -D / 2 + 3.0, 0.9, 0.6, 0.16, 0x6b5a4a, 1.0);         // chair back
+      decor(W / 2 - 2.0, 0.02, -D / 2 + 2.8, 2.2, 0.04, 2.0, 0x5a4a4a, 1.2);         // small rug
+      decor(W / 2 - 1.6, 0.7, -D / 2 + 1.4, 0.12, 1.4, 0.12, 0x2a2f37, 0.7);         // lamp pole
+      glowAt(W / 2 - 1.6, 1.5, -D / 2 + 1.4, 0.42, 0.32, 0.42, 0xffe6b0, 0.6, 0.7);  // lamp shade
+      glowAt(0, 2.4, -D / 2 + 0.18, 1.2, 0.8, 0.05, 0x5b8bff, 0.16, 0.4);            // one piece of art
+      return;
+    }
+
+    // ---- t2+ : a full LIVING set (couch + coffee table + TV on a stand + rug) ----
+    const sofaC = t >= 4 ? 0x5a4f6a : 0x8a5a2b;
+    if (t >= 4) { // aerie gets an L-sectional
+      decor(W / 2 - 2.6, 0.45, -D / 2 + 2.6, 2.8, 0.6, 1.0, sofaC, 1.2);
+      decor(W / 2 - 1.4, 0.45, -D / 2 + 4.0, 1.0, 0.6, 2.4, sofaC, 1.2);
+    } else {
+      decor(W / 2 - 2.4, 0.45, -D / 2 + 2.4, 2.4, 0.6, 1.0, sofaC, 1.2);             // couch
+    }
+    decor(0, 0.4, 0, 1.4, 0.5, 0.9, t >= 4 ? 0xcaa64a : 0x9aa0a8, 1.0);             // coffee table (gold on aerie)
+    decor(W / 2 - 1.4, 0.02, -D / 2 + 2.6, 3.0, 0.04, 2.6, [0,0,0x5a4a6a,0x4a3f55,0x4a3550][Math.min(4, t)], 1.4);  // rug
+
+    // a TV on a low STAND / console facing the couch (dark screen + under-glow)
+    decor(W / 2 - 1.6, 0.35, 0, 1.8, 0.5, 0.5, 0x2a2f37, 1.0);                       // stand
+    const tvW = t >= 4 ? 2.2 : 1.4;
+    decor(W / 2 - 1.6, 1.1, 0, tvW, 1.0, 0.08, 0x14171c, 1.0);                       // screen
+    glowAt(W / 2 - 1.6, 1.1, 0, tvW - 0.3, 0.7, 0.05, 0x39516a, 0.4, 1.0);           // screen glow
+
+    // a BOOKSHELF against a wall (body + a couple of coloured book bands)
+    if (decor(-W / 2 + 1.4, 0.9, 0.5, 0.6, 1.8, 1.6, 0x6b4a2a, 0.9)) {
+      for (let i = 0; i < 3; i++) glowAt(-W / 2 + 1.4, 0.6 + i * 0.5, 0.5, 0.5, 0.18, 1.4, [0x8a5a2b, 0x5b8bff, 0x4caf6e][i % 3], 0.0, 0.9);
+    }
+
+    // a POTTED PLANT in a corner + a floor LAMP (emissive shade) by the couch
+    decor(W / 2 - 1.2, 0.25, -D / 2 + 1.2, 0.5, 0.5, 0.5, 0x6b4a2a, 0.8);
+    decor(W / 2 - 1.2, 0.9, -D / 2 + 1.2, 0.6, 0.7, 0.6, 0x3f9a4f, 0.8);
+    decor(W / 2 - 2.6, 0.7, -D / 2 + 1.4, 0.12, 1.4, 0.12, 0x2a2f37, 0.7);           // lamp pole
+    glowAt(W / 2 - 2.6, 1.5, -D / 2 + 1.4, 0.45, 0.35, 0.45, 0xffe6b0, 0.7, 0.7);    // lamp shade
+
+    // ---- t3+ : a DINING set + a second plant + extra art for the lived-in feel ----
+    if (t >= 3) {
+      decor(0, 0.5, cz - 0.4, 1.2, 0.5, 2.6, 0x6b4a2a, 1.1);                          // dining table
+      for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) decor(0 + s * 0.95, 0.45, cz - 0.4 + i * 0.9, 0.45, 0.9, 0.45, 0x49505b, 1.1);  // chairs
+      decor(-W / 2 + 2.0, 0.4, D / 2 - 2.2, 0.8, 0.8, 0.8, 0x3f9a4f, 0.9);            // second planter
+      glowAt(-W / 2 + 0.22, 2.0, 0, 0.05, 1.2, 2.0, 0xc792ea, 0.18, 0.4);            // side-wall art column
+    }
+
+    // ---- t4 aerie : a BAR CART + a console table + accent uplighting (the perch) ----
+    if (t >= 4) {
+      decor(W / 2 - 2.2, 0.5, D / 2 - 2.6, 0.9, 1.0, 1.4, 0x3a2b1e, 0.9);            // bar cart body
+      glowAt(W / 2 - 1.5, 1.4, D / 2 - 2.6, 0.06, 0.9, 1.2, 0x39d0ff, 0.4, 0.9);     // backlit bottles
+      decor(-W / 2 + 1.4, 0.5, -D / 2 + 4.2, 0.6, 1.0, 1.8, 0x55452e, 0.9);          // console table
+      for (const s of [-1, 1]) glowAt(s * (W / 2 - 0.6), 0.5, 0, 0.18, 1.0, 0.18, 0xffe6c0, 0.5, 0.6);  // accent uplights by the glass
+      glowAt(0, 2.5, -D / 2 + 0.18, 2.4, 1.1, 0.05, 0xcaa64a, 0.2, 0.4);             // statement art
+    }
+
+    // 1-2 WALL-ART planes (framed colour) high on the back/side wall
+    glowAt(0, 2.4, -D / 2 + 0.18, 1.4, 0.9, 0.05, [0x5b8bff, 0xc792ea, 0xff9e6b][t % 3], 0.18, 0.4);
+    if (t >= 2) glowAt(W / 2 - 0.18, 2.3, 0, 0.05, 0.8, 1.2, [0x4caf6e, 0xe85d8a][t % 2], 0.18, 0.4);
+  }
+
+  // THE PENTHOUSE — the apex home filling the top floor of the mega-tower. This
+  // is the loft turned all the way up: a marble plinth bedroom with a four-poster
+  // king, a sunken lounge ringed by a wraparound sectional + a wall-spanning TV, a
+  // marble kitchen island with a waterfall counter + bar stools, a long dining
+  // table, a glowing CHANDELIER, a private home BAR with a backlit bottle wall, a
+  // grand piano, gold accent columns by the glass, a luxe rug, and warm cove
+  // lighting. Everything dressed at `baseY` (the top interior floor); the glass
+  // curtain wall (from the modern shell) rings it on all sides. The elevator +
+  // the penthouse door both land the owner right here. Draw-call-cheap (shared
+  // cached mats via b.lbox; no per-floor furniture — only the top floor is dressed).
+  function furnishPenthouse(b, baseY) {
+    const W = b.w, D = b.d, FHl = b.FH || FH;
+    const Y = baseY || 0;
+    const lb = (x, y, z, w, h, d, c, o) => b.lbox(x, Y + y, z, w, h, d, c, o || { cast: false });
+    const glow = (x, y, z, w, h, d, c, ei) => b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
+    const MARBLE = 0xe6e8ee, GOLD = 0xcaa64a, DARKWOOD = 0x3a2b1e, VELVET = 0x5a1622, STONE = 0x9aa0a8;
+    // ---- a polished MARBLE floor slab covering the whole penthouse ----
+    lb(0, 0.02, 0, W - 1.4, 0.04, D - 1.4, 0xc8ccd4);
+    // ---- warm COVE light running the perimeter + a central CHANDELIER ----
+    for (let i = -1; i <= 1; i++) glow(i * (W / 3.0), FHl - 0.22, 0, W / 4.2, 0.08, 0.35, 0xffe6c0, 0.5);
+    glow(0, FHl - 0.55, 0, 1.0, 0.5, 1.0, 0xfff0d0, 0.85);                          // chandelier body
+    for (let a = 0; a < 8; a++) { const an = a / 8 * 6.283; glow(Math.cos(an) * 0.7, FHl - 0.5, Math.sin(an) * 0.7, 0.16, 0.3, 0.16, 0xffe6a0, 0.7); }  // chandelier drops
+    // ---- MASTER BEDROOM on a raised marble plinth in the back corner ----
+    lb(-W / 2 + 3.0, 0.08, -D / 2 + 3.2, 6.2, 0.16, 5.4, MARBLE);                   // plinth
+    lb(-W / 2 + 3.0, 0.55, -D / 2 + 3.2, 3.0, 0.5, 2.4, DARKWOOD);                  // king frame
+    lb(-W / 2 + 3.0, 0.9, -D / 2 + 3.2, 2.8, 0.26, 2.3, 0x6b7da0);                  // mattress
+    lb(-W / 2 + 3.0, 1.12, -D / 2 + 2.2, 2.8, 0.3, 0.6, 0xe8e8ee);                  // pillows
+    lb(-W / 2 + 3.0, 2.0, -D / 2 + 4.5, 3.2, 1.6, 0.2, VELVET);                     // velvet headboard wall
+    for (const s of [-1, 1]) { lb(-W / 2 + 3.0 + s * 1.7, 1.4, -D / 2 + 2.0, 0.12, 2.6, 0.12, GOLD); }  // four-poster posts (front)
+    for (const s of [-1, 1]) { lb(-W / 2 + 3.0 + s * 1.7, 0.45, -D / 2 + 4.4, 0.5, 0.7, 0.5, DARKWOOD); glow(-W / 2 + 3.0 + s * 1.7, 0.95, -D / 2 + 4.4, 0.4, 0.16, 0.4, 0xffe6b0, 0.5); }  // nightstands + lamps
+    // ---- SUNKEN LOUNGE: wraparound sectional facing a wall-spanning media wall ----
+    lb(0, 0.02, D / 2 - 5.0, 8.5, 0.04, 5.0, 0x4a3550);                             // luxe rug
+    lb(0, 0.5, D / 2 - 3.2, 7.0, 0.65, 1.2, 0x6b2230);                              // sofa back run (velvet)
+    for (const s of [-1, 1]) lb(s * 3.4, 0.5, D / 2 - 4.6, 1.2, 0.65, 3.0, 0x6b2230);  // sectional returns
+    lb(0, 0.42, D / 2 - 5.6, 2.6, 0.42, 1.1, GOLD);                                 // gold coffee table
+    lb(0, 1.5, D / 2 - 0.3, 5.0, 2.2, 0.12, 0x101319);                             // wall-spanning TV
+    glow(0, 1.5, D / 2 - 0.38, 4.6, 1.8, 0.05, 0x39516a, 0.45);                    // screen glow
+    // ---- MARBLE KITCHEN: island w/ waterfall counter + stools + back run ----
+    lb(W / 2 - 3.4, 0.55, 0.4, 2.2, 1.0, 4.6, STONE);                              // island body
+    lb(W / 2 - 3.4, 1.08, 0.4, 2.4, 0.1, 4.9, MARBLE);                             // waterfall worktop
+    for (let i = -1; i <= 1; i++) { const sz = 0.4 + i * 1.4; lb(W / 2 - 5.0, 0.45, sz, 0.5, 0.9, 0.5, DARKWOOD); glow(W / 2 - 5.0, 0.92, sz, 0.42, 0.1, 0.42, GOLD, 0.3); }  // bar stools
+    lb(W / 2 - 1.3, 0.6, -D / 2 + 3.4, 1.0, 1.1, 4.4, 0x49505b);                   // back counter run
+    glow(W / 2 - 1.0, 1.7, -D / 2 + 3.4, 0.05, 0.9, 3.2, 0x9fe0ff, 0.3);           // backsplash glow
+    // ---- a HOME BAR with a backlit bottle wall in the far corner ----
+    lb(W / 2 - 2.4, 0.55, D / 2 - 2.6, 1.0, 1.0, 3.0, DARKWOOD);                   // bar counter
+    glow(W / 2 - 1.0, 1.8, D / 2 - 2.6, 0.06, 1.6, 2.6, 0x39d0ff, 0.5);            // backlit bottle shelf
+    for (let i = -2; i <= 2; i++) lb(W / 2 - 1.2, 1.4 + (i % 2) * 0.5, D / 2 - 2.6 + i * 0.5, 0.12, 0.4, 0.12, [0x6fbf73, 0xbf6f6f, 0xc7b06f][(i + 2) % 3]);  // bottles
+    // ---- a long DINING table with chairs ----
+    lb(W / 2 - 7.5, 0.5, D / 2 - 4.5, 1.4, 0.5, 3.8, DARKWOOD);
+    glow(W / 2 - 7.5, 0.78, D / 2 - 4.5, 0.9, 0.04, 3.2, 0xffe6c0, 0.18);          // candlelit runner
+    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) lb(W / 2 - 7.5 + s * 1.1, 0.45, D / 2 - 4.5 + i * 1.2, 0.5, 0.9, 0.5, VELVET);  // chairs
+    // ---- a GRAND PIANO near the lounge ----
+    lb(-W / 2 + 3.0, 0.45, D / 2 - 4.0, 2.4, 0.5, 1.6, 0x14171c);                  // body
+    lb(-W / 2 + 3.0, 0.78, D / 2 - 3.2, 2.4, 0.08, 0.4, 0x14171c);                 // open lid hint
+    for (let i = -1; i <= 1; i++) lb(-W / 2 + 2.0, 0.2, D / 2 - 4.0 + i * 0.5, 0.1, 0.4, 0.1, 0x14171c);  // legs
+    // ---- GOLD accent columns flanking the glass + big planters ----
+    for (const s of [-1, 1]) lb(s * (W / 2 - 1.0), FHl / 2, 0, 0.3, FHl, 0.3, GOLD);
+    lb(-W / 2 + 2.2, 0.5, D / 2 - 2.4, 1.0, 1.0, 1.0, 0x3f9a4f);                    // planter
+    lb(W / 2 - 2.0, 0.5, -D / 2 + 2.2, 1.0, 1.0, 1.0, 0x3f9a4f);
+    // ---- statement ART on the solid back stretches ----
+    glow(-W / 2 + 0.22, 2.0, 0, 0.05, 1.6, 2.6, 0xc792ea, 0.22);
+    glow(0, 2.6, -D / 2 + 0.22, 2.6, 1.2, 0.05, GOLD, 0.2);
+  }
+
+  // a handful of PARKED CARS on the Spire's ground-floor deck so an empty garage
+  // still reads as a garage. They sit in the four corner quadrants, clear of the
+  // central drive lanes (the bays line up on each face's middle). Solid props.
+  function deckCars(b, w, d) {
+    const PAL = [0xc0392b, 0x2e86de, 0xf1c40f, 0x27ae60, 0x8e44ad, 0xecf0f1];
+    const spots = [
+      { x: -w * 0.27, z: -d * 0.27, c: PAL[0] },
+      { x: w * 0.27, z: -d * 0.27, c: PAL[1] },
+      { x: -w * 0.27, z: d * 0.27, c: PAL[3] },
+      { x: w * 0.27, z: d * 0.27, c: PAL[4] },
+    ];
+    for (const s of spots) {
+      // skip the corner that shares the stairwell strip (-x side) so cars never
+      // block the climb to the elevator/roof.
+      if (s.x < -w * 0.18) continue;
+      b.lbox(s.x, 0.55, s.z, 2.0, 0.7, 3.9, s.c, { solid: true });          // body
+      b.lbox(s.x, 1.15, s.z + 0.2, 1.7, 0.55, 2.0, 0x1b1f25, { cast: false }); // cabin/glass
+      b.lbox(s.x, 0.3, s.z + 1.5, 2.05, 0.18, 0.5, 0x12161b, { cast: false }); // bumper hint
+    }
+  }
+
+  // ===== THE MEGA-TOWER — the flagship skyscraper, the tallest in the game =====
+  // ~30 storeys (DOUBLE the 15-storey island Twin Towers). It reuses makeBuilding's
+  // proven enterable shell + switchback stairs scaled tall, so it's fully
+  // climbable; makeBuilding's "modern" path already hangs a floor-to-ceiling glass
+  // CURTAIN WALL on every storey (perf-safe: shared cached glass mat, capped pane
+  // count per face). The ground floor is a wraparound HANGAR/garage deck (drive in
+  // from any side). The top floor is a lavish PENTHOUSE (furnishPenthouse) with a
+  // clean swing DOOR off the elevator landing. The rooftop HELIPAD is added by the
+  // worldgen post-pass via makeHelipad (which also sets lot.building.helipad).
+  //
+  // Tags set: lot.building.home (penthouse tier), lot.building.hangar {x,z,w,d},
+  // lot.building.helipad (by makeHelipad), lot.building.garage, lot.building.elevatorPad.
+  // Returns { b, penthouseDoor } for the worldgen caller + CBZ.cityMegaTower().
+  let _megaTower = null;   // { lot, penthouseDoor } cached for CBZ.cityMegaTower()
+  function makeMegaTower(root, lot, w, d, side, door, doorPt, FLAGSHIP) {
+    const STOREYS = 30;                                  // double the 15-storey Twin Towers
+    const color = 0x223040;                              // dark glass-tower mullion tone
+    // reuse the proven shell: tall enough that makeBuilding's `modern` (storeys>=3)
+    // curtain-wall path lights up on every floor; garageGround makes the ground a
+    // drive-in deck. Stairs auto-engage (storeys>1, lot is wide), so it's climbable.
+    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side, { garageGround: true });
+    const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
+    // PENTHOUSE — the apex home dressed across the whole top floor.
+    furnishPenthouse(b, topY);
+    deckCars(b, w, d);                                   // a few parked cars so the hangar deck reads as one
+
+    // A clean PENTHOUSE DOOR off the elevator landing on the top floor. The shell's
+    // ground door slot was consumed by the garage deck, so the penthouse gets its
+    // own swing door at floor level `topY`, set into the stairwell-side wall the
+    // elevator lands beside — a real shut/open threshold into the living space.
+    // It is an interior door (no exterior wall to pierce), so we hand it a short
+    // partition wall + the standard hinged leaf, framed and flush like every door.
+    const phDoorLocal = { x: -(w / 2) + WT + b.stairW + 1.0, z: 0, nx: 1, nz: 0 };  // faces into the room (+x)
+    // a short solid partition flanking the door so the leaf has a wall to seat into
+    const partW = 0.4, gap = DOORW;
+    for (const s of [-1, 1]) {
+      const pz = phDoorLocal.z + s * (gap / 2 + 1.4 + partW / 2);
+      b.lbox(phDoorLocal.x, topY + (FH - 0.85) / 2 + 0.02, pz, partW, FH - 0.85, 2.8, 0x2a323c, { solid: true });
+    }
+    // build the standard clean leaf+frame, then lift the whole rig (jambs, header,
+    // pivot, collider) up to the penthouse floor via makeDoorPanelAtY.
+    makeDoorPanelAtY(b.group, lot.cx, lot.cz, phDoorLocal, DOORW, topY);
+    const penthouseDoor = { x: lot.cx + phDoorLocal.x + 1.6, z: lot.cz + phDoorLocal.z, nx: 1, nz: 0, y: topY };
+
+    // tag the lot's building + the penthouse HOME record (the apex tier)
+    lot.kind = "tower";
+    lot.building = { ...b, name: FLAGSHIP.name, sign: color, side, door: doorPt };
+    lot.building.home = {
+      tier: FLAGSHIP.tier, id: FLAGSHIP.id, name: FLAGSHIP.name, price: FLAGSHIP.price, rent: 0,
+      sqft: FLAGSHIP.sqft, beds: 2, garage: FLAGSHIP.garage, elevator: true,
+      flagship: true, listed: true, owned: false,
+      // OWNING THE MEGA-TOWER = an airbase: a rooftop HELIPAD + a podium HANGAR.
+      // These flags are the WHY behind the price — Phase 3 reads g.cityOwnsHeli /
+      // g.cityOwnsHangar + the helipad to spawn + fly the missile chopper / F-22.
+      helipad: true, hangar: true,
+      // the penthouse lives on the TOP interior floor; the elevator lands here.
+      floorY: topY, loftY: topY, blurb: FLAGSHIP.blurb, door: penthouseDoor,
+    };
+    // the parking deck IS the ground floor; retrieved cars appear just outside a bay
+    lot.building.garage = { x: door.x + door.nx * 3.0, z: door.z + door.nz * 3.0, spots: [] };
+    lot.building.elevatorPad = { x: lot.cx - (w / 2 - 2.0), z: lot.cz, floorY: topY };
+    // the HANGAR: the ground/podium drive-in bay (a flagged WORLD-space zone). A
+    // ground-level bay the size of the deck footprint, centred on the lot — Phase 3
+    // reads this to place + roll out the F-22 once the hangar is bought.
+    lot.building.hangar = { x: lot.cx, z: lot.cz, w: w - 2 * WT, d: d - 2 * WT, y: 0 };
+
+    _megaTower = { lot, penthouseDoor };
+    return { b, penthouseDoor };
+  }
+
+  // build a hinged door whose whole rig sits at interior floor height `baseY`
+  // (for the penthouse, which has no ground-floor wall to pierce). Reuses
+  // makeDoorPanel, then lifts the pivot + frame/header meshes added during this
+  // call up to baseY. Cheap: a handful of meshes, identical clean leaf/frame.
+  function makeDoorPanelAtY(bgroup, ox, oz, localDoor, panelW, baseY) {
+    const before = bgroup.children.length;
+    const rec = makeDoorPanel(bgroup, ox, oz, localDoor, panelW);
+    // lift every mesh/group makeDoorPanel just appended (jambs, header, pivot) up
+    for (let i = before; i < bgroup.children.length; i++) bgroup.children[i].position.y += baseY;
+    // lift the height-gated collider too so it blocks at the penthouse floor
+    if (rec.col) { rec.col.y0 += baseY; rec.col.y1 += baseY; }
+    rec.doorY = baseY;   // only auto-open when an actor is near this floor in Y
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return rec;
   }
 
   function abandonDecor(b, rng, gangColor) {
@@ -1284,6 +1892,47 @@
     if (!b.clearFloorPoint || b.clearFloorPoint(-b.w / 2 + 2.2, b.d / 2 - 2.4, 1.2)) {
       b.lbox(-b.w / 2 + 2.2, 0.4, b.d / 2 - 2.4, 2.0, 0.5, 0.9, 0x4a423a, { cast: false });
     }
+    const clear = (x, z, pad) => (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad == null ? 1.0 : pad));
+    // a filthy MATTRESS PILE in a corner (a squatter's bed)
+    {
+      const mx = b.w / 2 - 2.2, mz = -b.d / 2 + 2.4;
+      if (clear(mx, mz, 1.1)) {
+        b.lbox(mx, 0.18, mz, 1.9, 0.3, 1.1, 0x6a5f50, { cast: false });           // mattress
+        b.lbox(mx + 0.3, 0.42, mz - 0.2, 1.2, 0.2, 0.8, 0x5a5246, { cast: false }); // crumpled blanket
+      }
+    }
+    // an OIL-DRUM FIRE: a rusty drum with an emissive ember glow + flame cube
+    {
+      const dx = (rng() - 0.5) * (b.w - 5), dz = (rng() - 0.5) * (b.d - 5);
+      if (clear(dx, dz, 1.0)) {
+        b.lbox(dx, 0.5, dz, 0.7, 1.0, 0.7, 0x3a2f24, { cast: false });            // drum
+        b.lbox(dx, 1.12, dz, 0.5, 0.45, 0.5, 0xff7a1f, { emissive: 0xff5a14, ei: 0.95, cast: false }); // flame
+        b.lbox(dx, 1.05, dz, 0.62, 0.12, 0.62, 0xffc24a, { emissive: 0xffb030, ei: 0.7, cast: false }); // ember rim
+      }
+    }
+    // BROKEN FURNITURE: a toppled chair + a smashed table on its side
+    {
+      const cx2 = -b.w / 2 + 2.6, cz2 = 0.4;
+      if (clear(cx2, cz2, 0.9)) { b.lbox(cx2, 0.25, cz2, 0.5, 0.5, 0.5, 0x4a4036, { cast: false }); b.lbox(cx2, 0.6, cz2 + 0.3, 0.5, 0.7, 0.08, 0x4a4036, { cast: false }); }
+      const tx2 = b.w / 2 - 3.0, tz2 = b.d / 2 - 3.2;
+      if (clear(tx2, tz2, 1.0)) { b.lbox(tx2, 0.35, tz2, 1.3, 0.08, 0.9, 0x55452e, { cast: false }); b.lbox(tx2 - 0.5, 0.18, tz2, 0.08, 0.36, 0.08, 0x55452e, { cast: false }); }
+    }
+    // extra GANG-TAG cluster (3 small tags) on one interior wall, tinted by the
+    // gang colour so a faction's turf reads its own colour up close.
+    {
+      const gtex2 = graffitiTex(gangColor || 0xb079ea);
+      const face = (rng() * 4) | 0, inset = 0.26;
+      for (let i = 0; i < 3; i++) {
+        const tg = new THREE.Mesh(new THREE.PlaneGeometry(1.2 + rng() * 0.6, 0.7 + rng() * 0.4),
+          new THREE.MeshBasicMaterial({ map: gtex2, transparent: true, depthWrite: false }));
+        const off = (i - 1) * 1.6;
+        if (face === 0) { tg.position.set(off, 2.4, -b.d / 2 + inset); }
+        else if (face === 1) { tg.position.set(off, 2.4, b.d / 2 - inset); tg.rotation.y = Math.PI; }
+        else if (face === 2) { tg.position.set(-b.w / 2 + inset, 2.4, off); tg.rotation.y = Math.PI / 2; }
+        else { tg.position.set(b.w / 2 - inset, 2.4, off); tg.rotation.y = -Math.PI / 2; }
+        b.group.add(tg);
+      }
+    }
   }
 
   function makeStash(b, lot, gangColor) {
@@ -1302,11 +1951,48 @@
     lot.building.stash.z = lot.cz + (b.d / 2 - 2.6);
   }
 
+  // ---- OWNERSHIP -----------------------------------------------------------
+  // EVERY lot ends up with lot.building.owner = {type, id, name, buyable}. One
+  // canonical field name (`owner`) consumed by zillow/gangs. Names come from a
+  // deterministic pool so the same lot reads the same proprietor each run.
+  const PROPRIETORS = ["Marcus Webb", "Lena Cho", "Tony Russo", "Dev Patel", "Rosa Vega",
+    "Grant Okafor", "Mei Lin", "Sal Bianchi", "Nadia Haq", "Cole Brennan", "Yuki Tanaka",
+    "Priya Rao", "Omar Said", "Greta Voss", "Hank Doyle", "Ivy Nguyen"];
+  const LANDLORDS = ["Crestview Holdings", "B. Falcone", "Sunset Property Co", "M. Delgado",
+    "Harborline LLC", "K. Sorensen", "Pinnacle Residential", "T. Okonkwo", "Ridgeway Estates",
+    "V. Castellano", "Northgate Rentals", "A. Lindqvist"];
+  function nameFor(pool, lot, idx) {
+    const seed = ((lot.i | 0) * 31 + (lot.j | 0) * 17 + (idx | 0) * 7) >>> 0;
+    return pool[seed % pool.length];
+  }
+  // stamp a single canonical owner. For homes the `type` is a live getter off
+  // home.owned, so the EXISTING realestate home.owned reset flips it back to
+  // 'landlord' on a new run — no parallel un-reset state in this file.
+  function stampOwner(lot, idx) {
+    const b = lot.building; if (!b || b.owner) return;
+    const kind = lot.kind;
+    if (kind === "abandoned") {
+      b.owner = { type: "gang", id: null, name: "(gang turf)", buyable: false };  // gangs.js sets owner.id
+    } else if (b.shop) {
+      b.owner = { type: "business", id: null, name: nameFor(PROPRIETORS, lot, idx), buyable: true };
+    } else if (b.home) {
+      const home = b.home, landlord = nameFor(LANDLORDS, lot, idx);
+      b.owner = {
+        id: null, buyable: home.listed !== false,   // only the curated ladder is for sale
+        get type() { return home.owned ? "player" : "landlord"; },
+        get name() { return home.owned ? "You" : landlord; },
+      };
+    } else {
+      // any other real building (towers without a home record, etc.)
+      b.owner = { type: "landlord", id: null, name: nameFor(LANDLORDS, lot, idx), buyable: true };
+    }
+  }
+
   CBZ.cityBuildings = function (city) {
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;
     const placed = [], abandonedLots = [], homeLots = [];
-    let chopShop = null, realtor = null, luxury = null, luxBuilding = null;
+    let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null;
 
     // shuffle the shop list, then float the gameplay-critical trades to the
     // front so they ALWAYS get placed; the rest fill in only sometimes, leaving
@@ -1325,16 +2011,63 @@
       if (dd > bestD) { bestD = dd; lux = lot; }
     }
 
+    // The property ladder is SHORT and every rung is a real, visitable building:
+    // one lot per LISTED level (studio → aerie), plus the flagship Spire on the
+    // lux lot. Every OTHER residence is a generic, occupied apartment (ranked for
+    // the empire board, but NOT on the market) so Zillow stays a handful of
+    // clearly-different LEVELS rather than a hundred near-identical listings.
     const HOME_TIERS = (C.homes || []).filter((h) => h.tier > 0);
-    const NONLUX_TIERS = HOME_TIERS.filter((h) => !h.elevator);   // studio / apt / condo
-    const PENTHOUSE = HOME_TIERS.find((h) => h.elevator) || HOME_TIERS[HOME_TIERS.length - 1];
-    let homeTierIdx = 0;
+    // THE APEX home goes on the lux lot as the MEGA-TOWER's penthouse. It is the
+    // highest-tier flagship in the ladder: once RE adds the tier-6 "penthouse"
+    // record (id "penthouse", flagship:true) it wins here; before that lands, the
+    // existing tier-5 Spire flagship is the fallback so the city always builds.
+    const FLAGSHIPS = HOME_TIERS.filter((h) => h.flagship);
+    const FLAGSHIP =
+      HOME_TIERS.find((h) => h.id === "penthouse") ||
+      (FLAGSHIPS.length ? FLAGSHIPS.reduce((a, b) => (b.tier > a.tier ? b : a)) : HOME_TIERS[HOME_TIERS.length - 1]);
+    // listed market rungs = everything that ISN'T the apex flagship (studio..aerie,
+    // and the old Spire too if the penthouse has superseded it as the apex).
+    const LISTED_TIERS = HOME_TIERS.filter((h) => h !== FLAGSHIP && !h.flagship);
+    const GENERIC = LISTED_TIERS[0] || FLAGSHIP;                   // furniture template for filler apts
+
+    // RESERVE one lot per listed level UP FRONT (like the lux lot) so the whole
+    // ladder ALWAYS exists even when shops/derelicts would otherwise eat every
+    // free lot. Spread the picks across the lot list so the levels aren't all
+    // clustered in one corner. A reserved lot skips the park/abandoned/shop rolls
+    // and is forced to become its assigned listed residence.
+    const reserved = new Map();
+    {
+      const pool = city.lots.filter((l) => l !== lux);
+      const n = LISTED_TIERS.length;
+      for (let t = 0; t < n && pool.length; t++) {
+        const idx = Math.min(pool.length - 1, Math.floor((t + 0.5) / n * pool.length));
+        if (!reserved.has(pool[idx])) reserved.set(pool[idx], LISTED_TIERS[t]);
+      }
+    }
 
     for (const lot of city.lots) {
       const isLux = lot === lux;
+      const forcedTier = reserved.get(lot) || null;   // a reserved listed-level lot
       const r = rng();
-      // parks (open plazas) for breathing room — fewer than before
-      if (!isLux && r < (C.parkFrac || 0.08)) { lot.kind = "park"; makePark(root, lot, rng); placed.push(lot); continue; }
+      // parks (open plazas) for breathing room — fewer than before. A park is a
+      // "dumb unowned corner": no collider/door requirement. We still give it a
+      // benign lot.building stub so the city has NO unowned lots — owned by the
+      // city. Downstream that touches lot.building.door already null-guards it.
+      if (!isLux && !forcedTier && r < (C.parkFrac || 0.08)) {
+        lot.kind = "park"; makePark(root, lot, rng);
+        // A park needs NO collider/door. But a few downstream lot.building.door
+        // consumers (careers' courier drop, lotDoor) read .door unguarded once a
+        // building exists — so we hand it a benign door at the park's own
+        // centre (the nearest open sidewalk-ish point), never a real entrance.
+        // nx/nz are omitted on purpose; readers that need a normal already guard
+        // door.nx != null (death/camera) and fall back to a centroid facing.
+        lot.building = {
+          park: true, name: "City Park",
+          door: { x: lot.cx, z: lot.cz },
+          owner: { type: "city", id: null, name: "City of Freeland", buyable: false },
+        };
+        placed.push(lot); continue;
+      }
 
       const w = lot.w - 2, d = lot.d - 2;
       const toCx = city.center.x - lot.cx, toCz = city.center.z - lot.cz;
@@ -1343,7 +2076,7 @@
       const doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
 
       // ---- ABANDONED / gang-run derelict ----
-      if (!isLux && r < (C.parkFrac || 0.08) + (C.abandonedFrac || 0.30)) {
+      if (!isLux && !forcedTier && r < (C.parkFrac || 0.08) + (C.abandonedFrac || 0.30)) {
         const storeys = 1 + ((rng() * 3) | 0);
         const color = ABANDONED_PALETTE[(rng() * ABANDONED_PALETTE.length) | 0];
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { boarded: true });
@@ -1360,7 +2093,7 @@
       // Essentials are placed unconditionally; extras only ~40% of the time, so
       // the remaining real lots become furnished, sellable HOMES.
       let shop = null;
-      if (!isLux) {
+      if (!isLux && !forcedTier) {
         if (shopIdx < nEssential) shop = shopQueue[shopIdx++];
         else if (shopIdx < shopQueue.length && rng() < 0.4) shop = shopQueue[shopIdx++];
       }
@@ -1368,7 +2101,7 @@
       if (shop) {
         const color = lightenWall(shop.sign);
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, shop.storeys, color, side, { showroom: !!(shop.gas || shop.carlot || shop.chop) });
-        signAwning(b, side, w, d, shop.sign, shop.name);
+        signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. On climbable buildings the
         // counter is shifted onto the solid side of the room so it never crosses
         // the dedicated stair strip.
@@ -1404,36 +2137,89 @@
           lot.building.chopZone = { x: door.x + door.nx * 5, z: door.z + door.nz * 5, r: 5.5 };
         }
         if (shop.realtor) realtor = lot;
+        // ===== THE VELVET CLUB — the city's one EXCLUSIVE nightclub =====
+        // The single "bar" shop IS the marquee club: a velvet rope across the
+        // door, a bouncer who stands just inside it, and a queue lane snaking
+        // out front. city/club.js reads lot.building.club to run the line +
+        // the drip-gated bouncer (money → clothes → drip → past the rope). We
+        // expose everything in WORLD coords so club.js needs no geometry math.
+        if (shop.kind === "bar") {
+          clubLot = lot;
+          const nx = door.nx, nz = door.nz, tx = -nz, tz = nx;   // out-normal + sidewalk tangent
+          const dx = door.x, dz = door.z;                        // door-wall centre (world)
+          // the rope sits right at the threshold; the bouncer holds the inside
+          // edge of it (one step toward the door), facing OUT at the line.
+          const ropeX = dx + nx * 1.4, ropeZ = dz + nz * 1.4;
+          // the QUEUE: a single-file lane offset to one side so the door stays
+          // walkable for the player, marching straight out from the rope.
+          const laneOff = 1.9;                                   // sideways shift of the lane
+          const queue = [];
+          for (let i = 0; i < 8; i++) {
+            const out = 2.6 + i * 1.55;                          // distance from the door wall
+            queue.push({ x: dx + nx * out + tx * laneOff, z: dz + nz * out + tz * laneOff });
+          }
+          lot.building.club = {
+            name: shop.name,
+            door: { x: door.x + nx * 1.2, z: door.z + nz * 1.2, nx, nz },   // step INTO the club
+            // bouncer stands at the rope, just OUTSIDE the door, facing the line
+            bouncerSpot: { x: ropeX, z: ropeZ, face: Math.atan2(nx, nz) },
+            // where an ADMITTED VIP lands once the rope opens (just inside)
+            insideSpot: { x: dx - nx * 3.2, z: dz - nz * 3.2 },
+            // the rope itself (so club.js can flash/open it) + the line anchors
+            ropePost: { x: ropeX, z: ropeZ },
+            queue,
+            tangent: { x: tx, z: tz }, normal: { x: nx, z: nz },
+          };
+          // ---- the exterior VELVET ROPE: two brass stanchions + a red sash
+          //   slung across the threshold, plus a short carpet runner. Cheap decor
+          //   (no colliders) gated through clearFloorPoint so it never blocks the
+          //   door. Built in WORLD space (this lot's frame) like signAwning.
+          clubRope(root, b, lot, door);
+        }
+      } else if (isLux) {
+        // ===== THE MEGA-TOWER — the flagship, the TALLEST building in the city =====
+        // Built by makeMegaTower(): ~30 storeys (double the island Twin Towers),
+        // a glass curtain wall on EVERY floor, a ground/podium HANGAR deck you
+        // drive into from any side, a lavish top-floor PENTHOUSE, a clean
+        // penthouse door, and a rooftop HELIPAD. It tags lot.building.home (the
+        // penthouse tier), lot.building.helipad and lot.building.hangar, and is
+        // exposed via CBZ.cityMegaTower().
+        const mega = makeMegaTower(root, lot, w, d, side, door, doorPt, FLAGSHIP);
+        luxury = lot; luxBuilding = mega.b;
+        homeLots.push(lot);
       } else {
-        // residence / office tower — enterable, climbable, FURNISHED, a HOME
-        const storeys = isLux ? 5 : 2 + ((rng() * 3) | 0);
+        // residence / office tower — enterable, climbable, FURNISHED, a HOME.
+        // The first few residence lots BECOME the listed ladder (studio..aerie);
+        // the rest are generic, occupied apartments (off the market).
+        const storeys = 2 + ((rng() * 3) | 0);
         const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side);
-        furnishHome(b, rng);
+        const listed = !!forcedTier;                 // only reserved lots are on the market
+        const tierDef = forcedTier || GENERIC;
+        furnishHome(b, rng, tierDef);
+        resFacade(b, side, w, d, color, lot);                                   // residential exterior dressing
         lot.kind = "tower";
         lot.building = { ...b, name: "Apartments", sign: color, side, door: doorPt };
-        // assign a home tier so the realtor can sell/rent it
-        let tierDef;
-        if (isLux) tierDef = PENTHOUSE;                                         // flagship penthouse
-        else { tierDef = NONLUX_TIERS[homeTierIdx % NONLUX_TIERS.length]; homeTierIdx++; }
         lot.building.home = {
-          tier: tierDef.tier, id: tierDef.id, name: tierDef.name, price: tierDef.price, rent: tierDef.rent || 0,
-          beds: tierDef.beds, garage: tierDef.garage, elevator: !!tierDef.elevator, owned: false,
-          floorY: (storeys - 1) * FH,          // penthouse floor height (for the elevator)
+          tier: tierDef.tier, id: tierDef.id, name: tierDef.name,
+          price: listed ? tierDef.price : 0,    // 0 → registry values filler by floor area, not the studio price
+          rent: tierDef.rent || 0,
+          sqft: tierDef.sqft, beds: tierDef.beds || 1, garage: tierDef.garage, elevator: !!tierDef.elevator,
+          listed: listed, owned: false, floorY: (storeys - 1) * FH, blurb: tierDef.blurb,
           door: doorPt,
         };
-        lot.building.name = tierDef.name;
+        lot.building.name = listed ? tierDef.name : "Apartments";
         homeLots.push(lot);
-        if (isLux) {
-          luxury = lot;
-          luxBuilding = b;
-          // ground-floor garage zone beside the door
-          lot.building.garage = { x: door.x + door.nx * 4.5, z: door.z + door.nz * 4.5, spots: [] };
-          lot.building.elevatorPad = { x: lot.cx - (w / 2 - 2.0), z: lot.cz, floorY: (storeys - 1) * FH };
-        }
       }
       placed.push(lot);
     }
+
+    // OWNERSHIP POST-PASS: give EVERY building an owner (shop→business,
+    // home/tower→landlord(→player when owned), abandoned→gang, park→city).
+    // Parks already carry their own owner stub above; this fills the rest. The
+    // canonical field is lot.building.owner everywhere; gangs.js sets owner.id
+    // on abandoned lots at spawn, realestate flips home owners via home.owned.
+    for (let i = 0; i < placed.length; i++) stampOwner(placed[i], i);
 
     // ROOFTOP HELIPAD on the flagship luxury tower (the tallest building) — a
     // marked landing pad the aircraft agent flies to. cityHelipad() returns it.
@@ -1445,6 +2231,7 @@
     city.chopShop = chopShop;
     city.realtor = realtor;
     city.luxuryLot = luxury;
+    city.clubLot = clubLot;          // THE Velvet Club lot (city/club.js reads its .building.club)
   };
 
   // pick black or white text for the best contrast against a sign colour
@@ -1483,17 +2270,25 @@
   // right onto the facade (no freestanding sidewalk sign), a canopy awning, a
   // perpendicular BLADE sign readable down the street, and display windows.
   // `along` = the facade runs perpendicular to the door normal.
-  function signAwning(b, side, w, d, color, name) {
+  function signAwning(b, side, w, d, color, name, kind) {
     const di = doorInfo(0, 0, w, d, side);
     const along = Math.abs(di.nx) > 0.5;          // door faces ±X → storefront spans Z
     const tx = along ? 0 : 1, tz = along ? 1 : 0; // facade tangent
     const facade = along ? d : w;                  // width available across the storefront
     const sw = Math.min(facade - 0.6, DOORW + 4.2); // sign board spans most of the facade
     const fx = (lw, h, ld) => (along ? [ld, h, lw] : [lw, h, ld]);   // size helper (swap by facing)
-    // CANOPY awning over the door (angled colour band)
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.32, 1.1)), mat(color, { emissive: color, ei: 0.4 }));
+    // per-kind storefront variety: the awning band picks up the trade accent and
+    // the neon trim glows that accent so each storefront reads differently.
+    const accent = kindAccent(kind);
+    const awnCol = (kind === "bank" || kind === "cityhall" || kind === "hospital") ? color : accent;
+    // CANOPY awning over the door (angled colour band, kind-tinted)
+    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.32, 1.1)), mat(awnCol, { emissive: awnCol, ei: 0.4 }));
     awn.position.set(di.x + di.nx * 0.75, FH - 0.7, di.z + di.nz * 0.75); awn.rotation[along ? "x" : "z"] = -0.22 * (along ? -di.nx || 1 : 1);
     b.group.add(awn);
+    // EMISSIVE NEON TRIM strip under the awning lip (cheap glowing accent line)
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 2.4, 0.06, 0.1)), mat(accent, { emissive: accent, ei: 0.95 }));
+    trim.position.set(di.x + di.nx * 1.3, FH - 0.88, di.z + di.nz * 1.3); trim.castShadow = false;
+    b.group.add(trim);
     // LIT SIGN BOARD across the facade above the awning — a glowing backing panel
     // (the trade colour) with the NAME painted on its front face.
     const signH = 1.2, signY = FH + 0.45;
@@ -1513,13 +2308,14 @@
     }
     // PERPENDICULAR BLADE SIGN — a small projecting sign so the store is readable
     // looking down the sidewalk (classic GTA storefront). Bracket + lit panel.
+    // The blade glows the kind accent so trades read apart down the street.
     const bladeOut = 0.9;
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.12, 0.9, 0.9)), mat(color, { emissive: color, ei: 0.8 }));
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.12, 0.9, 0.9)), mat(accent, { emissive: accent, ei: 0.85 }));
     blade.position.set(di.x + tx * (sw / 2 - 0.4) + di.nx * bladeOut, FH - 0.2, di.z + tz * (sw / 2 - 0.4) + di.nz * bladeOut);
     b.group.add(blade);
-    // DISPLAY WINDOWS flanking the entrance + a dark DOOR FRAME
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 0.5, 3.0, 0.22)), mat(0x20242b));
-    frame.position.set(di.x + di.nx * 0.06, 1.5, di.z + di.nz * 0.06); b.group.add(frame);
+    // DISPLAY WINDOWS flanking the entrance. (REMOVED: the old dark "DOOR FRAME"
+    // slab that sat over the doorway — it was a SECOND, static door covering the
+    // real swinging one. The wall opening + the swinging leaf are all the door needs.)
     for (const s of [-1, 1]) {
       const ox2 = tx * s * (DOORW * 0.5 + 1.5), oz2 = tz * s * (DOORW * 0.5 + 1.5);
       const win = new THREE.Mesh(new THREE.BoxGeometry(...fx(2.2, 2.4, 0.1)), glassMat());
@@ -1534,11 +2330,122 @@
       if (s) { s.position.set(di.x + di.nx * 0.6, FH + 1.7, di.z + di.nz * 0.6); s.scale.set(9, 2.25, 1); b.group.add(s); }
     }
   }
+  // ---- THE VELVET CLUB ENTRANCE: a real rope line out front ----------------
+  // Two brass STANCHIONS straddling the door with a sagging red velvet SASH slung
+  // between them (the rope you have to be let past), a short red CARPET runner
+  // leading in, and a soft pink ENTRANCE GLOW so the marquee club reads as THE
+  // exclusive spot from across the street. All decor (no colliders) hung in the
+  // building group at the door face, same local frame as signAwning. club.js
+  // animates the line/bouncer; this is just the set dressing.
+  function clubRope(root, b, lot, door) {
+    const w = b.w, d = b.d, side = lot.building.side;
+    const di = doorInfo(0, 0, w, d, side);
+    const along = Math.abs(di.nx) > 0.5;          // door faces ±X → entrance spans Z
+    const tx = along ? 0 : 1, tz = along ? 1 : 0; // tangent across the doorway
+    const nx = di.nx, nz = di.nz;                 // outward normal (local)
+    const VELVET = 0x8a1f2b, BRASS = 0xcaa64a, RUNNER = 0x7a141f, GLOW = 0xe85d8a;
+    const fx = (lw, h, ld) => (along ? new THREE.BoxGeometry(ld, h, lw) : new THREE.BoxGeometry(lw, h, ld));
+    const add = (geo, col, x, y, z, opt) => { const m = new THREE.Mesh(geo, mat(col, opt || {})); m.position.set(x, y, z); m.castShadow = false; b.group.add(m); return m; };
+    // RED CARPET runner from the door out to the rope
+    add(fx(2.0, 0.04, 3.0), RUNNER, di.x + nx * 1.6, 0.03, di.z + nz * 1.6);
+    // two brass STANCHION posts straddling the threshold (rope ends)
+    const stanOut = 1.7;        // how far out the rope line sits
+    for (const s of [-1, 1]) {
+      const px = di.x + nx * stanOut + tx * s * 1.5, pz = di.z + nz * stanOut + tz * s * 1.5;
+      add(new THREE.CylinderGeometry(0.07, 0.09, 1.0, 8), BRASS, px, 0.5, pz, { emissive: BRASS, ei: 0.25 });   // post
+      add(new THREE.SphereGeometry(0.12, 8, 6), BRASS, px, 1.05, pz, { emissive: BRASS, ei: 0.3 });             // brass cap
+      add(new THREE.CylinderGeometry(0.15, 0.18, 0.1, 10), 0x2a2f37, px, 0.06, pz);                             // weighted base
+    }
+    // the VELVET SASH slung (sagging) between the two posts — a low bar dipping
+    // in the middle, read as a soft rope across the door. Three short segments.
+    for (let i = -1; i <= 1; i++) {
+      const sag = i === 0 ? 0.78 : 0.9;     // middle dips lower
+      const rx = di.x + nx * stanOut + tx * i * 0.75, rz = di.z + nz * stanOut + tz * i * 0.75;
+      add(fx(1.6, 0.07, 0.07), VELVET, rx, sag, rz, { emissive: VELVET, ei: 0.25 });
+    }
+    // a soft pink ENTRANCE GLOW washing the threshold (the club's signature light)
+    add(fx(3.0, 0.06, 0.5), GLOW, di.x + nx * 0.5, FH - 0.5, di.z + nz * 0.5, { emissive: GLOW, ei: 0.9 });
+    // a small floating VELVET CLUB rope-line label so the spot is unmistakable
+    if (CBZ.makeLabelSprite) {
+      const s = CBZ.makeLabelSprite("🍷 VELVET — VIP ONLY");
+      if (s) { s.position.set(di.x + nx * 1.6, 2.9, di.z + nz * 1.6); s.scale.set(7, 1.6, 1); b.group.add(s); }
+    }
+  }
+
   // a bright, readable sprite tint derived from the sign colour (push it light)
   function spriteTint(hex) {
     let r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
     r = Math.round(r * 0.5 + 170); g = Math.round(g * 0.5 + 170); b = Math.round(b * 0.5 + 170);
     return "#" + ((1 << 24) + (Math.min(255, r) << 16) + (Math.min(255, g) << 8) + Math.min(255, b)).toString(16).slice(1);
+  }
+
+  // a small painted HOUSE-NUMBER plate (brass-on-dark), cached per number.
+  const numTexCache = new Map();
+  function houseNumTex(num) {
+    let t = numTexCache.get(num); if (t) return t;
+    const c = document.createElement("canvas"); c.width = 128; c.height = 64;
+    const x = c.getContext("2d");
+    x.fillStyle = "#1c2026"; x.fillRect(0, 0, 128, 64);
+    x.strokeStyle = "#caa64a"; x.lineWidth = 4; x.strokeRect(4, 4, 120, 56);
+    x.fillStyle = "#e8d8a8"; x.font = "900 40px Fredoka, Arial Black, sans-serif";
+    x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("" + num, 64, 34);
+    t = new THREE.CanvasTexture(c); numTexCache.set(num, t); return t;
+  }
+
+  // ---- RESIDENTIAL FACADE dressing (homes/towers get NO storefront sign) ----
+  // A light residential frontage: an entry STOOP + canopy over the door, a brass
+  // HOUSE-NUMBER plate, an AC window unit, and a fire-escape ladder rig. Reuses
+  // addCityGlass for any glass so panes stay shatterable. Kept modest (a handful
+  // of meshes), all hung in the building group at the door face.
+  function resFacade(b, side, w, d, color, lot) {
+    const di = doorInfo(0, 0, w, d, side);
+    const along = Math.abs(di.nx) > 0.5;          // door faces ±X → facade spans Z
+    const tx = along ? 0 : 1, tz = along ? 1 : 0; // facade tangent
+    const fx = (lw, h, ld) => (along ? [ld, h, lw] : [lw, h, ld]);   // swap by facing
+    const g = b.group, ox = b.ox, oz = b.oz;
+    const darkTrim = 0x2a2f37;
+    // ENTRY STOOP: a low step slab just outside the door
+    const stoop = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 1.0, 0.28, 1.4)), mat(0x8a8f97));
+    stoop.position.set(di.x + di.nx * 0.7, 0.14, di.z + di.nz * 0.7); stoop.castShadow = false; g.add(stoop);
+    // CANOPY over the entrance (trim-coloured, slight lip)
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(...fx(DOORW + 1.4, 0.18, 1.3)), mat(darkTrim));
+    canopy.position.set(di.x + di.nx * 0.6, FH - 0.6, di.z + di.nz * 0.6); canopy.castShadow = false; g.add(canopy);
+    for (const s of [-1, 1]) {                    // two thin support posts
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, FH - 0.8, 0.12), mat(darkTrim));
+      post.position.set(di.x + di.nx * 1.15 + tx * s * (DOORW * 0.5 + 0.4), (FH - 0.8) / 2, di.z + di.nz * 1.15 + tz * s * (DOORW * 0.5 + 0.4));
+      post.castShadow = false; g.add(post);
+    }
+    // HOUSE-NUMBER plate beside the door (sprite plane, both not needed — one face)
+    const num = 100 + ((((lot.i | 0) * 17 + (lot.j | 0) * 7) % 89) * 10);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.45),
+      new THREE.MeshBasicMaterial({ map: houseNumTex(num), transparent: true }));
+    plate.position.set(di.x + di.nx * 0.06 + tx * (DOORW * 0.5 + 0.5), 2.3, di.z + di.nz * 0.06 + tz * (DOORW * 0.5 + 0.5));
+    if (along) plate.rotation.y = di.nx > 0 ? Math.PI / 2 : -Math.PI / 2;
+    else if (di.nz > 0) plate.rotation.y = Math.PI;
+    plate.renderOrder = 2; g.add(plate);
+    // AC WINDOW UNIT jutting from a first-floor window (boxy grey unit),
+    // offset along the facade tangent away from the door.
+    const ac = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.8, 0.5, 0.5)), mat(0xb9bec6));
+    ac.position.set(di.x + di.nx * 0.2 + tx * (along ? d : w) * 0.28, FH + 0.55, di.z + di.nz * 0.2 + tz * (along ? d : w) * 0.28);
+    ac.castShadow = false; g.add(ac);
+    // FIRE-ESCAPE LADDER rig up one side of the door face (rails + rungs + a
+    // small landing) — purely cosmetic, hung on the building group.
+    const fox = di.x + di.nx * 0.16 - tx * (along ? d : w) * 0.30;
+    const foz = di.z + di.nz * 0.16 - tz * (along ? d : w) * 0.30;
+    const ladTop = Math.min(b.h - 0.5, FH * 2.2);
+    for (const s of [-0.25, 0.25]) {              // two vertical rails
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.08, ladTop, 0.08)), mat(0x3a3f46));
+      rail.position.set(fox + tx * s, ladTop / 2 + 0.6, foz + tz * s); rail.castShadow = false; g.add(rail);
+    }
+    for (let r = 0; r < 5; r++) {                  // rungs
+      const rung = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.6, 0.06, 0.06)), mat(0x3a3f46));
+      rung.position.set(fox, 1.0 + r * 0.9, foz); rung.castShadow = false; g.add(rung);
+    }
+    // a small landing platform at first floor
+    const land = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.9, 0.08, 0.7)), mat(0x44505c));
+    land.position.set(fox + di.nx * 0.25, FH - 0.2, foz + di.nz * 0.25); land.castShadow = false; g.add(land);
+    // a small shatterable glass transom over the door (kept through addCityGlass)
+    addCityGlass(g, di.x + di.nx * 0.05, FH - 0.45, di.z + di.nz * 0.05, along ? 0.06 : DOORW * 0.9, 0.5, along ? DOORW * 0.9 : 0.06, ox, oz, null, b.windows);
   }
 
   // ---- ROOFTOP HELIPAD -----------------------------------------------------
@@ -1610,6 +2517,22 @@
   // PUBLIC: where the rooftop helipad is (the aircraft agent lands here). Returns
   // {x,y,z,r} or null if no city is built yet.
   CBZ.cityHelipad = function () { return _helipad; };
+
+  // PUBLIC: the flagship MEGA-TOWER (the apex penthouse home). Returns
+  //   { lot, penthouseDoor, helipad, hangar }
+  // or null before a city is built. helipad/hangar are read live off the lot's
+  // building so they reflect the post-pass helipad too. Phase 3 (aircraft) reads
+  // this to base the missile chopper on the helipad and the F-22 in the hangar.
+  CBZ.cityMegaTower = function () {
+    if (!_megaTower || !_megaTower.lot) return null;
+    const lb = _megaTower.lot.building || {};
+    return {
+      lot: _megaTower.lot,
+      penthouseDoor: _megaTower.penthouseDoor,
+      helipad: lb.helipad || _helipad || null,
+      hangar: lb.hangar || null,
+    };
+  };
 
   function makePark(root, lot, rng) {
     for (let i = 0; i < 4; i++) {

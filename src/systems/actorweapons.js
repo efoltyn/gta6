@@ -227,9 +227,21 @@
       const a = list[i];
       if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) continue;
       if (a.surrender || (a.surrenderT || 0) > 0 || (a.char && (a.char.surrender || a.char.handsUp))) continue;
-      if (!a._weaponProp || !a._weaponProp.visible) continue;
-      if (CBZ.body && CBZ.body.busy && CBZ.body.busy(a)) continue;   // ragdoll owns the pose
-      setReadyPose(a.char, a._weaponProp.userData && a._weaponProp.userData.weaponSlot === "long");
+      // Skip ONLY a genuinely ragdolling body (down / airborne / held). Do NOT use
+      // CBZ.body.busy() here: in city it was widened to report ANY body still
+      // slightly pitched (rotation.x>0.04) as busy — which would steal the gun-
+      // ready pose from a shooter that merely has a tiny lean, leaving its arm
+      // (and gun) dangling at the hip and the shots reading as "from the chest".
+      const ph = a._phys;
+      if (ph && (ph.down > 0 || ph.air || ph.heldBy)) continue;
+      // ATTACH + show the gun prop right here if it isn't already (self-heal): if
+      // the spawn-time syncActorWeapon ever no-op'd (armed flipped on later, a
+      // recycle, etc.) the ped would otherwise fire an INVISIBLE gun from the
+      // hand. Building is cheap — syncActorWeapon early-returns when the prop is
+      // already attached with the right id, only rebuilding when the weapon changed.
+      const prop = syncActorWeapon(a);
+      if (!prop) continue;
+      setReadyPose(a.char, prop.userData && prop.userData.weaponSlot === "long");
     }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(36, function () {

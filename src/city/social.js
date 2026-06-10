@@ -32,6 +32,12 @@
 
   let beacon = null, kidnapCD = 0;
   let relTickT = 1, relTickCur = 0, _wrapped = false;
+  // spouses/kids we SPAWN for important NPCs (bosses, tycoons, socialites) so we
+  // can dispose them cleanly on reset and keep the population bounded.
+  const _familySpawns = [];
+  // hard cap on extra bodies we add for families — keeps the crowd (~90 rigs)
+  // sane no matter how many bosses/whales the city rolled.
+  const FAMILY_CAP = 14;
 
   // ===========================================================================
   //  PERSONAL RELATIONSHIPS — a multi-axis CONTINUUM each NPC holds toward the
@@ -105,6 +111,14 @@
     friendKilled:{ fear: +12, grudge: +40, loyalty: -22, affection: -16, respect: +6 },
     snubbed:   { affection: -6, loyalty: -4, grudge: +3 },
     betrayed:  { grudge: +44, loyalty: -40, fear: +10, respect: -6 },   // attacked your own crew
+
+    // GANG-FAVOR kinds — earning a faction's trust by running their work,
+    // backing them in a fight, clipping a rival, or bringing a cut. Each lands
+    // loyalty-first (you're proving you're useful), with respect riding along.
+    ranWork:     { loyalty: +10, respect: +8, fear: -2 },
+    defendedGang:{ loyalty: +14, respect: +12, affection: +4 },
+    killedRival: { respect: +10, loyalty: +6 },
+    broughtTribute:{ loyalty: +9, respect: +7 },
   };
 
   // apply a raw delta map to ONE ped's record (the atomic mutation). Cross-axis
@@ -143,6 +157,10 @@
   const RIPPLE = {
     beaten: 0.45, robbed: 0.4, extorted: 0.45, friendKilled: 0.6, betrayed: 0.7,
     defended: 0.4, healed: 0.3, paid: 0.25, gift: 0.25, rescued: 0.5, recruited: 0.2,
+    // favoring ONE gang member lifts nearby same-gang members — building a
+    // relationship with the FACTION, not just the individual (rippleToCircle
+    // pulls up to 4 same-gang within 30u and remaps the goodwill to them).
+    ranWork: 0.5, defendedGang: 0.5, killedRival: 0.4, broughtTribute: 0.4,
   };
   // turn a direct event into the circle's POV (a witnessed harm becomes
   // "friendHurt"/"friendKilled"; a witnessed kindness becomes mild respect).
@@ -234,6 +252,14 @@
   CBZ.cityRelLabel = function (ped) {
     const r = CBZ.cityRel(ped); const b = bondOf(ped);
     if (r.grudge > 60) return "wants you dead";
+    // for a gang member, fold the FACTION standing into the read so the player
+    // sees they're building trust with the whole crew, not just this one face.
+    if (ped && ped.gang && ped.gang !== "player" && CBZ.cityGangStanding) {
+      const st = CBZ.cityGangStanding(ped.gang) || 0;
+      if (st >= 60) return "crew respects you";
+      if (st >= 25) return "in good with the crew";
+      if (st <= -25) return "crew wants you gone";
+    }
     if (b > 1.0) return "loves you";
     if (b > 0.4) return "likes you";
     if (r.fear > 55) return "terrified of you";
@@ -292,11 +318,107 @@
   //   ped.knowsHero  — 0..1 how much this ped has "heard about" the player
   //   ped.opinion    — -1 hates .. +1 loves the player (gossip-driven)
 
+  // ===========================================================================
+  //  FAMILIES FOR IMPORTANT PEOPLE — a mob boss, a tycoon, a socialite doesn't
+  //  walk the city alone: they have a SPOUSE (and sometimes a kid), and the
+  //  family's WEALTH scales with the head. The headline: a mob boss's WIFE is a
+  //  walking vault — she carries the $5M Engagement Ring + a necklace + a bracelet
+  //  (often a tiara) = several million in ice, plus boss-tier cash. Robbing or
+  //  clipping her is a JACKPOT — but she's PROTECTED: harming her enrages the whole
+  //  crew (peds.js cityFamilyHarmed). We SPAWN her next to the head, on his turf,
+  //  link them as partner/family, and stamp the protection. Bounded by FAMILY_CAP.
+  // ===========================================================================
+  const WIFE_FIRST = ["Carmela", "Gina", "Rosalind", "Vera", "Sofia", "Lucia", "Bianca",
+    "Donatella", "Mona", "Adriana", "Camille", "Renata", "Vivienne", "Tatiana"];
+  // a recognizable name+tag so the player can SPOT the target: "Carmela (Boss's wife)".
+  function spouseName(head, kind) {
+    const first = WIFE_FIRST[(rng() * WIFE_FIRST.length) | 0];
+    const lbl = kind === "boss" ? "Boss's wife" : kind === "tycoon" ? "Tycoon's wife" : "Socialite";
+    return first + " (" + lbl + ")";
+  }
+  // spawn ONE extra ped (spouse/kid) near a head, on the same ground. Returns the
+  // ped or null (cap hit / no arena). Fully guarded; uses social.js's own rng so
+  // the peds.js deterministic stream stays untouched.
+  function spawnFamilyMember(head, opts) {
+    if (_familySpawns.length >= FAMILY_CAP) return null;
+    const A = CBZ.city && CBZ.city.arena; if (!A || !A.root || !CBZ.cityMakePed) return null;
+    // a point a few metres from the head, on their turf
+    const ang = rng() * 6.28, rad = 1.8 + rng() * 2.4;
+    const x = head.pos.x + Math.cos(ang) * rad, z = head.pos.z + Math.sin(ang) * rad;
+    let ped = null;
+    try { ped = CBZ.cityMakePed(x, z, rng, opts); } catch (e) { return null; }
+    if (!ped) return null;
+    // base personality/relationship fields (these spawn AFTER citySocialInit's
+    // civ loop, so set them here so the social sim treats them like everyone else).
+    ped.mood = 0; ped.knowsHero = 0; ped.opinion = 0; ped.relPlayer = null; ped._snitch0 = null;
+    A.root.add(ped.group);
+    CBZ.cityPeds.push(ped);
+    _familySpawns.push(ped);
+    return ped;
+  }
+  // give EACH gang boss + each tycoon/billionaire/socialite (without a partner) a
+  // real family. Co-located, wealth scaled to the head, protected for bosses.
+  function weaveFamilies() {
+    if (!CBZ.cityMakePed) return;     // need the spawn primitive
+    const peds = CBZ.cityPeds.slice();   // snapshot — we push spouses as we go
+    for (const head of peds) {
+      if (_familySpawns.length >= FAMILY_CAP) break;
+      if (!head || head.dead || head.vendor || head.controlled) continue;
+      if (head.partner) continue;        // already coupled — leave them
+      const isBoss = !!(head.isBoss || head.rank === "boss");
+      const a = ("" + (head.archetype || "")).toLowerCase();
+      const isRich = (a === "tycoon" || a === "billionaire" || a === "socialite");
+      if (!isBoss && !isRich) continue;
+      // the spouse's WEALTH PROFILE is keyed to the head: a boss → a mob WIFE
+      // (guaranteed $5M ring + necklace + bracelet + maybe tiara); a tycoon →
+      // a tycoon's wife (usually the ring); a socialite head → a socialite spouse.
+      const wifeArch = isBoss ? "mobwife" : (a === "tycoon" || a === "billionaire") ? "tycoonwife" : "socialite";
+      const headKind = isBoss ? "boss" : (a === "tycoon" || a === "billionaire") ? "tycoon" : "socialite";
+      const spouse = spawnFamilyMember(head, {
+        kind: "civilian",
+        archetype: wifeArch,
+        wealth: Math.min(0.99, Math.max(0.9, head.wealth || 0.9)),
+        aggr: 0.18 + rng() * 0.14,        // non-combatant — she flees, never fights her own crew
+        armed: false,
+        name: spouseName(head, headKind),
+        // NOT a gang member: a wife has no .gang (so she won't war on her own crew),
+        // but she IS protected by the head's gang via these stamps (peds.js reads them).
+        protectGang: isBoss ? head.gang : null,
+        protectedBy: head,
+        isFamily: true,
+      });
+      if (!spouse) continue;
+      // LINK them as a real couple/family so the partner-follow + groupReact logic
+      // (peds.js) makes them move/react as a UNIT, not random strangers.
+      head.partner = spouse; spouse.partner = head;
+      head.family = head.family || []; if (head.family.indexOf(spouse) < 0) head.family.push(spouse);
+      spouse.family = [head];
+      head.together = spouse.together = 0.85 + rng() * 0.15;   // a tight, committed pair
+      // a BOSS sometimes also has a kid at his side (one more protected mouth). Kept
+      // rare + capped so we don't bloat the crowd. Modest wealth (a kid, not a vault).
+      if (isBoss && rng() < 0.4 && _familySpawns.length < FAMILY_CAP) {
+        const kid = spawnFamilyMember(head, {
+          kind: "civilian", archetype: "resident", wealth: 0.5,
+          aggr: 0.12 + rng() * 0.1, armed: false,
+          name: "Young " + (head.name || "one").split(" ")[0],
+          protectGang: head.gang, protectedBy: head, isFamily: true,
+        });
+        if (kid) {
+          kid.family = [head, spouse];
+          head.family.push(kid); spouse.family.push(kid);
+        }
+      }
+    }
+  }
+
   // ---- setup: weave civilians into couples, families, and friend cliques ----
   CBZ.citySocialInit = function () {
     g.cityPartner = null; g.citySpouse = false; g.cityHostage = null;
     clearBeacon(); kidnapCD = 12;
     BUBBLES.length = 0; clubT = 0; queueT = 0; gossipT = 2; eventT = 6; routineT = 1.5;
+    // fresh run: the prior spawn's family bodies were already disposed by
+    // clearCityPeds (they live in CBZ.cityPeds); just drop our stale refs.
+    _familySpawns.length = 0;
     const civ = CBZ.cityPeds.filter((p) => p.kind === "civilian" && !p.vendor && !p.gang);
     // shuffle-ish pairing into couples (45%)
     for (let i = 0; i + 1 < civ.length; i += 2) {
@@ -329,6 +451,9 @@
     for (const p of CBZ.cityPeds) { p.relPlayer = null; p._snitch0 = null; }
     relTickT = 1; relTickCur = 0;
     wrapActionHooks();
+    // AFTER the civilian couples/cliques: give the IMPORTANT people (bosses,
+    // tycoons, socialites) a real, wealthy, co-located family (spouse + maybe kid).
+    weaveFamilies();
   };
 
   CBZ.cityIsRomance = function (ped) {
@@ -395,10 +520,60 @@
     CBZ.city.addRespect(10);
   };
 
+  // ---- gang favors: earn a FACTION's trust ----
+  // A gang member is "approachable for a favor" when they're a non-player gang
+  // member, alive, and don't hold a real grudge against you. Befriending one
+  // (running their work) ripples to nearby same-gang members and raises your
+  // standing with the whole faction — the relationship-building primitive.
+  CBZ.cityCanBefriend = function (ped) {
+    if (!ped || ped.dead) return false;
+    if (!ped.gang || ped.gang === "player") return false;
+    const r = CBZ.cityRel(ped);
+    return ((r && r.grudge) || 0) < 55;
+  };
+
+  // do a favor for a gang member: a small cash gesture buys goodwill that scales
+  // with how much they already respect you (a respected face earns more per
+  // favor). Lands a 'ranWork' shift on the ped (which ripples to their nearby
+  // crew), nudges your faction STANDING up, and seeds a 'gangFavor' rumor so
+  // your name spreads through their clique. Returns the new signed bond.
+  const FAVOR_LINES = ["“You came through. 🤝”", "“Aight, you're solid.”",
+    "“We see you out here.”", "“That's what I'm talking about.”", "“Respect.”"];
+  CBZ.cityDoFavor = function (ped) {
+    if (g.mode !== "city") return 0;
+    if (!CBZ.cityCanBefriend(ped)) {
+      if (CBZ.city) CBZ.city.note((ped && ped.name || "They") + " won't take a favor from you.", 1.6);
+      if (ped) say(ped, "“Get out of here.”", "#ff9b8b", 1.6);
+      return 0;
+    }
+    const r = CBZ.cityRel(ped);
+    // optional small cash/item cost (a token gesture); skip if broke but still
+    // let the favor happen smaller — the deed is what matters, not the spend.
+    const cost = S().favorCost || 25;
+    if (CBZ.city.canAfford(cost)) { CBZ.city.spend(cost); if (CBZ.sfx) CBZ.sfx("coin"); }
+    // gain scales with existing respect (modeled on cityFlirt's repBonus)
+    const repBonus = Math.min(0.6, r.respect / 300);
+    const gain = 0.7 + repBonus;
+    const bond = CBZ.cityRelShift(ped, "ranWork", gain);
+    ped.knowsHero = Math.min(1, (ped.knowsHero || 0) + 0.25);
+    ped.opinion = Math.min(1, (ped.opinion || 0) + 0.2);
+    ped.mood = Math.max(ped.mood || 0, 0.6);
+    // raise faction standing — a fraction of the per-ped gain (owned by gangs.js)
+    if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(ped.gang, gain * 6);
+    // your name spreads through the gang's clique via the 3-hop gossip web
+    if (ped.pos) CBZ.cityGossip(ped.pos.x, ped.pos.z, "gangFavor", 0.5);
+    say(ped, FAVOR_LINES[(rng() * FAVOR_LINES.length) | 0], "#7ed957", 2);
+    if (CBZ.city) {
+      const lbl = CBZ.cityRelLabel ? CBZ.cityRelLabel(ped) : "";
+      CBZ.city.note("You did " + (ped.name || "them") + " a favor." + (lbl ? " (" + lbl + ")" : ""), 2);
+    }
+    return bond;
+  };
+
   // ---- hostage: grab a ped at gunpoint as a shield / for ransom ----
   CBZ.cityTakeHostage = function (ped) {
     if (!ped || ped.dead || ped === g.cityPartner) return;
-    const armed = g.cityWeapon && CBZ.cityEcon.ITEMS[g.cityWeapon] && CBZ.cityEcon.ITEMS[g.cityWeapon].gun;
+    const armed = !!(CBZ.cityHasGun && CBZ.cityHasGun());
     if (!armed) { CBZ.city.note("Need a gun to take a hostage.", 1.6); return; }
     if (g.cityHostage) { CBZ.city.note("You already have a hostage.", 1.4); return; }
     g.cityHostage = ped; ped.controlled = true; ped.hostage = true; ped.fear = 10; ped.rage = null;
@@ -434,7 +609,7 @@
     // wrongly turn the whole map against you. An explicit flag always wins.
     if (byPlayer == null) {
       const P = CBZ.player;
-      byPlayer = !!(P && !P.dead && ped.pos && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 26 && ((g.wanted | 0) >= 1 || g.cityWeapon));
+      byPlayer = !!(P && !P.dead && ped.pos && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 26 && ((g.wanted | 0) >= 1 || (CBZ.cityHasGun && CBZ.cityHasGun())));
     }
     // anyone bonded to the victim reacts; the player gets the "killer" rumor
     if (CBZ.citySocialWitnessKill) CBZ.citySocialWitnessKill(ped, byPlayer);
@@ -454,6 +629,9 @@
     // retire any live speech bubbles + pending rumors
     for (const b of BUBBLES) retireBubble(b);
     BUBBLES.length = 0; RUMORS.length = 0;
+    // drop refs to spawned family bodies — they're disposed with the rest of the
+    // population by the clearCityPeds that follows on a fresh spawn.
+    _familySpawns.length = 0;
     gossipT = 2; eventT = 6; routineT = 1.5; clubT = 0; queueT = 0;
     // wipe relationship records + restore each ped's hardwired snitch baseline
     for (const p of (CBZ.cityPeds || [])) {
@@ -491,6 +669,9 @@
     breakup:    { op: 0,     mood: -0.5, say: ["“They broke up 💔”", "“It's over between them.”"] },
     proposal:   { op: 0,     mood: +0.6, say: ["“They got engaged! 💍”", "“Did you see the ring?!”"] },
     sale:       { op: +0.05, mood: +0.2, say: ["“Big sale at the shop.”", "“Whole block's busy today.”"] },
+    // a favor done for the crew — spreads your name (and goodwill) through the
+    // gang's clique via the same 3-hop gossip the other topics ride.
+    gangFavor:  { op: +0.35, mood: +0.4, say: ["“That one's putting in work.”", "“They're with us now.”", "“Solid people. 🤝”"] },
   };
 
   // seed a rumor at one ped; it will propagate to their friends/partner over time.
@@ -813,6 +994,9 @@
     if (typeof ok === "function" && !ok._relWrapped) {
       const w = function (ped, imp, cause) {
         const wasNoPartner = ped && !ped.partner;
+        // capture the victim's combat target BEFORE the kill clears it — if they
+        // were attacking a gang member, the player just DEFENDED that member.
+        const wasAttacking = ped && (ped.rage || ped.mem);
         const ret = ok.apply(this, arguments);
         try {
           const byPlayer = !imp || imp.byPlayer !== false;
@@ -823,7 +1007,24 @@
             const near = P && !P.dead && ped.pos && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) < 26;
             if (near) CBZ.citySocialWitnessKill(ped, true);
           }
-        } catch (e) {}
+          // DEFENDED A GANG MEMBER: you dropped someone who was fighting a non-
+          // player gang ped → that member (and their nearby crew, via ripple)
+          // warms to you. Gate to a real, live, befriendable gang victim's foe.
+          if (byPlayer) {
+            const foe = wasAttacking;
+            if (foe && foe.gang && foe.gang !== "player" && !foe.dead && foe !== ped
+                && CBZ.cityCanBefriend(foe)) {
+              const P = CBZ.player;
+              const seen = P && !P.dead && foe.pos && ped.pos
+                && Math.hypot(foe.pos.x - ped.pos.x, foe.pos.z - ped.pos.z) < 30;
+              if (seen) {
+                CBZ.cityRelShift(foe, "defendedGang", 1);
+                if (CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(foe.gang, 4);
+                say(foe, "“Good lookin' out! 🤝”", "#7ed957", 2);
+              }
+            }
+          }
+        } catch (e) { /* combat must never break on a relationship hiccup */ }
         return ret;
       };
       w._relWrapped = true; w._relOrig = ok; CBZ.cityKillPed = w;

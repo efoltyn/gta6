@@ -112,6 +112,7 @@
 
   function arena() { return CBZ.city && CBZ.city.arena; }
   const _tmp = { x: 0, z: 0 };
+  const _col = { x: 0, z: 0 };            // scratch for building collision in sim()
   function pickWaypoint(out) {            // a sidewalk point, kept inside the city
     const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
     const p = A.randomSidewalkPoint();
@@ -156,8 +157,10 @@
   }
 
   // pure-math simulation: stroll toward the target, repick on arrival.
+  let _simFrame = 0;                       // for the collide stride time-slice
   function sim(dt) {
     const A = arena(); if (!A) return;
+    const frame = _simFrame++;
     for (let i = 0; i < count; i++) {
       if (deadAgent[i]) continue;
       if (corpseT[i] > 0) { corpseT[i] -= dt; if (corpseT[i] <= 0) deadAgent[i] = 1; continue; }  // lying dead → fade out
@@ -171,6 +174,30 @@
       const step = spd[i] * dt;
       px[i] += dx * inv * step; pz[i] += dz * inv * step;
       phase[i] += spd[i] * 2.4 * dt;
+      // STOP THE NAMELESS AMBIENT CROWD WALKING THROUGH WALLS: the stroll above is
+      // a straight line to a random sidewalk point, which cuts THROUGH the building
+      // in the middle of a block. EVERY agent is RENDERED (no far-cull), so EVERY
+      // agent must collide — a camera-distance gate let the whole mid/far crowd walk
+      // through buildings in plain sight. collide() is grid-accelerated (~O(local
+      // walls)), so it's cheap; we still time-slice 1/3 of the crowd per frame (the
+      // per-frame step is tiny, so a body can't tunnel a wall in the 2 frames it's
+      // skipped) to keep the 360-strong crowd light. feetY/headY 0..1.7 hits full
+      // walls but ignores high window panes. 2-PASS DEPENETRATION (mirrors peds.js):
+      // one push at a corner can shove a body OUT of one wall and INTO the next, so
+      // a second pass resolves that — a straight-line stroll can't squeeze a thin
+      // wall in a single push. Stop early once a pass no longer moves the body.
+      if (CBZ.collide && ((frame + i) % 3 === 0)) {
+        _col.x = px[i]; _col.z = pz[i];
+        for (let pass = 0; pass < 2; pass++) {
+          const bx = _col.x, bz = _col.z;
+          CBZ.collide(_col, 0.5, 0, 1.7);
+          if (Math.abs(_col.x - bx) < 0.002 && Math.abs(_col.z - bz) < 0.002) break;
+        }
+        if (_col.x !== px[i] || _col.z !== pz[i]) {
+          px[i] = _col.x; pz[i] = _col.z;            // shoved out of the wall
+          pickWaypoint(_tmp); tx[i] = _tmp.x; tz[i] = _tmp.z;   // repick so it doesn't grind back in
+        }
+      }
     }
   }
 
@@ -293,6 +320,11 @@
       if (ped.dead) { deadAgent[i] = 1; promotedBy[i] = -1; pool[s] = { ped: makePooled(), idx: -1 }; continue; } // killed → consume agent, fresh pool ped
       px[i] = ped.pos.x; pz[i] = ped.pos.z; heading[i] = ped.char.group.rotation.y;   // mirror live motion back
       const dx = ped.pos.x - ppx, dz = ped.pos.z - ppz;
+      // keep YOUR killer promoted + on-map while you spectate it after WASTED
+      // (city/death.js sets g._citySpecTarget); otherwise this park-on-death sweep
+      // would banish a crowd-pool killer off-map and the kill-cam would orbit empty
+      // space. Everyone else parks as usual.
+      if (CBZ.game._citySpecTarget && ped === CBZ.game._citySpecTarget) continue;
       if (P.dead || P.driving || dx * dx + dz * dz > PROMO_OUT2) { promotedBy[i] = -1; park(e); }   // walked away → back to density
     }
     if (P.dead || P.driving) return;

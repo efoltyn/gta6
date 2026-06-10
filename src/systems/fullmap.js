@@ -101,6 +101,19 @@
         const d = Math.hypot(lot.cx - x, lot.cz - z);
         if (info && d < bd) { best = { lot, info }; bd = d; }
       }
+      // each non-player gang's HQ is also a snap candidate, so clicking near a
+      // rival block auto-labels it "<Gang> HQ" (same snap radius as POIs).
+      let bestGang = null, gd = 17;
+      for (const gang of CBZ.cityGangs || []) {
+        if (!gang || gang.isPlayer || gang.absorbed) continue;
+        const c = gang.center; if (!c || (!c.x && !c.z)) continue;
+        const d = Math.hypot(c.x - x, c.z - z);
+        if (d < gd) { bestGang = gang; gd = d; }
+      }
+      // whichever (POI vs HQ) is nearer wins
+      if (bestGang && (!best || gd < bd)) {
+        return { x: bestGang.center.x, z: bestGang.center.z, label: (bestGang.name || "Gang") + " HQ" };
+      }
       if (best) {
         const door = best.lot.building && best.lot.building.door;
         return { x: door ? door.x : best.lot.cx, z: door ? door.z : best.lot.cz, label: best.info.label };
@@ -147,6 +160,33 @@
     return wp;
   }
   map.setWaypoint = setWaypoint;
+
+  // ---- route to a GANG's HQ. Resolve via the gangs cluster's accessor when it's
+  //      present (cityGangHQ → live boss / seeded hq / shifting centre), else fall
+  //      back to the raw record's center/boss.pos. Null-guarded so escape/survival
+  //      (where CBZ.cityGangs is absent) simply no-op. Absorbed/dead crews whose
+  //      centre has collapsed to {0,0} are skipped — they have no real HQ. ----
+  function setGangWaypoint(gangId) {
+    if (gangId == null || !CBZ.cityGangs) return null;
+    let hq = null, name = null;
+    if (CBZ.cityGangHQ) {
+      const h = CBZ.cityGangHQ(gangId);
+      if (h) { hq = { x: h.x, z: h.z }; name = h.name; }
+    }
+    if (!hq && CBZ.cityGangById) {
+      const rec = CBZ.cityGangById(gangId);
+      if (rec) {
+        name = (rec.name || "Gang") + " HQ";
+        if (rec.boss && !rec.boss.dead && rec.boss.pos) hq = { x: rec.boss.pos.x, z: rec.boss.pos.z };
+        else if (rec.center && (rec.center.x || rec.center.z)) hq = { x: rec.center.x, z: rec.center.z };
+        else if (rec.turf && rec.turf.length) hq = { x: rec.turf[0].cx, z: rec.turf[0].cz };
+      }
+    }
+    // skip an absorbed crew pushed to a dead {0,0} centre (no real HQ left)
+    if (!hq || (!hq.x && !hq.z)) return null;
+    return setWaypoint(hq.x, hq.z, name || "Gang HQ");
+  }
+  map.setGangWaypoint = setGangWaypoint;
 
   function clearMoveKeys() {
     const keys = CBZ.keys || {};
@@ -221,8 +261,14 @@
     const pos = CBZ.player.pos;
     const h = CBZ.playerChar && CBZ.playerChar.group ? CBZ.playerChar.group.rotation.y : 0;
     ctx.save(); ctx.translate(p.x(pos.x), p.z(pos.z)); ctx.rotate(Math.atan2(Math.cos(h), Math.sin(h)));
-    ctx.fillStyle = "#ff9b3d"; ctx.beginPath();
-    ctx.moveTo(9, 0); ctx.lineTo(-6, 5); ctx.lineTo(-4, 0); ctx.lineTo(-6, -5); ctx.closePath(); ctx.fill();
+    // view cone (where you're looking) so "where I am AND what I face" is clear
+    const cone = ctx.createRadialGradient(0, 0, 2, 0, 0, 46);
+    cone.addColorStop(0, "rgba(255,176,80,.35)"); cone.addColorStop(1, "rgba(255,176,80,0)");
+    ctx.fillStyle = cone; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 46, -0.5, 0.5); ctx.closePath(); ctx.fill();
+    // bold facing chevron with a dark outline
+    ctx.fillStyle = "#ff9b3d"; ctx.strokeStyle = "rgba(0,0,0,.65)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, 6.5); ctx.lineTo(-4, 0); ctx.lineTo(-7, -6.5); ctx.closePath();
+    ctx.fill(); ctx.stroke();
     ctx.restore();
   }
 
@@ -330,17 +376,72 @@
   // palette as the full map — bank=blue, guns=green, hospital=red, HOME=lime…
   map.poi = poiInfo;
 
+  // colour-tint each crew's held blocks, ring its boundary, label its name + drop
+  // a diamond on the HQ — so the full map reads as a turf-control map at a glance.
+  // O(gangs · lots-held), range-culled by the projection bounds. hex pulled per
+  // the contract: '#'+(gang.color>>>0).toString(16) (padded to 6 digits).
+  function hex6(c) { return "#" + ("000000" + ((c >>> 0).toString(16))).slice(-6); }
+  // The DISTRICT CONTROL board — the city's 9 zones painted by who holds them,
+  // like nations on a Risk map. WHY: the meta-goal is "own the city" (districts
+  // held), so the map IS the scoreboard, and the coloured borders are the FRONT
+  // LINE where turf flips. Fill intensity = control strength; your turf is gold;
+  // weakly-held (flipping) districts get a dashed border. Crew HQs sit on top as
+  // ringed crests, and a crown marks the takeover leader.
+  function drawGangTurf(p) {
+    const A = CBZ.city && CBZ.city.arena;
+    const zones = CBZ.cityZones ? CBZ.cityZones() : null;
+    const leader = CBZ.cityTakeoverLeader ? CBZ.cityTakeoverLeader() : null;
+    if (zones && A && zones.length) {
+      const zw = (A.maxX - A.minX) / 3, zd = (A.maxZ - A.minZ) / 3;
+      for (const z of zones) {
+        const isPlayer = z.owner === "player";
+        const g = z.owner && !isPlayer && CBZ.cityGangById ? CBZ.cityGangById(z.owner) : null;
+        const col = isPlayer ? 0xffd451 : (g ? g.color : 0x46505e);
+        const hx = hex6(col), mx = p.x(z.cx), mz = p.z(z.cz);
+        const w = zw * p.sc * 0.97, d = zd * p.sc * 0.97;
+        ctx.fillStyle = hx; ctx.globalAlpha = z.owner ? (0.1 + 0.3 * (z.strength || 0.4)) : 0.05;
+        ctx.fillRect(mx - w / 2, mz - d / 2, w, d);
+        ctx.globalAlpha = z.owner ? 0.72 : 0.22; ctx.strokeStyle = hx; ctx.lineWidth = isPlayer ? 2.6 : 1.6;
+        ctx.setLineDash(z.owner && (z.strength || 1) < 0.5 ? [6, 5] : []);
+        ctx.strokeRect(mx - w / 2, mz - d / 2, w, d); ctx.setLineDash([]); ctx.globalAlpha = 1;
+        // district name + who holds it
+        ctx.textAlign = "center"; ctx.font = "700 10px Fredoka, sans-serif";
+        ctx.fillStyle = "rgba(240,246,255,.5)"; ctx.fillText((z.name || "").toUpperCase(), mx, mz - d / 2 + 13);
+        if (z.owner) { ctx.fillStyle = hx; ctx.font = "700 9px Fredoka, sans-serif"; ctx.fillText(isPlayer ? "★ YOURS" : (g ? (g.name || "").toUpperCase() : "CONTESTED"), mx, mz - d / 2 + 24); }
+      }
+    }
+    if (!CBZ.cityGangs) return;
+    for (const gang of CBZ.cityGangs) {
+      if (!gang || gang.absorbed) continue;
+      const col = hex6(gang.isPlayer ? 0xffd451 : gang.color);
+      const c = gang.center;
+      const hq = (CBZ.cityGangHQ && CBZ.cityGangHQ(gang.id)) || (c && (c.x || c.z) ? { x: c.x, z: c.z } : null);
+      if (hq && (hq.x || hq.z)) {
+        const mx = p.x(hq.x), mz = p.z(hq.z), s = 8;
+        ctx.fillStyle = col; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(mx, mz - s); ctx.lineTo(mx + s, mz); ctx.lineTo(mx, mz + s); ctx.lineTo(mx - s, mz); ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(mx, mz, 2, 0, Math.PI * 2); ctx.fill();
+        // crown the gang that holds the most districts (the one to beat)
+        if (leader && leader.id === gang.id) { ctx.fillStyle = "#ffd451"; ctx.font = "700 12px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("♛", mx, mz - s - 6); }
+      }
+    }
+  }
+
   function drawCity(p) {
     const A = CBZ.city && CBZ.city.arena;
     if (!A) { text("CITY DISTRICT", 0, (CBZ.CITY && CBZ.CITY.center.z) || -700, p, "rgba(235,245,255,.5)", 18); return; }
+    const wanted = (CBZ.game && CBZ.game.wanted) || 0;
     drawRoads(A, p);
-    // the bridge linking the mainland to the island district (so the two halves
-    // read as one connected city instead of two blobs floating in a void)
+    // THE BRIDGE — the sole chokepoint between mainland and island. WHY it matters
+    // mechanically: at 3★+ the cops seal it (roadblocks), so it turns red + SEALED
+    // — the map tells you your island escape is cut off.
     if (A.bridge) {
-      const b = A.bridge, mz = (b.minZ + b.maxZ) / 2;
-      line(b.minX, mz, b.maxX, mz, p, "rgba(156,168,182,.5)", Math.max(3, (b.maxZ - b.minZ) * p.sc * 0.8));
-      text("BRIDGE", (b.minX + b.maxX) / 2, mz - (b.maxZ - b.minZ) * 0.9, p, "rgba(225,240,255,.42)", 11);
+      const b = A.bridge, mz = (b.minZ + b.maxZ) / 2, sealed = wanted >= 3;
+      line(b.minX, mz, b.maxX, mz, p, sealed ? "rgba(255,80,70,.7)" : "rgba(156,168,182,.5)", Math.max(3, (b.maxZ - b.minZ) * p.sc * 0.8));
+      text(sealed ? "BRIDGE — SEALED" : "BRIDGE", (b.minX + b.maxX) / 2, mz - (b.maxZ - b.minZ) * 0.9, p, sealed ? "#ff8b7a" : "rgba(225,240,255,.42)", 11);
     }
+    drawGangTurf(p);   // district control board + HQ crests UNDER the lot/POI layer
     drawLots(A.lots, p);
     if (A.annex) {
       ctx.fillStyle = "rgba(120,150,110,.20)"; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.fill();
@@ -357,6 +458,38 @@
     // labelled POIs on top — this is what makes the map actually navigable
     drawPois(A.lots, p);
     if (A.annex) drawPois(A.annex.lots, p);
+    // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
+    if (CBZ.cityOwnsLot) {
+      ctx.strokeStyle = "#ffd451"; ctx.lineWidth = 2;
+      const ring = (lots) => { for (const lot of lots || []) { if (lot.building && CBZ.cityOwnsLot(lot)) { ctx.beginPath(); ctx.arc(p.x(lot.cx), p.z(lot.cz), 9, 0, Math.PI * 2); ctx.stroke(); } } };
+      ring(A.lots); if (A.annex) ring(A.annex.lots);
+    }
+    // ---- NEED-SURFACING: when a need is pressing, pulse the place that fixes it,
+    //      so the map answers "why is this lit? because you need it right now". ----
+    const G = CBZ.game, npulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.006);
+    function pulseKind(kind, on, col) {
+      if (!on) return;
+      const want = (lots) => { for (const lot of lots || []) { const b = lot.building; if (b && b.shop && b.shop.kind === kind) { ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p.x(lot.cx), p.z(lot.cz), 10 + npulse * 5, 0, Math.PI * 2); ctx.stroke(); } } };
+      want(A.lots); if (A.annex) want(A.annex.lots);
+    }
+    pulseKind("food", (G.hunger != null && G.hunger < 35), "#ff9e6b");
+    pulseKind("hospital", (CBZ.player && CBZ.player.hp != null && CBZ.player.hp < (CBZ.player.maxHp || 200) * 0.4), "#ff5b6b");
+    // ---- HEAT LAYER: where the police think you are + the air threat ----
+    if (wanted >= 1 && G.cityLastKnown) {
+      const lk = G.cityLastKnown, rr = (12 + wanted * 10) * p.sc;
+      ctx.strokeStyle = "rgba(255,70,55," + (0.35 + 0.25 * npulse).toFixed(2) + ")"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x(lk.x), p.z(lk.z), rr * (0.7 + 0.3 * npulse), 0, Math.PI * 2); ctx.stroke();
+      text("LAST SEEN", lk.x, lk.z - (14 + wanted * 10), p, "rgba(255,140,120,.7)", 10);
+    }
+    if (wanted >= 3 && CBZ.cityChopperPos) {
+      const hp = CBZ.cityChopperPos();
+      if (hp) {
+        const mx = p.x(hp.x), mz = p.z(hp.z);
+        ctx.save(); ctx.translate(mx, mz); ctx.rotate(performance.now() * 0.009);
+        ctx.strokeStyle = "#ff5040"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(10, 0); ctx.moveTo(0, -10); ctx.lineTo(0, 10); ctx.stroke(); ctx.restore();
+        ctx.fillStyle = "#ff5040"; ctx.beginPath(); ctx.arc(mx, mz, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
     const job = CBZ.game.cityJob;
     if (job && job.dest) drawPoi(job.dest.x, job.dest.z, p, "#7ed957", "JOB", true);
   }
@@ -386,12 +519,40 @@
     if (readout) readout.textContent = wp ? "Route: " + waypointDistance(wp) + "m - " + wp.label + (route && route.kind === "fallback" ? " (direct)" : "") : "No waypoint set";
     if (legend) {
       const common = "<span><i style='background:#ff9b3d'></i>You</span><span><i style='background:#7de7ff'></i>Route</span>";
-      legend.innerHTML = which === "escape" ? common + "<span><i style='background:#c792ea'></i>Hatch</span><span><i style='background:#ffd451'></i>Guard</span><span><i style='background:#39ff88'></i>Exit</span>" :
-        (which === "survival" ? common + "<span><i style='background:#ffe38a'></i>High ground</span><span><i style='background:#e8eef5'></i>Survivor</span>" :
-          common + "<span><i style='background:#39ff88'></i>Home</span><span><i style='background:#5bd0ff'></i>Police</span><span><i style='background:#7ed957'></i>Job</span>");
+      if (which === "escape") {
+        legend.innerHTML = common + "<span><i style='background:#c792ea'></i>Hatch</span><span><i style='background:#ffd451'></i>Guard</span><span><i style='background:#39ff88'></i>Exit</span>";
+      } else if (which === "survival") {
+        legend.innerHTML = common + "<span><i style='background:#ffe38a'></i>High ground</span><span><i style='background:#e8eef5'></i>Survivor</span>";
+      } else {
+        // grouped by WHY: Navigation, Threats, Your empire, then the clickable
+        // Territory swatches (each routes to that crew's HQ).
+        const grp = (t) => "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>" + t + "</span>";
+        let html = grp("GO") + common + "<span><i style='background:#39ff88'></i>Home</span><span><i style='background:#7ed957'></i>Job</span>";
+        html += grp("HEAT") + "<span><i style='background:#ff6a5a'></i>Police</span><span><i style='background:#ff5040'></i>Chopper 3★+</span><span><i style='background:#ff463a'></i>Last seen</span>";
+        html += grp("EMPIRE") + "<span><i style='background:#ffd451;border-radius:50%'></i>Your turf / owned</span>";
+        // one clickable swatch per rival crew → route to their HQ.
+        let hasGang = false; let terr = "";
+        for (const gang of CBZ.cityGangs || []) {
+          if (!gang || gang.isPlayer || gang.absorbed || !gang.turf || !gang.turf.length) continue;
+          hasGang = true;
+          terr += "<span class='fmGangChip' data-gang='" + esc(String(gang.id)) + "' style='cursor:pointer'>" +
+            "<i style='background:" + hex6(gang.color) + "'></i>" + esc(gang.name || "Gang") + "</span>";
+        }
+        if (hasGang) html += grp("TERRITORY") + terr + "<span style='opacity:.7;font-style:italic'>[click a crew] route to HQ</span>";
+        legend.innerHTML = html;
+      }
     }
   }
   map.draw = draw;
+  function esc(s) { return String(s).replace(/[<>&"]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;" : "&quot;"; }); }
+  // delegated click: a gang swatch in the legend routes to that crew's HQ, then
+  // closes the map so the on-screen arrow takes over (mirrors clicking the canvas).
+  if (legend) legend.addEventListener("click", function (e) {
+    const chip = e.target && e.target.closest && e.target.closest(".fmGangChip");
+    if (!chip) return;
+    const id = chip.getAttribute("data-gang");
+    if (id != null && setGangWaypoint(id)) close();
+  });
 
   function updateGuide() {
     const wp = activeWaypoint();

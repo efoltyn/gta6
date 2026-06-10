@@ -50,13 +50,10 @@
   }
 
   function playerArmed() {
-    const w = g.cityWeapon;
-    return !!(w && CBZ.cityEcon && CBZ.cityEcon.ITEMS[w] && CBZ.cityEcon.ITEMS[w].gun);
+    return !!(CBZ.cityHasGun && CBZ.cityHasGun());
   }
-  // OPENLY carrying = a firearm is your equipped city weapon AND it isn't stowed.
-  // COMPLY (below) stows the loadout (g.cityStowedWeapon / g._copStow) so the streets
-  // calm down — peds.js and this file both read g.cityWeapon, so clearing it puts the
-  // piece away city-wide; the engine viewmodel goes to fists too (empty inventory).
+  // OPENLY carrying = the shared engine loadout is currently drawn.
+  // COMPLY snapshots and empties that loadout, so every city system sees fists.
   function openCarry() { return playerArmed() && !g.cityStowedWeapon; }
 
   // ============================================================
@@ -163,18 +160,13 @@
   function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed — I carry legal.”"); }
   function stopExcuseRange()   { stopAttempt(stopTalkChance(0.5), "“On my way to the range, that's all.”"); }
 
-  // COMPLY — actually PUT THE GUN AWAY. We stow both the city-layer weapon label
-  // (g.cityWeapon, which peds/HUD/crime read) AND the engine loadout
-  // (CBZ.weaponInventory / currentWeaponId, which the first-person viewmodel reads:
-  // fpsmode shows fists when the inventory is empty). You still OWN the guns — they're
-  // snapshotted on g._copStow and re-drawn via CBZ.cityRedrawWeapon(). Calms the cop,
-  // calms the street, costs no heat.
+  // COMPLY — actually put the shared engine loadout away. You still own the
+  // guns: the inventory/current selection are snapshotted and restored on draw.
   function stowGuns() {
     if (g.cityStowedWeapon || (g._copStow && g._copStow.inv)) return false;   // already away
-    const snap = { name: g.cityWeapon || null, inv: (CBZ.weaponInventory || []).slice(), cur: CBZ.currentWeaponId || null };
-    g.cityStowedWeapon = g.cityWeapon || "Gun";
+    const snap = { inv: (CBZ.weaponInventory || []).slice(), cur: CBZ.currentWeaponId || null };
+    g.cityStowedWeapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || "Gun";
     g._copStow = snap;
-    g.cityWeapon = null;
     if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
     CBZ.currentWeaponId = null;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -196,10 +188,7 @@
     if (snap) {
       if (CBZ.weaponInventory && snap.inv) { CBZ.weaponInventory.length = 0; for (const id of snap.inv) CBZ.weaponInventory.push(id); }
       CBZ.currentWeaponId = snap.cur || CBZ.currentWeaponId;
-      g.cityWeapon = snap.name || g.cityStowedWeapon;
       if (CBZ.onWeaponInventoryChanged && CBZ.currentWeaponId) CBZ.onWeaponInventoryChanged(CBZ.currentWeaponId, false);
-    } else {
-      g.cityWeapon = g.cityStowedWeapon;
     }
     g.cityStowedWeapon = null; g._copStow = null;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -217,7 +206,7 @@
     if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
     if (CBZ.sfx) CBZ.sfx("report");
     if (CBZ.shake) CBZ.shake(0.4);
-    const it = g.cityWeapon && CBZ.cityEcon.ITEMS[g.cityWeapon];
+    const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
     const dmg = it && it.dmg ? it.dmg * 1.5 + 30 : 80;
     STOP.cop = null; stopHide();    // the stop is over the instant you pull
     if (CBZ.cityHurtCop) CBZ.cityHurtCop(c, dmg, { fromX: fx, fromZ: fz });
@@ -244,6 +233,11 @@
     // SINGLE gun → voluntarily holster (there's nothing to swap to anyway, so fpsmode's
     // Q is a no-op there). With 2+ guns, [Q] stays the weapon-swap key (fpsmode owns it).
     if (g._copStow || g.cityStowedWeapon) { e.preventDefault(); CBZ.cityRedrawWeapon(); return; }
+    if (g.cityMeleeWeapon && CBZ.cityDrawGun && CBZ.cityDrawGun()) {
+      e.preventDefault();
+      if (CBZ.city) CBZ.city.note("Weapon out.", 1.0);
+      return;
+    }
     if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
       e.preventDefault();
       if (CBZ.city) CBZ.city.note("Holstered. · [Q] to draw", 1.6);
@@ -279,10 +273,9 @@
   // Only ONE stop runs at a time; an ambient beat cop nearest you is chosen.
   function updateGunStop(dt) {
     // the stow is only "live" while the gun is actually away. If anything re-arms
-    // you (buy/loot a gun → combat.js cityGiveWeapon sets g.cityWeapon AND
-    // unlockWeapon refills weaponInventory), drop the stale stow snapshot so it reads
+    // you (buy/loot a gun → unlockWeapon refills weaponInventory), drop the stale stow snapshot so it reads
     // as open carry again — otherwise a fresh draw would never get stopped.
-    if ((g.cityStowedWeapon || g._copStow) && (g.cityWeapon || (CBZ.weaponInventory && CBZ.weaponInventory.length))) { g.cityStowedWeapon = null; g._copStow = null; }
+    if ((g.cityStowedWeapon || g._copStow) && CBZ.weaponInventory && CBZ.weaponInventory.length) { g.cityStowedWeapon = null; g._copStow = null; }
     // SAFETY: never carry a stow across a death/bust (the next life would start
     // unarmed with a stale snapshot). Hand the loadout back so the run resets clean.
     if (g._copStow && (CBZ.player.dead || g.busted)) CBZ.cityRedrawWeapon();
@@ -447,21 +440,51 @@
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite("AIR-1", { color: "#7fd0ff" }) : null;
     if (tag) { tag.position.y = 2.2; tag.scale.set(3, 0.8, 1); grp.add(tag); }
     const sp = A.randomRoadPoint();
-    grp.position.set(sp.x, 34, sp.z);
+    grp.position.set(sp.x, CHOP_Y, sp.z);
     return {
       group: grp, body, rotor, cone, pool, tag,
       pos: grp.position, target: new THREE.Vector3(sp.x, 0, sp.z),
       heading: 0, orbit: rng() * 6.28, shootCD: 1.2, leaveT: 0, spotR: 5,
     };
   }
+  // Cruise altitude of the searchlight chopper. The tallest tower (The Spire,
+  // 9 storeys @4m) tops out near y≈36 and a player on its roof sits ~y38, so the
+  // chopper flies WELL above that — it is never below a rooftop target it hunts.
+  const CHOP_Y = 44;
+  // a target this far BELOW the chopper is a plausible down/level shot; a player
+  // higher than the chopper can't be hit (a door gunner can't fire straight up).
+  const CHOP_FIRE_MARGIN = 3;
+  // Does the chopper have a realistic shot / true sighting of the player? Requires
+  // the player to be meaningfully BELOW the aircraft AND a clear line of fire from
+  // the belly to the player. If false, the chopper can't paint or hit them — it
+  // must climb/orbit back overhead first (the cruise altitude does the climbing).
+  function chopperEngage(P) {
+    if (!chopper || !P || P.dead) return false;
+    const ay = chopper.pos.y - 0.5;                    // door-gun height (just below belly)
+    const py = (P.pos.y || 0) + 1.4;                   // ~chest height
+    if (py > ay - CHOP_FIRE_MARGIN) return false;      // player at/above us → no down-angle
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(chopper.pos.x, ay, chopper.pos.z, P.pos.x, py, P.pos.z)) return false;
+    return true;
+  }
   // is the player currently painted by the chopper spotlight? cops + wanted.js
-  // can treat that as a live sighting.
+  // (and aircraft.js) treat that as a live sighting. A paint only counts when the
+  // beam pool is on you AND the chopper actually has eyes/arc on you: the player
+  // must be BELOW the chopper with a clear line of sight. A player up on a roof
+  // HIGHER than the chopper — or behind a wall — is NOT painted, so nothing can
+  // magically tag or shoot them until the chopper climbs back overhead.
   CBZ.cityChopperPaints = function () {
     if (!chopper) return false;
     const P = CBZ.player; if (!P || P.dead) return false;
     const dx = P.pos.x - chopper.pool.position.x, dz = P.pos.z - chopper.pool.position.z;
     const r = chopper.spotR * (P.crouch ? 0.7 : 1);
-    return dx * dx + dz * dz < r * r;
+    if (dx * dx + dz * dz >= r * r) return false;       // beam pool isn't on you
+    return chopperEngage(P);                            // ...and we have altitude + LOS
+  };
+  // expose the police chopper's ground position so the minimap / full map can
+  // show the air threat with a bearing (answers "why a helipad" on the map).
+  CBZ.cityChopperPos = function () {
+    if (!chopper || !chopper.pos) return null;
+    return { x: chopper.pos.x, z: chopper.pos.z, y: chopper.pos.y };
   };
   function despawnChopper() {
     if (!chopper) return;
@@ -490,7 +513,11 @@
     chopper.orbit += dt * (0.45 + stars * 0.07);
     const R = 18 - stars * 1.5;
     const tx = cx + Math.cos(chopper.orbit) * R, tz = cz + Math.sin(chopper.orbit) * R;
-    const ty = 30 - stars;
+    // cruise high (above the tallest tower). If the player has climbed ABOVE us
+    // (up on a roof), CLIMB to get back over them — a gunner can't fire straight
+    // up, so we reposition to regain altitude + line of fire before engaging.
+    const needY = (P.pos.y || 0) + 1.4 + CHOP_FIRE_MARGIN + 6;
+    const ty = Math.max(CHOP_Y - stars, needY);
     chopper.pos.x += (tx - chopper.pos.x) * Math.min(1, dt * 1.4);
     chopper.pos.z += (tz - chopper.pos.z) * Math.min(1, dt * 1.4);
     chopper.pos.y += (ty - chopper.pos.y) * Math.min(1, dt * 1.2);
@@ -519,6 +546,9 @@
   }
   function chopperFire() {
     const P = CBZ.player; if (!P || P.dead || !chopper) return;
+    // never fire up at / through cover: the player must be below us with a clear
+    // line of fire (the paint gate already checks this, but guard it here too).
+    if (!chopperEngage(P)) return;
     const from = { x: chopper.pos.x, y: chopper.pos.y - 0.5, z: chopper.pos.z };
     if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * 2, y: 1.5, z: P.pos.z + (rng() - 0.5) * 2 }, { muzzleScale: 1.2 });
     if (CBZ.sfx) CBZ.sfx("report");
@@ -563,7 +593,7 @@
         g._cityKillDetail = { cop: true, armed: true, victim: cop.name || "officer" };
         CBZ.city && CBZ.city.addKill();
         CBZ.city && CBZ.city.addRespect(8);
-        if (CBZ.cityCopKilled) CBZ.cityCopKilled();          // → 5 stars, instantly
+        if (CBZ.cityCopKilled) CBZ.cityCopKilled();          // big heat spike (caps at 4★ for a lone act; 5★ only via a long spree — see wanted.js)
         else if (CBZ.cityCrime) CBZ.cityCrime(120, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "cop-kill" });
       }
       if (CBZ.pushKill) CBZ.pushKill("An officer was killed", "#ff6b6b");
@@ -571,8 +601,9 @@
   };
 
   // GTA wanted-tier ramp: how many of the responders to you should be SWAT/NOOSE.
-  // 0-1★ none, 2★ a token, 3★ a couple, 4★ half, 5★ mostly heavy units.
-  const SWAT_FRAC = [0, 0, 0.12, 0.3, 0.55, 0.75];
+  // 0-1★ none, 2★ a token, 3★ a chunk, 4★ most, 5★ nearly the whole heavy column —
+  // the rare top star drowns you in armoured units (a brutal crescendo).
+  const SWAT_FRAC = [0, 0, 0.12, 0.45, 0.7, 0.95];
 
   // ---- maintain the right number of cops --------------------------------
   function maintain(dt) {
@@ -985,7 +1016,9 @@
     if (Math.random() >= hitP) return;
     let dmg = (c.swat ? 10 : 7) + Math.random() * 5;
     if (tgt.isPlayer) {
-      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", Math.random() < 0.012, c.swat ? "a SWAT officer" : "the police");
+      // pass the cop ACTOR so death.js can spectate them; cityHurtPlayer derives
+      // the "a SWAT officer" / "the police" display name from it (killfeed + title).
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", Math.random() < 0.012, c);
     } else {
       tgt.hp -= dmg;
       if (tgt.hp <= 0) CBZ.cityKillPed && CBZ.cityKillPed(tgt, { fromX: c.pos.x, fromZ: c.pos.z, attacker: c, byPlayer: false, force: 5, fling: 4 }, "shot by police");

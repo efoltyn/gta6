@@ -213,7 +213,13 @@
     blocks: 6,             // 6×6 grid of city blocks (room for shops + homes + turf)
     block: 34,             // block size (building lot)
     road: 9,               // street width between blocks
-    peds: typeof CBZ.CITY_PEDS === "number" ? CBZ.CITY_PEDS : 160,  // render-LOD culls far rigs, so the streets can be busy
+    // Full per-rig peds are ~16 draw calls EACH — the single biggest GPU cost in
+    // the city. The instanced ambient crowd (city/crowd.js, ~6 draw calls for
+    // hundreds of bodies) carries street DENSITY, and walking up promotes nearby
+    // ambient agents into real rigs on demand. So we keep the expensive rig pool
+    // lean and let the cheap crowd fill the streets. Adaptive quality (core/
+    // quality.js) trims this further on weak GPUs via CBZ.cityRigBudget.
+    peds: typeof CBZ.CITY_PEDS === "number" ? CBZ.CITY_PEDS : 90,
     cops: typeof CBZ.CITY_COPS === "number" ? CBZ.CITY_COPS : 0, // spawn on wanted
     ambientCops: typeof CBZ.CITY_AMBIENT_COPS === "number" ? CBZ.CITY_AMBIENT_COPS : 3, // patrols policing NPCs/traffic at 0 stars
     traffic: typeof CBZ.CITY_TRAFFIC === "number" ? CBZ.CITY_TRAFFIC : 66,
@@ -224,9 +230,12 @@
     tireExhaustDmg: 1.4,   // hp/s once you're fully exhausted and still awake
     sprintMul: 1.7,
     staminaMax: 100, staminaDrain: 22, staminaRegen: 14,
-    // wanted: heat needed to reach each star, and the cop response per star
-    starHeat: [0, 110, 300, 650, 1500, 4000],
-    heatDecay: 2.2,        // heat bled off per second when unseen
+    // wanted: heat needed to reach each star, and the cop response per star.
+    // The top is a CLIFF: 4★ already costs a sustained rampage, and 4→5 is an
+    // enormous wall (3200 → 12000) so a real 5★ is rare and brutally earned.
+    // Low tiers stay lively (petty crime still reaches 1-2★ promptly).
+    starHeat: [0, 300, 650, 1100, 3200, 12000],
+    heatDecay: 3.5,        // heat bled off per second when unseen
 
     // ---- world composition: every lot is one of these (buildings.js) -------
     abandonedFrac: 0.26,   // share of buildable lots that are derelict + gang-run
@@ -238,12 +247,22 @@
       // (Bloods, Latin Kings, Black P. Stones ride PEOPLE; Crips + Gangster
       // Disciples ride FOLK) — turf.js seeds alliances off `nation`. ids kept
       // stable where they were; names/colors/nation are what the game uses.
-      { id: "saints",    name: "Bloods",             color: 0xc0392b, accent: 0x6e1c1c, nation: "people",  ethnicity: "black"  }, // red
-      { id: "reapers",   name: "Crips",              color: 0x2f6bd6, accent: 0x1a3a6e, nation: "folk",    ethnicity: "black"  }, // blue
-      { id: "kings",     name: "Latin Kings",        color: 0xe0b020, accent: 0x6e5210, nation: "people",  ethnicity: "latino" }, // gold
-      { id: "stones",    name: "Black P. Stones",    color: 0x2f9e4f, accent: 0x123d22, nation: "people",  ethnicity: "black"  }, // green
-      { id: "disciples", name: "Gangster Disciples", color: 0x3a4150, accent: 0x141820, nation: "folk",    ethnicity: "black"  }, // charcoal
-      { id: "vipers",    name: "Trinitarios",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral", ethnicity: "latino" }, // teal (Dominican)
+      //
+      // `type` is the faction ARCHETYPE (gangs.js GANG_TYPES drives how each one
+      // spawns + fights so they play DIFFERENTLY — armed fraction, weapon tier,
+      // crew size, HP/aggression, melee-vs-guns, and how hard it defends turf):
+      //   street   — balanced corner crew, pistols/SMGs, turf-focused (the default)
+      //   cartel   — rich + heavily armed, rifles, drug-economy heavy, expansionist
+      //   syndicate— few but heavily-armed high-value earners, protection rackets,
+      //              defends/retaliates hardest
+      //   set      — scrappy big bench, lighter weapons, more bodies than guns
+      //   brawlers — a melee mob: machetes/bats over guns, tanky, roams + brawls
+      { id: "saints",    name: "Bloods",             color: 0xc0392b, accent: 0x6e1c1c, nation: "people",  ethnicity: "black",  type: "street"    }, // red
+      { id: "reapers",   name: "Crips",              color: 0x2f6bd6, accent: 0x1a3a6e, nation: "folk",    ethnicity: "black",  type: "street"    }, // blue
+      { id: "kings",     name: "Latin Kings",        color: 0xe0b020, accent: 0x6e5210, nation: "people",  ethnicity: "latino", type: "cartel"    }, // gold
+      { id: "stones",    name: "Black P. Stones",    color: 0x2f9e4f, accent: 0x123d22, nation: "people",  ethnicity: "black",  type: "set"       }, // green
+      { id: "disciples", name: "Gangster Disciples", color: 0x3a4150, accent: 0x141820, nation: "folk",    ethnicity: "black",  type: "syndicate" }, // charcoal
+      { id: "vipers",    name: "Trinitarios",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral", ethnicity: "latino", type: "brawlers"  }, // teal (Dominican, machete crew)
     ],
     gangPerTurf: [2, 4],   // members spawned to hold each controlled building
     gangArmedFrac: 0.55,   // share of gang members packing a firearm
@@ -290,19 +309,54 @@
       chopHeat: 14,        // NPC/your heat for chopping a hot car if seen
     },
 
-    // ---- real estate: the property ladder (city/realestate.js) ------------
-    // From a rented flophouse to a penthouse with a private garage + elevator.
+    // ---- real estate: the property LADDER, by SQUARE FOOTAGE (realestate.js) -
+    // It's ONE guy — nobody needs five bedrooms, they need SPACE. So the ladder
+    // isn't "more rooms," it's "more sqft / a bigger, more open place," and it's
+    // deliberately SHORT: a handful of clearly-DIFFERENT levels, not a hundred
+    // near-identical listings. Each level is a real, VISITABLE building in the
+    // world (see buildings.js: one lot per level, tagged home.listed) — you can
+    // tour it from Zillow, buy it, and spawn there. The top level, The Spire, is
+    // the TALLEST building in the city: a full ground-floor wraparound parking
+    // garage, glass on every wall, and one impossible loft filling the tower.
     // Owned homes are safehouses: heal, save, a money-safe stash, and a garage
-    // that stores cars. Rent (rented tiers) + tax (owned) are the money sinks.
+    // that stores cars. Rent (room) + property tax (owned) are the money sinks.
     homes: [
-      { id: "room",      name: "Rented Room",        rent: 30,  price: 0,     beds: 1, garage: 0, tier: 0 },
-      { id: "studio",    name: "Studio Apartment",   rent: 0,   price: 4500,  beds: 1, garage: 0, tier: 1 },
-      { id: "apartment", name: "2-Bed Apartment",    rent: 0,   price: 16000, beds: 2, garage: 1, tier: 2 },
-      { id: "condo",     name: "Riverside Condo",    rent: 0,   price: 48000, beds: 3, garage: 2, tier: 3 },
-      { id: "penthouse", name: "Skyline Penthouse",  rent: 0,   price: 150000,beds: 4, garage: 4, tier: 4, elevator: true },
+      { id: "room",      name: "Rented Room",        rent: 30, price: 0,      sqft: 180,   garage: 0, tier: 0, blurb: "A bed and a door that locks. Somewhere to respawn." },
+      { id: "studio",    name: "The Studio",         rent: 0,  price: 2500,   sqft: 450,   garage: 0, tier: 1, blurb: "One room, one window, everything in reach. A real start." },
+      { id: "flat",      name: "Open-Plan Flat",     rent: 0,  price: 12000,  sqft: 950,   garage: 1, tier: 2, blurb: "Room to breathe and a single bay for the car." },
+      { id: "loft",      name: "Warehouse Loft",     rent: 0,  price: 32000,  sqft: 2200,  garage: 2, tier: 3, blurb: "High ceilings, raw concrete, your whole life in one big open space." },
+      { id: "sky",       name: "Skyline Aerie",      rent: 0,  price: 80000,  sqft: 4200,  garage: 3, tier: 4, blurb: "A glass perch over downtown — the city laid out below you." },
+      { id: "spire",     name: "The Spire",          rent: 0,  price: 180000, sqft: 11000, garage: 6, tier: 5, elevator: true, blurb: "A tower yours top to bottom: a wraparound parking deck on the ground, glass on every wall, and one colossal loft filling the sky." },
+      // ---- TASK 1: the apex home. The mega-tower PENTHOUSE — the most expensive,
+      // flagship address in the city. It isn't just a place to sleep: a missile
+      // HELICOPTER comes parked on its rooftop HELIPAD (free with the home), and a
+      // deck HANGAR can be bought to base an F-22 Raptor (Phase 3). buildings.js
+      // builds the mega-tower and tags this exact tier (id "penthouse", the one
+      // flagship) onto lot.building.home; realestate.js + zillow.js sell it and
+      // set g.cityOwnsPenthouse / g.cityOwnsHeli on the buy. The hangar is a
+      // separate big-ticket add-on (priced below; charged in realestate.js).
+      { id: "penthouse", name: "The Apex Penthouse", rent: 0,  price: 750000, sqft: 24000, garage: 8, tier: 6, elevator: true, flagship: true, helipad: true, hangarPrice: 1200000, blurb: "The crown of the skyline: the city's tallest mega-tower, yours alone. A wraparound sky-deck garage, a glass loft that floats above downtown, and your own rooftop HELIPAD — a missile helicopter parked and ready. Buy the deck HANGAR to base a fighter jet." },
     ],
     rentTick: 90,          // seconds between rent / property-tax charges
     taxRate: 0.0008,       // owned-home tax per tick as a fraction of its price
+
+    // ---- DRIP & the exclusive CLUB (city/economy.js + city/club.js) -------
+    // The wealth→clothes→DRIP→club chain. DRIP is your visible STATUS, summed
+    // from the EQUIPPED outfit (CBZ.cityPlayerDrip). The club's bouncer reads it:
+    //   < CLUB_DRIP  → turned away at the rope (most NPCs in the line, and a
+    //                  broke player in street rags, fall here — that's the point)
+    //   >= CLUB_DRIP → you're let in
+    //   >= VIP_DRIP  → VIP tier (perks)
+    // Tuned against economy.js's wearable drip values so:
+    //   • a broke player (no fit / a few cheap streetwear pieces, total drip ~0-12)
+    //     is well UNDER CLUB_DRIP and gets rejected;
+    //   • a full MID-DESIGNER fit (bomber 6 + silk 6 + designer jeans 5 + loafers 6
+    //     + shades 5 + gold chain 7 ≈ 35) CLEARS CLUB_DRIP;
+    //   • only a LUXURY fit (tailored suit 18 + iced chain 22 + iced watch 24 +
+    //     diamond pinky 20 … ≈ 70+) reaches VIP_DRIP.
+    BASE_DRIP: 4,          // everyone has a sliver of baseline presence (added in cityPlayerDrip)
+    CLUB_DRIP: 30,         // bouncer's minimum drip to clear the rope
+    VIP_DRIP: 70,          // elite tier — perks inside
 
     // ---- relationships & family (city/social.js) --------------------------
     social: {
@@ -314,7 +368,20 @@
     },
   };
 
-  // small helper used everywhere for registering frame work
-  CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn }); };
-  CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn }); };
+  // Small helper used everywhere for registering frame work. In profiling
+  // sessions only, retain the callsite so the benchmark can name anonymous
+  // updater functions without adding any normal-game stack-capture overhead.
+  const profileFrameWork = typeof location !== "undefined" && /(?:\?|&)profile=1(?:&|$)/.test(location.search || "");
+  function frameSource() {
+    if (!profileFrameWork) return "";
+    const stack = (new Error()).stack || "";
+    const lines = stack.split("\n");
+    for (let i = 2; i < lines.length; i++) {
+      const m = lines[i].match(/(src\/[^:)]+\.js):(\d+)/);
+      if (m && m[1] !== "src/config.js") return m[1] + ":" + m[2];
+    }
+    return "";
+  }
+  CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource() }); };
+  CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource() }); };
 })();

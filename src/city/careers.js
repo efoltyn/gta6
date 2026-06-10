@@ -2,9 +2,10 @@
    city/careers.js — the many ways to make money.
 
    • Job board (any shop): a deep CONTRACT BOARD — HIT, DELIVERY,
-     store HEIST, SMUGGLING run, GETAWAY-DRIVER, PROTECTION racket,
-     plus a MAYHEM spree. Pay & danger scale with your NOTORIETY rank
-     (Nobody → Kingpin), GTA-style: do dirt, get bigger jobs.
+     store HEIST, SMUGGLING run, GETAWAY-DRIVER, PROTECTION racket.
+     Pay & danger scale with your NOTORIETY rank (Nobody → Kingpin),
+     GTA-style: do dirt, get bigger jobs. (Real rank/standing progression
+     comes from GANG MEMBERSHIP + crew contracts, not freelance body count.)
    • Drug dealing: a real loop — buy WHOLESALE at the trap house
      ([U] when near a dealer / trap lot), build a CUSTOMER BASE that
      re-ups from you, sell on the street where TERRITORY (your gang's
@@ -48,14 +49,16 @@
   function rankIdx() { const xp = notoriety(); let i = 0; for (let k = 0; k < RANKS.length; k++) if (xp >= RANKS[k].xp) i = k; return i; }
   function rankInfo() { return RANKS[rankIdx()]; }
   CBZ.cityNotoriety = function () { const r = rankInfo(); return { xp: notoriety(), idx: rankIdx(), name: r.name, cut: r.cut, max: rankIdx() >= RANKS.length - 1 }; };
+  // Notoriety is now a QUIET flavor stat (kept for HUD / leaderboard + as a job
+  // pay multiplier) — NOT a parallel auto-promote ladder. Real progression comes
+  // from gang membership + contracts (see finishGangContract). No rank-up jingle,
+  // no loud RANK UP banner: when your name carries a touch further, it's a quiet note.
   function gainNotoriety(amt) {
     const before = rankIdx();
     g.cityNotoriety = notoriety() + Math.max(0, amt | 0);
     const after = rankIdx();
-    if (after > before) {
-      CBZ.city.big("RANK UP · " + RANKS[after].name);
-      CBZ.city.note("Your name carries weight now — a " + RANKS[after].name + ". Heavier jobs hit the board, and they pay.", 3.2);
-      if (CBZ.sfx) CBZ.sfx("win");
+    if (after > before && CBZ.city) {
+      CBZ.city.note("Word's getting around — heavier jobs hit the board now.", 2.2);
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -144,6 +147,9 @@
     }
     return (wantLt && anyLt) ? anyLt : best;
   }
+  // Exposed so the playergang join-task system can reuse the SAME "nearest rival
+  // member of a non-allied crew" pick to choose + beacon a rival mark.
+  CBZ.cityFindRivalMember = function (myGangId, wantLt) { return findRivalMember(myGangId, wantLt); };
 
   // a rival / neutral ZONE the crew would want to take (not already yours/the set's).
   function findTakeZone(myGangId) {
@@ -287,8 +293,19 @@
       // you're the boss: the work feeds your own war chest + reputation
       c.rec.treasury = (c.rec.treasury || 0) + Math.round(total * (j.kick || 0.25));
     }
+    // A HIT whose mark was a RIVAL-GANG member or a SPECIFIC marked target is the
+    // real "earn your standing" work — credit a STRONGER membership gain so that
+    // hitting a named rival meaningfully advances your gang standing (this is what
+    // climbs the crew ladder, not body count from random violence).
+    if (j.type === "gcHit" && j.target && c && c.kind === "member" && CBZ.cityMemberPutInWork) {
+      const wasRivalMember = !!j.target.gang && j.target.gang !== c.gangId && j.target.gang !== "player";
+      const wasSpecificMark = wasRivalMember || j.lt || j.target === j._mark;
+      if (wasRivalMember || wasSpecificMark) {
+        CBZ.cityMemberPutInWork("body", j.lt ? 2 : 1);                 // a real, named body on top of the job's base body
+        CBZ.cityMemberPutInWork("standing", j.lt ? 0.18 : 0.10);
+      }
+    }
     g.cityGangJobsDone = (g.cityGangJobsDone || 0) + 1;
-    if (CBZ.sfx) CBZ.sfx("win");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     g.cityJob = null; clearBeacon();
   }
@@ -381,8 +398,9 @@
       const s = pick(shops);
       jobs.push({ type: "protection", lot: s, reward: payout(500, 500), desc: "RACKET: collect protection from " + s.building.name });
     }
-    // MAYHEM — a spree gig that ticks on each rob/drop (kept from wave 1)
-    jobs.push({ type: "vandal", count: 5 + ri, done: 0, reward: payout(250, 150), desc: "MAYHEM: rob or drop " + (5 + ri) + " people" });
+    // (The old MAYHEM "rob or drop N people" spree gig is GONE — it was pure
+    //  body-count filler. Progression is gang membership + contracts now, not a
+    //  freelance kill-count. See finishGangContract / playergang task system.)
 
     // trim to a tidy board, keep the starters + a random slice of the rest
     return jobs;
@@ -397,7 +415,7 @@
     return board;
   }
   let offered = [];
-  const ICON = { hit: "🎯", delivery: "📦", heist: "💰", smuggle: "🚚", getaway: "🏎️", protection: "💼", vandal: "🔨" };
+  const ICON = { hit: "🎯", delivery: "📦", heist: "💰", smuggle: "🚚", getaway: "🏎️", protection: "💼" };
   CBZ.cityJobBoard = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     // if you ride with a crew, the board opens straight onto YOUR set's
@@ -467,7 +485,6 @@
     // every finished contract grows your criminal CV (≈ a fraction of the pay)
     gainNotoriety(Math.round(j.reward * 0.5) + 40);
     g.cityJobsDone = (g.cityJobsDone || 0) + 1;
-    if (CBZ.sfx) CBZ.sfx("win");
     g.cityJob = null; clearBeacon();
   }
   function failJob(why) {
@@ -478,13 +495,10 @@
   CBZ.cityJobComplete = finishJob;
   CBZ.cityJobFail = failJob;
 
-  // a MAYHEM (vandal) gig ticks up on each rob/drop you commit
-  CBZ.cityCountMayhem = function () {
-    const j = g.cityJob; if (!j || j.type !== "vandal") return;
-    j.done = (j.done || 0) + 1;
-    if (j.done >= j.count) { CBZ.city.note("Mayhem spree done!", 1.6); finishJob(); }
-    else CBZ.city.note("Mayhem " + j.done + "/" + j.count, 1.1);
-  };
+  // The MAYHEM (vandal) "rob or drop N people" spree gig was removed (body-count
+  // filler). This hook is kept as a harmless no-op so its peds.js callers (which
+  // null-guard on existence) keep working without firing any kill-count job.
+  CBZ.cityCountMayhem = function () {};
 
   // ---- careers ----
   CBZ.cityStartCareer = function (kind) {

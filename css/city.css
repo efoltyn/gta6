@@ -26,6 +26,8 @@ body.mode-city #ammo,
 body.mode-city #survTop,
 body.mode-city #survZone,
 body.mode-city #survBars,
+body.mode-city #hotbar,
+body.mode-city #invScreen,
 body.mode-city #disasterBanner { display: none !important; }
 
 /* the contextual interact panel is reused by the city — keep it readable */

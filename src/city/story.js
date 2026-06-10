@@ -18,13 +18,17 @@
   const g = CBZ.game;
 
   // ---- chapters: the rungs of the ladder ----
+  // PERSONAL street-fame arc — this is YOUR notoriety, NOT a gang rank. Titles
+  // deliberately avoid the gang membership ladder words (prospect/lookout/runner/
+  // soldier/enforcer/lt/boss) so the HUD never reads as "you joined a gang" when
+  // you didn't — gang rank only comes from actually prospecting + patching in.
   const CHAPTERS = [
     "Nobody",        // 0 — fresh off the bus
     "Hustler",       // 1 — got your first money up
-    "Soldier",       // 2 — strapped, blood on your hands
-    "Shot Caller",   // 3 — you run a crew
+    "Name Ringing",  // 2 — strapped, blood on your hands; the street knows you
+    "Big Name",      // 3 — you run a crew
     "Made",          // 4 — property + a gang of your own
-    "Heavy",         // 5 — six figures, feared
+    "Notorious",     // 5 — six figures, feared
     "Kingpin",       // 6 — you took a rival's throne
   ];
 
@@ -85,10 +89,7 @@
   function world() { return CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null; }
   function bank() { return (g.cash || 0) + (g.cityBank || 0); }
   function hasGun() {
-    if (g.cityWeapon) {
-      const it = CBZ.cityEcon && CBZ.cityEcon.ITEMS && CBZ.cityEcon.ITEMS[g.cityWeapon];
-      if (it && it.gun) return true;
-    }
+    if (CBZ.cityOwnsGun && CBZ.cityOwnsGun()) return true;
     const inv = g.cityInv || {};
     const ITEMS = CBZ.cityEcon && CBZ.cityEcon.ITEMS;
     if (ITEMS) for (const k in inv) { if (inv[k] > 0 && ITEMS[k] && ITEMS[k].gun) return true; }

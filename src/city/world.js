@@ -153,9 +153,12 @@
                         : { x: r.x + along, z: r.z + lane, vertical: false };
     }
     function nearestIntersection(x, z) {
-      let best = intersections[0], bd = 1e9;
-      for (const it of intersections) { const d = Math.hypot(it.x - x, it.z - z); if (d < bd) { bd = d; best = it; } }
-      return best;
+      // Intersections are a regular (N+1)² grid. The nearest 2D point is
+      // exactly the independently nearest x-line and z-line, so avoid scanning
+      // the whole grid for every traffic car, every frame.
+      const i = Math.max(0, Math.min(N, Math.round((x - xLines[0]) / step)));
+      const j = Math.max(0, Math.min(N, Math.round((z - zLines[0]) / step)));
+      return intersections[i * (N + 1) + j];
     }
     function clampRect(p, x0, x1, z0, z1) {
       return { x: Math.max(x0, Math.min(x1, p.x)), z: Math.max(z0, Math.min(z1, p.z)) };

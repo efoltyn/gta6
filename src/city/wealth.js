@@ -400,7 +400,7 @@
       bumpNotoriety(Math.round(o.heat * 3));
       big(o.emoji + " " + o.name + " PAID OFF — " + money(payout) + " (×" + mult.toFixed(1) + ")");
       note("Net +" + money(payout - o.stake) + " on the play.", 2.8);
-      sfx("win"); if (CBZ.shake) CBZ.shake(0.25);
+      sfx("coin"); if (CBZ.shake) CBZ.shake(0.25);
     } else {
       big(o.emoji + " " + o.name + " WENT BAD — lost " + money(o.stake));
       note("Eat the loss and the heat. The street remembers.", 2.8);
@@ -478,7 +478,7 @@
     if (hold) {
       big("🛡️ Crew held off the raid on " + b.name + "!");
       note("Your people protected the stock. Respect on the street.", 2.8);
-      sfx("win"); if (CBZ.shake) CBZ.shake(0.18);
+      if (CBZ.shake) CBZ.shake(0.18);
       if (CBZ.city) CBZ.city.addRespect(clamp(Math.round(b.cost / 18000), 3, 40));
       bumpNotoriety(2);
       // a held raid still spends a little of their heat scrutiny

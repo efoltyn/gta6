@@ -70,22 +70,46 @@
     return out;
   }
 
-  function run() {
+  // Merge eligible meshes found under `target`. When `recurse` is true we walk
+  // the whole subtree (used for the city, whose thousands of static boxes live
+  // nested inside building groups under one root that loads AFTER the page —
+  // so the top-level load-time pass below never reached them). Merged meshes are
+  // baked to WORLD space and re-parented to `target`, so they inherit its
+  // mode-visibility toggle (A.root.visible) while costing one draw call apiece.
+  function run(target, recurse) {
+    target = target || scene;
     const losSet = new Set(CBZ.losBlockers || []);
+    // every mesh a collider points back to (buildings register colliders with a
+    // `ref` mesh but no userData tag, so this is the only way to spare them) —
+    // and platforms, which are stood on. Merging these would orphan the physics
+    // /camera-occlusion reference. Keep every referenced mesh's identity.
+    const refSet = new Set();
+    for (const c of (CBZ.colliders || [])) if (c && c.ref) refSet.add(c.ref);
+    for (const p of (CBZ.platforms || [])) if (p && p.ref) refSet.add(p.ref);
     const buckets = new Map();      // key -> [mesh,…]
-    // snapshot children first (we mutate scene.children as we go)
-    const kids = scene.children.slice();
-    for (const m of kids) {
-      if (!m.isMesh || m.isInstancedMesh) continue;
-      if (losSet.has(m)) continue;
-      if (m.userData && Object.keys(m.userData).length > 0) continue;  // referenced/interactive
+
+    function consider(m) {
+      if (!m.isMesh || m.isInstancedMesh) return;
+      if (losSet.has(m) || refSet.has(m)) return;
+      if (m.userData && Object.keys(m.userData).length > 0) return;  // referenced/interactive
+      if (m.userData && m.userData.collider) return;                 // physics box — keep identity
       const key = mergeableKey(m);
-      if (!key) continue;
+      if (!key) return;
       (buckets.get(key) || buckets.set(key, []).get(key)).push(m);
     }
+    function walk(o) {
+      // never descend into a subtree flagged dynamic (peds/cars/crowd rigs that
+      // move every frame — baking them static would freeze them in place).
+      if (o.userData && o.userData.dynamic) return;
+      if (o.isMesh) { consider(o); return; }
+      const kids = o.children ? o.children.slice() : [];
+      for (const c of kids) walk(c);
+    }
+    if (recurse) { for (const c of target.children.slice()) walk(c); }
+    else { for (const m of target.children.slice()) consider(m); }
 
     let mergedMeshes = 0, removed = 0;
-    buckets.forEach((meshes, key) => {
+    buckets.forEach((meshes) => {
       if (meshes.length < 2) return;              // nothing to gain
       const geos = meshes.map((m) => {
         m.updateWorldMatrix(true, false);
@@ -100,15 +124,27 @@
       mesh.castShadow = proto.castShadow;
       mesh.receiveShadow = proto.receiveShadow;
       mesh.matrixAutoUpdate = false;              // static — skip per-frame matrix work
-      scene.add(mesh);
-      meshes.forEach((m) => { scene.remove(m); m.geometry.dispose && m.geometry.dispose(); removed++; });
+      target.add(mesh);                           // baked to world space; target is identity
+      meshes.forEach((m) => { if (m.parent) m.parent.remove(m); m.geometry.dispose && m.geometry.dispose(); removed++; });
       mergedMeshes++;
     });
 
     // the shadow map was baked from the pre-merge scene; force one refresh
     if (CBZ.renderer) CBZ.renderer.shadowMap.needsUpdate = true;
-    CBZ.batchStats = { mergedMeshes, removed };
+    const prev = CBZ.batchStats || { mergedMeshes: 0, removed: 0 };
+    CBZ.batchStats = { mergedMeshes: prev.mergedMeshes + mergedMeshes, removed: prev.removed + removed };
+    return { mergedMeshes, removed };
   }
+
+  // Collapse the static geometry under a freshly-built root (the city). Call
+  // ONCE, after the world is assembled but BEFORE any dynamic actors (peds /
+  // cars) are added to it — they'd otherwise be baked static. Idempotent guard
+  // per-root so a re-entered mode can't double-merge.
+  CBZ.batchStaticUnder = function (root) {
+    if (!root || root.userData._batched) return null;
+    root.userData._batched = true;
+    return run(root, true);
+  };
 
   // Run after every load-time world/entity module has populated the scene.
   // The window 'load' event fires once all scripts have executed, so the

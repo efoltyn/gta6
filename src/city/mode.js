@@ -29,6 +29,25 @@
 
   let baseFloor = null;     // the floorAt that existed before the city wrapped it
 
+  // CONSERVATIVE urgency filter: a note that matches stays LOUD on the centre
+  // flash; everything else routes to the quiet left feed. Tuned to keep genuine
+  // danger/health/heat warnings prominent (car on fire, starving, wanted, a hit
+  // squad, getting busted, an active deadline) while demoting ambient chatter.
+  const NOTE_URGENT = /⚠|on fire|burning|starv|hungry|wanted|busted|jail|cops?|police|hit squad|drive-?by|hostile|warn|danger|surrender|bleeding|critical|dying|deadline|escape|robbed|alarm|shootout|ambush/i;
+
+  // CATEGORY throttle: ambient chatter (witnesses snitching, traffic stops,
+  // service dispatch) embeds a UNIQUE ped name each time, so the exact-string
+  // de-dup never catches the flood. Bucket each non-urgent note into a category
+  // and rate-limit per bucket — flavor survives, the spam dies. cooldowns in ms.
+  const NOTE_CAT_CD = { witness: 4500, traffic: 8000, dispatch: 6000, loot: 1500, _default: 1200 };
+  function noteCategory(msg) {
+    if (/saw that|reported you|Reported:|👀|🗣️/i.test(msg)) return "witness";
+    if (/Traffic stop|🚓|🎫|ticketed|fleeing the police|🚨/i.test(msg)) return "traffic";
+    if (/dispatched|🚒|🚑/i.test(msg)) return "dispatch";
+    if (/Picked up|Looted|\+\$|cash/i.test(msg)) return "loot";
+    return "_default";
+  }
+
   const city = {
     built: false,
     arena: null,
@@ -48,8 +67,42 @@
     // ---- kills (leaderboard) ----
     addKill() { g.kills = (g.kills || 0) + 1; city.addRespect(2); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); },
 
-    // a short toast (reuses the engine's hint flasher)
-    note(msg, sec) { if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2); },
+    // a short toast. Two channels feed it across the city code, with NO throttle
+    // historically → spam. note() now buckets each LOW-PRIORITY note by CATEGORY
+    // (witness/traffic/dispatch/loot) and rate-limits per bucket — the old exact-
+    // string de-dup couldn't catch witness floods that embed a unique ped name —
+    // routing the survivors into the self-pruning left stack (CBZ.cityFeed, which
+    // collapses repeats into "(xN)"). URGENT warnings (fire, starving, wanted,
+    // hostile, busted…) skip the throttle and stay on the centre flashHint. big()
+    // stays the headline channel (flashToast) untouched.
+    note(msg, sec, opts) {
+      if (!msg) return;
+      const now = (CBZ.now != null ? CBZ.now : performance.now());   // ms
+      const force = !!(opts && opts.urgent);
+      const urgent = force || NOTE_URGENT.test(msg);
+      if (urgent) { if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2); return; }
+      // ---- non-urgent: category throttle BEFORE the feed ----
+      // Witness/traffic/dispatch chatter carries a unique ped name each time, so
+      // the exact-string de-dup can't see the repeat. Gate by category cooldown
+      // and, when we drop a flooded note, ask the feed to bump a "(xN)" counter
+      // on the matching row instead of letting it stack new rows.
+      const cat = noteCategory(msg);
+      const cd = NOTE_CAT_CD[cat] || NOTE_CAT_CD._default;
+      const catT = (city._catT || (city._catT = {}));
+      if ((now - (catT[cat] || -9999)) < cd) {
+        if (CBZ.cityFeed) CBZ.cityFeed(msg, "#9fb0c6", { collapseOnly: true });
+        return;
+      }
+      catT[cat] = now;
+      // de-dup fallback: drop an identical message seen within ~1.2s. Only the
+      // _default bucket relies on this now; the others are already cooled above.
+      if (cat === "_default" && msg === city._lastNote && (now - (city._lastNoteT || -9999)) < 1200) return;
+      city._lastNote = msg; city._lastNoteT = now;
+      // low-priority: prefer the tidy left feed; fall back to flashHint if the
+      // feed isn't mounted (so a message is never silently lost).
+      if (CBZ.cityFeed) CBZ.cityFeed(msg, "#9fb0c6");
+      else if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2);
+    },
     big(msg) { if (CBZ.flashToast) CBZ.flashToast(msg); },
 
     forEachActor(fn) {
@@ -138,6 +191,12 @@
     reset(game) {
       build();
       const A = city.arena;
+      // Collapse the city's thousands of static decoration boxes into a handful
+      // of merged meshes. Runs ONCE (guarded per-root) — after buildCity built
+      // the root but BEFORE spawnCityPeds/Traffic add dynamic rigs to it. The
+      // load-time batch pass (core/batch.js) can't reach the city: it's built
+      // lazily, long after the page-load event that triggers that pass.
+      if (CBZ.batchStaticUnder) CBZ.batchStaticUnder(A.root);
       A.root.visible = true;
       if (A.reset) A.reset();
       if (CBZ.fx) CBZ.fx.clear();
@@ -154,12 +213,24 @@
       game.wanted = 0; game.heat = 0; game.hunger = 100; game.tired = 0;
       game.respect = 0; game.kills = 0; game.busted = false; game.career = null;
       game.elapsed = 0; game.invuln = 0;
-      game.cityInv = {}; game.cityWeapon = null; game.cityAmmo = 0; game.cityBank = 0;
+      game.cityInv = {}; game.cityMeleeWeapon = null; game.cityBank = 0;
       game.cityActivity = null;
       // start unarmed in the ONE engine gun system; fresh mags. Buying/looting a
       // gun unlocks it in fpsmode (systems/fpsmode.js), which drives city gunplay.
       if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
+      // TEST LOADOUT: spawn with an RPG + a rifle + a sidearm so weapon switching
+      // (number keys 1-9) and the rocket/helicopter systems are testable from the
+      // first second. Toggle CBZ.CITY_TEST_LOADOUT=false to ship a clean start.
+      if (CBZ.CITY_TEST_LOADOUT !== false && CBZ.unlockWeapon) {
+        CBZ.unlockWeapon("sidearm", { select: false });
+        CBZ.unlockWeapon("carbine", { select: false });
+        CBZ.unlockWeapon("bazooka", { select: true });
+      }
       if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
+      // top the test loadout's reserves right up (fpsResetWeapons set base mags)
+      if (CBZ.CITY_TEST_LOADOUT !== false && CBZ.fpsAddAmmo) {
+        CBZ.fpsAddAmmo(20, "bazooka"); CBZ.fpsAddAmmo(300, "carbine"); CBZ.fpsAddAmmo(120, "sidearm");
+      }
       if (CBZ.cityWorldBeginRun) CBZ.cityWorldBeginRun(game);
 
       // THIRD-PERSON by default (the jail follow camera); [V] toggles FP. The
@@ -167,9 +238,16 @@
       CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
       CBZ.cityCam.fp = false; CBZ.cityCam.death = null;
 
+      // clear any stale HQ / hit waypoint so it never bleeds into the new run
+      // (defensive — cityGangsReset also clears it, but ownership/order may shift).
+      if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
+
       // reset the new sub-systems BEFORE repopulating
       if (CBZ.cityGangsReset) CBZ.cityGangsReset();
       if (CBZ.citySocialReset) CBZ.citySocialReset();
+      if (CBZ.cityResetOutfit) CBZ.cityResetOutfit();   // clear worn clothes (drip) on a new run
+      game.cityDripRewarded = {};                        // re-earn drip respect on a fresh run
+      if (CBZ.cityClubReset) CBZ.cityClubReset();        // tear down the velvet-club line/bouncer
       if (CBZ.cityRealEstateReset) CBZ.cityRealEstateReset();
       if (CBZ.cityZillowReset) CBZ.cityZillowReset();
       if (CBZ.cityVehiclesReset) CBZ.cityVehiclesReset();
@@ -181,6 +259,8 @@
       if (CBZ.clearCityCops) CBZ.clearCityCops();
       if (CBZ.spawnCityTraffic) CBZ.spawnCityTraffic(CBZ.CITY.traffic);
       if (CBZ.cityWantedReset) CBZ.cityWantedReset();
+      if (CBZ.cityClearAircraft) CBZ.cityClearAircraft();
+      if (CBZ.cityClearPlayerAir) CBZ.cityClearPlayerAir();
       if (CBZ.cityCareersReset) CBZ.cityCareersReset();
       if (CBZ.cityEmpireReset) CBZ.cityEmpireReset();
       if (CBZ.cityLeaderboardReset) CBZ.cityLeaderboardReset();

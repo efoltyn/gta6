@@ -45,7 +45,7 @@
   function dist(a, x, z) { return Math.hypot(a.pos.x - x, a.pos.z - z); }
   function nearest(list, x, z, test) { let best = null, bd = REACH; for (const p of list) { if (!test(p)) continue; const d = dist(p, x, z); if (d < bd) { bd = d; best = p; } } return best; }
 
-  function armedGun() { const it = g.cityWeapon && CBZ.cityEcon.ITEMS[g.cityWeapon]; return it && it.gun ? it : null; }
+  function armedGun() { const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon(); return it && it.gun ? it : null; }
   // the ped you're "pointing your gun at": in the forward cone, close-ish
   function aimedPed(px, pz) {
     if (!armedGun()) return null;
@@ -64,10 +64,85 @@
   const TALK = ["You lost?", "Nice day, huh.", "Got a light?", "Move along.", "I know you?", "Crazy out here lately.", "Spare some change?"];
   function talk() { CBZ.city.note("“" + TALK[(Math.random() * TALK.length) | 0] + "”", 1.6); }
 
+  // ---- valuables / pawn helpers (Tasks 1-4) -------------------------------
+  // Everything reads from the shared econ catalog so the player can judge a
+  // haul: a Patek (clean $350k) pawns FAT, a Wallet ($40) is scraps. All
+  // feature-detected — if Agent 1/2's econ helpers are absent we degrade.
+  function econ() { return CBZ.cityEcon || null; }
+  function itemDef(name) { const e = econ(); return e && e.ITEMS ? e.ITEMS[name] : null; }
+  function itemVal(name) { const it = itemDef(name); return it ? (it.value | 0) : 0; }
+  function isLuxe(name) { const it = itemDef(name); return !!(it && (it.luxe || (it.value | 0) >= 90000)); }
+  // a short $-amount: $40 / $6.5k / $350k / $3.0M so the worth is instantly legible.
+  function money(n) { n = Math.round(n || 0); return n >= 1e6 ? "$" + (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1000 ? "$" + Math.round(n / 1000) + "k" : "$" + n; }
+  // what a fence/pawn would actually PAY for it (sellPrice when present, else value).
+  function pawnPay(name) { const e = econ(); const v = (e && e.sellPrice) ? e.sellPrice(name, "pawn") : 0; return v > 0 ? v : Math.round(itemVal(name) * 0.65); }
+  // a worth hint the player reads as "go pawn this": "(~$227k at the pawn shop)".
+  function pawnHint(name) { return "(~" + money(pawnPay(name)) + " at the pawn shop)"; }
+  // route ONE valuable item NAME into inventory; fire a satisfying headline for a
+  // jackpot, return a legible fragment ("a Patek Philippe (~$280k …)") for the haul line.
+  function takeValuable(name, opts) {
+    const e = econ(); if (!name || !e || !e.add) return "";
+    e.add(name, 1);
+    const luxe = isLuxe(name), v = itemVal(name);
+    if (luxe || v >= 20000) {
+      const head = (opts && opts.head) || "💎 You bagged a " + name;
+      if (CBZ.city && CBZ.city.big) CBZ.city.big(head + " — " + money(pawnPay(name)) + "!");
+      if (CBZ.sfx) CBZ.sfx("coin");
+      if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(luxe ? 6 : 2);
+    }
+    return name + " " + pawnHint(name);
+  }
+
   // ---- gang membership / relationship helpers (all feature-detected) ----
   // The I/J/K/L panel has a HARD cap of 4 slots; everything funnels through cap4
   // so no situation can ever overflow the row list.
   function cap4(opts) { return opts.length > 4 ? opts.slice(0, 4) : opts; }
+
+  // ---- THE CLUB (the velvet rope): the end of the money→clothes→drip loop ----
+  // buildings.js stamps lot.building.club = { bouncerSpot, ropePost, door, ... }
+  // on exactly one lot (CBZ.city.clubLot). When you walk up to the rope we offer
+  // a "step to the bouncer" verb that hands off to club.js's gate check — the
+  // bouncer reads CBZ.cityPlayerDrip() vs CBZ.CITY.CLUB_DRIP to admit/reject you.
+  // All feature-detected: no club lot (or no club.js yet) → the verb never shows.
+  function clubInfo() {
+    const lot = CBZ.city && CBZ.city.clubLot;
+    const c = lot && lot.building && lot.building.club;
+    // club is the structured object (not just the boolean flag); needs a spot.
+    if (c && typeof c === "object" && (c.bouncerSpot || c.ropePost)) return c;
+    return null;
+  }
+  // the world point you "step to" — the rope / bouncer's post.
+  function clubSpot(c) { return (c && (c.bouncerSpot || c.ropePost)) || null; }
+  // are you close enough to the rope to talk to the bouncer? (a touch wider than
+  // REACH so the queue lane / rope reads as one approachable zone).
+  const CLUB_REACH = 4.6;
+  function nearClubSpot(px, pz) {
+    const c = clubInfo(); if (!c) return null;
+    const s = clubSpot(c); if (!s) return null;
+    return Math.hypot(px - s.x, pz - s.z) <= CLUB_REACH ? c : null;
+  }
+  // hand off to club.js's entry/gate function — try the agreed global first, then
+  // a couple of sensible aliases so we coordinate cleanly via whatever club.js
+  // actually exposes. If club.js isn't loaded yet, say so rather than no-op.
+  function clubTryEnter() {
+    const fn = CBZ.cityClubTryEnter || CBZ.cityClubApproach || CBZ.cityClubEnter || CBZ.cityClubGate;
+    if (typeof fn === "function") { fn(); return; }
+    // graceful fallback: at least describe the gate so the loop reads even before
+    // club.js lands (the drip number is the thing that matters at the rope).
+    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
+    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
+    if (drip >= need) CBZ.city.note("The bouncer sizes up your fit (drip " + drip + ") and unhooks the rope…", 2.2);
+    else CBZ.city.note("“Not tonight.” The bouncer waves you off — drip " + drip + ", needs " + need + ". Dress up.", 2.6);
+  }
+  // the one-verb panel at the rope (kept to a single slot — never overflows cap4).
+  function clubOpts() {
+    return [{ label: "Step to the bouncer 🪩", key: "i", fn: clubTryEnter }];
+  }
+  function clubNote() {
+    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
+    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
+    return "Velvet rope · DRIP " + drip + "/" + need + (drip >= need ? " ✓ dressed to impress" : " — dress up to get in");
+  }
 
   // your CURRENT membership in an NPC crew (you as a member, not the boss), or null.
   function myMemb() { return (CBZ.cityMembership && CBZ.cityMembership()) || null; }
@@ -123,7 +198,7 @@
   // ---- option builders (each option: {label, key, fn, bad}) ----
   function hostageOpts(p) {
     return [
-      { label: "Rob at gunpoint", key: "i", bad: true, fn: () => { CBZ.cityRobPed(p); } },
+      { label: "Rob at gunpoint", key: "i", bad: true, fn: () => { mug(p); } },
       { label: "Take hostage", key: "j", bad: true, fn: () => CBZ.cityTakeHostage && CBZ.cityTakeHostage(p) },
       { label: "Demand ransom", key: "k", bad: true, fn: () => demandRansom(p) },
       { label: "Execute", key: "l", bad: true, fn: () => execute(p) },
@@ -160,25 +235,33 @@
       const opts = [];
       opts.push({ label: "Beat " + nm + " down", key: "i", bad: true, fn: () => attack(p) });   // a malicious option always exists
       opts.push({ label: "Put in WORK with " + nm, key: "j", fn: () => prospectOrWork(p) });
-      opts.push({ label: "Talk to " + nm, key: "k", fn: talk });
+      // relationship verb over plain Talk: do a crew-mate a favor to build standing
+      if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor)
+        opts.push({ label: "Do " + nm + " a favor 🤝", key: "k", fn: () => CBZ.cityDoFavor(p) });
+      else
+        opts.push({ label: "Talk to " + nm, key: "k", fn: talk });
       opts.push({ label: "Leave the crew", key: "l", bad: true, fn: () => CBZ.cityLeaveGang && CBZ.cityLeaveGang() });
       return cap4(opts);
     }
 
-    const opts = [{ label: "Mug " + nm, key: "i", bad: true, fn: () => CBZ.cityRobPed(p) }];
+    const opts = [{ label: "Mug " + nm, key: "i", bad: true, fn: () => mug(p) }];
     opts.push({ label: "Beat " + nm + " down", key: "j", bad: true, fn: () => attack(p) });
     if (p === g.cityPartner) opts.push({ label: g.citySpouse ? "Sweet-talk " + nm : "Propose to " + nm + " 💍", key: "k", fn: () => (g.citySpouse ? talk() : CBZ.cityPropose(p)) });
     // ---- a rival whose BOSS you dropped: claim the whole crew ----
     else if (p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled)
       opts.push({ label: "Claim the " + p.gang + " 👑", key: "k", fn: () => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Open [O] → Claim to take over.", 2.2); } });
-    // ---- PROSPECT / JOIN this ped's crew (you're a free agent on/near their turf) ----
+    // ---- PROSPECT / JOIN this ped's crew (you're a free agent on/near their
+    //      turf). This is the PRIMARY progression path, so it's ranked above the
+    //      generic recruit/flirt/talk verbs (and the i/j/l slots keep it from
+    //      being sliced by cap4). ----
     else if (joinableGangOf(p)) {
       const rec = joinableGangOf(p);
-      // NOTE: the public standing read can't tell "not courting" from "courting
-      // at 0", so PROSPECT is always the entry verb (cityProspectGang is guarded
-      // + idempotent). Only once standing maxes out do we surface "get initiated".
+      const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
       if (myProspectStanding() >= 1)
         opts.push({ label: "Get initiated with " + nm, key: "k", fn: () => prospectOrWork(p) });
+      else if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p))
+        // already prospecting this crew: do a FAVOR for this member to EARN STANDING
+        opts.push({ label: "Do " + nm + " a favor (earn standing) 🤝", key: "k", fn: () => prospectOrWork(p) });
       else
         opts.push({ label: "Prospect the " + (rec.name || "crew") + " 🩸", key: "k", fn: () => CBZ.cityProspectGang(rec) });
     }
@@ -191,7 +274,6 @@
     // ---- recruit straight into YOUR founded gang ----
     else if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100))))
       opts.push({ label: "Recruit " + nm + " to the gang 🔫", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
-    else if (p.gang && !g.career) opts.push({ label: "Run with the " + p.gang, key: "k", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("gangster") });
     else if (g.career === "dealer" && hasDrugs) opts.push({ label: "Sell " + nm + " product", key: "k", bad: true, fn: () => CBZ.cityDealTo(p) });
     else if (!p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)))) opts.push({ label: "Recruit " + nm + " 🔫", key: "k", fn: () => CBZ.cityRecruit(p) });
     else if (!hatesYou && CBZ.cityIsRomance && CBZ.cityIsRomance(p)) opts.push({ label: "Flirt with " + nm + " 💕", key: "k", fn: () => CBZ.cityFlirt(p) });
@@ -199,9 +281,12 @@
     opts.push({ label: "Pick " + nm + "'s pocket", key: "l", bad: true, fn: () => pickpocket(p) });
     return cap4(opts);
   }
-  // Advance the prospect/initiation/put-in-work flow. The membership system runs
-  // the actual hit + standing on the [O] crew menu; from the street we kick it
-  // off (prospect first if you haven't) and point the player at where it lands.
+  // Advance the prospect/initiation/put-in-work relationship FROM THE STREET.
+  //   • Not yet courting this crew → start prospecting it (cityProspectGang).
+  //   • Courting + this member is befriendable → do them a FAVOR, which raises
+  //     their affinity AND your gang standing (cityDoFavor) — the EARN-TRUST task.
+  //   • Standing maxed → point at the [O] menu for the initiation step.
+  //   • Already patched in → putting in work is a body kicked up.
   function prospectOrWork(p) {
     const rec = gangRec(p && p.gang);
     if (myMemb()) {
@@ -209,12 +294,24 @@
       CBZ.city.note("Drop a rival, then your kicked-up work counts toward the next rank. [O] for crew.", 3);
       return;
     }
-    if (myProspectStanding() < 0) {           // API absent fallback → just start courting this crew
+    // not courting anyone yet (or not this crew) → start prospecting THIS crew.
+    const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
+    if (!courting) {
       if (rec && CBZ.cityProspectGang) CBZ.cityProspectGang(rec);
       return;
     }
-    // standing is up: send them to the [O] menu to get jumped in / take the hit
-    CBZ.city.note("Open [O] → Initiation to get jumped in or put in work.", 2.6);
+    // standing maxed → the initiation step lives on the [O] menu.
+    if (myProspectStanding() >= 1) {
+      CBZ.city.note("Open [O] → Initiation to get jumped in or put in work.", 2.6);
+      return;
+    }
+    // courting + this member is befriendable → do them a FAVOR to earn standing.
+    if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) {
+      CBZ.cityDoFavor(p);
+      return;
+    }
+    // can't befriend this one (grudge/dead) — nudge toward the task path.
+    CBZ.city.note("Hang on their turf and do members favors to earn trust. [O] for tasks.", 2.6);
   }
   function vendorOpts(v) {
     return [
@@ -304,12 +401,74 @@
     CBZ.cityCrime && CBZ.cityCrime(50, { x: p.pos.x, z: p.pos.z, type: "extortion" });
     if (CBZ.sfx) CBZ.sfx("coin");
   }
+  // MUG / ROBBERY — takes their cash + the loot item (via cityRobPed, Agent 2's
+  // payout) AND transfers EVERY valuable they're carrying into your inventory to
+  // pawn. A rich victim = a big haul (a Patek + a ring); a broke one = scraps.
+  function mug(p) {
+    if (!p || p.dead) return;
+    // snapshot the valuables BEFORE the rob (cityRobPed only handles cash + loot;
+    // we own routing the watch/ring/etc into inventory). Clear so it can't re-drop.
+    const vals = (Array.isArray(p.valuables) && p.valuables.length) ? p.valuables.slice() : [];
+    if (vals.length) p.valuables = [];
+    const wasRobbed = p.robbed;
+    const res = CBZ.cityRobPed ? CBZ.cityRobPed(p) : null;
+    // cityRobPed no-ops if already robbed/dead — don't claim a phantom haul then.
+    if (wasRobbed || !res) {
+      if (!wasRobbed && vals.length) p.valuables = vals;  // restore: nothing was taken
+      return;
+    }
+    const got = [];                       // legible haul fragments for the headline
+    const cash = res.cash | 0;
+    if (res.item) got.push(res.item + " " + pawnHint(res.item));
+    let topVal = 0, topName = "";
+    for (const name of vals) {
+      const frag = takeValuable(name, { head: "💎 You ripped off a " + name });
+      if (frag) got.push(frag);
+      if (itemVal(name) > topVal) { topVal = itemVal(name); topName = name; }
+    }
+    // surface the haul. A real score earns a headline; otherwise a small note.
+    if (topVal >= 20000) {
+      // takeValuable already fired the jackpot big() for the top piece; add a haul line.
+      CBZ.city.note("Mugged " + (p.name || "them") + ": " + (cash > 0 ? "$" + cash + " + " : "") + got.join(", "), 3);
+    } else if (got.length || cash > 0) {
+      const line = "MUGGED" + (cash > 0 ? " + $" + cash : "") + (got.length ? " · " + got.join(", ") : "");
+      if (CBZ.city.big) CBZ.city.big(line);
+    } else {
+      CBZ.city.note((p.name || "They") + " had nothing worth taking — scraps.", 1.8);
+    }
+  }
+
+  // PICKPOCKET — lift a SLICE of their cash (scaled to WHO they are: a billionaire's
+  // pocket slice dwarfs a junkie's), and on a lucky dip palm ONE of their valuables
+  // (a watch/ring) into your inventory to fence. A pickpocketed billionaire = jackpot.
   function pickpocket(p) {
     if (p.robbed) { CBZ.city.note(p.name + " has nothing left.", 1.4); return; }
     if (Math.random() < 0.7) {
-      const take = Math.min(p.cash, 5 + ((Math.random() * 25) | 0));
-      p.cash -= take; if (take > 0) CBZ.city.addCash(take);
-      CBZ.city.note("Lifted $" + take + " unseen.", 1.6); if (CBZ.sfx) CBZ.sfx("coin");
+      // a slice of what they're actually carrying (15-40%), with a small floor so
+      // even a near-broke mark yields a few bucks; capped so you don't clean them out.
+      const have = p.cash | 0;
+      let take = have > 0 ? Math.round(have * (0.15 + Math.random() * 0.25)) : 0;
+      take = Math.max(take, Math.min(have, 3 + ((Math.random() * 10) | 0)));
+      take = Math.min(take, have);
+      p.cash = have - take; if (take > 0) CBZ.city.addCash(take);
+      // LUCKY DIP: a chance (better on a flashier mark) to palm ONE valuable — the
+      // watch/ring slips out with the wallet. A whale's pocket is where Pateks live.
+      let lifted = "";
+      const vals = Array.isArray(p.valuables) ? p.valuables : null;
+      const dipChance = 0.18 + (p.wealth || 0) * 0.22;
+      if (vals && vals.length && Math.random() < dipChance) {
+        // grab the BEST piece on a generous dip, a random one otherwise.
+        const idx = Math.random() < 0.5
+          ? vals.reduce((bi, n, i) => (itemVal(n) > itemVal(vals[bi]) ? i : bi), 0)
+          : (Math.random() * vals.length) | 0;
+        const name = vals.splice(idx, 1)[0];
+        lifted = takeValuable(name, { head: "👀 Lifted a " + name });
+        if (!isLuxe(name) && itemVal(name) < 20000)
+          CBZ.city.note("Lifted a " + name + " " + pawnHint(name) + " — fence it at the pawn shop.", 2.6);
+      }
+      if (!lifted) { CBZ.city.note("Lifted $" + take + " unseen.", 1.6); }
+      else if (take > 0) CBZ.city.note("…and $" + take + " in cash, clean.", 1.8);
+      if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.addRespect(1);
     } else { p.alarmed = 6; CBZ.cityAlarm(p.pos.x, p.pos.z, 12, 0.6, CBZ.city.playerActor); CBZ.cityCrime && CBZ.cityCrime(30, { x: p.pos.x, z: p.pos.z, type: "theft" }); CBZ.city.note(p.name + " caught you!", 1.6); }
   }
@@ -335,7 +494,20 @@
     let c;
     // loop in case several bodies are piled within reach (e.g. a car plough)
     while ((c = CBZ.cityNearestCorpse(px, pz, LOOT_R))) {
-      if (!CBZ.cityLootCorpse(c)) break;   // looted() flips so the next call skips it
+      const dl = CBZ.cityLootCorpse(c);    // routes cash + items (incl. valuables) into inv
+      if (!dl) break;                       // looted() flips so the next call skips it
+      // SURFACE THE JACKPOT: cityLootCorpse already added every item to inventory
+      // (no double-add here). If the body was carrying a high-value valuable, fire a
+      // satisfying headline so the score feels great. Bounty cash, if any, was already
+      // paid in cityKillPed — we only surface the loot, never re-pay it.
+      if (Array.isArray(dl.items) && dl.items.length) {
+        let topName = "", topVal = 0;
+        for (const it of dl.items) { const v = itemVal(it); if (v > topVal) { topVal = v; topName = it; } }
+        if (topName && (isLuxe(topName) || topVal >= 20000) && CBZ.city && CBZ.city.big) {
+          CBZ.city.big("💎 You looted a " + topName + " — " + money(pawnPay(topName)) + " at the pawn!");
+          if (CBZ.city.addRespect) CBZ.city.addRespect(isLuxe(topName) ? 6 : 2);
+        }
+      }
     }
   });
 
@@ -357,6 +529,18 @@
 
     // 2) a vendor counter
     if (!target) { const v = nearest(CBZ.cityPeds, px, pz, (p) => p.vendor && !p.dead); if (v) { target = v; key = "v:" + tag(v); opts = vendorOpts(v); label = v.vendor.building.name; note = "Vendor · cash register"; } }
+    // 2b) THE CLUB ROPE — near the bouncer's post → a single "get in" verb that
+    //    runs the drip-gated gate. Only ever shows at the club, and the key folds
+    //    in your drip vs the threshold so the panel refreshes as you dress up.
+    if (!target) {
+      const club = nearClubSpot(px, pz);
+      if (club) {
+        const drip = CBZ.cityPlayerDrip ? (CBZ.cityPlayerDrip() | 0) : 0;
+        const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
+        target = club; key = "club:" + (drip >= need ? 1 : 0); opts = clubOpts();
+        label = "🪩 " + ((club.name) || "The Velvet Club"); note = clubNote();
+      }
+    }
     // (bodies are looted AUTOMATICALLY by walking over them — see auto-loot below)
     // 4) a gang stash
     if (!target && CBZ.cityNearestStash) { const lot = CBZ.cityNearestStash(px, pz, REACH); if (lot) { target = lot; key = "s:" + lot.i + "," + lot.j; opts = [{ label: "Rob stash", key: "i", bad: true, fn: () => CBZ.cityRobStash(lot) }]; label = "🎒 Gang Stash"; note = (lot.building.gang || "gang") + " cache"; } }
@@ -395,9 +579,14 @@
   function pedCtxTag(p) {
     const memb = myMemb();
     const m = memb ? (p.gang === memb.gangId ? "crew" : "mem") : "0";
-    // only the initiation-ready threshold flips the OFFERED option, so that's all
-    // the menu key needs to track (the note shows the live % continuously below).
-    const pr = myProspectStanding() >= 1 ? "P9" : "P0";
+    // PROSPECT state folds in the active TASK + initiation-ready flag, because all
+    // three flip the OFFERED verb (Prospect → Do-a-favor → Get-initiated). The
+    // task ID changes as the sequence advances, so the menu rebuilds on each step;
+    // the note shows live progress continuously below.
+    let pr = "P-";
+    const task = CBZ.cityProspectTask && CBZ.cityProspectTask();
+    if (myProspectStanding() >= 1) pr = "P9";
+    else if (task) pr = "P" + (task.label ? task.label.charAt(0) : "1");   // coarse task fingerprint
     let rt = "";
     if (CBZ.cityRel) { const r = CBZ.cityRel(p); if (r) rt = (r.grudge > 45 ? "h" : r.fear > 55 ? "f" : (r.loyalty > 55 || r.respect > 50) ? "t" : "n"); }
     return m + pr + rt + (g.career || "") + (g.citySpouse ? "S" : "") + (p.recruited ? "R" : "");

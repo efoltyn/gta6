@@ -131,6 +131,72 @@
     scorches.push({ mesh, mat, t: 0, hold: (hold || 11) + Math.random() * 5, grow: 0 });
   }
 
+  // ---- GORY FALL/HARD-IMPACT splat — a body hitting the ground at speed ----
+  // Reuses the pooled-decal + pointBurst + chunk machinery, then routes through
+  // CBZ.gore for the blood burst/gibs. A dark-red blood POOL decal spreads at the
+  // impact seat (its own pool, separate from the soot scorch), a low crimson
+  // spatter sheets out, and the whole thing gets a heavy shake + bone-crunch +
+  // hitstop. Bounded: pools cap and recycle, so a spammed fall can't flood FX.
+  const splats = [];
+  let splatTex = null;
+  function makeSplatTexture() {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const ctx = c.getContext("2d"), r = 64, g = ctx.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0.0, "rgba(96,8,8,0.95)");
+    g.addColorStop(0.4, "rgba(120,12,12,0.9)");
+    g.addColorStop(0.72, "rgba(80,6,6,0.5)");
+    g.addColorStop(1.0, "rgba(40,0,0,0.0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+    // ragged limbs of spatter flicked out past the pool's edge (Tarantino fan)
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * 6.2832, rr = 40 + Math.random() * 24;
+      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 2 + Math.random() * 6, 0, 6.2832);
+      ctx.fillStyle = "rgba(110,6,6," + (0.3 + Math.random() * 0.55) + ")"; ctx.fill();
+    }
+    // a couple of darker clots near the centre so it doesn't read as a flat disc
+    ctx.globalCompositeOperation = "multiply";
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * 6.2832, rr = Math.random() * 30;
+      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 4 + Math.random() * 9, 0, 6.2832);
+      ctx.fillStyle = "rgba(60,0,0,0.6)"; ctx.fill();
+    }
+    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+  }
+  function addBloodPool(x, z, radius) {
+    if (!splatTex) splatTex = makeSplatTexture();
+    while (splats.length > 10) { const o = splats.shift(); scene.remove(o.mesh); o.mat.dispose(); }
+    const mat = new THREE.MeshBasicMaterial({ map: splatTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+    const mesh = new THREE.Mesh(scorchGeo, mat);   // reuse the shared 1x1 plane
+    mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = Math.random() * 6.28;
+    mesh.position.set(x, 0.05, z); mesh.scale.setScalar(0.4);
+    mesh.renderOrder = 2; scene.add(mesh);
+    splats.push({ mesh, mat, t: 0, r0: 0.4, r1: radius * 2, hold: 16 + Math.random() * 8 });
+  }
+
+  // x,y,z = impact point; opts.player flags the player's own splat (more gore),
+  // opts.speed scales the violence. Safe to call without THREE gore loaded.
+  CBZ.cityImpactSplat = function (x, y, z, opts) {
+    opts = opts || {};
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const player = !!opts.player;
+    const speed = opts.speed || 18;
+    const power = Math.min(2.4, Math.max(1, speed / 16));   // visual dial, clamped
+    // crimson sheet skidding out low across the ground (the splash on impact)
+    pointBurst(x, z, Math.round((player ? 40 : 26) * power), 0x8a0a0a, 0.17, 3 + speed * 0.28, 0.6, false);
+    pointBurst(x, z, Math.round(14 * power), 0xc01818, 0.12, 5 + speed * 0.3, 0.42, false);
+    // a lingering dark-red blood POOL spreading at the impact seat
+    addBloodPool(x, z, (player ? 2.4 : 1.7) * power);
+    // a few chunky dark gibs tumbling off the splat (reuse the debris pool)
+    addChunks(x, z, Math.round((player ? 6 : 4) * power), 2.2 + speed * 0.1, false, opts.dir || null);
+    // the layered blood event (spray/mist/gibs/pool/wall) — gibs-lite, the works
+    if (CBZ.gore) { try { CBZ.gore(x, y != null ? y : 1.0, z, { dir: opts.dir || null, amount: player ? 1.7 : 1.3, player: player, explosion: false }); } catch (e) {} }
+    // bone-crunch + wet impact (layered real foley), heavy shake + hitstop
+    if (CBZ.sfx) { CBZ.sfx("ko"); CBZ.sfx("clank"); }
+    if (CBZ.shake) CBZ.shake(Math.min(2.0, 0.9 + power * 0.4));
+    if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.22, 0.1 + power * 0.05));
+    if (player && CBZ.doSlowmo) CBZ.doSlowmo(0.4);
+  };
+
   // ---- soft additive FIREBALL sprites (the good-looking explosion) ----
   // One shared 64px radial-gradient texture (white core → transparent rim) used
   // by every pooled sprite; additive blending sums overlaps toward white-hot.
@@ -523,6 +589,16 @@
       if (s.t < 0.25) s.mat.opacity = (s.t / 0.25) * 0.9;          // snap in with the blast
       else if (s.t < s.hold) s.mat.opacity = 0.9;                  // linger as a black mark
       else { s.mat.opacity = Math.max(0, 0.9 * (1 - (s.t - s.hold) / 3)); if (s.t - s.hold >= 3) { scene.remove(s.mesh); s.mat.dispose(); scorches.splice(i, 1); } }
+    }
+    // blood pools: spread out fast on impact, hold as a dark stain, then fade
+    for (let i = splats.length - 1; i >= 0; i--) {
+      const s = splats[i]; s.t += dt;
+      const grow = Math.min(1, s.t / 0.5);                          // spread over the first half-second
+      const r = s.r0 + (s.r1 - s.r0) * (1 - Math.pow(1 - grow, 3));
+      s.mesh.scale.setScalar(r);
+      if (s.t < 0.2) s.mat.opacity = (s.t / 0.2) * 0.92;            // snap in
+      else if (s.t < s.hold) s.mat.opacity = 0.92;                 // linger
+      else { s.mat.opacity = Math.max(0, 0.92 * (1 - (s.t - s.hold) / 4)); if (s.t - s.hold >= 4) { scene.remove(s.mesh); s.mat.dispose(); splats.splice(i, 1); } }
     }
   });
 })();

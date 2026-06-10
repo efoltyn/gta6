@@ -16,8 +16,15 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  const COP_TARGET = [0, 2, 4, 7, 10, 14];
+  // cop response per star (read by police.js maintain() as g.cityCopTarget).
+  // Steeper at the top: the now-RARE 5★ floods the streets with heavy units so it
+  // FEELS overwhelming — a brutal crescendo to match the much harder wanted climb.
+  const COP_TARGET = [0, 2, 4, 8, 12, 20];
   let lastCrimeT = 0, busting = false;
+  // de-stack multi-witness reports of the SAME act: every ped in earshot of one
+  // crime would otherwise call in its OWN full charge (N witnesses → N stacks).
+  // A corroborating witness inside this space/time window only adds a small bump.
+  let lastReport = { t: -1e9, x: 0, z: 0, stars: 0 };
 
   function starsFromHeat(h) {
     const T = CBZ.CITY.starHeat;
@@ -49,13 +56,13 @@
     "murder":            { stars: 3, label: "Murder", kill: true },
     "vehicular homicide":{ stars: 3, label: "Vehicular Manslaughter", kill: true },
     "vehicular-homicide":{ stars: 3, label: "Vehicular Manslaughter", kill: true },
-    "terrorism":         { stars: 5, label: "Terrorism" },
+    "terrorism":         { stars: 4, label: "Terrorism" },   // only the SPREE path reaches 5★ now
     "_copkill":          { stars: 5, label: "Cop Killer" },
   };
   function crimeInfo(type, sev) {
     const c = CRIME[type];
     if (c) return c;
-    return { stars: (sev || 0) >= 150 ? 2 : 1, label: "Disturbance" };   // unknown type fallback
+    return { stars: 0, label: "Disturbance" };   // unknown type fallback — NOT a chargeable crime
   }
 
   // the ONLY thing that raises your stars: a crime gets REPORTED (a witness calls
@@ -66,26 +73,65 @@
       if (CBZ.city && CBZ.city.note) CBZ.city.note("🎭 A masked suspect was reported — not ID'd as you.", 1.4);
       return;
     }
+    const T = CBZ.CITY.starHeat;
     const info = crimeInfo(opts.type, sev);
+    // a non-crime (unknown/"Disturbance") never charges heat or grants a star —
+    // it's just ambient noise on the feed. Bail before any heat math runs.
+    if (info.stars <= 0) {
+      if (CBZ.city && CBZ.city.note) CBZ.city.note("Disturbance reported", 1.2);
+      return;
+    }
+    const x = opts.x != null ? opts.x : CBZ.player.pos.x;
+    const z = opts.z != null ? opts.z : CBZ.player.pos.z;
     let target = info.stars;
     // 5★ is meant to be RARE + earned — it scrambles the gunship + airstrikes, so it
     // must be REALLY hard to reach. A single killing (even a cop) tops out at 4★;
-    // only a sustained SPREE gets you to 5★. Terrorism stays an instant 5★ (it's a
-    // deliberate mass-casualty act). Cops weigh 5× a civilian toward the spree.
+    // only a long, sustained SPREE gets you to 5★, AND only once you've already
+    // survived 4★ for a while (heat already at the 4★ floor). Cops weigh 3× a
+    // civilian toward the spree (down from 5× — even a cop-kill alone caps at 4★).
     if (opts.type === "_copkill" || info.kill) {
       if (opts.type === "_copkill") g.cityCopKills = (g.cityCopKills || 0) + 1;
       else g.cityMurders = (g.cityMurders || 0) + 1;
-      const spree = (g.cityMurders || 0) + (g.cityCopKills || 0) * 5;
-      target = spree >= 15 ? 5 : (spree >= 4 ? 4 : 3);
+      const spree = (g.cityMurders || 0) + (g.cityCopKills || 0) * 3;
+      // 5★ requires BOTH a big spree AND that you're already deep at 4★ — never
+      // popped from a single act. Otherwise the spree tops out at 4★.
+      const fiveOk = spree >= 40 && (g.heat || 0) >= T[4];
+      target = fiveOk ? 5 : (spree >= 12 ? 4 : 3);
     }
     lastCrimeT = CBZ.now;
-    g.cityLastKnown = { x: opts.x != null ? opts.x : CBZ.player.pos.x, z: opts.z != null ? opts.z : CBZ.player.pos.z, t: CBZ.now };
+    g.cityLastKnown = { x: x, z: z, t: CBZ.now };
+    // is this a second witness corroborating the SAME act (close in space + time,
+    // and no worse than the act already on record)? If so its per-crime gain is
+    // a fraction — N onlookers to one bump don't stack into a multi-star event.
+    const sameEvent = (CBZ.now - lastReport.t < 4000)
+      && Math.hypot(x - lastReport.x, z - lastReport.z) < 14
+      && target <= lastReport.stars;
     const prev = g.wanted | 0;
     const want = Math.max(prev, Math.min(5, target));
-    // sit the heat at the floor of that star tier (so the cops respond now and it
-    // decays back DOWN over time) instead of stacking petty crimes up to 5.
-    g.heat = Math.max(g.heat || 0, CBZ.CITY.starHeat[want] + 20);
+    // ACCUMULATE heat toward the NEXT star instead of snapping to a tier floor —
+    // crimes build pressure, so climbing to 4★/5★ is a long grind while petty
+    // crime still reaches 1-2★ promptly. K scales the per-crime gain by severity:
+    // a single armed robbery (sev 160) ~ a 2★ band, while clawing to 4★ (3200) /
+    // 5★ (12000) takes a long string of kills. A non-kill crime can NEVER push
+    // heat above the top of its OWN CRIME.stars tier (so a run of muggings can't
+    // sneak you to 4★); only a kill/spree carries you into the heavy tiers.
+    // petty crimes (1★) barely charge; only real (2★+) acts get the full rate.
+    const K = (info.stars >= 2 ? 1.6 : 0.7);
+    // a corroborating witness of an act already on record only nudges the heat.
+    const charge = Math.max(1, sev || 1) * K * (sameEvent ? 0.25 : 1);
+    const gain = (g.heat || 0) + charge;
+    // ceiling: climb toward just under the next star up, but a GRANTED tier must
+    // always at least reach its own floor (so a target=5 spree kill can finally
+    // cross the 12000 wall into 5★ instead of clamping one shy of it).
+    let ceil = Math.max(T[Math.min(5, want)], T[Math.min(5, want + 1)] - 1);
+    if (!(opts.type === "_copkill" || info.kill)) {
+      // petty crime is capped to its OWN tier band (a run of muggings can't sneak
+      // you up to 4★) — but it can still snap to the floor of the tier it earns.
+      ceil = Math.min(ceil, Math.max(T[Math.min(5, info.stars)], T[Math.min(5, info.stars + 1)] - 1));
+    }
+    g.heat = Math.max(g.heat || 0, Math.min(ceil, gain));
     g.wanted = starsFromHeat(g.heat);
+    lastReport = { t: CBZ.now, x: x, z: z, stars: target };
     g.cityCrimeLabel = info.label;
     if (g.wanted > prev) CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED · " + info.label);
     else if (CBZ.city && CBZ.city.note) CBZ.city.note("Reported: " + info.label, 1.3);
@@ -95,7 +141,9 @@
   CBZ.cityReport = report;
 
   function forceStars(n) {
-    n = Math.min(5, n);
+    // empire raids / wealth heat / heists can crank you to 4★ but NEVER hand a
+    // free 5★ — the top star is reserved for an earned spree (see report()).
+    n = Math.min(4, n);
     g.heat = Math.max(g.heat || 0, CBZ.CITY.starHeat[n] + 5);
     const prev = g.wanted | 0; g.wanted = starsFromHeat(g.heat);
     lastCrimeT = CBZ.now; g.cityLastKnown = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: CBZ.now };
@@ -185,7 +233,13 @@
     const cops = CBZ.cityCops;
     for (let i = 0; i < cops.length; i++) { if (!cops[i].dead && cops[i].sees) { seen = true; break; } }
     if (!seen && sinceCrime > 3000 && (g.heat || 0) > 0) {   // 3s grace (CBZ.now is ms) before heat bleeds — not 3ms
-      const rate = CBZ.CITY.heatDecay * (g.wanted >= 4 ? 0.6 : 1);
+      // Decay scales with how much heat you're carrying (a flat base + a small
+      // fraction of current heat) so the HUGE high tiers bleed in reasonable
+      // absolute time instead of taking hours — a hard-won 5★ is STICKY-but-
+      // escapable: you must truly lose the heavy units for a sustained stretch
+      // (~1.5 min unseen to shed a star at 5★), but it never permanently traps
+      // you. A mild high-tier damping keeps the top stars feeling weighty.
+      const rate = (CBZ.CITY.heatDecay + (g.heat || 0) * 0.011) * (g.wanted >= 5 ? 0.7 : g.wanted >= 4 ? 0.85 : 1);
       g.heat = Math.max(0, g.heat - rate * dt);
       g.wanted = starsFromHeat(g.heat);
       if (g.heat <= 0) { g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null; }   // cleared → fresh slate

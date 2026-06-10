@@ -30,6 +30,7 @@
   const THROW_FWD = 13, THROW_UP = 7.5;
   const PUSH_FORCE = 12, PUNCH_FORCE = 6;
   const BOT_R = 0.5;
+  const _corpseC = { x: 0, z: 0 };   // scratch for the corpse-extent wall push
   function G() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
   function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
 
@@ -52,7 +53,18 @@
       flash: 0, flashSaved: -1, flashEi: 1,   // head-impact emissive pop
     });
   }
-  function busy(a) { const p = a._phys; return !!(p && (p.air || p.down > 0 || p.heldBy)); }
+  function busy(a) {
+    const p = a._phys; if (!p) return false;
+    if (p.air || p.down > 0 || p.heldBy) return true;
+    // CITY get-up window: a knocked-down body whose timer just expired is still
+    // pitched toward flat for a few frames while it stands. Keep it "busy" so
+    // city/peds.js move() doesn't reclaim it and pin pos.y to the bare floor
+    // (which sinks the half-flat rig). Dead bodies are skipped by move() upstream,
+    // so this only matters for the living get-up. Survival/escape: no a.group flat
+    // pitch is left on standing bots, so this never trips outside city.
+    if (CBZ.game && CBZ.game.mode === "city" && a.group && Math.abs(a.group.rotation.x) > 0.04) return true;
+    return false;
+  }
 
   // ---- EUPHORIA-LITE LIMB RAGDOLL ---------------------------------------
   //   Real euphoria runs an active rig: limbs have their own momentum, flail
@@ -219,7 +231,12 @@
       p.shock = Math.max(p.shock, sk);
       kickRag(a, p, sk, 0, a._deathSeed);
       if (o.knockdown) {
-        p.down = Math.max(p.down, o.knockdown);
+        // a caller may pass a duration (1.2) or just `true` to mean "knock them
+        // down". Coerce `true` to a full topple+lie+getup beat (1.3s) so a KO from
+        // a punch / car bump reads as a real fall, not a 1-frame stumble. Numbers
+        // pass through unchanged, so survival/jail callers are unaffected.
+        const kd = o.knockdown === true ? 1.3 : o.knockdown;
+        p.down = Math.max(p.down, kd);
         p.ddir = Math.atan2(dx, dz);
         p.shock = Math.max(p.shock, sk + 0.25);     // crumpling stirs the limbs
       } else if (f >= 10 && !a.isPlayer && Math.random() < (f - 10) * 0.05) {
@@ -246,11 +263,17 @@
       return;
     }
     if (p.down > 0) {
-      // dead = crumpled on the ground in a dramatic sprawl; living = on their back
-      const topple = a.dead ? (Math.PI / 2) * (1 + 0.18 * Math.sin(a._deathSeed)) : Math.PI / 2;
-      grp.rotation.x = damp(grp.rotation.x, -topple, a.dead ? 7 : 11, dt); // fall onto back
+      // dead = crumpled on the ground in a dramatic sprawl; living = on their back.
+      // topple is CAPPED at exactly 90° (flat on the back) — it must NEVER exceed
+      // vertical, or the rig (pivoting at its FEET) folds PAST flat: the head/torso
+      // swing down-and-behind, sinking under the street — the "backwards body" look.
+      // Variety comes from the side-ROLL below (a corpse rolls onto a shoulder),
+      // which reads as a natural crumple, not a broken backward fold.
+      const topple = Math.PI / 2;
+      grp.rotation.x = damp(grp.rotation.x, -topple, a.dead ? 7 : 11, dt); // fall onto back (never past flat)
       grp.rotation.y = damp(grp.rotation.y, p.ddir, 8, dt);
-      grp.rotation.z = damp(grp.rotation.z, a.dead ? 0.22 * Math.sin(a._deathSeed * 1.7) : 0, 9, dt);
+      const roll = a.dead ? 0.6 * Math.sin(a._deathSeed * 1.7) : 0;   // ~±35° onto a shoulder
+      grp.rotation.z = damp(grp.rotation.z, roll, 9, dt);
       if (a.dead && CBZ.deathPose) CBZ.deathPose(ch, a._deathSeed);
       applyRag(a, p, dt);     // limbs jiggle as the body lands & settles, then still
       return;
@@ -284,11 +307,22 @@
 
     if (p.air) {
       p.vy -= G() * dt;
-      grp.position.x += p.vx * dt; grp.position.y += p.vy * dt; grp.position.z += p.vz * dt;
-      if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
+      // ANTI-TUNNEL SUBSTEP: a blast/throw can launch a body fast enough that one
+      // position step skips clean THROUGH a wall before collide() ever tests it. Cut
+      // the advance into sub-steps no longer than ~0.3m each and collide on every one,
+      // so an explosion can't punt a body out the far side of a building.
+      const n = Math.max(1, Math.ceil(Math.hypot(p.vx, p.vy, p.vz) * dt / 0.3));
+      const sdt = dt / n;
+      for (let sub = 0; sub < n; sub++) {
+        grp.position.x += p.vx * sdt; grp.position.y += p.vy * sdt; grp.position.z += p.vz * sdt;
+        if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
+      }
       const fl = floorAt(grp.position.x, grp.position.z);
       if (grp.position.y <= fl && p.vy <= 0) {
-        grp.position.y = fl;
+        // rest ON the surface. In city, a flat (toppled/dead) body would have its
+        // mid-height at floor level and sink the lower half through the street, so
+        // lift it by flatness right on the landing frame too — no one-frame sink.
+        grp.position.y = (CBZ.game.mode === "city") ? cityRestY(grp) : fl;
         const impact = -p.vy;                       // how hard it hit
         const speed = Math.hypot(p.vx, p.vz);
         // BOUNCE: a hard landing kicks the body back up once or twice (it
@@ -318,6 +352,25 @@
       poseActor(a, p, dt);
       return true;
     }
+
+    // CITY GROUND OWNERSHIP: in city mode, grapple must keep grounding a body for
+    // as long as it is laid out — while knocked DOWN, while KO'd (the whole ko
+    // window, not just the brief knockdown beat), while DEAD (forever), and through
+    // the get-up window where the rig is still pitched toward flat — otherwise
+    // peds.js move() (which slams pos.y to the floor with NO flatness lift) takes
+    // over the instant p.down hits 0 and the half-flat body sinks through the
+    // street. We own the body (return true) and clamp Y to cityRestY on EVERY such
+    // frame. Gated to city; survival/escape are byte-identical.
+    const inCity = CBZ.game.mode === "city";
+    // CITY KO: a knocked-out ped (a.ko>0, set by city/peds.js cityKOPed) must stay
+    // SPRAWLED + grounded for the full KO, not just the 1.3s knockdown timer. We
+    // keep p.down topped up to the remaining ko so the body lies the whole time and
+    // then gets up cleanly — same weighty topple as a kill, just temporary. Only in
+    // city; survival/jail never set a.ko on a grapple-owned body, so untouched.
+    const cityKO = inCity && (a.ko || 0) > 0 && !a.dead;
+    if (cityKO && p.down < a.ko) p.down = a.ko;                  // lie for as long as KO'd
+    const cityFlat = Math.abs(grp.rotation.x) > 0.04;            // still laid/laying flat
+    const cityGround = inCity && (p.down > 0 || a.dead || cityKO || cityFlat);
 
     let owns = false;
     if (p.down > 0) {
@@ -351,18 +404,44 @@
     // (no airborne fall off smooth ground). Genuine building falls are the
     // player's department (physics.js, which tracks platforms); bots ride the
     // ground field, so a slide just rides the slope down and settles.
-    const cityDown = CBZ.game.mode === "city" && p.down > 0;
     if (Math.abs(p.kx) > 0.02 || Math.abs(p.kz) > 0.02) {
       grp.position.x += p.kx * dt; grp.position.z += p.kz * dt;
       const dec = Math.pow(0.0009, dt);
       p.kx *= dec; p.kz *= dec;
       if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
-      // city downed/dead bodies rest ON the surface (lifted by flatness); other
-      // sliding bodies hug the floor exactly. Applied LAST so nothing sinks them.
-      grp.position.y = cityDown ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z);
+      // city downed/dead/flat bodies rest ON the surface (lifted by flatness);
+      // other sliding bodies hug the floor exactly. Applied LAST so nothing sinks.
+      grp.position.y = cityGround ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z);
+    } else if (cityGround) {
+      // not sliding, but a city body that is down/dead/still-flat must STILL be
+      // ground-clamped every frame (peds.js would otherwise pin pos.y to the bare
+      // floor and sink the half-flat rig). cityRestY lifts by flatness so a body
+      // that has finished standing up (rotation.x≈0) just sits exactly on the floor.
+      grp.position.y = cityRestY(grp);
     } else if (p.down > 0) {
-      grp.position.y = cityDown ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z);
+      grp.position.y = floorAt(grp.position.x, grp.position.z);
     }
+    // CORPSE EXTENT vs WALLS: a flat body extends ~1.7m from its feet (grp.position,
+    // the only point collide() above tested) toward where the HEAD fell, so the
+    // head/torso end can clip into a wall the feet are clear of (dead people "fall
+    // through walls"). Collide the head end too and shove the WHOLE body out by the
+    // same delta. City + actually-flat only; cheap (one extra collide on a corpse).
+    if (cityGround && CBZ.collide) {
+      const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
+      if (flat > 0.4) {
+        const ry = grp.rotation.y || 0, ext = 1.7 * flat;
+        const hx = -Math.sin(ry) * ext, hz = -Math.cos(ry) * ext;   // toward the head
+        _corpseC.x = grp.position.x + hx; _corpseC.z = grp.position.z + hz;
+        CBZ.collide(_corpseC, BOT_R);
+        grp.position.x += _corpseC.x - (grp.position.x + hx);        // shift body by the head's push
+        grp.position.z += _corpseC.z - (grp.position.z + hz);
+      }
+    }
+    // OWN a city body that is dead or still laid flat even after the knockdown
+    // timer expired, so peds.js skips it (CBZ.body.busy reports it too) and never
+    // re-grounds it to the bare floor. Without this a settled corpse (down==0) or
+    // a KO'd ped mid-getup would be handed back to move() and sink.
+    if (cityGround) owns = true;
     if (p.fl > 0) p.fl = Math.max(0, p.fl - dt);
     poseActor(a, p, dt);
     return owns;

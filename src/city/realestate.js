@@ -53,9 +53,10 @@
   CBZ.cityHomeMenu = function () {
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     mode = "buy"; actions = [];
-    const homes = (CBZ.city.arena.homeLots || []).filter((l) => l.building.home && !l.building.home.owned
+    const homes = (CBZ.city.arena.homeLots || []).filter((l) => l.building.home && l.building.home.listed
+      && !l.building.home.owned
       && !(CBZ.cityZillow && CBZ.cityZillow.isRentingLot && CBZ.cityZillow.isRentingLot(l)));
-    homes.sort((a, b) => a.building.home.price - b.building.home.price);
+    homes.sort((a, b) => a.building.home.tier - b.building.home.tier);
 
     // build the row "entries" first so we can paginate, THEN flatten the visible
     // page into the `actions[]` array the [1-9] keys index into.
@@ -66,8 +67,12 @@
     }
     for (const lot of homes) {
       const h = lot.building.home;
-      const tags = (h.garage ? " ·🚗×" + h.garage : "") + (h.elevator ? " ·🛗" : "");
-      const fns = [{ key: "Buy " + money(h.price), fn: () => buyHome(lot) }];
+      const tags = (h.sqft ? " ·" + h.sqft.toLocaleString() + "sqft" : "") + (h.garage ? " ·🚗×" + h.garage : "") + (h.elevator ? " ·🛗" : "");
+      // show the LIVE Zillow price (market + your turf-control discount) so the
+      // realtor and Zillow never disagree — buyHome charges this same number.
+      const zp = (CBZ.cityZillow && CBZ.cityZillow.buyPriceForLot) ? CBZ.cityZillow.buyPriceForLot(lot) : null;
+      const ask = (zp != null) ? zp : h.price;
+      const fns = [{ key: "Buy " + money(ask), fn: () => buyHome(lot) }];
       const rentPer = zillowRentEstimate(lot);
       if (rentPer != null) fns.push({ key: "Rent ~" + money(rentPer), fn: () => rentResidence(lot) });
       entries.push({ html: "🏠 " + h.name + tags + zoneChip(lot), fns });
@@ -122,8 +127,18 @@
       if ((g.cityGarage || []).length) actions.push({ label: "Pull a car from garage (" + g.cityGarage.length + "/" + home.garage + ")", fn: retrieveCar });
     }
     if (home.elevator) actions.push({ label: "Take the elevator to the penthouse", fn: elevatorUp });
+    // ---- AIRBASE: the penthouse's rooftop helipad + deck hangar (the WHY behind
+    // the apex price). The helicopter comes WITH the home (g.cityOwnsHeli); the
+    // hangar (→ F-22) is a separate add-on offered here once you own the tower.
+    const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
+    if (isPent && g.cityOwnsHangar) {
+      actions.push({ label: "🛩 Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and press [F] to fly it (left-click = missiles), or call an airstrike from your phone. The chopper waits on the helipad.", 3.2); } });
+    } else if (isPent) {
+      actions.push({ label: "🛩 Buy the HANGAR — " + money(hangarPrice()) + " (unlocks a fighter jet)", fn: buyHangar });
+    }
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>🏡 " + home.name + "</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + " · [Esc] leave</div>";
+    if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>🚁 Helicopter ready on the pad" + (g.cityOwnsHangar ? " · 🛩 F-22 in the hangar" : "") + "</div>";
     actions.forEach((a, i) => { html += "<div style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
     open(html);
   };
@@ -146,11 +161,51 @@
     CBZ.city.note("Rented " + room.name + ". A roof over your head — and a respawn point.", 2.6);
     CBZ.cityHomeMenuRefresh();
   }
+  // BUY a home at the realtor. We route through Zillow's buy path so there's ONE
+  // source of truth: it registers the home in g.cityRealtyOwned, mirrors it to
+  // the world ledger (persist), charges the live Zillow price (market + the gang-
+  // control discount on your turf), and sets it as your home/respawn. Falls back
+  // to a self-contained buy only if Zillow isn't loaded.
+  // Is THIS home the flagship mega-tower penthouse? Match on the config id BLD
+  // tags the tower with ("penthouse") so realtor + Zillow + buildings.js all
+  // coordinate on one identifier. (flagship is the belt-and-suspenders fallback.)
+  function isPenthouse(home) { return !!home && (home.id === "penthouse" || home.flagship === true); }
+  // Buying the penthouse arms your airpower: the MISSILE HELICOPTER comes parked
+  // on its rooftop helipad (free with the home — Phase 3 spawns it there). The
+  // HANGAR (→ F-22) is a SEPARATE add-on bought later (see buyHangar). Guarded so
+  // a non-penthouse buy never trips these globals; safe to call after any buy.
+  // NOTE: zillow.js's takeResidence already arms the penthouse (the single
+  // buy/finance chokepoint, so the [Z] market and the realtor agree). This is the
+  // belt-and-suspenders for the Zillow-unavailable fallback buy below; it's
+  // idempotent (only fires the banner once) so the realtor route doesn't double it.
+  function armPenthouse(lot) {
+    const h = lot && lot.building && lot.building.home;
+    if (!isPenthouse(h)) return;
+    if (g.cityOwnsPenthouse && g.cityOwnsHeli) return;   // already armed (Zillow path) — don't re-banner
+    g.cityOwnsPenthouse = true;
+    g.cityOwnsHeli = true;          // the chopper comes with the penthouse
+    CBZ.city.big("🚁 The missile helicopter is yours — parked on the pad.");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
   function buyHome(lot) {
     const h = lot.building.home;
+    if (CBZ.cityZillow && CBZ.cityZillow.buyByLot) {
+      const price = (CBZ.cityZillow.buyPriceForLot && CBZ.cityZillow.buyPriceForLot(lot));
+      const ask = (price != null) ? price : h.price;
+      if (((g.cash || 0) + (g.cityBank || 0)) < ask) { CBZ.city.note("Need " + money(ask) + " (cash+bank).", 2); return; }
+      const bought = CBZ.cityZillow.buyByLot(lot);   // charges, persists, registers, sets home via takeResidence
+      if (bought) {
+        // ensure this is the active home/respawn even if the player already had one
+        if (CBZ.cityZillow.setHomeByLot) CBZ.cityZillow.setHomeByLot(lot);
+        armPenthouse(lot);                            // penthouse → helicopter + flags
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+        CBZ.cityHomeMenuRefresh();
+      }
+      return;
+    }
+    // ---- fallback (Zillow unavailable) — keep the legacy self-contained buy ----
     const total = (g.cash || 0) + (g.cityBank || 0);
     if (total < h.price) { CBZ.city.note("Need " + money(h.price) + " (cash+bank).", 2); return; }
-    // pull from cash first, then bank
     let owe = h.price; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank -= owe;
     h.owned = true; g.cityRentTier = null;
     if (g.cityHome) g.cityHome.lot.building.home.owned = false;     // moving up: release the old one
@@ -158,15 +213,62 @@
     g.citySpawnPoint = { x: lot.building.door.x, z: lot.building.door.z };
     CBZ.city.big("🏠 You bought " + h.name + "!");
     CBZ.city.addRespect(Math.ceil(h.tier * 4));
+    armPenthouse(lot);                                // penthouse → helicopter + flags
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     CBZ.cityHomeMenuRefresh();
   }
+  // ---- TASK 2: the HANGAR — a big-ticket add-on, offered only once you own the
+  // penthouse. Buying it sets g.cityOwnsHangar=true, which unlocks basing an F-22
+  // Raptor in the deck hangar (Phase 3 reads g.cityOwnsHangar). Charged from cash
+  // + bank like a home; price comes from the penthouse tier's hangarPrice.
+  function hangarPrice() {
+    const home = g.cityHome && g.cityHome.lot.building.home;
+    return (home && home.hangarPrice) || (((C().homes || []).find((x) => x.id === "penthouse") || {}).hangarPrice) || 1200000;
+  }
+  function buyHangar() {
+    if (!g.cityOwnsPenthouse) { CBZ.city.note("Buy the penthouse first — the hangar is its deck.", 2.2); return; }
+    if (g.cityOwnsHangar) { CBZ.city.note("You already own the hangar.", 1.8); return; }
+    const cost = hangarPrice();
+    const total = (g.cash || 0) + (g.cityBank || 0);
+    if (total < cost) { CBZ.city.note("Need " + money(cost) + " (cash+bank) for the hangar.", 2.4); return; }
+    let owe = cost; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
+    g.cityOwnsHangar = true;
+    CBZ.city.big("🛩 HANGAR ACQUIRED — base a fighter jet on the deck.");
+    CBZ.city.addRespect(40);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    CBZ.cityHomeMenuRefresh();
+  }
+  // WHY a house matters #1 — RECOVER + LAY LOW. Minecraft's bed skips the night
+  // and sets spawn; GTA's safehouse heals you and lets the heat die down. Sleeping
+  // in YOUR home does all of it at once: full heal, fed, rested, wounds dressed,
+  // AND the cops lose your trail (heat bleeds way down). That's the reason a roof
+  // over your head is worth more than the cash — it's the only place you can
+  // truly reset. The catch: you can't sleep with cops actively on you (5★ raid),
+  // so it rewards getting clear FIRST, then holing up.
   function sleepHeal() {
     const P = CBZ.player;
-    P.hp = P.maxHp || 100; g.hunger = Math.min(100, (g.hunger || 0) + 40);
+    const stars = g.wanted | 0;
+    P.hp = P.maxHp || 100;
+    P.stamina = P.maxStamina || 100;
+    g.hunger = 100;
+    g.tired = 0;
+    P._legWound = false; P._bleeding = false; P._bleedT = 0;      // wounds dressed overnight
     g.citySpawnPoint = { x: g.cityHome.lot.building.door.x, z: g.cityHome.lot.building.door.z };
+    // LAY LOW: heat bleeds hard while you're off the streets. A light record
+    // (≤2★) goes fully cold; a serious one drops a couple stars but the manhunt
+    // doesn't just evaporate — you still surface hot.
+    let laid = "";
+    if (CBZ.city && CBZ.city.addHeat && (g.heat || 0) > 0) {
+      const before = g.heat || 0;
+      const cut = stars <= 2 ? before : Math.max(before - (CBZ.CITY.starHeat[Math.max(0, stars - 2)] || 0), before * 0.45);
+      CBZ.city.addHeat(-cut);
+      const after = g.heat || 0;
+      laid = (g.wanted | 0) < stars ? " Heat cooled — you slipped the manhunt." : (after < before ? " Heat dropped while you laid low." : "");
+    }
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.sfx) CBZ.sfx("coin");
-    CBZ.city.note("Rested up. Respawn point set to home.", 2);
+    CBZ.city.note("😴 Slept it off — full health, fed, rested, patched up." + laid + " Respawn set to home.", 3.2);
     close();
   }
   function storeCar() {
@@ -194,12 +296,19 @@
   function elevatorUp() {
     const lot = g.cityHome.lot, home = lot.building.home;
     const P = CBZ.player;
-    const roofY = (home.floorY || 0) + (lot.building.FH || 4);
-    P.pos.set(lot.cx + 1.4, roofY + 0.2, lot.cz);
+    // The Spire's living space is the LOFT — the top interior floor — so the
+    // elevator lands you ON that floor, centred in the open plan. Older homes
+    // (penthouse roof) keep going one flight up onto the open roof terrace.
+    if (home.loftY != null) {
+      P.pos.set(lot.cx, home.loftY + 0.1, lot.cz);
+    } else {
+      const roofY = (home.floorY || 0) + (lot.building.FH || 4);
+      P.pos.set(lot.cx + 1.4, roofY + 0.2, lot.cz);
+    }
     P.vy = 0; P.grounded = true;
     CBZ.playerChar.group.position.copy(P.pos);
     if (CBZ.sfx) CBZ.sfx("door");
-    CBZ.city.note("🛗 Penthouse — top of the world.", 2);
+    CBZ.city.note(home.loftY != null ? "🛗 The Spire loft — top of the world." : "🛗 Penthouse — top of the world.", 2);
     close();
   }
 
@@ -209,6 +318,8 @@
 
   CBZ.cityRealEstateReset = function () {
     g.cityHome = null; g.cityRentTier = null; g.cityGarage = []; g.citySpawnPoint = null;
+    // apex-home airpower (penthouse helicopter + bought hangar) resets per run
+    g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false;
     payT = (C().rentTick || 90); rpage = 0;
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.homeLots) for (const l of A.homeLots) if (l.building.home) l.building.home.owned = false;

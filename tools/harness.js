@@ -8,6 +8,7 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const PROFILE = process.env.CBZ_PROFILE === "1";
 
 // ---------- THREE stub ----------
 function V3(x, y, z) { this.x = x || 0; this.y = y || 0; this.z = z || 0; }
@@ -88,7 +89,8 @@ function IcosahedronGeometry() { Geo.call(this); } IcosahedronGeometry.prototype
 function ConeGeometry() { Geo.call(this); } ConeGeometry.prototype = Object.create(Geo.prototype);
 function CircleGeometry() { Geo.call(this); } CircleGeometry.prototype = Object.create(Geo.prototype);
 
-function Mtl(opts) { opts = opts || {}; this.color = new Color(opts.color); this.emissive = new Color(opts.emissive); this.emissiveIntensity = opts.emissiveIntensity != null ? opts.emissiveIntensity : 1; this.map = opts.map || null; this.opacity = opts.opacity != null ? opts.opacity : 1; this.transparent = !!opts.transparent; }
+let nextMaterialId = 1;
+function Mtl(opts) { opts = opts || {}; this.id = nextMaterialId++; this.color = new Color(opts.color); this.emissive = new Color(opts.emissive); this.emissiveIntensity = opts.emissiveIntensity != null ? opts.emissiveIntensity : 1; this.map = opts.map || null; this.opacity = opts.opacity != null ? opts.opacity : 1; this.transparent = !!opts.transparent; }
 Mtl.prototype.dispose = function () {};
 Mtl.prototype.clone = function () { return new Mtl({ color: this.color.getHex(), emissive: this.emissive.getHex(), emissiveIntensity: this.emissiveIntensity, map: this.map, opacity: this.opacity, transparent: this.transparent }); };
 function Tex() { this.wrapS = 0; this.wrapT = 0; this.repeat = new V3(1, 1, 0); this.magFilter = 0; this.transparent = false; }
@@ -147,6 +149,7 @@ const documentStub = {
 const sandbox = {};
 sandbox.window = sandbox;
 sandbox.document = documentStub;
+sandbox.location = { search: PROFILE ? "?profile=1" : "" };
 sandbox.THREE = THREE;
 sandbox.console = console;
 sandbox.Math = Math; sandbox.JSON = JSON; sandbox.Date = Date; sandbox.Array = Array;
@@ -175,7 +178,15 @@ CBZ.scene = new Group();
 CBZ.scene.fog = { near: 1, far: 100 };
 CBZ.camera = new Group(); CBZ.camera.position.set(0, 20, -700);
 CBZ.mat = (c, o) => new Mtl({ color: c, emissive: o && o.emissive, emissiveIntensity: o && o.ei });
-CBZ.cmat = CBZ.mat; CBZ.boxGeom = () => new BoxGeometry();
+const harnessMatCache = new Map();
+CBZ.cmat = (c, o) => {
+  o = o || {};
+  const key = [c, o.emissive || 0, o.ei != null ? o.ei : 1].join("|");
+  let m = harnessMatCache.get(key);
+  if (!m) { m = CBZ.mat(c, o); m._shared = true; harnessMatCache.set(key, m); }
+  return m;
+};
+CBZ.boxGeom = () => new BoxGeometry();
 CBZ.addBox = function (x, y, z, w, h, d, color, opts) { opts = opts || {}; const m = new Mesh(new BoxGeometry(), CBZ.mat(color, opts)); m.position.set(x, y, z); CBZ.scene.add(m); if (opts.solid) { const c = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m }; if (opts.y0 != null) c.y0 = opts.y0; if (opts.y1 != null) c.y1 = opts.y1; CBZ.colliders.push(c); } return m; };
 CBZ.checkerTex = () => new Tex(); CBZ.concreteTex = () => new Tex();
 CBZ.markCollidersDirty = () => {};
@@ -230,6 +241,12 @@ const cityFiles = [
   "world", "buildings", "expansion", "props", "mode", "economy", "hunger", "wanted",
   "gangs", "social", "realestate", "view", "peds", "crowd", "police", "traffic", "vehicles",
   "shops", "careers", "interact", "combat", "death", "leaderboard", "zillow", "empire", "hud",
+  // aigoals: the crowd PURPOSE / needs layer (onUpdate 33) + the lone-wolf rampage
+  // director (onUpdate 35). Loaded so the headless sim exercises both.
+  "aigoals",
+  // phone (action hub) + playerair (personal chopper/airstrike tick @42.5) — load
+  // them so the headless loop exercises their per-frame ticks for crashes.
+  "phone", "playerair",
 ];
 for (const f of cityFiles) {
   const rel = "src/city/" + f + ".js";
@@ -242,10 +259,56 @@ CBZ.always.sort((a, b) => a.order - b.order);
 
 // ---------- drive a city session ----------
 const g = CBZ.game;
+const profileStats = new Map();
+let profileFrames = 0, profileStepMs = 0;
+function profileCall(kind, entry, index, fn, dt) {
+  if (!PROFILE) return fn(dt);
+  const key = kind + "|" + index + "|" + entry.order + "|" + (entry.source || "");
+  let s = profileStats.get(key);
+  if (!s) { s = { kind, order: entry.order, source: entry.source || "", calls: 0, total: 0, peak: 0 }; profileStats.set(key, s); }
+  const t0 = performance.now();
+  try { return fn(dt); }
+  finally {
+    const ms = performance.now() - t0;
+    s.calls++; s.total += ms; if (ms > s.peak) s.peak = ms;
+  }
+}
 function step(dt) {
+  const t0 = PROFILE ? performance.now() : 0;
   CBZ.now += dt;
-  for (const u of CBZ.updaters) if (g.state === "playing") u.fn(dt);
-  for (const a of CBZ.always) a.fn(dt);
+  for (let i = 0; i < CBZ.updaters.length; i++) {
+    const u = CBZ.updaters[i];
+    if (g.state === "playing") profileCall("update", u, i, u.fn, dt);
+  }
+  for (let i = 0; i < CBZ.always.length; i++) {
+    const a = CBZ.always[i];
+    profileCall("always", a, i, a.fn, dt);
+  }
+  if (PROFILE) { profileFrames++; profileStepMs += performance.now() - t0; }
+}
+
+function printProfile() {
+  if (!PROFILE || !profileFrames) return;
+  console.log("== HEADLESS CPU PROFILE ==");
+  console.log(`frames=${profileFrames} totalStepMs=${profileStepMs.toFixed(1)} avgStepMs=${(profileStepMs / profileFrames).toFixed(3)}`);
+  const ranked = Array.from(profileStats.values()).sort((a, b) => b.total - a.total).slice(0, 30);
+  for (const s of ranked) {
+    console.log(`${s.total.toFixed(1).padStart(9)} ms total | ${(s.total / s.calls).toFixed(4).padStart(8)} avg | ${s.peak.toFixed(3).padStart(8)} peak | ${String(s.calls).padStart(6)} calls | ${s.kind}@${s.order} ${s.source}`);
+  }
+  if (CBZ.perfDetail) {
+    console.log("== CITY SUBSYSTEM DETAIL ==");
+    const detail = Object.entries(CBZ.perfDetail).sort((a, b) => b[1].total - a[1].total);
+    for (const [name, s] of detail) {
+      console.log(`${s.total.toFixed(1).padStart(9)} ms total | ${(s.total / s.calls).toFixed(4).padStart(8)} avg | ${String(s.calls).padStart(7)} calls | ${name}`);
+    }
+  }
+}
+
+function resetProfile() {
+  profileStats.clear();
+  profileFrames = 0;
+  profileStepMs = 0;
+  if (CBZ.perfDetail) CBZ.perfDetail = {};
 }
 
 // faithful reimplementation of physics.collide + groundAt to test geometry
@@ -349,6 +412,7 @@ function run() {
   testIsland(city);
   testBuildings(city);
 
+
   console.log("== entering city mode ==");
   g.mode = "city";
   const mode = CBZ.modes.city;
@@ -356,9 +420,47 @@ function run() {
   mode.reset(g);
   console.log(`peds=${CBZ.cityPeds.length} cops=${CBZ.cityCops.length} cars=${CBZ.cityCars.length} gangs=${(CBZ.cityGangs || []).length}`);
 
+  if (PROFILE && process.env.CBZ_PROFILE_ONLY === "1") {
+    if (process.env.CBZ_PROFILE_SCENARIO === "wanted5") { g.wanted = 5; g.heat = 12000; }
+    // RAMPAGE smoke: force a lone-wolf spree on a living ped and let it run, so the
+    // active-shooter brain (peds.js rampageThink) + director (aigoals.js) are
+    // exercised under the collision/grounding STUBS (logic-only — no physics claim).
+    if (process.env.CBZ_PROFILE_SCENARIO === "rampage") {
+      const victimPed = (CBZ.cityPeds || []).find((p) => p && !p.dead && !p.vendor && !p.gang);
+      if (CBZ.cityStartRampage && victimPed) {
+        const ok = CBZ.cityStartRampage(victimPed);
+        console.log("== forced rampage on " + (victimPed.name || "?") + " ok=" + ok + " ==");
+      } else console.log("== rampage hook missing — cannot force ==");
+    }
+    const frames = Math.max(60, Number(process.env.CBZ_PROFILE_FRAMES) || 1200);
+    const warmup = Math.max(0, Number(process.env.CBZ_PROFILE_WARMUP_FRAMES) || 300);
+    if (warmup) {
+      console.log(`== profile warmup: ${warmup} frames ==`);
+      for (let i = 0; i < warmup; i++) step(1 / 60);
+      resetProfile();
+    }
+    console.log(`== focused ${process.env.CBZ_PROFILE_SCENARIO || "calm"} CPU profile: ${frames} frames ==`);
+    for (let i = 0; i < frames; i++) step(1 / 60);
+    if (process.env.CBZ_PROFILE_SCENARIO === "rampage") {
+      const r = (CBZ.cityPeds || []).filter((p) => p && p.rampage).length;
+      const dead = (CBZ.cityPeds || []).filter((p) => p && p.dead).length;
+      console.log("== after rampage: activeRampagers=" + r + " deadPeds=" + dead + " ==");
+    }
+    printProfile();
+    console.log("RESULT: OK");
+    return;
+  }
+  if (process.env.CBZ_VEHICLES_ONLY === "1") {
+    testVehicleModels();
+    testCrash();
+    console.log("RESULT: OK");
+    return;
+  }
+
   testZillow();
   testEmpire();
   testGlassRay();
+  testVehicleModels();
 
   console.log("== 1200 frames ==");
   let thrown = 0;
@@ -374,7 +476,39 @@ function run() {
   testCrash();
   testCrowd();
 
+  printProfile();
   console.log("RESULT: OK");
+}
+
+function testVehicleModels() {
+  console.log("== named vehicle model audit ==");
+  if (!CBZ.cityVehicleBodyKind || !CBZ.cityBuildAmbientCarVisual) throw new Error("vehicle audit hooks missing");
+  const models = CBZ.cityEcon && CBZ.cityEcon.CARS || [];
+  const allowed = new Set(["hatch", "sedan", "van", "pickup", "coupe", "suv", "muscle"]);
+  let minParts = Infinity, maxDrawMeshes = 0;
+  for (const model of models) {
+    const bodyA = CBZ.cityVehicleBodyKind(model), bodyB = CBZ.cityVehicleBodyKind(model);
+    if (!model.body || bodyA !== model.body || bodyB !== bodyA || !allowed.has(bodyA)) {
+      throw new Error("unstable/wrong body mapping for " + model.name + ": " + bodyA + " / expected " + model.body);
+    }
+    const root = CBZ.cityBuildAmbientCarVisual(model.name);
+    const dims = root.userData && root.userData.vehicleDims;
+    const designStyle = root.userData && root.userData.designStyle;
+    const sourceParts = root.userData && root.userData.sourceParts;
+    const drawMeshes = root.userData && root.userData.drawMeshes;
+    let meshes = 0;
+    root.traverse((o) => { if (o.geometry) meshes++; });
+    minParts = Math.min(minParts, sourceParts);
+    maxDrawMeshes = Math.max(maxDrawMeshes, drawMeshes);
+    if (!model.designStyle || designStyle !== model.designStyle || !dims || !(dims.width > 1.5) || !(dims.length > 3.5) ||
+        sourceParts < 24 || meshes !== drawMeshes || drawMeshes > 12) {
+      throw new Error("incomplete/expensive visual for " + model.name + ": dims=" + JSON.stringify(dims) +
+        " designStyle=" + designStyle + " sourceParts=" + sourceParts + " drawMeshes=" + drawMeshes + " traversed=" + meshes);
+    }
+  }
+  console.log("  ✓ " + models.length + " named models have stable body classes and detailed, batched visuals (min parts=" +
+    minParts + ", max draw meshes=" + maxDrawMeshes + ")");
+  console.log("  named vehicle audit OK");
 }
 
 // ---- city mass-crowd: agents spawn on sidewalks, stroll, stay in the city ----
@@ -440,14 +574,14 @@ function testZillow() {
   console.log(`  rankings=${ranks.length} top="${ranks[0].name}" yourRank=#${ranks.findIndex((r) => r.you) + 1} yourValue=${me.value}`);
   if (!me || me.value <= 0) throw new Error("player should appear on the rankings after buying");
 
-  // passive income should pay out on owned non-home (business) property.
-  // Zillow now settles property cashflow on a slower cycle so the market does
-  // not feel like an arcade ticker.
+  // Owned non-home property must settle a real cashflow cycle. A commercial
+  // unit can legitimately go vacant on this tick, in which case tax/upkeep is
+  // negative instead of rent being positive; either result proves settlement.
   const cashBeforeIncome = g.cash;
   for (let i = 0; i < 50 * 60; i++) step(1 / 60);
   const dInc = g.cash - cashBeforeIncome;
   console.log(`  income tick: cash ${cashBeforeIncome} -> ${g.cash} (Δ ${dInc}, rent ${target.rent})`);
-  if (target.category === "commercial" && dInc <= 0) throw new Error("owned business paid no net income");
+  if (target.category === "commercial" && dInc === 0) throw new Error("owned business produced no cashflow settlement");
 
   // sell it back
   Z.sell(target.id);
@@ -513,7 +647,28 @@ function stressTest() {
   const peds = CBZ.cityPeds.filter((p) => !p.dead && !p.vendor && !p.gang);
   const gangers = CBZ.cityPeds.filter((p) => p.gang && !p.dead);
   T("buy gun → unlock engine weapon", () => { CBZ.cityGiveWeapon("Pistol"); });
-  console.log("  gun bridge: hasWeapon(sidearm)=" + (CBZ.hasWeapon && CBZ.hasWeapon("sidearm")) + " cityHasGun=" + (CBZ.cityHasGun && CBZ.cityHasGun()) + " g.cityWeapon=" + g.cityWeapon);
+  T("buy second gun → same engine inventory", () => { CBZ.cityGiveWeapon("Shotgun"); });
+  T("select sidearm through canonical API", () => {
+    if (!CBZ.setCurrentWeapon("sidearm")) throw new Error("sidearm selection rejected");
+    if (CBZ.cityCurrentWeaponName() !== "Pistol") throw new Error("city did not follow sidearm selection");
+  });
+  T("ammo tops up selected canonical gun", () => {
+    if (!CBZ.fps || !CBZ.fpsAddAmmo) return;   // the lightweight harness does not load fpsmode.js
+    const sidearm = CBZ.FPS_WEAPONS.findIndex((w) => w.id === "sidearm");
+    const before = CBZ.fps.reserves[sidearm];
+    CBZ.cityAddAmmo(17);
+    if (CBZ.fps.reserves[sidearm] !== before + 17) throw new Error("ammo did not reach selected engine gun");
+  });
+  T("select shotgun through canonical API", () => {
+    if (!CBZ.setCurrentWeapon("shotgun")) throw new Error("shotgun selection rejected");
+    if (CBZ.cityCurrentWeaponName() !== "Shotgun") throw new Error("city did not follow shotgun selection");
+  });
+  T("city melee temporarily overrides canonical gun selection", () => {
+    CBZ.cityGiveWeapon("Bat");
+    if (CBZ.cityCurrentWeaponName() !== "Bat" || CBZ.cityHasGun()) throw new Error("city melee did not become active");
+    if (!CBZ.cityDrawGun() || CBZ.cityCurrentWeaponName() !== "Shotgun" || !CBZ.cityHasGun()) throw new Error("city did not draw canonical gun after melee");
+  });
+  console.log("  shared gun state: inventory=" + CBZ.weaponInventory.join(",") + " selected=" + CBZ.currentWeaponId + " cityName=" + CBZ.cityCurrentWeaponName() + " cityHasGun=" + CBZ.cityHasGun());
   P.pos.set(CBZ.city.arena.center.x, 0, CBZ.city.arena.center.z);
 
   T("crime/report", () => { CBZ.cityCrime(60, { x: P.pos.x, z: P.pos.z, type: "robbery" }); });
@@ -542,8 +697,11 @@ function stressTest() {
   tryStep(120);
   T("hurt+die", () => { for (let i = 0; i < 30 && !P.dead; i++) CBZ.cityHurtPlayer(40, P.pos.x + 5, P.pos.z, "test"); });
   console.log("  player dead=" + P.dead + " cityCam.death=" + !!(CBZ.cityCam && CBZ.cityCam.death));
-  tryStep(360);  // through the WASTED cinematic + respawn
+  tryStep(420);  // death.js waits 6.4s through WASTED; if an NPC killed us, a kill-cam
+  // spectate can hold for up to ~10 more seconds before auto-respawn — ride it out.
+  for (let i = 0; i < 14 && P.dead; i++) tryStep(60);
   console.log("  after respawn: dead=" + P.dead + " hp=" + Math.round(P.hp) + "/" + P.maxHp);
+  if (P.dead || P.hp <= 0) { fails++; console.error("STRESS FAIL [respawn]: player remained dead after WASTED + kill-cam window (~21s)"); }
   T("home menu", () => { if (CBZ.cityHomeMenu) CBZ.cityHomeMenu(); });
   T("realtor service", () => { /* exercised via home menu */ });
   tryStep(60);
@@ -590,13 +748,31 @@ function testCrash() {
   arena.clampToCity = function () {};              // isolate test cars outside city bounds
   let fails = 0;
   const ok = (label, cond, info) => { if (cond) console.log("  ✓ " + label + (info ? " — " + info : "")); else { fails++; console.error("  ✗ FAIL " + label + (info ? " — " + info : "")); } };
-  const freshCar = (x, z) => { const c = CBZ.citySpawnOwnedCar(x, z); c.crumple = 0; c.group.scale.set(1, 1, 1); c.v = 0; c.heading = 0; c.pos.set(x, 0, z); c.group.position.set(x, 0, z); return c; };
+  const freshCar = (x, z, name) => { const c = CBZ.citySpawnOwnedCar(x, z, name); c.crumple = 0; c.group.scale.set(1, 1, 1); c.v = 0; c.heading = 0; c.pos.set(x, 0, z); c.group.position.set(x, 0, z); return c; };
   const resetPlayer = () => { P.dead = false; P.hp = P.maxHp = 200; P.driving = false; P._vehicle = null; P._death = null; P._armor = 0; P._hurtT = 0; g.invuln = 0; g._cityKiller = null; if (P._phys) { P._phys.air = false; P._phys.down = 0; } };
   const wall = (x, z) => CBZ.addBox(x, 0, z, 6, 3, 1, 0x999999, { solid: true });
 
-  // (A) CRUMPLE — drive into a wall; the mesh deforms, accumulates, clamps ≤1.
+  // (A) DRIVING FEEL — steering builds/recenters instead of snapping and a
+  // throttle lift coasts rather than applying an invisible brake.
+  resetPlayer();
+  let c = freshCar(620, 620, "Chevy Malibu");
+  P.pos.set(620, 0, 620); CBZ.cityEnterVehicle(c);
+  CBZ.keys["w"] = CBZ.keys["a"] = true;
+  for (let i = 0; i < 36; i++) step(1 / 60);
+  CBZ.keys["w"] = CBZ.keys["a"] = false;
+  const steerPeak = c._steerInput || 0, headingAfterTurn = c.heading, speedBeforeCoast = Math.abs(c.v);
+  step(1 / 60);
+  ok("steering input builds smoothly and turns the car", steerPeak > 0.65 && Math.abs(headingAfterTurn) > 0.03,
+    "steer=" + steerPeak.toFixed(2) + " heading=" + headingAfterTurn.toFixed(2));
+  ok("steering recenters progressively", (c._steerInput || 0) > 0 && (c._steerInput || 0) < steerPeak,
+    "steer " + steerPeak.toFixed(2) + "→" + (c._steerInput || 0).toFixed(2));
+  ok("lifting throttle preserves a real coast", Math.abs(c.v) > speedBeforeCoast * 0.96,
+    "speed " + speedBeforeCoast.toFixed(2) + "→" + Math.abs(c.v).toFixed(2));
+  if (P.driving) CBZ.cityExitVehicle();
+
+  // (B) CRUMPLE — drive into a wall; the mesh deforms, accumulates, clamps ≤1.
   resetPlayer(); P.hp = P.maxHp = 1e6;              // huge HP: isolate the mesh deform from death
-  let c = freshCar(490, 490); wall(490, 500);       // ~10 units ahead → crashes within ~50 frames
+  c = freshCar(490, 490); wall(490, 500);           // ~10 units ahead → crashes within ~50 frames
   P.pos.set(490, 0, 490); CBZ.cityEnterVehicle(c);
   CBZ.keys["w"] = true; for (let i = 0; i < 70; i++) step(1 / 60); CBZ.keys["w"] = false;
   const cr1 = c.crumple || 0, sc = c.group.scale, bd = c.group.userData.body, cb = c.group.userData.cabin;
@@ -608,10 +784,10 @@ function testCrash() {
   ok("crumple accumulates and clamps ≤1", cr2 >= cr1 && cr2 <= 1.0001, "crumple " + cr1.toFixed(2) + "→" + cr2.toFixed(2));
   if (P.driving) CBZ.cityExitVehicle();
 
-  // (B) DAMAGE — crashes hurt the driver hard, but current gameplay avoids
+  // (C) DAMAGE — crashes hurt the driver hard, but current gameplay avoids
   // one-impact auto-death except in genuinely extreme cases.
   resetPlayer();
-  c = freshCar(520, 490); wall(520, 500);          // ~8 units → moderate impact
+  c = freshCar(520, 490, "Chevy Malibu"); wall(520, 500);          // ~8 units → moderate impact
   P.pos.set(520, 0, 490); CBZ.cityEnterVehicle(c);
   const hp0 = P.hp;
   CBZ.keys["w"] = true; for (let i = 0; i < 60; i++) step(1 / 60); CBZ.keys["w"] = false;
@@ -619,14 +795,66 @@ function testCrash() {
   if (P.driving) CBZ.cityExitVehicle();
 
   resetPlayer();
-  c = freshCar(540, 450); wall(540, 500);          // long runway → high-speed impact
+  c = freshCar(540, 450, "Ferrari Enzo"); wall(540, 500);          // long runway → high-speed impact
   P.pos.set(540, 0, 450); CBZ.cityEnterVehicle(c);
   const hpFast0 = P.hp;
   CBZ.keys["w"] = true; for (let fr = 0; fr < 220; fr++) step(1 / 60); CBZ.keys["w"] = false;
   ok("a fast crash badly hurts but does not auto-kill", P.hp < hpFast0 * 0.6 && !P.dead, "hp " + hpFast0 + "→" + Math.round(P.hp) + " dead=" + P.dead);
   resetPlayer();
 
-  // (C) HEAD FLASH — body.flash pops the head emissive, order-24 step fades it back.
+  // (D) CAR-TO-CAR — dimensions and mass drive contact + momentum. A pickup
+  // striking a light hatch should shove the hatch hard without an instant boom.
+  // Keep fixtures far outside the expanded mainland/island traffic. The old
+  // 700,700 location can contain a live ambient car, contaminating crashCD.
+  const truck = CBZ.citySpawnOwnedCar(7000, 7000, "Ford F-150");
+  const hatch = CBZ.citySpawnOwnedCar(7000, 7004.2, "Toyota Prius");
+  truck.ai = hatch.ai = false; truck.heading = 0; hatch.heading = 0;
+  truck.v = 13; truck.vx = 0; truck.vz = 13; hatch.v = 0; hatch.vx = hatch.vz = 0;
+  truck.group.position.copy(truck.pos); hatch.group.position.copy(hatch.pos);
+  step(1 / 60);
+  ok("vehicle-length contact catches a close nose-to-tail collision", (truck.crumple || 0) > 0 && (hatch.crumple || 0) > 0,
+    "truck=" + (truck.crumple || 0).toFixed(2) + " hatch=" + (hatch.crumple || 0).toFixed(2));
+  ok("heavy pickup transfers momentum into the light hatch", Math.hypot(hatch.vx || 0, hatch.vz || 0) > Math.hypot(truck.vx || 0, truck.vz || 0),
+    "truckV=" + Math.hypot(truck.vx || 0, truck.vz || 0).toFixed(1) + " hatchV=" + Math.hypot(hatch.vx || 0, hatch.vz || 0).toFixed(1));
+  ok("hard car-to-car wreck damages instead of instantly exploding", !truck.dead && !hatch.dead && truck.engineHp < 100 && hatch.engineHp < 100,
+    "truckHP=" + Math.round(truck.engineHp) + " hatchHP=" + Math.round(hatch.engineHp));
+
+  const longA = CBZ.citySpawnOwnedCar(7090, 7000, "Chevy Malibu");
+  const longB = CBZ.citySpawnOwnedCar(7090, 7007, "Chevy Malibu");
+  longA.ai = longB.ai = false; longA.heading = longB.heading = 0;
+  longA._visualDims = longB._visualDims = { width: 2.1, length: 8, wheelbase: 4.8 };
+  const longGap = Math.hypot(longA.pos.x - longB.pos.x, longA.pos.z - longB.pos.z);
+  step(1 / 60);
+  ok("dimension-aware broadphase catches promoted long vehicles", Math.hypot(longA.pos.x - longB.pos.x, longA.pos.z - longB.pos.z) > longGap,
+    "gap " + longGap.toFixed(2) + "→" + Math.hypot(longA.pos.x - longB.pos.x, longA.pos.z - longB.pos.z).toFixed(2));
+
+  const probeVan = freshCar(7120, 7096.9, "Dodge Caravan");
+  wall(7120, 7100); probeVan.heading = 0; probeVan.v = 4;
+  const probeMoved = CBZ.cityCollideVehicle(probeVan);
+  ok("long vehicle nose contacts a wall before its center circle", probeMoved > 0.02 && probeVan.pos.z < 7096.9,
+    "push=" + probeMoved.toFixed(2) + " z=" + probeVan.pos.z.toFixed(2));
+
+  const van = CBZ.citySpawnOwnedCar(7030, 7000, "Dodge Caravan");
+  const coupe = CBZ.citySpawnOwnedCar(7030, 7004.4, "Nissan 370Z");
+  van.ai = coupe.ai = false; van.heading = 0; coupe.heading = Math.PI;
+  van.v = 22; van.vx = 0; van.vz = 22; coupe.v = 10; coupe.vx = 0; coupe.vz = -10;
+  step(1 / 60);
+  ok("one catastrophic wreck does not instantly detonate healthy cars", !van.dead && !coupe.dead && van.engineHp <= 70 && coupe.engineHp <= 70,
+    "vanHP=" + Math.round(van.engineHp) + " coupeHP=" + Math.round(coupe.engineHp));
+
+  resetPlayer();
+  const struck = freshCar(7060, 7004.2, "Toyota Prius");
+  const hitter = CBZ.citySpawnOwnedCar(7060, 7000, "Ford F-150");
+  hitter.ai = false; hitter.heading = 0; hitter.v = 13; hitter.vx = 0; hitter.vz = 13;
+  P.pos.set(struck.pos.x, 0, struck.pos.z); CBZ.cityEnterVehicle(struck);
+  const carCrashHp = P.hp;
+  step(1 / 60);
+  ok("car-to-car delta-v injures the player occupant", P.hp < carCrashHp && !P.dead,
+    "hp " + carCrashHp + "→" + Math.round(P.hp));
+  if (P.driving) CBZ.cityExitVehicle();
+  resetPlayer();
+
+  // (E) HEAD FLASH — body.flash pops the head emissive, order-24 step fades it back.
   const fp = CBZ.cityPeds.find((p) => !p.dead && p.char && p.char.head && p.char.head.material);
   if (fp) {
     const m = fp.char.head.material, restHex = m.emissive.getHex(), restEi = m.emissiveIntensity;
@@ -639,7 +867,7 @@ function testCrash() {
     ok("flash fully restores to rest", fp._phys.flash <= 0 && m.emissive.getHex() === restHex && Math.abs(m.emissiveIntensity - restEi) < 0.01, "ei back to " + m.emissiveIntensity.toFixed(2));
   } else console.log("  (no living ped with a head material — flash sub-test skipped)");
 
-  // (D) COP-SHOT DRIVER — a dead driver ejects, the car careens then settles abandoned.
+  // (F) COP-SHOT DRIVER — a dead driver ejects, the car careens then settles abandoned.
   const dc = CBZ.cityCars.find((x) => x.ai && !x.player && !x.dead && x.road && !x.npcDriver);
   const dp = CBZ.cityPeds.find((p) => !p.dead && !p.vendor && !p.inCar);
   if (dc && dp) {
