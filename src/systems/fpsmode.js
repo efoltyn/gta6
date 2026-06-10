@@ -837,7 +837,7 @@
     syncAmmo();
     setAmmoHud();
 
-    const RK = 0.6;   // global recoil dampener — the guns were kicking too hard
+    const RK = 0.45;  // global recoil dampener — the guns were kicking too hard
     recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK);
     recoilSide += (Math.random() * 2 - 1) * w.sideKick * RK;
     recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
@@ -1279,7 +1279,7 @@
     // mag-dump return to where you were aiming instead of drifting up the wall.
     if (recoilHold > 0) recoilHold = Math.max(0, recoilHold - dt);
     else {
-      const rk = 1 - Math.pow(0.0016, dt);          // ~smooth critically-damped feel
+      const rk = 1 - Math.pow(0.0004, dt);          // ~smooth critically-damped feel (settles a touch faster — mag dumps recenter)
       recoil += (0 - recoil) * rk;
       // bleed the upward climb back toward neutral so sustained fire recenters
       if (fps.active) fps.fp += (0 - fps.fp) * (1 - Math.pow(0.55, dt)) * Math.min(1, recoil * 4 + 0.15);
@@ -1300,13 +1300,18 @@
     const reloadDip = fps.reloading > 0 ? 0.13 + Math.sin(CBZ.now * 0.018) * 0.025 : 0;
     if (fps.active) {
       if (armed()) {
+        // Sustained-fire climb is kept SMALL on purpose: the bullet origin is
+        // clamped to a tight camera-space box (muzzleWorld), so if the visible
+        // barrel pivots far under recoil, tracers visibly stop leaving the gun.
+        // The per-shot KICK reads through vmPunch (snappy, decays in ~0.1s);
+        // the accumulated recoil only nudges. Kick feel without the detach.
         vm.position.set(
-          0.36 - bobX * 0.5 + recoilSide * 0.9,
-          -0.34 + bobY * 0.5 - recoil * 0.12 - vmPunch * 0.18 - reloadDip,
-          -0.72 + recoil * 0.22 - vmPunch * 0.3
+          0.36 - bobX * 0.5 + recoilSide * 0.55,
+          -0.34 + bobY * 0.5 - recoil * 0.08 - vmPunch * 0.18 - reloadDip,
+          -0.72 + recoil * 0.12 - vmPunch * 0.3
         );
-        vm.rotation.x = -0.10 + recoil * 0.55 + vmPunch * 0.4 + reloadDip * 0.8;   // level the barrel forward (was tilted up)
-        vm.rotation.z = recoilSide * 1.2 - bobX * 0.18;
+        vm.rotation.x = -0.10 + recoil * 0.26 + vmPunch * 0.4 + reloadDip * 0.8;   // level the barrel forward (was tilted up)
+        vm.rotation.z = recoilSide * 0.7 - bobX * 0.18;
       } else {
         // unarmed single hand sits low and to the right (Minecraft-style)
         vm.position.set(0.12 + bobX * 0.4, -0.30 + bobY * 0.5 - vmPunch * 0.05, -0.66 - vmPunch * 0.05);

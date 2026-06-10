@@ -106,11 +106,15 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #gangHud .dim{color:#eaf3ff; opacity:.62;}
 
 #hint{
-  position:absolute; left:50%; bottom:78px; transform:translateX(-50%) translateY(10px);
+  /* sits ABOVE the whole bottom-centre stack (loot row + weapon slots + ammo
+     line top out ~120px in city; melee posture chips reach ~200px) — at 78px
+     it used to land dead on the hotbar and the loot chips wrapped into it. */
+  position:absolute; left:50%; bottom:206px; transform:translateX(-50%) translateY(10px);
   padding:9px 16px; font-weight:500; font-size:15px; opacity:0; transition:opacity .2s, transform .2s;
-  white-space:nowrap;
+  white-space:nowrap; max-width:86vw; overflow:hidden; text-overflow:ellipsis;
 }
 #hint.show{opacity:1; transform:translateX(-50%) translateY(0);}
+@media (max-width:900px),(max-height:560px){ #hint{font-size:13px; padding:7px 12px; bottom:188px} }
 
 #toast{
   position:absolute; left:50%; top:38%; transform:translate(-50%,-50%) scale(.7);

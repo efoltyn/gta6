@@ -86,6 +86,7 @@
         "#cHud .cSlot{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:9px;background:rgba(8,11,17,.55);border:1px solid rgba(255,255,255,.12);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
         "#cHud .cSlot .s{font-size:14px;font-weight:700;color:#cdd6e2;line-height:1.1;letter-spacing:.3px}" +
         "#cHud .cSlot .a{font-size:10px;color:#8a93a3;line-height:1.1;margin-top:1px}" +
+        "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
         "#cHud .cSlot.held{background:rgba(40,52,30,.78);border-color:#7ed957;box-shadow:0 0 0 1px rgba(126,217,87,.5),0 2px 10px rgba(0,0,0,.5)}" +
         "#cHud .cSlot.held .s{color:#fff;text-shadow:0 0 8px rgba(126,217,87,.55)}" +
         "#cHud .cSlot.held .a{color:#bfe9a3}" +
@@ -99,14 +100,28 @@
         "#cHud .cAmmo .arm{color:#7fd0ff}" +
         // --- carried LOOT readout (bottom-right, above the hotbar): drugs / valuables
         // / consumables you're holding, with counts. Compact chips; hidden when empty.
-        "#cHud .cLoot{display:flex;gap:5px;justify-content:center;flex-wrap:wrap;max-width:520px;margin-bottom:1px}" +
+        // one line, NEVER wraps — a second row used to climb into the centre
+        // toast ("Wallet" floating over dispatch lines). Tail rolls into "+N".
+        "#cHud .cLoot{display:flex;gap:5px;justify-content:center;flex-wrap:nowrap;max-width:520px;margin-bottom:1px;white-space:nowrap}" +
         "#cHud .cLoot .it{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:8px;background:rgba(8,11,17,.5);border:1px solid rgba(255,255,255,.10);font-size:12px;color:#dfe6f0;box-shadow:0 1px 5px rgba(0,0,0,.35)}" +
         "#cHud .cLoot .it b{color:#fff;font-weight:700}" +
         "#cHud .cLoot .it .x{color:#8a93a3;font-weight:600}" +
         // coordinate with turf.js's overlays (loaded BEFORE us): nudge its kill
         // feed down so it clears our top-right money/pop stack, and cap its width
         // so a long name never reaches the centre. One cohesive, non-overlapping HUD.
-        "#cKillFeed{top:230px !important;width:212px !important}";
+        "#cKillFeed{top:230px !important;width:212px !important}" +
+        // --- SMALL SCREENS: the bottom-centre stack (loot+slots+ammo) must never
+        // collide or spill — shrink chips/slots/fonts under 900px wide / 560px tall.
+        "@media (max-width:900px),(max-height:560px){" +
+        "  #cHud .cLoot{max-width:340px;gap:4px}" +
+        "  #cHud .cLoot .it{font-size:10px;padding:1px 6px;gap:3px}" +
+        "  #cHud .cSlots{gap:4px;max-width:380px}" +
+        "  #cHud .cSlot{min-width:38px;height:34px;padding:2px 5px;border-radius:7px}" +
+        "  #cHud .cSlot .s{font-size:11px}" +
+        "  #cHud .cAmmo{font-size:11px}" +
+        "  #cHud .cAmmo b{font-size:15px}" +
+        "  #cMoney{font-size:24px !important}" +
+        "}";
       document.head.appendChild(st);
     }
     root = document.createElement("div");
@@ -754,16 +769,18 @@
         if (!m) continue;
         const lbl = m.w.short || m.w.label || id;
         const held = (id === heldGun);
-        // per-slot ammo: mag for the held weapon comes from fps.rounds (live), the
-        // rest fall back to their full magSize so each slot reads a sensible number.
+        // ONE source of truth for ammo: the big line under the bar carries the
+        // HELD gun's live mag/reserve; slots stay clean (the old per-slot
+        // "11/265"-style mini counts tripled the numbers on screen). The only
+        // count that still matters at a glance is a stone-dry gun → DRY.
         let ammoTxt = "";
-        if (fps && fps.rounds && fps.reserves) {
+        if (!held && fps && fps.rounds && fps.reserves) {
           const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
           const res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-          ammoTxt = cur + "/" + res;
-        } else { ammoTxt = (m.w.mag || 0) + "/" + (m.w.reserve || 0); }
+          if (cur + res <= 0) ammoTxt = "<span class='a dry'>DRY</span>";
+        }
         html += "<div class='cSlot" + (held ? " held" : "") + "'>" +
-          "<span class='s'>" + esc(lbl) + "</span><span class='a'>" + ammoTxt + "</span></div>";
+          "<span class='s'>" + esc(lbl) + "</span>" + ammoTxt + "</div>";
       }
     }
     slotsEl.innerHTML = html;
@@ -827,7 +844,7 @@
     // lead with the most valuable loot; cap the row so it never sprawls across the
     // screen — a "+N more" chip rolls up the tail.
     rows.sort((a, b) => (b.val - a.val) || (b.n - a.n));
-    const MAX = 7;
+    const MAX = 4;   // one clean line always — the row may NEVER wrap into the toast above
     let html = "";
     for (let i = 0; i < rows.length && i < MAX; i++) {
       const r = rows[i];
