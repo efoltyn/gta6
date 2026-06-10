@@ -391,6 +391,9 @@
     for (let s = 0; s < pool.length; s++) { const e = pool[s]; if (e.idx >= 0) { promotedBy[e.idx] = -1; park(e); } }
   }
   function updatePromotion() {
+    // multiplayer guest: the crowd is pure local set-dressing — never promote
+    // an agent into a real simulated ped (the host owns the real population)
+    if (CBZ.net && CBZ.net.noSim()) return;
     if (!poolBuilt) { buildPool(); if (!poolBuilt) return; }
     const P = CBZ.player; if (!P) return;
     const ppx = P.pos.x, ppz = P.pos.z;

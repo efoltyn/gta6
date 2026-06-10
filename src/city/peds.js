@@ -231,7 +231,17 @@
     const nm = opts.name || name(r);
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
     if (tag) { tag.position.y = 3.0; tag.scale.set(3, 0.75, 1); tag.visible = false; ch.group.add(tag); }
-    const aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
+    let aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
+    // ---- THE NEIGHBORHOOD NIGHTMARE: ~1 ped per city is a violent, NON-gang
+    //      crook packing an AK-47. WHY: the status rifle can't only live on gang
+    //      muscle — a lone psycho with a banana mag is the block's boogeyman, a
+    //      walking jackpot (drop him, take the rifle where he falls) priced in
+    //      real risk (the AK's punchier NPC fire profile). His LEVEL read jumps
+    //      via level.js's HEAVY map ("AK-47") + the crazy-eyes aggr bonus, so the
+    //      street can SEE this one is different before he proves it. ----
+    const nightmare = !opts.gang && !opts.vendor && !opts.isFamily &&
+      opts.archetype == null && opts.armed == null && opts.weapon == null && r() < 0.007;
+    if (nightmare) aggr = Math.max(aggr, 0.89 + r() * 0.08);   // ≥ violent band — full agency
     // WHO this ped is drives WHAT they carry. A boss/dealer carries mobster-tier
     // cash; a rare well-dressed ped is a secret tycoon/socialite WHALE. Resolve the
     // effective archetype + final wealth FIRST so cash/valuables/bounty all agree.
@@ -271,8 +281,8 @@
     // civilian can own a gun and a violent civilian can still be empty-handed. The
     // street is HEAVILY armed now (mass-shooting energy): a real share of people are
     // packing — a fugitive nearly always is, and the rich more often.
-    const armed = opts.armed != null ? opts.armed
-      : (bounty > 0 ? r() < 0.85 : r() < (0.14 + mWealth * 0.10));
+    const armed = nightmare || (opts.armed != null ? opts.armed
+      : (bounty > 0 ? r() < 0.85 : r() < (0.14 + mWealth * 0.10)));
     // a RARE jackpot archetype (tycoon/socialite/billionaire) isn't part of the
     // castTraits vocabulary — pin it so the trait roll can't wash it back to a plain
     // resident. Otherwise let castTraits derive the social archetype as before.
@@ -292,7 +302,8 @@
       drugUser: !!traits.drugUser, erratic: traits.erratic || 0, tweakT: 1 + r() * 4,
       hp: opts.hp || 100, maxHp: opts.hp || 100, dead: false, deadT: 0, ko: 0,
       cash, loot, looted: false, robbed: false,
-      armed, weapon: opts.weapon || (armed ? "Pistol" : null), ammo: armed ? 30 : 0, shootCD: 0,
+      armed, weapon: opts.weapon || (armed ? (nightmare ? "AK-47" : "Pistol") : null),
+      ammo: armed ? (nightmare ? 60 + ((r() * 31) | 0) : 30) : 0, shootCD: 0,
       npcHeat: 0, npcWanted: 0, offenseT: 0, witnessSev: 0, deadLoot: null,
       gang: opts.gang || null, guard: opts.guard || null, faction: opts.faction || null,
       partner: null, family: null,
@@ -468,6 +479,20 @@
         x: alongX ? l.cx + (rng() - 0.5) * (l.w - 4) : l.cx + sx * (l.w / 2 - 1.2),
         z: alongX ? l.cz + sx * (l.d / 2 - 1.2) : l.cz + (rng() - 0.5) * (l.d - 4),
       };
+      // a CAMP nearby (props.js tents/barrels — CBZ.cityCamps)? live there: the
+      // bedroll, the fire, the shopping cart are THEIR address, not a random alley.
+      const camps = CBZ.cityCamps;
+      if (camps && camps.length) {
+        let best = null, bd = 1e9;
+        for (let c = 0; c < camps.length; c++) {
+          const dx = camps[c].x - p.x, dz = camps[c].z - p.z, d2 = dx * dx + dz * dz;
+          if (d2 < bd) { bd = d2; best = camps[c]; }
+        }
+        if (best && bd < 120 * 120) {
+          const a = rng() * 6.28, rr = rng() * (best.r || 4);
+          p.x = best.x + Math.cos(a) * rr; p.z = best.z + Math.sin(a) * rr;
+        }
+      }
       if (A.clampToCity) A.clampToCity(p, 0.6);
       const volatile = k < Math.max(1, (count * 0.3) | 0);   // a FEW are powder kegs
       const ped = makePed(p.x, p.z, rng, {
@@ -889,6 +914,13 @@
     if (!tgt || tgt.dead) return;
     const fx = att.pos.x, fz = att.pos.z;
     if (tgt.isPlayer) {
+      // a REMOTE player (multiplayer): the wound travels over the wire and is
+      // applied by the victim's own client; the knockdown below is LOCAL-player only.
+      if (tgt.netHurt) {
+        tgt.netHurt(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street");
+        if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 22 : 40, melee ? "assault" : "shots-fired");
+        return;
+      }
       // pass the ATTACKER ACTOR (not just its name) so city/death.js can SPECTATE
       // your killer after WASTED; cityHurtPlayer derives the display name from it.
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street", false, att);
@@ -961,6 +993,17 @@
     }
   }
 
+  // ---- NPC fire profiles: WHAT a shooter holds decides how hard a round lands
+  //      and how fast the next one comes. ONE default keeps every existing gun
+  //      exactly as it was; the AK-47 alone gets 7.62 physics — a touch more
+  //      damage than the SMG-tier default on a slower cycle. WHY: the status
+  //      rifle has to BE the threat it looks like, so duelling its carrier for
+  //      the drop is a genuine risk for a genuine prize, not a free upgrade. ----
+  const NPC_GUN = {
+    "AK-47": { dmg: 19, dspr: 10, cd: 0.75, cspr: 0.5 },
+  };
+  const NPC_GUN_DEF = { dmg: 14, dspr: 10, cd: 0.55, cspr: 0.5 };
+
   function npcAttack(att, tgt) {
     if (att.attackCD > 0 || !tgt || tgt.dead) return;
     const dx = att.pos.x - tgt.pos.x, dz = att.pos.z - tgt.pos.z;
@@ -981,17 +1024,20 @@
         att.attackCD = 0.25 + rng() * 0.3;               // brief beat, then re-check for a clean angle
         return;
       }
-      // clear line — take the real shot.
-      att.attackCD = 0.55 + rng() * 0.5; att.ammo--;
+      // clear line — take the real shot (cadence + damage from the gun's profile).
+      const prof = NPC_GUN[att.weapon] || NPC_GUN_DEF;
+      att.attackCD = prof.cd + rng() * prof.cspr; att.ammo--;
       const to = { x: tgt.pos.x, y: ty, z: tgt.pos.z };
       if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.0 });
       else if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
-      if (CBZ.sfx) CBZ.sfx("report");
+      // the shot SPEAKS its gun (AK bark vs pistol crack) and muffles with distance
+      if (CBZ.gunVoice) CBZ.gunVoice(att.weapon, CBZ.player ? Math.hypot(from.x - CBZ.player.pos.x, from.z - CBZ.player.pos.z) : 0);
+      else if (CBZ.sfx) CBZ.sfx("report");
       // accuracy falls off with the TRUE 3D distance (a long, steep up-shot is hard;
       // a clean close line lands). LOS is already guaranteed above.
       const d3 = Math.hypot(dh, to.y - from.y);
       const hit = rng() < Math.max(0.15, 0.8 - d3 * 0.03);
-      if (hit) hurtActor(att, tgt, 14 + rng() * 10, false);
+      if (hit) hurtActor(att, tgt, prof.dmg + rng() * prof.dspr, false);
       // a round only catches a bystander when it actually traveled the lane (it had
       // LOS); a blocked shot never fires, so there's no phantom crossfire behind cover.
       crossfire(att, tgt, !hit);

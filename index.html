@@ -436,6 +436,13 @@
      always-updater is in the sort -->
 <script src="src/systems/gore.js?v=gore1"></script>
 
+<!-- multiplayer (host-your-own RP servers) — inert when offline/solo; loads
+     after the whole city block so every CBZ hook it wraps already exists -->
+<script src="src/net/net.js?v=mp1"></script>
+<script src="src/net/netactors.js?v=mp1"></script>
+<script src="src/net/networld.js?v=mp1"></script>
+<script src="src/net/netui.js?v=mp1"></script>
+
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>
 <script src="src/core/batch.js"></script>

@@ -4,6 +4,15 @@
    The old version synthesized every effect from oscillators and
    generated noise. This keeps the small CBZ.sfx(name) API, but all
    audible output now comes from decoded local CC0 audio files.
+
+   GUN VOICES: every class of gun has its own voice built from the
+   same recordings (pitch/filter/decay layers — zero new files), so
+   you can read a threat with your eyes closed: pistol = sharp crack,
+   SMG = snappy ratatat, carbine = tight supersonic snap, AK-47 =
+   deep heavy 7.62 bark (it's the status rifle — it must SOUND like
+   money), shotgun = chest-thump boom with a rolling tail. Gunfire
+   that's far away (>60u) routes through one shared muffle+slap-echo
+   bus so distant gang wars read as city ambience, not as "incoming".
 ============================================================ */
 (function () {
   "use strict";
@@ -62,11 +71,36 @@
       part([O + "sfx100v2_misc_04.m4a", K + "impactMetal_light_001.m4a"], 0.26, 1.1, 1.24, 0.012),
     ], 0.07),
 
+    // ---- gun voices: one recognizable voice per gun class (see header) ----
     shoot: fx([F + "pistol-1.m4a", F + "pistol-2.m4a", F + "pistol-3.m4a"], 0.78, 0.035),
-    shoot_pistol: fx([F + "pistol-1.m4a", F + "pistol-2.m4a", F + "pistol-3.m4a"], 0.82, 0.035),
-    shoot_shotgun: fx([F + "shotgun-1.m4a", F + "shotgun-2.m4a"], 0.98, 0.12),
-    shoot_carbine: fx([F + "carbine-1.m4a", F + "carbine-2.m4a"], 0.8, 0.045),
-    shoot_smg: fx([F + "smg-1.m4a", F + "smg-2.m4a", F + "smg-3.m4a"], 0.68, 0.055),
+    // pistol: SHARP CRACK — high-passed + clipped decay so it bites and stops dead.
+    shoot_pistol: layers([
+      part([F + "pistol-1.m4a", F + "pistol-2.m4a", F + "pistol-3.m4a"], 0.84, 1.02, 1.1, 0, { hp: 300, decay: 0.22 }),
+    ], 0.035),
+    // shotgun: CHEST-THUMP BOOM — full blast + a lowpassed thunder roll under it
+    // (the long tail is what says "12 gauge" from a block away).
+    shoot_shotgun: layers([
+      part([F + "shotgun-1.m4a", F + "shotgun-2.m4a"], 1.0, 0.94, 1.0),
+      part([O + "sfx100v2_thunder_01.m4a"], 0.3, 1.18, 1.32, 0.015, { lp: 400 }),
+    ], 0.12),
+    // carbine: TIGHT SUPERSONIC SNAP — clean body + a thin pitched-up crack layer
+    // (the 5.56 "snap" overhead that the heavier guns don't have).
+    shoot_carbine: layers([
+      part([F + "carbine-1.m4a", F + "carbine-2.m4a"], 0.78, 0.98, 1.06),
+      part([F + "pistol-2.m4a"], 0.22, 1.55, 1.75, 0, { hp: 2200, decay: 0.07 }),
+    ], 0.045),
+    // smg: SNAPPY RATATAT — pitched up + short decay so 15rps reads as a zipper,
+    // not a wall of mud. Cooldown sits under the Uzi's 0.052s interval.
+    shoot_smg: layers([
+      part([F + "smg-1.m4a", F + "smg-2.m4a", F + "smg-3.m4a"], 0.62, 1.07, 1.16, 0, { hp: 480, decay: 0.13 }),
+    ], 0.04),
+    // AK-47: DEEP HEAVY BARK — the carbine recording dragged down to 7.62 weight
+    // (slower rate = naturally longer decay) + a low-shelf bass push + a lowpassed
+    // shotgun layer underneath for chest thump. The status rifle SOUNDS like status.
+    shoot_ak47: layers([
+      part([F + "carbine-1.m4a", F + "carbine-2.m4a"], 0.95, 0.72, 0.78, 0, { bass: 8 }),
+      part([F + "shotgun-1.m4a"], 0.32, 0.58, 0.66, 0, { lp: 480 }),
+    ], 0.05),
     shoot_taser: layers([
       part([R + "resonance2.mp3"], 0.5, 1.55, 1.75),
       part([R + "click6.mp3", R + "click7.mp3"], 0.34, 1.0, 1.12),
@@ -124,8 +158,11 @@
   const last = new Map();
   const loopSlots = new Map();
 
-  function part(files, volume, pitchMin, pitchMax, delay) {
-    return { files, volume, pitchMin: pitchMin || 0.96, pitchMax: pitchMax || 1.04, delay: delay || 0 };
+  // tone = optional per-layer voicing: { hp, lp: filter cutoffs Hz,
+  // bass: low-shelf dB at 240Hz, decay: clip the sample to this many seconds }.
+  // This is how one set of recordings becomes many distinct gun voices.
+  function part(files, volume, pitchMin, pitchMax, delay, tone) {
+    return { files, volume, pitchMin: pitchMin || 0.96, pitchMax: pitchMax || 1.04, delay: delay || 0, tone: tone || null };
   }
   function layers(parts, cooldown) { return { parts, cooldown: cooldown || 0 }; }
   function fx(files, volume, cooldown) { return layers([part(files, volume)], cooldown); }
@@ -194,14 +231,46 @@
     updateWorldLoops();
   }
 
+  // far-field gunfire bus, built ONCE (5 nodes shared by every distant shot):
+  // lowpass = air swallows the highs, slap delay = the report bouncing off the
+  // blocks between you and the fight. Distant gunfire becomes ambience you can
+  // still threat-read by voice, instead of sounding like it's in your ear.
+  let farIn = null;
+  function ensureFarBus() {
+    if (farIn || !ctx || !sfxBus) return;
+    farIn = ctx.createGain(); farIn.gain.value = 0.8;
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 820; lp.Q.value = 0.4;
+    farIn.connect(lp); lp.connect(sfxBus);
+    const dl = ctx.createDelay(0.5); dl.delayTime.value = 0.17;
+    const fb = ctx.createGain(); fb.gain.value = 0.32;
+    const wet = ctx.createGain(); wet.gain.value = 0.5;
+    farIn.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(lp);
+  }
+
   function playLoaded(file, buffer, p, opts) {
     const src = ctx.createBufferSource();
     const gain = ctx.createGain();
     src.buffer = buffer;
     src.playbackRate.value = opts.pitch || (p.pitchMin + Math.random() * (p.pitchMax - p.pitchMin));
-    gain.gain.value = p.volume * (opts.volume == null ? 1 : opts.volume);
-    src.connect(gain); gain.connect(sfxBus);
-    src.start(ctx.currentTime + (opts.delay || 0) + p.delay);
+    // optional voicing chain (1-2 biquads only on parts that ask for them)
+    let head = src;
+    const tone = p.tone;
+    if (tone) {
+      if (tone.hp) { const f = ctx.createBiquadFilter(); f.type = "highpass"; f.frequency.value = tone.hp; head.connect(f); head = f; }
+      if (tone.lp) { const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = tone.lp; head.connect(f); head = f; }
+      if (tone.bass) { const f = ctx.createBiquadFilter(); f.type = "lowshelf"; f.frequency.value = 240; f.gain.value = tone.bass; head.connect(f); head = f; }
+    }
+    const v = p.volume * (opts.volume == null ? 1 : opts.volume);
+    gain.gain.value = v;
+    head.connect(gain);
+    gain.connect(opts.far && farIn ? farIn : sfxBus);
+    const t0 = ctx.currentTime + (opts.delay || 0) + p.delay;
+    if (tone && tone.decay) {
+      // clipped decay: ramp to silence and stop the source — a crack, not a wash
+      gain.gain.setValueAtTime(Math.max(0.0001, v), t0);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + tone.decay);
+      src.start(t0); src.stop(t0 + tone.decay + 0.05);
+    } else src.start(t0);
     return src;
   }
   function playPart(p, opts) {
@@ -214,19 +283,66 @@
     return playLoaded(file, buffer, p, opts);
   }
 
+  const FAR_DIST = 60; // beyond this, gunfire goes through the muffle+echo bus
+
   function sfx(name, opts) {
     if (!ctx || !sfxBus) return null;
     if (ctx.state === "suspended") ctx.resume();
     const entry = BANK[name];
     if (!entry) { console.warn("[audio] unmapped sfx:", name); return null; }
     opts = opts || {};
+    // opts.dist (world units from the player): attenuate with range, and past
+    // FAR_DIST swap to the muffled far-field voice — distance IS information.
+    if (opts.dist != null) {
+      const d = opts.dist;
+      const att = d <= 16 ? 1 : Math.max(0.12, 1 - (d - 16) / 150);
+      opts.volume = (opts.volume == null ? 1 : opts.volume) * att;
+      if (d > FAR_DIST) { ensureFarBus(); opts.far = true; }
+    }
     const now = performance.now() * 0.001;
     const prev = last.get(name) || -1e9;
     if (!opts.force && now - prev < entry.cooldown) return null;
-    last.set(name, now);
+    // opts.ghost: play without stamping the cooldown — NPC fire must never
+    // starve the player's own muzzle report out of the channel.
+    if (!opts.ghost) last.set(name, now);
     let first = null;
     entry.parts.forEach(function (p) { const src = playPart(p, opts); if (!first) first = src; });
     return first;
+  }
+
+  // ---- per-weapon voice for NPC/remote gunfire ------------------------------
+  // CBZ.gunVoice(weaponName, dist): plays the right gun voice for whatever the
+  // shooter is actually holding (names are the loose actor strings — "Pistol",
+  // "AK-47", "smg" — so match by substring). WHY: incoming fire you can classify
+  // by EAR is a survival read — an AK bark says "armored money", a pistol crack
+  // says "street beef". Slightly quieter than your own muzzle so it reads as
+  // incoming, gated on its own cooldown map so a 10-man firefight can't spam.
+  function voiceFor(weapon) {
+    const w = String(weapon || "").toLowerCase();
+    if (w.indexOf("ak") >= 0 || w.indexOf("762") >= 0) return "shoot_ak47";
+    if (w.indexOf("shotgun") >= 0 || w.indexOf("12g") >= 0 || w.indexOf("pump") >= 0) return "shoot_shotgun";
+    if (w.indexOf("smg") >= 0 || w.indexOf("uzi") >= 0 || w.indexOf("mac1") >= 0 || w.indexOf("mac-1") >= 0) return "shoot_smg";
+    if (w.indexOf("carbine") >= 0 || w.indexOf("rifle") >= 0 || w.indexOf("sniper") >= 0 || w.indexOf("lmg") >= 0 || w.indexOf("m4") >= 0 || w.indexOf("556") >= 0) return "shoot_carbine";
+    if (w.indexOf("taser") >= 0) return "shoot_taser";
+    if (w.indexOf("rpg") >= 0 || w.indexOf("bazooka") >= 0 || w.indexOf("rocket") >= 0) return "explosion";
+    if (w.indexOf("pistol") >= 0 || w.indexOf("sidearm") >= 0 || w.indexOf("revolver") >= 0 || w.indexOf("deagle") >= 0 || w.indexOf("9mm") >= 0 || w.indexOf("gun") >= 0) return "shoot_pistol";
+    return "report"; // unknown/empty hands-with-a-gun: the generic incoming crack
+  }
+  const npcLast = new Map();
+  const npcOpts = { force: true, ghost: true, volume: 1, dist: null, far: false }; // reused: no per-shot allocation
+  function gunVoice(weapon, dist) {
+    if (!ctx || !sfxBus) return null;
+    const name = voiceFor(weapon);
+    const entry = BANK[name];
+    if (!entry) return null;
+    const now = performance.now() * 0.001;
+    const prev = npcLast.get(name) || -1e9;
+    if (now - prev < Math.max(entry.cooldown, 0.07)) return null;
+    npcLast.set(name, now);
+    npcOpts.volume = 0.72;
+    npcOpts.dist = dist == null ? null : dist;
+    npcOpts.far = false;
+    return sfx(name, npcOpts);
   }
 
   function slot(name) {
@@ -294,6 +410,8 @@
 
   CBZ.initAudio = initAudio;
   CBZ.sfx = sfx;
+  CBZ.gunVoice = gunVoice;
+  CBZ.gunVoiceName = voiceFor; // weapon name -> bank voice, for player-fired call sites (full volume via CBZ.sfx)
   CBZ.getAudioCtx = function () { return ctx; };
   CBZ.setAudioLoop = setAudioLoop;
   CBZ.stopAudioLoop = stopAudioLoop;

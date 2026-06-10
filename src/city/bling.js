@@ -35,6 +35,20 @@
    corpse KEEPS its shine until looted — you can spot a body still
    wearing its chain from across the street.
 
+   YOUR OWN DRIP: the same read applied to the PLAYER. The city can
+   read everyone — so your body must show YOUR money: the best chain /
+   watch / ring you actually OWN (g.cityInv, classified through
+   CBZ.cityEcon.ITEMS — the looted Patek on your wrist, the $5M rock a
+   glint on your hand), a VIP-level fit (CBZ.cityPlayerDrip ≥ VIP_DRIP)
+   ices the off-wrist too, and your crew's colors as a rag (own founded
+   gang first, else the set you're patched into). Mounted on
+   CBZ.playerChar's rig — third person, shoulder cam, the club line and
+   the WASTED kill-cam all show your status; pure first person hides it
+   for free because fpsmode hides the whole playerChar.group. Selling /
+   losing a piece undresses it: re-derived on a 1s timer via a cheap
+   signature compare (never per-frame), ZERO new geometry/material
+   types — the player wears the exact same shared meshes as the street.
+
    Headless-safe: every anchor/geometry/API access is guarded, so
    the harness (stub THREE, stub rigs with empty parts) never throws.
 ============================================================ */
@@ -245,10 +259,137 @@
   }
   let _wRob = false, _wLoot = false;
 
+  // ============================================================
+  //  YOUR OWN DRIP — the player's body shows the player's money.
+  // ============================================================
+  // What you OWN that reads on a body, classified ONCE from the econ catalog
+  // (so a new luxe item added to ITEMS auto-shows with zero changes here).
+  // Same keyword classifier as ped computeWant → same slots, same finishes:
+  // the Patek on your wrist is indistinguishable from the one you robbed.
+  let _flex = null;   // [{ name, slot, luxe, value }] — player-visible candidates
+  function flexTable() {
+    if (_flex) return _flex;
+    const items = CBZ.cityEcon && CBZ.cityEcon.ITEMS;
+    if (!items) return null;            // econ not booted yet — retry next tick
+    _flex = [];
+    for (const name in items) {
+      const it = items[name];
+      if (!it || (it.tag !== "wearable" && it.tag !== "valuable")) continue;
+      const s = name.toLowerCase();
+      let slot = null, luxe = false;
+      if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) {
+        slot = "neck"; luxe = s.indexOf("iced") >= 0 || s.indexOf("diamond") >= 0;
+      } else if (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
+                 s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0) {
+        slot = "wristL"; luxe = s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0;
+      } else if (s.indexOf("earring") < 0 && (s.indexOf("ring") >= 0 || s.indexOf("pinky") >= 0)) {
+        slot = "ring";                  // earrings stay off the hand — legibility
+      } else if (s.indexOf("bracelet") >= 0) {
+        slot = "wristR"; luxe = true;
+      }
+      if (slot) _flex.push({ name, slot, luxe, value: it.value || 0 });
+    }
+    return _flex;
+  }
+
+  // crew colors: your FOUNDED gang's color outranks the set you're patched into
+  // (a boss flies his own flag). Returns { mat, key } or null. cmat caches per
+  // color, so this is the same shared material every member of the crew wears.
+  function playerRag() {
+    const pg = g.playerGang;
+    if (pg && pg.founded) {
+      const col = pg.color != null ? pg.color : 0xb079ea;
+      return { mat: CBZ.cmat(col, { emissive: col, ei: 0.12 }), key: "own:" + col };
+    }
+    const m = g.cityMembership;
+    if (m && m.gangId) return { mat: ragMat(m.gangId), key: "memb:" + m.gangId };
+    return null;
+  }
+
+  // The player's SHOULD-WEAR set + a cheap signature (best item names + gang +
+  // VIP flag). Best per slot = highest catalog value among what you still OWN —
+  // sell or lose the piece and the next tick strips it off your body.
+  function computePlayerWant() {
+    const tab = flexTable();
+    if (!tab) return null;
+    const econ = CBZ.cityEcon, M = mats();
+    const best = { neck: null, wristL: null, wristR: null, ring: null };
+    for (let i = 0; i < tab.length; i++) {
+      const e = tab[i];
+      if (econ.count(e.name) <= 0) continue;
+      const b = best[e.slot];
+      if (!b || e.value > b.value) best[e.slot] = e;
+    }
+    // a VIP-level fit (the bouncer's elite read) ices the off-wrist even
+    // without a Tennis Bracelet — full luxury reads iced on BOTH wrists.
+    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() | 0 : 0;
+    const vip = drip >= ((CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70);
+    const rag = playerRag();
+    const want = {
+      neck: best.neck ? (best.neck.luxe ? M.ice : M.gold) : null,
+      wristL: best.wristL ? (best.wristL.luxe ? M.ice : M.gold) : null,
+      wristR: best.wristR ? M.ice : (vip ? M.ice : null),
+      ring: best.ring ? M.glint : null,
+      head: rag ? rag.mat : null,
+    };
+    const any = want.neck || want.wristL || want.wristR || want.ring || want.head;
+    const sig = (best.neck ? best.neck.name : "") + "|" + (best.wristL ? best.wristL.name : "") + "|" +
+                (best.wristR ? best.wristR.name : "") + "|" + (best.ring ? best.ring.name : "") + "|" +
+                (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
+    return { want: any ? want : null, sig };
+  }
+
+  // dress/undress the player rig — same SLOTS, same pooled meshes as peds.
+  // No distance/CAP gating: it's ≤5 tiny meshes and it IS the protagonist.
+  let _pMeshes = null, _pSig = "", _pT = 0, _pDirty = false;
+  function undressPlayer() {
+    if (_pMeshes) for (let i = 0; i < _pMeshes.length; i++) releaseMesh(_pMeshes[i]);
+    _pMeshes = null; _pSig = "";
+  }
+  function syncPlayer() {
+    const res = computePlayerWant();
+    if (!res) return;                          // econ not up yet
+    if (res.sig === _pSig && (_pMeshes || !res.want)) return;   // unchanged
+    if (_pMeshes) { for (let i = 0; i < _pMeshes.length; i++) releaseMesh(_pMeshes[i]); _pMeshes = null; }
+    _pSig = res.sig;
+    if (!res.want) return;
+    const ch = CBZ.playerChar;
+    if (!ch) { _pSig = ""; return; }           // rig not up — retry next tick
+    const an = { body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra };
+    const meshes = [];
+    for (let i = 0; i < SLOT_KEYS.length; i++) {
+      const key = SLOT_KEYS[i];
+      const mtl = res.want[key]; if (!mtl) continue;
+      const def = SLOTS[key];
+      const parent = an[def.anchor];
+      if (!parent || !parent.add) continue;    // harness stubs — skip slot
+      const mesh = acquire(def.kind);
+      mesh.material = mtl;
+      mesh.position.set(def.x, def.y, def.z);
+      mesh.rotation.set(def.rx || 0, 0, 0);
+      parent.add(mesh);
+      meshes.push(mesh);
+    }
+    if (meshes.length) _pMeshes = meshes;
+  }
+  // instant-feedback hook (optional): shops/econ can poke this on buy/sell/equip
+  // so the chain appears the FRAME you buy it; the 1s timer catches everything
+  // anyway (sell, drop, rob-loss, gang join/leave) without any caller changes.
+  CBZ.cityBlingPlayerDirty = function () { _pDirty = true; };
+  CBZ.cityPlayerBlingCount = function () { return _pMeshes ? _pMeshes.length : 0; };
+
   // ---- per-frame: maintain the dressed set (cheap, ≤60), time-slice the scan ----
   let cursor = 0;
-  CBZ.onUpdate(34.7, function () {
-    if (g.mode !== "city") { if (dressed.length) clearAll(); return; }
+  CBZ.onUpdate(34.7, function (dt) {
+    if (g.mode !== "city") {
+      if (dressed.length) clearAll();
+      if (_pMeshes) undressPlayer();           // jail jumpsuit wears no city ice
+      return;
+    }
+    // the player's drip: re-derive at 1Hz (or next frame when poked dirty) —
+    // a signature compare, so an unchanged inventory costs ~nothing.
+    _pT -= dt || 0.016;
+    if (_pDirty || _pT <= 0) { _pT = 1; _pDirty = false; syncPlayer(); }
     // lazy idempotent wrapping — load order with peds.js/social.js doesn't matter,
     // wrappers chain through whatever is current.
     if (!_wRob) _wRob = wrapStrip("cityRobPed");

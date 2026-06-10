@@ -201,7 +201,9 @@
       const P = CBZ.player;
       const d = Math.hypot(from.x - P.pos.x, from.z - P.pos.z);
       const vol = Math.max(0.12, Math.min(1, 1.15 - d / 90));
-      try { CBZ.sfx("report", { volume: vol }); } catch (e) { try { CBZ.sfx("report"); } catch (e2) {} }
+      // gunVoice owns attenuation + the far-field echo bus; m.w (shooter's weapon
+      // key, when the net event carries it) makes remote fire ear-readable too.
+      try { CBZ.gunVoice ? CBZ.gunVoice(m.w, d) : CBZ.sfx("report", { volume: vol }); } catch (e) { try { CBZ.sfx("report"); } catch (e2) {} }
     }
   });
 })();

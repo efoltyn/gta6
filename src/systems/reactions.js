@@ -16,6 +16,27 @@
    We also COWER fleeing npcs (aiState==="flee"): arms thrown up over the
    head and a hunched-forward body, so a panicking inmate reads as scared.
 
+   CITY FIGHT READS (pass 2 only — jail/survival are byte-identical):
+   melee is the most-watched animation in the game, so brawls must not
+   look like mannequins bumping. Four additive layers, all fast-decay:
+     • STAGGER  — a hit ped lurches AWAY from the real hit source
+                  (grapple's _phys.fl/fdx/fdz carry the true world
+                  direction + force), head whipping harder than torso.
+                  WHY: directional reactions are how the watcher reads
+                  WHO hit WHOM in a crowd brawl.
+     • SWING    — an NPC's landed punch (peds.js npcAttack has no anim:
+                  it just sets attackCD) gets a lean-in + jab follow-
+                  through, plus a cock-back off combat.js's _windup
+                  telegraph. WHY: a punch with no weight transfer reads
+                  as a glitch, not a threat.
+     • GUARD    — _blockT (combat.js) poses forearms up so "jab eaten,
+                  throw the heavy" is taught by the pose, not the toast;
+                  _broken drops the arms slack + a dazed sway so the
+                  finisher window is visibly OPEN.
+     • GET-UP   — knockdown recovery picks one of 3 variants (sit-up
+                  push / roll to either knee) seeded per person, so two
+                  peds dropped by the same sweep don't rise in lockstep.
+
    IMPLEMENTATION NOTES
    --------------------
    We run LATE (order 89, after animChar at 20/22 and facial.js at 88) so
@@ -63,6 +84,22 @@
   const AIM_ARM = -1.45;        // gun-arm pitch when an armed inmate aims back
   const SURRENDER_ARM = -2.85;  // arms clearly OVERHEAD for a gunpoint surrender (upright, not the forward cower)
 
+  // --- city fight-read tunables (only touched on the city pass) ---
+  const STAG_DUR = 0.25;        // directional stagger length (matches the old flinch beat)
+  const STAG_PITCH = 0.5;       // torso pitch along the push direction at peak
+  const STAG_ROLL = 0.3;        // torso roll for a side hit
+  const STAG_YAW = 0.35;        // shoulder twist away from the impact
+  const STAG_HEAD = 0.5;        // the head whips harder than the torso (whiplash sells force)
+  const SWING_DUR = 0.3;        // lean-in/follow-through after an NPC punch lands
+  const SWING_LEAN = 0.3;       // forward commit at the moment of impact
+  const SWING_TWIST = 0.3;      // shoulder rotation behind the punching arm
+  const SWING_ARM = -1.9;       // punching arm extended, snapping back over the swing
+  const BLOCK_ARM = -1.6;       // forearms up in front of the face (visible "jab is eaten" tell)
+  const BLOCK_HUNCH = 0.12;     // tucked-in crouch behind the guard
+  const DAZE_ARM = 0.3;         // guard-broken arms hang slack behind the hips
+  const DAZE_SWAY = 0.12;       // slow drunken sway while broken (the foe is OPEN — go)
+  const DAZE_HEAD = 0.42;       // head sags when the guard shatters
+
   // per-actor reaction record, keyed by the actor object.
   //   hp        : last frame's hp (to detect a drop)
   //   recoil    : remaining recoil time (s); peak at start, 0 = done
@@ -72,6 +109,19 @@
   //   cowerLean : smoothed body-hunch accumulator (0..COWER_LEAN)
   //   savedEm   : original emissive color hex of the head (-1 = none saved)
   //   savedEi   : original emissive intensity of the head
+  // city-pass extras (initialized for everyone, only ever WRITTEN on the
+  // city pass, so jail/survival records carry them inert):
+  //   nkOff/byOff       : neck-pitch / body-yaw added last frame (damped
+  //                       channels — backed out like the arms)
+  //   llOff/rlOff       : leg pitch added last frame (get-up poses)
+  //   gbx/gbz           : body pitch/roll we hold DURING a get-up (animChar
+  //                       is skipped while the body is flat, so these need
+  //                       their own back-out instead of riding its assign)
+  //   stagT/stagX/stagZ/stagAmp : directional stagger timer + world push
+  //                       direction + force-scaled amplitude
+  //   swingT/swingArm   : NPC punch follow-through timer + which arm (±1)
+  //   dazeK             : eased 0..1 weight of the guard-broken sway
+  //   lastFl/atkCd      : last seen _phys.fl / attackCD (edge detectors)
   const R = new Map();
 
   function rec(a) {
@@ -82,6 +132,13 @@
         recoil: 0, dir: 1, flash: 0,
         laOff: 0, raOff: 0, cowerLean: 0,
         savedEm: -1, savedEi: 1,
+        nkOff: 0, byOff: 0, llOff: 0, rlOff: 0, gbx: 0, gbz: 0,
+        stagT: 0, stagX: 0, stagZ: 1, stagAmp: 0,
+        swingT: 0, swingArm: 1, dazeK: 0,
+        // seed the detectors from the CURRENT values so an actor first seen
+        // mid-flinch / mid-cooldown doesn't fire a phantom stagger/swing.
+        lastFl: a._phys ? (a._phys.fl || 0) : 0,
+        atkCd: a.attackCD || 0,
       };
       R.set(a, r);
     }
@@ -205,7 +262,14 @@
             const ddx = a.pos.x - cam.x, ddz = a.pos.z - cam.z;
             if (ddx * ddx + ddz * ddz > CITY_LOD2) {
               const old = R.get(a);
-              if (old) { old.laOff = 0; old.raOff = 0; old.cowerLean = 0; }
+              if (old) {
+                old.laOff = 0; old.raOff = 0; old.cowerLean = 0;
+                old.nkOff = 0; old.byOff = 0; old.llOff = 0; old.rlOff = 0;
+                old.gbx = 0; old.gbz = 0; old.stagT = 0; old.swingT = 0; old.dazeK = 0;
+                // park the edge detectors HIGH so the first frame back in range
+                // can't read a stale value as a fresh hit / fresh swing.
+                old.lastFl = 9; old.atkCd = 1e9;
+              }
               continue;
             }
           }
@@ -234,6 +298,7 @@
         const ch = a.char;
         const body = ch.body;
         const parts = ch.parts;
+        const neck = ch.neck;
 
         // ---- detect a hit: hp dropped since last frame ----
         const hp = a.hp;
@@ -251,6 +316,49 @@
         }
         r.laOff = 0; r.raOff = 0;
 
+        // CITY fight-read channels share the same back-out dance: neck pitch +
+        // body yaw + legs are all DAMPED by animChar (feedback if left in), so
+        // reveal the clean base before this frame's offsets go back on.
+        if (isCity) {
+          if (neck && r.nkOff) neck.rotation.x -= r.nkOff;
+          if (body && r.byOff) body.rotation.y -= r.byOff;
+          if (parts) {
+            if (parts.ll && r.llOff) parts.ll.rotation.x -= r.llOff;
+            if (parts.rl && r.rlOff) parts.rl.rotation.x -= r.rlOff;
+          }
+          r.nkOff = 0; r.byOff = 0; r.llOff = 0; r.rlOff = 0;
+
+          // ---- EDGE DETECTORS (city) ----
+          // STAGGER: grapple's hit() bumps _phys.fl on every real blow and
+          // carries the TRUE world push direction + shock energy — far better
+          // than the hp-drop recoil, which can only guess "away from the
+          // player" and points the wrong way in NPC-vs-NPC brawls.
+          if (pp) {
+            if (pp.fl > r.lastFl + 0.01) {
+              r.stagT = STAG_DUR;
+              r.stagX = pp.fdx; r.stagZ = pp.fdz;
+              r.stagAmp = Math.min(1.2, 0.45 + (pp.shock || 0) * 0.5);   // force-scaled
+            }
+            r.lastFl = pp.fl;
+          }
+          // SWING: peds.js npcAttack's only tell is attackCD JUMPING up at the
+          // instant the blow lands (melee sets 0.5..0.9). A jump while in fight
+          // state with the victim at arm's length = a punch we should sell.
+          // (range gate keeps point-blank GUNFIRE cadence from reading as a jab;
+          // the _broken/stun gate keeps combat.js's guard-break — which jacks
+          // attackCD up to freeze their offense — from reading as a swing)
+          const cd = a.attackCD || 0;
+          if (cd > r.atkCd + 0.12 && a.state === "fight" && a.rage && !a.rage.dead &&
+              !(a.armed && a.ammo > 0) && !((a._broken || 0) > 0) && !((a.stun || 0) > 0) && a.rage.pos) {
+            const tdx = a.rage.pos.x - a.pos.x, tdz = a.rage.pos.z - a.pos.z;
+            if (tdx * tdx + tdz * tdz < 12) {            // ~3.4m: melee reach
+              r.swingT = SWING_DUR;
+              r.swingArm = -r.swingArm;                  // alternate hands, like a real flurry
+            }
+          }
+          r.atkCd = cd;
+        }
+
         // downed / dead actors: they lie flat (group.rotation.z ~ PI/2);
         // skip the live pose reactions but keep the flash fading out so a
         // KO'ing blow still pops, and keep timers bleeding down.
@@ -259,11 +367,16 @@
         // the body offset is the SUM of the recoil flinch and the cower
         // hunch, applied once on top of animChar's fresh assignment.
         let bodyOff = 0;
+        let bodyRoll = 0;   // city-only side lean (rotation.z is assigned by animChar, so pure additive)
 
         // ---- RECOIL: a flinch that eases back over RECOIL_DUR ----
         if (r.recoil > 0) {
           r.recoil = Math.max(0, r.recoil - dt);
-          if (!down) {
+          // city: when the DIRECTIONAL stagger fired for this same hit, it owns
+          // the pose — stacking the player-relative recoil on top would double
+          // the pitch and point the wrong way in NPC-vs-NPC fights. The timer
+          // still bleeds so the flash/shove bookkeeping is unchanged.
+          if (!down && !(isCity && r.stagT > 0)) {
             // ease-out: full at the moment of impact, smoothly to 0.
             const k = r.recoil / RECOIL_DUR;          // 1 → 0
             const ease = k * k;                        // quadratic ease-out
@@ -355,8 +468,159 @@
           if (!down) bodyOff += r.cowerLean;
         }
 
+        // ============================================================
+        //  CITY FIGHT READS — all additive, all fast-decay, all inside the
+        //  isCity gate so jail/survival posing is byte-identical. Pose writes
+        //  are ALSO gated on the body being upright (`flat` below): while the
+        //  rig is laid out / mid-get-up, animChar is skipped (body.busy), so
+        //  an un-stored add to an assigned channel would accumulate.
+        // ============================================================
+        if (isCity && parts && body) {
+          const laidOut = pp && (pp.air || pp.down > 0);   // grapple owns flat bodies
+          const flat = down || laidOut || Math.abs(a.group.rotation.x) > 0.05;
+          // only pose a rig animChar actually refreshed this frame: between the
+          // 58m anim gate and our 150m LOD, peds.js skips animChar for boring
+          // peds, so a store-less add to body pitch/roll would ACCUMULATE with
+          // nothing assigning the channel fresh. Mirror peds.js's
+          // near-or-important animate condition (3364 = 58²).
+          let animated = true;
+          if (cam) {
+            const adx = a.pos.x - cam.x, adz = a.pos.z - cam.z;
+            animated = (adx * adx + adz * adz < 3364) ||
+                       !!(a.rage || a.armed || a.guard || (a.npcWanted | 0) >= 1 || a.reportState || a.approach);
+          }
+          const live = !flat && animated;
+          const ry = a.group.rotation.y || 0;
+          const seed = a._deathSeed || 0;
+          const gunArm = a.armed && a._weaponProp && a._weaponProp.visible; // actorweapons owns it
+
+          // ---- (1) DIRECTIONAL STAGGER: lurch along the REAL push direction
+          //      so a watcher reads who hit whom — head whipping harder than
+          //      the torso is what sells the force. ----
+          if (r.stagT > 0) {
+            r.stagT = Math.max(0, r.stagT - dt);
+            if (live) {
+              const k = r.stagT / STAG_DUR;
+              const amp = k * k * r.stagAmp;                 // peak at impact, force-scaled
+              // express the world push in the actor's local frame (+z fwd, +x right)
+              const lf = Math.cos(ry) * r.stagZ + Math.sin(ry) * r.stagX;
+              const ls = Math.cos(ry) * r.stagX - Math.sin(ry) * r.stagZ;
+              bodyOff += lf * STAG_PITCH * amp;              // front hit → reel back
+              bodyRoll += -ls * STAG_ROLL * amp;             // side hit → keel sideways
+              r.byOff += ls * STAG_YAW * amp;                // shoulders twist off it
+              if (neck) r.nkOff += lf * STAG_HEAD * amp;     // head whips hardest
+            }
+          }
+
+          // ---- (2) SWING LEAN-IN: weight committed behind an NPC punch
+          //      (and a cock-back off combat.js's _windup telegraph first). ----
+          if (r.swingT > 0) {
+            r.swingT = Math.max(0, r.swingT - dt);
+            if (live) {
+              const k = r.swingT / SWING_DUR;                // 1 at impact → 0
+              bodyOff += SWING_LEAN * k;                     // lean INTO the target
+              r.byOff += r.swingArm * SWING_TWIST * k;       // hips behind the fist
+              if (!gunArm) {
+                const arm = r.swingArm > 0 ? parts.ra : parts.la;
+                if (arm) {
+                  const off = SWING_ARM * k * k;             // extended, snaps back
+                  arm.rotation.x += off;
+                  if (r.swingArm > 0) r.raOff += off; else r.laOff += off;
+                }
+              }
+            }
+          } else if ((a._windup || 0) > 0 && live && a.state === "fight") {
+            // the swing alternates hands on detection, so wind up the NEXT fist
+            const w = Math.min(1, a._windup / 0.25);
+            bodyOff += -0.12 * w;                            // rock back to load it
+            if (!gunArm) {
+              const arm = r.swingArm > 0 ? parts.la : parts.ra;
+              if (arm) {
+                const off = 0.5 * w;                         // fist drawn behind the hip
+                arm.rotation.x += off;
+                if (r.swingArm > 0) r.laOff += off; else r.raOff += off;
+              }
+            }
+          }
+
+          // ---- (3) GUARD READ: _blockT poses the block, _broken shows the
+          //      opening — the pose teaches "jab eaten → throw the heavy". ----
+          const dazed = (a._broken || 0) > 0 && live;
+          if (dazed) {
+            // arms hang slack — visibly OPEN for the finisher
+            if (parts.la) { const b0 = parts.la.rotation.x; const w = damp(b0, DAZE_ARM, 10, dt); r.laOff += w - b0; parts.la.rotation.x = w; }
+            if (parts.ra && !gunArm) { const b0 = parts.ra.rotation.x; const w = damp(b0, DAZE_ARM * 0.8, 10, dt); r.raOff += w - b0; parts.ra.rotation.x = w; }
+          } else if ((a._blockT || 0) > 0 && live && !aimBack && !handsUp) {
+            // forearms up in front of the face, chin tucked behind them
+            if (parts.la) { const b0 = parts.la.rotation.x; const w = damp(b0, BLOCK_ARM, 16, dt); r.laOff += w - b0; parts.la.rotation.x = w; }
+            if (parts.ra && !gunArm) { const b0 = parts.ra.rotation.x; const w = damp(b0, BLOCK_ARM * 0.9, 16, dt); r.raOff += w - b0; parts.ra.rotation.x = w; }
+            bodyOff += BLOCK_HUNCH * Math.min(1, (a._blockT || 0) / 0.15);  // ease out at expiry
+          }
+          // the dazed SWAY eases in/out so the break (and recovery) never pops
+          r.dazeK = damp(r.dazeK, dazed ? 1 : 0, 6, dt);
+          if (r.dazeK > 0.01 && live) {
+            const el = game.elapsed || 0;
+            bodyOff += Math.sin(el * 2.3 + seed) * 0.1 * r.dazeK;
+            bodyRoll += Math.sin(el * 1.7 + seed * 2.1) * DAZE_SWAY * r.dazeK;
+            if (neck) r.nkOff += DAZE_HEAD * r.dazeK;        // head sags, out on his feet
+          }
+
+          // ---- (4) GET-UP VARIETY: while grapple eases group.rotation.x back
+          //      upright (animChar is skipped — body.busy gates it), the rig
+          //      otherwise rises as the same stiff plank every time. Blend one
+          //      of 3 poses, weighted by remaining FLATNESS so it dissolves
+          //      exactly at upright. Seeded by _deathSeed (every knockdown sets
+          //      it) → stable per person, different across a dropped crowd. ----
+          const rising = !down && pp && !pp.air && pp.down <= 0 &&
+                         Math.abs(a.group.rotation.x) > 0.05;
+          if (rising) {
+            const k = Math.min(1, Math.abs(a.group.rotation.x) / 1.45);
+            const v = Math.abs(Math.sin(seed * 3.1));
+            // body pitch/roll have no animChar assign while flat → own back-out
+            body.rotation.x -= r.gbx; body.rotation.z -= r.gbz;
+            let gx = 0, gz = 0;
+            if (v < 0.45) {
+              // SIT-UP PUSH: arms drive forward, head curls in, knees pull up
+              gx = 0.35 * k;
+              if (parts.la) { parts.la.rotation.x += -1.25 * k; r.laOff += -1.25 * k; }
+              if (parts.ra) { parts.ra.rotation.x += -1.1 * k; r.raOff += -1.1 * k; }
+              if (parts.ll) { parts.ll.rotation.x += -0.55 * k; r.llOff += -0.55 * k; }
+              if (parts.rl) { parts.rl.rotation.x += -0.4 * k; r.rlOff += -0.4 * k; }
+              if (neck) r.nkOff += 0.5 * k;
+            } else {
+              // ROLL TO A KNEE (either side): weight over one planted arm,
+              // the opposite knee up — reads as pushing off the ground.
+              const s = v < 0.72 ? 1 : -1;
+              gx = 0.22 * k;
+              gz = -0.42 * k * s;
+              const plant = -0.85 * k, knee = -1.15 * k;
+              if (s > 0) {
+                if (parts.ra) { parts.ra.rotation.x += plant; r.raOff += plant; }
+                if (parts.ll) { parts.ll.rotation.x += knee; r.llOff += knee; }
+              } else {
+                if (parts.la) { parts.la.rotation.x += plant; r.laOff += plant; }
+                if (parts.rl) { parts.rl.rotation.x += knee; r.rlOff += knee; }
+              }
+              if (neck) r.nkOff += 0.3 * k;
+            }
+            body.rotation.x += gx; body.rotation.z += gz;
+            r.gbx = gx; r.gbz = gz;
+          } else if (r.gbx || r.gbz) {
+            // animChar's assign wiped any residual the moment it resumed — just
+            // forget the stores (subtracting would dent the fresh base instead).
+            r.gbx = 0; r.gbz = 0;
+          }
+        }
+
         // apply the combined body offset on top of animChar's fresh base
         if (body && bodyOff) body.rotation.x += bodyOff;
+        // city extras land the same way: roll rides animChar's rotation.z assign;
+        // yaw + neck are damped channels, already backed out at the top.
+        if (isCity) {
+          if (body && bodyRoll) body.rotation.z += bodyRoll;
+          if (body && r.byOff) body.rotation.y += r.byOff;
+          if (neck && r.nkOff) neck.rotation.x += r.nkOff;
+        }
 
         // ---- FLASH: fade the emissive boost back to rest ----
         if (r.flash > 0) {

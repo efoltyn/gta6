@@ -581,6 +581,8 @@
 
   CBZ.onUpdate(42, function (dt) {
     if (g.mode !== "city") { if (heli || jets.length || missiles.length) teardown(); return; }
+    // multiplayer guest: the shared wanted level must not spawn a LOCAL gunship
+    if (CBZ.net && CBZ.net.noSim()) { if (heli || jets.length || missiles.length) teardown(); return; }
     const r = root(); if (!r) return;
     if (!cleanupBound) {
       cleanupBound = true;

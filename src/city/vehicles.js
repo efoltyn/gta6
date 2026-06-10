@@ -658,6 +658,8 @@
 
   // Lightweight inspection hooks used by the vehicle audit/gallery tools.
   CBZ.cityVehicleBodyKind = modelBodyKind;
+  // multiplayer: net code spawns real local cars (ownership transfer on enter/exit)
+  CBZ.cityMakeCar = makeCar;
   CBZ.cityBuildAmbientCarVisual = function (modelName) {
     const model = CBZ.cityEcon && CBZ.cityEcon.carByName ? CBZ.cityEcon.carByName(modelName) : null;
     return buildCar(model);

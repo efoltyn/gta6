@@ -388,7 +388,7 @@
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     const from = CBZ.playerMuzzleWorld ? CBZ.playerMuzzleWorld() : { x: fx, y: 1.4, z: fz };
     if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
-    if (CBZ.sfx) CBZ.sfx("report");
+    if (CBZ.sfx) CBZ.sfx(CBZ.gunVoiceName ? CBZ.gunVoiceName((CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon() || {}).key) : "report");
     if (p.kind === "cop") CBZ.cityHurtCop && CBZ.cityHurtCop(p, 200, { fromX: fx, fromZ: fz });
     else CBZ.cityKillPed(p, { fromX: fx, fromZ: fz, force: 6, fling: 3 }, "executed");
   }

@@ -338,7 +338,7 @@
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     const from = CBZ.playerMuzzleWorld ? CBZ.playerMuzzleWorld() : { x: fx, y: 1.45, z: fz };
     if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
-    if (CBZ.sfx) CBZ.sfx("report");
+    if (CBZ.sfx) CBZ.sfx(CBZ.gunVoiceName ? CBZ.gunVoiceName((CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon() || {}).key) : "report");
     if (CBZ.shake) CBZ.shake(0.4);
     const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
     const dmg = it && it.dmg ? it.dmg * 1.5 + 30 : 80;
@@ -690,7 +690,8 @@
     if (!chopperEngage(P)) return;
     const from = { x: chopper.pos.x, y: chopper.pos.y - 0.5, z: chopper.pos.z };
     if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * 2, y: 1.5, z: P.pos.z + (rng() - 0.5) * 2 }, { muzzleScale: 1.2 });
-    if (CBZ.sfx) CBZ.sfx("report");
+    if (CBZ.gunVoice) CBZ.gunVoice("carbine", Math.hypot(chopper.pos.x - P.pos.x, chopper.pos.z - P.pos.z));
+    else if (CBZ.sfx) CBZ.sfx("report");
     if (rng() < 0.45 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
   }
   CBZ.cityClearChopper = despawnChopper;
@@ -919,6 +920,16 @@
       const sc = (p.npcWanted | 0) * 24 + (p.armed ? 12 : 0) - d * 0.6;
       if (sc > bestScore) { bestScore = sc; best = p; bestPed = p; }
     }
+    // multiplayer (sim host): remote players are chaseable/shootable too —
+    // scored exactly like the local player on the SHARED wanted level.
+    if ((g.wanted | 0) >= 1 && CBZ.net && CBZ.net.aiTargets) {
+      for (const r of CBZ.net.aiTargets()) {
+        if (r.dead) continue;
+        const d = Math.hypot(cp.x - r.pos.x, cp.z - r.pos.z);
+        const sc = (g.wanted | 0) * 30 - d * 0.5;
+        if (sc > bestScore) { bestScore = sc; best = r; bestPed = null; }
+      }
+    }
     cop.npcTarget = bestPed;
     return best;
   }
@@ -926,6 +937,7 @@
   // ---- per-frame update --------------------------------------------------
   CBZ.onUpdate(35, function (dt) {
     if (g.mode !== "city") return;
+    if (CBZ.net && CBZ.net.noSim()) return;   // multiplayer guest: cops are host-synced puppets
     if (g.state === "playing") maintain(dt);
     frame++;
     // prune dead/lost car suspects
@@ -1244,6 +1256,9 @@
       // lowered (challenge) gun or a blind/patrolling cop carries it stowed so it
       // never clips through a building.
       const wantShow = !c._gunLowered && !c.gunstop && c.sees && !!c.curTarget && c.state !== "leave";
+      // flag-backed: actorweapons' poseList self-heal honors _gunHidden, so the
+      // stow actually STICKS for a drawn-but-blind cop instead of popping back.
+      c._gunHidden = !wantShow;
       if (wantShow) {
         if (CBZ.syncActorWeapon && (!c._weaponProp || !c._weaponProp.visible)) CBZ.syncActorWeapon(c);
       } else if (c._weaponProp && c._weaponProp.visible) {
@@ -1255,7 +1270,7 @@
   function fireAt(c, tgt, dist) {
     // the gun is OUT and aimed now (clear any challenge/occlusion lowering;
     // a still-holstered cop forced into a fire path ALWAYS clears leather first)
-    c._gunLowered = false;
+    c._gunLowered = false; c._gunHidden = false;
     drawGun(c);
     if (c.armed && CBZ.syncActorWeapon) CBZ.syncActorWeapon(c);
     if (CBZ.actorAimAt) CBZ.actorAimAt(c, tgt);
@@ -1268,11 +1283,16 @@
       return;
     }
     if (CBZ.tracer) CBZ.tracer(from, { x: tgt.pos.x, y: ty, z: tgt.pos.z }, { muzzleScale: c.swat ? 1.15 : 0.95 });
-    if (CBZ.sfx) CBZ.sfx("report");
+    // distance to the LISTENER (the player), not to the cop's target
+    if (CBZ.gunVoice) CBZ.gunVoice(c.weapon || (c.swat ? "smg" : "sidearm"), CBZ.player ? Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) : 0);
+    else if (CBZ.sfx) CBZ.sfx("report");
     const hitP = Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
     if (Math.random() >= hitP) return;
     let dmg = (c.swat ? 10 : 7) + Math.random() * 5;
     if (tgt.isPlayer) {
+      // a REMOTE player (multiplayer): the wound travels over the wire and is
+      // applied by the victim's own client
+      if (tgt.netHurt) { tgt.netHurt(dmg, c.pos.x, c.pos.z, "gunned down by police"); return; }
       // pass the cop ACTOR so death.js can spectate them; cityHurtPlayer derives
       // the "a SWAT officer" / "the police" display name from it (killfeed + title).
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", Math.random() < 0.012, c);

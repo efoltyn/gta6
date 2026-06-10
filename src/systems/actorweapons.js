@@ -4,6 +4,16 @@
    City combat, police response, gangs, and prison/city stand-offs should not
    invent their own "shot origin" coordinates. This helper attaches the same
    weapon appearance models to actor hands and exposes a world-space barrel tip.
+
+   It also OWNS gun-away intent: a beat cop's pistol on the belt at 0★ is what
+   makes the DRAW an escalation cue, and a stowed gun behind cover is what keeps
+   muzzles from poking through walls. actor.armed=false (how police.js ships
+   holstering today) and the canonical actor._holstered both read "in the
+   leather"; actor._gunLowered / actor._gunHidden (police gun-stops, combat.js
+   walled-off stows) read "drawn but away". The per-frame pose pass respects
+   ALL of them — its self-heal must never force a deliberately-stowed gun back
+   into the hand. Stowing is a visibility flip ONLY: the prop never leaves its
+   socket and a re-draw never rebuilds geometry (we're draw-call/alloc bound).
 ============================================================ */
 (function () {
   "use strict";
@@ -131,11 +141,17 @@
 
   function syncActorWeapon(actor) {
     if (!actor || !actor.char) return null;
-    const shouldShow = !!(actor.armed && !actor.dead);
+    // HOLSTER GATE: armed=false (police.js holsterGun ships exactly this) and
+    // the canonical _holstered flag both mean "gun's in the leather" — hide the
+    // prop but KEEP it socketed with its id intact, so the next draw is a free
+    // visibility flip (a rebuild is for weapon SWAPS only). _gunLowered /
+    // _gunHidden are deliberately NOT honored here: an explicit sync call is a
+    // firing path saying "gun out NOW" (police fireAt clears its lowering
+    // first) — the per-frame pose pass is what enforces those visual stows.
+    const shouldShow = !!(actor.armed && !actor.dead && !actor._holstered);
     const id = shouldShow ? normalizeWeaponId(actor.weapon || (actor.swat ? "SMG" : "Pistol")) : null;
     if (!shouldShow) {
       if (actor._weaponProp) actor._weaponProp.visible = false;
-      actor._weaponPropId = null;
       return null;
     }
     const socket = socketOf(actor);
@@ -219,14 +235,27 @@
     }
   }
 
-  // every frame (AFTER the walk animation), force any armed actor to carry the
-  // gun in the ready pose so it never droops to the hip while standing/walking.
+  // every frame (AFTER the walk animation), force any actor whose gun is OUT
+  // to carry it in the ready pose so it never droops to the hip while standing
+  // or walking. "Out" respects intent: holstered/lowered/hidden actors are
+  // skipped (and kept stowed) so escalation cues and wall-stows actually read.
   function poseList(list) {
     if (!list) return;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
       if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) continue;
       if (a.surrender || (a.surrenderT || 0) > 0 || (a.char && (a.char.surrender || a.char.handsUp))) continue;
+      // INTENT FLAGS BEAT THE SELF-HEAL: _holstered (canonical, CBZ.actorHolster),
+      // _gunLowered (police gun-stop challenge / combat.js walled-off stow) and
+      // _gunHidden (occlusion hide) are deliberate "armed but gun away" states.
+      // Force-re-showing here every frame was exactly what defeated them — a
+      // challenge never read as a lowered muzzle and stowed guns popped back
+      // through walls. Enforce the hide (visibility flip only — prop stays on
+      // its socket) and leave the arms free for the owning system / reactions.
+      if (a._holstered || a._gunLowered || a._gunHidden) {
+        if (a._weaponProp && a._weaponProp.visible) a._weaponProp.visible = false;
+        continue;
+      }
       // Skip ONLY a genuinely ragdolling body (down / airborne / held). Do NOT use
       // CBZ.body.busy() here: in city it was widened to report ANY body still
       // slightly pitched (rotation.x>0.04) as busy — which would steal the gun-
@@ -249,9 +278,29 @@
     poseList(CBZ.cityPeds); poseList(CBZ.cityCops);
   });
 
+  // ---- CANONICAL HOLSTER INTENT --------------------------------------------
+  // WHY: police.js holsters by flipping .armed — honored above forever (back-
+  // compat). But .armed doubles as "this actor HAS a gun", so any system that
+  // wants "the gun stays his, it's just in the leather" (gang truces, club
+  // door checks, cop adoption later) sets intent here instead of mutating
+  // .armed and confusing threat-assessment readers. Visibility flip ONLY: the
+  // prop never leaves its socket and a re-draw never rebuilds geometry.
+  function actorHolster(actor, on) {
+    if (!actor) return;
+    actor._holstered = on !== false;
+    if (actor._holstered) {
+      if (actor.weapon) actor._beltGun = actor.weapon;   // what rides the belt (same field police.js uses)
+      if (actor._weaponProp) actor._weaponProp.visible = false;
+    } else {
+      if (!actor.weapon && actor._beltGun) actor.weapon = actor._beltGun;
+      if (actor.armed && !actor.dead) syncActorWeapon(actor);
+    }
+  }
+
   CBZ.weaponIdFromName = normalizeWeaponId;
   CBZ.buildActorWeapon = buildActorWeapon;
   CBZ.syncActorWeapon = syncActorWeapon;
+  CBZ.actorHolster = actorHolster;
   CBZ.actorMuzzle = actorMuzzle;
   CBZ.actorAimAt = actorAimAt;
 })();

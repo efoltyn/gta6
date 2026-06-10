@@ -78,7 +78,7 @@
       spread: 0.011, moveSpread: 2.3, bodyRadius: 0.61, headRadius: 0.32,
       recoil: 0.17, maxRecoil: 0.82, climb: 0.02, sideKick: 0.03,
       shake: 0.28, heat: 46, knock: 1.4, flash: 0.5, equip: 0.5,
-      sfx: "shoot_carbine", sfxPitch: 0.78, sfxVol: 1.2, tracer: 0.013, auto: true,
+      sfx: "shoot_ak47", tracer: 0.013, auto: true,   // dedicated layered voice (audio.js) owns the pitch/weight
     },
     {
       id: "uzi", key: "uzi", label: "MICRO UZI", short: "UZI", slot: "auto",

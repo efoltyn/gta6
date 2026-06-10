@@ -261,11 +261,16 @@
       if (CBZ.cityVehiclesReset) CBZ.cityVehiclesReset();
       if (CBZ.cityGlassReset) CBZ.cityGlassReset();   // re-glaze every shattered window
 
-      // spawn population (spawnCityPeds also spawns gangs + seeds families)
-      if (CBZ.spawnCityPeds) CBZ.spawnCityPeds(CBZ.CITY.peds);
-      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd((CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280));   // instanced ambient mass crowd
+      // spawn population (spawnCityPeds also spawns gangs + seeds families).
+      // Multiplayer GUEST: the sim host owns peds/cops/traffic — we render its
+      // snapshots as puppets (src/net/networld.js), so nothing spawns locally.
+      const netGuest = CBZ.net && CBZ.net.noSim();
+      if (!netGuest && CBZ.spawnCityPeds) CBZ.spawnCityPeds(CBZ.CITY.peds);
+      // the instanced ambient crowd is COSMETIC and stays local on guests too
+      // (crowd.js skips promotion-to-real-peds when net.noSim())
+      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd((CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280));
       if (CBZ.clearCityCops) CBZ.clearCityCops();
-      if (CBZ.spawnCityTraffic) CBZ.spawnCityTraffic(CBZ.CITY.traffic);
+      if (!netGuest && CBZ.spawnCityTraffic) CBZ.spawnCityTraffic(CBZ.CITY.traffic);
       if (CBZ.cityWantedReset) CBZ.cityWantedReset();
       if (CBZ.cityClearAircraft) CBZ.cityClearAircraft();
       if (CBZ.cityClearPlayerAir) CBZ.cityClearPlayerAir();

@@ -4,6 +4,14 @@
    M opens a north-up map in every mode. Left-click or right-click places a
    mode-local waypoint; after the map closes a compact arrow keeps guiding the
    player without replacing the prison objective compass.
+
+   In the city the map is the PLANNING board: district names lettered across
+   their blocks + a busy-ness wash (bright = foot traffic = witnesses, marks
+   and cops; dark = deals and body dumps), climb points (▲ lift lobbies, fire
+   stairs) for roof routes, and the ad boards YOU rent printed in gold — so
+   "where do I rob / dump / climb / flex" is answered before you commit.
+   Static city layers render ONCE per open to offscreen plates and composite
+   as drawImage calls, so the live redraw cost stays flat.
 ============================================================ */
 (function () {
   "use strict";
@@ -12,7 +20,7 @@
   const cv = document.getElementById("fullMapCanvas");
   if (!CBZ || !root || !cv) return;
 
-  const ctx = cv.getContext("2d");
+  let ctx = cv.getContext("2d");   // let: helpers retarget onto the offscreen plates
   const W = cv.width, H = cv.height, PAD = 26;
   const closeBtn = document.getElementById("fullMapClose");
   const titleEl = document.getElementById("fullMapTitle");
@@ -110,6 +118,22 @@
         const d = Math.hypot(c.x - x, c.z - z);
         if (d < gd) { bestGang = gang; gd = d; }
       }
+      // climb points snap too (tight radius — a deliberate click): planning a
+      // roof run from the map should land the waypoint ON the lift door or
+      // the ladder foot, not on the building's front desk.
+      let bestUp = null, ud = 9;
+      for (const el of (CBZ.cityElevators && CBZ.cityElevators()) || []) {
+        const gp = el.groundPad; if (!gp) continue;
+        const d = Math.hypot(gp.x - x, gp.z - z);
+        if (d < ud) { bestUp = { x: gp.x, z: gp.z, label: "Roof lift" }; ud = d; }
+      }
+      for (const lot of lots) {
+        const fe = lot.building && lot.building.fireEscape;
+        if (!fe) continue;
+        const d = Math.hypot(fe.x - x, fe.z - z);
+        if (d < ud) { bestUp = { x: fe.x, z: fe.z, label: "Fire stairs" }; ud = d; }
+      }
+      if (bestUp && (!best || ud < bd) && (!bestGang || ud < gd)) return bestUp;
       // whichever (POI vs HQ) is nearer wins
       if (bestGang && (!best || gd < bd)) {
         return { x: bestGang.center.x, z: bestGang.center.z, label: (bestGang.name || "Gang") + " HQ" };
@@ -199,6 +223,7 @@
     if (CBZ.simView && CBZ.simView.active && CBZ.setSimulationView) CBZ.setSimulationView(false);
     map.active = true;
     clearMoveKeys();
+    plates.a = null;   // re-render the static city plates fresh each open (ownership/renovations may have moved)
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("full-map-open");
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
@@ -404,10 +429,9 @@
         ctx.globalAlpha = z.owner ? 0.72 : 0.22; ctx.strokeStyle = hx; ctx.lineWidth = isPlayer ? 2.6 : 1.6;
         ctx.setLineDash(z.owner && (z.strength || 1) < 0.5 ? [6, 5] : []);
         ctx.strokeRect(mx - w / 2, mz - d / 2, w, d); ctx.setLineDash([]); ctx.globalAlpha = 1;
-        // district name + who holds it
-        ctx.textAlign = "center"; ctx.font = "700 10px Fredoka, sans-serif";
-        ctx.fillStyle = "rgba(240,246,255,.5)"; ctx.fillText((z.name || "").toUpperCase(), mx, mz - d / 2 + 13);
-        if (z.owner) { ctx.fillStyle = hx; ctx.font = "700 9px Fredoka, sans-serif"; ctx.fillText(isPlayer ? "★ YOURS" : (g ? (g.name || "").toUpperCase() : "CONTESTED"), mx, mz - d / 2 + 24); }
+        // the district NAME lives on the static lettered layer now — here only
+        // WHO holds it, pinned to the zone's top edge like a flag on the line
+        if (z.owner) { ctx.textAlign = "center"; ctx.fillStyle = hx; ctx.font = "700 9px Fredoka, sans-serif"; ctx.fillText(isPlayer ? "★ YOURS" : (g ? (g.name || "").toUpperCase() : "CONTESTED"), mx, mz - d / 2 + 13); }
       }
     }
     if (!CBZ.cityGangs) return;
@@ -428,11 +452,125 @@
     }
   }
 
+  // ---- DISTRICT FIELD on the map: name + busy-ness at a glance ------------
+  // WHY: districts have personalities (config CITY.districts — packed Midtown,
+  // dead Dockyard, volatile Southside) and the full map is where a crime gets
+  // PLANNED. The wash brightness IS the foot traffic (pop weight): bright =
+  // witnesses, marks and beat cops; dark = quiet deals and body dumps. The
+  // big lettered names make "meet me in Ironworks" mean something on sight.
+  // Same 3×3 carve as the turf zones, so the wash and the control board agree.
+  function eachDistrict(p, A, fn) {
+    const list = (A.districts && A.districts.length) ? A.districts : ((CBZ.CITY && CBZ.CITY.districts) || []);
+    if (!list.length) return;
+    let popMax = 0.001;
+    for (const d of list) popMax = Math.max(popMax, d.pop || 0);
+    const zw = (A.maxX - A.minX) / 3, zd = (A.maxZ - A.minZ) / 3;
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i], q = d.q != null ? d.q : i;   // q = dj*3 + di (world.js carve)
+      fn(d, p.x(A.minX + ((q % 3) + 0.5) * zw), p.z(A.minZ + (((q / 3) | 0) + 0.5) * zd), zw * p.sc, zd * p.sc, (d.pop || 0) / popMax);
+    }
+  }
+
+  // ---- CLIMB POINTS + AD BOARDS: where to go UP, and whose name is up -----
+  // WHY: roofs are getaways, sniper perches and flex real estate. ▲ = a lift
+  // lobby (the quiet ride to a roof), the ladder = fire stairs (the loud way
+  // up under fire). Every board prints a faint tick; the ones YOU rent flip
+  // to a gold $ — your money visible on the planning map like on the skyline.
+  function drawLiftMark(x, z, p) {
+    const mx = p.x(x), mz = p.z(z);
+    ctx.fillStyle = "#9fd8ff"; ctx.strokeStyle = "rgba(0,0,0,.65)"; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(mx, mz - 5.5); ctx.lineTo(mx + 4.6, mz + 3.4); ctx.lineTo(mx - 4.6, mz + 3.4); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  function drawEscapeMark(x, z, p) {
+    const mx = p.x(x), mz = p.z(z);
+    for (const pass of [["rgba(0,0,0,.6)", 3.2], ["#ffc46b", 1.4]]) {   // dark underlay → amber ladder
+      ctx.strokeStyle = pass[0]; ctx.lineWidth = pass[1]; ctx.beginPath();
+      ctx.moveTo(mx - 2.2, mz - 5); ctx.lineTo(mx - 2.2, mz + 5);
+      ctx.moveTo(mx + 2.2, mz - 5); ctx.lineTo(mx + 2.2, mz + 5);
+      for (let r = -3; r <= 3; r += 3) { ctx.moveTo(mx - 2.2, mz + r); ctx.lineTo(mx + 2.2, mz + r); }
+      ctx.stroke();
+    }
+  }
+  function drawClimbMarks(p, A) {
+    for (const el of (CBZ.cityElevators && CBZ.cityElevators()) || []) { if (el.groundPad) drawLiftMark(el.groundPad.x, el.groundPad.z, p); }
+    const lots = (A.lots || []).concat(A.annex ? A.annex.lots || [] : []);
+    for (const lot of lots) { const fe = lot.building && lot.building.fireEscape; if (fe) drawEscapeMark(fe.x, fe.z, p); }
+  }
+  function drawBoardTicks(p) {
+    ctx.fillStyle = "rgba(216,206,176,.5)";
+    for (const b of CBZ.cityAdBoards || []) ctx.fillRect(p.x(b.x) - 1.5, p.z(b.z) - 1.5, 3, 3);
+  }
+  function drawRentedBoards(p) {   // dynamic: a lease can lapse while the map is open
+    for (const b of CBZ.cityAdBoards || []) {
+      if (!b.lease) continue;
+      const mx = p.x(b.x), mz = p.z(b.z);
+      ctx.fillStyle = "#ffd451"; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(mx, mz, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#231a05"; ctx.font = "700 8px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("$", mx, mz + 2.8);
+    }
+  }
+
+  // ---- STATIC CITY PLATES --------------------------------------------------
+  // The city map splits into what NEVER changes while it's open (districts,
+  // roads, lots, shop labels, climb points, board ticks) and what does (turf,
+  // actors, heat). The static layers render ONCE per open onto three offscreen
+  // plates that composite as single drawImage calls — the 12fps redraw loop
+  // stops re-stroking hundreds of rects/labels, so the cost stays flat no
+  // matter how much detail the plates carry. THREE plates (not one) because
+  // dynamic ink is sandwiched between them: turf paint goes UNDER the lots,
+  // actor dots stay UNDER the labels.
+  const plates = { base: document.createElement("canvas"), lots: document.createElement("canvas"), marks: document.createElement("canvas"), a: null };
+  for (const k of ["base", "lots", "marks"]) { plates[k].width = W; plates[k].height = H; }
+  function onPlate(c, fn) {
+    const main = ctx; ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    try { fn(); } finally { ctx = main; }
+  }
+  function buildCityPlates(p, A) {
+    plates.a = A;
+    onPlate(plates.base, function () {
+      // busy-ness wash under the roads (brightness = pop weight)
+      eachDistrict(p, A, function (d, mx, mz, w, h, busy) {
+        ctx.fillStyle = "rgba(190,216,255," + (0.03 + 0.10 * busy).toFixed(3) + ")";
+        ctx.fillRect(mx - w / 2, mz - h / 2, w, h);
+      });
+      drawRoads(A, p);
+      if (A.annex) {
+        ctx.fillStyle = "rgba(120,150,110,.20)"; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.fill();
+        for (const r of A.annex.roads || []) line(r.vertical ? r.x : r.x - r.len / 2, r.vertical ? r.z - r.len / 2 : r.z, r.vertical ? r.x : r.x + r.len / 2, r.vertical ? r.z + r.len / 2 : r.z, p, "rgba(156,168,182,.55)", Math.max(2, 5 * p.sc));
+      }
+      // big lettered district names over the roads (faint, lots sit on top)
+      eachDistrict(p, A, function (d, mx, mz, w) {
+        const name = (d.name || "").toUpperCase().split("").join(" ");
+        const size = Math.max(10, Math.min(16, (w * 0.9) / Math.max(6, name.length * 0.62)));
+        ctx.font = "700 " + size.toFixed(1) + "px Fredoka, sans-serif"; ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(222,236,255,.22)";
+        ctx.fillText(name, mx, mz + size * 0.35);
+      });
+    });
+    onPlate(plates.lots, function () {
+      drawLots(A.lots, p);
+      if (A.annex) drawLots(A.annex.lots, p);
+    });
+    onPlate(plates.marks, function () {
+      // labelled POIs on top — this is what makes the map actually navigable
+      drawPois(A.lots, p);
+      if (A.annex) {
+        drawPois(A.annex.lots, p);
+        text("ISLAND", A.annex.cx, A.annex.cz - A.annex.radius + 9, p, "rgba(225,240,255,.42)", 13);
+      }
+      drawClimbMarks(p, A);
+      drawBoardTicks(p);
+    });
+  }
+
   function drawCity(p) {
     const A = CBZ.city && CBZ.city.arena;
     if (!A) { text("CITY DISTRICT", 0, (CBZ.CITY && CBZ.CITY.center.z) || -700, p, "rgba(235,245,255,.5)", 18); return; }
+    if (plates.a !== A) buildCityPlates(p, A);
     const wanted = (CBZ.game && CBZ.game.wanted) || 0;
-    drawRoads(A, p);
+    ctx.drawImage(plates.base, 0, 0);   // districts + roads + lettering
     // THE BRIDGE — the sole chokepoint between mainland and island. WHY it matters
     // mechanically: at 3★+ the cops seal it (roadblocks), so it turns red + SEALED
     // — the map tells you your island escape is cut off.
@@ -442,22 +580,15 @@
       text(sealed ? "BRIDGE — SEALED" : "BRIDGE", (b.minX + b.maxX) / 2, mz - (b.maxZ - b.minZ) * 0.9, p, sealed ? "#ff8b7a" : "rgba(225,240,255,.42)", 11);
     }
     drawGangTurf(p);   // district control board + HQ crests UNDER the lot/POI layer
-    drawLots(A.lots, p);
-    if (A.annex) {
-      ctx.fillStyle = "rgba(120,150,110,.20)"; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.fill();
-      for (const r of A.annex.roads || []) line(r.vertical ? r.x : r.x - r.len / 2, r.vertical ? r.z - r.len / 2 : r.z, r.vertical ? r.x : r.x + r.len / 2, r.vertical ? r.z + r.len / 2 : r.z, p, "rgba(156,168,182,.55)", Math.max(2, 5 * p.sc));
-      drawLots(A.annex.lots, p);
-      text("ISLAND", A.annex.cx, A.annex.cz - A.annex.radius + 9, p, "rgba(225,240,255,.42)", 13);
-    }
+    ctx.drawImage(plates.lots, 0, 0);   // lot blocks over the turf paint
     // live actors UNDER the labels
     for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
       const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p, "rgba(232,238,245,.62)", 1.6);
     }
     for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
     for (const cop of CBZ.cityCops || []) if (!cop.dead) dot(cop.pos.x, cop.pos.z, p, "#5bd0ff", 2.7);
-    // labelled POIs on top — this is what makes the map actually navigable
-    drawPois(A.lots, p);
-    if (A.annex) drawPois(A.annex.lots, p);
+    ctx.drawImage(plates.marks, 0, 0);  // POI labels + climb points + board ticks
+    drawRentedBoards(p);                // the gold $ over the boards that are YOURS
     // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
     if (CBZ.cityOwnsLot) {
       ctx.strokeStyle = "#ffd451"; ctx.lineWidth = 2;
@@ -529,7 +660,9 @@
         const grp = (t) => "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>" + t + "</span>";
         let html = grp("GO") + common + "<span><i style='background:#39ff88'></i>Home</span><span><i style='background:#7ed957'></i>Job</span>";
         html += grp("HEAT") + "<span><i style='background:#ff6a5a'></i>Police</span><span><i style='background:#ff5040'></i>Chopper 3★+</span><span><i style='background:#ff463a'></i>Last seen</span>";
-        html += grp("EMPIRE") + "<span><i style='background:#ffd451;border-radius:50%'></i>Your turf / owned</span>";
+        html += grp("EMPIRE") + "<span><i style='background:#ffd451;border-radius:50%'></i>Your turf / owned</span><span><i style='background:#ffd451'></i>Boards you rent</span>";
+        // ways onto a roof — plan the climb before the chase starts
+        html += grp("CLIMB") + "<span><i style='background:#9fd8ff'></i>Lifts</span><span><i style='background:#ffc46b'></i>Fire stairs</span>";
         // one clickable swatch per rival crew → route to their HQ.
         let hasGang = false; let terr = "";
         for (const gang of CBZ.cityGangs || []) {

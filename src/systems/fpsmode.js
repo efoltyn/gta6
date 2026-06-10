@@ -673,6 +673,8 @@
     };
     if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); }   // same gun, city targets
     else { scan(CBZ.guards); scan(CBZ.npcs); }
+    // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
+    if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());
     // the ambient instanced crowd is also a valid target (so you can shoot ANYONE,
     // not just the few promoted peds). It competes on distance → real occlusion.
     let crowdIdx = -1;
@@ -716,6 +718,9 @@
   // CITY mode reuses this exact hitscan but routes the hit into the city's own
   // death/loot/crime systems (cops, gangs, wanted) instead of the prison AI.
   function cityGunHit(a, hit, w) {
+    // multiplayer target (remote player or synced puppet): authority is over the
+    // wire — net code routes the damage and plays the local juice.
+    if (a.netKind && CBZ.net && CBZ.net.localGunHit) return CBZ.net.localGunHit(a, hit, w);
     const fall = hit.dist <= w.dropStart ? 1
       : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage));
     const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
@@ -914,6 +919,7 @@
 
     const origin = muzzleWorld(tmp2);
     aimForward(fwd);
+    if (CBZ.net && CBZ.net.active && CBZ.net.onShot) CBZ.net.onShot(origin, fwd, w);
 
     // EXPLOSIVE (RPG/bazooka): a hitscan-to-impact rocket. Resolve where the
     // shot lands, draw a tracer there, then detonate via the city explosion +

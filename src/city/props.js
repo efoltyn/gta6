@@ -5,6 +5,12 @@
    Traffic lights are built here (one signal head per intersection
    approach) and attached to the intersection record; city/traffic.js
    drives their colour each frame and reads them for red-light tickets.
+
+   Also builds the HOMELESS CAMPS in the projects/industrial pocket —
+   WHY: the money ladder only reads if its bottom rung is VISIBLE. The
+   vagrants peds.js spawns on those same lots need somewhere they live
+   (tarp tents, a burning barrel, carts, cardboard); driving from this
+   to your penthouse IS the scoreboard. CBZ.cityCamps publishes anchors.
 ============================================================ */
 (function () {
   "use strict";
@@ -1067,6 +1073,183 @@
     }
 
     // =====================================================================
+    //  HOMELESS CAMPS — WHERE THE BOTTOM LIVES. 2–3 strips hugging a lot
+    //  edge in the projects (industrial fringe as spillover): tarp tents
+    //  against the wall, a fire barrel at the kerb, flattened cardboard and
+    //  a loaded cart. Deterministic from the city seed and placed AFTER all
+    //  other props so the existing rng stream (and thus the whole built
+    //  city) is byte-identical to before. Every repeated mesh shares one
+    //  geometry/material; the fire is a flicker sprite + an emissive ground
+    //  pool — NO real THREE light. CBZ.cityCamps publishes the anchors so
+    //  the vagrants can post up here and cop beats can come roust them.
+    // =====================================================================
+    const camps = CBZ.cityCamps = [];
+    const campFires = [];                 // {flame, smoke, y0, ph} — flicker-driven below
+    const GY = 0.09;                      // pavement top (sidewalk 0.08 / lot pad 0.10)
+    // ridge tent: a 3-sided prism (apex up, flat base on the pavement)
+    const tentG = geo("campTent", () => {
+      const t = new THREE.CylinderGeometry(1.0, 1.0, 2.1, 3, 1, false, Math.PI / 2);
+      t.rotateZ(Math.PI / 2);             // ridge runs along local x
+      t.translate(0, 0.5, 0);             // base edge sits at y=0
+      return t;
+    });
+    const flapG = geo("campFlap", () => new THREE.PlaneGeometry(0.55, 0.75));
+    const cardG = geo("campCard", () => new THREE.BoxGeometry(0.95, 0.025, 1.5));
+    const barrelG = geo("campBarrel", () => new THREE.CylinderGeometry(0.34, 0.3, 0.95, 8));
+    const emberG = geo("campEmber", () => new THREE.CircleGeometry(0.27, 8));
+    const poolGeo = geo("campPool", () => new THREE.CircleGeometry(2.0, 12));
+    const TARPS = [smat(0x2f5fae), smat(0x4a6b3a), smat(0x6e7280)];  // blue tarp, army surplus, grey sheet
+    const flapM = smat(0x191c21), cardM = smat(0xa8895c), rustM = smat(0x5e3422);
+    const emberM = smat(0xff7a22, { emissive: 0xff7a22, ei: 0.95 }); // the coals burn day & night
+    // ONE warm pool material for every camp → flickering them all is a single write
+    const firePoolM = new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0, depthWrite: false });
+    // soft radial sprite texture (one tiny canvas per look, ever)
+    function puffTex(inner, outer) {
+      const c = document.createElement("canvas"); c.width = c.height = 64;
+      const x = c.getContext("2d");
+      const gr = x.createRadialGradient(32, 32, 2, 32, 32, 30);
+      gr.addColorStop(0, inner); gr.addColorStop(1, outer);
+      x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(c);
+    }
+    const flameM = new THREE.SpriteMaterial({ map: puffTex("rgba(255,232,170,1)", "rgba(255,110,20,0)"), color: 0xffb050, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending });
+    const smokeTexS = puffTex("rgba(205,210,220,0.8)", "rgba(205,210,220,0)");
+
+    // a loaded shopping cart: basket + tray + handle + axles + a tarp bundle
+    const cartM = smat(0x9aa0a8);
+    function shoppingCart(x, z, yaw) {
+      const g = new THREE.Group(); g.position.set(x, GY, z); g.rotation.y = yaw;
+      const basket = new THREE.Mesh(geo("cartBasket", () => new THREE.BoxGeometry(0.82, 0.5, 0.56)), cartM);
+      basket.position.y = 0.78; basket.castShadow = true; g.add(basket);
+      const tray = new THREE.Mesh(geo("cartTray", () => new THREE.BoxGeometry(0.7, 0.04, 0.48)), cartM);
+      tray.position.y = 0.3; g.add(tray);
+      const bar = new THREE.Mesh(geo("cartBar", () => new THREE.BoxGeometry(0.07, 0.07, 0.62)), cartM);
+      bar.position.set(-0.52, 1.02, 0); g.add(bar);
+      const axleG = geo("cartAxle", () => { const a = new THREE.CylinderGeometry(0.07, 0.07, 0.56, 6); a.rotateX(Math.PI / 2); return a; });
+      for (const ax of [-0.3, 0.3]) { const w = new THREE.Mesh(axleG, flapM); w.position.set(ax, 0.08, 0); g.add(w); }
+      // everything they own, bundled in a tarp on top
+      const bag = new THREE.Mesh(geo("cartBag", () => new THREE.IcosahedronGeometry(0.3, 0)), TARPS[(rng() * TARPS.length) | 0]);
+      bag.position.set(0.05, 1.12, 0); bag.scale.set(1.1, 0.75, 0.95); g.add(bag);
+      root.add(g);
+      city.streetProps.push({ x, z, type: "cart" });   // soft junk, no collider (peds flow past)
+    }
+
+    // one camp strip on a lot edge. Local frame: t runs along the edge,
+    // n points out toward the street (tents hug the wall, barrel at the kerb).
+    function buildCamp(lot, edge) {
+      const hw = lot.w / 2;
+      const F = edge === 0 ? { ox: lot.cx, oz: lot.cz - hw, tx: 1, tz: 0, nx: 0, nz: -1 }
+            : edge === 1   ? { ox: lot.cx, oz: lot.cz + hw, tx: 1, tz: 0, nx: 0, nz: 1 }
+            : edge === 2   ? { ox: lot.cx - hw, oz: lot.cz, tx: 0, tz: 1, nx: -1, nz: 0 }
+            :                { ox: lot.cx + hw, oz: lot.cz, tx: 0, tz: 1, nx: 1, nz: 0 };
+      const at = (t, n) => ({ x: F.ox + F.tx * t + F.nx * n, z: F.oz + F.tz * t + F.nz * n });
+      const tOff = (rng() - 0.5) * lot.w * 0.25;
+      // the whole strip (≈±3 along the edge) must clear doors and the map rim
+      for (const tt of [-2.8, 0, 2.8]) {
+        const p = at(tOff + tt, 0.9);
+        if (Math.abs(p.x) > 9990 || nearDoor(p.x, p.z, 2.8)) return false;
+      }
+      const ridgeYaw = F.tx ? 0 : -Math.PI / 2;       // tent ridge runs along the edge
+      const nT = 2 + ((rng() * 2) | 0);               // 2–3 tents per camp
+      for (let i = 0; i < nT; i++) {
+        const tt = tOff + (i - (nT - 1) / 2) * 2.6 + (rng() - 0.5) * 0.4;
+        const band = 0.1 + rng() * 0.25;              // hugging the wall line
+        const p = at(tt, band);
+        const tent = new THREE.Mesh(tentG, TARPS[(rng() * TARPS.length) | 0]);
+        tent.position.set(p.x, GY, p.z); tent.rotation.y = ridgeYaw + (rng() - 0.5) * 0.16;
+        tent.castShadow = true; root.add(tent);
+        // dark door flap closing one open end
+        const fs = rng() < 0.5 ? -1 : 1;
+        const fp = at(tt + fs * 1.04, band);
+        const flap = new THREE.Mesh(flapG, flapM);
+        flap.position.set(fp.x, GY + 0.42, fp.z);
+        flap.rotation.y = F.tx ? (fs > 0 ? Math.PI / 2 : -Math.PI / 2) : (fs > 0 ? 0 : Math.PI);
+        root.add(flap);
+        solidCollider(p.x, p.z, 0.8, tent);
+      }
+      // the FIRE BARREL out at the kerb — the camp's hearth
+      const bp = at(tOff + (rng() - 0.5) * 1.4, 1.75);
+      const barrel = new THREE.Mesh(barrelG, rustM);
+      barrel.position.set(bp.x, GY + 0.48, bp.z); barrel.castShadow = true; root.add(barrel);
+      const ember = new THREE.Mesh(emberG, emberM);
+      ember.rotation.x = -Math.PI / 2; ember.position.set(bp.x, GY + 0.93, bp.z); root.add(ember);
+      const flame = new THREE.Sprite(flameM);
+      flame.position.set(bp.x, GY + 1.28, bp.z); flame.scale.set(0.55, 0.7, 1); root.add(flame);
+      // each wisp owns its material so it can FADE as it rises (≤3 mats total)
+      const smoke = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTexS, color: 0xb9bec8, transparent: true, opacity: 0, depthWrite: false }));
+      smoke.position.set(bp.x, GY + 1.5, bp.z); root.add(smoke);
+      // warm light POOL on the pavement — an emissive disc, not a real light;
+      // the flicker driver fades it up after dark (firelight for free)
+      const pool = new THREE.Mesh(poolGeo, firePoolM);
+      pool.rotation.x = -Math.PI / 2; pool.position.set(bp.x, 0.165, bp.z); root.add(pool);   // floats above pad+cardboard (no z-fight)
+      campFires.push({ flame, smoke, y0: GY + 1.4, ph: rng() * 6.28 });
+      solidCollider(bp.x, bp.z, 0.42, barrel);
+      // flattened CARDBOARD bedding between the tents and the fire
+      const nC = 2 + ((rng() * 2) | 0);
+      for (let i = 0; i < nC; i++) {
+        const p = at(tOff + (rng() - 0.5) * 5.0, 0.7 + rng() * 0.8);
+        const card = new THREE.Mesh(cardG, cardM);
+        card.position.set(p.x, 0.12, p.z); card.rotation.y = rng() * 6.28; root.add(card);
+      }
+      // a loaded SHOPPING CART parked at the end of the row
+      const cp = at(tOff + (rng() < 0.5 ? -1 : 1) * 3.4, 1.2 + rng() * 0.6);
+      shoppingCart(cp.x, cp.z, rng() * 6.28);
+      const cc = at(tOff, 1.0);
+      camps.push({ x: cc.x, z: cc.z, r: 3.6 });        // anchor: vagrants/cops read this
+      city.streetProps.push({ x: cc.x, z: cc.z, type: "camp" });
+      return true;
+    }
+
+    // pick the camp blocks: the projects pocket first, the industrial fringe
+    // as spillover — the SAME lots peds.js seeds its vagrants on, so the
+    // beggars and their bedrolls end up on the same corners.
+    const dKind = (l) => { const d = city.districtAt ? city.districtAt(l.cx, l.cz) : null; return d ? d.kind : null; };
+    const okCampLot = (l) => l.building && !l.building.park;     // a camp needs a wall behind it
+    const projLots = lots.filter((l) => dKind(l) === "projects" && okCampLot(l));
+    const fringeLots = lots.filter((l) => dKind(l) === "industrial" && okCampLot(l));
+    const basePool = projLots.length ? projLots : fringeLots;
+    if (basePool.length) {
+      const usedCampLots = new Set();
+      let builtCamps = 0;
+      for (let tries = 0; tries < 14 && builtCamps < 3; tries++) {
+        // the third camp prefers the industrial fringe (the alley sleepers)
+        const pool = (builtCamps === 2 && fringeLots.length) ? fringeLots : basePool;
+        const lot = pool[(rng() * pool.length) | 0];
+        if (usedCampLots.has(lot)) continue;
+        if (buildCamp(lot, (rng() * 4) | 0)) { usedCampLots.add(lot); builtCamps++; }
+      }
+    }
+
+    // =====================================================================
+    //  CAMP-FIRE FLICKER — the camps' only per-frame cost, and it's tiny:
+    //  ≤3 sprite transforms + 2 shared material writes. The flame breathes
+    //  (two offset sines ≈ fire), smoke wisps rise/grow/fade on a loop, and
+    //  after dark the shared pool disc washes each camp warm.
+    // =====================================================================
+    if (CBZ.onAlways && campFires.length && !city._campFireHooked) {
+      city._campFireHooked = true;
+      let ft = 0;
+      CBZ.onAlways(7.5, function (dt) {
+        const g = CBZ.game;
+        if (!g || g.mode !== "city" || !root.visible) return;
+        ft += dt || 0.016;
+        const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
+        const fl = 0.82 + Math.sin(ft * 9.3) * 0.11 + Math.sin(ft * 23.7) * 0.07;
+        flameM.opacity = 0.5 + fl * 0.4;
+        firePoolM.opacity = (0.04 + n * 0.34) * fl;    // the warm pool only reads after dark
+        for (const e of campFires) {
+          const s = 0.5 + 0.16 * Math.sin(ft * 11 + e.ph) + 0.05 * Math.sin(ft * 27 + e.ph * 2);
+          e.flame.scale.set(s, s * 1.25, 1);
+          const u = (ft * 0.3 + e.ph) % 1;             // wisp cycle: rise, swell, thin out
+          e.smoke.position.y = e.y0 + u * 1.7;
+          const ss = 0.35 + u * 0.9;
+          e.smoke.scale.set(ss, ss, 1);
+          e.smoke.material.opacity = 0.26 * (1 - u);
+        }
+      });
+    }
+
+    // =====================================================================
     //  NIGHT DRIVER — lamp heads glow + billboards/ad panels self-illuminate
     //  after dark. Reads CBZ.nightAmount (0 day .. 1 deep night) set by
     //  core/daynight.js. City mode only; cheap (a handful of material writes
@@ -1083,7 +1266,7 @@
         lastN = n;
         const on = n;                               // 0..1
         headLampM.emissiveIntensity = 0.05 + on * 0.95;
-        glowM.opacity = on * 0.55;
+        glowM.opacity = on * 0.72;     // brighter lamp pool — the street reads by lamplight after dark
         for (const glow of nightLamps) { if (glow.material === glowM) continue; if (glow.material.emissive) glow.material.emissiveIntensity = on * 0.9; }
         for (const am of nightAds) { am.emissiveIntensity = 0.06 + on * 0.6; }
       });

@@ -147,6 +147,10 @@
   //    aggrAdd     additive nudge to the aggression roll (brawlers/cartel ride hot)
   //    wealthMul   member wealth multiplier (cartel/syndicate are richer to rob)
   //    melee       a melee weapon brawlers carry instead of a gun ("Machete"/"Bat")
+  //    akFrac      of the MADE tiers (Enforcer/Lt), chance to carry the AK-47 — the
+  //                crew's visible STATUS rifle. WHY: you SEE the banana mag and know
+  //                the block is serious; and because its carrier DROPS it where he
+  //                falls, the AK is a reason to pick a fight above your level.
   //    defend      turf-defence weight: how hard the crew retaliates / wars (>1 = harder)
   //    expand      expansion weight: how land-hungry the war/takeover director is
   //    roam        roam/brawl flavour: bikers freelance street crime more
@@ -156,27 +160,27 @@
   const GANG_TYPES = {
     street: {    // balanced corner crew — the baseline GTA gang
       label: "Street Gang", crewMul: 1.0, armedFrac: 0.7, rifleFrac: 0.0, smgFrac: 0.3,
-      hpMul: 1.0, aggrAdd: 0.0, wealthMul: 1.0, melee: null,
+      hpMul: 1.0, aggrAdd: 0.0, wealthMul: 1.0, melee: null, akFrac: 0.12,
       defend: 1.0, expand: 1.0, roam: 1.0, bossWeapon: "SMG",
     },
     cartel: {    // rich, rifle-heavy, drug money, land-hungry, hits hard
       label: "Cartel", crewMul: 1.1, armedFrac: 0.95, rifleFrac: 0.55, smgFrac: 0.35,
-      hpMul: 1.15, aggrAdd: 0.05, wealthMul: 1.5, melee: null,
+      hpMul: 1.15, aggrAdd: 0.05, wealthMul: 1.5, melee: null, akFrac: 0.4,
       defend: 1.35, expand: 1.4, roam: 0.85, bossWeapon: "Carbine",
     },
     syndicate: { // few but heavily-armed high earners — protection racket, retaliates hardest
       label: "Syndicate", crewMul: 0.7, armedFrac: 1.0, rifleFrac: 0.25, smgFrac: 0.6,
-      hpMul: 1.2, aggrAdd: 0.04, wealthMul: 1.8, melee: null,
+      hpMul: 1.2, aggrAdd: 0.04, wealthMul: 1.8, melee: null, akFrac: 0.3,
       defend: 1.6, expand: 0.8, roam: 0.7, bossWeapon: "Carbine",
     },
     set: {       // scrappy big bench, lighter weapons — more bodies than guns
       label: "Set", crewMul: 1.45, armedFrac: 0.5, rifleFrac: 0.0, smgFrac: 0.18,
-      hpMul: 0.9, aggrAdd: 0.0, wealthMul: 0.8, melee: "Bat",
+      hpMul: 0.9, aggrAdd: 0.0, wealthMul: 0.8, melee: "Bat", akFrac: 0.08,
       defend: 0.9, expand: 1.05, roam: 1.1, bossWeapon: "SMG",
     },
     brawlers: {  // a melee mob — machetes over guns, tanky, roams + brawls
       label: "Brawlers", crewMul: 1.25, armedFrac: 0.22, rifleFrac: 0.0, smgFrac: 0.1,
-      hpMul: 1.4, aggrAdd: 0.08, wealthMul: 0.9, melee: "Machete",
+      hpMul: 1.4, aggrAdd: 0.08, wealthMul: 0.9, melee: "Machete", akFrac: 0.05,
       defend: 1.1, expand: 1.0, roam: 1.5, bossWeapon: "SMG",
     },
   };
@@ -287,12 +291,20 @@
           const packs = leader ? (rng() < 0.9) : (rng() < tt.armedFrac);
           if (packs) {
             const r = rng();
+            // THE STATUS RIFLE: a made man (Enforcer/Lt) has a real chance of the
+            // AK-47 — the banana mag in his hands IS the crew's show of force (you
+            // see it and know the block is serious), and because he DROPS it where
+            // he falls, picking a fight with him is how the street gets one. The
+            // boss's home lot runs the heaviest detail — guarding the kingpin is
+            // the crew's best-armed post.
+            const akf = (tt.akFrac || 0) * (lot === gang.turf[0] ? 1.6 : 1);
+            if (leader && rng() < akf) weapon = "AK-47";
             // leaders skew up a tier; rifles only where the archetype fields them
-            if (r < tt.rifleFrac || (leader && rng() < tt.rifleFrac + 0.15)) weapon = "Carbine";
+            else if (r < tt.rifleFrac || (leader && rng() < tt.rifleFrac + 0.15)) weapon = "Carbine";
             else if (r < tt.rifleFrac + tt.smgFrac || (leader && rng() < 0.6)) weapon = "SMG";
             else weapon = "Pistol";
             armed = true;
-            ammo = weapon === "Carbine" ? 60 : weapon === "SMG" ? 40 : 30;
+            ammo = weapon === "AK-47" ? 60 + ((rng() * 31) | 0) : weapon === "Carbine" ? 60 : weapon === "SMG" ? 40 : 30;
           } else {
             // unarmed for gun purposes → the brain makes them BRAWL. They carry the
             // archetype's melee tool (machete/bat) as flavour; tankier HP makes the
@@ -346,7 +358,10 @@
     const wantSmg = rd.weapon === "SMG";
     if (wantSmg && (!m.weapon || m.weapon === "Pistol" || m.weapon === "Bat") && rng() < 0.75) m.weapon = "SMG";
     if (!m.weapon || m.weapon === "Bat") m.weapon = rd.weapon;
-    m.ammo = Math.max(m.ammo || 0, rd.weapon === "SMG" ? 50 : 30);
+    // making rank into the MADE tiers (Enforcer+) can come with the crew's STATUS
+    // rifle — the AK-47 is what a promotion looks like from across the street.
+    if (rd.tier >= 4 && m.weapon !== "AK-47" && rng() < (gangType(gang).akFrac || 0.1)) m.weapon = "AK-47";
+    m.ammo = Math.max(m.ammo || 0, m.weapon === "AK-47" ? 70 : rd.weapon === "SMG" ? 50 : 30);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(m);
   }
 
@@ -533,6 +548,14 @@
     for (const m of a.members) {
       if (sent >= count) break;
       if (m.dead || m.rage || m.inCar || m.raidT > 0) continue;
+      // WAR FOOTING: the chest the raid already spent cracks the heavy crates —
+      // a made man (Enforcer/Lt) rolls on a rival block with the AK-47, so a war
+      // VISIBLY escalates the hardware on the street, and every raider you drop
+      // is a chance to walk away with the status rifle yourself.
+      if (rankTier(m) >= 4 && m.weapon !== "AK-47" && rng() < (gangType(a).akFrac || 0.1) * 1.5) {
+        m.armed = true; m.weapon = "AK-47"; m.ammo = Math.max(m.ammo || 0, 60 + ((rng() * 31) | 0));
+        if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(m);
+      }
       m.homeGuard = m.homeGuard || m.guard;
       m.guard = { x: targetLot.cx, z: targetLot.cz };
       m.target.set(targetLot.cx + (rng() - 0.5) * 5, 0, targetLot.cz + (rng() - 0.5) * 5);
@@ -752,7 +775,9 @@
             if (!CBZ.clearLineOfFire || CBZ.clearLineOfFire(from.x, from.y, from.z, v.pos.x, ty, v.pos.z)) {
               const to = { x: v.pos.x, y: ty, z: v.pos.z };
               if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 0.9 });
-              if (CBZ.sfx) CBZ.sfx("shoot_smg");
+              // a drive-by two blocks over reads as distant ambience, not in-ear
+              if (CBZ.gunVoice) CBZ.gunVoice("smg", CBZ.player ? Math.hypot(from.x - CBZ.player.pos.x, from.z - CBZ.player.pos.z) : 0);
+              else if (CBZ.sfx) CBZ.sfx("shoot_smg");
               const dd = Math.hypot(v.pos.x - db.x, v.pos.z - db.z, ty - from.y);   // true 3D gap
               if (rng() < Math.max(0.18, 0.62 - dd * 0.02)) {
                 const dmg = 10 + rng() * 9;

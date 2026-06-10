@@ -22,7 +22,7 @@ const path = require("path");
 const wsmini = require("./wsmini");
 
 const ROOT = path.dirname(__dirname); // repo root
-const CFG_PATH = path.join(__dirname, "server.json");
+const CFG_PATH = process.env.CBZ_CONFIG || path.join(__dirname, "server.json");
 
 const DEFAULT_CFG = {
   name: "Cell Block Z RP",
@@ -32,6 +32,14 @@ const DEFAULT_CFG = {
   adminPass: "",
   maxPlayers: 16,
   port: 8000,
+  // RP roles players pick at the door — edit freely (DarkRP-style data, not code)
+  roles: [
+    { id: "civ", label: "Civilian" },
+    { id: "police", label: "Police" },
+    { id: "ems", label: "Paramedic" },
+    { id: "taxi", label: "Taxi Driver" },
+    { id: "crook", label: "Crook" },
+  ],
   // Optional: URL of a directory server to announce to (see server/directory.js)
   directory: "",
   // Optional: the public URL players use to reach this server (for directory listings)
@@ -106,6 +114,7 @@ function info() {
     name: cfg.name,
     motd: cfg.motd,
     tags: cfg.tags,
+    roles: cfg.roles,
     players: players.size,
     maxPlayers: cfg.maxPlayers,
     passworded: !!cfg.password,
@@ -223,7 +232,8 @@ function onConnection(conn, req) {
       }
       let name = sanitizeName(m.name);
       while ([...players.values()].some((q) => q.name === name)) name += "_";
-      p = { id: nextId++, name, conn, admin: false, joinedAt: Date.now() };
+      const role = (cfg.roles || []).some((r) => r.id === m.role) ? m.role : ((cfg.roles && cfg.roles[0] && cfg.roles[0].id) || "civ");
+      p = { id: nextId++, name, role, conn, admin: false, joinedAt: Date.now() };
       players.set(p.id, p);
       // first player in becomes the world simulator; tell everyone about them
       if (hostId == null) hostId = p.id;
@@ -232,11 +242,11 @@ function onConnection(conn, req) {
         id: p.id,
         hostId,
         server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers },
-        players: [...players.values()].filter((q) => q.id !== p.id).map((q) => ({ id: q.id, name: q.name })),
+        players: [...players.values()].filter((q) => q.id !== p.id).map((q) => ({ id: q.id, name: q.name, role: q.role })),
       });
       // the host is an admin on their own server
       if (p.id === hostId) p.admin = true;
-      broadcast({ t: "join", id: p.id, name: p.name }, p.id);
+      broadcast({ t: "join", id: p.id, name: p.name, role: p.role }, p.id);
       console.log(`[server] join #${p.id} ${p.name} (${players.size} online)`);
       return;
     }
