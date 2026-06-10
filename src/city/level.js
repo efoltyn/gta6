@@ -144,12 +144,21 @@
   };
 
   // ---- tag colour: the read keeps its allegiances --------------------------
+  // PERF: gang colours are fixed config — resolve the hex string ONCE per gang
+  // id instead of a .find() + string build per gang ped per 0.33s sweep.
+  const _gangCol = {};
   function colorFor(a) {
     if (a.kind === "cop") return "#8fc1ff";
     if (a.bounty > 0) return "#ff6a5e";                 // wanted blood-red
-    if (a.gang && CBZ.CITY && CBZ.CITY.gangs) {
-      const def = CBZ.CITY.gangs.find((x) => x.id === a.gang);
-      if (def) return "#" + ("000000" + ((def.color >>> 0).toString(16))).slice(-6);
+    if (a.gang) {
+      let c = _gangCol[a.gang];
+      if (c === undefined && CBZ.CITY && CBZ.CITY.gangs) {
+        c = null;
+        const defs = CBZ.CITY.gangs;
+        for (let i = 0; i < defs.length; i++) if (defs[i].id === a.gang) { c = "#" + ("000000" + ((defs[i].color >>> 0).toString(16))).slice(-6); break; }
+        _gangCol[a.gang] = c;
+      }
+      if (c) return c;
     }
     if (a.companion || a.recruited) return "#7ed957";   // yours
     return "#eef4ff";

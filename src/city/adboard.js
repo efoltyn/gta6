@@ -181,12 +181,19 @@
   };
 
   // ---- WEEKLY RENT TICK (the upkeep pattern: bank first, then cash) --------
+  // PERF: rent is a 60s clock — walking every board per FRAME just to bump a
+  // float is waste. Accumulate dt and sweep at ~4 Hz; lease timing is identical
+  // because the accumulated step is what's added.
+  let _rentAcc = 0;
   CBZ.onUpdate(30.8, function (dt) {
     if (g.mode !== "city") return;
+    _rentAcc += dt;
+    if (_rentAcc < 0.25) return;
+    const step = _rentAcc; _rentAcc = 0;
     const list = boards();
     for (const b of list) {
       const L = b.lease; if (!L) continue;
-      L.t += dt;
+      L.t += step;
       if (L.t < AD_WEEK) continue;
       L.t -= AD_WEEK;
       const due = L.per, bank = g.cityBank || 0;
@@ -217,7 +224,16 @@
       document.body.appendChild(chip);
     } catch (e) { chip = null; }
   }
-  function chipText(t) { dom(); if (!chip) return; if (!t) { chip.style.display = "none"; return; } chip.style.display = "block"; chip.textContent = t; }
+  // PERF: skip the DOM writes unless the text changed — re-setting the same
+  // textContent/display at the 12 Hz tick still dirties the DOM for nothing.
+  let _chipLast;
+  function chipText(t) {
+    if (t === _chipLast) return;
+    dom(); if (!chip) return;
+    _chipLast = t;
+    if (!t) { chip.style.display = "none"; return; }
+    chip.style.display = "block"; chip.textContent = t;
+  }
 
   // is the player standing at an elevator pad? The lift's [E] outranks ours.
   function liftNearby() {

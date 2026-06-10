@@ -17,6 +17,13 @@
    Routines: peds pick destinations (shop doors, benches, corners, home),
    route through intersections to cross, idle/chat in pairs, and duck into
    buildings. LOD + AI time-slicing keep the crowd cheap.
+
+   THE CITY KEEPS DIFFERENT HOURS: the street's CAST turns over with the
+   sun (CBZ.nightAmount — the one canonical clock the neon/windows already
+   ride). Off-screen civilians get re-dealt at the margins after each
+   dusk/dawn flip: tourists go in at night, dealers/crooks come out in the
+   projects, the core dresses up for the velvet rope, and the homeless
+   gather at their camp fires. Count never changes — only WHO is out.
 ============================================================ */
 (function () {
   "use strict";
@@ -512,6 +519,123 @@
       CBZ.cityPeds.push(ped);
     }
   }
+
+  // ============================================================
+  //  THE CITY KEEPS DIFFERENT HOURS — recast at the margins.
+  //  WHY: night just got a LOOK (neon, lit windows, camp fires), but if the
+  //  same tourists stroll the projects at 3am the fantasy dies. The street
+  //  has to TURN OVER: marks and witnesses go in, the predators and the
+  //  party crowd come out, and the quiet quarters get genuinely dangerous —
+  //  which makes night the time to do crime and the core the place to flex.
+  //  Casting dials ONLY (archetype/job/wealth/aggr/_role) — never weapons,
+  //  state or count; the brain just reads the new person. Driven by the ONE
+  //  canonical sun clock (CBZ.nightAmount) through the same dusk/dawn
+  //  hysteresis the neon flips on (view.js: on >0.6, off <0.45).
+  // ============================================================
+  let _nightShift = false;
+  // the published flip: crowd.js (density/redistribution) and anyone else
+  // reads THIS instead of re-deriving thresholds — one clock, one flip.
+  CBZ.cityNightShift = function () { return _nightShift; };
+  // nearest homeless camp anchor (props.js fires/tents publish CBZ.cityCamps)
+  function campNear(x, z, maxd) {
+    const camps = CBZ.cityCamps; if (!camps || !camps.length) return null;
+    let best = null, bd = (maxd || 130) * (maxd || 130);
+    for (let c = 0; c < camps.length; c++) {
+      const dx = camps[c].x - x, dz = camps[c].z - z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = camps[c]; }
+    }
+    return best;
+  }
+  // the ONE velvet-rope club (buildings.js flags lot.building.club). Cached
+  // once found; club.js is never touched — we only read where its line forms.
+  let _clubA = null, _clubRope = null;
+  function clubRope(A) {
+    if (_clubA === A && _clubRope) return _clubRope;
+    if (A.shopLots) for (let i = 0; i < A.shopLots.length; i++) {
+      const c = A.shopLots[i].building && A.shopLots[i].building.club;
+      if (c && c.queue && c.queue.length) {
+        const s = c.queue[c.queue.length - 1];           // the back of the line
+        _clubA = A; _clubRope = { x: s.x, z: s.z };
+        return _clubRope;
+      }
+    }
+    return null;
+  }
+  // re-deal ONE civilian's casting dials for the current hour at its position.
+  // The day person is STASHED on first night-cast and restored exactly at
+  // dawn, so repeated flips never drift anyone's identity. Returns true if
+  // the cast changed. crowd.js also calls this when it promotes an ambient
+  // body to a real rig — every promotion is a new person stepping out of the
+  // mass, so the churn itself is what biases the street's mix by hour.
+  CBZ.cityRecastForHour = function (ped, r) {
+    r = r || rng;
+    if (!ped || ped.dead || ped.vendor || ped.gang || ped.companion || ped.controlled ||
+        ped.recruited || ped.vagrant || ped.isPlayer || ped.kind !== "civilian") return false;
+    if (ped.rage || ped.surrender || ped.state === "fight" || ped.state === "flee" ||
+        (ped.npcWanted | 0) || ped.bounty || ped._clubLine || ped._clubGoingIn) return false;
+    if (ped._castNight === _nightShift) return false;    // already cast for this phase
+    const A = CBZ.city && CBZ.city.arena;
+    const d = A && A.districtAt ? A.districtAt(ped.pos.x, ped.pos.z) : null;
+    if (_nightShift && !d) return false;                 // night cast needs a district read
+    ped._castNight = _nightShift;
+    // wipe the cached life so the new cast re-derives fresh (workplace, role,
+    // club-drip all key off who this person is NOW)
+    ped._role = null; ped._work = null; ped._snapAt = null; ped._stage = null; ped._dripKey = null;
+    if (!_nightShift) {
+      // DAWN: the night cast washes off — the saved daytime person comes back.
+      const dc = ped._dayCast;
+      if (dc) { ped.archetype = dc.archetype; ped.job = dc.job; ped.wealth = dc.wealth; ped.aggr = dc.aggr; ped._dayCast = null; }
+      return true;
+    }
+    // DUSK: stash the daytime person once, then deal the night cast by district.
+    if (!ped._dayCast) ped._dayCast = { archetype: ped.archetype, job: ped.job, wealth: ped.wealth, aggr: ped.aggr };
+    const ag = A0();
+    if (d.kind === "projects" || d.kind === "industrial") {
+      // the predators' shift: the street economy works nights, tempers run
+      // hotter, and pockets stay thin — walking here after dark is a RISK.
+      const x = r();
+      if (x < 0.20) { ped.archetype = "dealer"; ped.job = "slinging"; }
+      else if (x < 0.34) { ped.archetype = "hustler"; ped.job = "working an angle"; }
+      else if (x < 0.46) { ped.archetype = "tweaker"; ped.job = "chasing a fix"; }
+      ped.aggr = rollAggr((ag.meanCivilian != null ? ag.meanCivilian : 0.24) + 0.2, (ag.spreadCivilian || 0.2) + 0.08);
+      ped.wealth = Math.min(ped.wealth, 0.3);
+    } else if (d.kind === "core") {
+      // the party crowd: dressed-up money out under the neon, drifting toward
+      // the rope — fat marks, big drip, plenty of witnesses.
+      ped.wealth = Math.max(ped.wealth, 0.5 + r() * 0.35);
+      if (r() < 0.08) ped.archetype = "socialite";       // the rare night whale
+      ped.job = "out on the town";
+      if (r() < 0.4) ped._role = "clubgoer";             // heads for the velvet rope
+    } else {
+      // residential/commercial after dark: the daytime faces go IN. Tourists
+      // and socialites don't wander dark side streets — they become locals
+      // hurrying home, which is exactly what thins the herd of easy marks.
+      if (ped.archetype === "tourist" || ped.archetype === "socialite") { ped.archetype = "resident"; ped.job = "in for the night"; }
+    }
+    return true;
+  };
+  // ---- the MARGINS CHURN: a slow rolling pass that re-deals only OFF-SCREEN,
+  //      unengaged civilians (~4/s), so the whole street turns over within a
+  //      minute of a flip and nobody ever morphs in front of you. This is the
+  //      hourly dial — one hysteresis check per 0.8s tick, never per-frame. ----
+  let _hourT = 0, _hourScan = 0;
+  CBZ.onUpdate(34.6, function (dt) {
+    if (g.mode !== "city") return;
+    _hourT -= dt; if (_hourT > 0) return;
+    _hourT = 0.8;
+    const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
+    _nightShift = _nightShift ? n > 0.45 : n > 0.6;   // the neon's own dusk/dawn hysteresis
+    const peds = CBZ.cityPeds; if (!peds || !peds.length || !CBZ.camera) return;
+    const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
+    let done = 0, scanned = 0;
+    while (done < 3 && scanned < 24) {
+      const p = peds[_hourScan]; _hourScan = (_hourScan + 1) % peds.length; scanned++;
+      if (!p || p._parked || p.dead || p.inCar) continue;
+      const dx = p.pos.x - camx, dz = p.pos.z - camz;
+      if (dx * dx + dz * dz < VIS_D2) continue;       // in view → never recast where you can see
+      if (CBZ.cityRecastForHour(p, rng)) done++;
+    }
+  });
 
   CBZ.spawnCityPeds = function (n) {
     CBZ.clearCityPeds();
@@ -1444,6 +1568,18 @@
         return null;
       }
       case "panhandler": {
+        // AFTER DARK the homeless head HOME: begging dries up when the marks
+        // go in, so the camps (props.js fires/tents — CBZ.cityCamps) gather
+        // their people around the flames. Sells the night-time projects as a
+        // real place — and puts bodies exactly where the fires now glow.
+        if (_nightShift && ped.vagrant) {
+          const camp = campNear(ped.pos.x, ped.pos.z, 150);
+          if (camp) {
+            ped._beg = { x: camp.x, z: camp.z };
+            const a = rng() * 6.28, rr = 0.8 + rng() * (camp.r || 4);
+            return { x: camp.x + Math.cos(a) * rr, z: camp.z + Math.sin(a) * rr };
+          }
+        }
         // lingers near a busy spot (a shop door / plaza) and begs — barely moves.
         const spot = nearestLotKind(A, ped.pos.x, ped.pos.z, ["park"], 50)
           || (A.shopLots && A.shopLots.length ? A.shopLots[(rng() * A.shopLots.length) | 0] : null);
@@ -1459,6 +1595,16 @@
         // to keep an eye on the street. The reactive crime-response lives in think().
         const cop = nearestCop(ped.pos.x, ped.pos.z, 70);
         if (cop) return { x: cop.pos.x + (rng() - 0.5) * 10, z: cop.pos.z + (rng() - 0.5) * 10 };
+        return null;
+      }
+      case "clubgoer": {
+        // a night life (dealt by the hour-cast): drawn to the ONE velvet rope.
+        // club.js drafts its line from whoever stands near it, so steering
+        // dressed-up bodies to the rope makes the queue a NIGHT thing without
+        // club.js ever knowing the hour. Dawn washes the role off.
+        if (!_nightShift) { ped._role = null; return null; }
+        const rope = clubRope(A);
+        if (rope) return { x: rope.x + (rng() - 0.5) * 7, z: rope.z + (rng() - 0.5) * 7 };
         return null;
       }
       default: return null;     // commuter / vendor / dealer / junkie → schedule+brain

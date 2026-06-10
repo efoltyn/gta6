@@ -36,7 +36,8 @@
   const CASE_DOT = 0.82;     // tighter cone up close so the clerk's E ("Shop here") isn't stolen
 
   const S = { lot: null, gs: null, group: null, slots: [], built: false,
-              cur: null, prompt: null, lastTxt: "", cx: 0, cz: 0 };
+              cur: null, prompt: null, lastTxt: "", cx: 0, cz: 0,
+              arena: null, noLotArena: null };
 
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -289,18 +290,29 @@
   }
 
   // ---- find the lot + build once (self-healing, clubLot pattern) -------------
+  // PERF: the fallback lot scan is O(all lots) — fine ONCE, but this runs from a
+  // per-frame updater, so a city with no gun-store lot must not rescan forever.
+  // The gunstore stamp + arena.gunShopLot land synchronously at build
+  // (buildings.js), so one failed scan per arena is a true answer — remember it.
+  // An arena REBUILD (new run) also invalidates a previously-built wall: the old
+  // display group died with the old root, so tear down and rebuild on the new one.
   function ensure() {
-    if (S.built) return true;
     const arena = CBZ.city && CBZ.city.arena;
+    if (S.built) {
+      if (S.arena === arena) return true;
+      S.built = false; S.group = null; S.slots = []; S.cur = null; S.lot = null; S.gs = null;
+    }
     if (!arena || !econ() || !CBZ.buildActorWeapon) return false;
+    if (S.noLotArena === arena) return false;          // this city has no gun wall — answered once
     let lot = arena.gunShopLot || null;
     if (!(lot && lot.building && lot.building.gunstore)) {
       lot = null;
       const lots = arena.lots || [];
       for (let i = 0; i < lots.length; i++) { const L = lots[i]; if (L && L.building && L.building.gunstore) { lot = L; break; } }
+      if (!lot && lots.length) { S.noLotArena = arena; return false; }
     }
     if (!lot) return false;
-    S.lot = lot; S.gs = lot.building.gunstore;
+    S.lot = lot; S.gs = lot.building.gunstore; S.arena = arena;
     buildDisplays();
     S.built = true;
     return true;

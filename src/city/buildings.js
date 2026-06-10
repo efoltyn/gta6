@@ -217,6 +217,17 @@
     CBZ.cityDoorsReset && CBZ.cityDoorsReset();
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
+  // register an EXTERNAL pane (the jewelry display cases — city/jewelry.js) in
+  // the shared city-glass list, so bullets (cityShatterRay), blasts/crashes
+  // (cityShatter) and the new-run re-glaze (cityGlassReset) all treat it as the
+  // SAME real glass as every storefront — zero special-case shatter code
+  // downstream. Returns the live pane record (rec.shattered = "is it broken",
+  // rec.mesh = the pane) so the owner can watch it break and re-glaze on restock.
+  CBZ.cityRegisterGlass = function (group, lx, ly, lz, pw, ph, pd, ox, oz, o) {
+    const list = [];
+    addCityGlass(group, lx, ly, lz, pw, ph, pd, ox || 0, oz || 0, o || null, list);
+    return list[0] || null;
+  };
   // shard physics + crack-decal lifecycle (cheap; only works while any exist)
   CBZ.onAlways(9, function (dt) {
     // spider cracks: a cracked pane that is left alone re-heals (clears its
@@ -1992,7 +2003,7 @@
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;
     const placed = [], abandonedLots = [], homeLots = [];
-    let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null, gunLot = null;
+    let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null, gunLot = null, jewelryLot = null;
 
     // shuffle the shop list, then float the gameplay-critical trades to the
     // front so they ALWAYS get placed; the rest fill in only sometimes, leaving
@@ -2168,6 +2179,50 @@
             counter: { x: lot.cx + ccx, z: lot.cz + ccz, w: cw, d: cd, top: 1.2, tx: tgx, tz: tgz },
           };
         }
+        // ===== THE JEWELRY STORE — glass-case smash-and-grab (city/jewelry.js) =====
+        // The shell (door, counter, clerk, lit wall shelves) already exists; what
+        // the smash-and-grab needs is WHERE the four GLASS DISPLAY CASES stand.
+        // Stamp WORLD-frame anchors — two front cases flanking the entrance
+        // aisle, a mid-aisle feature island, and the back VAULT case behind the
+        // counter (the clerk's body shields it: front cases live in their gaze,
+        // the vault sits at their back) — each pre-clamped onto solid floor
+        // (stair strip + walls) exactly like the counter was, so jewelry.js does
+        // zero geometry math. The gunstore pattern, applied to ice.
+        if (shop.kind === "jewelry") {
+          jewelryLot = lot;
+          const inx = door.nx, inz = door.nz, tgx = -inz, tgz = inx;   // inward + wall-tangent units
+          const halfIn = (inx !== 0 ? w : d) / 2;
+          const halfTan = (inx !== 0 ? d : w) / 2;
+          const stairRight = b.hasStairs ? (-w / 2 + WT + b.stairW) : -1e9;
+          // door-relative depth + tangent → a world point clamped onto open floor
+          const caseAt = function (depth, lat, extra) {
+            let lx = inx * (depth - halfIn) + tgx * lat, lz = inz * (depth - halfIn) + tgz * lat;
+            lx = Math.min(w / 2 - WT - 0.9, Math.max(Math.max(-w / 2 + WT + 0.9, stairRight + 0.9), lx));
+            lz = Math.min(d / 2 - WT - 0.9, Math.max(-d / 2 + WT + 0.9, lz));
+            const c = { x: lot.cx + lx, z: lot.cz + lz };
+            if (extra) for (const k in extra) c[k] = extra[k];
+            return c;
+          };
+          const counterDepth = (ccx * inx + ccz * inz) + halfIn;       // counter, door-relative
+          // vault slides sideways off the clerk's post (counter tangent seat)
+          const vendLat = ccx * tgx + ccz * tgz;
+          const vaultLat = vendLat <= 0 ? Math.min(halfTan - 1.7, vendLat + 2.8)
+                                        : Math.max(-(halfTan - 1.7), vendLat - 2.8);
+          lot.building.jewelry = {
+            name: shop.name,
+            // the walkable interior footprint ("you're in the store")
+            bounds: { minX: lot.cx - w / 2 + WT, maxX: lot.cx + w / 2 - WT, minZ: lot.cz - d / 2 + WT, maxZ: lot.cz + d / 2 - WT },
+            tx: tgx, tz: tgz, inx, inz,
+            // tier 0 = street ice up front, tier 1 = the iced feature island,
+            // tier 2 = the VAULT case behind the counter (the jackpot pieces).
+            cases: [
+              caseAt(3.2, -1.7, { tier: 0 }),
+              caseAt(3.2, 1.7, { tier: 0 }),
+              caseAt(Math.max(4.6, Math.min(6.6, counterDepth - 2.6)), 0, { tier: 1 }),
+              caseAt(2 * halfIn - 1.4, vaultLat, { tier: 2, vault: true }),
+            ],
+          };
+        }
         // ===== THE VELVET CLUB — the city's one EXCLUSIVE nightclub =====
         // The single "bar" shop IS the marquee club: a velvet rope across the
         // door, a bouncer who stands just inside it, and a queue lane snaking
@@ -2292,6 +2347,7 @@
     city.luxuryLot = luxury;
     city.clubLot = clubLot;          // THE Velvet Club lot (city/club.js reads its .building.club)
     city.gunShopLot = gunLot;        // the walk-in armory lot (city/gunstore.js hangs the real stock here)
+    city.jewelryLot = jewelryLot;    // the smash-and-grab lot (city/jewelry.js stands the glass cases here)
   };
 
   // pick black or white text for the best contrast against a sign colour

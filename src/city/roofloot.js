@@ -241,7 +241,16 @@
       document.body.appendChild(chip);
     } catch (e) { chip = null; }
   }
-  function chipText(t) { dom(); if (!chip) return; if (!t) { chip.style.display = "none"; return; } chip.style.display = "block"; chip.textContent = t; }
+  // PERF: callers run at frame rate — skip the DOM writes (display + textContent
+  // dirty layout even with identical values) unless the text actually changed.
+  let _chipLast;
+  function chipText(t) {
+    if (t === _chipLast) return;
+    dom(); if (!chip) return;
+    _chipLast = t;
+    if (!t) { chip.style.display = "none"; return; }
+    chip.style.display = "block"; chip.textContent = t;
+  }
 
   // the un-cracked stash you're standing over (you must actually be ON the roof)
   function stashNear() {
@@ -255,6 +264,7 @@
   }
 
   let cracking = null;   // { st, t }
+  let _promptT = 0;      // ~12 Hz proximity-prompt clock (the pry-beat stays per-frame)
   CBZ.onUpdate(36.7, function (dt) {            // after elevators (36.6) so the lift/escape tags exist
     if (g.mode !== "city") { cracking = null; chipText(null); return; }
     const A = CBZ.city && CBZ.city.arena;
@@ -284,9 +294,15 @@
       if (cracking.t >= CRACK_T) { crackOpen(st); cracking = null; chipText(null); }
       return;
     }
+    // prompt scan at ~12 Hz, not frame rate — stashNear hypots every stash, and
+    // a walk-up prompt doesn't need 60 Hz reactions (the [E] handler re-checks).
+    _promptT += dt;
     if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-      const st = stashNear();
-      chipText(st ? (st.rich ? "[E] Crack the set's stash" : "[E] Crack the stash open") : null);
+      if (_promptT >= 1 / 12) {
+        _promptT = 0;
+        const st = stashNear();
+        chipText(st ? (st.rich ? "[E] Crack the set's stash" : "[E] Crack the stash open") : null);
+      }
     } else chipText(null);
   });
 

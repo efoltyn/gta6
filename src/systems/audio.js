@@ -500,8 +500,8 @@
     // busted, a mode switch ate the exit hook) the motor must not drone on.
     if (eng && performance.now() * 0.001 - engFed > 0.4) engineStop();
     // (REMOVED per user request: the global "you're wanted" police-siren loop that
-    // played + swelled as your stars rose. Always off now.)
-    stopAudioLoop("wanted");
+    // played + swelled as your stars rose. Always off now — the !playing branch
+    // above already stops it on state change; no per-frame stop needed.)
   }
 
   CBZ.initAudio = initAudio;

@@ -16,6 +16,11 @@
      move-along that waves the block off. WHY: the wanted ramp only lands if
      the baseline cop reads as a working officer — then 5★ feels like the
      SAME force turning on you, not drones spawning.
+   • 3★+ ROADBLOCKS: the city starts closing roads AHEAD of a fast-moving
+     suspect — two cruisers nose-to-nose across the lane, officers posted
+     behind the engine blocks. WHY: stars used to just mean MORE cops chasing
+     the same way; real escalation changes the SHAPE of the pressure (and
+     makes rooftops/lifts matter as escape routes when the streets shut).
 
    Targets are chosen by threat: each cop locks the nearest high-priority
    offender (you or an NPC). cop.npcTarget points at the ped it's hunting
@@ -478,10 +483,10 @@
     stopShow();
   });
 
-  // a roadblock cruiser + PIT chaser are real cars borrowed from vehicles.js; we
-  // only flag them here. The chopper is a cheap mesh w/ a sweeping spotlight.
-  let chopper = null, roadblockCD = 0, pitCD = 0;
-  const roadblocks = [];   // parked cruisers forming a wall; released when heat drops
+  // PIT chasers are real traffic cars borrowed from vehicles.js (only flagged
+  // here). The chopper is a cheap mesh w/ a sweeping spotlight. ROADBLOCK
+  // cruisers are the force's OWN pooled units — see the ROADBLOCK section.
+  let chopper = null, pitCD = 0;
 
   function makeCop(x, z, swat, ambient) {
     const ch = makeCharacter({
@@ -539,14 +544,15 @@
     carSuspects.length = 0;
     for (const c of pursuers) if (c && !c.dead && !c.player) { c._pursuit = false; c.ai = true; c.reckless = false; }
     pursuers.length = 0;
-    for (const c of roadblocks) if (c && !c.dead) { c._roadblock = 0; c.ai = true; c.abandoned = false; }
-    roadblocks.length = 0;
+    rbReset();    // drop wall colliders + dispose pooled cruiser/officer rigs (posted cops were in cityCops → already disposed above)
     if (typeof despawnChopper === "function") despawnChopper();
-    roadblockCD = 0; pitCD = 0;
+    pitCD = 0;
     dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
   };
 
-  function liveCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead) n++; return n; }
+  // posted roadblock officers don't count toward the response total: the wall is
+  // pressure AHEAD of you, layered ON TOP of the chase — it must never starve it.
+  function liveCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && !c._post) n++; return n; }
   function liveAmbient() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && c.ambient) n++; return n; }
   function liveSwat() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && c.swat) n++; return n; }
 
@@ -768,7 +774,7 @@
       const Pp = CBZ.player;
       let caller = null, cd = 55;
       for (const c of CBZ.cityCops) {
-        if (c.dead || c.gunstop || c.giveUp || c.swat || c._radioT > 0) continue;
+        if (c.dead || c.gunstop || c.giveUp || c.swat || c._radioT > 0 || c._post) continue;
         if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;
         const d = Math.hypot(c.pos.x - Pp.pos.x, c.pos.z - Pp.pos.z);
         if (d < cd) { cd = d; caller = c; }
@@ -801,18 +807,17 @@
       }
     } else if (have > total) {
       // retire surplus non-ambient cops when the heat is gone (never a cop who's
-      // mid gun-stop — let the stand-off resolve first)
-      for (const c of CBZ.cityCops) if (!c.dead && !c.ambient && !c.npcTarget && !c.gunstop && stars === 0) { c.giveUp = true; break; }
+      // mid gun-stop or posted at a wall — let those resolve/tear down first)
+      for (const c of CBZ.cityCops) if (!c.dead && !c.ambient && !c.npcTarget && !c.gunstop && !c._post && stars === 0) { c.giveUp = true; break; }
     }
 
-    // ---- vehicle responses to a DRIVING suspect (3★ PIT, 4★ roadblock) -------
+    // ---- vehicle responses to a DRIVING suspect (3★ PIT + 3★ roadblocks) ----
     const P = CBZ.player;
-    if (roadblockCD > 0) roadblockCD -= 1.1;
     if (pitCD > 0) pitCD -= 1.1;
     if (P && P.driving && P._vehicle && stars >= 3 && g.state === "playing") {
       if (pitCD <= 0) { pitCD = 4 + rng() * 3; tryPIT(P._vehicle, stars); }
-      if (stars >= 4 && roadblockCD <= 0) { roadblockCD = 12 + rng() * 6; tryRoadblock(P._vehicle, stars); }
     }
+    rbMaintain(stars, P);
   }
 
   // PIT: draft a real traffic car into a pursuit cruiser that rams a fleeing
@@ -862,47 +867,335 @@
     }
   }
 
-  // ROADBLOCK: park a couple of cruisers across the road ahead of the suspect's
-  // travel so they have to brake/swerve. Cheap: reuse parked traffic cars.
-  function tryRoadblock(targetCar, stars) {
-    if (!CBZ.cityNearestCar || !targetCar) return;
-    const A = CBZ.city.arena; if (!A) return;
-    // project ahead along the car's velocity to a point down the road
-    const vx = targetCar.v != null ? Math.sin(targetCar.heading || 0) : 0;
-    const vz = targetCar.v != null ? Math.cos(targetCar.heading || 0) : 1;
-    const ahead = 38;
-    const it = A.nearestIntersection(targetCar.pos.x + vx * ahead, targetCar.pos.z + vz * ahead);
-    if (!it) return;
-    const n = stars >= 5 ? 3 : 2;
-    let placed = 0;
-    for (let i = 0; i < n; i++) {
-      const car = CBZ.cityNearestCar(it.x, it.z, 70);
-      if (!car || car.player || car.dead || car._roadblock || car._pursuit) continue;
-      // perpendicular spread across the lane to form a wall
-      const off = (i - (n - 1) / 2) * 3.2;
-      const px = it.x + (-vz) * off, pz = it.z + (vx) * off;
-      car.pos.x = px; car.pos.z = pz; car.v = 0; car.baseV = 0;
-      car.heading = Math.atan2(-vz, vx); // park sideways across the road
-      car.group.position.set(px, 0, pz);
-      car.group.rotation.y = car.heading;
-      car._roadblock = CBZ.now; car.npcDriver = null; car.ai = false; car.abandoned = true; car.v = 0;
-      roadblocks.push(car);
-      // a cop crouches at each car for cover-fire
-      CBZ.citySpawnCop && CBZ.citySpawnCop(px + (rng() - 0.5) * 2, pz + (rng() - 0.5) * 2, stars >= 4 && rng() < 0.5);
-      placed++;
-    }
-    if (placed && CBZ.city && CBZ.city.note) CBZ.city.note("🚧 ROADBLOCK ahead!", 1.4);
+  // ============================================================
+  //  ROADBLOCK (3★+) — the city closes the road AHEAD of you.
+  //  WHY: more stars used to just mean MORE cops chasing the same way. Real
+  //  escalation changes the SHAPE of the pressure: at 3★ the force starts
+  //  staging walls down your travel line — the iconic moment of cresting a
+  //  hill into two cruisers nosed together with officers behind the hoods.
+  //  It also makes rooftops/lifts matter: when the streets close, going UP
+  //  becomes the smart escape.
+  //
+  //  Mechanics, all pooled (we're draw-call bound):
+  //  • While you're DRIVING fast at 3★+, every 45-80s ONE wall is staged
+  //    120-200u ahead on the road you're running: 2 police cruisers (the
+  //    force's OWN cars, built once and reused) angled nose-to-nose across
+  //    the lane, light bars flashing, + 3-4 officers posted standing-aim
+  //    behind the engine blocks (no crouch pose exists in the rig).
+  //  • Each parked cruiser registers a TEMPORARY collider (markCollidersDirty)
+  //    so nobody ghosts the wall on foot. The collider dies with the parking
+  //    spot: rammed aside / stolen / wrecked → dropped immediately — and when
+  //    the suspect comes in HOT we drop them up front and let the car-car
+  //    crash pass own the contact (cruisers are real cars: ramming through at
+  //    speed works, but those are engine blocks — your front end pays).
+  //  • Officers at the wall fire only inside ~40u with a true sightline —
+  //    it's a WALL, not a turret nest.
+  //  • Stars <3, suspect on foot/far/past the wall → cruisers light out and
+  //    drive off, cops mount up, and every record returns to the pool.
+  const RB = {
+    state: 0,                 // 0 idle · 1 staged · 2 leaving
+    armed: false, cd: 0,      // cadence (ticks down in maintain's 1.1s beat)
+    x: 0, z: 0, ux: 0, uz: 1, // wall centre + road direction (unit, pointing DOWNSTREAM of the suspect's travel)
+    cars: [], cops: [], cols: [],
+    carPool: [], copPool: [], // detached, reusable records — never rebuilt per staging
+    flashT: 0, leaveT: 0, age: 0,
+  };
+  const CRUISER_MODEL = { name: "Police Cruiser", value: 3200, color: 0x16181d, body: "sedan", designStyle: "malibu" };
+  let rbM = null;             // shared light-bar/livery mats + ONE unit cube (built once, never disposed)
+  function rbMats() {
+    if (rbM) return rbM;
+    function bm(color) { const m = new THREE.MeshBasicMaterial({ color }); m._shared = true; return m; }
+    const white = new THREE.MeshLambertMaterial({ color: 0xe9edf2 }); white._shared = true;
+    rbM = { red: bm(0xff2d3e), blue: bm(0x2d6bff), dark: bm(0x101216), white, geo: new THREE.BoxGeometry(1, 1, 1) };
+    rbM.geo._shared = true;
+    return rbM;
   }
-  // when the heat clears, hand roadblock cars back to ambient traffic
-  function releaseRoadblocks() {
-    for (let i = roadblocks.length - 1; i >= 0; i--) {
-      const c = roadblocks[i];
-      if (!c || c.dead) { roadblocks.splice(i, 1); continue; }
-      c._roadblock = 0; c.ai = true; c.abandoned = false; c.baseV = Math.max(4, (TR_cruise() * 0.7));
-      roadblocks.splice(i, 1);
-    }
+  // turn a plain black sedan into a black-and-white: white door panels + a roof
+  // bar whose red/blue halves FLASH by visibility flip (zero material churn).
+  function rbDecorate(c) {
+    if (c._rbBar) return;
+    const M = rbMats();
+    const h = (c.dims && c.dims.height) || 1.55, w = (c.dims && c.dims.width) || 1.9;
+    const bar = new THREE.Group();
+    const base = new THREE.Mesh(M.geo, M.dark); base.scale.set(1.2, 0.09, 0.32); bar.add(base);
+    const red = new THREE.Mesh(M.geo, M.red); red.scale.set(0.52, 0.14, 0.28); red.position.set(-0.31, 0.1, 0); bar.add(red);
+    const blue = new THREE.Mesh(M.geo, M.blue); blue.scale.set(0.52, 0.14, 0.28); blue.position.set(0.31, 0.1, 0); bar.add(blue);
+    bar.position.set(0, h + 0.05, 0.12);
+    c.group.add(bar);
+    [1, -1].forEach((s) => {
+      const door = new THREE.Mesh(M.geo, M.white);
+      door.scale.set(0.05, 0.6, 1.2);
+      door.position.set(s * (w / 2 + 0.015), 0.98, 0.25);
+      c.group.add(door);
+    });
+    c._rbBar = { red, blue, phase: (Math.random() * 2) | 0 };
   }
-  function TR_cruise() { try { const t = CBZ.CITY.traf; return (t && t.cruise && t.cruise[1]) || 10; } catch (e) { return 10; } }
+  function rbDispose(grp) {   // same dispose discipline as clearCityCops/clearCars
+    if (!grp) return;
+    if (grp.parent) grp.parent.remove(grp);
+    grp.traverse(function (o) {
+      if (o.isSprite) return;   // sprites share an r128 geometry singleton — never dispose
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
+      const m = o.material;
+      if (Array.isArray(m)) m.forEach((x) => { if (x && !x._shared && x.dispose) x.dispose(); });
+      else if (m && !m._shared && m.dispose) m.dispose();
+    });
+  }
+  // a cruiser is only worth re-pooling if it's still a presentable police unit
+  function rbCarUsable(c) {
+    return !!(c && !c.dead && !c.player && !c._exploded && !c._onFire &&
+      (c.crumple || 0) < 0.55 && (c.engineHp == null || c.engineHp > 35));
+  }
+  // fresh unit next staging: back out the crumple/engine state a survivable
+  // block picked up (same fields crumpleCar/damageEngine wrote).
+  function rbRestoreCar(c) {
+    c.crumple = 0; c._cside = null; c.group.scale.set(1, 1, 1);
+    const ud = c.group.userData, base = ud && ud.crashBase;
+    if (base) {
+      if (ud.body) { ud.body.rotation.set(0, 0, 0); ud.body.position.y = base.bodyY; ud.body.position.z = base.bodyZ; ud.body.scale.set(1, 1, 1); }
+      if (ud.cabin) { ud.cabin.rotation.set(0, 0, 0); ud.cabin.position.y = base.cabinY; ud.cabin.position.z = base.cabinZ; ud.cabin.scale.set(1, 1, 1); }
+    }
+    c.engineHp = null; c._smoking = false; c.wreckT = 0; c.spin = 0;
+    c.v = 0; c.vx = 0; c.vz = 0; c.group.rotation.set(0, c.heading || 0, 0);
+  }
+  // pull an officer for the wall: pooled rig first (reposition + reset), else a
+  // fresh makeCop. Always a real record in CBZ.cityCops so damage/death/disarm
+  // and the corpse flow all just work.
+  function rbCop(x, z, swat) {
+    const A = CBZ.city.arena; if (!A) return null;
+    let c = null;
+    while (RB.copPool.length && !c) { const r = RB.copPool.pop(); if (r && !r.dead && !r.culled) c = r; }
+    if (c) {
+      c.pos.set(x, 0, z);
+      c.hp = c.swat ? 160 : 110; c.dead = false; c.deadT = 0; c.culled = false;
+      c.state = "patrol"; c.giveUp = false; c.searchT = 0; c.curTarget = null; c.npcTarget = null;
+      c.arrestT = 0; c._radioT = 0; c._duty = null; c.sees = false; c.retarget = 0; c.lostT = 0;
+      c._gunLowered = false; c._gunHidden = false; c.chaseCar = null; c._coverT = 0;
+      if (c.tag) c.tag.visible = true;
+    } else c = makeCop(x, z, swat, false);
+    A.root.add(c.group);
+    if (CBZ.cityCops.indexOf(c) < 0) CBZ.cityCops.push(c);
+    return c;
+  }
+  // release a posted officer: alive + settled → detach into the pool; dead or
+  // mid-ragdoll → leave him to the world (corpse flow / normal response logic).
+  function rbDetachCop(c) {
+    c._post = null; c.sees = false; c.curTarget = null;
+    if (c.dead || (CBZ.body && CBZ.body.busy && CBZ.body.busy(c))) { c.retarget = 0.5; return; }
+    const i = CBZ.cityCops.indexOf(c); if (i >= 0) CBZ.cityCops.splice(i, 1);
+    if (c.group.parent) c.group.parent.remove(c.group);
+    if (RB.copPool.length < 4) RB.copPool.push(c);
+    else rbDispose(c.group);
+  }
+  function rbDropCol(i) {
+    const col = RB.cols[i];
+    const k = CBZ.colliders.indexOf(col); if (k >= 0) CBZ.colliders.splice(k, 1);
+    RB.cols.splice(i, 1);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function rbDropCols() { for (let i = RB.cols.length - 1; i >= 0; i--) rbDropCol(i); }
+
+  // stage the wall 120-200u DOWN THE ROAD the suspect is actually running —
+  // snapped to the street's centre-line and kept out of the intersection box so
+  // it reads as a deliberate wall, not parked cross-traffic.
+  function rbStage(stars) {
+    const A = CBZ.city.arena, P = CBZ.player;
+    if (!A || !P || !P.driving || !P._vehicle || P._vehicle.dead || !A.xLines) return false;
+    const car = P._vehicle;
+    const dx = car.vx || 0, dz = car.vz || 0;
+    if (Math.hypot(dx, dz) < 9) return false;          // only a suspect RUNNING gets a wall
+    const ROAD = A.ROAD || 9, D = 120 + rng() * 80;
+    let bx, bz, ux, uz;
+    if (Math.abs(dx) >= Math.abs(dz)) {
+      // running a cross-street (along x): same street, projected ahead
+      let zl = A.zLines[0]; for (const v of A.zLines) if (Math.abs(v - P.pos.z) < Math.abs(zl - P.pos.z)) zl = v;
+      if (Math.abs(zl - P.pos.z) > ROAD) return false; // off-grid (bridge/island/lot) — no street to close
+      const s = dx > 0 ? 1 : -1;
+      bx = Math.max(A.minX + 14, Math.min(A.maxX - 14, P.pos.x + s * D));
+      let xl = A.xLines[0]; for (const v of A.xLines) if (Math.abs(v - bx) < Math.abs(xl - bx)) xl = v;
+      if (Math.abs(bx - xl) < ROAD / 2 + 6) bx = xl + s * (ROAD / 2 + 6);
+      if (bx < A.minX + 10 || bx > A.maxX - 10) bx = xl - s * (ROAD / 2 + 6);   // last intersection: set up on the NEAR side, not in the perimeter wall
+      if ((bx - P.pos.x) * s < 80) return false;       // map edge clamped it too close — no crest, no drama
+      bz = zl; ux = s; uz = 0;
+    } else {
+      // running an avenue (along z)
+      let xl = A.xLines[0]; for (const v of A.xLines) if (Math.abs(v - P.pos.x) < Math.abs(xl - P.pos.x)) xl = v;
+      if (Math.abs(xl - P.pos.x) > ROAD) return false;
+      const s = dz > 0 ? 1 : -1;
+      bz = Math.max(A.minZ + 14, Math.min(A.maxZ - 14, P.pos.z + s * D));
+      let zl = A.zLines[0]; for (const v of A.zLines) if (Math.abs(v - bz) < Math.abs(zl - bz)) zl = v;
+      if (Math.abs(bz - zl) < ROAD / 2 + 6) bz = zl + s * (ROAD / 2 + 6);
+      if (bz < A.minZ + 10 || bz > A.maxZ - 10) bz = zl - s * (ROAD / 2 + 6);   // last intersection: near side, never in the perimeter wall
+      if ((bz - P.pos.z) * s < 80) return false;
+      bx = xl; ux = 0; uz = s;
+    }
+    const lx = -uz, lz = ux;                            // lateral, across the lane
+    // ---- 2 cruisers, noses kissing mid-lane, the V pointed back at you ----
+    for (let k = 0; k < 2; k++) {
+      const side = k === 0 ? -1 : 1;
+      const cx = bx + lx * side * 2.5 + ux * 0.8, cz = bz + lz * side * 2.5 + uz * 0.8;
+      const heading = Math.atan2(-ux * 0.8 - lx * side, -uz * 0.8 - lz * side);
+      let c = null;
+      while (RB.carPool.length && !c) { const r = RB.carPool.pop(); if (rbCarUsable(r)) c = r; else rbDispose(r.group); }
+      if (c) { CBZ.cityCars.push(c); A.root.add(c.group); }
+      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, CRUISER_MODEL, 0) : null; if (c) rbDecorate(c); }
+      if (!c) { rbAbort(); return false; }
+      c.pos.set(cx, 0, cz); c.heading = heading;
+      c.group.position.set(cx, 0, cz); c.group.rotation.set(0, heading, 0);
+      c.ai = false; c.player = false; c.stolen = false; c.npcDriver = null; c.road = null;
+      c.v = 0; c.vx = 0; c.vz = 0; c.baseV = 0; c.reckless = false; c._pursuit = false;
+      c._roadblock = CBZ.now; c._rbLeave = 0;
+      RB.cars.push(c);
+      // TEMPORARY collider over the parked hull — on-foot actors can't ghost the
+      // wall. It dies with the parking spot (see rbUpdate), never outlives it.
+      const col = { minX: cx - 2.0, maxX: cx + 2.0, minZ: cz - 2.0, maxZ: cz + 2.0, ref: c.group, noCam: true, _rb: c, _px: cx, _pz: cz };
+      CBZ.colliders.push(col); RB.cols.push(col);
+    }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // ---- 3-4 officers posted behind the engine blocks (5★ posts NOOSE bodies
+    //      behind the same cruisers — heavier line, same pooled cars) ----
+    const lanes = stars >= 4 ? [-3.2, -1.1, 1.1, 3.2] : [-2.6, 0, 2.6];
+    for (let k = 0; k < lanes.length; k++) {
+      const c = rbCop(bx + ux * 3.6 + lx * lanes[k], bz + uz * 3.6 + lz * lanes[k], stars >= 5);
+      if (!c) continue;
+      c._post = { x: c.pos.x, z: c.pos.z, fx: -ux, fz: -uz, mount: null, mountT: 0 };
+      drawGun(c);
+      RB.cops.push(c);
+    }
+    RB.x = bx; RB.z = bz; RB.ux = ux; RB.uz = uz;
+    RB.state = 1; RB.age = 0; RB.flashT = 0;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("📻 \"All units — shut the street down ahead of him. Wall it off.\"", 2.0);
+    if (CBZ.sfx) CBZ.sfx("siren");
+    return true;
+  }
+  function rbAbort() {        // a half-staged wall is torn straight back down
+    rbDropCols();
+    for (const c of RB.cops.splice(0)) if (c) rbDetachCop(c);
+    for (const c of RB.cars.splice(0)) rbParkCar(c);
+    RB.state = 0;
+  }
+  function rbParkCar(c) {     // pull a cruiser record out of the live world, into the pool
+    if (!c) return;
+    c._roadblock = 0;
+    if (!rbCarUsable(c)) return;                        // stolen/wrecked unit stays in the world as-is
+    const i = CBZ.cityCars.indexOf(c); if (i >= 0) CBZ.cityCars.splice(i, 1);
+    if (c.group.parent) c.group.parent.remove(c.group);
+    rbRestoreCar(c);
+    if (RB.carPool.length < 2) RB.carPool.push(c);
+    else rbDispose(c.group);
+  }
+  // wall comes down: colliders die first (the cars are about to MOVE), cruisers
+  // light out down the closed road, officers jog to mount up.
+  function rbTeardown() {
+    if (RB.state !== 1) return;
+    rbDropCols();
+    RB.state = 2; RB.leaveT = 5;
+    for (const c of RB.cops) if (c && !c.dead && c._post) { c._post.mount = RB.cars.find(rbCarUsable) || null; c._post.mountT = 0; }
+    for (const c of RB.cars) if (rbCarUsable(c)) c._rbLeave = 0.9 + rng() * 0.8;   // a beat to load up, then roll
+  }
+  function rbLeaveTick(dt) {
+    RB.leaveT -= dt;
+    let rolling = false;
+    for (const c of RB.cars) {
+      if (!rbCarUsable(c)) continue;
+      if (c._rbLeave > 0) { c._rbLeave -= dt; rolling = true; continue; }
+      const want = Math.atan2(RB.ux, RB.uz);            // off DOWN the road they closed, lights still going
+      c.heading = lerpAngle(c.heading || 0, want, 1 - Math.pow(0.02, dt));
+      c.v = Math.min(13, (c.v || 0) + 9 * dt);
+      c.pos.x += Math.sin(c.heading) * c.v * dt;
+      c.pos.z += Math.cos(c.heading) * c.v * dt;
+      if (CBZ.collide) CBZ.collide(c.pos, 1.2);
+      if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, 1.2);
+      c.group.position.set(c.pos.x, 0, c.pos.z);
+      c.group.rotation.y = c.heading;
+      // keep rolling until clear of the PLAYER's eyes — never despawn on camera
+      if (RB.leaveT > 0 || Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) < 80) rolling = true;
+    }
+    if (!rolling || RB.leaveT <= -8) rbPark();
+  }
+  function rbPark() {
+    for (const c of RB.cops.splice(0)) if (c && c._post) rbDetachCop(c);   // stragglers mount up instantly
+    for (const c of RB.cars.splice(0)) rbParkCar(c);
+    RB.state = 0;
+    RB.cd = 38 + rng() * 30;    // next wall lands ~45-80s after this one went up
+  }
+  // cadence — runs on maintain's 1.1s beat. ONE wall citywide, ever.
+  function rbMaintain(stars, P) {
+    if (RB.state) return;
+    if (stars < 3) { RB.armed = false; return; }
+    if (!RB.armed) { RB.armed = true; RB.cd = 26 + rng() * 14; }   // first wall ~30s into a sustained chase
+    if (!P || !P.driving || !P._vehicle || g.state !== "playing") return;
+    RB.cd -= 1.1;
+    if (RB.cd <= 0 && !rbStage(stars)) RB.cd = 7;       // bad geometry (off-grid/edge) — retry shortly
+  }
+  // per-frame while a wall exists: flash the bars, keep colliders honest,
+  // hand a hot ram to the crash pass, and pull the trigger on teardown.
+  function rbUpdate(dt) {
+    if (!RB.state) return;
+    const P = CBZ.player, stars = g.wanted | 0;
+    RB.flashT += dt;
+    const ph = (RB.flashT * 6) | 0;
+    for (const c of RB.cars) if (c && c._rbBar && !c.player) {
+      const on = ((ph + c._rbBar.phase) & 1) === 0;
+      c._rbBar.red.visible = on; c._rbBar.blue.visible = !on;
+    }
+    if (RB.state === 2) { rbLeaveTick(dt); return; }
+    RB.age += dt;
+    // a cruiser knocked off its spot (rammed aside / stolen / wrecked) stops
+    // blocking — the collider dies with the parking spot, it NEVER goes stale.
+    for (let i = RB.cols.length - 1; i >= 0; i--) {
+      const c = RB.cols[i]._rb;
+      if (!c || c.dead || c.player || c.wreckT > 0 ||
+          Math.hypot(c.pos.x - RB.cols[i]._px, c.pos.z - RB.cols[i]._pz) > 1.2) rbDropCol(i);
+    }
+    // shoved cruisers still need to MOVE (ai=false cars skip the traffic loop):
+    // integrate the crash impulse the car-car pass gave them so they skid aside.
+    for (const c of RB.cars) {
+      if (!c || c.dead || c.player || !(c.wreckT > 0)) continue;
+      c.wreckT -= dt;
+      c.v = (c.v || 0) * Math.pow(0.04, dt);
+      c.spin = (c.spin || 0) * Math.pow(0.25, dt);
+      c.heading += c.spin * dt;
+      c.pos.x += Math.sin(c.heading) * c.v * dt;
+      c.pos.z += Math.cos(c.heading) * c.v * dt;
+      c.group.position.set(c.pos.x, 0, c.pos.z);
+      c.group.rotation.y = c.heading;
+    }
+    // suspect coming in HOT: drop the static boxes and let the car-car crash
+    // pass own the contact — the cruisers can be shoved, your front end pays.
+    if (P.driving && P._vehicle && RB.cols.length) {
+      const v = P._vehicle;
+      if (Math.hypot(v.vx || 0, v.vz || 0) > 9 && Math.hypot(v.pos.x - RB.x, v.pos.z - RB.z) < 18) rbDropCols();
+    }
+    // teardown: heat broke, suspect bailed on foot / got far / blew past the
+    // wall, or the wall went stale — pack up and roll out
+    const pdx = P.pos.x - RB.x, pdz = P.pos.z - RB.z, pd = Math.hypot(pdx, pdz);
+    const past = (pdx * RB.ux + pdz * RB.uz) > 26;
+    if (stars < 3 || P.dead || pd > 230 || past || (!P.driving && pd > 60) || RB.age > 60 || g.state !== "playing") rbTeardown();
+  }
+  // full reset (mode teardown): colliders out, pooled rigs disposed. Posted
+  // officers live in CBZ.cityCops, so clearCityCops' own loop disposes them.
+  function rbReset() {
+    rbDropCols();
+    for (const c of RB.cops) if (c) c._post = null;
+    RB.cops.length = 0;
+    for (const c of RB.cars) {
+      if (!c) continue;
+      c._roadblock = 0;
+      const i = CBZ.cityCars.indexOf(c);
+      if (i >= 0 && !c.player) { CBZ.cityCars.splice(i, 1); rbDispose(c.group); }
+      else if (i < 0) rbDispose(c.group);
+      // a player-driven cruiser stays: it's just a stolen car now
+    }
+    RB.cars.length = 0;
+    for (const c of RB.copPool) if (c) rbDispose(c.group);
+    RB.copPool.length = 0;
+    for (const c of RB.carPool) if (c) rbDispose(c.group);
+    RB.carPool.length = 0;
+    RB.state = 0; RB.armed = false; RB.cd = 0;
+  }
+  // the minimap/full map can flag the closed street ahead (a 🚧 with a bearing)
+  CBZ.cityRoadblockPos = function () { return RB.state === 1 ? { x: RB.x, z: RB.z } : null; };
 
   // pick the best target for a cop: the player (if wanted) or an NPC offender
   function chooseTarget(cop) {
@@ -969,6 +1262,39 @@
         const nearR = (c.pos.x - camx) * (c.pos.x - camx) + (c.pos.z - camz) * (c.pos.z - camz) < ANIM_D2;
         standIdle(c, lk ? Math.atan2(lk.x - c.pos.x, lk.z - c.pos.z) : c.group.rotation.y, dt, nearR);
         if (nearR) radioPose(c.char);
+        continue;
+      }
+      // ---- POSTED AT A ROADBLOCK: hold the slot behind the engine block, gun
+      //      up the street. A WALL, not a turret nest — fire only on a suspect
+      //      inside ~40u with a true sightline. On teardown each officer jogs
+      //      to the cruiser before the unit rolls (then returns to the pool).
+      if (c._post) {
+        const post = c._post;
+        const nearB = (c.pos.x - camx) * (c.pos.x - camx) + (c.pos.z - camz) * (c.pos.z - camz) < ANIM_D2;
+        if (!c.armed) drawGun(c);
+        if (c.shootCD > 0) c.shootCD -= dt;
+        if (RB.state === 2) {                                  // mounting up — the wall is leaving
+          post.mountT += dt;
+          const m = post.mount;
+          const mx = m && m.pos ? m.pos.x : RB.x, mz = m && m.pos ? m.pos.z : RB.z;
+          const mdx = mx - c.pos.x, mdz = mz - c.pos.z;
+          if (post.mountT > 2.2 || Math.hypot(mdx, mdz) < 2.0) { rbDetachCop(c); continue; }
+          stepTo(c, mdx, mdz, c.baseSpeed * 1.15, dt, nearB);
+          continue;
+        }
+        const hdx = post.x - c.pos.x, hdz = post.z - c.pos.z;
+        if (Math.hypot(hdx, hdz) > 0.8) { stepTo(c, hdx, hdz, c.baseSpeed, dt, nearB); continue; }
+        const pdx = P.pos.x - c.pos.x, pdz = P.pos.z - c.pos.z, pd = Math.hypot(pdx, pdz);
+        if (c._losCD == null) c._losCD = rng() * 0.25;
+        c._losCD -= dt;
+        if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = pd < 40 && !P.dead && losClear(c.pos.x, c.pos.z, P.pos.x, P.pos.z); }
+        c.sees = pd < 40 && !P.dead && stars >= 1 && !!c._losClear;
+        c.curTarget = c.sees ? CBZ.city.playerActor : null;    // feeds the aim pose + gun visibility
+        if (c.sees && c.shootCD <= 0) {
+          c.shootCD = (c.swat ? 0.2 : 0.55) + rng() * 0.3;
+          fireAt(c, CBZ.city.playerActor, pd);
+        }
+        standIdle(c, c.sees ? Math.atan2(pdx, pdz) : Math.atan2(post.fx, post.fz), dt, nearB);
         continue;
       }
       // stars out = guns out: the call is in, leather clears. (The 0★ holstering
@@ -1199,12 +1525,12 @@
 
     updateChopper(dt);
     updatePursuers(dt);
+    rbUpdate(dt);
     updateGunStop(dt);
     hideOccludedGuns(dt);
     copClock += dt;
     if (barkCD > 0) barkCD -= dt;
     scanDuty(dt);
-    if (stars === 0 && roadblocks.length) releaseRoadblocks();
   });
 
   // enter SEARCH mode aimed at the last-known position (GTA "?" investigate).
@@ -1252,6 +1578,13 @@
       const c = cops[i];
       if (c.dead || !c.armed) continue;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;   // ragdoll owns the rig
+      // posted at a roadblock: standing-aim up an OPEN street (no wall to clip
+      // through) — the drawn gun always shows, even before the 40u fire gate
+      if (c._post) {
+        c._gunHidden = false;
+        if (CBZ.syncActorWeapon && (!c._weaponProp || !c._weaponProp.visible)) CBZ.syncActorWeapon(c);
+        continue;
+      }
       // SHOW the gun only when he's actively a threat with a clear sightline; a
       // lowered (challenge) gun or a blind/patrolling cop carries it stowed so it
       // never clips through a building.

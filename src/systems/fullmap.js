@@ -687,9 +687,16 @@
     if (id != null && setGangWaypoint(id)) close();
   });
 
-  function updateGuide() {
+  let _guideT = 0, _guideRot = "", _guideDist = "", _guideLab = "";
+  function updateGuide(dt) {
     const wp = activeWaypoint();
     if (!guide) return;
+    // ~8Hz is plenty for a HUD compass — this used to run nav pathing + three
+    // DOM writes every frame, with the map closed, forever. Event-driven calls
+    // (waypoint set/cleared, map open/close) pass no dt and refresh NOW.
+    if (dt == null) _guideT = 0; else _guideT -= dt;
+    if (_guideT > 0) return;
+    _guideT = 0.125;
     guide.classList.toggle("show", !!wp && !map.active);
     if (!wp || !CBZ.player || !CBZ.player.pos) return;
     const nav = CBZ.navigation && CBZ.navigation.next(activeRoute(), CBZ.player.pos);
@@ -698,9 +705,12 @@
     const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
     const right = dx * Math.cos(yaw) - dz * Math.sin(yaw);
     const forward = -dx * Math.sin(yaw) - dz * Math.cos(yaw);
-    if (arrow) arrow.style.transform = "rotate(" + (Math.atan2(right, forward) * 180 / Math.PI).toFixed(1) + "deg)";
-    if (distEl) distEl.textContent = (nav ? Math.round(nav.remaining) : Math.round(Math.hypot(dx, dz))) + "m";
-    if (labelEl) labelEl.textContent = (nav ? nav.instruction + " - " : "") + (wp.label || "Waypoint");
+    const rot = "rotate(" + (Math.atan2(right, forward) * 180 / Math.PI).toFixed(1) + "deg)";
+    if (arrow && rot !== _guideRot) { arrow.style.transform = rot; _guideRot = rot; }
+    const ds = (nav ? Math.round(nav.remaining) : Math.round(Math.hypot(dx, dz))) + "m";
+    if (distEl && ds !== _guideDist) { distEl.textContent = ds; _guideDist = ds; }
+    const lab = (nav ? nav.instruction + " - " : "") + (wp.label || "Waypoint");
+    if (labelEl && lab !== _guideLab) { labelEl.textContent = lab; _guideLab = lab; }
   }
 
   function placeFromEvent(e) {
@@ -737,6 +747,6 @@
       reroute = 0;
       if (CBZ.navigation.offRoute(route, CBZ.player.pos) > 9) rebuildRoute(wp);
     }
-    updateGuide();
+    updateGuide(dt);
   });
 })();

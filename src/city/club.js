@@ -227,7 +227,9 @@
       if (!e.ped || e.ped.dead || !e.ped._clubLine || e.ped._clubGoingIn) S.line.splice(i, 1);
     }
     S.spawnT -= dt;
-    const want = Math.min(6, c.queue.length - 1);
+    // the rope is a NIGHT thing: a token couple of hopefuls by day, the full
+    // line only forms after dark (peds.js cityNightShift rides the sun clock).
+    const want = Math.min((CBZ.cityNightShift && CBZ.cityNightShift()) ? 6 : 2, c.queue.length - 1);
     if (S.line.length >= want) { reslot(); return; }
     if (S.spawnT > 0) return;
     S.spawnT = 1.4 + Math.random() * 1.2;

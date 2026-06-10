@@ -315,7 +315,17 @@
       document.body.appendChild(chip);
     } catch (e) { chip = null; }
   }
-  function chipText(t) { dom(); if (!chip) return; if (!t) { chip.style.display = "none"; return; } chip.style.display = "block"; chip.textContent = t; }
+  // PERF: callers run at frame rate (the ride ticker, the idle prompt) — skip
+  // the DOM writes unless the text actually changed; setting the same
+  // textContent/display every frame still dirties the DOM.
+  let _chipLast;
+  function chipText(t) {
+    if (t === _chipLast) return;
+    dom(); if (!chip) return;
+    _chipLast = t;
+    if (!t) { chip.style.display = "none"; return; }
+    chip.style.display = "block"; chip.textContent = t;
+  }
 
   function padNear() {
     const P = CBZ.player; if (!P) return null;
@@ -329,9 +339,12 @@
 
   function animRig(r, dt) {
     if (r.autoClose != null) { r.autoClose -= dt; if (r.autoClose <= 0) { r.autoClose = null; r.target = 0; } }
+    // PERF: doors at rest = leaves already sit at the pose — skip the per-leaf
+    // position writes (this runs per rig per frame, almost always idle).
+    if (r.open === r.target) return;
     const sp = 2.4 * dt;
     if (r.open < r.target) r.open = Math.min(r.target, r.open + sp);
-    else if (r.open > r.target) r.open = Math.max(r.target, r.open - sp);
+    else r.open = Math.max(r.target, r.open - sp);
     for (const L of r.leaves) {
       L.m.position.x = L.baseX + L.sx * 0.62 * r.open;
       L.m.position.z = L.baseZ + L.sz * 0.62 * r.open;
@@ -345,7 +358,7 @@
     if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P.pos);
   }
 
-  let shakeT = 0;
+  let shakeT = 0, _promptT = 0;
   CBZ.onUpdate(36.6, function (dt) {
     if (g.mode !== "city") { if (ride) { endRide(false); chipText(null); } return; }
     if (!built) { const A = CBZ.city && CBZ.city.arena; if (A && A.lots) buildAll(A); if (!built) return; }
@@ -355,10 +368,15 @@
 
     const P = CBZ.player;
     if (!ride) {
-      // proximity prompt
+      // proximity prompt at ~12 Hz, not frame rate — padNear hypots every lift
+      // pad, and the [E] handler re-checks reach on the actual press anyway.
+      _promptT += dt;
       if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-        const near = padNear();
-        chipText(near ? (near.up ? "[E] Elevator — ride to the roof" : "[E] Elevator — ride down") : null);
+        if (_promptT >= 1 / 12) {
+          _promptT = 0;
+          const near = padNear();
+          chipText(near ? (near.up ? "[E] Elevator — ride to the roof" : "[E] Elevator — ride down") : null);
+        }
       } else chipText(null);
       return;
     }

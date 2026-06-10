@@ -26,6 +26,18 @@
    district kind (bright tourist colour downtown, hi-vis/drab work gear
    on the industrial end) — per-instance colour on the SAME shared
    materials, zero new draw calls, total agent count unchanged.
+
+   THE CITY KEEPS DIFFERENT HOURS: night just got a LOOK (neon, lit
+   windows, camp fires) — the street has to TURN OVER with it or the
+   fantasy dies. After dusk (peds.js publishes the dusk/dawn flip off the
+   canonical CBZ.nightAmount sun clock) the crowd THINS to ~60% and
+   REDISTRIBUTES through a night-weighted draw: the core stays packed
+   (party-bright wardrobe headed for the neon + the velvet rope),
+   residential empties hard, the docks go dead — so the quiet quarters
+   become genuinely good places to do crime and bad places to be a
+   victim. All of it rides the EXISTING suppress/reseed machinery
+   (teleports far from the camera, a few per tick) — no meshes are ever
+   created or destroyed, and dawn reverses the whole thing.
 ============================================================ */
 (function () {
   "use strict";
@@ -44,10 +56,13 @@
   const SKINS = [0xf1c9a5, 0xe0a878, 0xc68642, 0x8d5524, 0xffdbac, 0xa66a3c];
   // 0-9: the everyday base palette. 10-14: BRIGHT tourist/money colours
   // (downtown casting). 15-18: hi-vis + drab canvas work gear (industrial).
-  // Plain hex values tinted per-instance — no new materials.
+  // 19-22: PARTY brights (hot pink/violet/cyan/cream) — the night-core
+  // going-out wardrobe, loud under the neon. Plain hex values tinted
+  // per-instance — no new materials.
   const SHIRTS = [0x3a6ea5, 0x9c3b3b, 0x4a7a44, 0xb8973f, 0x6a4a8a, 0x444a52, 0xb06a3a, 0x2f8a8a, 0xcfcfcf, 0x356b9a,
                   0xe8e4da, 0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0,
-                  0xe8821a, 0xc6d435, 0x4e453a, 0x5a5e52];
+                  0xe8821a, 0xc6d435, 0x4e453a, 0x5a5e52,
+                  0xff2e7a, 0xa44dff, 0x22d4c8, 0xf5e9da];
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
   // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads
   // moneyed (tourists in colour = walking wallets you can SEE), commercial
@@ -59,6 +74,39 @@
     industrial: [15, 16, 17, 18, 5, 6, 9],
     projects:   [5, 6, 17, 18, 1, 4],
   };
+  // after dark the core dresses for the rope: party brights, not daypacks.
+  const NIGHT_KIND_SHIRTS = { core: [19, 20, 21, 22, 14, 12] };
+
+  // ---- THE NIGHT FIELD ----
+  // Where the street lives by hour. Day density comes from world.js's
+  // pop-weighted draw; after dusk we draw from THIS table instead: the lit
+  // core packs out, residential empties hard, the docks go dead. The same
+  // numbers drive the turnover relocations, so the field self-corrects.
+  const NIGHT_KIND_W = { core: 4.6, commercial: 0.9, projects: 1.5, residential: 0.35, industrial: 0.12 };
+  const NIGHT_DENSITY = 0.6;              // the street holds ~60% of the day crowd after dark
+  const TURNOVER_FRAC = 0.5;              // share of the crowd reconsidered at each dusk/dawn flip
+  let nightShift = false;                 // local copy of peds.js's dusk/dawn flip (CBZ.cityNightShift)
+  let turnover = 0, _turnScan = 0;        // relocation budget + rolling cursor (spent in thin())
+  function nightNow() {
+    // peds.js owns the hysteresis flip off the ONE canonical sun clock
+    // (CBZ.nightAmount); fall back to the raw dusk threshold if it's absent.
+    return CBZ.cityNightShift ? CBZ.cityNightShift() : (CBZ.nightAmount == null ? 0 : CBZ.nightAmount) > 0.6;
+  }
+  // per-lot cumulative night weights, built once per arena (lots carry their
+  // stamped district quadrant; annex/island lots fall to a low filler weight).
+  let _ncA = null, _nc = null;
+  function nightCum(A) {
+    if (_ncA === A && _nc) return _nc;
+    _ncA = A;
+    const lots = A.lots, cum = new Float64Array(lots.length);
+    let t = 0;
+    for (let k = 0; k < lots.length; k++) {
+      const d = A.districts && typeof lots[k].district === "number" ? A.districts[lots[k].district] : null;
+      t += d && NIGHT_KIND_W[d.kind] != null ? NIGHT_KIND_W[d.kind] : 0.4;
+      cum[k] = t;
+    }
+    return (_nc = { cum, total: t });
+  }
 
   let root, wm = null;
   // full body + FACE so the city crowd reads as PEOPLE, not short faceless boxes —
@@ -164,18 +212,21 @@
     else { out.x = l.cx + off; out.z = l.cz + t; }
   }
   // a downtown walker strolls DOWNTOWN: most repicks stay in the walker's home
-  // district; the rest fall through to the city-wide pop-weighted draw, so a
+  // district; the rest fall through to the city-wide weighted draw, so a
   // little cross-district flow remains and the global density gradient holds.
   const STAY = 0.8;
-  // pickWaypoint(out)         → pop-weighted city-wide point (spawn/reseed)
-  // pickWaypoint(out, ax, az) → stroll target biased into (ax,az)'s district
-  function pickWaypoint(out, ax, az) {
+  // the city-wide draw for the CURRENT hour: pop-weighted by day, night-field
+  // weighted after dusk. ALL spawn/reseed/relocation positions come through
+  // here, so flipping ONE flag re-shapes where the whole street lives.
+  function drawPoint(out) {
     const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
-    if (ax !== undefined && A.districtAt && A.lots && Math.random() < STAY) {
-      const home = A.districtAt(ax, az);
-      const ls = home ? districtLots(A)[home.q] : null;
-      if (ls && ls.length) {
-        sidewalkOnLot(ls[(Math.random() * ls.length) | 0], out);
+    if (nightShift && A.lots && A.lots.length && A.districts) {
+      const nc = nightCum(A);
+      if (nc.total > 0) {
+        const x = Math.random() * nc.total;
+        let lo = 0, hi = nc.cum.length - 1;                    // binary-search the cum table
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (nc.cum[mid] < x) lo = mid + 1; else hi = mid; }
+        sidewalkOnLot(A.lots[lo], out);
         if (A.clampToCity) A.clampToCity(out, 0.6);
         return;
       }
@@ -184,13 +235,33 @@
     if (A.clampToCity) A.clampToCity(p, 0.6);
     out.x = p.x; out.z = p.z;
   }
+  // pickWaypoint(out)         → hour-weighted city-wide point (spawn/reseed)
+  // pickWaypoint(out, ax, az) → stroll target biased into (ax,az)'s district
+  function pickWaypoint(out, ax, az) {
+    const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
+    if (ax !== undefined && A.districtAt && A.lots && Math.random() < STAY) {
+      const home = A.districtAt(ax, az);
+      // AFTER DARK a dead quarter doesn't hold its walkers: a stroller in a
+      // night-dead district (residential/docks) usually heads for the lights
+      // instead of pacing an empty block, so the emptying reads as an exodus.
+      const deadHere = nightShift && home && (NIGHT_KIND_W[home.kind] == null || NIGHT_KIND_W[home.kind] < 0.5) && Math.random() < 0.65;
+      const ls = home && !deadHere ? districtLots(A)[home.q] : null;
+      if (ls && ls.length) {
+        sidewalkOnLot(ls[(Math.random() * ls.length) | 0], out);
+        if (A.clampToCity) A.clampToCity(out, 0.6);
+        return;
+      }
+    }
+    drawPoint(out);
+  }
   // cast the shirt for wherever this agent stands (district wardrobe above);
   // skin/hair stay city-wide. Used at spawn and when a body is recycled into
   // a NEW district (it walks in as a local, not a teleported stranger).
   function castTint(i, x, z) {
     const A = arena();
     const d = A && A.districtAt ? A.districtAt(x, z) : null;
-    const pool = d && KIND_SHIRTS[d.kind];
+    // night in the core dresses for the line — party brights under the neon
+    const pool = d && ((nightShift && NIGHT_KIND_SHIRTS[d.kind]) || KIND_SHIRTS[d.kind]);
     shirt[i] = pool ? pool[(Math.random() * pool.length) | 0] : ((Math.random() * 10) | 0);
   }
   function repaintShirt(i) {              // recolour one recycled body in-place
@@ -385,6 +456,11 @@
     ped.group.visible = true;
     ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0.2 + Math.random() * 0.6;
     setLook(ped, SKINS[skin[i]], SHIRTS[shirt[i]], HAIRS[hairC[i]]);
+    // every promotion is a NEW person stepping out of the mass — recast its
+    // dials for the hour + district it lands in (peds.js owns the table), so
+    // a body promoted at 3am in the projects walks in as a crook, not a
+    // tourist. Reset the phase stamp so the recast applies per-assignment.
+    if (CBZ.cityRecastForHour) { ped._castNight = void 0; CBZ.cityRecastForHour(ped, Math.random); }
   }
   function releaseAll() {
     if (!poolBuilt) return;
@@ -409,6 +485,10 @@
       // would banish a crowd-pool killer off-map and the kill-cam would orbit empty
       // space. Everyone else parks as usual.
       if (CBZ.game._citySpecTarget && ped === CBZ.game._citySpecTarget) continue;
+      // the velvet-rope LINE (club.js) drafts promoted crowd bodies like any
+      // other nearby civilian — never park one mid-queue, or the line holds a
+      // ghost slot pointing at an off-map body. It re-parks once released.
+      if (ped._clubLine || ped._clubGoingIn) continue;
       if (P.dead || P.driving || dx * dx + dz * dz > PROMO_OUT2) { promotedBy[i] = -1; park(e); }   // walked away → back to density
     }
     if (P.dead || P.driving) return;
@@ -435,6 +515,10 @@
       }
       if (best < 0) break;
       assign(e, s, best);
+      // ONE promotion per frame: filling every free slot in one frame is
+      // O(slots×agents) (worst ~18×360 sqrt scans after a mass release);
+      // refilling over ~0.3s instead is invisible at promotion distances.
+      break;
     }
   }
   // ---- AHEAD RESEED: bias density toward where the player is looking/heading ----
@@ -463,17 +547,17 @@
       const dn = Math.sqrt(d2) || 1;
       if ((dx / dn) * fx + (dz / dn) * fz > 0.2) continue;  // already roughly ahead → leave it
       // find a sidewalk point inside the forward ring (a few tries). The draw
-      // is POP-WEIGHTED, so what fills in ahead of you follows the district
-      // field: walk Midtown and the street ahead packs out; walk the Dockyard
-      // and most draws land elsewhere and fail the ring test — quiet STAYS
-      // quiet instead of magically filling because you looked at it.
+      // is HOUR-WEIGHTED (pop field by day, night field after dusk), so what
+      // fills in ahead of you follows the live district field: walk Midtown
+      // and the street ahead packs out; walk the Dockyard (or anywhere at
+      // 3am) and most draws land elsewhere and fail the ring test — quiet
+      // STAYS quiet instead of magically filling because you looked at it.
       for (let t = 0; t < 4; t++) {
-        const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(Math.random) : A.randomSidewalkPoint();
-        const rx = p.x - ppx, rz = p.z - ppz, rd = Math.hypot(rx, rz) || 1;
+        drawPoint(_tmp);
+        const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd = Math.hypot(rx, rz) || 1;
         if (rd < AHEAD_NEAR || rd > AHEAD_FAR) continue;
         if ((rx / rd) * fx + (rz / rd) * fz < AHEAD_DOT) continue;
-        if (A.clampToCity) A.clampToCity(p, 0.6);
-        px[i] = p.x; pz[i] = p.z;
+        px[i] = _tmp.x; pz[i] = _tmp.z;
         castTint(i, px[i], pz[i]); repaintShirt(i);   // recycled body dresses like a LOCAL
         pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
         heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
@@ -566,9 +650,18 @@
     _thinT -= dt; if (_thinT > 0) return;
     _thinT = 0.5;                                // re-evaluate ~twice a second (cheap)
     if (!CBZ.cityPopulation) return;
+    // ---- THE DUSK/DAWN FLIP (rides this 0.5s cadence — an hourly dial, never
+    //      per-frame). On a flip, arm a turnover budget: about half the crowd
+    //      gets reconsidered over the next ~30s so the street changes hands
+    //      gradually — the day people go in, the night people come out. ----
+    const wantNight = nightNow();
+    if (wantNight !== nightShift) { nightShift = wantNight; turnover = (count * TURNOVER_FRAC) | 0; }
     const pop = CBZ.cityPopulation();
     const frac = pop.total > 0 ? pop.alive / pop.total : 1;
-    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)));
+    // the night street holds fewer people OVERALL (~60% of day) on top of the
+    // finite-headcount fraction; dawn lifts the target back and the existing
+    // un-suppress path walks everyone back in.
+    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)) * (nightShift ? NIGHT_DENSITY : 1));
     const c = recountAgents();
     const P = CBZ.player;
     const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
@@ -600,6 +693,26 @@
           heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
         }
         add--;
+      }
+    }
+    // ---- TURNOVER: spend the dusk/dawn relocation budget, a few bodies per
+    //      tick. Each far, living, non-promoted agent gets teleport-reseeded
+    //      through the CURRENT hour's draw + re-dressed for where it lands —
+    //      the destination field is what shapes the street, so the same rule
+    //      works in both directions (dusk packs the core, dawn re-spreads).
+    //      Far-only, so the change always happens off-screen. ----
+    if (turnover > 0) {
+      let moved = 0, scanned = 0;
+      while (turnover > 0 && moved < 3 && scanned < 48) {
+        const i = _turnScan; _turnScan = (_turnScan + 1) % Math.max(1, count); scanned++;
+        if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) { turnover--; continue; }
+        const dx = px[i] - ppx, dz = pz[i] - ppz;
+        if (dx * dx + dz * dz < FAR2) { turnover--; continue; }   // in sight → it keeps walking; the draw fields still converge
+        drawPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
+        castTint(i, px[i], pz[i]); repaintShirt(i);               // walks on dressed for the hour
+        pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+        heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+        moved++; turnover--;
       }
     }
   }
