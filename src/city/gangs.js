@@ -746,17 +746,22 @@
           if (v && !v.dead) {
             db.shootCD = 0.22 + rng() * 0.18;
             const from = { x: db.x + Math.cos(db.heading) * 1.0, y: 1.3, z: db.z - Math.sin(db.heading) * 1.0 };
-            const to = { x: v.pos.x, y: v.isPlayer ? 1.55 : 1.3, z: v.pos.z };
-            if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 0.9 });
-            if (CBZ.sfx) CBZ.sfx("shoot_smg");
-            const dd = Math.hypot(v.pos.x - db.x, v.pos.z - db.z);
-            if (rng() < Math.max(0.18, 0.62 - dd * 0.02)) {
-              const dmg = 10 + rng() * 9;
-              if (v.isPlayer) { if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, db.x, db.z, "killed in a drive-by", false, db.gang.name, false); }
-              else {
-                v.hp -= dmg; v.alarmed = Math.max(v.alarmed || 0, 6);
-                if (v.hp <= 0) { if (CBZ.cityKillPed) CBZ.cityKillPed(v, { fromX: db.x, fromZ: db.z, byPlayer: false, force: 5, fling: 4 }, "drive-by"); }
-                else if (CBZ.body && CBZ.body.hit) CBZ.body.hit(v, { fromX: db.x, fromZ: db.z, force: 1.5 });
+            const ty = (v.pos.y || 0) + (v.isPlayer ? 1.55 : 1.3);   // victim's TRUE chest height
+            // a drive-by round needs a real line of fire too: a car on the street
+            // can't spray a target up on a roof or behind a building through the wall.
+            if (!CBZ.clearLineOfFire || CBZ.clearLineOfFire(from.x, from.y, from.z, v.pos.x, ty, v.pos.z)) {
+              const to = { x: v.pos.x, y: ty, z: v.pos.z };
+              if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 0.9 });
+              if (CBZ.sfx) CBZ.sfx("shoot_smg");
+              const dd = Math.hypot(v.pos.x - db.x, v.pos.z - db.z, ty - from.y);   // true 3D gap
+              if (rng() < Math.max(0.18, 0.62 - dd * 0.02)) {
+                const dmg = 10 + rng() * 9;
+                if (v.isPlayer) { if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, db.x, db.z, "killed in a drive-by", false, db.gang.name, false); }
+                else {
+                  v.hp -= dmg; v.alarmed = Math.max(v.alarmed || 0, 6);
+                  if (v.hp <= 0) { if (CBZ.cityKillPed) CBZ.cityKillPed(v, { fromX: db.x, fromZ: db.z, byPlayer: false, force: 5, fling: 4 }, "drive-by"); }
+                  else if (CBZ.body && CBZ.body.hit) CBZ.body.hit(v, { fromX: db.x, fromZ: db.z, force: 1.5 });
+                }
               }
             }
           }

@@ -195,7 +195,9 @@
     // reward
     if (m.cash && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(m.cash);
     if (m.respect && CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(m.respect);
-    if (CBZ.sfx) CBZ.sfx("win");
+    // (NO milestone jingle — user: remove all music from gang city. The big-text
+    // beat + cash/respect reward carry the moment; the "win" fanfare fired on
+    // every chapter beat — e.g. after a few extortions — which read as random music.)
     // a second beat: announce the new chapter rank
     if (m.chapter > 0) {
       const title = CHAPTERS[s.chapter];
@@ -225,7 +227,8 @@
     if (g.cityWon) return;
     g.cityWon = true;
     if (CBZ.doSlowmo) { try { CBZ.doSlowmo(0.45); } catch (e) {} }
-    if (CBZ.sfx) { try { CBZ.sfx("win"); } catch (e) {} }
+    // (no victory jingle either — user: remove all music from gang city. The
+    // slow-mo + 👑 banner + cash tribute still land the win.)
     if (CBZ.city && CBZ.city.big) CBZ.city.big("👑 YOU OWN THE CITY");
     const tribute = 50000;
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(tribute);

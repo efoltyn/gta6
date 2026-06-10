@@ -697,7 +697,7 @@
         armed: wasArmed,
         victim: ped.name || "civilian",
       };
-      CBZ.city && CBZ.city.addKill();
+      CBZ.city && CBZ.city.addKill(ped);   // pass the victim: respect scales with their LEVEL
       if (CBZ.cityCountMayhem) CBZ.cityCountMayhem();
       // BOUNTY CLAIMED: this ped was a wanted fugitive with a price on their head —
       // killing them (even by accident) pays out. The terrorist jackpot ($5M) can
@@ -809,7 +809,10 @@
     // ped vs ped
     tgt.hp -= dmg;
     tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
-    if (!tgt.rage && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back
+    // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
+    // (hands up / run), and returns whether this person DARES to fight back.
+    const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
+    if (!tgt.rage && dare && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back
     if (tgt.hp <= 0) CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
     else if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
@@ -861,24 +864,42 @@
 
   function npcAttack(att, tgt) {
     if (att.attackCD > 0 || !tgt || tgt.dead) return;
-    const d = Math.hypot(att.pos.x - tgt.pos.x, att.pos.z - tgt.pos.z);
-    if (att.armed && att.ammo > 0 && d < 26) {
-      // shoot
-      att.attackCD = 0.55 + rng() * 0.5; att.ammo--;
+    const dx = att.pos.x - tgt.pos.x, dz = att.pos.z - tgt.pos.z;
+    const dh = Math.hypot(dx, dz);                        // horizontal gap
+    if (att.armed && att.ammo > 0 && dh < 26) {
+      // aim first so the muzzle is oriented, then test a REAL line of fire from the
+      // muzzle to the target in 3D (angle + elevation + walls all count).
       if (CBZ.actorAimAt) CBZ.actorAimAt(att, tgt);
-      const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(att, tmp) : { x: att.pos.x, y: 1.4, z: att.pos.z };
-      const to = { x: tgt.pos.x, y: (tgt.isPlayer ? 1.55 : 1.3), z: tgt.pos.z };
+      const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(att, tmp) : { x: att.pos.x, y: (att.pos.y || 0) + 1.4, z: att.pos.z };
+      const ty = (tgt.pos.y || 0) + (tgt.isPlayer ? 1.5 : 1.3);
+      // NO clear line (a wall / roof edge / parapet sits between the muzzle and the
+      // target) → the bullet would hit COVER, not the target, so the NPC HOLDS FIRE
+      // instead of magically tagging you through geometry. THIS is what makes a
+      // rooftop or behind-cover position actually safe from a ground shooter —
+      // replacing the old "roll a dice by flat distance" hit that ignored LOS,
+      // elevation, and walls entirely.
+      if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y, from.z, tgt.pos.x, ty, tgt.pos.z)) {
+        att.attackCD = 0.25 + rng() * 0.3;               // brief beat, then re-check for a clean angle
+        return;
+      }
+      // clear line — take the real shot.
+      att.attackCD = 0.55 + rng() * 0.5; att.ammo--;
+      const to = { x: tgt.pos.x, y: ty, z: tgt.pos.z };
       if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.0 });
       else if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
       if (CBZ.sfx) CBZ.sfx("report");
-      const hit = rng() < Math.max(0.2, 0.8 - d * 0.025);
+      // accuracy falls off with the TRUE 3D distance (a long, steep up-shot is hard;
+      // a clean close line lands). LOS is already guaranteed above.
+      const d3 = Math.hypot(dh, to.y - from.y);
+      const hit = rng() < Math.max(0.15, 0.8 - d3 * 0.03);
       if (hit) hurtActor(att, tgt, 14 + rng() * 10, false);
-      // CROSSFIRE: a missed round (or rarely an over-penetrating hit) can catch a
-      // bystander near the line of fire. Only when a shot is actually fired.
+      // a round only catches a bystander when it actually traveled the lane (it had
+      // LOS); a blocked shot never fires, so there's no phantom crossfire behind cover.
       crossfire(att, tgt, !hit);
       if (att.ammo <= 0) { att.armed = false; att.weapon = null; if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(att); }
-    } else if (d < 2.4) {
-      // melee
+    } else if (dh < 2.4) {
+      // melee — needs a real reach: no clubbing a rooftop target from the street below.
+      if (Math.abs((tgt.pos.y || 0) - (att.pos.y || 0)) > 2.2) return;
       att.attackCD = 0.5 + rng() * 0.4;
       if (CBZ.sfx) CBZ.sfx("punch");
       hurtActor(att, tgt, 16 + rng() * 8, true);
@@ -1584,7 +1605,9 @@
       const grievance = host === 2 || prov > 0.3 || witnessedKill;   // a reason to start it
       const willMelee = ped.armed || (!playerArmed && ped.aggr >= (B.crook || 0.72));
       const odds = host === 2 ? 0.7 : 0.42;
-      if (grievance && willMelee && r < odds) {
+      // at WAR nobody backs down; a mere rival still sizes you up first
+      if (grievance && willMelee && r < odds &&
+          (host === 2 || !CBZ.citySizeUp || CBZ.citySizeUp(ped, CBZ.city.playerActor))) {
         ped.rage = CBZ.city.playerActor; ped.state = "fight"; ped.reactCD = 10;
         if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, host === 2 ? 0.3 : 0.15);
         citySayBark(ped, host === 2 ? pick(["Wrong block, opp!", "You're a dead man here.", "Light him up!"], rng())
@@ -1616,7 +1639,8 @@
     }
     // BEAT-DOWN: a crook with no gun fancies their chances against an UNARMED player
     // (won't melee-charge a drawn gun). Walks up, then throws hands.
-    if (ped.aggr >= (B.crook || 0.72) && !ped.armed && !playerArmed && r < 0.28 && dpl < 9) {
+    if (ped.aggr >= (B.crook || 0.72) && !ped.armed && !playerArmed && r < 0.28 && dpl < 9 &&
+        (!CBZ.citySizeUp || CBZ.citySizeUp(ped, CBZ.city.playerActor))) {
       ped.approach = "beat"; ped._approachT = 3.5; ped.reactCD = 8;
       citySayBark(ped, pick(["The hell you looking at?", "Wrong block, pal.", "You want some?"], rng()), 1.6);
       return true;
@@ -2184,6 +2208,8 @@
     return true;
   }
   CBZ.cityMarkGunpoint = markGunpoint;
+  CBZ.cityFleeFrom = fleeFrom;     // sizeup.js: outclassed peds break and run
+  CBZ.cityRallyGang = rallyGang;   // sizeup.js: hitting one ganger rallies the set
 
   // ============================================================
   //  GUNPOINT SWEEP (every frame, cheap) — give the WHOLE near crowd the jail's

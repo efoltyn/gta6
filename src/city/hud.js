@@ -126,6 +126,9 @@
       "  <div id='cTurfPay' class='cTurfPay' style='display:none'></div>" +
       "  <div id='cStarsWrap' style='display:none;margin-top:4px;padding:2px 8px;border-radius:8px;background:rgba(8,11,17,.5)'><span id='cStars' style='font-size:23px;letter-spacing:3px'></span></div>" +
       "  <div id='cCrew' style='font-size:13px;color:#9fb0c6;margin-top:3px'></div>" +
+      // YOUR street read (level.js): the same LEVEL N the city floats over
+      // everyone else's head, derived live from worth/heat/crew/bodies.
+      "  <div id='cLvl' style='font-size:14px;font-weight:800;color:#fff;letter-spacing:1px;margin-top:2px;text-shadow:0 1px 3px rgba(0,0,0,.6)'></div>" +
       // DRIP readout — your visible STATUS (CBZ.cityPlayerDrip): the club's gate.
       // Tints green once you clear CLUB_DRIP, gold at VIP. Self-hides if drip is
       // unavailable. Teaches the player that dressing up (clothes) opens the rope.

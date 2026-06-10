@@ -214,8 +214,8 @@
     if (inMyGang) {
       const opts = [];
       opts.push({ label: (p.rank === "lt" ? nm + " (Lieutenant)" : "Promote " + nm + " → Lt."), key: "i", fn: () => (p.rank === "lt" ? talk() : CBZ.cityPlayerGangPromote(p)) });
-      opts.push({ label: "Tell " + nm + " to HOLD here", key: "j", fn: () => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.homeGuard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); CBZ.city.note(nm + " holds this spot.", 1.6); } } });
-      opts.push({ label: nm + " FOLLOW me", key: "k", fn: () => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm + " falls in.", 1.4); } });
+      opts.push({ label: nm + ", hold this corner", key: "j", fn: () => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.homeGuard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); CBZ.city.note(nm + " holds this spot.", 1.6); } } });
+      opts.push({ label: nm + ", roll with me", key: "k", fn: () => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm + " falls in.", 1.4); } });
       opts.push({ label: "Talk to " + nm, key: "l", fn: talk });
       return cap4(opts);
     }
@@ -233,8 +233,8 @@
     const memb = myMemb();
     if (memb && p.gang && p.gang === memb.gangId) {
       const opts = [];
-      opts.push({ label: "Beat " + nm + " down", key: "i", bad: true, fn: () => attack(p) });   // a malicious option always exists
-      opts.push({ label: "Put in WORK with " + nm, key: "j", fn: () => prospectOrWork(p) });
+      opts.push({ label: "Swing on " + nm, key: "i", bad: true, fn: () => attack(p) });   // a malicious option always exists
+      opts.push({ label: "Put in work with " + nm, key: "j", fn: () => prospectOrWork(p) });
       // relationship verb over plain Talk: do a crew-mate a favor to build standing
       if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor)
         opts.push({ label: "Do " + nm + " a favor 🤝", key: "k", fn: () => CBZ.cityDoFavor(p) });
@@ -245,7 +245,7 @@
     }
 
     const opts = [{ label: "Mug " + nm, key: "i", bad: true, fn: () => mug(p) }];
-    opts.push({ label: "Beat " + nm + " down", key: "j", bad: true, fn: () => attack(p) });
+    opts.push({ label: "Swing on " + nm, key: "j", bad: true, fn: () => attack(p) });
     if (p === g.cityPartner) opts.push({ label: g.citySpouse ? "Sweet-talk " + nm : "Propose to " + nm + " 💍", key: "k", fn: () => (g.citySpouse ? talk() : CBZ.cityPropose(p)) });
     // ---- a rival whose BOSS you dropped: claim the whole crew ----
     else if (p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled)
@@ -261,7 +261,7 @@
         opts.push({ label: "Get initiated with " + nm, key: "k", fn: () => prospectOrWork(p) });
       else if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p))
         // already prospecting this crew: do a FAVOR for this member to EARN STANDING
-        opts.push({ label: "Do " + nm + " a favor (earn standing) 🤝", key: "k", fn: () => prospectOrWork(p) });
+        opts.push({ label: "Do " + nm + " a favor 🤝", key: "k", fn: () => prospectOrWork(p) });
       else
         opts.push({ label: "Prospect the " + (rec.name || "crew") + " 🩸", key: "k", fn: () => CBZ.cityProspectGang(rec) });
     }
@@ -269,14 +269,14 @@
     //      runs with you or shares a tip; a grudge-holder gets only plain talk. ----
     else if (fearsYou) opts.push({ label: "Shake " + nm + " down 💵", key: "k", bad: true, fn: () => demandRansom(p) });
     else if (tightWithYou && !p.gang && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && CBZ.cityRecruit)
-      opts.push({ label: "Bring " + nm + " into the gang 🤝", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
+      opts.push({ label: "Patch " + nm + " in 🤝", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
     else if (tightWithYou && !p.recruited && !p.gang) opts.push({ label: nm + " runs with you 🤝", key: "k", fn: () => CBZ.cityRecruit && CBZ.cityRecruit(p) });
     // ---- recruit straight into YOUR founded gang ----
     else if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100))))
-      opts.push({ label: "Recruit " + nm + " to the gang 🔫", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
+      opts.push({ label: "Put " + nm + " on the payroll 🔫", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
     else if (g.career === "dealer" && hasDrugs) opts.push({ label: "Sell " + nm + " product", key: "k", bad: true, fn: () => CBZ.cityDealTo(p) });
-    else if (!p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)))) opts.push({ label: "Recruit " + nm + " 🔫", key: "k", fn: () => CBZ.cityRecruit(p) });
-    else if (!hatesYou && CBZ.cityIsRomance && CBZ.cityIsRomance(p)) opts.push({ label: "Flirt with " + nm + " 💕", key: "k", fn: () => CBZ.cityFlirt(p) });
+    else if (!p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)))) opts.push({ label: "Hire " + nm + " 🔫", key: "k", fn: () => CBZ.cityRecruit(p) });
+    else if (!hatesYou && CBZ.cityIsRomance && CBZ.cityIsRomance(p)) opts.push({ label: "Chat " + nm + " up 💕", key: "k", fn: () => CBZ.cityFlirt(p) });
     else opts.push({ label: "Talk to " + nm, key: "k", fn: talk });
     opts.push({ label: "Pick " + nm + "'s pocket", key: "l", bad: true, fn: () => pickpocket(p) });
     return cap4(opts);

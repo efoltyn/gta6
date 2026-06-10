@@ -349,6 +349,9 @@
         // provoke / alarm so the world reacts to a non-lethal beating
         if (t.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(t.gang, 0.4);
         CBZ.cityCrime && CBZ.cityCrime(heavy ? 60 : 40, { x: t.pos.x, z: t.pos.z, type: "assault" });
+        // SIZE-UP (sizeup.js): a survivor reads who just hit them — a ganger's
+        // set piles in, an outclassed civilian folds instead of swinging back.
+        if (CBZ.citySizeUpHit && CBZ.city && CBZ.city.playerActor) CBZ.citySizeUpHit(t, CBZ.city.playerActor);
       }
     }
 

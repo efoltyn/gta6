@@ -239,7 +239,7 @@ if (fs.existsSync(path.join(__dirname, "..", "src/weapons/weapon-data.js"))) loa
 
 const cityFiles = [
   "world", "buildings", "expansion", "props", "mode", "economy", "hunger", "wanted",
-  "gangs", "social", "realestate", "view", "peds", "crowd", "police", "traffic", "vehicles",
+  "gangs", "social", "realestate", "view", "peds", "level", "sizeup", "crowd", "police", "traffic", "vehicles",
   "shops", "careers", "interact", "combat", "death", "leaderboard", "zillow", "empire", "hud",
   // aigoals: the crowd PURPOSE / needs layer (onUpdate 33) + the lone-wolf rampage
   // director (onUpdate 35). Loaded so the headless sim exercises both.
@@ -472,6 +472,7 @@ function run() {
 
   if (thrown > 0) { console.log("RESULT: FAIL (frame throws)"); process.exit(1); }
 
+  testLevels();
   stressTest();
   testCrash();
   testCrowd();
@@ -707,6 +708,50 @@ function stressTest() {
   tryStep(60);
   console.log("  stress throws=" + fails);
   if (fails > 0) { console.log("RESULT: FAIL (stress)"); process.exit(1); }
+}
+
+// ---- LEVEL + SIZE-UP: the street-read layer (level.js / sizeup.js) ----
+// Levels are DERIVED from live state; this verifies the read is sane (civilians
+// low, ranked gangers/cops high), the tag sweep actually swapped tags, the
+// player's read moves with worth, the outclassed fold, and respect pays by gap.
+function testLevels() {
+  console.log("== level / size-up tests ==");
+  let fails = 0;
+  const ok = (name, cond, detail) => { if (cond) console.log("  ✓ " + name + (detail ? " — " + detail : "")); else { fails++; console.error("  ✗ " + name + (detail ? " — " + detail : "")); } };
+  const g = CBZ.game, peds = CBZ.cityPeds;
+  ok("cityLevel exists", typeof CBZ.cityLevel === "function");
+  const civ = peds.find((p) => !p.dead && !p.gang && !p.armed && !p.weapon && !p.recruited && !p.companion &&
+                               (p.wealth || 0) < 0.5 && !(p.bounty > 0) && (p.aggr || 0) < 0.85);
+  const ganger = peds.find((p) => !p.dead && p.gang && (p.rank === "enforcer" || p.rank === "lt" || p.rank === "boss"));
+  if (civ) ok("ordinary civilian reads low", CBZ.cityLevel(civ) <= 3, "lvl=" + CBZ.cityLevel(civ));
+  if (ganger) ok("ranked gang member reads high", CBZ.cityLevel(ganger) >= 6, ganger.rank + " lvl=" + CBZ.cityLevel(ganger));
+  const cop = CBZ.cityCops.find((c) => !c.dead);
+  if (cop) ok("cop reads trained", CBZ.cityLevel(cop) >= 8, "lvl=" + CBZ.cityLevel(cop));
+  // the slow sweep ran during the 1200 frames — tags should read LEVEL N now
+  const tagged = peds.filter((p) => p.tag && !p.dead);
+  const swept = tagged.filter((p) => p._lvlShown > 0);
+  ok("tags swept to LEVEL N", tagged.length === 0 || swept.length >= tagged.length * 0.9, swept.length + "/" + tagged.length);
+  // your own read rises with worth
+  const pa = CBZ.city.playerActor;
+  const cash0 = g.cash, kills0 = g.kills, crew0 = g.cityCrew;
+  g.cash = 0; const broke = CBZ.cityLevel(pa);
+  g.cash = 6e6; const rich = CBZ.cityLevel(pa);
+  ok("player read rises with worth", rich > broke, broke + "→" + rich);
+  // size-up: a level-1 civilian against a kingpin-read player FOLDS, and
+  // stomping them earns nothing — respect only pays UP the ladder.
+  if (civ && CBZ.citySizeUp) {
+    g.cash = 6e6; g.kills = 40; g.cityCrew = 8;
+    ok("outclassed civilian won't dare", CBZ.citySizeUp(civ, pa) === false, "civLvl=" + CBZ.cityLevel(civ) + " plLvl=" + CBZ.cityLevel(pa));
+    CBZ.citySizeUpFold(civ, pa);
+    ok("outclassed civilian folds", civ.surrender === true || civ.state === "flee", "state=" + civ.state + " surrender=" + !!civ.surrender);
+    if (CBZ.cityLevel(civ) <= 2) ok("no respect for stomping a nobody", CBZ.cityKillRespect(civ) === 0, "resp=" + CBZ.cityKillRespect(civ));
+    if (ganger) ok("respect paid for a real one", CBZ.cityKillRespect(ganger) >= 2, "resp=" + CBZ.cityKillRespect(ganger));
+  }
+  const violent = peds.find((p) => !p.dead && (p.aggr || 0) >= 0.88);
+  if (violent && CBZ.citySizeUp) { g.cash = 6e6; ok("the violent fear nothing", CBZ.citySizeUp(violent, pa) === true); }
+  g.cash = cash0; g.kills = kills0; g.cityCrew = crew0;
+  if (fails > 0) { console.log("RESULT: FAIL (levels)"); process.exit(1); }
+  console.log("  level/size-up OK");
 }
 
 // ---- gunfire → glass: a ray fired through a window pane shatters THAT pane ----

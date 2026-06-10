@@ -566,7 +566,7 @@
       if (mult > 0) {
         const winAmt = casino.bet * mult; payout(casino.bet + winAmt); casinoCommit(winAmt, "slots");
         casino.slotMsg = { win: true, text: txt + " +$" + winAmt };
-        if (mult >= 250) { big("SLOTS JACKPOT +$" + winAmt); if (CBZ.sfx) CBZ.sfx("win"); }
+        if (mult >= 250) { big("SLOTS JACKPOT +$" + winAmt); }   // (no jingle — user: no music in gang city)
       } else { casinoCommit(-casino.bet, "slots"); casino.slotMsg = { win: false, text: txt + " -$" + casino.bet }; }
       renderSlots();
     };
@@ -942,7 +942,7 @@
       message: won ? "STREET RACE WON!" : (crashed ? "Wrecked out of the race." : "Lost the street race."),
     });
     if (s.bet) CBZ.cityEvent && CBZ.cityEvent("bet", { stake: s.bet, profit: won ? Math.round(s.bet * 2.2) - s.bet : -s.bet, faction: "gang", factionDelta: won ? 1 : -1 }, { silent: true });
-    if (won) { big("STREET RACE WON +$" + net); if (CBZ.sfx) CBZ.sfx("win"); }
+    if (won) { big("STREET RACE WON +$" + net); }   // (no jingle — user: no music in gang city)
     raceRun = null;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -966,7 +966,7 @@
       message: won ? ("Won the street race (P" + 1 + ")!") : ("Finished P" + (s.rivalCount + 1 - beat) + " in the street race."),
     });
     if (s.bet) CBZ.cityEvent && CBZ.cityEvent("bet", { stake: s.bet, profit: won ? Math.round(s.bet * 2.2) - s.bet : -s.bet, faction: "gang", factionDelta: won ? 1 : -1 }, { silent: true });
-    if (won) { big("STREET RACE WON +$" + net); if (CBZ.sfx) CBZ.sfx("win"); }
+    if (won) { big("STREET RACE WON +$" + net); }   // (no jingle — user: no music in gang city)
     raceRun = null;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }

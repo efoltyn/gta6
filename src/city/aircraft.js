@@ -491,10 +491,13 @@
 
   function heliGun(P) {
     if (!heli) return;
+    const py = (P.pos.y || 0) + 1.4;                  // the player's ACTUAL chest height (rooftop included)
     const from = { x: heli.pos.x, y: heli.pos.y - 0.6, z: heli.pos.z };
-    const to = { x: P.pos.x + (rng() - 0.5) * 1.8, y: 1.4, z: P.pos.z + (rng() - 0.5) * 1.8 };
-    // don't shoot through walls
-    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y, from.z, P.pos.x, 1.4, P.pos.z)) return;
+    const to = { x: P.pos.x + (rng() - 0.5) * 1.8, y: py, z: P.pos.z + (rng() - 0.5) * 1.8 };
+    // don't shoot through walls — test the line to the player's true elevation, not
+    // a hardcoded ground height (so it neither hits a rooftop target through the roof
+    // nor phantom-misses one it can plainly see from above).
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y, from.z, P.pos.x, py, P.pos.z)) return;
     if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.25 });
     if (CBZ.sfx) CBZ.sfx("shoot_carbine");
     if (rng() < 0.5 && CBZ.cityHurtPlayer) {

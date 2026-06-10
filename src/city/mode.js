@@ -65,7 +65,14 @@
     addRespect(n) { g.respect = Math.max(0, (g.respect || 0) + n); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); if (CBZ.cityWorldCommit) CBZ.cityWorldCommit(); },
 
     // ---- kills (leaderboard) ----
-    addKill() { g.kills = (g.kills || 0) + 1; city.addRespect(2); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); },
+    // Respect is earned UP the ladder (sizeup.js): pass the victim and the
+    // street pays out by THEIR level vs yours — dropping a boss makes a name,
+    // stomping a level-1 nobody earns nothing. No victim → the old flat +2.
+    addKill(victim) {
+      g.kills = (g.kills || 0) + 1;
+      const r = CBZ.cityKillRespect ? CBZ.cityKillRespect(victim) : 2;
+      if (r > 0) city.addRespect(r); else if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    },
 
     // a short toast. Two channels feed it across the city code, with NO throttle
     // historically → spam. note() now buckets each LOW-PRIORITY note by CATEGORY
