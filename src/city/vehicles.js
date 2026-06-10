@@ -15,6 +15,15 @@
    Player driving owns the transform (physics.js bails when driving):
    WASD, follow-cam, run people over, crash, and drive a STOLEN car into
    the chop shop to cash it out (value scales with how rare the car is).
+
+   BRAKE LIGHTS: every car's rear lamps flare when its driver is on the
+   brake (slowing for a red / a queue / a ped, or held stopped). WHY: a
+   street where you can SEE everyone obeying the rules is what makes
+   blasting through it feel like breaking them — and a wall of brake
+   lights ahead reads as "traffic" from a block away. Cost: TWO extra
+   shared materials for the whole fleet (a bright clone per distinct
+   tail material), swapped by pointer only when a car's braking state
+   actually changes. No new meshes, so the model audit stays intact.
 ============================================================ */
 (function () {
   "use strict";
@@ -165,6 +174,59 @@
     });
     const tl = boxMesh(w * 0.86, 0.16, 0.07, tail);
     tl.position.set(0, hullTopY, rearZ - 0.02); grp.add(tl);
+  }
+
+  // ---- BRAKE LIGHTS -------------------------------------------------------
+  // All tail lamps in the fleet use a handful of SHARED red-emissive materials
+  // (cmat / playercars' sharedMat are cached singletons). We lazily build ONE
+  // bright "braking" counterpart per distinct tail material (a pool of ~2-3 for
+  // the entire city, ever) and flip a car's tail meshes between the two by
+  // pointer when its braking state changes. Zero clones per car, zero per-frame
+  // material work, and the merged-mesh part structure is untouched.
+  const _brakeMats = new Map();           // tail material -> bright counterpart
+  function isTailMat(m) {
+    // red-dominant emissive + red body colour = a tail lamp. The g/b ceilings
+    // exclude headlights (pale blue) and red paint (emissive is dim, ~0.2 r).
+    if (!m || !m.color || !m.emissive || m.emissive.r == null) return false;
+    return m.emissive.r > 0.78 && m.emissive.g < 0.35 && m.emissive.b < 0.45 && m.color.r > 0.78;
+  }
+  function brakeMatFor(tailMat) {
+    let b = _brakeMats.get(tailMat);
+    if (!b) {
+      b = tailMat.clone ? tailMat.clone() : tailMat;
+      if (b !== tailMat) {
+        if (b.color && b.color.setHex) b.color.setHex(0xff4a52);
+        if (b.emissive && b.emissive.setHex) b.emissive.setHex(0xff0d18);
+        b.emissiveIntensity = 2.2;
+        b._shared = true;                 // never disposed by clearCars
+      }
+      _brakeMats.set(tailMat, b);
+    }
+    return b;
+  }
+  function tagTailMeshes(c) {
+    const grp = c.group; if (!grp || !grp.traverse) return;
+    const list = [];
+    grp.traverse(function (o) {
+      const m = o.material;
+      if (m && !Array.isArray(m) && isTailMat(m)) { o._tailMat = m; list.push(o); }
+    });
+    c._tailMeshes = list;
+    c._tailVisual = (grp.userData && grp.userData.carVisual) || null;
+    c._brakeOn = false;
+  }
+  function setBrake(c, on) {
+    on = !!on;
+    if (!c._tailMeshes) return;
+    // the [C] style-cycler can rebuild the visual under us — re-tag and re-apply
+    const vis = (c.group && c.group.userData && c.group.userData.carVisual) || null;
+    if (vis !== c._tailVisual) tagTailMeshes(c);
+    if (c._brakeOn === on) return;
+    c._brakeOn = on;
+    for (let i = 0; i < c._tailMeshes.length; i++) {
+      const mesh = c._tailMeshes[i];
+      mesh.material = on ? brakeMatFor(mesh._tailMat) : mesh._tailMat;
+    }
   }
 
   // tinted-glass greenhouse: a thin windshield slab + two side-window slabs
@@ -493,6 +555,7 @@
       _bk: grp.userData && grp.userData.bodyKind, dims: grp.userData && grp.userData.vehicleDims,
       mass: prof.mass, armor: prof.armor, repair: prof.repair,
     };
+    tagTailMeshes(c);                     // one traverse per car, at build time
     CBZ.cityCars.push(c);
     return c;
   }
@@ -860,6 +923,7 @@
     if (car) {
       car.player = false; car.v = 0; car.vx = car.vz = 0; car.ai = false;
       car._pitch = car._roll = 0;
+      setBrake(car, false);               // parked — foot's off the pedal
       if (car.group) car.group.rotation.set(0, car.heading, 0);   // drop the weight-transfer lean
       if (CBZ.cityDemotePlayerCar) CBZ.cityDemotePlayerCar(car);
     }
@@ -1029,6 +1093,8 @@
     if (k["a"]) steer += 1;
     if (k["d"]) steer -= 1;
     const vmag = Math.abs(car.v);
+    // brake lights: S while rolling forward, or the handbrake at speed
+    setBrake(car, (throttle < 0 && car.v > 0.4) || (handbrake && vmag > 1));
     const steerRate = steer ? 7.5 : 10.5;
     car._steerInput = (car._steerInput || 0) + (steer - (car._steerInput || 0)) * Math.min(1, dt * steerRate);
     const speedNorm = Math.min(1, vmag / Math.max(1, MAXV));
@@ -1425,6 +1491,7 @@
     car.group.rotation.y = car.heading;
     if (car.npcDriver && car.npcDriver.pos) car.npcDriver.pos.set(car.pos.x, 0, car.pos.z);
     if (car.v > 6) runOver(car, car.v);
+    setBrake(car, false);                 // a rammer is flat on the throttle
     const cdx = car.pos.x - CBZ.camera.position.x, cdz = car.pos.z - CBZ.camera.position.z;
     car.group.visible = (cdx * cdx + cdz * cdz) < 150 * 150;
     return true;
@@ -1498,6 +1565,7 @@
       // WRECKED (just crashed): spin out off-rails and coast to a stop, then
       // recover and drive on — skips all lane-keeping so the crash actually reads.
       if (c.wreckT > 0) {
+        setBrake(c, false);               // nobody's on the pedal mid-spin
         c.wreckT -= dt;
         c.v *= Math.pow(0.04, dt);
         c.spin = (c.spin || 0) * Math.pow(0.25, dt);
@@ -1547,6 +1615,7 @@
         if (c.v > 9 && (c.reckless || c.pullover === 4)) runOver(c, c.v);
         const tdx = c.pos.x - CBZ.camera.position.x, tdz = c.pos.z - CBZ.camera.position.z;
         c.group.visible = (tdx * tdx + tdz * tdz) < 150 * 150;
+        setBrake(c, c.group.visible && tv < c.v - 0.4);   // easing off into the corner
         continue;
       }
       const r = c.road;
@@ -1664,6 +1733,9 @@
       // simple distance cull: cars far from the camera stop drawing
       const cdx = c.pos.x - CBZ.camera.position.x, cdz = c.pos.z - CBZ.camera.position.z;
       c.group.visible = (cdx * cdx + cdz * cdz) < 150 * 150;
+      // brake lights flare while the driver is shedding speed (red / queue /
+      // ped ahead) or held stopped — only swapped for cars you can see.
+      setBrake(c, c.group.visible && (target < c.v - 0.6 || (c.v < 0.45 && target < 0.6)));
     }
   });
 

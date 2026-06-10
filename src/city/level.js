@@ -1,15 +1,18 @@
 /* ============================================================
-   city/level.js — THE STREET READS YOU: "LEVEL N" floats over every head.
+   city/level.js — THE STREET READS YOU: "CROOK · 3" floats over every head.
 
-   WHY a level instead of a name
-   -----------------------------
+   WHY a title + a level instead of a name
+   ---------------------------------------
    In a real city you size people up in a glance — the walk, the watch, the
    bulge under the jacket, who's standing behind them. Names tell you nothing
    (you learn a name by TALKING to someone — interact.js still shows it).
-   The LEVEL is that street-read made legible: ONE number that compresses
-   everything the world already tracks about a person. It is NEVER stored or
-   ground out — it is DERIVED, live, from real state, so "why is he level 14?"
-   always has an answer: he's a strapped gang lieutenant with bodies on him.
+   The tag is that street-read made legible in TWO beats: the TITLE says WHAT
+   someone is (OFFICER, DEALER, MOB BOSS, OLD MONEY), the NUMBER says how
+   heavy. Both are NEVER stored or ground out — they are DERIVED, live, from
+   real state, so "why does he read ENFORCER · 14?" always has an answer:
+   he's a strapped gang enforcer with bodies on him. The pairing is the whole
+   robbery/respect game at a glance: "OLD MONEY · 11" unarmed = a payday;
+   "SWAT · 14" = a wall; dropping a "MOB BOSS · 24" = a story.
 
    What the number feeds (the level is information, not decoration):
      • sizeup.js  — NPCs compare levels before swinging: outclassed peds fold
@@ -20,9 +23,11 @@
        finder: a HIGH level that isn't armed and isn't gang-coloured is a
        walking payday. Reading the street correctly = the robbery skill.
 
-   Perf note: makeLabelSprite caches materials by (text|color), so "LEVEL 3"
-   is ONE shared texture across every level-3 ped — far cheaper than the old
+   Perf note: makeLabelSprite caches materials by (text|color), so "CROOK · 3"
+   is ONE shared texture across every level-3 crook — far cheaper than the old
    one-unique-name-texture-per-ped. Swapping a tag = swapping a material ref.
+   Titles come from a small FIXED vocabulary (~25 strings), so the cache stays
+   bounded: titles × 40 levels × a handful of allegiance colours.
    ============================================================ */
 (function () {
   const CBZ = window.CBZ;
@@ -77,6 +82,51 @@
   }
   CBZ.cityPlayerLevel = playerLevel;
 
+  // ---- the street TITLE: what the number is attached to --------------------
+  // Same physics as the level: derived from real state, never stored. Every
+  // string is in-world (what a local would mutter, not a stat sheet) and the
+  // vocabulary is FIXED so the label-material cache stays small.
+  // bountyTag strings come from peds.js rollBounty — map them to one-word reads.
+  const BOUNTY_TITLE = { "WANTED TERRORIST": "TERRORIST", "ARMED & DANGEROUS": "GUNMAN", FUGITIVE: "FUGITIVE", WANTED: "WANTED" };
+  // gangs.js rank keys → spoken rank, used only if CBZ.cityRankName isn't loaded.
+  const RANK_TITLE = { prospect: "PROSPECT", lookout: "LOOKOUT", runner: "RUNNER", soldier: "SOLDIER", enforcer: "ENFORCER", lt: "LIEUTENANT", boss: "BOSS" };
+  // archetype vocabulary that actually exists (peds.js / economy.js casting).
+  const ARCH_TITLE = {
+    dealer: "DEALER", mobster: "MOBSTER", made: "MADE MAN", boss: "MOB BOSS",
+    tycoon: "TYCOON", billionaire: "MAGNATE", socialite: "SOCIALITE", heiress: "HEIRESS",
+  };
+  // YOUR name on the street is earned by the same number everyone else reads —
+  // climb the ladder by getting richer, deadlier, better-backed.
+  const LADDER = [[2, "NOBODY"], [5, "CROOK"], [8, "HUSTLER"], [12, "SOLDIER"], [16, "ENFORCER"], [21, "SHOT CALLER"], [27, "MOB BOSS"]];
+  function ladderTitle(n) {
+    for (let i = 0; i < LADDER.length; i++) if (n <= LADDER[i][0]) return LADDER[i][1];
+    return "KINGPIN";
+  }
+  CBZ.cityPlayerTitle = function () { return ladderTitle(playerLevel()); };
+
+  CBZ.cityTitle = function (a) {
+    if (!a) return "CIVILIAN";
+    if (a.isPlayer) return ladderTitle(playerLevel());
+    if (a.kind === "cop") return a.swat ? "SWAT" : "OFFICER";
+    if (a.kind === "security") return "SECURITY";
+    if (a.rampage) return "MANIAC";                     // mid-snap, nothing else matters
+    if (a.bounty > 0) return BOUNTY_TITLE[a.bountyTag] || "WANTED";
+    if (a.gang) {
+      if (CBZ.cityRankName && a.rank) {
+        const pip = CBZ.cityRankName(a.rank);
+        if (pip) return String(pip).toUpperCase();      // "Lt." → "LT.", "Boss" → "BOSS"
+      }
+      return RANK_TITLE[a.rank] || "SOLDIER";
+    }
+    const t = ARCH_TITLE[a.archetype];
+    if (t) return t;
+    // plain civilians still read: the eyes, the temper, the coat.
+    if ((a.aggr || 0) >= 0.88) return "PSYCHO";
+    if ((a.aggr || 0) >= 0.72) return "CROOK";
+    if ((a.wealth || 0) >= 0.88) return "OLD MONEY";
+    return "CIVILIAN";
+  };
+
   // ---- tag colour: the read keeps its allegiances --------------------------
   function colorFor(a) {
     if (a.kind === "cop") return "#8fc1ff";
@@ -89,18 +139,18 @@
     return "#eef4ff";
   }
 
-  // swap a tag's material to the cached LEVEL label. Other systems (gangs.js
-  // rank re-tags, bounty prefixes) still create NAME sprites — this loop
-  // self-heals them back to LEVEL within a tick because the material ref no
+  // swap a tag's material to the cached TITLE · LEVEL label. Other systems
+  // (gangs.js rank re-tags, bounty prefixes) still create NAME sprites — this
+  // loop self-heals them back within a tick because the material ref no
   // longer matches. The sprite OBJECT is never replaced, so every existing
   // reference (peds.js distance gate, playergang, turf) keeps working.
   function retag(a) {
     if (!a || !a.tag || a.dead) return;
-    const lvl = CBZ.cityLevel(a), col = colorFor(a);
-    if (a._lvlShown === lvl && a._lvlCol === col && a._lvlMat === a.tag.material) return;
-    const s = CBZ.makeLabelSprite("LEVEL " + lvl, { color: col });
+    const lvl = CBZ.cityLevel(a), col = colorFor(a), title = CBZ.cityTitle(a);
+    if (a._lvlShown === lvl && a._lvlTitle === title && a._lvlCol === col && a._lvlMat === a.tag.material) return;
+    const s = CBZ.makeLabelSprite(title + " · " + lvl, { color: col });
     a.tag.material = s.material;
-    a._lvlShown = lvl; a._lvlCol = col; a._lvlMat = s.material;
+    a._lvlShown = lvl; a._lvlTitle = title; a._lvlCol = col; a._lvlMat = s.material;
   }
 
   // ---- the slow sweep + your own HUD readout -------------------------------
@@ -120,7 +170,8 @@
       if (!lvlEl) lvlEl = document.getElementById("cLvl");
       if (lvlEl) {
         const pl = playerLevel();
-        if (pl !== lvlShown) { lvlShown = pl; lvlEl.textContent = "LEVEL " + pl; }
+        // ladderTitle is a pure function of pl, so the level compare covers both.
+        if (pl !== lvlShown) { lvlShown = pl; lvlEl.textContent = "LEVEL " + pl + " · " + ladderTitle(pl); }
       }
     }
   });

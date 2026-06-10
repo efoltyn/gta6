@@ -23,9 +23,14 @@
       const c = document.createElement("canvas");
       c.width = 256; c.height = 64;
       const x = c.getContext("2d");
+      // auto-fit: long labels ("MOB BOSS · 24", storefront names) shrink to the
+      // canvas instead of clipping at the edges. Cached per text, so it's free.
+      let fs = 30;
       x.font = "bold 30px Fredoka, sans-serif";
+      const tw = x.measureText(text).width;
+      if (tw > 242) { fs = Math.max(16, Math.floor(30 * 242 / tw)); x.font = "bold " + fs + "px Fredoka, sans-serif"; }
       x.textAlign = "center"; x.textBaseline = "middle";
-      x.lineWidth = 6; x.strokeStyle = "rgba(0,0,0,.75)";
+      x.lineWidth = Math.max(4, fs * 0.2); x.strokeStyle = "rgba(0,0,0,.75)";
       x.strokeText(text, 128, 34);
       x.fillStyle = opts.color || "#eef4ff";
       x.fillText(text, 128, 34);

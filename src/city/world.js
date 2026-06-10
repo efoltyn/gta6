@@ -10,7 +10,10 @@
    This file lays the FOUNDATION only — a flat ground, a regular grid
    of streets with lane lines + crosswalks, sidewalks ringing every
    block, and the descriptor (lots / roads / intersections / waypoint
-   helpers) that the rest of the city is built on. Buildings, the
+   helpers + the DISTRICT personality field: density-weighted spawn
+   pickers so downtown is packed and the docks are quiet BY DESIGN —
+   crime pacing needs busy and dead streets) that the rest of the city
+   is built on. Buildings, the
    connected island district, shops, props and traffic lights are added
    by sibling modules through the hooks at the end of buildCity().
 
@@ -160,6 +163,71 @@
       const j = Math.max(0, Math.min(N, Math.round((z - zLines[0]) / step)));
       return intersections[i * (N + 1) + j];
     }
+    // ---- DISTRICT FIELD: busy and quiet by DESIGN -----------------------
+    // WHY: pacing. config.js CITY.districts gives every 2×2-lot quadrant a
+    // personality (downtown packed, docks sparse) so foot traffic, casting
+    // and cop beats differ by neighbourhood and "where do I do this crime"
+    // is a real decision. Same 3×3 carve + names as turf.js zones, so the
+    // takeover map and the population field agree. All weights live in
+    // config; the pickers below are deterministic from the caller's rng,
+    // so the harness world stays stable.
+    const DISTRICTS = (C.districts && C.districts.length) ? C.districts : [];
+    const dSpan = Math.ceil(N / 3);
+    function districtQ(i, j) {
+      const di = Math.min(2, (i / dSpan) | 0), dj = Math.min(2, (j / dSpan) | 0);
+      return dj * 3 + di;
+    }
+    for (const l of lots) l.district = districtQ(l.i, l.j);   // stamp once
+    function districtAt(x, z) {
+      const i = Math.max(0, Math.min(N - 1, ((x - xLines[0]) / step) | 0));
+      const j = Math.max(0, Math.min(N - 1, ((z - zLines[0]) / step) | 0));
+      return DISTRICTS[districtQ(i, j)] || null;
+    }
+    // cumulative lot weights, built once per key (no rng draws → world build
+    // is byte-identical to before; only the CALLERS' picks redistribute).
+    function lotCum(key) {
+      const cum = new Float64Array(lots.length);
+      let t = 0;
+      for (let k = 0; k < lots.length; k++) {
+        const d = DISTRICTS[lots[k].district];
+        t += d && d[key] != null ? d[key] : 1;
+        cum[k] = t;
+      }
+      return { cum, total: t };
+    }
+    const popW = lotCum("pop"), copW = lotCum("cops");
+    function pickWeightedLot(w, r) {
+      if (!(w.total > 0)) return lots[(r() * lots.length) | 0];
+      const x = r() * w.total;
+      for (let k = 0; k < w.cum.length; k++) if (x <= w.cum[k]) return lots[k];
+      return lots[lots.length - 1];
+    }
+    function sidewalkOf(l, r) {           // a point on a lot's sidewalk ring
+      const edge = (r() * 4) | 0, t = (r() - 0.5) * l.w;
+      const off = l.w / 2 + 1.6;
+      if (edge === 0) return { x: l.cx + t, z: l.cz - off };
+      if (edge === 1) return { x: l.cx + t, z: l.cz + off };
+      if (edge === 2) return { x: l.cx - off, z: l.cz + t };
+      return { x: l.cx + off, z: l.cz + t };
+    }
+    // density-weighted sidewalk point: downtown draws ~4× the docks. Pass your
+    // own rng for a deterministic stream; defaults to the city rng.
+    function weightedSidewalkPoint(r) { r = r || rng; return sidewalkOf(pickWeightedLot(popW, r), r); }
+    // cop-beat point: a road lane point bordering a cops-weighted lot, so
+    // police presence follows the money (heavy downtown, thin at the docks).
+    // police.js can swap its randomRoadPoint() calls for this — same shape.
+    function copBeatPoint(r) {
+      r = r || rng;
+      const l = pickWeightedLot(copW, r);
+      const lane = (r() < 0.5 ? -1 : 1) * (ROAD * 0.22);
+      if (r() < 0.5) {                    // a bordering avenue (runs along z)
+        const x = xLines[l.i + (r() < 0.5 ? 0 : 1)];
+        return { x: x + lane, z: l.cz + (r() - 0.5) * l.d, vertical: true };
+      }
+      const z = zLines[l.j + (r() < 0.5 ? 0 : 1)];   // a bordering cross-street
+      return { x: l.cx + (r() - 0.5) * l.w, z: z + lane, vertical: false };
+    }
+
     function clampRect(p, x0, x1, z0, z1) {
       return { x: Math.max(x0, Math.min(x1, p.x)), z: Math.max(z0, Math.min(z1, p.z)) };
     }
@@ -197,6 +265,8 @@
       lots, roads, intersections, rng,
       groundHeightAt() { return 0; },
       lotAt, randomSidewalkPoint, randomRoadPoint, nearestIntersection, clampToCity,
+      // district personality field (peds/crowd density, casting, cop beats)
+      districts: DISTRICTS, districtAt, weightedSidewalkPoint, copBeatPoint,
       // a clear spawn: the central intersection sidewalk corner
       spawn: { x: cx + ROAD / 2 + 2, z: cz + ROAD / 2 + 2 },
       transients: [],

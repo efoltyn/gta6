@@ -285,6 +285,10 @@
   let bloom = 0, recoilHold = 0;
   const PUNCH_DUR = 0.26;
   let shotCD = 0, dryCD = 0, triggerHeld = false, reloadWeapon = 0;
+  // reusable per-shot sfx options (no per-shot allocation at auto-fire rates):
+  // heavy guns (AK) re-pitch a shared sample DOWN for a deeper bark — same
+  // audio file, different character, zero new assets.
+  const shotSfxOpts = { pitch: 1, volume: 1 };
 
   function triggerFistPunch() {
     punchT = PUNCH_DUR;
@@ -865,7 +869,13 @@
       worldMuzzleT = w.key === "shotgun" ? 0.065 : 0.04;
     }
 
-    CBZ.sfx && CBZ.sfx(w.sfx || "shoot");
+    if (CBZ.sfx) {
+      if (w.sfxPitch || w.sfxVol) {
+        shotSfxOpts.pitch = (w.sfxPitch || 1) * (0.96 + Math.random() * 0.08);  // jitter so bursts don't sound machine-stamped
+        shotSfxOpts.volume = w.sfxVol || 1;
+        CBZ.sfx(w.sfx || "shoot", shotSfxOpts);
+      } else CBZ.sfx(w.sfx || "shoot");
+    }
     CBZ.shake && CBZ.shake(w.shake);
     CBZ.doHitstop && CBZ.doHitstop(w.key === "shotgun" ? 0.028 : 0.014);
     if (CBZ.game.mode !== "city") CBZ.reportCrime && CBZ.reportCrime(w.heat, { type: w.nonlethal ? "taser" : "gunfire", actorRole: CBZ.game.role, weapon: w.key });
@@ -919,7 +929,9 @@
     // a hipfire/movement penalty (moving fast while shooting throws shots wide).
     // Standing still + tapping ≈ the gun's tight base cone for precise shots.
     const moving = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
-    const moveBloom = w.spread * moving * 1.4;
+    // per-weapon movement penalty: heavy rifles (AK moveSpread 2.3) punish
+    // run-and-gun harder than the 1.4 default — plant your feet for the payoff.
+    const moveBloom = w.spread * moving * (w.moveSpread || 1.4);
     const cone = w.spread * (1 + recoil * 0.18) + bloom + moveBloom;
     let head = false, down = false, hitSomething = false;
     for (let i = 0; i < pellets; i++) {
@@ -998,7 +1010,9 @@
     fps.weapon = av[(pos + delta + av.length) % av.length];
     CBZ.currentWeaponId = weaponIdOf(fps.weapon);
     fps.reloading = 0;
-    shotCD = Math.min(shotCD, 0.08);
+    // per-weapon draw time: a heavy rifle (AK equip 0.5s) takes a beat to
+    // shoulder before it can fire — switching itself stays instant.
+    shotCD = Math.max((WEAPONS[fps.weapon] && WEAPONS[fps.weapon].equip) || 0, Math.min(shotCD, 0.08));
     syncAmmo();
     weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
@@ -1020,7 +1034,8 @@
     if (idx === fps.weapon) return true;
     fps.weapon = idx;
     CBZ.currentWeaponId = weaponIdOf(fps.weapon);
-    fps.reloading = 0; shotCD = Math.min(shotCD, 0.08);
+    fps.reloading = 0;
+    shotCD = Math.max((WEAPONS[fps.weapon] && WEAPONS[fps.weapon].equip) || 0, Math.min(shotCD, 0.08));  // heavy guns take a beat to shoulder
     syncAmmo();
     weaponModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });

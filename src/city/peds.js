@@ -397,6 +397,97 @@
     return d;
   };
 
+  // ============================================================
+  //  DISTRICT CASTING — WHO walks WHERE. The district field (config CITY.
+  //  districts via world.js) decides both density AND casting so each
+  //  neighbourhood has a personality the player can WORK: downtown carries
+  //  tourists + secret whales (loud money — marks, witnesses, cops); the
+  //  docks carry workers (quiet — gang business); the projects carry
+  //  dealers/runners (sparse but volatile — dark money). Pure opts for
+  //  makePed; the brain is untouched. Deterministic from the rng stream.
+  // ============================================================
+  function castForDistrict(d, r) {
+    if (!d) return {};
+    const opts = {};
+    const ag = A0();
+    // wealth: blend the global rich-skew with the district's street wealth so
+    // downtown reads moneyed and the projects read broke (drives valuables,
+    // rollRareArchetype whales, drip — every money system downstream).
+    opts.wealth = Math.max(0.02, Math.min(1, richWealth(r) * 0.55 + d.wealth * 0.6 + (r() - 0.5) * 0.12));
+    if (d.kind === "core") {
+      // the strip: gawking tourists on top of the wealth boost (the boost alone
+      // makes rollRareArchetype promote more tycoons/socialites here).
+      if (r() < 0.2) { opts.archetype = "tourist"; opts.job = "tourist"; opts._role = "tourist"; }
+    } else if (d.kind === "industrial") {
+      // docks/works: shift-workers, modest pockets — thin pickings, few eyes.
+      if (r() < 0.55) { opts.archetype = "laborer"; opts.job = r() < 0.5 ? "dock worker" : "warehouse worker"; }
+      opts.wealth = Math.min(opts.wealth, 0.55);
+    } else if (d.kind === "projects") {
+      // the rough pocket: broke, quicker to violence, the street economy lives
+      // here (dealers/hustlers/users) — quiet money, but it bites back.
+      opts.wealth = Math.min(opts.wealth, 0.3);
+      opts.aggr = rollAggr((ag.meanCivilian != null ? ag.meanCivilian : 0.24) + 0.12, (ag.spreadCivilian || 0.2) + 0.06);
+      const x = r();
+      if (x < 0.16) opts.archetype = "dealer";
+      else if (x < 0.3) opts.archetype = "hustler";
+      else if (x < 0.4) opts.archetype = "tweaker";
+    } else if (d.kind === "commercial") {
+      // busy daytime mid: white-collar crowds (wallets + witnesses by day).
+      if (r() < 0.18) { opts.archetype = "professional"; opts.job = "office worker"; }
+    }
+    return opts;
+  }
+
+  // ============================================================
+  //  VAGRANTS — a small homeless population in the projects pocket + the
+  //  industrial fringe (alley edges of those lots). WHY: the rough end has to
+  //  FEEL rough — shuffling panhandlers begging off passers-by sell "quiet,
+  //  desperate streets", and a few volatile ones (aggr ≥ violent band → they
+  //  read PSYCHO via the existing title system and can swing first) make the
+  //  pocket genuinely dangerous, not just empty. They are NORMAL peds — the
+  //  existing approach/bark loop carries the panhandling ("Spare a few
+  //  bucks?"), and any cop move-along just sets the usual flee/fear fields.
+  //  Carved OUT of the ped budget (count stays flat). ped.vagrant flags them.
+  // ============================================================
+  function spawnVagrants(A, count) {
+    if (!count || !A.lots || !A.lots.length) return;
+    const kindOf = (l) => {
+      const d = A.districtAt ? A.districtAt(l.cx, l.cz) : null;
+      return d ? d.kind : null;
+    };
+    let anchors = A.lots.filter((l) => kindOf(l) === "projects");
+    const fringe = A.lots.filter((l) => kindOf(l) === "industrial");
+    // mostly the pocket, a couple under the industrial fringe (alley sleepers)
+    if (!anchors.length) anchors = fringe.length ? fringe : A.lots;
+    for (let k = 0; k < count; k++) {
+      const pool = (k % 4 === 3 && fringe.length) ? fringe : anchors;
+      const l = pool[(k + ((rng() * pool.length) | 0)) % pool.length];
+      // an ALLEY spot: hug a lot edge just off the sidewalk, not mid-pavement
+      const sx = rng() < 0.5 ? -1 : 1, alongX = rng() < 0.5;
+      const p = {
+        x: alongX ? l.cx + (rng() - 0.5) * (l.w - 4) : l.cx + sx * (l.w / 2 - 1.2),
+        z: alongX ? l.cz + sx * (l.d / 2 - 1.2) : l.cz + (rng() - 0.5) * (l.d - 4),
+      };
+      if (A.clampToCity) A.clampToCity(p, 0.6);
+      const volatile = k < Math.max(1, (count * 0.3) | 0);   // a FEW are powder kegs
+      const ped = makePed(p.x, p.z, rng, {
+        wealth: 0.02 + rng() * 0.05,
+        cash: (rng() * 9) | 0,                 // begging money, not robbing money
+        aggr: volatile ? 0.89 + rng() * 0.09   // ≥ violent band → titles read PSYCHO
+                       : 0.08 + rng() * 0.18,  // the rest: meek, just surviving
+        archetype: "vagrant", job: "panhandling",
+        armed: false, snitch: rng() * 0.08,    // the street doesn't call the law
+        outfit: [0x4a4438, 0x5a5244, 0x3e3a33, 0x6b5d4a][(rng() * 4) | 0],
+      });
+      ped.vagrant = true;                      // cops/quests can read it (move-along)
+      ped._role = "panhandler";                // begs via the existing role/bark loop
+      ped._beg = { x: p.x, z: p.z };           // post up where they woke up
+      ped.baseSpeed = 0.65 + rng() * 0.35;     // the shuffle
+      A.root.add(ped.group);
+      CBZ.cityPeds.push(ped);
+    }
+  }
+
   CBZ.spawnCityPeds = function (n) {
     CBZ.clearCityPeds();
     CBZ.cityPopulationReset();          // fresh city → reset the finite headcount
@@ -405,12 +496,20 @@
     _s = 555 + n;
     if (CBZ.cityEcon && CBZ.cityEcon.initMarket) CBZ.cityEcon.initMarket();
     CBZ.cityDrops.length = 0;
-    for (let i = 0; i < n; i++) {
-      const p = A.randomSidewalkPoint();
-      const ped = makePed(p.x, p.z, rng, {});
+    // the homeless are carved out of the ped budget so the TOTAL stays flat
+    // (perf: redistribute, never add). Deterministic from the seeded stream.
+    const nVagrant = Math.min((CBZ.CITY && CBZ.CITY.vagrants) || 0, (n / 4) | 0);
+    for (let i = 0; i < n - nVagrant; i++) {
+      // density-weighted spawn: packed downtown, thin docks — by design
+      const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : A.randomSidewalkPoint();
+      const d = A.districtAt ? A.districtAt(p.x, p.z) : null;
+      const opts = castForDistrict(d, rng);
+      const ped = makePed(p.x, p.z, rng, opts);
+      if (opts._role) ped._role = opts._role;   // pinned life (tourist on the strip)
       A.root.add(ped.group);
       CBZ.cityPeds.push(ped);
     }
+    spawnVagrants(A, nVagrant);
     if (A.shopLots) for (const lot of A.shopLots) {
       const vs = lot.building.vendorSpot;
       // the Ammu-Nation gunsmith (and the security firm) keep a gun behind the

@@ -283,11 +283,13 @@
         const each = unitPrice(it, qty);
         const meta = econ.ITEMS[it];
         const wear = meta.tag === "wearable";
-        // the per-item tag: food shows heal, guns "gun"; a WEARABLE shows its
-        // slot + drip value so its status contribution is legible at a glance.
+        // the per-item tag: food shows heal, guns show their DAMAGE (so paying
+        // the AK premium over the Rifle is a legible upgrade, not a blind flex);
+        // a WEARABLE shows its slot + drip value so its status contribution is
+        // legible at a glance.
         const slot = wear ? slotOf(it) : null;
         const tagN = kind === "food" ? "+" + (meta.heal || 0) + "hp"
-          : (meta.gun ? "gun" : (wear ? (slot ? slot + " · " : "") + "+" + (meta.drip || 0) + " drip" : meta.tag));
+          : (meta.gun ? "gun" + ((meta.dmg || 0) > 1 ? " · " + meta.dmg + " dmg" : "") : (wear ? (slot ? slot + " · " : "") + "+" + (meta.drip || 0) + " drip" : meta.tag));
         const worn = wear && isWorn(it);
         const line = qty > 1 ? (fmt$(each) + " ea · " + fmt$(each * qty) + "/×" + qty) : fmt$(each);
         // for a wearable you don't yet wear, preview DRIP x → y (and call out the

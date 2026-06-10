@@ -241,6 +241,33 @@
     abandonedFrac: 0.26,   // share of buildable lots that are derelict + gang-run
     parkFrac: 0.08,        // share kept as open plazas (breathing room / hangouts)
 
+    // ---- DISTRICTS: the city's population FIELD (world.js stamps lots) -----
+    // WHY: pacing. Busy streets mean witnesses, marks, foot traffic and cops —
+    // loud money. Quiet streets mean deals, body dumps and ambushes — dark
+    // money. "Where should I do this crime" only becomes a DECISION if places
+    // differ, so each 2×2-lot quadrant of the 6×6 grid gets a personality.
+    // Same 3×3 carve + NAMES as turf.js zones (q = dj*3 + di) so the takeover
+    // map and the population field describe the same neighbourhoods.
+    //   kind    core (packed strip) | commercial | residential | industrial | projects
+    //   pop     ped + ambient-crowd density weight — REDISTRIBUTES a fixed
+    //           total (perf: never adds bodies), downtown ~4× the docks
+    //   cops    beat-patrol weight: police presence follows the money
+    //   wealth  mean street wealth (casting: who walks here, what they carry)
+    districts: [
+      { q: 0, name: "Northpoint", kind: "residential", pop: 1.4, cops: 0.9,  wealth: 0.45 },
+      { q: 1, name: "Crownhill",  kind: "residential", pop: 1.4, cops: 1.2,  wealth: 0.68 },
+      { q: 2, name: "Eastgate",   kind: "commercial",  pop: 2.0, cops: 1.3,  wealth: 0.55 },
+      { q: 3, name: "Westend",    kind: "commercial",  pop: 2.2, cops: 1.3,  wealth: 0.52 },
+      { q: 4, name: "Midtown",    kind: "core",        pop: 3.8, cops: 2.6,  wealth: 0.78 },
+      { q: 5, name: "Harborside", kind: "commercial",  pop: 1.9, cops: 1.1,  wealth: 0.58 },
+      { q: 6, name: "Southside",  kind: "projects",    pop: 1.0, cops: 0.5,  wealth: 0.16 },
+      { q: 7, name: "Ironworks",  kind: "industrial",  pop: 0.9, cops: 0.5,  wealth: 0.34 },
+      { q: 8, name: "Dockyard",   kind: "industrial",  pop: 1.0, cops: 0.45, wealth: 0.30 },
+    ],
+    // homeless population cast into the projects pocket + industrial fringe
+    // (carved OUT of the ped total, never added on top — perf stays flat)
+    vagrants: 8,
+
     // ---- gangs: factions that own the abandoned blocks (city/gangs.js) -----
     gangs: [
       // Real gangs only, real colors, and the authentic People/Folk NATION split

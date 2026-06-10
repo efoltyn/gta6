@@ -16,6 +16,12 @@
      • HONKING + ROAD RAGE — a car stuck behind a dawdler on a green leans
        on the horn; an aggressive driver who's been blocked too long
        SNAPS and rams (hands the target to vehicles.js's road-rage code).
+     • QUEUES THAT DISSOLVE — every driver (even a cautious one, just
+       later) eventually pulls around a dead obstacle — a wreck, an
+       abandoned car, YOUR parked car — but only when the oncoming lane
+       is actually clear. WHY: a queue at a red reads as law; a queue
+       that flows around your dumped getaway car reads as a LIVING city,
+       and blocking a street with it stays a stunt, not a softlock.
      • EMERGENCY RESPONSE — an AMBULANCE rolls to fresh bodies and a FIRE
        TRUCK screams to burning cars, sirens + flashing bars, then leaves.
 
@@ -122,11 +128,14 @@
   // We bucket it into a readable archetype the moment we first see a car, then
   // use that for honking patience, horn-happiness and road-rage temper. The
   // buckets line up with GTA's vehicleaihandling tiers: timid → menace.
+  // ragePatience = seconds blocked before pulling around the obstacle — EVERY
+  // tier goes eventually (so queues dissolve and the city never gridlocks);
+  // the temperament only sets HOW SOON and HOW ANGRILY.
   const ARCH = {
-    cautious:   { honkPatience: 3.2, horny: 0.10, ragePatience: 1e9, cruiseMul: 0.86 },
-    normal:     { honkPatience: 1.9, horny: 0.34, ragePatience: 1e9, cruiseMul: 1.0 },
-    aggressive: { honkPatience: 0.9, horny: 0.72, ragePatience: 5.5, cruiseMul: 1.12 },
-    reckless:   { honkPatience: 0.5, horny: 0.92, ragePatience: 2.8, cruiseMul: 1.2 },
+    cautious:   { honkPatience: 3.2, horny: 0.10, ragePatience: 4.8, cruiseMul: 0.86 },
+    normal:     { honkPatience: 1.9, horny: 0.34, ragePatience: 2.6, cruiseMul: 1.0 },
+    aggressive: { honkPatience: 0.9, horny: 0.72, ragePatience: 1.6, cruiseMul: 1.12 },
+    reckless:   { honkPatience: 0.5, horny: 0.92, ragePatience: 0.9, cruiseMul: 1.2 },
   };
   function classify(c) {
     const a = c.driver ? (c.driver.aggr || 0) : 0;
@@ -194,6 +203,21 @@
       if (along > 0.4 && along < 7 && lat < 2.4 && along < bg) { bg = along; best = o; }
     }
     return best ? { car: best, gap: bg } : null;
+  }
+
+  // is the OPPOSING lane on `c`'s road clear enough to pull around into?
+  // Checks a window behind→ahead of the car for anything sitting in (or
+  // barrelling down) the lane we'd swerve to — no overtake into a head-on.
+  function laneFree(c) {
+    if (!c.road) return false;
+    for (const o of CBZ.cityCars) {
+      if (o === c || o.dead || o.road !== c.road) continue;
+      const oLat = c.road.vertical ? o.pos.x - c.road.x : o.pos.z - c.road.z;
+      if (Math.abs(oLat + c.lane) > 2.6) continue;        // not in the target lane (-c.lane)
+      const along = c.road.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
+      if (along > -8 && along < 14) return false;
+    }
+    return true;
   }
 
   // ---- area-scaled density + population upkeep --------------------------
@@ -320,26 +344,40 @@
       const blk = blockedAhead(c);
       const stuck = blk && blk.car.v < 1.5 && blk.gap < 5;
       const onGreen = CBZ.cityIsRed && !CBZ.cityIsRed(c.road.vertical);
+      // a DEAD obstacle (wreck, abandoned car, somebody's parked car) is not a
+      // queue — waiting behind it is never lawful, so patience runs even on red.
+      const deadAhead = stuck && (blk.car.abandoned || blk.car.dead || (blk.car.wreckT || 0) > 0 || !blk.car.ai);
       if (stuck) {
         // HONK at whoever's dawdling right in front of us, harder if it's a green.
-        if (c.honkCD <= 0 && Math.random() < arch.horny * (onGreen ? 1 : 0.5)) honkAt(c);
-        // only blocking on a GREEN builds real "why won't you MOVE" rage.
-        if (onGreen) c.blockedT += dt * slice; else c.blockedT = Math.max(0, c.blockedT - dt);
-        // an aggressive/reckless driver who's been blocked too long SNAPS and
-        // aggressively OVERTAKES — flips to the other lane and floors it past the
-        // dawdler. We only touch fields vehicles.js's lane-keeper already honors
-        // (lane / dirSign stays, reckless + a brief speed boost), so it stays in
-        // sync with the order-37 movement loop.
+        if (c.honkCD <= 0 && Math.random() < arch.horny * (onGreen || deadAhead ? 1 : 0.5)) honkAt(c);
+        // blocking on a GREEN — or by a dead obstacle — builds real
+        // "why won't you MOVE" patience-loss; a queue at a red doesn't.
+        if (onGreen || deadAhead) c.blockedT += dt * slice; else c.blockedT = Math.max(0, c.blockedT - dt);
+        // blocked past this driver's patience → PULL AROUND, but only if the
+        // opposing lane is actually clear (no head-on swerves). Everyone goes
+        // eventually — that's how a queue behind a wreck dissolves — but an
+        // aggressive/reckless driver does it as ROAD RAGE: floors it, stays
+        // hot (reckless), while a calm one just eases around and tucks back.
+        // We only touch fields vehicles.js's lane-keeper already honors
+        // (lane flips, a brief baseV boost), so the order-37 loop stays in sync.
         if (c.blockedT > arch.ragePatience && (c._rageT || 0) <= 0) {
-          c._rageT = 3 + Math.random() * 2;
-          c.lane = -c.lane;                 // swerve into the adjacent lane to pass
-          c.reckless = true;
-          c._rageBoost = (c.baseV || 8) * 0.6;
-          c.baseV = (c.baseV || 8) + c._rageBoost;
-          c.blockedT = 0;
-          honkAt(c);
-          if (CBZ.sfx) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 40 * 40) CBZ.sfx("clank"); }
-          if (CBZ.city) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 30 * 30) CBZ.city.note("😡 Road rage — aggressive overtake!", 1.0); }
+          if (!laneFree(c)) {
+            c.blockedT = arch.ragePatience * 0.6;          // boxed in — keep honking, retry soon
+            if (c.honkCD <= 0) honkAt(c);
+          } else {
+            const angry = c.trafArch === "aggressive" || c.trafArch === "reckless";
+            c._rageT = angry ? 3 + Math.random() * 2 : 2.2 + Math.random();
+            c.lane = -c.lane;               // swerve into the adjacent lane to pass
+            c._rageBoost = (c.baseV || 8) * (angry ? 0.6 : 0.3);
+            c.baseV = (c.baseV || 8) + c._rageBoost;
+            c.blockedT = 0;
+            if (angry) {
+              c.reckless = true;
+              honkAt(c);
+              if (CBZ.sfx) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 40 * 40) CBZ.sfx("clank"); }
+              if (CBZ.city) { const cam = CBZ.camera.position; const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z); if (dd < 30 * 30) CBZ.city.note("😡 Road rage — aggressive overtake!", 1.0); }
+            }
+          }
         }
       } else {
         c.blockedT = Math.max(0, c.blockedT - dt * 2 * slice);

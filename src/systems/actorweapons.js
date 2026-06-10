@@ -35,7 +35,7 @@
     Revolver: "sidearm", revolver: "sidearm",
     "Desert Eagle": "sidearm", deagle: "sidearm",
     Uzi: "smg", uzi: "smg",
-    "AK-47": "carbine", ak47: "carbine",
+    "AK-47": "ak47", ak47: "ak47",   // the status rifle gets its OWN model (wood + banana mag) — it must be recognizable in NPC hands
     Sniper: "carbine", sniper: "carbine",
     LMG: "carbine", lmg: "carbine",
   };

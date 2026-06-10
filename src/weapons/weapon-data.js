@@ -68,14 +68,17 @@
       sfx: "shoot_pistol", tracer: 0.022, auto: false,
     },
     {
+      // The status rifle: out-damages the carbine per round but handles LAZY —
+      // slow to bring up (equip), slow to feed (reload), and run-and-gun throws
+      // shots wide (moveSpread). Plant your feet and it earns its price tag.
       id: "ak47", key: "ak47", label: "AK-47", short: "762", slot: "rifle",
-      appearanceFactory: "carbine", magSize: 30, fireMode: "auto", fireDelay: 0.097, reloadTime: 1.55,
-      mag: 30, reserve: 120, reload: 1.55, interval: 0.097, range: 112,
+      appearanceFactory: "ak47", magSize: 30, fireMode: "auto", fireDelay: 0.097, reloadTime: 1.8,
+      mag: 30, reserve: 120, reload: 1.8, interval: 0.097, range: 112,
       damage: 34, headMult: 2.3, dropStart: 64, minDamage: 0.6,
-      spread: 0.011, bodyRadius: 0.61, headRadius: 0.32,
+      spread: 0.011, moveSpread: 2.3, bodyRadius: 0.61, headRadius: 0.32,
       recoil: 0.17, maxRecoil: 0.82, climb: 0.02, sideKick: 0.03,
-      shake: 0.28, heat: 46, knock: 1.4, flash: 0.5,
-      sfx: "shoot_carbine", tracer: 0.013, auto: true,
+      shake: 0.28, heat: 46, knock: 1.4, flash: 0.5, equip: 0.5,
+      sfx: "shoot_carbine", sfxPitch: 0.78, sfxVol: 1.2, tracer: 0.013, auto: true,
     },
     {
       id: "uzi", key: "uzi", label: "MICRO UZI", short: "UZI", slot: "auto",
