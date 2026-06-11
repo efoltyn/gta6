@@ -21,6 +21,9 @@
 
   const CYCLE = 150;        // seconds for a full day
   let t = 0.18;             // start mid-morning
+  // the sky clock, exposed for the multiplayer world save (net/netpersist.js):
+  // no arg reads the phase 0..1; a number sets it (host restoring a saved day)
+  CBZ.dayPhase = function (v) { if (v != null && isFinite(v)) t = (((+v) % 1) + 1) % 1; return t; };
 
   // palette keyframes across the day (0..1): [fog, sunColor, sunInt, hemiInt].
   // dusk fog is a touch deeper than the old 0xff9e6b pastel — the haze near

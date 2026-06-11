@@ -5,7 +5,7 @@
 const crypto = require("crypto");
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const MAX_MSG = 512 * 1024; // hard cap per message: snapshots are ~10-40KB
+const MAX_MSG = 1536 * 1024; // hard cap per message: snapshots are ~10-40KB, a world save (wsave) can run to a few hundred KB
 
 class WSConn {
   constructor(socket) {

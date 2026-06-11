@@ -237,6 +237,7 @@
     "student": ["electronics", "barber", "clothing"],
     "private security": ["security", "bank", "casino"],
   };
+  CBZ.cityJobKinds = JOB_KINDS;   // schedule.js derives timetables from the same vocabulary
   // the NEAREST plausible workplace, picked ONCE and cached. Re-validated
   // against the live arena so a recycled body / new run can't keep a stale lot.
   function jobLot(ped, A) {
@@ -666,6 +667,83 @@
     return true;
   }
 
+  // THE TIMETABLE (schedule.js proposes, this dispatches): every act lands on
+  // machinery that already exists — commute (goEarn's cached job door), lunch
+  // (goErrand's queues), home, the dealer's corner (goDeal), turf (goClimb) —
+  // plus one tiny "hang" (stand a beat at a spot: the bar door after the
+  // whistle, the camp fire, the trap's stash drop).
+  function hangAt(ped, A, x, z, secs, enter, fx, fz) {
+    routeTo(ped, A, enter ? { x, z, enter: true } : { x, z });
+    ped._hangAt = { x, z };
+    ped._hangFace = fx != null ? { x: fx, z: fz } : null;
+    ped._hangUntil = now() + secs * 1000;
+    ped._goalKind = "hang";
+    return true;
+  }
+  function goSched(ped, A, N, prop) {
+    const act = prop.act;
+    let ok = false;
+    if (act === "commute" || act === "work") ok = goEarn(ped, A, N);
+    else if (act === "lunch") ok = goErrand(ped, A, N);
+    else if (act === "home") ok = goHome(ped, A);
+    else if (act === "bar" || act === "club") {
+      // after the whistle / after dark: hold a spot outside the door — the
+      // rope (club.js) and the bar's smokers draft from exactly this crowd
+      const lot = lotNear(A, ped.pos.x, ped.pos.z, ["bar", "casino"], 140);
+      if (lot) {
+        const d = lot.building.door, o = doorOut(lot);
+        ok = hangAt(ped, A, d.x + o.x * 1.6 + (rng() - 0.5) * 3, d.z + o.z * 1.6 + (rng() - 0.5) * 3, 9 + rng() * 9, false, d.x, d.z);
+      }
+    } else if (act === "corner") {
+      ok = goDeal(ped, A, N);
+      if (ok && rng() < 0.2) bark(ped, "“On it till sunrise.”", "#cfe6ff", 2.2);
+    } else if (act === "layup") {
+      const trap = shopByKind(A, "drugs");
+      if (trap && trap.building && trap.building.door) {
+        const d = trap.building.door;
+        ok = hangAt(ped, A, d.x + (rng() - 0.5) * 7, d.z + (rng() - 0.5) * 7, 8 + rng() * 8, false);
+      }
+    } else if (act === "stash") {
+      // the take walks to the trap — rob him on the corner BEFORE this run
+      const trap = shopByKind(A, "drugs");
+      if (trap && trap.building && trap.building.door) {
+        const d = trap.building.door;
+        ped._stashRun = true;
+        ok = hangAt(ped, A, d.x, d.z, 2.5 + rng() * 2, true);
+      }
+    } else if (act === "post") ok = goClimb(ped, A, N);
+    else if (act === "hq") {
+      const hq = ped.gang && CBZ.cityGangHQ ? CBZ.cityGangHQ(ped.gang) : null;
+      const gg = !hq && ped.gang && CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
+      const c = hq || (gg && gg.center);
+      if (c) {
+        routeTo(ped, A, { x: c.x + (rng() - 0.5) * 10, z: c.z + (rng() - 0.5) * 10 });
+        ped._goalKind = "patrol";
+        ok = true;
+      }
+    } else if (act === "camp") {
+      // back to the fire that's THEIRS (props.js publishes the camp anchors)
+      const camps = CBZ.cityCamps;
+      if (camps && camps.length) {
+        let best = null, bd = 1e9;
+        for (let i = 0; i < camps.length; i++) {
+          const dx = camps[i].x - ped.pos.x, dz = camps[i].z - ped.pos.z, dd = dx * dx + dz * dz;
+          if (dd < bd) { bd = dd; best = camps[i]; }
+        }
+        if (best) {
+          const a = rng() * 6.283, rr = rng() * (best.r || 3);
+          ok = hangAt(ped, A, best.x + Math.cos(a) * rr, best.z + Math.sin(a) * rr, 14 + rng() * 10, false, best.x, best.z);
+        }
+      }
+    }
+    if (ok) {
+      ped._schedAct = act;   // anchored — schedule.js damps its pull until the next phase
+      // the morning commute HURRIES (the stroll speed-nudge plumbing, always restored)
+      if (prop.mood === "hurry" && !ped._joyT) { ped._baseSpeed0 = ped.baseSpeed; ped.baseSpeed *= 1.3; ped._joyT = 7 + rng() * 4; }
+    }
+    return ok;
+  }
+
   // ============================================================
   //  UTILITY PICK — score every goal by need × opportunity × fit, take the
   //  best (small jitter breaks ties so the crowd doesn't move in lockstep).
@@ -765,19 +843,30 @@
     if (!ped.vagrant && role !== "busker" && role !== "jogger" &&
         _moments.length < MOMENT_MAX && (ped._momCD || 0) <= now()) sMoment = 0.16 + rng() * 0.18;
 
+    // THE TIMETABLE (schedule.js, guarded): where this life is DUE right now —
+    // the commute, the corner shift, the camp fire. It races like any other
+    // drive, scored UNDER feud/defend, so threats always pre-empt the calendar.
+    let sSched = 0, schedProp = null;
+    if (CBZ.citySchedProposal) {
+      schedProp = CBZ.citySchedProposal(ped);
+      if (schedProp) sSched = schedProp.score;
+    }
+
     // small per-goal jitter so equal scores diverge across the crowd
     sFeud *= 1; sScore *= (0.85 + r * 0.3); sDeal *= (0.85 + rng() * 0.3);
     sClimb *= (0.85 + rng() * 0.3); sEarn *= (0.85 + rng() * 0.3); sChill *= (0.85 + rng() * 0.3);
     sDefend *= (0.9 + rng() * 0.2); sProve *= (0.85 + rng() * 0.3);
     sHome *= (0.9 + rng() * 0.2); sChat *= (0.9 + rng() * 0.2);
     sErrand *= (0.85 + rng() * 0.3); sMoment *= (0.85 + rng() * 0.3);
+    sSched *= (0.9 + rng() * 0.2);
 
     // rank the goals, try the best first; fall through if its opportunity isn't
     // actually there right now (e.g. no dealer to score from) to the next best.
     const order = [
       ["feud", sFeud], ["defend", sDefend], ["score", sScore], ["deal", sDeal],
       ["climb", sClimb], ["prove", sProve], ["home", sHome], ["chat", sChat],
-      ["earn", sEarn], ["errand", sErrand], ["moment", sMoment], ["chill", sChill],
+      ["sched", sSched], ["earn", sEarn], ["errand", sErrand], ["moment", sMoment],
+      ["chill", sChill],
     ].sort((a, b) => b[1] - a[1]);
 
     for (let i = 0; i < order.length; i++) {
@@ -792,6 +881,7 @@
       else if (kind === "prove") ok = goProve(ped, A, N);
       else if (kind === "home") ok = goHome(ped, A);
       else if (kind === "chat") ok = goChat(ped, A, chatMate);
+      else if (kind === "sched") ok = schedProp ? goSched(ped, A, N, schedProp) : false;
       else if (kind === "earn") ok = goEarn(ped, A, N);
       else if (kind === "errand") ok = goErrand(ped, A, N);
       else if (kind === "moment") ok = goMoment(ped, A, N);
@@ -922,6 +1012,40 @@
           ped._goalCD = 2 + rng() * 3; ped.pause = 0.4;
         }
       } else if (now() > (ped._smokeUntil || 0) + 8000) { ped._smokeAt = ped._smokeFace = null; ped._goalKind = null; }
+      return;
+    }
+
+    // HANG (schedule): hold the spot the timetable sent you — the bar door
+    // after work, the camp fire, the trap drop. A dealer's STASH RUN banks
+    // the carry here: wallet drops to walking money, the kick-up feeds the
+    // crew treasury (promotion currency) — so catching him fat is a window.
+    if (kind === "hang") {
+      const hAt = ped._hangAt;
+      if (!hAt) { ped._goalKind = null; return; }
+      if (Math.hypot(ped.pos.x - hAt.x, ped.pos.z - hAt.z) < 2.4) {
+        ped.path = null; ped.target.set(hAt.x, 0, hAt.z);
+        ped.pause = Math.max(ped.pause, 1.8); ped.speed = 0;
+        if (ped._hangFace) face(ped, ped._hangFace.x, ped._hangFace.z);
+        ped._goalCD = Math.max(ped._goalCD || 0, 2);
+        if (ped._stashRun) {
+          const carry = ped.cash | 0;
+          if (carry > 60) {
+            const banked = carry - 40;
+            ped.cash = 40;
+            const gang = ped.gang && CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
+            if (gang) gang.treasury = (gang.treasury || 0) + Math.round(banked * 0.6);
+            if (ped.gstat) ped.gstat.contrib = (ped.gstat.contrib || 0) + banked;
+          }
+          ped._stashRun = false;
+        }
+        if (now() > ped._hangUntil) {
+          satisfy(N, "social", 0.15);
+          ped._hangAt = ped._hangFace = null; ped._goalKind = null;
+          ped._goalCD = 2 + rng() * 3; ped.pause = 0.4;
+        }
+      } else if (now() > (ped._hangUntil || 0) + 9000) {
+        ped._hangAt = ped._hangFace = null; ped._stashRun = false; ped._goalKind = null;
+      }
       return;
     }
 
@@ -1129,6 +1253,11 @@
         ped._watch = null; ped._watchUntil = 0; ped._homeAt = null;
         ped._smokeAt = null; ped._smokeFace = null; ped._smokeUntil = 0;
         ped._paceA = null; ped._paceB = null; ped._paceN = 0; ped._momCD = 0;
+        // schedule state: hangs/stash drop with the old life; the identity sid
+        // is schedule.js' call (a deal that JUST landed must survive this tick)
+        ped._hangAt = null; ped._hangFace = null; ped._hangUntil = 0; ped._stashRun = false;
+        if (CBZ.cityScheduleRecycled) CBZ.cityScheduleRecycled(ped);
+        else { ped._sid = null; ped._sched = null; ped._schedAct = null; }
         // brain-side transients a fresh body shouldn't inherit (crowd.park leaves
         // these set); clearing here is safe — aigoals runs one tick before peds.
         ped.approach = null; ped.reactCD = 0; ped.witnessSev = 0; ped.witnessType = null;
@@ -1189,6 +1318,9 @@
     _queues = []; _pairs = []; _moments = [];
     for (let i = _bubbles.length - 1; i >= 0; i--) { const b = _bubbles[i]; if (b.s && b.s.parent) b.s.parent.remove(b.s); }
     _bubbles.length = 0;
+    // fresh city → release the ledger's live bindings (the BOOK itself survives:
+    // remembered identities re-deal onto the new population at their spots)
+    if (CBZ.cityScheduleNewRun) CBZ.cityScheduleNewRun();
     for (const p of (CBZ.cityPeds || [])) {
       p.rampage = false; p._rampArmed = 0; p._rampHeatT = 0; p._rampT = 0; p._rampPanicT = 0;
     }

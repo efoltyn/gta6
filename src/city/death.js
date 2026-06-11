@@ -271,6 +271,7 @@
   }
 
   // ---- WASTED ----
+  const _ragP = { x: 0, y: 0, z: 0 }, _ragD = { x: 0, y: 0, z: 0 };   // ragdoll scratch
   CBZ.cityKillPlayer = function (reason, imp) {
     const P = CBZ.player;
     if (P.dead) return;
@@ -311,8 +312,27 @@
       const ddx = P.pos.x - imp.fromX, ddz = P.pos.z - imp.fromZ, dl = Math.hypot(ddx, ddz);
       if (dl > 0.01) { fx = ddx / dl + (Math.random() - 0.5) * 0.5; fz = ddz / dl + (Math.random() - 0.5) * 0.5; }
     }
+    // VERLET RAGDOLL (city/ragdoll.js): YOUR body flops for real too — the rig
+    // takes the killing impulse point-blank, limbs drape down stairs/off ledges,
+    // and the death cam orbits the PELVIS as it goes (ragdoll.js feeds player.pos
+    // from the pelvis point each frame; camera.js already orbits player.pos).
+    // When it engages, P._death collapses to a landed sentinel so physics.js's
+    // spin-fling never fights the points. Falls back to the legacy fling cleanly.
+    let ragged = false;
+    if (CBZ.cityRagdoll && CBZ.playerChar && CBZ.city && CBZ.city.playerActor) {
+      let mag = splatDeath ? 3.5 : Math.min(18, 5 + (imp && imp.dmg != null ? imp.dmg : 25) * 0.14);
+      if (isExplosionCause(reason)) mag = 24;             // a blast LIFTS you
+      _ragD.x = fx; _ragD.y = 0; _ragD.z = fz;
+      _ragP.x = P.pos.x - fx * 0.25;
+      _ragP.y = P.pos.y + (imp && imp.headshot ? 2.05 : 1.25);
+      _ragP.z = P.pos.z - fz * 0.25;
+      ragged = CBZ.cityRagdoll(CBZ.city.playerActor, _ragP, _ragD, mag);
+    }
     // spinning ragdoll fling (physics.js handles player._death in non-escape modes)
-    P._death = splatDeath ? {
+    P._death = ragged ? {
+      // verlet owns the body — physics.js just idles in its landed branch
+      vx: 0, vz: 0, vy: 0, spin: 0, spin2: 0, t: 0, landed: true, seed: Math.random() * 6.28,
+    } : splatDeath ? {
       // low, flat crumple — barely leaves the ground, lands almost immediately
       vx: Math.cos(a) * (1.2 + Math.random() * 1.5), vz: Math.sin(a) * (1.2 + Math.random() * 1.5),
       vy: 1.0 + Math.random() * 1.0, spin: (Math.random() * 2 - 1) * 9, spin2: (Math.random() * 2 - 1) * 7,

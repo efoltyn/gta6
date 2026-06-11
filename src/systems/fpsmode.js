@@ -871,10 +871,10 @@
       CBZ.cityKOPed && CBZ.cityKOPed(a, fx, fz); down = true;       // taser → KO
     } else {
       if (lethalHead) a.hp = 0; else a.hp -= dmg;
-      if (a.hp <= 0) { CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: 6, fling: 3 }, hit.head ? "headshot" : "shot"); down = true; }
+      if (a.hp <= 0) { CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: 6, fling: 3, cal: caliber(w), wkey: w.key, dist: hit.dist, point: hit.point }, hit.head ? "headshot" : "shot"); down = true; }
       else {
         CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, 16, 1, CBZ.city.playerActor);
-        CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: hit.head ? 6.5 : 4.5 });
+        CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: (hit.head ? 6.5 : 4.5) * (0.6 + 0.45 * caliber(w)) });
         // getting shot provokes fight-or-flight. ANYONE HOLDING A GUN shoots BACK —
         // a person who's strapped and gets hit draws and returns fire (self-defence),
         // even a normally-meek civilian. Only the UNARMED + non-bold flee.
@@ -1183,7 +1183,7 @@
         // ~2x harder than a 9mm; heavy rounds also dent), a panel shudder, paint
         // chips in THIS car's coat, and a persistent hole that RIDES the panel.
         const car = hit.car;
-        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, (w.pellets ? 1.7 : 4.2) * cal, { byPlayer: true, crumple: cal >= 1.0 });
+        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, (w.pellets ? 1.7 : 4.2) * cal, { byPlayer: true, crumple: cal >= 1.0, point: hit.point, normal: hit.normal, cal: cal });
         spawnImpact(hit.point, false, cal >= 1.3);
         if (CBZ.bulletImpact) {
           CBZ.bulletImpact(hit.point, hit.normal, { kind: "spark", power: cal });
@@ -1212,6 +1212,10 @@
         // persistent pock — the wall you magdumped STAYS pocked, 7.62 > 9mm
         if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, { size: 0.15 + cal * 0.13, dist: hit.dist });
         else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
+        // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
+        // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
+        if (CBZ.game.mode === "city" && cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
+          CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
         if (wallThudDist < 0) wallThudDist = hit.dist;
       }
     }

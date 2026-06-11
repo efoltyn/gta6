@@ -741,7 +741,12 @@
       cop.armed = false; cop.weapon = null;
       if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
       if (CBZ.gore) { let dir = imp && imp.fromX != null ? { x: cop.pos.x - imp.fromX, z: cop.pos.z - imp.fromZ } : null; CBZ.gore(cop.pos.x, cop.pos.y + 1.0, cop.pos.z, { dir, amount: 1.1, player: false }); }
-      if (CBZ.body) { if (imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 8, fling: 5 }); else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 }); }
+      let copRagged = false;
+      if (CBZ.cityRagdoll && imp && imp.fromX != null) {
+        const rl = Math.hypot(cop.pos.x - imp.fromX, cop.pos.z - imp.fromZ) || 1;
+        copRagged = CBZ.cityRagdoll(cop, null, { x: (cop.pos.x - imp.fromX) / rl, y: 0, z: (cop.pos.z - imp.fromZ) / rl }, 8);
+      }
+      if (CBZ.body && !copRagged) { if (imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 8, fling: 5 }); else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 }); }
       // who killed the officer? player → automatic 5 stars; another NPC → that
       // NPC's offense; a cop / driverless car → nobody is charged.
       const att = imp && imp.attacker && imp.attacker.pos ? imp.attacker : null;
@@ -962,6 +967,7 @@
   // block picked up (same fields crumpleCar/damageEngine wrote).
   function rbRestoreCar(c) {
     c.crumple = 0; c._cside = null; c.group.scale.set(1, 1, 1);
+    if (CBZ.cityCarImpactReset) CBZ.cityCarImpactReset(c);   // back out vertex craters / hung panels / dead lamps
     const ud = c.group.userData, base = ud && ud.crashBase;
     if (base) {
       if (ud.body) { ud.body.rotation.set(0, 0, 0); ud.body.position.y = base.bodyY; ud.body.position.z = base.bodyZ; ud.body.scale.set(1, 1, 1); }

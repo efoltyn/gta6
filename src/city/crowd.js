@@ -530,6 +530,7 @@
     poolBuilt = true;
   }
   function park(e) {
+    if (CBZ.cityPedStash) CBZ.cityPedStash(e.ped);   // bank the identity before the body leaves play
     const ped = e.ped;
     ped._parked = true; ped.group.visible = false;
     ped.pos.set(PARK, 0, PARK); ped.target.set(PARK, 0, PARK);
@@ -550,6 +551,7 @@
     // a body promoted at 3am in the projects walks in as a crook, not a
     // tourist. Reset the phase stamp so the recast applies per-assignment.
     if (CBZ.cityRecastForHour) { ped._castNight = void 0; CBZ.cityRecastForHour(ped, Math.random); }
+    if (CBZ.cityPedDeal) CBZ.cityPedDeal(ped);   // a remembered identity due at this spot walks back in, carrying its take
   }
   function releaseAll() {
     if (!poolBuilt) return;

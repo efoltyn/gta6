@@ -27,6 +27,7 @@ function mkConfig(extra) {
     name: "Test RP City", motd: "test motd", tags: ["test"],
     password: "", adminPass: "letmein", maxPlayers: 8, port: PORT,
     roles: [{ id: "civ", label: "Civilian" }, { id: "police", label: "Police" }],
+    world: { name: "Test World", dir: path.join(dir, "worlds"), autosaveSec: 60 },
   }, extra || {});
   const p = path.join(dir, "server.json");
   fs.writeFileSync(p, JSON.stringify(cfg));
@@ -55,7 +56,7 @@ class Client {
     this.ws.onclose = () => { this.closed = true; };
     this.ready = new Promise((res, rej) => {
       this.ws.onopen = () => {
-        this.ws.send(JSON.stringify({ t: "hello", name, role: (opts && opts.role) || "civ", pass: (opts && opts.pass) || "", v: 1 }));
+        this.ws.send(JSON.stringify({ t: "hello", name, role: (opts && opts.role) || "civ", pass: (opts && opts.pass) || "", v: 1, pid: (opts && opts.pid) || undefined }));
         res();
       };
       this.ws.onerror = (e) => rej(e);
@@ -78,12 +79,14 @@ class Client {
 (async function main() {
   console.log("== multiplayer server protocol test (port " + PORT + ") ==");
   const cfgPath = mkConfig();
+  const worldFile = path.join(path.dirname(cfgPath), "worlds", "Test-World.json");
   const server = await startServer(cfgPath);
 
   // /api/info
   const info = await fetch(`http://127.0.0.1:${PORT}/api/info`).then((r) => r.json());
   ok(info.game === "cell-block-z" && info.name === "Test RP City", "/api/info identity", JSON.stringify({ name: info.name, players: info.players }));
   ok(Array.isArray(info.roles) && info.roles.length === 2, "/api/info exposes RP roles", info.roles.map((r) => r.id).join(","));
+  ok(Array.isArray(info.feat) && info.feat.includes("to") && info.feat.includes("persist") && info.world && info.world.name === "Test World" && info.world.autosaveSec === 60, "/api/info advertises feat + world", JSON.stringify(info.world));
   // static serving (the join link IS the game)
   const html = await fetch(`http://127.0.0.1:${PORT}/index.html`).then((r) => r.text());
   ok(html.includes("src/net/net.js"), "serves the game w/ net scripts");
@@ -91,11 +94,13 @@ class Client {
   ok(blocked === 403, "server config is NOT downloadable", "status " + blocked);
 
   // A joins -> becomes host
-  const A = new Client("Alice", { role: "police" });
+  const A = new Client("Alice", { role: "police", pid: "pid-A" });
   await A.ready;
   const wA = await A.expect((m) => m.t === "welcome");
   ok(wA && wA.id === 1 && wA.hostId === 1, "first joiner is elected sim host", JSON.stringify({ id: wA && wA.id, hostId: wA && wA.hostId }));
   ok(wA && wA.server && wA.server.motd === "test motd", "welcome carries server identity");
+  ok(wA && Array.isArray(wA.feat) && wA.feat.includes("to") && wA.feat.includes("persist"), "welcome advertises feat flags", JSON.stringify(wA && wA.feat));
+  ok(wA && wA.world && wA.world.name === "Test World" && wA.world.savedAt === null && wA.world.autosaveSec === 60, "welcome carries world identity (unsaved)", JSON.stringify(wA && wA.world));
 
   // B joins
   const B = new Client("Bob");
@@ -135,6 +140,37 @@ class Client {
   const shotC = await C.expect((m) => m.t === "ev" && m.e === "shot");
   ok(!!shotB && !!shotC, "broadcast ev reaches everyone else");
 
+  // "to" relay: payload delivered to one client only, stamped as the sender
+  B.send({ t: "ev", e: "to", id: 1, d: { t: "ev", e: "rag", p: [1, 2, 3], d: [0, 0, 1], imp: 9 } });
+  const ragA = await A.expect((m) => m.t === "ev" && m.e === "rag" && m.imp === 9);
+  ok(ragA && ragA.id === 2 && ragA.p[2] === 3, '"to" relay delivers payload to its target w/ sender id', JSON.stringify(ragA));
+  await sleep(200);
+  ok(C.count((m) => m.t === "ev" && m.e === "rag") === 0, '"to" relay NOT delivered to others');
+  B.send({ t: "ev", e: "to", id: 99, d: { t: "ev", e: "rag", imp: 1 } });
+  await sleep(150);
+  ok(!B.closed, 'unknown "to" target dropped silently');
+
+  // world persistence: wsave is host-only, lands on disk atomically
+  B.send({ t: "ev", e: "wsave", world: { turf: { docks: "bogus" } } });
+  await sleep(300);
+  ok(!fs.existsSync(worldFile), "guest wsave ignored (no world file)");
+  A.send({ t: "ev", e: "wsave", world: { turf: { docks: "kings" }, day: 0.4 } });
+  let saved = null;
+  for (let i = 0; i < 40 && !saved; i++) { await sleep(100); try { saved = JSON.parse(fs.readFileSync(worldFile, "utf8")); } catch (e) {} }
+  ok(saved && saved.v === 1 && saved.name === "Test World" && saved.world && saved.world.turf.docks === "kings", "host wsave lands on disk", worldFile);
+  ok(saved && typeof saved.savedAt === "number", "world file stamps savedAt");
+
+  // character save/load keyed by pid (cload arrives right after join)
+  A.send({ t: "ev", e: "csave", char: { name: "Alice", money: 1234, level: 7 } });
+  B.send({ t: "ev", e: "csave", char: { money: 9 } }); // no pid in B's hello -> skipped
+  await sleep(150);
+  const A2 = new Client("Alice", { pid: "pid-A" });
+  await A2.ready;
+  const cl = await A2.expect((m) => m.t === "ev" && m.e === "cload");
+  ok(cl && cl.char && cl.char.money === 1234 && cl.char.level === 7, "csave/cload roundtrip keyed by pid", JSON.stringify(cl && cl.char));
+  A2.close();
+  await A.expect((m) => m.t === "leave" && m.id === 4);
+
   // chat + RP commands
   B.send({ t: "chat", text: "hello city" });
   const sayA = await A.expect((m) => m.t === "chat" && m.kind === "say" && m.text === "hello city");
@@ -169,6 +205,32 @@ class Client {
 
   C.close();
   server.kill();
+  await sleep(300);
+
+  // shutdown flushed the debounced char save to disk
+  let saved2 = null;
+  try { saved2 = JSON.parse(fs.readFileSync(worldFile, "utf8")); } catch (e) {}
+  ok(saved2 && saved2.chars && saved2.chars["pid-A"] && saved2.chars["pid-A"].money === 1234 && Object.keys(saved2.chars).length === 1, "shutdown flush writes chars keyed by pid (pid-less csave skipped)", saved2 && JSON.stringify(Object.keys(saved2.chars)));
+
+  // reboot the SAME world: first host gets wload, chars follow their pid
+  const server3 = await startServer(cfgPath);
+  const G = new Client("Gwen", { pid: "pid-A" });
+  await G.ready;
+  const wG = await G.expect((m) => m.t === "welcome");
+  ok(wG && wG.world && typeof wG.world.savedAt === "number", "welcome shows the saved world", JSON.stringify(wG && wG.world));
+  const wl = await G.expect((m) => m.t === "ev" && m.e === "wload");
+  ok(wl && wl.world && wl.world.turf.docks === "kings" && wl.world.day === 0.4, "first host after boot gets wload");
+  const cl2 = await G.expect((m) => m.t === "ev" && m.e === "cload");
+  ok(cl2 && cl2.char && cl2.char.money === 1234, "character follows its pid across reboots");
+  const H = new Client("Hank");
+  await H.ready;
+  await H.expect((m) => m.t === "welcome");
+  G.close();
+  await H.expect((m) => m.t === "host" && m.id === 2);
+  await sleep(200);
+  ok(H.count((m) => m.t === "ev" && m.e === "wload") === 0, "host migration does NOT replay wload");
+  H.close();
+  server3.kill();
   await sleep(200);
 
   // password gate (fresh server, passworded)

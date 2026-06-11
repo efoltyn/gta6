@@ -21,6 +21,8 @@
     name: "",
     role: "civ",
     server: null,         // {name, motd, tags, maxPlayers}
+    feat: [],             // server feature flags from welcome (e.g. "to", "persist")
+    serverWorld: null,    // {name, savedAt} when the server holds a saved world
     players: new Map(),   // id -> {id, name, role}
     ws: null,
     _handlers: {},        // msg type -> [fn]
@@ -46,6 +48,16 @@
   net.sendEv = function (obj) { obj.t = "ev"; net.send(obj); };
   net.chat = function (text) { net.send({ t: "chat", text }); };
 
+  net.hasFeat = function (f) { return net.feat.indexOf(f) >= 0; };
+  // targeted relay (servers advertising feat "to"): the server unwraps d and
+  // delivers it to that ONE client — what lets the host send per-guest scoped
+  // snapshots instead of broadcasting the whole world to everyone.
+  net.sendTo = function (id, d) {
+    if (!net.hasFeat("to")) return false;
+    net.sendEv({ e: "to", id, d });
+    return true;
+  };
+
   // ---- connect / disconnect ----------------------------------------------
   net.connect = function (opts) {
     opts = opts || {};
@@ -55,7 +67,10 @@
     net.name = opts.name || "Stranger";
     net.role = opts.role || "civ";
     net.ws.onopen = function () {
-      net.send({ t: "hello", name: opts.name, role: opts.role, pass: opts.pass || "", v: 1 });
+      const m = { t: "hello", name: opts.name, role: opts.role, pass: opts.pass || "", v: 1 };
+      // stable identity across sessions (netpersist.js) — keys the saved character
+      if (CBZ.netPid) try { m.pid = CBZ.netPid(); } catch (e) {}
+      net.send(m);
     };
     net.ws.onmessage = function (e) {
       let m;
@@ -66,6 +81,8 @@
     net.ws.onclose = function () {
       const was = net.active;
       net.active = false;
+      net.feat = [];
+      net.serverWorld = null;
       net.players.clear();
       emit(net._handlers, "_offline", {});
       if (was && CBZ.city && CBZ.city.note) CBZ.city.note("⚠ Disconnected from server — world is now local", 4);
@@ -81,6 +98,8 @@
         net.id = m.id;
         net.hostId = m.hostId;
         net.server = m.server;
+        net.feat = m.feat || (m.server && m.server.feat) || [];
+        net.serverWorld = m.world || (m.server && m.server.world) || null;
         net.active = true;
         net.players.clear();
         for (const p of m.players || []) net.players.set(p.id, p);
@@ -111,6 +130,8 @@
       case "chat": emit(net._handlers, "chat", m); break;
       case "sys": emit(net._handlers, "sys", m); break;
       case "ev": emit(net._evHandlers, m.e, m); break;
+      // anything newer (persistence loads etc.) reaches net.on(type, fn) directly
+      default: emit(net._handlers, m.t, m); break;
     }
   }
 

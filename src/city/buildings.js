@@ -665,7 +665,11 @@
   function resetBreaches() {
     if (!cityBreaches.length) return;
     let dirty = false;
-    for (const b of cityBreaches) {
+    // REVERSE: a hole carved into another hole's remnant must restore first,
+    // so the outer record then owns deleting that remnant — never re-adding a
+    // disposed mesh/collider to the live sets.
+    for (let bi = cityBreaches.length - 1; bi >= 0; bi--) {
+      const b = cityBreaches[bi];
       // remove the dressing meshes (remnant flanks, backing quad, etc.)
       for (const m of b.extras) {
         if (m.parent) m.parent.remove(m); else CBZ.scene.remove(m);
@@ -680,31 +684,48 @@
     }
     cityBreaches.length = 0;
     if (dirty && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (CBZ.cityFracture && CBZ.cityFracture._cleared) CBZ.cityFracture._cleared();   // wipe the hole ledger with the walls
   }
 
-  // PUBLIC: blast a passable hole through the nearest ground-floor wall to (x,z).
-  // `r` ~ the breach half-reach in metres (an RPG blastRadius 13 → r≈3.6, a
-  // satisfying car-sized hole). Returns true if a wall actually opened.
-  CBZ.cityBreach = function (x, z, r) {
-    r = r || 1.6;
-    if (!CBZ.scene || !CBZ.colliders) return false;
-    // --- find the nearest GROUND-FLOOR tall wall (reuses cityDamageBuilding's
-    //     nearest-wall search, but restricted to ground-floor solid walls that
-    //     back-point to a real mesh we can hide/split). ---
+  // ---- GENERALIZED WALL CARVE (any height) -------------------------------
+  // The ground-floor breach grown up: walls are one solid box PER STOREY PER
+  // FACE, so carving at any height just means picking the wall collider whose
+  // y-span CONTAINS the hit instead of gating to the street. The opening gets
+  // full-height flanks + partial-height SILL/HEADER remnants — CBZ.collide's
+  // y-gating makes a chest-high murder hole shoot-through but not walk-through,
+  // while a floor-level hole drops its sill and reads as a blasted doorway.
+  // Dressing per hole: a room-dark inset pocket (hides the merged SKY/trim
+  // slabs that would float across the gap, warm spill after dusk) + a fractured
+  // concrete rim of jittered prism chunks (merged to ONE mesh, fake-AO shaded).
+  // city/fracture.js drives this primitive and owns ledger/caps/persistence.
+  let _rimMat = null, _insetMat = null, _spillMat = null, _plyMat = null, _plyBatMat = null;
+  function rimMat() { return _rimMat || (_rimMat = new THREE.MeshLambertMaterial({ color: 0x8d8576, vertexColors: true })); }
+  function insetMat() { return _insetMat || (_insetMat = new THREE.MeshBasicMaterial({ color: 0x1c1812, side: THREE.BackSide })); }
+  function spillMat() { return _spillMat || (_spillMat = new THREE.MeshBasicMaterial({ color: 0xffb45e, transparent: true, opacity: 0.08, depthWrite: false })); }
+  function plyMat() { return _plyMat || (_plyMat = new THREE.MeshLambertMaterial({ color: 0x9a7b4f })); }
+  function plyBatMat() { return _plyBatMat || (_plyBatMat = new THREE.MeshLambertMaterial({ color: 0x6f5636 })); }
+
+  function carveHole(x, y, z, r, opts) {
+    opts = opts || {};
+    r = r || 1.2;
+    if (!CBZ.scene || !CBZ.colliders) return null;
+    // --- nearest WALL box whose y-span contains the hit ---
+    const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
     let best = null, bestD = 1e9;
-    const searchR2 = 25;   // 5m: a wall right at the impact
     for (let i = 0; i < CBZ.colliders.length; i++) {
       const c = CBZ.colliders[i];
       if (c.y1 == null || !c.ref) continue;                 // not a wall-style AABB w/ a mesh
-      if (!(c.y0 <= 0.2 && c.y1 >= 2.0)) continue;          // ground-floor full-height wall only
+      if (y < c.y0 - 0.3 || y > c.y1 + 0.3) continue;       // the box must CONTAIN the hit height
+      if (c.y1 - c.y0 < 1.6) continue;                      // sills / furniture slabs aren't walls
+      if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.9) continue;   // thick = counters/plinths, skip
+      const mt = c.ref.material; if (mt && mt.transparent) continue;    // glass/doors keep their own systems
       const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
-      if (dd > searchR2 || dd >= bestD) continue;
+      if (dd > sr2 || dd >= bestD) continue;
       bestD = dd; best = c;
     }
     const wall = best && best.ref;
-    // nothing to breach (open air, or the wall was already opened) → just scorch.
-    if (!wall || wall._breached) { CBZ.cityScorch(x, z, (r || 1.6) * 0.9 + 1.2); return false; }
+    if (!wall || wall._breached) return null;
     wall._breached = true;
 
     const c = best;
@@ -715,78 +736,208 @@
     const len = maxU - minU;
     const thick = horiz ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
     const fixed = horiz ? (c.minZ + c.maxZ) / 2 : (c.minX + c.maxX) / 2;    // world coord on the off-axis
-    const y0 = c.y0, y1 = c.y1, ymid = (y0 + y1) / 2, hgt = y1 - y0;
+    const y0 = c.y0, y1 = c.y1;
     const hit = horiz ? x : z;                              // where the blast struck along the wall axis
     // gap = the opening centred on the hit, clamped within the wall, sized to the blast
-    const gapW = Math.min(len * 0.8, r * 2);
+    const gapW = Math.max(0.5, Math.min(len * 0.8, r * 2));
     let u0 = Math.max(minU, hit - gapW / 2), u1 = Math.min(maxU, hit + gapW / 2);
     if (u1 - u0 < 0.4) { u0 = Math.max(minU, (minU + maxU) / 2 - gapW / 2); u1 = Math.min(maxU, (minU + maxU) / 2 + gapW / 2); }
+    // vertical opening, clamped to the storey box. A bottom near the floor
+    // drops the SILL entirely (a blasted doorway); a top near the slab keeps
+    // no header. Anything between leaves real partial-height remnants.
+    const yc = Math.max(y0 + 0.3, Math.min(y1 - 0.3, y));
+    let v0 = Math.max(y0, yc - r), v1 = Math.min(y1, yc + r);
+    if (v1 - v0 < 1.0) { const vm = (v0 + v1) / 2; v0 = Math.max(y0, vm - 0.5); v1 = Math.min(y1, vm + 0.5); }
+    if (v0 - y0 < 0.55) v0 = y0;        // no ankle lip — clean walk-through bottom
+    if (y1 - v1 < 0.35) v1 = y1;
+    // OUTWARD side: from the building centre when we have one (stable across
+    // replays), else from the side the hit came from (scene-level props).
+    const cOff = horiz ? fixed - pz : fixed - px;
+    let outS;
+    if (parent && Math.abs(cOff) > 0.6) outS = cOff >= 0 ? 1 : -1;
+    else { const off = horiz ? (z - fixed) : (x - fixed); outS = off >= 0 ? 1 : -1; }
 
     const wmat = wall.material;
-    const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false };
+    const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false,
+      gap: { horiz, fixed, thick, u0, u1, v0, v1, y0, y1, px, pz, outS, parent } };
 
     // hide the solid wall mesh + remove it from LOS (cops can see/shoot through)
     wall.visible = false;
     if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(wall); if (li >= 0) { CBZ.losBlockers.splice(li, 1); rec.wallWasLos = true; } }
 
-    // --- SURVIVING FLANKS: rebuild the wall either side of the gap as thin
-    //     remnant boxes (parented to the building group so they inherit its
-    //     transform — local coords subtract the parent position). Each gets its
-    //     own height-gated collider; a flank thinner than ~0.3m is skipped. ---
-    function addRemnant(a, b) {
+    // --- SURVIVING REMNANTS: full-height flanks either side of the gap plus
+    //     partial-height sill/header boxes across it (parented to the building
+    //     group — local coords subtract the parent position). Each gets its own
+    //     height-gated collider; slivers are skipped. ---
+    function addRemnant(a, b, ry0, ry1) {
       const fw = b - a; if (fw < 0.3) return;
-      const ucen = (a + b) / 2;
+      if (ry0 == null) ry0 = y0; if (ry1 == null) ry1 = y1;
+      const rh = ry1 - ry0; if (rh < 0.18) return;
+      const ucen = (a + b) / 2, ymid = (ry0 + ry1) / 2;
       const wx = horiz ? ucen : fixed, wz = horiz ? fixed : ucen;
       const bw = horiz ? fw : thick, bd = horiz ? thick : fw;
-      const g = new THREE.BoxGeometry(bw, hgt, bd);
+      const g = new THREE.BoxGeometry(bw, rh, bd);
       // the wall material carries vertexColors (fake-AO walls) — the remnant
       // geometry needs the colour attribute too or it samples black
-      if (wmat && wmat.vertexColors) shadeGeo(g, true);
+      if (wmat && wmat.vertexColors) shadeGeo(g, ry0 <= 0.2);
       const m = new THREE.Mesh(g, wmat);
       // parent-local position = world minus parent offset (parent has y=0 offset)
       m.position.set(wx - px, ymid, wz - pz);
       m.castShadow = true; m.receiveShadow = true;
       if (parent) parent.add(m); else CBZ.scene.add(m);
       rec.extras.push(m);
-      const col = { minX: wx - bw / 2, maxX: wx + bw / 2, minZ: wz - bd / 2, maxZ: wz + bd / 2, ref: m, y0: y0, y1: y1 };
+      const col = { minX: wx - bw / 2, maxX: wx + bw / 2, minZ: wz - bd / 2, maxZ: wz + bd / 2, ref: m, y0: ry0, y1: ry1 };
       CBZ.colliders.push(col); rec.remnCols.push(col);
       if (rec.wallWasLos && CBZ.losBlockers) CBZ.losBlockers.push(m);
     }
-    addRemnant(minU, u0);   // left flank
-    addRemnant(u1, maxU);   // right flank
+    addRemnant(minU, u0);                       // left flank
+    addRemnant(u1, maxU);                       // right flank
+    addRemnant(u0 - 0.01, u1 + 0.01, y0, v0);   // sill below the opening
+    addRemnant(u0 - 0.01, u1 + 0.01, v1, y1);   // header above it
 
     // OPEN THE COLLIDER: splice the original wall AABB out + rebuild broadphase
     const ci = CBZ.colliders.indexOf(c); if (ci >= 0) CBZ.colliders.splice(ci, 1);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
 
-    // --- DRESS the hole: a dark scorched backing quad spanning the gap so the
-    //     interior reads dark, set a hair INSIDE the wall plane on both sides. ---
-    const gapU = u1 - u0, gapCen = (u0 + u1) / 2;
-    const inN = (() => {
-      // inward normal ≈ toward the blast origin's opposite? use side the blast hit
-      const off = horiz ? (z - fixed) : (x - fixed);
-      return off >= 0 ? 1 : -1;   // +1 if blast on +side of the wall, push backing to the other side
-    })();
-    for (const sgn of [-1, 1]) {                            // a quad facing each way so the hole reads from in + out
-      const q = new THREE.Mesh(new THREE.PlaneGeometry(gapU * 0.96, hgt * 0.96), scorchMat());
-      const qx = horiz ? gapCen : fixed, qz = horiz ? fixed : gapCen;
-      q.position.set(qx - px + (horiz ? 0 : sgn * 0.04), ymid, qz - pz + (horiz ? sgn * 0.04 : 0));
-      aimDecal(q, horiz ? 0 : sgn, 0, horiz ? sgn : 0);
-      q.renderOrder = 2;
-      if (parent) parent.add(q); else CBZ.scene.add(q);
-      rec.extras.push(q);
+    // window panes hanging on the carved band would float over the hole —
+    // clear them silently (the carve's debris/replay-silence owns the moment;
+    // cityGlassReset restores them with the wall on a new run)
+    for (let i = 0; i < cityGlass.length; i++) {
+      const gp = cityGlass[i];
+      if (gp.shattered) continue;
+      const gu = horiz ? gp.x : gp.z, gf = horiz ? gp.z : gp.x;
+      if (Math.abs(gf - fixed) > thick / 2 + 0.5) continue;
+      if (gu < u0 - 0.2 || gu > u1 + 0.2 || gp.y < v0 - 0.3 || gp.y > v1 + 0.3) continue;
+      gp.shattered = true;
+      if (gp.mesh) gp.mesh.visible = false; else paneShow(gp, false);
+      if (gp.col) { const gi = CBZ.colliders.indexOf(gp.col); if (gi >= 0) CBZ.colliders.splice(gi, 1); }
+    }
+
+    // --- DRESS: a room-deep dark INSET pocket (BackSide box — you look INTO
+    //     it) with a warm spill quad at its back that glows after dusk, so an
+    //     upper-storey wound reads as a blown-open room, not a paper cutout. ---
+    const gapU = u1 - u0, gapV = v1 - v0, gapCen = (u0 + u1) / 2, vCen = (v0 + v1) / 2;
+    const dep = v0 === y0 ? 1.0 : 2.2;          // walk-through holes keep the dark pass brief
+    const inCtr = fixed - outS * (dep - thick) / 2;   // pocket centred inward from the outer plane
+    const ig = new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep, gapV + 0.2, horiz ? dep : gapU + 0.2);
+    const im = new THREE.Mesh(ig, insetMat());
+    im.position.set((horiz ? gapCen : inCtr) - px, vCen, (horiz ? inCtr : gapCen) - pz);
+    im.castShadow = false; im.receiveShadow = false;
+    if (parent) parent.add(im); else CBZ.scene.add(im);
+    rec.extras.push(im);
+    const backN = fixed + outS * (thick / 2 - dep + 0.06);
+    const sq = new THREE.Mesh(new THREE.PlaneGeometry(gapU * 0.9, gapV * 0.9), spillMat());
+    sq.position.set((horiz ? gapCen : backN) - px, vCen, (horiz ? backN : gapCen) - pz);
+    aimDecal(sq, horiz ? 0 : outS, 0, horiz ? outS : 0);
+    sq.renderOrder = 2;
+    if (parent) parent.add(sq); else CBZ.scene.add(sq);
+    rec.extras.push(sq);
+
+    // --- FRACTURED RIM: 8-13 jittered concrete prisms ringing the opening in
+    //     a radial crack pattern, a few HANGING into the gap as cracked
+    //     overhang. Built in face space, merged to ONE mesh, fake-AO shaded. ---
+    const rim = [];
+    const nCh = 8 + ((Math.random() * 6) | 0);
+    const per = 2 * (gapU + gapV);
+    for (let i = 0; i < nCh; i++) {
+      const cw = 0.2 + Math.random() * (0.25 + Math.min(0.5, r * 0.18));
+      const chh = cw * (0.7 + Math.random() * 0.9);
+      const g = new THREE.BoxGeometry(cw, chh, 0.16 + Math.random() * 0.22);
+      g.rotateZ((Math.random() - 0.5) * 1.1);   // radial jitter around the face normal
+      g.rotateX((Math.random() - 0.5) * 0.4);
+      // walk the perimeter (bottom → right → top → left), jittered
+      const t = ((i + Math.random() * 0.6) / nCh) * per;
+      let fu, fv;
+      if (t < gapU) { fu = u0 + t; fv = v0 + (Math.random() * 0.12 - 0.04); }
+      else if (t < gapU + gapV) { fu = u1 + (Math.random() * 0.1 - 0.04); fv = v0 + (t - gapU); }
+      else if (t < gapU * 2 + gapV) {
+        fu = u1 - (t - gapU - gapV);
+        fv = Math.random() < 0.45 ? v1 - chh * 0.45 : v1 + (Math.random() * 0.1 - 0.03);   // overhang chunks HANG into the gap
+      } else { fu = u0 - (Math.random() * 0.1 - 0.04); fv = v1 - (t - gapU * 2 - gapV); }
+      fu = Math.max(u0 - 0.15, Math.min(u1 + 0.15, fu + (Math.random() - 0.5) * 0.2));
+      fv = Math.max(v0 - 0.1, Math.min(v1 + 0.12, fv));
+      const fn = fixed + outS * (thick / 2 - 0.05 + Math.random() * 0.16);   // proud of the face
+      if (horiz) g.translate(fu - px, fv, fn - pz);
+      else { g.rotateY(Math.PI / 2); g.translate(fn - px, fv, fu - pz); }
+      rim.push(g);
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    let rgs = null;
+    if (BGU && BGU.mergeBufferGeometries && rim.length > 1) { const m = BGU.mergeBufferGeometries(rim); for (const g of rim) g.dispose(); rgs = m ? [m] : null; }
+    else if (rim.length) rgs = rim;            // no merger: every chunk still lands, one mesh each
+    if (rgs) for (let ri = 0; ri < rgs.length; ri++) {
+      const rg = rgs[ri];
+      shadeGeo(rg, false);
+      const rm = new THREE.Mesh(rg, rimMat());
+      rm.castShadow = false; rm.receiveShadow = true;
+      if (parent) parent.add(rm); else CBZ.scene.add(rm);
+      rec.extras.push(rm);
     }
 
     cityBreaches.push(rec);
+    return rec;
+  }
+  // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there)
+  CBZ.cityCarveWall = carveHole;
 
+  // PUBLIC: plywood a hole over — the city patches its oldest wounds when the
+  // fracture ledger overflows. A board + battens on the street face, a solid
+  // collider filling the opening and the board back in the LOS set; everything
+  // rides the SAME rec, so the run-reset chain tears it down with the breach.
+  CBZ.cityBoardHole = function (rec) {
+    if (!rec || rec.boarded || !rec.gap) return;
+    rec.boarded = true;
+    const g = rec.gap;
+    const gapU = g.u1 - g.u0, gapV = g.v1 - g.v0, uc = (g.u0 + g.u1) / 2, vc = (g.v0 + g.v1) / 2;
+    const nOff = g.fixed + g.outS * (g.thick / 2 + 0.07);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(g.horiz ? gapU + 0.3 : 0.12, gapV + 0.25, g.horiz ? 0.12 : gapU + 0.3), plyMat());
+    board.position.set((g.horiz ? uc : nOff) - g.px, vc, (g.horiz ? nOff : uc) - g.pz);
+    board.castShadow = false; board.receiveShadow = true;
+    if (g.parent) g.parent.add(board); else CBZ.scene.add(board);
+    rec.extras.push(board);
+    const bOff = g.fixed + g.outS * (g.thick / 2 + 0.16);
+    for (const fy of [vc - gapV * 0.28, vc + gapV * 0.28]) {
+      const bat = new THREE.Mesh(new THREE.BoxGeometry(g.horiz ? gapU + 0.42 : 0.08, 0.16, g.horiz ? 0.08 : gapU + 0.42), plyBatMat());
+      bat.position.set((g.horiz ? uc : bOff) - g.px, fy, (g.horiz ? bOff : uc) - g.pz);
+      bat.castShadow = false;
+      if (g.parent) g.parent.add(bat); else CBZ.scene.add(bat);
+      rec.extras.push(bat);
+    }
+    // the opening blocks bodies AND sightlines again
+    const col = { minX: g.horiz ? g.u0 : g.fixed - g.thick / 2, maxX: g.horiz ? g.u1 : g.fixed + g.thick / 2,
+      minZ: g.horiz ? g.fixed - g.thick / 2 : g.u0, maxZ: g.horiz ? g.fixed + g.thick / 2 : g.u1,
+      ref: board, y0: g.v0, y1: g.v1 };
+    CBZ.colliders.push(col); rec.remnCols.push(col);
+    if (CBZ.losBlockers) CBZ.losBlockers.push(board);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  };
+
+  // PUBLIC: blast a passable hole through the nearest ground-floor wall to (x,z).
+  // `r` ~ the breach half-reach in metres (an RPG blastRadius 13 → r≈3.6, a
+  // satisfying car-sized hole). Returns true if a wall actually opened. Now a
+  // thin wrapper over the generalized carve (chest height, legacy 5m search) so
+  // every ground breach lands in the fracture ledger (persistence + guests) —
+  // and a no-op when this same blast's fracture pass already opened the wall.
+  CBZ.cityBreach = function (x, z, r) {
+    r = r || 1.6;
+    if (!CBZ.scene || !CBZ.colliders) return false;
+    const fr = CBZ.cityFracture;
+    if (fr && fr.recent && fr.recent(x, z)) return true;    // this rocket already opened the wall
+    const rec = carveHole(x, 1.2, z, r, { search: 5 });
+    // nothing to breach (open air, or the wall was already opened) → just scorch.
+    if (!rec) { CBZ.cityScorch(x, z, r * 0.9 + 1.2); return false; }
+    if (fr && fr._adopt) fr._adopt(rec, r);
     // rubble blown INWARD through the hole, scorch, burst nearby panes, feedback
-    const blastDir = inN;   // push debris away from the side the rocket came from
-    const dxr = horiz ? 0 : -blastDir, dzr = horiz ? -blastDir : 0;
-    const rubX = horiz ? gapCen : fixed, rubZ = horiz ? fixed : gapCen;
-    CBZ.cityChunk(rubX, ymid - hgt * 0.2, rubZ,
+    const g = rec.gap;
+    const off = g.horiz ? (z - g.fixed) : (x - g.fixed);
+    const inN = off >= 0 ? 1 : -1;                          // push debris away from the side the rocket came from
+    const dxr = g.horiz ? 0 : -inN, dzr = g.horiz ? -inN : 0;
+    const gapCen = (g.u0 + g.u1) / 2;
+    const rubX = g.horiz ? gapCen : g.fixed, rubZ = g.horiz ? g.fixed : gapCen;
+    CBZ.cityChunk(rubX, (g.v0 + g.v1) / 2 - (g.v1 - g.v0) * 0.2, rubZ,
       { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr });
-    CBZ.cityScorch(x, z, (r || 1.6) * 0.9 + 1.4);
-    CBZ.cityShatter(x, z, (r || 1.6) * 2 + 4);
+    CBZ.cityScorch(x, z, r * 0.9 + 1.4);
+    CBZ.cityShatter(x, z, r * 2 + 4);
     if (CBZ.shake) CBZ.shake(0.6);
     if (CBZ.sfx) CBZ.sfx("glass");
     return true;
@@ -810,6 +961,15 @@
         // if the blast is hard against a wall, add the full structural-damage
         // pass (facade scorch + outward chunks + gouges + nearby panes burst).
         CBZ.cityDamageBuilding(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4, z, Math.min(3, power));
+        // STRUCTURAL: a hard-enough blast detonating against a wall face carves
+        // a real persistent hole at the impact HEIGHT (fracture.js owns ledger/
+        // caps/debris). Radius maps the ordnance — RPG/airstrike ~2.6-3.4,
+        // grenade/car-burst ~1.6, anything weaker just scars.
+        if (CBZ.cityFracture && CBZ.cityFracture.blastAt && power >= 0.85 && !(opts && opts.noDamage)) {
+          const hy = (opts && opts.y) || 1.4;
+          const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
+          CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power });
+        }
       } catch (e) {}
       return r;
     };
@@ -824,6 +984,9 @@
     // view.js's emissive night pass so the whole night look lands together.
     const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
     CBZ.cityGlassNight(glassNightOn ? n > 0.45 : n > 0.6);
+    // warm light spilling out of carved wall holes — one shared material, so
+    // every hole in the city breathes with the same dusk
+    if (_spillMat) _spillMat.opacity = 0.08 + n * 0.5;
   });
 
   // chunk physics (only runs while chunks exist)

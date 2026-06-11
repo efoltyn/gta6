@@ -765,6 +765,9 @@
     const ud = grp.userData;
     const old = ud.carVisual;
     if (old) {
+      // crash deformation state (vertex rest snapshots, hung panels, dead-lamp
+      // swaps) belongs to the OLD body — release it before the swap orphans it.
+      if (CBZ.cityCarImpactReset) CBZ.cityCarImpactReset(car);
       old.traverse(function (o) {
         const list = Array.isArray(o.material) ? o.material : [o.material];
         list.forEach(function (m) { if (m && m._playerCarOwned && m.dispose) m.dispose(); });

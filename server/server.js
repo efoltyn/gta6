@@ -47,6 +47,9 @@ const DEFAULT_CFG = {
   directory: "",
   // Optional: the public URL players use to reach this server (for directory listings)
   publicUrl: "",
+  // Persistent world: server/worlds/<name>.json IS the world (back it up, share it).
+  // name "" = use the server name. autosaveSec = how often the host uploads the world.
+  world: { name: "", autosaveSec: 120 },
 };
 
 function loadConfig() {
@@ -63,6 +66,54 @@ function loadConfig() {
 }
 
 const cfg = loadConfig();
+
+// ----------------------------------------------------------------- world ---
+// The world lives in server/worlds/<name>.json — saved characters keyed by
+// pid, turf, building damage. Ambient peds/traffic regenerate (never saved).
+const WORLD_DIR = (cfg.world && cfg.world.dir) ? path.resolve(cfg.world.dir) : path.join(__dirname, "worlds");
+const worldName = (cfg.world && cfg.world.name) || cfg.name || "world";
+const autosaveSec = (cfg.world && cfg.world.autosaveSec) || 120;
+const sanitizeWorldName = (n) =>
+  String(n || "").replace(/[^a-zA-Z0-9_\-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "world";
+const WORLD_FILE = path.join(WORLD_DIR, sanitizeWorldName(worldName) + ".json");
+
+const world = { v: 1, name: worldName, savedAt: null, world: null, chars: {} };
+try {
+  const d = JSON.parse(fs.readFileSync(WORLD_FILE, "utf8"));
+  if (d && d.v === 1) {
+    world.world = d.world || null;
+    world.chars = d.chars || {};
+    world.savedAt = d.savedAt || null;
+    console.log(`[server] world "${worldName}" loaded <- ${WORLD_FILE} (${Object.keys(world.chars).length} characters)`);
+  }
+} catch (e) { /* no save yet */ }
+
+// ev subtypes the server consumes (or emits) itself — never relayed between clients
+const RESERVED_EV = { to: 1, wsave: 1, csave: 1, wload: 1, cload: 1 };
+
+let worldDirty = false, lastFlush = 0, flushTimer = null;
+function flushWorld() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (!worldDirty) return;
+  lastFlush = Date.now();
+  const prevStamp = world.savedAt;
+  world.savedAt = lastFlush;
+  try {
+    fs.mkdirSync(WORLD_DIR, { recursive: true });
+    const tmp = WORLD_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(world));
+    fs.renameSync(tmp, WORLD_FILE); // atomic: never a half-written world
+    worldDirty = false;
+  } catch (e) { world.savedAt = prevStamp; console.error(`[server] world save failed: ${e.message}`); } // stays dirty -> retried on the next save
+}
+function queueFlush() { // disk writes >=5s apart
+  worldDirty = true;
+  const wait = 5000 - (Date.now() - lastFlush);
+  if (wait <= 0) return flushWorld();
+  if (!flushTimer) flushTimer = setTimeout(flushWorld, wait);
+}
+process.on("SIGINT", () => { flushWorld(); process.exit(0); });
+process.on("SIGTERM", () => { flushWorld(); process.exit(0); });
 
 // ---------------------------------------------------------------- static ---
 const MIME = {
@@ -122,6 +173,8 @@ function info() {
     maxPlayers: cfg.maxPlayers,
     passworded: !!cfg.password,
     version: 1,
+    feat: ["to", "persist"],
+    world: { name: worldName, savedAt: world.savedAt, autosaveSec },
   };
 }
 
@@ -154,6 +207,7 @@ function onLeave(p, reason) {
   console.log(`[server] leave #${p.id} ${p.name}${reason ? " (" + reason + ")" : ""} (${players.size} online)`);
   broadcast({ t: "leave", id: p.id });
   if (hostId === p.id) setHost(pickHost());
+  if (players.size === 0) flushWorld(); // nobody simulating: the file is the world now
 }
 
 // --------------------------------------------------------------- commands ---
@@ -236,21 +290,31 @@ function onConnection(conn, req) {
       let name = sanitizeName(m.name);
       while ([...players.values()].some((q) => q.name === name)) name += "_";
       const role = (cfg.roles || []).some((r) => r.id === m.role) ? m.role : ((cfg.roles && cfg.roles[0] && cfg.roles[0].id) || "civ");
-      p = { id: nextId++, name, role, conn, admin: false, joinedAt: Date.now() };
+      const pid = (typeof m.pid === "string" && m.pid) ? m.pid.slice(0, 64) : null;
+      p = { id: nextId++, name, role, pid, conn, admin: false, joinedAt: Date.now() };
       players.set(p.id, p);
-      // first player in becomes the world simulator; tell everyone about them
-      if (hostId == null) hostId = p.id;
+      // first player into an empty room becomes the world simulator
+      const firstIn = hostId == null;
+      if (firstIn) hostId = p.id;
+      const worldInfo = { name: worldName, savedAt: world.savedAt, autosaveSec };
       send(p, {
         t: "welcome",
         id: p.id,
         hostId,
-        server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers, iceServers: cfg.iceServers || [] },
+        feat: ["to", "persist"],
+        world: worldInfo,
+        server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers, iceServers: cfg.iceServers || [], feat: ["to", "persist"], world: worldInfo },
         players: [...players.values()].filter((q) => q.id !== p.id).map((q) => ({ id: q.id, name: q.name, role: q.role })),
       });
       // the host is an admin on their own server
       if (p.id === hostId) p.admin = true;
       broadcast({ t: "join", id: p.id, name: p.name, role: p.role }, p.id);
       console.log(`[server] join #${p.id} ${p.name} (${players.size} online)`);
+      // resume: an empty room's new simulator gets the saved world; a saved
+      // character follows its pid anywhere. Mid-session host migrations never
+      // reload from disk — the live sim stays authoritative.
+      if (firstIn && world.world) send(p, { t: "ev", e: "wload", world: world.world });
+      if (p.pid && world.chars[p.pid]) send(p, { t: "ev", e: "cload", char: world.chars[p.pid] });
       return;
     }
     if (!p) return;
@@ -264,6 +328,30 @@ function onConnection(conn, req) {
         if (p.id === hostId) broadcast(m, p.id);
         break;
       case "ev": // reliable game events (shots, damage, enter/exit vehicle...)
+        if (m.e === "to") { // point-to-point relay: deliver d to one client, stamped as the sender
+          const tgt = players.get(m.id), d = m.d;
+          // only game payloads pass: evs (minus the persistence verbs) from anyone,
+          // world rows from the sim host — never core protocol frames (welcome/host/deny...)
+          const okT = d && typeof d === "object" &&
+            (d.t === "ev" ? !RESERVED_EV[d.e] : (d.t === "world" && p.id === hostId));
+          if (tgt && okT) { d.id = p.id; send(tgt, d); }
+          break;
+        }
+        if (m.e === "wsave") { // only the sim host writes the world
+          if (p.id === hostId && m.world && typeof m.world === "object") { world.world = m.world; queueFlush(); }
+          break;
+        }
+        if (m.e === "csave") { // per-character save keyed by the player's pid
+          if (p.pid && m.char && typeof m.char === "object" && JSON.stringify(m.char).length <= 64 * 1024) {
+            if (!world.chars[p.pid]) { // roster cap: oldest insertion drops first
+              const keys = Object.keys(world.chars);
+              if (keys.length >= 256) delete world.chars[keys[0]];
+            }
+            world.chars[p.pid] = m.char; queueFlush();
+          }
+          break;
+        }
+        if (m.e === "wload" || m.e === "cload") break; // server->client only, never relayed
         m.id = p.id;
         if (m.to != null) {
           const target = players.get(m.to);
@@ -323,6 +411,7 @@ server.listen(cfg.port, () => {
   console.log(`  ─ websocket:       ws://localhost:${cfg.port}/ws`);
   console.log(`  ─ server info:     http://localhost:${cfg.port}/api/info`);
   console.log(`  ─ config:          server/server.json  (name, motd, password, maxPlayers)`);
+  console.log(`  ─ world save:      ${path.relative(ROOT, WORLD_FILE)}  (autosave ${autosaveSec}s${world.savedAt ? ", loaded" : ", new"})`);
   console.log("");
   console.log(`  To let friends join over the internet:`);
   console.log(`    cloudflared tunnel --url http://localhost:${cfg.port}`);

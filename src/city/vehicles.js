@@ -763,7 +763,11 @@
     car.crumple = Math.min(1, (car.crumple || 0) + sev);
     if (car._cside == null) car._cside = Math.random() < 0.5 ? -1 : 1;
     const c = car.crumple, grp = car.group, ud = grp.userData;
-    grp.scale.set(1 - c * 0.14, 1 - c * 0.32, 1 - c * 0.12);
+    // unified visuals now carry REAL panel craters (crashdeform.js), so the
+    // whole-body squash drops to a hint — the old full squash stacked on the
+    // vertex damage read as a melting toy. Box rigs keep the legacy read.
+    if (CBZ.cityCarImpact && ud && ud.carVisual) grp.scale.set(1 - c * 0.05, 1 - c * 0.1, 1 - c * 0.04);
+    else grp.scale.set(1 - c * 0.14, 1 - c * 0.32, 1 - c * 0.12);
     const base = ud && ud.crashBase ? ud.crashBase : { bodyY: 0.78, bodyZ: 0, cabinY: 1.45, cabinZ: 0 };
     let front = 0, rear = 0, side = 0;
     if (impact) {
@@ -1049,6 +1053,14 @@
     if (car.engineHp == null) car.engineHp = 100;
     // tracer hits also visibly spark/dent the hull a touch
     if (opts.crumple) crumpleCar(car, Math.min(0.2, amount * 0.004));
+    // exact-point dent: a small crater under the bullet-hole decal. The shot
+    // resolver threads opts.point (world Vector3-ish), opts.normal (entry
+    // face, toward the shooter) and opts.cal — caliber sets the dimple.
+    if (opts.point && CBZ.cityCarImpact) {
+      const n = opts.normal || { x: 0, y: 0, z: 0 };
+      CBZ.cityCarImpact(car, opts.point, { x: -(n.x || 0), y: -(n.y || 0), z: -(n.z || 0) },
+        1.6 + (opts.cal || 1) * 1.5, { r: 0.22 + (opts.cal || 1) * 0.08 });
+    }
     damageEngine(car, amount, true);
     // a driver taking fire doesn't keep cruising the speed limit — they FLOOR it
     if (opts.byPlayer && car.ai && !car.dead && !car.npcDriver) {
@@ -1412,6 +1424,9 @@
       car.vx = (car.vx - 2 * vdotn * nwx) * bounce; car.vz = (car.vz - 2 * vdotn * nwz) * bounce;
       // the impact ALSO guts the engine — enough hard hits → smoke → fire → boom
       damageEngine(car, catastrophic ? 60 : (hard ? 28 : 6), false);
+      // crater point from the PRE-impact pose (group.matrixWorld still holds it) —
+      // captured before the push-back/spin below so the dent lands on the contact
+      const dentX = car.pos.x + Math.sin(car.heading) * 2.2, dentZ = car.pos.z + Math.cos(car.heading) * 2.2;
       const back = Math.min(catastrophic ? 2.2 : 1.35, vmag * (catastrophic ? 0.075 : 0.05));
       car.pos.x += nwx * back; car.pos.z += nwz * back;
       // a glancing hit SPINS the car off the wall toward the surface tangent; a
@@ -1431,6 +1446,8 @@
       if (CBZ.cityRankEvent) CBZ.cityRankEvent("crash", { speed: vmag, hard, catastrophic, wall: true, car });
       // the car visibly CRUMPLES (the building/post is only lightly scuffed)
       crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.08), { x: -nwx, z: -nwz });
+      // and the nose CRATERS at the contact — a 60mph wall hit stays cratered
+      if (CBZ.cityCarImpact) CBZ.cityCarImpact(car, { x: dentX, y: (vehicleDims(car).height || 1.5) * 0.42, z: dentZ }, { x: -nwx, y: 0, z: -nwz }, vmag);
       // Medium crashes hurt but are explicitly non-lethal. Only a truly
       // catastrophic top-speed slam is allowed to kill the driver.
       if (hard && CBZ.cityHurtPlayer) {
@@ -1534,6 +1551,14 @@
     const light = (catastrophic ? 0.6 : (hard ? 0.34 : 0.12)) * massAvg;
     crumpleCar(a, aRammer ? light : heavy, { x: nx, z: nz });
     crumpleCar(b, aRammer ? heavy : light, { x: -nx, z: -nz });
+    // panel craters at the actual contact point: each hull caves toward its
+    // own centre (n points a→b), the rammed car the deeper of the two
+    if (CBZ.cityCarImpact) {
+      const px = (a.pos.x + b.pos.x) / 2, pz = (a.pos.z + b.pos.z) / 2;
+      const py = Math.min(vehicleDims(a).height || 1.5, vehicleDims(b).height || 1.5) * 0.4;
+      CBZ.cityCarImpact(a, { x: px, y: py, z: pz }, { x: -nx, y: 0, z: -nz }, severity * (aRammer ? 0.75 : 1));
+      CBZ.cityCarImpact(b, { x: px, y: py, z: pz }, { x: nx, y: 0, z: nz }, severity * (aRammer ? 1 : 0.75));
+    }
     // engine HP: a collision guts the motor; the rammed car takes the worst of it,
     // so repeated/major rams build toward smoke → fire → explosion instead of
     // every high-speed collision instantly turning both cars into a fireball.
@@ -1818,6 +1843,10 @@
         if (pushed > 0.05 && c.v > 11) {
           const catastrophic = c.v >= CRASH.npcDriverLethal, hard = c.v >= CRASH.wallHard;
           crumpleCar(c, catastrophic ? 0.7 : (hard ? 0.42 : 0.16), { x: -Math.sin(c.heading), z: -Math.cos(c.heading) });
+          if (CBZ.cityCarImpact) {
+            const fx = Math.sin(c.heading), fz = Math.cos(c.heading), vd = vehicleDims(c);
+            CBZ.cityCarImpact(c, { x: c.pos.x + fx * vd.length * 0.45, y: (vd.height || 1.5) * 0.4, z: c.pos.z + fz * vd.length * 0.45 }, { x: -fx, y: 0, z: -fz }, c.v);
+          }
           damageEngine(c, catastrophic ? 55 : (hard ? 26 : 8), false);
           crashBurst(c.pos.x, c.pos.z, c.v, hard, catastrophic);
           if (hard && CBZ.cityShatter) CBZ.cityShatter(c.pos.x, c.pos.z, catastrophic ? 8 : 4.5);
@@ -2072,6 +2101,7 @@
   }
   CBZ.cityVehiclesReset = function () {
     npcDrivers = 0;
+    if (CBZ.cityCarDeformReset) CBZ.cityCarDeformReset();   // pristine fleet on a fresh run
     if (CBZ.carAudio) CBZ.carAudio.stop();   // a fresh run never inherits an orphaned motor
     // wipe the rubber: a new run starts on clean asphalt (zeroed quads are degenerate = invisible)
     if (skidPosArr) { skidPosArr.fill(0); skidRing = 0; if (skidMesh) skidMesh.geometry.attributes.position.needsUpdate = true; }

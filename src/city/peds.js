@@ -869,6 +869,7 @@
     CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
   };
 
+  const _ragP = { x: 0, y: 0, z: 0 }, _ragD = { x: 0, y: 0, z: 0 };   // ragdoll scratch
   CBZ.cityKillPed = function (ped, imp, cause) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // killed mid-call → the report dies with them
@@ -911,6 +912,36 @@
         }
       }
     }
+    // VERLET RAGDOLL (city/ragdoll.js): a near, on-screen full-rig kill flops for
+    // REAL — point impulse scaled by what actually hit them (a 9mm crumples, an
+    // AK shoves, a point-blank 12-gauge hurls, an RPG lifts the whole body). The
+    // ragdoll itself pins _phys.down=9999 (same busy-forever contract as below)
+    // and zeroes the fling, so exactly one simulation moves the corpse. Far
+    // kills — or any kill while ragdoll.js is absent — keep the cheap path.
+    let ragged = false;
+    if (CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar) {
+      let mag;
+      const f0 = (imp && imp.force) || 0;
+      if (cause === "explosion") mag = 20 + Math.min(14, (f0 || 10) * 0.8);
+      else if (cause === "run over" || cause === "killed in the crash") mag = Math.min(22, (f0 || 8) * 1.1);
+      else if (cause === "headshot" || cause === "shot" || cause === "shot by police") {
+        mag = 6 * ((imp && imp.cal) || 1);
+        if (imp && imp.wkey === "shotgun" && (imp.dist || 99) < 10) mag = 16;   // point-blank 12-gauge HURLS
+      } else if (cause === "stabbed" || cause === "beaten" || cause === "executed" || cause === "finished off") mag = 5 + (f0 || 6) * 0.25;
+      else if (cause === "bled out") mag = 2.5;
+      else mag = f0 || 6;
+      if (imp && imp.fromX != null) {
+        const rl = Math.hypot(ped.pos.x - imp.fromX, ped.pos.z - imp.fromZ) || 1;
+        _ragD.x = (ped.pos.x - imp.fromX) / rl; _ragD.y = 0; _ragD.z = (ped.pos.z - imp.fromZ) / rl;
+      } else { const ra = rng() * 6.28; _ragD.x = Math.cos(ra); _ragD.y = 0; _ragD.z = Math.sin(ra); }
+      if (imp && imp.point) { _ragP.x = imp.point.x; _ragP.y = imp.point.y; _ragP.z = imp.point.z; }
+      else {
+        _ragP.x = ped.pos.x - _ragD.x * 0.25;
+        _ragP.y = (ped.pos.y || 0) + (cause === "headshot" ? 2.05 : 1.25);
+        _ragP.z = ped.pos.z - _ragD.z * 0.25;
+      }
+      ragged = CBZ.cityRagdoll(ped, _ragP, _ragD, mag);
+    }
     // GROUNDING HANDOFF: a kill MUST arm the ragdoll so grapple (onUpdate 24) takes
     // ownership and grounds the corpse via cityRestY — otherwise a dead rig would
     // keep standing/sinking (peds.js skips downed bodies; nothing would lay it flat).
@@ -920,7 +951,7 @@
     // grounded Y. The knockdown fallback below guarantees a downed state even on the
     // off-chance a fling can't resolve (e.g. body already at floor), so we never
     // depend on the airborne path alone.
-    if (CBZ.body) {
+    if (CBZ.body && !ragged) {
       if (imp && imp.fromX != null) CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, force: imp.force || 7, fling: imp.fling || 4 });
       else { const a = rng() * 6.28; CBZ.body.hit(ped, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 3, fling: 5 }); }
       // belt-and-braces: force a hard knockdown too. hit(knockdown) sets _phys.down,

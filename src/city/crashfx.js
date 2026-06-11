@@ -105,6 +105,22 @@
     }
   }
 
+  // adopt an already-built mesh (a hood torn off a crashed car) into the shared
+  // debris pool: same gravity/bounce/spin/expiry as crash chunks, so a panel
+  // that tears free tumbles and settles like every other piece of wreckage.
+  // Caller hands it over already posed in WORLD space; the pool only ever
+  // scene.remove()s it (no dispose — donated geo/materials stay owned by the
+  // car systems that built them).
+  CBZ.cityDebrisAdopt = function (mesh, vx, vy, vz) {
+    if (!mesh) return;
+    while (chunks.length > 56) { const old = chunks.shift(); scene.remove(old.mesh); }
+    scene.add(mesh);
+    chunks.push({
+      mesh, vx: vx || 0, vy: vy == null ? 3 : vy, vz: vz || 0,
+      spin: (Math.random() - 0.5) * 9, t: 0, life: 2.6 + Math.random() * 1.2, trail: -1,
+    });
+  };
+
   // ---- ground SCORCH decal (a dark radial disc that snaps in + lingers) ----
   // Pooled flat circles laid just above the road; one shared scorch texture.
   let scorchTex = null;
@@ -661,6 +677,8 @@
       });
     }
   }
+  // fracture.js pours wall-hole debris through this same pooled cascade
+  CBZ.cityFacadeAvalanche = facadeAvalanche;
 
   function addBlastWound(x, y, z, nx, ny, nz, dur) {
     while (wounds.length >= 3) wounds.shift();   // 3 live wounds max — the oldest stops smoking

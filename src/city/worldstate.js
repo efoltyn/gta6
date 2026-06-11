@@ -134,6 +134,18 @@
     commit();
   };
 
+  // ---- shared collectors: the multiplayer persistence client (src/net/
+  //      netpersist.js) composes/applies the SAME ledger truth the local
+  //      save uses — one collector, two destinations (localStorage / server).
+  CBZ.cityWorldCollect = function () { return commit(); };
+  CBZ.cityWorldAdopt = function (w) {
+    if (!w || w.version !== 2) return false;
+    g.cityWorld = w;
+    applyToGame();
+    save(w);
+    return true;
+  };
+
   function addLog(w, type, label) {
     w.activityLog.unshift({ type, label, t: now() });
     if (w.activityLog.length > LOG_MAX) w.activityLog.length = LOG_MAX;

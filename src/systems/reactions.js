@@ -99,6 +99,14 @@
   const DAZE_ARM = 0.3;         // guard-broken arms hang slack behind the hips
   const DAZE_SWAY = 0.12;       // slow drunken sway while broken (the foe is OPEN — go)
   const DAZE_HEAD = 0.42;       // head sags when the guard shatters
+  const FLIN_DUR = 0.22;        // bullet flinch: sharp jerk, dead in ~220ms
+  const FLIN_PITCH = 0.3;       // upper-body jerk along the push
+  const FLIN_HEAD = 0.65;       // the head snap is what reads the caliber
+  const FLIN_YAW = 0.25;        // shoulders wrenched off the impact
+  const AIM_RANGE2 = 60 * 60;   // shooters visibly track a mark inside 60u
+  const AIM_HEAD_YAW = 0.75;    // believable neck turn cap
+  const AIM_HEAD_PIT = 0.38;
+  const AIM_ELEV = 0.55;        // max gun-arm elevation correction (rad)
 
   // per-actor reaction record, keyed by the actor object.
   //   hp        : last frame's hp (to detect a drop)
@@ -134,6 +142,8 @@
         savedEm: -1, savedEi: 1,
         nkOff: 0, byOff: 0, llOff: 0, rlOff: 0, gbx: 0, gbz: 0,
         stagT: 0, stagX: 0, stagZ: 1, stagAmp: 0,
+        flinT: 0, flinX: 0, flinZ: 1, flinAmp: 0,
+        aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         swingT: 0, swingArm: 1, dazeK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
         // mid-flinch / mid-cooldown doesn't fire a phantom stagger/swing.
@@ -254,7 +264,13 @@
         if (!a || !a.group || !a.char) continue;
         // city: skip pooled/off-map and player-driven rigs cheaply
         if (isCity) {
-          if (a._parked || a.culled || a.controlled) continue;
+          if (a._parked || a.culled || a.controlled) {
+            // neck yaw is the one channel nothing else damps — back it out or
+            // a pooled/driven rig keeps a twisted head for the rest of its life
+            const old = R.get(a);
+            if (old && old.hyOff) { if (a.char.neck) a.char.neck.rotation.y -= old.hyOff; old.hyOff = 0; }
+            continue;
+          }
           // far + nothing animating to see → don't pay for the pose math. Clear any
           // stored additive offset (without allocating a record) so the ped doesn't
           // back out a phantom offset the frame it re-enters range.
@@ -263,9 +279,11 @@
             if (ddx * ddx + ddz * ddz > CITY_LOD2) {
               const old = R.get(a);
               if (old) {
+                if (old.hyOff && a.char.neck) a.char.neck.rotation.y -= old.hyOff; // un-bake the aim yaw
                 old.laOff = 0; old.raOff = 0; old.cowerLean = 0;
                 old.nkOff = 0; old.byOff = 0; old.llOff = 0; old.rlOff = 0;
                 old.gbx = 0; old.gbz = 0; old.stagT = 0; old.swingT = 0; old.dazeK = 0;
+                old.flinT = 0; old.aimK = 0; old.hyOff = 0;
                 // park the edge detectors HIGH so the first frame back in range
                 // can't read a stale value as a fresh hit / fresh swing.
                 old.lastFl = 9; old.atkCd = 1e9;
@@ -321,12 +339,13 @@
         // reveal the clean base before this frame's offsets go back on.
         if (isCity) {
           if (neck && r.nkOff) neck.rotation.x -= r.nkOff;
+          if (neck && r.hyOff) neck.rotation.y -= r.hyOff;   // aim head-track (own channel — facial backs out only its own)
           if (body && r.byOff) body.rotation.y -= r.byOff;
           if (parts) {
             if (parts.ll && r.llOff) parts.ll.rotation.x -= r.llOff;
             if (parts.rl && r.rlOff) parts.rl.rotation.x -= r.rlOff;
           }
-          r.nkOff = 0; r.byOff = 0; r.llOff = 0; r.rlOff = 0;
+          r.nkOff = 0; r.hyOff = 0; r.byOff = 0; r.llOff = 0; r.rlOff = 0;
 
           // ---- EDGE DETECTORS (city) ----
           // STAGGER: grapple's hit() bumps _phys.fl on every real blow and
@@ -338,6 +357,11 @@
               r.stagT = STAG_DUR;
               r.stagX = pp.fdx; r.stagZ = pp.fdz;
               r.stagAmp = Math.min(1.2, 0.45 + (pp.shock || 0) * 0.5);   // force-scaled
+              // BULLET FLINCH rides the same edge: a sharper, faster jerk on top
+              // of the lurch — shock is force-scaled, so caliber sets the snap.
+              r.flinT = FLIN_DUR;
+              r.flinX = pp.fdx; r.flinZ = pp.fdz;
+              r.flinAmp = Math.min(1.5, 0.45 + (pp.shock || 0) * 0.6);
             }
             r.lastFl = pp.fl;
           }
@@ -512,6 +536,24 @@
             }
           }
 
+          // ---- (1b) BULLET FLINCH: a sharper jerk + head snap layered over the
+          //      stagger — dies off exponentially in ~220ms, magnitude rides the
+          //      round's force. A close shotgun hit pairs this snap WITH the big
+          //      stagger lurch; a 9mm graze barely tics the head. ----
+          if (r.flinT > 0) {
+            r.flinT = Math.max(0, r.flinT - dt);
+            if (live) {
+              const e = r.flinT / FLIN_DUR;
+              const k = e * e * e * r.flinAmp;               // sharp attack, exponential-feel die-off
+              const lf = Math.cos(ry) * r.flinZ + Math.sin(ry) * r.flinX;
+              const ls = Math.cos(ry) * r.flinX - Math.sin(ry) * r.flinZ;
+              bodyOff += lf * FLIN_PITCH * k;                // torso jerked along the push
+              bodyRoll += -ls * 0.18 * k;
+              r.byOff += ls * FLIN_YAW * k;                  // shoulders wrenched off it
+              if (neck) r.nkOff += lf * FLIN_HEAD * k;       // the head snap sells the round
+            }
+          }
+
           // ---- (2) SWING LEAN-IN: weight committed behind an NPC punch
           //      (and a cock-back off combat.js's _windup telegraph first). ----
           if (r.swingT > 0) {
@@ -556,6 +598,46 @@
             if (parts.ra && !gunArm) { const b0 = parts.ra.rotation.x; const w = damp(b0, BLOCK_ARM * 0.9, 16, dt); r.raOff += w - b0; parts.ra.rotation.x = w; }
             bodyOff += BLOCK_HUNCH * Math.min(1, (a._blockT || 0) / 0.15);  // ease out at expiry
           }
+          // ---- (3b) AIM PRESENCE: an armed shooter visibly TRACKS its mark —
+          //      head turned to the target, shoulders opened, and the gun arm's
+          //      ELEVATION corrected so the barrel line actually points where the
+          //      bullets go (actorAimAt is yaw-only; pitch lived nowhere). The arm
+          //      channel is hard-assigned by actorweapons (36) every frame the gun
+          //      is out, so an add can't accumulate; the neck yaw gets its own
+          //      stored offset (hyOff), backed out above. Blends in/out ~150ms. ----
+          let aimT = null;
+          if (live && gunArm && a.rage && !a.rage.dead && a.rage.pos &&
+              !aimBack && !handsUp && !a.surrender && !(a.char.handsUp || a.char.surrender)) {
+            const adx = a.rage.pos.x - a.pos.x, adz = a.rage.pos.z - a.pos.z;
+            if (adx * adx + adz * adz < AIM_RANGE2) aimT = a.rage;
+          }
+          r.aimK = damp(r.aimK, aimT ? 1 : 0, 14, dt);
+          if (aimT) {
+            const tdx = aimT.pos.x - a.pos.x, tdz = aimT.pos.z - a.pos.z;
+            const th = Math.hypot(tdx, tdz) || 0.001;
+            const ty = (aimT.pos.y || 0) + (aimT.isPlayer ? 1.5 : 1.35);
+            let relY = Math.atan2(tdx, tdz) - ry;
+            relY = ((relY + Math.PI) % (Math.PI * 2)) - Math.PI;
+            if (relY < -Math.PI) relY += Math.PI * 2;
+            if (relY > AIM_HEAD_YAW) relY = AIM_HEAD_YAW; else if (relY < -AIM_HEAD_YAW) relY = -AIM_HEAD_YAW;
+            const elev = Math.atan2(ty - ((a.pos.y || 0) + 1.84), th);  // shoulder → target
+            let hp2 = -elev * 0.7;                                      // facial convention: -x looks up
+            if (hp2 > AIM_HEAD_PIT) hp2 = AIM_HEAD_PIT; else if (hp2 < -AIM_HEAD_PIT) hp2 = -AIM_HEAD_PIT;
+            let armC = -elev;                                           // more negative = barrel raised
+            if (armC > AIM_ELEV) armC = AIM_ELEV; else if (armC < -AIM_ELEV) armC = -AIM_ELEV;
+            r.aimY = relY; r.aimP = hp2; r.aimA = armC;
+          }
+          if (r.aimK > 0.02 && live) {
+            r.hyOff = r.aimY * r.aimK;                                  // head turned onto the mark
+            if (neck) r.nkOff += r.aimP * r.aimK;
+            r.byOff += r.aimY * 0.3 * r.aimK;                           // shoulders open toward it
+            if (gunArm) {                                               // only while actorweapons assigned the arm this frame
+              if (parts.ra) parts.ra.rotation.x += r.aimA * r.aimK;
+              if (parts.la && a._weaponProp.userData && a._weaponProp.userData.weaponSlot === "long")
+                parts.la.rotation.x += r.aimA * r.aimK;                 // support hand rides the long gun up/down
+            }
+          }
+
           // the dazed SWAY eases in/out so the break (and recovery) never pops
           r.dazeK = damp(r.dazeK, dazed ? 1 : 0, 6, dt);
           if (r.dazeK > 0.01 && live) {
@@ -620,6 +702,7 @@
           if (body && bodyRoll) body.rotation.z += bodyRoll;
           if (body && r.byOff) body.rotation.y += r.byOff;
           if (neck && r.nkOff) neck.rotation.x += r.nkOff;
+          if (neck && r.hyOff) neck.rotation.y += r.hyOff;
         }
 
         // ---- FLASH: fade the emissive boost back to rest ----

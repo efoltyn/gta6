@@ -6,7 +6,9 @@
      - meta  (reliable, on join + as entities appear): who each
        ped IS — name, outfit colors, cop-ness; which car model
      - world (10Hz): positions/heading/speed/hp/flags for every
-       ped, cop and car
+       ped, cop and car — on servers with the targeted relay
+       (feat "to") each guest gets only the world NEAR them
+       (180u in / 210u out + grace), FiveM-style scoping
    Guests never simulate: they render interpolated PUPPETS that
    are still real hitscan targets — a guest's shot is routed to
    the host ("hit" event) and applied to the authoritative ped.
@@ -57,37 +59,104 @@
     return m;
   }
 
-  function packPeds(list) {
-    const out = [];
-    for (const p of list) {
+  // one packer fills nid->row Maps (rows are the unchanged wire format); the
+  // legacy broadcast dumps every row, the scoped path picks per guest
+  const _rowsPed = new Map(), _rowsCop = new Map(), _rowsCar = new Map();
+  const _ents = new Map(); // nid -> live entity this tick (meta on scope-enter)
+
+  function packInto(list, rows) {
+    for (const p of list || []) {
       if (!p.nid || !p.group) continue;
       let fl = 0;
       if (p.dead) fl |= 1;
       if (p.char && p.char.handsUp) fl |= 2;
       if (p.ko > 0) fl |= 4;
-      out.push([
+      rows.set(p.nid, [
         p.nid,
         Math.round(p.pos.x * 10) / 10, Math.round(p.pos.z * 10) / 10,
         Math.round((p.group.rotation.y || 0) * 100) / 100,
         Math.round((p.speed || 0) * 10) / 10,
         fl, Math.round(p.hp || 0),
       ]);
+      _ents.set(p.nid, p);
     }
-    return out;
   }
 
-  function packCars() {
-    const out = [];
+  function packCarsInto(rows) {
     for (const c of CBZ.cityCars || []) {
       if (!c.nid || c.dead) continue;
       if (c.player) continue; // the host's own driven car rides its state stream
-      out.push([
+      rows.set(c.nid, [
         c.nid,
         Math.round(c.pos.x * 10) / 10, Math.round(c.pos.z * 10) / 10,
         Math.round((c.heading || 0) * 100) / 100, Math.round((c.v || 0) * 10) / 10,
       ]);
+      _ents.set(c.nid, c);
     }
-    return out;
+  }
+
+  function vals(m) { const a = []; for (const r of m.values()) a.push(r); return a; }
+
+  // ---- interest management ------------------------------------------------
+  // Each guest only receives the world NEAR them (FiveM-style scoping): enter
+  // 180u / leave 210u hysteresis + 1.5s grace so bodies on the edge don't
+  // flicker. The host still SIMULATES everything — this only trims the wire,
+  // so 8 spread-out guests don't each pay for all ~160 synced entities.
+  const SCOPE_ENTER2 = 180 * 180, SCOPE_LEAVE2 = 210 * 210, SCOPE_GRACE = 1500;
+  const scope = new Map();   // guest id -> Map(nid -> 0 (in) | grace-start ms)
+  const _forced = new Set(); // nids pinned in scope for the guest being served
+
+  function metaCiv(p) { return pedMeta(p, false); }
+  function metaCop(p) { return pedMeta(p, true); }
+
+  function scopePass(rows, ents, gx, gz, now, outRows, metaOut, metaFn, gone, forced) {
+    for (const [nid, row] of rows) {
+      const dx = row[1] - gx, dz = row[2] - gz;
+      const d2 = dx * dx + dz * dz;
+      const st = ents.get(nid);
+      if (d2 <= SCOPE_ENTER2 || (forced && forced.has(nid))) {
+        if (st === undefined) metaOut.push(metaFn(_ents.get(nid))); // entering: puppet needs its meta first
+        if (st !== 0) ents.set(nid, 0);
+        outRows.push(row);
+      } else if (st !== undefined) {
+        if (d2 <= SCOPE_LEAVE2) {                    // inside the keep band: (re)anchor
+          if (st !== 0) ents.set(nid, 0);
+          outRows.push(row);
+        } else if (st === 0) { ents.set(nid, now); outRows.push(row); } // left the band: grace starts, still sent
+        else if (now - st > SCOPE_GRACE) { ents.delete(nid); gone.push(nid); }
+        else outRows.push(row);
+      }
+    }
+  }
+
+  function scopedSnapshots(now) {
+    for (const [gid] of net.players) {
+      const R = CBZ.netRemoteActor ? CBZ.netRemoteActor(gid) : null;
+      if (!R) continue; // no state from them yet (loading/title) — nothing to scope around
+      let gx, gz;
+      if (R.driving && R.carBuf && R.carBuf.length) { const c = R.carBuf[R.carBuf.length - 1]; gx = c.x; gz = c.z; }
+      else if (R.buf && R.buf.length) { const b = R.buf[R.buf.length - 1]; gx = b.x; gz = b.z; }
+      else continue;
+      let ents = scope.get(gid);
+      if (!ents) { ents = new Map(); scope.set(gid, ents); }
+      // cops actively hunting THIS guest stay in their world at any distance
+      _forced.clear();
+      for (const c of CBZ.cityCops || []) if (c.nid && (c.curTarget === R || c.npcTarget === R)) {
+        _forced.add(c.nid);
+        if (c.chaseCar && c.chaseCar.nid) _forced.add(c.chaseCar.nid); // the cruiser under him too
+      }
+      const mp = [], mc = [], gone = [];
+      const pd = [], cp = [], cr = [];
+      scopePass(_rowsPed, ents, gx, gz, now, pd, mp, metaCiv, gone, null);
+      scopePass(_rowsCop, ents, gx, gz, now, cp, mp, metaCop, gone, _forced);
+      scopePass(_rowsCar, ents, gx, gz, now, cr, mc, carMeta, gone, _forced); // pinned cruisers ride with their cops
+      // scoped entities the sim deleted outright (granted car, culled body)
+      for (const nid of ents.keys())
+        if (!_rowsPed.has(nid) && !_rowsCop.has(nid) && !_rowsCar.has(nid)) { ents.delete(nid); gone.push(nid); }
+      // meta first so a fresh puppet spawns dressed, then the rows
+      if (mp.length || mc.length || gone.length) net.sendTo(gid, { t: "ev", e: "meta", peds: mp, cars: mc, gone });
+      net.sendTo(gid, { t: "world", pd, cp, cr, w: g.wanted | 0 });
+    }
   }
 
   if (CBZ.onAlways) CBZ.onAlways(61, function (dt) {
@@ -95,23 +164,34 @@
     snapAcc += dt;
     if (snapAcc < 1 / SNAP_HZ) return;
     snapAcc = 0;
+    hookFracture();
 
     const freshPeds = [], freshCars = [];
     tagNew(CBZ.cityPeds || [], false, freshPeds, null);
     tagNew(CBZ.cityCops || [], true, freshPeds, null);
     for (const c of CBZ.cityCars || []) if (!c.nid) { c.nid = nextNid++; freshCars.push(c); }
 
-    // incremental meta for entities born since the last tick
-    if (freshPeds.length || freshCars.length || knownGone.length) {
-      net.sendEv({
-        e: "meta",
-        peds: freshPeds.map(function (p) { return pedMeta(p, (CBZ.cityCops || []).indexOf(p) >= 0); }),
-        cars: freshCars.map(carMeta),
-        gone: knownGone.splice(0),
-      });
-    }
+    _ents.clear(); _rowsPed.clear(); _rowsCop.clear(); _rowsCar.clear();
+    packInto(CBZ.cityPeds, _rowsPed);
+    packInto(CBZ.cityCops, _rowsCop);
+    packCarsInto(_rowsCar);
 
-    net.send({ t: "world", pd: packPeds(CBZ.cityPeds || []), cp: packPeds(CBZ.cityCops || []), cr: packCars(), w: g.wanted | 0 });
+    if (net.hasFeat("to")) {
+      // per-guest scoped snapshots; scope-exit gone lists replace knownGone
+      scopedSnapshots(performance.now());
+      knownGone.length = 0;
+    } else {
+      // legacy server: full broadcast, incremental meta for fresh entities
+      if (freshPeds.length || freshCars.length || knownGone.length) {
+        net.sendEv({
+          e: "meta",
+          peds: freshPeds.map(function (p) { return pedMeta(p, (CBZ.cityCops || []).indexOf(p) >= 0); }),
+          cars: freshCars.map(carMeta),
+          gone: knownGone.splice(0),
+        });
+      }
+      net.send({ t: "world", pd: vals(_rowsPed), cp: vals(_rowsCop), cr: vals(_rowsCar), w: g.wanted | 0 });
+    }
 
     hostRemoteInteractions();
   });
@@ -163,9 +243,11 @@
     }
   }
 
-  // full meta for late joiners
+  // full meta for late joiners (legacy servers only — with feat "to" the
+  // scoped pass hands them meta entity-by-entity as things enter their world)
   net.on("join", function (m) {
     if (!net.isHost()) return;
+    if (net.hasFeat("to")) return;
     const full = fullMeta();
     full.to = m.id;
     net.sendEv(full);
@@ -173,7 +255,11 @@
   net.on("welcome", function () {
     // if WE join as host (first player), nothing to do — entities tag lazily
     metaSentTo.clear();
+    scope.clear();
   });
+  net.on("leave", function (m) { scope.delete(m.id); });
+  net.on("host", function () { scope.clear(); });
+  net.on("_offline", function () { scope.clear(); });
 
   // a guest's bullet arrives: apply it to the authoritative ped/cop
   net.onEv("hit", function (m) {
@@ -236,6 +322,36 @@
       car.ai = false; car.v = 0; car.vx = car.vz = 0; car.stolen = true;
     } catch (e) { console.error("[net] carRel", e); }
   });
+
+  // ---- physics events out to guests ----------------------------------------
+  // A body going ragdoll on the host is broadcast so every screen sees the
+  // same launch (ragdoll.js calls this); nid rides in BOTH id and nid — the
+  // relay stamps the sender into id on broadcast evs.
+  const _rp = [0, 0, 0], _rd = [0, 0, 0];
+  function pack3(v, out) {
+    if (!v) { out[0] = out[1] = out[2] = 0; return out; }
+    if (v.x !== undefined) { out[0] = r2(v.x); out[1] = r2(v.y); out[2] = r2(v.z); }
+    else { out[0] = r2(v[0]); out[1] = r2(v[1]); out[2] = r2(v[2]); }
+    return out;
+  }
+  function r2(n) { return Math.round((n || 0) * 100) / 100; }
+  CBZ.netRagEmit = function (a, p, d, imp) {
+    if (!net.isHost() || !a || !a.nid) return;
+    net.sendEv({ e: "rag", id: a.nid, nid: a.nid, p: pack3(p, _rp), d: pack3(d, _rd), imp: r2(imp) });
+  };
+
+  // every fresh wall hole on the host replicates (cityFracture lands in
+  // parallel — poll-assign its onHole from the snapshot tick until it exists)
+  let frxHooked = false;
+  function hookFracture() {
+    if (frxHooked || !CBZ.cityFracture) return;
+    frxHooked = true;
+    const prev = CBZ.cityFracture.onHole;
+    CBZ.cityFracture.onHole = function (hole) {
+      if (typeof prev === "function") try { prev(hole); } catch (e) {}
+      if (net.isHost()) net.sendEv({ e: "frx", hole });
+    };
+  }
 
   // ============================ GUEST SIDE =================================
   const pup = { peds: new Map(), cars: new Map() }; // nid -> puppet
@@ -306,6 +422,35 @@
     for (const P of pup.peds.values()) if (!P.dead && P.group) out.push(P);
     return out;
   };
+  // puppet lookup for net-driven physics (ragdoll.js maps a rag event's id to
+  // a rig: puppets expose the same ch/char/group/pos surface as a real ped)
+  CBZ.netPuppetByNid = function (nid) { return pup.peds.get(nid) || null; };
+
+  // host ragdolled a ped: launch the same puppet here instead of letting it
+  // glide on interp — the kill should look as violent on every screen
+  const _rv1 = new THREE.Vector3(), _rv2 = new THREE.Vector3();
+  net.onEv("rag", function (m) {
+    if (!net.guest() || g.mode !== "city") return;
+    const nid = m.nid != null ? m.nid : m.id;
+    const P = pup.peds.get(nid);
+    if (!P) return;
+    P.dead = true;      // the rag ev outruns the snapshot row that flips the flag
+    P.netRag = true;    // physics owns the body now — interp lets go
+    let ok = false;
+    if (CBZ.cityRagdollNet) try { ok = !!CBZ.cityRagdollNet(P, m.p, m.d, m.imp || 0); } catch (e) {}
+    if (!ok && P.ch && CBZ.cityRagdoll && m.p && m.d) {
+      _rv1.set(m.p[0] || 0, m.p[1] || 0, m.p[2] || 0);
+      _rv2.set(m.d[0] || 0, m.d[1] || 0, m.d[2] || 0);
+      try { ok = !!CBZ.cityRagdoll(P, _rv1, _rv2, m.imp || 0); } catch (e) {}
+    }
+    if (!ok) P.netRag = false; // no ragdoll took the body — interp + deathPose keep it
+  });
+
+  // host blew a hole in a wall: stamp the same hole here
+  net.onEv("frx", function (m) {
+    if (!net.guest() || !m.hole) return;
+    if (CBZ.cityFracture && CBZ.cityFracture.applyOne) try { CBZ.cityFracture.applyOne(m.hole); } catch (e) {}
+  });
 
   net.on("world", function (m) {
     if (!net.guest() || g.mode !== "city") return;
@@ -316,7 +461,12 @@
         const nid = r[0];
         seen.add(nid);
         let P = pup.peds.get(nid);
-        if (!P) { if (!CBZ.makeCharacter) continue; P = makePedPuppet(nid); }
+        if (!P) {
+          if (!CBZ.makeCharacter) continue;
+          P = makePedPuppet(nid);
+          P.group.position.set(r[1], 0, r[2]); // born in place — no one-frame pop at origin
+          P.group.rotation.y = r[3] || 0;
+        }
         P.buf.push({ t: now, x: r[1], z: r[2], h: r[3], s: r[4] });
         if (P.buf.length > 8) P.buf.splice(0, P.buf.length - 8);
         const fl = r[5] | 0;
@@ -334,8 +484,13 @@
     for (const r of m.cr || []) {
       const nid = r[0];
       seen.add(nid);
-      let C = pup.cars.get(nid) || makeCarPuppet(nid);
-      if (!C) continue;
+      let C = pup.cars.get(nid);
+      if (!C) {
+        C = makeCarPuppet(nid);
+        if (!C) continue;
+        C.group.position.set(r[1], 0, r[2]);
+        C.group.rotation.y = r[3] || 0;
+      }
       C.lastSeen = now;
       C.buf.push({ t: now, x: r[1], z: r[2], h: r[3], v: r[4] });
       if (C.buf.length > 8) C.buf.splice(0, C.buf.length - 8);
@@ -382,6 +537,7 @@
     const t = performance.now() - INTERP_MS;
     const P0 = CBZ.player;
     for (const P of pup.peds.values()) {
+      if (P.netRag) continue; // ragdoll physics owns this body now
       const s = sample(P.buf, t);
       if (!s) continue;
       P.group.position.set(s.x, 0, s.z);
