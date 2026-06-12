@@ -759,9 +759,15 @@
     }
 
     if (m.st === "out") {
-      // wait for the walk-out (or time out on an AFK rider), then close up.
-      if ((!insideCab(el, m.end, P) && !inDoorway(el, m.end, P)) || m.t >= EXIT_WAIT) {
-        rigOf(el, m.end).target = 0;
+      // FORCE the arrival doors open and HOLD them — nothing (a stale
+      // autoClose, a flaky inside-test, anything) may close a cab on an
+      // arriving rider. The leave-check only arms once the doors are
+      // genuinely open, so a one-frame proximity glitch can never slam
+      // them shut before they've visibly moved (the filmed sealed-in bug).
+      r.target = 1; r.autoClose = null;
+      const armed = m.t > 1.2 && r.open > 0.5;
+      if ((armed && !insideCab(el, m.end, P) && !inDoorway(el, m.end, P)) || m.t >= EXIT_WAIT) {
+        r.target = 0;
         resetMachine(el, CALL_COOL);
         return null;
       }
@@ -802,6 +808,19 @@
       if (t !== undefined) text = t;
     }
     if (text !== undefined) { chipText(text); return; }
+
+    // RESCUE: a player standing inside ANY sealed idle cab gets the doors
+    // opened automatically — no state-machine path may ever leave someone
+    // entombed (belt-and-suspenders for the filmed stuck-at-arrival bug).
+    if (P && !P.dead) {
+      for (const el of elevators) {
+        if (el.m.st !== "idle") continue;
+        for (const end of ["g", "r"]) {
+          const rr = rigOf(el, end);
+          if (rr.open < 0.1 && insideCab(el, end, P)) { rr.target = 1; rr.autoClose = 4.0; }
+        }
+      }
+    }
 
     // all idle: proximity prompt at ~12 Hz, not frame rate — padNear hypots
     // every lift pad, and the [E] handler re-checks reach on the press anyway.
