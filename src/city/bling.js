@@ -19,6 +19,10 @@
                 learn to hunt)
      • wristR — iced band (Tennis Bracelet)
      • head   — gang-colored rag (ped.gang), so crews read as crews
+     • shirt/bow/square/sliver — the FORMAL KIT (outfits.js truth): a tux
+       reads black-tie (white shirt-front + bow-tie + pocket square), a
+       suit reads a modest white sliver. Clothing, not loot — it survives
+       looting and only trades bodies on the corpse-swap.
 
    PERF (the game is draw-call bound):
      • ONE shared geometry per accessory kind + ONE shared material
@@ -78,6 +82,12 @@
       gm._shared = true;
     } else if (kind === "band") gm = CBZ.boxGeom(0.36, 0.1, 0.36);   // wraps the 0.3 arm
     else if (kind === "ring") gm = CBZ.boxGeom(0.12, 0.07, 0.12);
+    // FORMAL KIT (outfits.js cityOutfitFormal*): the tux/suit read on a blocky
+    // rig — thin panels sitting just proud of the torso front (z 0.25).
+    else if (kind === "shirt") gm = CBZ.boxGeom(0.34, 0.5, 0.05);    // tux white shirt-front panel
+    else if (kind === "sliver") gm = CBZ.boxGeom(0.14, 0.46, 0.04);  // suit's modest shirt sliver
+    else if (kind === "bow") gm = CBZ.boxGeom(0.18, 0.09, 0.06);     // bow-tie at the collar
+    else if (kind === "square") gm = CBZ.boxGeom(0.09, 0.07, 0.04);  // pocket-square dot
     else gm = CBZ.boxGeom(0.68, 0.18, 0.68);                          // rag: encloses hair
     geos[kind] = gm;
     return gm;
@@ -91,6 +101,8 @@
       gold: CBZ.cmat(0xffd451, { emissive: 0x7a5c00, ei: 0.5 }),
       ice: CBZ.cmat(0xeaf6ff, { emissive: 0x9fd8ff, ei: 0.65 }),
       glint: CBZ.cmat(0xffffff, { emissive: 0xcfeaff, ei: 0.95 }),
+      shirt: CBZ.cmat(0xf7f4ea),                  // crisp white (shirt-front + square)
+      tie: CBZ.cmat(0x0a0a0d),                    // the black bow-tie
     };
     return _mats;
   }
@@ -124,11 +136,18 @@
     wristR: { kind: "band", anchor: "ra", x: 0, y: -0.68, z: 0 },
     ring: { kind: "ring", anchor: "ra", x: 0, y: -0.8, z: 0.22 },
     head: { kind: "rag", anchor: "neck", x: 0, y: 0.66, z: 0 },
+    // formal kit: torso front face is z 0.25, collar band y 1.75–1.93 —
+    // shirt panel rides the upper chest, bow at the throat, square on the
+    // jacket breast (x 0.28 keeps clear of the shirt panel's ±0.17 span).
+    shirt: { kind: "shirt", anchor: "body", x: 0, y: 1.52, z: 0.262 },
+    sliver: { kind: "sliver", anchor: "body", x: 0, y: 1.5, z: 0.258 },
+    bow: { kind: "bow", anchor: "body", x: 0, y: 1.78, z: 0.272 },
+    square: { kind: "square", anchor: "body", x: 0.28, y: 1.62, z: 0.262 },
   };
-  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head"];
+  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head", "shirt", "sliver", "bow", "square"];
 
   // ---- mesh pools per kind (reuse: dressing is pointer-swaps, not allocs) ----
-  const pools = { chain: [], band: [], ring: [], rag: [] };
+  const pools = { chain: [], band: [], ring: [], rag: [], shirt: [], sliver: [], bow: [], square: [] };
   function acquire(kind) {
     const pool = pools[kind];
     let mesh = pool && pool.pop();
@@ -177,8 +196,15 @@
       }
     }
     if (ped.gang) { head = ragMat(ped.gang); any = true; }
+    // FORMAL KIT — clothing, not loot: a looted corpse keeps its shirt front
+    // (like the rag) until a corpse-swap takes the actual cloth. Truth comes
+    // from outfits.js (identity + any swap-stamped record on the body).
+    const formal = CBZ.cityOutfitFormalOf ? CBZ.cityOutfitFormalOf(ped) : null;
+    let shirt = null, sliver = null, bow = null, square = null;
+    if (formal === "tux") { shirt = M.shirt; bow = M.tie; square = M.shirt; any = true; }
+    else if (formal === "suit") { sliver = M.shirt; any = true; }
     if (!any) return null;
-    return { neck, wristL, wristR, ring, head };
+    return { neck, wristL, wristR, ring, head, shirt, sliver, bow, square, _formal: formal };
   }
 
   // ---- dress / undress (pooled). ped._bling = { meshes, nVal, looted, gang } ----
@@ -211,6 +237,7 @@
       nVal: ped.valuables ? ped.valuables.length : 0,
       looted: lootedOut(ped),
       gang: ped.gang || null,
+      formal: want._formal || null,
     };
     dressed.push(ped);
   }
@@ -325,17 +352,25 @@
     const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() | 0 : 0;
     const vip = drip >= ((CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70);
     const rag = playerRag();
+    // YOUR formal kit rides the WORN outfit record (outfits.js): the boutique
+    // buy, CBZ.cityWearOutfit and the corpse swap all land in wearRecord →
+    // cityBlingPlayerDirty, so the shirt front arrives WITH the tux.
+    const formal = CBZ.cityOutfitFormal ? CBZ.cityOutfitFormal() : null;
     const want = {
       neck: best.neck ? (best.neck.luxe ? M.ice : M.gold) : null,
       wristL: best.wristL ? (best.wristL.luxe ? M.ice : M.gold) : null,
       wristR: best.wristR ? M.ice : (vip ? M.ice : null),
       ring: best.ring ? M.glint : null,
       head: rag ? rag.mat : null,
+      shirt: formal === "tux" ? M.shirt : null,
+      bow: formal === "tux" ? M.tie : null,
+      square: formal === "tux" ? M.shirt : null,
+      sliver: formal === "suit" ? M.shirt : null,
     };
-    const any = want.neck || want.wristL || want.wristR || want.ring || want.head;
+    const any = want.neck || want.wristL || want.wristR || want.ring || want.head || want.shirt || want.sliver;
     const sig = (best.neck ? best.neck.name : "") + "|" + (best.wristL ? best.wristL.name : "") + "|" +
                 (best.wristR ? best.wristR.name : "") + "|" + (best.ring ? best.ring.name : "") + "|" +
-                (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
+                (rag ? rag.key : "") + "|" + (vip ? 1 : 0) + "|" + (formal || "");
     return { want: any ? want : null, sig };
   }
 
@@ -407,7 +442,8 @@
       const dx = p.pos.x - camx, dz = p.pos.z - camz;
       if (dx * dx + dz * dz > UNDRESS_D2) { undress(p); continue; }
       const nVal = p.valuables ? p.valuables.length : 0;
-      if (nVal !== b.nVal || lootedOut(p) !== b.looted || (p.gang || null) !== b.gang) resyncPed(p);
+      const fm = CBZ.cityOutfitFormalOf ? CBZ.cityOutfitFormalOf(p) : null;  // cheap flag walk
+      if (nVal !== b.nVal || lootedOut(p) !== b.looted || (p.gang || null) !== b.gang || fm !== (b.formal || null)) resyncPed(p);
     }
 
     // 2) sliced scan: dress newly-near peds (a few per frame; full roster ~every
@@ -428,4 +464,8 @@
 
   // exposed for the harness/debug: how many peds are dressed right now.
   CBZ.cityBlingCount = function () { return dressed.length; };
+  // re-mirror ONE ped's attachments after their cloth changed out-of-band —
+  // outfits.js calls this on the corpse-swap so the tux's shirt front leaves
+  // (or your old fit's kit arrives on) the body the moment the trade lands.
+  CBZ.cityBlingResyncPed = resyncPed;
 })();

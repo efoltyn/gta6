@@ -81,6 +81,7 @@
   // you can drive straight THROUGH the hole — while a few glass shards rain
   // down. One shared translucent material + shard geometry keep it cheap.
   const cityGlass = [], cityShards = [];
+  let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
   function glassMat() { return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.46 })); }
   function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.22, 0.3, 0.05)); }
@@ -274,7 +275,7 @@
   }
   function burstPane(gp) {
     if (gp.shattered) return;
-    gp.shattered = true;
+    gp.shattered = true; shatteredPanes++;
     if (gp.mesh) gp.mesh.visible = false;
     else paneShow(gp, false);          // pooled pane: zero its instance matrix
     if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
@@ -364,8 +365,45 @@
       cityShards.push({ mesh: sh, vx: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 1.4, vz: (Math.random() - 0.5) * 2, spin: (Math.random() - 0.5) * 10, life: 0.9 });
     }
   }
+  // ---- OPEN-WINDOW SHOT HOLES --------------------------------------------
+  // Walls are SOLID per-storey boxes; window panes are decorative glass hanging
+  // ≤0.105 PROUD of either wall face. So "shooting through a window" needs an
+  // exception, not new geometry: given a losBlocker ray hit (px,py,pz) on a
+  // wall face and that face's horizontal normal (nx,nz — object space == world
+  // for these axis-aligned boxes; sign irrelevant), true means a SHATTERED
+  // pane's rect covers the point → the "wall" there is really an open window
+  // frame and the ray should keep tracing. los.js (NPC line-of-fire) and
+  // fpsmode's wall raycast both consult this, so bullets fly through broken
+  // windows in BOTH directions while intact glass keeps its wall's protection
+  // (panes never register as blockers — the first round breaks the pane via
+  // cityShatterRay, the next ones pass through the hole it left).
+  // Off-plane tolerance 0.62 = pane offset 0.105 + the full 0.4 wall depth
+  // (a hit on the FAR face of the wall still matches the near-side pane) +
+  // slack — but never enough to borrow a pane from a wall a room away.
+  const HOLE_TOL = 0.12, HOLE_OFF = 0.62;
+  CBZ.cityShotHole = function (px, py, pz, nx, nz) {
+    if (!shatteredPanes) return false;
+    const faceX = Math.abs(nx || 0) >= Math.abs(nz || 0);   // wall faces ±X → panes run along Z
+    for (let i = 0; i < cityGlass.length; i++) {
+      const gp = cityGlass[i];
+      if (!gp.shattered) continue;
+      const dy = py - gp.y;
+      if (dy > gp.hh + HOLE_TOL || dy < -(gp.hh + HOLE_TOL)) continue;
+      const dx = px - gp.x, dz = pz - gp.z;
+      const rr = gp.span + 1.0;                              // cheap spatial reject first
+      if (dx * dx + dy * dy + dz * dz > rr * rr) continue;
+      // the pane's thin axis must match the struck face's normal axis, or this
+      // pane dresses a PERPENDICULAR wall (same corner, wrong face)
+      if (faceX ? (gp.hw > gp.hd) : (gp.hd > gp.hw)) continue;
+      if (faceX) { if (Math.abs(dx) > HOLE_OFF || Math.abs(dz) > gp.hd + HOLE_TOL) continue; }
+      else if (Math.abs(dz) > HOLE_OFF || Math.abs(dx) > gp.hw + HOLE_TOL) continue;
+      return true;
+    }
+    return false;
+  };
   // re-glaze the whole city for a new game (restore panes + their colliders)
   CBZ.cityGlassReset = function () {
+    shatteredPanes = 0;
     for (const gp of cityGlass) {
       if (gp.shattered) {
         gp.shattered = false;
@@ -808,7 +846,7 @@
       const gu = horiz ? gp.x : gp.z, gf = horiz ? gp.z : gp.x;
       if (Math.abs(gf - fixed) > thick / 2 + 0.5) continue;
       if (gu < u0 - 0.2 || gu > u1 + 0.2 || gp.y < v0 - 0.3 || gp.y > v1 + 0.3) continue;
-      gp.shattered = true;
+      gp.shattered = true; shatteredPanes++;
       if (gp.mesh) gp.mesh.visible = false; else paneShow(gp, false);
       if (gp.col) { const gi = CBZ.colliders.indexOf(gp.col); if (gi >= 0) CBZ.colliders.splice(gi, 1); }
     }

@@ -669,7 +669,21 @@
     ray.set(origin, dir);
     ray.far = maxRange;
     const hits = ray.intersectObjects(CBZ.losBlockers, false);
-    return hits.length ? hits[0] : null;
+    // city: a wall hit landing inside an OPEN (shattered) window pane's rect
+    // (CBZ.cityShotHole, buildings.js) is a hole, not a wall — skip it and
+    // keep tracing, so firing out of (or into) a broken window carries past
+    // the frame instead of stamping a bullet pock on thin air. Intact glass
+    // still protects: panes aren't blockers, their SOLID wall is, and the
+    // first round breaks the pane (cityShatterRay below) so the next pass.
+    for (let i = 0; i < hits.length; i++) {
+      const h = hits[i];
+      if (CBZ.game.mode === "city" && CBZ.cityShotHole) {
+        const n = h.face && h.face.normal;   // axis-aligned walls: object-space normal == world
+        if (CBZ.cityShotHole(h.point.x, h.point.y, h.point.z, n ? n.x : 0, n ? n.z : 0)) continue;
+      }
+      return h;
+    }
+    return null;
   }
 
   // ---- ray vs the CAR fleet (cars were invisible to bullets before this) ----
@@ -801,7 +815,7 @@
         if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; }
       }
     };
-    if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); }   // same gun, city targets
+    if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); }   // same gun, city targets
     else { scan(CBZ.guards); scan(CBZ.npcs); }
     // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());

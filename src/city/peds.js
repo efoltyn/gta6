@@ -267,6 +267,14 @@
       const rare = rollRareArchetype(archetype, wealth, r);
       if (rare) { archetype = rare.archetype; mWealth = rare.wealth; }
     }
+    // CANONICAL WARDROBE (outfits.js): people whose POSITION dictates their
+    // cloth dress the part — a street tycoon wears the actual tux (not a
+    // random bright shirt under a bow tie), mobsters wear suits, dealers
+    // tracksuits, dock workers hi-vis. Caster-chosen outfits still win.
+    if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
+      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor });
+      if (fit && fit.colors) CBZ.cityRecolorRig(ch, fit.colors);
+    }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
     const cash = opts.cash != null ? opts.cash
@@ -873,6 +881,10 @@
   CBZ.cityKillPed = function (ped, imp, cause) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // killed mid-call → the report dies with them
+    // every body follows its killer around (kill-cam stats + street reads)
+    if (imp && imp.attacker && typeof imp.attacker === "object" && !imp.attacker.isPlayer) {
+      imp.attacker.bodies = (imp.attacker.bodies | 0) + 1;
+    }
     const wasArmed = !!ped.armed;
     ped.dead = true; ped.deadT = 0; ped.hp = 0;
     // FINITE POPULATION: a named rig just died → tick the city headcount DOWN.
@@ -1181,7 +1193,14 @@
       // rooftop or behind-cover position actually safe from a ground shooter —
       // replacing the old "roll a dice by flat distance" hit that ignored LOS,
       // elevation, and walls entirely.
-      if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y, from.z, tgt.pos.x, ty, tgt.pos.z)) {
+      // The gate ray starts at the CHEST CENTRE, not the muzzle tip: the
+      // movement collider guarantees the chest is outside every wall box,
+      // while a muzzle pressed into a facade can start INSIDE (or past) the
+      // wall — and a ray born inside a FrontSide box sees only culled back
+      // faces, so the wall didn't exist and shots cleared straight through
+      // buildings (the filmed shot-through-walls bug). The muzzle stays the
+      // tracer/flash origin so the visuals still leave the gun barrel.
+      if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(att.pos.x, (att.pos.y || 0) + 1.4, att.pos.z, tgt.pos.x, ty, tgt.pos.z)) {
         att.attackCD = 0.25 + rng() * 0.3;               // brief beat, then re-check for a clean angle
         return;
       }
@@ -1197,6 +1216,11 @@
       // accuracy falls off with the TRUE 3D distance (a long, steep up-shot is hard;
       // a clean close line lands). LOS is already guaranteed above.
       const d3 = Math.hypot(dh, to.y - from.y);
+      // the round is REAL to glass: any intact pane across the lane bursts
+      // (force=true, exactly like player fire) — so an NPC's first shot
+      // through a showroom front or a half-broken window BREAKS it, and the
+      // follow-ups fly through the hole (cityShotHole lets LOS/tracers pass).
+      if (CBZ.cityShatterRay) CBZ.cityShatterRay(from.x, from.y, from.z, to.x - from.x, to.y - from.y, to.z - from.z, d3 + 0.6, true);
       const hit = rng() < Math.max(0.15, 0.8 - d3 * 0.03);
       if (hit) hurtActor(att, tgt, prof.dmg + rng() * prof.dspr, false);
       // a round only catches a bystander when it actually traveled the lane (it had

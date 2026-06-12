@@ -192,12 +192,14 @@
     }
   }
 
-  // is `c` stuck right behind a much slower car in the same lane & direction?
+  // is `c` stuck right behind a much slower car physically in its lane? Counts
+  // same-direction dawdlers AND a head-on blocker (a stopped oncoming car / a
+  // U-turner in our lane) — either way the pull-around logic dissolves it.
   function blockedAhead(c) {
     if (!c.road) return null;
     let best = null, bg = 1e9;
     for (const o of CBZ.cityCars) {
-      if (o === c || o.dead || o.road !== c.road || o.dirSign !== c.dirSign) continue;
+      if (o === c || o.dead || o.road !== c.road) continue;
       const along = c.road.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
       const lat = c.road.vertical ? Math.abs(o.pos.x - c.pos.x) : Math.abs(o.pos.z - c.pos.z);
       if (along > 0.4 && along < 7 && lat < 2.4 && along < bg) { bg = along; best = o; }
@@ -468,6 +470,10 @@
       kind, grp: built.grp, pos: built.grp.position, mats: built,
       tx, tz, heading: 0, v: 0, state: "drive", t: 0, beaconT: Math.random() * 2,
       siren: 0, target: null,
+      // dims feed vehicles.js's shared wall resolver (cityCollideVehicle) so the
+      // truck hull collides exactly like every other driven car in the city.
+      dims: { width: 2.2, length: 5.4 },
+      cx: null, cz: null, stuckT: 0,
     };
     emg.push(e);
     return e;
@@ -533,29 +539,136 @@
     }
   }
 
-  // simple Manhattan road-router: drive to the target by snapping to the lane
-  // grid — go along the current axis to the target's row/col, turn, then finish.
+  // nearest road grid line to a coordinate (arena.xLines/zLines are the
+  // centre-lines of every avenue / cross-street)
+  function nearestLine(lines, v) {
+    let best = lines[0];
+    for (let i = 1; i < lines.length; i++) if (Math.abs(lines[i] - v) < Math.abs(best - v)) best = lines[i];
+    return best;
+  }
+
+  // ---- ROAD ROUTER + WALL CONTRACT (root-cause fix, user-filmed) -----------
+  // steerEmergency used to beeline at the incident along arbitrary dominant-axis
+  // legs with NO collider resolution at all — ambulances/fire trucks drove
+  // straight through buildings to mid-block scenes. Now:
+  //   • the goal is snapped to the CURB — the nearest point ON the road grid to
+  //     the scene (real ambulances park outside),
+  //   • the route follows actual road lines (cross-street → avenue → curb)
+  //     instead of cutting the block diagonal,
+  //   • the hull resolves against CBZ.colliders through the SAME oriented path
+  //     every driven car uses (vehicles.js cityCollideVehicle: body circle +
+  //     front probe), so a wall is a wall even when the steering is wrong,
+  //   • a truck that still gets pinned (wreck in the lane, blocked street)
+  //     accrues e.stuckT — the drive state parks it at the curb instead of
+  //     letting it grind through geometry.
   function steerEmergency(e, dt, A) {
     const tx = e.tx, tz = e.tz;
     const dx = tx - e.pos.x, dz = tz - e.pos.z;
     const dist = Math.hypot(dx, dz);
-    // pick the dominant axis first (drive the long leg), then the other
+    // CURB GOAL: nearest point on the road grid to the scene
+    let cx = tx, cz = tz, curbVert = false;
+    const onGrid = !!(A.xLines && A.xLines.length && A.zLines && A.zLines.length);
+    if (onGrid) {
+      const xl = nearestLine(A.xLines, tx), zl = nearestLine(A.zLines, tz);
+      if (Math.abs(tx - xl) <= Math.abs(tz - zl)) { cx = xl; cz = tz; curbVert = true; }
+      else { cx = tx; cz = zl; curbVert = false; }
+    }
+    e.cx = cx; e.cz = cz;
+    // this frame's aim point: a 3-leg Manhattan route along real roads
     let aimX, aimZ;
-    if (Math.abs(dx) > Math.abs(dz) + 2) { aimX = tx; aimZ = e.pos.z; }
-    else if (Math.abs(dz) > Math.abs(dx) + 2) { aimX = e.pos.x; aimZ = tz; }
-    else { aimX = tx; aimZ = tz; }
+    if (!onGrid) {
+      // no grid (shouldn't happen in city) — old dominant-axis fallback
+      if (Math.abs(dx) > Math.abs(dz) + 2) { aimX = tx; aimZ = e.pos.z; }
+      else if (Math.abs(dz) > Math.abs(dx) + 2) { aimX = e.pos.x; aimZ = tz; }
+      else { aimX = tx; aimZ = tz; }
+    } else if (curbVert) {
+      // curb sits on the avenue x=cx → run a cross-street over, then the avenue
+      if (Math.abs(e.pos.x - cx) > 2.5) {
+        const zr = nearestLine(A.zLines, e.pos.z);
+        if (Math.abs(e.pos.z - zr) > 2.5) { aimX = e.pos.x; aimZ = zr; }   // get onto a cross-street
+        else { aimX = cx; aimZ = zr; }                                     // run it to the avenue
+      } else { aimX = cx; aimZ = cz; }                                     // run the avenue to the curb
+    } else {
+      // curb sits on the cross-street z=cz → run an avenue over, then the street
+      if (Math.abs(e.pos.z - cz) > 2.5) {
+        const xr = nearestLine(A.xLines, e.pos.x);
+        if (Math.abs(e.pos.x - xr) > 2.5) { aimX = xr; aimZ = e.pos.z; }   // get onto an avenue
+        else { aimX = xr; aimZ = cz; }                                     // run it to the street
+      } else { aimX = cx; aimZ = cz; }                                     // run the street to the curb
+    }
     const adx = aimX - e.pos.x, adz = aimZ - e.pos.z;
     const want = Math.atan2(adx, adz);
     e.heading = CBZ.lerpAngle ? CBZ.lerpAngle(e.heading, want, 1 - Math.pow(0.0009, dt)) : want;
     // emergency vehicles roll fast — they have right of way (ignore the lights)
     const topV = Math.max(11, (TR().cruise ? TR().cruise[1] : 12) * 1.3);
     e.v += Math.min(14 * dt, topV - e.v);
+    const px = e.pos.x, pz = e.pos.z;
     e.pos.x += Math.sin(e.heading) * e.v * dt;
     e.pos.z += Math.cos(e.heading) * e.v * dt;
+    // WALLS ARE WALLS: the same oriented resolution every driven car gets
+    if (CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(e);
+    else if (CBZ.collide) CBZ.collide(e.pos, 1.3);
     if (A.clampToCity) A.clampToCity(e.pos, 1.6);
+    // pinned against geometry? (commanded a real step, the body barely moved)
+    const stepped = Math.hypot(e.pos.x - px, e.pos.z - pz);
+    if (e.v > 2 && stepped < e.v * dt * 0.35) { e.stuckT = (e.stuckT || 0) + dt; e.v *= Math.pow(0.05, dt); }
+    else e.stuckT = Math.max(0, (e.stuckT || 0) - dt * 2);
     e.grp.position.set(e.pos.x, 0, e.pos.z);
     e.grp.rotation.y = e.heading;
     return dist;
+  }
+
+  // ---- EMERGENCY VEHICLES ARE SOLID -----------------------------------------
+  // They live in their own list (not cityCars), so the normal car↔player pass
+  // never saw them: ambulances and fire trucks phased straight through you on
+  // foot AND through your car (user-filmed). Same treatment as every other
+  // vehicle now: an oriented-box push-out, a real run-down when they're moving,
+  // and a shove + bleed-off when they meet your car.
+  let emgRunCD = 0;
+  function emgCollide(e, dt) {
+    emgRunCD -= dt;
+    const P = CBZ.player;
+    if (!P || P.dead) return;
+    const speed = Math.abs(e.v || 0);
+    if (!P.driving) {
+      const hw = 1.1 + (P.radius || 0.45), hl = 2.7 + (P.radius || 0.45);
+      const s = Math.sin(e.heading), c = Math.cos(e.heading);
+      const dx = P.pos.x - e.pos.x, dz = P.pos.z - e.pos.z;
+      const lx = dx * c - dz * s, lz = dx * s + dz * c;
+      if (Math.abs(lx) >= hw || Math.abs(lz) >= hl) return;
+      const px = hw - Math.abs(lx), pz = hl - Math.abs(lz);
+      if (px < pz) { const d = lx >= 0 ? px : -px; P.pos.x += d * c; P.pos.z += -d * s; }
+      else { const d = lz >= 0 ? pz : -pz; P.pos.x += d * s; P.pos.z += d * c; }
+      if (speed > 6 && emgRunCD <= 0) {
+        emgRunCD = 0.9;
+        if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(140, 8 + speed * 4.5), e.pos.x, e.pos.z, "run down by a " + (e.kind === "firetruck" ? "fire truck" : "speeding ambulance"), false, null, speed < 14);
+        if (CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && !CBZ.body.busy(CBZ.city.playerActor)) {
+          CBZ.body.knockdown(CBZ.city.playerActor, { fromX: e.pos.x, fromZ: e.pos.z, force: Math.min(10, speed * 0.5), t: 1.1 });
+        }
+      }
+      return;
+    }
+    // your car vs the truck: push apart + kill the closing speed (a wall of
+    // steel with right of way — you bounce off, it barely notices)
+    const car = P._vehicle;
+    if (!car) return;
+    const dx = car.pos.x - e.pos.x, dz = car.pos.z - e.pos.z;
+    const d = Math.hypot(dx, dz), min = 4.3;
+    if (d >= min || d < 0.001) return;
+    const nx = dx / d, nz = dz / d, push = (min - d);
+    car.pos.x += nx * push * 0.85; car.pos.z += nz * push * 0.85;
+    e.pos.x -= nx * push * 0.15; e.pos.z -= nz * push * 0.15;
+    const closing = Math.abs((car.vx || 0) * nx + (car.vz || 0) * nz) + speed * 0.5;
+    car.vx = (car.vx || 0) * 0.45 + nx * 2; car.vz = (car.vz || 0) * 0.45 + nz * 2;
+    car.v = (car.v || 0) * 0.5;
+    e.v *= 0.55;
+    if (closing > 8 && emgRunCD <= 0) {
+      emgRunCD = 0.9;
+      if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, Math.min(40, closing * 2.2), { fromX: e.pos.x, fromZ: e.pos.z });
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(35, closing * 1.4), e.pos.x, e.pos.z, "car crash", false, null, true);
+      if (CBZ.sfx) { try { CBZ.sfx("crash"); } catch (er) {} }
+      if (CBZ.shake) CBZ.shake(0.6);
+    }
   }
 
   function flashBeacon(e, dt) {
@@ -583,8 +696,12 @@
         for (let i = 0; i < peds.length; i++) {
           const p = peds[i];
           if (!(p.dead && !p.collected && !p.culled)) continue;
-          const dd = (p.pos.x - e.pos.x) * (p.pos.x - e.pos.x) + (p.pos.z - e.pos.z) * (p.pos.z - e.pos.z);
-          if (dd < 12 * 12) p.needsPickup = true;
+          // near the TRUCK — or near the SCENE it parked at the curb for (the
+          // curb stop can leave the body a block-interior walk away; the on-foot
+          // stretcher team covers that last leg, not the truck)
+          const dT = (p.pos.x - e.pos.x) * (p.pos.x - e.pos.x) + (p.pos.z - e.pos.z) * (p.pos.z - e.pos.z);
+          const dS = (p.pos.x - e.tx) * (p.pos.x - e.tx) + (p.pos.z - e.tz) * (p.pos.z - e.tz);
+          if (dT < 12 * 12 || dS < 10 * 10) p.needsPickup = true;
         }
       }
       // (no toast — the stretcher team rolling up IS the scene)
@@ -630,24 +747,42 @@
         if (e.state === "drive") {
           const d = steerEmergency(e, dt, A);
           e.t += dt;
-          if (d < 6) { emergencyArrive(e); e.state = "work"; e.t = 0; }
+          // ARRIVE at the scene itself — or PARK at the curb nearest it (a
+          // mid-block body can't be reached by road; real ambulances park outside)
+          const atCurb = e.cx != null && Math.hypot(e.pos.x - e.cx, e.pos.z - e.cz) < 3.5;
+          if (d < 6 || (atCurb && d < 60)) { emergencyArrive(e); e.state = "work"; e.t = 0; e.stuckT = 0; }
+          else if (e.stuckT > 2.5) {
+            // wedged (wreck/queue in the lane): a real unit stops where it is and
+            // works the scene from there — never grinds through geometry.
+            if (d < 45) emergencyArrive(e);
+            e.state = d < 45 ? "work" : "leave"; e.t = 0; e.stuckT = 0;
+          }
           else if (e.t > 28) { e.state = "leave"; e.t = 0; }   // gave up / blocked
         }
       } else if (e.state === "work") {
         e.t += dt; e.v *= Math.pow(0.1, dt);
         if (e.t > 3.5) { e.state = "leave"; e.t = 0; if (e.target) e.target._emgClaimed = false; }
-      } else { // leave: drive off toward the nearest edge, then despawn
+      } else { // leave: roll off ALONG A ROAD toward the nearest edge, then despawn
         e.t += dt;
-        // aim at the far edge along the longer axis
-        const farX = (e.pos.x > A.center.x ? A.maxX + 20 : A.minX - 20);
-        const farZ = (e.pos.z > A.center.z ? A.maxZ + 20 : A.minZ - 20);
-        e.tx = Math.abs(e.pos.x - A.center.x) > Math.abs(e.pos.z - A.center.z) ? farX : e.pos.x;
-        e.tz = e.tx === e.pos.x ? farZ : e.pos.z;
+        // exit along the dominant axis, but down a real road line (the router
+        // snaps the lateral coordinate to the nearest avenue/cross-street, so
+        // the exit run never cuts a block diagonal through buildings)
+        if (Math.abs(e.pos.x - A.center.x) > Math.abs(e.pos.z - A.center.z)) {
+          e.tx = (e.pos.x > A.center.x ? A.maxX + 20 : A.minX - 20);
+          e.tz = (A.zLines && A.zLines.length) ? nearestLine(A.zLines, e.pos.z) : e.pos.z;
+        } else {
+          e.tz = (e.pos.z > A.center.z ? A.maxZ + 20 : A.minZ - 20);
+          e.tx = (A.xLines && A.xLines.length) ? nearestLine(A.xLines, e.pos.x) : e.pos.x;
+        }
         steerEmergency(e, dt, A);
         const outX = e.pos.x < A.minX - 14 || e.pos.x > A.maxX + 14;
         const outZ = e.pos.z < A.minZ - 14 || e.pos.z > A.maxZ + 14;
-        if (outX || outZ || e.t > 14) { if (e.target) e.target._emgClaimed = false; despawnEmergency(e); emg.splice(i, 1); continue; }
+        // stuckT: clampToCity pins the truck at the rim, so "wedged at the edge"
+        // is the real despawn cue out there (plus the old timeout)
+        if (outX || outZ || e.t > 14 || e.stuckT > 3) { if (e.target) e.target._emgClaimed = false; despawnEmergency(e); emg.splice(i, 1); continue; }
       }
+
+      emgCollide(e, dt);   // solid to the player, on foot or behind the wheel
 
       // distance cull (cheap LOD: hide the body when far off camera)
       const cam = CBZ.camera.position;

@@ -348,7 +348,13 @@
     const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
     const dmg = it && it.dmg ? it.dmg * 1.5 + 30 : 80;
     STOP.cop = null; stopHide();    // the stop is over the instant you pull
-    if (CBZ.cityHurtCop) CBZ.cityHurtCop(c, dmg, { fromX: fx, fromZ: fz });
+    // LOS GATE (audit): the stop only dies past 16u, not when a corner slides
+    // between you — without this, EXECUTE was the one police-stand-off shot that
+    // could land THROUGH a wall. A blocked shot still FIRED: the officer hears
+    // it and the assault-on-an-officer branch below still hunts you.
+    const clear = !CBZ.clearLineOfFire ||
+      CBZ.clearLineOfFire(from.x, from.y != null ? from.y : 1.45, from.z, c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z);
+    if (clear && CBZ.cityHurtCop) CBZ.cityHurtCop(c, dmg, { fromX: fx, fromZ: fz });
     if (!c.dead) {
       // didn't kill him — he's now hunting you for assaulting an officer
       if (CBZ.cityCrime) CBZ.cityCrime(70, { instant: true, x: c.pos.x, z: c.pos.z, type: "assault-officer" });
@@ -877,7 +883,11 @@
       c.v = Math.max(2, c.v);
       c.pos.x += Math.sin(c.heading) * c.v * dt;
       c.pos.z += Math.cos(c.heading) * c.v * dt;
-      if (CBZ.collide) CBZ.collide(c.pos, 1.0);
+      // full oriented hull (body circle + front probe) — these are real cars
+      // steered off vehicles.js's lane AI, so they keep its exact wall contract
+      // (the bare 1.0 circle let a long cruiser nose clip through corners)
+      if (CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(c);
+      else if (CBZ.collide) CBZ.collide(c.pos, 1.0);
       if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, 1.0);
       c.group.position.set(c.pos.x, 0, c.pos.z);
       c.group.rotation.y = c.heading;
@@ -1124,7 +1134,9 @@
       c.v = Math.min(13, (c.v || 0) + 9 * dt);
       c.pos.x += Math.sin(c.heading) * c.v * dt;
       c.pos.z += Math.cos(c.heading) * c.v * dt;
-      if (CBZ.collide) CBZ.collide(c.pos, 1.2);
+      // same wall contract as every driven car (oriented hull + front probe)
+      if (CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(c);
+      else if (CBZ.collide) CBZ.collide(c.pos, 1.2);
       if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, 1.2);
       c.group.position.set(c.pos.x, 0, c.pos.z);
       c.group.rotation.y = c.heading;
@@ -1629,10 +1641,13 @@
     if (c.armed && CBZ.syncActorWeapon) CBZ.syncActorWeapon(c);
     if (CBZ.actorAimAt) CBZ.actorAimAt(c, tgt);
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(c, tmp) : { x: c.pos.x, y: 1.4, z: c.pos.z };
-    // FINAL line-of-fire gate from the real muzzle: never put a round through a
-    // wall even if the torso-height sightline cleared (barrel past a corner, etc.).
+    // FINAL line-of-fire gate from the CHEST, not the muzzle tip: a cop pressed
+    // against a facade can poke the barrel INSIDE/THROUGH the 0.4 wall box, and a
+    // ray born inside a FrontSide box sees no faces (the filmed shot-through-wall
+    // bug). The chest centre is collider-guaranteed outside walls; the muzzle
+    // stays the tracer/flash origin only.
     const ty = tgt.isPlayer ? 1.55 : 1.3;
-    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y != null ? from.y : 1.4, from.z, tgt.pos.x, ty, tgt.pos.z)) {
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z, tgt.pos.x, ty, tgt.pos.z)) {
       c.sees = false; c.lostT = (c.lostT || 0) + 0.25;   // treat as a momentary loss → flank/reposition
       return;
     }

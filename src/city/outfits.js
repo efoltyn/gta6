@@ -68,14 +68,21 @@
                  colors: { legs: 0x23262e, torso: 0x241c18, collar: 0x100c0a, arms: 0x241c18, shoes: 0x16110d } },
     tactical:  { id: "tactical",  name: "All Black Tactical", tier: "fit",  who: "professionals",    price: 700,  drip: 7,
                  colors: { legs: 0x121418, torso: 0x121418, collar: 0x0b0c0f, arms: 0x121418, shoes: 0x0b0c0f } },
-    suit:      { id: "suit",      name: "Two-Piece Suit",   tier: "money",  who: "made men",         price: 1200, drip: 9,
-                 colors: { legs: 0x14161c, torso: 0x1c2030, collar: 0xf2f2f2, arms: 0x1c2030, shoes: 0x0c0d10 } },
+    // formal: "suit"/"tux" — bling.js attaches the FORMAL KIT for the read:
+    // suit = a modest white shirt-front sliver on a navy/charcoal body;
+    // tux = the full black-tie set (white shirt-front panel + bow-tie +
+    // pocket square). colors.gloss puts a patent-leather sheen on the shoes.
+    suit:      { id: "suit",      name: "Two-Piece Suit",   tier: "money",  who: "made men",         price: 1200, drip: 9, formal: "suit",
+                 colors: { legs: 0x14161c, torso: 0x1c2030, collar: 0x2a3047, arms: 0x1c2030, shoes: 0x0c0d10 } },
     designer:  { id: "designer",  name: "Designer Drip",    tier: "money",  who: "ballers",          price: 1600, drip: 12,
                  colors: { legs: 0xe9e4da, torso: 0x7a3df0, collar: 0xffd451, arms: 0x7a3df0, shoes: 0xffffff } },
     // THE APEX: priced like a car, and the rope opens for the cloth alone
     // (drip 28 + BASE_DRIP 4 = 32 ≥ CLUB_DRIP 30 — the tuxedo IS entry).
-    tuxedo:    { id: "tuxedo",    name: "Midnight Tuxedo",  tier: "apex",   who: "old money",        price: 7500, drip: 28,
-                 colors: { legs: 0x0b0c10, torso: 0x0b0c10, collar: 0xf6f2e8, arms: 0x0b0c10, shoes: 0x08090c } },
+    // True-black jacket, CHARCOAL-SATIN collar (lapel read, not a priest's
+    // band), gloss shoes; the white lives in the SHIRT-FRONT panel + square
+    // (formal kit meshes), never the collar — that was the priest look.
+    tuxedo:    { id: "tuxedo",    name: "Midnight Tuxedo",  tier: "apex",   who: "old money",        price: 7500, drip: 28, formal: "tux",
+                 colors: { legs: 0x0a0b0e, torso: 0x0a0b0e, collar: 0x24262e, arms: 0x0a0b0e, shoes: 0x08090c, gloss: true } },
   };
 
   // per-gang colors, generated off the live config so every crew's flag exists
@@ -124,7 +131,27 @@
       if (visible != null) m.visible = visible;
     }
   }
-  // recolor any character rig's CLOTH to an outfit's colors (skin/face untouched)
+  // GLOSS (the tux's patent-leather shoes): a faint cool sheen via the Lambert
+  // emissive. Clone-on-write like paint(), and always RESET when the fit has no
+  // gloss — a cloned material persists across re-wears, so a tux→hoodie change
+  // must walk the shine back off.
+  function sheen(list, on) {
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m || !m.material || !m.material.emissive || !m.material.emissive.setHex) continue;
+      if (m.material._shared) {
+        if (!on) continue;                     // shared cache mats are already matte
+        m.material = m.material.clone();
+      }
+      m.material.emissive.setHex(on ? 0x3a3f4c : 0x000000);
+      m.material.emissiveIntensity = on ? 0.4 : 1;
+    }
+  }
+  // recolor any character rig's CLOTH to an outfit's colors (skin/face untouched).
+  // SAME part mapping as sampleRigColors below — paint(legs/torso/collar/arms/
+  // shoes) ↔ sample(legs/torso/collar/arms/shoes) — so a corpse swap is exact:
+  // what you sample off them is precisely what painting puts on you.
   function recolorRig(ch, c) {
     if (!ch || !ch.skinSlots || !c) return false;
     const s = ch.skinSlots;
@@ -133,9 +160,40 @@
     paint(s.collar, c.collar != null ? c.collar : c.torso);
     paint(s.arms, c.arms != null ? c.arms : c.torso);
     paint(s.shoes, c.shoes != null ? c.shoes : 0x2b2b2b);
+    sheen(s.shoes, !!c.gloss);
     return true;
   }
   CBZ.cityRecolorRig = recolorRig;
+
+  // ---- VISUAL TRUTH: sample what a body is ACTUALLY rendering -------------
+  // Peds are painted at spawn from district wardrobes / tourist brights /
+  // vagrant rags, and repainted by crowd promotion + vips drafting — so a
+  // derived catalog record often looks NOTHING like the body. Read the live
+  // color off whatever material each part currently has (shared or cloned —
+  // getHex is read-only, we NEVER mutate here).
+  function readColor(list) {
+    if (!list) return null;
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (m && m.material && m.material.color && m.material.color.getHex) return m.material.color.getHex();
+    }
+    return null;
+  }
+  function sampleRigColors(ch) {
+    if (!ch || !ch.skinSlots) return null;
+    const s = ch.skinSlots;
+    const torso = readColor(s.torso);
+    if (torso == null) return null;            // harness stub rigs — no sample
+    const legs = readColor(s.legs), collar = readColor(s.collar);
+    const arms = readColor(s.arms), shoes = readColor(s.shoes);
+    return {
+      legs: legs != null ? legs : torso,
+      torso,
+      collar: collar != null ? collar : torso,
+      arms: arms != null ? arms : torso,
+      shoes: shoes != null ? shoes : 0x2b2b2b,
+    };
+  }
 
   // dress the PLAYER rig in the worn outfit (extends recolorRig with the
   // player-only kit: jail stripes hidden, the cop cap/badge ride the uniform —
@@ -261,21 +319,53 @@
     return null;                                                     // ordinary folk keep street variety
   };
 
-  // what is THIS body wearing? (corpse-swap + future reads). Derives the
-  // outfit record from who the actor IS — same truth the casting hook uses.
-  CBZ.cityOutfitOf = function (p) {
-    buildGangOutfits();
+  // WHO is this body, wardrobe-wise? The named-identity ladder (kept for the
+  // PERCEPTION flags: cop/gang/drip/formal have mechanical meaning). A corpse
+  // that's been through a swap wears whatever was left on it — that stamped
+  // record (p._wornOutfit, set in finishSwap) outranks identity.
+  function baseRecordOf(p) {
     if (!p) return null;
+    if (p._wornOutfit) return p._wornOutfit;
     if (p.kind === "cop") return p.swat ? CAT.swat : CAT.police;
     if (p.gang && CAT["gang:" + p.gang]) return CAT["gang:" + p.gang];
     if (p.vendor) return CAT.vendor;
     const a = p.archetype || "";
     if (a === "tycoon" || a === "billionaire") return CAT.tuxedo;
     if (a === "socialite" || a === "boss" || a === "mobster" || a === "made") return CAT.suit;
-    // plain civvies: their actual torso color travels with the swap
-    const torso = p.outfit != null ? p.outfit : 0x8a939c;
-    return { id: "civvies", name: "their street clothes", tier: "street", who: "them", price: 0, drip: 0,
-             colors: { legs: 0x363b46, torso, collar: torso, arms: torso, shoes: 0x2b2b2b } };
+    return null;
+  }
+
+  // what is THIS body wearing? (corpse-swap + interact's "Take their X").
+  // Identity decides the RECORD (name + cop/gang/drip/formal flags), but the
+  // COLOR PAYLOAD is SAMPLED off the live rig — visual truth always wins, so
+  // the fit you take is exactly the fit you saw (district wardrobe, tourist
+  // brights, a vips repaint and all). Catalog records are never mutated: a
+  // sampled result is a fresh copy.
+  CBZ.cityOutfitOf = function (p) {
+    buildGangOutfits();
+    if (!p) return null;
+    const rec = baseRecordOf(p);
+    const sampled = sampleRigColors(p.char);
+    if (rec) {
+      if (!sampled) return rec;                // no rig to read — catalog truth
+      const copy = Object.assign({}, rec);     // flags (cop/gang/drip/formal) ride along
+      copy.colors = Object.assign({}, rec.colors, sampled);  // belt/gloss kept, cloth sampled
+      return copy;
+    }
+    // plain civvies: their actual rendered set travels with the swap
+    const torso = sampled ? sampled.torso : (p.outfit != null ? p.outfit : 0x8a939c);
+    const colors = sampled || { legs: 0x363b46, torso, collar: torso, arms: torso, shoes: 0x2b2b2b };
+    return { id: "civvies", name: "their street clothes", tier: "street", who: "them", price: 0, drip: 0, colors };
+  };
+
+  // FORMAL KIT reads (bling.js attaches the meshes off these — its pooled,
+  // despawn-safe rig-attachment pipeline): "tux" = white shirt-front panel +
+  // bow-tie + pocket square; "suit" = the modest shirt-front sliver.
+  CBZ.cityOutfitFormal = function () { const w = g.cityWornOutfit; return (w && w.formal) || null; };
+  CBZ.cityOutfitFormalOf = function (p) {
+    buildGangOutfits();
+    const rec = baseRecordOf(p);
+    return (rec && rec.formal) || null;
   };
 
   // ============================================================
@@ -302,10 +392,18 @@
   function finishSwap() {
     const sw = _pendingSwap; _pendingSwap = null;
     if (!sw) return;
-    // the corpse is left in YOUR old fit (colors literally trade bodies)
-    if (sw.body && sw.body.char) {
-      recolorRig(sw.body.char, sw.mine.colors);
-      sw.body.outfit = sw.mine.colors.torso;     // gore/cloth reads stay true
+    // the corpse is left in YOUR old fit (colors literally trade bodies —
+    // sw.mine is the worn record, and the player rig is always painted from
+    // the worn record, so the corpse gets your exact previous visible set).
+    if (sw.body) {
+      sw.body._wornOutfit = sw.mine;             // identity reads now see the traded cloth
+      if (sw.body.char) {
+        recolorRig(sw.body.char, sw.mine.colors);
+        sw.body.outfit = sw.mine.colors.torso;   // gore/cloth reads stay true
+      }
+      // re-mirror the corpse's attachments NOW: a magnate stripped of his tux
+      // loses the shirt-front/bow on the spot (or gains yours, if you had one).
+      if (CBZ.cityBlingResyncPed) CBZ.cityBlingResyncPed(sw.body);
     }
     wearRecord(sw.theirs);
   }
