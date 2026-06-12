@@ -8,29 +8,37 @@
    mark — no menus, no inspection, just looking at people. Gang
    members also get a crew-colored rag so a block reads at a glance.
 
-   What you see:
-     • neck   — chain loop on the chest (gold = Gold/Iced Chain,
-                ice-white = Diamond Necklace)
-     • wristL — watch band (gold = Rolex/Omega; iced = the luxe
-                unicorns: AP / Patek / Richard Mille / Iced Watch —
-                the brighter the wrist, the bigger the score)
-     • ring   — tiny glint on the right hand (Engagement/Diamond
-                Ring/Pinky — the $5M rock is a pixel of light you
-                learn to hunt)
-     • wristR — iced band (Tennis Bracelet)
-     • head   — gang-colored rag (ped.gang), so crews read as crews
-     • shirt/bow/square/sliver — the FORMAL KIT (outfits.js truth): a tux
-       reads black-tie (white shirt-front + bow-tie + pocket square), a
-       suit reads a modest white sliver. Clothing, not loot — it survives
-       looting and only trades bodies on the corpse-swap.
+   What you see (REAL jewelry scale — reads at street distance, not
+   clownish up close):
+     • neck   — a thin chain lying FLAT against the upper chest: a
+                shallow V of two slim links meeting at a small pendant
+                just below the collar (gold = Gold Chain; thin silver
+                links + white rock = Diamond Necklace; thicker iced
+                links = Iced Chain). Never a hoop, never upright,
+                never bigger than the head.
+     • wristL — a thin watch band hugging the forearm just ABOVE the
+                hand + a small face plate (gold = Rolex; silver =
+                Omega; iced = the luxe unicorns: AP / Patek / Richard
+                Mille / Iced Watch — the brighter the wrist, the
+                bigger the score). Whole piece smaller than the hand.
+     • ring   — tiny ≤0.05 glint on the right hand's edge (Engagement/
+                Diamond Ring/Pinky — the $5M rock is a pixel of light
+                you learn to hunt)
+     • wristR — slim iced band (Tennis Bracelet)
+     • head   — gang-colored rag (ped.gang), a headband wrapping the
+                hair, so crews read as crews
+   (The FORMAL KIT — tux shirt-front / bow-tie / pocket square — is
+   now PAINTED into the outfit textures by clothes.js; bling carries
+   jewelry + colors only.)
 
    PERF (the game is draw-call bound):
-     • ONE shared geometry per accessory kind + ONE shared material
-       per finish (gold/ice/glint; rag materials shared per gang
-       color via cmat's cache). Meshes are POOLED and reused.
+     • ONE shared geometry per accessory part kind + ONE shared
+       material per finish (gold/silver/ice/glint; rag materials
+       shared per gang color via cmat's cache). Meshes are POOLED
+       and reused.
      • dress only within ~45u of the camera, undress past ~60u,
        hard cap 60 dressed peds, scan time-sliced (~14 peds/frame).
-     • castShadow stays off — a 0.1u box's shadow is invisible.
+     • castShadow stays off — a 0.05u box's shadow is invisible.
 
    TRUTH: bling mirrors ped.valuables LIVE. Mug/loot strips the ice
    off the body the moment it's taken (call-through wrappers around
@@ -69,26 +77,21 @@
   const SLICE = 14;        // peds scanned per frame (full roster every ~0.2s)
   const POOL_MAX = 48;     // per-kind pool bound; extras just drop (shared geo/mat)
 
-  // ---- shared geometry per accessory KIND (lazy; built once, never disposed) ----
+  // ---- shared geometry per accessory PART kind (lazy; built once, never disposed).
+  // Real-jewelry scale against the rig (torso 0.92w, front face z 0.25; arm 0.3
+  // square; hand cap 0.31 x 0.2 x 0.35; head 0.6 cube):
   const geos = {};
   function geoFor(kind) {
     let gm = geos[kind];
     if (gm) return gm;
-    if (kind === "chain") {
-      // a vertical loop lying on the chest reads as a necklace in blocky style.
-      // Harness THREE stub has no TorusGeometry — fall back to a thin slab.
-      gm = THREE.TorusGeometry ? new THREE.TorusGeometry(0.26, 0.045, 6, 14)
-                               : new THREE.BoxGeometry(0.5, 0.5, 0.08);
-      gm._shared = true;
-    } else if (kind === "band") gm = CBZ.boxGeom(0.36, 0.1, 0.36);   // wraps the 0.3 arm
-    else if (kind === "ring") gm = CBZ.boxGeom(0.12, 0.07, 0.12);
-    // FORMAL KIT (outfits.js cityOutfitFormal*): the tux/suit read on a blocky
-    // rig — thin panels sitting just proud of the torso front (z 0.25).
-    else if (kind === "shirt") gm = CBZ.boxGeom(0.34, 0.5, 0.05);    // tux white shirt-front panel
-    else if (kind === "sliver") gm = CBZ.boxGeom(0.14, 0.46, 0.04);  // suit's modest shirt sliver
-    else if (kind === "bow") gm = CBZ.boxGeom(0.18, 0.09, 0.06);     // bow-tie at the collar
-    else if (kind === "square") gm = CBZ.boxGeom(0.09, 0.07, 0.04);  // pocket-square dot
-    else gm = CBZ.boxGeom(0.68, 0.18, 0.68);                          // rag: encloses hair
+    if (kind === "link") gm = CBZ.boxGeom(0.30, 0.035, 0.03);        // chain strand (gold chain)
+    else if (kind === "linkThin") gm = CBZ.boxGeom(0.30, 0.026, 0.024); // diamond necklace's finer strand
+    else if (kind === "linkThick") gm = CBZ.boxGeom(0.30, 0.055, 0.035); // iced chain's fat links
+    else if (kind === "pendant") gm = CBZ.boxGeom(0.07, 0.07, 0.03);  // small flat pendant block
+    else if (kind === "cuff") gm = CBZ.boxGeom(0.32, 0.05, 0.32);     // thin band wrapping the 0.3 forearm
+    else if (kind === "face") gm = CBZ.boxGeom(0.10, 0.07, 0.03);     // watch face plate on the band
+    else if (kind === "ring") gm = CBZ.boxGeom(0.05, 0.04, 0.05);     // a glint dot, not a knuckle-duster
+    else gm = CBZ.boxGeom(0.68, 0.16, 0.68);                          // rag: headband enclosing the 0.64 hair
     geos[kind] = gm;
     return gm;
   }
@@ -98,11 +101,10 @@
   function mats() {
     if (_mats) return _mats;
     _mats = {
-      gold: CBZ.cmat(0xffd451, { emissive: 0x7a5c00, ei: 0.5 }),
+      gold: CBZ.cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),    // warm metal, not neon
+      silver: CBZ.cmat(0xb9c0c8, { emissive: 0x7e8790, ei: 0.35 }),
       ice: CBZ.cmat(0xeaf6ff, { emissive: 0x9fd8ff, ei: 0.65 }),
       glint: CBZ.cmat(0xffffff, { emissive: 0xcfeaff, ei: 0.95 }),
-      shirt: CBZ.cmat(0xf7f4ea),                  // crisp white (shirt-front + square)
-      tie: CBZ.cmat(0x0a0a0d),                    // the black bow-tie
     };
     return _mats;
   }
@@ -126,28 +128,82 @@
     return m;
   }
 
-  // ---- where each slot sits on the rig (character.js hierarchy):
-  //   body  = upper-body group (torso front face at z 0.25, collar at y 1.84)
-  //   la/ra = arm pivots; hand cap centers at y ≈ -0.82 in pivot space
-  //   neck  = head pivot; hair box at y 0.62 — the rag encloses it like a do-rag
-  const SLOTS = {
-    neck: { kind: "chain", anchor: "body", x: 0, y: 1.74, z: 0.27, rx: 0.12 },
-    wristL: { kind: "band", anchor: "la", x: 0, y: -0.68, z: 0 },
-    wristR: { kind: "band", anchor: "ra", x: 0, y: -0.68, z: 0 },
-    ring: { kind: "ring", anchor: "ra", x: 0, y: -0.8, z: 0.22 },
-    head: { kind: "rag", anchor: "neck", x: 0, y: 0.66, z: 0 },
-    // formal kit: torso front face is z 0.25, collar band y 1.75–1.93 —
-    // shirt panel rides the upper chest, bow at the throat, square on the
-    // jacket breast (x 0.28 keeps clear of the shirt panel's ±0.17 span).
-    shirt: { kind: "shirt", anchor: "body", x: 0, y: 1.52, z: 0.262 },
-    sliver: { kind: "sliver", anchor: "body", x: 0, y: 1.5, z: 0.258 },
-    bow: { kind: "bow", anchor: "body", x: 0, y: 1.78, z: 0.272 },
-    square: { kind: "square", anchor: "body", x: 0.28, y: 1.62, z: 0.262 },
-  };
-  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head", "shirt", "sliver", "bow", "square"];
+  // ---- LOOKS: each wearable is a small list of PARTS (kind + finish + local
+  // transform). Positions are in the anchor's local space (character.js):
+  //   body — torso front face at z 0.25, collar bottom ≈ y 1.75
+  //   la/ra — arm pivots; arm box 0..-0.92, hand cap spans y -0.92..-0.72
+  //   neck — hair box at y 0.62
+  // CHAIN: a shallow flat V hugging the upper chest — strand tops at x ±0.20
+  // y 1.76 (under the collar), meeting at (0, 1.54); each strand is 0.30 long
+  // tilted ±0.83 rad, sitting ~0.03 proud of the torso face. Pendant hangs at
+  // the meet. WATCH: band at y -0.66 (forearm end, ABOVE the hand) + a face
+  // plate on the outer front. RING: a dot on the front edge of the hand.
+  const CHAIN_Y = 1.65, CHAIN_Z = 0.268, CHAIN_TILT = 0.83;
+  let _looks = null;
+  function looks() {
+    if (_looks) return _looks;
+    const M = mats();
+    const v = function (kind, mat) {
+      return [
+        { kind: kind, mat: mat, x: -0.10, y: CHAIN_Y, z: CHAIN_Z, rz: -CHAIN_TILT },
+        { kind: kind, mat: mat, x: 0.10, y: CHAIN_Y, z: CHAIN_Z, rz: CHAIN_TILT },
+      ];
+    };
+    const watch = function (band, faceM) {
+      return [
+        { kind: "cuff", mat: band, x: 0, y: -0.66, z: 0 },
+        { kind: "face", mat: faceM, x: 0, y: -0.66, z: 0.165 },
+      ];
+    };
+    _looks = {
+      // necklaces — flat V + pendant, all smaller than the head
+      chainGold: v("link", M.gold).concat([{ kind: "pendant", mat: M.gold, x: 0, y: 1.515, z: 0.272 }]),
+      chainDiamond: v("linkThin", M.silver).concat([{ kind: "pendant", mat: M.glint, x: 0, y: 1.515, z: 0.272 }]),
+      chainIced: v("linkThick", M.ice).concat([{ kind: "pendant", mat: M.ice, x: 0, y: 1.515, z: 0.272 }]),
+      // watches — thin band + face, on the WRIST (hand top is y -0.72)
+      watchGold: watch(M.gold, M.gold),
+      watchSilver: watch(M.silver, M.silver),
+      watchIced: watch(M.ice, M.glint),
+      // tennis bracelet — band only
+      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.66, z: 0 }],
+      // ring — a glint dot on the hand's front edge
+      ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.80, z: 0.17 }],
+    };
+    return _looks;
+  }
+  // gang rag looks cached per gang id (one tiny array each, shared material)
+  const _ragLooks = {};
+  function ragLook(gangId) {
+    let lk = _ragLooks[gangId];
+    if (!lk) { lk = _ragLooks[gangId] = [{ kind: "rag", mat: ragMat(gangId), x: 0, y: 0.66, z: 0 }]; }
+    return lk;
+  }
+  function customRagLook(mat, key) {
+    let lk = _ragLooks[key];
+    if (!lk) { lk = _ragLooks[key] = [{ kind: "rag", mat: mat, x: 0, y: 0.66, z: 0 }]; }
+    return lk;
+  }
 
-  // ---- mesh pools per kind (reuse: dressing is pointer-swaps, not allocs) ----
-  const pools = { chain: [], band: [], ring: [], rag: [], shirt: [], sliver: [], bow: [], square: [] };
+  // ---- which rig anchor each slot hangs from ----
+  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", head: "neck" };
+  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head"];
+
+  // shared finish classifiers — the SAME name reads the same on a ped and on you.
+  function chainLookOf(s) {
+    const L = looks();
+    if (s.indexOf("necklace") >= 0 || s.indexOf("diamond") >= 0) return L.chainDiamond;
+    if (s.indexOf("iced") >= 0) return L.chainIced;
+    return L.chainGold;
+  }
+  function watchLookOf(s) {
+    const L = looks();
+    if (s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0) return L.watchIced;
+    if (s.indexOf("omega") >= 0) return L.watchSilver;
+    return L.watchGold;
+  }
+
+  // ---- mesh pools per part kind (reuse: dressing is pointer-swaps, not allocs) ----
+  const pools = { link: [], linkThin: [], linkThick: [], pendant: [], cuff: [], face: [], ring: [], rag: [] };
   function acquire(kind) {
     const pool = pools[kind];
     let mesh = pool && pool.pop();
@@ -166,15 +222,29 @@
     if (pool && pool.length < POOL_MAX) pool.push(mesh);
   }
 
+  // mount one slot's parts onto an anchor; pushes the pooled meshes into `out`.
+  function mountParts(parts, parent, out) {
+    if (!parent || !parent.add) return;          // harness rigs have empty parts — skip slot
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const mesh = acquire(p.kind);
+      mesh.material = p.mat;
+      mesh.position.set(p.x, p.y, p.z);
+      mesh.rotation.set(p.rx || 0, 0, p.rz || 0);
+      parent.add(mesh);
+      out.push(mesh);
+    }
+  }
+
   // ---- what a ped SHOULD be wearing right now, straight from their valuables.
   // A looted corpse is picked clean (jewelry gone) but keeps its gang colors —
   // the rag is clothing, not loot. First match wins per slot (one chain, one
-  // watch: legibility beats completeness).
+  // watch: legibility beats completeness). Each slot value is a parts LIST.
   function lootedOut(ped) {
     return !!(ped.dead && ped.deadLoot && ped.deadLoot.looted);
   }
   function computeWant(ped) {
-    const M = mats();
+    const L = looks();
     let neck = null, wristL = null, wristR = null, ring = null, head = null, any = false;
     const vals = ped.valuables;
     if (!lootedOut(ped) && vals && vals.length) {
@@ -182,29 +252,21 @@
         const v = vals[i]; if (!v) continue;
         const s = ("" + v).toLowerCase();
         if (!neck && (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0)) {
-          neck = s.indexOf("gold") >= 0 ? M.gold : M.ice; any = true;
+          neck = chainLookOf(s); any = true;
         } else if (!wristL && (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
                                s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0)) {
           // the luxe unicorns read ICED — the brighter the wrist, the fatter the fence.
-          const luxe = s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0;
-          wristL = luxe ? M.ice : M.gold; any = true;
+          wristL = watchLookOf(s); any = true;
         } else if (!ring && (s.indexOf("ring") >= 0 || s.indexOf("pinky") >= 0)) {
-          ring = M.glint; any = true;
+          ring = L.ring; any = true;
         } else if (!wristR && s.indexOf("bracelet") >= 0) {
-          wristR = M.ice; any = true;
+          wristR = L.bracelet; any = true;
         }
       }
     }
-    if (ped.gang) { head = ragMat(ped.gang); any = true; }
-    // FORMAL KIT — clothing, not loot: a looted corpse keeps its shirt front
-    // (like the rag) until a corpse-swap takes the actual cloth. Truth comes
-    // from outfits.js (identity + any swap-stamped record on the body).
-    const formal = CBZ.cityOutfitFormalOf ? CBZ.cityOutfitFormalOf(ped) : null;
-    let shirt = null, sliver = null, bow = null, square = null;
-    if (formal === "tux") { shirt = M.shirt; bow = M.tie; square = M.shirt; any = true; }
-    else if (formal === "suit") { sliver = M.shirt; any = true; }
+    if (ped.gang) { head = ragLook(ped.gang); any = true; }
     if (!any) return null;
-    return { neck, wristL, wristR, ring, head, shirt, sliver, bow, square, _formal: formal };
+    return { neck, wristL, wristR, ring, head };
   }
 
   // ---- dress / undress (pooled). ped._bling = { meshes, nVal, looted, gang } ----
@@ -220,16 +282,8 @@
     const meshes = [];
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];
-      const mtl = want[key]; if (!mtl) continue;
-      const def = SLOTS[key];
-      const parent = an[def.anchor];
-      if (!parent || !parent.add) continue;     // harness rigs have empty parts — skip slot
-      const mesh = acquire(def.kind);
-      mesh.material = mtl;
-      mesh.position.set(def.x, def.y, def.z);
-      mesh.rotation.set(def.rx || 0, 0, 0);
-      parent.add(mesh);
-      meshes.push(mesh);
+      const parts = want[key]; if (!parts) continue;
+      mountParts(parts, an[SLOTS[key]], meshes);
     }
     if (!meshes.length) return;
     ped._bling = {
@@ -237,7 +291,6 @@
       nVal: ped.valuables ? ped.valuables.length : 0,
       looted: lootedOut(ped),
       gang: ped.gang || null,
-      formal: want._formal || null,
     };
     dressed.push(ped);
   }
@@ -293,7 +346,7 @@
   // (so a new luxe item added to ITEMS auto-shows with zero changes here).
   // Same keyword classifier as ped computeWant → same slots, same finishes:
   // the Patek on your wrist is indistinguishable from the one you robbed.
-  let _flex = null;   // [{ name, slot, luxe, value }] — player-visible candidates
+  let _flex = null;   // [{ name, slot, value }] — player-visible candidates
   function flexTable() {
     if (_flex) return _flex;
     const items = CBZ.cityEcon && CBZ.cityEcon.ITEMS;
@@ -303,33 +356,30 @@
       const it = items[name];
       if (!it || (it.tag !== "wearable" && it.tag !== "valuable")) continue;
       const s = name.toLowerCase();
-      let slot = null, luxe = false;
-      if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) {
-        slot = "neck"; luxe = s.indexOf("iced") >= 0 || s.indexOf("diamond") >= 0;
-      } else if (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
-                 s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0) {
-        slot = "wristL"; luxe = s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0;
-      } else if (s.indexOf("earring") < 0 && (s.indexOf("ring") >= 0 || s.indexOf("pinky") >= 0)) {
+      let slot = null;
+      if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) slot = "neck";
+      else if (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
+               s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0) slot = "wristL";
+      else if (s.indexOf("earring") < 0 && (s.indexOf("ring") >= 0 || s.indexOf("pinky") >= 0)) {
         slot = "ring";                  // earrings stay off the hand — legibility
-      } else if (s.indexOf("bracelet") >= 0) {
-        slot = "wristR"; luxe = true;
-      }
-      if (slot) _flex.push({ name, slot, luxe, value: it.value || 0 });
+      } else if (s.indexOf("bracelet") >= 0) slot = "wristR";
+      if (slot) _flex.push({ name, slot, value: it.value || 0 });
     }
     return _flex;
   }
 
   // crew colors: your FOUNDED gang's color outranks the set you're patched into
-  // (a boss flies his own flag). Returns { mat, key } or null. cmat caches per
+  // (a boss flies his own flag). Returns { parts, key } or null. cmat caches per
   // color, so this is the same shared material every member of the crew wears.
   function playerRag() {
     const pg = g.playerGang;
     if (pg && pg.founded) {
       const col = pg.color != null ? pg.color : 0xb079ea;
-      return { mat: CBZ.cmat(col, { emissive: col, ei: 0.12 }), key: "own:" + col };
+      const key = "own:" + col;
+      return { parts: customRagLook(CBZ.cmat(col, { emissive: col, ei: 0.12 }), key), key };
     }
     const m = g.cityMembership;
-    if (m && m.gangId) return { mat: ragMat(m.gangId), key: "memb:" + m.gangId };
+    if (m && m.gangId) return { parts: ragLook(m.gangId), key: "memb:" + m.gangId };
     return null;
   }
 
@@ -339,7 +389,7 @@
   function computePlayerWant() {
     const tab = flexTable();
     if (!tab) return null;
-    const econ = CBZ.cityEcon, M = mats();
+    const econ = CBZ.cityEcon, L = looks();
     const best = { neck: null, wristL: null, wristR: null, ring: null };
     for (let i = 0; i < tab.length; i++) {
       const e = tab[i];
@@ -352,30 +402,22 @@
     const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() | 0 : 0;
     const vip = drip >= ((CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70);
     const rag = playerRag();
-    // YOUR formal kit rides the WORN outfit record (outfits.js): the boutique
-    // buy, CBZ.cityWearOutfit and the corpse swap all land in wearRecord →
-    // cityBlingPlayerDirty, so the shirt front arrives WITH the tux.
-    const formal = CBZ.cityOutfitFormal ? CBZ.cityOutfitFormal() : null;
     const want = {
-      neck: best.neck ? (best.neck.luxe ? M.ice : M.gold) : null,
-      wristL: best.wristL ? (best.wristL.luxe ? M.ice : M.gold) : null,
-      wristR: best.wristR ? M.ice : (vip ? M.ice : null),
-      ring: best.ring ? M.glint : null,
-      head: rag ? rag.mat : null,
-      shirt: formal === "tux" ? M.shirt : null,
-      bow: formal === "tux" ? M.tie : null,
-      square: formal === "tux" ? M.shirt : null,
-      sliver: formal === "suit" ? M.shirt : null,
+      neck: best.neck ? chainLookOf(best.neck.name.toLowerCase()) : null,
+      wristL: best.wristL ? watchLookOf(best.wristL.name.toLowerCase()) : null,
+      wristR: (best.wristR || vip) ? L.bracelet : null,
+      ring: best.ring ? L.ring : null,
+      head: rag ? rag.parts : null,
     };
-    const any = want.neck || want.wristL || want.wristR || want.ring || want.head || want.shirt || want.sliver;
+    const any = want.neck || want.wristL || want.wristR || want.ring || want.head;
     const sig = (best.neck ? best.neck.name : "") + "|" + (best.wristL ? best.wristL.name : "") + "|" +
                 (best.wristR ? best.wristR.name : "") + "|" + (best.ring ? best.ring.name : "") + "|" +
-                (rag ? rag.key : "") + "|" + (vip ? 1 : 0) + "|" + (formal || "");
+                (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
     return { want: any ? want : null, sig };
   }
 
   // dress/undress the player rig — same SLOTS, same pooled meshes as peds.
-  // No distance/CAP gating: it's ≤5 tiny meshes and it IS the protagonist.
+  // No distance/CAP gating: it's a handful of tiny meshes and it IS the protagonist.
   let _pMeshes = null, _pSig = "", _pT = 0, _pDirty = false;
   function undressPlayer() {
     if (_pMeshes) for (let i = 0; i < _pMeshes.length; i++) releaseMesh(_pMeshes[i]);
@@ -394,16 +436,8 @@
     const meshes = [];
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];
-      const mtl = res.want[key]; if (!mtl) continue;
-      const def = SLOTS[key];
-      const parent = an[def.anchor];
-      if (!parent || !parent.add) continue;    // harness stubs — skip slot
-      const mesh = acquire(def.kind);
-      mesh.material = mtl;
-      mesh.position.set(def.x, def.y, def.z);
-      mesh.rotation.set(def.rx || 0, 0, 0);
-      parent.add(mesh);
-      meshes.push(mesh);
+      const parts = res.want[key]; if (!parts) continue;
+      mountParts(parts, an[SLOTS[key]], meshes);
     }
     if (meshes.length) _pMeshes = meshes;
   }
@@ -442,8 +476,7 @@
       const dx = p.pos.x - camx, dz = p.pos.z - camz;
       if (dx * dx + dz * dz > UNDRESS_D2) { undress(p); continue; }
       const nVal = p.valuables ? p.valuables.length : 0;
-      const fm = CBZ.cityOutfitFormalOf ? CBZ.cityOutfitFormalOf(p) : null;  // cheap flag walk
-      if (nVal !== b.nVal || lootedOut(p) !== b.looted || (p.gang || null) !== b.gang || fm !== (b.formal || null)) resyncPed(p);
+      if (nVal !== b.nVal || lootedOut(p) !== b.looted || (p.gang || null) !== b.gang) resyncPed(p);
     }
 
     // 2) sliced scan: dress newly-near peds (a few per frame; full roster ~every
@@ -464,8 +497,8 @@
 
   // exposed for the harness/debug: how many peds are dressed right now.
   CBZ.cityBlingCount = function () { return dressed.length; };
-  // re-mirror ONE ped's attachments after their cloth changed out-of-band —
-  // outfits.js calls this on the corpse-swap so the tux's shirt front leaves
-  // (or your old fit's kit arrives on) the body the moment the trade lands.
+  // re-mirror ONE ped's attachments after their valuables/colors changed
+  // out-of-band — outfits.js calls this on the corpse-swap so the jewelry
+  // read stays honest the moment the trade lands.
   CBZ.cityBlingResyncPed = resyncPed;
 })();

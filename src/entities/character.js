@@ -123,7 +123,7 @@
       hair.position.y = 0.62; neck.add(hair); hairParts.push(hair);
     }
 
-    return {
+    const rig = {
       group: g, body, neck, head,
       parts: { ll, rl, la, ra },
       sockets: { leftHand, rightHand, weapon: rightHand, thirdPersonWeapon },
@@ -149,6 +149,12 @@
       bob: 0, breath: Math.random() * 6.28,
       lean: 0, sway: 0, headYaw: 0,
     };
+    // PAINTED CLOTHING opt-in (city/clothes.js): a caster may pass an outfit
+    // record as c.clothes to dress the rig in canvas-painted garments. When
+    // absent — every jail/survival caller — nothing runs and the rig is the
+    // exact flat-color build above (CBZ.applyClothes also restores it fully).
+    if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
+    return rig;
   }
 
   // shortest-arc angle lerp

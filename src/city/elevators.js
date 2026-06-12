@@ -5,27 +5,34 @@
    WHY: height is STATUS. The property ladder ends in a penthouse
    with a helipad, so getting UP has to feel like ARRIVING — you
    walk in through the building's DOOR, cross the lobby to the lift
-   alcove on an interior wall ([E] at the call panel), the doors
-   close, the car hums and the floor ticker climbs, and the doors
-   open onto a walkable roof with the whole city under you. The
-   alcove lives INSIDE on purpose: a lift you board off the sidewalk
-   reads like a prop, one you walk a lobby to reads like a building.
-   Cops and peds have no shaft — the lift is a clean ESCAPE — while
-   the fire escapes are the LOUD way up: open stairs anyone can
-   chase you on, ending on roofs that give vantage and a bail-out.
+   alcove on an interior wall, press [E] at the call panel, the
+   doors slide open onto a REAL CAB — a small lit room you
+   physically WALK INTO — the doors close behind you, the car hums
+   and the floor ticker climbs, and the doors open at the other end
+   onto a walkable roof with the whole city under you. You walk in;
+   you walk out. The alcove lives INSIDE on purpose: a lift you
+   board off the sidewalk reads like a prop, one you walk a lobby
+   to reads like a building. Cops and peds have no shaft — the lift
+   is a clean ESCAPE (the closed doors are a real collider, so
+   nothing follows you in) — while the fire escapes are the LOUD
+   way up: open stairs anyone can chase you on.
    Both rigs read the lot's door-face data first: the lobby alcove
    picks an interior wall clear of the door aisle / stair strip /
    counter stamps, and a fire escape never hangs on (or across the
    approach to) the facade that holds the entrance.
 
-   The ride is a teleport DRESSED IN BEATS (door close → hum/shake/
-   ticker → door open), not a simulated shaft — zero per-frame cost
-   when idle. Geometry is draw-call-cheap: ONE shared unit box geo
-   scaled per mesh + the city's cached shared materials (CBZ.cmat),
-   colliders/platforms registered once at build with a single
-   markCollidersDirty. Which lots rate a lift / an escape is decided
-   by buildings.js (city.elevatorLots / city.fireEscapeLots) so the
-   lot policy stays with the lots; this file owns the rigs.
+   The ride itself is still a ONE-FRAME relocation — but it happens
+   mid-ride inside the SEALED cab (two identical rooms, one at each
+   end; you can't see out, so the swap is invisible) instead of the
+   old "stand outside, watch the doors beat, get teleported" — zero
+   per-frame cost when idle. Geometry is draw-call-cheap: ONE shared
+   unit box geo scaled per mesh + the city's cached shared materials
+   (CBZ.cmat), colliders/platforms registered once at build with a
+   single markCollidersDirty (the door leaf collider is toggled by
+   mutating its y-gate, which the xz broadphase never re-indexes —
+   no rebuild churn per ride). Which lots rate a lift / an escape is
+   decided by buildings.js (city.elevatorLots / city.fireEscapeLots)
+   so the lot policy stays with the lots; this file owns the rigs.
 ============================================================ */
 (function () {
   "use strict";
@@ -66,6 +73,7 @@
   const LAMP_IDLE = () => cmat(0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
   const LAMP_LIT = () => cmat(0xffd9a0, { emissive: 0xffb347, ei: 0.9 });
   const STEEL = 0x39414c, LEAF = 0x8a93a0, SHAFT = 0x161b22, RAILC = 0x2c333d, LAND = 0x434b56;
+  const CABWALL = 0x4a525c, CABFLOOR = 0x59616c;
 
   // outward face info for a wall side (0:-z 1:+z 2:-x 3:+x), in building-local coords
   function faceInfo(side, w, d) {
@@ -151,7 +159,9 @@
   // counters / kitchen runs live — only as a last resort. Each slot is
   // sampled through b.clearFloorPoint (door aisle + stair strip + bounds)
   // plus the keep-clear anchors above; a second pass relaxes the anchors so
-  // a cramped room still gets its lift rather than none.
+  // a cramped room still gets its lift rather than none. The sampled
+  // footprint covers the FULL cab room (~2.2 deep into the lobby) plus the
+  // boarding apron in front of the leafs.
   function pickLobby(b) {
     const w = b.w, d = b.d, S = slabInfo(b), ds = doorSideOf(b);
     const avoid = interiorAvoids(b);
@@ -170,8 +180,8 @@
         : [2.4, -2.4, 1.2, -1.2, 0, 3.4, -3.4];
       for (let lat of slots) {
         lat = Math.max(-maxLat, Math.min(maxLat, lat));
-        // alcove footprint + the boarding apron in front of the leafs
-        const pts = [[-1.35, 0.45], [1.35, 0.45], [0, 0.7], [-1.35, 1.5], [1.35, 1.5], [0, 2.0], [0, 2.7]];
+        // cab-room footprint (side walls reach dep ~2.2) + the boarding apron
+        const pts = [[-1.35, 0.45], [1.35, 0.45], [0, 0.7], [-1.35, 1.5], [1.35, 1.5], [-1.2, 2.2], [1.2, 2.2], [0, 2.0], [0, 2.7]];
         let ok = true;
         for (const q of pts) {
           const lx = f.px - f.nx * (S.wt + q[1]) + f.tx * (lat + q[0]);
@@ -192,81 +202,161 @@
   }
 
   // ============================ ELEVATOR =================================
-  // Ground lobby alcove on an INTERIOR wall — you come in through the
-  // building's door and cross the floor to it (the old rig faced the street,
-  // which read like boarding a lift off the sidewalk): two solid cheeks +
-  // header, a dark shaft recess against the wall, two sliding steel leafs, a
-  // call panel with a glowing button, and a hall lantern that lights while
-  // the car runs. On the roof a matching headhouse (solid, so the roof reads
-  // built, not painted). The ride beats are untouched — only WHERE you board.
+  // Ground lobby CAB on an INTERIOR wall — a real walk-in room (~2.2 wide ×
+  // 2.45 tall × ~2.0 deep inside): back panel against the building wall, two
+  // solid side walls, ceiling with a lit panel, its own floor slab, and the
+  // two sliding steel leafs as the fourth side. Plus the door frame (cheeks +
+  // header), a call panel with a glowing button on the frame, and a hall
+  // lantern that lights while the car runs. On the roof a matching HOLLOW
+  // headhouse cab runs the same machine downward. The closed leafs are a real
+  // (y-gated) collider — the cab seals, so the mid-ride relocation is
+  // invisible and nothing on the street can ride along.
+  const CAB_H = 2.45;          // cab interior height
+  const DOOR_HW = 0.78;        // door opening half-width (collider span)
   function buildElevator(lot) {
     const b = lot.building, w = b.w, d = b.d, grp = b.group, ox = b.ox, oz = b.oz, h = b.h;
     const S = slabInfo(b);
     const spot = pickLobby(b);
     if (!spot) { console.warn("[elevator] no clear interior wall on", b.name || "lot"); return; }
     const f = spot.f, off = spot.lat;
-    // dep now measures INWARD from the interior wall face (f.px/f.pz sit on
-    // the outer plane; S.wt steps through the wall), so the whole alcove —
-    // cheeks, leafs, panel, boarding pad — builds into the room.
+    // dep measures INWARD from the interior wall face (f.px/f.pz sit on the
+    // outer plane; S.wt steps through the wall), so the whole cab room —
+    // walls, leafs, frame, boarding apron — builds into the lobby.
     const P = (lat, dep) => ({ x: f.px - f.nx * (S.wt + dep) + f.tx * (off + lat), z: f.pz - f.nz * (S.wt + dep) + f.tz * (off + lat) });
     const tn = (t, n) => (f.tx ? { w: t, d: n } : { w: n, d: t });
+    const GDOOR = 2.0;                                  // ground-cab door plane (dep from the wall)
 
-    // cheeks (solid) — the leaf pocket sits in the gap behind them
+    function solidAt(p, sz, y0, y1, ref) {
+      return solid(y0, y1, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, ref);
+    }
+
+    // ---- the CAB ROOM (ground end) ----------------------------------------
+    { // back panel (the building wall is the structure; this is the cab skin)
+      const p = P(0, 0.08), sz = tn(2.06, 0.12);
+      box(grp, p.x, 1.25, p.z, sz.w, CAB_H, sz.d, CABWALL);
+    }
+    for (const s of [-1, 1]) {  // side walls (solid: the cab is a sealed room)
+      const p = P(s * 1.04, 1.05), sz = tn(0.16, 2.1);
+      const m = box(grp, p.x, CAB_H / 2, p.z, sz.w, CAB_H, sz.d, STEEL, { cast: true });
+      solidAt(p, sz, 0, CAB_H, m);
+    }
+    { // ceiling + the small lit light panel
+      const p = P(0, 1.05), sz = tn(2.24, 2.3);
+      box(grp, p.x, CAB_H + 0.11, p.z, sz.w, 0.12, sz.d, STEEL);
+      const lp = P(0, 1.05), ls = tn(0.95, 0.95);
+      box(grp, lp.x, CAB_H - 0.03, lp.z, ls.w, 0.07, ls.d, 0xe8ddc2, { emissive: 0xfff1cd, ei: 0.95 });
+    }
+    { // cab floor slab (its top is the EXACT ground-end arrival height)
+      const p = P(0, 1.1), sz = tn(2.06, 2.3);
+      box(grp, p.x, 0.08, p.z, sz.w, 0.16, sz.d, CABFLOOR);
+      plat(ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, 0.16);
+    }
+    // door frame: cheeks (solid) + header over the opening
     for (const s of [-1, 1]) {
-      const p = P(s * 1.02, 0.625), sz = tn(0.6, 0.55);
+      const p = P(s * 1.02, GDOOR + 0.04), sz = tn(0.6, 0.55);
       const m = box(grp, p.x, 1.6, p.z, sz.w, 3.2, sz.d, STEEL, { cast: true });
-      solid(0, 3.2, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
+      solidAt(p, sz, 0, 3.2, m);
     }
-    { // header over the opening (solid — a jump can put a head in it)
-      const p = P(0, 0.625), sz = tn(2.64, 0.55);
+    { // header (solid — a jump can put a head in it)
+      const p = P(0, GDOOR + 0.04), sz = tn(2.64, 0.55);
       const m = box(grp, p.x, 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
-      solid(2.4, 3.24, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
+      solidAt(p, sz, 2.4, 3.24, m);
     }
-    { // dark shaft recess so an OPEN door reads as a real car bay
-      const p = P(0, 0.06), sz = tn(1.5, 0.08);
+    { // dark reveal strip behind the leafs so a closed door reads as a shaft door
+      const p = P(0, GDOOR - 0.12), sz = tn(1.5, 0.06);
       box(grp, p.x, 1.35, p.z, sz.w, 2.5, sz.d, SHAFT);
     }
-    // the two sliding leafs (visual only — the ride is beats, so no collider
-    // churn / markCollidersDirty per ride)
+    // the two sliding leafs + the door COLLIDER (one persistent y-gated box —
+    // toggled by mutating y0/y1, which the xz broadphase never re-indexes)
     const ground = { leaves: [], open: 0, target: 0, autoClose: null };
     for (const s of [-1, 1]) {
-      const p = P(s * 0.37, 0.16), sz = tn(0.76, 0.1);
+      const p = P(s * 0.37, GDOOR), sz = tn(0.76, 0.1);
       const m = box(grp, p.x, 1.27, p.z, sz.w, 2.45, sz.d, LEAF);
       ground.leaves.push({ m, baseX: p.x, baseZ: p.z, sx: f.tx * s, sz: f.tz * s });
     }
-    // call panel + button + hall lantern
-    { const p = P(1.02, 0.93), sz = tn(0.3, 0.08); box(grp, p.x, 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
-    const pb = P(1.02, 0.99), pbs = tn(0.12, 0.05);
+    {
+      const pA = P(-DOOR_HW, GDOOR - 0.07), pB = P(DOOR_HW, GDOOR + 0.07);
+      ground.col = solid(0, 2.4,
+        ox + Math.min(pA.x, pB.x), ox + Math.max(pA.x, pB.x),
+        oz + Math.min(pA.z, pB.z), oz + Math.max(pA.z, pB.z));
+      ground.cy0 = 0; ground.cy1 = 2.4; ground.solid = true;
+    }
+    // call panel + button on the door frame + hall lantern over the opening
+    { const p = P(1.02, GDOOR + 0.36), sz = tn(0.3, 0.08); box(grp, p.x, 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
+    const pb = P(1.02, GDOOR + 0.42), pbs = tn(0.12, 0.05);
     const btnG = box(grp, pb.x, 1.42, pb.z, pbs.w, 0.12, pbs.d, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
-    const pl = P(0, 0.95), pls = tn(0.7, 0.07);
+    const pl = P(0, GDOOR + 0.34), pls = tn(0.7, 0.07);
     const lampG = box(grp, pl.x, 3.05, pl.z, pls.w, 0.2, pls.d, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
-    const padP = P(0, 1.5);
+    const padP = P(0, 2.7);
     const groundPad = { x: ox + padP.x, z: oz + padP.z };
 
-    // ---- roof HEADHOUSE at the slab's (+x,-z) corner: clear of the open -x
-    //      stair shaft AND of the helipad mast (which holds the (+,+) corner).
+    // ---- roof HEADHOUSE CAB at the slab's (+x,-z) corner: clear of the open
+    //      -x stair shaft AND of the helipad mast (which holds the (+,+)
+    //      corner). HOLLOW — three walls + cap + lit ceiling + floor slab,
+    //      door (leafs) facing -x into the roof. Same machine, downward.
     const hx = S.ixMax - 1.7, hz = S.izMin + 1.7;
-    const hh = box(grp, hx, h + 1.32, hz, 2.4, 2.64, 2.4, 0x6c737c, { cast: true });
-    solid(h, h + 2.64, ox + hx - 1.2, ox + hx + 1.2, oz + hz - 1.2, oz + hz + 1.2, hh);
-    box(grp, hx, h + 2.7, hz, 2.6, 0.14, 2.6, 0x474f59);                     // cap
-    box(grp, hx - 1.21, h + 1.3, hz, 0.05, 2.35, 1.5, SHAFT);               // recess (door faces -x, into the roof)
+    const rx = ox + hx, rz = oz + hz;                  // world centre of the headhouse
+    const RDOOR = 2.27;                                // roof-cab door plane (dep from the back interior face at hx+1.11)
+    { // back wall (+x)
+      const m = box(grp, hx + 1.19, h + CAB_H / 2, hz, 0.16, CAB_H, 2.4, 0x6c737c, { cast: true });
+      solid(h, h + CAB_H, ox + hx + 1.11, ox + hx + 1.27, rz - 1.2, rz + 1.2, m);
+    }
+    for (const s of [-1, 1]) {  // side walls (±z)
+      const m = box(grp, hx - 0.01, h + CAB_H / 2, hz + s * 1.04, 2.4, CAB_H, 0.16, 0x6c737c, { cast: true });
+      solid(h, h + CAB_H, ox + hx - 1.21, ox + hx + 1.19, oz + hz + s * 1.04 - 0.08, oz + hz + s * 1.04 + 0.08, m);
+    }
+    box(grp, hx, h + CAB_H + 0.13, hz, 2.7, 0.14, 2.7, 0x474f59);            // cap
+    box(grp, hx, h + CAB_H - 0.05, hz, 0.95, 0.07, 0.95, 0xe8ddc2, { emissive: 0xfff1cd, ei: 0.95 }); // light panel
+    { // cab floor slab on the roof (its top is the EXACT roof arrival height)
+      box(grp, hx - 0.05, h + 0.02, hz, 2.5, 0.12, 2.1, CABFLOOR);
+      plat(ox + hx - 1.45, ox + hx + 1.2, rz - 1.05, rz + 1.05, h + 0.08);
+    }
+    // door frame on -x: cheeks + header (solid)
+    for (const s of [-1, 1]) {
+      const m = box(grp, hx - 1.13, h + CAB_H / 2, hz + s * 1.02, 0.55, CAB_H, 0.6, 0x6c737c, { cast: true });
+      solid(h, h + CAB_H, ox + hx - 1.405, ox + hx - 0.855, oz + hz + s * 1.02 - 0.3, oz + hz + s * 1.02 + 0.3, m);
+    }
+    {
+      const m = box(grp, hx - 1.13, h + 2.5, hz, 0.55, 0.4, 2.64, 0x6c737c);
+      solid(h + 2.3, h + 2.7, ox + hx - 1.405, ox + hx - 0.855, rz - 1.32, rz + 1.32, m);
+    }
+    box(grp, hx - 1.1, h + 1.3, hz, 0.05, 2.35, 1.5, SHAFT);                 // dark reveal
     const roof = { leaves: [], open: 0, target: 0, autoClose: null };
     for (const s of [-1, 1]) {
-      const m = box(grp, hx - 1.26, h + 1.25, hz + s * 0.37, 0.1, 2.3, 0.74, LEAF);
-      roof.leaves.push({ m, baseX: hx - 1.26, baseZ: hz + s * 0.37, sx: 0, sz: s });
+      const m = box(grp, hx - 1.16, h + 1.25, hz + s * 0.37, 0.1, 2.4, 0.76, LEAF);
+      roof.leaves.push({ m, baseX: hx - 1.16, baseZ: hz + s * 0.37, sx: 0, sz: s });
     }
-    box(grp, hx - 1.26, h + 1.35, hz + 1.0, 0.08, 0.5, 0.26, 0x232830);     // roof call panel
-    const btnR = box(grp, hx - 1.31, h + 1.45, hz + 1.0, 0.05, 0.12, 0.12, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
-    const lampR = box(grp, hx - 1.26, h + 2.45, hz, 0.07, 0.2, 0.7, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
-    const roofPad = { x: ox + hx - 1.9, z: oz + hz };
+    roof.col = solid(h, h + 2.4, ox + hx - 1.23, ox + hx - 1.09, rz - DOOR_HW, rz + DOOR_HW);
+    roof.cy0 = h; roof.cy1 = h + 2.4; roof.solid = true;
+    box(grp, hx - 1.42, h + 1.35, hz + 1.02, 0.08, 0.5, 0.26, 0x232830);     // roof call panel (on the cheek face)
+    const btnR = box(grp, hx - 1.47, h + 1.45, hz + 1.02, 0.05, 0.12, 0.12, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
+    const lampR = box(grp, hx - 1.42, h + 2.45, hz, 0.07, 0.2, 0.7, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
+    const roofPad = { x: ox + hx - 2.1, z: oz + hz };
 
     addParapets(lot, null);
     addRoofProps(lot, [
-      { x: ox + hx, z: oz + hz, r: 2.2 },
+      { x: ox + hx, z: oz + hz, r: 2.4 },
       { x: roofPad.x, z: roofPad.z, r: 1.4 },
     ]);
 
-    const rec = { lot, b, ground, roof, groundPad, roofPad, btnG, btnR, lampG, lampR };
+    // ---- per-end local frames: lat (across the door) / dep (from the back
+    //      wall toward the door plane). Used for walk-in detection, doorway
+    //      hold, and the mid-ride relative relocation between the two cabs.
+    const gBase = P(0, 0);
+    const gbx = ox + gBase.x, gbz = oz + gBase.z;
+    const gLoc = (x, z) => ({ lat: (x - gbx) * f.tx + (z - gbz) * f.tz, dep: -((x - gbx) * f.nx + (z - gbz) * f.nz) });
+    const gPt = (lat, dep) => ({ x: gbx - f.nx * dep + f.tx * lat, z: gbz - f.nz * dep + f.tz * lat });
+    const rbx = ox + hx + 1.11, rbz = oz + hz;        // back interior face of the headhouse
+    const rLoc = (x, z) => ({ lat: z - rbz, dep: rbx - x });
+    const rPt = (lat, dep) => ({ x: rbx - dep, z: rbz + lat });
+
+    const rec = {
+      lot, b, ground, roof, groundPad, roofPad, btnG, btnR, lampG, lampR,
+      gLoc, gPt, rLoc, rPt,
+      gDoor: GDOOR, rDoor: RDOOR,                     // door-plane dep per end
+      gFloor: 0.16, rFloor: h + 0.08,                 // EXACT cab-floor tops (the old bug: arrival height was re-derived via floorAt and could resolve to the wrong surface — now it's the slab we built)
+      m: { st: "idle", end: null, t: 0, will: false, moved: false, cool: 0 },
+    };
     lot.building.lift = { ground: groundPad, roof: { x: roofPad.x, y: h, z: roofPad.z } };
     elevators.push(rec);
   }
@@ -421,13 +511,28 @@
   }
 
   // ============================ THE RIDE ==================================
-  // beats: open (you called it) → board → close → ride (hum/shake/ticker) →
-  // doors open at the other end. The player is pinned + input-dead from the
-  // close beat, so nothing on the street can ride along — the lift is the
-  // clean getaway the penthouse price PAYS for.
-  const T_OPEN = 0.55, T_BOARD = 0.5, T_CLOSE = 0.55;
-  let ride = null;        // { el, up, phase, t }
-  function rideTime(el) { return Math.min(2.6, 0.8 + el.b.storeys * 0.055); }
+  // Per-lift state machine — you WALK the whole thing, the game never grabs
+  // your legs:
+  //   IDLE  → [E] at a call panel → OPEN (doors slide; held ~4s, and they
+  //   WAIT while anyone stands in the doorway — no crush)
+  //   OPEN  → you WALK INTO the cab (detected inside the cab volume) → CLOSE
+  //           ([E] inside also closes early; step back out before they shut
+  //           and the call cancels — no ride)
+  //   CLOSE → leafs fully shut (the door collider seals: cops/peds locked
+  //           out, you locked in) → RIDE
+  //   RIDE  → free-standing in the sealed cab; hum + shake pulses + the
+  //           floor ticker, 2.5–4s scaled by storeys. Halfway through, the
+  //           player is relocated to the IDENTICAL cab at the other end in
+  //           ONE frame, keeping their relative spot inside the room — the
+  //           cab has no windows, so the swap can't be seen
+  //   ARRIVE→ doors open at the destination → you WALK OUT → doors close,
+  //           short cooldown (so a mashed [E] can't instantly ride you back
+  //           — the OLD bug: arrival spot == the return call pad with zero
+  //           cooldown, so buffered presses re-rode you to where you started)
+  const WAIT_OPEN = 4.0;        // doors hold open for a boarder
+  const EXIT_WAIT = 8.0;        // arrival doors hold while you step out
+  const CALL_COOL = 0.8;        // post-ride cooldown before the panel re-arms
+  function rideTime(el) { return Math.max(2.5, Math.min(4.0, 1.6 + el.b.storeys * 0.16)); }
 
   function setLit(el, on) {
     el.btnG.material = on ? BTN_LIT() : BTN_IDLE();
@@ -436,19 +541,56 @@
     el.lampR.material = on ? LAMP_LIT() : LAMP_IDLE();
   }
 
-  function startRide(el, up) {
-    ride = { el, up, phase: "open", t: 0 };
-    (up ? el.ground : el.roof).target = 1;
+  function rigOf(el, end) { return end === "g" ? el.ground : el.roof; }
+  // is the player INSIDE the cab room at this end (xz volume + the floor's y band)?
+  function insideCab(el, end, P) {
+    if (!P) return false;
+    if (end === "g") { if (P.pos.y > 2.2) return false; }
+    else if (Math.abs(P.pos.y - el.b.h) > 2.2) return false;
+    const L = (end === "g" ? el.gLoc : el.rLoc)(P.pos.x, P.pos.z);
+    const door = end === "g" ? el.gDoor : el.rDoor;
+    return L.dep > 0.18 && L.dep < door - 0.15 && Math.abs(L.lat) < 0.9;
+  }
+  // is the player standing IN the doorway (the leaf line) — doors must wait.
+  // EXCLUDES the cab interior: a boarded rider near the front of the cab is a
+  // RIDER, not an obstruction (otherwise the doors could never close on them).
+  function inDoorway(el, end, P) {
+    if (!P) return false;
+    if (end === "g") { if (P.pos.y > 2.2) return false; }
+    else if (Math.abs(P.pos.y - el.b.h) > 2.2) return false;
+    if (insideCab(el, end, P)) return false;
+    const L = (end === "g" ? el.gLoc : el.rLoc)(P.pos.x, P.pos.z);
+    const door = end === "g" ? el.gDoor : el.rDoor;
+    return Math.abs(L.lat) < 0.95 && L.dep > door - 0.45 && L.dep < door + 0.55;
+  }
+
+  function callLift(el, end) {
+    const m = el.m;
+    m.st = "open"; m.end = end; m.t = 0; m.will = false; m.moved = false;
+    rigOf(el, end).target = 1;
     setLit(el, true);
     if (CBZ.sfx) { CBZ.sfx("switch"); CBZ.sfx("door"); }
   }
 
-  function endRide(arrived) {
-    if (!ride) return;
-    const el = ride.el;
-    if (!arrived) { el.ground.target = 0; el.roof.target = 0; }
+  function beginClose(el) {
+    const m = el.m;
+    m.st = "close"; m.t = 0; m.will = true;
+    rigOf(el, m.end).target = 0;
+    if (CBZ.sfx) CBZ.sfx("door");
+  }
+
+  function resetMachine(el, cool) {
+    const m = el.m;
+    m.st = "idle"; m.end = null; m.t = 0; m.will = false; m.moved = false;
+    if (cool) m.cool = cool;
     setLit(el, false);
-    ride = null;
+  }
+
+  // hard snap a rig shut (mode exit / mid-ride abort): leaves home, collider solid
+  function closeNow(r) {
+    r.open = 0; r.target = 0; r.autoClose = null;
+    for (const L of r.leaves) { L.m.position.x = L.baseX; L.m.position.z = L.baseZ; }
+    gateDoor(r);
   }
 
   // ---- the tiny prompt / floor-ticker chip (one DOM node, hidden when idle) --
@@ -479,9 +621,10 @@
   function padNear() {
     const P = CBZ.player; if (!P) return null;
     for (const el of elevators) {
+      if (el.m.st !== "idle" || el.m.cool > 0) continue;   // busy / just arrived: panel re-arms after the cooldown
       const h = el.b.h;
-      if (P.pos.y < 2.0 && Math.hypot(P.pos.x - el.groundPad.x, P.pos.z - el.groundPad.z) <= REACH) return { el, up: true };
-      if (Math.abs(P.pos.y - h) < 1.6 && Math.hypot(P.pos.x - el.roofPad.x, P.pos.z - el.roofPad.z) <= REACH) return { el, up: false };
+      if (P.pos.y < 2.0 && Math.hypot(P.pos.x - el.groundPad.x, P.pos.z - el.groundPad.z) <= REACH) return { el, end: "g" };
+      if (Math.abs(P.pos.y - h) < 1.6 && Math.hypot(P.pos.x - el.roofPad.x, P.pos.z - el.roofPad.z) <= REACH) return { el, end: "r" };
     }
     return null;
   }
@@ -500,6 +643,21 @@
     }
   }
 
+  // door leaf collider tracks the leaves: SOLID until they're ~quarter open.
+  // Toggled by mutating the y-gate (parked at +1e9 = "above everyone" when
+  // passable) — the broadphase only indexes xz, so this never rebuilds.
+  // NOTE: collide() callers that omit feetY/headY treat every y-gated box as
+  // full-height — i.e. the leaf line stays solid for them even when open.
+  // That's the ped gate for free: simple crowd/ped pushers never wander in.
+  function gateDoor(r) {
+    const c = r.col; if (!c) return;
+    const want = r.open < 0.25;
+    if (want === r.solid) return;
+    r.solid = want;
+    if (want) { c.y0 = r.cy0; c.y1 = r.cy1; }
+    else { c.y0 = 1e9; c.y1 = 1e9 + 1; }
+  }
+
   function teleport(x, y, z) {
     const P = CBZ.player;
     P.pos.set(x, y, z);
@@ -507,99 +665,193 @@
     if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P.pos);
   }
 
-  let shakeT = 0, _promptT = 0;
-  CBZ.onUpdate(36.6, function (dt) {
-    if (g.mode !== "city") { if (ride) { endRide(false); chipText(null); } return; }
-    if (!built) { const A = CBZ.city && CBZ.city.arena; if (A && A.lots) buildAll(A); if (!built) return; }
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-    // door animation (cheap: only moves while a target differs)
-    for (const el of elevators) { animRig(el.ground, dt); animRig(el.roof, dt); }
+  // step one lift's machine; returns the chip text it wants (or undefined)
+  let shakeT = 0, humT = 0;
+  function stepMachine(el, dt, P) {
+    const m = el.m;
+    if (m.cool > 0) m.cool -= dt;
+    if (m.st === "idle") return undefined;
+    // player gone (died / got in a car): let the cab go back to idle —
+    // doors open with an auto-close so nobody's corpse is sealed in a box.
+    if (!P || P.dead || P.driving) {
+      const r = rigOf(el, m.end);
+      r.target = 1; r.autoClose = 2.0;
+      resetMachine(el, CALL_COOL);
+      return null;
+    }
+    m.t += dt;
+    const r = rigOf(el, m.end);
 
-    const P = CBZ.player;
-    if (!ride) {
-      // proximity prompt at ~12 Hz, not frame rate — padNear hypots every lift
-      // pad, and the [E] handler re-checks reach on the actual press anyway.
-      _promptT += dt;
-      if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
-        if (_promptT >= 1 / 12) {
-          _promptT = 0;
-          const near = padNear();
-          chipText(near ? (near.up ? "[E] Elevator — ride to the roof" : "[E] Elevator — ride down") : null);
-        }
-      } else chipText(null);
-      return;
+    if (m.st === "open") {
+      // boarded? (only once the doors are wide enough that they really walked in)
+      if (r.open > 0.7 && insideCab(el, m.end, P)) { beginClose(el); return "Doors closing…"; }
+      if (m.t >= WAIT_OPEN) {
+        if (inDoorway(el, m.end, P)) { m.t = WAIT_OPEN - 0.6; return "Elevator — step in"; }  // doors WAIT, no crush
+        r.target = 0; m.st = "close"; m.will = false;        // nobody came: close back to idle
+        setLit(el, false);
+      }
+      return insideCab(el, m.end, P) ? "Doors closing…" : "Elevator — step in ([E] closes the doors)";
     }
 
-    // ---- ride state machine ----
-    const el = ride.el, b = el.b, h = b.h, ST = b.storeys;
-    if (!P || P.dead || P.driving) { endRide(false); chipText(null); return; }
-    ride.t += dt;
-    const pad = ride.up ? el.groundPad : el.roofPad;
-    const here = ride.up ? el.ground : el.roof;
-
-    if (ride.phase === "open") {
-      chipText("Elevator…");
-      if (Math.hypot(P.pos.x - pad.x, P.pos.z - pad.z) > 3.4) { endRide(false); chipText(null); return; }   // walked away — doors give up
-      if (ride.t >= T_OPEN) { ride.phase = "board"; ride.t = 0; }
-    } else if (ride.phase === "board") {
-      // ease the player into the car bay
-      P.pos.x += (pad.x - P.pos.x) * Math.min(1, dt * 6);
-      P.pos.z += (pad.z - P.pos.z) * Math.min(1, dt * 6);
-      if (ride.t >= T_BOARD) { ride.phase = "close"; ride.t = 0; here.target = 0; if (CBZ.sfx) CBZ.sfx("door"); }
-    } else if (ride.phase === "close") {
-      P.stun = Math.max(P.stun || 0, 0.15);   // input-dead: you're IN the car
-      P.pos.x = pad.x; P.pos.z = pad.z;
-      if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P.pos);   // we run after physics — keep the rig pinned too
-      if (ride.t >= T_CLOSE) {
-        ride.phase = "ride"; ride.t = 0;
-        if (CBZ.sfx) CBZ.sfx("rumble");
-        if (CBZ.shake) CBZ.shake(0.2);
+    if (m.st === "close") {
+      if (inDoorway(el, m.end, P)) {                          // someone in the leaf line: reopen
+        r.target = 1; m.st = "open"; m.t = WAIT_OPEN - 1.4;
+        if (m.will) m.will = false;
+        setLit(el, true);
+        return "Elevator — step in";
       }
-    } else if (ride.phase === "ride") {
-      P.stun = Math.max(P.stun || 0, 0.15);
-      P.pos.x = pad.x; P.pos.z = pad.z;
-      if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P.pos);
-      const dur = rideTime(el), p = Math.min(1, ride.t / dur);
-      const fl = ride.up ? Math.max(1, Math.round(1 + (ST - 1) * p)) : Math.max(1, Math.round(ST - (ST - 1) * p));
-      chipText((ride.up ? "▲ " : "▼ ") + fl + "F");
+      if (m.will && !insideCab(el, m.end, P)) {               // stepped back out: cancel the ride
+        m.will = false; setLit(el, false);
+      }
+      if (r.open <= 0) {
+        gateDoor(r);                                          // sealed
+        if (m.will) {
+          m.st = "ride"; m.t = 0; m.moved = false;
+          humT = 0; shakeT = 0;
+          if (CBZ.sfx) CBZ.sfx("rumble");
+          if (CBZ.shake) CBZ.shake(0.2);
+        } else {
+          resetMachine(el, 0);
+        }
+      }
+      return m.will ? "Doors closing…" : null;
+    }
+
+    if (m.st === "ride") {
+      const up = m.moved ? m.end === "r" : m.end === "g";     // direction reads the same before/after the swap
+      const dur = rideTime(el), p = Math.min(1, m.t / dur), ST = el.b.storeys;
+      // the car hums through your boots
       shakeT += dt;
-      if (shakeT > 0.35) { shakeT = 0; if (CBZ.shake) CBZ.shake(0.05); }    // the car hums through your boots
-      if (ride.t >= dur) {
-        // ARRIVE: doors open at the other end and you step out on top (or back
-        // in the lobby). Whoever was chasing you is still down there. The down
-        // ride lands on the interior foundation slab (top ≈0.14), not street 0.
-        const dest = ride.up ? el.roofPad : el.groundPad;
-        const dy = ride.up ? h + 0.05 : ((CBZ.floorAt ? CBZ.floorAt(dest.x, dest.z) : 0.14) + 0.05);
-        teleport(dest.x, dy, dest.z);
-        const there = ride.up ? el.roof : el.ground;
-        there.open = 0; there.target = 1; there.autoClose = 1.6;
+      if (shakeT > 0.35) { shakeT = 0; if (CBZ.shake) CBZ.shake(0.05); }
+      humT += dt;
+      if (humT > 1.25) { humT = 0; if (CBZ.sfx) CBZ.sfx("rumble"); }
+      if (!m.moved && m.t >= dur * 0.5) {
+        // THE SWAP — one frame, inside the sealed cab: carry the player's
+        // relative spot in the room over to the identical cab at the other
+        // end (clamped well inside its walls), feet on that cab's OWN floor
+        // slab top. No floorAt guesswork: the destination height is the slab
+        // we built, so the ride can never resolve back to the origin floor.
+        const from = m.end, to = from === "g" ? "r" : "g";
+        const L = (from === "g" ? el.gLoc : el.rLoc)(P.pos.x, P.pos.z);
+        const door = to === "g" ? el.gDoor : el.rDoor;
+        const pt = (to === "g" ? el.gPt : el.rPt)(clamp(L.lat, -0.7, 0.7), clamp(L.dep, 0.35, door - 0.5));
+        teleport(pt.x, (to === "g" ? el.gFloor : el.rFloor) + 0.04, pt.z);
+        m.end = to;                                           // the machine now lives at the destination cab
+        m.moved = true;
+      }
+      if (m.t >= dur) {
+        // ARRIVE: doors open where the player already physically stands —
+        // they WALK out. Whoever was chasing is still at the other end.
+        m.st = "out"; m.t = 0;
+        const r2 = rigOf(el, m.end);
+        r2.target = 1; gateDoor(r2);
         if (CBZ.sfx) CBZ.sfx("door");
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note(ride.up ? ("🛗 " + ST + " floors up — the roof is yours.") : "🛗 Ground floor.", 2);
+          CBZ.city.note(m.end === "r" ? ("🛗 " + ST + " floors up — the roof is yours.") : "🛗 Ground floor.", 2);
         }
-        chipText(null);
-        endRide(true);
+        return null;
       }
+      const fl = up ? Math.max(1, Math.round(1 + (ST - 1) * p)) : Math.max(1, Math.round(ST - (ST - 1) * p));
+      return (up ? "▲ " : "▼ ") + fl + "F";
     }
+
+    if (m.st === "out") {
+      // wait for the walk-out (or time out on an AFK rider), then close up.
+      if ((!insideCab(el, m.end, P) && !inDoorway(el, m.end, P)) || m.t >= EXIT_WAIT) {
+        rigOf(el, m.end).target = 0;
+        resetMachine(el, CALL_COOL);
+        return null;
+      }
+      return m.end === "r" ? "Roof — step out" : "Ground floor — step out";
+    }
+    return undefined;
+  }
+
+  let _promptT = 0;
+  CBZ.onUpdate(36.6, function (dt) {
+    if (g.mode !== "city") {
+      // mode exit mid-cycle: if the player was sealed in a ride, put them
+      // back on the ground apron (a known-safe spot) before the city sleeps.
+      // Guarded so other modes pay one compare per lift, not a door reset.
+      for (const el of elevators) {
+        if (el.m.st === "idle" && !el.ground.open && !el.roof.open &&
+            el.ground.target === 0 && el.roof.target === 0) continue;
+        if (el.m.st === "ride" && CBZ.player) teleport(el.groundPad.x, el.gFloor - 0.02, el.groundPad.z);
+        if (el.m.st !== "idle") resetMachine(el, 0);
+        closeNow(el.ground); closeNow(el.roof);
+      }
+      chipText(null);
+      return;
+    }
+    if (!built) { const A = CBZ.city && CBZ.city.arena; if (A && A.lots) buildAll(A); if (!built) return; }
+
+    const P = CBZ.player;
+    // door animation + collider gate (cheap: only moves while a target differs)
+    for (const el of elevators) {
+      animRig(el.ground, dt); animRig(el.roof, dt);
+      gateDoor(el.ground); gateDoor(el.roof);
+    }
+
+    // machines (normally all idle — stepMachine early-outs in one compare)
+    let text;
+    for (const el of elevators) {
+      const t = stepMachine(el, dt, P);
+      if (t !== undefined) text = t;
+    }
+    if (text !== undefined) { chipText(text); return; }
+
+    // all idle: proximity prompt at ~12 Hz, not frame rate — padNear hypots
+    // every lift pad, and the [E] handler re-checks reach on the press anyway.
+    _promptT += dt;
+    if (g.state === "playing" && P && !P.dead && !P.driving && !CBZ.cityMenuOpen) {
+      if (_promptT >= 1 / 12) {
+        _promptT = 0;
+        const near = padNear();
+        chipText(near ? (near.end === "g" ? "[E] Elevator — call (ride to the roof)" : "[E] Elevator — call (ride down)") : null);
+      }
+    } else chipText(null);
   });
 
-  // [E] calls the lift. Registered on DOCUMENT (keydown bubbles body→document→
-  // window) so stopPropagation keeps interact.js's window-level "[E] = eat"
-  // fallback from firing on the same press — the lift wins when you're at it.
+  // [E] calls the lift / closes the doors early. Registered on DOCUMENT in the
+  // CAPTURE phase so stopPropagation keeps every later handler — interact.js's
+  // window-level "[E] = eat" fallback, shop/zillow panels — from firing on the
+  // same press: the lift wins arbitration when you're at it.
   function onKey(e) {
-    if (!built || g.mode !== "city" || g.state !== "playing" || ride) return;
+    if (!built || g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.cityMenuOpen) return;
     const P = CBZ.player;
     if (!P || P.dead || P.driving) return;
     if ((e.key || "").toLowerCase() !== "e") return;
+    // inside an OPEN cab: [E] = close the doors now (early depart)
+    for (const el of elevators) {
+      if (el.m.st === "open" && insideCab(el, el.m.end, P) && !inDoorway(el, el.m.end, P)) {
+        e.preventDefault(); e.stopPropagation();
+        beginClose(el);
+        return;
+      }
+    }
     const near = padNear();
-    if (!near) return;
-    e.preventDefault();
-    e.stopPropagation();
-    startRide(near.el, near.up);
+    if (near) {
+      e.preventDefault(); e.stopPropagation();
+      callLift(near.el, near.end);
+      return;
+    }
+    // sealed inside an idle cab (doors timed out on you): [E] reopens this end
+    for (const el of elevators) {
+      if (el.m.st !== "idle") continue;
+      for (const end of ["g", "r"]) {
+        if (insideCab(el, end, P)) {
+          e.preventDefault(); e.stopPropagation();
+          callLift(el, end);
+          return;
+        }
+      }
+    }
   }
-  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey);
+  if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onKey, true);
 
   // PUBLIC: the built lifts (minimap markers / missions can target a roof)
   CBZ.cityElevators = function () { return elevators; };

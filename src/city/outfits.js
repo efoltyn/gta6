@@ -152,13 +152,21 @@
   // SAME part mapping as sampleRigColors below — paint(legs/torso/collar/arms/
   // shoes) ↔ sample(legs/torso/collar/arms/shoes) — so a corpse swap is exact:
   // what you sample off them is precisely what painting puts on you.
-  function recolorRig(ch, c) {
+  //
+  // PAINTED CLOTHING (city/clothes.js): when the optional `rec` (the outfit
+  // RECORD, not just its colors) is passed and clothes.js knows a painted look
+  // for it, the parts it paints get the canvas-textured garment (lapels, badge,
+  // apron…) instead of a flat tint; everything it doesn't paint — and the whole
+  // rig when clothes.js is absent — falls back to the exact flat-color path.
+  // opts.iso isolates the textured material per rig (crowd.js pooled bodies).
+  function recolorRig(ch, c, rec, opts) {
     if (!ch || !ch.skinSlots || !c) return false;
     const s = ch.skinSlots;
-    paint(s.legs, c.legs);
-    paint(s.torso, c.torso);
+    const pp = CBZ.cityApplyClothes ? CBZ.cityApplyClothes(ch, rec || null, opts) : null;
+    if (!pp || !pp.legs) paint(s.legs, c.legs);
+    if (!pp || !pp.torso) paint(s.torso, c.torso);
+    if (!pp || !pp.arms) paint(s.arms, c.arms != null ? c.arms : c.torso);
     paint(s.collar, c.collar != null ? c.collar : c.torso);
-    paint(s.arms, c.arms != null ? c.arms : c.torso);
     paint(s.shoes, c.shoes != null ? c.shoes : 0x2b2b2b);
     sheen(s.shoes, !!c.gloss);
     return true;
@@ -175,6 +183,10 @@
     if (!list) return null;
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
+      // a PAINTED part (canvas-textured, clothes.js) has no meaningful flat
+      // color — skip it so sampling falls back to the catalog record, which
+      // carries the painted identity through a corpse swap intact.
+      if (m && m.material && m.material.map) continue;
       if (m && m.material && m.material.color && m.material.color.getHex) return m.material.color.getHex();
     }
     return null;
@@ -202,7 +214,7 @@
   let _appliedId = null;
   function applyPlayer() {
     const ch = CBZ.playerChar, w = worn();
-    if (!ch || !ch.skinSlots || !recolorRig(ch, w.colors)) return;
+    if (!ch || !ch.skinSlots || !recolorRig(ch, w.colors, w)) return;
     const s = ch.skinSlots;
     paint(s.stripes, null, false);                                   // no city fit has jail stripes
     paint(s.belt, w.colors.belt != null ? w.colors.belt : 0x17191f, true);
@@ -319,6 +331,68 @@
     return null;                                                     // ordinary folk keep street variety
   };
 
+  // ============================================================
+  //  RE-DRESS — keep a body's CLOTH true to WHO IT IS RIGHT NOW.
+  //
+  //  THE GREY-TYCOON BUG: makePed paints the wardrobe exactly once, at
+  //  spawn — but a ped's IDENTITY is rewritten after spawn by (a) crowd.js
+  //  promotion, whose setLook() repaints the rig in the instanced body's
+  //  flat shirt color, then (b) CBZ.cityPedDeal, which can land a BANKED
+  //  tycoon/socialite identity on that body, and (c) CBZ.cityRecastForHour,
+  //  whose night cast mints socialites. None of those repainted — so a
+  //  remembered tycoon walked back in wearing the crowd's flat grey shirt.
+  //  Fix: wrap both identity chokepoints (the established wrap pattern —
+  //  no edits in crowd.js/schedule.js) and re-dress the body afterwards.
+  // ============================================================
+  // the body's CURRENT shirt tint, read even off a painted material —
+  // crowd.js's setLook writes the instanced shirt hex onto whatever material
+  // the torso carries, so this is the color the player just SAW walking.
+  // Pure white = a painted material's untouched base → spawn-time outfit hex.
+  function liveTorsoHex(ped) {
+    const s = ped.char && ped.char.skinSlots, list = s && s.torso;
+    if (list) for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (m && m.material && m.material.color && m.material.color.getHex) {
+        const h = m.material.color.getHex();
+        if (h !== 0xffffff) return h;
+      }
+    }
+    return ped.outfit != null ? ped.outfit : 0x8a939c;
+  }
+  function redressPed(ped) {
+    if (!ped || ped.isPlayer || ped.dead || !ped.char || !ped.char.skinSlots) return;
+    const opts = ped._crowd ? { iso: true } : null;   // pooled rigs get isolated materials (setLook tints in place)
+    if (ped._wornOutfit) { recolorRig(ped.char, ped._wornOutfit.colors, ped._wornOutfit, opts); return; }
+    const fit = CBZ.cityOutfitFor({
+      archetype: ped.archetype, job: ped.job, gang: ped.gang, vendor: ped.vendor,
+      kind: ped.kind, cop: ped.kind === "cop", swat: ped.swat,
+    });
+    if (fit && fit.colors) { recolorRig(ped.char, fit.colors, fit, opts); ped._castFit = fit.id; return; }
+    if (ped._castFit || ped._crowd) {
+      // back to an ordinary person: strip any cast paint, keep the shirt the
+      // body is visibly wearing (seamless against the instanced crowd swap).
+      const torso = liveTorsoHex(ped);
+      let legs = readColor(ped.char.skinSlots.legs);
+      if (legs == null) legs = 0x363b46;
+      const colors = { legs, torso, collar: torso, arms: torso, shoes: 0x2b2b2b };
+      recolorRig(ped.char, colors, { id: "basics", colors }, opts);
+      ped._castFit = null;
+    }
+  }
+  CBZ.cityRedressPed = redressPed;
+  function ensureCastWraps() {
+    const rc = CBZ.cityRecastForHour;
+    if (typeof rc === "function" && !rc._fitWrap) {
+      const w = function (ped, r) { const changed = rc(ped, r); if (changed) redressPed(ped); return changed; };
+      w._fitWrap = true; CBZ.cityRecastForHour = w;
+    }
+    const dl = CBZ.cityPedDeal;
+    if (typeof dl === "function" && !dl._fitWrap) {
+      const w2 = function (ped) { const out = dl(ped); redressPed(ped); return out; };
+      w2._fitWrap = true; CBZ.cityPedDeal = w2;
+    }
+  }
+
   // WHO is this body, wardrobe-wise? The named-identity ladder (kept for the
   // PERCEPTION flags: cop/gang/drip/formal have mechanical meaning). A corpse
   // that's been through a swap wears whatever was left on it — that stamped
@@ -374,7 +448,7 @@
   //  (CBZ.cityMenuOpen is the engine's existing fire-block chokepoint).
   //  The trade is literal: the corpse is left wearing YOUR old fit.
   // ============================================================
-  let _pendingSwap = null, _heldMenu = false;
+  let _pendingSwap = null, _heldMenu = false, _copDressT = 0;
   CBZ.cityOutfitSwapWithCorpse = function (body) {
     if (!body || !body.dead || body._clothesTaken) return false;
     if (_pendingSwap || (g.cityOutfitChanging || 0) > 0) return false;
@@ -398,7 +472,9 @@
     if (sw.body) {
       sw.body._wornOutfit = sw.mine;             // identity reads now see the traded cloth
       if (sw.body.char) {
-        recolorRig(sw.body.char, sw.mine.colors);
+        // the record rides along so the corpse inherits the PAINTED look too
+        // (your old tux lands on them with its lapels, not a flat black tint)
+        recolorRig(sw.body.char, sw.mine.colors, sw.mine);
         sw.body.outfit = sw.mine.colors.torso;   // gore/cloth reads stay true
       }
       // re-mirror the corpse's attachments NOW: a magnate stripped of his tux
@@ -427,14 +503,39 @@
   }
   CBZ.onUpdate(34.8, function (dt) {
     if (g.mode !== "city") {
-      _appliedId = null;                          // jail roles own the rig now; repaint on re-entry
+      if (_appliedId !== null) {
+        // leaving the city in PAINTED cloth: strip it (restores the rig's flat
+        // geometry+materials) and hand the look back to the mode that owns it —
+        // applyPlayerRole would otherwise tint a canvas texture (orange tux).
+        if (CBZ.cityApplyClothes && CBZ.playerChar && CBZ.playerChar._clothesKey != null) {
+          CBZ.cityApplyClothes(CBZ.playerChar, null);
+          if (CBZ.applyPlayerRole && CBZ.player) CBZ.applyPlayerRole(CBZ.player.role);
+        }
+        _appliedId = null;                        // jail roles own the rig now; repaint on re-entry
+      }
       if (_pendingSwap) cancelSwap();
       return;
     }
     ensureDripWrap();
+    ensureCastWraps();
     buildGangOutfits();
     const w = worn();
     if (_appliedId !== w.id) applyPlayer();
+    // COPS wear the painted uniform too (badge/belt/patches) — makeCop lives
+    // in police.js, which we don't edit: a cheap throttled sweep dresses any
+    // not-yet-painted cop rig through the same API. One pass per cop, ever
+    // (the painted key sticks on the rig), and only when clothes.js is loaded.
+    if (CBZ.cityApplyClothes) {
+      _copDressT -= dt;
+      if (_copDressT <= 0) {
+        _copDressT = 0.8;
+        const cops = CBZ.cityCops;
+        if (cops) for (let i = 0; i < cops.length; i++) {
+          const c = cops[i];
+          if (c && !c.dead && c.char && c.char.skinSlots && c.char._clothesKey === undefined) redressPed(c);
+        }
+      }
+    }
     // the change beat: count it down, then the swap lands
     if ((g.cityOutfitChanging || 0) > 0) {
       if (CBZ.player && CBZ.player.dead) { cancelSwap(); return; }

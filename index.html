@@ -255,7 +255,7 @@
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=roof1"></script>
+<script src="src/config.js?v=traf2"></script>
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js"></script>
@@ -293,15 +293,20 @@
 <script src="src/systems/economy.js?v=pick1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/weapon-data.js"></script>
-<script src="src/weapons/appearances/sidearm.js"></script>
+<script src="src/weapons/weapon-data.js?v=guns2"></script>
+<script src="src/weapons/appearances/sidearm.js?v=fix3"></script>
 <script src="src/weapons/appearances/shotgun.js"></script>
 <script src="src/weapons/appearances/carbine.js"></script>
 <script src="src/weapons/appearances/smg.js"></script>
 <script src="src/weapons/appearances/taser.js"></script>
-<script src="src/weapons/appearances/bazooka.js"></script>
+<script src="src/weapons/appearances/bazooka.js?v=fix2"></script>
 <script src="src/weapons/appearances/grenade.js"></script>
 <script src="src/weapons/appearances/ak47.js"></script>
+<script src="src/weapons/appearances/revolver.js"></script>
+<script src="src/weapons/appearances/deagle.js"></script>
+<script src="src/weapons/appearances/uzi.js"></script>
+<script src="src/weapons/appearances/sniper.js"></script>
+<script src="src/weapons/appearances/lmg.js"></script>
 <script src="src/systems/actorweapons.js?v=gunorigin1"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
@@ -355,8 +360,8 @@
 <script src="src/systems/state.js?v=gore1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/touch.js?v=camera14"></script>
-<script src="src/systems/fpsmode.js?v=city4"></script>
-<script src="src/systems/gunfx.js?v=incoming1"></script>
+<script src="src/systems/fpsmode.js?v=vmdepth2"></script>
+<script src="src/systems/gunfx.js?v=shoot2"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
@@ -377,17 +382,19 @@
      world lazily far from the other two. Must load BEFORE loop.js so its
      frame-work is included in the sort. mode.js defines CBZ.city first; the
      rest augment it. -->
-<script src="src/city/world.js?v=cityfix1"></script>
-<script src="src/city/buildings.js?v=city4"></script>
+<script src="src/city/world.js?v=beach1"></script>
+<script src="src/city/buildings.js?v=inout1"></script>
 <script src="src/city/fracture.js?v=frx1"></script>
-<script src="src/city/elevators.js?v=lift1"></script>
+<script src="src/city/elevators.js?v=lift2"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
+<script src="src/city/beach.js?v=beach1"></script>
 <script src="src/city/expansion.js?v=citysec1"></script>
-<script src="src/city/props.js?v=adboard1"></script>
+<script src="src/city/props.js?v=shoot1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=citysec1"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
-<script src="src/city/outfits.js?v=fit2"></script>
+<script src="src/city/clothes.js?v=fit3"></script>
+<script src="src/city/outfits.js?v=fit3"></script>
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=city3"></script>
 <script src="src/city/worldstate.js?v=hub1"></script>
@@ -397,33 +404,34 @@
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=city4"></script>
+<script src="src/city/peds.js?v=fit3"></script>
 <script src="src/city/level.js?v=lvl1"></script>
 <script src="src/city/sizeup.js?v=lvl1"></script>
-<script src="src/city/bling.js?v=fit2"></script>
+<script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=club1"></script>
 <script src="src/city/crowd.js?v=crowd1"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=citysec1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=city3"></script>
-<script src="src/city/aircraft.js?v=night2"></script>
-<script src="src/city/traffic.js?v=city3"></script>
-<script src="src/city/playercars.js?v=playercars1"></script>
-<script src="src/city/crashfx.js?v=rpgwall1"></script>
+<script src="src/city/police.js?v=beam1"></script>
+<script src="src/city/aircraft.js?v=beam1"></script>
+<script src="src/city/traffic.js?v=smart1"></script>
+<script src="src/city/playercars.js?v=glass2"></script>
+<script src="src/city/crashfx.js?v=noscar1"></script>
 <script src="src/city/crashdeform.js?v=deform1"></script>
-<script src="src/city/vehicles.js?v=crash7"></script>
+<script src="src/city/vehicles.js?v=smartai1"></script>
 <script src="src/city/playerair.js?v=air1"></script>
 <script src="src/city/playeraircraft.js?v=air1"></script>
 <script src="src/city/shops.js?v=city3"></script>
-<script src="src/city/gunstore.js?v=gunwall1"></script>
+<script src="src/city/gunstore.js?v=demo1"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
 <script src="src/city/careers.js?v=citysec1"></script>
 <script src="src/city/activities.js?v=hub1"></script>
 <script src="src/city/heists.js?v=night4"></script>
 <script src="src/city/interact.js?v=citysec1"></script>
 <script src="src/city/combat.js?v=grenade1"></script>
+<script src="src/city/explosives.js?v=c4-1"></script>
 <script src="src/city/death.js?v=crash7"></script>
 <script src="src/city/ragdoll.js?v=rag1"></script>
 <script src="src/city/leaderboard.js?v=city3"></script>
@@ -447,8 +455,8 @@
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=gore1"></script>
-<script src="src/systems/wounds.js?v=1"></script>
+<script src="src/systems/gore.js?v=blob2"></script>
+<script src="src/systems/wounds.js?v=soak2"></script>
 
 <!-- multiplayer (host-your-own RP servers) — inert when offline/solo; loads
      after the whole city block so every CBZ hook it wraps already exists -->

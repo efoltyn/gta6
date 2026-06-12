@@ -271,9 +271,16 @@
     // cloth dress the part — a street tycoon wears the actual tux (not a
     // random bright shirt under a bow tie), mobsters wear suits, dealers
     // tracksuits, dock workers hi-vis. Caster-chosen outfits still win.
+    // The RECORD rides along so clothes.js can paint the garment structure
+    // (lapels/badge/apron) onto the rig, not just tint it; everybody else
+    // gets the painted STREET BASICS pass (collar line/print/waistband) so
+    // even a nobody isn't a single flat slab. NOTE: spawn-time dressing only —
+    // post-spawn identity rewrites (crowd promotion, schedule deal-ins, the
+    // hour recast) re-dress through outfits.js's wraps (the grey-tycoon fix).
     if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
       const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor });
-      if (fit && fit.colors) CBZ.cityRecolorRig(ch, fit.colors);
+      if (fit && fit.colors) CBZ.cityRecolorRig(ch, fit.colors, fit);
+      else if (CBZ.cityApplyClothes) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
     }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
