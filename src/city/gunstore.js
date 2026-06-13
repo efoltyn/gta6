@@ -181,6 +181,41 @@
     ammo.tag = tagSprite("Ammo Box · " + fmt$(e.buyPrice("Ammo Box")), "#9fe0ff", 1.7, 0.42);
     if (ammo.tag) { ammo.tag.position.set(ax, 1.15, az); group.add(ammo.tag); }
     S.slots.push(ammo);
+
+    // ---- THE DEMOLITION END (past the ammo crates): a frag crate + a C4
+    //      satchel. Consumables sold by COUNT exactly like the Ammo Box —
+    //      the throw lives in city/combat.js ([G]) and the plant/detonate in
+    //      city/explosives.js ([B]); the store just moves the product. ----
+    if (e.ITEMS["Grenade"]) {
+      const fx = C.x + C.tx * (longLen / 2 + 1.35), fz = C.z + C.tz * (longLen / 2 + 1.35);
+      const fc = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.38, 0.56), m.crate);
+      fc.position.set(fx, 0.19, fz); fc.castShadow = false;
+      group.add(fc);
+      if (CBZ.grenadeMesh) for (let i = 0; i < 3; i++) {   // a few frags nested in the straw
+        const gm = CBZ.grenadeMesh(THREE);
+        if (!gm) break;
+        gm.position.set(fx + (i - 1) * 0.15, 0.42, fz + (Math.random() - 0.5) * 0.12);
+        group.add(gm);
+      }
+      const gren = { name: "Grenade", boom: true, sold: false, x: fx, y: 0.5, z: fz, reach: CASE_REACH, dot: CASE_DOT };
+      gren.tag = tagSprite("Frag Crate · " + fmt$(e.buyPrice("Grenade")), "#ff9e6a", 1.7, 0.42);
+      if (gren.tag) { gren.tag.position.set(fx, 0.95, fz); group.add(gren.tag); }
+      S.slots.push(gren);
+    }
+    if (e.ITEMS["C4 Charge"]) {   // registered by explosives.js — guard for safety
+      const bx = C.x + C.tx * (longLen / 2 + 2.1), bz = C.z + C.tz * (longLen / 2 + 2.1);
+      const bc = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.5), m.crate);
+      bc.position.set(bx, 0.15, bz); bc.castShadow = false;
+      group.add(bc);
+      if (CBZ.cityC4Mesh) {   // the real charge model on the lid (shared geo/mats)
+        const cm = CBZ.cityC4Mesh();
+        if (cm) { cm.position.set(bx, 0.36, bz); cm.rotation.y = Math.random() * 6.28; group.add(cm); }
+      }
+      const c4 = { name: "C4 Charge", boom: true, sold: false, x: bx, y: 0.42, z: bz, reach: CASE_REACH, dot: CASE_DOT };
+      c4.tag = tagSprite("C4 Charge · " + fmt$(e.buyPrice("C4 Charge")), "#ff6a6a", 1.7, 0.42);
+      if (c4.tag) { c4.tag.position.set(bx, 0.92, bz); group.add(c4.tag); }
+      S.slots.push(c4);
+    }
   }
 
   // ---- SOLD gap / restock ----------------------------------------------------
@@ -207,6 +242,22 @@
       if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(meta.rounds || 60);
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.note("+" + (meta.rounds || 60) + " rounds over the counter.", 1.6);
+      return;
+    }
+    // explosive consumables: bought by COUNT, never sell out (crates restock
+    // off-screen). Counts mirror to g.cityGrenades / g.cityC4 for HUD readers.
+    if (s.boom) {
+      const price = e.buyPrice(s.name);
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      e.add(s.name, 1);
+      const n = e.count ? e.count(s.name) : 0;
+      if (s.name === "Grenade") g.cityGrenades = n;
+      if (s.name === "C4 Charge") g.cityC4 = n;
+      if (CBZ.sfx) CBZ.sfx("coin");
+      CBZ.city.note(s.name === "C4 Charge"
+        ? "C4 in the bag (" + n + " carried) — [B] plants it, hold [B] to send the signal."
+        : "Frag in the bag (" + n + " carried) — [G] throws it.", 2.4);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
     if (s.sold) { CBZ.city.note("That slot's sold out — restock truck's rolling.", 1.8); return; }
@@ -257,6 +308,10 @@
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {};
       return "<b style='color:#ffd166'>[E]</b> Ammo Box — <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>· +" + (meta.rounds || 60) + " rounds</span>";
+    }
+    if (s.boom) {
+      const use = s.name === "C4 Charge" ? "remote det · [B] plant, hold [B] boom" : "frag · [G] throws it";
+      return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " — <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>· " + use + "</span>";
     }
     if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + " — SOLD</span> <span style='color:#7f8794'>· restock truck's rolling</span>";
     const meta = e.ITEMS[s.name] || {};

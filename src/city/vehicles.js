@@ -1043,6 +1043,101 @@
     }
   }
 
+  // ============================================================
+  //  TIRES ARE A TARGET — shoot a wheel and THAT tire blows, instead of the
+  //  round quietly chipping generic engine HP (USER-FILMED: "shooting cars
+  //  feels wrong"). WHY: aiming for rubber is the classic chase-ender — it
+  //  must read corner-exact: the struck wheel deflates, the body settles
+  //  toward it, a front flat drags the nose, a rear flat kills the launch,
+  //  and all four leaves you grinding along on the rims.
+  //  State: car._flats bitmask — 1=front-left  2=front-right
+  //                              4=rear-left   8=rear-right
+  //  (left = the car's local +x side; forward = local +z, like heading math)
+  // ============================================================
+  function tireAt(car, p) {
+    if (!p || p.y == null || p.y > 1.1) return 0;          // wheels live below ~1.1u
+    const d = vehicleDims(car);
+    const wb = (d.wheelbase || 2.7) * 0.5, track = (d.width || 2) * 0.5;
+    const h = car.heading || 0;
+    const fx = Math.sin(h), fz = Math.cos(h), sx = Math.cos(h), sz = -Math.sin(h);
+    const rx = p.x - car.pos.x, rz = p.z - car.pos.z;
+    const along = rx * fx + rz * fz, lat = rx * sx + rz * sz;
+    // nearest wheel centre in the car's own frame — generous 0.75u radius so a
+    // round into the arch/fender skirt still counts as a wheel shot.
+    const ca = along > 0 ? wb : -wb, cl = lat > 0 ? track : -track;
+    const da = along - ca, dl = lat - cl;
+    if (da * da + dl * dl > 0.75 * 0.75) return 0;
+    return 1 << ((along > 0 ? 0 : 2) + (lat > 0 ? 0 : 1));
+  }
+  // body settles toward the dead corner(s) — tiny angles, but at a glance the
+  // car reads "sitting wrong" exactly where you shot it.
+  function flatLean(car) {
+    const f = car._flats | 0; if (!f) return null;
+    let roll = 0, pitch = 0;
+    if (f & 1) { roll += 0.032; pitch += 0.02; }
+    if (f & 2) { roll -= 0.032; pitch += 0.02; }
+    if (f & 4) { roll += 0.032; pitch -= 0.02; }
+    if (f & 8) { roll -= 0.032; pitch -= 0.02; }
+    return { roll, pitch };
+  }
+  // deflate the struck corner's wheel MESH (radial squash + drop onto the rim).
+  // Wheels stay unmerged + tagged playerWheel by the unified visual builder;
+  // scale.x/z shrink the cylinder's radius and stay invariant under the spin
+  // applied by cityUpdatePlayerCarVisual. Box rigs merge their wheels — they
+  // skip the squash and keep just the body lean.
+  function applyFlatVisual(car) {
+    const ud = car.group && car.group.userData;
+    const vis = car._playerCarVisual || (ud && ud.carVisual);
+    car._flatVis = vis || null;
+    if (!vis) return;
+    const wheels = (vis.userData && vis.userData.playerWheels) || [];
+    const list = wheels.length ? wheels : (function () {
+      const out = [];
+      vis.traverse(function (o) { if (o.userData && o.userData.playerWheel) out.push(o); });
+      return out;
+    })();
+    for (let i = 0; i < list.length; i++) {
+      const w = list[i];
+      const bit = 1 << ((w.position.z > 0 ? 0 : 2) + (w.position.x > 0 ? 0 : 1));
+      if (!(car._flats & bit) || w._flatSq) continue;
+      w._flatSq = true;
+      const r = (w.geometry && w.geometry.parameters && w.geometry.parameters.radiusTop) || 0.4;
+      w.scale.x *= 0.68; w.scale.z *= 0.68;        // radial: tire's gone, rim's left
+      w.position.y -= r * 0.3;                     // settle the rim toward the road
+    }
+  }
+  // PUBLIC: a bullet landed at `point` — if that's a wheel, blow the tire.
+  // Returns true when the round hit rubber (callers soften engine damage).
+  CBZ.cityCarTireHit = function (car, point) {
+    if (!car || car.dead || !point) return false;
+    const bit = tireAt(car, point);
+    if (!bit) return false;
+    if (car._flats == null) car._flats = 0;
+    const side = (bit === 1 || bit === 4) ? 1 : -1;
+    emitTireSmoke(car, side);                      // even re-shooting a flat coughs rubber
+    if (car._flats & bit) return true;             // that corner's already dead
+    car._flats |= bit;
+    // the POP: a burst of shredded-rubber smoke + a bang you hear over the gun
+    emitTireSmoke(car, side); emitTireSmoke(car, side);
+    if (CBZ.sfx && nearCam(car, 70)) CBZ.sfx("clank");
+    applyFlatVisual(car);
+    const L = flatLean(car);
+    if (L && !car.player) {                        // AI loop only writes rotation.y — set the sag once
+      car.group.rotation.x = L.pitch; car.group.rotation.z = L.roll;
+    }
+    // a fresh flat under an AI driver: a brief swerve/wobble (the wreckT spin
+    // machinery the crash path already uses), then LIMP to the curb and crawl —
+    // a blown tire ends the cruise, it doesn't get floored through.
+    if (car.ai && !car.player) {
+      car.wreckT = Math.max(car.wreckT || 0, 0.7);
+      car.spin = (car.spin || 0) + (Math.random() < 0.5 ? -1 : 1) * (0.8 + Math.random() * 0.9);
+      car.baseV = Math.min(car.baseV || 9, 2.2);
+      if (car.lane) car.lane = (car.lane < 0 ? -1 : 1) * 3.3;   // hug the curb
+      car.reckless = false;
+    }
+    return true;
+  };
+
   // ---- PUBLIC: take damage from bullets / explosions elsewhere (combat, cops).
   //      amount is in engine-HP points; opts.byPlayer attributes the kill. A
   //      direct hit on an already-smoking car can light it; big hits pop it. ----
@@ -1051,19 +1146,24 @@
     opts = opts || {};
     if (opts.byPlayer) car._burnByPlayer = true;
     if (car.engineHp == null) car.engineHp = 100;
+    // WHEEL SHOT: the round went into rubber, not the motor — blow that tire
+    // and let only a sliver of the energy reach the engine block.
+    const tire = opts.point ? CBZ.cityCarTireHit(car, opts.point) : false;
+    if (tire) amount *= 0.25;
     // tracer hits also visibly spark/dent the hull a touch
-    if (opts.crumple) crumpleCar(car, Math.min(0.2, amount * 0.004));
+    if (!tire && opts.crumple) crumpleCar(car, Math.min(0.2, amount * 0.004));
     // exact-point dent: a small crater under the bullet-hole decal. The shot
     // resolver threads opts.point (world Vector3-ish), opts.normal (entry
     // face, toward the shooter) and opts.cal — caliber sets the dimple.
-    if (opts.point && CBZ.cityCarImpact) {
+    if (!tire && opts.point && CBZ.cityCarImpact) {
       const n = opts.normal || { x: 0, y: 0, z: 0 };
       CBZ.cityCarImpact(car, opts.point, { x: -(n.x || 0), y: -(n.y || 0), z: -(n.z || 0) },
         1.6 + (opts.cal || 1) * 1.5, { r: 0.22 + (opts.cal || 1) * 0.08 });
     }
     damageEngine(car, amount, true);
     // a driver taking fire doesn't keep cruising the speed limit — they FLOOR it
-    if (opts.byPlayer && car.ai && !car.dead && !car.npcDriver) {
+    // (unless the round just took a tire: you can't floor it on a flat)
+    if (!tire && opts.byPlayer && car.ai && !car.dead && !car.npcDriver) {
       car.reckless = true;
       car.baseV = Math.max(car.baseV || 0, ((CBZ.CITY.traf && CBZ.CITY.traf.cruise) || [7, 12])[1] * 1.5);
     }
@@ -1116,7 +1216,7 @@
     if (CBZ.sfx) CBZ.sfx("door");
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? "  ·  " + car.model.name : "";   // value stays hidden until you chop it
-    CBZ.city && CBZ.city.note("Driving" + worth + " — [F] out  [C] car style", 1.8);
+    CBZ.city && CBZ.city.note("Driving" + worth + " — [E] out  [C] car style", 1.8);
     return true;
   };
   CBZ.cityExitVehicle = function () {
@@ -1153,16 +1253,10 @@
     return null;
   }
 
-  // ---- F to enter / exit ----
-  function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement; }
-  addEventListener("keydown", function (e) {
-    if (!active() || e.repeat) return;
-    if (e.key.toLowerCase() === "f") {
-      e.preventDefault();
-      if (CBZ.player.driving) CBZ.cityExitVehicle();
-      else { const c = CBZ.cityNearestCar(CBZ.player.pos.x, CBZ.player.pos.z, 4.0); if (c) CBZ.cityEnterVehicle(c); }
-    }
-  });
+  // (the old dedicated F-to-enter/exit binding is GONE: car enter/boost/jack/
+  //  step-out are option records in the interaction registry now — see
+  //  city/interact.js "vehicle" / "vehicle:inside" registrations. One context
+  //  system, every verb visible before you press it.)
 
   // ---- per-car DYNAMICS, derived from the model + how wrecked it is ---------
   // GTA-style arcade handling: a body type sets the base feel (a coupe darts,
@@ -1235,7 +1329,22 @@
     // DAMAGE degrades it: a smoking/burning car is gutless and squirrelly
     const d = carDmg(car);
     accel *= 1 - d * 0.55; top *= 1 - d * 0.42; grip *= 1 - d * 0.5; turn *= 1 - d * 0.28;
-    return { accel, top, turn, grip, brake, dmg: d, roll, drift, wheelbase, steerLock, drag, rolling };
+    // BLOWN TIRES (car._flats bitmask): a flat FRONT cuts grip + steering and
+    // (in the drive loop) drags the nose toward the dead side; a flat REAR cuts
+    // grip + top speed. All four = riding on rims — barely a car anymore.
+    const f = car._flats | 0;
+    let flatPull = 0;
+    if (f) {
+      const fc = (f & 1 ? 1 : 0) + (f & 2 ? 1 : 0), rc = (f & 4 ? 1 : 0) + (f & 8 ? 1 : 0);
+      grip *= 1 - fc * 0.18 - rc * 0.14;
+      turn *= 1 - fc * 0.2;
+      top *= 1 - fc * 0.05 - rc * 0.14;
+      accel *= 1 - (fc + rc) * 0.07;
+      if (fc + rc === 4) { top *= 0.45; grip *= 0.65; }
+      // front flats steer the car: pull toward the flat side (left = +heading)
+      flatPull = (f & 1 ? 0.14 : 0) - (f & 2 ? 0.14 : 0);
+    }
+    return { accel, top, turn, grip, brake, dmg: d, roll, drift, wheelbase, steerLock, drag, rolling, flatPull };
   }
   function vehicleDims(car) {
     return (car && (car._visualDims || car.dims)) || { width: 2, length: 4.4, wheelbase: 2.7 };
@@ -1333,6 +1442,9 @@
         if (car._pull == null) car._pull = (car._cside || 1) * (0.18 + Math.random() * 0.12);
         car.heading += car._pull * (D.dmg - 0.45) * dt * Math.min(1, vmag / 8);
       }
+      // a blown FRONT tire drags the wheel steadily toward the flat — you hold
+      // opposite lock the whole way home (carDynamics signs it per corner)
+      if (D.flatPull) car.heading += D.flatPull * dt * Math.min(1, vmag / 8);
     }
     // ---- GRIP model: split the PREVIOUS velocity into forward + lateral
     //      (relative to the now-steered heading), bleed the lateral slip down by
@@ -1376,6 +1488,12 @@
       car._tireT = (car._tireT || 0) + dt;
       if (car._tireT > 0.13 - skidAmt * 0.06) { car._tireT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
     }
+    // ALL FOUR SHOT OUT: grinding along on bare rims — a constant cough of
+    // shredded-rubber/rim smoke off both rears whenever you force it to move
+    if (car._flats === 15 && vmag > 6) {
+      car._rimT = (car._rimT || 0) + dt;
+      if (car._rimT > 0.16) { car._rimT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
+    }
     laySkids(car, skidAmt, fwdX, fwdZ);
     // ---- ENGINE VOICE: revs climb through the fake gear band, snap down on
     //      the upshift. Reverse whines low; revving at a standstill screams. ----
@@ -1399,8 +1517,17 @@
     const pitchTarget = Math.max(-0.07, Math.min(0.09, accelG * 0.05 * Math.min(1, vmag / 14)));
     // body leans OUTWARD of the turn: steering at speed plus any tail-out slip.
     const latG = car._steerInput * Math.min(1, vmag / 12) + (latX * fwdZ - latZ * fwdX) * 0.16;
-    const rollTarget = Math.max(-0.16, Math.min(0.16, latG * 0.06 * (D.roll || 0.6)));
-    car._pitch = (car._pitch || 0) + (pitchTarget - (car._pitch || 0)) * Math.min(1, dt * 7);
+    let rollTarget = Math.max(-0.16, Math.min(0.16, latG * 0.06 * (D.roll || 0.6)));
+    let pitchT2 = pitchTarget;
+    // the body SITS on its blown corner(s) — the lean rides the same eased
+    // weight-transfer channel, so it composes with squat/dive/roll for free
+    if (car._flats) {
+      const FL = flatLean(car);
+      if (FL) { pitchT2 += FL.pitch; rollTarget += FL.roll; }
+      // [C] style-cycler swapped the visual under us — re-deflate the new wheels
+      if (car._playerCarVisual && car._playerCarVisual !== car._flatVis) applyFlatVisual(car);
+    }
+    car._pitch = (car._pitch || 0) + (pitchT2 - (car._pitch || 0)) * Math.min(1, dt * 7);
     car._roll = (car._roll || 0) + (rollTarget - (car._roll || 0)) * Math.min(1, dt * 6);
     car.vx = velX; car.vz = velZ;
     car.pos.x += velX * dt; car.pos.z += velZ * dt;
@@ -1873,9 +2000,12 @@
 
       // ---- mid-turn: arc smoothly through the intersection (no snap) ----
       if (c.turning) {
-        const tv = Math.min(c.baseV, c.reckless ? 8 : 5.5);   // ease off to corner
-        c.v += Math.max(-18 * dt, Math.min(10 * dt, tv - c.v));
-        c.v = Math.max(1.5, c.v);
+        let tv = Math.min(c.baseV, c.reckless ? 11 : 8);   // ease off to corner
+        // yield mid-arc: don't sweep the turn into a car crossing the box
+        const blk = carAhead(c);
+        if (blk && blk.gap < 5) tv = Math.min(tv, Math.max(0.8, blk.v * 0.5));
+        c.v += Math.max(-20 * dt, Math.min(12 * dt, tv - c.v));
+        c.v = Math.max(0.8, c.v);
         advanceTurn(c, dt);
         c.group.position.set(c.pos.x, 0, c.pos.z);
         c.group.rotation.y = c.heading;
@@ -1948,8 +2078,9 @@
         if (brake >= 1) target = 0; else if (brake > 0) target = Math.min(target, c.v * 0.3);
       }
 
-      // approach the target speed
-      const accel = (target > c.v ? 9 : 16) * (c.reckless ? 1.3 : 1);
+      // approach the target speed (real city pace: pulls away from a green
+      // briskly, brakes hard when it must)
+      const accel = (target > c.v ? 12 : 22) * (c.reckless ? 1.3 : 1);
       c.v += Math.max(-accel * dt, Math.min(accel * dt, target - c.v));
       c.v = Math.max(0, c.v);
 
@@ -1957,33 +2088,55 @@
       const moveAxisZ = r.vertical;
       if (moveAxisZ) c.pos.z += c.dirSign * c.v * dt; else c.pos.x += c.dirSign * c.v * dt;
 
-      // lane-keeping: pin to the lane's lateral line; reckless drivers WEAVE
+      // lane-keeping: EASE toward the lane line instead of pinning to it, so a
+      // lane flip (overtake, U-turn, post-crash recovery) reads as a real
+      // steered swerve, not a 4-metre sideways teleport. Reckless drivers WEAVE
       // (drunk/aggressive sway) within the lane so they read as bad drivers.
       const swayAmp = c.reckless ? 0.85 : 0;
       let phaseRate = 0;
       if (swayAmp) { phaseRate = (1.6 + (c.driver.aggr - 0.6) * 1.4); c.swayPhase = (c.swayPhase || rng() * 6) + dt * phaseRate; }
       const sway = swayAmp ? Math.sin(c.swayPhase) * swayAmp : 0;
-      if (moveAxisZ) c.pos.x = r.x + c.lane + sway; else c.pos.z = r.z + c.lane + sway;
+      const latNow = moveAxisZ ? c.pos.x - r.x : c.pos.z - r.z;
+      const latWant = c.lane + sway;
+      const latRate = 1.6 + Math.abs(c.v) * 0.24;            // faster car corrects faster
+      const lat = latNow + Math.max(-latRate * dt, Math.min(latRate * dt, latWant - latNow));
+      if (moveAxisZ) c.pos.x = r.x + lat; else c.pos.z = r.z + lat;
 
-      // heading follows travel, tilted by the weave so the nose visibly swerves
-      const baseH = moveAxisZ ? (c.dirSign > 0 ? 0 : Math.PI) : (c.dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
-      if (swayAmp) {
-        const dlat = Math.cos(c.swayPhase) * swayAmp * phaseRate;
-        const dalong = c.dirSign * Math.max(2, c.v);
-        c.heading = moveAxisZ ? Math.atan2(dlat, dalong) : Math.atan2(dalong, dlat);
-      } else c.heading = baseH;
+      // heading follows the ACTUAL motion (forward + lateral correction), so the
+      // nose visibly steers through lane changes and weaves instead of crabbing
+      const dlat = dt > 0.0001 ? (lat - latNow) / dt : 0;
+      const dalong = c.dirSign * Math.max(2, c.v);
+      c.heading = moveAxisZ ? Math.atan2(dlat, dalong) : Math.atan2(dalong, dlat);
 
-      // crossing the intersection: ran-a-red check + maybe begin a turn
+      // crossing the intersection: ran-a-red check + ONE committed route choice
+      // per box (the old per-frame coin-flip re-rolled every frame a car sat in
+      // the intersection — most cars turned at almost every corner, so traffic
+      // read as aimless wandering instead of people going somewhere).
       const insideInt = Math.abs(c.pos.x - it.x) < A.ROAD / 2 + 0.5 && Math.abs(c.pos.z - it.z) < A.ROAD / 2 + 0.5;
       if (insideInt && red && c.ranRedCD <= 0 && c.v > 4) {
         c.ranRedCD = 3; ranRed(c);
       }
-      if (insideInt && c.turnCD <= 0 && c.v > 2 && rng() < 0.5) beginTurn(c, it, A, lane);
+      if (insideInt && !c._intActive) {
+        c._intActive = true;
+        if (c.v > 1 && (c._mustTurn || (c.turnCD <= 0 && rng() < 0.38))) {
+          beginTurn(c, it, A, lane);
+          if (c.turning) c._mustTurn = false;
+        }
+      } else if (!insideInt && c._intActive) c._intActive = false;
 
-      // wrap at the end of the road (fallback if it never turned)
+      // approaching the end of the road: commit to turning off at the next
+      // intersection; if there is none left, U-TURN at the dead end (swing into
+      // the opposite lane and head back) — never teleport-wrap across the map.
       const lim = r.len / 2 - 2;
-      if (moveAxisZ) { if ((c.pos.z - r.z) * c.dirSign > lim) c.pos.z = r.z - c.dirSign * lim; }
-      else { if ((c.pos.x - r.x) * c.dirSign > lim) c.pos.x = r.x - c.dirSign * lim; }
+      const along = moveAxisZ ? (c.pos.z - r.z) * c.dirSign : (c.pos.x - r.x) * c.dirSign;
+      if (lim - along < 26) c._mustTurn = true;
+      if (along > lim) {
+        c.dirSign *= -1;
+        c.lane = -c.lane;                       // back onto the right-hand side
+        c.heading = moveAxisZ ? (c.dirSign > 0 ? 0 : Math.PI) : (c.dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
+        c.v = Math.min(c.v, 4);                 // a U-turn is taken slow
+        c._mustTurn = false;
+      }
 
       // fleeing suspect caught: a cop right on it ends the chase
       if (c.pullover === 4) {
@@ -2007,17 +2160,31 @@
     }
   });
 
-  // nearest car directly ahead of `c` in the same road & direction
+  // nearest car directly ahead of `c` — scanned in c's OWN heading frame, so it
+  // sees EVERYTHING in its path: the car it's following, cross traffic sweeping
+  // the intersection, a car mid-turn, the player's dumped getaway car. The old
+  // same-road-only check made drivers blind to anything not in their exact lane
+  // record — they'd plow into crossing traffic and phase past parked obstacles.
   function carAhead(c) {
-    let best = null, bg = 1e9;
+    const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
+    const myHalf = vehicleDims(c).length * 0.5;
+    const look = 8 + Math.abs(c.v) * 1.1;          // speed-scaled lookahead
+    let best = null, bg = 1e9, bestAlong = 0;
     for (const o of CBZ.cityCars) {
-      if (o === c || o.dead || o.road !== c.road || o.dirSign !== c.dirSign) continue;
-      const along = c.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
-      const lat = c.vertical ? Math.abs(o.pos.x - c.pos.x) : Math.abs(o.pos.z - c.pos.z);
-      const bumperGap = along - (vehicleDims(c).length + vehicleDims(o).length) * 0.5;
-      if (along > 0 && lat < 2.4 && bumperGap < bg) { bg = bumperGap; best = o; }
+      if (o === c || o.dead) continue;
+      const dx = o.pos.x - c.pos.x, dz = o.pos.z - c.pos.z;
+      const along = dx * fx + dz * fz;
+      if (along <= 0 || along > look) continue;
+      const lat = Math.abs(dx * fz - dz * fx);
+      if (lat > 2.3) continue;
+      const bumperGap = along - myHalf - vehicleDims(o).length * 0.5;
+      if (bumperGap < bg) { bg = bumperGap; best = o; bestAlong = along; }
     }
-    return best ? { v: best.v, gap: bg } : null;
+    if (!best) return null;
+    // how fast the obstacle is moving AWAY along our heading (crossing traffic
+    // and oncoming cars project to ~0 → we brake instead of matching "speed")
+    const ov = carVel(best);
+    return { v: Math.max(0, ov.x * fx + ov.z * fz), gap: bg, car: best, along: bestAlong };
   }
 
   // set up a smooth quarter-arc onto the perpendicular road. The arc is a
@@ -2028,7 +2195,12 @@
     const wantVertical = !c.vertical;
     const road = findRoad(A, wantVertical, wantVertical ? it.x : it.z);
     if (!road) return;
-    const newDir = rng() < 0.5 ? 1 : -1;
+    let newDir = rng() < 0.5 ? 1 : -1;
+    // don't turn INTO a dead end: if this direction runs out of road in a couple
+    // of car lengths, take the other one (real drivers turn toward the city,
+    // not the wall — and it kills the U-turn-right-after-turning read).
+    const intAlong = wantVertical ? it.z - road.z : it.x - road.x;
+    if (road.len / 2 - intAlong * newDir < 30) newDir = -newDir;
     const newLane = newDir * laneW;
     const lead = A.ROAD / 2 + 1.2;
 

@@ -74,11 +74,12 @@
     if (_popInit) return;
     _popInit = true;
     const named = (CBZ.CITY && CBZ.CITY.peds) || 160;
-    const crowd = (CBZ.CITY && CBZ.CITY.crowd != null) ? CBZ.CITY.crowd : 280;
+    const crowd = (CBZ.CITY && CBZ.CITY.crowd != null) ? CBZ.CITY.crowd : 700;
     // a believable city headcount: the named rigs + the ambient mass + a little
     // unseen slack (people indoors / off-screen) so it reads as a population, not
-    // exactly the number of bodies currently rendered.
-    _popTotal = named + crowd + 120;
+    // exactly the number of bodies currently rendered. 100 + 700 + 200 = the
+    // four-figure city the HUD counts down from.
+    _popTotal = named + crowd + 200;
     _popDead = 0;
   }
   // reset the roster for a fresh run (called from spawnCityPeds, the canonical
@@ -104,7 +105,15 @@
 
   const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xfae0c8, 0x5a3c28];
   const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0xb9b1a6, 0x7a4a2e, 0xdedede];
-  const OUTFIT = [0x4f9dff, 0x44d07a, 0xffd166, 0xc792ea, 0xff9e6b, 0x66d9c0, 0xf06b9b, 0x7ed957, 0xe85d8a, 0x5b8bff, 0x8a939c, 0xb98a5a];
+  // WHAT NORMAL PEOPLE WEAR — two racks, not one. The old single shared
+  // palette dealt legs and torso from the SAME bright pool, so the street
+  // walked around in purple pants under a neon shirt. Real people pull
+  // jeans/khakis off a PANTS rack and a plain tee off a SHIRT rack.
+  const PANTS = [0x2e4a6b, 0x27374d, 0x1d2430, 0x39414f, 0xb8a070, 0x4a5568];
+  const SHIRT = [0xe8e6e0, 0x8a939c, 0x23262b, 0x2c3e5c, 0x33573b, 0x6e2b33, 0xc9a23a];
+  // tourists stay LOUD on purpose (downtown's walking wallets read at a
+  // glance) — matched to crowd.js's bright pool so promotion doesn't shift hue
+  const BRIGHTS = [0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0, 0xe8e4da];
   const FIRST = ["Marcus", "Tanya", "Vince", "Lola", "Dee", "Rosa", "Cam", "Jax", "Trey", "Mona", "Otis", "Bree", "Sal", "Kira", "Boon", "Nia", "Rex", "Gita", "Hank", "Suze", "Marlo", "Pim", "Dro", "Esi", "Ray", "Val", "Cyd", "Nyla"];
   const LAST = "ABCDEFGHJKLMNPRSTVW";
   function pick(a, r) { return a[(r * a.length) | 0]; }
@@ -225,14 +234,35 @@
     return { bounty, tag };
   }
 
+  // the jobs the jobless mass gets re-dealt into (makePed below). Every one of
+  // these maps to a real lot in CBZ.cityJobs (aigoals.js — the one job table),
+  // so the recast is a VISIBLE life: a post to stand, a shift to run, a door
+  // to commute through. Weighted toward the street-facing trades (cabs, carts,
+  // counters) because those are the ones the player can see and use.
+  const JOB_RECAST = [
+    "cab driver", "cab driver", "street vendor", "street vendor", "courier",
+    "line cook", "personal trainer", "security guard", "barber", "mechanic",
+    "retail worker", "delivery driver",
+  ];
+
   function makePed(x, z, r, opts) {
     opts = opts || {};
     const ag = A0();
-    const outfit = opts.outfit || pick(OUTFIT, r());
+    const outfit = opts.outfit || pick(SHIRT, r());
     const skin = pick(SKIN, r());
     const wealth = opts.wealth != null ? opts.wealth : richWealth(r);
     const econ = CBZ.cityEcon;
-    const ch = makeCharacter({ legs: pick(OUTFIT, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: 0x2b2b2b });
+    // ~45% of plain civvies wear the tee SHORT-SLEEVED: bare skin arms under
+    // a colored torso reads t-shirt (caster-pinned outfits keep full sleeves)
+    const shortSleeve = !opts.outfit && r() < 0.45;
+    // headgear where the JOB wears one — a rig only grows a cap slot at build
+    // time (that's how cops get theirs), so it's decided here, off the cast job:
+    // construction = the yellow hardhat, deputy = the khaki campaign hat read,
+    // soldier = the olive patrol cap.
+    const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
+      : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
+        : /soldier/i.test(opts.job || "") ? 0x44503a : null;
+    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: shortSleeve ? skin : outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol });
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
     const nm = opts.name || name(r);
@@ -280,7 +310,9 @@
     if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
       const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor });
       if (fit && fit.colors) CBZ.cityRecolorRig(ch, fit.colors, fit);
-      else if (CBZ.cityApplyClothes) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
+      // the painted basics pass repaints ARMS in shirt cloth — long sleeves
+      // only; short-sleeve bodies keep the flat tee so the bare arms survive
+      else if (CBZ.cityApplyClothes && !shortSleeve) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
     }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
@@ -313,12 +345,28 @@
       aggr, archetype: rareArch || opts.archetype, job: opts.job, behavior: opts.behavior,
       reactivity: opts.reactivity, drugUser: opts.drugUser,
     }) : {};
+    // ROLES EVERYWHERE: "between jobs" used to be a fat slice of the street — an
+    // aimless mass with no commute, no post, no read. Nearly everyone works now:
+    // a plain resident who rolled jobless is RE-DEALT into one of the trades the
+    // city actually has counters/lots for (CBZ.cityJobs maps every one of these
+    // to a workplace, schedule.js runs its shift, outfits.js dresses the ones
+    // with a uniform read — all through the existing spawn chokepoints). A thin
+    // genuinely-jobless remainder survives so "between jobs" still exists as a
+    // life, not a bug. Street archetypes (tweaker/hustler/dealer) keep their
+    // hustle — only the resident mass is recast. Deterministic from the stream.
+    let job = traits.job || opts.job || "between jobs";
+    let jobRecast = false;
+    if (job === "between jobs" && !opts.gang && !opts.vendor &&
+        (traits.archetype || opts.archetype || "resident") === "resident" && r() < 0.85) {
+      job = JOB_RECAST[(r() * JOB_RECAST.length) | 0];
+      jobRecast = true;
+    }
     const ped = {
       char: ch, group: ch.group, pos: ch.group.position, name: nm,
       tag, outfit, skin, kind: opts.kind || "civilian",
       aggr, wealth: mWealth, valuables, bounty, bountyTag,
       archetype: rareArch || traits.archetype || opts.archetype || "resident",
-      job: traits.job || opts.job || "between jobs",
+      job,
       behavior: traits.behavior || opts.behavior || null,
       reactivity: traits.reactivity != null ? traits.reactivity : aggr,
       drugUser: !!traits.drugUser, erratic: traits.erratic || 0, tweakT: 1 + r() * 4,
@@ -366,6 +414,11 @@
       }
     }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    // a recast trade with a UNIFORM read (guard greys, vendor apron) dresses
+    // the part through the one chokepoint — the spawn paint above ran off
+    // opts.job, which predates the recast. Only the jobs outfits.js actually
+    // recognizes repaint; the rest keep their street basics (no double pass).
+    if (jobRecast && /security|guard|vendor/i.test(job) && CBZ.cityRedressPed) CBZ.cityRedressPed(ped);
     return ped;
   }
   CBZ.cityMakePed = makePed;        // used by gangs.js / social.js
@@ -450,10 +503,16 @@
     if (d.kind === "core") {
       // the strip: gawking tourists on top of the wealth boost (the boost alone
       // makes rollRareArchetype promote more tycoons/socialites here).
-      if (r() < 0.2) { opts.archetype = "tourist"; opts.job = "tourist"; opts._role = "tourist"; }
+      if (r() < 0.2) { opts.archetype = "tourist"; opts.job = "tourist"; opts._role = "tourist"; opts.outfit = pick(BRIGHTS, r()); }
     } else if (d.kind === "industrial") {
       // docks/works: shift-workers, modest pockets — thin pickings, few eyes.
-      if (r() < 0.55) { opts.archetype = "laborer"; opts.job = r() < 0.5 ? "dock worker" : "warehouse worker"; }
+      // a slice of the shift is CONSTRUCTION (orange vest + hardhat — the works
+      // half of industry), the rest dock/warehouse yellow hi-vis.
+      if (r() < 0.55) {
+        const x = r();
+        if (x < 0.3) { opts.archetype = "laborer"; opts.job = "construction worker"; }
+        else { opts.archetype = "laborer"; opts.job = x < 0.65 ? "dock worker" : "warehouse worker"; }
+      }
       opts.wealth = Math.min(opts.wealth, 0.55);
     } else if (d.kind === "projects") {
       // the rough pocket: broke, quicker to violence, the street economy lives
@@ -465,8 +524,26 @@
       else if (x < 0.3) opts.archetype = "hustler";
       else if (x < 0.4) opts.archetype = "tweaker";
     } else if (d.kind === "commercial") {
-      // busy daytime mid: white-collar crowds (wallets + witnesses by day).
-      if (r() < 0.18) { opts.archetype = "professional"; opts.job = "office worker"; }
+      // busy daytime mid: white-collar crowds (wallets + witnesses by day),
+      // plus the trades that orbit them — the hospital crowd in scrubs/whites
+      // (City Hospital sits in the shop mix; aigoals commutes nurses there),
+      // a paramedic between calls, a guard heading to a post.
+      const x = r();
+      if (x < 0.14) { opts.archetype = "professional"; opts.job = r() < 0.4 ? "accountant" : "office worker"; }
+      else if (x < 0.19) { opts.archetype = "professional"; opts.job = r() < 0.62 ? "nurse" : "doctor"; }
+      else if (x < 0.215) { opts.archetype = "professional"; opts.job = "paramedic"; }
+      else if (x < 0.24) { opts.archetype = "professional"; opts.job = "security guard"; }
+    }
+    // OCCUPATIONS YOU KNOW ON SIGHT — a thin citywide sprinkle over whoever
+    // wasn't cast above, so any block can surface a hardhat off shift, a
+    // deputy in from the county, a soldier on leave, a firefighter between
+    // calls. Rare by design: uniforms read because most people DON'T wear one.
+    if (!opts.archetype) {
+      const x = r();
+      if (x < 0.02) { opts.archetype = "laborer"; opts.job = "construction worker"; }
+      else if (x < 0.03) { opts.archetype = "professional"; opts.job = "sheriff's deputy"; }
+      else if (x < 0.038) { opts.archetype = "professional"; opts.job = "soldier on leave"; }
+      else if (x < 0.044) { opts.archetype = "professional"; opts.job = "firefighter"; }
     }
     return opts;
   }

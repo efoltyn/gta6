@@ -254,6 +254,9 @@
   function clampCity(a) {
     const p = posOf(a); if (!p) return;
     if (CBZ.collide) CBZ.collide(p, radiusOf(a), p.y, (p.y || 0) + 1.7);
+    // the PLAYER over open water is SWIMMING (city/swim.js owns them) — the
+    // land clamp would teleport them back onto the quay mid-stroke.
+    if (p === CBZ.player.pos && CBZ.cityWaterAt && CBZ.cityWaterAt(p.x, p.z)) return;
     if (CBZ.city && CBZ.city.arena) CBZ.city.arena.clampToCity(p, radiusOf(a));
   }
 

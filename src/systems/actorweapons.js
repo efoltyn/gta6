@@ -42,12 +42,12 @@
     shotgun: "shotgun",
     Taser: "taser",
     taser: "taser",
-    Revolver: "sidearm", revolver: "sidearm",
-    "Desert Eagle": "sidearm", deagle: "sidearm",
-    Uzi: "smg", uzi: "smg",
+    Revolver: "revolver", revolver: "revolver",
+    "Desert Eagle": "deagle", deagle: "deagle",
+    Uzi: "uzi", uzi: "uzi",
     "AK-47": "ak47", ak47: "ak47",   // the status rifle gets its OWN model (wood + banana mag) — it must be recognizable in NPC hands
-    Sniper: "carbine", sniper: "carbine",
-    LMG: "carbine", lmg: "carbine",
+    Sniper: "sniper", sniper: "sniper",
+    LMG: "lmg", lmg: "lmg",
   };
 
   const mat = {

@@ -358,6 +358,15 @@
     }
   };
 
+  // ---- lingering ground SMOLDER columns — a big blast's crater keeps smoking
+  // for tens of seconds (same pooled-emitter idea as the wall wounds below).
+  // Hard cap 3 live smolders: the oldest crater just stops smoking.
+  const smolders = [];
+  function addSmolder(x, z, dur) {
+    while (smolders.length >= 3) smolders.shift();
+    smolders.push({ x, z, t: 0, dur, acc: 0.3 });
+  }
+
   // a real EXPLOSION (super-fast car-on-car, grenades later, etc.): fireball +
   // smoke + shockwave + white flash + blast damage to everyone in radius. Reusable.
   CBZ.cityExplosion = function (x, z, opts) {
@@ -418,6 +427,19 @@
           vx: Math.cos(a) * dr, vy: 1.1 + Math.random() * 0.8, vz: Math.sin(a) * dr,
           delay: 0.08 + Math.random() * 0.18 });
     }
+    // ROLLING HANDOFF: a few smoke billows spawn ON the fireball's rim with its
+    // outward velocity inherited, so the orange roils visibly into black-orange
+    // smoke instead of the plume just appearing at the centre (their early
+    // heat-glow in updatePuffs paints them fire-orange before they sooty out).
+    for (let i = 0; i < Math.round(3 * P); i++) {
+      const a = Math.random() * 6.2832, rr = (0.8 + Math.random() * 0.8) * P, sp = 1.6 + Math.random() * 1.8;
+      spawnPuff(x + Math.cos(a) * rr, cy + 0.4 + Math.random() * 0.8 * P, z + Math.sin(a) * rr,
+        { additive: false, smoke: true, base: 1.2, pop: (4.5 + Math.random() * 2.5) * P,
+          life: 2.2 + Math.random() * 1.4, maxOp: 0.46, shade: 0.12 + Math.random() * 0.05,
+          spin: (Math.random() - 0.5) * 1.6,
+          vx: Math.cos(a) * sp, vy: 1.4 + Math.random() * 1.0, vz: Math.sin(a) * sp,
+          delay: 0.18 + Math.random() * 0.2 });
+    }
     // low rolling billows that spread outward at the base (ground blasts only)
     if (!elevated) for (let i = 0; i < Math.round(4 * P); i++) {
       const a = Math.random() * 6.2832, sp = 1.4 + Math.random() * 1.6;
@@ -432,6 +454,19 @@
     if (!elevated) {
       ring(x, z, R * 1.15, 0xffe7b0, { additive: true, opacity: 0.85, inner: 1.05, spd: 5.0, life: 0.42, flat: true, y: 0.06, r0: 0.6 });
       ring(x, z, R, 0xffb05a, { additive: true, opacity: 0.6, inner: 0.78, spd: 2.4, life: 0.55, y: 0.1 });
+      // ---- LAYER 4b: GROUND DUST — the pressure wave SLAPS the street: a pale
+      // dust skirt races outward just behind the bright ring (fast, low, short-
+      // lived) plus a kicked-up dust haze that hangs a beat. This is what makes
+      // a blast read as touching the WORLD instead of floating on it.
+      pointBurst(x, z, Math.round(16 * P), 0x8b8175, 0.42, 2 + power * 0.5, 0.95, true);
+      for (let i = 0; i < Math.round(5 * P); i++) {
+        const a = Math.random() * 6.2832, sp = 4.5 + Math.random() * 3.5 * P;
+        spawnPuff(x + Math.cos(a) * 0.6, 0.45, z + Math.sin(a) * 0.6,
+          { additive: false, smoke: true, base: 0.9, pop: (3 + Math.random() * 1.6) * P,
+            life: 0.9 + Math.random() * 0.5, maxOp: 0.3, shade: 0.34 + Math.random() * 0.06,
+            spin: (Math.random() - 0.5), vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp,
+            delay: 0.03 + Math.random() * 0.05 });
+      }
     }
 
     // ---- LAYER 5: SPARKS + EMBERS + DEBRIS (nearest layer) ----
@@ -445,7 +480,13 @@
           maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + Math.random() * 4, vz: Math.sin(a) * sp });
     }
     addChunks(x, z, Math.round(10 * P), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris
-    if (!elevated) addScorch(x, z, R * 0.5);                           // lasting ground scorch
+    if (!elevated) {
+      addScorch(x, z, R * 0.5);                                        // lasting ground scorch
+      // big blasts leave a SMOKING crater: a thin column keeps seeping off the
+      // scorch for ~half a minute (pooled emitter, hard cap 3 — the show-off
+      // plume that tells the whole block something detonated here).
+      if (power >= 1.3) addSmolder(x, z, 22 + Math.min(20, power * 9));
+    }
 
     // ---- IMPACT FEEDBACK: sound, shake, slow-mo, screen flash. Shake/stop
     // scale with how close the blast is to the LENS — a rocket at your feet
@@ -707,8 +748,11 @@
     const nl = Math.hypot(nx, ny, nz);
     if (nl < 1e-4) { nx = 0; ny = 0; nz = 1; } else { nx /= nl; ny /= nl; nz /= nl; }
     const roof = ny > 0.6;
-    // (1) the blackened scar — 2–4u with the round's power
-    addWallScar(x, y, z, nx, ny, nz, 2.2 + power * 0.85);
+    // (1) NO painted scar. The persistent mark is the REAL carved hole
+    //     (buildings.js cityCarveWall via the cityExplosion → fracture chain) —
+    //     the user filmed the old floating brown decal and called it exactly
+    //     what it was: fake. Where no wall can carve (glass curtain towers),
+    //     the shattered panes themselves are the mark.
     // (2) avalanche down the facade (roof hits just scatter debris on the deck)
     if (roof) addChunks(x, z, Math.round(5 + 4 * power), 3.5, false, null, y);
     else facadeAvalanche(x, y, z, nx, nz, power);
@@ -737,6 +781,7 @@
   // fresh run → cold facades (fpsmode's reset path calls this with the pocks)
   CBZ.cityBlastFxReset = function () {
     wounds.length = 0;
+    smolders.length = 0;
     for (const s of scars) { scene.remove(s.mesh); s.mat.dispose(); }
     scars.length = 0;
   };
@@ -773,6 +818,26 @@
       if (w.t < 6) spawnPuff(w.x + w.nx * 0.3, w.y, w.z + w.nz * 0.3, {
         additive: true, base: 0.35, pop: 1.1 + Math.random() * 0.7, life: 0.6 + Math.random() * 0.4,
         maxOp: 0.85, vy: 0.7, spin: (Math.random() - 0.5) * 2,
+      });
+    }
+    // smoking craters: a thin smoke column rises off each big-blast scorch,
+    // thinning as it cools; the first beats still glow with small flame licks.
+    for (let i = smolders.length - 1; i >= 0; i--) {
+      const w = smolders[i]; w.t += dt;
+      if (w.t >= w.dur) { smolders.splice(i, 1); continue; }
+      w.acc -= dt;
+      if (w.acc > 0) continue;
+      w.acc = 0.5 + Math.random() * 0.4;
+      const cool = 1 - w.t / w.dur;
+      spawnPuff(w.x + (Math.random() - 0.5) * 0.9, 0.6, w.z + (Math.random() - 0.5) * 0.9, {
+        additive: false, smoke: true, base: 1.0, pop: (3.4 + Math.random() * 2.4) * (0.5 + 0.5 * cool),
+        life: 3.4 + Math.random() * 1.8, maxOp: 0.3 * (0.4 + 0.6 * cool), shade: 0.12 + Math.random() * 0.04,
+        spin: (Math.random() - 0.5) * 0.8,
+        vx: (Math.random() - 0.5) * 0.4, vy: 1.2 + Math.random() * 0.7, vz: (Math.random() - 0.5) * 0.4,
+      });
+      if (w.t < 5) spawnPuff(w.x, 0.4, w.z, {
+        additive: true, base: 0.35, pop: 1.0 + Math.random() * 0.6, life: 0.6 + Math.random() * 0.4,
+        maxOp: 0.8, vy: 0.7, spin: (Math.random() - 0.5) * 2,
       });
     }
     const grav = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;

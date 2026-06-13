@@ -272,16 +272,25 @@
     //      concrete seawall cap with the sea right behind it — what a coastal
     //      city actually has at its edge. No more 6m gray prison walls. ----
     function wall(x, z, w, d) {
-      // visible cap: full length along the seawall, 1.4m thick, knee-high
+      // visible cap: full length along the seawall, 1.4m thick, knee-high.
+      // The collider is HEIGHT-GATED to the cap (y0/y1): walking into it stops
+      // you like any wall, but a JUMP clears it — over the lip and into the
+      // harbor (city/swim.js owns you from there). Peds/cops never jump, so
+      // the population still can't wander into the sea.
       const vw = w >= d ? w : 1.4, vd = d > w ? d : 1.4;
       const m = new THREE.Mesh(new THREE.BoxGeometry(vw, 0.55, vd), mat(0x9aa0a6));
       m.position.set(x, 0.275, z); m.castShadow = false; m.receiveShadow = true; root.add(m);
       const pad = 22;
-      CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m });
+      CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, ref: m, y0: 0, y1: 0.8 });
       return pad;
     }
     const EW = minX - 26, EE = maxX + 26, ES = minZ - 26, EN = maxZ + 26, T = 4;
-    wall((EW + EE) / 2, ES, EE - EW, T); wall((EW + EE) / 2, EN, EE - EW, T);
+    // THE BEACH GAP: the south seawall opens over one stretch — city/beach.js
+    // lays sand there and the shore must run straight into the water (no
+    // knee-wall, no cap). The wall resumes either side of the span.
+    const BX0 = cx - 110, BX1 = cx - 10;
+    wall((EW + BX0) / 2, ES, BX0 - EW, T); wall((BX1 + EE) / 2, ES, EE - BX1, T);
+    wall((EW + EE) / 2, EN, EE - EW, T);
     wall(EW, (ES + EN) / 2, T, EN - ES);
     // The east wall has a real road gate. city/expansion.js continues this
     // centre cross-street across a bridge into the island district.
@@ -414,6 +423,9 @@
       // the day/night-tinted water material — expansion.js's island ocean can
       // share it so the whole sea shifts tone together
       seaMat,
+      // the waterfront lines + the south seawall's beach gap (city/beach.js
+      // builds sand/boardwalk/pier inside this span; the wall above skips it)
+      shore: { EW, EE, ES, EN, beach: { x0: BX0, x1: BX1 } },
       groundHeightAt() { return 0; },
       lotAt, randomSidewalkPoint, randomRoadPoint, nearestIntersection, clampToCity,
       // district personality field (peds/crowd density, casting, cop beats)
@@ -668,25 +680,26 @@
         const b = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.7, 0.42), bollM);
         b.position.set(x, 0.35, z); b.castShadow = false; b.receiveShadow = true; root.add(b);
       }
-      function riprap(x, z, count, vertical) {
+      function riprap(x, z, count, vertical, skipX0, skipX1) {
         for (let i = 0; i < count; i++) {
           const s = 1.0 + hr() * 1.8;
           const along = (i / count - 0.5) * (vertical ? (NQ - SQ) - 18 : (EEx - WQ) - 18);
           const out = 1.6 + hr() * 3.2;
           const rx = vertical ? x + (x < cx ? -out : out) : x + along;
           const rz = vertical ? z + along : z + (z < cz ? -out : out);
+          if (skipX0 != null && rx > skipX0 && rx < skipX1) continue;   // the beach span: sand, not rock armour
           const r = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.7, s * 1.15), rockM);
           r.position.set(rx, -0.45 + hr() * 0.55, rz);
           r.rotation.y = hr() * Math.PI; r.rotation.z = (hr() - 0.5) * 0.35;
           r.castShadow = false; r.receiveShadow = true; root.add(r);
         }
       }
-      riprap(cx, SQ, 14, false);   // south shore
+      riprap(cx, SQ, 14, false, BX0, BX1);   // south shore (beach span stays bare sand)
       riprap(cx, NQ, 14, false);   // north shore
       riprap(WQ, cz, 14, true);    // west shore
       for (let i = 0; i < 7; i++) {  // bollards every ~30m, set in from the cap
         const t = (i / 6 - 0.5) * ((EEx - WQ) - 30);
-        bollard(cx + t, SQ + 2.0);
+        if (cx + t < BX0 || cx + t > BX1) bollard(cx + t, SQ + 2.0);   // none on the beach
         bollard(cx + t, NQ - 2.0);
         const tz = (i / 6 - 0.5) * ((NQ - SQ) - 30);
         bollard(WQ + 2.0, cz + tz);
@@ -695,6 +708,12 @@
       boat(cx - 60, SQ - 16, 1.25, 0x9e3434);
       boat(cx + 70, NQ + 17, -1.0, 0xd9a13a);
     })();
+
+    // ---- THE WATERFRONT WITH A PURPOSE (city/beach.js): sand beach +
+    //      boardwalk + pier in the south seawall gap, parking lot + container
+    //      dockyard breaking up the rest of the gray apron. Runs LAST so the
+    //      seawall lines / harbor decor already exist around it. ----
+    if (CBZ.cityBuildBeach) try { CBZ.cityBuildBeach(city); } catch (e) { console.error("[city beach]", e); }
 
     root.visible = false;     // hidden until city mode activates
     return city;

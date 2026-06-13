@@ -81,6 +81,9 @@
 
   const raycaster = new THREE.Raycaster();
   const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
+  // lazy-follow yaw for the city RDR2 cam — trails cam.yaw with exp smoothing
+  // (input itself is untouched; only the rig's framing lags)
+  let smYaw = 0, smYawOn = false;
 
   // cinematic spawn intro: far reveal -> push in -> 180 orbit handoff
   let introT = 0;
@@ -243,10 +246,16 @@
     // driving a car in the city → a wider, higher GTA-style chase (yaw is
     // auto-steered behind the car by city/vehicles.js).
     const driving = CBZ.game.mode === "city" && !!player.driving;
+    // CITY ON-FOOT (RDR2 feel): all tunables live at the top of city/camera.js
+    // (CBZ.CITY_TP) — lower, closer, over-the-right-shoulder, lazy follow.
+    const TP = (CBZ.game.mode === "city" && !driving && CBZ.CITY_TP) ? CBZ.CITY_TP : null;
 
     // ease the zoom distance toward its target. Normal third person is
     // a wider chase camera; armed third person becomes readable over-shoulder.
-    const desiredZoom = driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget));
+    // City scales the wheel-zoom around its own (much closer) default.
+    const desiredZoom = TP
+      ? (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF)))
+      : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
     camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, dt));
 
     // smoothed rig height (crouch dips the whole rig). Survival frames the
@@ -254,24 +263,32 @@
     // sprinting lifts it a touch more instead of letting it sag low.
     const surv = CBZ.game.mode === "survival";
     const sprinting = surv && !!player.sprint;
-    const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82))));
+    const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? TP.HEIGHT + 0.1 : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82)))));
     height = smoothDamp(height, baseHeight, heightV, 0.18, dt);
     const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
-    const rightX = Math.cos(cam.yaw), rightZ = -Math.sin(cam.yaw);
-    const fwdX = -Math.sin(cam.yaw), fwdZ = -Math.cos(cam.yaw);
-    const targetSide = shoulder ? 0.26 : (meleeFocus ? 0.12 : 0);
-    const camSide = shoulder ? 0.86 : (meleeFocus ? 0.32 : 0);
+    // city: the rig yaw lazily chases the input yaw (frame-rate independent),
+    // so quick mouse flicks read as a smoothed pan instead of a rigid lock.
+    let yaw = cam.yaw;
+    if (TP) {
+      if (!smYawOn) { smYaw = cam.yaw; smYawOn = true; }
+      smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(shoulder ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * dt));
+      yaw = smYaw;
+    } else smYawOn = false;
+    const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
+    const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
+    const targetSide = TP ? TP.SIDE * 0.5 : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
+    const camSide = TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0));
     const baseX = tx + rightX * targetSide;
-    const baseY = ty + (shoulder ? 0.08 : 0);
+    const baseY = ty + (!TP && shoulder ? 0.08 : 0);
     const baseZ = tz + rightZ * targetSide;
 
     // orbit offset from yaw/pitch
     const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-    const ox = Math.sin(cam.yaw) * cp * camDist;
+    const ox = Math.sin(yaw) * cp * camDist;
     const oy = sp * camDist;
-    const oz = Math.cos(cam.yaw) * cp * camDist;
+    const oz = Math.cos(yaw) * cp * camDist;
     let dx = baseX + ox + rightX * camSide;
-    let dy = baseY + oy + (shoulder ? -0.05 : (meleeFocus ? 0.02 : (surv ? 0.34 : 0.14)));
+    let dy = baseY + oy + (TP ? 0 : (shoulder ? -0.05 : (meleeFocus ? 0.02 : (surv ? 0.34 : 0.14))));
     let dz = baseZ + oz + rightZ * camSide;
 
     // ---- camera collision (spring-arm): pull the camera in to just before
@@ -308,10 +325,10 @@
     // ease the forward lead (a long lead drops the player low in frame when
     // sprinting) and raise the look height so you sit centred, not bottom-third.
     const lead = shoulder ? 0.05 : (meleeFocus ? 0.08 : 0.08);
-    const aimLead = driving ? 8.5 : (shoulder ? 12.0 : (meleeFocus ? 2.2 : (surv ? 2.4 : 3.6)));
+    const aimLead = driving ? 8.5 : (shoulder ? 12.0 : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))));
     const ltx = tx + vel.x * lead + rightX * targetSide + fwdX * aimLead;
     const ltz = tz + vel.z * lead + rightZ * targetSide + fwdZ * aimLead;
-    const lty = player.pos.y + (player.crouch ? 1.24 : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (surv ? 2.06 : 1.88)))));
+    const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))));
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
     if (introT > 0) {
@@ -373,16 +390,18 @@
       return;
     }
 
-    // SmoothDamp the camera toward the desired position. Shorter smooth-times
-    // than before so the camera tracks tightly — less "lag" between input and
-    // what you see, which reads as a snappier, faster game.
-    camera.position.x = smoothDamp(camera.position.x, dx, camV.x, 0.085, dt);
-    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, 0.10, dt);
-    camera.position.z = smoothDamp(camera.position.z, dz, camV.z, 0.085, dt);
+    // SmoothDamp the camera toward the desired position. Prison/survival keep
+    // the tight track; the city RDR2 cam runs a lazier settle (DAMP_POS) so the
+    // follow breathes — aiming snaps back to a tight 0.07 so guns stay crisp.
+    const posS = TP ? (shoulder ? 0.07 : TP.DAMP_POS) : 0.085;
+    camera.position.x = smoothDamp(camera.position.x, dx, camV.x, posS, dt);
+    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (shoulder ? 0.08 : TP.DAMP_POS * 1.1) : 0.10, dt);
+    camera.position.z = smoothDamp(camera.position.z, dz, camV.z, posS, dt);
 
-    look.x = smoothDamp(look.x, ltx, lookV.x, 0.07, dt);
-    look.y = smoothDamp(look.y, lty, lookV.y, 0.085, dt);
-    look.z = smoothDamp(look.z, ltz, lookV.z, 0.07, dt);
+    const lookS = TP ? (shoulder ? 0.06 : TP.DAMP_POS * 0.65) : 0.07;
+    look.x = smoothDamp(look.x, ltx, lookV.x, lookS, dt);
+    look.y = smoothDamp(look.y, lty, lookV.y, lookS * 1.2, dt);
+    look.z = smoothDamp(look.z, ltz, lookV.z, lookS, dt);
     camera.lookAt(look);
 
     // screen shake offset, decaying (applied after positioning)
@@ -397,7 +416,9 @@
 
     // FOV kick at speed for a sense of pace — wider base + a bigger kick make
     // movement feel quicker without changing the actual move speed.
-    const targetFov = shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6);
+    const targetFov = TP
+      ? (shoulder ? TP.FOV_AIM : TP.FOV + Math.min(spd / 6, 1) * 5)
+      : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
     fov = smoothDamp(fov, targetFov, fovV, 0.18, dt);
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   }

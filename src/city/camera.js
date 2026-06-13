@@ -26,6 +26,26 @@
   const g = CBZ.game;
   const THREE = window.THREE;
 
+  /* ---- CITY THIRD-PERSON FRAMING (RDR2 feel) — taste-tune HERE ----
+     Consumed every frame by systems/camera.js (its generic third-person path
+     reads CBZ.CITY_TP when mode==="city" and you're on foot). One block so the
+     owner tunes the whole on-foot feel in one place. */
+  CBZ.CITY_TP = {
+    HEIGHT: 1.42,      // rig pivot above feet — shoulder height, not overhead (was 1.82): camera rides level with the character, the street reads at eye level
+    DIST: 4.3,         // behind-the-back distance (was 7.6) — close enough to feel attached, far enough to read the body; scroll wheel still scales around this
+    DIST_AIM: 2.9,     // armed/aiming distance — tighter than unarmed so raising a gun visibly punches IN (keeps the old aim-tightens contract)
+    SIDE: 0.7,         // camera lateral offset to the player's RIGHT — character sits left-of-center, you see past their right shoulder down the street
+    SIDE_AIM: 1.0,     // harder over-shoulder when armed — clear sightline past the head
+    PITCH: 0.04,       // default orbit pitch on city entry — near-level (was 0.46 looking down): horizon sits high in frame, more world, less pavement
+    LOOK_Y: 1.45,      // look-target height above feet — chest/shoulder aim point; with the near-level pitch this gives a subtle down-gaze, not a top-down stare
+    LEAD: 4.6,         // forward look-ahead (was 3.6) — a touch more breathing room down-street
+    DAMP_POS: 0.16,    // position SmoothDamp time (was 0.085) — the lazy settle; bigger = floatier follow
+    DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly instead of rigid-locking; bigger = stiffer
+    DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
+    FOV: 57,           // base FOV (was 61) — narrower lens = more cinematic compression; speed kick still widens it
+    FOV_AIM: 55,       // armed FOV — a hair tighter than the old 58
+  };
+
   CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
   // claim the exterior-deathcam hook so death.js's fallback stays dormant
   if (CBZ.cityCam._extHookInstalled) return;
@@ -197,8 +217,14 @@
   // POST-camera override: systems/camera.js positions the camera at onAlways(50)
   // for the death orbit; we run at 51 and, only during the exterior beat, take
   // it over. Outside the beat we do nothing (the stock orbit shows through).
+  let _wasCity = false;
   CBZ.onAlways(51, function (dt) {
-    if (g.mode !== "city") return;
+    const inCity = g.mode === "city";
+    // on city ENTRY, settle the orbit pitch to the RDR2 default (near-level,
+    // horizon high) — once, so the player's own pitch input is never fought.
+    if (inCity && !_wasCity && CBZ.cam) CBZ.cam.pitch = CBZ.CITY_TP.PITCH;
+    _wasCity = inCity;
+    if (!inCity) return;
     honorExterior(dt);
   });
 })();

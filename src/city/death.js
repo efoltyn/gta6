@@ -22,12 +22,16 @@
 
   let overlay = null, titleEl = null, subEl = null;
   let respawnT = 0, dying = false, wastedT = 0, pendingWasted = null;
+  // the orbit cam is HELD a beat while the first-person gun-drop tumble plays
+  // (fpsmode.js) so the weapon visibly falls from YOUR eye before the WASTED
+  // replay pulls out to third person.
+  let pendingDeathCam = null, deathCamHoldT = 0;
   // ---- SPECTATE (Fortnite-style kill-cam): WASTED plays unchanged, THEN — if a
   //      real on-map actor killed you — the camera leaves your corpse and follows
   //      your KILLER, showing their live state, until you respawn. ----
   let spectating = false, specKiller = null, pendingSpecKiller = null;
   let specT = 0, specMax = 10, specKillerMax = 100;
-  let specHUD = null, specName = null, specHpFill = null, specHpTxt = null, specStateEl = null, specFoot = null;
+  let specHUD = null, specName = null, specHpFill = null, specHpTxt = null, specStateEl = null, specFoot = null, specStats = null;
 
   // a killer can arrive as an ACTOR (NPC/cop — has .pos, spectatable) or a plain
   // NAME string (chopper, gang, "the police"). This always yields the display
@@ -68,7 +72,7 @@
     titleEl.style.opacity = "0"; titleEl.style.transform = "scale(1.25)"; subEl.style.opacity = "0";
   }
 
-  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; };
+  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; pendingDeathCam = null; deathCamHoldT = 0; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset(); };
 
   // a red damage flash (the engine never defined CBZ.hitFlash) — drives the
   // existing #hitfx overlay so getting shot reads dramatically.
@@ -167,7 +171,11 @@
   // healing & reset hooks
   CBZ.cityHealWounds = function () { const P = CBZ.player; P._legWound = 0; P._armWound = 0; P._bleeding = 0; P._moveScale = 1; };
   const _injReset = CBZ.cityDeathReset;
-  CBZ.cityDeathReset = function () { if (_injReset) _injReset(); CBZ.cityHealWounds(); };
+  CBZ.cityDeathReset = function () {
+    if (_injReset) _injReset(); CBZ.cityHealWounds();
+    // mode swap / hard reset: never carry a missing head/limb into the next life
+    if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
+  };
 
   // ---- the injury TICK: clot bleeding (DOT), decay wounds, publish the limp
   //      move-scale, and drive a limp hitch on the model on top of the walk. ----
@@ -239,6 +247,24 @@
            r.indexOf("pavement") >= 0;
   }
 
+  // ---- does YOUR fatal headshot take the head OFF? ----
+  // Same rule gore.js applies to NPCs (a 9mm head wound is a snap + blood
+  // burst, never a decapitation): sniper always, a shotgun in your face
+  // always, rifle rounds occasionally, everything pistol-class never. The
+  // killer's gun is read off the live attacker actor (cityHurtPlayer parks it
+  // on g._cityKillerActor before the kill lands).
+  function headPopsPlayer(imp) {
+    const k = ("" + ((g._cityKillerActor && g._cityKillerActor.weapon) || (imp && imp.wkey) || "")).toLowerCase();
+    if (k.indexOf("sniper") >= 0) return true;
+    if (k.indexOf("shotgun") >= 0) {
+      if (!imp || imp.fromX == null) return true;
+      const P = CBZ.player;
+      return Math.hypot(P.pos.x - imp.fromX, P.pos.z - imp.fromZ) < 6;
+    }
+    if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) return Math.random() < 0.15;
+    return false;
+  }
+
   // ---- are we under a ROOF (inside a building)? ----
   // Building floor/roof slabs are registered as CBZ.platforms (with `top`) AND
   // as CBZ.losBlockers meshes. Cheap test first: any platform whose footprint
@@ -295,6 +321,18 @@
     }
     if (CBZ.playerChar) CBZ.playerChar.group.visible = true;
     if (P.driving && CBZ.cityExitVehicle) { CBZ.cityExitVehicle(); }
+    // THE GUN LEAVES YOUR HANDS (fpsmode.js): the first-person viewmodel
+    // tumbles out of frame and a cosmetic world mesh of the weapon clatters
+    // down beside the body (inventory untouched — it's back on respawn, and
+    // it's not a cityDrop so nobody can walk off with it). When the FP tumble
+    // plays, hold the orbit cam ~half a beat so the drop reads from YOUR eye
+    // before the replay pulls out; the exterior blast cinematic keeps priority.
+    const fpDrop = CBZ.fpsDeathDrop ? CBZ.fpsDeathDrop() : false;
+    if (fpDrop && extBeat <= 0 && CBZ.cityCam && CBZ.cityCam.death) {
+      pendingDeathCam = CBZ.cityCam.death;
+      CBZ.cityCam.death = null;
+      deathCamHoldT = 0.45;
+    }
     // A LETHAL FALL / hard impact reads as a brutal SPLAT, not a high arcing
     // fling: you've already hit the ground at speed, so the body crumples at the
     // spot in a spreading blood pool instead of launching back into the air.
@@ -350,6 +388,22 @@
     if (CBZ.doSlowmo) CBZ.doSlowmo(splatDeath ? 0.55 : 0.5);
     if (CBZ.doHitstop && splatDeath) CBZ.doHitstop(0.2);
     let gdir = imp && imp.fromX != null ? { x: P.pos.x - imp.fromX, z: P.pos.z - imp.fromZ } : null;
+    // REAL DISMEMBERMENT: the corpse the death cam orbits is genuinely MISSING
+    // what came off — but ONLY ordnance that actually removes heads pops YOURS
+    // (headPopsPlayer: sniper / face-range shotgun / the odd rifle round — a
+    // pistol headshot is a snap and a blood burst, the head stays on). A blast
+    // tears 1-2 limbs. respawn() hands the rig back whole via goreRestoreBody.
+    let popped = false;
+    if (CBZ.goreSever && CBZ.city && CBZ.city.playerActor && !splatDeath) {
+      const pa = CBZ.city.playerActor;
+      if (imp && imp.headshot) {
+        if (headPopsPlayer(imp)) { CBZ.goreSever(pa, "head", { dir: gdir }); popped = true; }
+      } else if (isExplosionCause(reason)) {
+        const LIMBS = ["ll", "rl", "la", "ra"];
+        const n = 1 + (Math.random() < 0.45 ? 1 : 0);
+        for (let i = 0; i < n; i++) CBZ.goreSever(pa, LIMBS[(Math.random() * 4) | 0], { dir: gdir, boom: true });
+      }
+    }
     if (splatDeath && CBZ.cityImpactSplat) {
       // the gory landing splat (blood pool + crimson sheet + gibs + bone-crunch),
       // seated right where the body hits. cityImpactSplat itself calls CBZ.gore.
@@ -360,7 +414,7 @@
       const ranOver = ("" + (reason || "")).toLowerCase().indexOf("run over") >= 0;
       CBZ.gore(P.pos.x, P.pos.y + 1.0, P.pos.z, {
         dir: gdir, amount: Math.min(2, 1.05 + fK * 0.35), player: true,
-        head: !!(imp && imp.headshot),
+        head: !!(imp && imp.headshot), pop: popped,
         smear: ranOver, smearLen: ranOver ? 3 + fK * 2.5 : 0,
       });
     }
@@ -371,6 +425,11 @@
     // an actor — not a string — dealt the blow). Held for the post-WASTED kill-cam.
     pendingSpecKiller = (g._cityKillerActor && g._cityKillerActor.pos && !g._cityKillerActor.culled &&
                          (CBZ.now || 0) - (g._cityKillerT || 0) < 6) ? g._cityKillerActor : null;
+    // YOU are a body on their ledger too — the kill-cam should never read
+    // "0 bodies" about the one who just put you down.
+    if (pendingSpecKiller && !pendingSpecKiller.isPlayer) {
+      pendingSpecKiller.bodies = (pendingSpecKiller.bodies | 0) + 1;
+    }
     // tell crowd.js to NOT park this killer off-map during the death beat (its
     // park-on-death sweep would otherwise banish a crowd-pool killer to (-4000),
     // leaving the kill-cam orbiting empty space). Lives until respawn.
@@ -416,13 +475,35 @@
     specHpTxt = document.createElement("span");
     specHpTxt.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#06121a;text-shadow:0 1px 0 rgba(255,255,255,.25)";
     hpWrap.appendChild(specHpFill); hpWrap.appendChild(specHpTxt);
+    // WHO beat you: what they're worth and how many they've dropped — the
+    // street-read you'd have wanted BEFORE picking the fight.
+    specStats = document.createElement("div");
+    specStats.style.cssText = "display:flex;gap:18px;justify-content:center;font-size:14px;color:#ffd451;margin-top:9px;font-weight:700";
     specStateEl = document.createElement("div");
     specStateEl.style.cssText = "font-size:14px;color:#cdd6e2;margin-top:9px;font-weight:600";
     specFoot = document.createElement("div");
     specFoot.style.cssText = "font-size:12px;color:#8a93a3;margin-top:11px";
-    card.appendChild(top); card.appendChild(specName); card.appendChild(hpWrap); card.appendChild(specStateEl); card.appendChild(specFoot);
+    card.appendChild(top); card.appendChild(specName); card.appendChild(hpWrap); card.appendChild(specStats); card.appendChild(specStateEl); card.appendChild(specFoot);
     specHUD.appendChild(card);
     document.body.appendChild(specHUD);
+  }
+  // what the killer is WORTH: pocket cash + the street value of everything
+  // they're carrying (same ITEMS catalog the fence pays out on)
+  function killerWorth(k) {
+    if (k.netKind === "player") return null;          // remote wallets aren't synced
+    let w = k.cash | 0;
+    const econ = CBZ.cityEcon;
+    if (k.valuables && econ && econ.ITEMS) {
+      for (const v of k.valuables) { const it = econ.ITEMS[v]; if (it && it.value) w += it.value; }
+    }
+    return w;
+  }
+  // how many they've dropped: the generic per-actor ledger (cityKillPed stamps
+  // every NPC kill) merged with the gang book when they ride with a set
+  function killerBodies(k) {
+    if (k.netKind === "player") return null;          // remote players don't sync kill counts (yet)
+    const gangBook = k.gstat && k.gstat.bodies != null ? (k.gstat.bodies | 0) : 0;
+    return Math.max(gangBook, k.bodies | 0);
   }
   function killerStateText(k) {
     if (!k) return "";
@@ -464,6 +545,13 @@
     if (specName) specName.textContent = killerName(k) || "your killer";
     if (specHpFill) { specHpFill.style.width = (ratio * 100).toFixed(0) + "%"; specHpFill.style.background = ratio > 0.5 ? "linear-gradient(90deg,#37d67a,#7ed957)" : ratio > 0.22 ? "linear-gradient(90deg,#e7a93a,#ffd451)" : "linear-gradient(90deg,#c9202a,#ff5a4a)"; }
     if (specHpTxt) specHpTxt.textContent = Math.ceil(hp) + " HP";
+    if (specStats) {
+      const w = killerWorth(k), b = killerBodies(k);
+      specStats.innerHTML =
+        (w == null ? "" : "<span>💰 $" + w.toLocaleString() + "</span>") +
+        (b == null ? "" : "<span style='color:#ff7a7a'>💀 " + b + (b === 1 ? " body" : " bodies") + "</span>") +
+        (k.bounty > 0 ? "<span style='color:#7ed957'>🎯 $" + (k.bounty | 0).toLocaleString() + " bounty</span>" : "");
+    }
     if (specStateEl) specStateEl.textContent = killerStateText(k);
     if (specFoot) specFoot.textContent = "Press [SPACE] or click to respawn  ·  auto in " + Math.max(0, Math.ceil(specMax - specT)) + "s";
     if (specT >= specMax) { endSpectate(); return; }
@@ -484,6 +572,8 @@
   function respawn() {
     const P = CBZ.player;
     dying = false; hideOverlay();
+    pendingDeathCam = null; deathCamHoldT = 0;
+    if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset();   // dropped prop gone, viewmodel whole
     spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null;
     if (specHUD) specHUD.style.display = "none";
     if (CBZ.cityCam) CBZ.cityCam.death = null;          // end the cinematic, back to FP
@@ -497,6 +587,9 @@
     g._lastBill = bill;
     if (CBZ.cityWantedReset) CBZ.cityWantedReset();
     if (CBZ.clearCityCops) CBZ.clearCityCops();
+    // hand the rig back WHOLE — any head/limb the death took comes back now,
+    // same frame (the audit in gore.js is the backstop, this is the guarantee)
+    if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
     P.pos.set(spot.x, 0, spot.z);
     P.vy = 0; P.grounded = true; P.dead = false; P.maxHp = P.maxHp || 200; P.hp = P.maxHp; P.ko = 0; P.stun = 0; P._hurtT = 0;
     P._death = null; P._armor = Math.max(0, (P._armor || 0)); P._fellSpeed = 0; P._fallPeak = 0;
@@ -518,6 +611,14 @@
     if (g.mode !== "city") return;
     if (g.invuln > 0) g.invuln = Math.max(0, g.invuln - dt);
     if (dying) {
+      // gun-drop beat over → hand the camera to the stock WASTED orbit
+      if (pendingDeathCam) {
+        deathCamHoldT -= dt;
+        if (deathCamHoldT <= 0) {
+          if (CBZ.cityCam && !CBZ.cityCam.death) CBZ.cityCam.death = pendingDeathCam;
+          pendingDeathCam = null;
+        }
+      }
       if (pendingWasted && wastedT > 0) { wastedT -= dt; if (wastedT <= 0) { showOverlay("WASTED", pendingWasted, "#c9202a"); pendingWasted = null; } }
       if (spectating) { tickSpectate(dt); return; }
       respawnT -= dt;

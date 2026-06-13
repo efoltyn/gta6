@@ -375,16 +375,17 @@
     const w = 2.16, len = 5.1, wheelR = 0.56, baseH = 0.92;
     addBox(root, w, baseH, len, 0, wheelR + baseH * 0.5, 0, paint);
     addBox(root, w + 0.06, 0.22, len * 0.96, 0, wheelR + 0.12, 0, trim);   // wide fender flares
-    // tall upright greenhouse cab set back over rear seats
-    addPrism(root, w * 0.9, [[-1.7, 0], [-1.2, 0.96], [1.0, 0.96], [1.6, 0]], wheelR + baseH, dark);
-    addBox(root, w * 0.78, 0.1, len * 0.5, 0, wheelR + baseH + 0.96, -0.1, paint);   // flat roof
-    addBox(root, 0.07, 0.07, len * 0.46, w * 0.4, wheelR + baseH + 1.02, -0.1, rail);  // roof rails
-    addBox(root, 0.07, 0.07, len * 0.46, -w * 0.4, wheelR + baseH + 1.02, -0.1, rail);
+    // tall upright greenhouse cab set back over rear seats — its base sinks
+    // INTO the body (a coplanar base z-fights the hood as a moiré patch)
+    addPrism(root, w * 0.9, [[-1.7, 0], [-1.2, 1.02], [1.0, 1.02], [1.6, 0]], wheelR + baseH - 0.06, dark);
+    addBox(root, w * 0.78, 0.1, len * 0.5, 0, wheelR + baseH + 0.93, -0.1, paint);   // flat roof (overlaps the glass top)
+    addBox(root, 0.07, 0.08, len * 0.46, w * 0.36, wheelR + baseH + 0.99, -0.1, rail);  // roof rails seated ON the roof
+    addBox(root, 0.07, 0.08, len * 0.46, -w * 0.36, wheelR + baseH + 0.99, -0.1, rail);
     addBox(root, w * 0.9, 0.16, 0.08, 0, wheelR + baseH * 0.55, len * 0.5 + 0.04, white);
     addBox(root, w * 0.9, 0.18, 0.08, 0, wheelR + baseH * 0.6, -len * 0.5 - 0.04, red);
     addBox(root, w * 0.7, 0.4, 0.12, 0, wheelR + 0.18, len * 0.5 + 0.06, trim);   // brush-guard bumper
     [1, -1].forEach(function (side) {
-      addBox(root, 0.035, 0.58, len * 0.43, side * (w * 0.455), wheelR + baseH + 0.49, -0.08, dark);
+      addBox(root, 0.035, 0.58, len * 0.43, side * (w * 0.455), wheelR + baseH + 0.43, -0.08, dark);
       addBox(root, 0.18, 0.14, 0.28, side * (w * 0.54), wheelR + baseH + 0.42, len * 0.22, trim);
     });
     addSphere(root, 0.46, 0, wheelR + baseH * 0.58, -len * 0.52, trim, 1, 1, 0.34);   // rear spare

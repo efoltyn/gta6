@@ -232,8 +232,20 @@
     viewModel.traverse((obj) => {
       obj.renderOrder = 1000;
       if (obj.material) {
-        obj.material.depthTest = false;
-        obj.material.depthWrite = false;
+        // REAL depth WITHIN the gun (USER-FILMED: with depthTest off, the
+        // gun's parts drew over each other in arbitrary order — the pistol
+        // read as detached, half-transparent pieces up close, while the same
+        // model looked perfect in an NPC's hand). The gun still never clips
+        // into walls: a sentinel mesh below clears the depth buffer right
+        // before the viewmodel draws, so it always paints over the world.
+        obj.material.depthTest = true;
+        obj.material.depthWrite = true;
+        // transparent:true moves the gun into the TRANSPARENT render queue
+        // (renderOrder still wins the sort there). The depth-clear sentinel
+        // must fire AFTER the world's glass — when it lived in the opaque
+        // queue, every transparent pane in the city depth-tested against a
+        // wiped buffer and bled through solid buildings (user-filmed).
+        obj.material.transparent = true;
       }
     });
     weaponModels.push(viewModel);
@@ -307,10 +319,25 @@
   fists.traverse((obj) => {
     obj.renderOrder = 1000;
     if (obj.material) {
-      obj.material.depthTest = false;
-      obj.material.depthWrite = false;
+      obj.material.depthTest = true;     // fists self-occlude like the guns now
+      obj.material.depthWrite = true;
+      obj.material.transparent = true;   // same late-queue ride as the guns
     }
   });
+  // DEPTH-CLEAR SENTINEL: a degenerate, invisible triangle that renders just
+  // before the viewmodel (renderOrder 999 < 1000, opaque queue) and wipes the
+  // depth buffer — the world is already drawn, so the gun then depth-tests
+  // only against ITSELF: correct part-on-part occlusion, zero wall clipping.
+  (function () {
+    const dcGeo = new THREE.BufferGeometry();
+    dcGeo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(9), 3));
+    const dcMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false, transparent: true });
+    const dc = new THREE.Mesh(dcGeo, dcMat);
+    dc.frustumCulled = false;
+    dc.renderOrder = 999;
+    dc.onBeforeRender = function (renderer) { renderer.clearDepth(); };
+    vm.add(dc);
+  })();
   vm.position.set(0.36, -0.34, -0.72);
 
   let recoil = 0, recoilSide = 0, vmPunch = 0, bobPhase = 0, muzzleT = 0, worldMuzzleT = 0, pumpT = 0;
@@ -454,6 +481,56 @@
     c.life = 1.5;
     if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + Math.random() * 80);
   }
+
+  // ---- DEATH DROP: the gun leaves your hands when you die -------------------
+  // WHY: dying with the viewmodel welded to the lens (and the carried gun still
+  // posed in the corpse's grip) reads fake — a body lets go. On death the
+  // first-person gun pitches forward, drops and yaws out of frame (~0.5s,
+  // TRANSFORM-ONLY on the `gun` group: the depth-clear sentinel + transparent
+  // material setup are untouched), and a cosmetic world mesh of the same
+  // weapon tumbles from the body and lies beside it. Purely visual: inventory
+  // and ammo survive the respawn and NPCs can't loot it (it's not a cityDrop).
+  let ddT = -1;                        // >=0 while the viewmodel tumble plays
+  const DD_DUR = 0.5;
+  let dropMesh = null, dropVx = 0, dropVy = 0, dropVz = 0,
+    dropSx = 0, dropSy = 0, dropSz = 0, dropLife = 0, dropLanded = false;
+  function clearWorldDrop() {
+    if (!dropMesh) return;
+    if (dropMesh.parent) dropMesh.parent.remove(dropMesh);
+    dropMesh.traverse((o) => { if (o.geometry && o.geometry.dispose) o.geometry.dispose(); });   // materials are the shared kit — never disposed
+    dropMesh = null;
+  }
+  function spawnWorldDrop(w) {
+    clearWorldDrop();
+    if (!CBZ.scene || !CBZ.player || !CBZ.player.pos) return;
+    const p = CBZ.player.pos;
+    dropMesh = buildWeaponModel(w);
+    dropMesh.scale.setScalar(1.05);
+    const a = Math.random() * 6.28;
+    dropMesh.position.set(p.x + Math.cos(a) * 0.3, p.y + 1.35, p.z + Math.sin(a) * 0.3);   // out of the dying grip, hand-high
+    dropMesh.rotation.set(Math.random() * 6.28, Math.random() * 6.28, 0);
+    CBZ.scene.add(dropMesh);
+    dropVx = Math.cos(a) * (1.2 + Math.random() * 1.2);
+    dropVz = Math.sin(a) * (1.2 + Math.random() * 1.2);
+    dropVy = 2.0 + Math.random() * 1.2;
+    dropSx = (Math.random() - 0.5) * 14; dropSy = (Math.random() - 0.5) * 10; dropSz = (Math.random() - 0.5) * 14;
+    dropLife = 30; dropLanded = false;
+  }
+  // called by city/death.js the frame you die; returns true when the
+  // first-person tumble plays (death.js holds the orbit cam a beat for it)
+  CBZ.fpsDeathDrop = function () {
+    if (!armed()) return false;
+    spawnWorldDrop(weapon());          // the body lets go — the gun lands beside it
+    carriedGun.visible = false;        // third person: nothing left in the grip
+    if (!fps.active) return false;
+    ddT = 0;                           // first person: the viewmodel tumbles away
+    return true;
+  };
+  // respawn / mode reset: cancel the tumble, restore the gun group, clear the prop
+  CBZ.fpsDeathDropReset = function () {
+    if (ddT >= 0) { ddT = -1; gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); vm.visible = fps.active; }
+    clearWorldDrop();
+  };
 
   // The bullet ORIGIN must stay pinned to the GUN, not swing with recoil. The
   // viewmodel kicks up AND rolls sideways under sustained fire, and with the
@@ -1516,6 +1593,35 @@
       if (worldMuzzleT <= 0) worldMuzzle.visible = false;
     }
 
+    // DEATH DROP — runs in the unconditional zone so it finishes even though
+    // view.js flips fps off the instant you die. The viewmodel pitches forward,
+    // accelerates down and yaws/rolls out of the grip, then hides; meanwhile
+    // the world prop falls from hand height, smacks the pavement and settles
+    // on its side beside the body.
+    if (ddT >= 0) {
+      ddT += dt;
+      const k = Math.min(1, ddT / DD_DUR);
+      vm.visible = true; gun.visible = true; fists.visible = false; muzzle.visible = false;
+      gun.position.set(k * 0.34, -k * k * 1.5, -k * 0.18);     // falls away, accelerating
+      gun.rotation.set(k * 1.9, -k * 0.8, k * 1.1);            // pitches forward, yaws + rolls free
+      if (k >= 1) { ddT = -1; gun.position.set(0, 0, 0); gun.rotation.set(0, 0, 0); vm.visible = false; }
+    }
+    if (dropMesh) {
+      dropLife -= dt;
+      if (dropLife <= 0) clearWorldDrop();
+      else if (!dropLanded) {
+        dropVy -= 20 * dt;
+        dropMesh.position.x += dropVx * dt; dropMesh.position.y += dropVy * dt; dropMesh.position.z += dropVz * dt;
+        dropMesh.rotation.x += dropSx * dt; dropMesh.rotation.y += dropSy * dt; dropMesh.rotation.z += dropSz * dt;
+        const fl = (CBZ.floorAt ? CBZ.floorAt(dropMesh.position.x, dropMesh.position.z) : 0) + 0.09;
+        if (dropMesh.position.y <= fl && dropVy < 0) {
+          dropMesh.position.y = fl; dropLanded = true;
+          dropMesh.rotation.set(0, dropMesh.rotation.y, Math.PI / 2 - 0.18);   // settles on its side
+          if (CBZ.sfx) CBZ.sfx("shell");                                        // the clatter of steel on pavement
+        }
+      }
+    }
+
     // HIT MARKER animation: ticks punch OUT from centre on the hit, then ease
     // back in while fading. A kill marker also rotates the whole cluster a few
     // degrees into an X and lingers longer. Runs unconditionally so it always
@@ -1535,7 +1641,11 @@
       if (hitMarkerT <= 0) hitMarker.wrap.style.display = "none";
     }
 
-    if (!aiming) {
+    // a corpse doesn't present a weapon: shoulderActive() doesn't know about
+    // death, so without this gate the carried gun stayed posed in the dead
+    // player's grip and the arm-damp below kept aiming the ragdoll (user: "you
+    // don't hold your weapon when you die"). The death tumble above owns the vm.
+    if (!aiming || (CBZ.player && CBZ.player.dead)) {
       carriedGun.visible = false;
       return;
     }

@@ -27,8 +27,9 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
 
-  const MAX_ACTIVE = 8;       // bodies actually solving (LRU early-freeze past this)
-  const POOL = 26;            // total slots incl. frozen corpses still holding pose
+  const MAX_ACTIVE = 14;      // bodies actually solving (LRU early-freeze past this) —
+                              // sized for a sprint/burst through the 1000-strong street
+  const POOL = 36;            // total slots incl. frozen corpses still holding pose
   const RANGE2 = 60 * 60;     // only kills this close to the camera get the flop
   const SLEEP_V = 0.22;       // u/s — under this the body counts as still
   const SLEEP_T = 0.6;        // s of stillness before the pose freezes

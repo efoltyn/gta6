@@ -7,7 +7,9 @@
      • a fine high-velocity MIST puff (rifle/headshot/explosion feel) that
        hangs, drifts, and fades — the subtle aerosol that reads as "real"
      • chunky flying GIBS (limbs/torso, gravity + tumble + settle as debris)
-     • lingering ground POOLS that spread, darken and only slowly fade
+     • lingering ground POOLS that spread, darken and only slowly fade —
+       irregular blob outlines (jittered geometry + random spin/stretch),
+       never a perfect circle
      • WALL SPLATTER: if a surface sits just behind the victim along the shot
        line, a vertical blood decal is stamped on it (GTA-style)
    plus a short red jolt + shake (+ optional slow-mo). Headshots and explosions
@@ -35,6 +37,8 @@
 
    opts: { dir:{x,z}, amount:0.5..2, skin, cloth, slowmo:secs,
            player:bool, sfx:bool|string, head:bool, explosion:bool,
+           pop:bool (the head ACTUALLY came apart — skull frags + heavy mist;
+           city kills decide this themselves from the killing weapon),
            melee:"blunt"|"blade", smear:bool, smearLen:units }
 ============================================================ */
 (function () {
@@ -64,7 +68,15 @@
     if (!orig || orig._goreTap) { killTapped = !!orig; return; }
     CBZ.cityKillPed = function (ped, imp, cause) {
       killCtx = { ped, imp, cause, used: false };
-      try { return orig(ped, imp, cause); } finally { killCtx = null; }
+      try { return orig(ped, imp, cause); }
+      finally {
+        killCtx = null;
+        // peds.js's own explosion limb-hide (it sets ped._lostLimb AFTER our
+        // gore pass ran) gets ADOPTED into the severed registry: it gains a
+        // stump cap, a matching flying part, and the guaranteed restore-on-
+        // reuse audit — instead of being a bare invisible limb.
+        adoptLostLimb(ped, imp);
+      }
     };
     CBZ.cityKillPed._goreTap = true;
     killTapped = true;
@@ -81,8 +93,26 @@
   const G_DROP = new THREE.SphereGeometry(1, 5, 4);   // blood droplet (scaled per-bit)
   const G_MIST = new THREE.SphereGeometry(1, 4, 3);   // fine mist puff (low poly)
   const G_GIB = new THREE.BoxGeometry(1, 1, 1);       // chunky gib (scaled per-bit)
-  const G_DISC = new THREE.CircleGeometry(1, 14);     // ground pool
-  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // wall splatter
+  const G_PLANE = new THREE.PlaneGeometry(1, 1);      // smears + drip streaks
+  // ground pools + wall splats: IRREGULAR blob outlines — a circle with
+  // per-vertex radial jitter (sum of randomly-phased sines) baked ONCE at
+  // startup. 3 shared geometries, randomly picked + spun + stretched per
+  // decal, so no two pools share a silhouette and none is a perfect circle.
+  function blobGeo() {
+    const g = new THREE.CircleGeometry(1, 16);
+    const pos = g.attributes.position;
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      if (x * x + y * y < 0.25) continue;             // centre vertex stays put
+      const a = Math.atan2(y, x);
+      const k = 1 + 0.16 * Math.sin(a * 3 + p1) + 0.13 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
+      pos.setXY(i, x * k, y * k);
+    }
+    return g;
+  }
+  const G_BLOB = [blobGeo(), blobGeo(), blobGeo()];
+  function blob() { return G_BLOB[(Math.random() * 3) | 0]; }
 
   // ---- shared materials (cloned only when a unique per-bit color is needed) --
   const matCache = new Map();
@@ -150,7 +180,7 @@
 
   function spawnSplat(x, z, grow, color, linger) {
     if (splats.length > 170) { rm(splats.shift().m); }
-    const m = new THREE.Mesh(G_DISC,
+    const m = new THREE.Mesh(blob(),
       new THREE.MeshBasicMaterial({ color: color || BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     m.rotation.x = -Math.PI / 2;
     m.rotation.z = Math.random() * 6.28;
@@ -164,6 +194,7 @@
     splats.push({
       m, t: 0, grow, max: grow, growT: linger ? 3.4 : 0.5,
       hold: linger ? (near ? 75 : 26) : (near ? 16 : 10), fade: linger ? 16 : 8,
+      ax: 0.82 + Math.random() * 0.36, az: 0.82 + Math.random() * 0.36,  // per-pool stretch
     });
   }
 
@@ -215,7 +246,7 @@
     }
     if (!best) return;
     const hx = x + dx * best.t, hz = z + dz * best.t;
-    const m = new THREE.Mesh(G_PLANE,
+    const m = new THREE.Mesh(blob(),
       new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
     let nx = 0, nz = 0, off = 0.03;
     if (best.face === "xmin") { nx = -1; } else if (best.face === "xmax") { nx = 1; }
@@ -224,22 +255,41 @@
     if (nx) m.rotation.y = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
     m.rotation.z = Math.random() * 6.28;
     m.renderOrder = 4;
-    const sz = 0.7 + amt * 0.7;
+    const sz = (0.7 + amt * 0.7) * 0.55;   // blob radius spans 2x a unit plane
     m.scale.set(0.1, 0.1, 1);
     scene().add(m);
-    walls.push({ m, t: instant ? 0.4 : 0, grow: sz, hold: 26, fade: 12 });
+    walls.push({
+      m, t: instant ? 0.4 : 0, grow: sz, hold: 26, fade: 12,
+      wx: 0.85 + Math.random() * 0.3, wy: 0.85 + Math.random() * 0.3,  // per-splat stretch
+    });
     // a couple of drip streaks running down from the splat
     const drips = Math.min(3, 1 + Math.round(amt));
     for (let d = 0; d < drips; d++) {
       const dm = new THREE.Mesh(G_PLANE,
         new THREE.MeshBasicMaterial({ color: BLOOD_D, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
       dm.position.copy(m.position); dm.rotation.copy(m.rotation);
-      dm.position.x += nx ? 0 : (Math.random() - 0.5) * sz * 0.7;
-      dm.position.z += nx ? (Math.random() - 0.5) * sz * 0.7 : 0;
+      dm.position.x += nx ? 0 : (Math.random() - 0.5) * sz * 1.3;
+      dm.position.z += nx ? (Math.random() - 0.5) * sz * 1.3 : 0;
       dm.scale.set(0.04, 0.1, 1);
       scene().add(dm);
       walls.push({ m: dm, t: 0, grow: 0, hold: 26, fade: 12, drip: 0.3 + Math.random() * 0.7, dripY: m.position.y });
     }
+  }
+
+  // ---- WHAT TOOK THE HEAD decides if it comes apart ---------------------------
+  // (user-filmed: every pistol headshot popped the skull — that's not how a
+  // handgun works). The kill context carries the player's weapon key (imp.wkey,
+  // fpsmode threads it) or an NPC/cop attacker whose .weapon names the gun:
+  // sniper always pops, a shotgun in the face (<6u) pops, rifle rounds only
+  // sometimes — everything pistol-class snaps the head and bursts blood at the
+  // entry instead (wound decal + localized splatter stay).
+  function headPops(imp) {
+    let k = imp ? (imp.wkey || (imp.attacker && imp.attacker.weapon) || "") : "";
+    k = ("" + k).toLowerCase();
+    if (k.indexOf("sniper") >= 0) return true;
+    if (k.indexOf("shotgun") >= 0) return (imp && imp.dist != null ? imp.dist : 99) < 6;
+    if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) return Math.random() < 0.15;
+    return false;
   }
 
   // ---- HEADSHOT: dry skull fragments riding the exit line --------------------
@@ -355,6 +405,154 @@
     }
   }
 
+  // ============================================================
+  //  REAL DISMEMBERMENT — the body that hits the ground is genuinely MISSING
+  //  what came off. WHY: spraying generic red cubes while the rig keeps all
+  //  its limbs reads FAKE (user-filmed). Now the actual body-part mesh on the
+  //  victim's rig is HIDDEN, a clone of THAT part (same proportions, same
+  //  clothing/skin materials — head flies with its face) launches from the
+  //  part's exact world transform, and a small dark-red cap seats at the
+  //  joint so the stump sells it.
+  //
+  //  RESTORE IS GUARANTEED: rigs are pooled/recycled and the player respawns,
+  //  so every sever is held in a registry and a throttled audit restores
+  //  visibility + removes the stump the moment the actor is alive again,
+  //  culled (about to recycle), or wearing a different rig. CBZ.goreRestoreBody
+  //  gives death.js an explicit same-frame restore on player respawn.
+  // ============================================================
+  const severed = [];                      // { actor, ch, items:[{ key, part, stump }] }
+  const SEV_CAP = 24;
+  // joint geometry per part: stump position (parent-local) + cap size.
+  // arms + head hang off ch.body; legs hang off the root group (character.js).
+  const STUMPS = {
+    head: { px: 0, py: 1.96, pz: 0, sx: 0.38, sy: 0.16, sz: 0.38, onBody: true },
+    la: { px: -0.62, py: 1.78, pz: 0, sx: 0.32, sy: 0.15, sz: 0.32, onBody: true },
+    ra: { px: 0.62, py: 1.78, pz: 0, sx: 0.32, sy: 0.15, sz: 0.32, onBody: true },
+    ll: { px: -0.23, py: 0.9, pz: 0, sx: 0.36, sy: 0.15, sz: 0.36, onBody: false },
+    rl: { px: 0.23, py: 0.9, pz: 0, sx: 0.36, sy: 0.15, sz: 0.36, onBody: false },
+  };
+  const SEV_LIMBS = ["ll", "rl", "la", "ra"];
+  function actorChar(a) { return a ? (a.char || (a.isPlayer ? CBZ.playerChar : null)) : null; }
+  // "head" = the whole neck group so the face/hair/cap fly WITH the skull
+  function partOf(ch, key) { return key === "head" ? ch.neck : (ch.parts ? ch.parts[key] : null); }
+
+  function severBody(actor, key, opts) {
+    opts = opts || {};
+    if (!CBZ.scene || !STUMPS[key]) return false;
+    const ch = actorChar(actor); if (!ch || !ch.group) return false;
+    const part = partOf(ch, key); if (!part) return false;
+    let r = null;
+    for (let i = 0; i < severed.length; i++) {
+      if (severed[i].actor === actor && severed[i].ch === ch) { r = severed[i]; break; }
+    }
+    if (r) for (let i = 0; i < r.items.length; i++) if (r.items[i].key === key) return false; // already off
+    // hidden by something that ISN'T us (LOD, etc.) → leave it alone, unless
+    // we're adopting peds.js's explosion hide into the registry.
+    if (part.visible === false && !opts.adopt) return false;
+    // grab the part's world transform BEFORE anything moves this frame
+    part.updateWorldMatrix(true, false);
+    if (!r) {
+      if (severed.length >= SEV_CAP) restoreRecord(severed.shift()); // oldest grows back (off-screen by now)
+      r = { actor, ch, items: [] };
+      severed.push(r);
+    }
+    part.visible = false;
+    // ---- STUMP: a small dark-red cap seated at the joint, riding the rig ----
+    const J = STUMPS[key];
+    const parent = J.onBody ? (ch.body || ch.group) : ch.group;
+    let stump = null;
+    if (parent) {
+      stump = new THREE.Mesh(G_GIB, lambert(BLOOD_D)); // shared cached material — disposal sweeps skip it
+      stump.scale.set(J.sx, J.sy, J.sz);
+      stump.position.set(J.px, J.py, J.pz);
+      stump.castShadow = false;
+      parent.add(stump);
+    }
+    r.items.push({ key, part, stump });
+    // ---- FLYING PART: a clone of the REAL meshes — same proportions, same
+    // clothing/skin materials (shared refs, never disposed) — launched from
+    // the part's exact world transform. Never a generic red cube.
+    if (!opts.noFly && bits.length < 500) {
+      const fly = part.clone();
+      for (let i = fly.children.length - 1; i >= 0; i--) {
+        if (!fly.children[i].isMesh) fly.remove(fly.children[i]); // hand/weapon sockets stay behind
+      }
+      fly.visible = true;
+      part.matrixWorld.decompose(fly.position, fly.quaternion, fly.scale);
+      scene().add(fly);
+      let dx = opts.dir ? opts.dir.x || 0 : 0, dz = opts.dir ? opts.dir.z || 0 : 0;
+      const dl = Math.hypot(dx, dz);
+      if (dl < 0.01) { const a = Math.random() * 6.28; dx = Math.cos(a); dz = Math.sin(a); }
+      else { dx /= dl; dz /= dl; }
+      const sp = opts.boom ? 4 + Math.random() * 4.5 : 4.5 + Math.random() * 3;
+      const up = key === "head" ? 4.5 + Math.random() * 2.5 : (opts.boom ? 5 + Math.random() * 4 : 3 + Math.random() * 2);
+      bits.push({
+        m: fly, vx: dx * sp + (Math.random() - 0.5) * 1.5, vy: up, vz: dz * sp + (Math.random() - 0.5) * 1.5,
+        kind: "gib", mat: null, mistFade: 0,
+        sx: (Math.random() - 0.5) * 12, sy: (Math.random() - 0.5) * 12, sz: (Math.random() - 0.5) * 12,
+        landed: false, bled: false, baseScale: 1, rad: key === "head" ? 0.3 : 0.2,
+        life: 9 + Math.random() * 5,
+      });
+      // the wound VENTS at the joint — a bright burst riding the part out
+      for (let i = 0; i < 4; i++) {
+        spawnBit(fly.position.x, fly.position.y, fly.position.z,
+          dx * 2 + (Math.random() - 0.5) * 3, 3 + Math.random() * 3, dz * 2 + (Math.random() - 0.5) * 3,
+          0.06 + Math.random() * 0.06, BLOOD_BRT, "blood");
+      }
+    }
+    return true;
+  }
+
+  function restoreRecord(r) {
+    if (!r) return;
+    for (let i = 0; i < r.items.length; i++) {
+      const it = r.items[i];
+      if (it.part) it.part.visible = true;
+      if (it.stump) rm(it.stump);
+    }
+    r.items.length = 0;
+    if (r.actor && r.actor._lostLimb) r.actor._lostLimb = null;
+  }
+
+  // adopt peds.js's explosion limb-hide (runs inside the kill tap's finally)
+  function adoptLostLimb(ped, imp) {
+    if (!ped || !ped._lostLimb || !CBZ.scene) return;
+    const key = ped._lostLimb, ch = actorChar(ped);
+    if (!ch || !STUMPS[key]) return;
+    for (let i = 0; i < severed.length; i++) {
+      const r = severed[i];
+      if (r.actor === ped && r.ch === ch) {
+        for (let j = 0; j < r.items.length; j++) if (r.items[j].key === key) return; // already ours
+        break;
+      }
+    }
+    let dir = null;
+    if (imp && imp.fromX != null && ped.pos) dir = { x: ped.pos.x - imp.fromX, z: ped.pos.z - imp.fromZ };
+    // far kills still get the registry (restore stays guaranteed) but skip the clone
+    const far = ped.pos ? dist2Cam(ped.pos.x, ped.pos.z) > 70 * 70 : true;
+    severBody(ped, key, { adopt: true, dir, boom: true, noFly: far });
+  }
+
+  // public: explicit sever (death.js drives the PLAYER's headshot/blast losses)
+  CBZ.goreSever = function (actor, key, opts) { return severBody(actor, key, opts || {}); };
+  // public: restore EVERYTHING this actor lost (player respawn / rig handback)
+  CBZ.goreRestoreBody = function (actor) {
+    if (!actor) return;
+    for (let i = severed.length - 1; i >= 0; i--) {
+      if (severed[i].actor === actor) { restoreRecord(severed[i]); severed.splice(i, 1); }
+    }
+  };
+  // the audit: any severed actor that's alive again (rig recycled / player
+  // respawned), culled, or wearing a fresh rig gets its parts back. One pass,
+  // throttled — leak-proof bookkeeping beats trusting every recycle path.
+  function severAudit() {
+    for (let i = severed.length - 1; i >= 0; i--) {
+      const r = severed[i], a = r.actor;
+      const alive = a && (a.isPlayer ? !(CBZ.player && CBZ.player.dead) : !a.dead);
+      if (!a || alive || a.culled || actorChar(a) !== r.ch) { restoreRecord(r); severed.splice(i, 1); }
+    }
+  }
+
   function ensureFlash() {
     if (flashEl) return flashEl;
     flashEl = document.createElement("div");
@@ -407,6 +605,35 @@
     const skin = opts.skin != null ? opts.skin : 0xc98a5e;
     const cloth = opts.cloth != null ? opts.cloth : 0xd24a32;
 
+    // --- REAL DISMEMBERMENT (severity follows WHAT actually hit them) --------
+    //   sniper / point-blank shotgun headshot → the head POPS (the body
+    //   collapses headless, face flies with the skull); rifle headshot → a
+    //   small chance; pistol/SMG headshot → a hard snap + entry burst, head
+    //   stays ON; explosion → 1-3 limbs torn off BY PROXIMITY; shotgun
+    //   point-blank body hit → an arm comes off at the shoulder. Falls/blunt/
+    //   blade keep the body whole.
+    let popHead = !!opts.pop;          // explicit (death.js drives the player's corpse)
+    if (ctx && ctx.ped && !ctx.ped.isPlayer) {
+      const sevDir = hasDir ? { x: dx, z: dz } : null;
+      // NOTE: the local `head` flag also trips on amount>=1.3 (a heat heuristic
+      // for the mist/spray) — severing the actual head trusts only the explicit
+      // signals, or an RPG would decapitate every victim it ALSO de-limbs.
+      if (boom || cause === "explosion") {
+        // limbs lost scale with how close the blast seat was — point-blank
+        // shreds, the rim of the radius takes one
+        let bd = 99;
+        if (ctx.imp && ctx.imp.fromX != null && ctx.ped.pos) bd = Math.hypot(ctx.ped.pos.x - ctx.imp.fromX, ctx.ped.pos.z - ctx.imp.fromZ);
+        const n = bd < 2.5 ? 3 : (bd < 5 ? 1 + (Math.random() < 0.6 ? 1 : 0) : 1);
+        for (let i = 0; i < n; i++) severBody(ctx.ped, SEV_LIMBS[(Math.random() * 4) | 0], { dir: sevDir, boom: true });
+      } else if (opts.head || cause === "headshot") {
+        if (headPops(ctx.imp)) popHead = severBody(ctx.ped, "head", { dir: sevDir });
+        // no pop: the ragdoll kick already whips the skull with the round —
+        // the entry burst/wound below is the rest of the read
+      } else if (ctx.imp && ctx.imp.wkey === "shotgun" && (ctx.imp.dist == null ? 99 : ctx.imp.dist) < 7 && Math.random() < 0.75) {
+        severBody(ctx.ped, Math.random() < 0.5 ? "la" : "ra", { dir: sevDir });
+      }
+    }
+
     // --- LAYER 1: directional SPRAY — fast droplets flung AWAY from impact ---
     // forward-biased fan, leaning HARD into the shot line so the exit wound
     // reads which way the bullet went; tighter+faster for a clean headshot,
@@ -434,7 +661,9 @@
     // --- LAYER 2: fine MIST — high-velocity aerosol (headshot/rifle/explosion) -
     // subtle hanging puff that drifts on the shot line and fades fast; this is
     // the touch that reads as "real" for high-velocity wounds.
-    const nm = Math.round((big ? 18 : 8) * amt * lod);
+    // a popped skull / blast aerosolizes far more than a through-and-through —
+    // a pistol headshot keeps its mist LOCAL (the burst at the entry, not a cloud)
+    const nm = Math.round(((popHead || boom) ? 18 : (head ? 12 : 8)) * amt * lod);
     for (let i = 0; i < nm; i++) {
       const a = Math.random() * 6.28, sp = 1 + Math.random() * 4;
       spawnBit(x + (Math.random() - 0.5) * 0.3, y + 0.6 + Math.random() * 1.0, z + (Math.random() - 0.5) * 0.3,
@@ -470,7 +699,9 @@
 
     // --- CAUSE BEATS: the kill's signature (skipped at distance — pure LOD) ---
     if (!far) {
-      if (head && hasDir) skullFrags(x, y, z, dx, dz, lod);
+      // bone only flies when the head actually came apart — a pistol/SMG
+      // headshot is a snap + blood, never skull fragments
+      if (popHead && hasDir) skullFrags(x, y, z, dx, dz, lod);
       if (blade && ctx && ctx.ped) arterialArcs(ctx.ped, dx, dz);
       if (blunt) {
         bluntBurst(x, y, z, dx, dz, hasDir);
@@ -506,8 +737,9 @@
     }
 
     // throttled corpse-stain scan: bodies lying in a pool soak dark, once each
+    // + the dismemberment audit: recycled/respawned rigs get their parts back
     stainT -= dt;
-    if (stainT <= 0) { stainT = 0.85; stainScan(); }
+    if (stainT <= 0) { stainT = 0.85; stainScan(); if (severed.length) severAudit(); }
 
     for (let i = bits.length - 1; i >= 0; i--) {
       const b = bits[i], m = b.m;
@@ -527,9 +759,10 @@
       m.position.x += b.vx * dt; m.position.y += b.vy * dt; m.position.z += b.vz * dt;
       m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt;
       const fl = floorAt(m.position.x, m.position.z);
-      if (m.position.y <= fl + 0.06 && b.vy < 0) {
+      const rr = b.rad || 0.06;       // severed parts carry a real radius — a head doesn't half-sink
+      if (m.position.y <= fl + rr && b.vy < 0) {
         if (b.kind === "blood") { spawnSplat(m.position.x, m.position.z, 0.3 + Math.random() * 0.5, BLOOD_D, false); rm(m); bits.splice(i, 1); continue; }
-        m.position.y = fl + 0.06; b.vy = 0; b.vx *= 0.22; b.vz *= 0.22; b.sx *= 0.1; b.sy *= 0.1; b.sz *= 0.1; b.landed = true;
+        m.position.y = fl + rr; b.vy = 0; b.vx *= 0.22; b.vz *= 0.22; b.sx *= 0.1; b.sy *= 0.1; b.sz *= 0.1; b.landed = true;
         if (!b.bled) { b.bled = true; spawnSplat(m.position.x, m.position.z, 0.4 + Math.random() * 0.4, BLOOD_D, false); }
       }
       if (b.landed || b.kind === "blood") b.life -= dt;
@@ -551,7 +784,7 @@
         // to full size as the body drains (growT: ~3.4s for kill pools).
         const k = Math.min(1, s.t / (s.growT || 0.5));
         const sc = s.grow * (0.34 + 0.66 * Math.sqrt(k));
-        s.m.scale.set(Math.max(0.1, sc), Math.max(0.1, sc), 1);
+        s.m.scale.set(Math.max(0.1, sc * (s.ax || 1)), Math.max(0.1, sc * (s.az || 1)), 1);
       }
       const fadeIn = Math.min(1, s.t * 4);
       const fadeOut = s.t > s.hold ? Math.max(0, 1 - (s.t - s.hold) / s.fade) : 1;
@@ -568,7 +801,7 @@
         w.m.position.y = w.dripY - len * 0.5;
       } else {
         const sc = Math.min(w.grow, w.t * 6 * w.grow);
-        w.m.scale.set(Math.max(0.1, sc), Math.max(0.1, sc), 1);
+        w.m.scale.set(Math.max(0.1, sc * (w.wx || 1)), Math.max(0.1, sc * (w.wy || 1)), 1);
       }
       const fadeIn = Math.min(1, w.t * 5);
       const fadeOut = w.t > w.hold ? Math.max(0, 1 - (w.t - w.hold) / w.fade) : 1;
@@ -579,6 +812,7 @@
 
   // wipe all gore (called on a match reset / scene swap)
   CBZ.clearGore = function () {
+    for (const r of severed) restoreRecord(r); severed.length = 0;   // every rig leaves whole
     for (const b of bits) rm(b.m); bits.length = 0;
     for (const s of splats) rm(s.m); splats.length = 0;
     for (const w of walls) rm(w.m); walls.length = 0;

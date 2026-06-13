@@ -7,25 +7,29 @@
        face the bullet came through, sitting slightly proud). ONE shared
        CircleGeometry + 3 shared unlit materials (fresh dark red → drying
        brown after ~12s; blunt hits leave a bruise-dark patch, no hole).
-     • BLOOD SOAK: the hit part's clothing climbs a 3-step soak ladder
-       (clean → bloodied → soaked) via CACHED darkened-material swaps —
-       the exact corpse-stain discipline gore.js already uses: shared
-       `cmat` clothing is SWAPPED to a cached `_shared` soak lambert
-       (never mutated, never per-ped cloned); the head's per-actor
-       unshared material is tinted in place (reactions.js's emissive
-       flash keeps working).
-     • SEVERITY READS: headshot = wound at the head + the shirt goes
-       straight to soaked (blood runs down); a shotgun blast scatters
-       2-3 wounds (per-pellet calls collapse into one ≤3-wound burst);
-       melee blunt = bigger bruise patch, no hole, no blood soak.
+       Per-wound scale jitter so no two holes are identical.
+     • LOCAL SOAK PATCH: an irregular dark stain SPREADS AROUND each entry
+       wound over a few seconds — anchored to the wound, riding the same
+       body part. Never a whole-garment recolor (the old clean→bloodied→
+       soaked material ladder turned people maroon — DELETED). 3 shared
+       blob geometries (per-vertex radial jitter baked at startup) + random
+       spin + per-axis stretch keep any two stains from matching.
+     • SEVERITY READS: headshot = wound at the head + a HEAVY insta-spread
+       splatter on the head that runs down onto the collar (a second stain
+       seated at the top of the shirt); a shotgun blast scatters 2-3 wounds
+       (per-pellet calls collapse into one ≤3-wound burst); melee blunt =
+       bigger bruise patch, no hole, no blood.
 
    Budget discipline (the game is draw-call bound):
-     • hard caps: 6 wounds per actor, 140 global — recycled oldest-first;
-       a free-mesh pool so churn never reallocates.
+     • hard caps: 10 meshes per actor (a hit = wound + its soak stain, so
+       ~5 readable hits), 200 global — recycled oldest-first; a free-mesh
+       pool so churn never reallocates (geometry/material reassigned on
+       reuse — both shared, nothing cloned or disposed).
      • wounds are CHILDREN of the rig's part meshes → they animate, fall
        and despawn WITH the body for free; a throttled (0.8s) sweep frees
-       records once a rig leaves the scene. ZERO per-frame cost while
-       nobody is being shot (one early-out).
+       records once a rig leaves the scene. Soak growth ticks per-frame
+       ONLY while a stain is actively spreading (a few seconds per hit);
+       the whole system sleeps when nobody is being shot (one early-out).
      • spawn distance-gated at 45u (matches gore.js's LOD band) so far
        NPC-vs-NPC scraps cost nothing.
 
@@ -42,15 +46,34 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
 
-  const CAP = 140;          // global live-wound cap (each is 1 tiny draw call)
-  const PER_ACTOR = 6;      // a body holds 6 readable hits, then recycles
+  const CAP = 200;          // global live-mesh cap (each is 1 tiny draw call)
+  const PER_ACTOR = 10;     // wound+stain pairs: a body holds ~5 readable hits
   const SPAWN_D2 = 45 * 45; // matches gore.js's "only where it can be seen" band
   const DRY_T = 12;         // seconds until a fresh wound dries brown
   const PROUD = 0.013;      // how far the disc sits off the surface (no z-fight)
+  const PROUD_SOAK = 0.008; // the stain sits UNDER its wound disc
 
-  // ---- shared geometry + materials (whole system = 1 geom, 3 mats) ---------
+  // ---- shared geometry + materials ------------------------------------------
   const G_WOUND = new THREE.CircleGeometry(1, 8);
   G_WOUND._shared = true;
+  // soak stains: IRREGULAR blob outlines — a circle with per-vertex radial
+  // jitter (sum of randomly-phased sines) baked ONCE at startup. 3 shared
+  // geometries, randomly picked + spun + stretched per stain.
+  function blobGeo() {
+    const g = new THREE.CircleGeometry(1, 14);
+    g._shared = true;
+    const pos = g.attributes.position;
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      if (x * x + y * y < 0.25) continue;            // centre vertex stays put
+      const a = Math.atan2(y, x);
+      const k = 1 + 0.18 * Math.sin(a * 3 + p1) + 0.14 * Math.sin(a * 5 + p2) + 0.09 * Math.sin(a * 7 + p3);
+      pos.setXY(i, x * k, y * k);
+    }
+    return g;
+  }
+  const G_SOAK = [blobGeo(), blobGeo(), blobGeo()];
   function unlit(color) {
     // unlit = the wound reads as a HOLE (no light catch), and it's the
     // cheapest material in the renderer. _shared → rig-disposal sweeps skip it.
@@ -61,29 +84,11 @@
   const MAT_FRESH = unlit(0x4e070b);   // fresh entry wound: near-black red
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
   const MAT_BRUISE = unlit(0x3a2334);  // blunt trauma: purple-dark, no hole
+  const MAT_SOAK = unlit(0x310609);    // wet cloth around the hole: near-black
 
-  // ---- soak ladder materials: cached per (base colour, step), shared -------
-  const SOAK_K = [0, 0.45, 0.75];      // blend toward blood per step
-  const soakCache = new Map();
-  function blendHex(base, k) {
-    const tr = 0x3c, tg = 0x06, tb = 0x0b;  // dried-blood target
-    const r = ((base >> 16) & 255), g = ((base >> 8) & 255), b = (base & 255);
-    return (((r + (tr - r) * k) | 0) << 16) | (((g + (tg - g) * k) | 0) << 8) | ((b + (tb - b) * k) | 0);
-  }
-  function soakMat(base, lvl) {
-    const key = base * 4 + lvl;
-    let m = soakCache.get(key);
-    if (!m) {
-      m = new THREE.MeshLambertMaterial({ color: blendHex(base, SOAK_K[lvl]) });
-      m._shared = true;
-      soakCache.set(key, m);
-    }
-    return m;
-  }
-
-  const wounds = [];   // FIFO: { m, actor, age, kind, dried }
+  const wounds = [];   // FIFO: { m, actor, age, kind, dried, gone, (soak: gx,gy,gt,t) }
+  const growing = [];  // soak records still spreading (per-frame, short-lived)
   const free = [];     // recycled meshes awaiting reuse
-  const soaked = [];   // { actor, mesh, base, unshared } — for restore on reset
   const tmpV = new THREE.Vector3();
 
   function dist2Cam(x, z) {
@@ -116,50 +121,36 @@
     return { mesh: S.torso && S.torso[0], region: "torso" };
   }
 
-  function regionMeshes(S, region) {
-    switch (region) {
-      case "head": return S.head || [];
-      case "torso": return (S.torso || []).concat(S.collar || []);
-      case "armL": return S.arms && S.arms[0] ? [S.arms[0]] : [];
-      case "armR": return S.arms && S.arms[1] ? [S.arms[1]] : [];
-      case "legL": return S.legs && S.legs[0] ? [S.legs[0]] : [];
-      case "legR": return S.legs && S.legs[1] ? [S.legs[1]] : [];
-    }
-    return [];
-  }
-
-  // ---- BLOOD SOAK: climb the part's clean → bloodied → soaked ladder -------
-  // Shared (cmat) clothing → SWAP to a cached _shared soak lambert (the
-  // gore.js corpse-stain pattern — zero clones). The head's fresh per-actor
-  // material (reactions.js flashes its emissive) is tinted IN PLACE instead.
-  function applySoak(actor, region, bump) {
-    if (!bump) return;
-    const ch = actor.char;
-    if (!ch || !ch.skinSlots) return;
-    const st = actor._soak || (actor._soak = {});
-    const cur = st[region] || 0;
-    const lvl = Math.min(2, cur + bump);
-    if (lvl === cur) return;
-    st[region] = lvl;
-    const list = regionMeshes(ch.skinSlots, region);
-    for (let i = 0; i < list.length; i++) {
-      const mesh = list[i];
-      if (!mesh || !mesh.material || !mesh.material.color) continue;
-      let base = mesh.userData._woundSoakBase;
-      if (base == null) {
-        base = mesh.material.color.getHex();
-        mesh.userData._woundSoakBase = base;
-        if (soaked.length > 420) soaked.shift();  // bound restore bookkeeping
-        soaked.push({ actor, mesh, base, unshared: !mesh.material._shared });
-      }
-      if (mesh.material._shared) mesh.material = soakMat(base, lvl);
-      else mesh.material.color.setHex(blendHex(base, SOAK_K[lvl]));
+  // ---- seat a decal on a part: part-local point → snapped to the box face --
+  // the round came through, slightly proud, spun in its own plane.
+  function seat(m, part, lp, proud) {
+    const prm = part.geometry.parameters || {};
+    const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
+    const rx = Math.abs(lp.x) / hx, ry = Math.abs(lp.y) / hy, rz = Math.abs(lp.z) / hz;
+    let ax = "z";                                 // front/back wins ties
+    if (rx > rz + 0.02 && rx > ry) ax = "x";
+    else if (ry > rz + 0.02 && ry > rx) ax = "y";
+    const cl = (v, h) => Math.max(-h * 0.78, Math.min(h * 0.78, v));
+    const spin = Math.random() * 6.28;            // decal spin in its own plane
+    if (ax === "x") {
+      const s = lp.x >= 0 ? 1 : -1;
+      m.position.set(s * (hx + proud), cl(lp.y, hy), cl(lp.z, hz));
+      m.rotation.set(0, s * Math.PI / 2, spin);
+    } else if (ax === "y") {
+      const s = lp.y >= 0 ? 1 : -1;
+      m.position.set(cl(lp.x, hx), s * (hy + proud), cl(lp.z, hz));
+      m.rotation.set(s > 0 ? -Math.PI / 2 : Math.PI / 2, 0, spin);
+    } else {
+      const s = lp.z >= 0 ? 1 : -1;
+      m.position.set(cl(lp.x, hx), cl(lp.y, hy), s * (hz + proud));
+      m.rotation.set(0, s > 0 ? 0 : Math.PI, spin);
     }
   }
 
   // ---- mesh pool ------------------------------------------------------------
   function dropWound(i, reuse) {
     const r = wounds.splice(i, 1)[0];
+    r.gone = true;                               // growing[] skips stale refs
     if (r.m.parent) r.m.parent.remove(r.m);
     if (r.actor) r.actor._woundN = Math.max(0, (r.actor._woundN || 1) - 1);
     if (!reuse && free.length < 36) free.push(r.m);  // reuse = caller takes the mesh
@@ -177,6 +168,29 @@
     const m = new THREE.Mesh(G_WOUND, MAT_FRESH);
     m.castShadow = m.receiveShadow = false;
     return m;
+  }
+
+  // ---- LOCAL SOAK: an irregular stain spreads around the entry point --------
+  // a child of the SAME part, seated on the SAME face, under the wound disc;
+  // grows from a blot to full spread over `growT` seconds (per-frame while
+  // active, then it costs nothing).
+  function spawnSoak(actor, part, lp, size, growT) {
+    const m = meshFor(actor);
+    m.geometry = G_SOAK[(Math.random() * 3) | 0];
+    m.material = MAT_SOAK;
+    seat(m, part, lp, PROUD_SOAK);
+    // a stain can never outgrow the panel it's soaked into — bigger than the
+    // face it reads as a rigid sheet hovering off the body (user-filmed)
+    const pp = part.geometry && part.geometry.parameters || {};
+    const cap = Math.max(0.16, Math.min(pp.width || 0.5, pp.height || 0.7, pp.depth || 0.4) * 1.05);
+    const gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
+    const gy = Math.min(cap * 1.25, size * (0.8 + Math.random() * 0.5));
+    m.scale.set(gx * 0.35, gy * 0.35, 1);
+    part.add(m);
+    const r = { m, actor, age: 0, kind: "soak", dried: true, gx, gy, gt: growT, t: 0 };
+    wounds.push(r);
+    growing.push(r);
+    actor._woundN = (actor._woundN || 0) + 1;
   }
 
   // ---- CBZ.bodyWound(actor, worldPoint, opts) -------------------------------
@@ -224,44 +238,25 @@
     if (!part || !part.geometry) return;
 
     const m = meshFor(actor);
+    m.geometry = G_WOUND;
     m.material = kind === "bruise" ? MAT_BRUISE : MAT_FRESH;
 
     // world hit → part-local, snapped to the box face the round came through
     part.updateWorldMatrix(true, false);
     const lp = tmpV.set(px, py, pz);
     part.worldToLocal(lp);
-    const prm = part.geometry.parameters || {};
-    const hx = (prm.width || 0.6) * 0.5, hy = (prm.height || 0.9) * 0.5, hz = (prm.depth || 0.45) * 0.5;
-    const rx = Math.abs(lp.x) / hx, ry = Math.abs(lp.y) / hy, rz = Math.abs(lp.z) / hz;
-    let ax = "z";                                 // front/back wins ties
-    if (rx > rz + 0.02 && rx > ry) ax = "x";
-    else if (ry > rz + 0.02 && ry > rx) ax = "y";
-    const cl = (v, h) => Math.max(-h * 0.78, Math.min(h * 0.78, v));
-    const spin = Math.random() * 6.28;            // disc spin in its own plane
-    if (ax === "x") {
-      const s = lp.x >= 0 ? 1 : -1;
-      m.position.set(s * (hx + PROUD), cl(lp.y, hy), cl(lp.z, hz));
-      m.rotation.set(0, s * Math.PI / 2, spin);
-    } else if (ax === "y") {
-      const s = lp.y >= 0 ? 1 : -1;
-      m.position.set(cl(lp.x, hx), s * (hy + PROUD), cl(lp.z, hz));
-      m.rotation.set(s > 0 ? -Math.PI / 2 : Math.PI / 2, 0, spin);
-    } else {
-      const s = lp.z >= 0 ? 1 : -1;
-      m.position.set(cl(lp.x, hx), cl(lp.y, hy), s * (hz + PROUD));
-      m.rotation.set(0, s > 0 ? 0 : Math.PI, spin);
-    }
+    seat(m, part, lp, PROUD);
 
     // severity → size: caliber widens the hole; the head wound reads a touch
     // bigger (it's the kill tell); a bruise is a broad flat patch; a blade
-    // leaves a thin slash.
+    // leaves a thin slash. Every wound carries its own jitter — no two match.
     let s0 = 0.045 + 0.032 * cal;
     if (pick.region === "head") s0 *= 1.15;
     if (kind === "bruise") {
       const b = s0 * 2.2;
       m.scale.set(b * (0.85 + Math.random() * 0.3), b * (0.7 + Math.random() * 0.3), 1);
     } else if (kind === "blade") {
-      m.scale.set(s0 * 0.55, s0 * 1.9, 1);
+      m.scale.set(s0 * (0.45 + Math.random() * 0.2), s0 * (1.7 + Math.random() * 0.4), 1);
     } else {
       m.scale.set(s0 * (0.85 + Math.random() * 0.3), s0 * (0.85 + Math.random() * 0.3), 1);
     }
@@ -270,35 +265,40 @@
     wounds.push({ m, actor, age: 0, kind, dried: false });
     actor._woundN = (actor._woundN || 0) + 1;
 
-    // ---- BLOOD SOAK (a bruise doesn't bleed) ----
+    // ---- LOCAL SOAK STAIN (a bruise doesn't bleed) ----
+    // the cloth around the hole goes dark and keeps spreading for a few
+    // seconds — local, irregular, anchored to THIS wound. Headshot = heavy
+    // fast splatter on the head PLUS a run-down stain seated at the collar.
     if (kind !== "bruise") {
       if (pick.region === "head") {
-        applySoak(actor, "head", 1);
-        applySoak(actor, "torso", 2);   // headshot: blood runs straight down the shirt
+        spawnSoak(actor, part, lp, s0 * 3.4, 0.6);
+        const torso = ch.skinSlots.torso && ch.skinSlots.torso[0];
+        if (torso && torso.geometry) {
+          torso.updateWorldMatrix(true, false);
+          tmpV.set(px, py, pz);
+          torso.worldToLocal(tmpV);                       // same side the round came from
+          const tp = torso.geometry.parameters || {};
+          tmpV.y = (tp.height || 0.9) * 0.5 * 0.72;       // up at the collar line
+          spawnSoak(actor, torso, tmpV, s0 * 3.8, 1.1);
+        }
       } else {
-        applySoak(actor, pick.region, kind === "shot" && cal >= 1.25 ? 2 : 1);
+        const heavy = kind === "shot" && cal >= 1.25;
+        spawnSoak(actor, part, lp, s0 * (heavy ? 3.4 : 2.6), heavy ? 2.2 : 3.2);
       }
     }
   };
 
-  // ---- reset: detach everything, walk every soak swap back to clean --------
+  // ---- reset: detach everything ---------------------------------------------
   CBZ.clearWounds = function () {
     for (let i = 0; i < wounds.length; i++) {
       const r = wounds[i];
+      r.gone = true;
       if (r.m.parent) r.m.parent.remove(r.m);
       if (free.length < 36) free.push(r.m);
-      if (r.actor) { r.actor._woundN = 0; r.actor._soak = null; }
+      if (r.actor) r.actor._woundN = 0;
     }
     wounds.length = 0;
-    for (let i = 0; i < soaked.length; i++) {
-      const s = soaked[i], mesh = s.mesh;
-      if (!mesh) continue;
-      if (s.unshared) { if (mesh.material && mesh.material.color) mesh.material.color.setHex(s.base); }
-      else mesh.material = soakMat(s.base, 0);
-      if (mesh.userData) mesh.userData._woundSoakBase = null;
-      if (s.actor) s.actor._soak = null;
-    }
-    soaked.length = 0;
+    growing.length = 0;
   };
 
   // chain onto CBZ.clearGore (match reset / scene swap) — checked lazily every
@@ -309,11 +309,22 @@
     CBZ.clearGore._wounds = true;
   }
 
-  // ---- one throttled updater: ZERO cost while nobody is being shot ----------
+  // ---- one updater: ZERO cost while nobody is being shot ---------------------
+  // soak spread runs per-frame (only while a stain is actively growing);
+  // record lifecycle stays on the cheap 0.8s throttle.
   let tick = 0;
   CBZ.onAlways(9, function (dt) {
     if (CBZ.clearGore && !CBZ.clearGore._wounds) wrapClearGore();
-    if (!wounds.length && !soaked.length) return;   // the whole system sleeps
+    if (!wounds.length) return;   // the whole system sleeps
+    for (let i = growing.length - 1; i >= 0; i--) {
+      const r = growing[i];
+      if (r.gone || !r.m.parent) { growing.splice(i, 1); continue; }
+      r.t += dt;
+      const k = Math.min(1, r.t / r.gt);
+      const e = 0.35 + 0.65 * Math.sqrt(k);   // fast blot, slow creep (gore pools' curve)
+      r.m.scale.set(r.gx * e, r.gy * e, 1);
+      if (k >= 1) growing.splice(i, 1);
+    }
     tick += dt;
     if (tick < 0.8) return;
     const step = tick;
@@ -324,10 +335,6 @@
       if (!a || a.culled || !a.group || !a.group.parent) { dropWound(i); continue; }
       r.age += step;
       if (r.kind === "shot" && !r.dried && r.age > DRY_T) { r.dried = true; r.m.material = MAT_DRY; }
-    }
-    for (let i = soaked.length - 1; i >= 0; i--) {
-      const a = soaked[i].actor;
-      if (!a || a.culled || !a.group || !a.group.parent) soaked.splice(i, 1);
     }
   });
 })();

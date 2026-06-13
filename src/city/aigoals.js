@@ -221,22 +221,48 @@
     }
   }
 
-  // ---- COMMUTES: which lot kind does THIS job clock in at? (the casttraits/
-  //      peds.js job-string vocabulary mapped onto buildings.js lot kinds —
-  //      jobs with no plausible storefront, e.g. "between jobs", map to none)
-  const JOB_KINDS = {
-    "retail worker": ["clothing", "electronics", "pawn"],
-    "mechanic": ["chop", "carlot", "gas"],
-    "office worker": ["bank", "cityhall", "realtor", "security"],
-    "construction worker": ["hardware"],
-    "bartender": ["bar", "casino"],
-    "nurse": ["hospital"],
-    "warehouse worker": ["hardware", "chop"],
-    "dock worker": ["hardware", "chop"],
-    "delivery driver": ["food", "gas", "transit"],
-    "student": ["electronics", "barber", "clothing"],
-    "private security": ["security", "bank", "casino"],
+  // ---- THE JOB TABLE: every job string the casters deal, mapped onto the city
+  //      that actually exists. One record per job — `lots` is where it clocks in
+  //      (buildings.js lot kinds), `hours` is the shift window the timetable
+  //      runs (schedule.js reads it: a bartender works nights, a cook the
+  //      breakfast-through-dinner stretch), `pay` is the $-per-sim-hour an
+  //      offline identity accrues at work, and `class` is the trade family —
+  //      counters and worker verbs gate on the CLASS string, never the ped ref,
+  //      so any actor carrying the class (NPC or not) gets the same verbs.
+  //      Jobs with no plausible storefront ("soldier on leave") map to none
+  //      and stay drifters by design. ----
+  const CITY_JOBS = {
+    // service — the counters and curbs that keep the city fed and moving
+    "retail worker":       { class: "service", lots: ["clothing", "electronics", "pawn"], hours: [9, 19], pay: 12 },
+    "office worker":       { class: "service", lots: ["bank", "cityhall", "realtor", "security"], hours: [9, 17], pay: 16 },
+    "accountant":          { class: "service", lots: ["bank", "cityhall"], hours: [9, 17], pay: 20 },
+    "bartender":           { class: "service", lots: ["bar", "casino"], hours: [17, 2], pay: 14 },
+    "line cook":           { class: "service", lots: ["food"], hours: [7, 21], pay: 11 },
+    "barber":              { class: "service", lots: ["barber"], hours: [9, 19], pay: 12 },
+    "street vendor":       { class: "service", lots: ["food", "gas"], hours: [7, 20], pay: 10 },
+    "cab driver":          { class: "service", lots: ["transit", "gas"], hours: [6, 22], pay: 13 },
+    "delivery driver":     { class: "service", lots: ["food", "gas", "transit"], hours: [8, 18], pay: 12 },
+    "courier":             { class: "service", lots: ["electronics", "hardware", "food"], hours: [8, 18], pay: 11 },
+    "student":             { class: "service", lots: ["electronics", "barber", "clothing"], hours: [10, 16], pay: 5 },
+    // trade — hands-on work at the yards and bays
+    "mechanic":            { class: "trade", lots: ["chop", "carlot", "gas"], hours: [8, 18], pay: 15 },
+    "construction worker": { class: "trade", lots: ["hardware"], hours: [6, 15], pay: 14 },
+    "warehouse worker":    { class: "trade", lots: ["hardware", "chop"], hours: [6, 16], pay: 12 },
+    "dock worker":         { class: "trade", lots: ["hardware", "chop"], hours: [5, 15], pay: 13 },
+    "personal trainer":    { class: "trade", lots: ["gym"], hours: [7, 20], pay: 13 },
+    // law — posted eyes (the city's own muscle, not the player's problem until it is)
+    "security guard":      { class: "law", lots: ["security", "bank", "casino", "jewelry"], hours: [8, 22], pay: 13 },
+    "private security":    { class: "law", lots: ["security", "bank", "casino"], hours: [8, 22], pay: 14 },
+    "sheriff's deputy":    { class: "law", lots: ["cityhall", "security"], hours: [8, 18], pay: 16 },
+    // medic — the hospital crowd
+    "nurse":               { class: "medic", lots: ["hospital"], hours: [7, 19], pay: 16 },
+    "doctor":              { class: "medic", lots: ["hospital"], hours: [9, 19], pay: 24 },
+    "paramedic":           { class: "medic", lots: ["hospital"], hours: [6, 18], pay: 15 },
   };
+  CBZ.cityJobs = CITY_JOBS;       // shops.js gates worker verbs on .class; schedule.js reads .hours/.pay
+  // the legacy job→lot vocabulary, derived from the one table (no second list to drift)
+  const JOB_KINDS = {};
+  for (const jn in CITY_JOBS) JOB_KINDS[jn] = CITY_JOBS[jn].lots;
   CBZ.cityJobKinds = JOB_KINDS;   // schedule.js derives timetables from the same vocabulary
   // the NEAREST plausible workplace, picked ONCE and cached. Re-validated
   // against the live arena so a recycled body / new run can't keep a stale lot.

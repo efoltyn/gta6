@@ -73,6 +73,177 @@
     return m;
   }
 
+  // ============================================================
+  //  SHOOTABLE STREET PROPS — the street REACTS to gunfire (USER-FILMED:
+  //  "shooting objects feels wrong"). gunfx.js routes every shot LINE here
+  //  (CBZ.cityShootProp); we test the few registered props near the segment
+  //  and answer in kind: a streetlight SHATTERS DARK, a hydrant POPS a
+  //  20-second water geyser (the classic showpiece), trash cans / news boxes
+  //  / cones get KNOCKED FLYING, bolted steel (mailboxes, meters) rings and
+  //  keeps the pock. WHY: a block you just shot up must LOOK shot up —
+  //  that's the show-off receipt. COST: a cheap segment-vs-point scan over a
+  //  flat registry (a few flops per prop per tracer), pooled water sprites,
+  //  tip animations that touch only group transform — zero new draw calls
+  //  beyond the pooled droplets.
+  // ============================================================
+  let shootables = [];                  // {type,x,z,y,r,...} registered at build
+  const knocks = [];                    // props mid-tip
+  const geysers = [];                   // popped hydrants {x,z,t,acc}
+  const drops = [];                     // live water droplets
+  const dropPool = [];
+  let waterTex = null;
+  const deadLampM = new THREE.MeshLambertMaterial({ color: 0x202329 });
+  deadLampM._shared = true;             // survives any teardown traversal
+  const _qTip = new THREE.Quaternion(), _axTip = new THREE.Vector3();
+
+  function waterTexture() {
+    if (waterTex) return waterTex;
+    const c = document.createElement("canvas"); c.width = c.height = 32;
+    const x = c.getContext("2d");
+    const gr = x.createRadialGradient(16, 16, 1, 16, 16, 15);
+    gr.addColorStop(0, "rgba(235,245,255,0.95)");
+    gr.addColorStop(0.55, "rgba(180,210,235,0.55)");
+    gr.addColorStop(1, "rgba(150,190,225,0)");
+    x.fillStyle = gr; x.fillRect(0, 0, 32, 32);
+    waterTex = new THREE.CanvasTexture(c);
+    return waterTex;
+  }
+  function takeDrop() {
+    let s = dropPool.pop();
+    if (!s) {
+      s = new THREE.Sprite(new THREE.SpriteMaterial({ map: waterTexture(), transparent: true, opacity: 0, depthWrite: false }));
+      s.renderOrder = 8;
+      CBZ.scene.add(s);
+    }
+    s.visible = true;
+    return s;
+  }
+  // knock a prop over AWAY from the shot: rotate about the horizontal axis
+  // perpendicular to the bullet, slide it along, light things hop. Composes
+  // with the prop's own yaw via quaternion (q0) — touches transform only.
+  function tipProp(s, dirX, dirZ, hop, slide) {
+    if (s.over || !s.group) return;
+    s.over = true;
+    const dl = Math.hypot(dirX, dirZ) || 1; dirX /= dl; dirZ /= dl;
+    knocks.push({
+      g: s.group, t: 0, dur: 0.4 + Math.random() * 0.18,
+      axx: dirZ, axz: -dirX,                  // tips the top toward +dir
+      ang: 1.4 + Math.random() * 0.18,
+      x0: s.group.position.x, y0: s.group.position.y, z0: s.group.position.z,
+      sx: dirX * slide, sz: dirZ * slide, hop: hop || 0,
+      q0: s.group.quaternion.clone(),
+    });
+  }
+  // one shot reaction, by what the round actually hit
+  function hitProp(s, p, n, d) {
+    const imp = CBZ.bulletImpact, hole = CBZ.bulletHole;
+    if (s.type === "lamp") {
+      if (imp) imp(p, n, { kind: "spark", power: 1.2 });
+      if (!s.broken) {
+        s.broken = true;
+        if (s.bulb) s.bulb.material = deadLampM;       // the head goes DARK
+        if (s.glow) s.glow.visible = false;            // and so does its pool on the street
+        if (imp) imp(p, { x: n.x, y: -0.6, z: n.z }, { kind: "chip", power: 1.2, color: 0xdfe9f2 });   // glass rains down
+        if (CBZ.sfx) CBZ.sfx("clank");
+      }
+    } else if (s.type === "hydrant") {
+      if (imp) imp(p, n, { kind: "spark", power: 1 });
+      if (hole) hole(p, n, { size: 0.16 });
+      if (!s.gy || s.gy.t <= 0) {                      // POP — the street fountain
+        s.gy = { x: s.x, z: s.z, t: 20, acc: 0 };
+        geysers.push(s.gy);
+        if (CBZ.sfx) CBZ.sfx("clank");
+      } else s.gy.t = Math.max(s.gy.t, 12);            // re-shot: keep it gushing
+    } else if (s.type === "bin") {
+      if (imp) imp(p, n, { kind: "chip", power: 0.9, color: 0x356b3e });
+      if (hole) hole(p, n, { size: 0.15 });
+      tipProp(s, d.x, d.z, 0, 0.45);
+    } else if (s.type === "newsbox") {
+      if (imp) imp(p, n, { kind: "chip", power: 0.8, color: 0x9aa0a8 });
+      if (hole) hole(p, n, { size: 0.14 });
+      tipProp(s, d.x, d.z, 0.1, 0.6);
+    } else if (s.type === "cone") {
+      if (imp) imp(p, n, { kind: "chip", power: 0.6, color: 0xff6a1a });
+      tipProp(s, d.x, d.z, 0.3, 1.5);                  // light plastic FLIES
+    } else {                                           // mailbox / meter: bolted steel
+      if (imp) imp(p, n, { kind: "spark", power: 0.9 });
+      if (hole) hole(p, n, { size: 0.13 });
+    }
+    return s;
+  }
+  // PUBLIC: a shot travelled from→to — react the nearest registered prop the
+  // line passes through (within its radius). Returns the prop record or null.
+  CBZ.cityShootProp = function (from, to) {
+    if (!shootables.length || !from || !to) return null;
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    const len2 = dx * dx + dy * dy + dz * dz;
+    if (len2 < 1e-4) return null;
+    let best = null, bt = 2;
+    for (let i = 0; i < shootables.length; i++) {
+      const s = shootables[i];
+      const ox = s.x - from.x, oy = s.y - from.y, oz = s.z - from.z;
+      const t = (ox * dx + oy * dy + oz * dz) / len2;
+      if (t < 0 || t > 1 || t >= bt) continue;
+      const mx = ox - dx * t, my = oy - dy * t, mz = oz - dz * t;
+      if (mx * mx + my * my + mz * mz > s.r * s.r) continue;
+      bt = t; best = s;
+    }
+    if (!best) return null;
+    const il = 1 / Math.sqrt(len2);
+    return hitProp(best,
+      { x: from.x + dx * bt, y: from.y + dy * bt, z: from.z + dz * bt },
+      { x: -dx * il, y: -dy * il, z: -dz * il },
+      { x: dx * il, z: dz * il });
+  };
+  // one always-driver animates tips + geysers; idles to a length check when quiet
+  if (CBZ.onAlways) CBZ.onAlways(7.8, function (dt) {
+    if (!knocks.length && !geysers.length && !drops.length) return;
+    // knock-overs: eased tip + slide (+ a hop for the cones)
+    for (let i = knocks.length - 1; i >= 0; i--) {
+      const k = knocks[i];
+      k.t += dt;
+      const u = Math.min(1, k.t / k.dur);
+      const e = 1 - (1 - u) * (1 - u);
+      _axTip.set(k.axx, 0, k.axz);
+      _qTip.setFromAxisAngle(_axTip, e * k.ang);
+      k.g.quaternion.copy(_qTip).multiply(k.q0);
+      k.g.position.set(k.x0 + k.sx * e, k.y0 + (k.hop ? Math.sin(u * Math.PI) * k.hop : 0), k.z0 + k.sz * e);
+      if (u >= 1) { k.g.position.y = k.y0; knocks.splice(i, 1); }
+    }
+    // hydrant geysers: emit pooled droplets while anyone's near enough to see
+    const cam = CBZ.camera && CBZ.camera.position;
+    for (let i = geysers.length - 1; i >= 0; i--) {
+      const gy = geysers[i];
+      gy.t -= dt;
+      if (gy.t <= 0) { geysers.splice(i, 1); continue; }
+      if (!cam) continue;
+      const gdx = gy.x - cam.x, gdz = gy.z - cam.z;
+      if (gdx * gdx + gdz * gdz > 90 * 90) continue;
+      const fade = Math.min(1, gy.t / 3);              // pressure dies over the last seconds
+      gy.acc += dt;
+      while (gy.acc > 0.04 && drops.length < 80) {
+        gy.acc -= 0.04;
+        const s = takeDrop();
+        s.position.set(gy.x + (Math.random() - 0.5) * 0.16, 0.75, gy.z + (Math.random() - 0.5) * 0.16);
+        s.scale.set(0.3, 0.5, 1);
+        s.material.opacity = 0.85 * fade;
+        drops.push({ s, vx: (Math.random() - 0.5) * 1.6, vy: (8.5 + Math.random() * 3.5) * (0.55 + 0.45 * fade), vz: (Math.random() - 0.5) * 1.6, life: 1 });
+      }
+      if (gy.acc > 0.04) gy.acc = 0;                   // pool full — drop the backlog
+    }
+    // droplets: ballistic rise + fall, swell and thin out on the way down
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const p = drops[i];
+      p.life -= dt;
+      p.vy -= 13 * dt;
+      p.s.position.x += p.vx * dt; p.s.position.y += p.vy * dt; p.s.position.z += p.vz * dt;
+      if (p.life <= 0 || p.s.position.y < 0.05) { p.s.visible = false; dropPool.push(p.s); drops.splice(i, 1); continue; }
+      const u = 1 - p.life;
+      p.s.scale.set(0.3 + u * 0.9, 0.5 + u * 0.7, 1);
+      p.s.material.opacity = Math.min(0.85, p.life * 1.7) * 0.9;
+    }
+  });
+
   // ---- shared advertising / poster canvas textures ------------------------
   // Billboards + bus-shelter ad panels read from a pool of generated poster
   // textures. Content is RELEVANT to OUR city — the real gangs that hold turf,
@@ -254,6 +425,29 @@
   CBZ.cityProps = function (city) {
     const root = city.root, rng = city.rng;
     city.streetProps = city.streetProps || [];
+    // fresh world: drop every shootable record/animation from the old one
+    shootables = [];
+    knocks.length = 0; geysers.length = 0;
+    for (let i = drops.length - 1; i >= 0; i--) { drops[i].s.visible = false; dropPool.push(drops[i].s); }
+    drops.length = 0;
+    // ---- THE ROAD STOPS BULLETS: one invisible raycast plane just above the
+    // street-paint stack (asphalt 0.04 → crosswalks 0.072 → pavement 0.09).
+    // The shot resolver (fpsmode wallDistance) only tests CBZ.losBlockers, so
+    // a round fired at the asphalt used to sail through the world and leave
+    // NOTHING — now it terminates on the street like a wall hit: dust kick,
+    // a persistent pock, the thud. visible=false → never rendered (zero draw
+    // calls); r128 raycasts it regardless. Built ONCE, ever (losBlockers is
+    // never wholesale reset), and one extra plane per ray is noise.
+    if (!CBZ._cityGroundRayPlane && CBZ.losBlockers) {
+      const gp = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshBasicMaterial());
+      gp.material._shared = true; gp.geometry._shared = true;
+      gp.rotation.x = -Math.PI / 2;
+      gp.position.y = 0.085;
+      gp.visible = false;
+      gp.updateMatrixWorld(true);          // never in the scene graph — bake the matrix once
+      CBZ._cityGroundRayPlane = gp;
+      CBZ.losBlockers.push(gp);
+    }
     // collected emissive props that should glow after dark (lamp heads, billboard
     // panels, shelter ad-lights, neon shop signs). Driven once/frame in city mode.
     const nightLamps = city._nightLamps = city._nightLamps || [];
@@ -426,6 +620,8 @@
       solidCollider(x, z, 0.3, pole);
       nightLamps.push(glow);
       city.streetProps.push({ x, z, type: "lamp" });
+      // shoot the HEAD and the light dies (the pole just sparks via walls/ground)
+      shootables.push({ type: "lamp", x, z, y: 5.35, r: 0.7, bulb, glow, broken: false });
       return g;
     }
     for (const r of city.roads) {
@@ -476,6 +672,7 @@
       root.add(g);
       solidCollider(x, z, 0.26, body);
       city.streetProps.push({ x, z, type: "hydrant" });
+      shootables.push({ type: "hydrant", x, z, y: 0.5, r: 0.5, group: g, gy: null });
     }
 
     // ----- MAILBOX: USPS-style blue drum letterbox on a foot ---------------
@@ -494,6 +691,7 @@
       root.add(g);
       solidCollider(x, z, 0.36, drum);
       city.streetProps.push({ x, z, type: "mailbox" });
+      shootables.push({ type: "mailbox", x, z, y: 0.95, r: 0.5 });
     }
 
     // ----- PUBLIC TRASH CAN: green mesh barrel + dome lid ------------------
@@ -506,6 +704,7 @@
       lid.position.y = 0.82; g.add(lid);
       root.add(g);
       city.streetProps.push({ x, z, type: "bin" });   // small, no collider
+      shootables.push({ type: "bin", x, z, y: 0.5, r: 0.48, group: g, over: false });
     }
 
     // ----- PARKING METER: post + head + tiny display -----------------------
@@ -520,6 +719,7 @@
       face.position.set(0, 1.36, 0.085); g.add(face);
       root.add(g);
       city.streetProps.push({ x, z, type: "meter" });  // thin, no collider
+      shootables.push({ type: "meter", x, z, y: 1.25, r: 0.28 });
     }
 
     // ----- NEWSPAPER / NEWS BOX: little coin-op vending box ----------------
@@ -535,6 +735,7 @@
       win.position.set(0, 0.62, 0.205); g.add(win);
       root.add(g);
       city.streetProps.push({ x, z, type: "newsbox" });
+      shootables.push({ type: "newsbox", x, z, y: 0.55, r: 0.45, group: g, over: false });
     }
 
     // ----- TRAFFIC CONE: orange cone + reflective collar -------------------
@@ -548,6 +749,7 @@
       const base = new THREE.Mesh(geo("coneBase", () => new THREE.BoxGeometry(0.32, 0.04, 0.32)), coneBaseM);
       base.position.y = 0.02; g.add(base);
       root.add(g);   // decor, no collider
+      shootables.push({ type: "cone", x, z, y: 0.27, r: 0.32, group: g, over: false });
     }
 
     // ----- PLANTER + low-poly TREE -----------------------------------------

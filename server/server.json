@@ -1,0 +1,41 @@
+{
+  "name": "Cell Block Z RP",
+  "motd": "Welcome. Stay in character. /help for commands.",
+  "tags": [
+    "rp",
+    "casual"
+  ],
+  "password": "",
+  "adminPass": "",
+  "maxPlayers": 16,
+  "port": 8000,
+  "roles": [
+    {
+      "id": "civ",
+      "label": "Civilian"
+    },
+    {
+      "id": "police",
+      "label": "Police"
+    },
+    {
+      "id": "ems",
+      "label": "Paramedic"
+    },
+    {
+      "id": "taxi",
+      "label": "Taxi Driver"
+    },
+    {
+      "id": "crook",
+      "label": "Crook"
+    }
+  ],
+  "iceServers": [],
+  "directory": "",
+  "publicUrl": "",
+  "world": {
+    "name": "",
+    "autosaveSec": 120
+  }
+}

@@ -170,6 +170,25 @@
     }
     const night = inc > 0 ? Math.min(1, CBZ.nightAmount || 0) : 0;
 
+    // ---- THE CITY REACTS to the round itself ------------------------------
+    // Every shot in the game draws a tracer, so this segment IS the bullet's
+    // whole path — route it once at the street furniture (props.js reacts:
+    // lamps shatter dark, hydrants geyser, cans go flying), and stamp the
+    // ROAD when the line carries below the pavement plane: the shot resolver
+    // only raycasts walls/cars, so a round fired into the asphalt used to
+    // vanish without a mark. Player pellets, NPC guns and cop fire all pass
+    // through here, so the whole firefight leaves evidence.
+    if (CBZ.game && CBZ.game.mode === "city" && opts.muzzle !== false) {
+      if (CBZ.cityShootProp) CBZ.cityShootProp(from, to);
+      const GY = 0.09;                                  // pavement top (sidewalk 0.08 / lot pad 0.10)
+      if (to.y < GY && from.y > GY + 0.3) {
+        const gt = (from.y - GY) / (from.y - to.y);
+        const gp = { x: from.x + (to.x - from.x) * gt, y: GY, z: from.z + (to.z - from.z) * gt };
+        CBZ.bulletHole(gp, { x: 0, y: 1, z: 0 }, { size: 0.2, noProp: true });
+        CBZ.bulletImpact(gp, { x: 0, y: 1, z: 0 }, { kind: "dust", power: 0.8 });
+      }
+    }
+
     const m = takeLine();
     const p = m.geometry.attributes.position.array;
     p[0] = from.x; p[1] = from.y; p[2] = from.z;
@@ -259,6 +278,11 @@
     const power = opts.power != null ? opts.power : 1;
     _vn.set(normal ? normal.x : 0, normal ? normal.y : 1, normal ? normal.z : 0);
     if (_vn.lengthSq() < 1e-6) _vn.set(0, 1, 0); else _vn.normalize();
+    // GROUND hit wearing a wall normal: the shot resolver reflects bullets off
+    // near-vertical surfaces, but a round into the STREET (the city's ground
+    // raycast plane sits at y≈0.085) must kick its debris UP off the asphalt,
+    // not sideways along it.
+    if (pos.y < 0.2 && Math.abs(_vn.y) < 0.5) _vn.set(_vn.x * 0.3, 1, _vn.z * 0.3).normalize();
     // tangent basis on the surface for cone-spread debris
     _vt.crossVectors(_vn, UP);
     if (_vt.lengthSq() < 1e-5) _vt.set(1, 0, 0); else _vt.normalize();
@@ -315,17 +339,22 @@
   // A fixed pool of small dark pock decals (cap 64, oldest recycled) stamped at
   // the hit point along the surface normal. opts.size carries CALIBER (an AK
   // pock reads visibly bigger than a 9mm), opts.parent mounts the decal on a
-  // moving body (a car group) so the hole rides the panel it punched. LOD: a
+  // moving body (a car group) so the hole rides the panel it punched —
+  // parented hits are SNAPPED onto the real bodywork by a short refinement
+  // ray (the caller's point/normal come off the car's bounding box) and
+  // capped at HOLE_PER_CAR per body (oldest on that body reused). LOD: a
   // pock you can't see isn't worth a slot — skipped beyond 50u of the camera.
   // The shared geo/material are flagged _shared so vehicles.js' teardown
   // traversal (explodeCar/clearCars disposes non-shared resources) spares them.
-  const HOLE_CAP = 64, HOLE_LOD = 50;
+  const HOLE_CAP = 64, HOLE_LOD = 50, HOLE_PER_CAR = 10;
   const holes = [];
-  let holeIdx = 0, holeGeo = null, holeMat = null;
+  let holeIdx = 0, holeSeq = 0, holeGeo = null, holeMat = null;
   const _zAxis = new THREE.Vector3(0, 0, 1);
   const _hq = new THREE.Quaternion();
   const _hp = new THREE.Vector3();
   const _hn = new THREE.Vector3();
+  const _ray = new THREE.Raycaster();
+  const _nm = new THREE.Matrix3();
   function makeHoleMat() {
     const c = document.createElement("canvas"); c.width = c.height = 32;
     const x = c.getContext("2d");
@@ -342,9 +371,20 @@
     m._shared = true;
     return m;
   }
+  let routingProps = false;   // re-entry guard: prop reactions stamp holes of their own
   CBZ.bulletHole = function (pos, normal, opts) {
     opts = opts || {};
     const cam = CBZ.camera;
+    // PLAYER-SHOT PROP ROUTING: fpsmode is the only caller that stamps holes,
+    // and the player's eye IS the camera — so camera→impact is the round's
+    // real path. Street furniture along it reacts (props.js cityShootProp:
+    // lamps die, hydrants geyser, cans fly). Runs BEFORE the 50u decal LOD so
+    // a sniped hydrant still pops. opts.noProp opts out (NPC ground stamps
+    // come in via CBZ.tracer, which already routed the true shooter→target line).
+    if (!routingProps && !opts.noProp && CBZ.cityShootProp && CBZ.game && CBZ.game.mode === "city" && cam) {
+      routingProps = true;
+      try { CBZ.cityShootProp(cam.position, pos); } finally { routingProps = false; }
+    }
     const d = opts.dist != null ? opts.dist
       : (cam ? Math.hypot(pos.x - cam.position.x, pos.y - cam.position.y, pos.z - cam.position.z) : 0);
     if (d > HOLE_LOD) return null;
@@ -353,24 +393,70 @@
       holeGeo = new THREE.PlaneGeometry(1, 1);
       holeGeo._shared = true;
     }
-    let m;
-    if (holes.length < HOLE_CAP) {
-      m = new THREE.Mesh(holeGeo, holeMat);
-      m.renderOrder = 4;
-      holes.push(m);
-    } else {
-      m = holes[holeIdx];
-      holeIdx = (holeIdx + 1) % HOLE_CAP;
-    }
     const parent = opts.parent || scene;
-    if (m.parent !== parent) parent.add(m);   // .add() detaches from any old parent
-    m.visible = true;
     _hn.set(normal ? normal.x : 0, normal ? normal.y : 0, normal ? normal.z : 1);
     if (_hn.lengthSq() < 1e-6) _hn.set(0, 0, 1); else _hn.normalize();
     _hp.set(pos.x, pos.y, pos.z);
+    // CAR SNAP: a parented hit point/normal comes off the car's BOUNDING-BOX
+    // slab test (fpsmode findCarHit) — on the real bodywork that point can
+    // float a metre off the hood/windshield (the filmed "plastic shield in
+    // front of the car"). Refine it: back outside the hull along the entry
+    // normal, fire a short ray back IN, and stamp on the first real panel
+    // mesh struck — true surface point + true face normal. Nothing visible
+    // along the ray means the slab test grazed past the bodywork: no panel,
+    // no hole (a floating disc is exactly the bug).
+    if (parent !== scene) {
+      if (parent.updateWorldMatrix) parent.updateWorldMatrix(true, true);
+      _ray.ray.origin.copy(_hp).addScaledVector(_hn, 1.5);
+      _ray.ray.direction.copy(_hn).negate();
+      _ray.near = 0; _ray.far = 4;
+      let best = null;
+      parent.traverse(function (o) {
+        // meshes only (sprites need a camera + a smoke puff is not a panel);
+        // skip shattered/hidden parts and the decals we already stamped
+        if (!o.isMesh || !o.visible || o._bulletHole) return;
+        const its = _ray.intersectObject(o, false);
+        if (its.length && its[0].face && (!best || its[0].distance < best.distance)) best = its[0];
+      });
+      if (!best) return null;
+      _hp.copy(best.point);
+      _nm.getNormalMatrix(best.object.matrixWorld);
+      _hn.copy(best.face.normal).applyMatrix3(_nm).normalize();
+      if (_hn.lengthSq() < 1e-6) _hn.set(0, 1, 0);
+    }
+    let m = null;
+    // PER-CAR CAP: one riddled sedan must not eat the whole pool — past
+    // HOLE_PER_CAR on this body, recycle ITS oldest pock instead of a slot.
+    if (parent !== scene) {
+      let count = 0, oldest = null;
+      for (let i = 0; i < holes.length; i++) {
+        const h = holes[i];
+        if (h.parent !== parent || !h.visible) continue;
+        count++;
+        if (!oldest || h._holeSeq < oldest._holeSeq) oldest = h;
+      }
+      if (count >= HOLE_PER_CAR) m = oldest;
+    }
+    if (!m) {
+      if (holes.length < HOLE_CAP) {
+        m = new THREE.Mesh(holeGeo, holeMat);
+        m.renderOrder = 4;
+        m._bulletHole = true;
+        holes.push(m);
+      } else {
+        m = holes[holeIdx];
+        holeIdx = (holeIdx + 1) % HOLE_CAP;
+      }
+    }
+    m._holeSeq = ++holeSeq;
+    if (m.parent !== parent) parent.add(m);   // .add() detaches from any old parent
+    m.visible = true;
+    // street-level hit with a wall-style horizontal normal → the pock lies
+    // FLAT on the asphalt (same ground correction as bulletImpact); cars are
+    // exempt — a rocker-panel hole at y0.15 really is on a vertical surface.
+    if (pos.y < 0.2 && Math.abs(_hn.y) < 0.5 && (!opts.parent || opts.parent === scene)) _hn.set(0, 1, 0);
     if (parent !== scene) {
       // mount in the parent's LOCAL frame so the pock moves with the panel
-      if (parent.updateWorldMatrix) parent.updateWorldMatrix(true, false);
       parent.worldToLocal(_hp);
       parent.getWorldQuaternion(_hq);
       _hn.applyQuaternion(_hq.invert()).normalize();

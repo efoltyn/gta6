@@ -52,7 +52,7 @@
   const CBZ = window.CBZ, THREE = window.THREE;
   if (!CBZ || !THREE) return;
 
-  const CAP = 360;                       // hard ceiling on instanced bodies
+  const CAP = 760;                       // hard ceiling on instanced bodies (~1000-alive city)
   let count = 0, built = false, ready = false;
 
   // --- agent state (flat arrays; index 0..count-1) ---
@@ -62,12 +62,15 @@
   const skin = new Int32Array(CAP), shirt = new Int32Array(CAP), hairC = new Int32Array(CAP);
 
   const SKINS = [0xf1c9a5, 0xe0a878, 0xc68642, 0x8d5524, 0xffdbac, 0xa66a3c];
-  // 0-9: the everyday base palette. 10-14: BRIGHT tourist/money colours
-  // (downtown casting). 15-18: hi-vis + drab canvas work gear (industrial).
-  // 19-22: PARTY brights (hot pink/violet/cyan/cream) — the night-core
-  // going-out wardrobe, loud under the neon. Plain hex values tinted
-  // per-instance — no new materials.
-  const SHIRTS = [0x3a6ea5, 0x9c3b3b, 0x4a7a44, 0xb8973f, 0x6a4a8a, 0x444a52, 0xb06a3a, 0x2f8a8a, 0xcfcfcf, 0x356b9a,
+  // 0-9: the everyday base palette — plain tee colors people actually buy
+  // (white/gray/black/navy/forest/maroon/mustard + two muted blues), matched
+  // to peds.js's SHIRT rack so a promoted body keeps reading like the same
+  // person. 10-14: BRIGHT tourist/money colours (downtown casting; peds.js
+  // BRIGHTS mirrors 11-14+10). 15-18: hi-vis + drab canvas work gear
+  // (industrial). 19-22: PARTY brights (hot pink/violet/cyan/cream) — the
+  // night-core going-out wardrobe, loud under the neon. Plain hex values
+  // tinted per-instance — no new materials.
+  const SHIRTS = [0x2c3e5c, 0x6e2b33, 0x33573b, 0xc9a23a, 0x444a52, 0x23262b, 0x8a939c, 0x3a5a7c, 0xe8e6e0, 0x356b9a,
                   0xe8e4da, 0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0,
                   0xe8821a, 0xc6d435, 0x4e453a, 0x5a5e52,
                   0xff2e7a, 0xa44dff, 0x22d4c8, 0xf5e9da];
@@ -90,7 +93,7 @@
   // pop-weighted draw; after dusk we draw from THIS table instead: the lit
   // core packs out, residential empties hard, the docks go dead. The same
   // numbers drive the turnover relocations, so the field self-corrects.
-  const NIGHT_KIND_W = { core: 4.6, commercial: 0.9, projects: 1.5, residential: 0.35, industrial: 0.12 };
+  const NIGHT_KIND_W = { core: 3.4, commercial: 0.9, projects: 1.5, residential: 0.5, industrial: 0.12 };
   const NIGHT_DENSITY = 0.6;              // the street holds ~60% of the day crowd after dark
   const TURNOVER_FRAC = 0.5;              // share of the crowd reconsidered at each dusk/dawn flip
   let nightShift = false;                 // local copy of peds.js's dusk/dawn flip (CBZ.cityNightShift)
@@ -162,7 +165,9 @@
   // work on them) as you walk up, then get parked back to instanced density
   // when you walk away. Without this the city crowd was render-only and dead to
   // interaction — you could walk into someone and nothing happened.
-  const PROMO = 18;                              // pool of interactive peds kept near you
+  const PROMO = 22;                              // pool of interactive peds kept near you
+                                                 // (a few slots of slack so bump-knockdowns
+                                                 //  can promote victims mid-sprint)
   const PROMO_IN2 = 22 * 22;                     // promote-in radius (any direction)
   // FAR REACH: an agent in your sightline (ahead of the camera) gets promoted to a
   // real, shoot/run-over-able ped from much farther out, so anyone you can SEE down
@@ -183,6 +188,14 @@
   // living total); they're parked off-map and skipped by sim/render/reseed/promote
   // until the target density says the street should hold more people again.
   const suppressed = new Uint8Array(CAP);
+  // BUMP REACTIONS: stagger timer + shove velocity per agent. While stagT>0
+  // the body is skidding/recovering from a physical hit instead of strolling —
+  // the render leans it with the shove, so a bump READS without any rig anim.
+  const stagT = new Float32Array(CAP), stagX = new Float32Array(CAP), stagZ = new Float32Array(CAP);
+  // dead-reckoning step direction (unit vector toward the current target),
+  // refreshed on think ticks; mid/far agents walk this between ticks.
+  const dirX = new Float32Array(CAP), dirZ = new Float32Array(CAP);
+  const collapsedQ = new Uint8Array(CAP);         // park matrices already written (skip rewrites)
   let liveTarget = CAP;                           // how many agents should be ON the street
   let pool = [], poolBuilt = false;               // interactive-promotion pool (declaration was dropped when thinning was added)
   promotedBy.fill(-1);
@@ -266,10 +279,11 @@
     else if (edge === 2) { out.x = l.cx - off; out.z = l.cz + t; }
     else { out.x = l.cx + off; out.z = l.cz + t; }
   }
-  // a downtown walker strolls DOWNTOWN: most repicks stay in the walker's home
-  // district; the rest fall through to the city-wide weighted draw, so a
-  // little cross-district flow remains and the global density gradient holds.
-  const STAY = 0.8;
+  // a downtown walker strolls DOWNTOWN-ish: a bit over half the repicks stay in
+  // the walker's home district; the rest fall through to the city-wide draw.
+  // Loosened from 0.8 — the hard home clamp is what bunched the whole street
+  // onto a few sidewalks; real foot traffic bleeds between neighbourhoods.
+  const STAY = 0.55;
   // the city-wide draw for the CURRENT hour: pop-weighted by day, night-field
   // weighted after dusk. ALL spawn/reseed/relocation positions come through
   // here, so flipping ONE flag re-shapes where the whole street lives.
@@ -285,6 +299,16 @@
         if (A.clampToCity) A.clampToCity(out, 0.6);
         return;
       }
+    }
+    // SPREAD: a third of the day draws come straight off the FULL lot grid
+    // (uniform — every street in the city), the rest stay pop-weighted toward
+    // the busy quarters. Together with the flattened district weights this
+    // kills the dead zones AND the clown-car sidewalks. Uniform path picks
+    // the lot with Math.random so the world's seeded rng stream is untouched.
+    if (!nightShift && A.lots && A.lots.length && Math.random() < 0.35) {
+      sidewalkOnLot(A.lots[(Math.random() * A.lots.length) | 0], out);
+      if (A.clampToCity) A.clampToCity(out, 0.6);
+      return;
     }
     const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(Math.random) : A.randomSidewalkPoint();
     if (A.clampToCity) A.clampToCity(p, 0.6);
@@ -331,6 +355,7 @@
     count = Math.max(0, Math.min(CAP, n | 0));
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
+    stagT.fill(0); collapsedQ.fill(0);
     liveTarget = count;                          // full street at the start of a run
     for (let i = 0; i < count; i++) {
       // pop-weighted spawn (Midtown packed, Dockyard thin), then a stroll
@@ -338,6 +363,7 @@
       pickWaypoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
       pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
       heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+      dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
       spd[i] = 1.0 + Math.random() * 1.6;
       phase[i] = Math.random() * 6.2832;
       skin[i] = (Math.random() * SKINS.length) | 0;
@@ -358,7 +384,7 @@
     }
     return count;
   };
-  CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 320)); };
+  CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 700)); };
   // tiny debug accessors (used by the headless harness; cheap, read-only)
   CBZ.cityCrowdCount = function () { return count; };
   CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i] }; };
@@ -374,20 +400,57 @@
   }
 
   // pure-math simulation: stroll toward the target, repick on arrival.
+  // TICK TIERS — the 700-strong street at flat per-frame cost: agents near the
+  // camera think every frame, mid-range every 4th, far every 16th (round-robin
+  // by (frame+i), so the work spreads evenly). Between thinks a body DEAD-
+  // RECKONS along its cached step direction at full speed, so motion stays
+  // per-frame smooth everywhere; only the steering/arrival/collide brain is
+  // sliced. Worst-case wall drift before a far tick's 2-pass depenetration is
+  // ~0.7m — well inside any building box, so the push always resolves it.
   let _simFrame = 0;                       // for the collide stride time-slice
+  const NEAR2 = 42 * 42, MID2 = 110 * 110; // think-tier rings (camera distance)
   function sim(dt) {
     const A = arena(); if (!A) return;
     const frame = _simFrame++;
+    const P = CBZ.player;
+    const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
     for (let i = 0; i < count; i++) {
       if (deadAgent[i]) continue;
       if (corpseT[i] > 0) { corpseT[i] -= dt; if (corpseT[i] <= 0) deadAgent[i] = 1; continue; }  // lying dead → fade out
       if (suppressed[i]) continue;                        // off-street (thinned out) → don't walk it
       if (promotedBy[i] >= 0) continue;                   // a real promoted ped owns this one
+      // BUMPED: skid out the shove, recover, then pick a fresh stroll — the
+      // physical reaction IS the behaviour (no pathing AI on top of it).
+      if (stagT[i] > 0) {
+        stagT[i] -= dt;
+        px[i] += stagX[i] * dt; pz[i] += stagZ[i] * dt;
+        const dec = Math.pow(0.02, dt); stagX[i] *= dec; stagZ[i] *= dec;
+        if (CBZ.collide) {
+          _col.x = px[i]; _col.z = pz[i];
+          CBZ.collide(_col, 0.5, 0, 1.7);
+          px[i] = _col.x; pz[i] = _col.z;
+        }
+        if (stagT[i] <= 0) {
+          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+        }
+        continue;
+      }
+      const cdx = px[i] - ppx, cdz = pz[i] - ppz, cd2 = cdx * cdx + cdz * cdz;
+      const stride = cd2 < NEAR2 ? 1 : (cd2 < MID2 ? 4 : 16);
+      if (stride > 1 && (frame + i) % stride !== 0) {
+        // off-tick: keep walking the cached direction — full speed, no brain
+        px[i] += dirX[i] * spd[i] * dt; pz[i] += dirZ[i] * spd[i] * dt;
+        phase[i] += spd[i] * 2.4 * dt;
+        continue;
+      }
       let dx = tx[i] - px[i], dz = tz[i] - pz[i], d = Math.hypot(dx, dz);
       if (d < 1.4) { pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z; dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
       const inv = 1 / (d || 1);
       const want = Math.atan2(dx, dz);
       heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], want, 1 - Math.pow(0.0015, dt)) : want;
+      dirX[i] = dx * inv; dirZ[i] = dz * inv;             // dead-reckoning cache for off-ticks
       const step = spd[i] * dt;
       px[i] += dx * inv * step; pz[i] += dz * inv * step;
       phase[i] += spd[i] * 2.4 * dt;
@@ -403,7 +466,9 @@
       // one push at a corner can shove a body OUT of one wall and INTO the next, so
       // a second pass resolves that — a straight-line stroll can't squeeze a thin
       // wall in a single push. Stop early once a pass no longer moves the body.
-      if (CBZ.collide && ((frame + i) % 3 === 0)) {
+      // (mid/far tiers collide on EVERY think tick — that's already a 4/16-frame
+      //  stride; near keeps the 1-in-3 slice from before)
+      if (CBZ.collide && (stride > 1 || (frame + i) % 3 === 0)) {
         _col.x = px[i]; _col.z = pz[i];
         for (let pass = 0; pass < 2; pass++) {
           const bx = _col.x, bz = _col.z;
@@ -413,6 +478,8 @@
         if (_col.x !== px[i] || _col.z !== pz[i]) {
           px[i] = _col.x; pz[i] = _col.z;            // shoved out of the wall
           pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;   // repick so it doesn't grind back in
+          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);     // don't reckon back into the wall
         }
       }
     }
@@ -445,15 +512,22 @@
     put(eyeR, i, 0.12, 2.235 + bob, 0.25, 0.11, 0.14, 0.12, 0);
     put(mouth, i, 0, 2.045 + bob, 0.255, 0.22, 0.055, 0.10, 0);
   }
+  const FARDRAW2 = 95 * 95;     // beyond this, matrix rewrites drop to every 4th frame
   function render() {
     if (!ready || !count) return;
+    const frame = _simFrame;
+    const P = CBZ.player;
+    const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
     for (let i = 0; i < count; i++) {
       if (deadAgent[i] || suppressed[i] || promotedBy[i] >= 0) {  // faded corpse, thinned off-street, or promoted to a real rig → collapse the instanced body
+        if (collapsedQ[i]) continue;                   // park matrices already written — skip the 11 rewrites
+        collapsedQ[i] = 1;
         wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
         for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
         if (shadowQ) shadowQ.setMatrixAt(i, wm);   // blob collapses with the body
         continue;
       }
+      collapsedQ[i] = 0;                               // visible again → park matrices need rewriting next collapse
       if (corpseT[i] > 0) {                            // freshly killed → lie flat ON the ground
         // Rotating the standing rig 90° about X lays it on its back: each part's
         // local +Z (body depth) becomes the world-vertical extent. The thickest
@@ -475,11 +549,20 @@
         }
         continue;
       }
+      // far bodies move sub-pixel per frame — rewrite their 11 matrices every
+      // 4th frame (round-robin) and let the stale pose coast in between.
+      const rdx = px[i] - ppx, rdz = pz[i] - ppz;
+      if (rdx * rdx + rdz * rdz > FARDRAW2 && ((frame + i) & 3) !== 0) continue;
       rootD.position.set(px[i], 0, pz[i]);
-      rootD.rotation.set(0, heading[i], 0);
+      if (stagT[i] > 0) {
+        // bumped: face the shover, pitch away with the shove — a readable
+        // stumble straight off the verlet-style skid, no rig animation needed.
+        const lean = Math.min(0.55, stagT[i] * 1.1);
+        rootD.rotation.set(lean, Math.atan2(stagX[i], stagZ[i]) + Math.PI, 0);
+      } else rootD.rotation.set(0, heading[i], 0);
       rootD.scale.set(1, 1, 1);
       rootD.updateMatrix();
-      const sn = Math.sin(phase[i]);
+      const sn = stagT[i] > 0 ? Math.sin(phase[i]) * 0.25 : Math.sin(phase[i]);
       drawParts(i, sn * 0.5, Math.abs(Math.cos(phase[i])) * 0.05);
       if (shadowQ) {
         shadD.position.set(px[i], 0.04, pz[i]);      // a hair above the pavement (+ polygonOffset)
@@ -652,7 +735,112 @@
         castTint(i, px[i], pz[i]); repaintShirt(i);   // recycled body dresses like a LOCAL
         pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
         heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+        dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
         moved++; break;
+      }
+    }
+  }
+
+  // ---- BUMP KNOCKDOWNS: collision IS the crowd AI ----
+  // No personal-space pathing — if something fast hits a body, the body reacts
+  // physically. Walking pace just shoulders people aside; a brisk runner makes
+  // them stumble (skid + lean + recover); a full sprint — yours or a fleeing
+  // ped's — bowls them over. Near-camera victims get PROMOTED into real rigs
+  // first so the shared body physics sells the hit, and the victim then reacts
+  // in character (curse, scramble, swing) through humancontact like any shove.
+  // Movers are the player + the handful of fast full rigs near the camera, so
+  // the pass is movers × agents (a few thousand mults), never O(n²) pairs.
+  const BUMP_R2 = 1.05 * 1.05;     // mover-vs-agent contact distance²
+  const STUMBLE_SPD = 3.0;         // relative speed → stumble (below: a shove aside)
+  const RIG_KD_SPD = 4.6;          // a sprinting/fleeing RIG bowls bodies past this
+  const MOVERS = 10;
+  const _mvX = new Float32Array(MOVERS), _mvZ = new Float32Array(MOVERS), _mvS = new Float32Array(MOVERS);
+  const _mvKD = new Uint8Array(MOVERS);      // mover hits hard enough to knock down
+  const _mvRef = new Array(MOVERS);          // mover actor (null = the player)
+  const _bumpSrc = { isPlayer: true, pos: null };   // react() source for player bumps
+  const _victims = [];                       // near, slow, upright rigs (reused)
+  function bumpAgent(i, nx, nz, sp, kd, ref) {
+    const guest = CBZ.net && CBZ.net.noSim();          // guests never spawn real peds
+    if (kd && !guest) {
+      // promote → real rig → real knockdown physics (the comedy payoff)
+      if (!poolBuilt) buildPool();
+      if (poolBuilt) for (let s = 0; s < pool.length; s++) {
+        const e = pool[s];
+        if (e.idx >= 0) continue;
+        assign(e, s, i);
+        const ped = e.ped;
+        if (CBZ.body && CBZ.body.knockdown) {
+          CBZ.body.knockdown(ped, { fromX: px[i] - nx, fromZ: pz[i] - nz, force: 7 + Math.min(8, sp * 0.6), t: 1.1 + Math.random() * 0.7 });
+        }
+        if (CBZ.humanContact) {                        // gets up cursing / swinging / fleeing per aggr
+          _bumpSrc.pos = CBZ.player.pos;
+          CBZ.humanContact.react(ped, { mode: "city", source: ref || _bumpSrc, kind: "run-over", severity: 1 });
+        }
+        if (CBZ.sfx) CBZ.sfx("ko");
+        return;
+      }
+    }
+    if (kd) {
+      // no free rig slot (or guest): a violent instanced skid still sells it
+      stagT[i] = 1.0 + Math.random() * 0.3;
+      stagX[i] = nx * (3.5 + sp * 0.5); stagZ[i] = nz * (3.5 + sp * 0.5);
+    } else if (sp >= STUMBLE_SPD) {
+      stagT[i] = 0.45 + Math.random() * 0.25;
+      stagX[i] = nx * (1.6 + sp * 0.35); stagZ[i] = nz * (1.6 + sp * 0.35);
+    } else {
+      // a walking-pace shoulder: they just get shifted aside, no drama
+      px[i] += nx * 0.35; pz[i] += nz * 0.35;
+    }
+  }
+  function bumpPass(dt) {
+    const P = CBZ.player; if (!P || !count) return;
+    const ppx = P.pos.x, ppz = P.pos.z;
+    // 1) gather movers: the player on foot + any fast rig near the camera
+    let nm = 0;
+    if (!P.dead && !P.driving && (P.speed || 0) > 1.5) {
+      _mvX[nm] = ppx; _mvZ[nm] = ppz; _mvS[nm] = P.speed || 0;
+      _mvKD[nm] = (P.sprint && (P.speed || 0) >= 6.2) ? 1 : 0;   // same charge gate as humancontact
+      _mvRef[nm] = null; nm++;
+    }
+    _victims.length = 0;
+    const peds = CBZ.cityPeds;
+    if (peds) for (let k = 0; k < peds.length && nm < MOVERS; k++) {
+      const p = peds[k];
+      if (p._parked || p.dead || p.inCar || p.culled || !p.pos) continue;
+      const dx = p.pos.x - ppx, dz = p.pos.z - ppz;
+      if (dx * dx + dz * dz > 45 * 45) continue;       // bump theatre is near-camera only
+      if (CBZ.body && CBZ.body.busy && CBZ.body.busy(p)) continue;
+      const sp = p.speed || 0;
+      if (sp >= STUMBLE_SPD) {                          // a runner — a mover
+        _mvX[nm] = p.pos.x; _mvZ[nm] = p.pos.z; _mvS[nm] = sp;
+        _mvKD[nm] = sp >= RIG_KD_SPD ? 1 : 0; _mvRef[nm] = p; nm++;
+      } else _victims.push(p);                          // upright bystander rig
+    }
+    if (!nm) return;
+    // 2) movers vs instanced agents (the mass crowd)
+    for (let i = 0; i < count; i++) {
+      if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0 || stagT[i] > 0) continue;
+      for (let m = 0; m < nm; m++) {
+        const dx = px[i] - _mvX[m], dz = pz[i] - _mvZ[m], d2 = dx * dx + dz * dz;
+        if (d2 >= BUMP_R2) continue;
+        const d = Math.sqrt(d2) || 1;
+        bumpAgent(i, dx / d, dz / d, _mvS[m], _mvKD[m] === 1, _mvRef[m]);
+        break;                                          // one hit per agent per frame
+      }
+    }
+    // 3) RIG movers vs bystander RIGS: a fleeing ped flattens whoever's in the
+    //    way (player-vs-rig charges are humancontact.js's job — not repeated here)
+    for (let m = 0; m < nm; m++) {
+      if (!_mvKD[m] || !_mvRef[m]) continue;
+      const src = _mvRef[m];
+      for (let v = 0; v < _victims.length; v++) {
+        const t = _victims[v];
+        if (t === src) continue;
+        const dx = t.pos.x - _mvX[m], dz = t.pos.z - _mvZ[m];
+        if (dx * dx + dz * dz >= 1.21) continue;
+        if (CBZ.body && CBZ.body.knockdown) CBZ.body.knockdown(t, { fromX: _mvX[m], fromZ: _mvZ[m], force: 6 + _mvS[m] * 0.5, t: 1.1 + Math.random() * 0.6 });
+        if (CBZ.humanContact) CBZ.humanContact.react(t, { mode: "city", source: src, kind: "run-over", severity: 0.8 });
+        if (CBZ.sfx) CBZ.sfx("ko");
       }
     }
   }
@@ -718,7 +906,7 @@
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {
     const _clear = CBZ.clearCityPeds;
-    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
+    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); collapsedQ.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
   }
 
   // ---- DENSITY THINNING: keep the on-street agent count in step with the finite
@@ -760,7 +948,7 @@
     const FAR2 = 60 * 60;
     if (c.live > liveTarget) {
       // too many on the street → suppress a few FAR, non-promoted, living agents
-      let need = Math.min(6, c.live - liveTarget), scanned = 0;
+      let need = Math.min(10, c.live - liveTarget), scanned = 0;   // rate scaled for the 700 crowd
       while (need > 0 && scanned < count) {
         const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
         if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
@@ -772,7 +960,7 @@
       // population didn't drop further (or a fresh run) → let a few back onto the
       // street, re-seeded at a FAR sidewalk point so they walk IN, not blink in.
       const A = arena();
-      let add = Math.min(4, liveTarget - c.live), scanned = 0;
+      let add = Math.min(7, liveTarget - c.live), scanned = 0;     // rate scaled for the 700 crowd
       while (add > 0 && scanned < count) {
         const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
         if (!suppressed[i] || deadAgent[i]) continue;
@@ -782,6 +970,7 @@
           castTint(i, px[i], pz[i]); repaintShirt(i);
           pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
           heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
         }
         add--;
       }
@@ -793,8 +982,8 @@
     //      works in both directions (dusk packs the core, dawn re-spreads).
     //      Far-only, so the change always happens off-screen. ----
     if (turnover > 0) {
-      let moved = 0, scanned = 0;
-      while (turnover > 0 && moved < 3 && scanned < 48) {
+      let moved = 0, scanned = 0;          // budgets scaled with the 700-strong street
+      while (turnover > 0 && moved < 5 && scanned < 80) {
         const i = _turnScan; _turnScan = (_turnScan + 1) % Math.max(1, count); scanned++;
         if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) { turnover--; continue; }
         const dx = px[i] - ppx, dz = pz[i] - ppz;
@@ -803,6 +992,7 @@
         castTint(i, px[i], pz[i]); repaintShirt(i);               // walks on dressed for the hour
         pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
         heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+        dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
         moved++; turnover--;
       }
     }
@@ -812,8 +1002,9 @@
   CBZ.onUpdate(23.7, function (dt) {
     if (CBZ.game.mode !== "city") { if (root) { root.visible = false; } if (poolBuilt) releaseAll(); return; }
     if (root) root.visible = true;
-    if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 320);
+    if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 700);
     sim(dt);
+    bumpPass(dt);         // physical bump reactions: stumble / bowl bodies over
     thin(dt);             // keep on-street density in step with the finite headcount
     aheadReseed();        // pull distant bodies into the street ahead of you
     updatePromotion();

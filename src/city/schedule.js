@@ -28,8 +28,11 @@
    near peds are scheduled through aigoals' existing slice + goal-cooldown
    (full rate where you look, ~1/30 of the crowd per frame); the sun-hour
    every consumer reads is cached at 8Hz; offline entries advance on a
-   0.5Hz rolling sweep (a few per tick), 200-identity LRU cap, no per-
-   frame allocation (one reused proposal scratch). Host-only — guests'
+   0.5Hz rolling sweep (a few per tick), 600-identity LRU cap (raised for
+   the ~1000-strong population now that nearly everyone holds a job — the
+   sweep stays a fixed 16 entries/2s and the deal-in scan is ≤CAP squared-
+   dist compares per promotion, so the budget is flat), no per-frame
+   allocation (one reused proposal scratch). Host-only — guests'
    crowds are set dressing (the host owns the population).
 
    CBZ.cityNpcLedger = { serialize(), apply(obj) } feeds world persistence
@@ -73,14 +76,25 @@
   }
   // the activity this identity OWES the hour. salt (0..1, per identity) keeps
   // the whole city from moving in lockstep: shifts stagger, not everyone bars.
-  function actOf(k, h, salt) {
+  // Workers run THEIR OWN shift window (CBZ.cityJobs hours — the bartender
+  // works nights, the docker pre-dawn), so the street turns over in waves
+  // instead of one synchronized 9-to-5 tide.
+  function actOf(k, h, salt, job) {
     salt = salt || 0.5;
     if (k === "worker") {
-      if (h < 6) return "home";
-      if (h < 9) return "commute";
-      if (h >= 12 && h < 14 && salt < 0.75) return "lunch";
-      if (h < 18) return "work";
-      if (h < 21.5 && salt < 0.55) return "bar";    // some clock straight out
+      const J = CBZ.cityJobs && CBZ.cityJobs[job];
+      const s = J && J.hours ? J.hours[0] : 9, e = J && J.hours ? J.hours[1] : 18;
+      const len = ((e - s + 24) % 24) || 9;          // shift length, wrap-safe (night shifts)
+      const into = (h - s + 24) % 24;                // hours into the shift
+      if (into < len) {
+        const mid = len / 2;                         // a mid-shift bite for most
+        if (into >= mid - 1 && into < mid + 1 && salt < 0.75) return "lunch";
+        return "work";
+      }
+      const off = (h - e + 24) % 24;                 // hours since the whistle
+      if (off < 2.5 && salt < 0.55) return "bar";    // some clock straight out
+      const pre = (s - h + 24) % 24;                 // hours until the next shift
+      if (pre <= 2) return "commute";
       return "home";
     }
     if (k === "vendor") return (h >= 7 && h < 21) ? "stall" : "closed";
@@ -114,10 +128,16 @@
   };
   // $-per-sim-hour by activity: what an OFFLINE identity accrues (the dealer's
   // corner is the fat one — that take is the whole point of casing him).
+  // A worker's "work" hour pays the JOB's wage (CBZ.cityJobs .pay — a doctor's
+  // wallet fattens faster than a student's), falling back to the flat 12.
   const RATE = {
     corner: 80, layup: 6, stall: 40, work: 12, post: 8, hq: 10,
     panhandle: 3, lunch: -4, bar: -8, club: -26,
   };
+  function wageOf(job) {
+    const J = CBZ.cityJobs && CBZ.cityJobs[job];
+    return J && J.pay ? J.pay : RATE.work;
+  }
 
   // one reused proposal scratch — aigoals consumes it synchronously per ped
   const _prop = { act: "", score: 0, mood: null };
@@ -128,7 +148,7 @@
       S = ped._sched = { k: castKey(ped), salt: rng(), a: ped.archetype, j: ped.job };
     }
     if (S.k === "drifter" || S.k === "vendor") return null;   // posted / emergent
-    const act = actOf(S.k, _h, S.salt);
+    const act = actOf(S.k, _h, S.salt, S.j);
     if (!act) return null;
     const sc = SCORE[act];
     if (!sc) return null;                            // panhandle: peds.js' beg loop owns it
@@ -141,9 +161,13 @@
   };
 
   // ============================================================
-  //  THE OFFLINE LEDGER — identities the city remembers (LRU, cap 200)
+  //  THE OFFLINE LEDGER — identities the city remembers (LRU, cap 600 —
+  //  raised from 200 with the jobs-everywhere casting: a learnable commute is
+  //  now the NORM, and the book has to hold enough pages that the barber you
+  //  know is still the barber tomorrow. Cost stays flat: the sweep window is
+  //  fixed-size and the deal scan is one bounded squared-dist pass.)
   // ============================================================
-  const CAP = 200, DEAL_R2 = 45 * 45;
+  const CAP = 600, DEAL_R2 = 45 * 45;
   let led = {};                  // sid -> entry (plain JSON-able objects only)
   let list = [];                 // same entries, for rolling sweeps
   let liveBy = {};               // sid -> live ped ref (never serialized)
@@ -232,14 +256,15 @@
       for (let i = 0; i < n; i++) {
         const span = Math.min(1, hrs - i);
         const hh = (_h - hrs + i + 240) % 24;        // the hour this slice happened at
-        const act = actOf(e.k, hh, e.salt);
+        const act = actOf(e.k, hh, e.salt, e.job);
         if (act === "stash") cash = Math.min(cash, 40);
+        else if (act === "work") cash += wageOf(e.job) * span * (0.6 + (e.wealth || 0.3) * 0.8);
         else if (RATE[act]) cash += RATE[act] * span * (0.6 + (e.wealth || 0.3) * 0.8);
       }
       e.cash = Math.max(0, Math.min(2500, cash | 0));
     }
     // where the timetable puts them RIGHT NOW (the deal-in spawn match)
-    const act = actOf(e.k, _h, e.salt) || "home";
+    const act = actOf(e.k, _h, e.salt, e.job) || "home";
     e.act = act;
     const homeish = act === "home" || act === "camp";
     if (homeish ? e.hx != null : e.jx != null) {
@@ -389,7 +414,7 @@
     const A = CBZ.city && CBZ.city.arena;
     if (A) vendorSweep(A, t);
     const n = list.length;
-    for (let k = 0; k < 10 && n; k++) {              // rolling window, bounded
+    for (let k = 0; k < 16 && n; k++) {              // rolling window, bounded (16/2s keeps a 600 book ~75s-fresh)
       const e = list[_swCur % n]; _swCur++;
       if (!e || !e.alive) continue;
       const body = liveBy[e.sid];

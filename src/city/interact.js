@@ -1,54 +1,36 @@
 /* ============================================================
-   city/interact.js — the contextual street interactions, shown in the
-   shared #interact HUD panel (the same one the jail uses). Walk up to a
-   person, body, gang stash, car or shop and a clear option list pops up.
+   city/interact.js — every street verb, registered into the ONE
+   interaction registry (city/interactions.js · CBZ.interactions).
+
+   This file no longer owns a panel, a key handler or a priority chain —
+   it OWNS THE VERBS: what you can do to a person, a cop, a clerk, a
+   body, a car, the club rope, a gang stash, and your own pockets. Each
+   is an option record with a live canShow gate; the registry decides
+   what you're looking at and which keys do what (and always SHOWS you
+   before you press).
 
    Rules the design follows:
-     • There is ALWAYS a malicious option (Mug / Steal car / Loot / Rob).
-     • Point a gun at someone (gun equipped + they're in your sights) and
-       the panel becomes a HOSTAGE menu — different DEMANDS (rob, ransom,
-       human shield, execute).
-     • Keys: E = shop / eat / loot, I J K L = the contextual options,
-       X = do drugs.
+     • There is ALWAYS a malicious option (Mug / Boost / Loot / Rob).
+     • Point a drawn gun at someone and the panel becomes a HOSTAGE menu
+       (needsGunDrawn options): rob, hostage, ransom, execute.
+     • Keys: E = the primary verb (tap/hold split where natural — tap E
+       gets in a car, HOLD E drags the driver out), I J K L = the rest.
+     • The old dedicated keys are GONE: F-for-cars and X-for-drugs and
+       bare-E-to-eat all surface as panel options now.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
+  const I = CBZ.interactions;
 
-  const REACH = 3.8;
-  let panel, nameEl, noteEl, optsEl;
-  let current = null, currentKey = "", currentOpts = [], detAcc = 0;
-
-  function dom() {
-    if (panel) return;
-    panel = document.getElementById("interact");
-    nameEl = document.getElementById("interactName");
-    noteEl = document.getElementById("interactNote");
-    optsEl = document.getElementById("interactOpts");
-    // tap/click the rows (mobile + mouse), same as the jail panel
-    if (optsEl) optsEl.addEventListener("click", function (e) {
-      if (g.mode !== "city" || CBZ.player.driving) return;
-      const row = e.target.closest && e.target.closest(".iopt");
-      if (!row || row.dataset.i == null) return;
-      const o = currentOpts[+row.dataset.i];
-      if (o && o.fn) o.fn();
-    });
-  }
-  // NOTE: #interact's base style is opacity:0 (the jail's fade-in); only the
-  // `.show` class lifts it to opacity:1. The city must toggle that class too,
-  // or the panel is display:block but fully TRANSPARENT — i.e. "no popup".
-  function hide() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentKey = ""; currentOpts = []; }
-  function show() { dom(); if (panel) { panel.style.display = "block"; panel.classList.add("show"); } }
-  function release() { dom(); if (panel) { panel.style.display = ""; panel.classList.remove("show"); } current = null; currentKey = ""; currentOpts = []; }
+  const REACH = I.REACH;   // 3.8 — the shared interaction reach
 
   function dist(a, x, z) { return Math.hypot(a.pos.x - x, a.pos.z - z); }
   function nearest(list, x, z, test) { let best = null, bd = REACH; for (const p of list) { if (!test(p)) continue; const d = dist(p, x, z); if (d < bd) { bd = d; best = p; } } return best; }
 
-  function armedGun() { const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon(); return it && it.gun ? it : null; }
   // the ped you're "pointing your gun at": in the forward cone, close-ish
   function aimedPed(px, pz) {
-    if (!armedGun()) return null;
     const y = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(y), fz = -Math.cos(y);
     let best = null, bd = 7, bestDot = 0.55;
     for (const p of CBZ.cityPeds) {
@@ -64,46 +46,10 @@
   const TALK = ["You lost?", "Nice day, huh.", "Got a light?", "Move along.", "I know you?", "Crazy out here lately.", "Spare some change?"];
   function talk() { CBZ.city.note("“" + TALK[(Math.random() * TALK.length) | 0] + "”", 1.6); }
 
-  // ---- CORPSE WARDROBE: a body whose CLOTHES you can take (city/outfits.js).
-  // Loot is automatic (walk over it); the FIT is a choice — swap outfits with
-  // the dead. WHY: a cop's uniform makes the law read you as one of theirs, a
-  // crew's colors flip turf hostility, a tycoon's tuxedo is pure worn status.
-  // Scans full-rig bodies only (peds + fallen officers — both keep skinSlots).
-  function nearestDressedBody(px, pz) {
-    if (!CBZ.cityOutfitSwapWithCorpse) return null;
-    let best = null, bd = REACH;
-    const scan = (list) => {
-      if (!list) return;
-      for (const p of list) {
-        if (!p || !p.dead || p._clothesTaken || p.culled) continue;
-        if (!p.char || !p.char.skinSlots) continue;
-        const d = dist(p, px, pz);
-        if (d < bd) { bd = d; best = p; }
-      }
-    };
-    scan(CBZ.cityPeds);
-    scan(CBZ.cityCops);
-    return best;
-  }
-  // the WHY line for a fit, read off what it buys you on the street
-  function bodyFitNote(fit) {
-    if (!fit) return "Their clothes could fit you";
-    if (fit.cop) return "A uniform — the law reads its own colors";
-    if (fit.gang) return "Their colors — that set would read you as kin";
-    if (fit.id === "tuxedo") return "A tuxedo — ropes open for cloth like this";
-    return "A clean change of clothes";
-  }
-  function bodyOpts(b, fit) {
-    return [{
-      label: "Take their clothes" + (fit ? " — " + fit.name : ""), key: "i", bad: true,
-      fn: () => { if (CBZ.cityOutfitSwapWithCorpse(b)) hide(); },
-    }];
-  }
-
-  // ---- valuables / pawn helpers (Tasks 1-4) -------------------------------
+  // ---- valuables / pawn helpers ------------------------------------------
   // Everything reads from the shared econ catalog so the player can judge a
   // haul: a Patek (clean $350k) pawns FAT, a Wallet ($40) is scraps. All
-  // feature-detected — if Agent 1/2's econ helpers are absent we degrade.
+  // feature-detected — if the econ helpers are absent we degrade.
   function econ() { return CBZ.cityEcon || null; }
   function itemDef(name) { const e = econ(); return e && e.ITEMS ? e.ITEMS[name] : null; }
   function itemVal(name) { const it = itemDef(name); return it ? (it.value | 0) : 0; }
@@ -128,58 +74,11 @@
     }
     return name + " " + pawnHint(name);
   }
+  // the first edible / drug in a ctx's pockets (gates the self options)
+  function foodIn(ctx) { const e = econ(); if (!e) return null; return Object.keys(ctx.items || {}).find((n) => ctx.items[n] > 0 && e.ITEMS[n] && e.ITEMS[n].heal) || null; }
+  function drugIn(ctx) { const e = econ(); if (!e) return null; return Object.keys(ctx.items || {}).find((n) => ctx.items[n] > 0 && e.ITEMS[n] && e.ITEMS[n].tag === "drug") || null; }
 
   // ---- gang membership / relationship helpers (all feature-detected) ----
-  // The I/J/K/L panel has a HARD cap of 4 slots; everything funnels through cap4
-  // so no situation can ever overflow the row list.
-  function cap4(opts) { return opts.length > 4 ? opts.slice(0, 4) : opts; }
-
-  // ---- THE CLUB (the velvet rope): the end of the money→clothes→drip loop ----
-  // buildings.js stamps lot.building.club = { bouncerSpot, ropePost, door, ... }
-  // on exactly one lot (CBZ.city.clubLot). When you walk up to the rope we offer
-  // a "step to the bouncer" verb that hands off to club.js's gate check — the
-  // bouncer reads CBZ.cityPlayerDrip() vs CBZ.CITY.CLUB_DRIP to admit/reject you.
-  // All feature-detected: no club lot (or no club.js yet) → the verb never shows.
-  function clubInfo() {
-    const lot = CBZ.city && CBZ.city.clubLot;
-    const c = lot && lot.building && lot.building.club;
-    // club is the structured object (not just the boolean flag); needs a spot.
-    if (c && typeof c === "object" && (c.bouncerSpot || c.ropePost)) return c;
-    return null;
-  }
-  // the world point you "step to" — the rope / bouncer's post.
-  function clubSpot(c) { return (c && (c.bouncerSpot || c.ropePost)) || null; }
-  // are you close enough to the rope to talk to the bouncer? (a touch wider than
-  // REACH so the queue lane / rope reads as one approachable zone).
-  const CLUB_REACH = 4.6;
-  function nearClubSpot(px, pz) {
-    const c = clubInfo(); if (!c) return null;
-    const s = clubSpot(c); if (!s) return null;
-    return Math.hypot(px - s.x, pz - s.z) <= CLUB_REACH ? c : null;
-  }
-  // hand off to club.js's entry/gate function — try the agreed global first, then
-  // a couple of sensible aliases so we coordinate cleanly via whatever club.js
-  // actually exposes. If club.js isn't loaded yet, say so rather than no-op.
-  function clubTryEnter() {
-    const fn = CBZ.cityClubTryEnter || CBZ.cityClubApproach || CBZ.cityClubEnter || CBZ.cityClubGate;
-    if (typeof fn === "function") { fn(); return; }
-    // graceful fallback: at least describe the gate so the loop reads even before
-    // club.js lands (the drip number is the thing that matters at the rope).
-    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
-    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
-    if (drip >= need) CBZ.city.note("The bouncer sizes up your fit and unhooks the rope…", 2.2);
-    else CBZ.city.note("“Not in those rags.” The bouncer waves you off — come back sharper.", 2.6);
-  }
-  // the one-verb panel at the rope (kept to a single slot — never overflows cap4).
-  function clubOpts() {
-    return [{ label: "Step to the bouncer 🪩", key: "i", fn: clubTryEnter }];
-  }
-  function clubNote() {
-    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
-    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
-    return "Velvet rope · " + (drip >= need ? "your fit gets you in" : "not dressed for it yet");
-  }
-
   // your CURRENT membership in an NPC crew (you as a member, not the boss), or null.
   function myMemb() { return (CBZ.cityMembership && CBZ.cityMembership()) || null; }
   // the human rank label for your membership (Prospect / Soldier / …).
@@ -188,6 +87,15 @@
   function gangRec(id) { return (id && CBZ.cityGangById) ? CBZ.cityGangById(id) : null; }
   // are you a PROSPECT for any crew right now? returns its standing 0..1 (or -1).
   function myProspectStanding() { return CBZ.cityProspectStanding ? CBZ.cityProspectStanding() : -1; }
+  // is this ped a soldier of YOUR founded gang?
+  function inMyGang(p) { return !!(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p)); }
+  // are you and this ped patched into the SAME NPC crew?
+  function crewmate(p) { const m = myMemb(); return !!(m && p.gang && p.gang === m.gangId); }
+  function relOf(p) { return CBZ.cityRel ? CBZ.cityRel(p) : null; }
+  function hatesYou(p) { const r = relOf(p); return !!(r && (r.grudge > 45 || (CBZ.cityBond && CBZ.cityBond(p) < -0.3))); }
+  function fearsYou(p) { const r = relOf(p); return !!(r && r.fear > 55 && !(r.respect > r.fear)); }
+  function tightWithYou(p) { const r = relOf(p); return !!(r && (r.loyalty > 55 || r.respect > 50 || (CBZ.cityBond && CBZ.cityBond(p) > 0.4))); }
+  function canAfford100() { return (g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)); }
 
   // Can this ped's crew be PROSPECTED/JOINED by the player? You can court a crew
   // when you don't run your own gang, aren't already patched in, and the ped's
@@ -231,186 +139,7 @@
     return bits.length ? bits.join(" · ") : "—";
   }
 
-  // ---- option builders (each option: {label, key, fn, bad}) ----
-  function hostageOpts(p) {
-    return [
-      { label: "Rob at gunpoint", key: "i", bad: true, fn: () => { mug(p); } },
-      { label: "Take hostage", key: "j", bad: true, fn: () => CBZ.cityTakeHostage && CBZ.cityTakeHostage(p) },
-      { label: "Demand ransom", key: "k", bad: true, fn: () => demandRansom(p) },
-      { label: "Execute", key: "l", bad: true, fn: () => execute(p) },
-    ];
-  }
-  function pedOpts(p) {
-    const nm = p.name || "them";
-    const econ = CBZ.cityEcon, inv = g.cityInv || {};
-    const hasDrugs = Object.keys(inv).some((k) => econ.ITEMS[k] && econ.ITEMS[k].tag === "drug");
-    const inMyGang = CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p);
-
-    // ---- YOUR gang member: command/promote them instead of robbing them ----
-    if (inMyGang) {
-      const opts = [];
-      opts.push({ label: (p.rank === "lt" ? nm + " (Lieutenant)" : "Promote " + nm + " → Lt."), key: "i", fn: () => (p.rank === "lt" ? talk() : CBZ.cityPlayerGangPromote(p)) });
-      opts.push({ label: nm + ", hold this corner", key: "j", fn: () => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.homeGuard = { x: CBZ.player.pos.x, z: CBZ.player.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); CBZ.city.note(nm + " holds this spot.", 1.6); } } });
-      opts.push({ label: nm + ", roll with me", key: "k", fn: () => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm + " falls in.", 1.4); } });
-      opts.push({ label: "Talk to " + nm, key: "l", fn: () => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
-      return cap4(opts);
-    }
-
-    // ---- relationship read: bias the friendly slot by how this ped feels about
-    //      you. A loyal/respectful ped opens up (a tip, runs with you); a feared
-    //      one folds and hands over cash; a grudge-holder refuses anything warm.
-    const rel = CBZ.cityRel ? CBZ.cityRel(p) : null;
-    const hatesYou = rel && (rel.grudge > 45 || (CBZ.cityBond && CBZ.cityBond(p) < -0.3));
-    const fearsYou = rel && rel.fear > 55 && !(rel.respect > rel.fear);
-    const tightWithYou = rel && (rel.loyalty > 55 || rel.respect > 50 || (CBZ.cityBond && CBZ.cityBond(p) > 0.4));
-
-    // ---- you're a PATCHED-IN member of an NPC crew, and so is this ped (your
-    //      crew-mate): put in work to climb, or peel off and leave the crew. ----
-    const memb = myMemb();
-    if (memb && p.gang && p.gang === memb.gangId) {
-      const opts = [];
-      opts.push({ label: "Swing on " + nm, key: "i", bad: true, fn: () => attack(p) });   // a malicious option always exists
-      opts.push({ label: "Put in work with " + nm, key: "j", fn: () => prospectOrWork(p) });
-      // relationship verb over plain Talk: do a crew-mate a favor to build standing
-      if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor)
-        opts.push({ label: "Do " + nm + " a favor 🤝", key: "k", fn: () => CBZ.cityDoFavor(p) });
-      else
-        opts.push({ label: "Talk to " + nm, key: "k", fn: () => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
-      opts.push({ label: "Leave the crew", key: "l", bad: true, fn: () => CBZ.cityLeaveGang && CBZ.cityLeaveGang() });
-      return cap4(opts);
-    }
-
-    const opts = [{ label: "Mug " + nm, key: "i", bad: true, fn: () => mug(p) }];
-    opts.push({ label: "Swing on " + nm, key: "j", bad: true, fn: () => attack(p) });
-    if (p === g.cityPartner) opts.push({ label: g.citySpouse ? "Sweet-talk " + nm : "Propose to " + nm + " 💍", key: "k", fn: () => (g.citySpouse ? talk() : CBZ.cityPropose(p)) });
-    // ---- a rival whose BOSS you dropped: claim the whole crew ----
-    else if (p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled)
-      opts.push({ label: "Claim the " + p.gang + " 👑", key: "k", fn: () => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone — the crew's yours to claim. · O", 2.2); } });
-    // ---- PROSPECT / JOIN this ped's crew (you're a free agent on/near their
-    //      turf). This is the PRIMARY progression path, so it's ranked above the
-    //      generic recruit/flirt/talk verbs (and the i/j/l slots keep it from
-    //      being sliced by cap4). ----
-    else if (joinableGangOf(p)) {
-      const rec = joinableGangOf(p);
-      const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
-      if (myProspectStanding() >= 1)
-        opts.push({ label: "Get initiated with " + nm, key: "k", fn: () => prospectOrWork(p) });
-      else if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p))
-        // already prospecting this crew: do a FAVOR for this member to EARN STANDING
-        opts.push({ label: "Do " + nm + " a favor 🤝", key: "k", fn: () => prospectOrWork(p) });
-      else
-        opts.push({ label: "Prospect the " + (rec.name || "crew") + " 🩸", key: "k", fn: () => CBZ.cityProspectGang(rec) });
-    }
-    // ---- a feared ped hands over cash without a fight; a loyal/respectful one
-    //      runs with you or shares a tip; a grudge-holder gets only plain talk. ----
-    else if (fearsYou) opts.push({ label: "Shake " + nm + " down 💵", key: "k", bad: true, fn: () => demandRansom(p) });
-    else if (tightWithYou && !p.gang && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && CBZ.cityRecruit)
-      opts.push({ label: "Patch " + nm + " in 🤝", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
-    else if (tightWithYou && !p.recruited && !p.gang) opts.push({ label: nm + " runs with you 🤝", key: "k", fn: () => CBZ.cityRecruit && CBZ.cityRecruit(p) });
-    // ---- recruit straight into YOUR founded gang ----
-    else if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100))))
-      opts.push({ label: "Put " + nm + " on the payroll 🔫", key: "k", fn: () => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); } });
-    else if (g.career === "dealer" && hasDrugs) opts.push({ label: "Sell " + nm + " product", key: "k", bad: true, fn: () => CBZ.cityDealTo(p) });
-    else if (!p.recruited && !p.gang && !hatesYou && ((g.respect || 0) >= 5 || (CBZ.city.canAfford && CBZ.city.canAfford(100)))) opts.push({ label: "Hire " + nm + " 🔫", key: "k", fn: () => CBZ.cityRecruit(p) });
-    else if (!hatesYou && CBZ.cityIsRomance && CBZ.cityIsRomance(p)) opts.push({ label: "Chat " + nm + " up 💕", key: "k", fn: () => CBZ.cityFlirt(p) });
-    else opts.push({ label: "Talk to " + nm, key: "k", fn: () => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
-    opts.push({ label: "Pick " + nm + "'s pocket", key: "l", bad: true, fn: () => pickpocket(p) });
-    return cap4(opts);
-  }
-  // Advance the prospect/initiation/put-in-work relationship FROM THE STREET.
-  //   • Not yet courting this crew → start prospecting it (cityProspectGang).
-  //   • Courting + this member is befriendable → do them a FAVOR, which raises
-  //     their affinity AND your gang standing (cityDoFavor) — the EARN-TRUST task.
-  //   • Standing maxed → point at the [O] menu for the initiation step.
-  //   • Already patched in → putting in work is a body kicked up.
-  function prospectOrWork(p) {
-    const rec = gangRec(p && p.gang);
-    if (myMemb()) {
-      // already patched in: putting in work is a body kicked up — call out the path.
-      CBZ.city.note("Drop a rival — kicked-up work moves you up the ladder. · O", 3);
-      return;
-    }
-    // not courting anyone yet (or not this crew) → start prospecting THIS crew.
-    const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
-    if (!courting) {
-      if (rec && CBZ.cityProspectGang) CBZ.cityProspectGang(rec);
-      return;
-    }
-    // standing maxed → the initiation step lives on the [O] menu.
-    if (myProspectStanding() >= 1) {
-      CBZ.city.note("They're ready to make you — get jumped in or put in work. · O", 2.6);
-      return;
-    }
-    // courting + this member is befriendable → do them a FAVOR to earn standing.
-    if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) {
-      CBZ.cityDoFavor(p);
-      return;
-    }
-    // can't befriend this one (grudge/dead) — nudge toward the task path.
-    CBZ.city.note("Hang on their turf and do members favors to earn trust. · O", 2.6);
-  }
-  function vendorOpts(v) {
-    return [
-      { label: "Shop here", key: "e", fn: () => CBZ.cityOpenShop(v.vendor) },
-      { label: "Rob the register", key: "i", bad: true, fn: () => robRegister(v) },
-      { label: "Talk to the clerk", key: "j", fn: () => CBZ.city.note("“Welcome in. Take a look around.”", 1.6) },
-    ];
-  }
-
-  // ---- police: the menu is built from the SITUATION, not a fixed list. ----
-  // Surrender only exists when you're actually wanted (you can't give up to
-  // nothing); an alibi only shows while the heat is still low enough that a
-  // story is believable. With a clean record a cop is just a person to talk to.
-  function copHunting(c) { return c.curTarget === CBZ.city.playerActor || (c.sees && (g.wanted | 0) >= 1); }
-  function copNote(c) {
-    const stars = g.wanted | 0;
-    if (copHunting(c)) return "👁 Onto you — give up, talk fast, or run";
-    if (stars >= 1) return "On alert · " + "★".repeat(stars);
-    return "Keeping the peace";
-  }
-  function copOpts(c) {
-    const stars = g.wanted | 0;
-    const opts = [];
-    if (stars >= 1) {
-      // give up: cuffed, but cooperating costs you less than getting gunned down
-      opts.push({ label: "Put your hands up — surrender", key: "i", fn: () => copSurrender(c) });
-      // an alibi is only plausible at low heat (you can't talk down a rampage)
-      if (stars <= 2) opts.push({ label: "Give the officer an alibi", key: "j", fn: () => copAlibi(c) });
-    } else {
-      opts.push({ label: "Ask " + c.name + " for directions", key: "k", fn: talk });
-    }
-    // the design rule: there's ALWAYS a malicious option — here, assault
-    opts.push({ label: "Sucker-punch " + c.name, key: "l", bad: true, fn: () => copAssault(c) });
-    return opts;
-  }
-  function copSurrender(c) {
-    if (CBZ.sfx) CBZ.sfx("door");
-    CBZ.city && CBZ.city.note("You raise your hands and give yourself up…", 1.4);
-    if (c) { c.curTarget = CBZ.city.playerActor; c.sees = true; }
-    CBZ.cityBust && CBZ.cityBust({ peaceful: true });   // cooperative → lighter than a violent bust
-  }
-  function copAlibi(c) {
-    const stars = g.wanted | 0;
-    if (stars < 1) { talk(); return; }
-    // believability falls as the heat climbs; selling it buys you down a level
-    const chance = stars === 1 ? 0.6 : 0.32;
-    if (Math.random() < chance) {
-      CBZ.cityReduceWanted && CBZ.cityReduceWanted(2);
-      if (c) { c.curTarget = null; c.sees = false; c.retarget = 2.5; c.arrestT = 0; }
-      // (no big — the cop's own line carries it)
-      CBZ.city && CBZ.city.note("“…fine. Move along.” " + c.name + " buys it.", 2);
-      CBZ.city && CBZ.city.addRespect(1);
-    } else {
-      CBZ.city && CBZ.city.note("“Save it.” " + c.name + " isn't buying it.", 2);
-      CBZ.cityCrime && CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "lying-to-police" });
-      if (c) c.retarget = 0;        // lock straight onto you
-    }
-  }
-  function copAssault(c) {
-    CBZ.cityCrime && CBZ.cityCrime(70, { instant: true, x: c.pos.x, z: c.pos.z, type: "assault-officer" });
-    attack(c);
-  }
-
+  // ---- the raw VERBS (unchanged behavior) ---------------------------------
   function attack(p) {
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     CBZ.player._fighting = 1.5;
@@ -437,9 +166,9 @@
     CBZ.cityCrime && CBZ.cityCrime(50, { x: p.pos.x, z: p.pos.z, type: "extortion" });
     if (CBZ.sfx) CBZ.sfx("coin");
   }
-  // MUG / ROBBERY — takes their cash + the loot item (via cityRobPed, Agent 2's
-  // payout) AND transfers EVERY valuable they're carrying into your inventory to
-  // pawn. A rich victim = a big haul (a Patek + a ring); a broke one = scraps.
+  // MUG / ROBBERY — takes their cash + the loot item (cityRobPed's payout) AND
+  // transfers EVERY valuable they're carrying into your inventory to pawn. A
+  // rich victim = a big haul (a Patek + a ring); a broke one = scraps.
   function mug(p) {
     if (!p || p.dead) return;
     // snapshot the valuables BEFORE the rob (cityRobPed only handles cash + loot;
@@ -473,7 +202,6 @@
       CBZ.city.note((p.name || "They") + " had nothing worth taking — scraps.", 1.8);
     }
   }
-
   // PICKPOCKET — lift a SLICE of their cash (scaled to WHO they are: a billionaire's
   // pocket slice dwarfs a junkie's), and on a lucky dip palm ONE of their valuables
   // (a watch/ring) into your inventory to fence. A pickpocketed billionaire = jackpot.
@@ -520,6 +248,385 @@
     if (CBZ.sfx) CBZ.sfx("coin");
   }
 
+  // Advance the prospect/initiation/put-in-work relationship FROM THE STREET.
+  //   • Not yet courting this crew → start prospecting it (cityProspectGang).
+  //   • Courting + this member is befriendable → do them a FAVOR, which raises
+  //     their affinity AND your gang standing (cityDoFavor) — the EARN-TRUST task.
+  //   • Standing maxed → point at the [O] menu for the initiation step.
+  //   • Already patched in → putting in work is a body kicked up.
+  function prospectOrWork(p) {
+    const rec = gangRec(p && p.gang);
+    if (myMemb()) {
+      // already patched in: putting in work is a body kicked up — call out the path.
+      CBZ.city.note("Drop a rival — kicked-up work moves you up the ladder. · O", 3);
+      return;
+    }
+    // not courting anyone yet (or not this crew) → start prospecting THIS crew.
+    const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
+    if (!courting) {
+      if (rec && CBZ.cityProspectGang) CBZ.cityProspectGang(rec);
+      return;
+    }
+    // standing maxed → the initiation step lives on the [O] menu.
+    if (myProspectStanding() >= 1) {
+      CBZ.city.note("They're ready to make you — get jumped in or put in work. · O", 2.6);
+      return;
+    }
+    // courting + this member is befriendable → do them a FAVOR to earn standing.
+    if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) {
+      CBZ.cityDoFavor(p);
+      return;
+    }
+    // can't befriend this one (grudge/dead) — nudge toward the task path.
+    CBZ.city.note("Hang on their turf and do members favors to earn trust. · O", 2.6);
+  }
+
+  // ---- police helpers -----------------------------------------------------
+  // Surrender only exists when you're actually wanted (you can't give up to
+  // nothing); an alibi only shows while the heat is still low enough that a
+  // story is believable. With a clean record a cop is just a person to talk to.
+  function copHunting(c) { return c.curTarget === CBZ.city.playerActor || (c.sees && (g.wanted | 0) >= 1); }
+  function copNote(c) {
+    const stars = g.wanted | 0;
+    if (copHunting(c)) return "👁 Onto you — give up, talk fast, or run";
+    if (stars >= 1) return "On alert · " + "★".repeat(stars);
+    return "Keeping the peace";
+  }
+  function copSurrender(c) {
+    if (CBZ.sfx) CBZ.sfx("door");
+    CBZ.city && CBZ.city.note("You raise your hands and give yourself up…", 1.4);
+    if (c) { c.curTarget = CBZ.city.playerActor; c.sees = true; }
+    CBZ.cityBust && CBZ.cityBust({ peaceful: true });   // cooperative → lighter than a violent bust
+  }
+  function copAlibi(c) {
+    const stars = g.wanted | 0;
+    if (stars < 1) { talk(); return; }
+    // believability falls as the heat climbs; selling it buys you down a level
+    const chance = stars === 1 ? 0.6 : 0.32;
+    if (Math.random() < chance) {
+      CBZ.cityReduceWanted && CBZ.cityReduceWanted(2);
+      if (c) { c.curTarget = null; c.sees = false; c.retarget = 2.5; c.arrestT = 0; }
+      // (no big — the cop's own line carries it)
+      CBZ.city && CBZ.city.note("“…fine. Move along.” " + c.name + " buys it.", 2);
+      CBZ.city && CBZ.city.addRespect(1);
+    } else {
+      CBZ.city && CBZ.city.note("“Save it.” " + c.name + " isn't buying it.", 2);
+      CBZ.cityCrime && CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "lying-to-police" });
+      if (c) c.retarget = 0;        // lock straight onto you
+    }
+  }
+  function copAssault(c) {
+    CBZ.cityCrime && CBZ.cityCrime(70, { instant: true, x: c.pos.x, z: c.pos.z, type: "assault-officer" });
+    attack(c);
+  }
+
+  // ---- CORPSE WARDROBE helpers (city/outfits.js) --------------------------
+  // Loot is automatic (walk over it); the FIT is a choice — swap outfits with
+  // the dead. WHY: a cop's uniform makes the law read you as one of theirs, a
+  // crew's colors flip turf hostility, a tycoon's tuxedo is pure worn status.
+  function nearestDressedBody(px, pz) {
+    if (!CBZ.cityOutfitSwapWithCorpse) return null;
+    let best = null, bd = REACH;
+    const scan = (list) => {
+      if (!list) return;
+      for (const p of list) {
+        if (!p || !p.dead || p._clothesTaken || p.culled) continue;
+        if (!p.char || !p.char.skinSlots) continue;
+        const d = dist(p, px, pz);
+        if (d < bd) { bd = d; best = p; }
+      }
+    };
+    scan(CBZ.cityPeds);
+    scan(CBZ.cityCops);
+    return best;
+  }
+  // the WHY line for a fit, read off what it buys you on the street
+  function bodyFitNote(fit) {
+    if (!fit) return "Their clothes could fit you";
+    if (fit.cop) return "A uniform — the law reads its own colors";
+    if (fit.gang) return "Their colors — that set would read you as kin";
+    if (fit.id === "tuxedo") return "A tuxedo — ropes open for cloth like this";
+    return "A clean change of clothes";
+  }
+
+  // ---- THE CLUB (the velvet rope) -----------------------------------------
+  // buildings.js stamps lot.building.club = { bouncerSpot, ropePost, door, ... }
+  // on exactly one lot (CBZ.city.clubLot). At the rope we offer a "step to the
+  // bouncer" verb that hands off to club.js's gate check — the bouncer reads
+  // CBZ.cityPlayerDrip() vs CBZ.CITY.CLUB_DRIP to admit/reject you.
+  function clubInfo() {
+    const lot = CBZ.city && CBZ.city.clubLot;
+    const c = lot && lot.building && lot.building.club;
+    // club is the structured object (not just the boolean flag); needs a spot.
+    if (c && typeof c === "object" && (c.bouncerSpot || c.ropePost)) return c;
+    return null;
+  }
+  function clubSpot(c) { return (c && (c.bouncerSpot || c.ropePost)) || null; }
+  // a touch wider than REACH so the queue lane / rope reads as one approachable zone.
+  const CLUB_REACH = 4.6;
+  // hand off to club.js's entry/gate function — try the agreed global first, then
+  // sensible aliases. If club.js isn't loaded yet, describe the gate instead.
+  function clubTryEnter() {
+    const fn = CBZ.cityClubTryEnter || CBZ.cityClubApproach || CBZ.cityClubEnter || CBZ.cityClubGate;
+    if (typeof fn === "function") { fn(); return; }
+    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
+    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
+    if (drip >= need) CBZ.city.note("The bouncer sizes up your fit and unhooks the rope…", 2.2);
+    else CBZ.city.note("“Not in those rags.” The bouncer waves you off — come back sharper.", 2.6);
+  }
+  function clubNote() {
+    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
+    const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
+    return "Velvet rope · " + (drip >= need ? "your fit gets you in" : "not dressed for it yet");
+  }
+
+  // ================== SOURCES: what can be targeted ==================
+  // Base prios mirror the old strict chain (vendor > club > stash > cop > ped >
+  // corpse > car) but the registry's facing weighting can pull the thing you're
+  // actually LOOKING AT ahead of a near-tied neighbor — that's the point.
+  I.registerSource({
+    id: "src-gunpoint", kind: "ped:gunpoint", layers: ["ped:civ", "ped"], prio: 0, gunpoint: true, driving: false,
+    find: function (px, pz, ctx, push) {
+      if (!ctx.gunDrawn) return;
+      const p = aimedPed(px, pz);
+      if (p) push(p, dist(p, px, pz));
+    },
+  });
+  I.registerSource({
+    id: "src-vendor", kind: "vendor", layers: ["ped:vendor", "ped"], prio: 12, driving: false,
+    find: function (px, pz, ctx, push) { const v = nearest(CBZ.cityPeds, px, pz, (p) => p.vendor && !p.dead); if (v) push(v, dist(v, px, pz)); },
+  });
+  I.registerSource({
+    id: "src-cop", kind: "cop", layers: ["ped:cop", "ped"], prio: 8, driving: false,
+    find: function (px, pz, ctx, push) { if (!CBZ.cityCops) return; const c = nearest(CBZ.cityCops, px, pz, (q) => !q.dead); if (c) push(c, dist(c, px, pz)); },
+  });
+  I.registerSource({
+    id: "src-ped", kind: "ped", layers: ["ped:civ", "ped"], prio: 6, driving: false,
+    find: function (px, pz, ctx, push) { const p = nearest(CBZ.cityPeds, px, pz, (q) => !q.vendor && !q.dead); if (p) push(p, dist(p, px, pz)); },
+  });
+  I.registerSource({
+    id: "src-corpse", kind: "corpse", layers: ["corpse"], prio: 4, driving: false,
+    find: function (px, pz, ctx, push) {
+      if ((g.cityOutfitChanging || 0) > 0) return;
+      const b = nearestDressedBody(px, pz);
+      if (b) push(b, dist(b, px, pz));
+    },
+  });
+  I.registerSource({
+    id: "src-car", kind: "vehicle", layers: ["vehicle"], prio: 3, driving: false,
+    find: function (px, pz, ctx, push) { if (!CBZ.cityNearestCar) return; const c = CBZ.cityNearestCar(px, pz, REACH); if (c) push(c, dist(c, px, pz)); },
+  });
+  // behind the wheel: the only target is the car you're IN (exit lives here now)
+  I.registerSource({
+    id: "src-mycar", kind: "vehicle:inside", layers: ["vehicle:inside"], prio: 50, driving: true,
+    find: function (px, pz, ctx, push) { if (ctx.vehicle) push(ctx.vehicle, 0); },
+  });
+  // your own pockets — the no-target fallback (eat / do drugs surface here, so
+  // the old bare-E and X keys are gone but nothing is hidden from the player)
+  const POCKETS = { pockets: true };
+  I.registerSource({
+    id: "src-self", kind: "self", layers: ["self"], prio: -5, driving: false,
+    find: function (px, pz, ctx, push) { push(POCKETS, 0); },
+  });
+
+  // ---- ZONES: interaction spots with no entity ----
+  I.registerZone({
+    id: "zone-club", kind: "club", prio: 11, driving: false,
+    find: function (px, pz) {
+      const c = clubInfo(); if (!c) return null;
+      const s = clubSpot(c); if (!s) return null;
+      if (Math.hypot(px - s.x, pz - s.z) > CLUB_REACH) return null;
+      // stable wrapper so hysteresis sees one identity (carries x,z for scoring)
+      if (!c._izTarget) c._izTarget = { x: s.x, z: s.z, club: c };
+      return c._izTarget;
+    },
+    options: [{ id: "club-enter", slot: "i", label: "Step to the bouncer 🪩", onSelect: function () { clubTryEnter(); } }],
+  });
+  I.registerZone({
+    id: "zone-stash", kind: "stash", prio: 10, driving: false,
+    find: function (px, pz) { return CBZ.cityNearestStash ? CBZ.cityNearestStash(px, pz, REACH) : null; },
+    options: [{ id: "stash-rob", slot: "i", bad: true, label: "Rob stash", onSelect: function (lot) { CBZ.cityRobStash(lot); } }],
+  });
+
+  // ================== DESCRIBERS: the card header per kind ==================
+  I.describe("ped", function (p) {
+    return {
+      label: ((p.nameKnown || p.recruited || p.companion || p === g.cityPartner) ? p.name : "A stranger") + (p.gang ? " (" + p.gang + ")" : ""),
+      note: ped$(p),
+    };
+  });
+  I.describe("ped:gunpoint", function (p) { return { label: "🔫 " + p.name, note: "Hands up · make your demand" }; });
+  I.describe("vendor", function (v) { return { label: (v.vendor && v.vendor.building && v.vendor.building.name) || "Counter", note: "Vendor · cash register" }; });
+  I.describe("cop", function (c) { return { label: "👮 " + c.name, note: copNote(c) }; });
+  I.describe("corpse", function (b) { const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null; return { label: "🧥 " + (b.name || "A body"), note: bodyFitNote(fit) }; });
+  I.describe("vehicle", function (car) {
+    const cond = CBZ.cityVehicleCondition ? CBZ.cityVehicleCondition(car) : null;
+    const why = car.owned ? "Your ride" : car.npcDriver ? "Someone's at the wheel" : "Boost it · chop shop pays by condition";
+    return { label: "🚗 " + (car.model ? car.model.name : "Car"), note: (cond ? cond.label + " · " : "") + why };
+  });
+  I.describe("vehicle:inside", function (car) {
+    const cond = CBZ.cityVehicleCondition ? CBZ.cityVehicleCondition(car) : null;
+    return { label: "🚗 " + (car.model ? car.model.name : "Car"), note: "Behind the wheel" + (cond ? " · " + cond.label : "") };
+  });
+  I.describe("club", function (t) { return { label: "🪩 " + ((t.club && t.club.name) || "The Velvet Club"), note: clubNote() }; });
+  I.describe("stash", function (lot) { return { label: "🎒 Gang Stash", note: ((lot.building && lot.building.gang) || "gang") + " cache" }; });
+  I.describe("self", function () { return { label: "Your pockets", note: "what you're carrying" }; });
+
+  // ================== OPTIONS ==================
+  const nm = (p) => p.name || "them";
+
+  // ---- GUNPOINT (needsGunDrawn): the HOSTAGE demands ----
+  I.register("ped:civ", { id: "gp-rob", slot: "i", needsGunDrawn: true, bad: true, label: "Rob at gunpoint", onSelect: (p) => mug(p) });
+  I.register("ped:civ", { id: "gp-hostage", slot: "j", needsGunDrawn: true, bad: true, label: "Take hostage", onSelect: (p) => CBZ.cityTakeHostage && CBZ.cityTakeHostage(p) });
+  I.register("ped:civ", { id: "gp-ransom", slot: "k", needsGunDrawn: true, bad: true, label: "Demand ransom", onSelect: (p) => demandRansom(p) });
+  I.register("ped:civ", { id: "gp-execute", slot: "l", needsGunDrawn: true, bad: true, label: "Execute", onSelect: (p) => execute(p) });
+
+  // ---- LIVING PED, slot I: your soldier > NPC crew-mate > anyone (mug) ----
+  // Slot exclusivity does the branch work: per key the highest-prio PASSING
+  // option wins, so "Mug" can't surface on your own soldier.
+  I.register("ped:civ", {
+    id: "ped-promote", slot: "i", prio: 60, canShow: (p) => inMyGang(p),
+    label: (p) => (p.rank === "lt" ? nm(p) + " (Lieutenant)" : "Promote " + nm(p) + " → Lt."),
+    onSelect: (p) => (p.rank === "lt" ? talk() : CBZ.cityPlayerGangPromote(p)),
+  });
+  I.register("ped:civ", { id: "ped-swing-crew", slot: "i", prio: 50, bad: true, canShow: (p) => crewmate(p), label: (p) => "Swing on " + nm(p), onSelect: (p) => attack(p) });
+  I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: (p) => "Mug " + nm(p), onSelect: (p) => mug(p) });
+
+  // ---- LIVING PED, slot J ----
+  I.register("ped:civ", {
+    id: "ped-hold-corner", slot: "j", prio: 60, canShow: (p) => inMyGang(p),
+    label: (p) => nm(p) + ", hold this corner",
+    onSelect: (p, ctx) => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: ctx.pos.x, z: ctx.pos.z }; p.homeGuard = { x: ctx.pos.x, z: ctx.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); CBZ.city.note(nm(p) + " holds this spot.", 1.6); } },
+  });
+  I.register("ped:civ", { id: "ped-put-in-work", slot: "j", prio: 50, canShow: (p) => crewmate(p), label: (p) => "Put in work with " + nm(p), onSelect: (p) => prospectOrWork(p) });
+  I.register("ped:civ", { id: "ped-swing", slot: "j", prio: 10, bad: true, label: (p) => "Swing on " + nm(p), onSelect: (p) => attack(p) });
+
+  // ---- LIVING PED, slot K: the contextual relationship ladder. Prios encode
+  //      the old else-chain order exactly (partner > claim-crew > prospect >
+  //      shakedown > patch-in > runs-with > payroll > sell > hire > flirt > talk).
+  I.register("ped:civ", { id: "ped-roll", slot: "k", prio: 60, canShow: (p) => inMyGang(p), label: (p) => nm(p) + ", roll with me", onSelect: (p) => { p.companion = true; p.guard = null; p.rage = null; CBZ.city.note(nm(p) + " falls in.", 1.4); } });
+  I.register("ped:civ", {
+    id: "ped-crew-favor", slot: "k", prio: 50, canShow: (p) => crewmate(p),
+    label: (p) => (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) ? "Do " + nm(p) + " a favor 🤝" : "Talk to " + nm(p),
+    onSelect: (p) => { if (CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor) CBZ.cityDoFavor(p); else { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } },
+  });
+  I.register("ped:civ", {
+    id: "ped-propose", slot: "k", prio: 45, canShow: (p) => p === g.cityPartner,
+    label: (p) => (g.citySpouse ? "Sweet-talk " + nm(p) : "Propose to " + nm(p) + " 💍"),
+    onSelect: (p) => (g.citySpouse ? talk() : CBZ.cityPropose(p)),
+  });
+  // a rival whose BOSS you dropped: claim the whole crew
+  I.register("ped:civ", {
+    id: "ped-claim-crew", slot: "k", prio: 44,
+    canShow: (p) => !!(p.gang && CBZ.cityGangById && CBZ.cityGangById(p.gang) && CBZ.cityGangById(p.gang).bossDead && CBZ.cityPlayerGangBossKilled),
+    label: (p) => "Claim the " + p.gang + " 👑",
+    onSelect: (p) => { const rec = CBZ.cityGangById(p.gang); CBZ.cityPlayerGangBossKilled(rec); CBZ.city.note("Their boss is gone — the crew's yours to claim. · O", 2.2); },
+  });
+  // PROSPECT / JOIN this ped's crew — the PRIMARY progression path, ranked
+  // above the generic recruit/flirt/talk verbs. The label walks the courtship:
+  // Prospect → Do-a-favor → Get-initiated.
+  I.register("ped:civ", {
+    id: "ped-prospect", slot: "k", prio: 43, canShow: (p) => !!joinableGangOf(p),
+    label: function (p) {
+      const rec = joinableGangOf(p);
+      const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
+      if (myProspectStanding() >= 1) return "Get initiated with " + nm(p);
+      if (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p)) return "Do " + nm(p) + " a favor 🤝";
+      return "Prospect the " + ((rec && rec.name) || "crew") + " 🩸";
+    },
+    onSelect: function (p) {
+      const rec = joinableGangOf(p);
+      const courting = myProspectStanding() > 0 || (CBZ.cityProspectTask && CBZ.cityProspectTask());
+      if (myProspectStanding() >= 1 || (courting && CBZ.cityCanBefriend && CBZ.cityCanBefriend(p))) { prospectOrWork(p); return; }
+      if (rec && CBZ.cityProspectGang) CBZ.cityProspectGang(rec);
+    },
+  });
+  // a feared ped hands over cash without a fight
+  I.register("ped:civ", { id: "ped-shakedown", slot: "k", prio: 42, bad: true, canShow: (p) => fearsYou(p), label: (p) => "Shake " + nm(p) + " down 💵", onSelect: (p) => demandRansom(p) });
+  I.register("ped:civ", {
+    id: "ped-patch-in", slot: "k", prio: 41,
+    canShow: (p) => tightWithYou(p) && !p.gang && CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !!CBZ.cityRecruit,
+    label: (p) => "Patch " + nm(p) + " in 🤝",
+    onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); },
+  });
+  I.register("ped:civ", { id: "ped-runs-with", slot: "k", prio: 40, canShow: (p) => tightWithYou(p) && !p.recruited && !p.gang, label: (p) => nm(p) + " runs with you 🤝", onSelect: (p) => CBZ.cityRecruit && CBZ.cityRecruit(p) });
+  // recruit straight into YOUR founded gang
+  I.register("ped:civ", {
+    id: "ped-payroll", slot: "k", prio: 39,
+    canShow: (p) => !!(CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists() && !p.recruited && !p.gang && !hatesYou(p) && canAfford100()),
+    label: (p) => "Put " + nm(p) + " on the payroll 🔫",
+    onSelect: (p) => { CBZ.cityRecruit(p); if (CBZ.cityPlayerGangEnlist && p.recruited) CBZ.cityPlayerGangEnlist(p, "soldier"); },
+  });
+  I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: (p) => "Sell " + nm(p) + " product", onSelect: (p) => CBZ.cityDealTo(p) });
+  I.register("ped:civ", {
+    id: "ped-hire", slot: "k", prio: 37,
+    canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100(),
+    label: (p) => "Hire " + nm(p) + " 🔫", onSelect: (p) => CBZ.cityRecruit(p),
+  });
+  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: (p) => "Chat " + nm(p) + " up 💕", onSelect: (p) => CBZ.cityFlirt(p) });
+  I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: (p) => "Talk to " + nm(p), onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
+
+  // ---- LIVING PED, slot L ----
+  I.register("ped:civ", { id: "ped-talk-gang", slot: "l", prio: 60, canShow: (p) => inMyGang(p), label: (p) => "Talk to " + nm(p), onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(); } });
+  I.register("ped:civ", { id: "ped-leave-crew", slot: "l", prio: 50, bad: true, canShow: (p) => crewmate(p), label: "Leave the crew", onSelect: () => CBZ.cityLeaveGang && CBZ.cityLeaveGang() });
+  I.register("ped:civ", { id: "ped-pickpocket", slot: "l", prio: 10, bad: true, label: (p) => "Pick " + nm(p) + "'s pocket", onSelect: (p) => pickpocket(p) });
+
+  // ---- COPS: the menu is built from the SITUATION, not a fixed list ----
+  I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1, label: "Put your hands up — surrender", onSelect: (c) => copSurrender(c) });
+  I.register("ped:cop", { id: "cop-alibi", slot: "j", canShow: (c, ctx) => ctx.wanted >= 1 && ctx.wanted <= 2, label: "Give the officer an alibi", onSelect: (c) => copAlibi(c) });
+  I.register("ped:cop", { id: "cop-directions", slot: "k", canShow: (c, ctx) => ctx.wanted < 1, label: (c) => "Ask " + c.name + " for directions", onSelect: () => talk() });
+  // the design rule: there's ALWAYS a malicious option — here, assault
+  I.register("ped:cop", { id: "cop-punch", slot: "l", bad: true, label: (c) => "Sucker-punch " + c.name, onSelect: (c) => copAssault(c) });
+
+  // ---- VENDOR COUNTER ----
+  I.register("ped:vendor", { id: "vendor-shop", slot: "e", canShow: (v) => !!v.vendor, label: "Shop here", onSelect: (v) => CBZ.cityOpenShop(v.vendor) });
+  I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor, label: "Rob the register", onSelect: (v) => robRegister(v) });
+  I.register("ped:vendor", { id: "vendor-talk", slot: "j", canShow: (v) => !!v.vendor, label: "Talk to the clerk", onSelect: () => CBZ.city.note("“Welcome in. Take a look around.”", 1.6) });
+
+  // ---- CORPSE: take the fit (loot is automatic — see the walk-over loop) ----
+  I.register("corpse", {
+    id: "corpse-clothes", slot: "i", bad: true,
+    label: function (b) { const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null; return "Take their clothes" + (fit ? " — " + fit.name : ""); },
+    onSelect: function (b) { CBZ.cityOutfitSwapWithCorpse && CBZ.cityOutfitSwapWithCorpse(b); },
+  });
+
+  // ---- CARS (the old F key, surfaced): tap E gets in, HOLD E jacks a driver ----
+  I.register("vehicle", {
+    id: "car-get-in", slot: "e", canShow: (car) => !car.npcDriver && (car.owned || car.stolen),
+    label: (car) => "Get in" + (car.owned ? " your ride" : ""), onSelect: (car) => CBZ.cityEnterVehicle(car),
+  });
+  I.register("vehicle", {
+    id: "car-boost", slot: "e", bad: true, canShow: (car) => !car.npcDriver && !car.owned && !car.stolen,
+    label: "Boost it", onSelect: (car) => CBZ.cityEnterVehicle(car),
+  });
+  // someone's behind the wheel: a HOLD — you rip the door open and drag them out
+  I.register("vehicle", {
+    id: "car-jack", slot: "e", hold: true, bad: true, canShow: (car) => !!car.npcDriver,
+    label: "Drag the driver out", onSelect: (car) => CBZ.cityEnterVehicle(car),
+  });
+  I.register("vehicle:inside", { id: "car-out", slot: "e", canShow: (car, ctx) => ctx.driving && ctx.vehicle === car, label: "Step out", onSelect: () => CBZ.cityExitVehicle() });
+
+  // ---- YOUR POCKETS (the no-target fallback): old bare-E eat + X drugs ----
+  I.register("self", {
+    id: "self-eat", slot: "e", needsItem: foodIn,
+    label: (t, ctx) => "Eat the " + foodIn(ctx),
+    onSelect: function (t, ctx) { const food = foodIn(ctx); if (food && CBZ.cityEat) CBZ.cityEat(food); },
+  });
+  I.register("self", {
+    id: "self-drugs", slot: "i", bad: true, needsItem: drugIn,
+    label: (t, ctx) => "Do the " + drugIn(ctx) + " 🌀",
+    onSelect: function (t, ctx) {
+      const drug = drugIn(ctx); if (!drug) return;
+      econ().take(drug, 1);
+      const P = ctx.actor;
+      P.hp = Math.min(P.maxHp || 200, P.hp + 18);
+      P._boost = 16; g.hunger = Math.min(100, (g.hunger || 0) + 8);
+      if (CBZ.shake) CBZ.shake(0.2);
+      CBZ.city.note("You did the " + drug + "… everything feels faster. 🌀", 2.2);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    },
+  });
+
   // ---- auto-loot: walk over (or drive over) a body and it's looted, no key.
   //      Runs on foot AND while driving, every frame, ignoring the menu state. ----
   const LOOT_R = 2.6;
@@ -545,126 +652,5 @@
         }
       }
     }
-  });
-
-  // ---- detection: choose what you're interacting with this frame ----
-  CBZ.onUpdate(39, function (dt) {
-    if (g.mode !== "city") { if (current || (panel && panel.style.display)) release(); return; }
-    if (g.state !== "playing" || CBZ.player.driving || CBZ.cityMenuOpen || CBZ.player.dead) { if (current) hide(); return; }
-    detAcc += dt; if (detAcc < 1 / 12) return; detAcc = 0;     // ~12 Hz is plenty for a prompt
-    const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
-
-    let target = null, opts = null, label = "", note = "", key = "";
-
-    // 1) pointing a gun at someone → HOSTAGE demands
-    const aimed = aimedPed(px, pz);
-    if (aimed) {
-      if (CBZ.cityMarkGunpoint) CBZ.cityMarkGunpoint(aimed, 0.55);
-      target = aimed; key = "aim:" + tag(aimed); opts = hostageOpts(aimed); label = "🔫 " + aimed.name; note = "Hands up · make your demand";
-    }
-
-    // 2) a vendor counter
-    if (!target) { const v = nearest(CBZ.cityPeds, px, pz, (p) => p.vendor && !p.dead); if (v) { target = v; key = "v:" + tag(v); opts = vendorOpts(v); label = v.vendor.building.name; note = "Vendor · cash register"; } }
-    // 2b) THE CLUB ROPE — near the bouncer's post → a single "get in" verb that
-    //    runs the drip-gated gate. Only ever shows at the club, and the key folds
-    //    in your drip vs the threshold so the panel refreshes as you dress up.
-    if (!target) {
-      const club = nearClubSpot(px, pz);
-      if (club) {
-        const drip = CBZ.cityPlayerDrip ? (CBZ.cityPlayerDrip() | 0) : 0;
-        const need = (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 30;
-        target = club; key = "club:" + (drip >= need ? 1 : 0); opts = clubOpts();
-        label = "🪩 " + ((club.name) || "The Velvet Club"); note = clubNote();
-      }
-    }
-    // (bodies are looted AUTOMATICALLY by walking over them — see auto-loot below)
-    // 4) a gang stash
-    if (!target && CBZ.cityNearestStash) { const lot = CBZ.cityNearestStash(px, pz, REACH); if (lot) { target = lot; key = "s:" + lot.i + "," + lot.j; opts = [{ label: "Rob stash", key: "i", bad: true, fn: () => CBZ.cityRobStash(lot) }]; label = "🎒 Gang Stash"; note = (lot.building.gang || "gang") + " cache"; } }
-    // 5) a police officer → contextual menu (surrender / alibi only when wanted)
-    if (!target && CBZ.cityCops) { const cop = nearest(CBZ.cityCops, px, pz, (c) => !c.dead); if (cop) { target = cop; key = "cop:" + (g.wanted | 0) + ":" + (copHunting(cop) ? 1 : 0); opts = copOpts(cop); label = "👮 " + cop.name; note = copNote(cop); } }
-    // 6) a living person — the key folds in gang/relationship CONTEXT so the
-    //    option list rebuilds the moment membership, prospect standing, or this
-    //    ped's standing toward you crosses a tier (otherwise it'd go stale).
-    if (!target) { const p = nearest(CBZ.cityPeds, px, pz, (q) => !q.vendor && !q.dead); if (p) { target = p; key = "p:" + tag(p) + ":" + pedCtxTag(p); opts = pedOpts(p); label = ((p.nameKnown || p.recruited || p.companion || p === g.cityPartner) ? p.name : "A stranger") + (p.gang ? " (" + p.gang + ")" : ""); note = ped$(p); } }
-    // 6b) a BODY whose clothes you can take (loot is automatic; the FIT is the
-    //     choice — uniform/colors/tuxedo are disguise + status, see outfits.js)
-    if (!target && !((g.cityOutfitChanging || 0) > 0)) {
-      const b = nearestDressedBody(px, pz);
-      if (b) {
-        const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null;
-        target = b; key = "body:" + tag(b); opts = bodyOpts(b, fit);
-        label = "🧥 " + (b.name || "A body"); note = bodyFitNote(fit);
-      }
-    }
-    // 6) a car you can jack
-    if (!target && CBZ.cityNearestCar) { const car = CBZ.cityNearestCar(px, pz, REACH); if (car) { const cond = CBZ.cityVehicleCondition ? CBZ.cityVehicleCondition(car) : null; target = car; key = "car:" + (cond ? cond.label : ""); opts = [{ label: "Steal car [F]", key: "i", bad: true, fn: () => CBZ.cityEnterVehicle(car) }]; label = "🚗 " + (car.model ? car.model.name : "Car"); note = (cond ? cond.label + " · " : "") + "Boost it · chop shop pays by condition"; } }
-
-    if (!target) { if (current) hide(); return; }
-    // whoever the panel is offering interactions on at least turns to LOOK at
-    // you while you're engaging them (city/peds.js move() honours _faceT).
-    if (target.group && !target.dead && (target.kind || target.vendor)) target._faceT = 0.45;
-    if (key !== currentKey) {
-      current = target; currentKey = key; currentOpts = opts;
-      dom();
-      if (nameEl) nameEl.textContent = label;
-      if (noteEl) noteEl.textContent = note;
-      // same overhauled row style as the jail panel: a key chip + a clean line
-      // (.iopt/.ikey/.ilab from css/hud.css). Malicious options tint red.
-      if (optsEl) optsEl.innerHTML = opts.map((o, i) =>
-        `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
-        `<span class="ilab"${o.bad ? " style=\"color:#ff9a9a\"" : ""}>${o.label}</span></div>`
-      ).join("");
-      show();
-    } else if (noteEl && opts === currentOpts) { /* same target; refresh note cheaply */ if (target.pos) noteEl.textContent = note; }
-  });
-
-  function tag(p) { return (p.name || "?") + (p.gang || ""); }
-  // a coarse CONTEXT fingerprint for a ped: membership state, prospect bucket,
-  // and a relationship tier. Coarse on purpose so the menu rebuilds on a real
-  // change, not every frame (the note still refreshes continuously below).
-  function pedCtxTag(p) {
-    const memb = myMemb();
-    const m = memb ? (p.gang === memb.gangId ? "crew" : "mem") : "0";
-    // PROSPECT state folds in the active TASK + initiation-ready flag, because all
-    // three flip the OFFERED verb (Prospect → Do-a-favor → Get-initiated). The
-    // task ID changes as the sequence advances, so the menu rebuilds on each step;
-    // the note shows live progress continuously below.
-    let pr = "P-";
-    const task = CBZ.cityProspectTask && CBZ.cityProspectTask();
-    if (myProspectStanding() >= 1) pr = "P9";
-    else if (task) pr = "P" + (task.label ? task.label.charAt(0) : "1");   // coarse task fingerprint
-    let rt = "";
-    if (CBZ.cityRel) { const r = CBZ.cityRel(p); if (r) rt = (r.grudge > 45 ? "h" : r.fear > 55 ? "f" : (r.loyalty > 55 || r.respect > 50) ? "t" : "n"); }
-    return m + pr + rt + (g.career || "") + (g.citySpouse ? "S" : "") + (p.recruited ? "R" : "");
-  }
-
-  addEventListener("keydown", function (e) {
-    if (g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen) return;
-    const k = e.key.toLowerCase();
-    if (k === "e" && !current) {
-      const econ = CBZ.cityEcon, inv = g.cityInv || {};
-      const food = Object.keys(inv).find((n) => econ.ITEMS[n] && econ.ITEMS[n].heal);
-      if (food && CBZ.cityEat) { e.preventDefault(); CBZ.cityEat(food); }
-      return;
-    }
-    if (k === "x") {
-      const econ = CBZ.cityEcon, inv = g.cityInv || {};
-      const drug = Object.keys(inv).find((n) => econ.ITEMS[n] && econ.ITEMS[n].tag === "drug");
-      if (drug) {
-        e.preventDefault();
-        econ.take(drug, 1);
-        const P = CBZ.player;
-        P.hp = Math.min(P.maxHp || 200, P.hp + 18);
-        P._boost = 16; g.hunger = Math.min(100, (g.hunger || 0) + 8);
-        if (CBZ.shake) CBZ.shake(0.2);
-        CBZ.city.note("You did the " + drug + "… everything feels faster. 🌀", 2.2);
-        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      }
-      return;
-    }
-    if (!current || CBZ.player.driving) return;
-    const o = currentOpts.find((x) => x.key === k);
-    if (o) { e.preventDefault(); o.fn(); }
   });
 })();

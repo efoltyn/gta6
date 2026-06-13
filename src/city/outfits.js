@@ -58,6 +58,32 @@
                  colors: { legs: 0x2e3138, torso: 0xc8553a, collar: 0xf0ead8, arms: 0xf0ead8, shoes: 0x2b2b2b } },
     hivis:     { id: "hivis",     name: "Dock Hi-Vis",      tier: "work",   who: "dock crews",       price: 0,    drip: 0,
                  colors: { legs: 0x2f4f8a, torso: 0xffb43a, collar: 0xfff06b, arms: 0xffb43a, shoes: 0x4a3a26 } },
+    // ---- uniforms everybody KNOWS ON SIGHT (price 0 — never racked; the
+    //      casting sprinkles them through the crowd so the street reads like
+    //      a working city, not a costume party). Each is the real-world
+    //      color grammar: safety orange over jeans, teal scrubs, navy EMS
+    //      with the reflective band at the collar, tan turnout with the
+    //      yellow trim, county khaki-over-brown. sheriff carries NO cop
+    //      flag on purpose: the trust/impersonation machinery stays city
+    //      PD's — khaki off a corpse is a look, not a skeleton key. ----
+    construction: { id: "construction", name: "Site Hi-Vis", tier: "work",  who: "construction crews", price: 0, drip: 0,
+                 colors: { legs: 0x2e4a6b, torso: 0xe8821a, collar: 0xfff06b, arms: 0x8a939c, shoes: 0x4a3a26 } },
+    scrubs:    { id: "scrubs",    name: "Hospital Scrubs",  tier: "work",   who: "nurses",           price: 0,    drip: 0,
+                 colors: { legs: 0x3d8a86, torso: 0x3d8a86, collar: 0x2e6b68, arms: 0x3d8a86, shoes: 0xd8d8d8 } },
+    doctor:    { id: "doctor",    name: "White Coat",       tier: "work",   who: "doctors",          price: 0,    drip: 1,
+                 colors: { legs: 0x39414f, torso: 0xe9e9e9, collar: 0x9ab8d0, arms: 0xe9e9e9, shoes: 0x2b2b2b } },
+    ems:       { id: "ems",       name: "Paramedic Blues",  tier: "work",   who: "EMS crews",        price: 0,    drip: 0,
+                 colors: { legs: 0x24304a, torso: 0x24304a, collar: 0xc6d435, arms: 0x24304a, shoes: 0x101216 } },
+    firefighter: { id: "firefighter", name: "Turnout Gear", tier: "work",   who: "firefighters",     price: 0,    drip: 0,
+                 colors: { legs: 0xb09a6e, torso: 0xb09a6e, collar: 0xe8d44a, arms: 0xb09a6e, shoes: 0x16110d } },
+    security:  { id: "security",  name: "Guard Blacks",     tier: "work",   who: "security guards",  price: 0,    drip: 0,
+                 colors: { legs: 0x1c1f26, torso: 0x1c1f26, collar: 0xe8e8e8, arms: 0x1c1f26, shoes: 0x101216 } },
+    sheriff:   { id: "sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0,
+                 colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
+    soldier:   { id: "soldier",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0,
+                 colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22 } },
+    office:    { id: "office",    name: "Office Slacks",    tier: "work",   who: "accountants",      price: 0,    drip: 1,
+                 colors: { legs: 0x39414f, torso: 0x9ab4c8, collar: 0x7d97ab, arms: 0x9ab4c8, shoes: 0x23262b } },
     // ---- the LAW (never sold — taken off a body; the street reads the badge) ----
     police:    { id: "police",    name: "Police Uniform",   tier: "law",    who: "beat cops",        price: 0,    drip: 1, cop: true,
                  colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
@@ -317,13 +343,34 @@
   //    if (fit && opts.outfit == null) opts.outfit = fit.colors.torso;
   //  (or pass fit.colors straight into makeCharacter for the full set).
   // ============================================================
+  // a JOB you can read at a glance → its uniform. Only trades EVERYBODY
+  // recognizes get a fit (the user's rule: paint what you KNOW); every other
+  // job stays in street clothes. Specific trades match BEFORE the generic
+  // laborer line — the old bare /worker/ regex put office workers in dock
+  // hi-vis, which is exactly the "weird clothes" this table retires.
+  function jobFit(job) {
+    if (!job) return null;
+    if (/clerk|cashier|vendor|line cook|barber/i.test(job)) return CAT.vendor;
+    if (/construction|builder|hardhat|roadwork|mechanic/i.test(job)) return CAT.construction;
+    if (/dock|warehouse|laborer|courier|delivery/i.test(job)) return CAT.hivis;
+    if (/paramedic|ambulance|\bems\b/i.test(job)) return CAT.ems;
+    if (/nurse|scrubs/i.test(job)) return CAT.scrubs;
+    if (/doctor|surgeon|physician/i.test(job)) return CAT.doctor;
+    if (/firefight/i.test(job)) return CAT.firefighter;
+    if (/sheriff|deputy/i.test(job)) return CAT.sheriff;
+    if (/soldier|military/i.test(job)) return CAT.soldier;
+    if (/security|guard|bouncer/i.test(job)) return CAT.security;
+    if (/accountant|office|banker|analyst|lawyer/i.test(job)) return CAT.office;
+    return null;
+  }
   CBZ.cityOutfitFor = function (spec) {
     buildGangOutfits();
     spec = spec || {};
     if (spec.kind === "cop" || spec.cop) return spec.swat ? CAT.swat : CAT.police;
     if (spec.gang && CAT["gang:" + spec.gang]) return CAT["gang:" + spec.gang];
-    if (spec.vendor || spec.job === "vendor" || /clerk|cashier|vendor/i.test(spec.job || "")) return CAT.vendor;
-    if (/dock|construction|builder|laborer|worker/i.test(spec.job || "")) return CAT.hivis;
+    if (spec.vendor || spec.job === "vendor") return CAT.vendor;
+    const jf = jobFit(spec.job);
+    if (jf) return jf;
     const a = spec.archetype || "";
     if (a === "tycoon" || a === "billionaire") return CAT.tuxedo;    // the walking jackpot WEARS it
     if (a === "socialite" || a === "boss" || a === "mobster" || a === "made") return CAT.suit;
@@ -403,6 +450,10 @@
     if (p.kind === "cop") return p.swat ? CAT.swat : CAT.police;
     if (p.gang && CAT["gang:" + p.gang]) return CAT["gang:" + p.gang];
     if (p.vendor) return CAT.vendor;
+    // uniformed trades: the corpse-swap record carries the NAME of what you
+    // saw (you take "Hospital Scrubs", not "their street clothes")
+    const jf = jobFit(p.job);
+    if (jf) return jf;
     const a = p.archetype || "";
     if (a === "tycoon" || a === "billionaire") return CAT.tuxedo;
     if (a === "socialite" || a === "boss" || a === "mobster" || a === "made") return CAT.suit;

@@ -219,7 +219,12 @@
     // ambient agents into real rigs on demand. So we keep the expensive rig pool
     // lean and let the cheap crowd fill the streets. Adaptive quality (core/
     // quality.js) trims this further on weak GPUs via CBZ.cityRigBudget.
-    peds: typeof CBZ.CITY_PEDS === "number" ? CBZ.CITY_PEDS : 90,
+    peds: typeof CBZ.CITY_PEDS === "number" ? CBZ.CITY_PEDS : 100,
+    // the instanced ambient mass (city/crowd.js) — where the population head-
+    // room lives: ~6 extra draw calls total no matter how big this gets. The
+    // crowd tick is tiered by camera distance (near every frame, far every
+    // 16th with dead-reckoning between), so 700 costs about what 300 used to.
+    crowd: typeof CBZ.CITY_CROWD === "number" ? CBZ.CITY_CROWD : 700,
     cops: typeof CBZ.CITY_COPS === "number" ? CBZ.CITY_COPS : 0, // spawn on wanted
     ambientCops: typeof CBZ.CITY_AMBIENT_COPS === "number" ? CBZ.CITY_AMBIENT_COPS : 3, // patrols policing NPCs/traffic at 0 stars
     traffic: typeof CBZ.CITY_TRAFFIC === "number" ? CBZ.CITY_TRAFFIC : 66,
@@ -250,19 +255,22 @@
     // map and the population field describe the same neighbourhoods.
     //   kind    core (packed strip) | commercial | residential | industrial | projects
     //   pop     ped + ambient-crowd density weight — REDISTRIBUTES a fixed
-    //           total (perf: never adds bodies), downtown ~4× the docks
+    //           total (perf: never adds bodies). Downtown is still the
+    //           busiest, but only ~2× the docks: with ~1000 alive the WHOLE
+    //           city has to read inhabited — the old 4× spread packed three
+    //           sidewalks and left the rest of the map dead.
     //   cops    beat-patrol weight: police presence follows the money
     //   wealth  mean street wealth (casting: who walks here, what they carry)
     districts: [
-      { q: 0, name: "Northpoint", kind: "residential", pop: 1.4, cops: 0.9,  wealth: 0.45 },
-      { q: 1, name: "Crownhill",  kind: "residential", pop: 1.4, cops: 1.2,  wealth: 0.68 },
-      { q: 2, name: "Eastgate",   kind: "commercial",  pop: 2.0, cops: 1.3,  wealth: 0.55 },
-      { q: 3, name: "Westend",    kind: "commercial",  pop: 2.2, cops: 1.3,  wealth: 0.52 },
-      { q: 4, name: "Midtown",    kind: "core",        pop: 3.8, cops: 2.6,  wealth: 0.78 },
-      { q: 5, name: "Harborside", kind: "commercial",  pop: 1.9, cops: 1.1,  wealth: 0.58 },
-      { q: 6, name: "Southside",  kind: "projects",    pop: 1.0, cops: 0.5,  wealth: 0.16 },
-      { q: 7, name: "Ironworks",  kind: "industrial",  pop: 0.9, cops: 0.5,  wealth: 0.34 },
-      { q: 8, name: "Dockyard",   kind: "industrial",  pop: 1.0, cops: 0.45, wealth: 0.30 },
+      { q: 0, name: "Northpoint", kind: "residential", pop: 1.3, cops: 0.9,  wealth: 0.45 },
+      { q: 1, name: "Crownhill",  kind: "residential", pop: 1.3, cops: 1.2,  wealth: 0.68 },
+      { q: 2, name: "Eastgate",   kind: "commercial",  pop: 1.6, cops: 1.3,  wealth: 0.55 },
+      { q: 3, name: "Westend",    kind: "commercial",  pop: 1.7, cops: 1.3,  wealth: 0.52 },
+      { q: 4, name: "Midtown",    kind: "core",        pop: 2.2, cops: 2.6,  wealth: 0.78 },
+      { q: 5, name: "Harborside", kind: "commercial",  pop: 1.5, cops: 1.1,  wealth: 0.58 },
+      { q: 6, name: "Southside",  kind: "projects",    pop: 1.1, cops: 0.5,  wealth: 0.16 },
+      { q: 7, name: "Ironworks",  kind: "industrial",  pop: 1.0, cops: 0.5,  wealth: 0.34 },
+      { q: 8, name: "Dockyard",   kind: "industrial",  pop: 1.05, cops: 0.45, wealth: 0.30 },
     ],
     // homeless population cast into the projects pocket + industrial fringe
     // (carved OUT of the ped total, never added on top — perf stays flat)
@@ -314,8 +322,8 @@
     traf: {
       lane: 2.2,           // lane-centre offset from a road's centre line
       follow: 8.0,         // car-following gap (m) kept behind the car ahead
-      cruise: [7, 12],     // calm cruising speed window
-      aggrSpeedMul: 1.7,   // how much faster aggressive drivers push it
+      cruise: [11, 17],    // calm cruising speed window (city pace, not a crawl)
+      aggrSpeedMul: 1.45,  // how much faster aggressive drivers push it
       stopGap: 6.5,        // how far out a calm driver brakes for a red
       recklessFrac: 0.18,  // share of ambient drivers who drive aggressively
       pulloverHeat: 18,    // NPC-offense heat a moving violation earns the driver

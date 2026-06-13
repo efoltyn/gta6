@@ -27,7 +27,18 @@
   let _s = 60601;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
+  let annexCarHook = null, _trafWrapped = false;
+  // the island's parking refills right after every traffic respawn —
+  // spawnCityTraffic clears cityCars at the start of each run, which used to
+  // leave the island carless (and is why it had its own prop cars at all)
+  function wrapTraffic() {
+    if (_trafWrapped || !CBZ.spawnCityTraffic) return;
+    _trafWrapped = true;
+    const orig = CBZ.spawnCityTraffic;
+    CBZ.spawnCityTraffic = function (n) { const r = orig(n); if (annexCarHook) try { annexCarHook(); } catch (e) {} return r; };
+  }
   CBZ.cityExpansion = function (city) {
+    wrapTraffic();
     if (city.annex) return city.annex;
     const build = CBZ.cityMakeBuilding;
     if (!build) return null;
@@ -170,16 +181,29 @@
       box(x + 3.4, 1.0, z + 5.6, 1.2, 2.0, 0.8, 0x9fe0ff, { emissive: 0x9fe0ff, ei: 0.45, cast: false });  // drinks cooler
     }
 
-    function parkedCar(x, z, vertical, color, solid) {
-      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = vertical ? 0 : Math.PI / 2; root.add(g);
-      const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 4.2), mat(color)); body.position.y = 0.78; body.castShadow = true; g.add(body);
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.72, 2.2), mat(0x223038, { emissive: 0x0c141a, ei: 0.35 })); cabin.position.set(0, 1.45, -0.2); g.add(cabin);
-      if (solid) {
-        const hw = vertical ? 1.1 : 2.2, hd = vertical ? 2.2 : 1.1;
-        CBZ.colliders.push({ minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, ref: body, noCam: true });
-      }
-      return g;
+    // ISLAND CARS ARE REAL CARS (user-filmed: the old two-box props read as a
+    // different, cheaper world — "why would the island have a different car
+    // situation?"). Every spot is recorded and filled with a REAL vehicles.js
+    // car — same unified visual as mainland traffic, enterable, stealable,
+    // choppable. Spawn is deferred: spawnCityTraffic clears cityCars at the
+    // start of every run, so the island re-fills right after it (see the wrap
+    // below). No static colliders — a real car is solid through the car system
+    // and must be free to drive away.
+    const carSpots = [];
+    function parkedCar(x, z, vertical, color, rare) {
+      carSpots.push({ x, z, vertical, rare: !!rare });
     }
+    function spawnAnnexCars() {
+      if (!CBZ.cityMakeCar || !CBZ.city || !CBZ.city.arena) return;
+      const econ = CBZ.cityEcon;
+      for (const s of carSpots) {
+        const heading = s.vertical ? (Math.random() < 0.5 ? 0 : Math.PI) : (Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
+        const model = econ && econ.pickCar ? econ.pickCar(s.rare || Math.random() < 0.12) : null;
+        const c = CBZ.cityMakeCar(s.x, s.z, heading, s.vertical, model, 0.2);
+        c.ai = false; c.v = 0; c.baseV = 0; c.road = null;   // parked until someone takes it
+      }
+    }
+    annexCarHook = spawnAnnexCars;
 
     function showroom(x, z) {
       addPlaced(x, z, 18, 13);
@@ -203,9 +227,9 @@
         box(x + off, 0.26 + i * 0.45, z + 5.3, 0.9 - i * 0.12, 0.42, 0.9 - i * 0.12, 0x23262b, { cast: false }); // tyre stacks
       box(x - 7.4, 0.8, z + 5.4, 2.2, 1.6, 0.7, 0x3a352e, { cast: false });            // parts shelf
       box(x, 0.1, z + 4.2, 5.2, 0.2, 3.0, 0xc8ccd4, { cast: false });                  // feature-car plinth
-      parkedCar(x - 4.6, z + 1.6, true, 0xe24b4b, false);
-      parkedCar(x + 4.6, z + 1.6, true, 0x3c6fd6, false);
-      parkedCar(x, z + 4.2, false, 0xf2c43d, false);
+      parkedCar(x - 4.6, z + 1.6, true, 0xe24b4b, true);
+      parkedCar(x + 4.6, z + 1.6, true, 0x3c6fd6, true);
+      parkedCar(x, z + 4.2, false, 0xf2c43d, true);
     }
 
     gasStation(cx - 78, cz + 74);
@@ -313,7 +337,7 @@
     for (let i = 0; i < roadSegs.length; i += 2) {
       const r = roadSegs[i], off = (rng() < 0.5 ? -1 : 1) * ROADW * 0.25, along = (rng() - 0.5) * r.len * 0.65;
       const x = r.x + (r.vertical ? off : along), z = r.z + (r.vertical ? along : off);
-      if (!blocked(x, z)) parkedCar(x, z, r.vertical, CAR_COLORS[(rng() * CAR_COLORS.length) | 0], true);
+      if (!blocked(x, z)) parkedCar(x, z, r.vertical, CAR_COLORS[(rng() * CAR_COLORS.length) | 0], false);
     }
 
     const annex = {

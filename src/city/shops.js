@@ -781,4 +781,307 @@
     const svc = services(openLot.kind).find((s) => s.key === k);
     if (svc) { e.preventDefault(); svc.fn(); }
   });
+
+  // ---- BREAKING & ENTERING through a shot-out window. buildings.js only
+  // reports the route (CBZ.cityWindowEntry fires when the player crosses the
+  // wall plane inward through a live opening); the LAW lives here with the
+  // rest of the shop crime. WHY: shooting out a pane is the burglar's door —
+  // quieter than an armed robbery, but a crime the moment you're inside
+  // someone's dark shop. Daylight entry is mere trespass — only matters if
+  // somebody sees it (cityCrime's witness gate already handles that).
+  CBZ.cityWindowEntry = function (rec) {
+    if (!rec || rec._charged) return;          // one charge per opening
+    rec._charged = true;
+    const P = CBZ.player; if (!P || P.dead) return;
+    const A = CBZ.city && CBZ.city.arena; if (!A || !A.lots) return;
+    let lot = null;
+    for (const l of A.lots) {
+      if (l.building && Math.abs(P.pos.x - l.cx) < l.w / 2 + 3 && Math.abs(P.pos.z - l.cz) < l.d / 2 + 3) { lot = l; break; }
+    }
+    const night = (CBZ.nightAmount || 0) > 0.45;
+    if (night) {
+      CBZ.cityCrime && CBZ.cityCrime(70, { x: P.pos.x, z: P.pos.z, type: "burglary" });
+      // a shopfront trips its silent alarm just like the register path
+      if (lot && CBZ.cityAlarm) CBZ.cityAlarm(P.pos.x, P.pos.z, 18, 0.7, CBZ.city.playerActor);
+    } else {
+      CBZ.cityCrime && CBZ.cityCrime(24, { x: P.pos.x, z: P.pos.z, type: "trespass" });
+    }
+  };
+
+  // ============================================================
+  //  THE COUNTER KNOWS WHO'S WORKING IT — registry options (interactions.js).
+  //  Every storefront verb below is an OPTION RECORD, not a key listener:
+  //  the counter reads the KEEPER's state (alive / at the post / on shift)
+  //  and the street reads the WORKER's trade (CBZ.cityJobs class strings),
+  //  so a mechanic, a cab driver or a cart vendor is something you can USE,
+  //  not just walk past. Worker-only verbs gate on ctx.role (the class
+  //  string), never on the ped ref — any actor carrying the trade gets the
+  //  same verbs. shops.js loads BEFORE the registry, so registration defers
+  //  one tick. All money paths reuse the existing economy (spend/addCash/
+  //  buyPrice/sellAll/tillEstimate) — no parallel tills.
+  // ============================================================
+  const _sNow = () => CBZ.now || 0;
+  const _first = (n) => (n || "them").split(" ")[0];
+  const _jobOf = (p) => (p && p.job) || "";
+  const _jclass = (p) => { const J = CBZ.cityJobs && CBZ.cityJobs[_jobOf(p)]; return J ? J.class : ""; };
+
+  // is this storefront LOCKED UP for the night? Only the banker's-hours kinds
+  // shut (the diner, the gas pump, the bar and the trap never close); hours
+  // come off the same sun clock the keepers' timetables run on.
+  const SHUT_KINDS = { bank: 1, cityhall: 1, realtor: 1, clothing: 1, barber: 1, electronics: 1, jewelry: 1, carlot: 1 };
+  function shopShut(lot) {
+    if (!lot || !SHUT_KINDS[lot.kind]) return false;
+    const h = CBZ.citySunHour ? CBZ.citySunHour() : 12;
+    return h < 7 || h >= 21;
+  }
+
+  // the QUIET TILL: the keeper's dead or gone and the drawer is just sitting
+  // there. Reaching over the counter is petty theft, not a stick-up — the
+  // heat is witness-gated (cityCrime without `instant`), so an empty street
+  // means a clean grab. Smaller take than the armed version, long refill.
+  function quietTill(lot) {
+    const est = tillEstimate(lot.kind);
+    const take = Math.max(15, Math.round(est * (0.45 + Math.random() * 0.35)));
+    lot._tillSneakT = _sNow() + 300000;              // ms — the drawer refills slowly (~5 min)
+    CBZ.city.addCash(take);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    const d = lot.building && lot.building.door;
+    if (CBZ.cityCrime) CBZ.cityCrime(40, { x: d ? d.x : CBZ.player.pos.x, z: d ? d.z : CBZ.player.pos.z, type: "till grab" });
+    CBZ.city.note("🤫 Cleaned the drawer — " + fmt$(take) + ". Nobody watching.", 2);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+
+  // a MECHANIC will only quote on a real wreck close enough to look at —
+  // engine health is vehicles.js's master number (engineHp), fire excluded.
+  function fixableCar(p) {
+    const cars = CBZ.cityCars; if (!cars) return null;
+    const P = CBZ.player;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || c.dead || c.npcDriver || c.engineHp == null || c.engineHp >= 85) continue;
+      if (c._onFire) continue;                       // nobody works a burning engine
+      const dxp = c.pos.x - p.pos.x, dzp = c.pos.z - p.pos.z;
+      if (dxp * dxp + dzp * dzp > 11 * 11) continue;
+      const dxP = c.pos.x - P.pos.x, dzP = c.pos.z - P.pos.z;
+      if (dxP * dxP + dzP * dzP > 15 * 15) continue;
+      return c;
+    }
+    return null;
+  }
+  function fixPrice(c) { return Math.round(60 + (100 - Math.max(0, c.engineHp)) * 1.6 * (c.repair || 1)); }
+
+  // a CAB ride: the fare scales with the crosstown distance; the arrival is a
+  // straight drop at the far-side intersection (fade-arrive — the ride itself
+  // isn't the show, being ACROSS town in five seconds is).
+  function cabDest() {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.nearestIntersection) return null;
+    const P = CBZ.player;
+    return A.nearestIntersection(-P.pos.x, -P.pos.z);   // mirror across the city core
+  }
+  function cabFare() {
+    const it = cabDest(); if (!it) return 0;
+    const P = CBZ.player;
+    return Math.max(30, Math.round(Math.hypot(it.x - P.pos.x, it.z - P.pos.z) * 0.5));
+  }
+  function cabRide(p) {
+    const it = cabDest(); if (!it) return;
+    const P = CBZ.player;
+    const dist = Math.hypot(it.x - P.pos.x, it.z - P.pos.z);
+    if (dist < 40) { if (CBZ.citySay) CBZ.citySay(p, "“That's a walk, not a fare.”", "#cfe6ff", 2); return; }
+    const fare = Math.max(30, Math.round(dist * 0.5));
+    if (!CBZ.city.spend(fare)) { if (CBZ.citySay) CBZ.citySay(p, "“No cash, no cab.”", "#cfe6ff", 2); return; }
+    p.cash = (p.cash | 0) + fare;
+    P.pos.x = it.x + 2; P.pos.z = it.z + 2;
+    if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
+    if (CBZ.sfx) CBZ.sfx("door");
+    CBZ.city.note("🚕 Dropped across town — " + fmt$(fare) + " on the meter.", 2.2);
+  }
+
+  const TOOLBAG = ["Crowbar", "Lockpick", "Medkit"];   // the hardware counter's working bundle
+  function toolbagPrice() {
+    const econ = CBZ.cityEcon; let t = 0;
+    for (const n of TOOLBAG) t += econ.buyPrice(n);
+    return Math.round(t * 0.85);
+  }
+
+  let _regDone = false;
+  CBZ.onUpdate(38.5, function () {
+    if (_regDone || !CBZ.interactions) return;
+    _regDone = true;
+    const I = CBZ.interactions;
+
+    // ---- the UNWATCHED REGISTER: a counter whose keeper is dead or gone.
+    //      A keeper standing their post keeps the ped:vendor layer in charge;
+    //      this zone only surfaces over the gap they leave. Token is cached
+    //      per lot so targeting hysteresis sees one stable candidate. ----
+    I.registerZone({
+      id: "shop-counter-open", kind: "counter", radius: 4.2,
+      find: function (px, pz) {
+        const A = CBZ.city && CBZ.city.arena; if (!A || !A.shopLots) return null;
+        let best = null, bd = 4.2 * 4.2;
+        for (let i = 0; i < A.shopLots.length; i++) {
+          const lot = A.shopLots[i], b = lot.building;
+          if (!b || !b.vendorSpot) continue;
+          const vs = b.vendorSpot;
+          const dd = (vs.x - px) * (vs.x - px) + (vs.z - pz) * (vs.z - pz);
+          if (dd >= bd) continue;
+          const v = b.vendor;
+          const away = !v || v.dead || Math.hypot(v.pos.x - vs.x, v.pos.z - vs.z) > 9;
+          if (!away) continue;                       // keeper's on the post — not our counter
+          bd = dd;
+          best = lot._counterTok || (lot._counterTok = { lot, x: vs.x, z: vs.z });
+        }
+        return best;
+      },
+      options: [
+        { id: "till-sneak", slot: "e", bad: true,
+          label: (t) => "Clean out the drawer (~" + fmt$(Math.round(tillEstimate(t.lot.kind) * 0.6)) + ")",
+          canShow: (t) => canRobTill(t.lot.kind) && _sNow() > (t.lot._tillSneakT || 0),
+          onSelect: (t) => quietTill(t.lot) },
+      ],
+    });
+    I.describe("counter", function (t) {
+      const v = t.lot.building && t.lot.building.vendor;
+      return {
+        label: (t.lot.building && t.lot.building.name) || "Counter",
+        note: v && v.dead ? "Register's open — nobody left to watch it" : "Register's open — nobody's watching",
+      };
+    });
+
+    // ---- LOCKED UP: off-shift = shut shop. The shut line outranks "Shop
+    //      here" on E for the banker's-hours kinds; the register verbs stay
+    //      (a closed store is still a store with a drawer). ----
+    I.register("ped:vendor", {
+      id: "vendor-shut", slot: "e", prio: 20,
+      canShow: (v) => !!v.vendor && shopShut(v.vendor),
+      label: (v) => "Locked up for the night — knock anyway",
+      onSelect: (v) => {
+        if (CBZ.citySay) CBZ.citySay(v, "“We're closed. Sunup.”", "#cfe6ff", 2.2);
+        else CBZ.city.note("“We're closed. Sunup.”", 1.6);
+      },
+    });
+
+    // ---- counter depth where it PAYS: one trade verb per storefront kind ----
+    // the diner: a HOT PLATE — the best hunger fill in the city, eaten standing
+    I.register("ped:vendor", {
+      id: "vendor-hotmeal", slot: "k", prio: 10,
+      canShow: (v) => !!v.vendor && v.vendor.kind === "food",
+      label: () => "Hot plate — $15 (a real meal)",
+      onSelect: () => {
+        if (!CBZ.city.spend(15)) { CBZ.city.note("A plate runs $15.", 1.4); return; }
+        g.hunger = Math.min(100, (g.hunger || 0) + 50);
+        if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 18);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        CBZ.city.note("🍛 Hot plate, straight off the grill.", 1.8);
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      },
+    });
+    // the barber: the quick chair — a lineup without opening the whole menu
+    I.register("ped:vendor", {
+      id: "vendor-lineup", slot: "k", prio: 10,
+      canShow: (v) => !!v.vendor && v.vendor.kind === "barber" && !shopShut(v.vendor),
+      label: () => "Quick lineup — $25",
+      onSelect: () => {
+        if (!CBZ.city.spend(25)) { CBZ.city.note("The chair runs $25.", 1.4); return; }
+        const lk = look(); lk.swagger = (lk.swagger || 0) + 1;
+        CBZ.city.addRespect(1);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        CBZ.city.note("💈 Edges cleaned up — sharper already.", 1.6);
+      },
+    });
+    // the hardware counter: the working TOOL BAG, bundled under list price
+    I.register("ped:vendor", {
+      id: "vendor-toolbag", slot: "k", prio: 10,
+      canShow: (v) => !!v.vendor && v.vendor.kind === "hardware",
+      label: () => "Tool bag — " + fmt$(toolbagPrice()) + " (crowbar · picks · medkit)",
+      onSelect: () => {
+        const price = toolbagPrice();
+        if (!CBZ.city.spend(price)) { CBZ.city.note("The bag runs " + fmt$(price) + ".", 1.6); return; }
+        const econ = CBZ.cityEcon;
+        for (const n of TOOLBAG) {
+          econ.add(n, 1);
+          const m = econ.ITEMS[n];
+          if (m && (m.melee || m.gun) && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(n);
+        }
+        if (CBZ.sfx) CBZ.sfx("coin");
+        CBZ.city.note("🧰 Tool bag over the counter — ready to work.", 1.8);
+      },
+    });
+    // the pawnbroker: one press fences the whole haul (the haggle's built into
+    // the counter's own sell prices — no second economy)
+    I.register("ped:vendor", {
+      id: "vendor-fence", slot: "k", prio: 10,
+      canShow: (v) => !!v.vendor && v.vendor.kind === "pawn" && sellTotal("pawn") > 0,
+      label: () => "Fence the lot — " + fmt$(sellTotal("pawn")),
+      onSelect: () => sellAll("pawn"),
+    });
+    // YOUR trade pays at the counter too: a player working security collects a
+    // watch retainer the same way an NPC guard draws a wage. Gated on the role
+    // class string — any actor carrying the trade sees the same verb.
+    I.register("ped:vendor", {
+      id: "vendor-retainer", slot: "l", prio: 12, role: "security",
+      canShow: (v) => !!v.vendor && !v.dead && _sNow() > (v._retainerT || 0),
+      label: () => "Collect the watch retainer — $40",
+      onSelect: (v) => {
+        v._retainerT = _sNow() + 600000;           // ms — one collection per keeper per long while
+        CBZ.city.addCash(40);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (CBZ.citySay) CBZ.citySay(v, "“Keep the block quiet, yeah?”", "#cfe6ff", 2.2);
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      },
+    });
+
+    // ---- WORKERS ON THE STREET: the trades you can flag down ----
+    // a mechanic near your beat-up ride quotes a fix on the spot
+    I.register("ped:civ", {
+      id: "ped-mechanic-fix", slot: "k", prio: 44,
+      canShow: (p, ctx) => !ctx.driving && !p.dead && /mechanic/i.test(_jobOf(p)) && !!fixableCar(p),
+      label: (p) => { const c = fixableCar(p); return "Pay " + _first(p.name) + " to fix your ride — " + fmt$(c ? fixPrice(c) : 0); },
+      onSelect: (p) => {
+        const c = fixableCar(p); if (!c) return;
+        const price = fixPrice(c);
+        if (!CBZ.city.spend(price)) { CBZ.city.note("Repairs run " + fmt$(price) + " — you're short.", 1.6); return; }
+        c.engineHp = 100; c._smoking = false;
+        p.cash = (p.cash | 0) + price;
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (CBZ.citySay) CBZ.citySay(p, "“Runs better than it looks. We're square.”", "#cfe6ff", 2.2);
+        CBZ.city.note("🔧 Engine patched — she'll run.", 1.8);
+      },
+    });
+    // a cab driver takes a fare across town (they won't carry a hot one)
+    I.register("ped:civ", {
+      id: "ped-cab-ride", slot: "k", prio: 43,
+      canShow: (p, ctx) => !ctx.driving && !p.dead && !p.rage && p.state !== "flee" &&
+        _jobOf(p) === "cab driver" && (ctx.wanted | 0) < 2,
+      label: () => "Flag a ride across town — " + fmt$(cabFare()),
+      onSelect: (p) => cabRide(p),
+    });
+    // a cart vendor sells off the cart — cheap calories without a counter
+    I.register("ped:civ", {
+      id: "ped-cart-bite", slot: "k", prio: 41,
+      canShow: (p) => !p.dead && !p.rage && p.state !== "flee" && _jobOf(p) === "street vendor",
+      label: (p) => "Buy a bite off " + _first(p.name) + "'s cart — $8",
+      onSelect: (p) => {
+        if (!CBZ.city.spend(8)) { CBZ.city.note("Even the cart wants $8.", 1.4); return; }
+        g.hunger = Math.min(100, (g.hunger || 0) + 30);
+        if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 8);
+        p.cash = (p.cash | 0) + 8;
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (CBZ.citySay) CBZ.citySay(p, "“Hot and fresh. Next!”", "#cfe6ff", 2);
+      },
+    });
+    // a posted guard can be GREASED — fifty bucks buys you blind eyes a while
+    I.register("ped:civ", {
+      id: "ped-guard-grease", slot: "l", prio: 30, bad: true,
+      canShow: (p) => !p.dead && !p.rage && !p.gang && _jclass(p) === "law",
+      label: (p) => "Slip " + _first(p.name) + " a fifty — eyes elsewhere",
+      onSelect: (p) => {
+        if (!CBZ.city.spend(50)) { CBZ.city.note("You need a whole fifty to grease anyone.", 1.4); return; }
+        p.snitch = 0; p.reactCD = Math.max(p.reactCD || 0, 90);
+        p.cash = (p.cash | 0) + 50;
+        if (CBZ.citySay) CBZ.citySay(p, "“Didn't see a thing.”", "#cfe6ff", 2.2);
+      },
+    });
+  });
 })();

@@ -49,7 +49,7 @@
     },
     {
       id: "revolver", key: "revolver", label: ".357 MAGNUM", short: "357", slot: "pistol",
-      appearanceFactory: "sidearm", magSize: 6, fireMode: "semi", fireDelay: 0.5, reloadTime: 1.6,
+      appearanceFactory: "revolver",   // own silhouette: cylinder + hammer + underlug (was sharing the 9mm's) magSize: 6, fireMode: "semi", fireDelay: 0.5, reloadTime: 1.6,
       mag: 6, reserve: 36, reload: 1.6, interval: 0.5, range: 92,
       damage: 64, headMult: 2.8, dropStart: 50, minDamage: 0.66,
       spread: 0.004, bodyRadius: 0.62, headRadius: 0.33,
@@ -59,7 +59,7 @@
     },
     {
       id: "deagle", key: "deagle", label: ".50 DESERT EAGLE", short: "50AE", slot: "pistol",
-      appearanceFactory: "sidearm", magSize: 7, fireMode: "semi", fireDelay: 0.4, reloadTime: 1.35,
+      appearanceFactory: "deagle",     // own silhouette: massive slab slide + .50 bore (was sharing the 9mm's) magSize: 7, fireMode: "semi", fireDelay: 0.4, reloadTime: 1.35,
       mag: 7, reserve: 49, reload: 1.35, interval: 0.4, range: 90,
       damage: 75, headMult: 2.7, dropStart: 48, minDamage: 0.64,
       spread: 0.0045, bodyRadius: 0.62, headRadius: 0.33,
@@ -82,7 +82,7 @@
     },
     {
       id: "uzi", key: "uzi", label: "MICRO UZI", short: "UZI", slot: "auto",
-      appearanceFactory: "smg", magSize: 25, fireMode: "auto", fireDelay: 0.052, reloadTime: 1.15,
+      appearanceFactory: "uzi",        // own silhouette: mag-in-grip stub + wire stock (was sharing the MP5's) magSize: 25, fireMode: "auto", fireDelay: 0.052, reloadTime: 1.15,
       mag: 25, reserve: 125, reload: 1.15, interval: 0.052, range: 56,
       damage: 16, headMult: 1.9, dropStart: 26, minDamage: 0.45,
       spread: 0.016, bodyRadius: 0.63, headRadius: 0.33,
@@ -92,7 +92,7 @@
     },
     {
       id: "sniper", key: "sniper", label: "BOLT SNIPER", short: "SNIP", slot: "rifle",
-      appearanceFactory: "carbine", magSize: 5, fireMode: "bolt", fireDelay: 1.25, reloadTime: 2.0,
+      appearanceFactory: "sniper",     // own silhouette: scope + bolt + long barrel (was sharing the M4's) magSize: 5, fireMode: "bolt", fireDelay: 1.25, reloadTime: 2.0,
       mag: 5, reserve: 25, reload: 2.0, interval: 1.25, range: 240,
       damage: 130, headMult: 3.0, dropStart: 180, minDamage: 0.85,
       spread: 0.0015, bodyRadius: 0.6, headRadius: 0.34,
@@ -102,7 +102,7 @@
     },
     {
       id: "lmg", key: "lmg", label: "M249 LMG", short: "LMG", slot: "auto",
-      appearanceFactory: "carbine", magSize: 100, fireMode: "auto", fireDelay: 0.075, reloadTime: 3.2,
+      appearanceFactory: "lmg",        // own silhouette: ammo box + bipod + feed cover (was sharing the M4's) magSize: 100, fireMode: "auto", fireDelay: 0.075, reloadTime: 3.2,
       mag: 100, reserve: 200, reload: 3.2, interval: 0.075, range: 120,
       damage: 27, headMult: 2.0, dropStart: 60, minDamage: 0.58,
       spread: 0.014, bodyRadius: 0.62, headRadius: 0.32,

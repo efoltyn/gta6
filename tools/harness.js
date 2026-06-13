@@ -19,6 +19,7 @@ V3.prototype.add = function (v) { this.x += v.x; this.y += v.y; this.z += v.z; r
 V3.prototype.sub = function (v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; };
 V3.prototype.multiplyScalar = function (s) { this.x *= s; this.y *= s; this.z *= s; return this; };
 V3.prototype.length = function () { return Math.hypot(this.x, this.y, this.z); };
+V3.prototype.lengthSq = function () { return this.x * this.x + this.y * this.y + this.z * this.z; };
 V3.prototype.normalize = function () { const l = this.length() || 1; this.x /= l; this.y /= l; this.z /= l; return this; };
 V3.prototype.distanceTo = function (v) { return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z); };
 
@@ -31,6 +32,7 @@ Scale.prototype.copy = function (v) { this.x = v.x; this.y = v.y; this.z = v.z; 
 Scale.prototype.multiplyScalar = function (s) { this.x *= s; this.y *= s; this.z *= s; return this; };
 function Quat() {}
 Quat.prototype.setFromUnitVectors = function () { return this; };
+Quat.prototype.copy = function () { return this; };
 
 function Color(h) { this.r = 1; this.g = 1; this.b = 1; this._h = h || 0; if (h != null) { this.r = ((h >> 16) & 255) / 255; this.g = ((h >> 8) & 255) / 255; this.b = (h & 255) / 255; } }
 Color.prototype.setHex = function (h) { this._h = h; this.r = ((h >> 16) & 255) / 255; this.g = ((h >> 8) & 255) / 255; this.b = (h & 255) / 255; return this; };
@@ -295,6 +297,10 @@ const cityFiles = [
   // phone (action hub) + playerair (personal chopper/airstrike tick @42.5) — load
   // them so the headless loop exercises their per-frame ticks for crashes.
   "phone", "playerair",
+  // family: pools + households + the kidnap director (onUpdate 36.2)
+  "family",
+  // swim: open water past the seawall (onUpdate 45.8)
+  "swim",
 ];
 for (const f of cityFiles) {
   const rel = "src/city/" + f + ".js";

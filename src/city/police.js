@@ -694,9 +694,27 @@
     beam.z += (P.pos.z - beam.z) * Math.min(1, dt * (0.7 + stars * 0.18));
     chopper.spotR = 6 + stars * 0.5;
     chopper.pool.scale.setScalar(chopper.spotR / 5);
-    // visible light cone hangs from the belly down to the ground (cheap: a local
-    // downward cylinder; the wide bottom radius reads as a spreading beam).
-    const len = Math.max(2, chopper.pos.y - 0.07);
+    // the beam lands on whatever is actually UNDER it: when the spot drifts
+    // over a building, the pool climbs to that ROOF and the cone stops there —
+    // light doesn't pass through six storeys to paint the street (user-filmed).
+    // Cheap: an AABB top scan only of colliders under the beam, throttled.
+    chopper._roofT = (chopper._roofT || 0) - dt;
+    if (chopper._roofT <= 0) {
+      chopper._roofT = 0.18;
+      let topY = 0;
+      const cols = CBZ.colliders || [];
+      for (let ci = 0; ci < cols.length; ci++) {
+        const c = cols[ci];
+        if (c.y1 == null || c.y1 <= topY || c.y1 > chopper.pos.y) continue;
+        if (beam.x < c.minX - 1 || beam.x > c.maxX + 1 || beam.z < c.minZ - 1 || beam.z > c.maxZ + 1) continue;
+        topY = c.y1;
+      }
+      chopper._beamY = topY;
+    }
+    beam.y = (chopper._beamY || 0) + 0.07;
+    // visible light cone hangs from the belly down to the lit surface (cheap: a
+    // local downward cylinder; the wide bottom radius reads as a spreading beam).
+    const len = Math.max(2, chopper.pos.y - beam.y);
     chopper.cone.position.set(0, -len / 2 - 0.4, 0);
     chopper.cone.rotation.set(0, 0, 0);
     chopper.cone.scale.set(1, len, 1);
@@ -733,6 +751,40 @@
     ped.ko = 4; ped.alarmed = 0;
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
     if (CBZ.body) CBZ.body.hit(ped, { dir: { x: 0, z: 1 }, force: 3, knockdown: 1.2 });
+  };
+
+  // ---- the PRECINCT DESK (city/restrain.js's citizen-collar pipeline) -------
+  // There is no dedicated station building yet — the law's intake desk fronts
+  // City Hall (falls back to the bank, then any shop door). Revalidated against
+  // the LIVE arena so a rebuilt world can't leave a stale point behind.
+  let _station = null;
+  CBZ.cityPoliceStation = function () {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.shopLots || !A.shopLots.length) return null;
+    if (_station && A.shopLots.indexOf(_station.lot) >= 0) return _station;
+    const lot = A.shopLots.find((l) => l.kind === "cityhall")
+      || A.shopLots.find((l) => l.kind === "bank")
+      || A.shopLots.find((l) => l.building && l.building.door);
+    const d = lot && lot.building && lot.building.door;
+    if (!d) return null;
+    _station = { x: d.x, z: d.z, lot };
+    return _station;
+  };
+  // a turned-in suspect gets WALKED INSIDE: charges cleared off the street
+  // ledger (same wipe as cityNpcArrest), then the body leaves play through the
+  // door — the crowd pool's _parked off-board state, not a death (the city's
+  // headcount only falls for corpses).
+  CBZ.cityStationIntake = function (ped) {
+    if (!ped || ped.dead) return false;
+    ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.rampage = null;
+    ped.armed = false; ped.weapon = null;
+    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    ped.controlled = false; ped.companion = false; ped.hostage = false;
+    ped.surrender = false; ped.surrenderT = 0;
+    ped._parked = true; ped.group.visible = false;
+    ped.pos.set(-9999, 0, -9999); ped.target.set(-9999, 0, -9999);
+    ped.speed = 0; ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.mem = null;
+    return true;
   };
 
   function offenderCount() { let n = 0; for (const p of CBZ.cityPeds) if (!p.dead && (p.npcWanted | 0) >= 1) n++; return n; }
@@ -1239,7 +1291,9 @@
       if (sc > bestScore) { bestScore = sc; best = CBZ.city.playerActor; bestPed = null; }
     }
     for (const p of CBZ.cityPeds) {
-      if (p.dead || (p.npcWanted | 0) < 1) continue;
+      // already in restraints (the player's collar) = already in custody — a cop
+      // hunting a zip-tied suspect would shoot the body you're delivering.
+      if (p.dead || p.restraint || (p.npcWanted | 0) < 1) continue;
       const d = Math.hypot(cp.x - p.pos.x, cp.z - p.pos.z);
       if (d > 60) continue;
       const sc = (p.npcWanted | 0) * 24 + (p.armed ? 12 : 0) - d * 0.6;

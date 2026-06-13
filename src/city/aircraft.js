@@ -454,7 +454,24 @@
     beam.z += (tgtz - beam.z) * Math.min(1, dt * 0.9);
     heli.spotR = 6 + stars * 0.5;
     heli.pool.scale.setScalar(heli.spotR / 5);
-    const len = Math.max(2, heli.pos.y - 0.08);
+    // the beam lands on what's under it — over a building the pool climbs to
+    // the roof and the cone stops there (same fix as the police searchlight:
+    // light through six storeys onto the street read as a bug). Throttled scan.
+    heli._roofT = (heli._roofT || 0) - dt;
+    if (heli._roofT <= 0) {
+      heli._roofT = 0.18;
+      let topY = 0;
+      const cols = CBZ.colliders || [];
+      for (let ci = 0; ci < cols.length; ci++) {
+        const c = cols[ci];
+        if (c.y1 == null || c.y1 <= topY || c.y1 > heli.pos.y) continue;
+        if (beam.x < c.minX - 1 || beam.x > c.maxX + 1 || beam.z < c.minZ - 1 || beam.z > c.maxZ + 1) continue;
+        topY = c.y1;
+      }
+      heli._beamY = topY;
+    }
+    beam.y = (heli._beamY || 0) + 0.08;
+    const len = Math.max(2, heli.pos.y - beam.y);
     heli.cone.position.set(0, -len / 2 - 0.4, 0);
     heli.cone.scale.set(1, len, 1);
 

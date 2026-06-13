@@ -6,8 +6,10 @@
 
    GTA-clean pass: money flashes a +/- delta on change, the wanted meter
    only shows when you HAVE a level (and flashes while heat is rising),
-   the radar got a circular framed look with a compass tick + your-car +
-   crew + cop-direction blips + a speedometer when driving, and a tidy
+   the radar is the RDR2-style bottom-left instrument cluster (circular
+   heading-up map + slim vitals beside it, turf/home lines stacked above),
+   with a compass tick + your-car + crew + cop-direction blips + a
+   speedometer when driving + speed-based zoom in a car, and a tidy
    city event feed (CBZ.cityFeed) stacks recent street events down the
    left without fighting the engine's global toast.
 
@@ -136,6 +138,13 @@
         "#cHud .cLoot .it{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);font-size:12px;color:var(--hud-ink);box-shadow:0 1px 5px rgba(0,0,0,.35)}" +
         "#cHud .cLoot .it b{color:var(--hud-ink);font-weight:700}" +
         "#cHud .cLoot .it .x{color:var(--hud-dim);font-weight:600}" +
+        // --- VITALS rows (bottom-left cluster, beside the minimap): micro label +
+        // slim fill — RDR2-compact, no fat 12px slabs. Labels right-align against
+        // the bars so the column reads as one edge.
+        "#cHud .vRow{display:flex;align-items:center;gap:6px;margin-top:6px}" +
+        "#cHud .vRow:first-child{margin-top:0}" +
+        "#cHud .vLab{flex:none;width:32px;font-size:9px;font-weight:700;letter-spacing:.8px;text-align:right;text-shadow:0 1px 2px rgba(0,0,0,.8)}" +
+        "#cHud .vSlot{flex:1;background:rgba(0,0,0,.5);border-radius:4px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}" +
         // coordinate with turf.js's overlays (loaded BEFORE us): nudge its kill
         // feed down so it clears our top-right money/pop stack, and cap its width
         // so a long name never reaches the centre. One cohesive, non-overlapping HUD.
@@ -151,6 +160,14 @@
         "  #cHud .cAmmo{font-size:11px}" +
         "  #cHud .cAmmo b{font-size:15px}" +
         "  #cMoney{font-size:24px !important}" +
+        // bottom-left cluster shrinks as a unit so it never reaches the hotbar:
+        // CSS-scale the canvas (the 190px backing store just downsamples) and
+        // pull the vitals/turf/home/badge offsets in to match.
+        "  #cityHud #cRadar{width:146px;height:146px}" +
+        "  #cHud #cVitals{left:calc(var(--hud-pad-l) + 154px) !important;width:92px !important;bottom:calc(var(--hud-pad-b) + 8px) !important}" +
+        "  #cHud #cTurf{bottom:calc(var(--hud-pad-b) + 152px) !important;font-size:11px !important}" +
+        "  #cHud #cHomeLine{bottom:calc(var(--hud-pad-b) + 168px) !important;font-size:11px !important}" +
+        "  #cHud #cMemb{bottom:calc(var(--hud-pad-b) + 186px) !important}" +
         "}";
       document.head.appendChild(st);
     }
@@ -180,10 +197,14 @@
       "  <div id='cWorld' class='oC' style='font-size:12px;color:var(--hud-dim);margin-top:2px'></div>" +
       "  <div id='cKill' class='oM' style='margin-top:7px;display:none'></div>" +
       "</div>" +
-      "<div class='oM' style='position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:230px'>" +
-      "  <div style='font-size:11px;color:#ffb3b3;font-weight:600;letter-spacing:.5px'>HEALTH</div><div style='height:12px;background:rgba(0,0,0,.45);border-radius:6px;overflow:hidden;margin-bottom:5px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div>" +
-      "  <div style='font-size:11px;color:#ffd9a8;font-weight:600;letter-spacing:.5px'>FOOD</div><div style='height:12px;background:rgba(0,0,0,.45);border-radius:6px;overflow:hidden;margin-bottom:5px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div>" +
-      "  <div style='font-size:11px;color:#a8e0ff;font-weight:600;letter-spacing:.5px'>STAMINA</div><div style='height:8px;background:rgba(0,0,0,.45);border-radius:5px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div>" +
+      // VITALS — RDR2-style compact cluster: three slim labeled bars stacked just
+      // right of the minimap's lower edge, so the bottom-left corner reads as ONE
+      // instrument (map + body state) instead of a pile. Bars are content-level;
+      // they stay clear of the bottom-centre hotbar (capped width + media shrink).
+      "<div id='cVitals' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 200px);bottom:calc(var(--hud-pad-b) + 12px);width:124px'>" +
+      "  <div class='vRow'><span class='vLab' style='color:#ffb3b3'>HP</span><div class='vSlot' style='height:7px'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div></div>" +
+      "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'>FOOD</span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
+      "  <div class='vRow'><span class='vLab' style='color:#a8e0ff'>STAM</span><div class='vSlot' style='height:5px'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div></div>" +
       "</div>" +
       // WEAPON HOTBAR + carried-loot readout (bottom-centre). The hotbar is the
       // jail-clarity loadout: every gun you OWN as a slot, the held one lit, live
@@ -203,13 +224,16 @@
       "  <span id='cObjTxt'></span> <span id='cObjRoute' style='pointer-events:auto;cursor:pointer;color:var(--hud-accent);font-weight:700;margin-left:6px'>↳ ROUTE</span>" +
       "  <div id='cObjSlot' style='height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden;margin-top:5px'><i id='cObjFill' style='display:block;height:100%;width:0%;background:var(--hud-accent);transition:width .4s ease'></i></div>" +
       "</div>" +
-      "<canvas id='cRadar' class='oM' width='190' height='190' style='position:absolute;left:var(--hud-pad-l);top:var(--hud-pad-t);border-radius:50%;box-shadow:0 4px 14px rgba(0,0,0,.45)'></canvas>" +
-      "<div id='cFeed' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 198px);top:var(--hud-pad-t);width:300px'></div>" +
-      "<div id='cTurf' class='oC' style='position:absolute;left:var(--hud-pad-l);top:212px;font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)'></div>" +
-      "<div id='cHomeLine' class='oC' style='position:absolute;left:var(--hud-pad-l);top:232px;font-size:12px;color:var(--hud-dim);text-shadow:0 1px 2px rgba(0,0,0,.7)'></div>" +
-      // gang-membership badge (left column, below the turf/home lines; clears the
-      // 190px radar which ends ~204px). Hidden entirely unless patched into a crew.
-      "<div id='cMemb' class='cMemb oC' style='position:absolute;left:var(--hud-pad-l);top:254px;display:none'>" +
+      // MINIMAP — bottom-left, RDR2-style. The turf/home lines stack right above
+      // it (the "region name over the map" read), the vitals hug its right edge.
+      "<canvas id='cRadar' class='oM' width='190' height='190' style='position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,.5)'></canvas>" +
+      // event feed takes the top-left corner the radar vacated
+      "<div id='cFeed' class='oM' style='position:absolute;left:var(--hud-pad-l);top:var(--hud-pad-t);width:300px'></div>" +
+      "<div id='cTurf' class='oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 196px);font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)'></div>" +
+      "<div id='cHomeLine' class='oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 215px);font-size:12px;color:var(--hud-dim);text-shadow:0 1px 2px rgba(0,0,0,.7)'></div>" +
+      // gang-membership badge (left column, capping the bottom-left cluster —
+      // map → turf → home → crew badge). Hidden entirely unless patched into a crew.
+      "<div id='cMemb' class='cMemb oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 236px);display:none'>" +
       "  <div class='row'><span class='gdot' id='cMembDot'></span><span class='gnm' id='cMembNm'></span><span class='rnk' id='cMembRnk'></span></div>" +
       "  <div class='pslot' id='cMembSlot'><i id='cMembFill' style='width:0%'></i></div>" +
       "</div>" +
@@ -517,20 +541,36 @@
   //  is. The strategic detail (names, full turf board) lives on the [M] map.
   // ============================================================
   let radarAcc = 0, popAcc = 0;
+  // smoothed view radius (world units). Tight on foot, wider at driving speed —
+  // the RDR2/GTA trick that makes the next three turns readable from the map.
+  let viewR = 100;
   function hex6n(c) { return "#" + ("000000" + ((c >>> 0) & 0xffffff).toString(16)).slice(-6); }
+  // district ground tints — a faint per-quadrant personality wash (desaturated;
+  // saturated colour stays reserved for territory + threats)
+  const DIST_TINT = { core: "#39404d", commercial: "#383f48", residential: "#3a443d", projects: "#454039", industrial: "#413d43" };
   function drawRadar() {
     if (!radar) return;
     const ctx = radar.getContext("2d"); if (!ctx) return;
-    const W = radar.width, H = radar.height, R = 112;             // world units shown around you
-    const sc = (W / 2) / R, cx = W / 2, cy = H / 2;
-    const P = CBZ.player, px = P.pos.x, pz = P.pos.z;
+    const P = CBZ.player;
     const A = CBZ.city && CBZ.city.arena; if (!A) return;
+    // ZOOM FEEL: on foot you care about the block (tight); in a car you care
+    // about the next turns, more so the faster you go. Lerped at the radar's own
+    // 14Hz so the scale change reads as a gentle breathe, never a snap.
+    const car = P.driving && P._vehicle;
+    const spd = (car && Math.abs(car.v || 0)) || 0;
+    const targetR = car ? Math.min(190, 130 + spd) : 96;
+    viewR += (targetR - viewR) * 0.16;
+    const R = viewR;
+    const W = radar.width, H = radar.height;
+    const sc = (W / 2) / R, cx = W / 2, cy = H / 2;
+    const px = P.pos.x, pz = P.pos.z;
     const g = CBZ.game, now = CBZ.now || 0;
     const wanted = (g && g.wanted) || 0;
     const pulse = 0.5 + 0.5 * Math.sin(now * 6);
     // heading-up rotation: rotMap === camera yaw makes the player's forward
-    // point to screen-up (derivation in commit msg). We rotate POINTS in JS (not
-    // the canvas) so every icon/label stays upright while the map turns.
+    // point to screen-up (derivation in commit msg). Blips rotate as POINTS in
+    // JS (not the canvas) so every icon/label stays upright while the map turns;
+    // the geometric base below uses a rotated CONTEXT instead (see note there).
     const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
     const cosR = Math.cos(yaw), sinR = Math.sin(yaw);
     const _p = [0, 0];
@@ -541,54 +581,93 @@
     ctx.clearRect(0, 0, W, H);
     ctx.save();
     ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 1, 0, 6.28); ctx.closePath();
-    ctx.fillStyle = "rgba(8,10,15,.78)"; ctx.fill();
+    // SEA base — anything past the seawall reads as water, distinctly cool
+    ctx.fillStyle = "#142b38"; ctx.fill();
     ctx.clip();
 
-    // ---- TERRITORY base: each lot faintly washed by its controlling crew so you
-    //      sense whose turf you're standing in; neutral blocks read dark. This is
-    //      the only "colour = meaning" on the base layer (no rainbow trade tiles).
+    // territory ownership (crew wash over the blocks) — the only "colour =
+    // meaning" on the base layer, so you sense whose turf you're standing in
     const owner = new Map();
     if (CBZ.cityGangs) for (const gg of CBZ.cityGangs) {
       if (!gg || !gg.turf) continue; const oc = gg.isPlayer ? 0xffd451 : gg.color;
       for (const lot of gg.turf) owner.set(lot, oc);
     }
     const R2 = (R + 26) * (R + 26);
+    const DQ = A.districts || [];
+
+    // ---- GEOMETRIC BASE in a ROTATED CONTEXT: land/roads/blocks are axis-
+    //      aligned world rects, so spinning the canvas keeps each one a single
+    //      crisp fillRect/stroke. restore() before the blip layer so icons and
+    //      the N label stay upright (the heading-up contract holds).
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(yaw);
+    const u = (wx) => (wx - px) * sc, v = (wz) => (wz - pz) * sc;
+    // land mass out to the seawall apron — terrain under the streets
+    const SH = A.shore || { EW: A.minX - 26, EE: A.maxX + 26, ES: A.minZ - 26, EN: A.maxZ + 26 };
+    ctx.fillStyle = "#272d35";
+    ctx.fillRect(u(SH.EW), v(SH.ES), (SH.EE - SH.EW) * sc, (SH.EN - SH.ES) * sc);
+    // the south beach gap: a thin sand strip straddling the seawall line
+    if (SH.beach) { ctx.fillStyle = "rgba(199,178,124,.45)"; ctx.fillRect(u(SH.beach.x0), v(SH.ES - 10), (SH.beach.x1 - SH.beach.x0) * sc, 13 * sc); }
     function paintLots(list) {
       if (!list) return;
       for (const lot of list) {
         if (!lot) continue; const ddx = lot.cx - px, ddz = lot.cz - pz; if (ddx * ddx + ddz * ddz > R2) continue;
-        S(lot.cx, lot.cz); const s = Math.max(3, (lot.w || 20) * sc);
+        const s = Math.max(3, (lot.w || 20) * sc), x = u(lot.cx), y = v(lot.cz);
+        // faint district wash across the whole block pad…
+        const dq = DQ[lot.district];
+        const dk = dq && DIST_TINT[dq.kind];
+        if (dk) { ctx.fillStyle = dk; ctx.globalAlpha = 0.55; ctx.fillRect(x - s / 2, y - s / 2, s, s); }
+        // …a soft dark building mass inset on it…
+        ctx.fillStyle = "#151a20"; ctx.globalAlpha = 0.8;
+        const b = s * 0.74; ctx.fillRect(x - b / 2, y - b / 2, b, b);
+        // …then the crew wash on top
         const oc = owner.get(lot);
-        if (oc != null) { ctx.fillStyle = hex6n(oc); ctx.globalAlpha = oc === 0xffd451 ? 0.5 : 0.32; }
-        else { ctx.fillStyle = "#252b33"; ctx.globalAlpha = 0.62; }
-        ctx.fillRect(_p[0] - s / 2, _p[1] - s / 2, s, s);
+        if (oc != null) { ctx.fillStyle = hex6n(oc); ctx.globalAlpha = oc === 0xffd451 ? 0.45 : 0.3; ctx.fillRect(x - s / 2, y - s / 2, s, s); }
       }
       ctx.globalAlpha = 1;
     }
-    // roads first (under blocks): faint grey, world-axis lines through the view
-    ctx.strokeStyle = "rgba(110,122,138,.26)"; ctx.lineWidth = Math.max(1, A.ROAD * sc * 0.7);
-    for (const x of A.xLines) { const a = S(x, pz - R - 30, [0, 0]), b = S(x, pz + R + 30, [0, 0]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
-    for (const z of A.zLines) { const a = S(px - R - 30, z, [0, 0]), b = S(px + R + 30, z, [0, 0]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    // ROADS read as STREETS: a dark casing pass then a light fill pass (the
+    // classic GTA-map treatment); both passes batch every line in one stroke.
+    function roadPass(col, w) {
+      ctx.strokeStyle = col; ctx.lineWidth = w;
+      ctx.beginPath();
+      const e = (R + 30) * sc;
+      for (const x of A.xLines) { ctx.moveTo(u(x), -e); ctx.lineTo(u(x), e); }
+      for (const z of A.zLines) { ctx.moveTo(-e, v(z)); ctx.lineTo(e, v(z)); }
+      ctx.stroke();
+    }
+    const roadW = Math.max(1.5, A.ROAD * sc * 0.85);
+    roadPass("rgba(8,11,15,.65)", roadW + 2.5);
+    roadPass("rgba(168,178,192,.42)", roadW);
     paintLots(A.lots);
-    // island: a thin beach ring + its streets + the bridge (the chokepoint)
+    // island: sand-ringed land disc + its streets + the bridge (the chokepoint)
     if (A.annex) {
-      const X = A.annex; S(X.cx, X.cz);
-      ctx.strokeStyle = "rgba(120,170,120,.5)"; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(_p[0], _p[1], X.radius * sc, 0, 6.28); ctx.stroke();
-      ctx.strokeStyle = "rgba(110,122,138,.22)"; ctx.lineWidth = Math.max(1, 5 * sc);
+      const X = A.annex, xr = X.radius * sc;
+      ctx.fillStyle = "#272d35"; ctx.beginPath(); ctx.arc(u(X.cx), v(X.cz), xr, 0, 6.28); ctx.fill();
+      ctx.strokeStyle = "rgba(199,178,124,.55)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(u(X.cx), v(X.cz), xr, 0, 6.28); ctx.stroke();
+      ctx.strokeStyle = "rgba(168,178,192,.38)"; ctx.lineWidth = Math.max(1, 5 * sc);
+      ctx.beginPath();
       for (const r of X.roads) {
-        const a = r.vertical ? S(r.x, r.z - r.len / 2, [0, 0]) : S(r.x - r.len / 2, r.z, [0, 0]);
-        const b = r.vertical ? S(r.x, r.z + r.len / 2, [0, 0]) : S(r.x + r.len / 2, r.z, [0, 0]);
-        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        if (r.vertical) { ctx.moveTo(u(r.x), v(r.z - r.len / 2)); ctx.lineTo(u(r.x), v(r.z + r.len / 2)); }
+        else { ctx.moveTo(u(r.x - r.len / 2), v(r.z)); ctx.lineTo(u(r.x + r.len / 2), v(r.z)); }
       }
+      ctx.stroke();
       paintLots(X.lots);
       if (A.bridge) {
-        const a = S(A.bridge.minX, (A.bridge.minZ + A.bridge.maxZ) / 2, [0, 0]);
-        const b = S(A.bridge.maxX, (A.bridge.minZ + A.bridge.maxZ) / 2, [0, 0]);
-        ctx.strokeStyle = wanted >= 3 ? "rgba(255,90,90,.8)" : "rgba(180,190,205,.5)"; ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        const bz = (A.bridge.minZ + A.bridge.maxZ) / 2;
+        ctx.strokeStyle = wanted >= 3 ? "rgba(255,90,90,.85)" : "rgba(190,198,210,.6)"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(u(A.bridge.minX), v(bz)); ctx.lineTo(u(A.bridge.maxX), v(bz)); ctx.stroke();
       }
     }
+    ctx.restore();   // drop rotation — blips/labels draw upright from here
+
+    // soft vignette: the rim darkens so the centre (you) carries the eye — the
+    // RDR2 aged-instrument read in our palette. Under the blip layers so threats
+    // stay bright at the edge.
+    const vg = ctx.createRadialGradient(cx, cy, W * 0.30, cx, cy, W / 2);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.45)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 
     // a blip helper that clamps off-map targets to the rim (so danger off-screen
     // still shows a bearing). draw(x,y,onRim) does the icon.
@@ -642,7 +721,8 @@
 
     // ---- objective + waypoint ----
     const wp = CBZ.fullMap && CBZ.fullMap.waypoint && CBZ.fullMap.waypoint();
-    if (wp) { blip(wp.x, wp.z, (x, y) => { ctx.strokeStyle = "#7de7ff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 4 + pulse * 2, 0, 6.28); ctx.stroke(); }, true); }
+    // waypoint reads as the loudest mark on the map: pulsing accent ring + dot
+    if (wp) { blip(wp.x, wp.z, (x, y) => { ctx.strokeStyle = "#7de7ff"; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(x, y, 4.5 + pulse * 2, 0, 6.28); ctx.stroke(); ctx.fillStyle = "#7de7ff"; ctx.beginPath(); ctx.arc(x, y, 1.8, 0, 6.28); ctx.fill(); }, true); }
     const j = g && g.cityJob;
     if (j && j.dest) blip(j.dest.x, j.dest.z, (x, y) => diamond(x, y, "#7ed957", 4 + pulse * 2), true);
     if (g && g.cityPartner && g.cityPartner.kidnapped && g.cityPartner.pos) blip(g.cityPartner.pos.x, g.cityPartner.pos.z, (x, y) => diamond(x, y, "#ff6bd0", 4 + pulse * 2), true);
@@ -669,9 +749,12 @@
       ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H); ctx.restore();
     }
 
-    // round frame
-    ctx.strokeStyle = wanted >= 4 ? "rgba(255,70,55,.7)" : "rgba(255,255,255,.2)"; ctx.lineWidth = 3;
+    // round frame — dark instrument bezel + a hairline accent ring (RDR2's aged
+    // brass ring, translated into the HUD's cyan-not-sepia design language)
+    ctx.strokeStyle = wanted >= 4 ? "rgba(255,70,55,.75)" : "rgba(10,13,18,.85)"; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 2, 0, 6.28); ctx.stroke();
+    ctx.strokeStyle = wanted >= 4 ? "rgba(255,120,100,.5)" : "rgba(125,231,255,.22)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 4.5, 0, 6.28); ctx.stroke();
     // NORTH pip — rotates with the heading-up map so it always points true north.
     // North is world -Z; through S that direction sits at (sinR, -cosR) from centre.
     const nx = cx + Math.sin(yaw) * (W / 2 - 11), ny = cy - Math.cos(yaw) * (W / 2 - 11);
@@ -687,9 +770,14 @@
     ctx.fillStyle = cg; ctx.beginPath(); ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, coneR, -Math.PI / 2 - coneH, -Math.PI / 2 + coneH); ctx.closePath(); ctx.fill();
     ctx.restore();
-    ctx.fillStyle = "#e8ecf2"; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 1.4;
+    // crisp chevron: a faint accent halo under an ink-white arrow so it never
+    // melts into a bright block or a crew wash beneath it
+    ctx.save();
+    ctx.shadowColor = "rgba(125,231,255,.85)"; ctx.shadowBlur = 5;
+    ctx.fillStyle = "#e8ecf2"; ctx.strokeStyle = "rgba(0,0,0,.65)"; ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx + 5.5, cy + 6); ctx.lineTo(cx, cy + 2.5); ctx.lineTo(cx - 5.5, cy + 6); ctx.closePath();
     ctx.fill(); ctx.stroke();
+    ctx.restore();
   }
   // little top-down helicopter glyph with spinning rotor — reads as "air threat"
   function drawChopper(ctx, x, y, now) {

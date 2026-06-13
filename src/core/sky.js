@@ -5,10 +5,11 @@
    island/city VANISHED across town. Now: an r=850 dome (camera far is
    1000) that writes no depth, whose horizon is forced to EXACTLY the
    scene fog colour every frame (no seam between fogged ground and sky,
-   in every mode, at every time of day), an endless painted skyline
-   past the city's last real block (city-gated — jail/survival horizons
-   untouched), stars + sun + moon riding daynight's clock, and clouds
-   over every inhabited region.
+   in every mode, at every time of day), stars + sun + moon riding
+   daynight's clock, and clouds over every inhabited region.
+   NO HORIZON RINGS — owner's standing order (filmed it twice): no
+   painted skyline cylinders, no window-light ring, no haze band. The
+   horizon is the real sea + fog, nothing else. Do not re-add them.
 
    THE SUNSET PASS (user-filmed: skyline read as flat white paper
    cutouts, dusk read as one flat orange wash):
@@ -18,13 +19,6 @@
      makes the horizon glow on the sun's side only. A uniform tint
      (the old daynight skyC multiply) mathematically cannot do this;
      daynight now leaves the dome tint white and this file owns colour.
-   - skyline towers are painted with per-tower vertical alpha fades
-     (soft tops dissolving into sky — a tower seen through 400m of air
-     has no crisp roofline) and their tint is a DESATURATED blue-grey
-     a few % darker than the live fog by day, dark backlit silhouette
-     at dusk, near-black at night (the lit-window ring carries it).
-   - a haze band ring hugs the horizon inside the skyline radii so the
-     sea plane, fog and silhouettes melt together — no blue sea strip.
    - the sun disc grows a big soft additive halo at golden hour/dusk.
    BUDGET: everything here is ≤8 draw calls (haze band: city only,
    halo: dusk only) — the old clouds (~36 meshes, one per puff) are ONE
@@ -96,12 +90,6 @@
   }
   function cssA(c, aa) {
     return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + (+aa).toFixed(3) + ")";
-  }
-  // pull a colour toward its own grey — distant haze kills saturation first
-  function desat(c, k) {
-    const l = (c.r + c.g + c.b) / 3;
-    c.r += (l - c.r) * k; c.g += (l - c.g) * k; c.b += (l - c.b) * k;
-    return c;
   }
 
   /* ---------------- 1. the dome -------------------------------------
@@ -202,107 +190,12 @@
     skyTex.needsUpdate = true;
   }
 
-  /* ---------------- 2. the endless skyline (CITY ONLY) ---------------
-     Two camera-following BackSide cylinder rings past the last real
-     block: r=430 taller/sparser, r=560 lower/denser. Towers are painted
-     with a vertical alpha fade — tops dissolve upward into sky (soft,
-     never a crisp white roofline). By day their tint is a desaturated
-     blue-grey a step darker than the live fog: the NEXT districts
-     already swallowed by haze — money out there you haven't taken yet.
-     At dusk they flip to dark backlit silhouettes against the burn; at
-     night they're near-black and the lit-window ring carries the view.
-     City-gated: invisible (zero draw calls) in jail/survival. */
-  function buildSkyline(W, H, seed, minW, maxW, minH, maxH, gapChance, slots, fadeFrac) {
-    const cv = document.createElement("canvas");
-    cv.width = W; cv.height = H;
-    const cx = cv.getContext("2d");
-    const rnd = mulberry32(seed);
-    let x = 4;
-    while (x < W - maxW - 4) {
-      const w = minW + rnd() * (maxW - minW);
-      if (rnd() < gapChance) { x += w * 0.8; continue; }
-      const h = H * (minH + rnd() * (maxH - minH));
-      const a = 0.86 + rnd() * 0.14;
-      const top = H - h;
-      // soft top: alpha 0 at the roofline growing to full body alpha —
-      // distance haze always eats the top of a tower first
-      const fadeLen = Math.max(8, h * fadeFrac);
-      const tg = cx.createLinearGradient(0, top, 0, top + fadeLen);
-      tg.addColorStop(0, "rgba(255,255,255,0)");
-      tg.addColorStop(1, "rgba(255,255,255," + a.toFixed(2) + ")");
-      cx.fillStyle = tg;
-      cx.fillRect(x, top, w, fadeLen);
-      cx.fillStyle = "rgba(255,255,255," + a.toFixed(2) + ")";
-      cx.fillRect(x, top + fadeLen, w, h - fadeLen);
-      if (rnd() < 0.3) { // antenna — a ghost of one; crisp needles read as paper edges
-        cx.fillStyle = "rgba(255,255,255," + (a * 0.22).toFixed(2) + ")";
-        cx.fillRect(x + w * 0.42, top - 6 - rnd() * 16, 2, 8 + rnd() * 16);
-      }
-      if (rnd() < 0.22) { // penthouse step, equally hazed
-        cx.fillStyle = "rgba(255,255,255," + (a * 0.3).toFixed(2) + ")";
-        cx.fillRect(x + 3, top - 4, w - 6, 4);
-      }
-      if (slots) slots.push({ x: x, w: w, h: h });
-      x += w + 3 + rnd() * 12;
-    }
-    return cv;
-  }
-
-  function ringMesh(radius, height, y, canvas, renderOrder, extraMat) {
-    const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.MeshBasicMaterial(Object.assign({
-      map: tex, transparent: true, fog: false, depthWrite: false, side: THREE.BackSide,
-    }, extraMat || {}));
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 64, 1, true), mat);
-    mesh.position.y = y;
-    mesh.renderOrder = renderOrder;
-    mesh.visible = false;
-    rig.add(mesh);
-    return mesh;
-  }
-
-  const nearSlots = [];
-  // far ring fades over 60% of each tower (hazier with distance), near over 45%
-  const farRing = ringMesh(560, 64, 20, buildSkyline(1024, 128, 1337, 10, 26, 0.22, 0.55, 0.10, null, 0.6), -3);
-  const nearCanvas = buildSkyline(1024, 256, 4242, 24, 52, 0.26, 0.78, 0.22, nearSlots, 0.45);
-  const nearRing = ringMesh(430, 110, 40, nearCanvas, -2);
-
-  // window dots aligned to the near silhouette (same texture-u layout, so a
-  // slightly smaller radius keeps them painted ON the same towers)
-  const lightCanvas = (function () {
-    const cv = document.createElement("canvas");
-    cv.width = 1024; cv.height = 256;
-    const cx = cv.getContext("2d");
-    const rnd = mulberry32(99);
-    const pal = ["#ffd98a", "#ffedb8", "#bcd6ff", "#ffc46e"];
-    for (const s of nearSlots) {
-      for (let yy = 256 - s.h + 5; yy < 248; yy += 7) {
-        for (let xx = s.x + 3; xx < s.x + s.w - 3; xx += 5) {
-          if (rnd() < 0.42) { cx.fillStyle = pal[(rnd() * pal.length) | 0]; cx.fillRect(xx, yy, 2, 3); }
-        }
-      }
-    }
-    return cv;
-  })();
-  const lightsRing = ringMesh(427, 110, 40, lightCanvas, -1.5, { blending: THREE.AdditiveBlending, opacity: 0 });
-
-  // THE HAZE BAND: a low gradient strip hugging the horizon, just inside the
-  // skyline radii. Its colour IS the live fog colour, solid at the waterline
-  // and fading up — so the sea plane (fog-faded by r≈414), the silhouettes
-  // and the dome's fog band all melt into ONE horizon with no blue strip
-  // between ring radii. City only (jail/survival have no sea to hide).
-  const hazeCanvas = (function () {
-    const cv = document.createElement("canvas");
-    cv.width = 4; cv.height = 64;
-    const cx = cv.getContext("2d");
-    const grd = cx.createLinearGradient(0, 0, 0, 64);
-    grd.addColorStop(0, "rgba(255,255,255,0)");
-    grd.addColorStop(0.55, "rgba(255,255,255,0.45)");
-    grd.addColorStop(1, "rgba(255,255,255,1)");
-    cx.fillStyle = grd; cx.fillRect(0, 0, 4, 64);
-    return cv;
-  })();
-  const hazeRing = ringMesh(414, 34, 9, hazeCanvas, -1); // spans y -8..26, drawn over rings+lights
+  /* ---------------- 2. NO horizon rings. EVER. ----------------------
+     OWNER DECISION (stated twice, with screenshots): no painted skyline
+     cutouts, no lit-window ring, no haze-band cylinder — every one of
+     them reads as a fake "ring around the world" from any rooftop or
+     aircraft. The horizon is the real sea plane melting into the fog
+     and the dome's fog band. DO NOT ADD RING MESHES BACK. */
 
   /* ---------------- 3. stars (ALL modes — night is universal) -------- */
   const STARS = 800;
@@ -439,7 +332,6 @@
   const lastFog = new THREE.Color(-1, -1, -1), lastTint = new THREE.Color(-1, -1, -1);
   let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1;
   const _fogFallback = new THREE.Color(0xbfe0ff);
-  const _rn = new THREE.Color(), _rf = new THREE.Color(), _winC = new THREE.Color();
   function moved(a, b) {
     return Math.abs(a.r - b.r) > 0.006 || Math.abs(a.g - b.g) > 0.006 || Math.abs(a.b - b.b) > 0.006;
   }
@@ -459,7 +351,6 @@
 
     // ---- frame palette: blend the keyframe tables -------------------
     const kDay = clamp01(up * 2.2 + 0.05);   // full daytime sky by mid-morning
-    const kNight = clamp01(-up * 2.6);       // full night once the sun is well under
     const civil = clamp01(0.45 - up * 3.2);  // 0 = golden hour, 1 = sun dipped
     _zen.copy(PAL.night.zen).lerp(PAL.day.zen, kDay).lerp(PAL.dusk.zen, duskness * 0.6);
     _mid.copy(PAL.night.mid).lerp(PAL.day.mid, kDay).lerp(PAL.dusk.mid, duskness * 0.85);
@@ -484,43 +375,6 @@
       lastFog.copy(fog); lastTint.copy(tint);
       lastKDay = kDay; lastGlowK = frame.glowK; lastGlowU = frame.glowU; lastPhotoK = frame.photoK;
       lastPaintAt = CBZ.now; forcePaint = false;
-    }
-
-    // ---- skyline rings + haze band: city only -----------------------
-    const city = g.mode === "city";
-    nearRing.visible = city; farRing.visible = city; hazeRing.visible = city;
-    if (city) {
-      // day base: desaturated blue-grey pulled from the LIVE fog (so storms
-      // darken the skyline too), stepped darker so it reads as buildings,
-      // never white paper. Dusk flips it to dark backlit silhouettes; night
-      // goes near-black and hands the view to the window lights.
-      _rn.copy(fog).multiplyScalar(0.85); desat(_rn, 0.4);   // a real step darker than
-      _rf.copy(fog).multiplyScalar(0.91); desat(_rf, 0.28);  // the haze they stand in
-      _rn.lerp(PAL.dusk.ringNear, duskness * 0.9).lerp(PAL.night.ringNear, kNight);
-      _rf.lerp(PAL.dusk.ringFar, duskness * 0.85).lerp(PAL.night.ringFar, kNight);
-      nearRing.material.color.copy(_rn);
-      farRing.material.color.copy(_rf);
-      // by clear day the whole ring goes a touch translucent — barely-there haze
-      const pureDay = kDay * (1 - duskness);
-      // ALTITUDE: rings are camera-centered, so from a rooftop/chopper the near
-      // radius reads as a visible CIRCLE of slabs. As the camera climbs, the
-      // painted skyline dissolves into pure atmosphere (sea + haze have no
-      // curvature to betray) and the haze band deepens the way a real horizon
-      // thickens from altitude. Street level is untouched (altK==1 below y≈45).
-      const altK = Math.max(0, 1 - Math.max(0, cam.y - 45) / 130);
-      nearRing.material.opacity = (1 - 0.08 * pureDay) * altK;
-      farRing.material.opacity = (1 - 0.18 * pureDay) * Math.max(altK, 0.3);
-      hazeRing.scale.y = 1 + Math.min(2.4, Math.max(0, cam.y - 45) * 0.035);
-      hazeRing.material.color.copy(fog); // the band IS the fog, melted upward
-    }
-    // window dots: on at night, and warming up through dusk as the sun dips
-    const winK = Math.max(night, duskness * civil);
-    lightsRing.visible = city && winK > 0.04;
-    if (lightsRing.visible) {
-      const altW = Math.max(0, 1 - Math.max(0, cam.y - 45) / 130);
-      lightsRing.material.opacity = Math.min(1, winK * 1.15) * altW;
-      _winC.setRGB(1, 1, 1).lerp(PAL.dusk.win, duskness * 0.8);
-      lightsRing.material.color.copy(_winC);
     }
 
     // stars

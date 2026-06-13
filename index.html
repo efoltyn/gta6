@@ -165,10 +165,9 @@
         <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
         <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
         <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch / fire weapon</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Mug · attack · deal/recruit · pickpocket</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Shop / rob register / eat food</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">X</span></span><span class="lab">Do drugs (buff)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">F</span></span><span class="lab">Steal / enter / exit a car</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Do the thing you're looking at — the card shows it (cars, shops, food, people)</span></div>
+        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">The other options on the card</span></div>
+        <div class="row"><span class="keycol">Hold <span class="kbd">E</span></span><span class="lab">The rougher option — drag a driver out, etc.</span></div>
         <div class="row"><span class="keycol"><span class="kbd">1–9 · 0</span></span><span class="lab">Shop: buy items · sell all</span></div>
         <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Leaderboard (cash · kills · respect)</span></div>
         <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow — buy/sell any property or business</span></div>
@@ -299,7 +298,7 @@
 <script src="src/weapons/appearances/carbine.js"></script>
 <script src="src/weapons/appearances/smg.js"></script>
 <script src="src/weapons/appearances/taser.js"></script>
-<script src="src/weapons/appearances/bazooka.js?v=fix2"></script>
+<script src="src/weapons/appearances/bazooka.js?v=cone1"></script>
 <script src="src/weapons/appearances/grenade.js"></script>
 <script src="src/weapons/appearances/ak47.js"></script>
 <script src="src/weapons/appearances/revolver.js"></script>
@@ -360,7 +359,7 @@
 <script src="src/systems/state.js?v=gore1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/touch.js?v=camera14"></script>
-<script src="src/systems/fpsmode.js?v=vmdepth2"></script>
+<script src="src/systems/fpsmode.js?v=drop1"></script>
 <script src="src/systems/gunfx.js?v=shoot2"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -388,13 +387,13 @@
 <script src="src/city/elevators.js?v=lift3"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
 <script src="src/city/beach.js?v=beach1"></script>
-<script src="src/city/expansion.js?v=citysec1"></script>
+<script src="src/city/expansion.js?v=realcars1"></script>
 <script src="src/city/props.js?v=shoot1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=citysec1"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
 <script src="src/city/clothes.js?v=fit3"></script>
-<script src="src/city/outfits.js?v=fit3"></script>
+<script src="src/city/outfits.js?v=fits1"></script>
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=city3"></script>
 <script src="src/city/worldstate.js?v=hub1"></script>
@@ -404,12 +403,12 @@
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=fit3"></script>
+<script src="src/city/peds.js?v=fits1"></script>
 <script src="src/city/level.js?v=lvl1"></script>
 <script src="src/city/sizeup.js?v=lvl1"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=club1"></script>
-<script src="src/city/crowd.js?v=crowd1"></script>
+<script src="src/city/crowd.js?v=fits1"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=citysec1"></script>
@@ -429,10 +428,12 @@
 <script src="src/city/careers.js?v=citysec1"></script>
 <script src="src/city/activities.js?v=hub1"></script>
 <script src="src/city/heists.js?v=night4"></script>
-<script src="src/city/interact.js?v=citysec1"></script>
+<script src="src/city/interactions.js?v=registry1"></script>
+<script src="src/city/interact.js?v=registry1"></script>
+<script src="src/city/restrain.js?v=collar1"></script>
 <script src="src/city/combat.js?v=grenade1"></script>
 <script src="src/city/explosives.js?v=c4-1"></script>
-<script src="src/city/death.js?v=crash7"></script>
+<script src="src/city/death.js?v=drop1"></script>
 <script src="src/city/ragdoll.js?v=rag1"></script>
 <script src="src/city/leaderboard.js?v=city3"></script>
 <script src="src/city/zillow.js?v=zillow1"></script>
@@ -455,8 +456,8 @@
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=blob2"></script>
-<script src="src/systems/wounds.js?v=soak2"></script>
+<script src="src/systems/gore.js?v=pop1"></script>
+<script src="src/systems/wounds.js?v=soak3"></script>
 
 <!-- multiplayer (host-your-own RP servers) — inert when offline/solo; loads
      after the whole city block so every CBZ hook it wraps already exists -->
