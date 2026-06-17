@@ -527,6 +527,15 @@
   CBZ.cityOutfitHeatMult = heatMult;
   CBZ.cityOutfitDrip = wornDrip;
   CBZ.cityOutfitGet = function () { return worn(); };
+  // the EFFECTIVE worn record actually PAINTED on the player rig — mirrors
+  // applyPlayer's PLAIN_BASE->composite substitution, so charpanel.js's portrait
+  // dresses IDENTICALLY to the live body (a default player reads the composite
+  // fit, not the raw grey 'street' base record). Falls back to the raw record.
+  CBZ.cityOutfitGetEffective = function () {
+    let w = worn();
+    if (w && PLAIN_BASE[w.id] && plainCivvies()) w = fitRecord();
+    return w;
+  };
   CBZ.cityOutfitCatalog = function () { buildGangOutfits(); return CAT; };
   CBZ.cityWearOutfit = function (id, opts) { buildGangOutfits(); return CAT[id] ? wearRecord(CAT[id], opts) : false; };
   CBZ.cityBuyOutfit = buyOutfit;

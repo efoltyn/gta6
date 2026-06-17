@@ -54,7 +54,7 @@
       cityFenceRep: 0,
       assets: { properties: [], businesses: [], vehicles: [], weapons: [] },
       injuries: 0,
-      criminalRecord: { wantedPeak: 0, heatPeak: 0, arrests: 0, charges: [] },
+      criminalRecord: { wantedPeak: 0, heatPeak: 0, arrests: 0, escapes: 0, charges: [] },
       jailHistory: { busts: 0, escapes: 0, visits: 0 },
       reputation: { driver: 0, fighter: 0, paintball: 0, hitman: 0, political: 0, gang: 0 },
       records: {
@@ -297,6 +297,10 @@
       addLog(w, type, "Arrested and sent to jail");
     } else if (type === "jail-escape") {
       w.jailHistory.escapes++;
+      // additive lifetime escape tally on the rap sheet (an older v2 ledger may
+      // predate this field — guard the NaN). Mirrors jailHistory.escapes; lives on
+      // criminalRecord so the record reads as a single "escaped N times" stat.
+      w.criminalRecord.escapes = (w.criminalRecord.escapes || 0) + 1;
       addFaction(w, "police", -5);
       addLog(w, type, "Escaped jail");
     } else if (type === "crash" || type === "bullet-impact") {

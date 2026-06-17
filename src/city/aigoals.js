@@ -234,8 +234,13 @@
   const CITY_JOBS = {
     // service — the counters and curbs that keep the city fed and moving
     "retail worker":       { class: "service", lots: ["clothing", "electronics", "pawn"], hours: [9, 19], pay: 12 },
-    "office worker":       { class: "service", lots: ["bank", "cityhall", "realtor", "security"], hours: [9, 17], pay: 16 },
-    "accountant":          { class: "service", lots: ["bank", "cityhall"], hours: [9, 17], pay: 20 },
+    // office === desk work: world.js flips a stable subset of downtown towers to
+    // lot.kind "office" (furnished with desk anchors). These jobs route to one of
+    // THOSE towers first (then the bank/cityhall halls as fallbacks) and, on
+    // arrival, CLAIM A DESK and SIT for the shift — "working a job = on the street",
+    // same schedule/goal/nav, a destination that ends in a chair. (C5)
+    "office worker":       { class: "service", office: true, lots: ["office", "bank", "cityhall", "realtor", "security"], hours: [9, 17], pay: 16 },
+    "accountant":          { class: "service", office: true, lots: ["office", "bank", "cityhall"], hours: [9, 17], pay: 20 },
     "bartender":           { class: "service", lots: ["bar", "casino"], hours: [17, 2], pay: 14 },
     "line cook":           { class: "service", lots: ["food"], hours: [7, 21], pay: 11 },
     "barber":              { class: "service", lots: ["barber"], hours: [9, 19], pay: 12 },
@@ -274,6 +279,23 @@
         ped._jobLot.building && ped._jobLot.building.door) return ped._jobLot;
     ped._jobLot = lotNear(A, ped.pos.x, ped.pos.z, kinds, 1e5);
     return ped._jobLot;
+  }
+  // is this ped a DESK worker (a job flagged office:true in the table)? A desk
+  // worker who isn't a gangster/vendor/vagrant gets ped._officeJob=true so the
+  // office spine (officejobs.js) recognises it (staffing safety-net + the barge-
+  // the-floor WHY) and so goEarn routes it to a CLAIMED desk to sit the shift.
+  function isOfficeJob(ped) {
+    if (ped.gang || ped.vendor || ped.vagrant) return false;
+    const J = CITY_JOBS[ped.job];
+    return !!(J && J.office);
+  }
+  function tagOfficeJob(ped) {
+    const off = isOfficeJob(ped);
+    // keep the flag honest across recasts (an identity rewrite can change .job):
+    // set it for desk workers, clear a stale one if they're no longer office.
+    if (off) ped._officeJob = true;
+    else if (ped._officeJob) ped._officeJob = false;
+    return off;
   }
   // the NEAREST home lot, cached once — "leaving work" reads as heading home
   function digsLot(ped, A) {
@@ -401,6 +423,36 @@
     // matching lot kind, cached once) — so the walk reads as a commute the
     // player can learn, not a fresh random errand each pass.
     const mine = jobLot(ped, A);
+
+    // DESK WORK (C5): an office-class worker doesn't vanish into a black-box door —
+    // they CLAIM a desk and walk to it to SIT the shift. "Working a job = on the
+    // street": the SAME schedule/goal/nav, just a destination that ends in a chair.
+    // peds.js handles the sit-on-arrival when finalGoal.sitDesk===true; officejobs.js
+    // owns who-holds-which-seat. Graceful fallback to the door if no desk is free.
+    if (tagOfficeJob(ped) && CBZ.cityClaimDesk) {
+      // bias the claim toward THIS firm's floors: officejobs' cityClaimDesk prefers
+      // a free desk whose lot === ped._work. Only point _work at a live office lot
+      // (never null it — peds.js owns _work and re-validates it for its own nav).
+      if (mine && mine.building && mine.building.office) ped._work = mine;
+      const anchor = CBZ.cityClaimDesk(ped);
+      if (anchor) {
+        // the walk-to-and-sit goal the brain carries: sitDesk tells peds.js to ENTER
+        // sit on arrival (snap to anchor, face anchor.face); anchor rides along so the
+        // seat survives the path rewrite. Routed like any other goal (reads identical).
+        routeTo(ped, A, { x: anchor.x, z: anchor.z, sitDesk: true, anchor: anchor });
+        ped._goalKind = "work";
+        // payday fires at the chair (resolve() below): claiming a desk and sitting IS
+        // clocking in, so this is ALWAYS on-the-clock (_payIsJob true even if the lot
+        // didn't resolve) — that guarantees dusk's sHome dominates and goHome RELEASES
+        // the seat, so a held desk can never be stranded into the evening.
+        ped._payAt = { x: anchor.x, z: anchor.z };
+        ped._payIsJob = true;
+        return true;
+      }
+      // no free desk this pass → fall through to the door (still reads as a commute);
+      // the next assign() pass retries the claim, and officejobs' safety-net helps.
+    }
+
     const lot = mine || shopByKind(A, null);
     if (!lot || !lot.building || !lot.building.door) return false;
     const d = lot.building.door;
@@ -572,6 +624,10 @@
   // commuter on a dark side street is exactly who a mugger works).
   function goHome(ped, A) {
     ped._clockedIn = false;
+    // shift's over — give the desk back so the next worker can take it (C5/C4).
+    // Stands the seated worker up: officejobs clears char.sitting, peds.js leaves
+    // the "sit" state on the goal change; the body then walks home like anyone.
+    if (ped._deskAnchor && CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
     const h = digsLot(ped, A);
     let goal;
     if (h) {
@@ -781,6 +837,14 @@
     const night = nightAmt(), hour = hourNow();
     // a worker who slept through their dusk exit resets quietly before dawn
     if (ped._clockedIn && hour < 6) ped._clockedIn = false;
+    // DESK LEAK-GUARD (C5): if a desk-holder is being re-planned while NOT seated
+    // (the chair guard in the slice blocks re-plans WHILE they sit, so reaching here
+    // means dusk/clock-out or the brain pulled them off the seat), free the desk now.
+    // If this very pass re-picks "work", goEarn re-claims the SAME seat (occupant===ped
+    // fast-path) before any other ped runs — so a leak is impossible and re-grab is free.
+    if (ped._deskAnchor && !(ped.char && ped.char.sitting === true) && CBZ.cityReleaseDesk) {
+      CBZ.cityReleaseDesk(ped);
+    }
 
     // ---- score each goal: urgency (1-need) shaped by opportunity & personality ----
     // FEUD: a live grudge target overrides almost everything (it's personal)
@@ -1272,6 +1336,11 @@
         // somewhere-to-be state: a recycled body sheds its old commute/errand
         // life (job + home re-derive from the NEW spawn spot, lines/holds drop)
         queueDrop(ped);
+        // give back any office desk the OLD identity held (frees the seat for the
+        // next worker; officejobs clears char.sitting). The flag re-derives from the
+        // NEW identity's job on its next goEarn via tagOfficeJob.
+        if (ped._deskAnchor && CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
+        ped._officeJob = false;
         ped._jobLot = null; ped._digs = null; ped._clockedIn = false; ped._payIsJob = false;
         ped._qSlot = null; ped._qFace = null; ped._qUntil = 0;
         ped._winAt = null; ped._winFace = null; ped._winUntil = 0;
@@ -1301,8 +1370,18 @@
       if (busy(ped)) { ped._goalCD = 2 + rng() * 3; continue; }
 
       // resolve the PAYOFF of whatever goal this ped is currently pursuing
-      // (cheap: just a distance check + need top-up when they've arrived)
+      // (cheap: just a distance check + need top-up when they've arrived). Runs
+      // BEFORE the seated-worker hold below so a just-sat worker still collects the
+      // desk payday + clocks in (so dusk's goHome fires and releases the seat).
       if (ped._goalKind) resolve(ped, decayNeeds(ped));
+
+      // A SEATED office worker stays planted for the shift: don't let the utility
+      // race walk them out of the chair mid-day (routeTo would break peds.js' sit
+      // state). Hold until dusk, when this guard lifts so the normal clock-out
+      // (goHome) fires and RELEASES the desk. Threats already drop them out of
+      // "sit" via the brain (fight/flee), which busy() catches above. (C5)
+      if (ped._deskAnchor && ped.char && ped.char.sitting === true &&
+          nightAmt() < 0.5 && hourNow() < 19) { ped._goalCD = 3 + rng() * 3; continue; }
 
       // cooldown between fresh goal decisions
       if (ped._goalCD == null) ped._goalCD = rng() * 6;   // stagger first pass

@@ -52,6 +52,8 @@
     respect: 0,            // street cred — drives the leaderboard + gang doors
     kills: 0,              // confirmed kills this life (leaderboard)
     busted: false,         // true the instant cops cuff you → routes to jail
+    escapedConvict: false, // true after breaking OUT of jail back to the city: holds
+                           //   a 3★ floor + harder cops until CBZ.cityClearConvict()
     career: null,          // active money-making path (hitman/dealer/…)
     cityWorld: null,       // persistent city truth ledger (city/worldstate.js)
     cityActivity: null,    // timed hub activity currently resolving
@@ -174,7 +176,7 @@
   // Prison population tiers. Named inmates always use the full social/combat
   // brain. JAIL_CROWD adds extra rich rigs; MASS_CROWD adds cheap instanced
   // ambient agents that still move, separate, and react locally.
-  CBZ.JAIL_CROWD = typeof CBZ.JAIL_CROWD === "number" ? CBZ.JAIL_CROWD : 36;
+  CBZ.JAIL_CROWD = typeof CBZ.JAIL_CROWD === "number" ? CBZ.JAIL_CROWD : 14;
   CBZ.MASS_CROWD = typeof CBZ.MASS_CROWD === "number" ? CBZ.MASS_CROWD : 900;
   // Production uses compact GPU points. Set window.CBZ.AB_TEST="A" before
   // load, or press P in overview, only when benchmarking legacy box markers.

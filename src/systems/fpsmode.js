@@ -1398,9 +1398,28 @@
       // bounded by the wall/actor it strikes and the weapon's range). A 9mm
       // round through a far window breaks it just like a rifle slug does — the
       // old caliber clamp (GLASS_PISTOL_REACH) made only rifles break far glass.
+      // FIX 5 — GLASS-BEHIND-WALL POCK SUPPRESSION. cityShatterRay publishes the
+      // muzzle-ray distance at which it just broke a pane (CBZ.cityLastShatterDist,
+      // -1 if nothing broke). When THIS round broke a pane and the solid wall the
+      // raycast returned sits at (or just behind) that pane, the wall hit is really
+      // a wall BEHIND a now-open window — stamping a pock there double-marks a fresh
+      // break (the filmed bug: a fresh window break also pocks the wall behind it).
+      // We compare WORLD impact points because cityShatterRay measures from the
+      // muzzle `origin` while resolveShot measures `hit.dist` from the camera `eye`
+      // — different frames; the pane's world point is origin+shotDir*lastShatterDist.
+      let glassPockSuppress = false;
       if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
         const reach = hit.dist != null ? hit.dist + 0.5 : w.range;
         CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z, reach, true);
+        const sd = CBZ.cityLastShatterDist;
+        if (sd != null && sd >= 0 && hit.wall && hit.point) {
+          // pane world impact along the muzzle ray
+          const gpx = origin.x + shotDir.x * sd, gpy = origin.y + shotDir.y * sd, gpz = origin.z + shotDir.z * sd;
+          const ddx = hit.point.x - gpx, ddy = hit.point.y - gpy, ddz = hit.point.z - gpz;
+          // wall sits within the pane's offset + a wall depth (≈0.62) past it (or
+          // essentially coincident) → it's the wall behind the just-broken glass.
+          if (ddx * ddx + ddy * ddy + ddz * ddz < 0.95 * 0.95) glassPockSuppress = true;
+        }
       }
       if (hit.actor) {
         hitSomething = true;
@@ -1468,6 +1487,13 @@
         if (CBZ.bulletHole && car.group) CBZ.bulletHole(hit.point, hit.normal, { size: 0.12 + cal * 0.1, parent: car.group, dist: hit.dist });
         carShudder(car, cal);
         if (carThudDist < 0) carThudDist = hit.dist;
+      } else if (hit.wall && glassPockSuppress) {
+        // FIX 5: the "wall" the ray returned is the solid wall BEHIND a pane this
+        // round just shattered — the bullet really flew through the fresh hole, so
+        // we stamp NO mark on the wall behind the glass (no pock, no spark/dust, no
+        // thud). The glass break + its shards/SFX already came from cityShatterRay
+        // above. Once the pane is open, follow-up rounds get hit.wall === false
+        // (cityShotHole skips the open frame) and fly past normally.
       } else if (hit.wall) {
         spawnImpact(hit.point, false, cal >= 1.3);
         // surface normal of the struck wall (faces back toward the shooter):
@@ -1968,15 +1994,27 @@
       // ADS ZOOM (RMB): ease the FPS lens ~14° tighter while aiming, back out on
       // release. Capture the hip fov from camera.js's value only while NOT aiming
       // (and clamp sane) so reading our own zoomed value can never ratchet it.
-      const ads = aimHeld && armed();
-      if (!ads || fpsHipFov === 0) {
-        if (CBZ.camera.fov >= 30 && CBZ.camera.fov <= 110) fpsHipFov = CBZ.camera.fov;
-        else if (fpsHipFov === 0) fpsHipFov = 70;
-      }
-      const wantFov = ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov;
-      if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
-        CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);
-        CBZ.camera.updateProjectionMatrix();
+      //
+      // SINGLE-OWNER GATE (city FPS-FOV flicker fix): in the CITY, the first-person
+      // lens is OWNED by systems/camera.js's cc.fp branch (onAlways 50) — it eases
+      // camera.fov toward an ADS-aware target with its OWN SmoothDamp state. This
+      // block ALSO ran every city frame easing toward fpsHipFov-ADS_FOV_DROP with a
+      // SEPARATE easing; two writers racing toward the (same) target with different
+      // smoothing states produced the in/out ADS FLICKER while RMB was held. So in
+      // city we SKIP this entirely and let camera.js solely drive the FOV. Outside
+      // city (prison/escape FPS) camera.js's city branch never runs, so this block
+      // remains the sole FOV owner there — byte-identical behaviour for those modes.
+      if (CBZ.game.mode !== "city") {
+        const ads = aimHeld && armed();
+        if (!ads || fpsHipFov === 0) {
+          if (CBZ.camera.fov >= 30 && CBZ.camera.fov <= 110) fpsHipFov = CBZ.camera.fov;
+          else if (fpsHipFov === 0) fpsHipFov = 70;
+        }
+        const wantFov = ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov;
+        if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
+          CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);
+          CBZ.camera.updateProjectionMatrix();
+        }
       }
     }
 

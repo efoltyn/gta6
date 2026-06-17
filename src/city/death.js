@@ -140,7 +140,17 @@
     // the FINAL damage of the killing blow rides the impact: cityKillPlayer
     // scales the ragdoll fling from it (a close shotgun blast hurls you, a
     // pistol tap just drops you) and the headshot flag drives the head-pop gore.
-    if (P.hp <= 0) CBZ.cityKillPlayer(reason || "killed", { fromX, fromZ, dmg, headshot });
+    if (P.hp <= 0) {
+      // ENVIRONMENTAL killing blow (explosion / car-crash / fall) that carries NO
+      // actor: it must not INHERIT a stale shooter. g._cityKillerActor/_cityKiller
+      // linger ~6s from your last hit, so a SWAT who shot you seconds before a blast
+      // (the blast passes attacker=null, reason "caught in an explosion") was being
+      // credited the kill — the kill-cam read "a SWAT officer" for an explosion death.
+      // Clear the stale killer here so the WASTED title + spectate read the real cause.
+      const hadActorBlow = attacker && typeof attacker === "object" && attacker.pos;
+      if (!hadActorBlow && (isExplosionCause(reason) || isImpactCause(reason))) { g._cityKiller = null; g._cityKillerActor = null; }
+      CBZ.cityKillPlayer(reason || "killed", { fromX, fromZ, dmg, headshot });
+    }
   };
 
   // ============================================================

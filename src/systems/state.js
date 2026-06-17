@@ -188,7 +188,35 @@
     document.getElementById("wCigs").textContent = g.cigs;
     document.getElementById("wKos").textContent = g.kos || 0;
     document.getElementById("wCaught").textContent = g.caughtCount;
+    // BACK TO THE STREETS: if a city run exists, breaking out of jail can drop you
+    // straight back into the open city as an ESCAPED CONVICT (3★ floor, harder
+    // cops — wanted.js/mode.js read g.escapedConvict). Reuses the same win-screen
+    // card + the bindButton machinery as "Escape Again" — no new DOM framework: the
+    // button is created once, lazily, and slotted next to againBtn.
+    ensureStreetsBtn(g.mode === "escape" && !!g.cityWorld);
     if (CBZ.recordWin) CBZ.recordWin();
+  }
+
+  // lazily create (once) the "BACK TO THE STREETS" button inside the win card,
+  // right after the existing againBtn, and show/hide it per call. Same look (.btn)
+  // and same debounced wiring (bindButton) as the other win-screen buttons.
+  let streetsBtn = null;
+  function ensureStreetsBtn(show) {
+    if (!streetsBtn) {
+      const again = document.getElementById("againBtn");
+      if (!again || !again.parentNode) return;
+      streetsBtn = document.createElement("button");
+      streetsBtn.id = "backToStreetsBtn";
+      streetsBtn.className = again.className || "btn";
+      streetsBtn.textContent = "BACK TO THE STREETS";
+      again.parentNode.insertBefore(streetsBtn, again.nextSibling);
+      bindButton("backToStreetsBtn", function () {
+        g.escapedConvict = true;
+        if (CBZ.setMode) CBZ.setMode("city");
+        if (CBZ.startRun) CBZ.startRun();
+      });
+    }
+    streetsBtn.classList.toggle("hidden", !show);
   }
 
   CBZ.setState = setState;

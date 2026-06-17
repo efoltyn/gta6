@@ -430,7 +430,7 @@
      (set before load). The LOD + AI time-slicing in updateNpc + the O(n) grid
      separation keep it smooth; per-part InstancedMesh is the next step to
      push this into the thousands. */
-  const CROWD = (typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 36;
+  const CROWD = (typeof CBZ.JAIL_CROWD === "number") ? CBZ.JAIL_CROWD : 14;
   (function spawnCrowd(count) {
     let s = 0x4a1f7b;
     const rr = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };

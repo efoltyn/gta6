@@ -41,6 +41,15 @@
   function clubDrip() { return (CBZ.CITY && CBZ.CITY.CLUB_DRIP) || 14; }
   function vipDrip() { return (CBZ.CITY && CBZ.CITY.VIP_DRIP) || 30; }
 
+  // ---- FINITE bouncer: a killed bouncer is CONSUMED from the city headcount
+  //   (peds.js cityKillPed already decrements _popTotal). It does NOT instantly
+  //   respawn. The club may HIRE at most a small number of replacements per run,
+  //   and only after a LONG delay — the player can stay ahead of it and even
+  //   permanently clear the door. The club still runs its line with NO bouncer
+  //   present (the door just stands unmanned). ----
+  const BOUNCER_REHIRE = 135;   // seconds the post stands EMPTY before one replacement is hired
+  const BOUNCER_MAX_HIRES = 2;  // total replacement bouncers the club will ever hire per run (after the original)
+
   // live club state (rebuilt per run by ensure()/reset)
   const S = {
     lot: null, club: null,       // the flagged lot + its .club data
@@ -52,6 +61,9 @@
     everIn: false,              // player has been admitted at least once (one-time bonus)
     rejectCD: 0,                 // so a rejected player isn't spammed every frame
     bottleCD: 0,                 // bottle-service payout cadence while inside
+    bouncerDownT: 0,             // >0 while the door post is empty after a kill (counts down to a slow re-hire)
+    bouncerHires: 0,             // replacement bouncers hired this run (finite — see BOUNCER_MAX_HIRES)
+    unmannedNoted: false,        // one-time "door's unmanned" note per empty stretch
     note: "",
   };
 
@@ -375,17 +387,52 @@
     if (g.mode !== "city") return false;
     const peds = CBZ.cityPeds;
     if (!peds) return false;
-    const bouncerLive = S.bouncer && !S.bouncer.dead && peds.indexOf(S.bouncer) !== -1;
-    if (S.club && bouncerLive) return true;     // already up and running
 
-    // fresh init (or recovery after a new run / a downed bouncer)
-    const lot = findClubLot();
-    if (!lot || !lot.building || !lot.building.club || !lot.building.club.queue) return false;
-    // a new run? (the lot changed or the bouncer is gone) → wipe state
-    if (lot !== S.lot || !bouncerLive) softReset();
-    S.lot = lot; S.club = lot.building.club;
+    // (A) Establish the club LOT once per run. This is independent of the
+    //     bouncer — the line/door logic runs even with the post empty.
+    if (!S.club) {
+      const lot = findClubLot();
+      if (!lot || !lot.building || !lot.building.club || !lot.building.club.queue) return false;
+      if (lot !== S.lot) softReset();        // truly a new run / different lot → wipe state
+      S.lot = lot; S.club = lot.building.club;
+    } else {
+      // detect a hard pool wipe (spawnCityPeds cleared everything) → full reset.
+      // If the lot descriptor is gone the city was rebuilt under us.
+      const lot = findClubLot();
+      if (!lot || lot !== S.lot) { softReset(); S.lot = null; S.club = null; return ensure(); }
+      S.lot = lot; S.club = lot.building.club;
+    }
+
+    // (B) FINITE bouncer. A live bouncer needs nothing.
+    const inPool = S.bouncer && peds.indexOf(S.bouncer) !== -1;
+    const bouncerLive = inPool && !S.bouncer.dead;
+    if (bouncerLive) return true;
+
+    if (S.bouncer) {
+      const wasKilled = !!S.bouncer.dead;     // genuinely killed vs vanished from a pool wipe
+      S.bouncer = null;
+      if (wasKilled) {
+        // KILLED — the bouncer is CONSUMED (peds.js cityKillPed already counts the
+        // kill against the finite headcount). Leave the post EMPTY rather than
+        // cloning instantly: arm the long re-hire clock. This is the fix.
+        if (S.bouncerDownT <= 0) S.bouncerDownT = BOUNCER_REHIRE;
+        if (!S.unmannedNoted) { S.unmannedNoted = true; note("🚪 The Velvet's door stands unmanned tonight.", 2.0); }
+      } else if (!inPool) {
+        // Bouncer ref went stale WITHOUT a death (the ped pool was wiped for a new
+        // run / city rebuild). That's not a kill — restaff immediately, no penalty.
+        softReset();
+      }
+    }
+
+    // No replacement until the long re-hire delay elapses AND the club still has
+    // a hire left in its budget. While empty, the club still runs (return true).
+    if (S.bouncerDownT > 0) return true;          // post empty — door unguarded for now
+    if (S.bouncerHires >= BOUNCER_MAX_HIRES) return true;  // club is out of replacements this run — door stays open forever
+
+    // delay elapsed + budget remains → hire ONE slow replacement.
     makeBouncer();
-    return !!S.bouncer;
+    if (S.bouncer) { S.bouncerHires++; S.unmannedNoted = false; note("🕴️ The Velvet hired a new doorman.", 2.0); }
+    return true;
   }
 
   // ---------- reset -----------------------------------------------------
@@ -398,6 +445,9 @@
     S.bouncer = null;
     S.admitted = false; S.admitted_vip = false; S.everIn = false;
     S.spawnT = 0; S.judgeT = 0; S.rejectCD = 0; S.bottleCD = 0; _connectCD = 0;
+    // fresh run → the door is staffed immediately (downT starts at 0) and the
+    // hire budget refills, but a KILLED bouncer mid-run still costs the delay.
+    S.bouncerDownT = 0; S.bouncerHires = 0; S.unmannedNoted = false;
   }
 
   CBZ.cityClubReset = function () {
@@ -409,6 +459,11 @@
   CBZ.onUpdate(36, function (dt) {
     if (g.mode !== "city") return;
     if (g.state && g.state !== "playing") return;     // paused / menu
+
+    // tick the empty-post re-hire clock (a killed bouncer leaves the door empty
+    // for BOUNCER_REHIRE seconds — the player can stay ahead of the replacement).
+    if (S.bouncerDownT > 0) S.bouncerDownT -= dt;
+
     if (!ensure()) return;
 
     holdBouncer();

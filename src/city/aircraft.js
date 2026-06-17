@@ -30,6 +30,7 @@
   // standing on its roof is ~y38, so cruise altitudes sit WELL above that: a
   // gunship/jet is never below a rooftop target it's hunting.
   const HELI_Y      = 44;     // cruise altitude of the gunship (clears the tallest roof + a player on it)
+  const HELI_CLEAR  = 4;      // min air gap kept over any rooftop the gunship passes over (no fly-through)
   const HELI_R      = 22;     // orbit radius around last-known
   const HELI_SPEED  = 14;     // m/s lateral chase toward orbit point
   const MISSILE_SPD = 46;     // m/s missile travel
@@ -388,10 +389,17 @@
     // ground / rooftop impact → detonate where it lands (the explode-on-landing the
     // player asked for: it rides down THEN blows, it doesn't pop in mid-air).
     const ground = CBZ.floorAt ? CBZ.floorAt(heli.pos.x, heli.pos.z) : 0;
-    if (heli.pos.y <= ground + 1.3) {
-      const ix = heli.pos.x, iz = heli.pos.z, iy = ground + 1.0;
-      detonate(ix, iy, iz);
-      if (CBZ.shake) CBZ.shake(0.85);
+    // detonate on whatever it actually hits — a ROOFTOP it falls onto, or the
+    // street — so a downed heli no longer sinks through a tower to blow up at the kerb.
+    const surf = Math.max(ground, roofTopAt(heli.pos.x, heli.pos.z));
+    if (heli.pos.y <= surf + 1.3) {
+      const ix = heli.pos.x, iz = heli.pos.z, iy = surf + 1.0;
+      // A crashing wreck is a CONTAINED fuel + ordnance fireball — NOT a block-leveling
+      // airstrike. That massive blast (detonate -> cityAirstrikeExplosion, power 3/r16)
+      // is reserved for missiles + called-in airstrikes; a crash is a fraction of it.
+      if (CBZ.cityExplosion) CBZ.cityExplosion(ix, iz, { power: 1.5, radius: 7, byPlayer: false, y: iy });
+      else detonate(ix, iy, iz);
+      if (CBZ.shake) CBZ.shake(0.6);
       despawnHeli();
     }
   }
@@ -415,6 +423,22 @@
     if (dx * dx + dy * dy + dz * dz > radius * radius) return false;
     damageHeli(dmg, x, z); return true;
   };
+
+  // tallest collider top under (x,z) — buildings register wall/slab colliders with
+  // y1 = roof height, so this is the rooftop the gunship must stay ABOVE (no more
+  // flying through towers) and the surface a crashing heli detonates ON (not the
+  // street six storeys below). Same collider data the spotlight roof-scan uses.
+  function roofTopAt(x, z) {
+    let topY = 0;
+    const cols = CBZ.colliders || [];
+    for (let ci = 0; ci < cols.length; ci++) {
+      const c = cols[ci];
+      if (c.y1 == null || c.y1 <= topY) continue;
+      if (x < c.minX - 1 || x > c.maxX + 1 || z < c.minZ - 1 || z > c.maxZ + 1) continue;
+      topY = c.y1;
+    }
+    return topY;
+  }
 
   function updateHeli(dt, r) {
     if (heli && heli.downed) { fallHeli(dt); return; }     // a dying heli ignores all AI
@@ -441,6 +465,9 @@
     heli.pos.x += (tx - heli.pos.x) * lat;
     heli.pos.z += (tz - heli.pos.z) * lat;
     heli.pos.y += (ty - heli.pos.y) * Math.min(1, dt * 1.2);
+    // NO FLY-THROUGH: never let the body sink into a building — ride over the roof.
+    const bodyTop = roofTopAt(heli.pos.x, heli.pos.z);
+    if (bodyTop > 0 && heli.pos.y < bodyTop + HELI_CLEAR) heli.pos.y = bodyTop + HELI_CLEAR;
     // bank into the turn + face flight direction
     const head = Math.atan2(tx - heli.pos.x + 0.0001, tz - heli.pos.z + 0.0001);
     heli.group.rotation.y += (head - heli.group.rotation.y) * Math.min(1, dt * 2.5) * 0.4;

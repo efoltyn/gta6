@@ -331,13 +331,31 @@
     if (tap) fire(tap);   // released before the threshold → the tap verb
   });
 
+  // Is a live prompt currently offering an action on a given key slot? The
+  // panel only shows rows the player can actually fire RIGHT NOW (current
+  // candidate + resolved currentRows), so this answers "would pressing <key>
+  // run a world interaction this instant?". charpanel.js consults this so the
+  // [I] inventory key DEFERS to a live "i" interaction (take-clothes, mug,
+  // rob-stash, surrender…) instead of double-firing alongside it.
+  function hasSlot(key) {
+    if (!current || !currentRows || !currentRows.length) return false;
+    if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || (CBZ.player && CBZ.player.dead)) return false;
+    key = String(key || "").toLowerCase();
+    for (const r of currentRows) if (r.key === key) return true;
+    return false;
+  }
+
   // ---- public API ---------------------------------------------------------------
   CBZ.interactions = {
     REACH,
     register, registerFor, registerZone, registerSource, describe, unregister,
     ctx: buildCtx,
     current: function () { return current ? { target: current.t, kind: current.kind, gunpoint: !!current.gunpoint } : null; },
+    hasSlot: hasSlot,
     refresh: function () { dirty = true; },
     hide: hidePanel,
   };
+  // tiny standalone query for cross-module use (charpanel's [I] guard)
+  CBZ.cityInteractHasSlot = hasSlot;
+  CBZ.cityInteractActive = function () { return !!(current && currentRows && currentRows.length); };
 })();

@@ -413,14 +413,33 @@
   // no collider in the gun's wall raycast, so the shot passes through it invisibly —
   // this is what makes the pane you fired through actually break. Returns the rec.
   let bestHX = 0, bestHY = 0, bestHZ = 0;   // impact point of the last ray-shatter
+  // distance along the shot ray at which the last cityShatterRay broke a pane,
+  // or -1 if it broke nothing. The shot caller can read this to suppress the
+  // wall pock that the SOLID wall behind the glass would otherwise stamp on the
+  // very frame the pane bursts (intact pane → wall registers the round, glass
+  // breaks: a pock-behind-the-glass double hit). CITY-only consumer.
+  CBZ.cityLastShatterDist = -1;
   // force=true (bullets) blows the pane out on the FIRST hit — a fired round
   // through a window should never read as "nothing happened". Default (melee)
   // keeps the two-stage crack-then-burst, so punching a window takes a couple
   // of swings.
+  //
+  // POINT-BLANK STABILITY: the old slab test used `t = tmin>0 ? tmin : 0`, so any
+  // pane whose slab the MUZZLE sat inside collapsed to entry distance 0. With a
+  // storefront's many adjacent panes that made every flush pane a 0-distance tie
+  // — array order (not the aimed pane) won, so a point-blank shot could burst a
+  // pane off to the side, the impact point snapped to the muzzle (outside the
+  // pane), and a grazing/parallel muzzle-inside shot could pop a pane it never
+  // actually crossed (flicker / wrong-pane break). Now: clip the ray to the
+  // pane's slab, require a real FORWARD crossing (positive-length forward segment
+  // ahead of the muzzle within range), select by true forward entry distance, and
+  // take the impact point at the MIDPOINT of the segment inside the pane so the
+  // decal/chip always lands in the glass — stable from touching distance to range.
   CBZ.cityShatterRay = function (ox, oy, oz, dx, dy, dz, maxDist, force) {
     const nl = Math.hypot(dx, dy, dz) || 1; dx /= nl; dy /= nl; dz /= nl;
     const lim = maxDist != null ? maxDist : 1e9;
-    let best = null, bestT = lim;
+    CBZ.cityLastShatterDist = -1;
+    let best = null, bestT = lim, bestMid = lim, bestExit = lim;
     for (let i = 0; i < cityGlass.length; i++) {
       const gp = cityGlass[i]; if (gp.shattered) continue;
       let tmin = -1e9, tmax = 1e9;                     // ray-vs-AABB slab test
@@ -430,11 +449,24 @@
       else { let a = ((gp.y - gp.hh) - oy) / dy, b = ((gp.y + gp.hh) - oy) / dy; if (a > b) { const s = a; a = b; b = s; } if (a > tmin) tmin = a; if (b < tmax) tmax = b; }
       if (Math.abs(dz) < 1e-8) { if (Math.abs(gp.z - oz) > gp.hd) continue; }
       else { let a = ((gp.z - gp.hd) - oz) / dz, b = ((gp.z + gp.hd) - oz) / dz; if (a > b) { const s = a; a = b; b = s; } if (a > tmin) tmin = a; if (b < tmax) tmax = b; }
-      if (tmax < tmin || tmax < 0) continue;            // miss / entirely behind the muzzle
-      const t = tmin > 0 ? tmin : 0;                    // entry distance (0 if muzzle inside the pane)
-      if (t < bestT) { bestT = t; best = gp; bestHX = ox + dx * t; bestHY = oy + dy * t; bestHZ = oz + dz * t; }
+      if (tmax < tmin) continue;                        // ray misses the box entirely
+      // forward segment the ray spends INSIDE this pane: [tEnter, tExit].
+      const tEnter = tmin > 0 ? tmin : 0;               // clamp the muzzle-inside case forward
+      const tExit = tmax < lim ? tmax : lim;            // bounded by the round's reach
+      if (tExit <= 1e-5 || tExit <= tEnter) continue;   // pane is at/behind the muzzle, or no forward extent → not crossed
+      // SELECT the pane whose forward entry is nearest; when several flush panes
+      // share entry 0 (muzzle inside, point-blank), break the tie on the SHORTER
+      // forward exit — that's the thin pane the round is actually punching out,
+      // not a neighbour the muzzle merely overlaps along its in-plane span.
+      if (tEnter < bestT - 1e-4 || (tEnter <= bestT + 1e-4 && tExit < bestExit)) {
+        bestT = tEnter; bestExit = tExit; best = gp;
+        bestMid = (tEnter + tExit) * 0.5;               // impact point sits INSIDE the glass, never on the muzzle
+        bestHX = ox + dx * bestMid; bestHY = oy + dy * bestMid; bestHZ = oz + dz * bestMid;
+      }
     }
     if (best) {
+      // entry distance of the pane we broke, for the wall-pock suppression above
+      CBZ.cityLastShatterDist = bestT;
       // a bullet (force) or a second hit — or a solid showroom pane — blows it
       // fully out; otherwise spider-crack it (and chip a shard off the point).
       if (force || best.cracked || best.col) { burstPane(best); tryWindowOpening(best); if (CBZ.sfx) CBZ.sfx("glass"); }
@@ -2521,7 +2553,7 @@
     }
     flushDeco();
 
-    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, colliders: cols, platforms: plats, windows, lbox, FH,
+    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
@@ -3014,10 +3046,16 @@
           const ss = pt(4.6, halfTan - 1.0, 0.7);
           if (ss) { decor(ss, 0.85, 0.08, 1.7, 0.08, 0x8a939c); glow(ss, 1.5, along ? 0.05 : 1.0, 0.5, along ? 1.0 : 0.05, 0x4fd0a0, 0.5); }
         } else {
-          // car lot / chop shop showroom: keep the centre clear for a vehicle,
-          // line the walls with tyres/tool benches only.
+          // car lot / chop shop showroom: a REAL detailed car on a display pad in
+          // the centre (the spot the layout keeps clear), facing the glass front —
+          // so the dealership/garage actually SHOWS the car, not an empty box.
           wallShelves({ body: 0x3a352e, top: 0x55606e, h: 1.4, count: 2, span: 2.0 });
           for (const st of shelfTops) stockRow(st, [0x2a2f37, 0x44505c], 4, 0.3, 0.3);   // tyre/part stacks
+          const cp = pt(halfIn, 0, 1.2);
+          if (cp) {
+            b.lbox(cp.x, 0.06, cp.z, 3.2, 0.12, 3.2, 0x26282e, { cast: false });   // low display turntable pad
+            realCarVisual(b, cp.x, 0.12, cp.z, Math.atan2(-inx, -inz), pickCarModel(kind === "chop" ? 0x8a1f24 : 0xe88a3c), false);
+          }
         }
         break;
       }
@@ -3223,6 +3261,86 @@
   // but has no dresser of its own — this is its furnishing hook.
   CBZ.cityFurnishApartment = function (b, baseY, idx) { furnishApartmentFloor(b, baseY, idx); };
 
+  // ---- THE GENERIC PER-FLOOR OFFICE -----------------------------------------
+  // WHY: an OFFICE tower full of seated workers is a living floor you see through
+  // the curtain wall, a payroll to rob, and witnesses who panic + call cops when
+  // you barge in armed (city/officejobs.js wires the consequence). The dressing
+  // is the apartment dresser's twin: rows of WORK DESKS on the solid half of the
+  // plate (the -x stairwell + the door aisle stay walkable via clearFloorPoint),
+  // each desk = a top slab + pedestal + a monitor + a chair, all plain opaque
+  // cast:false boxes with NO userData so core/batch.js folds every office floor
+  // city-wide into a handful of colour buckets (≈zero extra draw calls).
+  //
+  // For EACH desk it computes the seat as a WORLD-coord anchor {x,y,z,face} — the
+  // chair position at floor height, facing the monitor — and RETURNS the floor's
+  // anchors. The caller accumulates them across storeys and registers the whole
+  // building's seats once via CBZ.cityRegisterOfficeDesks (officejobs.js seats
+  // workers there; a seated worker = an AI working a job, not decoration).
+  function furnishOfficeFloor(b, baseY, idx) {
+    const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
+    idx = idx | 0;
+    const anchors = [];
+    // desk + chair palette rotates per floor so stacked floors don't read cloned.
+    const DESKC = [0x6b5a44, 0x55606e, 0x5a5048, 0x4a5560];
+    const CHAIRC = [0x2a2f37, 0x36302a, 0x2e333b, 0x332e2a];
+    const PANELC = [0x9fb4c8, 0xb0a8c0, 0xa8b8a8, 0x9fb0c4];   // monitor face tint (opaque, batch-safe)
+    const desk = DESKC[idx & 3], chair = CHAIRC[(idx + 1) & 3], panel = PANELC[(idx + 2) & 3];
+    // emissive ceiling strip so the floor reads LIT through the glass — one box
+    // (the only emissive piece; the lit-fixture precedent from furnishApartment).
+    b.lbox(1.0, Y + FHl - 0.22, 0, Math.min(W * 0.5, 5.0), 0.1, 0.5, 0xeef2ff, { emissive: 0xeef2ff, ei: 0.35, cast: false });
+
+    // ONE workstation: desk slab + pedestal + monitor + chair, gated on the chair
+    // point (pad clears the stair strip / door aisle). `dir` = +1 → the chair sits
+    // on the +z side and the worker faces -z (toward the monitor on the desk's -z
+    // edge); -1 mirrors it. Records the seat anchor in WORLD coords when it lands.
+    function station(cx, cz, dir) {
+      const seatZ = cz + dir * 0.85;          // chair sits one side of the desk centre
+      const monZ = cz - dir * 0.42;           // monitor on the far (work) edge
+      // gate on BOTH the chair AND the desk body so neither pokes the stairs/door
+      if (!b.clearFloorPoint || !b.clearFloorPoint(cx, seatZ, 0.6) || !b.clearFloorPoint(cx, cz, 0.7)) return;
+      // desk: a 0.7-tall pedestal under a thin worktop
+      b.lbox(cx, Y + 0.36, cz, 1.5, 0.66, 0.85, desk, { cast: false });
+      b.lbox(cx, Y + 0.72, cz, 1.62, 0.08, 0.95, 0xc9ccd2, { cast: false });   // pale worktop
+      // monitor: a thin dark slab + a pale opaque "screen" face (no emissive →
+      // stays in the batch; reads as a lit display at office scale)
+      b.lbox(cx, Y + 1.02, monZ, 0.7, 0.46, 0.06, 0x14181e, { cast: false });
+      b.lbox(cx, Y + 1.04, monZ + dir * 0.04, 0.58, 0.36, 0.02, panel, { cast: false });
+      b.lbox(cx, Y + 0.74, monZ, 0.12, 0.12, 0.12, 0x14181e, { cast: false });   // stand
+      // chair: a swivel seat + a back, behind the desk on the seat side
+      b.lbox(cx, Y + 0.42, seatZ, 0.6, 0.12, 0.6, chair, { cast: false });        // seat pad
+      b.lbox(cx, Y + 0.78, seatZ + dir * 0.26, 0.6, 0.7, 0.12, chair, { cast: false });  // backrest
+      b.lbox(cx, Y + 0.2, seatZ, 0.1, 0.4, 0.1, 0x14181e, { cast: false });        // post
+      // SEAT ANCHOR (world coords): the chair point at floor height, facing the
+      // monitor. The monitor sits straight across the desk in z, so the yaw is
+      // atan2(dx,dz) toward it — the SAME facing convention peds use everywhere.
+      anchors.push({
+        x: b.ox + cx, y: Y, z: b.oz + seatZ,
+        face: Math.atan2(0, monZ - seatZ),
+      });
+    }
+
+    // lay desks across the SOLID half of the plate (right of the -x stairwell,
+    // out to the +x wall), in columns × depth rows, so a wide core tower seats a
+    // whole bullpen and a narrow walk-up a couple of desks. clearFloorPoint
+    // silently drops any station landing in the stair strip or entrance aisle, so
+    // the spread can run the full width without ever blocking the climb/door.
+    const xHi = W / 2 - 2.0;                                  // first column off the +x wall
+    const xLo = (b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 1.6) : (-W / 2 + 2.0));  // stop clear of the stairwell
+    const cols = Math.max(1, Math.min(4, Math.floor((xHi - xLo) / 3.0) + 1));
+    const dxc = cols > 1 ? (xHi - xLo) / (cols - 1) : 0;
+    const rows = Math.max(2, Math.min(6, Math.floor((D - 3.0) / 2.6)));
+    const z0 = -D / 2 + 2.2, dz = rows > 1 ? (D - 4.4) / (rows - 1) : 0;
+    for (let c = 0; c < cols; c++) {
+      const cx = xHi - c * dxc;
+      for (let r = 0; r < rows; r++) {
+        const cz = z0 + r * dz;
+        // alternate which side the chair sits so back-to-back rows share an aisle
+        station(cx, cz, (r & 1) ? 1 : -1);
+      }
+    }
+    return anchors;
+  }
+
   // THE PENTHOUSE — the apex home filling the top floor of the mega-tower. This
   // is the loft turned all the way up: a marble plinth bedroom with a four-poster
   // king, a sunken lounge ringed by a wraparound sectional + a wall-spanning TV, a
@@ -3287,6 +3405,40 @@
     glow(0, 2.6, -D / 2 + 0.22, 2.6, 1.2, 0.05, GOLD, 0.2);
   }
 
+  // ---- REAL detailed car as static scenery --------------------------------
+  // Stand the SAME detailed per-car visual that traffic / parked / driven cars
+  // use (CBZ.cityBuildPlayerCarVisual) on a building group: wheels rested on the
+  // floor at local y `ly`, nose along `rotY`. Returns true if the real car went
+  // in; false → the caller draws its blocky box fallback (headless / no visual
+  // system). Pure scenery — no traffic, AI, or physics entanglement.
+  function realCarVisual(b, lx, ly, lz, rotY, model, solid) {
+    if (!CBZ.cityBuildPlayerCarVisual || !b || !b.group || !b.group.add) return false;
+    let v = null;
+    try {
+      const style = (CBZ.cityInferCarStyle && CBZ.cityInferCarStyle(model)) || "muscle";
+      v = CBZ.cityBuildPlayerCarVisual(style, model && model.color);
+    } catch (e) { v = null; }
+    if (!v) return false;
+    v.rotation.y = rotY || 0;
+    let minY = 0;
+    try { if (THREE.Box3) minY = new THREE.Box3().setFromObject(v).min.y; } catch (e) { minY = 0; }
+    if (!isFinite(minY)) minY = 0;
+    v.position.set(lx, ly - minY, lz);                 // rest the wheels on the floor
+    if (v.traverse) v.traverse(function (o) { if (o) o.castShadow = false; });   // scenery: no shadow cost
+    b.group.add(v);
+    if (solid && CBZ.colliders) {                      // keep the parked car solid (footprint = length along z)
+      const bx = b.ox != null ? b.ox : 0, bz = b.oz != null ? b.oz : 0;
+      CBZ.colliders.push({ minX: bx + lx - 1.05, maxX: bx + lx + 1.05, minZ: bz + lz - 2.35, maxZ: bz + lz + 2.35, y0: ly, y1: ly + 1.5 });
+    }
+    return true;
+  }
+  function pickCarModel(fallbackColor) {
+    let model = null;
+    try { if (CBZ.cityEcon && CBZ.cityEcon.pickCar) model = CBZ.cityEcon.pickCar(); } catch (e) { model = null; }
+    if (!model || typeof model !== "object") model = { color: fallbackColor };
+    return model;
+  }
+
   // a handful of PARKED CARS on the Spire's ground-floor deck so an empty garage
   // still reads as a garage. They sit in the four corner quadrants, clear of the
   // central drive lanes (the bays line up on each face's middle). Solid props.
@@ -3302,7 +3454,10 @@
       // skip the corner that shares the stairwell strip (-x side) so cars never
       // block the climb to the elevator/roof.
       if (s.x < -w * 0.18) continue;
-      b.lbox(s.x, 0.55, s.z, 2.0, 0.7, 3.9, s.c, { solid: true });          // body
+      // a REAL detailed car (same builder as traffic/parked/driven), rested on the
+      // deck — not a blocky box. Falls back to the box stand-in only when headless.
+      if (realCarVisual(b, s.x, 0.18, s.z, 0, pickCarModel(s.c), true)) continue;
+      b.lbox(s.x, 0.55, s.z, 2.0, 0.7, 3.9, s.c, { solid: true });          // body (fallback)
       b.lbox(s.x, 1.15, s.z + 0.2, 1.7, 0.55, 2.0, 0x1b1f25, { cast: false }); // cabin/glass
       b.lbox(s.x, 0.3, s.z + 1.5, 2.05, 0.18, 0.5, 0x12161b, { cast: false }); // bumper hint
     }
@@ -3910,7 +4065,35 @@
         // Heights ride the district field (core 4-8 … projects low-rise);
         // floor of 2 so every HOME keeps an upstairs to furnish.
         const storeys = Math.max(2, districtStoreys(lot));
-        const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];
+        const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];   // drawn for BOTH paths so RNG stays stable
+        // OFFICE TOWER? world.js owns the policy (city.officeLot): a downtown/
+        // midtown subset of TALL, NON-listed towers become workplaces, not homes.
+        // The listed home ladder (forcedTier) is always a HOME. Decided off a
+        // deterministic predicate — NO rng() draw — so later placement is stable.
+        const wantOffice = !forcedTier && storeys >= 3 &&
+          city.officeLot && city.officeLot(lot);
+        if (wantOffice) {
+          // a glass OFFICE shell — clear curtain wall so the seated workers READ
+          // through it from the street (the living-floor "why"). Same enterable/
+          // climbable rig; upper floors get desks instead of flats.
+          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { office: true, glassKind: "clear" });
+          // dress EVERY storey above the lobby with a working office floor and
+          // collect the seat anchors building-wide, then register them ONCE so
+          // city/officejobs.js can seat a payroll of workers (witnesses + cash).
+          const deskAnchors = [];
+          for (let k = 1; k < storeys; k++) {
+            const fa = furnishOfficeFloor(b, k * FH, (lot.i | 0) * 5 + (lot.j | 0) * 3 + k);
+            if (fa && fa.length) for (let a = 0; a < fa.length; a++) deskAnchors.push(fa[a]);
+          }
+          // C2: officejobs.js DEFINES CBZ.cityRegisterOfficeDesks and stores the
+          // anchors; optional-chained so the office still BUILDS if that file is
+          // absent (just no seated workers — never a dead floor either way).
+          if (deskAnchors.length) CBZ.cityRegisterOfficeDesks && CBZ.cityRegisterOfficeDesks(lot, deskAnchors);
+          lot.kind = "office";
+          lot.building = { ...b, name: "Office Tower", sign: color, side, door: doorPt, office: true, deskCount: deskAnchors.length };
+          placed.push(lot);
+          continue;
+        }
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side);
         const listed = !!forcedTier;                 // only reserved lots are on the market
         const tierDef = forcedTier || GENERIC;

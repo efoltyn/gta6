@@ -1140,6 +1140,7 @@
   CBZ.cityKOPed = function (ped, fromX, fromZ) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // knocked out mid-call → no report lands
+    leaveSit(ped);                             // a felled desk worker leaves the seat (C3)
     ped.ko = 8; ped.alarmed = 6;
     if (CBZ.body) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
@@ -1149,10 +1150,24 @@
     CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
   };
 
+  // SIT-INTERRUPT helper (C3): a seated desk worker that just got KO'd / killed /
+  // hit must LEAVE the seat — clear the seated pose flag, free its claimed desk
+  // (officejobs.js, optional-chained) and forget the anchor. move() also clears
+  // char.sitting whenever the state drifts off "sit", but the KO/kill paths skip
+  // move() entirely (the main loop `continue`s on dead/ko bodies), so an explicit
+  // clear here is what keeps a felled worker from carrying a stale sit pose.
+  function leaveSit(ped) {
+    if (!ped) return;
+    if (ped.char && ped.char.sitting) ped.char.sitting = false;
+    if (ped.state === "sit") ped.state = "walk";
+    if (ped._deskAnchor) { if (CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped); ped._deskAnchor = null; }
+  }
+
   const _ragP = { x: 0, y: 0, z: 0 }, _ragD = { x: 0, y: 0, z: 0 };   // ragdoll scratch
   CBZ.cityKillPed = function (ped, imp, cause) {
     if (!ped || ped.dead) return;
     if (ped.reportState) cancelReport(ped);    // killed mid-call → the report dies with them
+    leaveSit(ped);                             // a killed desk worker leaves the seat (C3)
     // every body follows its killer around (kill-cam stats + street reads)
     if (imp && imp.attacker && typeof imp.attacker === "object" && !imp.attacker.isPlayer) {
       imp.attacker.bodies = (imp.attacker.bodies | 0) + 1;
@@ -1385,6 +1400,7 @@
     // the body CARRIES the hit (wounds.js): entry wound + blood soak on the clothing
     if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.05 + Math.random() * 0.55, z: tgt.pos.z }, melee ? { melee: "blunt", fromX: fx, fromZ: fz } : { fromX: fx, fromZ: fz });
     tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
+    if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
     // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
     // (hands up / run), and returns whether this person DARES to fight back.
     const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
@@ -2489,6 +2505,39 @@
       if ((ped.partner || (ped.family && ped.family.length) || ped.aggr >= (B.bold || 0.5)) && groupReact(ped, B)) return;
     }
 
+    // ---- GANG-FEAR (THE WHY of turf): an ordinary, timid civilian gives an armed
+    //      gangster a WIDE berth. On a rate-gated sweep (like _groupT — never every
+    //      frame), a non-gang low-aggr ped scans the near crowd for an armed, living
+    //      gang member within ~16m and lets dread build the closer one is; when fear
+    //      crosses a threshold it bolts AWAY from the nearest one. Reuses the shared
+    //      fear field + fleeFrom + the "flee" state — so gang turf FEELS owned: people
+    //      avoid and clear out around the crew, no popup. Active/near crowd only,
+    //      and it never overrides a ped already fighting/surrendering/fleeing a worse
+    //      threat (those branches returned above). Cheap: bounded local scan, gated.
+    if (active && ped.kind !== "gang" && !ped.rage && ped.state !== "fight" &&
+        ped.aggr < (B.bold || 0.5) && (ped._gangFearT || 0) <= 0) {
+      ped._gangFearT = 0.4 + rng() * 0.25;
+      let gx = 0, gz = 0, gd2 = 16 * 16, sawGang = false;
+      const crowd = CBZ.cityPeds;
+      for (let gi = 0; gi < crowd.length; gi++) {
+        const p = crowd[gi];
+        if (p === ped || p.kind !== "gang" || !p.armed || p.dead) continue;
+        const dgx = p.pos.x - ped.pos.x, dgz = p.pos.z - ped.pos.z, dgd = dgx * dgx + dgz * dgz;
+        if (dgd < gd2) { gd2 = dgd; gx = p.pos.x; gz = p.pos.z; sawGang = true; }
+      }
+      if (sawGang) {
+        // closer ⇒ more dread (0 at the 16m edge, ~1.6/tick on top of you), bounded.
+        const close = 1 - Math.sqrt(gd2) / 16;
+        ped.fear = Math.min(10, ped.fear + 0.6 + close * 1.0);
+        if (ped.fear >= 4) { ped.state = "flee"; fleeFrom(ped, gx, gz); return; }
+      } else if (ped.fear > 0 && ped.alarmed <= 0) {
+        // no armed gangster in range and nothing else alarming → the turf-dread we
+        // raised bleeds back off, so a civilian who passed a crew calms once clear
+        // (keeps this purely local; doesn't touch fear other systems are driving).
+        ped.fear = Math.max(0, ped.fear - 0.5);
+      }
+    }
+
     // ---- GUNPOINT (reuses the jail's intimidate logic): if the player is
     //      pointing a gun at this person, the meek SURRENDER (hands up, frozen,
     //      robbable) and the bold/armed DRAW and fight back — a stand-off. ----
@@ -2625,6 +2674,16 @@
         ped.state = "flee"; fleeFrom(ped, cop.pos.x, cop.pos.z); return;
       }
     }
+
+    // ---- SEATED AT A DESK (C3): a worker who has reached its claimed desk stays
+    //      put for the shift. Every hard threat/interrupt above (rage / group /
+    //      gang-fear / gunpoint / threatened / cop-hunt) already RETURNED if it
+    //      fired and flipped the state off "sit", so reaching here means nothing
+    //      pulled them out this frame — hold the seat (don't gawk, don't re-path).
+    //      move() owns entering the pose on arrival and the seated speed-gate; it
+    //      also clears char.sitting whenever the state is no longer "sit" (i.e. an
+    //      interrupt above changed it), so this is purely the "stay seated" keeper.
+    if (ped.state === "sit") { ped.speed = 0; return; }
 
     // ---- default: routine ----
     if (ped.state === "confront" || ped.state === "fight" || ped.state === "flee" || ped.state === "loot") ped.state = "walk";
@@ -3124,6 +3183,17 @@
     }
 
     const st = ped.state;
+    // SIT INTERRUPT (C3): a seated desk worker stays in state "sit" only while
+    // nothing pulled it out. think() runs before move() and flips the state to
+    // flee/fight/confront/surrender on ANY threat/hit/gunpoint; a hit also routes
+    // through hurtActor (high fear → flee next think). So if the body still carries
+    // char.sitting but is no longer in "sit", an interrupt happened — drop the seat
+    // (animChar stops the seated pose) and let the new state (already set) run. We
+    // also let go of the claimed desk so it frees up (optional-chain; officejobs.js).
+    if (ped.char && ped.char.sitting && st !== "sit") {
+      ped.char.sitting = false;
+      if (CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
+    }
     const surrendering = st === "surrender" || ped.surrender || ped.surrenderT > 0;
     if (ped.char) {
       // HANDS-UP must be HELD by animChar (character.js), exactly like the jail
@@ -3149,7 +3219,7 @@
     if (st === "flee") spd = ped.baseSpeed * 2.2;
     else if (ped.reportState === "run") spd = ped.baseSpeed * 2.0;   // sprint to the cop to snitch
     else if (st === "fight" || st === "confront") spd = ped.baseSpeed * 1.7;
-    else if (st === "chat" || st === "idle" || st === "film" || st === "surrender") spd = 0;
+    else if (st === "chat" || st === "idle" || st === "film" || st === "surrender" || st === "sit") spd = 0;
     if (surrendering) spd = 0;
     if (ped.drugUser && ped.erratic > 0 && spd > 0) spd *= 1 + ped.erratic * 0.16;
     // a jogger keeps a brisk clip on its normal walk (derived from the role, so it
@@ -3176,6 +3246,44 @@
     if (ped._rampT > 0) ped._rampT -= dt;      // rampager re-target / re-arm cadence
     const dx = ped.target.x - ped.pos.x, dz = ped.target.z - ped.pos.z, dist = Math.hypot(dx, dz);
     if (ped.pause > 0) ped.pause -= dt;
+    // SIT-DOWN (C3): an office worker routed to a CLAIMED desk (finalGoal.sitDesk,
+    // C5) takes the seat the moment it gets within ~1.3m of the desk anchor. SNAP
+    // the group exactly onto the anchor, face anchor.face, record the anchor on the
+    // ped, raise the char.sitting flag (character.js animChar drops the hips / folds
+    // the thighs into a seated pose) and switch to state "sit" so the speed-gate
+    // above pins it at 0 for the shift. We return BEFORE the depenetration passes —
+    // the anchor is an authored, known-good seat point; a seated body must not be
+    // shoved around by the desk colliders. Any interrupt (handled in think()) flips
+    // the state off "sit" and the top-of-move clear lets the body go. Only enter
+    // sit while genuinely calm (no rage / fear is its own flee path / not fleeing).
+    if (st !== "sit" && ped.finalGoal && ped.finalGoal.sitDesk && !ped.rage &&
+        ped.state !== "flee" && ped.state !== "fight" && !surrendering) {
+      const anc = ped.finalGoal.anchor || ped.finalGoal;     // {x,z,face} (C2 anchor / finalGoal carry it)
+      const adx = anc.x - ped.pos.x, adz = anc.z - ped.pos.z;
+      if (adx * adx + adz * adz <= 1.3 * 1.3) {
+        ped.pos.x = anc.x; ped.pos.z = anc.z; ped.pos.y = 0;          // snap onto the seat
+        ped.group.position.set(anc.x, 0, anc.z);
+        if (anc.face != null) ped.group.rotation.y = anc.face;         // face the desk
+        ped._deskAnchor = { x: anc.x, y: anc.y || 0, z: anc.z, face: anc.face, lot: anc.lot };
+        ped.path = null; ped.speed = 0; ped.pause = 0;
+        ped.state = "sit";
+        if (ped.char) ped.char.sitting = true;
+        if (animate) animChar(ped.char, 0, dt);
+        return;
+      }
+    }
+    // ALREADY SEATED: hold the seat every frame — pinned to the anchor (no drift, no
+    // collide-shove from the desk geometry), seated pose, nothing else runs. An
+    // interrupt flips the state off "sit" (think()), so we no longer land here and
+    // the top-of-move clear releases the body back to normal locomotion.
+    if (st === "sit") {
+      const a = ped._deskAnchor;
+      if (a) { ped.pos.x = a.x; ped.pos.z = a.z; ped.group.position.set(a.x, 0, a.z); if (a.face != null) ped.group.rotation.y = a.face; }
+      ped.pos.y = 0; ped.speed = 0;
+      if (ped.char) ped.char.sitting = true;
+      if (animate) animChar(ped.char, 0, dt);
+      return;
+    }
     const _px0 = ped.pos.x, _pz0 = ped.pos.z, _trying = spd > 0 && dist > 0.5;
     if (spd > 0 && dist > 0.5) {
       // blend the desired heading with local steering (look-ahead + separation)
@@ -3271,6 +3379,7 @@
       if (p._refugeT > 0) p._refugeT -= dt;     // flee-toward-refuge recompute gate
       if (p._microT > 0) p._microT -= dt;       // archetype micro-behaviour gate
       if (p._groupT > 0) p._groupT -= dt;       // group/mob reaction recheck gate
+      if (p._gangFearT > 0) p._gangFearT -= dt; // civilian gang-fear scan rate gate
       if (p.poseCower > 0) p.poseCower -= dt;   // brief flinch/cringe at gunfire+blasts
       if (p.tweakT > 0) p.tweakT -= dt;
       if (p.npcHeat > 0) { p.npcHeat = Math.max(0, p.npcHeat - dt * 4); }

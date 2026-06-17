@@ -210,7 +210,10 @@
   };
   CBZ.cityCurrentWeaponName = currentWeaponName;
   CBZ.cityCurrentWeapon = currentWeaponItem;
-  CBZ.cityHasGun = function () { return !g.cityMeleeWeapon && !!(CBZ.equippedWeapon && CBZ.equippedWeapon()); };
+  // HOLSTERED counts as NO gun drawn (the FIST/holster slot lowers the weapon):
+  // gunpointSweep / witness / aim systems read this, so peds no longer throw
+  // their hands up at an unarmed/holstered/fists player. Selecting a gun un-holsters.
+  CBZ.cityHasGun = function () { return !g.cityMeleeWeapon && !g.cityHolstered && !!(CBZ.equippedWeapon && CBZ.equippedWeapon()); };
   CBZ.cityOwnsGun = function () {
     return !!((CBZ.weaponInventory && CBZ.weaponInventory.length) || (g._copStow && g._copStow.inv && g._copStow.inv.length));
   };

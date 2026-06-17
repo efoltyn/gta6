@@ -329,6 +329,32 @@
       if (CBZ.clearCityCops) CBZ.clearCityCops();
       if (!netGuest && CBZ.spawnCityTraffic) CBZ.spawnCityTraffic(CBZ.CITY.traffic);
       if (CBZ.cityWantedReset) CBZ.cityWantedReset();
+      // ESCAPED CONVICT: you didn't get released — you BROKE OUT. The city should
+      // not greet you clean. After cityWantedReset() zeroed the slate, stamp a
+      // 3★ floor + matching heat so the manhunt is already on the instant you
+      // hit the street (wanted.js holds it ≥3 while g.escapedConvict is set; cops
+      // bias toward you). g.escapedFromJail marks THIS run as a jailbreak entry;
+      // g.escapedConvict is NOT cleared here — wanted.js owns lifting it via
+      // CBZ.cityClearConvict(). Guarded: only when the flag is set.
+      if (game.escapedConvict) {
+        game.escapedFromJail = true;
+        const T = (CBZ.CITY && CBZ.CITY.starHeat) || [0, 300, 650, 1100, 3200, 12000];
+        game.heat = Math.max(game.heat || 0, (T[3] || 1100) + 5);
+        game.wanted = 3;                       // wanted.js holds this ≥3 while escapedConvict
+        game.cityCrimeLabel = "Escaped Convict";
+        // (g.cityCopTarget is recomputed each tick by wanted.js maintain() off g.wanted)
+        // jail rep → city rep: carry the two jail gang standings onto two city
+        // gangs so who you ran with inside still means something out here. Guarded:
+        // CBZ.cityGangs is an ARRAY of live city gangs; skip if APIs/gangs absent.
+        if (typeof CBZ.gangStanding === "function" && Array.isArray(CBZ.cityGangs) && CBZ.cityGangAddStanding) {
+          const cityGangs = CBZ.cityGangs;
+          for (let gi = 0; gi < 2 && gi < cityGangs.length; gi++) {
+            const js = CBZ.gangStanding(gi) | 0;            // jail standing -100..100
+            if (js && cityGangs[gi]) CBZ.cityGangAddStanding(cityGangs[gi].id, Math.max(-100, Math.min(100, js)));
+          }
+        }
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      }
       if (CBZ.cityClearAircraft) CBZ.cityClearAircraft();
       if (CBZ.cityClearPlayerAir) CBZ.cityClearPlayerAir();
       if (CBZ.cityCareersReset) CBZ.cityCareersReset();

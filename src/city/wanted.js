@@ -39,6 +39,29 @@
     return s;
   }
 
+  // ---- ESCAPED CONVICT FLOOR: while g.escapedConvict is set (you broke OUT of
+  // jail, mode.js stamped it on the city reset), the manhunt cannot end on its
+  // own — heat/stars can't bleed below the 3★ band. Only CBZ.cityClearConvict()
+  // (a pardon / paying it off / leaving the manhunt behind) lifts it. Cheap; runs
+  // off the existing decay tick. Idempotent — re-asserting the floor is harmless.
+  function convictFloor() {
+    if (!g.escapedConvict) return false;
+    const floor = CBZ.CITY.starHeat[3] + 1;
+    if ((g.heat || 0) < floor) g.heat = floor;
+    if ((g.wanted | 0) < 3) g.wanted = 3;
+    if (!g.cityCrimeLabel) g.cityCrimeLabel = "Escaped Convict";
+    return true;
+  }
+  // lift the convict status: clears the flag + lets the heat decay normally again.
+  // Stars are NOT zeroed (you may still be hot from a fresh crime) — only the
+  // permanent 3★ floor is removed; the next decay tick can carry you back to 0.
+  CBZ.cityClearConvict = function () {
+    g.escapedConvict = false;
+    if (g.cityCrimeLabel === "Escaped Convict") g.cityCrimeLabel = null;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  };
+  CBZ.cityIsConvict = function () { return !!g.escapedConvict; };
+
   // RDR2-style: every crime has a real NAME and a star TIER. Your stars are the
   // WORST single thing you're wanted for — not a stack of petty heat. Killing
   // escalates by body count. Killing a cop is an automatic 5.
@@ -58,6 +81,7 @@
     "robbery":           { stars: 2, label: "Robbery" },
     "burglary":          { stars: 2, label: "Burglary" },
     "kidnapping":        { stars: 3, label: "Kidnapping" },
+    "escaped-convict":   { stars: 3, label: "Escaped Convict" },
     "assault-officer":   { stars: 3, label: "Assaulting an Officer" },
     "murder":            { stars: 3, label: "Murder", kill: true },
     "vehicular homicide":{ stars: 3, label: "Vehicular Manslaughter", kill: true },
@@ -276,6 +300,9 @@
       g.wanted = starsFromHeat(g.heat);
       if (g.heat <= 0) { g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null; }   // cleared → fresh slate
     }
+    // an active manhunt for an escaped convict never falls below 3★ on its own
+    // (only CBZ.cityClearConvict lifts it). Re-assert AFTER any decay this frame.
+    convictFloor();
     g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   });

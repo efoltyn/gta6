@@ -187,6 +187,28 @@
     const norm = Math.min(speed / walkRef, 1);    // 0..1 walk→run, scaled to player walk speed
     ch.breath += dt;
 
+    // ---- SEATED (office-jobs): a worker who reached their desk sits the shift.
+    // city/officejobs.js + peds.js set ch.sitting once the ped snaps to a desk
+    // anchor; this is a full-rig pose that OWNS the body (like the legGone crawl)
+    // so a sitting clerk doesn't keep walk-swimming their limbs. Drop the hips,
+    // fold the thighs forward so the shins hang to the floor, sit the torso
+    // upright with a slight working lean, rest the arms toward the desktop. Modeled
+    // on the surrender DAMP skeleton below. Early-return so no gait layer fights it.
+    // (Jail/survival never set ch.sitting → this is a no-op there, byte-identical.)
+    if (ch.sitting) {
+      const sr = 12;
+      ch.body.position.y = damp(ch.body.position.y, -0.6, sr, dt);     // hips drop into the chair
+      ch.body.rotation.x = damp(ch.body.rotation.x, 0.14, sr, dt);     // slight working lean
+      ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
+      ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+      if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -1.2, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
+      if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -1.2, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
+      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.5, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.5, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+      return;   // seated pose owns the whole rig
+    }
+
     // gait advances with stride length; faster = quicker cadence.
     // Tuned so a normal walk reads as a brisk, weighty stride rather
     // than a frantic sprint, and the stride lengthens (not just speeds
@@ -405,6 +427,7 @@
   //      without breaking the seed-only callers (grapple/net/physics). ----
   function deathPose(ch, seed, fall) {
     if (!ch || !ch.parts) return;
+    ch.sitting = false;                 // a corpse is never "at its desk" — clear the seated pose
     const s = seed || 0;
     const p = ch.parts;
     const j = (k) => Math.sin(s * k);   // cheap per-corpse jitter in [-1,1]

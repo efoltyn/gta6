@@ -191,6 +191,60 @@
     return t ? { type: g0.type || "street", label: t.label, defend: t.defend, expand: t.expand } : null;
   };
 
+  // ---- ONE member spawn, shared by the initial roster build AND the slow
+  //      recruit tick. rk = rank key ("lt"/"enforcer"/"soldier"/"runner"/
+  //      "lookout"); lot = the turf block to post + guard. Loadout / HP /
+  //      wealth / aggression / naming are IDENTICAL on both paths — a recruit
+  //      is just another body, never a parallel cheaper unit. Returns the ped
+  //      (already added to the scene + gang.members + cityPeds) or null.
+  function spawnGangMember(gang, lot, rk) {
+    if (!gang || !lot) return null;
+    const A = CBZ.city && CBZ.city.arena; if (!A) return null;
+    const tt = gangType(gang);
+    const ag = CBZ.CITY.aggro || {};
+    const ang = rng() * 6.28, rad = 2.5 + rng() * 5;
+    const x = lot.cx + Math.cos(ang) * rad, z = lot.cz + Math.sin(ang) * rad;
+    const rd = rankDef(rk);
+    const leader = rd.tier >= 4;   // Lt / Enforcer — the made men of the block
+    // ---- ARCHETYPE LOADOUT: who's strapped, and with what (see GANG_TYPES) ----
+    let armed, weapon, ammo;
+    const packs = leader ? (rng() < 0.9) : (rng() < tt.armedFrac);
+    if (packs) {
+      const r = rng();
+      // THE STATUS RIFLE: a made man has a real chance of the AK-47 — the
+      // boss's home lot runs the heaviest detail.
+      const akf = (tt.akFrac || 0) * (lot === gang.turf[0] ? 1.6 : 1);
+      if (leader && rng() < akf) weapon = "AK-47";
+      else if (r < tt.rifleFrac || (leader && rng() < tt.rifleFrac + 0.15)) weapon = "Carbine";
+      else if (r < tt.rifleFrac + tt.smgFrac || (leader && rng() < 0.6)) weapon = "SMG";
+      else weapon = "Pistol";
+      armed = true;
+      ammo = weapon === "AK-47" ? 60 + ((rng() * 31) | 0) : weapon === "Carbine" ? 60 : weapon === "SMG" ? 40 : 30;
+    } else {
+      armed = false; weapon = tt.melee || null; ammo = 0;
+    }
+    const ped = CBZ.cityMakePed(x, z, rng, {
+      kind: "gang", gang: gang.id, faction: gang.id,
+      guard: { x: lot.cx, z: lot.cz },
+      outfit: gang.color, wealth: Math.min(0.97, (0.3 + rd.tier * 0.08) * tt.wealthMul),
+      aggr: clamp(rollGang(ag) + tt.aggrAdd, 0.6, 1),
+      archetype: "gangster", job: "gang " + rd.pip.toLowerCase().replace(".", ""),
+      armed, weapon,
+      hp: Math.round(rd.hp * tt.hpMul),
+      name: makeName(gang.ethnicity),
+    });
+    ped.rank = rk;
+    ped.ammo = ammo;
+    ped.maxHp = Math.round(rd.hp * tt.hpMul);
+    ped.homeGuard = { x: lot.cx, z: lot.cz };
+    const ms = memStats(ped); ms.bodies = (rd.tier) + ((rng() * 2) | 0); ms.contrib = rd.tier * 120 * rng(); ms.served = 30 + rng() * 120;
+    tagWithRank(ped, gang.color);   // "<Name> · Lt." etc.
+    A.root.add(ped.group);
+    CBZ.cityPeds.push(ped);
+    gang.members.push(ped);
+    return ped;
+  }
+
   CBZ.spawnCityGangs = function () {
     const A = CBZ.city && CBZ.city.arena; if (!A) return;
     _s = 99173;
@@ -274,66 +328,28 @@
         const baseN = lo + ((rng() * (hi - lo + 1)) | 0);
         const n = Math.max(1, Math.round(baseN * tt.crewMul));
         for (let k = 0; k < n; k++) {
-          const ang = rng() * 6.28, rad = 2.5 + rng() * 5;
-          const x = lot.cx + Math.cos(ang) * rad, z = lot.cz + Math.sin(ang) * rad;
           // a REAL pyramid under the boss: the first holder of each lot is a
           // LIEUTENANT, then an Enforcer, then the bench fills Soldier/Runner/
           // Lookout — a believable spread of veterans + low men who'll climb on
           // merit over the run. Each gets a REAL First-Last name; rank lives on
-          // ped.rank + shows as a tag pip.
+          // ped.rank + shows as a tag pip. spawnGangMember owns the loadout.
           const rk = k === 0 ? "lt" : k === 1 ? "enforcer" : (k <= 3 ? "soldier" : (rng() < 0.5 ? "runner" : "lookout"));
-          const rd = rankDef(rk);
-          const leader = rd.tier >= 4;   // Lt / Enforcer — the made men of the block
-          // ---- ARCHETYPE LOADOUT: who's strapped, and with what. Leaders are
-          //      (almost) always armed; the rest pack a gun only at the crew's
-          //      armedFrac. A cartel block bristles with rifles; a brawler block
-          //      is mostly machetes + fists, a deep but lightly-gunned mob. ----
-          let armed, weapon, ammo;
-          const packs = leader ? (rng() < 0.9) : (rng() < tt.armedFrac);
-          if (packs) {
-            const r = rng();
-            // THE STATUS RIFLE: a made man (Enforcer/Lt) has a real chance of the
-            // AK-47 — the banana mag in his hands IS the crew's show of force (you
-            // see it and know the block is serious), and because he DROPS it where
-            // he falls, picking a fight with him is how the street gets one. The
-            // boss's home lot runs the heaviest detail — guarding the kingpin is
-            // the crew's best-armed post.
-            const akf = (tt.akFrac || 0) * (lot === gang.turf[0] ? 1.6 : 1);
-            if (leader && rng() < akf) weapon = "AK-47";
-            // leaders skew up a tier; rifles only where the archetype fields them
-            else if (r < tt.rifleFrac || (leader && rng() < tt.rifleFrac + 0.15)) weapon = "Carbine";
-            else if (r < tt.rifleFrac + tt.smgFrac || (leader && rng() < 0.6)) weapon = "SMG";
-            else weapon = "Pistol";
-            armed = true;
-            ammo = weapon === "AK-47" ? 60 + ((rng() * 31) | 0) : weapon === "Carbine" ? 60 : weapon === "SMG" ? 40 : 30;
-          } else {
-            // unarmed for gun purposes → the brain makes them BRAWL. They carry the
-            // archetype's melee tool (machete/bat) as flavour; tankier HP makes the
-            // brawler mob a real melee threat instead of a free kill.
-            armed = false; weapon = tt.melee || null; ammo = 0;
-          }
-          const ped = CBZ.cityMakePed(x, z, rng, {
-            kind: "gang", gang: gang.id, faction: gang.id,
-            guard: { x: lot.cx, z: lot.cz },
-            outfit: gang.color, wealth: Math.min(0.97, (0.3 + rd.tier * 0.08) * tt.wealthMul),
-            aggr: clamp(rollGang(ag) + tt.aggrAdd, 0.6, 1),
-            archetype: "gangster", job: "gang " + rd.pip.toLowerCase().replace(".", ""),
-            armed, weapon,
-            hp: Math.round(rd.hp * tt.hpMul),
-            name: makeName(gang.ethnicity),
-          });
-          ped.rank = rk;
-          ped.ammo = ammo;
-          ped.maxHp = Math.round(rd.hp * tt.hpMul);
-          ped.homeGuard = { x: lot.cx, z: lot.cz };
-          // seed a plausible career so they're partway up the merit track already
-          const ms = memStats(ped); ms.bodies = (rd.tier) + ((rng() * 2) | 0); ms.contrib = rd.tier * 120 * rng(); ms.served = 30 + rng() * 120;
-          tagWithRank(ped, gang.color);   // "<Name> · Lt." etc.
-          A.root.add(ped.group);
-          CBZ.cityPeds.push(ped);
-          gang.members.push(ped);
+          spawnGangMember(gang, lot, rk);
         }
       }
+      // ---- FINITE + WIPEABLE roster model (owner's vision): the bodies we just
+      //      fielded are this crew's natural STRENGTH CEILING (rosterCap). A small
+      //      finite RESERVE (recruitPool) is the ONLY extra bodies it can EVER put
+      //      on the street — slow trickle-back so a held block feels alive, but the
+      //      total is bounded, so a determined push out-kills the recruiting and
+      //      when recruitPool hits 0 the crew can NEVER grow again. Drain the pool
+      //      AND clear the street and the gang is permanently WIPED. The recruit
+      //      cadence rides a little faster for land-hungry (expandW) archetypes.
+      gang.rosterCap = gang.members.length;
+      gang.recruitPool = Math.round(gang.rosterCap * 0.6);
+      gang.recruitInterval = 25 / (gang.expandW || 1);
+      gang.recruitT = gang.recruitInterval;
+      gang.lastDownT = 0;   // counts up since the player last dropped one of theirs
       CBZ.cityGangs.push(gang);
     }
   };
@@ -1019,6 +1035,9 @@
     const gang = gangById(ped.gang); if (!gang) return;
     const byPlayer = !imp || imp.byPlayer !== false;
     gang.provoke = Math.min(1, gang.provoke + (byPlayer ? 0.5 : 0.25));
+    // RECENT-DEATH timer: while the player is actively massacring this crew, the
+    // recruit tick stays shut off — a sustained push out-kills the trickle-back.
+    if (byPlayer) gang.lastDownT = 6;
     const wasBoss = (ped.isBoss || ped.rank === "boss" || ped === gang.boss);
     // losing a brother shakes the surviving crew — a real morale/loyalty hit,
     // sharper if it was the boss. This is what makes a hammered gang fracture.
@@ -1508,6 +1527,30 @@
   // expose a lookup so the player-gang hub can find a rival by id/record
   CBZ.cityGangById = gangById;
 
+  // ---- OP POSTS (gangops.js C8): read-only corner/post spots derived from a
+  //      crew's HELD LOTS, so the ops director (dealer corners, patrol anchors)
+  //      can post members on believable sidewalk spots without re-deriving lot
+  //      geometry itself. Each lot contributes its four corners pulled a touch
+  //      inward (so a "corner dealer" stands on the kerb, not in a facade) +
+  //      the lot centre. Clamped to walkable city ground. Additive — touches no
+  //      turf/war/raid/payday state; gangops.js falls back to its own derivation
+  //      if this isn't present (older gangs.js). ----
+  CBZ.cityGangOpSpots = function (gangId) {
+    const gang = gangById(gangId); if (!gang || !gang.turf || !gang.turf.length) return [];
+    const A = CBZ.city && CBZ.city.arena;
+    const out = [];
+    for (const lot of gang.turf) {
+      const hw = (lot.w || 16) / 2 - 1.5, hd = (lot.d || 16) / 2 - 1.5;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const p = { x: lot.cx + sx * hw, z: lot.cz + sz * hd };
+        if (A && A.clampToCity) A.clampToCity(p, 1.5);
+        out.push(p);
+      }
+      out.push({ x: lot.cx, z: lot.cz });
+    }
+    return out;
+  };
+
   // ---- GANG HQ: the home block a crew anchors on. The live boss IS the HQ
   //      while he stands; if he's down it falls back to the seeded home lot,
   //      then the crew's shifting centre, then the first held lot. ----
@@ -1585,6 +1628,9 @@
     }
     // drop any HIT/HQ waypoint we dropped on the full map so it doesn't bleed runs.
     if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
+    // clear the gang-OPS scratch (dealers/buyers/extorters + the cash carrot) while
+    // the records still exist — gangops.js owns it (optional: it may not be loaded).
+    if (CBZ.cityGangOpsReset) CBZ.cityGangOpsReset();
     CBZ.cityGangs.length = 0; warT = 0; incomeT = 0; reprisalT = 0; driveT = 0; shapeT = 0;
     if (CBZ.cityVendettaReset) CBZ.cityVendettaReset();   // no stale snitch runs / loyalty feuds
     if (CBZ.cityTurfReset) CBZ.cityTurfReset();   // clear the zone/alliance meta for a fresh run
@@ -1633,6 +1679,36 @@
       if (gang.warIntensity > 0) gang.warIntensity = Math.max(0, gang.warIntensity - dt * 0.02 * coolMul);
       if (gang.lostTurfT > 0) gang.lostTurfT -= dt;
       if (gang.strikeT > 0) gang.strikeT -= dt;
+      if (gang.lastDownT > 0) gang.lastDownT -= dt;
+
+      // ---- SLOW, OUT-PACEABLE RECRUIT TICK (owner's vision: gangs trickle bodies
+      //      back so a held block feels alive, but you can kill them off FASTER
+      //      than they recruit, and a finite recruitPool means a determined push
+      //      WIPES them for good). Fires ONE body, and only when the crew is calm,
+      //      thinned, still has reserve, and the player isn't mid-massacre. ----
+      if (gang.recruitT > 0) gang.recruitT -= dt;
+      if (gang.recruitT <= 0) {
+        gang.recruitT = gang.recruitInterval || 25;
+        const canRecruit =
+          !gang.isPlayer && !gang.absorbed &&
+          gang.turf.length > 0 &&                       // wiped-off-the-map crews stay gone
+          (gang.recruitPool || 0) > 0 &&                // FINITE reserve — empties → never grows again
+          gangStrength(gang) < (gang.rosterCap || 0) && // only backfill toward the natural ceiling
+          gang.warRemain <= 0 &&                         // not at war on this block — don't reinforce mid-fight
+          (gang.provoke || 0) < 0.25 &&                  // not under active attack
+          (gang.lastDownT || 0) <= 0;                    // player not actively massacring the crew
+        if (canRecruit) {
+          // post the new body on the HQ block if held, else any held lot. Low rank
+          // — a fresh recruit starts at the bottom and climbs on merit like any spawn.
+          const hqLot = gang.hq && gang.hq.lot && gang.turf.indexOf(gang.hq.lot) >= 0 ? gang.hq.lot : gang.turf[0];
+          const rk = rng() < 0.6 ? "runner" : (rng() < 0.5 ? "lookout" : "soldier");
+          const ped = spawnGangMember(gang, hqLot, rk);
+          if (ped) {
+            gang.recruitPool--;
+            memStats(ped).joined = "recruit";
+          }
+        }
+      }
       if (gang.warRemain > 0) {
         gang.warRemain -= dt;
         // war's over → the AFTERMATH plays out: regroup, the hurt kneel, one

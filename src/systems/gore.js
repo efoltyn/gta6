@@ -284,11 +284,35 @@
     });
   }
 
+  // is this collider's struck face SEE-THROUGH (intact glass pane / door vision
+  // glass / water) rather than an opaque wall? The showroom-solid glass panes
+  // push a collider whose .ref is the pane mesh on the shared transparent
+  // glassMat — a blood plane on those would float on visible-through glass. A
+  // genuine wall box is opaque. Cheap: one material flag read, no allocation.
+  function isSeeThroughCol(c) {
+    const r = c && c.ref;
+    const mat = r && r.material;
+    return !!(mat && mat.transparent && (mat.opacity == null || mat.opacity < 0.95));
+  }
+
   // stamp a vertical blood decal on a wall/surface that sits just behind the
   // victim along the impact direction (dir points AWAY from shooter). Cheap:
   // a single AABB scan of CBZ.colliders, no raycaster, capped + distance-gated.
   // `instant` (headshot): the decal arrives pre-grown — the brain hits the wall
   // the same frame as the shot, it doesn't bloom politely afterwards.
+  //
+  // OWNER-FILMED FIX (floating splats): a raw nearest-face scan stamped blood on
+  // ANYTHING — see-through glass curtain-walls, shot-open window holes, and tiny
+  // hydrant/pole/sign colliders — so the red plane hung in mid-air on nothing
+  // solid. A wall splat now requires a REAL, close, OPAQUE, WALL-SIZED solid
+  // face: glass faces are skipped, an open/shattered window (cityShotHole) is
+  // skipped (the bullet flew through a hole — keep scanning for a wall behind
+  // it), and the struck face must span a true wall (>= MIN_FACE wide, tall
+  // enough, with the splat seat inside the solid height band). No qualifying
+  // opaque wall → NO splat (the wound decal + ground pool still convey the hit;
+  // a missing splat beats a floating one).
+  const MIN_FACE = 1.2;   // min in-plane horizontal face span for a "wall" (rejects hydrant/pole/meter/sign)
+  const MIN_WALL_H = 1.0; // min height of a height-gated band to count as wall (rejects low curbs/ledges)
   function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
     const cols = CBZ.colliders;
     if (!cols || !cols.length || walls.length > 48) return;
@@ -296,7 +320,13 @@
     let best = null, bestT = MAXD;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i]; if (!c || c.minX == null) continue;
-      if (c.y1 != null && (y < c.y0 - 0.3 || y > c.y1 + 0.3)) continue; // height-gated wall out of band
+      // height-gated band: require the splat seat to land INSIDE the solid band
+      // (tight slack), not in open air above/below a window band.
+      if (c.y1 != null) {
+        if (y < c.y0 - 0.1 || y > c.y1 + 0.1) continue;     // splat would sit outside the solid band
+        if (c.y1 - c.y0 < MIN_WALL_H) continue;             // too short a band to be a wall (curb/ledge/sill)
+      }
+      if (isSeeThroughCol(c)) continue;                      // intact glass pane / door vision — never a splat
       // ray (x,z)+t*(dx,dz) vs AABB slab — find nearest forward face hit
       let t0 = 0, t1 = bestT, face = null;
       if (Math.abs(dx) > 1e-4) {
@@ -309,7 +339,21 @@
         if (ta > tb) { const s = ta; ta = tb; tb = s; fa = fa === "zmin" ? "zmax" : "zmin"; }
         if (ta > t0) { t0 = ta; face = fa; } t1 = Math.min(t1, tb);
       } else if (z < c.minZ || z > c.maxZ) { continue; }
-      if (face && t0 >= 0 && t0 <= t1 && t0 < bestT) { bestT = t0; best = { c, t: t0, face }; }
+      if (!(face && t0 >= 0 && t0 <= t1 && t0 < bestT)) continue;
+      // WALL-SIZED face: the struck face spans the axis PERPENDICULAR to its
+      // normal. A blood plane needs a real wall behind it, so require that span
+      // (and enough height) — a thin hydrant/pole/meter/sign box never passes.
+      const faceX = face === "xmin" || face === "xmax";
+      const span = faceX ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
+      if (span < MIN_FACE) continue;                         // thin prop, not a wall
+      if (c.y1 != null && c.y1 - y < 0.45) continue;         // face too short above the splat seat
+      // OPEN / SHATTERED WINDOW: the bullet flew through a hole — there is no
+      // surface to splat. Skip and keep scanning for a real wall behind it.
+      const hx = x + dx * t0, hz = z + dz * t0;
+      const nx = face === "xmin" ? -1 : face === "xmax" ? 1 : 0;
+      const nz = face === "zmin" ? -1 : face === "zmax" ? 1 : 0;
+      if (CBZ.cityShotHole && CBZ.cityShotHole(hx, y, hz, nx, nz)) continue;
+      bestT = t0; best = { c, t: t0, face };
     }
     if (!best) return;
     const hx = x + dx * best.t, hz = z + dz * best.t;

@@ -24,8 +24,8 @@
    (flashThenFade). De-fluffed: crew chip is a labeled count only (respect/
    bank live on the phone + leaderboard), no always-on DRIP line (the
    boutique/rope owns it), no population bar under the count, no melee
-   caption under the lit chip, no "(40%)" text beside the objective's own
-   fill bar, no ✨/• chip decorations, no star suffix on dispatch calls.
+   caption under the lit chip, no default prospect checklist, no ✨/• chip
+   decorations, no star suffix on dispatch calls.
 ============================================================ */
 (function () {
   "use strict";
@@ -34,7 +34,7 @@
 
   let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl;
   let slotsEl, ammoLineEl, lootEl;   // weapon hotbar (slots + ammo) + carried-loot row
-  let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // gang-join objective line
+  let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // retired prospect objective shell
   let popEl, killEl;
   // wave-5 depth surfaces (all contextual — hidden unless currently relevant)
   let turfPayEl;            // tiny "+$x/min" tag under the money readout
@@ -206,7 +206,7 @@
       // YOUR street read (level.js): the same LEVEL N the city floats over
       // everyone else's head, derived live from worth/heat/crew/bodies.
       "  <div id='cLvl' class='oC' style='font-size:14px;font-weight:800;color:var(--hud-ink);letter-spacing:1px;margin-top:2px;text-shadow:0 1px 3px rgba(0,0,0,.6)'></div>" +
-      "  <div id='cWorld' class='oC' style='font-size:12px;color:var(--hud-dim);margin-top:2px'></div>" +
+      "  <div id='cWorld' class='oC' style='font-size:12px;color:var(--hud-dim);margin-top:2px;display:none'></div>" +
       "  <div id='cKill' class='oM' style='margin-top:7px;display:none'></div>" +
       "</div>" +
       // VITALS — RDR2-style compact cluster: three slim labeled bars stacked just
@@ -229,9 +229,8 @@
       "</div>" +
       "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span><span style='font-size:12px;color:var(--hud-dim)'> mph</span></div>" +
       "<div id='cJob' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
-      // OBJECTIVE line — the active gang-join task when no city job is running. A
-      // one-tap [ROUTE] affordance (pointer-events:auto) drops an HQ waypoint, and a
-      // thin prospect-standing fill mirrors renderMemb/renderRel styling.
+      // Retired prospect objective shell. Kept hidden so older references stay
+      // harmless, but default story/prospect checklist text no longer reaches HUD.
       "<div id='cObj' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:62%;padding:5px 14px;display:none'>" +
       "  <span id='cObjTxt'></span> <span id='cObjRoute' style='pointer-events:auto;cursor:pointer;color:var(--hud-accent);font-weight:700;margin-left:6px'>↳ ROUTE</span>" +
       "  <div id='cObjSlot' style='height:3px;border-radius:2px;background:var(--hud-line);overflow:hidden;margin-top:5px'><i id='cObjFill' style='display:block;height:100%;width:0%;background:var(--hud-accent);transition:width .4s ease'></i></div>" +
@@ -851,33 +850,10 @@
     if (gang && CBZ.fullMap.setGangWaypoint) { CBZ.fullMap.setGangWaypoint(gang.id); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
   }
 
-  // OBJECTIVE LINE — only when no city job is active. Shows the prospect's active
-  // task with a % from cityProspectStanding(), a [ROUTE] affordance, and a thin
-  // standing fill. Fully guarded so it cleanly hides when not prospecting.
+  // Retired objective line. The old prospect checklist read like a half-built
+  // storyline relic on the main screen; keep the shell hidden for compatibility.
   function renderObjective() {
-    if (!objEl) return;
-    let task = null;
-    try { if (CBZ.cityProspectTask) task = CBZ.cityProspectTask(); } catch (e) { task = null; }
-    if (!task) { objEl.style.display = "none"; return; }
-    let standing = 0;
-    try { if (CBZ.cityProspectStanding) standing = CBZ.cityProspectStanding(); } catch (e) { standing = 0; }
-    const pct = Math.round(Math.max(0, Math.min(1, standing)) * 100);
-    // the fill bar below carries the % — printing "(40%)" beside a 40% bar said
-    // the same thing twice (F3)
-    if (objTxtEl) objTxtEl.innerHTML = "🎯 " + esc(task.label);
-    // [ROUTE] only makes sense when there's a place to go (a live target, or a
-    // resolvable HQ); otherwise hide it so the line doesn't dangle a dead button.
-    if (objRouteEl) {
-      const canRoute = (task.target && !task.target.dead) || !!prospectGang();
-      objRouteEl.style.display = canRoute ? "inline" : "none";
-    }
-    // standing fill — reuse the membership/relationship sliver styling. Only while
-    // there's actual standing to show (>0), per the spec.
-    if (objSlotEl && objFillEl) {
-      if (standing > 0) { objSlotEl.style.display = "block"; objFillEl.style.width = pct + "%"; }
-      else objSlotEl.style.display = "none";
-    }
-    objEl.style.display = "block";
+    if (objEl) objEl.style.display = "none";
   }
 
   // ---- WEAPON HOTBAR — bring the city loadout up to jail's clarity, reading the
@@ -1196,7 +1172,7 @@
     // from the wanted meter read as heat.
     const crew = g.cityCrew || 0;
     crewEl.textContent = crew ? "crew " + crew : "";
-    if (worldEl) worldEl.textContent = CBZ.cityWorldSummary ? CBZ.cityWorldSummary() : "";
+    if (worldEl) { worldEl.textContent = ""; worldEl.style.display = "none"; }
     // WEAPON HOTBAR + carried loot — reads the engine's authoritative weapon state
     // (CBZ.weaponInventory / currentWeaponId / CBZ.fps ammo) so the city loadout is
     // as clear as jail's: every gun you own as a slot, the held one lit, live ammo.
@@ -1215,7 +1191,7 @@
       if (objEl) objEl.style.display = "none";   // a real job pre-empts the gang-join objective
     } else {
       jobEl.style.display = "none";
-      renderObjective();   // surface the active gang-join task instead
+      renderObjective();
     }
     dirty = false;
   }

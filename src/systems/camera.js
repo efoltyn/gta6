@@ -12,6 +12,43 @@
   const { camera, canvas, player } = CBZ;
   const SENS = CBZ.TUNE.sens;
 
+  // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — BROKEN-LINK FIX ----
+  // The armed over-shoulder + ADS tier the city third-person path consumes lives
+  // in CBZ.CITY_TP. That object was authored in src/city/camera.js — but that file
+  // is NOT loaded by index.html (only this systems/camera.js is), so CBZ.CITY_TP
+  // came up UNDEFINED at runtime: the whole `TP` path below fell through to the
+  // generic wide/high chase, the armed shoulder cam never engaged, and holding RMB
+  // (ADS) did NOTHING in third person (the filmed bug). We define it HERE — in the
+  // file that actually loads and reads it — so the tier always engages. If
+  // src/city/camera.js IS ever added to index.html it simply re-assigns this object
+  // with identical values (no conflict). Values match the Fortnite reference:
+  // default armed = behind-shoulder at chest height (char LARGE, world ahead); RMB
+  // = punch TIGHT over the right shoulder with a real lens zoom, gun raised/centred.
+  if (!CBZ.CITY_TP) CBZ.CITY_TP = {
+    HEIGHT: 1.42,      // relaxed (un-armed) rig pivot height — shoulder height, not overhead
+    DIST: 4.3,         // relaxed behind-the-back distance; scroll wheel scales around this
+    SIDE: 0.7,         // relaxed lateral offset to the player's RIGHT (char left-of-centre)
+    PITCH: 0.06,       // default orbit pitch on city entry — near-level, horizon high
+    LOOK_Y: 1.45,      // relaxed look-target height above feet (chest/shoulder aim point)
+    LEAD: 4.6,         // relaxed forward look-ahead
+    DAMP_POS: 0.16,    // relaxed position SmoothDamp time (lazy settle)
+    DAMP_YAW: 9.0,     // relaxed yaw chase rate
+    DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
+    FOV: 57,           // relaxed base FOV
+    // ARMED / ADS over-shoulder tier (read every frame via the `shoulder` boolean).
+    // The *_AIM getters re-evaluate CBZ.isADS() each frame so holding RMB punches
+    // the cam IN + FURTHER over the shoulder + narrows the lens — a real ADS read.
+    DIST_AIM_BASE: 3.3, DIST_AIM_ADS: 1.45,   // resting over-shoulder → punched in TIGHT on RMB
+    SIDE_AIM_BASE: 0.9, SIDE_AIM_ADS: 1.25,   // over-shoulder offset → further over the shoulder on RMB (char hard-left)
+    FOV_AIM_BASE: 58,   FOV_AIM_ADS: 42,      // armed FOV → narrower (real zoom) on RMB
+    HEIGHT_AIM_BASE: 1.50, HEIGHT_AIM_ADS: 1.46,  // armed rig-pivot height (chest/shoulder, never overhead)
+    PITCH_LOOK: 1.0,   // how strongly the armed look target follows player pitch (FIX 1: aim vertically + stable framing)
+    get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
+    get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
+    get FOV_AIM()  { return (CBZ.isADS && CBZ.isADS()) ? this.FOV_AIM_ADS  : this.FOV_AIM_BASE; },
+    get HEIGHT_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.HEIGHT_AIM_ADS : this.HEIGHT_AIM_BASE; },
+  };
+
   // ---- zoom (scroll wheel / pinch). default sits wide; clamps in [MIN,MAX] ----
   const ZMIN = 5.2, ZMAX = 16, DEF = CBZ.TUNE.camDist;
   let camDist = DEF;        // smoothed actual distance
@@ -115,6 +152,8 @@
   // lazy-follow yaw for the city RDR2 cam — trails cam.yaw with exp smoothing
   // (input itself is untouched; only the rig's framing lags)
   let smYaw = 0, smYawOn = false;
+  // one-shot: settle the orbit pitch to the CITY_TP near-level default on city entry
+  let _cityPitchInit = false;
 
   // cinematic spawn intro: far reveal -> push in -> 180 orbit handoff
   let introT = 0;
@@ -293,9 +332,17 @@
     // driving a car in the city → a wider, higher GTA-style chase (yaw is
     // auto-steered behind the car by city/vehicles.js).
     const driving = CBZ.game.mode === "city" && !!player.driving;
-    // CITY ON-FOOT (RDR2 feel): all tunables live at the top of city/camera.js
-    // (CBZ.CITY_TP) — lower, closer, over-the-right-shoulder, lazy follow.
+    // CITY ON-FOOT (Fortnite over-shoulder feel): tunables in CBZ.CITY_TP (defined
+    // at the top of this file) — lower, closer, over-the-right-shoulder, lazy follow.
     const TP = (CBZ.game.mode === "city" && !driving && CBZ.CITY_TP) ? CBZ.CITY_TP : null;
+    // On city ENTRY, settle the orbit pitch to the near-level CITY_TP default
+    // (horizon high, not a top-down look-down). Done ONCE per entry so the
+    // player's own pitch input is never fought. city/camera.js used to own this
+    // hook, but it isn't loaded — so this is the broken-link replacement: without
+    // it the city started at DEFAULT_PITCH 0.46 (the filmed "too high" tilt).
+    if (TP) {
+      if (!_cityPitchInit) { cam.pitch = TP.PITCH; _cityPitchInit = true; }
+    } else _cityPitchInit = false;
 
     // ease the zoom distance toward its target. Normal third person is
     // a wider chase camera; armed third person becomes readable over-shoulder.
@@ -310,7 +357,7 @@
     // sprinting lifts it a touch more instead of letting it sag low.
     const surv = CBZ.game.mode === "survival";
     const sprinting = surv && !!player.sprint;
-    const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? TP.HEIGHT + 0.1 : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82)))));
+    const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? (TP.HEIGHT_AIM != null ? TP.HEIGHT_AIM : TP.HEIGHT + 0.1) : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82)))));
     height = smoothDamp(height, baseHeight, heightV, 0.18, fdt);
     const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
     // city: the rig yaw lazily chases the input yaw (frame-rate independent),
@@ -369,7 +416,14 @@
       // usable third-person distance there — accept a touch of wall clip over a
       // collapsed camera. The open prison/island rarely trigger this, so they
       // keep their tight 0.28 pull-in.
-      const minCam = (CBZ.game.mode === "city" && !player.driving) ? 2.4 : 0.28;
+      // City floor keeps the third-person cam usable in the dense grid (a tighter
+      // floor slammed it to your back every step). But the armed over-shoulder /
+      // ADS tier WANTS to ride in tight (DIST_AIM ~1.45 on RMB) — with the 2.4
+      // floor the Fortnite ADS punch-in could never land near a wall. So while
+      // armed in the city we relax the floor toward the spring-arm minimum so the
+      // tight ADS frame actually happens; the side-offset keeps the character in
+      // shot, not buried in the lens.
+      const minCam = (CBZ.game.mode === "city" && !player.driving) ? (shoulder ? 1.1 : 2.4) : 0.28;
       const d = Math.max(minCam, occ - 0.16);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
     }
@@ -386,9 +440,20 @@
     // the aim tracks the mouse 1:1; off (or non-TP) yawView===yaw → identical.
     const rightVX = Math.cos(yawView), rightVZ = -Math.sin(yawView);
     const fwdVX = -Math.sin(yawView), fwdVZ = -Math.cos(yawView);
-    const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLead;
-    const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLead;
-    const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))));
+    // ARMED-3PS PITCH FOLLOW (FIX 1 root cause): the over-shoulder look target now
+    // tracks the player's pitch so the camera AIMS where you point and the framing
+    // stays a stable behind-the-shoulder shot. The camera position already orbits
+    // up/down with sin(pitch)*camDist; pulling the look point up by the SAME
+    // sin(pitch)·aimLead (and shortening the horizontal lead by cos(pitch)) makes
+    // the view pitch with the mouse instead of ballooning the cam up into a
+    // top-down stare. Only the armed city tier opts in (pf>0); the relaxed TP
+    // chase, driving, melee and jail/survival paths are byte-identical (pf=0).
+    const pitchFollow = (TP && shoulder) ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) : 0;
+    const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
+    const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
+    const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
+    const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))
+      + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
     if (introT > 0) {

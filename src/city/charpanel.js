@@ -257,6 +257,70 @@
   }
 
   // ============================================================
+  //  DRESS THE PORTRAIT IN THE PLAYER'S ACTUAL WORN CLOTHING.
+  //
+  //  THE BUG: the portrait dressed only via cityApplyComposite(g.cityFit) —
+  //  but g.cityFit is just the COMPOSITE BASE (a shirt color + jean legs + a
+  //  list of owned blazer/tie/shirt visualIds). When the player wears a
+  //  CATALOG fit — the tuxedo, a police/EMS/SWAT uniform, gang colors, a
+  //  business suit, a hoodie/tracksuit, designer drip — that fit lives in
+  //  g.cityWornOutfit and OVERRIDES the composite while worn (outfits.js
+  //  applyPlayer → recolorRig(ch, w.colors, w)). The composite is empty/plain
+  //  for everyone in a catalog fit, so the portrait body read BARE while the
+  //  jewellery (mounted off the OWNED set, a separate axis) still showed.
+  //
+  //  FIX: dress the portrait off the SAME source of truth and the SAME paint
+  //  path the live player rig uses. CBZ.cityOutfitGet() is the worn RECORD;
+  //  CBZ.cityRecolorRig(rig, rec.colors, rec) is exactly what applyPlayer
+  //  calls — it routes composites → cityApplyComposite, painted catalog fits
+  //  (tux/cop) → cityApplyClothes, flat fits → flat tint, AND mounts/clears
+  //  the gang bandana. We then replay applyPlayer's player-only kit (hide jail
+  //  stripes, paint the belt, show the cop cap/badge, hide the hair under a
+  //  cap) so a uniform/tux portrait reads identically to the in-world body.
+  //  No parallel wardrobe — we call the engine's own dress functions.
+  // ============================================================
+  function dressPortrait(rig) {
+    if (!rig || !rig.skinSlots) return;
+    // use the EFFECTIVE worn record (mirrors applyPlayer's PLAIN_BASE->composite
+    // substitution) so a default player's portrait matches the live body's white-tee
+    // composite, not the raw grey 'street' base. Falls back to the raw worn record.
+    const w = ((CBZ.cityOutfitGetEffective && CBZ.cityOutfitGetEffective()) ||
+               (CBZ.cityOutfitGet && CBZ.cityOutfitGet())) || null;
+    if (w && w.colors && CBZ.cityRecolorRig) {
+      // the worn record — catalog fit OR the player's composite, whichever is
+      // active — painted through the player's exact recolor path.
+      CBZ.cityRecolorRig(rig, w.colors, w);
+    } else {
+      // fallback: the raw composite (engine primitives mid-load / no record yet)
+      const f = g.cityFit;
+      if (CBZ.cityApplyComposite && f && typeof f === "object") {
+        CBZ.cityApplyComposite(rig, { shirt: f.shirt, legs: f.legs, items: Array.isArray(f.items) ? f.items.slice() : [] });
+      }
+    }
+    // replay applyPlayer's player-only kit so cop/tux/uniform portraits match
+    const s = rig.skinSlots;
+    const setP = function (list, color, vis) {
+      if (!list) return;
+      for (let i = 0; i < list.length; i++) {
+        const m = list[i];
+        if (!m) continue;
+        if (color != null && m.material && m.material.color && m.material.color.setHex) {
+          if (m.material._shared) m.material = m.material.clone();
+          m.material.color.setHex(color);
+        }
+        if (vis != null) m.visible = vis;
+      }
+    };
+    const cop = !!(w && w.cop);
+    const beltHex = (w && w.colors && w.colors.belt != null) ? w.colors.belt : 0x17191f;
+    setP(s.stripes, null, false);          // no city fit has jail stripes
+    setP(s.belt, beltHex, true);
+    setP(s.badge, null, cop);              // the badge rides the uniform
+    setP(s.cap, null, cop);
+    setP(s.hair, null, !cop);
+  }
+
+  // ============================================================
   //  THE OFFSCREEN PORTRAIT — a dedicated rig + scene + renderer.
   //  Built once, lazily, and only in the city. Redraws ONLY when the
   //  panel is visible AND the look/level signature changed.
@@ -298,24 +362,37 @@
     } catch (e) { PORT.broken = true; return false; }
   }
 
-  // current look/level signature — cheap string; an unchanged look = no redraw
+  // current look/level signature — cheap string; an unchanged look = no redraw.
+  // The WORN look is NOT just g.cityFit (the composite base): a CATALOG fit
+  // (tuxedo / police uniform / gang colors / a business suit) lives in
+  // g.cityWornOutfit and overrides the composite while worn — so the signature
+  // MUST key off the worn RECORD (id + its cloth colors), or putting a tuxedo on
+  // (which leaves g.cityFit untouched) would never trigger a portrait redraw.
   function lookSig() {
     const f = g.cityFit || {};
     const items = Array.isArray(f.items) ? f.items.join(",") : "";
     const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 0;
     // worn jewellery influences the read too (informational on the portrait)
     const j = (blingWornIn("neck") || "") + "|" + (blingWornIn("wristL") || "") + "|" + (blingWornIn("ring") || "");
-    return (f.shirt || 0) + ":" + (f.legs || 0) + ":" + items + ":" + lvl + ":" + j;
+    // the WORN catalog/composite record — what's actually painted onto the body
+    const w = (CBZ.cityOutfitGet && CBZ.cityOutfitGet()) || null;
+    let ws = "";
+    if (w) {
+      const c = w.colors || {};
+      const ci = w.composite && Array.isArray(w.composite.items) ? w.composite.items.join(",") : "";
+      ws = (w.id || "") + "/" + (c.torso || 0) + "/" + (c.legs || 0) + "/" + (c.collar || 0) +
+           "/" + (c.arms || 0) + "/" + (c.shoes || 0) + "/" + (c.gloss ? 1 : 0) + "/" + (w.gang || "") +
+           "/" + (w.cop ? 1 : 0) + "/" + ci;
+    }
+    return (f.shirt || 0) + ":" + (f.legs || 0) + ":" + items + ":" + lvl + ":" + j + ":" + ws;
   }
 
   // dress the portrait rig exactly like the player and render one frame
   function drawPortrait(canvas, px) {
     if (!buildPortrait() || !canvas) return;
-    const f = g.cityFit;
-    // dress via the EXISTING composite pipeline (idempotent re-dress)
-    if (CBZ.cityApplyComposite && f && typeof f === "object") {
-      CBZ.cityApplyComposite(PORT.rig, { shirt: f.shirt, legs: f.legs, items: Array.isArray(f.items) ? f.items.slice() : [] });
-    }
+    // dress the rig in the player's ACTUAL worn clothing (catalog fit OR the
+    // composite — whichever is active), via the player's own paint path.
+    dressPortrait(PORT.rig);
     // mount the player's WORN jewellery (chains/watch/ring) onto the same rig —
     // re-seated only when the worn set changed (gated by lookSig's jewel field)
     applyPortraitJewelry(PORT.rig);
@@ -582,10 +659,8 @@
   // big portrait reuses the SAME offscreen rig, framed full-body
   function drawBigPortrait() {
     if (!buildPortrait() || !invBigCanvas) return;
-    const f = g.cityFit;
-    if (CBZ.cityApplyComposite && f && typeof f === "object") {
-      CBZ.cityApplyComposite(PORT.rig, { shirt: f.shirt, legs: f.legs, items: Array.isArray(f.items) ? f.items.slice() : [] });
-    }
+    // dress in the player's actual worn clothing (catalog fit OR composite)
+    dressPortrait(PORT.rig);
     applyPortraitJewelry(PORT.rig);                // worn chains/watch/ring on the big model too
     PORT.rig.group.rotation.y = -0.3;
     PORT.cam.position.set(0, 2.0, 7.4);
@@ -679,6 +754,14 @@
       if (k !== "o") return;
     }
     if (k === "i") {
+      // CONTEXT PRIORITY: if a world interaction is currently offered on the
+      // "i" slot (aiming at / next to a ped/corpse/vendor/stash with an "i"
+      // action — take-clothes, mug, rob-stash, surrender…), [I] runs THAT and
+      // does NOT open the inventory. We let the event fall through untouched so
+      // interactions.js's own keydown handler fires it. Only when no "i"
+      // interaction is live does [I] open the inventory. Exactly one action per
+      // press, no double-fire.
+      if (CBZ.cityInteractHasSlot && CBZ.cityInteractHasSlot("i")) return;
       e.preventDefault();
       if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       e.stopPropagation();

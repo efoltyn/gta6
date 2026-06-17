@@ -340,6 +340,21 @@
       const j = Math.max(0, Math.min(N - 1, ((z - zLines[0]) / step) | 0));
       return DISTRICTS[districtQ(i, j)] || null;
     }
+    // OFFICE-TOWER POLICY (consumed by city/buildings.js): which TALL towers read
+    // as workplaces instead of homes. WHY: downtown/midtown should be glass office
+    // stacks full of seated workers (witnesses + payroll), not just apartments —
+    // the skyline tells you where the 9-to-5 money is. Deterministic (NO rng draw,
+    // so the world build stays byte-identical): only the busy commercial cores
+    // (core = Midtown, commercial = Eastgate/Westend/Harborside) qualify, and a
+    // stable ~half of THOSE lots flip — a lot-index parity hash — so a believable
+    // MIX of offices and flats lines each downtown block rather than all-or-none.
+    // buildings.js further gates on storeys>=3 and never overrides a listed home.
+    function officeLot(lot) {
+      if (!lot) return false;
+      const D = DISTRICTS[lot.district];
+      if (!D || (D.kind !== "core" && D.kind !== "commercial")) return false;
+      return (((lot.i | 0) * 3 + (lot.j | 0)) & 1) === 0;   // stable subset (~half)
+    }
     // cumulative lot weights, built once per key (no rng draws → world build
     // is byte-identical to before; only the CALLERS' picks redistribute).
     function lotCum(key) {
@@ -430,6 +445,8 @@
       lotAt, randomSidewalkPoint, randomRoadPoint, nearestIntersection, clampToCity,
       // district personality field (peds/crowd density, casting, cop beats)
       districts: DISTRICTS, districtAt, weightedSidewalkPoint, copBeatPoint,
+      // which tall towers are OFFICES (workplaces) vs homes — buildings.js reads it
+      officeLot,
       // a clear spawn: the central intersection sidewalk corner
       spawn: { x: cx + ROAD / 2 + 2, z: cz + ROAD / 2 + 2 },
       transients: [],

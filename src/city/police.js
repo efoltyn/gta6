@@ -47,6 +47,43 @@
   const carSuspects = [];     // fleeing cars the police are after
   const pursuers = [];        // traffic cars drafted into PIT pursuit of the player car
 
+  // ============================================================
+  //  FINITE POLICE FORCE (mirrors the peds.js finite-headcount model).
+  //  The city EMPLOYS a bounded roster of officers. Dispatch/spawn can only
+  //  field officers it still has; every cop the player KILLS permanently
+  //  depletes the force for the run. The academy replenishes it SLOWLY (one
+  //  graduate every REPLENISH_INT seconds, only when the heat is low), at a
+  //  rate a determined player can OUTPACE — so a sustained massacre genuinely
+  //  THINS or temporarily WIPES the police (the streets go quiet, even at 5★,
+  //  with no one left to answer) rather than facing infinite waves. Killing a
+  //  cop does NOT touch the civilian headcount — police are a separate pool.
+  //  CITY-only state; reset on every fresh city run via cityPoliceForceReset().
+  // ============================================================
+  // total officers the city can field this run (its full roster, killable to 0).
+  function POLICE_FORCE_MAX() {
+    const v = CBZ.CITY && CBZ.CITY.policeForce;
+    return (typeof v === "number" && v > 0) ? v : 40;
+  }
+  let forcePool = POLICE_FORCE_MAX();   // officers still available to deploy
+  let replenishT = 0;                   // academy trickle timer
+  const REPLENISH_INT = 26;             // seconds between academy graduates (slow; player out-kills this)
+  // how many of cityCops are STILL the force's officers (alive + on duty). Posted
+  // roadblock cops count — they came from the same roster — and so do dead ones
+  // that haven't culled yet are EXCLUDED (their slot is already returned/depleted).
+  function deployedCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && c.kind === "cop") n++; return n; }
+  // reset the roster for a fresh city run (called from clearCityCops + spawn).
+  function cityPoliceForceReset() { forcePool = POLICE_FORCE_MAX(); replenishT = 0; }
+  CBZ.cityPoliceForceReset = cityPoliceForceReset;
+  // {alive,deployed,max} for the HUD / map: alive = officers still on the books
+  // (the pool you can still field + the ones currently deployed). Falls only as
+  // cops are killed; crawls back via the academy trickle.
+  CBZ.cityPoliceForce = function () {
+    const deployed = deployedCops();
+    return { reserve: forcePool, deployed, alive: forcePool + deployed, max: POLICE_FORCE_MAX() };
+  };
+  // expose for empire.js RAID / debug: did the player wipe the force?
+  CBZ.cityPoliceWiped = function () { return forcePool <= 0 && deployedCops() <= 0; };
+
   // ---- line-of-sight: do buildings block this cop's view? (GTA cops lose you
   //      behind cover and switch to SEARCH). One shared ray, throttled per-cop. --
   const _ray = new THREE.Raycaster();
@@ -80,6 +117,7 @@
   let barkCD = 0;              // ONE global small-talk cooldown → barks stay rare, never spam
   let dutyScanT = 0, dutyIdx = 0, dutyCop = null;          // single move-along assignment
   let dispatchHoldT = 0, lastStars = 0, lastWant = 0;   // radio-beat state
+  let convictHailed = false;   // one-shot "escaped convict" all-points bulletin per run
 
   // beat small-talk — strictly diegetic procedure/street flavor, only worth
   // SAYING when the player is close enough to overhear it.
@@ -537,10 +575,17 @@
 
   function spawnCop(swat, ambient) {
     const A = CBZ.city.arena; if (!A) return;
+    // FINITE FORCE: dispatch can only field an officer the city still has on its
+    // books. When the reserve is exhausted (player wiped the force), no patrol or
+    // response unit rolls — the streets stay quiet even at 5★ until the academy
+    // slowly graduates replacements (see the replenish tick in maintain()).
+    if (forcePool <= 0) return null;
     const P = CBZ.player;
     let x, z, tries = 0;
     do { const p = A.randomRoadPoint(); x = p.x; z = p.z; tries++; } while (tries < 8 && !ambient && Math.hypot(x - P.pos.x, z - P.pos.z) < 24);
     const c = makeCop(x, z, swat, ambient);
+    c._force = true;            // drawn from the finite roster (vs scripted guards)
+    forcePool--;               // one officer moves from reserve → deployed
     // 0★ baseline: a fresh beat cop hits the street with the sidearm ON THE BELT
     // (response units at 1★+ arrive already drawn — the city is hunting someone)
     if (ambient && !swat && (g.wanted | 0) === 0) holsterGun(c);
@@ -575,6 +620,7 @@
     if (typeof despawnChopper === "function") despawnChopper();
     pitCD = 0;
     dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
+    convictHailed = false;   // re-arm the escaped-convict APB for the next run
   };
 
   // posted roadblock officers don't count toward the response total: the wall is
@@ -843,6 +889,14 @@
     if (maintainT > 0) return;
     maintainT = 1.1;
     const stars = g.wanted | 0;
+    // ESCAPED CONVICT all-points bulletin: the first maintain tick after you hit
+    // the street as a jailbreaker, dispatch puts your description out — sells WHY
+    // the streets are already crawling with cops hunting you. One-shot per run
+    // (convictHailed reset in cityPoliceForceReset). chooseTarget() does the rest.
+    if (g.escapedConvict && !convictHailed && g.state === "playing") {
+      convictHailed = true;
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("⚠ ALL UNITS — ESCAPED CONVICT AT LARGE");
+    }
     const ambientWant = CBZ.CITY.ambientCops || 0;
     const playerWant = g.cityCopTarget || 0;
 
@@ -1298,7 +1352,10 @@
     const cp = cop.pos;
     if ((g.wanted | 0) >= 1 && !CBZ.player.dead) {
       const d = Math.hypot(cp.x - CBZ.player.pos.x, cp.z - CBZ.player.pos.z);
-      const sc = (g.wanted | 0) * 30 - d * 0.5;
+      // ESCAPED CONVICT: the manhunt is personal — a fleeing felon outranks a
+      // random armed NPC offender, so cops lock onto YOU over an equal-stars ped.
+      const convictBias = g.escapedConvict ? 40 + d * 0.4 : 0;   // also blunts the distance falloff
+      const sc = (g.wanted | 0) * 30 - d * 0.5 + convictBias;
       if (sc > bestScore) { bestScore = sc; best = CBZ.city.playerActor; bestPed = null; }
     }
     for (const p of CBZ.cityPeds) {
@@ -1417,7 +1474,10 @@
       // ---- behaviour ----
       if (c.giveUp) {
         c.state = "leave";
-        if (frame % 240 === 0 && rng() < 0.5) { if (c.group.parent) c.group.parent.remove(c.group); cops.splice(i, 1); continue; }
+        // de-escalation, NOT a casualty: an officer who stands down walks off
+        // duty and returns to the reserve (the force is unchanged — only a KILL
+        // depletes it). Guard with _returned so the same body can't bank twice.
+        if (frame % 240 === 0 && rng() < 0.5) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } cops.splice(i, 1); continue; }
         const gx = A.minX - 18 - c.pos.x, gz = 0; stepTo(c, gx, gz, c.baseSpeed, dt, near); continue;
       }
 
