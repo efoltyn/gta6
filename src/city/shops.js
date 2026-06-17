@@ -428,6 +428,13 @@
     if (kind === "security") s.push({ key: "j", label: "Apply: Security Guard job", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("security") });
     if (kind === "drugs") s.push({ key: "j", label: "Become a dealer (street sales)", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("dealer") });
     if (kind === "bar") s.push({ key: "j", label: "Run the night crew (pimp/entrepreneur)", fn: () => CBZ.cityStartCareer && CBZ.cityStartCareer("pimp") });
+    // the OTHER half of the "drinks · run the night crew" verb: an actual round.
+    // The bar has no SHOP_STOCK (so no BUY list) and the food heal path is gated
+    // to kind==="food", so a drink would otherwise do nothing — give it a real,
+    // kind-local effect here (mirrors the food heal+boost, sized for a quick one).
+    // [K] is free at the bar: 'j'/'b' are taken, and the closet's [K] only ever
+    // arms in a boutique (bar isn't one), so it can't collide.
+    if (kind === "bar") s.push({ key: "k", label: "Buy a round — $12 (drink up)", fn: buyDrink });
     if (kind === "casino") s.push({ key: "g", label: "Casino, sportsbook, fight and race betting", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Betting") });
     if (kind === "raceway") s.push({ key: "r", label: "Racing board: legal, street, drag", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
     if (kind === "racepark") s.push({ key: "r", label: "Horse and greyhound betting", fn: () => CBZ.cityOpenActivities && CBZ.cityOpenActivities("Racing") });
@@ -716,6 +723,19 @@
     if (CBZ.sfx) CBZ.sfx("coin"); render();
   }
   function train() { if (CBZ.city.spend(100)) { CBZ.player.maxHp = (CBZ.player.maxHp || 100) + 10; CBZ.player.hp = CBZ.player.maxHp; CBZ.city.addRespect(1); CBZ.city.note("Trained — max HP " + CBZ.player.maxHp, 1.8); render(); } }
+  // BAR — buy a round. The bar's verb promises "drinks" but it has no stock and
+  // the food heal path is kind-gated; this is the drink. Loosens you up: tops a
+  // little hunger, a short stamina boost, and a small patch-up (mirrors the
+  // food heal+boost at the buy() path, scaled down for a single round).
+  function buyDrink() {
+    if (!CBZ.city.spend(12)) { CBZ.city.note("Need $12.", 1.4); return; }
+    if (CBZ.sfx) CBZ.sfx("coin");
+    g.hunger = Math.min(100, (g.hunger || 0) + 15);
+    CBZ.player._boost = 12;
+    if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + 8);
+    CBZ.city.note("🍸 Drink — loosened up.", 1.6);
+    render();
+  }
   function buyCar() {
     if (!CBZ.city.spend(1500)) { CBZ.city.note("Need $1,500 for a car.", 1.6); return; }
     const A = CBZ.city.arena, door = openLot.building.door;

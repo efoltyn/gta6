@@ -21,10 +21,13 @@
        bigger bruise patch, no hole, no blood.
 
    Budget discipline (the game is draw-call bound):
-     • hard caps: 10 meshes per actor (a hit = wound + its soak stain, so
-       ~5 readable hits), 200 global — recycled oldest-first; a free-mesh
-       pool so churn never reallocates (geometry/material reassigned on
-       reuse — both shared, nothing cloned or disposed).
+     • hard caps: CITY 22 meshes per actor (a hit = wound + its soak stain,
+       so ~11 readable hits — a riddled body reads genuinely shot up) / 320
+       global; JAIL+SURVIVAL keep 10 per actor / 200 global byte-identical.
+       Both recycle oldest-first (wounds keep ACCUMULATING — shooting a
+       corpse adds holes — but stay bounded); a free-mesh pool so churn
+       never reallocates (geometry/material reassigned on reuse — both
+       shared, nothing cloned or disposed).
      • wounds are CHILDREN of the rig's part meshes → they animate, fall
        and despawn WITH the body for free; a throttled (0.8s) sweep frees
        records once a rig leaves the scene. Soak growth ticks per-frame
@@ -46,8 +49,17 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
 
-  const CAP = 200;          // global live-mesh cap (each is 1 tiny draw call)
-  const PER_ACTOR = 10;     // wound+stain pairs: a body holds ~5 readable hits
+  // CITY bodies should read as GENUINELY shot up — a riddled corpse carries
+  // many holes (owner: "MORE bullet holes"). City raises the per-actor budget
+  // (each readable hit = wound disc + its soak stain, so ~22 holes ≈ 11 hits)
+  // and bumps the global cap modestly; jail/survival keep the original 10/200
+  // byte-identical. Both stay LRU-recycled oldest-first so draw calls stay
+  // bounded no matter how long the magdump runs.
+  function cityWounds() { return !!(CBZ.game && CBZ.game.mode === "city"); }
+  const CAP_BASE = 200, CAP_CITY = 320;      // global live-mesh cap (each is 1 tiny draw call)
+  const PER_ACTOR_BASE = 10, PER_ACTOR_CITY = 22; // wound+stain pairs per body
+  function capGlobal() { return cityWounds() ? CAP_CITY : CAP_BASE; }
+  function perActor() { return cityWounds() ? PER_ACTOR_CITY : PER_ACTOR_BASE; }
   const SPAWN_D2 = 45 * 45; // matches gore.js's "only where it can be seen" band
   const DRY_T = 12;         // seconds until a fresh wound dries brown
   const PROUD = 0.013;      // how far the disc sits off the surface (no z-fight)
@@ -157,14 +169,15 @@
     return r.m;
   }
   function meshFor(actor) {
-    // per-actor cap: recycle THIS body's oldest hit first
-    if ((actor._woundN || 0) >= PER_ACTOR) {
+    // per-actor cap: recycle THIS body's oldest hit first (keeps wounds
+    // ACCUMULATING — shooting a corpse keeps adding holes — but bounded).
+    if ((actor._woundN || 0) >= perActor()) {
       for (let i = 0; i < wounds.length; i++) {
         if (wounds[i].actor === actor) return dropWound(i, true);
       }
     }
     if (free.length) return free.pop();
-    if (wounds.length >= CAP) return dropWound(0, true);   // global cap: oldest-first
+    if (wounds.length >= capGlobal()) return dropWound(0, true);   // global cap: oldest-first
     const m = new THREE.Mesh(G_WOUND, MAT_FRESH);
     m.castShadow = m.receiveShadow = false;
     return m;
@@ -204,10 +217,13 @@
     if (dist2Cam(px, pz) > SPAWN_D2) return;   // only where it can be seen
 
     // burst window: a shotgun's pellets (or a same-frame double report) land
-    // 2-3 SCATTERED wounds, never a pool-flushing spray of 8.
+    // SCATTERED wounds, never a pool-flushing spray. CITY lets more pellets
+    // through (a shotgun blast peppers the body — owner wants it to READ shot
+    // up) while still capping the same-frame burst; jail/survival keep 3.
+    const burstCap = cityWounds() ? 6 : 3;
     const now = performance.now();
     if (now - (actor._woundT || -1e9) < 90) {
-      if ((actor._woundBurst || 0) >= 3) return;
+      if ((actor._woundBurst || 0) >= burstCap) return;
       actor._woundBurst = (actor._woundBurst || 0) + 1;
     } else {
       actor._woundBurst = 1;
@@ -236,6 +252,26 @@
     const pick = pickPart(actor, px, py, pz, !!opts.head);
     const part = pick.mesh;
     if (!part || !part.geometry) return;
+
+    // ---- LEG HIT → LIMP (the "smart/realistic" read) -------------------------
+    // a round/blade to a leg makes the actor favour it: entities/character.js
+    // reads ch.legHurt and limps (shortened stiff stride on the hurt side, the
+    // body dips toward it on each weight-bearing step, reduced speed). Severity
+    // follows the caliber; a blade hobbles less than a slug. Light wounds ease
+    // off over ~20s; heavy ones persist until death. We DON'T touch the player
+    // here — death.js owns the player's own probabilistic leg-wound/limp model
+    // (P._legWound); see report. A leg already GONE (severed) stays gone.
+    if ((pick.region === "legL" || pick.region === "legR") && kind !== "bruise" &&
+        !actor.isPlayer && !ch.legGone) {
+      const side = pick.region === "legL" ? -1 : 1;
+      const add = (kind === "blade" ? 0.28 : 0.34) + cal * 0.34;   // caliber widens the limp
+      const prev = ch.legHurt;
+      const sevNew = Math.min(1, (prev && prev.side === side ? prev.sev : 0) + add);
+      // a new wound to the OTHER leg takes over only if it's worse than the old
+      if (!prev || prev.side === side || sevNew > prev.sev) {
+        ch.legHurt = { side, sev: sevNew, t: 9999 };   // t counts down only once light (animChar)
+      }
+    }
 
     const m = meshFor(actor);
     m.geometry = G_WOUND;
@@ -295,7 +331,7 @@
       r.gone = true;
       if (r.m.parent) r.m.parent.remove(r.m);
       if (free.length < 36) free.push(r.m);
-      if (r.actor) r.actor._woundN = 0;
+      if (r.actor) { r.actor._woundN = 0; if (r.actor.char) r.actor.char.legHurt = null; }
     }
     wounds.length = 0;
     growing.length = 0;

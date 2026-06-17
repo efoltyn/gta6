@@ -55,11 +55,42 @@
   const boxGeo = CBZ.boxGeom || function (w, h, d) { return new THREE.BoxGeometry(w, h, d); };
   const g = CBZ.game;
 
+  // CRASH SEVERITY THRESHOLDS — re-grounded in real-world crash data (NHTSA/IIHS).
+  // The sim's speed unit ≈ 2.4 mph (sedan top ≈ 35u ≈ 80 mph; cruise 7-12u ≈ 20-30
+  // mph), so the bands below map onto the real damage ladder:
+  //   • < 5 mph  (≈ 2u)   : fender-bender — scratches/dents/bumper scuff only.
+  //   • 10-15 mph(≈ 4-6u) : minor body damage, fully drivable.
+  //   • 20-30 mph(≈ 8-13u): real body/frame damage — a "hard" crash.
+  //   • 35-40+mph(≈ 14-17u): severe → total-loss territory — "catastrophic".
+  // The OLD carHard:8 fired a "real crash" at ~13 mph closing AND mass-inflated
+  // severity pushed slow bumps over it, so a parking-lot tap gutted the engine and
+  // could reach a fireball. Bars raised so low-speed contact stays cosmetic and a
+  // car survives many bumps before it's a wreck.
   const CRASH = CBZ.cityCrashTune = {
-    wallHard: 18, wallCatastrophic: 27,
-    carHard: 8, carCatastrophic: 24,    // a normal-speed ram now counts as a real (hard) crash, not a trivial bump
-    pedLethal: 14, npcDriverLethal: 26,
+    wallHard: 20, wallCatastrophic: 30,   // ~48 / ~72 mph into a fixed wall
+    carHard: 14, carCatastrophic: 30,     // ~real body damage / total-loss closing severity
+    pedLethal: 14, npcDriverLethal: 30,
   };
+
+  // ---- RUN-OVER JUICE ------------------------------------------------------
+  // A lethal run-over currently fires shake + a speed-bleed but — unlike a melee
+  // land() (combat.js) — NO hit-stop and NO bass impact, so a kill at speed reads
+  // LIGHTER than a punch. This restores the "thunk": a TINY hit-stop, a one-frame
+  // car-speed "catch", and a bass-heavy impact voice scaled by impact speed.
+  // WHY tiny: loop.js decrements CBZ.hitstop by the WORLD dt (clamped to 0.05s);
+  // on the weak Mac at ~5 FPS one rendered frame ≈ 0.2s of wall-clock, so the
+  // loop's clamped 0.05 drain means even a 0.05 hit-stop is ~ONE near-frozen
+  // frame — long enough to read as weight, short enough not to swallow an input
+  // sample. A bigger value here would eat a keypress at low FPS (research:
+  // hitstop is "3–5 frames" — but that's at 60 FPS; at 5 FPS 3 frames is a
+  // visible stall). Fired AT MOST ONCE per runOver() call (a car can clip
+  // several bodies in one frame — we must never stack N hit-stops / spam the
+  // audio channel). MP-SAFE: hit-stop scales this client's LOCAL sim dt only,
+  // SFX/shake are local present-path effects, and we touch no networked state
+  // beyond the car.v bleed the lethal path ALREADY applies here (host-sim value,
+  // broadcast via snapshots like today); guests see the ragdoll via snapshots.
+  // No ped HP / death / crime / witness / population logic is touched.
+  if (CBZ.runoverJuice === undefined) CBZ.runoverJuice = true;   // default ON; honour an owner toggle
   let _s = 1234;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   let _trafficStopNoteT = 0;   // global cooldown for the ambient "traffic stop nearby" feed line
@@ -674,6 +705,24 @@
     const model = CBZ.cityEcon && CBZ.cityEcon.carByName ? CBZ.cityEcon.carByName(modelName) : null;
     return buildCar(model);
   };
+  // A drive-by / hit car used to be a crude placeholder box (gangs.js buildDbCar)
+  // — the user's "fake-as-fuck car comes when a hit is sent". This builds the SAME
+  // real detailed visual every other city car uses, painted in the gang's colour so
+  // the rolling-up car reads as that crew's ride. A real model (rarity-weighted to
+  // common street cars) carries the body/style; only the paint is overridden.
+  // Returns null when the visual system isn't loaded (headless/gallery) so the
+  // caller can keep its lightweight box fallback. Parity, not new cost: this is the
+  // exact pipeline used by all traffic.
+  CBZ.cityBuildGangCarVisual = function (color) {
+    if (!CBZ.cityBuildPlayerCarVisual || !CBZ.cityInferCarStyle) return null;
+    const econ = CBZ.cityEcon;
+    let model = econ && econ.pickCar ? econ.pickCar(rng() < 0.1) : null;
+    // paint it the gang's colour (shallow clone so the catalog entry is untouched)
+    if (color != null) model = Object.assign({}, model || {}, { color: color });
+    // buildCar runs the real cityBuildPlayerCarVisual pipeline (guarded above), so
+    // this is the same detailed mesh all traffic uses — painted for this gang.
+    return buildCar(model);
+  };
 
   CBZ.spawnCityTraffic = function (n) {
     clearCars();
@@ -947,22 +996,56 @@
   });
 
   // apply mechanical damage to a car's engine. fromGun/explosion may ignite or
-  // pop it instantly at high amounts; crashes feed in here too.
+  // pop it instantly at high amounts. CRASHES (fromGun=false) NEVER instant-pop:
+  // reaching 0 HP from an impact leaves a DISABLED, SMOKING wreck — a fire (and
+  // then an explosion) only develops over time via the burn fuse, mirroring the
+  // real world where post-crash fires are rare (~0.2% of all crashes) and build
+  // over minutes rather than detonating on contact (a fuel-tank fireball is a
+  // Hollywood myth). Gunfire/explosive damage keeps the old instant-pop so those
+  // weapons still cook a car off as before.
   function damageEngine(car, amount, fromGun) {
     if (!car || car.dead) return;
     if (car.engineHp == null) car.engineHp = 100;
     const armor = Math.max(0, Math.min(0.35, car.armor || 0));
     amount *= Math.max(0.55, 1 - armor * (fromGun ? 1.25 : 0.85));
     car.engineHp = Math.max(-50, car.engineHp - amount);
-    if (car.engineHp <= 0 && !car._exploded) { explodeCar(car); return; }
-    if (car.engineHp <= FIRE_AT && !car._onFire) igniteCar(car);
-    if (fromGun && car.engineHp <= SMOKE_AT) car._smoking = true;
+    if (car.engineHp <= 0 && !car._exploded) {
+      if (fromGun) { explodeCar(car); return; }            // weapon hits still pop instantly
+      // a crash that guts the motor DISABLES it (smoking wreck). A fire only
+      // sometimes develops — post-crash fires are rare (~0.2% of crashes) — and
+      // when it does it cooks off slowly, never an instant bump-to-fireball.
+      car._smoking = true;
+      maybeCrashFire(car, true);
+      return;
+    }
+    if (fromGun) { if (car.engineHp <= FIRE_AT && !car._onFire) igniteCar(car, false); }
+    else if (car.engineHp <= FIRE_AT) maybeCrashFire(car, false);   // badly-crashed: a CHANCE to ignite
+    if (car.engineHp <= SMOKE_AT) car._smoking = true;
   }
-  function igniteCar(car) {
+  // CRASH-INDUCED FIRE — rare and slow, per real-world data (vehicle fires occur
+  // in only ~0.2% of all crashes / ~2.9% of fatal ones, and post-crash fires
+  // build over minutes, they do NOT instant-detonate). A badly-wrecked car only
+  // SOMETIMES catches fire; disabled = the common outcome. `gutted` (engine fully
+  // dead) carries a higher chance than merely fire-threshold damage.
+  function maybeCrashFire(car, gutted) {
+    car._smoking = true;                          // a hurt-enough motor always wisps
+    if (car._onFire || car.dead || car._exploded || car._crashFireRolled) return;
+    car._crashFireRolled = true;                  // roll once per wreck (re-bumps don't re-roll)
+    const chance = gutted ? 0.18 : 0.06;          // most wrecks just smoke + die
+    if (Math.random() < chance) igniteCar(car, true);
+  }
+  // crashFire = a slow post-crash burn (long cook-off); otherwise a weapon/molotov
+  // fire that cooks off in a few seconds as before.
+  function igniteCar(car, crashFire) {
     if (car._onFire || car.dead || car._exploded) return;
     car._onFire = true; car._smoking = true;
-    // a FUSE: a burning car cooks off in a few seconds (sooner the more it's hurt)
-    car._fuse = 2.4 + Math.random() * 2.2;
+    car._crashFire = !!crashFire;
+    // a FUSE: a weapon fire cooks off in a few seconds; a CRASH fire builds slowly
+    // (real post-crash fires take minutes), giving plenty of time to bail. About
+    // half of crash fires simply BURN OUT into a charred wreck instead of ever
+    // exploding (a fuel-tank fireball is the exception, not the rule).
+    car._fuse = crashFire ? (14 + Math.random() * 12) : (2.4 + Math.random() * 2.2);
+    car._burnsOut = crashFire && Math.random() < 0.5;   // crash fire that never detonates
     if (CBZ.city && (car.player || nearCam(car, 60))) CBZ.city.note("🔥 The car's on fire — bail out!", 1.1);
   }
   function explodeCar(car) {
@@ -1024,8 +1107,10 @@
     if (car._onFire) {
       car._burnByPlayer = car._burnByPlayer || car.player;
       car._fuse -= dt;
-      // burn keeps eating the engine so even a parked burning car eventually blows
-      car.engineHp -= 7 * dt;
+      // burn keeps eating the engine so even a parked burning weapon-fire car
+      // eventually blows. A crash fire's engine is already gutted, so its cook-off
+      // is governed by the (long) fuse alone — not an instantly-zero engineHp.
+      if (!car._crashFire) car.engineHp -= 7 * dt;
       if (visible) {
         car._fireT = (car._fireT || 0) + dt;
         if (car._fireT > 0.06) {
@@ -1039,7 +1124,15 @@
         car._burnTickCD = (car._burnTickCD || 0) - dt;
         if (car._burnTickCD <= 0) { car._burnTickCD = 0.5; CBZ.cityHurtPlayer(6, car.pos.x, car.pos.z, "burned in the car", false, null, true); if (CBZ.player.dead) return; }
       }
-      if (car._fuse <= 0 || car.engineHp <= 0) { explodeCar(car); return; }
+      // cook-off: weapon fires blow when the burn finishes the engine or the
+      // fuse runs out; a crash fire only when its (long) fuse expires — and a
+      // _burnsOut crash fire just dies down into a charred, smoking wreck.
+      if (car._crashFire) {
+        if (car._fuse <= 0) {
+          if (car._burnsOut) { car._onFire = false; car._smoking = true; car._fuse = 0; return; }
+          explodeCar(car); return;
+        }
+      } else if (car._fuse <= 0 || car.engineHp <= 0) { explodeCar(car); return; }
     }
   }
 
@@ -1549,8 +1642,19 @@
       const bounce = catastrophic ? 0.12 : (hard ? 0.2 : 0.35);
       const vdotn = car.vx * nwx + car.vz * nwz;
       car.vx = (car.vx - 2 * vdotn * nwx) * bounce; car.vz = (car.vz - 2 * vdotn * nwz) * bounce;
-      // the impact ALSO guts the engine — enough hard hits → smoke → fire → boom
-      damageEngine(car, catastrophic ? 60 : (hard ? 28 : 6), false);
+      // the impact damages the engine on a SPEED-SCALED curve (NHTSA/IIHS ladder):
+      // a low-speed wall scuff barely touches the motor, a moderate hit dings it,
+      // and only a fast slam guts it. Even a catastrophic hit no longer instantly
+      // explodes (damageEngine routes crashes through the burn fuse) — it disables
+      // the car into a smoking/burning wreck the player can bail from.
+      //   below wallHard : 0.6 HP per unit of speed above the 5-unit no-damage floor
+      //                    (~9 HP at a 20 mph clip — survives many; many bumps to kill)
+      //   hard           : ~26 + speed-over-threshold ramp
+      //   catastrophic   : heavy, can disable, then cooks off via the fire fuse
+      const crashE = catastrophic ? (52 + (vmag - CRASH.wallCatastrophic) * 4)
+                   : hard         ? (24 + (vmag - CRASH.wallHard) * 2)
+                                  : Math.max(0, (vmag - 5) * 0.6);
+      damageEngine(car, crashE, false);
       // crater point from the PRE-impact pose (group.matrixWorld still holds it) —
       // captured before the push-back/spin below so the dent lands on the contact
       const dentX = car.pos.x + Math.sin(car.heading) * 2.2, dentZ = car.pos.z + Math.cos(car.heading) * 2.2;
@@ -1686,13 +1790,24 @@
       CBZ.cityCarImpact(a, { x: px, y: py, z: pz }, { x: -nx, y: 0, z: -nz }, severity * (aRammer ? 0.75 : 1));
       CBZ.cityCarImpact(b, { x: px, y: py, z: pz }, { x: nx, y: 0, z: nz }, severity * (aRammer ? 1 : 0.75));
     }
-    // engine HP: a collision guts the motor; the rammed car takes the worst of it,
-    // so repeated/major rams build toward smoke → fire → explosion instead of
-    // every high-speed collision instantly turning both cars into a fireball.
-    const eHeavy = catastrophic ? 68 : (hard ? 30 : 8);
-    const eLight = catastrophic ? 42 : (hard ? 16 : 4);
-    damageEngine(a, Math.min(82, (aRammer ? eLight : eHeavy) * Math.max(0.75, bm)), false);
-    damageEngine(b, Math.min(82, (aRammer ? eHeavy : eLight) * Math.max(0.75, am)), false);
+    // engine HP: a collision guts the motor on a SPEED-SCALED curve, the rammed
+    // car taking the worst of it. A low-speed fender-bender (severity below
+    // carHard) costs only a sliver per car, so two cars can trade many bumps
+    // without dying; repeated/major rams build toward smoke → fire → explosion.
+    // No collision instantly turns a car into a fireball — even a catastrophic
+    // wreck disables it and the fire (then blast) develops over the burn fuse.
+    //   below carHard : ~0.5 HP per severity-unit over the 6-unit no-damage floor
+    //   hard          : ~26 + ramp over threshold
+    //   catastrophic  : heavy (still routed through the fire fuse, not instant)
+    const sevOver = Math.max(0, severity - 6);
+    const eHeavy = catastrophic ? (58 + (severity - CRASH.carCatastrophic) * 3)
+                 : hard         ? (26 + (severity - CRASH.carHard) * 2.2)
+                                : sevOver * 0.5;
+    const eLight = catastrophic ? (36 + (severity - CRASH.carCatastrophic) * 2)
+                 : hard         ? (15 + (severity - CRASH.carHard) * 1.3)
+                                : sevOver * 0.28;
+    damageEngine(a, Math.min(82, (aRammer ? eLight : eHeavy) * Math.max(0.85, Math.min(1.3, bm))), false);
+    damageEngine(b, Math.min(82, (aRammer ? eHeavy : eLight) * Math.max(0.85, Math.min(1.3, am))), false);
     if ((a.player || b.player)) { if (a.player) a._burnByPlayer = true; if (b.player) b._burnByPlayer = true; }
     // Occupant injury follows delta-v, the quantity people actually feel in a
     // collision. Normal bumps do nothing; a hard side/T-bone hit hurts badly.
@@ -1745,14 +1860,16 @@
       const a = cars[i]; if (a.dead) continue;
       if (a._crashCD > 0) a._crashCD -= dt;
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
-      const key = gx + "," + gz, bucket = carGrid.get(key);
+      // numeric key (no per-frame string alloc; gx/gz are small at CELL=9) — packs
+      // two ints collision-free for any |coord| < 1024 (offset+stride 4096 > range).
+      const key = (gx + 1024) * 4096 + (gz + 1024), bucket = carGrid.get(key);
       if (bucket) bucket.push(i); else carGrid.set(key, [i]);
     }
     for (let i = 0; i < n; i++) {
       const a = cars[i]; if (a.dead) continue;
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
       for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
-        const bucket = carGrid.get((gx + ox) + "," + (gz + oz)); if (!bucket) continue;
+        const bucket = carGrid.get(((gx + ox) + 1024) * 4096 + ((gz + oz) + 1024)); if (!bucket) continue;
         for (let bi = 0; bi < bucket.length; bi++) {
           const j = bucket[bi]; if (j <= i) continue;
           const b = cars[j]; if (b.dead) continue;
@@ -1808,6 +1925,9 @@
         car.v *= 0.7;
       }
     }
+    // one-per-call latch so a car that clips SEVERAL bodies this frame still
+    // fires exactly ONE hit-stop / impact voice / "catch" (never stack N).
+    let juiced = false;
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.inCar) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
@@ -1818,6 +1938,7 @@
         // genuinely fast impact becomes a lethal run-over.
         const imp = { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.35, fling: 4 + vmag * 0.3 };
         if (!car.player) { imp.attacker = car.npcDriver || null; imp.byPlayer = false; }
+        const lethal = vmag >= CRASH.pedLethal && !p.dead;   // a genuine kill THIS contact
         if (vmag >= CRASH.pedLethal) CBZ.cityKillPed && CBZ.cityKillPed(p, imp, "run over");
         else {
           const offender = car.player ? CBZ.city.playerActor : (car.npcDriver || null);
@@ -1839,7 +1960,38 @@
           } else if (car.npcDriver && CBZ.cityNpcOffense) CBZ.cityNpcOffense(car.npcDriver, 22, "vehicular-assault");
         }
         if (CBZ.shake) CBZ.shake((car.player ? 0.2 : 0.12) + Math.min(0.7, vmag * 0.025));
-        car.v *= vmag >= CRASH.pedLethal ? 0.9 : 0.72;
+        // ---- THE THUNK (CBZ.runoverJuice, once per call, clean lethal only) ----
+        // Make a kill-at-speed read as WEIGHT, matching melee's land(). A car
+        // that mows a whole line still thunks exactly once (the `juiced` latch).
+        if (lethal && CBZ.runoverJuice && !juiced) {
+          juiced = true;
+          // TINY, speed-scaled, hard-capped hit-stop. Base ~0.038s so even at
+          // 5 FPS it's a single near-frozen frame (loop.js drains by the clamped
+          // 0.05 world dt); never above 0.05 so it can't eat an input sample.
+          // doHitstop() is Math.max-merged in loop.js, so the per-call latch +
+          // this cap together guarantee it can't compound across bodies/frames.
+          if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009));
+          // BASS-HEAVY impact voice, speed-scaled, camera-distance attenuated so
+          // a far kill is quieter (dist convention used elsewhere in this file).
+          // `ko` is the layered heavy-punch + low-pitched thud_real (the bass);
+          // a faster impact layers `clank` (metal-crunch) on top for the crunch.
+          if (CBZ.sfx) {
+            const cm = CBZ.camera && CBZ.camera.position;
+            const dist = cm ? Math.hypot(car.pos.x - cm.x, car.pos.z - cm.z) : 0;
+            const hard = vmag >= CRASH.carHard;            // a normal-speed-or-faster kill
+            const vol = Math.min(1, 0.62 + vmag * 0.012);  // louder the faster you hit
+            // pitch DOWN slightly with speed → more bass/body on a heavy impact
+            const pitch = Math.max(0.84, 1.02 - vmag * 0.006);
+            CBZ.sfx("ko", { dist: dist, volume: vol, pitch: pitch });
+            if (hard) CBZ.sfx("clank", { dist: dist, volume: Math.min(0.9, vol * 0.8), pitch: pitch * 1.04 });
+          }
+        }
+        // one-frame car "catch": a lethal kill bleeds a touch more speed when
+        // juiced so the car visibly hooks on the body (today: *=0.9). Floored at
+        // *=0.82 so a determined player still plows THROUGH a crowd — we never
+        // strand the car, never zero v (that would change driving logic).
+        const lethalBleed = (CBZ.runoverJuice && car.player) ? 0.84 : 0.9;
+        car.v *= vmag >= CRASH.pedLethal ? lethalBleed : 0.72;
       }
     }
     // mow down the ambient instanced crowd (the far NPCs) — player car only so
@@ -1847,6 +1999,14 @@
     if (car.player && vmag >= CRASH.pedLethal && CBZ.cityCrowdCircleKill) {
       const n = CBZ.cityCrowdCircleKill(car.pos.x, car.pos.z, 2.0, { byCar: true, fromX: car.pos.x, fromZ: car.pos.z });
       if (n > 0 && CBZ.shake) CBZ.shake(0.25 + Math.min(0.5, vmag * 0.02));
+      // same THUNK for plowing the ambient crowd (shares the per-call `juiced`
+      // latch so a kill that already thunked above doesn't double-fire). Note:
+      // cityCrowdCircleKill already plays a "ko" voice (crowd.js) — we only add
+      // the missing hit-stop here, never a second bass voice, to avoid stacking.
+      if (n > 0 && CBZ.runoverJuice && !juiced) {
+        juiced = true;
+        if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009));
+      }
     }
     for (const c of CBZ.cityCops) {
       if (c.dead) continue;
@@ -1924,6 +2084,43 @@
   // back on screen). This is the single biggest CPU saving in the traffic loop.
   let _vframe = 0, _vslice = 0;
   const FARCAR_D2 = 150 * 150;     // == the group-visibility cull distance below
+
+  // ---- CAR-AHEAD broad phase (the O(n²) killer) -----------------------------
+  // carAhead() below is the traffic loop's hot path: it scans the ENTIRE car
+  // list once (sometimes twice) PER car, PER frame, to find the nearest vehicle
+  // in that driver's path. With ~66 ambient cars + parked/cop/player cars that's
+  // a few thousand pair tests every frame on the average — and a single-frame
+  // SPIKE when a light releases a cluster and every car simultaneously runs at
+  // full rate (the far-car LOD stride below stops hiding the cost). Mirroring
+  // peds.js / crowd.js, we rebuild ONE spatial hash of the cars per frame
+  // (CBZ.makeGrid, alloc-free after warm-up) and let carAhead inspect only the
+  // cells its speed-scaled lookahead actually reaches. The cars near a clustered
+  // light are genuinely close (the grid can't conjure them apart), but every car
+  // on a DIFFERENT block — the bulk of the list — is skipped, which is what
+  // turns the all-pairs spike back into a local scan.
+  //
+  // CORRECTNESS: the grid only chooses the CANDIDATE set (bucketed from this
+  // frame's start positions). The gap / along / lateral math in carAhead still
+  // reads each candidate's LIVE o.pos exactly as the old full scan did, so the
+  // steering decision is byte-identical. A car moves <~0.6m in one 60fps frame —
+  // far less than the cell-quantised padding of the query box below — so a car
+  // that should be a candidate can never have slipped out of the queried cells.
+  // Reverse the flag and carAhead falls straight back to the original full scan.
+  const CARAHEAD_GRID = true;      // default ON (proven peds/crowd pattern; candidate-complete)
+  const CAR_AHEAD_CELL = 12;       // cell ≈ a couple of car lengths; query pads to cover `look`
+  let _carGrid = null;
+  function _carVec(c) { return c.pos; }
+  function rebuildCarGrid() {
+    if (!CARAHEAD_GRID) return;
+    if (!_carGrid && CBZ.makeGrid) _carGrid = CBZ.makeGrid(CAR_AHEAD_CELL);
+    if (!_carGrid) return;
+    // bucket EVERY car carAhead would otherwise scan — including the player's
+    // car and parked/stolen/cop cars (carAhead treats them all as obstacles).
+    // Dead cars are skipped inside carAhead, so bucketing them is harmless, but
+    // we drop them here too so the cells stay small.
+    _carGrid.rebuild(CBZ.cityCars, _carVec);
+  }
+
   CBZ.onUpdate(37, function (dt) {
     if (g.mode !== "city") return;
     const A = CBZ.city.arena; if (!A) return;
@@ -1931,6 +2128,7 @@
     const baseDt = dt;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
+    rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
     for (const c of CBZ.cityCars) {
       dt = baseDt;     // reset each car (a strided far car overrides this below)
       if (c.player || c.dead || !c.ai || !c.road) continue;
@@ -1974,7 +2172,12 @@
             const fx = Math.sin(c.heading), fz = Math.cos(c.heading), vd = vehicleDims(c);
             CBZ.cityCarImpact(c, { x: c.pos.x + fx * vd.length * 0.45, y: (vd.height || 1.5) * 0.4, z: c.pos.z + fz * vd.length * 0.45 }, { x: -fx, y: 0, z: -fz }, c.v);
           }
-          damageEngine(c, catastrophic ? 55 : (hard ? 26 : 8), false);
+          // speed-scaled (NHTSA/IIHS ladder): a slow scrape barely dents the
+          // motor, only a fast slam disables it — and never an instant fireball
+          // (damageEngine routes the crash through the burn fuse).
+          damageEngine(c, catastrophic ? (50 + (c.v - CRASH.npcDriverLethal) * 3)
+                          : hard ? (24 + (c.v - CRASH.wallHard) * 2)
+                          : Math.max(0, (c.v - 5) * 0.6), false);
           crashBurst(c.pos.x, c.pos.z, c.v, hard, catastrophic);
           if (hard && CBZ.cityShatter) CBZ.cityShatter(c.pos.x, c.pos.z, catastrophic ? 8 : 4.5);
           const cm = CBZ.camera.position;
@@ -2165,26 +2368,50 @@
   // the intersection, a car mid-turn, the player's dumped getaway car. The old
   // same-road-only check made drivers blind to anything not in their exact lane
   // record — they'd plow into crossing traffic and phase past parked obstacles.
+  // carAhead's running best, shared by the grid scan and the full-scan fallback
+  // so BOTH paths run byte-identical per-candidate math. _caTest(c,o,...) folds
+  // one candidate `o` into the best-so-far and returns the new bumper gap.
+  let _caBest = null, _caBg = 1e9, _caAlong = 0;
+  function _caConsider(c, o, fx, fz, myHalf, look) {
+    if (o === c || o.dead) return;
+    const dx = o.pos.x - c.pos.x, dz = o.pos.z - c.pos.z;   // LIVE pos (same as old full scan)
+    const along = dx * fx + dz * fz;
+    if (along <= 0 || along > look) return;
+    const lat = Math.abs(dx * fz - dz * fx);
+    if (lat > 2.3) return;
+    const bumperGap = along - myHalf - vehicleDims(o).length * 0.5;
+    if (bumperGap < _caBg) { _caBg = bumperGap; _caBest = o; _caAlong = along; }
+  }
   function carAhead(c) {
     const fx = Math.sin(c.heading), fz = Math.cos(c.heading);
     const myHalf = vehicleDims(c).length * 0.5;
     const look = 8 + Math.abs(c.v) * 1.1;          // speed-scaled lookahead
-    let best = null, bg = 1e9, bestAlong = 0;
-    for (const o of CBZ.cityCars) {
-      if (o === c || o.dead) continue;
-      const dx = o.pos.x - c.pos.x, dz = o.pos.z - c.pos.z;
-      const along = dx * fx + dz * fz;
-      if (along <= 0 || along > look) continue;
-      const lat = Math.abs(dx * fz - dz * fx);
-      if (lat > 2.3) continue;
-      const bumperGap = along - myHalf - vehicleDims(o).length * 0.5;
-      if (bumperGap < bg) { bg = bumperGap; best = o; bestAlong = along; }
+    _caBest = null; _caBg = 1e9; _caAlong = 0;
+    if (CARAHEAD_GRID && _carGrid) {
+      // Visit only the cells the lookahead box can reach. Padding by `look` on
+      // every side (floor/ceil over the radius — the standard variable-radius
+      // hash query, same shape as CBZ.queryCollidersNear) guarantees we never
+      // miss a candidate the old full scan would have found. A car only LOOKS
+      // forward (along>0) but is bucketed by its centre, so a long obstacle
+      // straddling a cell boundary just behind us must still be reachable — the
+      // symmetric ±look box covers that with margin to spare.
+      const gx0 = _carGrid.cellIndex(c.pos.x - look), gx1 = _carGrid.cellIndex(c.pos.x + look);
+      const gz0 = _carGrid.cellIndex(c.pos.z - look), gz1 = _carGrid.cellIndex(c.pos.z + look);
+      for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+        const cell = _carGrid.bucket(gx, gz); if (!cell) continue;
+        for (let i = 0; i < cell.length; i++) _caConsider(c, cell[i], fx, fz, myHalf, look);
+      }
+    } else {
+      // fallback (flag OFF / grid unavailable): the original whole-list scan.
+      const cars = CBZ.cityCars;
+      for (let i = 0; i < cars.length; i++) _caConsider(c, cars[i], fx, fz, myHalf, look);
     }
+    const best = _caBest;
     if (!best) return null;
     // how fast the obstacle is moving AWAY along our heading (crossing traffic
     // and oncoming cars project to ~0 → we brake instead of matching "speed")
     const ov = carVel(best);
-    return { v: Math.max(0, ov.x * fx + ov.z * fz), gap: bg, car: best, along: bestAlong };
+    return { v: Math.max(0, ov.x * fx + ov.z * fz), gap: _caBg, car: best, along: _caAlong };
   }
 
   // set up a smooth quarter-arc onto the perpendicular road. The arc is a

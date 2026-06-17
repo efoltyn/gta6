@@ -55,11 +55,58 @@
     return colBuckets.get(colKey(Math.floor(pos.x / COL_CELL), Math.floor(pos.z / COL_CELL))) || EMPTY_COLS;
   }
 
-  // generic circle-vs-box resolution against the world colliders.
-  // mutates pos.{x,z}. Shared by the player AND every NPC/guard.
-  // feetY/headY (optional) give the actor's vertical span so height-gated
-  // colliders (windows / upper floors) are skipped when the body is clear of
-  // them; omit them and every collider acts full-height (prison behaviour).
+  // Broadphase query for systems that need to inspect nearby world geometry
+  // without resolving a collision. Callers own/reuse `out`; results are the
+  // same collider objects from CBZ.colliders, deduplicated across grid cells.
+  const colQuerySeen = new Set();
+  CBZ.queryCollidersNear = function (x, z, radius, out) {
+    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
+    out = out || [];
+    out.length = 0;
+    colQuerySeen.clear();
+    const gx0 = Math.floor((x - radius) / COL_CELL), gx1 = Math.floor((x + radius) / COL_CELL);
+    const gz0 = Math.floor((z - radius) / COL_CELL), gz1 = Math.floor((z + radius) / COL_CELL);
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+      const bucket = colBuckets.get(colKey(gx, gz));
+      if (!bucket) continue;
+      for (let i = 0; i < bucket.length; i++) {
+        const c = bucket[i];
+        if (colQuerySeen.has(c)) continue;
+        colQuerySeen.add(c);
+        out.push(c);
+      }
+    }
+    return out;
+  };
+
+  // ============================================================
+  //  SHARED WALL RESOLVER — CBZ.collide  (THE entry every moving
+  //  body, player AND NPC, calls each frame to slide out of walls)
+  // ============================================================
+  // Generic circle-vs-box depenetration against the world colliders.
+  // MUTATES pos.{x,z} in place; pos.y is untouched. Grid-accelerated
+  // (nearbyColliders → one 8m bucket), so the cost is O(local walls),
+  // not O(all ~5000 colliders): cheap enough to call for EVERY NPC every
+  // frame. Zero per-call allocation.
+  //
+  //   CBZ.collide(pos, radius, feetY, headY)
+  //     pos    — {x,z(,y)} mutated in place (the moving body's centre).
+  //     radius — the body's collision radius (player 0.55, ped/crowd 0.5).
+  //     feetY  — optional bottom of the body's vertical span.
+  //     headY  — optional top of the body's vertical span.
+  //
+  // feetY/headY gate HEIGHT-LIMITED colliders (windows, upper floors,
+  // shot-open sill remnants): a box with c.y0!=null is skipped when the
+  // body is entirely below it (headY<=y0) or entirely above it
+  // (feetY>=y1). Omit both args and EVERY collider acts full-height
+  // (prison / jail behaviour — byte-identical to before).
+  //
+  // SINGLE-PASS: one shortest-exit push per collider per call. A body
+  // wedged into an inside corner can need 2–3 passes to fully clear; for
+  // that, prefer CBZ.collideSlide (below) which loops to convergence in
+  // one call. Per the cross-agent contract this function is shared with
+  // the PLAYER — do NOT change its math/signature; add new helpers
+  // instead.
   function collide(pos, radius, feetY, headY) {
     const cols = nearbyColliders(pos);
     for (let i = 0; i < cols.length; i++) {
@@ -84,6 +131,86 @@
     }
   }
   CBZ.collide = collide;
+
+  // ---- CBZ.collideSlide — robust multi-pass form for NPC movers --------
+  // The convenience entry the peds / crowd / gang movement should call to
+  // slide a moving body fully out of building walls each frame. It loops
+  // CBZ.collide a few times so a body wedged into an inside corner (two
+  // walls at once) is depenetrated in ONE call instead of every caller
+  // re-implementing the 2–3-pass loop. Early-outs the instant a pass moves
+  // the body less than CONVERGE_EPS (the common case: 0 or 1 wall touched →
+  // one pass), so a body in open street pays a single grid lookup + a
+  // handful of box tests. Returns true iff the body was pushed at all this
+  // frame (callers use that to re-pick a waypoint so they don't grind back
+  // into the wall — mirrors the existing crowd/ped think-tick logic).
+  //
+  //   CBZ.collideSlide(pos, radius, feetY, headY, passes?) -> moved:boolean
+  //     passes defaults to 3 (matches peds.js's gold-standard loop); pass 1
+  //     for the cheap off-tick form (a tiny dead-reckoned step needs only
+  //     one push). pos.{x,z} mutated in place; pos.y untouched.
+  const CONVERGE_EPS = 0.002;     // a pass that moves <2mm has converged
+  function collideSlide(pos, radius, feetY, headY, passes) {
+    const n = passes > 0 ? passes : 3;
+    let moved = false;
+    for (let p = 0; p < n; p++) {
+      const bx = pos.x, bz = pos.z;
+      collide(pos, radius, feetY, headY);
+      const dx = pos.x - bx, dz = pos.z - bz;
+      if (dx * dx + dz * dz < CONVERGE_EPS * CONVERGE_EPS) break; // nothing more to push out of
+      moved = true;
+    }
+    return moved;
+  }
+  CBZ.collideSlide = collideSlide;
+
+  // ---- CBZ.npcStepLedge — bounded auto-step over a LOW obstacle --------
+  // SECONDARY (owner: optional). CITY-ONLY. When a moving body is walking
+  // INTO a collider whose TOP is only a low ledge above its feet — a window
+  // sill, a shot-open window's remnant, a low planter — let it climb ON TOP
+  // instead of grinding the face, so running at a shot-out window steps in
+  // like going up a stair. Strictly bounded: only ledges whose top sits
+  // between just-above-feet and STEP_UP_NPC (~1.0m) qualify, and only when
+  // the body is actually moving toward that ledge — never a flying boost up
+  // a sheer wall, never a tall wall, never the ground floor of a closed box.
+  //
+  //   CBZ.npcStepLedge(pos, radius, feetY, headY, moveX, moveZ) -> newFeetY
+  //     pos               — body centre (NOT mutated — XZ resolution stays
+  //                         with CBZ.collide/collideSlide; this only reports
+  //                         a Y to step up to).
+  //     feetY/headY       — current vertical span.
+  //     moveX/moveZ       — this frame's intended horizontal move (heading);
+  //                         only a ledge the body is heading toward lifts it.
+  //     returns the feetY the caller should adopt (== feetY if no step), so
+  //     the caller stays in control of its own Y. Off CITY mode it always
+  //     returns feetY unchanged (jail/survival byte-identical).
+  const STEP_UP_NPC = 1.0;        // max ledge an NPC auto-climbs (window sill ~0.5–0.9m)
+  const STEP_MIN_NPC = 0.08;      // ignore ~flat/terrain-level boxes
+  function npcStepLedge(pos, radius, feetY, headY, moveX, moveZ) {
+    if (CBZ.game.mode !== "city") return feetY;        // jail/survival untouched
+    const ml = moveX * moveX + moveZ * moveZ;
+    if (ml < 1e-6) return feetY;                        // not moving → nothing to climb
+    const cols = nearbyColliders(pos);
+    let bestTop = feetY;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y0 == null) continue;                       // full-height wall: never step over it
+      const top = c.y1;
+      // ledge must be a real lift (above feet) but no taller than STEP_UP_NPC,
+      // and the body's head must clear standing on top of it (cheap sanity).
+      if (top <= feetY + STEP_MIN_NPC || top > feetY + STEP_UP_NPC) continue;
+      // only step a box we're heading INTO: the body's centre must be within
+      // grabbing range of the box face AND the move vector must point at it.
+      const cx = Math.max(c.minX, Math.min(pos.x, c.maxX));
+      const cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
+      const dx = pos.x - cx, dz = pos.z - cz;
+      const near = radius + 0.25;
+      if (dx * dx + dz * dz > near * near) continue;     // not up against this ledge
+      if (dx * moveX + dz * moveZ > 0) continue;         // moving AWAY from it (face normal aligns with move → skip)
+      if (top > bestTop) bestTop = top;                  // climb onto the highest qualifying ledge
+    }
+    return bestTop;
+  }
+  CBZ.npcStepLedge = npcStepLedge;
 
   // Highest walkable surface under (x,z): the terrain height field, raised by
   // any building floor/stair/roof platform whose top is within reach. `fromY`
@@ -110,6 +237,80 @@
   CBZ.groundAt = groundAt;
 
   function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + 0.25, player.pos.y + BODY_H); }
+
+  // ---- FEEL: local wall-clock player motion (slow-mo-under-load fix) --------
+  // loop.js clamps the WORLD dt to ~0.05s so the 27ms sim can't spiral on the
+  // weak Mac. But at 200ms/frame that clamp also throttles the LOCAL PLAYER to
+  // ~25% wall-clock speed — the "wading through molasses" feel. Per the cross-
+  // agent contract, loop.js exposes CBZ.feelDt = the REAL frame delta clamped to
+  // FEEL_MAX (~0.1s), gated by CBZ.feelMotion. We read it ONLY for the player's
+  // own integration so the avatar covers correct ground per frame; the heavy
+  // world stays on the small clamped dt. MP-safe: every client runs this for its
+  // OWN avatar identically; we sync POSITIONS not timesteps.
+  //
+  // ADVERSARIAL: a bigger feel-dt = a bigger position step. Max on-foot speed is
+  // walkSpeed*sprintMul (~7*1.7=11.9 m/s); at fdt=0.1 that's a 1.19m step, but the
+  // player radius (0.55) only resolves overlaps up to radius+half-wall (~0.75m) —
+  // a single big step could TUNNEL a 0.4m-thick wall or overshoot a thin floor's
+  // landing test. Fix (the canonical character-controller answer): SUB-STEP the
+  // player's OWN movement+collision when the step is large. We split fdt into N
+  // equal slices sized so no slice can move farther than a safe fraction of the
+  // radius, capped at FEEL_SUBSTEP_MAX so a pathological frame can't multiply the
+  // tiny player integrator into a spiral. Collision is resolved EVERY slice, so a
+  // wall is caught mid-traverse exactly as it is at full FPS.
+  const FEEL_SAFE_STEP = 0.35;      // m — max horizontal move per collision slice (< player radius 0.55, so overlap always registers)
+  const FEEL_SUBSTEP_MAX = 5;       // hard cap on player slices/frame (player integ is ~µs; 5× is free vs the 27ms world sim).
+                                    // Sized so even the raised loop FEEL_MAX (0.12s)
+                                    // at max on-foot speed (11.9 m/s) slices to
+                                    // ≤0.12*11.9/5 ≈ 0.29m per slice — still under
+                                    // FEEL_SAFE_STEP, so the collider never tunnels.
+
+  // Returns how many equal slices to split a feel-frame into so the player can't
+  // out-run its own collision. Based on the worst-case horizontal step this frame
+  // (desired move speed) AND the vertical fall step (fast tower falls), whichever
+  // would travel farther, divided by the safe slice distance. Falls back to 1
+  // (today's single integration) whenever feel-dt is absent or already small.
+  function feelSubsteps(fdt, horizSpeed, vy) {
+    const reach = Math.max(horizSpeed, Math.abs(vy)) * fdt;   // farthest this body could move this frame
+    if (reach <= FEEL_SAFE_STEP) return 1;
+    let n = Math.ceil(reach / FEEL_SAFE_STEP);
+    if (n > FEEL_SUBSTEP_MAX) n = FEEL_SUBSTEP_MAX;
+    return n;
+  }
+
+  // ---- STAIRS: seam-bridging ground support (anti-fall-through) -------------
+  // OWNER ("stairs suck — you can fall through them down many floors"). The walk
+  // surface on a building climb is CBZ.platforms ramp/landing records; groundAt()
+  // returns the highest one whose XZ-AABB contains the EXACT query point. Even
+  // with AGENT BUILD closing the geometry gaps, a fast player can land a substep
+  // EXACTLY on a hairline seam between two ramp AABBs (or just outside one by a
+  // sub-millimetre) — groundAt then reads only the terrain floor far below and the
+  // grounded path mistakes that one-sample dropout for "walked off a roof rim",
+  // handing you to gravity → you plummet through the whole stairwell.
+  //
+  // The canonical character-controller cure is a STEP-DOWN / anti-bump probe:
+  // before believing a sudden large drop, re-sample support at the MIDPOINT of the
+  // move you just swept and, if it still has valid in-reach support, snap there —
+  // a geometry seam between two ramp AABBs is a hairline crack, so half a substep
+  // back (≤ ~0.15m) is reliably still on solid ramp/landing, while the bad END
+  // sample fell into the crack. We deliberately probe ONLY the midpoint, never the
+  // pre-move start: a real ledge (roof rim / balcony) ALWAYS has solid support at
+  // the start point you just left, so bridging from there would glue you to every
+  // edge and you could never walk off — the midpoint (a fraction of a step back)
+  // is narrow enough to bridge a seam yet far short of any real walkable ledge, so
+  // stepping off a roof still drops you. Cost: this whole probe runs ONLY when the
+  // direct sample shows a sudden below-step-down drop while grounded in CITY mode
+  // with platforms present — flat ground / smooth ramps / every other mode pay
+  // nothing and stay byte-identical. Returns the bridged support, else `direct`
+  // (the real-ledge case → caller hands off to gravity exactly as before).
+  function stairSupport(direct, px0, pz0, x1, z1, fromY) {
+    // only the city building-stair climb has these ramp/landing platforms; this
+    // never fires in escape/survival (no city platforms under the player there).
+    if (CBZ.game.mode !== "city" || !CBZ.platforms || !CBZ.platforms.length) return direct;
+    const sMid = groundAt((px0 + x1) * 0.5, (pz0 + z1) * 0.5, fromY);
+    if (sMid > direct && sMid <= fromY + STEP_UP && sMid >= fromY - STEP_DOWN) return sMid;
+    return direct;
+  }
 
   // ---- CITY fall damage -------------------------------------------------
   // Falling used to be free: you'd land and vy just zeroed. In CITY mode a hard
@@ -269,49 +470,77 @@
     const moveSpeed = (player.crouch ? T.crouchSpeed : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale;
     let desX = 0, desZ = 0;
     if (len > 0) { mx /= len; mz /= len; desX = mx * moveSpeed; desZ = mz * moveSpeed; }
-    player.pos.x += desX * dt;
-    player.pos.z += desZ * dt;
     player.speed = Math.hypot(desX, desZ);
 
-    // jump + gravity + ground following (terrain, stairs, floors, roofs)
+    // jump is an EDGE event (impulse), not integrated — fire it once per frame
+    // before the substep loop so a held key can't double-jump across slices.
     if (!overview && !mapOpen && !stunned && keys[" "] && player.grounded) { player.vy = T.jumpVel; player.grounded = false; CBZ.sfx("jump"); }
-    const support = groundAt(player.pos.x, player.pos.z, player.pos.y);
-    if (player.grounded) {
-      if (support <= player.pos.y + STEP_UP && support >= player.pos.y - STEP_DOWN) {
-        // close enough to the surface under us — stick to it. This follows
-        // slopes DOWN, climbs a stair tread UP, and steps down a short ledge,
-        // all without a hover or a bounce.
-        player.pos.y = support; player.vy = 0; player._fallPeak = 0;
-      } else {
-        // walked off an edge taller than a stair (a roof rim, a balcony) —
-        // hand off to gravity so you actually fall instead of snapping down.
-        player.grounded = false;
-        player.vy -= T.gravity * dt;
-        player.pos.y += player.vy * dt;
-        if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;
-        if (player.pos.y <= support) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); }
+
+    // FEEL: integrate the LOCAL player on the real wall-clock delta so it moves
+    // at correct speed under load (kills the slow-mo wade). fdt falls back to dt
+    // exactly when loop.js hasn't provided feelDt OR the flag is off — identical
+    // to today in that case. We split fdt into collision-safe slices (see above)
+    // so a bigger step can never tunnel a wall or overshoot a landing.
+    const fdt = (CBZ.feelDt != null ? CBZ.feelDt : dt);
+    const nSub = (fdt !== dt) ? feelSubsteps(fdt, player.speed, player.vy) : 1;
+    const subDt = fdt / nSub;
+    for (let s = 0; s < nSub; s++) {
+      const px0 = player.pos.x, pz0 = player.pos.z;   // pre-move XZ for the stair seam probe
+      player.pos.x += desX * subDt;
+      player.pos.z += desZ * subDt;
+
+      // gravity + ground following (terrain, stairs, floors, roofs)
+      let support = groundAt(player.pos.x, player.pos.z, player.pos.y);
+      // ANTI-FALL-THROUGH: a grounded actor whose support suddenly drops below
+      // step-down reach is about to be handed to gravity. On the city stairs that
+      // "drop" is usually a one-sample seam between ramp AABBs, not a real ledge —
+      // re-probe the swept path and snap to the highest support still in reach, so
+      // a fast climber is never dumped down the stairwell. No-op off the city
+      // stairs (escape/survival, flat ground, real ledges) → behaviour unchanged.
+      if (player.grounded && support < player.pos.y - STEP_DOWN) {
+        support = stairSupport(support, px0, pz0, player.pos.x, player.pos.z, player.pos.y);
       }
-    } else {
-      player.vy -= T.gravity * dt;
-      player.pos.y += player.vy * dt;
-      if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;   // track peak downward speed this fall
-      if (player.pos.y <= support && player.vy <= 0) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); } // landed
+      if (player.grounded) {
+        if (support <= player.pos.y + STEP_UP && support >= player.pos.y - STEP_DOWN) {
+          // close enough to the surface under us — stick to it. This follows
+          // slopes DOWN, climbs a stair tread UP, and steps down a short ledge,
+          // all without a hover or a bounce.
+          player.pos.y = support; player.vy = 0; player._fallPeak = 0;
+        } else {
+          // walked off an edge taller than a stair (a roof rim, a balcony) —
+          // hand off to gravity so you actually fall instead of snapping down.
+          player.grounded = false;
+          player.vy -= T.gravity * subDt;
+          player.pos.y += player.vy * subDt;
+          if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;
+          if (player.pos.y <= support) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); }
+        }
+      } else {
+        player.vy -= T.gravity * subDt;
+        player.pos.y += player.vy * subDt;
+        if (player.vy < 0 && -player.vy > (player._fallPeak || 0)) player._fallPeak = -player.vy;   // track peak downward speed this fall
+        if (player.pos.y <= support && player.vy <= 0) { player.pos.y = support; const ims = -player.vy; player.vy = 0; player.grounded = true; cityFallLand(ims); } // landed
+      }
+
+      resolveCollisions();
     }
 
-    resolveCollisions();
-
-    // sync model
+    // sync model. The PRESENTATION that should track the (now wall-clock) motion
+    // runs on fdt so the body doesn't turn / animate in slow-mo while it slides
+    // fast — body-yaw turn and the leg-cycle phase advance with the real move.
+    // These are exponential damps / a phase clock, so a larger fdt just reaches
+    // the target a touch sooner; with the flag off fdt===dt = today exactly.
     playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
     if (len > 0) {
       const tYaw = Math.atan2(mx, mz);
-      playerChar.group.rotation.y = lerpAngle(playerChar.group.rotation.y, tYaw, 1 - Math.pow(0.0006, dt));
+      playerChar.group.rotation.y = lerpAngle(playerChar.group.rotation.y, tYaw, 1 - Math.pow(0.0006, fdt));
     }
     // crouch squash
     const cs = player.crouch ? 0.62 : 1.0;
-    playerChar.group.scale.y += (cs - playerChar.group.scale.y) * (1 - Math.pow(0.001, dt));
+    playerChar.group.scale.y += (cs - playerChar.group.scale.y) * (1 - Math.pow(0.001, fdt));
     // get back up after a knockdown (ease the fall-over rotation out)
-    if (playerChar.group.rotation.x) playerChar.group.rotation.x = CBZ.damp(playerChar.group.rotation.x, 0, 9, dt);
-    animChar(playerChar, player.speed, dt);
+    if (playerChar.group.rotation.x) playerChar.group.rotation.x = CBZ.damp(playerChar.group.rotation.x, 0, 9, fdt);
+    animChar(playerChar, player.speed, fdt);
   }
 
   CBZ.updatePlayer = updatePlayer;

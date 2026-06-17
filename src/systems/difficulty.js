@@ -129,6 +129,11 @@
     const t = Math.min(TIERS, Math.floor(ramp * TIERS + 0.0001));
     if (t > tier) {
       tier = t;
+      // The prison-flavor difficulty hints ("⚠ The guards are getting restless"…)
+      // do NOT belong in the open CITY — advance the tier SILENTLY there (survival
+      // is already excluded in the driver). The difficulty math still applies; only
+      // the fourth-wall toast is suppressed.
+      if (CBZ.game && CBZ.game.mode === "city") return;
       const msg = TIER_HINTS[Math.min(TIER_HINTS.length - 1, t - 1)];
       if (typeof CBZ.flashHint === "function" && msg) CBZ.flashHint(msg, 2.2);
     }

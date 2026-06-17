@@ -12,6 +12,7 @@ import { rm } from "node:fs/promises";
 const scenario = process.argv[2] || "calm";
 const frames = Math.max(30, Number(process.argv[3]) || 90);
 const server = process.env.CBZ_PROFILE_URL || "http://127.0.0.1:8765/";
+const commandTimeout = Math.max(10000, Number(process.env.CBZ_CDP_TIMEOUT_MS) || 60000);
 const port = 9300 + Math.floor(Math.random() * 500);
 const profileDir = `/tmp/cbz-browser-profile-${port}`;
 const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -60,13 +61,14 @@ async function waitForPage() {
 function send(method, params = {}) {
   return new Promise((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { resolve, reject });
+    const request = { resolve, reject, timer: null };
+    pending.set(id, request);
     ws.send(JSON.stringify({ id, method, params }));
-    setTimeout(() => {
+    request.timer = setTimeout(() => {
       if (!pending.has(id)) return;
       pending.delete(id);
       reject(new Error(`${method} timed out`));
-    }, 10000);
+    }, commandTimeout);
   });
 }
 
@@ -80,6 +82,7 @@ async function connect(page) {
     const msg = JSON.parse(event.data);
     if (msg.id && pending.has(msg.id)) {
       const p = pending.get(msg.id); pending.delete(msg.id);
+      clearTimeout(p.timer);
       if (msg.error) p.reject(new Error(msg.error.message)); else p.resolve(msg.result);
       return;
     }

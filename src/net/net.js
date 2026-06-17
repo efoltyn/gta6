@@ -42,8 +42,30 @@
     if (list) for (const fn of list) { try { fn(m); } catch (e) { console.error("[net]", key, e); } }
   }
 
+  // BACKPRESSURE GATE (CBZ.netBackpressure, default ON; set false to revert).
+  // On a reliable WebSocket everything queued WILL arrive — eventually — so when
+  // the send buffer is already deep, queuing ANOTHER world/state snapshot just
+  // ships stale positions late and drives the relay toward its multi-MB socket
+  // kill (= the desync that breaks a shared world under load). We instead DROP
+  // high-frequency IDEMPOTENT snapshots while backed up (the next snapshot fully
+  // supersedes a dropped one); reliable events (ev/chat/join/death/kick/…) are
+  // NEVER dropped. Net effect: a slow link degrades to stutter, not a dropped
+  // connection. Inert under normal load (bufferedAmount stays ~0), so OFF==today
+  // everywhere except an actual overload.
+  const BP_LIMIT = 64 * 1024;        // bytes queued-but-unsent before we shed snapshots
+  net._bpDropped = 0;
+  function bpShedable(obj) {
+    if (obj.t === "world" || obj.t === "state") return true;            // a raw snapshot
+    return obj.t === "ev" && obj.e === "to" && obj.d &&                 // a per-guest "to"-wrapped snapshot
+      (obj.d.t === "world" || obj.d.t === "state");
+  }
   net.send = function (obj) {
-    if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(obj));
+    const ws = net.ws;
+    if (!ws || ws.readyState !== 1) return;
+    if (CBZ.netBackpressure !== false && ws.bufferedAmount > BP_LIMIT && bpShedable(obj)) {
+      net._bpDropped++; return;        // shed a stale snapshot rather than deepen the stall
+    }
+    ws.send(JSON.stringify(obj));
   };
   net.sendEv = function (obj) { obj.t = "ev"; net.send(obj); };
   net.chat = function (text) { net.send({ t: "chat", text }); };

@@ -129,6 +129,94 @@
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
   };
 
+  // ============================================================
+  //  COMPOSABLE WARDROBE CATALOG — the NEW buy/wear pipeline (contract C)
+  // ------------------------------------------------------------
+  //  These entries are addressed by a canonical `visualId` (NOT by their map
+  //  key) so the storefront modules (clothingstore.js / jewelry.js / pawnshop.js)
+  //  and the rig painter (clothes.js: cityComposableSpec / cityApplyComposite)
+  //  all reference the EXACT same string. They layer onto a PLAIN civilian base
+  //  one item per slot, so dressing up is composable instead of a single canned
+  //  outfit. tag:"clothing" / tag:"jewelry" keep them OUT of the legacy
+  //  "wearable" shop stock + fence paths (those filter tag==="wearable"); the new
+  //  modules pull them via cityEcon.itemsByTag(). Prices are research-grounded:
+  //  a plain tee ~$40, a collared shirt $60–120, a real (non-fused) blazer
+  //  $200–600, ties $40–90, a bowtie ~$50, white trousers ~$80, a bomber ~$300,
+  //  a tuxedo ~$2,500; watches climb from an everyday steel piece up through a
+  //  diver, a gold case, to a fully iced-out diamond watch.
+  //
+  //  visualId vocabulary (MUST equal clothes.js / contract [A]):
+  //    shirt_white, shirt_<c>_collar, blazer_<c>, tie_<c>, bowtie_black,
+  //    pants_white, jacket_bomber, tuxedo   (<c> ∈ a sensible subset of
+  //    navy/charcoal/burgundy/forest/white/black/red/silver/royal/pink/tan)
+  //  jewelry visualIds map to bling.js looks where one exists; gaps noted.
+  // ------------------------------------------------------------
+  // colors carried so the catalog can tint the rack sample + the rig without a
+  // second lookup. hex matches the sensible tailoring palette.
+  const FIT_HEX = {
+    navy: 0x27324a, charcoal: 0x3a3f47, burgundy: 0x5d2230, forest: 0x27432f,
+    white: 0xf2f2f2, black: 0x1b1d22, red: 0xb23030, silver: 0xb9c0c8,
+    royal: 0x2f5fd0, pink: 0xe4a7bd, tan: 0xc3a373,
+  };
+  function clothing(visualId, slot, drip, price, label, hex) {
+    ITEMS[label] = { value: price, tag: "clothing", slot: slot, drip: drip, visualId: visualId, label: label, hex: hex };
+  }
+  function jewel(visualId, slot, drip, price, label, look) {
+    ITEMS[label] = { value: price, tag: "jewelry", slot: slot, drip: drip, visualId: visualId, label: label, blingLook: look };
+  }
+
+  // ---- CLOTHING (composable, layered on the plain base) --------------------
+  // shirts (slot top). white tee is the cheap default everyone can afford.
+  clothing("shirt_white", "top", 1, 40, "White Tee", FIT_HEX.white);
+  // collared dress shirts in a tailoring palette ($60–120 by color/finish).
+  clothing("shirt_white_collar",    "top", 3, 80,  "White Collared Shirt",    FIT_HEX.white);
+  clothing("shirt_navy_collar",     "top", 3, 75,  "Navy Collared Shirt",     FIT_HEX.navy);
+  clothing("shirt_charcoal_collar", "top", 3, 70,  "Charcoal Collared Shirt", FIT_HEX.charcoal);
+  clothing("shirt_burgundy_collar", "top", 4, 95,  "Burgundy Collared Shirt", FIT_HEX.burgundy);
+  clothing("shirt_pink_collar",     "top", 4, 110, "Pink Collared Shirt",     FIT_HEX.pink);
+  clothing("shirt_royal_collar",    "top", 3, 65,  "Royal Collared Shirt",    FIT_HEX.royal);
+  // blazers (slot outer). a real half-canvas blazer, not a fused $80 slab.
+  clothing("blazer_navy",     "outer", 8,  280, "Navy Blazer",     FIT_HEX.navy);
+  clothing("blazer_charcoal", "outer", 8,  300, "Charcoal Blazer", FIT_HEX.charcoal);
+  clothing("blazer_burgundy", "outer", 9,  420, "Burgundy Blazer", FIT_HEX.burgundy);
+  clothing("blazer_forest",   "outer", 9,  380, "Forest Blazer",   FIT_HEX.forest);
+  clothing("blazer_black",    "outer", 10, 600, "Black Blazer",    FIT_HEX.black);
+  clothing("blazer_tan",      "outer", 8,  260, "Tan Blazer",      FIT_HEX.tan);
+  // ties (slot tie — a thin chest strip layered over the shirt) $40–90.
+  clothing("tie_navy",     "tie", 2, 50, "Navy Tie",     FIT_HEX.navy);
+  clothing("tie_charcoal", "tie", 2, 45, "Charcoal Tie", FIT_HEX.charcoal);
+  clothing("tie_burgundy", "tie", 3, 70, "Burgundy Tie", FIT_HEX.burgundy);
+  clothing("tie_forest",   "tie", 2, 60, "Forest Tie",   FIT_HEX.forest);
+  clothing("tie_red",      "tie", 3, 90, "Red Power Tie", FIT_HEX.red);
+  clothing("tie_silver",   "tie", 3, 75, "Silver Tie",   FIT_HEX.silver);
+  // bowtie (slot tie — the formal alternative, at the collar).
+  clothing("bowtie_black", "tie", 4, 50, "Black Bow Tie", FIT_HEX.black);
+  // white trousers (slot bottom) — the summer/formal bottom.
+  clothing("pants_white", "bottom", 4, 80, "White Trousers", FIT_HEX.white);
+  // bomber (slot outer) — solid shell w/ ribbed hem, a streetwear staple.
+  clothing("jacket_bomber", "outer", 6, 300, "Bomber Jacket (Composable)", FIT_HEX.black);
+  // tuxedo (slot outer) — the painted formal special; the apex of the rack.
+  clothing("tuxedo", "outer", 20, 2500, "Tuxedo (Composable)", FIT_HEX.black);
+
+  // ---- JEWELRY (composable; renders via bling.js real meshes) --------------
+  // watches (slot watch). steel = everyday case; diver = sport tool watch; gold
+  // = a precious-metal case; iced = a fully diamond-paved bust-down. bling.js
+  // has watchSilver/watchGold/watchIced looks — steel+diver share the silver
+  // look, gold the gold look, iced the iced look (see deviations).
+  jewel("watch_steel", "watch", 6,  1200,  "Steel Watch",        "watchSilver");
+  jewel("watch_diver", "watch", 9,  8000,  "Diver Watch",        "watchSilver");
+  jewel("watch_gold",  "watch", 14, 18000, "Gold Watch",         "watchGold");
+  jewel("watch_iced",  "watch", 26, 45000, "Iced-Out Watch",     "watchIced");
+  // chains (slot chain). bling.js chainGold / chainIced looks map 1:1.
+  jewel("chain_gold",  "chain", 7,  600,   "Gold Chain (Composable)",  "chainGold");
+  jewel("chain_iced",  "chain", 22, 8500,  "Iced Chain (Composable)",  "chainIced");
+  // ring (slot ring). bling.js `ring` glint-dot look.
+  jewel("ring_diamond", "ring", 10, 1500,  "Diamond Ring (Composable)", "ring");
+  // grill (slot glasses — the mouth piece rides the face slot like the legacy
+  // Diamond Grill). bling.js has NO grill look (see deviations) → falls back to
+  // the `ring` glint until clothes.js/bling.js add a dedicated grill mesh.
+  jewel("grill_diamond", "glasses", 12, 4000, "Diamond Grill (Composable)", "ring");
+
   const SHOP_STOCK = {
     guns:        ["Pistol", "Revolver", "Desert Eagle", "SMG", "Uzi", "Shotgun", "Rifle", "AK-47", "LMG", "Sniper", "Bazooka", "Rocket Launcher", "Grenade", "Ammo Box", "Body Armor", "Knife", "Bat"],
     jewelry:     ["Gold Chain", "Diamond Ring", "Rolex", "Diamond Grill", "Earrings", "Iced Chain", "Iced Watch", "Diamond Pinky"],
@@ -191,6 +279,20 @@
 
   let _seed = 1357913 & 0x7fffffff;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
+
+  // All catalog entries carrying a given tag, as an array of records. Each record
+  // is the ITEMS value augmented with its map `name` (so callers get the display
+  // key alongside value/slot/drip/visualId). Used by the storefront modules
+  // (clothingstore.js / jewelry.js / pawnshop.js) to build their racks. Cached
+  // (the catalog is static after load) keyed by tag.
+  const _byTag = {};
+  function itemsByTag(tag) {
+    if (_byTag[tag]) return _byTag[tag].slice();
+    const out = [];
+    for (const name in ITEMS) { const it = ITEMS[name]; if (it && it.tag === tag) out.push(Object.assign({ name: name }, it)); }
+    _byTag[tag] = out;
+    return out.slice();
+  }
 
   function add(name, n) { n = n || 1; g.cityInv = g.cityInv || {}; g.cityInv[name] = (g.cityInv[name] || 0) + n; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
   function has(name) { return ((g.cityInv && g.cityInv[name]) || 0) > 0; }
@@ -1028,6 +1130,8 @@
     // --- airpower prices (the F-22 + its rearm) ---
     JET_PRICE, MISSILE_RESUPPLY,
     add, has, count, take, drip, buyPrice, sellPrice, wholesalePrice,
+    // composable wardrobe catalog (contract C): tag-filtered item records
+    itemsByTag,
     // equipped-outfit drip model
     SLOTS, equip, unequip, slotOf, isEquipped, outfit, resetOutfit, playerDrip,
     stockFor(kind) { return SHOP_STOCK[kind] || []; },

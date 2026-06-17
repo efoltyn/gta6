@@ -33,9 +33,7 @@
   CBZ.CITY_TP = {
     HEIGHT: 1.42,      // rig pivot above feet — shoulder height, not overhead (was 1.82): camera rides level with the character, the street reads at eye level
     DIST: 4.3,         // behind-the-back distance (was 7.6) — close enough to feel attached, far enough to read the body; scroll wheel still scales around this
-    DIST_AIM: 2.9,     // armed/aiming distance — tighter than unarmed so raising a gun visibly punches IN (keeps the old aim-tightens contract)
     SIDE: 0.7,         // camera lateral offset to the player's RIGHT — character sits left-of-center, you see past their right shoulder down the street
-    SIDE_AIM: 1.0,     // harder over-shoulder when armed — clear sightline past the head
     PITCH: 0.04,       // default orbit pitch on city entry — near-level (was 0.46 looking down): horizon sits high in frame, more world, less pavement
     LOOK_Y: 1.45,      // look-target height above feet — chest/shoulder aim point; with the near-level pitch this gives a subtle down-gaze, not a top-down stare
     LEAD: 4.6,         // forward look-ahead (was 3.6) — a touch more breathing room down-street
@@ -43,7 +41,27 @@
     DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly instead of rigid-locking; bigger = stiffer
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
     FOV: 57,           // base FOV (was 61) — narrower lens = more cinematic compression; speed kick still widens it
-    FOV_AIM: 55,       // armed FOV — a hair tighter than the old 58
+    // ---- ARMED / ADS over-shoulder tier (read EVERY frame by systems/camera.js
+    //      via the `shoulder` boolean). These three are GETTERS so holding RMB
+    //      (CBZ.isADS) punches the cam IN + narrows the lens for a precise ADS
+    //      frame, WITHOUT editing systems/camera.js — the AIM values it already
+    //      reads (DIST_AIM/SIDE_AIM/FOV_AIM) now simply respond to RMB. The
+    //      smoothing there (camDist/fov SmoothDamp) eases the transition. When
+    //      RMB isn't held these return the same always-ready armed frame as before. ----
+    // FORTNITE-style over-shoulder ADS punch-in (owner reference): holding RMB
+    // pulls the cam IN TIGHT and FURTHER over the RIGHT shoulder so the character
+    // shifts hard LEFT of screen and gets BIG, with a real zoom toward the aim.
+    // DIST_AIM_ADS pulls the boom in tight; SIDE_AIM_ADS goes UP (not down) so the
+    // cam rides further over the shoulder — systems/camera.js applies camSide along
+    // the player's RIGHT vector, so a BIGGER value pushes the character left, which
+    // is the Fortnite ADS read (the old 0.82 < 1.0 base pulled it the WRONG way,
+    // toward center); FOV narrows for the zoom. SmoothDamp eases the transition.
+    DIST_AIM_BASE: 2.9, DIST_AIM_ADS: 1.6,    // armed distance → punched in TIGHT on RMB
+    SIDE_AIM_BASE: 1.0, SIDE_AIM_ADS: 1.2,    // over-shoulder offset → FURTHER over the shoulder on RMB (char hard-left)
+    FOV_AIM_BASE: 55,   FOV_AIM_ADS: 44,       // armed FOV → narrower (real zoom) on RMB
+    get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
+    get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
+    get FOV_AIM()  { return (CBZ.isADS && CBZ.isADS()) ? this.FOV_AIM_ADS  : this.FOV_AIM_BASE; },
   };
 
   CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };

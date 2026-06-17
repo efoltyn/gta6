@@ -67,6 +67,23 @@ function loadConfig() {
 
 const cfg = loadConfig();
 
+// ----------------------------------------------------- robustness knobs ---
+// Demo-day hardening for a small (2-6) friend group joining over a tunnel.
+// All default ON (they degrade a flaky connection toward "today"); each is
+// reversible via env if it ever misbehaves, with NO wire-protocol change.
+//   CBZ_NO_HEARTBEAT=1         -> never reap on missed pongs (old behavior:
+//                                 a half-open/zombie socket lingers until TCP
+//                                 eventually times out — minutes over a tunnel)
+//   CBZ_NO_RECONNECT_DEDUPE=1  -> don't drop a prior same-pid session on rejoin
+const HEARTBEAT = process.env.CBZ_NO_HEARTBEAT !== "1";
+const DEDUPE_RECONNECT = process.env.CBZ_NO_RECONNECT_DEDUPE !== "1";
+// ping cadence + how long silence before a socket is considered dead. 15s pings
+// sit well under typical proxy/tunnel idle timeouts (~60-100s); ~50s of no pong
+// = ~3 missed pings before we reap, so a momentarily slow-but-alive client is
+// never wrongly kicked mid-demo.
+const HEARTBEAT_MS = Number(process.env.CBZ_HEARTBEAT_MS) || 15000;
+const HEARTBEAT_DEAD_MS = Number(process.env.CBZ_HEARTBEAT_DEAD_MS) || 50000;
+
 // ----------------------------------------------------------------- world ---
 // The world lives in server/worlds/<name>.json — saved characters keyed by
 // pid, turf, building damage. Ambient peds/traffic regenerate (never saved).
@@ -178,11 +195,39 @@ function info() {
   };
 }
 
-function send(p, msg) { p.conn.send(JSON.stringify(msg)); }
+// BACKPRESSURE (CBZ_NO_BACKPRESSURE=1 to disable; CBZ_BP_LIMIT overrides bytes).
+// The relay forwards the host's world/state snapshots to every guest; a slow
+// guest's outbound write buffer would grow unbounded and the socket dies at
+// multi-MB → that guest desyncs. We instead DROP high-frequency IDEMPOTENT
+// snapshots to a guest whose write buffer is already deep (the next snapshot
+// supersedes a dropped one). Reliable traffic (join/leave/ev/chat/host/deny/…)
+// is NEVER dropped. Inert under normal load (writableLength stays ~0).
+const NET_BP = process.env.CBZ_NO_BACKPRESSURE !== "1";
+const BP_LIMIT = process.env.CBZ_BP_LIMIT != null ? Number(process.env.CBZ_BP_LIMIT) : 512 * 1024;
+let bpDropped = 0;
+function connBuffered(p) {
+  const s = p.conn && p.conn.socket;          // wsmini WSConn wraps a node net.Socket
+  return s && typeof s.writableLength === "number" ? s.writableLength : 0;
+}
+function bpShedable(msg) {
+  if (msg.t === "world" || msg.t === "state") return true;            // a raw snapshot
+  return msg.t === "ev" && msg.e === "to" && msg.d &&                 // a "to"-wrapped per-guest snapshot
+    (msg.d.t === "world" || msg.d.t === "state");
+}
+
+function send(p, msg) {
+  if (NET_BP && bpShedable(msg) && connBuffered(p) > BP_LIMIT) { bpDropped++; return; }
+  p.conn.send(JSON.stringify(msg));
+}
 
 function broadcast(msg, exceptId) {
   const str = JSON.stringify(msg);
-  for (const p of players.values()) if (p.id !== exceptId) p.conn.send(str);
+  const shed = NET_BP && bpShedable(msg);
+  for (const p of players.values()) {
+    if (p.id === exceptId) continue;
+    if (shed && connBuffered(p) > BP_LIMIT) { bpDropped++; continue; }
+    p.conn.send(str);
+  }
 }
 
 function pickHost() {
@@ -268,6 +313,9 @@ function handleCommand(p, text) {
 function onConnection(conn, req) {
   let p = null; // set after hello
   let saidHello = false;
+  // seed liveness so the heartbeat reaper gives a fresh socket a full grace
+  // window before its first pong (wsmini stamps conn.lastPong on every pong)
+  conn.lastPong = Date.now();
 
   conn.onmessage = (str) => {
     let m;
@@ -287,10 +335,27 @@ function onConnection(conn, req) {
         conn.close();
         return;
       }
-      let name = sanitizeName(m.name);
-      while ([...players.values()].some((q) => q.name === name)) name += "_";
       const role = (cfg.roles || []).some((r) => r.id === m.role) ? m.role : ((cfg.roles && cfg.roles[0] && cfg.roles[0].id) || "civ");
       const pid = (typeof m.pid === "string" && m.pid) ? m.pid.slice(0, 64) : null;
+      // RECONNECT / stale-socket cleanup: a friend whose tunnel blipped (or who
+      // refreshed the tab) comes back with the SAME stable pid (netpersist.js)
+      // before the old TCP socket has finished dying — over a tunnel that lag
+      // can run minutes. Without this the old session lingers as a ghost (a
+      // phantom avatar the host keeps syncing, and the name picks up a "_").
+      // Drop the prior session for this pid first, so the reconnect is clean and
+      // — crucially — if that ghost was the SIM HOST, migration runs now instead
+      // of the world staying frozen behind a dead host. Reuses the normal
+      // leave/host-migration path; no wire change. Off with CBZ_NO_RECONNECT_DEDUPE=1.
+      if (DEDUPE_RECONNECT && pid) {
+        for (const q of [...players.values()]) {
+          if (q.pid !== pid || q.conn === conn) continue;
+          console.log(`[server] reconnect: dropping stale session #${q.id} ${q.name} (pid match)`);
+          try { q.conn.close(); } catch (e) {}
+          onLeave(q, "reconnect");
+        }
+      }
+      let name = sanitizeName(m.name);
+      while ([...players.values()].some((q) => q.name === name)) name += "_";
       p = { id: nextId++, name, role, pid, conn, admin: false, joinedAt: Date.now() };
       players.set(p.id, p);
       // first player into an empty room becomes the world simulator
@@ -385,8 +450,26 @@ const server = http.createServer((req, res) => {
 
 wsmini.attach(server, "/ws", onConnection);
 
-// keep connections honest
-setInterval(() => { for (const p of players.values()) p.conn.ping(); }, 20000);
+// keep connections honest — and reap the dead. wsmini already records
+// conn.lastPong on every pong; here we finally READ it. A socket that has
+// stopped ponging for HEARTBEAT_DEAD_MS is half-open (tunnel/NAT/Wi-Fi drop
+// that never sent a TCP FIN) — we close + onLeave it on the SERVER's clock
+// instead of waiting minutes for the OS to notice. This is the single most
+// important demo fix: if a ZOMBIE socket is the sim host, the world is frozen
+// for everyone until migration; onLeave(pickHost) re-elects a live host now.
+// With CBZ_NO_HEARTBEAT=1 it falls back to the old ping-only behavior exactly.
+setInterval(() => {
+  const now = Date.now();
+  for (const p of [...players.values()]) {
+    if (HEARTBEAT && p.conn.lastPong && (now - p.conn.lastPong) > HEARTBEAT_DEAD_MS) {
+      console.log(`[server] heartbeat: reaping #${p.id} ${p.name} (no pong ${Math.round((now - p.conn.lastPong) / 1000)}s)`);
+      try { p.conn.close(); } catch (e) {}
+      onLeave(p, "timeout"); // same path as a clean disconnect: re-elects host, broadcasts leave
+      continue;
+    }
+    try { p.conn.ping(); } catch (e) {}
+  }
+}, HEARTBEAT ? HEARTBEAT_MS : 20000);
 
 // optional directory announce
 if (cfg.directory) {

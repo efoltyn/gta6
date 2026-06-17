@@ -739,7 +739,10 @@
     if (g.mode !== "city") return;
     if (!S.inited) {
       // belt-and-braces if the spawn hook is absent: self-start once the city is up
-      if (CBZ.cityPeds && CBZ.cityPeds.length && arena()) CBZ.spawnCityVips();
+      // …but NOT while the named-ped spawn slice is still draining: finishSpawn
+      // will call spawnCityVips against the COMPLETE roster, so self-starting
+      // here against the partial list would orphan VIPs when that re-seed runs.
+      if (CBZ.cityPeds && CBZ.cityPeds.length && arena() && !CBZ.citySpawnDraining) CBZ.spawnCityVips();
       else return;
     }
     for (let si = 0; si < S.slots.length; si++) {

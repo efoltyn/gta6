@@ -91,6 +91,7 @@
     else if (kind === "cuff") gm = CBZ.boxGeom(0.32, 0.05, 0.32);     // thin band wrapping the 0.3 forearm
     else if (kind === "face") gm = CBZ.boxGeom(0.10, 0.07, 0.03);     // watch face plate on the band
     else if (kind === "ring") gm = CBZ.boxGeom(0.05, 0.04, 0.05);     // a glint dot, not a knuckle-duster
+    else if (kind === "grill") gm = CBZ.boxGeom(0.16, 0.05, 0.04);    // an iced bar across the mouth (a grill)
     else gm = CBZ.boxGeom(0.68, 0.16, 0.68);                          // rag: headband enclosing the 0.64 hair
     geos[kind] = gm;
     return gm;
@@ -105,6 +106,7 @@
       silver: CBZ.cmat(0xb9c0c8, { emissive: 0x7e8790, ei: 0.35 }),
       ice: CBZ.cmat(0xeaf6ff, { emissive: 0x9fd8ff, ei: 0.65 }),
       glint: CBZ.cmat(0xffffff, { emissive: 0xcfeaff, ei: 0.95 }),
+      blueDial: CBZ.cmat(0x1b3a6b, { emissive: 0x0a1830, ei: 0.3 }),   // a diver's blue dial
     };
     return _mats;
   }
@@ -164,10 +166,16 @@
       watchGold: watch(M.gold, M.gold),
       watchSilver: watch(M.silver, M.silver),
       watchIced: watch(M.ice, M.glint),
+      watchSteel: watch(M.silver, M.silver),                                   // clean steel dress watch
+      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.66, z: 0 },      // steel band
+        { kind: "face", mat: M.blueDial, x: 0, y: -0.66, z: 0.165 },           // signature blue dial
+        { kind: "ring", mat: M.glint, x: 0, y: -0.60, z: 0.18 }],              // lume pip
       // tennis bracelet — band only
       bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.66, z: 0 }],
       // ring — a glint dot on the hand's front edge
       ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.80, z: 0.17 }],
+      // grill — a small iced bar across the lower face (the mouth)
+      grill: [{ kind: "grill", mat: M.glint, x: 0, y: 0.28, z: 0.265 }],
     };
     return _looks;
   }
@@ -185,8 +193,8 @@
   }
 
   // ---- which rig anchor each slot hangs from ----
-  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", head: "neck" };
-  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head"];
+  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", head: "neck", mouth: "neck" };
+  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head", "mouth"];
 
   // shared finish classifiers — the SAME name reads the same on a ped and on you.
   function chainLookOf(s) {
@@ -198,7 +206,8 @@
   function watchLookOf(s) {
     const L = looks();
     if (s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0) return L.watchIced;
-    if (s.indexOf("omega") >= 0) return L.watchSilver;
+    if (s.indexOf("diver") >= 0) return L.watchDiver;
+    if (s.indexOf("steel") >= 0 || s.indexOf("omega") >= 0) return L.watchSilver;
     return L.watchGold;
   }
 
@@ -354,10 +363,11 @@
     _flex = [];
     for (const name in items) {
       const it = items[name];
-      if (!it || (it.tag !== "wearable" && it.tag !== "valuable")) continue;
+      if (!it || (it.tag !== "wearable" && it.tag !== "valuable" && it.tag !== "jewelry")) continue;
       const s = name.toLowerCase();
       let slot = null;
-      if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) slot = "neck";
+      if (s.indexOf("grill") >= 0) slot = "mouth";
+      else if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) slot = "neck";
       else if (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
                s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0) slot = "wristL";
       else if (s.indexOf("earring") < 0 && (s.indexOf("ring") >= 0 || s.indexOf("pinky") >= 0)) {
@@ -390,7 +400,7 @@
     const tab = flexTable();
     if (!tab) return null;
     const econ = CBZ.cityEcon, L = looks();
-    const best = { neck: null, wristL: null, wristR: null, ring: null };
+    const best = { neck: null, wristL: null, wristR: null, ring: null, mouth: null };
     for (let i = 0; i < tab.length; i++) {
       const e = tab[i];
       if (econ.count(e.name) <= 0) continue;
@@ -408,11 +418,12 @@
       wristR: (best.wristR || vip) ? L.bracelet : null,
       ring: best.ring ? L.ring : null,
       head: rag ? rag.parts : null,
+      mouth: best.mouth ? L.grill : null,
     };
-    const any = want.neck || want.wristL || want.wristR || want.ring || want.head;
+    const any = want.neck || want.wristL || want.wristR || want.ring || want.head || want.mouth;
     const sig = (best.neck ? best.neck.name : "") + "|" + (best.wristL ? best.wristL.name : "") + "|" +
                 (best.wristR ? best.wristR.name : "") + "|" + (best.ring ? best.ring.name : "") + "|" +
-                (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
+                (best.mouth ? best.mouth.name : "") + "|" + (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
     return { want: any ? want : null, sig };
   }
 

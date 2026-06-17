@@ -35,6 +35,34 @@
   // squad, getting busted, an active deadline) while demoting ambient chatter.
   const NOTE_URGENT = /⚠|on fire|burning|starv|hungry|wanted|busted|jail|cops?|police|hit squad|drive-?by|hostile|warn|danger|surrender|bleeding|critical|dying|deadline|escape|robbed|alarm|shootout|ambush/i;
 
+  // FOURTH-WALL FILTER (owner directive): the ONLY hovering/floating text the
+  // world is allowed is the Lv.N tag over a head. Ambient NARRATION toasts —
+  // a stranger "saw that", "reported you", a "Traffic stop nearby", a rival gang
+  // "moving into" a district, a soldier who "defected"/"seized control", a
+  // bouncer barking at someone ELSE in the line, chapter-rank flavor — all break
+  // immersion. Because EVERY origin file funnels through city.note(), we drop
+  // these categories at this single chokepoint so no per-file edits are needed.
+  // Tuned to suppress only AMBIENT narration: player-triggered feedback (Bought/
+  // Sold/Equipped/Looted/Job accepted/heat/money) and URGENT danger still pass.
+  // NOTE: this MUST run before the NOTE_URGENT test — "reported you" etc. embed
+  // "police"/"cops", which NOTE_URGENT would otherwise promote to a centre flash.
+  const NOTE_FOURTH_WALL = new RegExp([
+    // --- witnesses / snitching (peds.js, jewelry.js) ---
+    "saw that", "reported you", "pointed you out", "Reported:", "🗣️",
+    "👀.*(saw|spun around|made)", "is a narc", "rival-affiliated",
+    // --- traffic flavor (vehicles.js) ---
+    "Traffic stop", "ticketed", "fleeing the police", "running from (the )?police",
+    // --- gang movement / ambient gang life (turf.js, gangs.js) ---
+    "is moving into", "defected", "seized (control of|a block|a turf)", "earned .*(pip|rank|stripe)",
+    // --- buyers / dealing ambience that just narrates NPC intent (careers.js) ---
+    "coming to score", "(buyer|buyers).*(coming|is coming|are coming)",
+    "is a regular now", "Word on the street",
+    // --- bouncer barks about OTHER guests in the line (club.js) ---
+    "bouncer waves a sharp-dressed guest", "turned away at the rope",
+    // --- shopkeeper / store ambience (citystaff.js, companies.js feed direct) ---
+    "Line out the door",
+  ].join("|"), "i");
+
   // CATEGORY throttle: ambient chatter (witnesses snitching, traffic stops,
   // service dispatch) embeds a UNIQUE ped name each time, so the exact-string
   // de-dup never catches the flood. Bucket each non-urgent note into a category
@@ -84,8 +112,13 @@
     // stays the headline channel (flashToast) untouched.
     note(msg, sec, opts) {
       if (!msg) return;
-      const now = (CBZ.now != null ? CBZ.now : performance.now());   // ms
       const force = !!(opts && opts.urgent);
+      // FOURTH-WALL DROP: kill ambient world-narration toasts outright (owner
+      // rule). Runs first so "reported you"/"running from police" can't sneak
+      // through NOTE_URGENT. An explicit opts.urgent caller can still force a
+      // message past the filter (none of the ambient origins set it).
+      if (!force && NOTE_FOURTH_WALL.test(msg)) return;
+      const now = (CBZ.now != null ? CBZ.now : performance.now());   // ms
       const urgent = force || NOTE_URGENT.test(msg);
       if (urgent) { if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2); return; }
       // ---- non-urgent: category throttle BEFORE the feed ----

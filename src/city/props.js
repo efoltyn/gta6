@@ -548,34 +548,68 @@
     }
 
     // ---- traffic-light heads at every intersection ----
-    // Each intersection gets one signal head on a pole; ns=true means the
-    // head currently governs the north–south flow when green. We build a 3-lamp
-    // head and stash the lamp meshes so traffic.js can recolour them.
-    // A proper 4-way: each intersection gets a signal head for EACH axis,
-    // placed on opposite corners and turned to face oncoming traffic, so the
-    // cross street correctly shows RED while the main runs GREEN.
+    // A REAL 4-way reads by APPROACH, not by axis-on-one-corner: a driver
+    // rolling up to the stop line must see a lit face turned square AT them.
+    // For each intersection we therefore build one head PER APPROACH THAT
+    // ACTUALLY HAS ONCOMING ROAD, parked on that approach's near-right corner,
+    // its lamp face rotated to point back at the oncoming driver.
+    //   • makeHead's lamp face is on local +z, so a head at world yaw rotY
+    //     shows its face along (sin rotY, 0, cos rotY). To face a driver who is
+    //     COMING FROM unit dir (fx,fz) we set rotY = atan2(fx, fz).
+    //   • the grid spans the whole map, so every interior crossing is a true
+    //     4-way — but a crossing on the OUTERMOST line (i==0/N or j==0/N) has
+    //     only a half-road stub on the outward side (the perimeter wall), i.e.
+    //     NO oncoming traffic: that approach is OMITTED so no head ever faces a
+    //     non-intersection. it.i / it.j vs N decide which approaches are real.
+    //   • heads are grouped by the axis they govern: ns[] = N–S-travel faces
+    //     (the avenue's north & south approaches), ew[] = E–W-travel faces
+    //     (the cross-street's west & east approaches). traffic.js lights a
+    //     whole axis array at once (and still handles the single-head path).
+    // Geometry is shared via geo() so adding ~2-4 heads/intersection stays
+    // draw-call cheap; the four base materials are shared, but each lamp keeps
+    // its OWN emissive material (traffic.js mutates it per-head every cycle).
+    const sigPoleG = geo("sigPole", () => new THREE.CylinderGeometry(0.12, 0.14, 5.2, 8));
+    const sigBoxG = geo("sigBox", () => new THREE.BoxGeometry(0.6, 1.6, 0.5));
+    const sigLampG = geo("sigLamp", () => new THREE.SphereGeometry(0.18, 10, 8));
+    const sigPoleM = mat(0x2c2f35), sigBoxM = mat(0x1c1f24);
     function makeHead(px, pz, rotY) {
       const head = new THREE.Group();
-      head.position.set(px, 0, pz); head.rotation.y = rotY;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 5.2, 8), mat(0x2c2f35));
+      // two approaches share a near corner (e.g. the S and E heads both want
+      // the +x/-z corner). Nudge each head sideways (perpendicular to its face)
+      // so the poles sit shoulder-to-shoulder on the kerb instead of z-fighting.
+      const sx = Math.cos(rotY) * 0.5, sz = -Math.sin(rotY) * 0.5;
+      head.position.set(px + sx, 0, pz + sz); head.rotation.y = rotY;
+      const pole = new THREE.Mesh(sigPoleG, sigPoleM);
       pole.position.y = 2.6; pole.castShadow = true; head.add(pole);
-      const box = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.6, 0.5), mat(0x1c1f24));
+      const box = new THREE.Mesh(sigBoxG, sigBoxM);
       box.position.set(0, 4.6, 0); head.add(box);
-      const red = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), lampMat(0xff3b3b));
-      const yel = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), lampMat(0xffcf3b));
-      const grn = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), lampMat(0x39ff66));
+      const red = new THREE.Mesh(sigLampG, lampMat(0xff3b3b));
+      const yel = new THREE.Mesh(sigLampG, lampMat(0xffcf3b));
+      const grn = new THREE.Mesh(sigLampG, lampMat(0x39ff66));
       red.position.set(0, 5.1, 0.28); yel.position.set(0, 4.6, 0.28); grn.position.set(0, 4.1, 0.28);
       head.add(red, yel, grn);
       root.add(head);
       return { red, yel, grn };
     }
     const off = city.ROAD / 2 + 0.6;
+    const NL = city.N != null ? city.N : ((city.xLines || [1]).length - 1);
     for (const it of city.intersections) {
-      // head governing N–S travel (faces along z), on the +x/+z corner
-      const ns = makeHead(it.x + off, it.z + off, 0);
-      // head governing E–W travel (faces along x), on the -x/-z corner
-      const ew = makeHead(it.x - off, it.z - off, Math.PI / 2);
-      it.light = { ns, ew, head: ns, red: ns.red, yel: ns.yel, grn: ns.grn };
+      const ns = [], ew = [];
+      // N–S travel runs along the avenue at this xLine. Its SOUTH (-z) approach
+      // exists unless this is the southmost line (j==0); the NORTH (+z) approach
+      // exists unless it's the northmost (j==N). Each head sits on the near-RIGHT
+      // corner of that approach, face turned to the oncoming driver.
+      if (it.j > 0)  ns.push(makeHead(it.x + off, it.z - off, Math.PI));   // from S, faces -z, right=+x
+      if (it.j < NL) ns.push(makeHead(it.x - off, it.z + off, 0));         // from N, faces +z, right=-x
+      // E–W travel runs along the cross-street at this zLine. WEST (-x) approach
+      // exists unless westmost (i==0); EAST (+x) unless eastmost (i==N).
+      if (it.i > 0)  ew.push(makeHead(it.x - off, it.z + off, -Math.PI / 2)); // from W, faces -x, right=+z
+      if (it.i < NL) ew.push(makeHead(it.x + off, it.z - off, Math.PI / 2));  // from E, faces +x, right=-z
+      // ns/ew are arrays of heads; traffic.js lights every head in an axis
+      // together. Keep the legacy single-head fields pointing at the first head
+      // of each axis (harmless back-compat; only traffic.js reads it.light).
+      const ns0 = ns[0] || null, ew0 = ew[0] || null;
+      it.light = { ns, ew, head: ns0 || ew0, red: ns0 && ns0.red, yel: ns0 && ns0.yel, grn: ns0 && ns0.grn };
     }
 
     // ---- street lamps along the avenues ----
@@ -968,6 +1002,42 @@
       city.streetProps.push({ x, z, type: "billboard" });
     }
 
+    // ----- BILLBOARD ROAD-CLEARANCE TEST (BUG FIX) -------------------------
+    // A billboard's footprint is a thin slab: its WIDTH (W, plus a little frame)
+    // runs along the board TANGENT; it's nearly flat in the facing direction
+    // (frame depth + the two leg colliders, r=0.35). The old placers only tested
+    // the board CENTRE against ONE road, so a board whose centre cleared the kerb
+    // could still throw its width — 4+ metres of it — out across a PERPENDICULAR
+    // cross-street, or sit a perimeter board's legs straight in the edge street.
+    // This tests the board's whole AABB footprint against EVERY road carriageway
+    // (centre-line ± ROAD/2) with a margin, so no part overhangs any kerb.
+    function billboardFootprint(yaw, big) {
+      const W = big ? 8.5 : 6.0;
+      const halfT = W / 2 + 0.2;                 // tangent half-span (frame = W+0.4)
+      const halfN = 0.35 + 0.35;                 // facing depth (frame) + leg collider r
+      const ca = Math.abs(Math.cos(yaw)), sa = Math.abs(Math.sin(yaw));
+      // world AABB half-extents (tangent runs on local +x → world (cos,-sin);
+      // normal on local +z → world (sin,cos))
+      return { extX: halfT * ca + halfN * sa, extZ: halfT * sa + halfN * ca };
+    }
+    // true if every part of the board's footprint clears every road by `marg`.
+    function billboardClearsRoads(x, z, yaw, big, marg) {
+      const fp = billboardFootprint(yaw, big);
+      const half = city.ROAD / 2;
+      const m = marg == null ? 1.0 : marg;
+      for (const r of city.roads) {
+        if (r.vertical) {
+          // carriageway is x ∈ road.x ± half, spanning z over road.len about road.z
+          if (Math.abs(z - r.z) - fp.extZ > r.len / 2) continue;   // footprint off the road's length
+          if (Math.abs(x - r.x) - fp.extX < half + m) return false;
+        } else {
+          if (Math.abs(x - r.x) - fp.extX > r.len / 2) continue;
+          if (Math.abs(z - r.z) - fp.extZ < half + m) return false;
+        }
+      }
+      return true;
+    }
+
     // =====================================================================
     //  PLACEMENT — march props around every block's sidewalk; bias the corners
     //  for hydrants/meters and put the bigger landmark props (shelters, big
@@ -1081,15 +1151,42 @@
     // ----- BILLBOARDS on the perimeter wall + a few rooftops ---------------
     // Big roadside billboards face inward along the outer walls (you see them as
     // you drive the ring road); their legs sit just inside the sidewalk band.
+    // BUG FIX: the old fixed +6 inset dropped a board's legs straight into the
+    // outermost cross-street (that street's kerb is only ~4.5 from the wall). We
+    // now push each board INWARD (along its facing normal, away from the wall)
+    // until its full footprint clears every road kerb, then place it — and skip
+    // it entirely if no inset within reach is clear (better a gap than a board
+    // in the carriageway). The inward direction is the board's local +z normal:
+    // world (sin yaw, cos yaw).
     const mnX = city.minX, mxX = city.maxX, mnZ = city.minZ, mxZ = city.maxZ;
     const bbStepX = (mxX - mnX) / 4, bbStepZ = (mxZ - mnZ) / 4;
+    // place a board at base (bx,bz) facing `yaw`, sliding it INWARD along
+    // (inX,inZ) AND laterally along the kerb (the board tangent) until its whole
+    // footprint clears every road. The lateral slide matters because a mid-wall
+    // board lands square on the perpendicular CENTRAL road, and its width — not
+    // its depth — straddles that carriageway: only stepping it sideways off the
+    // centre-line clears it. First clear spot wins; give up rather than place in
+    // the street.
+    function placePerimBoard(bx, bz, yaw, big, inX, inZ) {
+      const tx = inZ, tz = -inX;            // kerb tangent (perp to the inward dir)
+      for (let step = 0; step <= 9; step++) {
+        const ix = bx + inX * step * 1.5, iz = bz + inZ * step * 1.5;
+        for (const lat of [0, 9, -9, 16, -16, 22, -22]) {
+          const x = ix + tx * lat, z = iz + tz * lat;
+          if (Math.abs(x) > 9990 || Math.abs(z) > 9990) continue;
+          if (insideLot(x, z) || nearDoor(x, z, 3)) continue;
+          if (billboardClearsRoads(x, z, yaw, big, 1.0)) { billboard(x, z, yaw, big); return true; }
+        }
+      }
+      return false;
+    }
     for (let k = 1; k <= 3; k++) {
-      // north & south walls
-      billboard(mnX + bbStepX * k, mnZ + 6, 0, true);
-      billboard(mnX + bbStepX * k, mxZ - 6, Math.PI, true);
-      // west & east walls
-      billboard(mnX + 6, mnZ + bbStepZ * k, Math.PI / 2, true);
-      billboard(mxX - 6, mnZ + bbStepZ * k, -Math.PI / 2, k === 2 ? false : true);
+      // north & south walls (face inward: +z from the south wall, -z from north)
+      placePerimBoard(mnX + bbStepX * k, mnZ + 6, 0, true, 0, 1);
+      placePerimBoard(mnX + bbStepX * k, mxZ - 6, Math.PI, true, 0, -1);
+      // west & east walls (face inward: +x from west wall, -x from east)
+      placePerimBoard(mnX + 6, mnZ + bbStepZ * k, Math.PI / 2, true, 1, 0);
+      placePerimBoard(mxX - 6, mnZ + bbStepZ * k, -Math.PI / 2, k === 2 ? false : true, -1, 0);
     }
 
     // ----- CORE-AVENUE BILLBOARDS: the priciest faces in the city ----------
@@ -1111,19 +1208,27 @@
       }
       return false;
     }
-    const coreBand = city.ROAD / 2 + 2.6;     // sidewalk stand-off from the kerb
+    // BUG FIX: the old coreBand = ROAD/2 + 2.6 only stood the board CENTRE clear
+    // of the avenue, and inCrossRoad() only tested the centre — so a board whose
+    // 8.5m width spanned a perpendicular cross-street threw its edge/leg into
+    // that carriageway. We now search both the along-road position AND the kerb
+    // stand-off, and accept a spot ONLY when the board's full footprint clears
+    // every road (billboardClearsRoads). If nothing clears, the board is skipped
+    // rather than dropped in the street.
     function coreBoard(road, s) {
       if (!road) return;
-      // try a few stand-offs from the centre; take the first spot that's on
-      // real sidewalk (not a cross-street, not a lot, not blocking a door).
-      for (const t of [30, 44, 58]) {
-        if (inCrossRoad(s * t, road.vertical, road)) continue;
-        const bx = road.vertical ? road.x + s * coreBand : road.x + s * t;
-        const bz = road.vertical ? road.z + s * t : road.z + s * coreBand;
-        if (insideLot(bx, bz) || nearDoor(bx, bz, 4)) continue;
-        const yaw = road.vertical ? (s > 0 ? -Math.PI / 2 : Math.PI / 2) : (s > 0 ? Math.PI : 0);
-        billboard(bx, bz, yaw, true);
-        return;
+      const yaw = road.vertical ? (s > 0 ? -Math.PI / 2 : Math.PI / 2) : (s > 0 ? Math.PI : 0);
+      // along-road positions, then progressively deeper kerb stand-offs
+      for (const t of [38, 24, 52, 16, 64]) {
+        for (const band of [city.ROAD / 2 + 2.6, city.ROAD / 2 + 4.5, city.ROAD / 2 + 6.5]) {
+          const bx = road.vertical ? road.x + s * band : road.x + s * t;
+          const bz = road.vertical ? road.z + s * t : road.z + s * band;
+          if (Math.abs(bx) > 9990 || Math.abs(bz) > 9990) continue;
+          if (insideLot(bx, bz) || nearDoor(bx, bz, 4)) continue;
+          if (!billboardClearsRoads(bx, bz, yaw, true, 1.0)) continue;
+          billboard(bx, bz, yaw, true);
+          return;
+        }
       }
     }
     for (const s of [-1, 1]) { coreBoard(vAve, s); coreBoard(hAve, s); }
@@ -1217,19 +1322,14 @@
         const pipe = new THREE.Mesh(geo("roofPipe", () => new THREE.CylinderGeometry(0.12, 0.12, 1.8, 6)), pipeM);
         pipe.position.set(rcx + halfW * 0.8, h + 0.9, rcz - halfD * 0.8); root.add(pipe);
       }
-      // a roof-ACCESS STAIR HUT on bigger roofs (the bulkhead over the stairwell).
-      // Sits toward a back corner so it never blocks the centre gear cluster.
-      if (halfW > 3 && halfD > 3 && rng() < 0.45) {
-        const hut = new THREE.Group();
-        hut.position.set(rcx - halfW * 0.55, h, rcz - halfD * 0.55);
-        const box = new THREE.Mesh(geo("roofHut", () => new THREE.BoxGeometry(2.2, 1.9, 1.8)), hutM);
-        box.position.y = 0.95; box.castShadow = true; hut.add(box);
-        const cap = new THREE.Mesh(geo("roofHutRoof", () => new THREE.BoxGeometry(2.5, 0.16, 2.1)), hutRoofM);
-        cap.position.y = 1.95; hut.add(cap);
-        const door = new THREE.Mesh(geo("roofHutDoor", () => new THREE.PlaneGeometry(0.7, 1.4)), smat(0x23262b));
-        door.position.set(0, 0.72, 0.91); hut.add(door);
-        root.add(hut);
-      }
+      // ROOFTOP STAIR-HUT bulkhead REMOVED (owner-filmed): a plain box with a
+      // door read as a "fake elevator" you'd expect to enter but can't. The draw
+      // call below is preserved (same short-circuit as the old `&& rng() < 0.45`)
+      // so the deterministic per-roof prop stream stays byte-identical — only the
+      // hut meshes are gone. The real elevators (their lobby cab + enclosed shaft
+      // + roof headhouse) are built by city/elevators.js on storeys>=3 towers and
+      // are untouched.
+      if (halfW > 3 && halfD > 3) { rng(); }
       // PARAPET-RAILING SLATS — a top rail + vertical slats around the roof rim,
       // built as ONE merged-look run per edge using shared slat geometry. Modest
       // slat spacing keeps the count sane; only on roomy roofs.

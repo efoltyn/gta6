@@ -106,6 +106,7 @@ function SphereGeometry() { Geo.call(this); } SphereGeometry.prototype = Object.
 function IcosahedronGeometry() { Geo.call(this); } IcosahedronGeometry.prototype = Object.create(Geo.prototype);
 function ConeGeometry() { Geo.call(this); } ConeGeometry.prototype = Object.create(Geo.prototype);
 function CircleGeometry() { Geo.call(this); } CircleGeometry.prototype = Object.create(Geo.prototype);
+function TorusGeometry() { Geo.call(this); } TorusGeometry.prototype = Object.create(Geo.prototype);
 
 let nextMaterialId = 1;
 function Mtl(opts) { opts = opts || {}; this.id = nextMaterialId++; this.color = new Color(opts.color); this.emissive = new Color(opts.emissive); this.emissiveIntensity = opts.emissiveIntensity != null ? opts.emissiveIntensity : 1; this.map = opts.map || null; this.opacity = opts.opacity != null ? opts.opacity : 1; this.transparent = !!opts.transparent; }
@@ -150,7 +151,7 @@ InstancedMesh.prototype.setColorAt = function () { this.instanceColor = this.ins
 
 const THREE = {
   Group, Mesh, Sprite, Object3D: Obj3D,
-  BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CircleGeometry,
+  BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CircleGeometry, TorusGeometry,
   BufferGeometry, Float32BufferAttribute, BufferAttribute, Raycaster, Matrix4, InstancedMesh,
   DynamicDrawUsage: 35048, StaticDrawUsage: 35044,
   MeshLambertMaterial: Mtl, MeshBasicMaterial: Mtl, MeshStandardMaterial: Mtl, SpriteMaterial: Mtl,
@@ -280,17 +281,23 @@ CBZ.player = {
 CBZ.registerMode = CBZ.registerMode || function (id, def) { CBZ.modes[id] = def; };
 
 // ---------- load city files (index.html order) ----------
+// Use the engine's real collider broadphase so navigation profiles reflect the
+// browser runtime instead of the old no-op collision stub.
+load("src/systems/physics.js");
 // the shared body-physics layer (knockback/flinch/fling/HEAD-FLASH + order-24
 // step that integrates cityPeds/cityCops). Provides the REAL CBZ.body (the stub
 // above is replaced), needed to frame-test the gunfire/crash hit-flash.
 load("src/systems/grapple.js");
+// citynav/cityevents/crowd use the shared alloc-free spatial hash in the live
+// game. Load it here too so focused profiles measure the real code path.
+load("src/systems/spatialgrid.js");
 // the ONE engine gun system's inventory layer (unlockWeapon/hasWeapon/reset)
 if (fs.existsSync(path.join(__dirname, "..", "src/weapons/weapon-data.js"))) load("src/weapons/weapon-data.js");
 
 const cityFiles = [
-  "world", "buildings", "expansion", "props", "mode", "economy", "hunger", "wanted",
+  "world", "buildings", "citynav", "expansion", "props", "mode", "economy", "hunger", "wanted",
   "gangs", "social", "realestate", "view", "peds", "level", "sizeup", "crowd", "police", "traffic", "vehicles",
-  "shops", "careers", "interact", "combat", "death", "leaderboard", "zillow", "empire", "hud",
+  "shops", "careers", "interactions", "interact", "combat", "death", "leaderboard", "zillow", "empire", "hud",
   // aigoals: the crowd PURPOSE / needs layer (onUpdate 33) + the lone-wolf rampage
   // director (onUpdate 35). Loaded so the headless sim exercises both.
   "aigoals",
@@ -432,6 +439,24 @@ function testBuildings(city) {
   }
 }
 
+function testNoWindowlessClutter(city) {
+  console.log("== windowless-clutter tests ==");
+  const lots = city.lots.concat(city.annex && city.annex.lots || []);
+  const bad = lots.filter((l) => l.building &&
+    (l.building.boarded || l.building.facade === "fortified" || l.building.facade === "residential" || l.building.name === "Abandoned Building"));
+  if (bad.length) {
+    const sample = bad.slice(0, 4).map((l) => (l.building.name || l.kind) + "@" + Math.round(l.cx) + "," + Math.round(l.cz)).join("; ");
+    throw new Error("bad solid/sideways clutter shells still generated: " + sample);
+  }
+  for (const kind of ["food", "drugs"]) {
+    const lot = lots.find((l) => l.kind === kind);
+    if (!lot || !lot.building || !lot.building.windows || !lot.building.windows.length) {
+      throw new Error(kind + " lot has no visible window records");
+    }
+  }
+  console.log("windowless clutter: none; food/drug shops have windows");
+}
+
 function testIsland(city) {
   console.log("== island expansion tests ==");
   const X = city.annex, B = city.bridge;
@@ -465,6 +490,7 @@ function run() {
 
   testIsland(city);
   testBuildings(city);
+  testNoWindowlessClutter(city);
 
 
   console.log("== entering city mode ==");
@@ -528,7 +554,7 @@ function run() {
 
   testLevels();
   stressTest();
-  testCrash();
+  if (!process.env.CBZ_SKIP_CRASH) testCrash();   // crash sim can hang amid concurrent tree edits; skippable for crowd/flee checks
   testCrowd();
 
   printProfile();
@@ -589,6 +615,29 @@ function testCrowd() {
   });
   ok("agents walk (most moved)", moved >= 4, moved + "/5 moved");
   ok("agents stay in the city", inBounds === 5, inBounds + "/5 in bounds");
+
+  // ---- MASS FLEE (#8): a gunshot EVENT must scatter the instanced crowd AWAY ----
+  if (CBZ.cityCrowdFlee) {
+    CBZ.crowdMassFlee = true;
+    const threat = CBZ.cityCrowdAgent(0), tpx = threat.x, tpz = threat.z, R = 50;
+    const near = [], nd0 = [];
+    for (let i = 0; i < CBZ.cityCrowdCount(); i++) {
+      const a = CBZ.cityCrowdAgent(i), d = Math.hypot(a.x - tpx, a.z - tpz);
+      if (d < R) { near.push(i); nd0.push(d); }
+    }
+    // trigger via the real event bus when it's loaded (tests the full wiring), else
+    // call the crowd hook directly (cityevents.js isn't in the harness load set).
+    if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "gunshot", pos: { x: tpx, z: tpz }, radius: R, intensity: 1 });
+    else CBZ.cityCrowdFlee(tpx, tpz, R, 1);
+    for (let f = 0; f < 90; f++) step(1 / 60);                       // ~1.5s of panic
+    let aBefore = 0, aAfter = 0;
+    near.forEach((i, k) => { aBefore += nd0[k]; const a = CBZ.cityCrowdAgent(i); aAfter += Math.hypot(a.x - tpx, a.z - tpz); });
+    const avgB = aBefore / (near.length || 1), avgA = aAfter / (near.length || 1);
+    ok("crowd flees a gunshot (mass flee #8)", near.length >= 3 && avgA > avgB + 2,
+      near.length + " near, avg dist " + avgB.toFixed(1) + "→" + avgA.toFixed(1) + "m");
+    CBZ.crowdMassFlee = false;                                       // restore default for later tests
+  }
+
   if (fails > 0) { console.log("RESULT: FAIL (crowd tests, " + fails + ")"); process.exit(1); }
   console.log("  city mass-crowd OK");
 }
@@ -828,13 +877,14 @@ function testGlassRay() {
   }
   if (!pane.shattered) throw new Error("targeted pane did not shatter after repeated hit");
   console.log("  ✓ ray through a window shattered exactly that pane @ " + pane.x.toFixed(1) + "," + pane.z.toFixed(1));
-  // re-firing the same ray now finds nothing within range (pane gone) → null
+  // Re-firing the same ray must never target the same shattered pane. Dense
+  // window bands may legitimately let the ray continue into the next intact pane.
   const again = CBZ.cityShatterRay(ox, pane.y, pane.z, 1, 0, 0, pane.hw * 2 + 2);
-  if (again) throw new Error("a shattered pane shattered again");
+  if (again === pane) throw new Error("same shattered pane was hit again");
   // a ray pointing away from the pane hits nothing
   const away = CBZ.cityShatterRay(ox, pane.y, pane.z, -1, 0, 0, 2);
   if (away) throw new Error("ray fired away from glass still hit it");
-  console.log("  ✓ shattered pane is inert to a second shot; away-ray misses");
+  console.log("  ✓ shattered pane is inert to a second shot; away-ray misses" + (again ? " (follow-through hit another pane)" : ""));
   console.log("  gunfire-glass OK");
 }
 

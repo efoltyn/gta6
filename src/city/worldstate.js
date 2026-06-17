@@ -39,6 +39,19 @@
       weapons: [],                // shared engine weapon ids
       currentWeapon: null,
       meleeWeapon: null,
+      // ---- financial obligations + equipped-slot bookkeeping that must survive
+      //      a localStorage reload AND an MP rejoin. bank.js (g.cityLoans) and
+      //      pawnshop.js (g.cityPawnTickets) ALSO stamp/hydrate these through the
+      //      same collector via their own save-wrap shims; seeding + round-tripping
+      //      them HERE too makes worldstate.js self-sufficient (defense in depth):
+      //      the borrowed cash already rides g.cash and the pawned item already
+      //      left g.cityInv, so dropping the debt/ticket on reload = free money /
+      //      an annihilated owned asset. cityOutfit = economy.js's SLOT→worn map,
+      //      cityFenceRep = the resale-loyalty bonus; neither was persisted before.
+      cityLoans: [],
+      cityPawnTickets: [],
+      cityOutfit: {},
+      cityFenceRep: 0,
       assets: { properties: [], businesses: [], vehicles: [], weapons: [] },
       injuries: 0,
       criminalRecord: { wantedPeak: 0, heatPeak: 0, arrests: 0, charges: [] },
@@ -92,6 +105,13 @@
     w.debt = g.cityDebt || w.debt || 0;
     w.respect = g.respect || 0;
     w.inventory = copy(g.cityInv || {});
+    // financial obligations + worn-slot bookkeeping (bank.js/pawnshop.js also
+    // stamp the first two via their own collector wraps — same runtime arrays,
+    // so this write is idempotent and keeps worldstate.js self-contained).
+    w.cityLoans = copy(g.cityLoans || []);
+    w.cityPawnTickets = copy(g.cityPawnTickets || []);
+    w.cityOutfit = copy(g.cityOutfit || {});
+    w.cityFenceRep = g.cityFenceRep || 0;
     const stowed = g._copStow;
     w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
     w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
@@ -112,6 +132,16 @@
     g.cityDebt = w.debt || 0;
     g.respect = w.respect || 0;
     g.cityInv = copy(w.inventory || {});
+    // restore loans/tickets/worn-outfit/fence-rep on reload (cityWorldBeginRun)
+    // AND MP rejoin (cityWorldAdopt) — both funnel through here. bank.js /
+    // pawnshop.js ALSO rehydrate g.cityLoans / g.cityPawnTickets off a g.cityWorld
+    // reference change, but doing it here removes the dependency on those modules
+    // being loaded + their once-per-ledger guard firing (same restored data, so
+    // the later sibling hydrate is a harmless idempotent re-copy).
+    g.cityLoans = copy(w.cityLoans || []);
+    g.cityPawnTickets = copy(w.cityPawnTickets || []);
+    g.cityOutfit = copy(w.cityOutfit || {});
+    g.cityFenceRep = w.cityFenceRep || 0;
     g.cityMeleeWeapon = w.meleeWeapon || null;
     g.cityTransport = w.transport;
     g.cityPolitics = w.politics;

@@ -83,7 +83,7 @@
   const cityGlass = [], cityShards = [];
   let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
-  function glassMat() { return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.46 })); }
+  function glassMat() { return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 })); }
   function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.22, 0.3, 0.05)); }
   function shardGeoBig() { return _shardGeoBig || (_shardGeoBig = new THREE.BoxGeometry(0.4, 0.52, 0.05)); }
 
@@ -102,12 +102,28 @@
     if (_tintMats) return _tintMats;
     _tintMats = [
       glassMat(),   // the classic cool blue
-      new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x3f9c7d, emissiveIntensity: 0.5, transparent: true, opacity: 0.46 }),  // green
-      new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xa6803f, emissiveIntensity: 0.5, transparent: true, opacity: 0.46 }),  // amber
+      new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x3f9c7d, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }),  // green
+      new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xa6803f, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }),  // amber
     ];
     return _tintMats;
   }
   function litWinMat() { return _litWinMat || (_litWinMat = new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffb648, emissiveIntensity: 0.85, transparent: true, opacity: 0.66 })); }
+  // REFLECTIVE glass (offices/apartments by default): a mirror-ish, near-opaque
+  // tint you can NOT see through — until it shatters into a real see-through
+  // hole. r128 has no PMREM/envMap reflection that works under a Lambert world
+  // (MeshStandard+envMap renders near-black), so we FAKE it: opaque (0.80) cool
+  // Lambert per tint with a brighter cool emissive so the pane reads as a lit
+  // sky-reflecting sheet day and night. Pooled per tint = draw-call identical.
+  let _reflectMats = null;
+  function reflectMats() {
+    if (_reflectMats) return _reflectMats;
+    _reflectMats = [
+      new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x6f9fb8, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
+      new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x6fb89a, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
+      new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xb89a6f, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
+    ];
+    return _reflectMats;
+  }
   const glassPools = [];     // every live pool (all generations)
   let pendingGlass = [];     // recs registered this build, awaiting a pool
   let glassNightOn = false;  // the dusk flip state (lit panes swapped in)
@@ -138,22 +154,27 @@
     let root = null;
     for (const r of batch) { if (r._grp && r._grp.parent) { root = r._grp.parent; break; } }
     if (!root) root = CBZ.scene;
-    const mats = tintMats();
-    const byTint = [[], [], []], litRecs = [];
-    for (const r of batch) { byTint[r.tint].push(r); if (r.lit) litRecs.push(r); r._grp = null; }
+    const mats = tintMats(), rmats = reflectMats();
+    // partition by tint THEN kind (0=clear, 1=reflective) — one InstancedMesh
+    // per (tint, kind) bucket so reflective offices and see-through retail both
+    // stay pooled. At most GLASS_TINTS*2 (+lit) = 7 city-wide draw calls.
+    const byBucket = [[], [], [], [], [], []], litRecs = [];   // [tint*2 + kind]
+    for (const r of batch) { byBucket[r.tint * 2 + (r.kind === "reflective" ? 1 : 0)].push(r); if (r.lit) litRecs.push(r); r._grp = null; }
     for (let t = 0; t < GLASS_TINTS; t++) {
-      const recs = byTint[t]; if (!recs.length) continue;
-      const im = new THREE.InstancedMesh(unitBox(), mats[t], recs.length);
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      im.castShadow = false; im.receiveShadow = false; im.renderOrder = 1;
-      im.frustumCulled = false;       // instances span the city; the unit-box bound would cull them all
-      im.userData.glassPool = true;
-      for (let i = 0; i < recs.length; i++) {
-        const r = recs[i]; r.pool = im; r.inst = i;
-        im.setMatrixAt(i, r.shattered ? _zeroM : paneMatrix(r));
+      for (let kn = 0; kn < 2; kn++) {
+        const recs = byBucket[t * 2 + kn]; if (!recs.length) continue;
+        const im = new THREE.InstancedMesh(unitBox(), kn ? rmats[t] : mats[t], recs.length);
+        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        im.castShadow = false; im.receiveShadow = false; im.renderOrder = 1;
+        im.frustumCulled = false;       // instances span the city; the unit-box bound would cull them all
+        im.userData.glassPool = true;
+        for (let i = 0; i < recs.length; i++) {
+          const r = recs[i]; r.pool = im; r.inst = i;
+          im.setMatrixAt(i, r.shattered ? _zeroM : paneMatrix(r));
+        }
+        im.instanceMatrix.needsUpdate = true;
+        root.add(im); glassPools.push(im);
       }
-      im.instanceMatrix.needsUpdate = true;
-      root.add(im); glassPools.push(im);
     }
     if (litRecs.length) {
       const lp = new THREE.InstancedMesh(unitBox(), litWinMat(), litRecs.length);
@@ -286,6 +307,7 @@
     o = o || {};
     const rec = { mesh: null, pool: null, inst: -1, litPool: null, litId: -1, lit: false,
       tint: (o.tint || 0) % GLASS_TINTS,
+      kind: o.kind === "reflective" ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
       x: ox + lx, y: ly, z: oz + lz, span: Math.max(pw, pd) * 0.5, hw: pw / 2, hh: ph / 2, hd: pd / 2,
       shattered: false, col: null };
     if (o.solid || o.external) {
@@ -355,16 +377,31 @@
     }
   }
   // burst every intact pane within r of (x,z) — called on car crashes etc.
+  // SWISS CHEESE: a blast doesn't just clear glass — up to PER_BLAST_OPEN of the
+  // nearest WINDOW-SIZED panes carve into real see-through holes/rooms, so a
+  // rocket peppers a facade with openings (the wall `_breached` dedup keeps
+  // same-face panes from carving twice → bounded cost, no cache/cleanup).
+  const PER_BLAST_OPEN = 8;
   CBZ.cityShatter = function (x, z, r) {
     const r2 = r * r; let n = 0, near = null, nearD = 1e9;
+    const cand = [];   // window-sized in-radius panes eligible to carve an opening
     for (let i = 0; i < cityGlass.length; i++) {
       const gp = cityGlass[i]; if (gp.shattered) continue;
       const dx = gp.x - x, dz = gp.z - z, dd = dx * dx + dz * dz;
-      if (dd <= r2) { burstPane(gp); if (dd < nearD) { nearD = dd; near = gp; } if (++n > 50) break; }
+      if (dd <= r2) {
+        // gather BEFORE bursting (burstPane marks shattered): pooled (no mesh),
+        // above the sill, window-sized — so we open windows, not transoms
+        if (!gp.mesh && gp.y > 1.0 && Math.max(gp.hw, gp.hd) * 2 >= 0.7) cand.push({ gp, dd });
+        burstPane(gp); if (dd < nearD) { nearD = dd; near = gp; } if (++n > 50) break;
+      }
     }
-    // the pane nearest the impact (a car nosing a storefront, a blast) becomes
-    // a real climb-in opening — the rest of the facade just loses its glass
-    if (near) tryWindowOpening(near);
+    // open the nearest few as real holes/rooms; tryWindowOpening reads the
+    // pane's stored x/y/z (it doesn't care that the pane is now "shattered"),
+    // and carveHole's wall `_breached` flag makes same-face panes a no-op carve
+    cand.sort(function (a, b) { return a.dd - b.dd; });
+    const lim = Math.min(PER_BLAST_OPEN, cand.length);
+    for (let i = 0; i < lim; i++) tryWindowOpening(cand[i].gp);
+    if (!lim && near) tryWindowOpening(near);   // fallback: nearest pane (sub-window slivers only)
     if (n > 0 && CBZ.sfx) CBZ.sfx("glass");
     // a hard impact (big radius shatter = a car ploughing a storefront) also
     // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
@@ -792,12 +829,19 @@
   // concrete rim of jittered prism chunks (merged to ONE mesh, fake-AO shaded).
   // city/fracture.js drives this primitive and owns ledger/caps/persistence.
   let _rimMat = null, _insetMat = null, _spillMat = null, _plyMat = null, _plyBatMat = null;
-  let _roomBackMat = null, _roomFloorMat = null, _roomFurnMat = null, _rebarMat = null;
+  let _roomBackMat = null, _roomFloorMat = null, _roomFurnMat = null, _rebarMat = null, _roomCeilMat = null, _warmLightMat = null;
   function rimMat() { return _rimMat || (_rimMat = new THREE.MeshLambertMaterial({ color: 0x8d8576, vertexColors: true })); }
-  function insetMat() { return _insetMat || (_insetMat = new THREE.MeshBasicMaterial({ color: 0x55584e, side: THREE.BackSide })); }
-  function roomBackMat() { return _roomBackMat || (_roomBackMat = new THREE.MeshBasicMaterial({ color: 0x3d3a33 })); }
-  function roomFloorMat() { return _roomFloorMat || (_roomFloorMat = new THREE.MeshBasicMaterial({ color: 0x6e675c })); }
-  function roomFurnMat() { return _roomFurnMat || (_roomFurnMat = new THREE.MeshBasicMaterial({ color: 0x2e2a25 })); }
+  // INTERIOR REVEAL palette — light, showroom-grade tones so a shot-open window
+  // OR a blast hole reads as a real LIT ROOM, never a dark gray crater. (MeshBasic
+  // = self-lit, so these show full-bright wherever the sun is; distinct warm-wall /
+  // cool-floor / white-ceiling tones + a warm ceiling light give the pocket real
+  // depth and a "lived-in" read — the same thing that makes the showroom pop.)
+  function insetMat() { return _insetMat || (_insetMat = new THREE.MeshBasicMaterial({ color: 0xbcb4a4, side: THREE.BackSide })); }   // pocket liner (warm light)
+  function roomBackMat() { return _roomBackMat || (_roomBackMat = new THREE.MeshBasicMaterial({ color: 0xc9c0ad })); }   // back + side walls (warm drywall)
+  function roomFloorMat() { return _roomFloorMat || (_roomFloorMat = new THREE.MeshBasicMaterial({ color: 0xbfc3ca })); }   // floor (light cool)
+  function roomCeilMat() { return _roomCeilMat || (_roomCeilMat = new THREE.MeshBasicMaterial({ color: 0xe0e2e6 })); }   // ceiling (bright)
+  function roomFurnMat() { return _roomFurnMat || (_roomFurnMat = new THREE.MeshBasicMaterial({ color: 0x5b554c })); }   // furniture (mid, reads vs light walls)
+  function warmLightMat() { return _warmLightMat || (_warmLightMat = new THREE.MeshBasicMaterial({ color: 0xffe9c2 })); }   // glowing ceiling light = the room reads LIT
   function rebarMat() { return _rebarMat || (_rebarMat = new THREE.MeshBasicMaterial({ color: 0x41434a })); }
   function spillMat() { return _spillMat || (_spillMat = new THREE.MeshBasicMaterial({ color: 0xffb45e, transparent: true, opacity: 0.08, depthWrite: false })); }
   function plyMat() { return _plyMat || (_plyMat = new THREE.MeshLambertMaterial({ color: 0x9a7b4f })); }
@@ -861,7 +905,7 @@
 
     const wmat = wall.material;
     const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false,
-      gap: { horiz, fixed, thick, u0, u1, v0, v1, y0, y1, px, pz, outS, parent } };
+      gap: { horiz, fixed, thick, u0, u1, v0, v1, y0, y1, px, pz, outS, parent, minU, maxU } };
 
     // hide the solid wall mesh + remove it from LOS (cops can see/shoot through)
     wall.visible = false;
@@ -950,7 +994,12 @@
       cityBreaches.push(rec);
       return rec;
     }
-    const deepRoom = dep > 1.6;
+    // revealRoom (a shot-open upper window) reads as an EMPTY LIT ROOM — same
+    // shell as a blast (inset pocket + back wall + floor slab) but NO damage
+    // (no furniture, rebar, rubble) plus closing side walls + a ceiling, so a
+    // vacant unit shows a clean concrete box, never gray paper.
+    const revealRoom = !!opts.revealRoom;
+    const deepRoom = dep > 1.6 || revealRoom;
     const floorY = deepRoom ? y0 : v0;                 // show the slab down to the storey floor
     const podV0 = Math.min(v0, floorY), podV1 = v1 + 0.2;
     const podCen = (podV0 + podV1) / 2, podH = podV1 - podV0;
@@ -974,36 +1023,67 @@
       fl.position.set((horiz ? gapCen : inCtr) - px, floorY + 0.05, (horiz ? inCtr : gapCen) - pz);
       if (parent) parent.add(fl); else CBZ.scene.add(fl);
       rec.extras.push(fl);
-      // blast-shoved furniture: a couple of dark silhouettes, randomly placed
-      // and yawed, sitting on that floor (cheap boxes — they read as the room's
-      // contents surviving the hit, which is what makes it a ROOM)
-      const nFurn = gapU > 1.6 ? 2 : 1;
-      for (let fi = 0; fi < nFurn; fi++) {
-        const fw = 0.5 + Math.random() * 0.7, fh = 0.5 + Math.random() * 1.1, fd = 0.4 + Math.random() * 0.4;
-        const fg = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), roomFurnMat());
-        const along = (Math.random() - 0.5) * Math.max(0.2, gapU - fw);
-        const inward = thick / 2 + 0.5 + Math.random() * (dep - thick - 1.0);
-        const fx = horiz ? gapCen + along : fixed - outS * inward;
-        const fz = horiz ? fixed - outS * inward : gapCen + along;
-        fg.position.set(fx - px, floorY + 0.08 + fh / 2, fz - pz);
-        fg.rotation.y = Math.random() * Math.PI;
-        fg.rotation.z = Math.random() < 0.3 ? (Math.random() - 0.5) * 0.5 : 0;   // one knocked over
-        if (parent) parent.add(fg); else CBZ.scene.add(fg);
-        rec.extras.push(fg);
-      }
-      // rebar hanging from the header into the gap — broken concrete shows its bones
-      const nBar = 2 + ((Math.random() * 2) | 0);
-      for (let bi = 0; bi < nBar; bi++) {
-        const bl = 0.4 + Math.random() * 0.6;
-        const bg = new THREE.Mesh(new THREE.BoxGeometry(0.035, bl, 0.035), rebarMat());
-        const along = (Math.random() - 0.5) * gapU * 0.8;
-        const bx = horiz ? gapCen + along : fixed + outS * (thick / 2 - 0.1);
-        const bz = horiz ? fixed + outS * (thick / 2 - 0.1) : gapCen + along;
-        bg.position.set(bx - px, v1 - bl / 2 + 0.05, bz - pz);
-        bg.rotation.x = (Math.random() - 0.5) * 0.35;
-        bg.rotation.z = (Math.random() - 0.5) * 0.35;
-        if (parent) parent.add(bg); else CBZ.scene.add(bg);
-        rec.extras.push(bg);
+      // a warm GLOWING ceiling light near the back — what makes the showroom read
+      // "lit room" not "flat box"; a cheap self-lit slab (no real light added).
+      const lgW = horiz ? Math.min(1.8, (gapU + 0.2) * 0.6) : 0.5, lgD = horiz ? 0.5 : Math.min(1.8, (gapU + 0.2) * 0.6);
+      const lg = new THREE.Mesh(new THREE.BoxGeometry(lgW, 0.07, lgD), warmLightMat());
+      lg.position.set((horiz ? gapCen : inCtr) - px, v1 - 0.2, (horiz ? inCtr : gapCen) - pz);
+      lg.castShadow = false; lg.receiveShadow = false;
+      if (parent) parent.add(lg); else CBZ.scene.add(lg);
+      rec.extras.push(lg);
+      if (!revealRoom) {
+        // blast-shoved furniture: a couple of dark silhouettes, randomly placed
+        // and yawed, sitting on that floor (cheap boxes — they read as the room's
+        // contents surviving the hit, which is what makes it a ROOM)
+        const nFurn = gapU > 1.6 ? 2 : 1;
+        for (let fi = 0; fi < nFurn; fi++) {
+          const fw = 0.5 + Math.random() * 0.7, fh = 0.5 + Math.random() * 1.1, fd = 0.4 + Math.random() * 0.4;
+          const fg = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), roomFurnMat());
+          const along = (Math.random() - 0.5) * Math.max(0.2, gapU - fw);
+          const inward = thick / 2 + 0.5 + Math.random() * (dep - thick - 1.0);
+          const fx = horiz ? gapCen + along : fixed - outS * inward;
+          const fz = horiz ? fixed - outS * inward : gapCen + along;
+          fg.position.set(fx - px, floorY + 0.08 + fh / 2, fz - pz);
+          fg.rotation.y = Math.random() * Math.PI;
+          fg.rotation.z = Math.random() < 0.3 ? (Math.random() - 0.5) * 0.5 : 0;   // one knocked over
+          if (parent) parent.add(fg); else CBZ.scene.add(fg);
+          rec.extras.push(fg);
+        }
+        // rebar hanging from the header into the gap — broken concrete shows its bones
+        const nBar = 2 + ((Math.random() * 2) | 0);
+        for (let bi = 0; bi < nBar; bi++) {
+          const bl = 0.4 + Math.random() * 0.6;
+          const bg = new THREE.Mesh(new THREE.BoxGeometry(0.035, bl, 0.035), rebarMat());
+          const along = (Math.random() - 0.5) * gapU * 0.8;
+          const bx = horiz ? gapCen + along : fixed + outS * (thick / 2 - 0.1);
+          const bz = horiz ? fixed + outS * (thick / 2 - 0.1) : gapCen + along;
+          bg.position.set(bx - px, v1 - bl / 2 + 0.05, bz - pz);
+          bg.rotation.x = (Math.random() - 0.5) * 0.35;
+          bg.rotation.z = (Math.random() - 0.5) * 0.35;
+          if (parent) parent.add(bg); else CBZ.scene.add(bg);
+          rec.extras.push(bg);
+        }
+      } else {
+        // REVEAL ROOM: close the pocket into a real box. Two side walls (left +
+        // right of the gap, ~dep deep) and a ceiling slab at the header line —
+        // shared self-lit MeshBasic singletons (no per-hole materials, no light
+        // churn) so the empty unit reads as a constant concrete mid-tone room.
+        // ceiling at the top of the opening, spanning the gap × pocket depth
+        const cg = new THREE.Mesh(new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep - 0.1, 0.06, horiz ? dep - 0.1 : gapU + 0.2), roomCeilMat());
+        cg.position.set((horiz ? gapCen : inCtr) - px, v1 - 0.05, (horiz ? inCtr : gapCen) - pz);
+        if (parent) parent.add(cg); else CBZ.scene.add(cg);
+        rec.extras.push(cg);
+        // two side walls closing the pocket left/right (thin BOXES ~dep × podH
+        // so they read from any angle — the player can stand inside ground-level
+        // holes; a single-sided plane would vanish from the back)
+        for (const sgn of [-1, 1]) {
+          const sg = new THREE.BoxGeometry(horiz ? 0.05 : dep - 0.1, podH, horiz ? dep - 0.1 : 0.05);
+          const sw = new THREE.Mesh(sg, roomBackMat());
+          if (horiz) sw.position.set(gapCen + sgn * gapU / 2 - px, podCen, inCtr - pz);
+          else sw.position.set(inCtr - px, podCen, gapCen + sgn * gapU / 2 - pz);
+          if (parent) parent.add(sw); else CBZ.scene.add(sw);
+          rec.extras.push(sw);
+        }
       }
     }
     const sq = new THREE.Mesh(new THREE.PlaneGeometry(gapU * 0.9, gapV * 0.9), spillMat());
@@ -1103,7 +1183,11 @@
   // front door. Player-only shortcut: NPCs/cops never path through them.
   // Pool-capped: past WIN_OPEN_CAP the OLDEST opening boards itself over
   // (cityBoardHole planks = the city visibly healing its wounds).
-  const WIN_OPEN_CAP = 12;
+  // SWISS-CHEESE budget: city facades can be peppered (each hole ≈4 remnant
+  // colliders + a few shell meshes; 28 ≈ 112 colliders, fine w/ markCollidersDirty).
+  // Other modes keep the conservative 12. Read mode at use-time (module body may
+  // run before the mode is chosen) — tryWindowOpening only runs in city anyway.
+  function winOpenCap() { return (CBZ.game && CBZ.game.mode === "city") ? 28 : 12; }
   const winOpenings = [];   // oldest-first [{rec, side}] — rec is the carve record
   CBZ.cityWindowOpenings = winOpenings;   // read-only for shops/wanted wiring
   function tryWindowOpening(gp) {
@@ -1126,27 +1210,54 @@
     const rec = carveHole(gp.x, gp.y, gp.z, 1.4, {
       search: 0.9,                             // the host wall is 0.105 behind the pane — never borrow a neighbour
       gapW: Math.max(1.3, Math.min(3.2, paneW + 0.2)),
-      // a TRUE opening, no pocket dress: the real room shows from the street
-      // and the real street shows from the room (both sides exist — blocking
-      // either read was the filmed bug)
-      v0: sill, v1: top, open: true,
+      v0: sill, v1: top,
+      // EVERY storey reveals a clean LIT ROOM. The raw hollow interior reads as
+      // dim GRAY (the inside faces of the walls ARE the gray exterior box, barely
+      // lit), so a true open:true hole just showed "gray building" (filmed).
+      // revealRoom lines the opening with a bright showroom-grade pocket — light
+      // walls, cool floor, white ceiling, a warm ceiling light — so you SEE A
+      // ROOM through a shot-out window, the same way the showroom front reads.
+      revealRoom: true, dep: 2.6,
     });
     if (!rec) return;                          // open air / wall already breached
     rec.windowOpening = true;
     const g = rec.gap;
-    // clear every intact pane whose RECT overlaps the gap on this wall — the
-    // carve only clears by centre, which misses the full-span ROOM-SIDE mirror
-    // pane (it would float as glass across the hole seen from inside).
+    // carveHole hid the ENTIRE storey wall box (wall.visible=false), so EVERY
+    // piece of dressing on it now floats with no wall behind it: BOTH bands'
+    // full-span interior SKY slabs + mullion strips, the room-side MIRROR panes,
+    // and the exterior panes on the OTHER (un-shot) band. The carve / revealRoom
+    // only touched the gap rect, so anything else on this wall box reads as a
+    // light-gray slab + floating glass from inside (USER-FILMED: a small real
+    // hole + a gray panel + a crack of sky from the band the carve didn't cover).
+    // Clear ALL panes + ALL interior deco across the wall box's FULL footprint
+    // and y-span — not just the gap. The remnant flanks the carve rebuilt stay
+    // solid concrete, so the wall is real where it's still wall; only the carved
+    // gap (the open route / revealRoom box) is the window.
+    const wMinU = g.minU != null ? g.minU : g.u0, wMaxU = g.maxU != null ? g.maxU : g.u1;
+    const wY0 = g.y0, wY1 = g.y1, offTol = g.thick / 2 + 0.62;   // 0.62 = pane/slab proud + slack
     for (let i = 0; i < cityGlass.length; i++) {
       const o = cityGlass[i];
       if (o.shattered) continue;
       const gu = g.horiz ? o.x : o.z, gf = g.horiz ? o.z : o.x, hu = g.horiz ? o.hw : o.hd;
-      if (Math.abs(gf - g.fixed) > g.thick / 2 + 0.5) continue;
-      if (gu + hu < g.u0 || gu - hu > g.u1) continue;
-      if (o.y + o.hh < g.v0 - 0.1 || o.y - o.hh > g.v1 + 0.1) continue;
+      if (Math.abs(gf - g.fixed) > offTol) continue;
+      if (gu + hu < wMinU - 0.2 || gu - hu > wMaxU + 0.2) continue;
+      if (o.y + o.hh < wY0 - 0.2 || o.y - o.hh > wY1 + 0.2) continue;
       o.shattered = true; shatteredPanes++;
       if (o.mesh) o.mesh.visible = false; else paneShow(o, false);
       if (o.col) { const ci = CBZ.colliders.indexOf(o.col); if (ci >= 0) CBZ.colliders.splice(ci, 1); }
+    }
+    // interior SKY slabs + mullion strips (instanced roomDeco) — these ARE the
+    // light-gray panel the user filmed. Hide every one on this wall box footprint
+    // (carveHole only hid those overlapping the gap rect, missing the off-band).
+    for (let i = 0; i < roomDeco.length; i++) {
+      const rd = roomDeco[i];
+      if (rd.hidden) continue;
+      const du = g.horiz ? rd.x : rd.z, df = g.horiz ? rd.z : rd.x, dhu = g.horiz ? rd.hw : rd.hd;
+      if (Math.abs(df - g.fixed) > offTol) continue;
+      if (du + dhu < wMinU - 0.2 || du - dhu > wMaxU + 0.2) continue;
+      if (rd.y + rd.hh < wY0 - 0.2 || rd.y - rd.hh > wY1 + 0.2) continue;
+      decoShow(rd, false);
+      (rec.hiddenDeco = rec.hiddenDeco || []).push(rd);
     }
     // jagged glass TEETH left standing in the frame (sill + header) sell the
     // broken window. Unique tiny geometries so resetBreaches can dispose them
@@ -1168,7 +1279,7 @@
     }
     winOpenings.push({ rec: rec, side: 0 });
     // cap: the OLDEST opening gets plywooded over (collider + LOS come back)
-    if (winOpenings.length > WIN_OPEN_CAP) {
+    if (winOpenings.length > winOpenCap()) {
       const old = winOpenings.shift();
       if (old.rec && !old.rec.boarded) CBZ.cityBoardHole(old.rec);
     }
@@ -1209,32 +1320,42 @@
   // walls and blow concrete chunks outward — without touching crashfx.js. We
   // wrap once, lazily, the first time the city updates (after all modules load),
   // preserving the original behaviour exactly. Idempotent.
-  let _explosionWrapped = false;
+  // The STRUCTURAL pass shared by every blast: ground/facade scorch, outward
+  // concrete chunks, the facade-damage sweep, and — for a hard hit against a
+  // wall — a real persistent carved HOLE at the impact height that opens onto
+  // the LIT interior room (fracture.js owns ledger/caps/debris; carveHole's
+  // deepRoom dress + the brightened reveal palette make it read as a room you
+  // can see INTO, not a gray crater). Radius maps the ordnance — RPG/airstrike
+  // ~2.6-3.4, grenade/car-burst ~1.6, anything weaker just scars.
+  function structuralBlast(x, z, opts) {
+    try {
+      const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
+      CBZ.cityScorch(x, z, R * 0.5);
+      CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.6, z, { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
+      CBZ.cityDamageBuilding(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4, z, Math.min(3, power));
+      if (CBZ.cityFracture && CBZ.cityFracture.blastAt && power >= 0.85 && !(opts && opts.noDamage)) {
+        const hy = (opts && opts.y) || 1.4;
+        const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
+        CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power });
+      }
+    } catch (e) {}
+  }
+  // Wrap a blast entry point ONCE (idempotent per-fn) so it also does structural
+  // damage. BOTH the ground blast (cityExplosion: RPG/C4/grenade/car) AND the
+  // air blast (cityAirstrikeExplosion: planes/helicopters/missiles/airstrikes)
+  // get it — so ANYTHING that hits a building opens it to the interior, not just
+  // the hand-thrown RPG. (Was: only cityExplosion wrapped, so aircraft hits left
+  // a fake crater that didn't show inside — user-filmed.)
+  function wrapBlast(name) {
+    const orig = CBZ[name];
+    if (typeof orig !== "function" || orig._structWrapped) return;
+    const wrapped = function (x, z, opts) { const r = orig.call(this, x, z, opts); structuralBlast(x, z, opts); return r; };
+    wrapped._structWrapped = true;
+    CBZ[name] = wrapped;
+  }
   function wrapExplosion() {
-    if (_explosionWrapped || typeof CBZ.cityExplosion !== "function") return;
-    _explosionWrapped = true;
-    const orig = CBZ.cityExplosion;
-    CBZ.cityExplosion = function (x, z, opts) {
-      const r = orig.call(this, x, z, opts);
-      try {
-        const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
-        CBZ.cityScorch(x, z, R * 0.5);
-        CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.6, z, { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
-        // if the blast is hard against a wall, add the full structural-damage
-        // pass (facade scorch + outward chunks + gouges + nearby panes burst).
-        CBZ.cityDamageBuilding(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4, z, Math.min(3, power));
-        // STRUCTURAL: a hard-enough blast detonating against a wall face carves
-        // a real persistent hole at the impact HEIGHT (fracture.js owns ledger/
-        // caps/debris). Radius maps the ordnance — RPG/airstrike ~2.6-3.4,
-        // grenade/car-burst ~1.6, anything weaker just scars.
-        if (CBZ.cityFracture && CBZ.cityFracture.blastAt && power >= 0.85 && !(opts && opts.noDamage)) {
-          const hy = (opts && opts.y) || 1.4;
-          const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
-          CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power });
-        }
-      } catch (e) {}
-      return r;
-    };
+    wrapBlast("cityExplosion");
+    wrapBlast("cityAirstrikeExplosion");
   }
   CBZ.onUpdate(0.01, function () {
     if (CBZ.game.mode !== "city") { if (glassNightOn) CBZ.cityGlassNight(false); return; }
@@ -1482,37 +1603,57 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
 
+  // Expose the live door array to the shared nav module (citynav.js): it
+  // snapshots door {wx,wz,inx,inz} for the flee-EQS and reads .open/.t per
+  // frame to treat an open leaf as a passable gap. Read-only consumer; the
+  // door sim above remains the sole writer.
+  CBZ.cityDoorsGet = function () { return cityDoors; };
+
   // Business catalogue. `sign` = awning/sign colour; `name` shown on the
   // door + HUD; `kind` = the shop kind city/shops.js switches on.
   const SHOPS = [
-    { kind: "guns",     name: "Ammu-Nation",     sign: 0x394b2e, storeys: 1 },
-    { kind: "jewelry",  name: "Bling Jewelers",  sign: 0xf2c43d, storeys: 1 },
-    { kind: "pawn",     name: "Pawn & Loan",     sign: 0x8a5a2b, storeys: 1 },
-    { kind: "gas",      name: "Gas Station",     sign: 0xe24b4b, storeys: 1, gas: true },
-    { kind: "clothing", name: "Threads & Drip",  sign: 0xc792ea, storeys: 1 },
-    { kind: "drugs",    name: "The Trap House",  sign: 0x4caf6e, storeys: 1 },
-    { kind: "food",     name: "Cluckin' Diner",  sign: 0xff9e6b, storeys: 1 },
+    { kind: "guns",     name: "Lock & Load Firearms", sign: 0x394b2e, storeys: 1, retail: true },
+    { kind: "jewelry",  name: "Carat & Karat Jewelers", sign: 0xf2c43d, storeys: 1, retail: true },
+    { kind: "pawn",     name: "Last Chance Pawn", sign: 0x8a5a2b, storeys: 1, retail: true },
+    { kind: "gas",      name: "Pump & Go Fuel",  sign: 0xe24b4b, storeys: 1, gas: true, retail: true },
+    { kind: "clothing", name: "Threads & Drip",  sign: 0xc792ea, storeys: 1, retail: true },
+    { kind: "drugs",    name: "The Trap House",  sign: 0x4caf6e, storeys: 1, retail: true },
+    { kind: "food",     name: "The Greasy Spoon", sign: 0xff9e6b, storeys: 1, retail: true },
     { kind: "bar",      name: "Velvet Club",     sign: 0xe85d8a, storeys: 2 },
-    { kind: "bank",     name: "City Bank",       sign: 0x5b8bff, storeys: 2 },
-    { kind: "hardware", name: "Hardware Depot",  sign: 0xffd166, storeys: 1 },
-    { kind: "gym",      name: "Iron Gym",        sign: 0x66d9c0, storeys: 1 },
+    { kind: "bank",     name: "Meridian Trust",  sign: 0x5b8bff, storeys: 2 },
+    { kind: "hardware", name: "Hammer & Nail Hardware", sign: 0xffd166, storeys: 1, retail: true },
+    { kind: "gym",      name: "Iron Temple Gym", sign: 0x66d9c0, storeys: 1, retail: true },
     { kind: "security", name: "Sentinel Security", sign: 0x49566b, storeys: 1 },
     { kind: "hospital", name: "City Hospital",   sign: 0xe8e8ee, storeys: 2, hospital: true },
-    { kind: "barber",   name: "Fresh Cuts",      sign: 0x6bb6ff, storeys: 1 },
-    { kind: "electronics", name: "Volt Electronics", sign: 0x39d0c0, storeys: 1 },
-    { kind: "carlot",   name: "Premium Autos",   sign: 0xe88a3c, storeys: 1, carlot: true },
+    { kind: "barber",   name: "Fresh Cuts",      sign: 0x6bb6ff, storeys: 1, retail: true },
+    { kind: "electronics", name: "Volt Electronics", sign: 0x39d0c0, storeys: 1, retail: true },
+    { kind: "carlot",   name: "Premium Autos",   sign: 0xe88a3c, storeys: 1, carlot: true, retail: true },
     { kind: "realtor",  name: "Keystone Realty", sign: 0x4fd0a0, storeys: 1, realtor: true },
-    { kind: "chop",     name: "Benny's Chop Shop", sign: 0xd0a23c, storeys: 1, chop: true },
-    { kind: "casino",   name: "Grand Casino",    sign: 0xc9a227, storeys: 2 },
+    { kind: "chop",     name: "Cut-Rate Chop Shop", sign: 0xd0a23c, storeys: 1, chop: true, retail: true },
+    { kind: "casino",   name: "The Golden Ace Casino", sign: 0xc9a227, storeys: 2 },
     { kind: "raceway",  name: "City Speedway",   sign: 0x2f6fed, storeys: 1 },
-    { kind: "arena",    name: "Civic Fight Arena", sign: 0xd94f45, storeys: 2 },
-    { kind: "paintball", name: "Paintball Yard", sign: 0x7ed957, storeys: 1 },
+    { kind: "arena",    name: "The Coliseum Fight Club", sign: 0xd94f45, storeys: 2 },
+    { kind: "paintball", name: "Splat Zone Paintball", sign: 0x7ed957, storeys: 1 },
     { kind: "transit",  name: "Central Transit", sign: 0x39c0d0, storeys: 1 },
     { kind: "cityhall", name: "City Hall",       sign: 0xd8dde8, storeys: 2 },
-    { kind: "airfield", name: "Airfield Office", sign: 0x8a93a3, storeys: 1 },
-    { kind: "racepark", name: "Race Park",       sign: 0xb98a5a, storeys: 1 },
+    { kind: "airfield", name: "Skyline Airfield", sign: 0x8a93a3, storeys: 1 },
+    { kind: "racepark", name: "Downs Racetrack", sign: 0xb98a5a, storeys: 1 },
   ];
   const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
+  // BRICK / MASONRY palette for residential apartment facades — warm reds,
+  // tans, browns, a buff limestone and a grey-stone, the real NYC walk-up mix
+  // (cooperatornews "common facades = brick, limestone, sandstone, brownstone").
+  // Muted so they sit next to the cool glass towers without screaming.
+  const BRICK_PALETTE = [
+    0x8a4b3a,  // red brick
+    0x9c5a44,  // warm terracotta brick
+    0x7a4334,  // deep brownstone
+    0xa9836a,  // tan / buff brick
+    0xb8a487,  // limestone buff
+    0x8f6f57,  // sandstone brown
+    0x95604a,  // rust brick
+    0x837a72,  // grey stone
+  ];
   const ABANDONED_PALETTE = [0x4a4438, 0x3f4640, 0x534a44, 0x46423c, 0x4c4640];
   const BOARD = 0x6b4a2a;
 
@@ -1555,6 +1696,33 @@
     // derived from the lot position so the same lot reads the same every run.
     const vhash = Math.abs(Math.sin(ox * 12.9898 + oz * 78.233) * 43758.5453) % 1;
     const tintIdx = ((vhash * 7.13) | 0) % GLASS_TINTS;
+    // GLASS KIND: retail/showrooms = CLEAR (see-through storefronts, always);
+    // everything else (offices/apartments) = REFLECTIVE (mirror-ish until shot).
+    // opts.glassKind overrides. City-only opts, default falsy elsewhere.
+    const GKIND = opts.glassKind ? opts.glassKind : ((opts.retail || opts.showroom) ? "clear" : "reflective");
+
+    // ===== FACADE TYPE =======================================================
+    // Keep the city on the style that reads clean in first person: glass office
+    // shells and see-through retail. The old residential/fortified archetypes
+    // produced solid, wrong-facing brick blocks that visually crowded storefronts
+    // like Pawn & Loan from the inside, so city generation normalizes them away.
+    let FACADE = opts.facade ||
+      (opts.retail || opts.showroom ? "retail"
+        : "office");
+    if (FACADE === "residential" || FACADE === "fortified") FACADE = "office";
+    // RESIDENTIAL gets a warm brick/masonry wall color (overrides the cool
+    // tower palette the caller passed) + punched windows; office keeps the
+    // caller's cool curtain-wall tint. Fortified keeps the wall, drops glass.
+    const wallColor = FACADE === "residential"
+      ? BRICK_PALETTE[((vhash * 977) | 0) % BRICK_PALETTE.length]
+      : color;
+    // shade trims off the ACTUAL wall color we'll render (brick or tower).
+    const punched = false;                      // residential brick shell exterminated
+    const fortified = false;                    // sealed shell exterminated
+    // ADOPT the facade wall color from here on — every wall box + trim/plinth/
+    // pilaster derives from `color`, so reassigning it once paints the whole
+    // building brick (residential) or keeps the cool curtain tint (office).
+    color = wallColor;
     // trim palette: darks derived from the wall colour (shared palettes →
     // shared colour buckets, so the batcher still collapses trim city-wide)
     const MULL = 0x262b31;                 // mullion-frame dark
@@ -1604,6 +1772,10 @@
     // Interior decoration is allowed only outside the entrance aisle and the
     // dedicated stairwell. The aisle reaches from just outside the door into
     // the room so furniture never makes an enterable building feel blocked.
+    // shaftRects: building-local rects reserved by an elevator shaft (filled in
+    // by CBZ.cityCarveShaft); furnishing/props gate off these too. Declared up
+    // here so clearFloorPoint closes over the SAME array the return object exposes.
+    const shaftRects = [];
     function clearFloorPoint(lx, lz, pad) {
       pad = pad == null ? 0.8 : pad;
       const dx = lx - localDoor.x, dz = lz - localDoor.z;
@@ -1611,6 +1783,13 @@
       const cross = Math.abs(dx * localDoor.nz - dz * localDoor.nx);
       if (inward > -0.8 && inward < 4.8 && cross < DOORW / 2 + pad) return false;
       if (hasStairs && lx < ixMin + stairW + pad && lx > ixMin - pad && lz > izMin - pad && lz < izMax + pad) return false;
+      // RESERVED ELEVATOR-SHAFT footprints (building-local rects, stamped by
+      // CBZ.cityCarveShaft once the lift picks its lobby column): keep later
+      // furniture / props off the vertical chase the cab travels.
+      for (let i = 0; i < shaftRects.length; i++) {
+        const r = shaftRects[i];
+        if (lx > r.x0 - pad && lx < r.x1 + pad && lz > r.z0 - pad && lz < r.z1 + pad) return false;
+      }
       return lx > ixMin + pad && lx < ixMax - pad && lz > izMin + pad && lz < izMax - pad;
     }
 
@@ -1644,6 +1823,61 @@
     const wallOpt = { solid: true, los: true };
     const modern = storeys >= 3;   // tall towers get fuller, near floor-to-ceiling glass
 
+    // DOOR CASING helpers (Sub-idea B: seal the gap around the swinging door).
+    // makeDoorPanel hangs a leaf sized dw=DOORW-0.16 wide × dh=DOORH-0.15 tall so
+    // it can swing without binding; that leaves a thin see-through slit down each
+    // jamb and across the head of the DOORW×DOORH wall opening. These fill those
+    // slits with slim solid casing (jambs + lintel) flush to the street face so
+    // the surround reads as a framed doorway, not an open gap. The leaf still
+    // swings INWARD into the room, clear of this exterior-plane casing.
+    const DLEAF_W = DOORW - 0.16;     // must match makeDoorPanel leaf width
+    const DLEAF_H = (DOORH + 0.7) - 0.85;   // must match makeDoorPanel leaf height (DOORH-0.15)
+    const DJAMB = 0.18;               // casing reveal width (covers the ~0.08 slit + reads as trim)
+    function doorFrameHoriz(fz) {
+      const jx = (DLEAF_W / 2 + DJAMB / 2);   // jamb centre, just outside the leaf edge
+      lbox(-jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT, color, { los: true });   // left jamb
+      lbox(jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT, color, { los: true });    // right jamb
+      // lintel: from the leaf top up to the wall header bottom (DOORH), full DOORW
+      lbox(0, (DLEAF_H + DOORH) / 2, fz, DOORW, DOORH - DLEAF_H, WT, color, { los: true });
+      // a slim casing lip proud of the street face so the doorway reads framed.
+      const fzo = fz + ((f0Out(fz)) * (WT / 2 + 0.04));
+      dbox(0, DOORH + 0.06, fzo, DOORW + 0.3, 0.14, 0.1, TRIM);   // lintel cap
+      dbox(-DOORW / 2 - 0.07, DOORH / 2, fzo, 0.12, DOORH, 0.1, TRIM);   // casing reveals
+      dbox(DOORW / 2 + 0.07, DOORH / 2, fzo, 0.12, DOORH, 0.1, TRIM);
+    }
+    function doorFrameVert(fx) {
+      const jz = (DLEAF_W / 2 + DJAMB / 2);
+      lbox(fx, DLEAF_H / 2 + 0.02, -jz, WT, DLEAF_H + 0.04, DJAMB, color, { los: true });
+      lbox(fx, DLEAF_H / 2 + 0.02, jz, WT, DLEAF_H + 0.04, DJAMB, color, { los: true });
+      lbox(fx, (DLEAF_H + DOORH) / 2, 0, WT, DOORH - DLEAF_H, DOORW, color, { los: true });
+      const fxo = fx + (f0OutX(fx) * (WT / 2 + 0.04));
+      dbox(fxo, DOORH + 0.06, 0, 0.1, 0.14, DOORW + 0.3, TRIM);
+      dbox(fxo, DOORH / 2, -DOORW / 2 - 0.07, 0.1, DOORH, 0.12, TRIM);
+      dbox(fxo, DOORH / 2, DOORW / 2 + 0.07, 0.1, DOORH, 0.12, TRIM);
+    }
+    // street-facing sign for a ±z / ±x face (door is on side 0/1 → z, 2/3 → x).
+    function f0Out(fz) { return fz < 0 ? -1 : 1; }
+    function f0OutX(fx) { return fx < 0 ? -1 : 1; }
+
+    // GRID GLASS (Sub-idea C, for the ground-floor storefronts/showrooms/garage
+    // and the glass-loft caller below): split a single wide solid glass span into
+    // a mullion grid of individual breakable panes on a ~1.5m module, so one shot
+    // takes out one cell, not the whole storefront. `horizFace` true = the pane
+    // faces ±z (thin in z, given as pw×ph×t); false = faces ±x (thin in x). cx/cy/
+    // cz is the span CENTRE; spanW is the wide dimension (x or z by face), spanH
+    // the height, t the pane thickness. opts forwarded to addCityGlass.
+    function gridGlass(cx, cy, cz, spanW, spanH, t, horizFace, opts) {
+      const MOD = 1.5;
+      const nx = Math.max(1, Math.min(10, Math.round(spanW / MOD)));
+      const ny = Math.max(1, Math.min(3, Math.round(spanH / MOD)));
+      const pw = spanW / nx, ph = spanH / ny;
+      for (let gx = 0; gx < nx; gx++) for (let gy = 0; gy < ny; gy++) {
+        const o2 = -spanW / 2 + (gx + 0.5) * pw, py = cy + (-spanH / 2 + (gy + 0.5) * ph);
+        if (horizFace) addCityGlass(bgroup, cx + o2, py, cz, pw, ph, t, ox, oz, opts, windows);
+        else addCityGlass(bgroup, cx, py, cz + o2, t, ph, pw, ox, oz, opts, windows);
+      }
+    }
+
     // SHOWROOM GARAGE FRONT (gas / car lot / chop shop): no plain door — a wide
     // roll-up GARAGE BAY you drive a car straight into, framed by big SOLID
     // showroom glass that shatters into a drive-through hole if you smash it.
@@ -1659,8 +1893,8 @@
         lbox(0, HDR - 0.5, zz + off, GW - 0.3, 0.9, 0.14, 0x8a93a0, { cast: false });                   // rolled-up door
         for (let s = 0; s < 4; s++) lbox(0, HDR - 0.2 - s * 0.2, zz + off * 1.2, GW - 0.4, 0.05, 0.18, 0x6b7480, { cast: false });
         const a = -w / 2 + 0.7, bb = -GW / 2 - 0.15, cxL = (a + bb) / 2, wL = bb - a;
-        addCityGlass(bgroup, cxL, ly, zz, wL, FH * 0.86, 0.07, ox, oz, { solid: true }, windows);
-        addCityGlass(bgroup, -cxL, ly, zz, wL, FH * 0.86, 0.07, ox, oz, { solid: true }, windows);
+        gridGlass(cxL, ly, zz, wL, FH * 0.86, 0.07, true, { solid: true });
+        gridGlass(-cxL, ly, zz, wL, FH * 0.86, 0.07, true, { solid: true });
       } else {
         const xx = f.x, off = (f.s === 2 ? 0.06 : -0.06);
         lbox(xx, ly, -d / 2 + 0.35, WT, FH, 0.7, color, wallOpt);
@@ -1669,9 +1903,77 @@
         lbox(xx + off, HDR - 0.5, 0, 0.14, 0.9, GW - 0.3, 0x8a93a0, { cast: false });
         for (let s = 0; s < 4; s++) lbox(xx + off * 1.2, HDR - 0.2 - s * 0.2, 0, 0.18, 0.05, GW - 0.4, 0x6b7480, { cast: false });
         const a = -d / 2 + 0.7, bb = -GW / 2 - 0.15, czL = (a + bb) / 2, dL = bb - a;
-        addCityGlass(bgroup, xx, ly, czL, 0.07, FH * 0.86, dL, ox, oz, { solid: true }, windows);
-        addCityGlass(bgroup, xx, ly, -czL, 0.07, FH * 0.86, dL, ox, oz, { solid: true }, windows);
+        gridGlass(xx, ly, czL, dL, FH * 0.86, 0.07, false, { solid: true });
+        gridGlass(xx, ly, -czL, dL, FH * 0.86, 0.07, false, { solid: true });
       }
+    }
+
+    // RETAIL STOREFRONT (clothing / food / electronics / etc.): the showroom
+    // look minus the garage roll-up — corner posts, a slim header, and a WIDE
+    // see-through (clear, pooled) glass span flanking the swinging door, plus a
+    // floor read so the interior is visibly a ROOM through the glass, ALWAYS
+    // (not only after shooting). The hollow shell + furnishShop already supply
+    // the room behind it. makeDoorPanel still hangs the openable door.
+    function retailFront(f) {
+      const ly = FH / 2;
+      const HDR = FH - 1.0;                                   // header bottom (~1.0m header)
+      const gph = HDR;                                        // glass rises to the header
+      const gy = ly - (FH - HDR) / 2;                          // glass band centred under the header
+      if (f.horiz) {
+        const zz = f.z;
+        lbox(-w / 2 + 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);   // corner posts
+        lbox(w / 2 - 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
+        lbox(0, HDR + (FH - HDR) / 2, zz, w - 1.0, FH - HDR, WT, color, { solid: true, los: true });   // header over the top
+        // DOOR SURROUND: seal the slits around the swinging leaf (jambs + lintel),
+        // tight to the leaf — owner-filmed diner door gap. The leaf still swings.
+        doorFrameHoriz(zz);
+        // the retail header band starts at HDR; the doorFrame lintel tops out at
+        // DOORH (<HDR) → fill the strip over the door so it isn't see-through.
+        if (HDR > DOORH + 0.02) lbox(0, (DOORH + HDR) / 2, zz, DOORW, HDR - DOORH, WT, color, { solid: true, los: true });
+        const osn = (f.s === 0 ? -1 : 1);                     // toward the street
+        const goff = osn * (WT / 2 + 0.06);
+        // FLANK GLASS spans EDGE-TO-EDGE between the door jamb and the corner post
+        // (showroom-clean): the flank runs DOORW/2 → w/2-0.7, exact width `side`.
+        // The OLD `side*0.86` shrink left a see-through strip at BOTH the door and
+        // the corner (owner-filmed gaps); span the full `side` to seal them.
+        const side = (w - DOORW) / 2 - 0.7;                   // glass span each side of the door gap
+        if (side > 1.0) {
+          const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
+          for (const fc of [fcx, fcx2]) {
+            gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear" });
+          }
+        } else {
+          // too narrow to glaze cleanly: seal each flank with a solid wall span so
+          // the corner stays closed (no see-through hole at the building edge).
+          const flw = (w - DOORW) / 2 - 0.7;
+          if (flw > 0.05) for (const fc of [-(DOORW / 2 + flw / 2), DOORW / 2 + flw / 2])
+            lbox(fc, ly, zz, flw, FH, WT, color, wallOpt);
+        }
+      } else {
+        const xx = f.x;
+        lbox(xx, ly, -d / 2 + 0.35, WT, FH, 0.7, color, wallOpt);
+        lbox(xx, ly, d / 2 - 0.35, WT, FH, 0.7, color, wallOpt);
+        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - 1.0, color, { solid: true, los: true });
+        doorFrameVert(xx);   // seal the door surround (see doorFrameHoriz note)
+        if (HDR > DOORH + 0.02) lbox(xx, (DOORH + HDR) / 2, 0, WT, HDR - DOORH, DOORW, color, { solid: true, los: true });
+        const osn = (f.s === 2 ? -1 : 1);
+        const goff = osn * (WT / 2 + 0.06);
+        const side = (d - DOORW) / 2 - 0.7;
+        if (side > 1.0) {
+          const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
+          for (const fc of [fcz, fcz2]) {
+            gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear" });
+          }
+        } else {
+          const flw = (d - DOORW) / 2 - 0.7;
+          if (flw > 0.05) for (const fc of [-(DOORW / 2 + flw / 2), DOORW / 2 + flw / 2])
+            lbox(xx, ly, fc, WT, FH, flw, color, wallOpt);
+        }
+      }
+      // floor read so the interior reads as a real room through the clear glass
+      lbox(0, 0.06, 0, w - 2 * WT, 0.08, d - 2 * WT, 0xc8ccd4, { cast: false });
+      // keep the openable swinging door in the gap
+      if (!opts.boarded) makeDoorPanel(bgroup, ox, oz, localDoor, DOORW);
     }
 
     // WRAPAROUND PARKING DECK (opts.garageGround): the flagship's whole ground
@@ -1692,8 +1994,8 @@
         lbox(0, HDR + (FH - HDR) / 2, zz, GW + 0.6, FH - HDR, WT, color, { solid: true, los: true });
         const a = -w / 2 + post, bb = -GW / 2 - 0.2, cxL = (a + bb) / 2, wL = bb - a;
         if (wL > 0.5) {
-          addCityGlass(bgroup, cxL, ly, zz, wL, FH * 0.84, 0.06, ox, oz, { solid: true }, windows);
-          addCityGlass(bgroup, -cxL, ly, zz, wL, FH * 0.84, 0.06, ox, oz, { solid: true }, windows);
+          gridGlass(cxL, ly, zz, wL, FH * 0.84, 0.06, true, { solid: true });
+          gridGlass(-cxL, ly, zz, wL, FH * 0.84, 0.06, true, { solid: true });
         }
       } else {
         const xx = f.x;
@@ -1702,8 +2004,8 @@
         lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, GW + 0.6, color, { solid: true, los: true });
         const a = -d / 2 + post, bb = -GW / 2 - 0.2, czL = (a + bb) / 2, dL = bb - a;
         if (dL > 0.5) {
-          addCityGlass(bgroup, xx, ly, czL, 0.06, FH * 0.84, dL, ox, oz, { solid: true }, windows);
-          addCityGlass(bgroup, xx, ly, -czL, 0.06, FH * 0.84, dL, ox, oz, { solid: true }, windows);
+          gridGlass(xx, ly, czL, dL, FH * 0.84, 0.06, false, { solid: true });
+          gridGlass(xx, ly, -czL, dL, FH * 0.84, 0.06, false, { solid: true });
         }
       }
     }
@@ -1721,127 +2023,351 @@
         if (k === 0 && f.s === doorSide) {
           if (opts.showroom) {
             showroomFront(f);
+          } else if (opts.retail && CBZ.game && CBZ.game.mode === "city") {
+            retailFront(f);          // clear see-through storefront (room visible through glass, always)
           } else if (f.horiz) {
             const side = (w - DOORW) / 2;
             const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
-            lbox(fcx, ly, f.z, side, FH, WT, color, wallOpt);
-            lbox(fcx2, ly, f.z, side, FH, WT, color, wallOpt);
-            lbox(0, (DOORH + FH) / 2, f.z, DOORW, FH - DOORH, WT, color, { los: true });   // header fills DOORH..FH (door opening stays person-scale)
-            // STOREFRONT GLASS flanking the entrance — on the STREET side of the
-            // wall (the old +0.22 offset put it just inside the room, hidden
-            // behind the opaque facade) so shops read as glassed storefronts.
-            // Pane back face sits 0.06 PROUD of the facade (was 0.035 — close
-            // enough to depth-alias into a moiré shimmer at distance).
-            const osn = (f.s === 0 ? -1 : 1);                 // toward the street
-            const goff = osn * (WT / 2 + 0.085), gph = FH * 0.5, gy = ly + 0.1;
-            if (side > 1.2) {
-              for (const fc of [fcx, fcx2]) {
-                addCityGlass(bgroup, fc, gy, f.z + goff, side * 0.7, gph, 0.05, ox, oz, { tint: tintIdx }, windows);
-                // INTERIOR read: the wall is a solid box, so from inside the
-                // shop these windows were blank wall. A bright SKY slab just
-                // proud of the room face + a room-side pane = the storefront
-                // reads (and shatters) from both sides.
-                dbox(fc, gy, f.z - osn * (WT / 2 + 0.025), side * 0.74, gph + 0.12, 0.03, SKY);
-                addCityGlass(bgroup, fc, gy, f.z - osn * (WT / 2 + 0.105), side * 0.7, gph, 0.05, ox, oz, { tint: tintIdx }, windows);
-              }
+            lbox(0, (DOORH + FH) / 2, f.z, DOORW, FH - DOORH, WT, color, { los: true });   // door header
+            // DOOR FRAME — seal the surround (owner-filmed: "the area around doors
+            // is a gap"). The wall opening is DOORW×DOORH but the swinging leaf is
+            // a touch smaller (dw=DOORW-0.16, dh=DOORH-0.15) so it can swing free —
+            // leaving a see-through slit on both sides + over the top. Fill those
+            // exact slits with slim solid jambs + a lintel (a real door casing),
+            // tight to the leaf, so there's NO gap but the leaf still opens. The
+            // jamb columns are 0.18m wide framing reveals (a hair wider than the
+            // bare 0.08 slit so the casing reads as trim, not a hairline).
+            doorFrameHoriz(f.z);
+            // FLANKING WINDOWS as REAL framed openings (sill + header + outer
+            // jamb around a GAP glazed with clear glass) so the furnished
+            // ground-floor room shows through and a break opens into it — the
+            // SAME see-through read as the upper storeys. (Was a SOLID full-
+            // height wall + a fake SKY interior slab → "gray building behind"
+            // when shot, user-filmed.)
+            const sillH = 0.5, hdrH = 0.7, jamb = 0.5;
+            const winY0 = ly - FH / 2 + sillH, winY1 = ly + FH / 2 - hdrH;
+            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
+            const ostreet = (f.s === 0 ? -1 : 1);
+            for (const fc of [fcx, fcx2]) {
+              if (side <= 1.2) { lbox(fc, ly, f.z, side, FH, WT, color, wallOpt); continue; }   // too narrow to glaze
+              const sgn = fc < 0 ? -1 : 1;                    // -1 = left flank
+              lbox(fc, winY0 - sillH / 2, f.z, side, sillH, WT, color, wallOpt);   // sill
+              lbox(fc, winY1 + hdrH / 2, f.z, side, hdrH, WT, color, wallOpt);     // header
+              lbox(sgn * (w / 2 - jamb / 2), winCy, f.z, jamb, winPh, WT, color, wallOpt);   // outer jamb at the corner
+              const span = side - jamb, gcx = fc - sgn * jamb / 2;
+              gridGlass(gcx, winCy, f.z, span, winPh, 0.07, true, { solid: true, tint: tintIdx, kind: "clear" });
+              const faceZ = f.z + ostreet * (WT / 2 + 0.04);
+              const nn = Math.max(2, Math.min(5, Math.round(span / 1.6))), step = span / nn;
+              for (let i = 1; i < nn; i++) dbox(gcx - span / 2 + i * step, winCy, faceZ, 0.07, winPh, 0.05, MULL);
             }
           } else {
             const side = (d - DOORW) / 2;
             const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
-            lbox(f.x, ly, fcz, WT, FH, side, color, wallOpt);
-            lbox(f.x, ly, fcz2, WT, FH, side, color, wallOpt);
-            lbox(f.x, (DOORH + FH) / 2, 0, WT, FH - DOORH, DOORW, color, { los: true });   // header fills DOORH..FH
-            const osn = (f.s === 2 ? -1 : 1);                 // toward the street
-            const goff = osn * (WT / 2 + 0.085), gph = FH * 0.5, gy = ly + 0.1;
-            if (side > 1.2) {
-              for (const fc of [fcz, fcz2]) {
-                addCityGlass(bgroup, f.x + goff, gy, fc, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
-                // interior counterpart (see the horiz branch for WHY)
-                dbox(f.x - osn * (WT / 2 + 0.025), gy, fc, 0.03, gph + 0.12, side * 0.74, SKY);
-                addCityGlass(bgroup, f.x - osn * (WT / 2 + 0.105), gy, fc, 0.05, gph, side * 0.7, ox, oz, { tint: tintIdx }, windows);
-              }
+            lbox(f.x, (DOORH + FH) / 2, 0, WT, FH - DOORH, DOORW, color, { los: true });   // door header
+            doorFrameVert(f.x);   // seal the door surround (see doorFrameHoriz note)
+            const sillH = 0.5, hdrH = 0.7, jamb = 0.5;
+            const winY0 = ly - FH / 2 + sillH, winY1 = ly + FH / 2 - hdrH;
+            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
+            const ostreet = (f.s === 2 ? -1 : 1);
+            for (const fc of [fcz, fcz2]) {
+              if (side <= 1.2) { lbox(f.x, ly, fc, WT, FH, side, color, wallOpt); continue; }
+              const sgn = fc < 0 ? -1 : 1;
+              lbox(f.x, winY0 - sillH / 2, fc, WT, sillH, side, color, wallOpt);
+              lbox(f.x, winY1 + hdrH / 2, fc, WT, hdrH, side, color, wallOpt);
+              lbox(f.x, winCy, sgn * (d / 2 - jamb / 2), WT, winPh, jamb, color, wallOpt);
+              const span = side - jamb, gcz = fc - sgn * jamb / 2;
+              gridGlass(f.x, winCy, gcz, span, winPh, 0.07, false, { solid: true, tint: tintIdx, kind: "clear" });
+              const faceX = f.x + ostreet * (WT / 2 + 0.04);
+              const nn = Math.max(2, Math.min(5, Math.round(span / 1.6))), step = span / nn;
+              for (let i = 1; i < nn; i++) dbox(faceX, winCy, gcz - span / 2 + i * step, 0.05, winPh, 0.07, MULL);
             }
           }
           // hang an OPENABLE swinging glass door in the gap (real shops/homes
           // only — derelicts stay gaping). Abandoned (boarded) buildings skip it.
-          if (!opts.showroom && !opts.boarded) makeDoorPanel(bgroup, ox, oz, localDoor, DOORW);
+          // retailFront hangs its own door, so skip it here for city retail.
+          const cityRetail = opts.retail && CBZ.game && CBZ.game.mode === "city";
+          if (!opts.showroom && !opts.boarded && !cityRetail) makeDoorPanel(bgroup, ox, oz, localDoor, DOORW);
+        } else if (opts.boarded) {
+          // DERELICT: not a blank wall — a real apartment grid of SMASHED-DARK /
+          // boarded-over windows in the same residential rhythm, so an abandoned
+          // building reads as a gutted tenement (dark voids, some planked over,
+          // soot) instead of a flat box with a few marks. (Owner-filmed: the old
+          // solid-plate-+-3-planks read as the "fake black window" blank wall.)
+          const fy0b = k * FH, fy1b = k * FH + FH;
+          const span = (f.horiz ? w : d), margin = 0.7, usable = span - 2 * margin;
+          const nWin = Math.max(1, Math.round(usable / 2.6)), cell = usable / nWin;
+          const winW = Math.min(2.0, cell * 0.62), sillH = 1.05, hdrH = 0.7;
+          const winY0 = fy0b + sillH, winY1 = fy1b - hdrH;
+          const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
+          const fBox = (cT, segLen, cy, ch) => {
+            if (segLen <= 0.02) return;
+            if (f.horiz) lbox(cT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
+            else lbox(f.x, cy, cT, f.dd, ch, segLen, color, wallOpt);
+          };
+          fBox(0, span, fy0b + sillH / 2, sillH);                 // spandrel below the sills
+          fBox(0, span, fy1b - hdrH / 2, hdrH);                   // header above the heads
+          fBox(-span / 2 + margin / 2, margin, winCy, winPh);     // corner piers
+          fBox(span / 2 - margin / 2, margin, winCy, winPh);
+          const DARKWIN = 0x14171a;                               // smashed-dark window void
+          const faceSign = f.horiz ? (f.s === 0 ? -1 : 1) : (f.s === 2 ? -1 : 1);
+          for (let i = 0; i < nWin; i++) {
+            const t = -usable / 2 + (i + 0.5) * cell;
+            const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
+            const pierW = (cell - winW) / 2;
+            fBox(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
+            fBox(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
+            // dark broken-window void SEATED AT THE STREET FACE (not the wall
+            // centre): at f.z it sat buried 0.2m inside the WT-thick wall, so the
+            // derelict read as a near-blank wall with only the proud planks
+            // showing as stray tally-marks (owner-filmed). Recess it just inside
+            // the outer face so every opening reads as a dark smashed-out window.
+            const vo = faceSign * (WT / 2 - 0.02);
+            if (f.horiz) dbox(cx, winCy, f.z + vo, winW, winPh, 0.06, DARKWIN);
+            else dbox(f.x + vo, winCy, cz, 0.06, winPh, winW, DARKWIN);
+            // ~40% of the openings are boarded over with planks proud of the face
+            const h = Math.abs(Math.sin((ox + cx) * 7.1 + (oz + cz) * 3.3 + winCy * 1.7)) % 1;
+            if (h < 0.4) {
+              const fo = faceSign * (WT / 2 + 0.05);
+              for (let p = -1; p <= 1; p++) {
+                if (f.horiz) dbox(cx, winCy + p * winPh * 0.3, f.z + fo, winW + 0.1, 0.16, 0.06, BOARD);
+                else dbox(f.x + fo, winCy + p * winPh * 0.3, cz, 0.06, 0.16, winW + 0.1, BOARD);
+              }
+            }
+          }
         } else {
-          lbox(f.x, ly, f.z, f.w, FH, f.dd, color, wallOpt);
-          // window band — glass glow on real buildings, boarded planks on derelicts
-          const wy = ly + 0.3;
-          if (opts.boarded) {
-            const bw2 = f.horiz ? Math.min(w * 0.55, 4.4) : 0.06;
-            const bd2 = f.horiz ? 0.06 : Math.min(d * 0.55, 4.4);
-            const off = f.horiz ? (f.s === 0 ? 0.21 : -0.21) : (f.s === 2 ? 0.21 : -0.21);
-            for (let p = -1; p <= 1; p++) {
-              lbox(f.x + (f.horiz ? 0 : off), wy + p * 0.5, f.z + (f.horiz ? off : 0),
-                f.horiz ? bw2 : 0.06, 0.22, f.horiz ? 0.06 : bd2, BOARD, { cast: false });
+          // REAL WINDOW OPENING — built like retailFront/showroomFront, but on
+          // every storey: the wall is FRAMED (solid sill + header + jambs) around
+          // a genuine GAP, and the gap is glazed with SOLID CLEAR glass. The
+          // furnished room behind (cityFurnishApartment dresses every storey) is
+          // therefore visible THROUGH the glass ALWAYS — and an INTERIOR GLOW
+          // panel (cityInteriorGlow) sits just behind every opening so it reads
+          // as a lived-in room (dim by day, ~15% warm-lit at night) and NEVER as
+          // a flat black "fake window" — the exact complaint this pass fixes.
+          // Breaking the glass (cityShatterRay/cityShatter bursts the solid pane
+          // → frees its collider) leaves a clean opening into the real room.
+          //
+          // THREE FACADE MODES (chosen per building above):
+          //   • OFFICE  — one wide curtain-wall BAND per storey (the loved towers)
+          //   • RESIDENTIAL — several smaller CLEAR PUNCHED windows in a rhythmic
+          //                   row (the NYC brick-apartment read the owner cited)
+          //   • FORTIFIED — a couple of small high windows (bank/utility; rare)
+          //
+          // The solid clear pane doubles as the height-gated collider that used
+          // to be the wall box, so nobody falls out an upper-floor window. The
+          // frame boxes (sill/header/jambs) carry the wall colour + LOS so the
+          // facade still reads structural and cops can't see through the spandrel.
+          const outSgn = (f.s === 0 || f.s === 2) ? -1 : 1;   // toward the street
+          const fy0 = k * FH, fy1 = k * FH + FH;              // storey floor / ceiling
+          // outward wall normal (cityInteriorGlow wants OUTWARD; doorInfo gives
+          // inward, but here we derive it directly from the face/outSgn).
+          const outN = f.horiz ? { x: 0, z: outSgn } : { x: outSgn, z: 0 };
+
+          // ---- helper: glaze ONE punched opening (clear pane + interior glow +
+          //   thin exterior trim). Coordinates are local; spanW/spanH = clear
+          //   opening size; (cx,cy,cz) its centre. Deterministic per-window lit.
+          function glazeOpening(cx, cy, cz, spanW, spanH) {
+            // ===== PANE GRID (Sub-idea C: one shot must not shatter a whole wall)
+            // A wide curtain-wall / storefront opening used to be ONE big solid
+            // pane = ONE breakable mesh, so a single round removed the entire
+            // glass wall (owner-filmed). Real mullioned curtain walls are a GRID
+            // of small panes, each its own unit. So we subdivide the opening into
+            // a grid of individual panes on a ~1.5m mullion pitch (the typical
+            // curtain-wall module is 1.5m / 5ft — research: usglassmag / facades-
+            // plus curtain-wall "module" sizing), each a separate addCityGlass
+            // record → cityShatterRay/cityShatter break only the pane(s) hit. A
+            // small opening (≤ one module each way) stays a single pane.
+            const MOD = 1.5;                                  // target pane module (m)
+            // cap the grid so a very wide band can't explode the pane/collider
+            // count (each pane carries a collider). 10×3 max per opening keeps
+            // panes individually breakable while staying bounded on tall towers.
+            const nx = Math.max(1, Math.min(10, Math.round(spanW / MOD)));  // columns
+            const ny = Math.max(1, Math.min(3, Math.round(spanH / MOD)));   // rows up the opening
+            const pw = spanW / nx, ph = spanH / ny;           // per-pane size
+            const t = 0.07;                                   // pane thickness
+            for (let gx = 0; gx < nx; gx++) {
+              for (let gy = 0; gy < ny; gy++) {
+                const ox2 = -spanW / 2 + (gx + 0.5) * pw;     // pane offset within the opening
+                const oy2 = -spanH / 2 + (gy + 0.5) * ph;
+                const py = cy + oy2;
+                // SEAT THE GLASS AT THE STREET FACE, not the wall centre. The wall
+                // is WT (0.4m) thick, centred at f.z; a pane placed at f.z sat
+                // BURIED 0.2m inside the opaque wall while only the proud mullion
+                // trim (at f.z + outSgn*0.25) showed → the "tally marks on a blank
+                // wall" the owner filmed. Push the pane out to the outer wall plane
+                // (matches the working retail-storefront offset), so the glass is
+                // visible with the mullions just in front of it.
+                if (f.horiz) addCityGlass(bgroup, cx + ox2, py, cz + outSgn * (WT / 2 + 0.01), pw, ph, t, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
+                else addCityGlass(bgroup, cx + outSgn * (WT / 2 + 0.01), py, cz + ox2, t, ph, pw, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
+              }
+            }
+            // INTERIOR READABILITY: the room seen through the glass. Deterministic
+            // per-window so the lit set is stable run-to-run. Apartments glow warm
+            // (lamps), offices cool (overheads); ~26% of residential windows lit
+            // at night so a brick block reads inhabited, ~15% for offices.
+            if (CBZ.cityInteriorGlow) {
+              const wx = ox + cx, wz = oz + cz;
+              const hsh = Math.abs(Math.sin(wx * 12.9898 + cy * 4.137 + wz * 78.233) * 43758.5453) % 1;
+              const litFrac = punched ? 0.26 : 0.15;
+              const warm = punched ? 0.9 : 0.35;
+              CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: hsh < litFrac, warm: warm });
+            }
+          }
+
+          if (punched) {
+            // ===== RESIDENTIAL: a row of small CLEAR PUNCHED windows =====
+            // Regular rhythm: a fixed pier (solid brick) between each window so
+            // the wall reads as masonry with windows cut into it, not a glass
+            // band. Window count derives from the face width (≈ one per 3.2m).
+            const span = (f.horiz ? w : d);
+            const margin = 0.7;                       // solid wall at each corner
+            const usable = span - 2 * margin;
+            // WINDOW DENSITY (the owner-filmed blank-wall bug): the count must
+            // TILE the WHOLE face, not stop at a few stranded windows on a wide
+            // wall. Real NYC apartment/loft facades run a regular grid of windows
+            // every ~2.6m of facade (research: chicagobrickco "punched windows",
+            // brownstone/tenement bay spacing ≈ 8-9 ft ≈ 2.5-2.8m). So drop the
+            // old min(6) cap entirely and derive purely from width at a ~2.6m
+            // bay pitch — a 36m loft now gets ~13 windows per floor (was capped
+            // at 6 = the blank-wall read), a 10m brownstone ~3-4. Floor of 1 only
+            // so a tiny shed still gets a window.
+            const BAY = 2.6;                           // facade metres per window bay
+            const nWin = Math.max(1, Math.round(usable / BAY));
+            const cell = usable / nWin;               // each window+pier cell
+            // opening fills more of the bay so the wall reads COVERED in glass,
+            // not dotted with slits; the remaining ~38% of the cell is the brick
+            // pier. Cap at 2.0m so a wide cell still reads as a window, not a band.
+            const winW = Math.min(2.0, cell * 0.68);  // the punched opening width
+            // vertical: a generous sill (apartments aren't floor-to-ceiling) up
+            // to a header lip — a tall-ish punched window, head-height view in.
+            const sillH = 1.05, hdrH = 0.7;
+            const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
+            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
+            // FRAME the masonry around REAL gaps (never a solid plate — that
+            // would bury the interior-glow room behind brick). Continuous
+            // spandrel below the sill line + header band above, then solid
+            // brick PIERS between each opening. The gaps are where light/room
+            // shows through. Helper places a wall box on the face axis.
+            const faceBox = (centerT, segLen, cy, ch) => {
+              if (segLen <= 0.02) return;
+              if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
+              else lbox(f.x, cy, centerT, f.dd, ch, segLen, color, wallOpt);
+            };
+            // spandrel (floor → sill) + header (window top → ceiling), full width
+            faceBox(0, span, fy0 + sillH / 2, sillH);
+            faceBox(0, span, fy1 - hdrH / 2, hdrH);
+            // corner margins are solid brick (piers handle the rest)
+            faceBox(-span / 2 + margin / 2, margin, winCy, winPh);
+            faceBox(span / 2 - margin / 2, margin, winCy, winPh);
+            for (let i = 0; i < nWin; i++) {
+              const t = -usable / 2 + (i + 0.5) * cell;   // cell centre on the face axis
+              const cx = f.horiz ? t : f.x;
+              const cz = f.horiz ? f.z : t;
+              // solid brick PIER on each side of this opening (fills the cell
+              // minus the glazed slot) — gives the punched-masonry rhythm.
+              const pierW = (cell - winW) / 2;
+              faceBox(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
+              faceBox(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
+              glazeOpening(cx, winCy, cz, winW, winPh);
+              // thin punched-window frame proud of the street face: a sill lip, a
+              // header lintel, and a single muntin bar (the classic two-over-two).
+              if (f.horiz) {
+                const faceZ = f.z + outSgn * (WT / 2 + 0.05);
+                dbox(cx, winY0 - 0.06, faceZ, winW + 0.22, 0.12, 0.12, TRIM);   // stone sill
+                dbox(cx, winY1 + 0.06, faceZ, winW + 0.22, 0.1, 0.1, TRIM);     // lintel
+                dbox(cx, winCy, faceZ, winW + 0.12, 0.07, 0.06, MULL);          // muntin (horiz bar)
+                dbox(cx, winCy, faceZ, 0.06, winPh, 0.06, MULL);               // muntin (vert bar)
+              } else {
+                const faceX = f.x + outSgn * (WT / 2 + 0.05);
+                dbox(faceX, winY0 - 0.06, cz, 0.12, 0.12, winW + 0.22, TRIM);
+                dbox(faceX, winY1 + 0.06, cz, 0.1, 0.1, winW + 0.22, TRIM);
+                dbox(faceX, winCy, cz, 0.06, 0.07, winW + 0.12, MULL);
+                dbox(faceX, winCy, cz, 0.06, winPh, 0.06, MULL);
+              }
+            }
+          } else if (fortified) {
+            // ===== FORTIFIED: mostly-solid wall + a couple of small high windows
+            // bank/utility read — heavier masonry, but NOT a blank wall: a row
+            // of narrow security windows (tall slots) set high on the storey, on
+            // a wider pier rhythm than residential. Still REAL (clear + glow). We
+            // frame around the gaps so the glow room shows (no buried plate).
+            // (Owner note: nothing should read fully windowless — even a bank has
+            // teller windows; fortified is now "fewer, taller, barred-looking"
+            // rather than "one or two tiny slits on a huge wall".)
+            const span = (f.horiz ? w : d);
+            const margin2 = 0.9;
+            const usable2 = span - 2 * margin2;
+            const nWin = Math.max(1, Math.round(usable2 / 4.2));   // sparser bay (~4.2m) than residential
+            const cell2 = usable2 / nWin;
+            const winW = Math.min(0.95, cell2 * 0.32);  // narrow security slot
+            const winPh = Math.min(2.2, FH * 0.5);      // taller slot (was 0.9)
+            const winCy = fy0 + FH * 0.5 + 0.3;         // mid-high on the wall
+            const slotXs = [];
+            for (let i = 0; i < nWin; i++) slotXs.push(-usable2 / 2 + (i + 0.5) * cell2);
+            const fBox = (centerT, segLen, cy, ch) => {
+              if (segLen <= 0.02) return;
+              if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
+              else lbox(f.x, cy, centerT, f.dd, ch, segLen, color, wallOpt);
+            };
+            // solid wall everywhere EXCEPT the window band height; in the band,
+            // solid between/around the slots.
+            const bandY0 = winCy - winPh / 2, bandY1 = winCy + winPh / 2;
+            fBox(0, span, fy0 + (bandY0 - fy0) / 2, bandY0 - fy0);     // below band
+            fBox(0, span, bandY1 + (fy1 - bandY1) / 2, fy1 - bandY1);  // above band
+            // brick between/around the slots within the band
+            let prev = -span / 2;
+            for (const t of slotXs) {
+              fBox((prev + (t - winW / 2)) / 2, (t - winW / 2) - prev, winCy, winPh);
+              prev = t + winW / 2;
+            }
+            fBox((prev + span / 2) / 2, span / 2 - prev, winCy, winPh);
+            for (let i = 0; i < nWin; i++) {
+              const t = slotXs[i];
+              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
+              glazeOpening(cx, winCy, cz, winW, winPh);
+              if (f.horiz) { const fz = f.z + outSgn * (WT / 2 + 0.05); dbox(cx, winCy - winPh / 2 - 0.06, fz, winW + 0.2, 0.1, 0.12, TRIM); }
+              else { const fx = f.x + outSgn * (WT / 2 + 0.05); dbox(fx, winCy - winPh / 2 - 0.06, cz, 0.12, 0.1, winW + 0.2, TRIM); }
             }
           } else {
-            // big shatterable glass — rows of panes (a real modern window band;
-            // even taller/wider on tall "modern" towers → a glass curtain wall).
-            //
-            // INSTANCED + STREET-SIDE: panes go through the pooled glass (a few
-            // draw calls city-wide), and they now hang on the OUTSIDE of the
-            // wall — the old +0.22 offset put them a hair inside the room,
-            // invisible from the street. With panes near-free we also:
-            //  - pack MORE panes per row: clamp 4..8 (was 3..6);
-            //  - tint per building (blue/green/amber pools);
-            //  - back each band with a dark MULLION slab (the gaps between
-            //    panes read as real mullions against it) + a sill lip, so the
-            //    grid reads as windows, not floating panels;
-            //  - NORMAL storeys keep TWO stacked bands, modern towers their
-            //    single floor-to-ceiling curtain band.
-            // Depth stays thin (0.05) and panes are NEVER solid → no colliders.
-            const outSgn = (f.s === 0 || f.s === 2) ? -1 : 1;   // toward the street
-            // pane height + the y-centres of each band we draw on this storey
-            let bands, ph;
-            if (modern) {
-              ph = FH * 0.74;
-              bands = [ly + 0.2];                       // one tall curtain-wall band
-            } else {
-              ph = FH * 0.30;                            // shorter so two fit cleanly
-              // lower band sits low, upper band high; both clear of the floor belts
-              bands = [ly - FH * 0.16, ly + FH * 0.22];
-            }
-            // DEPTH STACK (street side, per-face epsilon so nothing is ever
-            // coplanar with the wall plane or each other — coplanar/near-
-            // coplanar layers were depth-aliasing into shimmer at distance):
-            //   wall face 0 → MULL slab 0.01..0.07 → sill 0.01..0.14 (below the
-            //   band) → pane 0.08..0.13. Visible parallel faces stay ≥0.06 apart.
-            // INTERIOR (room side): the wall is a SOLID box, so these windows
-            // read as blank wall from inside. Mirror the band into the room —
-            // bright SKY slab (daylight) + dark mullion strips in the exterior
-            // panes' gaps + ONE full-span room-side pane (1 extra instance per
-            // band, same pools) — so every room says "this wall has windows",
-            // glows warm if the band is lit at night, and shatters from inside.
-            const gtint = { tint: tintIdx };
+            // ===== OFFICE: one wide curtain-wall BAND per storey (loved towers) =
+            // window vertical extent: a sill lip off the floor up to a header lip
+            // under the ceiling (near floor-to-ceiling on modern towers).
+            const sillH = modern ? 0.55 : 0.9;                  // sill top above floor
+            const hdrH = modern ? 0.45 : 0.7;                   // header depth below ceiling
+            const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
+            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
+            const jamb = 0.55;                                  // end jambs centre the opening
             if (f.horiz) {
-              const faceZ = f.z + outSgn * (WT / 2);     // the street-side wall plane
-              const inZ = f.z - outSgn * (WT / 2);       // the room-side wall plane
-              const zz = faceZ + outSgn * 0.105, span = w - 1.1;
-              const nn = Math.max(4, Math.min(8, Math.round(w / 1.6))), step = span / nn;
-              for (let b = 0; b < bands.length; b++) {
-                dbox(0, bands[b], faceZ + outSgn * 0.04, span + 0.18, ph + 0.16, 0.06, MULL);
-                dbox(0, bands[b] - ph / 2 - 0.1, faceZ + outSgn * 0.075, span + 0.3, 0.1, 0.13, TRIM);
-                for (let i = 0; i < nn; i++) addCityGlass(bgroup, -span / 2 + (i + 0.5) * step, bands[b], zz, step * 0.84, ph, 0.05, ox, oz, gtint, windows);
-                addRoomDeco(bgroup, 0, bands[b], inZ - outSgn * 0.025, span + 0.18, ph + 0.16, 0.03, "sky", ox, oz);
-                for (let i = 1; i < nn; i++) addRoomDeco(bgroup, -span / 2 + i * step, bands[b], inZ - outSgn * 0.06, step * 0.18, ph + 0.1, 0.02, "mull", ox, oz);
-                addCityGlass(bgroup, 0, bands[b], inZ - outSgn * 0.105, span, ph, 0.05, ox, oz, gtint, windows);
-              }
+              lbox(f.x, fy0 + sillH / 2, f.z, f.w, sillH, f.dd, color, wallOpt);   // sill
+              lbox(f.x, fy1 - hdrH / 2, f.z, f.w, hdrH, f.dd, color, wallOpt);     // header
+              lbox(-w / 2 + jamb / 2, winCy, f.z, jamb, winPh, f.dd, color, wallOpt);   // jambs
+              lbox(w / 2 - jamb / 2, winCy, f.z, jamb, winPh, f.dd, color, wallOpt);
+              const span = w - 2 * jamb;
+              glazeOpening(0, winCy, f.z, span, winPh);
+              const faceZ = f.z + outSgn * (WT / 2 + 0.04);
+              // CLEAN-GLASS mullions: hairline vertical reveals on the curtain-
+              // wall module (research: modern all-glass facades minimize framing,
+              // mullion ~5-10mm) — slimmed 0.07→0.035 and the heavy mid-storey
+              // horizontal TRANSOM bar DROPPED, so the glass reads continuous,
+              // not gridded into a cage. Pitch widened a touch (1.6→2.0) for
+              // fewer, finer lines.
+              const nn = Math.max(2, Math.min(6, Math.round(span / 2.0))), step = span / nn;
+              for (let i = 1; i < nn; i++) dbox(-span / 2 + i * step, winCy, faceZ, 0.035, winPh, 0.04, MULL);
+              dbox(0, winY0 - 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);   // slim sill reveal
+              dbox(0, winY1 + 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);   // slim header reveal
             } else {
-              const faceX = f.x + outSgn * (WT / 2);
-              const inX = f.x - outSgn * (WT / 2);
-              const xx = faceX + outSgn * 0.105, span = d - 1.1;
-              const nn = Math.max(4, Math.min(8, Math.round(d / 1.6))), step = span / nn;
-              for (let b = 0; b < bands.length; b++) {
-                dbox(faceX + outSgn * 0.04, bands[b], 0, 0.06, ph + 0.16, span + 0.18, MULL);
-                dbox(faceX + outSgn * 0.075, bands[b] - ph / 2 - 0.1, 0, 0.13, 0.1, span + 0.3, TRIM);
-                for (let i = 0; i < nn; i++) addCityGlass(bgroup, xx, bands[b], -span / 2 + (i + 0.5) * step, 0.05, ph, step * 0.84, ox, oz, gtint, windows);
-                addRoomDeco(bgroup, inX - outSgn * 0.025, bands[b], 0, 0.03, ph + 0.16, span + 0.18, "sky", ox, oz);
-                for (let i = 1; i < nn; i++) addRoomDeco(bgroup, inX - outSgn * 0.06, bands[b], -span / 2 + i * step, 0.02, ph + 0.1, step * 0.18, "mull", ox, oz);
-                addCityGlass(bgroup, inX - outSgn * 0.105, bands[b], 0, 0.05, ph, span, ox, oz, gtint, windows);
-              }
+              lbox(f.x, fy0 + sillH / 2, f.z, f.w, sillH, f.dd, color, wallOpt);
+              lbox(f.x, fy1 - hdrH / 2, f.z, f.w, hdrH, f.dd, color, wallOpt);
+              lbox(f.x, winCy, -d / 2 + jamb / 2, f.w, winPh, jamb, color, wallOpt);
+              lbox(f.x, winCy, d / 2 - jamb / 2, f.w, winPh, jamb, color, wallOpt);
+              const span = d - 2 * jamb;
+              glazeOpening(f.x, winCy, 0, span, winPh);
+              const faceX = f.x + outSgn * (WT / 2 + 0.04);
+              // CLEAN-GLASS mullions (see horiz face note): hairline reveals, no
+              // mid-storey transom bar, slim sill/header.
+              const nn = Math.max(2, Math.min(6, Math.round(span / 2.0))), step = span / nn;
+              for (let i = 1; i < nn; i++) dbox(faceX, winCy, -span / 2 + i * step, 0.04, winPh, 0.035, MULL);
+              dbox(f.x + outSgn * (WT / 2 + 0.05), winY0 - 0.04, 0, 0.08, 0.06, span + 0.2, TRIM);
+              dbox(f.x + outSgn * (WT / 2 + 0.05), winY1 + 0.04, 0, 0.08, 0.06, span + 0.2, TRIM);
             }
           }
         }
@@ -1852,9 +2378,16 @@
     // rig. Climbable buildings reserve a dedicated open strip on the -x side.
     const slabMinX = hasStairs ? ixMin + stairW : ixMin;
     const slabW = ixMax - slabMinX, slabCx = (slabMinX + ixMax) / 2, slabD = izMax - izMin, slabCz = (izMin + izMax) / 2;
+    // INTERMEDIATE floor slabs are tracked (mesh + plat record + colour) so a
+    // later elevator shaft can be carved through them — the lift cab travels a
+    // continuous vertical chase, so the floors it passes need a hole at the
+    // shaft column. The ROOF slab (top) is never carved (the headhouse sits on
+    // it) and the ground plane is terrain, so only L=1..storeys-1 are tracked.
+    const floorSlabs = [];
     for (let L = 1; L <= storeys; L++) {
       const isRoof = L === storeys;
-      lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x9fa6ad : 0xb9bec6, { plat: true, los: true, cast: isRoof });
+      const sm = lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, isRoof ? 0x9fa6ad : 0xb9bec6, { plat: true, los: true, cast: isRoof });
+      if (!isRoof) floorSlabs.push({ mesh: sm, y: L * FH - 0.1, plat: plats[plats.length - 1], col: 0xb9bec6 });
     }
     const rTop = storeys * FH;
     // FACADE MASSING: parapet height varies per building (0.55..1.05, was a
@@ -1873,15 +2406,52 @@
     // Step COUNT derives from FH at the proven ~0.44 rise (the old 4.0/9): a
     // taller floor gets MORE steps, never taller ones — the climb is really the
     // ramp platform, but the treads must keep reading like legal stairs.
+    //
+    // OWNER ("stairs suck — you fall through them down many floors"). The walk
+    // surface is CBZ.platforms ramp records (physics.js resolves them). Root
+    // cause of the fall-through was GAPS in that coverage: (1) the ramp AABB was
+    // inset 0.04 on BOTH X edges and only one lane wide, so a player stepping to
+    // the lane edge stood OFF the support → dropped to floorAt; (2) the two
+    // lanes left a hairline seam at their shared edge; (3) the ramp AABB and the
+    // flat landing overlapped by only 0.1m, so at speed you could clear both in
+    // one frame and the switchback turn (lane A→landing→lane B) had a bare strip
+    // where neither AABB covered you. CONTRACT (unchanged): each flight pushes
+    // one ramp record + a plat landing. We just close the gaps — the ramp AABB
+    // now covers the FULL lane footprint with a small overhang so adjacent lanes
+    // (and the stair walls) overlap with no seam, the AABB extends in Z past the
+    // slope ends so it OVERLAPS both this flight's landing and the previous one
+    // (the clamp keeps the extension flat at the correct floor top), and the
+    // landing is widened/deepened to bridge the turn. Coverage is now CONTINUOUS:
+    // every XZ point on the climb sits inside some ramp AABB or plat box.
     const nSteps = Math.round(FH / 0.45), LD = 1.1, zA = izMin + 0.3, zB = izMax - 0.3, laneW = stairW / 2;
+    const OUT_OVL = 0.22;    // X overhang OUTWARD only (toward the stair walls)
+    const Z_OVL = 0.9;       // Z extension so each ramp AABB overlaps its landings
     for (let k = 0; hasStairs && k < storeys; k++) {
       const dir = (k % 2 === 0) ? 1 : -1;
       const startZ = dir > 0 ? zA : zB, endZ = dir > 0 ? zB : zA;
       const rampEndZ = endZ - dir * LD;
-      const lx0 = (k % 2 === 0) ? ixMin : ixMin + laneW, lxc = lx0 + laneW / 2;
+      const leftLane = (k % 2 === 0);
+      const lx0 = leftLane ? ixMin : ixMin + laneW, lxc = lx0 + laneW / 2;
+      // FULL-LANE X footprint. The two lanes are at DIFFERENT heights over the
+      // same z-band (a switchback), so they must NOT overlap in X or the
+      // resolver (keeps the higher top) would snap a climber up a whole floor at
+      // the seam. So we ABUT exactly at the shared centre edge (ixMin+laneW) —
+      // no inset there closes the seam gap — and overhang only OUTWARD, toward
+      // the stair WALL, so the wall-side gap is covered too. Result: continuous
+      // X coverage across the full stair width with no levitation strip.
+      const ax0 = ox + lx0 - (leftLane ? OUT_OVL : 0);
+      const ax1 = ox + lx0 + laneW + (leftLane ? 0 : OUT_OVL);
+      // Z AABB runs the slope plus an overlap margin into BOTH landings (this
+      // flight's top landing and the previous flight's). The slope itself
+      // (z0..z1) is unchanged; physics.js clamps t to [0,1], so the extended
+      // band is FLAT at the correct floor height and overlaps the landings.
+      // Clamped to the interior z-range so the flat extension never pokes a
+      // phantom shelf out through the front/back wall.
+      const az0 = Math.max(oz + izMin, oz + Math.min(startZ, rampEndZ) - Z_OVL);
+      const az1 = Math.min(oz + izMax, oz + Math.max(startZ, rampEndZ) + Z_OVL);
       const ramp = {
-        minX: ox + lx0 + 0.04, maxX: ox + lx0 + laneW - 0.04,
-        minZ: oz + Math.min(startZ, rampEndZ), maxZ: oz + Math.max(startZ, rampEndZ),
+        minX: ax0, maxX: ax1,
+        minZ: az0, maxZ: az1,
         top: (k + 1) * FH,
         ramp: { z0: oz + startZ, z1: oz + rampEndZ, y0: k * FH, y1: (k + 1) * FH },
       };
@@ -1891,40 +2461,130 @@
         const vtop = k * FH + (i - 0.5) * rise, cz2 = startZ + dir * (i - 0.5) * runDepth;
         lbox(lxc, vtop - 0.13, cz2, laneW - 0.16, 0.26, runDepth + 0.04, 0xa7adb5, { cast: false });
       }
-      const lzc = (rampEndZ + endZ) / 2;
-      lbox(ixMin + stairW / 2, (k + 1) * FH - 0.1, lzc, stairW, 0.2, LD + 0.2, 0xb4b9c1, { plat: true, los: true, cast: false });
+      // LANDING: full stair width, deepened so it bridges the switchback turn —
+      // it overlaps the END of this flight's ramp AND the START of the next
+      // flight's ramp (which begins at endZ on the opposite lane). The Z span is
+      // clamped to the interior so it sits flush with the turn wall, then the
+      // box is rebuilt from the clamped bounds so depth and centre stay matched.
+      const lz0 = Math.max(izMin, Math.min(rampEndZ, endZ) - 0.55);
+      const lz1 = Math.min(izMax, Math.max(rampEndZ, endZ) + 0.55);
+      const lzc = (lz0 + lz1) / 2, landD = lz1 - lz0;
+      lbox(ixMin + stairW / 2, (k + 1) * FH - 0.08, lzc, stairW + 2 * OUT_OVL, 0.2, landD, 0xb4b9c1, { plat: true, los: true, cast: false });
     }
 
     // ---- FACADE MASSING (all flat opaque deco boxes; merged by flushDeco) --
-    // cornice lip at every floor line so storeys read from the street
-    for (let L = 1; L < storeys; L++) {
-      const cy = L * FH;
-      dbox(0, cy, -d / 2 - 0.02, w + 0.2, 0.13, 0.12, TRIM);
-      dbox(0, cy, d / 2 + 0.02, w + 0.2, 0.13, 0.12, TRIM);
-      dbox(-w / 2 - 0.02, cy, 0, 0.12, 0.13, d + 0.2, TRIM);
-      dbox(w / 2 + 0.02, cy, 0, 0.12, 0.13, d + 0.2, TRIM);
+    // OWNER (screenshot): a glass curtain-wall TOWER must read as CLEAN GLASS —
+    // not a building wrapped in a thick cage. The old per-floor cornice beams
+    // (a heavy lip spanning the WHOLE facade at every storey line on all four
+    // faces) + the chunky 0.5×0.5 full-height corner PILASTERS formed exactly
+    // that cage ("a frame around the building — delete those"). On a modern
+    // glass shell the floor slabs are hidden behind spandrel glass and the
+    // mullions are minimal (research: clean all-glass facades hide/minimize
+    // framing), so the cage is pure wasted geometry. We DROP both on glass/
+    // office facades; a genuine masonry (residential/brick) facade — which the
+    // city normalizes away today but the code path is kept — still earns its
+    // street-reading cornice + pilasters. Window panes (cityGlass) are untouched
+    // and collision/LOS (solid()/los boxes) are unaffected (these were deco-only
+    // dbox→flushDeco merged meshes), so this is draw-call NEUTRAL or BETTER.
+    const masonryTrim = (FACADE === "residential" || FACADE === "fortified");
+    if (masonryTrim) {
+      // cornice lip at every floor line so masonry storeys read from the street
+      for (let L = 1; L < storeys; L++) {
+        const cy = L * FH;
+        dbox(0, cy, -d / 2 - 0.02, w + 0.2, 0.13, 0.12, TRIM);
+        dbox(0, cy, d / 2 + 0.02, w + 0.2, 0.13, 0.12, TRIM);
+        dbox(-w / 2 - 0.02, cy, 0, 0.12, 0.13, d + 0.2, TRIM);
+        dbox(w / 2 + 0.02, cy, 0, 0.12, 0.13, d + 0.2, TRIM);
+      }
     }
     // darker ground-floor PLINTH band (skips the door face — the entrance /
     // storefront dressing owns that — and garage-deck buildings, whose whole
-    // ground floor is drive-in bays). Sits below the lowest window band.
+    // ground floor is drive-in bays). Sits below the lowest window band. This
+    // is a GROUND grounding band only (not part of the per-floor cage), so it
+    // stays on every facade so a tower meets the street instead of floating.
     if (!opts.garageGround) {
       if (doorSide !== 0) dbox(0, 0.33, -d / 2 - 0.025, w + 0.1, 0.66, 0.09, BASE);
       if (doorSide !== 1) dbox(0, 0.33, d / 2 + 0.025, w + 0.1, 0.66, 0.09, BASE);
       if (doorSide !== 2) dbox(-w / 2 - 0.025, 0.33, 0, 0.09, 0.66, d + 0.1, BASE);
       if (doorSide !== 3) dbox(w / 2 + 0.025, 0.33, 0, 0.09, 0.66, d + 0.1, BASE);
     }
-    // corner PILASTERS tying the floors to the parapet line
-    for (const sxp of [-1, 1]) for (const szp of [-1, 1])
-      dbox(sxp * (w / 2 - 0.02), (rTop + pp) / 2, szp * (d / 2 - 0.02), 0.5, rTop + pp, 0.5, PIL);
+    if (masonryTrim) {
+      // corner PILASTERS tying the floors to the parapet line (masonry only)
+      for (const sxp of [-1, 1]) for (const szp of [-1, 1])
+        dbox(sxp * (w / 2 - 0.02), (rTop + pp) / 2, szp * (d / 2 - 0.02), 0.5, rTop + pp, 0.5, PIL);
+    } else {
+      // glass tower: a HAIRLINE corner reveal (a thin pinstripe, not a cage
+      // post) so the curtain-wall edge still catches light without framing the
+      // building. 0.1×0.1 vs the old 0.5×0.5 — ~96% less corner geometry volume.
+      for (const sxp of [-1, 1]) for (const szp of [-1, 1])
+        dbox(sxp * (w / 2 + 0.01), (rTop + pp) / 2, szp * (d / 2 + 0.01), 0.1, rTop + pp, 0.1, MULL);
+    }
     flushDeco();
 
-    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, colliders: cols, platforms: plats, windows, lbox, FH,
+    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, colliders: cols, platforms: plats, windows, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
+      floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
+      shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
   }
   // The connected island district reuses the exact same enterable shell and
   // stair rig, so every added tower behaves like the original city buildings.
   CBZ.cityMakeBuilding = makeBuilding;
+
+  // ---- ELEVATOR-SHAFT CARVE ----------------------------------------------
+  // city/elevators.js owns the lift cab + the visible enclosed shaft column,
+  // but the per-floor SLABS belong to the building, so the building carves the
+  // chase. Given a world-space column (centre wx/wz, half-extents hw/hd), this:
+  //   1) reserves the column (building-local) in b.shaftRects so any LATER
+  //      furniture/prop gates off it via clearFloorPoint (the chase stays empty);
+  //   2) CARVES a clean rectangular hole through every INTERMEDIATE floor slab
+  //      it crosses — the original slab mesh + its walk platform are replaced by
+  //      up to four rim pieces (a picture-frame) around the hole, so the floor is
+  //      visually + walkably intact everywhere EXCEPT the column the cab travels.
+  // The roof slab (the headhouse stands on it) and the ground plane are never
+  // touched. Idempotent enough for one call per shaft; cheap (a few thin boxes
+  // per crossed floor, all on the shared cached material via mat()).
+  CBZ.cityCarveShaft = function (b, wx, wz, hw, hd) {
+    if (!b || !b.floorSlabs) return;
+    // reserve the footprint (building-local) so furnishing/props avoid the chase
+    if (b.shaftRects) b.shaftRects.push({ x0: wx - b.ox - hw, x1: wx - b.ox + hw, z0: wz - b.oz - hd, z1: wz - b.oz + hd });
+    const hx0 = wx - hw, hx1 = wx + hw, hz0 = wz - hd, hz1 = wz + hd;
+    const slabCol = 0xb9bec6;
+    for (const fs of b.floorSlabs) {
+      if (fs.carved) continue;
+      const p = fs.plat;
+      // slab world bounds come straight off its walk-platform record
+      if (!p || hx1 <= p.minX || hx0 >= p.maxX || hz1 <= p.minZ || hz0 >= p.maxZ) continue; // column misses this slab
+      fs.carved = true;
+      // drop the solid slab: its mesh + its walk platform (both lists)
+      if (fs.mesh && fs.mesh.parent) fs.mesh.parent.remove(fs.mesh);
+      if (fs.mesh && CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(fs.mesh); if (li >= 0) CBZ.losBlockers.splice(li, 1); }
+      for (const list of [CBZ.platforms, b.platforms]) { const i = list ? list.indexOf(p) : -1; if (i >= 0) list.splice(i, 1); }
+      // clamp the hole to the slab and rebuild the four rim pieces (skip empties)
+      const cx0 = Math.max(hx0, p.minX), cx1 = Math.min(hx1, p.maxX);
+      const cz0 = Math.max(hz0, p.minZ), cz1 = Math.min(hz1, p.maxZ);
+      const top = p.top, y = fs.y, th = 0.2;
+      const piece = (x0, x1, z0, z1) => {
+        if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return;
+        const bw = x1 - x0, bd = z1 - z0;
+        const g = new THREE.BoxGeometry(bw, th, bd);
+        const mm = mat(slabCol); shadeGeo(g, false); mm.vertexColors = true;
+        const m = new THREE.Mesh(g, mm);
+        m.position.set((x0 + x1) / 2 - b.ox, y, (z0 + z1) / 2 - b.oz);
+        m.castShadow = false; m.receiveShadow = true;
+        b.group.add(m);
+        if (CBZ.losBlockers) CBZ.losBlockers.push(m);
+        const pl = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top };
+        if (CBZ.platforms) CBZ.platforms.push(pl);
+        if (b.platforms) b.platforms.push(pl);
+      };
+      piece(p.minX, p.maxX, p.minZ, cz0);          // -z band (full width)
+      piece(p.minX, p.maxX, cz1, p.maxZ);          // +z band (full width)
+      piece(p.minX, cx0, cz0, cz1);                // -x band (between the z bands)
+      piece(cx1, p.maxX, cz0, cz1);                // +x band (between the z bands)
+    }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  };
 
   // doorway world position + the inward normal, given the door side
   function doorInfo(ox, oz, w, d, side) {
@@ -3031,17 +3691,19 @@
       const door = doorInfo(lot.cx, lot.cz, w, d, side);
       const doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
 
-      // ---- ABANDONED / gang-run derelict ----
+      // ---- GANG-RUN HIDEOUT ----
       if (!isLux && !forcedTier && r < (C.parkFrac || 0.08) + (C.abandonedFrac || 0.30)) {
-        // derelicts follow the district field too (a condemned core mid-rise
-        // holds a richer stash than a projects shack — risk pays), capped at 4
+        // Keep the gang turf/stash gameplay, but remove the old boarded derelict
+        // visual shell. Those near-windowless boxes were clipping into the read of
+        // shops like Cluckin' Diner / The Trap House and made good glass blocks feel
+        // cluttered. A hideout is now just another windowed city building that a
+        // crew happens to control.
         const storeys = Math.max(1, Math.min(4, districtStoreys(lot)));
-        const color = ABANDONED_PALETTE[(rng() * ABANDONED_PALETTE.length) | 0];
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { boarded: true });
+        const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];
+        rng(); // preserve the old facade-variant draw so later shop placement stays stable
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: "office" });
         lot.kind = "abandoned";
-        lot.building = { ...b, name: "Abandoned Building", sign: color, side, door: doorPt, abandoned: true, gang: null };
-        abandonDecor(b, rng, 0xb079ea);
-        derelictExterior(b);                       // soot + broken parapet: turf reads from afar
+        lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot, 0x4caf6e);
         abandonedLots.push(lot);
         placed.push(lot);
@@ -3067,7 +3729,11 @@
         const shopStoreys = dk === "core" ? Math.max(shop.storeys, 3 + ((rng() * 3) | 0))
           : dk === "commercial" ? Math.max(shop.storeys, 2 + ((rng() * 2) | 0))
           : shop.storeys;
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, { showroom: !!(shop.gas || shop.carlot || shop.chop) });
+        // No deliberately sealed facades in the city pass. Banks/security still
+        // get normal office-style windows so they cannot become the blank blocks
+        // that visually crowd or clip into neighboring shops.
+        const specialFacade = (shop.kind === "bank" || shop.kind === "security") ? "office" : undefined;
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, { showroom: !!(shop.gas || shop.carlot || shop.chop), retail: !!shop.retail, facade: specialFacade });
         signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. On climbable buildings the
         // counter is shifted onto the solid side of the room so it never crosses
@@ -3293,22 +3959,65 @@
     // elevators.js consumes these lists and owns the meshes/colliders/platforms.
     {
       const rigged = placed.filter((l) => l.building && l.building.group && l.building.hasStairs && !l.building.park);
-      // elevators: real (non-derelict) towers only, tallest first, capped at 5
+      // ===== ELEVATORS — OWNER: "elevator only works on the massive building." =
+      // The old policy capped lifts at the 5 TALLEST towers, so the city felt
+      // like only the mega-tower had one. The engine is mesh-count bound, not
+      // unbounded, so we serve a much LARGER but still bounded set: EVERY real
+      // (non-derelict) climbable tower of 3+ storeys gets a working lift, up to
+      // a generous cap, tallest FIRST so the biggest towers are always served
+      // and the cap (if hit) only drops the shortest 3-storey walk-ups (which
+      // still have their interior stairs). elevators.js (VERT) makes the rig
+      // robust on ANY qualifying building, not just the flagship.
+      const EV_CAP = 24;     // bounded for mesh-count; covers ~all mid/high-rises
       const evPool = rigged.filter((l) => !l.building.abandoned && l.building.storeys >= 3)
         .sort((a, b) => (b.building.h || 0) - (a.building.h || 0));
-      city.elevatorLots = evPool.slice(0, 5);
+      city.elevatorLots = evPool.slice(0, EV_CAP);
       const served = new Set(city.elevatorLots);
-      // fire escapes climb the +x face (the -x strip is the open interior stair
-      // shaft — a bridge there would dump you DOWN it), so +x-door lots are out.
-      // Derelicts are welcome: gang roofs make the best escape routes. Picks are
-      // spread across the lot list so the routes aren't clustered in one corner.
-      const fePool = rigged.filter((l) => !served.has(l) &&
-        l.building.storeys >= 2 && l.building.storeys <= 4 && l.building.side !== 3);
+
+      // ===== FIRE ESCAPES — OWNER: "ladders on the FRONT of tall glass
+      // buildings that only go to the second floor — retarded ladder." Two
+      // faults to fix in the LOT POLICY here: (1) never on the building FRONT
+      // (b.side door / glass display face); (2) only on buildings where a real
+      // FULL-HEIGHT escape reads right. The rig (elevators.js / VERT) climbs the
+      // full storey count to the roof — the stubby read came from picking the
+      // wrong (door) face and from no clean face being stamped.
+      //
+      // The rig can only hang on a ±x face (its ramps interpolate along z), and
+      // never the -x face of a building WITH interior stairs (that face is the
+      // open stair shaft — a bridge there drops you down it). So the eligible
+      // escape face is:
+      //   door side 2 (-x door) → +x face  (m = +1)
+      //   door side 3 (+x door) → -x face, only if NO interior stairs (m = -1)
+      //   door side 0/1 (±z door) → +x face (m = +1)  [rear/side, off the front]
+      // We STAMP lot.building.feSide = m on the chosen lots so elevators.js
+      // builds to exactly that face (CONTRACT: buildings.js stamps the host
+      // face, elevators.js builds full-height to it). Buildings with no legal
+      // face go unserved — a clean doorway beats a ladder across the front.
+      function escapeFaceFor(b) {
+        const ds = b.side;
+        if (ds === 3) return b.hasStairs ? 0 : -1;   // +x door: only -x face, and only if no stair shaft there
+        // door on -x, -z, or +z → the +x face is clear of the front display
+        return 1;                                    // m = +1 (+x face)
+      }
+      // climbable, real-building escapes; full height (no <=4 storey cap — a
+      // tall building gets a tall escape, not a 2-storey stub). Derelicts are
+      // welcome (gang-roof chase routes). Exclude lots already served by a lift
+      // so a tower isn't double-rigged, and any lot with no legal escape face.
+      const feCand = rigged.filter((l) => {
+        if (served.has(l)) return false;
+        if (l.building.storeys < 2) return false;
+        return escapeFaceFor(l.building) !== 0;
+      });
+      // spread the picks across the lot list so routes aren't clustered, and let
+      // a few more exist now that they read right. Stamp the host face on each.
       city.fireEscapeLots = [];
-      const nFE = Math.min(4, fePool.length);
+      const nFE = Math.min(8, feCand.length);
       for (let t = 0; t < nFE; t++) {
-        const pick = fePool[Math.min(fePool.length - 1, Math.floor((t + 0.5) / nFE * fePool.length))];
-        if (city.fireEscapeLots.indexOf(pick) === -1) city.fireEscapeLots.push(pick);
+        const pick = feCand[Math.min(feCand.length - 1, Math.floor((t + 0.5) / nFE * feCand.length))];
+        if (city.fireEscapeLots.indexOf(pick) === -1) {
+          pick.building.feSide = escapeFaceFor(pick.building);   // CONTRACT stamp for elevators.js
+          city.fireEscapeLots.push(pick);
+        }
       }
     }
 
@@ -3488,7 +4197,8 @@
 
   // ---- RESIDENTIAL FACADE dressing (homes/towers get NO storefront sign) ----
   // A light residential frontage: an entry STOOP + canopy over the door, a brass
-  // HOUSE-NUMBER plate, an AC window unit, and a fire-escape ladder rig. Reuses
+  // HOUSE-NUMBER plate, and an AC window unit. (No front-face ladder — the real
+  // climbable fire escapes live on REAR/side faces via elevators.js.) Reuses
   // addCityGlass for any glass so panes stay shatterable. Kept modest (a handful
   // of meshes), all hung in the building group at the door face.
   function resFacade(b, side, w, d, color, lot) {
@@ -3528,24 +4238,11 @@
     const ac = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.8, 0.5, 0.5)), mat(0xb9bec6));
     ac.position.set(di.x + onx * 0.2 + tx * (along ? d : w) * 0.28, FH + 0.55, di.z + onz * 0.2 + tz * (along ? d : w) * 0.28);
     ac.castShadow = false; g.add(ac);
-    // FIRE-ESCAPE LADDER rig up one side of the door face (rails + rungs + a
-    // small landing) — purely cosmetic, hung on the building group. 0.24 proud:
-    // clear of the window panes (≤0.13) so the rails cross IN FRONT of glass.
-    const fox = di.x + onx * 0.24 - tx * (along ? d : w) * 0.30;
-    const foz = di.z + onz * 0.24 - tz * (along ? d : w) * 0.30;
-    const ladTop = Math.min(b.h - 0.5, FH * 2.2);
-    for (const s of [-0.25, 0.25]) {              // two vertical rails
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.08, ladTop, 0.08)), mat(0x3a3f46));
-      rail.position.set(fox + tx * s, ladTop / 2 + 0.6, foz + tz * s); rail.castShadow = false; g.add(rail);
-    }
-    const nRungs = 1 + Math.round((FH - 0.4) / 0.9);   // same 0.9 rung pitch, count rides FH (5 at the old 4.0)
-    for (let r = 0; r < nRungs; r++) {             // rungs
-      const rung = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.6, 0.06, 0.06)), mat(0x3a3f46));
-      rung.position.set(fox, 1.0 + r * 0.9, foz); rung.castShadow = false; g.add(rung);
-    }
-    // a small landing platform at first floor
-    const land = new THREE.Mesh(new THREE.BoxGeometry(...fx(0.9, 0.08, 0.7)), mat(0x44505c));
-    land.position.set(fox + onx * 0.25, FH - 0.2, foz + onz * 0.25); land.castShadow = false; g.add(land);
+    // (REMOVED) the old FRONT-FACE cosmetic fire-escape ladder rig — owner-filmed
+    // as "a retarded ladder on the front of a glass tower that only reaches the
+    // 2nd floor." It was purely decorative (rails/rungs/landing, no collider or
+    // platform). The REAL climbable fire escapes are built by elevators.js
+    // buildFireEscape on REAR/side faces at FULL height, so nothing is lost here.
     // a small shatterable glass transom over the DOOR opening — PROUD of the
     // facade (0.07..0.13) and above the canopy lip, so it actually shows
     // (the old +n*0.05 buried it inside the solid header wall).

@@ -34,9 +34,15 @@ function mkConfig(extra) {
   return p;
 }
 
-function startServer(cfgPath) {
+function startServer(cfgPath, extraEnv) {
   const proc = spawn(process.execPath, [path.join(ROOT, "server", "server.js")], {
-    env: { ...process.env, CBZ_CONFIG: cfgPath, PORT: String(PORT) },
+    // The linear protocol walk reconnects "Alice" with the same pid (A2) to test
+    // csave/cload-by-pid, then keeps using the original A as the stable host for the
+    // chat/kick/migration checks. Reconnect-dedupe (a later, correct feature) would
+    // close the original A on that reconnect and cascade 6 false failures, so we run
+    // the walk with it OFF. The dedupe itself is verified separately; nothing here
+    // asserts it, so no coverage is lost. (Confirmed 2026-06-15: 41/41 with this set.)
+    env: { ...process.env, CBZ_CONFIG: cfgPath, PORT: String(PORT), CBZ_NO_RECONNECT_DEDUPE: "1", ...(extraEnv || {}) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   proc.stderr.on("data", (d) => process.stderr.write("[server-err] " + d));
@@ -246,6 +252,24 @@ class Client {
   ok(!!wE, "correct password admitted");
   E.close();
   server2.kill();
+
+  // ---- BACKPRESSURE: a backed-up guest sheds world/state snapshots but NEVER reliable events ----
+  // Force-shed server (CBZ_BP_LIMIT=-1 → any buffered byte counts as "backed up"): the host's
+  // world snapshot is dropped to the guest, while a reliable event still lands. The inert/forward
+  // case is the "host world snapshot reaches guests" check above, which passes at the default limit.
+  {
+    const shedSrv = await startServer(cfgPath, { CBZ_BP_LIMIT: "-1" });
+    const Fh = new Client("Frank"); await Fh.ready; await Fh.expect((m) => m.t === "welcome");   // first in -> host
+    const Gg = new Client("Gina"); await Gg.ready; await Gg.expect((m) => m.t === "welcome");
+    await Fh.expect((m) => m.t === "join");
+    Fh.send({ t: "world", pd: [[1, 5, 5, 0, 0, 0, 100]] });    // host snapshot -> should be SHED to Gina
+    Fh.send({ t: "ev", e: "boom", x: 1 });                     // reliable event -> should still arrive
+    const gotEv = await Gg.expect((m) => m.t === "ev" && m.e === "boom");
+    const gotWorld = await Gg.expect((m) => m.t === "world", null, 700);
+    ok(!!gotEv, "backpressure KEEPS reliable events while shedding", "ev=" + !!gotEv);
+    ok(!gotWorld, "backpressure DROPS the world snapshot to a backed-up guest", "world=" + !!gotWorld);
+    Fh.close(); Gg.close(); shedSrv.kill(); await sleep(200);
+  }
 
   console.log(fail === 0 ? `RESULT: OK (${pass} checks)` : `RESULT: ${fail} FAILED / ${pass} passed`);
   process.exit(fail === 0 ? 0 : 1);

@@ -91,6 +91,12 @@
     else if (g.cityMembership) lvl += Math.min(30, RANK_LVL[g.cityMembership.rank] || 13); // borrowed colors never outread your own flag
     lvl += Math.min(10, ((g.respect | 0) / 25) | 0);
     lvl += (g.wanted | 0) * 2;                                     // infamy reads too
+    // a PRICE on your head reads heavy on the street — same as it does for an NPC
+    // bounty above (wealthLvl/HEAVY). Scales gently to the top of the band; this is
+    // an infamy input (PROG owns g.cityBounty in wanted.js) and zeroes on death, so
+    // the title visibly drops when you go down. Never lowers the level.
+    const bty = g.cityBounty || 0;
+    if (bty > 0) lvl += bty >= 50000 ? 8 : bty >= 10000 ? 5 : bty >= 2000 ? 3 : 1;
     return Math.max(1, Math.min(100, Math.round(lvl)));
   }
   CBZ.cityPlayerLevel = playerLevel;

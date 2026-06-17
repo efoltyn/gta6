@@ -345,10 +345,46 @@
   function rentFor(rec) { return round5(mval(rec) * (RENT_FRAC[rec.category] || 0.012)); }
 
   // ---- FINANCE / mortgage (financed buys) -----------------------------------
+  // A financed property is tracked in g.cityMortgages keyed by listing id. The
+  // record is ONE of two shapes depending on whether the dedicated bank loan
+  // ENGINE (bank.js → CBZ.cityBankLoan, contract [E]) is loaded:
+  //   • LEGACY / self-contained: { balance, orig, rate } — zillow's own
+  //     economyTick (below) accrues interest + auto-pays it. Used when bank.js
+  //     isn't present (feature-detect), preserving today's behaviour exactly.
+  //   • BANK-BACKED: { viaBank:true, loanId, orig, rate } — the loan lives in
+  //     g.cityLoans and bank.js owns ALL accrual + auto-pay (its tick runs the
+  //     amortization). Zillow keeps only a thin LINK so the property still reads
+  //     as FINANCED and its live balance/equity/payoff resolve off the engine.
+  // mortgageBalanceOf() is the single resolver both shapes flow through.
   function mortgages() { return (g.cityMortgages = g.cityMortgages || {}); }
   function mortgageOf(rec) { return mortgages()[rec.id] || null; }
+  function bankLoan() { return CBZ.cityBankLoan || null; }   // the loan ENGINE, if wired
+  // live balance of a property's debt, whichever shape it is. For a bank-backed
+  // mortgage we read the engine's ledger; if that loan has been fully paid /
+  // closed by bank.js we prune the stale link so the row flips back to OWNED.
+  function bankLoanRec(loanId) {
+    const bl = bankLoan(); if (!bl || loanId == null) return null;
+    const list = (bl.list && bl.list()) || g.cityLoans || [];
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].id === loanId) return list[i];
+    return null;
+  }
+  function mortgageBalanceOf(rec) {
+    const m = mortgageOf(rec); if (!m) return 0;
+    if (m.viaBank) {
+      const lr = bankLoanRec(m.loanId);
+      if (!lr) { delete mortgages()[rec.id]; return 0; }   // engine closed it → property is free & clear
+      const bal = +(lr.balance != null ? lr.balance : lr.principal);
+      return isFinite(bal) && bal > 0 ? bal : 0;
+    }
+    return Math.max(0, +m.balance || 0);
+  }
+  function mortgageRateOf(rec) {
+    const m = mortgageOf(rec); if (!m) return FIN().rate;
+    if (m.viaBank) { const lr = bankLoanRec(m.loanId); if (lr && isFinite(lr.rate)) return lr.rate; }
+    return isFinite(m.rate) ? m.rate : FIN().rate;
+  }
   function FIN() { return (CBZ.cityEcon && CBZ.cityEcon.FINANCE) || { minDownFrac: 0.2, rate: 0.06, minPaymentFrac: 0.04, maxLTV: 0.8 }; }
-  function equity(rec) { const m = mortgageOf(rec); return Math.max(0, mval(rec) - (m ? m.balance : 0)); }
+  function equity(rec) { return Math.max(0, mval(rec) - mortgageBalanceOf(rec)); }
 
   // ---- RENT OUT (NPC tenants in property YOU own) ---------------------------
   function tenants() { return (g.cityTenants = g.cityTenants || {}); }
@@ -377,6 +413,34 @@
   function canBuy(rec) { return rec.legal && rec.marketable !== false && !isOwned(rec) && !isRenting(rec); }
   function canRent(rec) { return rec.legal && rec.marketable !== false && rec.category !== "land" && !isOwned(rec) && !isRenting(rec); }
   function canFinance(rec) { return canBuy(rec) && buyPriceOf(rec) >= 8000; }
+  // A side-effect-FREE financing quote for a listing — what the realtor (and the
+  // [Z] details panel) preview before you commit. 20% down from FIN(); the rest
+  // is the principal. If the bank loan ENGINE is wired we ask it for a pre-qual
+  // (a non-binding offer with NO ctx flag so it doesn't book anything) to surface
+  // the real rate / per-cycle payment / approval; otherwise we fall back to the
+  // self-contained terms. Numbers only — `financeBuy` is the one that transacts.
+  function financeQuote(rec) {
+    if (!rec || !canFinance(rec)) return null;
+    const f = FIN();
+    const price = buyPriceOf(rec);
+    const down = round500(price * f.minDownFrac);
+    const principal = Math.max(0, price - down);
+    const q = { price: price, down: down, principal: principal, rate: f.rate, payment: 0, approved: true, reason: "", viaBank: false };
+    const bl = bankLoan();
+    if (bl && bl.offer) {
+      const o = bl.offer("mortgage", principal, { propertyId: rec.id, value: mval(rec), down: down, category: rec.category, kind: rec.kind, quote: true });
+      if (o) {
+        q.viaBank = true;
+        q.approved = !!o.approved;
+        if (o.reason) q.reason = o.reason;
+        if (isFinite(o.rate)) q.rate = o.rate;
+        if (isFinite(o.principal)) q.principal = o.principal;
+        if (isFinite(o.payment)) q.payment = o.payment;
+        if (isFinite(o.termTicks)) q.termTicks = o.termTicks;
+      }
+    }
+    return q;
+  }
   // which RIVAL gang currently HOLDS an illegal op (its live block-owner, else
   // the gang controlling its zone). Returns null if it's your own gang's block
   // (controlClass already grants "mine") or truly unclaimed turf.
@@ -415,12 +479,12 @@
     for (const rec of r.listings) {
       const owned = isOwned(rec), renting = isRenting(rec);
       if (!owned && !renting) continue;
-      const m = mortgageOf(rec), t = tenants()[rec.id];
+      const m = mortgageOf(rec), t = tenants()[rec.id], bal = mortgageBalanceOf(rec);
       list.push({
         id: rec.id, name: rec.business ? rec.business.name : rec.name, address: rec.address,
         category: rec.category, kind: rec.kind, value: mval(rec),
         tenure: owned ? (m ? "financed" : "owned") : "rented",
-        mortgage: m ? Math.round(m.balance) : 0,
+        mortgage: Math.round(bal),
         rentedOut: !!(owned && !isHome(rec) && t && t.occupied),
         isHome: isHome(rec) || (renting && rentals()[rec.id].isHome),
       });
@@ -532,6 +596,13 @@
     refresh();
   }
 
+  // FINANCED BUY (contract [E] consumer side). 20% down from cash+bank; the
+  // REMAINDER is financed. If the bank loan ENGINE is wired we route the loan
+  // through it (real underwriting: it may decline, set its own rate/term, and it
+  // owns the per-tick amortization + auto-pay against g.cityLoans). If bank.js
+  // isn't present we fall back to the self-contained mortgage exactly as before,
+  // so financing keeps working today. Either way the property is registered the
+  // moment the down clears — the only difference is WHO services the debt.
   function financeBuy(id) {
     const r = reg(); if (!r) return;
     const rec = r.byId[id]; if (!rec) return;
@@ -539,15 +610,39 @@
     const f = FIN();
     const price = buyPriceOf(rec);
     const down = round500(price * f.minDownFrac);
+    const principal = Math.max(0, price - down);
     if (((g.cash || 0) + (g.cityBank || 0)) < down) { flash("Need " + money(down) + " down to finance.", "bad"); CBZ.city.note("Need " + money(down) + " down.", 2); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return; }
-    charge(down);
-    const bal = Math.max(0, price - down);
-    mortgages()[rec.id] = { balance: bal, orig: bal, rate: f.rate };
+
+    const bl = bankLoan();
+    let mort;   // the record we'll stamp once the down clears
+    if (bl && bl.offer && bl.take) {
+      // ---- bank.js underwrites the mortgage ----------------------------------
+      const offer = bl.offer("mortgage", principal, { propertyId: rec.id, value: mval(rec), down: down, category: rec.category, kind: rec.kind });
+      if (!offer || !offer.approved) {
+        const why = (offer && offer.reason) ? offer.reason : "the bank declined the mortgage";
+        flash("Mortgage declined — " + why + ".", "bad"); CBZ.city.note("Mortgage declined: " + why + ".", 2.4); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return;
+      }
+      charge(down);   // the down comes out of pocket; the engine disburses the rest to escrow
+      const loanId = bl.take(offer);
+      const bal = +(offer.principal != null ? offer.principal : principal);
+      // If the engine couldn't book the loan (no id back), DON'T silently forgive
+      // the balance (that'd be a free-house exploit) — keep the debt on Zillow's
+      // own books at the offered terms so the player still owes it.
+      mort = (loanId != null)
+        ? { viaBank: true, loanId: loanId, orig: bal, rate: isFinite(offer.rate) ? offer.rate : f.rate }
+        : { balance: bal, orig: bal, rate: isFinite(offer.rate) ? offer.rate : f.rate };
+    } else {
+      // ---- fallback: self-contained mortgage (legacy, byte-identical) --------
+      charge(down);
+      mort = { balance: principal, orig: principal, rate: f.rate };
+    }
+    mortgages()[rec.id] = mort;
     ownedSet()[rec.id] = true; rec.ownerId = "player"; rec.boughtAt = price;
     takeResidence(rec);
     pushInfluence(rec);
     CBZ.city.addRespect(Math.max(1, Math.min(20, Math.round(down / 8000))));
-    flash("Financed " + (rec.business ? rec.business.name : rec.name) + ": " + money(down) + " down, " + money(bal) + " owed.", "ok");
+    const owed = mortgageBalanceOf(rec);
+    flash("Financed " + (rec.business ? rec.business.name : rec.name) + ": " + money(down) + " down, " + money(owed) + " owed.", "ok");
     CBZ.city.big("Financed " + rec.name);
     if (CBZ.sfx) CBZ.sfx("coin");
     persist(); if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -556,12 +651,25 @@
   function payMortgage(id, frac) {
     const r = reg(); if (!r) return;
     const rec = r.byId[id]; const m = rec && mortgageOf(rec); if (!m) return;
-    let pay = frac >= 1 ? m.balance : round500(m.balance * frac);
-    pay = Math.min(pay, m.balance);
+    const balance = mortgageBalanceOf(rec);
+    let pay = frac >= 1 ? balance : round500(balance * frac);
+    pay = Math.min(pay, balance);
     if (pay <= 0) return;
     if (((g.cash || 0) + (g.cityBank || 0)) < pay) { flash("Need " + money(pay) + " to pay down.", "bad"); if (CBZ.sfx) CBZ.sfx("empty"); refresh(); return; }
+    if (m.viaBank) {
+      // hand the extra principal to the loan engine (it debits cash/bank itself
+      // via payExtra); don't double-charge here. Then resolve the live balance.
+      const bl = bankLoan();
+      if (bl && bl.payExtra) bl.payExtra(m.loanId, pay);
+      const left = mortgageBalanceOf(rec);   // re-reads the engine (prunes if closed)
+      if (left <= 1 || !mortgageOf(rec)) { delete mortgages()[rec.id]; flash("Mortgage cleared on " + rec.name + ".", "ok"); CBZ.city.big("Mortgage cleared"); }
+      else flash("Paid " + money(pay) + " toward " + rec.name + ". " + money(left) + " left.", "ok");
+      if (CBZ.sfx) CBZ.sfx("coin");
+      persist(); if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      refresh(); return;
+    }
     charge(pay);
-    m.balance -= pay;
+    m.balance = Math.max(0, balance - pay);
     if (m.balance <= 1) { delete mortgages()[rec.id]; flash("Mortgage cleared on " + rec.name + ".", "ok"); CBZ.city.big("Mortgage cleared"); }
     else flash("Paid " + money(pay) + " toward " + rec.name + ". " + money(m.balance) + " left.", "ok");
     if (CBZ.sfx) CBZ.sfx("coin");
@@ -616,10 +724,21 @@
     const rec = r.byId[id]; if (!rec || !isOwned(rec)) return;
     const gross = round500(mval(rec) * SELL_CUT);
     const m = mortgageOf(rec);
-    const payoff = m ? Math.round(m.balance) : 0;
+    const payoff = Math.round(mortgageBalanceOf(rec));
     const got = Math.max(0, gross - payoff);
     const pl = rec.boughtAt ? gross - rec.boughtAt : 0;      // flip profit/loss vs. what you paid
-    CBZ.city.addCash(got);
+    // Settle the outstanding debt out of the sale proceeds (not the seller's
+    // pocket). For a bank-backed loan, credit the FULL gross then route the
+    // payoff through the engine (payExtra debits cash + closes its books), so the
+    // net to the player is `got` and g.cityLoans stays consistent. A legacy
+    // self-contained mortgage just nets `got` directly (its record is deleted).
+    if (m && m.viaBank) {
+      const bl = bankLoan();
+      CBZ.city.addCash(gross);
+      if (payoff > 0 && bl && bl.payExtra) bl.payExtra(m.loanId, payoff);
+    } else {
+      CBZ.city.addCash(got);
+    }
     delete ownedSet()[rec.id];
     delete mortgages()[rec.id];
     delete tenants()[rec.id];
@@ -679,7 +798,7 @@
     let count = 0, value = 0, eq = 0, debt = 0;
     for (const rec of r.listings) if (isOwned(rec)) {
       count++; const v = mval(rec); value += v;
-      const m = mortgageOf(rec); if (m) debt += m.balance;
+      debt += mortgageBalanceOf(rec);
       eq += equity(rec);
     }
     return { count, value, equity: Math.round(eq), debt: Math.round(debt) };
@@ -707,7 +826,13 @@
       const v = mval(rec);
       const tax = Math.max(0, Math.round(v * TAX_PER_TICK));
       const m = mortgageOf(rec);
-      if (m && m.balance > 0) {
+      // Self-contained mortgages amortize HERE. Bank-backed loans (viaBank) are
+      // serviced by bank.js's own tick (it accrues + auto-pays against
+      // g.cityLoans) — touching them here would double-bill, so we skip them and
+      // only prune the link if the engine has since closed the loan.
+      if (m && m.viaBank) {
+        if (mortgageBalanceOf(rec) <= 0) { /* mortgageBalanceOf already pruned it */ }
+      } else if (m && m.balance > 0) {
         const interest = Math.round(m.balance * (m.rate / 240));
         m.balance += interest;
         const minPay = Math.min(m.balance, Math.max(interest + 50, Math.round(m.orig * FIN().minPaymentFrac)));
@@ -1015,8 +1140,9 @@
 
     let primary = "";
     const m = mortgageOf(rec);
+    const mBal = m ? Math.round(mortgageBalanceOf(rec)) : 0;   // live debt (bank-backed or legacy)
     if (isOwned(rec)) {
-      const netSale = Math.max(0, round500(v * SELL_CUT) - (m ? Math.round(m.balance) : 0));
+      const netSale = Math.max(0, round500(v * SELL_CUT) - mBal);
       primary = btn("sell", rec.id, "Sell " + money(netSale), "zbtn-sell");
     } else if (isRenting(rec)) {
       primary = btn("endrent", rec.id, "End lease", "zbtn-neutral");
@@ -1036,12 +1162,12 @@
     if (expanded === rec.id) {
       let acts = "";
       if (isOwned(rec)) {
-        if (m) { acts += btn("payhalf", rec.id, "Pay half", "zbtn-neutral") + btn("payoff", rec.id, "Pay off " + money(Math.round(m.balance)), "zbtn-home"); }
+        if (m) { acts += btn("payhalf", rec.id, "Pay half", "zbtn-neutral") + btn("payoff", rec.id, "Pay off " + money(mBal), "zbtn-home"); }
         if (rec.category === "residence" && homeObj(rec) && !isHome(rec)) acts += btn("home", rec.id, "Set home", "zbtn-home");
         const t = tenants()[rec.id];
         const occ = isHome(rec) ? "your residence" : (t && t.occupied === false ? "vacant" : tenantLabel(rec));
         const pl = rec.boughtAt ? "<span style='color:" + (v * SELL_CUT - rec.boughtAt >= 0 ? "#9be8b4" : "#ff9e90") + "'> · flip " + (v * SELL_CUT - rec.boughtAt >= 0 ? "+" : "") + money(v * SELL_CUT - rec.boughtAt) + "</span>" : "";
-        extra = "<div class='zsub'>" + occ + (m ? " · mortgage " + money(Math.round(m.balance)) + " · equity " + money(equity(rec)) : "") + pl + "</div>";
+        extra = "<div class='zsub'>" + occ + (m ? " · mortgage " + money(mBal) + " · equity " + money(equity(rec)) : "") + pl + "</div>";
       } else if (isRenting(rec)) {
         const lease = rentals()[rec.id];
         if (lease.isHome && g.cityRentedHome !== rec.id && !g.cityHome) acts += btn("rhome", rec.id, "Set home", "zbtn-home");
@@ -1295,6 +1421,16 @@
     return Math.round(eq);
   }
 
+  // Resolve a listing record from EITHER a listing id ("p7") or a world lot —
+  // the shared currency the realtor/realtyoffice modules pass us.
+  function recForAny(lotOrId) {
+    const r = reg(); if (!r) return null;
+    if (lotOrId == null) return null;
+    if (typeof lotOrId === "string") return r.byId[lotOrId] || null;
+    if (lotOrId.lot) return lotOrId;                 // already a record
+    return recForLot(lotOrId);                       // a world lot
+  }
+
   CBZ.cityZillow = {
     open, close, buy, finance: financeBuy, rent, sell, setHome, seize, rankings, playerEmpire,
     ownsLot: CBZ.cityOwnsLot, listings: () => reg() && reg().listings, isOpen, portfolioValue,
@@ -1307,6 +1443,69 @@
     buyByLot: (lot) => { const rec = recForLot(lot); if (rec) buy(rec.id, true); return rec ? isOwned(rec) : false; },
     buyPriceForLot: (lot) => { const rec = recForLot(lot); return rec ? buyPriceOf(rec) : null; },
     setHomeByLot: (lot) => { const rec = recForLot(lot); if (rec && isOwned(rec) && homeObj(rec)) setAsHome(rec, true); },
+    // FINANCING (contract [E]) — financed buy by lot OR id, single source of truth.
+    financeByLot: (lot) => { const rec = recForLot(lot); if (rec) financeBuy(rec.id); return rec ? isOwned(rec) : false; },
+    financeQuoteForLot: (lot) => { const rec = recForLot(lot); return rec ? financeQuote(rec) : null; },
+    canFinanceLot: (lot) => { const rec = recForLot(lot); return rec ? canFinance(rec) : false; },
+  };
+
+  // ==========================================================================
+  //  REALTY FINANCING — the consumer side of the financing chain (contract [E]).
+  //  realtyoffice.js (the in-world realtor desk) drives the player through a
+  //  financed home/commercial purchase using these. They REUSE the Zillow market
+  //  (no duplicate listings) and the SAME transact path as the [Z] panel, so the
+  //  realtor and Zillow can never disagree on price, ownership, or debt.
+  // ==========================================================================
+  // Finance a property by lot OR listing id: 20% down from cash+bank, remainder
+  // via the bank loan engine (or the self-contained fallback). Returns true if
+  // the player ended up owning it. This is the ONLY financing entry realtyoffice
+  // needs — financeBuy itself feature-detects CBZ.cityBankLoan.
+  CBZ.cityRealtyFinance = function (lotOrId) {
+    const rec = recForAny(lotOrId);
+    if (!rec) return false;
+    financeBuy(rec.id);
+    return isOwned(rec);
+  };
+  // The buyable inventory for the realtor desk, DERIVED from the live Zillow
+  // registry (which already folds the config home ladder into listed-residence
+  // rows). Default = the listed home LADDER (what a realtor sells); pass
+  // { commercial:true } to also include for-sale businesses, { all:true } for
+  // every marketable legal lot. Each row carries everything realtyoffice.js needs
+  // to render AND to drive a cash/finance buy (it calls back into buyByLot /
+  // cityRealtyFinance with the id). Cash price + the financing quote are included
+  // so the desk never has to recompute money. Sorted like the realtor list (homes
+  // climb by level, then price).
+  CBZ.cityRealtyListings = function (opts) {
+    const r = reg(); if (!r) return [];
+    opts = opts || {};
+    const rows = [];
+    for (const rec of r.listings) {
+      if (!rec.legal) continue;
+      const home = homeObj(rec);
+      const isLadderHome = rec.category === "residence" && rec.homeListed;
+      let include = false;
+      if (opts.all) include = rec.marketable !== false;
+      else if (isLadderHome) include = true;                                  // the ladder is always the core inventory
+      else if (opts.commercial && rec.category === "commercial") include = rec.marketable !== false;
+      if (!include) continue;
+      const price = buyPriceOf(rec);
+      rows.push({
+        id: rec.id, lot: rec.lot, name: nameOf(rec), address: rec.address,
+        category: rec.category, kind: rec.kind,
+        value: mval(rec), price: price,
+        sqft: rec.sqft || 0, beds: rec.beds || 0, storeys: rec.storeys || 1,
+        tier: rec.homeTier || 0, flagship: !!rec.flagship, listedHome: isLadderHome,
+        blurb: rec.blurb || "", flavor: rec.flavor || "",
+        owned: isOwned(rec), isHome: isHome(rec), renting: isRenting(rec),
+        canBuy: canBuy(rec), canFinance: canFinance(rec), canRent: canRent(rec),
+        rentPerCycle: canRent(rec) ? rentFor(rec) : null,
+        finance: financeQuote(rec),     // {down, principal, rate, payment, approved, reason, viaBank} or null
+        zone: (function () { const z = (CBZ.cityZoneAt && rec.lot) ? CBZ.cityZoneAt(rec.lot.cx || 0, rec.lot.cz || 0) : null; return z ? z.name : null; })(),
+      });
+    }
+    rows.sort((a, b) => (a.listedHome === b.listedHome ? 0 : a.listedHome ? -1 : 1)
+      || (a.tier - b.tier) || (a.price - b.price) || (a.id < b.id ? -1 : 1));
+    return rows;
   };
 
   // ---- key: [Z] toggles the market; arrows page; number keys switch tabs ----

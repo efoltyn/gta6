@@ -26,6 +26,37 @@
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
   CBZ.cam = cam;
 
+  // ---- FEEL-CAM (de-lagged, real-time follow) -----------------------------
+  // Two coupled feel fixes, both reversible via CBZ.feelCam (default ON):
+  //  (A) REAL-TIME SETTLE: every SmoothDamp / exp-chase below integrates with
+  //      the wall-clock CBZ.feelDt (graceful: `feelDt != null ? feelDt : dt`)
+  //      instead of the world's 0.05-clamped dt. At ~5 FPS the clamped dt makes
+  //      the camera settle at ~25% real speed (the slow-mo-under-load follow);
+  //      feelDt restores real-time settling WITHOUT changing any smoothTime
+  //      constant — the float/lazy character is byte-identical, just paced to
+  //      real time. The SMOOTH-TIME tunables (DAMP_POS etc.) are untouched, so
+  //      the translation follow stays exactly as floaty as the owner tuned it.
+  //  (B) CRISP ROTATION: mouse-look already writes cam.yaw INSTANTLY in the DOM
+  //      event — that is the responsive aim. The city rig then RE-smooths it via
+  //      smYaw and re-lags the look target, re-adding rotational latency on top
+  //      of an already-instant aim (the "view turns a beat after my mouse" feel
+  //      research flags as the dizzying over-delay). Under feelCam the VIEW
+  //      DIRECTION (look target) uses LIVE cam.yaw 1:1 while the lagged smYaw
+  //      still frames the BODY/orbit — so turning is crisp but the body keeps
+  //      its cinematic trail. Consensus from research: rotation instant,
+  //      translation smoothed.
+  // MP-SAFE: this is a pure per-client present-path read of player.pos/cam.yaw;
+  // no net hook lives in this file and every client runs identical own-view
+  // logic. OFF (CBZ.feelCam === false) → reverts to today's smYaw framing +
+  // world-dt settle exactly. The FOV speed-kick is preserved unchanged.
+  if (CBZ.feelCam === undefined) CBZ.feelCam = true;
+  // look-target smoothTime is multiplied by this when feelCam is on: the look
+  // target carries the ROTATIONAL view direction (via the big aimLead term),
+  // so tightening it snaps the aim toward live yaw while a small residue keeps
+  // player-position noise from jittering the view at low FPS. Position follow
+  // SmoothDamp is NOT tightened (translation stays floaty).
+  const LOOK_TIGHTEN = 0.28;
+
   // screen shake — punches/KOs call CBZ.shake(magnitude)
   let shakeAmt = 0;
   CBZ.shake = function (m) { shakeAmt = Math.max(shakeAmt, m); };
@@ -147,6 +178,13 @@
   }
 
   function updateCamera(dt) {
+    // FEEL-DT: the real-wall-clock present delta for camera settle (graceful —
+    // falls back to the passed world dt if loop.js hasn't published feelDt or
+    // CBZ.feelMotion is off). Gated by feelCam so the whole feel pass reverts
+    // cleanly: when feelCam is off we settle on the world dt exactly as today.
+    // Used ONLY for time-integration of the damps/exp-chase below; the velocity
+    // calc keeps the world dt so look-ahead/FOV pacing is unchanged.
+    const fdt = (CBZ.feelCam && CBZ.feelDt != null) ? CBZ.feelDt : dt;
     // BIRD'S-EYE SOCIETY VIEW: a strategic camera for the math-only mass
     // simulation. It intentionally bypasses spring-arm collision and close
     // camera effects; the player remains frozen while the prison keeps living.
@@ -156,12 +194,12 @@
       prev.copy(player.pos); // prevent a false velocity spike on hand-off
       shakeAmt = 0;
       const targetX = sv.x, targetY = sv.height, targetZ = sv.z + sv.height * 0.16;
-      camera.position.x = smoothDamp(camera.position.x, targetX, camV.x, 0.16, dt);
-      camera.position.y = smoothDamp(camera.position.y, targetY, camV.y, 0.16, dt);
-      camera.position.z = smoothDamp(camera.position.z, targetZ, camV.z, 0.16, dt);
+      camera.position.x = smoothDamp(camera.position.x, targetX, camV.x, 0.16, fdt);
+      camera.position.y = smoothDamp(camera.position.y, targetY, camV.y, 0.16, fdt);
+      camera.position.z = smoothDamp(camera.position.z, targetZ, camV.z, 0.16, fdt);
       look.set(sv.x, 0, sv.z);
       camera.lookAt(look);
-      fov = smoothDamp(fov, 52, fovV, 0.16, dt);
+      fov = smoothDamp(fov, 52, fovV, 0.16, fdt);
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
       return;
     }
@@ -174,15 +212,15 @@
       const cfx = -Math.sin(cam.yaw), cfz = -Math.cos(cam.yaw);   // = the car's forward
       const back = 9.5, up = 10.0, ahead = 6.0;
       const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
-      camera.position.x = smoothDamp(camera.position.x, tx, camV.x, 0.12, dt);
-      camera.position.y = smoothDamp(camera.position.y, ty, camV.y, 0.12, dt);
-      camera.position.z = smoothDamp(camera.position.z, tz, camV.z, 0.12, dt);
-      look.x = smoothDamp(look.x, player.pos.x + cfx * ahead, lookV.x, 0.10, dt);
-      look.y = smoothDamp(look.y, player.pos.y + 0.6, lookV.y, 0.10, dt);
-      look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, 0.10, dt);
+      camera.position.x = smoothDamp(camera.position.x, tx, camV.x, 0.12, fdt);
+      camera.position.y = smoothDamp(camera.position.y, ty, camV.y, 0.12, fdt);
+      camera.position.z = smoothDamp(camera.position.z, tz, camV.z, 0.12, fdt);
+      look.x = smoothDamp(look.x, player.pos.x + cfx * ahead, lookV.x, 0.10, fdt);
+      look.y = smoothDamp(look.y, player.pos.y + 0.6, lookV.y, 0.10, fdt);
+      look.z = smoothDamp(look.z, player.pos.z + cfz * ahead, lookV.z, 0.10, fdt);
       camera.lookAt(look);
-      if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, dt); if (shakeAmt < 0.01) shakeAmt = 0; }
-      fov = smoothDamp(fov, 66, fovV, 0.18, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }
+      fov = smoothDamp(fov, 66, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
       return;
     }
 
@@ -203,7 +241,7 @@
         const r = watching ? 6.6 : 5.5, h = watching ? 3.4 : 3.0, ly = watching ? 1.1 : 0.7;
         camera.position.set(subj.x + Math.cos(ang) * r, subj.y + h, subj.z + Math.sin(ang) * r);
         look.set(subj.x, subj.y + ly, subj.z); camera.lookAt(look);
-        fov = smoothDamp(fov, 48, fovV, 0.2, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+        fov = smoothDamp(fov, 48, fovV, 0.2, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
         return;
       }
       if (cc.fp && !player.dead && !player.driving) {   // first-person
@@ -216,12 +254,21 @@
         // and the door-step don't jolt the whole view up and down.
         camera.position.x = player.pos.x;
         camera.position.z = player.pos.z;
-        camera.position.y = smoothDamp(camera.position.y, eye, camV.y, 0.06, dt);
+        camera.position.y = smoothDamp(camera.position.y, eye, camV.y, 0.06, fdt);
         const ey = camera.position.y;
         look.set(player.pos.x + fX * cp * 6, ey - sp * 6, player.pos.z + fZ * cp * 6);
         camera.lookAt(look);
-        if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, dt); if (shakeAmt < 0.01) shakeAmt = 0; }
-        fov = smoothDamp(fov, 70, fovV, 0.18, dt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+        if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }
+        // FOV must be ADS-AWARE so this writer and fpsmode.js's ADS writer AGREE.
+        // Both run every frame in city first-person (this at onAlways(50), fpsmode
+        // at onAlways(52)). If this always eased toward the 70° hip while fpsmode
+        // eased toward hip-14 (=56°) on RMB, they tug-of-war'd: the zoom never
+        // settled and any per-shot perturbation tipped the unstable equilibrium
+        // back toward hip — the "left-click unzooms while holding RMB" bug. Easing
+        // toward the SAME 56° target during ADS makes both writers converge, so the
+        // zoom holds rock-steady through firing. (Hip 70 / drop 14 mirror fpsmode.)
+        const fpHipFov = (CBZ.isADS && CBZ.isADS()) ? 70 - 14 : 70;
+        fov = smoothDamp(fov, fpHipFov, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
         return;
       }
     }
@@ -229,9 +276,9 @@
     // SPECTATE death-cam: slowly orbit the fallen body, drift to a higher,
     // pulled-back framing so you watch the chaos play out.
     if (CBZ.surv && CBZ.surv.spectating) {
-      cam.yaw += dt * 0.22;
-      cam.pitch += (0.52 - cam.pitch) * Math.min(1, dt * 1.5);
-      zoomTarget = clampZoom(zoomTarget + (12.5 - zoomTarget) * Math.min(1, dt * 1.2));
+      cam.yaw += fdt * 0.22;
+      cam.pitch += (0.52 - cam.pitch) * Math.min(1, fdt * 1.5);
+      zoomTarget = clampZoom(zoomTarget + (12.5 - zoomTarget) * Math.min(1, fdt * 1.2));
     }
     cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
 
@@ -256,7 +303,7 @@
     const desiredZoom = TP
       ? (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF)))
       : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
-    camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, dt));
+    camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, fdt));
 
     // smoothed rig height (crouch dips the whole rig). Survival frames the
     // player higher — disasters need you to read the ground around you — and
@@ -264,15 +311,23 @@
     const surv = CBZ.game.mode === "survival";
     const sprinting = surv && !!player.sprint;
     const baseHeight = player.crouch ? 1.16 : (driving ? 2.35 : (TP ? (shoulder ? TP.HEIGHT + 0.1 : TP.HEIGHT) : (shoulder ? 1.64 : (meleeFocus ? 1.44 : (surv ? (sprinting ? 2.28 : 2.08) : 1.82)))));
-    height = smoothDamp(height, baseHeight, heightV, 0.18, dt);
+    height = smoothDamp(height, baseHeight, heightV, 0.18, fdt);
     const tx = player.pos.x, ty = player.pos.y + height, tz = player.pos.z;
     // city: the rig yaw lazily chases the input yaw (frame-rate independent),
     // so quick mouse flicks read as a smoothed pan instead of a rigid lock.
-    let yaw = cam.yaw;
+    // `yaw` frames the BODY/orbit (lazy trail); `yawView` aims the look target.
+    // Under feelCam the look target uses LIVE cam.yaw 1:1 (crisp aim) while the
+    // body keeps its smYaw trail (cinematic) — rotation instant, body floaty.
+    // smYaw integrates on feel-dt so its trail settles in REAL time (at 5 FPS
+    // the world-dt version chased at ~25% speed = the "view drags behind my
+    // mouse" lag). Off → identical to today (smYaw frames both, world-dt chase).
+    let yaw = cam.yaw, yawView = cam.yaw;
     if (TP) {
       if (!smYawOn) { smYaw = cam.yaw; smYawOn = true; }
-      smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(shoulder ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * dt));
+      const yawDt = CBZ.feelCam ? fdt : dt;
+      smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(shoulder ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * yawDt));
       yaw = smYaw;
+      yawView = CBZ.feelCam ? cam.yaw : smYaw;   // crisp view dir vs lazy body
     } else smYawOn = false;
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
@@ -326,8 +381,13 @@
     // sprinting) and raise the look height so you sit centred, not bottom-third.
     const lead = shoulder ? 0.05 : (meleeFocus ? 0.08 : 0.08);
     const aimLead = driving ? 8.5 : (shoulder ? 12.0 : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))));
-    const ltx = tx + vel.x * lead + rightX * targetSide + fwdX * aimLead;
-    const ltz = tz + vel.z * lead + rightZ * targetSide + fwdZ * aimLead;
+    // The look target carries the VIEW DIRECTION via the aimLead·forward term.
+    // Derive that forward/right from yawView (= live cam.yaw under feelCam) so
+    // the aim tracks the mouse 1:1; off (or non-TP) yawView===yaw → identical.
+    const rightVX = Math.cos(yawView), rightVZ = -Math.sin(yawView);
+    const fwdVX = -Math.sin(yawView), fwdVZ = -Math.cos(yawView);
+    const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLead;
+    const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLead;
     const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))));
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
@@ -393,15 +453,25 @@
     // SmoothDamp the camera toward the desired position. Prison/survival keep
     // the tight track; the city RDR2 cam runs a lazier settle (DAMP_POS) so the
     // follow breathes — aiming snaps back to a tight 0.07 so guns stay crisp.
+    // POSITION smoothTime is UNCHANGED (translation stays floaty); we only swap
+    // the integration dt → feel-dt so the floaty follow settles in REAL time
+    // instead of the ~25%-speed slow-mo the world-clamped dt produced at 5 FPS.
     const posS = TP ? (shoulder ? 0.07 : TP.DAMP_POS) : 0.085;
-    camera.position.x = smoothDamp(camera.position.x, dx, camV.x, posS, dt);
-    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (shoulder ? 0.08 : TP.DAMP_POS * 1.1) : 0.10, dt);
-    camera.position.z = smoothDamp(camera.position.z, dz, camV.z, posS, dt);
+    camera.position.x = smoothDamp(camera.position.x, dx, camV.x, posS, fdt);
+    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (shoulder ? 0.08 : TP.DAMP_POS * 1.1) : 0.10, fdt);
+    camera.position.z = smoothDamp(camera.position.z, dz, camV.z, posS, fdt);
 
-    const lookS = TP ? (shoulder ? 0.06 : TP.DAMP_POS * 0.65) : 0.07;
-    look.x = smoothDamp(look.x, ltx, lookV.x, lookS, dt);
-    look.y = smoothDamp(look.y, lty, lookV.y, lookS * 1.2, dt);
-    look.z = smoothDamp(look.z, ltz, lookV.z, lookS, dt);
+    // The look target carries the view DIRECTION (its target already tracks live
+    // yaw via yawView). Under feelCam we additionally TIGHTEN its smoothTime so
+    // the aim snaps toward live yaw (crisp rotation) — but only the look target,
+    // NOT the position follow, so translation stays floaty. A small residue
+    // (LOOK_TIGHTEN, not zero) keeps player-position noise from jittering the
+    // view at low FPS. Off → today's lookS settle on world dt exactly.
+    let lookS = TP ? (shoulder ? 0.06 : TP.DAMP_POS * 0.65) : 0.07;
+    if (CBZ.feelCam) lookS *= LOOK_TIGHTEN;
+    look.x = smoothDamp(look.x, ltx, lookV.x, lookS, fdt);
+    look.y = smoothDamp(look.y, lty, lookV.y, lookS * 1.2, fdt);
+    look.z = smoothDamp(look.z, ltz, lookV.z, lookS, fdt);
     camera.lookAt(look);
 
     // screen shake offset, decaying (applied after positioning)
@@ -410,7 +480,7 @@
       camera.position.x += (Math.random() - 0.5) * s;
       camera.position.y += (Math.random() - 0.5) * s;
       camera.position.z += (Math.random() - 0.5) * s;
-      shakeAmt *= Math.pow(0.0006, dt); // fast decay
+      shakeAmt *= Math.pow(0.0006, fdt); // fast decay (real-time under load)
       if (shakeAmt < 0.01) shakeAmt = 0;
     }
 
@@ -419,7 +489,7 @@
     const targetFov = TP
       ? (shoulder ? TP.FOV_AIM : TP.FOV + Math.min(spd / 6, 1) * 5)
       : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
-    fov = smoothDamp(fov, targetFov, fovV, 0.18, dt);
+    fov = smoothDamp(fov, targetFov, fovV, 0.18, fdt);
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   }
 

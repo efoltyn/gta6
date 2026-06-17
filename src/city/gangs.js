@@ -706,6 +706,16 @@
     return _dbGeo;
   }
   function buildDbCar(color) {
+    // THE FIX: a hit/drive-by car used to be a crude placeholder box (the user's
+    // "fake-as-fuck car comes when a hit is sent"). Build the SAME real detailed
+    // visual every other city car uses, painted in the gang's colour, via the
+    // shared vehicles.js pipeline (parity, not new cost — all traffic uses it).
+    if (CBZ.cityBuildGangCarVisual) {
+      const real = CBZ.cityBuildGangCarVisual(color);
+      if (real) return real;
+    }
+    // last-resort box rig — only reached when the visual system isn't loaded
+    // (headless / gallery). Keeps drive-bys working there without the hero mesh.
     const grp = new THREE.Group();
     const body = new THREE.Mesh(dbCarGeo(), new THREE.MeshLambertMaterial({ color: 0x16181d }));
     body.position.y = 0.75; grp.add(body);
@@ -776,6 +786,27 @@
     return best;
   }
 
+  // a drive-by car USED TO move on rails — `clampToCity` kept it inside the
+  // arena bounds but it phased straight THROUGH buildings (the owner-filmed
+  // "fake car drives thru walls" on a hit). Route it through the SAME oriented
+  // wall resolver every other city car uses (vehicles.js cityCollideVehicle —
+  // box depenetration + a forward probe so the nose doesn't bury in a facade).
+  // It mutates car.pos in place; we adapt the rail car's x/z onto a reused
+  // Vector3 so there's zero per-frame alloc. vehicles.js is LOCKED — we only
+  // CALL its exported resolver, never edit it.
+  const _dbCarPos = new THREE.Vector3();
+  const _dbCar = { pos: _dbCarPos, heading: 0, v: 0, _visualDims: { width: 2.0, length: 4.2 } };
+  function collideDrivebyCar(db) {
+    if (!CBZ.cityCollideVehicle) return;   // headless / vehicles.js absent → bounds-only (clampToCity still runs)
+    _dbCarPos.set(db.x, db.y || 0, db.z);
+    _dbCar.heading = db.heading; _dbCar.v = db.v;
+    CBZ.cityCollideVehicle(_dbCar);        // pushes _dbCarPos out of any wall it overlaps
+    // if a wall shoved it, bleed speed so it doesn't keep grinding the facade
+    const moved = Math.hypot(_dbCarPos.x - db.x, _dbCarPos.z - db.z);
+    db.x = _dbCarPos.x; db.z = _dbCarPos.z;
+    if (moved > 0.05) db.v *= 0.6;
+  }
+
   function updateDrivebys(dt) {
     for (let i = drivebys.length - 1; i >= 0; i--) {
       const db = drivebys[i];
@@ -794,6 +825,8 @@
       const nz = db.z + Math.cos(db.heading) * db.v * dt;
       db.x = nx; db.z = nz;
       const A = CBZ.city && CBZ.city.arena;
+      // BUILDING collision first (stop at walls), then the arena bounds clamp.
+      collideDrivebyCar(db);
       if (A && A.clampToCity) { const p = { x: db.x, z: db.z }; A.clampToCity(p, 1.6); db.x = p.x; db.z = p.z; }
       db.grp.position.set(db.x, 0, db.z); db.grp.rotation.y = db.heading;
       // close pass → it's "alongside", start spraying; then it loops for another pass
@@ -1069,6 +1102,140 @@
       CBZ.city && CBZ.city.big("⚠ " + gang.name + " sent a hit squad after you");
     }
     return sent;
+  }
+
+  // ============================================================
+  //  DOOR-AWARE ATTACK ROUTING — the owner-filmed "gang walks/drives THRU a
+  //  building when it comes for me" bug. A gang attacker's chase (peds.js fight
+  //  state) BEELINES at the target's live position; building walls are real
+  //  colliders so the body can't actually phase — but a raw beeline GRINDS the
+  //  facade forever when the target ducks inside. Cops already solve this
+  //  (police.js routes a blind chaser to the building's DOOR). Gangs route
+  //  through peds.js's universal brain, which has no such detour — so we add it
+  //  HERE, director-side, the same way war-shape already steers fields the brain
+  //  honors (guard/state/target/path). When a raging attacker is walled out of a
+  //  target inside a building, we WALK them to that building's door (a real,
+  //  auto-opening opening — buildings.js drops the leaf collider on proximity)
+  //  and resume the chase once they're at the door or can see the target again.
+  //  cityNav.routeTo already threads the door as the final legs (citynav.js), so
+  //  one routeTo lays "streets → door → step inside". Composes with the breach-
+  //  glass path: an attacker standing on a shootable window keeps shooting
+  //  through it (peds.js _breachedT), and only walks to the door when the
+  //  obstruction is solid (no glass on the lane). Bounded: only ATTACKERS
+  //  (rage + hunt/raid), each throttled by m._gDoorCD, never a full-roster scan.
+  // ============================================================
+  const _gDoorPath = [];   // reused out array for routeTo (per-call, one at a time)
+  // the live position of whoever this attacker is hunting. While a door detour
+  // is in flight we deliberately CLEAR m.rage (so peds.js walks the path instead
+  // of beelining the wall), so fall back to the remembered victim during it.
+  function attackerTargetPos(m) {
+    let R = m.rage;
+    if ((!R || R.dead) && m._gDoorGoal) {
+      R = m._gWasPlayer ? playerActor() : m._gWasVictim;   // detour in flight: use the remembered mark
+    }
+    if (!R || R.dead) return null;
+    return R.pos || null;
+  }
+  // true if a clear shot exists from the attacker's chest to the target's chest
+  function attackerHasLOS(m, tx, ty, tz) {
+    if (!CBZ.clearLineOfFire) return true;   // no LOS module → assume open (today's behaviour)
+    return CBZ.clearLineOfFire(m.pos.x, (m.pos.y || 0) + 1.4, m.pos.z, tx, ty, tz);
+  }
+  // route ONE attacker to the door of the building its target stands in, if it's
+  // walled out. Returns true if it took/holds the door detour this tick.
+  function routeAttackerToDoor(m, dt) {
+    const NAV = CBZ.cityNav;
+    if (!NAV || !NAV.indoorLotAt || !NAV.doorFor) return false;
+    const tp = attackerTargetPos(m);
+    if (!tp) { m._gDoorGoal = null; return false; }
+    // a member shooting THROUGH a freshly-broken window this beat prefers the
+    // glass lane — don't fight the breach push with a door detour (combat.js
+    // stamps _breachedT > 0 when it opens a pane on the firing lane).
+    if ((m._breachedT || 0) > 0) { m._gDoorGoal = null; return false; }
+    // is the hunted mark the player? (m.rage is cleared mid-detour → use the
+    // remembered flag too) — only affects the chest height we LOS-test against.
+    const huntPlayer = (m.rage && m.rage.isPlayer) || (!m.rage && m._gDoorGoal && m._gWasPlayer);
+    const ty = (tp.y || 0) + (huntPlayer ? 1.55 : 1.3);
+    // throttled lookup (matches police.js _doorCD cadence) — cheap, not per-frame
+    m._gDoorCD = (m._gDoorCD || 0) - dt;
+    if (m._gDoorCD <= 0) {
+      m._gDoorCD = 0.45 + rng() * 0.3;
+      const lot = NAV.indoorLotAt(tp.x, tp.z);
+      // only detour when the target is INSIDE a lot we are NOT already in, and we
+      // genuinely can't shoot them (blind). A clear shot → let the brain fight.
+      if (lot && NAV.indoorLotAt(m.pos.x, m.pos.z) !== lot && !attackerHasLOS(m, tp.x, ty, tp.z)) {
+        const door = NAV.doorFor(lot);
+        // route only if the door sits between us and the target (closer than the
+        // target itself) so we never run AWAY from a target already in the doorway.
+        if (door && Math.hypot(door.x - m.pos.x, door.z - m.pos.z) > 2.4) {
+          NAV.routeTo(m.pos.x, m.pos.z, tp.x, tp.z, _gDoorPath);   // threads streets → door → inside
+          if (_gDoorPath.length) {
+            // REMEMBER who we were hunting BEFORE we release rage, so we can
+            // re-engage exactly the same target once we're at the door / can see.
+            const victim = m.rage;
+            m._gWasPlayer = !!(victim && victim.isPlayer);
+            m._gWasVictim = (victim && !victim.isPlayer) ? victim : null;
+            // copy out of the shared routeTo pool into the ped's OWN path array so
+            // a later routeTo for another attacker can't clobber this one mid-walk.
+            const own = [];
+            for (let k = 0; k < _gDoorPath.length; k++) own.push({ x: _gDoorPath[k].x, z: _gDoorPath[k].z });
+            m.path = own;
+            m._gDoorGoal = { x: door.x, z: door.z };
+            // one-shot rage release so peds.js WALKS the path instead of beelining
+            // the rage target through the wall; we re-rage on arrival / sightline.
+            m.rage = null; m.state = "walk"; m.pause = 0;
+            m.target.set(m.path[0].x, 0, m.path[0].z);
+          }
+        } else m._gDoorGoal = null;
+      } else m._gDoorGoal = null;
+    }
+    if (m._gDoorGoal) {
+      const ddx = m._gDoorGoal.x - m.pos.x, ddz = m._gDoorGoal.z - m.pos.z;
+      // reached the door OR a fresh sightline opened → drop the detour, resume the
+      // hunt: re-rage the original target so peds.js fights again from here.
+      const reached = Math.hypot(ddx, ddz) < 2.4;
+      const seesNow = attackerHasLOS(m, tp.x, ty, tp.z);
+      if (reached || seesNow) {
+        m._gDoorGoal = null;
+        // restore the chase: rage at whoever we were hunting (player or rival)
+        const PA = playerActor();
+        if (m._gWasPlayer && PA) { m.rage = PA; }
+        else if (m._gWasVictim && !m._gWasVictim.dead) { m.rage = m._gWasVictim; }
+        if (m.rage) { m.state = "fight"; m.target.set(m.rage.pos.x, 0, m.rage.pos.z); m.path = null; }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // run the door-router over only the live ATTACKERS each frame — a bounded set
+  // (raid squads ≤10, reprisal squads ≤6, plus any rival-war fighters), each
+  // self-throttled by m._gDoorCD so the indoor/LOS lookups stay cheap. We touch
+  // a member only when it's actually hunting/raiding AND raging at a real mark
+  // (or already mid-detour). Players-only matters: the bug is "a gang comes for
+  // ME", but routing rival-vs-rival chasers through doors too is the same code
+  // and keeps the city honest with zero extra cost on this bounded set.
+  function routeAttackersThruDoors(dt) {
+    if (!CBZ.cityNav || !CBZ.cityNav.indoorLotAt) return;
+    for (const gang of CBZ.cityGangs) {
+      if (gang.absorbed) continue;
+      for (const m of gang.members) {
+        if (!m || m.dead || m.ko > 0 || m.inCar || m.companion || m.controlled) continue;
+        // a member holding a war-shape FIRING ROLE (arc/press/call/back/bag) is a
+        // positioned fighter, not a pursuer — leave the front line to war-shape so
+        // the two systems never fight over guard/rage. Door routing is for raw
+        // chasers + reprisal HUNTERS who are walled out of a target inside.
+        if (m._wRole) { if (m._gDoorGoal) m._gDoorGoal = null; continue; }
+        // only attackers: a live rage mark, or a door detour still in flight that
+        // belongs to a member who's STILL on the warpath (hunting / on a raid
+        // clock). A member who's gone home (no rage, not hunting, raidT done)
+        // drops any stale detour so it can't keep walking to an old door.
+        const onWarpath = (m.rage && !m.rage.dead) || m.hunting || m.raidT > 0;
+        const attacking = onWarpath && ((m.rage && !m.rage.dead) || m._gDoorGoal);
+        if (!attacking) { if (m._gDoorGoal) { m._gDoorGoal = null; m._gWasVictim = null; } continue; }
+        routeAttackerToDoor(m, dt);
+      }
+    }
   }
 
   // ============================================================
@@ -1437,6 +1604,9 @@
   CBZ.onUpdate(34.5, function (dt) {
     if (g.mode !== "city") return;
     updateDrivebys(dt);
+    // DOOR-AWARE ATTACK ROUTING: walk walled-out attackers to the building DOOR
+    // instead of grinding/straight-lining the facade toward a target inside.
+    routeAttackersThruDoors(dt);
 
     // ---- HIERARCHY upkeep: succession + a slow merit/loyalty review ----
     // A boss who died mid-frame leaves a power vacuum; the bench takes over.

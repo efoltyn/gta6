@@ -243,7 +243,7 @@
     heatDecay: 3.5,        // heat bled off per second when unseen
 
     // ---- world composition: every lot is one of these (buildings.js) -------
-    abandonedFrac: 0.26,   // share of buildable lots that are derelict + gang-run
+    abandonedFrac: 0.06,   // share of buildable lots that are derelict + gang-run (RARE — most of the city is real lived-in buildings; derelicts are a characterful minority, not a quarter of every block)
     parkFrac: 0.08,        // share kept as open plazas (breathing room / hangouts)
 
     // ---- DISTRICTS: the city's population FIELD (world.js stamps lots) -----
@@ -402,6 +402,21 @@
       kidnapChance: 0.0,   // set live by social.js when you're hot near a gang
     },
   };
+
+  // ---- feature switches (CBZ.CONFIG) ------------------------------------------
+  // Reversible behaviour flags read across the city build. Kept distinct from
+  // CBZ.CITY's tuning numbers: these flip whole rendering/identity behaviours on
+  // or off, so a single line here reverts a system to its old look.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  // PLAIN CIVILIANS (owner's rule): when on, ordinary civilians — anyone with no
+  // role uniform, no gang, and no business/tycoon identity — render PLAIN (a
+  // solid shirt color over blue-jean legs + shoes, NO painted canvas atlas).
+  // Role peds (cops/medics/trades/soldiers) keep their painted templates, gang
+  // peds get a solid shirt + a bandana MESH, and business NPCs get a composed
+  // blazer/shirt/tie. Flip false to bring back the old painted street-basics
+  // seams (collar/placket/waistband) on every nobody. clothes.js, outfits.js and
+  // crowd.js all read this; undefined is treated as ON.
+  if (CBZ.CONFIG.CITY_PLAIN_CIVVIES == null) CBZ.CONFIG.CITY_PLAIN_CIVVIES = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

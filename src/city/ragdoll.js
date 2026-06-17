@@ -73,6 +73,12 @@
       cx: 0, cy: 0, cz: 0,                  // pelvis (death cam follows this)
       p: new Float32Array(39), q: new Float32Array(39),
       kv: new Float32Array(39), kicked: false, // pending impulse velocities — applied at the solver's real substep
+      // ---- DYING BEAT: a brief active stumble BEFORE the body goes fully
+      //      limp, so a shot ped lurches a step in the bullet's travel
+      //      direction + buckles at the knees instead of teleporting flat.
+      //      dyt counts down; while >0 the solver bends the legs to a brace
+      //      then a collapse and shoves the hips along dyx/dyz.
+      dyt: 0, dyMax: 0, dyx: 0, dyz: 0, dyForce: 0, dyHead: false,
     };
   }
   const slots = [];
@@ -104,6 +110,7 @@
     s.used = false; s.ped = null; s.ch = null; s.isPlayer = false;
     s.asleep = false; s.still = 0; s.life = 0; s.thud = false;
     s.kicked = false; s.kv.fill(0);
+    s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false;
   }
 
   // grounded-corpse contract: down=9999 keeps CBZ.body.busy true forever (peds.js
@@ -120,6 +127,15 @@
 
   // distribute the impulse over the points with falloff from the hit, a topple
   // bias toward the high points, headshot head-kick, explosive lift past imp 20.
+  //
+  // REALISM (research: GTA Euphoria, procedural hit-reaction systems): a body
+  // doesn't slide as a rigid plank along the bullet — it TOPPLES. So the high
+  // mass (head/shoulders) gets far more horizontal push than the planted feet,
+  // and the feet get a small COUNTER push back toward the shooter: the pair is
+  // a couple that pitches the body over AWAY from the gun (forward if shot in
+  // the back, backward if shot in the chest, sideways for a flank). A headshot
+  // takes the legs out from under and the body drops nearly straight down. A
+  // shotgun/blast (imp >= ~14) overpowers the topple and HURLS the whole body.
   function kick(s, point, dir, imp) {
     const p = s.p, q = s.kv; s.kicked = true; // velocities park in kv; solve() converts at its real substep
     let dx = dir ? (dir.x || 0) : 0, dy = dir ? (dir.y || 0) : 0, dz = dir ? (dir.z || 0) : 0;
@@ -127,27 +143,48 @@
     if (dl < 0.001) { const a = Math.random() * 6.28; dx = Math.cos(a); dz = Math.sin(a); dy = 0; }
     else { dx /= dl; dy /= dl; dz /= dl; }
     const m = Math.max(1, Math.min(34, imp || 6));
-    const boom = m >= 20;
+    const boom = m >= 20;          // explosion / RPG: lift the whole body
+    const heavy = m >= 14;         // point-blank shotgun / car: a real launch, topple gives way to fling
     const px = point ? point.x : null, py = point ? point.y : 0, pz = point ? point.z : 0;
     const hs = px != null &&
-      ((px - p[0]) * (px - p[0]) + (py - p[1]) * (py - p[1]) + (pz - p[2]) * (pz - p[2])) < 0.3;
+      ((px - p[0]) * (px - p[0]) + (py - p[1]) * (py - p[1]) + (pz - p[2]) * (pz - p[2])) < 0.36;
+    // arm the DYING BEAT (solve() reads it): the heavier the hit the shorter
+    // the on-his-feet stumble before he's fully limp — a blast gives no stumble
+    // at all (the body is already airborne), a pistol gives the full lurch.
+    if (s.dyt <= 0 && !boom) {
+      s.dyMax = s.dyt = Math.max(0.12, Math.min(0.34, 0.34 - (m - 1) * 0.012));
+      s.dyx = dx; s.dyz = dz; s.dyForce = m / 6; s.dyHead = hs;
+    }
     for (let i = 0; i < 13; i++) {
       const ix = i * 3, iy = ix + 1, iz = ix + 2;
+      // distance falloff from the wound (close points take the round hardest)
       let w = 0.75;
       if (px != null) {
         const d = Math.sqrt((p[ix] - px) * (p[ix] - px) + (p[iy] - py) * (p[iy] - py) + (p[iz] - pz) * (p[iz] - pz));
         w = Math.max(0.3, 1 - d / 2.4);
       }
-      w *= 0.72 + 0.28 * (OFF[ix + 1] / 2.18);   // high points carry more → the topple
-      let vx = dx * m * VK * w, vy = (dy * m * VK + m * 0.05) * w, vz = dz * m * VK * w;
-      if (boom) vy += (m * 0.3 + Math.random() * 2) * w;   // a blast LIFTS the whole body
+      // height factor 0 (feet) .. 1 (head). TOPPLE COUPLE: high points pushed
+      // hard along the round, low points get a small kick BACK toward the gun.
+      const hf = OFF[ix + 1] / 2.18;
+      // a headshot buckles the legs — almost no horizontal couple, the body
+      // folds and drops; a body shot topples about the feet.
+      const toppleHi = hs ? (0.35 + 0.25 * hf) : (0.45 + 1.15 * hf);
+      const toppleLo = hs ? 0 : (1 - hf) * 0.45;          // counter-kick at the legs
+      const along = m * VK * w * (toppleHi - toppleLo);
+      let vx = dx * along, vz = dz * along;
+      // vertical: a tiny upward toss off a body shot (rounds carry up the torso),
+      // legs sag for a headshot collapse. dy from the caller adds an aimed lift.
+      let vy = (dy * m * VK + m * 0.04 * hf) * w;
+      if (hs) vy -= m * 0.10 * (1 - hf) * w;              // legs give → hips drop
+      if (boom) vy += (m * 0.3 + Math.random() * 2) * w;  // a blast LIFTS the whole body
+      else if (heavy) vy += m * 0.10 * hf * w;            // a shotgun lofts the upper body as it hurls it
       vx += (Math.random() - 0.5) * m * 0.06;
       vz += (Math.random() - 0.5) * m * 0.06;
       q[ix] -= vx * KICK_DT; q[iy] -= vy * KICK_DT; q[iz] -= vz * KICK_DT;
     }
-    if (hs) {  // headshot: the skull whips with the round
-      q[0] -= dx * m * 0.3 * KICK_DT; q[2] -= dz * m * 0.3 * KICK_DT;
-      q[1] -= m * 0.32 * KICK_DT;
+    if (hs) {  // headshot: the skull whips with the round, snaps back, head dumps down
+      q[0] -= dx * m * 0.34 * KICK_DT; q[2] -= dz * m * 0.34 * KICK_DT;
+      q[1] += m * 0.10 * KICK_DT;       // (kv is subtracted in solve → +q here = the head DROPS)
     }
   }
 
@@ -206,6 +243,7 @@
     }
     s.used = true; s.ped = target; s.ch = ch; s.isPlayer = !!target.isPlayer;
     s.age = ++seq; s.still = 0; s.asleep = false; s.life = 0; s.thud = false;
+    s.dyt = 0;                                       // cleared so kick() arms a fresh beat
     s.cx = grp.position.x; s.cy = grp.position.y; s.cz = grp.position.z;
     target._ragSlot = s.idx;
     // strip pose extras once so our absolute writes sit on a clean rig
@@ -235,6 +273,40 @@
       const ks = h / KICK_DT, kv = s.kv;            // same launch speed at 30fps as at 120
       for (let j = 0; j < 39; j++) { q[j] += kv[j] * ks; kv[j] = 0; }
       s.kicked = false;
+    }
+    // ---- DYING BEAT: a brief active stumble before full limp. While dyt runs
+    //      the body still "fights" gravity a little — the knees BUCKLE (feet
+    //      drift in under the hips, the hip line sags) and the whole frame
+    //      lurches a step in the bullet's travel direction — so the death reads
+    //      as absorbing the round and stumbling, not snapping flat. It eases out
+    //      to nothing, handing off seamlessly to the limp verlet fall below.
+    if (s.dyt > 0) {
+      s.dyt = Math.max(0, s.dyt - dt);
+      const k = s.dyMax > 0 ? s.dyt / s.dyMax : 0;   // 1 at impact → 0
+      const step = h * s.dyForce;
+      // lurch the upper body a stagger-step along the force (sets velocity by
+      // moving p ahead of q): strongest at impact, fades as he goes limp.
+      const drive = (s.dyHead ? 0.45 : 1.0) * k * step * 1.4;
+      // shoulders + head carry the stumble; hips follow a touch
+      const PUSH = [0, 1, 2, 3, 4];                   // head, shoulders, hips
+      for (let n = 0; n < PUSH.length; n++) {
+        const ix = PUSH[n] * 3;
+        const wgt = ix < 9 ? 1 : 0.5;                 // head/shoulders > hips
+        p[ix] += s.dyx * drive * wgt;
+        p[ix + 2] += s.dyz * drive * wgt;
+      }
+      // KNEES BUCKLE: collapse the legs so the body sinks instead of staying
+      // planted — feet ease in toward under the hips, knees fold, hip line dips.
+      const buckle = (s.dyHead ? 1.3 : 0.8) * k;
+      for (let n = 0; n < 2; n++) {
+        const hip = (3 + n) * 3, knee = (9 + n) * 3, foot = (11 + n) * 3;
+        // drag the feet horizontally toward the hips (knees give out)
+        p[foot] += (p[hip] - p[foot]) * 0.10 * buckle;
+        p[foot + 2] += (p[hip + 2] - p[foot + 2]) * 0.10 * buckle;
+        // sag the knee + hip down a hair so the stance collapses
+        p[knee + 1] -= 0.012 * buckle;
+        p[hip + 1] -= 0.010 * buckle;
+      }
     }
     const gh2 = GRAV() * h * h;
     let maxd2 = 0;
@@ -293,8 +365,10 @@
         p[i] = _c.x; p[i + 2] = _c.z;
       }
     }
-    // sleep: kinetic energy stayed low → freeze the pose where it lies
-    if (Math.sqrt(maxd2) / h < SLEEP_V) s.still += dt; else s.still = 0;
+    // sleep: kinetic energy stayed low → freeze the pose where it lies. Never
+    // let the body sleep mid dying-beat (a near-vertical headshot collapse moves
+    // slowly but must NOT freeze upright before it folds to the ground).
+    if (s.dyt <= 0 && Math.sqrt(maxd2) / h < SLEEP_V) s.still += dt; else s.still = 0;
     s.life += dt;
     if (s.still > SLEEP_T || s.life > MAX_LIFE) s.asleep = true;
   }
@@ -364,6 +438,61 @@
   });
 
   CBZ.cityRagdoll = function (target, point, dir, imp) { return start(target, point, dir, imp, false); };
+
+  // ============================================================
+  //  WAKE-ON-HIT: a DOWNED body shouldn't lose physics. When the hitscan
+  //  (or a blast / a car) strikes an already-settled corpse, this un-sleeps
+  //  its verlet slot, banks the impulse so it JERKS + reacts, stamps a wound
+  //  where the round landed, then lets the EXISTING solver re-sleep after the
+  //  jolt (SLEEP_T) — so only the struck body wakes, briefly, never all
+  //  corpses always-on. A corpse with no slot yet (died on the cheap far path)
+  //  gets one spun up via start() so it becomes reactive too (start() honours
+  //  RANGE2 / MAX_ACTIVE / LRU). Player corpse included: NPCs can keep
+  //  shooting your body in the WASTED / spectate window and it keeps reacting.
+  //
+  //  Signature the HITSCAN agent calls:
+  //      CBZ.cityCorpseHit(actorOrChar, point, dir, force) -> bool
+  //  point/dir are {x,y,z} (world hit point + travel direction), force is the
+  //  impulse magnitude (same scale as cityRagdoll's imp: ~6 pistol, ~14 shotgun,
+  //  ~20+ blast). Returns true if a reactive body took the hit.
+  // ============================================================
+  CBZ.cityCorpseHit = function (target, point, dir, force) {
+    if (!CBZ.game || CBZ.game.mode !== "city") return false;
+    if (!target) return false;
+    // accept an actor (has .group) or a bare char → climb back to its actor
+    if (!target.group && target.actor) target = target.actor;
+    if (!target.group) return false;
+    if (!target.isPlayer && !target.dead) return false;   // only DOWNED bodies wake this way
+    const imp = Math.max(1, force || 6);
+    // a body still solving (or asleep) and already ours → re-kick + un-sleep in place
+    let s = target._ragSlot != null ? slots[target._ragSlot] : null;
+    if (s && s.used && s.ped === target) {
+      kick(s, point, dir, imp);
+      s.asleep = false; s.still = 0; s.life = 0; s.age = ++seq;   // freshen LRU so the jolt isn't instantly re-frozen
+      bumpPhys(target);
+      stampWound(target, point, dir);
+      return true;
+    }
+    // no live slot (cheap far-kill, picked-up-then-reshot, or never ragdolled) →
+    // spin a reactive body up. start() re-uses an existing slot if present and
+    // honours range / MAX_ACTIVE / LRU, so this stays perf-bounded.
+    const ok = start(target, point, dir, imp, false);
+    if (ok) stampWound(target, point, dir);
+    return ok;
+  };
+  // accumulate a wound disc on the downed body where the round struck (wounds.js
+  // is universal but gated city-only here; it self-caps the same-frame burst and
+  // only draws within camera range, so this is cheap).
+  const _wp = { x: 0, y: 0, z: 0 };
+  function stampWound(target, point, dir) {
+    if (!CBZ.bodyWound) return;
+    const grp = target.group; if (!grp) return;
+    if (point && point.x != null) { _wp.x = point.x; _wp.y = point.y != null ? point.y : grp.position.y + 1.0; _wp.z = point.z; }
+    else { _wp.x = grp.position.x; _wp.y = grp.position.y + 1.0; _wp.z = grp.position.z; }
+    let fromX = null, fromZ = null;
+    if (dir && (dir.x || dir.z)) { fromX = _wp.x - dir.x; fromZ = _wp.z - dir.z; }   // shooter is back up the travel line
+    try { CBZ.bodyWound(target, _wp, { fromX, fromZ }); } catch (e) {}
+  }
   // guest-side entry: the net layer maps the id (accepts a resolved actor too)
   CBZ.cityRagdollNet = function (id, p, d, imp) {
     const look = CBZ.netPuppetByNid || CBZ.netPedById;

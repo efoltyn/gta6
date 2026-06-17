@@ -114,10 +114,19 @@
         // engine's live mag/reserve ammo for the equipped weapon underneath. ------
         "#cHud .cBar{display:flex;flex-direction:column;align-items:center;gap:5px}" +
         "#cHud .cSlots{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;max-width:560px}" +
-        "#cHud .cSlot{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4)}" +
+        // chips are CLICKABLE — opt back into pointer-events (the HUD root is
+        // pointer-events:none) so a tap dispatches CBZ.cityHotbarSelect. The
+        // leading position is the HOLSTER/fists chip; item chips reuse the gun
+        // chip frame with a tiny ×count badge so the unified bar reads as one row.
+        "#cHud .cSlot{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4);pointer-events:auto;cursor:pointer}" +
         "#cHud .cSlot .s{font-size:14px;font-weight:700;color:var(--hud-dim);line-height:1.1;letter-spacing:.3px}" +
         "#cHud .cSlot .a{font-size:10px;color:var(--hud-dim);line-height:1.1;margin-top:1px}" +
         "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
+        // item chip: a glyph (or short name) over a small ×count badge, sharing
+        // the gun chip's frame so the bar stays one visual run.
+        "#cHud .cSlot.item .ic{font-size:18px;line-height:1.05}" +
+        "#cHud .cSlot.item .s{font-size:11px}" +
+        "#cHud .cSlot .cnt{position:absolute;right:2px;top:1px;font-size:9px;font-weight:700;color:var(--hud-ink);background:rgba(8,11,17,.85);border-radius:6px;padding:0 3px;line-height:1.3}" +
         // the held slot is a SELECTION (interactive chrome) → the one cyan accent,
         // same for guns and melee. The old green/orange split spent the cash and
         // heat semantics on a highlight that just means "in hand".
@@ -157,6 +166,9 @@
         "  #cHud .cSlots{gap:4px;max-width:380px}" +
         "  #cHud .cSlot{min-width:38px;height:34px;padding:2px 5px}" +
         "  #cHud .cSlot .s{font-size:11px}" +
+        "  #cHud .cSlot.item .ic{font-size:15px}" +
+        "  #cHud .cSlot.item .s{font-size:9px}" +
+        "  #cHud .cSlot .cnt{font-size:8px}" +
         "  #cHud .cAmmo{font-size:11px}" +
         "  #cHud .cAmmo b{font-size:15px}" +
         "  #cMoney{font-size:24px !important}" +
@@ -228,7 +240,9 @@
       // it (the "region name over the map" read), the vitals hug its right edge.
       "<canvas id='cRadar' class='oM' width='190' height='190' style='position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,.5)'></canvas>" +
       // event feed takes the top-left corner the radar vacated
-      "<div id='cFeed' class='oM' style='position:absolute;left:var(--hud-pad-l);top:var(--hud-pad-t);width:300px'></div>" +
+      // shifted RIGHT past the top-left character panel (#cpPanel is ~128px wide
+      // at left:14) so street-event rows never overlap the player portrait/Lv/bounty.
+      "<div id='cFeed' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 150px);top:var(--hud-pad-t);width:300px'></div>" +
       "<div id='cTurf' class='oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 196px);font-size:13px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.7)'></div>" +
       "<div id='cHomeLine' class='oC' style='position:absolute;left:var(--hud-pad-l);bottom:calc(var(--hud-pad-b) + 215px);font-size:12px;color:var(--hud-dim);text-shadow:0 1px 2px rgba(0,0,0,.7)'></div>" +
       // gang-membership badge (left column, capping the bottom-left cluster —
@@ -257,6 +271,18 @@
     hpBar = root.querySelector("#cHp"); hungerBar = root.querySelector("#cFood"); stamBar = root.querySelector("#cStam");
     wpnEl = root.querySelector("#cWpn"); jobEl = root.querySelector("#cJob");
     slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo"); lootEl = root.querySelector("#cLoot");
+    // CLICK-TO-SELECT on the unified hotbar (city-only). Chips carry data-bi (the
+    // bar index); a tap routes straight to CBZ.cityHotbarSelect, which handles
+    // holster / gun-select / item-use byte-identically. Delegated so re-rendered
+    // chips stay live. Guarded like the key handlers (city + playing + no menu/map).
+    if (slotsEl) slotsEl.addEventListener("click", function (ev) {
+      const chip = ev.target && ev.target.closest ? ev.target.closest(".cSlot[data-bi]") : null;
+      if (!chip) return;
+      if (g.mode !== "city" || g.state !== "playing") return;
+      if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
+      const bi = parseInt(chip.getAttribute("data-bi"), 10);
+      if (bi >= 0 && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(bi); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+    });
     objEl = root.querySelector("#cObj"); objTxtEl = root.querySelector("#cObjTxt"); objRouteEl = root.querySelector("#cObjRoute");
     objSlotEl = root.querySelector("#cObjSlot"); objFillEl = root.querySelector("#cObjFill");
     if (objRouteEl) objRouteEl.addEventListener("click", routeToProspectHQ);
@@ -867,12 +893,98 @@
     for (let i = 0; i < T.length; i++) { const w = T[i]; if (w && (w.id === id || w.key === id)) return { w: w, i: i }; }
     return null;
   }
+  // a unified-bar gun entry carries label/short (not the engine weapon index); map
+  // it back to its FPS_WEAPONS row so the chip can show live mag/reserve (DRY) and
+  // the big ammo line, exactly as before. Matched by label first, then short.
+  function weaponMetaByLabel(label, short) {
+    const T = CBZ.FPS_WEAPONS;
+    if (!T) return null;
+    for (let i = 0; i < T.length; i++) { const w = T[i]; if (w && (w.label === label || (short && w.short === short))) return { w: w, i: i }; }
+    return null;
+  }
+  // glyphs for usable-item chips (food/drug/throwable) so the row reads at a
+  // glance; falls back to a short name when there's no glyph. (Mirrors the loot
+  // row's per-item/by-tag icon tables, defined below.)
+  function hotbarItemGlyph(name, item) {
+    if (LOOT_ITEM_ICON[name]) return LOOT_ITEM_ICON[name];
+    const tag = item && item.tag;
+    if (tag && LOOT_ICON[tag]) return LOOT_ICON[tag];
+    return "";
+  }
   function renderHotbar() {
     if (!slotsEl) return;
+    const fps = CBZ.fps;                            // engine ammo store (guarded)
+    // city-only: drive the UNIFIED bar (holster + guns + usable items) when the
+    // API is present. Outside city (jail/survival) fall back to the legacy
+    // owned-guns/melee render so those modes are byte-identical.
+    const useUnified = g.mode === "city" && typeof CBZ.cityHotbar === "function";
+    let line = "";
+    if (useUnified) {
+      let bar = null;
+      try { bar = CBZ.cityHotbar(); } catch (e) { bar = null; }
+      if (bar) {
+        const ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
+        let html = "";
+        for (let bi = 0; bi < bar.length; bi++) {
+          const e = bar[bi];
+          const held = !!e.active;
+          if (e.kind === "holster") {
+            // leading fists/holster chip — the unarmed/de-escalated state.
+            html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+              "<span class='s'>" + esc(e.short || e.label || "Fists") + "</span></div>";
+          } else if (e.kind === "gun") {
+            // gun chips EXACTLY as before: short label, lit when held, plus a DRY
+            // flag when stone-empty. Live mag/reserve for the held gun goes in the
+            // big #cAmmo line below (one source of truth, no per-chip counts).
+            const lbl = e.short || e.label || "Gun";
+            const m = weaponMetaByLabel(e.label, e.short);
+            let ammoTxt = "";
+            if (!held && m && fps && fps.rounds && fps.reserves) {
+              const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
+              const res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
+              if (cur + res <= 0) ammoTxt = "<span class='a dry'>DRY</span>";
+            }
+            html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+              "<span class='s'>" + esc(lbl) + "</span>" + ammoTxt + "</div>";
+          } else if (e.kind === "item") {
+            // usable-item chip: glyph (or short name) + a small ×count badge.
+            const glyph = hotbarItemGlyph(e.item || e.label, ITEMS[e.item || e.label]);
+            const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
+            const face = glyph
+              ? "<span class='ic'>" + glyph + "</span>"
+              : "<span class='s'>" + esc(e.short || e.label || "Item") + "</span>";
+            html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
+              face + cnt + "</div>";
+          }
+        }
+        slotsEl.innerHTML = html;
+        // the prominent equipped-weapon ammo line (jail-style big mag / reserve) for
+        // whichever gun is the active entry; holster/items show no ammo here.
+        for (let bi = 0; bi < bar.length; bi++) {
+          const e = bar[bi];
+          if (e.kind !== "gun" || !e.active) continue;
+          const m = weaponMetaByLabel(e.label, e.short);
+          let cur = 0, mag = 0, res = 0, reloading = false;
+          if (m && fps && fps.rounds && fps.reserves) {
+            cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
+            res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
+            mag = m.w.mag || 0;
+            reloading = (m.i === fps.weapon) && (fps.reloading > 0);
+          } else if (m) { cur = m.w.mag || 0; mag = m.w.mag || 0; res = m.w.reserve || 0; }
+          if (reloading) line = "<span class='rl'>RELOADING…</span> ";
+          line += "<b>" + cur + "</b><span class='res'> / " + mag + " · " + res + " res</span>";
+          break;
+        }
+        const armorU = (CBZ.player && CBZ.player._armor) || 0;
+        if (armorU > 0) line += (line ? " " : "") + "<span class='arm'>🛡 " + Math.round(armorU) + "</span>";
+        if (ammoLineEl) ammoLineEl.innerHTML = line;
+        return;
+      }
+    }
+    // ---- LEGACY path (non-city, or the API not yet loaded) — unchanged. -----------
     const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
     const melee = g.cityMeleeWeapon || null;        // Bat/Knife — a held melee, not a gun
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
-    const fps = CBZ.fps;                            // engine ammo store (guarded)
     let html = "";
     // a Fists slot is the baseline — shown when you own no guns, or as the unarmed
     // fallback. It's the HELD slot only when you're carrying neither gun nor melee.
@@ -909,7 +1021,6 @@
     slotsEl.innerHTML = html;
     // the prominent equipped-weapon ammo line (jail-style big mag / reserve). For a
     // gun we read fps live state for the CURRENT weapon; melee/fists show no ammo.
-    let line = "";
     if (heldGun) {
       const m = weaponMetaById(heldGun);
       let cur = 0, mag = 0, res = 0, reloading = false;
@@ -986,12 +1097,39 @@
   // when the held weapon's mag/reserve/reload actually changed (a cheap signature
   // compare → no needless DOM churn on phones). Returns nothing; safe when unarmed.
   let ammoSig = "";
+  // a compact signature of the UNIFIED bar (holster state + each entry's
+  // active/label + item counts) plus the held gun's live mag/reserve/reload. The
+  // bar re-renders only when one of these actually changes — so number-key/click
+  // selection, holstering, picking up a gun, or eating an item all refresh the
+  // chips, while plain firing only touches the DOM on a real ammo change.
+  function unifiedBarSig() {
+    let bar = null;
+    try { bar = CBZ.cityHotbar(); } catch (e) { bar = null; }
+    if (!bar) return "x";
+    let s = (g.cityHolstered ? "H" : "h");
+    const fps = CBZ.fps;
+    for (let i = 0; i < bar.length; i++) {
+      const e = bar[i];
+      s += "|" + (e.kind || "") + ":" + (e.short || e.label || "") + (e.active ? "*" : "");
+      if (e.kind === "item") s += "#" + (e.count | 0);
+      if (e.kind === "gun" && e.active && fps && fps.rounds && fps.reserves) {
+        const m = weaponMetaByLabel(e.label, e.short);
+        const k = m ? m.i : -1;
+        s += "@" + (k >= 0 ? fps.rounds[k] : "") + "/" + (k >= 0 ? fps.reserves[k] : "") + (fps.reloading > 0 ? "r" : "");
+      }
+    }
+    return s;
+  }
   function refreshAmmoLive() {
     const fps = CBZ.fps;
     const melee = g.cityMeleeWeapon || null;
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
     let sig;
-    if (heldGun && fps && fps.rounds && fps.reserves) {
+    if (g.mode === "city" && typeof CBZ.cityHotbar === "function") {
+      // city: signature spans the whole unified bar so holster/item/select changes
+      // re-render too (legacy ammo-only sig missed those).
+      sig = unifiedBarSig() + "|" + ((CBZ.player && CBZ.player._armor) | 0);
+    } else if (heldGun && fps && fps.rounds && fps.reserves) {
       const m = weaponMetaById(heldGun);
       const i = m ? m.i : -1;
       sig = heldGun + "|" + (i >= 0 ? fps.rounds[i] : "") + "|" + (i >= 0 ? fps.reserves[i] : "") + "|" + (fps.reloading > 0 ? 1 : 0) + "|" + ((CBZ.player && CBZ.player._armor) | 0);
@@ -1085,7 +1223,9 @@
   CBZ.onAlways(46, function () {
     build();
     const show = g.mode === "city";
-    root.style.display = show ? "block" : "none";
+    // respect the [H] hide-HUD toggle (charpanel.js) — don't clobber it every frame
+    const hudHidden = show && CBZ.cityCharPanel && CBZ.cityCharPanel.hudHidden && CBZ.cityCharPanel.hudHidden();
+    root.style.display = (show && !hudHidden) ? "block" : "none";
     document.body.classList.toggle("mode-city", show);
     if (!show) return;
     // track the wanted peak so the flashing only fires while it's RISING/held

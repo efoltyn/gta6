@@ -20,9 +20,51 @@
   CBZ.doHitstop = function (s) { CBZ.hitstop = Math.max(CBZ.hitstop, s); };
   CBZ.doSlowmo = function (s) { CBZ.slowmo = Math.max(CBZ.slowmo, s); };
 
+  // ---- FEEL-DT (the slow-motion-under-load fix) ---------------------------
+  // The heavy WORLD sim runs on `dt` clamped to 0.05 — that clamp is the
+  // spiral-of-death guard (Gaffer "Fix Your Timestep": a frame that takes
+  // M>N to simulate must NOT advance N seconds or it falls further behind
+  // forever). On the weak Mac we render at ~5 FPS (~0.2s/frame), so the
+  // world correctly advances only 50ms/frame — but that ALSO drags the
+  // PLAYER, camera and projectiles to ~25% wall-clock speed: the world
+  // feels like slow-motion under load.
+  //
+  // The fix is NOT to sub-step the world (multiplying the 27ms sim by 4
+  // would spiral the weak Mac). Instead we publish a SECOND, real-wall-clock
+  // delta — CBZ.feelDt — clamped to a modest FEEL_MAX so only the present
+  // path (player movement/gravity, camera follow, owned projectiles) can
+  // catch up to real time. It is a single bounded value, NOT a loop, so it
+  // adds zero spiral risk; FEEL_MAX caps tunnelling for the collider path.
+  //
+  // CONTRACT for consumers (physics.js player, camera.js, projectiles):
+  //   const fdt = (CBZ.feelDt != null ? CBZ.feelDt : dt);
+  // — i.e. read feelDt when present, else fall back to the passed dt. That
+  // makes every consumer safe whether or not this code ran first, and makes
+  // the whole feature reversible:
+  //   • CBZ.feelMotion === false  → feelDt is set to the SAME clamped world
+  //     dt, so consumers behave EXACTLY as today (graceful off).
+  //   • this module not yet loaded → feelDt is undefined → consumers fall
+  //     back to dt (exactly as today).
+  // MP-SAFE: feelDt is a per-client LOCAL present value derived from this
+  // client's own rAF. Nothing is networked as a timestep — every client
+  // runs the same logic for its OWN avatar (authoritative), puppet interp
+  // (networld INTERP_MS) is wall-clock and untouched. No net hook lives here.
+  // The player path SUB-STEPS its own collision (physics.js feelSubsteps slices
+  // each move to ≤0.35m and resolves every slice), so the cap no longer has to
+  // stay tiny to avoid tunnelling — it only bounds worst-case present travel.
+  // CITY gets the larger 0.12: at ~5fps the player/camera advance 0.12s of motion
+  // per 0.2s wall-clock (60% real-time) instead of 50%, so the owner-reported
+  // "ultra slow" wade is lighter. JAIL/SURVIVAL keep the ORIGINAL 0.10 verbatim so
+  // those modes stay byte-identical (only the open-city path may change). OFF
+  // (feelMotion===false) → feelDt = world dt = unchanged in every mode.
+  const FEEL_MAX_CITY = 0.12, FEEL_MAX_OTHER = 0.10;
+  if (CBZ.feelMotion === undefined) CBZ.feelMotion = true;  // default ON;
+                          // honour an owner-set value (don't clobber a toggle)
+
   function loop(t) {
     CBZ.now = t;
     let dt = (t - last) / 1000;
+    let realDt = dt;       // untouched wall-clock delta (pre-clamp) for feel
     last = t;
     dt = Math.min(dt, 0.05); // clamp big tab-switch gaps
 
@@ -33,6 +75,15 @@
     if (CBZ.hitstop > 0) { CBZ.hitstop -= dt; scale = 0.06; }
     else if (CBZ.slowmo > 0) { CBZ.slowmo -= dt; scale = 0.32; }
     dt *= scale;
+
+    // FEEL-DT: a real-wall-clock delta for the present path. Clamp to its own
+    // (larger) FEEL_MAX, then apply the SAME hit-stop/slow-mo scale as the
+    // world so a blast still reads as weight on the player/camera too. When
+    // the flag is off we publish the world's `dt` verbatim → today's behaviour.
+    const FEEL_MAX = (g.mode === "city") ? FEEL_MAX_CITY : FEEL_MAX_OTHER;
+    CBZ.feelDt = CBZ.feelMotion
+      ? Math.min(realDt, FEEL_MAX) * scale
+      : dt;
 
     // updaters are wrapped so a single throw can NEVER freeze the loop
     if (g.state === "playing") {

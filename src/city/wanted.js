@@ -16,6 +16,12 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
+  // ---- BOUNTY: a live dollar price on the player's head (PROG owns). Default 0,
+  // rises in report() with reported-crime severity, resets to 0 on death. Read-only
+  // accessor for the HUD/charpanel. (Plain field on g so it serializes with state.)
+  if (g.cityBounty == null) g.cityBounty = 0;
+  CBZ.cityBounty = function () { return g.cityBounty || 0; };
+
   // cop response per star (read by police.js maintain() as g.cityCopTarget).
   // Steeper at the top: the now-RARE 5★ floods the streets with heavy units so it
   // FEELS overwhelming — a brutal crescendo to match the much harder wanted climb.
@@ -129,6 +135,21 @@
     }
     g.heat = Math.max(g.heat || 0, Math.min(ceil, gain));
     g.wanted = starsFromHeat(g.heat);
+    // ---- BOUNTY ($ on your head): rises with every REPORTED crime, scaled by how
+    // bad the reported act is. Petty (1★) reports add ~$500; a serious act several
+    // thousand; a cop-killing spree (target 5) drops a big chunk each report — so a
+    // sustained rampage stacks toward ~$50k+. A corroborating same-event witness
+    // only nudges it (matches the heat de-stack). Hard cap so it can't run away.
+    // Reads as infamy by the level/title read and is zeroed on death.
+    {
+      const tierPay = [0, 500, 2200, 6000, 14000, 32000];   // per-report base by GRANTED tier (want)
+      let pay = tierPay[Math.min(5, Math.max(0, want))];
+      // a spree kill (5★ target) or a cop-kill earns its own heavy bump on top.
+      if (opts.type === "_copkill") pay += 18000;
+      else if (info.kill) pay += 4000;
+      pay *= (sameEvent ? 0.2 : 1);                          // de-stack multi-witness
+      g.cityBounty = Math.min(250000, Math.max(0, (g.cityBounty || 0) + Math.round(pay)));
+    }
     lastReport = { t: CBZ.now, x: x, z: z, stars: target };
     g.cityCrimeLabel = info.label;
     // the centre flash fires ONLY when a star is actually GAINED (that's direct
@@ -261,7 +282,49 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; };
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; };
+
+  // ---- DEATH RESET (PROG owns): on player death, drop the player's STREET INFAMY
+  // back toward Lv.1 so the level/title visibly falls and the player re-climbs.
+  // We zero ONLY the infamy inputs that feed CBZ.cityPlayerLevel() (level.js):
+  // kills, respect, the wanted heat/stars, the bounty, the crew + borrowed-colors
+  // membership, and the holster flag. We NEVER touch owned assets (cash, house,
+  // cars, guns, jewelry) — net worth still contributes to the level (that's earned
+  // and stays). Safe to call repeatedly and only meaningful in city mode.
+  // death.js's respawn() already calls cityWantedReset() (heat/stars/bounty); this
+  // hook is additionally fired the instant you die (we wrap cityKillPlayer below),
+  // and may also be called by any death-flow code directly.
+  function infamyResetOnDeath() {
+    if (g.mode !== "city") return;
+    g.heat = 0; g.wanted = 0; g.cityCopTarget = 0;
+    g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null;
+    g.cityBounty = 0;                       // the price on your head dies with you
+    g.kills = 0;                            // body count infamy resets (assets untouched)
+    g.respect = 0;                          // street respect resets
+    g.cityCrew = 0;                         // your crew scatters when you go down
+    g.cityMembership = null;                // borrowed gang colors lapse (a founded g.playerGang is an asset → kept)
+    g.cityHolstered = false;               // back to default stance on respawn
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  CBZ.cityInfamyResetOnDeath = infamyResetOnDeath;
+
+  // self-wire the death moment: cityKillPlayer (death.js) is the single WASTED
+  // trigger. It loads AFTER us, so wrap it lazily (the heists.js/aircraft.js
+  // pattern). Firing the infamy reset AT death (not only at respawn) makes the
+  // Lv/Title drop visible immediately on the WASTED screen. Idempotent flag guard
+  // means a re-wrap (hot reload) can't double-chain.
+  // returns true ONLY when wrapping is DONE (or already done) — so the retry loop
+  // keeps polling until cityKillPlayer actually exists (it loads after us).
+  function wrapKill() {
+    if (typeof CBZ.cityKillPlayer !== "function") return false;   // not loaded yet → retry
+    if (CBZ.cityKillPlayer._infamyWrapped) return true;            // already wrapped → stop
+    const orig = CBZ.cityKillPlayer;
+    const wrapped = function () { try { infamyResetOnDeath(); } catch (e) {} return orig.apply(this, arguments); };
+    wrapped._infamyWrapped = true;
+    CBZ.cityKillPlayer = wrapped;
+    return true;
+  }
+  if (!wrapKill()) { const iv = setInterval(function () { if (wrapKill()) clearInterval(iv); }, 0); }
   function augment() { if (CBZ.city) { CBZ.city.crime = crime; CBZ.city.report = report; CBZ.city.addHeat = addHeat; CBZ.city.clearWanted = clearWanted; CBZ.city.stars = function () { return g.wanted | 0; }; } }
   if (CBZ.city) augment(); else { const iv = setInterval(function () { if (CBZ.city) { augment(); clearInterval(iv); } }, 0); }
 })();

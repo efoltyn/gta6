@@ -1,13 +1,23 @@
 /* ============================================================
-   city/jewelry.js — THE JEWELRY STORE smash-and-grab: the case IS the score.
+   city/jewelry.js — THE JEWELRY STORE: buy the ice OR smash the case.
 
-   WHY: the loot economy's crown pieces (Rolex, Iced Watch, Diamond
-   Necklace, the $5M Engagement Ring) only spawned in pockets — you had to
-   get LUCKY to touch the jackpot tier. A glass case downtown holding them
-   in plain sight is the purest make-money-show-off loop in the game: you
-   WALK PAST your next score every day, and the only thing between you and
-   it is 5mm of glass and a screaming alarm. Case → fence → chain on your
-   neck for the whole street to read.
+   WHY: the loot economy's crown pieces (Diamond Necklace, the $5M
+   Engagement Ring) only spawned in pockets — you had to get LUCKY to touch
+   the jackpot tier. A glass case downtown holding them in plain sight is
+   the purest make-money-show-off loop in the game: you WALK PAST your next
+   score every day. But the store is also a real STORE: the front cases hold
+   the buyable catalog (a steel diver, a two-tone gold case, a fully iced-out
+   bust-down, gold + iced chains, a diamond ring + grill) — pay the clerk and
+   it goes STRAIGHT ON YOUR BODY (the same bling.js wrist/neck/hand meshes the
+   whole street reads), AND it's a wearable ASSET you can pawn back later.
+   Case → fence (or buy → flex → pawn): every piece is money on your neck.
+
+   The watches are drawn distinct + low-poly per visualId (websearch-grounded
+   dress / dive / two-tone-chrono / iced-pavé silhouettes): a slim steel dress
+   case, a chunky diver with a rotating bezel + lume pip, a two-tone gold case
+   with chrono subdials, and a white-gold case paved with a grid of ice. The
+   names/prices/visualIds come from CBZ.cityEcon.itemsByTag("jewelry") so the
+   case, the price tag and the equipped body all reference the same catalog.
 
    The jewelry lot's shell (door/counter/clerk) already exists; buildings.js
    stamps lot.building.jewelry with four pre-clamped WORLD case anchors (two
@@ -23,10 +33,15 @@
      vendor ped; their gaze + line-of-sight checked live — the vault sits
      at their BACK by design), [E] starts a slow pry: one piece, no alarm,
      but every pull risks the clerk turning around.
+   • BUY — a clerk-watched, intact buyable case ([E] Buy) charges cash-then-
+     bank, drops the REAL economy item into your inventory (so bling.js renders
+     it the same frame), and equips the matching wardrobe visualId (contract
+     [B] cityGrantItem + cityWear) so the look persists / serializes. No alarm,
+     no crime — it's a legit purchase. You can pawn it back later for a haircut.
    Cases restock on a ~10-minute timer (the insurance payout re-stocks the
    shop — and the re-glazed glass invites you back).
 
-   Loot is the REAL economy items (econ.add) so fencing/wearing/drip all
+   Loot/buys are the REAL economy items (econ.add) so fencing/wearing/drip all
    work untouched. Perf: built ONCE per city on one group, shared geometries
    + materials for every ring/watch/bust, whole display vis-gated at 55m.
    Mode-gated + headless-guarded. The gunstore architecture, applied to ice.
@@ -48,14 +63,20 @@
   const ALARM_TIME = 18;     // how long the alarm screams after a smash
   const CASE_W = 1.35, CASE_D = 0.85;   // glass case footprint (long side faces the aisle)
 
-  // what each case holds — REAL ITEMS names, value-tiered front → vault.
-  // The Engagement Ring is the rotating showpiece: on display at open, then
-  // only SOMETIMES back after a hit (a $5M stone isn't always on the floor).
+  // What each case HOLDS, value-tiered front → vault. Two kinds of slot:
+  //   { id }   — a BUYABLE catalog piece (visualId from cityEcon jewelry tag):
+  //              [E] Buy it (clerk-watched + intact case), it equips on your body
+  //              and persists; OR smash + grab/pry it like anything else.
+  //   { loot } — a steal-ONLY jackpot (a $250k necklace / $5M rock isn't on the
+  //              retail floor): smash-and-grab or pry only, fenced at the pawn.
+  // The two front cases are the buyable RETAIL floor; the feature island holds
+  // the two headline watches (gold two-tone + the iced bust-down); the VAULT is
+  // the steal-only crown set. Names/prices come from the catalog at build time.
   const STOCK = [
-    ["Rolex", "Gold Chain", "Earrings"],            // front case (street ice)
-    ["Diamond Ring", "Diamond Grill", "Gold Chain"],// front case (street ice)
-    ["Iced Watch", "Iced Chain", "Diamond Pinky"],  // mid feature island (ICED tier)
-    ["Diamond Necklace", "Diamond Tiara", "Engagement Ring"],   // the VAULT
+    [{ id: "watch_steel" }, { id: "chain_gold" }, { id: "ring_diamond" }],   // front: entry retail
+    [{ id: "watch_diver" }, { id: "grill_diamond" }, { id: "chain_iced" }],  // front: sport + iced retail
+    [{ id: "watch_gold" }, { id: "watch_iced" }],                            // feature island: the headline watches
+    [{ loot: "Diamond Necklace" }, { loot: "Diamond Tiara" }, { loot: "Engagement Ring" }],  // the VAULT (steal-only)
   ];
   const RING_RESTOCK_ODDS = 0.35;   // the $5M rock returns to the vault this often
 
@@ -65,6 +86,48 @@
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
   function note(t, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s); }
+
+  // ---- the BUYABLE catalog, keyed by visualId -------------------------------
+  // Pulled ONCE from CBZ.cityEcon.itemsByTag("jewelry") so the case model, the
+  // price tag and the equipped wardrobe item all agree on name/price/visualId.
+  let CAT = null;
+  function catalog() {
+    if (CAT) return CAT;
+    const e = econ(); if (!e || !e.itemsByTag) return null;
+    CAT = {};
+    const arr = e.itemsByTag("jewelry") || [];
+    for (let i = 0; i < arr.length; i++) { const it = arr[i]; if (it && it.visualId) CAT[it.visualId] = it; }
+    return CAT;
+  }
+  // a flat WHY line for the buyable pieces (these are wearable ASSETS).
+  function dripWord(drip) {
+    drip = drip | 0;
+    if (drip >= 22) return "drips INSANE";
+    if (drip >= 12) return "drips hard";
+    if (drip >= 7) return "real drip";
+    return "clean drip";
+  }
+  // Resolve a STOCK slot into a normalized piece descriptor. Buyable pieces
+  // carry their catalog record (id/price/drip/visualId); loot pieces fall back
+  // to the legacy valuable name + its pawn value. `kind` selects the display
+  // model (the four distinct watches key off the visualId).
+  function resolvePiece(slot) {
+    const e = econ(); if (!e) return null;
+    if (slot && slot.id) {
+      const cat = catalog(); const rec = cat && cat[slot.id];
+      if (!rec) return null;
+      // strip the catalog's "(Composable)" disambiguation suffix for the tag/prompt
+      const label = (rec.label || rec.name || "").replace(/\s*\(Composable\)\s*$/i, "");
+      return { name: rec.name, label, value: rec.value | 0,
+               drip: rec.drip | 0, visualId: rec.visualId, kind: rec.visualId, buyable: true };
+    }
+    const name = slot && slot.loot;
+    if (!name) return null;
+    const it = e.ITEMS && e.ITEMS[name]; if (!it) return null;
+    const value = (e.buyPrice && e.buyPrice(name)) || it.value || 0;
+    return { name, label: name, value, drip: it.drip | 0, visualId: null, kind: name, buyable: false,
+             showpiece: name === "Engagement Ring" };
+  }
 
   // ---- shared geometries + materials (one each, flagged _shared) ------------
   let M = null, GEO = null;
@@ -76,9 +139,16 @@
       brass: new THREE.MeshLambertMaterial({ color: 0xcaa64a }),                                  // brass trim
       velvet: new THREE.MeshLambertMaterial({ color: 0x4a1420 }),                                 // deep velvet pad
       glow: new THREE.MeshLambertMaterial({ color: 0xffe08a, emissive: 0xffe08a, emissiveIntensity: 0.6 }),  // case under-light (the trade's warm accent)
-      gold: new THREE.MeshLambertMaterial({ color: 0xf0c33c, emissive: 0x8a6a14, emissiveIntensity: 0.35 }),
-      silver: new THREE.MeshLambertMaterial({ color: 0xd8dde6, emissive: 0x6a7280, emissiveIntensity: 0.3 }),
-      ice: new THREE.MeshLambertMaterial({ color: 0xeef6ff, emissive: 0xbcd8ff, emissiveIntensity: 0.75 }),  // diamonds READ from the door
+      // metal finishes match bling.js's player-worn tones, so the case piece and
+      // the wrist it lands on read as the SAME metal: gold 0xc9a44a, silver
+      // 0xb9c0c8, ice 0xeaf6ff. (case versions glow a touch more for the display.)
+      gold: new THREE.MeshLambertMaterial({ color: 0xc9a44a, emissive: 0x7a5c1c, emissiveIntensity: 0.4 }),
+      silver: new THREE.MeshLambertMaterial({ color: 0xc6cdd6, emissive: 0x70798a, emissiveIntensity: 0.32 }),
+      ice: new THREE.MeshLambertMaterial({ color: 0xeaf6ff, emissive: 0xa6d6ff, emissiveIntensity: 0.78 }),  // diamonds READ from the door
+      glint: new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xdff0ff, emissiveIntensity: 0.95 }), // a single hot sparkle
+      dial: new THREE.MeshLambertMaterial({ color: 0x14171d, emissive: 0x0a0c10, emissiveIntensity: 0.12 }),  // dark sunburst dial
+      blueDial: new THREE.MeshLambertMaterial({ color: 0x1c3a66, emissive: 0x0c2244, emissiveIntensity: 0.25 }), // diver blue dial
+      lume: new THREE.MeshLambertMaterial({ color: 0xd8ffe6, emissive: 0x8fffba, emissiveIntensity: 0.7 }),   // glowing lume markers
     };
     Object.keys(M).forEach((k) => { M[k]._shared = true; });
     return M;
@@ -93,6 +163,20 @@
       gem: new THREE.OctahedronGeometry(0.045, 0),
       face: new THREE.CylinderGeometry(0.05, 0.05, 0.03, 10),
       bust: new THREE.CylinderGeometry(0.07, 0.12, 0.24, 8),
+      // ---- richer WATCH parts (websearch-grounded silhouettes) -------------
+      // a watch sits upright on a little wedge stand so the dial faces the door.
+      stand: new THREE.CylinderGeometry(0.045, 0.075, 0.12, 10),         // display wedge
+      caseR: new THREE.CylinderGeometry(0.06, 0.06, 0.028, 16),          // round watch case (dress)
+      caseT: new THREE.CylinderGeometry(0.066, 0.066, 0.03, 14),         // tool/diver case (chunkier)
+      bezel: new THREE.TorusGeometry(0.062, 0.012, 8, 18),               // rotating dive bezel ring
+      dial: new THREE.CylinderGeometry(0.046, 0.046, 0.006, 16),         // the dial face
+      subdial: new THREE.CylinderGeometry(0.013, 0.013, 0.004, 10),      // chrono subdial
+      pip: new THREE.CylinderGeometry(0.008, 0.008, 0.006, 8),           // lume pip / hour marker
+      hand: new THREE.BoxGeometry(0.006, 0.04, 0.004),                   // watch hand
+      crown: new THREE.CylinderGeometry(0.01, 0.01, 0.02, 8),            // winding crown
+      bandSeg: new THREE.BoxGeometry(0.085, 0.052, 0.022),               // bracelet link segment
+      icegem: new THREE.OctahedronGeometry(0.012, 0),                    // pavé stone (tiny)
+      tile: new THREE.BoxGeometry(0.014, 0.012, 0.006),                  // grill tooth tile
     };
     Object.keys(GEO).forEach((k) => { GEO[k]._shared = true; });
     return GEO;
@@ -104,38 +188,104 @@
     return m;
   }
 
-  // the tiny display model for a piece — shared geometry, 1-3 meshes each, so
-  // the whole showroom of ice costs a few dozen draw-gated meshes total.
-  function buildPiece(name) {
+  // ---- the four DISTINCT watch models (websearch silhouettes) ---------------
+  // Built upright on a little wedge stand, dial facing +Z (the caller rotates
+  // the group so it faces the door). Each is a clean low-poly read: dress vs
+  // diver vs two-tone-chrono vs iced is legible from across the aisle. Shared
+  // geometry + the per-finish shared mats keep the whole wall a few dozen meshes.
+  function buildWatch(visualId, grp) {
+    const GG = geos(), m = mats();
+    // common: the display stand + an upright case the dial sits on. We stand the
+    // case on its edge (rotate the cylinder so its flat face points at the door).
+    const stand = mesh(GG.stand, m.body); stand.position.y = 0.06; grp.add(stand);
+    const caseY = 0.21;
+    const place = function (mh, y) { mh.rotation.x = Math.PI / 2; mh.position.set(0, y == null ? caseY : y, 0); return mh; };
+
+    if (visualId === "watch_steel") {                 // SLIM STEEL DRESS WATCH
+      grp.add(place(mesh(GG.caseR, m.silver)));        // thin round steel case
+      const dial = place(mesh(GG.dial, m.dial)); dial.position.z = 0.016; grp.add(dial);
+      // two slim hands + a couple of stick markers — minimal, elegant
+      const hh = mesh(GG.hand, m.silver); hh.position.set(0, caseY + 0.012, 0.02); hh.scale.set(1, 0.7, 1); grp.add(hh);
+      const mh = mesh(GG.hand, m.silver); mh.position.set(0, caseY + 0.02, 0.02); grp.add(mh);
+      for (const s of [-1, 1]) { const p = mesh(GG.pip, m.silver); p.rotation.x = Math.PI / 2; p.position.set(s * 0.035, caseY, 0.018); grp.add(p); }
+      const cr = mesh(GG.crown, m.silver); cr.rotation.z = Math.PI / 2; cr.position.set(0.066, caseY, 0); grp.add(cr);
+      bracelet(grp, m.silver, caseY);
+    } else if (visualId === "watch_diver") {           // CHUNKY STEEL DIVER
+      grp.add(place(mesh(GG.caseT, m.silver)));         // beefier tool case
+      const bz = mesh(GG.bezel, m.silver); bz.position.set(0, caseY, 0.016); grp.add(bz);   // rotating bezel ring
+      const dial = place(mesh(GG.dial, m.blueDial)); dial.position.z = 0.017; grp.add(dial); // signature blue dial
+      // a fat lume pip at 12 + lume hour pips around the dial (Submariner read)
+      const top = mesh(GG.pip, m.lume, 1.5); top.rotation.x = Math.PI / 2; top.position.set(0, caseY + 0.05, 0.02); grp.add(top);
+      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; const p = mesh(GG.pip, m.lume); p.rotation.x = Math.PI / 2; p.position.set(Math.cos(a) * 0.034, caseY + Math.sin(a) * 0.034, 0.02); grp.add(p); }
+      const hh = mesh(GG.hand, m.lume); hh.position.set(0, caseY + 0.014, 0.022); grp.add(hh);
+      const cr = mesh(GG.crown, m.silver); cr.rotation.z = Math.PI / 2; cr.position.set(0.072, caseY, 0); grp.add(cr);
+      bracelet(grp, m.silver, caseY);
+    } else if (visualId === "watch_gold") {            // TWO-TONE GOLD CHRONO
+      grp.add(place(mesh(GG.caseR, m.gold)));           // gold case…
+      const bz = mesh(GG.bezel, m.gold); bz.position.set(0, caseY, 0.016); grp.add(bz);
+      const dial = place(mesh(GG.dial, m.dial)); dial.position.z = 0.016; grp.add(dial);
+      // two chrono subdials (the two-tone-chrono signature) + gold hands
+      for (const s of [-1, 1]) { const sd = mesh(GG.subdial, m.gold); sd.rotation.x = Math.PI / 2; sd.position.set(s * 0.022, caseY - 0.006, 0.019); grp.add(sd); }
+      const sd3 = mesh(GG.subdial, m.gold); sd3.rotation.x = Math.PI / 2; sd3.position.set(0, caseY + 0.024, 0.019); grp.add(sd3);
+      const hh = mesh(GG.hand, m.gold); hh.position.set(0, caseY + 0.012, 0.02); grp.add(hh);
+      const cr = mesh(GG.crown, m.gold); cr.rotation.z = Math.PI / 2; cr.position.set(0.066, caseY, 0); grp.add(cr);
+      bracelet(grp, m.silver, caseY, m.gold);           // …on a STEEL bracelet with gold center links = two-tone
+    } else {                                            // watch_iced — FULLY ICED BUST-DOWN
+      grp.add(place(mesh(GG.caseT, m.ice)));
+      const bz = mesh(GG.bezel, m.ice); bz.position.set(0, caseY, 0.016); grp.add(bz);
+      const dial = place(mesh(GG.dial, m.glint)); dial.position.z = 0.017; grp.add(dial);
+      // a tight PAVÉ ring of tiny ice stones around the bezel (the bust-down look)
+      for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; const gm = mesh(GG.icegem, m.glint); gm.position.set(Math.cos(a) * 0.062, caseY + Math.sin(a) * 0.062, 0.024); grp.add(gm); }
+      const hh = mesh(GG.hand, m.silver); hh.position.set(0, caseY + 0.012, 0.022); grp.add(hh);
+      bracelet(grp, m.ice, caseY, m.glint);             // iced bracelet, every link a stone
+    }
+    return grp;
+  }
+  // a short run of bracelet links hanging below the case (lug → wrist), plus a
+  // couple above. centerMat (optional) tints the middle link → two-tone look.
+  function bracelet(grp, mat, caseY, centerMat) {
+    const GG = geos();
+    const ys = [caseY - 0.07, caseY - 0.125, caseY + 0.07];
+    for (let i = 0; i < ys.length; i++) {
+      const seg = mesh(GG.bandSeg, mat); seg.position.set(0, ys[i], -0.004); grp.add(seg);
+      if (centerMat) { const c = mesh(GG.box, centerMat, 0.028, 0.05, 0.024); c.position.set(0, ys[i], 0.006); grp.add(c); }
+    }
+  }
+
+  // the tiny display model for a piece — shared geometry, a few meshes each, so
+  // the whole showroom of ice costs a few dozen draw-gated meshes total. `kind`
+  // is the visualId for buyable pieces (routes the four distinct watches) or the
+  // legacy loot name for the steal-only jackpot pieces.
+  function buildPiece(kind) {
     const GG = geos(), m = mats();
     const grp = new THREE.Group();
-    if (name === "Rolex" || name === "Iced Watch" || name === "Omega") {
-      const band = mesh(GG.band, name === "Iced Watch" ? m.ice : m.gold);   // upright on its stand
-      const face = mesh(GG.face, m.silver); face.rotation.x = Math.PI / 2; face.position.z = 0.0; face.position.y = 0.075;
-      grp.add(band); grp.add(face);
-    } else if (name === "Gold Chain" || name === "Iced Chain") {
-      const link = mesh(GG.link, name === "Iced Chain" ? m.ice : m.gold);
-      link.rotation.x = Math.PI / 2; link.position.y = 0.015;               // laid flat on the velvet
-      grp.add(link);
-    } else if (name === "Earrings") {
-      for (const s of [-1, 1]) { const e = mesh(GG.gem, m.ice, 0.7); e.position.set(s * 0.05, 0.035, 0); grp.add(e); }
-    } else if (name === "Diamond Grill") {
-      const t = mesh(GG.box, m.silver, 0.12, 0.045, 0.07); t.position.y = 0.03;
-      const i = mesh(GG.box, m.ice, 0.11, 0.02, 0.06); i.position.y = 0.062;
-      grp.add(t); grp.add(i);
-    } else if (name === "Diamond Necklace") {
+    if (kind === "watch_steel" || kind === "watch_diver" || kind === "watch_gold" || kind === "watch_iced") {
+      return buildWatch(kind, grp);
+    }
+    if (kind === "chain_gold" || kind === "chain_iced") {                 // composable chains on the velvet
+      const iced = kind === "chain_iced";
+      const link = mesh(GG.link, iced ? m.ice : m.gold, 1.05);
+      link.rotation.x = Math.PI / 2; link.position.y = 0.02; grp.add(link);
+      const pend = mesh(GG.gem, iced ? m.glint : m.gold, iced ? 1.1 : 0.9); pend.position.set(0, 0.03, 0.085); grp.add(pend);
+    } else if (kind === "ring_diamond") {                                 // composable diamond ring
+      const r = mesh(GG.ring, m.silver); const gm = mesh(GG.gem, m.glint, 0.95); gm.position.y = 0.078;
+      grp.add(r); grp.add(gm);
+    } else if (kind === "grill_diamond") {                                // composable diamond grill: a row of iced teeth
+      const base = mesh(GG.box, m.silver, 0.14, 0.04, 0.06); base.position.y = 0.028; grp.add(base);
+      for (let i = -2; i <= 2; i++) { const t = mesh(GG.tile, m.glint); t.position.set(i * 0.026, 0.055, 0.022); grp.add(t); }
+    } else if (kind === "Diamond Necklace") {
       const b = mesh(GG.bust, m.velvet); b.position.y = 0.12;
       const c = mesh(GG.link, m.gold, 0.85); c.rotation.x = Math.PI / 2 - 0.35; c.position.y = 0.17;
       const p = mesh(GG.gem, m.ice, 0.8); p.position.set(0, 0.1, 0.075);
       grp.add(b); grp.add(c); grp.add(p);
-    } else if (name === "Diamond Tiara") {
+    } else if (kind === "Diamond Tiara") {
       const c = mesh(GG.link, m.silver, 1.1); c.rotation.x = Math.PI / 2; c.position.y = 0.02;
       for (let i = -1; i <= 1; i++) { const gm = mesh(GG.gem, m.ice, 0.7 + (i === 0 ? 0.35 : 0)); gm.position.set(i * 0.07, 0.055 + (i === 0 ? 0.02 : 0), 0.08); grp.add(gm); }
       grp.add(c);
-    } else {  // rings: Diamond Ring / Diamond Pinky / the Engagement Ring
-      const big = name === "Engagement Ring";
+    } else {  // rings: the Engagement Ring (the $5M vault rock) + any other loot ring
+      const big = kind === "Engagement Ring";
       const r = mesh(GG.ring, big ? m.silver : m.gold, big ? 1.2 : 1);
-      const gm = mesh(GG.gem, m.ice, big ? 1.5 : 0.8); gm.position.y = big ? 0.1 : 0.075;
+      const gm = mesh(GG.gem, big ? m.glint : m.ice, big ? 1.6 : 0.8); gm.position.y = big ? 0.1 : 0.075;
       grp.add(r); grp.add(gm);
     }
     return grp;
@@ -150,7 +300,7 @@
 
   // ---- build the four cases once per city -----------------------------------
   function buildDisplays() {
-    const e = econ(), jw = S.jw, m = mats(), GG = geos();
+    const jw = S.jw, m = mats(), GG = geos();
     const group = new THREE.Group();
     S.group = group;
     const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
@@ -190,22 +340,27 @@
 
       const cs = { idx, x: anchor.x, z: anchor.z, tier: anchor.tier | 0, vault,
                    pane, pieces: [], smashed: false, charged: false, restockT: 0 };
-      // the pieces, spread along the case's long side, each with its sticker
-      const names = STOCK[Math.min(idx, STOCK.length - 1)];
-      names.forEach((name, i) => {
-        const it = e && e.ITEMS[name];
-        if (!it) return;
-        const lat = (i - (names.length - 1) / 2) * ((CASE_W - 0.35) / Math.max(names.length - 1, 1));
+      // the pieces, spread along the case's long side, each with its sticker.
+      // STOCK slots resolve through the econ catalog so name/price/visualId all
+      // agree; a slot the catalog can't resolve is simply skipped (never throws).
+      const slots = STOCK[Math.min(idx, STOCK.length - 1)] || [];
+      const resolved = [];
+      for (let s = 0; s < slots.length; s++) { const r = resolvePiece(slots[s]); if (r) resolved.push(r); }
+      resolved.forEach((r, i) => {
+        const lat = (i - (resolved.length - 1) / 2) * ((CASE_W - 0.35) / Math.max(resolved.length - 1, 1));
         const px = anchor.x + tx * lat, pz = anchor.z + tz * lat;
-        const model = buildPiece(name);
+        const model = buildPiece(r.kind);
         model.position.set(px, 1.07, pz);
         model.rotation.y = Math.atan2(-jw.inx, -jw.inz);   // pieces face the door
         group.add(model);
-        const value = (e.buyPrice && e.buyPrice(name)) || it.value || 0;
-        const tag = tagSprite(name + " · " + fmt$(value), cs.vault ? "#ffe08a" : "#ffd166", 1.5, 0.36);
-        if (tag) { tag.position.set(px, 1.78 + (i % 2) * 0.3, pz); group.add(tag); }
-        cs.pieces.push({ name, value, model, tag, taken: false,
-                         showpiece: name === "Engagement Ring" });   // the rotating $5M exhibit
+        // crisp two-line sticker: the NAME up top, the PRICE below (+ a BUY/VAULT
+        // accent) — gold for retail, warm amber for the vault crown set.
+        const sub = r.buyable ? fmt$(r.value) + "  · BUY" : fmt$(r.value);
+        const tag = tagSprite(r.label + " · " + sub, cs.vault ? "#ffe08a" : (r.buyable ? "#bfe6ff" : "#ffd166"), 1.6, 0.36);
+        if (tag) { tag.position.set(px, 1.8 + (i % 2) * 0.3, pz); group.add(tag); }
+        cs.pieces.push({ name: r.name, label: r.label, value: r.value, drip: r.drip, visualId: r.visualId,
+                         buyable: !!r.buyable, model, tag, taken: false,
+                         showpiece: !!r.showpiece });   // the rotating $5M exhibit
       });
       S.cases.push(cs);
     });
@@ -273,6 +428,67 @@
   function isNight() { return (CBZ.nightAmount || 0) >= NIGHT_MIN; }
   function pryEligible(cs) {
     return !cs.smashed && (!cs.pane || !cs.pane.shattered) && piecesLeft(cs) > 0 && isNight() && !clerkSees(cs.x, cs.z);
+  }
+  // the store is OPEN to sell when a live clerk is posted (you pay them across
+  // the counter). A dead clerk's store can only be robbed, never bought from.
+  function clerkAlive() { const v = S.lot && S.lot.building && S.lot.building.vendor; return !!(v && !v.dead); }
+  function clerkName() { const v = S.lot && S.lot.building && S.lot.building.vendor; return (v && v.name) || "Jeweler"; }
+
+  // ---- BUY: pay the clerk, the piece goes on your body ------------------------
+  // The buyable piece in the case nearest your aim (so you buy what you point at,
+  // not a random one). Skips taken pieces + loot-only jackpots.
+  function buyTarget(cs) {
+    if (!clerkAlive() || (cs.pane && cs.pane.shattered)) return null;
+    const P = CBZ.player; if (!P) return null;
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    let best = null, bestDot = -2;
+    for (const p of cs.pieces) {
+      if (p.taken || !p.buyable) continue;
+      const mp = p.model && p.model.position; if (!mp) { if (!best) best = p; continue; }
+      const dx = mp.x - P.pos.x, dz = mp.z - P.pos.z, d = Math.hypot(dx, dz) || 1;
+      const dot = (dx / d) * fx + (dz / d) * fz;
+      if (dot > bestDot) { bestDot = dot; best = p; }
+    }
+    return best;
+  }
+  function affordPrice() { return (CBZ.game.cash || 0) + (CBZ.game.cityBank || 0); }
+  function chargeCashThenBank(price) {
+    // mirrors realestate.js: spend cash first, then dip into the bank for the rest
+    let owe = price;
+    const fromCash = Math.min(CBZ.game.cash || 0, owe); CBZ.game.cash = (CBZ.game.cash || 0) - fromCash; owe -= fromCash;
+    if (owe > 0) CBZ.game.cityBank = (CBZ.game.cityBank || 0) - owe;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+  }
+  function buyPiece(cs, p) {
+    if (!p || p.taken || !p.buyable) return false;
+    const e = econ(); if (!e) return false;
+    const price = p.value | 0;
+    if (affordPrice() < price) { note("Need " + fmt$(price) + " (cash + bank) for the " + p.label + ".", 2); return false; }
+    chargeCashThenBank(price);
+    // 1) the REAL econ item lands in inventory → it's an owned, PAWNABLE asset
+    //    with the right identity + value (pawnshop/fence read g.cityInv by name).
+    e.add(p.name, 1);
+    // 2) wardrobe contract [B]: own + WEAR the matching visualId so the look is
+    //    persisted/serialized, the drip counts toward club status, and the body
+    //    renders the piece the instant the composable jewelry parts exist (see
+    //    DEVIATION: the watch_*/chain_*/ring_*/grill_* visualIds have no render
+    //    spec yet in clothes.js COMP or bling.js — they're catalog-only today).
+    // jewelry RENDERS (bling reads g.cityInv ownership) and COUNTS for drip
+    // (best-owned-per-slot) by OWNERSHIP — it is not a clothing composite, so it
+    // does NOT route through cityWear (that's the shirt/blazer/tie fit, and a
+    // jewelry id there is inert clutter). Grant marks it owned for the wardrobe
+    // list; cityBlingPlayerDirty (below) seats it on the body this frame.
+    if (p.visualId && CBZ.cityGrantItem) CBZ.cityGrantItem(p.visualId);
+    if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();   // re-seat worn ice this frame
+    // bought pieces are off the display (it's now on YOU); restock returns it.
+    setTaken(p, true);
+    if (piecesLeft(cs) === 0) caseEmptied(cs);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    note("💎 Bought the " + p.label + " — " + fmt$(price) + ". " + dripWord(p.drip) + ". (pawn it later)", 2.6);
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(p.drip >= 20 ? 3 : 1);
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return true;
   }
 
   // ---- LOUD: scoop a smashed case ---------------------------------------------
@@ -357,11 +573,22 @@
       return "<span style='color:#7f8794'>Cleaned out — the insurance re-stock is coming.</span>";
     if (S.pry && S.pry.cs === cs)
       return "<span style='color:#9fe0ff'>Prying… " + Math.round(100 * S.pry.t / PRY_TIME) + "%</span> <span style='color:#7f8794'>· don't move</span>";
+    // OPEN-STORE BUY: clerk posted + intact case + a buyable piece in your aim →
+    // pay the counter and it goes ON YOU (then pawn it later). The WHY hint says
+    // it: a wearable asset. (If you'd rather take it, the glass is right there.)
+    const buy = buyTarget(cs);
+    if (buy) {
+      const can = affordPrice() >= (buy.value | 0);
+      const why = "<span style='color:#7f8794'>· " + dripWord(buy.drip) + " · pawn it later</span>";
+      if (can)
+        return "<b style='color:#9be37a'>[E]</b> Buy the " + buy.label + " — <b style='color:#ffd166'>" + fmt$(buy.value) + "</b> " + why;
+      return "<span style='color:#ff9e9e'>" + buy.label + " — " + fmt$(buy.value) + "</span> <span style='color:#7f8794'>· short on cash + bank · the glass, though…</span>";
+    }
     if (pryEligible(cs))
       return "<b style='color:#9fe0ff'>[E]</b> Pry the case <span style='color:#7f8794'>· slow + silent · one piece · the clerk might turn</span>";
     if (!isNight())
       return "<span style='color:#7f8794'>Locked case — too many eyes in daylight. The glass, though…</span>";
-    return "<span style='color:#ff9e9e'>The " + ((S.lot.building.vendor && S.lot.building.vendor.name) || "Jeweler") + " is watching this case.</span> <span style='color:#7f8794'>· the glass, though…</span>";
+    return "<span style='color:#ff9e9e'>The " + clerkName() + " is watching this case.</span> <span style='color:#7f8794'>· the glass, though…</span>";
   }
 
   function promptEl() {
@@ -392,6 +619,8 @@
     if (S.pry) return;                                 // hands are busy
     const broken = cs.pane && cs.pane.shattered;
     if (broken && piecesLeft(cs) > 0) { scoop(cs); return; }
+    const buy = buyTarget(cs);
+    if (buy) { buyPiece(cs, buy); return; }            // open store → pay the clerk
     if (pryEligible(cs)) { startPry(cs); return; }
   }
 
@@ -485,13 +714,36 @@
     if (CBZ.cityHasGun && CBZ.cityHasGun()) return;        // gunfire path handles glass itself
     const cs = pickCase();
     if (!cs || (cs.pane && cs.pane.shattered)) return;
+    // OPEN STORE: a left-click at a clerk-watched, intact case you can BUY from is
+    // a purchase, NOT a smash — browsing the counter shouldn't frame you for
+    // burglary. Robbing in daylight still works via a GUN; the bat smashes when
+    // the clerk can't see (night / their blind side) or is down. (E-key buys too.)
+    if (buyTarget(cs) && clerkSees(cs.x, cs.z)) { actOn(cs); return; }
     // pop just THIS case's pane through the shared glass system (sfx + shards
     // + the alarm transition above all follow from the pane state change)
     if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8);
   });
 
   // ---- public hooks (headless/harness handles, gunstore-style) ----------------
+  // FEATURE-DETECT (contract [F], mirrors cityGunWallLive): interact.js trims the
+  // generic "Shop here" vendor verb on the jewelry clerk when this is true, so
+  // the in-world cases ARE the store (buy/smash/pry — no text menu). ensure()
+  // builds-on-approach so the very first walk-up reports live.
+  CBZ.cityJewelryLive = function (lot) {
+    if (!g || g.mode !== "city") return false;
+    if (!ensure()) return false;
+    return !!(S.lot && (!lot || lot === S.lot));
+  };
   CBZ.cityJewelryLot = function () { return (S.built && S.lot) || null; };
+  // headless/harness handle: buy a named buyable display by visualId or label.
+  CBZ.cityJewelryBuy = function (idOrLabel) {
+    if (!ensure()) return false;
+    for (const cs of S.cases) for (const p of cs.pieces) {
+      if (p.taken || !p.buyable) continue;
+      if (p.visualId === idOrLabel || p.label === idOrLabel || p.name === idOrLabel) return buyPiece(cs, p);
+    }
+    return false;
+  };
   CBZ.cityJewelrySmash = function (i) {
     if (!ensure()) return false;
     const cs = S.cases[i | 0];
@@ -509,9 +761,11 @@
   CBZ.cityJewelryState = function () {
     if (!S.built) return null;
     return {
-      alarm: S.alarmT > 0,
+      alarm: S.alarmT > 0, clerkAlive: clerkAlive(),
       cases: S.cases.map((cs) => ({ tier: cs.tier, vault: !!cs.vault, x: cs.x, z: cs.z,
-        smashed: !!(cs.pane && cs.pane.shattered), left: piecesLeft(cs), restockT: cs.restockT })),
+        smashed: !!(cs.pane && cs.pane.shattered), left: piecesLeft(cs), restockT: cs.restockT,
+        pieces: cs.pieces.map((p) => ({ name: p.name, label: p.label, value: p.value, drip: p.drip,
+          visualId: p.visualId, buyable: !!p.buyable, taken: !!p.taken })) })),
     };
   };
 })();

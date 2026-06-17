@@ -1,0 +1,551 @@
+{
+  "scenario": "chaos",
+  "requestedSeconds": 60,
+  "requestedFrames": 90,
+  "elapsedSeconds": 37.49,
+  "fps": 1.68,
+  "frameMs": {
+    "avg": 626.165,
+    "p50": 533.4,
+    "p95": 1066.5,
+    "p99": 3899.8,
+    "max": 3899.8,
+    "over25ms": 63,
+    "over50ms": 63
+  },
+  "render": {
+    "avgCpuMs": 82.183,
+    "peakCpuMs": 702.4,
+    "avgCalls": 1756.6,
+    "avgTriangles": 282067
+  },
+  "counts": {
+    "peds": 326,
+    "cops": 6,
+    "cars": 111,
+    "crowd": 360,
+    "colliders": 19667,
+    "platforms": 816,
+    "losBlockers": 4311
+  },
+  "scene": {
+    "objects": 42274,
+    "meshes": 35320,
+    "instancedMeshes": 38,
+    "visibleMeshes": 32797,
+    "groups": 5728,
+    "lights": 6,
+    "sprites": 1207
+  },
+  "renderAttribution": {
+    "full": {
+      "calls": 1790,
+      "triangles": 283486
+    },
+    "withoutPedsAndCops": {
+      "calls": 1388,
+      "triangles": 278638
+    },
+    "withoutCars": {
+      "calls": 1721,
+      "triangles": 279638
+    },
+    "withoutAmbientCrowd": {
+      "calls": 1779,
+      "triangles": 190766
+    },
+    "withoutCityDynamic": {
+      "calls": 1308,
+      "triangles": 182070
+    },
+    "withoutCityRoot": {
+      "calls": 36,
+      "triangles": 97515
+    }
+  },
+  "cityRootCensus": {
+    "meshes": 31175,
+    "visibleMeshes": 28866,
+    "instanced": 11,
+    "textured": 568,
+    "transparent": 15909,
+    "emissive": 17633,
+    "materialArrays": 0,
+    "userData": 953,
+    "losRefs": 4245,
+    "colliderRefs": 19331,
+    "platformRefs": 0,
+    "knownActorDynamic": 8181,
+    "mergeEligible": 7798,
+    "staticMergeEligible": 1159,
+    "uniqueGeometries": 22595,
+    "uniqueMaterials": 6679,
+    "repeatedGeometryMaterialPairs": 256,
+    "meshesInRepeatedPairs": 7104,
+    "largestRepeatedPair": 664,
+    "topLevelChildren": [
+      {
+        "index": 10,
+        "name": "",
+        "type": "Group",
+        "meshes": 3181,
+        "visibleMeshes": 2911
+      },
+      {
+        "index": 54,
+        "name": "",
+        "type": "Group",
+        "meshes": 1486,
+        "visibleMeshes": 1327
+      },
+      {
+        "index": 55,
+        "name": "",
+        "type": "Group",
+        "meshes": 1486,
+        "visibleMeshes": 1327
+      },
+      {
+        "index": 57,
+        "name": "",
+        "type": "Group",
+        "meshes": 822,
+        "visibleMeshes": 723
+      },
+      {
+        "index": 56,
+        "name": "",
+        "type": "Group",
+        "meshes": 734,
+        "visibleMeshes": 645
+      },
+      {
+        "index": 58,
+        "name": "",
+        "type": "Group",
+        "meshes": 642,
+        "visibleMeshes": 563
+      },
+      {
+        "index": 35,
+        "name": "",
+        "type": "Group",
+        "meshes": 573,
+        "visibleMeshes": 518
+      },
+      {
+        "index": 42,
+        "name": "",
+        "type": "Group",
+        "meshes": 573,
+        "visibleMeshes": 518
+      },
+      {
+        "index": 28,
+        "name": "",
+        "type": "Group",
+        "meshes": 571,
+        "visibleMeshes": 516
+      },
+      {
+        "index": 36,
+        "name": "",
+        "type": "Group",
+        "meshes": 571,
+        "visibleMeshes": 516
+      },
+      {
+        "index": 37,
+        "name": "",
+        "type": "Group",
+        "meshes": 571,
+        "visibleMeshes": 516
+      },
+      {
+        "index": 34,
+        "name": "",
+        "type": "Group",
+        "meshes": 569,
+        "visibleMeshes": 514
+      },
+      {
+        "index": 24,
+        "name": "",
+        "type": "Group",
+        "meshes": 480,
+        "visibleMeshes": 438
+      },
+      {
+        "index": 25,
+        "name": "",
+        "type": "Group",
+        "meshes": 479,
+        "visibleMeshes": 437
+      },
+      {
+        "index": 31,
+        "name": "",
+        "type": "Group",
+        "meshes": 483,
+        "visibleMeshes": 437
+      },
+      {
+        "index": 30,
+        "name": "",
+        "type": "Group",
+        "meshes": 422,
+        "visibleMeshes": 373
+      },
+      {
+        "index": 19,
+        "name": "",
+        "type": "Group",
+        "meshes": 380,
+        "visibleMeshes": 350
+      },
+      {
+        "index": 18,
+        "name": "",
+        "type": "Group",
+        "meshes": 378,
+        "visibleMeshes": 341
+      },
+      {
+        "index": 14,
+        "name": "",
+        "type": "Group",
+        "meshes": 371,
+        "visibleMeshes": 334
+      },
+      {
+        "index": 43,
+        "name": "",
+        "type": "Group",
+        "meshes": 371,
+        "visibleMeshes": 334
+      }
+    ]
+  },
+  "batch": {
+    "mergedMeshes": 225,
+    "removed": 9638,
+    "wallMerged": 168,
+    "wallHidden": 2379
+  },
+  "colliderBroadphase": {
+    "colliders": 19667,
+    "buckets": 1476
+  },
+  "heapUsedMB": 279,
+  "glitches": {
+    "nanActors": 0,
+    "nearInvisiblePeds": 1,
+    "outOfBoundsActors": 0,
+    "carOverlaps": 0,
+    "duplicateColliders": 0
+  },
+  "errors": [],
+  "topFrameWork": [
+    {
+      "kind": "update",
+      "order": 34,
+      "source": "",
+      "calls": 64,
+      "totalMs": 25172.6,
+      "avgMs": 393.3219,
+      "peakMs": 812.2,
+      "over2ms": 64
+    },
+    {
+      "kind": "update",
+      "order": 37,
+      "source": "",
+      "calls": 64,
+      "totalMs": 1920.7,
+      "avgMs": 30.0109,
+      "peakMs": 626.4,
+      "over2ms": 64
+    },
+    {
+      "kind": "always",
+      "order": 50,
+      "source": "",
+      "calls": 64,
+      "totalMs": 453.7,
+      "avgMs": 7.0891,
+      "peakMs": 26.9,
+      "over2ms": 64
+    },
+    {
+      "kind": "update",
+      "order": 23.7,
+      "source": "",
+      "calls": 64,
+      "totalMs": 297,
+      "avgMs": 4.6406,
+      "peakMs": 43.6,
+      "over2ms": 29
+    },
+    {
+      "kind": "update",
+      "order": 42,
+      "source": "",
+      "calls": 64,
+      "totalMs": 274.6,
+      "avgMs": 4.2906,
+      "peakMs": 16.7,
+      "over2ms": 57
+    },
+    {
+      "kind": "update",
+      "order": 38,
+      "source": "",
+      "calls": 64,
+      "totalMs": 221.3,
+      "avgMs": 3.4578,
+      "peakMs": 38.6,
+      "over2ms": 36
+    },
+    {
+      "kind": "update",
+      "order": 89,
+      "source": "",
+      "calls": 64,
+      "totalMs": 144.9,
+      "avgMs": 2.2641,
+      "peakMs": 10.1,
+      "over2ms": 25
+    },
+    {
+      "kind": "always",
+      "order": 52,
+      "source": "",
+      "calls": 64,
+      "totalMs": 139.5,
+      "avgMs": 2.1797,
+      "peakMs": 4,
+      "over2ms": 24
+    },
+    {
+      "kind": "update",
+      "order": 33.5,
+      "source": "",
+      "calls": 64,
+      "totalMs": 110.4,
+      "avgMs": 1.725,
+      "peakMs": 21.5,
+      "over2ms": 8
+    },
+    {
+      "kind": "update",
+      "order": 35,
+      "source": "",
+      "calls": 64,
+      "totalMs": 90.5,
+      "avgMs": 1.4141,
+      "peakMs": 11.4,
+      "over2ms": 18
+    },
+    {
+      "kind": "update",
+      "order": 37.6,
+      "source": "",
+      "calls": 64,
+      "totalMs": 80.8,
+      "avgMs": 1.2625,
+      "peakMs": 14.6,
+      "over2ms": 8
+    },
+    {
+      "kind": "always",
+      "order": 46,
+      "source": "",
+      "calls": 64,
+      "totalMs": 64.1,
+      "avgMs": 1.0016,
+      "peakMs": 5.9,
+      "over2ms": 11
+    },
+    {
+      "kind": "update",
+      "order": 15,
+      "source": "",
+      "calls": 64,
+      "totalMs": 49.2,
+      "avgMs": 0.7688,
+      "peakMs": 11.6,
+      "over2ms": 3
+    },
+    {
+      "kind": "update",
+      "order": 36.6,
+      "source": "",
+      "calls": 64,
+      "totalMs": 48.2,
+      "avgMs": 0.7531,
+      "peakMs": 45.8,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 35.5,
+      "source": "",
+      "calls": 64,
+      "totalMs": 42.5,
+      "avgMs": 0.6641,
+      "peakMs": 28.1,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 24,
+      "source": "",
+      "calls": 64,
+      "totalMs": 38.5,
+      "avgMs": 0.6016,
+      "peakMs": 4.3,
+      "over2ms": 3
+    },
+    {
+      "kind": "update",
+      "order": 14,
+      "source": "",
+      "calls": 64,
+      "totalMs": 38.2,
+      "avgMs": 0.5969,
+      "peakMs": 16.2,
+      "over2ms": 3
+    },
+    {
+      "kind": "update",
+      "order": 34.3,
+      "source": "",
+      "calls": 64,
+      "totalMs": 36.2,
+      "avgMs": 0.5656,
+      "peakMs": 8.4,
+      "over2ms": 3
+    },
+    {
+      "kind": "update",
+      "order": 36,
+      "source": "",
+      "calls": 64,
+      "totalMs": 35.4,
+      "avgMs": 0.5531,
+      "peakMs": 2.5,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 10,
+      "source": "",
+      "calls": 64,
+      "totalMs": 33,
+      "avgMs": 0.5156,
+      "peakMs": 27.8,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 25,
+      "source": "",
+      "calls": 64,
+      "totalMs": 31,
+      "avgMs": 0.4844,
+      "peakMs": 5.5,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 36.5,
+      "source": "",
+      "calls": 64,
+      "totalMs": 30.4,
+      "avgMs": 0.475,
+      "peakMs": 6.1,
+      "over2ms": 3
+    },
+    {
+      "kind": "always",
+      "order": 90,
+      "source": "",
+      "calls": 64,
+      "totalMs": 29.6,
+      "avgMs": 0.4625,
+      "peakMs": 5.8,
+      "over2ms": 4
+    },
+    {
+      "kind": "always",
+      "order": 88,
+      "source": "",
+      "calls": 64,
+      "totalMs": 26.9,
+      "avgMs": 0.4203,
+      "peakMs": 5.1,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 37,
+      "source": "",
+      "calls": 64,
+      "totalMs": 25.9,
+      "avgMs": 0.4047,
+      "peakMs": 25,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 30,
+      "source": "",
+      "calls": 64,
+      "totalMs": 25.8,
+      "avgMs": 0.4031,
+      "peakMs": 8.4,
+      "over2ms": 3
+    },
+    {
+      "kind": "update",
+      "order": 36,
+      "source": "",
+      "calls": 64,
+      "totalMs": 25.3,
+      "avgMs": 0.3953,
+      "peakMs": 4.5,
+      "over2ms": 3
+    },
+    {
+      "kind": "update",
+      "order": 38.5,
+      "source": "",
+      "calls": 64,
+      "totalMs": 19.7,
+      "avgMs": 0.3078,
+      "peakMs": 4,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 12,
+      "source": "",
+      "calls": 64,
+      "totalMs": 18.6,
+      "avgMs": 0.2906,
+      "peakMs": 4.6,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 39,
+      "source": "",
+      "calls": 64,
+      "totalMs": 18.5,
+      "avgMs": 0.2891,
+      "peakMs": 3.8,
+      "over2ms": 2
+    }
+  ],
+  "browserErrors": []
+}

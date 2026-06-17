@@ -170,6 +170,128 @@
     return dups.size;
   }
 
+  // Query-only render attribution. These extra renders run after measurement
+  // has finished and temporarily hide one category at a time, so normal play
+  // pays nothing and the report can distinguish a static-world draw-call
+  // problem from peds/cars/crowd without guessing.
+  function renderAttribution() {
+    if (!originalRender || !CBZ.scene || !CBZ.camera) return null;
+    const renderer = CBZ.renderer;
+    const shadowEnabled = renderer.shadowMap.enabled;
+    const shadowAuto = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.enabled = false;
+    renderer.shadowMap.autoUpdate = false;
+    function sample(hidden) {
+      const old = [];
+      for (let i = 0; i < hidden.length; i++) {
+        const o = hidden[i]; if (!o) continue;
+        old.push([o, o.visible]); o.visible = false;
+      }
+      originalRender(CBZ.scene, CBZ.camera);
+      const r = renderer.info && renderer.info.render;
+      const out = r ? { calls: r.calls || 0, triangles: r.triangles || 0 } : null;
+      for (let i = 0; i < old.length; i++) old[i][0].visible = old[i][1];
+      return out;
+    }
+    const peds = (CBZ.cityPeds || []).concat(CBZ.cityCops || []).map(function (p) { return p && p.group; }).filter(Boolean);
+    const cars = (CBZ.cityCars || []).map(function (c) { return c && c.group; }).filter(Boolean);
+    const crowd = CBZ.scene.getObjectByName ? CBZ.scene.getObjectByName("city-crowd") : null;
+    const cityRoot = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    const allDynamic = peds.concat(cars); if (crowd) allDynamic.push(crowd);
+    const result = {
+      full: sample([]),
+      withoutPedsAndCops: sample(peds),
+      withoutCars: sample(cars),
+      withoutAmbientCrowd: sample(crowd ? [crowd] : []),
+      withoutCityDynamic: sample(allDynamic),
+      withoutCityRoot: sample(cityRoot ? [cityRoot] : []),
+    };
+    renderer.shadowMap.enabled = shadowEnabled;
+    renderer.shadowMap.autoUpdate = shadowAuto;
+    renderer.shadowMap.needsUpdate = true;
+    return result;
+  }
+
+  // Query-only census explaining WHY the city root still costs draw calls after
+  // the static batcher runs. Counts are non-exclusive: a textured interactive
+  // mesh appears in both buckets. Repeated geometry/material pairs are the
+  // strongest candidates for the next instancing A/B.
+  function cityRootCensus() {
+    const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    if (!root || !root.traverse) return null;
+    const los = new Set(CBZ.losBlockers || []);
+    const colRefs = new Set(), platformRefs = new Set();
+    const knownDynamic = new Set();
+    for (const c of (CBZ.colliders || [])) if (c && c.ref) colRefs.add(c.ref);
+    for (const p of (CBZ.platforms || [])) if (p && p.ref) platformRefs.add(p.ref);
+    const actorRoots = (CBZ.cityPeds || []).concat(CBZ.cityCops || [], CBZ.cityCars || [])
+      .map(function (a) { return a && a.group; }).filter(Boolean);
+    const crowdRoot = CBZ.scene.getObjectByName ? CBZ.scene.getObjectByName("city-crowd") : null;
+    if (crowdRoot) actorRoots.push(crowdRoot);
+    for (let i = 0; i < actorRoots.length; i++) actorRoots[i].traverse(function (o) { if (o.isMesh) knownDynamic.add(o); });
+    const counts = {
+      meshes: 0, visibleMeshes: 0, instanced: 0, textured: 0, transparent: 0,
+      emissive: 0, materialArrays: 0, userData: 0, losRefs: 0, colliderRefs: 0,
+      platformRefs: 0, knownActorDynamic: 0, mergeEligible: 0, staticMergeEligible: 0,
+    };
+    const pairCounts = new Map(), geos = new Set(), mats = new Set();
+    function materialList(m) { return Array.isArray(m.material) ? m.material : [m.material]; }
+    function meshCount(o) {
+      let meshes = 0, visibleMeshes = 0;
+      o.traverse(function (n) {
+        if (!n.isMesh) return;
+        meshes++; if (n.visible) visibleMeshes++;
+      });
+      return { meshes, visibleMeshes };
+    }
+    root.traverse(function (m) {
+      if (!m.isMesh) return;
+      counts.meshes++; if (m.visible) counts.visibleMeshes++;
+      if (m.isInstancedMesh) counts.instanced++;
+      const ml = materialList(m);
+      if (Array.isArray(m.material)) counts.materialArrays++;
+      let textured = false, transparent = false, emissive = false;
+      for (let i = 0; i < ml.length; i++) {
+        const mat = ml[i]; if (!mat) continue;
+        mats.add(mat.uuid || mat.id);
+        if (mat.map) textured = true;
+        if (mat.transparent || mat.opacity < 1) transparent = true;
+        if (mat.emissive && mat.emissive.getHex && mat.emissive.getHex() !== 0) emissive = true;
+      }
+      if (textured) counts.textured++;
+      if (transparent) counts.transparent++;
+      if (emissive) counts.emissive++;
+      const hasUserData = !!(m.userData && Object.keys(m.userData).length);
+      if (hasUserData) counts.userData++;
+      if (los.has(m)) counts.losRefs++;
+      if (colRefs.has(m)) counts.colliderRefs++;
+      if (platformRefs.has(m)) counts.platformRefs++;
+      if (knownDynamic.has(m)) counts.knownActorDynamic++;
+      if (m.geometry) {
+        geos.add(m.geometry.uuid || m.geometry.id);
+        const matKey = ml.map(function (x) { return x && (x.uuid || x.id); }).join(",");
+        const key = (m.geometry.uuid || m.geometry.id) + "|" + matKey;
+        pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
+      }
+      if (!m.isInstancedMesh && !Array.isArray(m.material) && !textured && !transparent && !emissive &&
+          !hasUserData && !los.has(m) && !colRefs.has(m) && !platformRefs.has(m)) {
+        counts.mergeEligible++;
+        if (!knownDynamic.has(m)) counts.staticMergeEligible++;
+      }
+    });
+    counts.uniqueGeometries = geos.size;
+    counts.uniqueMaterials = mats.size;
+    const repeatedPairs = Array.from(pairCounts.values()).filter(function (n) { return n > 1; }).sort(function (a, b) { return b - a; });
+    counts.repeatedGeometryMaterialPairs = repeatedPairs.length;
+    counts.meshesInRepeatedPairs = repeatedPairs.reduce(function (a, b) { return a + b; }, 0);
+    counts.largestRepeatedPair = repeatedPairs[0] || 0;
+    counts.topLevelChildren = root.children.map(function (o, index) {
+      const c = meshCount(o);
+      return { index, name: o.name || "", type: o.type || "", meshes: c.meshes, visibleMeshes: c.visibleMeshes };
+    }).sort(function (a, b) { return b.visibleMeshes - a.visibleMeshes; }).slice(0, 20);
+    return counts;
+  }
+
   function finish() {
     if (finished) return;
     finished = true;
@@ -203,6 +325,8 @@
         losBlockers: (CBZ.losBlockers || []).length,
       },
       scene: sceneCounts(),
+      renderAttribution: renderAttribution(),
+      cityRootCensus: cityRootCensus(),
       batch: CBZ.batchStats || null,
       colliderBroadphase: CBZ.colliderBroadphaseStats || null,
       heapUsedMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null,

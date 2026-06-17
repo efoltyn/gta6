@@ -36,6 +36,10 @@
   const tmp = new THREE.Vector3();
 
   const COP_R = 0.5, ANIM_D2 = 70 * 70;
+  // how close a blind cop must be before it'll SHOOT OUT a glass wall between it
+  // and the target (matches combat.js BREACH_REACH; a cop only breaches glass it
+  // could plausibly reach, so it never plinks distant storefronts).
+  const BREACH_REACH = 16;
   let frame = 0, maintainT = 0;
   let _s = 314159;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
@@ -510,6 +514,11 @@
       skin: 0xe8b58c, hair: 0x101820, shoes: 0x101216,
     });
     ch.group.position.set(x, 0, z);
+    // HEAD TAG: seeded as "POLICE"/"SWAT" but the street-read system (level.js
+    // retag) repaints it to the ALLOWED Lv.N head tag — "Lv.20 Officer" /
+    // "Lv.35 SWAT". This sprite IS that level tag (level.js retag early-returns
+    // when .tag is null), so it must exist — nulling it removed the level tag
+    // entirely (regression). LOD toggles its visibility below.
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(swat ? "SWAT" : "POLICE", { color: "#7fd0ff" }) : null;
     if (tag) { tag.position.y = 3.0; tag.scale.set(2.6, 0.7, 1); ch.group.add(tag); }
     const cop = {
@@ -600,8 +609,10 @@
     pool.rotation.x = -Math.PI / 2; pool.position.y = 0.07;
     A.root.add(pool);
     A.root.add(grp);
-    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite("AIR-1", { color: "#7fd0ff" }) : null;
-    if (tag) { tag.position.y = 2.2; tag.scale.set(3, 0.8, 1); grp.add(tag); }
+    // NO floating "AIR-1" billboard over the police chopper — a role label on an
+    // aircraft breaks the fourth wall (same rule as the cop/vehicle labels). The
+    // searchlight + rotor already read it as a police helicopter.
+    const tag = null;
     const sp = A.randomRoadPoint();
     grp.position.set(sp.x, CHOP_Y, sp.z);
     return {
@@ -1430,7 +1441,19 @@
         // (losClear is throttled per-cop so the raycast cost stays cheap.)
         if (c._losCD == null) c._losCD = rng() * 0.25;
         c._losCD -= dt;
-        if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = dist < 48 && losClear(c.pos.x, c.pos.z, tx, tz); }
+        if (c._losCD <= 0) {
+          c._losCD = 0.22 + rng() * 0.12;
+          c._losClear = dist < 48 && losClear(c.pos.x, c.pos.z, tx, tz);
+          // GLASS WE JUST SHOT OUT reads as open air: the cheap wall raycast still
+          // hits the facade box, but clearLineOfFire (los.js) sees through the
+          // shattered pane's hole (cityShotHole). After a breach, re-confirm the
+          // lane the glass-aware way so the cop SEES through its own hole and
+          // closes/fires, instead of standing there re-breaking nothing.
+          if (!c._losClear && (c._breachedT || 0) > 0 && dist < BREACH_REACH && CBZ.clearLineOfFire) {
+            const ty2 = isPlayer ? 1.55 : 1.3;
+            c._losClear = CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z, tx, (tgt.pos.y || 0) + ty2, tz);
+          }
+        }
         const painted = isPlayer && CBZ.cityChopperPaints && CBZ.cityChopperPaints();
         c.sees = dist < 48 && (c._losClear || painted || dist < 4);
         if (c.sees) {
@@ -1487,10 +1510,50 @@
           continue;
         }
 
-        // ---- NO LINE OF FIRE → FLANK to a real angle instead of pressing into the
-        //      wall. A wanted shooter who can't see the target picks a side and
-        //      slides perpendicular to peek around cover (alternating sides if one
-        //      side stays blocked), so cops round corners instead of wallhacking.
+        // ---- NO LINE OF FIRE → BREACH THE GLASS, else FLANK. A wanted shooter
+        //      who can't see the target because a STOREFRONT WINDOW (and its wall)
+        //      sits between them now SHOOTS THE GLASS OUT instead of milling — the
+        //      broken pane reads as open air (cityShotHole), so next frame c.sees
+        //      flips clear and the chase below closes straight through the hole.
+        //      cityNpcBreachGlass only fires when there's genuinely breakable
+        //      glass on the firing lane within reach, so cops never plink random
+        //      windows. If there's no glass to break, fall back to the corner
+        //      flank (slide perpendicular to peek around solid cover).
+        if (wantShoot && !c.sees && dist < BREACH_REACH && c._losClear === false) {
+          if (CBZ.cityNpcBreachGlass && CBZ.cityNpcBreachGlass(c, tgt, BREACH_REACH)) {
+            c.shootCD = Math.max(c.shootCD, 0.18);   // the breach round IS this beat's shot
+            c._losCD = 0;                            // re-test the (now open) line of sight immediately
+            // push toward the freshly-opened hole rather than flanking away from it
+            stepTo(c, dx, dz, c.baseSpeed, dt, near);
+            continue;
+          }
+        }
+
+        // ---- DOOR-AWARE ROUTING: no glass to breach, but the target is INSIDE a
+        //      building we're walled out of → make for that building's DOOR instead
+        //      of grinding against the facade. cityNav.indoorLotAt finds the lot the
+        //      target stands in; its entrance is a real, walkable opening. We only
+        //      detour when we're genuinely blind + close-ish (a far target is the
+        //      flank/search code's job). Throttled lookup, cheap.
+        if (c._losClear === false && !c.sees && dist < 34 && CBZ.cityNav && CBZ.cityNav.indoorLotAt) {
+          c._doorCD = (c._doorCD || 0) - dt;
+          if (c._doorCD <= 0) {
+            c._doorCD = 0.5 + rng() * 0.3;
+            const lot = CBZ.cityNav.indoorLotAt(tx, tz);
+            const door = lot && lot.building && lot.building.door;
+            // only route to the door if it actually sits between us and the wall
+            // (closer to us than the target itself), so we don't run away from a
+            // target that's standing in the doorway already.
+            c._doorGoal = (door && Math.hypot(door.x - c.pos.x, door.z - c.pos.z) > 2.4) ? { x: door.x, z: door.z } : null;
+          }
+          if (c._doorGoal) {
+            const ddx = c._doorGoal.x - c.pos.x, ddz = c._doorGoal.z - c.pos.z;
+            // reached the door (or it opened a sightline) → drop it, resume the hunt
+            if (Math.hypot(ddx, ddz) < 2.2 || c.sees) { c._doorGoal = null; }
+            else { stepTo(c, ddx, ddz, c.baseSpeed * 1.05, dt, near); continue; }
+          }
+        } else { c._doorGoal = null; }
+
         if (wantShoot && !c.sees && dist < 42) {
           c._flankT = (c._flankT || 0) - dt;
           if (c._flankT <= 0 || c._flankSide == null) { c._flankT = 1.2 + rng() * 0.8; c._flankSide = (c._flankSide === 1) ? -1 : 1; }

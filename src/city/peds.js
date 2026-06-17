@@ -34,6 +34,39 @@
   const g = CBZ.game;
   const A0 = () => (CBZ.CITY && CBZ.CITY.aggro) || {};
   const tmp = new THREE.Vector3();
+  // CONTEXT-STEERING scratch (Builder B side of the citynav contract). Reused
+  // every frame so the near-crowd steer is alloc-free at ~100 rigs: a flat
+  // neighbour buffer [x0,z0,x1,z1,...] filled by the bounded near-ped scan, and
+  // one `out` object cityNav.contextSteer writes the chosen unit dir into. The
+  // 8 cap mirrors the old separation cap (n>=4 pairs ≈ what crowding warrants);
+  // the buffer is oversized so we never realloc.
+  const _nbrBuf = new Float32Array(32);   // up to 16 neighbour pairs
+  const _ctxOut = { x: 0, z: 0 };
+  // One spatial index for the rich city-ped rigs. Context steering used to
+  // rescan the full ped list for every active mover; that becomes quadratic as
+  // the city cast grows. Rebuild once per frame, then inspect only local cells.
+  // The nearest-N insertion below is also smarter than the old first-N-in-array
+  // cap: steering always reacts to the closest bodies, independent of spawn
+  // order.
+  let _pedGrid = null;
+  const _pedGridList = [];
+  const _nbrD2 = new Float32Array(8);
+  const _nbrX = new Float32Array(8), _nbrZ = new Float32Array(8);
+  function _pedVec(p) { return p.pos; }
+  function rebuildPedGrid() {
+    if (!_pedGrid && CBZ.makeGrid) _pedGrid = CBZ.makeGrid(4);
+    if (!_pedGrid) return;
+    _pedGridList.length = 0;
+    const peds = CBZ.cityPeds;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p.dead && !p.inCar && !p._parked && p.enterT <= 0) _pedGridList.push(p);
+    }
+    _pedGrid.rebuild(_pedGridList, _pedVec);
+  }
+  // fleeFrom runs on a STATE TRANSITION (not the per-frame hot loop), so it may
+  // build its short ped.path array there — cityNav.routeTo writes into the caller
+  // array we hand it (ped owns ped.path; move() shifts it as the ped advances).
 
   const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 26 * 26, FAR_D2 = 110 * 110;
   // Full-rig render distance. The instanced ambient crowd covers everything past
@@ -252,8 +285,11 @@
     const skin = pick(SKIN, r());
     const wealth = opts.wealth != null ? opts.wealth : richWealth(r);
     const econ = CBZ.cityEcon;
-    // ~45% of plain civvies wear the tee SHORT-SLEEVED: bare skin arms under
-    // a colored torso reads t-shirt (caster-pinned outfits keep full sleeves)
+    // ~45% of plain civvies wear the tee SHORT-SLEEVED. A bare-skin WHOLE arm
+    // (the old way) read as sleeveless and the skin shoulder blended into the
+    // shirt torso (user-filmed). A real short sleeve = shirt-colored
+    // shoulder/upper-arm + bare forearm: arms stay the shirt color, and we
+    // add a skin forearm box below mid-arm (see makeCharacter call's aftermath).
     const shortSleeve = !opts.outfit && r() < 0.45;
     // headgear where the JOB wears one — a rig only grows a cap slot at build
     // time (that's how cops get theirs), so it's decided here, off the cast job:
@@ -262,7 +298,19 @@
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
         : /soldier/i.test(opts.job || "") ? 0x44503a : null;
-    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: shortSleeve ? skin : outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol });
+    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol });
+    // SHORT SLEEVE: bare the forearm (lower ~45% of the arm) with a skin box on
+    // each arm pivot — reads as a tee sleeve ending mid-bicep, no sleeveless
+    // skin shoulder blending into the shirt. Rides the arm swing; shared geo.
+    if (shortSleeve && ch.parts && CBZ.cmat && window.THREE) {
+      [ch.parts.la, ch.parts.ra].forEach(function (arm) {
+        if (!arm) return;
+        const fa = new window.THREE.Mesh(CBZ.boxGeom(0.31, 0.42, 0.31), CBZ.cmat(skin));
+        fa.position.y = -0.72;                 // below mid-arm, above the hand cap (-0.93)
+        fa.castShadow = true;
+        arm.add(fa);
+      });
+    }
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
     const nm = opts.name || name(r);
@@ -307,12 +355,27 @@
     // even a nobody isn't a single flat slab. NOTE: spawn-time dressing only —
     // post-spawn identity rewrites (crowd promotion, schedule deal-ins, the
     // hour recast) re-dress through outfits.js's wraps (the grey-tycoon fix).
+    // PLAIN CIVILIANS (CBZ.CONFIG.CITY_PLAIN_CIVVIES, default on): an ordinary
+    // person — no role uniform, no gang, no business/tycoon identity — stays
+    // PLAIN. The rig is already built with a solid shirt (the SHIRT palette) +
+    // trouser legs, so "plain" means we DON'T lay the painted street-basics
+    // canvas over it. Role peds get their painted uniform (cityOutfitFor →
+    // recolorRig paints it); gang peds get a solid shirt + a bandana MESH;
+    // business/tycoon get a composed blazer/shirt/tie (or the apex tux). Flip
+    // the flag false to bring the painted basics seams back for nobodies.
+    const _plain = !CBZ.CONFIG || CBZ.CONFIG.CITY_PLAIN_CIVVIES == null || !!CBZ.CONFIG.CITY_PLAIN_CIVVIES;
+    let _castFit = null;
     if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
-      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor });
-      if (fit && fit.colors) CBZ.cityRecolorRig(ch, fit.colors, fit);
-      // the painted basics pass repaints ARMS in shirt cloth — long sleeves
-      // only; short-sleeve bodies keep the flat tee so the bare arms survive
-      else if (CBZ.cityApplyClothes && !shortSleeve) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
+      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0 });
+      if (fit && fit.colors) {
+        CBZ.cityRecolorRig(ch, fit.colors, fit);
+        _castFit = fit.id;                          // stamped on the ped below (redress revert read)
+      }
+      // NOT a role/gang/business identity → ordinary civilian. Painted basics
+      // ONLY when the plain switch is off (the old "nobody is a flat slab" look);
+      // the painted pass repaints ARMS, so skip it on short-sleeve bodies so the
+      // bare forearm survives.
+      else if (!_plain && CBZ.cityApplyClothes && !shortSleeve) CBZ.cityApplyClothes(ch, { id: "basics", colors: { torso: outfit } });
     }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
@@ -386,6 +449,10 @@
       // against the live arena so a stale ref from a recycled body self-heals).
       _home: null, _work: null,
       baseSpeed: 1.5 + r() * 1.0, speed: 0,
+      // context-steering hysteresis (Builder B): last frame's chosen unit steer
+      // dir, fed back into cityNav.contextSteer so the heading doesn't jitter
+      // frame-to-frame (the doc's "global hysteresis" — no per-behaviour state).
+      _prevSteerX: 0, _prevSteerZ: 0,
       target: new THREE.Vector3(x, 0, z), finalGoal: null, path: null,
       pause: 0, state: "walk", fear: 0, callT: 0, alarmed: 0,
       // SNITCH trait: how readily this person rats. Most people mind their own
@@ -398,6 +465,10 @@
       reactCD: 0,
       rage: null, mem: null, attackCD: 0, enterT: 0, chatT: 0,
       vendor: opts.vendor || null, slice: (r() * 8) | 0, isPlayer: false,
+      // the cast outfit id this body was dressed in at spawn (a uniform/gang/
+      // business fit), so outfits.js redressPed knows to strip cast paint when
+      // the body later reverts to an ordinary civilian. null = plain civilian.
+      _castFit: _castFit,
     };
     if (ped.vendor) ped.kind = "vendor";
     // FUGITIVE flavor: re-label a wanted ped so the tag reads as a recognizable
@@ -729,6 +800,12 @@
     }
   });
 
+  // SPAWN-SLICE flag (default ON; honour an owner-set value so a toggle sticks).
+  // OFF → spawnCityPeds runs the exact old synchronous burst. The whole feature
+  // is in one place (spawnCityPeds below) and degrades to today when this is
+  // false, the scheduler is missing, or under the profiler.
+  if (CBZ.spawnSlice === undefined) CBZ.spawnSlice = true;
+
   CBZ.spawnCityPeds = function (n) {
     CBZ.clearCityPeds();
     CBZ.cityPopulationReset();          // fresh city → reset the finite headcount
@@ -740,7 +817,14 @@
     // the homeless are carved out of the ped budget so the TOTAL stays flat
     // (perf: redistribute, never add). Deterministic from the seeded stream.
     const nVagrant = Math.min((CBZ.CITY && CBZ.CITY.vagrants) || 0, (n / 4) | 0);
-    for (let i = 0; i < n - nVagrant; i++) {
+
+    // ---- ONE civilian: density-weighted point + district cast + full rig.
+    //      Factored out so it can run either in the old synchronous burst OR as
+    //      one drained work item — IDENTICAL body either way. Each call pulls
+    //      the seeded rng stream in the same internal order; the only thing the
+    //      slicer changes is WHEN (which frame) a given index is built, never
+    //      what rng it consumes once it runs. ----
+    function spawnOneCivilian() {
       // density-weighted spawn: packed downtown, thin docks — by design
       const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : A.randomSidewalkPoint();
       const d = A.districtAt ? A.districtAt(p.x, p.z) : null;
@@ -750,36 +834,140 @@
       A.root.add(ped.group);
       CBZ.cityPeds.push(ped);
     }
-    spawnVagrants(A, nVagrant);
-    if (A.shopLots) for (const lot of A.shopLots) {
-      const vs = lot.building.vendorSpot;
-      // the Ammu-Nation gunsmith (and the security firm) keep a gun behind the
-      // counter — of course. Robbing/downing them drops it for the taking. A
-      // higher nerve makes them stand their ground rather than flee.
-      const packsHeat = lot.kind === "guns" || lot.kind === "security";
-      const ped = makePed(vs.x, vs.z, rng, {
-        vendor: lot, kind: "vendor", wealth: 0.7, cash: 80 + ((rng() * 200) | 0),
-        name: vendorName(lot), aggr: packsHeat ? 0.55 : 0.3,
-        archetype: "merchant", job: vendorName(lot).toLowerCase(),
-        armed: packsHeat, weapon: packsHeat ? (lot.kind === "guns" ? "Carbine" : "Pistol") : null,
-      });
-      if (packsHeat) { ped.nerve = 0.85; ped.ammo = 40; }
-      ped.group.rotation.y = vs.face;
-      A.root.add(ped.group);
-      CBZ.cityPeds.push(ped);
-      lot.building.vendor = ped;
+
+    // ---- the REST of a fresh city: vagrants, vendors, then the seeders that
+    //      iterate the COMPLETE ped list (gangs/security/social/vips weave
+    //      couples, cliques, families, protection details). These MUST see every
+    //      civilian, so when the build is sliced they run only after the queue
+    //      has fully drained — never against a half-filled list. Pulled into a
+    //      closure so both the synchronous path and the drained path call the
+    //      exact same tail in the exact same order (rng-identical). ----
+    function finishSpawn() {
+      // the slice drain is complete (or never started) — clear the guard that
+      // tells per-frame seeders (vips.js) NOT to self-start against a partial
+      // roster mid-drain. finishSpawn weaves the COMPLETE list below.
+      CBZ.citySpawnDraining = false;
+      spawnVagrants(A, nVagrant);
+      if (A.shopLots) for (const lot of A.shopLots) {
+        const vs = lot.building.vendorSpot;
+        // the Ammu-Nation gunsmith (and the security firm) keep a gun behind the
+        // counter — of course. Robbing/downing them drops it for the taking. A
+        // higher nerve makes them stand their ground rather than flee.
+        const packsHeat = lot.kind === "guns" || lot.kind === "security";
+        const ped = makePed(vs.x, vs.z, rng, {
+          vendor: lot, kind: "vendor", wealth: 0.7, cash: 80 + ((rng() * 200) | 0),
+          name: vendorName(lot), aggr: packsHeat ? 0.55 : 0.3,
+          archetype: "merchant", job: vendorName(lot).toLowerCase(),
+          armed: packsHeat, weapon: packsHeat ? (lot.kind === "guns" ? "Carbine" : "Pistol") : null,
+        });
+        if (packsHeat) { ped.nerve = 0.85; ped.ammo = 40; }
+        ped.group.rotation.y = vs.face;
+        A.root.add(ped.group);
+        CBZ.cityPeds.push(ped);
+        lot.building.vendor = ped;
+      }
+      if (CBZ.spawnCityGangs) CBZ.spawnCityGangs();
+      if (CBZ.spawnCitySecurity) CBZ.spawnCitySecurity();
+      if (CBZ.citySocialInit) CBZ.citySocialInit();
+      // VIP principals + protection details (city/vips.js): drafts/dresses bodies
+      // that already exist, so the citywide rig count stays flat. Guarded —
+      // everything still works if the file isn't loaded.
+      if (CBZ.spawnCityVips) CBZ.spawnCityVips();
+      // fresh city → clear the lone-wolf rampage director + any stale spree flags
+      // (aigoals.js owns the director state; guarded in case load order shifts).
+      if (CBZ.cityRampageReset) CBZ.cityRampageReset();
     }
-    if (CBZ.spawnCityGangs) CBZ.spawnCityGangs();
-    if (CBZ.spawnCitySecurity) CBZ.spawnCitySecurity();
-    if (CBZ.citySocialInit) CBZ.citySocialInit();
-    // VIP principals + protection details (city/vips.js): drafts/dresses bodies
-    // that already exist, so the citywide rig count stays flat. Guarded —
-    // everything still works if the file isn't loaded.
-    if (CBZ.spawnCityVips) CBZ.spawnCityVips();
-    // fresh city → clear the lone-wolf rampage director + any stale spree flags
-    // (aigoals.js owns the director state; guarded in case load order shifts).
-    if (CBZ.cityRampageReset) CBZ.cityRampageReset();
+
+    const nCiv = n - nVagrant;
+
+    // ===== SPAWN-SLICE: drain the civilian rig burst over frames ============
+    // PROBLEM: makePed() builds ~30 THREE.Mesh via character.js; doing all ~100
+    // (260 in the profiler) in ONE synchronous loop is a multi-hundred-ms main-
+    // thread block — the "world loads → controls freeze" hitch on city entry.
+    //
+    // FIX: build a budgeted number of civilians per FRAME within a small wall-
+    // clock budget (performance.now), so the full count still lands over ~1-2s
+    // but no single frame stalls. The seeders (gangs/social/vips) run in
+    // finishSpawn() AFTER the last civilian, so they still weave the COMPLETE
+    // list — zero population/logic regression, same final count, same rng order.
+    //
+    // GUARDED + REVERSIBLE: gated on CBZ.spawnSlice (default true). Off → the
+    // exact old synchronous loop. Also forced synchronous when the scheduler
+    // isn't available, or under a NET sim-host so a join in progress can't catch
+    // a half-built world mid-drain (guests never reach here — mode.js skips
+    // spawnCityPeds when net.noSim(); this only guards the host's own snapshots).
+    // the headless PROFILER (?profile=1) spawns a city then immediately measures
+    // / alarms the WHOLE list in the same tick (profile.js chaos scenario) — it
+    // WANTS the full population present synchronously, not streamed in over 2s.
+    // Force the old path there so benchmarks stay apples-to-apples.
+    const _profiling = (typeof location !== "undefined")
+      && /(?:\?|&)profile=1(?:&|$)/.test((location && location.search) || "");
+    const sliceOn = (CBZ.spawnSlice !== false) && !_profiling && (typeof performance !== "undefined")
+      && CBZ.onUpdate && nCiv > 0;
+    if (!sliceOn) {
+      // ---- ORIGINAL synchronous path (flag off / no scheduler) -------------
+      for (let i = 0; i < nCiv; i++) spawnOneCivilian();
+      finishSpawn();
+      return;
+    }
+
+    // build a small ESSENTIAL slice up front so the street isn't empty on the
+    // first rendered frame (the player spawns into bodies, not a ghost town),
+    // then hand the remainder to the ONE persistent drainer below. Capped so
+    // even the essential slice can't re-introduce a visible stall on the weak Mac.
+    const essential = Math.min(nCiv, 12);
+    for (let i = 0; i < essential; i++) spawnOneCivilian();
+
+    // publish this run's drain JOB into module state. A NEW spawnCityPeds (mode
+    // re-enter / net re-sim / host handoff) simply OVERWRITES this — clearCityPeds
+    // already wiped the old roster, so the prior job is moot and is dropped. One
+    // shared job object means the per-frame drainer is registered exactly ONCE
+    // (below, at load), never accumulating a dead closure per city entry.
+    // mark the slice as DRAINING so per-frame seeders that self-start off a
+    // truthy cityPeds.length (vips.js) don't fire against the PARTIAL roster and
+    // get orphaned when finishSpawn re-seeds the complete one. Cleared in
+    // finishSpawn. (undefined == not draining, so this only gates the live window
+    // — worst on the slow Mac where the drain outlasts a VIP slot's 2s cooldown.)
+    CBZ.citySpawnDraining = true;
+    _spawnJob = {
+      built: essential, total: nCiv,
+      makeOne: spawnOneCivilian, finish: finishSpawn,
+    };
   };
+
+  // ---- the ONE persistent spawn drainer: registered a single time, drains the
+  //      current _spawnJob a budgeted slice per frame. BUDGET_MS keeps each
+  //      frame's spawn work tiny (a couple of rigs) so it folds into the
+  //      existing per-frame cost instead of trading one big freeze for several
+  //      medium ones; MAX_PER_FRAME caps it independently when performance.now
+  //      is coarse/clamped (some browsers round it to 1ms for privacy). Order
+  //      0.5 → runs BEFORE the ped think tick so a body built this frame is
+  //      already live for AI/render the same frame. No-op (one cheap null check)
+  //      whenever there's no pending job, so the steady-state cost is nil. ----
+  let _spawnJob = null;
+  const _SPAWN_BUDGET_MS = 4;     // ~a few rigs/frame; the full count lands in ~1-2s
+  const _SPAWN_MAX_FRAME = 8;     // hard cap regardless of a coarse clock
+  if (CBZ.onUpdate) CBZ.onUpdate(0.5, function () {
+    const job = _spawnJob;
+    if (!job) return;
+    // left the city mid-drain → drop the job. We do NOT force-finish: a re-entry
+    // calls spawnCityPeds fresh (clearCityPeds wipes this partial roster), so an
+    // abandoned city's queue is moot. Force-building the remainder here would
+    // re-introduce a freeze on the exit frame — the exact hitch this removes.
+    if (g.mode !== "city") { _spawnJob = null; return; }
+    const t0 = performance.now();
+    let made = 0;
+    while (job.built < job.total && made < _SPAWN_MAX_FRAME) {
+      job.makeOne();
+      job.built++; made++;
+      if (performance.now() - t0 >= _SPAWN_BUDGET_MS) break;
+    }
+    if (job.built >= job.total) {
+      // seeders (gangs/social/vips) weave the now-COMPLETE list, then we're done.
+      // Guard against a re-spawn swapping the job mid-loop: only finish if still ours.
+      if (_spawnJob === job) { _spawnJob = null; job.finish(); }
+    }
+  });
 
   function vendorName(lot) {
     const t = {
@@ -1842,16 +2030,12 @@
   //  the reporter before it lands and the report never happens (RDR2-style).
   // ============================================================
 
-  // a small floating emoji tell over a ped's head (phone / snitch), reusing the
-  // shared sprite path. Cheap: one extra sprite, only while reporting.
-  function showTell(ped, emoji) {
-    if (!CBZ.makeLabelSprite) return;
-    if (ped.phoneSprite) { if (ped.phoneSprite.parent) ped.phoneSprite.parent.remove(ped.phoneSprite); ped.phoneSprite = null; }
-    const s = CBZ.makeLabelSprite(emoji);
-    if (!s) return;
-    s.position.y = 3.5; s.scale.set(1.1, 1.1, 1); s.userData.transient = true;
-    ped.group.add(s); ped.phoneSprite = s;
-  }
+  // The floating phone/snitch emoji that used to hover over a reporting ped's
+  // head was a fourth-wall break (the only hovering text allowed in-world is the
+  // Lv.N level/title head tag). It's gone — the snitch BEHAVIOR (running to a cop
+  // or standing to dial) reads on its own. Kept as a no-op so every call site +
+  // the clearTell teardown stay valid without touching the report logic.
+  function showTell(ped, emoji) { /* no floating emoji over heads — fourth wall */ }
   function clearTell(ped) {
     if (ped.phoneSprite) { if (ped.phoneSprite.parent) ped.phoneSprite.parent.remove(ped.phoneSprite); ped.phoneSprite = null; }
   }
@@ -1912,7 +2096,8 @@
       showTell(ped, "📱");
       ped.speed = 0;   // stand and dial
     }
-    CBZ.city && CBZ.city.note("👀 " + ped.name + " saw that...", 1.2);
+    // (no "👀 … saw that" narration toast — an ambient caption over the world
+    //  broke the fourth wall; the ped visibly bolting for a cop / dialing tells it)
   }
 
   // land the report: convert the witness's tag into actual stars (or punish an
@@ -2509,11 +2694,70 @@
     return true;
   }
 
+  // ---- FLEE: NAV-GUIDED escape (Builder B side of the citynav contract) ----
+  // The PREFERRED panic path when CBZ.cityNav is present:
+  //   • INDOORS (cityNav.indoorLotAt hit) → bolt for the building's OWN door and
+  //     2m past it onto the street (a real exit, not a blind away-vector that
+  //     would just grind the ped into an interior wall).
+  //   • OUTDOORS → cityNav.nearestExit picks the best door / corner to flee
+  //     TOWARD (away-dot + nearness + line-of-fire), and cityNav.routeTo lays an
+  //     intersection-graph path there — mirroring pickRoutineGoal's path/finalGoal.
+  // If cityNav is ABSENT, or it can't produce a usable escape, we fall straight
+  // through to _fleeFallback — the ORIGINAL away-vector heuristic, byte-for-byte,
+  // so a world without citynav.js behaves exactly as it does today.
+  function fleeFrom(ped, x, z) {
+    ped.state = "flee";
+    let routed = false;
+    const NAV = CBZ.cityNav;
+    if (NAV) {
+      // INDOORS: head for THIS building's door, then 2m out along -inwardNormal.
+      const lot = NAV.indoorLotAt ? NAV.indoorLotAt(ped.pos.x, ped.pos.z) : null;
+      const door = lot && lot.building && lot.building.door;
+      if (door && (door.nx || door.nz)) {           // real entrance with an inward normal (parks/stubs lack it → fall through to the exit scorer)
+        // door.nx/nz is the INWARD normal → stepping along -(nx,nz) walks OUT.
+        const nx = door.nx || 0, nz = door.nz || 0;
+        ped.finalGoal = null;
+        ped.path = [
+          { x: door.x, z: door.z },                       // the doorway threshold
+          { x: door.x - nx * 2, z: door.z - nz * 2 },     // 2m onto the street
+        ];
+        ped.target.set(ped.path[0].x, 0, ped.path[0].z);
+        routed = true;
+      }
+      // OUTDOORS: pick the best EXIT to flee toward, then route to it.
+      if (!routed && NAV.nearestExit && NAV.routeTo) {
+        const ax = ped.pos.x - x, az = ped.pos.z - z, am = Math.hypot(ax, az) || 1;
+        const exit = NAV.nearestExit(ped.pos.x, ped.pos.z, ax / am, az / am);
+        if (exit) {
+          // reuse ped.path as the caller-owned out array (move() shifts it down).
+          const out = (ped.path && ped.path.length !== undefined) ? ped.path : [];
+          NAV.routeTo(ped.pos.x, ped.pos.z, exit.x, exit.z, out);
+          if (out.length) {
+            ped.path = out;
+            ped.finalGoal = { x: exit.x, z: exit.z };
+            ped.target.set(out[0].x, 0, out[0].z);
+            routed = true;
+          }
+        }
+      }
+    }
+    // NO cityNav (or it produced nothing usable): the original heuristic, intact.
+    if (!routed) _fleeFallback(ped, x, z);
+    // a RARE scream when genuine terror hits (high fear — gunfire/explosion/a body
+    // dropping right by them, which is what drives fear that high). LONG per-ped
+    // cooldown AND a small chance, on top of the hard city-wide gap in scream(),
+    // so it only PUNCTUATES the worst moments instead of every startled bolt.
+    if (ped.fear >= 8 && (ped._screamT || 0) <= 0) { ped._screamT = 18 + rng() * 14; if (rng() < 0.12) scream(); }
+  }
+
   // FLEE along a CLEAR path: sample several headings biased away from the threat
   // and pick the most open one, so a panicked ped doesn't sprint into a wall.
-  // Also screams and looks for cover the first time it bolts.
-  function fleeFrom(ped, x, z) {
-    ped.state = "flee"; ped.path = null;
+  // Also looks for cover the first time it bolts. This is the LAST-RESORT branch
+  // (cityNav absent / no route) AND reproduces TODAY's behaviour exactly when
+  // citynav.js isn't loaded. (The scream now lives in fleeFrom so it fires once
+  // per panic regardless of which branch ran.)
+  function _fleeFallback(ped, x, z) {
+    ped.path = null;
     const ax = ped.pos.x - x, az = ped.pos.z - z, m = Math.hypot(ax, az) || 1;
     let baseAng = Math.atan2(ax / m, az / m);      // straight away from the threat
     // BIAS the meek/wary toward HELP rather than a blind away-vector: run to the
@@ -2567,11 +2811,45 @@
       }
       if (!placed) ped.target.set(ped.pos.x, 0, ped.pos.z);
     }
-    // a RARE scream when genuine terror hits (high fear — gunfire/explosion/a body
-    // dropping right by them, which is what drives fear that high). LONG per-ped
-    // cooldown AND a small chance, on top of the hard city-wide gap in scream(),
-    // so it only PUNCTUATES the worst moments instead of every startled bolt.
-    if (ped.fear >= 8 && (ped._screamT || 0) <= 0) { ped._screamT = 18 + rng() * 14; if (rng() < 0.12) scream(); }
+  }
+
+  // NEIGHBOUR GATHER for context steering (alloc-free): fill the shared flat
+  // buffer [x0,z0,x1,z1,...] with nearby rigs' positions EXCLUDING self, return
+  // the PAIR count. Same bounded near-scan the old separation used (skip dead /
+  // in-car / parked / entering bodies), capped at NBR_CAP pairs so cost stays in
+  // the same class — a slightly wider radius than pure separation since context
+  // steering reasons about bodies a step or two ahead, not just touching. The
+  // single shared buffer is safe because steering() is called once per ped
+  // synchronously and cityNav.contextSteer consumes it within the same call.
+  const NBR_CAP = 8, NBR_R2 = 3.5 * 3.5;
+  function gatherNbrs(ped) {
+    if (!_pedGrid) return 0;
+    let n = 0;
+    const gx = _pedGrid.cellIndex(ped.pos.x), gz = _pedGrid.cellIndex(ped.pos.z);
+    for (let cx = gx - 1; cx <= gx + 1; cx++) for (let cz = gz - 1; cz <= gz + 1; cz++) {
+      const cell = _pedGrid.bucket(cx, cz); if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        const o = cell[i];
+        if (o === ped) continue;
+        const ox = o.pos.x - ped.pos.x, oz = o.pos.z - ped.pos.z, od2 = ox * ox + oz * oz;
+        if (od2 > NBR_R2 || od2 < 0.0004) continue;
+        // Keep the closest N neighbours. This bounded insertion is allocation
+        // free and avoids spawn order deciding who an agent can perceive.
+        let at;
+        if (n < NBR_CAP) { at = n; n++; }
+        else {
+          if (od2 >= _nbrD2[NBR_CAP - 1]) continue;
+          at = NBR_CAP - 1;
+        }
+        while (at > 0 && _nbrD2[at - 1] > od2) {
+          _nbrD2[at] = _nbrD2[at - 1]; _nbrX[at] = _nbrX[at - 1]; _nbrZ[at] = _nbrZ[at - 1];
+          at--;
+        }
+        _nbrD2[at] = od2; _nbrX[at] = o.pos.x; _nbrZ[at] = o.pos.z;
+      }
+    }
+    for (let i = 0; i < n; i++) { _nbrBuf[i * 2] = _nbrX[i]; _nbrBuf[i * 2 + 1] = _nbrZ[i]; }
+    return n;
   }
 
   // ---- LOCAL STEERING: a short look-ahead probe + separation from neighbours,
@@ -2583,6 +2861,32 @@
     _steer.x = 0; _steer.z = 0; _steer.blocked = 0;
     if (dist < 0.001) return _steer;
     const hx = dx / dist, hz = dz / dist;       // desired heading (unit)
+    // CONTEXT STEERING (Builder B side of the citynav contract) — the NEAR/ACTIVE
+    // tier only. cityNav.contextSteer reads CBZ.colliders for wall danger AND the
+    // neighbour buffer we gather for crowd danger, fuses them with the interest in
+    // our desired heading, and returns ONE chosen unit travel dir — replacing the
+    // old look-ahead probe + Reynolds separation for these rigs. We express it back
+    // as the SAME {x,z} offset move() already adds to the heading: move() computes
+    //   mx = hx + s.x ; mz = hz + s.z ; then re-normalises
+    // so setting s = (chosenDir - heading) makes the re-normalised vector point
+    // EXACTLY at the chosen dir — move()'s path-follow + 3-pass collide stay
+    // untouched. We still flag `blocked` (→ move() cuts the forward step) when the
+    // chosen dir veers hard off the heading, i.e. it's threading past a wall, so
+    // the existing anti-tunnel step-cut keeps working.
+    if (active && CBZ.cityNav && CBZ.cityNav.contextSteer) {
+      const nbrCount = gatherNbrs(ped);
+      const out = CBZ.cityNav.contextSteer(
+        ped.pos.x, ped.pos.z, hx, hz,
+        _nbrBuf, nbrCount,
+        ped._prevSteerX, ped._prevSteerZ, _ctxOut);
+      if (out && (out.x || out.z)) {
+        ped._prevSteerX = out.x; ped._prevSteerZ = out.z;   // hysteresis for next frame
+        const dot = out.x * hx + out.z * hz;                // how far the dir was bent
+        if (dot < 0.35) _steer.blocked = 1;                 // threading past an obstacle
+        _steer.x = out.x - hx; _steer.z = out.z - hz;       // offset → move() lands on out
+      }
+      return _steer;
+    }
     // 1) OBSTACLE LOOK-AHEAD: probe a point ahead; if blocked, veer to whichever
     //    side is open. The ACTIVE/near crowd probes every steering tick. EVERY OTHER
     //    MOVING ped that's heading toward a FAR goal also probes — but only on a
@@ -2885,8 +3189,11 @@
       // ease around the obstacle instead of punching through it (the multi-pass
       // collide below catches whatever overlap remains). Only bites when blocked.
       const stepMul = s.blocked ? 0.25 : 1;
-      ped.pos.x += mx * spd * dt * stepMul;
-      ped.pos.z += mz * spd * dt * stepMul;
+      // a wounded/limping leg actually slows the body (animChar publishes the
+      // multiplier off the leg-injury state; a severed leg → 0 = can't walk)
+      const limpMul = ped.char && ped.char.limpSpeedMul != null ? ped.char.limpSpeedMul : 1;
+      ped.pos.x += mx * spd * dt * stepMul * limpMul;
+      ped.pos.z += mz * spd * dt * stepMul * limpMul;
       ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(mx, mz), 1 - Math.pow(0.0009, dt));
       ped.speed = spd;
     } else {
@@ -2955,6 +3262,7 @@
     gunpointSweep(dt);
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const peds = CBZ.cityPeds;
+    rebuildPedGrid();
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
       if (p._parked) continue;     // pooled crowd-promotion ped waiting off-map; not in play

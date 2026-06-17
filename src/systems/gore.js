@@ -22,7 +22,12 @@
      • a lazy tap on CBZ.cityKillPed reads the CAUSE of every city kill, so
        gore knows HOW someone died without any caller changing a line:
        - HEADSHOT  → a distinct heavier pop: tighter/faster exit spray, dry
-         skull-fragment gibs, and an INSTANT wall splat behind the head
+         skull-fragment gibs, and an INSTANT wall splat behind the head; in
+         CITY a SHOTGUN (or sniper / point-blank rifle) headshot is a FULL
+         DECAPITATION — the head mesh comes OFF, a flying head gib tumbles and
+         settles, and the neck STUMP geysers a heavy arterial spurt (the
+         restore-on-reuse audit regrows the head on any rig recycle). A
+         pistol/SMG headshot never decapitates.
        - BLUNT melee (beaten) → teeth + spit fly, then a DELAYED bleed-out
          pool spreads under the body a couple of seconds later
        - BLADE melee (stabbed/executed) → 2-3 timed ARTERIAL spurts arc out
@@ -47,6 +52,15 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
 
+  // CITY-GATE for the death-realism pass (owner-filmed: a shootout buried the
+  // floor in permanent clothing-colored boxes — "not realistic"). A real kill
+  // DROPS the person (ragdoll.js already does the intact body); it does not
+  // explode them into cubes. So in CITY mode only: a normal gunshot leaves
+  // little-to-no flying gib (reserve dismemberment for explosions / extreme
+  // overkill + a tasteful headshot pop), and any gib that DOES spawn FADES OUT
+  // and despawns over a few seconds so the battlefield clears. Jail/survival
+  // gore stays byte-identical (this flag is read live at every spawn site).
+  function cityMode() { return !!(CBZ.game && CBZ.game.mode === "city"); }
   const GRAV = 24;
   const BLOOD = 0x8a0b10, BLOOD_D = 0x5e070b, BLOOD_BRT = 0xb01218;
   const BONE = 0xe6ddc8, BONE_D = 0xcfc3ad, TOOTH = 0xf2ead8;
@@ -155,31 +169,84 @@
     const dx = x - cam.x, dz = z - cam.z; return dx * dx + dz * dz;
   }
 
+  // PERMANENCE / population-pool recycle: when the gib pool is full, evict the
+  // OLDEST gib that has LANDED and is FAR from the lens — never a fresh, in-air,
+  // or on-screen piece (the GTA pattern: things vanish only off-camera).
+  function recycleFarGib() {
+    let far = 55 * 55;
+    for (let i = 0; i < bits.length; i++) {
+      const b = bits[i];
+      if (b.kind !== "gib" || !b.landed) continue;
+      if (dist2Cam(b.m.position.x, b.m.position.z) > far) { rm(b.m); bits.splice(i, 1); return true; }
+    }
+    // none far → drop the literal oldest LANDED gib so we never pop one in-flight
+    for (let i = 0; i < bits.length; i++) {
+      if (bits[i].kind === "gib" && bits[i].landed) { rm(bits[i].m); bits.splice(i, 1); return true; }
+    }
+    return false;
+  }
+
   function spawnBit(x, y, z, vx, vy, vz, size, color, kind) {
-    const cap = kind === "mist" ? 620 : 520;
-    if (bits.length > cap) return null;  // hard cap so a nuke can't flood the scene
+    // CITY: standing gibs are FADING debris now, not permanent evidence, so the
+    // pool can be far smaller — a shootout can never leave a huge persistent
+    // pile. Jail/survival keep the original "true world" 520-gib budget.
+    const city = cityMode();
+    const cap = kind === "mist" ? 620 : (kind === "gib" && city ? 90 : 520);
+    if (bits.length > cap) {
+      // CITY gibs are fading debris: make room by recycling a far/old LANDED gib
+      // instead of refusing to spawn the new piece. Jail/survival keep the
+      // original hard-cap drop-if-full behaviour (return null) byte-identical.
+      if (kind === "gib" && city && recycleFarGib()) { /* room made */ }
+      else return null;
+    }
     let geo, mat;
     if (kind === "gib") { geo = G_GIB; mat = lambert(color); }
     else if (kind === "mist") { geo = G_MIST; mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }); }
     else { geo = G_DROP; mat = lambert(color); }
     const m = new THREE.Mesh(geo, mat);
     // gibs are boxy with random proportions; drops/mist are scaled spheres
-    if (kind === "gib") m.scale.set(size, size * (0.5 + Math.random()), size * (0.7 + Math.random() * 0.6));
-    else m.scale.setScalar(size);
+    let hh = 0.06;
+    if (kind === "gib") {
+      if (city) {
+        // CITY rest-height: track the box's half-Y so its BOTTOM rests on the road.
+        const sy = size * (0.5 + Math.random());
+        m.scale.set(size, sy, size * (0.7 + Math.random() * 0.6));
+        hh = sy * 0.5;
+      } else {
+        // jail/survival: original boxy scale, original 0.06 rest radius.
+        m.scale.set(size, size * (0.5 + Math.random()), size * (0.7 + Math.random() * 0.6));
+      }
+    } else m.scale.setScalar(size);
     m.position.set(x, y, z); m.castShadow = false; m.renderOrder = kind === "mist" ? 5 : 0;
     scene().add(m);
     const rec = {
       m, vx, vy, vz, kind, mat: kind === "mist" ? mat : null, mistFade: 0,
       sx: (Math.random() - 0.5) * 18, sy: (Math.random() - 0.5) * 18, sz: (Math.random() - 0.5) * 18,
-      landed: false, bled: false, baseScale: size,
-      life: kind === "blood" ? 0.7 + Math.random() * 0.8 : (kind === "mist" ? 0.45 + Math.random() * 0.45 : 7 + Math.random() * 6),
+      landed: false, bled: false, baseScale: size, rad: kind === "gib" ? hh : 0.06,
+      // CITY: a landed gib is short-lived debris that SHRINKS/SINKS to nothing
+      // (see the updater) so the ground clears after combat — not a permanent
+      // colored cube. Jail/survival gibs PERSIST (true world model — evidence
+      // you walk back past). Blood/mist are brief in every mode.
+      fade: kind === "gib" && city,
+      life: kind === "blood" ? 0.7 + Math.random() * 0.8
+        : (kind === "mist" ? 0.45 + Math.random() * 0.45
+          : (city ? 5 + Math.random() * 4 : 7 + Math.random() * 6)),
     };
     bits.push(rec);
     return rec;
   }
 
+  // recycle the oldest pool that is FAR from the lens (never one underfoot).
+  // CITY-only behaviour — jail/survival keep the original drop-the-oldest shift.
+  function recycleFarSplat() {
+    if (!cityMode()) { rm(splats.shift().m); return; }
+    for (let i = 0; i < splats.length; i++) {
+      if (dist2Cam(splats[i].m.position.x, splats[i].m.position.z) > 50 * 50) { rm(splats.splice(i, 1)[0].m); return; }
+    }
+    rm(splats.shift().m);
+  }
   function spawnSplat(x, z, grow, color, linger) {
-    if (splats.length > 170) { rm(splats.shift().m); }
+    if (splats.length > 170) recycleFarSplat();
     const m = new THREE.Mesh(blob(),
       new THREE.MeshBasicMaterial({ color: color || BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     m.rotation.x = -Math.PI / 2;
@@ -202,7 +269,7 @@
   // the wheel pulls the pool with it, so the decal stretches out over ~half a
   // second along the car's direction instead of blooming in place.
   function spawnStreak(x0, z0, dx, dz, len) {
-    if (splats.length > 170) { rm(splats.shift().m); }
+    if (splats.length > 170) recycleFarSplat();
     const m = new THREE.Mesh(G_PLANE,
       new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     m.rotation.x = -Math.PI / 2;
@@ -280,16 +347,65 @@
   // (user-filmed: every pistol headshot popped the skull — that's not how a
   // handgun works). The kill context carries the player's weapon key (imp.wkey,
   // fpsmode threads it) or an NPC/cop attacker whose .weapon names the gun:
-  // sniper always pops, a shotgun in the face (<6u) pops, rifle rounds only
-  // sometimes — everything pistol-class snaps the head and bursts blood at the
-  // entry instead (wound decal + localized splatter stay).
-  function headPops(imp) {
+  // sniper always pops, a shotgun headshot ALWAYS takes the head off (full
+  // decapitation in city, see headDecaps), rifle rounds only sometimes —
+  // everything pistol-class snaps the head and bursts blood at the entry
+  // instead (wound decal + localized splatter stay).
+  function weaponKey(imp) {
     let k = imp ? (imp.wkey || (imp.attacker && imp.attacker.weapon) || "") : "";
-    k = ("" + k).toLowerCase();
+    return ("" + k).toLowerCase();
+  }
+  function headPops(imp) {
+    const k = weaponKey(imp);
     if (k.indexOf("sniper") >= 0) return true;
-    if (k.indexOf("shotgun") >= 0) return (imp && imp.dist != null ? imp.dist : 99) < 6;
+    if (k.indexOf("shotgun") >= 0) return true; // a shotgun headshot takes the head OFF (decap, below)
     if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) return Math.random() < 0.15;
     return false;
+  }
+  // FULL DECAPITATION (owner: a SHOTGUN headshot takes the head fully OFF, leaving
+  // a neck stump + heavy spurt) — reserved for HEAVY weapons so a pistol never
+  // decapitates. A shotgun decaps at any range a headshot lands; a sniper always;
+  // a point-blank rifle round (<3u, the muzzle in the face) sometimes. Used to
+  // drive the heavy neck-stump spurt; the head mesh is removed by severBody either
+  // way, but only a decap gets the geyser. City-only is enforced at the call site.
+  function headDecaps(imp) {
+    const k = weaponKey(imp);
+    if (k.indexOf("shotgun") >= 0) return true;
+    if (k.indexOf("sniper") >= 0) return true;
+    if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) {
+      const d = imp && imp.dist != null ? imp.dist : 99;
+      return d < 3 && Math.random() < 0.5;
+    }
+    return false;
+  }
+  // HEAVY NECK-STUMP SPURT: a real decapitation geysers from the open neck — a
+  // dense fan of bright arterial droplets up + along the shot line, plus a thick
+  // mist puff and an immediate timed second pulse (the heart pumps twice before it
+  // realizes). Pooled/capped through spawnBit like every other gore bit; fades
+  // like the rest. Seated at the neck joint (chest-high y + STUMPS.head.py).
+  function neckStumpSpurt(x, y, z, dx, dz, lod) {
+    const ny = y + STUMPS.head.py - 0.06;   // y arrives chest-high; lift to the neck
+    function pulse(strength) {
+      const n = Math.round(10 * strength * lod);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * 6.28, sp = 1.4 + Math.random() * 3.2;
+        spawnBit(x + (Math.random() - 0.5) * 0.16, ny + Math.random() * 0.12, z + (Math.random() - 0.5) * 0.16,
+          dx * (2.0 + Math.random() * 2.8) * strength + Math.cos(a) * sp * 0.6,
+          (5.5 + Math.random() * 4.0) * strength,                 // GEYSERS straight up
+          dz * (2.0 + Math.random() * 2.8) * strength + Math.sin(a) * sp * 0.6,
+          0.06 + Math.random() * 0.07, Math.random() < 0.7 ? BLOOD_BRT : BLOOD, "blood");
+      }
+      // a thick aerosol cap over the stump
+      for (let i = 0; i < Math.round(5 * strength * lod); i++) {
+        const a = Math.random() * 6.28, sp = 1 + Math.random() * 2.5;
+        spawnBit(x + (Math.random() - 0.5) * 0.2, ny + 0.1 + Math.random() * 0.25, z + (Math.random() - 0.5) * 0.2,
+          Math.cos(a) * sp, 1.5 + Math.random() * 2.5, Math.sin(a) * sp,
+          0.05 + Math.random() * 0.06, BLOOD_BRT, "mist");
+      }
+    }
+    pulse(1);                       // the burst the moment the head leaves
+    after(0.45, function () { pulse(0.7); });   // a second weaker pump
+    after(0.95, function () { pulse(0.45); });  // a last trickle pulse
   }
 
   // ---- HEADSHOT: dry skull fragments riding the exit line --------------------
@@ -469,6 +585,11 @@
       parent.add(stump);
     }
     r.items.push({ key, part, stump });
+    // a severed LEG = the rig can't stand: flag the char so entities/character.js
+    // drops it into a one-legged collapse/crawl (limpSpeedMul → 0) instead of
+    // walking on a missing limb. -1 = left leg gone, +1 = right. Cleared on the
+    // restore-on-reuse audit below so a recycled rig starts whole.
+    if (key === "ll" || key === "rl") { ch.legGone = key === "ll" ? -1 : 1; ch.legHurt = null; }
     // ---- FLYING PART: a clone of the REAL meshes — same proportions, same
     // clothing/skin materials (shared refs, never disposed) — launched from
     // the part's exact world transform. Never a generic red cube.
@@ -486,12 +607,20 @@
       else { dx /= dl; dz /= dl; }
       const sp = opts.boom ? 4 + Math.random() * 4.5 : 4.5 + Math.random() * 3;
       const up = key === "head" ? 4.5 + Math.random() * 2.5 : (opts.boom ? 5 + Math.random() * 4 : 3 + Math.random() * 2);
+      // CITY: even a severed limb clears eventually so a blast doesn't leave a
+      // permanent limb field — it lingers a good while (real body part, not a
+      // generic cube), then sinks/shrinks away. Jail/survival keep the ORIGINAL
+      // short limb life (byte-identical) and no fade.
+      const cityLimb = cityMode();
       bits.push({
         m: fly, vx: dx * sp + (Math.random() - 0.5) * 1.5, vy: up, vz: dz * sp + (Math.random() - 0.5) * 1.5,
         kind: "gib", mat: null, mistFade: 0,
         sx: (Math.random() - 0.5) * 12, sy: (Math.random() - 0.5) * 12, sz: (Math.random() - 0.5) * 12,
         landed: false, bled: false, baseScale: 1, rad: key === "head" ? 0.3 : 0.2,
-        life: 9 + Math.random() * 5,
+        // fade against the clone's OWN scale (a limb mesh isn't unit-scaled) so
+        // the shrink reads right; vScale captures that base. City-only.
+        fade: cityLimb, vScale: cityLimb ? fly.scale.clone() : null,
+        life: cityLimb ? 14 + Math.random() * 6 : 9 + Math.random() * 5,
       });
       // the wound VENTS at the joint — a bright burst riding the part out
       for (let i = 0; i < 4; i++) {
@@ -505,13 +634,20 @@
 
   function restoreRecord(r) {
     if (!r) return;
+    let hadLeg = false;
     for (let i = 0; i < r.items.length; i++) {
       const it = r.items[i];
       if (it.part) it.part.visible = true;
       if (it.stump) rm(it.stump);
+      if (it.key === "ll" || it.key === "rl") hadLeg = true;
+      // a regrown head clears the decap guard so a recycled rig can be
+      // decapitated (and geyser) fresh — never permanently flagged.
+      if (it.key === "head" && r.actor) r.actor._decapped = false;
     }
     r.items.length = 0;
     if (r.actor && r.actor._lostLimb) r.actor._lostLimb = null;
+    // a regrown leg can stand again — clear the can't-walk flag (character.js)
+    if (hadLeg && r.ch) r.ch.legGone = 0;
   }
 
   // adopt peds.js's explosion limb-hide (runs inside the kill tap's finally)
@@ -626,7 +762,19 @@
         const n = bd < 2.5 ? 3 : (bd < 5 ? 1 + (Math.random() < 0.6 ? 1 : 0) : 1);
         for (let i = 0; i < n; i++) severBody(ctx.ped, SEV_LIMBS[(Math.random() * 4) | 0], { dir: sevDir, boom: true });
       } else if (opts.head || cause === "headshot") {
-        if (headPops(ctx.imp)) popHead = severBody(ctx.ped, "head", { dir: sevDir });
+        if (headPops(ctx.imp)) {
+          popHead = severBody(ctx.ped, "head", { dir: sevDir });
+          // CITY: a SHOTGUN (or sniper/point-blank) headshot is a FULL
+          // DECAPITATION — the head mesh is already OFF (severBody hid the neck
+          // group, launched the flying head + seated the stump cap); now open the
+          // neck with a heavy arterial geyser so the stump reads visceral. The
+          // restore-on-reuse audit regrows the head on any recycle, so a reused
+          // rig is never permanently headless. Pistol/SMG never reach here.
+          if (popHead && cityMode() && !ctx.ped._decapped && headDecaps(ctx.imp)) {
+            ctx.ped._decapped = true;   // guard: one geyser per head (cleared on regrow)
+            neckStumpSpurt(x, y, z, dx, dz, lod);
+          }
+        }
         // no pop: the ragdoll kick already whips the skull with the round —
         // the entry burst/wound below is the rest of the read
       } else if (ctx.imp && ctx.imp.wkey === "shotgun" && (ctx.imp.dist == null ? 99 : ctx.imp.dist) < 7 && Math.random() < 0.75) {
@@ -674,7 +822,14 @@
     }
 
     // --- LAYER 3: chunky GIBS — limbs/torso, heavier, tumble then settle ------
-    const ng = Math.round((big ? 7 : 5) * amt * lod);
+    // CITY REALISM: a normal gunshot DROPS the person (ragdoll.js leaves an
+    // intact body) — it does not blow them into clothing cubes. So reserve the
+    // multi-gib spray for EXPLOSIONS and extreme overkill (amount >= 1.8); a
+    // headshot gets a small tasteful pop; an ordinary kill gets ZERO flying
+    // boxes. Jail/survival keep the original chunky spray on every kill.
+    const overkill = amt >= 1.8;
+    let ng = Math.round((big ? 7 : 5) * amt * lod);
+    if (cityMode()) ng = boom ? Math.round(6 * amt * lod) : (overkill ? Math.round(4 * lod) : (head ? 2 : 0));
     const cols = [skin, cloth, BLOOD, cloth, skin, 0xb8443a, BLOOD_D];
     for (let i = 0; i < ng; i++) {
       const side = (Math.random() - 0.5) * 2, a = Math.random() * 6.28, sp = 3 + Math.random() * 5;
@@ -741,6 +896,9 @@
     stainT -= dt;
     if (stainT <= 0) { stainT = 0.85; stainScan(); if (severed.length) severAudit(); }
 
+    // CITY drives the realistic fade/settle/cull path; jail/survival fall back
+    // to the original byte-identical gib physics (read once per frame).
+    const gibCity = cityMode();
     for (let i = bits.length - 1; i >= 0; i--) {
       const b = bits[i], m = b.m;
       if (b.kind === "mist") {
@@ -755,17 +913,61 @@
         if (b.life <= 0) { rm(m); bits.splice(i, 1); }
         continue;
       }
+      // CITY only: a LANDED gib has come to rest ON the ground — it stops
+      // simulating (no jitter) and counts down, FADING/SINKING out near
+      // end-of-life so the battlefield clears. Jail/survival never set this
+      // early-rest state (b.landed stays in the original physics path below),
+      // so they fall through to the byte-identical settle/expire logic.
+      if (gibCity && b.landed) {
+        b.life -= dt;
+        // CITY debris: over the last ~1.6s of life the gib SHRINKS toward zero
+        // and SINKS into the road, so it dissolves out of the world instead of
+        // popping. Cheap: one scale + y nudge.
+        if (b.fade && b.life < 1.6) {
+          const k = Math.max(0, b.life / 1.6);   // 1 → 0
+          if (b.vScale) {                        // severed-limb clone: shrink vs its own scale
+            m.scale.set(b.vScale.x * k, b.vScale.y * k, b.vScale.z * k);
+          } else {
+            const s = b.baseScale * k;
+            m.scale.set(s, s * 0.5, s);          // generic gib collapses flat as it goes
+          }
+          m.position.y -= b.rad * (1 - k) * dt * 1.4;  // settle into the ground
+        }
+        if (b.life <= 0) { rm(m); bits.splice(i, 1); }
+        continue;
+      }
       b.vy -= GRAV * dt;
       m.position.x += b.vx * dt; m.position.y += b.vy * dt; m.position.z += b.vz * dt;
       m.rotation.x += b.sx * dt; m.rotation.y += b.sy * dt; m.rotation.z += b.sz * dt;
       const fl = floorAt(m.position.x, m.position.z);
-      const rr = b.rad || 0.06;       // severed parts carry a real radius — a head doesn't half-sink
+      // rr = the bit's half-height. CITY adds a hair so the piece clears the
+      // road paint; jail/survival keep the original bare radius.
+      const rr = gibCity ? (b.rad || 0.06) + 0.012 : (b.rad || 0.06);
       if (m.position.y <= fl + rr && b.vy < 0) {
         if (b.kind === "blood") { spawnSplat(m.position.x, m.position.z, 0.3 + Math.random() * 0.5, BLOOD_D, false); rm(m); bits.splice(i, 1); continue; }
-        m.position.y = fl + rr; b.vy = 0; b.vx *= 0.22; b.vz *= 0.22; b.sx *= 0.1; b.sy *= 0.1; b.sz *= 0.1; b.landed = true;
-        if (!b.bled) { b.bled = true; spawnSplat(m.position.x, m.position.z, 0.4 + Math.random() * 0.4, BLOOD_D, false); }
+        if (gibCity) {
+          // CITY SETTLE: clamp to ground, kill vertical, bleed off horizontal +
+          // spin. A slow piece comes to REST this frame; a still-fast one keeps a
+          // little tumble/roll before stopping.
+          m.position.y = fl + rr; b.vy = 0; b.vx *= 0.22; b.vz *= 0.22; b.sx *= 0.12; b.sy *= 0.12; b.sz *= 0.12;
+          if (!b.bled) { b.bled = true; spawnSplat(m.position.x, m.position.z, 0.4 + Math.random() * 0.4, BLOOD_D, false); }
+          if ((b.vx * b.vx + b.vz * b.vz) < 0.5) { b.landed = true; b.vx = b.vz = b.vy = 0; b.sx = b.sy = b.sz = 0; }
+        } else {
+          // ORIGINAL jail/survival settle: snap to floor and mark landed at once.
+          m.position.y = fl + rr; b.vy = 0; b.vx *= 0.22; b.vz *= 0.22; b.sx *= 0.1; b.sy *= 0.1; b.sz *= 0.1; b.landed = true;
+          if (!b.bled) { b.bled = true; spawnSplat(m.position.x, m.position.z, 0.4 + Math.random() * 0.4, BLOOD_D, false); }
+        }
       }
-      if (b.landed || b.kind === "blood") b.life -= dt;
+      if (gibCity) {
+        if (b.kind === "blood") b.life -= dt;
+        else b.airT = (b.airT || 0) + dt;   // gib still in flight
+        // safety: a gib flung off the map (never lands) still retires so a long
+        // life can't leak the pool.
+        if (b.airT > 14) { rm(m); bits.splice(i, 1); continue; }
+      } else {
+        // ORIGINAL: only a landed gib (or any blood) counts down.
+        if (b.landed || b.kind === "blood") b.life -= dt;
+      }
       if (b.life <= 0) { rm(m); bits.splice(i, 1); }
     }
 

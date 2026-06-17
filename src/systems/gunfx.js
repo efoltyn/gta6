@@ -180,6 +180,7 @@
     // through here, so the whole firefight leaves evidence.
     if (CBZ.game && CBZ.game.mode === "city" && opts.muzzle !== false) {
       if (CBZ.cityShootProp) CBZ.cityShootProp(from, to);
+      if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "gunshot", pos: from, radius: 40, intensity: 0.9 });   // crowd panic bus (cityevents.js): a gunshot is a wide, sharp scare
       const GY = 0.09;                                  // pavement top (sidewalk 0.08 / lot pad 0.10)
       if (to.y < GY && from.y > GY + 0.3) {
         const gt = (from.y - GY) / (from.y - to.y);

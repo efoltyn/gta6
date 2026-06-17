@@ -19,7 +19,10 @@
   const C = () => CBZ.CITY || {};
 
   let panel = null, mode = "buy", payT = 0, actions = [], rpage = 0;
-  const RPAGE = 4;          // realtor home rows per page — keeps numeric keys ≤ 9 and one screen
+  // realtor home rows per page. Each home row can now carry up to THREE actions
+  // (Buy · Finance · Rent), so 3 rows keeps the numeric-key slots ≤ 9 and the
+  // menu on one screen. (Was 4 when rows had at most Buy+Rent.)
+  const RPAGE = 3;
 
   function el() {
     if (panel) return panel;
@@ -73,9 +76,25 @@
       const zp = (CBZ.cityZillow && CBZ.cityZillow.buyPriceForLot) ? CBZ.cityZillow.buyPriceForLot(lot) : null;
       const ask = (zp != null) ? zp : h.price;
       const fns = [{ key: "Buy " + money(ask), fn: () => buyHome(lot) }];
+      // FINANCE option (contract [E]): only the cash-purchase used to be offered.
+      // Pull the live financing quote from Zillow (down payment, and — when the
+      // bank loan engine is wired — the real rate/payment + an approval flag). The
+      // realtor and Zillow agree because both go through the same quote/transact
+      // path. If the bank declines (quote.approved===false) we don't dangle a
+      // dead button — we show why instead. Cash buy is always kept above.
+      const fq = (CBZ.cityZillow && CBZ.cityZillow.financeQuoteForLot) ? CBZ.cityZillow.financeQuoteForLot(lot) : null;
+      let finNote = "";
+      if (fq) {
+        if (fq.approved !== false) {
+          const tail = (fq.viaBank && fq.payment > 0) ? " (" + money(Math.round(fq.payment)) + "/cycle)" : "";
+          fns.push({ key: "Finance " + money(fq.down) + " down" + tail, fn: () => financeHome(lot) });
+        } else {
+          finNote = " <span style='color:#ff9e90;font-size:11px'>· no financing (" + (fq.reason || "declined") + ")</span>";
+        }
+      }
       const rentPer = zillowRentEstimate(lot);
       if (rentPer != null) fns.push({ key: "Rent ~" + money(rentPer), fn: () => rentResidence(lot) });
-      entries.push({ html: "🏠 " + h.name + tags + zoneChip(lot), fns });
+      entries.push({ html: "🏠 " + h.name + tags + zoneChip(lot) + finNote, fns });
     }
 
     const pages = Math.max(1, Math.ceil(entries.length / RPAGE));
@@ -216,6 +235,29 @@
     armPenthouse(lot);                                // penthouse → helicopter + flags
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     CBZ.cityHomeMenuRefresh();
+  }
+  // FINANCE a home at the realtor (contract [E]). Routes through Zillow's
+  // financeByLot so there's ONE financing path: 20% down from cash+bank, the rest
+  // via the bank loan ENGINE (CBZ.cityBankLoan) when wired, else Zillow's
+  // self-contained mortgage. Zillow handles charging the down, registering the
+  // home, persisting, and setting it as home (takeResidence) — exactly like the
+  // cash buy, so the realtor and [Z] panel agree. If financing isn't possible
+  // (no Zillow market at all) we honestly fall back to the cash buy.
+  function financeHome(lot) {
+    const h = lot.building.home;
+    if (CBZ.cityZillow && CBZ.cityZillow.financeByLot) {
+      const owned = CBZ.cityZillow.financeByLot(lot);   // charges down, registers, sets home, opens the loan
+      if (owned) {
+        if (CBZ.cityZillow.setHomeByLot) CBZ.cityZillow.setHomeByLot(lot);
+        armPenthouse(lot);                              // penthouse → helicopter + flags
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      }
+      CBZ.cityHomeMenuRefresh();
+      return;
+    }
+    // No Zillow market loaded → no mortgage system to finance against; do the
+    // honest thing and route to the cash buy (which has its own fallback).
+    buyHome(lot);
   }
   // ---- TASK 2: the HANGAR — a big-ticket add-on, offered only once you own the
   // penthouse. Buying it sets g.cityOwnsHangar=true, which unlocks basing an F-22

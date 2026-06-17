@@ -106,6 +106,29 @@
   const scope = new Map();   // guest id -> Map(nid -> 0 (in) | grace-start ms)
   const _forced = new Set(); // nids pinned in scope for the guest being served
 
+  // ---- DELTA SNAPSHOTS (CBZ.netDelta, default ON; set false to revert) --------
+  // On a RELIABLE transport the delta baseline is simply "the last row I sent this
+  // guest" — no acks/ring-buffers. We send a per-guest in-scope row only when it
+  // CHANGED, or every HEAL_MS as a refresh. HEAL_MS < the guest's 4000ms absence-
+  // drop, so an omitted (unchanged) entity is ALWAYS re-sent before it would time
+  // out — and the guest already tolerates omissions (that is exactly how scoping
+  // works), so NO apply-side change is needed. A standing crowd — which dominates a
+  // packed plaza — collapses from 10Hz to ~0.5Hz per body. OFF → full rows = today.
+  const SENT = new Map();    // guest id -> Map(nid -> { k:rowKey, t:lastSentMs })
+  const HEAL_MS = 2000;
+  if (CBZ.netDelta === undefined) CBZ.netDelta = true;
+  function rowKey(r) { return r.join(","); }   // rows are already quantized → a stable change key
+  function deltaRows(rows, sm, now) {
+    if (CBZ.netDelta === false) return rows;
+    const out = [];
+    for (const r of rows) {
+      const nid = r[0], k = rowKey(r), s = sm.get(nid);
+      if (!s || s.k !== k || now - s.t > HEAL_MS) { out.push(r); sm.set(nid, { k, t: now }); }
+    }
+    return out;
+  }
+  CBZ._netDeltaRows = deltaRows;   // test hook (tools/test-net-delta.js)
+
   function metaCiv(p) { return pedMeta(p, false); }
   function metaCop(p) { return pedMeta(p, true); }
 
@@ -153,9 +176,14 @@
       // scoped entities the sim deleted outright (granted car, culled body)
       for (const nid of ents.keys())
         if (!_rowsPed.has(nid) && !_rowsCop.has(nid) && !_rowsCar.has(nid)) { ents.delete(nid); gone.push(nid); }
-      // meta first so a fresh puppet spawns dressed, then the rows
+      // DELTA: send only changed (or HEAL_MS-stale) rows; a gone/left entity drops
+      // its baseline so a re-entry re-sends a full row. Per-guest baseline = SENT[gid].
+      let sm = SENT.get(gid); if (!sm) { sm = new Map(); SENT.set(gid, sm); }
+      for (const nid of gone) sm.delete(nid);
+      const pdD = deltaRows(pd, sm, now), cpD = deltaRows(cp, sm, now), crD = deltaRows(cr, sm, now);
+      // meta first so a fresh puppet spawns dressed, then the (delta'd) rows
       if (mp.length || mc.length || gone.length) net.sendTo(gid, { t: "ev", e: "meta", peds: mp, cars: mc, gone });
-      net.sendTo(gid, { t: "world", pd, cp, cr, w: g.wanted | 0 });
+      net.sendTo(gid, { t: "world", pd: pdD, cp: cpD, cr: crD, w: g.wanted | 0 });
     }
   }
 

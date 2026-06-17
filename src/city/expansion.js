@@ -131,12 +131,71 @@
     const bridgeEnd = cx - R + 12;
     const bridgeLen = bridgeEnd - bridgeStart;
     const bridgeX = (bridgeStart + bridgeEnd) / 2;
-    plane(bridgeX, cz, bridgeLen, 18, 0x9aa0a8, 0.025);
+    // ---- INTENTIONAL CABLE-STAYED BRIDGE (replaces the old blank gray slab
+    //      walls). One coherent style: a structural concrete deck with curbs,
+    //      see-through steel railings (posts + twin top rails), two tapered
+    //      pylons straddling the deck near the 1/3 / 2/3 spans, and fan cables
+    //      sweeping from each pylon top to the deck. The visible railing is
+    //      open so you see the water through it; behind it a single thin,
+    //      continuous SOLID curb collider per side runs the whole span as the
+    //      fall-guard (no gap a car can slip through). All boxes are periodic,
+    //      not per-meter, so the draw-call cost stays in the low tens. ----
+    const SIDE = 8.7;                 // deck-edge / barrier centre on Z
+    // colour buckets reused across all elements (keeps Lambert count low)
+    const C_DECK = 0x8d939c, C_CURB = 0x707782, C_RAIL = 0x9aa3ad, C_PYLON = 0xb9c0c8, C_CABLE = 0xd9dde2;
+    // deck base (slightly proud, with a structural fascia look) + road surface + centre dashes
+    plane(bridgeX, cz, bridgeLen, 18, C_DECK, 0.025);
     plane(bridgeX, cz, bridgeLen, ROADW, 0x33363d, 0.055);
     for (let x = bridgeStart + 3; x < bridgeEnd; x += 7) plane(x, cz, 2.8, 0.28, 0xf2d14a, 0.075, true);
-    box(bridgeX, 0.75, cz - 8.7, bridgeLen, 1.5, 0.4, 0x626a76, { solid: true, noCam: true });
-    box(bridgeX, 0.75, cz + 8.7, bridgeLen, 1.5, 0.4, 0x626a76, { solid: true, noCam: true });
-    city.bridge = { minX: bridgeStart - 2, maxX: bridgeEnd + 5, minZ: cz - 9.2, maxZ: cz + 9.2 };
+
+    // continuous SOLID fall-guard curb, one per side (low + thin, part of the
+    // railing base). noCam so the chase camera doesn't clip on it. This is the
+    // ONLY barrier collider — the posts/rails/cables below are all decorative.
+    box(bridgeX, 0.45, cz - SIDE, bridgeLen, 0.9, 0.3, C_CURB, { solid: true, noCam: true });
+    box(bridgeX, 0.45, cz + SIDE, bridgeLen, 0.9, 0.3, C_CURB, { solid: true, noCam: true });
+
+    // see-through railings: vertical posts every ~5m + twin horizontal top rails.
+    for (const sz of [cz - SIDE, cz + SIDE]) {
+      for (let x = bridgeStart + 2.5; x <= bridgeEnd - 2.5; x += 5) {
+        box(x, 1.0, sz, 0.16, 1.4, 0.16, C_RAIL, { cast: false });        // post (non-solid; curb holds the line)
+      }
+      box(bridgeX, 1.55, sz, bridgeLen, 0.1, 0.1, C_RAIL, { cast: false }); // upper rail
+      box(bridgeX, 1.1, sz, bridgeLen, 0.08, 0.08, C_RAIL, { cast: false }); // mid rail
+    }
+
+    // two cable-stayed pylons + fan cables. Pylons straddle the deck (a leg on
+    // each side joined by a cross-beam over the road); cables sweep from the
+    // tower top down to deck anchor points fore and aft.
+    const PYH = 19;                                   // pylon height above deck
+    for (const px of [bridgeStart + bridgeLen * 0.30, bridgeStart + bridgeLen * 0.70]) {
+      for (const sz of [cz - SIDE, cz + SIDE]) {
+        box(px, PYH / 2, sz, 1.1, PYH, 1.1, C_PYLON, { solid: true, noCam: true }); // tapered leg (also a soft pier collider)
+      }
+      box(px, PYH + 0.4, cz, 1.0, 1.0, SIDE * 2 + 1.2, C_PYLON, { cast: false });    // cross-beam over the road
+      // fan cables: from each tower-top corner to staggered deck anchors fore & aft
+      for (const sz of [cz - SIDE, cz + SIDE]) {
+        for (const dir of [-1, 1]) {
+          for (let k = 1; k <= 3; k++) {
+            const ax = px + dir * (4 + k * 5);          // deck anchor along the span
+            const dx = ax - px, dy = PYH, midx = (px + ax) / 2;
+            const len = Math.hypot(dx, dy);
+            const cab = box(midx, PYH / 2 + 0.6, sz, 0.07, len, 0.07, C_CABLE, { cast: false });
+            cab.rotation.z = Math.atan2(dx, dy);        // tilt the cable from vertical toward the anchor
+          }
+        }
+      }
+    }
+
+    // span end portals — slim gateway frames where the bridge meets land, so
+    // the entrance reads as a deliberate threshold rather than an open seam.
+    for (const ex of [bridgeStart + 1.5, bridgeEnd - 1.5]) {
+      box(ex, 2.6, cz - SIDE, 0.6, 5.2, 0.6, C_PYLON, { cast: false });
+      box(ex, 2.6, cz + SIDE, 0.6, 5.2, 0.6, C_PYLON, { cast: false });
+      box(ex, 5.0, cz, 0.6, 0.6, SIDE * 2 + 0.6, C_PYLON, { cast: false });
+    }
+
+    // the deck barriers run the full span; AABB matches the curb edges (cz±SIDE)
+    city.bridge = { minX: bridgeStart - 2, maxX: bridgeEnd + 5, minZ: cz - (SIDE + 0.5), maxZ: cz + (SIDE + 0.5) };
     city.roads.push({ x: bridgeX, z: cz, vertical: false, len: bridgeLen, district: "bridge" });
 
     // ---- landmark towers: every former mountain position becomes skyline ----

@@ -171,15 +171,36 @@
     if (OPP[ds] !== 2 || !b.hasStairs) faces.push(OPP[ds]);   // back wall: last resort
     function tryFace(side, strict) {
       const f = faceInfo(side, w, d);
-      const maxLat = Math.max(0, f.span / 2 - 4.4);           // stay off both corners (beds/kitchens hug them)
-      // the mega-tower deck: hold the alcove well beside the central drive-in
-      // bay so the hangar roll-out lane stays open; otherwise centre-out, and
-      // on ±z walls of climbable buildings bias AWAY from the -x stair strip.
-      const slots = b.hangar ? [f.span * 0.30, -f.span * 0.30, f.span * 0.38, -f.span * 0.38]
-        : (b.hasStairs && (side === 0 || side === 1)) ? [2.4, 3.4, 1.2, 0, -1.2, -2.4, -3.4]
-        : [2.4, -2.4, 1.2, -1.2, 0, 3.4, -3.4];
+      const CABHALF = 1.45;                                   // cab room half-width + a touch of margin
+      // The walkable LATERAL band on this face, in face-tangent coords centred
+      // on the building origin. On ±z faces `lat` is an X offset, so on a stair
+      // building it MUST stay on the SOLID slab (x ≥ slabMinX) — the old
+      // symmetric `±(span/2-4.4)` clamp could never reach the solid half on a
+      // narrow tower, which is why only the wide mega-tower ever seated a lift.
+      // On ±x faces `lat` is a Z offset bounded by the slab depth. We derive the
+      // real [latLo, latHi] from the slab so an arbitrary qualifying building
+      // gets a valid slot, then bias the search toward the slab centre.
+      let latLo, latHi;
+      if (side === 0 || side === 1) {                         // lat == X
+        const xLo = (b.hasStairs ? S.slabMinX : -w / 2 + S.wt);
+        const xHi = S.ixMax;
+        latLo = xLo + CABHALF; latHi = xHi - CABHALF;
+      } else {                                                // lat == Z
+        latLo = S.izMin + CABHALF; latHi = S.izMax - CABHALF;
+      }
+      if (latHi < latLo) { const mid = (latLo + latHi) / 2; latLo = latHi = mid; }
+      const latMid = (latLo + latHi) / 2;
+      // candidate offsets: the slab-centre first (always valid), then a spread
+      // toward both edges. The mega-tower deck holds the alcove beside the
+      // central drive-in bay so the hangar roll-out lane stays open.
+      let slots;
+      if (b.hangar) {
+        slots = [f.span * 0.30, -f.span * 0.30, f.span * 0.38, -f.span * 0.38];
+      } else {
+        slots = [latMid, latMid + 1.2, latMid - 1.2, latMid + 2.4, latMid - 2.4, latMid + 3.4, latMid - 3.4];
+      }
       for (let lat of slots) {
-        lat = Math.max(-maxLat, Math.min(maxLat, lat));
+        lat = Math.max(latLo, Math.min(latHi, lat));
         // cab-room footprint (side walls reach dep ~2.2) + the boarding apron
         const pts = [[-1.35, 0.45], [1.35, 0.45], [0, 0.7], [-1.35, 1.5], [1.35, 1.5], [-1.2, 2.2], [1.2, 2.2], [0, 2.0], [0, 2.7]];
         let ok = true;
@@ -262,10 +283,11 @@
       const m = box(grp, p.x, 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
       solidAt(p, sz, 2.4, 3.24, m);
     }
-    { // dark reveal strip behind the leafs so a closed door reads as a shaft door
-      const p = P(0, GDOOR - 0.12), sz = tn(1.5, 0.06);
-      box(grp, p.x, 1.35, p.z, sz.w, 2.5, sz.d, SHAFT);
-    }
+    // NO dark reveal strip here: the leafs ARE the closed door, and behind
+    // them sits the REAL lit cab room (back panel, side walls, lit ceiling,
+    // floor slab). When the leafs slide open the lobby frames the actual cab
+    // interior — exactly like an opened building door reveals the real room —
+    // instead of a black void backing that occluded it (the filmed bug).
     // the two sliding leafs + the door COLLIDER (one persistent y-gated box —
     // toggled by mutating y0/y1, which the xz broadphase never re-indexes)
     const ground = { leaves: [], open: 0, target: 0, autoClose: null };
@@ -290,71 +312,132 @@
     const padP = P(0, 2.7);
     const groundPad = { x: ox + padP.x, z: oz + padP.z };
 
-    // ---- roof HEADHOUSE CAB at the slab's (+x,-z) corner: clear of the open
-    //      -x stair shaft AND of the helipad mast (which holds the (+,+)
-    //      corner). HOLLOW — three walls + cap + lit ceiling + floor slab,
-    //      door (leafs) facing -x into the roof. Same machine, downward.
-    const hx = S.ixMax - 1.7, hz = S.izMin + 1.7;
-    const rx = ox + hx, rz = oz + hz;                  // world centre of the headhouse
-    const RDOOR = 2.27;                                // roof-cab door plane (dep from the back interior face at hx+1.11)
-    { // back wall (+x)
-      const m = box(grp, hx + 1.19, h + CAB_H / 2, hz, 0.16, CAB_H, 2.4, 0x6c737c, { cast: true });
-      solid(h, h + CAB_H, ox + hx + 1.11, ox + hx + 1.27, rz - 1.2, rz + 1.2, m);
+    // ---- roof HEADHOUSE CAB — built in the SAME lobby-local frame (P/tn) as
+    //      the ground cab, just raised to the roof line (h). That makes the two
+    //      ends a TRUE VERTICAL COLUMN (one directly above the other) instead of
+    //      the old free-floating corner box, so a real ENCLOSED SHAFT can rise
+    //      straight up between them and the whole thing reads as a lift that
+    //      actually travels somewhere. Door faces the same outward way (into the
+    //      open roof). HOLLOW: walls + cap + lit ceiling + floor slab + leafs.
+    const RDOOR = GDOOR;                               // roof door plane == ground (identical cab)
+    const RBASE = h;                                   // roof cab Y offset
+    { // back skin against the building wall
+      const p = P(0, 0.08), sz = tn(2.06, 0.12);
+      box(grp, p.x, RBASE + 1.25, p.z, sz.w, CAB_H, sz.d, CABWALL);
     }
-    for (const s of [-1, 1]) {  // side walls (±z)
-      const m = box(grp, hx - 0.01, h + CAB_H / 2, hz + s * 1.04, 2.4, CAB_H, 0.16, 0x6c737c, { cast: true });
-      solid(h, h + CAB_H, ox + hx - 1.21, ox + hx + 1.19, oz + hz + s * 1.04 - 0.08, oz + hz + s * 1.04 + 0.08, m);
+    for (const s of [-1, 1]) {  // side walls (solid)
+      const p = P(s * 1.04, 1.05), sz = tn(0.16, 2.1);
+      const m = box(grp, p.x, RBASE + CAB_H / 2, p.z, sz.w, CAB_H, sz.d, STEEL, { cast: true });
+      solid(RBASE, RBASE + CAB_H, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
-    box(grp, hx, h + CAB_H + 0.13, hz, 2.7, 0.14, 2.7, 0x474f59);            // cap
-    box(grp, hx, h + CAB_H - 0.05, hz, 0.95, 0.07, 0.95, 0xe8ddc2, { emissive: 0xfff1cd, ei: 0.95 }); // light panel
-    { // cab floor slab on the roof (its top is the EXACT roof arrival height)
-      box(grp, hx - 0.05, h + 0.02, hz, 2.5, 0.12, 2.1, CABFLOOR);
-      plat(ox + hx - 1.45, ox + hx + 1.2, rz - 1.05, rz + 1.05, h + 0.08);
+    { // cap + lit ceiling panel
+      const p = P(0, 1.05), sz = tn(2.24, 2.3);
+      box(grp, p.x, RBASE + CAB_H + 0.13, p.z, sz.w + 0.4, 0.14, sz.d + 0.4, 0x474f59);
+      const ls = tn(0.95, 0.95);
+      box(grp, p.x, RBASE + CAB_H - 0.05, p.z, ls.w, 0.07, ls.d, 0xe8ddc2, { emissive: 0xfff1cd, ei: 0.95 });
     }
-    // door frame on -x: cheeks + header (solid)
+    { // cab floor slab on the roof (its top is the EXACT roof arrival height = RBASE+0.16)
+      const p = P(0, 1.1), sz = tn(2.06, 2.3);
+      box(grp, p.x, RBASE + 0.08, p.z, sz.w, 0.16, sz.d, CABFLOOR);
+      plat(ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, RBASE + 0.16);
+    }
+    // door frame: cheeks (solid) + header
     for (const s of [-1, 1]) {
-      const m = box(grp, hx - 1.13, h + CAB_H / 2, hz + s * 1.02, 0.55, CAB_H, 0.6, 0x6c737c, { cast: true });
-      solid(h, h + CAB_H, ox + hx - 1.405, ox + hx - 0.855, oz + hz + s * 1.02 - 0.3, oz + hz + s * 1.02 + 0.3, m);
+      const p = P(s * 1.02, RDOOR + 0.04), sz = tn(0.6, 0.55);
+      const m = box(grp, p.x, RBASE + 1.6, p.z, sz.w, 3.2, sz.d, STEEL, { cast: true });
+      solid(RBASE, RBASE + 3.2, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
-    {
-      const m = box(grp, hx - 1.13, h + 2.5, hz, 0.55, 0.4, 2.64, 0x6c737c);
-      solid(h + 2.3, h + 2.7, ox + hx - 1.405, ox + hx - 0.855, rz - 1.32, rz + 1.32, m);
+    { const p = P(0, RDOOR + 0.04), sz = tn(2.64, 0.55);
+      const m = box(grp, p.x, RBASE + 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
+      solid(RBASE + 2.4, RBASE + 3.24, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
-    box(grp, hx - 1.1, h + 1.3, hz, 0.05, 2.35, 1.5, SHAFT);                 // dark reveal
     const roof = { leaves: [], open: 0, target: 0, autoClose: null };
     for (const s of [-1, 1]) {
-      const m = box(grp, hx - 1.16, h + 1.25, hz + s * 0.37, 0.1, 2.4, 0.76, LEAF);
-      roof.leaves.push({ m, baseX: hx - 1.16, baseZ: hz + s * 0.37, sx: 0, sz: s });
+      const p = P(s * 0.37, RDOOR), sz = tn(0.76, 0.1);
+      const m = box(grp, p.x, RBASE + 1.27, p.z, sz.w, 2.45, sz.d, LEAF);
+      roof.leaves.push({ m, baseX: p.x, baseZ: p.z, sx: f.tx * s, sz: f.tz * s });
     }
-    roof.col = solid(h, h + 2.4, ox + hx - 1.23, ox + hx - 1.09, rz - DOOR_HW, rz + DOOR_HW);
-    roof.cy0 = h; roof.cy1 = h + 2.4; roof.solid = true;
-    box(grp, hx - 1.42, h + 1.35, hz + 1.02, 0.08, 0.5, 0.26, 0x232830);     // roof call panel (on the cheek face)
-    const btnR = box(grp, hx - 1.47, h + 1.45, hz + 1.02, 0.05, 0.12, 0.12, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
-    const lampR = box(grp, hx - 1.42, h + 2.45, hz, 0.07, 0.2, 0.7, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
-    const roofPad = { x: ox + hx - 2.1, z: oz + hz };
+    {
+      const pA = P(-DOOR_HW, RDOOR - 0.07), pB = P(DOOR_HW, RDOOR + 0.07);
+      roof.col = solid(RBASE, RBASE + 2.4,
+        ox + Math.min(pA.x, pB.x), ox + Math.max(pA.x, pB.x),
+        oz + Math.min(pA.z, pB.z), oz + Math.max(pA.z, pB.z));
+      roof.cy0 = RBASE; roof.cy1 = RBASE + 2.4; roof.solid = true;
+    }
+    { const p = P(1.02, RDOOR + 0.36), sz = tn(0.3, 0.08); box(grp, p.x, RBASE + 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
+    const pbR = P(1.02, RDOOR + 0.42), pbRs = tn(0.12, 0.05);
+    const btnR = box(grp, pbR.x, RBASE + 1.42, pbR.z, pbRs.w, 0.12, pbRs.d, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
+    const plR = P(0, RDOOR + 0.34), plRs = tn(0.7, 0.07);
+    const lampR = box(grp, plR.x, RBASE + 3.05, plR.z, plRs.w, 0.2, plRs.d, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
+    const padPR = P(0, 2.7);
+    const roofPad = { x: ox + padPR.x, z: oz + padPR.z };
+
+    // ---- THE ENCLOSED SHAFT: opaque thin steel panels on the NON-door sides
+    //      (back + both sides) rising the full column from the ground cab to the
+    //      roof headhouse, PLUS a solid front (door-side) spandrel between the
+    //      two landing openings — so from anywhere in the building the lift reads
+    //      as a sealed vertical column with a door at the bottom and the top, not
+    //      a box with a ceiling. Mid-ride the sealed cab relocates between the two
+    //      identical ends INSIDE this opaque column, so the swap is invisible from
+    //      every angle. Cheap: ~5 thin boxes on shared cached mats, no colliders
+    //      beyond the cab/door ones already registered (the building wall + the
+    //      cab side walls already stop you; the shaft skin is a visual enclosure).
+    const SHAFT_TOP = h;                               // shaft rises to the roof-cab floor line
+    { // back skin (against the building's own interior wall — full height)
+      const p = P(0, 0.04), sz = tn(2.2, 0.08);
+      box(grp, p.x, SHAFT_TOP / 2 + 0.1, p.z, sz.w, SHAFT_TOP + 0.2, sz.d, SHAFT);
+    }
+    for (const s of [-1, 1]) { // side skins (full height, just outside the cab side walls)
+      const p = P(s * 1.13, 1.12), sz = tn(0.1, 2.42);
+      box(grp, p.x, SHAFT_TOP / 2 + 0.1, p.z, sz.w, SHAFT_TOP + 0.2, sz.d, SHAFT);
+    }
+    { // FRONT spandrel (door side): solid from above the ground door header up to
+      // the roof door sill — leaves the ground opening (0..3.24) and the roof
+      // opening (h..) clear so you can walk in/out at both ends.
+      const p = P(0, RDOOR + 0.12), sz = tn(2.64, 0.08);
+      const segBot = 3.24, segTop = SHAFT_TOP;          // between the two door frames
+      if (segTop - segBot > 0.1)
+        box(grp, p.x, (segBot + segTop) / 2, p.z, sz.w, segTop - segBot, sz.d, SHAFT);
+    }
+    { // a thin ceiling cap over the whole column, just under the roof cab floor,
+      // so looking up the shaft from the lobby ends on the cab, not open sky.
+      const p = P(0, 1.1), sz = tn(2.5, 2.6);
+      box(grp, p.x, SHAFT_TOP - 0.12, p.z, sz.w, 0.1, sz.d, 0x20262e);
+    }
+    // CARVE the chase: drop a clean hole through every intermediate floor slab
+    // the column crosses so the cab travels a continuous shaft (building owns the
+    // slabs → buildings.js does the carve; also reserves the footprint so no
+    // later furniture/prop lands in the chase).
+    if (CBZ.cityCarveShaft) {
+      const cCol = P(0, 1.1);                            // column centre (cab footprint)
+      const hwT = f.tx ? 1.3 : 1.25, hdT = f.tx ? 1.25 : 1.3;
+      CBZ.cityCarveShaft(b, ox + cCol.x, oz + cCol.z, hwT, hdT);
+    }
 
     addParapets(lot, null);
     addRoofProps(lot, [
-      { x: ox + hx, z: oz + hz, r: 2.4 },
-      { x: roofPad.x, z: roofPad.z, r: 1.4 },
+      { x: roofPad.x, z: roofPad.z, r: 2.4 },
+      { x: ox + P(0, 1.1).x, z: oz + P(0, 1.1).z, r: 2.0 },
     ]);
 
     // ---- per-end local frames: lat (across the door) / dep (from the back
-    //      wall toward the door plane). Used for walk-in detection, doorway
-    //      hold, and the mid-ride relative relocation between the two cabs.
+    //      wall toward the door plane). The two cabs are now built in the SAME
+    //      lobby frame (f/P), so the roof end reuses the ground frame verbatim —
+    //      walk-in detection, doorway hold and the mid-ride relocation all share
+    //      one transform, the cleanest possible expression of "the same cab, one
+    //      floor up".
     const gBase = P(0, 0);
     const gbx = ox + gBase.x, gbz = oz + gBase.z;
     const gLoc = (x, z) => ({ lat: (x - gbx) * f.tx + (z - gbz) * f.tz, dep: -((x - gbx) * f.nx + (z - gbz) * f.nz) });
     const gPt = (lat, dep) => ({ x: gbx - f.nx * dep + f.tx * lat, z: gbz - f.nz * dep + f.tz * lat });
-    const rbx = ox + hx + 1.11, rbz = oz + hz;        // back interior face of the headhouse
-    const rLoc = (x, z) => ({ lat: z - rbz, dep: rbx - x });
-    const rPt = (lat, dep) => ({ x: rbx - dep, z: rbz + lat });
+    const rLoc = gLoc;                                 // identical frame, one column up
+    const rPt = gPt;
 
     const rec = {
       lot, b, ground, roof, groundPad, roofPad, btnG, btnR, lampG, lampR,
       gLoc, gPt, rLoc, rPt,
-      gDoor: GDOOR, rDoor: RDOOR,                     // door-plane dep per end
-      gFloor: 0.16, rFloor: h + 0.08,                 // EXACT cab-floor tops (the old bug: arrival height was re-derived via floorAt and could resolve to the wrong surface — now it's the slab we built)
+      gDoor: GDOOR, rDoor: RDOOR,                     // door-plane dep per end (identical)
+      gFloor: 0.16, rFloor: h + 0.16,                 // EXACT cab-floor tops (the slab we built at each end; never re-derived via floorAt)
       m: { st: "idle", end: null, t: 0, will: false, moved: false, cool: 0 },
     };
     lot.building.lift = { ground: groundPad, roof: { x: roofPad.x, y: h, z: roofPad.z } };
@@ -391,16 +474,52 @@
     return fx0 < cx1 && fx1 > cx0 && fz0 < cz1 && fz1 > cz0;
   }
 
+  // FACADE PICK for the escape (returns ±1 = the +x / -x face, or 0 if none).
+  // HARD ENGINE CONSTRAINT: the climb is z-axis RAMP platforms and physics.js
+  // interpolates ramp height ONLY along z (t = (z-z0)/(z1-z0)). An escape on a
+  // ±z face would run its slope along x where ramps DON'T interpolate — you'd
+  // hit a vertical wall, not a stair. So a real fire escape can only hang on a
+  // ±x face here; "rear/side, away from the door" therefore means the ±x face
+  // FARTHEST from the door/display face (b.side), never the door face itself.
+  // buildings.js (AGENT BUILD) stamps the chosen face on the lot; we HONOR a
+  // valid stamp and otherwise DERIVE the correct rear face, so a missing/stale
+  // stamp never strands the rig on the glass front. The -x face is off-limits
+  // on stair buildings (its slab gap is the open interior stairwell — a bridge
+  // there drops you down it).
+  function escapeFaceSign(stamp) {
+    // accept either a face index (2:-x, 3:+x) or a raw sign (±1)
+    if (stamp === 2 || stamp === -1) return -1;
+    if (stamp === 3 || stamp === 1) return 1;
+    return 0;
+  }
+  function pickEscapeFace(b) {
+    const ds = doorSideOf(b);
+    // candidate ±x faces, ordered so the REAR (away from the door) wins:
+    //   door on +x(3) → prefer -x ; door on -x(2) → prefer +x ;
+    //   door on ±z     → +x first (the alley side on most lots), then -x.
+    let order;
+    if (ds === 3) order = [-1, 1];
+    else if (ds === 2) order = [1, -1];
+    else order = [1, -1];
+    // honor a valid stamp first by floating it to the front of the order
+    const stamped = escapeFaceSign(b.feSide != null ? b.feSide
+      : (b.fireEscapeSide != null ? b.fireEscapeSide : null));
+    if (stamped) order = [stamped].concat(order.filter((m) => m !== stamped));
+    for (const m of order) {
+      if (m < 0 && b.hasStairs) continue;            // -x is the open stairwell on stair buildings
+      if ((m > 0 ? 3 : 2) === ds) continue;          // never the door/display face
+      if (flightCrossesDoor(b, m)) continue;         // never across the door walk-up
+      return m;
+    }
+    return 0;
+  }
+
   function buildFireEscape(lot) {
     const b = lot.building, w = b.w, d = b.d, grp = b.group, ox = b.ox, oz = b.oz, h = b.h;
-    // facade pick: +x first; -x only on buildings WITHOUT the interior stair
-    // shaft (its slab gap sits on -x — a bridge there would drop you down it).
+    // facade pick: the REAR ±x face away from the door (see pickEscapeFace).
     // If every valid facade hosts the door / crosses its walk-up, the lot
     // simply goes unserved — a clear doorway beats a fourth escape route.
-    let m = 0;
-    for (const cand of (b.hasStairs ? [1] : [1, -1])) {
-      if (!flightCrossesDoor(b, cand)) { m = cand; break; }
-    }
+    const m = pickEscapeFace(b);
     if (!m) return;
     const X0 = w / 2 + 0.15, X1 = w / 2 + 1.35, XC = w / 2 + 0.75;
     const xLo = (a, c) => ox + Math.min(m * a, m * c), xHi = (a, c) => ox + Math.max(m * a, m * c);

@@ -157,14 +157,96 @@
     if (p.kind === "cop") CBZ.cityHurtCop && CBZ.cityHurtCop(p, 200, { fromX: fx, fromZ: fz });
     else CBZ.cityKillPed(p, { fromX: fx, fromZ: fz, force: 6, fling: 3 }, "executed");
   }
+  // SHAKEDOWN / EXTORTION — REALISTIC + BOUNDED (no infinite faucet).
+  // A person carries a FINITE wallet (economy.js rollCashFor: a broke Lv.1 has
+  // $5–40, a tycoon $10k–90k). A shakedown empties THAT wallet and DEPLETES it —
+  // it does NOT mint fresh cash. Once tapped they have nothing left to give, so
+  // spamming one mark yields a few crumpled bills at most, then zero. And every
+  // shakedown is a CRIME that escalates: their fear/grudge climb, heat + witness
+  // attention rise, and a brave/armed mark fights back, the timid bolt, a snitch
+  // runs to the law. Pushing your luck gets you into trouble, not riches.
+  function shakeBraveEnough(p) {
+    // a made/armed/aggressive mark, or one whose respect outweighs their fear,
+    // dares to refuse and swing back instead of paying.
+    const r = relOf(p);
+    const aggr = p.aggr || 0.3;
+    if (p.armed) return true;
+    if (r && r.respect > r.fear + 20) return true;
+    return aggr >= 0.62;   // "crook"/"violent" bands stand their ground
+  }
   function demandRansom(p) {
     if (p === g.cityHostage) { CBZ.cityReleaseHostage && CBZ.cityReleaseHostage(true); return; }
-    const pay = 150 + (((p.wealth || 0.3) * 900) | 0);
-    p.cash = 0; p.alarmed = 8; p.fear = 10;
-    CBZ.city.addCash(pay); CBZ.city.big("EXTORTED + $" + pay);
+    if (!p || p.dead) return;
+    const now = (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0);
+
+    // A wallet that's already been fully tapped (mugged/robbed/drained) is dry —
+    // you cannot squeeze water from a stone.
+    const wallet = Math.max(0, p.cash | 0);
+
+    // RESISTANCE FIRST. A brave/armed mark refuses and turns on you; spamming a
+    // shakedown is how you start a fight, not how you get paid. Resistance grows
+    // every time you lean on the SAME person (they get fed up / desperate).
+    const prior = p._shakeCount | 0;
+    const sinceLast = now - (p._shakeT || 0);
+    const fearNow = (relOf(p) && relOf(p).fear) || p.fear * 10 || 0;
+    // base refusal chance climbs with each prior shakedown and with low fear.
+    let refuse = 0.04 + prior * 0.12 + Math.max(0, (40 - fearNow)) * 0.004;
+    if (shakeBraveEnough(p)) refuse += 0.35;
+    if (refuse > 0.92) refuse = 0.92;
+    if (Math.random() < refuse) {
+      // they don't pay — and it costs YOU. Grudge/fear shift, heat, witnesses.
+      if (CBZ.cityRelShift) CBZ.cityRelShift(p, "threatened");
+      p.alarmed = Math.max(p.alarmed || 0, 8);
+      const pa = CBZ.city && CBZ.city.playerActor;
+      if (shakeBraveEnough(p) && pa) {
+        // a hard mark squares up — now you've got a fight on your hands.
+        p.rage = pa; p.state = "fight"; p.fear = 0;
+        CBZ.city.note((p.name || "They") + " won't be shaken down — and squares up!", 2);
+      } else {
+        // the timid bolt; a snitch makes a beeline for the cops.
+        p.state = "flee"; p.target && p.target.set(p.pos.x, 0, p.pos.z);
+        CBZ.city.note((p.name || "They") + " refuses and backs away.", 1.8);
+      }
+      CBZ.cityAlarm(p.pos.x, p.pos.z, 18, 1.1, pa);
+      CBZ.cityCrime && CBZ.cityCrime(45, { x: p.pos.x, z: p.pos.z, type: "extortion" });
+      if (CBZ.sfx) CBZ.sfx("punch");
+      p._shakeT = now; p._shakeCount = prior + 1;
+      return;
+    }
+
+    // THEY PAY — but only what they actually have on them, and only the cut a
+    // first squeeze can extract. The cut SHRINKS every time you re-lean on the
+    // same person within a stretch (they've handed over their cash already).
+    // A fully recovered wallet (long gap) lets the cut reset toward the top.
+    let cutFrac;
+    if (sinceLast > 90000 || prior === 0) cutFrac = 0.6 + Math.random() * 0.25;  // fresh mark: 60–85%
+    else cutFrac = Math.max(0.05, 0.45 - prior * 0.15);                          // diminishing on repeats
+    let pay = Math.round(wallet * cutFrac);
+    // a floor so a fearful mark still coughs up pocket change the FIRST time, but
+    // never out of an empty wallet — once dry, repeats give nothing.
+    if (pay <= 0 && wallet > 0) pay = Math.min(wallet, 2 + ((Math.random() * 6) | 0));
+    pay = Math.min(pay, wallet);
+
+    if (pay <= 0) {
+      // dry — leaning on a tapped mark just raises heat for no reward.
+      p.alarmed = Math.max(p.alarmed || 0, 6);
+      if (CBZ.cityRelShift) CBZ.cityRelShift(p, "threatened");
+      CBZ.cityCrime && CBZ.cityCrime(30, { x: p.pos.x, z: p.pos.z, type: "extortion" });
+      CBZ.city.note((p.name || "They") + " has nothing left to give.", 1.8);
+      p._shakeT = now; p._shakeCount = prior + 1;
+      return;
+    }
+
+    p.cash = wallet - pay;          // DEPLETE the finite wallet — no fresh money minted
+    p.alarmed = 8; p.fear = Math.min(10, (p.fear || 0) + 2);
+    CBZ.city.addCash(pay);
+    CBZ.city.big("EXTORTED + " + money(pay));
+    if (CBZ.cityRelShift) CBZ.cityRelShift(p, "extorted");
     CBZ.cityAlarm(p.pos.x, p.pos.z, 16, 1, CBZ.city.playerActor);
-    CBZ.cityCrime && CBZ.cityCrime(50, { x: p.pos.x, z: p.pos.z, type: "extortion" });
+    // repeat extortion of the same block draws more heat, not less.
+    CBZ.cityCrime && CBZ.cityCrime(50 + prior * 12, { x: p.pos.x, z: p.pos.z, type: "extortion" });
     if (CBZ.sfx) CBZ.sfx("coin");
+    p._shakeT = now; p._shakeCount = prior + 1;
   }
   // MUG / ROBBERY — takes their cash + the loot item (cityRobPed's payout) AND
   // transfers EVERY valuable they're carrying into your inventory to pawn. A
@@ -456,7 +538,16 @@
     };
   });
   I.describe("ped:gunpoint", function (p) { return { label: "🔫 " + p.name, note: "Hands up · make your demand" }; });
-  I.describe("vendor", function (v) { return { label: (v.vendor && v.vendor.building && v.vendor.building.name) || "Counter", note: "Vendor · cash register" }; });
+  I.describe("vendor", function (v) {
+    const name = (v.vendor && v.vendor.building && v.vendor.building.name) || "Counter";
+    // the card subtitle = the contextual reason for THIS trade (VERB[kind].sub),
+    // so the header itself tells you what the counter is for; fall back to the
+    // old generic line for any kind without an entry. (VERB/vendorKind are
+    // declared lower in this IIFE but always initialised by the time any
+    // describer runs — describers fire per-frame, long after module load.)
+    const d = VERB[vendorKind(v)];
+    return { label: name, note: (d && d.sub) || "Vendor · cash register" };
+  });
   I.describe("cop", function (c) { return { label: "👮 " + c.name, note: copNote(c) }; });
   I.describe("corpse", function (b) { const fit = CBZ.cityOutfitOf ? CBZ.cityOutfitOf(b) : null; return { label: "🧥 " + (b.name || "A body"), note: bodyFitNote(fit) }; });
   I.describe("vehicle", function (car) {
@@ -579,7 +670,73 @@
   I.register("ped:cop", { id: "cop-punch", slot: "l", bad: true, label: (c) => "Sucker-punch " + c.name, onSelect: (c) => copAssault(c) });
 
   // ---- VENDOR COUNTER ----
-  I.register("ped:vendor", { id: "vendor-shop", slot: "e", canShow: (v) => !!v.vendor, label: "Shop here", onSelect: (v) => CBZ.cityOpenShop(v.vendor) });
+  // CONTEXTUAL VERBS: the old flat "Shop here" said nothing about WHY you'd
+  // walk up to THIS counter. VERB[kind] answers it — the action's verb (E
+  // primary) + a one-line reason the player reads under the cursor — for all
+  // 26 storefront kinds. `rich:true` marks the six trades that get their own
+  // in-world, self-prompting module (jewelry/pawn/bank/clothing/realtor/guns):
+  // when that module is LIVE the counter verb hides (the module owns the
+  // walk-up), but until it's wired the verb still shows and falls back to the
+  // text menu — never a dead counter. Verbs are grounded in what each kind
+  // actually sells (shops.js services()): a pawnbroker offers CASH for your
+  // haul + loans on collateral; the jeweler is RETAIL bling; the gun counter
+  // is the armoury; the bank is the vault; realty is the listings book.
+  const VERB = {
+    guns:        { verb: "Browse the gun counter",      sub: "pistols · rifles · ammo",                 rich: true },
+    jewelry:     { verb: "Browse the jewelry cases",    sub: "chains · watches · ice — retail",          rich: true },
+    pawn:        { verb: "Step up to the pawn window",  sub: "cash for your haul · loans on collateral", rich: true },
+    bank:        { verb: "Step to the teller",          sub: "deposit · withdraw · wire",                rich: true },
+    clothing:    { verb: "Browse the racks",            sub: "fits · drip · change in back",             rich: true },
+    realtor:     { verb: "Talk to the realtor",         sub: "buy property · listings book",             rich: true },
+
+    gas:         { verb: "Pay at the pump",             sub: "snacks · top off the tank",                rich: false },
+    drugs:       { verb: "Cop from the trap",           sub: "product · turn dealer",                    rich: false },
+    food:        { verb: "Order at the counter",        sub: "hot plate — fill up",                      rich: false },
+    bar:         { verb: "Bar up",                       sub: "drinks · run the night crew",              rich: false },
+    hardware:    { verb: "Hit the hardware counter",    sub: "tools · crowbar · picks · medkit",         rich: false },
+    gym:         { verb: "Sign in at the gym",          sub: "train HP · fight card",                    rich: false },
+    security:    { verb: "Ask about contracts",         sub: "gear · apply: security guard",             rich: false },
+    hospital:    { verb: "Check in at the desk",        sub: "patch up · heal to full",                  rich: false },
+    barber:      { verb: "Take the chair",              sub: "fresh cut · lineup",                       rich: false },
+    electronics: { verb: "Browse electronics",          sub: "phone · upgrades · gadgets",               rich: false },
+    carlot:      { verb: "Talk to the car salesman",    sub: "buy a ride · open a resale yard",          rich: false },
+    chop:        { verb: "See the chop shop man",       sub: "drive a hot car into the bay",             rich: false },
+    casino:      { verb: "Hit the cage",                sub: "tables · sportsbook · betting",            rich: false },
+    raceway:     { verb: "Check the race board",        sub: "legal · street · drag",                    rich: false },
+    arena:       { verb: "Sign the fight card",         sub: "boxing · MMA",                             rich: false },
+    paintball:   { verb: "Book a paintball match",      sub: "team match board",                         rich: false },
+    transit:     { verb: "Buy a ticket",                sub: "bus · train routes",                       rich: false },
+    cityhall:    { verb: "See the clerk",               sub: "permits · politics · civic contracts",     rich: false },
+    airfield:    { verb: "See the dispatcher",          sub: "air support · emergency contracts",        rich: false },
+    racepark:    { verb: "Place a wager",               sub: "horse · greyhound betting",                rich: false },
+  };
+  // is this kind's dedicated self-prompting module live? (mirrors the gun-wall
+  // feature-detect). When live, the counter verb steps aside for that module.
+  function richModuleLive(lot) {
+    if (!lot) return false;
+    switch (lot.kind) {
+      case "guns":     return !!(CBZ.cityGunWallLive  && CBZ.cityGunWallLive(lot));
+      case "jewelry":  return !!(CBZ.cityJewelryLive  && CBZ.cityJewelryLive(lot));
+      case "pawn":     return !!(CBZ.cityPawnLive     && CBZ.cityPawnLive(lot));
+      case "bank":     return !!(CBZ.cityBankLive     && CBZ.cityBankLive(lot));
+      case "clothing": return !!(CBZ.cityClothingLive && CBZ.cityClothingLive(lot));
+      case "realtor":  return !!(CBZ.cityRealtyLive   && CBZ.cityRealtyLive(lot));
+      default:         return false;
+    }
+  }
+  // the kind of the lot a vendor is keeping (lot carries .kind; degrade safe).
+  function vendorKind(v) { return (v && v.vendor && v.vendor.kind) || ""; }
+  CBZ.cityShopVerb = function (kind) { return VERB[kind] || null; };   // shared lookup (HUD / other verbs may want it)
+
+  I.register("ped:vendor", {
+    id: "vendor-shop", slot: "e",
+    // hide ONLY when a rich kind's own in-world module has taken over the
+    // walk-up; otherwise this counter is always offered (text-menu fallback).
+    canShow: (v) => !!v.vendor && !richModuleLive(v.vendor),
+    label: (v) => { const d = VERB[vendorKind(v)]; return d ? d.verb : "Shop here"; },
+    sub:   (v) => { const d = VERB[vendorKind(v)]; return d ? d.sub : ""; },
+    onSelect: (v) => CBZ.cityOpenShop(v.vendor),
+  });
   I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor, label: "Rob the register", onSelect: (v) => robRegister(v) });
   I.register("ped:vendor", { id: "vendor-talk", slot: "j", canShow: (v) => !!v.vendor, label: "Talk to the clerk", onSelect: () => CBZ.city.note("“Welcome in. Take a look around.”", 1.6) });
 
@@ -612,20 +769,11 @@
     label: (t, ctx) => "Eat the " + foodIn(ctx),
     onSelect: function (t, ctx) { const food = foodIn(ctx); if (food && CBZ.cityEat) CBZ.cityEat(food); },
   });
-  I.register("self", {
-    id: "self-drugs", slot: "i", bad: true, needsItem: drugIn,
-    label: (t, ctx) => "Do the " + drugIn(ctx) + " 🌀",
-    onSelect: function (t, ctx) {
-      const drug = drugIn(ctx); if (!drug) return;
-      econ().take(drug, 1);
-      const P = ctx.actor;
-      P.hp = Math.min(P.maxHp || 200, P.hp + 18);
-      P._boost = 16; g.hunger = Math.min(100, (g.hunger || 0) + 8);
-      if (CBZ.shake) CBZ.shake(0.2);
-      CBZ.city.note("You did the " + drug + "… everything feels faster. 🌀", 2.2);
-      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    },
-  });
+  // The "Do the COKE/WEED 🌀" pocket auto-button was REMOVED (owner: a real
+  // drug-use would be opt-in roleplay, not a button that pops into your pockets
+  // panel and breaks the fourth wall). Carried drugs are still sellable/loot;
+  // there's just no auto-consume option surfaced here. Eating (self-eat above)
+  // and pickpocketing stay.
 
   // ---- auto-loot: walk over (or drive over) a body and it's looted, no key.
   //      Runs on foot AND while driving, every frame, ignoring the menu state. ----

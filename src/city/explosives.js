@@ -244,6 +244,7 @@
     if (CBZ.cityShatter) CBZ.cityShatter(p.x, p.z, C4.radius + 2);
     if (CBZ.cityCrime) CBZ.cityCrime(150, { x: p.x, z: p.z, type: "bombing" });
     if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(p.x, p.z, 45, 1.8, CBZ.city.playerActor);
+    if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: p, radius: 80, intensity: 2.0 });   // crowd panic bus (cityevents.js): a blast is the loudest, widest scare
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: p.x, z: p.z, panic: 12, damage: 6 }, { silent: true, noWanted: true });
   }
 

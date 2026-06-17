@@ -13,18 +13,134 @@
   const bursts = [], rings = [], chunks = [], scorches = [];
   const chunkGeo = new THREE.BoxGeometry(0.28, 0.18, 0.42);
   chunkGeo._shared = true;
+  // base box half-height (the 0.18 dim above ÷2) — a chunk must rest with its
+  // BOTTOM on the road, so y_rest = floor + halfHeight*scale, never center=0.1
+  // (which buried half the box into the asphalt — the user-filmed sink).
+  const CHUNK_HH = 0.09;
+
+  // TRUE-WORLD ground sample: where wreckage actually comes to rest (rooftops,
+  // raised terrain, breaches), not a flat hardcoded y. Falls back to 0.
+  function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
+  function camDist2(x, z) {
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (!cam) return 0;
+    const dx = x - cam.x, dz = z - cam.z; return dx * dx + dz * dz;
+  }
+  // PERMANENCE / population-pool recycle: when a debris pool is full, evict the
+  // OLDEST piece that is FAR from the lens (GTA pattern) so nothing pops out in
+  // view. Falls back to the literal oldest only if every piece is on-screen.
+  function recycleChunk() {
+    let idx = -1, far = 60 * 60;
+    for (let i = 0; i < chunks.length; i++) {
+      if (camDist2(chunks[i].mesh.position.x, chunks[i].mesh.position.z) > far) { idx = i; break; }
+    }
+    if (idx < 0) idx = 0;             // all in view → take the oldest anyway
+    const old = chunks.splice(idx, 1)[0];
+    scene.remove(old.mesh);
+  }
+  const CHUNK_CAP = 220;             // bias HARD toward persistence (was 56)
   // a couple of debris materials so flying chunks aren't all the same flat grey
   const chunkMat = new THREE.MeshLambertMaterial({ color: 0x3c4148 });
   chunkMat._shared = true;
   const chunkMatHot = new THREE.MeshBasicMaterial({ color: 0x6b3a22 }); // charred / glowing edge
   chunkMatHot._shared = true;
+  // a paler, dustier concrete for the settled RUBBLE HEAP so the pile reads as
+  // shattered masonry (lighter, chalky) against the darker flying shrapnel.
+  const rubbleMat = new THREE.MeshLambertMaterial({ color: 0x6c6358 });
+  rubbleMat._shared = true;
+  const rubbleMat2 = new THREE.MeshLambertMaterial({ color: 0x554d44 }); // shadowed lumps in the heap
+  rubbleMat2._shared = true;
+  // an irregular-ish concrete lump geo for heap pieces (a stretched box reads as
+  // a broken slab fragment better than the small flying-chunk box).
+  const rubbleGeo = new THREE.BoxGeometry(0.55, 0.4, 0.7);
+  rubbleGeo._shared = true;
+  // exposed REBAR: a thin dark steel bar. One shared thin box (cheaper than a
+  // cylinder, and at this gauge the silhouette is identical) bent into an L by a
+  // child segment so it dangles + hooks like blown reinforcement.
+  const rebarMat = new THREE.MeshLambertMaterial({ color: 0x2a2520 });
+  rebarMat._shared = true;
+  const rebarGeo = new THREE.BoxGeometry(0.05, 1, 0.05);
+  rebarGeo._shared = true;
+  const rebar = [];                 // [{group, t, hold}] dangling-rebar props
+  const REBAR_CAP = 28;             // bars across all live wounds
+
+  // ---- POOLED point-burst ring (CBZ.fxPool, default ON) ----------------------
+  // THE EXPLOSION ALLOCATION SPIKE: the old pointBurst minted a fresh
+  // Float32Array×2 + BufferGeometry + BufferAttribute + PointsMaterial + Points
+  // on EVERY call (≈6 per blast, more for airstrikes/wall-ruins) and dispose()'d
+  // them all on expiry — a rocket impact = a GC bomb that hitched the frame on
+  // the weak Mac. Fix (research: three.js object pooling + DynamicDrawUsage +
+  // setDrawRange — utsubo tip #39 "pool bullets/particles", joshmarinacci
+  // particle recycling, threejs docs setDrawRange/setUsage): a fixed RING of
+  // preallocated Points. Each slot owns ONE BufferGeometry whose position
+  // attribute is sized to BURST_MAX particles + marked DynamicDrawUsage, a CPU
+  // velocity scratch array, and ONE reusable PointsMaterial. A burst just writes
+  // its particles into the slot's buffers, sets the per-burst look (color/size/
+  // opacity/blending) on the reused material, setDrawRange(0,count) so only the
+  // live particles draw, and flags needsUpdate. ZERO per-blast allocation, ZERO
+  // dispose churn — the look/counts/motion are byte-identical to before.
+  //
+  // BURST_MAX covers the largest single pointBurst the game ever fires (airstrike
+  // sparks ≈ round(40 * P), P≤4.6 ⇒ ~184) with headroom so nothing is truncated.
+  // RING_CAP covers a multi-blast / sprint-through-crowd burst (cityExplosion ≈6
+  // bursts, airstrike ≈3, wall-ruin ≈2, plus impact splats) so live bursts are
+  // never stolen mid-flight; on overrun the oldest slot is reused — exactly the
+  // permanence the old path got from expiry, just without the allocation.
+  const BURST_MAX = 256, RING_CAP = 48;
+  const burstPool = [];   // preallocated Points, lazily grown to RING_CAP
+  let burstRing = 0;      // next slot to (re)use
+  function makeBurstSlot() {
+    const pos = new Float32Array(BURST_MAX * 3);
+    const attr = new THREE.BufferAttribute(pos, 3);
+    if (attr.setUsage) attr.setUsage(THREE.DynamicDrawUsage); else attr.dynamic = true;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", attr);
+    geo.setDrawRange(0, 0);
+    const mat = new THREE.PointsMaterial({
+      size: 0.1, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Points(geo, mat);
+    mesh.renderOrder = 8;
+    // these transient blast bursts always pop at the action: skip frustum culling
+    // so a REUSED geometry whose computed bounds shrank can never wrongly vanish.
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    scene.add(mesh);
+    // velocity scratch lives on the slot too — reused, never reallocated.
+    const slot = { mesh, geo, attr, mat, pos, vel: new Float32Array(BURST_MAX * 3), live: null };
+    return slot;
+  }
+  // pull a slot out of the ring, evicting whatever burst was riding it (the
+  // evicted burst is dropped from the active list — same as the old expiry).
+  function acquireBurstSlot() {
+    let slot = burstPool[burstRing];
+    if (!slot) { slot = burstPool[burstRing] = makeBurstSlot(); }
+    burstRing = (burstRing + 1) % RING_CAP;
+    if (slot.live) {                       // evict the previous rider, if any
+      const idx = bursts.indexOf(slot.live);
+      if (idx >= 0) bursts.splice(idx, 1);
+      slot.live = null;
+    }
+    return slot;
+  }
 
   // y0 (optional) seats the burst at an impact HEIGHT (rocket on a tower face)
   // instead of the default street level.
   function pointBurst(x, z, count, color, size, speed, life, dust, y0) {
-    const pos = new Float32Array(count * 3);
-    const vel = new Float32Array(count * 3);
+    if (count > BURST_MAX) count = BURST_MAX;   // never overrun the pooled buffer
     const baseY = y0 != null ? y0 : 0.35;
+    const pooled = CBZ.fxPool !== false;
+    // pooled path reuses the slot's preallocated buffers; the fallback (flag off)
+    // allocates exactly as before so behavior degrades to today byte-for-byte.
+    let pos, vel, slot = null, geo = null, mat = null, mesh = null;
+    if (pooled) {
+      slot = acquireBurstSlot();
+      pos = slot.pos; vel = slot.vel;
+    } else {
+      pos = new Float32Array(count * 3);
+      vel = new Float32Array(count * 3);
+    }
     for (let i = 0; i < count; i++) {
       const o = i * 3, a = Math.random() * Math.PI * 2;
       const sp = speed * (0.35 + Math.random() * 0.8);
@@ -35,16 +151,35 @@
       vel[o + 1] = (dust ? 0.9 : 2.5) + Math.random() * (dust ? 1.7 : 4.5);
       vel[o + 2] = Math.sin(a) * sp;
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    const mat = new THREE.PointsMaterial({
-      color, size, transparent: true, opacity: dust ? 0.5 : 0.95,
-      depthWrite: false, blending: dust ? THREE.NormalBlending : THREE.AdditiveBlending,
-    });
-    const mesh = new THREE.Points(geo, mat);
-    mesh.renderOrder = 8;
-    scene.add(mesh);
-    bursts.push({ mesh, geo, mat, pos, vel, t: 0, life, dust: !!dust });
+    const op0 = dust ? 0.5 : 0.95;
+    const blend = dust ? THREE.NormalBlending : THREE.AdditiveBlending;
+    if (pooled) {
+      // re-dress the reused material + buffer for this burst's exact look/count
+      mat = slot.mat; geo = slot.geo; mesh = slot.mesh;
+      mat.color.set(color); mat.size = size; mat.opacity = op0; mat.blending = blend;
+      mat.needsUpdate = true;            // blending swap needs a program recompile flag
+      geo.setDrawRange(0, count);
+      // bound the per-frame GPU upload to the LIVE particles only (the buffer is
+      // BURST_MAX long but only `count` matter) — r128 honours updateRange.count.
+      slot.attr.updateRange.offset = 0; slot.attr.updateRange.count = count * 3;
+      slot.attr.needsUpdate = true;      // upload the freshly-written positions
+      mesh.visible = true;
+    } else {
+      geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      mat = new THREE.PointsMaterial({
+        color, size, transparent: true, opacity: op0,
+        depthWrite: false, blending: blend,
+      });
+      mesh = new THREE.Points(geo, mat);
+      mesh.renderOrder = 8;
+      scene.add(mesh);
+    }
+    // n = LIVE byte-length so the shared updater steps only the real particles
+    // (a pooled buffer is BURST_MAX long but only `count` are alive this burst).
+    const b = { mesh, geo, mat, pos, vel, t: 0, life, dust: !!dust, op0, n: count * 3, slot };
+    if (slot) slot.live = b;
+    bursts.push(b);
   }
 
   function ring(x, z, radius, color, opt) {
@@ -75,10 +210,7 @@
   // y0 (optional) spawns the debris at an elevated impact seat; life stretches
   // to cover the fall so chunks reach the street instead of vanishing mid-air.
   function addChunks(x, z, count, force, hot, dir, y0) {
-    while (chunks.length > 56) {
-      const old = chunks.shift();
-      scene.remove(old.mesh);
-    }
+    while (chunks.length > CHUNK_CAP - count) recycleChunk();
     const dx = dir ? dir.x : 0, dz = dir ? dir.z : 0, biased = !!dir;
     const baseY = y0 != null ? y0 : 0.4;
     const fall = y0 != null ? Math.sqrt(Math.max(0.5, y0) / 8.8) : 0;   // grav*0.8 fall time to street
@@ -87,9 +219,10 @@
       // mostly charred grey, a few glowing-hot shards on an explosion
       const glow = hot && Math.random() < 0.5;
       const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
+      const sc = (0.65 + Math.random() * 0.8) * (hot ? 1.1 : 1);
       mesh.position.set(x, baseY + Math.random() * 0.8, z);
       mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      mesh.scale.setScalar((0.65 + Math.random() * 0.8) * (hot ? 1.1 : 1));
+      mesh.scale.setScalar(sc);
       scene.add(mesh);
       // debris flies fast then arcs down under gravity (slightly damped so it
       // hangs a touch longer like AAA shrapnel), heavier shards thrown lower
@@ -97,9 +230,12 @@
       const sp = force * (0.4 + Math.random() * 1.0);
       let vx = Math.cos(a) * sp, vz = Math.sin(a) * sp;
       if (biased) { vx += dx * force * (0.6 + Math.random() * 0.8); vz += dz * force * (0.6 + Math.random() * 0.8); }
+      // hh = this chunk's half-height so it RESTS on the road, not buried to its
+      // centre; rest = up to 60s of permanence once it has settled (true world).
       chunks.push({
-        mesh, vx, vy: up, vz,
+        mesh, vx, vy: up, vz, hh: CHUNK_HH * sc,
         spin: (Math.random() - 0.5) * 16, t: 0, life: fall + 1.2 + Math.random() * 1.1,
+        rest: 0, settled: false,
         trail: glow ? 0 : -1, // glowing shards drip a tiny ember trail
       });
     }
@@ -113,11 +249,15 @@
   // car systems that built them).
   CBZ.cityDebrisAdopt = function (mesh, vx, vy, vz) {
     if (!mesh) return;
-    while (chunks.length > 56) { const old = chunks.shift(); scene.remove(old.mesh); }
+    while (chunks.length > CHUNK_CAP - 1) recycleChunk();
     scene.add(mesh);
+    // a torn-off panel is built around its own origin; bbox half-height seats it
+    // on the road so it lies flat instead of sinking through.
+    let hh = 0.12;
+    try { mesh.geometry.computeBoundingBox(); const bb = mesh.geometry.boundingBox; if (bb) hh = Math.max(0.04, (bb.max.y - bb.min.y) * 0.5 * (mesh.scale.y || 1)); } catch (e) {}
     chunks.push({
-      mesh, vx: vx || 0, vy: vy == null ? 3 : vy, vz: vz || 0,
-      spin: (Math.random() - 0.5) * 9, t: 0, life: 2.6 + Math.random() * 1.2, trail: -1,
+      mesh, vx: vx || 0, vy: vy == null ? 3 : vy, vz: vz || 0, hh,
+      spin: (Math.random() - 0.5) * 9, t: 0, life: 2.6 + Math.random() * 1.2, rest: 0, settled: false, trail: -1,
     });
   };
 
@@ -511,6 +651,37 @@
       if (gR > 0.4) applyBlastDamage(x, z, gR, power, byPlayer);
     }
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
+
+    // ---- STRUCTURAL COUPLING (the one place a blast wounds a building) --------
+    // EVERY ordnance routes through cityExplosion (RPG, grenade, C4, airstrike),
+    // so this is THE coupling point: after the FX/damage, carve+scar the nearest
+    // facade within the blast radius, AT the blast HEIGHT (cy) — near or far, any
+    // floor of a tower, not just the kerb. The carve primitive is height-aware
+    // (cityFracture.blastAt(pt, r) → cityCarveWall at pt.y, finding the nearest
+    // wall within `search`); blastAt floors the hole to a dramatic, room-exposing
+    // size by ordnance class, so the wound is SATISFYING, not a dimple.
+    //
+    // ANTI-DOUBLE-CARVE: buildings.js wraps cityExplosion to run its own
+    // structuralBlast→blastAt AFTER this returns. When that wrap is installed
+    // (CBZ.cityExplosion._structWrapped), we SKIP here and let the wrap do it —
+    // exactly one carve. We only self-couple as a FALLBACK when the wrap is
+    // absent (buildings.js not loaded / not yet wrapped), so cityExplosion ALWAYS
+    // wounds a building no matter the load order. Either path uses the SAME
+    // deferral/coalescing in fracture.js (DEFER_CELL), so even a redundant call
+    // collapses into one hole.
+    //
+    // GATES (mirror buildings.js structuralBlast): only meaningful ordnance
+    // (power ≳1) carves; the heli ember (power 0.2, noDamage) and tiny car-pops
+    // must NOT punch holes — noDamage is skipped outright, weak blasts scar at
+    // most. CITY-ONLY (cityFracture.blastAt self-guards mode==="city").
+    if (!opts.noDamage && power >= 1.0 && CBZ.cityFracture && CBZ.cityFracture.blastAt
+        && !(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped)) {
+      // hole radius by ordnance class (blastAt re-floors it to a room-exposing
+      // size); search left to blastAt's radius-scaled default so a blast a few
+      // units off the wall still couples to the NEAREST facade at this height.
+      const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
+      try { CBZ.cityFracture.blastAt({ x: x, y: cy, z: z }, hr, { power: power }); } catch (e) {}
+    }
   };
 
   // Shared blast-damage application — the SAME path cityExplosion always used:
@@ -519,9 +690,14 @@
   // people identically. (force/fling let an airstrike fling bodies harder.)
   function applyBlastDamage(x, z, R, power, byPlayer, force, fling) {
     force = force == null ? 9 : force; fling = fling == null ? 6 : fling;
-    if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, R, { byCar: true, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer });
-    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= R * R && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, "explosion"); }
-    for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= R * R && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
+    // REALISTIC LETHALITY: a blast is fatal near ground zero, not across its whole
+    // visual / ground-shock radius. Killing EVERYONE within R wiped out crowds of
+    // bystanders most of a block away (filmed "kills a huge amount of people").
+    // Lethal core ≈ 0.55R (≈0.3× the area, so ~3× fewer deaths); past it, spared.
+    const LR = R * 0.55, LR2 = LR * LR;
+    if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: true, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer });
+    for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, "explosion"); }
+    for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
     const PL = CBZ.player;
     if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, "caught in an explosion", false, null, false); } }
   }
@@ -637,6 +813,19 @@
     // blast damage — SAME shared path as cityExplosion, just flings bodies harder
     applyBlastDamage(x, z, R, power, byPlayer, 14, 10);
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power }, { silent: true, noWanted: true });
+
+    // STRUCTURAL COUPLING (same contract as cityExplosion above): an airstrike
+    // wounds the nearest facade at its impact HEIGHT. buildings.js wraps this too
+    // (wrapBlast("cityAirstrikeExplosion")), so we SKIP when that wrap is present
+    // and only self-couple as a FALLBACK — exactly one carve, any load order.
+    // Carve at the real wall-hit height (opts.y) when given, not the raised
+    // air-burst seat. Airstrikes are heavy ordnance → always above the gate.
+    if (!opts.noDamage && CBZ.cityFracture && CBZ.cityFracture.blastAt
+        && !(CBZ.cityAirstrikeExplosion && CBZ.cityAirstrikeExplosion._structWrapped)) {
+      const hy = opts.y != null ? Math.max(1.0, opts.y) : cy;
+      const hr = Math.min(4.6, 3.4 + (Math.min(2.4, power) - 1.3) * 0.9);   // big, room-exposing
+      try { CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power }); } catch (e) {}
+    }
   };
 
   // ============================================================
@@ -683,24 +872,25 @@
     let tx = -nz, tz = nx;
     const tl = Math.hypot(tx, tz);
     if (tl < 1e-4) { tx = 1; tz = 0; } else { tx /= tl; tz /= tl; }
-    while (chunks.length > 56) { const old = chunks.shift(); scene.remove(old.mesh); }
     const n = Math.round(7 + 5 * power);
+    while (chunks.length > CHUNK_CAP - n) recycleChunk();
     const fall = Math.sqrt(Math.max(0.5, y) / 8.8);   // time to reach the street under chunk gravity
     for (let i = 0; i < n; i++) {
       const glow = Math.random() < 0.25;
       const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
+      const sc = 0.7 + Math.random() * 1.1;
       const along = (Math.random() - 0.5) * 2.4;
       mesh.position.set(x + tx * along + nx * 0.3, y + (Math.random() - 0.3) * 1.6, z + tz * along + nz * 0.3);
       mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-      mesh.scale.setScalar(0.7 + Math.random() * 1.1);
+      mesh.scale.setScalar(sc);
       scene.add(mesh);
       chunks.push({
-        mesh,
+        mesh, hh: CHUNK_HH * sc,
         vx: nx * (0.8 + Math.random() * 2.4) + tx * (Math.random() - 0.5) * 3,
         vy: 0.5 - Math.random() * 3,                  // DOWNWARD bias — it pours off the wound
         vz: nz * (0.8 + Math.random() * 2.4) + tz * (Math.random() - 0.5) * 3,
         spin: (Math.random() - 0.5) * 14, t: 0, life: fall + 1.3 + Math.random() * 0.9,
-        trail: glow ? 0 : -1,
+        rest: 0, settled: false, trail: glow ? 0 : -1,
       });
     }
     // pale concrete dust sheeting down the face below the wound, staggered so
@@ -721,21 +911,188 @@
   // fracture.js pours wall-hole debris through this same pooled cascade
   CBZ.cityFacadeAvalanche = facadeAvalanche;
 
+  // ---- PERSISTENT RUBBLE HEAP at the base of a wall wound ----
+  // Real blasted reinforced concrete dumps a HEAP of masonry on the sidewalk
+  // (Red Faction / MechAssault: "down to a pile of dusty rubble"). The flying
+  // chunks already tumble + settle, but they scatter thin; this drops a DENSE,
+  // CLUSTERED pile that rests immediately and persists like a world prop —
+  // overlapping lumps mounded highest near the wall and tapering out, a few
+  // larger slab fragments, all seated on the true ground (floorAt).
+  // cx,cz = the wall-base point under the wound; nx,nz = outward normal (the
+  // heap spills onto the street side); spread/size scale with the hole width.
+  function rubbleHeap(cx, cz, nx, nz, spread, size, count) {
+    // tangent along the wall so the pile is wider than it is deep
+    let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    const groundN = nNorm(nx, nz);
+    const gx = groundN.x, gz = groundN.y;
+    const base = floorAt(cx, cz);
+    for (let i = 0; i < count; i++) {
+      while (chunks.length > CHUNK_CAP - 1) recycleChunk();
+      // bias placement toward the wall + low; pieces farther out sit lower so the
+      // heap mounds against the facade and tapers onto the pavement.
+      const out = Math.random() * Math.random() * spread;       // r^2 → clusters near 0 (the wall)
+      const along = (Math.random() - 0.5) * spread * 1.6;
+      const px = cx + gx * (0.35 + out) + tx * along;
+      const pz = cz + gz * (0.35 + out) + tz * along;
+      // mound height: tall against the wall, thinning outward, plus jitter
+      const mound = Math.max(0, (1 - out / (spread + 0.01))) * size * 0.9;
+      const big = Math.random() < 0.28;
+      const sc = (big ? 1.3 + Math.random() * 1.1 : 0.6 + Math.random() * 0.8) * size;
+      const mesh = new THREE.Mesh(big ? rubbleGeo : chunkGeo, Math.random() < 0.5 ? rubbleMat : rubbleMat2);
+      mesh.scale.set(sc, sc * (0.6 + Math.random() * 0.5), sc * (0.8 + Math.random() * 0.5));
+      const hh = (big ? 0.2 : CHUNK_HH) * sc;
+      mesh.position.set(px, floorAt(px, pz) + hh + Math.random() * mound, pz);
+      mesh.rotation.set(Math.random() * 3, Math.random() * 6.28, Math.random() * 3);
+      scene.add(mesh);
+      // born SETTLED — it's a heap, it doesn't fly. Long rest = persistent prop.
+      chunks.push({ mesh, vx: 0, vy: 0, vz: 0, hh, spin: 0, t: 0, life: 1,
+        rest: 0, settled: true, trail: -1, heap: true });
+    }
+  }
+  // unit ground normal (guards a near-vertical / zero normal)
+  const _nn = { x: 0, y: 1 };
+  function nNorm(nx, nz) { const l = Math.hypot(nx, nz); if (l < 1e-3) { _nn.x = 0; _nn.y = 1; } else { _nn.x = nx / l; _nn.y = nz / l; } return _nn; }
+
+  // ---- DANGLING REBAR off the wound's top edge ----
+  // The iconic read of blasted reinforced concrete: bent steel bars hanging out
+  // of the broken slab. A few thin dark bars rooted at the header line, kinked
+  // and drooping outward over the hole. Pooled + persistent (they hold ~80s with
+  // the wound, then fade), capped so a mag-dump of rockets can't flood them.
+  function dangleRebar(cx, topY, cz, nx, nz, width, n) {
+    let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    for (let i = 0; i < n; i++) {
+      while (rebar.length >= REBAR_CAP) { const o = rebar.shift(); scene.remove(o.group); }
+      const along = (Math.random() - 0.5) * width * 0.85;
+      const x = cx + tx * along + nx * 0.12;
+      const z = cz + tz * along + nz * 0.12;
+      const g = new THREE.Group();
+      g.position.set(x, topY - 0.05, z);
+      // root segment hangs DOWN out of the broken header, kinked outward
+      const len1 = 0.5 + Math.random() * 0.7;
+      const s1 = new THREE.Mesh(rebarGeo, rebarMat);
+      s1.scale.y = len1; s1.position.y = -len1 / 2;
+      // tilt it outward + a little sideways so bars splay instead of hanging neat
+      s1.rotation.z = (Math.random() - 0.5) * 0.5;
+      s1.rotation.x = (nz !== 0 ? 1 : 0) * (0.3 + Math.random() * 0.5) * (nz > 0 ? 1 : -1);
+      g.add(s1);
+      // a kinked tip on most bars (the L-bend that sells "torn from concrete")
+      if (Math.random() < 0.75) {
+        const len2 = 0.25 + Math.random() * 0.4;
+        const s2 = new THREE.Mesh(rebarGeo, rebarMat);
+        s2.scale.y = len2;
+        // hang the tip off the bottom of the first segment, bent ~60-100°
+        s2.position.set((Math.random() - 0.5) * 0.1, -len1 - len2 / 2 * 0.4, (Math.random() - 0.5) * 0.1);
+        s2.rotation.z = (Math.random() - 0.5) * 1.8;
+        s2.rotation.x = (Math.random() - 0.5) * 1.8;
+        g.add(s2);
+      }
+      // splay the whole bundle outward from the facade
+      g.rotation.y = Math.atan2(nx, nz) + (Math.random() - 0.5) * 0.6;
+      scene.add(g);
+      rebar.push({ group: g, t: 0, hold: 78 + Math.random() * 40 });
+    }
+  }
+
+  // ---- SOOT RING decal hugging the wall around the wound ----
+  // The owner called the OLD floating brown decal fake — but that was a scar
+  // sitting in EMPTY AIR with no hole behind it. Now there is a real carved hole,
+  // so a blackened soot ring rimming the wound reads exactly right (research:
+  // radial-gradient blackening that fades at the edges, smudges radiating from
+  // the epicentre). Reuses the wall-scar pool/updater already in this file.
+  function woundScorch(x, y, z, nx, ny, nz, size) {
+    addWallScar(x, y, z, nx, ny, nz, size);
+  }
+
+  // ============================================================
+  // cityWallRuin — the COMPLETE real-blast facade read in one call, composed by
+  // fracture.js right after it carves a persistent hole. Layers, big→subtle:
+  //   1) debris AVALANCHE pouring down the facade (the existing cascade),
+  //   2) a DENSE PERSISTENT RUBBLE HEAP mounded at the wall base on the street,
+  //   3) DANGLING REBAR off the broken header edge,
+  //   4) a blackened SOOT RING rimming the hole on the wall face,
+  //   5) a fat concrete DUST CLOUD bursting out of the wound,
+  //   6) a LINGERING smoke wound (60-90s column) so the ruin reads across the
+  //      district — wired through addBlastWound.
+  // x,y,z = the wound centre on the outer wall plane; nx,nz = outward normal.
+  // o = { power, width (hole width), top, bottom } from the carved gap.
+  // ============================================================
+  CBZ.cityWallRuin = function (x, y, z, nx, nz, o) {
+    o = o || {};
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const power = Math.min(2.4, o.power || 1.4);
+    const width = Math.max(1.0, o.width || (2 + power));
+    const top = o.top != null ? o.top : y + width * 0.5;
+    const bottom = o.bottom != null ? o.bottom : Math.max(0, y - width * 0.5);
+    // normalize the outward normal in the ground plane
+    const gn = nNorm(nx, nz); nx = gn.x; nz = gn.y;
+
+    // (1) avalanche down the face (scaled to the hit, not capped to a dribble)
+    facadeAvalanche(x, y, z, nx, nz, Math.min(2.2, power + 0.2));
+
+    // (2) the persistent RUBBLE HEAP at the base — sized to the hole. A wider,
+    //     more powerful hole drops a bigger, deeper pile of more pieces.
+    const heapN = Math.round(14 + width * 4 + power * 6);
+    const heapSpread = 1.4 + width * 0.5;
+    const heapSize = 1.0 + power * 0.25;
+    rubbleHeap(x, z, nx, nz, heapSpread, heapSize, heapN);
+
+    // (3) dangling REBAR off the broken header (only if the wound is up off the
+    //     deck — a slab edge to tear from; ground-line blasts get fewer bars)
+    const nBar = top > 2.2 ? Math.round(3 + width * 0.8) : 2;
+    dangleRebar(x, top - 0.1, z, nx, nz, width, Math.min(8, nBar));
+
+    // (4) blackened SOOT RING rimming the hole on the wall face
+    woundScorch(x, y, z, nx, 0, nz, width * 1.5 + 1.0);
+
+    // (5) a fat CONCRETE DUST CLOUD punching out of the wound + a low billow that
+    //     rolls down to the heap (this is the "dust sheet" the owner asked for)
+    pointBurst(x, z, Math.round(22 + 14 * power), 0xa39a8c, 0.5, 3.5 + power * 1.2, 1.2, true, y);
+    for (let i = 0; i < Math.round(5 + power * 3); i++) {
+      const a = Math.random() * 6.2832, sp = 1.2 + Math.random() * 1.8;
+      spawnPuff(x + nx * (0.4 + Math.random() * 0.6), y + (Math.random() - 0.4) * width * 0.5, z + nz * (0.4 + Math.random() * 0.6), {
+        additive: false, smoke: true, base: 1.4, pop: (4 + Math.random() * 3) * power,
+        life: 2.0 + Math.random() * 1.4, maxOp: 0.4, shade: 0.36 + Math.random() * 0.08,
+        spin: (Math.random() - 0.5),
+        vx: nx * sp + (Math.random() - 0.5), vy: 0.3 + Math.random() * 0.8, vz: nz * sp + (Math.random() - 0.5),
+        delay: Math.random() * 0.25,
+      });
+    }
+    // low dust rolling down the facade to the rubble pile (staggered cascade)
+    const drop = Math.min(Math.max(2, top - bottom), 16);
+    for (let i = 0; i < Math.round(5 + power * 2); i++) {
+      const f = Math.random();
+      spawnPuff(x + (Math.random() - 0.5) * width + nx * 0.5, top - f * drop, z + (Math.random() - 0.5) * width + nz * 0.5, {
+        additive: false, smoke: true, base: 1.0, pop: 3.4 + Math.random() * 2.0,
+        life: 1.6 + Math.random(), maxOp: 0.4, shade: 0.4 + Math.random() * 0.08,
+        spin: (Math.random() - 0.5),
+        vx: nx * 0.5, vy: -(1.5 + Math.random() * 2.0), vz: nz * 0.5,
+        delay: f * 0.5,
+      });
+    }
+
+    // (6) the wound keeps smoking for a minute-plus — the show-off plume that
+    //     tells the whole block a rocket hit here.
+    addBlastWound(x, y, z, nx, 0, nz, 60 + Math.random() * 30);
+  };
+
   function addBlastWound(x, y, z, nx, ny, nz, dur) {
     while (wounds.length >= 3) wounds.shift();   // 3 live wounds max — the oldest stops smoking
     wounds.push({ x, y, z, nx, ny, nz, t: 0, dur, acc: 0.2 });
   }
 
   function parapetChunk(x, topY, z, nx, nz) {
-    while (chunks.length > 56) { const old = chunks.shift(); scene.remove(old.mesh); }
+    while (chunks.length > CHUNK_CAP - 1) recycleChunk();
     const mesh = new THREE.Mesh(chunkGeo, chunkMat);
-    mesh.scale.set(4 + Math.random() * 2.5, 3 + Math.random() * 2, 4 + Math.random() * 2.5);  // a ~1.2–1.8u coping block
+    const sy = 3 + Math.random() * 2;
+    mesh.scale.set(4 + Math.random() * 2.5, sy, 4 + Math.random() * 2.5);  // a ~1.2–1.8u coping block
     mesh.position.set(x + nx * 0.8, topY + 0.5, z + nz * 0.8);
     mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
     scene.add(mesh);
     chunks.push({
-      mesh, vx: nx * (1.5 + Math.random() * 2), vy: 1.2 + Math.random() * 1.5, vz: nz * (1.5 + Math.random() * 2),
-      spin: (Math.random() - 0.5) * 6, t: 0, life: Math.sqrt(Math.max(1, topY) / 8.8) + 2.2, trail: -1,
+      mesh, hh: CHUNK_HH * sy,
+      vx: nx * (1.5 + Math.random() * 2), vy: 1.2 + Math.random() * 1.5, vz: nz * (1.5 + Math.random() * 2),
+      spin: (Math.random() - 0.5) * 6, t: 0, life: Math.sqrt(Math.max(1, topY) / 8.8) + 2.2,
+      rest: 0, settled: false, trail: -1,
     });
   }
 
@@ -784,6 +1141,8 @@
     smolders.length = 0;
     for (const s of scars) { scene.remove(s.mesh); s.mat.dispose(); }
     scars.length = 0;
+    for (const rb of rebar) scene.remove(rb.group);   // shared geo/mats — remove only
+    rebar.length = 0;
   };
 
   CBZ.onAlways(9.5, function (dt) {
@@ -797,6 +1156,12 @@
         s.mat.opacity = Math.max(0, 0.95 * (1 - (s.t - s.hold) / 8));
         if (s.t - s.hold >= 8) { scene.remove(s.mesh); s.mat.dispose(); scars.splice(i, 1); }
       }
+    }
+    // dangling rebar: hold with the wound, then quietly retire (no fade — steel
+    // doesn't fade; we just despawn it once the wound has long stopped smoking).
+    for (let i = rebar.length - 1; i >= 0; i--) {
+      const rb = rebar[i]; rb.t += dt;
+      if (rb.t >= rb.hold) { scene.remove(rb.group); rebar.splice(i, 1); }
     }
     // wounded facades keep smoking: ~2 puffs/s drifting up + out of the hole,
     // thinning as the wound cools; the first beats still cook with flame licks
@@ -843,13 +1208,28 @@
     const grav = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
     for (let i = bursts.length - 1; i >= 0; i--) {
       const b = bursts[i]; b.t += dt;
-      for (let j = 0; j < b.pos.length; j += 3) {
+      // step ONLY the live particles. n = count*3 for a pooled slot (its buffer
+      // is BURST_MAX long but only `count` are alive) and the full length for the
+      // legacy per-blast path — identical motion to before in both cases.
+      const n = b.n != null ? b.n : b.pos.length;
+      for (let j = 0; j < n; j += 3) {
         b.vel[j + 1] -= grav * (b.dust ? 0.16 : 0.65) * dt;
         b.pos[j] += b.vel[j] * dt; b.pos[j + 1] += b.vel[j + 1] * dt; b.pos[j + 2] += b.vel[j + 2] * dt;
       }
       b.geo.attributes.position.needsUpdate = true;
-      b.mat.opacity = Math.max(0, (b.dust ? 0.5 : 0.95) * (1 - b.t / b.life));
-      if (b.t >= b.life) { scene.remove(b.mesh); b.geo.dispose(); b.mat.dispose(); bursts.splice(i, 1); }
+      b.mat.opacity = Math.max(0, (b.op0 != null ? b.op0 : (b.dust ? 0.5 : 0.95)) * (1 - b.t / b.life));
+      if (b.t >= b.life) {
+        if (b.slot) {
+          // POOLED: just retire the slot for reuse — no scene churn, no dispose,
+          // no GC. (If the slot was already re-acquired by a later burst its
+          // .live points elsewhere; only clear it if it still references us.)
+          b.mesh.visible = false; b.geo.setDrawRange(0, 0);
+          if (b.slot.live === b) b.slot.live = null;
+        } else {
+          scene.remove(b.mesh); b.geo.dispose(); b.mat.dispose();
+        }
+        bursts.splice(i, 1);
+      }
     }
     for (let i = rings.length - 1; i >= 0; i--) {
       const r = rings[i]; r.t += dt;
@@ -860,16 +1240,50 @@
       if (r.t >= r.life) { scene.remove(r.mesh); r.geo.dispose(); r.mat.dispose(); rings.splice(i, 1); }
     }
     for (let i = chunks.length - 1; i >= 0; i--) {
-      const c = chunks[i]; c.t += dt; c.vy -= grav * 0.8 * dt; // mild gravity so shrapnel hangs
-      c.mesh.position.x += c.vx * dt; c.mesh.position.y += c.vy * dt; c.mesh.position.z += c.vz * dt;
+      const c = chunks[i]; c.t += dt;
+      const p = c.mesh.position;
+      if (c.settled) {
+        // SETTLED: the piece RESTS on the road as a permanent prop of the world
+        // (no per-frame physics). It lingers up to ~60s, then quietly retires —
+        // but the population-pool recycle evicts it first if space is needed, so
+        // nothing ever pops out from under the player's eye.
+        c.rest += dt;
+        // a RUBBLE-HEAP piece is the permanent ruin — it persists far longer
+        // (the population-pool recycle still evicts it if space is needed AND
+        // it's off-screen, so it never pops out under the player's eye).
+        if (c.rest > (c.heap ? 600 : 60)) { scene.remove(c.mesh); chunks.splice(i, 1); }
+        continue;
+      }
+      c.vy -= grav * 0.8 * dt; // mild gravity so shrapnel hangs
+      p.x += c.vx * dt; p.y += c.vy * dt; p.z += c.vz * dt;
       c.mesh.rotation.x += c.spin * dt; c.mesh.rotation.z += c.spin * 0.7 * dt;
-      if (c.mesh.position.y < 0.1) { c.mesh.position.y = 0.1; c.vy *= -0.25; c.vx *= 0.6; c.vz *= 0.6; c.spin *= 0.6; }
+      // GROUND REST: a chunk's BOTTOM meets the actual ground (floorAt: street,
+      // rooftop, raised terrain), seated by its half-height + a hair of offset so
+      // it never z-fights the road paint. Bounce loses most of its energy; once
+      // it is slow + low it SETTLES FLAT (kills jitter) and becomes permanent.
+      const hh = c.hh || 0.09;
+      const fl = floorAt(p.x, p.z) + hh + 0.015;
+      if (p.y <= fl) {
+        p.y = fl;
+        if (c.vy < 0) c.vy *= -0.25;              // damped bounce
+        c.vx *= 0.6; c.vz *= 0.6; c.spin *= 0.55;
+        const slow = (c.vx * c.vx + c.vy * c.vy + c.vz * c.vz) < 0.6;
+        if (slow || c.t > c.life) {
+          c.settled = true; c.rest = 0;
+          c.vx = c.vy = c.vz = 0; c.spin = 0;
+          // lie flat on the deck rather than frozen at a tumble angle
+          c.mesh.rotation.x = (Math.random() - 0.5) * 0.5;
+          c.mesh.rotation.z = (Math.random() - 0.5) * 0.5;
+        }
+      }
       // glowing shards drip a faint ember spark every so often as they fly
       if (c.trail >= 0 && c.t < 0.6) {
         c.trail += dt;
-        if (c.trail > 0.06) { c.trail = 0; spawnPuff(c.mesh.position.x, c.mesh.position.y, c.mesh.position.z, { additive: true, base: 0.16, pop: 0.05, life: 0.35, maxOp: 0.9, vy: -1 }); }
+        if (c.trail > 0.06) { c.trail = 0; spawnPuff(p.x, p.y, p.z, { additive: true, base: 0.16, pop: 0.05, life: 0.35, maxOp: 0.9, vy: -1 }); }
       }
-      if (c.t >= c.life) { scene.remove(c.mesh); chunks.splice(i, 1); }
+      // safety: an in-flight piece that never found ground (flung off the map)
+      // still retires so it can't leak the pool.
+      if (!c.settled && c.t > c.life + 8) { scene.remove(c.mesh); chunks.splice(i, 1); }
     }
     for (let i = scorches.length - 1; i >= 0; i--) {
       const s = scorches[i]; s.t += dt;

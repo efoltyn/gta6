@@ -94,9 +94,28 @@
   const CITY_DR = 0.6;           // fraction of incoming damage the player actually takes
   const HEADSHOT_FRAC = 0.6;     // a headshot deals up to 60% of max HP (not an instakill)
 
+  // corpse-hit scratch (zero per-call allocation) for the wake-on-hit route below
+  const _crpP = { x: 0, y: 0, z: 0 }, _crpD = { x: 0, y: 0, z: 0 };
   CBZ.cityHurtPlayer = function (dmg, fromX, fromZ, reason, headshot, attacker, nonlethal) {
     const P = CBZ.player;
-    if (P.dead || (g.invuln || 0) > 0) return;
+    // YOU DON'T LOSE PHYSICS WHEN YOU DIE: while dead (the WASTED / spectate
+    // window) a round from an NPC no longer just vanishes — your corpse stays a
+    // reactive ragdoll. Route the hit to the wake-on-hit hook so the body JERKS,
+    // takes the impulse and accumulates a wound where it lands, then re-sleeps.
+    // (No HP/regen/wound-model side effects — you're already down.)
+    if (P.dead) {
+      if (CBZ.cityCorpseHit && g.mode === "city" && CBZ.city && CBZ.city.playerActor) {
+        let dx = 0, dz = 0;
+        if (fromX != null && P.pos) { dx = P.pos.x - fromX; dz = P.pos.z - fromZ; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
+        _crpP.x = P.pos ? P.pos.x : 0; _crpP.y = (P.pos ? P.pos.y : 0) + (headshot ? 1.95 : 1.1); _crpP.z = P.pos ? P.pos.z : 0;
+        _crpD.x = dx; _crpD.y = 0; _crpD.z = dz;
+        // scale the jolt to the round: a pistol nudges, a shotgun/blast tosses it.
+        const f = nonlethal ? 3 : Math.min(20, 4 + (dmg || 6) * 0.16);
+        try { CBZ.cityCorpseHit(CBZ.city.playerActor, _crpP, _crpD, f); } catch (e) {}
+      }
+      return;
+    }
+    if ((g.invuln || 0) > 0) return;
     if (attacker) {
       // an ACTOR (has .pos) can be SPECTATED after WASTED; a bare string just names
       // the killer. g._cityKiller STAYS a display string either way (killfeed.js +

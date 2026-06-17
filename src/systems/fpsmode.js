@@ -91,7 +91,19 @@
     }
   }
   function weapon() { normalizeWeapon(); return WEAPONS[fps.weapon] || WEAPONS[0]; }
+  // HOLSTER (city-only de-escalation): when the player holsters, armed() reads
+  // FALSE so the EXISTING fists viewmodel shows and every cityHasGun()/witness/
+  // wanted/panic system automatically treats the player as unarmed — the
+  // de-escalation comes free from this single gate. Default false (undefined =
+  // not holstered). Jail/survival are untouched (the holster flag is city-only).
+  CBZ.cityHolster = function (on) {
+    if (CBZ.game.mode !== "city") return;
+    CBZ.game.cityHolstered = (on === undefined) ? !CBZ.game.cityHolstered : !!on;
+    setAmmoHud();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  };
   function armed() {
+    if (CBZ.game.mode === "city" && CBZ.game.cityHolstered) return false;   // holstered = read as unarmed (fists show, de-escalates)
     return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
   }
   function shoulderActive() { return !fps.active && armed() && CBZ.game.state === "playing"; }
@@ -132,6 +144,7 @@
   }
 
   function resetWeapons() {
+    if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // a fresh run / respawn is never holstered (PROG also zeroes it)
     fps.weapon = CBZ.currentWeaponId ? Math.max(0, weaponIndex(CBZ.currentWeaponId)) : 0;
     normalizeWeapon();
     fps.rounds = WEAPONS.map((w) => w.mag);
@@ -141,6 +154,8 @@
     dryCD = 0;
     triggerHeld = false;
     recoil = 0; recoilSide = 0; bloom = 0; recoilHold = 0;
+    recoilPitch = 0; recoilYaw = 0; shotsInBurst = 0; sinceShot = 99;
+    fpsHipFov = 0;
     hitMarkerT = 0;
     if (hitMarker && hitMarker.wrap) hitMarker.wrap.style.display = "none";
     syncAmmo();
@@ -348,6 +363,37 @@
   // and-gun and the cone opens up. recoilHold delays recoil recovery slightly
   // for a snappier kick-then-settle (instead of an instant rubber-band).
   let bloom = 0, recoilHold = 0;
+  // ---- RECOIL OFFSET CHANNELS (CoD/Apex model) ----------------------------
+  // The "missing high" ROOT FIX: the per-shot vertical/horizontal kick lives in
+  // its OWN transient offset channel (radians) that is ADDED to the shot
+  // direction only and is GUARANTEED to spring back to 0 every frame — it NEVER
+  // mutates the player's stored aim (fps.fp / CBZ.cam.pitch). So a mag-dump
+  // climbs along a learnable pattern then re-centres exactly on the crosshair;
+  // tapped/burst shots land where aimed instead of permanently drifting up.
+  // Identical in FPS and 3PS, and in jail/survival/city (strict improvement).
+  let recoilPitch = 0, recoilYaw = 0;     // transient aim offset (rad), trends to 0
+  let shotsInBurst = 0;                    // pattern position; reset by a fire gap
+  let sinceShot = 99;                      // s since last shot — drives the burst reset
+  // deterministic L/R yaw weave (signed fractions of basePitch): straight up for
+  // the first few, then a learnable side-to-side sway. Scaled per weapon by
+  // w.yawWeave. This is the PATTERN (skill expression), not random bloom.
+  const YAW_PATTERN = [0, 0.10, 0.20, 0.15, -0.10, -0.25, -0.15, 0.20, 0.35, 0.30, 0.10, -0.20, -0.30, -0.10, 0.25];
+  // ramp curve: first ~3 shots controllable (1.0), then climb to rampMax over
+  // shots 3..12, clamped thereafter — sustained auto fire kicks harder.
+  function rampCurve(n, rampMax) {
+    if (n < 3) return 1.0;
+    if (n >= 12) return rampMax;
+    return 1.0 + (rampMax - 1.0) * ((n - 3) / 9);
+  }
+  // ADS multiplier: holding RMB (CBZ.isADS) softens recoil ~0.55x. Applies in
+  // ALL modes (strict feel improvement); RMB is already wired (aimHeld).
+  function adsRecoilMul() { return aimHeld ? 0.55 : 1; }
+  // FPS ADS zoom: fpsmode owns the FPS camera (runs after systems/camera.js), so
+  // the slight zoom-on-RMB lives here. We track the HIP fov (whatever camera.js
+  // set this frame, captured only while NOT aiming so it never ratchets) and ease
+  // toward hip-ADS_FOV_DROP when RMB is held. ~14° tighter = a red-dot punch-in.
+  let fpsHipFov = 0;          // last-known hip fov (refreshed every non-ADS frame)
+  const ADS_FOV_DROP = 14;
   const PUNCH_DUR = 0.26;
   let shotCD = 0, dryCD = 0, triggerHeld = false, reloadWeapon = 0;
   // reusable per-shot sfx options (no per-shot allocation at auto-fire rates):
@@ -655,6 +701,21 @@
     return forward(out);
   }
 
+  // The SHOT direction: the TRUE crosshair (aimForward) with the transient
+  // recoil offset added on top — pitched UP by recoilPitch and swayed sideways
+  // by recoilYaw. forward()/aimForward() stay PURE (casing eject, muzzle origin,
+  // reticle target, FPS camera all keep reading the clean aim); only bullets
+  // carry the climb. Small-angle add about the freshly-built basis; the caps
+  // keep the approximation sub-degree and it self-corrects as it recenters.
+  function aimWithRecoil(out) {
+    aimForward(out);
+    if (recoilPitch || recoilYaw) {
+      buildBasis(out);   // sets `right` (out×UP) and `aimUp` (right×out)
+      out.addScaledVector(aimUp, recoilPitch).addScaledVector(right, recoilYaw).normalize();
+    }
+    return out;
+  }
+
   // ---- HUD ----
   const cross = document.getElementById("crosshair");
   const ammoEl = document.getElementById("ammo");
@@ -907,6 +968,38 @@
     return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
+  // ---- ray vs the DOWNED (CITY-ONLY) -----------------------------------------
+  // OWNER: you must be able to keep shooting a corpse — more holes, it reacts.
+  // findActorHit deliberately skips dead actors (so a live target isn't blocked
+  // by a body in front of it); this is its dead-only twin. A corpse lies PRONE,
+  // so the standing head/torso/leg spheres don't fit — instead we test a couple
+  // of low, fat spheres around the body's settled root (group.position tracks the
+  // ragdoll). Returns the nearest dead actor + whether the hit landed up near the
+  // head end (for the decap read). City-only; never runs in jail/survival.
+  const CORPSE_R = 0.62;        // prone body is a low fat sausage
+  function findCorpseHit(origin, dir, maxT) {
+    if (CBZ.game.mode !== "city") return null;
+    let best = null, bestDist = maxT, bestHead = false;
+    const scan = function (list) {
+      if (!list) return;
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!a || !a.dead || a.escaped || !a.group || a.group.visible === false) continue;
+        const gp = a.group.position, gy = gp.y || 0;
+        // a settled body hugs the ground: one sphere at the torso mass (low),
+        // one a touch higher toward the head end. Heading is unknown post-topple,
+        // so we keep them vertically split — a head shot reads as the upper hit.
+        const td = sphereEntry(origin, dir, gp.x, gy + 0.35, gp.z, CORPSE_R, maxT);
+        if (td >= 0 && td < bestDist) { best = a; bestDist = td; bestHead = false; }
+        const hd = sphereEntry(origin, dir, gp.x, gy + 0.62, gp.z, CORPSE_R * 0.7, maxT);
+        if (hd >= 0 && hd < bestDist) { best = a; bestDist = hd; bestHead = true; }
+      }
+    };
+    scan(CBZ.cityPeds); scan(CBZ.cityCops); scan(CBZ.cityMedics);
+    if (!best) return null;
+    return { corpse: best, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
+  }
+
   function resolveShot(w, dir) {
     eye.copy(CBZ.camera.position);
     const wall = wallDistance(eye, dir, w.range);
@@ -921,6 +1014,11 @@
     const air = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
     if (hit && (!air || hit.dist <= air.dist)) return hit;
     if (air) return { actor: null, aircraft: true, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) };
+    // a DOWNED body in the path (city-only): only when NO live actor was hit, so a
+    // corpse never shadows a living target. Competes on distance with car/wall —
+    // shoot it for more holes + a jerk; wins only if it's nearer than those.
+    const corpse = findCorpseHit(eye, dir, maxT);
+    if (corpse && (!carHit || corpse.dist <= carHit.dist)) return corpse;
     if (carHit) return { actor: null, car: carHit.car, normal: carHit.normal, dist: carHit.dist, point: eye.clone().addScaledVector(dir, carHit.dist) };
     return {
       actor: null,
@@ -1105,15 +1203,35 @@
     setAmmoHud();
 
     const RK = 0.45;  // global recoil dampener — the guns were kicking too hard
-    recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK);
-    recoilSide += (Math.random() * 2 - 1) * w.sideKick * RK;
+    // BURST RESET: a fire gap > 0.25s wipes the ramp + pattern position, so the
+    // next round is a fresh first-shot (soft, dead-centre). sinceShot was
+    // accumulated by the frame loop; reset it now that we've fired.
+    if (sinceShot > 0.25) shotsInBurst = 0;
+    sinceShot = 0;
+    const adsK = adsRecoilMul();
+    // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
+    // just softened under ADS so holding RMB visibly settles the gun.
+    recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK);
+    recoilSide += (Math.random() * 2 - 1) * w.sideKick * RK * adsK;
     recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
     // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
     // capped so even mag-dumps stay usable. moving adds extra below in the loop.
-    bloom = Math.min(w.spread * 2.6, bloom + w.spread * (w.auto ? 0.9 : 0.45));
-    if (fps.active) fps.fp = Math.min(1.3, fps.fp + (w.climb + Math.random() * w.climb * 0.45) * RK);
-    else CBZ.cam.pitch = Math.min(1.15, CBZ.cam.pitch + w.climb * 0.36 * RK);
-    CBZ.cam.yaw += (Math.random() * 2 - 1) * w.sideKick * 0.55 * RK;
+    bloom = Math.min(w.spread * 2.6, bloom + w.spread * (w.auto ? 0.9 : 0.45) * adsK);
+    if (!w.noRecoil) {
+      // AIM-OFFSET kick (the part that decides where bullets go) — into the
+      // dedicated recoilPitch/recoilYaw channels, NOT the player's stored aim.
+      const ramp = rampCurve(shotsInBurst, w.rampMax || 1.6);
+      // first shot of a fresh burst is SOFTER (0.6x) + dead-centre — pinpoint tap.
+      const firstShot = shotsInBurst === 0 ? 0.6 : 1;
+      const basePitch = w.climb * RK;
+      const jitter = 0.92 + Math.random() * 0.16;                       // <=8% noise
+      const pitchKick = basePitch * ramp * firstShot * jitter * adsK;
+      const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
+      const yawKick = (pat * (w.yawWeave || 0.6) + (Math.random() * 2 - 1) * 0.15) * basePitch * ramp * adsK;
+      recoilPitch = Math.min(0.5, recoilPitch + pitchKick);   // cap so a mag-dump tops out
+      recoilYaw = Math.max(-0.32, Math.min(0.32, recoilYaw + yawKick));
+      shotsInBurst++;
+    }
     pumpT = w.pump ? 1 : pumpT;
 
     const flashScale = w.flash * (0.9 + Math.random() * 0.28);
@@ -1145,7 +1263,11 @@
     ejectCasing(w);
 
     const origin = muzzleWorld(tmp2);
-    aimForward(fwd);
+    // GUNS fire along the recoil-carried direction (climbs the pattern). The
+    // ROCKET fires STRAIGHT down the TRUE crosshair — no recoil bias, ever — so
+    // it lands exactly under the reticle and the SAME straight fwd is what the
+    // net sends to remote clients (they must see the same straight rocket).
+    if (w.explosive) aimForward(fwd); else aimWithRecoil(fwd);
     if (CBZ.net && CBZ.net.active && CBZ.net.onShot) CBZ.net.onShot(origin, fwd, w);
 
     // EXPLOSIVE (RPG/bazooka): a hitscan-to-impact rocket. Resolve where the
@@ -1154,39 +1276,72 @@
     // BLAST is the kill, so we skip the normal per-pellet damage loop entirely.
     if (w.explosive) {
       const MIN_DET = 4;
-      const hit = resolveShot(w, fwd);   // sets `eye` to the camera; resolves wall/actor along fwd
-      // Detonate at the NEAREST of: what the ray HIT (wall/NPC), where it crosses
-      // the STREET, or max range. The ground-crossing is the key "far-away" fix —
-      // a rocket aimed down a block at distant targets used to fly OVER them (their
-      // rigs LOD-culled, so findActorHit missed) and pop in empty air at max range.
-      // Now it lands ON the street among them, and the big blast radius does the rest.
-      let detT = hit.point ? Math.max(0.1, hit.dist || w.range) : w.range;
+      // a rocket REACHES across the whole map — its detonation must not be capped
+      // at the gun's per-pellet `range` (200), or a tower you aim at 250u down a
+      // boulevard shows the fireball in empty air SHORT of the wall and the facade
+      // never reacts (owner-filmed "far/high building unaffected"). FAR ≈ the map
+      // diagonal: long enough to reach any facade, the trace is the same cheap
+      // losBlockers raycast regardless of distance.
+      const FAR = 450;
+      const hit = resolveShot(w, fwd);   // sets `eye` to the camera; resolves wall/actor along fwd (clamped to w.range)
+      // A DEDICATED long-range wall trace so a distant facade beyond w.range is
+      // actually struck — resolveShot only looks out to w.range, so a far tower
+      // returns wall:false and the rocket used to die at 200u in open air.
+      const farWall = wallDistance(eye, fwd, FAR);
+      // Detonate at the NEAREST of: what the close ray HIT (actor/car/near wall),
+      // the FAR wall down the sightline, where the ray crosses the STREET, or FAR.
+      // The ground-crossing is the original "far-away" fix; the far-wall trace is
+      // the new one — together a rocket lands ON whatever it's pointed at, near or
+      // far, and the big blast radius does the rest.
+      let detT = (hit.wall || hit.actor || hit.car || hit.aircraft) && hit.dist ? Math.max(0.1, hit.dist) : FAR;
+      if (farWall && farWall.distance < detT) detT = Math.max(0.1, farWall.distance);
       if (fwd.y < -0.01) { const gt = (0 - eye.y) / fwd.y; if (gt > 0 && gt < detT) detT = gt; }  // ground (street ≈ y0)
-      detT = Math.max(MIN_DET, Math.min(detT, w.range));   // never on the shooter, never past range
+      detT = Math.max(MIN_DET, Math.min(detT, FAR));   // never on the shooter, never past the map
+      // the wall the rocket actually lands on (close hit OR the far facade) — used
+      // below to stamp the struck face's scar at the real impact point.
+      const wallStruck = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.wallHit
+        : (farWall && Math.abs(farWall.distance - detT) < 0.6) ? farWall : null;
+      const wallPoint = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.point
+        : (farWall && Math.abs(farWall.distance - detT) < 0.6 && farWall.point) ? farWall.point.clone() : null;
       const pt = eye.clone().addScaledVector(fwd, detT);
       fireTracer(origin, pt, w.tracer, 0.07);
       if (CBZ.game.mode === "city") {
         const groundHit = pt.y < 3.5;   // the blast actually couples to the street
         // the fireball/smoke/damage bloom AT the impact height — a tower hit
-        // 30u up no longer pops at the kerb below it (crashfx reads opts.y)
+        // 30u up no longer pops at the kerb below it (crashfx reads opts.y). This
+        // single call is ALSO what carves the facade: cityExplosion is wrapped to
+        // run the fracture chain (cityFracture.blastAt at opts.y, power-scaled), so
+        // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
+        // the same wall a second time — it only adds flavor (scar/debris/breach).
         if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
         // wreck the storefront HARD — shatter a wide radius of glass (was +2)
         if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
+        // AND ray-shatter every pane in the rocket's ACTUAL flight path (eye→impact):
+        // the radial burst above only reaches glass near where the blast LANDS, so a
+        // rocket that detonates a hair short of (or beside) a tower used to leave the
+        // window you aimed at intact. This is the SAME path ray-shatter that makes the
+        // rifle reliably break far glass — now on the rocket, so "even RPGs" break it.
+        if (CBZ.cityShatterRay) CBZ.cityShatterRay(eye.x, eye.y, eye.z, fwd.x, fwd.y, fwd.z, detT + (w.blastRadius || 7), true);
         if (groundHit && CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
         // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
-        // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in)
+        // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in).
+        // GROUND-ONLY BONUS: the facade carve at any height already came from the
+        // cityExplosion chain above; this just widens a street-level hit into a
+        // walkable breach. cityBreach self-dedups via cityFracture.recent() (which
+        // blastAt armed synchronously a tick ago) so it never double-carves.
         if (groundHit && CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
-        // detonated ON a building face → the facade REACTS (crashfx): blackened
-        // blast scar on the wall, debris avalanche pouring down the facade, a
-        // lingering smoke column from the wound, a parapet block near the roof-
-        // line. Composes WITH the ground breach on a ground-floor wall hit.
-        if (hit.wall && hit.wallHit && hit.dist <= detT + 0.6 && CBZ.cityBlastWall) {
+        // detonated ON a building face (near OR far) → the facade REACTS (crashfx):
+        // debris avalanche pouring down the facade, a lingering smoke column from
+        // the wound, a parapet block near the roofline, concrete dust. NO carve
+        // (cityBlastWall is flavor only — the real hole is the cityExplosion chain).
+        // DEGATED: now fires for a far facade too, not just a near-wall hit.
+        if (wallStruck && CBZ.cityBlastWall) {
           // wall-face normal: the raycast's struck face rotated to world (the
           // exact face-entry normal, same idea as findCarHit's AABB slabs);
           // falls back to the reflected horizontal shot direction.
           shotDir.set(-fwd.x, 0, -fwd.z);
           if (shotDir.lengthSq() < 1e-6) shotDir.set(0, 1, 0); else shotDir.normalize();
-          const wf = hit.wallHit.face, wo = hit.wallHit.object;
+          const wf = wallStruck.face, wo = wallStruck.object;
           if (wf && wo && wo.getWorldQuaternion) {
             tmp.copy(wf.normal).applyQuaternion(wo.getWorldQuaternion(wallQ));
             if (tmp.lengthSq() > 0.25) {
@@ -1195,7 +1350,7 @@
             }
           }
           // MIN_DET can push pt past a point-blank wall — stamp at the wall point
-          CBZ.cityBlastWall(hit.dist < detT - 0.05 ? hit.point : pt, shotDir, { power: w.blastPower || 1.4 });
+          CBZ.cityBlastWall(wallPoint || pt, shotDir, { power: w.blastPower || 1.4 });
         }
         // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
         if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
@@ -1224,7 +1379,11 @@
     // per-weapon movement penalty: heavy rifles (AK moveSpread 2.3) punish
     // run-and-gun harder than the 1.4 default — plant your feet for the payoff.
     const moveBloom = w.spread * moving * (w.moveSpread || 1.4);
-    const cone = w.spread * (1 + recoil * 0.18) + bloom + moveBloom;
+    // ADS (RMB held) collapses the whole cone ~0.4x for pinpoint shots — the
+    // single biggest accuracy change, à la CoD. Applies in all modes (strict
+    // improvement); hip cone unchanged when RMB isn't held.
+    const adsSpreadK = aimHeld ? 0.4 : 1;
+    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK;
     const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
     let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
@@ -1234,12 +1393,14 @@
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
       if (i < 5 || pellets === 1) fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
       // city: a window in this pellet's path shatters (glass never blocks the
-      // shot) — but CALIBER decides REACH: a rifle slug still carries pane-
-      // breaking energy across the block, a 9mm/SMG round only up close.
+      // shot). EVERY round breaks the pane it actually passes through, out to
+      // wherever the bullet really travels (reach = the hit distance, already
+      // bounded by the wall/actor it strikes and the weapon's range). A 9mm
+      // round through a far window breaks it just like a rifle slug does — the
+      // old caliber clamp (GLASS_PISTOL_REACH) made only rifles break far glass.
       if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
         const reach = hit.dist != null ? hit.dist + 0.5 : w.range;
-        CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z,
-          heavyRound(w) ? reach : Math.min(reach, GLASS_PISTOL_REACH), true);
+        CBZ.cityShatterRay(origin.x, origin.y, origin.z, shotDir.x, shotDir.y, shotDir.z, reach, true);
       }
       if (hit.actor) {
         hitSomething = true;
@@ -1256,6 +1417,30 @@
         // part + blood soaking into the clothing (systems/wounds.js). Per
         // pellet — a shotgun blast scatters wounds (wounds.js caps the burst).
         if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal });
+      } else if (hit.corpse) {
+        // DOWNED BODY (city-only): keep shooting it — it accumulates holes AND
+        // jerks. cityCorpseHit (ragdoll.js) wakes the verlet slot on-hit only,
+        // banks the impulse so it reacts, and STAMPS the wound itself — so we do
+        // NOT call bodyWound here (that would double-stamp). Force scales with
+        // caliber on the same scale cityRagdoll uses (~6 pistol .. ~14 shotgun).
+        hitSomething = true;
+        const force = (w.pellets ? 11 : 5.5) * (0.6 + 0.5 * cal);
+        if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
+        else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal });
+        spawnImpact(hit.point, true, w.key === "shotgun");
+        // wet blood off the corpse along the shot line (same gore kit, smaller —
+        // a body already bled out, so this is spatter, not a fresh kill burst).
+        if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
+          dir: shotDir, amount: (hit.head ? 0.9 : 0.55) * (w.key === "shotgun" ? 1.5 : 1), player: true,
+        });
+        // a SHOTGUN/sniper HEADSHOT on the head end takes it OFF even post-mortem
+        // (gore.js's decap read), guarded so one head only severs once. Live kills
+        // route this through cityKillPed's killCtx; a corpse has no kill ctx, so we
+        // drive the public sever directly. Non-heavy guns never reach here.
+        if (CBZ.game.mode === "city" && hit.head && !w.nonlethal && !hit.corpse._decapped
+            && CBZ.goreSever && (w.key === "shotgun" || w.key === "sniper")) {
+          if (CBZ.goreSever(hit.corpse, "head", { dir: shotDir })) hit.corpse._decapped = true;
+        }
       } else if (hit.crowd != null) {
         // shot an ambient crowd member (the far NPCs that used to be unkillable)
         hitSomething = true;
@@ -1365,6 +1550,7 @@
   // WHY: scrolling/Q through a growing arsenal is clumsy; an RPG, an AK and a
   // sidearm should each be one keypress (GTA/CS muscle memory). 0-based slot.
   function selectWeaponSlot(slot) {
+    if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // drawing a gun un-holsters (re-arms)
     const av = availableIndices();
     if (slot < 0 || slot >= av.length) return false;
     const idx = av[slot];
@@ -1384,13 +1570,88 @@
     return true;
   }
   CBZ.fpsSelectSlot = selectWeaponSlot;
+
+  // ---- UNIFIED CITY HOTBAR (shared with HOTBAR + CHARPANEL) -----------------
+  // CITY-ONLY. The single source of truth for the in-world bar AND the mirrored
+  // bar in the I-screen. Order (contract): [0] HOLSTER/fists chip, then the
+  // OWNED GUNS in their current left-to-right order (gunSlot = index into
+  // availableIndices, selected byte-identically via CBZ.fpsSelectSlot), then the
+  // USABLE ITEMS (g.cityInv entries whose econ tag is food/drug/throwable).
+  // Each entry: { kind:"holster"|"gun"|"item", label, short, item?, gunSlot?,
+  //   count?, active }. HOTBAR/CHARPANEL render exactly this; CBZ.cityHotbarSelect
+  // dispatches a bar index. Pure read (no side effects) so the renderers can poll.
+  const USABLE_TAGS = { food: 1, drug: 1, throwable: 1 };
+  function hotbarItemNames() {
+    // stable order: ITEMS catalog declaration order, filtered to owned usables.
+    const inv = CBZ.game.cityInv || {}, ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
+    const out = [];
+    for (const name in ITEMS) {
+      const it = ITEMS[name];
+      if (it && USABLE_TAGS[it.tag] && (inv[name] || 0) > 0) out.push(name);
+    }
+    // any owned usable not in the catalog map (defensive) appended after
+    for (const name in inv) {
+      if ((inv[name] || 0) > 0 && !ITEMS[name] && out.indexOf(name) < 0) out.push(name);
+    }
+    return out;
+  }
+  function cityHotbar() {
+    if (CBZ.game.mode !== "city") return [];
+    const bar = [];
+    const guns = availableIndices();
+    // holster chip is "active" when holstered OR when you simply have no gun (so
+    // the bar always shows your current empty-hand state highlighted)
+    bar.push({ kind: "holster", label: "FISTS", short: "FIST", active: !!CBZ.game.cityHolstered || guns.length === 0 });
+    for (let s = 0; s < guns.length; s++) {
+      const w = WEAPONS[guns[s]];
+      bar.push({ kind: "gun", gunSlot: s, label: w.label, short: w.short, active: !CBZ.game.cityHolstered && guns[s] === fps.weapon });
+    }
+    const items = hotbarItemNames(), inv = CBZ.game.cityInv || {};
+    for (let i = 0; i < items.length; i++) {
+      const name = items[i];
+      bar.push({ kind: "item", item: name, label: name, short: name, count: inv[name] || 0, active: false });
+    }
+    return bar;
+  }
+  CBZ.cityHotbar = cityHotbar;
+
+  // dispatch a UNIFIED-bar index: holster -> de-escalate; gun -> existing
+  // fpsSelectSlot (byte-identical) + un-holster; item -> the EXISTING consume/
+  // throw path for that item's tag. Returns true if it acted on a valid slot.
+  function cityHotbarSelect(barIdx) {
+    if (CBZ.game.mode !== "city") return false;
+    const bar = cityHotbar();
+    if (barIdx < 0 || barIdx >= bar.length) return false;
+    const e = bar[barIdx];
+    if (e.kind === "holster") { CBZ.cityHolster(true); return true; }
+    if (e.kind === "gun") { CBZ.game.cityHolstered = false; return selectWeaponSlot(e.gunSlot); }   // fpsSelectSlot also clears holster
+    if (e.kind === "item") return useHotbarItem(e.item);
+    return false;
+  }
+  CBZ.cityHotbarSelect = cityHotbarSelect;
+
+  // route a usable item to its EXISTING consume/throw path (no new mechanics):
+  // food -> CBZ.cityEat, throwable -> CBZ.cityThrowFromInventory. Drugs have no
+  // existing player-consume action (they're product to sell) — a graceful note.
+  function useHotbarItem(name) {
+    const ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
+    const it = ITEMS[name];
+    if (!it) return false;
+    if (it.tag === "food" && CBZ.cityEat) return CBZ.cityEat(name);
+    if (it.tag === "throwable" && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
+    if (it.tag === "drug") { CBZ.city && CBZ.city.note("Sell " + name + " to a dealer — not for using.", 1.4); return false; }
+    return false;
+  }
+
   // number-key hotbar in CITY (jail keeps its own stash-hotbar in inventory.js).
-  // Gated so it never fires while a menu/map is up or you're typing in a panel.
+  // [1]..[9] map across the WHOLE unified bar (holster + guns + usable items),
+  // so a keypress matches exactly what HOTBAR/CHARPANEL draw. Guns still select
+  // byte-identically. Gated so it never fires while a menu/map is up.
   addEventListener("keydown", function (e) {
     if (e.repeat || CBZ.game.mode !== "city" || CBZ.game.state !== "playing") return;
     if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
     const n = "123456789".indexOf(e.key);
-    if (n >= 0 && armed()) { if (selectWeaponSlot(n)) e.preventDefault(); }
+    if (n >= 0) { if (cityHotbarSelect(n)) e.preventDefault(); }
   });
 
   function setActive(on) {
@@ -1433,6 +1694,11 @@
     setAmmoHud();
   };
   CBZ.fpsActive = function () { return fps.active; };
+  // TRUE while the player is HOLDING RMB to aim down sights, with a gun out and
+  // mid-play (FPS or the 3PS shoulder). Read by city/camera.js to punch the
+  // over-shoulder cam IN + narrow FOV on ADS. (Spread/recoil reduction is read
+  // locally via aimHeld; this is the camera-side hook.)
+  CBZ.isADS = function () { return aimHeld && armed() && (fps.active || shoulderActive()) && CBZ.game.state === "playing"; };
   CBZ.weaponThirdPersonActive = shoulderActive;
   CBZ.playerArmed = armed;
   CBZ.playerMuzzleWorld = function (out) { return muzzleWorld(out || new THREE.Vector3()); };
@@ -1485,7 +1751,32 @@
   document.addEventListener("contextmenu", (e) => {
     if ((fps.active || shoulderActive()) && CBZ.game.state === "playing") e.preventDefault();
   });
+  // index of the currently-selected entry in the unified city bar (the active
+  // gun, or the holster chip when holstered/empty-handed). For scroll stepping.
+  function cityHotbarCurrentIndex() {
+    const bar = cityHotbar();
+    for (let i = 0; i < bar.length; i++) if (bar[i].active) return i;
+    return 0;   // fall back to the holster chip
+  }
   addEventListener("wheel", (e) => {
+    // CITY: scroll cycles the DURABLE selection (holster chip + guns), so you
+    // can wheel back to fists or to any gun — works even while holstered. Item
+    // slots are intentionally SKIPPED by the wheel (one-shot uses would fire
+    // just from scrolling past them); reach items with the number keys.
+    if (CBZ.game.mode === "city") {
+      if (CBZ.game.state !== "playing" || CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
+      const bar = cityHotbar();
+      // selectable = holster + gun entries only
+      const sel = [];
+      for (let i = 0; i < bar.length; i++) if (bar[i].kind !== "item") sel.push(i);
+      if (sel.length <= 1) return;
+      e.preventDefault();
+      const cur = cityHotbarCurrentIndex();
+      let pos = sel.indexOf(cur); if (pos < 0) pos = 0;
+      const dir = e.deltaY > 0 ? 1 : -1;
+      cityHotbarSelect(sel[(pos + dir + sel.length) % sel.length]);
+      return;
+    }
     if (!(fps.active || shoulderActive()) || !armed()) return;
     e.preventDefault();
     switchWeapon(e.deltaY > 0 ? 1 : -1);
@@ -1674,6 +1965,19 @@
       CBZ.camera.position.copy(eye);
       tmp.copy(eye).add(fwd);
       CBZ.camera.lookAt(tmp);
+      // ADS ZOOM (RMB): ease the FPS lens ~14° tighter while aiming, back out on
+      // release. Capture the hip fov from camera.js's value only while NOT aiming
+      // (and clamp sane) so reading our own zoomed value can never ratchet it.
+      const ads = aimHeld && armed();
+      if (!ads || fpsHipFov === 0) {
+        if (CBZ.camera.fov >= 30 && CBZ.camera.fov <= 110) fpsHipFov = CBZ.camera.fov;
+        else if (fpsHipFov === 0) fpsHipFov = 70;
+      }
+      const wantFov = ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov;
+      if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
+        CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);
+        CBZ.camera.updateProjectionMatrix();
+      }
     }
 
     // SMOOTHER recoil RECOVERY: after a brief hold (so the kick reads), the gun
@@ -1686,8 +1990,31 @@
     else {
       const rk = 1 - Math.pow(0.0004, dt);          // ~smooth critically-damped feel (settles a touch faster — mag dumps recenter)
       recoil += (0 - recoil) * rk;
-      // bleed the upward climb back toward neutral so sustained fire recenters
-      if (fps.active) fps.fp += (0 - fps.fp) * (1 - Math.pow(0.55, dt)) * Math.min(1, recoil * 4 + 0.15);
+    }
+    // ---- AUTO-CENTERING (the "missing high" FIX) ----------------------------
+    // Spring the recoil OFFSET channels back to 0 every frame, UN-gated by the
+    // cosmetic `recoil` accumulator (the old gate was the bug — it collapsed to
+    // a trickle and the climb stalled, leaving permanent up-drift). Released
+    // trigger recenters ~4x faster than while firing, so a tap fully re-centres
+    // in ~RECENTER and the next shot is dead-accurate; a held burst climbs the
+    // pattern then settles the instant you let go. Works in FPS AND 3PS, jail/
+    // survival/city alike (strict improvement). Per-weapon RECENTER from w.recenter.
+    {
+      const wNow = armed() ? weapon() : null;
+      const recenter = (wNow && wNow.recenter) || 0.18;     // seconds to settle
+      // "firing this frame" while an auto weapon's trigger is held → recover slow
+      // (so the kick reads); otherwise recover full speed (4x).
+      const firing = recoilHold > 0 || (triggerHeld && wNow && wNow.auto && fps.rounds[fps.weapon] > 0);
+      const recoverK = firing ? 0.25 : 1.0;
+      const settle = recoverK * (1 - Math.exp(-dt / recenter));
+      recoilPitch -= recoilPitch * settle;
+      recoilYaw -= recoilYaw * settle;
+      if (Math.abs(recoilPitch) < 1e-5) recoilPitch = 0;
+      if (Math.abs(recoilYaw) < 1e-5) recoilYaw = 0;
+      // BURST RESET: a fire gap of >0.25s wipes the ramp + pattern position so
+      // the next round is a fresh, pinpoint first shot.
+      sinceShot += dt;
+      if (sinceShot > 0.25 && shotsInBurst !== 0) shotsInBurst = 0;
     }
     recoilSide += (0 - recoilSide) * Math.min(1, 13 * dt);
     vmPunch += (0 - vmPunch) * Math.min(1, 10 * dt);

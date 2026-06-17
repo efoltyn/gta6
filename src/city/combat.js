@@ -354,6 +354,7 @@
         // provoke / alarm so the world reacts to a non-lethal beating
         if (t.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(t.gang, 0.4);
         CBZ.cityCrime && CBZ.cityCrime(heavy ? 60 : 40, { x: t.pos.x, z: t.pos.z, type: "assault" });
+        if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "fight", pos: t.pos, radius: 10, intensity: 0.6 });   // crowd panic bus (cityevents.js): a brawl spooks bystanders nearby
         // SIZE-UP (sizeup.js): a survivor reads who just hit them — a ganger's
         // set piles in, an outclassed civilian folds instead of swinging back.
         if (CBZ.citySizeUpHit && CBZ.city && CBZ.city.playerActor) CBZ.citySizeUpHit(t, CBZ.city.playerActor);
@@ -591,6 +592,83 @@
     return clear;
   };
 
+  // ============================================================
+  //  BREACH GLASS — the "teach them about doors, or shooting glass" fix.
+  //
+  //  An armed NPC (cop / SWAT / gang / any city shooter) that can SEE a target
+  //  through a window but whose line of fire is WALLED OFF used to just mill
+  //  outside the glass forever (no door use, no breach). Real breaching AI: if
+  //  the obstacle between you and your quarry is DESTRUCTIBLE, destroy it and a
+  //  new route/sightline opens (the navigation re-evaluates against the hole).
+  //
+  //  Here the destructible is the storefront glass. We exploit one fact: glass
+  //  panes are NOT losBlockers (the solid wall behind them is), and a SHATTERED
+  //  pane registers as open air via CBZ.cityShotHole — so once we punch out the
+  //  pane on the NPC's firing lane, clearLineOfFire starts returning CLEAR
+  //  through that hole and the existing chase code advances + shoots through it.
+  //
+  //  The gate that stops NPCs randomly shooting windows: cityShatterRay ALONG
+  //  THE FIRING LANE only returns a pane when there is genuinely breakable glass
+  //  on the line to the target, and we ONLY call it when the shot is currently
+  //  BLOCKED and the target is within breaching reach. No glass on the lane →
+  //  the ray returns null → nothing breaks and nothing is spent. So a window
+  //  only ever shatters when it is the literal thing between the gun and the
+  //  quarry. After it breaks, c.sees / clearLineOfFire flips clear next frame.
+  //
+  //  Returns true if it broke a pane (the caller should then keep advancing /
+  //  re-test its line of fire). City-gated; no-op everywhere else.
+  // ============================================================
+  const _bz = new THREE.Vector3();
+  const BREACH_REACH = 16;          // a shooter only breaches glass it could plausibly reach
+  function breachGlass(att, tgt, reach) {
+    if (g.mode !== "city") return false;
+    if (!att || !att.pos || !tgt || !tgt.pos || tgt.dead) return false;
+    if (!CBZ.cityShatterRay || !CBZ.clearLineOfFire) return false;
+    // per-NPC cooldown so a single stuck shooter doesn't machine-gun the pane
+    if ((att._breachCD || 0) > 0) return false;
+    reach = reach || BREACH_REACH;
+    const ax = att.pos.x, ay = (att.pos.y || 0) + 1.4, az = att.pos.z;
+    const ty = tgt.isPlayer ? 1.55 : 1.3;
+    const tx = tgt.pos.x, tyy = (tgt.pos.y || 0) + ty, tz = tgt.pos.z;
+    const dx = tx - ax, dy = tyy - ay, dz = tz - az;
+    const dh = Math.hypot(dx, dz);
+    if (dh > reach || dh < 0.6) return false;                       // out of breach range
+    // only breach when the lane is ACTUALLY blocked right now (else there's a
+    // clean shot already — no reason to be shooting the glass).
+    if (CBZ.clearLineOfFire(ax, ay, az, tx, tyy, tz)) return false;
+    // is there breakable glass on the lane? cityShatterRay bursts the nearest
+    // intact pane the ray crosses within reach and returns it (or null when the
+    // lane has no glass — then we've broken nothing). force=true = one shot out,
+    // exactly like the NPC's normal aimed fire.
+    const seg = Math.min(reach, dh + 0.8);
+    const pane = CBZ.cityShatterRay(ax, ay, az, dx, dy, dz, seg, true);
+    if (!pane) return false;                                        // no glass on the lane → nothing to breach
+    // arm the cooldown BEFORE anything that might re-enter the muzzle wrap, so a
+    // recursive call can't trigger a second breach this frame.
+    att._breachCD = 0.5 + Math.random() * 0.35;                    // a beat before the next breach attempt
+    att._breachedT = 0.8;                                          // "just made a hole — push through it" window
+    // a real round went through the glass — sell it like any NPC shot, and let
+    // the world treat it as gunfire (witnessed crime / alarm) for the player.
+    // _muzGate suppresses the muzzle wrap's own LOS/breach side-effects here.
+    _muzGate = true;
+    const m = (CBZ.actorMuzzle ? CBZ.actorMuzzle(att, _bz) : null) || { x: ax, y: ay, z: az };
+    _muzGate = false;
+    if (CBZ.tracer) CBZ.tracer(m, { x: tx, y: tyy, z: tz }, { muzzleScale: att.swat ? 1.15 : 1.0 });
+    if (CBZ.gunVoice) CBZ.gunVoice(att.weapon || (att.swat ? "smg" : "sidearm"), CBZ.player ? Math.hypot(att.pos.x - CBZ.player.pos.x, att.pos.z - CBZ.player.pos.z) : 0);
+    else if (CBZ.sfx) CBZ.sfx("report");
+    raiseGun(att);                                                  // gun's up and firing — never leave it lowered
+    return true;
+  }
+  CBZ.cityNpcBreachGlass = breachGlass;
+
+  // tick down the per-NPC breach cooldowns (cheap, sliced over the crowd at the
+  // existing aim-memory pass below).
+  function tickBreach(a, dt) {
+    if (!a) return;
+    if (a._breachCD > 0) a._breachCD -= dt;
+    if (a._breachedT > 0) a._breachedT -= dt;
+  }
+
   // --- wrap actorAimAt: stash the aim target so the muzzle/tracer wraps know
   //     who this actor is firing at (the firing paths aim immediately before
   //     they grab the muzzle + draw the tracer). -----------------------------
@@ -616,7 +694,19 @@
         if (t && t.pos && !t.dead && CBZ.clearLineOfFire && res) {
           const ty = t.isPlayer ? 1.55 : 1.3;
           if (CBZ.clearLineOfFire(res.x, res.y != null ? res.y : 1.42, res.z, t.pos.x, ty, t.pos.z)) raiseGun(actor);
-          else lowerGun(actor);
+          else {
+            lowerGun(actor);
+            // BREACH: an armed ped (gang / rampager / empire crew) aiming at a
+            // quarry it can't hit because a STOREFRONT WINDOW is in the way shoots
+            // the glass OUT — same generic behavior the cops get. breachGlass is a
+            // no-op unless there's genuinely breakable glass on this firing lane
+            // within reach, so a ped behind a SOLID corner never plinks windows.
+            // Once the pane bursts, cityShotHole opens the lane and the ped's own
+            // npcAttack LOS gate (which uses clearLineOfFire) passes next beat, so
+            // it fires through — and a burst pooled/showroom pane drops its
+            // collider too, so it can step in after it.
+            breachGlass(actor, t, BREACH_REACH);
+          }
         }
       }
       return res;
@@ -656,7 +746,11 @@
     const lists = [CBZ.cityPeds, CBZ.cityCops];
     for (let li = 0; li < lists.length; li++) {
       const L = lists[li]; if (!L) continue;
-      for (let i = 0; i < L.length; i++) { const a = L[i]; if (a && a._fireTgtT > 0) a._fireTgtT -= dt; }
+      for (let i = 0; i < L.length; i++) {
+        const a = L[i];
+        if (a && a._fireTgtT > 0) a._fireTgtT -= dt;
+        if (a && (a._breachCD > 0 || a._breachedT > 0)) tickBreach(a, dt);
+      }
     }
   });
 
@@ -892,6 +986,7 @@
     // throwing a frag is at least as loud as discharging a firearm
     if (CBZ.cityCrime) CBZ.cityCrime(120, { x, z, type: "shots-fired" });
     if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(x, z, 40, 1.6, CBZ.city.playerActor);
+    if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: { x: x, z: z }, radius: 80, intensity: 2.0 });   // crowd panic bus (cityevents.js): frag blast
     if (CBZ.cityEvent) CBZ.cityEvent("bullet-impact", { weapon: "grenade", panic: 4, damage: 0.3 }, { silent: true, noWanted: true });
   }
 

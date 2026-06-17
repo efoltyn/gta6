@@ -60,10 +60,11 @@
       if ((home.tier || 0) >= 2 && (home.tier || 0) <= 4) {
         buildPool(A.root, lot.cx + lot.w * 0.3, lot.cz + lot.d * 0.3, 0.02, 4.2, 2.8);
       }
-      // ROOF pool: the high ladder (tier 5+) towers swim above the city
-      if ((home.tier || 0) >= 5 && lot.building.h) {
-        buildPool(A.root, lot.cx - lot.w * 0.18, lot.cz + lot.d * 0.18, lot.building.h + 0.05, 3.6, 2.4);
-      }
+      // NO roof pool. A water slab on a tower roof collided with the penthouse
+      // HELIPAD (the missile-chopper / F-22 deck) and read as a box floating in
+      // the sky — removed. Backyard pools (above) are the wealth tell now.
+      // (Roof pools were never family-drift magnets anyway — the drift code
+      // gates on pool.y < 1, so this removal changes only the visual.)
     }
   }
 

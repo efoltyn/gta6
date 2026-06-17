@@ -192,12 +192,43 @@
   // the body is skidding/recovering from a physical hit instead of strolling —
   // the render leans it with the shove, so a bump READS without any rig anim.
   const stagT = new Float32Array(CAP), stagX = new Float32Array(CAP), stagZ = new Float32Array(CAP);
+  // MASS FLEE (flag-gated, default OFF): when a city EVENT (gunshot/explosion, via
+  // cityevents.js → cityPostEvent) lands near an instanced body it SPRINTS away for
+  // panicT seconds along fleeH. Closes the gap where the 760-strong background crowd
+  // ignored gunfire while the full-rig peds already scattered (cityevents handles
+  // those). Reuses sim()'s existing move + 2-pass collide, so fleers scrape along
+  // walls instead of tunnelling. OFF → panicT is never set → the sim() flee branch
+  // is dead code → byte-identical to today.
+  const panicT = new Float32Array(CAP), fleeHX = new Float32Array(CAP), fleeHZ = new Float32Array(CAP);
+  const PANIC_SPD = 4.2;                          // m/s flat sprint while fleeing (a real run)
+  // default ON (validated 2026-06-15: harness testCrowd — 14 bystanders' avg distance
+  // from a gunshot rose 28.8→31.0m over 1.5s). Set CBZ.crowdMassFlee=false to revert.
+  if (CBZ.crowdMassFlee === undefined) CBZ.crowdMassFlee = true;
   // dead-reckoning step direction (unit vector toward the current target),
   // refreshed on think ticks; mid/far agents walk this between ticks.
   const dirX = new Float32Array(CAP), dirZ = new Float32Array(CAP);
   const collapsedQ = new Uint8Array(CAP);         // park matrices already written (skip rewrites)
   let liveTarget = CAP;                           // how many agents should be ON the street
   let pool = [], poolBuilt = false;               // interactive-promotion pool (declaration was dropped when thinning was added)
+  // ---- POOL PRE-WARM (kill the "NPCs pop in / load slowly as I walk up" hitch) ----
+  // The promotion pool is ~PROMO real makeCharacter rigs (each ~16-22 THREE.Mesh +
+  // ~10-12 cloned materials + trait rolls + a label sprite + outfit recolour). The
+  // OLD path built ALL of them SYNCHRONOUSLY on FIRST NEED — i.e. the first frame you
+  // walked near anyone — so your first encounter cost ~22 rig constructions in ONE
+  // frame: a visible stutter exactly when the world should feel alive. CLASSIC FIX
+  // (object-pool pre-warm, verified best practice): build the pool AHEAD of need, a
+  // few rigs PER FRAME (time-sliced so no single frame spikes), starting at city
+  // LOAD — while you're still on the spawn roof and can't reach anyone — so the rigs
+  // are finished and parked off-map (visible=false) long before the first promotion.
+  // GPU NOTE: every rig material is a MeshLambertMaterial, the SAME shader the
+  // instanced crowd already renders on frame 0 — and cloneLook() clones (same shader
+  // program/defines) — so revealing a pre-built rig triggers NO new shader compile;
+  // the only first-reveal cost is a tiny matrix/uniform upload, dwarfed by the
+  // construction we just moved off the hot path. (An optional renderer.compile()
+  // warm-up would be a core/main hook, not ours — reported, not required.)
+  const PREWARM_POOL = true;                       // ON: amortized pre-build at load. OFF → exact old lazy path.
+  const PREWARM_PER_FRAME = 2;                      // rigs to construct per frame while warming (≈11 frames to fill 22 — invisible)
+  let prewarming = false;                           // armed by spawnCityCrowd, spent by prewarmTick()
   promotedBy.fill(-1);
 
   // a UNIT (1×1×1) box scaled per-part at render time, jail-crowd style. Tinted
@@ -355,7 +386,7 @@
     count = Math.max(0, Math.min(CAP, n | 0));
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
-    stagT.fill(0); collapsedQ.fill(0);
+    stagT.fill(0); collapsedQ.fill(0); panicT.fill(0);
     liveTarget = count;                          // full street at the start of a run
     for (let i = 0; i < count; i++) {
       // pop-weighted spawn (Midtown packed, Dockyard thin), then a stroll
@@ -382,6 +413,13 @@
       }
       render(0);                 // place them so frame 0 isn't a pile at the origin
     }
+    // ARM THE POOL PRE-WARM. This fires at city LOAD (mode.js calls spawnCityCrowd
+    // on entry) — you're still on the spawn roof, far from anyone — so the ~PROMO
+    // rigs get built a couple per frame over the next ~11 frames and are parked,
+    // ready, off-map BEFORE your first encounter. If the pool was already built
+    // (a re-seed within the same run), leave it: releaseAll() above already freed
+    // its held slots, so it's warm and reusable as-is. Guests skip (cosmetic crowd).
+    if (PREWARM_POOL && !poolBuilt && !(CBZ.net && CBZ.net.noSim())) prewarming = true;
     return count;
   };
   CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 700)); };
@@ -437,12 +475,60 @@
         }
         continue;
       }
+      // PANIC: sprint away from a recent threat (set by cityCrowdFlee). Runs every
+      // frame while panicked — bounded, since only bodies near a live event are armed
+      // — so the scatter reads instantly. Reuses the 2-pass collide so a fleer scrapes
+      // along walls, not through them. Off-flag → panicT is always 0 → never taken.
+      if (panicT[i] > 0) {
+        panicT[i] -= dt;
+        const fh = Math.atan2(fleeHX[i], fleeHZ[i]);
+        heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], fh, 1 - Math.pow(0.02, dt)) : fh;
+        dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+        px[i] += dirX[i] * PANIC_SPD * dt; pz[i] += dirZ[i] * PANIC_SPD * dt;
+        phase[i] += PANIC_SPD * 2.4 * dt;          // legs pump fast
+        if (CBZ.collide) {
+          _col.x = px[i]; _col.z = pz[i];
+          for (let pass = 0; pass < 2; pass++) {
+            const bx = _col.x, bz = _col.z;
+            CBZ.collide(_col, 0.5, 0, 1.7);
+            if (Math.abs(_col.x - bx) < 0.002 && Math.abs(_col.z - bz) < 0.002) break;
+          }
+          px[i] = _col.x; pz[i] = _col.z;
+        }
+        if (panicT[i] <= 0) {                      // calmed → pick a fresh stroll
+          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+        }
+        continue;
+      }
       const cdx = px[i] - ppx, cdz = pz[i] - ppz, cd2 = cdx * cdx + cdz * cdz;
       const stride = cd2 < NEAR2 ? 1 : (cd2 < MID2 ? 4 : 16);
       if (stride > 1 && (frame + i) % stride !== 0) {
-        // off-tick: keep walking the cached direction — full speed, no brain
-        px[i] += dirX[i] * spd[i] * dt; pz[i] += dirZ[i] * spd[i] * dt;
+        // off-tick: keep walking the cached direction — full speed, no brain.
+        // CLOSE THE WALL-PHASING HOLE: a mid/far body skips up to 15 frames between
+        // think-ticks, dead-reckoning a STRAIGHT line that cuts through the building
+        // in the middle of a block — so it MUST still collide every frame it moves
+        // (every rendered, no far-cull). Clamp the per-frame step to one push's worth
+        // (<FEEL_SAFE_STEP 0.35m — matters at low FPS / big dt so a giant off-tick
+        // step can't tunnel the wall before the single push registers), advance, then
+        // a CHEAP single-pass collide (off-ticks move a tiny step → one push is enough,
+        // no 2-pass loop). collide() is grid-accelerated → ~O(local walls), so this is
+        // one bucket lookup + a few box tests per body: well within the 760-body budget.
+        let oStep = spd[i] * dt; if (oStep > 0.34) oStep = 0.34;
+        px[i] += dirX[i] * oStep; pz[i] += dirZ[i] * oStep;
         phase[i] += spd[i] * 2.4 * dt;
+        if (CBZ.collide) {
+          _col.x = px[i]; _col.z = pz[i];
+          CBZ.collide(_col, 0.5, 0, 1.7);
+          if (_col.x !== px[i] || _col.z !== pz[i]) {
+            px[i] = _col.x; pz[i] = _col.z;          // shoved out of a wall on the dead-reckoned line
+            // repick so it doesn't grind back in (mirrors the think-tick block below)
+            pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+            heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+            dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          }
+        }
         continue;
       }
       let dx = tx[i] - px[i], dz = tz[i] - pz[i], d = Math.hypot(dx, dz);
@@ -457,18 +543,18 @@
       // STOP THE NAMELESS AMBIENT CROWD WALKING THROUGH WALLS: the stroll above is
       // a straight line to a random sidewalk point, which cuts THROUGH the building
       // in the middle of a block. EVERY agent is RENDERED (no far-cull), so EVERY
-      // agent must collide — a camera-distance gate let the whole mid/far crowd walk
-      // through buildings in plain sight. collide() is grid-accelerated (~O(local
-      // walls)), so it's cheap; we still time-slice 1/3 of the crowd per frame (the
-      // per-frame step is tiny, so a body can't tunnel a wall in the 2 frames it's
-      // skipped) to keep the 360-strong crowd light. feetY/headY 0..1.7 hits full
-      // walls but ignores high window panes. 2-PASS DEPENETRATION (mirrors peds.js):
-      // one push at a corner can shove a body OUT of one wall and INTO the next, so
-      // a second pass resolves that — a straight-line stroll can't squeeze a thin
-      // wall in a single push. Stop early once a pass no longer moves the body.
-      // (mid/far tiers collide on EVERY think tick — that's already a 4/16-frame
-      //  stride; near keeps the 1-in-3 slice from before)
-      if (CBZ.collide && (stride > 1 || (frame + i) % 3 === 0)) {
+      // agent must collide — a camera-distance gate previously let the whole mid/far
+      // crowd walk through buildings on off-ticks in plain sight (the known instanced-
+      // crowd wall-phasing). collide() is grid-accelerated (~O(local walls)), so it's
+      // cheap. feetY/headY 0..1.7 hits full walls but ignores high window panes.
+      // 2-PASS DEPENETRATION (mirrors peds.js): one push at a corner can shove a body
+      // OUT of one wall and INTO the next, so a second pass resolves that — a straight-
+      // line stroll can't squeeze a thin wall in a single push. Stop early once a pass
+      // no longer moves the body. EVERY agent now collides EVERY frame it moves: the
+      // off-tick branch above already collides the dead-reckoned step, so this think-
+      // tick block no longer needs the old 1-in-3 near-tier slice to avoid leaving a
+      // gap — gating is now uniform (one grid-accelerated collide per moving body/frame).
+      if (CBZ.collide) {
         _col.x = px[i]; _col.z = pz[i];
         for (let pass = 0; pass < 2; pass++) {
           const bx = _col.x, bz = _col.z;
@@ -484,6 +570,25 @@
       }
     }
   }
+
+  // Scatter the instanced crowd away from a threat at (ex,ez). Called by the city
+  // EVENT bus (cityevents.js → cityPostEvent) on gunfire/explosions. A linear scan of
+  // the ≤count bodies is cheap and events are ring-throttled, so no extra rate-limit.
+  // Each in-range body gets a flee heading (unit vector away) + a panic timer scaled
+  // by intensity and distance falloff; sim()'s panic branch does the running.
+  CBZ.cityCrowdFlee = function (ex, ez, radius, intensity) {
+    if (!CBZ.crowdMassFlee || !count) return;
+    const r = radius > 0 ? radius : 24, r2 = r * r, it = intensity > 0 ? intensity : 1;
+    for (let i = 0; i < count; i++) {
+      if (deadAgent[i] || corpseT[i] > 0 || suppressed[i] || promotedBy[i] >= 0) continue;
+      const dx = px[i] - ex, dz = pz[i] - ez, d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+      const d = Math.sqrt(d2) || 0.001, inv = 1 / d;
+      fleeHX[i] = dx * inv; fleeHZ[i] = dz * inv;                 // unit vector AWAY from the threat
+      const ttl = (1.4 + 2.6 * (1 - d / r)) * (0.6 + 0.7 * it);   // ~1.4–4.7s, closer + louder = longer
+      if (ttl > panicT[i]) panicT[i] = ttl;                      // refresh, never shorten an active panic
+    }
+  };
 
   function put(mesh, i, lx, ly, lz, sx, sy, sz, rx) {
     partD.position.set(lx, ly, lz);
@@ -553,7 +658,11 @@
       // 4th frame (round-robin) and let the stale pose coast in between.
       const rdx = px[i] - ppx, rdz = pz[i] - ppz;
       if (rdx * rdx + rdz * rdz > FARDRAW2 && ((frame + i) & 3) !== 0) continue;
-      rootD.position.set(px[i], 0, pz[i]);
+      // FEET ON THE GROUND: the city is flat (groundHeightAt→0) so this is 0
+      // today, but route through floorAt like the corpse path so a body never
+      // sinks/floats if it walks onto raised terrain (beach/boardwalk/etc).
+      const fy = CBZ.floorAt ? CBZ.floorAt(px[i], pz[i]) : 0;
+      rootD.position.set(px[i], fy, pz[i]);
       if (stagT[i] > 0) {
         // bumped: face the shover, pitch away with the shove — a readable
         // stumble straight off the verlet-style skid, no rig animation needed.
@@ -565,7 +674,7 @@
       const sn = stagT[i] > 0 ? Math.sin(phase[i]) * 0.25 : Math.sin(phase[i]);
       drawParts(i, sn * 0.5, Math.abs(Math.cos(phase[i])) * 0.05);
       if (shadowQ) {
-        shadD.position.set(px[i], 0.04, pz[i]);      // a hair above the pavement (+ polygonOffset)
+        shadD.position.set(px[i], fy + 0.04, pz[i]);  // a hair above the surface (+ polygonOffset)
         shadD.rotation.set(-Math.PI / 2, 0, 0);
         const ss = 1.18 + Math.abs(sn) * 0.22;       // stride spreads the contact patch — reads as WALK
         shadD.scale.set(ss, ss * 0.94, 1);
@@ -589,6 +698,17 @@
   }
   function setLook(ped, skinHex, shirtHex, hairHex) {
     const ch = ped.char; if (!ch) return;
+    // PLAIN CIVILIANS (CBZ.CONFIG.CITY_PLAIN_CIVVIES, default on): a body
+    // stepping out of the instanced mass is an ordinary civilian — a SOLID
+    // shirt, no painted canvas. A pooled rig is reused, so the previous
+    // occupant may have left a painted garment (cop/tux/biz) on it; strip that
+    // back to flat geometry+materials first, else setHex would tint the painted
+    // texture (the orange-tux bug). outfits.js redressPed re-paints any body
+    // that recasts into a real role/gang/business identity right after this.
+    const C = CBZ.CONFIG, plain = !C || C.CITY_PLAIN_CIVVIES == null || !!C.CITY_PLAIN_CIVVIES;
+    if (plain && ch._clothesKey != null && CBZ.cityApplyClothes) CBZ.cityApplyClothes(ch, null);
+    // a stale bandana from a prior gang occupant must go too (clothes.js mesh)
+    if (plain && ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
     const paint = (arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(hex); });
     if (ch.head && ch.head.material && ch.head.material.color) ch.head.material.color.setHex(skinHex);
     const ss = ch.skinSlots || {};
@@ -605,12 +725,33 @@
     CBZ.cityPeds.push(ped);
     return ped;
   }
+  // Build the pool the REST of the way to PROMO. With PREWARM the prewarmTick()
+  // has usually already filled most/all of it across earlier frames, so this is a
+  // no-op or a tiny top-up; without prewarm (or if a body is needed before the warm
+  // finished) it completes synchronously — the exact OLD behaviour, so this is a
+  // clean fallback that can never leave the pool short.
   function buildPool() {
     if (poolBuilt) return;
     if (!arena() || !CBZ.cityMakePed || !CBZ.cityPeds) return;
-    pool = [];
-    for (let s = 0; s < PROMO; s++) pool.push({ ped: makePooled(), idx: -1 });
+    // resume in-place: keep any rigs the pre-warm already constructed (don't throw
+    // them away and rebuild — that would re-spike). Only allocate the shortfall.
+    if (!Array.isArray(pool)) pool = [];
+    while (pool.length < PROMO) pool.push({ ped: makePooled(), idx: -1 });
+    prewarming = false;
     poolBuilt = true;
+  }
+  // ---- AMORTIZED PRE-WARM: build a few pooled rigs per frame until the pool is
+  //      full, then stop. Started at city load (spawnCityCrowd) so construction
+  //      happens BEFORE the first encounter, spread thin enough to never spike a
+  //      single frame. Guests never build the real pool (host owns the population).
+  function prewarmTick() {
+    if (!prewarming || poolBuilt) { prewarming = false; return; }
+    if (CBZ.net && CBZ.net.noSim()) { prewarming = false; return; }   // guest: cosmetic crowd only
+    if (!arena() || !CBZ.cityMakePed || !CBZ.cityPeds) return;        // deps not ready yet → try again next frame
+    if (!Array.isArray(pool)) pool = [];
+    let made = 0;
+    while (pool.length < PROMO && made < PREWARM_PER_FRAME) { pool.push({ ped: makePooled(), idx: -1 }); made++; }
+    if (pool.length >= PROMO) { poolBuilt = true; prewarming = false; }   // pool complete — promotion is now instant
   }
   function park(e) {
     if (CBZ.cityPedStash) CBZ.cityPedStash(e.ped);   // bank the identity before the body leaves play
@@ -620,6 +761,37 @@
     ped.rage = null; ped.mem = null; ped.state = "walk"; ped.path = null; ped.finalGoal = null;
     e.idx = -1;
   }
+  // ---- NO CLOTHING-CHANGE POP ON PROMOTION (LOD continuity) ----
+  // The instanced body can only ever render a FLAT shirt — it has no badge, no
+  // lapels, no bandana — so to the player every distant ambient body reads as an
+  // ordinary plain civilian in the shirt color we tinted it (SHIRTS[shirt[i]]).
+  // When that body is promoted to a real rig it must walk up wearing EXACTLY that:
+  // the same plain civilian, the same shirt. The old path re-rolled a fresh role
+  // (cop/hi-vis/tux/gang/socialite) ON the body you were walking toward AND reused
+  // a pooled rig that still carried the PREVIOUS occupant's painted uniform — so
+  // setLook() tinted the crowd shirt and then redressPed() instantly repainted it
+  // into a uniform the distant body never showed: the visible "dumb load-in"
+  // clothing swap. Fix: wipe the pooled rig back to a CLEAN plain-civilian identity
+  // and stamp THIS agent's crowd shirt as the ped's outfit BEFORE any dress runs,
+  // so every redress path (cityRecastForHour / cityPedDeal → outfits.js redressPed)
+  // keeps the body plain and keeps the exact shirt the player just saw. Night
+  // BEHAVIOUR churn still happens — but only off-screen, via peds.js's margins pass
+  // (gated by VIS_D2), never on the body in your face. A genuine banked identity
+  // (cityPedDeal) can still re-seat a specific remembered person and re-dress them.
+  function resetToPlain(ped, shirtHex) {
+    // identity → ordinary resident (clear any stale role the pooled rig wore last)
+    ped.archetype = "resident"; ped.job = "between jobs";
+    ped.gang = null; ped.vendor = null; ped.vagrant = false;
+    ped.bounty = 0; ped.bountyTag = null;
+    // wardrobe-revert reads in outfits.js: no cast fit, no worn record, no stashed
+    // day-cast, no role tag → redressPed takes its plain-civilian branch and keeps
+    // the live (crowd) shirt instead of repainting a uniform.
+    ped._castFit = null; ped._wornOutfit = null; ped._dayCast = null;
+    ped._role = null; ped._work = null; ped._castNight = void 0;
+    // the shirt the instanced body was rendering IS this person's outfit now, so
+    // liveTorsoHex/civShirtFor and every downstream read agree with what was seen.
+    ped.outfit = shirtHex;
+  }
   function assign(e, s, i) {
     const ped = e.ped;
     e.idx = i; promotedBy[i] = s;
@@ -628,13 +800,19 @@
     ped.target.set(px[i], 0, pz[i]);
     ped.group.visible = true;
     ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0.2 + Math.random() * 0.6;
-    setLook(ped, SKINS[skin[i]], SHIRTS[shirt[i]], HAIRS[hairC[i]]);
-    // every promotion is a NEW person stepping out of the mass — recast its
-    // dials for the hour + district it lands in (peds.js owns the table), so
-    // a body promoted at 3am in the projects walks in as a crook, not a
-    // tourist. Reset the phase stamp so the recast applies per-assignment.
-    if (CBZ.cityRecastForHour) { ped._castNight = void 0; CBZ.cityRecastForHour(ped, Math.random); }
-    if (CBZ.cityPedDeal) CBZ.cityPedDeal(ped);   // a remembered identity due at this spot walks back in, carrying its take
+    const shirtHex = SHIRTS[shirt[i]];
+    // CLEAN SLATE FIRST: drop the prior occupant's role/outfit and adopt the
+    // instanced body's exact shirt, so what walks up matches what you saw.
+    resetToPlain(ped, shirtHex);
+    setLook(ped, SKINS[skin[i]], shirtHex, HAIRS[hairC[i]]);
+    // a remembered identity DUE at this spot (a banked dealer/regular walking back
+    // in, carrying its take) is the one legitimate non-plain promotion — it sets
+    // its own identity + re-dresses itself. Everyone else stays the plain civilian
+    // we just painted. The on-promotion hour-recast is GONE: it minted a uniform on
+    // the body in your face (the pop); night churn now lives only in peds.js's
+    // off-screen margins pass (VIS_D2-gated), so nobody ever changes clothes as you
+    // approach. cityRecastForHour still runs there for the behavioural turnover.
+    if (CBZ.cityPedDeal) CBZ.cityPedDeal(ped);
   }
   function releaseAll() {
     if (!poolBuilt) return;
@@ -695,48 +873,99 @@
       break;
     }
   }
-  // ---- AHEAD RESEED: bias density toward where the player is looking/heading ----
-  // Agents wander randomly across the whole city, so the street ahead of you can
-  // end up sparse — a ghost world. Each frame we cheaply recycle a FEW distant,
-  // non-promoted, living agents to fresh sidewalk points out in front of the
-  // camera (just past promotion reach, so they're real-and-ready as you advance).
-  // No new bodies are spawned (cap is fixed); we just teleport far ones forward.
-  const AHEAD_NEAR = 30, AHEAD_FAR = 64;          // ring out in front to seed into
-  const RESEED_BEHIND2 = 70 * 70;                 // only recycle agents this far away
+  // ---- COVERAGE BALANCE: keep the crowd spread over the WHOLE map ------------
+  // ROOT CAUSE (user: "they all crowd one area"): the old aheadReseed teleported
+  // far agents into a 30-64m ring INSIDE the camera's FORWARD CONE every frame.
+  // Because the player keeps moving, bodies that were ahead fell behind, became
+  // re-eligible, and got vacuumed forward again — so over a minute of walking the
+  // bulk of the 700-strong population collapsed into one moving blob in front of
+  // the camera and the rest of the city emptied (measured: 82% of agents ended up
+  // within 70m of the player; cell-occupancy fell from 96/144 to 51/144).
+  //
+  // FIX (open-world / GTA-popcycle model + blue-noise even coverage): the static
+  // district density FIELD owns where the crowd lives, NOT where the player looks.
+  // This pass only CORRECTS two failure modes, both off-screen, on a tiny budget:
+  //   • DRAIN GUARD — if more than a fair LOCAL SHARE of the living crowd is
+  //     packed near the player, push the surplus (the FARTHEST-from-player of the
+  //     near set is left alone; we recycle ones at the edge of the near ring) back
+  //     out through the whole-map density draw (drawPoint), re-spreading them so
+  //     distant districts refill instead of starving. This is what stops the blob.
+  //   • SPARSE FILL — only when the player's own block is genuinely empty AND the
+  //     player stands in a district the field says should be busy, trickle a
+  //     couple of far agents into a ring AROUND the player in ALL directions (not
+  //     a forward cone), drawn through the SAME density field so a quiet quarter
+  //     (docks / 3am) stays quiet. No forward bias — coverage, not a spotlight.
+  // No bodies are created/destroyed (finite headcount preserved); we only retarget
+  // a few existing agents per frame. Draw-call neutral (instanced; count fixed).
+  const NEAR_R = 90;                              // "local" radius around the player
+  const NEAR_R2 = NEAR_R * NEAR_R;
+  // fair share of the LIVING crowd allowed inside NEAR_R. The near disc is a small
+  // slice of the ~258m-wide map (π·90² ≈ 0.4 of the play area), so allotting ~45%
+  // of the crowd to it already reads as a believably busier foreground without
+  // draining the rest. Surplus past this gets re-spread.
+  const NEAR_SHARE = 0.45;
+  const FILL_NEAR = 26, FILL_FAR = 60;            // ring around the player for sparse-fill
+  const FILL_MIN = 10;                            // below this many locals → allow a fill
   let reseedScan = 0;
   function aheadReseed() {
     const P = CBZ.player; if (!P || P.dead) return;
     const A = arena(); if (!A || !A.randomSidewalkPoint) return;
     const ppx = P.pos.x, ppz = P.pos.z;
-    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0);
-    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    // census: how many living, on-street, non-promoted agents are near the player,
+    // and the live total (the budget the fair-share is a fraction of). One cheap
+    // O(count) scan reused for both decisions.
+    let near = 0, live = 0;
+    for (let i = 0; i < count; i++) {
+      if (deadAgent[i] || corpseT[i] > 0 || suppressed[i] || promotedBy[i] >= 0) continue;
+      live++;
+      const dx = px[i] - ppx, dz = pz[i] - ppz;
+      if (dx * dx + dz * dz < NEAR_R2) near++;
+    }
+    const fairNear = Math.max(FILL_MIN + 4, (live * NEAR_SHARE) | 0);
+    const over = near > fairNear;                 // crowd is piling up on the player
+    const sparse = near < FILL_MIN;               // player's block is a ghost town
+    if (!over && !sparse) return;                 // density already fair here — leave it
     let moved = 0, scanned = 0;
     // walk a rolling window of agents (a few per frame) so the cost is bounded
-    for (let n = 0; n < count && scanned < 40 && moved < 2; n++) {
+    for (let n = 0; n < count && scanned < 60 && moved < 3; n++) {
       const i = reseedScan; reseedScan = (reseedScan + 1) % Math.max(1, count); scanned++;
       if (deadAgent[i] || corpseT[i] > 0 || promotedBy[i] >= 0 || suppressed[i]) continue;
       const dx = px[i] - ppx, dz = pz[i] - ppz, d2 = dx * dx + dz * dz;
-      if (d2 < RESEED_BEHIND2) continue;          // already close enough to matter
-      // is this far agent BEHIND / off to the side? if so, recycle it ahead.
-      const dn = Math.sqrt(d2) || 1;
-      if ((dx / dn) * fx + (dz / dn) * fz > 0.2) continue;  // already roughly ahead → leave it
-      // find a sidewalk point inside the forward ring (a few tries). The draw
-      // is HOUR-WEIGHTED (pop field by day, night field after dusk), so what
-      // fills in ahead of you follows the live district field: walk Midtown
-      // and the street ahead packs out; walk the Dockyard (or anywhere at
-      // 3am) and most draws land elsewhere and fail the ring test — quiet
-      // STAYS quiet instead of magically filling because you looked at it.
-      for (let t = 0; t < 4; t++) {
-        drawPoint(_tmp);
-        const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd = Math.hypot(rx, rz) || 1;
-        if (rd < AHEAD_NEAR || rd > AHEAD_FAR) continue;
-        if ((rx / rd) * fx + (rz / rd) * fz < AHEAD_DOT) continue;
-        px[i] = _tmp.x; pz[i] = _tmp.z;
-        castTint(i, px[i], pz[i]); repaintShirt(i);   // recycled body dresses like a LOCAL
-        pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-        heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-        dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
-        moved++; break;
+      if (over) {
+        // DRAIN GUARD: recycle agents at/just inside the near ring (not the ones
+        // right on top of you — those would visibly vanish) OUT to a whole-map
+        // density point, so the surplus repopulates distant districts. Far-bias:
+        // only touch ones in the OUTER half of the near disc, which are off-screen
+        // enough that a relocate doesn't pop in the player's face.
+        if (d2 < (NEAR_R * 0.6) * (NEAR_R * 0.6) || d2 >= NEAR_R2) continue;
+        for (let t = 0; t < 4; t++) {
+          drawPoint(_tmp);
+          const rx = _tmp.x - ppx, rz = _tmp.z - ppz;
+          if (rx * rx + rz * rz < NEAR_R2) continue;   // must land OUTSIDE the local disc
+          px[i] = _tmp.x; pz[i] = _tmp.z;
+          castTint(i, px[i], pz[i]); repaintShirt(i);  // re-dress for the district it lands in
+          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          moved++; break;
+        }
+      } else {
+        // SPARSE FILL: only pull bodies from genuinely FAR away, and seat them in a
+        // ring all the way AROUND the player (omnidirectional), drawn through the
+        // density field so a quiet district refuses to fill. No forward cone — even
+        // coverage, never a spotlight that follows your gaze.
+        if (d2 < NEAR_R2 * 1.6) continue;         // only recycle distant agents
+        for (let t = 0; t < 4; t++) {
+          drawPoint(_tmp);
+          const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd = Math.hypot(rx, rz) || 1;
+          if (rd < FILL_NEAR || rd > FILL_FAR) continue;   // land in the around-player ring
+          px[i] = _tmp.x; pz[i] = _tmp.z;
+          castTint(i, px[i], pz[i]); repaintShirt(i);
+          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          moved++; break;
+        }
       }
     }
   }
@@ -756,18 +985,63 @@
   const MOVERS = 10;
   const _mvX = new Float32Array(MOVERS), _mvZ = new Float32Array(MOVERS), _mvS = new Float32Array(MOVERS);
   const _mvKD = new Uint8Array(MOVERS);      // mover hits hard enough to knock down
-  const _mvRef = new Array(MOVERS);          // mover actor (null = the player)
+  const _mvRef = new Array(MOVERS);          // mover actor (null = the player → an INSTANCED-source bump)
+  const _mvAgent = new Int32Array(MOVERS);   // instanced-source mover's own agent index (-1 = rig/player)
+  _mvAgent.fill(-1);                          // every slot is rewritten per gather; -1 baseline so an unset slot can never read as agent 0
+  // one-hit-per-agent-per-frame guard WITHOUT an O(CAP) clear: stamp the frame a
+  // body was bumped and compare; never cleared, so wrap is harmless (a stale stamp
+  // only ever matches its OWN frame). The instanced movers can overlap 3×3 cells,
+  // so without this an agent in two neighbourhoods could take two shoves a frame.
+  const _bumpStamp = new Int32Array(CAP);
+  let _bumpFrame = 0;
+  // NPC<->NPC bumps: the instanced mass is far too large to test pairwise, so we
+  // hash the LIVE agents into a 2m uniform grid each frame (CBZ.makeGrid — one
+  // persistent Map, alloc-free after warm-up) and only resolve a mover against the
+  // 3×3 cells around it. The fastest instanced agents (spd≥STUMBLE_SPD) become
+  // movers themselves, slotted into the SAME _mv* arrays as the rig movers, so the
+  // resolve loop and bumpAgent() don't need to know the source kind.
+  let _bumpGrid = null;                      // CBZ.makeGrid(2.0), built lazily (cell ≈ 2× contact reach)
+  const _gridIdx = [];                       // index list fed to grid.rebuild (reused; holds live agent indices)
+  const _gridVec = { x: 0, z: 0 };           // getVec scratch (the grid reads px/pz through this)
+  let _gridBuiltFrame = -1;                  // bump + separation share one rebuild per sim frame
+  function _agentVec(i) { _gridVec.x = px[i]; _gridVec.z = pz[i]; return _gridVec; }
+  function rebuildAgentGrid() {
+    if (!_bumpGrid) { if (!CBZ.makeGrid) return false; _bumpGrid = CBZ.makeGrid(2.0); }
+    if (_gridBuiltFrame === _simFrame) return true;
+    _gridIdx.length = 0;
+    for (let i = 0; i < count; i++) {
+      if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0 || stagT[i] > 0) continue;
+      _gridIdx.push(i);
+    }
+    _bumpGrid.rebuild(_gridIdx, _agentVec);
+    _gridBuiltFrame = _simFrame;
+    return true;
+  }
   const _bumpSrc = { isPlayer: true, pos: null };   // react() source for player bumps
+  // react() source for an INSTANCED-agent-on-agent bump: explicitly NOT the player
+  // (no isPlayer flag), so a promoted victim reacts to the SHOVER, not to you —
+  // otherwise every NPC pile-up would file player crimes / sic cops on you / make
+  // bystanders fight you for a collision you never caused. One reused object; its
+  // pos is repointed to the mover each resolve (alloc-free).
+  const _npcSrc = { isPlayer: false, _crowdBump: true, pos: { x: 0, z: 0 } };
   const _victims = [];                       // near, slow, upright rigs (reused)
+  // NPC<->NPC chain reactions can knock over MANY bodies in one frame (a sprinter
+  // ploughs a line, the fallers ploughs the next), and each real-rig promotion is
+  // a ragdoll + humancontact brain + draw calls. Cap NEW promotions per frame so a
+  // pile-up can't spike a frame; overflow victims still react via the free instanced
+  // skid below (zero allocation), so the chain keeps propagating — just cheaper.
+  const PROMO_CAP_FRAME = 4;
+  let _promoBudget = PROMO_CAP_FRAME;        // remaining rig promotions THIS frame (reset in bumpPass)
   function bumpAgent(i, nx, nz, sp, kd, ref) {
     const guest = CBZ.net && CBZ.net.noSim();          // guests never spawn real peds
-    if (kd && !guest) {
+    if (kd && !guest && _promoBudget > 0) {
       // promote → real rig → real knockdown physics (the comedy payoff)
       if (!poolBuilt) buildPool();
       if (poolBuilt) for (let s = 0; s < pool.length; s++) {
         const e = pool[s];
         if (e.idx >= 0) continue;
         assign(e, s, i);
+        _promoBudget--;                                // spent one of this frame's rig slots
         const ped = e.ped;
         if (CBZ.body && CBZ.body.knockdown) {
           CBZ.body.knockdown(ped, { fromX: px[i] - nx, fromZ: pz[i] - nz, force: 7 + Math.min(8, sp * 0.6), t: 1.1 + Math.random() * 0.7 });
@@ -795,12 +1069,14 @@
   function bumpPass(dt) {
     const P = CBZ.player; if (!P || !count) return;
     const ppx = P.pos.x, ppz = P.pos.z;
+    _promoBudget = PROMO_CAP_FRAME;                     // refill this frame's rig-promotion allowance
+    _bumpFrame++;                                       // new one-hit-per-agent epoch
     // 1) gather movers: the player on foot + any fast rig near the camera
     let nm = 0;
     if (!P.dead && !P.driving && (P.speed || 0) > 1.5) {
       _mvX[nm] = ppx; _mvZ[nm] = ppz; _mvS[nm] = P.speed || 0;
       _mvKD[nm] = (P.sprint && (P.speed || 0) >= 6.2) ? 1 : 0;   // same charge gate as humancontact
-      _mvRef[nm] = null; nm++;
+      _mvRef[nm] = null; _mvAgent[nm] = -1; nm++;
     }
     _victims.length = 0;
     const peds = CBZ.cityPeds;
@@ -813,19 +1089,83 @@
       const sp = p.speed || 0;
       if (sp >= STUMBLE_SPD) {                          // a runner — a mover
         _mvX[nm] = p.pos.x; _mvZ[nm] = p.pos.z; _mvS[nm] = sp;
-        _mvKD[nm] = sp >= RIG_KD_SPD ? 1 : 0; _mvRef[nm] = p; nm++;
+        _mvKD[nm] = sp >= RIG_KD_SPD ? 1 : 0; _mvRef[nm] = p; _mvAgent[nm] = -1; nm++;
       } else _victims.push(p);                          // upright bystander rig
     }
-    if (!nm) return;
-    // 2) movers vs instanced agents (the mass crowd)
+    // 1b) hash the LIVE instanced agents into the 2m grid (the exact set the
+    //     resolve below is allowed to bump). Reuses _gridIdx + the persistent grid
+    //     Map — alloc-free after warm-up. We bucket by INDEX (getVec reads px/pz).
+    if (!rebuildAgentGrid()) return;
+    // 1c) NPC<->NPC MOVERS: the FASTEST live instanced agents become movers in the
+    //     SAME _mv* arrays, _mvRef=null flagging an instanced source. A body's
+    //     EFFECTIVE speed is its stroll speed OR — while it's skidding from a hit —
+    //     the magnitude of its stag velocity, because THAT is what physically
+    //     carries it into the bodies ahead. Prioritise the fastest: fill free slots,
+    //     then displace the slowest instanced mover already held if this one hits
+    //     harder, so a sprinting runner is always represented even in a dense crowd.
+    //
+    //     This is the CHAIN, with NO recursion: a mover knocks a (non-stag) victim
+    //     down → bumpAgent gives the victim a stagX/stagZ skid (or promotes it to a
+    //     ragdoll that gets up and flees fast) → NEXT frame that skidder's stag
+    //     velocity clears STUMBLE_SPD so it qualifies HERE as a mover and ploughs
+    //     the next bodies. It self-limits because sim() bleeds the skid every frame
+    //     (Math.pow(0.02,dt)); once it drops below STUMBLE_SPD the body stops
+    //     shoving and the pile settles. Skidders are MOVERS but never VICTIMS (the
+    //     grid skips stagT>0), so a body mid-skid is never re-shoved into a loop.
+    //     We scan ALL live, un-promoted agents (not just the grid set) precisely so
+    //     the skidding propagators — excluded from the grid — can still drive it.
     for (let i = 0; i < count; i++) {
-      if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0 || stagT[i] > 0) continue;
-      for (let m = 0; m < nm; m++) {
-        const dx = px[i] - _mvX[m], dz = pz[i] - _mvZ[m], d2 = dx * dx + dz * dz;
-        if (d2 >= BUMP_R2) continue;
-        const d = Math.sqrt(d2) || 1;
-        bumpAgent(i, dx / d, dz / d, _mvS[m], _mvKD[m] === 1, _mvRef[m]);
-        break;                                          // one hit per agent per frame
+      if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
+      let sp = spd[i];
+      if (stagT[i] > 0) {                              // skidding: velocity, not stroll pace
+        const sv = Math.sqrt(stagX[i] * stagX[i] + stagZ[i] * stagZ[i]);
+        if (sv > sp) sp = sv;
+      }
+      if (sp < STUMBLE_SPD) continue;                  // only fast bodies shove others
+      let slot = -1;
+      if (nm < MOVERS) slot = nm++;
+      else {
+        // arrays full → find the slowest INSTANCED mover (rig/player movers are
+        // never evicted) and replace it only if this agent is genuinely faster.
+        let worst = -1, worstS = sp;
+        for (let m = 0; m < nm; m++) {
+          if (_mvAgent[m] < 0) continue;               // rig/player mover: keep
+          if (_mvS[m] < worstS) { worstS = _mvS[m]; worst = m; }
+        }
+        slot = worst;
+      }
+      if (slot < 0) continue;                          // no room and nothing slower to evict
+      _mvX[slot] = px[i]; _mvZ[slot] = pz[i]; _mvS[slot] = sp;
+      _mvKD[slot] = sp >= RIG_KD_SPD ? 1 : 0; _mvRef[slot] = null; _mvAgent[slot] = i;
+    }
+    if (!nm) return;
+    // 2) movers vs instanced agents — query ONLY the mover's 3×3 grid cells, so the
+    //    cost stays O(agents × local-neighbours) instead of movers × count. The
+    //    per-agent frame stamp keeps it to one shove each even where cells overlap.
+    for (let m = 0; m < nm; m++) {
+      const gx = _bumpGrid.cellIndex(_mvX[m]), gz = _bumpGrid.cellIndex(_mvZ[m]);
+      const selfI = _mvAgent[m];                        // an instanced mover must not bump itself
+      for (let cx = gx - 1; cx <= gx + 1; cx++) {
+        for (let cz = gz - 1; cz <= gz + 1; cz++) {
+          const cell = _bumpGrid.bucket(cx, cz);
+          if (!cell) continue;
+          for (let q = 0; q < cell.length; q++) {
+            const i = cell[q];
+            if (i === selfI || _bumpStamp[i] === _bumpFrame) continue;
+            // stagT can be set mid-pass by an earlier mover this frame; the stamp
+            // already excludes it, but guard anyway so a downgraded skid is one-shot.
+            if (stagT[i] > 0 || promotedBy[i] >= 0) continue;
+            const dx = px[i] - _mvX[m], dz = pz[i] - _mvZ[m], d2 = dx * dx + dz * dz;
+            if (d2 >= BUMP_R2) continue;
+            const d = Math.sqrt(d2) || 1;
+            _bumpStamp[i] = _bumpFrame;                 // claim the hit before resolving
+            // ref: rig actor for a rig mover; the non-player crowd source for an
+            // instanced mover (selfI>=0); null only for the PLAYER (becomes _bumpSrc).
+            let ref = _mvRef[m];
+            if (!ref && selfI >= 0) { _npcSrc.pos.x = _mvX[m]; _npcSrc.pos.z = _mvZ[m]; ref = _npcSrc; }
+            bumpAgent(i, dx / d, dz / d, _mvS[m], _mvKD[m] === 1, ref);
+          }
+        }
       }
     }
     // 3) RIG movers vs bystander RIGS: a fleeing ped flattens whoever's in the
@@ -842,6 +1182,88 @@
         if (CBZ.humanContact) CBZ.humanContact.react(t, { mode: "city", source: src, kind: "run-over", severity: 0.8 });
         if (CBZ.sfx) CBZ.sfx("ko");
       }
+    }
+  }
+
+  // ---- PERSONAL SPACE: keep the mass from standing INSIDE each other ----
+  // The stroll/dead-reckon brain steers every agent toward a sidewalk point with
+  // zero awareness of its neighbours, so two walkers headed for the same corner
+  // (or a slow body the dead-reckoning others overtake) end up co-located —
+  // bodies merged into one blob, which kills the world-model read. This is the
+  // classic boids SEPARATION rule (Reynolds): each agent feels a soft repulsion
+  // from anyone inside a small "personal space" radius, scaled by the overlap.
+  // We accelerate it with the SAME uniform spatial hash the bumps use
+  // (CBZ.makeGrid) so it's O(agents × local-neighbours), never O(n²) — at a
+  // 700-strong crowd the naive pairwise pass would be ~250k checks/frame.
+  //
+  // CHEAP BY NATURE: alloc-free (a persistent grid + a reused index list), and
+  // TIME-SLICED — we rebuild the full grid every frame (cheap O(n) bucketing)
+  // but only RESOLVE one slice of the agents per frame (round-robin), so the
+  // neighbour scan cost is ~count/SEP_SLICES regardless of crowd size. An agent
+  // gets nudged ~3× a second, which is plenty to stop standing overlaps without
+  // any visible jitter. The push is a gentle clamped NUDGE (not a hard solve) so
+  // it never fights the navigation: a body still walks where it's going, it just
+  // doesn't share a square metre with the person next to it. After the nudge we
+  // run the SAME collide() depenetration the stroll uses, so separation can
+  // never shove anyone into a wall, a building, or the street.
+  const SEP_R = 0.62;                 // personal-space radius (≈1.24m apart — box bodies are ~0.82 wide)
+  const SEP_R2 = SEP_R * SEP_R, SEP_MIN = SEP_R * 2;
+  const SEP_PUSH = 0.5;               // share of the overlap closed per resolve (the other body closes the rest)
+  const SEP_MAXSTEP = 0.18;           // hard cap on one frame's nudge (m) — no teleport-pops
+  const SEP_SLICES = 3;               // resolve 1/SEP_SLICES of the crowd each frame (round-robin)
+  let _sepSlice = 0;                  // rolling slice cursor
+  // separable = a normally-strolling body: skip the dead/corpse/suppressed,
+  // the promoted rigs (a real ped owns their motion + their own actorcollide),
+  // and skidding bodies (their bump skid IS their motion this beat).
+  function separable(i) {
+    return !deadAgent[i] && !suppressed[i] && corpseT[i] <= 0 && promotedBy[i] < 0 && stagT[i] <= 0;
+  }
+  function separate(dt) {
+    if (!count) return;
+    // Bump reactions and personal-space separation operate on the same live,
+    // upright ambient set. Share their one per-frame broadphase rebuild.
+    if (!rebuildAgentGrid() || !_gridIdx.length) return;
+    // resolve only THIS frame's slice (round-robin over the agent array)
+    const slice = _sepSlice; _sepSlice = (_sepSlice + 1) % SEP_SLICES;
+    for (let i = slice; i < count; i += SEP_SLICES) {
+      if (!separable(i)) continue;
+      const ax = px[i], az = pz[i];
+      const gx = _bumpGrid.cellIndex(ax), gz = _bumpGrid.cellIndex(az);
+      let nxAcc = 0, nzAcc = 0;
+      for (let cx = gx - 1; cx <= gx + 1; cx++) {
+        for (let cz = gz - 1; cz <= gz + 1; cz++) {
+          const cell = _bumpGrid.bucket(cx, cz); if (!cell) continue;
+          for (let q = 0; q < cell.length; q++) {
+            const j = cell[q];
+            if (j === i || !separable(j)) continue;
+            const dx = ax - px[j], dz = az - pz[j], d2 = dx * dx + dz * dz;
+            if (d2 >= SEP_MIN * SEP_MIN || d2 < 1e-6) continue;   // outside personal space (or exactly coincident)
+            const d = Math.sqrt(d2);
+            // repulsion scaled by how deep the overlap is (boids separation):
+            // closer neighbours push harder; the inverse-distance unit vector
+            // away from each crowder accumulates into one resolved nudge.
+            const w = (SEP_MIN - d) / d;       // (overlap / d) → unit-away × overlap
+            nxAcc += dx * w; nzAcc += dz * w;
+          }
+        }
+      }
+      if (nxAcc === 0 && nzAcc === 0) continue;
+      // two co-located bodies EXACTLY overlapping would net to zero above — but
+      // 1e-6 skip prevents that pair contributing, so a deterministic stack can't
+      // lock. Nudge by half the accumulated overlap, hard-capped so it reads as a
+      // step-aside, never a pop. (The other body resolves its own half next slice.)
+      let mvx = nxAcc * SEP_PUSH * 0.5, mvz = nzAcc * SEP_PUSH * 0.5;
+      const ml = Math.hypot(mvx, mvz);
+      if (ml > SEP_MAXSTEP) { const s = SEP_MAXSTEP / ml; mvx *= s; mvz *= s; }
+      let nx = ax + mvx, nz = az + mvz;
+      // keep the nudge on the pavement — never let separation shove a body into a
+      // wall/building or out into the road. Same collider the stroll already obeys.
+      if (CBZ.collide) {
+        _col.x = nx; _col.z = nz;
+        CBZ.collide(_col, 0.5, 0, 1.7);
+        nx = _col.x; nz = _col.z;
+      }
+      px[i] = nx; pz[i] = nz;
     }
   }
 
@@ -906,7 +1328,7 @@
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {
     const _clear = CBZ.clearCityPeds;
-    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); collapsedQ.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
+    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; prewarming = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); collapsedQ.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
   }
 
   // ---- DENSITY THINNING: keep the on-street agent count in step with the finite
@@ -1003,7 +1425,12 @@
     if (CBZ.game.mode !== "city") { if (root) { root.visible = false; } if (poolBuilt) releaseAll(); return; }
     if (root) root.visible = true;
     if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 700);
+    // amortized pool pre-warm (a couple of rigs/frame at load) — runs FIRST so the
+    // promotion pool is finished and parked before updatePromotion() reaches for it.
+    // No-op once the pool is full or when PREWARM_POOL is off (prewarming stays false).
+    if (prewarming) prewarmTick();
     sim(dt);
+    separate(dt);         // personal-space repulsion: no bodies standing inside each other
     bumpPass(dt);         // physical bump reactions: stumble / bowl bodies over
     thin(dt);             // keep on-street density in step with the finite headcount
     aheadReseed();        // pull distant bodies into the street ahead of you

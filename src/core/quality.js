@@ -28,6 +28,51 @@
   ];
   let qLevel = QUALITY.length - 1; // start optimistic; only fall if needed
 
+  // ---- QUALITY-V2 (smarter FEEL-aware tier control) -----------------------
+  // Gated behind CBZ.qualityV2 (default ON). When OFF we run the ORIGINAL
+  // sampler verbatim (see the `else` branch of sampleFPS) → today's behaviour
+  // byte-for-byte. V2 fixes three things the old sampler got wrong for FEEL:
+  //
+  //   1) TRUE frame time. loop.js calls sampleFPS(dt) with the WORLD dt, which
+  //      is clamped to 0.05 and further scaled by hit-stop/slow-mo. Under load
+  //      (~0.2s/frame) that clamp makes the sampler think every frame is 50ms
+  //      (= "20fps") no matter how bad it really is — so it can't tell a 5fps
+  //      grind from a 20fps one and reacts to a LIE. V2 instead times its OWN
+  //      performance.now() gaps between calls = the real wall-clock frame time.
+  //
+  //   2) STEADY BEATS SPIKY. A session whose MEAN fps looks ok but whose frames
+  //      are spiky feels worse than a steady lower fps (frame-time consistency,
+  //      not average, is what reads as smooth — Martin Fuller / Doug Binks DRS
+  //      notes; askagamedev). V2 adds a step-DOWN trigger on the window's p95
+  //      frame time (we reject the single worst outlier so a lone GC/upload
+  //      hitch never nukes a tier), independent of the mean.
+  //
+  //   3) HOSTING COSTS. When this client is the elected sim-host it carries the
+  //      whole NPC/traffic/physics world for the guests too — measurably more
+  //      load than solo. V2 caps the eligible TOP tier one notch lower while
+  //      hosting so a demo doesn't tank the host. Re-evaluated every window, so
+  //      a mid-session host promotion/demotion (networld becomeHost) is handled
+  //      with NO net hook here. Solo (net inactive → isHost()===false) is never
+  //      biased — full fidelity preserved.
+  //
+  // React on a SHORTER window (0.5s) so a real slump is caught fast; keep the
+  // up-step hysteresis STRONG (need several good windows) + a brief cooldown
+  // after any down-step so we never ping-pong (DRS oscillation is itself felt
+  // as stutter — ktcplay/Apex). Nothing here touches population, AI, sim dt or
+  // any net hook: only the pre-existing pr/shadow/crowd-render/pedLOD knobs.
+  if (CBZ.qualityV2 === undefined) CBZ.qualityV2 = true;
+
+  // host-aware eligible-top-tier cap. Live-evaluated so promotion is handled.
+  function topTier() {
+    let top = QUALITY.length - 1;
+    if (CBZ.qualityV2) {
+      let hosting = false;
+      try { hosting = !!(CBZ.net && CBZ.net.isHost && CBZ.net.isHost()); } catch (e) {}
+      if (hosting) top = Math.max(0, top - 1); // one notch down while hosting
+    }
+    return top;
+  }
+
   function applyQuality() {
     const q = QUALITY[qLevel];
     CBZ.qualityLevel = qLevel;
@@ -45,17 +90,95 @@
   }
   applyQuality();
 
-  // rolling 1s FPS sampler with hysteresis (no quality ping-pong)
+  // rolling FPS sampler with hysteresis (no quality ping-pong)
   let _accum = 0, _frames = 0, _window = 0, _good = 0, _warmup = 1.5;
+
+  // V2 state: true-frame-time timing + per-window spike tracking + cooldown.
+  // _vPrev is the wall-clock timestamp of the previous sampleFPS call; the gap
+  // between calls IS the true frame time (loop.js calls us once per frame, near
+  // the top, BEFORE the world updates — so this is the full real frame delta).
+  const V_WIN = 0.5;          // s — shorter window: catch a slump ~2× faster
+  const V_FPS_DOWN = 50;      // mean-fps step-down threshold (matches old 50)
+  const V_FPS_UP = 58;        // mean-fps step-up threshold (matches old 58)
+  const V_GOOD_NEED = 4;      // up-step needs 4 good 0.5s windows (~2s) — strong
+                              // hysteresis so we rise cautiously, never twitchy
+  const V_SPIKE_MS = 90;      // p95 frame-time over this = "spiky" → step down
+                              // even if the mean looks fine (steady beats spiky)
+  const V_SPIKE_NEED = 2;     // need the spike condition in 2 windows running so
+                              // one transient stall can't strip a tier
+  let _vPrev = 0;             // performance.now() of last call (0 = uninit)
+  let _vWorst = 0, _v2nd = 0; // worst + 2nd-worst true frame ms this window
+                              // (p95 ≈ 2nd-worst → the single outlier is ignored)
+  let _vCool = 0;             // step-up cooldown (windows) after any step-down
+  let _vSpikeRun = 0;         // consecutive spiky windows
+
   function sampleFPS(dt) {
-    if (_warmup > 0) { _warmup -= dt; return; } // ignore first 1.5s of upload jank
-    _accum += dt; _frames++; _window += dt;
-    if (_window < 1) return;
+    // ---- legacy path (flag off) : EXACTLY today's behaviour ----------------
+    if (!CBZ.qualityV2) {
+      if (_warmup > 0) { _warmup -= dt; return; } // ignore first 1.5s of upload jank
+      _accum += dt; _frames++; _window += dt;
+      if (_window < 1) return;
+      const fps = _frames / _accum;
+      _accum = 0; _frames = 0; _window = 0;
+      if (fps < 50 && qLevel > 0) { qLevel--; applyQuality(); _good = 0; }
+      else if (fps >= 58) { if (++_good >= 3 && qLevel < QUALITY.length - 1) { qLevel++; applyQuality(); _good = 0; } }
+      else { _good = 0; }
+      return;
+    }
+
+    // ---- V2 path : true frame time + p95 spike trigger + host bias ---------
+    const now = (typeof performance !== "undefined") ? performance.now() : Date.now();
+    if (_vPrev === 0) { _vPrev = now; return; }   // first call: no prior stamp
+    let trueMs = now - _vPrev;                     // REAL wall-clock frame time
+    _vPrev = now;
+    // Reject pathological gaps (tab-switch / debugger pause) so they neither
+    // pollute the mean nor masquerade as a render spike — they're not the GPU.
+    if (trueMs > 1000) trueMs = 0;                 // drop, don't count this frame
+    if (trueMs <= 0) return;
+    const trueDt = trueMs / 1000;
+
+    if (_warmup > 0) { _warmup -= trueDt; return; } // first 1.5s upload jank
+
+    _accum += trueDt; _frames++; _window += trueDt;
+    // track worst + 2nd-worst frame this window for a cheap p95 (no array)
+    if (trueMs > _vWorst) { _v2nd = _vWorst; _vWorst = trueMs; }
+    else if (trueMs > _v2nd) { _v2nd = trueMs; }
+
+    if (_window < V_WIN) return;
     const fps = _frames / _accum;
-    _accum = 0; _frames = 0; _window = 0;
-    if (fps < 50 && qLevel > 0) { qLevel--; applyQuality(); _good = 0; }
-    else if (fps >= 58) { if (++_good >= 3 && qLevel < QUALITY.length - 1) { qLevel++; applyQuality(); _good = 0; } }
-    else { _good = 0; }
+    const p95 = (_frames >= 4) ? _v2nd : 0;  // need a few frames for p95 to mean
+                                             // anything; else don't spike-trigger
+    const top = topTier();                   // host-aware eligible ceiling (live)
+    // window done — reset accumulators
+    _accum = 0; _frames = 0; _window = 0; _vWorst = 0; _v2nd = 0;
+    if (_vCool > 0) _vCool--;
+
+    // SPIKY? p95 frame time too high → the session reads as stutter even if the
+    // mean is acceptable. Require it to persist (V_SPIKE_NEED) so a lone hitch
+    // is forgiven; then step down once and arm the cooldown.
+    const spiky = p95 > 0 && p95 > V_SPIKE_MS;
+    if (spiky) _vSpikeRun++; else _vSpikeRun = 0;
+
+    // 1) if we're above the host-aware ceiling, drop toward it immediately.
+    if (qLevel > top) { qLevel--; applyQuality(); _good = 0; _vCool = 4; return; }
+
+    // 2) mean too low → step down (fast, this is the primary guard).
+    if (fps < V_FPS_DOWN && qLevel > 0) {
+      qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 4; return;
+    }
+
+    // 3) steady-beats-spiky: sustained p95 spikes → shed a tier even if mean ok.
+    if (_vSpikeRun >= V_SPIKE_NEED && qLevel > 0) {
+      qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 6; return;
+    }
+
+    // 4) headroom → step UP, but only when smooth (mean high AND not spiky),
+    //    not during the post-down cooldown, never above the host-aware ceiling.
+    if (fps >= V_FPS_UP && !spiky && _vCool === 0) {
+      if (++_good >= V_GOOD_NEED && qLevel < top) { qLevel++; applyQuality(); _good = 0; }
+    } else {
+      _good = 0;
+    }
   }
 
   CBZ.sampleFPS = sampleFPS;

@@ -59,6 +59,22 @@
     lamp.material.color.setHex(on ? color : 0x20242a);
     if (lamp.material.emissive) lamp.material.emissive.setHex(color);
   }
+  // light a whole signal AXIS to one state. `axis` is either an ARRAY of heads
+  // (one per real approach — the current props.js, multiple faces per axis) or
+  // a single {red,yel,grn} head (legacy single-head path). Either way the three
+  // lamps of every head on that axis show the same colour, so the cross street
+  // reads RED while the main runs GREEN exactly like a real 4-way.
+  function axisSet(axis, state) {
+    if (!axis) return;
+    const heads = Array.isArray(axis) ? axis : [axis];
+    for (let h = 0; h < heads.length; h++) {
+      const head = heads[h];
+      if (!head) continue;
+      lampSet(head.red, state === "red", 0xff3b3b);
+      lampSet(head.yel, state === "yellow", 0xffcf3b);
+      lampSet(head.grn, state === "green", 0x39ff66);
+    }
+  }
 
   let lightT = 0, ticketCD = 0, prevInside = false;
 
@@ -74,17 +90,11 @@
       const p = phase();
       for (const it of A.intersections) {
         const L = it.light; if (!L) continue;
-        // each axis head shows its own state — cross street is red while the
-        // main runs green, exactly like a real 4-way signal.
-        const ns = L.ns || L, ew = L.ew;
-        lampSet(ns.red, p.ns === "red", 0xff3b3b);
-        lampSet(ns.yel, p.ns === "yellow", 0xffcf3b);
-        lampSet(ns.grn, p.ns === "green", 0x39ff66);
-        if (ew) {
-          lampSet(ew.red, p.ew === "red", 0xff3b3b);
-          lampSet(ew.yel, p.ew === "yellow", 0xffcf3b);
-          lampSet(ew.grn, p.ew === "green", 0x39ff66);
-        }
+        // each axis (an array of approach heads, or a single legacy head) shows
+        // its own state — the cross street is red while the main runs green,
+        // exactly like a real 4-way signal. ns governs N–S travel, ew E–W.
+        axisSet(L.ns || L, p.ns);
+        axisSet(L.ew, p.ew);
       }
     }
 
@@ -151,30 +161,20 @@
     c.blockedT = 0;            // how long we've been stuck behind a dawdler
   }
 
-  // ---- honk "pop": a brief sprite above a honking car (no horn sample exists
-  //      in the bank, so the honk reads visually + a faint metallic stab) -----
+  // ---- honk: a real two-note horn (distance-attenuated). The floating "HONK!"
+  //      WORD over the car broke the fourth wall and was removed — a horn is a
+  //      SOUND, not a label. The pool/liveHonks below stay (now always empty) so
+  //      the reset/teardown paths keep working without edits elsewhere. ---------
   const honkPool = [];
   const liveHonks = [];
   function honkAt(c) {
     if (c.honkCD > 0) return;
     const arch = ARCH[c.trafArch] || ARCH.normal;
     c.honkCD = arch.honkPatience + 0.4 + Math.random() * 0.8;
-    // only spend a sprite + sound if you're near enough to notice it
+    // only spend a sound if you're near enough to hear it
     const cam = CBZ.camera.position;
     const dd = (c.pos.x - cam.x) * (c.pos.x - cam.x) + (c.pos.z - cam.z) * (c.pos.z - cam.z);
     if (dd > 60 * 60) return;
-    let s = honkPool.pop();
-    if (!s) {
-      if (CBZ.makeLabelSprite) s = CBZ.makeLabelSprite("HONK!", { color: "#ffd34d" });
-      if (!s) return;
-      s.scale.multiplyScalar(0.72);
-    }
-    s.position.set(c.pos.x, 3.0, c.pos.z);
-    if (s.material) s.material.opacity = 1;
-    s.visible = true;
-    CBZ.city.arena.root.add(s);
-    liveHonks.push({ s, t: 0, life: 0.8 });
-    // a faint metallic stab stands in for the horn (real recorded foley only)
     if (dd < 34 * 34 && CBZ.sfx && Math.random() < 0.6) CBZ.sfx("horn", { dist: Math.sqrt(dd) });   // a real two-note horn, distance-attenuated
   }
   function updateHonks(dt) {
@@ -449,8 +449,9 @@
       w.position.set(i % 2 === 0 ? -1.05 : 1.05, 0.5, i < 2 ? 1.7 : -1.7);
       grp.add(w);
     }
-    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(isFire ? "FIRE" : "AMBULANCE", { color: isFire ? "#ff7a4d" : "#7fffd0" }) : null;
-    if (tag) { tag.position.set(0, 3.4, 0); grp.add(tag); }
+    // No floating "AMBULANCE"/"FIRE" word: the shape, livery (red truck / white
+    // box) and flashing red+blue beacons read as an emergency vehicle on sight.
+    // A label over the roof broke the fourth wall and was removed.
     return { grp, redMat, bluMat, body: bodyMat, cab: cabMat, bar: barMat };
   }
 
@@ -641,7 +642,11 @@
       else { const d = lz >= 0 ? pz : -pz; P.pos.x += d * s; P.pos.z += d * c; }
       if (speed > 6 && emgRunCD <= 0) {
         emgRunCD = 0.9;
-        if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(140, 8 + speed * 4.5), e.pos.x, e.pos.z, "run down by a " + (e.kind === "firetruck" ? "fire truck" : "speeding ambulance"), false, null, speed < 14);
+        // "firetruck" stays ONE word on purpose: killfeed.js buckets a death by
+        // matching the cause string, and its earlier /\bfire\b/ test would
+        // mis-file "fire truck" (two words) as an EXPLOSION; "firetruck" dodges
+        // that boundary and its `truck` rule files it as a vehicle death.
+        if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(140, 8 + speed * 4.5), e.pos.x, e.pos.z, "run down by " + (e.kind === "firetruck" ? "a firetruck" : "an ambulance"), false, null, speed < 14);
         if (CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && !CBZ.body.busy(CBZ.city.playerActor)) {
           CBZ.body.knockdown(CBZ.city.playerActor, { fromX: e.pos.x, fromZ: e.pos.z, force: Math.min(10, speed * 0.5), t: 1.1 });
         }
@@ -665,7 +670,13 @@
     if (closing > 8 && emgRunCD <= 0) {
       emgRunCD = 0.9;
       if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, Math.min(40, closing * 2.2), { fromX: e.pos.x, fromZ: e.pos.z });
-      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(35, closing * 1.4), e.pos.x, e.pos.z, "car crash", false, null, true);
+      // attribute to the emergency vehicle that hit your car — not a generic
+      // "car crash" (the owner was T-boned by an ambulance and the note lied).
+      // "firetruck" is one word so killfeed.js's /\bfire\b/ can't mis-file it as
+      // an explosion; "car was rammed" carries the `car` keyword so the feed
+      // still buckets it as a vehicle death.
+      const emgReason = "in a crash with " + (e.kind === "firetruck" ? "a firetruck" : "an ambulance");
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(35, closing * 1.4), e.pos.x, e.pos.z, emgReason, false, null, true);
       if (CBZ.sfx) { try { CBZ.sfx("crash"); } catch (er) {} }
       if (CBZ.shake) CBZ.shake(0.6);
     }

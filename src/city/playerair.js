@@ -147,8 +147,9 @@
     }
     const rotor = new THREE.Mesh(a.rotorMain, a.rotorMat); rotor.position.y = 1.05; grp.add(rotor);
     const trotor = new THREE.Mesh(a.rotorTail, a.rotorMat); trotor.position.set(0.18, 0.45, -5.2); grp.add(trotor);
-    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite("YOUR CHOPPER", { color: "#59c2ff" }) : null;
-    if (tag) { tag.position.y = 2.4; tag.scale.set(4.0, 0.9, 1); grp.add(tag); }
+    // No floating "YOUR CHOPPER" word over your helicopter — it's the only one
+    // you summoned and the only one landing on you, so it reads as yours. A
+    // hovering label broke the fourth wall and was removed.
     r.add(grp);
 
     // spawn high, offset from the player, and pick a clear landing pad nearby
@@ -158,7 +159,7 @@
     land.y = floorAt(land.x, land.z) + 1.0;
     grp.position.set(land.x + Math.cos(ang) * 30, CRUISE_Y, land.z + Math.sin(ang) * 30);
     return {
-      group: grp, rotor, trotor, tag, pos: grp.position,
+      group: grp, rotor, trotor, pos: grp.position,
       phase: "incoming", land, waitT: LAND_WAIT, rideT: 0, dest: null, spin: 1,
     };
   }

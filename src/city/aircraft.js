@@ -308,8 +308,9 @@
     const cone = new THREE.Mesh(a.cone, a.lightMat); grp.add(cone);
     const pool = new THREE.Mesh(a.pool, a.poolMat); pool.rotation.x = -Math.PI / 2; pool.position.y = 0.08;
     r.add(pool);
-    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite("GUNSHIP", { color: "#ff7b6b" }) : null;
-    if (tag) { tag.position.y = 2.3; tag.scale.set(3.4, 0.8, 1); grp.add(tag); }
+    // No floating "GUNSHIP" word over the helicopter — the armoured silhouette,
+    // missile pods, spotlight and rotor read as a police gunship without a label
+    // (a hovering word broke the fourth wall).
     r.add(grp);
     // spawn at a rooftop helipad if buildings.js gave us one, else fly in from edge
     let sp = null;
@@ -317,7 +318,7 @@
     if (!sp) sp = edgePoint(rng() * 6.28, HELI_Y);
     grp.position.set(sp.x, sp.y != null ? Math.max(sp.y, 6) : HELI_Y, sp.z);
     return {
-      group: grp, rotor, trotor, cone, pool, tag,
+      group: grp, rotor, trotor, cone, pool,
       pos: grp.position, orbit: rng() * 6.28,
       missileCD: 3.5, gunCD: 1.0, leaveT: 0, spotR: 6, climb: 0,
       hp: 140, maxHp: 140, downed: false,           // armoured — ~2 rockets / a sustained burst

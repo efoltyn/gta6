@@ -103,6 +103,8 @@
   const FLIN_PITCH = 0.3;       // upper-body jerk along the push
   const FLIN_HEAD = 0.65;       // the head snap is what reads the caliber
   const FLIN_YAW = 0.25;        // shoulders wrenched off the impact
+  const CLUTCH_DUR = 0.6;       // wound-clutch: hand reaches to the hit for ~0.6s after a non-fatal shot
+  const CLUTCH_ARM = -1.35;     // the clutching arm folds in across the wound (pitch up + across)
   const AIM_RANGE2 = 60 * 60;   // shooters visibly track a mark inside 60u
   const AIM_HEAD_YAW = 0.75;    // believable neck turn cap
   const AIM_HEAD_PIT = 0.38;
@@ -143,6 +145,7 @@
         nkOff: 0, byOff: 0, llOff: 0, rlOff: 0, gbx: 0, gbz: 0,
         stagT: 0, stagX: 0, stagZ: 1, stagAmp: 0,
         flinT: 0, flinX: 0, flinZ: 1, flinAmp: 0,
+        clutchT: 0, clutchSide: 0, clutchAmp: 0,   // wound-clutch (non-fatal): timer / which hand (±1) / caliber weight
         aimK: 0, aimY: 0, aimP: 0, aimA: 0, hyOff: 0,
         swingT: 0, swingArm: 1, dazeK: 0,
         // seed the detectors from the CURRENT values so an actor first seen
@@ -283,7 +286,7 @@
                 old.laOff = 0; old.raOff = 0; old.cowerLean = 0;
                 old.nkOff = 0; old.byOff = 0; old.llOff = 0; old.rlOff = 0;
                 old.gbx = 0; old.gbz = 0; old.stagT = 0; old.swingT = 0; old.dazeK = 0;
-                old.flinT = 0; old.aimK = 0; old.hyOff = 0;
+                old.flinT = 0; old.clutchT = 0; old.aimK = 0; old.hyOff = 0;
                 // park the edge detectors HIGH so the first frame back in range
                 // can't read a stale value as a fresh hit / fresh swing.
                 old.lastFl = 9; old.atkCd = 1e9;
@@ -362,6 +365,20 @@
               r.flinT = FLIN_DUR;
               r.flinX = pp.fdx; r.flinZ = pp.fdz;
               r.flinAmp = Math.min(1.5, 0.45 + (pp.shock || 0) * 0.6);
+              // WOUND-CLUTCH: a NON-fatal hit makes them clap a hand over the
+              // wound + take half a step off it for ~0.6s — the long, readable
+              // tell that a living body absorbed the round (the fast flinch above
+              // is the impact, this is the recoil-from-pain after). Dead bodies
+              // ragdoll, so gate it on still-alive; caliber scales the magnitude.
+              if (!a.dead && (a.ko == null || a.ko <= 0)) {
+                const ry0 = a.group.rotation.y || 0;
+                // lateral component of the push in the actor's local frame → which
+                // side took it → which hand reaches across to clutch.
+                const lsr = Math.cos(ry0) * pp.fdx - Math.sin(ry0) * pp.fdz;
+                r.clutchSide = lsr >= 0 ? -1 : 1;   // hit pushed right → wound on the left → left hand clutches
+                r.clutchT = CLUTCH_DUR;
+                r.clutchAmp = Math.min(1.2, 0.55 + (pp.shock || 0) * 0.5);
+              }
             }
             r.lastFl = pp.fl;
           }
@@ -554,6 +571,31 @@
             }
           }
 
+          // ---- (1c) WOUND-CLUTCH: after a non-fatal shot the near hand claps
+          //      over the wound and the torso curls protectively off it. Eases
+          //      out over CLUTCH_DUR; the longer "he's hurt" read that sits under
+          //      the sharp flinch above. Skips the gun arm (actorweapons owns it)
+          //      and any frame an overriding pose (block/aim/surrender) is up. ----
+          if (r.clutchT > 0) {
+            r.clutchT = Math.max(0, r.clutchT - dt);
+            if (live && !aimBack && !handsUp && !((a._broken || 0) > 0) && !((a._blockT || 0) > 0)) {
+              const k = r.clutchT / CLUTCH_DUR;          // 1 → 0
+              const ease = Math.sin(Math.min(1, k * 1.7) * 1.5708);  // quick reach, slow release
+              const w = ease * r.clutchAmp;
+              bodyOff += 0.18 * w;                        // curl forward, protecting the wound
+              r.byOff += r.clutchSide * 0.18 * w;         // shoulder rolls in over it
+              const arm = r.clutchSide > 0 ? parts.ra : parts.la;
+              const isGun = gunArm && ((r.clutchSide > 0) === true); // ra is the usual gun arm
+              if (arm && !isGun) {
+                const off = (CLUTCH_ARM - 0) * w;
+                arm.rotation.x += off;                    // fold the hand in across the body
+                arm.rotation.z += -r.clutchSide * 0.5 * w;
+                if (r.clutchSide > 0) r.raOff += off; else r.laOff += off;
+              }
+              if (neck) r.nkOff += 0.2 * w;               // head dips toward the wound
+            }
+          }
+
           // ---- (2) SWING LEAN-IN: weight committed behind an NPC punch
           //      (and a cock-back off combat.js's _windup telegraph first). ----
           if (r.swingT > 0) {
@@ -703,6 +745,47 @@
           if (body && r.byOff) body.rotation.y += r.byOff;
           if (neck && r.nkOff) neck.rotation.x += r.nkOff;
           if (neck && r.hyOff) neck.rotation.y += r.hyOff;
+        }
+
+        // ---- BODY-PITCH SAFETY CLAMP (root-cause fix for the "walk folds the
+        //      torso ~90°" bug) ----
+        // Every CITY pose layer above adds to body.rotation.x INDEPENDENTLY and
+        // none knew about the others, so on a busy frame they could sum without
+        // bound — a fleeing/cowering ped that also takes a round stacks animChar's
+        // lean + cower (0.4) + stagger forward pitch (≤0.6) + flinch (≤0.45) +
+        // wound-clutch (0.18) and folds the upper body nearly flat mid-stride (the
+        // owner-filmed "weirdly bent" walk). Each layer is legitimate in isolation;
+        // only their unclamped SUM is wrong. Cap the final upper-body pitch to a
+        // deep-but-human range so the heaviest flinch still reads as a person
+        // reeling, never a 90° fold. This sits AFTER the get-up writes (≤0.35) and
+        // bodyOff, so it bounds every contributor without changing any of them.
+        //   CITY-ONLY (isCity): the jail/survival passes never stack the city fight
+        //   layers — their only body-pitch sources are recoil + cower (max ~1.07,
+        //   reached only when shot mid-cower) — and those modes must stay byte-
+        //   identical, so the clamp must not touch them.
+        //   LIVE, UPRIGHT rigs only: laid-out / mid-get-up bodies pitch via
+        //   group.rotation (clamped via its own k) and animChar is skipped for them.
+        //   The `flat` gate (computed above for the city pose block) excludes
+        //   knocked-down and mid-get-up frames, where body.rotation.x/z carry the
+        //   get-up branch's OWN backed-out writes (r.gbx) — clamping there would
+        //   desync that back-out. On an upright walker both channels are freshly
+        //   ASSIGNED by animChar, so the clamp is purely a ceiling with no feedback.
+        const upright = isCity && body && !down &&
+          !(pp && (pp.air || pp.down > 0)) && Math.abs(a.group.rotation.x) <= 0.05;
+        if (upright) {
+          const MAX_FWD = 0.95;   // deepest forward bend (matches the severed-leg crawl read)
+          const MAX_BACK = -0.7;  // deepest backward reel
+          if (body.rotation.x > MAX_FWD) body.rotation.x = MAX_FWD;
+          else if (body.rotation.x < MAX_BACK) body.rotation.x = MAX_BACK;
+          // side-keel (roll) sums the same independent layers (stagger + flinch +
+          // daze) — bound it too so a busy frame can't tip the torso flat sideways.
+          // SAFE to clamp here: animChar ASSIGNS body.rotation.z (= ch.sway) fresh
+          // every frame, so a clamp can't feed back. (body.rotation.y / yaw is a
+          // DAMPED, backed-out channel — clamping it post-add would desync r.byOff,
+          // so it is deliberately left to its own already-modest sum.)
+          const ROLL = 0.6;       // ~34°: a deep side-keel, still upright
+          if (body.rotation.z > ROLL) body.rotation.z = ROLL;
+          else if (body.rotation.z < -ROLL) body.rotation.z = -ROLL;
         }
 
         // ---- FLASH: fade the emissive boost back to rest ----
