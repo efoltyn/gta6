@@ -474,6 +474,83 @@
     t.max = t.life;
   }
 
+  // ---- REAL ROCKET FLIGHT (b) -------------------------------------------------
+  // The RPG used to be "a hitscan-to-impact rocket" (resolve impact instantly,
+  // draw a tracer, detonate the same frame) — every other heavy-ordnance game
+  // gives a rocket actual hang time you can see and react to. The impact POINT
+  // (and the wall it lands on) is still resolved up-front at the moment of
+  // firing, exactly like before (so it always lands precisely under the
+  // reticle — the existing "no recoil bias, ever" contract is unchanged) and
+  // handed to launchRocket() as the flight's fixed endpoint; only WHEN the
+  // detonation actually fires moved, from instant to a real flight-time delay.
+  // shoot()'s explosive branch builds a `detonate` closure that runs the
+  // EXACT same FX call sequence the old instant branch ran and passes it in
+  // as onArrive — see (b) there for the full original-vs-new diff explanation.
+  const rocketGeo = new THREE.CylinderGeometry(0.06, 0.07, 0.42, 8);
+  const rocketMat = new THREE.MeshLambertMaterial({ color: 0x2a2e22 });
+  const rockets = [];
+  for (let i = 0; i < 3; i++) {
+    const body = new THREE.Mesh(rocketGeo, rocketMat);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending, opacity: 0.85,
+    }));
+    glow.scale.setScalar(0.5);
+    glow.position.z = 0.24;   // exhaust glow trails the tail
+    body.add(glow);
+    body.visible = false;
+    CBZ.scene.add(body);
+    rockets.push({
+      mesh: body, active: false, t: 0, dur: 0.3,
+      ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0,   // origin + impact point (straight-line endpoints)
+      sagY: 0,                                     // peak mid-flight gravity sag (world units, visual only)
+      detonate: null,                               // bound closure: () => runs the exact old detonation block
+    });
+  }
+  let rocketIdx = 0;
+  // launch a projectile from `from`→`to` over `dur` seconds, sagging under
+  // `sag` world-units of (visual) gravity at the midpoint, then call `onArrive`.
+  function launchRocket(from, to, dur, sag, onArrive) {
+    const r = rockets[rocketIdx];
+    rocketIdx = (rocketIdx + 1) % rockets.length;
+    r.active = true; r.t = 0; r.dur = Math.max(0.02, dur);
+    r.ox = from.x; r.oy = from.y; r.oz = from.z;
+    r.dx = to.x; r.dy = to.y; r.dz = to.z;
+    r.sagY = sag;
+    r.detonate = onArrive;
+    r.mesh.position.copy(from);
+    r.mesh.visible = true;
+    return r;
+  }
+  // quadratic sag added to a straight-line lerp (peaks at the midpoint, zero
+  // at both ends) — reads as gravity without a full ballistic re-solve, and
+  // the rocket still ARRIVES exactly at the pre-resolved impact point.
+  const _rocketPos = new THREE.Vector3(), _rocketPrev = new THREE.Vector3();
+  function updateRockets(dt) {
+    for (let i = 0; i < rockets.length; i++) {
+      const r = rockets[i];
+      if (!r.active) continue;
+      _rocketPrev.copy(r.mesh.position);
+      r.t += dt;
+      const k = Math.min(1, r.t / r.dur);
+      const sag = r.sagY * 4 * k * (1 - k);
+      _rocketPos.set(
+        r.ox + (r.dx - r.ox) * k,
+        r.oy + (r.dy - r.oy) * k - sag,
+        r.oz + (r.dz - r.oz) * k
+      );
+      r.mesh.position.copy(_rocketPos);
+      // orient along the instantaneous travel direction so the body+exhaust
+      // glow visibly pitches through the arc instead of staying level.
+      tmp.copy(_rocketPos).sub(_rocketPrev);
+      if (tmp.lengthSq() > 1e-6) r.mesh.quaternion.setFromUnitVectors(UP, tmp.normalize());
+      if (k >= 1) {
+        r.active = false; r.mesh.visible = false;
+        const fn = r.detonate; r.detonate = null;
+        if (fn) fn();
+      }
+    }
+  }
+
   // ---- impact puff pool ----
   function radialTexture(stops) {
     const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -1288,10 +1365,15 @@
     if (w.explosive) aimForward(fwd); else aimWithRecoil(fwd);
     if (CBZ.net && CBZ.net.active && CBZ.net.onShot) CBZ.net.onShot(origin, fwd, w);
 
-    // EXPLOSIVE (RPG/bazooka): a hitscan-to-impact rocket. Resolve where the
-    // shot lands, draw a tracer there, then detonate via the city explosion +
-    // glass-shatter systems (CITY-ONLY — escape/survival never see these). The
-    // BLAST is the kill, so we skip the normal per-pellet damage loop entirely.
+    // EXPLOSIVE (RPG/bazooka) — REAL PROJECTILE FLIGHT (b): the impact POINT is
+    // still resolved synchronously at the moment of firing (so it always lands
+    // exactly under the reticle — unchanged from before), but the rocket no
+    // longer detonates the same frame it's fired. A visible projectile now
+    // flies the eye→impact line over a real flight time (launchRocket, with a
+    // gravity sag), and `detonate()` below — the EXACT same FX call sequence
+    // the old instant branch ran, unchanged line-for-line — fires once it
+    // actually arrives. CITY-ONLY (escape/survival never see these systems).
+    // The BLAST is the kill, so the normal per-pellet damage loop is skipped.
     if (w.explosive) {
       const MIN_DET = 4;
       // a rocket REACHES across the whole map — its detonation must not be capped
@@ -1322,65 +1404,96 @@
       const wallPoint = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.point
         : (farWall && Math.abs(farWall.distance - detT) < 0.6 && farWall.point) ? farWall.point.clone() : null;
       const pt = eye.clone().addScaledVector(fwd, detT);
-      fireTracer(origin, pt, w.tracer, 0.07);
-      if (CBZ.game.mode === "city") {
-        const groundHit = pt.y < 3.5;   // the blast actually couples to the street
-        // the fireball/smoke/damage bloom AT the impact height — a tower hit
-        // 30u up no longer pops at the kerb below it (crashfx reads opts.y). This
-        // single call is ALSO what carves the facade: cityExplosion is wrapped to
-        // run the fracture chain (cityFracture.blastAt at opts.y, power-scaled), so
-        // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
-        // the same wall a second time — it only adds flavor (scar/debris/breach).
-        if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
-        // wreck the storefront HARD — shatter a wide radius of glass (was +2)
-        if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
-        // AND ray-shatter every pane in the rocket's ACTUAL flight path (eye→impact):
-        // the radial burst above only reaches glass near where the blast LANDS, so a
-        // rocket that detonates a hair short of (or beside) a tower used to leave the
-        // window you aimed at intact. This is the SAME path ray-shatter that makes the
-        // rifle reliably break far glass — now on the rocket, so "even RPGs" break it.
-        if (CBZ.cityShatterRay) CBZ.cityShatterRay(eye.x, eye.y, eye.z, fwd.x, fwd.y, fwd.z, detT + (w.blastRadius || 7), true);
-        if (groundHit && CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
-        // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
-        // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in).
-        // GROUND-ONLY BONUS: the facade carve at any height already came from the
-        // cityExplosion chain above; this just widens a street-level hit into a
-        // walkable breach. cityBreach self-dedups via cityFracture.recent() (which
-        // blastAt armed synchronously a tick ago) so it never double-carves.
-        if (groundHit && CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
-        // detonated ON a building face (near OR far) → the facade REACTS (crashfx):
-        // debris avalanche pouring down the facade, a lingering smoke column from
-        // the wound, a parapet block near the roofline, concrete dust. NO carve
-        // (cityBlastWall is flavor only — the real hole is the cityExplosion chain).
-        // DEGATED: now fires for a far facade too, not just a near-wall hit.
-        if (wallStruck && CBZ.cityBlastWall) {
-          // wall-face normal: the raycast's struck face rotated to world (the
-          // exact face-entry normal, same idea as findCarHit's AABB slabs);
-          // falls back to the reflected horizontal shot direction.
-          shotDir.set(-fwd.x, 0, -fwd.z);
-          if (shotDir.lengthSq() < 1e-6) shotDir.set(0, 1, 0); else shotDir.normalize();
-          const wf = wallStruck.face, wo = wallStruck.object;
-          if (wf && wo && wo.getWorldQuaternion) {
-            tmp.copy(wf.normal).applyQuaternion(wo.getWorldQuaternion(wallQ));
-            if (tmp.lengthSq() > 0.25) {
-              if (tmp.dot(fwd) > 0) tmp.multiplyScalar(-1);   // always face the shooter
-              shotDir.copy(tmp.normalize());
+      // pre-resolved shot direction + origin for the detonation closure below.
+      // MUST be clones, not the shared `eye`/`fwd` scratch vectors — detonate()
+      // can now run many frames after this shot (real flight time), by which
+      // point other shots/frames will have overwritten the shared vectors.
+      const launchDir = fwd.clone();
+      const launchEye = eye.clone();
+      const detonate = function () {
+        if (CBZ.game.mode === "city") {
+          const groundHit = pt.y < 3.5;   // the blast actually couples to the street
+          // the fireball/smoke/damage bloom AT the impact height — a tower hit
+          // 30u up no longer pops at the kerb below it (crashfx reads opts.y). This
+          // single call is ALSO what carves the facade: cityExplosion is wrapped to
+          // run the fracture chain (cityFracture.blastAt at opts.y, power-scaled), so
+          // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
+          // the same wall a second time — it only adds flavor (scar/debris/breach).
+          if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
+          // wreck the storefront HARD — shatter a wide radius of glass (was +2)
+          if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
+          // AND ray-shatter every pane in the rocket's ACTUAL flight path (eye→impact):
+          // the radial burst above only reaches glass near where the blast LANDS, so a
+          // rocket that detonates a hair short of (or beside) a tower used to leave the
+          // window you aimed at intact. This is the SAME path ray-shatter that makes the
+          // rifle reliably break far glass — now on the rocket, so "even RPGs" break it.
+          if (CBZ.cityShatterRay) CBZ.cityShatterRay(launchEye.x, launchEye.y, launchEye.z, launchDir.x, launchDir.y, launchDir.z, detT + (w.blastRadius || 7), true);
+          if (groundHit && CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
+          // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
+          // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in).
+          // GROUND-ONLY BONUS: the facade carve at any height already came from the
+          // cityExplosion chain above; this just widens a street-level hit into a
+          // walkable breach. cityBreach self-dedups via cityFracture.recent() (which
+          // blastAt armed synchronously a tick ago) so it never double-carves.
+          if (groundHit && CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
+          // detonated ON a building face (near OR far) → the facade REACTS (crashfx):
+          // debris avalanche pouring down the facade, a lingering smoke column from
+          // the wound, a parapet block near the roofline, concrete dust. NO carve
+          // (cityBlastWall is flavor only — the real hole is the cityExplosion chain).
+          // DEGATED: now fires for a far facade too, not just a near-wall hit.
+          if (wallStruck && CBZ.cityBlastWall) {
+            // wall-face normal: the raycast's struck face rotated to world (the
+            // exact face-entry normal, same idea as findCarHit's AABB slabs);
+            // falls back to the reflected horizontal shot direction.
+            const sd = new THREE.Vector3(-launchDir.x, 0, -launchDir.z);
+            if (sd.lengthSq() < 1e-6) sd.set(0, 1, 0); else sd.normalize();
+            const wf = wallStruck.face, wo = wallStruck.object;
+            if (wf && wo && wo.getWorldQuaternion) {
+              const wn = wf.normal.clone().applyQuaternion(wo.getWorldQuaternion(wallQ));
+              if (wn.lengthSq() > 0.25) {
+                if (wn.dot(launchDir) > 0) wn.multiplyScalar(-1);   // always face the shooter
+                sd.copy(wn.normalize());
+              }
             }
+            // MIN_DET can push pt past a point-blank wall — stamp at the wall point
+            CBZ.cityBlastWall(wallPoint || pt, sd, { power: w.blastPower || 1.4 });
           }
-          // MIN_DET can push pt past a point-blank wall — stamp at the wall point
-          CBZ.cityBlastWall(wallPoint || pt, shotDir, { power: w.blastPower || 1.4 });
+          // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
+          if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
         }
-        // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
-        if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
+        // kick scales with how close the blast is to the lens — a rocket at your
+        // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
+        // its own explosion shake the same way)
+        const camD = CBZ.camera ? CBZ.camera.position.distanceTo(pt) : 0;
+        CBZ.shake && CBZ.shake(((w.shake || 1) + 0.6) * Math.max(0.3, Math.min(1, 1.25 - camD / 130)));
+        CBZ.doHitstop && CBZ.doHitstop(0.05);
+      };
+      // FLIGHT TIME + visible arc: projSpeed/projGravity (weapon-data.js) drive
+      // a real travel delay instead of detonating the instant the trigger is
+      // pulled. Weapons without projSpeed (defensive default) keep the OLD
+      // instant-detonate behaviour so this never silently breaks a future
+      // explosive that doesn't carry the new fields.
+      const projSpeed = w.projSpeed || 0;
+      if (projSpeed > 0) {
+        const flightDist = origin.distanceTo(pt);
+        const flightDur = Math.max(0.04, flightDist / projSpeed);
+        // visual sag: how far the arc dips at its midpoint under projGravity
+        // over the flight time (s = 1/8 * g * t^2 for a midpoint sag — the
+        // peak of a parabola released over the full duration), capped so a
+        // very long shot doesn't sag the rocket into the ground mid-flight.
+        const sag = Math.min(flightDist * 0.18, 0.125 * (w.projGravity || 0) * flightDur * flightDur);
+        launchRocket(origin, pt, flightDur, sag, detonate);
+        // a brief launch flare only (the flying mesh IS the tracer now) — no
+        // fireTracer() instant line all the way to `pt`, which would visibly
+        // spoil the flight by drawing the whole path before the rocket arrives.
+      } else {
+        fireTracer(origin, pt, w.tracer, 0.07);
+        detonate();
       }
-      // kick scales with how close the blast is to the lens — a rocket at your
-      // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
-      // its own explosion shake the same way)
-      const camD = CBZ.camera ? CBZ.camera.position.distanceTo(pt) : 0;
-      CBZ.shake && CBZ.shake(((w.shake || 1) + 0.6) * Math.max(0.3, Math.min(1, 1.25 - camD / 130)));
-      CBZ.doHitstop && CBZ.doHitstop(0.05);
       // firing still raises wanted: replicate the witnessed-crime block below so
-      // launching a rocket is at least as loud as discharging a firearm.
+      // launching a rocket is at least as loud as discharging a firearm. This
+      // fires at LAUNCH (the report is "shots fired", not "it landed") so a
+      // witness reacts to the whoosh/launch sound immediately, same as before.
       if (CBZ.game.mode === "city" && CBZ.cityCrime) {
         CBZ.cityCrime(120, { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
         CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: 4, damage: 0.3 }, { silent: true, noWanted: true });
