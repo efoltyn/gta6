@@ -1891,6 +1891,7 @@
         if (t.life <= 0) t.mesh.visible = false;
       }
     }
+    updateRockets(dt);   // (b) in-flight RPG projectiles: fly the arc, detonate on arrival
     for (let i = 0; i < impacts.length; i++) {
       const p = impacts[i];
       if (p.life > 0) {
