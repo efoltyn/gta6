@@ -551,6 +551,23 @@
     }
   }
 
+  // ---- tiny deferred-call queue (sniper travel-time feedback) ---------------
+  // GENERIC, NOT just for the sniper: a short list of {t, fn} pairs ticked
+  // every frame in the same onAlways(52,...) loop as everything else here.
+  // Used ONLY for the sniper's "travel time" (b): damage/game-state still
+  // resolves THIS frame (hit-scan, deterministic, doesn't risk the per-pellet
+  // branch logic below — see resolveShotSniper's header comment), but the
+  // PLAYER-FACING feedback (tracer draw, hit-thwack sfx/marker) is held back
+  // by the round's real flight time so a 200m headshot doesn't feel instant.
+  const deferred = [];
+  function deferCall(delay, fn) { if (delay > 0.001) deferred.push({ t: delay, fn }); else fn(); }
+  function updateDeferred(dt) {
+    for (let i = deferred.length - 1; i >= 0; i--) {
+      deferred[i].t -= dt;
+      if (deferred[i].t <= 0) { const fn = deferred[i].fn; deferred.splice(i, 1); fn(); }
+    }
+  }
+
   // ---- impact puff pool ----
   function radialTexture(stops) {
     const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -1562,11 +1579,29 @@
     const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
     let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
+    let feedbackDelay = 0;   // (b) sniper travel-time: hoisted out of the loop so the post-loop hit-marker/sfx can wait for it too (sniper is always single-pellet, so there's exactly one value to carry)
     for (let i = 0; i < pellets; i++) {
       spreadDir(fwd, cone, shotDir);
-      const hit = resolveShot(w, shotDir);
+      // (b) SNIPER DROP/TRAVEL-TIME: every other weapon resolves exactly as
+      // before (resolveShotSniper no-ops to plain resolveShot when the
+      // weapon carries no sniperDrop table). For the sniper at long range,
+      // shotDir is bent down in-place to the real drop-compensated path
+      // BEFORE resolveShot runs, so every system below (glass shatter ray,
+      // wall pock, gore, etc.) reads the SAME dropped trajectory — there's
+      // only one resolved path per shot, not a cosmetic one and a real one.
+      const sniperShot = resolveShotSniper(w, shotDir);
+      const hit = sniperShot.hit;
+      feedbackDelay = sniperShot.delay;
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
-      if (i < 5 || pellets === 1) fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
+      // Damage/world-state above (gunHit, glass, wall pocks...) still resolve
+      // THIS frame — only the player-FACING feedback (tracer beam + the
+      // worst-of-the-burst hit marker/hit-sfx further down) waits for the
+      // round's real flight time, so a 200m headshot doesn't feel instant
+      // without touching the deterministic hit-resolution timing at all.
+      if (i < 5 || pellets === 1) {
+        if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
+        else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
+      }
       // city: a window in this pellet's path shatters (glass never blocks the
       // shot). EVERY round breaks the pane it actually passes through, out to
       // wherever the bullet really travels (reach = the hit distance, already
@@ -1702,10 +1737,20 @@
     if (carThudDist >= 0) surfaceThud("clank", cal, carThudDist);
     else if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
     // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
-    if (hitSomething) flashHitMarker(down, head);
-    // (no "HEADSHOT"/"TARGET DOWN" text — the red hit marker, gore and foley own the kill)
-    if (head) { CBZ.sfx && CBZ.sfx("headshot"); }
-    else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
+    // (b) sniper travel-time: the marker/sfx wait for feedbackDelay too (same
+    // "round's still in the air" feel as the deferred tracer above) — game
+    // STATE (damage, kills, crime) already happened this frame; only the
+    // confirmation the PLAYER sees/hears is held back to match the flight.
+    if (feedbackDelay > 0) {
+      if (hitSomething) deferCall(feedbackDelay, function () { flashHitMarker(down, head); });
+      if (head) deferCall(feedbackDelay, function () { CBZ.sfx && CBZ.sfx("headshot"); });
+      else if (hitSomething) deferCall(feedbackDelay, function () { CBZ.sfx && CBZ.sfx("hit"); });
+    } else {
+      if (hitSomething) flashHitMarker(down, head);
+      // (no "HEADSHOT"/"TARGET DOWN" text — the red hit marker, gore and foley own the kill)
+      if (head) { CBZ.sfx && CBZ.sfx("headshot"); }
+      else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
+    }
     // discharging a firearm in the city is a witnessed crime (city wanted system)
     if (CBZ.game.mode === "city" && CBZ.cityCrime) {
       CBZ.cityCrime(w.nonlethal ? 20 : (hitSomething ? 100 : 55), { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
@@ -2043,6 +2088,7 @@
       }
     }
     updateRockets(dt);   // (b) in-flight RPG projectiles: fly the arc, detonate on arrival
+    updateDeferred(dt);  // (b) sniper travel-time feedback queue
     for (let i = 0; i < impacts.length; i++) {
       const p = impacts[i];
       if (p.life > 0) {
