@@ -50,6 +50,11 @@
   const g = CBZ.game;
   if (!g) return;
 
+  // deterministic LCG (project convention: never Math.random()) — used only
+  // for the respray colour pick below.
+  let _s = 90121;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
   // ---- tuning ---------------------------------------------------------------
   const TUNE = {
     armorMul: { light: 0.5, heavy: 0.2 },   // fraction of bullet/ram damage taken
@@ -261,6 +266,10 @@
       if (m.booster) car._modFx.booster = buildBooster(root, dims);
       if (m.turret) car._modFx.turret = buildTurret(root, dims);
       if (m.launcher) car._modFx.launcher = buildLauncher(root, dims);
+      // a respray / [C] style-cycle rebuilds car._playerCarFeel from the new
+      // style's stock FEEL table (playercars.js) — re-assert the perf reshape
+      // on top so a built motor doesn't quietly revert to stock after a paint job.
+      if (m.perf) applyPerf(car);
     } catch (e) { /* a dressing failure must never break the car */ }
   }
   CBZ.cityApplyCarModsRebuild = applyMods;   // public: re-dress after a visual swap / MP spawn
@@ -285,8 +294,13 @@
   CBZ.cityApplyCarMod = cityApplyCarMod;
 
   // PERFORMANCE: bump the published handling-feel (vehicles.js reads
-  // car._playerCarFeel for accel/top/grip). We layer a multiplier so it
-  // composes with the style's base feel and is idempotent per tier.
+  // car._playerCarFeel for accel/top/grip) AND reshape the actual per-gear
+  // torque-band curve vehicles.js's gearTorqueMul() reads (car._perfGearTorque
+  // — see vehicles.js CBZ.cityGearTorqueBase). A flat accel scalar makes every
+  // gear "feel faster" by the same amount everywhere in its band; a Stage 3
+  // build should also CHANGE the shape — less of a low-end dip, a higher and
+  // longer-held peak, and the fall-off near redline pushed later — so shifting
+  // through a built motor reads differently than a stock one, not just quicker.
   function applyPerf(car) {
     const tier = (car.mods && car.mods.perf) | 0;
     if (!tier) return;
@@ -299,6 +313,31 @@
     if (f.top != null) f.top *= (1 + tier * 0.1);
     if (f.grip != null) f.grip *= (1 + tier * 0.06);
     car._playerCarFeel = f;
+    reshapeGearTorque(car, tier);
+  }
+  // build a per-tier RESHAPED torque-band table from vehicles.js's base curve:
+  //   • raise the low-end (less of a soft-idle dip — a built motor pulls
+  //     harder right off the bottom of the band),
+  //   • raise + flatten the mid/peak (more of the band sits near peak torque),
+  //   • push the fall-off later (keypoint that used to sit at the gear's END
+  //     moves outward, so the curve stays fuller deeper into the redline).
+  // Computed once per tier change (cached on the car) — zero per-frame cost.
+  function reshapeGearTorque(car, tier) {
+    const baseTable = CBZ.cityGearTorqueBase;
+    if (!baseTable) return;   // vehicles.js not loaded (headless/order issue) — flat scalar still applied above
+    const lowBoost = 1 + tier * 0.05, peakBoost = 1 + tier * 0.07, fallEase = tier * 0.05;
+    car._perfGearTorque = baseTable.map(function (curve) {
+      return curve.map(function (pt, i) {
+        const t = pt[0], mul = pt[1];
+        // points past the curve's own peak (mul below the curve's max) get the
+        // fall-off softened toward the peak value instead of dropping as hard.
+        const peak = Math.max.apply(null, curve.map(function (p) { return p[1]; }));
+        const isFalling = i === curve.length - 1 || (mul < peak && t > curve[Math.max(0, i - 1)][0]);
+        let m = mul * (t < 0.25 ? lowBoost : peakBoost);
+        if (isFalling && mul < peak) m = mul + (peak - mul) * fallEase;
+        return [t, Math.min(1.15, m)];
+      });
+    });
   }
 
   // ============================================================
@@ -837,7 +876,7 @@
     }
     // pick a fresh colour + cycle style; recolour the visual.
     const palette = [0x2b2f36, 0xb02a2a, 0x1f5fb0, 0x2f8f4f, 0xe0a52a, 0xe8e8ec, 0x6a2f9a, 0xff6a00];
-    const col = palette[(Math.random() * palette.length) | 0];
+    const col = palette[(rng() * palette.length) | 0];
     car.color = col;
     let restyled = false;
     if (CBZ.cityCyclePlayerCarStyle) { try { CBZ.cityCyclePlayerCarStyle(); restyled = true; } catch (e) { /* keep */ } }

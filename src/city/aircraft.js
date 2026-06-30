@@ -21,7 +21,12 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const g = CBZ.game;
-  const rng = Math.random;
+  // seeded LCG (project convention — NEVER Math.random, so a city run replays
+  // deterministically). This module previously aliased rng straight to
+  // Math.random; fixed here while the file is already open for the flight
+  // model work.
+  let _s = 90217;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   const cmat = CBZ.cmat || CBZ.mat || function (c, o) { return new THREE.MeshLambertMaterial({ color: c }); };
 
   // NEW MATERIAL API (carfx.js) with a flat-cmat fallback (auto-upgrades when
@@ -221,7 +226,7 @@
     grp.add(body);
     const flame = new THREE.Mesh(a.smoke, a.flameMat);
     flame.scale.set(0.5, 0.5, 0.9); flame.position.z = -0.9; grp.add(flame);
-    return { group: grp, flame, live: true, trail: [], dir: new THREE.Vector3(), life: 0, byPlayer: false };
+    return { group: grp, flame, live: true, trail: [], dir: new THREE.Vector3(), life: 0, byPlayer: false, seek: null };
   }
   function freeMissile(m) {
     m.live = false;
@@ -235,19 +240,48 @@
   // blast counts as a player crime + does player-attributed damage). The gunship
   // / jets pass no flag → false (unchanged). The PUBLIC player entry below
   // (CBZ.cityFireMissile) routes here with byPlayer:true.
-  function launchMissile(fx, fy, fz, target, byPlayer) {
+  //
+  // `seek` (optional): a zero-arg function returning a LIVE {x,y,z} point to
+  // re-aim toward every frame (a simple proportional-nav-lite homer — see
+  // updateMissiles). Pass null/omit for the old straight-line behaviour
+  // (still used for anything fired at a static point, e.g. a building).
+  function launchMissile(fx, fy, fz, target, byPlayer, seek) {
     if (!target) return;
     const r = root(); if (!r) return;
     const m = getMissile(); if (!m) return;
     m.group.position.set(fx, fy, fz);
     m.dir.set(target.x - fx, (target.y || 1) - fy, target.z - fz).normalize();
-    m.life = 0; m.byPlayer = !!byPlayer;
+    m.life = 0; m.byPlayer = !!byPlayer; m.seek = seek || null;
     // orient nose along travel dir
     m.group.lookAt(fx + m.dir.x, fy + m.dir.y, fz + m.dir.z);
     r.add(m.group);
     if (missiles.indexOf(m) < 0) missiles.push(m);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     return m;
+  }
+
+  // pick a live AI aircraft (gunship or jet) roughly ahead of a player-fired
+  // missile's launch ray, within a forward cone + max range, so a player
+  // salvo aimed AT the police air can lock on — but firing at a building or
+  // the street (nothing hostile near that ray) stays a plain straight shot.
+  // Returns a zero-arg `seek` getter (re-reads the live position every frame,
+  // same lock-loss-on-death contract as the AI seekers) or null.
+  const LOCK_CONE = Math.cos(18 * Math.PI / 180);   // ~18° half-angle
+  const LOCK_RANGE = 160;
+  function pickPlayerLockSeek(fx, fy, fz, nx, ny, nz) {
+    let best = null, bestDot = LOCK_CONE;
+    const consider = (obj, isHeli) => {
+      if (!obj || (isHeli && obj.downed) || !obj.pos) return;
+      const dx = obj.pos.x - fx, dy = obj.pos.y - fy, dz = obj.pos.z - fz;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < 1 || d > LOCK_RANGE) return;
+      const dot = (dx * nx + dy * ny + dz * nz) / d;
+      if (dot > bestDot) { bestDot = dot; best = obj; }
+    };
+    consider(heli, true);
+    for (let i = 0; i < jets.length; i++) consider(jets[i], false);
+    if (!best) return null;
+    return function () { return (best && best.pos && !(best.downed)) ? { x: best.pos.x, y: best.pos.y, z: best.pos.z } : null; };
   }
 
   // ---- PUBLIC: player-fired missile (the F-22 / chopper salvo) --------------
@@ -276,7 +310,11 @@
     const FAR = 400;
     const target = { x: x + nx * FAR, y: y + ny * FAR, z: z + nz * FAR };
     const byPlayer = opts.byPlayer !== false;  // default TRUE for the player entry
-    const m = launchMissile(x, y, z, target, byPlayer);
+    // HOMING: if the player's aim ray is roughly on a live police gunship/jet,
+    // lock it (proportional-nav-lite, same as the AI's missiles) — otherwise
+    // this stays the old straight shot (a building/ground strike never homes).
+    const seek = byPlayer ? pickPlayerLockSeek(x, y, z, nx, ny, nz) : null;
+    const m = launchMissile(x, y, z, target, byPlayer, seek);
     return !!m;                                // false ⇒ pool was at MAX_MISSILES
   };
 
@@ -293,12 +331,33 @@
     liveCount() { return missiles.length; },
   };
 
+  // proportional-nav-LITE turn rate: enough to run down a target flying
+  // straight, not enough to out-turn a player who breaks hard (banks +
+  // changes altitude). A fixed-wing-style cap — generous early in flight
+  // (the missile is fast and the geometry forgives it), tightened by a
+  // short "seeker arm" delay so a missile can't snap-track the instant it
+  // leaves the rail (a real seeker has to acquire first).
+  const HOMING_TURN_RATE = 1.8;     // rad/s
+  const HOMING_ARM_T     = 0.35;    // s before the seeker starts steering
   function updateMissiles(dt, r) {
     const a = assets();
     for (let i = missiles.length - 1; i >= 0; i--) {
       const m = missiles[i];
       if (!m.live) { missiles.splice(i, 1); continue; }
       const p = m.group.position;
+      // ---- HOMING: proportional-nav-lite. Only re-aims if the launcher gave
+      // us a live `seek` getter (a static-point shot — e.g. at a building —
+      // stays a straight-line projectile exactly as before). Capped turn rate
+      // means a target that keeps maneuvering can fly the missile off its
+      // tail; a target holding a straight line gets walked down.
+      if (m.seek && m.life > HOMING_ARM_T && CBZ.aeroPhysics) {
+        const tp = m.seek();
+        if (tp) {
+          const nd = CBZ.aeroPhysics.homingSteer(m.dir, tp.x - p.x, (tp.y != null ? tp.y : p.y) - p.y, tp.z - p.z, HOMING_TURN_RATE, dt);
+          m.dir.set(nd.x, nd.y, nd.z);
+          m.group.lookAt(p.x + nd.x, p.y + nd.y, p.z + nd.z);
+        }
+      }
       const step = MISSILE_SPD * dt;
       p.x += m.dir.x * step; p.y += m.dir.y * step; p.z += m.dir.z * step;
       m.life += dt;
@@ -566,15 +625,45 @@
     const needY = P0 ? (P0.pos.y || 0) + 1.4 + FIRE_MARGIN + 6 : 0;   // stay this far over the player
     const ty = Math.max(HELI_Y - (stars - HELI_STAR) * 2, needY);
     const lat = Math.min(1, dt * (HELI_SPEED / Math.max(R, 6)));
+    const prevX = heli.pos.x, prevY = heli.pos.y, prevZ = heli.pos.z;
     heli.pos.x += (tx - heli.pos.x) * lat;
     heli.pos.z += (tz - heli.pos.z) * lat;
     heli.pos.y += (ty - heli.pos.y) * Math.min(1, dt * 1.2);
-    // NO FLY-THROUGH: never let the body sink into a building — ride over the roof.
-    const bodyTop = roofTopAt(heli.pos.x, heli.pos.z);
-    if (bodyTop > 0 && heli.pos.y < bodyTop + HELI_CLEAR) heli.pos.y = bodyTop + HELI_CLEAR;
     // bank into the turn + face flight direction
     const head = Math.atan2(tx - heli.pos.x + 0.0001, tz - heli.pos.z + 0.0001);
     heli.group.rotation.y += (head - heli.group.rotation.y) * Math.min(1, dt * 2.5) * 0.4;
+    // ---- AERO LAYER (lift/drag/ETL/ground-effect) ------------------------
+    // The gunship is still TARGET-SEEKING (the orbit/engagement AI above is
+    // proven and untouched), but its actual motion now reads through the
+    // shared aero core instead of a free teleport-lerp: derive this frame's
+    // real world velocity from the position delta, resolve it into the
+    // body frame, and let ETL (mushy near-hover, solid forward flight) +
+    // ground effect (a cushioning bonus low over a roof/street) perturb the
+    // commanded altitude by a small, bounded amount — enough to feel like a
+    // real rotor disc reacting to the air, never enough to break the chase.
+    if (CBZ.aeroPhysics && dt > 0.0001 && dt < 0.2) {
+      const A = CBZ.aeroPhysics;
+      const wvx = (heli.pos.x - prevX) / dt, wvy = (heli.pos.y - prevY) / dt, wvz = (heli.pos.z - prevZ) / dt;
+      const local = A.localVelocity(wvx, wvy, wvz, heli.group.rotation.y, 0, heli.group.rotation.z);
+      const fwdSpeed = Math.max(0, local.z);
+      const etl = A.etlMul(fwdSpeed, 8.2, 12.3);
+      const groundY = Math.max(CBZ.floorAt ? CBZ.floorAt(heli.pos.x, heli.pos.z) : 0, roofTopAt(heli.pos.x, heli.pos.z));
+      const agl = Math.max(0, heli.pos.y - groundY);
+      const gMul = A.groundEffectMul(agl, 9.4);    // ~9.4m main-rotor diameter
+      const aero = A.aeroForces(local, { liftScale: 0.004, etl, groundMul: gMul,
+        dragCoef: { px: 0.07, nx: 0.07, py: 0.05, ny: 0.05, pz: 0.02, nz: 0.09 } });
+      // a stalled/low-ETL disc sags slightly; ground effect cushions a low pass —
+      // both are SMALL (≤~0.6m of correction) so the engagement geometry (canEngage,
+      // roofTopAt clearance, spotlight) never sees a meaningful altitude surprise.
+      heli._aeroSag = (heli._aeroSag || 0) + (((aero.stalled ? -0.5 : 0) + (gMul - 1) * 1.6 + (etl - 1) * 0.8) - (heli._aeroSag || 0)) * Math.min(1, dt * 2);
+      heli.pos.y += heli._aeroSag * dt;
+      heli._etl = etl; heli._aoa = aero.aoaDeg;
+    }
+    // NO FLY-THROUGH: never let the body sink into a building — ride over the roof.
+    // (checked AFTER the aero sag so the small cushion/sag correction can never
+    // itself cause a roof clip — this clamp always has the final say)
+    const bodyTop = roofTopAt(heli.pos.x, heli.pos.z);
+    if (bodyTop > 0 && heli.pos.y < bodyTop + HELI_CLEAR) heli.pos.y = bodyTop + HELI_CLEAR;
     heli.group.rotation.z = Math.sin(heli.orbit) * 0.14;
     heli.rotor.rotation.y += dt * 42;
     heli.trotor.rotation.x += dt * 60;
@@ -664,7 +753,19 @@
         const side = rng() < 0.5 ? -1.5 : 1.5;
         // launch from a wing pod, lead the target a touch toward last-known
         const t = aimPoint();
-        launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t);
+        // HOMING: re-acquire the player's live position every frame, but only
+        // while the gunship still has a real shot (canEngage — below us + clear
+        // LOS) — once you duck behind cover or climb above the heli, the seeker
+        // loses lock and the missile coasts straight on its last heading, same
+        // as before. This keeps it beatable: break the engagement geometry and
+        // you break the lock, not just the aim.
+        const seekHeli = function () {
+          const SP = player();
+          if (!SP) return null;
+          if (!canEngage(heli.pos.x, heli.pos.y - 0.4, heli.pos.z, SP)) return null;
+          return { x: SP.pos.x, y: (SP.pos.y || 0) + 1.2, z: SP.pos.z };
+        };
+        launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t, false, seekHeli);
         // (no text — the missile has a smoke trail you can see)
       }
     }
@@ -766,6 +867,22 @@
       j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
       // gentle bob so it doesn't look perfectly rigid
       j.pos.y += Math.sin(j.life * 6) * dt * 0.6;
+      // ---- AERO LAYER: same shared core as the gunship. The jet's heading/speed
+      // stay scripted (a screaming straight pass is the intended read), but ground
+      // effect now genuinely cushions a low pass over a rooftop, and a deep-AoA bob
+      // (from the existing sinusoidal wobble) reads through the real stall curve —
+      // so a jet skimming a tower visibly "feels" the air instead of free-floating.
+      if (CBZ.aeroPhysics) {
+        const A = CBZ.aeroPhysics;
+        const groundY = Math.max(CBZ.floorAt ? CBZ.floorAt(j.pos.x, j.pos.z) : 0, roofTopAt(j.pos.x, j.pos.z));
+        const agl = Math.max(0, j.pos.y - groundY);
+        const gMul = A.groundEffectMul(agl, 10.8);   // ~10.8m wingspan
+        const local = { x: 0, y: Math.cos(j.life * 6) * 0.6, z: JET_SPEED };
+        const aero = A.aeroForces(local, { liftScale: 0.0009, groundMul: gMul });
+        // ground effect very gently floats a low pass up off the roofline
+        j.pos.y += (gMul - 1) * 2.2 * dt;
+        j._aoa = aero.aoaDeg;
+      }
       if (j.burn) j.burn.scale.z = 1.4 + Math.sin(j.life * 30) * 0.4;
       // fire a missile salvo near closest approach to the target
       if (!j.fired) {
@@ -773,7 +890,17 @@
         if (dx * dx + dz * dz < 60 * 60) {
           j.fired = true;
           const t = aimPoint();
-          launchMissile(j.pos.x, j.pos.y - 0.5, j.pos.z, t);
+          // HOMING, same lock-or-lose-it rule as the gunship: only tracks while
+          // there's a clear line of fire to the player's live position, so
+          // ducking into cover breaks the lock and the missile goes ballistic.
+          const seekJet = function () {
+            const SP = player();
+            if (!SP) return null;
+            const py = (SP.pos.y || 0) + 1.2;
+            if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(j.pos.x, j.pos.y - 0.5, j.pos.z, SP.pos.x, py, SP.pos.z)) return null;
+            return { x: SP.pos.x, y: py, z: SP.pos.z };
+          };
+          launchMissile(j.pos.x, j.pos.y - 0.5, j.pos.z, t, false, seekJet);
           // (no banner — you HEAR the jet; diegetic roar below)
           if (CBZ.sfx && CBZ.player) { const dj = Math.hypot(j.pos.x - CBZ.player.pos.x, j.pos.z - CBZ.player.pos.z); CBZ.sfx("rumble", { dist: dj, ghost: true }); }
         }

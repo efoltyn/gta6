@@ -20,6 +20,23 @@
    still reads). All of it swells after dark, when the flash is the
    only thing visible at 40u. The flash IS the "you're being shot"
    indicator.
+
+   SUPPRESSION (combat-realism pass): being shot AT and missed should still
+   cost you something, or "incoming fire" is purely cosmetic. tracer()
+   already computes `inc` (0..1, how close a round's closest approach came to
+   a target) for the player's own camera — that EXACT near-miss test is now
+   reused, generically, against any target passed as opts.targetActor (an
+   NPC defender, a guard, anyone with a {x,y,z}-ish .pos), so a shot that
+   buzzes a ped's head rattles THEM too, not just the player. A connecting
+   `inc` above SUPPRESS_THRESH stacks a decaying "rattled" meter on the
+   target (an internal WeakMap keyed by the target object itself — CBZ.player
+   included, so no actor needs a reserved field) that callers read via
+   CBZ.suppressionLevel(actor)
+   (0 = composed, 1 = freshly buzzed) and CBZ.suppressionAccuracyMul(actor)
+   (a ready-to-multiply 1..~1.6 spread/sway penalty). Pure data — gunfx.js
+   never touches anyone's aim itself; fpsmode.js (player) folds the mul into
+   its spread cone, and any NPC shooter can do the same with zero coupling
+   back to this file. Decays linearly over SUPPRESS_DECAY seconds back to 0.
      CBZ.bulletImpact(pos,n,o)   — debris burst; o.power scales it by
                                    CALIBER, o.kind "chip" + o.color =
                                    paint flecks in a shot car's coat.
@@ -41,6 +58,76 @@
   if (!CBZ || !window.THREE || !CBZ.scene) return;
   const THREE = window.THREE;
   const scene = CBZ.scene;
+
+  // ---- SUPPRESSION STATE (c) -------------------------------------------------
+  // A WeakMap keyed by the target object itself (CBZ.player, a ped/cop actor —
+  // anything with a .pos) so nobody needs a reserved field on actors they
+  // don't own. Value: { t: secondsRemainingAtFullStrength-ish counter, peak }.
+  // We store a simple decaying TIMER (not a 0..1 level) so re-triggering while
+  // already suppressed EXTENDS the clock instead of needing max() bookkeeping
+  // at every read site; level is derived from the timer at read time.
+  const SUPPRESS_THRESH = 0.22;   // near-miss `inc` below this is "not close enough to flinch"
+  const SUPPRESS_DECAY = 3.2;     // seconds for a fresh max-strength flinch to fully decay
+  const SUPPRESS_MAX_MUL = 1.65;  // worst-case spread/sway multiplier at peak suppression
+  const suppression = new WeakMap();
+
+  // tick every live suppression timer down. Lazily walks a side-list of
+  // recently-touched targets (a WeakMap can't be iterated) so this stays
+  // cheap regardless of how many actors exist in the city.
+  const suppressedRecent = [];
+  // mark `target` as freshly shot-at-and-missed, strength 0..1 (how close the
+  // round's closest approach came). Re-triggering refreshes/extends the timer
+  // rather than just overwriting it, so a hail of near-misses keeps someone
+  // rattled instead of each shot resetting to the same single-shot decay.
+  function noteSuppressed(target, strength) {
+    if (!target || strength <= 0) return;
+    const cur = suppression.get(target);
+    const add = strength * SUPPRESS_DECAY;
+    const t = cur ? Math.min(SUPPRESS_DECAY * 1.6, cur.t + add * 0.6) : add;
+    suppression.set(target, { t, peak: cur ? Math.max(cur.peak, strength) : strength });
+    if (suppressedRecent.indexOf(target) < 0) suppressedRecent.push(target);
+  }
+  // 0 (composed) .. 1 (freshly buzzed) — callers that want a raw "how rattled"
+  // read (HUD shake, AI morale, etc.) rather than the ready-to-use multiplier.
+  CBZ.suppressionLevel = function (target) {
+    const s = target && suppression.get(target);
+    if (!s || s.t <= 0) return 0;
+    return Math.max(0, Math.min(1, s.t / SUPPRESS_DECAY));
+  };
+  // ready-to-multiply accuracy/aim-sway penalty: 1 = unaffected, up to
+  // SUPPRESS_MAX_MUL at peak. Quadratic ease so a faint near-miss barely
+  // registers but a close shave genuinely throws the aim off.
+  CBZ.suppressionAccuracyMul = function (target) {
+    const lvl = CBZ.suppressionLevel(target);
+    if (lvl <= 0) return 1;
+    return 1 + (SUPPRESS_MAX_MUL - 1) * lvl * lvl;
+  };
+  CBZ.onAlways(53, function (dt) {
+    for (let i = suppressedRecent.length - 1; i >= 0; i--) {
+      const tgt = suppressedRecent[i];
+      const s = suppression.get(tgt);
+      if (!s) { suppressedRecent.splice(i, 1); continue; }
+      s.t -= dt;
+      if (s.t <= 0) { suppression.delete(tgt); suppressedRecent.splice(i, 1); }
+    }
+  });
+
+  // Generic near-miss closest-approach test, factored out of the player-only
+  // check tracer() used to do inline (SAME math, now reusable for any actor
+  // with a .pos). Returns 0..1 (0 = not close / not heading at them, 1 =
+  // dead-on) for a shot segment from→to versus a point at (px,py,pz).
+  function closestApproachInc(from, to, px, py, pz) {
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    const len2 = dx * dx + dy * dy + dz * dz;
+    const ox = px - from.x, oy = py - from.y, oz = pz - from.z;
+    if (len2 <= 16 || ox * ox + oy * oy + oz * oz <= 16) return 0;
+    let t = (ox * dx + oy * dy + oz * dz) / len2;
+    if (t <= 0.45) return 0;          // travelling toward the target's half of the line
+    if (t > 1) t = 1;
+    const mx = from.x + dx * t - px, my = from.y + dy * t - py, mz = from.z + dz * t - pz;
+    const miss = Math.sqrt(mx * mx + my * my + mz * mz);
+    return miss < 3.4 ? 1 - miss / 3.4 : 0;
+  }
 
   // ---- pooled fading tracer lines ----
   const linePool = [];
@@ -151,22 +238,30 @@
     // shot segment to the player's chest line decides; the boost scales with
     // how dead-on the shot is (inc 0..1). Player-origin / point-blank-adjacent
     // shots are excluded so your own allies' barrels don't flare in your face.
+    // (closestApproachInc factors out the exact math that used to live inline
+    // here — SAME numbers for the player — so it can also drive SUPPRESSION
+    // below without duplicating the geometry test.)
     let inc = 0;
     const P = CBZ.player;
     if (P && P.pos && from && to) {
-      const px = P.pos.x, py = P.pos.y + 1.45, pz = P.pos.z;
-      const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
-      const len2 = dx * dx + dy * dy + dz * dz;
-      const ox = px - from.x, oy = py - from.y, oz = pz - from.z;
-      if (len2 > 16 && ox * ox + oy * oy + oz * oz > 16) {
-        let t = (ox * dx + oy * dy + oz * dz) / len2;
-        if (t > 0.45) {            // travelling toward the player's half of the line
-          if (t > 1) t = 1;
-          const mx = from.x + dx * t - px, my = from.y + dy * t - py, mz = from.z + dz * t - pz;
-          const miss = Math.sqrt(mx * mx + my * my + mz * mz);
-          if (miss < 3.4) inc = 1 - miss / 3.4;            // 1 = dead-on
-        }
-      }
+      inc = closestApproachInc(from, to, P.pos.x, P.pos.y + 1.45, P.pos.z);
+    }
+    // SUPPRESSION (c): a round that buzzed the PLAYER rattles their own aim
+    // for a few seconds (fpsmode.js reads CBZ.suppressionAccuracyMul(CBZ.player)
+    // into its spread cone). opts.shooter excludes the player's own outgoing
+    // fire from suppressing themselves (mirrors the existing "player-origin
+    // shots are excluded" muzzle-flash rule above).
+    if (inc >= SUPPRESS_THRESH && P && opts.shooter !== P) noteSuppressed(P, inc);
+    // GENERIC near-miss for any other target (NPC defenders, guards, cops…):
+    // shooters that know WHO they're aiming at pass opts.targetActor (an
+    // object with .pos) so that actor gets rattled too, independent of the
+    // player-only `inc` above. Computed separately (NOT reusing `inc`) since
+    // the target here is rarely the player and the test must run against the
+    // target's own position, not the camera's.
+    if (opts.targetActor && opts.targetActor !== opts.shooter && opts.targetActor.pos && from && to) {
+      const ta = opts.targetActor.pos;
+      const tInc = closestApproachInc(from, to, ta.x, (ta.y || 0) + 1.4, ta.z);
+      if (tInc >= SUPPRESS_THRESH) noteSuppressed(opts.targetActor, tInc);
     }
     const night = inc > 0 ? Math.min(1, CBZ.nightAmount || 0) : 0;
 

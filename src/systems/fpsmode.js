@@ -26,6 +26,17 @@
   const MELEE = 2.7;
   const BODY_R = 0.85;
 
+  // ---- DETERMINISM (owner rule): every roll in this file — shot spread,
+  // recoil jitter, casing tumble, the death-drop toss — goes through this
+  // seeded LCG instead of Math.random(). Combat outcome (where a bullet
+  // actually lands) used to be the one place in fpsmode.js that broke the
+  // project's seeded-RNG contract; fixed here for all of it, cosmetic rolls
+  // included (a death-drop toss isn't decision-critical, but a stray
+  // Math.random() left in a file this central is exactly the kind of thing
+  // that quietly reintroduces non-determinism later).
+  let _s = 77345;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
   const WEAPONS = (CBZ.FPS_WEAPONS && CBZ.FPS_WEAPONS.length) ? CBZ.FPS_WEAPONS : [{
     key: "sidearm", label: "9MM SIDEARM", short: "9MM",
     mag: 15, reserve: 75, reload: 1.15, interval: 0.16, range: 78,
@@ -129,7 +140,7 @@
   const thudSfxOpts = { pitch: 1, volume: 1, dist: null, far: false };
   function surfaceThud(name, cal, dist) {
     if (!CBZ.sfx) return;
-    thudSfxOpts.pitch = Math.max(0.6, 1.18 - cal * 0.3) * (0.95 + Math.random() * 0.1);  // heavier round = deeper smack
+    thudSfxOpts.pitch = Math.max(0.6, 1.18 - cal * 0.3) * (0.95 + rng() * 0.1);  // heavier round = deeper smack
     thudSfxOpts.volume = 0.35 + cal * 0.4;
     thudSfxOpts.dist = dist;
     thudSfxOpts.far = false;
@@ -177,8 +188,8 @@
 
   function spreadDir(base, cone, out) {
     buildBasis(base);
-    const a = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random()) * cone;
+    const a = rng() * Math.PI * 2;
+    const r = Math.sqrt(rng()) * cone;
     out.copy(base)
       .addScaledVector(right, Math.cos(a) * r)
       .addScaledVector(aimUp, Math.sin(a) * r)
@@ -523,13 +534,13 @@
       .addScaledVector(right, 0.18)
       .addScaledVector(aimUp, -0.16)
       .addScaledVector(fwd, -0.08);
-    c.vel.copy(right).multiplyScalar(2.4 + Math.random() * 1.2)
-      .addScaledVector(aimUp, 1.0 + Math.random() * 0.9)
-      .addScaledVector(fwd, -0.25 + Math.random() * 0.25);
-    c.mesh.rotation.set(Math.random() * 4, Math.random() * 4, Math.random() * 4);
+    c.vel.copy(right).multiplyScalar(2.4 + rng() * 1.2)
+      .addScaledVector(aimUp, 1.0 + rng() * 0.9)
+      .addScaledVector(fwd, -0.25 + rng() * 0.25);
+    c.mesh.rotation.set(rng() * 4, rng() * 4, rng() * 4);
     c.mesh.visible = true;
     c.life = 1.5;
-    if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + Math.random() * 80);
+    if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + rng() * 80);
   }
 
   // ---- DEATH DROP: the gun leaves your hands when you die -------------------
@@ -556,14 +567,14 @@
     const p = CBZ.player.pos;
     dropMesh = buildWeaponModel(w);
     dropMesh.scale.setScalar(1.05);
-    const a = Math.random() * 6.28;
+    const a = rng() * 6.28;
     dropMesh.position.set(p.x + Math.cos(a) * 0.3, p.y + 1.35, p.z + Math.sin(a) * 0.3);   // out of the dying grip, hand-high
-    dropMesh.rotation.set(Math.random() * 6.28, Math.random() * 6.28, 0);
+    dropMesh.rotation.set(rng() * 6.28, rng() * 6.28, 0);
     CBZ.scene.add(dropMesh);
-    dropVx = Math.cos(a) * (1.2 + Math.random() * 1.2);
-    dropVz = Math.sin(a) * (1.2 + Math.random() * 1.2);
-    dropVy = 2.0 + Math.random() * 1.2;
-    dropSx = (Math.random() - 0.5) * 14; dropSy = (Math.random() - 0.5) * 10; dropSz = (Math.random() - 0.5) * 14;
+    dropVx = Math.cos(a) * (1.2 + rng() * 1.2);
+    dropVz = Math.sin(a) * (1.2 + rng() * 1.2);
+    dropVy = 2.0 + rng() * 1.2;
+    dropSx = (rng() - 0.5) * 14; dropSy = (rng() - 0.5) * 10; dropSz = (rng() - 0.5) * 14;
     dropLife = 30; dropLanded = false;
   }
   // called by city/death.js the frame you die; returns true when the
@@ -1050,8 +1061,11 @@
     // multiplayer target (remote player or synced puppet): authority is over the
     // wire — net code routes the damage and plays the local juice.
     if (a.netKind && CBZ.net && CBZ.net.localGunHit) return CBZ.net.localGunHit(a, hit, w);
-    const fall = hit.dist <= w.dropStart ? 1
-      : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage));
+    // (e) per-weapon-CLASS falloff SHAPE, not one shared linear ramp — the
+    // shotgun/sniper/smg/rifle curves live once in weapon-data.js and every
+    // shooter (this + the prison gunHit below) calls the same evaluator.
+    const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
+      : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
     const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
     const lethalHead = hit.head && !w.nonlethal;
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
@@ -1092,9 +1106,9 @@
     if (CBZ.game.mode === "city") return cityGunHit(a, hit, w);
     const guardish = a.kind === "guard" || a.kind === "warden";
     if (a.hp == null) a.hp = maxHpOf(a);
-    const fall = hit.dist <= w.dropStart
-      ? 1
-      : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage));
+    // (e) same shared per-class falloff evaluator as cityGunHit above.
+    const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
+      : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
     const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
     const lethalHeadshot = hit.head && !w.nonlethal;
     if (lethalHeadshot) a.hp = 0;
@@ -1216,7 +1230,7 @@
     // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
     // just softened under ADS so holding RMB visibly settles the gun.
     recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK);
-    recoilSide += (Math.random() * 2 - 1) * w.sideKick * RK * adsK;
+    recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK;
     recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
     // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
     // capped so even mag-dumps stay usable. moving adds extra below in the loop.
@@ -1228,22 +1242,22 @@
       // first shot of a fresh burst is SOFTER (0.6x) + dead-centre — pinpoint tap.
       const firstShot = shotsInBurst === 0 ? 0.6 : 1;
       const basePitch = w.climb * RK;
-      const jitter = 0.92 + Math.random() * 0.16;                       // <=8% noise
+      const jitter = 0.92 + rng() * 0.16;                       // <=8% noise
       const pitchKick = basePitch * ramp * firstShot * jitter * adsK;
       const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
-      const yawKick = (pat * (w.yawWeave || 0.6) + (Math.random() * 2 - 1) * 0.15) * basePitch * ramp * adsK;
+      const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK;
       recoilPitch = Math.min(0.5, recoilPitch + pitchKick);   // cap so a mag-dump tops out
       recoilYaw = Math.max(-0.32, Math.min(0.32, recoilYaw + yawKick));
       shotsInBurst++;
     }
     pumpT = w.pump ? 1 : pumpT;
 
-    const flashScale = w.flash * (0.9 + Math.random() * 0.28);
+    const flashScale = w.flash * (0.9 + rng() * 0.28);
     if (fps.active) {
       const activeModel = weaponModels[fps.weapon];
       if (!setMuzzleSpriteFromModel(muzzle, activeModel)) muzzle.position.copy(activeModel.userData.muzzle);
       muzzle.scale.setScalar(flashScale);
-      muzzle.rotation.z = Math.random() * Math.PI * 2;
+      muzzle.rotation.z = rng() * Math.PI * 2;
       muzzle.visible = true;
       muzzleT = w.key === "shotgun" ? 0.065 : 0.04;
     } else {
@@ -1256,7 +1270,7 @@
 
     if (CBZ.sfx) {
       if (w.sfxPitch || w.sfxVol) {
-        shotSfxOpts.pitch = (w.sfxPitch || 1) * (0.96 + Math.random() * 0.08);  // jitter so bursts don't sound machine-stamped
+        shotSfxOpts.pitch = (w.sfxPitch || 1) * (0.96 + rng() * 0.08);  // jitter so bursts don't sound machine-stamped
         shotSfxOpts.volume = w.sfxVol || 1;
         CBZ.sfx(w.sfx || "shoot", shotSfxOpts);
       } else CBZ.sfx(w.sfx || "shoot");
@@ -1387,7 +1401,13 @@
     // single biggest accuracy change, à la CoD. Applies in all modes (strict
     // improvement); hip cone unchanged when RMB isn't held.
     const adsSpreadK = aimHeld ? 0.4 : 1;
-    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK;
+    // SUPPRESSION (c): a round that just buzzed the player rattles their aim
+    // for a few seconds (gunfx.js tracks it off the SAME near-miss test that
+    // already drives the "you're being shot at" muzzle-flash/bolt juice — no
+    // new detection, just a real cost wired onto an existing read). Feature-
+    // detected so this file degrades gracefully if gunfx.js isn't loaded.
+    const suppressK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
+    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK * suppressK;
     const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
     let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
@@ -1512,7 +1532,7 @@
           // knocked clean off the face (LOD: only worth drawing inside ~45u)
           if (cal >= 1.2 && hit.dist < 45) {
             CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3 });
-            if (CBZ.cityChunk && Math.random() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
+            if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
           }
         }
         // persistent pock — the wall you magdumped STAYS pocked, 7.62 > 9mm
@@ -2181,11 +2201,14 @@
     if (cross) {
       const aim = aimedActor(armed() ? w.range : MELEE);
       // reticle breathes with the live cone: tight at rest, blooms with recoil,
-      // bloom accumulation and movement — so the crosshair HONESTLY shows where
-      // shots will land (the AAA contract between reticle and spread).
+      // bloom accumulation, movement AND suppression — so the crosshair
+      // HONESTLY shows where shots will land (the AAA contract between
+      // reticle and spread; suppressK mirrors the same penalty shoot() folds
+      // into the actual cone, so a rattled player SEES why they're missing).
       const mv = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
+      const suppK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
       const size = armed()
-        ? 18 + w.spread * 280 + bloom * 300 + recoil * 34 + mv * 10 + (fps.reloading > 0 ? 8 : 0)
+        ? (18 + w.spread * 280 + bloom * 300 + recoil * 34 + mv * 10 + (fps.reloading > 0 ? 8 : 0)) * suppK
         : 22;
       cross.style.width = size.toFixed(1) + "px";
       cross.style.height = size.toFixed(1) + "px";

@@ -30,6 +30,9 @@
    _shared), the blinking LED is a visibility toggle (no material churn),
    the per-frame updater early-outs when nothing is planted, and the
    plant probe only runs on a keypress. Mode-gated + headless-guarded.
+
+   DETERMINISM: the charge's spawn-time jitter (LED blink phase, ground-plant
+   facing) runs off a local seeded LCG, NEVER Math.random() — replay/MP sync.
 ============================================================ */
 (function () {
   "use strict";
@@ -37,6 +40,10 @@
   if (!CBZ || !window.THREE || !CBZ.onAlways) return;
   const THREE = window.THREE;
   const g = CBZ.game;
+
+  // ---- deterministic seeded LCG (NEVER Math.random() — replay/MP sync) ------
+  let _rs = 51917;
+  function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
 
   const C4 = {
     item: "C4 Charge",
@@ -161,7 +168,7 @@
     if (planted.length >= C4.maxPlanted) { if (CBZ.city) CBZ.city.note("The receiver only tracks " + C4.maxPlanted + " charges — send what's out there first.", 2); return; }
     const f = aimFwd();
     const px = P.pos.x, pz = P.pos.z, py = (P.pos.y || 0) + 1.2;
-    const ch = { mesh: buildMesh(), car: null, wall: null, x: 0, y: 0, z: 0, det: null, blink: Math.random() };
+    const ch = { mesh: buildMesh(), car: null, wall: null, x: 0, y: 0, z: 0, det: null, blink: rng() };
 
     // 1) A CAR in front (or right beside you): stick it to the hull — it RIDES.
     let car = null, bd = C4.carReach;
@@ -203,7 +210,7 @@
         const gy = (CBZ.floorAt ? CBZ.floorAt(gx, gz) : 0) || 0;
         ch.x = gx; ch.y = gy + 0.06; ch.z = gz;
         ch.mesh.position.set(gx, gy + 0.06, gz);
-        ch.mesh.rotation.y = Math.random() * 6.2832;
+        ch.mesh.rotation.y = rng() * 6.2832;
         if (CBZ.scene) CBZ.scene.add(ch.mesh);
       }
     }

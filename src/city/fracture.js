@@ -89,6 +89,62 @@
     return h;
   }
 
+  // ---- PER-FACADE CUMULATIVE WOUND TRACKING ---------------------------------
+  // Every carve so far was an independent event: a hole is a hole, capped/
+  // boarded on its own LRU, with no memory of how many times THIS WALL has
+  // already been hit. That made CBZ.cityAirstrikeCollapse a one-off the caller
+  // had to explicitly invoke (airstrike/tank agents only) rather than an
+  // emergent consequence of accumulated damage. This adds exactly that memory:
+  // a per-facade (building key `b` + `face`) wound score that every real carve
+  // (rocket/grenade/C4/airstrike via carveNow) AND every ground-out murder-hole
+  // (chewWall, weighted far lighter — sustained rifle fire alone shouldn't
+  // bring a wall down) bumps. Once a facade's score crosses WOUND_COLLAPSE from
+  // REPEATED hits — not necessarily one big hit — it escalates to a real
+  // partial collapse via CBZ.cityAirstrikeCollapse (crashfx.js), which already
+  // self-throttles per building (_collapseSeen) so a salvo only collapses once.
+  // Bounded: the Map only ever holds entries for walls that have been hit at
+  // least once, pruned alongside `chew` so a long session can't leak memory.
+  const wounds = new Map();     // "b|face" -> { score, t }
+  const WOUND_COLLAPSE = 6.0;   // cumulative score that triggers an escalation
+  const WOUND_DECAY_AFTER = 40; // seconds of quiet before a facade's score starts fading (a wall "heals" its memory, not its holes)
+  function woundKey(b, face) { return b + "|" + face; }
+  function pruneWounds(t) {
+    wounds.forEach(function (w, k) { if (t - w.t > 400 && w.score < 0.5) wounds.delete(k); });
+  }
+  // bump a facade's wound score and, once it crosses threshold, ESCALATE a real
+  // partial collapse — the emergent consequence this file was missing. amount
+  // is in the same rough units as a carve's `power` (a grenade ~1, RPG ~1.4-2,
+  // airstrike ~2+, a chewWall murder-hole ~0.35 — heavy sustained fire alone
+  // can still bring a wall down, just needs many more hits than one rocket).
+  // cx,cz = a world point on/near the wall (handed straight to
+  // CBZ.cityAirstrikeCollapse, which resolves the building's tallest wall from
+  // the live colliders itself — we don't need to track height/footprint here).
+  function woundFacade(b, face, amount, cx, cz) {
+    const t = nowS();
+    const k = woundKey(b, face);
+    let w = wounds.get(k);
+    if (!w) {
+      if (wounds.size > 96) pruneWounds(t);   // bound the map before growing it further
+      w = { score: 0, t: t };
+      wounds.set(k, w);
+    } else if (t - w.t > WOUND_DECAY_AFTER) {
+      // a facade that's sat quiet for a while fades its memory (a building
+      // that took one rocket a long time ago shouldn't collapse from a single
+      // unrelated tap today) — linear decay, floored at 0.
+      w.score = Math.max(0, w.score - (t - w.t - WOUND_DECAY_AFTER) * 0.05);
+    }
+    w.score += amount;
+    w.t = t;
+    if (w.score >= WOUND_COLLAPSE && CBZ.cityAirstrikeCollapse) {
+      // reset so the SAME facade needs to rebuild damage before collapsing
+      // again (cityAirstrikeCollapse's own 2.5s _collapseSeen throttle still
+      // guards a same-instant salvo; this guards the slower "rebuilds rubble
+      // forever" case across a long siege).
+      w.score = 0;
+      try { CBZ.cityAirstrikeCollapse({ x: cx, z: cz }, { power: Math.min(2.6, 1.6 + amount * 0.3) }); } catch (e) {}
+    }
+  }
+
   // hole debris = the wave-22 facade RUIN (pooled chunks + dust sheeting down the
   // wall + a PERSISTENT rubble heap at the base + dangling rebar + a soot ring),
   // poured from the opening along its outward normal. The opening WIDTH drives
@@ -182,6 +238,10 @@
     if (!rec) return null;
     const h = adopt(rec, r, quiet);
     if (!quiet) debris(rec, power);
+    // STRUCTURAL ESCALATION: every real (non-quiet/non-replay) carve feeds the
+    // facade's cumulative wound score — repeated rockets into the same wing of
+    // a building, not just one huge hit, can now bring it down for real.
+    if (!quiet) woundFacade(h.b, h.face, power, x, z);
     return h;
   }
 
@@ -260,6 +320,10 @@
     // ground out, not blown out: a quiet crumble of chunks, no boom
     const g = rec.gap, nx = g.horiz ? 0 : g.outS, nz = g.horiz ? g.outS : 0;
     if (CBZ.cityChunk) CBZ.cityChunk(x + nx * 0.3, y, z + nz * 0.3, { count: 3, force: 2, dirx: nx, dirz: nz });
+    // sustained gunfire still feeds the same facade wound score, just at a
+    // much lighter weight than ordnance — many murder holes ground into one
+    // wing CAN bring it down, it just takes a lot more of them than a rocket.
+    woundFacade(h.b, h.face, 0.35, x, z);
     return h;
   }
 
@@ -348,7 +412,7 @@
   // run-reset hook (buildings.js resetBreaches restored every wall already).
   // Also drop any in-flight deferred carves — their target walls just got reset,
   // so draining them next frame would carve into a fresh arena (stale).
-  function cleared() { live.length = 0; pending.length = 0; chew.clear(); deferQ.length = 0; lastT = -1e9; }
+  function cleared() { live.length = 0; pending.length = 0; chew.clear(); deferQ.length = 0; lastT = -1e9; wounds.clear(); }
 
   // pending replays retry at 2Hz until their walls exist (drain early-outs
   // when the queue is empty, so this costs nothing in the steady state)
@@ -433,5 +497,8 @@
   api.burst = fractureBurst;  // explicit alias if a caller prefers a named method
   api._adopt = function (rec, r) { return adopt(rec, r || (rec.gap ? (rec.gap.u1 - rec.gap.u0) / 2 : 1.6), false); };
   api._cleared = cleared;
+  // debug/QA accessor for the per-facade cumulative wound score (b+face key —
+  // see woundFacade above); not used by any gameplay path, additive only.
+  api._woundScore = function (b, face) { const w = wounds.get(woundKey(b, face)); return w ? w.score : 0; };
   CBZ.cityFracture = api;
 })();
