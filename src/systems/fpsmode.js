@@ -1176,6 +1176,110 @@
     return { hit: dropped, delay: flight };
   }
 
+  // ---- BULLET PENETRATION + RICOCHET (d) -------------------------------------
+  // Every raycast used to stop dead at the first solid hit. Two small, RARE,
+  // clearly-telegraphed additions (own request: flavor/danger, not a core
+  // mechanic — neither fires often and both are capped to a single extra
+  // event per shot, so a firefight doesn't turn into a pinball table):
+  //   PENETRATION — a "thin" wall (read the SAME way los.js derives real wall
+  //   thickness: BoxGeometry.parameters along the struck face's axis) lets a
+  //   sufficiently powerful round carry through to whatever's standing right
+  //   behind it, at reduced exit damage. Pellet guns (shotgun) never
+  //   penetrate (a shot charge dumps its energy into the first thing it
+  //   hits — also keeps a 9-pellet blast from rolling 9 penetration checks).
+  //   RICOCHET — a hit on a THICK/hard wall at a shallow GRAZING angle (the
+  //   shot direction nearly parallel to the surface, not punching square into
+  //   it) has a small chance to kick a deflected tracer off along the
+  //   reflection vector, with a much smaller chance of clipping a nearby
+  //   actor for token stray damage. Visual-first: the deflected beam is what
+  //   sells it ("that round just skipped off the wall"), the stray hit is a
+  //   rare bonus, never the point.
+  const PEN_THIN_MAX = 0.22;      // at/under this real thickness, a wall is "thin" (PWT≈0.16 partitions qualify; WT=0.4 exterior walls don't)
+  const PEN_MIN_CAL = 0.9;        // rounds lighter than this (uzi/sidearm/taser) don't reliably punch even thin cover
+  const PEN_DMG_MUL = 0.45;       // reduced exit damage on whatever's struck behind the cover
+  const RICOCHET_GRAZE = 0.16;    // |shotDir·wallNormal| below this = a shallow enough graze to maybe deflect
+  const RICOCHET_CHANCE = 0.16;   // telegraphed-rare: most grazing hits do NOT ricochet
+  const RICOCHET_STRAY_CHANCE = 0.12;  // of the ricochets that DO fire, how often a nearby actor catches token stray damage
+  const RICOCHET_STRAY_DMG = 6;        // flavor-tier, never a real threat on its own
+
+  // Real thickness of the struck axis-aligned wall box, along the face's
+  // horizontal normal — identical technique to los.js's boxThicknessAlong
+  // (separate IIFE closures can't share the helper, so this is the fpsmode
+  // copy; both read the same BoxGeometry.parameters convention). Returns
+  // Infinity (never "thin") for non-box geometry — can't penetrate what we
+  // can't measure.
+  function wallThickness(wallHit) {
+    const obj = wallHit && wallHit.object, n = wallHit && wallHit.face && wallHit.face.normal;
+    const geo = obj && obj.geometry, p = geo && geo.parameters;
+    if (!p || p.width == null || p.depth == null) return Infinity;
+    const nx = n ? n.x : 0, nz = n ? n.z : 0;
+    return Math.abs(nx) >= Math.abs(nz) ? p.width : p.depth;
+  }
+
+  // Attempts penetration first; if it doesn't apply, attempts a ricochet.
+  // Mutually exclusive per shot (a round either punches through OR skips off,
+  // never both) — called once from the hit.wall branch in shoot()'s pellet
+  // loop, AFTER the normal wall pock/spark/hole have already been stamped.
+  // `wnx,wnz` is the wall-facing normal the caller already computed.
+  function tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz) {
+    if (w.pellets) return;                       // shotgun: no penetration/ricochet rolls
+    const wallHit = hit.wallHit;
+    if (!wallHit) return;
+    const graze = Math.abs(shotDir.x * wnx + shotDir.z * wnz);   // ~0 = parallel to the wall face, ~1 = square hit
+    const thickness = wallThickness(wallHit);
+
+    // PENETRATION — thin cover + a round heavy enough to carry through.
+    if (thickness <= PEN_THIN_MAX && cal >= PEN_MIN_CAL && hit.dist < w.range - 0.5) {
+      const exitPt = hitPoint.copy(hit.point).addScaledVector(shotDir, thickness + 0.06);
+      const remaining = Math.max(0.5, w.range - hit.dist - thickness);
+      const beyondActor = findActorHit(exitPt, shotDir, Math.min(remaining, 24), w);
+      if (beyondActor && beyondActor.actor) {
+        // a SECOND, lighter gunHit on whatever was standing behind the cover —
+        // same damage pipeline (falloff, headshot, city/prison routing), just
+        // pre-multiplied down for the energy the wall already ate.
+        const exitHit = { actor: beyondActor.actor, head: beyondActor.head, dist: hit.dist + thickness + beyondActor.dist, point: beyondActor.point };
+        const penW = Object.create(w); penW.damage = w.damage * PEN_DMG_MUL;   // cheap prototype override — never mutates the shared weapon table
+        gunHit(exitHit, penW);
+        spawnImpact(beyondActor.point, true, false);
+        if (CBZ.gore) CBZ.gore(beyondActor.point.x, beyondActor.point.y, beyondActor.point.z, { dir: shotDir, amount: 0.45, player: true });
+        fireTracer(exitPt, beyondActor.point, w.tracer * 0.8, 0.05);
+      } else {
+        // nothing behind it: still show the round carrying through the cover
+        // a short, visibly DIFFERENT exit puff so a penetration clearly reads
+        // as "that went through", not a second impossible impact on the wall.
+        const farPt = hitPoint.clone().addScaledVector(shotDir, Math.min(remaining, 6));
+        fireTracer(exitPt, farPt, w.tracer * 0.7, 0.04);
+      }
+      return;
+    }
+
+    // RICOCHET — thick/hard surface, shallow grazing angle, rare + telegraphed.
+    if (graze < RICOCHET_GRAZE && rng() < RICOCHET_CHANCE) {
+      // reflect shotDir off the wall normal (horizontal-plane reflection —
+      // walls here are near-vertical, same simplification the wall-impact
+      // branch above already makes for its spark cone).
+      const dot = shotDir.x * wnx + shotDir.z * wnz;
+      const rx = shotDir.x - 2 * dot * wnx, rz = shotDir.z - 2 * dot * wnz;
+      const rl = Math.hypot(rx, rz) || 1;
+      tmpMuzzle.set(rx / rl, shotDir.y * 0.4, rz / rl).normalize();   // tmpMuzzle: free scratch here (only used for muzzle-sprite placement, already done earlier this shot)
+      const deflectEnd = hitPoint.clone().copy(hit.point).addScaledVector(tmpMuzzle, 7 + rng() * 5);
+      fireTracer(hit.point, deflectEnd, w.tracer * 0.6, 0.06);
+      if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: wnx, y: 0.25, z: wnz }, { kind: "spark", power: cal * 1.2 });
+      CBZ.sfx && CBZ.sfx("hit", { pitch: 1.3, volume: 0.5 });
+      // tiny stray-damage roll: a nearby actor along the deflection MIGHT eat
+      // a token hit. Deliberately small range + flat damage — this is flavor,
+      // never the headline outcome of firing a gun near a wall.
+      if (rng() < RICOCHET_STRAY_CHANCE) {
+        const strayHit = findActorHit(hit.point, tmpMuzzle, 9, w);
+        if (strayHit && strayHit.actor) {
+          const strayW = Object.create(w); strayW.damage = RICOCHET_STRAY_DMG; strayW.headMult = 1;
+          gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW);
+          spawnImpact(strayHit.point, true, false);
+        }
+      }
+    }
+  }
+
   function aimedActor(maxRange) {
     aimForward(fwd);
     const p = CBZ.player;
