@@ -1121,6 +1121,44 @@
     };
   }
 
+  // ---- SNIPER BULLET DROP / TRAVEL TIME (b) ----------------------------------
+  // Bullets stay hitscan for every weapon (the owner's call — see the file
+  // header's rocket section for the one weapon that gets a real projectile).
+  // The sniper alone gets a believable LONG-RANGE correction instead of the
+  // same flat linear falloff every other gun uses: past w.sniperDrop.start,
+  // the shot direction is bent DOWN by a small angle so the round lands lower
+  // than dead-center-of-reticle at extreme range (a real slow heavy bullet
+  // sags over a long flight), and resolution is delayed by a short, scaled
+  // "time of flight" so a 200m shot doesn't register as instant. Two-stage:
+  // resolve once with the TRUE aim to learn the real distance, then (only if
+  // past `start`) bend by an angle sized to that distance and re-resolve —
+  // so the bend amount always matches how far the round actually travels,
+  // not a guess. Returns the hit (possibly the original, undropped one) plus
+  // the flight delay (seconds, 0 for non-snipers / under `start`).
+  function resolveShotSniper(w, dir) {
+    const drop = w.sniperDrop;
+    if (!drop) return { hit: resolveShot(w, dir), delay: 0 };
+    const probe = resolveShot(w, dir);
+    const dist = probe.dist != null ? probe.dist : w.range;
+    if (dist <= drop.start) return { hit: probe, delay: 0 };
+    const over = Math.min(dist - drop.start, (w.range - drop.start) || dist);
+    const dropAmt = Math.min(drop.maxDrop || 1.6, over * (drop.perM || 0.01));
+    // bend the AIM down by the small angle whose tangent over `dist` yields
+    // dropAmt world-units of sag at that range — small-angle, single basis
+    // rebuild (buildBasis already ran inside spreadDir's caller; redo it here
+    // since `dir` may have been perturbed by spread since). Uses `hitPoint`
+    // (an otherwise-unused module scratch Vector3) — NOT tmp2, which IS the
+    // live `origin` reference for this shot (muzzleWorld(tmp2) aliases it; a
+    // shared scratch write here would silently relocate the muzzle origin).
+    buildBasis(dir);
+    const ang = Math.atan2(dropAmt, Math.max(1, dist));
+    hitPoint.copy(dir).addScaledVector(aimUp, -ang).normalize();   // aimUp is "up" from buildBasis; bend DOWN
+    const dropped = resolveShot(w, hitPoint);
+    dir.copy(hitPoint);   // caller's shotDir must reflect the bent path (tracer, glass-shatter ray, etc. all read it after this call)
+    const flight = Math.min(0.55, dist * (drop.flightPerM || 0));   // capped — a delay, not a simulated arc
+    return { hit: dropped, delay: flight };
+  }
+
   function aimedActor(maxRange) {
     aimForward(fwd);
     const p = CBZ.player;
