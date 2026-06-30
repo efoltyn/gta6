@@ -162,6 +162,14 @@
   // a cramped room still gets its lift rather than none. The sampled
   // footprint covers the FULL cab room (~2.2 deep into the lobby) plus the
   // boarding apron in front of the leafs.
+  // ---- cab SIZE variants. The standard cab is the AAA walk-in room; the
+  // COMPACT cab is a tighter shaft (~1.4m interior) so narrow / small towers
+  // that can't seat the wide room still get a real lift instead of none.
+  // `half` is the lateral half-width used by both the wall search (pickLobby)
+  // and the geometry (buildElevator), so the two never disagree.
+  const CAB_STD = { half: 1.45, iw: 2.06, dep: 2.2, gdoor: 2.0, dhw: 0.78, leafHW: 0.76, side: 1.04, frameLat: 1.02, hw: 1.3, hd: 1.25 };
+  const CAB_CMP = { half: 0.92, iw: 1.42, dep: 1.85, gdoor: 1.7, dhw: 0.56, leafHW: 0.54, side: 0.74, frameLat: 0.72, hw: 0.92, hd: 0.9 };
+
   function pickLobby(b) {
     const w = b.w, d = b.d, S = slabInfo(b), ds = doorSideOf(b);
     const avoid = interiorAvoids(b);
@@ -169,9 +177,9 @@
     for (const c of [3, 0, 1]) if (c !== ds && c !== OPP[ds]) faces.push(c);
     if (!b.hasStairs && ds !== 2 && OPP[ds] !== 2) faces.push(2);
     if (OPP[ds] !== 2 || !b.hasStairs) faces.push(OPP[ds]);   // back wall: last resort
-    function tryFace(side, strict) {
+    function tryFace(side, strict, V) {
       const f = faceInfo(side, w, d);
-      const CABHALF = 1.45;                                   // cab room half-width + a touch of margin
+      const CABHALF = V.half;                                 // cab room half-width + a touch of margin (variant-driven)
       // The walkable LATERAL band on this face, in face-tangent coords centred
       // on the building origin. On ±z faces `lat` is an X offset, so on a stair
       // building it MUST stay on the SOLID slab (x ≥ slabMinX) — the old
@@ -199,10 +207,12 @@
       } else {
         slots = [latMid, latMid + 1.2, latMid - 1.2, latMid + 2.4, latMid - 2.4, latMid + 3.4, latMid - 3.4];
       }
+      const hl = V.half - 0.1;                                // footprint lateral half (cab + a hair)
+      const apron = V.dep + 0.5;                              // boarding apron just past the leafs
       for (let lat of slots) {
         lat = Math.max(latLo, Math.min(latHi, lat));
-        // cab-room footprint (side walls reach dep ~2.2) + the boarding apron
-        const pts = [[-1.35, 0.45], [1.35, 0.45], [0, 0.7], [-1.35, 1.5], [1.35, 1.5], [-1.2, 2.2], [1.2, 2.2], [0, 2.0], [0, 2.7]];
+        // cab-room footprint (side walls reach dep ~V.dep) + the boarding apron
+        const pts = [[-hl, 0.45], [hl, 0.45], [0, 0.7], [-hl, V.dep - 0.7], [hl, V.dep - 0.7], [-hl + 0.15, V.dep], [hl - 0.15, V.dep], [0, V.dep - 0.2], [0, apron]];
         let ok = true;
         for (const q of pts) {
           const lx = f.px - f.nx * (S.wt + q[1]) + f.tx * (lat + q[0]);
@@ -213,12 +223,16 @@
             if (!ok) break;
           }
         }
-        if (ok) return { f, lat };
+        if (ok) return { f, lat, V };
       }
       return null;
     }
-    for (const side of faces) { const r = tryFace(side, true); if (r) return r; }
-    for (const side of faces) { const r = tryFace(side, false); if (r) return r; }
+    // try the STANDARD walk-in cab first (strict avoids, then relaxed), then
+    // fall back to the COMPACT cab — a tight tower still gets a working lift.
+    for (const V of [CAB_STD, CAB_CMP]) {
+      for (const side of faces) { const r = tryFace(side, true, V); if (r) return r; }
+      for (const side of faces) { const r = tryFace(side, false, V); if (r) return r; }
+    }
     return null;
   }
 
@@ -240,46 +254,52 @@
     const spot = pickLobby(b);
     if (!spot) { console.warn("[elevator] no clear interior wall on", b.name || "lot"); return; }
     const f = spot.f, off = spot.lat;
+    const V = spot.V || CAB_STD;                        // cab size variant chosen by pickLobby
+    const IW = V.iw, SIDE = V.side, FRAMELAT = V.frameLat, DHW = V.dhw, LEAFHW = V.leafHW;
+    const LEAFOFF = LEAFHW / 2 + 0.01;                  // each leaf's parked centre offset
+    const LEAFTRAV = LEAFHW * 0.82;                     // open travel per leaf
     // dep measures INWARD from the interior wall face (f.px/f.pz sit on the
     // outer plane; S.wt steps through the wall), so the whole cab room —
     // walls, leafs, frame, boarding apron — builds into the lobby.
     const P = (lat, dep) => ({ x: f.px - f.nx * (S.wt + dep) + f.tx * (off + lat), z: f.pz - f.nz * (S.wt + dep) + f.tz * (off + lat) });
     const tn = (t, n) => (f.tx ? { w: t, d: n } : { w: n, d: t });
-    const GDOOR = 2.0;                                  // ground-cab door plane (dep from the wall)
+    const GDOOR = V.gdoor;                              // ground-cab door plane (dep from the wall, variant-scaled)
+    const CABDEP = V.dep;                               // cab interior depth (side-wall length)
 
     function solidAt(p, sz, y0, y1, ref) {
       return solid(y0, y1, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, ref);
     }
 
+    const CD = CABDEP / 2;                              // cab depth half (centre of side walls / floor / ceiling)
     // ---- the CAB ROOM (ground end) ----------------------------------------
     { // back panel (the building wall is the structure; this is the cab skin)
-      const p = P(0, 0.08), sz = tn(2.06, 0.12);
+      const p = P(0, 0.08), sz = tn(IW, 0.12);
       box(grp, p.x, 1.25, p.z, sz.w, CAB_H, sz.d, CABWALL);
     }
     for (const s of [-1, 1]) {  // side walls (solid: the cab is a sealed room)
-      const p = P(s * 1.04, 1.05), sz = tn(0.16, 2.1);
+      const p = P(s * SIDE, CD + 0.02), sz = tn(0.16, CABDEP);
       const m = box(grp, p.x, CAB_H / 2, p.z, sz.w, CAB_H, sz.d, STEEL, { cast: true });
       solidAt(p, sz, 0, CAB_H, m);
     }
     { // ceiling + the small lit light panel
-      const p = P(0, 1.05), sz = tn(2.24, 2.3);
+      const p = P(0, CD + 0.02), sz = tn(IW + 0.18, CABDEP + 0.2);
       box(grp, p.x, CAB_H + 0.11, p.z, sz.w, 0.12, sz.d, STEEL);
-      const lp = P(0, 1.05), ls = tn(0.95, 0.95);
+      const lp = P(0, CD + 0.02), ls = tn(Math.min(0.95, IW * 0.46), Math.min(0.95, CABDEP * 0.43));
       box(grp, lp.x, CAB_H - 0.03, lp.z, ls.w, 0.07, ls.d, 0xe8ddc2, { emissive: 0xfff1cd, ei: 0.95 });
     }
     { // cab floor slab (its top is the EXACT ground-end arrival height)
-      const p = P(0, 1.1), sz = tn(2.06, 2.3);
+      const p = P(0, CD + 0.07), sz = tn(IW, CABDEP + 0.2);
       box(grp, p.x, 0.08, p.z, sz.w, 0.16, sz.d, CABFLOOR);
       plat(ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, 0.16);
     }
     // door frame: cheeks (solid) + header over the opening
     for (const s of [-1, 1]) {
-      const p = P(s * 1.02, GDOOR + 0.04), sz = tn(0.6, 0.55);
+      const p = P(s * FRAMELAT, GDOOR + 0.04), sz = tn(0.6, 0.55);
       const m = box(grp, p.x, 1.6, p.z, sz.w, 3.2, sz.d, STEEL, { cast: true });
       solidAt(p, sz, 0, 3.2, m);
     }
     { // header (solid — a jump can put a head in it)
-      const p = P(0, GDOOR + 0.04), sz = tn(2.64, 0.55);
+      const p = P(0, GDOOR + 0.04), sz = tn(IW + 0.58, 0.55);
       const m = box(grp, p.x, 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
       solidAt(p, sz, 2.4, 3.24, m);
     }
@@ -290,26 +310,26 @@
     // instead of a black void backing that occluded it (the filmed bug).
     // the two sliding leafs + the door COLLIDER (one persistent y-gated box —
     // toggled by mutating y0/y1, which the xz broadphase never re-indexes)
-    const ground = { leaves: [], open: 0, target: 0, autoClose: null };
+    const ground = { leaves: [], open: 0, target: 0, autoClose: null, trav: LEAFTRAV };
     for (const s of [-1, 1]) {
-      const p = P(s * 0.37, GDOOR), sz = tn(0.76, 0.1);
+      const p = P(s * LEAFOFF, GDOOR), sz = tn(LEAFHW, 0.1);
       const m = box(grp, p.x, 1.27, p.z, sz.w, 2.45, sz.d, LEAF);
       ground.leaves.push({ m, baseX: p.x, baseZ: p.z, sx: f.tx * s, sz: f.tz * s });
     }
     {
-      const pA = P(-DOOR_HW, GDOOR - 0.07), pB = P(DOOR_HW, GDOOR + 0.07);
+      const pA = P(-DHW, GDOOR - 0.07), pB = P(DHW, GDOOR + 0.07);
       ground.col = solid(0, 2.4,
         ox + Math.min(pA.x, pB.x), ox + Math.max(pA.x, pB.x),
         oz + Math.min(pA.z, pB.z), oz + Math.max(pA.z, pB.z));
       ground.cy0 = 0; ground.cy1 = 2.4; ground.solid = true;
     }
     // call panel + button on the door frame + hall lantern over the opening
-    { const p = P(1.02, GDOOR + 0.36), sz = tn(0.3, 0.08); box(grp, p.x, 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
-    const pb = P(1.02, GDOOR + 0.42), pbs = tn(0.12, 0.05);
+    { const p = P(FRAMELAT, GDOOR + 0.36), sz = tn(0.3, 0.08); box(grp, p.x, 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
+    const pb = P(FRAMELAT, GDOOR + 0.42), pbs = tn(0.12, 0.05);
     const btnG = box(grp, pb.x, 1.42, pb.z, pbs.w, 0.12, pbs.d, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
     const pl = P(0, GDOOR + 0.34), pls = tn(0.7, 0.07);
     const lampG = box(grp, pl.x, 3.05, pl.z, pls.w, 0.2, pls.d, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
-    const padP = P(0, 2.7);
+    const padP = P(0, V.dep + 0.5);
     const groundPad = { x: ox + padP.x, z: oz + padP.z };
 
     // ---- roof HEADHOUSE CAB — built in the SAME lobby-local frame (P/tn) as
@@ -322,54 +342,54 @@
     const RDOOR = GDOOR;                               // roof door plane == ground (identical cab)
     const RBASE = h;                                   // roof cab Y offset
     { // back skin against the building wall
-      const p = P(0, 0.08), sz = tn(2.06, 0.12);
+      const p = P(0, 0.08), sz = tn(IW, 0.12);
       box(grp, p.x, RBASE + 1.25, p.z, sz.w, CAB_H, sz.d, CABWALL);
     }
     for (const s of [-1, 1]) {  // side walls (solid)
-      const p = P(s * 1.04, 1.05), sz = tn(0.16, 2.1);
+      const p = P(s * SIDE, CD + 0.02), sz = tn(0.16, CABDEP);
       const m = box(grp, p.x, RBASE + CAB_H / 2, p.z, sz.w, CAB_H, sz.d, STEEL, { cast: true });
       solid(RBASE, RBASE + CAB_H, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
     { // cap + lit ceiling panel
-      const p = P(0, 1.05), sz = tn(2.24, 2.3);
+      const p = P(0, CD + 0.02), sz = tn(IW + 0.18, CABDEP + 0.2);
       box(grp, p.x, RBASE + CAB_H + 0.13, p.z, sz.w + 0.4, 0.14, sz.d + 0.4, 0x474f59);
-      const ls = tn(0.95, 0.95);
+      const ls = tn(Math.min(0.95, IW * 0.46), Math.min(0.95, CABDEP * 0.43));
       box(grp, p.x, RBASE + CAB_H - 0.05, p.z, ls.w, 0.07, ls.d, 0xe8ddc2, { emissive: 0xfff1cd, ei: 0.95 });
     }
     { // cab floor slab on the roof (its top is the EXACT roof arrival height = RBASE+0.16)
-      const p = P(0, 1.1), sz = tn(2.06, 2.3);
+      const p = P(0, CD + 0.07), sz = tn(IW, CABDEP + 0.2);
       box(grp, p.x, RBASE + 0.08, p.z, sz.w, 0.16, sz.d, CABFLOOR);
       plat(ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, RBASE + 0.16);
     }
     // door frame: cheeks (solid) + header
     for (const s of [-1, 1]) {
-      const p = P(s * 1.02, RDOOR + 0.04), sz = tn(0.6, 0.55);
+      const p = P(s * FRAMELAT, RDOOR + 0.04), sz = tn(0.6, 0.55);
       const m = box(grp, p.x, RBASE + 1.6, p.z, sz.w, 3.2, sz.d, STEEL, { cast: true });
       solid(RBASE, RBASE + 3.2, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
-    { const p = P(0, RDOOR + 0.04), sz = tn(2.64, 0.55);
+    { const p = P(0, RDOOR + 0.04), sz = tn(IW + 0.58, 0.55);
       const m = box(grp, p.x, RBASE + 2.82, p.z, sz.w, 0.84, sz.d, STEEL, { cast: true });
       solid(RBASE + 2.4, RBASE + 3.24, ox + p.x - sz.w / 2, ox + p.x + sz.w / 2, oz + p.z - sz.d / 2, oz + p.z + sz.d / 2, m);
     }
-    const roof = { leaves: [], open: 0, target: 0, autoClose: null };
+    const roof = { leaves: [], open: 0, target: 0, autoClose: null, trav: LEAFTRAV };
     for (const s of [-1, 1]) {
-      const p = P(s * 0.37, RDOOR), sz = tn(0.76, 0.1);
+      const p = P(s * LEAFOFF, RDOOR), sz = tn(LEAFHW, 0.1);
       const m = box(grp, p.x, RBASE + 1.27, p.z, sz.w, 2.45, sz.d, LEAF);
       roof.leaves.push({ m, baseX: p.x, baseZ: p.z, sx: f.tx * s, sz: f.tz * s });
     }
     {
-      const pA = P(-DOOR_HW, RDOOR - 0.07), pB = P(DOOR_HW, RDOOR + 0.07);
+      const pA = P(-DHW, RDOOR - 0.07), pB = P(DHW, RDOOR + 0.07);
       roof.col = solid(RBASE, RBASE + 2.4,
         ox + Math.min(pA.x, pB.x), ox + Math.max(pA.x, pB.x),
         oz + Math.min(pA.z, pB.z), oz + Math.max(pA.z, pB.z));
       roof.cy0 = RBASE; roof.cy1 = RBASE + 2.4; roof.solid = true;
     }
-    { const p = P(1.02, RDOOR + 0.36), sz = tn(0.3, 0.08); box(grp, p.x, RBASE + 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
-    const pbR = P(1.02, RDOOR + 0.42), pbRs = tn(0.12, 0.05);
+    { const p = P(FRAMELAT, RDOOR + 0.36), sz = tn(0.3, 0.08); box(grp, p.x, RBASE + 1.32, p.z, sz.w, 0.55, sz.d, 0x232830); }
+    const pbR = P(FRAMELAT, RDOOR + 0.42), pbRs = tn(0.12, 0.05);
     const btnR = box(grp, pbR.x, RBASE + 1.42, pbR.z, pbRs.w, 0.12, pbRs.d, 0x35d07a, { emissive: 0x16a04a, ei: 0.7 });
     const plR = P(0, RDOOR + 0.34), plRs = tn(0.7, 0.07);
     const lampR = box(grp, plR.x, RBASE + 3.05, plR.z, plRs.w, 0.2, plRs.d, 0x3a3f46, { emissive: 0x10131a, ei: 0.3 });
-    const padPR = P(0, 2.7);
+    const padPR = P(0, V.dep + 0.5);
     const roofPad = { x: ox + padPR.x, z: oz + padPR.z };
 
     // ---- THE ENCLOSED SHAFT: opaque thin steel panels on the NON-door sides
@@ -384,24 +404,24 @@
     //      cab side walls already stop you; the shaft skin is a visual enclosure).
     const SHAFT_TOP = h;                               // shaft rises to the roof-cab floor line
     { // back skin (against the building's own interior wall — full height)
-      const p = P(0, 0.04), sz = tn(2.2, 0.08);
+      const p = P(0, 0.04), sz = tn(IW + 0.14, 0.08);
       box(grp, p.x, SHAFT_TOP / 2 + 0.1, p.z, sz.w, SHAFT_TOP + 0.2, sz.d, SHAFT);
     }
     for (const s of [-1, 1]) { // side skins (full height, just outside the cab side walls)
-      const p = P(s * 1.13, 1.12), sz = tn(0.1, 2.42);
+      const p = P(s * (SIDE + 0.09), CD + 0.09), sz = tn(0.1, CABDEP + 0.32);
       box(grp, p.x, SHAFT_TOP / 2 + 0.1, p.z, sz.w, SHAFT_TOP + 0.2, sz.d, SHAFT);
     }
     { // FRONT spandrel (door side): solid from above the ground door header up to
       // the roof door sill — leaves the ground opening (0..3.24) and the roof
       // opening (h..) clear so you can walk in/out at both ends.
-      const p = P(0, RDOOR + 0.12), sz = tn(2.64, 0.08);
+      const p = P(0, RDOOR + 0.12), sz = tn(IW + 0.58, 0.08);
       const segBot = 3.24, segTop = SHAFT_TOP;          // between the two door frames
       if (segTop - segBot > 0.1)
         box(grp, p.x, (segBot + segTop) / 2, p.z, sz.w, segTop - segBot, sz.d, SHAFT);
     }
     { // a thin ceiling cap over the whole column, just under the roof cab floor,
       // so looking up the shaft from the lobby ends on the cab, not open sky.
-      const p = P(0, 1.1), sz = tn(2.5, 2.6);
+      const p = P(0, CD + 0.07), sz = tn(IW + 0.44, CABDEP + 0.5);
       box(grp, p.x, SHAFT_TOP - 0.12, p.z, sz.w, 0.1, sz.d, 0x20262e);
     }
     // CARVE the chase: drop a clean hole through every intermediate floor slab
@@ -409,15 +429,15 @@
     // slabs → buildings.js does the carve; also reserves the footprint so no
     // later furniture/prop lands in the chase).
     if (CBZ.cityCarveShaft) {
-      const cCol = P(0, 1.1);                            // column centre (cab footprint)
-      const hwT = f.tx ? 1.3 : 1.25, hdT = f.tx ? 1.25 : 1.3;
+      const cCol = P(0, CD + 0.07);                      // column centre (cab footprint)
+      const hwT = f.tx ? V.hw : V.hd, hdT = f.tx ? V.hd : V.hw;
       CBZ.cityCarveShaft(b, ox + cCol.x, oz + cCol.z, hwT, hdT);
     }
 
     addParapets(lot, null);
     addRoofProps(lot, [
       { x: roofPad.x, z: roofPad.z, r: 2.4 },
-      { x: ox + P(0, 1.1).x, z: oz + P(0, 1.1).z, r: 2.0 },
+      { x: ox + P(0, CD + 0.07).x, z: oz + P(0, CD + 0.07).z, r: 2.0 },
     ]);
 
     // ---- per-end local frames: lat (across the door) / dep (from the back
@@ -433,14 +453,26 @@
     const rLoc = gLoc;                                 // identical frame, one column up
     const rPt = gPt;
 
+    // STOP LIST — the floor numbers the ticker counts THROUGH. If buildings.js
+    // has stamped b.floorTops (one arrival Y per storey, ground→roof), we read
+    // its LENGTH so the ride ticker shows the true storey count even on lifts
+    // whose b.storeys differs. The PHYSICAL relocation is always ground↔roof:
+    // those are the only two ends with a real sealed cab room (floor slab +
+    // walls + leafs). Stamping intermediate arrival heights without a cab room
+    // there would drop a rider into the open carved shaft — unsafe to ship
+    // untested — so the machine stays binary while the readout reflects reality.
+    const ftops = Array.isArray(b.floorTops) && b.floorTops.length >= 2 ? b.floorTops : null;
+    const topFloor = ftops ? ftops.length : Math.max(2, b.storeys || 2);
+
     const rec = {
       lot, b, ground, roof, groundPad, roofPad, btnG, btnR, lampG, lampR,
       gLoc, gPt, rLoc, rPt,
       gDoor: GDOOR, rDoor: RDOOR,                     // door-plane dep per end (identical)
       gFloor: 0.16, rFloor: h + 0.16,                 // EXACT cab-floor tops (the slab we built at each end; never re-derived via floorAt)
+      topFloor,                                       // roof floor number (ticker top)
       m: { st: "idle", end: null, t: 0, will: false, moved: false, cool: 0 },
     };
-    lot.building.lift = { ground: groundPad, roof: { x: roofPad.x, y: h, z: roofPad.z } };
+    lot.building.lift = { ground: groundPad, roof: { x: roofPad.x, y: h, z: roofPad.z }, floors: topFloor };
     elevators.push(rec);
   }
 
@@ -651,7 +683,16 @@
   const WAIT_OPEN = 4.0;        // doors hold open for a boarder
   const EXIT_WAIT = 8.0;        // arrival doors hold while you step out
   const CALL_COOL = 0.8;        // post-ride cooldown before the panel re-arms
-  function rideTime(el) { return Math.max(2.5, Math.min(4.0, 1.6 + el.b.storeys * 0.16)); }
+  function rideTime(el) { return Math.max(3.0, Math.min(6.0, 2.0 + el.topFloor * 0.18)); }
+  // ACCEL/DECEL weight envelope: 0 at the ends, ~1 at cruise, with a quick
+  // ease-in and a longer ease-out so the cab feels like it leans into the climb
+  // then settles. Drives the shake magnitude so the camera bobs with momentum.
+  function rideEnvelope(p) {
+    const aIn = 0.22, aOut = 0.30;          // ramp-up / ramp-down fractions of the ride
+    if (p < aIn) { const x = p / aIn; return x * x * (3 - 2 * x); }            // smoothstep in
+    if (p > 1 - aOut) { const x = (1 - p) / aOut; return x * x * (3 - 2 * x); } // smoothstep out
+    return 1;
+  }
 
   function setLit(el, on) {
     el.btnG.material = on ? BTN_LIT() : BTN_IDLE();
@@ -756,9 +797,10 @@
     const sp = 2.4 * dt;
     if (r.open < r.target) r.open = Math.min(r.target, r.open + sp);
     else r.open = Math.max(r.target, r.open - sp);
+    const tv = r.trav || 0.62;
     for (const L of r.leaves) {
-      L.m.position.x = L.baseX + L.sx * 0.62 * r.open;
-      L.m.position.z = L.baseZ + L.sz * 0.62 * r.open;
+      L.m.position.x = L.baseX + L.sx * tv * r.open;
+      L.m.position.z = L.baseZ + L.sz * tv * r.open;
     }
   }
 
@@ -840,12 +882,15 @@
 
     if (m.st === "ride") {
       const up = m.moved ? m.end === "r" : m.end === "g";     // direction reads the same before/after the swap
-      const dur = rideTime(el), p = Math.min(1, m.t / dur), ST = el.b.storeys;
-      // the car hums through your boots
+      const dur = rideTime(el), p = Math.min(1, m.t / dur), ST = el.topFloor;
+      // ACCEL/DECEL: a weight envelope drives the camera bob — the cab leans
+      // into the climb, holds at cruise, then settles. The hum pulse follows
+      // the same envelope so the car sounds like it's working then easing off.
+      const env = rideEnvelope(p);
       shakeT += dt;
-      if (shakeT > 0.35) { shakeT = 0; if (CBZ.shake) CBZ.shake(0.05); }
+      if (shakeT > 0.32) { shakeT = 0; if (CBZ.shake) CBZ.shake(0.025 + 0.075 * env); }
       humT += dt;
-      if (humT > 1.25) { humT = 0; if (CBZ.sfx) CBZ.sfx("rumble"); }
+      if (humT > (1.4 - 0.5 * env) && CBZ.sfx) { humT = 0; CBZ.sfx("rumble"); }
       if (!m.moved && m.t >= dur * 0.5) {
         // THE SWAP — one frame, inside the sealed cab: carry the player's
         // relative spot in the room over to the identical cab at the other
@@ -866,15 +911,19 @@
         m.st = "out"; m.t = 0;
         const r2 = rigOf(el, m.end);
         r2.target = 1; gateDoor(r2);
-        if (CBZ.sfx) CBZ.sfx("door");
+        // arrival DING then the doors (guarded — "blip" stands in for a chime)
+        if (CBZ.sfx) { CBZ.sfx("blip"); CBZ.sfx("door"); }
         if (CBZ.shake) CBZ.shake(0.25);
         if (CBZ.city && CBZ.city.note) {
           CBZ.city.note(m.end === "r" ? ("🛗 " + ST + " floors up — the roof is yours.") : "🛗 Ground floor.", 2);
         }
         return null;
       }
+      // floor ticker: count THROUGH from current floor toward the destination
+      // (1 ↔ topFloor), showing the destination beside the live number.
+      const dest = up ? ST : 1;
       const fl = up ? Math.max(1, Math.round(1 + (ST - 1) * p)) : Math.max(1, Math.round(ST - (ST - 1) * p));
-      return (up ? "▲ " : "▼ ") + fl + "F";
+      return (up ? "▲ " : "▼ ") + fl + "F  →  " + dest + "F";
     }
 
     if (m.st === "out") {

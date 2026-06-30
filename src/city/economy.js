@@ -198,6 +198,57 @@
   // tuxedo (slot outer) — the painted formal special; the apex of the rack.
   clothing("tuxedo", "outer", 20, 2500, "Tuxedo (Composable)", FIT_HEX.black);
 
+  // ---- PAINTED FULL-LOOK SUITS (visualId "suit_N" ↔ clothes.js SUIT_STYLES[N]) ----
+  // These are the apex of the rack: complete painted tailoring (jacket+shirt+
+  // trousers in one look), each a distinct SUIT_STYLES index. Slot "suit" so
+  // they occupy the dedicated suit slot (one suit at a time). Prices climb with
+  // tailoring: 2-piece business < pinstripe/3-piece/DB < color/pattern < tux.
+  const SUIT_CAT = [
+    // [index, label, price]  — index MUST match clothes.js SUIT_STYLES order
+    [0, "Charcoal Suit", 900], [1, "Navy Suit", 900], [2, "Mid-Grey Suit", 850], [3, "Black Suit", 950],
+    [4, "Navy Pinstripe Suit", 1300], [5, "Charcoal Pinstripe Suit", 1300],
+    [6, "Navy Double-Breasted Suit", 1600], [7, "Charcoal Double-Breasted Suit", 1600],
+    [8, "Charcoal 3-Piece Suit", 1900], [9, "Navy 3-Piece Suit", 1900], [10, "Burgundy 3-Piece Suit", 2100],
+    [11, "Tan Suit", 1100], [12, "Olive Suit", 1150], [13, "Burgundy Dinner Suit", 2400],
+    [14, "Powder-Blue Suit", 1250], [15, "All-White Suit", 1800],
+    [16, "Brown Glen-Check Suit", 1700], [17, "Grey Windowpane Suit", 1700],
+    [18, "Black Shawl Tuxedo", 2600], [19, "Midnight-Blue Tuxedo", 2900],
+    [20, "White Dinner Jacket", 3200], [21, "Double-Breasted Peak Tuxedo", 3400],
+  ];
+  const SUIT_HEX = [0x2c2f36, 0x1c2438, 0x53585f, 0x191a1f, 0x1b2236, 0x2b2e35, 0x1a2236, 0x2a2d34,
+    0x2c2f36, 0x1c2438, 0x4a1c28, 0xae9468, 0x55582f, 0x5a1f2c, 0x7d9bb8, 0xe9e7df,
+    0x6e5c44, 0x595d63, 0x16171c, 0x141a2e, 0xeae8e0, 0x16171c];
+  SUIT_CAT.forEach(function (s) {
+    clothing("suit_" + s[0], "suit", s[0] >= 18 ? 26 : (s[0] >= 8 && s[0] <= 10 ? 18 : 14), s[2], s[1], SUIT_HEX[s[0]]);
+  });
+
+  // ---- STREETWEAR / CASUAL full-looks (painted; slot outer/top) ----
+  clothing("hoodie",        "outer", 4,  90,  "Hoodie",          0x7a4a3a);
+  clothing("hoodie_grey",   "outer", 4,  90,  "Grey Hoodie",     0x4a4d54);
+  clothing("hoodie_black",  "outer", 5,  120, "Black Hoodie",    0x1c1d22);
+  clothing("puffer",        "outer", 7,  240, "Puffer Jacket",   0x223a55);
+  clothing("denim_jacket",  "outer", 6,  160, "Denim Jacket",    0x3c5a7a);
+  clothing("varsity",       "outer", 8,  320, "Varsity Jacket",  0x6e1f2b);
+  clothing("graphic_tee",   "top",   2,  45,  "Graphic Tee",     0x1c1d22);
+  clothing("tracksuit",     "outer", 5,  180, "Tracksuit",       0x2bb673);
+  clothing("tracksuit_red", "outer", 5,  180, "Red Tracksuit",   0xb22a2a);
+  clothing("tracksuit_navy","outer", 5,  180, "Navy Tracksuit",  0x1c2440);
+
+  // ---- WORK / SERVICE full-looks (painted uniforms anyone can buy) ----
+  clothing("coveralls",     "outer", 4,  110, "Coveralls",       0x394a5a);
+  clothing("chef",          "outer", 6,  150, "Chef Whites",     0xf0efe9);
+  clothing("waiter",        "outer", 7,  200, "Waiter Set",      0x16171c);
+  clothing("pilot",         "outer", 9,  420, "Pilot Uniform",   0xeef0f2);
+
+  // ---- DRESSES (painted A-line; slot outer — a full look) ----
+  clothing("dress_black",   "outer", 9,  260, "Black Dress",     0x1c1d22);
+  clothing("dress_red",     "outer", 9,  290, "Red Dress",       0x8a1f28);
+  clothing("dress_navy",    "outer", 9,  250, "Navy Dress",      0x1c2438);
+  clothing("dress_emerald", "outer", 10, 340, "Emerald Dress",   0x1d5a44);
+  clothing("dress_white",   "outer", 10, 380, "White Dress",     0xe9e7df);
+  clothing("sundress",      "outer", 6,  140, "Floral Sundress", 0xf0d9a0);
+  clothing("sundress_blue", "outer", 6,  140, "Blue Sundress",   0xbcd6ea);
+
   // ---- JEWELRY (composable; renders via bling.js real meshes) --------------
   // watches (slot watch). steel = everyday case; diver = sport tool watch; gold
   // = a precious-metal case; iced = a fully diamond-paved bust-down. bling.js
@@ -1099,6 +1150,79 @@
       }
     }
   });
+
+  // ---- H4: THE CITY-WIDE RENT TICK (the WHY behind every job) --------------
+  // housing.js leases EVERY resident a real micro-unit; this is the faucet/sink
+  // side of that lease. Once per ~45s we sum the rent owed by all OCCUPIED
+  // units in CBZ.cityHousing and move the money the way a real city does:
+  //   • a unit in a building the PLAYER owns → that rent is INCOME (your
+  //     tenants pay you): credited via CBZ.city.addCash with a throttled note.
+  //   • every OTHER unit → a pure world SINK: the cash leaves the NPC's pocket
+  //     to an off-screen landlord and never touches g.cash. This is the
+  //     Cities:Skylines money sink that stops NPC wallets ballooning, and it's
+  //     what makes "rent is due" a felt pressure rather than a UI number.
+  // SCOPE: strictly cityHousing units — it never double-collects against
+  // zillow's portfolio faucet (that pays off g.cityTenants[rec.id] LISTING
+  // records, a separate player rent-out layer; zillow already skips the player's
+  // own residence, and these per-floor micro-units are not zillow recs at all).
+  // CHEAP: one accumulator, the units array walked once per cycle, early-out
+  // when housing is absent. WHY (codebase voice): a corner is worth holding
+  // because the 1st of the month always comes.
+  const RENT_TICK = 45;          // seconds between city-wide rent cycles
+  let _rentNoteShown = false;    // throttle the player "rent collected" note
+  CBZ.cityRentTick = function (dt) {
+    if (g.mode !== "city") return;
+    const H = CBZ.cityHousing;
+    if (!H || !H.units) return;                  // housing layer absent → no-op
+    g._cityRentClock = (g._cityRentClock || 0) + (dt || 0);
+    if (g._cityRentClock < RENT_TICK) return;
+    g._cityRentClock -= RENT_TICK;
+    let units;
+    try { units = H.units(); } catch (e) { return; }
+    if (!units || !units.length) return;
+    let ownerIncome = 0;                          // rent owed to the PLAYER
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      const occ = u.occupant;
+      if (!occ || occ.dead) continue;             // empty/dead → no rent flows
+      const rent = u.rent || 0;
+      if (rent <= 0) continue;
+      // does the PLAYER own this building? (home.owned flag set by realestate/
+      // zillow, or an explicit player owner record). Their tenants pay them.
+      const b = u.lot && u.lot.building;
+      const home = b && b.home;
+      const owner = b && b.owner;
+      const playerOwned = !!(home && home.owned) || !!(owner && owner.type === "player");
+      if (playerOwned) {
+        ownerIncome += rent;
+      }
+      // OPTIONAL flavour (guarded HARD): nick the rent off the NPC's own wallet
+      // so a broke ped reads as 'behind on rent'. Only when a numeric wallet
+      // already exists (most peds carry ped.cash) — we never invent one, never
+      // let an NPC go negative, and it's a modest debit so it's a pressure not a
+      // wipe. This is the sink made personal: the money left their pocket.
+      if (typeof occ.cash === "number" && occ.cash > 0) {
+        const pay = Math.min(occ.cash, Math.max(1, Math.round(rent * 0.5)));
+        occ.cash -= pay;
+        occ._rentDue = Math.max(0, (occ._rentDue | 0) + (rent - pay));   // shortfall = how far behind
+      } else if (typeof occ.cash === "number") {
+        // already broke → the arrears climb (read elsewhere as 'behind').
+        occ._rentDue = (occ._rentDue | 0) + rent;
+      }
+    }
+    if (ownerIncome > 0 && CBZ.city && CBZ.city.addCash) {
+      const credited = Math.round(ownerIncome);
+      CBZ.city.addCash(credited);
+      if (!_rentNoteShown && CBZ.city.note) {
+        _rentNoteShown = true;                    // one-time teach, then the HUD carries it
+        CBZ.city.note("Rent collected from your tenants: +$" + credited + ".", 3);
+      }
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    }
+  };
+  // drive the rent tick from the city onUpdate (own slot, after the other
+  // money ticks). Gated to city mode inside the function above.
+  CBZ.onUpdate(30.8, function (dt) { CBZ.cityRentTick(dt); });
 
   // --- the EQUIPPED-OUTFIT / DRIP API (the foundation everything else reads) --
   // Top-level globals so club.js (bouncer), shops.js (boutique equips on buy),

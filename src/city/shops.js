@@ -394,7 +394,16 @@
   // OUTFITS — identity/status fits from the canonical wardrobe when present)
   function styleMenu(kind) {
     if (kind === "barber") return HAIRCUTS;
-    if (kind === "clothing") return outfitRack();
+    if (kind === "clothing") {
+      // The WALK-IN store (clothingstore.js) is the sole buy path for cloth:
+      // real racks + mannequins INSIDE the shop, no loose floating "for sale"
+      // ghosts. When that store is live for this lot, retire the redundant
+      // clerk text-sale entirely so there is ONE way to shop here. Keep the
+      // legacy text rack ONLY as a fallback if the store never built (so the
+      // clothing shop is never a dead room with nothing to buy).
+      if (CBZ.cityClothingLive && CBZ.cityClothingLive(openLot)) return [];
+      return outfitRack();
+    }
     return [];
   }
   // letters for the style rows, SKIPPING service keys + the closet key so a

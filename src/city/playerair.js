@@ -91,18 +91,26 @@
       matTrim: M(0x394656),
       matGlow: M(0x59c2ff, { emissive: 0x59c2ff, ei: 0.7 }),
       matJet:  M(0x2f3744, { ei: 0.05 }),
-      heliBody: shared(new THREE.BoxGeometry(2.3, 1.3, 5.0)),
-      heliTail: shared(new THREE.BoxGeometry(0.42, 0.42, 3.3)),
-      heliFin:  shared(new THREE.BoxGeometry(0.18, 1.0, 0.7)),
-      heliSkid: shared(new THREE.BoxGeometry(0.16, 0.16, 3.8)),
+      // friendly heli — a clean civilian-exec airframe (cabin + tapered boom)
+      heliBody: shared(new THREE.BoxGeometry(2.0, 1.35, 4.4)),
+      heliCanopy:shared(new THREE.BoxGeometry(1.7, 0.8, 1.9)),   // forward glass cabin
+      heliBoom: shared(new THREE.BoxGeometry(0.55, 0.55, 2.9)),  // tapered tail boom
+      heliFin:  shared(new THREE.BoxGeometry(0.18, 1.05, 0.7)),
+      heliStab: shared(new THREE.BoxGeometry(1.6, 0.12, 0.6)),
+      heliSkid: shared(new THREE.BoxGeometry(0.16, 0.16, 3.6)),
       heliStrut:shared(new THREE.BoxGeometry(0.12, 0.6, 0.12)),
-      glowStrip:shared(new THREE.BoxGeometry(2.0, 0.5, 0.08)),
-      rotorMain:shared(new THREE.BoxGeometry(9.0, 0.06, 0.6)),
-      rotorTail:shared(new THREE.BoxGeometry(0.06, 1.7, 0.3)),
-      jetBody:  shared(new THREE.BoxGeometry(1.4, 1.0, 8.6)),
-      jetNose:  shared(new THREE.ConeGeometry(0.7, 2.4, 8)),
-      jetWing:  shared(new THREE.BoxGeometry(7.2, 0.18, 2.2)),
-      jetTail:  shared(new THREE.BoxGeometry(0.16, 1.6, 1.4)),
+      heliHub:  shared(new THREE.BoxGeometry(0.34, 0.36, 0.34)),
+      glowStrip:shared(new THREE.BoxGeometry(1.7, 0.45, 0.08)),
+      rotorBlade:shared(new THREE.BoxGeometry(8.8, 0.05, 0.46)), // one main blade
+      rotorTail:shared(new THREE.BoxGeometry(0.05, 1.5, 0.28)),  // one tail blade
+      // airstrike jet — clean swept delta + canted twin tails (mirrors aircraft.js)
+      jetBody:  shared(new THREE.BoxGeometry(1.3, 1.05, 7.6)),
+      jetNose:  shared(new THREE.ConeGeometry(0.66, 2.6, 10)),
+      jetCanopy:shared(new THREE.BoxGeometry(0.85, 0.55, 1.7)),
+      jetWing:  shared(new THREE.BoxGeometry(3.4, 0.16, 3.0)),   // one swept delta half
+      jetTail:  shared(new THREE.BoxGeometry(0.14, 1.3, 1.1)),   // one canted vertical tail
+      jetStab:  shared(new THREE.BoxGeometry(1.5, 0.12, 0.9)),
+      jetIntake:shared(new THREE.BoxGeometry(0.42, 0.6, 1.6)),
       bomb:     shared(new THREE.CylinderGeometry(0.18, 0.18, 1.2, 7)),
       burn:     shared(new THREE.SphereGeometry(0.5, 7, 6)),
       rotorMat: shared(new THREE.MeshBasicMaterial({ color: 0x0e1015, transparent: true, opacity: 0.5, depthWrite: false })),
@@ -137,16 +145,29 @@
     const a = assets();
     const grp = new THREE.Group();
     const body = new THREE.Mesh(a.heliBody, a.matHull); grp.add(body);
-    const tail = new THREE.Mesh(a.heliTail, a.matHull); tail.position.set(0, 0.25, -3.8); grp.add(tail);
-    const fin = new THREE.Mesh(a.heliFin, a.matTrim); fin.position.set(0, 0.7, -5.1); grp.add(fin);
-    const glow = new THREE.Mesh(a.glowStrip, a.matGlow); glow.position.set(0, 0.1, 2.4); grp.add(glow);
-    for (const sx of [-0.9, 0.9]) {
-      const skid = new THREE.Mesh(a.heliSkid, a.matTrim); skid.position.set(sx, -0.82, 0); grp.add(skid);
-      const s1 = new THREE.Mesh(a.heliStrut, a.matTrim); s1.position.set(sx, -0.5, 1.1); grp.add(s1);
-      const s2 = new THREE.Mesh(a.heliStrut, a.matTrim); s2.position.set(sx, -0.5, -1.1); grp.add(s2);
+    // forward glass cabin overlapping the fuselage front
+    const canopy = new THREE.Mesh(a.heliCanopy, a.matTrim); canopy.position.set(0, 0.5, 1.45); grp.add(canopy);
+    // tapered tail boom — front sunk into the rear of the cabin (no gap)
+    const boom = new THREE.Mesh(a.heliBoom, a.matHull);
+    boom.position.set(0, 0.32, -3.2); boom.scale.set(0.7, 0.7, 1); grp.add(boom);
+    const fin = new THREE.Mesh(a.heliFin, a.matTrim); fin.position.set(0, 0.82, -4.45); grp.add(fin);
+    const stab = new THREE.Mesh(a.heliStab, a.matTrim); stab.position.set(0, 0.32, -4.2); grp.add(stab);
+    const glow = new THREE.Mesh(a.glowStrip, a.matGlow); glow.position.set(0, 0.1, 2.18); grp.add(glow);
+    for (const sx of [-0.85, 0.85]) {
+      const skid = new THREE.Mesh(a.heliSkid, a.matTrim); skid.position.set(sx, -0.9, 0.1); grp.add(skid);
+      const s1 = new THREE.Mesh(a.heliStrut, a.matTrim); s1.position.set(sx, -0.58, 1.1); grp.add(s1);
+      const s2 = new THREE.Mesh(a.heliStrut, a.matTrim); s2.position.set(sx, -0.58, -0.9); grp.add(s2);
     }
-    const rotor = new THREE.Mesh(a.rotorMain, a.rotorMat); rotor.position.y = 1.05; grp.add(rotor);
-    const trotor = new THREE.Mesh(a.rotorTail, a.rotorMat); trotor.position.set(0.18, 0.45, -5.2); grp.add(trotor);
+    // mast hub + crossed pair of thin blades (named group spun by updateChopper)
+    const hub = new THREE.Mesh(a.heliHub, a.matTrim); hub.position.y = 0.96; grp.add(hub);
+    const rotor = new THREE.Group(); rotor.position.y = 1.1;
+    const rb1 = new THREE.Mesh(a.rotorBlade, a.rotorMat); rotor.add(rb1);
+    const rb2 = new THREE.Mesh(a.rotorBlade, a.rotorMat); rb2.rotation.y = Math.PI / 2; rotor.add(rb2);
+    grp.add(rotor);
+    const trotor = new THREE.Group(); trotor.position.set(0.16, 0.6, -4.68);
+    const tb1 = new THREE.Mesh(a.rotorTail, a.rotorMat); trotor.add(tb1);
+    const tb2 = new THREE.Mesh(a.rotorTail, a.rotorMat); tb2.rotation.x = Math.PI / 2; trotor.add(tb2);
+    grp.add(trotor);
     // No floating "YOUR CHOPPER" word over your helicopter — it's the only one
     // you summoned and the only one landing on you, so it reads as yours. A
     // hovering label broke the fourth wall and was removed.
@@ -283,10 +304,20 @@
     const a = assets();
     const grp = new THREE.Group();
     const body = new THREE.Mesh(a.jetBody, a.matJet); grp.add(body);
-    const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = -Math.PI / 2; nose.position.z = 5.3; grp.add(nose);
-    const wing = new THREE.Mesh(a.jetWing, a.matJet); wing.position.z = -0.4; grp.add(wing);
-    const tail = new THREE.Mesh(a.jetTail, a.matJet); tail.position.set(0, 0.8, -3.8); grp.add(tail);
-    const burn = new THREE.Mesh(a.burn, a.flameMat); burn.scale.set(0.7, 0.7, 1.4); burn.position.z = -4.7; grp.add(burn);
+    // nose cone base sunk into the fuselage front (clean taper, no seam)
+    const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = -Math.PI / 2; nose.position.z = 4.4; grp.add(nose);
+    const canopy = new THREE.Mesh(a.jetCanopy, a.matJet); canopy.position.set(0, 0.62, 1.7); grp.add(canopy);
+    const inL = new THREE.Mesh(a.jetIntake, a.matJet); inL.position.set(-0.72, -0.1, 0.6); grp.add(inL);
+    const inR = new THREE.Mesh(a.jetIntake, a.matJet); inR.position.set(0.72, -0.1, 0.6); grp.add(inR);
+    // swept delta halves — roots sink into the fuselage sides (no root gap)
+    const wingL = new THREE.Mesh(a.jetWing, a.matJet); wingL.position.set(-1.9, -0.18, -0.7); wingL.rotation.y = 0.32; grp.add(wingL);
+    const wingR = new THREE.Mesh(a.jetWing, a.matJet); wingR.position.set(1.9, -0.18, -0.7); wingR.rotation.y = -0.32; grp.add(wingR);
+    const stabL = new THREE.Mesh(a.jetStab, a.matJet); stabL.position.set(-0.85, 0, -3.3); stabL.rotation.y = 0.2; grp.add(stabL);
+    const stabR = new THREE.Mesh(a.jetStab, a.matJet); stabR.position.set(0.85, 0, -3.3); stabR.rotation.y = -0.2; grp.add(stabR);
+    // canted twin tails, roots overlapping the rear fuselage top
+    const tailL = new THREE.Mesh(a.jetTail, a.matJet); tailL.position.set(-0.42, 0.78, -3.0); tailL.rotation.z = 0.22; grp.add(tailL);
+    const tailR = new THREE.Mesh(a.jetTail, a.matJet); tailR.position.set(0.42, 0.78, -3.0); tailR.rotation.z = -0.22; grp.add(tailR);
+    const burn = new THREE.Mesh(a.burn, a.flameMat); burn.scale.set(0.7, 0.7, 1.4); burn.position.z = -4.1; grp.add(burn);
     r.add(grp);
     const sp = edgePoint(tgt.x, tgt.z, STRIKE_Y);
     grp.position.set(sp.x, STRIKE_Y, sp.z);
@@ -380,9 +411,7 @@
   CBZ.cityCallAirstrike = function (tgt) {
     if (g.mode !== "city" || g.state !== "playing") return false;
     if (!canStrike()) {
-      note(ownsPenthouse()
-        ? "🎯 No jet yet. Buy the HANGAR add-on at your home [H] to base an F-22."
-        : "🎯 No hangar. Own the Apex Penthouse, then buy its deck hangar to base an attack jet.", 3.8);
+      note("🎯 No F-22 yet. Buy a hangar (penthouse deck [H] or the airport Private Hangar [P]→Services), STEAL the F-22 from the military base, then land it in your hangar to keep it.", 4.2);
       return false;
     }
     if (strikeCD > 0) { note("🎯 Jet rearming — " + Math.ceil(strikeCD) + "s.", 2); return false; }

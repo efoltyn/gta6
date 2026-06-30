@@ -202,17 +202,123 @@
     } else {
       inner += svcBtn("chopper", "🚁 Call Chopper", true, "Aerial pickup → flies you to your map waypoint, else home.");
     }
-    // AIRSTRIKE — the paid hangar add-on (F-22)
+    // HANGAR — the home a stolen F-22 needs. Two ways to own one: the penthouse
+    //   deck hangar (bought at home [H]) OR the standalone airport Private Hangar
+    //   (bought right here / [G] near the apron). Surface the airport one so the
+    //   player can always find a way to buy a hangar without owning the tower.
+    const ownsAirportHangar = !!(CBZ.cityStorage && CBZ.cityStorage.owns && (function () { try { return CBZ.cityStorage.owns("hangar"); } catch (e) { return false; } })());
+    const hangarProp = (CBZ.cityStorage && CBZ.cityStorage.PROPERTIES) ? CBZ.cityStorage.PROPERTIES.find(function (p) { return p.id === "hangar"; }) : null;
     if (!s || !s.hangar) {
-      inner += svcBtn("", "🎯 Call Airstrike", false, s && s.penthouse
-        ? "Locked — buy the HANGAR add-on at your home [H] to base a jet."
-        : "Locked — own the APEX PENTHOUSE, then buy its deck hangar.");
+      if (ownsAirportHangar) {
+        inner += svcBtn("", "🛩 Private Hangar — owned", false, "Empty hangar at the airport apron. STEAL the F-22 from the military base, then land it inside to keep it.");
+      } else if (CBZ.cityStorage && CBZ.cityStorage.buy) {
+        inner += svcBtn("buyhangar", "🛩 Buy Private Hangar — " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar — the home a stolen F-22 needs. (Or buy the penthouse deck hangar at home [H].)");
+      }
+    }
+    // AIRSTRIKE — needs a based F-22 (own a hangar, then steal & land the jet)
+    if (!s || !s.hangar) {
+      inner += svcBtn("", "🎯 Call Airstrike", false,
+        "Locked — buy a hangar (above, or penthouse deck [H]), STEAL the F-22, and land it inside to base it.");
     } else if (s.strikeCD > 0) {
       inner += svcBtn("", "🎯 Jet rearming", false, "Ready in " + s.strikeCD + "s.");
     } else {
       inner += svcBtn("strike", "🎯 Call Airstrike", true, "Bombs your waypoint (else your aim). " + money(s.strikeCost) + " · draws police heat.");
     }
     return card("📡 SERVICES", inner);
+  }
+
+  // ---- GIG WORK: the phone's honest-money app. The WHY: not every dollar has
+  //      to come from a body — you can clock in. CBZ.cityGig (gigs.js, parallel
+  //      build) owns the loop; this card is the dispatcher: it lists the gig
+  //      lines you can pick up (Delivery / Rideshare / Smuggle), offers fresh
+  //      jobs, and lets you ACCEPT one. Fully feature-detected: if cityGig isn't
+  //      loaded the card simply says so — nothing else in the phone breaks.
+  //
+  //      Contract used (all optional, each guarded):
+  //        CBZ.cityGig.active()        → the in-progress gig (or null/false)
+  //        CBZ.cityGig.offer(kind)     → fresh offer(s) for a line; array or one def
+  //        CBZ.cityGig.accept(def)     → take a specific offered def
+  //        CBZ.cityGig.lines()         → [{kind,label,sub,pay?}] available gig lines
+  //        CBZ.cityGig.cancel()        → drop the active gig
+  const GIG_LINES = [
+    { kind: "delivery", label: "📦 Delivery", sub: "grab a package · run it across town" },
+    { kind: "taxi", label: "🚕 Rideshare", sub: "pick up a fare · drop them at their stop" },
+    { kind: "smuggling", label: "🕶️ Smuggle run", sub: "off-book cargo · hot money, hotter heat" },
+  ];
+  // a clickable gig row. mode "offer" lists a line to fetch work for; mode
+  // "accept" is a concrete offered def the player can take right now.
+  function gigBtn(mode, key, label, enabled, sub) {
+    const bg = enabled ? "rgba(126,217,87,.14)" : "rgba(255,255,255,.04)";
+    const bd = enabled ? "#4a8a3a" : "#2c3140";
+    const col = enabled ? "#dff5d0" : DIM;
+    const cursor = enabled ? "pointer" : "default";
+    return "<div data-gig='" + esc(mode) + "' data-gigkey='" + esc(key) + "' data-on='" + (enabled ? 1 : 0) + "' " +
+      "style='background:" + bg + ";border:1px solid " + bd + ";border-radius:9px;padding:8px 11px;margin:4px 0;cursor:" + cursor + ";'>" +
+      "<div style='color:" + col + ";font-weight:700;font-size:13px'>" + esc(label) + "</div>" +
+      (sub ? "<div style='color:" + DIM + ";font-size:11px;margin-top:2px'>" + esc(sub) + "</div>" : "") +
+      "</div>";
+  }
+  // the stage/phase of an active gig, read defensively across plausible field names.
+  function gigStage(a) {
+    if (!a) return "";
+    return String(a.stage || a.phase || a.step || a.state || "active");
+  }
+  function gigStageHint(a) {
+    const s = gigStage(a).toLowerCase();
+    if (s.indexOf("pickup") >= 0 || s.indexOf("hail") >= 0 || s.indexOf("offered") >= 0) return "Head to the pickup — the spot's on your map.";
+    if (s.indexOf("carry") >= 0 || s.indexOf("ride") >= 0 || s.indexOf("transit") >= 0 || s.indexOf("enroute") >= 0) return "Cargo aboard — get to the drop-off.";
+    if (s.indexOf("drop") >= 0 || s.indexOf("deliver") >= 0) return "At the drop — hand it over.";
+    return "Job in progress.";
+  }
+  // cache the last batch of offers we showed, keyed by index, so a click can
+  // resolve to the exact def we listed (offers may be objects, not just kinds).
+  let gigOffers = [];
+  function gigApp() {
+    const G = CBZ.cityGig;
+    if (!G || typeof G !== "object") {
+      return card("💼 GIG WORK",
+        "<div style='font-size:13px;color:" + DIM + "'>No gig dispatch available right now.</div>");
+    }
+    let inner = "";
+    // 1) ACTIVE JOB — if one's running, show it + a cancel.
+    let active = null;
+    try { active = (typeof G.active === "function") ? G.active() : null; } catch (e) { active = null; }
+    if (active) {
+      const k = String(active.kind || active.line || "gig");
+      const line = GIG_LINES.find(function (l) { return l.kind === k; });
+      const title = (line ? line.label : "💼 " + k) + (active.pay ? " · " + money(active.pay) : "");
+      inner += "<div style='font-size:13px;color:" + GREEN + ";font-weight:700;margin-bottom:2px'>" + esc(title) + "</div>";
+      inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:6px'>" + esc(gigStageHint(active)) + "</div>";
+      if (typeof G.cancel === "function") inner += gigBtn("cancel", k, "✖ Drop this gig", true, "Forfeit the run — no pay.");
+      return card("💼 GIG WORK", inner);
+    }
+    // 2) FRESH OFFERS — if the player has fetched offers for a line, list them.
+    if (gigOffers.length) {
+      inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Available jobs — tap to accept:</div>";
+      gigOffers.forEach(function (def, i) {
+        const lbl = (def && (def.label || def.title)) || "Job #" + (i + 1);
+        const sub = (def && (def.sub || def.desc)) || (def && def.pay ? money(def.pay) : "");
+        inner += gigBtn("accept", String(i), "✔ " + lbl, true, sub);
+      });
+      inner += gigBtn("clear", "", "↩ Back to gig lines", true, "");
+      return card("💼 GIG WORK", inner);
+    }
+    // 3) DEFAULT — the menu of gig lines to fetch work for.
+    inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Clock in — pick a line of work:</div>";
+    let lines = GIG_LINES;
+    if (typeof G.lines === "function") {
+      try {
+        const ll = G.lines();
+        if (Array.isArray(ll) && ll.length) lines = ll.map(function (l) {
+          const base = GIG_LINES.find(function (b) { return b.kind === l.kind; });
+          return { kind: l.kind, label: l.label || (base && base.label) || l.kind, sub: l.sub || (base && base.sub) || "" };
+        });
+      } catch (e) {}
+    }
+    lines.forEach(function (l) {
+      inner += gigBtn("offer", l.kind, l.label, typeof G.offer === "function", l.sub);
+    });
+    return card("💼 GIG WORK", inner);
   }
 
   function vitalsApp() {
@@ -241,6 +347,7 @@
     try { html += wantedApp(); } catch (e) {}
     try { html += territoryApp(); } catch (e) {}
     try { html += empireApp(); } catch (e) {}
+    try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}
     try { html += vitalsApp(); } catch (e) {}
     body.innerHTML = html;
@@ -270,11 +377,52 @@
     // chopper/jet do its thing. Feature-detected so a missing module is inert.
     panel.addEventListener("click", function (e) {
       const t = e.target && e.target.closest ? e.target.closest("[data-svc]") : null;
-      if (!t || t.getAttribute("data-on") !== "1") return;
-      const svc = t.getAttribute("data-svc");
-      if (svc === "chopper" && typeof CBZ.cityCallChopper === "function") { if (CBZ.cityCallChopper()) close(); }
-      else if (svc === "strike" && typeof CBZ.cityCallAirstrike === "function") { if (CBZ.cityCallAirstrike()) close(); }
-      else render();
+      if (t && t.getAttribute("data-on") === "1") {
+        const svc = t.getAttribute("data-svc");
+        if (svc === "chopper" && typeof CBZ.cityCallChopper === "function") { if (CBZ.cityCallChopper()) close(); }
+        else if (svc === "strike" && typeof CBZ.cityCallAirstrike === "function") { if (CBZ.cityCallAirstrike()) close(); }
+        else if (svc === "buyhangar" && CBZ.cityStorage && typeof CBZ.cityStorage.buy === "function") {
+          try {
+            const hp = (CBZ.cityStorage.PROPERTIES || []).find(function (p) { return p.id === "hangar"; });
+            if (hp) CBZ.cityStorage.buy(hp);
+          } catch (e) {}
+          render();
+        }
+        else render();
+        return;
+      }
+      // ---- GIG WORK clicks ----
+      const gt = e.target && e.target.closest ? e.target.closest("[data-gig]") : null;
+      if (gt && gt.getAttribute("data-on") === "1") {
+        const G = CBZ.cityGig;
+        const mode = gt.getAttribute("data-gig");
+        const key = gt.getAttribute("data-gigkey");
+        if (!G) { render(); return; }
+        try {
+          if (mode === "offer" && typeof G.offer === "function") {
+            const res = G.offer(key);
+            // offer() may return one def or an array of defs. If it returns
+            // nothing truthy, assume it accepted/posted directly — just re-render.
+            if (Array.isArray(res)) gigOffers = res.filter(Boolean);
+            else if (res) gigOffers = [res];
+            else gigOffers = [];
+          } else if (mode === "accept" && typeof G.accept === "function") {
+            const idx = parseInt(key, 10) || 0;
+            const def = gigOffers[idx];
+            if (def) { G.accept(def); }
+            gigOffers = [];
+            close();   // job's on — close the phone, go work it
+            return;
+          } else if (mode === "clear") {
+            gigOffers = [];
+          } else if (mode === "cancel" && typeof G.cancel === "function") {
+            G.cancel();
+            gigOffers = [];
+          }
+        } catch (err) { gigOffers = []; }
+        render();
+        return;
+      }
     });
 
     document.body.appendChild(panel);

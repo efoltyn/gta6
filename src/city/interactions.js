@@ -103,9 +103,16 @@
   function buildCtx() {
     const P = CBZ.player;
     const it = CBZ.cityCurrentWeapon && CBZ.cityCurrentWeapon();
+    // A gun is only "drawn" if it's actually a FIREARM the player is holding —
+    // not melee and NOT holstered. cityCurrentWeapon() ignores the holster flag,
+    // so we gate on cityHasGun() (the single source of truth: not melee, not
+    // holstered, a real equipped gun). Without this, holstering to FISTS still
+    // read as gunDrawn — surfacing the "src-gunpoint" target and throwing meek
+    // peds' hands up the moment you APPROACHED them unarmed.
+    const drawn = !!(it && it.gun) && !!(CBZ.cityHasGun && CBZ.cityHasGun());
     return {
       actor: P, pos: P.pos, driving: !!P.driving, vehicle: P._vehicle || null,
-      gun: it && it.gun ? it : null, gunDrawn: !!(it && it.gun),
+      gun: drawn ? it : null, gunDrawn: drawn,
       items: g.cityInv || {}, role: g.career || "", wanted: g.wanted | 0,
       cash: g.cash | 0, local: true,
     };
@@ -269,7 +276,10 @@
     // whoever the panel is offering interactions on turns to LOOK at you
     const t = pick.t;
     if (t && t.group && !t.dead && (t.kind || t.vendor)) t._faceT = 0.45;
-    if (pick.gunpoint && CBZ.cityMarkGunpoint) CBZ.cityMarkGunpoint(t, 0.55);
+    // hands-up ONLY under a genuinely DRAWN firearm (ctx.gunDrawn already gates
+    // on cityHasGun: not melee, not holstered, a real gun) — never on an unarmed
+    // / holstered approach, even if some gunpoint-flagged source slips through.
+    if (pick.gunpoint && ctx.gunDrawn && CBZ.cityMarkGunpoint) CBZ.cityMarkGunpoint(t, 0.55);
 
     const desc = (descs[pick.kind] && descs[pick.kind](t, ctx)) || { label: "—", note: "" };
     // fingerprint = target + the resolved rows; rebuild DOM only on a real change

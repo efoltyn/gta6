@@ -83,7 +83,9 @@
     const out = [];
     for (const id in g.cityEmpireBiz) {
       const b = g.cityEmpireBiz[id], def = BIZ_BY_ID[id]; if (!def) continue;
-      out.push({ id, name: def.name, tier: b.tier | 0, sec: b.secLevel | 0, value: bizValue(id) });
+      const o = { id, name: def.name, tier: b.tier | 0, sec: b.secLevel | 0, value: bizValue(id) };
+      if (def.gig) { o.workers = b.workers | 0; o.rep = clamp(b.rep == null ? 1 : b.rep, 0, 1); }
+      out.push(o);
     }
     w.assets.businesses = out;
     // luxury lives in our own ledger field so it survives runs too
@@ -99,8 +101,16 @@
     const w = CBZ.cityWorldEnsure(); if (!w) return;
     if (w.assets && w.assets.businesses) {
       for (const rec of w.assets.businesses) {
-        if (!BIZ_BY_ID[rec.id]) continue;
-        if (!g.cityEmpireBiz[rec.id]) g.cityEmpireBiz[rec.id] = { tier: rec.tier | 0, secLevel: rec.sec | 0, supply: 0, lastTick: now() };
+        // legacy alias: the old "taxi" front is now the "rideshare" gig company.
+        let rid = rec.id; if (rid === "taxi" && BIZ_BY_ID.rideshare) rid = "rideshare";
+        const def = BIZ_BY_ID[rid]; if (!def) continue;
+        if (!g.cityEmpireBiz[rid]) {
+          g.cityEmpireBiz[rid] = {
+            tier: rec.tier | 0, secLevel: rec.sec | 0, supply: 0, lastTick: now(),
+            workers: def.gig ? (rec.workers | 0) : 0,
+            rep: def.gig ? clamp(rec.rep == null ? 1 : rec.rep, 0, 1) : undefined,
+          };
+        }
       }
     }
     if (w.luxury) { for (const k in w.luxury) g.cityLuxury[k] = w.luxury[k]; }
@@ -125,7 +135,14 @@
   // ============================================================
   const BUSINESSES = [
     { id: "carwash",   name: "Sudz Car Wash",        emoji: "🧼", kind: "front",   cost: 45000,   rate: 22,  cap: 4500,   maxTier: 3, upgradeMul: 1.9, launder: true,  minTier: 1, blurb: "A legit front. Quietly washes dirty cash and prints a trickle." },
-    { id: "taxi",      name: "Downtown Cab Co.",     emoji: "🚕", kind: "front",   cost: 70000,   rate: 30,  cap: 6500,   maxTier: 3, upgradeMul: 1.9, launder: true,  minTier: 1, blurb: "A medallion fleet — cash business, easy to cook the books." },
+    // ---- GIG COMPANIES -------------------------------------------------------
+    // The two-stream model: a `gig:true` company runs on EMPLOYEES (a `workers`
+    // tier-track adds NPC drivers + scales the passive rate) AND on REPUTATION
+    // that DECAYS unless you personally run active gigs for the brand. Let the
+    // rep slide and the passive faucet chokes — you have to keep the brand alive.
+    { id: "delivery",  name: "RapidGig Courier",     emoji: "📦", kind: "front",   cost: 55000,   rate: 26,  cap: 5500,   maxTier: 3, upgradeMul: 1.9,  launder: true,  minTier: 1, gig: true, gigLabel: "deliveries", blurb: "A courier front. Your driver fleet runs parcels while you cook the books." },
+    { id: "rideshare", name: "Downtown Cab Co.",     emoji: "🚕", kind: "front",   cost: 70000,   rate: 30,  cap: 6500,   maxTier: 3, upgradeMul: 1.9,  launder: true,  minTier: 1, gig: true, gigLabel: "fares", blurb: "A medallion + rideshare fleet — cash business, easy to cook the books." },
+    { id: "smuggle",   name: "Harbor Freight (Front)",emoji: "🚢", kind: "supply", cost: 180000,  rate: 78,  cap: 16000,  maxTier: 4, upgradeMul: 1.85, launder: false, minTier: 3, gig: true, gigLabel: "runs", blurb: "A dockside 'freight' front. Driver crews move contraband — fat haul, real bust risk." },
     { id: "weed",      name: "Green Room Dispensary",emoji: "🌿", kind: "supply",  cost: 95000,   rate: 44,  cap: 9000,   maxTier: 4, upgradeMul: 1.85, launder: false, minTier: 2, blurb: "Half-legal grow-op. Steady product, steady money." },
     { id: "pawn",      name: "Iron City Pawn",       emoji: "💍", kind: "front",   cost: 120000,  rate: 50,  cap: 11000,  maxTier: 3, upgradeMul: 1.95, launder: true,  minTier: 2, blurb: "Fences hot goods and launders through 'sales'. Cops rarely look." },
     { id: "club",      name: "Vault Nightclub",      emoji: "🍾", kind: "club",    cost: 240000,  rate: 95,  cap: 24000,  maxTier: 5, upgradeMul: 1.8,  launder: true,  minTier: 3, blurb: "The GTA classic. Popularity drives huge passive income & bottle cash." },
@@ -159,7 +176,55 @@
   }
   // tier multiplier: tier 0 = 1×, each tier ≈ +60% (so 5 tiers ≈ 10×)
   function tierMul(tier) { return 1 + 0.6 * (tier | 0); }
-  function bizRate(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return b.rate * tierMul(r.tier) * empireSynergy() * tierPerk("passiveMul"); }
+
+  // ---- GIG-COMPANY two-stream model: WORKERS (a hired-driver tier) + REP -----
+  //  WORKERS: each gig company can HIRE NPC drivers (an upgrade track separate
+  //  from biz tier). More drivers = more passive rate (each driver ≈ +14% of base
+  //  rate) and more livery cars gigfleet spawns. Hiring scales in cost.
+  //  REP: a 0..1 brand-health float that DECAYS while you neglect the company
+  //  (no active player gigs) and is RESTORED by running gigs (CBZ.cityGig → the
+  //  gigfleet hook bumps it). Passive rate is multiplied by repMul(rep): a dead
+  //  brand pays a fraction, a hot brand pays full + a little extra. This is the
+  //  Nightclub/Bunker "popularity decays, you must engage" pressure, applied to
+  //  the legit/illegit gig front — the WHY the player keeps hustling personally.
+  const WORKER_MAX = 6;                 // max hired drivers per gig company
+  const WORKER_RATE = 0.14;             // each driver adds this fraction of base rate
+  const REP_DECAY = 1 / 240;            // rep drains ~from full to empty over ~4 min of neglect
+  const REP_FLOOR = 0.15;               // a neglected brand still limps along at 15%
+  function isGig(id) { const b = BIZ_BY_ID[id]; return !!(b && b.gig); }
+  function workerCost(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return Math.round(b.cost * 0.28 * Math.pow(1.55, (r.workers | 0))); }
+  function workerCount(id) { const r = rec(id); return r ? clamp(r.workers | 0, 0, WORKER_MAX) : 0; }
+  function workerMul(id) { return isGig(id) ? 1 + WORKER_RATE * workerCount(id) : 1; }
+  // brand reputation [0..1]; non-gig businesses are always "full" (rep = 1).
+  function bizRep(id) { const r = rec(id); if (!r || !isGig(id)) return 1; if (r.rep == null) r.rep = 1; return clamp(r.rep, 0, 1); }
+  // a faucet multiplier from rep: floor..1.15 (a hot brand slightly over-earns).
+  function repMul(id) { if (!isGig(id)) return 1; return REP_FLOOR + (1 - REP_FLOOR) * bizRep(id) + 0.15 * bizRep(id) * bizRep(id); }
+  // called by gigfleet when the player completes an active gig for a company:
+  // restores brand rep (and a little overshoot that decay then trims back).
+  function bumpRep(id, amt) {
+    const r = rec(id); if (!r || !isGig(id)) return 0;
+    if (r.rep == null) r.rep = 1;
+    r.rep = clamp(r.rep + (amt == null ? 0.34 : amt), 0, 1);
+    persist(); if (open_) render();
+    return r.rep;
+  }
+  function hireWorker(id) {
+    const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return;
+    if (!isGig(id)) { note(b.name + " doesn't run a driver fleet.", 1.8); return; }
+    if ((r.workers | 0) >= WORKER_MAX) { note(b.name + " fleet is fully staffed (" + WORKER_MAX + " drivers).", 1.8); return; }
+    const cost = workerCost(id);
+    if (!canAfford(cost)) { note("⛔ Hiring a driver costs " + money(cost) + ".", 2); sfx("hit"); return; }
+    charge(cost);
+    r.workers = (r.workers | 0) + 1;
+    big("🧑‍✈️ " + b.name + " — hired driver #" + r.workers);
+    note("Fleet now " + r.workers + " driver" + (r.workers === 1 ? "" : "s") + " · output " + money(bizRate(id)) + "/sec. They roll the streets in your livery.", 2.8);
+    sfx("coin");
+    // tell the fleet glue to (re)spawn the right number of livery cars.
+    if (CBZ.cityGigFleet && CBZ.cityGigFleet.sync) try { CBZ.cityGigFleet.sync(id); } catch (e) {}
+    persist(); if (open_) render();
+  }
+
+  function bizRate(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return b.rate * tierMul(r.tier) * workerMul(id) * repMul(id) * empireSynergy() * tierPerk("passiveMul"); }
   function bizCap(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return Math.round(b.cap * tierMul(r.tier)); }
   function upgradeCost(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return Math.round(b.cost * 0.6 * Math.pow(b.upgradeMul, r.tier)); }
   function bizValue(id) {
@@ -194,12 +259,15 @@
     if (ti < (b.minTier || 0)) { note("⛔ " + b.name + " needs " + tierName(b.minTier) + " status to acquire.", 2.4); sfx("hit"); return; }
     if (!canAfford(b.cost)) { note("⛔ Need " + money(b.cost) + " (cash + bank) to acquire " + b.name + ".", 2.4); sfx("hit"); return; }
     charge(b.cost);
-    state().cityEmpireBiz[id] = { tier: 0, supply: 0, lastTick: now() };
+    state().cityEmpireBiz[id] = { tier: 0, supply: 0, lastTick: now(), workers: 0, rep: b.gig ? 1 : undefined };
     const rep = clamp(Math.round(b.cost / 9000), 3, 60);
     if (CBZ.city) CBZ.city.addRespect(rep);
     big(b.emoji + " ACQUIRED " + b.name);
-    note("Now earning " + money(bizRate(id)) + "/sec. Collect from the Empire menu.", 3);
+    note(b.gig ? "Now earning " + money(bizRate(id)) + "/sec. HIRE drivers to scale & run gigs to keep the brand alive."
+               : "Now earning " + money(bizRate(id)) + "/sec. Collect from the Empire menu.", 3);
     sfx("coin");
+    // spin up the fleet glue for a fresh gig company (no-op if absent).
+    if (b.gig && CBZ.cityGigFleet && CBZ.cityGigFleet.sync) try { CBZ.cityGigFleet.sync(id); } catch (e) {}
     persist(); recomputeFlex(); if (open_) render();
   }
   function upgradeBiz(id) {
@@ -524,7 +592,11 @@
     const biz = state().cityEmpireBiz;
     let anyFull = false, autoTotal = 0;
     for (const id in biz) {
-      const r = biz[id]; const rate = bizRate(id), cap = bizCap(id);
+      const r = biz[id];
+      // GIG REP DECAY: neglected gig companies bleed brand reputation every tick,
+      // dragging their passive rate down toward the floor until you run gigs again.
+      if (isGig(id)) { if (r.rep == null) r.rep = 1; r.rep = clamp(r.rep - REP_DECAY * dt, 0, 1); }
+      const rate = bizRate(id), cap = bizCap(id);
       if (rate <= 0) continue;
       // a small slice auto-deposits to cash (passive "safe" earnings); the rest
       // pools as collectable supply (the active money loop).
@@ -625,8 +697,16 @@
         sub = "Pool " + pct + "% of " + money(bizCap(b.id)) + (r.tier < b.maxTier ? " · upgrade " + money(upgradeCost(b.id)) : " · MAXED") +
           (b.launder ? " · 🧺 front" : "") + " · 🛡️" + sl + "/" + SEC_MAX +
           ((g.wanted | 0) >= 3 && raidChance(b.id) > 0 ? " · ⚠️ raid risk " + Math.round(raidChance(b.id) * 100) + "%" : "");
+        // gig company: surface fleet size + brand health (rep) and how it feeds rate.
+        if (b.gig) {
+          const rp = Math.round(bizRep(b.id) * 100);
+          const repCol = rp >= 66 ? "#7ed957" : rp >= 33 ? "#ffd166" : "#ff6b6b";
+          sub += "<br>🧑‍✈️ " + workerCount(b.id) + "/" + WORKER_MAX + " drivers · brand <b style='color:" + repCol + "'>" + rp + "%</b> (×" + repMul(b.id).toFixed(2) + " rate)" +
+            (rp < 50 ? " · ⚠️ run " + (b.gigLabel || "gigs") + " to revive the brand!" : "");
+        }
         const acts = (Math.floor(r.supply) >= 1 ? btn(keyLabel(i), "collect", "#1f4a2a") : "") +
           (r.tier < b.maxTier ? btn("U", "upgrade", "#2a3a4a") : "") +
+          (b.gig && workerCount(b.id) < WORKER_MAX ? btn("H", "hire " + money(workerCost(b.id)), "#1f3a4a") : "") +
           (sl < SEC_MAX ? btn("S", "security " + money(secCost(b.id)), "#2a2a4a") : "");
         right += "<div style='margin-top:3px'>" + acts + "</div>";
       } else {
@@ -710,7 +790,7 @@
     bar += "</div>";
     let body = tab === "biz" ? renderBiz() : tab === "lux" ? renderLux() : tab === "ops" ? renderOps() : renderPerks();
     let foot = "<div style='font-size:11px;color:#8a7d5a;margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
-      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>S</b> security · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
+      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
     el().innerHTML = head + bar + body + foot;
   }
 
@@ -762,6 +842,7 @@
         if (k === "l") { e.preventDefault(); launderAll(); return; }
         if (k === "p") { e.preventDefault(); partySpend(); return; }
         if (k === "u") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && r.tier < b.maxTier) { upgradeBiz(b.id); break; } } return; }
+        if (k === "h") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && b.gig && workerCount(b.id) < WORKER_MAX) { hireWorker(b.id); break; } } return; }
         if (k === "s") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return; }
       }
       // number keys act on the visible list row (0 = the 10th row)
@@ -790,6 +871,8 @@
     open, close, isOpen: () => open_,
     BUSINESSES, LUXURY, OPS, PERKS,
     buyBiz, upgradeBiz, collectBiz, collectAll, bizRate, bizCap, bizValue,
+    // gig two-stream surface (gigfleet.js drives these):
+    isGig, hireWorker, workerCount, workerCost, WORKER_MAX, bizRep, repMul, bumpRep,
     upgradeSecurity, secLevel, secCost, raidChance, resolveRaid, defenseStrength, liveCrew, SEC_MAX,
     buyLux, luxPrice, ownsLux, partySpend, launderAll,
     runOp, opCooldown,

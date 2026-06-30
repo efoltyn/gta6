@@ -246,6 +246,12 @@
 <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
+<!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
+     the terrain builder. BOTH must load before city/world.js runs, since
+     buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
+     CBZ.terrainHeight. terrain.js depends on BufferGeometryUtils (above). -->
+<script src="src/vendor/noise.js"></script>
+<script src="src/world/terrain.js?v=terrain1"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -265,6 +271,7 @@
 
 <!-- 2. world geometry -->
 <script src="src/world/materials.js?v=scale1"></script>
+<script src="src/world/carfx.js?v=carfx1"></script>
 <script src="src/world/ground.js"></script>
 <script src="src/world/cellblock.js"></script>
 <script src="src/world/yard.js"></script>
@@ -388,9 +395,30 @@
 <script src="src/city/citynav.js?v=brains1"></script>
 <script src="src/city/fracture.js?v=ruin1"></script>
 <script src="src/city/elevators.js?v=seein1"></script>
+<script src="src/city/escalators.js?v=esc1"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
 <script src="src/city/beach.js?v=beach1"></script>
 <script src="src/city/expansion.js?v=realcars1"></script>
+<!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
+     MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
+<script src="src/city/worldmap.js?v=arch1"></script>
+<script src="src/city/highways.js?v=hwy1"></script>
+<!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
+     placement + per-biome town generator (loaded before biome/island builders). -->
+<script src="src/city/assets.js?v=sims1"></script>
+<script src="src/city/placement.js?v=sims1"></script>
+<script src="src/city/towngen.js?v=sims1"></script>
+<script src="src/city/island_speedway.js?v=arch1"></script>
+<script src="src/city/island_airport.js?v=arch1"></script>
+<script src="src/city/island_military.js?v=arch1"></script>
+<script src="src/city/biome_desert.js?v=arch1"></script>
+<script src="src/city/biome_forest.js?v=arch1"></script>
+<script src="src/city/biome_farmland.js?v=arch1"></script>
+<script src="src/city/biome_snow.js?v=arch1"></script>
+<!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
+     far backdrop relief (world/terrain.js). Self-registers as a high-order
+     landmass; runs via cityWorldGeo after terrain + biomes exist. -->
+<script src="src/world/wildnature.js?v=wild1"></script>
 <script src="src/city/props.js?v=shoot1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=citysec1"></script>
@@ -461,6 +489,33 @@
 <script src="src/city/wealth.js?v=night1"></script>
 <script src="src/city/turf.js?v=night3"></script>
 <script src="src/city/gangops.js?v=living1"></script>
+<!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
+<script src="src/city/militaryvehicles.js?v=sim1"></script>
+<script src="src/city/squadai.js?v=sim1"></script>
+<script src="src/city/loyalty.js?v=sim1"></script>
+<!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
+<script src="src/city/wallet.js?v=sim2"></script>
+<script src="src/city/housing.js?v=sim2"></script>
+<script src="src/city/citytemplates.js?v=sim2"></script>
+<script src="src/city/minicities.js?v=sim2"></script>
+<script src="src/city/spawnplaces.js?v=sim2"></script>
+<script src="src/city/scenedirector.js?v=sim2"></script>
+<script src="src/city/fracture.js?v=sim2"></script>
+<script src="src/city/crashfx.js?v=sim2"></script>
+<script src="src/city/race_livery.js?v=sim2"></script>
+<script src="src/city/racing.js?v=sim2"></script>
+<!-- 4d-3. this wave's feature modules (load after all deps they read) -->
+<script src="src/city/interactions_rich.js?v=arch1"></script>
+<script src="src/city/captives.js?v=arch1"></script>
+<script src="src/city/millionaires.js?v=arch1"></script>
+<script src="src/city/regionlife.js?v=arch1"></script>
+<script src="src/city/modshop.js?v=veh1"></script>
+<script src="src/city/storage.js?v=veh1"></script>
+<script src="src/city/armor.js?v=armor1"></script>
+<!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
+<script src="src/city/gigs.js?v=gig1"></script>
+<script src="src/city/gigfleet.js?v=gig1"></script>
+<script src="src/city/giglife.js?v=gig1"></script>
 <script src="src/city/hud.js?v=route1"></script>
 <script src="src/city/charpanel.js?v=cp1"></script>
 <script src="src/city/phone.js"></script>

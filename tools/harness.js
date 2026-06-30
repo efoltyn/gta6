@@ -152,7 +152,7 @@ InstancedMesh.prototype.setColorAt = function () { this.instanceColor = this.ins
 const THREE = {
   Group, Mesh, Sprite, Object3D: Obj3D,
   BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CircleGeometry, TorusGeometry,
-  BufferGeometry, Float32BufferAttribute, BufferAttribute, Raycaster, Matrix4, InstancedMesh,
+  BufferGeometry, Float32BufferAttribute, BufferAttribute, InstancedBufferAttribute: BufferAttribute, Raycaster, Matrix4, InstancedMesh,
   DynamicDrawUsage: 35048, StaticDrawUsage: 35044,
   MeshLambertMaterial: Mtl, MeshBasicMaterial: Mtl, MeshStandardMaterial: Mtl, SpriteMaterial: Mtl,
   CanvasTexture: Tex, Texture: Tex, Vector3: V3, Color, Quaternion: Quat, Euler,
@@ -166,7 +166,7 @@ function fakeCanvas() {
     width: 256, height: 64,
     getContext: () => ({
       fillRect() {}, strokeRect() {}, clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, closePath() {},
-      fillText() {}, strokeText() {}, arc() {}, fill() {}, save() {}, restore() {}, translate() {}, rect() {}, clip() {},
+      fillText() {}, strokeText() {}, arc() {}, ellipse() {}, fill() {}, save() {}, restore() {}, translate() {}, rect() {}, clip() {},
       rotate() {}, scale() {}, drawImage() {}, createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }),
       set fillStyle(v) {}, get fillStyle() { return ""; }, set strokeStyle(v) {}, get strokeStyle() { return ""; },
       set font(v) {}, set lineWidth(v) {}, set lineCap(v) {}, set textAlign(v) {}, set textBaseline(v) {},

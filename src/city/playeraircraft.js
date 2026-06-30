@@ -36,6 +36,69 @@
   const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
   const boxGeo = CBZ.boxGeom || function (w, h, d) { return new THREE.BoxGeometry(w, h, d); };
 
+  // ---- NEW MATERIAL API (carfx.js) — fake-reflection env-mapped vehicle mats
+  // for instant shine. Falls back to the flat cached cmat() if carfx hasn't
+  // loaded, so nothing here breaks at worldgen and it auto-upgrades at runtime.
+  // Roles: paint / glass / chrome / metal / rim / tire / lightFront / lightTail
+  // / plastic / interior.
+  function vmat(role, color, opts) {
+    if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
+    return cmat(color != null ? color : 0x808890, opts);
+  }
+
+  // ---- SHAPE HELPER: r128 has NO geometry.vertices[] — sculpt the
+  // position attribute directly, then recompute normals so lighting is right.
+  // taperBox builds a BoxGeometry then scales each vertex's X/Y by a factor that
+  // depends on its Z (z=+halfDepth → nose factor `nz`, z=-halfDepth → tail
+  // factor `tz`), optionally squashing the underside (`belly`<1 narrows the
+  // bottom, rounding the keel). One geometry, one draw call. NOT cached/shared —
+  // each sculpted body is unique, so the disposer (which skips _shared) frees it.
+  function taperBox(w, h, d, opt) {
+    opt = opt || {};
+    const nz = opt.nz != null ? opt.nz : 1;   // X/Y scale at the nose (+Z)
+    const tz = opt.tz != null ? opt.tz : 1;   // X/Y scale at the tail (-Z)
+    const topNarrow = opt.top != null ? opt.top : 1;   // <1 → narrower roofline (rounded canopy/spine)
+    const botNarrow = opt.bot != null ? opt.bot : 1;   // <1 → narrower keel (rounded belly)
+    const segW = opt.segW || 2, segH = opt.segH || 2, segD = opt.segD || 6;
+    const g = new THREE.BoxGeometry(w, h, d, segW, segH, segD);
+    const pos = g.attributes.position;
+    const hd = d / 2, hh = h / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      // longitudinal taper: lerp nose↔tail factor by normalized z (-1..1)
+      const f = z / hd;                                   // -1 (tail) .. +1 (nose)
+      const zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
+      let sx = zt, sy = zt;
+      // vertical profile narrowing toward the top / bottom
+      const vy = hh > 0 ? y / hh : 0;                     // -1 (bottom) .. +1 (top)
+      if (vy > 0) sx *= (1 + (topNarrow - 1) * vy);
+      if (vy < 0) sx *= (1 + (botNarrow - 1) * -vy);
+      pos.setX(i, x * sx);
+      pos.setY(i, y * sy);
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }
+
+  // a single thin tapered rotor blade with a slight droop, rooted at the hub
+  // (origin) and reaching out +X. Reused by both player rotors. Returns a Mesh.
+  function makeBlade(len, mat, droop) {
+    const g = new THREE.BoxGeometry(len, 0.06, 0.34, 6, 1, 1);
+    const pos = g.attributes.position; const hl = len / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const t = (x + hl) / len;                 // 0 at inboard, 1 at tip
+      // taper the chord toward the tip + a gentle downward droop
+      pos.setZ(i, pos.getZ(i) * (1 - 0.45 * t));
+      pos.setY(i, pos.getY(i) - (droop || 0) * t * t);
+    }
+    pos.needsUpdate = true; g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mat);
+    m.position.x = hl;                            // root at origin, blade extends +X
+    return m;
+  }
+
   // ---- tunables (arcade flight — NOT realistic aero) -----------------------
   const JET_PRICE   = 3000000;     // $3M for the F-22
   const CEILING     = 220;         // hard altitude clamp (m)
@@ -65,6 +128,12 @@
   // ---- module state --------------------------------------------------------
   let heli = null;                 // the helicopter craft object (or null)
   let jet = null;                  // the F-22 craft object (or null)
+  // stolenAir: a HOT flyable spawned from a base/airport prop (militaryvehicles.js
+  // CBZ.citySpawnFlyableFromProp). KEPT SEPARATE from the owned heli/jet singletons
+  // so commandeering a base chopper/airliner never clobbers (or launders into) the
+  // penthouse heli or the Raptor — it's a throwaway hot bird that despawns on bail,
+  // exactly like a stolen Raptor that never reached a hangar.
+  let stolenAir = null;
   let G = null;                    // lazy shared geometry/material cache
   let _lastHeliFlag = false, _lastJetFlag = false;   // for ownership-flip detection
   let _hudEl = null;
@@ -90,21 +159,38 @@
   function assets() {
     if (G) return G;
     const shared = (o) => { if (o) o._shared = true; return o; };
+    // every body material is a MODULE-LEVEL SINGLETON reused by every craft, so
+    // flag them _shared — the disposer must NEVER free them (a carfx vehicleMat
+    // may be cache-shared with the cars; freeing it would break them).
     G = {
-      // shared materials (cmat already caches + flags _shared)
-      mBody:   cmat(0x2b3038, { emissive: 0x0c0e12, ei: 0.25 }),
-      mDark:   cmat(0x14171d, { emissive: 0x060708, ei: 0.2 }),
-      mGrey:   cmat(0x6a727c, { emissive: 0x202329, ei: 0.3 }),
-      mGlass:  cmat(0x16242e, { emissive: 0x0a151c, ei: 0.45 }),
-      mJet:    cmat(0x424b58, { emissive: 0x10131a, ei: 0.12 }),
-      mJetDk:  cmat(0x2c333d, { emissive: 0x0a0d12, ei: 0.15 }),
-      mMissile:cmat(0xd8dde4, { emissive: 0x3a3e44, ei: 0.25 }),
-      mWarn:   cmat(0xff5a3a, { emissive: 0xff3018, ei: 0.7 }),
+      // BODY PANELS routed through the new env-mapped vehicle roles → instant
+      // shine (auto-fall back to flat cmat). Player birds get sleek hero colours:
+      // a deep gunmetal-navy chopper, a charcoal stealth-grey jet.
+      mBody:   shared(vmat('paint', 0x2b3340, { emissive: 0x0c0e12, ei: 0.2 })),   // heli fuselage
+      mDark:   shared(vmat('metal', 0x1b1f26, { emissive: 0x060708, ei: 0.15 })),  // skids / booms / dark trim
+      mGrey:   shared(vmat('metal', 0x707884, { emissive: 0x202329, ei: 0.25 })),  // mast / pods / wings
+      mGlass:  shared(vmat('glass', 0x16242e, { emissive: 0x0a151c, ei: 0.4 })),   // canopy glass (reflective)
+      mJet:    shared(vmat('paint', 0x3a414c, { emissive: 0x10131a, ei: 0.1 })),   // jet skin
+      mJetDk:  shared(vmat('metal', 0x262b33, { emissive: 0x0a0d12, ei: 0.12 })),  // chines / nozzles / dark structure
+      mMissile:shared(vmat('chrome', 0xd8dde4, { emissive: 0x3a3e44, ei: 0.2 })),  // missile bodies
+      mWarn:   shared(cmat(0xff5a3a, { emissive: 0xff3018, ei: 0.7 })),            // muzzle / afterburner core (kept hot/flat)
+      // emissive NAV lights — wingtip red (port) / green (stbd), white tail beacon
+      navR:    shared(vmat('lightTail',  0xff2a22, { emissive: 0xff1810, ei: 0.95 })),
+      navG:    shared(cmat(0x18ff3a, { emissive: 0x10ff30, ei: 0.95 })),
+      navW:    shared(vmat('lightFront', 0xffffff, { emissive: 0xeaf4ff, ei: 0.9 })),
       // shared rotor disc (semi-transparent blur) — its own non-cached mat so we
       // can keep it translucent without poisoning cmat's opaque cache
       rotorMat: shared(new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.42, depthWrite: false })),
+      // solid blade material (the real spinning blades read as metal, not blur)
+      bladeMat: shared(vmat('metal', 0x202833, { emissive: 0x080a0e, ei: 0.2 })),
     };
     return G;
+  }
+
+  // tiny emissive nav-light bead
+  function navLight(grp, mat, x, y, z) {
+    const m = new THREE.Mesh(boxGeo(0.16, 0.16, 0.16), mat);
+    m.position.set(x, y, z); grp.add(m); return m;
   }
 
   // a small bright marker at the muzzle so the firing point reads
@@ -121,35 +207,76 @@
   function buildHeli() {
     const a = assets();
     const grp = new THREE.Group();
-    // fuselage (chunky nose-forward body, +Z is forward)
-    const body = new THREE.Mesh(boxGeo(2.2, 1.4, 4.6), a.mBody); body.position.y = 0.2; grp.add(body);
-    const nose = new THREE.Mesh(boxGeo(1.7, 1.0, 1.4), a.mBody); nose.position.set(0, 0.05, 2.6); grp.add(nose);
-    // canopy glass
-    const canopy = new THREE.Mesh(boxGeo(1.5, 0.85, 1.7), a.mGlass); canopy.position.set(0, 0.5, 1.7); grp.add(canopy);
-    // tail boom + fin
-    const boom = new THREE.Mesh(boxGeo(0.42, 0.42, 3.4), a.mBody); boom.position.set(0, 0.45, -3.6); grp.add(boom);
-    const fin = new THREE.Mesh(boxGeo(0.2, 1.1, 0.7), a.mBody); fin.position.set(0, 0.9, -5.2); grp.add(fin);
-    // skids
-    [-0.95, 0.95].forEach((sx) => {
-      const skid = new THREE.Mesh(boxGeo(0.16, 0.16, 3.4), a.mDark); skid.position.set(sx, -1.0, 0.1); grp.add(skid);
-      const strut1 = new THREE.Mesh(boxGeo(0.14, 0.7, 0.14), a.mDark); strut1.position.set(sx, -0.55, 1.0); grp.add(strut1);
-      const strut2 = new THREE.Mesh(boxGeo(0.14, 0.7, 0.14), a.mDark); strut2.position.set(sx, -0.55, -1.0); grp.add(strut2);
+    // ROUNDED FUSELAGE (+Z forward): a single sculpted body — the box's nose pinches
+    // in (nz<1), the tail necks down into the boom (tz small), the roofline narrows
+    // (top<1) and the keel rounds (bot<1). One draw call, real curvature.
+    const body = new THREE.Mesh(taperBox(2.25, 1.5, 5.0, { nz: 0.62, tz: 0.34, top: 0.7, bot: 0.62, segD: 8 }), a.mBody);
+    body.position.y = 0.18; grp.add(body);
+    // soft chin/nose cap blending the front (rounded, slightly dropped)
+    const nose = new THREE.Mesh(taperBox(1.5, 1.0, 1.5, { nz: 0.35, tz: 1.0, top: 0.7, bot: 0.6 }), a.mBody);
+    nose.position.set(0, 0.02, 2.5); grp.add(nose);
+    // BUBBLE CANOPY — reflective glass, domed (narrows top & nose) wrapping the cockpit
+    const canopy = new THREE.Mesh(taperBox(1.55, 1.0, 2.1, { nz: 0.55, tz: 0.85, top: 0.4, bot: 1.0 }), a.mGlass);
+    canopy.position.set(0, 0.52, 1.55); grp.add(canopy);
+    // SLEEKER TAIL BOOM — long, tapering thinner toward the tail rotor
+    const boom = new THREE.Mesh(taperBox(0.5, 0.5, 4.2, { nz: 1.0, tz: 0.5, top: 0.85, bot: 0.85 }), a.mBody);
+    boom.position.set(0, 0.5, -3.5); grp.add(boom);
+    // swept vertical fin at the tail + a small horizontal stabiliser
+    const fin = new THREE.Mesh(taperBox(0.18, 1.25, 0.95, { tz: 0.5, top: 0.55 }), a.mDark); fin.position.set(0, 0.95, -5.05); fin.rotation.x = 0.12; grp.add(fin);
+    const stab = new THREE.Mesh(boxGeo(1.5, 0.1, 0.55), a.mDark); stab.position.set(0, 0.55, -4.7); grp.add(stab);
+    // ROUNDED SKIDS: a tapered tube with up-swept ends + a faired cross-tube to the belly
+    [-0.92, 0.92].forEach((sx) => {
+      const skid = new THREE.Mesh(taperBox(0.18, 0.18, 3.6, { nz: 0.5, tz: 0.5, top: 0.8, bot: 0.8 }), a.mDark);
+      skid.position.set(sx, -1.0, 0.05); grp.add(skid);
+      [1.0, -1.0].forEach((sz) => {
+        const strut = new THREE.Mesh(taperBox(0.16, 0.72, 0.16, { top: 0.7 }), a.mGrey);
+        strut.position.set(sx * 0.85, -0.56, sz); strut.rotation.z = sx > 0 ? -0.18 : 0.18; grp.add(strut);
+      });
     });
-    // stub wings + missile pods (so missiles read as "from the pods/nose")
-    const wing = new THREE.Mesh(boxGeo(3.4, 0.18, 0.8), a.mGrey); wing.position.set(0, 0.0, 0.4); grp.add(wing);
-    [-1.6, 1.6].forEach((px) => {
-      const pod = new THREE.Mesh(boxGeo(0.5, 0.5, 1.7), a.mDark); pod.position.set(px, -0.15, 0.4); grp.add(pod);
+    // stub weapon wings (roots buried in the body) + faired missile pods under them
+    const wing = new THREE.Mesh(taperBox(3.7, 0.2, 0.95, { nz: 0.85, tz: 0.7 }), a.mGrey); wing.position.set(0, 0.02, 0.4); grp.add(wing);
+    [-1.58, 1.58].forEach((px) => {
+      const pod = new THREE.Mesh(taperBox(0.52, 0.52, 1.9, { nz: 0.35, tz: 0.6, top: 0.8, bot: 0.8 }), a.mDark);
+      pod.position.set(px, -0.2, 0.4); grp.add(pod);
     });
-    // MAIN ROTOR (spins about Y) on a mast
-    const mast = new THREE.Mesh(boxGeo(0.22, 0.5, 0.22), a.mDark); mast.position.y = 1.1; grp.add(mast);
-    const rotor = new THREE.Mesh(boxGeo(9.2, 0.07, 0.6), a.rotorMat); rotor.position.y = 1.4; grp.add(rotor);
-    const rotor2 = new THREE.Mesh(boxGeo(0.6, 0.07, 9.2), a.rotorMat); rotor2.position.y = 1.4; grp.add(rotor2);
-    // TAIL ROTOR (spins about X)
-    const trotor = new THREE.Mesh(boxGeo(0.07, 1.8, 0.3), a.rotorMat); trotor.position.set(0.22, 0.9, -5.4); grp.add(trotor);
-    const trotor2 = new THREE.Mesh(boxGeo(0.07, 0.3, 1.8), a.rotorMat); trotor2.position.set(0.22, 0.9, -5.4); grp.add(trotor2);
+    // MAIN ROTOR (spins about Y) — visible hub + a translucent blur disc + TWO bars
+    // of real tapered/drooped blades. rotor & rotor2 are Groups (each a 2-blade bar
+    // crossing the hub) so a .rotation.y still spins them exactly as before.
+    const mast = new THREE.Mesh(taperBox(0.26, 0.55, 0.26, { top: 0.6 }), a.mDark); mast.position.y = 1.12; grp.add(mast);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, 0.26, 8), a.mGrey); hub.position.y = 1.42; grp.add(hub);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(4.7, 20), a.rotorMat); disc.rotation.x = -Math.PI / 2; disc.position.y = 1.45; grp.add(disc);
+    function bladeBar() {
+      const bar = new THREE.Group(); bar.position.y = 1.44;
+      bar.add(makeBlade(4.6, a.bladeMat, 0.16));        // blade extends +X from hub
+      // opposite blade: wrap a +X blade in a group rotated PI about the HUB origin
+      // (rotating the blade mesh itself wouldn't flip it — its pivot is offset)
+      const opp = new THREE.Group(); opp.rotation.y = Math.PI; opp.add(makeBlade(4.6, a.bladeMat, 0.16)); bar.add(opp);
+      return bar;
+    }
+    const rotor = bladeBar(); grp.add(rotor);
+    const rotor2 = bladeBar(); rotor2.rotation.y = Math.PI / 2; grp.add(rotor2);   // crossed → 4-blade look
+    // TAIL ROTOR (spins about X) — hub + two crossed bars of small blades on the fin
+    const thub = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 6), a.mGrey); thub.rotation.z = Math.PI / 2; thub.position.set(0.24, 0.9, -5.45); grp.add(thub);
+    function tailBar() {
+      const bar = new THREE.Group(); bar.position.set(0.24, 0.9, -5.45);
+      [-1, 1].forEach((s) => {
+        const bg = new THREE.BoxGeometry(0.05, 0.92, 0.22, 1, 4, 1);
+        const pos = bg.attributes.position;
+        for (let i = 0; i < pos.count; i++) { const ty = pos.getY(i); pos.setZ(i, pos.getZ(i) * (1 - 0.4 * Math.abs(ty) / 0.46)); }
+        pos.needsUpdate = true; bg.computeVertexNormals();
+        const bl = new THREE.Mesh(bg, a.bladeMat); bl.position.y = s * 0.46; bar.add(bl);
+      });
+      return bar;
+    }
+    const trotor = tailBar(); grp.add(trotor);
+    const trotor2 = tailBar(); trotor2.rotation.x = Math.PI / 2; grp.add(trotor2);
     grp.userData.rotor = rotor; grp.userData.rotor2 = rotor2;
     grp.userData.trotor = trotor; grp.userData.trotor2 = trotor2;
-    // nose muzzle
+    // NAV LIGHTS: port wingtip red, stbd wingtip green, white tail beacon
+    navLight(grp, a.navR, -1.85, 0.05, 0.4);
+    navLight(grp, a.navG,  1.85, 0.05, 0.4);
+    navLight(grp, a.navW,  0, 1.55, -5.15);
+    // nose muzzle (unchanged firing point + marker)
     addMuzzle(grp, 0, -0.1, 3.4);
     grp.userData.belly = 1.2;                // how far the skids hang below the origin
     return grp;
@@ -159,45 +286,71 @@
   function buildJet() {
     const a = assets();
     const grp = new THREE.Group();
-    // sleek body (+Z forward)
-    const body = new THREE.Mesh(boxGeo(1.5, 1.0, 8.6), a.mJet); grp.add(body);
-    // angular nose cone
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.8, 4), a.mJet);
-    nose.rotation.x = -Math.PI / 2; nose.rotation.z = Math.PI / 4; nose.position.z = 5.4; grp.add(nose);
-    // raked canopy
-    const canopy = new THREE.Mesh(boxGeo(0.95, 0.7, 2.2), a.mGlass); canopy.position.set(0, 0.55, 1.9); grp.add(canopy);
-    // chined forebody (the angular shoulders)
+    // SLEEK SCULPTED FUSELAGE (+Z forward): the spine everything plugs into. The
+    // box pinches to a sharp nose (nz small), necks down at the tail, narrows the
+    // spine (top) and rounds the belly (bot) — one curved draw call, no seams.
+    const body = new THREE.Mesh(taperBox(1.55, 1.05, 8.8, { nz: 0.22, tz: 0.62, top: 0.72, bot: 0.62, segD: 10 }), a.mJet);
+    grp.add(body);
+    // a fine needle nose tip extending the taper to a point (radar boom feel)
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.3, 8), a.mJetDk);
+    tip.rotation.x = -Math.PI / 2; tip.position.set(0, -0.02, 4.85); grp.add(tip);
+    // REFLECTIVE BUBBLE CANOPY — domed, raked, narrows toward the nose & top
+    const canopy = new THREE.Mesh(taperBox(0.9, 0.62, 2.4, { nz: 0.45, tz: 0.95, top: 0.45, bot: 1.0 }), a.mGlass);
+    canopy.position.set(0, 0.5, 1.85); grp.add(canopy);
+    // chined forebody shoulders (LERX) — angular blends overlapping the body sides
     [-1, 1].forEach((s) => {
-      const chine = new THREE.Mesh(boxGeo(1.0, 0.4, 4.0), a.mJetDk);
-      chine.position.set(s * 0.9, -0.1, 2.0); chine.rotation.y = s * 0.12; grp.add(chine);
+      const chine = new THREE.Mesh(taperBox(1.1, 0.4, 4.4, { nz: 0.25, tz: 0.85, top: 0.7 }), a.mJetDk);
+      chine.position.set(s * 0.78, -0.12, 1.9); chine.rotation.y = s * 0.12; grp.add(chine);
     });
-    // delta wings (swept, wide)
+    // side air intakes hugging the lower fuselage
     [-1, 1].forEach((s) => {
-      const wing = new THREE.Mesh(boxGeo(4.2, 0.16, 3.4), a.mJet);
-      wing.position.set(s * 2.6, -0.2, -0.6); wing.rotation.y = s * 0.34; grp.add(wing);
-      // under-wing missile
-      const msl = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 1.8, 6), a.mMissile);
-      msl.rotation.x = Math.PI / 2; msl.position.set(s * 2.2, -0.45, 0.2); grp.add(msl);
+      const intake = new THREE.Mesh(taperBox(0.5, 0.62, 2.0, { nz: 0.7, tz: 1.0, top: 0.7 }), a.mJetDk);
+      intake.position.set(s * 0.82, -0.18, 0.7); grp.add(intake);
     });
-    // twin canted vertical tails
+    // CLEAN DELTA WINGS (swept, tapered) with a touch of DIHEDRAL (tips raised).
+    // Roots driven through the fuselage; each wing tapers toward the tip + carries
+    // a pylon + a real-looking missile (nose cone + body + tail fins) underneath.
     [-1, 1].forEach((s) => {
-      const tail = new THREE.Mesh(boxGeo(0.16, 1.5, 1.6), a.mJet);
-      tail.position.set(s * 0.9, 0.8, -3.4); tail.rotation.z = s * 0.32; grp.add(tail);
+      const wing = new THREE.Mesh(taperBox(4.7, 0.16, 3.5, { nz: 0.35, tz: 0.78, top: 1, bot: 1, segW: 4 }), a.mJet);
+      wing.position.set(s * 2.45, -0.16, -0.6); wing.rotation.y = s * 0.34; wing.rotation.z = s * -0.07; grp.add(wing);
+      // pylon
+      const pylon = new THREE.Mesh(boxGeo(0.14, 0.26, 1.1), a.mJetDk); pylon.position.set(s * 2.25, -0.34, 0.1); grp.add(pylon);
+      // under-wing missile (cone tip + chrome body + 4 tail fins) — reads as ordnance
+      const msl = new THREE.Group(); msl.position.set(s * 2.25, -0.52, 0.1);
+      const mb = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 1.7, 8), a.mMissile); mb.rotation.x = Math.PI / 2; msl.add(mb);
+      const mc = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.5, 8), a.mMissile); mc.rotation.x = -Math.PI / 2; mc.position.z = 1.1; msl.add(mc);
+      [0, 1].forEach((f) => {
+        const fin = new THREE.Mesh(boxGeo(0.62, 0.04, 0.34), a.mJetDk);   // a fin plate across the tail
+        fin.position.z = -0.72; fin.rotation.z = f * Math.PI / 2; msl.add(fin);   // f=0 horiz pair, f=1 vert → cruciform
+      });
+      grp.add(msl);
     });
-    // horizontal stabs
+    // twin canted vertical tails — tapered, bases sunk into the aft deck
     [-1, 1].forEach((s) => {
-      const stab = new THREE.Mesh(boxGeo(2.2, 0.12, 1.4), a.mJet);
-      stab.position.set(s * 1.6, -0.1, -3.8); grp.add(stab);
+      const tail = new THREE.Mesh(taperBox(0.16, 1.6, 1.8, { nz: 0.7, tz: 0.45, top: 0.5 }), a.mJet);
+      tail.position.set(s * 0.78, 0.68, -3.4); tail.rotation.z = s * 0.32; grp.add(tail);
     });
-    // twin exhaust nozzles + afterburner glow
+    // horizontal stabilators — tapered, inboard ends buried in the rear fuselage
+    [-1, 1].forEach((s) => {
+      const stab = new THREE.Mesh(taperBox(2.6, 0.12, 1.5, { nz: 0.4, tz: 0.7 }), a.mJet);
+      stab.position.set(s * 1.45, -0.1, -3.8); stab.rotation.y = s * 0.12; grp.add(stab);
+    });
+    // AFTERBURNER CANS: twin nozzles flaring out of the tail + the hot glow plume
     [-0.5, 0.5].forEach((s) => {
-      const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 0.8, 8), a.mJetDk);
-      noz.rotation.x = Math.PI / 2; noz.position.set(s, -0.05, -4.4); grp.add(noz);
+      const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 1.1, 12), a.mJetDk);
+      noz.rotation.x = Math.PI / 2; noz.position.set(s, -0.05, -4.35); grp.add(noz);
+      // dark inner can mouth
+      const mouth = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.2, 12), a.mDark);
+      mouth.rotation.x = Math.PI / 2; mouth.position.set(s, -0.05, -4.85); grp.add(mouth);
     });
-    const burn = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), a.mWarn);
+    const burn = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), a.mWarn);
     burn.scale.set(0.7, 0.7, 1.6); burn.position.set(0, -0.05, -5.0); grp.add(burn);
     grp.userData.burn = burn;
-    // nose muzzle
+    // NAV LIGHTS: port wingtip red, stbd wingtip green, white tailfin beacon
+    navLight(grp, a.navR, -2.7, 0.0, -1.4);
+    navLight(grp, a.navG,  2.7, 0.0, -1.4);
+    navLight(grp, a.navW,  0, 1.4, -3.9);
+    // nose muzzle (unchanged firing point + marker)
     addMuzzle(grp, 0, 0, 5.6);
     grp.userData.belly = 0.6;
     return grp;
@@ -273,6 +426,66 @@
   // expose for realestate / worldgen to nudge a re-place on ownership change
   CBZ.cityPlayerAircraftRefresh = refreshFleet;
 
+  // ---- STEAL-TO-KEEP: spawn a HOT F-22 at (x,z) and board it immediately.
+  // This is the trophy you risk your life for at the military base. It's marked
+  // craft.hot=true: a hot jet is NOT yours yet — eject/die/leave and it despawns
+  // (see the keep-gate + hot cleanup in onUpdate(12)). Land it inside an OWNED
+  // hangar to launder it into a permanent g.cityOwnsJet. Storage.js calls this
+  // both for the base steal AND when retrieving an already-kept jet from storage
+  // (pass {owned:true} so it spawns already-yours, not hot).
+  function spawnStolenJet(x, z, heading, opts) {
+    opts = opts || {};
+    const root = arenaRoot(); if (!root) return null;
+    // if a hot/parked jet object already exists and isn't being flown, recycle it
+    if (jet && _aircraftFlying() !== jet) { disposeGroup(jet.group); jet = null; }
+    const craft = makeCraft("jet"); if (!craft) return null;
+    jet = craft;
+    const gy = floorY(x, z);
+    craft.pos.set(x, gy + craft.belly + GROUND_PAD, z);
+    craft.heading = (heading || 0); craft.pitch = 0; craft.roll = 0;
+    craft.vx = craft.vy = craft.vz = 0; craft.speed = JET_MIN;
+    craft.group.position.copy(craft.pos);
+    craft.group.rotation.set(0, craft.heading, 0);
+    craft.hot = !opts.owned;          // owned retrieval spawns already-yours
+    enterAircraft(craft);
+    return craft;
+  }
+  CBZ.citySpawnStolenJet = spawnStolenJet;
+
+  // ---- STEAL A FLYABLE FROM A PARKED PROP — the entry militaryvehicles.js calls
+  // when you commandeer a base helicopter or an airport/airliner/private jet.
+  // We spawn a REAL player-flyable (so it gets rotors, missiles, the chase cam,
+  // the ceiling/ground clamp) at the prop's spot + heading and board it. It's
+  // HOT (craft.hot=true): bail/die/leave and it's impounded — you don't keep base
+  // hardware for free. WHY a flyable stand-in instead of animating the static
+  // island prop: the parked island models have no flight rig — reusing the proven
+  // makeCraft heli/jet gives honest, weaponised flight with zero new sim. We store
+  // it in the SEPARATE `stolenAir` slot so the owned heli/Raptor are untouched.
+  // rec.kind 'heli' → the missile chopper; anything else ('plane') → the jet.
+  function spawnFlyableFromProp(rec) {
+    if (!rec || !rec.pos) return null;
+    const root = arenaRoot(); if (!root) return null;
+    if (CBZ.player && CBZ.player._aircraft) return null;       // already airborne
+    const kind = rec.kind === "heli" ? "heli" : "jet";
+    // recycle a prior stolen bird if it's lying around un-flown
+    if (stolenAir && _aircraftFlying() !== stolenAir) { disposeGroup(stolenAir.group); stolenAir = null; }
+    const craft = makeCraft(kind); if (!craft) return null;
+    stolenAir = craft;
+    const heading = rec.heading != null ? rec.heading : 0;
+    const gy = floorY(rec.pos.x, rec.pos.z);
+    craft.pos.set(rec.pos.x, gy + craft.belly + GROUND_PAD, rec.pos.z);
+    craft.heading = heading; craft.pitch = 0; craft.roll = 0;
+    craft.vx = craft.vy = craft.vz = 0;
+    craft.speed = kind === "jet" ? JET_MIN : 0;
+    craft.group.position.copy(craft.pos);
+    craft.group.rotation.set(0, craft.heading, 0);
+    craft.hot = true;                                          // never keepable: a base bird, not yours
+    craft.fromProp = true;                                    // so the keep-gate ignores it (only the Raptor launders)
+    enterAircraft(craft);
+    return craft;
+  }
+  CBZ.citySpawnFlyableFromProp = spawnFlyableFromProp;
+
   // ============================================================
   //  ENTER / EXIT (the vehicles.js board pattern)
   // ============================================================
@@ -304,11 +517,42 @@
     return true;
   }
 
+  // ---- HOT-JET CLEANUP: a stolen jet you haven't KEPT yet vanishes the moment
+  // you stop flying it (eject/die/leave). You can't park a hot bird and walk off
+  // with it for free — it must be laundered through an owned hangar first. Only
+  // touches the module `jet` when it IS the hot craft; never disposes a kept one.
+  function despawnHotJet(craft) {
+    if (!craft || !craft.hot) return false;
+    // null whichever module slot held it so we never dispose a kept craft. A
+    // prop-sourced bird lives in `stolenAir`; the base Raptor lives in `jet`.
+    if (stolenAir === craft) { disposeGroup(stolenAir.group); stolenAir = null; }
+    else if (jet === craft) { disposeGroup(jet.group); jet = null; }
+    else disposeGroup(craft.group);
+    if (CBZ.city && CBZ.city.note) {
+      // a commandeered base machine is impounded; only the Raptor talks hangars.
+      CBZ.city.note(craft.fromProp
+        ? "The commandeered aircraft was impounded — military hardware doesn't stay yours."
+        : "The stolen F-22 was impounded — you never got it to a hangar.", 2.6);
+    }
+    return true;
+  }
+
   function exitAircraft() {
     const P = CBZ.player; if (!P) return;
     const craft = P._aircraft;
     P.driving = false; P._aircraft = null;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = true;
+    // ejecting from a still-HOT stolen jet loses it (you didn't keep it)
+    if (craft && craft.hot) {
+      if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !P.dead;
+      const gy = floorY(craft.pos.x, craft.pos.z);
+      P.pos.set(craft.pos.x, Math.max(gy, gy), craft.pos.z);
+      P.vy = 0; P.grounded = true;
+      if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
+      despawnHotJet(craft);
+      if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+      return;
+    }
     if (craft) {
       // settle the craft flat where it is, then drop the player onto the surface
       // beside it, never through the ground
@@ -343,35 +587,41 @@
     const hw = (h.w || 10) / 2 + 4, hd = (h.d || 10) / 2 + 4;
     return Math.abs(x - h.x) <= hw && Math.abs(z - h.z) <= hd;
   }
-  function tryBuyJet() {
-    if (g.cityOwnsJet) return false;
-    if (!g.cityOwnsHangar) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Buy the HANGAR at the penthouse first — then the F-22 is yours to buy here.", 2.8);
-      return false;
+  // Is (x,z) inside an OWNED hangar's keep-zone? Two sources: the penthouse deck
+  // hangar (g.cityOwnsHangar) and any hangar bought through storage.js (which
+  // exposes CBZ.cityStorageHangarHit — feature-detected). Either one keeps a
+  // stolen jet. A roomier radius than atHangar so a fast jet doesn't skip past it.
+  function hangarKeepHit(x, z) {
+    if (g.cityOwnsHangar) {
+      const t = tower(); const h = t && t.hangar;
+      if (h) {
+        const hw = (h.w || 10) / 2 + 7, hd = (h.d || 10) / 2 + 7;
+        if (Math.abs(x - h.x) <= hw && Math.abs(z - h.z) <= hd) return true;
+      }
     }
-    const total = (g.cash || 0) + (g.cityBank || 0);
-    if (total < JET_PRICE) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("The F-22 RAPTOR costs $" + (JET_PRICE / 1e6).toFixed(0) + "M (cash+bank). Keep grinding.", 2.8);
-      return false;
-    }
-    // charge cash first, then bank — mirror the home/hangar buy
-    let owe = JET_PRICE;
-    if (CBZ.city && CBZ.city.spend && (g.cash || 0) >= owe) {
-      CBZ.city.spend(owe); owe = 0;
-    } else {
-      const fromCash = Math.min(g.cash || 0, owe); g.cash = (g.cash || 0) - fromCash; owe -= fromCash;
-      if (owe > 0) g.cityBank = Math.max(0, (g.cityBank || 0) - owe);
-      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-    }
-    g.cityOwnsJet = true;
-    placeJet();
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 THE RAPTOR IS YOURS");
-    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(40);
-    // (no second toast — the big + the jet sitting on your deck carry it)
-    return true;
+    if (CBZ.cityStorageHangarHit) { try { if (CBZ.cityStorageHangarHit(x, z)) return true; } catch (e) {} }
+    return false;
   }
-  CBZ.cityBuyJet = tryBuyJet;
+  // Do you OWN a hangar anywhere? Either the penthouse deck hangar, or the
+  // airport Private Hangar bought through the [G] storage menu. Feature-detected.
+  function ownsAnyHangar() {
+    if (g.cityOwnsHangar) return true;
+    try { if (CBZ.cityStorage && CBZ.cityStorage.owns && CBZ.cityStorage.owns("hangar")) return true; } catch (e) {}
+    return false;
+  }
+  // THE F-22 CANNOT BE BOUGHT. It's a trophy you STEAL from the military base
+  // (storage.js boards the parked base jet → CBZ.citySpawnStolenJet) and KEEP by
+  // landing it in a hangar you own (the keep-gate in onUpdate(12) sets
+  // g.cityOwnsJet). This stub stays as the old name so any caller degrades into
+  // the steal-it notice instead of a money buy. WHY: a $3M button made the apex
+  // jet just another purchase; risking your life to lift it off a 4★ base and
+  // sweating it back to your hangar is the felt earn.
+  function jetNotBuyable() {
+    if (g.cityOwnsJet) { if (CBZ.city && CBZ.city.note) CBZ.city.note("The F-22 is already yours — it's in your hangar.", 2.4); return false; }
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("The F-22 can't be bought — steal it from the military base and land it in a hangar you own.", 3.4);
+    return false;
+  }
+  CBZ.cityBuyJet = jetNotBuyable;
 
   // ============================================================
   //  INPUT — [F] board/eject + buy, [B] also buys at the hangar
@@ -390,9 +640,10 @@
       const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
       if (c) { e.preventDefault(); enterAircraft(c); }
     } else if (k === "b") {
-      // buy the F-22 when standing at the hangar
+      // the F-22 is no longer buyable here — at the hangar without one, point the
+      // player at the steal-it path (storage.js owns the actual theft).
       if (!P._aircraft && !P.driving && !g.cityOwnsJet && atHangar(P.pos.x, P.pos.z)) {
-        e.preventDefault(); tryBuyJet();
+        e.preventDefault(); jetNotBuyable();
       }
     }
   });
@@ -568,13 +819,27 @@
     const P = CBZ.player;
     const craft = P && P._aircraft;
     if (!craft || P.dead) {
-      // dead while flying → eject so death.js takes over on the ground
+      // dead while flying → eject so death.js takes over on the ground. A hot
+      // stolen jet is lost on death (exitAircraft despawns it).
       if (craft && P && P.dead) exitAircraft();
       return;
     }
     if (craft.fireCD > 0) craft.fireCD = Math.max(0, craft.fireCD - dt);
     if (craft.kind === "jet") flyJet(craft, dt); else flyHeli(craft, dt);
     integrate(craft, dt);
+    // ---- KEEP-GATE: land a HOT stolen F-22 inside a hangar you OWN, slow, and
+    // it becomes permanently yours. This is the only way to keep the trophy.
+    if (craft.hot && !craft.fromProp && craft.kind === "jet" && craft.speed < 16 && hangarKeepHit(craft.pos.x, craft.pos.z)) {
+      craft.hot = false;
+      g.cityOwnsJet = true;
+      _lastJetFlag = true;
+      if (CBZ.cityClearWanted) CBZ.cityClearWanted();
+      else if (CBZ.city && CBZ.city.clearWanted) CBZ.city.clearWanted();
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 THE RAPTOR IS YOURS");
+      if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(60);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+    }
     // own the player transform so physics.js (which bails on P.driving) and the
     // chase-cam (which follows player.pos) both track the aircraft
     P.pos.set(craft.pos.x, craft.pos.y, craft.pos.z);
@@ -661,9 +926,13 @@
     const x = P.pos.x, z = P.pos.z;
     const c = nearestBoardable(x, z, 6.5);
     if (c) { showPrompt("[F] Fly the " + (c.kind === "jet" ? "F-22 RAPTOR" : "Missile Heli")); return; }
-    if (!g.cityOwnsJet && atHangar(x, z)) {
-      if (g.cityOwnsHangar) showPrompt("[B] Buy the F-22 RAPTOR — $" + (JET_PRICE / 1e6).toFixed(0) + "M");
-      else showPrompt("Buy the HANGAR at the penthouse to unlock the F-22");
+    // A correct, in-place note ONLY when you're standing AT a hangar you OWN
+    // (penthouse deck OR the airport Private Hangar) but haven't bagged the jet
+    // yet — it tells you the next step. No persistent nag for the unowned case:
+    // the way to GET a hangar lives in the [P] phone / [G] storage menu, not a
+    // sticky on-screen prompt.
+    if (!g.cityOwnsJet && atHangar(x, z) && ownsAnyHangar()) {
+      showPrompt("Empty hangar — STEAL an F-22 from the military base & land it here to keep it");
       return;
     }
     hidePrompt();
@@ -700,6 +969,7 @@
     if (P && CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !P.dead;
     disposeGroup(heli && heli.group); heli = null;
     disposeGroup(jet && jet.group); jet = null;
+    disposeGroup(stolenAir && stolenAir.group); stolenAir = null;   // hot prop-bird never persists
     g.cityOwnsJet = false;          // heli/hangar flags belong to realestate's reset
     _lastHeliFlag = false; _lastJetFlag = false;
     hideHud(); hidePrompt();

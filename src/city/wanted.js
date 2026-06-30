@@ -81,6 +81,7 @@
     "robbery":           { stars: 2, label: "Robbery" },
     "burglary":          { stars: 2, label: "Burglary" },
     "kidnapping":        { stars: 3, label: "Kidnapping" },
+    "grand-theft-aircraft":{ stars: 4, label: "Stolen Military Aircraft" },
     "escaped-convict":   { stars: 3, label: "Escaped Convict" },
     "assault-officer":   { stars: 3, label: "Assaulting an Officer" },
     "murder":            { stars: 3, label: "Murder", kill: true },

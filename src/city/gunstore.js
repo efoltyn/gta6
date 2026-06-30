@@ -182,6 +182,13 @@
     if (ammo.tag) { ammo.tag.position.set(ax, 1.15, az); group.add(ammo.tag); }
     S.slots.push(ammo);
 
+    // ---- THE ARMOR RACK (a mannequin row at the OTHER end of the counter) ----
+    // WHY: a gun store IS where you walk in unarmored and walk out plated — the
+    // non-violent path to body armor (the violent path: peel a SWAT vest off a
+    // corpse). Kits come from armor.js (CBZ.ARMOR_KITS); equipping routes through
+    // CBZ.cityEquipArmor. swatVest is OMITTED on purpose — police issue, LOOT-ONLY.
+    buildArmorRack(group, m, C, longLen);
+
     // ---- THE DEMOLITION END (past the ammo crates): a frag crate + a C4
     //      satchel. Consumables sold by COUNT exactly like the Ammo Box —
     //      the throw lives in city/combat.js ([G]) and the plant/detonate in
@@ -218,6 +225,62 @@
     }
   }
 
+  // which kits the store SELLS, in display order. swatVest is intentionally NOT
+  // here — it's police issue, taken off a dead SWAT (the loot-only why). Prices
+  // come from cityEcon if the kit name is registered there; else a sane default.
+  const ARMOR_FOR_SALE = [
+    { kit: "softVest",     label: "Kevlar Vest",    price: 450,  color: "#9fe0ff" },
+    { kit: "plateCarrier", label: "Plate Carrier",  price: 2400, color: "#ffd166" },
+    { kit: "helmet",       label: "Combat Helmet",  price: 600,  color: "#9fe0ff" },
+  ];
+  function armorKit(id) { return (CBZ.ARMOR_KITS && CBZ.ARMOR_KITS[id]) || null; }
+  function armorPrice(spec) {
+    const e = econ();
+    const kit = armorKit(spec.kit);
+    if (kit && (kit.price | 0) > 0) return kit.price | 0;                 // kit may carry its own price
+    if (e && e.ITEMS && e.ITEMS[spec.label] && e.buyPrice) { const p = e.buyPrice(spec.label); if (p) return p; }
+    return spec.price;
+  }
+
+  // a small armored-mannequin row past the ammo crates (counter's far + tangent
+  // end). Each kit that actually EXISTS in CBZ.ARMOR_KITS gets a torso block +
+  // (for the helmet) a head dome + a price tag; missing kits are skipped so the
+  // store degrades gracefully if armor.js never loaded.
+  function buildArmorRack(group, m, C, longLen) {
+    const kits = CBZ.ARMOR_KITS;
+    if (!kits) return;                                       // armor.js absent — no rack, no crash
+    const sells = ARMOR_FOR_SALE.filter((sp) => armorKit(sp.kit));
+    if (!sells.length) return;
+    // mannequins sit at the - tangent end (ammo/explosives took the + end)
+    const baseOff = -(longLen / 2 + 0.7);
+    const vestMat = m.armorVest || (m.armorVest = (function () {
+      const mm = new THREE.MeshLambertMaterial({ color: 0x2c3340 }); mm._shared = true; return mm;
+    })());
+    sells.forEach((sp, i) => {
+      const off = baseOff - i * 0.9;
+      const x = C.x + C.tx * off, z = C.z + C.tz * off;
+      const isHelmet = (armorKit(sp.kit) || {}).slot === "helmet" || sp.kit === "helmet";
+      // a stubby torso plate; the helmet kit gets a dome on a short post instead
+      if (isHelmet) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.9, 0.12), m.board);
+        post.position.set(x, 0.45, z); post.castShadow = false; group.add(post);
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 8, 0, Math.PI * 2, 0, Math.PI / 1.7), vestMat);
+        dome.position.set(x, 1.02, z); dome.castShadow = false; group.add(dome);
+      } else {
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.78, 0.32), vestMat);
+        torso.position.set(x, 0.95, z); torso.castShadow = false; group.add(torso);
+        const stand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.55, 0.1), m.board);
+        stand.position.set(x, 0.3, z); stand.castShadow = false; group.add(stand);
+      }
+      const slot = { name: sp.label, armor: true, kit: sp.kit, price: sp.price,
+                     sold: false, x: x, y: isHelmet ? 1.02 : 0.95, z: z, reach: CASE_REACH, dot: CASE_DOT };
+      const price = armorPrice(sp);
+      slot.tag = tagSprite(sp.label + " · " + fmt$(price), sp.color, 1.9, 0.44);
+      if (slot.tag) { slot.tag.position.set(x, (isHelmet ? 1.5 : 1.55), z); group.add(slot.tag); }
+      S.slots.push(slot);
+    });
+  }
+
   // ---- SOLD gap / restock ----------------------------------------------------
   function setSold(s, on) {
     s.sold = !!on;
@@ -242,6 +305,19 @@
       if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(meta.rounds || 60);
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.note("+" + (meta.rounds || 60) + " rounds over the counter.", 1.6);
+      return;
+    }
+    // ARMOR: a kit off the rack. Charge, then route through armor.js's equip
+    // (sets the player's armor bar + mesh). Never "sells out" — you can re-buy
+    // to top your plate back up after it's been shot off. swatVest isn't here.
+    if (s.armor) {
+      if (!CBZ.cityEquipArmor) { CBZ.city.note("Body armor's not stocked right now.", 1.8); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
+      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + " — come back with the money.", 2); if (CBZ.sfx) CBZ.sfx("glass"); return; }
+      CBZ.cityEquipArmor(s.kit);
+      if (CBZ.sfx) CBZ.sfx("coin");
+      CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + " — you're plated up.", 2.2);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
     // explosive consumables: bought by COUNT, never sell out (crates restock
@@ -312,6 +388,12 @@
     if (s.boom) {
       const use = s.name === "C4 Charge" ? "remote det · [B] plant, hold [B] boom" : "frag · [G] throws it";
       return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + " — <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>· " + use + "</span>";
+    }
+    if (s.armor) {
+      const kit = armorKit(s.kit) || {};
+      const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
+      const stats = ((kit.pts | 0) > 0 ? "+" + kit.pts + " armor" : "body armor") + (kit.slot === "helmet" ? " · head" : "");
+      return "<b style='color:#ffd166'>[E]</b> Equip " + s.name + " — <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>· " + stats + "</span>";
     }
     if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + " — SOLD</span> <span style='color:#7f8794'>· restock truck's rolling</span>";
     const meta = e.ITEMS[s.name] || {};

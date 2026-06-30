@@ -149,7 +149,9 @@
 
   // ---- material reads: dead lamps + frosted glass ------------------------
   function isHeadMat(m) {
-    return !!(m && m.color && m.emissive && m.emissive.b > 0.65 && m.emissive.g > 0.6 && m.color.r > 0.75);
+    // Key off the cool white EMISSIVE (high g+b) — robust to carfx's dark-lens
+    // headlights (color 0x222018) and the old Lambert lamps alike; excludes red tails.
+    return !!(m && m.emissive && m.emissive.b > 0.6 && m.emissive.g > 0.6);
   }
   function isGlassMat(m) {
     if (!m || !m.color) return false;

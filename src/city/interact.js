@@ -462,6 +462,84 @@
     return "Velvet rope · " + (drip >= need ? "your fit gets you in" : "not dressed for it yet");
   }
 
+  // ---- GIG WORK (city/gigs.js · CBZ.cityGig) ------------------------------
+  // The honest-money loop: accept (phone) → PICKUP → CARRY → DROP-OFF → paid.
+  // gigs.js owns the state; interact.js owns the in-world VERBS that drive it.
+  // EVERYTHING here is feature-detected — if CBZ.cityGig is absent, every gig
+  // verb's canShow returns false and nothing surfaces (no breakage).
+  function gig() { return CBZ.cityGig || null; }
+  function gigActive() { const G = gig(); if (!G || typeof G.active !== "function") return null; try { return G.active() || null; } catch (e) { return null; } }
+  function gigStageStr(a) { return a ? String(a.stage || a.phase || a.step || a.state || "").toLowerCase() : ""; }
+  // call the FIRST available advance fn on CBZ.cityGig (the state machine's
+  // "advance the loop one step" — pickup grabbed / fare aboard / dropped off).
+  // We try several plausible names so we line up with gigs.js however it lands.
+  function gigAdvance(arg) {
+    const G = gig(); if (!G) return false;
+    const fn = G.advance || G.step || G.interact || G.handoff || G.progress || G.action;
+    if (typeof fn === "function") { try { fn.call(G, arg); return true; } catch (e) {} }
+    return false;
+  }
+  // is the player at the gig's PICKUP spot right now? Prefer a gigs.js predicate;
+  // else fall back to a distance check against an exposed pickup coordinate.
+  function gigAtPickup() {
+    const G = gig(), a = gigActive(); if (!G || !a) return false;
+    if (typeof G.atPickup === "function") { try { return !!G.atPickup(); } catch (e) {} }
+    const st = gigStageStr(a);
+    if (st && st.indexOf("pickup") < 0 && st.indexOf("offered") < 0 && st.indexOf("hail") < 0) return false;
+    const spot = a.pickup || a.from || a.origin || a.pickupSpot;
+    if (!spot || a.hasCargo || a.carrying) return st.indexOf("pickup") >= 0 ? !!spot : false;
+    return Math.hypot(CBZ.player.pos.x - num(spot.x), CBZ.player.pos.z - num(spot.z)) < REACH;
+  }
+  // is the player at the gig's DROP-OFF spot, with the cargo/fare in hand?
+  function gigAtDropoff() {
+    const G = gig(), a = gigActive(); if (!G || !a) return false;
+    if (typeof G.atDropoff === "function") { try { return !!G.atDropoff(); } catch (e) {} }
+    const st = gigStageStr(a);
+    const carrying = a.hasCargo || a.carrying || st.indexOf("carry") >= 0 || st.indexOf("drop") >= 0 || st.indexOf("ride") >= 0;
+    if (!carrying) return false;
+    const spot = a.dropoff || a.to || a.dest || a.destination || a.dropSpot;
+    if (!spot) return st.indexOf("drop") >= 0;
+    return Math.hypot(CBZ.player.pos.x - num(spot.x), CBZ.player.pos.z - num(spot.z)) < REACH;
+  }
+  function num(n) { return (typeof n === "number" && isFinite(n)) ? n : 0; }
+  // a kind-aware verb label for the pickup action.
+  function gigPickupLabel(a) {
+    const k = a ? String(a.kind || a.line || "") : "";
+    if (k === "taxi" || k === "uber" || k === "rideshare") return "Pick up the fare 🚕";
+    if (k === "smuggling" || k === "smuggle") return "Load the shipment 📦";
+    return "Grab the bag 📦";
+  }
+  function gigDropLabel(a) {
+    const k = a ? String(a.kind || a.line || "") : "";
+    if (k === "taxi" || k === "uber" || k === "rideshare") return "Drop the fare off 🏁";
+    if (k === "smuggling" || k === "smuggle") return "Hand over the shipment 🤝";
+    return "Drop off the delivery 🤝";
+  }
+  // HAIL-A-CAB: while driving a taxi/empty car, a waiting fare nearby you can
+  // pick up. gigs.js may auto-zone fares; this verb is the manual hand-off so a
+  // player who pulls up to a flagged rider can stop and take them. We look for a
+  // gigs.js-flagged waiting ped, else any nearby idle ped when a taxi gig wants one.
+  function gigWaitingFare(px, pz) {
+    const G = gig(); if (!G) return null;
+    if (typeof G.waitingFare === "function") { try { return G.waitingFare(px, pz, REACH + 1.2) || null; } catch (e) {} }
+    // fallback: a ped explicitly flagged as a fare by gigs.js
+    let best = null, bd = REACH + 1.6;
+    for (const p of (CBZ.cityPeds || [])) {
+      if (p.dead || p.vendor) continue;
+      if (!p._gigFare && !p.hailingCab) continue;
+      const d = dist(p, px, pz);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+  function gigHailFare(p) {
+    const G = gig(); if (!G) return;
+    if (typeof G.pickupFare === "function") { try { G.pickupFare(p); return; } catch (e) {} }
+    if (!gigAdvance(p)) {
+      CBZ.city && CBZ.city.note && CBZ.city.note("They climb in.", 1.4);
+    }
+  }
+
   // ================== SOURCES: what can be targeted ==================
   // Base prios mirror the old strict chain (vendor > club > stash > cop > ped >
   // corpse > car) but the registry's facing weighting can pull the thing you're
@@ -508,7 +586,12 @@
   const POCKETS = { pockets: true };
   I.registerSource({
     id: "src-self", kind: "self", layers: ["self"], prio: -5, driving: false,
-    find: function (px, pz, ctx, push) { push(POCKETS, 0); },
+    // ONLY surface the pockets card when there's a real pocket action (food to
+    // eat). It used to push unconditionally, so "Your pockets / Open the gig app"
+    // sat on screen forever as its own dumb always-open panel. The gig app lives
+    // in the phone now ([P] → Gig Work), so nothing is lost — the HUD just stays
+    // clean when you've got nothing to do in your pockets.
+    find: function (px, pz, ctx, push) { if (foodIn(ctx)) push(POCKETS, 0); },
   });
 
   // ---- ZONES: interaction spots with no entity ----
@@ -561,6 +644,14 @@
   });
   I.describe("club", function (t) { return { label: "🪩 " + ((t.club && t.club.name) || "The Velvet Club"), note: clubNote() }; });
   I.describe("stash", function (lot) { return { label: "🎒 Gang Stash", note: ((lot.building && lot.building.gang) || "gang") + " cache" }; });
+  I.describe("gig", function (t) {
+    const a = (t && t.gig) || gigActive();
+    const k = a ? String(a.kind || a.line || "gig") : "gig";
+    const at = gigAtDropoff() ? "drop-off" : "pickup";
+    const pay = a && a.pay ? " · " + money(a.pay) : "";
+    return { label: "💼 " + (k.charAt(0).toUpperCase() + k.slice(1)) + " gig", note: "At the " + at + pay };
+  });
+  I.describe("modshop", function () { return { label: "🔧 Mod Garage", note: "Sell · respray · armor · booster · turret · rockets" }; });
   I.describe("self", function () { return { label: "Your pockets", note: "what you're carrying" }; });
 
   // ================== OPTIONS ==================
@@ -701,6 +792,7 @@
     electronics: { verb: "Browse electronics",          sub: "phone · upgrades · gadgets",               rich: false },
     carlot:      { verb: "Talk to the car salesman",    sub: "buy a ride · open a resale yard",          rich: false },
     chop:        { verb: "See the chop shop man",       sub: "drive a hot car into the bay",             rich: false },
+    modshop:     { verb: "Pull into the mod garage",     sub: "respray · armor · booster · turret · rockets", rich: false },
     casino:      { verb: "Hit the cage",                sub: "tables · sportsbook · betting",            rich: false },
     raceway:     { verb: "Check the race board",        sub: "legal · street · drag",                    rich: false },
     arena:       { verb: "Sign the fight card",         sub: "boxing · MMA",                             rich: false },
@@ -747,6 +839,37 @@
     onSelect: function (b) { CBZ.cityOutfitSwapWithCorpse && CBZ.cityOutfitSwapWithCorpse(b); },
   });
 
+  // ---- CORPSE: strip their ARMOR (cop/SWAT plate carrier, riot helmet). Mirrors
+  //      the clothes-swap above but routes through the armor system (armor.js). It
+  //      is DELIBERATE (its own slot, not the walk-over auto-loot) — you crouch and
+  //      peel the vest off. canShow is fully feature-detected: the action vanishes
+  //      whole if the armor module isn't loaded, the body never carried armor, or
+  //      it's already been taken. ----
+  function corpseArmorKitName(b) {
+    const loot = b && b._armorLoot;
+    if (!loot) return "";
+    const KITS = CBZ.ARMOR_KITS || null;
+    // _armorLoot may be a kit-id, a {chest,head} record, or already a name
+    let id = loot;
+    if (loot && typeof loot === "object") id = (loot.chest != null) ? loot.chest : (loot.id != null ? loot.id : loot.name);
+    const k = (KITS && id != null) ? KITS[id] : null;
+    return (k && (k.name || k.short)) || (typeof id === "string" ? id : "armor");
+  }
+  I.register("corpse", {
+    id: "corpse-armor", slot: "k", bad: true,
+    canShow: function (b) {
+      return g.mode === "city" && !!b && !!b._armorLoot && !b._armorTaken && !!CBZ.cityLootArmorFromCorpse;
+    },
+    label: function (b) { const nm = corpseArmorKitName(b); return "Take their armor" + (nm ? " — " + nm : ""); },
+    onSelect: function (b) {
+      if (!b || b._armorTaken || !CBZ.cityLootArmorFromCorpse) return;
+      const took = CBZ.cityLootArmorFromCorpse(b);   // equips it onto the player + returns what was taken
+      b._armorTaken = true;
+      const nm = corpseArmorKitName(b) || "their armor";
+      if (CBZ.city && CBZ.city.note) CBZ.city.note(took === false ? "Nothing to strip." : "🛡 Stripped " + nm + " — armor equipped.", 1.8);
+    },
+  });
+
   // ---- CARS (the old F key, surfaced): tap E gets in, HOLD E jacks a driver ----
   I.register("vehicle", {
     id: "car-get-in", slot: "e", canShow: (car) => !car.npcDriver && (car.owned || car.stolen),
@@ -762,6 +885,15 @@
     label: "Drag the driver out", onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   I.register("vehicle:inside", { id: "car-out", slot: "e", canShow: (car, ctx) => ctx.driving && ctx.vehicle === car, label: "Step out", onSelect: () => CBZ.cityExitVehicle() });
+  // HAIL-A-CAB: behind the wheel, a waiting fare in reach → pick them up. The WHY:
+  // rideshare is a driving job — you pull over for a rider, not press a menu. Only
+  // shows when a gig system is live AND a flagged fare is actually waiting nearby.
+  I.register("vehicle:inside", {
+    id: "car-pickup-fare", slot: "i",
+    canShow: (car, ctx) => !!gig() && !!gigWaitingFare(ctx.pos.x, ctx.pos.z),
+    label: "Pick up the fare 🚕",
+    onSelect: (car, ctx) => { const p = gigWaitingFare(ctx.pos.x, ctx.pos.z); if (p) gigHailFare(p); },
+  });
 
   // ---- YOUR POCKETS (the no-target fallback): old bare-E eat + X drugs ----
   I.register("self", {
@@ -769,6 +901,33 @@
     label: (t, ctx) => "Eat the " + foodIn(ctx),
     onSelect: function (t, ctx) { const food = foodIn(ctx); if (food && CBZ.cityEat) CBZ.cityEat(food); },
   });
+  // THE GIG APP no longer rides the pockets card (it was the always-open
+  // "Open the gig app" clutter, and grabbing slot "i" stole [I] from the
+  // inventory). It lives in the phone — [P] → Gig Work — mixed in with the
+  // other phone services, where a dispatcher app belongs.
+
+  // ---- GIG PICKUP / DROP-OFF ZONE: the in-world hand-off spots that drive the
+  //      loop. One zone target, slot E. canShow flips its label between "grab the
+  //      bag / load the shipment" (at the pickup) and "drop off / hand over" (at
+  //      the dropoff). Both call gigs.js's advance. Feature-detected end to end. ----
+  I.registerZone({
+    id: "zone-gig", kind: "gig", prio: 9, driving: false,
+    find: function (px, pz) {
+      if (!gig() || !gigActive()) return null;
+      if (!gigAtPickup() && !gigAtDropoff()) return null;
+      const a = gigActive();
+      if (!a._izTarget) a._izTarget = { x: px, z: pz, gig: a };
+      // keep the wrapper near the player so the registry scores it as in-reach
+      a._izTarget.x = px; a._izTarget.z = pz; a._izTarget.gig = a;
+      return a._izTarget;
+    },
+    options: [{
+      id: "gig-handoff", slot: "e",
+      label: function () { const a = gigActive(); return gigAtDropoff() ? gigDropLabel(a) : gigPickupLabel(a); },
+      onSelect: function () { if (!gigAdvance() && CBZ.city && CBZ.city.note) CBZ.city.note("…", 0.8); },
+    }],
+  });
+
   // The "Do the COKE/WEED 🌀" pocket auto-button was REMOVED (owner: a real
   // drug-use would be opt-in roleplay, not a button that pops into your pockets
   // panel and breaks the fourth wall). Carried drugs are still sellable/loot;

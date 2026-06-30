@@ -60,6 +60,11 @@
           minZ = Math.min(minZ, A.annex.cz - A.annex.radius);
           maxZ = Math.max(maxZ, A.annex.cz + A.annex.radius);
         }
+        // worldmap.js islands & biomes extend the map to the whole archipelago
+        if (A.regions) for (const rg of A.regions) {
+          minX = Math.min(minX, rg.minX); maxX = Math.max(maxX, rg.maxX);
+          minZ = Math.min(minZ, rg.minZ); maxZ = Math.max(maxZ, rg.maxZ);
+        }
         return { minX: minX - 10, maxX: maxX + 10, minZ: minZ - 10, maxZ: maxZ + 10 };
       }
       const C = CBZ.CITY || { center: { x: 0, z: -700 }, blocks: 6, block: 34, road: 9 };
@@ -71,17 +76,76 @@
     return { minX: B.minX - 2, maxX: B.maxX + 2, minZ: B.minZ - 2, maxZ: B.maxZ + 2 };
   }
 
+  // pan/zoom view applied on TOP of the fit-to-bounds base. Only used by the
+  // city map (other modes ignore it); ox/oz = world point centred on canvas,
+  // z = zoom multiplier over the base fit. fitted=false means "re-centre on the
+  // player next open" (so M drops you where you stand, GTA-style).
+  map.view = { z: 1, ox: 0, oz: 0, fitted: false };
   function makeProjection(bounds) {
     const sw = bounds.maxX - bounds.minX, sh = bounds.maxZ - bounds.minZ;
-    const sc = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
-    const left = (W - sw * sc) * 0.5, top = (H - sh * sc) * 0.5;
+    const sc0 = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
+    const useView = (mode() === "city");
+    const z = useView ? map.view.z : 1;
+    const sc = sc0 * z;
+    let left, top;
+    if (useView) {
+      // centre the canvas on the view's world point (ox,oz) at the zoomed scale
+      left = W / 2 - (map.view.ox - bounds.minX) * sc;
+      top = H / 2 - (map.view.oz - bounds.minZ) * sc;
+    } else {
+      left = (W - sw * sc) * 0.5; top = (H - sh * sc) * 0.5;
+    }
     return {
-      bounds, sc, left, top,
+      bounds, sc, sc0, left, top,
       x(wx) { return left + (wx - bounds.minX) * sc; },
       z(wz) { return top + (wz - bounds.minZ) * sc; },
       wx(mx) { return bounds.minX + (mx - left) / sc; },
       wz(mz) { return bounds.minZ + (mz - top) / sc; },
     };
+  }
+  // the base (un-panned, un-zoomed) projection used to BAKE the static plates,
+  // so the live composite can re-scale them with a single canvas transform.
+  function baseProjection(bounds) {
+    const sw = bounds.maxX - bounds.minX, sh = bounds.maxZ - bounds.minZ;
+    const sc = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
+    const left = (W - sw * sc) * 0.5, top = (H - sh * sc) * 0.5;
+    return {
+      bounds, sc, sc0: sc, left, top,
+      x(wx) { return left + (wx - bounds.minX) * sc; },
+      z(wz) { return top + (wz - bounds.minZ) * sc; },
+      wx(mx) { return bounds.minX + (mx - left) / sc; },
+      wz(mz) { return bounds.minZ + (mz - top) / sc; },
+    };
+  }
+  function clampZoom(z) { return Math.max(0.6, Math.min(12, z)); }
+  // keep the panned centre within the bounds (+ a margin) so you can never
+  // scroll the land off into the void.
+  function clampPan() {
+    const b = boundsFor("city"), m = 120;
+    map.view.ox = Math.max(b.minX - m, Math.min(b.maxX + m, map.view.ox));
+    map.view.oz = Math.max(b.minZ - m, Math.min(b.maxZ + m, map.view.oz));
+  }
+  // frame the view on the player (default) or fit the whole archipelago (F).
+  function setCityView(fitAll) {
+    const b = boundsFor("city");
+    if (fitAll) {
+      map.view.z = 1;
+      map.view.ox = (b.minX + b.maxX) * 0.5;
+      map.view.oz = (b.minZ + b.maxZ) * 0.5;
+      map.view.fitted = true;
+      return;
+    }
+    const pos = CBZ.player && CBZ.player.pos;
+    map.view.ox = pos ? pos.x : 0;
+    map.view.oz = pos ? pos.z : -700;
+    // base scale that fits the whole map → choose z so ~250 world units frame
+    // the canvas (zoomed-in on the player, like dropping M on GTA's pause map)
+    const sw = b.maxX - b.minX, sh = b.maxZ - b.minZ;
+    const sc0 = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
+    const wantSc = (W - PAD * 2) / 250;
+    map.view.z = clampZoom(wantSc / sc0);
+    map.view.fitted = true;
+    clampPan();
   }
 
   function activeWaypoint(which) { return map.points[which || mode()] || null; }
@@ -224,6 +288,8 @@
     map.active = true;
     clearMoveKeys();
     plates.a = null;   // re-render the static city plates fresh each open (ownership/renovations may have moved)
+    if (mode() === "city") setCityView(false);   // drop the view on the player, zoomed-in
+    map._cursor = null;
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("full-map-open");
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
@@ -235,6 +301,7 @@
   function close(relock) {
     if (!map.active) return;
     map.active = false;
+    map._cursor = null;
     root.setAttribute("aria-hidden", "true");
     document.body.classList.remove("full-map-open");
     updateGuide();
@@ -375,6 +442,129 @@
     arena: "#d94f45", paintball: "#7ed957", transit: "#39c0d0", cityhall: "#d8dde8", airfield: "#8a93a3",
     racepark: "#b98a5a",
   };
+  // ---- BIOME PALETTE: every island/biome region paints with a land fill + a
+  // coastline edge so the archipelago reads as REAL ground floating on a sea,
+  // not a tiny blob in a black void. WHY: the city is one island among many
+  // (desert, forest, snow, speedway, airport, military, farmland) and the map
+  // is the only place you see how they connect — so each must be a recognisable
+  // shape with its own terrain colour, the way GTA/RDR2 colour their biomes.
+  const BIOME_FILL = {
+    city: { fill: "#39424e", edge: "#7d8aa0" },
+    commerce: { fill: "#3a4636", edge: "#9bb07a" },
+    speedway: { fill: "#403a44", edge: "#b98a5a" },
+    airport: { fill: "#34373d", edge: "#8a93a3" },
+    military: { fill: "#3a3f34", edge: "#6e7a52" },
+    desert: { fill: "#5a4f37", edge: "#d9bd86" },
+    forest: { fill: "#2f4030", edge: "#5e7e4a" },
+    farmland: { fill: "#4a4a2e", edge: "#b9a25a" },
+    snow: { fill: "#5a6470", edge: "#dfe8f0" },
+    _default: { fill: "#39424e", edge: "#7d8aa0" },
+  };
+  function biomePal(b) { return BIOME_FILL[b] || BIOME_FILL._default; }
+  map.biomePal = biomePal;
+  // links (causeways/bridges between islands) draw as thin tan connectors, NOT
+  // filled land + named — so they don't clutter the map with "desert-causeway".
+  function isLink(rg) { return /causeway|bridge/i.test(rg.name || "") || (rg.pad != null && rg.pad <= 1); }
+  function regionCentroid(rg) {
+    if (rg.kind === "circle") return { x: rg.cx, z: rg.cz };
+    return { x: (rg.minX + rg.maxX) * 0.5, z: (rg.minZ + rg.maxZ) * 0.5 };
+  }
+  function fillRegion(rg, p, color) {
+    ctx.fillStyle = color;
+    if (rg.kind === "circle") { ctx.beginPath(); ctx.arc(p.x(rg.cx), p.z(rg.cz), rg.r * p.sc, 0, Math.PI * 2); ctx.fill(); }
+    else ctx.fillRect(p.x(rg.minX), p.z(rg.minZ), (rg.maxX - rg.minX) * p.sc, (rg.maxZ - rg.minZ) * p.sc);
+  }
+  function strokeRegion(rg, p, color, w) {
+    ctx.strokeStyle = color; ctx.lineWidth = w || 1.5;
+    if (rg.kind === "circle") { ctx.beginPath(); ctx.arc(p.x(rg.cx), p.z(rg.cz), rg.r * p.sc, 0, Math.PI * 2); ctx.stroke(); }
+    else ctx.strokeRect(p.x(rg.minX), p.z(rg.minZ), (rg.maxX - rg.minX) * p.sc, (rg.maxZ - rg.minZ) * p.sc);
+  }
+  // ---- ROUNDED land helpers: soften the hard rectangles so islands read like
+  // shaped landmasses, not boxes. Circles are already round, so these only round
+  // rects (radius ~ 12% of the shorter on-screen edge, clamped). r128's
+  // ctx.roundRect is used when present, with a manual arc fallback.
+  function roundRectPath(x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2));
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function landRadius(rg, p) {
+    const w = (rg.maxX - rg.minX) * p.sc, h = (rg.maxZ - rg.minZ) * p.sc;
+    return Math.max(4, Math.min(w, h) * 0.12);
+  }
+  function fillRegionRounded(rg, p, color) {
+    if (rg.kind === "circle") return fillRegion(rg, p, color);
+    ctx.fillStyle = color;
+    roundRectPath(p.x(rg.minX), p.z(rg.minZ), (rg.maxX - rg.minX) * p.sc, (rg.maxZ - rg.minZ) * p.sc, landRadius(rg, p));
+    ctx.fill();
+  }
+  function strokeRegionRounded(rg, p, color, w) {
+    if (rg.kind === "circle") return strokeRegion(rg, p, color, w);
+    ctx.strokeStyle = color; ctx.lineWidth = w || 1.5;
+    roundRectPath(p.x(rg.minX), p.z(rg.minZ), (rg.maxX - rg.minX) * p.sc, (rg.maxZ - rg.minZ) * p.sc, landRadius(rg, p));
+    ctx.stroke();
+  }
+
+  // ---- HIGHWAY CASING: draw a link region (causeway/bridge) as a real ROAD —
+  // a line down its long axis, stroked twice (dark casing + light asphalt) with
+  // round caps so it reads as connected tarmac, plus a dashed yellow centerline.
+  // Endpoints are pushed ~extend world-units past the rect toward the land each
+  // end touches, so the highway visibly meets both shores instead of floating.
+  // (ax,az)-(bx,bz) are WORLD coords; widthWorld = the road's world width.
+  function drawHighway(ax, az, bx, bz, widthWorld, p, dashed) {
+    const x1 = p.x(ax), y1 = p.z(az), x2 = p.x(bx), y2 = p.z(bz);
+    const wide = Math.max(5, widthWorld * p.sc);
+    ctx.save();
+    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(20,28,36,.85)"; ctx.lineWidth = wide;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = "rgba(150,160,176,.95)"; ctx.lineWidth = wide * 0.65;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    if (dashed !== false && wide > 9) {
+      ctx.strokeStyle = "rgba(240,210,90,.5)"; ctx.lineWidth = Math.max(1, wide * 0.06);
+      ctx.setLineDash([6, 7]);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // a link region's centerline endpoints (midpoints of its two short edges) +
+  // its short-axis world width. Returns {ax,az,bx,bz,wWorld,horiz}.
+  function linkAxis(rg) {
+    if (rg.kind === "circle") {
+      return { ax: rg.cx - rg.r, az: rg.cz, bx: rg.cx + rg.r, bz: rg.cz, wWorld: rg.r * 2, horiz: true };
+    }
+    const w = rg.maxX - rg.minX, h = rg.maxZ - rg.minZ, cx = (rg.minX + rg.maxX) / 2, cz = (rg.minZ + rg.maxZ) / 2;
+    if (w >= h) return { ax: rg.minX, az: cz, bx: rg.maxX, bz: cz, wWorld: h, horiz: true };
+    return { ax: cx, az: rg.minZ, bx: cx, bz: rg.maxZ, wWorld: w, horiz: false };
+  }
+  // push a causeway endpoint outward (away from the region centre) until it
+  // lands on the nearest non-link land region / the mainland — so the highway
+  // visibly TOUCHES the shore it connects. Falls back to a fixed extension.
+  function snapEndpointToLand(ex, ez, cx, cz, regions, mainland) {
+    let dx = ex - cx, dz = ez - cz; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+    let best = null, bestT = Infinity;
+    const cands = (regions || []).filter(function (r) { return !isLink(r); });
+    if (mainland) cands.push(mainland);
+    for (const r of cands) {
+      // march outward a short way to find where this ray first hits a landmass
+      for (let t = 0; t <= 60; t += 2) {
+        const px = ex + dx * t, pz = ez + dz * t;
+        const hit = r.kind === "circle"
+          ? Math.hypot(px - r.cx, pz - r.cz) <= r.r + (r.pad || 2)
+          : (px >= r.minX - (r.pad || 2) && px <= r.maxX + (r.pad || 2) && pz >= r.minZ - (r.pad || 2) && pz <= r.maxZ + (r.pad || 2));
+        if (hit) { if (t < bestT) { bestT = t; best = { x: px, z: pz }; } break; }
+      }
+    }
+    if (best) return best;
+    return { x: ex + dx * 6, z: ez + dz * 6 };   // fallback: small fixed nudge onto the gap
+  }
+
   function poiInfo(lot) {
     const b = lot.building; if (!b) return null;
     const home = CBZ.game.cityHome;
@@ -396,6 +586,10 @@
   }
   function drawPois(lots, p) {
     for (const lot of lots || []) { const info = poiInfo(lot); if (info) drawPoi(lot.cx, lot.cz, p, info.color, info.label, info.key); }
+  }
+  // glyph-only POIs for the static plate (labels are drawn dynamically + decluttered)
+  function drawPoiGlyphs(lots, p) {
+    for (const lot of lots || []) { const info = poiInfo(lot); if (info) drawPoi(lot.cx, lot.cz, p, info.color, "", info.key); }
   }
   // shared so the corner minimap (city/hud.js) colours shops by the SAME trade
   // palette as the full map — bank=blue, guns=green, hospital=red, HOME=lime…
@@ -520,7 +714,7 @@
   // matter how much detail the plates carry. THREE plates (not one) because
   // dynamic ink is sandwiched between them: turf paint goes UNDER the lots,
   // actor dots stay UNDER the labels.
-  const plates = { base: document.createElement("canvas"), lots: document.createElement("canvas"), marks: document.createElement("canvas"), a: null };
+  const plates = { base: document.createElement("canvas"), lots: document.createElement("canvas"), marks: document.createElement("canvas"), a: null, p0: null };
   for (const k of ["base", "lots", "marks"]) { plates[k].width = W; plates[k].height = H; }
   function onPlate(c, fn) {
     const main = ctx; ctx = c.getContext("2d");
@@ -529,7 +723,40 @@
   }
   function buildCityPlates(p, A) {
     plates.a = A;
+    plates.p0 = p;   // remember the base projection the plates were baked at
+    const sand = "rgba(199,178,124,.35)";
     onPlate(plates.base, function () {
+      // ---- ISLANDS / BIOMES FIRST: every registered region is real ground on
+      //      the sea, painted with its terrain colour + a sand coastline so the
+      //      archipelago reads as a map, not a void with a city blob in it.
+      const sandHalo = "rgba(199,178,124,.18)";   // soft blurred beach ring
+      for (const rg of A.regions || []) {
+        if (isLink(rg)) continue;
+        const pal = biomePal(rg.biome);
+        strokeRegionRounded(rg, p, sandHalo, 11); // wide diffuse sand halo (the beach ring)
+        fillRegionRounded(rg, p, pal.fill);       // rounded land
+        strokeRegionRounded(rg, p, sand, 4);      // translucent sand apron
+        strokeRegionRounded(rg, p, pal.edge, 1.6);// crisp biome coastline
+      }
+      // ---- HIGHWAYS: causeways/bridges drawn as connected ROADS (casing +
+      //      asphalt + dashed centerline), endpoints snapped onto each shore so
+      //      the tarmac visibly touches both landmasses instead of floating.
+      const mainRect = { kind: "rect", minX: A.minX, maxX: A.maxX, minZ: A.minZ, maxZ: A.maxZ, pad: 4 };
+      for (const rg of A.regions || []) {
+        if (!isLink(rg)) continue;
+        const ax = linkAxis(rg);
+        const others = (A.regions || []).filter(function (r) { return r !== rg; });
+        const a = snapEndpointToLand(ax.ax, ax.az, (ax.ax + ax.bx) / 2, (ax.az + ax.bz) / 2, others, mainRect);
+        const b = snapEndpointToLand(ax.bx, ax.bz, (ax.ax + ax.bx) / 2, (ax.az + ax.bz) / 2, others, mainRect);
+        drawHighway(a.x, a.z, b.x, b.z, ax.wWorld, p, true);
+      }
+      // ---- MAINLAND: the city island itself, painted as land + coastline ----
+      const cp = biomePal("city");
+      const mw = (A.maxX - A.minX) * p.sc, mh = (A.maxZ - A.minZ) * p.sc, mr = Math.max(4, Math.min(mw, mh) * 0.08);
+      ctx.strokeStyle = sandHalo; ctx.lineWidth = 11; roundRectPath(p.x(A.minX), p.z(A.minZ), mw, mh, mr); ctx.stroke();
+      ctx.fillStyle = cp.fill; roundRectPath(p.x(A.minX), p.z(A.minZ), mw, mh, mr); ctx.fill();
+      ctx.strokeStyle = sand; ctx.lineWidth = 4; roundRectPath(p.x(A.minX), p.z(A.minZ), mw, mh, mr); ctx.stroke();
+      ctx.strokeStyle = cp.edge; ctx.lineWidth = 1.6; roundRectPath(p.x(A.minX), p.z(A.minZ), mw, mh, mr); ctx.stroke();
       // busy-ness wash under the roads (brightness = pop weight)
       eachDistrict(p, A, function (d, mx, mz, w, h, busy) {
         ctx.fillStyle = "rgba(190,216,255," + (0.03 + 0.10 * busy).toFixed(3) + ")";
@@ -537,57 +764,166 @@
       });
       drawRoads(A, p);
       if (A.annex) {
-        ctx.fillStyle = "rgba(120,150,110,.20)"; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.fill();
+        const ap = biomePal("commerce");
+        ctx.fillStyle = ap.fill; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = sand; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = ap.edge; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(p.x(A.annex.cx), p.z(A.annex.cz), A.annex.radius * p.sc, 0, Math.PI * 2); ctx.stroke();
         for (const r of A.annex.roads || []) line(r.vertical ? r.x : r.x - r.len / 2, r.vertical ? r.z - r.len / 2 : r.z, r.vertical ? r.x : r.x + r.len / 2, r.vertical ? r.z + r.len / 2 : r.z, p, "rgba(156,168,182,.55)", Math.max(2, 5 * p.sc));
       }
-      // big lettered district names over the roads (faint, lots sit on top)
+      // big lettered district names over the roads (faint, lots sit on top).
+      // No letter-spacing smear — multi-word names stay legible.
       eachDistrict(p, A, function (d, mx, mz, w) {
-        const name = (d.name || "").toUpperCase().split("").join(" ");
-        const size = Math.max(10, Math.min(16, (w * 0.9) / Math.max(6, name.length * 0.62)));
+        const name = (d.name || "").toUpperCase();
+        if (!name) return;
+        const size = Math.max(10, Math.min(16, (w * 0.9) / Math.max(6, name.length * 0.55)));
         ctx.font = "700 " + size.toFixed(1) + "px Fredoka, sans-serif"; ctx.textAlign = "center";
         ctx.fillStyle = "rgba(222,236,255,.22)";
         ctx.fillText(name, mx, mz + size * 0.35);
       });
+      // ---- METROPOLIS TITLE: the mainland city is a named place too, equal to
+      //      the islands. A large faint banner sits just above the district grid.
+      {
+        const title = "PORT VANCE";
+        const tsize = Math.max(16, Math.min(34, mw / Math.max(8, title.length * 0.6)));
+        ctx.font = "800 " + tsize.toFixed(1) + "px Fredoka, sans-serif"; ctx.textAlign = "center";
+        const tx = p.x((A.minX + A.maxX) / 2), ty = p.z(A.minZ) - tsize * 0.5;
+        ctx.lineWidth = 4; ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.strokeText(title, tx, ty);
+        ctx.fillStyle = "rgba(232,242,255,.34)"; ctx.fillText(title, tx, ty);
+      }
     });
     onPlate(plates.lots, function () {
       drawLots(A.lots, p);
       if (A.annex) drawLots(A.annex.lots, p);
     });
     onPlate(plates.marks, function () {
-      // labelled POIs on top — this is what makes the map actually navigable
-      drawPois(A.lots, p);
-      if (A.annex) {
-        drawPois(A.annex.lots, p);
-        text("ISLAND", A.annex.cx, A.annex.cz - A.annex.radius + 9, p, "rgba(225,240,255,.42)", 13);
+      // POI DIAMONDS only (no text) — labels are a dynamic, decluttered pass in
+      // drawCity so they don't pile into unreadable mush at the fit zoom.
+      drawPoiGlyphs(A.lots, p);
+      if (A.annex) drawPoiGlyphs(A.annex.lots, p);
+      // REGION / BIOME NAMES at each island's centroid (the map's geography
+      // legend — "where is the desert / the snow / the speedway"). Sized to the
+      // region's on-screen width so a small island gets a small name.
+      // REGION names: the real place name (no letter-spacing smear so multi-word
+      // names like "Redhollow Woods" stay readable), with a smaller, fainter
+      // subtitle below (e.g. "International Airport"). Sized to the region width.
+      for (const rg of A.regions || []) {
+        if (isLink(rg)) continue;
+        const c = regionCentroid(rg);
+        const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
+        const name = rg.name || rg.biome || "";
+        if (!name) continue;
+        const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
+        const nx = p.x(c.x), ny = p.z(c.z);
+        ctx.textAlign = "center";
+        ctx.font = "700 " + size.toFixed(1) + "px Fredoka, sans-serif";
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.strokeText(name, nx, ny);
+        ctx.fillStyle = "rgba(228,238,250,.92)"; ctx.fillText(name, nx, ny);
+        if (rg.subtitle) {
+          const ssize = Math.max(8, size * 0.8);
+          ctx.font = "600 " + ssize.toFixed(1) + "px Fredoka, sans-serif";
+          ctx.lineWidth = 2.4; ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.strokeText(rg.subtitle, nx, ny + size * 0.95);
+          ctx.fillStyle = "rgba(205,218,232,.5)"; ctx.fillText(rg.subtitle, nx, ny + size * 0.95);
+        }
       }
       drawClimbMarks(p, A);
       drawBoardTicks(p);
     });
   }
 
+  // ---- DECLUTTERED POI LABELS (the fix for "label mush") --------------------
+  // WHY: drawing a name on every shop turns the map into noise. So labels are
+  // TIERED: key POIs (your HOME) are always named; ordinary shops only when
+  // you've zoomed IN (view.z>=1.8) or are hovering near them (~70px of the
+  // cursor). Then a greedy collision pass measures each candidate and skips any
+  // that would overlap one already placed — so what shows always reads clean.
+  function labelHit(boxes, x0, y0, x1, y1) {
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i];
+      if (x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0) return true;
+    }
+    return false;
+  }
+  function drawCityLabels(p, A) {
+    const cur = map._cursor;   // {x,y} canvas px, or null
+    const zoomShow = map.view.z >= 1.8;
+    const cands = [];
+    const collect = (lots) => {
+      for (const lot of lots || []) {
+        const info = poiInfo(lot); if (!info || !info.label) continue;
+        const sx = p.x(lot.cx), sy = p.z(lot.cz);
+        if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;   // off-canvas
+        let cd = 1e9;
+        if (cur) cd = Math.hypot(sx - cur.x, sy - cur.y);
+        const near = cur && cd <= 70;
+        // tier gate: key POIs always; shops only when zoomed-in or hovered
+        if (!info.key && !zoomShow && !near) continue;
+        cands.push({ info: info, sx: sx, sy: sy, cd: cd });
+      }
+    };
+    collect(A.lots); if (A.annex) collect(A.annex.lots);
+    // key POIs first, then nearest-to-cursor — so the important names win the
+    // greedy collision arbitration.
+    cands.sort(function (a, b) {
+      if (!!b.info.key !== !!a.info.key) return b.info.key ? 1 : -1;
+      return a.cd - b.cd;
+    });
+    const boxes = [];
+    for (let i = 0; i < cands.length; i++) {
+      const c = cands[i], s = c.info.key ? 7 : 5, lbl = c.info.label;
+      const fs = c.info.key ? 12 : 10;
+      ctx.font = "700 " + fs + "px Fredoka, sans-serif"; ctx.textAlign = "center";
+      const w = ctx.measureText(lbl).width, ty = c.sy - s - 3;
+      const x0 = c.sx - w / 2 - 1, x1 = c.sx + w / 2 + 1, y0 = ty - fs, y1 = ty + 2;
+      if (!c.info.key && labelHit(boxes, x0, y0, x1, y1)) continue;   // greedy skip overlaps
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.strokeText(lbl, c.sx, ty);
+      ctx.fillStyle = c.info.key ? "#bfffd9" : "rgba(244,250,255,.96)"; ctx.fillText(lbl, c.sx, ty);
+      boxes.push({ x0: x0, y0: y0, x1: x1, y1: y1 });
+    }
+  }
+
+  // composite a static plate (baked at plates.p0) under the CURRENT pan/zoom by
+  // rescaling/translating it once — far cheaper than re-baking on every zoom.
+  function compositePlate(plate, p) {
+    const p0 = plates.p0; if (!p0) { ctx.drawImage(plate, 0, 0); return; }
+    const k = p.sc / p0.sc;
+    ctx.save();
+    ctx.setTransform(k, 0, 0, k, p.left - k * p0.left, p.top - k * p0.top);
+    ctx.drawImage(plate, 0, 0);
+    ctx.restore();   // setTransform back to identity
+  }
+
   function drawCity(p) {
     const A = CBZ.city && CBZ.city.arena;
     if (!A) { text("CITY DISTRICT", 0, (CBZ.CITY && CBZ.CITY.center.z) || -700, p, "rgba(235,245,255,.5)", 18); return; }
-    if (plates.a !== A) buildCityPlates(p, A);
+    // bake the static plates ONCE at the base fit (NOT the panned/zoomed view)
+    if (plates.a !== A) buildCityPlates(baseProjection(p.bounds), A);
     const wanted = (CBZ.game && CBZ.game.wanted) || 0;
-    ctx.drawImage(plates.base, 0, 0);   // districts + roads + lettering
+    compositePlate(plates.base, p);   // districts + roads + lettering (rescaled)
     // THE BRIDGE — the sole chokepoint between mainland and island. WHY it matters
     // mechanically: at 3★+ the cops seal it (roadblocks), so it turns red + SEALED
     // — the map tells you your island escape is cut off.
     if (A.bridge) {
       const b = A.bridge, mz = (b.minZ + b.maxZ) / 2, sealed = wanted >= 3;
-      line(b.minX, mz, b.maxX, mz, p, sealed ? "rgba(255,80,70,.7)" : "rgba(156,168,182,.5)", Math.max(3, (b.maxZ - b.minZ) * p.sc * 0.8));
+      // proper road casing for the bridge too; turns red overlay when sealed
+      drawHighway(b.minX, mz, b.maxX, mz, (b.maxZ - b.minZ), p, true);
+      if (sealed) {
+        ctx.save(); ctx.lineCap = "round";
+        ctx.strokeStyle = "rgba(255,80,70,.7)"; ctx.lineWidth = Math.max(5, (b.maxZ - b.minZ) * p.sc);
+        ctx.beginPath(); ctx.moveTo(p.x(b.minX), p.z(mz)); ctx.lineTo(p.x(b.maxX), p.z(mz)); ctx.stroke();
+        ctx.restore();
+      }
       text(sealed ? "BRIDGE — SEALED" : "BRIDGE", (b.minX + b.maxX) / 2, mz - (b.maxZ - b.minZ) * 0.9, p, sealed ? "#ff8b7a" : "rgba(225,240,255,.42)", 11);
     }
     drawGangTurf(p);   // district control board + HQ crests UNDER the lot/POI layer
-    ctx.drawImage(plates.lots, 0, 0);   // lot blocks over the turf paint
+    compositePlate(plates.lots, p);   // lot blocks over the turf paint
     // live actors UNDER the labels
     for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
       const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p, "rgba(232,238,245,.62)", 1.6);
     }
     for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
     for (const cop of CBZ.cityCops || []) if (!cop.dead) dot(cop.pos.x, cop.pos.z, p, "#5bd0ff", 2.7);
-    ctx.drawImage(plates.marks, 0, 0);  // POI labels + climb points + board ticks
+    compositePlate(plates.marks, p);  // POI diamonds + region names + climb points + board ticks
+    drawCityLabels(p, A);             // DECLUTTERED dynamic POI labels (tiered, collision-avoided)
     drawRentedBoards(p);                // the gold $ over the boards that are YOURS
     // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
     if (CBZ.cityOwnsLot) {
@@ -638,7 +974,15 @@
     const which = mode(), p = map.projection = makeProjection(boundsFor(which));
     if (titleEl) titleEl.textContent = MODE_TITLE[which] || "AREA MAP";
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#08111d"; ctx.fillRect(0, 0, W, H);
+    if (which === "city") {
+      // OCEAN: the archipelago floats on water, not a black void. A faint depth
+      // gradient gives the sea body so the islands read as land at a glance.
+      const og = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, Math.max(W, H) * 0.62);
+      og.addColorStop(0, "#13334a"); og.addColorStop(1, "#0c2433");
+      ctx.fillStyle = og; ctx.fillRect(0, 0, W, H);
+    } else {
+      ctx.fillStyle = "#08111d"; ctx.fillRect(0, 0, W, H);
+    }
     drawGrid(p);
     if (which === "survival") drawSurvival(p);
     else if (which === "city") drawCity(p);
@@ -713,17 +1057,78 @@
     if (labelEl && lab !== _guideLab) { labelEl.textContent = lab; _guideLab = lab; }
   }
 
+  // canvas-space (W×H) coords from a mouse event
+  function evCanvas(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+  }
   function placeFromEvent(e) {
     if (e.button !== 0 && e.button !== 2) return;
     e.preventDefault();
-    const r = cv.getBoundingClientRect();
-    const x = (e.clientX - r.left) * W / r.width, z = (e.clientY - r.top) * H / r.height;
+    const c = evCanvas(e);
     const p = map.projection || makeProjection(boundsFor(mode()));
-    setWaypoint(p.wx(x), p.wz(z));
+    setWaypoint(p.wx(c.x), p.wz(c.y));
   }
 
-  cv.addEventListener("mousedown", placeFromEvent);
+  // CITY map gets pan + zoom; every other mode keeps the plain place-on-click.
+  // Drag-vs-click is decided by a 4px threshold so a deliberate click still
+  // drops a waypoint while a drag pans the camera (and never sets a waypoint).
+  let drag = null;   // { startX, startY, button, ox, oz, moved }
+  cv.addEventListener("mousedown", function (e) {
+    if (mode() !== "city") { placeFromEvent(e); return; }
+    if (e.button !== 0 && e.button !== 2) return;
+    e.preventDefault();
+    const c = evCanvas(e);
+    drag = { startX: c.x, startY: c.y, button: e.button, ox: map.view.ox, oz: map.view.oz, moved: false };
+  });
+  cv.addEventListener("mousemove", function (e) {
+    const c = evCanvas(e);
+    if (mode() === "city") map._cursor = { x: c.x, y: c.y };
+    if (!drag) return;
+    const dx = c.x - drag.startX, dy = c.y - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;   // still a potential click
+    drag.moved = true;
+    const p = map.projection; if (!p) return;
+    // pan: keep the world point under the press fixed by moving the centre
+    map.view.ox = drag.ox - dx / p.sc;
+    map.view.oz = drag.oz - dy / p.sc;
+    clampPan();
+    draw();
+  });
+  function endDrag(e) {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (mode() !== "city") return;
+    if (!d.moved && (e.button === 0 || e.button === 2)) {
+      // a clean click → place the waypoint (left OR right, as before)
+      const p = map.projection || makeProjection(boundsFor("city"));
+      const c = evCanvas(e);
+      setWaypoint(p.wx(c.x), p.wz(c.y));
+    }
+  }
+  cv.addEventListener("mouseup", endDrag);
+  cv.addEventListener("mouseleave", function () { drag = null; });
   cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  // ZOOM-TO-CURSOR wheel: keep the world point under the cursor fixed while the
+  // zoom changes (the standard map-zoom feel), then re-clamp the pan.
+  cv.addEventListener("wheel", function (e) {
+    if (mode() !== "city" || !map.active) return;
+    e.preventDefault();
+    const c = evCanvas(e);
+    const p = map.projection; if (!p) return;
+    const wx = p.wx(c.x), wz = p.wz(c.y);
+    const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+    const nz = clampZoom(map.view.z * factor);
+    if (nz === map.view.z) return;
+    map.view.z = nz;
+    // recompute the projection at the new zoom, then shift ox/oz so (wx,wz)
+    // lands back under the cursor.
+    const np = makeProjection(boundsFor("city"));
+    map.view.ox += wx - np.wx(c.x);
+    map.view.oz += wz - np.wz(c.y);
+    clampPan();
+    draw();
+  }, { passive: false });
   if (closeBtn) closeBtn.addEventListener("click", function () { close(); });
 
   addEventListener("keydown", function (e) {
@@ -732,6 +1137,7 @@
     if (k === "m") { map.toggle(); e.preventDefault(); }
     else if (map.active && e.key === "Escape") { close(); e.preventDefault(); }
     else if (map.active && (e.key === "Backspace" || e.key === "Delete")) { clearWaypoint(); e.preventDefault(); }
+    else if (map.active && mode() === "city" && k === "f") { setCityView(true); draw(); e.preventDefault(); }   // F = fit the whole archipelago
   });
 
   let redraw = 0, reroute = 0;

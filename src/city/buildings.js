@@ -72,7 +72,7 @@
   const DOORH = 3.3;
   const WT = 0.4;      // wall thickness
   const SW = 5.6;      // two generous stair lanes; narrow stairs snag characters at speed
-  const DOORW = 2.2;   // doorway width
+  const DOORW = 2.2;   // doorway width — original proportions (owner-approved; the 1.15 narrowing was overdone). Garage/showroom vehicle openings use GW, not this.
   const GLASS = 0x9fd8ee;
 
   // ---- SHATTERABLE GLASS (city-wide) ------------------------------------
@@ -666,6 +666,34 @@
   }
   function chunkGeo() { return _chunkGeo || (_chunkGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4)); }
   function chunkMat() { return _chunkMat || (_chunkMat = new THREE.MeshLambertMaterial({ color: 0x7c828b })); }
+  // a shared CRACKED-CONCRETE decal (jagged radiating fracture lines on a faint
+  // grey scuff) painted once — the tier-2 wound mark before a wall blows open.
+  let _crackMat = null;
+  function crackMat() {
+    if (_crackMat) return _crackMat;
+    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+    const x = c.getContext("2d");
+    // faint concrete bruise behind the cracks
+    const g = x.createRadialGradient(32, 32, 2, 32, 32, 30);
+    g.addColorStop(0, "rgba(30,30,34,0.5)"); g.addColorStop(0.6, "rgba(40,40,44,0.22)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    // jagged radiating fracture lines (a few branch)
+    x.strokeStyle = "rgba(12,12,14,0.85)"; x.lineCap = "round";
+    for (let i = 0; i < 6; i++) {
+      const a = i / 6 * 6.28 + (i * 1.3);
+      let px = 32, py = 32, ang = a, len = 0; x.lineWidth = 1.6;
+      x.beginPath(); x.moveTo(px, py);
+      const segs = 4 + (i % 3);
+      for (let s = 0; s < segs; s++) {
+        ang += (((i * 7 + s * 5) % 9) - 4) * 0.16; len = 4 + (s + 1) * 2.6;
+        px += Math.cos(ang) * len; py += Math.sin(ang) * len; x.lineTo(px, py);
+      }
+      x.stroke();
+    }
+    const t = new THREE.CanvasTexture(c);
+    _crackMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    return _crackMat;
+  }
   // orient a decal quad so its +Z faces along the surface normal (nx,ny,nz)
   const _nrm = new THREE.Vector3(), _q = new THREE.Quaternion(), _zAxis = new THREE.Vector3(0, 0, 1);
   function aimDecal(mesh, nx, ny, nz) {
@@ -798,14 +826,138 @@
     }
     // (4) shatter every pane within the blast radius (cracked → blown out)
     CBZ.cityShatter(x, z, 4.0 + power * 2.2);
+    // (4b) ACCUMULATE a persistent wound on the struck wall — repeated hits/blasts
+    // on the SAME wall escalate scorch → cracks → a real blown-open carve. We
+    // already located the wall + its surface point + outward normal above, so
+    // hand them straight to cityWoundWall (zero extra search).
+    if (onWall && best && CBZ._cityWoundWallRec) CBZ._cityWoundWallRec(best, bsx, bsy, bsz, power, bnx, bnz);
     // (5) feedback
     if (CBZ.shake) CBZ.shake(Math.min(1.2, 0.3 + power * 0.3));
     return { x: onWall ? bsx : x, y: onWall ? bsy : y, z: onWall ? bsz : z, nx: bnx, nz: bnz, onWall };
   };
 
+  // ---- ESCALATING WALL WOUNDS ----------------------------------------------
+  // WHY: one rocket carves a wall open instantly, but a wall raked by rifle fire
+  // or peppered with small blasts used to shrug it ALL off — nothing accumulated.
+  // Now every hit on a wall builds a damage record on THAT collider: it scorches,
+  // then cracks, then (once enough damage piles on) the wall genuinely BLOWS OPEN
+  // into the room behind it — the satisfying "keep hitting it and it gives" beat.
+  // The decals are pooled+capped and the auto-carve routes through the fracture
+  // ledger so it counts against the 24-hole budget and boards over like any breach.
+  const wallDmg = new Map();   // wall collider -> { dmg, x,y,z (impact centroid), nx,nz, sc1, cracks:[] }
+  const WALLDMG_CAP = 40;
+  // a tiny dedicated CRACK-decal pool (kept apart from scorchPool so cracks don't
+  // thrash the explosion-scorch LRU). Small cap — only a handful of wounded walls
+  // ever show cracks at once before they auto-carve.
+  const crackPool = []; let crackIdx = 0; const CRACK_CAP = 24;
+  function placeCrack(px, py, pz, nx, nz, scale) {
+    if (!CBZ.scene) return;
+    let m;
+    if (crackPool.length < CRACK_CAP) { m = new THREE.Mesh(holeGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
+    else { m = crackPool[crackIdx]; crackIdx = (crackIdx + 1) % CRACK_CAP; m.visible = true; }
+    m.position.set(px + nx * 0.025, py, pz + nz * 0.025); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
+    const s = scale || 1.3; m.scale.set(s, s, s);
+  }
+  function placeWoundScorch(px, py, pz, nx, nz, scale) {
+    if (!CBZ.scene) return;
+    let m;
+    if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
+    else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
+    m.position.set(px + nx * 0.03, py, pz + nz * 0.03); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
+    const s = scale || 1.4; m.scale.set(s, s, s);
+  }
+  // INTERNAL: accumulate a wound on an ALREADY-LOCATED wall collider (cityDamage-
+  // Building calls this — it found `best` for us). Tiers fire as the total climbs.
+  CBZ._cityWoundWallRec = function (col, sx, sy, sz, power, nx, nz) {
+    if (!col) return;
+    let rec = wallDmg.get(col);
+    if (!rec) {
+      // cap the map — evict the least-damaged record so a long firefight can't
+      // grow it unbounded (the evicted wall just loses its accumulator, not its
+      // already-stamped decals).
+      if (wallDmg.size >= WALLDMG_CAP) {
+        let lo = null, loV = 1e9; for (const [k, v] of wallDmg) { if (v.dmg < loV) { loV = v.dmg; lo = k; } }
+        if (lo) wallDmg.delete(lo);
+      }
+      rec = { dmg: 0, x: sx, y: sy, z: sz, nx: nx, nz: nz, sc1: false, t2: 0, n: 0 };
+      wallDmg.set(col, rec);
+    }
+    // running impact centroid (so the auto-carve opens where the wall took the
+    // most fire, not at the first stray round).
+    rec.n++; const k = 1 / rec.n;
+    rec.x += (sx - rec.x) * k; rec.y += (sy - rec.y) * k; rec.z += (sz - rec.z) * k;
+    rec.nx = nx; rec.nz = nz;
+    const before = rec.dmg; rec.dmg += power;
+    // TIER 1 (>=0.6): a persistent scorch smudge appears (once).
+    if (rec.dmg >= 0.6 && !rec.sc1) { rec.sc1 = true; placeWoundScorch(sx, sy, sz, nx, nz, 1.5); }
+    // TIER 2 (>=1.6): 1-2 crack decals + a knock of chunks (each threshold-cross
+    // adds one crack, capped at 2, so a pummelled wall visibly spiderwebs).
+    if (rec.dmg >= 1.6 && before < rec.dmg && rec.t2 < 2 && Math.floor((rec.dmg - 1.6) / 0.6) >= rec.t2) {
+      rec.t2++;
+      placeCrack(sx + (Math.random() - 0.5) * 0.5, sy + (Math.random() - 0.5) * 0.5, sz, nx, nz, 1.2 + Math.random() * 0.5);
+      CBZ.cityChunk(sx, sy, sz, { count: 2 + ((Math.random() * 2) | 0), force: 3, dirx: nx, dirz: nz });
+    }
+    // TIER 3 (>=2.8): the wall finally GIVES — promote to a real walk-through
+    // carve at the accumulated impact centroid, routed through the fracture
+    // ledger (so it counts against the hole budget + boards over like a breach).
+    if (rec.dmg >= 2.8) {
+      wallDmg.delete(col);                                 // spent — it's a hole now
+      const fr = CBZ.cityFracture;
+      if (fr && fr.recent && fr.recent(rec.x, rec.z)) return;   // already opened here
+      const r2 = carveHole(rec.x, rec.y, rec.z, 1.3, { search: 1.2 });
+      if (r2) {
+        if (fr && fr._adopt) fr._adopt(r2, 1.3);
+        const g = r2.gap, gc = (g.u0 + g.u1) / 2;
+        const rx = g.horiz ? gc : g.fixed, rz = g.horiz ? g.fixed : gc;
+        CBZ.cityChunk(rx, (g.v0 + g.v1) / 2, rz, { count: 4 + ((Math.random() * 3) | 0), force: 5, dirx: -nx, dirz: -nz });
+        if (CBZ.shake) CBZ.shake(0.5);
+        if (CBZ.sfx) CBZ.sfx("glass");
+      }
+    }
+  };
+  // PUBLIC: wound the nearest wall at (x,y,z) — same wall-selection as carveHole,
+  // so callers that DON'T already have the collider (sustained gunfire impacts,
+  // small grenade splashes) can feed the accumulator. Feature-detected by callers.
+  CBZ.cityWoundWall = function (x, y, z, power, nx, nz) {
+    if (!CBZ.scene || !CBZ.colliders) return;
+    if (y == null) y = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4;
+    // reuse carveHole's nearest-opaque-wall selection (y-span contains hit,
+    // height>=1.6, thin face, opaque material).
+    let best = null, bestD = 1e9, sr2 = 6.25;   // 2.5m search
+    for (let i = 0; i < CBZ.colliders.length; i++) {
+      const c = CBZ.colliders[i];
+      if (c.y1 == null || !c.ref) continue;
+      if (y < c.y0 - 0.3 || y > c.y1 + 0.3) continue;
+      if (c.y1 - c.y0 < 1.6) continue;
+      if (Math.min(c.maxX - c.minX, c.maxZ - c.minZ) > 0.9) continue;
+      const mt = c.ref.material; if (mt && mt.transparent) continue;
+      const px = Math.max(c.minX, Math.min(c.maxX, x)), pz = Math.max(c.minZ, Math.min(c.maxZ, z));
+      const dx = x - px, dz = z - pz, dd = dx * dx + dz * dz;
+      if (dd > sr2 || dd >= bestD) continue;
+      bestD = dd; best = c;
+    }
+    if (!best) return;
+    // derive the outward normal + surface point if the caller didn't pass one
+    let onx = nx, onz = nz, ssx = x, ssz = z;
+    const c = best, cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+    const wx = c.maxX - c.minX, wz = c.maxZ - c.minZ;
+    const psx = Math.max(c.minX, Math.min(c.maxX, x)), psz = Math.max(c.minZ, Math.min(c.maxZ, z));
+    if (nx == null || nz == null) {
+      if (wx >= wz) { onz = (z - cz) < 0 ? -1 : 1; onx = 0; ssz = onz < 0 ? c.minZ - 0.04 : c.maxZ + 0.04; ssx = psx; }
+      else { onx = (x - cx) < 0 ? -1 : 1; onz = 0; ssx = onx < 0 ? c.minX - 0.04 : c.maxX + 0.04; ssz = psz; }
+    } else {
+      if (onx !== 0) ssx = onx < 0 ? c.minX - 0.04 : c.maxX + 0.04; else ssx = psx;
+      if (onz !== 0) ssz = onz < 0 ? c.minZ - 0.04 : c.maxZ + 0.04; else ssz = psz;
+    }
+    const ssy = Math.max(c.y0 + 0.4, Math.min(c.y1 - 0.4, y));
+    CBZ._cityWoundWallRec(best, ssx, ssy, ssz, power || 0.4, onx, onz);
+  };
+
   CBZ.cityDamageReset = function () {
     for (const m of bulletPool) m.visible = false;
     for (const m of scorchPool) m.visible = false;
+    if (crackPool) { for (const m of crackPool) m.visible = false; crackIdx = 0; }
+    if (wallDmg) wallDmg.clear();   // wipe the accumulated wall-wound records
     bulletIdx = scorchIdx = 0;
     for (const c of cityChunks) { CBZ.scene.remove(c.mesh); if (c.dispose && c.mesh.material) c.mesh.material.dispose(); }
     cityChunks.length = 0;
@@ -2434,51 +2586,59 @@
     dbox(slabCx, rTop + pp + 0.05, -d / 2 + WT / 2, slabW + 0.1, 0.1, WT + 0.16, TRIM);
     dbox(-w / 2 + WT / 2, rTop + pp + 0.05, slabCz, WT + 0.16, 0.1, slabD + 0.1, TRIM);
 
-    // switchback stairs (two lanes alternating; ported from disaster_arena).
-    // Step COUNT derives from FH at the proven ~0.44 rise (the old 4.0/9): a
-    // taller floor gets MORE steps, never taller ones — the climb is really the
-    // ramp platform, but the treads must keep reading like legal stairs.
+    // ============================================================
+    //  SWITCHBACK STAIRS — CONTINUOUS RAMP COLLISION + DECO TREADS
+    // ============================================================
+    // OWNER ("stairs suck — you fall through them down many floors"). ROOT CAUSE
+    // (verified): the walk surface was a STACK of per-flight ramp AABBs into
+    // CBZ.platforms; physics.groundAt() point-samples the highest plat whose
+    // XZ-AABB contains the query, so a fast player landing a substep in a
+    // hairline SEAM between two ramp/landing AABBs (or a sliver outside one) read
+    // the terrain far below → "walked off a ledge" → fell through floors.
     //
-    // OWNER ("stairs suck — you fall through them down many floors"). The walk
-    // surface is CBZ.platforms ramp records (physics.js resolves them). Root
-    // cause of the fall-through was GAPS in that coverage: (1) the ramp AABB was
-    // inset 0.04 on BOTH X edges and only one lane wide, so a player stepping to
-    // the lane edge stood OFF the support → dropped to floorAt; (2) the two
-    // lanes left a hairline seam at their shared edge; (3) the ramp AABB and the
-    // flat landing overlapped by only 0.1m, so at speed you could clear both in
-    // one frame and the switchback turn (lane A→landing→lane B) had a bare strip
-    // where neither AABB covered you. CONTRACT (unchanged): each flight pushes
-    // one ramp record + a plat landing. We just close the gaps — the ramp AABB
-    // now covers the FULL lane footprint with a small overhang so adjacent lanes
-    // (and the stair walls) overlap with no seam, the AABB extends in Z past the
-    // slope ends so it OVERLAPS both this flight's landing and the previous one
-    // (the clamp keeps the extension flat at the correct floor top), and the
-    // landing is widened/deepened to bridge the turn. Coverage is now CONTINUOUS:
-    // every XZ point on the climb sits inside some ramp AABB or plat box.
-    const nSteps = Math.round(FH / 0.45), LD = 1.1, zA = izMin + 0.3, zB = izMax - 0.3, laneW = stairW / 2;
+    // THE FIX (every shipped game): a CONTINUOUS, gap-free, MONOTONIC invisible
+    // ramp collider from ground to roof, under purely DECORATIVE step geometry
+    // (collision-OFF), backed by a physics ground-snap + sane step height.
+    //   • ONE ramp plat record per flight whose footprint EXACTLY covers the
+    //     flight, abutting at the shared lane edge (no double-height seam) and
+    //     OVERHANGING outward to the stair walls (no wall-side sliver).
+    //   • ONE flat landing plat record at each turn, deep enough to OVERLAP both
+    //     the end of this flight's ramp and the start of the next — so every XZ
+    //     point on the climb sits inside some plat box, and consecutive flights'
+    //     footprints overlap (the ramp's flat Z-extension, t clamped to [0,1],
+    //     reaches into the landings). Coverage is continuous; groundAt can never
+    //     hit a seam, and physics.js ground-snap glues you across nosings.
+    //   • Treads/risers/stringers/railings are DECO (dbox → flushDeco merged: ~1
+    //     mesh per colour, cast:false, NOT solid/los/plat) — they read as real
+    //     built stairs but never touch collision/raycast. Draw-call neutral.
+    //
+    // Step proportions are realistic: rise ~0.18m, run ~0.29m, EQUAL risers; the
+    // count derives from FH at that rise (taller floor → more steps, same rise).
+    const STAIR_RISE = 0.185;                                  // target riser ~0.18-0.2m
+    const nSteps = Math.max(2, Math.round(FH / STAIR_RISE));   // equal risers, count from FH
+    const rise = FH / nSteps;                                  // exact equal rise
+    const LD = 1.1, zA = izMin + 0.3, zB = izMax - 0.3, laneW = stairW / 2;
     const OUT_OVL = 0.22;    // X overhang OUTWARD only (toward the stair walls)
     const Z_OVL = 0.9;       // Z extension so each ramp AABB overlaps its landings
+    // DECO colours (shared materials → batch-foldable; no new draw calls).
+    const STEP_COL = 0xa7adb5, STRINGER_COL = shadeHex(color, 0.6), RAIL_COL = 0x3a3f47;
     for (let k = 0; hasStairs && k < storeys; k++) {
       const dir = (k % 2 === 0) ? 1 : -1;
       const startZ = dir > 0 ? zA : zB, endZ = dir > 0 ? zB : zA;
       const rampEndZ = endZ - dir * LD;
       const leftLane = (k % 2 === 0);
       const lx0 = leftLane ? ixMin : ixMin + laneW, lxc = lx0 + laneW / 2;
+      // ---- CONTINUOUS RAMP COLLIDER (the ONLY collision for this flight) ----
       // FULL-LANE X footprint. The two lanes are at DIFFERENT heights over the
-      // same z-band (a switchback), so they must NOT overlap in X or the
-      // resolver (keeps the higher top) would snap a climber up a whole floor at
-      // the seam. So we ABUT exactly at the shared centre edge (ixMin+laneW) —
-      // no inset there closes the seam gap — and overhang only OUTWARD, toward
-      // the stair WALL, so the wall-side gap is covered too. Result: continuous
-      // X coverage across the full stair width with no levitation strip.
+      // same z-band (a switchback), so they must NOT overlap in X or the resolver
+      // (keeps the higher top) would snap a climber up a whole floor at the seam.
+      // They ABUT exactly at the shared centre edge (ixMin+laneW) and overhang
+      // only OUTWARD toward the stair wall — continuous X coverage, no levitation
+      // strip. The Z AABB runs the slope plus an overlap margin into BOTH
+      // landings; t is clamped in physics.js so the extension is FLAT at the
+      // floor top. Clamped to interior z so no phantom shelf pokes through a wall.
       const ax0 = ox + lx0 - (leftLane ? OUT_OVL : 0);
       const ax1 = ox + lx0 + laneW + (leftLane ? 0 : OUT_OVL);
-      // Z AABB runs the slope plus an overlap margin into BOTH landings (this
-      // flight's top landing and the previous flight's). The slope itself
-      // (z0..z1) is unchanged; physics.js clamps t to [0,1], so the extended
-      // band is FLAT at the correct floor height and overlaps the landings.
-      // Clamped to the interior z-range so the flat extension never pokes a
-      // phantom shelf out through the front/back wall.
       const az0 = Math.max(oz + izMin, oz + Math.min(startZ, rampEndZ) - Z_OVL);
       const az1 = Math.min(oz + izMax, oz + Math.max(startZ, rampEndZ) + Z_OVL);
       const ramp = {
@@ -2488,20 +2648,64 @@
         ramp: { z0: oz + startZ, z1: oz + rampEndZ, y0: k * FH, y1: (k + 1) * FH },
       };
       CBZ.platforms.push(ramp); plats.push(ramp);
-      const runLen = Math.abs(rampEndZ - startZ), runDepth = runLen / nSteps, rise = FH / nSteps;
+      const runLen = Math.abs(rampEndZ - startZ), runDepth = runLen / nSteps;
+      // ---- DECORATIVE TREADS + RISERS (collision-off; merged via dbox) ----
+      // Each step: a flat tread box at its top, a thin riser box at its face.
+      // Sits ON the ramp surface so the visible step matches where you stand.
       for (let i = 1; i <= nSteps; i++) {
-        const vtop = k * FH + (i - 0.5) * rise, cz2 = startZ + dir * (i - 0.5) * runDepth;
-        lbox(lxc, vtop - 0.13, cz2, laneW - 0.16, 0.26, runDepth + 0.04, 0xa7adb5, { cast: false });
+        const vtop = k * FH + i * rise;                          // this step's top
+        const cz2 = startZ + dir * (i - 0.5) * runDepth;         // tread centre Z
+        dbox(lxc, vtop - 0.03, cz2, laneW - 0.12, 0.06, runDepth + 0.03, STEP_COL);   // tread slab
+        const riserZ = startZ + dir * (i - 1) * runDepth + dir * 0.02;                 // riser face Z
+        dbox(lxc, vtop - rise / 2, riserZ, laneW - 0.18, rise, 0.05, STRINGER_COL);    // riser
       }
-      // LANDING: full stair width, deepened so it bridges the switchback turn —
-      // it overlaps the END of this flight's ramp AND the START of the next
-      // flight's ramp (which begins at endZ on the opposite lane). The Z span is
-      // clamped to the interior so it sits flush with the turn wall, then the
-      // box is rebuilt from the clamped bounds so depth and centre stay matched.
-      const lz0 = Math.max(izMin, Math.min(rampEndZ, endZ) - 0.55);
-      const lz1 = Math.min(izMax, Math.max(rampEndZ, endZ) + 0.55);
+      // ---- STRINGERS: two thin sloped boxes per flight (collision-off). A box
+      // can't shear, so we approximate the slope with a thin diagonal box rotated
+      // is overkill for a deco batch; instead lay one slim box per few treads is
+      // costly — use one centred sloped "skirt" via per-step thin edge segments
+      // folded into the deco batch (cheap, reads as a built stringer edge). ----
+      for (const sx of [-1, 1]) {
+        const ex = lxc + sx * (laneW / 2 - 0.04);
+        for (let i = 1; i <= nSteps; i++) {
+          const vtop = k * FH + i * rise, cz2 = startZ + dir * (i - 0.5) * runDepth;
+          dbox(ex, vtop - rise * 0.5 - 0.02, cz2, 0.05, rise + 0.06, runDepth + 0.03, STRINGER_COL);
+        }
+      }
+      // ---- LANDING: full stair width, deep enough to bridge the switchback turn
+      // (overlaps the END of this flight's ramp AND the START of the next, which
+      // begins at endZ on the opposite lane). Clamped to interior z so it sits
+      // flush with the turn wall. THE flat collider at the turn. ----
+      const lz0 = Math.max(izMin, Math.min(rampEndZ, endZ) - 0.6);
+      const lz1 = Math.min(izMax, Math.max(rampEndZ, endZ) + 0.6);
       const lzc = (lz0 + lz1) / 2, landD = lz1 - lz0;
       lbox(ixMin + stairW / 2, (k + 1) * FH - 0.08, lzc, stairW + 2 * OUT_OVL, 0.2, landD, 0xb4b9c1, { plat: true, los: true, cast: false });
+      // ---- PREMIUM RAILINGS (deco, merged): a sloped handrail per flight on the
+      // OPEN (centre) edge, balusters every ~2 treads, and newel posts at each
+      // flight end. Single shared material → folds into the deco batch. ----
+      const railX = leftLane ? (lx0 + laneW - 0.06) : (lx0 + 0.06);   // open (centre) edge
+      const railH = 0.95;                                              // handrail height above tread
+      // balusters (one thin vertical box every other step)
+      for (let i = 0; i <= nSteps; i += 2) {
+        const bz = startZ + dir * i * runDepth;
+        const by = k * FH + i * rise;
+        dbox(railX, by + railH / 2, bz, 0.05, railH, 0.05, RAIL_COL);
+      }
+      // sloped top handrail: one slim box laid along the flight at stair pitch.
+      // (Axis-aligned thin box spanning the run; sits at handrail height. A box
+      // can't tilt without rotation, so we step it: a short box per ~3 treads
+      // following the slope reads as a continuous rail and stays in the batch.)
+      for (let i = 0; i < nSteps; i += 3) {
+        const seg = Math.min(3, nSteps - i);
+        const z0r = startZ + dir * i * runDepth, z1r = startZ + dir * (i + seg) * runDepth;
+        const zc = (z0r + z1r) / 2, segD = Math.abs(z1r - z0r) + 0.05;
+        const yc = k * FH + (i + seg / 2) * rise + railH;
+        dbox(railX, yc, zc, 0.07, 0.08, segD, RAIL_COL);
+      }
+      // newel posts at both ends of the flight
+      for (const nz of [startZ, rampEndZ]) {
+        const ny = k * FH + (nz === startZ ? 0 : (Math.abs(rampEndZ - startZ) / runDepth) * rise);
+        dbox(railX, ny + (railH + 0.12) / 2, nz, 0.09, railH + 0.12, 0.09, RAIL_COL);
+      }
     }
 
     // ---- FACADE MASSING (all flat opaque deco boxes; merged by flushDeco) --
@@ -2553,9 +2757,19 @@
     }
     flushDeco();
 
+    // PER-FLOOR ARRIVAL HEIGHTS (ground..roof) for the elevator agent's multi-
+    // stop logic (elevators.js consumes b.floorTops). Each entry is the exact
+    // slab-TOP a rider stands on at that floor: the foundation floor's walkable
+    // top is 0.14 (lbox(0,-0.21,...,0.7,...) → top -0.21+0.35=0.14), and every
+    // upper floor L=1..storeys is the slab at lbox(...,L*FH-0.1,...,0.2,...) →
+    // top L*FH. floorTops[0]=ground, floorTops[storeys]=roof. Real slab math.
+    const floorTops = [0.14];
+    for (let L = 1; L <= storeys; L++) floorTops.push(L * FH);
+
     return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
+      floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
   }
@@ -2624,6 +2838,164 @@
     if (side === 1) return { x: ox, z: oz + d / 2, nx: 0, nz: -1 };
     if (side === 2) return { x: ox - w / 2, z: oz, nx: 1, nz: 0 };
     return { x: ox + w / 2, z: oz, nx: -1, nz: 0 };
+  }
+
+  // ---- REUSABLE INTERIOR ROOM-KIT ----------------------------------------
+  // WHY: lots are huge (usable ~27-29u square, FH=4.6) but the old furnishers
+  // dropped a sparse scatter into ONE undivided box — every interior read bare
+  // and unintentional. roomKit() is the shared layer that turns a plate into
+  // PROGRAMMED ROOMS: thin partition walls (with real doorways) + a furniture-set
+  // vocabulary. Everything is draw-call-cheap: partitions/furniture are all
+  // cast:false, NON-collider, NON-los, no userData, ONE shared wall colour (PCOL)
+  // → core/batch.js folds them into its colour buckets (≈0 extra draw calls), and
+  // because they carry no y1 collider they're invisible to the carve/breach picker.
+  // Every placement is gated through clearFloorPoint so the door aisle / stair
+  // strip / elevator shaftRects stay walkable. baseY lifts the whole kit onto an
+  // upper floor (the furnishPenthouse/furnishHome precedent).
+  const PWT = 0.16;          // thin partition thickness (one place, shared by pool floor too)
+  const PCOL = 0xb9bcc4;     // one shared partition colour bucket
+  function roomKit(b, baseY) {
+    const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
+    const WALLH = FHl - 0.05;
+    // usable band, clear of the -x stair strip + facade walls
+    const xLo = (b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 0.4) : (-W / 2 + (b.wt || WT) + 0.4));
+    const xHi = W / 2 - (b.wt || WT) - 0.4;
+    const zLo = -D / 2 + (b.wt || WT) + 0.4;
+    const zHi = D / 2 - (b.wt || WT) - 0.4;
+    // clearFloorPoint-gated opaque box (cast:false, batch-safe, NON-collider)
+    function put(x, y, z, w, h, d, c, pad) {
+      if (b.clearFloorPoint && !b.clearFloorPoint(x, z, pad == null ? 0.7 : pad)) return false;
+      b.lbox(x, Y + y, z, w, h, d, c, { cast: false });
+      return true;
+    }
+    function glow(x, y, z, w, h, d, c, ei, pad) {
+      if (b.clearFloorPoint && !b.clearFloorPoint(x, z, pad == null ? 0.7 : pad)) return false;
+      b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
+      return true;
+    }
+    // a full-height thin partition running along X at fixed z (x0..x1), split into
+    // ≤2 spans around a doorway centred at gapX (width gapW) with a lintel over it.
+    // NON-collider/NON-los so it batch-folds + the carve/breach picker ignores it.
+    function wallX(z, x0, x1, gapX, gapW) {
+      gapW = gapW || 1.6;
+      const lo = Math.min(x0, x1), hi = Math.max(x0, x1);
+      const g0 = gapX != null ? gapX - gapW / 2 : hi + 1, g1 = gapX != null ? gapX + gapW / 2 : hi + 1;
+      const segs = gapX != null && gapX > lo && gapX < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]];
+      for (let i = 0; i < segs.length; i++) {
+        const s0 = segs[i][0], s1 = segs[i][1]; if (s1 - s0 < 0.2) continue;
+        b.lbox((s0 + s1) / 2, Y + WALLH / 2, z, s1 - s0, WALLH, PWT, PCOL, { cast: false });
+      }
+      if (gapX != null && gapX > lo && gapX < hi)   // lintel over the doorway so it reads as a portal
+        b.lbox(gapX, Y + WALLH - 0.18, z, gapW, 0.36, PWT, PCOL, { cast: false });
+    }
+    // a full-height thin partition running along Z at fixed x (z0..z1), doorway at gapZ.
+    function wallZ(x, z0, z1, gapZ, gapW) {
+      gapW = gapW || 1.6;
+      const lo = Math.min(z0, z1), hi = Math.max(z0, z1);
+      const g0 = gapZ != null ? gapZ - gapW / 2 : hi + 1, g1 = gapZ != null ? gapZ + gapW / 2 : hi + 1;
+      const segs = gapZ != null && gapZ > lo && gapZ < hi ? [[lo, g0], [g1, hi]] : [[lo, hi]];
+      for (let i = 0; i < segs.length; i++) {
+        const s0 = segs[i][0], s1 = segs[i][1]; if (s1 - s0 < 0.2) continue;
+        b.lbox(x, Y + WALLH / 2, (s0 + s1) / 2, PWT, WALLH, s1 - s0, PCOL, { cast: false });
+      }
+      if (gapZ != null && gapZ > lo && gapZ < hi)
+        b.lbox(x, Y + WALLH - 0.18, gapZ, PWT, 0.36, gapW, PCOL, { cast: false });
+    }
+    return { W: W, D: D, FHl: FHl, Y: Y, xLo: xLo, xHi: xHi, zLo: zLo, zHi: zHi, put: put, glow: glow, wallX: wallX, wallZ: wallZ };
+  }
+
+  // ---- FURNITURE-SET VOCABULARY ------------------------------------------
+  // Each set takes a roomKit `k` and a room rect {x0,x1,z0,z1} (building-local)
+  // and drops a focal-point-oriented cluster of ~4-8 cast:false boxes. Every
+  // piece routes through k.put/k.glow so it stays off the aisle. Reused by the
+  // apartment / home / office / shop programs below. WHY-first: each set reads as
+  // a real, purposeful room, not scattered furniture.
+  function rcx(r) { return (r.x0 + r.x1) / 2; }
+  function rcz(r) { return (r.z0 + r.z1) / 2; }
+  function setBedroom(k, r, linen) {
+    linen = linen || 0x6b7da0;
+    const cx = rcx(r), z0 = r.z0;
+    k.put(cx, 0.02, rcz(r), Math.min(r.x1 - r.x0 - 0.6, 3.2), 0.04, Math.min(r.z1 - r.z0 - 0.6, 3.0), 0x4a3f4a, 1.2);  // rug
+    k.put(cx, 0.35, z0 + 1.3, 2.0, 0.4, 1.7, 0x4a4036, 1.0);          // bed frame AGAINST wall
+    k.put(cx, 0.62, z0 + 1.3, 1.9, 0.2, 1.6, linen, 1.0);             // mattress
+    k.put(cx, 0.8, z0 + 0.6, 1.9, 0.22, 0.5, 0xe8e8ee, 1.0);          // pillows
+    k.put(cx, 1.15, z0 + 0.2, 2.1, 0.95, 0.16, 0x55606e, 1.0);        // headboard against wall
+    for (const s of [-1, 1]) { k.put(cx + s * 1.35, 0.4, z0 + 0.7, 0.5, 0.5, 0.5, 0x55452e, 0.9); }  // 2 nightstands
+    k.glow(cx + 1.35, 0.8, z0 + 0.7, 0.36, 0.14, 0.36, 0xffe6b0, 0.5, 0.9);   // lamp
+    k.put(r.x1 - 0.6, 1.1, rcz(r), 0.6, 2.0, Math.min(r.z1 - r.z0 - 1.2, 2.4), 0x2e2620, 0.9);  // wardrobe against far wall
+  }
+  function setLiving(k, r, sofa) {
+    sofa = sofa || 0x8a5a2b;
+    const cx = rcx(r), cz = rcz(r);
+    k.put(cx, 0.02, cz, Math.min(r.x1 - r.x0 - 0.6, 3.4), 0.04, Math.min(r.z1 - r.z0 - 0.8, 2.8), 0x4a3f55, 1.4);  // rug
+    k.put(cx, 0.45, r.z1 - 1.0, 2.6, 0.55, 0.9, sofa, 1.1);           // sofa FLOATED, back to +z, ≥0.9 walkway behind
+    k.put(cx, 0.88, r.z1 - 0.7, 2.6, 0.5, 0.22, sofa, 1.1);          // sofa back
+    k.put(cx, 0.34, cz, 1.4, 0.34, 0.8, 0x6b4a2a, 0.9);              // coffee table
+    k.put(cx, 0.4, r.z0 + 0.3, Math.min(r.x1 - r.x0 - 0.8, 3.2), 0.8, 0.4, 0x2a2f37, 0.9);  // media wall console
+    k.put(cx, 1.4, r.z0 + 0.22, Math.min(r.x1 - r.x0 - 1.4, 2.6), 1.2, 0.1, 0x14171c, 0.9);  // TV on the media wall
+    k.glow(cx, 1.4, r.z0 + 0.16, Math.min(r.x1 - r.x0 - 1.8, 2.2), 0.9, 0.05, 0x39516a, 0.4, 0.9);  // screen glow
+  }
+  function setKitchen(k, r) {
+    const cz = rcz(r);
+    // L counter on 2 walls: a back-wall run + a side-wall run
+    k.put(rcx(r), 0.55, r.z1 - 0.55, r.x1 - r.x0 - 0.8, 1.0, 0.8, 0x55606e, 0.9);  // back-wall counter
+    k.put(rcx(r), 1.08, r.z1 - 0.55, r.x1 - r.x0 - 0.7, 0.08, 0.9, 0xe6e8ee, 0.9); // worktop
+    k.put(r.x1 - 0.55, 0.55, cz, 0.8, 1.0, r.z1 - r.z0 - 1.6, 0x55606e, 0.9);      // side-wall run (L)
+    k.put(r.x1 - 0.55, 1.08, cz, 0.9, 0.08, r.z1 - r.z0 - 1.6, 0xe6e8ee, 0.9);     // worktop
+    k.put(rcx(r), 1.95, r.z1 - 0.4, r.x1 - r.x0 - 1.0, 0.7, 0.4, 0x49505b, 0.9);   // upper cabinets
+    k.put(rcx(r), 0.55, cz, 1.6, 1.0, 1.0, 0x49505b, 1.0);                          // island
+    k.put(rcx(r), 1.08, cz, 1.7, 0.08, 1.1, 0xc8ccd4, 1.0);                         // island top
+    for (const s of [-1, 1]) k.put(rcx(r) + s * 0.55, 0.45, cz - 0.9, 0.38, 0.9, 0.38, 0x3a2b1e, 0.9);  // 2 stools
+    k.put(r.x0 + 0.6, 0.55, r.z1 - 0.55, 0.6, 1.0, 0.6, 0x2a2f37, 0.9);             // range/sink block
+  }
+  function setBath(k, r) {
+    const cx = rcx(r), cz = rcz(r);
+    k.put(cx, 0.02, cz, r.x1 - r.x0 - 0.4, 0.04, r.z1 - r.z0 - 0.4, 0x3a4250, 1.0);  // tile floor
+    k.put(r.x1 - 0.8, 0.3, r.z1 - 1.0, 1.4, 0.6, 1.6, 0xd8dde6, 0.8);                // tub/shower base
+    k.put(r.x1 - 0.8, 1.4, r.z1 - 1.0, 1.4, 1.6, 0.08, GLASS, 0.8);                  // shower glass
+    k.put(r.x0 + 0.6, 0.45, cz, 0.7, 0.9, 1.2, 0x55606e, 0.8);                       // vanity
+    k.put(r.x0 + 0.6, 0.92, cz, 0.8, 0.08, 1.3, 0xe6e8ee, 0.8);                      // vanity top
+    k.put(cx, 0.3, r.z0 + 0.6, 0.5, 0.6, 0.6, 0xe8e8ee, 0.8);                        // toilet
+  }
+  function setDining(k, r) {
+    const cx = rcx(r), cz = rcz(r);
+    k.put(cx, 0.02, cz, Math.min(r.x1 - r.x0 - 0.6, 3.4), 0.04, Math.min(r.z1 - r.z0 - 0.6, 3.0), 0x3a2f3a, 1.4);  // rug
+    k.put(cx, 0.5, cz, 1.4, 0.5, 2.4, 0x6b4a2a, 1.2);                                // table centred, ≥1.2 clearance
+    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) k.put(cx + s * 1.0, 0.45, cz + i * 0.85, 0.45, 0.9, 0.45, 0x49505b, 1.0);  // chairs
+  }
+  function setReception(k, r, accent) {
+    accent = accent || 0x9fd8ee;
+    const cx = rcx(r), cz = rcz(r);
+    k.put(cx, 0.5, cz, 2.4, 1.0, 0.9, 0x49505b, 1.0);                                // reception desk
+    k.put(cx, 1.08, cz, 2.5, 0.08, 1.0, 0xe6e8ee, 1.0);                              // desk top
+    for (const s of [-1, 1]) { k.put(cx + s * 1.8, 0.42, r.z1 - 0.9, 0.7, 0.4, 0.7, 0x2a2f37, 0.9); k.put(cx + s * 1.8, 0.85, r.z1 - 0.6, 0.7, 0.5, 0.16, 0x2a2f37, 0.9); }  // 2 waiting chairs
+    k.glow(cx, 2.2, r.z0 + 0.18, 2.6, 0.9, 0.06, accent, 0.4, 0.9);                  // logo wall
+  }
+  function setMeeting(k, r) {
+    const cx = rcx(r), cz = rcz(r);
+    // a glass-wall conference room: table + chairs + a wall screen
+    k.put(cx, 0.5, cz, Math.min(r.x1 - r.x0 - 1.6, 2.6), 0.5, Math.min(r.z1 - r.z0 - 1.6, 1.4), 0x3a2b1e, 1.0);  // table
+    for (const s of [-1, 1]) for (let i = -1; i <= 1; i++) k.put(cx + i * 0.9, 0.45, cz + s * 0.95, 0.42, 0.9, 0.42, 0x2a2f37, 0.9);  // chairs
+    k.put(cx, 1.5, r.z0 + 0.2, Math.min(r.x1 - r.x0 - 1.4, 2.2), 1.1, 0.1, 0x14171c, 0.9);  // wall screen
+    k.glow(cx, 1.5, r.z0 + 0.15, Math.min(r.x1 - r.x0 - 1.8, 1.8), 0.8, 0.05, 0x39516a, 0.4, 0.9);
+  }
+  function setBreak(k, r) {
+    const cx = rcx(r), cz = rcz(r);
+    k.put(cx, 0.55, r.z1 - 0.5, Math.min(r.x1 - r.x0 - 1.0, 2.4), 1.0, 0.7, 0x55606e, 0.9);  // counter
+    k.put(cx, 1.08, r.z1 - 0.5, Math.min(r.x1 - r.x0 - 0.9, 2.5), 0.08, 0.8, 0xe6e8ee, 0.9); // counter top
+    k.put(r.x0 + 0.7, 1.0, r.z1 - 0.5, 0.8, 1.8, 0.8, 0xd8dde6, 0.9);                // fridge
+    k.put(cx, 0.45, cz, 1.1, 0.5, 1.1, 0x6b4a2a, 0.9);                               // small table
+    for (const s of [-1, 1]) k.put(cx + s * 0.9, 0.42, cz, 0.42, 0.85, 0.42, 0x2a2f37, 0.9);  // chairs
+  }
+  function setBackroom(k, r) {
+    // tall shelving runs + crates: a stockroom that reads as the back of house
+    for (const s of [-1, 1]) {
+      const x = s < 0 ? r.x0 + 0.6 : r.x1 - 0.6;
+      k.put(x, 1.2, rcz(r), 0.6, 2.2, Math.min(r.z1 - r.z0 - 0.8, 4.0), 0x55606e, 0.8);  // tall shelving
+    }
+    k.put(rcx(r), 0.4, r.z0 + 0.8, 1.0, 0.8, 1.0, 0x6b5a3a, 0.9);                    // crate stack
+    k.put(rcx(r), 1.1, r.z0 + 0.8, 0.9, 0.6, 0.9, 0x5a4a2e, 0.9);                    // crate stack
+    k.put(rcx(r) + 1.2, 0.45, rcz(r), 1.0, 0.9, 1.0, 0x6b5a3a, 0.9);                 // crate
   }
 
   // ---- interior furnishing ------------------------------------------------
@@ -2738,9 +3110,8 @@
       // a WASTE BIN by the far front corner
       const wb = pt(4.0, -(halfTan - 0.9), 0.6);
       if (wb) decor(wb, 0.32, 0.42, 0.64, 0.42, 0x3a4048);
-      // a WALL-CLOCK plane high on a side wall (white face, accent ring)
-      const wc = pt(halfIn + 1.2, -(halfTan - 0.18), 0.6);
-      if (wc) { decor(wc, 2.6, along ? 0.03 : 0.7, 0.7, along ? 0.7 : 0.03, 0xeef2f6); glow(wc, 2.6, along ? 0.02 : 0.78, 0.78, along ? 0.78 : 0.02, accent || 0x9fd8ee, 0.25); }
+      // (a purely-decorative wall clock used to hang here — CUT: no time read,
+      //  no purpose. The space stays open instead of carrying a dumb prop.)
       // a couple of customer STOOLS / a waiting CHAIR near the entrance
       for (const side of [-1, 1]) {
         const s = pt(3.4, side * (halfTan - 1.0), 0.6);
@@ -2748,6 +3119,41 @@
       }
     }
     baseClutter(kindAccent(kind));
+
+    // ---- UNIVERSAL BACK-OF-HOUSE PARTITION (every non-showroom trade) ----------
+    // WHY: a shop is a SALES FLOOR (front) backed by a STOCKROOM the customer
+    // never sees — the old single-box interior had no such read. A thin full-height
+    // partition runs across the room behind the counter (at backDepth from the door
+    // wall), with a ≥1.6u doorway gap so the clerk can reach the back. The back
+    // band is filled with shelving/crates (setBackroom). Showroom trades
+    // (carlot/chop/realtor) keep their open display floor — they return early below.
+    const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor"
+      && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
+    if (backWalled) {
+      const WALLH = FHl - 0.05;
+      const backDepth = 2 * halfIn - 5.5;            // wall sits ~5.5u in front of the back wall
+      // doorway centred (lat 0) — keep one gap so the stockroom is reachable.
+      const gapW = 1.7, segHalf = halfTan;
+      const spans = [[-segHalf, -gapW / 2], [gapW / 2, segHalf]];
+      for (let s = 0; s < spans.length; s++) {
+        const a0 = spans[s][0], a1 = spans[s][1]; if (a1 - a0 < 0.2) continue;
+        const latC = (a0 + a1) / 2, len = a1 - a0;
+        const lx = inx * (-halfIn + backDepth) + tx * latC;
+        const lz = inz * (-halfIn + backDepth) + tz * latC;
+        const bw = along ? PWT : len, bd = along ? len : PWT;
+        b.lbox(lx, WALLH / 2, lz, bw, WALLH, bd, PCOL, { cast: false });
+      }
+      // lintel over the doorway
+      const llx = inx * (-halfIn + backDepth), llz = inz * (-halfIn + backDepth);
+      b.lbox(llx, WALLH - 0.18, llz, along ? PWT : gapW, 0.36, along ? gapW : PWT, PCOL, { cast: false });
+      // STOCKROOM fill behind the wall (setBackroom: tall shelving + crates). The
+      // back band runs from the partition (backDepth) to the back wall, across the
+      // tangent — convert those IN-frame corners to a building-local axis rect.
+      const k = roomKit(b, 0);
+      const cA = [inx * (-halfIn + backDepth) + tx * (-(halfTan - 0.5)), inz * (-halfIn + backDepth) + tz * (-(halfTan - 0.5))];
+      const cB = [inx * (-halfIn + (2 * halfIn - 0.8)) + tx * (halfTan - 0.5), inz * (-halfIn + (2 * halfIn - 0.8)) + tz * (halfTan - 0.5)];
+      setBackroom(k, { x0: Math.min(cA[0], cB[0]), x1: Math.max(cA[0], cB[0]), z0: Math.min(cA[1], cB[1]), z1: Math.max(cA[1], cB[1]) });
+    }
 
     // dispatch to the trade-specific dresser
     switch (kind) {
@@ -3046,16 +3452,15 @@
           const ss = pt(4.6, halfTan - 1.0, 0.7);
           if (ss) { decor(ss, 0.85, 0.08, 1.7, 0.08, 0x8a939c); glow(ss, 1.5, along ? 0.05 : 1.0, 0.5, along ? 1.0 : 0.05, 0x4fd0a0, 0.5); }
         } else {
-          // car lot / chop shop showroom: a REAL detailed car on a display pad in
-          // the centre (the spot the layout keeps clear), facing the glass front —
-          // so the dealership/garage actually SHOWS the car, not an empty box.
+          // car lot / chop shop SHOWROOM: a full display floor — a GRID of
+          // turntable pads, each holding a DIFFERENT car from the catalog with a
+          // name/price placard, so the dealership actually shows its inventory
+          // instead of one lonely box. Spread across EVERY storey of the building
+          // (showroomFloor is also called per-upper-floor by the city builder) so
+          // every floor is full of cars. A parts/tyre wall keeps the trade read.
           wallShelves({ body: 0x3a352e, top: 0x55606e, h: 1.4, count: 2, span: 2.0 });
           for (const st of shelfTops) stockRow(st, [0x2a2f37, 0x44505c], 4, 0.3, 0.3);   // tyre/part stacks
-          const cp = pt(halfIn, 0, 1.2);
-          if (cp) {
-            b.lbox(cp.x, 0.06, cp.z, 3.2, 0.12, 3.2, 0x26282e, { cast: false });   // low display turntable pad
-            realCarVisual(b, cp.x, 0.12, cp.z, Math.atan2(-inx, -inz), pickCarModel(kind === "chop" ? 0x8a1f24 : 0xe88a3c), false);
-          }
+          showroomFloor(b, kind, door, 0, 0);   // ground floor = catalog start
         }
         break;
       }
@@ -3068,9 +3473,96 @@
         break;
       }
       default: {
-        // generic store: tidy stocked shelving on both walls + display island
+        // generic store: stocked wall shelving + a central GONDOLA aisle of
+        // product the customer walks BETWEEN to the counter — a real shop floor,
+        // not bare walls. The gondola is gated so it never crosses the door aisle.
         wallShelves({ count: 3 });
         for (const st of shelfTops) stockRow(st, [0xff9e6b, 0x6bb6ff, 0x4caf6e, 0xc792ea], 4, 0.24, 0.24);
+        // 2-3 GONDOLA ROWS the customer walks between (a denser sales floor).
+        for (const gd of [halfIn - 2.2, halfIn + 0.6, halfIn + 3.4]) {
+          if (gd > 2 * halfIn - 6.0) break;            // stop short of the back-of-house wall
+          const g = pt(gd, 0, 1.0);
+          if (g) {
+            decor(g, 0.55, along ? 1.2 : 3.0, 1.1, along ? 3.0 : 1.2, 0x55606e);
+            const gtop = { p: g, top: 1.16, across: along ? 1.0 : 2.6, deep: along ? 2.6 : 1.0 };
+            stockRow(gtop, [0x4caf6e, 0xff9e6b, 0x6bb6ff], 5, 0.22, 0.3);
+          }
+        }
+      }
+    }
+
+    // ---- PER-KIND PARTITION ACCENTS (read on top of the back-of-house wall) ----
+    // Small enclosed sub-rooms that make each trade read as itself. All cast:false
+    // / batch-folded; every wall span carries a doorway gap and every piece is
+    // clearFloorPoint-gated. A thin partition box along the tangent at `inDepth`.
+    function partAlong(inDepth, lat0, lat1, c) {
+      const latC = (lat0 + lat1) / 2, len = Math.abs(lat1 - lat0);
+      if (len < 0.2) return;
+      const lx = inx * (-halfIn + inDepth) + tx * latC, lz = inz * (-halfIn + inDepth) + tz * latC;
+      b.lbox(lx, (FHl - 0.05) / 2, lz, along ? PWT : len, FHl - 0.05, along ? len : PWT, c || PCOL, { cast: false });
+    }
+    // a thin partition perpendicular (running INWARD) at a fixed tangent `lat`.
+    function partIn(d0, d1, lat, c) {
+      const dC = (d0 + d1) / 2, len = Math.abs(d1 - d0);
+      if (len < 0.2) return;
+      const lx = inx * (-halfIn + dC) + tx * lat, lz = inz * (-halfIn + dC) + tz * lat;
+      b.lbox(lx, (FHl - 0.05) / 2, lz, along ? len : PWT, FHl - 0.05, along ? PWT : len, c || PCOL, { cast: false });
+    }
+    if ((2 * halfTan) >= 8 && (2 * halfIn) >= 13) {
+      if (kind === "clothing") {
+        // a row of FITTING BOOTHS against one side wall (3 small stalls w/ curtains)
+        const lat = halfTan - 1.3;
+        for (let i = 0; i < 3; i++) {
+          const d = 5.0 + i * 2.2;
+          if (d > 2 * halfIn - 6.0) break;
+          partIn(d - 0.9, d + 0.9, lat - 0.9);                       // booth back-divider
+          const p = pt(d, lat, 0.8);
+          if (p) decor(p, 1.1, along ? 1.6 : 0.1, 2.2, along ? 0.1 : 1.6, 0x4a4250);  // curtain front
+        }
+      } else if (kind === "food" || kind === "bar") {
+        // an ENCLOSED KITCHEN behind the counter: a walled cell with a pass window
+        const kd = 2 * halfIn - 5.0;
+        partAlong(kd, -(halfTan - 0.6), -1.0);                       // kitchen front wall (one side of a pass gap)
+        partAlong(kd, 1.0, halfTan - 0.6);
+        const kp = pt(2 * halfIn - 3.0, halfTan - 1.6, 0.8);
+        if (kp) decor(kp, 0.55, along ? 0.9 : 2.0, 1.0, along ? 2.0 : 0.9, 0x6a7078);  // a steel prep counter inside
+      } else if (kind === "bank") {
+        // a walled VAULT room in the back corner + a manager office beside it
+        const vd0 = 2 * halfIn - 6.0, vlat = halfTan - 2.0;
+        partAlong(vd0, vlat - 2.2, vlat + 2.2);                      // vault front wall (no gap — vault door is the read)
+        partIn(vd0, 2 * halfIn - 0.5, vlat - 2.2);                   // vault -side wall
+        const vp = pt(2 * halfIn - 3.0, vlat, 0.8);
+        if (vp) { decor(vp, 1.0, along ? 1.4 : 1.4, 2.0, along ? 1.4 : 1.4, 0x3a4250); glow(vp, 1.0, 0.3, 0.6, 0.3, 0x5b8bff, 0.4); }  // vault door
+        // manager office on the opposite side (a glass-front cell)
+        partIn(5.0, 9.0, -(halfTan - 2.0));
+        partAlong(9.0, -(halfTan - 0.6), -(halfTan - 4.0), GLASS);
+      } else if (kind === "hospital") {
+        // partitioned EXAM ROOMS along one side wall (2-3 curtained bays)
+        const lat = halfTan - 1.8;
+        partIn(5.0, 2 * halfIn - 4.0, lat - 1.6);                    // corridor wall fronting the exam bays
+        for (let i = 0; i < 3; i++) {
+          const d = 6.0 + i * 3.2; if (d > 2 * halfIn - 5.0) break;
+          partAlong(d, lat - 1.6, lat + 1.4);                       // exam-room dividers
+          const bp = pt(d - 1.4, lat, 0.8);
+          if (bp) decor(bp, 0.45, along ? 0.7 : 1.8, 0.5, along ? 1.8 : 0.7, 0xe6e8ee);  // exam bed
+        }
+      } else if (kind === "gym") {
+        // a LOCKER-ROOM partition walling off the back corner (lockers inside)
+        const ld = 2 * halfIn - 6.0;
+        partAlong(ld, -(halfTan - 0.6), -1.2);                      // locker-room front wall + doorway gap
+        partIn(ld, 2 * halfIn - 0.5, -1.2);
+        for (let i = 0; i < 4; i++) {
+          const lat = -(halfTan - 1.4) + i * 1.0;
+          const lp2 = pt(2 * halfIn - 2.5, lat, 0.8);
+          if (lp2) decor(lp2, 1.1, along ? 0.5 : 0.9, 2.2, along ? 0.9 : 0.5, 0x49566b);  // lockers
+        }
+      } else if (kind === "realtor") {
+        // realtor keeps its open display floor — just a small BACK OFFICE cell.
+        const od = 2 * halfIn - 5.0;
+        partAlong(od, -(halfTan - 0.6), -1.2);                      // back-office front wall + doorway
+        partIn(od, 2 * halfIn - 0.5, -1.2);
+        const op = pt(2 * halfIn - 2.8, -(halfTan - 1.8), 0.8);
+        if (op) decor(op, 0.5, along ? 0.9 : 1.6, 1.0, along ? 1.6 : 0.9, 0x6b4a2a);  // manager desk
       }
     }
   }
@@ -3130,6 +3622,51 @@
     const fx0 = (Y > 0 && b.hasStairs) ? (-W / 2 + (b.wt || WT) + b.stairW + 0.1) : (-W / 2 + 0.7);
     const fx1 = W / 2 - 0.7;
     b.lbox((fx0 + fx1) / 2, Y + 0.02, 0, Math.max(1, fx1 - fx0), 0.04, D - 1.4, FLOORHEX, { cast: false });
+
+    // ---- TIER-SCALED PROGRAMMED HOME (large plates, t>=2) ----------------------
+    // WHY: a home should read as ROOMS, not one open box. The room COUNT scales
+    // off the tier so each rung of the ladder feels distinct:
+    //   t2 flat  : enclosed bedroom + bath nook, the rest open living/kitchen.
+    //   t3 loft  : two enclosed bedrooms + bath + open living/kitchen/dining.
+    //   t4 aerie : a bedroom SUITE (walk-in + ensuite) + a great-room.
+    // Partitions batch-fold; every piece is clearFloorPoint-gated. Studios (t<=1)
+    // and tiny plates fall through to the open-plan scatter below.
+    const kh = roomKit(b, baseY);
+    if (t >= 2 && (kh.xHi - kh.xLo) >= 10 && (kh.zHi - kh.zLo) >= 10) {
+      const linenH = [0,0, 0x5a6f9a, 0x7a6f8c, 0x8a6f9c][Math.min(4, t)];
+      const sofaH = t >= 4 ? 0x5a4f6a : 0x8a5a2b;
+      const midX = kh.xLo + (kh.xHi - kh.xLo) * (t >= 3 ? 0.42 : 0.40);   // private wing on the -x side, living on +x
+      const wantBeds = Math.max(1, Math.min(2, t >= 3 ? 2 : 1));
+      // VERTICAL partition splitting the private bedroom wing from the great-room
+      const wingDoorZ = kh.zLo + (kh.zHi - kh.zLo) * 0.5;
+      kh.wallZ(midX, kh.zLo, kh.zHi, wingDoorZ, 1.7);
+      if (wantBeds >= 2) {
+        // split the wing into two bedrooms + a shared bath strip
+        const splitZ = kh.zLo + (kh.zHi - kh.zLo) * 0.5;
+        kh.wallX(splitZ, kh.xLo, midX, (kh.xLo + midX) / 2, 1.6);
+        setBedroom(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: kh.zLo + 0.3, z1: splitZ - 0.3 }, linenH);
+        // second bedroom OR an ensuite bath for the lower half
+        if (t >= 4) setBath(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 });
+        else setBedroom(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 }, 0x7a6f8c);
+      } else {
+        // t2: one enclosed bedroom in the top of the wing + a bath nook below it
+        const splitZ = kh.zLo + (kh.zHi - kh.zLo) * 0.58;
+        kh.wallX(splitZ, kh.xLo, midX, (kh.xLo + midX) / 2, 1.6);
+        setBedroom(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: kh.zLo + 0.3, z1: splitZ - 0.3 }, linenH);
+        if (kh.zHi - splitZ >= 2.2) setBath(kh, { x0: kh.xLo + 0.3, x1: midX - 0.3, z0: splitZ + 0.3, z1: kh.zHi - 0.3 });
+      }
+      // t4: a WALK-IN closet carved off the bedroom suite (a slim run along -x wall)
+      if (t >= 4) {
+        kh.put(kh.xLo + 0.6, 1.1, kh.zLo + (kh.zHi - kh.zLo) * 0.25, 0.6, 2.0, 2.4, 0x2e2620, 0.8);  // wardrobe carcass
+        kh.glow(kh.xLo + 0.9, 2.0, kh.zLo + (kh.zHi - kh.zLo) * 0.25, 0.06, 0.08, 2.2, 0xfff0d0, 0.4, 0.8);  // rail light
+      }
+      // the GREAT-ROOM (+x side): living + kitchen + (t3+) a dining set
+      const greatX0 = midX + 0.3;
+      setLiving(kh, { x0: greatX0, x1: kh.xHi, z0: kh.zLo + 0.3, z1: kh.zLo + (kh.zHi - kh.zLo) * 0.5 - 0.3 }, sofaH);
+      setKitchen(kh, { x0: greatX0, x1: kh.xHi, z0: kh.zHi - (kh.zHi - kh.zLo) * 0.36, z1: kh.zHi });
+      if (t >= 3) setDining(kh, { x0: greatX0, x1: kh.xHi, z0: kh.zLo + (kh.zHi - kh.zLo) * 0.5, z1: kh.zHi - (kh.zHi - kh.zLo) * 0.36 - 0.4 });
+      return;
+    }
 
     // PRIMARY BED in the back corner (base + mattress + pillow). Linen colour +
     // a headboard richen with tier.
@@ -3233,27 +3770,54 @@
     }
     const LINEN = [0x6b7da0, 0x7a6f8c, 0x5a6f9a, 0x6f8a7a];
     const SOFA = [0x8a5a2b, 0x55606e, 0x6b4a3a, 0x4a5a6b];
-    const RUGC = [0x5a4a4a, 0x4a3f55, 0x3f4a55, 0x554a3f];
-    const linen = LINEN[idx & 3], sofa = SOFA[(idx + 1) & 3], rug = RUGC[(idx + 2) & 3];
-    // BED in the +x front corner (frame + mattress + pillow) — the -x side is
-    // the stair strip, so the whole flat keeps to the solid half of the plate.
+    const linen = LINEN[idx & 3], sofa = SOFA[(idx + 1) & 3];
+
+    const k = roomKit(b, baseY);
+    // emissive CEILING fixture so the flat reads lit (one rare emissive piece).
+    b.lbox((k.xLo + k.xHi) / 2, Y + (b.FH || FH) - 0.28, 0, 1.8, 0.1, 0.5, 0xffd9a0, { emissive: 0xffd9a0, ei: 0.4, cast: false });
+    // tinted hardwood FLOOR slab over the solid plate (-x stair strip stays open).
+    b.lbox((k.xLo + k.xHi) / 2, Y + 0.02, 0, Math.max(1, k.xHi - k.xLo), 0.04, k.zHi - k.zLo, 0x33373f, { cast: false });
+
+    // ---- PROGRAMMED FLAT (only when the plate is big enough to zone) ----------
+    // 1 vertical + 1 horizontal partition split the solid half into: entry/hall
+    // by the door, a living room facing the facade glass, a kitchen+small dining
+    // strip across the back (+z), an enclosed bedroom in the back +x corner, and a
+    // small bath nook beside it. Doorways keep every room reachable (≥1.6u gaps).
+    if (k.xHi - k.xLo >= 10 && k.zHi - k.zLo >= 10) {
+      const midX = k.xLo + (k.xHi - k.xLo) * 0.46;   // vertical split: living (left) | private wing (right)
+      const midZ = (idx & 1) ? k.zLo + (k.zHi - k.zLo) * 0.58 : k.zLo + (k.zHi - k.zLo) * 0.42;  // horizontal split rotates by idx
+      // bedroom corner rotates by idx so stacked flats don't read cloned
+      const bedTop = (idx & 2) === 0;
+      const bedZ0 = bedTop ? k.zLo : midZ, bedZ1 = bedTop ? midZ : k.zHi;
+      const bathZ0 = bedTop ? midZ : k.zLo, bathZ1 = bedTop ? k.zHi : midZ;
+      // VERTICAL partition (along Z) at midX, doorway into the private wing
+      k.wallZ(midX, k.zLo, k.zHi, (bedZ0 + bedZ1) / 2, 1.7);
+      // split the private wing into bedroom + bath with a horizontal partition
+      k.wallX((bedZ0 + bedZ1) / 2 + (bedTop ? 1 : -1) * 0, midX, k.xHi, (midX + k.xHi) / 2, 1.6);
+      // LIVING fills the left (facade) band; KITCHEN+DINING share the back strip
+      const livR = { x0: k.xLo, x1: midX - 0.3, z0: k.zLo + 0.3, z1: midZ - 0.3 };
+      const dinR = { x0: k.xLo, x1: midX - 0.3, z0: midZ + 0.3, z1: k.zHi };
+      const bedR = { x0: midX + 0.3, x1: k.xHi, z0: bedZ0 + 0.3, z1: bedZ1 - 0.3 };
+      const bathR = { x0: midX + 0.3, x1: k.xHi, z0: bathZ0 + 0.3, z1: bathZ1 - 0.3 };
+      setLiving(k, livR, sofa);
+      setKitchen(k, dinR);
+      setBedroom(k, bedR, linen);
+      if (bathR.z1 - bathR.z0 >= 2.2) setBath(k, bathR);
+      return;
+    }
+
+    // ---- OPEN-PLAN FALLBACK (tiny plates) — the original studio dressing -------
     const bx = W / 2 - 2.0, bz = -D / 2 + 2.2;
     if (put(bx, 0.35, bz, 1.9, 0.4, 1.3, 0x4a4036, 1.1)) {
       put(bx, 0.62, bz, 1.8, 0.2, 1.25, linen, 1.1);
       put(bx, 0.8, bz - 0.45, 1.8, 0.2, 0.5, 0xe8e8ee, 1.1);
     }
-    // KITCHEN RUN along the back (+z) wall: counter body + a pale worktop
-    // (pad 1.0, the furnishHome-kitchen precedent — wall-hugging pieces gate on
-    // their centre point; a bigger pad can never clear the wall it hugs)
     const kw = Math.min(W * 0.32, 3.6), kz = D / 2 - 1.6;
     if (put(W / 2 - 2.6, 0.5, kz, kw, 1.0, 0.9, 0x55606e, 1.0))
       put(W / 2 - 2.6, 1.06, kz, kw + 0.1, 0.08, 1.0, 0xe6e8ee, 1.0);
-    // LIVING SET right of centre: rug + couch (seat + back) + coffee table
-    put(1.2, 0.02, 0.2, 3.0, 0.04, 2.4, rug, 1.6);
+    put(1.2, 0.02, 0.2, 3.0, 0.04, 2.4, 0x4a3f55, 1.6);
     if (put(1.2, 0.42, 1.0, 2.2, 0.55, 0.9, sofa, 1.2)) put(1.2, 0.85, 1.35, 2.2, 0.5, 0.22, sofa, 1.2);
     put(1.2, 0.3, -0.5, 1.1, 0.32, 0.7, 0x6b4a2a, 0.9);
-    // a FLOOR LAMP by the couch — a warm-bright shade box reads lit while
-    // staying opaque/non-emissive so the whole flat keeps batch-merging
     if (put(W / 2 - 1.2, 0.7, -0.6, 0.12, 1.4, 0.12, 0x2a2f37, 0.7))
       put(W / 2 - 1.2, 1.5, -0.6, 0.42, 0.3, 0.42, 0xffe6b0, 0.7);
   }
@@ -3319,6 +3883,45 @@
       });
     }
 
+    // ---- PARTITIONED SHELL around the bullpen (large plates only) -------------
+    // WHY: a real office isn't an open slab of desks — it has a reception you
+    // arrive into, enclosed meeting rooms along the back glass, and a break room
+    // tucked in a corner. We carve those rooms FIRST and SHRINK the bullpen grid
+    // bounds so the desks never overlap them. Partitions batch-fold (≈0 draw
+    // calls) and the desk station() / anchor math is untouched (byte-compatible).
+    const k = roomKit(b, baseY);
+    let bullZ1 = k.zHi;                          // back limit of the desk grid (shrinks if rooms claim the back)
+    let bullX1 = k.xHi;                          // +x limit of the desk grid (shrinks if a break room claims a corner)
+    const bigOffice = (k.xHi - k.xLo) >= 12 && (k.zHi - k.zLo) >= 12;
+    if (bigOffice) {
+      // RECEPTION near the door aisle, against the -z front: a desk + waiting chairs
+      const recR = { x0: k.xLo + 0.4, x1: Math.min(k.xLo + 5.5, k.xHi), z0: k.zLo + 0.4, z1: k.zLo + 3.4 };
+      setReception(k, recR, 0xeef2ff);
+      // 1-2 enclosed MEETING ROOMS along the +z back wall (glass-walled conf rooms)
+      const mzDepth = 4.2;
+      const mz0 = k.zHi - mzDepth;
+      bullZ1 = mz0 - 0.6;                        // desks stop short of the meeting strip
+      // a partition along X separating the bullpen from the back meeting strip,
+      // with a doorway in the middle so the rooms stay reachable.
+      k.wallX(mz0, k.xLo, k.xHi, (k.xLo + k.xHi) / 2, 1.7);
+      const mw = (k.xHi - k.xLo);
+      const nMeet = mw >= 18 ? 2 : 1;
+      for (let m = 0; m < nMeet; m++) {
+        const mx0 = k.xLo + m * (mw / nMeet), mx1 = k.xLo + (m + 1) * (mw / nMeet);
+        if (m > 0) k.wallZ(mx0, mz0, k.zHi, (mz0 + k.zHi) / 2, 1.6);   // divider between the two rooms
+        setMeeting(k, { x0: mx0 + 0.3, x1: mx1 - 0.3, z0: mz0 + 0.3, z1: k.zHi - 0.3 });
+      }
+      // a BREAK ROOM in the back +x corner (enclosed by 2 partitions)
+      const brW = 4.2, brD = 4.0;
+      const brX0 = k.xHi - brW, brZ1 = bullZ1, brZ0 = brZ1 - brD;
+      if (brZ0 > k.zLo + 3.5) {
+        k.wallZ(brX0, brZ0, brZ1, (brZ0 + brZ1) / 2, 1.6);            // -x wall of the break room
+        k.wallX(brZ0, brX0, k.xHi, (brX0 + k.xHi) / 2, 1.6);          // -z wall of the break room
+        setBreak(k, { x0: brX0 + 0.3, x1: k.xHi - 0.3, z0: brZ0 + 0.3, z1: brZ1 - 0.3 });
+        bullX1 = brX0 - 0.6;                     // desks stop short of the break corner... (only in the back rows)
+      }
+    }
+
     // lay desks across the SOLID half of the plate (right of the -x stairwell,
     // out to the +x wall), in columns × depth rows, so a wide core tower seats a
     // whole bullpen and a narrow walk-up a couple of desks. clearFloorPoint
@@ -3328,12 +3931,18 @@
     const xLo = (b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 1.6) : (-W / 2 + 2.0));  // stop clear of the stairwell
     const cols = Math.max(1, Math.min(4, Math.floor((xHi - xLo) / 3.0) + 1));
     const dxc = cols > 1 ? (xHi - xLo) / (cols - 1) : 0;
-    const rows = Math.max(2, Math.min(6, Math.floor((D - 3.0) / 2.6)));
-    const z0 = -D / 2 + 2.2, dz = rows > 1 ? (D - 4.4) / (rows - 1) : 0;
+    // grid runs from the front (just inside the reception/door zone) to bullZ1
+    // (short of the back meeting strip when the office is partitioned).
+    const z0 = bigOffice ? Math.max(-D / 2 + 2.2, k.zLo + 3.8) : (-D / 2 + 2.2);
+    const zEnd = bigOffice ? bullZ1 : (D / 2 - 2.2);
+    const rows = Math.max(2, Math.min(6, Math.floor((zEnd - z0) / 2.6) + 1));
+    const dz = rows > 1 ? (zEnd - z0) / (rows - 1) : 0;
     for (let c = 0; c < cols; c++) {
       const cx = xHi - c * dxc;
       for (let r = 0; r < rows; r++) {
         const cz = z0 + r * dz;
+        // skip desks that would fall inside the break-room corner
+        if (bigOffice && cx > bullX1 && cz > bullZ1 - 4.6) continue;
         // alternate which side the chair sits so back-to-back rows share an aisle
         station(cx, cz, (r & 1) ? 1 : -1);
       }
@@ -3403,6 +4012,147 @@
     // ---- statement ART on the solid back stretches ----
     glow(-W / 2 + 0.22, 2.0, 0, 0.05, 1.6, 2.6, 0xc792ea, 0.22);
     glow(0, 2.6, -D / 2 + 0.22, 2.6, 1.2, 0.05, GOLD, 0.2);
+
+    // ====================================================================
+    // FILL THE WASTED FLOOR: the bedroom/lounge/kitchen ring the perimeter and
+    // leave the deep mid-band empty. A real luxury floor zones it into private
+    // amenities. Everything point-gated so the door/stair aisle stays walkable.
+    // ====================================================================
+    const zone = (x, y, z, w, h, d, c, o) => {
+      if (!b.clearFloorPoint || b.clearFloorPoint(x, z, 1.2)) lb(x, y, z, w, h, d, c, o);
+    };
+    const zoneGlow = (x, y, z, w, h, d, c, ei) => {
+      if (!b.clearFloorPoint || b.clearFloorPoint(x, z, 1.2)) glow(x, y, z, w, h, d, c, ei);
+    };
+
+    // ---- HOME GYM in the back-CENTRE (rubber floor + rack, bench, treadmill) ----
+    const gx = 0, gz = -D / 2 + 3.4;
+    zone(gx, 0.02, gz, 5.0, 0.05, 4.0, 0x1c1f24);                                  // rubber gym floor
+    zone(gx - 1.6, 1.1, gz - 1.2, 0.16, 2.2, 1.6, 0x2a2f37);                       // squat-rack uprights
+    zone(gx - 1.6, 2.0, gz - 1.2, 0.16, 0.16, 1.6, 0x44505c);                      // barbell on rack
+    zone(gx + 0.4, 0.45, gz + 0.4, 0.5, 0.45, 1.7, 0x14171c);                      // flat bench pad
+    zone(gx + 1.9, 0.18, gz + 0.6, 1.0, 0.3, 1.8, 0x2a2f37);                       // treadmill deck
+    zone(gx + 1.9, 0.9, gz - 0.4, 1.0, 0.7, 0.1, 0x14171c);                        // treadmill console
+    for (let i = 0; i < 4; i++) zone(gx - 2.2, 0.18 + i * 0.06, gz + 1.5 - i * 0.18, 0.7, 0.16, 0.16, [0x6a7078, 0x55606e][i & 1]);  // dumbbell rack
+    zoneGlow(gx, FHl - 0.24, gz, 3.0, 0.06, 0.3, 0xeaf2ff, 0.3);                   // gym strip light
+
+    // ---- HOME OFFICE / STUDY mid-floor (-x of centre): desk, chair, shelves ----
+    const ox = -W / 6, oz = -1.0;
+    zone(ox, 0.4, oz, 1.8, 0.7, 0.9, DARKWOOD);                                    // executive desk pedestal
+    zone(ox, 0.78, oz, 1.95, 0.08, 1.0, MARBLE);                                   // stone desktop
+    zoneGlow(ox, 1.0, oz - 0.3, 0.7, 0.4, 0.05, 0x39516a, 0.4);                    // monitor glow
+    zone(ox, 0.45, oz + 0.9, 0.6, 0.5, 0.6, 0x14171c);                             // leather chair seat
+    zone(ox, 0.95, oz + 1.15, 0.6, 0.7, 0.12, 0x14171c);                           // chair back
+    if (!b.clearFloorPoint || b.clearFloorPoint(ox, oz - 1.6, 1.0)) {             // bookshelves behind the desk
+      lb(ox, 1.1, oz - 1.6, 2.6, 2.0, 0.5, DARKWOOD);
+      for (let s = 0; s < 4; s++) glow(ox - 0.9 + s * 0.6, 0.6 + (s & 1) * 0.8, oz - 1.4, 0.4, 0.4, 0.16, [0x8a5a2b, 0x5b8bff, 0x4caf6e, VELVET][s], 0.0);
+    }
+
+    // ---- LIBRARY / READING LOUNGE in the mid-+z band: armchairs + low table ----
+    const lx2 = -W / 6, lz2 = D / 2 - 6.0;
+    zone(lx2, 0.02, lz2, 4.0, 0.04, 3.4, 0x3a2f3a);                                // reading rug
+    for (const s of [-1, 1]) { zone(lx2 + s * 1.1, 0.45, lz2, 1.0, 0.5, 1.0, 0x5a4f6a); zone(lx2 + s * 1.1, 0.9, lz2 - 0.4, 1.0, 0.6, 0.16, 0x5a4f6a); }  // facing armchairs
+    zone(lx2, 0.35, lz2, 0.9, 0.35, 0.9, GOLD);                                    // brass side table
+    zone(lx2, 0.7, lz2, 0.16, 1.4, 0.16, 0x2a2f37);                               // floor lamp pole
+    zoneGlow(lx2, 1.55, lz2, 0.42, 0.3, 0.42, 0xffe6b0, 0.6);                      // lamp shade
+
+    // ---- WINE WALL / CELLAR DISPLAY against the -x wall (backlit bottle racks) ----
+    const wz = 1.0;
+    zone(-W / 2 + 1.0, 1.3, wz, 0.6, 2.4, 4.0, 0x241a14);                          // wine cabinet body
+    zoneGlow(-W / 2 + 1.3, 1.4, wz, 0.05, 1.8, 3.6, 0x8a1622, 0.35);              // backlit cellar glow
+    for (let i = -3; i <= 3; i++) zone(-W / 2 + 1.25, 1.4 + (i & 1) * 0.45, wz + i * 0.55, 0.12, 0.34, 0.12, [0x3a1d22, 0x2a1f14, 0x401820][(i + 3) % 3]);  // bottles
+
+    // ---- WALK-IN CLOSET nook beside the bedroom (open wardrobe runs + island) ----
+    const cx2 = -W / 2 + 2.4, cz2 = -1.4;
+    if (!b.clearFloorPoint || b.clearFloorPoint(cx2, cz2, 1.0)) {
+      lb(cx2, 1.1, cz2, 1.0, 2.0, 3.0, 0x2e2620);                                  // wardrobe carcass
+      for (let i = -2; i <= 2; i++) lb(cx2 + 0.2, 1.5, cz2 + i * 0.5, 0.12, 0.9, 0.18, [0x55606e, 0x6b4a2a, 0x49505b, VELVET, 0x3a4250][(i + 2) % 5]);  // hung garments
+      glow(cx2, 2.0, cz2, 0.06, 0.08, 2.6, 0xfff0d0, 0.4);                         // closet rail light
+    }
+    zone(cx2 + 1.4, 0.45, cz2, 0.9, 0.5, 1.6, MARBLE);                            // dressing-island top
+
+    // ---- MEDIA / BILLIARDS corner in the +x mid-band (pool table) ----
+    const bx2 = W / 2 - 4.6, bz2 = -1.2;
+    zone(bx2, 0.4, bz2, 2.0, 0.5, 3.4, 0x14463a);                                  // billiards felt bed
+    zone(bx2, 0.66, bz2, 2.2, 0.08, 3.6, DARKWOOD);                               // table rail frame
+    for (const sx of [-1, 1]) for (const sz of [-1, 0, 1]) zone(bx2 + sx * 0.9, 0.18, bz2 + sz * 1.5, 0.16, 0.36, 0.16, 0x14171c);  // table legs/pockets
+    zoneGlow(bx2, FHl - 0.4, bz2, 1.4, 0.1, 0.5, 0xffe6c0, 0.5);                  // low pendant over the table
+
+    // ---- SUITE PARTITIONS: enclose the master bedroom + walk-in + ensuite as a
+    // real private suite (light touch — 2 partition walls with doorways). The
+    // bedroom plinth + walk-in nook already sit in the back -x corner; we wall the
+    // suite off from the great-room so it reads as a sealed master, not an open
+    // alcove. Batch-folds (cast:false / no collider) so the carve picker ignores
+    // it; clearFloorPoint-gated so the elevator/door landing stays walkable.
+    {
+      const kp = roomKit(b, baseY);
+      const suiteX1 = Math.min(kp.xLo + 6.6, kp.xHi);   // suite spans the -x corner out ~6.6u
+      const suiteZ1 = Math.min(kp.zLo + 6.4, kp.zHi);   // ...and ~6.4u deep from the back
+      // a VERTICAL wall (along Z) closing the suite's +x edge, doorway mid-span
+      kp.wallZ(suiteX1, kp.zLo, suiteZ1, (kp.zLo + suiteZ1) / 2, 1.8);
+      // a HORIZONTAL wall (along X) closing the suite's +z edge, doorway near -x
+      kp.wallX(suiteZ1, kp.xLo, suiteX1, kp.xLo + 2.0, 1.8);
+    }
+  }
+
+  // ---- THE INDOOR POOL FLOOR (mansion natatorium) ---------------------------
+  // WHY (owner's explicit ask): a mansion deserves a dedicated POOL FLOOR — you
+  // ride/climb to a storey that is one big travertine-decked natatorium with a
+  // recessed pool, a corner spa, loungers and a skylit cove. Modeled on
+  // furnishPenthouse: all boxes cast:false / no userData → batch-folded (≈0 draw
+  // calls), every pad clearFloorPoint-gated (1.2u) so the door aisle / -x stair
+  // strip / elevator chase stay walkable. The water is DECORATIVE only — swim.js
+  // treats just the OUTDOOR ocean as water, so an upper-floor emissive slab is
+  // safe; the deck is a solid walkable floor like every other interior slab.
+  function furnishPoolFloor(b, baseY) {
+    const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
+    const lb = (x, y, z, w, h, d, c, o) => b.lbox(x, Y + y, z, w, h, d, c, o || { cast: false });
+    const glow = (x, y, z, w, h, d, c, ei) => b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
+    const gate = (x, z) => !b.clearFloorPoint || b.clearFloorPoint(x, z, 1.2);
+    const STONE = 0xcfd4dc, GOLD = 0xcaa64a;
+    // tinted travertine DECK slab, clamped off the -x stair strip (furnishHome idiom)
+    const dx0 = b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 0.2) : (-W / 2 + 0.7);
+    const dx1 = W / 2 - 0.7;
+    lb((dx0 + dx1) / 2, 0.02, 0, Math.max(1, dx1 - dx0), 0.04, D - 1.4, STONE);
+    const deckCx = (dx0 + dx1) / 2;
+    // ---- recessed POOL BASIN: a water slab sized off the plate, centred on the deck
+    const pw = Math.max(4, Math.min(5, W * 0.42));
+    const pd = Math.max(8, Math.min(13, D - 6));
+    const px = deckCx, pz = 0;
+    if (gate(px, pz)) {
+      lb(px, 0.04, pz, pw + 0.5, 0.08, pd + 0.5, 0x16242c);                          // darker basin lip under the water
+      b.lbox(px, Y + 0.10, pz, pw, 0.18, pd, 0x3fb6e0, { emissive: 0x1a5d7a, ei: 0.32, cast: false });  // water
+      // a coping FRAME (four ~1.2u deck rails ringing the basin) so the edge reads
+      lb(px, 0.06, pz - pd / 2 - 0.6, pw + 2.4, 0.12, 1.2, 0xdfe3ea);                // -z coping
+      lb(px, 0.06, pz + pd / 2 + 0.6, pw + 2.4, 0.12, 1.2, 0xdfe3ea);                // +z coping
+      lb(px - pw / 2 - 0.6, 0.06, pz, 1.2, 0.12, pd + 2.4, 0xdfe3ea);               // -x coping
+      lb(px + pw / 2 + 0.6, 0.06, pz, 1.2, 0.12, pd + 2.4, 0xdfe3ea);               // +x coping
+      // a SKYLIGHT / cove emissive ceiling strip the length of the basin (sparing)
+      glow(px, FHl - 0.22, pz, pw * 0.7, 0.06, pd * 0.8, 0xeaf6ff, 0.4);
+    }
+    // ---- LOUNGERS on the long deck edge facing the water (slab + raised backrest)
+    const loungeX = px + pw / 2 + 1.6;
+    for (let i = -1; i <= 1; i++) {
+      const lz = i * (pd * 0.32);
+      if (!gate(loungeX, lz)) continue;
+      lb(loungeX, 0.28, lz, 0.8, 0.18, 1.9, 0xe6e8ee);                                // lounger pad
+      lb(loungeX - 0.5, 0.7, lz - 0.7, 0.8, 0.7, 0.5, 0xe6e8ee);                      // raised backrest (head toward -z)
+    }
+    // ---- a corner SPA hot tub (raised stone box + brighter water inset) --------
+    const spaX = dx1 - 1.6, spaZ = D / 2 - 2.4;
+    if (gate(spaX, spaZ)) {
+      lb(spaX, 0.35, spaZ, 2.4, 0.7, 2.4, 0x9aa0a8);                                 // raised stone tub
+      glow(spaX, 0.72, spaZ, 1.7, 0.12, 1.7, 0x5fd0ea, 0.45);                        // brighter spa water
+    }
+    // ---- two slim glass-wall accent columns (the penthouse GOLD/STONE idiom) ----
+    for (const s of [-1, 1]) { if (gate(deckCx + s * (W / 2 - 1.4), 0)) lb(deckCx + s * (W / 2 - 1.4), FHl / 2, 0, 0.3, FHl, 0.3, s < 0 ? GOLD : 0x9aa0a8); }
+    // ---- a small wet-bar / towel counter on the back (+z, -x) wall -------------
+    const barX = dx0 + 1.4, barZ = D / 2 - 1.4;
+    if (gate(barX, barZ)) {
+      lb(barX, 0.55, barZ, 2.0, 1.0, 0.8, 0x3a2b1e);                                 // bar / towel counter
+      lb(barX, 1.08, barZ, 2.1, 0.08, 0.9, 0xe6e8ee);                               // counter top
+      glow(barX, 1.6, barZ, 0.06, 0.8, 1.6, 0x9fe0ff, 0.3);                          // backlit shelf
+    }
   }
 
   // ---- REAL detailed car as static scenery --------------------------------
@@ -3438,6 +4188,77 @@
     if (!model || typeof model !== "object") model = { color: fallbackColor };
     return model;
   }
+
+  // ---- THE SHOWROOM FLOOR: lay out a GRID of the car catalog ----------------
+  // WHY: a dealership exists to SHOW its inventory. The old interior put ONE car
+  // on the floor and left the rest of the (often multi-storey) building empty.
+  // Now each floor is a real showroom: turntable display pads in a grid, each on
+  // its own pad holding a DIFFERENT catalog car (real per-car visual) angled
+  // 25° off the aisle (the dealer convention — you read length + face at once),
+  // with a name/price placard sprite. The catalog index continues across floors
+  // (`startIdx`) so a tall tower walks you past the whole line-up and repeats
+  // only once everything's shown. Every pad is gated by clearFloorPoint so the
+  // stairwell + door aisle stay walkable; cars are capped per floor for perf
+  // (each real-car visual is detailed). Returns how many cars it placed so the
+  // caller can advance the catalog index for the next floor.
+  function showroomFloor(b, kind, door, baseY, startIdx) {
+    const cars = (CBZ.cityEcon && Array.isArray(CBZ.cityEcon.CARS) && CBZ.cityEcon.CARS.length) ? CBZ.cityEcon.CARS : null;
+    const W = b.w, D = b.d, Y = baseY || 0;
+    const inx = door.nx, inz = door.nz;
+    const yaw = Math.atan2(-inx, -inz);             // "face the glass front" base yaw
+    // grid bounds: keep clear of the -x stairwell strip and the door aisle.
+    const xLo = b.hasStairs ? (-W / 2 + (b.wt || WT) + b.stairW + 1.8) : (-W / 2 + 2.4);
+    const xHi = W / 2 - 2.4;
+    const zLo = -D / 2 + 2.6, zHi = D / 2 - 2.6;
+    // each display bay ≈ a car footprint + a walk-around aisle (~4u square).
+    const BAY = 4.2;
+    let cols = Math.max(1, Math.floor((xHi - xLo) / BAY) + 1);
+    let rows = Math.max(1, Math.floor((zHi - zLo) / BAY) + 1);
+    cols = Math.min(cols, 3); rows = Math.min(rows, 4);   // cap ≈ up to ~10 cars/floor (perf)
+    const dxc = cols > 1 ? (xHi - xLo) / (cols - 1) : 0;
+    const dzc = rows > 1 ? (zHi - zLo) / (rows - 1) : 0;
+    let idx = startIdx | 0, placed = 0, MAXPF = 10;
+    const PADC = kind === "chop" ? 0x201f22 : 0x26282e;
+    for (let c = 0; c < cols && placed < MAXPF; c++) {
+      for (let r = 0; r < rows && placed < MAXPF; r++) {
+        const lx = xHi - c * dxc, lz = zLo + r * dzc;
+        if (b.clearFloorPoint && !b.clearFloorPoint(lx, lz, 1.4)) continue;   // skip stair/door aisle
+        // a low circular-reading turntable pad (square box — cheap) + a thin
+        // chrome rim band so it reads as a display dais, not just floor.
+        b.lbox(lx, Y + 0.06, lz, 3.4, 0.12, 3.4, PADC, { cast: false });
+        b.lbox(lx, Y + 0.14, lz, 3.5, 0.04, 3.5, 0x6a7078, { cast: false });   // rim
+        // alternate the angle row-to-row so the grid doesn't read as parked cars.
+        const model = cars ? cars[idx % cars.length] : pickCarModel(kind === "chop" ? 0x8a1f24 : 0xe88a3c);
+        const ang = yaw + ((r + c) & 1 ? 0.44 : -0.44);   // ~25° off-aisle showroom angle
+        realCarVisual(b, lx, Y + 0.16, lz, ang, model || pickCarModel(0xe88a3c), false);
+        // a name/price PLACARD on a little stanchion at the front of the pad.
+        const nm = (model && model.name) || "VEHICLE";
+        const val = (model && model.value) || 0;
+        const txt = val ? (nm + "  $" + val.toLocaleString()) : nm;
+        b.lbox(lx, Y + 0.55, lz - 1.5, 0.1, 0.9, 0.1, 0x44505c, { cast: false });   // stanchion post
+        if (CBZ.makeLabelSprite) {
+          try {
+            const s = CBZ.makeLabelSprite(txt, { color: kind === "chop" ? "#ff9a6b" : "#ffd166" });
+            if (s) {
+              const wx = (b.ox != null ? b.ox : 0) + lx;
+              const wz = (b.oz != null ? b.oz : 0) + lz - 1.5;
+              s.position.set(wx, Y + 1.15, wz);
+              if (b.group && b.group.add) b.group.add(s);
+            }
+          } catch (e) {}
+        } else {
+          // headless / no sprite system: a coloured plaque plate stands in.
+          b.lbox(lx, Y + 1.0, lz - 1.5, 1.4, 0.5, 0.06, 0x14181e, { cast: false });
+          b.lbox(lx, Y + 1.0, lz - 1.5, 1.2, 0.36, 0.02, kind === "chop" ? 0xff9a6b : 0xffd166, { cast: false });
+        }
+        idx++; placed++;
+      }
+    }
+    return placed;
+  }
+  // city builder hook: dress each UPPER floor of a dealership as more showroom
+  // (the catalog index carries across floors via the caller).
+  CBZ.cityFurnishShowroomFloor = function (b, kind, door, baseY, startIdx) { return showroomFloor(b, kind, door, baseY, startIdx); };
 
   // a handful of PARKED CARS on the Spire's ground-floor deck so an empty garage
   // still reads as a garage. They sit in the four corner quadrants, clear of the
@@ -3491,7 +4312,12 @@
     // every floor between the garage deck and the penthouse is a dressed flat —
     // 28 storeys of stairwell views into OTHER people's homes is what makes the
     // penthouse on top read as the apex (merged tris; no extra draw calls).
-    for (let k = 1; k < STOREYS - 1; k++) furnishApartmentFloor(b, k * FH, k);
+    // the storey just below the penthouse is the mansion NATATORIUM (indoor pool);
+    // every other floor is a dressed flat (merged tris; no extra draw calls).
+    for (let k = 1; k < STOREYS - 1; k++) {
+      if (k === STOREYS - 2) furnishPoolFloor(b, k * FH);
+      else furnishApartmentFloor(b, k * FH, k);
+    }
 
     // A clean PENTHOUSE DOOR off the elevator landing on the top floor. The shell's
     // ground door slot was consumed by the garage deck, so the penthouse gets its
@@ -3720,23 +4546,40 @@
   // stamp a single canonical owner. For homes the `type` is a live getter off
   // home.owned, so the EXISTING realestate home.owned reset flips it back to
   // 'landlord' on a new run — no parallel un-reset state in this file.
+  // STARTING-CASH SEED for the wallet ledger (LE6). WHY: a shop must be able to
+  // pay a clerk's wage on day one, and a landlord needs a float to be owed rent
+  // against — without a believable opening balance the ledger reads $0 and no
+  // money ever moves. We scale the seed by what the business plausibly holds:
+  // a bank/casino/jeweller sits on a vault, a food cart on pocket change; a
+  // landlord's float tracks the rent they collect. This is a PLAIN data property
+  // dropped alongside the owner stub — wallet.js (LE1) lazily creates _acct if
+  // absent and PREFERS lot._company.cash once companies.js routes a real company
+  // here, so this is only the pre-company fallback (and the wage/rent float).
+  const ACCT_SEED = { bank: 9000, casino: 8000, jewelry: 6500, security: 5000, realtor: 4200, carlot: 4000, chop: 3000, gym: 2200, clothing: 2000, guns: 2400, pawn: 2600, bar: 2800, gas: 1600, drugs: 1800, hospital: 3500, cityhall: 5000, arena: 4000, raceway: 3600, transit: 2000, food: 900 };
   function stampOwner(lot, idx) {
     const b = lot.building; if (!b || b.owner) return;
     const kind = lot.kind;
     if (kind === "abandoned") {
       b.owner = { type: "gang", id: null, name: "(gang turf)", buyable: false };  // gangs.js sets owner.id
     } else if (b.shop) {
-      b.owner = { type: "business", id: null, name: nameFor(PROPRIETORS, lot, idx), buyable: true };
+      const sk = (b.shop && b.shop.kind) || "store";
+      const seed = (ACCT_SEED[sk] != null ? ACCT_SEED[sk] : 1500) + (((b.storeys || 1) - 1) * 250);
+      b.owner = { type: "business", id: null, name: nameFor(PROPRIETORS, lot, idx), buyable: true, _acct: { cash: seed } };
     } else if (b.home) {
       const home = b.home, landlord = nameFor(LANDLORDS, lot, idx);
+      // a landlord float scaled by what this place rents for (so rent can be
+      // owed/paid out of a believable balance). Cheap micro-units → small float.
+      const rent = (home.rent || 0);
+      const rentSeed = Math.round(400 + rent * 6 + (b.storeys || 1) * 80);
       b.owner = {
         id: null, buyable: home.listed !== false,   // only the curated ladder is for sale
+        _acct: { cash: rentSeed },                  // plain data float ALONGSIDE the getters
         get type() { return home.owned ? "player" : "landlord"; },
         get name() { return home.owned ? "You" : landlord; },
       };
     } else {
       // any other real building (towers without a home record, etc.)
-      b.owner = { type: "landlord", id: null, name: nameFor(LANDLORDS, lot, idx), buyable: true };
+      b.owner = { type: "landlord", id: null, name: nameFor(LANDLORDS, lot, idx), buyable: true, _acct: { cash: 600 + (b.storeys || 1) * 90 } };
     }
   }
 
@@ -3755,13 +4598,34 @@
       const D = (city.districts && city.districts[lot.district]) || null;
       return D ? D.kind : null;
     }
+    // CITY HEIGHT GRADIENT (CH4). WHY: the skyline should fall AWAY from the
+    // money — Midtown's core towers over you and every band steps DOWN toward the
+    // rim, so distance-from-centre reads as land value at a glance (instead of 3
+    // flat district bands with a hard seam). We bias the EXISTING per-kind range
+    // by a core bonus that fades to ~0 at the city edge. The bonus is computed
+    // PURELY from geometry (no rng() draw) so the deterministic world build / MP
+    // stay byte-identical, and the per-kind base stays a FLOOR.
+    let _maxR = 0;   // cached half-diagonal of the built area (farthest lot from centre)
+    for (const _l of city.lots) { const dd = Math.hypot((_l.cx || 0) - city.center.x, (_l.cz || 0) - city.center.z); if (dd > _maxR) _maxR = dd; }
+    if (_maxR < 1) _maxR = 1;   // headless / single-lot guard (no divide-by-zero)
+    function coreBonus(lot, kind) {
+      const dd = Math.hypot((lot.cx || 0) - city.center.x, (lot.cz || 0) - city.center.z);
+      const t = Math.max(0, Math.min(1, dd / _maxR));            // 0 at centre → 1 at rim
+      const peak = kind === "core" ? 5 : kind === "commercial" ? 3 : 2;
+      return Math.round((1 - t) * peak);                         // fades to 0 at the edge
+    }
     function districtStoreys(lot) {
       const kind = districtKind(lot);
-      if (kind === "core") return 4 + ((rng() * 5) | 0);          // 4-8
-      if (kind === "commercial") return 3 + ((rng() * 3) | 0);    // 3-5
-      if (kind === "projects" || kind === "industrial") return 1 + ((rng() * 3) | 0);  // 1-3
-      if (kind === "residential") return 2 + ((rng() * 4) | 0);   // 2-5
-      return 2 + ((rng() * 3) | 0);
+      // draw the EXISTING rng() exactly as before (preserve RNG order), THEN add
+      // the geometry-only core bonus and clamp so non-flagship towers never rival
+      // the 30-storey mega-tower.
+      let base;
+      if (kind === "core") base = 4 + ((rng() * 5) | 0);          // 4-8
+      else if (kind === "commercial") base = 3 + ((rng() * 3) | 0);    // 3-5
+      else if (kind === "projects" || kind === "industrial") base = 1 + ((rng() * 3) | 0);  // 1-3
+      else if (kind === "residential") base = 2 + ((rng() * 4) | 0);   // 2-5
+      else base = 2 + ((rng() * 3) | 0);
+      return Math.max(1, Math.min(12, base + coreBonus(lot, kind)));   // base is a FLOOR, +centre bonus, capped
     }
     let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null, gunLot = null, jewelryLot = null;
 
@@ -3775,12 +4639,22 @@
     const nEssential = shopQueue.filter((s) => ESSENTIAL.has(s.kind)).length;
     let shopIdx = 0;
 
-    // pick the flagship LUXURY tower lot (a corner, far from centre) up front
-    let lux = null, bestD = -1;
+    // pick the flagship LUXURY tower lot up front. CH5 — the flagship Spire/mega-
+    // tower should CROWN Midtown, not sulk in a corner: a 30-storey apex landing
+    // on the rim contradicts the whole land-value gradient (CH4). So choose the
+    // lot CLOSEST to the city centre that sits in a 'core'/'commercial' district
+    // (the prime real estate), falling back to the global nearest lot if no such
+    // district is tagged (headless / minimal city). All downstream wiring keys
+    // off this lot by reference, so moving it is transparent to makeMegaTower /
+    // penthouse / helipad / hangar.
+    let lux = null, bestD = 1e18, luxAny = null, bestAny = 1e18;
     for (const lot of city.lots) {
       const dd = Math.hypot(lot.cx - city.center.x, lot.cz - city.center.z);
-      if (dd > bestD) { bestD = dd; lux = lot; }
+      if (dd < bestAny) { bestAny = dd; luxAny = lot; }          // global-nearest fallback
+      const dk = districtKind(lot);
+      if ((dk === "core" || dk === "commercial") && dd < bestD) { bestD = dd; lux = lot; }
     }
+    if (!lux) lux = luxAny;                                       // no core/commercial tag → nearest lot
 
     // The property ladder is SHORT and every rung is a real, visitable building:
     // one lot per LISTED level (studio → aerie), plus the flagship Spire on the
@@ -3921,12 +4795,34 @@
         furnishShop(b, lot, door);
         // the district field stacks HOMES over the storefront — stairs (and
         // anyone ducking upstairs mid-robbery) walk through them, so every
-        // upper floor is a dressed flat, not a bare slab.
-        for (let k = 1; k < shopStoreys; k++) furnishApartmentFloor(b, k * FH, (lot.i | 0) * 7 + (lot.j | 0) + k);
+        // upper floor is a dressed flat, not a bare slab. EXCEPT dealerships:
+        // a car showroom fills EVERY floor with inventory (the catalog index
+        // carries across floors so the whole line-up is shown before repeating).
+        if (shop.carlot || shop.chop) {
+          const dealKind = shop.chop ? "chop" : "carlot";
+          // ground floor placed ~ up to 10 cars; continue the catalog upstairs.
+          let carIdx = 10;
+          for (let k = 1; k < shopStoreys; k++) carIdx += showroomFloor(b, dealKind, door, k * FH, carIdx);
+        } else {
+          for (let k = 1; k < shopStoreys; k++) furnishApartmentFloor(b, k * FH, (lot.i | 0) * 7 + (lot.j | 0) + k);
+        }
         if (shop.chop) {
           chopShop = lot;
           // a drive-in sell bay just outside the door
           lot.building.chopZone = { x: door.x + door.nx * 5, z: door.z + door.nz * 5, r: 5.5 };
+          // ===== THE MOD GARAGE / WAR-MACHINE BAY (city/modshop.js) =====
+          // The chop shop only DELETES a car for cash. Right alongside it we
+          // stamp a second drive-in bay — the customs/weapon workshop — so the
+          // player can KEEP a car by turning it into a war machine (respray,
+          // armor plating, rocket booster, roof turret, rocket launcher, perf).
+          // Offset down the wall-tangent from the chop bay so the two bays read
+          // as distinct lanes of the same garage; modshop.js registers the zone
+          // and the menu off this descriptor. (Mirror of the chopZone block.)
+          lot.building.modZone = {
+            x: door.x + door.nx * 5 - door.nz * 7,
+            z: door.z + door.nz * 5 + door.nx * 7,
+            r: 5.5,
+          };
         }
         if (shop.realtor) realtor = lot;
         // ===== THE GUN STORE — the walk-in armory (city/gunstore.js) =====
@@ -4104,10 +5000,19 @@
         // apartment dresser so the stair climb passes lived-in rooms.
         const topY = (storeys - 1) * FH;
         furnishHome(b, rng, tierDef, topY);
-        for (let k = 0; k < storeys - 1; k++) furnishApartmentFloor(b, k * FH, (lot.i | 0) * 5 + (lot.j | 0) * 3 + k);
+        // MANSION-tier homes (tier>=4, 3+ storeys) get a dedicated indoor POOL
+        // floor just below the top home floor — the owner's explicit ask. Clamped
+        // to a real interior storey (never ground or top); every other storey is a
+        // dressed flat. poolStorey ∈ [1, storeys-2] by construction.
+        const poolStorey = (tierDef.tier >= 4 && storeys >= 3) ? Math.max(1, Math.min(storeys - 2, storeys - 2)) : -1;   // ∈ [1, storeys-2]
+        for (let k = 0; k < storeys - 1; k++) {
+          if (k === poolStorey) furnishPoolFloor(b, k * FH);
+          else furnishApartmentFloor(b, k * FH, (lot.i | 0) * 5 + (lot.j | 0) * 3 + k);
+        }
         resFacade(b, side, w, d, color, lot);                                   // residential exterior dressing
         lot.kind = "tower";
         lot.building = { ...b, name: "Apartments", sign: color, side, door: doorPt };
+        if (poolStorey >= 1) lot.building.poolY = poolStorey * FH;   // additive tag (safe)
         lot.building.home = {
           tier: tierDef.tier, id: tierDef.id, name: tierDef.name,
           price: listed ? tierDef.price : 0,    // 0 → registry values filler by floor area, not the studio price
@@ -4143,17 +5048,32 @@
     {
       const rigged = placed.filter((l) => l.building && l.building.group && l.building.hasStairs && !l.building.park);
       // ===== ELEVATORS — OWNER: "elevator only works on the massive building." =
-      // The old policy capped lifts at the 5 TALLEST towers, so the city felt
-      // like only the mega-tower had one. The engine is mesh-count bound, not
-      // unbounded, so we serve a much LARGER but still bounded set: EVERY real
-      // (non-derelict) climbable tower of 3+ storeys gets a working lift, up to
-      // a generous cap, tallest FIRST so the biggest towers are always served
-      // and the cap (if hit) only drops the shortest 3-storey walk-ups (which
-      // still have their interior stairs). elevators.js (VERT) makes the rig
-      // robust on ANY qualifying building, not just the flagship.
-      const EV_CAP = 24;     // bounded for mesh-count; covers ~all mid/high-rises
-      const evPool = rigged.filter((l) => !l.building.abandoned && l.building.storeys >= 3)
-        .sort((a, b) => (b.building.h || 0) - (a.building.h || 0));
+      // The old policy capped lifts at the few TALLEST towers (and required
+      // interior stairs), so the city felt like only the mega-tower had one. The
+      // engine is mesh-count bound but generous, so we serve a much LARGER set:
+      // ANY enterable multi-floor building (group + storeys>=2 + not park/
+      // abandoned) qualifies — the hasStairs requirement is DROPPED so small/
+      // narrow towers (which can't fit an interior switchback) still get a lift.
+      // Stairs (now fixed/nice) STAY as a working fallback wherever they exist —
+      // both coexist like a real building; elevators.js places the cab on a
+      // non-stairwell interior wall. Capped (perf), prioritised tallest + most
+      // central so the biggest/most-visited towers are always served and the cap
+      // (if hit) only drops the shortest fringe walk-ups (which still have stairs
+      // where present). elevators.js (VERT) makes the rig robust on ANY building.
+      const EV_CAP = 80;     // bounded for mesh-count; covers ~every real tower
+      const ctr = city.center || { x: 0, z: 0 };
+      const evCand = placed.filter((l) =>
+        l.building && l.building.group && l.building.storeys >= 2 &&
+        !l.building.park && !l.building.abandoned);
+      // priority score: tallest first, central as tiebreak (closer = higher).
+      // Normalise distance to a small fraction so height dominates ordering.
+      const evPool = evCand.slice().sort((a, b) => {
+        const hb = (b.building.h || 0) - (a.building.h || 0);
+        if (Math.abs(hb) > 0.01) return hb;
+        const da = Math.hypot((a.cx || 0) - ctr.x, (a.cz || 0) - ctr.z);
+        const db = Math.hypot((b.cx || 0) - ctr.x, (b.cz || 0) - ctr.z);
+        return da - db;   // closer to centre wins the tie
+      });
       city.elevatorLots = evPool.slice(0, EV_CAP);
       const served = new Set(city.elevatorLots);
 
@@ -4307,12 +5227,12 @@
     // z-fighting panels the player filmed. makeBuilding already glazes the
     // door flanks with pooled, shatterable storefront panes; these were
     // redundant, un-shatterable, and 4 extra meshes per shop.)
-    // a floating crisp name sprite above the board too (always faces the camera),
-    // tinted bright for a from-a-distance read.
-    if (CBZ.makeLabelSprite) {
-      const s = CBZ.makeLabelSprite(name, { color: spriteTint(color) });
-      if (s) { s.position.set(di.x + onx * 0.6, FH + 1.7, di.z + onz * 0.6); s.scale.set(9, 2.25, 1); b.group.add(s); }
-    }
+    // (CH1 — FLOATING NAME SPRITE REMOVED: the store name is already painted on
+    // the lit board PLATE above the door AND on the perpendicular BLADE sign, so
+    // a third hovering camera-facing label was redundant text floating off the
+    // facade. Cutting it saves 1 Sprite + 1 SpriteMaterial cache entry per shop
+    // and respects "no dumb floating UI". Interactions read lot.building.shop.name,
+    // never this sprite, so nothing gameplay-side depends on it.)
   }
   // ---- THE VELVET CLUB ENTRANCE: a real rope line out front ----------------
   // Two brass STANCHIONS straddling the door with a sagging red velvet SASH slung
@@ -4351,11 +5271,11 @@
     }
     // a soft pink ENTRANCE GLOW washing the threshold (the club's signature light)
     add(fx(3.0, 0.06, 0.5), GLOW, di.x + nx * 0.5, DOORH + 0.2, di.z + nz * 0.5, { emissive: GLOW, ei: 0.9 });   // washes the doorway, so it rides DOORH
-    // a small floating VELVET CLUB rope-line label so the spot is unmistakable
-    if (CBZ.makeLabelSprite) {
-      const s = CBZ.makeLabelSprite("🍷 VELVET — VIP ONLY");
-      if (s) { s.position.set(di.x + nx * 1.6, 2.9, di.z + nz * 1.6); s.scale.set(7, 1.6, 1); b.group.add(s); }
-    }
+    // (CH2 — FLOATING "VELVET — VIP ONLY" LABEL REMOVED: the brass stanchions,
+    // sagging red sash, carpet runner and pink threshold glow above ALREADY read
+    // the venue as the exclusive spot, and signAwning hangs the lit board+plate
+    // name sign on the facade. The hovering text was redundant floating UI — cut
+    // per the no-dumb-floating-UI rule. The diegetic rope line + glow remain.)
   }
 
   // a bright, readable sprite tint derived from the sign colour (push it light)
@@ -4516,6 +5436,65 @@
       helipad: lb.helipad || _helipad || null,
       hangar: lb.hangar || null,
     };
+  };
+
+  // PUBLIC (LE6): break a residential building into its individual RENTAL UNITS —
+  // one (or more) per floor, INCLUDING a dirt-cheap "micro" tier on the bottom.
+  // WHY: the home-bond system (housing.js) has to give EVERY ped a roof they can
+  // afford, so a tower can't be one listing — it's a stack of flats, and the low
+  // rungs are sub-basement-cheap studios nobody is priced out of. The TOP home
+  // floor (the player-buyable penthouse/listed tier) is EXCLUDED — that one is
+  // owned, not rented. Returns [] for anything without a home record (offices,
+  // parks, derelicts) so the caller skips them.
+  //
+  // Shape matches housing.js's own unit record EXACTLY — { id, lot, building,
+  // floorY, door, tier, rent, occupant } — because buildings.js loads first, so
+  // THIS is the canonical CBZ.cityFloorUnits the contract names (housing.js then
+  // defers to it). tier 0 = the affordable MICRO floor; higher tiers read nicer.
+  // Allocation-light (one array out, called once at assign time); we never mutate
+  // the building (no geometry, no draw calls).
+  CBZ.cityFloorUnits = function (lot) {
+    const b = lot && lot.building;
+    const home = b && b.home;
+    if (!b || !home || b.park || b.abandoned || lot.kind === "office") return [];   // no residence → no units
+    const storeys = Math.max(1, (b.storeys | 0) || (b.floorTops ? b.floorTops.length - 1 : 1));
+    const FHl = b.FH || FH;
+    // per-floor arrival Y from the real slab math (elevators.js contract); else a
+    // synthetic ladder so headless/oddly-built shells still split.
+    let tops = b.floorTops;
+    if (!tops || !tops.length) { tops = [0.14]; for (let L = 1; L <= storeys; L++) tops.push(L * FHl); }
+    const door = home.door || b.door || null;
+    const topFloorY = home.floorY;                          // the listed/penthouse tier — NEVER rented
+    // base MICRO rent by district value: pricier address → pricier studio, but the
+    // floor stays cheap so the poorest ped is always housed. home.rent (if any) is
+    // the headline the upper floors climb toward.
+    const headlineRent = home.rent ? home.rent : Math.round(120 + storeys * 18);
+    const MICRO_RENT = 45;
+    const foot = ((b.w || 12) * (b.d || 12));
+    const perFloor = foot > 520 ? 3 : foot > 300 ? 2 : 1;   // bigger footprint → more flats per floor
+    const units = [];
+    for (let f = 0; f < storeys; f++) {
+      const fy = tops[f];
+      if (fy == null) continue;
+      // skip the top home floor precisely (compare by Y so a flagship penthouse on
+      // the very top slab is excluded even when indexing differs).
+      if (topFloorY != null && Math.abs(fy - topFloorY) < 0.05) continue;
+      const lift = storeys > 1 ? f / (storeys - 1) : 0;     // 0 at ground → 1 near top
+      for (let u = 0; u < perFloor; u++) {
+        // the FIRST unit on the two lowest floors is the dirt-cheap MICRO tier so
+        // affordable stock always exists at the bottom of the stack.
+        const micro = (f <= 1 && u === 0);
+        const tier = micro ? 0 : (f === storeys - 1 ? 3 : f === 0 ? 1 : 2);
+        const rent = micro
+          ? Math.max(8, MICRO_RENT + f * 8)
+          : Math.max(8, Math.round(MICRO_RENT + (headlineRent - MICRO_RENT) * (0.25 + 0.75 * lift) + u * 22));
+        units.push({
+          id: lot.i + "_" + lot.j + "_f" + f + "_u" + u,
+          lot, building: b, floorY: fy, door, tier, rent, occupant: null,
+        });
+      }
+    }
+    return units;
   };
 
   // ---- PARKS WORTH CROSSING -------------------------------------------------

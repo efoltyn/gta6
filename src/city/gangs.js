@@ -273,6 +273,23 @@
       lot.building.gangColor = gang.color;
       if (lot.building.stash) lot.building.stash.gang = gang.id;
     });
+    // BACKSTOP (13-gang roster): the round-robin only seats as many crews as
+    // there are derelict lots. If a low abandonedFrac roll left fewer lots than
+    // gangs, every short crew would hold 0 turf and be INVISIBLE (no center, no
+    // spawn, never appears on the takeover map). So pull a lot off whichever crew
+    // holds the most and hand it to each empty crew — guarantees every gang in
+    // CBZ.CITY.gangs lands ≥1 lot regardless of the abandoned count.
+    for (const empty of gangs) {
+      if (empty.turf.length) continue;
+      let donor = null;
+      for (const o of gangs) { if (o !== empty && o.turf.length > 1 && (!donor || o.turf.length > donor.turf.length)) donor = o; }
+      if (!donor) break;                          // not enough lots to go around
+      const lot = donor.turf.pop();
+      empty.turf.push(lot);
+      lot.building.gang = empty.id;
+      lot.building.gangColor = empty.color;
+      if (lot.building.stash) lot.building.stash.gang = empty.id;
+    }
     // turf centre + member spawn
     const [lo, hi] = CBZ.CITY.gangPerTurf || [3, 6];
     const ag = CBZ.CITY.aggro || {};

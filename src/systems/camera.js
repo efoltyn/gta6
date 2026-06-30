@@ -25,23 +25,23 @@
   // default armed = behind-shoulder at chest height (char LARGE, world ahead); RMB
   // = punch TIGHT over the right shoulder with a real lens zoom, gun raised/centred.
   if (!CBZ.CITY_TP) CBZ.CITY_TP = {
-    HEIGHT: 1.42,      // relaxed (un-armed) rig pivot height — shoulder height, not overhead
-    DIST: 4.3,         // relaxed behind-the-back distance; scroll wheel scales around this
-    SIDE: 0.7,         // relaxed lateral offset to the player's RIGHT (char left-of-centre)
+    HEIGHT: 1.6,       // relaxed (un-armed) rig pivot height — over-shoulder height, lifts the eye
+    DIST: 5.2,         // relaxed behind-the-back distance — char shrinks, more world ahead
+    SIDE: 1.0,         // relaxed lateral offset to the player's RIGHT (char hard left-of-centre)
     PITCH: 0.06,       // default orbit pitch on city entry — near-level, horizon high
-    LOOK_Y: 1.45,      // relaxed look-target height above feet (chest/shoulder aim point)
+    LOOK_Y: 1.62,      // relaxed look-target height above feet (shoulder aim point)
     LEAD: 4.6,         // relaxed forward look-ahead
     DAMP_POS: 0.16,    // relaxed position SmoothDamp time (lazy settle)
     DAMP_YAW: 9.0,     // relaxed yaw chase rate
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
-    FOV: 57,           // relaxed base FOV
+    FOV: 59,           // relaxed base FOV (less claustrophobic)
     // ARMED / ADS over-shoulder tier (read every frame via the `shoulder` boolean).
     // The *_AIM getters re-evaluate CBZ.isADS() each frame so holding RMB punches
     // the cam IN + FURTHER over the shoulder + narrows the lens — a real ADS read.
-    DIST_AIM_BASE: 3.3, DIST_AIM_ADS: 1.45,   // resting over-shoulder → punched in TIGHT on RMB
-    SIDE_AIM_BASE: 0.9, SIDE_AIM_ADS: 1.25,   // over-shoulder offset → further over the shoulder on RMB (char hard-left)
-    FOV_AIM_BASE: 58,   FOV_AIM_ADS: 42,      // armed FOV → narrower (real zoom) on RMB
-    HEIGHT_AIM_BASE: 1.50, HEIGHT_AIM_ADS: 1.46,  // armed rig-pivot height (chest/shoulder, never overhead)
+    DIST_AIM_BASE: 4.8, DIST_AIM_ADS: 1.45,   // resting over-shoulder → punched in TIGHT on RMB (pushed back: char in lower-third, world open)
+    SIDE_AIM_BASE: 1.3, SIDE_AIM_ADS: 1.4,    // over-shoulder offset → further over the shoulder on RMB (char hard-left, frame-center clear)
+    FOV_AIM_BASE: 68,   FOV_AIM_ADS: 48,      // armed FOV → wider lens shrinks the char + shows world/headroom; narrows (real zoom) on RMB
+    HEIGHT_AIM_BASE: 1.72, HEIGHT_AIM_ADS: 1.46,  // armed rig-pivot height (shoulder, never overhead; lifted for headroom)
     PITCH_LOOK: 1.0,   // how strongly the armed look target follows player pitch (FIX 1: aim vertically + stable framing)
     get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
     get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
@@ -57,7 +57,13 @@
   CBZ.camZoom = function (d) { zoomTarget = clampZoom(zoomTarget + d); };
   CBZ.resetZoom = function () { zoomTarget = DEF; camDist = DEF; };
 
-  const MIN_PITCH = -0.18, MAX_PITCH = 0.72;
+  // Looking UP is the NEGATIVE-pitch direction (boom uses oy = sin(pitch)*camDist,
+  // and the look target adds sin(pitch)*aimLead). The old MIN_PITCH = -0.18 capped
+  // look-up at only ~-10°, so you could barely tilt the view up. Widen to a
+  // generous ~57° up / ~51° down. A hard ±1.45 safety in the mousemove handler
+  // keeps |pitch| away from π/2 (gimbal / camera-through-floor).
+  const MIN_PITCH = -1.0, MAX_PITCH = 0.9;
+  const PITCH_SAFETY = 1.45;
   const DEFAULT_PITCH = 0.46;   // lower angle — less of a top-down "high" view
   CBZ.CAM_DEFAULT_PITCH = DEFAULT_PITCH;
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
@@ -117,7 +123,9 @@
     if (!cam.locked) return;
     cam.yaw -= e.movementX * SENS;
     cam.pitch -= e.movementY * SENS;
+    // soft tier clamp, then a hard safety so |pitch| can never reach π/2
     cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
+    cam.pitch = Math.max(-PITCH_SAFETY, Math.min(PITCH_SAFETY, cam.pitch));
   });
   // scroll wheel zooms the third-person camera (ignored in first-person)
   addEventListener("wheel", (e) => {
@@ -240,6 +248,23 @@
       camera.lookAt(look);
       fov = smoothDamp(fov, 52, fovV, 0.16, fdt);
       if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      return;
+    }
+
+    // FIRST-PERSON (systems/fpsmode.js) fully owns the camera POSITION + LOOK +
+    // FOV every frame at onAlways(52) — AFTER this. Bow out entirely while it's
+    // active so we never race its lens. The old city `cc.fp` branch above was the
+    // intended FP hand-off, but cc.fp is never set true (city FP runs on
+    // fps.active), so this function used to fall straight through to the
+    // THIRD-PERSON tail and ease camera.fov toward a ~61° chase FOV every frame —
+    // while fpsmode eased the SAME fov toward the ADS target (~36° on RMB). Two
+    // writers tugging opposite directions = the ADS zoom flickering in/out while
+    // holding right-click. One owner = a rock-steady hold. (Keep prev/introT
+    // synced so the 3rd-person hand-off on toggle-off doesn't spike velocity or
+    // replay the intro.) fpsmode positions the FP camera in ALL modes, so this is
+    // safe for jail/escape FP too — they had the identical race.
+    if (CBZ.fps && CBZ.fps.active && !player.dead && !player.driving) {
+      introT = 0; prev.copy(player.pos);
       return;
     }
 
@@ -378,7 +403,7 @@
     } else smYawOn = false;
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
-    const targetSide = TP ? TP.SIDE * 0.5 : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
+    const targetSide = TP ? TP.SIDE * 0.25 : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
     const camSide = TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0));
     const baseX = tx + rightX * targetSide;
     const baseY = ty + (!TP && shoulder ? 0.08 : 0);
@@ -423,8 +448,14 @@
       // armed in the city we relax the floor toward the spring-arm minimum so the
       // tight ADS frame actually happens; the side-offset keeps the character in
       // shot, not buried in the lens.
-      const minCam = (CBZ.game.mode === "city" && !player.driving) ? (shoulder ? 1.1 : 2.4) : 0.28;
-      const d = Math.max(minCam, occ - 0.16);
+      // PRIMARY FIX: split the collision floor by ADS state. Resting-armed must
+      // NOT collapse tight (a wall behind you in the dense street would yank the
+      // boom from 4.8 → ~1.1, ballooning the character + dropping the angle low —
+      // THE main 3PS framing bug). Only RMB/ADS may ride in close for the punch-in.
+      const minCam = (CBZ.game.mode === "city" && !player.driving)
+        ? (shoulder ? ((CBZ.isADS && CBZ.isADS()) ? 1.3 : 2.6) : 3.0)
+        : 0.28;
+      const d = Math.max(minCam, occ - 0.25);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
     }
     // never drop below the surface you're standing on (no looking up through floors)
@@ -448,7 +479,7 @@
     // the view pitch with the mouse instead of ballooning the cam up into a
     // top-down stare. Only the armed city tier opts in (pf>0); the relaxed TP
     // chase, driving, melee and jail/survival paths are byte-identical (pf=0).
-    const pitchFollow = (TP && shoulder) ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) : 0;
+    const pitchFollow = TP ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) : 0;
     const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
     const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
     const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;

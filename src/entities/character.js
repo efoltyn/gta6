@@ -209,11 +209,22 @@
       return;   // seated pose owns the whole rig
     }
 
-    // gait advances with stride length; faster = quicker cadence.
-    // Tuned so a normal walk reads as a brisk, weighty stride rather
-    // than a frantic sprint, and the stride lengthens (not just speeds
-    // up) as you move faster.
-    ch.phase += dt * (2.3 + speed * 0.92);
+    // gait advances with DISTANCE TRAVELLED, not a wall clock — one stride per
+    // STRIDE_LEN metres covered, so the cadence is exactly tied to how far the
+    // feet actually carry the body. WHY: the old `2.3 + speed*0.92` was a clock
+    // — it kept ticking the legs over at full cadence even when the body crept
+    // forward a few cm/s (a slow creep, a body being nudged, a near-planted
+    // promoted ped), so the feet swung through a full step while the ground
+    // barely moved under them → the filmed FOOT-SLIDE / leg-strobe. Pacing the
+    // phase off `speed*dt/STRIDE_LEN` plants the feet: half the speed → half the
+    // cadence → the stride still covers ~STRIDE_LEN of ground per swing, and a
+    // body that isn't really translating doesn't pump its legs. A tiny idle
+    // term keeps a stopped rig from freezing mid-stride one frame after it halts
+    // (the leg/lift/bob layers below all gate on `moving`, so at a true standstill
+    // this only feeds the gentle sway, never a slide). STRIDE_LEN≈1.15m reads as
+    // a brisk, weighty walk; norm still LENGTHENS the stride (amplitude) at speed.
+    const STRIDE_LEN = 1.15;
+    ch.phase += dt * 0.9 + (speed * dt) / STRIDE_LEN;
     const swing = Math.sin(ch.phase) * (0.24 + 0.34 * norm);
 
     // ---- LEG WOUND / LIMP STATE (systems/wounds.js sets ch.legHurt on a leg
@@ -283,8 +294,38 @@
     ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1 - liftL * 0.14, 16, dt);
     ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1 - liftR * 0.14, 16, dt);
 
-    // arms: cuffed (escort) pins them behind the back; else counter-swing
-    if (ch.cuffed) {
+    // arms: aiming a gun (3PS present-weapon) OWNS the arms; else cuffed pins
+    // them behind the back; else counter-swing.
+    if (ch.aimingPose) {
+      // FORTNITE-STYLE PRESENT-WEAPON: raise the right (gun) arm forward to hold
+      // the weapon out toward the crosshair, bring the left arm in as a support
+      // grip on the handguard. animChar is the SINGLE owner of the arms while
+      // aiming (fpsmode.js only RAISES ch.aimingPose + feeds aimLong/aimRecoil/
+      // aimRecoilSide) — holding the pose here every frame means nothing fights
+      // it back toward idle. The barrel PITCHES with the camera: looking up is
+      // the NEGATIVE-pitch direction (camera.js), and a more-negative arm
+      // rotation.x raises the arm higher, so adding cam.pitch points the muzzle
+      // where the reticle is. Recoil adds a snappy upward/sideways kick.
+      const longGun = !!ch.aimLong;
+      const recoil = ch.aimRecoil || 0;
+      const recoilSide = ch.aimRecoilSide || 0;
+      const pitch = (CBZ.cam && typeof CBZ.cam.pitch === "number") ? CBZ.cam.pitch : 0;
+      const ar = 16;   // settle quickly so the present-weapon pose reads snappy
+      // BASELINE -1.571 (-π/2) = arm HORIZONTAL-FORWARD. Paired with the carried
+      // gun's new local orientation (rotation.x≈-1.571, no Math.PI) the muzzle
+      // lies along the forearm and points dead level at cam.pitch≈0. SIGN: looking
+      // UP is NEGATIVE cam.pitch (camera.js cam.pitch-=movementY) and a MORE-negative
+      // arm rotation.x raises the muzzle, so we SUBTRACT pitch — look up → muzzle up,
+      // look down → muzzle down (tracks the crosshair). Recoil kicks the muzzle up.
+      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 - pitch * 0.8 - recoil * 0.16, ar, dt);
+      ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, -0.18 + recoilSide * 0.22, ar, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.34, ar, dt);
+      ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.14, ar, dt);
+      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.45) - pitch * 0.8, ar - 1, dt);
+      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, longGun ? 0.34 : 0.22, ar - 1, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? 0.42 : 0.30, ar - 1, dt);
+      ch.parts.la.position.z = damp(ch.parts.la.position.z, longGun ? 0.24 : 0.14, ar - 1, dt);
+    } else if (ch.cuffed) {
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.5, 10, dt);
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.5, 10, dt);
       ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.5, 10, dt);
@@ -295,10 +336,15 @@
       ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.08, 6, dt);
       ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.08, 6, dt);
     }
-    ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, 10, dt);
-    ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, 10, dt);
-    ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, 12, dt);
-    ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0, 12, dt);
+    // The aim pose owns arm .y + .position.z (it sets non-zero targets above);
+    // these recenter-to-zero defaults would otherwise fight it, so skip them
+    // while aiming. cuffed/walk/idle all expect the recenter and keep it.
+    if (!ch.aimingPose) {
+      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, 10, dt);
+      ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, 10, dt);
+      ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, 12, dt);
+      ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0, 12, dt);
+    }
 
     // ---- body: bob (2× stride), side sway, forward lean ----
     const bobTarget = moving ? -Math.abs(Math.sin(ch.phase)) * (0.03 + 0.055 * norm) : 0;

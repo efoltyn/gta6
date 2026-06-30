@@ -41,6 +41,11 @@
     if (B && x >= B.minX && x <= B.maxX && z >= B.minZ && z <= B.maxZ) return false;
     const I = A.annex;
     if (I && Math.hypot(x - I.cx, z - I.cz) <= I.radius + 1.5) return false;
+    // worldmap.js islands & biomes are dry land too
+    const regs = A.regions;
+    if (regs && CBZ.cityRegionHit) {
+      for (let i = 0; i < regs.length; i++) if (CBZ.cityRegionHit(regs[i], x, z, 0)) return false;
+    }
     return true;
   }
 
@@ -70,6 +75,15 @@
       const d = Math.hypot(x - I.cx, z - I.cz) || 1;
       consider(I.cx + ((x - I.cx) / d) * I.radius, I.cz + ((z - I.cz) / d) * I.radius,
                I.cx + ((x - I.cx) / d) * (I.radius - 2.5), I.cz + ((z - I.cz) / d) * (I.radius - 2.5));
+    }
+    // worldmap.js islands/biomes: haul out onto the nearest registered shore
+    const regs = A.regions;
+    if (regs && CBZ.cityRegionClamp) {
+      for (let i = 0; i < regs.length; i++) {
+        const edge = CBZ.cityRegionClamp(regs[i], x, z, 0);
+        const land = CBZ.cityRegionClamp(regs[i], x, z, 3.0);
+        consider(edge.x, edge.z, land.x, land.z);
+      }
     }
     return best;
   }

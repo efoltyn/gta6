@@ -233,13 +233,17 @@
     const gangs = (CBZ.cityGangs || []).filter((x) => !x.isPlayer);
     for (let i = 0; i < gangs.length; i++)
       for (let j = i + 1; j < gangs.length; j++) {
-        // Authentic blocs: same NATION → allies, rival nations (People vs Folk) →
-        // at war, anyone neutral → a mild random lean. Relations still DRIFT later.
+        // Authentic blocs: same NATION → allies, rival nations (People vs Folk vs
+        // Norte) → at war, anyone neutral → a mild random lean. The Aryan Brotherhood
+        // rides its OWN bloc ("brand") and is hostile to EVERYONE — including the
+        // neutral organized-crime crews — so a hate faction is a wildcard nobody
+        // shelters. Relations still DRIFT later (driftAlliances).
         const na = nationOf(gangs[i].id), nb = nationOf(gangs[j].id);
         let r;
-        if (na !== "neutral" && na === nb) r = 0.5 + rng() * 0.25;          // brothers under one Nation
-        else if (na !== "neutral" && nb !== "neutral") r = -0.5 - rng() * 0.25; // People vs Folk
-        else r = (rng() - 0.5) * 0.5;                                        // neutral crew
+        if (na === "brand" || nb === "brand") r = -0.55 - rng() * 0.25;      // hostile-to-all chaos faction
+        else if (na !== "neutral" && na === nb) r = 0.5 + rng() * 0.25;       // brothers under one Nation
+        else if (na !== "neutral" && nb !== "neutral") r = -0.5 - rng() * 0.25; // People vs Folk vs Norte
+        else r = (rng() - 0.5) * 0.5;                                         // neutral crew (cartel/cosa/MC) — situational
         setRel(gangs[i].id, gangs[j].id, r);
       }
   }
@@ -485,11 +489,18 @@
   //  ALLIANCE DRIFT — relations relax toward neutral, then the field ganging
   //  up on the leader pulls leader-vs-others toward war and others toward ally.
   // ============================================================
+  // rate-limit on the coordinated "gang up on the front-runner" raid so a
+  // runaway leader provokes a VISIBLE alliance-of-convenience strike now and
+  // then — not a nonstop siege that turns the whole city into permanent war.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_GANG_COMMON_ENEMY == null) CBZ.CONFIG.CITY_GANG_COMMON_ENEMY = true;
+  let _rallyCool = 0;        // seconds until another coordinated raid may fire
+
   function driftAlliances(dt) {
     for (const k in rel) {
       const v = rel[k];
       rel[k] = v + (0 - v) * Math.min(1, dt * 0.012);   // slow relax to neutral
     }
+    if (_rallyCool > 0) _rallyCool -= dt;
     const ldr = CBZ.cityTakeoverLeader();
     if (!ldr) return;
     const others = (CBZ.cityGangs || []).filter((x) => !x.absorbed && x.id !== ldr.id);
@@ -500,33 +511,135 @@
         for (let j = i + 1; j < others.length; j++)
           nudgeRel(others[i].id, others[j].id, dt * 0.012);
     }
+
+    // COMMON ENEMY: when one crew's hold spikes clear of the pack (a "rising
+    // rival"), the others stop merely souring on it and actually MOUNT a raid
+    // together against the front-runner. Reuses cityStartGangWar (the same
+    // engine directExpand uses) — this is wiring existing parts into a readable
+    // "everyone unites against whoever's winning" beat. WHY: the macro should
+    // visibly produce an alliance-of-convenience against the gang that's running
+    // away with the city, not just relations sliding toward war off-screen.
+    const rallyOn = !CBZ.CONFIG || CBZ.CONFIG.CITY_GANG_COMMON_ENEMY !== false;
+    if (!rallyOn || _rallyCool > 0 || !CBZ.cityStartGangWar) return;
+    const leadGang = CBZ.cityGangById && CBZ.cityGangById(ldr.id);
+    if (!leadGang || leadGang.isPlayer) return;            // the PLAYER-unify path owns that case
+    // is the leader a genuine runaway? hold ≥3 districts AND well ahead of #2.
+    const ctrl = CBZ.cityZoneControl();
+    let secondBest = 0;
+    for (const id in ctrl.byGang) if (id !== ldr.id && ctrl.byGang[id] > secondBest) secondBest = ctrl.byGang[id];
+    const ledStr = liveStrength(leadGang);
+    const runaway = ldr.zones >= 3 && ldr.zones - secondBest >= 2;
+    const dominant = ledStr >= 6;                          // and has bodies to be worth ganging
+    if (!runaway || !dominant) return;
+    // assemble the posse: every non-player rival that isn't allied WITH the
+    // leader and can field a few bodies. Need at least two to call it "uniting".
+    const posse = others.filter((o) =>
+      o && !o.isPlayer && o.turf.length &&
+      !(CBZ.cityAreAllied && CBZ.cityAreAllied(o.id, ldr.id)) &&
+      liveStrength(o) >= 3);
+    if (posse.length < 2) return;
+    // bind the alliance-of-convenience so they don't trip over each other, and
+    // point each at a fresh front on the leader's turf.
+    _rallyCool = 34 + rng() * 24;
+    let launched = 0;
+    const targets = leadGang.turf.slice();
+    for (let i = 0; i < posse.length && i < 3; i++) {
+      const o = posse[i];
+      setRel(o.id, ldr.id, Math.min(getRel(o.id, ldr.id), -0.6));   // they DO hate the front-runner
+      for (let j = i + 1; j < posse.length; j++) setRel(o.id, posse[j].id, Math.max(getRel(o.id, posse[j].id), 0.45));
+      const tgt = targets.length ? targets[(rng() * targets.length) | 0] : null;
+      if (tgt) { CBZ.cityStartGangWar(o, leadGang, { lot: tgt, assault: true }); launched++; }
+    }
+    if (launched && (nearPlayer(leadGang.center.x, leadGang.center.z, 240) ||
+        nearPlayer((CBZ.player && CBZ.player.pos && CBZ.player.pos.x) || 0, (CBZ.player && CBZ.player.pos && CBZ.player.pos.z) || 0, 1))) {
+      CBZ.city && CBZ.city.note("⚔ The other crews are uniting against " + ldr.name + ".", 3.0);
+      if (CBZ.cityFeed) { try { CBZ.cityFeed("⚔ " + ldr.name + " is running away with the city — the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
+    } else if (launched && CBZ.cityFeed) {
+      try { CBZ.cityFeed("⚔ The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
+    }
+    hudDirty = true;
   }
+
+  // "fat treasury" / "cash-poor" thresholds — a gang sitting on real money can
+  // afford a war of expansion; a broke gang can't, and would rather make peace
+  // and grind the corners. Tunable so a trimmed economy still reads sensibly.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_GANG_PEACE_FOR_MONEY == null) CBZ.CONFIG.CITY_GANG_PEACE_FOR_MONEY = true;
+  const RICH_TREASURY = 2600;   // above this a crew is flush → leans aggressive
+  const POOR_TREASURY = 900;    // below this a crew is hurting → leans to peace
+  const THIN_CREW = 4;          // at/under this many live bodies a crew is bleeding
 
   // occasionally make a deliberate diplomatic MOVE (forge/break a pact) so the
   // map of alliances visibly shifts, with a readable note when near the player.
+  // The driver is MONEY, not entropy: two broke / bleeding crews deliberately
+  // SUE FOR PEACE to "focus on the paper" (a visible, motivated truce), while a
+  // crew sitting on a fat treasury bankrolls a WAR on a weaker neighbour to
+  // expand. WHY: "gangs fight but make PEACE to chase money" has to read as a
+  // decision a hungry crew makes — you should be able to see why it happened.
   function diploMove() {
     const gangs = (CBZ.cityGangs || []).filter((x) => !x.absorbed && !x.isPlayer);
     if (gangs.length < 2) return;
+    const peaceOn = !CBZ.CONFIG || CBZ.CONFIG.CITY_GANG_PEACE_FOR_MONEY !== false;
     const a = pick(gangs);
     const others = gangs.filter((x) => x !== a);
     if (!others.length) return;
-    const b = pick(others);
-    const cur = getRel(a.id, b.id);
-    // weakest two tend to ally; a strong gang bullies a weak neutral into war
-    const sa = liveStrength(a), sb = liveStrength(b);
-    let toward, word;
-    if (sa + sb < 8 && cur < 0.34) { toward = 0.6; word = "alliance"; }
-    else if (cur > -0.34 && rng() < 0.5) { toward = -0.6; word = "war"; }
-    else { toward = 0; word = "truce"; }
+    const sa = liveStrength(a), ta = a.treasury || 0;
+
+    // a FLUSH crew goes hunting: pick its WEAKEST reachable non-ally neighbour
+    // and bankroll a war to take their block. A BROKE / THIN crew instead seeks
+    // out a fellow hard-up neighbour to bury the beef and chase money together.
+    let b = null, toward, word;
+    const aRich = ta >= RICH_TREASURY && sa >= THIN_CREW + 1;
+    const aPoor = peaceOn && (ta <= POOR_TREASURY || sa <= THIN_CREW);
+    if (aRich) {
+      // expand: weakest non-ally neighbour (low strength, near a's centre)
+      let bestScore = -Infinity;
+      for (const o of others) {
+        if (CBZ.cityAreAllied && CBZ.cityAreAllied(a.id, o.id)) continue;
+        const d = Math.hypot(o.center.x - a.center.x, o.center.z - a.center.z) || 1;
+        const score = (8 - Math.min(8, liveStrength(o))) * 12 - d * 0.05;
+        if (score > bestScore) { bestScore = score; b = o; }
+      }
+      if (b) { toward = -0.6; word = "war"; }
+    } else if (aPoor) {
+      // sue for peace: the most hard-up neighbour we aren't already tight with
+      let bestNeed = -Infinity;
+      for (const o of others) {
+        if (getRel(a.id, o.id) >= 0.34) continue;          // already allied
+        const need = (o.treasury || 0) <= POOR_TREASURY ? 1 : 0;
+        const thin = liveStrength(o) <= THIN_CREW ? 1 : 0;
+        const score = need + thin + (1 - Math.min(1, (o.treasury || 0) / 4000));
+        if (score > bestNeed) { bestNeed = score; b = o; }
+      }
+      // only actually call the truce if the partner is ALSO hurting (mutual WHY)
+      if (b && ((b.treasury || 0) <= POOR_TREASURY || liveStrength(b) <= THIN_CREW)) {
+        toward = 0.5; word = "money-truce";
+      } else b = null;
+    }
+
+    // fall back to the original weak-ally / bully-neutral behaviour when neither
+    // money condition fired, so the alliance map still breathes on its own.
+    if (!b) {
+      b = pick(others);
+      const cur = getRel(a.id, b.id);
+      const sb = liveStrength(b);
+      if (sa + sb < 8 && cur < 0.34) { toward = 0.6; word = "alliance"; }
+      else if (cur > -0.34 && rng() < 0.5) { toward = -0.6; word = "war"; }
+      else { toward = 0; word = "truce"; }
+    }
+
     setRel(a.id, b.id, toward);
     if (word === "war" && CBZ.cityStartGangWar && rng() < 0.6) {
-      // a fresh war comes with an opening raid
+      // a fresh war comes with an opening raid (a flush crew can fund the push)
       const tgt = b.turf.length ? pick(b.turf) : null;
       if (tgt) CBZ.cityStartGangWar(a, b, { lot: tgt });
     }
     if (nearPlayer(a.center.x, a.center.z, 220) || nearPlayer(b.center.x, b.center.z, 220)) {
-      const icon = word === "alliance" ? "🤝" : word === "war" ? "⚔" : "🕊";
-      CBZ.city && CBZ.city.note(icon + " " + a.name + " & " + b.name + ": " + word + ".", 2.4);
+      if (word === "money-truce") {
+        CBZ.city && CBZ.city.note("🕊 " + a.name + " & " + b.name + " called a truce to chase paper.", 2.6);
+      } else {
+        const icon = word === "alliance" ? "🤝" : word === "war" ? "⚔" : "🕊";
+        CBZ.city && CBZ.city.note(icon + " " + a.name + " & " + b.name + ": " + (word === "war" ? "war" : word === "alliance" ? "alliance" : "truce") + ".", 2.4);
+      }
     }
     hudDirty = true;
   }
@@ -798,6 +911,7 @@
   CBZ.cityTurfReset = function () {
     zones = []; zonesBuilt = false; won = false; startPop = 0;
     for (const k in rel) delete rel[k];
+    _rallyCool = 0;
     feedSig = "";
     if (hudRoot) hudRoot.style.display = "none";
     if (feedEl) { feedEl.style.display = "none"; feedEl.innerHTML = ""; }

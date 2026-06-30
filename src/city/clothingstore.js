@@ -34,7 +34,7 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  const VIS_R = 55;          // display group draws only when you're near the shop
+  const VIS_R = 24;          // racks only draw when you're basically at the door — never readable from the street through glass
   const RACK_REACH = 3.0;    // walk right up to a rail / mannequin / mirror
   const RACK_DOT = 0.62;     // you act on the fixture you're LOOKING at
   const WT = 0.4;            // wall thickness (matches buildings.js)
@@ -65,6 +65,17 @@
     Object.keys(M).forEach((k) => { M[k]._shared = true; });
     return M;
   }
+  // garment-cloth materials, ONE per color (shared across every hung piece of
+  // the same hue → draw-call neutral no matter how big the catalog grows).
+  let GMATS = null;
+  function garmentMat(hex) {
+    if (!GMATS) GMATS = {};
+    const key = (hex == null ? 0x9aa1ab : hex) >>> 0;
+    let mt = GMATS[key];
+    if (!mt) { mt = new THREE.MeshLambertMaterial({ color: key }); mt._shared = true; GMATS[key] = mt; }
+    return mt;
+  }
+
   function tagSprite(text, color, sx, sy) {
     if (!CBZ.makeLabelSprite) return null;
     const s = CBZ.makeLabelSprite(text, { color: color || "#e2c2f4" });
@@ -80,6 +91,9 @@
   //  rig painter (cityComposableSpec) draws the SAME sample on the fixture
   //  that it layers on you.
   // ============================================================
+  // category order along the rails so like hangs with like (SHIRTS, then TIES,
+  // then TROUSERS…) — drives both the layout and the placards.
+  const SLOT_ORDER = ["shirt", "neck", "legs", "dress", "outfit"];
   function partitionStock() {
     const e = econ();
     const list = (e && e.itemsByTag) ? e.itemsByTag("clothing") : [];
@@ -90,8 +104,14 @@
       const sp = CBZ.cityComposableSpec(it.visualId);
       if (sp && sp.painted === "tuxedo") { tux.push(it); continue; }   // the apex — sold at the mirror
       if (sp && (sp.slot === "jacket")) forms.push(it);                 // blazers/bomber → mannequins
-      else wall.push(it);                                              // shirts/ties/trousers → rails
+      else { it._slot = (sp && sp.slot) || "shirt"; wall.push(it); }    // shirts/ties/trousers → rails
     }
+    // group the rail stock by slot so each category hangs together + gets a
+    // placard; keep a stable category order, unknown slots trail.
+    wall.sort((a, b) => {
+      const ia = SLOT_ORDER.indexOf(a._slot), ib = SLOT_ORDER.indexOf(b._slot);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
     return { wall, forms, tux: tux[0] || null };
   }
 
@@ -107,6 +127,61 @@
     host.add(grp);
     return grp;
   }
+
+  // ---- a REAL garment on a hanger ------------------------------------------
+  // The owner's complaint was that rail items read as loose "for sale" ghosts
+  // floating in space. This hangs an actual garment silhouette off the chrome
+  // rod BEHIND each composable sample: a wire hook + a shoulder bar, then a
+  // draped body — a torso/jacket box for tops, or a folded-over-the-bar
+  // trouser shape for legwear — tinted to the item's own color. So "White
+  // Trousers $80" now reads as white trousers ON a rack, not a phantom.
+  // Everything mounts on a host group already positioned + rotated to face the
+  // aisle; geometry is small boxes, the material is the shared per-color cloth.
+  function buildHungGarment(host, slot, hex) {
+    const cloth = garmentMat(hex);
+    const m = mats();
+    // the wire hanger: a hook curling over the rod + the shoulder triangle bar.
+    const hook = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.025), m.hanger);
+    hook.position.set(0, 0.55, 0.02); hook.castShadow = false; host.add(hook);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, 0.03), m.hanger);
+    bar.position.set(0, 0.45, 0); bar.castShadow = false; host.add(bar);
+
+    if (slot === "legs") {
+      // TROUSERS folded over the bar: a short waist cuff at the bar, then the
+      // two leg panels hanging straight down from it.
+      const waist = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 0.05), cloth);
+      waist.position.set(0, 0.4, 0); waist.castShadow = false; host.add(waist);
+      const legGeo = new THREE.BoxGeometry(0.14, 0.62, 0.05);
+      const lL = new THREE.Mesh(legGeo, cloth); lL.position.set(-0.085, 0.04, 0); lL.castShadow = false; host.add(lL);
+      const lR = new THREE.Mesh(legGeo, cloth); lR.position.set(0.085, 0.04, 0); lR.castShadow = false; host.add(lR);
+      return;
+    }
+    if (slot === "neck") {
+      // a TIE draped over the bar: a thin knot + a long blade hanging down.
+      const knot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.04), cloth);
+      knot.position.set(0, 0.4, 0); knot.castShadow = false; host.add(knot);
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.55, 0.03), cloth);
+      blade.position.set(0, 0.08, 0); blade.castShadow = false; host.add(blade);
+      return;
+    }
+    // TOPS (shirt / jacket / anything else): draped shoulders + a body box, and
+    // for a jacket a slightly wider shell with two sleeve panels at the sides.
+    const isJacket = (slot === "jacket");
+    const bodyW = isJacket ? 0.46 : 0.38;
+    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(bodyW, 0.08, 0.07), cloth);
+    shoulder.position.set(0, 0.4, 0); shoulder.castShadow = false; host.add(shoulder);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, 0.5, 0.06), cloth);
+    body.position.set(0, 0.1, 0); body.castShadow = false; host.add(body);
+    if (isJacket) {
+      const slGeo = new THREE.BoxGeometry(0.1, 0.46, 0.06);
+      const sL = new THREE.Mesh(slGeo, cloth); sL.position.set(-0.27, 0.12, 0); sL.castShadow = false; host.add(sL);
+      const sR = new THREE.Mesh(slGeo, cloth); sR.position.set(0.27, 0.12, 0); sR.castShadow = false; host.add(sR);
+    }
+  }
+
+  // a small floor-anchored category placard along the rail.
+  const SLOT_PLACARD = { shirt: "SHIRTS", neck: "TIES", legs: "TROUSERS", jacket: "BLAZERS", outfit: "SUITS", dress: "DRESSES" };
+  function slotCategory(slot) { return SLOT_PLACARD[slot] || "APPAREL"; }
 
   // ---- build the displays once per city ------------------------------------
   function buildDisplays() {
@@ -148,8 +223,12 @@
       lilac.position.set(wallX, railY + 1.05, wallZ); lilac.castShadow = false; group.add(lilac);
     });
 
+    // track the last category placed on each side so a placard drops at the
+    // head of each new category block as the rail walks down the wall.
+    const lastCat = {};
     wall.forEach((it, i) => {
-      const sgn = sides[i < half ? 0 : 1];
+      const sideIdx = i < half ? 0 : 1;
+      const sgn = sides[sideIdx];
       const inRow = (sgn === sides[0]) ? half : (wall.length - half);
       const idxInRow = (sgn === sides[0]) ? i : i - half;
       const wallX = cs.cx + tx * sgn * (halfTan - WT - 0.22);
@@ -159,13 +238,30 @@
       const depth = 0.9 + t * Math.max(0.2, railLen - 0.6);
       const x = wallX + inx * depth, z = wallZ + inz * depth;
       const sp = CBZ.cityComposableSpec(it.visualId);
-      // a hung garment: a small hanger hook + the composable sample, scaled
-      // down and faced INTO the room so the cut reads from the aisle.
-      const hook = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.18, 0.03), m.hanger);
-      hook.position.set(x, railY + 0.45, z); hook.castShadow = false; group.add(hook);
+      const slot = (sp && sp.slot) || it._slot || "shirt";
+      const faceY = Math.atan2(-tx * sgn, -tz * sgn);        // off the wall, into the room
+
+      // CATEGORY PLACARD at the head of each new category block on this side.
+      const cat = slotCategory(slot);
+      if (lastCat[sideIdx] !== cat) {
+        lastCat[sideIdx] = cat;
+        const plc = tagSprite(cat, "#c9a8e8", 1.2, 0.34);
+        if (plc) { plc.position.set(x, railY + 1.42, z); group.add(plc); }
+      }
+
+      // a REAL garment on a hanger hanging off the rod, tinted to the item's
+      // own color — this is what stops the merch reading as a floating ghost.
+      const rack = new THREE.Group();
+      rack.position.set(x, railY, z);
+      rack.rotation.y = faceY;
+      group.add(rack);
+      buildHungGarment(rack, slot, (sp && sp.color != null) ? sp.color : null);
+
+      // the composable sample drapes in front of the hung garment so the cut /
+      // pattern reads from the aisle, same draw path as the rig painter.
       const host = new THREE.Group();
-      host.position.set(x, railY, z);
-      host.rotation.y = Math.atan2(-tx * sgn, -tz * sgn);   // face off the wall, into the room
+      host.position.set(x + Math.sin(faceY) * 0.07, railY, z + Math.cos(faceY) * 0.07);
+      host.rotation.y = faceY;
       host.scale.setScalar(0.78);
       group.add(host);
       const sample = drawSample(host, it.visualId, 0);
@@ -463,7 +559,15 @@
     if (!ensure()) return;
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
-    const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
+    // The racks may ONLY render when the player is actually INSIDE the store
+    // shell (plus a small doorway lip). r128's raycaster can't cull a hung
+    // garment behind opaque walls, so the merch was reading through the glass
+    // from the street ("White Trousers $80" floating outside). Gating on the
+    // walkable bounds — not a 55m radius — keeps every sample sealed in the room.
+    const B = S.cs.bounds;
+    const inside = (P.pos.x >= B.minX - 1.2 && P.pos.x <= B.maxX + 1.2 &&
+                    P.pos.z >= B.minZ - 1.2 && P.pos.z <= B.maxZ + 1.2);
+    const near = inside && (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
     if (!near || g.state !== "playing" || P.dead || P.driving) { hidePrompt(); if (S.panelOpen && (!near || P.dead || P.driving)) closePanel(); return; }
     if (S.panelOpen) { hidePrompt(); return; }           // panel up: in-world prompt yields

@@ -55,6 +55,15 @@
   const boxGeo = CBZ.boxGeom || function (w, h, d) { return new THREE.BoxGeometry(w, h, d); };
   const g = CBZ.game;
 
+  // SHINY material API (world/carfx.js → CBZ.vehicleMat), with a flat-lambert
+  // fallback for headless/gallery. Routes the BOX-RIG fallback car's surfaces
+  // through the same reflective env-mapped materials the detailed visual uses,
+  // so the gallery / no-visual path also reads as polished, not toy-matte.
+  function vmat(role, color, opts) {
+    return (CBZ.vehicleMat) ? CBZ.vehicleMat(role, color, opts)
+                            : cmat(color == null ? 0x888888 : color, opts);
+  }
+
   // CRASH SEVERITY THRESHOLDS — re-grounded in real-world crash data (NHTSA/IIHS).
   // The sim's speed unit ≈ 2.4 mph (sedan top ≈ 35u ≈ 80 mph; cruise 7-12u ≈ 20-30
   // mph), so the bands below map onto the real damage ladder:
@@ -95,6 +104,10 @@
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   let _trafficStopNoteT = 0;   // global cooldown for the ambient "traffic stop nearby" feed line
   const TR = () => (CBZ.CITY && CBZ.CITY.traf) || {};
+  // multi-lane geometry (mirrors traffic.js): lane index → signed lateral offset.
+  const lanesPerDir = () => Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0);
+  const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
+  const laneOffset = (dir, idx) => dir * laneWidth() * (idx + 0.5);
 
   // ---- ambient car MODEL builder ----------------------------------------
   // Cars read as real vehicles: a low body with a chamfered roof/hood, a
@@ -103,7 +116,7 @@
   // of seven BODY TYPES (hatch / sedan / SUV / pickup / van / muscle / coupe) with distinct
   // proportions. crumpleCar animates userData.body + userData.cabin, so those
   // two meshes stay the deformable hull (low at y≈0.78) and roof (y≈1.45).
-  const WHEEL_GEO = new THREE.CylinderGeometry(0.45, 0.45, 0.42, 12);
+  const WHEEL_GEO = new THREE.CylinderGeometry(0.45, 0.45, 0.42, 16);   // rounder tyre
   WHEEL_GEO._shared = true;
   const HUB_GEO = new THREE.CylinderGeometry(0.2, 0.2, 0.44, 8);
   HUB_GEO._shared = true;
@@ -159,6 +172,35 @@
     out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
     out.computeBoundingSphere();
     return out;
+  }
+
+  // ---- ALLOY RIM geometry (shared, built once): a bright wheel face = flat disc
+  //      + 5 radial spokes + hub cap, baked into ONE geometry for a radius-0.45
+  //      reference wheel and SCALED per car in addWheels. Replaces the old plain
+  //      hub cylinder so wheels read as machined alloys, not black discs.
+  let RIM_GEO = null;
+  function buildRimGeo() {
+    if (RIM_GEO) return RIM_GEO;
+    try {
+      const r = 0.45, width = 0.42, rimR = r * 0.66, parts = [];
+      const pushNI = (g3) => { g3.computeVertexNormals(); parts.push(g3.index ? g3.toNonIndexed() : g3); };
+      pushNI(new THREE.CylinderGeometry(rimR, rimR, width * 0.5, 16));   // rim face disc
+      const spokeLen = rimR * 0.95, spokeW = r * 0.13, spokeT = width * 0.52;
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const s = new THREE.BoxGeometry(spokeLen, spokeW, spokeT);
+        s.translate(spokeLen * 0.5, 0, 0);
+        s.applyMatrix4(new THREE.Matrix4().makeRotationY(a));
+        pushNI(s);
+      }
+      pushNI(new THREE.CylinderGeometry(r * 0.17, r * 0.17, width * 0.62, 8));   // hub cap
+      RIM_GEO = mergeGeometryCopies(parts);
+      parts.forEach((g3) => g3.dispose && g3.dispose());
+    } catch (e) {
+      RIM_GEO = HUB_GEO;   // headless renderer w/o BufferGeometry baking: fall back to the old cap
+    }
+    RIM_GEO._shared = true;
+    return RIM_GEO;
   }
 
   // Ambient-car parts never animate independently, except for the deformable
@@ -277,22 +319,29 @@
   }
 
   function addWheels(grp, halfTrack, wz, r) {
-    const wmat = cmat(0x131417, { emissive: 0x060708, ei: 0.2 });
-    const hmat = cmat(0x70767e, { emissive: 0x24272b, ei: 0.3 });
-    [[halfTrack, wz], [-halfTrack, wz], [halfTrack, -wz], [-halfTrack, -wz]].forEach(([wx, wzz]) => {
+    const wmat = vmat("tire", 0x131417, { emissive: 0x060708, ei: 0.2 });   // shiny rubber
+    const rmat = vmat("rim", 0xc2c9d1, { emissive: 0x20242a, ei: 0.3 });     // bright alloy
+    const rim = buildRimGeo();
+    [[halfTrack, wz, -1], [-halfTrack, wz, 1], [halfTrack, -wz, -1], [-halfTrack, -wz, 1]].forEach(([wx, wzz, out]) => {
       const wh = new THREE.Mesh(WHEEL_GEO, wmat);
       wh.rotation.z = Math.PI / 2; wh.position.set(wx, r, wzz);
       wh.scale.set(r / 0.45, 1, r / 0.45); wh.castShadow = false; grp.add(wh);   // blob shadows ground cars
-      const hub = new THREE.Mesh(HUB_GEO, hmat);
-      hub.rotation.z = Math.PI / 2; hub.position.set(wx + (wx > 0 ? 0.01 : -0.01), r, wzz);
-      hub.scale.set(r / 0.45, 1.02, r / 0.45); grp.add(hub);
+      // alloy rim proud of the OUTboard tyre face (sign per side keeps it facing out)
+      const rd = new THREE.Mesh(rim, rmat);
+      rd.rotation.z = out * Math.PI / 2;
+      rd.position.set(wx, r, wzz);
+      rd.scale.set(r / 0.45, 1, r / 0.45);
+      rd.position.x += out * 0.13 * (r / 0.45);   // push the face outboard a touch
+      rd.castShadow = false; grp.add(rd);
     });
   }
 
-  // headlights (front, pale) + taillights (rear, red), as small emissive bars
+  // headlights (front, pale) + taillights (rear, red), as small emissive bars.
+  // Colours/emissives are kept EXACTLY as before (the brake-light + crash dead-
+  // lamp detectors key off these specific values); vmat just adds the glossy lens.
   function addLights(grp, w, hullTopY, frontZ, rearZ) {
-    const head = cmat(0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
-    const tail = cmat(0xff3038, { emissive: 0xff2630, ei: 0.8 });
+    const head = vmat("lightFront", 0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
+    const tail = vmat("lightTail", 0xff3038, { emissive: 0xff2630, ei: 0.8 });
     const lx = w * 0.34;
     [lx, -lx].forEach((hx) => {
       const hl = boxMesh(0.4, 0.18, 0.06, head);
@@ -311,10 +360,15 @@
   // material work, and the merged-mesh part structure is untouched.
   const _brakeMats = new Map();           // tail material -> bright counterpart
   function isTailMat(m) {
-    // red-dominant emissive + red body colour = a tail lamp. The g/b ceilings
-    // exclude headlights (pale blue) and red paint (emissive is dim, ~0.2 r).
-    if (!m || !m.color || !m.emissive || m.emissive.r == null) return false;
-    return m.emissive.r > 0.78 && m.emissive.g < 0.35 && m.emissive.b < 0.45 && m.color.r > 0.78;
+    // A tail lamp = STRONG red emissive (the glow), regardless of the lens BODY
+    // colour. carfx gives lamps a realistic DARK lens (color.r≈0.13) lit by a
+    // bright emissive, so the old `color.r>0.78` clause (which assumed a bright
+    // red body) wrongly rejected every carfx tail and broke brake lights. We now
+    // key purely off the emissive: high red, low green/blue. This still excludes
+    // headlights (pale-white emissive → green/blue high) and body PAINT (whose
+    // emissive is a dim fraction of its colour, ~0.04-0.2 r, well under 0.78).
+    if (!m || !m.emissive || m.emissive.r == null) return false;
+    return m.emissive.r > 0.78 && m.emissive.g < 0.45 && m.emissive.b < 0.5;
   }
   function brakeMatFor(tailMat) {
     let b = _brakeMats.get(tailMat);
@@ -358,7 +412,8 @@
   // tinted-glass greenhouse: a thin windshield slab + two side-window slabs
   // wrapped around the cabin so the cabin reads as a windowed passenger box.
   function addGlass(grp, cabinW, cabinD, cabinY, cabinH, raked) {
-    const glass = cmat(0x16242e, { emissive: 0x0a151c, ei: 0.45 });
+    // keep the tint colour (crash frost-glass detector keys off it); vmat adds gloss.
+    const glass = vmat("glass", 0x16242e, { emissive: 0x0a151c, ei: 0.45 });
     const half = cabinD / 2;
     // windshield (front, raked back) + rear glass
     const wsW = cabinW * 0.9;
@@ -381,9 +436,9 @@
     const { w, len, hullH, hullY, roofW, roofH, roofY, roofZ, paint, trim } = d;
     const bodyY = 0.78 + (hullY - 0.72);
     const front = len * 0.5 + 0.055, rear = -len * 0.5 - 0.055;
-    const chrome = cmat(0xaeb7c0, { emissive: 0x24292e, ei: 0.3 });
-    const head = cmat(0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });
-    const tail = cmat(0xff3038, { emissive: 0xff2630, ei: 0.8 });
+    const chrome = vmat("chrome", 0xaeb7c0, { emissive: 0x24292e, ei: 0.3 });
+    const head = vmat("lightFront", 0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });   // exact colour kept
+    const tail = vmat("lightTail", 0xff3038, { emissive: 0xff2630, ei: 0.8 });     // for brake/crash detectors
     const add = (ww, hh, dd, x, y, z, material) => {
       const mesh = boxMesh(ww, hh, dd, material);
       mesh.position.set(x, y, z); grp.add(mesh); return mesh;
@@ -521,8 +576,9 @@
     const tint = 0.86 + rng() * 0.28;
     const c3 = new THREE.Color(color).multiplyScalar(tint);
     const paintHex = c3.getHex();
-    const paint = mat(paintHex, { emissive: c3.clone().multiplyScalar(0.18).getHex(), ei: 0.5 });
-    const trim = cmat(0x16181c, { emissive: 0x070809, ei: 0.25 });
+    // shiny clearcoat body (fresh per car so it carries THIS colour + reflections)
+    const paint = vmat("paint", paintHex, { emissive: c3.clone().multiplyScalar(0.18).getHex(), ei: 0.5 });
+    const trim = vmat("plastic", 0x16181c, { emissive: 0x070809, ei: 0.25 });
 
     // Use the model's stable body class so named traffic always reads correctly.
     let bt = modelBodyKind(model);
@@ -621,7 +677,7 @@
       const seam = boxMesh(0.025, hullH * 0.68, 0.035, trim);
       seam.position.set(side * (w * 0.505), 0.78 + (hullY - 0.72) + hullH * 0.1, -len * 0.05); grp.add(seam);
     });
-    const plate = boxMesh(w * 0.28, 0.14, 0.025, cmat(0xe8edf2, { emissive: 0x25282c, ei: 0.25 }));
+    const plate = boxMesh(w * 0.28, 0.14, 0.025, vmat("metal", 0xe8edf2, { emissive: 0x25282c, ei: 0.25 }));
     plate.position.set(0, 0.78 + (hullY - 0.72) - hullH * 0.08, -len * 0.5 - 0.085); grp.add(plate);
 
     if (model && model.livery === "taxi") {
@@ -632,13 +688,13 @@
     }
     const detail = model && model.detailStyle;
     if (detail && /^tesla-/.test(detail)) {
-      const roofGlass = boxMesh(roofW * 0.72, 0.035, roofD * 0.5, cmat(0x111d26, { emissive: 0x061018, ei: 0.35 }));
+      const roofGlass = boxMesh(roofW * 0.72, 0.035, roofD * 0.5, vmat("glass", 0x111d26, { emissive: 0x061018, ei: 0.35 }));
       roofGlass.position.set(0, roofY + roofH * 0.51, roofZ - roofD * 0.04); grp.add(roofGlass);
       const cleanNose = boxMesh(w * 0.72, 0.06, 0.03, paint);
       cleanNose.position.set(0, 0.78 + (hullY - 0.72) - hullH * 0.05, len * 0.5 + 0.02); grp.add(cleanNose);
     }
     if (detail === "cybertruck") {
-      const cyberGlass = cmat(0x111d26, { emissive: 0x061018, ei: 0.35 });
+      const cyberGlass = vmat("glass", 0x111d26, { emissive: 0x061018, ei: 0.35 });
       const tonneau = boxMesh(w * 0.86, 0.08, len * 0.34, trim);
       tonneau.position.set(0, roofY - roofH * 0.2, -len * 0.28); grp.add(tonneau);
       [1, -1].forEach((side) => {
@@ -735,7 +791,8 @@
       const r = A.roads[(rng() * A.roads.length) | 0];
       const along = (rng() - 0.5) * r.len * 0.85;
       const dirSign = rng() < 0.5 ? 1 : -1;
-      const lane = dirSign * (TR().lane != null ? TR().lane : 2.2);
+      const laneIdx = (rng() * lanesPerDir()) | 0;
+      const lane = laneOffset(dirSign, laneIdx);
       const x = r.vertical ? r.x + lane : r.x + along;
       const z = r.vertical ? r.z + along : r.z + lane;
       const heading = r.vertical ? (dirSign > 0 ? 0 : Math.PI) : (dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
@@ -743,7 +800,7 @@
       const aggr = reckless ? 0.65 + rng() * 0.35 : 0.15 + rng() * 0.35;
       const model = econ ? econ.pickCar(rng() < 0.12) : null;
       const c = makeCar(x, z, heading, r.vertical, model, aggr);
-      c.road = r; c.lane = lane; c.dirSign = dirSign;
+      c.road = r; c.lane = lane; c.dirSign = dirSign; c.laneIdx = laneIdx;
       c.baseV = (cLo + rng() * (cHi - cLo)) * (reckless ? (TR().aggrSpeedMul || 1.7) : 1);
       c.v = c.baseV * 0.6; c.reckless = reckless;
     }
@@ -1225,7 +1282,11 @@
       car.wreckT = Math.max(car.wreckT || 0, 0.7);
       car.spin = (car.spin || 0) + (Math.random() < 0.5 ? -1 : 1) * (0.8 + Math.random() * 0.9);
       car.baseV = Math.min(car.baseV || 9, 2.2);
-      if (car.lane) car.lane = (car.lane < 0 ? -1 : 1) * 3.3;   // hug the curb
+      if (car.lane) {                                          // hug the curb (scaled to road width)
+        const rd = (CBZ.CITY && CBZ.CITY.road) || 9;
+        car.lane = (car.lane < 0 ? -1 : 1) * Math.max(2.2, rd / 2 - 1.5);
+        car.laneIdx = lanesPerDir() - 1;
+      }
       car.reckless = false;
     }
     return true;
@@ -1650,11 +1711,27 @@
       //   below wallHard : 0.6 HP per unit of speed above the 5-unit no-damage floor
       //                    (~9 HP at a 20 mph clip — survives many; many bumps to kill)
       //   hard           : ~26 + speed-over-threshold ramp
-      //   catastrophic   : heavy, can disable, then cooks off via the fire fuse
-      const crashE = catastrophic ? (52 + (vmag - CRASH.wallCatastrophic) * 4)
+      //   catastrophic   : heavy enough to GUT the motor (engineHp→0) so it always
+      //                    becomes at least a disabled, smoking wreck (was 52 → a
+      //                    30-unit slam left it at HP 48, not even smoking; the bug
+      //                    fast-impact-velocity-detonate flags). Now it reliably
+      //                    disables, then cooks off via the (rare, slow) fire fuse.
+      const crashE = catastrophic ? (110 + (vmag - CRASH.wallCatastrophic) * 8)
                    : hard         ? (24 + (vmag - CRASH.wallHard) * 2)
                                   : Math.max(0, (vmag - 5) * 0.6);
       damageEngine(car, crashE, false);
+      // TOP-SPEED ram ALWAYS ignites → explodes (fast-impact-velocity-detonate
+      // "things hitting things BLOW UP when they should"): a genuinely flat-out
+      // slam (vmag>=38 ≈ 91mph, near a car's top end) is past the point where it
+      // merely smokes — it GUARANTEES a cook-off, overriding the rare-fire roll.
+      // A mid-catastrophic ram (30..38) keeps the realistic odds (usually a
+      // disabled smoker, sometimes a slow burn). Guarded so a freak engine state
+      // never double-ignites. The breach above + the wreck flag dedup the carve.
+      if (catastrophic && vmag >= 38 && !car._onFire && !car._exploded && !car.dead) {
+        car._smoking = true; car._crashFireRolled = true;   // we're forcing it — skip the chance roll
+        igniteCar(car, true);                               // slow crash-fire fuse → time to bail, then detonates
+        car._burnsOut = false;                              // a top-speed ram fireball does NOT just burn out
+      }
       // crater point from the PRE-impact pose (group.matrixWorld still holds it) —
       // captured before the push-back/spin below so the dent lands on the contact
       const dentX = car.pos.x + Math.sin(car.heading) * 2.2, dentZ = car.pos.z + Math.cos(car.heading) * 2.2;
@@ -1679,6 +1756,22 @@
       crumpleCar(car, catastrophic ? 0.78 : (hard ? 0.42 : 0.08), { x: -nwx, z: -nwz });
       // and the nose CRATERS at the contact — a 60mph wall hit stays cratered
       if (CBZ.cityCarImpact) CBZ.cityCarImpact(car, { x: dentX, y: (vehicleDims(car).height || 1.5) * 0.42, z: dentZ }, { x: -nwx, y: 0, z: -nwz }, vmag);
+      // ---- STRUCTURAL COUPLING (ram-breaches-building): the WALL the car hit
+      //      reacts to the slam, not just the car. A HARD hit scorches/dents the
+      //      facade, bursts its panes and knocks chunks loose (the same damage
+      //      escalation an explosion uses, dialled modest so it scuffs — never
+      //      levels — at <=1.4 power). A CATASTROPHIC (top-speed, vmag>=30) ram
+      //      ALSO punches a car-sized WALK-THROUGH BREACH so a 70mph ram opens a
+      //      hole you can keep driving through — the exact ground-floor carve the
+      //      RPG ground-hit uses, which self-dedups via fracture.recent() and is
+      //      a harmless no-op on open air. NOT a detonation: a ram makes no
+      //      fireball unless the engine later cooks off through the damage fuse.
+      //      Contact point ix,iz + wall normal nwx,nwz are already derived above.
+      if (hard && CBZ.cityDamageBuilding) {
+        const wy = (CBZ.floorAt ? CBZ.floorAt(ix, iz) : 0) + 1.0;
+        CBZ.cityDamageBuilding(ix, wy, iz, catastrophic ? 1.4 : 0.8);
+      }
+      if (catastrophic && CBZ.cityBreach) CBZ.cityBreach(ix, iz, 1.6);
       // Medium crashes hurt but are explicitly non-lethal. Only a truly
       // catastrophic top-speed slam is allowed to kill the driver.
       if (hard && CBZ.cityHurtPlayer) {
@@ -2124,7 +2217,6 @@
   CBZ.onUpdate(37, function (dt) {
     if (g.mode !== "city") return;
     const A = CBZ.city.arena; if (!A) return;
-    const lane = TR().lane != null ? TR().lane : 2.2;
     const baseDt = dt;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
@@ -2224,9 +2316,12 @@
       // ---- desired speed: cruise, modulated by lights, following, stops ----
       let target = c.baseV;
 
-      // red-light stop (calm drivers; the reckless gamble on it)
+      // red-light stop (calm drivers; the reckless gamble on it). HIGHWAY +
+      // arterial roads (the new mini-city/island network) have NO city-grid
+      // intersection, so nearestIntersection can return null — treat that as
+      // "no signal ahead" (open highway) instead of dereferencing undefined.
       const it = A.nearestIntersection(c.pos.x, c.pos.z);
-      const distToInt = r.vertical ? (it.z - c.pos.z) * c.dirSign : (it.x - c.pos.x) * c.dirSign;
+      const distToInt = !it ? 1e9 : (r.vertical ? (it.z - c.pos.z) * c.dirSign : (it.x - c.pos.x) * c.dirSign);
       const red = CBZ.cityIsRed(r.vertical);
       const stopGap = TR().stopGap || 6.5;
       const redLookahead = stopGap + 5 + Math.min(11, c.v * 0.75);
@@ -2300,8 +2395,24 @@
       if (swayAmp) { phaseRate = (1.6 + (c.driver.aggr - 0.6) * 1.4); c.swayPhase = (c.swayPhase || rng() * 6) + dt * phaseRate; }
       const sway = swayAmp ? Math.sin(c.swayPhase) * swayAmp : 0;
       const latNow = moveAxisZ ? c.pos.x - r.x : c.pos.z - r.z;
+      // KEEP RIGHT as the baseline (lane-recover-right): a CALM, non-deviating
+      // car whose lane offset somehow ended up on the WRONG side of the centre-
+      // line (sign of c.lane ≠ sign of c.dirSign — e.g. a botched turn/U-turn
+      // restore left it crossed over) is snapped back onto its proper right-hand
+      // lane. We do NOT touch a car that is deliberately deviating — reckless
+      // weavers, an active road-rage pass (_rageT, including the reckless
+      // oncoming chicken-pass), a car mid-turn, or one pulling over — those OWN
+      // their lane this frame. WHY: right-hand driving is the law of the road;
+      // recklessness is the deviation ON TOP, not the default.
+      if (!c.reckless && (c._rageT || 0) <= 0 && !c.turning && !c.pullover && !c.roadRageTarget) {
+        const want = laneOffset(c.dirSign, c.laneIdx != null ? c.laneIdx : 0);
+        if (c.lane * want < 0 || Math.abs(c.lane) < 0.2) c.lane = want;   // crossed over (or zeroed) → back to the right
+      }
       const latWant = c.lane + sway;
-      const latRate = 1.6 + Math.abs(c.v) * 0.24;            // faster car corrects faster
+      // faster car corrects faster. A calm (non-weaving) car corrects MORE
+      // briskly so a recovered/crossed lane is reclaimed promptly instead of
+      // drifting; reckless cars keep the gentler rate so their weave still reads.
+      const latRate = c.reckless ? (1.6 + Math.abs(c.v) * 0.24) : (2.2 + Math.abs(c.v) * 0.3);
       const lat = latNow + Math.max(-latRate * dt, Math.min(latRate * dt, latWant - latNow));
       if (moveAxisZ) c.pos.x = r.x + lat; else c.pos.z = r.z + lat;
 
@@ -2315,14 +2426,14 @@
       // per box (the old per-frame coin-flip re-rolled every frame a car sat in
       // the intersection — most cars turned at almost every corner, so traffic
       // read as aimless wandering instead of people going somewhere).
-      const insideInt = Math.abs(c.pos.x - it.x) < A.ROAD / 2 + 0.5 && Math.abs(c.pos.z - it.z) < A.ROAD / 2 + 0.5;
+      const insideInt = it != null && Math.abs(c.pos.x - it.x) < A.ROAD / 2 + 0.5 && Math.abs(c.pos.z - it.z) < A.ROAD / 2 + 0.5;
       if (insideInt && red && c.ranRedCD <= 0 && c.v > 4) {
         c.ranRedCD = 3; ranRed(c);
       }
       if (insideInt && !c._intActive) {
         c._intActive = true;
         if (c.v > 1 && (c._mustTurn || (c.turnCD <= 0 && rng() < 0.38))) {
-          beginTurn(c, it, A, lane);
+          beginTurn(c, it, A);
           if (c.turning) c._mustTurn = false;
         }
       } else if (!insideInt && c._intActive) c._intActive = false;
@@ -2418,7 +2529,7 @@
   // quadratic Bézier from the car's current lane position, through the corner
   // where the two lane centre-lines meet, out onto the new lane — so the car
   // sweeps the turn instead of teleporting + snapping its heading.
-  function beginTurn(c, it, A, laneW) {
+  function beginTurn(c, it, A) {
     const wantVertical = !c.vertical;
     const road = findRoad(A, wantVertical, wantVertical ? it.x : it.z);
     if (!road) return;
@@ -2428,7 +2539,9 @@
     // not the wall — and it kills the U-turn-right-after-turning read).
     const intAlong = wantVertical ? it.z - road.z : it.x - road.x;
     if (road.len / 2 - intAlong * newDir < 30) newDir = -newDir;
-    const newLane = newDir * laneW;
+    // keep the car's lane INDEX through the turn → its offset on the new road.
+    const idx = c.laneIdx != null ? c.laneIdx : 0;
+    const newLane = laneOffset(newDir, idx);
     const lead = A.ROAD / 2 + 1.2;
 
     // P0: where we are now, snapped onto the current lane's lateral line

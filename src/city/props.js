@@ -418,6 +418,14 @@
       kings: "ice in our veins",
       reapers: "steel never sleeps",
       saints: "pray we don't find you",
+      // 2nd-wave crews
+      lords:    "almighty, all is well",
+      surenos:  "sur side till we die",
+      nortenos: "puro norte, XIV up",
+      cartel:   "the plug. everybody eats here",
+      cosa:     "this block pays rent to us",
+      angels:   "ride or get run over",
+      brand:    "blood in, blood out",
     };
     return [d.name.toUpperCase(), slogans[d.id] || "this block is ours", darken(d.color, 0.16), hex(d.color), { kind: "gang", tag: "TURF" }];
   }

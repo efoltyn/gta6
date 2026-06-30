@@ -9,8 +9,18 @@
   const T = CBZ.TUNE;
 
   // vertical-physics constants (survival's multi-storey buildings)
-  const STEP_UP = 0.9;      // forgiving auto-climb: stairs stay easy at a run
+  // STEP_UP lowered 0.9→0.45 (Source sv_stepsize≈18u/0.45m; Unity stepOffset
+  // 0.1-0.4m): the old 0.9 over-climbed and let the player snap up nearly a
+  // whole flight in one frame, which jittered and let groundAt grab a far higher
+  // ramp top across a seam. 0.45 still clears every real riser (~0.18m) and curbs
+  // but no longer over-reaches. The stairs are now a CONTINUOUS ramp collider
+  // (buildings.js), so the player follows a smooth slope, not tread-by-tread.
+  const STEP_UP = 0.45;     // auto-climb a riser/curb/sill, not a whole flight
   const STEP_DOWN = 0.9;    // small drops you step down; bigger ones you fall off
+  const SNAP_DOWN = 0.35;   // ~one riser + margin: max distance we GLUE feet to a
+                            // floor a hair below them (kills descend-bounce / the
+                            // "airborne off each nosing → fall through" bug). A
+                            // real ledge (drop > SNAP_DOWN) still falls normally.
   const BODY_H = 1.7;       // collision body height for height-gated walls
 
   // ---- static-world collision broad phase ---------------------------
@@ -183,7 +193,7 @@
   //     returns the feetY the caller should adopt (== feetY if no step), so
   //     the caller stays in control of its own Y. Off CITY mode it always
   //     returns feetY unchanged (jail/survival byte-identical).
-  const STEP_UP_NPC = 1.0;        // max ledge an NPC auto-climbs (window sill ~0.5–0.9m)
+  const STEP_UP_NPC = 0.9;        // max ledge an NPC auto-climbs (curb/window sill ~0.5–0.9m)
   const STEP_MIN_NPC = 0.08;      // ignore ~flat/terrain-level boxes
   function npcStepLedge(pos, radius, feetY, headY, moveX, moveZ) {
     if (CBZ.game.mode !== "city") return feetY;        // jail/survival untouched
@@ -309,6 +319,12 @@
     if (CBZ.game.mode !== "city" || !CBZ.platforms || !CBZ.platforms.length) return direct;
     const sMid = groundAt((px0 + x1) * 0.5, (pz0 + z1) * 0.5, fromY);
     if (sMid > direct && sMid <= fromY + STEP_UP && sMid >= fromY - STEP_DOWN) return sMid;
+    // tight snap-down probe at the END point too: if a floor sits within one
+    // riser+margin below the feet (a nosing/seam), prefer it over the far drop.
+    if (direct < fromY - SNAP_DOWN) {
+      const sEnd = groundAt(x1, z1, fromY);
+      if (sEnd > direct && sEnd >= fromY - SNAP_DOWN && sEnd <= fromY + STEP_UP) return sEnd;
+    }
     return direct;
   }
 
@@ -491,20 +507,27 @@
 
       // gravity + ground following (terrain, stairs, floors, roofs)
       let support = groundAt(player.pos.x, player.pos.z, player.pos.y);
-      // ANTI-FALL-THROUGH: a grounded actor whose support suddenly drops below
-      // step-down reach is about to be handed to gravity. On the city stairs that
-      // "drop" is usually a one-sample seam between ramp AABBs, not a real ledge —
-      // re-probe the swept path and snap to the highest support still in reach, so
-      // a fast climber is never dumped down the stairwell. No-op off the city
-      // stairs (escape/survival, flat ground, real ledges) → behaviour unchanged.
+      // ANTI-FALL-THROUGH (belt-and-braces): with the CONTINUOUS ramp collider
+      // (buildings.js) groundAt can no longer hit a seam, so the seam-bridge is
+      // now redundant — but we keep a GUARDED version so nothing regresses if a
+      // future building rig reintroduces a gap. It only fires on the city
+      // building-climb when support drops past step-down reach while grounded.
       if (player.grounded && support < player.pos.y - STEP_DOWN) {
         support = stairSupport(support, px0, pz0, player.pos.x, player.pos.z, player.pos.y);
       }
       if (player.grounded) {
+        // GROUND-SNAP: glue the feet to the surface under us when it's within
+        // climb (STEP_UP) above OR snap-down (SNAP_DOWN ≈ one riser + margin)
+        // below — this kills the "briefly airborne off each nosing → fall" bug
+        // and the descend-bounce: walking DOWN a ramp/stair you stay glued. A
+        // larger but still in-reach step-down (SNAP_DOWN..STEP_DOWN) also sticks
+        // so short curbs don't launch you. A real ledge (drop > STEP_DOWN) falls.
         if (support <= player.pos.y + STEP_UP && support >= player.pos.y - STEP_DOWN) {
           // close enough to the surface under us — stick to it. This follows
           // slopes DOWN, climbs a stair tread UP, and steps down a short ledge,
-          // all without a hover or a bounce.
+          // all without a hover or a bounce. (SNAP_DOWN is the tight band that
+          // makes the continuous ramp un-fall-through-able; STEP_DOWN extends it
+          // for forgiving curb/landing step-downs.)
           player.pos.y = support; player.vy = 0; player._fallPeak = 0;
         } else {
           // walked off an edge taller than a stair (a roof rim, a balcony) —

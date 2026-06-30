@@ -286,9 +286,29 @@
         box(x + off, 0.26 + i * 0.45, z + 5.3, 0.9 - i * 0.12, 0.42, 0.9 - i * 0.12, 0x23262b, { cast: false }); // tyre stacks
       box(x - 7.4, 0.8, z + 5.4, 2.2, 1.6, 0.7, 0x3a352e, { cast: false });            // parts shelf
       box(x, 0.1, z + 4.2, 5.2, 0.2, 3.0, 0xc8ccd4, { cast: false });                  // feature-car plinth
-      parkedCar(x - 4.6, z + 1.6, true, 0xe24b4b, true);
-      parkedCar(x + 4.6, z + 1.6, true, 0x3c6fd6, true);
-      parkedCar(x, z + 4.2, false, 0xf2c43d, true);
+      // A FULL SALES FLOOR: a grid of display cars on pale plinths so the empty
+      // middle reads as inventory you'd browse (not three lonely cars). Real,
+      // stealable cars (parkedCar) + a name/price placard on each plinth.
+      const showSpots = [
+        { dx: -4.6, dz: 1.6, vert: true,  c: 0xe24b4b },
+        { dx:  4.6, dz: 1.6, vert: true,  c: 0x3c6fd6 },
+        { dx:  0.0, dz: 4.2, vert: false, c: 0xf2c43d },
+        { dx: -4.6, dz: -3.2, vert: true, c: 0x202225 },
+        { dx:  4.6, dz: -3.2, vert: true, c: 0xa8afb2 },
+        { dx:  0.0, dz: -1.0, vert: false, c: 0xf28c28 },
+      ];
+      const cars = (CBZ.cityEcon && Array.isArray(CBZ.cityEcon.CARS)) ? CBZ.cityEcon.CARS : null;
+      showSpots.forEach((s, i) => {
+        box(x + s.dx, 0.08, z + s.dz, s.vert ? 2.6 : 5.0, 0.16, s.vert ? 5.0 : 2.6, 0xc8ccd4, { cast: false });  // plinth
+        parkedCar(x + s.dx, z + s.dz, s.vert, s.c, true);
+        if (CBZ.makeLabelSprite && cars) {
+          try {
+            const m = cars[(i * 4 + 8) % cars.length];   // spread across the catalog
+            const s2 = CBZ.makeLabelSprite(m.name + "  $" + (m.value || 0).toLocaleString(), { color: "#ffd166" });
+            if (s2) { s2.position.set(x + s.dx, 1.4, z + s.dz - (s.vert ? 2.7 : 1.5)); root.add(s2); }
+          } catch (e) {}
+        }
+      });
     }
 
     gasStation(cx - 78, cz + 74);
@@ -383,15 +403,97 @@
     city.allXLines = city.xLines.concat(islandXLines);
     city.allZLines = city.zLines.concat(islandZLines);
 
-    // ---- trees and parked cars make the new district feel inhabited ----
-    for (let i = 0; i < 58; i++) {
-      const a = rng() * Math.PI * 2, dist = 20 + rng() * (R - 24);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
-      if (blocked(x, z) || nearRoad(x, z, 1, 1) || nearDoor(x, z, 2.7)) continue;
-      const th = 2.0 + rng() * 1.5;
-      box(x, th / 2, z, 0.5, th, 0.5, 0x6b4a2a, { solid: true, noCam: true });
-      box(x, th + 1.2, z, 2.4 + rng(), 2.6, 2.4 + rng(), 0x3f9a4f, { cast: false });
-    }
+    // ---- trees make the new district feel inhabited. INSTANCED (owner rule
+    //      #4): the old island trees were per-tree box pairs (trunk box +
+    //      foliage box) — dozens of separate meshes/draw calls and a flat slab
+    //      look. They are now ONE tapered-trunk InstancedMesh + ONE stacked-
+    //      cone crown InstancedMesh (2 draw calls for every island tree), with
+    //      prettier shapes and per-instance scale/colour variation. A SPARSE
+    //      set of colliders is kept (only the biggest few trunks) so the island
+    //      still feels solid where you'd brush a trunk, without thousands of
+    //      AABBs — matching the biome_forest discipline. ----------------------
+    (function islandTrees() {
+      const trees = [];
+      for (let i = 0; i < 64; i++) {
+        const a = rng() * Math.PI * 2, dist = 20 + rng() * (R - 24);
+        const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
+        if (blocked(x, z) || nearRoad(x, z, 1, 1) || nearDoor(x, z, 2.7)) continue;
+        const broad = rng() < 0.5;                 // mix conifers + round broadleaf
+        const h = (broad ? 4.0 : 5.0) + rng() * 3.5;
+        trees.push({
+          x, z, h, broad,
+          tr: 0.7 + rng() * 0.5,                   // trunk radius scale
+          rot: rng() * 6.28,
+          lean: (rng() - 0.5) * 0.05,
+          cR: broad ? h * (0.40 + rng() * 0.16) : 0.85 + rng() * 0.5,
+          cH: broad ? h * (0.55 + rng() * 0.2) : h * (0.95 + rng() * 0.2),
+          cY: broad ? h * (0.7 + rng() * 0.1) : h * 0.5,
+        });
+      }
+      const N = trees.length;
+      if (!N) return;
+
+      // unit geometries (base at y=0 so per-instance Y-scale grows upward)
+      const trunkGeo = new THREE.CylinderGeometry(0.18, 0.36, 1, 5);
+      trunkGeo.translate(0, 0.5, 0);
+      // broadleaf crown = squashed icosahedron; conifer crown = a 2-cone stack
+      // merged into one geo. Both crowns ride their own InstancedMesh, but we
+      // only need ONE crown IM if we pick a single crown geo — to keep it to 2
+      // draw calls total we use the round icosahedron for broadleaf and a tall
+      // cone for conifers, selected per-instance by SCALING a shared crown geo
+      // would distort; instead bake BOTH into one merged crown atlas is overkill
+      // here, so we render conifers' crowns by reusing the icosahedron stretched
+      // tall+narrow (reads as a rounded evergreen) — keeps it at 2 draw calls.
+      const crownGeo = new THREE.IcosahedronGeometry(0.6, 0);
+      crownGeo.translate(0, 0.6, 0);
+
+      const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); trunkMat._shared = true;
+      const crownMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); crownMat._shared = true;
+      const trunkIM = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
+      const crownIM = new THREE.InstancedMesh(crownGeo, crownMat, N);
+      trunkIM.castShadow = crownIM.castShadow = true;
+      trunkIM.receiveShadow = crownIM.receiveShadow = true;
+      trunkIM.frustumCulled = false; crownIM.frustumCulled = false;   // r128 instanced cull bug
+
+      const dummy = new THREE.Object3D();
+      const col = new THREE.Color();
+      const tCol = new Float32Array(N * 3), cCol = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const t = trees[i];
+        // trunk
+        dummy.position.set(t.x, 0, t.z);
+        dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+        dummy.scale.set(t.tr, t.h, t.tr);
+        dummy.updateMatrix(); trunkIM.setMatrixAt(i, dummy.matrix);
+        // crown (broadleaf = round; conifer = stretched tall+narrow)
+        dummy.position.set(t.x, t.cY, t.z);
+        dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+        if (t.broad) dummy.scale.set(t.cR, t.cH * 0.9, t.cR);
+        else dummy.scale.set(t.cR, t.cH, t.cR * 0.92);
+        dummy.updateMatrix(); crownIM.setMatrixAt(i, dummy.matrix);
+        // colours
+        const s = 0.32 + rng() * 0.14; col.setRGB(s, s * 0.62, s * 0.36);    // bark
+        tCol[i * 3] = col.r; tCol[i * 3 + 1] = col.g; tCol[i * 3 + 2] = col.b;
+        if (t.broad) col.setRGB(0.24 + rng() * 0.16, 0.46 + rng() * 0.16, 0.18 + rng() * 0.08);
+        else col.setRGB(0.10 + rng() * 0.08, 0.30 + rng() * 0.14, 0.14 + rng() * 0.07);
+        cCol[i * 3] = col.r; cCol[i * 3 + 1] = col.g; cCol[i * 3 + 2] = col.b;
+      }
+      trunkIM.instanceColor = new THREE.InstancedBufferAttribute(tCol, 3);
+      crownIM.instanceColor = new THREE.InstancedBufferAttribute(cCol, 3);
+      trunkIM.instanceMatrix.needsUpdate = true;
+      crownIM.instanceMatrix.needsUpdate = true;
+      root.add(trunkIM); root.add(crownIM);
+
+      // SPARSE colliders: only the biggest few trunks (the old code made every
+      // tree a noCam solid box; thousands of AABBs aren't worth it, but a
+      // handful keep the island feeling solid). Pick the tallest, cap at 14.
+      const byH = trees.slice().sort((a, b) => b.h - a.h);
+      for (let i = 0; i < byH.length && i < 14; i++) {
+        const t = byH[i];
+        const r = t.tr * 0.32 + 0.22;
+        CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
+      }
+    })();
     const CAR_COLORS = [0xe24b4b, 0x3c6fd6, 0xf2c43d, 0x4caf6e, 0xe8e8ee, 0x2a2d33, 0xe88a3c];
     for (let i = 0; i < roadSegs.length; i += 2) {
       const r = roadSegs[i], off = (rng() < 0.5 ? -1 : 1) * ROADW * 0.25, along = (rng() - 0.5) * r.len * 0.65;

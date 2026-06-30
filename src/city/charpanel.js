@@ -72,7 +72,7 @@
     { key: "outer",   name: "Outer",   icon: "🧥", cloth: "jacket" },
     { key: "bottom",  name: "Bottom",  icon: "👖", cloth: "legs" },
     { key: "shoes",   name: "Shoes",   icon: "👟", cloth: "shoes" },
-    { key: "glasses", name: "Glasses", icon: "🕶️", cloth: "face" },
+    { key: "glasses", name: "Glasses", icon: "🕶️", bling: "eyes" },
     { key: "chain",   name: "Chain",   icon: "📿", bling: "neck" },
     { key: "watch",   name: "Watch",   icon: "⌚", bling: "wristL" },
     { key: "ring",    name: "Ring",    icon: "💍", bling: "ring" },
@@ -99,6 +99,11 @@
   // best OWNED jewellery name for a bling slot (mirrors bling.js flexTable
   // classification, read-only). Returns the catalog name or null.
   function blingWornIn(slotKey) {
+    // eyewear is its own axis (a face-mounted shade, not a body jewel) — the
+    // panel's "Glasses" slot reads it like a bling slot for a uniform "Worn"
+    // grid, but the OWNED-item test differs (sunglass/shades, never a grill),
+    // so we delegate to the single eyewear classifier rather than duplicate it.
+    if (slotKey === "eyes") return eyewearWornIn();
     const econ = CBZ.cityEcon;
     if (!econ || !econ.ITEMS || !g.cityInv) return null;
     const items = econ.ITEMS;
@@ -257,6 +262,185 @@
   }
 
   // ============================================================
+  //  WORN ARMOR ON THE PORTRAIT — vest + chest plate band + helmet.
+  //  Same separate-mesh story as the jewellery above: armor.js mounts the
+  //  player's kit (CBZ.player._armorKit) as POOLED shells on the LIVE rig via
+  //  CBZ.cityArmorPlayerResync — tied to armor.js's own pool + the live-player
+  //  anchors, wrong for this isolated offscreen rig. So we mount the SAME shells
+  //  here directly, at the EXACT geometry + local transforms armor.js uses
+  //  (geoFor / mountKitMeshes), coloured from the public CBZ.ARMOR_KITS table.
+  //  Built once, re-pointed on change — no per-frame alloc, no pool touched.
+  // ============================================================
+  const AG = {};                                   // shared armour geometry by kind
+  function ageo(kind) {
+    if (AG[kind] !== undefined) return AG[kind];
+    const B = CBZ.boxGeom; let gm = null;
+    if (B) {
+      if (kind === "vest") gm = B(1.02, 0.86, 0.62);
+      else if (kind === "vestHi") gm = B(1.04, 0.30, 0.64);
+      else if (kind === "helmet") gm = B(0.70, 0.46, 0.70);
+    }
+    AG[kind] = gm;
+    return gm;
+  }
+  const _amats = {};                               // shared armour finishes by colour (mirror armor.js matFor)
+  function amat(color) {
+    if (color == null) color = 0x2b2f36;
+    if (_amats[color]) return _amats[color];
+    const C = CBZ.cmat; if (!C) return null;
+    return (_amats[color] = C(color, { emissive: 0x0a0c0f, ei: 0.18 }));
+  }
+  // a stable signature of the player's worn armour — re-mount only on change.
+  function armorSig() {
+    const P = CBZ.player, k = P && P._armorKit;
+    if (!k) return "";
+    return (k.chest || "") + "|" + (k.head || "");   // hand=shield is cosmetic, skip
+  }
+  function mountArmorMesh(kind, anchor, color, x, y, z, out) {
+    if (!anchor || !anchor.add || !THREE) return;
+    const geo = ageo(kind), mat = amat(color);
+    if (!geo || !mat) return;
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = false; m.receiveShadow = false;
+    m.position.set(x, y, z);
+    anchor.add(m); out.push(m);
+  }
+  // (re)dress the portrait rig's worn armour to match the player. Idempotent:
+  // strips the previous shells, mounts the current kit. Vest/band ride the body,
+  // helmet rides the neck — the exact anchors + transforms armor.js mounts on.
+  function applyPortraitArmor(rig) {
+    if (!rig) return;
+    if (rig._cpArmor) {
+      for (let i = 0; i < rig._cpArmor.length; i++) { const m = rig._cpArmor[i]; if (m && m.parent) m.parent.remove(m); }
+      rig._cpArmor = null;
+    }
+    const P = CBZ.player, k = P && P._armorKit, KITS = CBZ.ARMOR_KITS;
+    if (!k || !KITS) return;                        // no kit worn — fabric only
+    const out = [];
+    const chest = k.chest && KITS[k.chest];
+    if (chest) {
+      mountArmorMesh("vest", rig.body, chest.color, 0, 1.40, 0, out);
+      if (chest.id !== "softVest") mountArmorMesh("vestHi", rig.body, chest.color, 0, 1.58, 0.02, out);   // raised plate band (SWAT/plate reads heavier)
+    }
+    const head = k.head && KITS[k.head];
+    if (head) mountArmorMesh("helmet", rig.neck, head.color, 0, 0.40, 0, out);
+    if (out.length) rig._cpArmor = out;
+  }
+
+  // ============================================================
+  //  WORN EYEWEAR ON THE PORTRAIT — sunglasses / designer shades.
+  //  Same separate-mesh story as the jewellery + armour above: bling.js
+  //  mounts the player's shades as a 5-part shell (two lenses + bridge + two
+  //  temples) on the LIVE rig's "eyes" group — which resolves to the head/neck
+  //  bone, so the glasses RIDE AND TURN with the head — but that path is the
+  //  live-player roster + camera-distance gated, wrong for this isolated
+  //  offscreen rig. So we mount the SAME shell here directly, at the EXACT
+  //  geometry, local transforms and finishes bling.js uses, anchored on the
+  //  rig's NECK group (transforms are NECK-LOCAL). Built once, re-pointed on
+  //  change — no per-frame alloc, no global roster touched.
+  //
+  //  WHY a face-mounted shade reads at all on a tiny portrait: the small panel
+  //  frames the upper body and the big [I] view shows the whole rig — the head
+  //  is the focal point of both, so a worn pair of shades is the single most
+  //  visible accessory; without this the portrait lied (bare eyes) the instant
+  //  the player put shades on, exactly the "is it actually ON me?" doubt this
+  //  whole mirror exists to kill.
+  // ============================================================
+  const EG = {};                                   // shared eyewear geometry by kind (mirror bling.js)
+  function egeo(kind) {
+    if (EG[kind] !== undefined) return EG[kind];
+    const B = CBZ.boxGeom; let gm = null;
+    if (B) {
+      if (kind === "lens") gm = B(0.20, 0.17, 0.05);         // one shade lens over an eye
+      else if (kind === "bridge") gm = B(0.09, 0.055, 0.05); // nose bridge joining the lenses
+      else if (kind === "temple") gm = B(0.035, 0.045, 0.30);// arm running back over the ear
+    }
+    EG[kind] = gm;
+    return gm;
+  }
+  let _emats = null;                               // shared eyewear finishes (mirror bling.js)
+  function emats() {
+    if (_emats) return _emats;
+    const C = CBZ.cmat; if (!C) return null;
+    _emats = {
+      lensDark: C(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),   // basic sunglasses lens
+      lensMirror: C(0x0e1422, { emissive: 0x37588a, ei: 0.50 }), // designer mirrored lens
+      frameDark: C(0x111317, { emissive: 0x000000, ei: 0.0 }),   // black plastic frame
+      gold: C(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),        // designer frame (same gold the jewelry uses)
+    };
+    return _emats;
+  }
+  // the 5-part shade shell (kind + finish + neck-local transform) — copied 1:1
+  // from bling.js so the portrait reads identically to the live body. The basic
+  // pair is all-black with dark lenses; the designer pair is the SAME 5
+  // transforms with mirrored lenses + a gold frame.
+  function eyewearParts(name) {
+    const M = emats(); if (!M) return null;
+    const designer = String(name).toLowerCase().indexOf("designer") >= 0;
+    const lens = designer ? M.lensMirror : M.lensDark;
+    const frame = designer ? M.gold : M.frameDark;
+    return [
+      { kind: "lens", mat: lens, x: -0.145, y: 0.345, z: 0.34 },
+      { kind: "lens", mat: lens, x: 0.145, y: 0.345, z: 0.34 },
+      { kind: "bridge", mat: frame, x: 0.0, y: 0.345, z: 0.34 },
+      { kind: "temple", mat: frame, x: -0.27, y: 0.345, z: 0.17 },
+      { kind: "temple", mat: frame, x: 0.27, y: 0.345, z: 0.17 },
+    ];
+  }
+  // best OWNED eyewear NAME (or null) — scans g.cityInv + CBZ.cityEcon.ITEMS
+  // exactly like blingWornIn does, but with the eyewear name test: a "sunglass"
+  // or "shades" item (NEVER a "grill", which slots to glasses but is a mouth
+  // piece). Designer Shades (value 420) outrank Sunglasses (value 140), so the
+  // highest-value owned pair wins.
+  function eyewearWornIn() {
+    const econ = CBZ.cityEcon;
+    if (!econ || !econ.ITEMS || !g.cityInv) return null;
+    const items = econ.ITEMS;
+    let best = null, bestV = -1;
+    for (const name in g.cityInv) {
+      if ((g.cityInv[name] | 0) <= 0) continue;
+      const it = items[name];
+      if (!it) continue;
+      const s = name.toLowerCase();
+      if (s.indexOf("grill") >= 0) continue;                 // a grill slots to glasses but is NOT eyewear
+      if (s.indexOf("sunglass") < 0 && s.indexOf("shades") < 0) continue;
+      const v = it.value || 0;
+      if (v > bestV) { bestV = v; best = name; }
+    }
+    return best;
+  }
+  function mountEyewearMesh(kind, anchor, mat, x, y, z, out) {
+    if (!anchor || !anchor.add || !THREE || !mat) return;
+    const geo = egeo(kind);
+    if (!geo) return;
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = false; m.receiveShadow = false;
+    m.position.set(x, y, z);
+    anchor.add(m); out.push(m);
+  }
+  // (re)dress the portrait rig's worn eyewear to match the player. Idempotent:
+  // strips the previous shade shell, mounts the current pair on the NECK group
+  // (so it rides the head exactly like bling.js's "eyes" anchor). No pool shared
+  // with bling — its own tracked list on rig._cpEyewear.
+  function applyPortraitEyewear(rig) {
+    if (!rig) return;
+    if (rig._cpEyewear) {
+      for (let i = 0; i < rig._cpEyewear.length; i++) { const m = rig._cpEyewear[i]; if (m && m.parent) m.parent.remove(m); }
+      rig._cpEyewear = null;
+    }
+    if (!emats()) return;                           // engine primitives not up yet
+    const worn = eyewearWornIn();
+    if (!worn) return;                              // no shades owned — bare eyes
+    const out = [];
+    const parts = eyewearParts(worn);
+    if (parts) for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      mountEyewearMesh(p.kind, rig.neck, p.mat, p.x, p.y, p.z, out);
+    }
+    if (out.length) rig._cpEyewear = out;
+  }
+
+  // ============================================================
   //  DRESS THE PORTRAIT IN THE PLAYER'S ACTUAL WORN CLOTHING.
   //
   //  THE BUG: the portrait dressed only via cityApplyComposite(g.cityFit) —
@@ -374,6 +558,10 @@
     const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 0;
     // worn jewellery influences the read too (informational on the portrait)
     const j = (blingWornIn("neck") || "") + "|" + (blingWornIn("wristL") || "") + "|" + (blingWornIn("ring") || "");
+    // worn armour (vest/plate/helmet) — so strapping a kit on redraws the portrait
+    const arm = armorSig();
+    // worn eyewear (sunglasses/designer shades) — so putting shades on redraws too
+    const eye = eyewearWornIn() || "";
     // the WORN catalog/composite record — what's actually painted onto the body
     const w = (CBZ.cityOutfitGet && CBZ.cityOutfitGet()) || null;
     let ws = "";
@@ -384,7 +572,7 @@
            "/" + (c.arms || 0) + "/" + (c.shoes || 0) + "/" + (c.gloss ? 1 : 0) + "/" + (w.gang || "") +
            "/" + (w.cop ? 1 : 0) + "/" + ci;
     }
-    return (f.shirt || 0) + ":" + (f.legs || 0) + ":" + items + ":" + lvl + ":" + j + ":" + ws;
+    return (f.shirt || 0) + ":" + (f.legs || 0) + ":" + items + ":" + lvl + ":" + j + ":" + ws + ":" + arm + ":" + eye;
   }
 
   // dress the portrait rig exactly like the player and render one frame
@@ -396,6 +584,8 @@
     // mount the player's WORN jewellery (chains/watch/ring) onto the same rig —
     // re-seated only when the worn set changed (gated by lookSig's jewel field)
     applyPortraitJewelry(PORT.rig);
+    applyPortraitArmor(PORT.rig);                   // + worn vest/plate/helmet (gated by lookSig's armor field)
+    applyPortraitEyewear(PORT.rig);                 // + worn sunglasses/designer shades (gated by lookSig's eyewear field)
     // a calm front 3/4 view; gentle idle so it reads "live", not a freeze-frame
     const rig = PORT.rig;
     rig.group.rotation.y = -0.32;
@@ -662,6 +852,8 @@
     // dress in the player's actual worn clothing (catalog fit OR composite)
     dressPortrait(PORT.rig);
     applyPortraitJewelry(PORT.rig);                // worn chains/watch/ring on the big model too
+    applyPortraitArmor(PORT.rig);                  // + worn vest/plate/helmet on the big model
+    applyPortraitEyewear(PORT.rig);                // + worn sunglasses/designer shades on the big model
     PORT.rig.group.rotation.y = -0.3;
     PORT.cam.position.set(0, 2.0, 7.4);
     PORT.cam.lookAt(0, 1.55, 0);

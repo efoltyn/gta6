@@ -91,6 +91,22 @@
   }
   let frame = 0;
 
+  // ---- MODULE-OWNED CONFIG DEFAULTS (self-defaulted so a missing flag never
+  //      throws; we own peds.js, so we don't touch config.js). ----
+  // SPAWN-DISTRIBUTION (spawn-distribution-tuning): a thicker homeless population
+  // makes "dangerous nights" land — 8 was thin for a city this size. Still carved
+  // OUT of the ped budget (nVagrant is capped at peds/4 and the total stays flat),
+  // so this redistributes WHO is out, it does NOT add bodies.
+  if (CBZ.CITY) CBZ.CITY.vagrants = Math.max(CBZ.CITY.vagrants || 0, 14);
+  // PLACE-SPAWN routing (SPAWN-1): emerge peds from real places (apartment doors,
+  // store counters/queues) instead of random sidewalk when spawnplaces.js is loaded.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_PLACE_SPAWN == null) CBZ.CONFIG.CITY_PLACE_SPAWN = true;
+  // SPAWN-FROM-DOORS bias (H5): a fraction of fresh civvies appear just outside
+  // their home/work door reading as "just left home / arriving for work".
+  if (CBZ.spawnFromDoors == null) CBZ.spawnFromDoors = true;
+  // HOBO NIGHT JUMPSCARE (hobo-night-jumpscare): owner-toggleable fright loop.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_HOBO_SCARE == null) CBZ.CONFIG.CITY_HOBO_SCARE = true;
+
   // ============================================================
   //  FINITE, NON-REGENERATING POPULATION (the "headcount").
   //  The city starts with a fixed living total and only ever goes DOWN as people
@@ -424,9 +440,23 @@
       job = JOB_RECAST[(r() * JOB_RECAST.length) | 0];
       jobRecast = true;
     }
+    // MILITARY RANK: a soldier-costumed ped (island base troops, biome guards —
+    // anyone cast with the soldier/military job that paints the camo + olive cap)
+    // gets a real rank so level.js reads "Lv.36 Lieutenant", not "Civilian". A
+    // unit is a PYRAMID, so this roll is weighted hard to privates with a thin
+    // officer corps and a rare general — a base reads like a real chain of
+    // command. Keyed off opts.job (the same signal that chose the costume) so the
+    // stripes always match the uniform. Deterministic from the spawn stream.
+    let milRank = null;
+    if (/soldier|military|marine/i.test(opts.job || "")) {
+      const mr = r();
+      milRank = mr < 0.52 ? "private" : mr < 0.72 ? "corporal" : mr < 0.85 ? "sergeant"
+        : mr < 0.92 ? "lieutenant" : mr < 0.96 ? "captain" : mr < 0.985 ? "major"
+          : mr < 0.997 ? "colonel" : "general";
+    }
     const ped = {
       char: ch, group: ch.group, pos: ch.group.position, name: nm,
-      tag, outfit, skin, kind: opts.kind || "civilian",
+      tag, outfit, skin, kind: opts.kind || "civilian", milRank,
       aggr, wealth: mWealth, valuables, bounty, bountyTag,
       archetype: rareArch || traits.archetype || opts.archetype || "resident",
       job,
@@ -578,22 +608,31 @@
     } else if (d.kind === "industrial") {
       // docks/works: shift-workers, modest pockets — thin pickings, few eyes.
       // a slice of the shift is CONSTRUCTION (orange vest + hardhat — the works
-      // half of industry), the rest dock/warehouse yellow hi-vis.
-      if (r() < 0.55) {
-        const x = r();
+      // half of industry), the rest dock/warehouse yellow hi-vis. The OTHER half
+      // isn't all clean: the works edge backs onto the rough pocket, so a thin
+      // share are corner PREDATORS (a dealer/hustler working the loading-dock
+      // shadows) — enough that the industrial fringe reads dicey, not deserted.
+      // (Draws ONE r() either way so seeded determinism holds; the night-recast
+      // amps it further and is left untouched to avoid double-shifting.)
+      const x = r();
+      if (x < 0.55) {
         if (x < 0.3) { opts.archetype = "laborer"; opts.job = "construction worker"; }
-        else { opts.archetype = "laborer"; opts.job = x < 0.65 ? "dock worker" : "warehouse worker"; }
-      }
+        else { opts.archetype = "laborer"; opts.job = x < 0.42 ? "dock worker" : "warehouse worker"; }
+      } else if (x < 0.62) { opts.archetype = "dealer"; }
+      else if (x < 0.68) { opts.archetype = "hustler"; }
       opts.wealth = Math.min(opts.wealth, 0.55);
     } else if (d.kind === "projects") {
       // the rough pocket: broke, quicker to violence, the street economy lives
-      // here (dealers/hustlers/users) — quiet money, but it bites back.
+      // here (dealers/hustlers/users) — quiet money, but it bites back. A higher
+      // PREDATOR share than the rest of the city so the projects read genuinely
+      // risky even by day (the night-recast pushes it further still). Counts stay
+      // flat — this only changes WHO this district's spawns are.
       opts.wealth = Math.min(opts.wealth, 0.3);
       opts.aggr = rollAggr((ag.meanCivilian != null ? ag.meanCivilian : 0.24) + 0.12, (ag.spreadCivilian || 0.2) + 0.06);
       const x = r();
-      if (x < 0.16) opts.archetype = "dealer";
-      else if (x < 0.3) opts.archetype = "hustler";
-      else if (x < 0.4) opts.archetype = "tweaker";
+      if (x < 0.20) opts.archetype = "dealer";
+      else if (x < 0.36) opts.archetype = "hustler";
+      else if (x < 0.46) opts.archetype = "tweaker";
     } else if (d.kind === "commercial") {
       // busy daytime mid: white-collar crowds (wallets + witnesses by day),
       // plus the trades that orbit them — the hospital crowd in scrubs/whites
@@ -800,6 +839,65 @@
     }
   });
 
+  // ============================================================
+  //  HOBO NIGHT JUMPSCARE — the dark-alley fright.
+  //  WHY: "add JUMPSCARES especially at night and from HOBOS" — the shuffling
+  //  figure in the shadows that suddenly SNAPS at you. At night, a vagrant /
+  //  panhandler (or a creepy lone ped) standing right next to you whips around,
+  //  barks a startle line and the camera flinches. A VOLATILE vagrant (the
+  //  powder-keg ones spawnVagrants already makes, aggr ≥ violent) follows the
+  //  scare by actually LUNGING into an attack — so the fright has teeth.
+  //
+  //  Rate-limited HARD so it stays a fright, never a nuisance: a long PER-PED
+  //  cooldown (a given hobo scares you at most every ~25s) AND a citywide gap
+  //  (~6s minimum between any two scares). Night-gated (CBZ.nightAmount high) and
+  //  near-player only; one cheap throttled scan, all hooks feature-detected so it
+  //  no-ops headless. ped._scareT is the transient pose marker the rig can read
+  //  (we also drive the existing poseCower so reactions.js animates the recoil).
+  // ============================================================
+  let _scareT = 0;             // citywide cooldown (s); next scare can't fire until this hits 0
+  let _scareScan = 0;          // round-robin cursor so we don't always probe the same peds
+  CBZ.onUpdate(34.7, function (dt) {
+    if (g.mode !== "city") return;
+    if (CBZ.CONFIG && CBZ.CONFIG.CITY_HOBO_SCARE === false) return;
+    if (_scareT > 0) { _scareT -= dt; return; }
+    const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
+    if (night < 0.55) return;                                  // daylight: no jumpscares
+    const P = CBZ.player; if (!P || P.dead || P.driving) return;
+    const peds = CBZ.cityPeds; if (!peds || !peds.length) return;
+    const PA = CBZ.city && CBZ.city.playerActor;
+    const px = P.pos.x, pz = P.pos.z;
+    let scanned = 0;
+    while (scanned < 18) {
+      const p = peds[_scareScan]; _scareScan = (_scareScan + 1) % peds.length; scanned++;
+      if (!p || p.dead || p._parked || p.inCar || p.ko > 0 || p.enterT > 0) continue;
+      if (p.isPlayer || p.controlled || p.companion || p.recruited || p.gang) continue;
+      // a HOBO, or a creepy lone ped: the lurker in the dark. Skip anyone already
+      // mid-scene (raging/fleeing/surrendering) and the recently-scared (per-ped CD).
+      const creepy = p.vagrant || p._role === "panhandler";
+      if (!creepy) continue;
+      if (p.rage || p.surrender || p.state === "flee" || p.state === "fight") continue;
+      if ((p._scareCD || 0) > 0) { p._scareCD -= dt; continue; }
+      const dx = px - p.pos.x, dz = pz - p.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < 1.7 * 1.7 || d2 > 3.0 * 3.0) continue;          // the 2-3m "right next to you" band
+      // SNAP: whip around to face you, freeze the shuffle, recoil pose.
+      p.group.rotation.y = Math.atan2(dx, dz);
+      p.speed = 0; p.pause = Math.max(p.pause, 0.8);
+      p.poseCower = Math.max(p.poseCower || 0, 0.7);            // reactions.js animates the hunch/recoil
+      p._scareT = 0.9;                                          // transient marker (rig may read it)
+      p._scareCD = 22 + rng() * 10;                             // this hobo won't scare you again for ~25s
+      if (CBZ.citySay) CBZ.citySay(p, pick(["“GET BACK!”", "“YOU SEE EM TOO?!”", "“DON'T TOUCH ME!”", "“THEY'RE WATCHING!”"], rng()), "#ff7b6b", 1.6);
+      if (CBZ.sfx) CBZ.sfx("punch");                           // a sharp startle stinger
+      if (CBZ.shake) CBZ.shake(0.5);                            // the camera flinch
+      // VOLATILE vagrant (≥ violent band): the scare has TEETH — it lunges.
+      if (PA && p.aggr >= ((A0().violent) || 0.88)) {
+        p.rage = PA; p.state = "fight"; p.reactCD = 8;
+      }
+      _scareT = 6 + rng() * 4;                                  // citywide gap before the next fright
+      return;                                                   // one scare per pass, max
+    }
+  });
+
   // SPAWN-SLICE flag (default ON; honour an owner-set value so a toggle sticks).
   // OFF → spawnCityPeds runs the exact old synchronous burst. The whole feature
   // is in one place (spawnCityPeds below) and degrades to today when this is
@@ -825,12 +923,83 @@
     //      slicer changes is WHEN (which frame) a given index is built, never
     //      what rng it consumes once it runs. ----
     function spawnOneCivilian() {
-      // density-weighted spawn: packed downtown, thin docks — by design
-      const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : A.randomSidewalkPoint();
-      const d = A.districtAt ? A.districtAt(p.x, p.z) : null;
-      const opts = castForDistrict(d, rng);
+      // ===== SPAWN-1: EMERGE FROM PLACES, not random pavement ==================
+      // WHY: a city reads alive when people come OUT of where life happens — a
+      // resident off an apartment stoop, a shopper at a store counter, someone in
+      // a queue — not teleported onto a sidewalk. spawnplaces.js (CBZ.cityPlaceSpawnPoint)
+      // returns a place {x,z,role,opts} ~half the time (it leaves the other half null
+      // BY DESIGN so the street keeps its through-traffic). When it gives a place we
+      // spawn AT it with the place's pre-baked opts and SKIP castForDistrict (the
+      // place already decided who they are). DETERMINISM: we call it FIRST and
+      // ALWAYS (even when we won't use it / flag-off) so the seeded rng order — and
+      // the MP host snapshot — never drift.
+      const place = (CBZ.cityPlaceSpawnPoint) ? CBZ.cityPlaceSpawnPoint(A, rng) : null;
+      if (place && CBZ.CONFIG && CBZ.CONFIG.CITY_PLACE_SPAWN !== false) {
+        const popts = place.opts || {};
+        const ped = makePed(place.x, place.z, rng, popts);
+        if (popts._role || place.role) ped._role = popts._role || place.role;
+        // an apartment-door place tags the home lot + an EMERGE first-leg so
+        // SCHED-1 walks them a few metres off the door before normal commute AI.
+        if (place.lot) ped._home = ped._digs = place.lot;
+        if (popts._emerge || place.emerge) { ped._emerge = true; ped._goalKind = "emerge"; }
+        if (popts._queueAt || place.queueAt) ped._queueAt = popts._queueAt || place.queueAt;
+        A.root.add(ped.group);
+        CBZ.cityPeds.push(ped);
+        return;
+      }
+      // ===== H5: DOOR-BIASED street spawn ======================================
+      // The default ambient civilian: a density-weighted sidewalk point + a
+      // district cast. But ~35% of the time (when housing.js is present and the
+      // owner toggle is on) we instead place them JUST OUTSIDE their own home or
+      // work DOOR — at night/evening outside the home lobby ("just left / heading
+      // in"), in work hours at their workplace door ("arriving for work") — the
+      // same idiom regionlife.js uses (base = pick.home). The other 65% keep the
+      // street's through-traffic so the sidewalks never empty.
+      let p = null, opts = null, emerge = false;
+      const doorBias = CBZ.spawnFromDoors !== false && CBZ.cityHousing &&
+        A.homeLots && A.homeLots.length && rng() < 0.35;
+      if (doorBias) {
+        // build a provisional ped identity by district at a sidewalk anchor, then
+        // resolve its persistent home/work and shift the SPAWN to that door. We
+        // cast first (cheap, sets archetype/wealth) so homeLot/workLot bias right.
+        const anchor = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : A.randomSidewalkPoint();
+        const d0 = A.districtAt ? A.districtAt(anchor.x, anchor.z) : null;
+        opts = castForDistrict(d0, rng);
+        const tmpPed = { archetype: opts.archetype, wealth: opts.wealth, vendor: null, pos: { x: anchor.x, z: anchor.z }, _digs: null, _unit: null, _home: null, _work: null };
+        const phase = dayPhase();
+        let lot = null, wantEmerge = false;
+        if (phase === "morning" || phase === "work") {
+          lot = workLot(tmpPed, A);                 // "arriving for work"
+        }
+        if (!lot) { lot = homeLot(tmpPed, A); wantEmerge = true; }   // home (night/default)
+        const door = lot && lot.building && lot.building.door;
+        if (door) {
+          // offset OUT along the door's outward normal so we never spawn inside a
+          // collider or wedge the doorway (door.nx/nz is the INWARD normal).
+          const ox = door.nx != null ? -door.nx : 0, oz = door.nz != null ? -door.nz : 0;
+          p = { x: door.x + ox * 1.6 + (rng() - 0.5) * 1.2, z: door.z + oz * 1.6 + (rng() - 0.5) * 1.2 };
+          if (A.clampToCity) A.clampToCity(p, PED_R);
+          // carry the resolved identity + anchors onto the real ped below.
+          opts._home = wantEmerge ? lot : null;
+          opts._work = tmpPed._work || null;
+          opts._digs = tmpPed._digs || null;
+          emerge = wantEmerge;
+        } else { p = anchor; }   // no usable door → just spawn at the anchor (already cast)
+      }
+      if (!p) {
+        // ---- the original path (no door bias): density-weighted point + cast ----
+        p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : A.randomSidewalkPoint();
+        const d = A.districtAt ? A.districtAt(p.x, p.z) : null;
+        opts = castForDistrict(d, rng);
+      }
       const ped = makePed(p.x, p.z, rng, opts);
       if (opts._role) ped._role = opts._role;   // pinned life (tourist on the strip)
+      // carry resolved home/work/digs from the door-bias path (makePed inits these
+      // to null; we stamp the persistent anchors so the routine reads consistent).
+      if (opts._home) { ped._home = opts._home; ped._digs = opts._home; }
+      if (opts._work) ped._work = opts._work;
+      if (opts._digs && !ped._digs) ped._digs = opts._digs;
+      if (emerge) { ped._emerge = true; ped._goalKind = "emerge"; }
       A.root.add(ped.group);
       CBZ.cityPeds.push(ped);
     }
@@ -982,6 +1151,18 @@
 
   CBZ.clearCityPeds = function () {
     for (const p of CBZ.cityPeds) {
+      // HOME-BOND release (H2): a recycled/wiped body must let go of its leased
+      // unit so the next city's tenants aren't blocked. Prefer the housing.js
+      // contract; else clear the occupancy fields aigoals/housing stamp directly
+      // (unit.occupant + the home._tenants tally). All optional-chained — no-op
+      // when no housing layer is loaded.
+      if (CBZ.cityHomeRelease) { try { CBZ.cityHomeRelease(p); } catch (e) {} }
+      else {
+        if (p._unit && p._unit.occupant === p) p._unit.occupant = null;
+        const hm = p._digs && p._digs.building && p._digs.building.home;
+        if (hm && hm._tenants) hm._tenants = Math.max(0, hm._tenants - 1);
+      }
+      p._unit = null; p._digs = null; p._home = null;
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
       if (p.group) p.group.traverse(function (o) {
         if (o.isSprite) return;     // sprites share an r128 geometry singleton — never dispose
@@ -1725,8 +1906,34 @@
   // to whatever residence is theirs (and, when that building has an owner record,
   // remembers it so the ped reads as a distinct life rather than a random walker).
   function homeLot(ped, A) {
-    // re-validate against the LIVE arena: a recycled/respawned body (crowd.js
-    // reuses a parked rig) or a new run must not keep a stale lot reference.
+    // HOME BOND (H2): the persistent address a ped drifts back to after dark is
+    // OWNED by the housing layer (housing.js stamps ped._digs = their home LOT;
+    // aigoals.js's digsLot resolves a leased unit + affordability into it). We
+    // only READ it here so the night homeward goal routes to that ONE door every
+    // day — no parallel picker (owner rule: extend, don't reinvent). The lease's
+    // floor height is stashed on ped._homeFloorY for sleep/arrival logic.
+    // Re-validated against the LIVE arena so a stale ref from a recycled rig (or
+    // a fresh run) self-heals to a current lot.
+    if (A.homeLots && A.homeLots.length) {
+      const digs = ped._digs;
+      if (digs && digs.building && A.homeLots.indexOf(digs) >= 0) {
+        ped._home = digs;
+        if (ped._unit && ped._unit.floorY != null) ped._homeFloorY = ped._unit.floorY;
+        return digs;
+      }
+      // housing.js present but no bond yet → let it assign one (stable across the
+      // ped's life), then mirror it onto _home. Guarded: absent → old path below.
+      if (CBZ.cityHomeOf) {
+        const h = CBZ.cityHomeOf(ped);
+        if (h && h.building && A.homeLots.indexOf(h) >= 0) {
+          ped._digs = h; ped._home = h;
+          if (ped._unit && ped._unit.floorY != null) ped._homeFloorY = ped._unit.floorY;
+          return h;
+        }
+      }
+    }
+    // FALLBACK (no housing layer / no home lots resolved): the original behaviour —
+    // re-validate the cached _home, else pick a random home lot once and cache it.
     if (ped._home && ped._home.building && A.homeLots && A.homeLots.indexOf(ped._home) >= 0) return ped._home;
     ped._home = null;
     if (!A.homeLots || !A.homeLots.length) return null;
@@ -1972,6 +2179,51 @@
   // ---- routine waypoint picking (route through an intersection to cross) ----
   function pickRoutineGoal(ped) {
     const A = CBZ.city.arena;
+    // ===== SCHED-1: EMERGE first-leg ========================================
+    // A place-spawned resident (SPAWN-1 / H5 set ped._emerge at their home door)
+    // first walks a SHORT leg AWAY from that door into the street — so they read
+    // as "just left home" before falling into the normal commute. ONE-SHOT and
+    // SOFT (owner rule: no force-routing): we clear the flag here, set a brief
+    // direct goal a few metres off the door, then release to normal AI next time.
+    if (ped._emerge) {
+      ped._emerge = false; ped._goalKind = null;
+      const home = ped._home || ped._digs;
+      const door = home && home.building && home.building.door;
+      if (door) {
+        // outward from the door (door.nx/nz is the INWARD normal) a few metres.
+        const ox = door.nx != null ? -door.nx : (ped.pos.x - door.x);
+        const oz = door.nz != null ? -door.nz : (ped.pos.z - door.z);
+        const m = Math.hypot(ox, oz) || 1;
+        const gx = ped.pos.x + (ox / m) * (4 + rng() * 3), gz = ped.pos.z + (oz / m) * (4 + rng() * 3);
+        ped.finalGoal = { x: gx, z: gz };
+        ped.path = [ped.finalGoal];
+        ped.target.set(gx, 0, gz);
+        ped.pause = 0.2 + rng() * 0.5;
+        ped.state = "walk";
+        return;
+      }
+      // no door → nothing to emerge from; fall through to a normal goal.
+    }
+    // OFFICE COMMUTER (SCHED-1): a place-spawned office worker (ped._claimDesk)
+    // ends up SEATED at a real desk via the existing officejobs plumbing rather
+    // than milling — reuse cityClaimDesk (don't reinvent seating). One-shot: the
+    // sit-routing in move() (finalGoal.sitDesk) carries it the rest of the way.
+    if (ped._claimDesk && CBZ.cityClaimDesk && (dayPhase() === "morning" || dayPhase() === "work")) {
+      const desk = CBZ.cityClaimDesk(ped);
+      if (desk) {
+        ped._claimDesk = false;
+        ped.finalGoal = { x: desk.x, z: desk.z, sitDesk: true, anchor: desk };
+        const dGoal = Math.hypot(desk.x - ped.pos.x, desk.z - ped.pos.z);
+        if (dGoal > A.step * 0.9) {
+          const it = A.nearestIntersection(desk.x, desk.z);
+          ped.path = [{ x: it.x + (rng() - 0.5) * 3, z: it.z + (rng() - 0.5) * 3 }, ped.finalGoal];
+        } else ped.path = [ped.finalGoal];
+        ped.target.set(ped.path[0].x, 0, ped.path[0].z);
+        ped.pause = 0.3 + rng() * 0.8;
+        ped.state = "walk";
+        return;
+      }
+    }
     const r = rng();
     // a flavour-role destination first (jogger laps / busker stage / tourist
     // landmark / panhandler corner / watcher near a cop); falls through to the
@@ -2454,6 +2706,41 @@
   }
   CBZ.cityRampageThink = rampageThink;   // exposed for the director to validate the hook
 
+  // ---- NPC-on-NPC MUGGING (a real grab-and-go, not just a fistfight) ----------
+  // WHY: "random people rob each other" has to MOVE money — a thief who snatches a
+  // mark's wallet and BOLTS, leaving a robbed, frightened victim who carries a
+  // GRUDGE. That's the seed of an emergent street feud (the victim may hunt the
+  // thief back later via cityNpcGrudge), not a throwaway scuffle. Returns true if
+  // the mug landed (the caller stops the close-and-brawl), false to keep closing.
+  // Rate-limited by the caller's attackCD; gated to the active/near crowd upstream.
+  function npcMug(att, victim) {
+    if (!att || !victim || att.dead || victim.dead || victim === att) return false;
+    if (victim.gang || victim.recruited || victim.controlled || victim.companion) return false; // don't shake down crew/escorts
+    if (victim.robbed) return false;                                   // already taken — nothing left to grab
+    const dx = victim.pos.x - att.pos.x, dz = victim.pos.z - att.pos.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > 1.6 * 1.6) return false;                                  // not in arm's reach yet → keep closing
+    // the SNATCH: take what's on them up to a quick-grab cap (a wallet, not the
+    // whole bank). Even a broke mark loses face — set robbed so it can't repeat.
+    const purse = victim.cash | 0;
+    const grab = Math.min(purse, 40 + ((rng() * 120) | 0));
+    if (grab > 0) { victim.cash = Math.max(0, purse - grab); att.cash = (att.cash || 0) + grab; }
+    victim.robbed = true;
+    victim.fear = Math.min(10, (victim.fear || 0) + 6);               // a robbery is terrifying
+    victim.alarmed = Math.max(victim.alarmed || 0, 6);
+    // face the victim for the grab beat, then BOLT away from them (grab-and-go).
+    att.group.rotation.y = Math.atan2(dx, dz);
+    if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, 12, "mugging");   // one offense (the caller no longer logs its own)
+    if (CBZ.cityNpcGrudge) CBZ.cityNpcGrudge(victim, att);            // the mark may come back for the thief
+    if (CBZ.sfx) CBZ.sfx("coin");
+    if (CBZ.citySay && rng() < 0.5) CBZ.citySay(att, "“Gimme that!”", "#ffce6b", 1.4);
+    // the thief flees AWAY from the victim for a few seconds, then re-checks the
+    // street — fleeFrom routes a clear path; a short timer keeps the run committed.
+    att.state = "flee"; att._mugFleeT = 3 + rng() * 2;
+    fleeFrom(att, victim.pos.x, victim.pos.z);
+    return true;
+  }
+
   // ---- the brain (time-sliced) ----
   function think(ped, dt, active) {
     if (ped.companion) { companionThink(ped, dt, active); return; }
@@ -2472,6 +2759,17 @@
     //      (no flee at low HP). It only stops when killed. Handled here, first, so
     //      nothing else (flee/surrender/routine) can override the spree.
     if (ped.rampage) { rampageThink(ped, dt, active); return; }
+
+    // ---- GRAB-AND-GO COMMIT: a thief who just snatched a wallet (npcMug) bolts
+    //      AWAY from the mark for a few seconds before re-checking the street, so
+    //      the mug READS as a snatch-and-run, not a hover. Hold the flee while the
+    //      short timer runs, then release back to normal AI. (A real threat — a hit,
+    //      a cop, gunpoint — still overrides below; this only keeps the routine
+    //      "calm down" pass from cancelling the run on the very next think.)
+    if ((ped._mugFleeT || 0) > 0) {
+      ped._mugFleeT -= dt;
+      if (ped._mugFleeT > 0 && !ped.rage && !ped.reportState) { ped.state = "flee"; return; }
+    }
 
     // ---- IN-PROGRESS WITNESS REPORT: a committed snitch is busy dialing / running
     //      to a cop. The player can STOP it: get close with a gun out and a timid
@@ -2659,10 +2957,21 @@
         if (roll < 0.10) { const cop = nearestActor(ped, 22, (p) => p.kind === "cop"); if (cop) { ped.rage = cop; ped.state = "fight"; return; } }
         if (roll < 0.16 && CBZ.cityNpcCarjack && !ped.inCar) { if (CBZ.cityNpcCarjack(ped)) return; }
       }
-      // 3) crooks mug / brawl a nearby weaker civilian
+      // 3) crooks mug / brawl a nearby weaker civilian. A SNATCH-AND-RUN now moves
+      //    real money: if already in arm's reach, npcMug() transfers the wallet and
+      //    bolts the thief (a fleeing crook + a robbed, grudge-holding mark — the
+      //    seed of a feud). Otherwise CLOSE on the mark (walk up to them); the next
+      //    autonomy beat lands the grab once in range. The offense is logged ONCE,
+      //    inside npcMug on success (no double-count from the old fight branch).
       if (roll < 0.14) {
         const victim = nearestActor(ped, 12, (p) => !p.vendor && p.kind === "civilian" && p.aggr < ped.aggr - 0.15);
-        if (victim) { ped.rage = victim; ped.state = "fight"; if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "mugging"); return; }
+        if (victim) {
+          if (npcMug(ped, victim)) return;                 // snatched + fled
+          ped.path = null; ped.finalGoal = { x: victim.pos.x, z: victim.pos.z };
+          ped.target.set(victim.pos.x, 0, victim.pos.z); ped.state = "walk"; ped.pause = 0;
+          ped.attackCD = 0.4 + rng() * 0.4;                // re-check the grab shortly
+          return;
+        }
       }
     }
 
@@ -3140,8 +3449,17 @@
     if ((ped._coverGrace -= dt) > 0) return;
     ped._covered = false; ped._coverGrace = 0;
     ped.poseAimBack = false;
-    if (ped.poseHandsUp && (ped.surrenderT || 0) <= 0) {
+    // RELEASE: fully tear down the surrender state, NOT gated on surrenderT.
+    // markGunpoint re-arms surrenderT every aimed frame, so a ped actually held
+    // at gunpoint never reaches here (it stays _covered); only the genuine
+    // release path (holster / fists / aim away / out of range, past _coverGrace)
+    // runs this. Previously this was gated behind surrenderT<=0 and never cleared
+    // ped.surrender/surrenderT, so move()'s surrendering check stayed true forever
+    // and the hands re-raised every frame.
+    if (ped.poseHandsUp || ped.surrender || ped.state === "surrender") {
       ped.poseHandsUp = false;
+      ped.surrender = false;
+      ped.surrenderT = 0;
       if (ped.char) { ped.char.handsUp = false; ped.char.surrender = false; }
       if (ped.state === "surrender") ped.state = "walk";
     }
@@ -3381,6 +3699,7 @@
       if (p._groupT > 0) p._groupT -= dt;       // group/mob reaction recheck gate
       if (p._gangFearT > 0) p._gangFearT -= dt; // civilian gang-fear scan rate gate
       if (p.poseCower > 0) p.poseCower -= dt;   // brief flinch/cringe at gunfire+blasts
+      if (p._scareT > 0) p._scareT -= dt;       // hobo-jumpscare lunge marker (transient)
       if (p.tweakT > 0) p.tweakT -= dt;
       if (p.npcHeat > 0) { p.npcHeat = Math.max(0, p.npcHeat - dt * 4); }
       if (p.offenseT > 0) p.offenseT -= dt;
@@ -3419,7 +3738,16 @@
       if ((frame + p.slice) % stride === 0) {
         think(p, dt * stride, active);
       }
-      move(p, dt, near || important);
+      // ANIMATE THE WHOLE VISIBLE BAND, not just the near 58m. A rig drawn out to
+      // VIS_D2 (95m) but BEYOND ANIM_D2 used to move with animate=false → the legs
+      // froze while the body slid (the filmed 58-95m "foot-slide"). Anything you
+      // can SEE walking must swing its legs; animChar is a cheap pose write (no
+      // alloc), and we only spend it on rigs already passing the draw test, so the
+      // ~1000-NPC budget is untouched (the off-screen mass still gets animate=false
+      // and the instanced ambient crowd covers everything past 95m). enterT rigs
+      // are hidden inside a building, so skip them.
+      const visAnim = vis && p.enterT <= 0;
+      move(p, dt, near || important || visAnim);
     }
 
     // age out / pick up dropped weapons (player auto-grabs by walking over)

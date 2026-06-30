@@ -274,7 +274,11 @@
     carriedGun.add(carried);
   });
   carriedGun.position.set(0.02, 0.02, 0.03);
-  carriedGun.rotation.set(0.02, Math.PI, 0);
+  // Local orientation so the barrel lies along the socket -Y (down the forearm):
+  // rotation.x ≈ -π/2 (no Math.PI on Y). Paired with animChar's -1.571 arm
+  // baseline (character.js) this points the muzzle HORIZONTAL-FORWARD at the
+  // crosshair instead of double-rotating it skyward.
+  carriedGun.rotation.set(-1.571, 0, 0);
   carriedGun.visible = false;
   function attachCarriedGun() {
     const ch = CBZ.playerChar;
@@ -393,7 +397,7 @@
   // set this frame, captured only while NOT aiming so it never ratchets) and ease
   // toward hip-ADS_FOV_DROP when RMB is held. ~14° tighter = a red-dot punch-in.
   let fpsHipFov = 0;          // last-known hip fov (refreshed every non-ADS frame)
-  const ADS_FOV_DROP = 14;
+  const ADS_FOV_DROP = 25;   // real ADS punch-in: hip ~75 → ADS ~50
   const PUNCH_DUR = 0.26;
   let shotCD = 0, dryCD = 0, triggerHeld = false, reloadWeapon = 0;
   // reusable per-shot sfx options (no per-shot allocation at auto-fire rates):
@@ -1689,6 +1693,9 @@
     setAmmoHud();
     if (on && fps.fp === 0) fps.fp = 0.06;
     if (!on) triggerHeld = false;
+    // toggling FPS on hides the body; clear the 3PS present-weapon pose so the
+    // rig's arms are not stuck raised when the body re-appears unarmed/holstered.
+    if (CBZ.playerChar && on) CBZ.playerChar.aimingPose = false;
   }
 
   CBZ.toggleFPS = function () { setActive(!fps.active); };
@@ -2004,12 +2011,20 @@
       // city we SKIP this entirely and let camera.js solely drive the FOV. Outside
       // city (prison/escape FPS) camera.js's city branch never runs, so this block
       // remains the sole FOV owner there — byte-identical behaviour for those modes.
-      if (CBZ.game.mode !== "city") {
+      // FP-FOV runs in ALL modes now. While fps.active, camera.js bows out of the
+      // FP lens (it early-returns) so THIS block is the genuine sole FP-FOV owner
+      // — no second writer to race, no flicker. (The old `mode!=="city"` gate left
+      // city FP with nobody narrowing the FOV → RMB never zoomed.)
+      {
         const ads = aimHeld && armed();
-        if (!ads || fpsHipFov === 0) {
-          if (CBZ.camera.fov >= 30 && CBZ.camera.fov <= 110) fpsHipFov = CBZ.camera.fov;
-          else if (fpsHipFov === 0) fpsHipFov = 70;
-        }
+        // HIP FOV IS A STABLE BASELINE — captured ONCE, never re-read from the
+        // live lens. The old code re-captured it every non-ADS frame; that was
+        // the RATCHET bug: camera.js now bows out of the FP lens (sole-owner fix),
+        // so right after you release RMB the lens is still easing BACK from the
+        // ADS punch-in — re-capturing that half-zoomed value as the new "hip" made
+        // every right-click zoom in further and never zoom back out. A fixed hip
+        // means RMB eases to hip−DROP and release eases cleanly back to hip.
+        if (fpsHipFov === 0) fpsHipFov = 75;   // FP hip → ADS lands ~50 (hip − ADS_FOV_DROP)
         const wantFov = ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov;
         if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
           CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);
@@ -2069,6 +2084,9 @@
     const w = weapon();
     const reloadDip = fps.reloading > 0 ? 0.13 + Math.sin(CBZ.now * 0.018) * 0.025 : 0;
     if (fps.active) {
+      // First-person: the player body is hidden, so the 3PS aim pose must not
+      // linger on the rig (animChar reads this flag). Clear it here.
+      if (CBZ.playerChar) CBZ.playerChar.aimingPose = false;
       if (armed()) {
         // Sustained-fire climb is kept SMALL on purpose: the bullet origin is
         // clamped to a tight camera-space box (muzzleWorld), so if the visible
@@ -2104,34 +2122,36 @@
       // the pose no longer drops to a lowered idle. Put it away by switching slots.
       const aim = true;
       // gun sits a touch lower / tilted down when at the ready
+      // Nudge the carried gun a touch UP + FORWARD so the muzzle clears the
+      // chest silhouette when the arm is raised into the present-weapon pose
+      // (animChar owns the arm; this just keeps the barrel reading on-screen).
       carriedGun.position.set(
         (longGun ? 0.04 : 0.00) + recoilSide * 0.18,
-        (aim ? (longGun ? -0.02 : -0.05) : -0.12) - reloadDip * 0.16,
-        (aim ? (longGun ? 0.18 : (util ? 0.04 : 0.10)) : 0.02) - recoil * 0.07
+        (aim ? (longGun ? 0.04 : 0.01) : -0.12) - reloadDip * 0.16,
+        (aim ? (longGun ? 0.30 : (util ? 0.14 : 0.22)) : 0.02) - recoil * 0.07
       );
+      // Barrel-down-the-forearm baseline (-π/2, no Math.PI on Y) so the carried
+      // gun's muzzle reads forward at the crosshair once animChar holds the arm
+      // at its -1.571 horizontal-forward baseline. Recoil/reload stay as small
+      // additive perturbations on top of the new baseline.
       carriedGun.rotation.set(
-        (aim ? 0.03 : 0.42) + recoil * 0.12 + reloadDip * 0.22,
-        Math.PI - 0.04,
+        -1.571 + (aim ? 0.0 : 0.18) + recoil * 0.12 + reloadDip * 0.22,
+        -0.04,
         -0.03 + recoilSide * 0.75
       );
       if (CBZ.playerChar) {
         const yaw = Math.atan2(-Math.sin(CBZ.cam.yaw), -Math.cos(CBZ.cam.yaw));
         CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, yaw, 1 - Math.pow(0.00008, dt));
-        if (CBZ.playerChar.parts) {
-          const ra = CBZ.playerChar.parts.ra, la = CBZ.playerChar.parts.la;
-          if (ra) {
-            ra.rotation.x = CBZ.damp(ra.rotation.x, (aim ? -1.32 : -0.46) - recoil * 0.14, 14, dt);
-            ra.rotation.y = CBZ.damp(ra.rotation.y, (aim ? -0.18 : -0.05) + recoilSide * 0.22, 14, dt);
-            ra.rotation.z = CBZ.damp(ra.rotation.z, aim ? -0.34 : -0.15, 14, dt);
-            ra.position.z = CBZ.damp(ra.position.z, aim ? 0.14 : 0.04, 14, dt);
-          }
-          if (la) {
-            la.rotation.x = CBZ.damp(la.rotation.x, aim ? (longGun ? -1.12 : -0.62) : -0.30, 13, dt);
-            la.rotation.y = CBZ.damp(la.rotation.y, aim ? (longGun ? 0.34 : 0.12) : 0.06, 13, dt);
-            la.rotation.z = CBZ.damp(la.rotation.z, aim ? (longGun ? 0.42 : 0.16) : 0.12, 13, dt);
-            la.position.z = CBZ.damp(la.position.z, aim ? (longGun ? 0.24 : 0.08) : 0.03, 13, dt);
-          }
-        }
+        // HAND OFF the arm pose to animChar (the single owner of the arms — see
+        // entities/character.js). fpsmode no longer writes ra/la directly: it
+        // only RAISES the flag + feeds the data the pose needs, so the per-frame
+        // animChar pass can HOLD the aim pose without a tug-of-war damping the
+        // arm back toward idle. animChar reads aimingPose / aimLong / aimRecoil /
+        // aimRecoilSide and builds the Fortnite-style present-weapon pose.
+        CBZ.playerChar.aimingPose = armed();
+        CBZ.playerChar.aimLong = longGun;
+        CBZ.playerChar.aimRecoil = recoil;
+        CBZ.playerChar.aimRecoilSide = recoilSide;
       }
     }
 

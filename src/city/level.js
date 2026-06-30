@@ -53,12 +53,30 @@
   // tiers — a plain civilian spans Lv.1-8 on the coat alone.
   function wealthLvl(w) { return w >= 0.985 ? 7 : w >= 0.88 ? 5 : w >= 0.7 ? 3 : w >= 0.5 ? 1 : 0; }
 
+  // MILITARY rank — the man in fatigues with an AK reads by his STRIPES, same
+  // as a cop reads by his shield. WHY: a soldier-costumed ped used to fall all
+  // the way through to "Civilian" (he isn't a cop, gang, or archetype) — but a
+  // uniform + a rifle is the loudest read on the street. peds.js stamps a rank
+  // (a unit is a PYRAMID: a sea of privates, a thin officer corps, a rare
+  // general) so the same trooper always reads the same. Distinct from the GANG
+  // "Soldier" rank (which hangs off a.gang) and the player's street ladder —
+  // those are untouched. Brass reads HEAVY: a sergeant outreads a beat cop, a
+  // captain outreads SWAT, a general walks near kingpin air.
+  const MIL_NAME = { private: "Private", corporal: "Corporal", sergeant: "Sergeant", lieutenant: "Lieutenant", captain: "Captain", major: "Major", colonel: "Colonel", general: "General" };
+  const MIL_LVL  = { private: 15, corporal: 20, sergeant: 27, lieutenant: 36, captain: 45, major: 55, colonel: 67, general: 85 };
+  function milRankOf(a) {
+    if (a.milRank && MIL_NAME[a.milRank]) return a.milRank;        // the stamped rank (peds.js)
+    if (a.job && /soldier|military|marine/i.test(a.job)) return "private"; // costumed but unstamped → green grunt
+    return null;
+  }
+
   // ---- the one read: any actor → integer level (1..100) -------------------
   CBZ.cityLevel = function (a) {
     if (!a) return 1;
     if (a.isPlayer) return playerLevel();
     if (a.kind === "cop") return a.swat ? 35 : 20;      // trained, armed, backed by the state
     if (a.kind === "security") return 14;               // uniform + sidearm, no cavalry
+    { const mr = milRankOf(a); if (mr) return MIL_LVL[mr] || 15; }   // the stripes ARE the read
     let lvl = 1 + wealthLvl(a.wealth || 0);
     if (a.armed) lvl += a.weapon && HEAVY[a.weapon] ? 12 : 9; // a gun jumps a civilian into the teens
     else if (a.weapon) lvl += 3;                        // bat / blade tucked away
@@ -133,6 +151,7 @@
     if (a.vipTitle) return a.vipTitle;                  // vips.js: Magnate / Don / Senator...
     if (a.kind === "cop") return a.swat ? "SWAT" : "Officer"; // SWAT stays an acronym — "Swat" reads like a typo
     if (a.kind === "security") return "Security";
+    { const mr = milRankOf(a); if (mr) return MIL_NAME[mr] || "Private"; }  // Private … General (NOT the gang "Soldier")
     if (a.rampage) return "Maniac";                     // mid-snap, nothing else matters
     if (a.bounty > 0) return BOUNTY_TITLE[a.bountyTag] || "Wanted";
     if (a.gang) {
@@ -157,6 +176,7 @@
   const _gangCol = {};
   function colorFor(a) {
     if (a.kind === "cop") return "#8fc1ff";
+    if (milRankOf(a)) return "#b3c489";                 // olive — a uniformed faction reads in its colour, like the cops' blue
     if (a.bounty > 0) return "#ff6a5e";                 // wanted blood-red
     if (a.gang) {
       let c = _gangCol[a.gang];

@@ -65,6 +65,63 @@
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
 
+  // ---- SHINY MATERIAL API ---------------------------------------------------
+  // world/carfx.js (loads BEFORE this file) publishes CBZ.vehicleMat(role,color,
+  // opts) — PBR-ish materials carrying a fake-reflection env map so every car
+  // reads as polished clearcoat / chromed / glassy instead of flat matte. We
+  // route ALL car surfaces through this so the whole fleet uplifts at once.
+  // Roles: 'paint','glass','chrome','metal','rim','tire','lightFront',
+  // 'lightTail','plastic','interior'. Graceful fallback to flat lambert when
+  // carfx isn't loaded (headless / gallery audit) so nothing crashes.
+  function vmat(role, color, opts) {
+    return (CBZ.vehicleMat) ? CBZ.vehicleMat(role, color, opts)
+                            : CBZ.cmat(color == null ? 0x888888 : color, opts);
+  }
+
+  // r128 position-attribute SCULPTING (legacy geo.vertices[] is removed). Edits
+  // a box's top verts in place to slope a hood / rake a roof / taper a tail so
+  // sports cars read sleek instead of brick-shaped. Operates on a CLONED geo
+  // (caller passes a fresh BoxGeometry) then recomputes normals so lighting is
+  // correct on the new slopes. All offsets are in local mesh space.
+  //   noseDrop : push the top FRONT edge (+z) DOWN  (hood slope)
+  //   tailDrop : push the top REAR  edge (-z) DOWN  (fastback / decklid drop)
+  //   topTaper : pull the WHOLE top inward in X     (greenhouse tumblehome)
+  //   frontPinch: pull top FRONT inward in X        (pointed nose)
+  //   rearPinch : pull top REAR  inward in X        (coke-bottle tail)
+  function slopeBox(geo, o) {
+    o = o || {};
+    const pos = geo.attributes.position;
+    const arr = pos.array;
+    // discover bounds so edits are proportional regardless of box size
+    let maxY = -Infinity, maxZ = -Infinity, minZ = Infinity, maxX = -Infinity;
+    for (let i = 0; i < arr.length; i += 3) {
+      if (arr[i + 1] > maxY) maxY = arr[i + 1];
+      if (arr[i + 2] > maxZ) maxZ = arr[i + 2];
+      if (arr[i + 2] < minZ) minZ = arr[i + 2];
+      if (arr[i] > maxX) maxX = arr[i];
+    }
+    const yTol = Math.max(1e-4, maxY * 0.01);
+    const isTop = (y) => y >= maxY - yTol;
+    const dz = (maxZ - minZ) || 1;
+    for (let i = 0; i < arr.length; i += 3) {
+      const x = arr[i], y = arr[i + 1], z = arr[i + 2];
+      if (!isTop(y)) continue;
+      const front = z > 0, rear = z < 0;
+      if (o.noseDrop && front) arr[i + 1] = y - o.noseDrop;
+      if (o.tailDrop && rear) arr[i + 1] = y - o.tailDrop;
+      // X taper: scale x toward 0. topTaper applies everywhere on the roof,
+      // front/rearPinch only at the matching end (lerped along z so it cones).
+      let xs = 1;
+      if (o.topTaper) xs *= (1 - o.topTaper);
+      if (o.frontPinch && front) xs *= (1 - o.frontPinch * ((z) / (maxZ || 1)));
+      if (o.rearPinch && rear) xs *= (1 - o.rearPinch * ((z) / (minZ || -1)));
+      if (xs !== 1) arr[i] = x * xs;
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  }
+
   const mats = new Map();
   const boxes = new Map();
   const prisms = new Map();
@@ -91,6 +148,35 @@
     mats.set(key, m);
     return m;
   }
+
+  // ---- ROLE materials, cached & SHINY (via carfx vmat) ---------------------
+  // Per-STYLE body PAINT: a fresh shiny clearcoat material, tagged _bodyPaint so
+  // recolorBody clones+recolours it per car, and _shared so the template copy is
+  // never disposed. Keyed by style so each silhouette keeps its showroom default.
+  function paintMat(style, color) {
+    const key = "paint-" + style;
+    let m = mats.get(key);
+    if (m) return m;
+    m = vmat("paint", color);
+    m._bodyPaint = true; m._shared = true;
+    mats.set(key, m);
+    return m;
+  }
+  // FLEET-shared accent singletons (one each for the whole city). Cached in the
+  // same `mats` map and flagged _shared by sharedMat's twin below.
+  function roleMat(key, role, color, opts) {
+    let m = mats.get(key);
+    if (m) return m;
+    m = vmat(role, color, opts);
+    m._shared = true;
+    mats.set(key, m);
+    return m;
+  }
+  const glassMat = () => roleMat("glass", "glass", 0x16242e, { emissive: 0x070f15, ei: 0.25, double: true });
+  const chromeMat = () => roleMat("chrome", "chrome", 0xc4ccd4, { emissive: 0x262b31, ei: 0.3 });
+  const lightFrontMat = () => roleMat("lightFront", "lightFront", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.9 });
+  const lightTailMat = () => roleMat("lightTail", "lightTail", 0xff3344, { emissive: 0xff2233, ei: 0.95 });
+  const plateMat = () => roleMat("plate", "metal", 0xe8edf2, { emissive: 0x202428, ei: 0.3 });
 
   function boxGeo(w, h, d) {
     const key = w + "|" + h + "|" + d;
@@ -139,11 +225,108 @@
     const key = radius + "|" + width;
     let geo = wheels.get(key);
     if (!geo) {
-      geo = new THREE.CylinderGeometry(radius, radius, width, 12);
+      geo = new THREE.CylinderGeometry(radius, radius, width, 16);
       geo._shared = true;
       wheels.set(key, geo);
     }
     return geo;
+  }
+
+  // ---- one TIRE mesh per size: rounder 16-seg sidewall (the dark rubber). The
+  // bright RIM (disc + spokes) is a SEPARATE merged mesh added as a child so it
+  // can carry the shiny vmat('rim') material while the tire stays vmat('tire').
+  // Both are cached & flagged _shared (templates live forever; clones reuse). ----
+  const rimGeos = new Map();
+  function rimGeo(radius, width) {
+    const key = radius + "|" + width;
+    let geo = rimGeos.get(key);
+    if (geo) return geo;
+    const rimR = radius * 0.66;          // rim face inside the tire
+    const parts = [];
+    // rim face disc (axis along Y like the tire), sitting on the outboard side.
+    parts.push(new THREE.CylinderGeometry(rimR, rimR, width * 0.5, 16));
+    // 5 thin spokes radiating from the hub across the rim face. Each spoke is a
+    // box built pointing +X from center, then SPUN about the wheel axis (Y).
+    const spokeLen = rimR * 0.95, spokeW = radius * 0.13, spokeT = width * 0.52;
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      const s = new THREE.BoxGeometry(spokeLen, spokeW, spokeT);
+      s.translate(spokeLen * 0.5, 0, 0);              // root at hub, extend out +X
+      s.applyMatrix4(new THREE.Matrix4().makeRotationY(a));   // spin into the disc
+      parts.push(s);
+    }
+    // small hub cap at the very center, proud of the spokes.
+    parts.push(new THREE.CylinderGeometry(radius * 0.17, radius * 0.17, width * 0.62, 8));
+    geo = mergeGeo(parts);
+    geo._shared = true;
+    rimGeos.set(key, geo);
+    return geo;
+  }
+
+  // minimal BufferGeometry merge (position+normal) — local to playercars so we
+  // don't depend on BufferGeometryUtils. Inputs are disposed by caller if needed.
+  function mergeGeo(geos) {
+    let n = 0;
+    for (const g of geos) { g.computeVertexNormals(); n += g.attributes.position.count; }
+    const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
+    let pi = 0;
+    for (const g of geos) {
+      const gp = g.index ? g.toNonIndexed() : g;
+      const pa = gp.attributes.position.array, na = gp.attributes.normal.array;
+      pos.set(pa, pi); nrm.set(na, pi); pi += pa.length;
+      if (gp !== g && gp.dispose) gp.dispose();
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    out.computeBoundingSphere();
+    return out;
+  }
+
+  // Build ONE wheel (tire + bright rim child) at the origin, axle along the
+  // mesh's own Y (caller rotates z=PI/2 to lay it on its side like the old rig).
+  // The tire mesh is the one tagged playerWheel + kept OUT of the static merge;
+  // its rim is a child so it spins/recolours with it as a unit. Shared geos +
+  // shared shiny materials → ~2 meshes per wheel, draw-call friendly after merge.
+  // a SCULPTED box geometry (BoxGeometry run through slopeBox) cached by its
+  // params so abundant clones reuse one shared geo. Used for sloped hood
+  // clamshells / raked roof caps on the road cars (the prompt's r128 vertex trick
+  // applied where a box reads better sloped than flat).
+  const sculptGeos = new Map();
+  function sculptGeo(w, h, d, opts) {
+    const key = [w, h, d, JSON.stringify(opts)].join("|");
+    let geo = sculptGeos.get(key);
+    if (geo) return geo;
+    geo = new THREE.BoxGeometry(w, h, d);
+    slopeBox(geo, opts);
+    geo._shared = true;
+    sculptGeos.set(key, geo);
+    return geo;
+  }
+  function addSculpt(root, w, h, d, x, y, z, material, opts) {
+    const mesh = new THREE.Mesh(sculptGeo(w, h, d, opts), material);
+    mesh.position.set(x || 0, y || 0, z || 0);
+    mesh.castShadow = false;
+    root.add(mesh);
+    return mesh;
+  }
+
+  // tire + rim materials are FLEET-shared singletons (one black rubber, one
+  // bright alloy) cached here so every wheel in the city reuses them and so
+  // clearCars (which disposes only un-_shared mats) can never dispose them.
+  let _tireMat = null, _rimMat = null;
+  function tireMat() { if (!_tireMat) { _tireMat = vmat("tire", 0x14161a); _tireMat._shared = true; } return _tireMat; }
+  function rimMat() { if (!_rimMat) { _rimMat = vmat("rim", 0xc2c9d1, { emissive: 0x20242a, ei: 0.3 }); _rimMat._shared = true; } return _rimMat; }
+  function makeWheel(radius, width) {
+    const tire = new THREE.Mesh(wheelGeo(radius, width), tireMat());
+    tire.castShadow = false;
+    tire.userData.playerWheel = true;
+    const rim = new THREE.Mesh(rimGeo(radius, width), rimMat());
+    // rim sits PROUD on the OUTBOARD face; +Y is outboard before the z-rotation.
+    rim.position.y = width * 0.30;
+    rim.castShadow = false;
+    tire.add(rim);
+    return tire;
   }
 
   function sphereGeo(radius) {
@@ -182,19 +365,16 @@
   }
 
   function addWheels(root, width, length, radius, wheelWidth) {
-    const tire = sharedMat("tire", 0x15171a);
-    const hub = sharedMat("hub", 0x59616b);
     const wz = length * 0.32;
-    [[width / 2, wz], [-width / 2, wz], [width / 2, -wz], [-width / 2, -wz]].forEach(function (p) {
-      const wheel = new THREE.Mesh(wheelGeo(radius, wheelWidth), tire);
-      wheel.rotation.z = Math.PI / 2;
+    // Lay each wheel on its side. The rim child sits at local +Y; a z-rotation of
+    // +PI/2 sends local +Y to world -X, and -PI/2 sends it to world +X. So +x
+    // wheels use -PI/2 (rim faces +x = OUTboard) and -x wheels use +PI/2 — keeping
+    // the bright alloy face pointing OUT on both sides.
+    [[width / 2, wz, -1], [-width / 2, wz, 1], [width / 2, -wz, -1], [-width / 2, -wz, 1]].forEach(function (p) {
+      const wheel = makeWheel(radius, wheelWidth);
+      wheel.rotation.z = p[2] * Math.PI / 2;
       wheel.position.set(p[0], radius, p[1]);
-      wheel.castShadow = false;
-      wheel.userData.playerWheel = true;
       root.add(wheel);
-      const cap = new THREE.Mesh(wheelGeo(radius * 0.57, wheelWidth + 0.02), hub);
-      cap.position.y = 0;
-      wheel.add(cap);
     });
   }
 
@@ -206,246 +386,437 @@
     root.userData.playerWheels = out;
   }
 
-  function addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, glass, trim, white, red) {
-    const bodyY = wheelR * 0.55, bodyTop = bodyY + baseH;
-    const plate = sharedMat("plate", 0xe8edf2, { emissive: 0x202428, ei: 0.3 });
-    const chrome = sharedMat("road-chrome", 0xabb3bc, { emissive: 0x252a30, ei: 0.35 });
+  function addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, glass, trim, white, red, bodyYIn, cabBaseYIn) {
+    const bodyY = bodyYIn == null ? wheelR * 0.42 : bodyYIn, bodyTop = bodyY + baseH;
+    const peakY = cabin[1][1];
+    const plate = plateMat();
+    const chrome = chromeMat();             // shiny chromed trim / exhaust
+    const grilleMat = roleMat("grille", "plastic", 0x0d1014, { emissive: 0, ei: 0 });   // matte dark grille slab
     const noGrille = /^tesla/.test(style);
 
     // Hood/trunk breaks, mirrors, door cuts and wheel-arch brows give every
     // silhouette readable vehicle anatomy before model-specific trim is added.
+    // Anchored on the TALL hull (baseH is now ~0.6*H), so deck breaks sit on top.
     addBox(root, w * 0.78, 0.035, len * 0.27, 0, bodyTop + 0.02, len * 0.31, paint);
     addBox(root, w * 0.74, 0.035, len * 0.18, 0, bodyTop + 0.02, -len * 0.39, paint);
     [1, -1].forEach(function (side) {
-      addBox(root, 0.18, 0.12, 0.28, side * (w * 0.53), bodyTop + cabin[1][1] * 0.34, len * 0.15, trim);
+      // mirror on the greenhouse beltline (cabin base ~bodyTop), just below the glass
+      addBox(root, 0.18, 0.12, 0.28, side * (w * 0.53), bodyTop + peakY * 0.28, len * 0.15, trim);
+      // door-seam pillars on the upper flank of the tall hull
       [-len * 0.14, len * 0.12].forEach(function (z) {
-        addBox(root, 0.025, baseH * 0.72, 0.028, side * (w * 0.505), bodyY + baseH * 0.57, z, trim);
+        addBox(root, 0.025, baseH * 0.6, 0.028, side * (w * 0.505), bodyY + baseH * 0.62, z, trim);
       });
+      // wheel-arch brows over each axle (top of arch ~ mid-hull)
       [len * 0.32, -len * 0.32].forEach(function (z) {
-        addBox(root, 0.06, 0.09, len * 0.2, side * (w * 0.505), wheelR * 1.66, z, trim);
+        addBox(root, 0.06, 0.09, len * 0.2, side * (w * 0.505), bodyY + baseH * 0.42, z, trim);
       });
     });
-    addBox(root, w * 0.28, 0.13, 0.025, 0, bodyY + baseH * 0.45, -len * 0.5 - 0.075, plate);
+    addBox(root, w * 0.28, 0.13, 0.025, 0, bodyY + baseH * 0.32, -len * 0.5 - 0.075, plate);
     addBox(root, w * 0.96, 0.12, 0.16, 0, bodyY + 0.04, len * 0.5 - 0.03, trim);
     addBox(root, w * 0.96, 0.13, 0.14, 0, bodyY + 0.05, -len * 0.5 + 0.02, trim);
-    if (!noGrille) addBox(root, w * 0.56, 0.2, 0.055, 0, bodyY + baseH * 0.38, len * 0.5 + 0.035, trim);
-    else addBox(root, w * 0.5, 0.07, 0.045, 0, bodyY + baseH * 0.25, len * 0.5 + 0.03, trim);
+    // grille: a recessed DARK slab (matte) so the nose reads as a face, with a
+    // thin chrome surround lip on combustion cars (teslas get a slim closed nose).
+    if (!noGrille) {
+      addBox(root, w * 0.56, 0.2, 0.05, 0, bodyY + baseH * 0.3, len * 0.5 + 0.03, grilleMat);
+      addBox(root, w * 0.6, 0.24, 0.035, 0, bodyY + baseH * 0.3, len * 0.5 + 0.045, chrome);   // chrome grille frame
+    } else addBox(root, w * 0.5, 0.07, 0.045, 0, bodyY + baseH * 0.22, len * 0.5 + 0.03, chrome);
+    // thin chrome window-surround on the greenhouse beltline (catches light, reads
+    // as a real DLO trim strip wrapping the glass). Cheap pair of low boxes.
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.03, 0.035, (cabin[2][0] - cabin[1][0]) * 0.9, side * (w * 0.44 * 0.94), bodyTop + peakY * 0.08, (cabin[1][0] + cabin[2][0]) * 0.5, chrome);
+    });
 
+    // Headlights set high on the hull face (upper third), not on the greenhouse.
     if (style === "porsche") {
-      addSphere(root, 0.18, w * 0.3, bodyY + baseH * 0.72, len * 0.48, white, 1.2, 0.72, 0.38);
-      addSphere(root, 0.18, -w * 0.3, bodyY + baseH * 0.72, len * 0.48, white, 1.2, 0.72, 0.38);
+      addSphere(root, 0.18, w * 0.3, bodyY + baseH * 0.66, len * 0.48, white, 1.2, 0.72, 0.38);
+      addSphere(root, 0.18, -w * 0.3, bodyY + baseH * 0.66, len * 0.48, white, 1.2, 0.72, 0.38);
     } else {
       [1, -1].forEach(function (side) {
         const lightW = style === "aventador" || style === "enzo" ? w * 0.25 : w * 0.3;
-        const light = addBox(root, lightW, 0.13, 0.065, side * w * 0.28, bodyY + baseH * 0.66, len * 0.5 + 0.045, white);
+        const light = addBox(root, lightW, 0.13, 0.065, side * w * 0.28, bodyY + baseH * 0.58, len * 0.5 + 0.045, white);
         if (style === "aventador" || style === "enzo") light.rotation.z = side * -0.16;
       });
     }
-    if (/tesla|veyron/.test(style)) addBox(root, w * 0.82, 0.1, 0.06, 0, bodyY + baseH * 0.68, -len * 0.5 - 0.035, red);
+    // Tail lamps + reflectors flush on the actual VERTICAL rear face (z=-len*0.5),
+    // sitting in the upper-mid of the tall hull rear wall.
+    if (/tesla|veyron/.test(style)) addBox(root, w * 0.82, 0.1, 0.06, 0, bodyY + baseH * 0.55, -len * 0.5 + 0.01, red);
     else [1, -1].forEach(function (side) {
-      addBox(root, w * 0.28, 0.14, 0.065, side * w * 0.29, bodyY + baseH * 0.64, -len * 0.5 - 0.035, red);
+      addBox(root, w * 0.28, 0.14, 0.065, side * w * 0.29, bodyY + baseH * 0.55, -len * 0.5 + 0.01, red);
     });
 
+    // chrome exhaust tips poking from the rear valance. Supercars get a centred
+    // quad-ish pair; muscle/lowrider/hatch get offset twin pipes; teslas (EV) none.
     if (/ferrari|enzo|aventador|porsche|veyron/.test(style)) {
       [1, -1].forEach(function (side) {
-        addBox(root, 0.2, 0.12, 0.16, side * w * 0.25, bodyY + 0.11, -len * 0.5 - 0.06, chrome);
+        addBox(root, 0.2, 0.12, 0.12, side * w * 0.25, bodyY + 0.11, -len * 0.5 + 0.02, chrome);
+      });
+    } else if (/muscle|lowrider|hatch/.test(style)) {
+      [1, -1].forEach(function (side) {
+        addBox(root, 0.12, 0.1, 0.14, side * w * 0.3, bodyY + 0.08, -len * 0.5 - 0.04, chrome);
       });
     }
-    root.userData.vehicleDims = { width: w, length: len, height: bodyTop + cabin[1][1], wheelbase: len * 0.64 };
+    // total height = hull top + greenhouse peak (greenhouse base sunk into deck).
+    const cabBaseY = cabBaseYIn == null ? bodyTop - peakY * 0.08 : cabBaseYIn;
+    root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.64 };
   }
 
   function makeRoadCar(style) {
     const root = new THREE.Group();
-    const paint = sharedMat("paint-" + style, ({
+    const paint = paintMat(style, ({
       "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6,
       "tesla-y": 0x1470e3, porsche: 0xf3cf39, aventador: 0xf28c28,
       ferrari: 0xd1262f, enzo: 0xe02025, veyron: 0x202225,
       muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6,
-    })[style] || 0xd1262f);
-    paint._bodyPaint = true;   // per-car recolour (city/vehicles.js) targets this
-    const dark = sharedMat("glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
-    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
-    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.7 });
-    let w = 2.0, len = 4.8, wheelR = 0.46, baseH = 0.62;
-    let cabin = [[-1.48, 0], [-0.93, 0.75], [0.62, 0.75], [1.5, 0]];
+    })[style] || 0xd1262f);   // shiny clearcoat, _bodyPaint-tagged for per-car recolour
+    const dark = glassMat();   // reflective tinted glass
+    const red = lightTailMat();
+    const white = lightFrontMat();
 
-    if (style === "ferrari") { w = 2.02; len = 4.62; wheelR = 0.47; baseH = 0.51; cabin = [[-1.1, 0], [-0.58, 0.61], [0.3, 0.61], [1.08, 0]]; }
-    if (style === "tesla-3") { w = 1.92; len = 4.55; cabin = [[-1.42, 0], [-0.82, 0.77], [0.48, 0.77], [1.45, 0]]; }
-    if (style === "tesla-x") { w = 2.08; len = 5.0; wheelR = 0.52; baseH = 0.76; cabin = [[-1.57, 0], [-1.0, 0.98], [0.58, 0.98], [1.58, 0]]; }
-    if (style === "tesla-y") { w = 2.02; len = 4.72; wheelR = 0.5; baseH = 0.73; cabin = [[-1.47, 0], [-0.88, 0.88], [0.52, 0.88], [1.5, 0]]; }
-    if (style === "porsche") { w = 1.94; len = 4.35; wheelR = 0.47; baseH = 0.57; cabin = [[-1.1, 0], [-0.68, 0.67], [0.42, 0.67], [1.0, 0]]; }
-    if (style === "aventador") { w = 2.08; len = 4.72; wheelR = 0.48; baseH = 0.49; cabin = [[-1.08, 0], [-0.55, 0.57], [0.25, 0.57], [1.08, 0]]; }
-    if (style === "enzo") { w = 2.03; len = 4.7; wheelR = 0.47; baseH = 0.5; cabin = [[-1.05, 0], [-0.55, 0.6], [0.28, 0.6], [1.08, 0]]; }
-    if (style === "veyron") { w = 2.08; len = 4.55; wheelR = 0.5; baseH = 0.58; cabin = [[-1.2, 0], [-0.66, 0.68], [0.5, 0.68], [1.2, 0]]; }
-    // long-hood American muscle: wide, low, a fat greenhouse set back
-    if (style === "muscle") { w = 2.06; len = 4.95; wheelR = 0.5; baseH = 0.6; cabin = [[-1.35, 0], [-0.92, 0.66], [0.18, 0.66], [0.78, 0]]; }
-    // lowrider: dropped ride height, long body, narrow chopped roofline
-    if (style === "lowrider") { w = 2.04; len = 5.05; wheelR = 0.4; baseH = 0.56; cabin = [[-1.4, 0], [-0.86, 0.6], [0.42, 0.6], [1.3, 0]]; }
-    // hot hatch: short, tall, upright greenhouse over a stubby body
-    if (style === "hatch") { w = 1.84; len = 4.0; wheelR = 0.44; baseH = 0.66; cabin = [[-1.18, 0], [-0.74, 0.84], [0.86, 0.84], [1.36, 0]]; }
+    // ===================================================================
+    // PROPORTION LAW (drives the whole silhouette off total height H):
+    //   wheelR     ~ 0.16*H        (tire diameter ~ 0.33*H)
+    //   bodyY      = wheelR*0.42   (hull bottom just below axle)
+    //   baseH      = hullFrac*H    (hull is the DOMINANT band, ~0.60-0.66*H)
+    //   greenhouse peak ~ ghFrac*baseH  (0.34-0.46, NEVER > baseH)
+    // Result: hull ~62% of H, greenhouse ~25% of H, wheel dia ~ half hull.
+    // ===================================================================
+    // Per-body table: [W, L, H, hullFrac, cabinLenFrac, cabinCenterX(frac of L), ghFrac]
+    const SPEC = {
+      "tesla-s":  { W: 1.95, L: 4.70, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42 },
+      "tesla-3":  { W: 1.92, L: 4.55, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42 },
+      "tesla-x":  { W: 2.05, L: 4.85, H: 1.72, hull: 0.66, cab: 0.50, cx: -0.02, gh: 0.44 },
+      "tesla-y":  { W: 2.02, L: 4.78, H: 1.66, hull: 0.65, cab: 0.50, cx: -0.02, gh: 0.44 },
+      porsche:    { W: 1.94, L: 4.45, H: 1.40, hull: 0.64, cab: 0.42, cx: -0.05, gh: 0.40 },
+      ferrari:    { W: 2.05, L: 4.60, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
+      enzo:       { W: 2.04, L: 4.62, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
+      aventador:  { W: 2.05, L: 4.65, H: 1.28, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
+      veyron:     { W: 2.05, L: 4.55, H: 1.32, hull: 0.66, cab: 0.38, cx: -0.04, gh: 0.36 },
+      muscle:     { W: 2.05, L: 4.95, H: 1.45, hull: 0.64, cab: 0.40, cx: -0.10, gh: 0.40 },
+      lowrider:   { W: 2.04, L: 5.05, H: 1.42, hull: 0.66, cab: 0.44, cx: -0.02, gh: 0.36 },
+      hatch:      { W: 1.84, L: 4.05, H: 1.50, hull: 0.60, cab: 0.50, cx: -0.04, gh: 0.46 },
+    };
+    const s = SPEC[style] || SPEC["tesla-3"];
+    const w = s.W, len = s.L, H = s.H;
+    const wheelR = +(0.16 * H).toFixed(3);            // tire dia ~0.33H
+    const bodyY = +(wheelR * 0.42).toFixed(3);        // hull bottom just below axle
+    const baseH = +(s.hull * H).toFixed(3);           // TALL dominant hull
+    const bodyTop = bodyY + baseH;
+    const peakY = +(s.gh * baseH).toFixed(3);         // slim greenhouse, < baseH
+    const cabLen = len * s.cab;
+    const cabCx = len * s.cx;                          // cabin center (rearward = -)
+    // cabin profile (z,y): [rear-bottom, rear-top, front-top, front-bottom].
+    // top is shorter footprint than base (windshield/backlight rake) AND narrower
+    // width is applied below (tumblehome). Base z half-extent = cabLen/2.
+    const cb = cabLen * 0.5, ct = cabLen * 0.30;       // base vs top half-length (rake)
+    const cabin = [
+      [cabCx - cb, 0], [cabCx - ct, peakY], [cabCx + ct, peakY], [cabCx + cb, 0],
+    ];
 
-    const bodyY = wheelR * 0.55, bodyTop = bodyY + baseH;
-    const bodyProfile = [[-len * 0.5, 0], [-len * 0.5, baseH * 0.62], [-len * 0.37, baseH], [len * 0.34, baseH], [len * 0.5, baseH * 0.58], [len * 0.5, 0]];
+    // ---- HULL: the dominant painted mass, with a beltline + raked nose/tail ----
+    // Deck top must enclose the cabin footprint so the greenhouse never overhangs
+    // the sloped hood/tail. Derive deck edges from the cabin z-extent.
+    const cabinRearZ = cabin[0][0], cabinFrontZ = cabin[cabin.length - 1][0];
+    const deckRear = Math.max(-len * 0.5, Math.min(-len * 0.30, cabinRearZ - 0.14));
+    const deckFront = Math.min(len * 0.5, Math.max(len * 0.28, cabinFrontZ + 0.14));
+    // beltline at baseH; nose & tail dip slightly so the hull reads sculpted.
+    const bodyProfile = [
+      [-len * 0.5, 0], [-len * 0.5, baseH * 0.80],
+      [deckRear, baseH], [deckFront, baseH],
+      [len * 0.5, baseH * 0.78], [len * 0.5, 0],
+    ];
     addPrism(root, w, bodyProfile, bodyY, paint);
-    addPrism(root, w * 0.84, cabin, bodyTop - 0.04, dark);
-    addBox(root, w * 0.72, 0.08, len * 0.28, 0, bodyTop + cabin[1][1] * 0.74, -0.16, paint);
-    // sculpted lower body: a contrasting rocker/sill down each flank + a slim
-    // front splitter so the nose reads as a real bumper, not a flat box face.
+
+    // ---- GREENHOUSE: a BODY-COLORED trapezoidal prism (paint, NOT glass) ----
+    // Top narrower (tumblehome via width) AND shorter (rake via cabin profile)
+    // than its base. Base sunk ~8% of peak into the hull deck so it fuses cleanly.
+    const cabW = w * 0.86;                              // greenhouse base width
+    const cabBaseY = bodyTop - peakY * 0.08;
+    addPrism(root, cabW, cabin, cabBaseY, paint);       // painted A/B/C pillars + roof
+
+    // Decklid behind the cabin (not on fastbacks).
+    const fastback = /^(ferrari|enzo|aventador|veyron)$/.test(style);
+    if (!fastback) {
+      const lidFront = cabin[0][0] - 0.02;
+      const lidRear = deckRear - 0.04;
+      const lidLen = Math.max(0.12, lidFront - lidRear);
+      addBox(root, w * 0.72, 0.06, lidLen, 0, bodyTop + 0.02, (lidFront + lidRear) * 0.5, paint);
+    }
+
+    // ---- GLASS: thin INSET dark panels recessed INTO the painted greenhouse ----
+    // windshield + backlight on the raked end faces, two side windows on the
+    // flanks. Each ~0.7 of the cabin face, recessed ~3-5cm so the surrounding
+    // paint reads as pillars + roof + beltline. (Replaces the old full-size dark
+    // rake slabs that doubled the dark mass.)
+    const glassW = cabW * 0.90;
+    // cabin corners: [0]=rear bottom, [1]=rear top, [2]=front top, [3]=front bottom
+    const rB = cabin[0], rT = cabin[1], fT = cabin[2], fB = cabin[3];
+    function rakeGlass(zTop, yTop, zBot, yBot, gw, normalSign) {
+      const dz = zTop - zBot, dy = yTop - yBot;
+      const faceLen = Math.hypot(dz, dy);
+      if (faceLen < 0.05) return;
+      // shrink to ~0.7 of the face, centered, leaving paint margins (pillars/roof).
+      const f = 0.7;
+      const midZ = (zTop + zBot) * 0.5, midY = cabBaseY + (yTop + yBot) * 0.5;
+      // INSET ~4cm along the face normal toward the cabin interior (negative sign).
+      const nz = (dy / faceLen) * normalSign, ny = (-dz / faceLen) * normalSign;
+      const inset = -0.04;
+      const m = new THREE.Mesh(boxGeo(gw, faceLen * f, 0.02), dark);
+      m.position.set(0, midY + ny * inset, midZ + nz * inset);
+      m.rotation.x = -Math.atan2(dz, dy);
+      m.castShadow = false;
+      m.material.polygonOffset = true; m.material.polygonOffsetFactor = -1;
+      root.add(m);
+    }
+    rakeGlass(fT[0], fT[1], fB[0], fB[1], glassW, 1);   // windshield
+    rakeGlass(rT[0], rT[1], rB[0], rB[1], glassW, -1);  // backlight
+    // two side windows: inset dark panels on the flanks, between the rake faces.
+    const sideZ0 = cabin[1][0], sideZ1 = cabin[2][0];
+    const sideMidZ = (sideZ0 + sideZ1) * 0.5;
+    const sideLen = Math.max(0.2, (sideZ1 - sideZ0) * 0.92);
+    [1, -1].forEach(function (side) {
+      const sw = addBox(root, 0.02, peakY * 0.6, sideLen, side * (cabW * 0.5 - 0.045), cabBaseY + peakY * 0.55, sideMidZ, dark);
+      sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
+    });
+
+    // paint cowl at the windshield base so you can't see under it into a hollow shell.
+    addBox(root, cabW * 0.94, 0.10, 0.12, 0, cabBaseY + fB[1] + 0.05, fB[0] - 0.02, paint);
+
+    // SLEEK NOSE: a thin painted hood clamshell over the front deck, sculpted to
+    // SLOPE DOWN toward the nose (r128 vertex trick via slopeBox). Sports cars get
+    // a steep wedge drop + a pinched point; teslas/hatch a gentler fall. This is
+    // what turns a flat-top hull into a car that "leans forward".
+    const noseDrop = ({ ferrari: 0.16, enzo: 0.16, aventador: 0.17, veyron: 0.13, porsche: 0.13, muscle: 0.08, lowrider: 0.07, hatch: 0.07 })[style] || 0.09;
+    const hoodFront = Math.min(len * 0.5, deckFront);
+    const hoodRear = cabin[cabin.length - 1][0] - 0.04;   // up to the windshield base
+    const hoodLen = Math.max(0.4, hoodFront - hoodRear);
+    addSculpt(root, w * 0.9, baseH * 0.16, hoodLen, 0, bodyTop - baseH * 0.05, (hoodFront + hoodRear) * 0.5, paint,
+      { noseDrop: noseDrop, frontPinch: /ferrari|enzo|aventador|veyron|porsche/.test(style) ? 0.22 : 0.1 });
+
+    // sculpted lower body: contrasting rocker/sill + a slim front splitter so the
+    // nose reads as a real bumper, not a flat box face.
     const sill = sharedMat("sill-" + style, 0x14171c);
     addBox(root, w + 0.04, 0.14, len * 0.9, 0, wheelR + 0.08, 0, sill);
     addBox(root, w * 0.96, 0.1, 0.18, 0, wheelR + 0.06, len * 0.5 - 0.04, sill);   // front splitter
-    addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, dark, sill, white, red);
+    addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, dark, sill, white, red, bodyY, cabBaseY);
+
+    // ---- per-model accents (Y anchors re-based on the TALL hull) ----
+    const wingY = bodyTop + 0.14;   // wing/spoiler height above the tall hull
     if (style === "ferrari") {
-      addBox(root, w * 0.22, 0.22, 0.08, -w * 0.29, bodyY + baseH * 0.38, len * 0.5 + 0.04, sill);
-      addBox(root, w * 0.22, 0.22, 0.08, w * 0.29, bodyY + baseH * 0.38, len * 0.5 + 0.04, sill);
-      addBox(root, w * 0.34, 0.18, 0.08, 0, bodyY + baseH * 0.34, len * 0.5 + 0.05, paint);
+      addBox(root, w * 0.22, 0.22, 0.08, -w * 0.29, bodyY + baseH * 0.34, len * 0.5 + 0.04, sill);
+      addBox(root, w * 0.22, 0.22, 0.08, w * 0.29, bodyY + baseH * 0.34, len * 0.5 + 0.04, sill);
+      addBox(root, w * 0.34, 0.18, 0.08, 0, bodyY + baseH * 0.30, len * 0.5 + 0.05, paint);
     }
-    if (style === "aventador") addBox(root, w * 0.76, 0.12, 0.16, 0, wheelR + baseH + 0.18, -len * 0.42, paint);
-    if (style === "porsche") addBox(root, w * 0.72, 0.1, 0.14, 0, wheelR + baseH + 0.14, -len * 0.44, paint);
+    if (style === "aventador") addBox(root, w * 0.76, 0.12, 0.16, 0, wingY, -len * 0.42, paint);
+    if (style === "porsche") addBox(root, w * 0.72, 0.1, 0.14, 0, wingY - 0.04, -len * 0.44, paint);
     if (style === "enzo") {
-      addBox(root, w * 0.92, 0.1, 0.12, 0, wheelR + baseH + 0.11, -len * 0.44, paint);
+      addBox(root, w * 0.92, 0.1, 0.12, 0, wingY - 0.06, -len * 0.44, paint);
       addBox(root, w * 0.32, 0.1, 0.12, 0, wheelR + 0.34, len * 0.51, sharedMat("enzo-black", 0x101317));
     }
     if (style === "veyron") {
       const orange = sharedMat("veyron-orange", 0xff6b20);
       addBox(root, w + 0.02, 0.17, len * 0.94, 0, wheelR + 0.12, 0, orange);
-      addBox(root, w * 0.74, 0.12, 0.14, 0, wheelR + baseH + 0.16, -len * 0.42, paint);
+      addBox(root, w * 0.74, 0.12, 0.14, 0, wingY - 0.02, -len * 0.42, paint);
     }
     if (style === "muscle") {
       const black = sharedMat("muscle-black", 0x0c0e12);
-      // hood scoop + twin racing stripes up the long hood
-      addBox(root, w * 0.34, 0.14, 0.6, 0, wheelR + baseH + 0.06, len * 0.28, black);
-      addBox(root, 0.18, 0.02, len * 0.9, -0.28, wheelR + baseH * 0.95, 0, black);
-      addBox(root, 0.18, 0.02, len * 0.9, 0.28, wheelR + baseH * 0.95, 0, black);
+      // hood scoop + twin racing stripes up the long hood (on the tall hull deck)
+      addBox(root, w * 0.34, 0.14, 0.6, 0, bodyTop + 0.06, len * 0.28, black);
+      addBox(root, 0.18, 0.02, len * 0.9, -0.28, bodyTop + 0.005, 0, black);
+      addBox(root, 0.18, 0.02, len * 0.9, 0.28, bodyTop + 0.005, 0, black);
       // chunky rear wing
-      addBox(root, w * 0.78, 0.08, 0.16, 0, wheelR + baseH + 0.26, -len * 0.46, black);
+      addBox(root, w * 0.78, 0.08, 0.16, 0, wingY + 0.08, -len * 0.46, black);
     }
     if (style === "lowrider") {
       const chrome = sharedMat("low-chrome", 0xc9ccd2, { emissive: 0x2a2d33, ei: 0.4 });
       const roof = sharedMat("low-roof", 0xf2f3f6);
       // chrome rocker trim down both sides + a painted hardtop roof cap
       addBox(root, w + 0.06, 0.07, len * 0.92, 0, wheelR + 0.05, 0, chrome);
-      addBox(root, w * 0.7, 0.07, len * 0.32, 0, wheelR + baseH + cabin[1][1] * 0.86, -0.1, roof);
+      addBox(root, cabW * 0.92, 0.06, sideLen * 0.9, cabCx * 0 + 0, cabBaseY + peakY + 0.02, sideMidZ, roof);
     }
     if (style === "hatch") {
       const black = sharedMat("hatch-black", 0x14171c);
-      // roof-edge spoiler over the tailgate + a black A-pillar wrap
-      addBox(root, w * 0.82, 0.06, 0.14, 0, wheelR + baseH + cabin[1][1] + 0.02, -len * 0.46, black);
-      addBox(root, w * 0.86, 0.05, len * 0.94, 0, wheelR + baseH - 0.04, 0, black);
+      // roof-edge spoiler over the tailgate
+      addBox(root, w * 0.82, 0.06, 0.14, 0, cabBaseY + peakY + 0.02, cabin[0][0] - 0.04, black);
     }
-    addWheels(root, w + 0.08, len, wheelR, 0.34);
+    addWheels(root, w + 0.08, len, wheelR, 0.30 * (H / 1.5));
     return root;
   }
 
   function makeCybertruck() {
     const root = new THREE.Group();
-    const silver = sharedMat("cyber-silver", 0xa8afb2); silver._bodyPaint = true;
-    const trim = sharedMat("cyber-trim", 0x20262a);
-    const glass = sharedMat("cyber-glass", 0x17242b, { emissive: 0x081116, ei: 0.35 });
-    const red = sharedMat("cyber-rear", 0xff3344, { emissive: 0xff2233, ei: 0.8 });
-    const white = sharedMat("cyber-front", 0xe6f8ff, { emissive: 0xbbeeff, ei: 0.8 });
-    const w = 2.28, len = 5.35, wheelR = 0.61;
-    addBox(root, w, 0.74, len, 0, 0.93, 0, silver);
-    addBox(root, w + 0.08, 0.2, len * 0.82, 0, 0.54, -0.08, trim);
-    addPrism(root, w * 0.93, [[-2.0, 0], [-0.72, 1.18], [0.32, 1.18], [1.82, 0]], 1.12, silver);
-    addPrism(root, w * 0.84, [[-1.62, 0], [-0.66, 0.93], [0.25, 0.93], [1.38, 0]], 1.2, glass);
-    addBox(root, w * 0.88, 0.13, 0.09, 0, 1.02, len * 0.5 + 0.05, white);
-    addBox(root, w * 0.88, 0.14, 0.09, 0, 1.06, -len * 0.5 - 0.05, red);
+    // brushed-stainless body: route through the 'metal' role for a cold reflective
+    // sheen, still tagged _bodyPaint so it recolours per car.
+    const silver = (function () {
+      let m = mats.get("cyber-silver"); if (m) return m;
+      m = vmat("metal", 0xa8afb2); m._bodyPaint = true; m._shared = true; mats.set("cyber-silver", m); return m;
+    })();
+    const trim = roleMat("cyber-trim", "plastic", 0x20262a);
+    const glass = glassMat();
+    const red = lightTailMat();
+    const white = lightFrontMat();
+    // PROPORTION LAW: pickup, tall hull + cab forward of an open bed. H~1.80.
+    const w = 2.2, len = 5.35, H = 1.80;
+    const wheelR = +(0.16 * H).toFixed(3);            // ~0.29
+    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const baseH = +(0.58 * H).toFixed(3);             // ~1.04 tall hull (pickup body)
+    const bodyTop = bodyY + baseH;
+    // body shell (tall hull). bed crease via a lower trim band.
+    addBox(root, w, baseH, len, 0, bodyY + baseH * 0.5, 0, silver);
+    addBox(root, w + 0.08, 0.2, len * 0.82, 0, bodyY + 0.12, -0.08, trim);
+    // CYBERTRUCK WEDGE identity: a body-COLORED angular cab prism forward, on the
+    // tall hull deck (base sunk in), with INSET dark glass (no doubled dark mass).
+    const peakY = +(0.40 * baseH).toFixed(3);         // slim cab band, < baseH
+    const cabBaseY = bodyTop - peakY * 0.08;
+    const cabCx = len * 0.05;                          // cab forward of an open bed
+    const cb = len * 0.40 * 0.5, ct = len * 0.40 * 0.30;
+    const cabProf = [[cabCx - cb, 0], [cabCx - ct, peakY], [cabCx + ct, peakY], [cabCx + cb, 0]];
+    addPrism(root, w * 0.93, cabProf, cabBaseY, silver);
+    // inset glass: windshield (front rake) + backlight (rear rake), ~0.7 of face.
+    const rT = cabProf[1], fT = cabProf[2], rB = cabProf[0], fB = cabProf[3];
+    function cyberGlass(zT, zB, sign) {
+      const dz = zT - zB, dy = peakY;
+      const fl = Math.hypot(dz, dy);
+      const nz = (dy / fl) * sign, ny = (-dz / fl) * sign;
+      const midZ = (zT + zB) * 0.5, midY = cabBaseY + peakY * 0.5;
+      const m = new THREE.Mesh(boxGeo(w * 0.78, fl * 0.7, 0.02), glass);
+      m.position.set(0, midY + ny * -0.04, midZ + nz * -0.04);
+      m.rotation.x = -Math.atan2(dz, dy);
+      m.material.polygonOffset = true; m.material.polygonOffsetFactor = -1;
+      root.add(m);
+    }
+    cyberGlass(fT[0], fB[0], 1);
+    cyberGlass(rT[0], rB[0], -1);
+    // side windows
     [1, -1].forEach(function (side) {
-      addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), 0.68, 0, trim);
-      addBox(root, 0.025, 0.74, 0.03, side * (w * 0.505), 1.12, -0.28, trim);
-      addBox(root, 0.035, 0.5, len * 0.34, side * (w * 0.47), 1.48, 0.28, glass);
-      addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), 1.3, 0.85, trim);
+      const sw = addBox(root, 0.02, peakY * 0.55, (ct + cb), side * (w * 0.93 * 0.5 - 0.04), cabBaseY + peakY * 0.55, cabCx, glass);
+      sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
     });
-    addBox(root, w * 0.84, 0.08, len * 0.3, 0, 1.58, -len * 0.29, trim);   // dark tonneau cover
-    addWheels(root, w + 0.13, len, wheelR, 0.43);
-    root.userData.vehicleDims = { width: w, length: len, height: 2.3, wheelbase: len * 0.68 };
+    addBox(root, w * 0.88, 0.13, 0.09, 0, bodyTop - 0.06, len * 0.5 + 0.05, white);
+    addBox(root, w * 0.88, 0.14, 0.09, 0, bodyTop - 0.02, -len * 0.5 - 0.05, red);
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), bodyY + baseH * 0.3, 0, trim);
+      addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), bodyTop - 0.08, len * 0.32, trim);   // mirrors
+    });
+    addBox(root, w * 0.84, 0.08, len * 0.3, 0, bodyTop + 0.04, -len * 0.29, trim);   // dark tonneau cover over bed
+    addWheels(root, w + 0.13, len, wheelR, 0.40);
+    root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.68 };
     return root;
   }
 
   // --- a tall boxy 3-box SUV: high greenhouse, roof rails, beefy fenders. ---
   function makeSUV() {
     const root = new THREE.Group();
-    const paint = sharedMat("suv-paint", 0x2e3a4a); paint._bodyPaint = true;
-    const dark = sharedMat("suv-glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
-    const trim = sharedMat("suv-trim", 0x14171c);
-    const rail = sharedMat("suv-rail", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
-    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
-    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.7 });
-    const w = 2.16, len = 5.1, wheelR = 0.56, baseH = 0.92;
-    addBox(root, w, baseH, len, 0, wheelR + baseH * 0.5, 0, paint);
-    addBox(root, w + 0.06, 0.22, len * 0.96, 0, wheelR + 0.12, 0, trim);   // wide fender flares
-    // tall upright greenhouse cab set back over rear seats — its base sinks
-    // INTO the body (a coplanar base z-fights the hood as a moiré patch)
-    addPrism(root, w * 0.9, [[-1.7, 0], [-1.2, 1.02], [1.0, 1.02], [1.6, 0]], wheelR + baseH - 0.06, dark);
-    addBox(root, w * 0.78, 0.1, len * 0.5, 0, wheelR + baseH + 0.93, -0.1, paint);   // flat roof (overlaps the glass top)
-    addBox(root, 0.07, 0.08, len * 0.46, w * 0.36, wheelR + baseH + 0.99, -0.1, rail);  // roof rails seated ON the roof
-    addBox(root, 0.07, 0.08, len * 0.46, -w * 0.36, wheelR + baseH + 0.99, -0.1, rail);
-    addBox(root, w * 0.9, 0.16, 0.08, 0, wheelR + baseH * 0.55, len * 0.5 + 0.04, white);
-    addBox(root, w * 0.9, 0.18, 0.08, 0, wheelR + baseH * 0.6, -len * 0.5 - 0.04, red);
+    const paint = paintMat("suv", 0x2e3a4a);
+    const dark = glassMat();
+    const trim = roleMat("suv-trim", "plastic", 0x14171c);
+    const rail = roleMat("suv-rail", "metal", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
+    const red = lightTailMat();
+    const white = lightFrontMat();
+    // PROPORTION LAW: tall 3-box SUV. H~1.74, tall hull + upright greenhouse.
+    const w = 2.16, len = 5.1, H = 1.74;
+    const wheelR = +(0.16 * H).toFixed(3);            // ~0.28
+    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const baseH = +(0.60 * H).toFixed(3);             // ~1.04 tall hull
+    const bodyTop = bodyY + baseH;
+    addBox(root, w, baseH, len, 0, bodyY + baseH * 0.5, 0, paint);
+    addBox(root, w + 0.06, 0.22, len * 0.96, 0, bodyY + 0.12, 0, trim);   // wide fender flares
+    // upright BODY-COLORED greenhouse (paint), base sunk ~8% into the hull deck.
+    const peakY = +(0.42 * baseH).toFixed(3);         // ~0.44 slim band
+    const cabBaseY = bodyTop - peakY * 0.08;
+    const cabCx = -len * 0.02;                         // slightly rearward (long hood)
+    const cb = len * 0.52 * 0.5, ct = len * 0.52 * 0.38;   // upright => gentle rake
+    const suvCab = [[cabCx - cb, 0], [cabCx - ct, peakY], [cabCx + ct, peakY], [cabCx + cb, 0]];
+    addPrism(root, w * 0.9, suvCab, cabBaseY, paint);
+    // inset dark glass: windshield, backlight, side windows.
+    const rT = suvCab[1], fT = suvCab[2], rB = suvCab[0], fB = suvCab[3];
+    function suvGlass(zT, zB, sign) {
+      const dz = zT - zB, dy = peakY, fl = Math.hypot(dz, dy);
+      const nz = (dy / fl) * sign, ny = (-dz / fl) * sign;
+      const m = new THREE.Mesh(boxGeo(w * 0.72, fl * 0.72, 0.02), dark);
+      m.position.set(0, cabBaseY + peakY * 0.5 + ny * -0.04, (zT + zB) * 0.5 + nz * -0.04);
+      m.rotation.x = -Math.atan2(dz, dy);
+      m.material.polygonOffset = true; m.material.polygonOffsetFactor = -1;
+      root.add(m);
+    }
+    suvGlass(fT[0], fB[0], 1);
+    suvGlass(rT[0], rB[0], -1);
+    const sideMidZ = (suvCab[1][0] + suvCab[2][0]) * 0.5;
+    const sideLen = (suvCab[2][0] - suvCab[1][0]) * 0.92;
+    [1, -1].forEach(function (side) {
+      const sw = addBox(root, 0.02, peakY * 0.6, sideLen, side * (w * 0.9 * 0.5 - 0.04), cabBaseY + peakY * 0.55, sideMidZ, dark);
+      sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
+    });
+    // flat roof ON the greenhouse peak + roof rails.
+    const suvRoofY = cabBaseY + peakY + 0.05;
+    addBox(root, w * 0.84, 0.1, sideLen * 1.04, 0, suvRoofY, sideMidZ, paint);   // flat roof ON glass
+    addBox(root, 0.07, 0.08, sideLen, w * 0.36, suvRoofY + 0.09, sideMidZ, rail);  // roof rails
+    addBox(root, 0.07, 0.08, sideLen, -w * 0.36, suvRoofY + 0.09, sideMidZ, rail);
+    addBox(root, w * 0.9, 0.16, 0.08, 0, bodyY + baseH * 0.5, len * 0.5 + 0.04, white);
+    addBox(root, w * 0.9, 0.18, 0.08, 0, bodyY + baseH * 0.55, -len * 0.5 - 0.04, red);
     addBox(root, w * 0.7, 0.4, 0.12, 0, wheelR + 0.18, len * 0.5 + 0.06, trim);   // brush-guard bumper
     [1, -1].forEach(function (side) {
-      addBox(root, 0.035, 0.58, len * 0.43, side * (w * 0.455), wheelR + baseH + 0.43, -0.08, dark);
-      addBox(root, 0.18, 0.14, 0.28, side * (w * 0.54), wheelR + baseH + 0.42, len * 0.22, trim);
+      addBox(root, 0.18, 0.14, 0.28, side * (w * 0.54), bodyTop + peakY * 0.2, len * 0.22, trim);  // mirrors
     });
-    addSphere(root, 0.46, 0, wheelR + baseH * 0.58, -len * 0.52, trim, 1, 1, 0.34);   // rear spare
-    addWheels(root, w + 0.14, len, wheelR, 0.42);
-    root.userData.vehicleDims = { width: w, length: len, height: wheelR + baseH + 1.08, wheelbase: len * 0.66 };
+    addSphere(root, 0.46, 0, bodyY + baseH * 0.55, -len * 0.52, trim, 1, 1, 0.34);   // rear spare
+    addWheels(root, w + 0.14, len, wheelR, 0.40);
+    root.userData.vehicleDims = { width: w, length: len, height: suvRoofY + 0.05, wheelbase: len * 0.66 };
     return root;
   }
 
   // --- a tall long cargo van: flat slab sides (sliding-door crease), short hood. ---
   function makeVan() {
     const root = new THREE.Group();
-    const paint = sharedMat("van-paint", 0xe9ebee); paint._bodyPaint = true;
-    const dark = sharedMat("van-glass", 0x16242e, { emissive: 0x081015, ei: 0.35 });
-    const trim = sharedMat("van-trim", 0x202428);
-    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.7 });
-    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.7 });
-    const w = 2.18, len = 5.6, wheelR = 0.5, boxH = 1.5;
-    // big slab cargo box
-    addBox(root, w, boxH, len * 0.74, 0, wheelR + boxH * 0.5, -len * 0.1, paint);
+    const paint = paintMat("van", 0xe9ebee);
+    const dark = glassMat();
+    const trim = roleMat("van-trim", "plastic", 0x202428);
+    const red = lightTailMat();
+    const white = lightFrontMat();
+    // PROPORTION LAW: tall cab-forward box van. H~1.95, greenhouse merges into box.
+    const w = 2.18, len = 5.6, H = 1.95;
+    const wheelR = +(0.16 * H).toFixed(3);            // ~0.31
+    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const boxH = +(0.82 * H).toFixed(3);              // ~1.60 very tall cargo box
+    const boxTop = bodyY + boxH;
+    // big slab cargo box (the dominant tall mass)
+    addBox(root, w, boxH, len * 0.74, 0, bodyY + boxH * 0.5, -len * 0.1, paint);
     // sliding-door crease line + lower rocker trim down the slab
-    addBox(root, w + 0.02, 0.05, len * 0.7, 0, wheelR + boxH * 0.62, -len * 0.1, trim);
-    addBox(root, w + 0.02, 0.18, len * 0.72, 0, wheelR + 0.1, -len * 0.1, trim);
-    // sloped short hood up front
-    addPrism(root, w * 0.96, [[len * 0.18, 0], [len * 0.18, 0.62], [len * 0.5, 0.62], [len * 0.5, 0.2]], wheelR + 0.06, paint);
-    addPrism(root, w * 0.9, [[len * 0.16, 0], [len * 0.16, 0.5], [len * 0.46, 0.5]], wheelR + 0.62, dark);  // windshield
-    addBox(root, w * 0.86, 0.5, 0.04, 0, wheelR + boxH - 0.3, len * 0.5 - 0.02, dark);   // cab side glass front
-    addBox(root, w * 0.9, 0.18, 0.07, 0, wheelR + 0.32, len * 0.5 + 0.02, white);
-    addBox(root, w * 0.92, 0.22, 0.07, 0, wheelR + boxH - 0.1, -len * 0.47 - 0.04, red);   // tall rear-door lights ON the cargo-box rear face (box ends at -len*0.47; the old -len*0.42 buried them INSIDE the box — invisible, so the van showed no tail/brake lights)
+    addBox(root, w + 0.02, 0.05, len * 0.7, 0, bodyY + boxH * 0.6, -len * 0.1, trim);
+    addBox(root, w + 0.02, 0.18, len * 0.72, 0, bodyY + 0.1, -len * 0.1, trim);
+    // sloped short hood up front (rises toward the cab, merging into the box)
+    addPrism(root, w * 0.96, [[len * 0.18, 0], [len * 0.18, boxH * 0.9], [len * 0.5, boxH * 0.55], [len * 0.5, 0.2]], bodyY + 0.06, paint);
+    // raked windshield: INSET dark panel on the hood's front rake face.
+    addBox(root, w * 0.84, boxH * 0.34, 0.03, 0, bodyY + boxH * 0.62, len * 0.46, dark);  // windshield (recessed)
+    addBox(root, w * 0.86, boxH * 0.34, 0.03, 0, bodyY + boxH * 0.5, len * 0.355, dark);   // cab side/door glass front
+    addBox(root, w * 0.9, 0.18, 0.07, 0, bodyY + 0.32, len * 0.5 + 0.02, white);
+    addBox(root, w * 0.92, 0.22, 0.07, 0, bodyY + boxH - 0.16, -len * 0.47 - 0.04, red);   // tall rear-door lights ON the box rear face
     [1, -1].forEach(function (side) {
-      addBox(root, 0.035, 0.52, len * 0.16, side * (w * 0.505), wheelR + boxH * 0.68, len * 0.27, dark);
-      addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), wheelR + boxH * 0.51, -len * 0.1, trim);
-      addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), wheelR + boxH * 0.7, len * 0.35, trim);
+      addBox(root, 0.03, boxH * 0.28, len * 0.14, side * (w * 0.505), bodyY + boxH * 0.62, len * 0.32, dark);  // cab side window
+      addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), bodyY + boxH * 0.51, -len * 0.1, trim);
+      addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), bodyY + boxH * 0.66, len * 0.4, trim);  // mirrors
     });
-    addBox(root, 0.035, boxH * 0.74, 0.04, 0, wheelR + boxH * 0.5, -len * 0.47, trim);   // split rear doors
-    addWheels(root, w + 0.1, len, wheelR, 0.4);
-    root.userData.vehicleDims = { width: w, length: len, height: wheelR + boxH, wheelbase: len * 0.68 };
+    addBox(root, 0.035, boxH * 0.74, 0.04, 0, bodyY + boxH * 0.5, -len * 0.47, trim);   // split rear doors
+    addWheels(root, w + 0.1, len, wheelR, 0.38);
+    root.userData.vehicleDims = { width: w, length: len, height: boxTop, wheelbase: len * 0.68 };
     return root;
   }
 
   // --- superbike: two fat wheels, fuel tank, low clip-on bars, tail cowl, rider. ---
   function makeMotorcycle() {
     const root = new THREE.Group();
-    const paint = sharedMat("moto-paint", 0x16a0e0);
-    const black = sharedMat("moto-black", 0x101317);
-    const chrome = sharedMat("moto-chrome", 0xb9c0c8, { emissive: 0x1f242a, ei: 0.35 });
-    const seat = sharedMat("moto-seat", 0x18191c);
-    const rider = sharedMat("moto-rider", 0x20242c);
-    const red = sharedMat("rear-light", 0xff3344, { emissive: 0xff2233, ei: 0.8 });
-    const white = sharedMat("front-light", 0xeaf8ff, { emissive: 0xc8efff, ei: 0.8 });
+    const paint = roleMat("moto-paint", "paint", 0x16a0e0);
+    const black = roleMat("moto-black", "plastic", 0x101317);
+    const chrome = chromeMat();
+    const seat = roleMat("moto-seat", "interior", 0x18191c);
+    const rider = roleMat("moto-rider", "plastic", 0x20242c);
+    const red = lightTailMat();
+    const white = lightFrontMat();
     const wheelR = 0.42, wb = 0.78;   // wheelbase half-length
-    // two in-line wheels (front/back along z)
+    // two in-line wheels (front/back along z) — proper alloy rims via makeWheel.
     [[wb, 0.46], [-wb, 0.5]].forEach(function (p) {
-      const wheel = new THREE.Mesh(wheelGeo(wheelR, p[1]), black);
+      const wheel = makeWheel(wheelR, p[1]);
       wheel.rotation.z = Math.PI / 2;
       wheel.position.set(0, wheelR, p[0]);
-      wheel.castShadow = false;
-      wheel.userData.playerWheel = true;
       root.add(wheel);
-      const disc = new THREE.Mesh(wheelGeo(wheelR * 0.45, p[1] + 0.02), chrome);
-      wheel.add(disc);
     });
     // engine block + tank + tail, set low between the wheels
     addBox(root, 0.4, 0.42, 0.9, 0, wheelR + 0.18, -0.05, black);   // engine/gearbox mass
@@ -473,11 +844,11 @@
   // --- light helicopter: fuselage pod, tail boom, skids, animated main + tail rotor. ---
   function makeHelicopter() {
     const root = new THREE.Group();
-    const body = sharedMat("heli-body", 0x1b2b3c);
-    const glass = sharedMat("heli-glass", 0x132330, { emissive: 0x0a141d, ei: 0.4 });
-    const dark = sharedMat("heli-dark", 0x14171c);
-    const blade = sharedMat("heli-blade", 0x202428);
-    const tail = sharedMat("heli-tail", 0xd14a2a);
+    const body = roleMat("heli-body", "paint", 0x1b2b3c);
+    const glass = glassMat();
+    const dark = roleMat("heli-dark", "plastic", 0x14171c);
+    const blade = roleMat("heli-blade", "metal", 0x202428);
+    const tail = roleMat("heli-tail", "paint", 0xd14a2a);
     const groundY = 0.34;   // skid clearance above the ground plane
     // rounded cockpit pod
     addPrism(root, 1.5, [[-1.4, 0], [-1.1, 1.0], [0.9, 1.0], [1.7, 0.55], [1.55, 0]], groundY, body);
@@ -525,12 +896,12 @@
   // --- speedboat: V-hull, raked windshield, seats, outboard, animated prop wake. ---
   function makeBoat() {
     const root = new THREE.Group();
-    const hull = sharedMat("boat-hull", 0xeceff2);
-    const stripe = sharedMat("boat-stripe", 0x1574d6);
-    const deck = sharedMat("boat-deck", 0x6b4a2c);
-    const glass = sharedMat("boat-glass", 0x18303f, { emissive: 0x0a161f, ei: 0.4 });
-    const dark = sharedMat("boat-dark", 0x101317);
-    const chrome = sharedMat("boat-chrome", 0xb9c0c8, { emissive: 0x1f242a, ei: 0.35 });
+    const hull = roleMat("boat-hull", "paint", 0xeceff2);
+    const stripe = roleMat("boat-stripe", "paint", 0x1574d6);
+    const deck = roleMat("boat-deck", "plastic", 0x6b4a2c);
+    const glass = glassMat();
+    const dark = roleMat("boat-dark", "plastic", 0x101317);
+    const chrome = chromeMat();
     const w = 2.1, len = 6.2;
     const baseY = 0.25;
     // pointed planing V-hull (prism profile along z gives the bow rake)
@@ -644,7 +1015,29 @@
     bounds.getSize(size);
     const scale = 4.72 / Math.max(size.x, size.z);
     root.scale.setScalar(scale);
-    if (size.x > size.z) root.rotation.y = -Math.PI / 2;
+    // ORIENT the import so its NOSE points local +z — this engine's forward
+    // (procedural cars put the grille at +z, and vehicles.js drives toward +z at
+    // heading 0). Derive the nose straight from the wheel nodes (front = wheel_fl/
+    // fr, rear = wheel_rl/rr) so it's correct for ANY car GLB, not a guess: yaw the
+    // model so the front→rear axis lands on +z. The bundled ferrari.glb is modelled
+    // length-along-Z with its nose at -z (front wheels z≈-1.15, rears z≈+1.50,
+    // wheelbase 2.65), so this resolves to a 180° spin — the OLD `size.x>size.z ?
+    // -π/2` test never fired for this Z-long mesh, so the car drove tail-first.
+    let fx = 0, fz = 0, fn = 0, rx = 0, rz = 0, rn = 0;
+    const wp = new THREE.Vector3();
+    root.updateMatrixWorld(true);
+    root.traverse(function (o) {
+      const m = o.name && /^wheel_(fl|fr|rl|rr)$/.exec(o.name);
+      if (!m) return;
+      o.getWorldPosition(wp);
+      if (m[1].charAt(0) === "f") { fx += wp.x; fz += wp.z; fn++; } else { rx += wp.x; rz += wp.z; rn++; }
+    });
+    if (fn && rn) {
+      const nx = fx / fn - rx / rn, nz = fz / fn - rz / rn;   // nose vector (front − rear)
+      root.rotation.y = Math.atan2(-nx, nz);                  // yaw that lands the nose on +z
+    } else if (size.x > size.z) {
+      root.rotation.y = -Math.PI / 2;                         // fallback: a length-along-X import with no named wheels
+    }
     root.position.y = -bounds.min.y * scale;
     root.userData.vehicleDims = { width: Math.min(size.x, size.z) * scale, length: Math.max(size.x, size.z) * scale, height: size.y * scale, wheelbase: 2.65 };
     const body = root.getObjectByName("body");
@@ -822,11 +1215,20 @@
 
   CBZ.cityPlayerCarStyles = STYLE_ORDER.slice();
   CBZ.cityPlayerCarStyleLabels = Object.assign({}, STYLE_LABEL);
-  CBZ.cityBuildPlayerCarVisual = function (style, color) {
+  CBZ.cityBuildPlayerCarVisual = function (style, color, livery) {
     // The gallery uses the lightweight fallback so auditing all styles never
     // blocks on the optional high-poly GLB/network decoder. `color` (optional)
     // paints THIS instance's body without touching the shared style template.
-    return makeProcedural(style, color);
+    const v = makeProcedural(style, color);
+    // RACE LIVERY (optional, additive seam): when a livery descriptor is passed,
+    // paint a number + scheme onto THIS instance before it's returned/merged, so
+    // both the showroom/AI field and ambient race cars opt in here with no change
+    // to makeProcedural's body code. null/undefined livery = the byte-identical
+    // no-op path for the whole street fleet. (race_livery.js publishes the layer.)
+    if (livery && CBZ.cityApplyRaceLivery) {
+      try { CBZ.cityApplyRaceLivery(v, livery); } catch (e) { /* never break a build */ }
+    }
+    return v;
   };
   // public handling-feel lookup so the driving sim / other systems can branch on
   // vehicle class (e.g. air/marine/twoWheel flags) and apply the multipliers.

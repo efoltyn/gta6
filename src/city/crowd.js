@@ -70,10 +70,49 @@
   // (industrial). 19-22: PARTY brights (hot pink/violet/cyan/cream) — the
   // night-core going-out wardrobe, loud under the neon. Plain hex values
   // tinted per-instance — no new materials.
+  // APPEND-ONLY beyond index 22: KIND_SHIRTS / NIGHT_KIND_SHIRTS index SHIRTS by
+  // POSITION, so the day/night palettes 0..22 must NEVER be reordered. Indices
+  // 23+ are the BIOME bubble palette (crowd.js's near-player biome spread) —
+  // reusing regionlife's plain palette hexes so a biome walker reads like the
+  // land it stands on (military olive / farmland earth / forest green / desert
+  // tan / snow brights / airport travel / speedway fan). Per-instance tint on
+  // the SAME shared material → still ZERO new draw calls.
   const SHIRTS = [0x2c3e5c, 0x6e2b33, 0x33573b, 0xc9a23a, 0x444a52, 0x23262b, 0x8a939c, 0x3a5a7c, 0xe8e6e0, 0x356b9a,
                   0xe8e4da, 0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0,
                   0xe8821a, 0xc6d435, 0x4e453a, 0x5a5e52,
-                  0xff2e7a, 0xa44dff, 0x22d4c8, 0xf5e9da];
+                  0xff2e7a, 0xa44dff, 0x22d4c8, 0xf5e9da,
+                  // 23-25 military olive | 26-28 farmland earth | 29-31 forest
+                  0x44503a, 0x4e5740, 0x3a4030,
+                  0x6b5d3a, 0x7a5a3a, 0x8a6b4a,
+                  0x3a5a3a, 0x5a6b3a, 0x6b4a2a,
+                  // 32-34 desert tan | 35-38 snow brights | 39-41 airport travel
+                  0x8a7050, 0x6b5a40, 0x9a6a3a,
+                  0xd03030, 0x3060c0, 0xe0a020, 0xe0e0e0,
+                  0x3a4a6b, 0x8a4a4a, 0xb0b0b0,
+                  // 42-45 speedway fan brights
+                  0xd03030, 0x3060c0, 0x9030c0, 0xe0a020,
+                  // ---- STANDALONE MINI-CITY wardrobes (append-only, ≥46 — never
+                  // reorder; 0-22 are POSITION-indexed by KIND_SHIRTS) ----
+                  // 46-47 capeharbor: coastal sun-bleached blues/whites
+                  0x4f86b8, 0xe6ebf0,
+                  // 48-49 goldspire: downtown money — warm gold + charcoal
+                  0xd8b24a, 0x2e3138,
+                  // 50-51 neonreef: night-core hot neon (pink/cyan)
+                  0xff2e8a, 0x22d4d8,
+                  // 52-53 foundry: industrial steel + rust
+                  0x6a727c, 0x9a5a36];
+  // BIOME → [first, lastInclusive] index range into SHIRTS (24+ entries above).
+  const BIOME_TINT = {
+    military: [23, 25], farmland: [26, 28], forest: [29, 31],
+    desert:   [32, 34], snow:    [35, 38], airport: [39, 41],
+    speedway: [42, 45],
+    // STANDALONE MINI-CITIES — their own 2-index bright urban palettes (46-53).
+    // harvestmarket/pinecrest carry biome 'farmland'/'snow' so they reuse those
+    // ranges above (no entry needed here). The biome bubble RELOCATES existing
+    // instanced bodies into these towns and tints them to fit — zero new draw
+    // calls, zero new entities (same shared crowd material, per-instance tint).
+    capeharbor: [46, 47], goldspire: [48, 49], neonreef: [50, 51], foundry: [52, 53],
+  };
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
   // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads
   // moneyed (tourists in colour = walking wallets you can SEE), commercial
@@ -95,6 +134,34 @@
   // numbers drive the turnover relocations, so the field self-corrects.
   const NIGHT_KIND_W = { core: 3.4, commercial: 0.9, projects: 1.5, residential: 0.5, industrial: 0.12 };
   const NIGHT_DENSITY = 0.6;              // the street holds ~60% of the day crowd after dark
+
+  // ---- BIOME BUBBLE (flag-gated; relocate, never create) ----
+  // ROOT CAUSE: every position draw above pulls from A.lots (mainland district
+  // lots), so all 760 instanced bodies live on the mainland — islands/biomes had
+  // 0% land. FIX: when the player is on/near a NON-'city' region, relocate a
+  // share of the existing agents into a near-player bubble INSIDE that region
+  // (biome-tinted), reusing the SAME reseed/turnover machinery — zero new
+  // entities, zero new draw calls. Mainland behaviour stays byte-identical.
+  // Flag OFF → every biome gate below no-ops → exactly today's mainland-only crowd.
+  if (CBZ.crowdBiomeBubble === undefined) CBZ.crowdBiomeBubble = true;
+  const ACTIVE_RAD = 140;                 // stream the bubble only within this of a region edge
+  const BIOME_BUBBLE_SHARE = 0.55;        // share of relocation draws that aim INTO the active region
+  const BUBBLE_NEAR = 18, BUBBLE_FAR = 95; // bubble ring around the player (m) for biome relocations
+  // per-biome density MULTIPLIER on liveTarget (sparse desert, packed speedway).
+  // Folded into thin() so the on-street count tracks the biome — WITHOUT touching
+  // CAP or draw calls (surplus is just suppressed, exactly like a massacre).
+  // STANDALONE MINI-CITIES are CITIES → busy (high share), unlike the sparse
+  // wilderness biomes. capeharbor 0.7 / goldspire 0.9 / neonreef 1.0 (packed
+  // night-core) / foundry 0.6 (industrial, lighter foot traffic). harvestmarket/
+  // pinecrest ride the existing farmland/snow shares (sparse, by design).
+  const BIOME_DENSITY = { speedway: 1.0, airport: 0.85, military: 0.45, farmland: 0.4, forest: 0.35, desert: 0.3, snow: 0.3,
+                          capeharbor: 0.7, goldspire: 0.9, neonreef: 1.0, foundry: 0.6 };
+  // per-tick cache of the player's active region/biome (set in the onUpdate tick,
+  // NEVER per-agent). _activeBiome 'city' = mainland or a link → bubble disabled.
+  let _activeReg = null, _activeBiome = "city";
+  // bubble is live only when the flag is on, we have a real region, and its biome
+  // has a tint palette (links carry no biome → fall through to 'city'/mainland).
+  function bubbleOn() { return CBZ.crowdBiomeBubble && _activeReg && _activeBiome !== "city" && !!BIOME_TINT[_activeBiome]; }
   const TURNOVER_FRAC = 0.5;              // share of the crowd reconsidered at each dusk/dawn flip
   let nightShift = false;                 // local copy of peds.js's dusk/dawn flip (CBZ.cityNightShift)
   let turnover = 0, _turnScan = 0;        // relocation budget + rolling cursor (spent in thin())
@@ -345,10 +412,57 @@
     if (A.clampToCity) A.clampToCity(p, 0.6);
     out.x = p.x; out.z = p.z;
   }
+  // ---- BIOME BUBBLE POINT ----
+  // When the bubble is live, with prob BIOME_BUBBLE_SHARE draw a relocation point
+  // INSIDE the active region but within BUBBLE_FAR of the player (a near-player
+  // bubble), so the biome fills with bodies; otherwise fall through to the
+  // mainland draw. Always region-aware clamped (A.clampToCity consults regions).
+  function regionPoint(out) {
+    const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
+    const P = CBZ.player; const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
+    if (bubbleOn() && Math.random() < BIOME_BUBBLE_SHARE) {
+      const reg = _activeReg, far2 = BUBBLE_FAR * BUBBLE_FAR;
+      // a few region scatter tries, keep the first that lands inside the bubble
+      for (let t = 0; t < 6; t++) {
+        const pts = CBZ.cityScatterInRegion(reg, 1, Math.random, 4);
+        if (!pts || !pts.length) break;
+        const dx = pts[0].x - ppx, dz = pts[0].z - ppz;
+        if (dx * dx + dz * dz <= far2) {
+          out.x = pts[0].x; out.z = pts[0].z;
+          if (A.clampToCity) A.clampToCity(out, 0.6);
+          return;
+        }
+      }
+      // fallback: a ring point around the player, clamped onto the region so it
+      // can never land in the sea even when the bubble overhangs the edge.
+      const a = Math.random() * Math.PI * 2, d = BUBBLE_NEAR + Math.random() * (BUBBLE_FAR - BUBBLE_NEAR);
+      let rx = ppx + Math.cos(a) * d, rz = ppz + Math.sin(a) * d;
+      if (CBZ.cityRegionClamp) { const c = CBZ.cityRegionClamp(reg, rx, rz, 0.6); rx = c.x; rz = c.z; }
+      out.x = rx; out.z = rz;
+      if (A.clampToCity) A.clampToCity(out, 0.6);
+      return;
+    }
+    drawPoint(out);
+  }
+  // dispatcher for RELOCATION draws only: biome bubble when active, else mainland.
+  function fieldPoint(out) { if (bubbleOn()) regionPoint(out); else drawPoint(out); }
   // pickWaypoint(out)         → hour-weighted city-wide point (spawn/reseed)
   // pickWaypoint(out, ax, az) → stroll target biased into (ax,az)'s district
   function pickWaypoint(out, ax, az) {
     const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
+    // BIOME STROLL: a body standing INSIDE the active region picks its next stroll
+    // goal WITHIN the same region (cityScatterInRegion), not from mainland district
+    // lots — otherwise clampToCity would drag every biome goal to the nearest
+    // mainland sidewalk and the whole bubble would "walk to the sea". Gated so
+    // mainland bodies are untouched (bubbleOn false → skipped entirely).
+    if (ax !== undefined && bubbleOn() && CBZ.cityRegionHit && CBZ.cityRegionHit(_activeReg, ax, az, 0)) {
+      const pts = CBZ.cityScatterInRegion(_activeReg, 1, Math.random, 4);
+      if (pts && pts.length) {
+        out.x = pts[0].x; out.z = pts[0].z;
+        if (A.clampToCity) A.clampToCity(out, 0.6);
+        return;
+      }
+    }
     if (ax !== undefined && A.districtAt && A.lots && Math.random() < STAY) {
       const home = A.districtAt(ax, az);
       // AFTER DARK a dead quarter doesn't hold its walkers: a stroller in a
@@ -369,6 +483,16 @@
   // a NEW district (it walks in as a local, not a teleported stranger).
   function castTint(i, x, z) {
     const A = arena();
+    // BIOME WARDROBE: a body that lands in a non-'city' region dresses for the
+    // land (olive on the base, earth on the farm, tan in the desert). Gated on
+    // the flag; mainland bodies fall straight through to the district palette so
+    // flag-off / mainland casting is byte-identical to today. Append-only SHIRTS
+    // indices (23+) keep this one material / zero new draw calls.
+    if (CBZ.crowdBiomeBubble && A) {
+      const reg = CBZ.cityAnyRegion ? CBZ.cityAnyRegion(A, x, z, 0) : null;
+      const bt = reg && reg.biome && reg.biome !== "city" ? BIOME_TINT[reg.biome] : null;
+      if (bt) { shirt[i] = bt[0] + ((Math.random() * (bt[1] - bt[0] + 1)) | 0); return; }
+    }
     const d = A && A.districtAt ? A.districtAt(x, z) : null;
     // night in the core dresses for the line — party brights under the neon
     const pool = d && ((nightShift && NIGHT_KIND_SHIRTS[d.kind]) || KIND_SHIRTS[d.kind]);
@@ -511,19 +635,40 @@
         // in the middle of a block — so it MUST still collide every frame it moves
         // (every rendered, no far-cull). Clamp the per-frame step to one push's worth
         // (<FEEL_SAFE_STEP 0.35m — matters at low FPS / big dt so a giant off-tick
-        // step can't tunnel the wall before the single push registers), advance, then
-        // a CHEAP single-pass collide (off-ticks move a tiny step → one push is enough,
-        // no 2-pass loop). collide() is grid-accelerated → ~O(local walls), so this is
-        // one bucket lookup + a few box tests per body: well within the 760-body budget.
+        // step can't tunnel the wall before the push registers), advance, then a CHEAP
+        // 2-pass collideSlide (corners need a second push — see below). collide() is
+        // grid-accelerated → ~O(local walls), and the slide early-outs after one pass
+        // in open street, so this is ~one bucket lookup + a few box tests per body:
+        // well within the 760-body budget.
         let oStep = spd[i] * dt; if (oStep > 0.34) oStep = 0.34;
         px[i] += dirX[i] * oStep; pz[i] += dirZ[i] * oStep;
         phase[i] += spd[i] * 2.4 * dt;
-        if (CBZ.collide) {
+        if (CBZ.collideSlide) {
+          // 2-PASS depenetration on the dead-reckoned off-tick step too (was a
+          // single push). SEAL THE WALL-PHASING HOLE: a body skipping up to 15
+          // frames between brains can dead-reckon straight at a CORNER, where one
+          // push shoves it out of one wall and INTO the abutting one — a single
+          // collide() leaves it embedded for the rest of the off-tick streak,
+          // visibly inside the building. The second pass resolves that corner, so
+          // even an off-tick body can't squeeze a thin wall. collideSlide early-
+          // outs the instant a pass moves <2mm (the common open-street case = one
+          // grid lookup), so 2 passes cost ~the same as the old single collide for
+          // the bodies that weren't touching anything — perf-neutral on the budget.
+          // Its returned boolean IS "was pushed" → drive the repick off it directly.
+          _col.x = px[i]; _col.z = pz[i];
+          if (CBZ.collideSlide(_col, 0.5, 0, 1.7, 2)) {
+            px[i] = _col.x; pz[i] = _col.z;          // shoved out of a wall on the dead-reckoned line
+            // repick so it doesn't grind back in (mirrors the think-tick block below)
+            pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
+            heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+            dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          } else { px[i] = _col.x; pz[i] = _col.z; }   // converged in open street; keep the (unchanged) resolved pos
+        } else if (CBZ.collide) {
+          // fallback if the slide helper isn't loaded (partial load order): single push
           _col.x = px[i]; _col.z = pz[i];
           CBZ.collide(_col, 0.5, 0, 1.7);
           if (_col.x !== px[i] || _col.z !== pz[i]) {
-            px[i] = _col.x; pz[i] = _col.z;          // shoved out of a wall on the dead-reckoned line
-            // repick so it doesn't grind back in (mirrors the think-tick block below)
+            px[i] = _col.x; pz[i] = _col.z;
             pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
             heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
             dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
@@ -657,7 +802,8 @@
       // far bodies move sub-pixel per frame — rewrite their 11 matrices every
       // 4th frame (round-robin) and let the stale pose coast in between.
       const rdx = px[i] - ppx, rdz = pz[i] - ppz;
-      if (rdx * rdx + rdz * rdz > FARDRAW2 && ((frame + i) & 3) !== 0) continue;
+      const isFar = rdx * rdx + rdz * rdz > FARDRAW2;
+      if (isFar && ((frame + i) & 3) !== 0) continue;
       // FEET ON THE GROUND: the city is flat (groundHeightAt→0) so this is 0
       // today, but route through floorAt like the corpse path so a body never
       // sinks/floats if it walks onto raised terrain (beach/boardwalk/etc).
@@ -671,8 +817,16 @@
       } else rootD.rotation.set(0, heading[i], 0);
       rootD.scale.set(1, 1, 1);
       rootD.updateMatrix();
-      const sn = stagT[i] > 0 ? Math.sin(phase[i]) * 0.25 : Math.sin(phase[i]);
-      drawParts(i, sn * 0.5, Math.abs(Math.cos(phase[i])) * 0.05);
+      // STOP THE FAR-TIER LEG STROBE: a far body's matrices are only rewritten
+      // every 4th frame, but phase[i] keeps advancing every frame — so on each
+      // write Math.sin(phase[i]) has jumped ~4 frames of swing, snapping the legs
+      // to a new angle 4× a second (the filmed far-crowd leg strobe / stutter).
+      // The legs are sub-pixel out there anyway, so draw the far tier in a STILL
+      // pose (sw 0, bob 0 — exactly like the corpse path) and let only the body's
+      // SLIDE (position) read as motion. The 0.94-quarter shadow stays a plain
+      // disc. Near bodies (full per-frame rewrites) keep the normal walk cycle.
+      const sn = isFar ? 0 : (stagT[i] > 0 ? Math.sin(phase[i]) * 0.25 : Math.sin(phase[i]));
+      drawParts(i, isFar ? 0 : sn * 0.5, isFar ? 0 : Math.abs(Math.cos(phase[i])) * 0.05);
       if (shadowQ) {
         shadD.position.set(px[i], fy + 0.04, pz[i]);  // a hair above the surface (+ polygonOffset)
         shadD.rotation.set(-Math.PI / 2, 0, 0);
@@ -797,9 +951,19 @@
     e.idx = i; promotedBy[i] = s;
     ped._parked = false; ped.dead = false; ped.deadT = 0; ped.ko = 0; ped.culled = false; ped.collected = false; ped.needsPickup = false;
     ped.pos.set(px[i], 0, pz[i]); ped.char.group.rotation.y = heading[i];
-    ped.target.set(px[i], 0, pz[i]);
+    // PROMOTION MOTION CONTINUITY: the instanced body you were watching was
+    // WALKING along its cached heading; the real ped must pick that walk straight
+    // up. The old hand-off parked it (target == its own pos) AND added a 0.2-0.8s
+    // pause → the body you approached FROZE solid the instant it became "real" (the
+    // filmed freeze-on-approach). Instead, aim the fresh target a few metres ahead
+    // down the SAME heading the instanced agent was carrying (dirX/dirZ are its
+    // live dead-reckoning unit vector) and zero the pause — so it keeps striding
+    // through the swap with no visible hitch. (The ped's own brain repicks a proper
+    // waypoint within a stride; this just bridges the one-frame identity hand-off.)
+    const AHEAD = 4;
+    ped.target.set(px[i] + dirX[i] * AHEAD, 0, pz[i] + dirZ[i] * AHEAD);
     ped.group.visible = true;
-    ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0.2 + Math.random() * 0.6;
+    ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0;
     const shirtHex = SHIRTS[shirt[i]];
     // CLEAN SLATE FIRST: drop the prior occupant's role/outfit and adopt the
     // instanced body's exact shirt, so what walks up matches what you saw.
@@ -956,7 +1120,7 @@
         // coverage, never a spotlight that follows your gaze.
         if (d2 < NEAR_R2 * 1.6) continue;         // only recycle distant agents
         for (let t = 0; t < 4; t++) {
-          drawPoint(_tmp);
+          fieldPoint(_tmp);                        // biome bubble pulls fill INTO the active region
           const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd = Math.hypot(rx, rz) || 1;
           if (rd < FILL_NEAR || rd > FILL_FAR) continue;   // land in the around-player ring
           px[i] = _tmp.x; pz[i] = _tmp.z;
@@ -1209,7 +1373,15 @@
   const SEP_R = 0.62;                 // personal-space radius (≈1.24m apart — box bodies are ~0.82 wide)
   const SEP_R2 = SEP_R * SEP_R, SEP_MIN = SEP_R * 2;
   const SEP_PUSH = 0.5;               // share of the overlap closed per resolve (the other body closes the rest)
-  const SEP_MAXSTEP = 0.18;           // hard cap on one frame's nudge (m) — no teleport-pops
+  // GENTLER, FRAMERATE-INDEPENDENT separation nudge. WHY: the old 0.18m was a flat
+  // PER-FRAME cap — at 120fps a body resolves twice as often as at 60fps, so the
+  // same crush shoved it twice as far per second (a high-FPS-only personal-space
+  // JITTER, the filmed twitch when bodies bunch). Cap the nudge as a SPEED instead
+  // (m/s × dt) so it closes the same ground per second at any framerate, and halve
+  // it: 0.55m/s × dt → ~0.09m at a 60fps slice — reads as a calm step-aside, never
+  // a pop. (Scaled by dt below; the post-clamp collide still keeps it off walls.)
+  const SEP_MAXVEL = 0.55;            // max separation drift (m/s); per-frame cap = SEP_MAXVEL*dt
+  const SEP_MAXSTEP_CEIL = 0.10;      // absolute ceiling (m) so one huge-dt hitch can't still pop
   const SEP_SLICES = 3;               // resolve 1/SEP_SLICES of the crowd each frame (round-robin)
   let _sepSlice = 0;                  // rolling slice cursor
   // separable = a normally-strolling body: skip the dead/corpse/suppressed,
@@ -1254,7 +1426,10 @@
       // step-aside, never a pop. (The other body resolves its own half next slice.)
       let mvx = nxAcc * SEP_PUSH * 0.5, mvz = nzAcc * SEP_PUSH * 0.5;
       const ml = Math.hypot(mvx, mvz);
-      if (ml > SEP_MAXSTEP) { const s = SEP_MAXSTEP / ml; mvx *= s; mvz *= s; }
+      // dt-scaled drift cap (framerate-independent), with an absolute ceiling so a
+      // single giant-dt hitch can't teleport-pop the body across the pavement.
+      let cap = SEP_MAXVEL * dt; if (cap > SEP_MAXSTEP_CEIL) cap = SEP_MAXSTEP_CEIL;
+      if (ml > cap) { const s = cap / ml; mvx *= s; mvz *= s; }
       let nx = ax + mvx, nz = az + mvz;
       // keep the nudge on the pavement — never let separation shove a body into a
       // wall/building or out into the road. Same collider the stroll already obeys.
@@ -1362,7 +1537,12 @@
     // the night street holds fewer people OVERALL (~60% of day) on top of the
     // finite-headcount fraction; dawn lifts the target back and the existing
     // un-suppress path walks everyone back in.
-    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)) * (nightShift ? NIGHT_DENSITY : 1));
+    // BIOME DENSITY: when the bubble is live, scale the on-street target by the
+    // biome's multiplier (sparse desert, packed speedway) — surplus is suppressed
+    // exactly like a massacre, so it's a MULTIPLIER on liveTarget, not a cap or
+    // draw-call change. Flag-off / mainland → biomeMul stays 1 → byte-identical.
+    const biomeMul = bubbleOn() && BIOME_DENSITY[_activeBiome] != null ? BIOME_DENSITY[_activeBiome] : 1;
+    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)) * (nightShift ? NIGHT_DENSITY : 1) * biomeMul);
     const c = recountAgents();
     const P = CBZ.player;
     const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
@@ -1388,7 +1568,7 @@
         if (!suppressed[i] || deadAgent[i]) continue;
         suppressed[i] = 0;
         if (A && A.randomSidewalkPoint) {        // fresh pop-weighted spot, dressed for it
-          pickWaypoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
+          fieldPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;   // biome bubble seats un-suppressed bodies in-region
           castTint(i, px[i], pz[i]); repaintShirt(i);
           pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
           heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
@@ -1410,8 +1590,8 @@
         if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) { turnover--; continue; }
         const dx = px[i] - ppx, dz = pz[i] - ppz;
         if (dx * dx + dz * dz < FAR2) { turnover--; continue; }   // in sight → it keeps walking; the draw fields still converge
-        drawPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
-        castTint(i, px[i], pz[i]); repaintShirt(i);               // walks on dressed for the hour
+        fieldPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;         // biome bubble routes turnover INTO the active region
+        castTint(i, px[i], pz[i]); repaintShirt(i);               // walks on dressed for the hour/biome
         pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
         heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
         dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
@@ -1425,6 +1605,20 @@
     if (CBZ.game.mode !== "city") { if (root) { root.visible = false; } if (poolBuilt) releaseAll(); return; }
     if (root) root.visible = true;
     if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 700);
+    // BIOME BUBBLE: cache the player's active region/biome ONCE per tick (never
+    // per-agent). On/near a non-'city' region → the relocation paths (fieldPoint),
+    // the stroll gate and the density multiplier all aim the crowd into that biome.
+    // Flag off (or no region) → _activeBiome stays 'city' → every gate no-ops.
+    _activeReg = null; _activeBiome = "city";
+    if (CBZ.crowdBiomeBubble) {
+      const A = arena(), P = CBZ.player;
+      if (A && P && P.pos) {
+        const ppx = P.pos.x, ppz = P.pos.z;
+        const reg = (CBZ.cityAnyRegion && CBZ.cityAnyRegion(A, ppx, ppz, 0)) ||
+                    (CBZ.cityNearestRegion && CBZ.cityNearestRegion(A, ppx, ppz, ACTIVE_RAD));
+        if (reg) { _activeReg = reg; _activeBiome = reg.biome || "city"; }  // links carry no biome → 'city'
+      }
+    }
     // amortized pool pre-warm (a couple of rigs/frame at load) — runs FIRST so the
     // promotion pool is finished and parked before updatePromotion() reaches for it.
     // No-op once the pool is full or when PREWARM_POOL is off (prewarming stays false).

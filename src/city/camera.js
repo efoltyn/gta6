@@ -31,16 +31,16 @@
      reads CBZ.CITY_TP when mode==="city" and you're on foot). One block so the
      owner tunes the whole on-foot feel in one place. */
   CBZ.CITY_TP = {
-    HEIGHT: 1.42,      // rig pivot above feet — shoulder height, not overhead (was 1.82): camera rides level with the character, the street reads at eye level
-    DIST: 4.3,         // behind-the-back distance (was 7.6) — close enough to feel attached, far enough to read the body; scroll wheel still scales around this
-    SIDE: 0.7,         // camera lateral offset to the player's RIGHT — character sits left-of-center, you see past their right shoulder down the street
+    HEIGHT: 1.6,       // rig pivot above feet — over-shoulder height (lifts the eye): camera rides above the character so the street reads ahead, not buried
+    DIST: 5.2,         // behind-the-back distance — far enough to shrink the character so it no longer occludes the frame; scroll wheel still scales around this
+    SIDE: 1.0,         // camera lateral offset to the player's RIGHT — character sits hard left-of-center, world/crosshair stay clear
     PITCH: 0.06,       // default orbit pitch on city entry — near-level (was 0.46 looking down): horizon sits high in frame, more world, less pavement
-    LOOK_Y: 1.45,      // look-target height above feet — chest/shoulder aim point; with the near-level pitch this gives a subtle down-gaze, not a top-down stare
+    LOOK_Y: 1.62,      // look-target height above feet — shoulder aim point; with the near-level pitch this gives a subtle down-gaze, not a top-down stare
     LEAD: 4.6,         // forward look-ahead (was 3.6) — a touch more breathing room down-street
     DAMP_POS: 0.16,    // position SmoothDamp time (was 0.085) — the lazy settle; bigger = floatier follow
     DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly instead of rigid-locking; bigger = stiffer
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
-    FOV: 57,           // base FOV (was 61) — narrower lens = more cinematic compression; speed kick still widens it
+    FOV: 59,           // base FOV — less claustrophobic; speed kick still widens it
     // ---- ARMED / ADS over-shoulder tier (read EVERY frame by systems/camera.js
     //      via the `shoulder` boolean). These three are GETTERS so holding RMB
     //      (CBZ.isADS) punches the cam IN + narrows the lens for a precise ADS
@@ -63,14 +63,14 @@
     // real lens zoom (FOV 42), the character hard-left + big, the gun raised. The
     // BASE was pulled out slightly (2.9→3.3) and the orbit pitch lowered so the
     // default frame is a clean behind-the-shoulder shot, NOT a top-down look-down.
-    DIST_AIM_BASE: 3.3, DIST_AIM_ADS: 1.45,   // armed distance → resting over-shoulder, punched in TIGHT on RMB
-    SIDE_AIM_BASE: 0.9, SIDE_AIM_ADS: 1.25,   // over-shoulder offset → FURTHER over the shoulder on RMB (char hard-left)
-    FOV_AIM_BASE: 58,   FOV_AIM_ADS: 42,      // armed FOV → narrower (real zoom) on RMB
+    DIST_AIM_BASE: 4.8, DIST_AIM_ADS: 1.45,   // armed distance → resting over-shoulder (pushed back: char lower-third, world open), punched in TIGHT on RMB
+    SIDE_AIM_BASE: 1.3, SIDE_AIM_ADS: 1.4,    // over-shoulder offset → FURTHER over the shoulder on RMB (char hard-left, frame-center clear)
+    FOV_AIM_BASE: 68,   FOV_AIM_ADS: 48,      // armed FOV → wider lens shrinks the char + shows world/headroom; narrows (real zoom) on RMB
     // HEIGHT_AIM: rig-pivot height while armed — the camera rides at chest/shoulder
     // height so the framing is a behind-the-shoulder shot, never an overhead stare.
     // ADS drops a hair so the raised gun + crosshair sit centred. Read by
     // systems/camera.js (shoulder branch) in place of the old HEIGHT+0.1 fudge.
-    HEIGHT_AIM_BASE: 1.50, HEIGHT_AIM_ADS: 1.46,
+    HEIGHT_AIM_BASE: 1.72, HEIGHT_AIM_ADS: 1.46,
     // PITCH_LOOK: how strongly the armed 3PS LOOK target follows the player's
     // pitch (systems/camera.js drops/raises the look point by this * camDist).
     // WHY (FIX 1 root cause): the old TP look target was pitch-BLIND (fixed

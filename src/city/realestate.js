@@ -153,7 +153,7 @@
     if (isPent && g.cityOwnsHangar) {
       actions.push({ label: "🛩 Hangar — your F-22 is on the deck", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar — walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
     } else if (isPent) {
-      actions.push({ label: "🛩 Buy the HANGAR — " + money(hangarPrice()) + " (unlocks a fighter jet)", fn: buyHangar });
+      actions.push({ label: "🛩 Buy the rooftop Hangar — " + money(hangarPrice()) + " (a home for a stolen F-22)", fn: buyHangar });
     }
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>🏡 " + home.name + "</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + " · [Esc] leave</div>";
@@ -275,7 +275,7 @@
     if (total < cost) { CBZ.city.note("Need " + money(cost) + " (cash+bank) for the hangar.", 2.4); return; }
     let owe = cost; const fromCash = Math.min(g.cash || 0, owe); g.cash -= fromCash; owe -= fromCash; if (owe > 0) g.cityBank = (g.cityBank || 0) - owe;
     g.cityOwnsHangar = true;
-    CBZ.city.big("🛩 HANGAR ACQUIRED — base a fighter jet on the deck.");
+    CBZ.city.big("🛩 HANGAR ACQUIRED — now STEAL an F-22 and land it here to keep it.");
     CBZ.city.addRespect(40);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

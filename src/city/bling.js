@@ -92,6 +92,9 @@
     else if (kind === "face") gm = CBZ.boxGeom(0.10, 0.07, 0.03);     // watch face plate on the band
     else if (kind === "ring") gm = CBZ.boxGeom(0.05, 0.04, 0.05);     // a glint dot, not a knuckle-duster
     else if (kind === "grill") gm = CBZ.boxGeom(0.16, 0.05, 0.04);    // an iced bar across the mouth (a grill)
+    else if (kind === "lens") gm = CBZ.boxGeom(0.20, 0.17, 0.05);     // one shade lens (two of these cover the eyes)
+    else if (kind === "bridge") gm = CBZ.boxGeom(0.09, 0.055, 0.05);  // nose bridge joining the lenses
+    else if (kind === "temple") gm = CBZ.boxGeom(0.035, 0.045, 0.30); // arm running back over the ear
     else gm = CBZ.boxGeom(0.68, 0.16, 0.68);                          // rag: headband enclosing the 0.64 hair
     geos[kind] = gm;
     return gm;
@@ -107,6 +110,9 @@
       ice: CBZ.cmat(0xeaf6ff, { emissive: 0x9fd8ff, ei: 0.65 }),
       glint: CBZ.cmat(0xffffff, { emissive: 0xcfeaff, ei: 0.95 }),
       blueDial: CBZ.cmat(0x1b3a6b, { emissive: 0x0a1830, ei: 0.3 }),   // a diver's blue dial
+      lensDark: CBZ.cmat(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),  // basic sunglasses lens: near-black, faint cool sheen
+      lensMirror: CBZ.cmat(0x0e1422, { emissive: 0x37588a, ei: 0.50 }),// designer lens: darker, brighter mirrored cool tint
+      frameDark: CBZ.cmat(0x111317, { emissive: 0x000000, ei: 0.0 }),  // black plastic frame
     };
     return _mats;
   }
@@ -176,6 +182,24 @@
       ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.80, z: 0.17 }],
       // grill — a small iced bar across the lower face (the mouth)
       grill: [{ kind: "grill", mat: M.glint, x: 0, y: 0.28, z: 0.265 }],
+      // shades — two lenses + bridge + temples sitting on the eyes (neck-local,
+      // so they turn with the head). Status you wear on your FACE: the same
+      // "I've got money" read as the chain, just up at eye level.
+      shades: [
+        { kind: "lens", mat: M.lensDark, x: -0.145, y: 0.345, z: 0.34 },
+        { kind: "lens", mat: M.lensDark, x: 0.145, y: 0.345, z: 0.34 },
+        { kind: "bridge", mat: M.frameDark, x: 0.0, y: 0.345, z: 0.34 },
+        { kind: "temple", mat: M.frameDark, x: -0.27, y: 0.345, z: 0.17 },
+        { kind: "temple", mat: M.frameDark, x: 0.27, y: 0.345, z: 0.17 },
+      ],
+      // designer shades — same frame, mirrored lens + gold hardware (the pricier read)
+      shadesDesigner: [
+        { kind: "lens", mat: M.lensMirror, x: -0.145, y: 0.345, z: 0.34 },
+        { kind: "lens", mat: M.lensMirror, x: 0.145, y: 0.345, z: 0.34 },
+        { kind: "bridge", mat: M.gold, x: 0.0, y: 0.345, z: 0.34 },
+        { kind: "temple", mat: M.gold, x: -0.27, y: 0.345, z: 0.17 },
+        { kind: "temple", mat: M.gold, x: 0.27, y: 0.345, z: 0.17 },
+      ],
     };
     return _looks;
   }
@@ -193,8 +217,8 @@
   }
 
   // ---- which rig anchor each slot hangs from ----
-  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", head: "neck", mouth: "neck" };
-  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head", "mouth"];
+  const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", head: "neck", mouth: "neck", eyes: "neck" };
+  const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "head", "mouth", "eyes"];
 
   // shared finish classifiers — the SAME name reads the same on a ped and on you.
   function chainLookOf(s) {
@@ -210,9 +234,14 @@
     if (s.indexOf("steel") >= 0 || s.indexOf("omega") >= 0) return L.watchSilver;
     return L.watchGold;
   }
+  function eyewearLookOf(s) {
+    const L = looks();
+    if (s.indexOf("designer") >= 0) return L.shadesDesigner;   // gold-framed mirror — the pricier flex
+    return L.shades;
+  }
 
   // ---- mesh pools per part kind (reuse: dressing is pointer-swaps, not allocs) ----
-  const pools = { link: [], linkThin: [], linkThick: [], pendant: [], cuff: [], face: [], ring: [], rag: [] };
+  const pools = { link: [], linkThin: [], linkThick: [], pendant: [], cuff: [], face: [], ring: [], grill: [], lens: [], bridge: [], temple: [], rag: [] };
   function acquire(kind) {
     const pool = pools[kind];
     let mesh = pool && pool.pop();
@@ -254,7 +283,7 @@
   }
   function computeWant(ped) {
     const L = looks();
-    let neck = null, wristL = null, wristR = null, ring = null, head = null, any = false;
+    let neck = null, wristL = null, wristR = null, ring = null, head = null, eyes = null, any = false;
     const vals = ped.valuables;
     if (!lootedOut(ped) && vals && vals.length) {
       for (let i = 0; i < vals.length; i++) {
@@ -270,12 +299,15 @@
           ring = L.ring; any = true;
         } else if (!wristR && s.indexOf("bracelet") >= 0) {
           wristR = L.bracelet; any = true;
+        } else if (!eyes && (s.indexOf("shades") >= 0 || s.indexOf("sunglass") >= 0)) {
+          // shades read as money on the FACE — same spot-the-mark cue as the chain.
+          eyes = eyewearLookOf(s); any = true;
         }
       }
     }
     if (ped.gang) { head = ragLook(ped.gang); any = true; }
     if (!any) return null;
-    return { neck, wristL, wristR, ring, head };
+    return { neck, wristL, wristR, ring, head, eyes };
   }
 
   // ---- dress / undress (pooled). ped._bling = { meshes, nVal, looted, gang } ----
@@ -366,7 +398,8 @@
       if (!it || (it.tag !== "wearable" && it.tag !== "valuable" && it.tag !== "jewelry")) continue;
       const s = name.toLowerCase();
       let slot = null;
-      if (s.indexOf("grill") >= 0) slot = "mouth";
+      if (s.indexOf("grill") >= 0) slot = "mouth";   // FIRST: "Diamond Grill"'s econ slot is "glasses" — keep it off the eyes
+      else if (s.indexOf("shades") >= 0 || s.indexOf("sunglass") >= 0) slot = "eyes";
       else if (s.indexOf("chain") >= 0 || s.indexOf("necklace") >= 0) slot = "neck";
       else if (s.indexOf("rolex") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("piguet") >= 0 ||
                s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("watch") >= 0) slot = "wristL";
@@ -400,7 +433,7 @@
     const tab = flexTable();
     if (!tab) return null;
     const econ = CBZ.cityEcon, L = looks();
-    const best = { neck: null, wristL: null, wristR: null, ring: null, mouth: null };
+    const best = { neck: null, wristL: null, wristR: null, ring: null, mouth: null, eyes: null };
     for (let i = 0; i < tab.length; i++) {
       const e = tab[i];
       if (econ.count(e.name) <= 0) continue;
@@ -419,11 +452,13 @@
       ring: best.ring ? L.ring : null,
       head: rag ? rag.parts : null,
       mouth: best.mouth ? L.grill : null,
+      eyes: best.eyes ? eyewearLookOf(best.eyes.name.toLowerCase()) : null,
     };
-    const any = want.neck || want.wristL || want.wristR || want.ring || want.head || want.mouth;
+    const any = want.neck || want.wristL || want.wristR || want.ring || want.head || want.mouth || want.eyes;
     const sig = (best.neck ? best.neck.name : "") + "|" + (best.wristL ? best.wristL.name : "") + "|" +
                 (best.wristR ? best.wristR.name : "") + "|" + (best.ring ? best.ring.name : "") + "|" +
-                (best.mouth ? best.mouth.name : "") + "|" + (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
+                (best.mouth ? best.mouth.name : "") + "|" + (best.eyes ? best.eyes.name : "") + "|" +
+                (rag ? rag.key : "") + "|" + (vip ? 1 : 0);
     return { want: any ? want : null, sig };
   }
 

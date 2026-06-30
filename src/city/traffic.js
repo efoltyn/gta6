@@ -104,7 +104,10 @@
     if (!P.driving || !P._vehicle) { prevInside = false; return; }
     const v = P._vehicle;
     const it = A.nearestIntersection(P.pos.x, P.pos.z);
-    const inside = Math.abs(P.pos.x - it.x) < A.ROAD / 2 + 1.5 && Math.abs(P.pos.z - it.z) < A.ROAD / 2 + 1.5;
+    // highways / arterials (the new mini-city + island network) have no city-grid
+    // intersection, so this can be null while you drive a causeway — you're never
+    // "inside" one out there (avoids a null deref + a phantom red-light ticket).
+    const inside = it != null && Math.abs(P.pos.x - it.x) < A.ROAD / 2 + 1.5 && Math.abs(P.pos.z - it.z) < A.ROAD / 2 + 1.5;
     // count it once, on entry, while moving with a red against your heading
     if (inside && !prevInside && Math.hypot(v.vx || 0, v.vz || 0) > 6) {
       const vertical = Math.abs(v.vz || 0) > Math.abs(v.vx || 0);
@@ -132,6 +135,11 @@
   if (!THREE) return;
 
   const TR = () => (CBZ.CITY && CBZ.CITY.traf) || {};
+  // multi-lane geometry: lane index → signed lateral offset from the centreline.
+  // dir is ±1, idx in [0..lanesPerDir-1]; centre of lane idx = laneW*(idx+0.5).
+  const lanesPerDir = () => Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0);
+  const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
+  const laneOffset = (dir, idx) => dir * laneWidth() * (idx + 0.5);
 
   // ---- driver personalities ---------------------------------------------
   // A car's aggression stat already lives on c.driver.aggr (0..1) and c.reckless.
@@ -202,24 +210,40 @@
       if (o === c || o.dead || o.road !== c.road) continue;
       const along = c.road.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
       const lat = c.road.vertical ? Math.abs(o.pos.x - c.pos.x) : Math.abs(o.pos.z - c.pos.z);
-      if (along > 0.4 && along < 7 && lat < 2.4 && along < bg) { bg = along; best = o; }
+      if (along > 0.4 && along < 7 && lat < laneWidth() * 0.7 && along < bg) { bg = along; best = o; }
     }
     return best ? { car: best, gap: bg } : null;
   }
 
-  // is the OPPOSING lane on `c`'s road clear enough to pull around into?
-  // Checks a window behind→ahead of the car for anything sitting in (or
-  // barrelling down) the lane we'd swerve to — no overtake into a head-on.
-  function laneFree(c) {
+  // is the lane at lateral offset `targetLat` on `c`'s road clear enough to pull
+  // into? Checks a window behind→ahead for anything sitting in (or barrelling
+  // down) that lane. Multi-lane: overtaking stays in the SAME direction (an
+  // adjacent lane index), so no head-on swerves into oncoming.
+  function laneFree(c, targetLat) {
     if (!c.road) return false;
+    const half = laneWidth() * 0.6;
     for (const o of CBZ.cityCars) {
       if (o === c || o.dead || o.road !== c.road) continue;
       const oLat = c.road.vertical ? o.pos.x - c.road.x : o.pos.z - c.road.z;
-      if (Math.abs(oLat + c.lane) > 2.6) continue;        // not in the target lane (-c.lane)
+      if (Math.abs(oLat - targetLat) > half) continue;    // not in the target lane
       const along = c.road.vertical ? (o.pos.z - c.pos.z) * c.dirSign : (o.pos.x - c.pos.x) * c.dirSign;
       if (along > -8 && along < 14) return false;
     }
     return true;
+  }
+  // pick an adjacent SAME-DIRECTION lane to overtake into (idx±1 within
+  // [0..lanesPerDir-1]); returns the target lateral offset or null if boxed in.
+  function overtakeLane(c) {
+    const dir = c.dirSign || 1;
+    const idx = c.laneIdx != null ? c.laneIdx : 0;
+    const cand = [];
+    if (idx + 1 < lanesPerDir()) cand.push(idx + 1);   // prefer pulling outboard
+    if (idx - 1 >= 0) cand.push(idx - 1);
+    for (const ni of cand) {
+      const lat = laneOffset(dir, ni);
+      if (laneFree(c, lat)) return { idx: ni, lat };
+    }
+    return null;
   }
 
   // ---- area-scaled density + population upkeep --------------------------
@@ -231,7 +255,7 @@
   //   • when too few ambient cars are near the camera, take one that's driven
   //     way off (far from player + camera) and teleport it onto a road just
   //     out of sight ahead of you, ready to drive into frame.
-  let targetNear = 0, upkeepT = 0, lastArena = null;
+  let targetNear = 0, upkeepT = 0, lastArena = null, _farSeedT = 0;
   function computeTarget(A) {
     // base on number of road segments (≈ block grid) — bigger grid → more cars.
     const roads = (A.roads && A.roads.length) || 16;
@@ -264,7 +288,7 @@
     // pick the farthest healthy, idle-ish ambient car to relocate
     let pick = null, pd = FAR2;
     for (const c of CBZ.cityCars) {
-      if (!c.ai || c.dead || c.owned || c.player || !c.road) continue;
+      if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar) continue;   // never yank a police patrol cruiser
       if (c.abandoned || c.wreckT > 0 || c.turning || c.npcDriver || c.pullover || c.roadRageTarget || (c._rageT || 0) > 0) continue;
       if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;   // don't teleport visible wrecks
       const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z, d = dx * dx + dz * dz;
@@ -276,7 +300,8 @@
       const r = A.roads[(Math.random() * A.roads.length) | 0];
       const along = (Math.random() - 0.5) * r.len * 0.8;
       const dir = Math.random() < 0.5 ? 1 : -1;
-      const lane = dir * (TR().lane != null ? TR().lane : 2.2);
+      const laneIdx = (Math.random() * lanesPerDir()) | 0;
+      const lane = laneOffset(dir, laneIdx);
       const x = r.vertical ? r.x + lane : r.x + along;
       const z = r.vertical ? r.z + along : r.z + lane;
       const dpx = x - P.x, dpz = z - P.z, dp = dpx * dpx + dpz * dpz;
@@ -284,7 +309,7 @@
       // out of the player's near bubble + off camera, but not on the far edge
       if (dp < 50 * 50 || dp > 120 * 120 || dc < 62 * 62) continue;
       // relocate: vehicles.js (order 37) reads road/lane/dirSign/heading each frame
-      pick.road = r; pick.vertical = r.vertical; pick.dirSign = dir; pick.lane = lane;
+      pick.road = r; pick.vertical = r.vertical; pick.dirSign = dir; pick.lane = lane; pick.laneIdx = laneIdx;
       pick.pos.x = x; pick.pos.z = z;
       pick.heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
       pick.v = (pick.baseV || 8) * 0.6;
@@ -296,12 +321,126 @@
     return false;
   }
 
+  // ---- DISTRICT DISTRIBUTION (traffic-district-distribution + TRAF-1) --------
+  // The recycle above keeps the bubble AROUND the player full, but it favours
+  // wherever the player is (almost always downtown). The far highways, islands
+  // and outlying towns rarely get a car — so the moment you arrive they look
+  // dead. These seeders pull an IDLE, far-from-camera ambient car and relocate
+  // it onto an OUTLYING tagged road (highway/island/town/bridge/desert/snow...)
+  // so the whole drivable map carries traffic, not just the core. WHY: a city
+  // that's only alive where you stand isn't a city — it's a stage set. We reuse
+  // the EXACT relocation field-writes recycleOne uses (road/vertical/dirSign/
+  // lane/laneIdx/pos/heading/v/turning) so vehicles.js order-37 stays in sync.
+
+  // a tagged outlying segment is anything NOT a plain core-grid road (grid roads
+  // are pushed WITHOUT a district in world.js; everything outlying is tagged).
+  function isOutlying(r) {
+    const d = r && r.district;
+    return d === "highway" || d === "island" || d === "town" || d === "bridge" ||
+           d === "desert" || d === "snow" || d === "forest" || d === "farmland";
+  }
+  // pick the farthest-from-camera idle/healthy ambient car (same filter as
+  // recycleOne) that's at least minD2 away — a car nobody is watching.
+  function farIdleCar(minD2) {
+    const cam = CBZ.camera.position;
+    let pick = null, pd = minD2;
+    for (const c of CBZ.cityCars) {
+      if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar) continue;   // never yank a police patrol cruiser
+      if (c.abandoned || c.wreckT > 0 || c.turning || c.npcDriver || c.pullover || c.roadRageTarget || (c._rageT || 0) > 0) continue;
+      if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;
+      const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z, d = dx * dx + dz * dz;
+      if (d > pd) { pd = d; pick = c; }
+    }
+    return pick;
+  }
+  // write the SAME relocation fields recycleOne writes, onto an explicit road r
+  // at a clamped along-offset (long highways get spread out, not bunched at one
+  // end). Returns true. Keeps vehicles.js order-37 in sync.
+  function placeOnRoad(c, r) {
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const laneIdx = (Math.random() * lanesPerDir()) | 0;
+    const lane = laneOffset(dir, laneIdx);
+    // clamp the spread so a 600m highway doesn't drop the car a single fixed
+    // distance from its mid — use up to ±45% of length, capped at ±90m.
+    const spread = Math.min(r.len * 0.45, 90);
+    const along = (Math.random() - 0.5) * 2 * spread;
+    const x = r.vertical ? r.x + lane : r.x + along;
+    const z = r.vertical ? r.z + along : r.z + lane;
+    c.road = r; c.vertical = r.vertical; c.dirSign = dir; c.lane = lane; c.laneIdx = laneIdx;
+    c.pos.x = x; c.pos.z = z;
+    c.heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    c.v = (c.baseV || 8) * 0.6;
+    c.group.position.set(x, 0, z);
+    c.group.rotation.y = c.heading;
+    c.turning = null;
+    return true;
+  }
+  // does an OUTLYING region already have a car near it? (so we only seed EMPTY
+  // outlying segments, never pile cars onto one the player's already near).
+  function segHasCar(r, rad2) {
+    for (const c of CBZ.cityCars) {
+      if (!c.ai || c.dead || c.player || c.owned || !c.road) continue;
+      const dx = c.pos.x - r.x, dz = c.pos.z - r.z;
+      if (dx * dx + dz * dz < rad2) return true;
+    }
+    return false;
+  }
+  // ONGOING low-rate far-seeder: at most ONE car per call, onto a random EMPTY
+  // outlying segment that's well away from the camera (so the relocation is
+  // never seen). Off during a hot pursuit. Respects the quality governor via the
+  // caller's cadence. (traffic-district-distribution)
+  let _outScan = 0;
+  function seedFarRegions(A) {
+    if (!A.roads || !A.roads.length) return false;
+    const cam = CBZ.camera.position;
+    // find an outlying segment that is (a) empty and (b) far from camera.
+    let target = null;
+    for (let tries = 0; tries < 6 && !target; tries++) {
+      _outScan = (_outScan + 1 + ((Math.random() * 7) | 0)) % A.roads.length;
+      const r = A.roads[_outScan];
+      if (!isOutlying(r)) continue;
+      const dcx = r.x - cam.x, dcz = r.z - cam.z;
+      if (dcx * dcx + dcz * dcz < 140 * 140) continue;          // near the camera — recycleOne already covers it
+      if (segHasCar(r, 70 * 70)) continue;                       // already has traffic
+      target = r;
+    }
+    if (!target) return false;
+    const pick = farIdleCar(120 * 120);                          // a car nobody's watching
+    if (!pick) return false;
+    return placeOnRoad(pick, target);
+  }
+
+  // ONE-TIME arena-bind seed (TRAF-1): when a new arena binds, drop a car or two
+  // onto ~1-in-3 of the HIGHWAY segments so every highway starts visibly alive
+  // when you arrive. Bounded (≤8 seeds), runs ONCE per bind (never per frame),
+  // and only while the quality governor allows far cars.
+  function seedHighwaysOnBind(A) {
+    if (!A.roads || !A.roads.length) return;
+    const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
+    if (q <= 1) return;                                          // weak GPU: skip far seeding
+    const cap = q >= 3 ? 8 : 5;
+    let seeded = 0;
+    for (let i = 0; i < A.roads.length && seeded < cap; i++) {
+      const r = A.roads[i];
+      if (r.district !== "highway") continue;
+      if (Math.random() > 0.34) continue;                        // ~1 in 3 highways
+      if (segHasCar(r, 60 * 60)) continue;
+      const pick = farIdleCar(0);                                // any idle car (none are near a fresh arena)
+      if (!pick) break;
+      if (placeOnRoad(pick, r)) seeded++;
+    }
+  }
+
   // ---- behaviour + density tick (order 36.5: after lights, before AI 37) --
   let beh = 0;
   CBZ.onUpdate(36.5, function (dt) {
     if (g.mode !== "city") { return; }
     const A = CBZ.city.arena; if (!A) return;
-    if (A !== lastArena) { lastArena = A; targetNear = computeTarget(A); }
+    if (A !== lastArena) {
+      lastArena = A; targetNear = computeTarget(A);
+      seedHighwaysOnBind(A);     // TRAF-1: every highway starts visibly alive on arrival
+      _farSeedT = 2;             // stagger the first ongoing far-seed a beat after bind
+    }
 
     updateHonks(dt);
 
@@ -316,6 +455,18 @@
         const near = countNear();
         if (near < targetNear) recycleOne(A);
       }
+    }
+
+    // ONGOING far-region seeder (traffic-district-distribution): a much SLOWER
+    // beat than the near-bubble upkeep — every ~2.5s, ONE car onto an empty
+    // outlying tagged road far off-camera, so highways/islands/towns you AREN'T
+    // standing in still carry life. Off during a hot pursuit, and only on
+    // mid/strong GPUs (the governor) so weak devices never seed far cars.
+    _farSeedT -= dt;
+    if (_farSeedT <= 0) {
+      _farSeedT = 2.5;
+      const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
+      if (q > 1 && !(CBZ.player.driving && (g.wanted | 0) >= 2)) seedFarRegions(A);
     }
 
     // per-car behaviour: time-sliced honking + road-rage temper. We only look at
@@ -363,13 +514,32 @@
         // We only touch fields vehicles.js's lane-keeper already honors
         // (lane flips, a brief baseV boost), so the order-37 loop stays in sync.
         if (c.blockedT > arch.ragePatience && (c._rageT || 0) <= 0) {
-          if (!laneFree(c)) {
+          let ot = overtakeLane(c);
+          // RECKLESS-LAYER OVERTAKE (reckless-layer-overtake): a maniac who is
+          // BOXED IN on every same-direction lane plays chicken — he swings
+          // ACROSS the centreline into the oncoming inner lane to blast past,
+          // but ONLY when that lane is actually clear (no suicidal head-on). It
+          // is a SHORT, hot deviation ON TOP of the keep-right baseline; the
+          // restore at lines below (driven by _prevLane) yanks him back to the
+          // right the instant the rage timer expires. WHY: the owner loves the
+          // recklessness — a truly stuck lunatic crossing into traffic to
+          // overtake reads as the city's worst driver, not a polite queue.
+          if (!ot && (c.trafArch === "reckless" || (c.driver && c.driver.aggr >= 0.82))) {
+            const dir = c.dirSign || 1;
+            const onLat = laneOffset(-dir, 0);             // oncoming INNER lane (across the centreline)
+            if (laneFree(c, onLat)) ot = { idx: 0, lat: onLat, oncoming: true };
+          }
+          if (!ot) {
             c.blockedT = arch.ragePatience * 0.6;          // boxed in — keep honking, retry soon
             if (c.honkCD <= 0) honkAt(c);
           } else {
             const angry = c.trafArch === "aggressive" || c.trafArch === "reckless";
-            c._rageT = angry ? 3 + Math.random() * 2 : 2.2 + Math.random();
-            c.lane = -c.lane;               // swerve into the adjacent lane to pass
+            // an ONCOMING-lane pass is a SHORTER deviation — you don't loiter in
+            // the wrong lane; you blast past and dive back right immediately.
+            c._rageT = ot.oncoming ? (1.5 + Math.random() * 0.8)
+                     : angry ? 3 + Math.random() * 2 : 2.2 + Math.random();
+            c._prevLane = c.lane; c._prevLaneIdx = c.laneIdx != null ? c.laneIdx : 0;
+            c.lane = ot.lat; c.laneIdx = ot.idx;   // pull into an adjacent lane (same-dir, or oncoming for a reckless chicken-pass) to pass
             c._rageBoost = (c.baseV || 8) * (angry ? 0.6 : 0.3);
             c.baseV = (c.baseV || 8) + c._rageBoost;
             c.blockedT = 0;
@@ -389,7 +559,8 @@
         c._rageT -= dt * slice;
         if (c._rageT <= 0) {
           if (c._rageBoost) { c.baseV = Math.max(2, (c.baseV || 8) - c._rageBoost); c._rageBoost = 0; }
-          c.lane = -c.lane;          // pull back into our own lane after passing
+          // pull back into our own lane after passing
+          if (c._prevLane != null) { c.lane = c._prevLane; c.laneIdx = c._prevLaneIdx; c._prevLane = null; }
         }
       }
     }
@@ -460,7 +631,7 @@
     // enter from the city edge along a road far from the incident
     const r = A.roads[(Math.random() * A.roads.length) | 0];
     const dir = Math.random() < 0.5 ? 1 : -1;
-    const lane = dir * (TR().lane != null ? TR().lane : 2.2);
+    const lane = laneOffset(dir, 0);   // emergency runs the inner lane
     let sx, sz;
     if (r.vertical) { sx = r.x + lane; sz = r.z - dir * (r.len / 2 - 4); }
     else { sx = r.x - dir * (r.len / 2 - 4); sz = r.z + lane; }

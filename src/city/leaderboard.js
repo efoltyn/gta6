@@ -101,6 +101,13 @@
   }
   function whyOf(p, loot) {
     if (p.bounty) return "bounty in " + districtOf(p);
+    // a PRO RACER (racing.js) reads by their championship standing, not turf. The
+    // _racer branch wins over _milli/whale so a racer is never mislabeled a tycoon.
+    if (p._racer && CBZ.cityRacing) {
+      const r = p._racer;
+      const pos = CBZ.cityRacing.positionOf ? CBZ.cityRacing.positionOf(r) : 0;
+      return "P" + pos + " in the championship · " + (r.wins || 0) + " wins";
+    }
     if (p.gang) return rankName(p.rank) + " of " + gangName(p.gang) + " - " + protectionOf(p);
     if (p.vipTitle) return p.vipTitle + " - " + protectionOf(p);
     if (WHALE_ARCH[p.archetype]) return titleOf(p) + " in " + districtOf(p);
@@ -115,14 +122,22 @@
       if (!p || p.dead || p.collected || p.vendor || p.kind === "cop") continue;
       const loot = actorLoot(p);
       const lv = levelOf(p);
-      const whale = !!(p.vipTitle || p.vipLvl || p.isBoss || p.rank === "boss" || p.rank === "lt" ||
+      // a PRO RACER is always a high-value row (a famous, rich, killable mark) even
+      // if their carried loot is modest — their fame + purse-winnings are the value.
+      const racer = p._racer || null;
+      const whale = !!(racer || p.vipTitle || p.vipLvl || p.isBoss || p.rank === "boss" || p.rank === "lt" ||
         p.rank === "enforcer" || p.bounty || loot >= 1200 || (p.wealth || 0) >= 0.88 || WHALE_ARCH[p.archetype]);
       if (!whale) continue;
       const prot = protectionOf(p);
-      const score = loot + lv * 1100 + (p.vipLvl || 0) * 900 + (p.gang ? 9000 : 0) + (p.bounty || 0);
+      // fold a racer's season purse-winnings into their score so a winning driver
+      // climbs the rich list over the season (read-only of cityRacing).
+      const racerWorth = (racer && CBZ.cityRacing && CBZ.cityRacing.netWorthOf) ? CBZ.cityRacing.netWorthOf(racer) : 0;
+      const score = loot + lv * 1100 + (p.vipLvl || 0) * 900 + (p.gang ? 9000 : 0) + (p.bounty || 0) + racerWorth;
       out.push({
-        actor: p, name: p.name || titleOf(p), title: titleOf(p), level: lv,
-        loot: loot, score: score, why: whyOf(p, loot), where: districtOf(p),
+        actor: p, name: p.name || titleOf(p),
+        title: racer ? ("Racer #" + racer.number) : titleOf(p), level: lv,
+        loot: racer ? Math.max(loot, racerWorth) : loot,
+        score: score, why: whyOf(p, loot), where: districtOf(p),
         protection: prot, you: false,
       });
     }
@@ -293,6 +308,32 @@
     return h;
   }
 
+  // ---- compact CHAMPIONSHIP standings block (racing.js). Read-only of
+  // CBZ.cityRacing; fully guarded so a headless/partial load just skips it. ----
+  function renderChampionship() {
+    const RC = CBZ.cityRacing;
+    if (!RC || !RC.standings) return "";
+    const rows = RC.standings().slice(0, 6);
+    if (!rows.length) return "";
+    const cols = "24px 28px 1.4fr 56px 46px";
+    let h = "<div style='margin-top:10px'>" +
+      "<div style='font-size:13px;font-weight:700;margin-bottom:3px'>Racing Championship " +
+      "<span style='font-size:11px;color:#8a93a3;font-weight:400'>· S" + RC.season + " R" + (RC.round + 1) + "/" + RC.ROUNDS + "</span></div>" +
+      "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
+      "<span>#</span><span>No</span><span>Driver</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Wins</span></div>";
+    rows.forEach(function (r, i) {
+      h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px'>" +
+        "<span style='color:" + (i === 0 ? "#ffd166" : "#8a93a3") + "'>" + (i + 1) + "</span>" +
+        "<span style='text-align:center;font-weight:700;color:" + hex6(r.teamColor != null ? r.teamColor : 0x8a93a3) + "'>" + r.number + "</span>" +
+        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e3e9f2'>" + esc(r.name) + "</span>" +
+        "<span style='text-align:right;color:#7ed957;font-weight:700'>" + r.points + "</span>" +
+        "<span style='text-align:right;color:#9fe6c8'>" + r.wins + "</span>" +
+        "</div>";
+    });
+    h += "</div>";
+    return h;
+  }
+
   function fitToScreen(el) {
     el.style.fontSize = "";
     let guard = 0, fs = 100;
@@ -320,6 +361,7 @@
       "</div></div>";
     html += renderGangs(gangStandings());
     html += renderTargets(rows, me);
+    html += renderChampionship();
     const tier = CBZ.cityEcon && CBZ.cityEcon.wealthTier ? CBZ.cityEcon.wealthTier(me.score) : null;
     html += "<div style='font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px;display:flex;justify-content:space-between;gap:10px'>" +
       "<span>You: Lv." + me.level + " " + esc(me.title) + " · " + money(me.score) + (tier ? " · " + esc(tier.name) : "") + "</span>" +

@@ -57,6 +57,16 @@
   const A0 = () => (CBZ.CITY && CBZ.CITY.aggro) || {};
   const now = () => CBZ.now || 0;
 
+  // ---- self-defaulted flags (never edit config.js from a wrapped module) ----
+  // The LIVING ECONOMY: wages move at the till, rent drains at the door, hunger
+  // is a real motive, and a tenant who can't pay gets evicted to the street. All
+  // ADDITIVE + feature-detected (wallet.js/housing.js own the ledger; we only
+  // CALL the contract) so a partial load or a missing bank can never throw.
+  const C = CBZ.CONFIG || (CBZ.CONFIG = {});
+  if (C.CITY_LIVING_ECON == null) C.CITY_LIVING_ECON = true;   // master switch for wages/rent/eat
+  if (C.CITY_EVICTIONS == null) C.CITY_EVICTIONS = true;       // broke + behind-on-rent → vagrant flip
+  if (C.CITY_NPC_HEISTS == null) C.CITY_NPC_HEISTS = true;     // NPCs rob banks + cash-trucks (the director)
+
   // a tiny independent PRNG so we never disturb peds.js' deterministic stream
   let _s = 13371;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
@@ -80,16 +90,26 @@
     let N = ped._needs;
     if (!N) {
       const greed = 0.4 + ped.aggr * 0.5 + (1 - (ped.wealth || 0.4)) * 0.4; // poor/aggressive want money
+      const poor = 1 - (ped.wealth || 0.4);                          // the poor & active burn through a meal faster
       N = ped._needs = {
         money: 0.45 + rng() * 0.4,
         high: ped.drugUser ? (0.3 + rng() * 0.4) : 1,
         social: 0.5 + rng() * 0.4,
         ambition: ped.gang ? (0.4 + rng() * 0.3) : 0.6,
+        // FOOD — the oldest motive. Everyone gets hungry; a meal tops it up. A
+        // person who CAN'T afford to eat (broke) stays low and turns desperate.
+        food: 0.5 + rng() * 0.4,
+        // RENT — a SLOW dread that builds over many minutes (drains ~10× slower
+        // than money). Looming rent makes earning feel urgent; paying it at the
+        // door (LE3) is what tops it back up. Vagrants carry no rent (they're full).
+        rent: ped.vagrant ? 1 : (0.6 + rng() * 0.3),
         // per-ped drain rates (units per second of sim time), personality-shaped
         kMoney: (0.006 + 0.010 * greed) * (0.7 + rng() * 0.6),
         kHigh: ped.drugUser ? (0.010 + 0.018 * (ped.erratic || 0.2)) : 0,
         kSocial: 0.004 + rng() * 0.004,
         kAmb: ped.gang ? (0.005 + 0.008 * ped.aggr) : 0,
+        kFood: (0.008 + 0.006 * poor) * (0.75 + rng() * 0.5),         // ~0.008..0.014/s
+        kRent: ped.vagrant ? 0 : (0.0006 + rng() * 0.0004),          // ~0.0008/s — bites over minutes
         t: now(),
       };
     }
@@ -105,6 +125,9 @@
     if (ped.drugUser) N.high = clamp01(N.high - N.kHigh * dt);
     N.social = clamp01(N.social - N.kSocial * dt);
     if (ped.gang) N.ambition = clamp01(N.ambition - N.kAmb * dt);
+    // hunger always builds; rent always looms (both slow burns vs. money)
+    N.food = clamp01(N.food - (N.kFood || 0) * dt);
+    N.rent = clamp01(N.rent - (N.kRent || 0) * dt);
     return N;
   }
   function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -168,6 +191,13 @@
   // 24h loop (desynced from the sun) — use it only for WITHIN-day schedules.
   function nightAmt() { return CBZ.nightAmount == null ? 0 : CBZ.nightAmount; }
   function hourNow() { return CBZ.cityHour ? CBZ.cityHour() : 12; }
+  // a MONOTONIC city-DAY index — increments once per in-city day (peds.js runs a
+  // 360s day on the same CBZ.now wall-clock _dayClock advances on). Used purely
+  // as a once-per-day STAMP for rent (so a tenant pays on their FIRST home
+  // arrival each day, never every dusk loop). Never mixed with the nightAmount
+  // sun for the same decision — it's a counter, not a phase.
+  const CITY_DAY_LEN = 360;   // matches peds.js DAY_LEN (seconds per in-city day)
+  function dayIndex() { return Math.floor((CBZ.now || 0) / (CITY_DAY_LEN * 1000)); }
 
   // nearest shop lot of the given kinds WITH a usable door (bounded scan)
   function lotNear(A, x, z, kinds, maxd) {
@@ -263,18 +293,41 @@
     "nurse":               { class: "medic", lots: ["hospital"], hours: [7, 19], pay: 16 },
     "doctor":              { class: "medic", lots: ["hospital"], hours: [9, 19], pay: 24 },
     "paramedic":           { class: "medic", lots: ["hospital"], hours: [6, 18], pay: 15 },
+    // BIOME WORK (the open archipelago): these jobs have no storefront — they
+    // route to a WORK-ANCHOR (worldmap.js / officejobs.js claim) instead of a
+    // shopLot. `anchor` is the anchor KIND to claim; `patrol:true` means the
+    // worker walks the spot ring continuously (a beat) rather than holding one
+    // spot. WHY-first: the farmer grows the city's food, the rancher tends the
+    // herd, the ranger keeps the trails, the soldier guards the base, the ski
+    // instructor works the slope, ground crew turns the planes, the shopkeeper
+    // minds the stand. Each answers who-does-what out where there are no shops.
+    "farmer":              { class: "trade", anchor: "field",     hours: [6, 18], pay: 11 },
+    "farmhand":            { class: "trade", anchor: "field",     hours: [6, 18], pay: 9 },
+    "rancher":             { class: "trade", anchor: "ranch",     hours: [6, 18], pay: 12 },
+    "ranger":              { class: "law",   anchor: "trailhead", hours: [7, 19], pay: 14, patrol: true },
+    "park ranger":         { class: "law",   anchor: "trailhead", hours: [7, 19], pay: 14, patrol: true },
+    "soldier":             { class: "law",   anchor: "armory",    hours: [6, 22], pay: 15, patrol: true },
+    "ski instructor":      { class: "service", anchor: "slope",   hours: [8, 17], pay: 13 },
+    "skier":               { class: "service", anchor: "slope",   hours: [9, 16], pay: 8 },
+    "ground crew":         { class: "trade", anchor: "terminal",  hours: [6, 22], pay: 13 },
+    "shopkeeper":          { class: "service", anchor: "shop",    hours: [8, 20], pay: 12 },
   };
   CBZ.cityJobs = CITY_JOBS;       // shops.js gates worker verbs on .class; schedule.js reads .hours/.pay
   // the legacy job→lot vocabulary, derived from the one table (no second list to drift)
   const JOB_KINDS = {};
-  for (const jn in CITY_JOBS) JOB_KINDS[jn] = CITY_JOBS[jn].lots;
+  // anchor jobs (biome work) have no shopLot `lots` — give them an empty list so
+  // they still register as a JOB (schedule.js' castKey + the morning-commute
+  // gate test `JOB_KINDS[ped.job]` truthily, and timetables read .hours/.pay
+  // straight off CITY_JOBS). The anchor routing happens in jobLot/goEarn below.
+  for (const jn in CITY_JOBS) JOB_KINDS[jn] = CITY_JOBS[jn].lots || [];
   CBZ.cityJobKinds = JOB_KINDS;   // schedule.js derives timetables from the same vocabulary
   // the NEAREST plausible workplace, picked ONCE and cached. Re-validated
   // against the live arena so a recycled body / new run can't keep a stale lot.
   function jobLot(ped, A) {
     if (ped.gang || ped.vendor || ped.vagrant) return null;   // posted / on turf / no job
+    if (CITY_JOBS[ped.job] && CITY_JOBS[ped.job].anchor) return null;  // anchor job → no shopLot
     const kinds = JOB_KINDS[ped.job];
-    if (!kinds) return null;
+    if (!kinds || !kinds.length) return null;
     if (ped._jobLot && A.shopLots && A.shopLots.indexOf(ped._jobLot) >= 0 &&
         ped._jobLot.building && ped._jobLot.building.door) return ped._jobLot;
     ped._jobLot = lotNear(A, ped.pos.x, ped.pos.z, kinds, 1e5);
@@ -289,6 +342,21 @@
     const J = CITY_JOBS[ped.job];
     return !!(J && J.office);
   }
+  // is this an ANCHOR job (biome work — routes to a work-anchor, not a shopLot)?
+  function isAnchorJob(ped) {
+    if (ped.gang || ped.vendor || ped.vagrant) return false;
+    const J = CITY_JOBS[ped.job];
+    return !!(J && J.anchor);
+  }
+  // is this a GIG job — a courier/delivery/cab driver whose work is to DRIVE a
+  // pickup→dropoff run (giglife.js owns the anchors, car + driver loop)? These
+  // still clock in at a door via goEarn as the fallback, but when the gig system
+  // is loaded + a car slot is free, goGigRun makes them actually drive a route.
+  const GIG_JOBS = { "courier": 1, "delivery driver": 1, "cab driver": 1 };
+  function isGigJob(ped) {
+    if (ped.gang || ped.vendor || ped.vagrant) return false;
+    return !!GIG_JOBS[ped.job];
+  }
   function tagOfficeJob(ped) {
     const off = isOfficeJob(ped);
     // keep the flag honest across recasts (an identity rewrite can change .job):
@@ -297,18 +365,66 @@
     else if (ped._officeJob) ped._officeJob = false;
     return off;
   }
-  // the NEAREST home lot, cached once — "leaving work" reads as heading home
+  // a ped's DAILY RENT BUDGET — what their wealth tier can comfortably carry.
+  // Mirrors LE3's rent fallback (8 + wealth*40) so the affordability bias and the
+  // actual outflow agree: a poor soul affords a micro-unit, a tycoon a tower.
+  function rentBudget(ped) { return 8 + (ped.wealth || 0.4) * 44; }
+  // the home lot's cheapest rent, read READ-ONLY off housing.js's bond (we never
+  // write home.owned/listed — only the additive _tenants tag). Falls back to the
+  // same wealth-scaled estimate the outflow uses when housing.js hasn't priced it.
+  function lotRent(l) {
+    const h = l && l.building && l.building.home;
+    if (h && h.rent != null) return h.rent;
+    // a cheap MICRO tier exists so everyone can afford SOMETHING — estimate one
+    // off the building's own value if buildings.js exposed units; else a floor.
+    return null;
+  }
+  // the HOME a ped lives at, picked ONCE and CACHED (the persistent home bond).
+  // "Leaving work → heads home" + schedule.js's home/sleep acts all route to the
+  // SAME door every day. Selection is AFFORDABILITY-BIASED (poor → cheapest
+  // micro-units; wealthy → a nicer tower) and nudged toward a believable commute
+  // from their workplace. A ped near no affordable lot still gets the nearest one
+  // (goHome must never return false). housing.js owns ped._digs when it's loaded;
+  // we only READ it and, as a fallback, populate it the same way.
   function digsLot(ped, A) {
-    if (ped._digs && A.homeLots && A.homeLots.indexOf(ped._digs) >= 0) return ped._digs;
-    ped._digs = null;
     const hl = A.homeLots; if (!hl || !hl.length) return null;
-    let best = null, bd = Infinity;
+    // H3: an assigned UNIT (housing.js leases one) is the single source of truth —
+    // route to ITS lot so work-exit and schedule's home/sleep share one door.
+    if (ped._unit && ped._unit.lot && hl.indexOf(ped._unit.lot) >= 0) {
+      ped._digs = ped._unit.lot; return ped._digs;
+    }
+    // the persistent bond: a cached, still-live home lot wins (stable address).
+    if (ped._digs && hl.indexOf(ped._digs) >= 0) return ped._digs;
+    ped._digs = null;
+    // first assignment: a bounded scan scoring affordability fit + commute. The
+    // job lot (if any) is the commute origin; without one we fall to position.
+    const ox = (ped._jobLot && ped._jobLot.cx != null) ? ped._jobLot.cx : ped.pos.x;
+    const oz = (ped._jobLot && ped._jobLot.cz != null) ? ped._jobLot.cz : ped.pos.z;
+    const budget = rentBudget(ped);
+    let best = null, bestScore = -Infinity;      // affordability-biased pick
+    let near = null, nd = Infinity;              // guaranteed nearest fallback
     for (let i = 0; i < hl.length; i++) {
       const l = hl[i];
-      const dd = (l.cx - ped.pos.x) * (l.cx - ped.pos.x) + (l.cz - ped.pos.z) * (l.cz - ped.pos.z);
-      if (dd < bd) { bd = dd; best = l; }
+      const dx = l.cx - ox, dz = l.cz - oz, dd = dx * dx + dz * dz;
+      if (dd < nd) { nd = dd; near = l; }
+      const rent = lotRent(l);
+      // commute score: closer = better (normalised against a generous radius)
+      const commute = 1 / (1 + dd / (260 * 260));
+      let afford;
+      if (rent == null) afford = 0.5;            // unpriced → neutral (rely on commute)
+      else if (rent <= budget) afford = 1 - (rent / Math.max(1, budget)) * 0.35;  // within means, prefer the cheaper end
+      else afford = Math.max(0, 0.5 - (rent - budget) / Math.max(1, budget));      // over budget → penalised hard
+      const s = afford * 1.6 + commute + rng() * 0.15;   // afford dominates, commute biases, tiny jitter spreads the crowd
+      if (s > bestScore) { bestScore = s; best = l; }
     }
+    best = best || near;
     ped._digs = best;
+    // reciprocal occupancy tag so a landlord/company knows the unit is taken
+    // (LE1 seeding + an optional HUD read it). ADDITIVE — never touches home.owned.
+    if (best && best.building && best.building.home) {
+      const hm = best.building.home;
+      hm._tenants = (hm._tenants | 0) + 1;
+    }
     return best;
   }
 
@@ -401,14 +517,59 @@
   //  the goals — each returns true if it managed to set one
   // ============================================================
 
+  // tear down a gig run cleanly from any phase (giglife gone, car lost, no drop,
+  // recycle, dusk) — return the car, release the pickup, clear all gig state.
+  function endGig(ped) {
+    if (ped._gigCar && CBZ.cityGigReturnCar) CBZ.cityGigReturnCar(ped._gigCar, false);
+    else if (ped.inCar && ped.inCar._gig && CBZ.cityGigReturnCar) CBZ.cityGigReturnCar(ped.inCar, false);
+    if (CBZ.cityGigReleasePickup) CBZ.cityGigReleasePickup(ped);
+    ped._gigCar = null; ped._gigDrop = null; ped._gigAt = null; ped._gigPhase = null;
+    if (ped._goalKind === "gig") ped._goalKind = null;
+  }
+
+  // GIG RUN: a courier/delivery/cab driver actually DRIVES a pickup→dropoff
+  // route — the visible gig economy (giglife.js owns the anchors, the car + the
+  // steering loop; this goal is the BRAIN that strings the legs together). The
+  // shape mirrors the anchored goEarn/fieldwork flow: claim a work-anchor
+  // (here a gig PICKUP), route to it, then resolve() drives the rest:
+  //   leg 1  walk → the pickup curb (no car yet)
+  //   leg 2  AT pickup: spawn/enter a car (cityGigSpawnCar = the carjack pattern
+  //          but benign, road:null so the ambient AI leaves it to giglife) and
+  //          set car._gigTarget = the dropoff; giglife's loop drives there.
+  //   leg 3  AT dropoff: PAY the driver (money need), drop the fare/package,
+  //          return the car, release the pickup → cycle to a NEW pickup.
+  // Feature-detected end-to-end: if giglife isn't loaded or the car cap is hit,
+  // we bail (return false) and goEarn falls through to the door clock-in.
+  function goGigRun(ped, A, N) {
+    if (!CBZ.cityGigClaimPickup || !CBZ.cityGigSpawnCar) return false;   // giglife not loaded
+    if (ped.inCar || ped.controlled) return false;                      // already driving / busy
+    // respect the concurrency cap up front (and don't claim a pickup we can't use)
+    if (!ped._gigCar && CBZ.cityGigCount && CBZ.cityGigCap &&
+        CBZ.cityGigCount() >= CBZ.cityGigCap()) return false;
+    const pick = CBZ.cityGigClaimPickup(ped);
+    if (!pick) return false;
+    // walk to the pickup curb; resolve('gig') takes it from there
+    routeTo(ped, A, { x: pick.spots[0].x, z: pick.spots[0].z });
+    ped._goalKind = "gig";
+    ped._gigPhase = "toPickup";
+    ped._gigAt = { x: pick.spots[0].x, z: pick.spots[0].z };
+    ped._payIsJob = true;       // a gig is a job → clocked in until dusk's goHome
+    return true;
+  }
+
   // EARN: ordinary peds commute to a shop/workplace and clock in. A greedier
   // or harder ped instead HUSTLES the rich — shadows a wealthy mark to lift
   // their wallet (a real NPC mugging via the offense pipeline).
   function goEarn(ped, A, N) {
     // greedy/bold peds will rob the rich when one is nearby (utility: high
-    // money-need + a fat opportunity walking past).
-    if (ped.aggr >= (A0().crook || 0.72)) {
-      const mark = nearestPed(ped, 26, (p) => !p.vendor && p.kind === "civilian" && (p.wealth || 0) > 0.55 && (p.cash | 0) > 40 && p.aggr < ped.aggr && !p.surrender && p.state !== "flee");
+    // money-need + a fat opportunity walking past). DESPERATION (broke + hungry,
+    // set in assign) lowers the aggr gate AND widens the reach — so an ordinary
+    // commuter who can't afford to eat visibly turns into a stick-up kid.
+    const desp = !!ped._desperate;
+    const robGate = desp ? (A0().bold || 0.5) : (A0().crook || 0.72);
+    const robReach = desp ? 38 : 26;
+    if (ped.aggr >= robGate) {
+      const mark = nearestPed(ped, robReach, (p) => !p.vendor && p.kind === "civilian" && (p.wealth || 0) > (desp ? 0.4 : 0.55) && (p.cash | 0) > (desp ? 20 : 40) && p.aggr < ped.aggr && !p.surrender && p.state !== "flee");
       if (mark) {
         ped.rage = mark; ped.state = "fight";
         ped.target.set(mark.pos.x, 0, mark.pos.z);
@@ -419,6 +580,15 @@
         return true;
       }
     }
+    // GIG WORK (courier / delivery / cab): the job IS to drive a pickup→dropoff
+    // run, so it's the most legible thing this worker can do — try it FIRST. If
+    // the gig system is loaded and a car slot is free, goGigRun claims a pickup,
+    // pulls an ambient car and drives a fare/package to a drop (paying at the
+    // dropoff, then cycling). When it can't (cap hit, no anchors, headless/MP
+    // guest), we fall straight through to the ordinary clock-in-at-the-door
+    // commute below — so these jobs never stall.
+    if (isGigJob(ped) && goGigRun(ped, A, N)) return true;
+
     // a JOB-HOLDER earns at THEIR workplace — the same door every time (nearest
     // matching lot kind, cached once) — so the walk reads as a commute the
     // player can learn, not a fresh random errand each pass.
@@ -451,6 +621,36 @@
       }
       // no free desk this pass → fall through to the door (still reads as a commute);
       // the next assign() pass retries the claim, and officejobs' safety-net helps.
+    }
+
+    // BIOME WORK: an anchor-job worker (farmer/rancher/ranger/soldier/ski
+    // instructor/ground crew/shopkeeper) doesn't have a shop door — they CLAIM a
+    // work-anchor (a field, the barn, the gate, the trailhead, the slope, the
+    // apron) and walk to its first task spot to WORK the shift. The SAME
+    // schedule/goal/nav as a commuter, just routed to open-ground work. The
+    // 'fieldwork' resolver below cycles them through the anchor's spots (patrol
+    // roles walk the ring continuously), drips pay, and clocks them in so dusk's
+    // goHome releases the anchor. Graceful fallback to a stroll if none is free.
+    if (isAnchorJob(ped) && CBZ.cityClaimWorkAnchor) {
+      const heldBefore = ped._workAnchor;
+      const anchor = CBZ.cityClaimWorkAnchor(ped);
+      if (anchor) {
+        // keep cycling from the CURRENT spot if we already held this anchor (a
+        // slow walker shouldn't get yanked back to spot 0 every re-plan); start
+        // fresh at spot 0 only on a brand-new claim.
+        if (anchor !== heldBefore) ped._anchorSpot = 0;
+        const si = (ped._anchorSpot | 0) % anchor.spots.length;
+        const spot = anchor.spots[si] || { x: anchor.x, z: anchor.z };
+        routeTo(ped, A, { x: spot.x, z: spot.z });
+        ped._goalKind = "fieldwork";
+        // payday + clock-in fire at the first spot (resolve() below): claiming an
+        // anchor and reaching it IS clocking in, so dusk's sHome dominates and
+        // goHome RELEASES the anchor (no slot can be stranded into the evening).
+        ped._payAt = { x: spot.x, z: spot.z };
+        ped._payIsJob = true;
+        return true;
+      }
+      // no anchor free / none registered → fall through to the wander fallback.
     }
 
     const lot = mine || shopByKind(A, null);
@@ -628,8 +828,23 @@
     // Stands the seated worker up: officejobs clears char.sitting, peds.js leaves
     // the "sit" state on the goal change; the body then walks home like anyone.
     if (ped._deskAnchor && CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
-    const h = digsLot(ped, A);
+    // a gig driver clocking out for the night ends any half-started run (returns
+    // the car, frees the pickup) so nothing strands into the evening.
+    if (ped._gigCar || ped._gigPickup || ped._gigPhase) endGig(ped);
+    // a biome worker gives the work-anchor slot back too (so the next farmer/
+    // soldier/ranger can take it). Mirrors the desk release. If the anchor has a
+    // home, walk toward THAT (the farmhouse, the barracks); else fall to digsLot.
+    let anchorHome = null;
+    if (ped._workAnchor && ped._workAnchor.home) anchorHome = ped._workAnchor.home;
+    if (ped._workAnchor && CBZ.cityReleaseWorkAnchor) CBZ.cityReleaseWorkAnchor(ped);
+    const h = anchorHome ? null : digsLot(ped, A);
     let goal;
+    if (anchorHome) {
+      routeTo(ped, A, { x: anchorHome.x, z: anchorHome.z });
+      ped._homeAt = { x: anchorHome.x, z: anchorHome.z };
+      ped._goalKind = "home";
+      return true;
+    }
     if (h) {
       const door = h.building && h.building.door;
       goal = door ? { x: door.x, z: door.z, enter: true }
@@ -654,6 +869,9 @@
     if (!lot) return false;
     const door = lot.building.door, dir = doorOut(lot);
     const px = -dir.z, pz = dir.x;                       // sideways along the frontage
+    // an errand at a FOOD counter is also a bite — let the served/looked payoff
+    // top up hunger (a snack), so the diner queue isn't purely a money sink.
+    ped._errandFood = (lot.kind === "food" || lot.kind === "gas");
     if (QUEUE_KINDS.indexOf(lot.kind) >= 0) {
       // join (or open) the short line at the door — spaced slots, brief, bounded
       let q = null;
@@ -684,6 +902,26 @@
     ped._winUntil = now() + 2600 + rng() * 2600;
     routeTo(ped, A, { x: ped._winAt.x, z: ped._winAt.z });
     ped._goalKind = "window";
+    return true;
+  }
+
+  // EAT: hunger is the oldest motive. A hungry ped walks to the NEAREST place
+  // that sells food (diner / gas counter — same goErrand nav, food kinds only)
+  // and, on arrival, BUYS a meal (resolve('eat') spends a few $ + tops up food).
+  // The catch: a BROKE ped (cash<8) can still walk there but CAN'T pay → food
+  // stays low → desperation builds (assign() turns that into a mugging). This is
+  // the felt engine behind "a person who can't afford to eat robs someone".
+  const FOOD_KINDS = ["food", "gas"];
+  function goEat(ped, A, N) {
+    const lot = lotNear(A, ped.pos.x, ped.pos.z, FOOD_KINDS, 70);
+    if (!lot || !lot.building || !lot.building.door) return false;
+    const d = lot.building.door, dir = doorOut(lot);
+    // stand just outside the counter door (a grab-and-go), facing in
+    ped._eatAt = { x: d.x + dir.x * 1.2, z: d.z + dir.z * 1.2 };
+    ped._eatFace = { x: d.x, z: d.z };
+    ped._eatUntil = now() + 2600 + rng() * 2200;
+    routeTo(ped, A, { x: ped._eatAt.x, z: ped._eatAt.z });
+    ped._goalKind = "eat";
     return true;
   }
 
@@ -889,6 +1127,19 @@
     if (!ped._clockedIn && night < 0.45 && hour >= 6 && hour < 10 && JOB_KINDS[ped.job] &&
         !ped.gang && !ped.vendor && !ped.vagrant) sEarn = Math.max(sEarn, 0.85) * 1.35;
 
+    // EAT: hunger pulls toward food the lower it gets — a strong, near-survival
+    // drive once it dips under ~0.45 (it outranks errands/chats; only threats and
+    // a real money panic beat a starving belly).
+    let sEat = 0;
+    if (N.food < 0.45 && !ped.vagrant) sEat = (1 - N.food) * 1.15;
+
+    // DESPERATION: broke AND hungry = the floor has dropped out. Earning turns
+    // urgent (multiply sEarn) and ordinary peds get bold enough to MUG (goEarn
+    // reads ped._desperate to widen the rich-mark reach + lower the aggr gate).
+    // This is the felt switch that turns a normal commuter into a stick-up kid.
+    ped._desperate = (N.food < 0.3 && N.money < 0.3 && !ped.vagrant && !ped.vendor);
+    if (ped._desperate) sEarn = Math.max(sEarn, 0.9) * 1.5;
+
     // CHILL: the social fallback, plus a baseline so nobody freezes
     let sChill = 0.15 + (1 - N.social) * 0.45;
 
@@ -948,15 +1199,15 @@
     sDefend *= (0.9 + rng() * 0.2); sProve *= (0.85 + rng() * 0.3);
     sHome *= (0.9 + rng() * 0.2); sChat *= (0.9 + rng() * 0.2);
     sErrand *= (0.85 + rng() * 0.3); sMoment *= (0.85 + rng() * 0.3);
-    sSched *= (0.9 + rng() * 0.2);
+    sSched *= (0.9 + rng() * 0.2); sEat *= (0.9 + rng() * 0.2);
 
     // rank the goals, try the best first; fall through if its opportunity isn't
     // actually there right now (e.g. no dealer to score from) to the next best.
     const order = [
       ["feud", sFeud], ["defend", sDefend], ["score", sScore], ["deal", sDeal],
-      ["climb", sClimb], ["prove", sProve], ["home", sHome], ["chat", sChat],
-      ["sched", sSched], ["earn", sEarn], ["errand", sErrand], ["moment", sMoment],
-      ["chill", sChill],
+      ["climb", sClimb], ["prove", sProve], ["home", sHome], ["eat", sEat],
+      ["chat", sChat], ["sched", sSched], ["earn", sEarn], ["errand", sErrand],
+      ["moment", sMoment], ["chill", sChill],
     ].sort((a, b) => b[1] - a[1]);
 
     for (let i = 0; i < order.length; i++) {
@@ -970,6 +1221,7 @@
       else if (kind === "climb") ok = goClimb(ped, A, N);
       else if (kind === "prove") ok = goProve(ped, A, N);
       else if (kind === "home") ok = goHome(ped, A);
+      else if (kind === "eat") ok = goEat(ped, A, N);
       else if (kind === "chat") ok = goChat(ped, A, chatMate);
       else if (kind === "sched") ok = schedProp ? goSched(ped, A, N, schedProp) : false;
       else if (kind === "earn") ok = goEarn(ped, A, N);
@@ -986,6 +1238,23 @@
     ped._goalCD = 3 + rng() * 4;
   }
 
+  // REAL WAGES (LE2): the money NEED still drives behaviour (a poor ped goes
+  // earning), but the wage that satisfies it is now ACTUAL CASH drawn through the
+  // ledger — wallet.js's cityWagePay drains the TILL that pays them (the shop's
+  // account), so a business with no money can't pay, and the cash a worker earns
+  // is real spendable money (rent, meals, a mark to mug). Tuned TINY per tick:
+  // pay is $/sim-hour off CITY_JOBS; `factor` keeps a whole shift ≈ one day's
+  // rent (a one-shot door/desk payday pays ~a day; a fieldwork/gig drip pays a
+  // sliver, many times). Lot may be null (door fallback / anchor) → wallet.js
+  // falls back to a generic 'city' account. Fully feature-detected.
+  function payWage(ped, lot, factor) {
+    if (!CBZ.CONFIG.CITY_LIVING_ECON || !CBZ.cityWagePay) return;
+    const J = CITY_JOBS[ped.job];
+    const pay = (J && J.pay != null) ? J.pay : 10;
+    const wage = Math.max(1, Math.round(pay * factor * (0.8 + rng() * 0.5)));
+    CBZ.cityWagePay(ped, lot || null, wage);   // wallet.js credits ped.cash, drains the till
+  }
+
   // ============================================================
   //  ARRIVAL EFFECTS — when a ped reaches/acts on its goal, the need is
   //  satisfied and (for trades) real value moves. Checked cheaply per slice;
@@ -995,11 +1264,17 @@
     const kind = ped._goalKind;
     if (!kind) return;
 
-    // WORK payday: arrived at the workplace door → earn a wage, fill money need
+    // WORK payday: arrived at the workplace door / desk → earn a wage, fill money
+    // need. The wage is REAL CASH now (LE2): cityWagePay drains the employer's
+    // till (the desk's lot for office work, the cached job lot for a door job;
+    // null lot → wallet's generic 'city' account). A one-shot day's pay — keep
+    // the satisfy(money) too (the NEED drives the commute; cash is the byproduct).
     if (kind === "work" && ped._payAt) {
       if (Math.hypot(ped.pos.x - ped._payAt.x, ped.pos.z - ped._payAt.z) < 4.5) {
         satisfy(N, "money", 0.4 + rng() * 0.3);
         satisfy(N, "social", 0.12);
+        const tillLot = (ped._deskAnchor && ped._deskAnchor.lot) || ped._jobLot || null;
+        if (ped._payIsJob) payWage(ped, tillLot, 1.2);     // one shift's pay at clock-in
         // arrived at YOUR OWN workplace → on the clock until dusk sends you home
         if (ped._payIsJob) { ped._clockedIn = true; ped.pause = Math.max(ped.pause, 1.5 + rng() * 2); }
         ped._payIsJob = false;
@@ -1008,13 +1283,196 @@
       return;
     }
 
-    // HOME (dusk clock-out): through the door — off the street, day done
+    // FIELDWORK (biome anchor jobs): the worker reaches a task spot, pauses and
+    // strikes a WORKING pose (char.working), then advances to the NEXT spot in
+    // the anchor's ring (wrapping). A patrol role (ranger/soldier) walks the ring
+    // CONTINUOUSLY — a beat with no long holds; a tending role (farmer/rancher/
+    // ski instructor/ground crew/shopkeeper) lingers a few seconds at each spot.
+    // Pay drips at every spot through the existing satisfy(...,'money',...), and
+    // the first arrival clocks them in so dusk's goHome releases the anchor.
+    if (kind === "fieldwork") {
+      const A = CBZ.city && CBZ.city.arena;   // resolve() has no A param — bind the live arena for routeTo
+      const a = ped._workAnchor;
+      if (!a || !a.spots || !a.spots.length) { ped._goalKind = null; return; }
+      if (!A) { ped._goalKind = null; return; }
+      const i = ped._anchorSpot | 0;
+      const spot = a.spots[i % a.spots.length];
+      const J = CITY_JOBS[ped.job];
+      const patrol = !!(J && J.patrol) || !!a.patrol;
+      if (Math.hypot(ped.pos.x - spot.x, ped.pos.z - spot.z) < 3.2) {
+        // arrived at this spot — clock in on the very first arrival of the shift
+        if (ped._payIsJob) { ped._clockedIn = true; ped._payIsJob = false; }
+        satisfy(N, "money", 0.16 + rng() * 0.18);          // the wage drips at work
+        payWage(ped, (a && a.lot) || null, 0.15);          // a sliver of REAL pay per spot — a whole ring ≈ a day (anchors may have no lot → wallet 'city' fallback)
+        satisfy(N, "social", 0.05);
+        ped.char && (ped.char.working = true);             // the working pose flag
+        // advance to the next task spot (wrap) and route there. We keep the goal
+        // as 'fieldwork' (never null it) so the worker walks the whole ring for
+        // the shift instead of re-entering the utility race after one spot. The
+        // CD is held long enough that the hold + walk play out first.
+        const ni = (i + 1) % a.spots.length;
+        ped._anchorSpot = ni;
+        const next = a.spots[ni];
+        routeTo(ped, A, { x: next.x, z: next.z });         // sets ped.pause = 0.4
+        ped._goalKind = "fieldwork";                       // routeTo doesn't change it, but be explicit
+        ped._payAt = { x: next.x, z: next.z };
+        if (patrol) {
+          // a beat — a brief square-up then keep flowing down the ring
+          ped.pause = Math.max(ped.pause, 0.4 + rng() * 0.6);
+          ped._goalCD = Math.max(ped._goalCD || 0, 1.5);
+        } else {
+          // tending — hold the spot a few seconds in the working pose before the
+          // next leg (the longer pause overrides routeTo's 0.4 above)
+          face(ped, a.x, a.z);
+          ped.pause = Math.max(ped.pause, 2.5 + rng() * 2.5);
+          ped._goalCD = Math.max(ped._goalCD || 0, 3.0);
+        }
+      } else {
+        // walking toward the current spot — don't let a re-plan yank them off
+        ped._goalCD = Math.max(ped._goalCD || 0, 1.5);
+      }
+      return;
+    }
+
+    // GIG (courier/delivery/cab DRIVE): the multi-leg run. giglife.js owns the
+    // car + the steering; this resolver advances the PHASES at each arrival.
+    //   toPickup → AT the curb: clock in, spawn/enter the car, pick a dropoff,
+    //              hand giglife the first car._gigTarget. (driving phase)
+    //   driving  → giglife steers the car to the drop; we just watch the car's
+    //              position (the ped rides inside it) and switch to atDrop when
+    //              the CAR reaches the dropoff. (no walking driven here)
+    //   atDrop   → PAY (money need), drop the fare/package, return the car,
+    //              release the old pickup → loop straight into a new run.
+    // Any broken precondition (giglife gone, car lost, no drop) ends the run
+    // cleanly back to the utility race.
+    if (kind === "gig") {
+      const phase = ped._gigPhase;
+      // -- leg 1→2: reached the pickup curb on foot → grab a car + a destination
+      if (phase === "toPickup") {
+        const at = ped._gigAt;
+        if (!at) { endGig(ped); return; }
+        if (Math.hypot(ped.pos.x - at.x, ped.pos.z - at.z) < 4.5) {
+          // clock in on arrival (so dusk's goHome releases the pickup + car)
+          if (ped._payIsJob) { ped._clockedIn = true; ped._payIsJob = false; }
+          const drop = CBZ.cityGigNearestDrop ? CBZ.cityGigNearestDrop(ped.pos.x, ped.pos.z, 30) : null;
+          const car = drop && CBZ.cityGigSpawnCar ? CBZ.cityGigSpawnCar(ped, drop, null) : null;
+          if (!car || !drop) { endGig(ped); ped.pause = Math.max(ped.pause, 1.0); return; }
+          ped._gigCar = car; ped._gigDrop = { x: drop.x, z: drop.z };
+          car._gigTarget = { x: drop.x, z: drop.z };
+          ped._gigPhase = "driving";
+          ped._goalKind = "gig";
+          ped._goalCD = Math.max(ped._goalCD || 0, 3);   // hold the goal while we drive
+          if (rng() < 0.3) bark(ped, ped.job === "cab driver" ? "“Where to? Hop in.”" : "“Got a drop to make.”", "#cfe6ff", 2.2);
+        } else {
+          ped._goalCD = Math.max(ped._goalCD || 0, 2);    // still walking to the curb
+        }
+        return;
+      }
+      // -- leg 2: driving (giglife steers car._gigTarget). Watch the CAR arrive.
+      if (phase === "driving") {
+        const car = ped._gigCar, drop = ped._gigDrop;
+        if (!car || car.dead || car.npcDriver !== ped || !drop) { endGig(ped); return; }
+        if (Math.hypot(car.pos.x - drop.x, car.pos.z - drop.z) < 5.5) {
+          ped._gigPhase = "atDrop";
+          ped._goalCD = 0.3;          // resolve the dropoff next pass
+        } else {
+          ped._goalCD = Math.max(ped._goalCD || 0, 1.5);  // keep the goal; giglife drives
+        }
+        return;
+      }
+      // -- leg 3: at the dropoff → PAY, drop cargo, return the car, cycle
+      if (phase === "atDrop") {
+        const car = ped._gigCar;
+        satisfy(N, "money", 0.35 + rng() * 0.3);          // the fare / delivery fee
+        satisfy(N, "social", 0.08);
+        // the fare is REAL money: route it through the ledger (null lot → the
+        // customer pays via wallet's 'city' account) for the same clamp/flow as
+        // every other wage. If the ledger isn't loaded, credit cash directly so
+        // a gig is never unpaid.
+        if (CBZ.CONFIG.CITY_LIVING_ECON && CBZ.cityWagePay) {
+          const fare = 8 + ((rng() * 14) | 0);
+          CBZ.cityWagePay(ped, null, fare);
+        } else if (ped.cash != null) {
+          ped.cash = (ped.cash | 0) + (8 + ((rng() * 14) | 0));   // real cash earned (no-ledger fallback)
+        }
+        if (rng() < 0.4) bark(ped, ped.job === "cab driver" ? "“Here you go. Cash or card?”" : "“Delivery! Sign here.”", "#cfe6ff", 2.2);
+        if (car && CBZ.cityGigReturnCar) CBZ.cityGigReturnCar(car, true);
+        if (CBZ.cityGigReleasePickup) CBZ.cityGigReleasePickup(ped);
+        ped._gigCar = null; ped._gigDrop = null; ped._gigAt = null; ped._gigPhase = null;
+        ped._goalKind = null;
+        // short beat, then the utility race re-picks "earn" → goGigRun starts a
+        // fresh run (still clocked in until dusk)
+        ped.pause = Math.max(ped.pause, 0.8 + rng());
+        ped._goalCD = 1.5 + rng() * 2;
+        return;
+      }
+      // unknown phase — recover
+      endGig(ped);
+      return;
+    }
+
+    // HOME (dusk clock-out): through the door — off the street, day done. This
+    // is also where RENT comes due (LE3): the FIRST time a tenant reaches their
+    // own door each city-day, the day's rent drains out of their wallet through
+    // wallet.js (cityRentPay credits the landlord's account). A broke tenant pays
+    // PARTIAL — they fall behind, and that arrears (rent need pinned low) is what
+    // the eviction sweep reads. The cash drain itself re-raises the money need on
+    // the next decay, so no extra satisfy is needed — paying rent makes you poor.
     if (kind === "home") {
       if (!ped._homeAt) { ped._goalKind = null; return; }
       if (Math.hypot(ped.pos.x - ped._homeAt.x, ped.pos.z - ped._homeAt.z) < 5) {
         satisfy(N, "social", 0.1);
+        // RENT DAY-GATE: at most once per city-day (the first home arrival). The
+        // rent NEED is settled by getting home and paying — that part runs even
+        // with NO ledger loaded (so the crowd doesn't all drift to the eviction
+        // floor just because wallet.js isn't up). The CASH transfer is the ledger's
+        // job: only cityRentPay actually drains the wallet + credits the landlord.
+        if (CBZ.CONFIG.CITY_LIVING_ECON && !ped.vagrant && ped._rentDay !== dayIndex()) {
+          const today = dayIndex();
+          const A = CBZ.city && CBZ.city.arena;
+          let homeLot = (ped._unit && ped._unit.lot) || ped._digs || null;
+          if ((!homeLot || (A && A.homeLots && A.homeLots.indexOf(homeLot) < 0)) && A) homeLot = digsLot(ped, A);
+          const hm = homeLot && homeLot.building && homeLot.building.home;
+          const rent = hm && hm.rent != null ? hm.rent : (8 + (ped.wealth || 0.4) * 40);
+          // what the tenant can actually cover (a broke one pays partial = behind).
+          const have = ped.cash != null ? (ped.cash | 0) : rent;
+          const due = Math.min(rent, have);
+          if (due > 0 && CBZ.cityRentPay && homeLot && hm) CBZ.cityRentPay(ped, homeLot, due);   // real wallet drain → landlord acct
+          ped._rentDay = today;     // stamp regardless (never retry the same day, even on a $0 pay)
+          // settle the rent NEED toward what they covered: a full pay calms it; a
+          // broke tenant's partial leaves it LOW — that arrears is what eviction reads.
+          satisfy(N, "rent", rent > 0 ? Math.min(1, due / rent) : 1);
+        }
         ped._homeAt = null; ped._goalKind = null;
       }
+      return;
+    }
+
+    // EAT: arrived at the food counter. If the ped can PAY (cash≥8), they buy a
+    // meal — food need filled, a few $ spent (which re-raises the money need on
+    // the next decay). If BROKE, they linger then drift off STILL HUNGRY — food
+    // stays low and desperation keeps climbing. That failure state is the point:
+    // the hungry-and-broke are exactly who turn to mugging (goEarn desperation).
+    if (kind === "eat") {
+      const e = ped._eatAt;
+      if (!e) { ped._goalKind = null; return; }
+      if (Math.hypot(ped.pos.x - e.x, ped.pos.z - e.z) < 2) {
+        ped.path = null; ped.target.set(e.x, 0, e.z);
+        ped.pause = Math.max(ped.pause, 1.6); ped.speed = 0;
+        if (ped._eatFace) face(ped, ped._eatFace.x, ped._eatFace.z);
+        ped._goalCD = Math.max(ped._goalCD || 0, 2);
+        if (now() > ped._eatUntil) {
+          if ((ped.cash | 0) >= 8) {
+            ped.cash -= 4 + ((rng() * 6) | 0);                 // the price of a meal
+            satisfy(N, "food", 0.6 + rng() * 0.3);             // belly full
+            satisfy(N, "social", 0.06);
+          } else {
+            satisfy(N, "food", 0.06);                          // can't pay — a scrap at best, still hungry
+          }
+          ped._eatAt = ped._eatFace = null; ped._goalKind = null;
+          ped._goalCD = 2 + rng() * 3; ped.pause = 0.4;
+        }
+      } else if (now() > (ped._eatUntil || 0) + 6000) { ped._eatAt = ped._eatFace = null; ped._goalKind = null; }
       return;
     }
 
@@ -1031,6 +1489,7 @@
         if (t > ped._qUntil) {                          // served — step off content
           satisfy(N, "social", 0.15 + rng() * 0.1);
           if ((ped.cash | 0) > 14) ped.cash -= 3 + ((rng() * 7) | 0);   // a small purchase
+          if (ped._errandFood) satisfy(N, "food", 0.4 + rng() * 0.25);  // a bite at the diner counter
           queueDrop(ped);
           ped._qSlot = ped._qFace = null; ped._goalKind = null;
           ped._goalCD = 2 + rng() * 3; ped.pause = 0.4;
@@ -1052,6 +1511,7 @@
         ped._goalCD = Math.max(ped._goalCD || 0, 2);
         if (now() > ped._winUntil) {
           satisfy(N, "social", 0.1);
+          if (ped._errandFood && (ped.cash | 0) >= 6) { ped.cash -= 2 + ((rng() * 4) | 0); satisfy(N, "food", 0.3 + rng() * 0.2); }  // grabbed something at the stand
           ped._winAt = ped._winFace = null; ped._goalKind = null;
           ped._goalCD = 2 + rng() * 4; ped.pause = 0.4;
         }
@@ -1341,7 +1801,22 @@
         // NEW identity's job on its next goEarn via tagOfficeJob.
         if (ped._deskAnchor && CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
         ped._officeJob = false;
-        ped._jobLot = null; ped._digs = null; ped._clockedIn = false; ped._payIsJob = false;
+        // give back any biome work-anchor the OLD identity held (frees the slot)
+        if (ped._workAnchor && CBZ.cityReleaseWorkAnchor) CBZ.cityReleaseWorkAnchor(ped);
+        ped._workAnchor = null; ped._anchorSpot = 0;
+        // give back any GIG run the OLD identity held (return the car, free the
+        // pickup) so a recycled body never strands a gig car or a pickup slot
+        if ((ped._gigCar || ped._gigPickup || ped._gigPhase)) endGig(ped);
+        ped._gigCar = null; ped._gigDrop = null; ped._gigAt = null; ped._gigPhase = null; ped._gigPickup = null;
+        if (ped.char) ped.char.working = false;
+        ped._jobLot = null; ped._digs = null; ped._unit = null; ped._clockedIn = false; ped._payIsJob = false;
+        // living-economy state: a fresh identity re-derives its home/rent/hunger
+        // (food + rent reset for free with ped._needs=null above). Drop the eat
+        // errand, the once-per-day rent stamp, the desperation/food-errand flags.
+        ped._rentDay = -1; ped._desperate = false; ped._errandFood = false;
+        ped._eatAt = null; ped._eatFace = null; ped._eatUntil = 0;
+        // an NPC robber recycled mid-heist gives the job slot back (director frees it below)
+        if (ped._npcJob) releaseNpcJob(ped);
         ped._qSlot = null; ped._qFace = null; ped._qUntil = 0;
         ped._winAt = null; ped._winFace = null; ped._winUntil = 0;
         ped._meetWith = null; ped._meetT = 0; ped._chatCD = 0;
@@ -1364,10 +1839,42 @@
         { const ri = _rampagers.indexOf(ped); if (ri >= 0) _rampagers.splice(ri, 1); }   // drop a recycled body from the director's live list
       }
 
+      // GIG DRIVING CARVE-OUT: a courier/cab mid-run IS controlled + inCar (we
+      // hid the body and giglife.js steers the car), so the generic skip below
+      // would freeze the run. While the driver is still riding the gig car
+      // (driving leg OR the atDrop hand-off that RETURNS the car), keep ticking
+      // resolve() so the multi-leg run advances (detects the car reaching the
+      // drop, then pays + frees the car). Once atDrop returns the car the ped is
+      // no longer inCar, so the normal path resumes next pass. Dead driver / lost
+      // car ends the run cleanly.
+      if (ped._goalKind === "gig" && ped.inCar && ped.inCar._gig &&
+          (ped._gigPhase === "driving" || ped._gigPhase === "atDrop")) {
+        if (ped.dead) { endGig(ped); ped._goalCD = 4; continue; }
+        resolve(ped, decayNeeds(ped));
+        ped._goalCD = Math.max(ped._goalCD || 0, 0.3);
+        continue;
+      }
+
       // never touch anyone the brain is busy driving, or who isn't ours to drive
       if (ped.dead || ped.vendor || ped.companion || ped.controlled ||
-          ped.inCar || ped.ko > 0) { ped._goalCD = 4; continue; }
+          ped.inCar || ped.ko > 0) {
+        // a gig driver whose car/phase got torn out from under them (player
+        // grabbed the car, car exploded) must release the run, not leak it
+        if (ped._goalKind === "gig" && !ped.inCar) endGig(ped);
+        ped._goalCD = 4; continue;
+      }
       if (busy(ped)) { ped._goalCD = 2 + rng() * 3; continue; }
+
+      // EVICTION SWEEP (low cadence): a tenant who's fallen badly behind on rent
+      // and is flat broke loses the unit — they flip to the vagrant life right
+      // where they stand (no respawn, an additive identity change). Gated to ~once
+      // per 30s per ped so it's a slow attrition, and hard-capped citywide so the
+      // street doesn't become all hobos. Housing pressure with a real failure
+      // state — and it feeds the night-hobo population.
+      if (CBZ.CONFIG.CITY_EVICTIONS && (ped._evictT || 0) <= now()) {
+        ped._evictT = now() + 28000 + rng() * 8000;
+        tryEvict(ped);
+      }
 
       // resolve the PAYOFF of whatever goal this ped is currently pursuing
       // (cheap: just a distance check + need top-up when they've arrived). Runs
@@ -1382,6 +1889,11 @@
       // "sit" via the brain (fight/flee), which busy() catches above. (C5)
       if (ped._deskAnchor && ped.char && ped.char.sitting === true &&
           nightAmt() < 0.5 && hourNow() < 19) { ped._goalCD = 3 + rng() * 3; continue; }
+
+      // ON A ROBBERY: a tagged robber is driven entirely by the crime director
+      // (tickNpcJob @36) — the utility race must NOT re-plan them off the job.
+      // (If they get engaged the director drops the tag and the brain takes over.)
+      if (ped._npcJob) { ped._goalCD = 1 + rng() * 2; continue; }
 
       // cooldown between fresh goal decisions
       if (ped._goalCD == null) ped._goalCD = rng() * 6;   // stagger first pass
@@ -1529,4 +2041,383 @@
       CBZ.cityStartRampage(best);
     }
   });
+
+  // ============================================================
+  //  EVICTION → VAGRANCY — housing pressure with a real failure state.
+  // ------------------------------------------------------------
+  //  A tenant whose rent need has been pinned at the floor for a sustained
+  //  stretch AND who is flat broke can't make rent — so they lose the unit and
+  //  fall to the street, flipping to the SAME panhandler life spawnVagrants
+  //  builds (begging via the existing role/_beg microBehaviour — no new behaviour
+  //  code). The body is NOT respawned or moved: it's an additive identity change
+  //  in place. Hard-capped citywide so the street never becomes all hobos, and
+  //  guarded so it NEVER touches a gang member / vendor / family / region-life /
+  //  cop / already-vagrant. This is what makes the rent dread mean something —
+  //  and it feeds the night-hobo population other systems lean on.
+  // ------------------------------------------------------------
+  const EVICT_MAX = 6;          // at most this many fresh evictions live citywide
+  let _evicted = 0;             // running count (reset on a new run)
+  // only an ORDINARY resident can be evicted (everything special is protected)
+  function evictEligible(p) {
+    if (!p || p.dead || p.vagrant || p.vendor || p.companion || p.controlled || p.recruited || p._parked) return false;
+    if (p.gang || p._regionLife || p.kind === "cop" || p.guard) return false;
+    if (p.family && p.family.length) return false;       // a family member has people; they don't get put out
+    if (p.inCar || p.ko > 0 || p.rage || p.hostage) return false;
+    if (p.archetype === "vagrant" || p.job === "panhandling") return false;
+    return true;
+  }
+  function tryEvict(ped) {
+    if (_evicted >= EVICT_MAX) return;
+    if (!evictEligible(ped)) { ped._rentLowSince = 0; return; }
+    const N = ped._needs;
+    if (!N) return;
+    const broke = (ped.cash != null ? (ped.cash | 0) : 99) < 5;
+    const behind = (N.rent || 0) < 0.06;                  // rent need at the floor = badly behind
+    if (!broke || !behind) { ped._rentLowSince = 0; return; }
+    // require the arrears to have PERSISTED (not a one-frame dip) before we put
+    // someone out — a sustained window of broke-and-behind.
+    if (!ped._rentLowSince) { ped._rentLowSince = now(); return; }
+    if (now() - ped._rentLowSince < 25000) return;        // ~25s pinned at the floor
+    // --- evict: additive flip to the panhandler life, in place (no respawn) ---
+    ped.vagrant = true;                                   // cops/quests read it (move-along)
+    ped._role = "panhandler";                             // begs via the existing role/bark loop
+    ped.archetype = "vagrant"; ped.job = "panhandling";
+    ped.wealth = 0.02 + rng() * 0.04;
+    ped._beg = { x: ped.pos.x, z: ped.pos.z };            // post up where they were put out
+    // the shuffle — a permanent slow-down (NOT the joyT temp boost, so don't touch
+    // _baseSpeed0); end any live boost first so it can't restore the old speed.
+    if (ped._joyT > 0 && ped._baseSpeed0 != null) { ped.baseSpeed = ped._baseSpeed0; ped._baseSpeed0 = null; ped._joyT = 0; }
+    if (ped.baseSpeed) ped.baseSpeed = Math.max(0.45, ped.baseSpeed * 0.6);
+    ped.armed = false; ped.weapon = null;
+    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
+    // shed the housed life so nothing routes them back to a unit they've lost
+    ped._digs = null; ped._unit = null; ped._jobLot = null; ped._clockedIn = false;
+    if (ped._deskAnchor && CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
+    if (ped._workAnchor && CBZ.cityReleaseWorkAnchor) CBZ.cityReleaseWorkAnchor(ped);
+    ped._workAnchor = null; ped._goalKind = null; ped._goalCD = 1 + rng() * 2;
+    if (N) { N.rent = 1; N.kRent = 0; }                   // a vagrant carries no rent
+    // drift toward the nearest camp (their new address: bedroll, fire, cart) if
+    // props.js seeded any — else they just hold the spot they were put out on.
+    const camps = CBZ.cityCamps, A = CBZ.city && CBZ.city.arena;
+    if (camps && camps.length && A) {
+      let best = null, bd = 200 * 200;
+      for (let c = 0; c < camps.length; c++) {
+        const dx = camps[c].x - ped.pos.x, dz = camps[c].z - ped.pos.z, d2 = dx * dx + dz * dz;
+        if (d2 < bd) { bd = d2; best = camps[c]; }
+      }
+      if (best) { ped._beg = { x: best.x, z: best.z }; routeTo(ped, A, { x: best.x, z: best.z }); }
+    }
+    _evicted++;
+    if (CBZ.cityFeed && CBZ.player && Math.hypot(ped.pos.x - CBZ.player.pos.x, ped.pos.z - CBZ.player.pos.z) < 60) {
+      CBZ.cityFeed("🏚️ Evicted — another soul put out on the street.", "#9a8d7a");
+    }
+  }
+
+  // ============================================================
+  //  EMERGENT CRIME DIRECTOR — the city robs itself.
+  // ------------------------------------------------------------
+  //  Round a corner and a robbery is already IN PROGRESS: a crew of armed,
+  //  violent NPCs holding up a BANK (alarms, panic, cops rolling), or a
+  //  thunderous roadside stick-up on an armored CASH TRUCK (the guard crew bails
+  //  and a real firefight erupts). The player can JOIN it, STOP it, or swoop the
+  //  spill in the aftermath. It reuses the EXISTING heat pipeline (each robber
+  //  self-wanteds via cityNpcOffense so the NPC police hunt THEM — exactly like a
+  //  rampager — plus cityTagWitnesses + cityPanic for the theatre), and NEVER
+  //  touches the player's own heists.js flow (a distinct ped._npcJob tag + its
+  //  own phase, never cityHeistState). Bounded to ONE big NPC robbery citywide so
+  //  it stays an EVENT, theatre-gated near the player, fully feature-detected.
+  // ------------------------------------------------------------
+  // hard concurrency cap = ONE big NPC robbery citywide: a single _npcJobKind is
+  // ever set at a time (the director tick early-returns while one runs), so bank
+  // and cash-truck jobs are mutually exclusive AND capped at one by construction.
+  const ROB_CREW = 3;            // up to this many robbers per job
+  let _npcJobCrew = [];          // the live robbers (bank OR truck — shared cap)
+  let _npcJobKind = null;        // "bank" | "truck" while one is running
+  let _npcJobTarget = null;      // the bank lot {door} or the live truck car
+  let _jobCD = 0;                // seconds until the next job is eligible
+  let _jobCracked = false;       // a truck job already attempted its rare crack
+
+  // a robber gives the job up (engaged, dead, recycled): drop the tag + let the
+  // brain take over. Hoisted so the recycle block can call it.
+  function releaseNpcJob(ped) {
+    if (!ped) return;
+    ped._npcJob = null; ped._npcJobPhase = null; ped._npcJobAt = null;
+    const i = _npcJobCrew.indexOf(ped);
+    if (i >= 0) _npcJobCrew.splice(i, 1);
+  }
+  function endNpcJob() {
+    for (let i = _npcJobCrew.length - 1; i >= 0; i--) releaseNpcJob(_npcJobCrew[i]);
+    // clear the one-shot "robbed" mark off the target so the SAME bank/truck can
+    // be hit again on a later cooldown (it's per-job theatre, not a permanent state)
+    if (_npcJobTarget) _npcJobTarget._npcRobbed = false;
+    _npcJobCrew = []; _npcJobKind = null; _npcJobTarget = null; _jobCracked = false;
+    _jobCD = 30 + rng() * 40;     // a long calm before the next big job
+  }
+  // is THIS ped fit to be pulled into a robbery crew? armed + genuinely violent +
+  // NON-gang (gangs run their own ops) + ours to drive + not already special.
+  function robberEligible(p) {
+    if (!p || p.dead || p.gang || p.vendor || p.vagrant || p.companion || p.controlled || p.recruited || p._parked) return false;
+    if (p.inCar || p.ko > 0 || p.kind === "cop" || p.guard || p.rampage) return false;
+    if (p._regionLife || (p.family && p.family.length)) return false;
+    if (p.rage || p.surrender || (p.npcWanted | 0) >= 1) return false;
+    if (!p.armed) return false;                          // a robbery is an ARMED crew
+    if ((p.aggr || 0) < (A0().crook || 0.72)) return false;   // violent band only
+    return true;
+  }
+  // the stick-up beat fires the heat/witness/panic pipeline at a spot, credits
+  // the crew, and registers the crime as a CITY EVENT. Crucially this DOES NOT
+  // star the PLAYER — an NPC's robbery is the NPCs' problem: each robber self-
+  // wanteds via cityNpcOffense (npcWanted), so the NPC police hunt THEM exactly
+  // like a rampager. We tag witnesses + panic the bystanders directly, and fire
+  // the silent/noWanted cityEvent (the same shape wanted.js' crime() uses for the
+  // feed) so a robbery shows up in the world WITHOUT bleeding into player heat.
+  function robberyBeat(x, z, sev, label) {
+    if (CBZ.cityNpcOffense) {
+      for (let i = 0; i < _npcJobCrew.length; i++) {
+        const r = _npcJobCrew[i];
+        if (r && !r.dead) { CBZ.cityNpcOffense(r, 70, "armed-robbery"); if ((r.npcWanted | 0) < 2) r.npcWanted = 2; }
+      }
+    }
+    if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(x, z, sev, "robbery");
+    if (CBZ.cityPanic) CBZ.cityPanic(x, z, 2.0, _npcJobCrew[0] || null);
+    // the city EVENT/feed at the robbery location WITHOUT touching player wanted
+    // (silent + noWanted — never report() into g.heat for an NPC's crime).
+    if (CBZ.cityEvent) {
+      try { CBZ.cityEvent("crime", { crime: label || "Robbery", severity: sev, x: x, z: z, panic: Math.min(5, sev / 30) }, { silent: true, noWanted: true }); } catch (e) {}
+    }
+    if (CBZ.cityFeed && CBZ.player && Math.hypot(x - CBZ.player.pos.x, z - CBZ.player.pos.z) < 90) {
+      CBZ.cityFeed("🚨 " + (label || "Robbery") + " in progress!", "#ff9a5a");
+    }
+  }
+
+  // theatre gate: a job is only worth staging when the player is actually in the
+  // city to STUMBLE INTO it (not a sim running off in an empty quarter). Returns
+  // the live player actor or null; the start fns place the job at a believable
+  // distance from it.
+  function playerNear() {
+    const P = CBZ.player; if (!P || P.dead || !P.pos) return null;
+    return P;
+  }
+
+  // start a BANK job: pick a bank lot + a crew nearby, route them to the door.
+  function startBankJob(peds, A) {
+    if (!A.shopLots) return false;
+    const P = playerNear();
+    // candidate banks, preferring one a believable distance from the player
+    let bank = null, bestD = -1;
+    for (let i = 0; i < A.shopLots.length; i++) {
+      const l = A.shopLots[i];
+      if (l.kind !== "bank" || !l.building || !l.building.door) continue;
+      const d = P ? Math.hypot(l.building.door.x - P.pos.x, l.building.door.z - P.pos.z) : 0;
+      if (P && (d < 40 || d > 220)) continue;            // near enough to find, not in your lap
+      if (d > bestD) { bestD = d; bank = l; }             // farthest in-window reads as "across town"
+    }
+    if (!bank) return false;
+    const door = bank.building.door;
+    // gather a crew of armed violent peds near the bank
+    const crew = [];
+    const n = peds.length, start = (rng() * n) | 0;
+    for (let i = 0; i < n && crew.length < ROB_CREW; i++) {
+      const p = peds[(start + i) % n];
+      if (!robberEligible(p)) continue;
+      if (Math.hypot(p.pos.x - door.x, p.pos.z - door.z) > 70) continue;   // within a block of the bank
+      crew.push(p);
+    }
+    if (crew.length < 2) return false;                   // a robbery needs at least a pair
+    _npcJobKind = "bank"; _npcJobTarget = bank; _npcJobCrew = crew; _jobCracked = false;
+    for (let i = 0; i < crew.length; i++) {
+      const p = crew[i];
+      p._npcJob = "bank"; p._npcJobPhase = "toTarget";
+      p._npcJobAt = { x: door.x + (rng() - 0.5) * 4, z: door.z + (rng() - 0.5) * 4 };
+      routeTo(p, A, { x: p._npcJobAt.x, z: p._npcJobAt.z });
+      p._goalKind = null; p._goalCD = Math.max(p._goalCD || 0, 3);
+    }
+    return true;
+  }
+
+  // start a CASH-TRUCK job: a live armored truck + a crew near its route. The
+  // hull is explosive-only, so this is a STICK-UP firefight — the robbers open
+  // fire on the truck, its guard crew bails and engages, and it becomes a loud
+  // roadside battle (rare crack → cash spill the player can swoop). armored.js
+  // is fully feature-detected; absent → this branch just never fires.
+  function startTruckJob(peds, A) {
+    const AR = CBZ.cityArmored;
+    if (!AR || !AR.active || !AR.active()) return false;
+    const truck = AR.truck && AR.truck();
+    if (!truck || truck.dead || truck.armoredCracked || !truck.pos) return false;
+    const tx = truck.pos.x, tz = truck.pos.z;
+    const P = playerNear();
+    if (P && Math.hypot(tx - P.pos.x, tz - P.pos.z) > 220) return false;   // stage it where you might see it
+    const crew = [];
+    const n = peds.length, start = (rng() * n) | 0;
+    for (let i = 0; i < n && crew.length < ROB_CREW; i++) {
+      const p = peds[(start + i) % n];
+      if (!robberEligible(p)) continue;
+      if (Math.hypot(p.pos.x - tx, p.pos.z - tz) > 60) continue;   // near the truck's road
+      crew.push(p);
+    }
+    if (crew.length < 2) return false;
+    _npcJobKind = "truck"; _npcJobTarget = truck; _npcJobCrew = crew; _jobCracked = false;
+    for (let i = 0; i < crew.length; i++) {
+      const p = crew[i];
+      p._npcJob = "truck"; p._npcJobPhase = "toTarget";
+      p._npcJobAt = { x: tx, z: tz };                    // intercept the truck's position
+      routeTo(p, A, { x: tx + (rng() - 0.5) * 6, z: tz + (rng() - 0.5) * 6 });
+      p._goalKind = null; p._goalCD = Math.max(p._goalCD || 0, 2);
+    }
+    return true;
+  }
+
+  // advance every live robber one beat (called from the director tick). Handles
+  // engagement bail-out (a robber who's now fighting/fleeing/hunted drops the
+  // job and lets think()/rage take over), the arrival stick-up, and the getaway.
+  function tickNpcJob(dt, A) {
+    // prune crew who bailed/died; if all gone, the job's over
+    for (let i = _npcJobCrew.length - 1; i >= 0; i--) {
+      const r = _npcJobCrew[i];
+      if (!r || r.dead || r._parked || r.controlled || r.companion) { releaseNpcJob(r); continue; }
+      // ENGAGED → drop the job, fight for your life (the brain owns it now)
+      if (r.surrender || r.ko > 0 || (r.fear || 0) > 4 || r.state === "flee" || r.state === "surrender") {
+        releaseNpcJob(r); continue;
+      }
+    }
+    if (!_npcJobCrew.length) { if (_npcJobKind) endNpcJob(); return; }
+
+    if (_npcJobKind === "bank") {
+      // is the whole crew at the door yet? hold them in the stick-up, then on a
+      // beat fire the pipeline + flee.
+      const bank = _npcJobTarget;
+      const door = bank && bank.building && bank.building.door;
+      if (!door) { endNpcJob(); return; }
+      // iterate BACKWARD — releaseNpcJob() splices the crew mid-loop (a fled
+      // robber leaves the job), so a forward index would skip the next member.
+      for (let i = _npcJobCrew.length - 1; i >= 0; i--) {
+        const r = _npcJobCrew[i];
+        const at = r._npcJobAt || { x: door.x, z: door.z };
+        if (r._npcJobPhase === "toTarget") {
+          if (Math.hypot(r.pos.x - at.x, r.pos.z - at.z) < 4) {
+            r._npcJobPhase = "stickup";
+            r._npcJobT = now() + 2200 + rng() * 1800;     // a stick-up beat at the door
+            r.path = null; r.target.set(door.x, 0, door.z); face(r, door.x, door.z);
+            r.pause = Math.max(r.pause, 1.4);
+            if (rng() < 0.4) bark(r, "“EVERYBODY DOWN! Hands where I can see ‘em!”", "#ff8a5a", 2.4);
+          } else { r._goalCD = Math.max(r._goalCD || 0, 1.5); }
+        } else if (r._npcJobPhase === "stickup") {
+          r.path = null; r.pause = Math.max(r.pause, 1.0);
+          if (now() > (r._npcJobT || 0)) {
+            // the score lands: fire the heat/witness/panic pipeline ONCE (first
+            // crew member to finish triggers it), credit each robber, then flee.
+            if (!bank._npcRobbed) {
+              bank._npcRobbed = true;
+              robberyBeat(door.x, door.z, 90, "Bank robbery");
+            }
+            // a real cut of cash for pulling it off (the spendable byproduct)
+            if (r.cash != null) r.cash = (r.cash | 0) + (120 + ((rng() * 240) | 0));
+            r._npcJobPhase = "flee";
+            // a getaway heading: bolt away from the bank
+            const ang = Math.atan2(r.pos.z - door.z, r.pos.x - door.x) + (rng() - 0.5);
+            const fx = r.pos.x + Math.cos(ang) * 40, fz = r.pos.z + Math.sin(ang) * 40;
+            routeTo(r, A, { x: fx, z: fz });
+            r.state = "flee"; r.fear = Math.max(r.fear || 0, 3);
+            if (rng() < 0.5) bark(r, "“GO GO GO!”", "#ff8a5a", 1.8);
+            releaseNpcJob(r);                             // off the job — now just a fleeing wanted man
+          }
+        }
+      }
+      if (!_npcJobCrew.length) endNpcJob();
+      return;
+    }
+
+    if (_npcJobKind === "truck") {
+      const AR = CBZ.cityArmored;
+      const truck = _npcJobTarget;
+      if (!truck || truck.dead || !truck.pos || (AR && AR.active && !AR.active())) { endNpcJob(); return; }
+      const tx = truck.pos.x, tz = truck.pos.z;
+      let firedOnce = false;
+      // backward — releaseNpcJob() splices mid-loop when a robber's beat ends
+      for (let i = _npcJobCrew.length - 1; i >= 0; i--) {
+        const r = _npcJobCrew[i];
+        if (r._npcJobPhase === "toTarget") {
+          // chase the (rolling) truck; once close, open fire on it
+          r._npcJobAt = { x: tx, z: tz };
+          if (Math.hypot(r.pos.x - tx, r.pos.z - tz) < 9) {
+            r._npcJobPhase = "stickup";
+            r._npcJobT = now() + 3000 + rng() * 3000;
+            // RAGE at the truck: peds.js drives the shooting; the truck's wrap
+            // sees damage → its guard crew bails and engages → a real firefight.
+            r.rage = truck; r.state = "fight"; r.target.set(tx, 0, tz);
+            if (rng() < 0.4) bark(r, "“Stop the truck! Out of the cab — NOW!”", "#ff8a5a", 2.4);
+          } else {
+            r.target.set(tx, 0, tz); r.path = null; r._goalCD = Math.max(r._goalCD || 0, 1.0);
+          }
+        } else if (r._npcJobPhase === "stickup") {
+          // keep the gun on the truck; fire the pipeline once
+          if (!truck._npcRobbed) { truck._npcRobbed = true; firedOnce = true; }
+          if (truck.pos) { r.rage = truck; r.state = "fight"; r.target.set(truck.pos.x, 0, truck.pos.z); }
+          if (r.cash != null && rng() < 0.02) r.cash = (r.cash | 0) + 20;   // grabbing loose notes
+          if (now() > (r._npcJobT || 0)) {
+            // beat's done — they either keep fighting the bailed guards (the brain
+            // owns that via rage) or peel off; either way drop the director tag.
+            releaseNpcJob(r);
+          }
+        }
+      }
+      if (firedOnce) robberyBeat(tx, tz, 80, "Cash-truck robbery");
+      // RARE crack: if armored.js exposes it, a small chance the assault blows the
+      // doors and SPILLS the cash (the fat score the player can swoop). One try.
+      if (!_jobCracked && AR && AR.crack && !truck.armoredCracked && rng() < 0.012) {
+        _jobCracked = true;
+        try { AR.crack(); } catch (e) {}
+        if (CBZ.cityFeed && CBZ.player && Math.hypot(tx - CBZ.player.pos.x, tz - CBZ.player.pos.z) < 120) {
+          CBZ.cityFeed("💥 The truck's cracked — cash everywhere!", "#ffd451");
+        }
+      }
+      if (!_npcJobCrew.length) endNpcJob();
+      return;
+    }
+
+    // unknown kind — recover
+    endNpcJob();
+  }
+
+  CBZ.onUpdate(36, function (dt) {
+    if (g.mode !== "city") return;
+    if (!CBZ.CONFIG.CITY_NPC_HEISTS) return;
+    const A = CBZ.city && CBZ.city.arena;
+    const peds = CBZ.cityPeds;
+    if (!A || !A.shopLots || !peds || !peds.length) return;
+
+    // a job in progress: advance it, and don't start another (cap = 1).
+    if (_npcJobKind) { tickNpcJob(dt, A); return; }
+
+    if (_jobCD > 0) { _jobCD -= dt; return; }
+    _jobCD = 6 + rng() * 8;        // re-roll cadence between attempts
+
+    // only stage a robbery when the player is actually in the city to stumble
+    // into it (theatre) — otherwise hold (saves the event for when it'll be seen).
+    if (!playerNear()) return;
+
+    // MUTUALLY EXCLUSIVE: prefer a live cash-truck (rarer + louder) when one's
+    // rolling, else a bank job. Either way the cap of ONE is enforced by _npcJobKind.
+    if (rng() < 0.45 && startTruckJob(peds, A)) return;
+    startBankJob(peds, A);
+  });
+
+  // fresh-run reset: clear the director + eviction state so a new city never
+  // inherits an old robbery crew or eviction count. Wrap cityRampageReset (the
+  // canonical new-run hook peds.js fires) without clobbering its existing body.
+  (function () {
+    const prevReset = CBZ.cityRampageReset;
+    CBZ.cityRampageReset = function () {
+      if (prevReset) try { prevReset(); } catch (e) {}
+      // release any live robbery crew (drop tags) and reset the cadence
+      for (let i = _npcJobCrew.length - 1; i >= 0; i--) {
+        const r = _npcJobCrew[i];
+        if (r) { r._npcJob = null; r._npcJobPhase = null; r._npcJobAt = null; }
+      }
+      _npcJobCrew = []; _npcJobKind = null; _npcJobTarget = null; _jobCracked = false;
+      _jobCD = 25 + rng() * 30;
+      _evicted = 0;
+    };
+  })();
 })();

@@ -53,6 +53,38 @@
                  colors: { legs: 0x23262e, torso: 0x3a3f4a, collar: 0x2a2e36, arms: 0x3a3f4a, shoes: 0x191b20 } },
     tracksuit: { id: "tracksuit", name: "Corner Tracksuit", tier: "street", who: "hustlers",         price: 180,  drip: 3,
                  colors: { legs: 0x20242c, torso: 0x2bb673, collar: 0xeef3f7, arms: 0x2bb673, shoes: 0xf2f2f2 } },
+    // ---- NEW STREETWEAR (painted ids in clothes.js; feature-detected — a
+    //      missing painter falls back to the flat colors below, never a crash) ----
+    puffer:    { id: "puffer",    name: "Block Puffer",     tier: "street", who: "corner crews",     price: 220,  drip: 4,
+                 colors: { legs: 0x20242c, torso: 0x1d1f26, collar: 0x14161b, arms: 0x1d1f26, shoes: 0x101216 } },
+    denim_jacket: { id: "denim_jacket", name: "Denim Jacket", tier: "street", who: "the block",      price: 160,  drip: 3,
+                 colors: { legs: 0x2c3340, torso: 0x3a536e, collar: 0x2c4156, arms: 0x3a536e, shoes: 0x2b2b2b } },
+    varsity:   { id: "varsity",   name: "Varsity Jacket",   tier: "street", who: "young money",      price: 280,  drip: 5,
+                 colors: { legs: 0x23262e, torso: 0x6e1f2b, collar: 0xe9eaec, arms: 0x1d1f26, shoes: 0xe9eaec } },
+    // ---- NEW WORK UNIFORMS (jobFit casts these; painted in clothes.js when
+    //      present, else flat fallback) ----
+    chef:      { id: "chef",      name: "Chef Whites",      tier: "work",   who: "line cooks",       price: 0,    drip: 0,
+                 colors: { legs: 0x2b2f36, torso: 0xf0ead8, collar: 0xe2dcc8, arms: 0xf0ead8, shoes: 0xd8d8d8 } },
+    waiter:    { id: "waiter",    name: "Waiter Blacks",    tier: "work",   who: "wait staff",       price: 0,    drip: 1,
+                 colors: { legs: 0x141519, torso: 0x16171c, collar: 0xe9eaec, arms: 0x16171c, shoes: 0x101216 } },
+    mailman:   { id: "mailman",   name: "Mail Carrier Blues", tier: "work", who: "mail carriers",    price: 0,    drip: 0,
+                 colors: { legs: 0x2f4a6b, torso: 0x3a6a96, collar: 0x274056, arms: 0x3a6a96, shoes: 0x2b241c } },
+    pilot:     { id: "pilot",     name: "Captain's Stripes", tier: "work",  who: "pilots",           price: 0,    drip: 2,
+                 colors: { legs: 0x141826, torso: 0x16203a, collar: 0xe9eaec, arms: 0x16203a, shoes: 0x101216 } },
+    janitor:   { id: "janitor",   name: "Custodian Greys",  tier: "work",   who: "custodians",       price: 0,    drip: 0,
+                 colors: { legs: 0x3a3f46, torso: 0x4a5560, collar: 0x363b42, arms: 0x4a5560, shoes: 0x2b2b2b } },
+    valet:     { id: "valet",     name: "Valet Vest",       tier: "work",   who: "valets",           price: 0,    drip: 1,
+                 colors: { legs: 0x16171c, torso: 0x8a1f24, collar: 0xe9eaec, arms: 0x16171c, shoes: 0x101216 } },
+    busdriver: { id: "busdriver", name: "Transit Uniform",  tier: "work",   who: "bus drivers",      price: 0,    drip: 0,
+                 colors: { legs: 0x24304a, torso: 0x2f5a6b, collar: 0x1c3a44, arms: 0x2f5a6b, shoes: 0x101216 } },
+    coveralls: { id: "coveralls", name: "Work Coveralls",   tier: "work",   who: "grease monkeys",   price: 0,    drip: 0,
+                 colors: { legs: 0x3a4150, torso: 0x3a4150, collar: 0x2a2f3a, arms: 0x3a4150, shoes: 0x2b241c } },
+    // ---- NIGHTLIFE / DRESSES (sprinkled onto a fraction of civilians near the
+    //      club; painted dress/sundress in clothes.js when present) ----
+    dress:     { id: "dress",     name: "Evening Dress",    tier: "fit",    who: "the night crowd",  price: 640,  drip: 8,
+                 colors: { legs: 0x16171c, torso: 0x6e1f2b, collar: 0x4a141d, arms: 0x6e1f2b, shoes: 0x16171c } },
+    sundress:  { id: "sundress",  name: "Summer Dress",     tier: "fit",    who: "day strollers",    price: 240,  drip: 4,
+                 colors: { legs: 0xe9d8c8, torso: 0xd98aa6, collar: 0xe2b2c2, arms: 0xd98aa6, shoes: 0xf2f2f2 } },
     // ---- work uniforms (a JOB on your back — casting wears these) ----
     vendor:    { id: "vendor",    name: "Vendor Apron",     tier: "work",   who: "counter clerks",   price: 0,    drip: 0,
                  colors: { legs: 0x2e3138, torso: 0xc8553a, collar: 0xf0ead8, arms: 0xf0ead8, shoes: 0x2b2b2b } },
@@ -183,6 +215,15 @@
     { blazer: "blazer_charcoal", shirt: "shirt_navy_collar",     tie: "tie_burgundy", shirtHex: 0x1c2030 },
     { blazer: "blazer_navy",     shirt: "shirt_charcoal_collar", tie: "tie_silver",   shirtHex: 0x2a2d34 },
     { blazer: "blazer_burgundy", shirt: "shirt_white_collar",    tie: "tie_navy",     shirtHex: 0xf2f2f2 },
+    { blazer: "blazer_navy",     shirt: "shirt_white_collar",    tie: "tie_silver",   shirtHex: 0xf2f2f2 },
+    { blazer: "blazer_charcoal", shirt: "shirt_white_collar",    tie: "tie_red",      shirtHex: 0xe9eaec },
+    { blazer: "blazer_charcoal", shirt: "shirt_charcoal_collar", tie: "tie_burgundy", shirtHex: 0x2a2d34 },
+    { blazer: "blazer_navy",     shirt: "shirt_navy_collar",     tie: "tie_royal",    shirtHex: 0x1c2030 },
+    { blazer: "blazer_forest",   shirt: "shirt_white_collar",    tie: "tie_forest",   shirtHex: 0xf2f2f2 },
+    { blazer: "blazer_burgundy", shirt: "shirt_charcoal_collar", tie: "tie_silver",   shirtHex: 0x2a2d34 },
+    { blazer: "blazer_black",    shirt: "shirt_white_collar",    tie: "tie_charcoal", shirtHex: 0xf2f2f2 },
+    { blazer: "blazer_navy",     shirt: "shirt_royal_collar",    tie: "tie_navy",     shirtHex: 0x274690 },
+    { blazer: "blazer_charcoal", shirt: "shirt_burgundy_collar", tie: "tie_pink",     shirtHex: 0x6e1f2b },
   ];
   // build a business RECORD that carries a composite item list. recolorRig
   // honors rec.composite via CBZ.cityApplyComposite, so the body wears a real
@@ -196,8 +237,19 @@
       id: "biz:" + idx, name: "Business Suit", tier: "money", who: "professionals",
       price: 0, drip: base.drip, formal: "suit",
       colors: { legs: JEAN, torso: c.shirtHex, collar: c.shirtHex, arms: c.shirtHex, shoes: 0x14161c },
-      composite: { shirt: c.shirtHex, legs: JEAN, items: [c.blazer, c.shirt, c.tie] },
+      // feature-detect every composable id: a clothes.js that doesn't ship a
+      // given blazer/shirt/tie just drops it from the list (cityApplyComposite
+      // ignores unknown ids anyway, but a clean list keeps the drip honest).
+      composite: { shirt: c.shirtHex, legs: JEAN, items: compFilter([c.blazer, c.shirt, c.tie]) },
     };
+  }
+  // keep only composable ids clothes.js actually knows (graceful when the
+  // sibling clothes.js wave hasn't landed a particular garment yet).
+  function compFilter(ids) {
+    if (!CBZ.cityComposableSpec) return ids.slice();   // can't check → trust the list
+    const out = [];
+    for (let i = 0; i < ids.length; i++) if (CBZ.cityComposableSpec(ids[i])) out.push(ids[i]);
+    return out;
   }
   function pickBizIdx(spec) {
     const rng = spec && spec.rng;
@@ -205,6 +257,88 @@
     // stable-ish fallback so the same body keeps one look across re-dresses
     const seed = (spec && (spec.seed | 0)) || 0;
     return Math.abs(seed) % BIZ_COMPOSITES.length;
+  }
+
+  // ============================================================
+  //  PAINTED SUITS — the "suit|N" look (SUIT_STYLES in clothes.js). Higher
+  //  archetypes wear a VARIED painted suit instead of the composed blazer so
+  //  the rich crowd reads as bespoke, not off-the-rack. We pick a STYLE INDEX
+  //  deterministically off the body and hand it to clothes.js two ways for
+  //  forward-compat:
+  //    • id:"suit"     — the CURRENT clothes.js painted-suit path (keyOf reads
+  //      id==="suit"); fires today.
+  //    • suitStyle:N   — the parameterized SUIT_STYLES selector the sibling
+  //      wave reads; ignored harmlessly by today's clothes.js.
+  //  Either way recolorRig's flat fallback still tints a believable suit if no
+  //  painter exists, so this never crashes on a partial clothes.js.
+  //
+  //  STYLE FAMILIES (indices are advisory — clothes.js owns the real table; we
+  //  only steer ARCHETYPE→family so the look READS right):
+  //    pinstripe (mob), tux/3-piece (old money), colored/DB (socialite),
+  //    charcoal/navy notch (generic exec).
+  // ============================================================
+  // a guess at how many styles clothes.js ships (read it if exposed, else a
+  // safe default that the modulo keeps in-range for any real table size).
+  function suitStyleCount() {
+    const n = CBZ.citySuitStyleCount && (CBZ.citySuitStyleCount() | 0);
+    return n > 0 ? n : 20;
+  }
+  // archetype → a small set of preferred style indices (deterministic pick
+  // within the set via the seed). Conservative, table-agnostic mapping: the
+  // sibling wave's SUIT_STYLES is ordered notch→pinstripe→DB→3-piece→color→tux,
+  // so these ranges aim at the right families and degrade to a modulo if the
+  // real table is shorter.
+  const SUIT_FAMILIES = {
+    mobster:   [4, 5, 6, 7],        // pinstripe band
+    made:      [4, 5, 6, 7],        // pinstripe band
+    tycoon:    [12, 13, 18, 19],    // 3-piece / tux band
+    billionaire:[12, 13, 18, 19],
+    oldmoney:  [12, 13, 18, 19],
+    socialite: [8, 9, 10, 11, 14],  // double-breasted / colored band
+    boss:      [0, 1, 2, 3],        // charcoal/navy notch
+    exec:      [0, 1, 2, 3],
+  };
+  function suitStyleFor(spec) {
+    const a = (spec && spec.archetype) || "";
+    const fam = SUIT_FAMILIES[a];
+    const seed = Math.abs((spec && (spec.seed | 0)) || 0);
+    const n = suitStyleCount();
+    if (fam && fam.length) {
+      // walk the family for the first in-range index (shorter tables degrade
+      // gracefully); if none fit, fall through to a plain modulo.
+      for (let k = 0; k < fam.length; k++) {
+        const idx = fam[(seed + k) % fam.length];
+        if (idx < n) return idx;
+      }
+    }
+    return seed % n;
+  }
+  // build the painted-suit RECORD. colors give the flat fallback its body tint
+  // so a missing painter still reads as that suit family (pinstripe→charcoal,
+  // colored→tan, etc.); the formal flag + drip keep perception/rope reads.
+  const SUIT_FALLBACK_HEX = {
+    mobster: 0x23262e, made: 0x23262e,              // dark charcoal pinstripe body
+    tycoon: 0x0a0b0e, billionaire: 0x0a0b0e, oldmoney: 0x14161c,  // near-black tux/3-piece
+    socialite: 0x3a4a6b, boss: 0x1c2030, exec: 0x1c2030,
+  };
+  function suitRecord(spec) {
+    const style = suitStyleFor(spec);
+    const a = (spec && spec.archetype) || "";
+    const body = SUIT_FALLBACK_HEX[a] != null ? SUIT_FALLBACK_HEX[a] : 0x1c2030;
+    const tux = a === "tycoon" || a === "billionaire" || a === "oldmoney";
+    return {
+      id: "suit", name: "Tailored Suit", tier: "money", who: "professionals",
+      price: 0, drip: tux ? CAT.tuxedo.drip : CAT.suit.drip,
+      formal: tux ? "tux" : "suit", suitStyle: style,
+      colors: { legs: body, torso: body, collar: tone(body, 0.12), arms: body, shoes: 0x0c0d10, gloss: tux },
+    };
+  }
+  // tiny hex tone helper (lighten/darken) for the suit collar/lapel read.
+  function tone(n, amt) {
+    let r = (n >> 16) & 255, gg = (n >> 8) & 255, b = n & 255;
+    if (amt > 0) { r += (255 - r) * amt; gg += (255 - gg) * amt; b += (255 - b) * amt; }
+    else { r *= 1 + amt; gg *= 1 + amt; b *= 1 + amt; }
+    return ((r | 0) << 16) | ((gg | 0) << 8) | (b | 0);
   }
 
   // ============================================================
@@ -370,8 +504,10 @@
     let w = worn();
     // a plain-civvie base record means "wear the COMPOSITE" — dress from
     // g.cityFit via cityApplyComposite (recolorRig routes rec.composite there).
-    // Catalog fits (uniforms/tux/gang/biz) carry their own record and win.
-    if (PLAIN_BASE[w.id] && plainCivvies()) w = fitRecord();
+    // Catalog fits (uniforms/tux/gang/biz) carry their own record and win. A
+    // SWIPED fit (clothes taken off a body) carries real sampled colors — honor
+    // them, don't revert to your own composite.
+    if (PLAIN_BASE[w.id] && plainCivvies() && !w.swiped) w = fitRecord();
     if (!ch || !ch.skinSlots || !recolorRig(ch, w.colors, w)) return;
     const s = ch.skinSlots;
     paint(s.stripes, null, false);                                   // no city fit has jail stripes
@@ -533,7 +669,7 @@
   // fit, not the raw grey 'street' base record). Falls back to the raw record.
   CBZ.cityOutfitGetEffective = function () {
     let w = worn();
-    if (w && PLAIN_BASE[w.id] && plainCivvies()) w = fitRecord();
+    if (w && PLAIN_BASE[w.id] && plainCivvies() && !w.swiped) w = fitRecord();
     return w;
   };
   CBZ.cityOutfitCatalog = function () { buildGangOutfits(); return CAT; };
@@ -554,8 +690,17 @@
   // hi-vis, which is exactly the "weird clothes" this table retires.
   function jobFit(job) {
     if (!job) return null;
-    if (/clerk|cashier|vendor|line cook|barber/i.test(job)) return CAT.vendor;
-    if (/construction|builder|hardhat|roadwork|mechanic/i.test(job)) return CAT.construction;
+    // specific new uniforms first (they'd otherwise be eaten by broader lines)
+    if (/\bchef\b|line cook|cook\b|kitchen/i.test(job)) return CAT.chef || CAT.vendor;
+    if (/waiter|waitress|server|wait staff|barista/i.test(job)) return CAT.waiter || CAT.vendor;
+    if (/mail\s?man|mail carrier|postal|postman|letter carrier/i.test(job)) return CAT.mailman || CAT.hivis;
+    if (/pilot|aviator|first officer|flight crew|captain/i.test(job)) return CAT.pilot || CAT.office;
+    if (/janitor|custodian|cleaner|sanitation/i.test(job)) return CAT.janitor || CAT.security;
+    if (/\bvalet\b|parking attendant/i.test(job)) return CAT.valet || CAT.security;
+    if (/bus driver|transit|trolley|tram driver/i.test(job)) return CAT.busdriver || CAT.security;
+    if (/clerk|cashier|vendor|barber/i.test(job)) return CAT.vendor;
+    if (/construction|builder|hardhat|roadwork/i.test(job)) return CAT.construction;
+    if (/mechanic|auto shop|garage/i.test(job)) return CAT.coveralls || CAT.construction;
     if (/dock|warehouse|laborer|courier|delivery/i.test(job)) return CAT.hivis;
     if (/paramedic|ambulance|\bems\b/i.test(job)) return CAT.ems;
     if (/nurse|scrubs/i.test(job)) return CAT.scrubs;
@@ -582,13 +727,55 @@
       return jf;
     }
     const a = spec.archetype || "";
-    if (a === "tycoon" || a === "billionaire") return CAT.tuxedo;    // the walking jackpot WEARS it (apex formal kit)
-    // BUSINESS NPCs (socialite/boss/mobster/made) wear the COMPOSED suit —
-    // blazer + collared shirt + tie layered on a plain base (contract [A]).
-    if (a === "socialite" || a === "boss" || a === "mobster" || a === "made") return bizRecord(spec);
-    if (a === "dealer" || a === "hustler") return CAT.tracksuit;     // street hustle, not "ordinary folk"
+    const seed = Math.abs((spec.seed | 0) || 0);
+    // ---- THE SUITED CROWD: higher archetypes wear VARIED painted suits
+    //      (suit|N) so the rich read as bespoke, each one different. The mapping:
+    //        mobster/made          → pinstripe
+    //        tycoon/old-money      → tux or 3-piece
+    //        socialite             → colored / double-breasted
+    //        generic boss/exec     → charcoal/navy notch
+    //      Desk workers keep the composed blazer+shirt+tie (bizRecord) path. ----
+    if (a === "tycoon" || a === "billionaire" || a === "oldmoney") {
+      // half wear the apex catalog tux (formal kit), half a varied 3-piece/tux
+      // painted suit — so old money isn't a row of identical tuxedos.
+      return (seed & 1) ? CAT.tuxedo : suitRecord(spec);
+    }
+    if (a === "mobster" || a === "made") return suitRecord(spec);    // pinstripe family
+    if (a === "socialite") return suitRecord(spec);                  // colored / DB family
+    if (a === "boss" || a === "exec") return suitRecord(spec);       // charcoal/navy notch
+    // generic desk workers → the COMPOSED suit (blazer + collared shirt + tie).
+    if (a === "office" || a === "professional" || a === "businessman" || a === "suit") return bizRecord(spec);
+    // ---- STREETWEAR: hustle archetypes cycle through the new painted street
+    //      garments so corners aren't all the same tracksuit. Feature-detected —
+    //      a missing painter falls back to the flat CAT colors. ----
+    if (a === "dealer" || a === "hustler" || a === "cornerkid" || a === "corner") {
+      const street = streetwearFor(seed);
+      if (street) return street;
+    }
+    // ---- NIGHTLIFE DRESSES: sprinkle dress/sundress onto a fraction of
+    //      civilians. Honor an explicit sex flag if the ped carries one; else
+    //      use a "nightlife" archetype (peds near the club). Deterministic. ----
+    if (a === "nightlife" || a === "clubber" || a === "partygoer") {
+      const d = (seed % 3 === 0) ? null : CAT.dress;   // ~2/3 dressed, rest stays plain/suited
+      if (d) return d;
+    }
+    const sex = spec.sex || spec.gender || null;
+    if ((sex === "f" || sex === "female" || spec.fem) && (a === "" || a === "civilian" || a === "tourist")) {
+      // a small deterministic fraction of women get a dress/sundress.
+      if (seed % 5 === 0 && CAT.sundress) return CAT.sundress;
+      if (seed % 7 === 0 && CAT.dress) return CAT.dress;
+    }
     return null;                                                     // ORDINARY civilians → PLAIN (peds.js paints a solid shirt + jeans)
   };
+  // deterministic streetwear pick for the corner archetypes — cycles the new
+  // painted ids (and the old tracksuit) so the block reads varied. compFilter
+  // logic via CAT presence keeps it crash-proof if an id is absent.
+  function streetwearFor(seed) {
+    const pool = [CAT.tracksuit, CAT.hoodie, CAT.puffer, CAT.denim_jacket, CAT.varsity]
+      .filter(function (r) { return !!r; });
+    if (!pool.length) return null;
+    return pool[seed % pool.length];
+  }
 
   // ============================================================
   //  RE-DRESS — keep a body's CLOTH true to WHO IT IS RIGHT NOW.
@@ -685,8 +872,9 @@
     const jf = jobFit(p.job);
     if (jf) return jf;
     const a = p.archetype || "";
-    if (a === "tycoon" || a === "billionaire") return CAT.tuxedo;
-    if (a === "socialite" || a === "boss" || a === "mobster" || a === "made") return bizRecord({ seed: pedSeed(p) });
+    const seed = pedSeed(p);
+    if (a === "tycoon" || a === "billionaire" || a === "oldmoney") return (Math.abs(seed) & 1) ? CAT.tuxedo : suitRecord({ archetype: a, seed });
+    if (a === "mobster" || a === "made" || a === "socialite" || a === "boss" || a === "exec") return suitRecord({ archetype: a, seed });
     return null;
   }
 
@@ -714,10 +902,14 @@
       }
       return copy;
     }
-    // plain civvies: their actual rendered set travels with the swap
+    // plain civvies: their actual rendered set travels with the swap. swiped:true
+    // marks this as an EXPLICIT sampled fit so the plain-base→your-composite
+    // substitution (applyPlayer / cityOutfitGetEffective) does NOT fire and
+    // overwrite the stolen colors with your default white tee — taking a body's
+    // clothes must actually re-dress you (and the portrait) in THEIR colors.
     const torso = sampled ? sampled.torso : (p.outfit != null ? p.outfit : 0x8a939c);
     const colors = sampled || { legs: 0x363b46, torso, collar: torso, arms: torso, shoes: 0x2b2b2b };
-    return { id: "civvies", name: "their street clothes", tier: "street", who: "them", price: 0, drip: 0, colors };
+    return { id: "civvies", name: "their street clothes", tier: "street", who: "them", price: 0, drip: 0, colors, swiped: true };
   };
 
   // FORMAL KIT reads (bling.js attaches the meshes off these — its pooled,

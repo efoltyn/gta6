@@ -102,8 +102,16 @@
     // cityWallRuin (crashfx.js) composes the whole REAL-blast read at once:
     // avalanche + rubble heap + rebar + soot ring + dust/smoke. Falls back to
     // the older avalanche, then the bare chunk burst, if a system is missing.
-    if (CBZ.cityWallRuin) {
-      CBZ.cityWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, { power: power, width: width, top: g.v1, bottom: g.v0 });
+    // HEAVY ORDNANCE (power>=2: airstrike/missile/tank, the self-couple path in
+    // cityAirstrikeExplosion hands us power≈3): compose the BIGGER cityHeavyWallRuin
+    // — a full-facade avalanche + collapse curtain + a taller dust column — so the
+    // read scales with the bomb, not just the rocket. Same pooled systems, so it's
+    // draw-call-neutral; falls straight back to the standard ruin if it's missing.
+    const ruinArgs = { power: power, width: width, top: g.v1, bottom: g.v0 };
+    if (power >= 2 && CBZ.cityHeavyWallRuin) {
+      CBZ.cityHeavyWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, ruinArgs);
+    } else if (CBZ.cityWallRuin) {
+      CBZ.cityWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, ruinArgs);
     } else if (CBZ.cityFacadeAvalanche) {
       CBZ.cityFacadeAvalanche(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, Math.min(2.2, power));
     } else if (CBZ.cityChunk) {
@@ -215,6 +223,20 @@
   // SAME rocket doesn't open a second hole through the legacy ground pass)
   function recent(x, z) {
     if (nowS() - lastT > 0.6) return false;
+    const dx = x - lastX, dz = z - lastZ;
+    return dx * dx + dz * dz < 64;
+  }
+  // GENERALIZED dedup window (additive — recent() above stays for its legacy
+  // 0.6s callers). A ram-breach and the heavy-ruin path BOTH want to ask "did a
+  // carve just land on this wall THIS impact frame?" but with their own window:
+  // the ram + the fireball that cooks off it can fire a few frames apart, so a
+  // shared, tunable `withinS` lets every caller use ONE dedup and never double-
+  // carve the same wall in the same event (the wall's _breached flag is the
+  // other backstop). withinS defaults to recent()'s 0.6s so an argless-ish call
+  // behaves identically; radius is the same 8m (64 = 8²) proximity recent() uses.
+  function recentAt(x, z, withinS) {
+    const w = withinS == null ? 0.6 : withinS;
+    if (nowS() - lastT > w) return false;
     const dx = x - lastX, dz = z - lastZ;
     return dx * dx + dz * dz < 64;
   }
@@ -350,15 +372,66 @@
     drainDefer();
   });
 
-  CBZ.cityFracture = {
-    blastAt: blastAt,
-    chewWall: chewWall,
-    serialize: serialize,
-    apply: apply,
-    applyOne: applyOne,
-    onHole: null,            // net layer assigns: fn(hole) on every NEW local carve
-    recent: recent,
-    _adopt: function (rec, r) { return adopt(rec, r || (rec.gap ? (rec.gap.u1 - rec.gap.u0) / 2 : 1.6), false); },
-    _cleared: cleared,
-  };
+  // ---- CBZ.cityFracture(pos, radius, dir) — the pooled DEBRIS BURST ----------
+  // The cross-module contract names cityFracture as a CALLABLE: "a pooled
+  // debris/rubble/scorch burst when something blows up". The traffic + buildings
+  // agents fire it at any detonation (a car cooks off, a prop blows) to throw a
+  // cheap, pooled spray of concrete shrapnel + a kicked-up dust puff + a road
+  // scorch — WITHOUT carving a wall (that's blastAt's job; this is the free
+  // ground-FX that sells the boom anywhere, even mid-street with no facade).
+  // WHY: a thing that explodes should leave a MARK and fling rubble — a blast
+  // that just flashes and vanishes reads fake. All work routes through the
+  // already-pooled crashfx systems (cityChunk recycles under CHUNK_CAP, scorch
+  // LRU-caps), so it adds ZERO steady cost and can't flood. Headless-safe: every
+  // sub-call is feature-detected, so a stub THREE / partial load never throws.
+  // pos = {x,y,z} (or a raycast hit w/ .point); radius scales the spray + scorch;
+  // dir (optional {x,z}/{x,y,z} unit-ish) biases the shrapnel DOWNRANGE of the hit.
+  function fractureBurst(pos, radius, dir) {
+    if (pos && pos.point) pos = pos.point;
+    if (!pos || !CBZ.game || CBZ.game.mode !== "city") return;
+    const x = pos.x, z = pos.z, y = pos.y == null ? 0.4 : pos.y;
+    const r = Math.max(0.6, radius || 2.2);
+    // power read off the radius so a tiny pop and an RPG-class burst differ
+    const power = Math.min(2.6, 0.7 + r * 0.35);
+    let dx = dir ? dir.x : 0, dz = dir ? (dir.z != null ? dir.z : 0) : 0;
+    const dl = Math.hypot(dx, dz);
+    const biased = dl > 1e-3;
+    if (biased) { dx /= dl; dz /= dl; }
+    // (1) pooled concrete SHRAPNEL flung from the seat (downrange if dir given) —
+    // cityChunk is the shared, recycled debris pool, so this is draw-call-cheap.
+    if (CBZ.cityChunk) {
+      try {
+        CBZ.cityChunk(x, Math.max(0.4, y), z, {
+          count: Math.round(4 + power * 4), force: 4 + power * 3, hot: power > 1.2,
+          dirx: biased ? dx : null, dirz: biased ? dz : null,
+        });
+      } catch (e) {}
+    }
+    // (2) a kicked-up DUST CLOUD at the base (the breath of pulverized debris) —
+    // crashfx owns the pooled puff/point-burst systems and exports cityDustKick
+    // for exactly this; guarded so a partial load never throws.
+    if (CBZ.cityDustKick) { try { CBZ.cityDustKick(x, y, z, power); } catch (e) {} }
+    // (3) a road SCORCH stain so the blast leaves a permanent mark on the deck.
+    if (CBZ.cityScorch) { try { CBZ.cityScorch(x, z, 1.2 + r * 0.5); } catch (e) {} }
+    // (4) blow out nearby glass — a detonation should crack the windows around it.
+    if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, 3.0 + r * 1.4); } catch (e) {} }
+  }
+
+  // Export cityFracture as the CALLABLE burst, with every existing object method
+  // hung off it so NO existing caller (CBZ.cityFracture.blastAt / .apply / .onHole
+  // / .recent / net hooks) breaks — additive: the object's whole surface is
+  // preserved, we just made the namespace itself invokable.
+  const api = fractureBurst;
+  api.blastAt = blastAt;
+  api.chewWall = chewWall;
+  api.serialize = serialize;
+  api.apply = apply;
+  api.applyOne = applyOne;
+  api.onHole = null;          // net layer assigns: fn(hole) on every NEW local carve
+  api.recent = recent;
+  api.recentAt = recentAt;    // generalized dedup window (additive)
+  api.burst = fractureBurst;  // explicit alias if a caller prefers a named method
+  api._adopt = function (rec, r) { return adopt(rec, r || (rec.gap ? (rec.gap.u1 - rec.gap.u0) / 2 : 1.6), false); };
+  api._cleared = cleared;
+  CBZ.cityFracture = api;
 })();

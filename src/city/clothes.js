@@ -130,65 +130,144 @@
   // ============================================================
   const PAINT = {};
 
-  // shared formal-wear front: white shirt V + studs/tie + open jacket shell
+  // ---- suit FABRIC overlays (drawn source-atop, like shade()) --------------
+  // pinstripe: thin vertical light lines; windowpane: a wide grid; glen: a
+  // small dense check. All clipped to existing paint so they never bleed onto
+  // the jacket gap/cap. line color is a quiet tone of the body.
+  // a generic source-atop pattern stamper that works through a rowPainter's
+  // rect() (so it respects the row/column atlas regions automatically).
+  function patternRow(R, ctx, bodyHex, kind) {
+    if (kind === "solid" || !kind) return;
+    ctx.save(); ctx.globalCompositeOperation = "source-atop";
+    const light = tone(bodyHex, 0.22), dark = tone(bodyHex, -0.18);
+    if (kind === "pinstripe") {
+      for (const col of ["front", "back", "side"])
+        for (let x = 0.06; x < 1; x += 0.12) R.rect(col, x, 0, 0.012, 1, light);
+    } else if (kind === "windowpane") {
+      for (const col of ["front", "back", "side"]) {
+        for (let x = 0.12; x < 1; x += 0.26) R.rect(col, x, 0, 0.016, 1, light);
+        for (let y = 0.1; y < 1; y += 0.26) R.rect(col, 0, y, 1, 0.016, light);
+      }
+    } else if (kind === "glen") {                                  // dense small houndstooth-ish check
+      for (const col of ["front", "back", "side"]) {
+        for (let y = 0; y < 1; y += 0.1)
+          for (let x = 0; x < 1; x += 0.1)
+            R.rect(col, x, y, 0.05, 0.05, ((x * 10 + y * 10) & 1) ? dark : light);
+        for (let x = 0.06; x < 1; x += 0.18) R.rect(col, x, 0, 0.01, 1, dark);  // faint windowpane over-check
+      }
+    }
+    ctx.restore();
+  }
+
+  // shared formal-wear front: white shirt V + studs/tie + open jacket shell.
+  // opts may carry: bow, tie(hex), belt, square, gap, lapel(width), lapelType
+  // ('notch'|'peak'|'shawl'), pattern, db(double-breasted), vest(hex|true),
+  // ctx (canvas ctx for pattern overlays).
   function formalTorso(T, J, jacketHex, lapelCss, opts) {
     const jc = hx(jacketHex), shirt = "#f1f2ec", shirtLow = "#dddfd6";
+    const ctx = opts.ctx, lt = opts.lapelType || "notch";
     T.fill(jc);
-    // the shirt panel the open jacket reveals (full front — the gap crops it)
-    T.rect("front", 0.3, 0, 0.4, 0.84, shirt);
-    T.rect("front", 0.47, 0.02, 0.06, 0.82, shirtLow);            // placket seam
+    // 3-PIECE: the open jacket reveals a buttoned WAISTCOAT, not bare shirt.
+    if (opts.vest) {
+      const vest = hx(opts.vest === true ? jacketHex : opts.vest);
+      T.rect("front", 0.28, 0, 0.44, 0.9, vest);                   // vest panel
+      // narrow shirt sliver + collar above the vest
+      T.rect("front", 0.42, 0, 0.16, 0.18, shirt);
+      T.rect("front", 0.49, 0.5, 0.02, 0.4, tone(opts.vest === true ? jacketHex : opts.vest, -0.25)); // vest button placket
+      for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.34 + i * 0.13, 0.012, tone(opts.vest === true ? jacketHex : opts.vest, 0.25)); // buttons
+      T.poly("front", [[0.34, 0], [0.5, 0.34], [0.66, 0]], jc);    // vest V opening (jacket-color gap above buttons)
+      T.rect("front", 0.42, 0, 0.16, 0.16, shirt);                 // shirt at the very top
+    } else {
+      // the shirt panel the open jacket reveals (full front — the gap crops it)
+      T.rect("front", 0.3, 0, 0.4, 0.84, shirt);
+      T.rect("front", 0.47, 0.02, 0.06, 0.82, shirtLow);          // placket seam
+    }
     if (opts.bow) {                                                // black bow tie at the collar line
       T.rect("front", 0.38, 0.025, 0.24, 0.085, "#0b0c10");
       T.rect("front", 0.465, 0.035, 0.07, 0.065, "#15161c");      // knot
       T.dot("front", 0.5, 0.21, 0.018, "#15161a");                // stud dots
       T.dot("front", 0.5, 0.33, 0.018, "#15161a");
       T.dot("front", 0.5, 0.45, 0.018, "#15161a");
-    } else if (opts.tie) {                                         // suit: colored tie
+    } else if (opts.tie && !opts.vest) {                           // suit: colored tie (vest hides most of it)
       T.poly("front", [[0.44, 0.02], [0.56, 0.02], [0.53, 0.1], [0.47, 0.1]], tone(opts.tie, -0.25)); // knot
       T.rect("front", 0.465, 0.1, 0.07, 0.5, hx(opts.tie));
       T.poly("front", [[0.465, 0.6], [0.535, 0.6], [0.5, 0.68]], hx(opts.tie));
+    } else if (opts.tie && opts.vest) {                            // a glimpse of tie at the vest V
+      T.rect("front", 0.47, 0.04, 0.06, 0.22, hx(opts.tie));
     }
-    if (opts.belt) {                                               // suit belt line at the waist
+    if (opts.belt && !opts.vest) {                                 // suit belt line at the waist
       T.rect("front", 0.3, 0.84, 0.4, 0.08, "#17181d");
       T.rect("front", 0.475, 0.85, 0.05, 0.06, "#b9a05a");        // buckle
-    } else T.rect("front", 0.3, 0.78, 0.4, 0.1, "#0d0e12");       // tux cummerbund break
+    } else if (!opts.vest) T.rect("front", 0.3, 0.78, 0.4, 0.1, "#0d0e12"); // tux cummerbund break
+    if (ctx) patternRow(T, ctx, jacketHex, opts.pattern);
     T.shade();
     // ---- the OPEN JACKET shell: alpha-cut V gap + satin lapel wedges ----
     J.fill(jc);
     J.clear("cap", 0, 0, 1, 1);                                    // open top/bottom — see the shirt inside
     const g = opts.gap || 0.13;                                    // half-width of the gap at the hem
-    J.clearPoly("front", [[0.5 - 0.035, 0], [0.5 + 0.035, 0], [0.5 + g, 1], [0.5 - g, 1]]);
-    // lapels: two angled satin facets meeting at the V
-    const lw = opts.lapel || 0.13;                                 // lapel width at the shoulder
-    J.poly("front", [[0.5 - 0.035 - lw, 0], [0.5 - 0.034, 0], [0.5 - g + 0.005, 0.46], [0.5 - g - 0.05, 0.4]], lapelCss);
-    J.poly("front", [[0.5 + 0.034, 0], [0.5 + 0.035 + lw, 0], [0.5 + g + 0.05, 0.4], [0.5 + g - 0.005, 0.46]], lapelCss);
+    const db = !!opts.db, overlap = db ? 0.07 : 0.035;            // double-breasted = wider overlap
+    J.clearPoly("front", [[0.5 - overlap, 0], [0.5 + overlap, 0], [0.5 + g, 1], [0.5 - g, 1]]);
+    // lapels: notch (default angled wedge), peak (an upswept point), shawl
+    // (one smooth continuous curve-ish facet, tux). width at the shoulder.
+    const lw = opts.lapel || 0.13;
+    if (lt === "shawl") {
+      J.poly("front", [[0.5 - overlap - lw, 0], [0.5 - overlap, 0], [0.5 - g + 0.01, 0.5], [0.5 - g - 0.07, 0.46]], lapelCss);
+      J.poly("front", [[0.5 + overlap, 0], [0.5 + overlap + lw, 0], [0.5 + g + 0.07, 0.46], [0.5 + g - 0.01, 0.5]], lapelCss);
+    } else if (lt === "peak") {
+      J.poly("front", [[0.5 - overlap - lw, 0.06], [0.5 - overlap, 0], [0.5 - g, 0.44], [0.5 - g - 0.04, 0.34], [0.5 - overlap - lw - 0.04, 0.16]], lapelCss);
+      J.poly("front", [[0.5 + overlap, 0], [0.5 + overlap + lw, 0.06], [0.5 + overlap + lw + 0.04, 0.16], [0.5 + g + 0.04, 0.34], [0.5 + g, 0.44]], lapelCss);
+    } else {                                                       // notch
+      J.poly("front", [[0.5 - overlap - lw, 0], [0.5 - overlap + 0.001, 0], [0.5 - g + 0.005, 0.46], [0.5 - g - 0.05, 0.4]], lapelCss);
+      J.poly("front", [[0.5 + overlap - 0.001, 0], [0.5 + overlap + lw, 0], [0.5 + g + 0.05, 0.4], [0.5 + g - 0.005, 0.46]], lapelCss);
+    }
+    if (db) {                                                      // a second column of buttons
+      for (let i = 0; i < 3; i++) { J.dot("front", 0.5 - g + 0.03, 0.4 + i * 0.16, 0.018, lapelCss); J.dot("front", 0.5 + g - 0.03, 0.4 + i * 0.16, 0.018, lapelCss); }
+    }
     J.rect("back", 0.47, 0.55, 0.06, 0.45, tone(jacketHex, -0.25)); // back vent
     if (opts.square) J.rect("front", 0.16, 0.18, 0.1, 0.045, "#f1f2ec"); // pocket square
+    if (ctx) patternRow(J, ctx, jacketHex, opts.pattern);
     J.shade();
   }
-  function formalLimbs(A, L, jacketHex, legHex, cuff) {
-    const jc = hx(jacketHex);
+  function formalLimbs(A, L, jacketHex, legHex, cuff, opts) {
+    opts = opts || {};
+    const jc = hx(jacketHex), ctx = opts.ctx;
     A.fill(jc);
     if (cuff) { A.rect("front", 0, 0.86, 1, 0.07, "#f1f2ec"); A.rect("side", 0, 0.86, 1, 0.07, "#f1f2ec"); A.rect("back", 0, 0.86, 1, 0.07, "#e3e4dc"); }
     A.dot("front", 0.78, 0.8, 0.05, tone(jacketHex, -0.35));       // sleeve button
+    if (ctx) patternRow(A, ctx, jacketHex, opts.pattern);
     A.shade();
     L.fill(hx(legHex));
     L.rect("front", 0.46, 0, 0.08, 0.94, tone(legHex, 0.18));      // sharp crease line
     L.rect("front", 0, 0.94, 1, 0.06, tone(legHex, -0.3));         // gloss shoe break
     L.rect("side", 0, 0.94, 1, 0.06, tone(legHex, -0.3));
+    if (ctx) patternRow(L, ctx, legHex, opts.pattern);
     L.shade();
   }
 
-  PAINT.tuxedo = function (P, c) {
-    const body = 0x16171c;                                         // lifted off true black so shading reads
-    formalTorso(P.T, P.J, body, "rgb(46,48,58)", { bow: true, square: true, gap: 0.12, lapel: 0.15 });
-    formalLimbs(P.A, P.L, body, 0x14151a, true);
+  // tuxedo accepts an optional style record so the SUIT_STYLES table can ship
+  // tux variants (shawl satin, midnight-blue, white dinner jacket, DB peak).
+  PAINT.tuxedo = function (P, c, st) {
+    st = st || {};
+    const body = st.body != null ? st.body : 0x16171c;            // lifted off true black so shading reads
+    const lapel = st.lapelCss || tone(body, 0.16);
+    formalTorso(P.T, P.J, body, lapel, { bow: true, square: true, gap: 0.12, lapel: 0.15, lapelType: st.lapel || "shawl", db: !!st.db, ctx: P.ctx, pattern: st.pattern });
+    formalLimbs(P.A, P.L, body, st.legs != null ? st.legs : 0x14151a, true, { ctx: P.ctx, pattern: st.pattern });
     return { torso: 1, arms: 1, legs: 1, jacket: 1 };
   };
-  PAINT.suit = function (P, c, tie) {
-    const body = c && c.torso != null ? c.torso : 0x1c2030;
-    formalTorso(P.T, P.J, body, tone(body, 0.16), { tie: tie || 0x7a1f2b, belt: true, gap: 0.1, lapel: 0.09 });
-    formalLimbs(P.A, P.L, body, (c && c.legs != null) ? c.legs : 0x14161c, false);
+  // suit accepts a STYLE record (SUIT_STYLES entry) OR a raw colors record. The
+  // style drives pattern/db/vest/lapel/tie; raw {torso,legs} still works.
+  PAINT.suit = function (P, c, st) {
+    if (typeof st === "number") st = { tie: st };                  // legacy: a bare tie hex
+    st = st || {};
+    const body = st.body != null ? st.body : (c && c.torso != null ? c.torso : 0x1c2030);
+    const legs = st.legs != null ? st.legs : ((c && c.legs != null) ? c.legs : tone2(body, -0.08));
+    const lapelCss = st.lapelCss || tone(body, st.pattern && st.pattern !== "solid" ? 0.1 : 0.16);
+    formalTorso(P.T, P.J, body, lapelCss, {
+      tie: st.tie != null ? st.tie : 0x7a1f2b, belt: !st.vest && !st.db, gap: st.db ? 0.13 : 0.1,
+      lapel: st.lapel === "peak" ? 0.12 : 0.09, lapelType: st.lapel || "notch",
+      pattern: st.pattern, db: !!st.db, vest: st.vest, ctx: P.ctx, square: !!st.square,
+    });
+    formalLimbs(P.A, P.L, body, legs, false, { ctx: P.ctx, pattern: st.pattern });
     return { torso: 1, arms: 1, legs: 1, jacket: 1 };
   };
 
@@ -580,10 +659,257 @@
   };
 
   // ============================================================
+  //  STREETWEAR / WORKWEAR / SERVICE / DRESSES — the new garment painters.
+  //  Each follows the scrubs/ems structure: fill base, paint the structure,
+  //  shade(), return which parts it painted. colors.torso overrides the base.
+  // ============================================================
+
+  // HOODIE — kangaroo pocket + drawstrings + a hood lump at the neck.
+  PAINT.hoodie = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x7a4a3a, bc = hx(body);
+    const T = P.T, A = P.A, hoodLo = tone(body, -0.22);
+    T.fill(bc);
+    T.rect("front", 0.18, 0, 0.64, 0.14, hoodLo);                  // hood gathered at the neck (front)
+    T.rect("back", 0.14, 0, 0.72, 0.34, hoodLo);                   // the hood lump down the back
+    T.dot("front", 0.42, 0.13, 0.018, "#e9e4d8");                  // drawstring tips
+    T.dot("front", 0.58, 0.13, 0.018, "#e9e4d8");
+    T.rect("front", 0.42, 0.12, 0.02, 0.16, "#d9d3c4");           // strings hang
+    T.rect("front", 0.58, 0.12, 0.02, 0.16, "#d9d3c4");
+    T.rect("front", 0.26, 0.6, 0.48, 0.26, hoodLo);               // kangaroo pocket
+    T.rect("front", 0.26, 0.6, 0.48, 0.03, tone(body, -0.34));    // pocket top seam
+    T.rect("front", 0, 0.92, 1, 0.08, tone(body, -0.3));         // ribbed hem
+    T.rect("side", 0, 0.92, 1, 0.08, tone(body, -0.3));
+    T.shade();
+    A.fill(bc); A.rect("front", 0, 0.9, 1, 0.08, tone(body, -0.3)); A.rect("side", 0, 0.9, 1, 0.08, tone(body, -0.3)); A.shade(); // ribbed cuff
+    return { torso: 1, arms: 1 };
+  };
+
+  // PUFFER — horizontal quilted channels + a zip; warm color default.
+  PAINT.puffer = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x223a55, bc = hx(body);
+    const T = P.T, A = P.A, seam = tone(body, -0.3), hi = tone(body, 0.16);
+    T.fill(bc);
+    for (const col of ["front", "back", "side"]) {
+      for (let y = 0.08; y < 0.95; y += 0.16) { T.rect(col, 0, y, 1, 0.02, seam); T.rect(col, 0, y + 0.03, 1, 0.04, hi); } // quilt channels + puffed highlight
+    }
+    T.rect("front", 0.48, 0, 0.04, 1, seam);                       // centre zip
+    T.dot("front", 0.5, 0.06, 0.02, "#cdd3d8");                    // zip pull
+    T.rect("front", 0.3, 0, 0.4, 0.08, tone(body, -0.2));        // stand collar
+    T.shade();
+    A.fill(bc);
+    for (let y = 0.1; y < 0.95; y += 0.18) A.rect("front", 0, y, 1, 0.02, seam);
+    for (let y = 0.1; y < 0.95; y += 0.18) A.rect("side", 0, y, 1, 0.02, seam);
+    A.shade();
+    return { torso: 1, arms: 1 };
+  };
+
+  // DENIM JACKET — button placket, chest flap pockets, contrast stitch seams.
+  PAINT.denim_jacket = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x3c5a7a, bc = hx(body);
+    const T = P.T, A = P.A, stitch = "#d8b87a", dk = tone(body, -0.22);
+    T.fill(bc);
+    T.rect("front", 0.49, 0, 0.02, 1, dk);                         // button placket
+    for (let i = 0; i < 5; i++) T.dot("front", 0.5, 0.12 + i * 0.18, 0.013, "#c9cdd2"); // buttons
+    T.rect("front", 0.16, 0.22, 0.18, 0.14, dk); T.rect("front", 0.66, 0.22, 0.18, 0.14, dk); // chest flap pockets
+    T.rect("front", 0.16, 0.22, 0.18, 0.02, stitch); T.rect("front", 0.66, 0.22, 0.18, 0.02, stitch); // stitch lines
+    T.rect("front", 0.3, 0, 0.4, 0.06, dk);                       // collar
+    T.rect("front", 0, 0.9, 1, 0.05, stitch);                     // hem stitch band
+    T.shade();
+    A.fill(bc); A.rect("front", 0, 0.84, 1, 0.1, dk); A.rect("front", 0, 0.84, 1, 0.02, stitch); A.rect("side", 0, 0.84, 1, 0.1, dk); A.shade(); // buttoned cuff
+    return { torso: 1, arms: 1 };
+  };
+
+  // VARSITY — body color torso, CONTRAST sleeves, a chest letter + stripe trim.
+  PAINT.varsity = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x6e1f2b, sleeve = (c && c.collar != null) ? c.collar : 0xeae6dc;
+    const T = P.T, A = P.A, bc = hx(body), sc = hx(sleeve), trim = tone(body, -0.3);
+    T.fill(bc);
+    T.rect("front", 0.48, 0, 0.04, 1, "#d8c98a");                  // snap placket
+    T.rect("front", 0.18, 0.18, 0.26, 0.34, sc);                  // chest patch (felt block)
+    T.rect("front", 0.22, 0.22, 0.18, 0.26, bc);                  // the letter field
+    T.poly("front", [[0.25, 0.45], [0.31, 0.24], [0.37, 0.45], [0.34, 0.45], [0.31, 0.34], [0.28, 0.45]], "#d8c98a"); // a chunky "A"
+    T.rect("front", 0.3, 0, 0.4, 0.06, sc);                       // collar in sleeve color
+    T.rect("front", 0, 0.9, 1, 0.07, sc); T.rect("front", 0, 0.9, 1, 0.02, trim); // ribbed striped hem
+    T.shade();
+    A.fill(sc); A.rect("front", 0, 0.88, 1, 0.08, hx(tone2(sleeve, -0.2))); A.rect("side", 0, 0.88, 1, 0.08, hx(tone2(sleeve, -0.2))); A.shade(); // contrast leather sleeves + ribbed cuff
+    return { torso: 1, arms: 1 };
+  };
+
+  // GRAPHIC TEE — solid tee + a bold centered graphic block (color via collar).
+  PAINT.graphic_tee = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x1c1d22, gfx = (c && c.collar != null) ? c.collar : 0xd84a3a;
+    const T = P.T, A = P.A, bc = hx(body), gc = hx(gfx);
+    T.fill(bc);
+    T.poly("front", [[0.38, 0], [0.62, 0], [0.5, 0.1]], tone(body, -0.25)); // crew neck
+    T.rect("front", 0.3, 0.28, 0.4, 0.36, gc);                    // graphic field
+    T.poly("front", [[0.5, 0.3], [0.66, 0.5], [0.5, 0.62], [0.34, 0.5]], tone(gfx, 0.3)); // a diamond motif
+    T.dot("front", 0.5, 0.46, 0.05, bc);                          // negative-space center
+    T.rect("front", 0, 0.94, 1, 0.04, tone(body, -0.2));        // hem
+    T.shade();
+    A.fill(bc); A.rect("front", 0, 0.86, 1, 0.05, tone(body, -0.2)); A.rect("side", 0, 0.86, 1, 0.05, tone(body, -0.2)); A.shade();
+    return { torso: 1, arms: 1 };
+  };
+
+  // COVERALLS — a mechanic ONE-PIECE: zip, chest patch, hip pockets, leg seams.
+  PAINT.coveralls = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x394a5a, bc = hx(body);
+    const T = P.T, A = P.A, L = P.L, dk = tone(body, -0.25);
+    T.fill(bc);
+    T.rect("front", 0.48, 0, 0.04, 1, dk);                         // full-length zip
+    T.rect("front", 0.16, 0.18, 0.2, 0.04, "#e6e2d6");            // oval name patch
+    T.rect("front", 0.16, 0.16, 0.2, 0.1, dk); T.rect("front", 0.16, 0.18, 0.2, 0.04, "#e6e2d6");
+    T.rect("front", 0.62, 0.16, 0.22, 0.13, dk);                  // chest pocket
+    T.rect("front", 0.1, 0.68, 0.24, 0.16, dk); T.rect("front", 0.66, 0.68, 0.24, 0.16, dk); // hip pockets
+    T.rect("front", 0.2, 0.5, 0.6, 0.05, dk);                     // waist seam
+    T.shade();
+    A.fill(bc); A.rect("front", 0, 0.86, 1, 0.06, dk); A.rect("side", 0, 0.86, 1, 0.06, dk); A.shade();
+    L.fill(bc); L.rect("side", 0.38, 0, 0.24, 1, dk); L.rect("front", 0.2, 0.4, 0.6, 0.12, dk); L.shade(); // leg seam + knee pocket
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // CHEF — white double-breasted jacket + a colored neckerchief.
+  PAINT.chef = function (P, c) {
+    const white = "#f0efe9", lo = "#dcdbd2";
+    const T = P.T, A = P.A, kerch = (c && c.collar != null) ? c.collar : 0x9a2a2a;
+    T.fill(white);
+    // two columns of cloth knot buttons (double-breasted)
+    T.rect("front", 0.4, 0.1, 0.2, 0.78, lo);                     // the overlap panel shadow
+    T.rect("front", 0.42, 0.1, 0.16, 0.78, white);                // overlap panel face
+    for (let i = 0; i < 4; i++) { T.dot("front", 0.42, 0.16 + i * 0.18, 0.018, lo); T.dot("front", 0.58, 0.16 + i * 0.18, 0.018, lo); }
+    T.poly("front", [[0.34, 0], [0.5, 0.12], [0.66, 0]], hx(kerch)); // neckerchief at the throat
+    T.rect("front", 0, 0.92, 1, 0.05, lo);                        // hem
+    T.shade();
+    A.fill(white); A.rect("front", 0, 0.86, 1, 0.08, lo); A.rect("side", 0, 0.86, 1, 0.08, lo); A.shade();
+    return { torso: 1, arms: 1 };
+  };
+
+  // WAITER — black vest + white shirt + black bow tie (reuses formal helpers).
+  PAINT.waiter = function (P, c) {
+    formalTorso(P.T, P.J, 0x16171c, "rgb(30,31,37)", { bow: true, gap: 0.05, lapel: 0.07, lapelType: "notch", vest: 0x141519, ctx: P.ctx });
+    formalLimbs(P.A, P.L, 0x16171c, 0x141519, false, { ctx: P.ctx });
+    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+  };
+
+  // PILOT — crisp white shirt, black tie, gold EPAULETTES + wings.
+  PAINT.pilot = function (P, c) {
+    const white = "#eef0f2", lo = "#d6d9dd";
+    const T = P.T, A = P.A, L = P.L;
+    T.fill(white);
+    T.rect("front", 0.49, 0, 0.02, 0.9, lo);                       // placket
+    T.poly("front", [[0.42, 0.02], [0.58, 0.02], [0.55, 0.1], [0.45, 0.1]], "#15161c"); // tie knot
+    T.rect("front", 0.47, 0.1, 0.06, 0.5, "#15161c");             // tie
+    T.rect("front", 0.06, 0, 0.18, 0.1, lo); T.rect("front", 0.76, 0, 0.18, 0.1, lo); // epaulette base
+    for (const x of [0.08, 0.14, 0.2]) T.rect("front", x, 0.02, 0.03, 0.06, "#e8c454"); // gold bars L
+    for (const x of [0.78, 0.84, 0.9]) T.rect("front", x, 0.02, 0.03, 0.06, "#e8c454"); // gold bars R
+    T.rect("front", 0.62, 0.2, 0.1, 0.04, "#e8c454");            // gold wings
+    T.shade();
+    A.fill(white); A.rect("front", 0, 0.86, 1, 0.06, lo); A.rect("side", 0, 0.86, 1, 0.06, lo); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x1a1c24)); L.rect("side", 0.4, 0, 0.2, 1, "#0d0e12"); L.shade(); // black slacks w/ stripe
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // DRESS — an A-line dress: fitted bodice, FLARED hem painted onto the LEG row
+  // (the skirt sweeps out at the bottom). color via key/torso → many colors.
+  PAINT.dress = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0x8a2050, bc = hx(body);
+    const T = P.T, A = P.A, L = P.L, hi = tone(body, 0.14), lo = tone(body, -0.2);
+    T.fill(bc);
+    T.poly("front", [[0.34, 0], [0.5, 0.18], [0.66, 0]], lo);      // scoop neckline
+    T.rect("front", 0.3, 0.5, 0.4, 0.04, lo);                     // waist seam (bodice meets skirt)
+    T.rect("front", 0, 0.86, 1, 0.14, hi);                        // the skirt begins flaring (lighter sweep)
+    T.shade();
+    A.fill(bc); A.rect("front", 0, 0.42, 1, 0.05, lo); A.rect("side", 0, 0.42, 1, 0.05, lo); A.shade(); // cap-sleeve cuff
+    // the LEG row carries the A-line skirt: flared (wider light wedge low),
+    // hem sweep, so the legs read as a skirt, not trousers.
+    L.fill(bc);
+    for (const col of ["front", "back", "side"]) {
+      L.poly(col, [[0.3, 0], [0.7, 0], [1, 1], [0, 1]], hi);       // flare outward to the hem
+      L.rect(col, 0, 0.92, 1, 0.06, lo);                          // hem band
+    }
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // SUNDRESS — light dress + a FLORAL dot pattern (deterministic blot field).
+  PAINT.sundress = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0xf0d9a0, bc = hx(body);
+    const flo1 = (c && c.collar != null) ? c.collar : 0xd86a8a, flo2 = tone(body, -0.3);
+    const T = P.T, A = P.A, L = P.L;
+    let seed = (body & 0xffff) ^ 0x5a5a;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    function flowers(R, n) {
+      R.fill(bc);
+      for (const col of ["front", "back", "side"]) for (let i = 0; i < n; i++) {
+        const x = rnd(), y = rnd(), r = 0.025 + rnd() * 0.02, fc = rnd() < 0.5 ? hx(flo1) : hx(flo2);
+        R.dot(col, x, y, r, fc); R.dot(col, x, y, r * 0.4, "#fff7e2");
+      }
+    }
+    flowers(T, 14);
+    T.poly("front", [[0.34, 0], [0.5, 0.16], [0.66, 0]], tone(body, -0.2)); // neckline
+    T.rect("front", 0.26, 0, 0.1, 0.16, bc); T.rect("front", 0.64, 0, 0.1, 0.16, bc); // straps gap
+    T.rect("front", 0.3, 0.5, 0.4, 0.03, tone(body, -0.22));      // waist tie
+    T.shade();
+    A.fill(bc); A.shade();
+    flowers(L, 12);
+    for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.92, 1, 0.05, tone(body, -0.2)); // hem
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1 };
+  };
+
+  // TRACKSUIT VARIANTS — color/stripe themes. PAINT.tracksuit already exists;
+  // these are thin wrappers selecting palette via the color record so the cache
+  // keys stay distinct (tracksuit2/tracksuit3) without duplicating the painter.
+  PAINT.tracksuit2 = function (P, c) {                            // red w/ white stripes
+    return PAINT.tracksuit(P, c && c.torso != null ? c : { torso: 0xb22a2a, legs: 0x161616 });
+  };
+  PAINT.tracksuit3 = function (P, c) {                            // navy w/ gold stripes (re-tints the stripe via collar handled below)
+    return PAINT.tracksuit(P, c && c.torso != null ? c : { torso: 0x1c2440, legs: 0x14161c });
+  };
+
+  // ============================================================
   //  THE CACHE — one set per outfit key, shared by every wearer.
   // ============================================================
   const sets = {};                                  // key → {mat, tex, parts}
-  const SUIT_TIES = [0x7a1f2b, 0x1f4e7a];           // burgundy / steel blue
+
+  // ============================================================
+  //  SUIT_STYLES — the parameterized suit catalog. A suit's cache key is
+  //  "suit|"+index, so these INDICES ARE A STABLE CONTRACT (outfits.js / NPC
+  //  casting references "suit|N"). Append new styles to the END only; never
+  //  reorder. Each: {body, tie, pattern, db, vest, lapel, legs, name}.
+  //  tux:true routes through PAINT.tuxedo instead of PAINT.suit.
+  // ============================================================
+  const SUIT_STYLES = [
+    // 0-3: the bread-and-butter 2-piece notch business suits
+    { name: "Charcoal Suit",            body: 0x2c2f36, tie: 0x7a1f2b, pattern: "solid" },
+    { name: "Navy Suit",                body: 0x1c2438, tie: 0x8a1f2b, pattern: "solid" },
+    { name: "Mid-Grey Suit",            body: 0x53585f, tie: 0x274690, pattern: "solid" },
+    { name: "Black Suit",               body: 0x191a1f, tie: 0x9a9da3, pattern: "solid" },
+    // 4-5: pinstripe
+    { name: "Navy Pinstripe Suit",      body: 0x1b2236, tie: 0x6e1f2b, pattern: "pinstripe" },
+    { name: "Charcoal Pinstripe Suit",  body: 0x2b2e35, tie: 0x274690, pattern: "pinstripe" },
+    // 6-7: double-breasted peak
+    { name: "Navy Double-Breasted Suit",     body: 0x1a2236, tie: 0x8a1f2b, pattern: "solid", db: true, lapel: "peak" },
+    { name: "Charcoal Double-Breasted Suit", body: 0x2a2d34, tie: 0x1c1d22, pattern: "solid", db: true, lapel: "peak" },
+    // 8-10: 3-piece (waistcoat)
+    { name: "Charcoal 3-Piece Suit",    body: 0x2c2f36, tie: 0x7a1f2b, pattern: "solid", vest: true },
+    { name: "Navy 3-Piece Suit",        body: 0x1c2438, tie: 0x274690, pattern: "solid", vest: true },
+    { name: "Burgundy 3-Piece Suit",    body: 0x4a1c28, tie: 0x1c1d22, pattern: "solid", vest: 0x3a1620 },
+    // 11-14: color/seasonal suits
+    { name: "Tan Suit",                 body: 0xae9468, tie: 0x4a3422, pattern: "solid", legs: 0xa68d62 },
+    { name: "Olive Suit",              body: 0x55582f, tie: 0x2c2c20, pattern: "solid", legs: 0x4d5029 },
+    { name: "Burgundy Dinner Suit",     body: 0x5a1f2c, tie: 0x141519, pattern: "solid", lapel: "shawl" },
+    { name: "Powder-Blue Suit",         body: 0x7d9bb8, tie: 0x24405e, pattern: "solid", legs: 0x6f8da8 },
+    { name: "All-White Suit",           body: 0xe9e7df, tie: 0x9a9d9a, pattern: "solid", legs: 0xe2e0d6 },
+    // 15-16: patterned tailoring
+    { name: "Brown Glen-Check Suit",    body: 0x6e5c44, tie: 0x3a2c1e, pattern: "glen", legs: 0x655439 },
+    { name: "Grey Windowpane Suit",     body: 0x595d63, tie: 0x6e1f2b, pattern: "windowpane" },
+    // 17-20: TUXEDOS (tux:true)
+    { name: "Black Shawl Tuxedo",       tux: true, body: 0x16171c, lapel: "shawl" },
+    { name: "Midnight-Blue Tuxedo",     tux: true, body: 0x141a2e, lapel: "shawl" },
+    { name: "White Dinner Jacket",      tux: true, body: 0xeae8e0, lapel: "shawl", legs: 0x16171c, lapelCss: "rgb(225,222,212)" },
+    { name: "Double-Breasted Peak Tuxedo", tux: true, body: 0x16171c, lapel: "peak", db: true },
+  ];
+  CBZ.citySuitStyles = SUIT_STYLES;                 // outfits.js reads names/indices
 
   // resolve an outfit record/id to a cache key (null = no painted look)
   function keyOf(rec, ch) {
@@ -598,12 +924,24 @@
       if (plainCivvies()) return null;
       return "gang|" + (c.torso | 0) + "|" + (c.collar | 0);
     }
-    if (CIVVIE_IDS[id]) {                            // the street nobody
+    if (CIVVIE_IDS[id] && !rec.forcePaint) {         // the street nobody
       // PLAIN by default — let recolorRig paint flat shirt + jean legs + shoes.
+      // (a BOUGHT hoodie sets rec.forcePaint so the painted look still applies.)
       if (plainCivvies()) return null;
       return "basics|" + (c.torso != null ? c.torso | 0 : 0x8a939c);
     }
-    if (id === "suit") return "suit|" + (ch && ch.group ? ch.group.id % SUIT_TIES.length : 0);
+    // color-keyed garments: same painter, distinct cache per color so the store
+    // can sell a dozen dress colors without collapsing them to one texture.
+    if (id === "dress" || id === "sundress") {
+      return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + (c.collar != null ? c.collar | 0 : 0);
+    }
+    if (id === "suit") {
+      // style index: explicit rec.style wins; else derive a stable per-rig pick.
+      let si = (rec.style != null) ? (rec.style | 0)
+        : (ch && ch.group && ch.group.id != null ? (ch.group.id % SUIT_STYLES.length) : 0);
+      if (si < 0 || si >= SUIT_STYLES.length) si = 0;
+      return "suit|" + si;
+    }
     if (id === "construction") return "hivis|" + (c.torso != null ? c.torso | 0 : 0xffb43a); // same painter, site-orange default
     if (PAINT[id]) return id;
     return null;                                    // leather/tactical/designer… stay flat
@@ -613,7 +951,7 @@
     const cv = document.createElement("canvas");
     cv.width = W; cv.height = H;
     const ctx = cv.getContext("2d");
-    const P = { T: rowPainter(ctx, "torso"), J: rowPainter(ctx, "jacket"), A: rowPainter(ctx, "arm"), L: rowPainter(ctx, "leg") };
+    const P = { T: rowPainter(ctx, "torso"), J: rowPainter(ctx, "jacket"), A: rowPainter(ctx, "arm"), L: rowPainter(ctx, "leg"), ctx: ctx };
     const c = (rec && rec.colors) || {};
     const kind = key.split("|")[0];
     // pre-fill the WHOLE atlas opaque (base cloth color) so rows a painter
@@ -623,7 +961,10 @@
     ctx.fillStyle = hx(c.torso != null ? c.torso : (key.split("|")[1] | 0) || 0x444444);
     ctx.fillRect(0, 0, W, H);
     let parts = null;
-    if (kind === "suit") parts = PAINT.suit(P, c, SUIT_TIES[key.split("|")[1] | 0]);
+    if (kind === "suit") {
+      const st = SUIT_STYLES[(key.split("|")[1] | 0)] || SUIT_STYLES[0];
+      parts = st.tux ? PAINT.tuxedo(P, c, st) : PAINT.suit(P, c, st);
+    }
     else if (kind === "basics") parts = PAINT.basics(P, { torso: key.split("|")[1] | 0 });
     else if (kind === "hivis") parts = PAINT.hivis(P, { torso: key.split("|")[1] | 0, legs: c.legs, arms: c.arms }); // shared by construction key
     else if (kind === "gang") { const seg = key.split("|"); parts = PAINT.gang(P, { torso: seg[1] | 0, collar: seg[2] | 0, legs: c.legs }); }
@@ -882,6 +1223,50 @@
       piece(group, 0.3, 0.7, 0.04, 0, 0.05, 0.31, 0xf1f2ec);     // shirt front
       piece(group, 0.2, 0.07, 0.05, 0, 0.34, 0.33, 0x0b0c10); } }; // bow tie
 
+  // ============================================================
+  //  NEW BUYABLE FULL-LOOKS — each is a PAINTED outfit (painted:"<id>" short-
+  //  circuits straight to PAINT.<id>, like the tuxedo). The rack sample draws a
+  //  cheap representative box. paintRec carries colors/style to applyClothes.
+  // ============================================================
+  function paintedLook(visualId, paintId, label, drip, color, paintRec, drawHex2) {
+    COMP[visualId] = {
+      slot: "outfit", drip: drip, color: color, label: label, painted: paintId, paintRec: paintRec || null,
+      draw(group, ctx) {
+        const c = (ctx && ctx.hex != null) ? ctx.hex : color;
+        piece(group, 0.9, 0.9, 0.6, 0, 0, 0, c);
+        if (drawHex2 != null) piece(group, 0.36, 0.7, 0.06, 0, 0.02, 0.31, drawHex2);
+      },
+    };
+  }
+  // SUITS: one buyable look per SUIT_STYLES index → painted:"suit", style:N.
+  SUIT_STYLES.forEach(function (st, i) {
+    paintedLook("suit_" + i, "suit", st.name, st.tux ? 26 : (st.vest ? 18 : 14), st.body,
+      { style: i, forcePaint: 1 }, "#f1f2ec");
+  });
+  // STREETWEAR / SERVICE / WORKWEAR full-looks
+  paintedLook("hoodie",       "hoodie",       "Hoodie",          4,  0x7a4a3a, { forcePaint: 1, colors: { torso: 0x7a4a3a } });
+  paintedLook("hoodie_grey",  "hoodie",       "Grey Hoodie",     4,  0x4a4d54, { forcePaint: 1, colors: { torso: 0x4a4d54 } });
+  paintedLook("hoodie_black", "hoodie",       "Black Hoodie",    5,  0x1c1d22, { forcePaint: 1, colors: { torso: 0x1c1d22 } });
+  paintedLook("puffer",       "puffer",       "Puffer Jacket",   7,  0x223a55, { colors: { torso: 0x223a55 } });
+  paintedLook("denim_jacket", "denim_jacket", "Denim Jacket",    6,  0x3c5a7a, { colors: { torso: 0x3c5a7a } });
+  paintedLook("varsity",      "varsity",      "Varsity Jacket",  8,  0x6e1f2b, { colors: { torso: 0x6e1f2b, collar: 0xeae6dc } });
+  paintedLook("graphic_tee",  "graphic_tee",  "Graphic Tee",     2,  0x1c1d22, { colors: { torso: 0x1c1d22, collar: 0xd84a3a } });
+  paintedLook("coveralls",    "coveralls",    "Coveralls",       4,  0x394a5a, { colors: { torso: 0x394a5a } });
+  paintedLook("chef",         "chef",         "Chef Whites",     6,  0xf0efe9, { colors: { collar: 0x9a2a2a } });
+  paintedLook("waiter",       "waiter",       "Waiter Set",      7,  0x16171c, null, "#f1f2ec");
+  paintedLook("pilot",        "pilot",        "Pilot Uniform",   9,  0xeef0f2, { colors: { legs: 0x1a1c24 } });
+  paintedLook("tracksuit",    "tracksuit",    "Tracksuit",       5,  0x2bb673, { colors: { torso: 0x2bb673 } });
+  paintedLook("tracksuit_red","tracksuit2",   "Red Tracksuit",   5,  0xb22a2a, null);
+  paintedLook("tracksuit_navy","tracksuit3",  "Navy Tracksuit",  5,  0x1c2440, null);
+  // DRESSES (color-keyed cache via paintRec.colors.torso)
+  [["dress_black", 0x1c1d22, "Black Dress"], ["dress_red", 0x8a1f28, "Red Dress"],
+   ["dress_navy", 0x1c2438, "Navy Dress"], ["dress_emerald", 0x1d5a44, "Emerald Dress"],
+   ["dress_white", 0xe9e7df, "White Dress"]].forEach(function (d) {
+    paintedLook(d[0], "dress", d[2], 9, d[1], { colors: { torso: d[1] } });
+  });
+  paintedLook("sundress",     "sundress",     "Floral Sundress", 6,  0xf0d9a0, { colors: { torso: 0xf0d9a0, collar: 0xd86a8a } });
+  paintedLook("sundress_blue","sundress",     "Blue Sundress",   6,  0xbcd6ea, { colors: { torso: 0xbcd6ea, collar: 0x3a6aa0 } });
+
   function cityComposableSpec(visualId) { return COMP[visualId] || null; }
   CBZ.cityComposableSpec = cityComposableSpec;
 
@@ -900,18 +1285,19 @@
     const items = comp.items || [];
     const shirt = comp.shirt != null ? comp.shirt : 0xf2f2f2;
     let legs = comp.legs != null ? comp.legs : 0x39414f;
-    // a fully-painted special (tuxedo) short-circuits the whole stack
-    let painted = null, shell = null;
+    // a fully-painted special (tuxedo/suit/dress…) short-circuits the whole stack
+    let painted = null, paintRec = null, shell = null;
     for (let i = 0; i < items.length; i++) {
       const sp = COMP[items[i]];
       if (!sp) continue;
-      if (sp.painted) painted = sp.painted;
+      if (sp.painted) { painted = sp.painted; paintRec = sp.paintRec || null; }
       if (sp.shell) shell = items[i];
       if (sp.legsHex != null) legs = sp.legsHex;
     }
     clearComposite(ch);
     if (painted) {                                   // e.g. tuxedo → the painted look
-      applyClothes(ch, { id: painted });
+      const rec = paintRec ? Object.assign({ id: painted }, paintRec) : { id: painted };
+      applyClothes(ch, rec);
       return true;
     }
     // PLAIN base: strip any painted look, then flat-tint via recolorRig if the

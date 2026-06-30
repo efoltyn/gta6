@@ -33,6 +33,7 @@
   const g = CBZ.game;
 
   let root, cashEl, deltaEl, starsEl, starsWrap, hpBar, hungerBar, stamBar, wpnEl, jobEl, crewEl, worldEl, radar, turfEl, homeLineEl, feedEl, speedEl;
+  let armBar, armRowEl, armLabEl;   // ARMOR bar (the steel/blue outer-layer gauge under HP)
   let slotsEl, ammoLineEl, lootEl;   // weapon hotbar (slots + ammo) + carried-loot row
   let objEl, objTxtEl, objRouteEl, objSlotEl, objFillEl;   // retired prospect objective shell
   let popEl, killEl;
@@ -215,6 +216,11 @@
       // they stay clear of the bottom-centre hotbar (capped width + media shrink).
       "<div id='cVitals' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 200px);bottom:calc(var(--hud-pad-b) + 12px);width:124px'>" +
       "  <div class='vRow'><span class='vLab' style='color:#ffb3b3'>HP</span><div class='vSlot' style='height:7px'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div></div>" +
+      // ARMOR — the GTA-style outer layer: a distinct steel/blue plate gauge that
+      // sits just under HP, shown ONLY when the player is wearing armor (driven by
+      // CBZ.player._armor / ._armorMax). The 🛡 label carries the equipped tier name
+      // (+ a ⛑ helmet glyph when _armorKit.head is set). Hidden whole when no armor.
+      "  <div id='cArmRow' class='vRow' style='display:none'><span class='vLab' id='cArmLab' style='color:#a9c7ff'>🛡</span><div class='vSlot' style='height:7px'><div id='cArm' style='height:100%;width:100%;background:linear-gradient(90deg,#5b86c9,#a9c7ff);transition:width .12s linear'></div></div></div>" +
       "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'>FOOD</span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
       "  <div class='vRow'><span class='vLab' style='color:#a8e0ff'>STAM</span><div class='vSlot' style='height:5px'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div></div>" +
       "</div>" +
@@ -268,6 +274,7 @@
     starsEl = root.querySelector("#cStars"); starsWrap = root.querySelector("#cStarsWrap");
     crewEl = root.querySelector("#cCrew"); worldEl = root.querySelector("#cWorld");
     hpBar = root.querySelector("#cHp"); hungerBar = root.querySelector("#cFood"); stamBar = root.querySelector("#cStam");
+    armBar = root.querySelector("#cArm"); armRowEl = root.querySelector("#cArmRow"); armLabEl = root.querySelector("#cArmLab");
     wpnEl = root.querySelector("#cWpn"); jobEl = root.querySelector("#cJob");
     slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo"); lootEl = root.querySelector("#cLoot");
     // CLICK-TO-SELECT on the unified hotbar (city-only). Chips carry data-bi (the
@@ -633,6 +640,43 @@
     ctx.fillRect(u(SH.EW), v(SH.ES), (SH.EE - SH.EW) * sc, (SH.EN - SH.ES) * sc);
     // the south beach gap: a thin sand strip straddling the seawall line
     if (SH.beach) { ctx.fillStyle = "rgba(199,178,124,.45)"; ctx.fillRect(u(SH.beach.x0), v(SH.ES - 10), (SH.beach.x1 - SH.beach.x0) * sc, 13 * sc); }
+    // ---- NEIGHBOURING ISLANDS / BIOMES: the radar shouldn't end at the city's
+    //      seawall — when you stand near the desert/forest/snow causeway you
+    //      should SEE that land coming up. Each registered region paints as land
+    //      + a sand coastline (distance-culled to ≤~12 nearby rects at 14Hz).
+    const REGIONS = A.regions || [];
+    if (REGIONS.length) {
+      const palFn = (CBZ.fullMap && CBZ.fullMap.biomePal) || null;
+      const FALLBACK = { desert: { fill: "#5a4f37" }, forest: { fill: "#2f4030" }, snow: { fill: "#5a6470" }, farmland: { fill: "#4a4a2e" }, speedway: { fill: "#403a44" }, airport: { fill: "#34373d" }, military: { fill: "#3a3f34" }, commerce: { fill: "#3a4636" }, _default: { fill: "#272d35" } };
+      const palOf = (b) => (palFn ? palFn(b) : (FALLBACK[b] || FALLBACK._default));
+      const isLinkR = (rg) => /causeway|bridge/i.test(rg.name || "") || (rg.pad != null && rg.pad <= 1);
+      const cullR = R + 30;
+      const inReg = CBZ.cityBiomeAt ? CBZ.cityBiomeAt(px, pz) : "city";
+      const drawReg = (rg) => {
+        if (isLinkR(rg)) { ctx.fillStyle = "rgba(170,150,110,.7)"; }
+        else { ctx.fillStyle = palOf(rg.biome).fill; }
+        if (rg.kind === "circle") {
+          ctx.beginPath(); ctx.arc(u(rg.cx), v(rg.cz), rg.r * sc, 0, 6.28); ctx.fill();
+          if (!isLinkR(rg)) { ctx.strokeStyle = "rgba(199,178,124,.5)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(u(rg.cx), v(rg.cz), rg.r * sc, 0, 6.28); ctx.stroke(); }
+        } else {
+          ctx.fillRect(u(rg.minX), v(rg.minZ), (rg.maxX - rg.minX) * sc, (rg.maxZ - rg.minZ) * sc);
+          if (!isLinkR(rg)) { ctx.strokeStyle = "rgba(199,178,124,.5)"; ctx.lineWidth = 2; ctx.strokeRect(u(rg.minX), v(rg.minZ), (rg.maxX - rg.minX) * sc, (rg.maxZ - rg.minZ) * sc); }
+        }
+      };
+      let here = null;
+      for (let ri = 0; ri < REGIONS.length; ri++) {
+        const rg = REGIONS[ri];
+        const cxr = rg.kind === "circle" ? rg.cx : (rg.minX + rg.maxX) * 0.5;
+        const czr = rg.kind === "circle" ? rg.cz : (rg.minZ + rg.maxZ) * 0.5;
+        const half = rg.kind === "circle" ? rg.r : Math.max(rg.maxX - rg.minX, rg.maxZ - rg.minZ) * 0.5;
+        const ddx = cxr - px, ddz = czr - pz;
+        if (ddx * ddx + ddz * ddz > (cullR + half) * (cullR + half)) continue;
+        // the region the player is INSIDE draws LAST so its tint wins at centre
+        if (!isLinkR(rg) && rg.biome === inReg && inReg !== "city" && CBZ.cityRegionHit && CBZ.cityRegionHit(rg, px, pz, 0)) { here = rg; continue; }
+        drawReg(rg);
+      }
+      if (here) drawReg(here);
+    }
     function paintLots(list) {
       if (!list) return;
       for (const lot of list) {
@@ -1213,6 +1257,28 @@
     hpBar.style.width = Math.max(0, Math.min(100, (P.hp / maxHp) * 100)) + "%";
     hungerBar.style.width = Math.max(0, Math.min(100, g.hunger || 0)) + "%";
     stamBar.style.width = Math.max(0, Math.min(100, (P.stamina == null ? 100 : P.stamina))) + "%";
+    // ARMOR — the outer-layer plate gauge. Shown only when the armor system has
+    // given the player a kit (_armorMax > 0); guarded against div-by-zero and a
+    // missing armor module (fields simply absent → row stays hidden). The label
+    // carries the equipped tier name + a ⛑ helmet glyph when a head piece is on.
+    if (armRowEl) {
+      const aMax = +(P._armorMax) || 0;
+      if (aMax > 0) {
+        const aCur = Math.max(0, +(P._armor) || 0);
+        armBar.style.width = Math.max(0, Math.min(100, (aCur / aMax) * 100)) + "%";
+        if (armLabEl) {
+          const kit = P._armorKit || null;
+          const KITS = CBZ.ARMOR_KITS || null;
+          let nm = "";
+          if (kit && KITS) {
+            const ck = kit.chest, c = ck != null ? KITS[ck] : null;
+            nm = (c && (c.short || c.name)) || (typeof ck === "string" ? ck : "");
+          }
+          armLabEl.innerHTML = "🛡" + (kit && kit.head ? "⛑" : "") + (nm ? " " + nm : "");
+        }
+        armRowEl.style.display = "";
+      } else armRowEl.style.display = "none";
+    }
     if (g.cityJob && (g.cityJob.dest || g.cityJob.type === "hit")) renderText();
     // keep the hotbar ammo live as you fire/reload (cheap: a signature guard means
     // it only touches the DOM when the held weapon's mag/reserve actually changed).

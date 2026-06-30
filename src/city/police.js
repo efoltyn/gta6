@@ -44,6 +44,21 @@
   let _s = 314159;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
+  // ---- IN-MODULE TUNING (owner rule: never edit config.js — a parallel agent
+  //      owns it; self-default flags here + nudge CBZ.CITY at load) ------------
+  // Self-defaults so a partial/older config never throws.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_CARS == null) CBZ.CONFIG.CITY_PATROL_CARS = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_DISTRICT_WEIGHT == null) CBZ.CONFIG.CITY_PATROL_DISTRICT_WEIGHT = true;
+  // MORE BOOTS ON THE BEAT: a city this big read EMPTY of police with only 3
+  // ambient cops. Raise the standing foot patrol to ~7 (the streets are policed
+  // everywhere, not just where you stand) — comfortably under POLICE_FORCE_MAX
+  // (40) so the finite-force massacre mechanic still bites. WHY: the wanted ramp
+  // only lands when the 0★ baseline already reads as a working force.
+  if (CBZ.CITY) CBZ.CITY.ambientCops = Math.max(CBZ.CITY.ambientCops || 0, 7);
+  // how many PATROL CRUISERS cruise the streets (a separate, capped pool — these
+  // are DRIVING cop cars, not the foot beat). Mutable so config can override.
+  if (CBZ.CITY && CBZ.CITY.patrolCars == null) CBZ.CITY.patrolCars = 4;
+
   const carSuspects = [];     // fleeing cars the police are after
   const pursuers = [];        // traffic cars drafted into PIT pursuit of the player car
 
@@ -561,12 +576,26 @@
     if (tag) { tag.position.y = 3.0; tag.scale.set(2.6, 0.7, 1); ch.group.add(tag); }
     const cop = {
       char: ch, group: ch.group, pos: ch.group.position, name: swat ? "SWAT" : "Officer",
-      kind: "cop", swat: !!swat, ambient: !!ambient, hp: swat ? 160 : 110, dead: false, deadT: 0,
+      // hp TRIMMED (swat 160→120, cop 110→90): durability now has a VISIBLE
+      // cause — the body armor mounted below (armor.js) soaks the first hits —
+      // instead of mystery hp. The armor pool + raw hp together restore the old
+      // effective toughness, but the WHY is on the ped's chest, lootable on death.
+      kind: "cop", swat: !!swat, ambient: !!ambient, hp: swat ? 120 : 90, dead: false, deadT: 0,
       baseSpeed: swat ? 5.2 : 4.6, speed: 0, state: "patrol", sees: false,
       shootCD: 0.6 + rng() * 0.6, arrestT: 0, slice: (rng() * 6) | 0, tag, isPlayer: false,
       npcTarget: null, patrolGoal: null, retarget: 0, armed: true, weapon: swat ? "SMG" : "Pistol",
     };
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
+    // BODY ARMOR (armor.js, feature-detected): SWAT wear a full plate carrier +
+    // helmet; a regular beat cop sometimes wears a concealable soft vest. The API
+    // mounts the visible 3D meshes on the ped, sets cop._armor (a damage pool) and
+    // cop._armorKit (the piece ids) — which become the lootable drop on death.
+    // The clothes.js PAINT.swat painted plate-vest stays underneath; this is the
+    // real 3D armor layer on top.
+    if (CBZ.cityArmorDressPed) {
+      if (swat) CBZ.cityArmorDressPed(cop, ["swatVest", "helmet"]);
+      else if (rng() < 0.5) CBZ.cityArmorDressPed(cop, ["softVest"]);
+    }
     // cops ride blob shadows (city/blobshadows.js) — swept AFTER the weapon
     // sync so the holstered gun mesh leaves the sun shadow pass too.
     ch.group.traverse(function (o) { if (o.isMesh) o.castShadow = false; });
@@ -617,6 +646,7 @@
     for (const c of pursuers) if (c && !c.dead && !c.player) { c._pursuit = false; c.ai = true; c.reckless = false; }
     pursuers.length = 0;
     rbReset();    // drop wall colliders + dispose pooled cruiser/officer rigs (posted cops were in cityCops → already disposed above)
+    patrolCarsReset();   // clear patrol-cruiser handles (the cars are disposed by vehicles.js clearCars)
     if (typeof despawnChopper === "function") despawnChopper();
     pitCD = 0;
     dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
@@ -635,17 +665,34 @@
     const A = CBZ.city.arena; if (!A) return null;
     const grp = new THREE.Group();
     const matBody = CBZ.mat ? CBZ.mat(0x1a1d24, { ei: 0.02 }) : new THREE.MeshStandardMaterial({ color: 0x1a1d24 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.1, 4.4), matBody);
-    body.castShadow = false; grp.add(body);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 3.0), matBody);
-    tail.position.set(0, 0.2, -3.4); grp.add(tail);
     const skidMat = CBZ.mat ? CBZ.mat(0x2a2e36) : matBody;
-    const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 3.4), skidMat); skidL.position.set(-0.8, -0.7, 0); grp.add(skidL);
-    const skidR = skidL.clone(); skidR.position.x = 0.8; grp.add(skidR);
-    // main rotor — a thin spinning blade plane (cheap)
-    const rotor = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.05, 0.5),
-      new THREE.MeshBasicMaterial({ color: 0x101216, transparent: true, opacity: 0.55, depthWrite: false }));
-    rotor.position.y = 0.85; grp.add(rotor);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.2, 4.0), matBody);
+    body.castShadow = false; grp.add(body);
+    // forward glass cabin overlapping the fuselage front
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.7, 1.7), skidMat);
+    canopy.position.set(0, 0.5, 1.25); grp.add(canopy);
+    // tapered tail boom — front sunk into the rear of the cabin (no gap)
+    const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 2.7), matBody);
+    boom.position.set(0, 0.26, -2.95); grp.add(boom);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.95, 0.6), matBody);
+    fin.position.set(0, 0.7, -4.0); grp.add(fin);
+    // skids on struts that meet the belly
+    const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 3.2), skidMat); skidL.position.set(-0.75, -0.82, 0.1); grp.add(skidL);
+    const skidR = skidL.clone(); skidR.position.x = 0.75; grp.add(skidR);
+    for (const sx of [-0.75, 0.75]) {
+      for (const sz of [0.85, -0.85]) {
+        const st = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.1), skidMat);
+        st.position.set(sx, -0.52, sz + 0.1); grp.add(st);
+      }
+    }
+    // main rotor — crossed thin blades on a mast hub (group spun by updateChopper)
+    const hub = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.32, 0.3), skidMat); hub.position.y = 0.82; grp.add(hub);
+    const rotorMat = new THREE.MeshBasicMaterial({ color: 0x101216, transparent: true, opacity: 0.55, depthWrite: false });
+    const bladeGeo = new THREE.BoxGeometry(7.5, 0.05, 0.46);
+    const rotor = new THREE.Group(); rotor.position.y = 0.92;
+    const rb1 = new THREE.Mesh(bladeGeo, rotorMat); rotor.add(rb1);
+    const rb2 = new THREE.Mesh(bladeGeo, rotorMat); rb2.rotation.y = Math.PI / 2; rotor.add(rb2);
+    grp.add(rotor);
     // belly searchlight: a visible cone + a ground pool (like searchlight.js)
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 5.5, 1, 16, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
@@ -849,9 +896,24 @@
   // damage a cop; killing one spikes player heat + drops the cop's gun
   CBZ.cityHurtCop = function (cop, dmg, imp) {
     if (!cop || cop.dead) return;
+    // ARMOR SOAK: a vest/plate carrier eats the first hits before flesh — this is
+    // WHY a plated SWAT survives the opening burst. Drain the pool, then bleed any
+    // overflow into hp. (No-op when the cop has no armor pool / armor.js absent.)
+    if ((cop._armor | 0) > 0 && dmg > 0) {
+      const soak = Math.min(cop._armor, dmg);
+      cop._armor -= soak; dmg -= soak;
+      if (dmg <= 0) {
+        // shot stopped by armor — still react to the impact, but no flesh damage
+        if (CBZ.body && imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 2 });
+        return;
+      }
+    }
     cop.hp -= dmg;
     if (cop.hp <= 0) {
       cop.dead = true; cop.deadT = 0;
+      // CORPSE ARMOR LOOT: stamp the kit pieces this cop wore so the body offers
+      // "Take their armor" (read by interact.js). Only when they actually had a kit.
+      if (cop._armorKit && cop._armorKit.length) cop._armorLoot = cop._armorKit.slice();
       if (CBZ.cityDropWeapon) CBZ.cityDropWeapon(cop.pos.x, cop.pos.z, cop.swat ? "SMG" : "Pistol", 30);   // disarmed
       cop.armed = false; cop.weapon = null;
       if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
@@ -882,6 +944,129 @@
   // 0-1★ none, 2★ a token, 3★ a chunk, 4★ most, 5★ nearly the whole heavy column —
   // the rare top star drowns you in armoured units (a brutal crescendo).
   const SWAT_FRAC = [0, 0, 0.12, 0.45, 0.7, 0.95];
+
+  // ============================================================
+  //  PATROL CRUISERS (police-patrol-cars) — a small, capped pool of black-and-
+  //  white units that CRUISE the streets on the normal lane AI, marked
+  //  _patrolCar so they ride vehicles.js order-37 like any car (no bespoke
+  //  driving). They are CARS in CBZ.cityCars, never cop peds in CBZ.cityCops, so
+  //  they NEVER touch liveCops()/the finite-force pool — they're pure visible
+  //  presence on top of the foot beat. They reuse the EXACT cruiser look the
+  //  roadblock uses (CRUISER_MODEL + rbDecorate over cityMakeCar). Seeded toward
+  //  UNDER-COVERED districts so the police presence spreads across the whole map
+  //  (cops-weighted via the arena's copBeatPoint), not just downtown.
+  //  WHY: you should SEE the police rolling the city, lights cresting a block,
+  //  not just teleporting in when you offend. A patrolling cruiser is the
+  //  baseline that makes a chase read as the same force turning on you.
+  // ============================================================
+  const _patrolCars = [];
+  function patrolCap() {
+    if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_CARS)) return 0;
+    let cap = (CBZ.CITY && CBZ.CITY.patrolCars != null) ? (CBZ.CITY.patrolCars | 0) : 4;
+    // weak-GPU governor: fewer driving cruisers (same discipline as traffic.js)
+    const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
+    if (q <= 1) cap = Math.min(cap, 1);
+    else if (q === 2) cap = Math.min(cap, 3);
+    return Math.max(0, cap);
+  }
+  // a cruiser is still a presentable patrol unit (drop wrecks/burners from the
+  // pool so a smoking hulk never counts as "on patrol").
+  function patrolUsable(c) {
+    return !!(c && !c.dead && !c.player && !c._exploded && !c._onFire && !c._smoking &&
+      !c.abandoned && (c.crumple || 0) < 0.4);
+  }
+  // how MANY of our live patrol cars are currently near a point — used so we seed
+  // the NEXT cruiser into an UNDER-covered spot, not on top of one already there.
+  function patrolNear(x, z, rad2) {
+    let n = 0;
+    for (const c of _patrolCars) { if (!patrolUsable(c)) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz < rad2) n++; }
+    return n;
+  }
+  // choose a seed road point biased to cops-heavy districts (copBeatPoint follows
+  // the money) AND away from where a cruiser already patrols (under-covered). Min
+  // FLOOR: every district can still be picked even if its cops weight is low, so
+  // the outskirts aren't left wholly unpatrolled. Falls back to randomRoadPoint.
+  function patrolSeedPoint(A) {
+    let best = null, bestCover = 1e9;
+    for (let t = 0; t < 6; t++) {
+      const p = (A.copBeatPoint ? A.copBeatPoint() : (A.randomRoadPoint ? A.randomRoadPoint() : null));
+      if (!p) continue;
+      const cover = patrolNear(p.x, p.z, 90 * 90);          // how covered this spot already is
+      if (cover < bestCover) { bestCover = cover; best = p; }
+      if (cover === 0) break;                                // an empty district — take it
+    }
+    return best || (A.randomRoadPoint ? A.randomRoadPoint() : null);
+  }
+  // snap a seed point onto the nearest drivable road segment so the cruiser binds
+  // to lane AI immediately (vehicles.js order-37 needs c.road/lane/dirSign set).
+  function nearestRoadSeg(A, x, z) {
+    if (!A.roads || !A.roads.length) return null;
+    let best = null, bd = 1e9;
+    for (const r of A.roads) {
+      // full 2D distance to the nearest point ON the segment: clamp the ALONG
+      // coordinate to ±len/2 so a parallel road across town isn't picked just
+      // because it shares the cross-coordinate.
+      const half = (r.len || 0) / 2;
+      let dx, dz;
+      if (r.vertical) { dx = x - r.x; dz = z - Math.max(r.z - half, Math.min(r.z + half, z)); }
+      else { dz = z - r.z; dx = x - Math.max(r.x - half, Math.min(r.x + half, x)); }
+      const d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = r; }
+    }
+    return best;
+  }
+  function spawnPatrolCar(A) {
+    if (!CBZ.cityMakeCar) return null;
+    const p = patrolSeedPoint(A); if (!p) return null;
+    const r = nearestRoadSeg(A, p.x, p.z); if (!r) return null;
+    const dir = (p.vertical != null ? p.vertical : r.vertical) ? (Math.random() < 0.5 ? 1 : -1)
+                                                               : (Math.random() < 0.5 ? 1 : -1);
+    const laneIdx = (Math.random() * lanesPerDirP()) | 0;
+    const lane = dir * laneWidthP() * (laneIdx + 0.5);
+    const along = (Math.random() - 0.5) * Math.min(r.len * 0.8, 120);
+    const x = r.vertical ? r.x + lane : r.x + along;
+    const z = r.vertical ? r.z + along : r.z + lane;
+    const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    const c = CBZ.cityMakeCar(x, z, heading, r.vertical, CRUISER_MODEL, 0.28);
+    if (!c) return null;
+    // dress it as a black-and-white (guarded — rbDecorate no-ops on a box rig)
+    try { rbDecorate(c); } catch (e) { /* box rig / headless — skip livery, still drives */ }
+    // routine patrol = lightbar DARK (not responding). The flash is reserved for
+    // an active roadblock/response, so a cruising unit reads as on-the-beat, not
+    // mid-call. (rbUpdate only flashes RB.cars, never our patrol pool, so these
+    // stay dark unless we ever wire a response.)
+    if (c._rbBar) { if (c._rbBar.red) c._rbBar.red.visible = false; if (c._rbBar.blue) c._rbBar.blue.visible = false; }
+    // bind to lane AI exactly like an ambient car
+    c.road = r; c.lane = lane; c.dirSign = dir; c.laneIdx = laneIdx;
+    c.baseV = (TRP().cruise ? TRP().cruise[0] : 7) + 2.5;   // a steady patrol pace
+    c.v = c.baseV * 0.6; c.reckless = false; c.ai = true;
+    c._patrolCar = true;                                    // tag (excluded from any cop accounting)
+    _patrolCars.push(c);
+    return c;
+  }
+  // top the patrol pool up to its cap and prune wrecked/dead units from the
+  // registry (the CAR itself is reaped by vehicles.js; we only drop our handle).
+  function maintainPatrolCars(A) {
+    if (!A) return;
+    // prune
+    for (let i = _patrolCars.length - 1; i >= 0; i--) {
+      const c = _patrolCars[i];
+      if (!c || c.dead || c._reap || c._exploded || CBZ.cityCars.indexOf(c) < 0) { _patrolCars.splice(i, 1); continue; }
+      // a badly crumpled/burning cruiser stops being "on patrol" — release the
+      // handle so a fresh one tops the pool back up (the wreck lives on as traffic
+      // debris until vehicles.js reaps it).
+      if (!patrolUsable(c)) { c._patrolCar = false; _patrolCars.splice(i, 1); }
+    }
+    const cap = patrolCap();
+    if (_patrolCars.length < cap) spawnPatrolCar(A);        // one per maintain beat (1.1s) — eases them in
+  }
+  // local lane geometry mirrors (vehicles.js/traffic.js use the same CBZ.CITY.traf)
+  function TRP() { return (CBZ.CITY && CBZ.CITY.traf) || {}; }
+  function lanesPerDirP() { return Math.max(1, (TRP().lanesPerDir != null ? TRP().lanesPerDir : 2) | 0); }
+  function laneWidthP() { return TRP().laneW != null ? TRP().laneW : 3.6; }
+  // reset hook: clear the registry on a fresh run (the cars themselves are
+  // disposed by vehicles.js clearCars). Called from clearCityCops.
+  function patrolCarsReset() { for (const c of _patrolCars) if (c) c._patrolCar = false; _patrolCars.length = 0; }
 
   // ---- maintain the right number of cops --------------------------------
   function maintain(dt) {
@@ -957,6 +1142,10 @@
       if (pitCD <= 0) { pitCD = 4 + rng() * 3; tryPIT(P._vehicle, stars); }
     }
     rbMaintain(stars, P);
+    // patrol cruisers cruise the city on lane AI — top the pool up here (1.1s
+    // beat). Skipped while you're driving with heat up so we never pop a fresh
+    // cruiser into a tense chase (the chase units are spawned by the ramp above).
+    if (!(P && P.driving && stars >= 2)) { const A = CBZ.city && CBZ.city.arena; if (A) maintainPatrolCars(A); }
   }
 
   // PIT: draft a real traffic car into a pursuit cruiser that rams a fleeing
@@ -1112,10 +1301,18 @@
     while (RB.copPool.length && !c) { const r = RB.copPool.pop(); if (r && !r.dead && !r.culled) c = r; }
     if (c) {
       c.pos.set(x, 0, z);
-      c.hp = c.swat ? 160 : 110; c.dead = false; c.deadT = 0; c.culled = false;
+      c.hp = c.swat ? 120 : 90; c.dead = false; c.deadT = 0; c.culled = false;   // trimmed: armor (below) carries the rest of the toughness
       c.state = "patrol"; c.giveUp = false; c.searchT = 0; c.curTarget = null; c.npcTarget = null;
       c.arrestT = 0; c._radioT = 0; c._duty = null; c.sees = false; c.retarget = 0; c.lostT = 0;
       c._gunLowered = false; c._gunHidden = false; c.chaseCar = null; c._coverT = 0;
+      // re-issue armor on a recycled officer (refills the soak pool, re-mounts the
+      // vest/helmet if the kill stripped them, clears the prior corpse loot stamp)
+      c._armorLoot = null;
+      if (CBZ.cityArmorDressPed) {
+        if (c.swat) CBZ.cityArmorDressPed(c, ["swatVest", "helmet"]);
+        else if (!c._armorKit && rng() < 0.5) CBZ.cityArmorDressPed(c, ["softVest"]);
+        else if (c._armorKit) CBZ.cityArmorDressPed(c, c._armorKit.slice());
+      }
       if (c.tag) c.tag.visible = true;
     } else c = makeCop(x, z, swat, false);
     A.root.add(c.group);
@@ -1729,7 +1926,18 @@
         c._beatT = (c._beatT == null ? 8 + rng() * 14 : c._beatT - dt);
         if (c._beatT <= 0) { c._beatT = 16 + rng() * 20; c._pauseT = 2.2 + rng() * 2.4; if (M && !mateBusy) copBark(c, BEAT_LINES); continue; }
       }
-      if (!c.patrolGoal || Math.hypot(c.pos.x - c.patrolGoal.x, c.pos.z - c.patrolGoal.z) < 4) { const rp = A.randomRoadPoint(); c.patrolGoal = { x: rp.x, z: rp.z }; }
+      // DISTRICT-WEIGHTED BEAT (police-district-weight): an idle patrol cop picks
+      // its next goal via copBeatPoint — a road point bordering a cops-WEIGHTED
+      // lot, so police presence follows the district's cops value (busy cores
+      // draw more beats than the quiet docks/outskirts). lotCum gives EVERY lot a
+      // min weight of 1, so even a zero-cops district can still be picked (the
+      // min floor — nowhere is left wholly unpatrolled). Falls back to a plain
+      // road point if the arena lacks the weighted picker (stripped/headless).
+      if (!c.patrolGoal || Math.hypot(c.pos.x - c.patrolGoal.x, c.pos.z - c.patrolGoal.z) < 4) {
+        const weighted = (CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_DISTRICT_WEIGHT !== false) && A.copBeatPoint;
+        const rp = weighted ? A.copBeatPoint() : A.randomRoadPoint();
+        c.patrolGoal = { x: rp.x, z: rp.z };
+      }
       stepTo(c, c.patrolGoal.x - c.pos.x, c.patrolGoal.z - c.pos.z, c.baseSpeed * 0.6, dt, near);
     }
 

@@ -252,14 +252,46 @@
     }
   }
 
+  // ---- THE SUPPLIER (WHY: a street corner deal has a SOURCE) ----------------
+  // The Sinaloa Cartel (config flag `supplier:true`) is the wholesale PLUG every
+  // street crew sources product from. So a slice of each street deal-in kicks UP
+  // to the cartel's treasury — the cartel earns off the WHOLE street economy
+  // without lifting a finger, which is exactly why it sits rich + rifle-heavy and
+  // expansionist (gangs.js cartel archetype). Feature-detected + cached: if no
+  // gang carries the flag (e.g. a trimmed roster), the kick-up just no-ops.
+  let _supplier; // undefined = not looked up yet, null = none on this roster
+  function supplierGang() {
+    if (_supplier !== undefined) {
+      // re-validate the cache survived an absorb / reset
+      if (_supplier && (!_supplier.absorbed)) return _supplier;
+      if (_supplier === null) return null;
+    }
+    const gangs = CBZ.cityGangs || [];
+    _supplier = null;
+    for (const gx of gangs) {
+      if (gx && gx.supplier && !gx.isPlayer) { _supplier = gx; break; }
+    }
+    return _supplier;
+  }
+
   // the money changes hands: the crew banks it (treasury + standing nudge), the
   // dealer keeps a corner take, and a deal in the open draws a little heat
   // through the EXISTING witness path. Drops a robbable cash stack at his feet.
   function settleDeal(gang, dealer, buyer) {
     const take = 30 + ((rng() * 70) | 0);
     if (gang) {
-      gang.treasury = Math.min(8000, (gang.treasury || 0) + take);
-      if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(dealer); s.contrib = (s.contrib || 0) + take * 0.5; s.loyalty = Math.min(1, (s.loyalty || 0.5) + 0.01); }
+      // SUPPLIER kick-up: a street crew buys its product wholesale from the
+      // cartel, so ~22% of the street take routes UP to the supplier's treasury.
+      // The cartel itself (selling its OWN product) keeps the whole take.
+      const sup = supplierGang();
+      let crewTake = take;
+      if (sup && sup !== gang && !gang.supplier) {
+        const kick = Math.round(take * 0.22);
+        sup.treasury = Math.min(12000, (sup.treasury || 0) + kick);
+        crewTake = take - kick;
+      }
+      gang.treasury = Math.min(8000, (gang.treasury || 0) + crewTake);
+      if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(dealer); s.contrib = (s.contrib || 0) + crewTake * 0.5; s.loyalty = Math.min(1, (s.loyalty || 0.5) + 0.01); }
     }
     opBark(gang, dealer, DEAL_BARK);
     // the cash carrot: a grabbable stack the player can rob (one city-wide)
@@ -275,10 +307,26 @@
   // ============================================================
   const EXTORT_BARK = ["This block's ours — pay up.", "Protection ain't free.", "You owe rent on this corner.", "Hand it over, we'll keep you safe."];
 
-  // find a civilian standing on the gang's turf to shake down.
+  // is a ped a BUSINESS FRONT — a shopkeeper/vendor or a well-off operator
+  // (tycoon/billionaire/socialite/business identity)? La Cosa Nostra's whole WHY
+  // is the protection racket on legit business, so it shakes these down first.
+  function isBizFront(p) {
+    if (!p) return false;
+    if (p.vendor || p.kind === "vendor") return true;
+    const a = p.archetype;
+    if (a === "tycoon" || a === "billionaire" || a === "socialite") return true;
+    if (p.business || p.owner) return true;
+    return false;
+  }
+
+  // find a civilian standing on the gang's turf to shake down. For La Cosa Nostra
+  // (config flag `extortsBiz:true`) the racket leans on BUSINESS FRONTS — vendors,
+  // shopkeepers, the well-dressed operators of the commercial blocks — so those
+  // marks are strongly preferred (a plain civilian is only a fallback for them).
   function extortMark(gang) {
     const peds = CBZ.cityPeds; if (!peds) return null;
-    let best = null, bd = 16 * 16;
+    const bizPref = !!gang.extortsBiz;
+    let best = null, bd = 16 * 16, bestBiz = false;
     const cx = gang.center.x, cz = gang.center.z;
     for (let i = 0; i < peds.length; i++) {
       const p = peds[i];
@@ -292,7 +340,13 @@
       for (const lot of gang.turf) { const dx = p.pos.x - lot.cx, dz = p.pos.z - lot.cz; if (dx * dx + dz * dz < 11 * 11) { onTurf = true; break; } }
       if (!onTurf) continue;
       const dx = p.pos.x - cx, dz = p.pos.z - cz, d2 = dx * dx + dz * dz;
-      if (d2 < bd) { bd = d2; best = p; }
+      const biz = bizPref && isBizFront(p);
+      // a business front always out-ranks a plain civilian for the racket crew;
+      // among equals, take the nearer mark.
+      if (bizPref) {
+        if (biz && !bestBiz) { best = p; bd = d2; bestBiz = true; continue; }
+        if (biz === bestBiz && d2 < bd) { bd = d2; best = p; bestBiz = biz; }
+      } else if (d2 < bd) { bd = d2; best = p; }
     }
     return best;
   }
@@ -524,6 +578,7 @@
   // ---- reset: drop all op state so a fresh run / mode swap starts clean ----
   function resetOps() {
     dropCash();
+    _supplier = undefined;                     // re-resolve the supplier on the fresh roster
     const gangs = CBZ.cityGangs || [];
     for (const gang of gangs) {
       if (!gang) continue;
@@ -555,4 +610,151 @@
       for (const gang of CBZ.cityGangs) runGangOps(gang, step);
     }
   });
+
+  // ============================================================
+  //  UNIFY THE STREETS AGAINST THE PLAYER — the whole board flips into a
+  //  last-stand siege. Every crew drops its own beef, ALLIES with the others,
+  //  and turns to HUNT the player. This is the macro endgame of "you can unify
+  //  all gangs into hating + hunting you": one clean, MOTIVATED flip — not a
+  //  silent stat change. It rides entirely on the existing hostility / provoke /
+  //  relations setters, so the reprisal + turf systems make the hunt come free,
+  //  and it's REVERSIBLE — turf.js's alliance drift relaxes the bloc over time
+  //  once the player stops giving them a reason.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_GANG_UNIFY == null) CBZ.CONFIG.CITY_GANG_UNIFY = true;
+  // the WHY trigger thresholds (notoriety the streets won't abide, and the
+  // "you wiped a crew → the survivors band together" reprisal count).
+  const UNIFY_RESPECT = 220;   // notoriety bar: a legend the whole city wants gone
+  const UNIFY_WIPES = 2;       // crews the player has wiped out → the rest unite
+  let _unified = false;        // currently in the all-vs-player siege?
+  let _unifyArmed = true;      // re-arm gate so one trigger fires it once
+  let _absorbedSeen = 0;       // how many absorbed rivals we've already counted
+
+  // the flip itself. intensity (0.5..1) scales how hot the hostility runs; the
+  // banner + war-declaration are the same regardless. Safe to call repeatedly
+  // (it just refreshes the heat) and safe with a partial gang API (every call
+  // is feature-detected, so a trimmed build degrades instead of throwing).
+  CBZ.cityUnifyGangsAgainstPlayer = function (intensity) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CITY_GANG_UNIFY === false) return false;
+    const gangs = CBZ.cityGangs || [];
+    const hot = Math.max(3, Math.min(5, 3 + (intensity || 1) * 2));   // 3..5 hostility
+    const live = [];
+    for (const gang of gangs) {
+      if (!gang || gang.isPlayer || gang.absorbed) continue;
+      live.push(gang);
+      // 1) a crew the player rides with no longer gets a pass — clear friendly
+      //    FIRST, because cityGangProvoke no-ops on a playerFriendly crew.
+      if (CBZ.cityGangSetPlayerFriendly) CBZ.cityGangSetPlayerFriendly(gang.id, false);
+      else gang.playerFriendly = false;
+      // 2) crank hostility + provoke so the reprisal/turf systems send hunters.
+      gang.hostility = Math.min(5, Math.max(gang.hostility || 0, hot));
+      gang.provoke = 1;
+      gang.strikeT = 0;                                  // first squad rolls NOW
+      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(gang.id, 1);
+      // 3) declare open war on the player in the relations graph (so turf.js
+      //    treats player turf as hostile + won't let them shelter behind a pact).
+      if (CBZ.citySetRelation) CBZ.citySetRelation("player", gang.id, "war");
+      if (CBZ.cityDeclareWar) CBZ.cityDeclareWar("player", gang.id);
+    }
+    // 4) the alliance-of-convenience: every rival ALLIES every other rival so
+    //    they hunt as one bloc instead of also fighting each other. Pairwise via
+    //    the existing forge-alliance setter (turf.js will relax it later).
+    if (CBZ.cityForgeAlliance) {
+      for (let i = 0; i < live.length; i++)
+        for (let j = i + 1; j < live.length; j++)
+          CBZ.cityForgeAlliance(live[i].id, live[j].id);
+    }
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    // 5) the moment, made loud. One big banner — no hidden stat, no dumb UI.
+    if (live.length) {
+      if (CBZ.city && CBZ.city.big) { try { CBZ.city.big("☠ EVERY CREW IN THE CITY IS HUNTING YOU"); } catch (e) {} }
+      if (CBZ.city && CBZ.city.note) { try { CBZ.city.note("You've made enemies of every set in town. There's nowhere left to lie low.", 4); } catch (e) {} }
+      if (CBZ.cityFeed) { try { CBZ.cityFeed("☠ The whole city has united against you.", "#ff6a6a"); } catch (e) {} }
+    }
+    _unified = live.length > 0;
+    return _unified;
+  };
+
+  // are we mid-siege? (for UI / phone to show + so the monitor doesn't re-fire)
+  CBZ.cityGangsUnified = function () { return _unified; };
+
+  // expose a manual trigger for the phone / a debug menu (the player or a UI can
+  // CHOOSE to bring the whole city down on themselves). Mirrors the auto path.
+  CBZ.cityProvokeAllGangs = function () {
+    _unifyArmed = false;                       // a deliberate flip, count it as fired
+    return CBZ.cityUnifyGangsAgainstPlayer(1);
+  };
+
+  // count how many rival crews the player has wiped off the map (absorbed). New
+  // absorptions since last poll feed the reprisal trigger — wipe enough sets and
+  // the survivors close ranks against you. Cheap (a length-of-roster scan).
+  function countWipes() {
+    const gangs = CBZ.cityGangs || [];
+    let n = 0;
+    for (const gang of gangs) { if (gang && !gang.isPlayer && gang.absorbed) n++; }
+    return n;
+  }
+
+  // the WHY, watched: TWO natural escalation points trip the unify, both gated so
+  // it fires ONCE per run (the siege then relaxes via turf.js drift). (A) NOTORIETY
+  // — cross a respect bar the streets won't tolerate and the legend unites the
+  // city. (B) REPRISAL — wipe out enough whole crews and the remaining sets band
+  // together against the threat. Cadenced (~2s), city-only, host-only.
+  let _unifyT = 0;
+  CBZ.onUpdate(34.72, function (dt) {
+    if (!inCity()) return;
+    if (noSim()) return;
+    if (CBZ.CONFIG && CBZ.CONFIG.CITY_GANG_UNIFY === false) return;
+    if (!CBZ.cityGangs || !CBZ.cityGangs.length) return;
+    _unifyT -= dt;
+    if (_unifyT > 0) return;
+    _unifyT = 2.0;
+
+    // keep the absorbed-count fresh so a wipe is detected the moment it lands.
+    const wipes = countWipes();
+    const newWipe = wipes > _absorbedSeen;
+    _absorbedSeen = wipes;
+
+    if (_unified) {
+      // already under siege — relax the latch once the streets have cooled (no
+      // non-player crew still actively hunting), so a later provocation can fire
+      // it again. We DON'T force-relax relations; turf.js drift owns that.
+      let anyHot = false;
+      for (const gang of CBZ.cityGangs) {
+        if (!gang || gang.isPlayer || gang.absorbed) continue;
+        if ((gang.hostility || 0) >= 2 || (gang.provoke || 0) >= 0.4) { anyHot = true; break; }
+      }
+      if (!anyHot) { _unified = false; _unifyArmed = true; }
+      return;
+    }
+    if (!_unifyArmed) return;
+
+    // (A) notoriety bar — a respect level the whole city wants gone.
+    const respect = (g && g.respect) || 0;
+    const notorious = respect >= UNIFY_RESPECT;
+    // (B) reprisal — the player has wiped out enough crews that the rest unite.
+    //     Only trip on a FRESH wipe so it lands as a reaction, not on reload.
+    const reprisal = wipes >= UNIFY_WIPES && newWipe;
+
+    if (notorious || reprisal) {
+      _unifyArmed = false;
+      if (CBZ.cityFeed) {
+        try {
+          CBZ.cityFeed(reprisal
+            ? "🩸 You wiped out " + wipes + " whole crews. The rest are closing ranks."
+            : "🔥 Your name rings out too loud — the whole city wants you gone.", "#ffb37b");
+        } catch (e) {}
+      }
+      CBZ.cityUnifyGangsAgainstPlayer(reprisal ? 1 : 0.85);
+    }
+  });
+
+  // fold the unify latches into the existing op reset so a fresh run / mode swap
+  // starts with a clean board (no leftover siege flags across careers reset).
+  const _resetOpsInner = resetOps;
+  resetOps = function () {
+    _resetOpsInner();
+    _unified = false; _unifyArmed = true; _absorbedSeen = 0; _unifyT = 0;
+  };
+  CBZ.cityGangOpsReset = resetOps;
 })();

@@ -214,7 +214,7 @@
     center: { x: 0, z: -700 },
     blocks: 6,             // 6×6 grid of city blocks (room for shops + homes + turf)
     block: 34,             // block size (building lot)
-    road: 9,               // street width between blocks
+    road: 16,              // street width between blocks (US 4-lane arterial; block stays 34 so buildings don't move)
     // Full per-rig peds are ~16 draw calls EACH — the single biggest GPU cost in
     // the city. The instanced ambient crowd (city/crowd.js, ~6 draw calls for
     // hundreds of bodies) carries street DENSITY, and walking up promotes nearby
@@ -245,7 +245,13 @@
     heatDecay: 3.5,        // heat bled off per second when unseen
 
     // ---- world composition: every lot is one of these (buildings.js) -------
-    abandonedFrac: 0.06,   // share of buildable lots that are derelict + gang-run (RARE — most of the city is real lived-in buildings; derelicts are a characterful minority, not a quarter of every block)
+    // Bumped 0.06→0.36 for the 13-gang roster: turf is round-robin in gangs.js
+    // (aband.forEach((lot,i)=>gangs[i%gangs.length].turf.push(lot))), so EVERY
+    // crew needs ≥1 abandoned lot to be VISIBLE. The grid is only 6×6 = 36 lots
+    // (one building per block, not subdivided), so 13 gangs need ~13 derelicts;
+    // park (0.08) eats a few first, hence ~0.36. gangs.js also now backstops this
+    // (ensureEveryGangHasTurf) so even a low roll never strands a crew off-map.
+    abandonedFrac: 0.36,   // share of buildable lots that are derelict + gang-run (~13 of 36 lots → one per crew on the 13-gang roster).
     parkFrac: 0.08,        // share kept as open plazas (breathing room / hangouts)
 
     // ---- DISTRICTS: the city's population FIELD (world.js stamps lots) -----
@@ -300,6 +306,22 @@
       { id: "stones",    name: "Black P. Stones",    color: 0x2f9e4f, accent: 0x123d22, nation: "people",  ethnicity: "black",  type: "set"       }, // green
       { id: "disciples", name: "Gangster Disciples", color: 0x3a4150, accent: 0x141820, nation: "folk",    ethnicity: "black",  type: "syndicate" }, // charcoal
       { id: "vipers",    name: "Trinitarios",        color: 0x16a8a0, accent: 0x0c3b39, nation: "neutral", ethnicity: "latino", type: "brawlers"  }, // teal (Dominican, machete crew)
+      // ---- 2nd wave: the underworld's four tiers filled out (street / cartel /
+      //      mafia / biker+prison). NATION drives turf.js alliances:
+      //        people  → Bloods, Latin Kings, Black P. Stones, + Vice Lords (PEOPLE bloc)
+      //        folk    → Crips, Gangster Disciples, + Sureños (FOLK bloc)
+      //        nortenos→ Norteños ride their OWN Norte bloc, sworn enemies of the Sur/Folk
+      //        neutral → Sinaloa Cartel, La Cosa Nostra, Iron Saints MC, Trinitarios
+      //                  (organized crime — they deal with everyone, ally no bloc)
+      //        brand   → Aryan Brotherhood rides its OWN bloc → allies with NOBODY
+      //      ORGANIZED-crime crews lean SMALL-BENCH (cartel/syndicate crewMul<1.1) for perf.
+      { id: "lords",     name: "Vice Lords",         color: 0xdaa520, accent: 0x141414, nation: "people",   ethnicity: "black",  type: "set"       }, // gold/black (People — distinct deeper goldenrod vs Kings' brighter gold)
+      { id: "surenos",   name: "Sureños 13",         color: 0x1d3f8f, accent: 0x0c1d44, nation: "folk",     ethnicity: "latino", type: "street"    }, // navy (Sur/Folk)
+      { id: "nortenos",  name: "Norteños 14",        color: 0xa62128, accent: 0x4d1013, nation: "nortenos", ethnicity: "latino", type: "street"    }, // deep red (own Norte bloc — arch-rival of Sureños; darker than Bloods' brighter red)
+      { id: "cartel",    name: "Sinaloa Cartel",     color: 0xc8a060, accent: 0x6b5026, nation: "neutral",  ethnicity: "latino", type: "cartel",    supplier: true }, // desert tan — the wholesale product SUPPLIER
+      { id: "cosa",      name: "La Cosa Nostra",     color: 0x7a2233, accent: 0x2a1016, nation: "neutral",  ethnicity: "mixed",  type: "syndicate", extortsBiz: true }, // wine/charcoal — protection + laundering, business district
+      { id: "angels",    name: "Iron Saints MC",     color: 0x5a6068, accent: 0xd2691e, nation: "neutral",  ethnicity: "mixed",  type: "brawlers"  }, // gunmetal w/ orange accent — bikers, highways/industrial
+      { id: "brand",     name: "Aryan Brotherhood",  color: 0xcfc6b0, accent: 0x4a463c, nation: "brand",    ethnicity: "white",  type: "syndicate" }, // bone/ash — prison-power, OWN nation → hostile to all
     ],
     gangPerTurf: [2, 4],   // members spawned to hold each controlled building
     gangArmedFrac: 0.55,   // share of gang members packing a firearm
@@ -322,7 +344,9 @@
 
     // ---- traffic realism (city/vehicles.js + city/traffic.js) -------------
     traf: {
-      lane: 2.2,           // lane-centre offset from a road's centre line
+      lane: 3.6,           // lane-centre offset from a road's centre line (metric US lane width)
+      lanesPerDir: 2,      // lanes per direction (road system derives lane centers from this + laneW)
+      laneW: 3.6,          // metric lane width (m)
       follow: 8.0,         // car-following gap (m) kept behind the car ahead
       cruise: [11, 17],    // calm cruising speed window (city pace, not a crawl)
       aggrSpeedMul: 1.45,  // how much faster aggressive drivers push it
@@ -419,6 +443,15 @@
   // seams (collar/placket/waistband) on every nobody. clothes.js, outfits.js and
   // crowd.js all read this; undefined is treated as ON.
   if (CBZ.CONFIG.CITY_PLAIN_CIVVIES == null) CBZ.CONFIG.CITY_PLAIN_CIVVIES = true;
+
+  // SMART TEAM COMBAT (city/squadai.js + city/loyalty.js): armed NPCs that were
+  // engaged would all sprint to ~9m and trade shots in a scrum. With this ON, a
+  // coordinator LAYERS over the existing per-ped brain (it only writes the
+  // transient fields the brain already honors) to hold a standoff band, strafe,
+  // seek cover, focus-fire a shared target, fan shooters onto firing arcs, and
+  // post a shield on a protectee. Purely additive — flip false to restore the
+  // raw vanilla brain (every steer is gated on this flag).
+  if (CBZ.CONFIG.CITY_SMART_COMBAT == null) CBZ.CONFIG.CITY_SMART_COMBAT = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

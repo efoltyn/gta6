@@ -112,6 +112,63 @@
     if (ped.char) ped.char.sitting = false;   // keep the pose flag honest
   };
 
+  // ---- BIOME WORK-ANCHORS: claim / release (the desk pattern, ported) -----
+  // A biome worker (farmer/rancher/ranger/soldier/ski instructor/ground crew/
+  // shopkeeper) routes to a WORK-ANCHOR instead of a shopLot. cityClaimWorkAnchor
+  // finds the NEAREST matching-kind anchor with a free slot for the ped's job and
+  // claims a seat in it; cityReleaseWorkAnchor frees it. Mirrors cityClaimDesk:
+  // we own who-holds-which-anchor; aigoals.js owns the routing + the fieldwork
+  // resolver; worldmap.js owns the data (CBZ.cityWorkAnchors).
+  //
+  // The anchor KIND comes from the ped's job table entry (CBZ.cityJobs[job].anchor).
+  // Returns the anchor record (so goEarn can read .spots) or null.
+  CBZ.cityClaimWorkAnchor = function (ped) {
+    if (!ped) return null;
+    const list = CBZ.cityWorkAnchors;
+    if (!list || !list.length) return null;
+    // already holds one that's still valid → re-grab (idempotent, free)
+    if (ped._workAnchor && list.indexOf(ped._workAnchor) >= 0 &&
+        ped._workAnchor.occupants.indexOf(ped) >= 0) return ped._workAnchor;
+    const J = CBZ.cityJobs && CBZ.cityJobs[ped.job];
+    const kind = J && J.anchor;
+    if (!kind) return null;
+    const px = ped.pos ? ped.pos.x : 0, pz = ped.pos ? ped.pos.z : 0;
+    let best = null, bestD = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (a.kind !== kind) continue;
+      if (a.occupants.indexOf(ped) >= 0) { best = a; bestD = 0; break; }  // ours already
+      if (a.occupants.length >= (a.cap | 0)) continue;                    // full
+      const dd = (a.x - px) * (a.x - px) + (a.z - pz) * (a.z - pz);
+      if (dd < bestD) { bestD = dd; best = a; }
+    }
+    if (!best) return null;
+    if (best.occupants.indexOf(ped) < 0) best.occupants.push(ped);
+    ped._workAnchor = best;
+    return best;
+  };
+
+  // free whatever work-anchor a ped holds (shift-end / panic / death / recycle).
+  // Idempotent; also clears the working pose flag so a freed worker stands up.
+  CBZ.cityReleaseWorkAnchor = function (ped) {
+    if (!ped) return;
+    const a = ped._workAnchor;
+    if (a && a.occupants) {
+      const i = a.occupants.indexOf(ped);
+      if (i >= 0) a.occupants.splice(i, 1);
+    } else {
+      // ref dropped elsewhere — back-scan so a stale slot can't leak
+      const list = CBZ.cityWorkAnchors;
+      if (list) for (let k = 0; k < list.length; k++) {
+        const occ = list[k].occupants, j = occ ? occ.indexOf(ped) : -1;
+        if (j >= 0) occ.splice(j, 1);
+      }
+    }
+    ped._workAnchor = null;
+    ped._anchorSpot = 0;
+    if (ped.char) ped.char.working = false;
+  };
+
   // ---- optional grabbable cash on a manager desk --------------------------
   // ONE loose cash stack, parented to the scene at a manager desk's anchor, that
   // the player grabs by walking over it (no key — diegetic). Reuses CBZ.city.addCash.
@@ -216,6 +273,25 @@
     acc += dt;
     if (acc < 0.4) return;                    // ~2.5Hz — plenty for an intrusion
     const tick = acc; acc = 0;
+
+    // BIOME WORK-ANCHOR hygiene: drop dead / parked / departed peds from anchor
+    // occupant lists so a slot is never stranded by a body that left without a
+    // clean release (death, cull, recycle). Tiny: ≤ a handful of anchors, each a
+    // 2-3-slot list. Mirrors the desk back-scan but runs on the same cheap tick.
+    const anchors = CBZ.cityWorkAnchors;
+    if (anchors && anchors.length) {
+      for (let i = 0; i < anchors.length; i++) {
+        const occ = anchors[i].occupants;
+        if (!occ || !occ.length) continue;
+        for (let k = occ.length - 1; k >= 0; k--) {
+          const p = occ[k];
+          if (!p || p.dead || p._parked || p._workAnchor !== anchors[i]) {
+            if (p && p._workAnchor === anchors[i]) p._workAnchor = null;
+            occ.splice(k, 1);
+          }
+        }
+      }
+    }
 
     const peds = CBZ.cityPeds;
     const PA = CBZ.city && CBZ.city.playerActor;

@@ -158,13 +158,17 @@
     if (!A.roads || !A.roads.length || !P) return;
 
     // pick a road segment whose chosen seat is far enough from the player
-    let r = null, x = 0, z = 0, along = 0, dirSign = 1, lane = 0, heading = 0, tries = 0;
+    let r = null, x = 0, z = 0, along = 0, dirSign = 1, lane = 0, laneIdx = 0, heading = 0, tries = 0;
     do {
       r = A.roads[(rng() * A.roads.length) | 0];
       along = (rng() - 0.5) * r.len * 0.8;
       dirSign = rng() < 0.5 ? 1 : -1;
-      const laneOff = ((CBZ.CITY && CBZ.CITY.traf && CBZ.CITY.traf.lane) != null) ? CBZ.CITY.traf.lane : 2.2;
-      lane = dirSign * laneOff;
+      // ride the outer (curb) lane, scaled to the new multi-lane geometry
+      const traf = (CBZ.CITY && CBZ.CITY.traf) || {};
+      const lpd = Math.max(1, (traf.lanesPerDir != null ? traf.lanesPerDir : 2) | 0);
+      const lw = traf.laneW != null ? traf.laneW : 3.6;
+      laneIdx = lpd - 1;
+      lane = dirSign * lw * (laneIdx + 0.5);
       x = r.vertical ? r.x + lane : r.x + along;
       z = r.vertical ? r.z + along : r.z + lane;
       heading = r.vertical ? (dirSign > 0 ? 0 : Math.PI) : (dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
@@ -174,7 +178,7 @@
     const c = CBZ.cityMakeCar(x, z, heading, r.vertical, TRUCK_MODEL, 0.18);
     if (!c) return;
     // slot it into traffic exactly like spawnCityTraffic does so the AI drives it
-    c.road = r; c.lane = lane; c.dirSign = dirSign;
+    c.road = r; c.lane = lane; c.laneIdx = laneIdx; c.dirSign = dirSign;
     const cruise = (CBZ.CITY && CBZ.CITY.traf && CBZ.CITY.traf.cruise) || [7, 12];
     c.baseV = (cruise[0] + rng() * (cruise[1] - cruise[0])) * 0.85;   // a heavy truck cruises a touch slower
     c.v = c.baseV * 0.6;

@@ -129,7 +129,18 @@
     // Bumps and medium-speed traffic impacts can hurt badly, but should not
     // turn a scrape into a WASTED screen. Truly catastrophic hits opt out.
     if (nonlethal) dmg = Math.min(dmg, Math.max(0, P.hp - 1));
-    if (P._armor > 0) { const a = Math.min(P._armor, dmg * (headshot ? 0.45 : 0.7)); P._armor -= a; dmg -= a; }
+    // VISIBLE ARMOR (armor.js): the vest/plate/helmet you looted or bought eats
+    // part of the hit before flesh. Read the kit's published fractions (lower
+    // headFrac with a helmet); fall back to the legacy bare-scalar values when
+    // armor.js is absent. When the pool drains the prop is spent → it visibly
+    // comes off (cityArmorBroke flashes "ARMOR GONE").
+    const aF = headshot ? (P._armorHeadFrac != null ? P._armorHeadFrac : 0.45)
+                        : (P._armorAbsorb != null ? P._armorAbsorb : 0.7);
+    if (P._armor > 0) {
+      const a = Math.min(P._armor, dmg * aF);
+      P._armor -= a; dmg -= a;
+      if (P._armor <= 0 && CBZ.cityArmorBroke) CBZ.cityArmorBroke();
+    }
     P.hp -= dmg;
     P._hurtT = 3.5;                     // pause regen briefly, then it ramps back
     if (CBZ.hitFlash) CBZ.hitFlash();
@@ -463,9 +474,15 @@
     // park-on-death sweep would otherwise banish a crowd-pool killer to (-4000),
     // leaving the kill-cam orbiting empty space). Lives until respawn.
     g._citySpecTarget = pendingSpecKiller;
+    // Most death reasons are PASSIVE past-participles ("shot by police", "run
+    // over", "executed", "stabbed") and read right as "You were ___". A handful
+    // are ACTIVE-voice phrases where that template is just broken English —
+    // "You were bled out" / "You were starved to death" — so those take a bare
+    // "You ___" instead ("You bled out", "You starved to death").
+    const activeVoice = reason === "bled out" || reason === "starved to death" || reason === "collapsed from exhaustion";
     const line = killer ? ("Killed by " + killer)
       : splatDeath ? "You hit the pavement"
-      : (reason ? ("You were " + reason) : "You died");
+      : (reason ? ((activeVoice ? "You " : "You were ") + reason) : "You died");
     // hold the WASTED title back ~1.8s so the ragdoll fling plays out first, THEN
     // it fades in — no jarring instant pop on the exact frame you die. When the
     // exterior cinematic plays, hold the title until the street shot has done its
@@ -621,7 +638,12 @@
     if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
     P.pos.set(spot.x, 0, spot.z);
     P.vy = 0; P.grounded = true; P.dead = false; P.maxHp = P.maxHp || 200; P.hp = P.maxHp; P.ko = 0; P.stun = 0; P._hurtT = 0;
-    P._death = null; P._armor = Math.max(0, (P._armor || 0)); P._fellSpeed = 0; P._fallPeak = 0;
+    // ARMOR drops with the body: respawn bare. cityArmorResetPlayer clears the
+    // pool + kit + unmounts the vest/helmet prop (armor.js). Fallback zeroes the
+    // pool if armor.js is absent so the legacy absorb path stays sane.
+    P._death = null; P._fellSpeed = 0; P._fallPeak = 0;
+    if (CBZ.cityArmorResetPlayer) CBZ.cityArmorResetPlayer();
+    else { P._armor = 0; P._armorMax = 0; }
     g.hunger = Math.max(40, g.hunger || 0);
     if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
     CBZ.playerChar.group.visible = true;

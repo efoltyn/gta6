@@ -210,6 +210,11 @@
   // y0 (optional) spawns the debris at an elevated impact seat; life stretches
   // to cover the fall so chunks reach the street instead of vanishing mid-air.
   function addChunks(x, z, count, force, hot, dir, y0) {
+    // CLAMP count to the pool cap: an oversized request (a huge-power blast) would
+    // otherwise drive CHUNK_CAP-count negative (a never-terminating recycle loop)
+    // AND spawn `count` meshes in the for-loop below — either one hard-freezes the
+    // frame. Capping keeps every blast bounded to the pooled budget.
+    count = Math.min(CHUNK_CAP, Math.max(0, count | 0));
     while (chunks.length > CHUNK_CAP - count) recycleChunk();
     const dx = dir ? dir.x : 0, dz = dir ? dir.z : 0, biased = !!dir;
     const baseY = y0 != null ? y0 : 0.4;
@@ -820,11 +825,18 @@
     // and only self-couple as a FALLBACK — exactly one carve, any load order.
     // Carve at the real wall-hit height (opts.y) when given, not the raised
     // air-burst seat. Airstrikes are heavy ordnance → always above the gate.
+    // HEAVY READ: an airstrike is by definition power>=2 ordnance, so we floor the
+    // power we hand to blastAt to 2.0 — blastAt→debris() then routes to the BIGGER
+    // cityHeavyWallRuin (full-facade cascade + collapse curtain + taller plume)
+    // instead of the standard rocket ruin. ONE carve only (blastAt owns it), so
+    // there is no double-carve with the heavy ruin — the ruin is pure FX layered
+    // on the single hole. (buildings.js's wrap, when present, drives the same.)
     if (!opts.noDamage && CBZ.cityFracture && CBZ.cityFracture.blastAt
         && !(CBZ.cityAirstrikeExplosion && CBZ.cityAirstrikeExplosion._structWrapped)) {
       const hy = opts.y != null ? Math.max(1.0, opts.y) : cy;
       const hr = Math.min(4.6, 3.4 + (Math.min(2.4, power) - 1.3) * 0.9);   // big, room-exposing
-      try { CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power }); } catch (e) {}
+      const hp = Math.max(2.0, power);   // airstrike → heavy ruin tier in debris()
+      try { CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: hp }); } catch (e) {}
     }
   };
 
@@ -872,7 +884,7 @@
     let tx = -nz, tz = nx;
     const tl = Math.hypot(tx, tz);
     if (tl < 1e-4) { tx = 1; tz = 0; } else { tx /= tl; tz /= tl; }
-    const n = Math.round(7 + 5 * power);
+    const n = Math.min(CHUNK_CAP, Math.max(0, Math.round(7 + 5 * power)));   // cap to the pool: a huge-power blast must not spin the recycle loop / mega-spawn
     while (chunks.length > CHUNK_CAP - n) recycleChunk();
     const fall = Math.sqrt(Math.max(0.5, y) / 8.8);   // time to reach the street under chunk gravity
     for (let i = 0; i < n; i++) {
@@ -1075,6 +1087,239 @@
     addBlastWound(x, y, z, nx, 0, nz, 60 + Math.random() * 30);
   };
 
+  // ---- CBZ.cityDustKick — a cheap pooled DUST CLOUD at a blast seat ----------
+  // The generic "breath of pulverized debris" a detonation kicks up off the deck,
+  // exposed so fracture.js's debris-burst (CBZ.cityFracture(pos,r,dir)) and any
+  // other caller can drop a dust pop without owning the puff/point-burst pools.
+  // WHY: shrapnel + a scorch alone read dry; the dust is what sells "concrete
+  // just shattered here". Pooled (pointBurst ring + spawnPuff pool), so it's
+  // draw-call-cheap and can't flood; power scales the volume. Headless-safe.
+  CBZ.cityDustKick = function (x, y, z, power) {
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const P = Math.min(2.6, Math.max(0.4, power || 1));
+    const cy = y == null ? 0.4 : y;
+    // a fast pale dust spray + a couple of slow rolling billows that linger
+    pointBurst(x, z, Math.round(10 + 10 * P), 0x9a9082, 0.45, 2.2 + P * 1.2, 1.0, true, cy);
+    for (let i = 0; i < Math.round(2 + P * 2); i++) {
+      const a = Math.random() * 6.2832, sp = 0.8 + Math.random() * 1.4;
+      spawnPuff(x + (Math.random() - 0.5) * 0.8, cy + 0.2 + Math.random() * 0.6, z + (Math.random() - 0.5) * 0.8, {
+        additive: false, smoke: true, base: 1.1, pop: (3.2 + Math.random() * 2.0) * P,
+        life: 1.6 + Math.random() * 1.0, maxOp: 0.34, shade: 0.36 + Math.random() * 0.08,
+        spin: (Math.random() - 0.5),
+        vx: Math.cos(a) * sp, vy: 0.5 + Math.random() * 0.8, vz: Math.sin(a) * sp,
+        delay: Math.random() * 0.12,
+      });
+    }
+  };
+
+  // ---- COLLAPSE CURTAIN — pooled chunks raining the FULL height of a facade ---
+  // Heavy ordnance doesn't just punch a hole — the wall above the wound SHEDS, a
+  // sheet of masonry sloughing the whole way down to the street. This rains a
+  // power-scaled (CAPPED) curtain of pooled chunks distributed across the height
+  // from topY down to bottomY, all biased DOWNWARD so they pour rather than fly.
+  // Reuses the shared chunk pool + recycleChunk (CHUNK_CAP bounds it), so even a
+  // 6-missile salvo can't flood it. x,z = wound column; nx,nz = outward normal.
+  function collapseCurtain(x, z, nx, nz, topY, bottomY, width, count) {
+    let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    const n = Math.min(CHUNK_CAP, Math.max(0, count | 0));   // cap to the pool (curtain salvo can't flood or spin the recycle loop)
+    while (chunks.length > CHUNK_CAP - n) recycleChunk();
+    const span = Math.max(1, topY - bottomY);
+    for (let i = 0; i < n; i++) {
+      const glow = Math.random() < 0.18;
+      const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
+      const sc = 0.7 + Math.random() * 1.3;
+      // distribute up the column (biased toward the upper half — the wall above
+      // the wound is what comes down) and across the wound width along the face
+      const h = bottomY + Math.pow(Math.random(), 0.7) * span;
+      const along = (Math.random() - 0.5) * width * 1.1;
+      mesh.position.set(x + tx * along + nx * 0.3, h, z + tz * along + nz * 0.3);
+      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      mesh.scale.setScalar(sc);
+      scene.add(mesh);
+      const fall = Math.sqrt(Math.max(0.5, h) / 8.8);
+      chunks.push({
+        mesh, hh: CHUNK_HH * sc,
+        vx: nx * (0.4 + Math.random() * 1.8) + tx * (Math.random() - 0.5) * 2.2,
+        vy: -(0.5 + Math.random() * 2.5),               // pours straight down the face
+        vz: nz * (0.4 + Math.random() * 1.8) + tz * (Math.random() - 0.5) * 2.2,
+        spin: (Math.random() - 0.5) * 12, t: 0, life: fall + 1.4 + Math.random() * 1.0,
+        rest: 0, settled: false, trail: glow ? 0 : -1,
+      });
+    }
+  }
+
+  // ============================================================
+  // cityHeavyWallRuin — the BIGGER, taller facade read for HEAVY ordnance
+  // (power>=2: airstrike / missile / tank). Everything cityWallRuin does, then a
+  // SECOND tier staged DOWN the whole facade from the wound to the street, a
+  // collapse curtain raining the full height, a taller dust column and a fatter
+  // persistent rubble heap — so a bomb reads as a bomb, not a rocket. All on the
+  // existing pooled chunk/puff/scorch systems (CHUNK_CAP recycle bounds it), so
+  // it's draw-call-neutral and a salvo can't flood it (curtain count is capped).
+  // x,y,z = wound centre on the outer wall plane; nx,nz = outward normal.
+  // o = { power, width, top, bottom } from the carved gap (same as cityWallRuin).
+  // ============================================================
+  CBZ.cityHeavyWallRuin = function (x, y, z, nx, nz, o) {
+    o = o || {};
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    const power = Math.min(2.6, o.power || 2);
+    const width = Math.max(1.2, o.width || (2 + power));
+    const top = o.top != null ? o.top : y + width * 0.5;
+    const bottom = o.bottom != null ? o.bottom : Math.max(0, y - width * 0.5);
+    const gn = nNorm(nx, nz); nx = gn.x; nz = gn.y;
+
+    // (a) the standard ruin does the core hole read (avalanche + heap + rebar +
+    //     soot ring + dust + smoking wound). Build everything bigger ON TOP.
+    if (CBZ.cityWallRuin) CBZ.cityWallRuin(x, y, z, nx, nz, o);
+
+    // (b) a SECOND avalanche tier sheeting the FULL facade from wound to street —
+    //     a much larger drop than the core ruin's, with a tall staggered dust
+    //     column so the whole wall visibly cascades, not just the wound lip.
+    facadeAvalanche(x, y, z, nx, nz, Math.min(2.4, power + 0.3));
+    const drop = Math.min(Math.max(3, top - 0.5), 26);   // extend the cascade to the wound HEIGHT
+    const nCol = Math.round(8 + power * 4);
+    for (let i = 0; i < nCol; i++) {
+      const f = i / nCol;                                 // staggered top→bottom
+      spawnPuff(x + (Math.random() - 0.5) * width * 1.2 + nx * 0.5, top - f * drop,
+        z + (Math.random() - 0.5) * width * 1.2 + nz * 0.5, {
+          additive: false, smoke: true, base: 1.2, pop: (4.0 + Math.random() * 2.6) * power,
+          life: 2.0 + Math.random() * 1.4, maxOp: 0.44, shade: 0.38 + Math.random() * 0.08,
+          spin: (Math.random() - 0.5),
+          vx: nx * 0.6 + (Math.random() - 0.5), vy: -(1.6 + Math.random() * 2.6), vz: nz * 0.6 + (Math.random() - 0.5),
+          delay: f * 0.6 + Math.random() * 0.08,
+        });
+    }
+    // a tall dust COLUMN boiling up off the wound (the bomb's signature plume)
+    pointBurst(x, z, Math.round(20 + 14 * power), 0xa39a8c, 0.55, 2.0 + power, 1.4, true, y + width * 0.4);
+
+    // (c) the COLLAPSE CURTAIN — 12–18 extra pooled chunks (power-scaled, capped)
+    //     raining the full height from the wound up to the street, biased down.
+    const curtainN = Math.min(18, Math.round(12 + power * 3));
+    collapseCurtain(x, z, nx, nz, Math.max(top, y + width), bottom, width, curtainN);
+
+    // (d) a FATTER, taller persistent rubble heap (~1.5x spread + count) — a bomb
+    //     dumps a deeper pile of masonry on the sidewalk than a rocket.
+    const heapN = Math.round((14 + width * 4 + power * 6) * 1.5);
+    const heapSpread = (1.4 + width * 0.5) * 1.5;
+    const heapSize = (1.0 + power * 0.25) * 1.15;
+    rubbleHeap(x, z, nx, nz, heapSpread, heapSize, heapN);
+  };
+
+  // ============================================================
+  // CBZ.cityAirstrikeCollapse(lot) — a building PARTIAL COLLAPSE for the heaviest
+  // hits (airstrike / missile / tank). The contract endpoint the player-air +
+  // armored agents call when a structure takes ordnance it can't shrug off: a
+  // section of the building SLOUGHS — a wide collapse curtain + heap raining down
+  // a facade, a parapet block knocked loose off the roofline, a fat dust pall and
+  // a lingering smoke wound. WHY: a tank shell into a tower that leaves it pristine
+  // reads fake; this is the visible "you brought the corner DOWN" beat. Accepts a
+  // lot ({cx,cz,w,d,building}) OR a bare position {x,z}; resolves the building's
+  // tallest wall + footprint from the live colliders either way. Pooled (chunk /
+  // puff / scorch caps), draw-call-cheap, headless-safe, and self-throttled so a
+  // missile salvo on one building can't re-collapse it every frame.
+  // ============================================================
+  const _collapseSeen = new Map();   // building-key -> last collapse time (anti-spam)
+  CBZ.cityAirstrikeCollapse = function (lot, opts) {
+    opts = opts || {};
+    if (!CBZ.game || CBZ.game.mode !== "city") return;
+    // resolve a centre + footprint from a lot OR a bare position
+    let cx, cz, half = 8, key = null;
+    if (lot && lot.cx != null) {
+      cx = lot.cx; cz = lot.cz;
+      half = Math.max(4, Math.min((lot.w || 16), (lot.d || 16)) * 0.5);
+      key = Math.round(cx) + "," + Math.round(cz);
+    } else if (lot && (lot.x != null || lot.point)) {
+      const p = lot.point || lot; cx = p.x; cz = p.z;
+      key = Math.round(cx) + "," + Math.round(cz);
+    } else if (lot && lot.building && lot.building.group) {
+      cx = lot.building.group.position.x; cz = lot.building.group.position.z;
+      key = Math.round(cx) + "," + Math.round(cz);
+    } else return;
+    // SELF-THROTTLE: one collapse per building per ~2.5s — a salvo of missiles
+    // adds more rubble than re-running the whole sequence every impact.
+    const tNow = performance.now() / 1000;
+    if (key) {
+      const last = _collapseSeen.get(key);
+      if (last != null && tNow - last < 2.5) return;
+      if (_collapseSeen.size > 64) {            // bound the dedup map
+        _collapseSeen.forEach((v, k) => { if (tNow - v > 12) _collapseSeen.delete(k); });
+      }
+      _collapseSeen.set(key, tNow);
+    }
+    const power = Math.min(2.6, opts.power || 2.2);
+    // find the building's TALLEST wall near the centre to anchor the collapsing
+    // face + read the roof height (the same wall AABBs cityBreach/cityScorch use).
+    let topY = -1, faceX = cx, faceZ = cz, fnx = 0, fnz = 1, found = false;
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y1 == null || !c.ref) continue;
+      const mt = c.ref.material; if (mt && mt.transparent) continue;   // skip glass
+      const bx = (c.minX + c.maxX) / 2, bz = (c.minZ + c.maxZ) / 2;
+      if (Math.abs(bx - cx) > half + 2 || Math.abs(bz - cz) > half + 2) continue;
+      const ex = c.maxX - c.minX, ez = c.maxZ - c.minZ;
+      if (Math.min(ex, ez) > 1.2) continue;                            // walls only, not slabs
+      if (c.y1 <= topY) continue;
+      topY = c.y1; found = true;
+      // outward normal = the broad face pointing away from the building centre
+      if (ex >= ez) { fnz = bz < cz ? -1 : 1; fnx = 0; faceZ = fnz < 0 ? c.minZ - 0.1 : c.maxZ + 0.1; faceX = bx; }
+      else { fnx = bx < cx ? -1 : 1; fnz = 0; faceX = fnx < 0 ? c.minX - 0.1 : c.maxX + 0.1; faceZ = bz; }
+    }
+    if (!found) topY = Math.max(8, opts.top || 12);                    // no wall? assume a mid-rise
+    const gn = nNorm(fnx, fnz); fnx = gn.x; fnz = gn.y;
+    // the collapsing section spans a chunk of the upper facade
+    const top = topY;
+    const bottom = Math.max(0, topY * 0.35);
+    const width = Math.max(3, half * 0.9);
+    const woundY = (top + bottom) * 0.5;
+
+    // (1) a WIDE collapse curtain raining the section down the face (capped)
+    const curtainN = Math.min(26, Math.round(16 + power * 4));
+    collapseCurtain(faceX, faceZ, fnx, fnz, top, bottom, width, curtainN);
+    // (2) a big avalanche + a deep persistent rubble heap mounded at the base
+    facadeAvalanche(faceX, woundY, faceZ, fnx, fnz, Math.min(2.4, power + 0.2));
+    rubbleHeap(faceX, faceZ, fnx, fnz, (1.6 + width * 0.4) * 1.4, 1.2 + power * 0.25, Math.round(20 + width * 3));
+    // (3) knock a parapet/coping block loose off the roofline (it tumbles down)
+    if (topY > 7) {
+      let px = fnx, pz = fnz;
+      if (Math.hypot(px, pz) < 0.3) { const a = Math.random() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
+      parapetChunk(faceX, topY, faceZ, px, pz);
+      if (power >= 2.2) parapetChunk(faceX + (Math.random() - 0.5) * width, topY, faceZ + (Math.random() - 0.5) * width, px, pz);
+    }
+    // (4) a fat dust PALL rolling off the collapsing section + a tall column
+    pointBurst(faceX, faceZ, Math.round(24 + 16 * power), 0xa39a8c, 0.6, 2.4 + power, 1.5, true, woundY);
+    for (let i = 0; i < Math.round(6 + power * 3); i++) {
+      const a = Math.random() * 6.2832, sp = 1.4 + Math.random() * 2.2;
+      spawnPuff(faceX + fnx * (0.4 + Math.random()), woundY + (Math.random() - 0.3) * width, faceZ + fnz * (0.4 + Math.random()), {
+        additive: false, smoke: true, base: 1.6, pop: (5 + Math.random() * 3) * power,
+        life: 3.0 + Math.random() * 1.8, maxOp: 0.42, shade: 0.34 + Math.random() * 0.08,
+        spin: (Math.random() - 0.5),
+        vx: fnx * sp + (Math.random() - 0.5), vy: 0.6 + Math.random() * 1.0, vz: fnz * sp + (Math.random() - 0.5),
+        delay: Math.random() * 0.3,
+      });
+    }
+    // low dust cascading down the whole face to the heap (staggered)
+    const drop = Math.min(Math.max(3, top - bottom), 26);
+    for (let i = 0; i < Math.round(7 + power * 3); i++) {
+      const f = Math.random();
+      spawnPuff(faceX + (Math.random() - 0.5) * width + fnx * 0.5, top - f * drop, faceZ + (Math.random() - 0.5) * width + fnz * 0.5, {
+        additive: false, smoke: true, base: 1.2, pop: 3.6 + Math.random() * 2.4,
+        life: 1.8 + Math.random() * 1.2, maxOp: 0.42, shade: 0.4 + Math.random() * 0.08,
+        spin: (Math.random() - 0.5),
+        vx: fnx * 0.5, vy: -(1.6 + Math.random() * 2.4), vz: fnz * 0.5,
+        delay: f * 0.6,
+      });
+    }
+    // (5) the collapse keeps smoking for a minute-plus + a ground scorch ring
+    addBlastWound(faceX, woundY, faceZ, fnx, 0, fnz, 60 + Math.random() * 30);
+    addScorch(faceX + fnx * 1.2, faceZ + fnz * 1.2, width * 0.5 + 2, 18);
+    // (6) feedback — a heavy structural rumble (sound is owned by the caller's
+    // explosion; we add the felt shake of a section coming down).
+    if (CBZ.shake) CBZ.shake(Math.min(4.0, 2.4 + power));
+    // (7) escalate the building's persistent damage state so the wall STAYS hurt.
+    if (CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(faceX, woundY, faceZ, Math.min(3, power)); } catch (e) {} }
+  };
+
   function addBlastWound(x, y, z, nx, ny, nz, dur) {
     while (wounds.length >= 3) wounds.shift();   // 3 live wounds max — the oldest stops smoking
     wounds.push({ x, y, z, nx, ny, nz, t: 0, dur, acc: 0.2 });
@@ -1143,6 +1388,7 @@
     scars.length = 0;
     for (const rb of rebar) scene.remove(rb.group);   // shared geo/mats — remove only
     rebar.length = 0;
+    if (_collapseSeen) _collapseSeen.clear();          // fresh run → un-throttle collapses
   };
 
   CBZ.onAlways(9.5, function (dt) {
