@@ -142,8 +142,32 @@
     _popDead = Math.min(_popTotal, _popDead + (n || 1));
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();   // headcount changed → refresh the HUD
   };
+  // W11 — BIRTHS: the one and only way `dead` ever goes back DOWN. This is
+  // NOT population growth — total never moves. A birth just PROMOTES a body
+  // that was already inside the finite headcount (the "few hundred unseen
+  // slack" from _ensurePop's +200, or literally a death's own vacated slot)
+  // into a named, living child, and spends exactly one unit of the headroom
+  // a death created to pay for it. births.js is the sole caller: it already
+  // refuses to attempt a birth unless CBZ.cityPopulation().dead > 0 (see its
+  // header for the full "Path A vs Path B" reasoning), so in practice this
+  // only ever consumes headroom that was checked a moment earlier in the same
+  // synchronous tick — but it re-clamps at 0 here too, defensively, so no
+  // caller can ever push `dead` negative (which would let alive > total).
+  // Returns how many births this call actually funded (0 or `n`, never a
+  // partial credit) so the caller can detect the (should-never-happen) case
+  // where headroom evaporated between its own check and this call.
+  CBZ.cityPopulationBirth = function (n) {
+    _ensurePop();
+    const want = n || 1;
+    const take = Math.min(_popDead, want);
+    if (take <= 0) return 0;
+    _popDead -= take;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();   // headcount changed → refresh the HUD
+    return take;
+  };
   // {alive,total,dead} — the live battle-royale-style headcount for the HUD /
-  // kill feed. alive NEVER rises on its own; it only falls as deaths accrue.
+  // kill feed. alive only ever moves via cityPopulationDie/cityPopulationBirth
+  // above (never both up AND down without a matching cause — see W11 note).
   CBZ.cityPopulation = function () {
     _ensurePop();
     return { alive: Math.max(0, _popTotal - _popDead), total: _popTotal, dead: _popDead };

@@ -308,6 +308,7 @@
       if (CBZ.cityGangsReset) CBZ.cityGangsReset();
       if (CBZ.cityFamilyReset) CBZ.cityFamilyReset();   // households re-cast after peds spawn
       if (CBZ.cityFamilyTreeReset) CBZ.cityFamilyTreeReset(); // W6: fresh run starts with no kinship edges
+      if (CBZ.cityBirthsReset) CBZ.cityBirthsReset();     // W11: fresh cadence timer for the birth tick
       if (CBZ.citySocialReset) CBZ.citySocialReset();
       if (CBZ.cityResetOutfit) CBZ.cityResetOutfit();   // clear worn clothes (drip) on a new run
       game.cityDripRewarded = {};                        // re-earn drip respect on a fresh run
