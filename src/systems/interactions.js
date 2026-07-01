@@ -1,6 +1,9 @@
 /* ============================================================
-   systems/interactions.js — pickups (keycard, coins), the door,
-   breaker box, security cameras, ventilation, and win check.
+   systems/interactions.js — keycard pickup, the door, breaker box,
+   security cameras, ventilation, and win check. (Cigarette-pack
+   pickups used to live here too — that block is now the "coin"
+   prop type in systems/proptypes.js / entities/coins.js, the F3
+   proof that a migrated object type sheds its dedicated block here.)
    ============================================================ */
 (function () {
   "use strict";
@@ -28,28 +31,10 @@
       }
     }
 
-    // ---- cigarette packs ----
-    for (const c of CBZ.coins) {
-      if (c.collected) {
-        if (c.anim < 1) {
-          c.anim += dt * 3.5;
-          c.group.position.y = c.baseY + c.anim * 1.6;
-          c.group.scale.setScalar(Math.max(0, 1 - c.anim));
-          if (c.anim >= 1) c.group.visible = false;
-        }
-        continue;
-      }
-      c.group.rotation.y += dt * 3;
-      c.group.position.y = c.baseY + Math.sin(CBZ.now * 0.005 + c.baseY) * 0.1;
-      const dx = player.pos.x - c.group.position.x, dz = player.pos.z - c.group.position.z;
-      if (dx * dx + dz * dz < 1.4) {
-        c.collected = true; c.anim = 0;
-        if (c.ring) c.ring.visible = false;
-        CBZ.econ.addCigs(c.value);
-        CBZ.flashHint(`+${c.value} 🚬`, 1.0);
-        CBZ.sfx("coin");
-      }
-    }
+    // ---- cigarette packs ---- migrated to systems/proptypes.js's "coin"
+    // prop type (see entities/coins.js) — bob/spin + proximity pickup now
+    // live in that def's onUpdate/onInteract, ticked by the registry's own
+    // updater instead of here.
 
     // ---- door ----
     const ddx = player.pos.x, ddz = player.pos.z + 8;

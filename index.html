@@ -288,6 +288,10 @@
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
 
+<!-- 2c. the prop-type registry (generic object lifecycle) — must load
+     before any entity that registers a prop type, e.g. coins.js below -->
+<script src="src/systems/proptypes.js?v=arch2"></script>
+
 <!-- 3. entities -->
 <script src="src/entities/character.js?v=fall1"></script>
 <script src="src/entities/player.js?v=scale1"></script>
