@@ -130,6 +130,7 @@
     if (gangs.length) blob.gangs = gangs;
     if (CBZ.cityFracture && CBZ.cityFracture.serialize) try { blob.fracture = CBZ.cityFracture.serialize(); } catch (e) {}
     if (CBZ.cityNpcLedger && CBZ.cityNpcLedger.serialize) try { blob.npc = CBZ.cityNpcLedger.serialize(); } catch (e) {}
+    if (CBZ.cityFamilyTree && CBZ.cityFamilyTree.serialize) try { blob.fam = CBZ.cityFamilyTree.serialize(); } catch (e) {}
     if (CBZ.dayPhase) blob.day = CBZ.dayPhase();
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     return blob;
@@ -219,6 +220,7 @@
     if (w.gangs) applyGangs(w.gangs);
     if (w.fracture && CBZ.cityFracture && CBZ.cityFracture.apply) try { CBZ.cityFracture.apply(w.fracture); } catch (e) { console.error("[netpersist]", e); }
     if (w.npc && CBZ.cityNpcLedger && CBZ.cityNpcLedger.apply) try { CBZ.cityNpcLedger.apply(w.npc); } catch (e) { console.error("[netpersist]", e); }
+    if (w.fam && CBZ.cityFamilyTree && CBZ.cityFamilyTree.apply) try { CBZ.cityFamilyTree.apply(w.fam); } catch (e) { console.error("[netpersist]", e); }
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
   }
