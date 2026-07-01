@@ -214,6 +214,14 @@
     if (i >= 0) list.splice(i, 1);
   }
 
+  // W9 (inheritance.js): safe read-only accessors onto the private led/liveBy
+  // maps above — a consumer that needs "does this sid have an offline page?"
+  // or "is this sid a standing body RIGHT NOW?" (to credit cash somewhere
+  // visible instead of a page that may not even exist) shouldn't need to grow
+  // its own copy of this module's state. Both return null, never undefined.
+  CBZ.cityLedgerEntry = function (sid) { return (sid && led[sid]) || null; };
+  CBZ.cityLedgerLive = function (sid) { return (sid && liveBy[sid]) || null; };
+
   // bank a live ped into its entry. Called when a body leaves play (crowd.js
   // park), just before an hour-recast rewrites it, and on the live refresh
   // sweep, so the page is never more than a couple of seconds stale.

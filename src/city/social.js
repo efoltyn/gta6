@@ -684,8 +684,17 @@
       CBZ.city && CBZ.city.big("💔 Your partner was killed");
     }
     if (ped === g.cityHostage) { g.cityHostage = null; }
-    // sever relationship links so survivors don't reference a corpse
-    if (ped.partner) { ped.partner.partner = null; if (ped.partner.family) ped.partner.family = ped.partner.family.filter((x) => x !== ped); }
+    // sever LIVE refs so survivors don't reference a corpse (a live ped.partner
+    // must never point at a dead rig — move(), flirt, etc. all deref it) — but
+    // the family TREE above already kept the marriage on record (endMarriage
+    // stamped end/why:"death" via markDeath), so this is cosmetic bookkeeping
+    // on the live object graph only, not a loss of kinship (W9: heirOf/spouseOf
+    // still resolve the dead spouse's edges for inheritance/grudges later).
+    if (ped.partner) {
+      ped.partner._widowed = true;                 // grief flag: still "was married", just alone now
+      ped.partner.partner = null;
+      if (ped.partner.family) ped.partner.family = ped.partner.family.filter((x) => x !== ped);
+    }
     if (ped.friends) for (const f of ped.friends) if (f && f.friends) f.friends = f.friends.filter((x) => x !== ped);
   };
 

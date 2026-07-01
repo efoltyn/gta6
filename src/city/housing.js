@@ -418,6 +418,23 @@
     return true;
   }
 
+  // ---- W9: HOUSEHOLD PROMOTE (the primary leaseholder died) -----------------
+  // occupants[0] is the one who actually holds the lease (rent payer, the name
+  // economy.js's rent tick bills). When that primary dies, inheritance.js hands
+  // the household to the heir if the heir is ALREADY a co-occupant of the SAME
+  // unit (a live spouse/kid who lived there) — just reorder occupants so the
+  // heir leads it; nobody moves, nothing re-leases, the address survives the
+  // death exactly like a real household would. Returns true on a promotion (or
+  // if the heir was already primary); false if the heir isn't seated in this
+  // unit at all (inheritance.js leaves release()'s normal vacancy path alone).
+  function householdPromote(unit, ped) {
+    if (!unit || !unit.occupants || !ped) return false;
+    const i = unit.occupants.indexOf(ped);
+    if (i < 0) return false;
+    if (i > 0) { unit.occupants.splice(i, 1); unit.occupants.unshift(ped); }
+    return true;
+  }
+
   // CBZ.cityFloorUnits(lot): the rentable units on one lot. The global contract
   // lists this as a buildings.js name — but buildings.js is a parallel file and
   // may not ship it. We PROVIDE it here (deriving from the lot) UNLESS buildings
@@ -497,6 +514,9 @@
   // lot bridge). Every caller guards with `CBZ.cityHouseholdJoin &&` since this
   // module can be disabled/absent like the rest of the housing layer.
   CBZ.cityHouseholdJoin = householdJoin;
+  // W9: the death-side counterpart — promote a surviving co-occupant to
+  // occupants[0] when the primary leaseholder dies (inheritance.js).
+  CBZ.cityHouseholdPromote = householdPromote;
 
   CBZ.cityHousing = {
     units: function () { return ensure().units; },
@@ -505,6 +525,7 @@
     homeOf: homeOf,
     release: release,
     householdJoin: householdJoin,
+    householdPromote: householdPromote,
     rentBudget: rentBudget,
     markOccupancy: markOccupancy,
     occupancyTick: occupancyTick,
