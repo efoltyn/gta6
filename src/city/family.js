@@ -119,6 +119,33 @@
     return p;
   }
 
+  // ---- W8: HOUSING BRIDGE --------------------------------------------------
+  // castFamilies anchors a family straight to lot GEOMETRY (backyardOf) —
+  // it never touches housing.js at all, so the household's rent/occupancy/
+  // persistence layers never see them. This is a DATA-level bridge only: the
+  // visual/routine anchor above (fam.homeX/houseX etc., read by dayGoalFor)
+  // is untouched — members still wander the yard exactly as before. We just
+  // ALSO register them as occupants of a real unit on that same lot, so
+  // economy.js's rent tick and schedule.js's ledger know this household
+  // exists. Best-effort: if the lot has no rentable floor (deriveUnitsForLot
+  // returns []) or the unit is already full (MICRO tier caps at 1 seat), a
+  // member simply keeps no housing tie — harmless, matches how ungated NPCs
+  // already behave with housing absent/disabled.
+  function bridgeHousehold(fam) {
+    if (!CBZ.cityFloorUnits || !fam || !fam._lot || !fam.members.length) return;
+    let units;
+    try { units = CBZ.cityFloorUnits(fam._lot); } catch (e) { return; }
+    if (!units || !units.length) return;               // no rentable floor on this lot
+    const lead = fam.members[0];                        // wife (or the mistress, solo) leases first
+    // hint homeOf() to lease ON this exact lot (the same "adopt a cached _digs"
+    // path aigoals' own fallback already relies on) rather than the citywide
+    // affordability pick — the family's housing tie must match their actual home.
+    lead._digs = fam._lot;
+    if (CBZ.cityHomeOf) CBZ.cityHomeOf(lead);
+    if (!CBZ.cityHouseholdJoin) return;
+    for (let i = 1; i < fam.members.length; i++) CBZ.cityHouseholdJoin(fam.members[i], lead);
+  }
+
   function castFamilies() {
     const A = CBZ.city && CBZ.city.arena;
     if (!A || !A.homeLots || !CBZ.cityPeds || !CBZ.cityPeds.length) return;
@@ -175,7 +202,7 @@
           CBZ.cityFamilyTree.bearChild(gang.boss, wife, kid);
         }
       }
-      if (fam.members.length) families.push(fam);
+      if (fam.members.length) { families.push(fam); bridgeHousehold(fam); }
       if (gang && gi === 1) sideLot = sideLot || lots.find((l) => l !== lot && (l.building.home.tier || 0) >= 2);
       // the FIRST boss also keeps a mistress at a second address — the secret
       // the street can sell: she wears no colors herself, but he pays to keep
@@ -194,6 +221,7 @@
           };
           her._fam = sf; her._role = "mistress";
           families.push(sf);
+          bridgeHousehold(sf);
         }
       }
     }

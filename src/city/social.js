@@ -410,6 +410,11 @@
       // schedule.js worth()) — unlike the street-couple budget gate above,
       // ALWAYS record the marriage in the persistent family tree.
       if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.marry(head, spouse);
+      // W8: move the spouse INTO the head's own leased unit (or lease one for
+      // the head first if he doesn't have one yet) — a couple shares one
+      // address, one rent bill, not two strangers' leases. Guarded: housing.js
+      // may be disabled/absent, same as every other optional layer here.
+      if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(spouse, head);
       // a BOSS sometimes also has a kid at his side (one more protected mouth). Kept
       // rare + capped so we don't bloat the crowd. Modest wealth (a kid, not a vault).
       if (isBoss && rng() < 0.4 && _familySpawns.length < FAMILY_CAP) {
@@ -424,6 +429,9 @@
           kid.family = [head, spouse];
           head.family.push(kid); spouse.family.push(kid);
           if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.bearChild(head, spouse, kid);
+          // W8: the kid joins the same household unit as the head (falls back
+          // to the spouse's seat if the head's is somehow full/gone).
+          if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(kid, head) || CBZ.cityHouseholdJoin(kid, spouse);
         }
       }
     }
@@ -464,6 +472,11 @@
         if (CBZ.cityFamilyTree && (a.gang || a.vendor || a.nameKnown || b.gang || b.vendor || b.nameKnown)) {
           CBZ.cityFamilyTree.marry(a, b);
         }
+        // W8: move in together — every matched couple shares one leased unit
+        // (not just the ledger-worthy subset above; the family tree entry is
+        // gated for budget reasons, housing isn't). Guarded: housing.js may be
+        // disabled/absent.
+        if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(b, a);
       }
     }
     // friend cliques: small groups (3-5) of nearby civilians who hang together,

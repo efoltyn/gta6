@@ -1192,15 +1192,19 @@
       // HOME-BOND release (H2): a recycled/wiped body must let go of its leased
       // unit so the next city's tenants aren't blocked. Prefer the housing.js
       // contract; else clear the occupancy fields aigoals/housing stamp directly
-      // (unit.occupant + the home._tenants tally). All optional-chained — no-op
-      // when no housing layer is loaded.
+      // (unit.occupants[] + the home._tenants tally — W8: an array now, since a
+      // unit can hold a whole household, not just one ped). All optional-chained
+      // — no-op when no housing layer is loaded.
       if (CBZ.cityHomeRelease) { try { CBZ.cityHomeRelease(p); } catch (e) {} }
       else {
-        if (p._unit && p._unit.occupant === p) p._unit.occupant = null;
+        if (p._unit && p._unit.occupants) {
+          const oi = p._unit.occupants.indexOf(p);
+          if (oi >= 0) p._unit.occupants.splice(oi, 1);
+        }
         const hm = p._digs && p._digs.building && p._digs.building.home;
         if (hm && hm._tenants) hm._tenants = Math.max(0, hm._tenants - 1);
       }
-      p._unit = null; p._digs = null; p._home = null;
+      p._unit = null; p._digs = null; p._home = null; p._household = null;
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
       if (p.group) p.group.traverse(function (o) {
         if (o.isSprite) return;     // sprites share an r128 geometry singleton — never dispose

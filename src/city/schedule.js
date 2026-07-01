@@ -233,6 +233,10 @@
     // W5: gender + the longHair roll (peds.js makePed) — compact ints, same as
     // the fields above — so a woman who despawns comes back a woman.
     e.sex = ped.gender === "f" ? 1 : 0; e.lh = ped._longHair ? 1 : 0;
+    // W8: household id (housing.js's unit.id, stamped by cityHouseholdJoin) —
+    // lets the ledger recognise "this is the same address as their spouse/head"
+    // across a stash/deal cycle without walking the housing unit graph.
+    e.hh = ped._household || null;
     const r = ped.relPlayer;   // the street remembers — grudges ride the page
     e.rel = (r && r.seen) ? { r: r.respect | 0, f: r.fear | 0, l: r.loyalty | 0, a: r.affection | 0, g: r.grudge | 0, s: r.seen | 0 } : null;
     if (!ped._parked) {        // a parked body sits off-map — keep the old spots
@@ -245,7 +249,14 @@
       else if (ped._beg) { jx = ped._beg.x; jz = ped._beg.z; }
       if (jx == null) { jx = ped.pos.x; jz = ped.pos.z; }   // last seen working = the spot
       e.jx = jx; e.jz = jz;
-      const hl = ped._digs && ped._digs.building && ped._digs.building.door;
+      // W8: when this ped belongs to a shared household, anchor on the actual
+      // leased unit's own door rather than ped._digs's building door — every
+      // household member reads the SAME unit object, so this is guaranteed to
+      // converge on one address even if a member's _digs pointer (e.g. a
+      // family.js routine anchor) hasn't been kept in lockstep.
+      const hl = (ped._household && ped._unit && ped._unit.door)
+        ? ped._unit.door
+        : (ped._digs && ped._digs.building && ped._digs.building.door);
       if (hl) { e.hx = hl.x; e.hz = hl.z; }
       else if (e.hx == null) { e.hx = ped.pos.x; e.hz = ped.pos.z; }
       e.tx = ped.pos.x; e.tz = ped.pos.z;
@@ -335,6 +346,8 @@
     ped._sched = { k: best.k, salt: best.salt || 0.5, a: ped.archetype, j: ped.job };
     ped._schedAct = null;                            // let the timetable re-anchor them
     ped._jobLot = null; ped._digs = null;            // re-derive toward the stored anchors
+    ped._unit = null;                                 // the unit ref itself doesn't survive a deal — re-leased below
+    ped._household = best.hh != null ? best.hh : null; // W8: null-guarded — older saves carry no `hh` field
     ped._sid = best.sid; ped._sidFresh = t;
     liveBy[best.sid] = ped; best.seen = t;
     // a regular reads as a regular — one street line, only for someone you KNOW

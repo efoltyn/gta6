@@ -1183,7 +1183,11 @@
     let ownerIncome = 0;                          // rent owed to the PLAYER
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
-      const occ = u.occupant;
+      // W8: a unit can hold a whole household now (occupants[]) — rent is
+      // billed ONCE per unit, to the PRIMARY leaseholder only (occupants[0]).
+      // A spouse/kid who joined via cityHouseholdJoin never gets their own
+      // rent line — one address, one bill, exactly like a real lease.
+      const occ = u.occupants && u.occupants[0];
       if (!occ || occ.dead) continue;             // empty/dead → no rent flows
       const rent = u.rent || 0;
       if (rent <= 0) continue;
