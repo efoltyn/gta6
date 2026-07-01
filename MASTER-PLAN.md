@@ -209,6 +209,25 @@ Hierarchy **country → state → city** mapped onto real geography: State of **
 - **Voter blocs computed from real data, per district:** population share from ledger home anchors; wealth axis from Zillow district values; worker axis from the ledger job census; **gang intimidation** — districts inside hostile turf get `turnout ×0.6` and shift 20% of votes to the gang's pick (the player's pick, if it's the player's gang). Candidate score = `40 + 0.5·approval(incumbent) + 12·charisma + platform·bloc·15 + momentum + fraud`.
 - **Player levers:** rally attendance/disruption, donations, attack ads, ballot-office heists (`fraud +10`, discovery risk `scandal +25`), intimidation canvassing, and **running for office** as endgame (filing fee + `reputation.political ≥ 40`; then you set taxes, direct police posture, embezzle — judged by the same approval equation; recall below 20%).
 
+## V.2b One protector system: secret service, hired security, militias, gangs
+
+**Everything that guards anything is the same system.** The codebase already ships four disconnected prototypes: Senator/Judge VIPs walk with police escorts and MAGNATEs with 2-3 suited SMG guards (vips.js:11-14, 79-94); the squad coordinator already "posts a shield on a protectee" (config.js:447-454); gang members already guard bosses with rank/loyalty stat sheets and avenge them (gangs.js); stationed guards already hold posts with drift-back logic (island_military.js gate guards). The plan converges all of them onto one `ProtectionDetail` record:
+
+```
+ProtectionDetail { id, principal (person | base | outlet), memberIds [registry people],
+  gearTier, formation, postings, fundingSource (treasury | wallet | gang treasury),
+  wageRate, loyalty (per member, from the existing 5-axis relationship rows), legalStatus }
+```
+
+The four flavors are **parameterizations, not systems**:
+
+- **Secret Service** — the president's detail (governors/mayors get smaller ones scaled by office): elite gear tier through the existing armor system, treasury-funded, motorcade + podium coverage during the V.2 schedule, body-on-the-principal shielding, and it *grows after failed attempts*. Killing a president through a full detail should be an endgame heist, not a lucky shot.
+- **Hired security** — anyone with money buys the same machinery: recruit guards from the registry (the careers.js recruiting flow + wealth-tier bodyguard discounts already exist), **arm them yourself** — a guard's loadout is literally the weapon items you hand them, so a player who buys rifles fields rifle guards — and assign them to protect you, your family, your base (Part IV), or your business outlets. Billionaires' details are this exact system, NPC-driven.
+- **Militia** — hired security past a headcount threshold becomes a *faction*: it needs wages (a real funding stream), a base to muster at (the tool-cupboard plot), and it inherits the gang machinery — turf capability, the war-shape combat formations, treasury, standing. Regimes react to it: fascist governments deputize friendly militias, democracies restrict private armies (a legal-status heat mechanic), anarchist collapse makes them the only law. Former cops and veterans (V.0/V.6 transitions) recruit cheaper and fight better — your militia is *built out of the simulation's own casualties of history*.
+- **Gangs** — already the working implementation; a gang crew guarding its boss IS a ProtectionDetail with `fundingSource: gang treasury`. The convergence means every improvement (formations, postings, loyalty) upgrades gangs, militias, security, and the Secret Service simultaneously.
+
+**Shared consequences, because protectors are registry people (V.0):** every guard has a wallet, a family, relationship axes, and a price. Underpay them and they quit; mistreat them and loyalty rots; and the assassination meta writes itself — **the bribed bodyguard is the classic vector** (buy a member's grudge/greed through the relationship system), or get yourself *hired into the detail* as the ultimate infiltration. Killing a guard is a permanent registry death with family vendettas attached. One module (`src/city/protection.js`), one behavior set, four skins.
+
 ## V.3 Approval — legible, real inputs
 
 Per jurisdiction, five normalized inputs: **econ** (property index + confidence + employment), **crime** (heat, Σ gang warIntensity, 7-day murder counter), **services/taxes**, **events** (decaying shocks: disasters −15, assassination −10, war declared −12/won +15), **propaganda** (0-20, bought from treasury).
