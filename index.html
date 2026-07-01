@@ -280,8 +280,12 @@
 <script src="src/world/razorwire.js?v=mapflow2"></script>
 <script src="src/world/graffiti.js"></script>
 <script src="src/world/towers.js"></script>
-<script src="src/world/crates.js"></script>
-<script src="src/world/props.js"></script>
+<!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
+     CBZ.spawnPiece at parse time, so they must load after chunks.js/
+     pieces.js define it. Nothing else in this file's original 283-284 slot
+     depended on their (synchronous, load-time) execution happening this
+     early — every cross-file reader (e.g. CBZ.breaker) only touches them
+     from inside a runtime callback, long after all scripts have loaded. -->
 <script src="src/world/clutter.js"></script>
 <script src="src/world/door.js?v=scale2"></script>
 <script src="src/world/exit.js"></script>
@@ -420,6 +424,11 @@
      either load order works. -->
 <script src="src/systems/chunks.js?v=arch2"></script>
 <script src="src/systems/pieces.js?v=arch2"></script>
+<!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
+     (moved from the "2. world geometry" wave above, right after
+     towers.js): they now need spawnPiece to exist at parse time. -->
+<script src="src/world/crates.js"></script>
+<script src="src/world/props.js"></script>
 <script src="src/city/towngen.js?v=sims1"></script>
 <script src="src/city/island_speedway.js?v=arch1"></script>
 <script src="src/city/island_airport.js?v=arch1"></script>

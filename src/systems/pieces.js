@@ -140,6 +140,27 @@
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
 
+    // ---- optional LOS blocking (F7 addition) -------------------------
+    // world/materials.js's addBox has long supported opts.blockLOS: push
+    // the just-built Mesh into the flat CBZ.losBlockers array, which every
+    // raycast consumer (guards.js, detection.js, fpsmode.js, camera.js...)
+    // tests via raycaster.intersectObjects(CBZ.losBlockers, false) — NON-
+    // recursive, so only the pushed object itself is hit-tested, never its
+    // children. Pieces needed the identical capability so compound cover
+    // objects (crates, walls, ...) migrated onto spawnPiece keep blocking
+    // guard/camera sightlines exactly as before (F7, world/crates.js).
+    // NOTE: if `mesh` resolves to a Group (the common case when build()
+    // just fills ctx.group and returns nothing), pushing it here is a
+    // no-op for raycasting — THREE.Group has no geometry of its own, so
+    // Group.raycast() never reports a hit. A def that needs REAL LOS
+    // blocking must instead return an actual Mesh from build() (attach any
+    // cosmetic detail meshes to THAT mesh, not to ctx.group) so a single
+    // real hit-testable surface gets registered here, matching addBox's
+    // one-mesh-per-blocker convention.
+    if (opts.blockLOS) {
+      CBZ.losBlockers.push(mesh);
+    }
+
     // ---- optional walkable top (stacking support) -------------------
     const piecePlatforms = [];
     if (opts.walkTop) {
@@ -325,6 +346,21 @@
       if (touchedPlatforms) CBZ.platforms = next;
     }
 
+    // F7 addition: mirror the same one-filter-pass reap for losBlockers.
+    // Entries there are raw Meshes (not {pieceId,...} records like
+    // colliders/platforms), so identify a piece's own blocker via the
+    // userData.pieceId tag spawnPiece already stamps on every mesh it builds.
+    if (CBZ.losBlockers && CBZ.losBlockers.length) {
+      const next = [];
+      let touchedLos = false;
+      for (let i = 0; i < CBZ.losBlockers.length; i++) {
+        const m = CBZ.losBlockers[i];
+        if (m && m.userData && m.userData.pieceId != null && ids.has(m.userData.pieceId)) { touchedLos = true; continue; }
+        next.push(m);
+      }
+      if (touchedLos) CBZ.losBlockers = next;
+    }
+
     const dirtyChunks = new Set();
     ids.forEach(function (id) {
       const p = CBZ.pieces.get(id);
@@ -384,6 +420,7 @@
 
     const collidersBefore = CBZ.colliders.length;
     const platformsBefore = CBZ.platforms.length;
+    const losBefore = (CBZ.losBlockers || []).length;
     const testX = 100000, testZ = 100000; // far out in empty space, away from any real geometry
 
     const base = CBZ.spawnPiece(boxDef, { pos: { x: testX, y: 0, z: testZ }, walkTop: true });
@@ -392,7 +429,10 @@
 
     const sup1 = CBZ.findSupport(testX, testZ, base.pos.y, base.pos.y + 10);
     const midY = sup1 ? sup1.y : (base.pos.y + boxDef.y1);
-    const mid = CBZ.spawnPiece(boxDef, { pos: { x: testX, y: midY, z: testZ }, walkTop: true });
+    // F7: also exercise the new blockLOS path on this spawn — checked below
+    // alongside the collider/platform counts, then torn down by the same
+    // cascade despawn so the array is restored to baseline like everything else.
+    const mid = CBZ.spawnPiece(boxDef, { pos: { x: testX, y: midY, z: testZ }, walkTop: true, blockLOS: true });
     mid.supportedBy.push(base.id); base.supports.push(mid.id);
     log("findSupport -> " + JSON.stringify(sup1) + "; spawned mid " + mid.id + " @y=" + midY);
 
@@ -404,19 +444,23 @@
 
     const collidersAfterSpawn = CBZ.colliders.length;
     const platformsAfterSpawn = CBZ.platforms.length;
+    const losAfterSpawn = (CBZ.losBlockers || []).length;
     if (collidersAfterSpawn !== collidersBefore + 3) { result.ok = false; result.errors.push("expected +3 colliders, got " + (collidersAfterSpawn - collidersBefore)); }
     if (platformsAfterSpawn !== platformsBefore + 2) { result.ok = false; result.errors.push("expected +2 platforms, got " + (platformsAfterSpawn - platformsBefore)); }
-    log("after spawn: colliders " + collidersBefore + "->" + collidersAfterSpawn + ", platforms " + platformsBefore + "->" + platformsAfterSpawn);
+    if (losAfterSpawn !== losBefore + 1) { result.ok = false; result.errors.push("expected +1 losBlockers, got " + (losAfterSpawn - losBefore)); }
+    log("after spawn: colliders " + collidersBefore + "->" + collidersAfterSpawn + ", platforms " + platformsBefore + "->" + platformsAfterSpawn + ", losBlockers " + losBefore + "->" + losAfterSpawn);
 
     CBZ.despawnPiece(base.id, { cascade: true });
     reapDrain(); // synchronous drain for an immediate console result (normally runs on the next onUpdate(89) tick)
 
     const collidersAfter = CBZ.colliders.length;
     const platformsAfter = CBZ.platforms.length;
+    const losAfter = (CBZ.losBlockers || []).length;
     if (collidersAfter !== collidersBefore) { result.ok = false; result.errors.push("colliders not restored: " + collidersAfter + " vs baseline " + collidersBefore); }
     if (platformsAfter !== platformsBefore) { result.ok = false; result.errors.push("platforms not restored: " + platformsAfter + " vs baseline " + platformsBefore); }
+    if (losAfter !== losBefore) { result.ok = false; result.errors.push("losBlockers not restored: " + losAfter + " vs baseline " + losBefore); }
     if (CBZ.pieces.has(base.id) || CBZ.pieces.has(mid.id) || CBZ.pieces.has(top.id)) { result.ok = false; result.errors.push("cascade did not remove all 3 pieces from CBZ.pieces"); }
-    log("after cascade despawn: colliders " + collidersAfter + " (baseline " + collidersBefore + "), platforms " + platformsAfter + " (baseline " + platformsBefore + ")");
+    log("after cascade despawn: colliders " + collidersAfter + " (baseline " + collidersBefore + "), platforms " + platformsAfter + " (baseline " + platformsBefore + "), losBlockers " + losAfter + " (baseline " + losBefore + ")");
 
     result.ok ? log("PASS") : log("FAIL: " + result.errors.join("; "));
     if (window.console) console.log("[piecesSelfTest]", result.ok ? "PASS" : "FAIL", result);

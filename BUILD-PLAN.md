@@ -32,7 +32,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **F4** `systems/pieces.js` + `systems/chunks.js` (new, additive, zero call sites): `spawnPiece/despawnPiece/findSupport`, 16m chunk registry, reap queue, per-chunk dirty batching skeleton.
 - [x] **F5** `city/placement.js`: rects gain `minY/maxY` (default full-height so behavior is unchanged); `overlaps()` gains the Y test. The one shared PR four building systems need.
 - [x] **F6** `city/assets.js`: pool free-list (remove/recycle instances) — the most load-bearing gap; spike first, then land.
-- [ ] **F7** Migrate `world/props.js` + `world/crates.js` compound props through `spawnPiece` (proof of the piece model; broadphase stats must match).
+- [x] **F7** Migrate `world/props.js` + `world/crates.js` compound props through `spawnPiece` (proof of the piece model; broadphase stats must match).
 
 ## Stage B — Player building
 
