@@ -52,26 +52,50 @@
   function makeCharacter(c) {
     const g = new THREE.Group();
 
+    // ---- BUILD param (c.build: "m" default | "f") -----------------------
+    // A single boolean gate read at every dimension below. Every fem-only
+    // number sits behind `fem ? … : …` (or `if (fem)`) so the untouched
+    // default path — c.build undefined/"m" — produces byte-identical
+    // geometry to before this feature existed: same widths, same offsets,
+    // same leg height (gait math in animChar is keyed off leg height, so
+    // that one stays fixed for both builds). fem only narrows/tapers the
+    // silhouette (shoulders, torso, legs, head) and hip-flares the leg
+    // pivots slightly; it does not restructure the rig — no part is
+    // renamed or added/removed except the optional long-hair mesh below.
+    const fem = c.build === "f";
+
     // ---- legs (children of root: feet stay planted) ----
-    const ll = limb(0.34, 0.95, 0.34, c.legs, c.shoes, 0.2);
-    const rl = limb(0.34, 0.95, 0.34, c.legs, c.shoes, 0.2);
-    ll.position.set(-0.23, 0.95, 0); rl.position.set(0.23, 0.95, 0);
+    const legW = fem ? 0.30 : 0.34;
+    const hipX = fem ? 0.26 : 0.23; // hip flare: pivots a touch wider when fem
+    const ll = limb(legW, 0.95, legW, c.legs, c.shoes, 0.2);
+    const rl = limb(legW, 0.95, legW, c.legs, c.shoes, 0.2);
+    ll.position.set(-hipX, 0.95, 0); rl.position.set(hipX, 0.95, 0);
     g.add(ll, rl);
+
+    // subtle overall height trim for fem builds. Safe for foot-planting:
+    // the legs are the ONLY thing that reaches this group's local y=0
+    // (foot bottom = ll.position.y − leg height = 0.95 − 0.95 = 0), and
+    // scaling g.scale.y multiplies every child's local y by the same
+    // factor about that same local origin — a point already at y=0 stays
+    // at y=0 regardless of scale, so feet neither sink nor float.
+    if (fem) g.scale.y = 0.97;
 
     // ---- body (everything above the hips) ----
     const body = new THREE.Group();
     body.position.y = 0; // bob/sway/lean applied here
     g.add(body);
 
-    const torso = new THREE.Mesh(boxGeom(0.92, 0.95, 0.5), cmat(c.torso));
+    const torso = new THREE.Mesh(boxGeom(fem ? 0.78 : 0.92, 0.95, fem ? 0.44 : 0.5), cmat(c.torso));
     torso.position.y = 1.42; torso.castShadow = torso.receiveShadow = true;
-    const collar = new THREE.Mesh(boxGeom(0.94, 0.18, 0.52), cmat(c.collar || c.torso));
+    const collar = new THREE.Mesh(boxGeom(fem ? 0.80 : 0.94, 0.18, fem ? 0.46 : 0.52), cmat(c.collar || c.torso));
     collar.position.y = 1.84;
     body.add(torso, collar);
 
-    const la = limb(0.3, 0.92, 0.3, c.arms, c.skin, 0.2);
-    const ra = limb(0.3, 0.92, 0.3, c.arms, c.skin, 0.2);
-    la.position.set(-0.62, 1.84, 0); ra.position.set(0.62, 1.84, 0);
+    const armW = fem ? 0.26 : 0.3;
+    const armX = fem ? 0.54 : 0.62;
+    const la = limb(armW, 0.92, armW, c.arms, c.skin, 0.2);
+    const ra = limb(armW, 0.92, armW, c.arms, c.skin, 0.2);
+    la.position.set(-armX, 1.84, 0); ra.position.set(armX, 1.84, 0);
     body.add(la, ra);
     const leftHand = new THREE.Group();
     const rightHand = new THREE.Group();
@@ -87,22 +111,27 @@
     neck.position.y = 1.88;
     // head keeps a FRESH (unshared) material — systems/reactions.js flashes
     // its emissive per-actor on hits, so it must not be a shared cache entry.
-    const head = new THREE.Mesh(boxGeom(0.6, 0.6, 0.6), mat(c.skin));
-    head.position.y = 0.3; head.castShadow = true;
+    const headSize = fem ? 0.55 : 0.6;
+    const head = new THREE.Mesh(boxGeom(headSize, headSize, headSize), mat(c.skin));
+    head.position.y = headSize / 2; head.castShadow = true;
     // FACE READS AT RANGE: slightly bigger, darker, prouder features so a face
     // is legible at 20-40u (street distance), not just in a close-up. Deeper
     // boxes wrap back into the head so the features hold up at oblique angles
     // instead of vanishing edge-on. facial.js owns eye x/y + mouth y at runtime
     // (it rewrites them every frame); z and geometry size are ours to set here.
+    // faceZ tracks headSize/2 (+ the original 0.015 protrusion) so the smaller
+    // fem head still sits its features flush on the surface instead of the
+    // fixed 0.315 floating past a shrunk face.
+    const faceZ = headSize / 2 + 0.015;
     const eyeMat = cmat(0x101010);
     const le = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
     const re = new THREE.Mesh(boxGeom(0.13, 0.16, 0.08), eyeMat);
-    le.position.set(-0.14, 0.34, 0.315); re.position.set(0.14, 0.34, 0.315);
+    le.position.set(-0.14, 0.34, faceZ); re.position.set(0.14, 0.34, faceZ);
     // a brow line + a small mouth for expression (animated by systems/facial.js)
     const brow = new THREE.Mesh(boxGeom(0.46, 0.06, 0.06), cmat(0x1c150e));
-    brow.position.set(0, 0.46, 0.315);
+    brow.position.set(0, 0.46, faceZ);
     const mouth = new THREE.Mesh(boxGeom(0.22, 0.06, 0.06), cmat(0x4a2528));
-    mouth.position.set(0, 0.16, 0.315);
+    mouth.position.set(0, 0.16, faceZ);
     neck.add(head, le, re, brow, mouth);
     body.add(neck);
 
@@ -131,6 +160,17 @@
     } else {
       const hair = new THREE.Mesh(boxGeom(0.64, 0.18, 0.64), cmat(c.hair || 0x4a3526));
       hair.position.y = 0.62; neck.add(hair); hairParts.push(hair);
+      // LONG HAIR (fem builds only): a second box hanging off the BACK of the
+      // head down the neck, same material as the top hair box. Gated on an
+      // explicit c.longHair flag rather than a coin-flip in here — this file
+      // has no rng in scope (Math.random() below is only used to desync gait
+      // phase, not appearance), so the short/long split is left as a
+      // deterministic decision for the caller (e.g. a seeded roll in
+      // city/peds.js), same pattern as c.cap gating the whole hair block.
+      if (fem && c.longHair) {
+        const longHair = new THREE.Mesh(boxGeom(0.5, 0.55, 0.16), cmat(c.hair || 0x4a3526));
+        longHair.position.set(0, 0.22, -0.3); neck.add(longHair); hairParts.push(longHair);
+      }
     }
 
     const rig = {

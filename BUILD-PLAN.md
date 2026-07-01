@@ -10,7 +10,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 ## Stage W — Women & Families (the least-built part; first priority)
 
-- [ ] **W1** `entities/character.js`: add `c.build` ("m"/"f") to `makeCharacter` — narrower shoulders (arm x-offset 0.62→~0.54), tapered torso, hip-flared leg pivots, smaller head ratio, and a real long-hair mesh option (second box hanging from the neck, gated like `cap`). Animation is proportion-agnostic; nothing else changes. *Enables everything in Stage W.*
+- [x] **W1** `entities/character.js`: add `c.build` ("m"/"f") to `makeCharacter` — narrower shoulders (arm x-offset 0.62→~0.54), tapered torso, hip-flared leg pivots, smaller head ratio, and a real long-hair mesh option (second box hanging from the neck, gated like `cap`). Animation is proportion-agnostic; nothing else changes. *Enables everything in Stage W.*
 - [ ] **W2** `city/peds.js`: `ped.gender` rolled ~50/50 (archetype-biased), threaded into `makeCharacter({build})` and `cityOutfitFor({sex})` — which activates the dormant dress branch at outfits.js:762. Split `FIRST` into `FIRST_M`/`FIRST_F`. `family.js`/`social.js` wife/mistress/spouse spawns pass `gender:"f"` explicitly. Women exist.
 - [ ] **W3** Crowds: `city/crowd.js` + `entities/crowd.js` per-instance `fem[]` flag varying the existing `put()` scale args + hair instance drop (long hair) — half the ambient crowd reads female with zero new draw calls.
 - [ ] **W4** Player gender: option on the character panel; rebuilds `playerChar` with `build`, wardrobe paints correctly.
