@@ -406,6 +406,10 @@
       head.family = head.family || []; if (head.family.indexOf(spouse) < 0) head.family.push(spouse);
       spouse.family = [head];
       head.together = spouse.together = 0.85 + rng() * 0.15;   // a tight, committed pair
+      // bosses/tycoons/socialites are always ledger-worthy (isFamily, see
+      // schedule.js worth()) — unlike the street-couple budget gate above,
+      // ALWAYS record the marriage in the persistent family tree.
+      if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.marry(head, spouse);
       // a BOSS sometimes also has a kid at his side (one more protected mouth). Kept
       // rare + capped so we don't bloat the crowd. Modest wealth (a kid, not a vault).
       if (isBoss && rng() < 0.4 && _familySpawns.length < FAMILY_CAP) {
@@ -419,6 +423,7 @@
         if (kid) {
           kid.family = [head, spouse];
           head.family.push(kid); spouse.family.push(kid);
+          if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.bearChild(head, spouse, kid);
         }
       }
     }
@@ -435,11 +440,30 @@
     const civ = CBZ.cityPeds.filter((p) => p.kind === "civilian" && !p.vendor && !p.gang);
     // shuffle-ish pairing into couples (45%)
     for (let i = 0; i + 1 < civ.length; i += 2) {
+      const a = civ[i];
+      if (a.partner) continue;   // already claimed by an earlier scan-ahead below
       if (rng() < 0.45) {
-        const a = civ[i], b = civ[i + 1];
+        // prefer an OPPOSITE-GENDER partner: scan a short deterministic window
+        // ahead (this module's seeded rng) before falling back to the plain
+        // next-slot pairing — O(n), and we don't force it: a same-gender
+        // couple is fine when the scan misses.
+        let bi = i + 1;
+        for (let s = i + 1; s < Math.min(civ.length, i + 6); s++) {
+          if (!civ[s].partner && civ[s].gender !== a.gender) { bi = s; break; }
+        }
+        const b = civ[bi];
+        if (b.partner) continue;   // the fallback slot got claimed by a scan-ahead pick
         a.partner = b; b.partner = a;
         a.family = [b]; b.family = [a];
         a.together = b.together = 0.5 + rng() * 0.5;   // relationship strength
+        // BUDGET GATE: force-minting a family-tree sid for every street couple
+        // would mint ~150 sids nobody ever meets. Only record the couple in
+        // the persistent tree when a side is already ledger-worthy (gang/
+        // vendor/known) — an inline approximation of schedule.js's worth()
+        // (kept local to avoid a load-order dependency on schedule.js).
+        if (CBZ.cityFamilyTree && (a.gang || a.vendor || a.nameKnown || b.gang || b.vendor || b.nameKnown)) {
+          CBZ.cityFamilyTree.marry(a, b);
+        }
       }
     }
     // friend cliques: small groups (3-5) of nearby civilians who hang together,
@@ -529,6 +553,16 @@
     if (g.citySpouse) { CBZ.city.note("You're already married 💍", 1.6); return; }
     if (!econ.has(ring)) { CBZ.city.note("You need a " + ring + " to propose.", 2); return; }
     econ.take(ring, 1); g.citySpouse = true;
+    // W7 minimal persistent hook: force-mint a sid so this marriage can be
+    // found later (spouseOf/heirOf) even if the spouse despawns. NOTE:
+    // cityPedStash (schedule.js) skips companion/controlled peds, and the
+    // partner is BOTH by the time they're proposed to — so this only sticks
+    // if a sid was already minted earlier (e.g. via worth()'s nameKnown gate
+    // before commitment). Full player-in-tree wiring (a real player sid +
+    // a marry() edge) is a later step; this just remembers the sid if we
+    // have one.
+    if (CBZ.cityPedStash) CBZ.cityPedStash(ped);
+    g.citySpouseSid = ped._sid || null;
     CBZ.cityRelShift(ped, "gift", 4);     // a ring is the ultimate gift → max affection/loyalty
     CBZ.city.big("💍 You married " + ped.name + "!");
     CBZ.city.addRespect(10);
@@ -619,6 +653,10 @@
   //   in the street has a real social cost — GTA crowd reactions, but persistent.
   CBZ.citySocialDeath = function (ped, byPlayer) {
     if (!ped) return;
+    // record the death in the persistent family tree (if this identity was
+    // ever minted a sid there); W9 revisits SEVERING the tree's links for
+    // inheritance — this step only records the fact of death.
+    if (ped._sid && CBZ.cityFamilyTree) CBZ.cityFamilyTree.markDeath(ped._sid);
     // The legacy caller passes only (ped); without an explicit flag, infer the
     // player's involvement from proximity so an NPC gang war across town doesn't
     // wrongly turn the whole map against you. An explicit flag always wins.
@@ -969,6 +1007,10 @@
           a.partner = null; b.partner = null; a.together = b.together = 0; a.engaged = b.engaged = false;
           if (a.family) a.family = a.family.filter((x) => x !== b);
           if (b.family) b.family = b.family.filter((x) => x !== a);
+          // if this pair was ever recorded in the persistent family tree
+          // (both have sids — the budget gate/weaveFamilies only mints for
+          // ledger-worthy couples), end that marriage too — divorce, not death.
+          if (a._sid && b._sid && CBZ.cityFamilyTree) CBZ.cityFamilyTree.endMarriage(a._sid, b._sid, "divorce");
           gossipFrom(a, "breakup", 0.5);
         }
       } else if (roll < 0.45 && !a.engaged) {

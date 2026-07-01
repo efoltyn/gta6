@@ -178,11 +178,13 @@
   function worth(ped) {
     if (ped.vendor || ped.gang || ped.nameKnown || ped.bounty) return true;
     // FAMILY (W5): a boss/tycoon's household is worth a page too — family.js
-    // stamps p.family = role (a STRING) on its wife/kid; social.js stamps
-    // isFamily/protectGang on the spouse+kid it weaves for a boss/rich head.
-    // Deliberately narrower than ped.partner (~45% of civilians are coupled —
-    // that would blow the cap): only these protected-household markers count.
-    if (ped.protectGang || ped.isFamily || typeof ped.family === "string") return true;
+    // stamps p.famRole = role (a STRING; renamed W7 from p.family, which
+    // collides with social.js's ped.family ARRAY of kin refs) on its wife/kid;
+    // social.js stamps isFamily/protectGang on the spouse+kid it weaves for a
+    // boss/rich head. Deliberately narrower than ped.partner (~45% of
+    // civilians are coupled — that would blow the cap): only these
+    // protected-household markers count.
+    if (ped.protectGang || ped.isFamily || ped.famRole) return true;
     const k = castKey(ped);
     if (k === "dealer") return true;
     const r = ped.relPlayer;

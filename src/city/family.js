@@ -111,7 +111,10 @@
     });
     if (!p) return null;
     if (gangId) p.gang = gangId;        // wears the colors in the books — kill her
-    p.family = role;                    // and the SET takes it personally (gangs.js)
+    // W7: renamed from p.family (a STRING role label) to p.famRole — social.js's
+    // ped.family is an ARRAY of kin refs; the two collided under one name. See
+    // schedule.js's worth() for the matching read-side migration.
+    p.famRole = role;                   // and the SET takes it personally (gangs.js)
     if (kid && p.char && p.char.group) { p.char.group.scale.setScalar(0.62); p.hp = 40; p.maxHp = 40; }
     return p;
   }
@@ -154,11 +157,23 @@
       const wife = famPed(fam.homeX, fam.homeZ, WIVES[(rng() * WIVES.length) | 0],
         mine ? "your wife" : (boss + "'s wife"), fam.gangId, false, "f");
       if (wife) { wife._fam = fam; wife._role = "wife"; fam.members.push(wife); }
+      // W7: link a BOSS family into the persistent family tree — gang.boss is
+      // a real ped ref (gangs.js), reachable right here, so marry() has an
+      // actual head to hang the edge off. The PLAYER's own family (mine, gang
+      // is null) has no ped-with-a-sid to be the "head" — the player isn't a
+      // ped yet — so it's skipped for now; full player-in-tree wiring is a
+      // later step (see also cityPropose's citySpouseSid hook in social.js).
+      if (wife && gang && gang.boss && !gang.boss.dead && CBZ.cityFamilyTree) {
+        CBZ.cityFamilyTree.marry(gang.boss, wife);
+      }
       const nKids = 1 + ((rng() * 2) | 0);
       for (let k = 0; k < nKids; k++) {
         const kid = famPed(fam.homeX + 1.5 + k, fam.homeZ + 1.2,
           KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, true, rng() < 0.5 ? "f" : "m");
         if (kid) { kid._fam = fam; kid._role = "kid"; fam.members.push(kid); }
+        if (kid && gang && gang.boss && !gang.boss.dead && CBZ.cityFamilyTree) {
+          CBZ.cityFamilyTree.bearChild(gang.boss, wife, kid);
+        }
       }
       if (fam.members.length) families.push(fam);
       if (gang && gi === 1) sideLot = sideLot || lots.find((l) => l !== lot && (l.building.home.tier || 0) >= 2);
