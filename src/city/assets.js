@@ -35,6 +35,29 @@
    CBZ.assets.rotatedFootprint(def, rot) → {hx,hz}  (swaps on 90°/270°)
    CBZ.assets.pool(key, max) → { add(x,z,rot,scale), mesh|group, count }
 
+   ── FREE-LIST (F6) ─────────────────────────────────────────────
+   .pool()/.add() above is fire-and-forget: fine for static scatter
+   (trees/benches/lamps) that is placed once and never removed. But
+   dynamic content — build-mode pieces, harvest nodes — gets demolished
+   constantly, and an ever-growing index with no way back is a leak.
+   These are NEW, PARALLEL entry points on the SAME pool record; the
+   old add()-based API above is untouched and keeps working as-is:
+     CBZ.assets.poolAcquire(key, max) → {mesh, index} | null
+         Reuses a freed slot if one exists, else grows (same growth/
+         at-cap contract as .add(): silent-drop, i.e. returns null at
+         capacity instead of throwing — caller decides what to do).
+         Caller is responsible for mesh.setMatrixAt(index, m) (+
+         setColorAt if desired) and mesh.instanceMatrix.needsUpdate.
+         ONLY works for the fast (single-InstancedMesh) path — a def
+         needs instanceable+geom()+material(); multi-mesh defs fall
+         back to per-instance groups and have no addressable index,
+         so poolAcquire warns + returns null for those keys.
+     CBZ.assets.poolRelease(key, index) → bool
+         Hides the instance (zero-scale matrix, moved far below the
+         world — the standard r128 "delete" trick, since InstancedMesh
+         has no true removal) and returns the slot to the free-list.
+         Guards double-release (see _defs below).
+     CBZ.assets.poolStats(key) → {capacity, live, free}
    ============================================================ */
 (function () {
   'use strict';
@@ -101,6 +124,12 @@
      def's shared materials). instanceable defs SHOULD supply geom() and
      material() so the pool can use the fast path.                       */
   var _pools = {};
+
+  // Module-scratch matrix reused by EVERY poolRelease() call (any key) —
+  // one allocation for the process, not per-release/per-pool. Safe because
+  // release calls never interleave/re-enter (single-threaded JS).
+  var _releaseZeroM = new THREE.Matrix4();
+
   A.pool = function (key, max) {
     if (_pools[key]) return _pools[key];
     var def = A._defs[key];
@@ -124,6 +153,17 @@
       var _ax = new THREE.Vector3(0, 1, 0);
       pool = {
         key: key, mesh: im, group: null, count: 0, cap: cap,
+        // ---- F6 free-list fields (additive; .add() below never touches
+        // these — legacy fire-and-forget callers are unaffected). ----
+        //   free       — stack of recycled slot indices, LIFO reuse.
+        //   live       — count of currently-active (visible) slots.
+        //   liveFlags  — Uint8Array, 1 byte/slot: 1=live, 0=free/unused.
+        //                Chosen over a Set: pool caps run into the
+        //                thousands (scatter/build), and a typed array
+        //                gives O(1) double-release checks with a fixed,
+        //                tiny footprint (cap bytes) and zero GC/hash
+        //                overhead vs boxed numbers in a Set.
+        free: [], live: 0, liveFlags: new Uint8Array(cap),
         add: function (x, z, rot, scale) {
           if (this.count >= cap) return false;
           var sc = scale || 1;
@@ -164,6 +204,63 @@
 
   // Reset pools (call alongside placement.reset on a fresh world build).
   A.resetPools = function () { _pools = {}; };
+
+  /* ---- F6: free-list acquire/release (dynamic, recyclable users) --
+     Parallel to .pool()/.add() above — see the block comment at the
+     top of this file for the full contract. Only the fast (single-
+     InstancedMesh) path is addressable by index, so these two only
+     work for instanceable defs with geom()+material(); everything
+     else returns null (with a console.warn) rather than silently
+     doing the wrong thing.                                          */
+  A.poolAcquire = function (key, max) {
+    var pool = A.pool(key, max);
+    if (!pool.mesh) {
+      console.warn('[assets] poolAcquire: "' + key + '" has no single ' +
+        'InstancedMesh (multi-mesh def or unknown key) — not recyclable');
+      return null;
+    }
+    var im = pool.mesh;
+    var index;
+    if (pool.free.length) {
+      index = pool.free.pop();               // reuse — SAME contract as fresh alloc
+    } else {
+      if (pool.count >= pool.cap) return null;     // AT CAP — same silent-drop
+      index = pool.count;                          // rule as legacy .add() (no throw).
+      pool.count = ++im.count;                     // identical growth path to .add().
+    }
+    pool.liveFlags[index] = 1;
+    pool.live++;
+    return { mesh: im, index: index };
+  };
+
+  A.poolRelease = function (key, index) {
+    var pool = _pools[key];
+    if (!pool || !pool.mesh) return false;
+    if (index < 0 || index >= pool.cap) return false;
+    if (!pool.liveFlags[index]) return false;      // guard: double-release / never-live
+    var im = pool.mesh;
+    // r128 has no InstancedMesh removal: hide the slot with a zero-scale
+    // matrix (degenerate → nothing rasterizes) AND drop it far below the
+    // world as a second line of defense against any shader that ignores
+    // zero scale. mesh.count is a highwater mark and is NEVER shrunk back
+    // here — the freed slot stays inside the drawn range but invisible,
+    // which is exactly what makes it safe to hand back out later.
+    _releaseZeroM.makeScale(0, 0, 0);
+    _releaseZeroM.setPosition(0, -9999, 0);
+    im.setMatrixAt(index, _releaseZeroM);
+    im.instanceMatrix.needsUpdate = true;
+    pool.liveFlags[index] = 0;
+    pool.live--;
+    pool.free.push(index);
+    return true;
+  };
+
+  A.poolStats = function (key) {
+    var pool = _pools[key];
+    if (!pool) return null;
+    return { capacity: pool.cap, live: pool.live || 0,
+             free: pool.free ? pool.free.length : 0 };
+  };
 
   /* ============================================================
      STARTER DEFS — generic, shared-material, deterministic.
@@ -256,5 +353,89 @@
       m.position.y = 0.6 * s; ctx.group.add(m);
     }
   });
+
+  /* ============================================================
+     F6 SPIKE-VALIDATION — CBZ.assetsPoolSelfTest(). NOT auto-run
+     (dev console / test harness only). Proves the free-list actually
+     recycles indices before anything (pieces.js/harvest/build) is
+     allowed to depend on it. Uses a seeded LCG, never Math.random,
+     so failures reproduce deterministically.
+     ============================================================ */
+  CBZ.assetsPoolSelfTest = function () {
+    var errors = [];
+    var KEY = '__pool_selftest__';
+    if (!A.has(KEY)) {
+      A.define(KEY, {
+        footprint: { hx: 0.2, hz: 0.2 }, y1: 0.5, instanceable: true,
+        geom: function () { return new THREE.BoxGeometry(0.3, 0.3, 0.3); },
+        material: function () { return cmat(0xff00ff); },
+        build: function (ctx) {
+          ctx.group.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), cmat(0xff00ff)));
+        }
+      });
+    }
+    // seeded LCG (numerical-recipes constants) — deterministic, not Math.random.
+    var seed = 0xC0FFEE;
+    function rng() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+
+    var N = 50, RELEASE_N = 20;
+    var everLive = new Set();          // catch "handed out twice while live"
+    var acquired = [];
+    var m4 = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
+
+    for (var i = 0; i < N; i++) {
+      var r = A.poolAcquire(KEY, 128);
+      if (!r) { errors.push('acquire failed at i=' + i); continue; }
+      if (everLive.has(r.index)) errors.push('index handed out twice while live: ' + r.index);
+      everLive.add(r.index);
+      v.set(i, 0, 0);
+      m4.compose(v, q, s);
+      r.mesh.setMatrixAt(r.index, m4);
+      r.mesh.instanceMatrix.needsUpdate = true;
+      acquired.push(r.index);
+    }
+
+    var st1 = A.poolStats(KEY);
+    if (st1.live !== N) errors.push('expected live=' + N + ' after acquire, got ' + st1.live);
+
+    // release RELEASE_N random (seeded), distinct indices.
+    var pool = acquired.slice(), toRelease = [];
+    for (var k = 0; k < RELEASE_N && pool.length; k++) {
+      var pick = Math.floor(rng() * pool.length);
+      toRelease.push(pool.splice(pick, 1)[0]);
+    }
+    toRelease.forEach(function (idx) {
+      if (!A.poolRelease(KEY, idx)) errors.push('release failed for index ' + idx);
+      everLive.delete(idx);
+    });
+
+    var st2 = A.poolStats(KEY);
+    if (st2.free !== RELEASE_N) errors.push('expected free=' + RELEASE_N + ', got ' + st2.free);
+    if (st2.live !== (N - RELEASE_N)) errors.push('expected live=' + (N - RELEASE_N) + ', got ' + st2.live);
+
+    // re-acquire RELEASE_N and verify the SAME indices come back (free-list reuse).
+    var releasedSet = {};
+    toRelease.forEach(function (idx) { releasedSet[idx] = true; });
+    var reacquired = [];
+    for (var j = 0; j < RELEASE_N; j++) {
+      var r2 = A.poolAcquire(KEY, 128);
+      if (!r2) { errors.push('re-acquire failed at j=' + j); continue; }
+      if (everLive.has(r2.index)) errors.push('index handed out twice while live: ' + r2.index);
+      everLive.add(r2.index);
+      reacquired.push(r2.index);
+    }
+    reacquired.forEach(function (idx) {
+      if (!releasedSet[idx]) errors.push('re-acquired index ' + idx + ' was not a freed slot (no reuse)');
+    });
+
+    // double-release guard.
+    if (reacquired.length) {
+      var probe = reacquired[0];
+      A.poolRelease(KEY, probe);
+      if (A.poolRelease(KEY, probe) !== false) errors.push('double-release guard did not reject a second release');
+    }
+
+    return { ok: errors.length === 0, errors: errors };
+  };
 
 })();

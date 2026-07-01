@@ -173,6 +173,8 @@
       maxLoad: opts.maxLoad != null ? opts.maxLoad : Infinity,
       colliders: pieceColliders,
       platforms: piecePlatforms,
+      // B-stage TODO: instanceable piece kinds swap this per-piece mesh for
+      // CBZ.assets.poolAcquire(baseId)/poolRelease(baseId, index) (F6, city/assets.js).
       meshRef: mesh,
       chunkKey: chunk ? chunk.key : null,
       sealed: false,
