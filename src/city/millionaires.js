@@ -281,6 +281,18 @@
     p.snitch = 0.35;                                // they DO call it in
     paintFit(p, pick(SUITS));
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
+    // PERMANENT IDENTITY (city/identity.js, feature-detected). Unlike vips.js's
+    // 4 fixed slots cycling 1-at-a-time through 5 archetypes, up to
+    // TARGET_TYCOONS(9) tycoons walk SIMULTANEOUSLY off only 5 TYCOONS defs, so
+    // several live bodies can share one def at once — identity can't live on
+    // the def (that would collide two concurrent "Tycoon"s into one id). Each
+    // cast is its own individual: mint a fresh identity every time, stamped on
+    // the ped so peds.js's death hook (a separate task) can find it via
+    // p._identityId.
+    if (CBZ.cityIdentities && CBZ.cityIdentities.register) {
+      const rec = CBZ.cityIdentities.register("tycoon", p.name || def.title, { title: def.title, job: def.job });
+      p._identityId = rec.id;
+    }
   }
   function castGuard(q) {
     q._milliGuard = true; q.controlled = true;   // we drive it every frame (vips.js guard pattern)
@@ -295,6 +307,38 @@
     const rec = { ped: p, guard: guard || null };
     if (anchor) { rec._officeAt = anchor; rec._penthouse = !!anchor._penthouse; }
     M.tycoons.push(rec);
+  }
+
+  // ---- PERMANENT DEATH: retire this tycoon's identity, announce, snapshot --
+  // Same shape as vips.js's retireIdentity: idempotent against identity.js's
+  // own markDead no-op AND against the onDeathRegister callback below (in case
+  // peds.js's cityKillPed hook — a separate task this wave — fires markDead
+  // directly via p._identityId before our own scan observes p.dead).
+  function retireTycoonIdentity(p) {
+    const R = CBZ.cityIdentities;
+    if (!R || !R.markDead || !p || !p._identityId) return;
+    const before = R.get(p._identityId);
+    if (!before || before.status === "dead") return;     // already processed
+    const rec = R.markDead(p._identityId, { killedBy: null });
+    if (!rec) return;
+    rec.finalLevel = CBZ.cityLevel ? CBZ.cityLevel(p) : 0;
+    rec.finalLoot = (p.cash || 0) + (p._milliBag || 0);
+    if (!rec._milliAnnounced) {
+      rec._milliAnnounced = true;
+      const title = (p._milliTitle) || rec.title || "Tycoon";
+      big("💀 " + title + " " + (rec.name || "") + " has been killed — their fortune is up for grabs, and a new face fills the rich list.");
+    }
+  }
+  // death callback for kind 'tycoon' — registered so the identity still flips
+  // to dead/announced exactly once even if peds.js's cityKillPed hook reaches
+  // markDead before our own per-frame scan does (whichever fires first wins;
+  // the other's announce is a no-op via rec._milliAnnounced).
+  if (CBZ.cityIdentities && CBZ.cityIdentities.onDeathRegister) {
+    CBZ.cityIdentities.onDeathRegister("tycoon", function (rec) {
+      if (rec._milliAnnounced) return;
+      rec._milliAnnounced = true;
+      big("💀 " + (rec.title || "Tycoon") + " " + (rec.name || "") + " has been killed — their fortune is up for grabs, and a new face fills the rich list.");
+    });
   }
 
   function spawnTycoon() {
@@ -720,7 +764,14 @@
         // a shaken/robbed one has served its purpose — let it wander off when far
         const spent = p && p._milliShaken && camD2(p.pos.x, p.pos.z) > OFFSCREEN2;
         if (gone) { M.tycoons.splice(i, 1); continue; }
-        if (dead) { /* leave the body as loot; just drop our record */ M.tycoons.splice(i, 1); continue; }
+        if (dead) {
+          // leave the body as loot; retire the identity PERMANENTLY (a fresh
+          // tycoon promoted on next spawnTycoon() is a brand-new individual —
+          // see castTycoon's identity mint above) then drop our live record.
+          retireTycoonIdentity(p);
+          M.tycoons.splice(i, 1);
+          continue;
+        }
         if (far || spent) {
           if (camD2(p.pos.x, p.pos.z) > OFFSCREEN2) { releaseTycoon(rec, false); M.tycoons.splice(i, 1); }
         }

@@ -59,6 +59,14 @@
   const THREE = window.THREE;
   const scene = CBZ.scene;
 
+  // DETERMINISM (owner rule): this file used raw Math.random() for every
+  // sprite/particle jitter — harmless-looking cosmetic VFX, but the project
+  // rule is no Math.random() ANYWHERE, full stop, so a file already open for
+  // the combat-realism pass gets fixed here too. Seeded LCG, same formula as
+  // every other file in the codebase.
+  let _s = 50321;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
   // ---- SUPPRESSION STATE (c) -------------------------------------------------
   // A WeakMap keyed by the target object itself (CBZ.player, a ped/cop actor —
   // anything with a .pos) so nobody needs a reserved field on actors they
@@ -177,7 +185,7 @@
     opts = opts || {};
     const s = takeFlash();
     s.position.set(pos.x, pos.y, pos.z);
-    const sc = (opts.scale || 1) * (0.7 + Math.random() * 0.5);
+    const sc = (opts.scale || 1) * (0.7 + rng() * 0.5);
     s.scale.set(sc, sc, sc);
     // pooled sprites keep their last tint/peak — reset both every take
     s.material.color.setHex(opts.color != null ? opts.color : 0xffffff);
@@ -396,10 +404,10 @@
       const p = streaks[streakIdx];
       streakIdx = (streakIdx + 1) % streaks.length;
       // ricochet cone hugging the normal, with random tangential scatter
-      const a = Math.random() * Math.PI * 2;
-      const spread = 0.35 + Math.random() * 0.75;
-      const speed = (dust ? 2.2 : chip ? 3.4 : 5.5) + Math.random() * (dust ? 2.5 : chip ? 3 : 7) * power;
-      p.vel.copy(_vn).multiplyScalar(0.6 + Math.random() * 0.5)
+      const a = rng() * Math.PI * 2;
+      const spread = 0.35 + rng() * 0.75;
+      const speed = (dust ? 2.2 : chip ? 3.4 : 5.5) + rng() * (dust ? 2.5 : chip ? 3 : 7) * power;
+      p.vel.copy(_vn).multiplyScalar(0.6 + rng() * 0.5)
         .addScaledVector(_vt, Math.cos(a) * spread)
         .addScaledVector(_vb, Math.sin(a) * spread)
         .normalize().multiplyScalar(speed);
@@ -407,10 +415,10 @@
       p.mesh.material.color.setHex(baseColor);
       p.mesh.material.opacity = dust ? 0.7 : 1;
       p.mesh.material.blending = (dust || chip) ? THREE.NormalBlending : THREE.AdditiveBlending;
-      p.len = dust ? 0.05 : chip ? 0.09 : (0.14 + Math.random() * 0.22);
+      p.len = dust ? 0.05 : chip ? 0.09 : (0.14 + rng() * 0.22);
       p.w = dust ? 0.05 : chip ? 0.032 : 0.018;
       p.grav = dust ? 1.5 : chip ? 11 : 16;
-      p.life = dust ? (0.16 + Math.random() * 0.12) : chip ? (0.13 + Math.random() * 0.1) : (0.1 + Math.random() * 0.14);
+      p.life = dust ? (0.16 + rng() * 0.12) : chip ? (0.13 + rng() * 0.1) : (0.1 + rng() * 0.14);
       p.max = p.life;
       p.mesh.visible = true;
     }
@@ -559,8 +567,8 @@
     }
     m.position.copy(_hp).addScaledVector(_hn, 0.025);  // nudge off the surface — no z-fight
     m.quaternion.setFromUnitVectors(_zAxis, _hn);
-    m.rotateZ(Math.random() * Math.PI);
-    const s = (opts.size || 0.24) * (0.85 + Math.random() * 0.3);
+    m.rotateZ(rng() * Math.PI);
+    const s = (opts.size || 0.24) * (0.85 + rng() * 0.3);
     m.scale.set(s, s, 1);
     return m;
   };

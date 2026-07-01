@@ -1220,17 +1220,29 @@
   // Mutually exclusive per shot (a round either punches through OR skips off,
   // never both) — called once from the hit.wall branch in shoot()'s pellet
   // loop, AFTER the normal wall pock/spark/hole have already been stamped.
-  // `wnx,wnz` is the wall-facing normal the caller already computed.
+  // `wnx,wnz` is the wall-facing normal the caller already computed (a
+  // SYNTHETIC reflected-shot-direction approximation used for the spark
+  // cone's cosmetics — NOT the wall's true face normal). The grazing-angle
+  // test below needs the REAL face normal instead (the synthetic one is, by
+  // construction, always anti-parallel-ish to shotDir and would make every
+  // shot read as a square hit) — read straight off wallHit.face, the same
+  // axis-aligned-object-space-equals-world-space assumption this file
+  // already relies on elsewhere (wallDistance/cityShotHole). Fires RARELY
+  // (thin-wall gate / grazing-angle-plus-dice-roll gate below), so this
+  // deliberately allocates plain Vector3s instead of fighting over the
+  // file's hot-path scratch pool — clarity over micro-reuse for a cold path.
   function tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz) {
     if (w.pellets) return;                       // shotgun: no penetration/ricochet rolls
     const wallHit = hit.wallHit;
     if (!wallHit) return;
-    const graze = Math.abs(shotDir.x * wnx + shotDir.z * wnz);   // ~0 = parallel to the wall face, ~1 = square hit
+    const faceN = wallHit.face && wallHit.face.normal;
+    const fnx = faceN ? faceN.x : wnx, fnz = faceN ? faceN.z : wnz;
+    const graze = Math.abs(shotDir.x * fnx + shotDir.z * fnz);   // ~0 = parallel to the TRUE wall face, ~1 = square hit
     const thickness = wallThickness(wallHit);
 
     // PENETRATION — thin cover + a round heavy enough to carry through.
     if (thickness <= PEN_THIN_MAX && cal >= PEN_MIN_CAL && hit.dist < w.range - 0.5) {
-      const exitPt = hitPoint.copy(hit.point).addScaledVector(shotDir, thickness + 0.06);
+      const exitPt = hit.point.clone().addScaledVector(shotDir, thickness + 0.06);
       const remaining = Math.max(0.5, w.range - hit.dist - thickness);
       const beyondActor = findActorHit(exitPt, shotDir, Math.min(remaining, 24), w);
       if (beyondActor && beyondActor.actor) {
@@ -1244,10 +1256,10 @@
         if (CBZ.gore) CBZ.gore(beyondActor.point.x, beyondActor.point.y, beyondActor.point.z, { dir: shotDir, amount: 0.45, player: true });
         fireTracer(exitPt, beyondActor.point, w.tracer * 0.8, 0.05);
       } else {
-        // nothing behind it: still show the round carrying through the cover
+        // nothing behind it: still show the round carrying through the cover —
         // a short, visibly DIFFERENT exit puff so a penetration clearly reads
         // as "that went through", not a second impossible impact on the wall.
-        const farPt = hitPoint.clone().addScaledVector(shotDir, Math.min(remaining, 6));
+        const farPt = exitPt.clone().addScaledVector(shotDir, Math.min(remaining, 6));
         fireTracer(exitPt, farPt, w.tracer * 0.7, 0.04);
       }
       return;
@@ -1255,22 +1267,24 @@
 
     // RICOCHET — thick/hard surface, shallow grazing angle, rare + telegraphed.
     if (graze < RICOCHET_GRAZE && rng() < RICOCHET_CHANCE) {
-      // reflect shotDir off the wall normal (horizontal-plane reflection —
-      // walls here are near-vertical, same simplification the wall-impact
-      // branch above already makes for its spark cone).
-      const dot = shotDir.x * wnx + shotDir.z * wnz;
-      const rx = shotDir.x - 2 * dot * wnx, rz = shotDir.z - 2 * dot * wnz;
+      // reflect shotDir off the TRUE wall normal (horizontal-plane reflection
+      // — walls here are near-vertical, same simplification the wall-impact
+      // branch above already makes for its spark cone, but using fnx/fnz
+      // here — not the synthetic wnx/wnz — so the deflection is a real
+      // physical reflection, not just "back roughly the way it came".
+      const dot = shotDir.x * fnx + shotDir.z * fnz;
+      const rx = shotDir.x - 2 * dot * fnx, rz = shotDir.z - 2 * dot * fnz;
       const rl = Math.hypot(rx, rz) || 1;
-      tmpMuzzle.set(rx / rl, shotDir.y * 0.4, rz / rl).normalize();   // tmpMuzzle: free scratch here (only used for muzzle-sprite placement, already done earlier this shot)
-      const deflectEnd = hitPoint.clone().copy(hit.point).addScaledVector(tmpMuzzle, 7 + rng() * 5);
+      const deflectDir = new THREE.Vector3(rx / rl, shotDir.y * 0.4, rz / rl).normalize();
+      const deflectEnd = hit.point.clone().addScaledVector(deflectDir, 7 + rng() * 5);
       fireTracer(hit.point, deflectEnd, w.tracer * 0.6, 0.06);
-      if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: wnx, y: 0.25, z: wnz }, { kind: "spark", power: cal * 1.2 });
+      if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: fnx, y: 0.25, z: fnz }, { kind: "spark", power: cal * 1.2 });
       CBZ.sfx && CBZ.sfx("hit", { pitch: 1.3, volume: 0.5 });
       // tiny stray-damage roll: a nearby actor along the deflection MIGHT eat
       // a token hit. Deliberately small range + flat damage — this is flavor,
       // never the headline outcome of firing a gun near a wall.
       if (rng() < RICOCHET_STRAY_CHANCE) {
-        const strayHit = findActorHit(hit.point, tmpMuzzle, 9, w);
+        const strayHit = findActorHit(hit.point, deflectDir, 9, w);
         if (strayHit && strayHit.actor) {
           const strayW = Object.create(w); strayW.damage = RICOCHET_STRAY_DMG; strayW.headMult = 1;
           gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW);
@@ -1833,6 +1847,9 @@
         if (CBZ.game.mode === "city" && cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
           CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
         if (wallThudDist < 0) wallThudDist = hit.dist;
+        // (d) PENETRATION / RICOCHET — purely additive flavor on top of the
+        // normal wall mark above; rare + telegraphed (see the function header).
+        tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz);
       }
     }
     // impact THUD by caliber — a 7.62 lands a deeper, louder smack on whatever

@@ -115,6 +115,58 @@
     return "wealthy mark";
   }
 
+  // ---- HALL OF FAME: permanently-dead notables (city/identity.js) ----------
+  // gangState()/heirOf() above already solve this for gangs (a dead boss shows
+  // a 'succession' row with a named heir instead of the gang just vanishing).
+  // This is the same idea for VIPs/tycoons/racers: a kill that used to make a
+  // "Magnate"/"Tycoon"/"Racer #N" vanish from the list with no record now
+  // leaves a DECEASED row carrying their name, title, and final stats — read
+  // entirely from CBZ.cityIdentities (vips.js/millionaires.js stamp p._identityId
+  // + finalLevel/finalLoot at death) and CBZ.cityRacing.deceased() (racing.js's
+  // own permanence fix, which already tracks retired/dead drivers). Fully
+  // feature-detected: a missing identity.js/racing.js export just yields fewer
+  // (or zero) Hall of Fame rows, never a crash.
+  const HOF_CAP = 6;          // don't let history crowd out the living rich list
+  function hofRowFromIdentity(rec) {
+    const title = rec.title || (rec.kind === "tycoon" ? "Tycoon" : "VIP");
+    return {
+      actor: null, name: rec.name || "Unknown", title: title, level: rec.finalLevel || 0,
+      loot: rec.finalLoot || 0,
+      // scored well below a same-level LIVING whale (×0.35) so the list reads
+      // "who's rich and killable NOW" first, history second — but still high
+      // enough that a famous kill (high finalLoot/level) ranks above small fry.
+      score: ((rec.finalLoot || 0) + (rec.finalLevel || 0) * 1100) * 0.35,
+      why: "DECEASED — " + title + (rec.killedAt ? ", killed" : ""), where: "city",
+      protection: "none (dead)", you: false, dead: true,
+    };
+  }
+  function deceasedNotables() {
+    const out = [];
+    const R = CBZ.cityIdentities;
+    if (R && R.byKind) {
+      const vips = R.byKind("vip").filter(function (r) { return r.status === "dead"; });
+      const tycoons = R.byKind("tycoon").filter(function (r) { return r.status === "dead"; });
+      for (const rec of vips) out.push(hofRowFromIdentity(rec));
+      for (const rec of tycoons) out.push(hofRowFromIdentity(rec));
+    }
+    const RC = CBZ.cityRacing;
+    if (RC && RC.deceased) {
+      const dead = RC.deceased();
+      for (const racer of dead) {
+        const worth = RC.netWorthOf ? RC.netWorthOf(racer) : 0;
+        out.push({
+          actor: null, name: racer.name, title: "Racer #" + racer.number, level: 0,
+          loot: worth,
+          score: worth * 0.35 + (racer.wins || 0) * 900 * 0.35,
+          why: "DECEASED — Racer #" + racer.number + " · " + (racer.wins || 0) + " career wins", where: "city",
+          protection: "none (dead)", you: false, dead: true,
+        });
+      }
+    }
+    out.sort(function (a, b) { return b.score - a.score; });
+    return out.slice(0, HOF_CAP);
+  }
+
   function livePowerTargets() {
     const out = [];
     const peds = CBZ.cityPeds || [];
@@ -162,7 +214,14 @@
   }
   function targetRows() {
     const rows = livePowerTargets();
-    return rows.length ? rows : fallbackTargets();
+    const base = rows.length ? rows : fallbackTargets();
+    // append the Hall of Fame (deceased VIPs/tycoons/racers) so a permanent
+    // kill leaves a record instead of silently disappearing from the board —
+    // appended+re-sorted rather than interleaved so the merge can't accidentally
+    // reorder live rows when history is empty (the common case, zero cost).
+    const hof = deceasedNotables();
+    if (!hof.length) return base;
+    return base.concat(hof).sort(function (a, b) { return b.score - a.score; });
   }
 
   CBZ.cityLeaderboardReset = function () {
@@ -292,18 +351,26 @@
       "<span>#</span><span>Person</span><span style='text-align:right'>Read</span><span style='text-align:right'>Take</span><span>Why</span></div>";
     all.forEach(function (r, i) {
       const level = r.level ? "Lv." + r.level : "";
-      h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px'>" +
+      // DECEASED rows (Hall of Fame — permanently-dead VIPs/tycoons/racers,
+      // see deceasedNotables()) read dim/greyed with a skull tag instead of the
+      // usual bright name, same "this entry is gone but on record" language
+      // renderGangs uses for a vacant boss (#ff8a8a) — here it's a flat grey
+      // since unlike a gang there's no living successor IN this row to flag.
+      const nameCol = r.dead ? "#8a93a3" : "#e8eef7";
+      h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px;" + (r.dead ? "opacity:.6" : "") + "'>" +
         "<span style='color:#8a93a3'>" + (i + 1) + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'><b style='color:#e8eef7'>" + esc(r.name) + "</b> <span style='color:#8a93a3'>" + esc(r.title) + "</span></span>" +
+        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + (r.dead ? "💀 " : "") + "<b style='color:" + nameCol + "'>" + esc(r.name) + "</b> <span style='color:#8a93a3'>" + esc(r.title) + "</span></span>" +
         "<span style='text-align:right;color:#ffd166;font-weight:700'>" + esc(level) + "</span>" +
-        "<span style='text-align:right;color:#7ed957;font-weight:700'>" + money(r.loot) + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#aeb6c2'>" + esc(r.why) + "</span>" +
+        "<span style='text-align:right;color:" + (r.dead ? "#8a93a3" : "#7ed957") + ";font-weight:700'>" + money(r.loot) + "</span>" +
+        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (r.dead ? "#ff8a8a" : "#aeb6c2") + "'>" + esc(r.why) + "</span>" +
         "</div>";
     });
     if (!all.length) h += "<div style='font-size:12px;color:#8a93a3;padding:4px'>No high-value people visible yet.</div>";
-    const richer = rows.filter(function (r) { return r.loot > me.loot; }).length + 1;
+    // "ranks against live targets" should mean LIVE — exclude Hall of Fame rows.
+    const liveRows = rows.filter(function (r) { return !r.dead; });
+    const richer = liveRows.filter(function (r) { return r.loot > me.loot; }).length + 1;
     h += "<div style='font-size:11px;color:#6b7480;margin-top:5px;display:flex;justify-content:space-between'>" +
-      "<span>Your net worth ranks #" + richer + "/" + (rows.length + 1) + " against live targets.</span>" +
+      "<span>Your net worth ranks #" + richer + "/" + (liveRows.length + 1) + " against live targets.</span>" +
       "<span>Cash " + money(g.cash || 0) + " · Bank " + money(g.cityBank || 0) + "</span></div></div>";
     return h;
   }

@@ -23,6 +23,14 @@
        shared mark, hold the leader centre-back, fall the hurt/dry back — and set a
        single FOCUS-FIRE target so the whole team drops one enemy at a time.
 
+   TACTICAL DEPTH (systems/aitactics.js): cityCombatSmarts and cityShapeSquad now
+   also call the SAME shared LOS-memory/search-sweep, cover-peek, and flank-lane
+   primitives city/police.js's cop hunting branch uses, so non-cop armed fights —
+   gang wars especially — get real tactical depth (a shooter who loses LOS works
+   the corner or sweeps the last-known spot instead of holding a static standoff
+   band; a hit shooter ducks into a reactive peek cycle) instead of pure
+   standoff-band positioning. See systems/aitactics.js for the shared module.
+
    HARD RULE — this module must never break vanilla combat. It is additive and
    fully gated on CBZ.CONFIG.CITY_SMART_COMBAT. It NEVER drives a ped that gangs.js
    is already shaping (ped._wRole set): those keep gangs.js's proven war-shape. Our
@@ -41,7 +49,19 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;           // headless / no-engine guard
   const g = CBZ.game;
-  const rng = Math.random;
+  // SEEDED LCG (owner rule: no Math.random() — this file used to alias rng
+  // straight to Math.random(), which made strafe sides/cover throttles/lane
+  // jitter/focus-fire picks all non-deterministic; same pattern police.js's
+  // rng() uses, just a different seed so the two streams don't correlate).
+  let _s = 951413;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // SHARED TACTICAL PRIMITIVES (systems/aitactics.js) — the same cover-peek,
+  // flank-lane, and LOS-memory/search-sweep math city/police.js's hunting
+  // branch uses, so non-cop armed fights (gang wars especially) get real
+  // tactical depth instead of pure standoff-band positioning. Feature-
+  // detected: if the module didn't load, the calls below just no-op and this
+  // file falls back to its original standoff/strafe/cover-bias behavior.
+  const AT = CBZ.aiTactics || null;
 
   function on() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SMART_COMBAT !== false; }
   function inCity() { return g && g.mode === "city" && g.state === "playing"; }
@@ -128,13 +148,25 @@
   const _cov = { has: false, x: 0, z: 0 };
 
   // =========================================================================
-  // (1) cityCombatSmarts(ped, foe, dt): per-shooter standoff + strafe + cover.
+  // (1) cityCombatSmarts(ped, foe, dt): per-shooter standoff + strafe + cover +
+  //     (shared) LOS-memory / reactive cover-peek / blind-flank / search-sweep.
   //     COMPOSES with the squad shaper. If the ped already holds a lane slot from
   //     cityShapeSquad this cadence (_sqRole set), we keep that lane and only ADD a
   //     per-frame STRAFE offset + COVER bias to it — so the formation survives while
   //     the body still slides + tucks. If it's an UNSHAPED lone fighter, we compute
   //     the full standoff-band slot from scratch. Only nudges ped.target, never
   //     touches a gangs.js-owned ped. Foe may be an actor or a {x,z}. Frame-safe.
+  //
+  //     TACTICAL DEPTH (systems/aitactics.js, the SAME functions city/police.js's
+  //     hunting branch uses): we track LOS to the foe (ped.sees/_losClear/lostT),
+  //     so a shooter who's lost their line — same wall-occlusion test cops use —
+  //     stops holding a static standoff band and instead works the corner with a
+  //     BLIND FLANK (perpendicular dodge), exactly like a cop who can't see you;
+  //     losing it long enough escalates into a SEARCH SWEEP at the last-known spot
+  //     (same cop escalation) instead of forever blind-flanking a wall. A shooter
+  //     who just took a hit ducks into a reactive COVER-PEEK cycle (sidestep, hold,
+  //     peek back out) on top of the static coverBias lean. All no-op (falling back
+  //     to the original standoff-only behavior) if aitactics didn't load.
   // =========================================================================
   CBZ.cityCombatSmarts = function (ped, foe, dt) {
     if (!on() || !steerable(ped) || !ped.target) return;
@@ -146,6 +178,40 @@
     ax /= d; az /= d;
     const tx = -az, tz = ax;                           // perpendicular (strafe axis)
 
+    // LOS-MEMORY (shared): does this shooter actually have eyes on the foe right
+    // now, or are they hosing a wall? Throttled per-ped, same cadence cops use.
+    // Lost too long (giveUpT) → arm a SEARCH sweep at the foe's last-known spot
+    // instead of indefinitely blind-flanking a wall (same escalation cops use).
+    let sees = true;
+    if (AT) {
+      const losRes = AT.updateLOS(ped, F.x, F.z, dt || 0.016, { range: 44, giveUpT: 3.5, rng });
+      sees = losRes.sees;
+      if (losRes.justLost && !(ped.searchT > 0)) AT.searchStart(ped, { x: ped.lkx, z: ped.lkz }, { dur: 4 + rng() * 3, rng });
+      if (sees && ped.searchT > 0) { ped.searchT = 0; ped.searchGoal = null; ped._sweepGoal = null; }   // re-acquired
+    }
+
+    // SEARCHING: pushes toward the foe's last-known position then sweeps nearby,
+    // exactly the cop sweep — reads as "working the last spot they saw you", not
+    // a shooter frozen mid-standoff-band on an empty wall.
+    if (AT && ped.searchT > 0) {
+      const step = AT.searchTick(ped, dt || 0.016, { sweepRadMin: 5, sweepRadMax: 12, reachR: 3, rng });
+      if (step) { steerTo(ped, px + step.x, pz + step.z); return; }
+      ped.searchT = 0;   // sweep just ended this tick — fall through to normal positioning
+    }
+
+    // REACTIVE COVER-PEEK: armed when a shooter just took fresh damage (a real
+    // "incoming!" beat), ducking into the cop-style sidestep/peek cycle for ~1-2s
+    // before resuming normal positioning.
+    if (AT) {
+      const hpNow = ped.hp != null ? ped.hp : null;
+      if (hpNow != null && ped._sqHpLast != null && hpNow < ped._sqHpLast - 0.5 && rng() < 0.35) {
+        AT.coverArm(ped, { dur: 0.8 + rng() * 0.7, rng });
+      }
+      ped._sqHpLast = hpNow;
+      const peek = AT.coverPeek(ped, -ax * d, -az * d, d, dt || 0.016, { sideAmt: 3.5, peek: 0.12 });
+      if (peek) { steerTo(ped, px + peek.x, pz + peek.z); return; }
+    }
+
     // STRAFE: flip the side every 1.0–1.8s so the body slides across the foe's aim
     // rather than standing still. Hurt units don't strafe (they want cover/retreat).
     ped._strafeT = (ped._strafeT || 0) - (dt || 0.016);
@@ -154,7 +220,15 @@
     const strafe = hurt ? 0 : (ped._strafeSide || 1) * (2.6 + rng() * 0.8);
 
     let dx, dz;
-    if (ped._sqRole) {
+    if (!sees && AT && d < 42) {
+      // BLIND: same "work the corner" perpendicular dodge cops use instead of
+      // holding a standoff band on a wall they can't see through. Gated to <42m
+      // (matches police.js's blind-flank range) — beyond that the foe is too far
+      // for "work the corner" to read as anything but a teleport-ish lurch, so a
+      // distant blind shooter just keeps its normal standoff/arc positioning.
+      const bf = AT.blindFlank(ped, -ax * d, -az * d, d, dt || 0.016, { period: 1.2, periodJitter: 0.8, sideAmt: 4.5, closeBias: 0.3, rng });
+      dx = px + bf.x; dz = pz + bf.z;
+    } else if (ped._sqRole) {
       // SHAPED this cadence → keep the lane target the shaper wrote, just slide it
       // sideways for strafe (the formation holds; the body isn't a parked target).
       dx = ped.target.x + tx * strafe * 0.5;
@@ -282,10 +356,15 @@
       // ARC SHOOTER: a loose firing arc 8–14m off the enemy, laned along the front
       // so the squad forms a LINE (opposing the enemy), not a clump. Side offset is
       // a deterministic lane (±) widened per shooter; we FOCUS-FIRE the kill.
+      // Lane assignment is the SHARED flank-lane primitive (systems/aitactics.js —
+      // the same one cops use): -2..+2 across 5 lanes, cached on the member (sticky
+      // across re-shapes, same as a cop's _flank) instead of recomputed from a
+      // local loop counter every cadence.
       m._sqRole = "arc"; m._sqOwn = 1; m._squadHold = 1;
       setEngage(m, focus);
       const back = 9 + (i % 3) * 1.8;                       // 9 / 10.8 / 12.6m bands
-      const side = (((lane % 5) - 2) * 3.1);                // lanes: -6.2 -3.1 0 +3.1 +6.2
+      const laneIdx = AT ? AT.flankLane(m, lane, 5) : ((lane % 5) - 2);   // -2..+2
+      const side = laneIdx * 3.1;                            // lanes: -6.2 -3.1 0 +3.1 +6.2
       lane++;
       m._sqWantCover = (i & 1) ? 1 : 0;                     // every other shooter favors cover
       steerTo(m, _E.x - axx * back + tx * side, _E.z - axz * back + tz * side);
@@ -505,7 +584,10 @@
         touched++;
         // FOCUS-FIRE the shared kill (only re-point a free shooter already in it)
         if (hasGun(m) && focus !== m && _fset.has(m.rage) === false) m.rage = focus;
-        // per-shooter strafe/standoff/cover on top
+        // per-shooter strafe/standoff/cover on top — now also LOS-memory/blind-flank/
+        // search-sweep via the shared module (see cityCombatSmarts header above), so
+        // a gang shooter who loses sight of its target on a real wall reacts like a
+        // cop would instead of grinding a standoff band into the facade.
         CBZ.cityCombatSmarts(m, m.rage || focus, 0.2);
       }
     }

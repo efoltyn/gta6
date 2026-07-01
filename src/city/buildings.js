@@ -56,6 +56,12 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const mat = CBZ.mat;
+  // Deterministic LCG (owner rule: no Math.random) for the runtime decal
+  // helpers below (cityBulletHole/cityScorch) -- everything else in this file
+  // is driven by a caller-supplied seeded rng, but these two fire at gameplay
+  // time from arbitrary call sites with no rng of their own.
+  let _decalSeed = 61819;
+  function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
 
   // FLOOR-TO-FLOOR — sized off the CHARACTER, not habit. The rig in
   // entities/character.js crowns at ~2.5 (head top 2.48, hair/cap ~2.6), so a
@@ -717,8 +723,8 @@
     const off = 0.02;
     m.position.set(x + (nx || 0) * off, y + (ny || 0) * off, z + (nz || 0) * off);
     aimDecal(m, nx || 0, ny || 0, nz || 1);
-    const s = 0.7 + Math.random() * 0.7; m.scale.set(s, s, s);
-    m.rotateZ(Math.random() * Math.PI);
+    const s = 0.7 + decalRng() * 0.7; m.scale.set(s, s, s);
+    m.rotateZ(decalRng() * Math.PI);
     return m;
   };
 
@@ -730,7 +736,7 @@
       let m;
       if (scorchPool.length < SCORCH_CAP) { m = new THREE.Mesh(holeGeo(), scorchMat()); m.renderOrder = 2; CBZ.scene.add(m); scorchPool.push(m); }
       else { m = scorchPool[scorchIdx]; scorchIdx = (scorchIdx + 1) % SCORCH_CAP; m.visible = true; }
-      m.position.set(px, py, pz); aimDecal(m, nx, ny, nz); m.rotateZ(Math.random() * Math.PI);
+      m.position.set(px, py, pz); aimDecal(m, nx, ny, nz); m.rotateZ(decalRng() * Math.PI);
       m.scale.set(scale, scale, scale);
     };
     // ground scorch (faces up)
@@ -4608,9 +4614,18 @@
     let _maxR = 0;   // cached half-diagonal of the built area (farthest lot from centre)
     for (const _l of city.lots) { const dd = Math.hypot((_l.cx || 0) - city.center.x, (_l.cz || 0) - city.center.z); if (dd > _maxR) _maxR = dd; }
     if (_maxR < 1) _maxR = 1;   // headless / single-lot guard (no divide-by-zero)
-    function coreBonus(lot, kind) {
+    // normalised core distance: 0 at the dead centre → 1 at the farthest built
+    // lot. The ONE distance calc the whole gradient family (height AND, below,
+    // what-gets-built) shares — coreBonus reuses it for storeys, and the
+    // parkProbFor/abandonedProbFor/extraShopMulFor trio (CH-PLAN, below) reuse
+    // the exact same number for shop/park/abandoned odds, so "downtown" means
+    // the same thing everywhere instead of two competing ideas of centre.
+    function coreT(lot) {
       const dd = Math.hypot((lot.cx || 0) - city.center.x, (lot.cz || 0) - city.center.z);
-      const t = Math.max(0, Math.min(1, dd / _maxR));            // 0 at centre → 1 at rim
+      return Math.max(0, Math.min(1, dd / _maxR));
+    }
+    function coreBonus(lot, kind) {
+      const t = coreT(lot);                                      // 0 at centre → 1 at rim
       const peak = kind === "core" ? 5 : kind === "commercial" ? 3 : 2;
       return Math.round((1 - t) * peak);                         // fades to 0 at the edge
     }
@@ -4627,6 +4642,38 @@
       else base = 2 + ((rng() * 3) | 0);
       return Math.max(1, Math.min(12, base + coreBonus(lot, kind)));   // base is a FLOOR, +centre bonus, capped
     }
+
+    // ---- LOT-KIND GRADIENT (CH-PLAN). WHY: height already falls away from the
+    // centre (coreBonus); WHAT gets built on a lot didn't — every lot rolled the
+    // same flat park/abandoned/shop odds no matter how close to Midtown it sat,
+    // so downtown and the rim were built from the same dice. towngen.js already
+    // solved this for the biome towns (buildProbFor: density*0.72^ring, a
+    // ring-based falloff); this ports the SAME shape onto the mainland's
+    // continuous coreT() distance (no concentric "ring" here, just 0..1) so the
+    // gradient is centred on the SAME geometry coreBonus already uses for
+    // height — one downtown, read the same way by every system. Multipliers are
+    // centred so a lot at t≈0.5 (the city's average lot) lands close to the
+    // ORIGINAL flat constants — this reshapes the city, it doesn't reinflate or
+    // deflate it (gangs.js already backstops a thin abandoned count regardless).
+    // NO new rng() draw: each function only RESCALES the threshold the existing
+    // single `r = rng()` per lot is compared against, so the rng() draw order —
+    // and therefore the whole deterministic build — is untouched.
+    function lerp01(t, lo, hi) { return lo + (hi - lo) * t; }
+    // park odds: rarer in the dense core (every plaza-eligible parcel downtown
+    // is too valuable to leave empty), commoner toward the rim (breathing room
+    // where land is cheap) — t=0 → 0.6x base, t=1 → 1.4x base.
+    function parkProbFor(lot) { return (C.parkFrac || 0.08) * lerp01(coreT(lot), 0.6, 1.4); }
+    // abandoned/gang odds: a little more common toward the rim (the core is too
+    // policed/valuable to sit derelict) — a gentler swing than park's, so the
+    // core still gets SOME gang turf (gangs.js needs turf everywhere, not just
+    // the edge) — t=0 → 0.8x base, t=1 → 1.2x base.
+    function abandonedProbFor(lot) { return (C.abandonedFrac || 0.30) * lerp01(coreT(lot), 0.8, 1.2); }
+    // extra-shop odds (the ~40% roll that decides a non-essential lot becomes a
+    // SECOND business instead of a generic apartment): denser retail frontage
+    // near downtown, falling off toward the rim, where a lot is more likely to
+    // just be a home — t=0 → 1.3x, t=1 → 0.7x (essentials still place
+    // unconditionally regardless of t — this only weights the EXTRA shops).
+    function extraShopMulFor(lot) { return lerp01(coreT(lot), 1.3, 0.7); }
     let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null, gunLot = null, jewelryLot = null;
 
     // shuffle the shop list, then float the gameplay-critical trades to the
@@ -4636,6 +4683,14 @@
     let shopQueue = SHOPS.slice();
     for (let i = shopQueue.length - 1; i > 0; i--) { const j = (rng() * (i + 1)) | 0; const t = shopQueue[i]; shopQueue[i] = shopQueue[j]; shopQueue[j] = t; }
     shopQueue = shopQueue.filter((s) => ESSENTIAL.has(s.kind)).concat(shopQueue.filter((s) => !ESSENTIAL.has(s.kind)));
+    // CITY HALL is pulled OUT of the queue (no extra rng() draw — same shuffle,
+    // same draw count/order as before, just a post-shuffle splice) because the
+    // civic lot below FORCES it onto the most-central lot instead of letting it
+    // land wherever the shuffle happened to drop it.
+    const CITYHALL_SHOP = (function () {
+      const idx = shopQueue.findIndex((s) => s.kind === "cityhall");
+      return idx >= 0 ? shopQueue.splice(idx, 1)[0] : null;
+    })();
     const nEssential = shopQueue.filter((s) => ESSENTIAL.has(s.kind)).length;
     let shopIdx = 0;
 
@@ -4655,6 +4710,27 @@
       if ((dk === "core" || dk === "commercial") && dd < bestD) { bestD = dd; lux = lot; }
     }
     if (!lux) lux = luxAny;                                       // no core/commercial tag → nearest lot
+
+    // ---- THE CIVIC LOT (CH-PLAN). WHY: towngen.js's biome towns RESERVE the
+    // most-central block as a square/landmark up front (never leaving it to a
+    // random park/abandoned/shop roll); the mainland never did — City Hall
+    // (already in SHOPS/ESSENTIAL) just landed wherever the shuffled shopQueue
+    // happened to drop it, sometimes blocks from the centre. Mirror towngen's
+    // guarantee: find the lot CLOSEST to the centre (the same coreT()==0 point
+    // height already crowns), excluding the lux lot the mega-tower already
+    // owns. On this mainland's even 6x6 grid there are FOUR lots tied for
+    // closest (no single dead-centre cell) and `lux` claims one of them above —
+    // this scan naturally picks the next-closest tie (first found, since `<` is
+    // strict), so the civic anchor sits immediately beside the flagship tower,
+    // the two reading as one administered civic core instead of two unrelated
+    // picks. Falls back to nearest-overall if every central lot is somehow lux
+    // (tiny/headless grids).
+    let civicLot = null, bestC = 1e18;
+    for (const lot of city.lots) {
+      if (lot === lux) continue;
+      const dd = Math.hypot(lot.cx - city.center.x, lot.cz - city.center.z);
+      if (dd < bestC) { bestC = dd; civicLot = lot; }
+    }
 
     // The property ladder is SHORT and every rung is a real, visitable building:
     // one lot per LISTED level (studio → aerie), plus the flagship Spire on the
@@ -4682,7 +4758,7 @@
     // and is forced to become its assigned listed residence.
     const reserved = new Map();
     {
-      const pool = city.lots.filter((l) => l !== lux);
+      const pool = city.lots.filter((l) => l !== lux && l !== civicLot);
       const n = LISTED_TIERS.length;
       for (let t = 0; t < n && pool.length; t++) {
         const idx = Math.min(pool.length - 1, Math.floor((t + 0.5) / n * pool.length));
@@ -4692,13 +4768,20 @@
 
     for (const lot of city.lots) {
       const isLux = lot === lux;
+      const isCivic = lot === civicLot;              // the reserved City Hall anchor
       const forcedTier = reserved.get(lot) || null;   // a reserved listed-level lot
       const r = rng();
+      // CH-PLAN: the SAME r draw, but compared against a per-lot threshold that
+      // falls/rises with distance from the centre (parkProbFor/abandonedProbFor)
+      // instead of the old flat C.parkFrac/C.abandonedFrac constant. No extra
+      // rng() call — only the threshold value moves — so determinism/draw-order
+      // is byte-identical to before.
+      const parkP = parkProbFor(lot), abandonedP = abandonedProbFor(lot);
       // parks (open plazas) for breathing room — fewer than before. A park is a
       // "dumb unowned corner": no collider/door requirement. We still give it a
       // benign lot.building stub so the city has NO unowned lots — owned by the
       // city. Downstream that touches lot.building.door already null-guards it.
-      if (!isLux && !forcedTier && r < (C.parkFrac || 0.08)) {
+      if (!isLux && !isCivic && !forcedTier && r < parkP) {
         lot.kind = "park"; makePark(root, lot, rng);
         // A park needs NO collider/door. But a few downstream lot.building.door
         // consumers (careers' courier drop, lotDoor) read .door unguarded once a
@@ -4721,7 +4804,7 @@
       const doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
 
       // ---- GANG-RUN HIDEOUT ----
-      if (!isLux && !forcedTier && r < (C.parkFrac || 0.08) + (C.abandonedFrac || 0.30)) {
+      if (!isLux && !isCivic && !forcedTier && r < parkP + abandonedP) {
         // Keep the gang turf/stash gameplay, but remove the old boarded derelict
         // visual shell. Those near-windowless boxes were clipping into the read of
         // shops like Cluckin' Diner / The Trap House and made good glass blocks feel
@@ -4740,12 +4823,19 @@
       }
 
       // ---- REAL: a business or a residence (and never a shop on the luxury lot) ----
-      // Essentials are placed unconditionally; extras only ~40% of the time, so
-      // the remaining real lots become furnished, sellable HOMES.
+      // Essentials are placed unconditionally; extras only ~40% of the time
+      // (CH-PLAN: scaled by extraShopMulFor so that 40% itself falls away from
+      // the centre — denser shop frontage downtown, more plain homes toward the
+      // rim), so the remaining real lots become furnished, sellable HOMES.
       let shop = null;
-      if (!isLux && !forcedTier) {
+      if (isCivic && CITYHALL_SHOP) {
+        // the reserved civic anchor: City Hall, unconditionally, no rng() draw
+        // (CITYHALL_SHOP was already spliced out of shopQueue up front so it's
+        // never double-placed by the random draw below).
+        shop = CITYHALL_SHOP;
+      } else if (!isLux && !isCivic && !forcedTier) {
         if (shopIdx < nEssential) shop = shopQueue[shopIdx++];
-        else if (shopIdx < shopQueue.length && rng() < 0.4) shop = shopQueue[shopIdx++];
+        else if (shopIdx < shopQueue.length && rng() < 0.4 * extraShopMulFor(lot)) shop = shopQueue[shopIdx++];
       }
 
       if (shop) {

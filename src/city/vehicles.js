@@ -1776,7 +1776,22 @@
         const sN0 = Math.min(1, Math.abs(car.v) / MAXV);
         const gt = gearTorqueMul(car, sN0);
         const wheelspinCap = throttle > 0 && Math.abs(car.v) < MAXV * 0.4 ? Math.min(1, 0.55 + D.surfMul * 0.6) : 1;
-        car.v += ACCEL * gt.mul * wheelspinCap * dt;
+        // AERO DRAG TAPER: the gear-torque curve alone models engine/gearbox
+        // power delivery per gear -- it has no notion of the car's own
+        // aerodynamic drag rising with v^2, which is what actually caps real
+        // top speed (the old flat taper this replaced folded that in
+        // implicitly). Without an equivalent term a car sustains far more of
+        // its peak torque all the way to MAXV than before and reaches a given
+        // speed dramatically sooner (verified: without this, a full-throttle
+        // run into a wall a fixed distance away hits at a meaningfully higher
+        // speed than the pre-existing formula produced for the same run,
+        // enough to flip a survivable "hard" wall hit into a fatal
+        // "catastrophic" one). Keep the same overall envelope the old taper
+        // guaranteed -- multiply the gear curve by it directly -- while still
+        // letting the per-gear shape do its job in the low/mid range where
+        // the old taper was close to 1 anyway.
+        const dragTaper = 1 - Math.min(0.7, sN0);
+        car.v += ACCEL * gt.mul * dragTaper * wheelspinCap * dt;
       }
     } else if (throttle < 0) {
       if (car.v > 0.5) car.v -= D.brake * dt;         // S brakes hard when rolling forward

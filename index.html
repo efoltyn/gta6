@@ -259,6 +259,15 @@
      config → core → world → entities → systems → loop → main.
 ============================================================ -->
 
+<!-- pre-config: a saved Settings-panel "Total Population" choice (localStorage,
+     see src/systems/settings.js) must land on window.CBZ BEFORE config.js
+     reads CBZ.MASS_CROWD/CROWD_RIG_CAP so it actually takes effect next load. -->
+<script>
+  try {
+    var _popOverride = parseInt(localStorage.getItem("CBZ_POP_OVERRIDE_V1"), 10);
+    if (_popOverride > 0) window.CBZ = Object.assign(window.CBZ || {}, { MASS_CROWD: _popOverride });
+  } catch (e) {}
+</script>
 <!-- 0. namespace + constants -->
 <script src="src/config.js?v=abandon1"></script>
 
@@ -345,6 +354,7 @@
 <script src="src/entities/crowd.js?v=skin1"></script>
 <script src="src/systems/simulation.js?v=scale7"></script>
 <script src="src/systems/detection.js?v=npcgoal51"></script>
+<script src="src/systems/aitactics.js?v=tac1"></script>
 <script src="src/systems/capture.js?v=npc-react1"></script>
 <script src="src/systems/markers.js?v=npcgoal54"></script>
 <script src="src/systems/music.js?v=samples1"></script>
@@ -427,6 +437,7 @@
 <script src="src/city/outfits.js?v=fits1"></script>
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=city3"></script>
+<script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=hub1"></script>
 <script src="src/city/gangs.js?v=citysec1"></script>
 <script src="src/city/social.js?v=city3"></script>
@@ -445,6 +456,7 @@
 <script src="src/city/security.js?v=citysec1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
 <script src="src/city/police.js?v=beam1"></script>
+<script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=beam1"></script>
 <script src="src/city/traffic.js?v=smart1"></script>
 <script src="src/city/playercars.js?v=glass2"></script>
@@ -477,6 +489,7 @@
 <script src="src/city/family.js?v=fam1"></script>
 <script src="src/city/swim.js?v=swim1"></script>
 <script src="src/city/empire.js?v=empire1"></script>
+<script src="src/city/construction.js?v=build1"></script>
 <script src="src/city/companies.js?v=co1"></script>
 <script src="src/city/citystaff.js?v=staff1"></script>
 <script src="src/city/playergang.js?v=night1"></script>
@@ -540,6 +553,7 @@
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>
+<script src="src/systems/settings.js?v=settings1"></script>
 <script src="src/core/batch.js"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/loop.js?v=scale1"></script>

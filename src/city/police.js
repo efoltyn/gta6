@@ -43,6 +43,13 @@
   let frame = 0, maintainT = 0;
   let _s = 314159;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // SHARED TACTICAL PRIMITIVES (systems/aitactics.js): LOS-memory/search-sweep,
+  // flank-lane assignment, cover-peek cycling, glass-breach/door-routing-when-
+  // blind. Extracted out of this file's hunting branch so other armed-NPC
+  // systems (squadai.js) get the same depth. Feature-detected — if the module
+  // didn't load (stripped/old build), AT is null and every call site below
+  // falls back to skipping that tactic (cop still functions, just dumber).
+  const AT = CBZ.aiTactics || null;
 
   // ---- IN-MODULE TUNING (owner rule: never edit config.js — a parallel agent
   //      owns it; self-default flags here + nudge CBZ.CITY at load) ------------
@@ -335,7 +342,7 @@
     const c = STOP.cop; if (!c) return;
     if (CBZ.city && CBZ.city.note) CBZ.city.note(sellLine, 1.6);
     STOP.asked++;
-    if (Math.random() < chance) {
+    if (rng() < chance) {
       if (CBZ.city) { CBZ.city.note("“…alright. Keep it holstered. Move along.”", 2.2); CBZ.city.addRespect(1); }
       if (c.armed && CBZ.syncActorWeapon) { c._gunLowered = true; }
       endStop(true);
@@ -1019,11 +1026,11 @@
     if (!CBZ.cityMakeCar) return null;
     const p = patrolSeedPoint(A); if (!p) return null;
     const r = nearestRoadSeg(A, p.x, p.z); if (!r) return null;
-    const dir = (p.vertical != null ? p.vertical : r.vertical) ? (Math.random() < 0.5 ? 1 : -1)
-                                                               : (Math.random() < 0.5 ? 1 : -1);
-    const laneIdx = (Math.random() * lanesPerDirP()) | 0;
+    const dir = (p.vertical != null ? p.vertical : r.vertical) ? (rng() < 0.5 ? 1 : -1)
+                                                               : (rng() < 0.5 ? 1 : -1);
+    const laneIdx = (rng() * lanesPerDirP()) | 0;
     const lane = dir * laneWidthP() * (laneIdx + 0.5);
-    const along = (Math.random() - 0.5) * Math.min(r.len * 0.8, 120);
+    const along = (rng() - 0.5) * Math.min(r.len * 0.8, 120);
     const x = r.vertical ? r.x + lane : r.x + along;
     const z = r.vertical ? r.z + along : r.z + lane;
     const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
@@ -1261,7 +1268,7 @@
       door.position.set(s * (w / 2 + 0.015), 0.98, 0.25);
       c.group.add(door);
     });
-    c._rbBar = { red, blue, phase: (Math.random() * 2) | 0 };
+    c._rbBar = { red, blue, phase: (rng() * 2) | 0 };
   }
   function rbDispose(grp) {   // same dispose discipline as clearCityCops/clearCars
     if (!grp) return;
@@ -1693,34 +1700,43 @@
         const tx = tgt.pos.x, tz = tgt.pos.z;
         const dx = tx - c.pos.x, dz = tz - c.pos.z, dist = Math.hypot(dx, dz);
 
-        // real LINE OF SIGHT: within range AND not blocked by a building. The
-        // chopper painting you also counts as a sighting that feeds every cop.
-        // (losClear is throttled per-cop so the raycast cost stays cheap.)
-        if (c._losCD == null) c._losCD = rng() * 0.25;
-        c._losCD -= dt;
-        if (c._losCD <= 0) {
-          c._losCD = 0.22 + rng() * 0.12;
-          c._losClear = dist < 48 && losClear(c.pos.x, c.pos.z, tx, tz);
-          // GLASS WE JUST SHOT OUT reads as open air: the cheap wall raycast still
-          // hits the facade box, but clearLineOfFire (los.js) sees through the
-          // shattered pane's hole (cityShotHole). After a breach, re-confirm the
-          // lane the glass-aware way so the cop SEES through its own hole and
-          // closes/fires, instead of standing there re-breaking nothing.
-          if (!c._losClear && (c._breachedT || 0) > 0 && dist < BREACH_REACH && CBZ.clearLineOfFire) {
-            const ty2 = isPlayer ? 1.55 : 1.3;
-            c._losClear = CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z, tx, (tgt.pos.y || 0) + ty2, tz);
-          }
-        }
+        // real LINE OF SIGHT + lost-sight memory, via the shared tactics module
+        // (systems/aitactics.js): within range AND not blocked by a building,
+        // re-tested on a throttled per-cop cadence, with a glass-breach re-confirm
+        // (sees through a hole it just shot) and the chopper spotlight counting as
+        // an extra "painted" sighting. No AT loaded (stripped build) → fall back
+        // to the bare losClear probe so a cop still functions, just without memory.
         const painted = isPlayer && CBZ.cityChopperPaints && CBZ.cityChopperPaints();
-        c.sees = dist < 48 && (c._losClear || painted || dist < 4);
-        if (c.sees) {
-          c.lostT = 0;
-          c.lkx = tx; c.lkz = tz;                    // remember where we last saw them
-          if (isPlayer) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
+        if (AT) {
+          const ty2 = isPlayer ? 1.55 : 1.3;
+          const losRes = AT.updateLOS(c, tx, tz, dt, {
+            range: 48, breachReach: BREACH_REACH, painted, targetY: (tgt.pos.y || 0) + ty2, rng,
+          });
+          if (isPlayer && losRes.sees) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
+          if (losRes.justLost) {
+            c.curTarget = null; c.retarget = 0.4;
+            goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz });
+            continue;
+          }
         } else {
-          // lost sight — count down toward a SEARCH at the last-known spot
-          c.lostT = (c.lostT || 0) + dt;
-          if (c.lostT > (stars >= 4 ? 6 : 4)) { c.curTarget = null; c.retarget = 0.4; goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz }); continue; }
+          if (c._losCD == null) c._losCD = rng() * 0.25;
+          c._losCD -= dt;
+          if (c._losCD <= 0) {
+            c._losCD = 0.22 + rng() * 0.12;
+            c._losClear = dist < 48 && losClear(c.pos.x, c.pos.z, tx, tz);
+            if (!c._losClear && (c._breachedT || 0) > 0 && dist < BREACH_REACH && CBZ.clearLineOfFire) {
+              const ty2 = isPlayer ? 1.55 : 1.3;
+              c._losClear = CBZ.clearLineOfFire(c.pos.x, (c.pos.y || 0) + 1.4, c.pos.z, tx, (tgt.pos.y || 0) + ty2, tz);
+            }
+          }
+          c.sees = dist < 48 && (c._losClear || painted || dist < 4);
+          if (c.sees) {
+            c.lostT = 0; c.lkx = tx; c.lkz = tz;
+            if (isPlayer) g.cityLastKnown = { x: tx, z: tz, t: CBZ.now };
+          } else {
+            c.lostT = (c.lostT || 0) + dt;
+            if (c.lostT > (stars >= 4 ? 6 : 4)) { c.curTarget = null; c.retarget = 0.4; goSearch(c, isPlayer ? (g.cityLastKnown || { x: c.lkx, z: c.lkz }) : { x: c.lkx, z: c.lkz }); continue; }
+          }
         }
 
         const npcThreat = !isPlayer && (tgt.armed || tgt.aggr >= 0.85 || (tgt.npcWanted | 0) >= 2);
@@ -1734,7 +1750,7 @@
 
         // assign each cop a FLANK lane so they don't bunch up — left/right/center
         // by index so a squad surrounds you instead of conga-lining single file.
-        if (c._flank == null) c._flank = ((i % 3) - 1);   // -1 left, 0 center, +1 right
+        if (AT) AT.flankLane(c, i, 3); else if (c._flank == null) c._flank = ((i % 3) - 1);   // -1 left, 0 center, +1 right
 
         // ---- ARREST: only when we actually see them + are right on top ----
         if (wantArrest && c.sees && dist < 1.9) {
@@ -1755,87 +1771,107 @@
             c.shootCD = (c.swat ? 0.16 : 0.5) + rng() * 0.3;
             fireAt(c, tgt, dist);   // fireAt does the final muzzle→target clearLineOfFire gate
             // after a burst, an armed target may make a cop break to cover briefly
-            if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
+            if (isPlayer && stars >= 2 && playerArmed() && rng() < (c.swat ? 0.12 : 0.28)) {
+              if (AT) AT.coverArm(c, { dur: 1.0 + rng(), rng });
+              else { c._coverT = 1.0 + rng(); c._coverDir = rng() < 0.5 ? -1 : 1; }
+            }
           }
         }
 
         // taking cover: sidestep perpendicular to the target, then peek back out
+        // (shared cover-peek cycle — systems/aitactics.js)
         if (c._coverT > 0) {
-          c._coverT -= dt;
-          const px = -dz / (dist || 1), pz = dx / (dist || 1);   // perpendicular
-          stepTo(c, px * c._coverDir * 4 + dx * 0.15, pz * c._coverDir * 4 + dz * 0.15, c.baseSpeed * 1.1, dt, near);
-          continue;
-        }
-
-        // ---- NO LINE OF FIRE → BREACH THE GLASS, else FLANK. A wanted shooter
-        //      who can't see the target because a STOREFRONT WINDOW (and its wall)
-        //      sits between them now SHOOTS THE GLASS OUT instead of milling — the
-        //      broken pane reads as open air (cityShotHole), so next frame c.sees
-        //      flips clear and the chase below closes straight through the hole.
-        //      cityNpcBreachGlass only fires when there's genuinely breakable
-        //      glass on the firing lane within reach, so cops never plink random
-        //      windows. If there's no glass to break, fall back to the corner
-        //      flank (slide perpendicular to peek around solid cover).
-        if (wantShoot && !c.sees && dist < BREACH_REACH && c._losClear === false) {
-          if (CBZ.cityNpcBreachGlass && CBZ.cityNpcBreachGlass(c, tgt, BREACH_REACH)) {
-            c.shootCD = Math.max(c.shootCD, 0.18);   // the breach round IS this beat's shot
-            c._losCD = 0;                            // re-test the (now open) line of sight immediately
-            // push toward the freshly-opened hole rather than flanking away from it
-            stepTo(c, dx, dz, c.baseSpeed, dt, near);
+          const step = AT ? AT.coverPeek(c, dx, dz, dist, dt, { sideAmt: 4, peek: 0.15 }) : null;
+          if (step) { stepTo(c, step.x, step.z, c.baseSpeed * 1.1, dt, near); continue; }
+          if (!AT) {
+            c._coverT -= dt;
+            const px = -dz / (dist || 1), pz = dx / (dist || 1);   // perpendicular
+            stepTo(c, px * c._coverDir * 4 + dx * 0.15, pz * c._coverDir * 4 + dz * 0.15, c.baseSpeed * 1.1, dt, near);
             continue;
           }
         }
 
-        // ---- DOOR-AWARE ROUTING: no glass to breach, but the target is INSIDE a
-        //      building we're walled out of → make for that building's DOOR instead
-        //      of grinding against the facade. cityNav.indoorLotAt finds the lot the
-        //      target stands in; its entrance is a real, walkable opening. We only
-        //      detour when we're genuinely blind + close-ish (a far target is the
-        //      flank/search code's job). Throttled lookup, cheap.
-        if (c._losClear === false && !c.sees && dist < 34 && CBZ.cityNav && CBZ.cityNav.indoorLotAt) {
-          c._doorCD = (c._doorCD || 0) - dt;
-          if (c._doorCD <= 0) {
-            c._doorCD = 0.5 + rng() * 0.3;
-            const lot = CBZ.cityNav.indoorLotAt(tx, tz);
-            const door = lot && lot.building && lot.building.door;
-            // only route to the door if it actually sits between us and the wall
-            // (closer to us than the target itself), so we don't run away from a
-            // target that's standing in the doorway already.
-            c._doorGoal = (door && Math.hypot(door.x - c.pos.x, door.z - c.pos.z) > 2.4) ? { x: door.x, z: door.z } : null;
+        // ---- NO LINE OF FIRE → BREACH THE GLASS, else ROUTE TO THE DOOR, else
+        //      FLANK. A wanted shooter who can't see the target because a
+        //      STOREFRONT WINDOW (and its wall) sits between them now SHOOTS THE
+        //      GLASS OUT instead of milling — the broken pane reads as open air
+        //      (cityShotHole), so next frame c.sees flips clear and the chase
+        //      below closes straight through the hole. cityNpcBreachGlass only
+        //      fires when there's genuinely breakable glass on the firing lane
+        //      within reach, so cops never plink random windows. No glass + the
+        //      target is INSIDE a building we're walled out of → make for that
+        //      building's DOOR instead of grinding on the facade. Both routed
+        //      through the shared breachOrRoute (systems/aitactics.js); cops opt
+        //      into BOTH capabilities (canBreach + canRouteDoors) — other armed
+        //      NPCs via squadai.js currently opt into neither (street fighters,
+        //      not building-clearing officers).
+        if (wantShoot && AT) {
+          const detour = AT.breachOrRoute(c, tgt, tx, tz, dist, dt, {
+            canBreach: true, canRouteDoors: true, breachReach: BREACH_REACH, doorRange: 34, rng,
+          });
+          if (detour) {
+            if (detour.kind === "breach") c.shootCD = Math.max(c.shootCD, 0.18);   // the breach round IS this beat's shot
+            const spd = detour.kind === "breach" ? c.baseSpeed : c.baseSpeed * 1.05;
+            stepTo(c, detour.x, detour.z, spd, dt, near);
+            continue;
           }
-          if (c._doorGoal) {
-            const ddx = c._doorGoal.x - c.pos.x, ddz = c._doorGoal.z - c.pos.z;
-            // reached the door (or it opened a sightline) → drop it, resume the hunt
-            if (Math.hypot(ddx, ddz) < 2.2 || c.sees) { c._doorGoal = null; }
-            else { stepTo(c, ddx, ddz, c.baseSpeed * 1.05, dt, near); continue; }
+        } else if (wantShoot && !AT) {
+          if (!c.sees && dist < BREACH_REACH && c._losClear === false) {
+            if (CBZ.cityNpcBreachGlass && CBZ.cityNpcBreachGlass(c, tgt, BREACH_REACH)) {
+              c.shootCD = Math.max(c.shootCD, 0.18);
+              c._losCD = 0;
+              stepTo(c, dx, dz, c.baseSpeed, dt, near);
+              continue;
+            }
           }
-        } else { c._doorGoal = null; }
+          if (c._losClear === false && !c.sees && dist < 34 && CBZ.cityNav && CBZ.cityNav.indoorLotAt) {
+            c._doorCD = (c._doorCD || 0) - dt;
+            if (c._doorCD <= 0) {
+              c._doorCD = 0.5 + rng() * 0.3;
+              const lot = CBZ.cityNav.indoorLotAt(tx, tz);
+              const door = lot && lot.building && lot.building.door;
+              c._doorGoal = (door && Math.hypot(door.x - c.pos.x, door.z - c.pos.z) > 2.4) ? { x: door.x, z: door.z } : null;
+            }
+            if (c._doorGoal) {
+              const ddx = c._doorGoal.x - c.pos.x, ddz = c._doorGoal.z - c.pos.z;
+              if (Math.hypot(ddx, ddz) < 2.2 || c.sees) { c._doorGoal = null; }
+              else { stepTo(c, ddx, ddz, c.baseSpeed * 1.05, dt, near); continue; }
+            }
+          } else { c._doorGoal = null; }
+        }
 
+        // BLIND FLANK: "can't see them, work the corner" perpendicular dodge
+        // (shared — systems/aitactics.js), flipping side every ~1.2-2.0s.
         if (wantShoot && !c.sees && dist < 42) {
-          c._flankT = (c._flankT || 0) - dt;
-          if (c._flankT <= 0 || c._flankSide == null) { c._flankT = 1.2 + rng() * 0.8; c._flankSide = (c._flankSide === 1) ? -1 : 1; }
-          const px = -dz / (dist || 1), pz = dx / (dist || 1);
-          // move mostly sideways (to clear the corner) with a little closing bias
-          const fx = px * c._flankSide * 5 + dx * 0.35, fz = pz * c._flankSide * 5 + dz * 0.35;
-          stepTo(c, fx, fz, c.baseSpeed * 1.05, dt, near);
+          const step = AT ? AT.blindFlank(c, dx, dz, dist, dt, { period: 1.2, periodJitter: 0.8, sideAmt: 5, closeBias: 0.35, rng })
+            : (function () {
+              c._flankT = (c._flankT || 0) - dt;
+              if (c._flankT <= 0 || c._flankSide == null) { c._flankT = 1.2 + rng() * 0.8; c._flankSide = (c._flankSide === 1) ? -1 : 1; }
+              const px = -dz / (dist || 1), pz = dx / (dist || 1);
+              return { x: px * c._flankSide * 5 + dx * 0.35, z: pz * c._flankSide * 5 + dz * 0.35 };
+            })();
+          stepTo(c, step.x, step.z, c.baseSpeed * 1.05, dt, near);
           continue;
         }
 
         // approach with a FLANK offset so the squad encircles, and hold a
         // firing-line distance once we're a threat-range shooter.
-        const flankAmt = c._flank * (isPlayer && stars >= 3 ? 7 : 4);
-        const px = -dz / (dist || 1), pz = dx / (dist || 1);
-        const gx = dx + px * flankAmt, gz = dz + pz * flankAmt;
+        const flankAmt = isPlayer && stars >= 3 ? 7 : 4;
+        const appr = AT ? AT.flankApproach(c, dx, dz, dist, flankAmt) : (function () {
+          const px = -dz / (dist || 1), pz = dx / (dist || 1);
+          return { x: dx + px * c._flank * flankAmt, z: dz + pz * c._flank * flankAmt };
+        })();
         const stop = (wantShoot && dist < (isPlayer ? (stars >= 3 ? 9 : 4) : 8)) ? (isPlayer && stars >= 3 ? 8 : 5) : 1.5;
         const spd = c.baseSpeed * (c.sees ? 1 : 1.12);     // sprint a touch when chasing blind
-        if (dist > stop) stepTo(c, gx, gz, spd, dt, near);
+        if (dist > stop) stepTo(c, appr.x, appr.z, spd, dt, near);
         else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); if (near) animChar(c.char, 0, dt); finalizeMove(c); }
         continue;
       }
 
       // ---- SEARCH: go to last-known, then sweep nearby before giving up ----
+      // (shared sweep state machine — systems/aitactics.js searchTick; the
+      // player RE-ACQUIRE shout stays cop-specific procedure, inline below)
       if (c.searchT > 0 && (stars >= 1 || c.npcSearch)) {
-        c.searchT -= dt;
         // RE-ACQUIRE: if we catch sight of the wanted player again mid-sweep, drop
         // the search and resume the hunt (GTA: spotted you again → back to chase).
         if (stars >= 1 && !CBZ.player.dead) {
@@ -1849,17 +1885,23 @@
           }
         }
         c.sees = false;
-        const sg = c.searchGoal || g.cityLastKnown;
-        if (sg) {
-          const sdx = sg.x - c.pos.x, sdz = sg.z - c.pos.z, sd = Math.hypot(sdx, sdz);
-          if (sd < 3) {
-            // reached it — pick a new nearby sweep point (wander, hoping to re-spot)
-            if (!c._sweepGoal || Math.hypot(c.pos.x - c._sweepGoal.x, c.pos.z - c._sweepGoal.z) < 2.5) {
-              const ang = rng() * 6.28, rad = 6 + rng() * 10;
-              c._sweepGoal = { x: sg.x + Math.cos(ang) * rad, z: sg.z + Math.sin(ang) * rad };
-            }
-            stepTo(c, c._sweepGoal.x - c.pos.x, c._sweepGoal.z - c.pos.z, c.baseSpeed * 0.7, dt, near);
-          } else stepTo(c, sdx, sdz, c.baseSpeed, dt, near);
+        if (AT) {
+          if (!c.searchGoal && g.cityLastKnown) c.searchGoal = { x: g.cityLastKnown.x, z: g.cityLastKnown.z };
+          const step = AT.searchTick(c, dt, { sweepRadMin: 6, sweepRadMax: 16, reachR: 3, rng });
+          if (step) stepTo(c, step.x, step.z, c.baseSpeed * (step.sweeping ? 0.7 : 1), dt, near);
+        } else {
+          c.searchT -= dt;
+          const sg = c.searchGoal || g.cityLastKnown;
+          if (sg) {
+            const sdx = sg.x - c.pos.x, sdz = sg.z - c.pos.z, sd = Math.hypot(sdx, sdz);
+            if (sd < 3) {
+              if (!c._sweepGoal || Math.hypot(c.pos.x - c._sweepGoal.x, c.pos.z - c._sweepGoal.z) < 2.5) {
+                const ang = rng() * 6.28, rad = 6 + rng() * 10;
+                c._sweepGoal = { x: sg.x + Math.cos(ang) * rad, z: sg.z + Math.sin(ang) * rad };
+              }
+              stepTo(c, c._sweepGoal.x - c.pos.x, c._sweepGoal.z - c.pos.z, c.baseSpeed * 0.7, dt, near);
+            } else stepTo(c, sdx, sdz, c.baseSpeed, dt, near);
+          }
         }
         if (c.searchT <= 0) { c.searchGoal = null; c._sweepGoal = null; c.npcSearch = false; if (stars === 0 && !c.ambient) c.giveUp = true; }
         continue;
@@ -1952,11 +1994,12 @@
   });
 
   // enter SEARCH mode aimed at the last-known position (GTA "?" investigate).
+  // (shared arm — systems/aitactics.js searchStart; falls back inline if the
+  // module didn't load so a cop can still search, just without sharing it.)
   function goSearch(c, last) {
     if (!last || last.x == null) { c.giveUp = (g.wanted | 0) === 0 && !c.ambient; return; }
-    c.searchT = 6 + rng() * 4;
-    c.searchGoal = { x: last.x, z: last.z };
-    c._sweepGoal = null;
+    if (AT) AT.searchStart(c, last, { dur: 6 + rng() * 4, rng });
+    else { c.searchT = 6 + rng() * 4; c.searchGoal = { x: last.x, z: last.z }; c._sweepGoal = null; }
     c.npcSearch = !((g.wanted | 0) >= 1);   // searching for an NPC offender, not you
   }
 
@@ -2041,18 +2084,18 @@
     if (CBZ.gunVoice) CBZ.gunVoice(c.weapon || (c.swat ? "smg" : "sidearm"), CBZ.player ? Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) : 0);
     else if (CBZ.sfx) CBZ.sfx("report");
     const hitP = Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
-    if (Math.random() >= hitP) return;
-    let dmg = (c.swat ? 10 : 7) + Math.random() * 5;
+    if (rng() >= hitP) return;
+    let dmg = (c.swat ? 10 : 7) + rng() * 5;
     if (tgt.isPlayer) {
       // a REMOTE player (multiplayer): the wound travels over the wire and is
       // applied by the victim's own client
       if (tgt.netHurt) { tgt.netHurt(dmg, c.pos.x, c.pos.z, "gunned down by police"); return; }
       // pass the cop ACTOR so death.js can spectate them; cityHurtPlayer derives
       // the "a SWAT officer" / "the police" display name from it (killfeed + title).
-      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", Math.random() < 0.012, c);
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, c.pos.x, c.pos.z, "gunned down by police", rng() < 0.012, c);
     } else {
       tgt.hp -= dmg;
-      if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.0 + Math.random() * 0.6, z: tgt.pos.z }, { cal: c.swat ? 1.1 : 0.85, fromX: c.pos.x, fromZ: c.pos.z });
+      if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.0 + rng() * 0.6, z: tgt.pos.z }, { cal: c.swat ? 1.1 : 0.85, fromX: c.pos.x, fromZ: c.pos.z });
       if (tgt.hp <= 0) CBZ.cityKillPed && CBZ.cityKillPed(tgt, { fromX: c.pos.x, fromZ: c.pos.z, attacker: c, byPlayer: false, force: 5, fling: 4 }, "shot by police");
       else if (CBZ.body) CBZ.body.hit(tgt, { fromX: c.pos.x, fromZ: c.pos.z, force: 3 });
     }

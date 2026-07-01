@@ -387,11 +387,13 @@
 
   function ensureGhost() {
     if (T.ghost) return T.ghost;
+    var parent = CBZ.scene || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root);
+    if (!parent) return null;                      // no scene yet — caller retries next frame
     ghostGreenMat = new THREE.MeshBasicMaterial({ color: 0x5fe06a, transparent: true, opacity: 0.45, depthWrite: false });
     ghostRedMat = new THREE.MeshBasicMaterial({ color: 0xe0605f, transparent: true, opacity: 0.45, depthWrite: false });
     var grp = new THREE.Group();
     grp.visible = false;
-    (CBZ.scene || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root)).add(grp);
+    parent.add(grp);
     T.ghost = grp;
     return grp;
   }
@@ -400,6 +402,7 @@
   var ghostMesh = null, ghostBuiltFor = null;
   function updateGhostShape(name) {
     var grp = ensureGhost();
+    if (!grp) return;
     if (ghostBuiltFor === name && ghostMesh) return;
     if (ghostMesh) { grp.remove(ghostMesh); }
     var def = CBZ.assets.get(name);
@@ -510,6 +513,7 @@
     T.target = { x: pick.x, y: pick.y, z: pick.z, rot: pick.rot, rect: rect, def: def, name: name, valid: valid, socket: pick.socket };
 
     var grp = ensureGhost();
+    if (!grp) return;
     grp.visible = true;
     grp.position.set(pick.x, pick.y, pick.z);
     grp.rotation.y = pick.rot;

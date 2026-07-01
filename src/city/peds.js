@@ -1380,9 +1380,9 @@
       // replaced by a fresh makeCharacter (crowd.js:313) and standalone corpses are
       // disposed, so no living ped ever inherits a missing limb. Real, gruesome,
       // INTENTIONAL — the limb-loss you saw is now a designed effect, not a glitch.
-      if (cause === "explosion" && ped.char && ped.char.parts && Math.random() < 0.5) {
+      if (cause === "explosion" && ped.char && ped.char.parts && rng() < 0.5) {
         const LIMBS = ["ll", "rl", "la", "ra"];                 // legs read most dramatic
-        const key = LIMBS[(Math.random() * LIMBS.length) | 0];
+        const key = LIMBS[(rng() * LIMBS.length) | 0];
         const limb = ped.char.parts[key];
         if (limb && limb.visible !== false) {
           limb.visible = false;                                  // blown clean off
@@ -1476,6 +1476,15 @@
       }
     }
     if (ped.gang && CBZ.cityGangMemberDown) CBZ.cityGangMemberDown(ped, imp);
+    // PERMANENT-DEATH HOOK (persistent-identity registry, a separate task this same
+    // wave): if this ped was ever entered into CBZ.cityIdentities (a named/recurring
+    // NPC the player met, recruited, or otherwise grew a real identity record for),
+    // mark it permanently dead there too. Feature-detected both ways — a no-op if
+    // the registry module hasn't loaded yet (load order across this wave isn't
+    // guaranteed) or if this particular ped never got an identity in the first place.
+    if (ped._identityId && CBZ.cityIdentities && CBZ.cityIdentities.markDead) {
+      try { CBZ.cityIdentities.markDead(ped._identityId, { killedBy: offender, at: (CBZ.now || 0) }); } catch (e) {}
+    }
     // KILLED A POWER'S FAMILY (boss's wife/kin): the whole crew now hunts you. The
     // wife herself has no .gang, so this is the path that makes clipping her
     // DANGEROUS — a jackpot in jewellery, paid for with the gang on your back.
@@ -1565,7 +1574,7 @@
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, fx, fz, att.kind === "cop" ? "gunned down" : "killed in the street", false, att);
       // a melee beatdown can knock you off your feet (physics.js owns the get-up)
       if (melee && CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor &&
-          !((CBZ.game.invuln || 0) > 0) && !CBZ.body.busy(CBZ.city.playerActor) && Math.random() < 0.33) {
+          !((CBZ.game.invuln || 0) > 0) && !CBZ.body.busy(CBZ.city.playerActor) && rng() < 0.33) {
         CBZ.body.knockdown(CBZ.city.playerActor, { fromX: fx, fromZ: fz, force: 7, t: 1.0 });
       }
       if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 22 : 40, melee ? "assault" : "shots-fired");
@@ -1579,7 +1588,7 @@
     // ped vs ped
     tgt.hp -= dmg;
     // the body CARRIES the hit (wounds.js): entry wound + blood soak on the clothing
-    if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.05 + Math.random() * 0.55, z: tgt.pos.z }, melee ? { melee: "blunt", fromX: fx, fromZ: fz } : { fromX: fx, fromZ: fz });
+    if (CBZ.bodyWound) CBZ.bodyWound(tgt, { x: tgt.pos.x, y: (tgt.pos.y || 0) + 1.05 + rng() * 0.55, z: tgt.pos.z }, melee ? { melee: "blunt", fromX: fx, fromZ: fz } : { fromX: fx, fromZ: fz });
     tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
     if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
     // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
@@ -2442,8 +2451,16 @@
   //  ped that ISN'T already fleeing/fighting/guarding/reporting. Picks ONE intent
   //  from a personality+context spectrum and drives it into existing states:
   //    KILL (rage) · BEAT-DOWN (fists rage) · STEAL/pickpocket (sneak→lift cash) ·
-  //    WORK-for-you (walk up + offer) · DEAL/trade · TALK/favor · FLEE · IGNORE.
-  //  Behaviour-first + throttled (reactCD) so it's varied, never spam.
+  //    WORK-for-you (walk up + offer) · TRADE/barter (buy/sell/swap an item) ·
+  //    DEAL/drugs (product, not goods) · TALK/favor · FLEE · IGNORE.
+  //  UTILITY-SCORED (IAUS-style, matching aigoals.js' need-scoring shape): every
+  //  candidate verb gets ONE cheap consideration score from personality (aggr/
+  //  archetype/snitch) × gang stance × ped.relPlayer (fear/grudge/loyalty/respect)
+  //  × opportunity (distance/cash/hot), then we weighted-pick among the top few —
+  //  same DECISION SHAPE as the old if-chain, just scored instead of sequential,
+  //  so a strong personality fit can win even if it isn't first in some fixed
+  //  order. Cheap: a handful of multiplies per ped per decision tick (reactCD
+  //  gates how often this runs at all — never per frame).
   // ============================================================
   function citySayBark(ped, txt, secs) {
     // a brief player-facing line; cheap, throttled by the caller via reactCD.
@@ -2462,6 +2479,109 @@
     // now they BOLT with your money; chase them down to get it back
     ped.state = "flee"; fleeFrom(ped, P.pos.x, P.pos.z); ped.reactCD = 8;
     ped.snitch = Math.min(ped.snitch, 0.1);   // a thief won't also call the cops on you
+  }
+  // TRADE / barter — the GENERIC street swap, distinct from DEAL (which is always
+  // drugs, see goDeal/pedDealOffer-style flavour below): an ordinary vendor-ish or
+  // opportunist civilian offers to buy something off you, sell you something they're
+  // carrying, or — if both sides have goods — swap. Hooks the existing economy
+  // (CBZ.cityEcon — the same ITEMS/valuables/loot vocabulary cityRobPed/rollDeadLoot
+  // already use), so it's real inventory movement, not a flavour-text no-op. Fully
+  // guarded: a no-op (graceful bail) if cityEcon isn't loaded.
+  function pedTrade(ped) {
+    const econ = CBZ.cityEcon;
+    if (!econ) { citySayBark(ped, "Eh, never mind.", 1.4); ped.reactCD = Math.max(ped.reactCD, 6); return; }
+    const haveInv = g.cityInv || {};
+    const invKeys = []; for (const k in haveInv) if (haveInv[k] > 0) invKeys.push(k);
+    // what THEY carry that's tradeable (their rolled loot/valuables — same pool a
+    // robbery would take, just offered willingly here instead of lifted by force).
+    const theirGoods = [];
+    if (ped.loot) theirGoods.push(ped.loot);
+    if (ped.valuables && ped.valuables.length) for (const v of ped.valuables) if (v) theirGoods.push(v);
+    // SELL TO YOU: they have something, you have room/cash — a street price, a
+    // little above pawn value (their cut for carrying the risk).
+    const canSell = theirGoods.length > 0 && (g.cash | 0) >= 15;
+    // BUY FROM YOU: you're holding something sellable and they want it (a fence-ish
+    // opportunist will take valuables/wearables off your hands at a haircut).
+    let buyTarget = null;
+    if (invKeys.length) {
+      for (const k of invKeys) {
+        const it = econ.ITEMS && econ.ITEMS[k];
+        if (it && (it.tag === "valuable" || it.tag === "wearable" || it.tag === "tool")) { buyTarget = k; break; }
+      }
+    }
+    if (canSell && (!buyTarget || rng() < 0.5)) {
+      const item = theirGoods[(rng() * theirGoods.length) | 0];
+      const ask = Math.max(10, Math.round((econ.buyPrice ? econ.buyPrice(item) : 40) * (0.55 + rng() * 0.35)));
+      const price = Math.min(ask, g.cash | 0);
+      if (price >= 10) {
+        if (CBZ.city) CBZ.city.addCash(-price);
+        econ.add(item, 1);
+        // it left their hands — don't let rollDeadLoot/cityRobPed double-grant it later
+        if (ped.loot === item) ped.loot = null;
+        else if (ped.valuables) { const idx = ped.valuables.indexOf(item); if (idx >= 0) ped.valuables.splice(idx, 1); }
+        ped.cash = (ped.cash || 0) + price;
+        CBZ.city && CBZ.city.note("🤝 Bought " + item + " off " + (ped.name || "a local") + " for $" + price, 2);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
+      } else { citySayBark(ped, "Can't do it for that.", 1.6); }
+    } else if (buyTarget) {
+      const it = econ.ITEMS && econ.ITEMS[buyTarget];
+      const offer = Math.max(5, Math.round((econ.sellPrice ? econ.sellPrice(buyTarget) : ((it && it.value) || 20) * 0.45) * (0.7 + rng() * 0.3)));
+      if (econ.take(buyTarget, 1)) {
+        if (CBZ.city) CBZ.city.addCash(offer);
+        CBZ.city && CBZ.city.note("🤝 Sold " + buyTarget + " to " + (ped.name || "a local") + " for $" + offer, 2);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        if (CBZ.cityRelShift) CBZ.cityRelShift(ped, "greeted", 1);
+      }
+    } else {
+      citySayBark(ped, pick(["Nah, nothing on me worth your while.", "Not today — maybe next time.", "I'm tapped out, sorry."], rng()), 1.8);
+    }
+    ped.reactCD = 16 + rng() * 10;
+  }
+
+  // ---- VIOLENT TELEGRAPH (the "tell"): KILL/BEAT-DOWN no longer convert
+  // straight to ped.state="fight" in one frame — that read as an instant
+  // ambush. Instead a short 0.3-0.6s wind-up plays first: the ped squares up
+  // (poseAimBack — the same gun-arm-levelled pose the gunpoint sweep already
+  // uses), barks a hostile line, and HOLDS at range in "confront" (closes in
+  // if still far, but doesn't throw a punch / open fire yet) — readable as a
+  // deliberate personality decision instead of a sucker-punch. tickViolentWindup
+  // (called every think()) counts it down and commits to the real "fight"
+  // state (+ ped.rage) once it elapses. A windup ped that takes damage or
+  // loses its target along the way just falls through to the normal hurt/rage
+  // handling next frame — nothing here can leave a ped stuck.
+  function beginViolentWindup(ped, kind) {
+    ped._windup = kind;                          // "kill" | "beat"
+    ped._windupT = 0.3 + rng() * 0.3;             // 0.3-0.6s tell
+    ped.state = "confront";
+    ped.target.set(CBZ.player.pos.x, 0, CBZ.player.pos.z);
+    ped.poseAimBack = ped.armed || kind === "kill";   // weapon-draw / squared-up posture
+    ped.reactCD = kind === "kill" ? 9 : 7;
+    citySayBark(ped, kind === "kill"
+      ? pick(["You picked the wrong day!", "I'll drop you right here!", "This ends now!"], rng())
+      : pick(["You don't wanna do this.", "Last chance, walk away.", "Square up, then!"], rng()), 1.6);
+  }
+  // ticked from think() every frame a windup is live (cheap: a couple of field
+  // writes; the actual commit only happens once when the timer crosses zero).
+  function tickViolentWindup(ped, dt) {
+    if (!ped._windup) return false;
+    const P = CBZ.player;
+    if (P.dead || !ped.target) { ped._windup = null; ped.poseAimBack = false; return false; }
+    ped.target.set(P.pos.x, 0, P.pos.z);
+    ped.group.rotation.y = lerpAngle(ped.group.rotation.y, Math.atan2(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z), 0.5);
+    const d = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+    // a beat-down windup walks in close; a kill windup squares up where it stands
+    // (it likely already has the range — armed peds don't need to close).
+    ped.speed = (ped._windup === "beat" && d > 2.2) ? ped.baseSpeed * 1.4 : 0;
+    ped._windupT -= dt;
+    if (ped._windupT <= 0 || d > 18) {            // timer's up, or they bolted — commit/abort
+      const kind = ped._windup; ped._windup = null; ped.poseAimBack = false;
+      if (d > 18) { ped.state = "walk"; return true; }   // lost them — stand down quietly
+      ped.rage = CBZ.city.playerActor; ped.state = "fight";
+      if (kind === "beat" && CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "assault");
+      return true;
+    }
+    return true;
   }
 
   // returns true if a reaction was chosen (think() should return immediately).
@@ -2482,10 +2602,10 @@
       ped._approachT -= 0.12;
       if (dpl < 2.2 || ped._approachT <= 0) {
         const intent = ped.approach; ped.approach = null; ped.speed = 0;
-        ped.reactCD = 6 + rng() * 6;
+        ped.reactCD = 5 + rng() * 5;
         if (dpl >= 2.6) return true;          // never reached you — give up quietly
         if (intent === "steal") { pedSteal(ped); return true; }
-        if (intent === "beat") { ped.rage = CBZ.city.playerActor; ped.state = "fight"; if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 12, "assault"); return true; }
+        if (intent === "beat") { beginViolentWindup(ped, "beat"); return true; }
         if (intent === "work") {
           ped.wantsWork = 12;                 // interact.js can read this; bark either way
           citySayBark(ped, pick(["You hiring? I'll run with you.", "Put me on. I need the work.", "Let me earn with your crew."], rng()), 2.2);
@@ -2495,6 +2615,7 @@
           citySayBark(ped, pick(["Got that good-good if you're buying.", "You need anything? I got product.", "Best prices in the city, my friend."], rng()), 2.2);
           ped.offersDeal = 10; return true;
         }
+        if (intent === "trade") { pedTrade(ped); return true; }
         // talk / favor
         citySayBark(ped, pick(["You see what happened over there?", "Spare a few bucks?", "Watch yourself out here.", "You that one from the news?", "Crazy day, right?"], rng()), 2.0);
         return true;
@@ -2502,8 +2623,12 @@
       return true;
     }
 
-    // ---- pick a fresh intent (one shot, then a long cooldown) ----
-    if (dpl > 13 || ped.reactCD > 0) return false;
+    // ---- pick a fresh intent (one shot, then a short-ish cooldown — TUNING PASS:
+    //      the old cooldowns (6-25s) + low per-roll odds (5-18%) made the spectrum
+    //      "practically invisible" in normal play; shortened + the gate widened a
+    //      touch so KILL/STEAL/WORK/DEAL/TRADE/TALK actually surface during a
+    //      normal stroll without turning into spam — see the utility floor below). ----
+    if (dpl > 15 || ped.reactCD > 0) return false;
     const hot = (g.wanted | 0) >= 1;
     const respect = g.respect || 0;
     const prov = provokedAtPlayer(ped);
@@ -2587,45 +2712,119 @@
       }
     }
 
-    // KILL: an armed/violent ped that has a reason — provoked gang, you're a hot
-    // armed threat in their space, or pure aggression — opens fire / charges.
-    if (ped.aggr >= (B.violent || 0.88) && r < 0.5 && (prov > 0.3 || (hot && playerArmed) || ped.armed) && dpl < 11) {
-      ped.rage = CBZ.city.playerActor; ped.state = "fight"; ped.reactCD = 10;
+    // ============================================================
+    //  UTILITY-SCORED VERB PICK (IAUS-style — mirrors aigoals.js' assign()):
+    //  every candidate gets ONE cheap "consideration" score (personality ×
+    //  relationship × opportunity); we keep the candidates whose gate actually
+    //  passed (e.g. STEAL needs you visibly loaded, DEAL needs a dealer ped),
+    //  rank them, and weighted-pick among the top few — so the choice still
+    //  FEELS personality-driven (a violent ped's KILL score dominates a meek
+    //  ped's TALK score) without forcing a rigid first-match order. Each
+    //  consideration's flat base term (the leading constant, e.g. KILL's 0.22)
+    //  is the actual fix for the old "spectrum is invisible" tuning bug — these
+    //  used to be independent ~5-18% coin-flips per branch (most rolls just
+    //  failed silently); now they're SCORES that compete against whatever else
+    //  qualified, so something fires far more often per opportunity window
+    //  (reactCD still throttles how often we even get a window at all).
+    // ------------------------------------------------------------
+    const rel2 = ped.relPlayer;
+    const fear2 = rel2 ? rel2.fear : 0, grudge2 = rel2 ? rel2.grudge : 0;
+    const loyalty2 = rel2 ? rel2.loyalty : 0, respect2 = rel2 ? rel2.respect : 0;
+    const cash = g.cash | 0;
+    const cand = [];   // [name, score, weight-jitter applied already]
+
+    // KILL: armed/violent ped with a reason — provoked gang, a hot armed threat
+    // in their space, pure aggression, or a personal grudge — opens fire/charges.
+    if (ped.aggr >= (B.violent || 0.85) && dpl < 12 && (prov > 0.2 || (hot && playerArmed) || ped.armed || grudge2 > 50)) {
+      let s = 0.22 + ped.aggr * 0.5 + prov * 0.5 + grudge2 / 140 + (hot && playerArmed ? 0.2 : 0) + (ped.armed ? 0.12 : 0);
+      s -= fear2 / 200;                              // even a killer hesitates if truly scared of you
+      cand.push(["kill", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+    // BEAT-DOWN: a crook with no gun fancies their chances against an UNARMED
+    // player (won't melee-charge a drawn gun). Walks up, then throws hands.
+    if (ped.aggr >= (B.crook || 0.7) && !ped.armed && !playerArmed && dpl < 10 &&
+        (!CBZ.citySizeUp || CBZ.citySizeUp(ped, CBZ.city.playerActor))) {
+      let s = 0.18 + (ped.aggr - (B.crook || 0.7)) * 1.6 + grudge2 / 160;
+      s -= respect2 / 180;
+      cand.push(["beat", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+    // STEAL / pickpocket: an opportunist (light-fingered, not a fighter) sneaks up
+    // to a DISTRACTED player and lifts cash — more tempting if you're visibly
+    // loaded, less if they already fear/respect you (don't bite the hand).
+    const opportunist = ped.snitch < 0.4 && ped.aggr < (B.crook || 0.7) && ped.aggr >= (B.flee || 0.3);
+    if (opportunist && !ped.armed && !hot && cash > 25 && dpl < 9) {
+      let s = 0.14 + (cash > 1000 ? 0.18 : cash > 200 ? 0.1 : 0.04) + (1 - ped.snitch) * 0.12;
+      s -= (fear2 + respect2) / 220;
+      cand.push(["steal", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+    // WORK FOR YOU: a have-respect-for-you, broke, willing soul offers to run
+    // with you (you've made a name / have a gang). Walks up and pitches.
+    if (!ped.gang && !ped.recruited && respect >= 3 && ped.wealth < 0.5 && !hot && dpl < 10) {
+      let s = 0.1 + Math.min(1, respect / 20) * 0.3 + (0.5 - ped.wealth) * 0.3 + loyalty2 / 150;
+      cand.push(["work", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+    // TRADE / barter: the generic street swap — a vendor-flavoured or just
+    // ordinary opportunist civilian with goods (or wanting yours) sidles up.
+    // Distinct from DEAL below (drugs only). Calmer opportunity gate than
+    // STEAL (nobody needs to be "distracted" for an honest trade).
+    const traderish = ped.archetype === "merchant" || ped.archetype === "hustler" ||
+      (ped.snitch < 0.55 && ped.aggr < (B.crook || 0.7));
+    if (traderish && !ped.vendor && !hot && dpl < 10 && (ped.loot || (ped.valuables && ped.valuables.length) || cash > 60)) {
+      let s = 0.13 + (ped.archetype === "merchant" || ped.archetype === "hustler" ? 0.18 : 0) + loyalty2 / 200;
+      cand.push(["trade", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+    // DEAL / drugs: a dealer-ish ped sidles up to sell PRODUCT when you're not a threat.
+    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && dpl < 9) {
+      let s = 0.16 + (ped.archetype === "dealer" ? 0.22 : 0.08);
+      cand.push(["deal", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+    // TALK / ask a favor: a friendly local just wants a word (the common,
+    // cheap, low-stakes fallback — always eligible for a non-violent band).
+    if (bnd !== "violent" && !playerArmed && dpl < 8) {
+      let s = 0.09 + (1 - ped.aggr) * 0.06 + respect2 / 220;
+      cand.push(["talk", Math.max(0, s) * (0.85 + rng() * 0.3)]);
+    }
+
+    if (!cand.length) return false;
+    cand.sort((a, b) => b[1] - a[1]);
+    // weighted-random among the top few (unpredictability — the strongest
+    // personality fit usually wins, but not deterministically every time).
+    const top = cand.slice(0, Math.min(3, cand.length));
+    let wsum = 0; for (const c of top) wsum += c[1];
+    if (wsum <= 0.04) return false;                  // nothing scored high enough to act on
+    let roll = r * wsum, picked = top[0][0];
+    for (const c of top) { roll -= c[1]; if (roll <= 0) { picked = c[0]; break; } }
+
+    if (picked === "kill") {
+      beginViolentWindup(ped, "kill");
       if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.2);
       return true;
     }
-    // BEAT-DOWN: a crook with no gun fancies their chances against an UNARMED player
-    // (won't melee-charge a drawn gun). Walks up, then throws hands.
-    if (ped.aggr >= (B.crook || 0.72) && !ped.armed && !playerArmed && r < 0.28 && dpl < 9 &&
-        (!CBZ.citySizeUp || CBZ.citySizeUp(ped, CBZ.city.playerActor))) {
-      ped.approach = "beat"; ped._approachT = 3.5; ped.reactCD = 8;
+    if (picked === "beat") {
+      ped.approach = "beat"; ped._approachT = 3.5; ped.reactCD = 7;
       citySayBark(ped, pick(["The hell you looking at?", "Wrong block, pal.", "You want some?"], rng()), 1.6);
       return true;
     }
-    // STEAL / pickpocket: an opportunist (light-fingered, not a fighter) sneaks up to
-    // a DISTRACTED player and lifts cash — more tempting if you're visibly loaded.
-    const opportunist = ped.snitch < 0.35 && ped.aggr < (B.crook || 0.72) && ped.aggr >= (B.flee || 0.3);
-    if (opportunist && !ped.armed && !hot && (g.cash | 0) > 40 && r < 0.10 + (g.cash > 1000 ? 0.08 : 0) && dpl < 8) {
-      ped.approach = "steal"; ped._approachT = 4; ped.reactCD = 14;
+    if (picked === "steal") {
+      ped.approach = "steal"; ped._approachT = 4; ped.reactCD = 11;
       return true;
     }
-    // WORK FOR YOU: a have-respect-for-you, broke, willing soul offers to run with
-    // you (you've made a name / have a gang). Walks up and pitches.
-    if (!ped.gang && !ped.recruited && respect >= 4 && ped.wealth < 0.45 && !hot && r < 0.06 && dpl < 9) {
-      ped.approach = "work"; ped._approachT = 4; ped.reactCD = 25;
+    if (picked === "work") {
+      ped.approach = "work"; ped._approachT = 4; ped.reactCD = 20;
       return true;
     }
-    // DEAL / trade: a dealer-ish ped sidles up to sell when you're not a threat.
-    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && r < 0.08 && dpl < 8) {
-      ped.approach = "deal"; ped._approachT = 4; ped.reactCD = 18;
+    if (picked === "trade") {
+      ped.approach = "trade"; ped._approachT = 4; ped.reactCD = 15;
+      citySayBark(ped, pick(["Yo, you buying or selling?", "I got a little something if you're interested.", "Let's talk business a sec."], rng()), 2);
       return true;
     }
-    // TALK / ask a favor: a friendly local just wants a word (most common, cheap).
-    if (bnd !== "violent" && !playerArmed && r < 0.05 && dpl < 7) {
-      ped.approach = "talk"; ped._approachT = 4; ped.reactCD = 16;
+    if (picked === "deal") {
+      ped.approach = "deal"; ped._approachT = 4; ped.reactCD = 14;
       return true;
     }
-    return false;
+    // talk
+    ped.approach = "talk"; ped._approachT = 4; ped.reactCD = 13;
+    return true;
   }
 
   // ============================================================
@@ -2771,6 +2970,13 @@
       if (ped._mugFleeT > 0 && !ped.rage && !ped.reportState) { ped.state = "flee"; return; }
     }
 
+    // ---- VIOLENT TELEGRAPH: a KILL/BEAT-DOWN verb chosen by reactToPlayer doesn't
+    //      commit straight to "fight" — it plays a brief wind-up "tell" first (see
+    //      beginViolentWindup). Resolve/advance it here, ahead of rage/report, so it
+    //      can't be skipped by time-slicing and reliably converts to a real fight
+    //      (or stands down if the target's gone) exactly once.
+    if (ped._windup) { if (tickViolentWindup(ped, dt)) return; }
+
     // ---- IN-PROGRESS WITNESS REPORT: a committed snitch is busy dialing / running
     //      to a cop. The player can STOP it: get close with a gun out and a timid
     //      witness panics, drops the phone and bolts (report dies). Otherwise the
@@ -2789,6 +2995,22 @@
       else {
         ped.state = "fight";
         ped.target.set(ped.rage.pos.x, 0, ped.rage.pos.z);
+        // TACTICAL HANDOFF (feature-detected, additive): an important/named civilian
+        // — someone you know by name, a boss, a bounty, a protected family member, a
+        // recruit — mid-fight refines its OWN walk-straight-at-target line into real
+        // cover/flank positioning via the shared tactical-AI module another task in
+        // this wave is building (CBZ.aiTactics). It may not exist yet (load order
+        // across this wave isn't guaranteed) and even when it does we only spend the
+        // extra per-frame work on the handful of named fighters — ordinary ambient
+        // civilians keep the bare cheap path (ped.target straight at the foe, above).
+        if (CBZ.aiTactics && ped.armed &&
+            (ped.nameKnown || ped.isBoss || ped.rank === "boss" || ped.bounty > 0 || ped.protectGang || ped.protectedBy || ped.recruited)) {
+          const tac = CBZ.aiTactics;
+          try {
+            if (tac.engage) tac.engage(ped, ped.rage, dt);
+            else if (tac.tick) tac.tick(ped, ped.rage, dt);
+          } catch (e) {}
+        }
         // disengage if badly hurt and not truly violent
         if (ped.hp < ped.maxHp * 0.3 && ped.aggr < (B.violent || 0.88)) { ped.rage = null; ped.state = "flee"; fleeFrom(ped, ped.pos.x + ddx, ped.pos.z + ddz); }
         return;

@@ -64,6 +64,45 @@
   }
   CBZ.cityGainNotoriety = gainNotoriety;
 
+  // ============================================================
+  //  LEGIT RANK LADDER — the player's own "Security Guard" career gets a
+  //  minimal promotion ladder, a small mirror of gangs.js's Prospect→Boss
+  //  pyramid (RANK_BY_KEY/cityRankLadder/cityRankName) for the one straight
+  //  job careers.js actually runs end-to-end on the player. A clean shift
+  //  (no stars) on the books is SENIORITY currency, exactly like gangs.js's
+  //  memStats.served; enough clean shifts earns the next tier's better wage.
+  //  This is the "legit" half of the manager-promotion concept officejobs.js
+  //  implements for the NPC office floors (CBZ.cityPromoteOfficeManager /
+  //  CBZ.citySucceedOfficeManager) — same shape, different roster of one.
+  // ============================================================
+  const SECURITY_RANKS = [
+    { key: "guard",   pip: "Guard",         shifts: 0,  wageMul: 1.0 },
+    { key: "senior",  pip: "Senior Guard",  shifts: 6,  wageMul: 1.4 },
+    { key: "shiftmgr",pip: "Shift Manager", shifts: 16, wageMul: 1.9 },
+  ];
+  CBZ.citySecurityRankLadder = function () { return SECURITY_RANKS.map((r) => ({ key: r.key, pip: r.pip, shifts: r.shifts })); };
+  CBZ.citySecurityRankName = function (key) { const r = SECURITY_RANKS.find((x) => x.key === key); return r ? r.pip : "Guard"; };
+  function securityRankIdx() {
+    const shifts = g.citySecurityShifts || 0;
+    let i = 0; for (let k = 0; k < SECURITY_RANKS.length; k++) if (shifts >= SECURITY_RANKS[k].shifts) i = k;
+    return i;
+  }
+  function securityRankInfo() { return SECURITY_RANKS[securityRankIdx()]; }
+  CBZ.citySecurityRank = function () { const r = securityRankInfo(); return { key: r.key, pip: r.pip, shifts: g.citySecurityShifts || 0, wageMul: r.wageMul }; };
+  // a clean paid shift banks toward the next rank; firing (going wanted) resets
+  // the streak — a real consequence for blowing a clean-record job, same spirit
+  // as gangs.js's disciplineHit on a loss.
+  function securityClockShift() {
+    const before = securityRankIdx();
+    g.citySecurityShifts = (g.citySecurityShifts || 0) + 1;
+    const after = securityRankIdx();
+    if (after > before) {
+      const r = SECURITY_RANKS[after];
+      CBZ.city.note("⬆ Promoted to " + r.pip + " — wage's better now.", 2.4);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    }
+  }
+
   // topY (optional): stretch the column to reach a ROOF objective — a dead-drop
   // point 40m up still needs a beam you can see from the street.
   function makeBeacon(x, z, color, topY) {
@@ -532,7 +571,7 @@
     if (CBZ.cityCloseShop) CBZ.cityCloseShop();
     const msg = {
       dealer: "You're slinging now. Cop wholesale at the trap house, then deal on the street — turn buyers into regulars, keep the heat off your back. · U buy · I deal",
-      security: "On the books as a Security Guard. Keep your record clean (0 stars) for the salary; drop criminals for bonus pay.",
+      security: "On the books as a " + securityRankInfo().pip + ". Keep your record clean (0 stars) for the salary — clean shifts earn a promotion (and a better wage).",
       pimp: "You run the night crew now. Recruit earners — they kick up to you while you sleep. · K recruit",
       gangster: "Putting a crew together. Recruit shooters — they ride with you and answer your orders. · K recruit · O orders",
     }[kind] || ("Career: " + kind);
@@ -881,6 +920,7 @@
     // story arc. We only clear transient regular flags off live peds.
     g.cityNotoriety = g.cityNotoriety || 0;
     g.cityGangJobsDone = g.cityGangJobsDone || 0;   // crew-contract CV persists too
+    g.citySecurityShifts = g.citySecurityShifts || 0;   // legit-job rank ladder CV persists too
     g.cityCustomers = 0; g.cityDrugSales = g.cityDrugSales || 0;
     g.cityPostedUp = false; g.cityPostX = 0; g.cityPostZ = 0;
     for (const p of (CBZ.cityPeds || [])) { p.regular = false; p.reUpT = 0; p.loyalty = 0; p.seekPlayer = false; }
@@ -973,8 +1013,14 @@
         else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("💸 Couldn't make payroll — " + q.name + " walked off.", 2.6); }
       }
       if (g.career === "security") {
-        if ((g.wanted | 0) === 0) { CBZ.city.addCash(E.securityWage || 14); }
-        else { g.career = null; CBZ.city.note("Security: you went wanted — you're FIRED.", 2.2); }
+        if ((g.wanted | 0) === 0) {
+          const wage = Math.round((E.securityWage || 14) * securityRankInfo().wageMul);
+          CBZ.city.addCash(wage);
+          securityClockShift();
+        } else {
+          g.career = null; g.citySecurityShifts = 0;   // busted record — back to the bottom if rehired
+          CBZ.city.note("Security: you went wanted — you're FIRED.", 2.2);
+        }
       }
       // CUSTOMER BASE + WALK-UP DEMAND: regulars who are due to re-up seek YOU
       // out, and — when you're POSTED UP on a corner — fresh addicts with a live

@@ -5,6 +5,12 @@
    one-off minigame screens. Activities and existing systems emit compact
    events; this ledger records the durable results and mirrors the live
    cash/bank/inventory fields back into CBZ.game.
+
+   Also round-trips CBZ.cityIdentities (city/identity.js's permanent-death
+   registry) through this SAME CBZ_CITY_WORLD_V2 localStorage record, so a
+   singleplayer reload respects a killed racer/gang boss/VIP/tycoon exactly
+   like the MP host path (net/netpersist.js) already does — commit() mirrors
+   the live registry out, applyToGame() rebuilds it on load.
 ============================================================ */
 (function () {
   "use strict";
@@ -70,6 +76,12 @@
       politics: { support: 0, corruption: 0, scandal: 0, emergencyPowers: 0, official: "Mayor Rosa Vale" },
       factions,
       activityLog: [],
+      // permanent-identity registry mirror (CBZ.cityIdentities) — killed
+      // racers/gang bosses/VIPs/tycoons must stay dead across a singleplayer
+      // reload too, not just the MP host path (netpersist.js). null until the
+      // registry has minted at least one identity; commit()/applyToGame()
+      // round-trip it the same way netpersist.js's worldBlob/applyWorld do.
+      identities: null,
       lastSaved: now(),
     };
   }
@@ -119,6 +131,7 @@
     w.weapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || w.meleeWeapon || null;
     w.criminalRecord.wantedPeak = Math.max(w.criminalRecord.wantedPeak || 0, g.wanted || 0);
     w.criminalRecord.heatPeak = Math.max(w.criminalRecord.heatPeak || 0, g.heat || 0);
+    if (CBZ.cityIdentities && CBZ.cityIdentities.serialize) try { w.identities = CBZ.cityIdentities.serialize(); } catch (e) {}
     save(w);
     return w;
   }
@@ -153,6 +166,7 @@
     } else if (restoreWeapon && CBZ.cityGiveWeapon) {
       CBZ.cityGiveWeapon(restoreWeapon);     // migrate legacy single-name saves
     }
+    if (w.identities && CBZ.cityIdentities && CBZ.cityIdentities.apply) try { CBZ.cityIdentities.apply(w.identities); } catch (e) {}
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return w;
   }

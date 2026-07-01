@@ -331,6 +331,7 @@
         A.root.add(boss.group);
         CBZ.cityPeds.push(boss);
         gang.members.push(boss);
+        registerBossIdentity(gang, boss);   // cityIdentities plug-in (feature-detected; see above)
       }
       // recolour this turf's graffiti hint (stash glow) toward the gang colour
       for (const lot of gang.turf) {
@@ -375,6 +376,47 @@
   function rollGang(ag) { const r = (rng() + rng()) / 2; return (ag.meanGang != null ? ag.meanGang : 0.8) + (r - 0.5) * 2 * (ag.spreadGang || 0.14); }
 
   function gangById(id) { return CBZ.cityGangs.find((x) => x.id === id); }
+
+  // ============================================================
+  //  PERMANENT-IDENTITY REGISTRY PLUG-IN (city/identity.js, feature-detected,
+  //  load order NOT guaranteed). gangs.js already runs the real, working
+  //  succession mechanic end-to-end (gang.bossDead / succeedBoss below) —
+  //  this does NOT replace any of that. It only ALSO mints/retires a
+  //  CBZ.cityIdentities record per crowned boss so racing/vips/companies and
+  //  this file share ONE uniform history/leaderboard view ("every named boss
+  //  this city has ever had, alive or dead, who succeeded whom"). Mirrors the
+  //  exact stamp-id-on-the-individual pattern racing.js/vips.js/millionaires.js
+  //  use: boss._identityId names the live record; peds.js's central death
+  //  chain (a separate task) can call markDead via that id too — both paths
+  //  are idempotent (identity.js no-ops a second markDead on the same id). ----
+  // mint (or reuse, if this exact boss ped already holds one — e.g. a
+  // re-tag pass that doesn't actually replace the body) an identity for the
+  // CURRENT boss of a gang, and stamp it onto the ped.
+  function registerBossIdentity(gang, boss) {
+    const R = CBZ.cityIdentities;
+    if (!R || !R.register || !boss) return;
+    if (boss._identityId) { const ex = R.get(boss._identityId); if (ex && ex.status === "alive") return; }
+    const rec = R.register("gangBoss", boss.name || gang.bossName || "Boss", { gangId: gang.id, gangName: gang.name, archetype: gang.type || "street" });
+    boss._identityId = rec.id;
+  }
+  // retire the identity for a boss who just went down — idempotent against
+  // both this direct call AND identity.js's own onDeathRegister dispatch (in
+  // case peds.js's death hook also reaches markDead via the same _identityId).
+  function retireBossIdentity(ped, killedBy) {
+    const R = CBZ.cityIdentities;
+    if (!R || !R.markDead || !ped || !ped._identityId) return null;
+    const before = R.get(ped._identityId);
+    if (!before || before.status === "dead") return before || null;     // already processed
+    return R.markDead(ped._identityId, { killedBy: killedBy || null });
+  }
+  // identity.js's death-reaction hook for kind 'gangBoss': purely a uniform
+  // history/leaderboard read — the REAL succession (heir pick, rename, gear,
+  // morale hit) already happened in succeedBoss() below by the time this
+  // fires (or is about to, on the same tick); this never drives policy, only
+  // logs it. Feature-detected so an older identity.js (or none loaded) is fine.
+  if (CBZ.cityIdentities && CBZ.cityIdentities.onDeathRegister) {
+    CBZ.cityIdentities.onDeathRegister("gangBoss", function (rec) { /* leaderboard.js reads cityIdentities.byKind('gangBoss') directly; nothing else to do here */ });
+  }
 
   // ============================================================
   //  HIERARCHY ENGINE — promotion on merit, income split by rank,
@@ -514,10 +556,17 @@
     });
     const heir = live[0];
     const wasStrong = rankTier(heir) >= 4;     // an Enforcer/Lt rising = clean handover
+    const prevIdentityId = gang.boss && gang.boss._identityId; // gang.boss may already be null (dead-and-spliced)
     heir.rank = "boss"; heir.isBoss = true; gang.boss = heir; gang.bossName = heir.name;
     heir.name = heir.name && heir.name.indexOf("'") < 0 ? makeBossName(gang.ethnicity) : heir.name;
     applyRankGear(heir, gang); tagWithRank(heir, gang.color);
     gang.bossDead = false; gang.leaderless = false;
+    // cityIdentities plug-in: mint the heir's own identity + log the handover
+    // onto the dead boss's record (lineage queryable via R.get(id).successorId).
+    registerBossIdentity(gang, heir);
+    if (prevIdentityId && CBZ.cityIdentities && CBZ.cityIdentities.setSuccessor) {
+      CBZ.cityIdentities.setSuccessor(prevIdentityId, heir._identityId || null);
+    }
     // a weak handover fractures morale — everyone wobbles, some will walk
     const moraleHit = wasStrong ? 0.05 : 0.22;
     for (const m of live) disciplineHit(gang, m, moraleHit);
@@ -1099,6 +1148,10 @@
     // so the upkeep tick promotes the heir for rival-on-rival kingpin kills too.
     if (wasBoss && !gang.isPlayer) {
       gang.bossDead = true;
+      // cityIdentities plug-in: retire HIS record now (idempotent — succeedBoss's
+      // own setSuccessor call later reads this same id off gang.boss, which is
+      // still wired to the dead ped until the upkeep tick runs succession).
+      retireBossIdentity(ped, (imp && imp.attacker && imp.attacker.name) || (byPlayer ? "player" : null));
       if (byPlayer) {
         // the takeover prize hook always fires (succession/player-takeover);
         // the big respect bump only lands on a SANCTIONED kingpin hit.
