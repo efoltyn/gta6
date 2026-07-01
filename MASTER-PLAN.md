@@ -14,7 +14,7 @@ Five findings drive everything below:
 4. **OSS integration is blocked by exactly two things:** three.js r128-as-global (2021, pre-ESM; loaded from CDN at index.html:245) and the no-modules IIFE architecture. The codebase itself is unusually clean for an upgrade (zero uses of removed `THREE.Geometry`; almost all Lambert/Basic materials). **Fix: Vite + a compat shim (`window.THREE`, `window.CBZ`) so all 241 legacy files run unmodified while new code is real ESM that can `npm install` any GitHub repo, wrapped by a standard adapter convention.**
 5. **Politics and deep economy are generalizations of systems that already work.** The 13-gang faction system is a functioning war/diplomacy/treasury sim. Every persistent NPC already has a wallet, job, wage accrual, home/work anchors, and a 5-axis relationship record that ripples through a social graph with gossip propagation. There's a per-district drug market with real supply/demand and a macro property index. There's even a dormant politics stub in the save file (`worldstate.js:70`: support/corruption/scandal/emergencyPowers + `official: "Mayor Rosa Vale"`). **Fix: promote these into jurisdictions, offices, elections, regimes, war, and a unified per-jurisdiction market that every feature reads and writes.**
 
-The plan is organized so each part ships value independently, but they compound: the architecture conventions (Part II) make everything else cheap; the city components (Part III) and player building (Part IV) share one piece/socket/parcel substrate; politics (Part V) and economy (Part VI) form one political-economy loop; the roadmap (Part VII) sequences it.
+The plan is organized so each part ships value independently, but they compound: the architecture conventions (Part II) make everything else cheap; the city components (Part III) and player building (Part IV) share one piece/socket/parcel substrate; politics (Part V) and economy (Part VI, incl. the stock market/casino) form one political-economy loop; the SQLite + math backbone (Part VII) carries all of it; the roadmap (Part VIII) sequences it.
 
 ---
 
@@ -126,7 +126,63 @@ One generic loop iterates instances; no new object type may splice an `if` block
 
 # Part IV — Player building: Rust bases, Minecraft freedom, Roblox composability
 
-*(This part is being finalized from the dedicated 27-agent design workflow — placeholder pending its Round-3 output: core piece/socket building system; free placement & stacking that fixes the Sims problem; destruction & raiding; ownership & locks; resources & crafting; persistence & multiplayer sync; and the enabling engine refactor for thousands of runtime pieces.)*
+*(Synthesized from a dedicated 27-agent workflow: 13 subsystem explorers → cross-cutting analyses → 7 system designers → an adversarial critic whose reconciliation verdicts are baked in below.)*
+
+## IV.0 What exploration found: the seams exist, the abstractions don't
+
+**Ready to reuse:** runtime collider add/remove is proven in production (`door.js` pushes/splices its collider + `markCollidersDirty()`; `buildings.js carveHole()` at :1034 hides wall meshes, splices colliders, spawns remnant flank/sill/header geometry, and replicates it via `fracture.js`'s coordinate-keyed serialize/apply/applyOne ledger — the single strongest precedent for networked runtime wall mutation). Walkable surfaces are data (`CBZ.platforms` records incl. ramps — a player floor is one pushed record; `groundAt()` handles stacking for free). `CBZ.assets.define/pool` is a data-driven prefab registry with InstancedMesh pooling; `placement.js` has a battle-tested spatial hash with `isFree/reserve`; `interactions.js` registers verbs without keydown listeners; `netPid()` provides stable player identity.
+
+**The gaps:** no grid or snapping anywhere (every world position is a hand-typed float); `addBox()` makes a unique Mesh+Material+Geometry per call (the prison never adopted batching); `placement.js` rects are **XZ-only** (no Y range — the literal Sims problem); `assets.pool()` has **no removal/free-list** (players demolish constantly); colliders have no per-object ownership IDs; no HP/damage model for structures; nothing stacks because nothing can answer "what surface is at this point?"
+
+## IV.1 One canonical record + the chunked engine (the reconciliation)
+
+The critic's top finding: five designs independently invented five names (BuildPiece/Placeable/Piece/Structure) for what must be **one record**. Verdict adopted: **`src/systems/pieces.js` owns the canonical `Piece`**, and everything else extends it with optional field groups:
+
+```
+Piece {
+  id, ownerId (netPid), baseId, kind, tier,
+  gridPos {gx,gy,gz} | pos (authoritative: grid for structural, free for furniture), rot (quarter-turns),
+  sockets [{localPos, normal, kind, mate}], supportedBy [], supports [],
+  hp, maxHp, weightClass, maxLoad,
+  colliderIds [], platformIds [], meshRef | instanceSlot, chunkKey,
+  locked, keyId,            // doors/containers
+  seq, createdAt            // net/persistence
+}
+```
+
+`CBZ.spawnPiece(assetKey, opts)` / `CBZ.despawnPiece(id)` are the *only* constructor/destructor: they pair collider+platform registration generically, parent meshes under a 16m-chunk root, and defer splices via the `_reap` queue idiom (vehicles.js) so a raid killing 40 pieces mid-frame can't corrupt iteration. **`src/systems/chunks.js`** does incremental rebatching: per-chunk dirty flags drained by a debounced late-order updater; `sealed` pieces merge via batch.js's existing `mergeGeometries` machinery (1-2 draw calls/chunk) or per-chunk instanced pools; unsealed (under construction / being raided) pieces stay individual meshes — `unsealChunk()` re-expands for carve-level damage, re-seals after combat. **`CBZ.findSupport(x,z,yMin,yMax)`** — one shared support query (the two designs that each proposed their own were collapsed into this) built on the existing `groundAt` platform scan + `queryCollidersNear` — is the root fix for the Sims problem.
+
+**Three spike tests before any Phase 1 code** (critic's riskiest assumptions): (1) retrofit a free-list onto `assets.pool()`'s InstancedMesh — instance 500, remove/re-add 50, check corruption/perf; (2) profile `markCollidersDirty()` full-rebuild cost at realistic collider counts to size the debounce (or justify incremental broadphase); (3) a 2-3 client jitter test of deterministic client-side placement validity near a chunk boundary.
+
+## IV.2 The core building system (Rust-style)
+
+**Pieces:** 7 kinds × 4 tiers as parametric catalog entries, not hand-authored: foundation (3×3m, graph root), wall / doorway / window variants, floor, stairs (registers a ramp platform — the player glides up via existing `groundAt` ramp support), roof, door (door.js clone + lock/owner fields). **Grid:** CELL=3m; `gridPos` integers are authoritative (world transform derived — no float drift; validity = O(1) occupancy-map lookup per base, spatial hash as the fallback vs. world geometry). **Sockets:** local-space typed connection points; placement raycasts, finds the nearest compatible unmated socket within ~0.75m, and snaps — this is what makes it feel like Rust, not freeform drag. **Tiers:** twig (free prototyping — the Minecraft-creative on-ramp) → wood (~250hp) → stone (~900) → metal (~2200); upgrade-in-place preserves the socket graph. **Structural integrity:** `supportedBy/supports` graph, stability = BFS hops from a foundation, per-tier cantilever caps, cascade collapse on removal (bounded recompute, children only). **Build UX:** hotbar piece strip (inventory.js slot pattern), ghost preview tinted green/red with a *reason* ("need foundation", "not enough wood"), Q/E quarter-turn rotation, confirm through the interactions registry; plus the critic's additions — an undo-last-placement verb and an inside-a-room placement fallback for when the camera ray is blocked by the room you're standing in.
+
+## IV.3 Free placement & furniture (interior design becomes intentional)
+
+The furniture layer shares the Piece record but skips the grid: **`findSupport` face classification** (normal.y > 0.7 = floor/tabletop, < −0.7 = ceiling, else wall) means chairs refuse walls, sconces refuse floors, and everything rests at a *computed* height instead of a hand-typed literal. **Sockets as snap-assist, never a requirement:** a table declares a tabletop socket, a shelf declares evenly spaced shelf-line sockets — a lamp near the table snaps *onto* it, centered and upright; free placement remains for everything else (wall-mount-only items like picture frames are the one `requiresSocket` class). **Stacking with physics-lite:** placement.js rects gain minY/maxY (a single shared PR — four designs depended on it), `weightClass/maxLoad` caps prevent infinite crate towers, and destroying a support walks `supportedBy`: children re-settle onto whatever is below or become one-shot falling debris via the existing `fx.dropDebris` — "blow up the table leg and everything on it crashes down" without a physics engine. **Move carries children:** picking up a table moves the lamp on it; cancel restores exactly. This is also the city's furnishing upgrade path: `furnish*` interior sets migrate onto the same spawn/support pipeline (the engine refactor's proof milestone reroutes one apartment unit through it).
+
+## IV.4 Destruction & raiding
+
+Per-piece HP with **material × damage-type multipliers** (melee ~nothing vs stone/metal; bullets chip wood; explosives are the raid currency — C4/rockets via the existing `explosives.js` integration). Carve-level visual damage reuses `carveHole()`'s remnant system on player walls (the critic flagged: wall meshes must be authored carve-compatible, not plain boxes — owned by the piece catalog). Support destruction triggers the IV.2 collapse cascade; destroyed containers spill contents as lootable drops. **Repair/replace** by hitting with resources in hand; **decay/upkeep** (below) is the offline-raid balance lever. The critic's honest gap, now owned explicitly in phasing: the **raid-tool balance table** (damage values, splash radii, tool tiers vs material tiers) is a dedicated design deliverable before the raid phase ships, and **server-side placement validation beyond size/rate/ownership** (anti-cheat for floating/overlapping structures) gets a named owner when multiplayer building opens — the SQLite authority layer (Part VII) is where those checks live.
+
+## IV.5 Ownership & security (tool cupboard model)
+
+All base authority roots in **one placed object — the Tool Cupboard**: placing it creates a `BaseRecord {id, ownerId, center, radius ~30m, authorizedPids:Set(netPid), upkeepPaid, keycodes}` and claims building privilege; foreign placement inside the radius is rejected as one more predicate in the shared validity pipeline (`CBZ.baseAt(x,z)` modeled on turf.js's `cityZoneOwner`). Bases expose `owner:{type:"player", id}` in the exact shape procedural buildings already use (buildings.js:4563), so turf/economy/wallet code works on player bases unmodified. **Doors:** door.js's proven shape + `{locked, keyId, code}`; keypads via `registerZone`; lockpicking reuses the roofloot.js timed-pry idiom, pick time scaling with door tier. **Containers:** contents are the same flat count-map as the inventory (zero new item schema); locked containers force-unlock when an adjacent wall is breached to 0hp — a raid exposes loot for anyone, Rust-style. **Clans:** a roster record; effective auth = union(explicit, clan members) computed at check time (no stale copies). **Griefing limits:** upkeep decay reclaims abandoned bases (~3 days lapse → TC radius lifts), TC radius blocks spite-walls, a `raidableAfter` grace protects brand-new bases. A **land-claim policy layer** (no building on roads/mission zones; where TCs may be placed at all) is a named content deliverable the critic caught as unowned.
+
+## IV.6 Resources & crafting (gather → craft → build → defend)
+
+**Nodes:** a new near-field harvestable scatter (instanced trees/rocks/scrap piles via `assets.pool`, ~2-4 draw calls, parallel to — not touching — wildnature.js's decorative backdrop), each registered in `CBZ.resourceNodes` with hp/yield/respawn timers (the roofloot.js RESPAWN pattern). **The city IS the scrapyard:** destroyed cars and shot-out street furniture roll Scrap/Metal drops through the same loot-roll shape economy.js already uses — raiding a chop-shop car is a resource action with zero new geometry. **Tools:** Hatchet/Pickaxe as craftable items with a per-tool harvest-bonus map, swinging through the *existing* melee path (node hit-test checked before actor hit-test — no new input or animation). **Recipes:** one small `src/systems/craft.js` registry; outputs are either tool items or **deployable items whose `buildPieceKey` names a piece-catalog entry** — the inventory's `useItem()` gains a third branch: deployables enter build mode. Tiering solves its own chicken-and-egg: the workbench is the one station-free recipe; forge unlocks metal; stations are checked by proximity query to placed Pieces. Crafting/materials integrate with the economy (Part VI): building consumes `materials.s`, and big builders move district prices.
+
+## IV.7 Persistence & multiplayer sync
+
+Build data rides a **fourth channel** modeled on fracture.js's proven incremental ledger — never inside the capped worldBlob. **Peer-authoritative events** (`bplace/bmove/bdamage/bdestroy` + host-arbitrated `bclaim` for simultaneous claims): each carries the owner's monotonic `seq` for dedup + last-writer-wins; every client applies optimistically on sight, so a guest's base survives a host crash. Structures need **no snapshot loop** (placement-rate, not per-frame) — the 10Hz networld pipeline is untouched. **Join-in-progress streams by chunk** using the existing scope-enter/leave hysteresis: a player who never visits a base never downloads it. Durable saves: per-plot dirty-flagged `bsave` with explicit size caps and *user-facing* trim feedback (silent loss is worse than no persistence). The ownership events (baseAuth/lock changes) adopt the same seq/LWW vocabulary — the critic caught the two designs using different conflict language. Long-term the whole channel lands in the `player_structures`/`containers` tables of Part VII.
+
+## IV.8 Order of work + the walking skeleton
+
+Critic-endorsed sequence: **(1)** pieces.js + chunks.js skeleton (Phase 0, additive, zero call sites — forces the schema convergence); **(2)** the three spikes; **(3)** migrate props.js + one furnished apartment as proofs (this produces `findSupport` for everyone); **(4)** the shared placement.js Y-range PR; **(5)** crafting phases 1-2 in parallel (no placement dependency); **(6)** core building on the Piece registry; **(7)** build-mode UX + deployable recipes together; **(8)** nav/LOS scaling before base density arrives; **(9)** integrity graph + furniture cascade as one shared system; **(10)** tool cupboard/locks; **(11)** persistence/sync on the frozen schema; **(12)** tiers, raid tables, containers, clans, streaming, upkeep.
+
+**First shippable milestone:** single-player, one piece type — debug-granted wood wall → ghost preview snapped via `findSupport` → place with E → real collision → **stack a second wall on the first and stand on it** (the Sims problem fixed, literally) → demolish and watch collider/platform splice cleanly. It exercises the whole vertical stack with no sockets, tiers, persistence, or multiplayer — and validates the two most load-bearing assumptions first.
 
 ---
 
@@ -136,7 +192,7 @@ Everything here promotes the **dormant stub that already exists** — `worldstat
 
 ## V.0 The persistent-population principle
 
-A rule that governs every mechanic in Parts V and VI: **every person in the world is a stored individual with a coordinate at all times, and simulation events transition people — they never delete-and-respawn them.** The codebase already half-commits to this ("finite factions": a permanently wipeable ~40-officer police force, police.js:65-90; non-respawning gang rosters; the 600-entry NPC ledger with permanent death via `dropSid`; ledger entries already carry home/work anchors + last position and fast-forward their earnings offline, schedule.js:211-306). The plan completes it: the ledger becomes the **population registry** (backed by SQLite, Part VIII) covering everyone — cops, soldiers, officials, billionaires, shopkeepers, citizens — each with identity, wallet, employer, home, relationships, and faction history.
+A rule that governs every mechanic in Parts V and VI: **every person in the world is a stored individual with a coordinate at all times, and simulation events transition people — they never delete-and-respawn them.** The codebase already half-commits to this ("finite factions": a permanently wipeable ~40-officer police force, police.js:65-90; non-respawning gang rosters; the 600-entry NPC ledger with permanent death via `dropSid`; ledger entries already carry home/work anchors + last position and fast-forward their earnings offline, schedule.js:211-306). The plan completes it: the ledger becomes the **population registry** (backed by SQLite, Part VII) covering everyone — cops, soldiers, officials, billionaires, shopkeepers, citizens — each with identity, wallet, employer, home, relationships, and faction history.
 
 **Everyone is at a coordinate, always.** Each person's position is a deterministic function of their schedule and the sim clock: home overnight → commute → workplace → lunch spot → bar → home. When the player approaches any point, the engine asks the registry "who is here *right now*?" and streams those specific people in at their actual positions — spawning is pure presentation, never random invention. This is what makes the world feel smart: the bartender you robbed last night is home asleep at 4am (and you can go to his house); the mayor really is at city hall at 10:00 and in the motorcade at 17:00; you can tail a billionaire from his penthouse to his HQ; a witness who saw you actually travels to the police station before the report lands (the snitch-run mechanic, gangs.js:983, already works this way — generalize it). Unloaded people advance along their routes mathematically (the `fastForward` pattern, schedule.js:248, upgraded from "accrue wages" to "advance position along schedule path"), so the answer is always consistent whether you watched them or not.
 
@@ -237,24 +293,69 @@ Every good has a **legal channel** (shop shelf, priced `base × p × legality`) 
 
 **The player must SEE it:** adboards become **live market tickers** (a new creative painter on the existing `cityAdMatFor` canvas pipeline — "FUEL $3.40 ▲", "SHORTAGE: BUILDING MATERIALS"); shop price tags move day-to-day with ▲▼ glyphs (shops.js already prints computed prices); threshold-crossing headlines through `city.note`; a phone Markets app with sparklines; district prosperity visuals — citystaff queue lengths repointed from company flavor to district `activity`, all-day shutters + FOR LEASE signs on closed shops (which list cheap on Zillow: buy the block during the bust you caused).
 
-## VI.6 Modules & phasing
+## VI.6 Stock market, real corporations, billionaires & the casino
+
+**Real productive companies.** `companies.js`'s decorative holdcos become background landlords; a curated roster of **8 launch corporations** (new `src/sim/corporations.js`) each owns real outlets in real buildings across the mainland + mini-cities and books revenue from **actual simulated sales**: each hour, `outletRevenue = cohortSpend(district, good) × outletShareOfCityDemand`, minus wages (paid into NPC/cohort wallets), rent, inputs, and debt service. The launch roster maps to EconState good categories: **Bunbros** fast food (the owner's example — outlets in every city, sells `food`), **Royale Casino Corp** (operates the Neon Reef casino), **Ironclad Arms** (guns), **Granite & Sons Construction** (`materials` — earnings spike when the city gets destroyed), **Meridian Fuel**, **Zenith Media** (its multiple tracks press freedom — state control crashes it), **Goldspire Trust REIT** (wraps the existing zillow CORPS magnates; NAV reads real listing values), **Apex Dealership Holdings** (luxury). Player businesses can **IPO**: a maxed wealth.js BIZ converts into a listed company seeded from its live `bizRate()`.
+
+**One exchange per country**, physically enterable — the existing GOLDSPIRE TRUST bank prefab (citytemplates.js:98-99) retagged `shopKind:"exchange"`, zero new geometry. Hourly price formation reuses the proven propMkt skeleton (economy.js:1069-1093 momentum/mean-reversion):
+```
+anchor  = P/E_sector × EPS(trailing real earnings)      // fast-food 18x, casino 14x, guns 10x…
+price  ← clamp(price × (1 + revert·(anchor/price − 1) + macroTerm + momentum + eventTerm))
+momentum ← momentum·0.62 + noise·vol + herdFlow          // retail cohorts chase trailing momentum
+```
+`macroTerm` reads jurisdiction `activity`; `eventTerm` takes shocks: war (+defense stocks), nationalization (−1.0, exchange closes under communism with shares converted to haircut "nationalization bonds"), an outlet destroyed (earnings hit — **burn a chain's restaurants and the stock falls**), founder assassinated (−25-55% + volatility + succession event). Player tools: phone STOCKS app + exchange-floor terminal, buy/sell/short, dividends, **real insider trading** (befriend an executive through the relationship system → see next tick's earnings surprise; replaces the fake "Insider Stock Play" op at wealth.js:439) with SEC heat, and exploitable **herding** — pump with well-timed buys, trigger retail momentum-chasing, sell into the herd, risk the investigation. A Dow-divisor **national index per country** runs on the adboard tickers.
+
+**Billionaires are shareholders, not cash piles.** The transient billionaire archetype (peds.js:258-264) becomes a persistent ledger identity: `netWorth = shares × price + properties + cash`, marked to market with the same compositional pattern as the player's own net worth (economy.js:876-877). They ARE the existing MAGNATE VIPs (vips.js:11-14 already gives them suited SMG security) wired to a `companyId`, with executive schedules (HQ office / penthouse — and per V.0, you can tail them there). They **act**: expand outlets (buying lots via zillow), short rivals, fund political candidates by sector interest (Ironclad funds the hawks). Killing or kidnapping one is an economic act — stock shock, succession, maybe a board offer to a player holding enough shares.
+
+**The casino** (one per country, Neon Reef's already-built casino prefabs): the fully worked minigame math already in activities.js:338-341 (blackjack 3:2 stands-17, single-zero roulette 2.70% edge, ~90% RTP slots) is kept — and **the house's side of every settled bet books into Royale Casino Corp's revenue**, alongside simulated whale action from rich ledger NPCs on a "gambling" schedule phase, so the stock moves even when you're not at the tables. High-roller room gated by wealth tier/DRIP; whales can be cheated or robbed; the vault heist targets a fraction of the company's real `cash` and prints a negative earnings surprise the next quarter. Buy shares — or take the company over at >50% and the wealth.js "Royale Casino Floor" business becomes your controlling stake's local franchise.
+
+Phasing: (1) Bunbros alone with real revenue + read-only ticker → (2) exchange building + trading for one stock → (3) full roster + index + dividends → (4) billionaire persistence + assassination shocks → (5) casino wired to minigame + whales + heist → (6) insider trading/SEC/manipulation/shorts → (7) political hooks (war booms, nationalization, campaign funding).
+
+## VI.7 Modules & phasing
 
 `src/sim/econstate.js`, `market.js` (with the safe shim `CBZ.market.price(good)` → falls back to 1.0 so every migrated call site is safe on day one), `npcecon.js`, `econnews.js`, `policy.js` (the write-API politics calls). Persistence: `blob.econ` beside `blob.propMkt`. Phasing: (1) dynamic **food** prices + visible tags → (2) all 7 categories + shim everywhere + tickers → (3) NPC circulation & real vacancies → (4) business supply chains (companies.js stops being decoration) → (5) crime/war coupling → (6) unified black market → (7) political economy (election → prohibition → black-market boom → crime wave → next election runs on safety) → (8) multi-jurisdiction arbitrage as the trade endgame.
 
 ---
 
-# Part VII — Unified roadmap
+# Part VII — The SQLite + math backbone ("math and SQLite make the game smart")
 
-**Phase 0 (foundations, ~1-2 weeks):** Vite + bootstrap shim (II.2); `PRIO` bands + prop-type registry + contracts index (II.1); first OSS integration (grass) as the adapter proof.
+## VII.1 Why the current persistence cannot carry the plan
 
-**Phase 1 (two proofs, parallel):**
+The server holds the entire world as **one in-memory JSON object flushed to one file** (server.js:87-131); the hand-rolled WebSocket layer **kills any socket carrying a message over 1.5MB** (wsmini.js:8,54,100) — which is exactly why netpersist self-caps at 1.4MB and why the NPC ledger is LRU-capped at 600 entries (schedule.js:170, raised once already from 200 purely to fit the JSON budget). The math: 10,000 persistent people ≈ 2.8MB alone; +5,000 build pieces ≈ 1MB; +one exchange's price history ≈ 1.4MB → a full world is **5-8MB, 4-6× past the hard kill threshold**. The blob model fails the plan by construction.
+
+## VII.2 The architecture: one schema, two hosts
+
+**Server-side SQLite** (better-sqlite3 or node:sqlite — Node v22 is already running) becomes the authoritative world DB, replacing `server/worlds/<name>.json`; the debounced-flush pattern becomes debounced transaction commits. **Single-player runs the identical schema in-browser** via official sqlite-wasm + OPFS (localStorage fallback where OPFS is missing; one-time importer from the `CBZ_CITY_WORLD_V2` blob). Simulation logic (econ ticks, elections, the schedule fast-forward math) is written as plain JS functions over rows, callable from Node *and* the browser — **one simulation codebase, no SP/MP fork**. Legacy JSON blobs remain as import fallbacks, never deleted.
+
+**Authority shift:** macro systems (population registry, econ ticks, elections, wars, market) move from the elected browser-host to the Node server — they must stay consistent across host swaps, and should tick even with zero players online (today a host disconnect freezes the world). Micro sim (per-frame peds, physics, hitscan) stays in the browser exactly as now.
+
+## VII.3 The schema (core tables)
+
+`people` (the population registry — sid, name, archetype, job, employer→companies, home/work→properties, wallet, faction, alive, x/z + **chunk_x/chunk_z**), `person_transitions` (the "why they are where they are" history — every cop→former-cop flip is a row), `relationships` (the 5-axis records, person↔player and person↔person), `jurisdictions/offices/officeholders/elections/election_results`, `companies/company_financials/shares/holdings/price_history`, `econ_state` (per jurisdiction × tick × good), `cohorts`, `properties`, `player_structures/containers/container_items`, and `events` — **the town's queryable memory** (assassinations, wars, regime changes; today's activity log keeps 24 entries and discards the rest). Chunk-bucket indexes serve the hot spatial queries ("who is near (x,z) *right now*" — the V.0 coordinate model's engine); composite (entity, time) indexes feed every sparkline.
+
+## VII.4 Sync + the math
+
+**Interest management replaces whole-world blobs:** per client, the server streams only people/structures within chunk radius (generalizing the existing point-to-point relay primitive) — no message ever represents the whole world, so the 1.5MB frame limit stops mattering. **Write path:** client intents → server validates against DB state → one transaction → delta broadcast to interested clients (this is also where build-event anti-cheat validation from IV.4 lives). **Tick batching:** each hourly econ tick is one `BEGIN…COMMIT` bulk transaction.
+
+The math: **deterministic seeded ticks** — `(worldSeed, tick)` in, identical rows out (the codebase already bans Math.random in layout; extend the rule to simulation, making the world replayable/auditable from the events table). **Fixed-point integer cents** for all money (the current float accrual in schedule.js:261-264 drifts over a 10k-person multi-week world). **SQL aggregations replace O(n) JS scans**: `AVG(wallet) GROUP BY district` for cohort stats, `SUM(profit) per company per day` for earnings, `SUM(votes) GROUP BY candidate, district` for elections — the queries *are* the simulation's smart parts.
+
+## VII.5 Migration (each step shippable)
+
+(1) Server stores the existing blobs in SQLite rows, chunked — kills the 1.4MB cap with zero schema risk; (2) NPC ledger → `people` table, **LRU cap deleted**; (3) structures + containers tables (player building persists durably); (4) econ/market/political tables + server-side ticks (audit sim files for browser-coupling first); (5) single-player parity via sqlite-wasm + OPFS. Risks named: OPFS browser support (fallback path), porting sim modules to run DOM-free in Node, save-compat via the importers.
+
+# Part VIII — Unified roadmap
+
+**Phase 0 (foundations, ~1-2 weeks):** Vite + bootstrap shim (II.2); `PRIO` bands + prop-type registry + contracts index (II.1); first OSS integration (grass) as the adapter proof; SQLite blob storage on the server (VII.5 step 1 — kills the 1.4MB cap immediately); pieces.js/chunks.js skeleton + the three building spikes (IV.8 steps 1-2).
+
+**Phase 1 (proofs, parallel):**
 - *City track:* CityKit milestones 1-3 (III.4) — one componentized shop type, `registerRole`, one data table.
-- *Sim track:* Economy milestone 1-2 (VI.6) + Politics M1 (Mayor of Libertyville).
+- *Sim track:* Economy milestone 1-2 (VI.7) + Politics M1 (Mayor of Libertyville); `people` table replaces the NPC ledger cap (VII.5 step 2).
+- *Building track:* the walking skeleton (IV.8) — place, stack, stand on, demolish one wall type.
 
-**Phase 2 (the substrate):** CityKit 4-7 (seeded mainland, city registry, `generateCity(seed)`); player building core (Part IV) on the shared parcel/socket substrate; economy 3-4 (circulation + supply chains).
+**Phase 2 (the substrate):** CityKit 4-7 (seeded mainland, city registry, `generateCity(seed)`); core building system + crafting on the shared parcel/socket substrate; economy 3-4 (circulation + supply chains); structures/containers tables (VII.5 step 3); Bunbros + read-only ticker (VI.6 milestone 1).
 
-**Phase 3 (depth):** Politics M2-M4 (electorates, states, regimes); economy 5-6 (crime/war coupling, black market); building destruction/raiding + persistence.
+**Phase 3 (depth):** Politics M2-M4 (electorates, states, regimes); economy 5-6 (crime/war coupling, black market); building destruction/raiding + ownership/locks + persistence; exchange trading + full corporate roster + billionaires (VI.6 milestones 2-4); server-side authoritative ticks (VII.5 step 4).
 
-**Phase 4 (the payoff loops):** Coups/revolutions/war (M5-M6); political economy (VI.6 #7); player candidacy; infinite cities live; three.js palette re-tune if desired.
+**Phase 4 (the payoff loops):** Coups/revolutions/war (M5-M6); political economy (VI.7 #7); casino + insider trading + market manipulation (VI.6 milestones 5-6); player candidacy; infinite cities live; single-player SQLite parity (VII.5 step 5); three.js palette re-tune if desired.
 
 Sequencing rationale: Phase 0's conventions make every later feature a "1 new file + 1 registration" change instead of a 6-file splice; the city/building substrate must precede raiding and war fronts; the economy shim must precede political price levers; and every phase ships something a player feels that session.
