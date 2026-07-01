@@ -102,6 +102,23 @@
   }
   CBZ.qualityTopTier = topTier; // exposed so the settings panel can grey out / cap its slider
 
+  // ---- shadow-frustum info (for core/daynight.js's texel-snapped re-centering)
+  // The ortho frustum's world-space WIDTH changes at runtime (city/mode.js and
+  // modes/survival.js both widen it for their arenas), so this reads the LIVE
+  // camera rect rather than caching the boot-time value — texel size must track
+  // whatever frustum is actually active this frame. Returns a reused object
+  // (called once/frame from onAlways(2); no allocation churn).
+  const _shadowInfo = { width: 140, mapSize: 2048, texel: 140 / 2048 };
+  CBZ.shadowFrustumInfo = function () {
+    const cam = sun.shadow && sun.shadow.camera;
+    const width = cam ? (cam.right - cam.left) : _shadowInfo.width;
+    const mapSize = sun.shadow.mapSize.x || _shadowInfo.mapSize;
+    _shadowInfo.width = width;
+    _shadowInfo.mapSize = mapSize;
+    _shadowInfo.texel = width / mapSize;
+    return _shadowInfo;
+  };
+
   function applyQuality() {
     const q = QUALITY[qLevel];
     CBZ.qualityLevel = qLevel;

@@ -323,6 +323,108 @@
   }
   writeClouds(0);
 
+  /* ---------------- 5b. billboard cloud layer (Technique 1) ---------
+     mrdoob's classic clouds example merged a pile of plane meshes into
+     ONE static BufferGeometry with GeometryUtils.merge (deprecated/gone
+     in r128) so puffs the camera could fly past were still just flat
+     paper cutouts baked at world-fixed spots. We want the OPPOSITE of
+     world-fixed here: a thin high layer that always reads as "clouds
+     drifting overhead ahead of you" no matter which of the three worlds
+     (or how far you've walked in the city) you're in — so instead of a
+     merge we use ONE InstancedMesh (same draw-call win the merge was
+     going for, just the r128-idiomatic instanced form) of small soft-
+     edged billboard planes, RECYCLED AROUND THE CAMERA exactly like
+     weather.js's rain pool: a fixed-size ring of puffs seeded on a disc
+     around the player, each one silently re-seeded to a fresh spot once
+     it drifts far enough away that recycling it is invisible. That's
+     the only way a bounded instance count can cover unbounded player
+     travel across escape/survival/city without ever thinning out or
+     needing per-region authoring (the section above, which stays as-is
+     for the low "always visible in the distance" skyline puffs).
+     Texture: one shared runtime radial-gradient CanvasTexture (same
+     canvas-blob-of-alpha approach city/blobshadows.js uses for ground
+     contact shadows, just white-on-transparent instead of black) — no
+     asset dependency, one canvas, one texture, one material, one mesh. */
+  const BCLOUD_N = 26;              // pooled billboard count (small: this is a THIN high layer, not full overcast)
+  const BCLOUD_RADIUS = 340;        // disc radius around the camera puffs are scattered/recycled within
+  const BCLOUD_Y_MIN = 100, BCLOUD_Y_MAX = 150; // altitude band, above the box-puff clusters (72-92)
+  const BCLOUD_DRIFT = 1.1;         // units/sec — same order of magnitude as the box clusters' 0.8
+
+  function billboardCloudTex() {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 64;
+    const cx = cv.getContext("2d");
+    const grd = cx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grd.addColorStop(0, "rgba(255,255,255,0.85)");
+    grd.addColorStop(0.5, "rgba(255,255,255,0.4)");
+    grd.addColorStop(1, "rgba(255,255,255,0)");
+    cx.fillStyle = grd; cx.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(cv);
+  }
+
+  // seeded LCG (never Math.random — matches weather.js / every other
+  // system's determinism rule) so the puff layout is stable session to
+  // session instead of reshuffling on every reload.
+  let _bcSeed = 91771;
+  function bcRng() { _bcSeed = (_bcSeed * 1103515245 + 12345) & 0x7fffffff; return _bcSeed / 0x7fffffff; }
+
+  const bcTex = billboardCloudTex();
+  const bcMat = new THREE.MeshBasicMaterial({
+    map: bcTex, color: 0xffffff, transparent: true, depthWrite: false,
+    fog: true, side: THREE.DoubleSide,
+  });
+  const bcGeo = new THREE.PlaneGeometry(1, 1);
+  const bcInst = new THREE.InstancedMesh(bcGeo, bcMat, BCLOUD_N);
+  bcInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  bcInst.frustumCulled = false; // camera-relative pool — never off-screen-culled away wrongly
+  bcInst.renderOrder = -3;      // behind sun/moon/halo sprites, in front of the dome
+  scene.add(bcInst);            // world-space, NOT parented to the camera rig — mirrors rain's `scene.add`
+
+  // per-puff scratch (positions/scale only — no per-instance rotation
+  // state needed since ALL puffs share one camera-facing quaternion,
+  // written once per frame below, exactly like a billboard particle pool)
+  const bcPos = new Float32Array(BCLOUD_N * 3);
+  const bcScale = new Float32Array(BCLOUD_N);
+  function bcSeed(i, cx, cz, anywhere) {
+    const a = bcRng() * Math.PI * 2;
+    const r = (anywhere ? Math.sqrt(bcRng()) : (0.55 + bcRng() * 0.45)) * BCLOUD_RADIUS;
+    const o = i * 3;
+    bcPos[o] = cx + Math.cos(a) * r;
+    bcPos[o + 1] = BCLOUD_Y_MIN + bcRng() * (BCLOUD_Y_MAX - BCLOUD_Y_MIN);
+    bcPos[o + 2] = cz + Math.sin(a) * r;
+    bcScale[i] = 55 + bcRng() * 70;
+  }
+  (function seedAll() {
+    const cx = CBZ.camera.position.x, cz = CBZ.camera.position.z;
+    for (let i = 0; i < BCLOUD_N; i++) bcSeed(i, cx, cz, true);
+  })();
+
+  const _bcM = new THREE.Matrix4(), _bcP = new THREE.Vector3(), _bcS = new THREE.Vector3();
+  const _bcQ = new THREE.Quaternion();
+  const BCLOUD_R2 = (BCLOUD_RADIUS + 40) * (BCLOUD_RADIUS + 40); // recycle band (a little past the seed radius, like rain's r2 hysteresis)
+  function writeBillboardClouds(dt) {
+    const cx = CBZ.camera.position.x, cz = CBZ.camera.position.z;
+    _bcQ.copy(CBZ.camera.quaternion); // one shared billboard facing for every instance this frame
+    // gentle uniform drift (wind reads as "the whole layer creeping one way"
+    // rather than each puff wandering independently — cheap and looks right
+    // at this altitude/scale) + camera-relative recycling, same shape as
+    // weather.js's rain-drop recycle: past the ring → reseed "ahead of you".
+    const driftX = BCLOUD_DRIFT, driftZ = BCLOUD_DRIFT * 0.35;
+    for (let i = 0; i < BCLOUD_N; i++) {
+      const o = i * 3;
+      bcPos[o] += driftX * dt;
+      bcPos[o + 2] += driftZ * dt;
+      const dx = bcPos[o] - cx, dz = bcPos[o + 2] - cz;
+      if (dx * dx + dz * dz > BCLOUD_R2) bcSeed(i, cx, cz, false);
+      _bcP.set(bcPos[o], bcPos[o + 1], bcPos[o + 2]);
+      _bcS.setScalar(bcScale[i]);
+      _bcM.compose(_bcP, _bcQ, _bcS);
+      bcInst.setMatrixAt(i, _bcM);
+    }
+    bcInst.instanceMatrix.needsUpdate = true;
+  }
+  writeBillboardClouds(0);
+
   /* ---------------- per-frame sync ----------------------------------
      Runs at order 99 — AFTER daynight (@2), weather's fog lerp (@90),
      survival's env override (@93) and city's light override (@94) — so
@@ -416,5 +518,16 @@
     // dimmed and pushed toward the haze colour at night)
     writeClouds(dt);
     cloudMat.color.setScalar(0.35 + 0.65 * dayness).lerp(fog, 0.12 + night * 0.2 + duskness * 0.25);
+
+    // billboard cloud layer: same day/night/dusk tint recipe as the box-puff
+    // clusters above (one shared look, two techniques) plus a storm-darken
+    // pass so the high layer reads as "weather" too — feature-detected since
+    // weather.js loads AFTER this file in index.html and may not exist yet
+    // on the very first frames (or at all, in a stripped-down build).
+    writeBillboardClouds(dt);
+    const rainI = (CBZ.weather && typeof CBZ.weather.intensity === "number") ? CBZ.weather.intensity : 0;
+    bcMat.color.setScalar(0.35 + 0.65 * dayness).lerp(fog, 0.12 + night * 0.2 + duskness * 0.25);
+    bcMat.color.multiplyScalar(1 - rainI * 0.35); // storm clouds read darker/heavier, not just wetter streets
+    bcMat.opacity = 0.9 - rainI * 0.15; // slightly thins the soft edge in a downpour rather than solid overcast
   });
 })();

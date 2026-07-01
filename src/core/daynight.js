@@ -13,6 +13,20 @@
    was flattening that into one orange wash. The horizon seam is
    closed in sky.js at order 99, which repaints the dome's horizon
    stop to the FINAL scene.fog.color after every mode override.
+
+   SHADOW RE-CENTERING (texel-snapped): the fixed ortho shadow frustum
+   was parked at the world origin, so at city scale most of its shadow
+   texels were spent on empty ground far from wherever the player
+   actually is — the one place shadow resolution matters. Below we keep
+   the day-night cycle's sun angle/colour/timing math untouched and
+   ONLY translate the already-computed sun/target positions by the
+   player's x/z, snapped to a whole shadow-texel so the translation
+   itself can't sub-pixel-shimmer the shadow edges as the player moves
+   (the standard CSM "texel snapping" trick, applied to a single map).
+   city/mode.js (@94) and modes/survival.js (@93) run LATER in the frame
+   and still win for their own arenas — this is just the shared default
+   so any mode without its own override (or the player before a mode
+   claims the light) also gets a player-following, swim-free shadow.
 ============================================================ */
 (function () {
   "use strict";
@@ -37,6 +51,13 @@
   // reused scratch colours — this runs every frame, so don't allocate here
   const sunC = new THREE.Color(), fogC = new THREE.Color();
 
+  // last texel-snapped recenter offset actually applied — compared each frame
+  // so we only poke renderer.shadowMap.needsUpdate when the light truly moved
+  // by a full texel (a sub-texel wobble is invisible; flagging it anyway would
+  // just fight core/renderer.js's own tier-based update cadence for nothing).
+  let _snapX = 0, _snapZ = 0;
+  const sunTarget = CBZ.sunTarget;
+
   CBZ.onAlways(2, function (dt) {
     t = (t + dt / CYCLE) % 1;
 
@@ -44,6 +65,30 @@
     const ang = t * Math.PI * 2;
     CBZ.sunAngle = ang; // core/sky.js places the sun/moon discs from this
     sun.position.set(Math.cos(ang) * 80, Math.sin(ang) * 95, -10);
+    if (sunTarget) sunTarget.position.set(0, 0, 18);
+
+    // Re-center the frustum on the player (texel-snapped) instead of the
+    // world origin — same relative sun offset/angle above, just translated.
+    // Guarded: CBZ.player doesn't exist at boot/menu, and modes that run their
+    // own override later this frame (city @94, survival @93) simply redo this
+    // with their own focus point, so double-applying here is harmless.
+    const P = CBZ.player && CBZ.player.pos;
+    if (P && sunTarget) {
+      const info = CBZ.shadowFrustumInfo ? CBZ.shadowFrustumInfo() : null;
+      const texel = (info && info.texel > 0) ? info.texel : 0;
+      let ox = P.x, oz = P.z;
+      if (texel > 0) { ox = Math.floor(ox / texel) * texel; oz = Math.floor(oz / texel) * texel; }
+      sun.position.x += ox; sun.position.z += oz;
+      sunTarget.position.x += ox; sunTarget.position.z += oz;
+      // the light only visibly MOVED (by a full texel) if this offset changed
+      // since last frame — that's the one condition that actually needs a
+      // fresh shadow pass; renderer.js's stride throttle still gates the rest.
+      if (CBZ.renderer && (Math.abs(ox - _snapX) >= (texel || 0.001) || Math.abs(oz - _snapZ) >= (texel || 0.001))) {
+        CBZ.renderer.shadowMap.needsUpdate = true;
+      }
+      _snapX = ox; _snapZ = oz;
+    }
+
     const up = Math.sin(ang);                 // -1 night .. 1 noon
     const dayness = Math.max(0, up);          // 0 at/under horizon
     const duskness = Math.max(0, 1 - Math.abs(up) * 3); // glow near horizon

@@ -296,7 +296,7 @@
     const meshes = [];
     for (let v = 0; v < variantN; v++) {
       const list = buckets[v];
-      if (!list.length) continue;
+      if (!list.length) { if (geomVariants[v].dispose) geomVariants[v].dispose(); continue; }   // unused variant this call — free it
       const im = new THREE.InstancedMesh(geomVariants[v], material, list.length);
       im.castShadow = true; im.receiveShadow = true;
       im.frustumCulled = false;         // backdrop/scatter spans a wide area; never let it pop
