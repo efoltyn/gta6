@@ -401,27 +401,109 @@
     })();
 
     // ---- mountain CABIN + frozen-over OUTPOST ----------------------------
+    // NO-DECOY FIX: both landmarks used to be sealed doorless box() shells
+    // that only carried a name sign — a promise ("cabin"/"outpost" reads as
+    // "go inside") the geometry never paid off. Rebuilt on the SAME
+    // cityMakeBuilding + cityFurnishApartment pattern the lodge above already
+    // uses (real door/collider/interior), each single-storey with a real
+    // one-room interior, plus one small interaction matching its name: the
+    // cabin is a HUNTER'S rest/warm-up spot (fireplace glow, a stamina nudge),
+    // the outpost is a derelict LOOT CACHE (one-time cash grab, then empty).
     (function cabinAndOutpost() {
-      // a small log cabin tucked near the trees
-      const cx = 600, cz = -1600;
-      box(cx, 2, cz, 9, 4, 7, mTimber, true);
-      box(cx, 4.6, cz, 10.4, 1.6, 8.4, new THREE.MeshLambertMaterial({ color: COL.roofSnow }), false);
+      // ---- a small log cabin tucked near the trees — enterable, one room ----
+      const cx = 600, cz = -1600, cw = 9, cd = 7;
+      let cb = null;
+      if (CBZ.cityMakeBuilding) {
+        try {
+          cb = CBZ.cityMakeBuilding(root, cx, cz, cw, cd, 1, COL.timber, 0, { retail: true, glassKind: "clear", facade: "retail" });
+          if (cb && CBZ.cityFurnishApartment) CBZ.cityFurnishApartment(cb, 0, (cx | 0) + (cz | 0));
+        } catch (e) { cb = null; }   // never let a rejected opt sink the biome
+      }
+      if (!cb) box(cx, 2, cz, cw, 4, cd, mTimber, true);   // headless/no-buildings.js fallback: old sealed shell
+      box(cx, 4.6, cz, cw + 1.4, 1.6, cd + 1.4, new THREE.MeshLambertMaterial({ color: COL.roofSnow }), false);
       box(cx + 3, 5.4, cz - 2, 1, 2, 1, mTimberDk, false);  // chimney
       const cabL = new THREE.PointLight(0xffd9a0, 0.4, 14, 2);
       cabL.position.set(cx, 2.4, cz - 3.2); root.add(cabL);
       const g1 = new THREE.Group(); g1.position.set(cx, 6.6, cz); root.add(g1);
       tag(g1, "HUNTER'S CABIN", 0);
+      if (cb && city.lots) {
+        city.lots.push({ cx, cz, w: cw, d: cd, kind: "cabin", district: "snow",
+          building: Object.assign({}, cb, { name: "Hunter's Cabin",
+            door: { x: cx, z: cz - cd / 2 + 1.6, nx: 0, nz: 1 } }) });
+      }
+      // ---- REST/WARM-UP interaction: a small zone at the fireplace corner ----
+      // a hunter ducking out of the cold gets a small HP top-up (mirrors the
+      // hospital's healFull idiom in shops.js, just free + tiny + on a cooldown
+      // so it reads as "resting by a fire", not a full-heal battery).
+      if (CBZ.interactions && CBZ.interactions.registerZone) {
+        const warmSpot = { x: cx - cw / 2 + 1.5, z: cz - cd / 2 + 1.2, kind: "cabin-hearth" };
+        let nextWarmT = 0;
+        CBZ.interactions.registerZone({
+          id: "snow-cabin-hearth", kind: "cabin-hearth", radius: 3.2,
+          find: function (px, pz) {
+            const dx = warmSpot.x - px, dz = warmSpot.z - pz;
+            return (dx * dx + dz * dz) < 3.2 * 3.2 ? warmSpot : null;
+          },
+          options: [{
+            id: "cabin-warmup", slot: "e",
+            label: function () { return (CBZ.now || 0) < nextWarmT ? "Warming up (still cozy)" : "Warm up by the fire"; },
+            canShow: function () { return (CBZ.now || 0) >= nextWarmT; },
+            onSelect: function () {
+              nextWarmT = (CBZ.now || 0) + 120000;      // ~2 min cooldown — a rest, not a battery
+              const P = CBZ.player;
+              if (P && P.hp != null && P.maxHp) P.hp = Math.min(P.maxHp, P.hp + Math.round(P.maxHp * 0.08));
+              if (CBZ.sfx) CBZ.sfx("door");
+              CBZ.city.note("🔥 You warm up by the hearth — the cold eases off.", 2.2);
+            },
+          }],
+        });
+      }
 
-      // a derelict frozen-over outpost: a low concrete shell crusted in ice
-      const ox = 90, oz = -1640;
-      box(ox, 2.4, oz, 14, 4.8, 10, new THREE.MeshLambertMaterial({ color: COL.rockDark }), true);
+      // ---- a derelict frozen-over outpost: enterable concrete shell --------
+      const ox = 90, oz = -1640, ow = 14, od = 10;
+      let ob = null;
+      if (CBZ.cityMakeBuilding) {
+        try {
+          ob = CBZ.cityMakeBuilding(root, ox, oz, ow, od, 1, COL.rockDark, 0, { retail: true, facade: "office" });
+        } catch (e) { ob = null; }
+      }
+      if (!ob) box(ox, 2.4, oz, ow, 4.8, od, new THREE.MeshLambertMaterial({ color: COL.rockDark }), true);
       // ice crust on the roof
-      box(ox, 5.2, oz, 14.4, 0.6, 10.4, new THREE.MeshLambertMaterial({ color: COL.ice, transparent: true, opacity: 0.85 }), false);
+      box(ox, 5.2, oz, ow + 0.4, 0.6, od + 0.4, new THREE.MeshLambertMaterial({ color: COL.ice, transparent: true, opacity: 0.85 }), false);
       // a tilted broken radio mast
       const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 12, 5), mSteel);
       mast.position.set(ox + 4, 8, oz + 2); mast.rotation.z = 0.22; mast.castShadow = true; root.add(mast);
       const g2 = new THREE.Group(); g2.position.set(ox, 7.2, oz); root.add(g2);
       tag(g2, "FROZEN OUTPOST", 0);
+      if (ob && city.lots) {
+        city.lots.push({ cx: ox, cz: oz, w: ow, d: od, kind: "outpost", district: "snow",
+          building: Object.assign({}, ob, { name: "Frozen Outpost",
+            door: { x: ox, z: oz - od / 2 + 1.6, nx: 0, nz: 1 } }) });
+      }
+      // ---- LOOT CACHE interaction: a one-time cash grab in the abandoned shell ----
+      if (CBZ.interactions && CBZ.interactions.registerZone) {
+        const cacheSpot = { x: ox, z: oz + od / 2 - 2.2, kind: "outpost-cache" };
+        let looted = false;
+        CBZ.interactions.registerZone({
+          id: "snow-outpost-cache", kind: "outpost-cache", radius: 3.0,
+          find: function (px, pz) {
+            if (looted) return null;
+            const dx = cacheSpot.x - px, dz = cacheSpot.z - pz;
+            return (dx * dx + dz * dz) < 3.0 * 3.0 ? cacheSpot : null;
+          },
+          options: [{
+            id: "outpost-loot", slot: "e", label: "Search the abandoned supply crate",
+            onSelect: function () {
+              if (looted) return;
+              looted = true;
+              const take = 60 + (((cx * 7 + oz * 13) & 0x3f));   // deterministic small payout, no Math.random
+              if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(take);
+              if (CBZ.sfx) CBZ.sfx("coin");
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("🎒 Frozen supply crate — found $" + take + ". Picked clean now.", 2.4);
+            },
+          }],
+        });
+      }
     })();
 
     // ---- CHAIRLIFT line up a slope (towers + cable + moving chairs) ------

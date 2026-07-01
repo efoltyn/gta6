@@ -81,6 +81,36 @@
     pedLethal: 14, npcDriverLethal: 30,
   };
 
+  // ---- MARINE (boat) HANDLING — NO-DECOY FIX -------------------------------
+  // playercars.js's FEEL table already tags style "boat" with `marine:true`,
+  // but nothing downstream ever branched on it: a player who cycled into the
+  // boat visual was still driving ordinary road physics wearing a hull mesh.
+  // This is the minimal real branch: (a) a boat drifting over open water
+  // skips the building/seawall wall-resolver + clampToCity — a hull nosing
+  // out of the harbor toward the sea shouldn't crunch on the same knee-wall
+  // collider that stops a pedestrian at the quay; (b) it rides at a fixed
+  // near-water Y instead of the flat car y=0 (this engine has no terrain-
+  // following suspension at all — every car sits at y=0 — so "float" here
+  // just means "don't sit at the car height"); (c) slower/wider turning, tuned
+  // in carDynamics below. No buoyancy sim — the bar is "reads like a boat,
+  // not a car", not physical accuracy. WATER_Y is a shade above swim.js's
+  // SURF_Y (-0.38, a half-submerged SWIMMER's chest height) since a boat
+  // rides ON the surface, not in it.
+  const WATER_Y = -0.12;
+  // true iff this car's CURRENT handling class is the boat one — checks the
+  // live playercars.js feel hook first (style-cycler can change it mid-drive)
+  // and falls back to the model's own body so a freshly-entered boat (before
+  // cityPromotePlayerCar has run) still reads as marine.
+  function isMarineCar(car) {
+    if (!car) return false;
+    const feel = car._playerCarFeel;
+    if (feel) return !!feel.marine;
+    return !!(car.model && car.model.body === "boat");
+  }
+  // feature-detected: swim.js exposes "is this point open water" (used for the
+  // player's own swim state); reuse it here instead of re-deriving shorelines.
+  function overWater(x, z) { return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)); }
+
   // ---- RUN-OVER JUICE ------------------------------------------------------
   // A lethal run-over currently fires shake + a speed-bleed but — unlike a melee
   // land() (combat.js) — NO hit-stop and NO bass impact, so a kill at speed reads
@@ -1603,6 +1633,13 @@
       accel *= feel.accel; top *= feel.top; turn *= feel.turn; grip *= feel.grip; brake *= feel.brake;
       roll = feel.roll == null ? 0.6 : feel.roll; drift = feel.drift == null ? 1.0 : feel.drift;
       if (feel.twoWheel) roll = 0;   // a bike leans via its own rider rig, not whole-body roll
+      // MARINE: a hull doesn't carve like a car — it comes around SLOW and WIDE.
+      // FEEL.boat's turn:1.0 is a straight sedan-rate multiplier (playercars.js
+      // never branches on `marine` itself — that's this fix), so cut the yaw
+      // rate + widen the effective turning circle here instead of in the FEEL
+      // table: a long, low steerLock means holding full rudder still sweeps a
+      // big arc rather than snapping the bow around like a wheeled steer lock.
+      if (feel.marine) { turn *= 0.5; steerLock *= 0.55; wheelbase *= 1.6; }
     } else {
       if (bk === "coupe") { roll = 0.4; drift = 0.9; }
       else if (bk === "muscle") { roll = 0.7; drift = 1.35; }
@@ -1734,6 +1771,13 @@
   }
   function collideVehicle(car) {
     if (!CBZ.collide || !car || !car.pos) return 0;
+    // MARINE: a boat out on open water has no buildings/seawall to bump — skip
+    // the road-car wall resolver entirely so it can nose past the harbor's
+    // knee-wall collider (height-gated for a JUMPING pedestrian, not a boat
+    // hull sitting at y=0) instead of crunching to a stop at the dock like it
+    // hit a building. Still resolves normally over land (a beached/marooned
+    // boat, or the moment it noses back toward the quay, behaves like any car).
+    if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) return 0;
     const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
     CBZ.collide(car.pos, radius);
     const d = vehicleDims(car);
@@ -2041,8 +2085,16 @@
         if (P.dead) return;                  // death.js ejects + ragdolls the driver
       }
     }
-    if (CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
-    car.group.position.set(car.pos.x, 0, car.pos.z);
+    // MARINE: skip the mainland-bounds clamp while out on open water (it would
+    // otherwise yank a boat leaving the harbor straight back onto the quay —
+    // the same clamp a pedestrian/road car needs to never sail off the map
+    // edge doesn't apply to something that's SUPPOSED to be out past it), and
+    // ride at the water surface instead of the flat car-height y=0 (this
+    // engine has no terrain-following suspension — every car sits at y=0 — so
+    // this is the one place a vehicle's Y ever moves off it).
+    const marine = isMarineCar(car) && overWater(car.pos.x, car.pos.z);
+    if (!marine && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
+    car.group.position.set(car.pos.x, marine ? WATER_Y : 0, car.pos.z);
     car.group.rotation.set(car._pitch || 0, car.heading, car._roll || 0);   // y=heading, x/z = weight-transfer lean
     if (vmag > 6) runOver(car, vmag);
     P.pos.set(car.pos.x, 0, car.pos.z);

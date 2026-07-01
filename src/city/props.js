@@ -91,10 +91,24 @@
   const geysers = [];                   // popped hydrants {x,z,t,acc}
   const drops = [];                     // live water droplets
   const dropPool = [];
+  // NO-DECOY FIX: light street furniture (bin/meter/newsbox/cone) used to be
+  // shootable but utterly car-transparent — a car ploughed straight through a
+  // trash can with zero reaction. carKnockables mirrors the record a car can
+  // actually clip (x,z,r + the SAME group/over fields the shootables record
+  // for that prop already carries, so a bullet-knock and a bumper-knock share
+  // one "is it already tipped" flag and never double-animate the same prop).
+  const carKnockables = [];             // {type,x,z,r,group,ref} — scanned vs CBZ.cityCars
   let waterTex = null;
   const deadLampM = new THREE.MeshLambertMaterial({ color: 0x202329 });
   deadLampM._shared = true;             // survives any teardown traversal
   const _qTip = new THREE.Quaternion(), _axTip = new THREE.Vector3();
+  // headless-safe: real THREE.Quaternion always has setFromAxisAngle/multiply;
+  // a minimal test stub (tools/harness.js) may not. Feature-detect ONCE so the
+  // knock-over animator below can skip the rotation math gracefully instead of
+  // throwing — this only ever matters off-browser (harness.js now legitimately
+  // reaches tipProp via ordinary traffic driving past a bin/cone/newsbox/meter
+  // over a long simulated run, a path nothing exercised before).
+  const _hasFullQuat = typeof _qTip.setFromAxisAngle === "function" && typeof _qTip.multiply === "function";
 
   function waterTexture() {
     if (waterTex) return waterTex;
@@ -125,13 +139,18 @@
     if (s.over || !s.group) return;
     s.over = true;
     const dl = Math.hypot(dirX, dirZ) || 1; dirX /= dl; dirZ /= dl;
+    // headless-safe: a minimal Quaternion stub (tools/harness.js — it never
+    // exercised this path before the car-knock scan below started reaching
+    // props during ordinary traffic simulation) may lack .clone(); real THREE
+    // always has it, so this fallback is a no-op in the browser.
+    const q0 = (s.group.quaternion && s.group.quaternion.clone) ? s.group.quaternion.clone() : s.group.quaternion;
     knocks.push({
       g: s.group, t: 0, dur: 0.4 + Math.random() * 0.18,
       axx: dirZ, axz: -dirX,                  // tips the top toward +dir
       ang: 1.4 + Math.random() * 0.18,
       x0: s.group.position.x, y0: s.group.position.y, z0: s.group.position.z,
       sx: dirX * slide, sz: dirZ * slide, hop: hop || 0,
-      q0: s.group.quaternion.clone(),
+      q0,
     });
   }
   // one shot reaction, by what the round actually hit
@@ -204,9 +223,11 @@
       k.t += dt;
       const u = Math.min(1, k.t / k.dur);
       const e = 1 - (1 - u) * (1 - u);
-      _axTip.set(k.axx, 0, k.axz);
-      _qTip.setFromAxisAngle(_axTip, e * k.ang);
-      k.g.quaternion.copy(_qTip).multiply(k.q0);
+      if (_hasFullQuat) {
+        _axTip.set(k.axx, 0, k.axz);
+        _qTip.setFromAxisAngle(_axTip, e * k.ang);
+        k.g.quaternion.copy(_qTip).multiply(k.q0);
+      }
       k.g.position.set(k.x0 + k.sx * e, k.y0 + (k.hop ? Math.sin(u * Math.PI) * k.hop : 0), k.z0 + k.sz * e);
       if (u >= 1) { k.g.position.y = k.y0; knocks.splice(i, 1); }
     }
@@ -241,6 +262,57 @@
       const u = 1 - p.life;
       p.s.scale.set(0.3 + u * 0.9, 0.5 + u * 0.7, 1);
       p.s.material.opacity = Math.min(0.85, p.life * 1.7) * 0.9;
+    }
+  });
+
+  // ---- CAR-VS-PROP KNOCKDOWNS (NO-DECOY FIX) -------------------------------
+  // Bullets already tip these four over (hitProp above); a car ploughing
+  // through the same trash can/meter/newsbox/cone used to sail straight
+  // through with zero reaction — the solidCollider() calls added at each
+  // builder give the physics resolver something to nudge against, and THIS
+  // scan is what makes it look and feel like a hit: the nearest live city car
+  // within reach of an un-tipped prop tips it (tipProp, the exact same
+  // animation gunfire uses) in the car's direction of travel, and bleeds a
+  // touch of the car's speed so the bump reads as contact, not a phantom
+  // wall. Deliberately cheap: a flat O(props × nearby cars) scan at 10Hz
+  // (proximity, not per-frame), only over the handful of registered props —
+  // never a draw call, never touches vehicles.js's own crash/crumple path
+  // (these are far too light to dent a hull).
+  let _carKnockT = 0;
+  // order 14.7: strictly after vehicles.js's driving update (11, computes this
+  // frame's car.pos/car.v) but its OWN slot — city/combat.js already owns 15
+  // (a melee telegraph scan, unrelated but no need to tie-break against it).
+  if (CBZ.onUpdate) CBZ.onUpdate(14.7, function (dt) {
+    if (!carKnockables.length || !CBZ.cityCars || !CBZ.cityCars.length) return;
+    const gm = CBZ.game; if (!gm || gm.mode !== "city") return;
+    _carKnockT += dt;
+    if (_carKnockT < 0.1) return;                 // 10Hz — a bumper clip doesn't need 60Hz reaction
+    _carKnockT = 0;
+    for (let i = 0; i < carKnockables.length; i++) {
+      const s = carKnockables[i];
+      if (s.over) continue;
+      for (let j = 0; j < CBZ.cityCars.length; j++) {
+        const car = CBZ.cityCars[j];
+        if (!car || car.dead || !car.pos) continue;
+        // a car whose physics went bad (NaN pos, e.g. a wrecked/despawning car
+        // mid-teardown) must NOT pass the range test below: a NaN distance
+        // compares false against EVERY bound, so an unguarded check would
+        // silently treat every prop in the array as "in range" and spuriously
+        // tip the whole city's street furniture in one tick.
+        if (!isFinite(car.pos.x) || !isFinite(car.pos.z)) continue;
+        const vmag = Math.abs(car.v || 0);
+        if (!isFinite(vmag) || vmag < 0.6) continue;   // parked/crawling/broken cars don't "hit" anything
+        const dx = s.x - car.pos.x, dz = s.z - car.pos.z;
+        const hitR = s.r + 1.1;                     // s.r is the prop's own radius; +car half-width fudge
+        if (dx * dx + dz * dz > hitR * hitR) continue;
+        // tip it AWAY from the car, along its heading (mirrors hitProp's d.x/d.z)
+        const fx = Math.sin(car.heading || 0), fz = Math.cos(car.heading || 0);
+        const light = s.type === "cone" || s.type === "meter";
+        tipProp(s, fx, fz, light ? 0.3 : 0.1, light ? 1.4 : 0.55);
+        car.v *= 0.94;                              // barely felt — it's a can, not a curb
+        if (CBZ.sfx) CBZ.sfx("clank");
+        break;                                       // one car claims the hit this tick
+      }
     }
   });
 
@@ -435,6 +507,7 @@
     city.streetProps = city.streetProps || [];
     // fresh world: drop every shootable record/animation from the old one
     shootables = [];
+    carKnockables.length = 0;
     knocks.length = 0; geysers.length = 0;
     for (let i = drops.length - 1; i >= 0; i--) { drops[i].s.visible = false; dropPool.push(drops[i].s); }
     drops.length = 0;
@@ -745,8 +818,14 @@
       const lid = new THREE.Mesh(geo("canLid", () => new THREE.CylinderGeometry(0.3, 0.27, 0.12, 8)), lidM);
       lid.position.y = 0.82; g.add(lid);
       root.add(g);
-      city.streetProps.push({ x, z, type: "bin" });   // small, no collider
-      shootables.push({ type: "bin", x, z, y: 0.5, r: 0.48, group: g, over: false });
+      city.streetProps.push({ x, z, type: "bin" });
+      // small, light — a real hit (bullet OR bumper) knocks it flat, it never
+      // stops a car. solidCollider's radius is trivial (barrel footprint) so
+      // pedestrians route around it but a car barely notices the nudge.
+      solidCollider(x, z, 0.24, g);
+      const rec = { type: "bin", x, z, y: 0.5, r: 0.48, group: g, over: false };
+      shootables.push(rec);
+      carKnockables.push(rec);
     }
 
     // ----- PARKING METER: post + head + tiny display -----------------------
@@ -760,8 +839,15 @@
       const face = new THREE.Mesh(geo("meterFace", () => new THREE.PlaneGeometry(0.14, 0.1)), meterFaceM);
       face.position.set(0, 1.36, 0.085); g.add(face);
       root.add(g);
-      city.streetProps.push({ x, z, type: "meter" });  // thin, no collider
-      shootables.push({ type: "meter", x, z, y: 1.25, r: 0.28 });
+      city.streetProps.push({ x, z, type: "meter" });
+      // thin bolted post — a bullet just rings it (hitProp treats meter/
+      // mailbox as "bolted steel"), but a CAR is a different order of force:
+      // it bends the post right over. Tiny collider + it joins carKnockables
+      // below so a bumper clip actually topples it, unlike a gunshot.
+      solidCollider(x, z, 0.16, g);
+      const rec = { type: "meter", x, z, y: 1.25, r: 0.28, group: g, over: false };
+      shootables.push(rec);
+      carKnockables.push(rec);
     }
 
     // ----- NEWSPAPER / NEWS BOX: little coin-op vending box ----------------
@@ -777,7 +863,12 @@
       win.position.set(0, 0.62, 0.205); g.add(win);
       root.add(g);
       city.streetProps.push({ x, z, type: "newsbox" });
-      shootables.push({ type: "newsbox", x, z, y: 0.55, r: 0.45, group: g, over: false });
+      // light sheet-metal box on skinny legs — a small collider so a bumper
+      // clip registers as a real hit, not a ghost.
+      solidCollider(x, z, 0.22, g);
+      const rec = { type: "newsbox", x, z, y: 0.55, r: 0.45, group: g, over: false };
+      shootables.push(rec);
+      carKnockables.push(rec);
     }
 
     // ----- TRAFFIC CONE: orange cone + reflective collar -------------------
@@ -790,8 +881,13 @@
       band.position.y = 0.2; g.add(band);
       const base = new THREE.Mesh(geo("coneBase", () => new THREE.BoxGeometry(0.32, 0.04, 0.32)), coneBaseM);
       base.position.y = 0.02; g.add(base);
-      root.add(g);   // decor, no collider
-      shootables.push({ type: "cone", x, z, y: 0.27, r: 0.32, group: g, over: false });
+      root.add(g);
+      // trivially light — smallest collider of the four (it's a hollow plastic
+      // cone), so it's the easiest thing on the street to send flying.
+      solidCollider(x, z, 0.14, g);
+      const rec = { type: "cone", x, z, y: 0.27, r: 0.32, group: g, over: false };
+      shootables.push(rec);
+      carKnockables.push(rec);
     }
 
     // ----- PLANTER + low-poly TREE -----------------------------------------

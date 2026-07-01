@@ -545,8 +545,18 @@
     }
 
     // ================================================================
-    //  LANDMARK: LOOKOUT TOWER — four legs + a cabin on top + ladder feel.
-    //  A vista landmark; gets a collider so you can't walk through the legs.
+    //  LANDMARK: LOOKOUT TOWER — four legs + a cabin on top + a REAL climb.
+    //  A vista landmark. NO-DECOY FIX: this used to be pure decoration (a
+    //  small ground-level collider only) despite its own header comment
+    //  calling it "a vista landmark" — nothing let you actually reach the
+    //  deck. Fixed with the SAME z-axis ramp-platform rig city buildings use
+    //  for stairs (city/buildings.js / city/elevators.js: CBZ.platforms
+    //  ramp records interpolate height along Z only — see systems/physics.js
+    //  groundAt — so every flight below runs along Z, switching back on a
+    //  mid-landing, exactly like the proven fire-escape rig). The deck itself
+    //  is ALSO a registered platform (a real standable surface, not a
+    //  decorative box), and a lookout/vista interaction fires once you're up
+    //  there — the payoff the header comment promised.
     // ================================================================
     const twX = -460, twZ = -1560, twH = 14;
     const towerWoodA = mat(0x7a5d38), towerWoodB = mat(0x4a3a22);
@@ -557,6 +567,7 @@
       leg.castShadow = true; root.add(leg);
     });
     // deck
+    const deckHalf = 4.25;
     const deck = new THREE.Mesh(CBZ.boxGeom(8.5, 0.4, 8.5), towerWoodB);
     deck.position.set(twX, twH, twZ); deck.castShadow = true; deck.receiveShadow = true; root.add(deck);
     // cabin shell on top (open-front lookout)
@@ -568,6 +579,76 @@
     if (CBZ.makeLabelSprite) {
       const ts = CBZ.makeLabelSprite("FIRE LOOKOUT");
       ts.position.set(twX, twH + 7, twZ); ts.scale.set(9, 2.2, 1); root.add(ts);
+    }
+
+    // ---- THE CLIMB: a switchback staircase up the +x face (clear of the
+    // legs at ±3), two flights around a mid-landing, exactly the elevators.js
+    // fire-escape idiom (tilted stringer slab + rail visual, CBZ.platforms
+    // ramp records for the actual walk-surface). CBZ.platforms only exists
+    // once city/buildings.js has loaded (it inits the array) — guard so a
+    // headless/stripped build never throws.
+    if (CBZ.platforms) {
+      const railMat = mat(0x2c333d);
+      const stairX0 = twX + deckHalf - 0.05, stairX1 = twX + deckHalf + 1.15;   // stringer strip, just past the deck edge
+      const stairXC = (stairX0 + stairX1) / 2;
+      const zA = twZ - 6.5, zB = twZ + 6.5, LD = 1.0;      // flight run bounds + landing depth (~35° slope, matches elevators.js's fire-escape feel)
+      const midY = twH / 2;                                 // mid-landing height (half the climb)
+      function flight(zStart, zEnd, y0, y1) {
+        const dir = zEnd > zStart ? 1 : -1;
+        const rampEnd = zEnd - dir * LD;
+        CBZ.platforms.push({
+          minX: stairX0, maxX: stairX1,
+          minZ: Math.min(zStart, rampEnd), maxZ: Math.max(zStart, rampEnd),
+          top: y1, ramp: { z0: zStart, z1: rampEnd, y0, y1 },
+        });
+        // flat landing nosing at the top of this flight
+        CBZ.platforms.push({
+          minX: stairX0, maxX: stairX1,
+          minZ: Math.min(rampEnd, zEnd), maxZ: Math.max(rampEnd, zEnd), top: y1,
+        });
+        // visual: one tilted stringer slab (mesh-count bound — no per-tread boxes)
+        const run = Math.abs(rampEnd - zStart), rise = y1 - y0;
+        const hyp = Math.hypot(run, rise), tilt = -dir * Math.atan2(rise, run);
+        const slab = new THREE.Mesh(CBZ.boxGeom(1.2, 0.1, hyp), towerWoodB);
+        slab.position.set(stairXC, (y0 + y1) / 2 - 0.05, (zStart + rampEnd) / 2);
+        slab.rotation.x = tilt; slab.castShadow = true; root.add(slab);
+        const rail = new THREE.Mesh(CBZ.boxGeom(0.07, 0.9, hyp), railMat);
+        rail.position.set(stairX1 + 0.03, (y0 + y1) / 2 + 0.4, (zStart + rampEnd) / 2);
+        rail.rotation.x = tilt; root.add(rail);
+      }
+      // flight 1: ground -> mid-landing (rising +z), flight 2: mid-landing -> deck (rising -z)
+      flight(zA, zB, 0, midY);
+      flight(zB, zA, midY, twH);
+      // mid-landing platform (small square where the flights meet)
+      CBZ.platforms.push({ minX: stairX0, maxX: stairX1, minZ: zB - LD, maxZ: zB + LD, top: midY });
+      // guard rail colliders on the outer stringer edge, y-gated above 1.6m so
+      // ground-level foot traffic never snags on them (mirrors elevators.js's
+      // y-gated fall-guard rail).
+      CBZ.colliders.push({ minX: stairX1 - 0.05, maxX: stairX1 + 0.12, minZ: zA - LD, maxZ: zB + LD, y0: 1.6, y1: twH + 1.0 });
+      // THE DECK is a real standable platform (was purely decorative before —
+      // groundAt() never saw it, so the box was a visual lie). Registered flat
+      // (no ramp) at the deck's walking height.
+      CBZ.platforms.push({ minX: twX - deckHalf, maxX: twX + deckHalf, minZ: twZ - deckHalf, maxZ: twZ + deckHalf, top: twH + 0.2 });
+
+      // ---- VISTA interaction: a simple lookout payoff once you're up top ----
+      if (CBZ.interactions && CBZ.interactions.registerZone) {
+        const vistaSpot = { x: twX, z: twZ, kind: "lookout-vista" };
+        CBZ.interactions.registerZone({
+          id: "forest-lookout-vista", kind: "lookout-vista", radius: deckHalf + 0.5,
+          find: function (px, pz) {
+            const P = CBZ.player;
+            if (!P || P.pos.y < twH - 1.0) return null;        // only up on the deck, not from the ground below
+            const dx = vistaSpot.x - px, dz = vistaSpot.z - pz;
+            return (dx * dx + dz * dz) < (deckHalf + 0.5) * (deckHalf + 0.5) ? vistaSpot : null;
+          },
+          options: [{
+            id: "lookout-scan", slot: "e", label: "Scan the treeline",
+            onSelect: function () {
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("🔭 From up here the whole of Redhollow Woods spreads out below.", 2.6);
+            },
+          }],
+        });
+      }
     }
 
     // ================================================================

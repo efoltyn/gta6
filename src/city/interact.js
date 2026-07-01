@@ -29,6 +29,26 @@
   function dist(a, x, z) { return Math.hypot(a.pos.x - x, a.pos.z - z); }
   function nearest(list, x, z, test) { let best = null, bd = REACH; for (const p of list) { if (!test(p)) continue; const d = dist(p, x, z); if (d < bd) { bd = d; best = p; } } return best; }
 
+  // NO-DECOY FIX: a nearest-finder over city.streetProps (city/props.js's flat
+  // registry of every street prop: bins, meters, newsboxes, cones, lamps…),
+  // filtered by TYPE — the exact idiom cityNearestCar/cityNearestStash/
+  // cityNearestCorpse already use, just scanning a plain {x,z,type} array
+  // instead of an entity list (these records have no .pos, so this can't
+  // reuse dist()/nearest() above as-is). types is an array of type strings
+  // ("bin","newsbox",…); pass null/omit to match ANY street prop.
+  CBZ.cityNearestStreetProp = function (px, pz, maxd, types) {
+    const list = CBZ.city && CBZ.city.streetProps;
+    if (!list || !list.length) return null;
+    let best = null, bd = (maxd || REACH) * (maxd || REACH);
+    for (let i = 0; i < list.length; i++) {
+      const sp = list[i];
+      if (types && types.indexOf(sp.type) < 0) continue;
+      const dx = sp.x - px, dz = sp.z - pz, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = sp; }
+    }
+    return best;
+  };
+
   // the ped you're "pointing your gun at": in the forward cone, close-ish
   function aimedPed(px, pz) {
     const y = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(y), fz = -Math.cos(y);
@@ -317,6 +337,47 @@
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city.addRespect(1);
     } else { p.alarmed = 6; CBZ.cityAlarm(p.pos.x, p.pos.z, 12, 0.6, CBZ.city.playerActor); CBZ.cityCrime && CBZ.cityCrime(30, { x: p.pos.x, z: p.pos.z, type: "theft" }); CBZ.city.note(p.name + " caught you!", 1.6); }
+  }
+  // ---- SEARCH A STREET PROP (bin / newsbox): a small, bounded chance the
+  // player finds a few loose bucks or a scrap item inside. Modest by design —
+  // this is a trash can, not a mark's wallet — and BOUNDED per-prop like
+  // demandRansom's wallet: a prop that just paid out goes quiet for a real
+  // stretch so it can't be spammed into a faucet. Uses CBZ.cityEcon.rng()
+  // (the shared city RNG other new city files route through) with a
+  // Math.random() fallback if econ isn't loaded — same idiom as gigfleet.js /
+  // empire.js / wealth.js's own `rng()` helpers.
+  function propRng() { return (CBZ.cityEcon && CBZ.cityEcon.rng) ? CBZ.cityEcon.rng() : Math.random(); }
+  // CBZ.now is a requestAnimationFrame timestamp — MILLISECONDS (see
+  // core/loop.js: CBZ.now = t), same unit demandRansom's _shakeT bookkeeping
+  // above already assumes (sinceLast > 90000). Cooldown expressed to match.
+  const SEARCH_COOLDOWN_MS = 90000;   // 90s before the same can/box is worth checking again
+  function searchStreetProp(sp) {
+    const now = (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0);
+    if ((sp._searchT || 0) > now) { CBZ.city.note("Already picked through — nothing new.", 1.6); return; }
+    sp._searchT = now + SEARCH_COOLDOWN_MS;
+    const r = propRng();
+    if (r < 0.55) {
+      CBZ.city.note("Nothing but trash.", 1.4);
+      return;
+    }
+    if (r < 0.9) {
+      const cash = 3 + ((propRng() * 12) | 0);
+      CBZ.city.addCash(cash);
+      if (CBZ.sfx) CBZ.sfx("coin");
+      CBZ.city.note("Found $" + cash + " someone tossed.", 1.8);
+      return;
+    }
+    // rare: a usable scrap item, if the econ catalog is loaded
+    const econ = CBZ.cityEcon;
+    if (econ && econ.add && econ.ITEMS && econ.ITEMS["Hotdog"]) {
+      econ.add("Hotdog", 1);
+      CBZ.city.note("Found a half-eaten Hotdog — still wrapped.", 1.8);
+      return;
+    }
+    const cash = 15 + ((propRng() * 20) | 0);
+    CBZ.city.addCash(cash);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    CBZ.city.note("Jackpot — someone dumped $" + cash + " in there.", 2);
   }
   function robRegister(v) {
     const ped = v;
@@ -612,6 +673,21 @@
     find: function (px, pz) { return CBZ.cityNearestStash ? CBZ.cityNearestStash(px, pz, REACH) : null; },
     options: [{ id: "stash-rob", slot: "i", bad: true, label: "Rob stash", onSelect: function (lot) { CBZ.cityRobStash(lot); } }],
   });
+  // NO-DECOY FIX: street furniture used to be pure decoration (or gunfire-only —
+  // see props.js's shootables). Trash cans and news boxes are exactly the kind
+  // of prop a street would let you rummage through — a low-prio, low-reward
+  // "Check it" that occasionally pays a few bucks. One zone registration covers
+  // BOTH prop types city-wide (cityNearestStreetProp filters by type), not a
+  // per-instance option — the category-wide ask from the task.
+  I.registerZone({
+    id: "zone-streetprop", kind: "streetprop", prio: 2, driving: false,
+    find: function (px, pz) { return CBZ.cityNearestStreetProp ? CBZ.cityNearestStreetProp(px, pz, REACH, ["bin", "newsbox"]) : null; },
+    options: [{
+      id: "streetprop-search", slot: "i",
+      label: function (sp) { return sp.type === "newsbox" ? "Check the news box" : "Check the trash can"; },
+      onSelect: function (sp) { searchStreetProp(sp); },
+    }],
+  });
 
   // ================== DESCRIBERS: the card header per kind ==================
   I.describe("ped", function (p) {
@@ -644,6 +720,12 @@
   });
   I.describe("club", function (t) { return { label: "🪩 " + ((t.club && t.club.name) || "The Velvet Club"), note: clubNote() }; });
   I.describe("stash", function (lot) { return { label: "🎒 Gang Stash", note: ((lot.building && lot.building.gang) || "gang") + " cache" }; });
+  I.describe("streetprop", function (sp) {
+    const isBox = sp.type === "newsbox";
+    const now = (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0);
+    const picked = (sp._searchT || 0) > now;
+    return { label: (isBox ? "📰 News box" : "🗑 Trash can"), note: picked ? "Picked through recently" : "Might be worth a look" };
+  });
   I.describe("gig", function (t) {
     const a = (t && t.gig) || gigActive();
     const k = a ? String(a.kind || a.line || "gig") : "gig";

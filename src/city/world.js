@@ -798,6 +798,47 @@
       }
     }
 
+    // ---- NO-DECOY FIX: the harbor's moored hulls used to be dead THREE.Mesh
+    //      boxes — no collider, no cityCars entry, no [E] prompt: a boat you
+    //      could see but never reach, the classic "decoy" prop. The 3 EAST
+    //      HARBOR hulls (the ones you actually pass close to, crossing the
+    //      bridge) are now REAL vehicles.js cars: recorded here as spawn
+    //      spots, then handed to cityMakeCar with economy.js's "Speedboat"
+    //      model once vehicles.js exists — same pipeline expansion.js uses for
+    //      the island's parked cars (spawnCityTraffic clears cityCars on every
+    //      run, so re-fire this hook right after it, or the harbor goes empty
+    //      after the first respawn). They get playercars.js's real makeBoat()
+    //      visual (via cityInferCarStyle reading detailStyle:"boat") and are
+    //      enterable through the exact same cityEnterVehicle every car uses.
+    //      The other coast hulls (west/south/north) stay pure decor — the
+    //      task only asks for 2-3 real ones, and this keeps the draw-call/
+    //      cityCars-array cost of the change minimal. ----
+    const _harborBoatSpots = [];
+    let _harborHookWrapped = false;
+    function wrapHarborBoatSpawn() {
+      if (_harborHookWrapped || !CBZ.spawnCityTraffic) return;
+      _harborHookWrapped = true;
+      const orig = CBZ.spawnCityTraffic;
+      CBZ.spawnCityTraffic = function (n) {
+        const r = orig(n);
+        spawnHarborBoats();
+        return r;
+      };
+    }
+    function spawnHarborBoats() {
+      // cityMakeCar reaches into CBZ.city.arena — which mode.js only assigns
+      // AFTER this whole buildCity() call returns, so this must NEVER run
+      // synchronously from inside buildCity() itself (only from the
+      // spawnCityTraffic hook below, which always fires later, post-build).
+      if (!CBZ.cityMakeCar || !CBZ.cityEcon || !CBZ.cityEcon.carByName || !CBZ.city || !CBZ.city.arena) return;
+      const model = CBZ.cityEcon.carByName("Speedboat");
+      if (!model) return;
+      for (const s of _harborBoatSpots) {
+        const c = CBZ.cityMakeCar(s.x, s.z, s.yaw, false, model, 0);
+        if (!c) continue;
+        c.ai = false; c.v = 0; c.baseV = 0; c.road = null;   // moored — sits still until jacked
+      }
+    }
     // ---- EAST HARBOR: the bridge-approach gap used to be bare void over
     //      nothing. A sand shoulder under the seawall, rip-rap armour at the
     //      waterline (it also hides the ground apron's hard edge) and a few
@@ -836,9 +877,14 @@
         const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 2.0), hmat(0xe8ebee));
         cab.position.set(0, 1.15, -1.2); cab.castShadow = true; b.add(cab);
       }
-      boat(EEx + 34, cz - 26, 0.35, 0x9e3434);
-      boat(EEx + 46, cz + 24, -0.5, 0x2f5d8a);
-      boat(EEx + 38, cz + 44, 0.15, 0x9e3434);
+      // these 3 east-harbor hulls are the ones the player actually passes
+      // close to crossing the bridge, so they're the ones promoted to REAL
+      // vehicles (see spawnHarborBoats above) instead of the old dead
+      // boat(...) box-mesh decor — recorded here, spawned once vehicles.js's
+      // cityMakeCar exists, at the exact spot/yaw the decor used to sit.
+      _harborBoatSpots.push({ x: EEx + 34, z: cz - 26, yaw: 0.35 });
+      _harborBoatSpots.push({ x: EEx + 46, z: cz + 24, yaw: -0.5 });
+      _harborBoatSpots.push({ x: EEx + 38, z: cz + 44, yaw: 0.15 });
 
       // ---- THE WATERFRONT RING: the other three coasts get the same harbor
       //      treatment (the east already has it) — rip-rap rock armour where
@@ -879,6 +925,14 @@
       boat(cx - 60, SQ - 16, 1.25, 0x9e3434);
       boat(cx + 70, NQ + 17, -1.0, 0xd9a13a);
     })();
+    // Install the respawn hook (buildCity() runs once at city-mode entry, well
+    // after every script — incl. vehicles.js, which loads AFTER world.js in
+    // index.html — has loaded, so CBZ.spawnCityTraffic is live by now despite
+    // the script tag order). Do NOT spawn here directly: mode.js's build()
+    // only sets CBZ.city.arena AFTER this buildCity() call returns, and
+    // cityMakeCar needs it — the first real spawn happens when mode.js calls
+    // CBZ.spawnCityTraffic() right after, same as expansion.js's annex cars.
+    wrapHarborBoatSpawn();
 
     // ---- THE WATERFRONT WITH A PURPOSE (city/beach.js): sand beach +
     //      boardwalk + pier in the south seawall gap, parking lot + container
