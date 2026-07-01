@@ -75,6 +75,12 @@
     item: array(Uint8Array, total, true), cigs: array(Uint8Array, total, true),
     dead: array(Uint8Array, total, true),   // 1 = killed by the player; removed from the live crowd
     skin: array(Uint32Array, total), hair: array(Uint32Array, total),
+    // WOMEN IN THE CROWD (W3): per-agent female flag, rolled ~48% off the SAME
+    // deterministic per-agent xorshift stream (rnd(id)) as skin/hair below —
+    // never Math.random, so a materialized agent's silhouette is stable across
+    // demote/promote/save-load like every other rolled trait here. Read by
+    // entities/crowd.js's renderRigs() to vary the instanced put() scale args.
+    fem: array(Uint8Array, total),
     rng: array(Uint32Array, total), explicit: array(Uint8Array, total),
     densityCellSize: DENSITY_CELL_SIZE, densityWidth: DENSITY_W, densityHeight: DENSITY_H,
     densityCell: array(Uint16Array, total),
@@ -234,6 +240,7 @@
     S.nerve[id] = (rnd(id) * 101) | 0; S.empathy[id] = (rnd(id) * 101) | 0; S.greed[id] = (rnd(id) * 101) | 0;
     S.reactivity[id] = (rnd(id) * 256) | 0;
     S.mood[id] = 50; S.skin[id] = SKIN[(rnd(id) * SKIN.length) | 0]; S.hair[id] = HAIR[(rnd(id) * HAIR.length) | 0];
+    S.fem[id] = rnd(id) < 0.48 ? 1 : 0;
     rollInventory(id);
     randomPoint(id, zone, point);
     S.posX[id] = point.x; S.posZ[id] = point.z;
