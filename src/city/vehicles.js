@@ -1947,6 +1947,29 @@
       if (car._rimT > 0.16) { car._rimT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
     }
     laySkids(car, skidAmt, fwdX, fwdZ);
+    // ---- POOLED fading skid-TRAILS + drift/burnout DUST (systems/skidmarks.js
+    //      + systems/dustfx.js) — feature-detected, ADDITIVE to the opaque
+    //      laySkids() rubber above; reuses the exact same skidAmt slip signal
+    //      so both effects only ever run while the tyres are actually working.
+    //      Smallest possible hook: compute the two rear-wheel world seats (same
+    //      rb/tw geometry laySkids already derives) and hand them to the pooled
+    //      systems, which own all their own pooling/eviction/fade internally.
+    if (skidAmt > 0.3 && (CBZ.cityBeginSkid || CBZ.cityDriftDust)) {
+      const rd = vehicleDims(car);
+      const rb2 = (rd.wheelbase || 2.7) * 0.45;
+      const two2 = car._playerCarFeel && car._playerCarFeel.twoWheel;
+      const tw2 = two2 ? 0 : (rd.width || 2) * 0.4;
+      const wlx = car.pos.x - fwdX * rb2 + fwdZ * tw2, wlz = car.pos.z - fwdZ * rb2 - fwdX * tw2;
+      const wrx = car.pos.x - fwdX * rb2 - fwdZ * tw2, wrz = car.pos.z - fwdZ * rb2 + fwdX * tw2;
+      if (CBZ.cityBeginSkid && CBZ.cityUpdateSkid) {
+        CBZ.cityBeginSkid(car, 0, wlx, wlz); CBZ.cityUpdateSkid(car, 0, wlx, wlz);
+        if (!two2) { CBZ.cityBeginSkid(car, 1, wrx, wrz); CBZ.cityUpdateSkid(car, 1, wrx, wrz); }
+      }
+      if (CBZ.cityDriftDust) {
+        CBZ.cityDriftDust(wlx, 0.15, wlz, { amt: skidAmt });
+        if (!two2) CBZ.cityDriftDust(wrx, 0.15, wrz, { amt: skidAmt });
+      }
+    } else if (CBZ.cityEndSkid) { CBZ.cityEndSkid(car, 0); CBZ.cityEndSkid(car, 1); }
     // ---- ENGINE VOICE: revs climb through the fake gear band, snap down on
     //      the upshift. Reverse whines low; revving at a standstill screams.
     //      gear/revFrac come from the SAME gearFor() the throttle integrator

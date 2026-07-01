@@ -294,6 +294,7 @@
     //    (foggier) backdrop ring give layered depth.
     const RING_SEG = 9;            // arc segments around the ring
     const heroGeoms = [];
+    const heroSpines = [];         // crest sample arrays [{x,z,h}, ...] per segment — reused below for rock scatter candidates
     function ringSpines(radius, span, cfg, fogBase, fogDepth) {
       if (!buildRidge) return;
       for (let i = 0; i < RING_SEG; i++) {
@@ -313,7 +314,7 @@
           palette: heroPalette,
         });
         const built = buildRidge(THREE, p0, p1, dir, c);
-        if (built) heroGeoms.push(built.geo);
+        if (built) { heroGeoms.push(built.geo); if (built.spine) heroSpines.push(built.spine); }
       }
     }
     // near ring — the dominant craggy peaks
@@ -353,6 +354,54 @@
       for (const g of geoms) g.dispose();
     }
     addMergedHero(heroGeoms);
+
+    // --- 3) BOULDER SCATTER — a modest field of fractured rocks (world/
+    //        rockscliffs.js) dressing the mountain ring's slopes. WHY: the
+    //        hero-peak facets alone read as a smooth folded surface; a
+    //        scatter of chipped boulders sitting IN the slope (not glued on
+    //        top) sells "this is a real rockfall-strewn mountainside" from
+    //        the vantage points the player actually sees it from (city
+    //        edges looking out). Candidates are drawn from the ridge
+    //        spine samples every ringSpines() call already computed (free —
+    //        no extra sampling pass), jittered around each spine point so
+    //        rocks scatter near the crest instead of sitting in a dead-
+    //        straight line. Slope-aware exclusion (scatterRocks' angle-of-
+    //        repose cutoff) throws out anything on a cliff face too steep to
+    //        hold a loose rock — using THIS file's own terrainNormal, so the
+    //        scatter always agrees with the actual relief mesh it sits on.
+    //        Pure backdrop: every candidate is already outside the flat
+    //        playable region (spine points come from the ring layout, which
+    //        starts at radius ~1900) — nothing here can land on walkable
+    //        ground. One extra InstancedMesh cluster (a couple variants),
+    //        not a new draw-call category.
+    if (CBZ.scatterRocks) {
+      // gather every spine sample from both rings as jittered candidates —
+      // reuses the ridge builder's own crest data instead of re-deriving it.
+      const spinePts = [];
+      for (const g of heroSpines) {
+        for (const s of g) spinePts.push(s);
+      }
+      if (spinePts.length) {
+        function pickNearSpine(rng) {
+          const p = spinePts[(rng() * spinePts.length) | 0];
+          if (!p) return null;
+          // jitter around the crest sample so rocks don't line up in a row
+          return { x: p.x + (rng() - 0.5) * 90, z: p.z + (rng() - 0.5) * 90 };
+        }
+        CBZ.scatterRocks(root, {
+          count: 90,
+          pick: pickNearSpine,
+          heightAt: CBZ.terrainHeight,
+          normalAt: CBZ.terrainNormal,
+          repeatAngleDeg: 38,             // angle of repose — matches the requested 35-40deg band
+          minSize: 3, maxSize: 9,          // mountain-scale boulders, bigger than desert clutter
+          baseRadius: 1, detail: 1,
+          variants: 3,
+          colorHex: 0x716b60,             // dark weathered granite, close to terrain's COL_ROCK band
+          seed: 4242,
+        });
+      }
+    }
 
     _built = terrain;
     return terrain;
