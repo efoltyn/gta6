@@ -341,7 +341,12 @@
   function spouseName(head, kind) {
     const first = WIFE_FIRST[(rng() * WIFE_FIRST.length) | 0];
     const lbl = kind === "boss" ? "Boss's wife" : kind === "tycoon" ? "Tycoon's wife" : "Socialite";
-    return first + " (" + lbl + ")";
+    // W12 DYNASTY NAMING: graft the head's own surname onto her first name
+    // ("Mrs <Surname>") so the couple reads as one family — only if his
+    // ledger name actually carries a surname token to borrow.
+    const parts = head && head.name ? String(head.name).trim().split(/\s+/) : [];
+    const named = parts.length > 1 ? first + " " + parts[parts.length - 1] : first;
+    return named + " (" + lbl + ")";
   }
   // spawn ONE extra ped (spouse/kid) near a head, on the same ground. Returns the
   // ped or null (cap hit / no arena). Fully guarded; uses social.js's own rng so

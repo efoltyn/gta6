@@ -103,6 +103,16 @@
   // 48/52 fallback): famPed hands makePed `Math.random` as its rng, so an
   // un-set gender would roll off Math.random instead of this module's
   // seeded `rng()` — breaking the "deterministic from the seed" contract.
+  // W12 DYNASTY NAMING: "Mrs <Surname>" — graft the head's own surname onto a
+  // spawned first name (wife pool is given-names-only) so she reads as part
+  // of his family, not an unrelated woman. No-op (returns firstName as-is)
+  // if the head's name has no surname token to borrow.
+  function withSurname(firstName, headName) {
+    if (!headName) return firstName;
+    const parts = String(headName).trim().split(/\s+/);
+    return parts.length > 1 ? firstName + " " + parts[parts.length - 1] : firstName;
+  }
+
   function famPed(x, z, name, role, gangId, kid, gender) {
     if (!CBZ.cityMakePed) return null;
     const p = CBZ.cityMakePed(x, z, Math.random, {
@@ -181,7 +191,9 @@
         label: mine ? "Your family" : (boss + "'s family"),
         members: [],
       };
-      const wife = famPed(fam.homeX, fam.homeZ, WIVES[(rng() * WIVES.length) | 0],
+      const wifeFirst = WIVES[(rng() * WIVES.length) | 0];
+      const wifeName = gang && gang.boss ? withSurname(wifeFirst, gang.boss.name) : wifeFirst;
+      const wife = famPed(fam.homeX, fam.homeZ, wifeName,
         mine ? "your wife" : (boss + "'s wife"), fam.gangId, false, "f");
       if (wife) { wife._fam = fam; wife._role = "wife"; fam.members.push(wife); }
       // W7: link a BOSS family into the persistent family tree — gang.boss is

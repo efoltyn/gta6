@@ -196,17 +196,33 @@
   const FIRST_F = ["Tanya", "Lola", "Dee", "Mona", "Rosa", "Bree", "Kira", "Nia", "Gita", "Suze", "Esi", "Val", "Cyd", "Nyla",
     "Nadia", "Trish", "Simone", "Coco", "Reyna", "Zola", "Ivy", "Wren", "Mabel", "Fawn", "Solange", "Priya", "Yara", "Tess", "Bianca"];
   const FIRST = FIRST_M.concat(FIRST_F);
-  const LAST = "ABCDEFGHJKLMNPRSTVW";
+  // W12: real surnames — replaces the old single random LAST initial ("First
+  // X."). Audited before widening: city/props.js:24's makeLabelSprite
+  // auto-shrinks the font to fit whatever text width it's given (no
+  // truncation), and city/level.js overwrites a ped's tag wholesale with
+  // "Lv.N Title" rather than ever reading ped.name — so nothing in the
+  // codebase depends on the short single-letter form. Mixed origins to match
+  // FIRST_M/FIRST_F's own tone.
+  const SURNAMES = [
+    "Reyes", "Okafor", "Volkov", "Nakamura", "Marino", "Delgado", "Kowalski", "Haddad",
+    "Silva", "Petrov", "Nguyen", "Brennan", "Castillo", "Yamamoto", "Adeyemi", "Novak",
+    "Torres", "Hassan", "Larsen", "Moreau", "Kim", "Abara", "Rossi", "Fitzgerald",
+    "Kaur", "Mensah", "Ibarra", "Chen", "Duarte", "Bianchi", "Salazar", "Okonkwo",
+    "Whitfield", "Suzuki", "Park", "Alvi", "Dimitriou", "Wozniak", "Fontaine", "Osei",
+  ];
   function pick(a, r) { return a[(r * a.length) | 0]; }
 
   let _s = 555;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
   // gender-aware: pass the ped's rolled gender ("f"/"m") to draw from the
   // matching pool; omit it (existing callers, if any) to keep the old
-  // combined-pool behavior byte-identical.
+  // combined-pool behavior byte-identical. W12: mints "First Last" off the
+  // real SURNAMES pool; exported below as CBZ.cityMintName so births.js can
+  // mint a gendered first name and then graft on a parent's surname (the
+  // dynasty rule) instead of a fresh random one.
   function name(r, gender) {
     const pool = gender === "f" ? FIRST_F : gender === "m" ? FIRST_M : FIRST;
-    return pick(pool, r()) + " " + LAST[(r() * LAST.length) | 0] + ".";
+    return pick(pool, r()) + " " + pick(SURNAMES, r());
   }
 
   // Scream audio is intentionally disabled. Panic/fear behavior still runs, but
@@ -585,6 +601,8 @@
     return ped;
   }
   CBZ.cityMakePed = makePed;        // used by gangs.js / social.js
+  CBZ.cityMintName = name;          // W12: exposed so births.js can mint a gendered
+                                     // first name, then swap in a parent's surname.
 
   // ---- NPC DRIP: an NPC's visible STATUS, read by club.js's bouncer ---------
   // The velvet rope only works if MOST people fail it. cityPedDrip(ped) scores a

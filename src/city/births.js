@@ -148,6 +148,18 @@
     return (e && e.name) || "Someone";
   }
 
+  // W12 DYNASTY NAMING: pull the last whitespace-separated token off a
+  // parent's ledger name to use as the kid's surname. Guards single-token
+  // names (the "Someone" fallback above, or any legacy short name) by
+  // returning null so the caller falls back to a fresh random name instead
+  // of grafting a bogus one-word "surname".
+  function surnameOf(fullName) {
+    if (!fullName) return null;
+    const parts = String(fullName).trim().split(/\s+/);
+    if (parts.length < 2) return null;
+    return parts[parts.length - 1];
+  }
+
   // "does this sid still exist and count as alive?" — a live standing ped
   // that isn't marked dead, OR an offline ledger page (dropSid deletes a
   // dead sid's page outright, so mere presence already means "not dead" —
@@ -218,10 +230,24 @@
     const x = door ? door.x : c.parent.pos.x;
     const z = door ? door.z : c.parent.pos.z;
     const gender = rng() < 0.5 ? "f" : "m";
+    // W12 DYNASTY NAMING: mint a gendered first name off the exact same
+    // rng contract makePed's internal name(r,gender) uses (peds.js exports
+    // it as CBZ.cityMintName), then graft on a parent's surname instead of
+    // the fresh random one it came with — a kid carries the family name.
+    // Falls back to the minted name untouched if neither parent's ledger
+    // name has a surname token to borrow (surnameOf guards single-token
+    // names defensively).
+    let kidName = null;
+    if (CBZ.cityMintName) {
+      const minted = CBZ.cityMintName(rng, gender);
+      const surname = surnameOf(nameOf(c.a)) || surnameOf(nameOf(c.b));
+      kidName = surname ? (minted.split(" ")[0] + " " + surname) : minted;
+    }
     let kid = null;
     try {
       kid = CBZ.cityMakePed(x, z, rng, {
         gender, archetype: "resident", job: "the kid", aggr: 0, armed: false,
+        name: kidName || undefined,
       });
     } catch (err) { return false; }
     if (!kid) return false;
