@@ -99,10 +99,14 @@
   let kidnap = null;   // {ped, gangId, captors:[], ransom, t, x, z}
   let kidnapCD = 90;   // first window opens a minute and a half in
 
-  function famPed(x, z, name, role, gangId, kid) {
+  // `gender` is REQUIRED from the caller (never left to makePed's internal
+  // 48/52 fallback): famPed hands makePed `Math.random` as its rng, so an
+  // un-set gender would roll off Math.random instead of this module's
+  // seeded `rng()` — breaking the "deterministic from the seed" contract.
+  function famPed(x, z, name, role, gangId, kid, gender) {
     if (!CBZ.cityMakePed) return null;
     const p = CBZ.cityMakePed(x, z, Math.random, {
-      name, aggr: 0, armed: false, archetype: "resident",
+      name, aggr: 0, armed: false, archetype: "resident", gender,
       job: role, behavior: "timid", cash: 20 + ((rng() * 60) | 0),
     });
     if (!p) return null;
@@ -148,12 +152,12 @@
         members: [],
       };
       const wife = famPed(fam.homeX, fam.homeZ, WIVES[(rng() * WIVES.length) | 0],
-        mine ? "your wife" : (boss + "'s wife"), fam.gangId, false);
+        mine ? "your wife" : (boss + "'s wife"), fam.gangId, false, "f");
       if (wife) { wife._fam = fam; wife._role = "wife"; fam.members.push(wife); }
       const nKids = 1 + ((rng() * 2) | 0);
       for (let k = 0; k < nKids; k++) {
         const kid = famPed(fam.homeX + 1.5 + k, fam.homeZ + 1.2,
-          KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, true);
+          KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, true, rng() < 0.5 ? "f" : "m");
         if (kid) { kid._fam = fam; kid._role = "kid"; fam.members.push(kid); }
       }
       if (fam.members.length) families.push(fam);
@@ -164,7 +168,7 @@
       if (gang && gi === 1 && sideLot) {
         const sby = backyardOf(sideLot), spool = lotPool.get(sideLot) || null;
         const her = famPed(sby.bx, sby.bz, SIDE[(rng() * SIDE.length) | 0],
-          "a friend of " + boss, fam.gangId, false);
+          "a friend of " + boss, fam.gangId, false, "f");
         if (her) {
           const sf = {
             gangId: fam.gangId, mine: false,

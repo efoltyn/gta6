@@ -384,6 +384,11 @@
       const spouse = spawnFamilyMember(head, {
         kind: "civilian",
         archetype: wifeArch,
+        // the wife archetypes above are always cast female by peds.js's
+        // FEMALE_ARCH table anyway — stamped explicitly here too so the
+        // couple reads as opposite-gender even if the head is a rare female
+        // boss/tycoon (head.gender "f" → a husband, not another wife).
+        gender: head.gender === "f" ? "m" : "f",
         wealth: Math.min(0.99, Math.max(0.9, head.wealth || 0.9)),
         aggr: 0.18 + rng() * 0.14,        // non-combatant — she flees, never fights her own crew
         armed: false,
@@ -406,6 +411,7 @@
       if (isBoss && rng() < 0.4 && _familySpawns.length < FAMILY_CAP) {
         const kid = spawnFamilyMember(head, {
           kind: "civilian", archetype: "resident", wealth: 0.5,
+          gender: rng() < 0.5 ? "f" : "m",   // 50/50, off this module's own seeded rng
           aggr: 0.12 + rng() * 0.1, armed: false,
           name: "Young " + (head.name || "one").split(" ")[0],
           protectGang: head.gang, protectedBy: head, isFamily: true,

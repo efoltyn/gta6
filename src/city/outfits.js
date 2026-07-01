@@ -760,7 +760,11 @@
       if (d) return d;
     }
     const sex = spec.sex || spec.gender || null;
-    if ((sex === "f" || sex === "female" || spec.fem) && (a === "" || a === "civilian" || a === "tourist")) {
+    // "resident" is peds.js's default archetype for the ordinary civilian mass
+    // (makePed: `let archetype = opts.archetype || "resident"`) — the literal
+    // ""/"civilian" cases below are never actually cast by any spawner, so
+    // without "resident" this branch was effectively dead outside "tourist".
+    if ((sex === "f" || sex === "female" || spec.fem) && (a === "" || a === "civilian" || a === "tourist" || a === "resident")) {
       // a small deterministic fraction of women get a dress/sundress.
       if (seed % 5 === 0 && CAT.sundress) return CAT.sundress;
       if (seed % 7 === 0 && CAT.dress) return CAT.dress;

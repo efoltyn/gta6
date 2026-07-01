@@ -163,13 +163,27 @@
   // tourists stay LOUD on purpose (downtown's walking wallets read at a
   // glance) — matched to crowd.js's bright pool so promotion doesn't shift hue
   const BRIGHTS = [0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0, 0xe8e4da];
-  const FIRST = ["Marcus", "Tanya", "Vince", "Lola", "Dee", "Rosa", "Cam", "Jax", "Trey", "Mona", "Otis", "Bree", "Sal", "Kira", "Boon", "Nia", "Rex", "Gita", "Hank", "Suze", "Marlo", "Pim", "Dro", "Esi", "Ray", "Val", "Cyd", "Nyla"];
+  // WOMEN EXIST: the name pool splits by gender so a female ped draws a
+  // female first name (see makePed's `gender` roll below). FIRST_F carries
+  // the original female half PLUS ~15 new names in the same short-punchy
+  // style; FIRST_M is the original male half, untouched. FIRST stays a
+  // combined pool (kept for backward compat / the gender-less name(r) call).
+  const FIRST_M = ["Marcus", "Vince", "Cam", "Jax", "Trey", "Otis", "Sal", "Boon", "Rex", "Hank", "Marlo", "Pim", "Dro", "Ray"];
+  const FIRST_F = ["Tanya", "Lola", "Dee", "Mona", "Rosa", "Bree", "Kira", "Nia", "Gita", "Suze", "Esi", "Val", "Cyd", "Nyla",
+    "Nadia", "Trish", "Simone", "Coco", "Reyna", "Zola", "Ivy", "Wren", "Mabel", "Fawn", "Solange", "Priya", "Yara", "Tess", "Bianca"];
+  const FIRST = FIRST_M.concat(FIRST_F);
   const LAST = "ABCDEFGHJKLMNPRSTVW";
   function pick(a, r) { return a[(r * a.length) | 0]; }
 
   let _s = 555;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
-  function name(r) { return pick(FIRST, r()) + " " + LAST[(r() * LAST.length) | 0] + "."; }
+  // gender-aware: pass the ped's rolled gender ("f"/"m") to draw from the
+  // matching pool; omit it (existing callers, if any) to keep the old
+  // combined-pool behavior byte-identical.
+  function name(r, gender) {
+    const pool = gender === "f" ? FIRST_F : gender === "m" ? FIRST_M : FIRST;
+    return pick(pool, r()) + " " + LAST[(r() * LAST.length) | 0] + ".";
+  }
 
   // Scream audio is intentionally disabled. Panic/fear behavior still runs, but
   // the human scream sample was too intrusive during city chaos.
@@ -294,9 +308,25 @@
     "retail worker", "delivery driver",
   ];
 
+  // DEFINITIONALLY-FEMALE archetypes — the wife/socialite identities family.js
+  // and social.js spawn for a boss/tycoon's household (mirrors ARCH_DRIP's
+  // wife-tier keys further down this file). A ped cast as one of these is
+  // always a woman; every other archetype splits ~48/52 (see makePed's gender
+  // roll below).
+  const FEMALE_ARCH = {
+    socialite: 1, mobwife: 1, "mob-wife": 1, bosswife: 1, kingpinwife: 1,
+    tycoonwife: 1, heiress: 1, richwoman: 1, "rich woman": 1,
+  };
+
   function makePed(x, z, r, opts) {
     opts = opts || {};
     const ag = A0();
+    // GENDER: who this ped IS — drives makeCharacter's build/hair below, the
+    // name pool, and (via cityOutfitFor's sex flag, further down) the
+    // nightlife dress branch. Forced female for the wife/socialite archetypes
+    // above; everyone else draws off the SAME deterministic stream (r) every
+    // other appearance roll here uses — never Math.random.
+    const gender = opts.gender || (FEMALE_ARCH[opts.archetype] ? "f" : (r() < 0.48 ? "f" : "m"));
     const outfit = opts.outfit || pick(SHIRT, r());
     const skin = pick(SKIN, r());
     const wealth = opts.wealth != null ? opts.wealth : richWealth(r);
@@ -314,7 +344,11 @@
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
         : /soldier/i.test(opts.job || "") ? 0x44503a : null;
-    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol });
+    const ch = makeCharacter({
+      legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()),
+      shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol,
+      build: gender === "f" ? "f" : "m", longHair: gender === "f" && r() < 0.6,
+    });
     // SHORT SLEEVE: bare the forearm (lower ~45% of the arm) with a skin box on
     // each arm pivot — reads as a tee sleeve ending mid-bicep, no sleeveless
     // skin shoulder blending into the shirt. Rides the arm swing; shared geo.
@@ -329,7 +363,7 @@
     }
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
-    const nm = opts.name || name(r);
+    const nm = opts.name || name(r, gender);
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
     if (tag) { tag.position.y = 3.0; tag.scale.set(3, 0.75, 1); tag.visible = false; ch.group.add(tag); }
     let aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
@@ -382,7 +416,7 @@
     const _plain = !CBZ.CONFIG || CBZ.CONFIG.CITY_PLAIN_CIVVIES == null || !!CBZ.CONFIG.CITY_PLAIN_CIVVIES;
     let _castFit = null;
     if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
-      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0 });
+      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0, sex: gender });
       if (fit && fit.colors) {
         CBZ.cityRecolorRig(ch, fit.colors, fit);
         _castFit = fit.id;                          // stamped on the ped below (redress revert read)
@@ -455,7 +489,7 @@
           : mr < 0.997 ? "colonel" : "general";
     }
     const ped = {
-      char: ch, group: ch.group, pos: ch.group.position, name: nm,
+      char: ch, group: ch.group, pos: ch.group.position, name: nm, gender,
       tag, outfit, skin, kind: opts.kind || "civilian", milRank,
       aggr, wealth: mWealth, valuables, bounty, bountyTag,
       archetype: rareArch || traits.archetype || opts.archetype || "resident",

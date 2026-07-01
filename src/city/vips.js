@@ -423,7 +423,13 @@
     if (!p && S.fresh < 6 && CBZ.cityMakePed && A.root) {
       const sp = spawnPointFor(def, A, gang);
       try {
-        p = CBZ.cityMakePed(sp.x, sp.z, rng, { wealth: 0.9 });
+        // the "Star" (def.archetype "socialite") is female-flavored (see the
+        // header doc's "shooting HER a spectacle") — a fresh body built for
+        // that slot should read as a woman. Every other principal keeps the
+        // default 48/52 split. Only matters on this fallback path: the usual
+        // case (draftPrincipal above) reuses an EXISTING body whose gender/
+        // build was already fixed at its original spawn.
+        p = CBZ.cityMakePed(sp.x, sp.z, rng, { wealth: 0.9, gender: def.archetype === "socialite" ? "f" : undefined });
         A.root.add(p.group); CBZ.cityPeds.push(p); S.fresh++;
       } catch (e) { p = null; }
     }
