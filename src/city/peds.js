@@ -344,10 +344,13 @@
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
         : /soldier/i.test(opts.job || "") ? 0x44503a : null;
+    // stashed on the ped below (_longHair) so schedule.js's ledger can persist
+    // this roll — otherwise a woman who despawns and re-deals comes back bald.
+    const longHair = gender === "f" && r() < 0.6;
     const ch = makeCharacter({
       legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()),
       shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol,
-      build: gender === "f" ? "f" : "m", longHair: gender === "f" && r() < 0.6,
+      build: gender === "f" ? "f" : "m", longHair,
     });
     // SHORT SLEEVE: bare the forearm (lower ~45% of the arm) with a skin box on
     // each arm pivot — reads as a tee sleeve ending mid-bicep, no sleeveless
@@ -490,6 +493,7 @@
     }
     const ped = {
       char: ch, group: ch.group, pos: ch.group.position, name: nm, gender,
+      _longHair: longHair, // W5: persisted by schedule.js's ledger (deal-in restores it)
       tag, outfit, skin, kind: opts.kind || "civilian", milRank,
       aggr, wealth: mWealth, valuables, bounty, bountyTag,
       archetype: rareArch || traits.archetype || opts.archetype || "resident",

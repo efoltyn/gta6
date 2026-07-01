@@ -28,10 +28,10 @@
    near peds are scheduled through aigoals' existing slice + goal-cooldown
    (full rate where you look, ~1/30 of the crowd per frame); the sun-hour
    every consumer reads is cached at 8Hz; offline entries advance on a
-   0.5Hz rolling sweep (a few per tick), 600-identity LRU cap (raised for
-   the ~1000-strong population now that nearly everyone holds a job — the
-   sweep stays a fixed 16 entries/2s and the deal-in scan is ≤CAP squared-
-   dist compares per promotion, so the budget is flat), no per-frame
+   0.5Hz rolling sweep (a few per tick), 900-identity LRU cap (raised again
+   for W5: family pages now qualify too — the sweep stays a fixed 16
+   entries/2s and the deal-in scan is ≤CAP squared-dist compares per
+   promotion, so the budget is flat), no per-frame
    allocation (one reused proposal scratch). Host-only — guests'
    crowds are set dressing (the host owns the population).
 
@@ -161,13 +161,14 @@
   };
 
   // ============================================================
-  //  THE OFFLINE LEDGER — identities the city remembers (LRU, cap 600 —
-  //  raised from 200 with the jobs-everywhere casting: a learnable commute is
-  //  now the NORM, and the book has to hold enough pages that the barber you
-  //  know is still the barber tomorrow. Cost stays flat: the sweep window is
-  //  fixed-size and the deal scan is one bounded squared-dist pass.)
+  //  THE OFFLINE LEDGER — identities the city remembers (LRU, cap 900 —
+  //  raised from 600 for W5: a boss/tycoon's spouse/kid is now ledger-worthy
+  //  too (worth() below), so households persist instead of respawning as
+  //  strangers. Cost stays flat: the sweep window is fixed-size and the deal
+  //  scan is one bounded squared-dist pass. JSON budget re-checked: entries
+  //  run ~280B, so 900 × 280B ≈ 250KB — still far under the 1.4MB wsave cap.)
   // ============================================================
-  const CAP = 600, DEAL_R2 = 45 * 45;
+  const CAP = 900, DEAL_R2 = 45 * 45;
   let led = {};                  // sid -> entry (plain JSON-able objects only)
   let list = [];                 // same entries, for rolling sweeps
   let liveBy = {};               // sid -> live ped ref (never serialized)
@@ -176,6 +177,12 @@
   // is this person worth a page in the book? (selective, or the cap churns)
   function worth(ped) {
     if (ped.vendor || ped.gang || ped.nameKnown || ped.bounty) return true;
+    // FAMILY (W5): a boss/tycoon's household is worth a page too — family.js
+    // stamps p.family = role (a STRING) on its wife/kid; social.js stamps
+    // isFamily/protectGang on the spouse+kid it weaves for a boss/rich head.
+    // Deliberately narrower than ped.partner (~45% of civilians are coupled —
+    // that would blow the cap): only these protected-household markers count.
+    if (ped.protectGang || ped.isFamily || typeof ped.family === "string") return true;
     const k = castKey(ped);
     if (k === "dealer") return true;
     const r = ped.relPlayer;
@@ -221,6 +228,9 @@
     e.name = ped.name; e.arch = ped.archetype; e.job = ped.job;
     e.wealth = ped.wealth || 0.3; e.aggr = ped.aggr || 0.3; e.drug = !!ped.drugUser;
     e.cash = ped.cash | 0; e.known = !!ped.nameKnown;
+    // W5: gender + the longHair roll (peds.js makePed) — compact ints, same as
+    // the fields above — so a woman who despawns comes back a woman.
+    e.sex = ped.gender === "f" ? 1 : 0; e.lh = ped._longHair ? 1 : 0;
     const r = ped.relPlayer;   // the street remembers — grudges ride the page
     e.rel = (r && r.seen) ? { r: r.respect | 0, f: r.fear | 0, l: r.loyalty | 0, a: r.affection | 0, g: r.grudge | 0, s: r.seen | 0 } : null;
     if (!ped._parked) {        // a parked body sits off-map — keep the old spots
@@ -286,13 +296,23 @@
       if (liveBy[ped._sid] === ped) delete liveBy[ped._sid];
       ped._sid = null; ped._sched = null; ped._schedAct = null;
     }
+    // gender-matched entry pick (W3 precedent, crowd.js pickFreeSlot): the fresh
+    // body's rig (build/hair) is ALREADY fixed by the time this runs (spawn ran
+    // first), so we can't rebuild geometry — instead prefer the nearest entry
+    // whose stored sex agrees with this body's rolled gender, and only fall
+    // back to the plain-nearest entry (rare visual mismatch) when none matches
+    // within range. e.sex == null covers old saves from before this field existed.
+    const wantSex = ped.gender === "f" ? 1 : 0;
     let best = null, bd = DEAL_R2;
+    let bestM = null, bdM = DEAL_R2;
     for (let i = 0; i < list.length; i++) {          // ≤200 squared-dist compares
       const e = list[i];
       if (!e.alive || liveBy[e.sid] || e.k === "vendor" || e.k === "gangster" || e.tx == null) continue;
       const dx = e.tx - ped.pos.x, dz = e.tz - ped.pos.z, dd = dx * dx + dz * dz;
       if (dd < bd) { bd = dd; best = e; }
+      if ((e.sex == null || e.sex === wantSex) && dd < bdM) { bdM = dd; bestM = e; }
     }
+    best = bestM || best;
     if (!best) return;
     fastForward(best);
     ped.name = best.name || ped.name;
@@ -303,6 +323,11 @@
     ped.drugUser = !!best.drug;
     ped.cash = best.cash | 0;                        // the carry — the whole score
     ped.nameKnown = !!best.known;
+    // restore identity's sex/hair onto the record (soft-matched above, so this
+    // is usually a no-op; on the rare mismatch the rig geometry stays as spawned
+    // — accepted, cheap, matches the W3 precedent's own fallback tradeoff).
+    if (best.sex != null) ped.gender = best.sex ? "f" : "m";
+    if (best.lh != null) ped._longHair = !!best.lh;
     if (best.rel) ped.relPlayer = { respect: best.rel.r, fear: best.rel.f, loyalty: best.rel.l, affection: best.rel.a, grudge: best.rel.g, seen: best.rel.s || 1, t: 0, ambushT: 0 };
     ped._dayCast = null; ped._role = null; ped._dripKey = null;  // this IS the person now
     ped._sched = { k: best.k, salt: best.salt || 0.5, a: ped.archetype, j: ped.job };
