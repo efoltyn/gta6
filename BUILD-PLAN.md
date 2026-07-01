@@ -26,7 +26,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 ## Stage F — Foundations (make every later feature a 1-file change)
 
-- [ ] **F1** `core/prio.js` (new): `CBZ.PRIO` named bands + one-time collision warn in dev; new code uses bands.
+- [x] **F1** `core/prio.js` (new): `CBZ.PRIO` named bands + one-time collision warn in dev; new code uses bands.
 - [ ] **F2** `core/interfaces.js` (new): the contracts index — feelDt, collide signature, colliders/platforms shapes, serialize/apply, region records, day-phase API, with file:line pointers.
 - [ ] **F3** `systems/proptypes.js` (new): `CBZ.registerPropType({id, build, onUpdate, onInteract, save})` + generic loop; migrate coins as proof.
 - [ ] **F4** `systems/pieces.js` + `systems/chunks.js` (new, additive, zero call sites): `spawnPiece/despawnPiece/findSupport`, 16m chunk registry, reap queue, per-chunk dirty batching skeleton.
