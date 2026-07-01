@@ -413,6 +413,13 @@
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>
 <script src="src/city/placement.js?v=sims1"></script>
+<!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
+     sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
+     findSupport built on top of it + the CBZ.assets/physics.js contracts
+     above. chunks.js first (pieces.js registers pieces into it), though
+     either load order works. -->
+<script src="src/systems/chunks.js?v=arch2"></script>
+<script src="src/systems/pieces.js?v=arch2"></script>
 <script src="src/city/towngen.js?v=sims1"></script>
 <script src="src/city/island_speedway.js?v=arch1"></script>
 <script src="src/city/island_airport.js?v=arch1"></script>

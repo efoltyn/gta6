@@ -29,7 +29,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **F1** `core/prio.js` (new): `CBZ.PRIO` named bands + one-time collision warn in dev; new code uses bands.
 - [x] **F2** `core/interfaces.js` (new): the contracts index — feelDt, collide signature, colliders/platforms shapes, serialize/apply, region records, day-phase API, with file:line pointers.
 - [x] **F3** `systems/proptypes.js` (new): `CBZ.registerPropType({id, build, onUpdate, onInteract, save})` + generic loop; migrate coins as proof.
-- [ ] **F4** `systems/pieces.js` + `systems/chunks.js` (new, additive, zero call sites): `spawnPiece/despawnPiece/findSupport`, 16m chunk registry, reap queue, per-chunk dirty batching skeleton.
+- [x] **F4** `systems/pieces.js` + `systems/chunks.js` (new, additive, zero call sites): `spawnPiece/despawnPiece/findSupport`, 16m chunk registry, reap queue, per-chunk dirty batching skeleton.
 - [ ] **F5** `city/placement.js`: rects gain `minY/maxY` (default full-height so behavior is unchanged); `overlaps()` gains the Y test. The one shared PR four building systems need.
 - [ ] **F6** `city/assets.js`: pool free-list (remove/recycle instances) — the most load-bearing gap; spike first, then land.
 - [ ] **F7** Migrate `world/props.js` + `world/crates.js` compound props through `spawnPiece` (proof of the piece model; broadphase stats must match).
