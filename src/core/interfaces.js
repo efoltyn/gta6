@@ -192,11 +192,12 @@
   //      modules that call A.define per prop kind.
 
   // 13. CBZ.placement.isFree / .reserve — THE OCCUPANCY RECT
-  //    OWNER: city/placement.js:24-90
-  //    SHAPE: { minX, maxX, minZ, maxZ, stackable, zone } — XZ ONLY
-  //      today. F5 adds minY/maxY (default full-height, unchanged
-  //      behaviour) + a Y test in overlaps() — don't assume a Y band
-  //      exists before F5 lands.
+  //    OWNER: city/placement.js:36-138 (overlaps()/isFree()/reserve())
+  //    SHAPE: { minX, maxX, minZ, maxZ, minY, maxY, stackable, zone } —
+  //      minY/maxY are OPTIONAL (F5). A rect that omits them is
+  //      full-height: overlaps() defaults minY to -Infinity and maxY to
+  //      +Infinity, so every pre-F5 (XZ-only) rect keeps blocking the
+  //      whole vertical column, unchanged.
   //    RULE: isFree() runs on plain rects (test-then-build); reserve()
   //      stores the INFLATED rect (footprint+clearance), but the
   //      collider pushed to CBZ.colliders (#3) is un-inflated true size

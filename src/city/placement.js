@@ -19,9 +19,22 @@
    • stackable rects may overlap other stackable rects (signs, awnings).
    • zones: opts.zoneOnly → conflicts only count within the same zone tag.
 
+   ── Y RANGE (F5) ─────────────────────────────────────────────
+   • rects MAY carry minY/maxY (a vertical band) alongside the XZ footprint.
+     A rect that omits them is treated as FULL-HEIGHT: overlaps() defaults
+     a missing minY to -Infinity and a missing maxY to +Infinity, so a
+     legacy XZ-only rect still blocks the entire vertical column — every
+     call site that predates F5 passes XZ-only rects, so this is a NO-OP
+     for existing behaviour (byte-identical).
+   • intended users: systems/pieces.js and the building systems (player
+     building, town-generator multi-storey lots, etc.) that need to stack
+     things at different heights on the same XZ footprint without the
+     lower piece blocking the upper one.
+
    ── API ──────────────────────────────────────────────────────
    reset()
-   isFree(rect, opts) → bool         rect={minX,maxX,minZ,maxZ,stackable,zone}
+   isFree(rect, opts) → bool         rect={minX,maxX,minZ,maxZ,minY,maxY,stackable,zone}
+                                      (minY/maxY optional — default full-height)
    reserve(rect)
    placeAsset(name, near{x,z}, opts) → {group,x,z,rot,rect} | null
    scatter(name, regionRect, minDist, opts) → placed[]
@@ -58,8 +71,18 @@
   }
 
   function overlaps(a, b) {
-    return a.minX < b.maxX && a.maxX > b.minX &&
-           a.minZ < b.maxZ && a.maxZ > b.minZ;
+    if (!(a.minX < b.maxX && a.maxX > b.minX &&
+          a.minZ < b.maxZ && a.maxZ > b.minZ)) return false;
+    // F5: Y test. Missing minY/maxY default to -Infinity/+Infinity — a
+    // legacy full-height rect always overlaps another full-height rect
+    // vertically, so every pre-F5 caller (none of which set minY/maxY)
+    // sees IDENTICAL results to before this test existed. Defaults are
+    // computed inline (no mutation of the caller's rect objects).
+    var aMinY = a.minY != null ? a.minY : -Infinity;
+    var aMaxY = a.maxY != null ? a.maxY : Infinity;
+    var bMinY = b.minY != null ? b.minY : -Infinity;
+    var bMaxY = b.maxY != null ? b.maxY : Infinity;
+    return aMinY < bMaxY && aMaxY > bMinY;
   }
 
   /* ---- isFree -------------------------------------------------- */
@@ -73,7 +96,18 @@
       if (!bucket) return false;
       for (var i = 0; i < bucket.length; i++) {
         var r = bucket[i];
-        // two stackables may share space.
+        // two stackables may share space. This unconditional allow is
+        // still correct under F5's Y test, in every case:
+        //  - either side lacks a Y range → legacy full-height rects, works
+        //    exactly as it did before F5 (unchanged behaviour).
+        //  - both sides have a Y range and they're Y-DISJOINT → they were
+        //    never going to conflict anyway (overlaps()'s Y test below
+        //    would say so too), so skipping here changes nothing.
+        //  - both sides have a Y range and they OVERLAP in Y → this is the
+        //    case the stackable escape hatch exists for (e.g. two signs on
+        //    the same wall band) — keep allowing it.
+        // So `continue` unconditionally is the right call in all three
+        // sub-cases; nothing here needs to consult minY/maxY directly.
         if (stackable && r.stackable) continue;
         // zone-scoped test: ignore rects in other zones.
         if (zoneOnly && zone != null && r.zone != null && r.zone !== zone) continue;
@@ -90,6 +124,7 @@
   P.reserve = function (rect) {
     var r = {
       minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ,
+      minY: rect.minY, maxY: rect.maxY,              // F5: optional Y band, passed through as-is (undefined if absent — overlaps() defaults it)
       stackable: !!rect.stackable, zone: rect.zone || null, ref: rect.ref || null
     };
     forCells(r, function (key) { (hash[key] || (hash[key] = [])).push(r); });
