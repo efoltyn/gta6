@@ -22,6 +22,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [ ] **W10** Generational grudges: persisted grudge records keyed by sid, inherited at fractional weight by spouse/kids, restored on deal-in — kill a boss and his son remembers, sessions later.
 - [ ] **W11** Births: married couple + shared home + time → a crowd body is *promoted* into a named child (parent edges, small rig, household join) — population stays finite, "the crowd already contained this future person."
 - [ ] **W12** FAMILY panel: self-styled overlay showing the player's family + known NPCs' trees; dynasty surnames (kids inherit last names — upgrade the single-letter `LAST` to real surname lists per gender-neutral family name).
+- [ ] **W13** Marriage strain & divorce: per-marriage strain score fed by poverty (household income vs cost of living), neglect (affection decay), danger (wanted/kidnaps), and gossip-carried betrayal; past threshold the spouse files — endMarriage(divorce), moves household, asset split, custody by bond, remarriage; reconciliation window; same model for NPC couples (depressions cause divorce waves).
 
 ## Stage F — Foundations (make every later feature a 1-file change)
 
