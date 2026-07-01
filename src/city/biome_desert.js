@@ -157,6 +157,41 @@
     mergeAdd(patchDk, cmat(SAND_DK), { receive: true });
     mergeAdd(patchPale, cmat(SAND_PALE), { receive: true });
 
+    // ---- BIOME-EDGE BLEND APRON: was a hard cut from sand straight to
+    // nothing past the rim. A per-vertex-colored ring just outside the basin
+    // fades sand -> a neutral scrubby "wild ground" tone via MOISTURE NOISE
+    // (window.noise.simplex2, the same field terrain.js uses) so the desert
+    // reads as melting into the surrounding land instead of stopping at a
+    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
+    // region change — walkable footprint + causeway corridor untouched.
+    (function edgeBlendApron() {
+      const apronW = HX * 2 + 200, apronD = HZ * 2 + 200;
+      const SEG = 16;
+      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
+      const cSand = new THREE.Color(SAND);
+      const cWild = new THREE.Color(0x8a8a5c);   // neutral dry-scrub edge tone
+      const _ac = new THREE.Color();
+      const apos = ag.attributes.position;
+      const acolors = new Float32Array(apos.count * 3);
+      const hasNoise = !!(window.noise && window.noise.simplex2);
+      for (let i = 0; i < apos.count; i++) {
+        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
+        const lx = apos.getX(i), lz = apos.getY(i);
+        const wx = CX + lx, wz = CZ - lz;
+        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
+        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
+        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
+        _ac.copy(cSand).lerp(cWild, t);
+        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      }
+      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
+      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      apron.rotation.x = -Math.PI / 2;
+      apron.position.set(CX, 0.0, CZ);
+      apron.receiveShadow = true;
+      root.add(apron);
+    })();
+
     // =====================================================================
     //  2) DUNES — low rolling mounds you walk OVER visually (no colliders).
     //     One merged mesh of squashed low-poly spheres (icosa, flat-tan).
@@ -377,10 +412,13 @@
     // ---- CAUSEWAY: a REAL wide highway land-bridge to the speedway -----------
     const cwLen = Math.abs(CW_X1 - CW_X0);
     if (CBZ.buildHighway) {
+      // heightAt: grade-follow world/terrain.js relief (0 over this rect's
+      // flat playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
         path: [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "asphalt",
         guardrail: true, lights: true, elevated: false, rng: rng,
+        heightAt: CBZ.terrainHeight,
       });
     } else {
       // ---- fallback: bespoke narrow deck (only if buildHighway absent) ----

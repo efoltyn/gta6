@@ -94,3 +94,50 @@
 body.mode-survival .mode-escape-only{display:none;}
 body.mode-survival .mode-survival-only{display:block;}
 
+/* ============================================================
+   settings panel (src/systems/settings.js) — pause-screen overlay with
+   performance + population controls. Mirrors city/phone.js's dark-modal
+   look (translucent near-black card, Fredoka, cyan headers) but uses real
+   classes instead of inline style.cssText since this view is form-heavy
+   (sliders/checkboxes repeated several times) — classes avoid re-typing
+   the same long inline string per control. Visually consistent with
+   #cityPhone: same radius/border/shadow/font, just promoted to CSS.
+============================================================ */
+#settingsPanel{
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  z-index:60; /* above #cityPhone (48) and the HUD — this can open from the pause screen too */
+  display:none; width:min(480px,92vw); max-height:88vh; overflow-y:auto;
+  background:rgba(16,18,24,.96); border:2px solid #2c3140; border-radius:16px;
+  padding:18px 20px; box-sizing:border-box; color:#e8eef7;
+  font-family:Fredoka,system-ui,sans-serif; box-shadow:0 18px 50px rgba(0,0,0,.55);
+  pointer-events:auto;
+}
+#settingsPanel .stg-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+#settingsPanel .stg-title{font-size:20px; font-weight:800; letter-spacing:.5px;}
+#settingsPanel .stg-hint{font-size:12px; color:#8a93a3;}
+#settingsPanel .stg-hint b{color:#7fd0ff;}
+#settingsPanel .stg-section{background:rgba(255,255,255,.04); border-radius:10px; padding:12px 14px; margin-bottom:10px;}
+#settingsPanel .stg-section h4{margin:0 0 8px; font-size:13px; font-weight:700; letter-spacing:.4px; color:#7fd0ff;}
+#settingsPanel .stg-row{display:flex; justify-content:space-between; align-items:center; gap:10px; margin:8px 0;}
+#settingsPanel .stg-row label{font-size:13px; color:#cfd6e2; flex:1 1 auto;}
+#settingsPanel .stg-val{font-size:12px; color:#8a93a3; font-variant-numeric:tabular-nums; min-width:64px; text-align:right;}
+#settingsPanel input[type="range"]{
+  flex:1 1 auto; -webkit-appearance:none; appearance:none; height:6px; border-radius:4px;
+  background:rgba(255,255,255,.14); outline:none; cursor:pointer; accent-color:#7fd0ff;
+}
+#settingsPanel input[type="range"]:disabled{opacity:.4; cursor:default;}
+#settingsPanel input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+  background:#7fd0ff; border:2px solid #16181f; cursor:pointer;
+}
+#settingsPanel input[type="checkbox"]{width:17px; height:17px; accent-color:#7fd0ff; cursor:pointer;}
+#settingsPanel .stg-note{font-size:11px; color:#8a93a3; margin-top:4px;}
+#settingsPanel .stg-note.warn{color:#ffd451;}
+#settingsPanel .stg-close{
+  pointer-events:auto; cursor:pointer; border:none; font-family:inherit; font-weight:700;
+  font-size:14px; color:#0c1118; background:#7fd0ff; padding:9px 18px; border-radius:10px;
+  margin-top:4px; width:100%;
+}
+#settingsPanel .stg-close:active{transform:translateY(1px);}
+#settingsOpenBtn{margin-top:12px;}
+

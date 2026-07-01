@@ -4,6 +4,12 @@
    any GPU. Strong devices get full-res crisp shadows; weak ones step
    down quietly instead of dropping frames, and step back up when
    there's headroom — nothing is permanently nerfed.
+
+   CBZ.qualityLocked (default false) lets src/systems/settings.js pin a
+   manual tier: sampleFPS() below no-ops while it's true, and
+   CBZ.setQualityLevel(n) is the one call the settings panel needs to set
+   qLevel + applyQuality() together (capped at the live host-aware
+   CBZ.qualityTopTier()). Untouched (panel never opened) → byte-identical.
 ============================================================ */
 (function () {
   "use strict";
@@ -62,6 +68,28 @@
   // any net hook: only the pre-existing pr/shadow/crowd-render/pedLOD knobs.
   if (CBZ.qualityV2 === undefined) CBZ.qualityV2 = true;
 
+  // ---- MANUAL QUALITY LOCK (src/systems/settings.js) -----------------------
+  // The settings panel lets a player pick a fixed tier instead of letting the
+  // V2/legacy sampler drive it. CBZ.qualityLocked is the ONLY new piece of
+  // state needed for that: when true, sampleFPS() below returns immediately
+  // before touching qLevel, so a manual pick sticks until the player flips
+  // back to Auto. Default false (=Auto) → untouched byte-identical sampler
+  // behaviour for anyone who never opens the panel. CBZ.setQualityLevel is the
+  // single entry point settings.js calls — it owns the qLevel write + the
+  // applyQuality() call so the panel never has to poke qLevel directly.
+  if (CBZ.qualityLocked === undefined) CBZ.qualityLocked = false;
+  CBZ.setQualityLevel = function (lvl) {
+    lvl = Math.max(0, Math.min(QUALITY.length - 1, lvl | 0));
+    // never let a manual pick exceed the live host-aware ceiling — picking a
+    // tier that the sampler would instantly revert is a silent bait-and-switch
+    lvl = Math.min(lvl, topTier());
+    qLevel = lvl;
+    applyQuality();
+    return qLevel;
+  };
+  CBZ.getQualityLevel = function () { return qLevel; };
+  CBZ.qualityTierCount = QUALITY.length;
+
   // host-aware eligible-top-tier cap. Live-evaluated so promotion is handled.
   function topTier() {
     let top = QUALITY.length - 1;
@@ -72,6 +100,7 @@
     }
     return top;
   }
+  CBZ.qualityTopTier = topTier; // exposed so the settings panel can grey out / cap its slider
 
   function applyQuality() {
     const q = QUALITY[qLevel];
@@ -113,6 +142,11 @@
   let _vSpikeRun = 0;         // consecutive spiky windows
 
   function sampleFPS(dt) {
+    // ---- manual lock (settings panel) : never override a manual choice -----
+    // Still consume time so warmup/accumulators don't burst-react the instant
+    // the player flips back to Auto, but skip every qLevel-changing branch.
+    if (CBZ.qualityLocked) return;
+
     // ---- legacy path (flag off) : EXACTLY today's behaviour ----------------
     if (!CBZ.qualityV2) {
       if (_warmup > 0) { _warmup -= dt; return; } // ignore first 1.5s of upload jank

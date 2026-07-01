@@ -170,6 +170,41 @@
     // a few grass tinted overlays so the bare lanes read as soil, the rest green
     plane(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, M.grass, 0.012);
 
+    // ---- BIOME-EDGE BLEND APRON: was a hard cut from soil straight to
+    // nothing past the rim. A per-vertex-colored ring just outside the valley
+    // fades soil -> a neutral wild-grass edge tone via MOISTURE NOISE
+    // (window.noise.simplex2, the same field terrain.js uses) so the farm
+    // reads as melting into the surrounding land instead of stopping at a
+    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
+    // region change — walkable footprint + causeway corridor untouched.
+    (function edgeBlendApron() {
+      const apronW = (MAXX - MINX) + 220, apronD = (MAXZ - MINZ) + 220;
+      const SEG = 18;
+      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
+      const cSoil = new THREE.Color(0x6b4f33);
+      const cWild = new THREE.Color(0x6e7a48);   // neutral wild-grass edge tone
+      const _ac = new THREE.Color();
+      const apos = ag.attributes.position;
+      const acolors = new Float32Array(apos.count * 3);
+      const hasNoise = !!(window.noise && window.noise.simplex2);
+      for (let i = 0; i < apos.count; i++) {
+        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
+        const lx = apos.getX(i), lz = apos.getY(i);
+        const wx = CX + lx, wz = CZ - lz;
+        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
+        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
+        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
+        _ac.copy(cSoil).lerp(cWild, t);
+        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      }
+      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
+      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      apron.rotation.x = -Math.PI / 2;
+      apron.position.set(CX, 0.0, CZ);
+      apron.receiveShadow = true;
+      root.add(apron);
+    })();
+
     // =====================================================================
     // 2) FIELD PARCELS — patchwork of big rectangular fields. Each parcel:
     //    a single striped bulk quad (ONE draw call) + ONE InstancedMesh of
@@ -512,10 +547,13 @@
     // =====================================================================
     if (CBZ.buildHighway) {
       // REAL wide dirt country-road highway over the water to the desert.
+      // heightAt: grade-follow world/terrain.js relief (0 over this rect's
+      // flat playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
         path: [{ x: ROAD_X, z: ROAD_MINZ }, { x: ROAD_X, z: ROAD_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
         guardrail: true, lights: true, elevated: false, rng: rng,
+        heightAt: CBZ.terrainHeight,
       });
       // soft soil shoulder so the deck reads as raised land over the sea
       plane(ROAD_X, (ROAD_MINZ + ROAD_MAXZ) / 2, 24 + 8, ROAD_MAXZ - ROAD_MINZ, M.soil, 0.025);

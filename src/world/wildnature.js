@@ -12,10 +12,12 @@
 
    DRAW-CALL DISCIPLINE (owner rule #4 — the game is ~1000-NPC draw-call
    bound): EVERYTHING here is THREE.InstancedMesh. Thousands of trees cost
-   ~4-6 draw calls total, not thousands of meshes:
+   ~6-7 draw calls total, not thousands of meshes:
      • conifer   = 1 trunk IM + 1 stacked-cone crown IM
      • broadleaf = 1 trunk IM + 1 squashed-icosahedron crown IM
      • birch     = 1 thin-trunk IM + 1 small round crown IM  (shares broadleaf crown geo)
+     • snag      = 1 bare-trunk IM (NO crown — a dead/burned tree silhouette,
+                   the 4th species; cheaper than the others, not more)
      • rocks     = 1 icosahedron IM
      • grass     = 1 cross-billboard IM   (capped count)
    Per-instance scale + colour variation via instanceColor on a white-based
@@ -23,6 +25,13 @@
    call). frustumCulled=false on every InstancedMesh (r128's per-object
    bounding-sphere cull throws away instanced meshes whose origin is off
    screen — without this, whole tree fields vanish at the map edge).
+
+   SIMPLE DISTANCE LOD: a throttled onUpdate checks ONE distance (camera/
+   player to the wild-nature field's centre) and toggles castShadow off
+   across every species' InstancedMeshes when nobody is near enough to see
+   the shadows resolve (shadow-casting thousands of instanced trees at
+   backdrop range is pure wasted shadow-map fill-rate). O(species count)
+   per check, not O(instance count) — cheap regardless of how many trees.
 
    NO per-instance colliders: this is distant visual-only backdrop you can't
    reach (it lives on the un-walkable backdrop hills). Matches biome_forest,
@@ -158,6 +167,30 @@
     const trunkBirchGeo = new THREE.CylinderGeometry(0.11, 0.16, 1, 5);
     trunkBirchGeo.translate(0, 0.5, 0);
 
+    // SNAG (4th species) — a bare, gnarled dead/burned trunk with a couple of
+    // stub branches baked into ONE geo (still a single instanced draw call,
+    // no crown mesh at all — genuinely distinct silhouette: gaunt and leafless
+    // instead of another conical/round canopy). Adds visual variety to the
+    // backdrop without adding cost (it's cheaper than every other species).
+    const snagGeo = (function () {
+      const trunk = new THREE.CylinderGeometry(0.07, 0.20, 1, 5);
+      trunk.translate(0, 0.5, 0);
+      const parts = [trunk];
+      // two stub branches jutting off at fixed angles (unit space; baked in)
+      const stubs = [{ y: 0.55, len: 0.30, tilt: 0.9, rotY: 0.6 }, { y: 0.78, len: 0.22, tilt: -0.8, rotY: 2.6 }];
+      for (const s of stubs) {
+        const b = new THREE.CylinderGeometry(0.025, 0.05, s.len, 4);
+        b.translate(0, s.len / 2, 0);
+        b.rotateZ(s.tilt);
+        b.rotateY(s.rotY);
+        b.translate(0, s.y, 0);
+        parts.push(b);
+      }
+      const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+      if (merge) { const g = merge(parts, false); if (g) return g; }
+      return trunk;   // fallback (BufferGeometryUtils absent): plain bare trunk
+    })();
+
     // rocks: a single low icosahedron, jittered per-instance.
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
 
@@ -189,7 +222,7 @@
     //  flat playable ground (groundY<0.5 — only the backdrop relief qualifies),
     //  reject steep cliffs (normal.y<0.6). Survivors are sorted into species.
     // ============================================================
-    const conifers = [], broadleaves = [], birches = [], rockList = [], grasses = [];
+    const conifers = [], broadleaves = [], birches = [], snags = [], rockList = [], grasses = [];
     const STEP = 26;                                  // grid pitch (jittered)
     const J = STEP * 0.62;                            // jitter amplitude
     const CAP_TREES = 5200;                          // hard caps protect the frame budget
@@ -235,28 +268,34 @@
         // TREES — keep probability rises with elevation (lusher highlands).
         const treeP = 0.34 + Math.min(0.5, (y - 0.5) * 0.012);
         if (r > treeP) continue;
-        if (conifers.length + broadleaves.length + birches.length >= CAP_TREES) continue;
+        if (conifers.length + broadleaves.length + birches.length + snags.length >= CAP_TREES) continue;
 
         const pick = rng();
         const rot = rng() * 6.28;
         const lean = (rng() - 0.5) * 0.06;
-        if (pick < 0.6) {
+        if (pick < 0.56) {
           // CONIFER — taller, narrower; dominant on the high ground
           const h = 7 + rng() * 13;
           conifers.push({ x, z, y, h, tr: 0.55 + rng() * 0.5, rot, lean,
             cR: 0.7 + rng() * 0.5, cH: h * (0.9 + rng() * 0.25) });
-        } else if (pick < 0.86) {
+        } else if (pick < 0.80) {
           // BROADLEAF — squat, round canopy
           const h = 5 + rng() * 8;
           broadleaves.push({ x, z, y, h, tr: 0.7 + rng() * 0.6, rot, lean,
             cR: h * (0.42 + rng() * 0.16), cH: h * (0.5 + rng() * 0.2),
             cY: h * (0.7 + rng() * 0.1) });
-        } else {
+        } else if (pick < 0.93) {
           // BIRCH — thin, pale, airy
           const h = 6 + rng() * 7;
           birches.push({ x, z, y, h, tr: 0.6 + rng() * 0.5, rot, lean,
             cR: h * (0.26 + rng() * 0.12), cH: h * (0.34 + rng() * 0.16),
             cY: h * (0.74 + rng() * 0.08) });
+        } else {
+          // SNAG — sparse dead/bare trees (4th species), a bit shorter on
+          // average so a few gaunt silhouettes punctuate the canopy rather
+          // than dominate it.
+          const h = 5 + rng() * 9;
+          snags.push({ x, z, y, h, tr: 0.5 + rng() * 0.4, rot, lean });
         }
       }
     }
@@ -297,6 +336,7 @@
     //  BUILD the InstancedMeshes. Helper builds one species (trunk + crown)
     //  with per-instance matrix + instanceColor in a single pass.
     // ============================================================
+    const speciesIMs = [];   // every trunk/crown InstancedMesh built below (for the distance LOD pass)
     function buildSpecies(list, trunkGeo, crownGeo, opts) {
       const N = list.length;
       if (!N) return;
@@ -348,6 +388,7 @@
       trunkIM.instanceMatrix.needsUpdate = true;
       crownIM.instanceMatrix.needsUpdate = true;
       root.add(trunkIM); root.add(crownIM);
+      speciesIMs.push(trunkIM, crownIM);
     }
 
     // CONIFER — dark blue-green needles, brown bark
@@ -368,6 +409,34 @@
       tint: function (c, r) { c.setRGB(0.42 + r() * 0.16, 0.56 + r() * 0.14, 0.22 + r() * 0.10); },
       bark: function (c, r) { const s = 0.78 + r() * 0.14; c.setRGB(s, s, s * 0.94); },
     });
+
+    // SNAG (4th species) — a single-mesh species (bare trunk + stub branches
+    // baked into ONE geo, no separate crown IM needed — cheaper than the
+    // other three species, not more). Grey-brown, weathered/burned bark tint.
+    const snagIMs = [];
+    if (snags.length) {
+      const N = snags.length;
+      const snagMat = whiteMat(false);
+      const snagIM = new THREE.InstancedMesh(snagGeo, snagMat, N);
+      snagIM.castShadow = true; snagIM.receiveShadow = true;
+      snagIM.frustumCulled = false;
+      const sCol = new Float32Array(N * 3);
+      for (let i = 0; i < N; i++) {
+        const t = snags[i];
+        dummy.position.set(t.x, t.y, t.z);
+        dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+        dummy.scale.set(t.tr, t.h, t.tr);
+        dummy.updateMatrix();
+        snagIM.setMatrixAt(i, dummy.matrix);
+        const g = 0.30 + rng() * 0.14;               // grey-brown weathered wood
+        col.setRGB(g, g * 0.86, g * 0.72);
+        sCol[i * 3] = col.r; sCol[i * 3 + 1] = col.g; sCol[i * 3 + 2] = col.b;
+      }
+      snagIM.instanceColor = new THREE.InstancedBufferAttribute(sCol, 3);
+      snagIM.instanceMatrix.needsUpdate = true;
+      root.add(snagIM);
+      snagIMs.push(snagIM);
+    }
 
     // ============================================================
     //  ROCKS — one instanced icosahedron, grey/brown per-instance, flatShaded.
@@ -425,9 +494,44 @@
       root.add(grassIM);
     }
 
+    // ============================================================
+    //  SIMPLE DISTANCE LOD — thousands of tree instances render full detail
+    //  at every distance today. A throttled onUpdate checks ONE distance
+    //  (camera/player to the wilderness field's centre, the playfield AABB
+    //  midpoint) and toggles castShadow off across every tree species'
+    //  InstancedMeshes once nobody is close enough for the shadows to
+    //  resolve into anything visible — backdrop trees on distant hills are
+    //  never close to the camera, so this is close to a permanent win, but
+    //  it stays a real distance check (not a hardcoded off) so a flycam /
+    //  future traversal upgrade still gets shadows up close. Hysteresis band
+    //  avoids flicker at the boundary. O(species count), not O(instance
+    //  count) — cheap no matter how many trees CAP_TREES allows.
+    // ============================================================
+    (function distanceLOD() {
+      const allTreeIMs = speciesIMs.concat(snagIMs);
+      if (!CBZ.onUpdate || !allTreeIMs.length) return;
+      const lodCX = (pMinX + pMaxX) / 2, lodCZ = (pMinZ + pMaxZ) / 2;
+      const fieldR = Math.max(pMaxX - pMinX, pMaxZ - pMinZ) / 2;
+      const LOD_NEAR = fieldR + RING * 0.45, LOD_FAR = fieldR + RING * 0.65;   // hysteresis band
+      let detailed = true;
+      CBZ.onUpdate(99.2, function () {
+        const P = CBZ.player;
+        if (!P || !P.pos) return;
+        const d = Math.hypot(P.pos.x - lodCX, P.pos.z - lodCZ);
+        if (detailed && d > LOD_FAR) {
+          detailed = false;
+          for (let i = 0; i < allTreeIMs.length; i++) allTreeIMs[i].castShadow = false;
+        } else if (!detailed && d < LOD_NEAR) {
+          detailed = true;
+          for (let i = 0; i < allTreeIMs.length; i++) allTreeIMs[i].castShadow = true;
+        }
+      });
+    })();
+
     return {
       conifers: conifers.length, broadleaves: broadleaves.length,
-      birches: birches.length, rocks: rockList.length, grass: grasses.length,
+      birches: birches.length, snags: snags.length,
+      rocks: rockList.length, grass: grasses.length,
       usedTerrain: haveTerrain,
     };
   };
