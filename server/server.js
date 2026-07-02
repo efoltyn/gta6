@@ -85,6 +85,14 @@ const DEDUPE_RECONNECT = process.env.CBZ_NO_RECONNECT_DEDUPE !== "1";
 const HEARTBEAT_MS = Number(process.env.CBZ_HEARTBEAT_MS) || 15000;
 const HEARTBEAT_DEAD_MS = Number(process.env.CBZ_HEARTBEAT_DEAD_MS) || 50000;
 
+// S2: chunk-indexed spawn query cooldown, per socket — a client asking
+// "who lives/works near chunk (cx,cz)" (message {t:"pquery",cx,cz,r}) more
+// often than this just gets silently dropped (no error frame; the client's
+// own next tick tries again). Cheap enough at normal spawn-query rates that
+// this is a safety rail, not a real throttle.
+const PQUERY_COOLDOWN_MS = Number(process.env.CBZ_PQUERY_COOLDOWN_MS) || 500;
+const PQUERY_MAX_R = 20; // chunks (320m at 16m/chunk) — plenty for a spawn radius
+
 // ----------------------------------------------------------------- world ---
 // The world lives in server/worlds/<name>.sqlite (S1: node:sqlite, chunked
 // blob storage — see server/db.js) — saved characters keyed by pid, turf,
@@ -107,6 +115,12 @@ const DB_FILE = path.join(WORLD_DIR, sanitizeWorldName(worldName) + ".sqlite");
 // byte-for-byte in that case.
 let db = null;
 try { db = cbzdb.open(DB_FILE); } catch (e) { console.error(`[server] SQLite open failed (${e.message}) — falling back to legacy JSON world file`); db = null; }
+
+// S2: advertised only when a people table actually exists to answer it —
+// clients (and this codebase's OWN client, per BUILD-PLAN.md S2) MAY use
+// this to prefer a server-side chunk-indexed spawn query over local-only
+// data; a client that doesn't recognize "pquery" simply never sends one.
+const FEAT = db ? ["to", "persist", "pquery"] : ["to", "persist"];
 
 const world = { v: 1, name: worldName, savedAt: null, world: null, chars: {} };
 let worldDirtyImportPending = false; // set below when a legacy file was just imported into a fresh DB
@@ -163,6 +177,70 @@ if (db) {
     world.savedAt = legacy.savedAt || null;
     console.log(`[server] world "${worldName}" loaded <- ${WORLD_FILE} (${Object.keys(world.chars).length} characters)`);
   }
+}
+
+// S2 (BUILD-PLAN.md Stage S): first-boot import of a legacy world blob that
+// still carries the NPC ledger inline (`world.world.npc`, the pre-S2 shape
+// — either loaded straight from SQLite's "world" blob above, or from the
+// legacy-JSON-file fallback) — import it into the `people` table ONCE so no
+// existing server loses its population by upgrading, then strip the rider
+// from the in-memory/stored blob and mark it `peopleInDb:true` so every
+// save from here on goes through extractPeopleFromWorld() below instead.
+// Only runs when SQLite is actually available (people table requires it).
+if (db && world.world && world.world.npc && Array.isArray(world.world.npc.ids) && !world.world.peopleInDb) {
+  const importIds = world.world.npc.ids;
+  try {
+    const n = db.peoplePut(importIds);
+    world.world = Object.assign({}, world.world, { peopleInDb: true });
+    delete world.world.npc;
+    console.log(`[server] first boot: imported ${n} ledger people (of ${importIds.length} in the blob) into the people table`);
+    worldDirtyImportPending = true; // flushed below, once flush helpers exist
+  } catch (e) { console.error(`[server] people-table first-boot import failed: ${e.message}`); }
+}
+
+// people-table extraction/reassembly (S2): the worldBlob's `npc` rider
+// (net/netpersist.js worldBlob(), src/city/schedule.js's cityNpcLedger)
+// is the ONLY thing that moves between the wire shape and this table —
+// everything else in the blob (gangs/fracture/politics/econ/...) still
+// rides in `world.world` completely untouched, exactly as S1 left it.
+//
+// extractPeopleFromWorld(w): called on every incoming wsave. If `w.npc`
+// (the ledger rider, {v:1, ids:[...]}) is present, every entry is upserted
+// into the people table (peoplePut is idempotent by sid — see db.js), and
+// the STORED copy of the world blob has `npc` stripped and `peopleInDb`
+// stamped true, so the table is the single source of truth for population
+// going forward (the blob itself never re-accumulates it). If SQLite isn't
+// available, this is a no-op and the ledger keeps riding inline exactly
+// like it did before S2 — no behavior change without a people table.
+function extractPeopleFromWorld(w) {
+  if (!db || !w || !w.npc || !Array.isArray(w.npc.ids)) return w;
+  try {
+    db.peoplePut(w.npc.ids);
+  } catch (e) {
+    console.error(`[server] peoplePut failed (${e.message}) — keeping the ledger rider inline this save`);
+    return w; // never silently drop people: on failure, leave npc in the stored blob
+  }
+  const stripped = Object.assign({}, w, { peopleInDb: true });
+  delete stripped.npc;
+  return stripped;
+}
+
+// assembleWorldForWire(w): called whenever `world.world` is about to be
+// sent DOWN to a client (wload, on join). If the stored blob has people in
+// the table (`peopleInDb`), reassemble a complete `npc` rider from the
+// table's ALIVE rows so the client — old or new — receives a world blob
+// that is shape-identical to what it always received (a full ledger rider
+// living at `blob.npc`). The client stays completely protocol-compatible:
+// it has no idea a table exists on the other end. Dead (alive=0) people
+// never get reassembled onto the wire — they stay in the server's books
+// (peopleAll with no filter still sees them) but are never resurrected
+// into a client's live simulation.
+function assembleWorldForWire(w) {
+  if (!db || !w || !w.peopleInDb) return w;
+  let ids = [];
+  try { ids = db.peopleAll({ aliveOnly: true }).map((r) => r.data).filter(Boolean); }
+  catch (e) { console.error(`[server] peopleAll failed: ${e.message}`); }
+  return Object.assign({}, w, { npc: { v: 1, ids } });
 }
 
 // ev subtypes the server consumes (or emits) itself — never relayed between clients
@@ -272,7 +350,7 @@ function info() {
     maxPlayers: cfg.maxPlayers,
     passworded: !!cfg.password,
     version: 1,
-    feat: ["to", "persist"],
+    feat: FEAT,
     world: { name: worldName, savedAt: world.savedAt, autosaveSec },
   };
 }
@@ -448,9 +526,9 @@ function onConnection(conn, req) {
         t: "welcome",
         id: p.id,
         hostId,
-        feat: ["to", "persist"],
+        feat: FEAT,
         world: worldInfo,
-        server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers, iceServers: cfg.iceServers || [], feat: ["to", "persist"], world: worldInfo },
+        server: { name: cfg.name, motd: cfg.motd, tags: cfg.tags, maxPlayers: cfg.maxPlayers, iceServers: cfg.iceServers || [], feat: FEAT, world: worldInfo },
         players: [...players.values()].filter((q) => q.id !== p.id).map((q) => ({ id: q.id, name: q.name, role: q.role })),
       });
       // the host is an admin on their own server
@@ -460,7 +538,9 @@ function onConnection(conn, req) {
       // resume: an empty room's new simulator gets the saved world; a saved
       // character follows its pid anywhere. Mid-session host migrations never
       // reload from disk — the live sim stays authoritative.
-      if (firstIn && world.world) send(p, { t: "ev", e: "wload", world: world.world });
+      // S2: reassemble the ledger rider from the people table (no-op, and
+      // byte-identical to pre-S2 behavior, if peopleInDb was never stamped).
+      if (firstIn && world.world) send(p, { t: "ev", e: "wload", world: assembleWorldForWire(world.world) });
       if (p.pid && world.chars[p.pid]) send(p, { t: "ev", e: "cload", char: world.chars[p.pid] });
       return;
     }
@@ -485,7 +565,13 @@ function onConnection(conn, req) {
           break;
         }
         if (m.e === "wsave") { // only the sim host writes the world
-          if (p.id === hostId && m.world && typeof m.world === "object") { world.world = m.world; queueFlush(); }
+          if (p.id === hostId && m.world && typeof m.world === "object") {
+            // S2: extract the ledger rider into the people table before
+            // storing (see extractPeopleFromWorld's header above) — a
+            // no-op fallthrough (unstripped blob) when SQLite is absent.
+            world.world = extractPeopleFromWorld(m.world);
+            queueFlush();
+          }
           break;
         }
         if (m.e === "csave") { // per-character save keyed by the player's pid
@@ -508,6 +594,27 @@ function onConnection(conn, req) {
       case "chat":
         handleChat(p, m.text);
         break;
+      // S2: chunk-indexed spawn query — {t:"pquery", cx, cz, r} -> everyone
+      // whose home anchor falls within r chunks of (cx,cz), stripped down to
+      // spawn-relevant fields (sid/name/x/z/cash/alive — never the full
+      // `data` JSON; a client has no business seeing another person's whole
+      // ledger page over the wire). Answerable by ANY player, not just the
+      // host — it's a read-only query against server storage, not sim state.
+      // Rate-limited per socket (see PQUERY_COOLDOWN_MS); over-limit requests
+      // are just dropped, no error frame (the client's own next tick retries).
+      case "pquery": {
+        if (!db) { send(p, { t: "presult", cx: m.cx | 0, cz: m.cz | 0, people: [] }); break; }
+        const now = Date.now();
+        if (p._pqCooldown && now < p._pqCooldown) break;
+        p._pqCooldown = now + PQUERY_COOLDOWN_MS;
+        const cx = m.cx | 0, cz = m.cz | 0;
+        const r = Math.max(0, Math.min(PQUERY_MAX_R, m.r | 0 || 3));
+        let rows = [];
+        try { rows = db.peopleByChunk(cx, cz, r); } catch (e) { console.error(`[server] peopleByChunk failed: ${e.message}`); }
+        const people = rows.map((row) => ({ sid: row.sid, name: row.name, x: row.x, z: row.z, cash: row.cash, alive: row.alive }));
+        send(p, { t: "presult", cx, cz, people });
+        break;
+      }
     }
   };
 

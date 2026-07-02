@@ -169,7 +169,14 @@
   //  run ~280B, so 900 × 280B ≈ 250KB — still far under the wsave cap (S1,
   //  BUILD-PLAN.md Stage S: raised from 1.4MB to 15MB once server/db.js's
   //  chunked SQLite storage removed the server-side reason to keep it
-  //  tight; this LRU cap itself is S2's job to lift, not S1's).
+  //  tight). S2 landed the OTHER half of this: server/db.js's `people`
+  //  table now holds the FULL population server-side with no trim at all
+  //  (server.js extracts this module's serialize() output into the table
+  //  on every wsave and reassembles it on load — see that file's header);
+  //  the multiplayer wire shape here is unchanged, one full ledger rider
+  //  in, one full ledger rider out. THIS cap (the CLIENT's own in-memory
+  //  LRU, still 900) deliberately stays — client memory footprint is a
+  //  separate concern S4/S5 own, not something S2 touches.
   // ============================================================
   const CAP = 900, DEAL_R2 = 45 * 45;
   let led = {};                  // sid -> entry (plain JSON-able objects only)

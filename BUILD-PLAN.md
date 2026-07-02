@@ -93,7 +93,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 ## Stage S — SQLite backbone (server)
 
 - [x] **S1** `server/db.js` (node:sqlite): blobs stored chunked in SQLite — the 1.4MB socket cap dies.
-- [ ] **S2** `people` table replaces the ledger blob (cap removed); chunk-indexed spawn queries.
+- [x] **S2** `people` table replaces the ledger blob (cap removed); chunk-indexed spawn queries.
 - [ ] **S3** structures/containers tables; **S4** econ/market/political tables + server-side ticks; **S5** sqlite-wasm single-player parity.
 
 ## Stage O — OSS/Vite (workflow change; scheduled after core waves stabilize)

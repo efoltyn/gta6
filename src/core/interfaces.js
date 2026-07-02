@@ -188,10 +188,27 @@
   //      wealth, aggr, drug, cash, known, sex, lh(longHair), hh
   //      (household id, W8), rel:{r,f,l,a,g,s}|null } — compact ints.
   //    RULE: the two accessors return null, NEVER undefined. This
-  //      module is the SOLE authority on offline identity — don't grow
-  //      a parallel copy of its maps elsewhere, widen these instead.
+  //      module is the SOLE authority on offline identity, CLIENT-side —
+  //      don't grow a parallel copy of its maps elsewhere, widen these
+  //      instead. This module's own CAP (900, still standing) governs
+  //      client memory only.
   //    RIDERS: city/inheritance.js (offline heir lookups), familytree.js
   //      (mints a sid via cityPedStash at pairing time).
+  //    SERVER SIDE (S2, BUILD-PLAN.md Stage S): server/db.js's `people`
+  //      table is a SEPARATE, uncapped copy of this same population, kept
+  //      in sync one direction only — server.js's extractPeopleFromWorld()
+  //      upserts this module's serialize() output (the `blob.npc` worldBlob
+  //      rider) into the table on every wsave, and assembleWorldForWire()
+  //      rebuilds that exact rider from the table's alive rows on load.
+  //      The wire shape (and this module's own apply()) is UNCHANGED — the
+  //      table is invisible to this file and to old clients. server/db.js's
+  //      peopleByChunk(cx,cz,r) answers "who lives near chunk X" off an
+  //      indexed (cx,cz) home-anchor projection, exposed to clients as the
+  //      {t:"pquery",cx,cz,r} -> {t:"presult",...} message pair (feature-
+  //      advertised as "pquery" in welcome.feat); this module's own
+  //      cityPedDeal() deal-in scan does NOT consume it (synchronous
+  //      per-frame local scan vs. an async network round trip is not a
+  //      clean seam — S4's server ticks are the intended first consumer).
 
   // 11. CBZ.cityFamilyTree — EDGE SHAPE + heirOf SEMANTICS
   //    OWNER: city/familytree.js (edges array + accessors, :261-266)

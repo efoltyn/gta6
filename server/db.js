@@ -9,19 +9,25 @@
 // ~256KB rows so no single SQLite row, JS string, or JSON.stringify call
 // ever has to hold "the whole world" as one unit on the storage side either.
 //
-// This is Stage S, step S1 (BUILD-PLAN.md) — the FOUNDATION. S2-S5 decompose
-// these blobs into real tables (people, structures, econ, politics...); the
-// API below is shaped so that migration is additive:
+// Stage S, step S1 (BUILD-PLAN.md) built the FOUNDATION (blob store). S2
+// adds the FIRST real table on top of it — `people`, the population
+// registry (migration v2 below) — with S3-S5 to follow (structures,
+// econ/politics, sqlite-wasm parity). The API is shaped so each step is
+// additive:
 //   - open(path)              feature-detects node:sqlite, sets up pragmas
 //                              tuned for a game server, runs migrations.
-//   - blobPut/blobGet/blobDelete/blobList   the chunked blob store (S1..S4
-//                              use this directly; S2+ ADD real tables
-//                              alongside it via MIGRATIONS below — nothing
-//                              here has to change shape when that happens).
+//   - blobPut/blobGet/blobDelete/blobList   the chunked blob store (still
+//                              used for everything that ISN'T `people` —
+//                              gangs/fracture/politics/econ/etc riders).
+//   - peoplePut/peopleGet/peopleAll/peopleByChunk/peopleDelete/peopleCount
+//                              the S2 population registry — see migration
+//                              v2's own comment below for the shape and
+//                              server.js for how the `blob.npc` worldBlob
+//                              rider gets extracted into it / reassembled
+//                              out of it (the wire protocol is unchanged).
 //   - migrate(db, target)     schema_version tracked in PRAGMA user_version;
 //                              MIGRATIONS is an ordered array of {version,up}
-//                              — S2 appends { version: 2, up(db){ CREATE
-//                              TABLE people... } } to this same array.
+//                              — never edit a shipped migration, only append.
 //   - close()                 checkpoints the WAL and closes cleanly; wire
 //                              into the same SIGINT/SIGTERM hooks server.js
 //                              already uses for flushWorld().
@@ -74,7 +80,52 @@ const MIGRATIONS = [
       `);
     },
   },
+  // S2 (BUILD-PLAN.md Stage S): the population registry — the FIRST real
+  // table alongside the blob store. src/city/schedule.js's client-side
+  // ledger (CAP 900) still owns the live simulation and still rides the
+  // `blob.npc` worldBlob rider on the wire (net/netpersist.js is untouched
+  // — old clients keep working byte-for-byte); server.js now EXTRACTS that
+  // rider into this table on every wsave and REASSEMBLES it on load. The
+  // table exists so the server can (a) hold more people than the client
+  // cap ever could (the cap dies HERE, server-side; the client cap is a
+  // separate, still-standing concern — S4/S5's problem) and (b) answer
+  // "who lives/works near chunk (cx,cz)" without walking a JS array — see
+  // peopleByChunk below and the (cx,cz) index it hits. `data` keeps the
+  // FULL ledger entry as JSON (the long tail of rider fields — rel/hh/act/
+  // etc — stays schemaless this wave); the named columns are just an
+  // indexed projection of it, derived from the entry's home anchor
+  // (hx/hz in schedule.js) and work anchor (jx/jz) bucketed into 16m chunks.
+  {
+    version: 2,
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS people (
+          sid TEXT PRIMARY KEY,
+          name TEXT,
+          sex INTEGER NOT NULL DEFAULT 0,
+          x REAL NOT NULL DEFAULT 0,
+          z REAL NOT NULL DEFAULT 0,
+          cx INTEGER NOT NULL DEFAULT 0,
+          cz INTEGER NOT NULL DEFAULT 0,
+          workCx INTEGER NOT NULL DEFAULT 0,
+          workCz INTEGER NOT NULL DEFAULT 0,
+          cash REAL NOT NULL DEFAULT 0,
+          alive INTEGER NOT NULL DEFAULT 1,
+          data TEXT NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_people_chunk ON people (cx, cz);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_people_workchunk ON people (workCx, workCz);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_people_alive ON people (alive);`);
+    },
+  },
 ];
+
+// 16m-square chunks (matches F4's systems/chunks.js grid) — a person's
+// home/work anchor bucketed the same way the world already buckets pieces.
+const PEOPLE_CHUNK_M = 16;
+function chunkCoord(v) { return Math.floor((+v || 0) / PEOPLE_CHUNK_M); }
 
 function currentVersion(db) {
   return db.prepare("PRAGMA user_version").get().user_version | 0;
@@ -228,6 +279,115 @@ function open(file) {
     return stListIds.all(kind).map((r) => r.id);
   }
 
+  // ---- people table (S2): the population registry ------------------------
+  const stPeopleUpsert = db.prepare(`
+    INSERT INTO people (sid, name, sex, x, z, cx, cz, workCx, workCz, cash, alive, data, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(sid) DO UPDATE SET
+      name = excluded.name, sex = excluded.sex, x = excluded.x, z = excluded.z,
+      cx = excluded.cx, cz = excluded.cz, workCx = excluded.workCx, workCz = excluded.workCz,
+      cash = excluded.cash, alive = excluded.alive, data = excluded.data, updatedAt = excluded.updatedAt
+  `);
+  const stPeopleGet = db.prepare("SELECT * FROM people WHERE sid = ?");
+  const stPeopleDelete = db.prepare("DELETE FROM people WHERE sid = ?");
+  const stPeopleCount = db.prepare("SELECT COUNT(*) AS n FROM people");
+  const stPeopleAll = db.prepare("SELECT * FROM people ORDER BY sid ASC");
+  const stPeopleAllAlive = db.prepare("SELECT * FROM people WHERE alive = 1 ORDER BY sid ASC");
+  // INDEXED BY pins the query planner to idx_people_chunk explicitly — with
+  // no ANALYZE stats and a table this narrow, SQLite's cost estimator can
+  // otherwise prefer idx_people_alive (alive is nearly always 1, but on a
+  // tiny/fresh table the planner doesn't know that) instead of the (cx,cz)
+  // range index this query exists to hit. The hint makes "chunk-indexed"
+  // a guarantee, not a heuristic that flips with table size.
+  const stPeopleByChunk = db.prepare(
+    "SELECT * FROM people INDEXED BY idx_people_chunk WHERE alive = 1 AND cx BETWEEN ? AND ? AND cz BETWEEN ? AND ? ORDER BY sid ASC"
+  );
+
+  // a DB row -> the shape callers want: named/indexed columns alongside the
+  // full original ledger entry (parsed from `data`) so a consumer never has
+  // to reconstruct rider fields (rel/hh/act/...) from the projection.
+  function rowToEntry(row) {
+    if (!row) return null;
+    let data = null;
+    try { data = JSON.parse(row.data); } catch (e) { data = null; }
+    return {
+      sid: row.sid, name: row.name, sex: row.sex | 0,
+      x: row.x, z: row.z, cx: row.cx | 0, cz: row.cz | 0,
+      workCx: row.workCx | 0, workCz: row.workCz | 0,
+      cash: row.cash, alive: !!row.alive, updatedAt: row.updatedAt,
+      data,
+    };
+  }
+
+  // peoplePut: transactional upsert of ledger entries (schedule.js's `e`
+  // shape — sid/name/sex/hx/hz/jx/jz/tx/tz/cash/alive/...). Idempotent by
+  // sid — a person present in the batch inserts-or-overwrites; a person
+  // NOT in the batch is left completely untouched (no delete, ever — the
+  // persistence principle: the dead stay in the books, see MASTER-PLAN
+  // Part V.0). x/z come from the entry's last-seen position (tx/tz,
+  // falling back to the home anchor); cx/cz are the HOME anchor's chunk;
+  // workCx/workCz are the WORK anchor's chunk (falls back to home if the
+  // entry has no job/vendor/gang anchor). Returns the number of rows written.
+  function peoplePut(entries) {
+    if (!Array.isArray(entries) || !entries.length) return 0;
+    let n = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const e of entries) {
+        if (!e || !e.sid) continue;
+        const homeX = e.hx != null ? e.hx : (e.tx != null ? e.tx : 0);
+        const homeZ = e.hz != null ? e.hz : (e.tz != null ? e.tz : 0);
+        const workX = e.jx != null ? e.jx : homeX;
+        const workZ = e.jz != null ? e.jz : homeZ;
+        const x = e.tx != null ? e.tx : homeX;
+        const z = e.tz != null ? e.tz : homeZ;
+        stPeopleUpsert.run(
+          String(e.sid),
+          e.name != null ? String(e.name) : null,
+          e.sex ? 1 : 0,
+          +x || 0, +z || 0,
+          chunkCoord(homeX), chunkCoord(homeZ),
+          chunkCoord(workX), chunkCoord(workZ),
+          +e.cash || 0,
+          e.alive === false ? 0 : 1,
+          JSON.stringify(e),
+          Date.now()
+        );
+        n++;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch (e2) {}
+      throw err;
+    }
+    return n;
+  }
+
+  function peopleGet(sid) { return rowToEntry(stPeopleGet.get(sid)); }
+
+  function peopleAll(opts) {
+    const st = (opts && opts.aliveOnly) ? stPeopleAllAlive : stPeopleAll;
+    return st.all().map(rowToEntry);
+  }
+
+  // peopleByChunk: everyone whose HOME anchor falls within `r` chunks of
+  // (cx,cz) — a square (Chebyshev) radius, cheap and index-friendly (hits
+  // idx_people_chunk's leading (cx,cz) columns via a BETWEEN range scan).
+  // Dead (alive=0) rows never come back from a spawn query — they stay in
+  // the books (peopleAll with no aliveOnly filter still sees them).
+  function peopleByChunk(cx, cz, r) {
+    cx = cx | 0; cz = cz | 0; r = Math.max(0, r | 0);
+    return stPeopleByChunk.all(cx - r, cx + r, cz - r, cz + r).map(rowToEntry);
+  }
+
+  function peopleDelete(sid) {
+    const existed = !!stPeopleGet.get(sid);
+    if (existed) stPeopleDelete.run(sid);
+    return existed;
+  }
+
+  function peopleCount() { return stPeopleCount.get().n | 0; }
+
   function close() {
     try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch (e) {}
     try { db.close(); } catch (e) {}
@@ -242,8 +402,14 @@ function open(file) {
     blobGet,
     blobDelete,
     blobList,
+    peoplePut,
+    peopleGet,
+    peopleAll,
+    peopleByChunk,
+    peopleDelete,
+    peopleCount,
     close,
   };
 }
 
-module.exports = { open, isAvailable, CHUNK_SIZE, MIGRATIONS };
+module.exports = { open, isAvailable, CHUNK_SIZE, MIGRATIONS, PEOPLE_CHUNK_M, chunkCoord };
