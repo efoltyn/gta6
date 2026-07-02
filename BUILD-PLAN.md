@@ -61,7 +61,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 ## Stage P — Politics & protection
 
 - [x] **P1** `city/polity.js` (new): jurisdiction registry (city→state→country over existing geography), `worldDay` counter off dayPhase wrap, serialize/apply.
-- [ ] **P2** `city/officials.js` (new): Mayor Rosa Vale as a real scheduled ledger NPC (city hall hours, appearance window, 2 bodyguards), assassination → succession machine, `cityKillPed` wrap.
+- [x] **P2** `city/officials.js` (new): Mayor Rosa Vale as a real scheduled ledger NPC (city hall hours, appearance window, 2 bodyguards), assassination → succession machine, `cityKillPed` wrap.
 - [ ] **P3** `city/approval.js` (new): the 5-input approval equation @ 1Hz slices + POLITICS tab with sparkline.
 - [ ] **P4** `city/elections.js` (new): 7-day mayoral cycle, 2 candidates, voter blocs from district data, campaign events, results feed.
 - [ ] **P5** `city/protection.js` (new): unified `ProtectionDetail` — secret-service details for officials, hireable/armable security for the player, gang crews adopt the same record.
@@ -73,7 +73,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 ## Stage X — The world: countries, demographics, villages, hunger, relations
 
-- [ ] **X1** De-stub officials: generated names everywhere (no "Rosa Vale"); officials minted like all persistent people.
+- [x] **X1** De-stub officials: generated names everywhere (no "Rosa Vale"); officials minted like all persistent people.
 - [ ] **X2** Hunger: player hunger stat (Minecraft-style — food fills, high hunger blocks sprint/regen, starvation damages) + NPC hunger driven by wallet food spending; hungry+broke NPCs steal (shoplift/pickpocket routine override); famine→crime→unrest loop wired to food prices.
 - [ ] **X3** Country registry v2: 5+ countries as data records {wealthLevel, demographics config, settlement mix, currencyId placeholder} with varied state/city counts; polity tree + worldmap landmasses for the new territories (new islands/landmasses across the archipelago).
 - [ ] **X4** Demographics: per-region population config (skin-tone distribution, name pools per culture, dress palettes) read by makePed/crowds at spawn; region-correct populations, migration mixes them over time.
