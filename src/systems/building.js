@@ -42,11 +42,12 @@
    occupancy is building.js's own "is this logical slot already spoken
    for" index and doesn't exist anywhere else.
 
-   STAIRS' RAMP LIMITATION: CBZ.platforms' `ramp` record only interpolates
-   along Z (systems/physics.js:236-241, core/interfaces.js #4 — {z0,z1,
-   y0,y1}, no x-axis variant exists). So this wave only ships rot 0/2
-   stairs (z-axis climbs); rot 1/3 is rejected with a console.warn.
-   B3 lifts this once/if the ramp shape grows an x-axis sibling.
+   STAIRS' RAMP AXIS (B3): CBZ.platforms' `ramp` record grew an optional
+   x-axis sibling this step (systems/physics.js:~241, core/interfaces.js
+   #4 — additive to the DATA SHAPE, not CBZ.collide's frozen signature):
+   {axis:"x", x0,x1,y0,y1} alongside the original z-axis {z0,z1,y0,y1}
+   (no axis field = z, unchanged). So all 4 rots now ship: rot 0/2 climb
+   along z (unchanged math), rot 1/3 climb along x (NEW, place() below).
 
    CATALOG REGISTRATION CHOICE: BUILD-PLAN's one-line description says
    "as assets.define entries" — but CBZ.assets.define() (city/assets.js:
@@ -373,13 +374,6 @@
       stackable: true,
     };
 
-    if (kind === "stairs" && (rot === 1 || rot === 3)) {
-      return {
-        ok: false,
-        reason: "stairs: rot 1/3 (x-axis ramp) unsupported this wave — CBZ.platforms' ramp record only interpolates along z (core/interfaces.js #4); B3 TODO if the ramp shape grows an x-axis variant.",
-        slot: slot, key: key, pos: pos, fp: fp, rect: rect,
-      };
-    }
     if (occupancy.has(key)) return { ok: false, reason: "slot already occupied", slot: slot, key: key, pos: pos, fp: fp, rect: rect };
 
     const sup = checkSupport(kind, gx, gy, gz, cx, cz);
@@ -424,11 +418,11 @@
 
     const v = computeValidity(kind, gx, gy, gz, rot);
 
-    // HARD fails — enforced even under opts.skipValidity (a replayed save
-    // still can't double-claim a slot or resurrect an unsupported ramp
-    // rot); only support/world-collision are the trust-the-save skip.
+    // HARD fail — enforced even under opts.skipValidity (a replayed save
+    // still can't double-claim a slot); support/world-collision are the
+    // only trust-the-save skip. (B3: the old "stairs rot 1/3 unsupported"
+    // hard fail is gone now that the x-axis ramp exists — see below.)
     if (v.reason === "slot already occupied") return null;
-    if (v.reason && v.reason.indexOf("stairs:") === 0) { console.warn("[building] place: " + v.reason); return null; }
     if (!opts.skipValidity && !v.ok) return null;
 
     const pos = v.pos, fp = v.fp, rect = v.rect, sup = v.sup, key = v.key;
@@ -460,17 +454,20 @@
     if (kind === "stairs") {
       // Custom RAMP platform (systems/physics.js's groundAt ramp handling,
       // core/interfaces.js #4) — NOT the generic walkTop flat-top path.
-      // rot0 climbs toward +z, rot2 (only other supported rot) toward -z.
-      const dir = rot === 0 ? 1 : -1;
+      // rot0/rot2 climb along z (unchanged); rot1/rot3 climb along x (B3 —
+      // physics.js's ramp parsing grew an optional axis:"x" sibling for
+      // exactly this). dir is "which way is uphill" along the climb axis:
+      // rot0 → +z, rot2 → -z, rot1 → +x, rot3 → -x.
+      const onXAxis = (rot === 1 || rot === 3);
+      const dir = (rot === 0 || rot === 1) ? 1 : -1;
+      const rampShape = onXAxis
+        ? { axis: "x", x0: dir > 0 ? pos.x - CELL / 2 : pos.x + CELL / 2, x1: dir > 0 ? pos.x + CELL / 2 : pos.x - CELL / 2, y0: pos.y, y1: pos.y + WALL_H }
+        : { z0: dir > 0 ? pos.z - CELL / 2 : pos.z + CELL / 2, z1: dir > 0 ? pos.z + CELL / 2 : pos.z - CELL / 2, y0: pos.y, y1: pos.y + WALL_H };
       const ramp = {
         minX: pos.x - fp.hx, maxX: pos.x + fp.hx,
         minZ: pos.z - fp.hz, maxZ: pos.z + fp.hz,
         top: pos.y + WALL_H,
-        ramp: {
-          z0: dir > 0 ? pos.z - CELL / 2 : pos.z + CELL / 2,
-          z1: dir > 0 ? pos.z + CELL / 2 : pos.z - CELL / 2,
-          y0: pos.y, y1: pos.y + WALL_H,
-        },
+        ramp: rampShape,
         pieceId: piece.id,
       };
       CBZ.platforms.push(ramp);

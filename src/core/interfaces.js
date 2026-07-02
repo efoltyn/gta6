@@ -63,14 +63,20 @@
   // 4. CBZ.platforms + CBZ.groundAt() — WALKABLE HORIZONTAL SURFACES
   //    OWNER: array in config.js:15-17; groundAt() in
   //      systems/physics.js:230-247
-  //    SHAPE: { minX, maxX, minZ, maxZ, top, [ramp] } — ramp is
-  //      { z0, z1, y0, y1 }: a continuous sloped stair, not tread-steps.
+  //    SHAPE: { minX, maxX, minZ, maxZ, top, [ramp] } — ramp is a
+  //      continuous sloped stair, not tread-steps: { z0, z1, y0, y1 }
+  //      (default, interpolates along z) or, since B3, the additive
+  //      sibling { axis:"x", x0, x1, y0, y1 } (interpolates along x).
+  //      No axis field = the original z form, byte-identical math — this
+  //      is a DATA-SHAPE extension only, NOT a change to CBZ.collide's
+  //      frozen signature (#1).
   //    RULE: groundAt(x, z, fromY) only counts a top within STEP_UP of
   //      fromY (stops "climb a sheer wall"). Off in `escape` mode. Only
   //      the player's vertical physics reads this — NOT the NPC
   //      collide() path.
   //    RIDERS: physics.js player resolve; city/buildings.js (floors/
-  //      stairs/roofs push here).
+  //      stairs/roofs push here, always the z form); systems/building.js
+  //      (B3: player stairs, z form for rot0/2, x form for rot1/3).
 
   // 5. worldBlob serialize()/apply() — THE WORLD-SAVE OPT-IN
   //    OWNER: net/netpersist.js:113-137 (worldBlob), :218-226 (applyWorld)

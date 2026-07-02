@@ -238,7 +238,17 @@
         // stairs are stored as a sloped ramp so you glide up smoothly instead
         // of hopping tread to tread; flat floors/roofs just use their top.
         let top = p.top;
-        if (p.ramp) { const r = p.ramp; let t = (z - r.z0) / (r.z1 - r.z0); if (t < 0) t = 0; else if (t > 1) t = 1; top = r.y0 + t * (r.y1 - r.y0); }
+        // B3: ramp gained an optional x-axis sibling (core/interfaces.js #4 —
+        // additive to the DATA SHAPE only, not CBZ.collide's frozen signature).
+        // r.axis === "x" interpolates along x0/x1 instead of z0/z1; every
+        // existing ramp record (no axis field, city/buildings.js's stairs
+        // included) takes the untouched z-branch below, byte-identical math.
+        if (p.ramp) {
+          const r = p.ramp;
+          let t = (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
+          if (t < 0) t = 0; else if (t > 1) t = 1;
+          top = r.y0 + t * (r.y1 - r.y0);
+        }
         if (top <= reach && top > best) best = top;
       }
     }

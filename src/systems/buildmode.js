@@ -189,6 +189,99 @@
   function showUI() { hintEl.style.display = "block"; stripEl.style.display = "flex"; renderStrip(); }
   function hideUI() { hintEl.style.display = "none"; stripEl.style.display = "none"; }
 
+  /* ================= B3: SOCKET SNAP ================================
+     snapCandidate(kind, hitPiece, hitPoint, camDir) -> {gx,gy,gz,rot} | null
+
+     Pure function, no THREE/DOM/CBZ dependency (unit-testable in the node
+     harness with plain object literals) — derives a Rust-feel CANDIDATE
+     placement from the piece actually hit + the selected kind's known
+     compatibility, instead of raw "same cell as whatever's under the
+     crosshair" cell math. Returns null when the (kind, hit-piece kind)
+     pair has no compatibility rule here, so the caller (updateTarget,
+     below) falls back to the pre-B3 same-cell/top-face behaviour.
+
+       kind      — bm.kind, the piece the player currently has selected.
+       hitPiece  — { kind, gridPos:{gx,gy,gz}, rot } of the piece the
+                   raycast actually landed on.
+       hitPoint  — {x,y,z} world-space point the ray hit (THREE.Vector3
+                   duck-typed — only .x/.y/.z are read).
+       camDir    — {x,y,z} the ray's normalized look direction (only used
+                   to break a near-corner tie for edge kinds; safe to omit).
+
+     Multi-candidate cycling (TAB, corner aims with >1 plausible edge) is
+     explicitly OUT of scope this step — polish later; we always resolve
+     to a single best candidate. */
+  function snapCandidate(kind, hitPiece, hitPoint, camDir) {
+    if (!hitPiece || !hitPiece.gridPos || !hitPoint) return null;
+    const hp = hitPiece.gridPos;
+    const cx = hp.gx * CELL, cz = hp.gz * CELL;
+    const FILL_KINDS = { foundation: 1, floor: 1, roof: 1, stairs: 1 };
+
+    // 1) foundation selected + foundation hit -> the ADJACENT cell in the
+    // direction of the hit point (Rust's "expand the pad sideways" feel;
+    // NOT a vertical stack, even though a foundation's own top face is
+    // flush with the next gy up — this rule takes priority over that).
+    if (kind === "foundation" && hitPiece.kind === "foundation") {
+      const dx = hitPoint.x - cx, dz = hitPoint.z - cz;
+      if (Math.abs(dx) >= Math.abs(dz)) {
+        return { gx: hp.gx + (dx >= 0 ? 1 : -1), gy: hp.gy, gz: hp.gz, rot: 0 };
+      }
+      return { gx: hp.gx, gy: hp.gy, gz: hp.gz + (dz >= 0 ? 1 : -1), rot: 0 };
+    }
+
+    // 2) wall/doorframe selected + a FILL piece hit -> the NEAREST EDGE of
+    // THAT cell, picked by hit-point-to-edge distance (not just "which
+    // half the point is in" — a true nearest-edge test). Near a corner
+    // (top two edges within CORNER_EPS of each other) prefer whichever
+    // edge's OUTWARD normal faces the camera (most opposed to camDir) —
+    // that's the face the player is actually looking at.
+    if ((kind === "wall" || kind === "doorframe") && FILL_KINDS[hitPiece.kind]) {
+      const half = CELL / 2;
+      const edges = [
+        { rot: 0, d: Math.abs(hitPoint.z - (cz - half)), n: { x: 0, z: -1 } }, // north
+        { rot: 1, d: Math.abs(hitPoint.x - (cx + half)), n: { x: 1, z: 0 } },  // east
+        { rot: 2, d: Math.abs(hitPoint.z - (cz + half)), n: { x: 0, z: 1 } },  // south
+        { rot: 3, d: Math.abs(hitPoint.x - (cx - half)), n: { x: -1, z: 0 } }, // west
+      ];
+      edges.sort(function (a, b) { return a.d - b.d; });
+      let best = edges[0];
+      const CORNER_EPS = 0.2; // metres — "near a corner" tie band
+      if (camDir && Math.abs(edges[1].d - edges[0].d) < CORNER_EPS) {
+        const dot0 = edges[0].n.x * camDir.x + edges[0].n.z * camDir.z;
+        const dot1 = edges[1].n.x * camDir.x + edges[1].n.z * camDir.z;
+        best = dot1 < dot0 ? edges[1] : edges[0]; // more negative dot = normal opposes the look dir = faces the camera
+      }
+      return { gx: hp.gx, gy: hp.gy, gz: hp.gz, rot: best.rot };
+    }
+
+    // 3) floor/roof selected + a wall/doorframe hit -> the cell/level ABOVE
+    // that wall (the floor IT supports — matches building.js's own
+    // floor/roof support rule: "a wall at gy-1 supports a floor at gy").
+    if ((kind === "floor" || kind === "roof") && (hitPiece.kind === "wall" || hitPiece.kind === "doorframe")) {
+      return { gx: hp.gx, gy: hp.gy + 1, gz: hp.gz, rot: 0 };
+    }
+
+    // 4) stairs selected + a FILL piece hit -> the adjacent cell, SAME
+    // level, rot facing AWAY from the hit cell: the low step lands on the
+    // hit cell's fill piece and the climb runs away from it (the walk-up
+    // direction) — matches building.js place()'s rot->climb-direction
+    // convention (rot0/1 climb +z/+x, rot2/3 climb -z/-x).
+    if (kind === "stairs" && FILL_KINDS[hitPiece.kind]) {
+      const dx = hitPoint.x - cx, dz = hitPoint.z - cz;
+      if (Math.abs(dx) >= Math.abs(dz)) {
+        const east = dx >= 0;
+        return { gx: hp.gx + (east ? 1 : -1), gy: hp.gy, gz: hp.gz, rot: east ? 1 : 3 };
+      }
+      const south = dz >= 0;
+      return { gx: hp.gx, gy: hp.gy, gz: hp.gz + (south ? 1 : -1), rot: south ? 0 : 2 };
+    }
+
+    return null; // no compatibility rule for this pair — caller falls back
+  }
+  // exposed for the node harness (B3) — pure function, safe to call
+  // directly without the rest of build mode being active.
+  bm.snapCandidate = snapCandidate;
+
   /* ================= raycast helpers ================= */
   const raycaster = new THREE.Raycaster();
   const NDC_CENTER = new THREE.Vector2(0, 0);
@@ -234,19 +327,28 @@
     if (pieceHit) {
       const piece = CBZ.pieces.get(pieceHit.pieceId);
       if (piece && piece.gridPos) {
-        const isEdgeKind = (bm.kind === "wall" || bm.kind === "doorframe");
-        const n = pieceHit.hit.face ? pieceHit.hit.face.normal : null;
-        if (!isEdgeKind && n && n.y > 0.5) {
-          // hit a top face with a FILL kind selected → stack on top of it
-          gx = piece.gridPos.gx; gz = piece.gridPos.gz; gy = piece.gridPos.gy + 1;
+        // B3: ask the socket-snap function for a compatibility-driven
+        // candidate first (foundation-edge, wall-onto-edge, floor-above-
+        // wall, stairs-adjacent) — falls back to the pre-B3 same-cell/
+        // top-face behaviour below when there's no rule for this pair.
+        const cand = snapCandidate(bm.kind, { kind: piece.kind, gridPos: piece.gridPos, rot: piece.rot }, pieceHit.hit.point, raycaster.ray.direction);
+        if (cand) {
+          gx = cand.gx; gy = cand.gy; gz = cand.gz; rot = cand.rot;
         } else {
-          // same cell/level as the hit piece; walls/doorframes snap to
-          // whichever of the cell's 4 edges the hit point sits nearest
-          gx = piece.gridPos.gx; gz = piece.gridPos.gz; gy = piece.gridPos.gy;
-          if (isEdgeKind) {
-            const cx = gx * CELL, cz = gz * CELL;
-            const dxp = pieceHit.hit.point.x - cx, dzp = pieceHit.hit.point.z - cz;
-            rot = Math.abs(dxp) > Math.abs(dzp) ? (dxp > 0 ? 1 : 3) : (dzp > 0 ? 2 : 0);
+          const isEdgeKind = (bm.kind === "wall" || bm.kind === "doorframe");
+          const n = pieceHit.hit.face ? pieceHit.hit.face.normal : null;
+          if (!isEdgeKind && n && n.y > 0.5) {
+            // hit a top face with a FILL kind selected → stack on top of it
+            gx = piece.gridPos.gx; gz = piece.gridPos.gz; gy = piece.gridPos.gy + 1;
+          } else {
+            // same cell/level as the hit piece; walls/doorframes snap to
+            // whichever of the cell's 4 edges the hit point sits nearest
+            gx = piece.gridPos.gx; gz = piece.gridPos.gz; gy = piece.gridPos.gy;
+            if (isEdgeKind) {
+              const cx = gx * CELL, cz = gz * CELL;
+              const dxp = pieceHit.hit.point.x - cx, dzp = pieceHit.hit.point.z - cz;
+              rot = Math.abs(dxp) > Math.abs(dzp) ? (dxp > 0 ? 1 : 3) : (dzp > 0 ? 2 : 0);
+            }
           }
         }
       }
@@ -267,7 +369,10 @@
     }
 
     bm.gx = gx; bm.gy = gy; bm.gz = gz;
-    if (bm.kind === "wall" || bm.kind === "doorframe") bm.rot = rot;
+    // wall/doorframe always auto-face their snapped edge; stairs only get
+    // an auto-rot from snapCandidate's rule 4 (fill-piece hit) — everywhere
+    // else `rot` still equals bm.rot here, so this assignment is a no-op.
+    if (bm.kind === "wall" || bm.kind === "doorframe" || bm.kind === "stairs") bm.rot = rot;
 
     const v = B.validate(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
     bm.lastValid = v;
