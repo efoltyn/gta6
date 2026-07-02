@@ -234,6 +234,18 @@
     inner += row("Price", "$" + Q.price.toFixed(2), CYAN);
     inner += row("Fair value (anchor)", "$" + Q.anchor.toFixed(2), DIM);
     inner += "<div style='font-size:11px;color:" + hintCol + ";margin:2px 0 6px'>" + esc(hint) + "</div>";
+    // E8: the founder line — sim/billionaires.js mints a persistent
+    // shareholder NPC per company (co.founderSid); "estate-held" once one
+    // has been assassinated without an heir (co.founderSid goes null).
+    const foundCo = (CBZ.corps && typeof CBZ.corps.list === "function") ? CBZ.corps.list().find(function (c) { return c.tickerSym === sym; }) : null;
+    if (foundCo && foundCo.founderSid && CBZ.billionaires && typeof CBZ.billionaires.netWorthOf === "function") {
+      const fLive = CBZ.cityLedgerLive && CBZ.cityLedgerLive(foundCo.founderSid);
+      const fEntry = !fLive && CBZ.cityLedgerEntry ? CBZ.cityLedgerEntry(foundCo.founderSid) : null;
+      const fName = (fLive && fLive.name) || (fEntry && fEntry.name) || "Unknown";
+      inner += row("Founder", fName + " · " + money(CBZ.billionaires.netWorthOf(foundCo.founderSid)), GOLD);
+    } else if (foundCo && !foundCo.founderSid) {
+      inner += row("Founder", "None (estate-held)", DIM);
+    }
     inner += "<canvas id='stockSpark_" + esc(sym) + "' width='260' height='40' style='display:block;margin-bottom:8px'></canvas>";
     if (pos && pos.qty > 0) {
       inner += row("Position", pos.qty + " sh @ avg $" + pos.avgCost.toFixed(2));

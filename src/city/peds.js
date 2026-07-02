@@ -1004,6 +1004,7 @@
     if (CBZ.npcEcon && CBZ.npcEcon.reset) CBZ.npcEcon.reset();   // E4: fresh city → cohort wallets re-seeded off the fresh population
     if (CBZ.corps && CBZ.corps.reset) CBZ.corps.reset();   // E5: fresh city → the roster resets (re-claims outlets on the next build tick)
     if (CBZ.stocks && CBZ.stocks.reset) CBZ.stocks.reset();   // E7: fresh city → exchange/portfolio/index reset (no stale prior-run IPO tickers)
+    if (CBZ.billionaires && CBZ.billionaires.reset) CBZ.billionaires.reset();   // E8: fresh city → founders/holdings re-mint on the next tick
     CBZ.cityDrops.length = 0;
     // the homeless are carved out of the ped budget so the TOTAL stays flat
     // (perf: redistribute, never add). Deterministic from the seeded stream.
