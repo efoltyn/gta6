@@ -243,13 +243,29 @@
   }
 
   // ---- the hourly tick: priceIndex every hour, settlement every 24 --------
+  // M4: priceIndex = (category CPI) × (sim/inflation.js's own compounding
+  // price LEVEL for this jurisdiction's country). SCOPE NOTE (adapt, don't
+  // silently narrow — see that file's header for the full rationale): only
+  // DEFAULT_ID ("libertyville") has a real category market behind it
+  // (sim/market.js is city-wide, republic-only) — every OTHER country's
+  // jurisdiction previously inherited this SAME shared city-wide `idx`
+  // verbatim (a pre-M4 placeholder, not a deliberate design), which made
+  // sim/forex.js's own PPP term ("repPI/countryPI") a permanent no-op for
+  // every country (identical numerators/denominators). This wave gives
+  // every non-default jurisdiction a flat 1.0 category base instead, so its
+  // priceIndex is now driven purely by ITS OWN country's real, diverging π
+  // — exactly the divergence forex's PPP term was always waiting for.
   function hourTick(m) {
     const idx = computePriceIndex();
+    const inflMod = CBZ.inflation;
     for (const id in m.reg) {
       const st = m.reg[id];
-      st.priceIndex = idx;
+      const baseIdx = (id === DEFAULT_ID) ? idx : 1.0;
+      const infl = (inflMod && typeof inflMod.priceLevel === "function") ? inflMod.priceLevel(id) : 1.0;
+      const pi = baseIdx * infl;
+      st.priceIndex = (isFinite(pi) && pi > 0) ? clampNum(0.001, 1e9, pi) : st.priceIndex;
       // E3: one hourly sample into this jurisdiction's sparkline rings.
-      pushHist(m, id, "priceIndex", idx);
+      pushHist(m, id, "priceIndex", st.priceIndex);
       pushHist(m, id, "activity", st.activity);
     }
     m.dayHrAcc = (m.dayHrAcc || 0) + 1;
@@ -300,8 +316,13 @@
       const st = m.reg[id];
       if (isFinite(src.activity)) st.activity = clampNum(0.1, 3.0, +src.activity);
       if (isFinite(src.employment)) st.employment = clampNum(0, 1, +src.employment);
-      if (isFinite(src.piYest)) st.piYest = clampNum(0.1, 3.0, +src.piYest);
-      if (isFinite(src.priceIndex)) st.priceIndex = clampNum(0.1, 3.0, +src.priceIndex);
+      // M4: priceIndex/piYest can legitimately exceed the old [0.1,3.0] band
+      // once sim/inflation.js's compounding price level is in play (a save
+      // taken mid-hyperinflation must round-trip, not get silently clamped
+      // back down on load) — widened to a generous numeric-safety-only band,
+      // matching this file's own hourTick clamp above.
+      if (isFinite(src.piYest)) st.piYest = clampNum(0.001, 1e9, +src.piYest);
+      if (isFinite(src.priceIndex)) st.priceIndex = clampNum(0.001, 1e9, +src.priceIndex);
       if (isFinite(src.taxRate)) st.taxRate = clampNum(0, 1, +src.taxRate);
       if (isFinite(src.treasury) && src.treasury != null) st.treasury = +src.treasury;
     }

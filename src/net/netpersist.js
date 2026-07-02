@@ -158,6 +158,9 @@
     if (CBZ.npcEcon && CBZ.npcEcon.serialize) try { blob.npce = CBZ.npcEcon.serialize(); } catch (e) {}
     if (CBZ.corps && CBZ.corps.serialize) try { blob.corp = CBZ.corps.serialize(); } catch (e) {}
     if (CBZ.stocks && CBZ.stocks.serialize) try { blob.stk = CBZ.stocks.serialize(); } catch (e) {}
+    // M4: inflation's own rider (NOT folded into blob.cb — see sim/
+    // inflation.js's header for why the two lifecycles stay separate).
+    if (CBZ.inflation && CBZ.inflation.serialize) try { blob.inf = CBZ.inflation.serialize(); } catch (e) {}
     return blob;
   }
 
@@ -306,6 +309,10 @@
     if (w.npce && CBZ.npcEcon && CBZ.npcEcon.apply) try { CBZ.npcEcon.apply(w.npce); } catch (e) { console.error("[netpersist]", e); }
     if (w.corp && CBZ.corps && CBZ.corps.apply) try { CBZ.corps.apply(w.corp); } catch (e) { console.error("[netpersist]", e); }
     if (w.stk && CBZ.stocks && CBZ.stocks.apply) try { CBZ.stocks.apply(w.stk); } catch (e) { console.error("[netpersist]", e); }
+    // M4: inflation's own apply() just restores pi/level/prevTreasury per
+    // country — no ordering dependency on anything above (rides right
+    // beside w.stk, same "no ordering dependency" family as w.fx/w.cb).
+    if (w.inf && CBZ.inflation && CBZ.inflation.apply) try { CBZ.inflation.apply(w.inf); } catch (e) { console.error("[netpersist]", e); }
   }
 
   function applyGangs(rows) {

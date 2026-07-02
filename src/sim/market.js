@@ -154,15 +154,30 @@
     const lv = g.cityMarket.lvl[cat];
     return lv ? lv.p : 1.0;
   }
-  // itemPrice(name) -> ITEMS[name].value scaled by its category's live price,
-  // EXCEPT drugs, which the district engine owns (returned at flat catalog
-  // value — callers who want the real drug price use streetPrice/wholesalePrice).
+  // M4: the compounding inflation price level (sim/inflation.js), read once
+  // per call — defaults to 1.0 if that file isn't loaded (day-one/pre-M4
+  // behavior, byte-identical). This is a SEPARATE multiplier from the
+  // per-category `price(cat)` above: `price(cat)` stays the tight [0.6,1.8]
+  // relative flood-vs-scarcity band (untouched by this wave), while THIS
+  // factor is the overall, unbounded-upward price LEVEL — multiplicative on
+  // top, so relative category dynamics stay intact exactly as the task
+  // brief specifies. No-arg call defaults to the republic (this file is the
+  // republic's own city-wide shim).
+  function inflationLevel() {
+    return (CBZ.inflation && typeof CBZ.inflation.priceLevel === "function") ? CBZ.inflation.priceLevel() : 1.0;
+  }
+  // itemPrice(name) -> ITEMS[name].value scaled by its category's live price
+  // AND the live inflation level, EXCEPT drugs, which the district engine
+  // owns (returned at flat catalog value × inflation — callers who want the
+  // real drug price use streetPrice/wholesalePrice; district drug pricing
+  // itself is untouched, only the catalog-value fallback here inflates).
   function itemPrice(name) {
     const ITEMS = CBZ.cityEcon && CBZ.cityEcon.ITEMS;
     const it = ITEMS && ITEMS[name];
     if (!it) return 0;
-    if (it.tag === "drug") return Math.round(it.value);
-    return Math.round(it.value * price(categoryOfTag(it.tag)));
+    const infl = inflationLevel();
+    if (it.tag === "drug") return Math.round(it.value * infl);
+    return Math.round(it.value * price(categoryOfTag(it.tag)) * infl);
   }
   // trend(category) -> "up" | "down" | "flat", vs the price snapshotted at
   // the last day boundary (±1.5% threshold — small daily wobble reads flat).

@@ -187,7 +187,10 @@
     for (const dk of DISTRICT_KEYS) initByDist[dk] = 0;
     let initTotal = 0;
     for (const row of rows) { initTotal += row.wallet; initByDist[row.d] += row.wallet; }
-    g.npcEcon = { rows: rows, entPool: 0, initTotal: initTotal, initByDist: initByDist, hrAcc: 0 };
+    // M4: wageIndex — see hourTick()'s own header comment for the real-wage-
+    // squeeze mechanism this drives. Starts at parity (1.0), same as the
+    // priceIndex it chases.
+    g.npcEcon = { rows: rows, entPool: 0, initTotal: initTotal, initByDist: initByDist, hrAcc: 0, wageIndex: 1.0 };
   }
   function ensureInit() { if (!g.npcEcon || !g.npcEcon.rows) reset(); }
   function rowFor(dk, cls) {
@@ -296,12 +299,36 @@
   }
 
   // ---- the hourly pass: income in, food/goods/ent spend out ----------------
+  // M4: REAL-WAGE SQUEEZE — nominal wages no longer track the live
+  // priceIndex INSTANTLY (the old flat clamp(0.85,1.15,...) effectively
+  // froze the nominal wage bump at +15% forever once priceIndex compounded
+  // past that ceiling, which is "honest" by accident but not by design).
+  // wageIndex now CHASES the live priceIndex with a lag: it closes
+  // WAGE_CATCHUP_PER_DAY (30%) of the gap per day (converted to an
+  // equivalent per-hour rate so it composes correctly under this file's
+  // hourly tick — same "daily lerp, expressed per-tick" idiom sim/
+  // econstate.js's own SETTLE_LERP already uses). Honest-money contract:
+  // inflation TRANSFERS value, it never mints it — while wageIndex trails
+  // priceIndex, real income (income ÷ priceIndex) is strictly below parity;
+  // the catch-up closes MOST but never ALL of that gap (the steady-state
+  // ratio under sustained inflation rate π is wageIndex/priceIndex =
+  // c/(c+π/365) where c=0.3 — negligible at the 2% seed drift, a real,
+  // felt, but bounded squeeze under sustained high/hyperinflation π,
+  // verified by m4harness's own real-wage-squeeze test). The clamp below is
+  // a wide NUMERIC safety band only (extreme-π stability), not an economic
+  // one — it replaces the old tight [0.85,1.15] band entirely.
+  const WAGE_CATCHUP_PER_DAY = 0.3;
+  const WAGE_CATCHUP_PER_HOUR = 1 - Math.pow(1 - WAGE_CATCHUP_PER_DAY, 1 / 24);
   function hourTick() {
     ensureInit();
     const M = g.npcEcon;
     const activity = (CBZ.econState && typeof CBZ.econState.activity === "function") ? CBZ.econState.activity() : 1.0;
     const est = (CBZ.econState && CBZ.econState.get) ? CBZ.econState.get() : null;
-    const priceAdj = clampNum(0.85, 1.15, (est && est.priceIndex != null) ? est.priceIndex : 1.0);
+    const rawPI = (est && est.priceIndex != null) ? est.priceIndex : 1.0;
+    if (M.wageIndex == null) M.wageIndex = 1.0;
+    M.wageIndex += (rawPI - M.wageIndex) * WAGE_CATCHUP_PER_HOUR;
+    if (!isFinite(M.wageIndex)) M.wageIndex = 1.0;
+    const priceAdj = clampNum(0.1, 1000, M.wageIndex);
     // E5/E7 seam: this hour's per-district spend across every widened
     // category, for sim/corporations.js's outletRevenue (Bunbros/Ironclad/
     // Meridian/Apex all read this instead of duplicating this income/
@@ -357,6 +384,7 @@
       initTotal: M.initTotal || 0,
       initByDist: Object.assign({}, M.initByDist),
       hrAcc: M.hrAcc || 0,
+      wageIndex: M.wageIndex != null ? M.wageIndex : 1.0,
     };
   }
   function apply(obj) {
@@ -371,6 +399,7 @@
       if (isFinite(src.wallet)) row.wallet = Math.max(0, +src.wallet);
       if (isFinite(src.employedFrac)) row.employedFrac = clampNum(0, 1, +src.employedFrac);
     }
+    if (isFinite(obj.wageIndex)) M.wageIndex = clampNum(0.1, 1000, +obj.wageIndex);
     if (isFinite(obj.entPool)) M.entPool = Math.max(0, +obj.entPool);
     if (isFinite(obj.initTotal) && obj.initTotal > 0) M.initTotal = +obj.initTotal;
     if (obj.initByDist) for (const dk of DISTRICT_KEYS) if (isFinite(obj.initByDist[dk])) M.initByDist[dk] = +obj.initByDist[dk];

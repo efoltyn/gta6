@@ -214,6 +214,23 @@
   const STATE_BLEND_LERP = 0.25;  // daily lerp factor: state approval -> avg(child cities)
   const COUNTRY_BLEND_LERP = 0.20; // daily lerp factor: country approval -> avg(child states)
   const FEED_LOW = 35, FEED_HIGH = 65;
+  // M4: INFLATION TERM — BUILD-PLAN's own "−12·max(0, π−5%)" read literally
+  // (π as a fraction, −12 as the coefficient) is far too weak to read as
+  // "politically lethal": at π=15% that's only −1.2, less than a rounding
+  // error next to the ±22-point econ/crime terms below. CALIBRATION (this
+  // file's own report documents the choice too): those two terms scale a
+  // raw input ∈[-1,1] by 22, so a SINGLE input maxes out around ±22 — the
+  // scale this equation's other terms live at. Reading the plan's intent
+  // ("10% excess inflation costs ~double-digit approval") against that
+  // scale: INFLATION_COEF=120 puts 10 points of excess π (π=15%) at exactly
+  // −12 (120·0.10), squarely in the same double-digit range crime/econ
+  // themselves produce — the plan's own coefficient, reinterpreted at the
+  // SAME per-point scale its sibling terms already use, not literally
+  // multiplied by the raw fractional π. No cap on the term itself (like
+  // events/propaganda below, only the FINAL target clamps to [2,98]) — a
+  // president facing real hyperinflation (M6) should be able to bleed
+  // approval faster than any other single input, which is the point.
+  const INFLATION_COEF = 120, INFLATION_THRESHOLD = 0.05;
 
   function clampNum(lo, hi, v) { return Math.max(lo, Math.min(hi, v)); }
 
@@ -329,11 +346,26 @@
     const support = (w && w.politics && w.politics.support) || 0;
     return support * 0.1;
   }
-  // pure function, exported for the harness: given the 5 raw inputs, the
+  // M4: inflation input — sim/inflation.js's own π for this jurisdiction's
+  // country (accepts either a country id or a capital/jurisdiction id — see
+  // that file's header; `rec.econ || rec.id` is the SAME jurisdiction key
+  // econOf() above already reads). Guarded — 0 (no political cost) if
+  // sim/inflation.js isn't loaded, matching every other guarded read in
+  // this file. Already at final scale (like events/propaganda below) —
+  // targetFrom adds it directly, no further coefficient at the call site.
+  function inflationInput(rec) {
+    if (!CBZ.inflation || typeof CBZ.inflation.rateForJurisdiction !== "function") return 0;
+    const pi = CBZ.inflation.rateForJurisdiction(rec.econ || rec.id);
+    if (!isFinite(pi)) return 0;
+    return -INFLATION_COEF * Math.max(0, pi - INFLATION_THRESHOLD);
+  }
+  // pure function, exported for the harness: given the 6 raw inputs, the
   // exact target formula (no game-state reads) — lets the harness verify
   // the arithmetic at a fixed vector without mocking every subsystem.
-  function targetFrom(econ, crime, services, events, propaganda) {
-    return clampNum(2, 98, 50 + 22 * econ + 22 * crime + 16 * services + events + propaganda);
+  // `inflation` defaults to 0 so pre-M4 5-arg call sites/harnesses still work.
+  function targetFrom(econ, crime, services, events, propaganda, inflation) {
+    inflation = inflation || 0;
+    return clampNum(2, 98, 50 + 22 * econ + 22 * crime + 16 * services + events + propaganda + inflation);
   }
   function computeInputs(rec) {
     const es = econOf(rec);
@@ -342,9 +374,10 @@
     const services = servicesInput(rec);
     const events = eventsInput(rec);
     const propaganda = propagandaInput();
+    const inflation = inflationInput(rec);
     return {
-      hasEcon: !!es, econ: econ, crime: crime, services: services, events: events, propaganda: propaganda,
-      target: targetFrom(econ, crime, services, events, propaganda),
+      hasEcon: !!es, econ: econ, crime: crime, services: services, events: events, propaganda: propaganda, inflation: inflation,
+      target: targetFrom(econ, crime, services, events, propaganda, inflation),
     };
   }
 
@@ -687,7 +720,13 @@
       bars.appendChild(miniBar("Services", inp.services, 1));
       bars.appendChild(miniBar("Events", inp.events, 20));
       bars.appendChild(miniBar("Propaganda", inp.propaganda, 10));
+      bars.appendChild(miniBar("Inflation", inp.inflation, 30));
       c.appendChild(bars);
+      // M4: raw π%, right beside the equation's own inflation-TERM mini-bar
+      // above — the mini-bar shows the approval hit, this row shows the
+      // actual number driving it (sim/inflation.js's own CPI).
+      const piNow = (CBZ.inflation && CBZ.inflation.rateForJurisdiction) ? CBZ.inflation.rateForJurisdiction(rec.econ || rec.id) : null;
+      if (piNow != null) c.appendChild(row("Inflation (π)", (piNow >= 0 ? "+" : "") + (piNow * 100).toFixed(1) + "%/yr", piNow > INFLATION_THRESHOLD ? "#ff6a5e" : "#8fe08a"));
       c.appendChild(row("Misery index (city-wide)", (CBZ.hunger && CBZ.hunger.miseryIndex ? (CBZ.hunger.miseryIndex() * 100).toFixed(0) + "%" : "—")));
     } else {
       c.appendChild(el("div", "font:12px system-ui;color:#7e8aa3;margin-top:4px;", "Not simulated yet — no live EconState behind this jurisdiction."));

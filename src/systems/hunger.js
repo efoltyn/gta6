@@ -229,14 +229,23 @@
     for (let i = 0; i < rows.length; i++) if (rows[i].d === dk && rows[i].c === cls) return rows[i];
     return null;
   }
+  // M4: real, compounding inflation on top of market.js's own relative
+  // [0.6,1.8] food-category band — see sim/inflation.js's header for why
+  // these are two separate multipliers. Defaults to 1.0 (day-one/pre-M4
+  // behavior, byte-identical) if that file isn't loaded.
+  function inflationLevel() {
+    return (CBZ.inflation && typeof CBZ.inflation.priceLevel === "function") ? CBZ.inflation.priceLevel() : 1.0;
+  }
   // mealCost() — CBZ.hunger's public "what does one meal cost right now"
   // read: a flat per-head dollar figure scaled by the SAME live market food
-  // price every shop register already reads (sim/market.js). Consumed by
-  // city/schedule.js's ledger fastForward() (one guarded call) and internally
-  // as the parity baseline for the cohort ratio below.
+  // price every shop register already reads (sim/market.js), NOW ALSO
+  // scaled by the real compounding inflation level — a starving cohort's
+  // "what does it cost to eat" reads the SAME number the register does.
+  // Consumed by city/schedule.js's ledger fastForward() (one guarded call)
+  // and internally as the parity baseline for the cohort ratio below.
   function mealCost() {
     const p = (CBZ.market && CBZ.market.price) ? CBZ.market.price("food") : 1.0;
-    return MEAL_DOLLAR * p;
+    return MEAL_DOLLAR * p * inflationLevel();
   }
   function classMealBase(c) { return CLASS_WAGE[c] * EMPLOYED_FRAC[c] * FOOD_PROP; }
 
@@ -244,7 +253,11 @@
   function hourTick() {
     ensureInit();
     const M = g.hungerWorld;
-    const foodPrice = (CBZ.market && CBZ.market.price) ? CBZ.market.price("food") : 1.0;
+    // M4: the REAL, inflation-compounded food price — same reasoning as
+    // mealCost() above (needed() must reflect what a meal actually costs
+    // right now, not just the relative category wobble, for the famine
+    // lever to track real inflation).
+    const foodPrice = ((CBZ.market && CBZ.market.price) ? CBZ.market.price("food") : 1.0) * inflationLevel();
     const lastSpend = (CBZ.npcEcon && CBZ.npcEcon.lastSpend) || null;
     for (const dk of districtKeys()) {
       // this district's ACTUAL food dollars spent last hour (npcecon.js's

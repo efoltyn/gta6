@@ -9,8 +9,10 @@
      • MARKETS  — sim/market.js's 6 category prices + sim/econstate.js's CPI/
                   activity/employment/treasury, each row with a tiny inline
                   sparkline (E3 legibility: the invisible economy, on your phone);
-                  sibling cards 💱 CURRENCY EXCHANGE (M2) and 🏦 CENTRAL BANKS
-                  (M3: policy rate/independence/governor per country) ride here too
+                  sibling cards 💱 CURRENCY EXCHANGE (M2), 🏦 CENTRAL BANKS
+                  (M3: policy rate/independence/governor per country), and
+                  📉 INFLATION (M4: real π%/yr per country + sparkline,
+                  republic sorted first) all ride here too
      • CREW     — your founded gang: name, live members, turf held
      • VITALS   — HP, hunger, tiredness, injuries
 
@@ -399,6 +401,61 @@
     return card("🏦 CENTRAL BANKS", inner);
   }
 
+  // ---- M4: INFLATION — read-only, one row per country: π%/yr + a trailing
+  //      sparkline, same row+sparkline idiom marketsHtml()/fxHtml()/cbHtml()
+  //      above all use. The republic's own row sorts first (task brief:
+  //      "Republic's CPI prominent") — every other country follows in
+  //      sim/inflation.js's own list() order.
+  function inflHtml(rowsData) {
+    if (!rowsData || !rowsData.length) {
+      return card("📉 INFLATION", "<div style='font-size:13px;color:" + DIM + "'>No inflation data available.</div>");
+    }
+    const sorted = rowsData.slice().sort(function (a, b) {
+      if (a.id === "republic") return -1;
+      if (b.id === "republic") return 1;
+      return 0;
+    });
+    let inner = "";
+    sorted.forEach(function (r) {
+      const hot = r.pi > 0.05;
+      const col = hot ? RED : (r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM));
+      const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
+      inner += "<div style='display:flex;justify-content:space-between;align-items:center;padding:3px 0'>" +
+        "<span style='font-size:12px;color:" + DIM + "'>" + esc(r.name || r.id) + "</span>" +
+        "<span style='display:flex;align-items:center;gap:8px'>" +
+        "<span style='font-weight:600;font-size:13px;color:" + col + "'>" + (r.pi >= 0 ? "+" : "") + (r.pi * 100).toFixed(1) + "%/yr " + arrow + "</span>" +
+        "<canvas id='inflSpark_" + esc(r.id) + "' width='56' height='18' style='display:block'></canvas>" +
+        "</span></div>";
+    });
+    return card("📉 INFLATION", inner);
+  }
+  // paints each country's π sparkline canvas — same DOM/canvas-only split as
+  // drawSparklines()/drawFxSparklines() above (a no-op outside a real DOM).
+  function drawInflSparklines(rowsData) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    (rowsData || []).forEach(function (r) {
+      const cv = document.getElementById("inflSpark_" + r.id);
+      if (!cv || typeof cv.getContext !== "function") return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const w = cv.width || 56, h = cv.height || 18;
+      if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+      const hist = (CBZ.inflation && typeof CBZ.inflation.history === "function") ? CBZ.inflation.history(r.id) : [];
+      if (!hist || hist.length < 2) return;
+      const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+      const span = (hi - lo) || 0.0001;
+      ctx.strokeStyle = r.trend === "up" ? RED : (r.trend === "down" ? GREEN : DIM);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach(function (v, i) {
+        const x = (i / (hist.length - 1)) * w;
+        const y = h - ((v - lo) / span) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
   function crewApp() {
     const pg = g.playerGang;
     if (pg && pg.founded) {
@@ -610,6 +667,11 @@
       const cbRows = (CBZ.centralbank && typeof CBZ.centralbank.list === "function") ? CBZ.centralbank.list() : [];
       html += cbHtml(cbRows);
     } catch (e) {}
+    let inflRows = [];
+    try {
+      inflRows = (CBZ.inflation && typeof CBZ.inflation.list === "function") ? CBZ.inflation.list() : [];
+      html += inflHtml(inflRows);
+    } catch (e) {}
     try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}
     try { html += vitalsApp(); } catch (e) {}
@@ -617,6 +679,7 @@
     // sparkline canvases only exist now that innerHTML landed — paint them.
     try { drawSparklines(marketRows); } catch (e) {}
     try { drawFxSparklines(fxRows); } catch (e) {}
+    try { drawInflSparklines(inflRows); } catch (e) {}
     try { if (stockOpen) drawStockSpark(stockOpen); } catch (e) {}
   }
 
