@@ -672,6 +672,22 @@
      CBZ.cityLedgerEntry/cityPoliceForceAdd — every one of those already live
      above. -->
 <script src="src/city/militia.js?v=pol1"></script>
+<!-- P8: state/country wars — generalizes the gang-war machinery (declare/
+     upkeep/decay, treasury-funded raids) to whole polities: counted
+     matériel (soldiers/planes/missiles) per country, fronts at causeway
+     chokepoints (falling back to the capital midpoint where no causeway
+     connects the two sides — see that file's own header), procurement
+     contracts routing real treasury dollars into KAI/VLT/Granite revenue
+     (defense stocks inflate honestly through earnings, not a fake pump),
+     conscription (cohort employment down), and the losing-authoritarian
+     desperate-measures ladder (nationalization, child-soldier war crimes).
+     Loads LAST in the P/X-wave block, right after militia.js: it reads
+     CBZ.polity/CBZ.relations/CBZ.regimes(govType only)/CBZ.hunger/
+     CBZ.econState/CBZ.npcEcon/CBZ.corps/CBZ.COUNTRIES, every one of those
+     already live above. declareWar()/endWar()/warsOf()/frontsOf() are a
+     kind-agnostic public API — X6b's civil war (a country splitting into
+     two warring polity records) builds directly on this machinery. -->
+<script src="src/city/polwar.js?v=pol1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>

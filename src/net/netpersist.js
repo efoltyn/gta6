@@ -143,6 +143,7 @@
     if (CBZ.relations && CBZ.relations.serialize) try { blob.rel = CBZ.relations.serialize(); } catch (e) {}
     if (CBZ.crown && CBZ.crown.serialize) try { blob.crown = CBZ.crown.serialize(); } catch (e) {}
     if (CBZ.militia && CBZ.militia.serialize) try { blob.mil = CBZ.militia.serialize(); } catch (e) {}
+    if (CBZ.polwar && CBZ.polwar.serialize) try { blob.war = CBZ.polwar.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -259,6 +260,9 @@
     // P7: militia's own apply() reads govType off w.pol/w.reg (both already
     // restored above) and cityGangs, so it must run after every one of those.
     if (w.mil && CBZ.militia && CBZ.militia.apply) try { CBZ.militia.apply(w.mil); } catch (e) { console.error("[netpersist]", e); }
+    // P8: polwar's own apply() re-stamps rec.warCrime mirrors off w.pol's
+    // already-restored polity records, so it must run after w.pol above.
+    if (w.war && CBZ.polwar && CBZ.polwar.apply) try { CBZ.polwar.apply(w.war); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }

@@ -261,6 +261,21 @@
     g.npcEcon.entPool = before - took;
     return took;
   }
+  // adjustEmployedFrac(delta) -> P8: city/polwar.js's conscription lever.
+  // Applies `delta` (negative = conscription pulling workers off the job,
+  // positive = releasing them back on peace) to EVERY cohort row's
+  // employedFrac uniformly, clamped 0..1. Returns `delta` unchanged (the
+  // flat additive hit this file guarantees absent a clamp) so the caller
+  // can track exactly how much it applied for its own release bookkeeping.
+  // Guarded, ≤10 lines — the same "add a small hook for a new consumer"
+  // convention every other sim/* module already carries (setControls,
+  // creditRevenue, notifyDestruction, etc.).
+  function adjustEmployedFrac(delta) {
+    ensureInit();
+    if (!delta) return 0;
+    for (const row of g.npcEcon.rows) row.employedFrac = clampNum(0, 1, row.employedFrac + delta);
+    return delta;
+  }
   // summary() -> a COPY of the 20 rows (diagnostics / a future phone app;
   // callers can't mutate the live state through it).
   function summary() {
@@ -362,6 +377,7 @@
     walletHealth: walletHealth,
     entPool: entPool,
     drainEntPool: drainEntPool,
+    adjustEmployedFrac: adjustEmployedFrac,
     summary: summary,
     serialize: serialize,
     apply: apply,
