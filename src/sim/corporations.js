@@ -1,104 +1,104 @@
 /* ============================================================
-   sim/corporations.js — Stage E, step E5: THE FIRST REAL CORPORATION.
+   sim/corporations.js — Stage E, step E7: THE FULL 8-COMPANY ROSTER.
 
-   MASTER-PLAN VI.6 (verbatim, the piece this file lands): "a curated roster
-   of 8 launch corporations (new src/sim/corporations.js) each owns real
-   outlets in real buildings across the mainland + mini-cities and books
-   revenue from actual simulated sales: each hour, outletRevenue =
-   cohortSpend(district, good) × outletShareOfCityDemand, minus wages (paid
-   into NPC/cohort wallets), rent, inputs, and debt service... Bunbros fast
-   food (the owner's example — outlets in every city, sells food)."
-   Phasing (VI.6): "(1) Bunbros alone with real revenue + read-only ticker
-   → (2) exchange building + trading for one stock → ..." THIS FILE is (1).
-   E6 adds the exchange/buy-sell/price formation; E7 adds the other 7
-   companies (Royale Casino Corp, Ironclad Arms, Granite & Sons, Meridian
-   Fuel, Zenith Media, Goldspire Trust REIT, Apex Dealership Holdings) —
-   `g.corps.list` is already keyed by id so they're additive rows later,
-   not a reshape.
+   MASTER-PLAN VI.6: "a curated roster of 8 launch corporations... each owns
+   real outlets in real buildings across the mainland + mini-cities and books
+   revenue from actual simulated sales." E5 landed Bunbros alone (hardcoded);
+   E6 added the exchange for that one stock. THIS wave generalizes the whole
+   file into a DATA-DRIVEN loop over a COMPANIES table (below) and lands the
+   other 7: Ironclad Arms (guns), Granite & Sons Construction (materials),
+   Meridian Fuel, Zenith Media, Royale Casino Corp, Goldspire Trust REIT,
+   Apex Dealership Holdings. `g.corps.list` stays keyed by id exactly like
+   E5 left it — every reader that already used CBZ.corps.get/list/summary/
+   robOutlet keeps working unchanged; only the INTERNALS became a loop.
 
-   NOT city/companies.js: that file's decorative holdco roster (NPC firms
-   trading real estate for city-feed flavor, Math.random-driven, never
-   serialized) stays untouched — VI.6 says it "becomes background
-   landlords" later (a future wave teaches it to sit ABOVE a corporation's
-   outlets as their landlord, rent flowing corp → holdco). Two separate
-   systems on purpose: companies.js is decoration, this file is the real
-   economy's producer/consumer.
+   THE ROSTER — each row is either OUTLET-BASED (claims real shop lots the
+   same seeded-LCG-idempotent way E5's Bunbros did, revenue = a live cohort
+   spend category × that company's share of the city's lots of that kind)
+   or SPECIAL (no retail lots exist for the sector, so revenue comes from a
+   different real signal — see each `special` branch in hourlyEarnOne()):
+     bunbros/BUN   food     — claims "food" lots (unchanged from E5/E6).
+     ironclad/IRN  guns     — claims "guns" lots; ALSO earns half of every
+                              PLAYER purchase at a gun-store counter (city/
+                              shops.js's generic buy() — see that file's
+                              guarded 2-line hook).
+     meridian/MER  fuel     — claims "gas" lots (city/buildings.js +
+                              city/expansion.js both spawn gas-kind lots).
+                              FALLBACK: an arena with zero gas lots (e.g. a
+                              mini-city that never rolled one) still gives
+                              Meridian a flat cityShare of citywide fuel
+                              spend — the fuel monopoly doesn't vanish just
+                              because this particular map has no pumps.
+     apex/APX      luxury   — claims "carlot" lots; ALSO earns half of every
+                              PLAYER car purchase at a dealership (city/
+                              shops.js's buyCar(), guarded 1-line hook).
+     royale/RYL    casino   — claims "casino" lots (Neon Reef's casino
+                              prefabs); revenue is NOT cohort spend — it's a
+                              slice of sim/npcecon.js's entPool (the "ent"
+                              propensity money that's been banking up with
+                              nothing to consume it), drained proportional
+                              to Royale's citywide share of casino lots. This
+                              is the stub for E9's real casino house-take —
+                              this wave just gives the entPool a real sink.
+     granite/GRN   materials— NO retail lots (construction firms don't have
+                              a shopfront kind). Revenue = citywide materials
+                              BUY VOLUME (sim/market.js's new drainBuyVolume,
+                              fed by cohort/player/corp materials purchases)
+                              × the live materials price level, PLUS a
+                              reconstruction stream: every player-built piece
+                              destroyed (systems/structdamage.js's hit())
+                              queues a paid "rebuild job" that Granite works
+                              off a few at a time each hour — literally "earn
+                              more when the city gets destroyed" per VI.6.
+     zenith/ZEN    media    — NO retail lots. Revenue = a steady activity-
+                              scaled base (the ad-market's citywide presence)
+                              PLUS the player's own adboard rent (city/
+                              adboard.js's rentBoard() + weekly renewal both
+                              credit half the rent straight to Zenith via
+                              creditRevenue() below — a real rental fee the
+                              player already pays, now booked as revenue).
+     goldspire/GLD reit     — NO retail lots. NAV-driven: revenue = the
+                              city's property-market INDEX (city/economy.js's
+                              propIndex(), the same propMkt this file's price
+                              formation is itself modeled on) delta this hour
+                              × a fixed book value (Goldspire "owns" a slice
+                              of the whole city's real estate), plus a small
+                              steady rent-roll yield on that book value — a
+                              REIT in stock form, literally wrapping the
+                              existing property index.
 
-   OUTLETS: at city build, Bunbros claims CLAIM_FRAC (~60%) of the city's
-   food-kind shop lots (arena.shopLots, kind==="food") as its own outlets;
-   the rest stay independent mom-and-pop diners with no revenue tie-in here
-   (no downside for them either — they're simply outside this system, same
-   as every other shop kind). The claim is a SEEDED LCG shuffle (this file's
-   own stream — never Math.random, per repo convention for world state) of
-   the food-lot pool, so build() is IDEMPOTENT: the same arena always yields
-   the same outlet set. That means outlets are cheap to RE-DERIVE instead of
-   serialized — see the persistence note below.
+   ACTIVE FLAG: `co.active` replaces the old bare `co.outlets.length` gate —
+   true once an outlet-based company claims real lots (or falls back to a
+   cityShare), true FOREVER for the 3 no-outlet specials (they don't wait on
+   an arena), and true immediately for a player IPO (see createIPO() below).
+   sim/stocks.js's lazy listing gate reads THIS flag now, not outlets.length.
 
-   REVENUE: sim/npcecon.js's hourly cohort pass now stamps CBZ.npcEcon.
-   lastSpend = { district: {food, goods} } every hour (this wave's 4-line
-   edit to that file — the exact dollars 20 cohorts just spent on food this
-   hour, per district). Bunbros's own hourly tick (29.65, right after
-   npcecon's 29.6 so it reads THIS hour's fresh snapshot) reads it:
-     outletRevenue(district) = lastSpend[district].food × outletShare(district)
-   outletShare(district) = Bunbros outlets in that district ÷ total food lots
-   in that district, computed ONCE at build() (not re-derived hourly — a
-   burned-down outlet is a future wave's problem, see VI.6's "an outlet
-   destroyed" event). Total revenue sums outletShare × food-spend over every
-   DISTINCT district Bunbros has a presence in (a district with N outlets
-   isn't counted N times — outletShare already captures N via the numerator).
+   PLAYER IPO (VI.6: "Player businesses can IPO: a maxed wealth.js BIZ
+   converts into a listed company seeded from its live bizRate()"): sim/
+   stocks.js's CBZ.stocks.ipo(bizId) is the entry point (gates eligibility
+   against city/wealth.js's BIZ table); it calls THIS file's createIPO(spec)
+   to mint a 9th+ row that lives in g.corps.extra[] (persisted alongside the
+   fixed 8 — see serialize()/apply() v2 below) instead of the static
+   COMPANIES table, since it's created at runtime, not by this file's author.
 
-   COSTS (hourly, scale with the outlet count):
-     wages  = outlets × 3 workers × $8/hr × priceIndex   (entry-level fast
-              food wage, inflated by sim/econstate.js's live CPI so a hot
-              economy costs Bunbros more to staff, same as everyone else)
-     rent   = outlets × $40/hr                            (flat toy landlord fee)
-     inputs = 0.35 × revenue, ROUTED as real food demand: CBZ.market.
-              recordBuy("food", inputs/20) — the supply chain closes here:
-              Bunbros buying groceries nudges the SAME citywide food price
-              sim/market.js already prices for the player and the cohorts,
-              exactly like npcecon.js's own $/DOLLARS_PER_UNIT demand-signal
-              conversion (a different toy divisor, documented, since this is
-              a wholesale/bulk buy, not a retail cohort purchase).
-     earnings = revenue − (wages + rent + inputs); accrues straight into
-     co.cash every hour, plus a rolling revenueTTM/costsTTM trail (48 hourly
-     samples, same ring length as market.js's sparkline history — E6's stock
-     pricing will want a trailing window) and a 28-DAY earningsHistory roll
-     (one net-earnings sample per in-game day, capped at 28 — a "quarter" of
-     city-days) for the ticker/phone touchpoints below.
+   REVENUE (hourly, order 29.65 — right after sim/npcecon.js's 29.6 so this
+   hour's freshly-stamped lastSpend/entPool are what every branch reads) and
+   COSTS (wages/rent/inputs, scaled by outlet count, same shape as E5):
+   see hourlyEarnOne() below — one function, branching on `spec.special`.
 
-   BANKRUPTCY: cash <= 0 reverts every outlet to an independent (drops the
-   _bunCo tag, empties co.outlets) and fires a city-feed line. MOSTLY
-   THEORETICAL at this wave's tuning — $50k starting cash against a modest
-   handful of outlets earning positive margins in practice; the guard exists
-   so a determined robbery spree (see ROBBERY below) has a real floor to hit,
-   not because the model is expected to bust on its own. No auto-reopen this
-   wave (a future wave could re-float the company after a cooldown).
+   NATIONAL INDEX + DIVIDENDS: both live in sim/stocks.js (E7), reading this
+   file's co.sharesOutstanding/earningsHistory/cash — nothing to do here.
 
-   ROBBERY: city/shops.js's robTill() is the store-robbery stick-up (cityCrime
-   type "store robbery"). A single guarded line there calls CBZ.corps.
-   robOutlet(openLot, take) — if openLot is tagged as a Bunbros outlet
-   (lot._bunCo), the SAME dollars the player just took off the till also
-   come off the company's books. Rob the burger chain, hurt the balance
-   sheet; E6 wires that into the stock price.
-
-   PLAYER TOUCHPOINTS (read-only this wave — E6 adds buy/sell):
-     - city/props.js's adboard MARKET TICKER creative occasionally swaps its
-       CPI line for "BUN earnings $X ▲/▼" (this file's tickerLine()).
-     - city/phone.js's MARKETS app gains a BUN row (name, daily earnings,
-       cash-trend arrow) via this file's summary().
-
-   PERSISTENCE: same two-rider pattern as market.js/econstate.js/npcecon.js —
+   PERSISTENCE (v2 — generalized from E5/E6's single-Bunbros v1 blob):
      - MULTIPLAYER: src/net/netpersist.js worldBlob()/applyWorld() pick up
-       serialize()/apply() beside blob.npce (blob.corp).
-     - SINGLE-PLAYER: wraps CBZ.cityWorldCommit/cityWorldCollect (own guard
-       flag _corpWrap) so g.cityWorld.corp rides the localStorage ledger.
-   Fresh-run reset: city/peds.js's spawnCityPeds() resets market/econState/
-   npcEcon right after buildCity(); this file's CBZ.corps.reset() call sits
-   right beside them (outlets themselves are picked up again by the next
-   41.75 build tick against the fresh arena — see OUTLETS above, only the
-   FINANCIAL state — cash, TTM trails, earnings history — round-trips
-   through serialize()/apply(); the outlet-lot set is deterministically
-   re-derived, never serialized).
+       serialize()/apply() beside blob.npce (blob.corp) — UNCHANGED call
+       sites, only the blob's internal shape grew.
+     - SINGLE-PLAYER: same CBZ.cityWorldCommit/cityWorldCollect wrap
+       (_corpWrap) as E5/E6.
+     - BACK-COMPAT: apply() still reads a v1 blob (an E5/E6-era save) and
+       hydrates it straight into Bunbros only — the other 7 simply start
+       fresh, exactly as if this were a brand-new run for them.
+   Fresh-run reset: unchanged call site (city/peds.js's spawnCityPeds()).
 ============================================================ */
 (function () {
   "use strict";
@@ -106,280 +106,454 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const BUNBROS_ID = "bunbros";
-
-  // ---- tuning (VI.6 constants, all in one place) -------------------------
-  const HOUR = 150 / 24;          // seconds per in-game hour — matches market.js/econstate.js/npcecon.js
-  const CLAIM_FRAC = 0.6;         // ~60% of the city's food lots become Bunbros outlets
+  const HOUR = 150 / 24;          // seconds per in-game hour — matches every sim/* module
   const WORKERS_PER_OUTLET = 3;
-  const OUTLET_WAGE = 8;          // $/hr per worker, entry-level fast-food baseline (priceIndex-adjusted)
-  const RENT_PER_OUTLET = 40;     // $/hr flat toy landlord fee per outlet
-  const INPUT_FRAC = 0.35;        // share of revenue spent on food inputs (the supply-chain link)
-  const INPUT_DOLLARS_PER_UNIT = 20; // $ of inputs -> a market.js recordBuy "quantity" (bulk-buy divisor)
-  const STARTING_CASH = 50000;
   const SHARES_OUTSTANDING = 1000000;
-  const HIST_CAP = 48;             // revenueTTM/costsTTM ring length (matches market.js's sparkline rings)
-  const DAILY_CAP = 28;            // earningsHistory: 28 daily net-earnings samples ("a quarter of city-days")
+  const HIST_CAP = 48;             // revenueTTM/costsTTM ring length
+  const DAILY_CAP = 28;            // earningsHistory: 28 daily samples ("a quarter of city-days")
+  const BUNBROS_ID = "bunbros";    // back-compat default id for pre-E7 no-arg callers (phone.js/props.js)
 
-  // own seeded LCG (never Math.random — repo convention for world state), a
-  // distinct seed from market.js/economy.js's own streams so the three don't
-  // accidentally correlate. Reset alongside reset() so build() is IDEMPOTENT:
-  // the same arena always claims the same outlet set without ever needing to
-  // serialize which lots were picked (see the file header's PERSISTENCE note).
+  // ---- THE ROSTER (data-driven — this table IS the "8 launch corporations")
+  // claimKind: the shop lot `kind` this company claims outlets from (city/
+  // buildings.js's SHOP_KINDS + city/expansion.js's mini-city lots); absent
+  // for the 3 no-outlet specials. spendCat: the sim/npcecon.js lastSpend /
+  // sim/market.js category this company's revenue (and input-purchase
+  // recordBuy) is keyed to — deliberately the SAME string as the market
+  // category everywhere it applies, so no translation table is needed.
+  const COMPANIES = [
+    { id: "bunbros",   sym: "BUN", name: "Bunbros",                     sector: "food",
+      claimKind: "food",   claimFrac: 0.60, spendCat: "food",   wage: 8,  rent: 40,  inputFrac: 0.35, startCash: 50000 },
+    { id: "ironclad",  sym: "IRN", name: "Ironclad Arms",                sector: "guns",
+      claimKind: "guns",   claimFrac: 0.55, spendCat: "guns",   wage: 12, rent: 50,  inputFrac: 0.30, startCash: 80000 },
+    { id: "meridian",  sym: "MER", name: "Meridian Fuel",                sector: "fuel",
+      claimKind: "gas",    claimFrac: 0.65, spendCat: "fuel",   wage: 9,  rent: 35,  inputFrac: 0.45, startCash: 70000, fallbackShare: 0.4 },
+    { id: "apex",      sym: "APX", name: "Apex Dealership Holdings",     sector: "luxury",
+      claimKind: "carlot", claimFrac: 0.50, spendCat: "luxury", wage: 15, rent: 90,  inputFrac: 0.55, startCash: 150000 },
+    { id: "royale",    sym: "RYL", name: "Royale Casino Corp",           sector: "casino",
+      claimKind: "casino", claimFrac: 0.50, special: "casino",  wage: 14, rent: 120, startCash: 300000 },
+    { id: "granite",   sym: "GRN", name: "Granite & Sons Construction",  sector: "materials",
+      special: "materials", startCash: 120000 },
+    { id: "zenith",    sym: "ZEN", name: "Zenith Media",                 sector: "media",
+      special: "media",     startCash: 60000 },
+    { id: "goldspire", sym: "GLD", name: "Goldspire Trust REIT",         sector: "reit",
+      special: "reit",      startCash: 500000 },
+  ];
+
+  // ---- special-sector tuning (all in one place, VI.6-style) ---------------
+  const DRAIN_FRAC = 0.15;           // royale: fraction of pooled entPool drained/hr, weighted by citywide share
+  const GRN_UNIT_VALUE = 25;         // granite: $ booked per market.js materials "unit" of citywide buy volume
+  const GRN_OVERHEAD = 60;           // granite: flat $/hr overhead
+  const REBUILD_RATE = 6;            // granite: max queued rebuild "jobs" paid off per hour
+  const REBUILD_PAY_PER_UNIT = 45;   // granite: $ per rebuild job paid
+  const MEDIA_BASE = 90;             // zenith: steady $/hr base, scaled by activity (citywide ad-market presence)
+  const MEDIA_OVERHEAD = 50;
+  const GLD_BOOK_VALUE = 4000000;    // goldspire: NAV proxy — the slice of the city's property book it "owns"
+  const GLD_RENT_YIELD_HOURLY = 0.00003; // goldspire: steady rent-roll yield per hour (~0.26%/in-game day)
+  const GLD_OVERHEAD = 120;
+  const INPUT_DOLLARS_PER_UNIT = 20; // $ of inputs -> a market.js recordBuy "quantity" (bulk-buy divisor)
+
+  // own seeded LCG (never Math.random — repo convention for world state).
   const INITIAL_SEED = 314159265 & 0x7fffffff;
   let _seed = INITIAL_SEED;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
 
-  // ---- state lives on g.corps (mirrors g.cityMarket / g.npcEcon) ----------
-  function freshCompany() {
+  // ---- state lives on g.corps ----------------------------------------------
+  function freshCompany(spec) {
+    const noOutlets = !spec.claimKind;
     return {
-      id: BUNBROS_ID, name: "Bunbros", sector: "food", tickerSym: "BUN",
-      outlets: [],            // [{lot, district}]
-      shareByDistrict: {},    // district -> outlets-here / total-food-lots-here, computed once at build()
-      cash: STARTING_CASH,
-      revenueTTM: [], costsTTM: [],   // trailing hourly samples, capped at HIST_CAP (E6 stock-pricing input)
-      revAcc: 0, costAcc: 0,          // today's running hourly totals, rolled into earningsHistory at the day boundary
-      earningsHistory: [],            // up to DAILY_CAP daily net-earnings samples
+      id: spec.id, name: spec.name, sector: spec.sector, tickerSym: spec.sym,
+      outlets: [], shareByDistrict: {}, cityShare: spec.fallbackShare || 0,
+      active: noOutlets,        // outlet-based cos flip true once build() claims real lots (or a fallback share)
+      cash: spec.startCash,
+      revenueTTM: [], costsTTM: [], revAcc: 0, costAcc: 0,
+      earningsHistory: [],
       sharesOutstanding: SHARES_OUTSTANDING,
-      lastPrice: null,        // E6: exchange/trading wires a real share price here
-      founderSid: null,       // E8: billionaire-shareholder persistence wires an owner NPC here
-      cashDayStart: STARTING_CASH, cashTrend: "flat",  // day-over-day cash direction (phone/ticker arrow)
+      lastPrice: null,
+      founderSid: null,        // E8: billionaire-shareholder persistence wires an owner NPC here
+      cashDayStart: spec.startCash, cashTrend: "flat",
       bankrupt: false,
-      dayHrAcc: 0,
-      _builtForArena: null,   // the arena object outlets were last claimed against (rebuild gate)
+      rebuildQueue: 0,          // granite only — queued destruction-rebuild jobs
+      lastPropIndex: null,      // goldspire only — last hour's propIndex() reading (NAV delta basis)
+      _builtForArena: null,
     };
   }
   function reset() {
     _seed = INITIAL_SEED;
-    g.corps = { list: {}, hrAcc: 0 };
-    g.corps.list[BUNBROS_ID] = freshCompany();
+    g.corps = { list: {}, hrAcc: 0, dayHrAcc: 0, extra: [] };
+    for (const spec of COMPANIES) g.corps.list[spec.id] = freshCompany(spec);
   }
-  function ensureInit() { if (!g.corps || !g.corps.list) reset(); }
+  function ensureInit() { if (!g.corps || !g.corps.list) reset(); if (!g.corps.extra) g.corps.extra = []; }
+  function allSpecs() { return COMPANIES.concat(g.corps.extra || []); }
+  function specFor(id) { for (const s of allSpecs()) if (s.id === id) return s; return null; }
 
-  // ---- OUTLETS: claim ~60% of the city's food lots at build -------------
+  // ---- OUTLETS: claim a seeded-LCG share of the city's lots of `claimKind` -
   function districtOf(lot) {
     const cx = (lot && lot.cx) || 0, cz = (lot && lot.cz) || 0;
     return (CBZ.cityEcon && CBZ.cityEcon.districtAt) ? CBZ.cityEcon.districtAt(cx, cz) : "downtown";
   }
-  function buildBunbros(arena) {
-    ensureInit();
-    const co = g.corps.list[BUNBROS_ID];
-    if (co.bankrupt) return false;    // stays bankrupt this wave — no auto-reopen (see file header)
+  function claimLots(spec, arena) {
+    const co = g.corps.list[spec.id];
+    if (!co || co.bankrupt) return false;
+    if (!spec.claimKind) { co.active = true; co._builtForArena = arena; return true; }   // no-outlet sector — always "built"
     const all = (arena.shopLots || arena.lots || []).filter(function (l) {
-      return l && l.building && l.building.shop && l.building.shop.kind === "food";
+      return l && l.building && l.building.shop && l.building.shop.kind === spec.claimKind;
     });
-    if (!all.length) return false;    // no food lots this arena yet — build tick retries with a cooldown
-
+    if (!all.length) {
+      // no lots of this kind exist in THIS arena — fall back to a flat
+      // citywide demand share instead of real outlets (documented per-row
+      // above; only meridian sets a nonzero fallbackShare this wave).
+      co.outlets = []; co.shareByDistrict = {};
+      co.cityShare = spec.fallbackShare || 0;
+      co.active = co.cityShare > 0;
+      co._builtForArena = arena;
+      return co.active;
+    }
     const districtTotal = {};
     for (const l of all) { const dk = districtOf(l); districtTotal[dk] = (districtTotal[dk] || 0) + 1; }
-
     // seeded LCG Fisher-Yates — SAME arena always yields the SAME claimed set.
     const pool = all.slice();
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
       const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
-    const nClaim = Math.max(1, Math.round(pool.length * CLAIM_FRAC));
+    const nClaim = Math.max(1, Math.round(pool.length * spec.claimFrac));
     const districtOutlets = {};
     co.outlets = [];
     for (let i = 0; i < nClaim; i++) {
       const lot = pool[i], dk = districtOf(lot);
-      lot._bunCo = BUNBROS_ID;   // robbery lookup (city/shops.js) + future citystaff/citation tagging
+      lot._corpOutlet = spec.id;   // robbery lookup (city/shops.js) + future citystaff/citation tagging
       co.outlets.push({ lot: lot, district: dk });
       districtOutlets[dk] = (districtOutlets[dk] || 0) + 1;
     }
-    // pool[nClaim..] stay independent mom-and-pop diners — no company, no
-    // revenue tie-in, no downside either; simply outside this system.
     co.shareByDistrict = {};
     for (const dk in districtTotal) co.shareByDistrict[dk] = (districtOutlets[dk] || 0) / districtTotal[dk];
+    co.cityShare = nClaim / all.length;   // citywide fraction — royale's entPool share, everyone's fallback basis
+    co.active = true;
     co._builtForArena = arena;
     return true;
   }
   let buildCool = 0;
   CBZ.onUpdate(41.75, function (dt) {
     // slotted between city/companies.js's 41.7 (decorative holdco build/move)
-    // and city/citystaff.js's 41.8 (visible queues/staff) — same lazy-build,
-    // self-healing family: wait for the arena, retry with a small backoff.
+    // and city/citystaff.js's 41.8 (visible queues/staff) — unchanged slot.
     const gm = CBZ.game; if (!gm || gm.mode !== "city") return;
     const arena = CBZ.city && CBZ.city.arena;
     if (!arena) return;
     ensureInit();
-    const co = g.corps.list[BUNBROS_ID];
-    if (co._builtForArena === arena) return;
     buildCool -= dt;
     if (buildCool > 0) return;
     buildCool = 1.0;
-    try { buildBunbros(arena); } catch (e) {}
+    for (const spec of allSpecs()) {
+      const co = g.corps.list[spec.id];
+      if (!co || co.bankrupt || co._builtForArena === arena) continue;
+      try { claimLots(spec, arena); } catch (e) {}
+    }
   });
 
   // ---- bankruptcy: outlets revert to independents ------------------------
   function bankrupt(co) {
     if (co.bankrupt) return;
     co.bankrupt = true;
-    for (const o of co.outlets) { if (o.lot) delete o.lot._bunCo; }
-    co.outlets = [];
-    co.shareByDistrict = {};
+    for (const o of co.outlets) { if (o.lot) delete o.lot._corpOutlet; }
+    co.outlets = []; co.shareByDistrict = {}; co.active = false;
     if (CBZ.cityFeed) CBZ.cityFeed("💥 " + co.name + " has gone BANKRUPT — outlets revert to independents", "#ff9a6b");
   }
 
-  // ---- REVENUE + COSTS: the hourly earnings pass -------------------------
-  function hourlyEarn() {
-    ensureInit();
-    const co = g.corps.list[BUNBROS_ID];
-    if (!co.outlets.length || co.bankrupt) return;
+  // ---- REVENUE + COSTS: one hourly pass, branching on spec.special --------
+  function hourlyEarnOne(spec) {
+    const co = g.corps.list[spec.id];
+    if (!co || co.bankrupt || !co.active) return;
 
     const est = (CBZ.econState && CBZ.econState.get) ? CBZ.econState.get() : null;
     const priceAdj = (est && est.priceIndex != null) ? est.priceIndex : 1.0;
+    const activity = (CBZ.econState && typeof CBZ.econState.activity === "function") ? CBZ.econState.activity() : 1.0;
     const spend = (CBZ.npcEcon && CBZ.npcEcon.lastSpend) || {};
 
-    // revenue: outletShare(district) x this hour's cohort food spend there,
-    // summed over every DISTINCT district Bunbros has a presence in (a
-    // district with N outlets isn't double-counted — the share already
-    // reflects N via its numerator).
-    let revenue = 0;
-    const seenD = {};
-    for (const o of co.outlets) {
-      if (seenD[o.district]) continue;
-      seenD[o.district] = 1;
-      const foodSpend = (spend[o.district] && spend[o.district].food) || 0;
-      revenue += foodSpend * (co.shareByDistrict[o.district] || 0);
+    let revenue = 0, costs = 0;
+
+    if (spec.special === "materials") {
+      // GRANITE & SONS: no retail lots — revenue is citywide materials BUY
+      // VOLUME (cohort/player/corp purchases, drained from market.js's
+      // per-category counter) x the live materials price level, plus a
+      // reconstruction stream worked off the rebuildQueue (see notifyDestruction).
+      const vol = (CBZ.market && typeof CBZ.market.drainBuyVolume === "function") ? CBZ.market.drainBuyVolume("materials") : 0;
+      const priceLvl = (CBZ.market && typeof CBZ.market.price === "function") ? CBZ.market.price("materials") : 1;
+      revenue = vol * GRN_UNIT_VALUE * priceLvl;
+      const payN = Math.min(co.rebuildQueue || 0, REBUILD_RATE);
+      co.rebuildQueue = Math.max(0, (co.rebuildQueue || 0) - payN);
+      revenue += payN * REBUILD_PAY_PER_UNIT;
+      costs = GRN_OVERHEAD;
+    } else if (spec.special === "media") {
+      // ZENITH MEDIA: a steady activity-scaled base (the ad-market's citywide
+      // presence) — city/adboard.js's rentBoard()/weekly-renewal ALSO credit
+      // half the player's real rent straight into revAcc/cash via
+      // creditRevenue() below, so this branch is only the floor on top of that.
+      revenue = MEDIA_BASE * activity;
+      costs = MEDIA_OVERHEAD;
+    } else if (spec.special === "reit") {
+      // GOLDSPIRE TRUST REIT: NAV-driven — city/economy.js's propIndex() (the
+      // same propMkt this file's own price formation echoes) delta this hour
+      // x a fixed book value, plus a small steady rent-roll yield on that book.
+      const idx = (CBZ.cityEcon && typeof CBZ.cityEcon.propIndex === "function") ? CBZ.cityEcon.propIndex() : 1;
+      if (co.lastPropIndex == null) co.lastPropIndex = idx;
+      const delta = idx - co.lastPropIndex;
+      co.lastPropIndex = idx;
+      revenue = GLD_BOOK_VALUE * delta + GLD_BOOK_VALUE * GLD_RENT_YIELD_HOURLY;
+      costs = GLD_OVERHEAD;
+    } else if (spec.special === "casino") {
+      // ROYALE CASINO CORP: a slice of npcecon.js's entPool (ent-propensity
+      // money that's had nothing to consume it), drained proportional to
+      // Royale's citywide share of casino lots — the E9 stub: real house-take
+      // wires in later, but the entPool gets a real sink starting now.
+      const pool = (CBZ.npcEcon && typeof CBZ.npcEcon.entPool === "function") ? CBZ.npcEcon.entPool() : 0;
+      const share = co.cityShare || 0;
+      const drain = pool * DRAIN_FRAC * share;
+      if (drain > 0 && CBZ.npcEcon && typeof CBZ.npcEcon.drainEntPool === "function") CBZ.npcEcon.drainEntPool(drain);
+      revenue = drain;
+      const n = co.outlets.length || 1;
+      costs = n * WORKERS_PER_OUTLET * spec.wage * priceAdj + n * spec.rent;
+    } else if (spec.special === "ipo") {
+      // PLAYER IPO: this wave's minimal-but-real model — the seeded dailyEPS
+      // basis IS the daily earnings, spread flat across the 24 hourly ticks
+      // (no cohort link yet; a future wave could tie it to the biz's own kind).
+      revenue = (spec.dailySeed || 0) / 24;
+      costs = 0;
+    } else {
+      // OUTLET-BASED, cohort-spend sector (bunbros/ironclad/meridian/apex):
+      // outletRevenue = cohortSpend(district, spendCat) x outletShare(district),
+      // summed over every DISTINCT district this company has a presence in —
+      // exactly E5's Bunbros formula, generalized. cityShare fallback (no real
+      // outlets this arena) reads citywide total spend instead of per-district.
+      if (co.outlets.length) {
+        const seenD = {};
+        for (const o of co.outlets) {
+          if (seenD[o.district]) continue;
+          seenD[o.district] = 1;
+          const catSpend = (spend[o.district] && spend[o.district][spec.spendCat]) || 0;
+          revenue += catSpend * (co.shareByDistrict[o.district] || 0);
+        }
+      } else if (co.cityShare > 0) {
+        let total = 0; for (const dk in spend) total += (spend[dk][spec.spendCat] || 0);
+        revenue = total * co.cityShare;
+      }
+      const n = co.outlets.length || 1;
+      const wages = n * WORKERS_PER_OUTLET * spec.wage * priceAdj;
+      const rent = n * spec.rent;
+      const inputs = (spec.inputFrac || 0) * revenue;
+      costs = wages + rent + inputs;
+      // the supply chain: inputs are a real spendCat-category purchase, the
+      // SAME faucet npcecon.js's own cohort spend already feeds.
+      if (inputs > 0 && CBZ.market && CBZ.market.recordBuy) CBZ.market.recordBuy(spec.spendCat, inputs / INPUT_DOLLARS_PER_UNIT);
     }
 
-    const n = co.outlets.length;
-    const wages = n * WORKERS_PER_OUTLET * OUTLET_WAGE * priceAdj;
-    const rent = n * RENT_PER_OUTLET;
-    const inputs = INPUT_FRAC * revenue;
-    const costs = wages + rent + inputs;
     const earnings = revenue - costs;
-
     co.cash += earnings;
     co.revAcc = (co.revAcc || 0) + revenue;
     co.costAcc = (co.costAcc || 0) + costs;
-
     co.revenueTTM.push(revenue); if (co.revenueTTM.length > HIST_CAP) co.revenueTTM.shift();
     co.costsTTM.push(costs); if (co.costsTTM.length > HIST_CAP) co.costsTTM.shift();
-
-    // the supply chain: inputs are a real food-category purchase, same faucet
-    // npcecon.js's own cohort spend already feeds (a different divisor: this
-    // is a wholesale/bulk buy, not a retail cohort purchase).
-    if (inputs > 0 && CBZ.market && CBZ.market.recordBuy) CBZ.market.recordBuy("food", inputs / INPUT_DOLLARS_PER_UNIT);
-
-    co.dayHrAcc = (co.dayHrAcc || 0) + 1;
-    if (co.dayHrAcc >= 24) {
-      co.dayHrAcc -= 24;
-      const net = Math.round(co.revAcc - co.costAcc);
-      co.earningsHistory.push(net);
-      if (co.earningsHistory.length > DAILY_CAP) co.earningsHistory.shift();
-      co.revAcc = 0; co.costAcc = 0;
-      co.cashTrend = co.cash >= co.cashDayStart ? "up" : "down";
-      co.cashDayStart = co.cash;
-    }
-
     if (co.cash <= 0 && !co.bankrupt) bankrupt(co);
   }
+  // one shared day counter (not per-company) so every company's earningsHistory
+  // rolls on the SAME game-day boundary — sim/stocks.js's dividend day-hook
+  // (and the anchor's trailing-7-day EPS) depend on that alignment.
+  function hourlyEarnAll() {
+    ensureInit();
+    for (const spec of allSpecs()) { try { hourlyEarnOne(spec); } catch (e) {} }
+    g.corps.dayHrAcc = (g.corps.dayHrAcc || 0) + 1;
+    if (g.corps.dayHrAcc >= 24) {
+      g.corps.dayHrAcc -= 24;
+      for (const spec of allSpecs()) {
+        const co = g.corps.list[spec.id]; if (!co) continue;
+        const net = Math.round((co.revAcc || 0) - (co.costAcc || 0));
+        co.earningsHistory.push(net);
+        if (co.earningsHistory.length > DAILY_CAP) co.earningsHistory.shift();
+        co.revAcc = 0; co.costAcc = 0;
+        co.cashTrend = co.cash >= co.cashDayStart ? "up" : "down";
+        co.cashDayStart = co.cash;
+      }
+    }
+  }
   // VI.6's hourly earnings pass — order 29.65, right after sim/npcecon.js's
-  // 29.6 so this hour's freshly-stamped lastSpend snapshot is what revenue reads.
+  // 29.6 so this hour's freshly-stamped lastSpend/entPool snapshots are fresh.
   CBZ.onUpdate(29.65, function (dt) {
     if (g.mode !== "city") return;
     ensureInit();
     const C = g.corps;
     C.hrAcc = (C.hrAcc || 0) + dt;
-    while (C.hrAcc >= HOUR) { C.hrAcc -= HOUR; hourlyEarn(); }
+    while (C.hrAcc >= HOUR) { C.hrAcc -= HOUR; hourlyEarnAll(); }
   });
 
   // ---- reads ---------------------------------------------------------------
-  // robOutlet(lot, amount) -> true if `lot` is a live Bunbros outlet: debits
-  // the company's cash by `amount` (city/shops.js's robTill() calls this the
-  // instant a till robbery lands — the same dollars leave the company's books).
+  // robOutlet(lot, amount) -> true if `lot` is a live company outlet: debits
+  // that company's cash by `amount` (city/shops.js's robTill() calls this the
+  // instant a till robbery lands — works for ANY claimed outlet kind now).
   function robOutlet(lot, amount) {
-    if (!(lot && lot._bunCo) || !(amount > 0)) return false;
+    if (!(lot && lot._corpOutlet) || !(amount > 0)) return false;
     ensureInit();
-    const co = g.corps.list[lot._bunCo];
+    const co = g.corps.list[lot._corpOutlet];
     if (!co) return false;
     co.cash -= amount;
-    // E6: a robbed till is a real (tiny) shock to the exchange too — momentum
-    // reacts before the next earnings print does (sim/stocks.js's shock API).
     if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(co.tickerSym, -amount / 500000);
     if (co.cash <= 0 && !co.bankrupt) bankrupt(co);
     return true;
   }
-  // summary() -> the phone MARKETS app's BUN row data (null once outlets == 0,
-  // i.e. not built yet or bankrupted out — callers render "no data" instead).
-  function summary() {
+  // creditRevenue(id, amount) -> books a real dollar amount straight into a
+  // company's cash + today's revAcc (so it rolls into earningsHistory the
+  // same as any other revenue). The generic hook for a real dollar changing
+  // hands OUTSIDE the hourly cohort-spend pass: a player gun/car purchase
+  // (city/shops.js), a player adboard rental (city/adboard.js).
+  function creditRevenue(id, amount) {
+    if (!(amount > 0)) return false;
     ensureInit();
-    const co = g.corps.list[BUNBROS_ID];
-    if (!co.outlets.length) return null;
+    const co = g.corps.list[id];
+    if (!co || co.bankrupt) return false;
+    co.cash += amount;
+    co.revAcc = (co.revAcc || 0) + amount;
+    return true;
+  }
+  // notifyDestruction(n) -> a player-built piece was just destroyed (systems/
+  // structdamage.js's hit(), guarded 2-line hook): queues `n` rebuild jobs
+  // Granite & Sons works off a few at a time each hour (see hourlyEarnOne).
+  function notifyDestruction(n) {
+    ensureInit();
+    const co = g.corps.list.granite; if (!co) return;
+    co.rebuildQueue = (co.rebuildQueue || 0) + (n || 1);
+  }
+  // summary(id) -> a phone/ticker row's data (id defaults to Bunbros for
+  // pre-E7 no-arg callers). null once the company isn't active yet/bankrupted.
+  function summary(id) {
+    ensureInit();
+    const co = g.corps.list[id || BUNBROS_ID];
+    if (!co || !co.active) return null;
     const h = co.earningsHistory;
-    const daily = h.length ? h[h.length - 1] : Math.round(co.revAcc - co.costAcc);
+    const daily = h.length ? h[h.length - 1] : Math.round((co.revAcc || 0) - (co.costAcc || 0));
     return {
-      id: co.id, name: co.name, tickerSym: co.tickerSym,
+      id: co.id, name: co.name, sector: co.sector, tickerSym: co.tickerSym,
       outlets: co.outlets.length, cash: Math.round(co.cash),
       dailyEarnings: daily, cashTrend: co.cashTrend || "flat", bankrupt: !!co.bankrupt,
     };
   }
-  // tickerLine() -> "BUN earnings $1,240 ▲" — the adboard ticker's occasional
-  // corp line (city/props.js's tickerAd() folds this in place of the CPI
-  // line on a rotation). "" once outlets == 0 (props.js falls back to CPI).
-  function tickerLine() {
-    const s = summary();
+  // summaryAll() -> every active company's summary() row — the full-roster
+  // phone MARKETS list (E7).
+  function summaryAll() {
+    ensureInit();
+    const out = [];
+    for (const spec of allSpecs()) { const s = summary(spec.id); if (s) out.push(s); }
+    return out;
+  }
+  function companyTickerLine(id) {
+    const s = summary(id);
     if (!s) return "";
     const arrow = s.cashTrend === "up" ? "▲" : (s.cashTrend === "down" ? "▼" : "–");
     let line = s.tickerSym + " earnings " + (s.dailyEarnings >= 0 ? "$" : "-$") + Math.abs(Math.round(s.dailyEarnings)).toLocaleString() + " " + arrow;
-    // E6: fold the live exchange price in alongside earnings (sim/stocks.js) —
-    // guarded no-op until that module actually lists this ticker.
     if (CBZ.stocks && typeof CBZ.stocks.tickerLine === "function") {
       const pl = CBZ.stocks.tickerLine(s.tickerSym);
       if (pl) line += " · " + pl;
     }
     return line;
   }
+  // tickerLine(id?) -> "SYM earnings $X ▲ · $12.40 ▲". With no id, ROTATES
+  // across every active company every ~20s (E7: the adboard ticker now shows
+  // the full roster over time, not just Bunbros) — same rotation cadence
+  // city/props.js's tickerAd() already used for the single-company slot.
+  function tickerLine(id) {
+    if (id) return companyTickerLine(id);
+    const all = summaryAll();
+    if (!all.length) return "";
+    const i = Math.floor((CBZ.now || 0) / 20000) % all.length;
+    return companyTickerLine(all[i].id);
+  }
+
+  // ---- PLAYER IPO: mint a runtime company from a maxed wealth.js BIZ -------
+  // Called by sim/stocks.js's CBZ.stocks.ipo(bizId) (that file owns the
+  // eligibility gate against city/wealth.js's BIZ table + the exchange
+  // listing); THIS function only mints the corp record. spec: {id, sym, name,
+  // sector, dailySeed, playerShareFrac} — dailySeed is the bizRate()-derived
+  // starting daily-earnings basis (stocks.js computes it).
+  function createIPO(spec) {
+    ensureInit();
+    if (!spec || !spec.id || g.corps.list[spec.id]) return null;   // no double-IPO
+    const full = Object.assign({ special: "ipo", startCash: Math.max(10000, Math.round((spec.dailySeed || 0) * 30)) }, spec);
+    g.corps.extra.push(full);
+    const co = freshCompany(full);
+    co.active = true;
+    // seed one earningsHistory sample so sim/stocks.js's anchor is computable
+    // on the very first price-formation tick (no "wait a day" dead air).
+    co.earningsHistory = [Math.round(spec.dailySeed || 0)];
+    g.corps.list[spec.id] = co;
+    return co;
+  }
 
   // ---- persistence ------------------------------------------------------
-  // NOTE: outlets/shareByDistrict are deliberately NOT serialized — see the
-  // file header's PERSISTENCE note: build() is idempotent (seeded LCG reset
-  // alongside reset()), so the next 41.75 tick re-derives the identical
-  // outlet set from the (already-built, unchanged) arena. Only the FINANCIAL
-  // state round-trips.
-  function serialize() {
-    ensureInit();
-    const co = g.corps.list[BUNBROS_ID];
+  // v2: generalized over every company (fixed 8 + any g.corps.extra IPOs).
+  // Outlets/shareByDistrict/cityShare are deliberately NOT serialized — same
+  // "idempotent rebuild" note as E5: the next 41.75 tick re-derives them.
+  function serializeCompany(co) {
     return {
-      v: 1,
-      cash: co.cash,
-      revenueTTM: co.revenueTTM.slice(), costsTTM: co.costsTTM.slice(),
-      earningsHistory: co.earningsHistory.slice(),
-      revAcc: co.revAcc || 0, costAcc: co.costAcc || 0,
-      hrAcc: g.corps.hrAcc || 0, dayHrAcc: co.dayHrAcc || 0,
-      cashDayStart: co.cashDayStart, cashTrend: co.cashTrend || "flat",
-      bankrupt: !!co.bankrupt,
+      cash: co.cash, revenueTTM: co.revenueTTM.slice(), costsTTM: co.costsTTM.slice(),
+      earningsHistory: co.earningsHistory.slice(), revAcc: co.revAcc || 0, costAcc: co.costAcc || 0,
+      cashDayStart: co.cashDayStart, cashTrend: co.cashTrend || "flat", bankrupt: !!co.bankrupt,
+      rebuildQueue: co.rebuildQueue || 0, lastPropIndex: co.lastPropIndex,
     };
   }
+  function applyCompany(co, src) {
+    if (!co || !src) return;
+    if (isFinite(src.cash)) co.cash = +src.cash;
+    if (Array.isArray(src.revenueTTM)) co.revenueTTM = src.revenueTTM.slice(-HIST_CAP);
+    if (Array.isArray(src.costsTTM)) co.costsTTM = src.costsTTM.slice(-HIST_CAP);
+    if (Array.isArray(src.earningsHistory)) co.earningsHistory = src.earningsHistory.slice(-DAILY_CAP);
+    if (isFinite(src.revAcc)) co.revAcc = +src.revAcc;
+    if (isFinite(src.costAcc)) co.costAcc = +src.costAcc;
+    if (isFinite(src.cashDayStart)) co.cashDayStart = +src.cashDayStart;
+    if (src.cashTrend) co.cashTrend = src.cashTrend;
+    co.bankrupt = !!src.bankrupt;
+    if (isFinite(src.rebuildQueue)) co.rebuildQueue = +src.rebuildQueue;
+    if (isFinite(src.lastPropIndex)) co.lastPropIndex = +src.lastPropIndex;
+  }
+  function serialize() {
+    ensureInit();
+    const out = { v: 2, hrAcc: g.corps.hrAcc || 0, dayHrAcc: g.corps.dayHrAcc || 0, co: {}, extra: (g.corps.extra || []).slice() };
+    for (const id in g.corps.list) out.co[id] = serializeCompany(g.corps.list[id]);
+    return out;
+  }
   function apply(obj) {
-    if (!obj || obj.v !== 1) return;
+    if (!obj || (obj.v !== 1 && obj.v !== 2)) return;
     reset();
-    const co = g.corps.list[BUNBROS_ID];
-    if (isFinite(obj.cash)) co.cash = +obj.cash;
-    if (Array.isArray(obj.revenueTTM)) co.revenueTTM = obj.revenueTTM.slice(-HIST_CAP);
-    if (Array.isArray(obj.costsTTM)) co.costsTTM = obj.costsTTM.slice(-HIST_CAP);
-    if (Array.isArray(obj.earningsHistory)) co.earningsHistory = obj.earningsHistory.slice(-DAILY_CAP);
-    if (isFinite(obj.revAcc)) co.revAcc = +obj.revAcc;
-    if (isFinite(obj.costAcc)) co.costAcc = +obj.costAcc;
+    if (obj.v === 1) {
+      // legacy E5/E6-era single-Bunbros blob: hydrate Bunbros only, the other
+      // 7 (and any IPOs — there were none pre-E7) start fresh, as intended.
+      applyCompany(g.corps.list[BUNBROS_ID], obj);
+      g.corps.hrAcc = obj.hrAcc || 0;
+      return;
+    }
+    if (Array.isArray(obj.extra)) {
+      for (const spec of obj.extra) {
+        if (!spec || !spec.id || g.corps.list[spec.id]) continue;
+        g.corps.extra.push(spec);
+        const co = freshCompany(spec); co.active = true;
+        g.corps.list[spec.id] = co;
+      }
+    }
+    if (obj.co) for (const id in obj.co) if (g.corps.list[id]) applyCompany(g.corps.list[id], obj.co[id]);
     g.corps.hrAcc = obj.hrAcc || 0;
-    co.dayHrAcc = obj.dayHrAcc || 0;
-    if (isFinite(obj.cashDayStart)) co.cashDayStart = +obj.cashDayStart;
-    if (obj.cashTrend) co.cashTrend = obj.cashTrend;
-    co.bankrupt = !!obj.bankrupt;
+    g.corps.dayHrAcc = obj.dayHrAcc || 0;
   }
 
   CBZ.corps = {
     BUNBROS_ID: BUNBROS_ID,
+    COMPANIES: COMPANIES.slice(),
     get: function (id) { ensureInit(); return g.corps.list[id || BUNBROS_ID] || null; },
     list: function () { ensureInit(); const out = []; for (const id in g.corps.list) out.push(g.corps.list[id]); return out; },
     summary: summary,
+    summaryAll: summaryAll,
     tickerLine: tickerLine,
-    isOutlet: function (lot) { return !!(lot && lot._bunCo); },
-    companyOfLot: function (lot) { ensureInit(); const id = lot && lot._bunCo; return id ? g.corps.list[id] : null; },
+    isOutlet: function (lot) { return !!(lot && lot._corpOutlet); },
+    companyOfLot: function (lot) { ensureInit(); const id = lot && lot._corpOutlet; return id ? g.corps.list[id] : null; },
     robOutlet: robOutlet,
+    creditRevenue: creditRevenue,
+    notifyDestruction: notifyDestruction,
+    createIPO: createIPO,
     serialize: serialize,
     apply: apply,
     reset: reset,

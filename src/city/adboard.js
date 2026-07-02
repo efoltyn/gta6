@@ -141,6 +141,10 @@
     const brand = brandAd(b);
     const m = CBZ.cityAdMatFor ? CBZ.cityAdMatFor(brand.ad) : null;
     if (!m) { CBZ.city.addCash(per); return; }   // generator missing — refund, no half-deal
+    // E7: Zenith Media books half of every ad-board rental as real revenue
+    // (sim/corporations.js's creditRevenue) — a rental fee the player already
+    // pays, now flowing through the company's earnings too.
+    if (CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("zenith", per * 0.5);
     b.lease = { per, t: 0, bizId: brand.bizId || null, bizName: brand.bizName || null };
     b.mesh.material = m; b.mesh.userData.adLease = true;
     if (b.mesh2) { b.mesh2.material = m; b.mesh2.userData.adLease = true; }
@@ -205,6 +209,9 @@
       }
       else { endLease(b, true); continue; }     // broke → the landlord pulls it
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      // E7: Zenith Media books half of every renewal too (see rentBoard()'s
+      // matching hook for the first week).
+      if (CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("zenith", due * 0.5);
       // every board also pays in CLOUT: a week of your name over the street
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);
     }

@@ -555,12 +555,16 @@
       if (!M || typeof M.tickerLine !== "function") return null;
       const line1 = M.tickerLine(cats[0]), line2 = M.tickerLine(cats[1]);
       const E = CBZ.econState;
-      // E5: every ~20s window in 4, the CPI line makes way for Bunbros's
-      // read-only earnings line (sim/corporations.js) — "" (falls back to
-      // CPI) until that company actually has outlets built.
-      const C = CBZ.corps;
-      const corpLine = (C && typeof C.tickerLine === "function" && Math.floor((CBZ.now || 0) / 20000) % 4 === 3) ? C.tickerLine() : "";
-      const line3 = corpLine || ((E && typeof E.tickerLine === "function") ? E.tickerLine() : "");
+      // E5/E7: every ~20s window in 4, the CPI line makes way for either the
+      // roster's rotating earnings line (sim/corporations.js — E7: rotates
+      // across all 8 companies + any player IPO, not just Bunbros) or the
+      // LBX national index (sim/stocks.js) — "" falls back to CPI until
+      // anything has ever listed.
+      const C = CBZ.corps, S = CBZ.stocks;
+      const win = Math.floor((CBZ.now || 0) / 20000) % 4;
+      const corpLine = (win === 3 && C && typeof C.tickerLine === "function") ? C.tickerLine() : "";
+      const idxLine = (win === 2 && S && typeof S.indexTickerLine === "function") ? S.indexTickerLine() : "";
+      const line3 = corpLine || idxLine || ((E && typeof E.tickerLine === "function") ? E.tickerLine() : "");
       if (!line1 && !line2 && !line3) return null;
       return [line1, line2, 0x05060a, 0x9fd8ff, { kind: "ticker", tag: "MKT", line3: line3 }];
     }

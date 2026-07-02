@@ -119,13 +119,30 @@
   const g = CBZ.game;
 
   // ---- the listing registry: ticker -> which corporation/sector backs it.
-  // E7 adds the other 7 rows here; nothing else in this file changes shape.
-  const LISTINGS = {
-    BUN: { corpId: "bunbros", sector: "food" },
-  };
+  // E7: DATA-DRIVEN off sim/corporations.js's COMPANIES roster (syncListings-
+  // FromCorps() below) instead of a hardcoded single BUN row — a fallback
+  // static entry keeps this file safe if corporations.js somehow isn't
+  // loaded. Player IPOs (CBZ.stocks.ipo()) add further rows at runtime.
+  const BASE_LISTINGS = { BUN: { corpId: "bunbros", sector: "food" } };
+  // NOTE: LISTINGS is mutated IN PLACE (never reassigned) — CBZ.stocks.LISTINGS
+  // below captures this exact object reference once at export time, so a
+  // fresh-run reset() must clear/refill it rather than pointing the const at
+  // a new object (which would silently orphan that exported reference).
+  const LISTINGS = Object.assign({}, BASE_LISTINGS);
+  function syncListingsFromCorps() {
+    if (!CBZ.corps || typeof CBZ.corps.list !== "function") return;
+    for (const co of CBZ.corps.list()) {
+      if (!LISTINGS[co.tickerSym]) LISTINGS[co.tickerSym] = { corpId: co.id, sector: co.sector };
+    }
+  }
+  function resetListings() {
+    for (const k in LISTINGS) delete LISTINGS[k];
+    Object.assign(LISTINGS, BASE_LISTINGS);
+    syncListingsFromCorps();
+  }
   // P/E multiples by EconState good-category sector (VI.6: "fast-food 18x,
-  // casino 14x, guns 10x…" — only food is a real listing this wave).
-  const PE_SECTOR = { food: 18, casino: 14, guns: 10, materials: 12, fuel: 11, luxury: 20, reit: 16, default: 15 };
+  // casino 14x, guns 10x…") — one row per E7 roster sector, plus a fallback.
+  const PE_SECTOR = { food: 18, casino: 14, guns: 10, materials: 12, fuel: 11, luxury: 20, reit: 16, media: 13, default: 15 };
 
   // ---- tuning (E6 constants, all in one place) ---------------------------
   const HOUR = 150 / 24;          // seconds per in-game hour — matches corporations.js exactly
@@ -156,14 +173,18 @@
   // (g.cityPortfolio / g.cityPortfolioBasis — see header's PORTFOLIO note) ---
   function reset() {
     _seed = INITIAL_SEED;
-    g.stocks = { list: {}, hrAcc: 0 };
+    g.stocks = { list: {}, hrAcc: 0, dayHrAcc: 0, index: null };
     g.cityPortfolio = {};
     g.cityPortfolioBasis = {};
+    // E7: a fresh run drops any prior run's player-IPO tickers — start back
+    // at the fixed 8-company roster, re-synced below.
+    resetListings();
   }
   function ensureInit() {
-    if (!g.stocks || !g.stocks.list) { g.stocks = { list: {}, hrAcc: (g.stocks && g.stocks.hrAcc) || 0 }; }
+    if (!g.stocks || !g.stocks.list) { g.stocks = { list: {}, hrAcc: (g.stocks && g.stocks.hrAcc) || 0, dayHrAcc: 0, index: null }; }
     if (!g.cityPortfolio) g.cityPortfolio = {};
     if (!g.cityPortfolioBasis) g.cityPortfolioBasis = {};
+    syncListingsFromCorps();
   }
 
   // ---- ANCHOR: fair value off real trailing earnings ----------------------
@@ -191,7 +212,10 @@
   function stepListing(sym) {
     const meta = LISTINGS[sym];
     const co = (CBZ.corps && CBZ.corps.get) ? CBZ.corps.get(meta.corpId) : null;
-    if (!co || !co.outlets || !co.outlets.length) return;   // lazy: wait for corps to have real outlets/earnings
+    // lazy: wait for the corp to be ACTIVE (E7: outlet-based cos flip this
+    // once they claim real lots; the 3 no-outlet specials + any player IPO
+    // are active immediately — see sim/corporations.js's `co.active`).
+    if (!co || !co.active) return;
 
     const anchor = computeAnchor(co, meta.sector);
     let st = g.stocks.list[sym];
@@ -220,6 +244,7 @@
   function tickAll() {
     ensureInit();
     for (const sym in LISTINGS) stepListing(sym);
+    updateIndex();
   }
   // VI.6: hourly, right after corporations.js's 29.65 earnings pass so this
   // hour's freshly-accrued earnings are what the anchor reads.
@@ -228,8 +253,99 @@
     ensureInit();
     const S = g.stocks;
     S.hrAcc = (S.hrAcc || 0) + dt;
-    while (S.hrAcc >= HOUR) { S.hrAcc -= HOUR; tickAll(); }
+    while (S.hrAcc >= HOUR) {
+      S.hrAcc -= HOUR;
+      tickAll();
+      // E7: dividends — one game-day boundary, shared with corporations.js's
+      // own day counter (both roll off the same HOUR cadence starting from
+      // the same reset(), so they land in lockstep in practice).
+      S.dayHrAcc = (S.dayHrAcc || 0) + 1;
+      if (S.dayHrAcc >= 24) { S.dayHrAcc -= 24; try { payDividends(); } catch (e) {} }
+    }
   });
+
+  // ---- NATIONAL INDEX (LBX): a Dow-style divisor index over every listed
+  // company's price x sharesOutstanding. The divisor is set the FIRST time
+  // there's any positive raw sum so the index starts at exactly 100; every
+  // time a NEW company lists later (its price/anchor first appears), the
+  // divisor is bumped so the index VALUE stays continuous across the
+  // addition instead of jumping (the textbook Dow-divisor trick). -----------
+  function computeRawSum() {
+    let sum = 0;
+    for (const sym in g.stocks.list) {
+      const st = g.stocks.list[sym], meta = LISTINGS[sym];
+      const co = (meta && CBZ.corps && CBZ.corps.get) ? CBZ.corps.get(meta.corpId) : null;
+      const shares = co ? co.sharesOutstanding : 0;
+      if (shares > 0) sum += st.price * shares;
+    }
+    return sum;
+  }
+  function updateIndex() {
+    const S = g.stocks;
+    if (!S.index) S.index = { divisor: null, value: 100, nSyms: 0, trend: "flat" };
+    const raw = computeRawSum();
+    const nSyms = Object.keys(g.stocks.list).length;
+    if (S.index.divisor == null) {
+      if (raw > 0) { S.index.divisor = raw / 100; S.index.value = 100; S.index.nSyms = nSyms; }
+      return;
+    }
+    if (nSyms > S.index.nSyms && S.index.value > 0) {
+      S.index.divisor = raw / S.index.value;   // absorb the new listing with zero index jump
+      S.index.nSyms = nSyms;
+    }
+    const newValue = S.index.divisor > 0 ? raw / S.index.divisor : 100;
+    S.index.trend = newValue > S.index.value * 1.0008 ? "up" : (newValue < S.index.value * 0.9992 ? "down" : "flat");
+    S.index.value = newValue;
+  }
+  // indexQuote()/indexTickerLine() -> the phone MARKETS header + billboard
+  // ticker's "LBX 100.4 ▲" line. null/"" until the divisor has ever been seeded.
+  function indexQuote() {
+    ensureInit();
+    const I = g.stocks.index;
+    if (!I || I.divisor == null) return null;
+    return { value: I.value, trend: I.trend };
+  }
+  function indexTickerLine() {
+    const Q = indexQuote();
+    if (!Q) return "";
+    const arrow = Q.trend === "up" ? "▲" : (Q.trend === "down" ? "▼" : "–");
+    return "LBX " + Q.value.toFixed(1) + " " + arrow;
+  }
+
+  // ---- DIVIDENDS: 20% of trailing-7-day average earnings, once per
+  // game-day, gated on real solvency (positive trailing earnings AND cash
+  // more than double a trailing daily cost estimate) — a company bleeding
+  // cash or barely profitable pays nothing, it isn't a Ponzi. -------------
+  const DIVIDEND_FRAC = 0.20;
+  function dailyCostEstimate(co) {
+    const arr = co.costsTTM || []; const win = arr.slice(-24);
+    let s = 0; for (const v of win) s += v;
+    return s;
+  }
+  function payDividends() {
+    for (const sym in LISTINGS) {
+      const meta = LISTINGS[sym];
+      const co = (CBZ.corps && CBZ.corps.get) ? CBZ.corps.get(meta.corpId) : null;
+      if (!co || co.bankrupt || !co.earningsHistory || !co.earningsHistory.length) continue;
+      const win = co.earningsHistory.slice(-ANCHOR_EPS_WINDOW);
+      let sum = 0; for (const v of win) sum += v;
+      const avgDaily = sum / win.length;
+      if (!(avgDaily > 0)) continue;                              // positive trailing-7 earnings required
+      if (!(co.cash > 2 * dailyCostEstimate(co))) continue;       // cash > 2x costs required
+      const divTotal = avgDaily * DIVIDEND_FRAC;
+      if (!(divTotal > 0)) continue;
+      co.cash -= divTotal;
+      const qty = g.cityPortfolio[sym] || 0;
+      if (qty > 0) {
+        const payout = round2(divTotal * (qty / (co.sharesOutstanding || 1)));
+        if (payout >= 0.01) {
+          if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(payout); else g.cash = (g.cash || 0) + payout;
+          if (CBZ.cityFeed) CBZ.cityFeed("💵 " + sym + " paid a dividend — +$" + payout.toFixed(2), "#7ed957");
+          if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+        }
+      }
+    }
+  }
 
   // ---- EVENT SHOCKS: momentum += frac, called externally (E7/E8 wire more
   // callers — war, nationalization, assassination; THIS wave wires exactly
@@ -336,6 +452,56 @@
     return { sym: sym, qty: qty, avgCost: avgCost, price: price, value: value, pnl: pnl, pnlPct: pnlPct };
   }
 
+  // ---- PLAYER IPO: a maxed city/wealth.js BIZ converts into a listed company
+  // (VI.6). This file owns the eligibility gate (against CBZ.cityWealth's
+  // BIZ table) + the exchange listing; sim/corporations.js's createIPO()
+  // only mints the underlying company record. The player is GRANTED
+  // IPO_PLAYER_FRAC (40%) of the float — not bought, so no cash changes
+  // hands here — and the biz's wealth.js passive income is gated off
+  // (rec.ipo = true; see wealth.js's bizRate() guard) so the SAME dollars
+  // don't double-pay through both systems from here on. ---------------------
+  const IPO_PLAYER_FRAC = 0.40;
+  const IPO_DAY_SECONDS = 150;   // core/daynight.js's CYCLE — one real-clock game-day, wealth.js's bizRate() is $/real-sec
+  // wealth.js BIZ `kind` -> a stock sector (documented mapping; front/gig
+  // fronts read as consumer "goods", supply chains as "materials", the two
+  // vanity/high-roller kinds as "luxury", casino/invest map directly).
+  const SECTOR_BY_BIZKIND = { front: "goods", supply: "materials", club: "luxury", casino: "casino", lux: "luxury", invest: "reit" };
+  function ipoSymFor(bizId, name) {
+    const base = String(bizId || name || "IPO").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3) || "IPO";
+    if (!LISTINGS[base]) return base;
+    for (let n = 1; n <= 9; n++) { const s = base.slice(0, 2) + n; if (!LISTINGS[s]) return s; }
+    return base + Math.floor(rng() * 90 + 10);   // pathological collision fallback
+  }
+  function ipo(bizId) {
+    ensureInit();
+    const W = CBZ.cityWealth;
+    if (!W || !Array.isArray(W.BUSINESSES)) return { ok: false, reason: "no-wealth" };
+    const b = W.BUSINESSES.find(function (x) { return x.id === bizId; });
+    if (!b) return { ok: false, reason: "unknown-biz" };
+    if (!W.owns || !W.owns(bizId)) return { ok: false, reason: "not-owned" };
+    const st = W.state ? W.state() : null;
+    const rec = st && st.biz ? st.biz[bizId] : null;
+    if (!rec) return { ok: false, reason: "no-record" };
+    if ((rec.tier | 0) < (b.maxTier || 0)) return { ok: false, reason: "not-maxed" };
+    if (rec.ipo) return { ok: false, reason: "already-ipo" };
+    if (!CBZ.corps || typeof CBZ.corps.createIPO !== "function") return { ok: false, reason: "no-corps" };
+    const dailySeed = Math.max(1, Math.round((typeof W.bizRate === "function" ? W.bizRate(bizId) : 0) * IPO_DAY_SECONDS));
+    const sector = SECTOR_BY_BIZKIND[b.kind] || "goods";
+    const sym = ipoSymFor(bizId, b.name);
+    const co = CBZ.corps.createIPO({ id: "ipo_" + bizId, sym: sym, name: b.name, sector: sector, dailySeed: dailySeed, playerShareFrac: IPO_PLAYER_FRAC });
+    if (!co) return { ok: false, reason: "create-failed" };
+    LISTINGS[sym] = { corpId: co.id, sector: sector };
+    const anchor = computeAnchor(co, sector);
+    g.stocks.list[sym] = { sym: sym, price: anchor, anchor: anchor, momentum: 0, vol: DEFAULT_VOL, history: [anchor], flowAcc: 0 };
+    const shares = Math.round((co.sharesOutstanding || 0) * IPO_PLAYER_FRAC);
+    g.cityPortfolio[sym] = (g.cityPortfolio[sym] || 0) + shares;
+    g.cityPortfolioBasis[sym] = anchor;   // granted, not bought — a fair paper cost basis at the IPO price
+    rec.ipo = true;                        // wealth.js's bizRate() guard: this biz's passive income now flows THROUGH the company instead
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("📈 " + b.name + " went PUBLIC as " + sym + " — you keep " + Math.round(IPO_PLAYER_FRAC * 100) + "% of the float");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return { ok: true, sym: sym, shares: shares, price: anchor };
+  }
+
   // ---- persistence ----------------------------------------------------------
   // NOTE: unlike market.js/corporations.js, `history` (the sparkline ring) IS
   // serialized here — it's needed to draw a sensible detail-view sparkline
@@ -343,7 +509,13 @@
   // and it's small (≤48 numbers per listing, one listing this wave).
   function serialize() {
     ensureInit();
-    const out = { v: 1, list: {}, portfolio: {}, basis: {}, hrAcc: g.stocks.hrAcc || 0 };
+    // note: sim/corporations.js's serialize() is what actually recreates any
+    // player-IPO ticker's backing company (its `extra[]` spec); by the time
+    // THIS file's apply() runs, netpersist.js has already applied CBZ.corps
+    // (market -> npce -> corp -> stk order), so syncListingsFromCorps() in
+    // reset()/ensureInit() below already re-registered that ticker's sym ->
+    // {corpId,sector} row before obj.list is walked.
+    const out = { v: 1, list: {}, portfolio: {}, basis: {}, hrAcc: g.stocks.hrAcc || 0, dayHrAcc: g.stocks.dayHrAcc || 0, index: g.stocks.index };
     for (const sym in g.stocks.list) {
       const st = g.stocks.list[sym];
       out.list[sym] = { price: st.price, anchor: st.anchor, momentum: st.momentum, history: st.history.slice() };
@@ -372,6 +544,8 @@
     if (obj.portfolio) for (const sym in obj.portfolio) if (isFinite(obj.portfolio[sym])) g.cityPortfolio[sym] = +obj.portfolio[sym];
     if (obj.basis) for (const sym in obj.basis) if (isFinite(obj.basis[sym])) g.cityPortfolioBasis[sym] = +obj.basis[sym];
     g.stocks.hrAcc = obj.hrAcc || 0;
+    g.stocks.dayHrAcc = obj.dayHrAcc || 0;
+    if (obj.index && isFinite(obj.index.divisor)) g.stocks.index = { divisor: +obj.index.divisor, value: +obj.index.value || 100, nSyms: obj.index.nSyms || 0, trend: obj.index.trend || "flat" };
   }
 
   CBZ.stocks = {
@@ -386,6 +560,9 @@
     sell: sell,
     sellAll: sellAll,
     position: position,
+    ipo: ipo,
+    indexQuote: indexQuote,
+    indexTickerLine: indexTickerLine,
     serialize: serialize,
     apply: apply,
     reset: reset,

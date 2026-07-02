@@ -53,7 +53,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **E4** NPC circulation: ledger rent/spend, cohort wallets (20 rows), robbery debits cohorts, vacancies become real.
 - [x] **E5** `sim/corporations.js` (new): Bunbros with real outlet revenue from cohort spend; read-only ticker line.
 - [x] **E6** `sim/stocks.js` (new): exchange building role + buy/sell UI + price formation off real earnings.
-- [ ] **E7** Full 8-company roster + national index + dividends + IPO for player businesses.
+- [x] **E7** Full 8-company roster + national index + dividends + IPO for player businesses.
 - [ ] **E8** Billionaires as persistent shareholder NPCs (MAGNATE VIP wiring, mark-to-market net worth, assassination shocks + succession via family tree from W9).
 - [ ] **E9** Casino: minigame house-take books into Royale Casino Corp; NPC whales; vault heist = earnings shock.
 - [ ] **E10** Motorsport: car manufacturers as listed corporations owning the CARS catalog models (dealership sales = their revenue); racing teams per manufacturer with persistent driver NPCs on salary; race results move brand demand + stock ("win on Sunday, sell on Monday"); purse pool becomes sponsorship spend; race-fixing/sabotage = market manipulation with SEC heat.

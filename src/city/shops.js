@@ -526,6 +526,10 @@
       if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
+    // E7: Ironclad Arms books half of every player gun-store purchase as
+    // real revenue (sim/corporations.js's creditRevenue) — a guns lot the
+    // company doesn't even need to have claimed as an outlet.
+    if (openLot.kind === "guns" && CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("ironclad", total * 0.5);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (openLot.kind === "food" && meta.heal) {
       for (let k = 0; k < n; k++) { g.hunger = Math.min(100, (g.hunger || 0) + meta.heal); if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + Math.round(meta.heal * 0.4)); }
@@ -759,6 +763,9 @@
   }
   function buyCar() {
     if (!CBZ.city.spend(1500)) { CBZ.city.note("Need $1,500 for a car.", 1.6); return; }
+    // E7: Apex Dealership Holdings books half of every player car purchase
+    // as real revenue (sim/corporations.js's creditRevenue).
+    if (CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("apex", 1500 * 0.5);
     const A = CBZ.city.arena, door = openLot.building.door;
     if (CBZ.citySpawnOwnedCar) CBZ.citySpawnOwnedCar(door.x + door.nx * 3, door.z + door.nz * 3);
     CBZ.city.note("Your new ride is parked out front!", 2.2);

@@ -136,6 +136,10 @@
 
     if (p.hp <= 0) {
       forget(pieceId);
+      // E7: sim/corporations.js's Granite & Sons — every destroyed piece
+      // queues a paid reconstruction job (drained a few at a time each
+      // hour). Guarded no-op until that module loads.
+      if (CBZ.corps && typeof CBZ.corps.notifyDestruction === "function") CBZ.corps.notifyDestruction(1);
       // B6 BREACH STAMP: any piece destroyed inside a base's radius marks
       // this instant as a breach — systems/baseclaim.js's lockable doors/
       // containers stay open to non-owners for a short window afterward

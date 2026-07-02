@@ -84,6 +84,7 @@
     for (const id in g.cityEmpireBiz) {
       const b = g.cityEmpireBiz[id], def = BIZ_BY_ID[id]; if (!def) continue;
       const o = { id, name: def.name, tier: b.tier | 0, sec: b.secLevel | 0, value: bizValue(id) };
+      if (b.ipo) o.ipo = true;   // E7: IPO'd businesses stay public across a reload
       if (def.gig) { o.workers = b.workers | 0; o.rep = clamp(b.rep == null ? 1 : b.rep, 0, 1); }
       out.push(o);
     }
@@ -109,6 +110,7 @@
             tier: rec.tier | 0, secLevel: rec.sec | 0, supply: 0, lastTick: now(),
             workers: def.gig ? (rec.workers | 0) : 0,
             rep: def.gig ? clamp(rec.rep == null ? 1 : rec.rep, 0, 1) : undefined,
+            ipo: !!rec.ipo,   // E7: restore the "went public" flag (see bizRate()'s guard below)
           };
         }
       }
@@ -224,7 +226,11 @@
     persist(); if (open_) render();
   }
 
-  function bizRate(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return b.rate * tierMul(r.tier) * workerMul(id) * repMul(id) * empireSynergy() * tierPerk("passiveMul"); }
+  // E7: an IPO'd business (see sim/stocks.js's ipo()) pays zero passive
+  // income here from now on — the SAME dollars flow through the listed
+  // company's own earnings instead (CBZ.corps.get("ipo_"+id)), so this
+  // guard is what stops the biz from double-paying via both systems.
+  function bizRate(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; if (r.ipo) return 0; return b.rate * tierMul(r.tier) * workerMul(id) * repMul(id) * empireSynergy() * tierPerk("passiveMul"); }
   function bizCap(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return Math.round(b.cap * tierMul(r.tier)); }
   function upgradeCost(id) { const b = BIZ_BY_ID[id], r = rec(id); if (!b || !r) return 0; return Math.round(b.cost * 0.6 * Math.pow(b.upgradeMul, r.tier)); }
   function bizValue(id) {
@@ -281,6 +287,21 @@
     note("Output now " + money(bizRate(id)) + "/sec, cap " + money(bizCap(id)) + ".", 2.6);
     sfx("coin");
     if (CBZ.city) CBZ.city.addRespect(2);
+    persist(); if (open_) render();
+  }
+  // ---- E7 IPO: a maxed-tier business converts into a listed company on the
+  // exchange (sim/stocks.js owns the actual mechanics — this is just the
+  // eligibility check + the menu action that calls it). --------------------
+  function ipoEligible(id) {
+    const b = BIZ_BY_ID[id], r = rec(id);
+    return !!(b && r && !r.ipo && (r.tier | 0) >= (b.maxTier || 0));
+  }
+  function ipoBiz(id) {
+    const b = BIZ_BY_ID[id]; if (!b) return;
+    if (!ipoEligible(id)) { note(b.name + " isn't ready to IPO — max out every tier first.", 2); return; }
+    if (!CBZ.stocks || typeof CBZ.stocks.ipo !== "function") { note("The exchange isn't open yet.", 1.8); return; }
+    const r = CBZ.stocks.ipo(id);
+    if (!r || !r.ok) { note("⛔ IPO failed (" + ((r && r.reason) || "unknown") + ").", 2.2); return; }
     persist(); if (open_) render();
   }
   // COLLECT the accrued product/cash pool from one business (the active step).
@@ -689,7 +710,14 @@
     for (const b of BUSINESSES) {
       const have = owns(b.id), r = rec(b.id);
       let right, sub = b.blurb;
-      if (have) {
+      if (have && r.ipo) {
+        // E7: gone public — passive income now flows through the listed
+        // company's own earnings (sim/corporations.js), not this menu.
+        const co = CBZ.corps && CBZ.corps.get ? CBZ.corps.get("ipo_" + b.id) : null;
+        const sym = co ? co.tickerSym : "?";
+        right = "<div style='color:#7fd0ff'>PUBLIC ✓</div><div style='font-size:11px;color:#a99b78'>ticker " + sym + " · check STOCKS</div>";
+        sub = "Went public — its income is now on the exchange, not here.";
+      } else if (have) {
         const pct = Math.round((r.supply / Math.max(1, bizCap(b.id))) * 100);
         right = "<div style='color:#7ed957'>" + money(Math.floor(r.supply)) + "</div>" +
           "<div style='font-size:11px;color:#a99b78'>" + money(bizRate(b.id)) + "/s · T" + r.tier + "/" + b.maxTier + "</div>";
@@ -707,7 +735,8 @@
         const acts = (Math.floor(r.supply) >= 1 ? btn(keyLabel(i), "collect", "#1f4a2a") : "") +
           (r.tier < b.maxTier ? btn("U", "upgrade", "#2a3a4a") : "") +
           (b.gig && workerCount(b.id) < WORKER_MAX ? btn("H", "hire " + money(workerCost(b.id)), "#1f3a4a") : "") +
-          (sl < SEC_MAX ? btn("S", "security " + money(secCost(b.id)), "#2a2a4a") : "");
+          (sl < SEC_MAX ? btn("S", "security " + money(secCost(b.id)), "#2a2a4a") : "") +
+          (ipoEligible(b.id) ? btn("I", "IPO", "#1a3a5a") : "");
         right += "<div style='margin-top:3px'>" + acts + "</div>";
       } else {
         const locked = tierIndex() < (b.minTier || 0);
@@ -790,7 +819,7 @@
     bar += "</div>";
     let body = tab === "biz" ? renderBiz() : tab === "lux" ? renderLux() : tab === "ops" ? renderOps() : renderPerks();
     let foot = "<div style='font-size:11px;color:#8a7d5a;margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
-      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
+      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>I</b> IPO · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
     el().innerHTML = head + bar + body + foot;
   }
 
@@ -844,6 +873,7 @@
         if (k === "u") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && r.tier < b.maxTier) { upgradeBiz(b.id); break; } } return; }
         if (k === "h") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && b.gig && workerCount(b.id) < WORKER_MAX) { hireWorker(b.id); break; } } return; }
         if (k === "s") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return; }
+        if (k === "i") { e.preventDefault(); for (const b of BUSINESSES) { if (ipoEligible(b.id)) { ipoBiz(b.id); break; } } return; }
       }
       // number keys act on the visible list row (0 = the 10th row)
       if (k >= "0" && k <= "9") { e.preventDefault(); actNum(parseInt(k, 10)); return; }
@@ -875,6 +905,7 @@
     isGig, hireWorker, workerCount, workerCost, WORKER_MAX, bizRep, repMul, bumpRep,
     upgradeSecurity, secLevel, secCost, raidChance, resolveRaid, defenseStrength, liveCrew, SEC_MAX,
     buyLux, luxPrice, ownsLux, partySpend, launderAll,
+    ipoEligible, ipoBiz,   // E7
     runOp, opCooldown,
     tierPerk, hasVIP, flexLevel, incomePerSec,
     // economy.js holdingsWorth() & SINKS.launderCut() read these via CBZ.cityEmpire:

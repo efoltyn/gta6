@@ -96,9 +96,9 @@
   // ---- state lives on g.cityMarket (mirrors g.cityDrugDist) so it saves/
   // resets with the rest of the run's world state ------------------------
   function reset() {
-    const lvl = {}, yest = {}, hist = {};
-    for (const c of CATS) { lvl[c] = { p: 1.0 }; yest[c] = 1.0; hist[c] = []; }
-    g.cityMarket = { lvl: lvl, yest: yest, hist: hist, hrAcc: 0, dayHrAcc: 0, bigFired: {} };
+    const lvl = {}, yest = {}, hist = {}, buyVol = {};
+    for (const c of CATS) { lvl[c] = { p: 1.0 }; yest[c] = 1.0; hist[c] = []; buyVol[c] = 0; }
+    g.cityMarket = { lvl: lvl, yest: yest, hist: hist, buyVol: buyVol, hrAcc: 0, dayHrAcc: 0, bigFired: {} };
   }
   function ensureInit() {
     if (!g.cityMarket) { reset(); return; }
@@ -108,6 +108,11 @@
     if (!g.cityMarket.hist) {
       g.cityMarket.hist = {};
       for (const c of CATS) g.cityMarket.hist[c] = [];
+    }
+    // E7: backfill the buy-volume counter the same way for pre-E7 state.
+    if (!g.cityMarket.buyVol) {
+      g.cityMarket.buyVol = {};
+      for (const c of CATS) g.cityMarket.buyVol[c] = 0;
     }
   }
 
@@ -189,6 +194,21 @@
     const lv = g.cityMarket.lvl[cat]; if (!lv) return;
     qty = qty || 1;
     lv.p = clamp(lv.p + Math.min(SIGNAL_CAP, SIGNAL_BUMP * qty));
+    // E7: a raw cumulative buy-volume counter per category (NOT the clamped
+    // price nudge above) — sim/corporations.js's Granite & Sons reads this
+    // as its citywide materials-demand proxy (drainBuyVolume() below).
+    g.cityMarket.buyVol[cat] = (g.cityMarket.buyVol[cat] || 0) + qty;
+  }
+  // drainBuyVolume(cat) -> this category's accumulated recordBuy volume since
+  // the last drain, reset to 0. A one-shot "read and clear" counter (like
+  // recordSale/recordBuy's own semantics elsewhere) — only Granite & Sons
+  // calls this today, but any future consumer gets its own fair slice as
+  // long as it drains on its own cadence.
+  function drainBuyVolume(cat) {
+    ensureInit();
+    const v = g.cityMarket.buyVol[cat] || 0;
+    g.cityMarket.buyVol[cat] = 0;
+    return v;
   }
 
   // ---- the city feed line on big moves (throttled) -----------------------
@@ -277,6 +297,7 @@
     trend: trend,
     recordSale: recordSale,
     recordBuy: recordBuy,
+    drainBuyVolume: drainBuyVolume,
     serialize: serialize,
     apply: apply,
     reset: reset,

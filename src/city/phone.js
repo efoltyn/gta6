@@ -187,22 +187,31 @@
         "</span></div>";
     });
     if (!rowsData.length) inner = "<div style='font-size:13px;color:" + DIM + "'>Market data unavailable.</div>";
-    // E5: Bunbros (sim/corporations.js) — the first real corporation, one
-    // read-only row (name, today's-so-far/last daily earnings, cash-trend
-    // arrow). Absent entirely until outlets are actually built.
-    // E6: that row is now TAPPABLE (sim/stocks.js lists it once outlets
-    // exist) — tap toggles a detail view: price, sparkline, over/undervalued
-    // hint, BUY/SELL buttons, position + P&L.
-    const co = (CBZ.corps && typeof CBZ.corps.summary === "function") ? CBZ.corps.summary() : null;
-    if (co) {
+    // E7: the LBX national index (sim/stocks.js) — a Dow-divisor index over
+    // every listed company's price x sharesOutstanding, seeded to start at
+    // exactly 100. Absent until at least one company has ever listed.
+    const idx = (CBZ.stocks && typeof CBZ.stocks.indexQuote === "function") ? CBZ.stocks.indexQuote() : null;
+    if (idx) {
+      const idxCol = idx.trend === "up" ? GOLD : (idx.trend === "down" ? GREEN : DIM);
+      const idxArrow = idx.trend === "up" ? "▲" : (idx.trend === "down" ? "▼" : "–");
+      inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+      inner += row("LBX index", idx.value.toFixed(1) + " " + idxArrow, idxCol);
+    }
+    // E5 landed Bunbros alone (one read-only row); E6 made it tappable
+    // (sim/stocks.js lists it once outlets exist — detail view: price,
+    // sparkline, over/undervalued hint, BUY/SELL buttons, position + P&L).
+    // E7: the FULL 8-company roster (+ any player IPOs), one row each —
+    // summaryAll() replaces the single summary() read.
+    const roster = (CBZ.corps && typeof CBZ.corps.summaryAll === "function") ? CBZ.corps.summaryAll() : [];
+    if (roster.length) inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+    roster.forEach(function (co) {
       const coCol = co.cashTrend === "up" ? GOLD : (co.cashTrend === "down" ? GREEN : DIM);
       const coArrow = co.cashTrend === "up" ? "▲" : (co.cashTrend === "down" ? "▼" : "–");
       const tradable = !!(CBZ.stocks && typeof CBZ.stocks.quote === "function" && CBZ.stocks.quote(co.tickerSym));
-      inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
       inner += "<div" + (tradable ? " data-stock='" + esc(co.tickerSym) + "' style='cursor:pointer'" : "") + ">" +
         row(co.tickerSym + " · " + co.name, money(co.dailyEarnings) + "/day " + coArrow, coCol) + "</div>";
       if (tradable && stockOpen === co.tickerSym) inner += stockDetailHtml(co.tickerSym);
-    }
+    });
     return card("📈 MARKETS", inner);
   }
   // ---- STOCK DETAIL — sim/stocks.js's data layer (quote()/position()) laid
