@@ -111,6 +111,47 @@
   const PIECE_SCAN_R2 = 20 * 20; // ~20m piece-hit scan radius, squared
   const LEVEL_MAX = 20;
 
+  /* ================= B7: RESOURCE COSTS =====================
+     CATALOG.cost{Wood:N} (data-only since B1) becomes real: tryPlace()
+     below checks affordability against CBZ.craft.itemStore() (systems/
+     craft.js's ONE store accessor for whichever mode is live) before
+     calling B.place(), and deducts only on a SUCCESSFUL placement — a
+     placement B.place() rejects for some other reason (occupied cell,
+     out of span, etc.) never costs you anything (check-then-place).
+
+     CBZ.CONFIG.BUILD_FREE — self-defaulted false, same in-module-tuning
+     idiom as city/police.js:49-51 (never edit config.js directly here).
+     When true it's a hard global override: everything is free everywhere.
+
+     Left false (the default), costsApply() below decides per mode/kind:
+       • survival — ALWAYS costs. It's the core gather→build loop there.
+       • city     — FREE for the 6 generic structural pieces (foundation/
+         wall/floor/roof/stairs/doorframe). City building is brand-new
+         this wave; charging up front for a wall would just stop anyone
+         from touching the feature at all — keep the friction low.
+         The 3 baseclaim pieces (cupboard/container/door) still cost,
+         because THOSE stake a real claim (systems/baseclaim.js's
+         BaseRecord + placement-rejection radius) and shouldn't be free
+         to spam across a block. */
+  if (CBZ.CONFIG && CBZ.CONFIG.BUILD_FREE == null) CBZ.CONFIG.BUILD_FREE = false;
+  const CLAIM_KINDS = { cupboard: 1, container: 1, door: 1 };
+  function costsApply(kind) {
+    if (CBZ.CONFIG && CBZ.CONFIG.BUILD_FREE) return false;
+    if (CBZ.game.mode === "survival") return true;
+    return !!CLAIM_KINDS[kind];
+  }
+  // affordability({ok, cost, short}) — cost is the CATALOG entry (or null
+  // when this kind/mode charges nothing this wave); short names the first
+  // material you're missing when ok is false.
+  function affordability(kind) {
+    const def = B.CATALOG[kind];
+    if (!def || !def.cost || !costsApply(kind)) return { ok: true, cost: null };
+    const S = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
+    if (!S) return { ok: true, cost: def.cost };   // store not loaded yet — never hard-block on a load-order fluke
+    for (const mat in def.cost) if (S.count(mat) < def.cost[mat]) return { ok: false, cost: def.cost, short: mat };
+    return { ok: true, cost: def.cost };
+  }
+
   const bm = CBZ.buildMode = {
     active: false,
     kind: KINDS[0],
@@ -180,9 +221,16 @@
   function renderStrip() {
     for (let i = 0; i < stripCells.length; i++) stripCells[i].classList.toggle("sel", i === bm.kindIdx);
   }
-  function setHint(text) { hintEl.textContent = text; }
-  function hintLine(v) {
+  function setHint(text, warn) { hintEl.textContent = text; hintEl.style.color = warn ? "#ff6a6a" : ""; }
+  // B7: append the piece's live cost (when this mode/kind actually charges —
+  // see costsApply() above) and flag the whole line red when short.
+  function hintLine(v, afford) {
     let s = "[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit";
+    if (afford && afford.cost) {
+      const parts = Object.keys(afford.cost).map(function (m) { return afford.cost[m] + " " + m; });
+      s += "  ·  cost " + parts.join(", ");
+      if (!afford.ok) s += "  ⚠ need " + afford.cost[afford.short] + " " + afford.short;
+    }
     if (!v.ok) s += "  —  " + (v.reason || "invalid");
     return s;
   }
@@ -377,18 +425,30 @@
     const v = B.validate(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
     bm.lastValid = v;
     renderGhost(v);
-    setHint(hintLine(v));
+    const afford = affordability(bm.kind);
+    setHint(hintLine(v, afford), !afford.ok);
   }
 
   /* ================= actions ================= */
   function tryPlace() {
     if (!bm.active) return;
     if (bm.gx == null) { CBZ.flashHint && CBZ.flashHint("🚫 No target", 1.0); return; }
+    // B7: check affordability BEFORE B.place() (check-then-place — a failed
+    // placement below never costs you anything either way).
+    const afford = affordability(bm.kind);
+    if (!afford.ok) {
+      CBZ.flashHint && CBZ.flashHint("🚫 Need " + afford.cost[afford.short] + " " + afford.short, 1.4);
+      return;
+    }
     // B6: thread the builder's stable pid through so every piece carries
     // its owner (foreign-base placement gate + the demolish gate below both
     // key off this) — CBZ.netPid() always resolves, online or offline.
     const piece = B.place(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot, { ownerId: CBZ.netPid ? CBZ.netPid() : null });
     if (piece) {
+      if (afford.cost) {
+        const S = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
+        if (S) for (const mat in afford.cost) S.take(mat, afford.cost[mat]);
+      }
       bm.placedStack.push(piece.id);
       // audio.js's BANK has no "place" entry yet (grepped) — "coin" is
       // the documented fallback the task asks for until one lands.

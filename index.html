@@ -513,6 +513,14 @@
 <script src="src/city/interact.js?v=registry1"></script>
 <script src="src/city/restrain.js?v=collar1"></script>
 <script src="src/city/combat.js?v=grenade1"></script>
+<!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
+     CBZ.CITY already loaded, and CBZ.cityEcon's new Wood/Stone/Scrap/
+     Hatchet/Pickaxe entries above) + the [C] craft panel (needs
+     CBZ.cityGiveWeapon, just above, to auto-equip a freshly-crafted tool).
+     Loads right after city/combat.js, whose lightAttack/heavyAttack call
+     CBZ.resourceHarvestSwing when a swing finds no ped in the cone. -->
+<script src="src/systems/resources.js?v=bld1"></script>
+<script src="src/systems/craft.js?v=bld1"></script>
 <script src="src/city/explosives.js?v=c4-1"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
 <script src="src/city/death.js?v=drop1"></script>

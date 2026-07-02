@@ -127,6 +127,18 @@
     "Burner Phone":{ value: 60,   tag: "tool" },
     Medkit:        { value: 150,  tag: "tool", medkit: 40 },
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
+    // --- B7: RESOURCES (harvested from city nodes — trees/rocks/scrap piles;
+    // see systems/resources.js) + the two gathering TOOLS that craft against
+    // them (systems/craft.js). Hatchet/Pickaxe also carry melee:true/dmg so
+    // equipping one routes through the EXACT SAME slot city/combat.js already
+    // uses for Bat/Knife (CBZ.cityGiveWeapon → g.cityMeleeWeapon) with zero
+    // special-casing — weaponFeel() just doesn't recognize their name, so
+    // they swing with the plain "melee" profile rather than a tuned one.
+    Wood:          { value: 2,   tag: "resource" },
+    Stone:         { value: 3,   tag: "resource" },
+    Scrap:         { value: 4,   tag: "resource" },
+    Hatchet:       { value: 40,  tag: "tool", melee: true, dmg: 24 },
+    Pickaxe:       { value: 45,  tag: "tool", melee: true, dmg: 22 },
   };
 
   // ============================================================

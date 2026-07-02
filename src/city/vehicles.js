@@ -1110,7 +1110,11 @@
     car._exploded = true; car.dead = true; car._onFire = false; car._smoking = false;
     const x = car.pos.x, z = car.pos.z;
     if (car.npcDriver) killNpcDriverInCar(car);
-    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: !!(car._burnByPlayer || car.player) });
+    const byPlayer = !!(car._burnByPlayer || car.player);
+    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: 1.15, radius: 6.5, byPlayer: byPlayer });
+    // B7: a wreck the PLAYER caused leaves scrap behind (systems/resources.js's
+    // Scrap item) — a real reason to blow cars up beyond the spectacle.
+    if (byPlayer && CBZ.cityEcon && CBZ.cityEcon.add) CBZ.cityEcon.add("Scrap", 2 + ((Math.random() * 5) | 0));
     // if the PLAYER was still inside, the blast handles their damage; eject them
     if (car.player && CBZ.player.driving) { CBZ.cityExitVehicle(); }
     // remove the wreck mesh now; DEFER the array splice to the reaper so we never

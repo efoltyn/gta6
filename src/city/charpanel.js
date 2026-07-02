@@ -741,12 +741,14 @@
   let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invHot = null, invBuild = null;
   let invOpen = false, invBigSig = "";
 
-  const LOOT_ICON = { drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔", weapon: "🔫", ammo: "📦" };
+  const LOOT_ICON = { drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔", weapon: "🔫", ammo: "📦", resource: "📦" };
   const ITEM_ICON = {
     Grenade: "🧨", "C4 Charge": "🧨", Rolex: "⌚", Omega: "⌚", "Audemars Piguet": "⌚", "Patek Philippe": "⌚",
     "Richard Mille": "⌚", "Gold Bar": "🥇", "Gold Chain": "📿", "Diamond Ring": "💍", "Engagement Ring": "💍",
     Medkit: "🩹", "Body Armor": "🦺", Weed: "🌿", Coke: "❄️", "Cash Stack": "💵", "Briefcase of Cash": "💼",
     Phone: "📱", Laptop: "💻", Wallet: "👛", Burger: "🍔", Soda: "🥤",
+    // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
+    Wood: "🪵", Stone: "🪨", Scrap: "⚙️", Hatchet: "🪓", Pickaxe: "⛏️",
   };
 
   function buildInv() {

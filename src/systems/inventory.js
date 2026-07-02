@@ -32,6 +32,9 @@
     "Handcuff Key": "🔑", "Bedsheet Rope": "🪢", "Hacksaw Blade": "🪚",
     "Contraband Map": "🗺️", "Stolen Wallet": "👛", "Cash Roll": "💵",
     "Gold Tooth": "🦷", "Gold Chain": "📿", "Luxury Watch": "⌚",
+    // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
+    // + city/charpanel.js for the city-mode equivalents.
+    "Wood": "🪵", "Stone": "🪨", "Scrap": "⚙️", "Hatchet": "🪓", "Pickaxe": "⛏️",
   };
   // items you can FENCE for their cigarette value straight from the bag
   const FENCEABLE = new Set(["Cash Roll", "Cigarette Carton", "Stolen Wallet", "Gold Tooth", "Gold Chain", "Luxury Watch"]);
