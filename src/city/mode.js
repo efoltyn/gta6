@@ -381,8 +381,21 @@
       if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = 0.4; }
       if (CBZ.resetZoom) CBZ.resetZoom();
       if (CBZ.cityDeathReset) CBZ.cityDeathReset();
+      // ORIGIN: a fresh character (or one who just picked a different origin
+      // than their saved one) gets a one-time scripted opening scene — the
+      // exec's raid, the barfly's toss, the tenant's mattress — staged by
+      // city/origins.js, which may override the position/cash/outfit/weapon
+      // set above. A returning character with an origin already played is a
+      // no-op here (default rooftop spawn above stands). When an origin
+      // intro IS active we must NOT force first-person yet — the jail-style
+      // cinematic (CBZ.startIntro, armed by systems/state.js's startRun)
+      // needs third-person for its front-reveal/orbit; onIntroComplete flips
+      // to FP the same way the escape game does.
+      const originResult = CBZ.cityOriginApply ? CBZ.cityOriginApply(game) : null;
       // CITY defaults to FIRST-PERSON (the jail's fpsmode); [V] toggles to 3rd-person.
-      if (CBZ.setFPS) CBZ.setFPS(true);
+      if (!(originResult && originResult.introActive)) {
+        if (CBZ.setFPS) CBZ.setFPS(true);
+      }
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
     winStats(game) {

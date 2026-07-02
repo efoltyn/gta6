@@ -160,6 +160,14 @@
     <div class="mode-city-only">
       <div class="logo">GANG <span class="z">LIFE</span></div>
       <div class="sub">Open-world turf war</div>
+      <!-- character-origin picker (systems/state.js wires it; city/origins.js
+           applies the pick at run-start — see that file's header). -->
+      <div class="origin-label">CHOOSE YOUR STORY</div>
+      <div id="originSelect" class="origin-select" aria-label="Choose your story">
+        <button class="origin-btn" type="button" data-origin="exec"><b>💼 The Executive</b><span>Top floor. Millions. None of it real.</span></button>
+        <button class="origin-btn" type="button" data-origin="barfly"><b>🍺 The Barfly</b><span>Thrown out at closing time. In debt.</span></button>
+        <button class="origin-btn active" type="button" data-origin="tenant"><b>🔫 The Tenant</b><span>$12, an air mattress, and a pistol.</span></button>
+      </div>
       <div class="keys">
         <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
         <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
@@ -517,9 +525,17 @@
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig1"></script>
 <script src="src/city/hud.js?v=route1"></script>
+<!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
+     loads after shops.js/hud so it can hook the same HUD/economy surface) -->
+<script src="src/city/drinking.js?v=drink1"></script>
 <script src="src/city/charpanel.js?v=cp1"></script>
 <script src="src/city/phone.js"></script>
 <script src="src/city/killfeed.js?v=night3"></script>
+<!-- character-origin scenes (title-screen picker payoff): needs mode.js,
+     worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
+     bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
+     already loaded above — so it goes last in the city block. -->
+<script src="src/city/origins.js?v=origins1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
 <script src="src/systems/fullmap.js?v=route1"></script>

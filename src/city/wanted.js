@@ -260,19 +260,24 @@
   };
 
   // ---- BUST: cuffed by police → off to the jail (escape) game ----
+  // opts.bigLabel / opts.note (city/origins.js, the EXEC fraud arrest): an
+  // optional custom big-text + overlay sub-line for a scripted bust that
+  // isn't the generic wanted-star cuffing (e.g. "BUSTED — SECURITIES FRAUD").
+  // Both default to the existing generic text when omitted — fully backward
+  // compatible with every other bust() caller.
   function bust(opts) {
     if (busting || g.busted) return;
     opts = opts || {};
     busting = true; g.busted = true;
-   
-    CBZ.city && CBZ.city.big(opts.peaceful ? "SURRENDERED" : "BUSTED");
+
+    CBZ.city && CBZ.city.big(opts.bigLabel || (opts.peaceful ? "SURRENDERED" : "BUSTED"));
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     // cooperating (hands up) costs you less than getting dragged in violently
     const frac = opts.peaceful ? 0.25 : 0.5;
     const lost = Math.round((g.cash || 0) * frac);
     if (lost > 0) { g.cash -= lost; }
     if (CBZ.cityEvent) CBZ.cityEvent("arrest", { lost, peaceful: !!opts.peaceful, debt: opts.peaceful ? 0 : 25 }, { noWanted: true });
-    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail);
+    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: opts.note });
     else toJail();
   }
   function toJail() {

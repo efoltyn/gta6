@@ -735,14 +735,19 @@
   // BAR — buy a round. The bar's verb promises "drinks" but it has no stock and
   // the food heal path is kind-gated; this is the drink. Loosens you up: tops a
   // little hunger, a short stamina boost, and a small patch-up (mirrors the
-  // food heal+boost at the buy() path, scaled down for a single round).
+  // food heal+boost at the buy() path, scaled down for a single round) — and,
+  // per city/drinking.js, tips your drunk level: one round is a buzz, several
+  // rounds is a stumble, and the bar can absolutely put you on the floor if
+  // you keep ordering (guarded — the round still pours fine if that file
+  // somehow isn't loaded).
   function buyDrink() {
     if (!CBZ.city.spend(12)) { CBZ.city.note("Need $12.", 1.4); return; }
     if (CBZ.sfx) CBZ.sfx("coin");
     g.hunger = Math.min(100, (g.hunger || 0) + 15);
     CBZ.player._boost = 12;
     if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + 8);
-    CBZ.city.note("🍸 Drink — loosened up.", 1.6);
+    if (CBZ.cityDrink) CBZ.cityDrink(1);
+    CBZ.city.note("🍸 Drink — loosened up. That's gonna add up...", 1.8);
     render();
   }
   function buyCar() {

@@ -690,8 +690,11 @@
   });
 
   // ---- BUSTED fade (called by city/wanted.js before the jail handoff) ----
-  CBZ.cityBustOverlay = function (lost, done) {
-    showOverlay("BUSTED", "Cuffed and processed" + (lost > 0 ? "  ·  lost $" + lost : "") + "  ·  off to the cells…", "#5b8bff");
+  // opts.note (city/origins.js EXEC fraud arrest): an optional custom sub-line
+  // replacing the generic "Cuffed and processed..." text; omitted -> unchanged.
+  CBZ.cityBustOverlay = function (lost, done, opts) {
+    opts = opts || {};
+    showOverlay("BUSTED", opts.note || ("Cuffed and processed" + (lost > 0 ? "  ·  lost $" + lost : "") + "  ·  off to the cells…"), "#5b8bff");
     let t = 0;
     const tick = function () {
       t += 0.05;

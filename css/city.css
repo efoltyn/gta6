@@ -16,6 +16,32 @@ body.mode-city .mode-city-only { display: block; }
 body.mode-city .mode-escape-only,
 body.mode-city .mode-survival-only { display: none; }
 
+/* CITY: character-origin picker (3 opening scenes — src/city/origins.js).
+   Mirrors the .role-btn look (css/screens.css) so it reads like the same
+   product; stacked full-width rows since each card carries a name + blurb. */
+.origin-label {
+  margin: 14px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: #7c5a3a; text-align: center;
+}
+.origin-select {
+  display: flex; flex-direction: column; gap: 8px;
+  width: min(460px, 100%); margin: 0 auto 4px;
+}
+.origin-btn {
+  pointer-events: auto; cursor: pointer; font-family: inherit; text-align: left;
+  border: 2px solid #2a2622; border-bottom-width: 5px; border-radius: 12px;
+  background: #fff; color: #2a2622; padding: 10px 14px 9px;
+  display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap;
+  transition: transform .08s, border-color .12s, box-shadow .12s, background .12s;
+}
+.origin-btn b { font-size: 15px; letter-spacing: .3px; }
+.origin-btn span { color: #7c5a3a; font-weight: 600; font-size: 13px; }
+.origin-btn.active {
+  border-color: var(--orange-d); box-shadow: 0 0 0 3px rgba(255,122,26,.2);
+  background: linear-gradient(180deg,#fff6ee,#ffe9d6);
+}
+.origin-btn:active { transform: translateY(3px); border-bottom-width: 2px; }
+
 /* hide the prison + survival HUD panels in the city (city has its own) */
 body.mode-city #objective,
 body.mode-city #topright,
