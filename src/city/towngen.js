@@ -139,7 +139,6 @@
 
     // ----- placement-API feature detect -----
     const P = CBZ.placement || null;
-    const hasPlace = !!(P && P.placeAsset);
     if (P && P.seedFromColliders) { try { P.seedFromColliders(); } catch (e) {} }
     function reserveRect(r) { if (P && P.reserve) { try { P.reserve(r); } catch (e) {} } }
 
@@ -432,9 +431,38 @@
         // shop pass), so the town mounts its own compact facade board here.
         if (isShop && pick.name) mountShopSign(lt, color, pick.name);
         filled.push(lotRec);
-      } else if (pick.asset && hasPlace && CBZ.assets && CBZ.assets.has && CBZ.assets.has(pick.asset)) {
-        // solid prop via the placement API (respects occupancy)
-        try { P.placeAsset(pick.asset, { x: lt.cx, z: lt.cz }, { rng, parent: root, zone: lt.zone, tries: 4, scale: pick.scale || 1 }); } catch (e) {}
+      } else if (pick.asset && CBZ.assets && CBZ.assets.has && CBZ.assets.has(pick.asset)) {
+        // X5 FINDING: this used to route through P.placeAsset (respects
+        // occupancy) — but step 3 above ALREADY reserved this exact lot's
+        // full rect via reserveRect(), so placeAsset's own isFree() check
+        // (scanning the SAME reservation hash) sees every candidate point,
+        // including the lot centre, as already occupied and silently places
+        // nothing — every time, for any asset prefab. No existing recipe
+        // ever used the asset-prefab path (grep citytemplates.js), so this
+        // never surfaced until city/villagekit.js (X5) became its first
+        // caller. The lot is, by construction (non-overlapping recursive
+        // subdivision — see step 3), already this prop's EXCLUSIVE ground:
+        // no second occupancy check is needed. Build it directly — the same
+        // geometry + collider math placeAsset uses, minus the redundant,
+        // self-conflicting reserve/isFree dance.
+        const def = CBZ.assets.get(pick.asset);
+        if (def) {
+          try {
+            const rot = pick.rot != null ? pick.rot : rng() * Math.PI * 2;
+            const scale = pick.scale || 1;
+            const grp = new THREE.Group();
+            def.build({ group: grp, x: lt.cx, z: lt.cz, rot, rng, scale });
+            grp.position.set(lt.cx, def.y0 || 0, lt.cz);
+            grp.rotation.y = rot;
+            grp.scale.set(scale, scale, scale);
+            grp.updateMatrix(); grp.matrixAutoUpdate = false;
+            root.add(grp);
+            if (!def.noCollide && CBZ.colliders) {
+              const fp = CBZ.assets.rotatedFootprint(def, rot);
+              CBZ.colliders.push({ minX: lt.cx - fp.hx, maxX: lt.cx + fp.hx, minZ: lt.cz - fp.hz, maxZ: lt.cz + fp.hz, y0: def.y0 || 0, y1: def.y1 == null ? 30 : def.y1, ref: grp });
+            }
+          } catch (e) {}
+        }
       }
     }
 

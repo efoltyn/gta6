@@ -30,13 +30,13 @@
        DEFAULT population pools this wave — X4 gives it (and everyone) a
        real demographics config; no edit needed here when that lands.
 
-   NOTE (villages, X5): there is no dedicated hut/mud-brick/thatch prefab
-   kit yet — every settlement below, including "villages", is grown from
-   the SAME towngen + citytemplates.js recipe pool as the mini-cities
-   (CBZ.cityTemplate(id, overrides) clones an existing template, low
-   density/storeys standing in for "small and poor" until X5's real village
-   kit exists). Comment left at every "harvestmarket"-based village clone
-   below so `grep "X5 upgrades"` finds every spot that wave replaces.
+   NOTE (villages, X5 — LANDED): every "village"-tier settlement below now
+   clones CBZ.CITY_TEMPLATES.village (city/villagekit.js's hut/mud-brick/
+   thatch/corrugated-shack kit — huts, a well, a market stall, one food
+   shopfront), not harvestmarket's low-rise glass shells. Capitals
+   (keshtown/mbeyacity) deliberately stay on "harvestmarket" — the task's
+   "a poor capital = few towers over shacks" reads as low-rise, not a
+   hut village; see each capital's own baseTemplate comment.
 
    DATA vs GEOMETRY SPLIT (deliberate — see file body): CBZ.COUNTRIES (the
    pure data table: id/name/wealthLevel/govType/settlements/states) is
@@ -191,7 +191,7 @@
           id: "keshtown", name: "Keshtown", subtitle: "Royal Capital", capital: true, tier: "capital",
           cx: 1900, cz: -1600, hx: 100, hz: 95,
           cols: 3, rows: 3, blockW: 42, blockD: 38, roadW: 13,
-          baseTemplate: "harvestmarket", densityBase: 0.6,   // X5 upgrades this to the real village/low-rise kit
+          baseTemplate: "harvestmarket", densityBase: 0.6,   // X5: capitals stay low-rise harvestmarket, not hut-village (task: "keep capitals as-is")
           // base 5 * wealthFactor(.35)=.7775 -> round(3.9)=4 (task's own "low-rise maxS 4")
           skylineBase: { minStoreys: 1, maxStoreys: 5, towerFrac: 0.08, megaChance: false, townMax: 4 },
         },
@@ -199,7 +199,7 @@
           id: "kesh_north", name: "Nur Hollow", subtitle: "Village", capital: false, tier: "village",
           cx: 1900, cz: -1380, hx: 70, hz: 62,
           cols: 2, rows: 2, blockW: 36, blockD: 32, roadW: 11,
-          baseTemplate: "harvestmarket", densityBase: 0.63,  // X5 upgrades this to the real village/hut kit
+          baseTemplate: "village", densityBase: 0.63,  // X5: the real hut/mud-brick village kit (villagekit.js)
           // density .63*(.6+.55*.35)=.63*.7925=.499 ≈ task's own "density 0.5"
           // base 3 * wealthFactor(.35)=.7775 -> round(2.3)=2 (task's own "maxS 2")
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
@@ -208,7 +208,7 @@
           id: "kesh_east", name: "Adar's Well", subtitle: "Village", capital: false, tier: "village",
           cx: 2160, cz: -1600, hx: 70, hz: 62,
           cols: 2, rows: 2, blockW: 36, blockD: 32, roadW: 11,
-          baseTemplate: "harvestmarket", densityBase: 0.63,  // X5 upgrades this to the real village/hut kit
+          baseTemplate: "village", densityBase: 0.63,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
         },
       ],
@@ -243,28 +243,28 @@
           id: "mbeyacity", name: "Mbeya City", subtitle: "Federal Capital", capital: true, tier: "capital",
           cx: -2200, cz: -1200, hx: 95, hz: 88,
           cols: 3, rows: 3, blockW: 40, blockD: 36, roadW: 12,
-          baseTemplate: "harvestmarket", densityBase: 0.55,  // X5 upgrades this to the real village/low-rise kit
+          baseTemplate: "harvestmarket", densityBase: 0.55,  // X5: capitals stay low-rise harvestmarket, not hut-village (task: "keep capitals as-is")
           skylineBase: { minStoreys: 1, maxStoreys: 4, towerFrac: 0.06, megaChance: false, townMax: 3 },
         },
         {
           id: "mbeya_west", name: "Kolo Village", subtitle: "Village", capital: false, tier: "village",
           cx: -2460, cz: -1200, hx: 66, hz: 58,
           cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 11,
-          baseTemplate: "harvestmarket", densityBase: 0.58,  // X5 upgrades this to the real village/hut kit
+          baseTemplate: "village", densityBase: 0.58,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
         },
         {
           id: "mbeya_south", name: "Tende Village", subtitle: "Village", capital: false, tier: "village",
           cx: -2200, cz: -1420, hx: 66, hz: 58,
           cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 11,
-          baseTemplate: "harvestmarket", densityBase: 0.58,  // X5 upgrades this to the real village/hut kit
+          baseTemplate: "village", densityBase: 0.58,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
         },
         {
           id: "mbeya_east", name: "Ruvu Village", subtitle: "Village", capital: false, tier: "village",
           cx: -1940, cz: -1200, hx: 66, hz: 58,
           cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 11,
-          baseTemplate: "harvestmarket", densityBase: 0.58,  // X5 upgrades this to the real village/hut kit
+          baseTemplate: "village", densityBase: 0.58,  // X5: the real hut/mud-brick village kit (villagekit.js)
           skylineBase: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.02, megaChance: false, townMax: 2 },
         },
       ],

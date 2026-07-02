@@ -118,6 +118,16 @@
     // instanced bodies into these towns and tints them to fit — zero new draw
     // calls, zero new entities (same shared crowd material, per-instance tint).
     capeharbor: [46, 47], goldspire: [48, 49], neonreef: [50, 51], foundry: [52, 53],
+    // X5 — the 4 new countries' settlements (city/countries.js), keyed by
+    // settlement id (same convention as the mini-cities above). Trivial reuse
+    // of the existing farmland range (26-28, earth tones) rather than minting
+    // new SHIRTS entries — every one of these settlements, from a rural
+    // capital to a hut village, reads earthy/agrarian, the same "why" the
+    // farmland range already covers.
+    veridiacity: [26, 28], lowport: [26, 28],
+    keshtown: [26, 28], kesh_north: [26, 28], kesh_east: [26, 28],
+    solaracity: [26, 28],
+    mbeyacity: [26, 28], mbeya_west: [26, 28], mbeya_south: [26, 28], mbeya_east: [26, 28],
   };
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
   // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads

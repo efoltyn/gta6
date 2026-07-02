@@ -64,6 +64,17 @@
     // place needs to read as itself (dockworkers, suits, gamblers, factory
     // hands) — plus its lone guard/bouncer/foreman.
     capeharbor: 4, goldspire: 4, neonreef: 4, foundry: 3,
+    // X5 — the 4 new countries' settlements (city/countries.js), keyed by
+    // SETTLEMENT id (registerCityRegion stamps `biome: s.id` — see that
+    // file's buildSettlement), same convention as the mini-cities above.
+    // Capitals: 4-5, mixed workers/vendors (an economy actually running).
+    // Villages: 3, adult farmer/villager/vendor casts — no anchor jobs
+    // beyond farming, since a village has no fields/ranch/office to route
+    // to (unlike biome_farmland.js's real crop parcels).
+    veridiacity: 5, lowport: 3,
+    keshtown: 4, kesh_north: 3, kesh_east: 3,
+    solaracity: 4,
+    mbeyacity: 4, mbeya_west: 3, mbeya_south: 3, mbeya_east: 3,
   };
 
   // ---- biome cast: archetype/job/look/behaviour fed straight into makePed --
@@ -151,7 +162,58 @@
       return { job: r() < 0.5 ? "construction worker" : "warehouse worker",
                archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_WORK) };
     },
+    // ---- X5: the 4 new countries (city/countries.js) — capitals get a
+    // mixed working/vendor cast (a real, if modest, economy running); the
+    // villages (X5's hut/mud-brick kit, city/villagekit.js) get the SAME
+    // adult farmer/villager/vendor cast every rural settlement earns —
+    // no soldiers/tycoons, this is a poor farm hamlet, not a garrison.
+    veridiacity: function (r) {
+      if (r() < 0.18) return { job: "security guard", archetype: "resident", kind: "civilian",
+                               armed: r() < 0.5, weapon: "Pistol", aggr: 0.4, outfit: 0x2c3e5c };
+      return { job: r() < 0.5 ? "office worker" : "vendor",
+               archetype: r() < 0.25 ? "tycoon" : "resident", kind: "civilian", outfit: pickCol(r, OUT_VERIDIA) };
+    },
+    lowport: function (r) {
+      if (r() < 0.2) return { job: "dock worker", archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_VERIDIA) };
+      return { job: "vendor", archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_VERIDIA) };
+    },
+    keshtown: function (r) {
+      if (r() < 0.15) return { job: "guard", archetype: "resident", kind: "civilian",
+                               armed: r() < 0.4, weapon: "Pistol", aggr: 0.35, outfit: 0x6b5238 };
+      return { job: r() < 0.5 ? "clerk" : "vendor", archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_KESH) };
+    },
+    kesh_north: villageCast(function () { return OUT_KESH; }),
+    kesh_east: villageCast(function () { return OUT_KESH; }),
+    solaracity: function (r) {
+      if (r() < 0.16) return { job: "security guard", archetype: "resident", kind: "civilian",
+                               armed: r() < 0.5, weapon: "Pistol", aggr: 0.4, outfit: 0x2a3a4a };
+      return { job: r() < 0.5 ? "dock worker" : "vendor", archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_SOLARA) };
+    },
+    mbeyacity: function (r) {
+      if (r() < 0.14) return { job: "guard", archetype: "resident", kind: "civilian",
+                               armed: r() < 0.35, weapon: "Pistol", aggr: 0.3, outfit: 0x4a3a28 };
+      return { job: r() < 0.5 ? "clerk" : "vendor", archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_MBEYA) };
+    },
+    mbeya_west: villageCast(function () { return OUT_MBEYA; }),
+    mbeya_south: villageCast(function () { return OUT_MBEYA; }),
+    mbeya_east: villageCast(function () { return OUT_MBEYA; }),
   };
+  // shared adult farmer/villager/vendor cast for a X5 village settlement —
+  // takes a THUNK (not the array itself) since it's built as a CAST entry
+  // before OUT_KESH/OUT_MBEYA are declared below (function hoisting covers
+  // the def; the thunk defers the array lookup to call time).
+  function villageCast(paletteFn) {
+    return function (r) {
+      var pal = paletteFn();
+      var k = r();
+      // mirrors biome_farmland.js's own farmer cast (armed r()<0.12, Shotgun)
+      // — a working farm hand, not a threat.
+      if (k < 0.55) return { job: "farmer", archetype: "resident", kind: "civilian",
+                             armed: r() < 0.12, weapon: "Shotgun", outfit: pickCol(r, pal) };
+      if (k < 0.85) return { job: "villager", archetype: "resident", kind: "civilian", outfit: pickCol(r, pal) };
+      return { job: "vendor", archetype: "resident", kind: "civilian", outfit: pickCol(r, pal) };
+    };
+  }
   // outfit palettes (plain colours; clothes/outfits modules paint roles).
   var OUT_TRAVEL = [0x3a4a6b, 0x6b6b6b, 0x8a4a4a, 0x4a6b5a, 0xb0b0b0];
   var OUT_MIL    = [0x44503a, 0x4e5740, 0x3a4030];
@@ -165,6 +227,11 @@
   var OUT_SUIT   = [0x23262e, 0x2a3040, 0x303030, 0x3a3a4a, 0x40404a];  // dark business suits
   var OUT_NEON   = [0xff3070, 0x30c0ff, 0xffd020, 0xa030ff, 0x30ffa0, 0xffffff];  // bright strip wear
   var OUT_WORK   = [0x4a4842, 0x5a5248, 0x6b5a44, 0x3a4a3a, 0x6a4a32];  // grey/brown coveralls
+  // X5 country palettes (plain colours; clothes/outfits paint roles).
+  var OUT_VERIDIA = [0x8a939c, 0x2c3e5c, 0xe8e6e0, 0x33573b, 0x6e2b33];  // cool European business/harbour tones
+  var OUT_KESH    = [0x6b5238, 0xa9895c, 0xc9a23a, 0x8a6a3a, 0x7a5a30];  // warm gold/earthen monarchy tones
+  var OUT_SOLARA  = [0x4f86b8, 0xe6ebf0, 0x2a3a4a, 0x7ea6c2, 0xd8c98a];  // bright coastal city-state tones
+  var OUT_MBEYA   = [0x8a6b45, 0xa3653a, 0xc9a97a, 0x6b4a2a, 0xb98c58];  // earthy federation/village tones
 
   function pickCol(r, arr) { return arr[(r() * arr.length) | 0]; }
 
