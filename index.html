@@ -614,6 +614,11 @@
 <script src="src/systems/basesave.js?v=bld1"></script>
 
 <!-- E-wave: living economy -->
+<!-- M1: multi-currency wallet + registry — loads FIRST in the sim wave, on
+     purpose: market.js/econstate.js consume nothing from it yet (day one is
+     unchanged), but M2's forex.js/M3's centralbank.js wire into the registry
+     this ships, so it needs to exist before every other sim/* money module. -->
+<script src="src/sim/currency.js?v=cur1"></script>
 <script src="src/sim/market.js?v=econ1"></script>
 <script src="src/sim/econstate.js?v=econ1"></script>
 <script src="src/sim/npcecon.js?v=econ1"></script>

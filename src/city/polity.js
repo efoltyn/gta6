@@ -167,7 +167,13 @@
     records = Object.create(null);
 
     addRecord(Object.assign(
-      { id: "republic", kind: "country", name: "Republic of Liberty", parent: null, rect: null },
+      // M1 (sim/currency.js): the republic's currencyId, LBD (Liberty
+      // Dollar) — MASTER-PLAN VI.8 names this one verbatim. Every
+      // republic state/city below (Liberty, Costa del Este, Westmark,
+      // Fort Brandt) inherits it implicitly via CBZ.polity.countryOf()
+      // (sim/currency.js's jurisdictionCurrency() helper) rather than
+      // stamping the field on each of them — one source, no drift.
+      { id: "republic", kind: "country", name: "Republic of Liberty", parent: null, rect: null, currencyId: "LBD" },
       seedMutable("country")));
 
     addRecord(Object.assign(
@@ -230,7 +236,7 @@
     for (let ci = 0; ci < extraCountries.length; ci++) {
       const cd = extraCountries[ci];
       if (!cd || !cd.id) continue;
-      registerCountry({ id: cd.id, name: cd.name, wealthLevel: cd.wealthLevel, govType: cd.govType });
+      registerCountry({ id: cd.id, name: cd.name, wealthLevel: cd.wealthLevel, govType: cd.govType, currencyId: cd.currencyId });
       const settleList = cd.settlements || [];
       const stateList = cd.states || [];
       for (let si = 0; si < stateList.length; si++) {
@@ -382,6 +388,12 @@
       rec.treasury = Math.round(rec.wealthLevel * base.treasury);
     }
     if (opts.govType) rec.govType = opts.govType;
+    // M1 (sim/currency.js): a country's own currency id, straight from
+    // city/countries.js's cd.currencyId (the X3 placeholder, now filled) —
+    // same optional-field flow wealthLevel/govType already use above. Data
+    // only: nothing reads rec.currencyId this wave except sim/currency.js's
+    // own countryOf()-walking helper.
+    if (opts.currencyId) rec.currencyId = opts.currencyId;
     records[opts.id] = rec;
     invalidateCache();
     return rec;

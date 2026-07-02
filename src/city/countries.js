@@ -14,6 +14,16 @@
    landmasses for the new territories (new islands/landmasses across the
    archipelago)."
 
+   M1 (sim/currency.js) FILLS the currencyId placeholder below: veridia ->
+   VDM, kesh -> KSD, solara -> SOL, mbeya -> MBS (the republic's LBD is
+   hardcoded on city/polity.js's own "republic" record — see that file).
+   city/polity.js's registerCountry() plumbs cd.currencyId straight onto the
+   country record it builds (same flow wealthLevel/govType already use), and
+   sim/currency.js's registry is the single source of truth for what those
+   ids mean (name/symbol) — see that file's header for the naming
+   rationale. Pure data, no behaviour change: nothing reads a country
+   record's currencyId this wave.
+
    THIS WAVE ships 4 NEW countries (+ the existing "republic" = 5+ total):
      veridia — Republic of Veridia, wealthLevel .85, 2 states (each ONE
        settlement): a big 4x4 capital (skyline maxStoreys 14) + a smaller
@@ -156,6 +166,9 @@
   const COUNTRIES = [
     {
       id: "veridia", name: "Republic of Veridia", wealthLevel: 0.85,
+      // M1: currencyId placeholder filled (sim/currency.js's registry) —
+      // Veridian Mark (VDM), a rich harbor-finance note.
+      currencyId: "VDM",
       settlements: [
         {
           // NOTE: the settlement id is DISTINCT from the country id ("veridia")
@@ -185,6 +198,9 @@
     },
     {
       id: "kesh", name: "Kingdom of Kesh", wealthLevel: 0.35, govType: "monarchy",
+      // M1: currencyId placeholder filled — Kesh Dinar (KSD), the royal-
+      // treasury coinage a monarchy's culture reads as.
+      currencyId: "KSD",
       settlements: [
         {
           // (distinct from the country id "kesh" — see veridiacity's note above)
@@ -218,6 +234,9 @@
     },
     {
       id: "solara", name: "Solara", wealthLevel: 0.6,
+      // M1: currencyId placeholder filled — Solara Sol (SOL), the sunny
+      // island city-state's note (Sol doubles as sun/currency).
+      currencyId: "SOL",
       settlements: [
         {
           // (distinct from the country id "solara" — see veridiacity's note above)
@@ -234,6 +253,9 @@
     },
     {
       id: "mbeya", name: "Mbeya Federation", wealthLevel: 0.25,
+      // M1: currencyId placeholder filled — Mbeya Shilling (MBS), the
+      // real-world East-African-federation coinage this culture reads as.
+      currencyId: "MBS",
       // X4 gives Mbeya (and everyone) a real demographics config (skin-tone
       // distribution, name pools, dress palette) — this wave it draws from
       // the SAME default population pools every other settlement does.

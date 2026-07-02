@@ -83,7 +83,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 ## Stage M — Money
 
-- [ ] **M1** `sim/currency.js` (new): multi-currency wallet map; `g.cash`/`g.cityBank` become LBD compatibility accessors — day one unchanged.
+- [x] **M1** `sim/currency.js` (new): multi-currency wallet map; `g.cash`/`g.cityBank` become LBD compatibility accessors — day one unchanged.
 - [ ] **M2** Countries CRE/WMK registered; `sim/forex.js` rates (PPP+carry+confidence+momentum); airport FX counters + exchange desk.
 - [ ] **M3** `sim/centralbank.js` (new): governor NPCs, policy rate wired into bank.js RATES, reserve-requirement credit cap.
 - [ ] **M4** Inflation: π equation → priceIndex compounding → every price; CPI ticker; approval term −12·max(0, π−5%).

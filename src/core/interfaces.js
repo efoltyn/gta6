@@ -107,7 +107,27 @@
   //      change (fresh load / respawn / MP adopt), not once at boot.
   //    RIDERS: bank.js (cityLoans), pawnshop.js (cityPawnTickets),
   //      outfits.js (cityFit), familytree.js (familyTree, guard
-  //      `_ftWrap`), marriage.js.
+  //      `_ftWrap`), marriage.js, sim/currency.js (currencyWallet/
+  //      currencyBank, guard `_curWrap`).
+
+  // 6b. g.cash / g.cityBank — THE MULTI-CURRENCY WALLET COMPAT ACCESSORS
+  //    OWNER: sim/currency.js (whole file; M1)
+  //    CONTRACT: both are Object.defineProperty accessors on CBZ.game
+  //      proxying g.cityWallet.LBD / g.cityBankWallet.LBD — a PLAIN
+  //      get/set passthrough (no clamping at the property level; a raw
+  //      `g.cash -= n` behaves exactly like the old number field always
+  //      did). CBZ.currency.walletAdd/walletTake/bankAdd/bankTake are a
+  //      SEPARATE, parallel API (M2+ forex/central-bank use) — never
+  //      called by the accessors themselves.
+  //    RULE: read/write `g.cash`/`g.cityBank` exactly as before — every
+  //      one of the ~60 existing call sites needs zero edits. A NEW
+  //      foreign-currency balance goes through CBZ.currency.walletAdd/
+  //      Take(currencyId, amt) / CBZ.currency.wallet()[currencyId],
+  //      never through g.cash (that's the republic-only compat lane).
+  //    RIDERS: every city/* module that touches g.cash/g.cityBank
+  //      (city/mode.js's addCash/spend/canAfford is the canonical
+  //      faucet/sink; city/bank.js/pawnshop.js/zillow.js/realestate.js/
+  //      worldstate.js and ~30 others read/write directly).
 
   // 7. cityKillPed — THE ONE DEATH FUNNEL, AND ITS WRAP CHAIN
   //    OWNER: city/peds.js:1432 — every ped death routes through here.
