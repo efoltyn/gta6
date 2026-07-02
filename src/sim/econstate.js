@@ -213,7 +213,12 @@
     // written by war/disaster/recovery events and never read before this.
     const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
     const confidence = (w && w.economy && w.economy.confidence != null) ? w.economy.confidence : 100;
-    const wagesProxy = 1.0 + (confidence - 70) / 100;
+    // E4: a small term from sim/npcecon.js's CITY-WIDE cohort wallet health
+    // (1.0 = seeded baseline) — a district you've robbed into a depression
+    // literally shows up as worse wages city-wide. Guarded + day-one neutral
+    // (health defaults to 1.0 -> factor 1.0 -> byte-identical to before E4).
+    const cohortHealth = (CBZ.npcEcon && typeof CBZ.npcEcon.walletHealth === "function") ? CBZ.npcEcon.walletHealth() : 1.0;
+    const wagesProxy = (1.0 + (confidence - 70) / 100) * (0.5 + 0.5 * cohortHealth);
 
     // safety: g.heat (config.js:244 starHeat thresholds) as a soft risk term.
     const heat = g.heat || 0;

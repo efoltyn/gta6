@@ -472,8 +472,16 @@
     }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
-    const cash = opts.cash != null ? opts.cash
+    let cash = opts.cash != null ? opts.cash
       : (econ && econ.rollCashFor ? econ.rollCashFor(archetype, mWealth, r) : fallbackCashFor(archetype, mWealth, r));
+    // E4 CIRCULATION (sim/npcecon.js): an ordinary resident's spawn cash is
+    // drawn from their district cohort's wallet mean instead of pure RNG —
+    // this closes the robbery money-printer (strip-mine a district and its
+    // FUTURE spawns carry less, not just its current pedestrians).
+    if (opts.cash == null && archetype === "resident" && CBZ.npcEcon && CBZ.npcEcon.drawCash && econ && econ.districtAt) {
+      const drawn = CBZ.npcEcon.drawCash(econ.districtAt(x, z), mWealth, r);
+      if (drawn != null) cash = drawn;
+    }
     // valuables: array of item NAMES this ped carries (watch/ring/chain/etc). Most
     // people none/Phone; the whales carry a luxury jackpot. Guarded per contract.
     const valuables = opts.valuables != null ? opts.valuables
@@ -993,6 +1001,7 @@
     if (CBZ.cityEcon && CBZ.cityEcon.initMarket) CBZ.cityEcon.initMarket();
     if (CBZ.market && CBZ.market.reset) CBZ.market.reset();   // E1: fresh city → levels back to 1.0
     if (CBZ.econState && CBZ.econState.reset) CBZ.econState.reset();   // E2: fresh city → EconState back to equilibrium
+    if (CBZ.npcEcon && CBZ.npcEcon.reset) CBZ.npcEcon.reset();   // E4: fresh city → cohort wallets re-seeded off the fresh population
     CBZ.cityDrops.length = 0;
     // the homeless are carved out of the ped budget so the TOTAL stays flat
     // (perf: redistribute, never add). Deterministic from the seeded stream.
@@ -1391,6 +1400,13 @@
     const econ = CBZ.cityEcon;
     let got = ped.cash; ped.cash = 0;
     if (got > 0 && CBZ.city) CBZ.city.addCash(got);
+    // E4 CIRCULATION: the cash that just left this ped's pocket also leaves
+    // their district+class cohort's aggregate wallet (sim/npcecon.js) — rob
+    // enough of a district and its cohort spending (and the market it drives)
+    // visibly sags. Guarded no-op if npcecon.js/districtAt aren't loaded.
+    if (got > 0 && CBZ.npcEcon && CBZ.npcEcon.debit && econ && econ.districtAt && ped.pos) {
+      CBZ.npcEcon.debit(econ.districtAt(ped.pos.x, ped.pos.z), CBZ.npcEcon.classFor(ped.wealth), got);
+    }
     let item = "";
     if (ped.loot && econ) { econ.add(ped.loot, 1); item = ped.loot; ped.loot = null; }
     ped.robbed = true; ped.alarmed = 8; ped.fear = 10;
@@ -1598,6 +1614,11 @@
     const dl = ped.deadLoot; dl.looted = true;
     const econ = CBZ.cityEcon;
     if (dl.cash > 0 && CBZ.city) CBZ.city.addCash(dl.cash);
+    // E4 CIRCULATION: same debit as a live robbery (see cityRobPed) — a
+    // looted corpse's cash leaves its district+class cohort wallet too.
+    if (dl.cash > 0 && CBZ.npcEcon && CBZ.npcEcon.debit && econ && econ.districtAt && ped.pos) {
+      CBZ.npcEcon.debit(econ.districtAt(ped.pos.x, ped.pos.z), CBZ.npcEcon.classFor(ped.wealth), dl.cash);
+    }
     const got = [];
     for (const it of dl.items) { if (it && econ) { econ.add(it, 1); got.push(it); } }
     if (CBZ.sfx) CBZ.sfx("loot");
