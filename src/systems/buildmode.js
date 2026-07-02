@@ -1,0 +1,406 @@
+/* ============================================================
+   systems/buildmode.js — CBZ.buildMode: THE WALKING SKELETON (B2,
+   BUILD-PLAN Stage B). Ghost preview, hotbar strip, confirm/rotate/
+   undo/demolish, all calling B1's CBZ.building.place()/remove() end to
+   end. No new geometry system — this file is pure input + a preview
+   mesh layered on top of systems/building.js + systems/pieces.js.
+
+   ------------------------------------------------------------------
+   KEY BINDINGS — audited against every existing keydown/mousedown
+   listener in src/ (grepped, not guessed) before picking each one:
+
+     N        toggle build mode (only in city/survival, CBZ.game.state
+              === "playing", no menu/stash open, not driving/dead).
+              CONFLICT: systems/killstreaks.js also binds N (tactical
+              nuke @ 25-streak) with NO mode gate at all. Once build
+              mode owns N in city/survival, a 25-streak nuke reached in
+              those modes can never be keyboard-detonated again — a
+              real but extremely rare edge (that reward is themed
+              "guards/yard", i.e. escape-mode content, and needs an
+              unbroken 25-kill streak). Documented trade-off, same
+              spirit as fpsmode.js's own "V is not bound in city
+              because city owns V" carve-out.
+     T        rotate (fill kinds face rot; wall/doorframe picks an
+              edge). Q was the obvious pick but fpsmode.js already
+              polls CBZ.keys["q"] every frame to swap guns whenever
+              shoulderActive() (any city moment you're carrying a gun,
+              not just while aiming) — a FAR busier conflict than N's.
+              T is next: net/netui.js opens multiplayer chat on T, but
+              ONLY while CBZ.net.active, and Enter is a documented
+              second way to open that same chat (netui.js:174) — so
+              capturing T here costs nothing reachable.
+     R / F    working level up/down (gy). Both are genuinely busy in
+              fpsmode.js (R=reload, F=fire) whenever the player is
+              armed in third person (shoulderActive(), which is just
+              "holding any gun", not "aiming"). Mitigated by
+              auto-holstering on build-mode ENTRY (city mode only, via
+              the existing CBZ.cityHolster de-escalation flag) — armed()
+              reads false, shoulderActive() reads false, R/F fall
+              through cleanly. Survival has no firearms, so no real
+              conflict there. Per the task's own steer, scroll was
+              ruled out (systems/fpsmode.js's wheel listener already
+              cycles weapons/hotbar) — R/F only, no wheel.
+     E/LMB    place (calls CBZ.building.place). E doubles as the global
+              interact key (city/interactions.js) and LMB doubles as
+              fire/punch (fpsmode.js/combat.js) — both are fully owned
+              by this module's capture-phase listeners while build mode
+              is active (see INTERCEPTION below), so neither can fire
+              alongside a placement.
+     X        demolish the aimed piece. Conflicts only inside menu-
+              scoped UIs (city/shops.js's qty-cycle X), which can't be
+              open at the same time build mode is active outdoors.
+     Z        undo the last piece placed THIS session. Conflicts only
+              with city/zillow.js's property-menu toggle (gated
+              !cityMenuOpen, same non-overlap as X above).
+     1-6      select a piece kind. inventory.js's hotbar also reads
+              1-9 — see INTERCEPTION below for how that's resolved
+              WITHOUT touching inventory.js.
+
+   INTERCEPTION MODEL: one CAPTURE-PHASE listener on window per event
+   (keydown, mousedown). Capture-phase listeners on `window` run before
+   ANY bubble-phase listener anywhere in the document (window is the
+   outermost node in the propagation path, visited first on the way
+   down and last on the way back up) — so stopPropagation() here
+   reliably starves every other module's listener for that same event,
+   REGARDLESS of script load order. This is how numbers 1-6 stay clear
+   of inventory.js's hotbar-select handler with a ZERO-LINE edit to
+   inventory.js, and how E/LMB never double-fire an interact/shoot/punch
+   alongside a placement. Movement (WASD) and mouse-look are never
+   claimed — only the keys/buttons this module actually understands
+   swallow the event; everything else passes through untouched.
+
+   TARGETING MODEL (~10Hz throttle, core loop stays untouched every
+   other frame): raycast from camera through screen-center.
+     1) Scan CBZ.pieces within ~20m of the camera, raycast against
+        their meshRefs (recursive, since fill-kind meshes are Groups —
+        pieces.js's own documented Group-raycast caveat — so a hit
+        reports a child; walk .parent up to the node stamped with
+        userData.pieceId, spawnPiece's own convention).
+     2) Piece hit + fill kind + top-face normal (ny>0.5) → target the
+        cell ABOVE it (stacking: gx/gz unchanged, gy = piece.gy+1).
+     3) Piece hit + wall/doorframe → target THAT piece's cell, edge
+        auto-picked by whichever axis the hit point sits furthest off
+        the cell centre (simple nearest-edge snap, not full socket
+        logic — B3's job).
+     4) No piece hit → intersect a virtual horizontal plane at
+        y = level*WALL_H (the R/F-controlled working level) and snap
+        gx/gz = round(x/CELL), round(z/CELL).
+   Every result is fed straight into CBZ.building.validate() (the B1
+   refactor below) for the ghost's tint + the HUD reason line — B2
+   never re-implements occupancy/support/world-collision, it only asks.
+
+   MODE GATES: city + survival only. NOT escape (the prison break story
+   mode) — that campaign has its own fixed geography and no build
+   economy; wiring a construction mode into it would be a different
+   feature, not this one. No resource costs this wave (CATALOG.cost is
+   data-only — B7 wires crafting/inventory deduction against it).
+   ------------------------------------------------------------------ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  if (!CBZ || !window.THREE || !CBZ.building) return;
+  if (CBZ.buildMode) return; // idempotent, same guard idiom as the rest of this family
+  const THREE = window.THREE;
+  const B = CBZ.building;
+  const CELL = B.CELL, WALL_H = B.WALL_H;
+
+  const KINDS = ["foundation", "wall", "floor", "roof", "stairs", "doorframe"];
+  const LABEL = { foundation: "FND", wall: "WAL", floor: "FLR", roof: "ROF", stairs: "STR", doorframe: "DOR" };
+  const TOGGLE_KEY = "n";
+  const THROTTLE = 0.1;      // ~10Hz targeting/ghost refresh
+  const PIECE_SCAN_R2 = 20 * 20; // ~20m piece-hit scan radius, squared
+  const LEVEL_MAX = 20;
+
+  const bm = CBZ.buildMode = {
+    active: false,
+    kind: KINDS[0],
+    kindIdx: 0,
+    rot: 0,
+    level: 0,      // gy of the virtual working plane (R/F)
+    gx: null, gy: 0, gz: null,   // last resolved target cell (null = no target)
+    lastValid: null,
+    placedStack: [],            // this-session undo stack (piece ids)
+  };
+
+  /* ================= ghost meshes (one per kind, built once) ================= */
+  const ghostMatValid = new THREE.MeshBasicMaterial({ color: 0x33dd55, transparent: true, opacity: 0.4, depthWrite: false });
+  const ghostMatInvalid = new THREE.MeshBasicMaterial({ color: 0xdd3333, transparent: true, opacity: 0.4, depthWrite: false });
+  const ghosts = {}; // kind -> { root, parts:[Mesh,...] }
+  KINDS.forEach(function (kind) {
+    const def = B.CATALOG[kind];
+    const group = new THREE.Group();
+    const built = def.build({ group: group, x: 0, y: 0, z: 0, rot: 0, rng: Math.random, scale: 1 });
+    const root = (built && built.isObject3D) ? built : group;
+    const parts = [];
+    root.traverse(function (o) {
+      // frustumCulled lives on each MESH (its own geometry bounding sphere),
+      // not on a parent Group — set it per-part so a repositioned ghost
+      // never pops out of view from a stale local-origin bounding sphere.
+      if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; o.material = ghostMatValid; o.frustumCulled = false; parts.push(o); }
+    });
+    root.visible = false;
+    root.matrixAutoUpdate = true;   // unlike spawnPiece's real pieces, the ghost moves every throttle tick
+    CBZ.scene.add(root);
+    ghosts[kind] = { root: root, parts: parts };
+  });
+  function hideAllGhosts() { for (const k in ghosts) ghosts[k].root.visible = false; }
+  function renderGhost(v) {
+    hideAllGhosts();
+    const g = ghosts[bm.kind];
+    if (!g || bm.gx == null) return;
+    const pos = v.pos || B.gridToWorld(bm.gx, bm.gy, bm.gz);
+    g.root.position.set(pos.x, pos.y, pos.z);
+    g.root.rotation.y = bm.rot * (Math.PI / 2);
+    g.root.visible = true;
+    const tint = v.ok ? ghostMatValid : ghostMatInvalid;
+    for (let i = 0; i < g.parts.length; i++) g.parts[i].material = tint;
+  }
+
+  /* ================= HUD: hint line + kind strip (self-styled, ISO to hotbar) ================= */
+  const hintEl = document.createElement("div");
+  hintEl.className = "panel";
+  hintEl.style.cssText = "position:fixed;left:50%;bottom:78px;transform:translateX(-50%);" +
+    "display:none;padding:6px 14px;font:600 12px/1.4 inherit;color:#e8ecf2;" +
+    "text-align:center;white-space:nowrap;z-index:15;pointer-events:none;";
+  document.body.appendChild(hintEl);
+
+  const stripEl = document.createElement("div");
+  stripEl.style.cssText = "position:fixed;left:50%;bottom:132px;transform:translateX(-50%);" +
+    "display:none;gap:6px;z-index:15;pointer-events:none;";
+  const stripCells = KINDS.map(function (kind) {
+    const c = document.createElement("div");
+    c.className = "islot";
+    c.style.cssText = "width:42px;height:42px;font:700 11px/1 inherit;";
+    c.textContent = LABEL[kind];
+    stripEl.appendChild(c);
+    return c;
+  });
+  document.body.appendChild(stripEl);
+
+  function renderStrip() {
+    for (let i = 0; i < stripCells.length; i++) stripCells[i].classList.toggle("sel", i === bm.kindIdx);
+  }
+  function setHint(text) { hintEl.textContent = text; }
+  function hintLine(v) {
+    let s = "[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit";
+    if (!v.ok) s += "  —  " + (v.reason || "invalid");
+    return s;
+  }
+  function showUI() { hintEl.style.display = "block"; stripEl.style.display = "flex"; renderStrip(); }
+  function hideUI() { hintEl.style.display = "none"; stripEl.style.display = "none"; }
+
+  /* ================= raycast helpers ================= */
+  const raycaster = new THREE.Raycaster();
+  const NDC_CENTER = new THREE.Vector2(0, 0);
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const _planePt = new THREE.Vector3();
+  const _nearbyMeshes = [];
+
+  // raycast the piece nearest the crosshair within ~20m of the camera —
+  // shared by the stacking/edge-snap logic below AND the X demolish key,
+  // so "what you're aiming at" and "what X removes" are always the
+  // exact same answer.
+  function raycastNearbyPiece() {
+    _nearbyMeshes.length = 0;
+    const cp = CBZ.camera.position;
+    CBZ.pieces.forEach(function (p) {
+      if (!p.alive || !p.meshRef) return;
+      const dx = p.pos.x - cp.x, dy = p.pos.y - cp.y, dz = p.pos.z - cp.z;
+      if (dx * dx + dy * dy + dz * dz > PIECE_SCAN_R2) return;
+      _nearbyMeshes.push(p.meshRef);
+    });
+    if (!_nearbyMeshes.length) return null;
+    // recursive:true — fill-kind meshRefs are Groups (pieces.js's own
+    // documented "Group.raycast is a no-op" caveat), so a hit reports a
+    // CHILD object; walk .parent up to the node spawnPiece stamped with
+    // userData.pieceId (every piece root gets exactly one such stamp).
+    const hits = raycaster.intersectObjects(_nearbyMeshes, true);
+    for (let i = 0; i < hits.length; i++) {
+      let o = hits[i].object;
+      while (o && (!o.userData || o.userData.pieceId == null)) o = o.parent;
+      if (o && o.userData.pieceId != null) return { pieceId: o.userData.pieceId, hit: hits[i] };
+    }
+    return null;
+  }
+
+  /* ================= the throttled targeting + ghost update ================= */
+  function updateTarget() {
+    if (!bm.active) return;
+    raycaster.setFromCamera(NDC_CENTER, CBZ.camera);
+
+    let gx = null, gy = bm.level, gz = null, rot = bm.rot;
+    const pieceHit = raycastNearbyPiece();
+
+    if (pieceHit) {
+      const piece = CBZ.pieces.get(pieceHit.pieceId);
+      if (piece && piece.gridPos) {
+        const isEdgeKind = (bm.kind === "wall" || bm.kind === "doorframe");
+        const n = pieceHit.hit.face ? pieceHit.hit.face.normal : null;
+        if (!isEdgeKind && n && n.y > 0.5) {
+          // hit a top face with a FILL kind selected → stack on top of it
+          gx = piece.gridPos.gx; gz = piece.gridPos.gz; gy = piece.gridPos.gy + 1;
+        } else {
+          // same cell/level as the hit piece; walls/doorframes snap to
+          // whichever of the cell's 4 edges the hit point sits nearest
+          gx = piece.gridPos.gx; gz = piece.gridPos.gz; gy = piece.gridPos.gy;
+          if (isEdgeKind) {
+            const cx = gx * CELL, cz = gz * CELL;
+            const dxp = pieceHit.hit.point.x - cx, dzp = pieceHit.hit.point.z - cz;
+            rot = Math.abs(dxp) > Math.abs(dzp) ? (dxp > 0 ? 1 : 3) : (dzp > 0 ? 2 : 0);
+          }
+        }
+      }
+    }
+
+    if (gx == null) {
+      // fall back to the virtual ground plane at the current working level
+      groundPlane.constant = -(bm.level * WALL_H);
+      const pt = raycaster.ray.intersectPlane(groundPlane, _planePt);
+      if (pt) { gx = Math.round(pt.x / CELL); gz = Math.round(pt.z / CELL); gy = bm.level; }
+    }
+
+    if (gx == null) {
+      bm.gx = null; bm.gy = bm.level; bm.gz = null; bm.lastValid = null;
+      hideAllGhosts();
+      setHint("[" + bm.kind.toUpperCase() + "] · rot T · level R/F (" + bm.level + ") · click/E place · X demolish · Z undo · N exit  —  no target");
+      return;
+    }
+
+    bm.gx = gx; bm.gy = gy; bm.gz = gz;
+    if (bm.kind === "wall" || bm.kind === "doorframe") bm.rot = rot;
+
+    const v = B.validate(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
+    bm.lastValid = v;
+    renderGhost(v);
+    setHint(hintLine(v));
+  }
+
+  /* ================= actions ================= */
+  function tryPlace() {
+    if (!bm.active) return;
+    if (bm.gx == null) { CBZ.flashHint && CBZ.flashHint("🚫 No target", 1.0); return; }
+    const piece = B.place(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
+    if (piece) {
+      bm.placedStack.push(piece.id);
+      // audio.js's BANK has no "place" entry yet (grepped) — "coin" is
+      // the documented fallback the task asks for until one lands.
+      CBZ.sfx && CBZ.sfx("coin");
+      updateTarget();
+    } else {
+      const v = B.validate(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
+      CBZ.flashHint && CBZ.flashHint("🚫 " + (v.reason || "Can't place there"), 1.4);
+    }
+  }
+  function tryDemolish() {
+    if (!bm.active) return;
+    raycaster.setFromCamera(NDC_CENTER, CBZ.camera);
+    const hit = raycastNearbyPiece();
+    if (!hit) { CBZ.flashHint && CBZ.flashHint("🚫 Nothing in range to demolish", 1.0); return; }
+    const piece = CBZ.pieces.get(hit.pieceId);
+    // ownerId gate: every piece is ownerless this wave (B6 lands real
+    // ownership/tool-cupboard locks) — the check is here so B6 only has
+    // to fill in the "matching" half, not invent this gate from scratch.
+    if (!piece || piece.ownerId != null) { CBZ.flashHint && CBZ.flashHint("🚫 Can't demolish that", 1.0); return; }
+    const idx = bm.placedStack.indexOf(hit.pieceId);
+    if (idx >= 0) bm.placedStack.splice(idx, 1);
+    B.remove(hit.pieceId);
+    CBZ.sfx && CBZ.sfx("hit");
+    updateTarget();
+  }
+  function tryUndo() {
+    if (!bm.active) return;
+    while (bm.placedStack.length) {
+      const id = bm.placedStack.pop();
+      if (CBZ.pieces.has(id)) {
+        B.remove(id);
+        CBZ.flashHint && CBZ.flashHint("↩ Undid last piece", 1.0);
+        updateTarget();
+        return;
+      }
+    }
+    CBZ.flashHint && CBZ.flashHint("Nothing to undo this session", 1.0);
+  }
+  function selectKind(idx) {
+    if (idx < 0 || idx >= KINDS.length || idx === bm.kindIdx) { if (idx >= 0 && idx < KINDS.length) updateTarget(); return; }
+    bm.kindIdx = idx; bm.kind = KINDS[idx];
+    renderStrip();
+    updateTarget();
+  }
+
+  function canEnter() {
+    const g = CBZ.game;
+    if (!g || g.state !== "playing") return false;
+    if (g.mode !== "city" && g.mode !== "survival") return false; // NOT escape — see file header
+    if (CBZ.cityMenuOpen || CBZ.invOpen) return false;
+    if (CBZ.player && (CBZ.player.driving || CBZ.player.dead)) return false;
+    return true;
+  }
+  function enterBuildMode() {
+    bm.active = true;
+    bm.rot = 0; bm.level = 0; bm.kindIdx = 0; bm.kind = KINDS[0];
+    bm.placedStack.length = 0;
+    // free up R/F (reload/fire) for the duration of the session — see
+    // the R/F conflict note in the file header. City-only: cityHolster
+    // itself no-ops outside city mode.
+    if (CBZ.game.mode === "city" && CBZ.cityHolster) CBZ.cityHolster(true);
+    showUI();
+    updateTarget();
+    CBZ.flashHint && CBZ.flashHint("🛠 Build mode", 1.0);
+  }
+  function exitBuildMode() {
+    bm.active = false;
+    hideUI();
+    hideAllGhosts();
+  }
+
+  /* ================= input: capture-phase, see file header ================= */
+  addEventListener("keydown", function (e) {
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+
+    if (k === TOGGLE_KEY) {
+      if (bm.active) exitBuildMode();
+      else { if (!canEnter()) return; enterBuildMode(); }
+      e.preventDefault(); e.stopPropagation();
+      return;
+    }
+
+    if (!bm.active) return; // every other key passes through untouched while build mode is off
+
+    let handled = true;
+    if (k === "t") bm.rot = (bm.rot + 1) % 4;
+    else if (k === "r") bm.level = Math.min(LEVEL_MAX, bm.level + 1);
+    else if (k === "f") bm.level = Math.max(0, bm.level - 1);
+    else if (k === "e") tryPlace();
+    else if (k === "x") tryDemolish();
+    else if (k === "z") tryUndo();
+    else {
+      const n = "123456".indexOf(k);
+      if (n >= 0) selectKind(n);
+      else handled = false;
+    }
+    if (!handled) return; // e.g. WASD — let physics.js/input.js see it normally
+
+    e.preventDefault();
+    e.stopPropagation();
+    updateTarget(); // immediate refresh for rot/level/kind changes (snappier than waiting for the throttle)
+  }, true);
+
+  addEventListener("mousedown", function (e) {
+    if (!bm.active) return;
+    if (e.button === 0) tryPlace();
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  /* ================= per-frame: mode-gate safety net + throttle ================= */
+  let acc = 0;
+  CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.GAMEPLAY + 0.2 : 40.2, function (dt) {
+    if (!bm.active) return;
+    if (!canEnter()) { exitBuildMode(); return; } // mode/menu/vehicle changed out from under us
+    acc += dt;
+    if (acc < THROTTLE) return;
+    acc = 0;
+    updateTarget();
+  });
+})();

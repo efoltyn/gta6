@@ -317,36 +317,32 @@
   }
 
   /* ============================================================
-     CBZ.building.place(kind, gx, gy, gz, rot, opts) -> Piece | null
-       opts: { skipValidity=false, ownerId=null, hp } — skipValidity is
-       ONLY for serialize()/apply() replay (trust the save); ownerId/hp
-       let a replayed piece carry its saved owner + damage state.
+     computeValidity(kind, gx, gy, gz, rot) — B2 MINIMAL REFACTOR: the
+     exact validity block place() always ran, factored out so B2's ghost
+     preview can ask "would this placement succeed, and why not" WITHOUT
+     actually spawning anything. Byte-identical math to the old inline
+     block (this function is a pure extraction, not a rewrite) — it
+     always computes the geometry (slot/pos/footprint/rect) even for the
+     hard-fail paths (stairs rot 1/3, duplicate slot) so B2 can still
+     render a red ghost at the right transform for those cases.
+
+     Returns { ok, reason, slot, key, pos, fp, rect, sup } — sup is only
+     present once support was actually checked (i.e. past the hard-fail
+     gates). `reason` is null when ok, else a short human string; two
+     EXACT reason strings ("slot already occupied" and a "stairs: ..."
+     prefix) are HARD fails place() enforces even under opts.skipValidity
+     (replay trusts the save for support/world-collision only, never a
+     double claim on one logical slot or a structurally-impossible ramp)
+     — see place() below.
      ============================================================ */
-  const B = (CBZ.building = {});
-  B.CELL = CELL; B.WALL_H = WALL_H; B.FLOOR_T = FLOOR_T; B.WALL_T = WALL_T;
-  B.CATALOG = CATALOG;
-
-  // Convenience for B2's ghost preview: grid coords -> world origin
-  // (the SAME formula as the file-header contract; exposed so callers
-  // never hand-roll it).
-  B.gridToWorld = function (gx, gy, gz) { return { x: gx * CELL, y: gy * WALL_H, z: gz * CELL }; };
-
-  B.place = function (kind, gx, gy, gz, rot, opts) {
-    opts = opts || {};
+  function computeValidity(kind, gx, gy, gz, rot) {
     const def = CATALOG[kind];
-    if (!def) { console.warn("[building] place: unknown kind", kind); return null; }
+    if (!def) return { ok: false, reason: "unknown kind: " + kind };
     gx |= 0; gy |= 0; gz |= 0;
     rot = ((rot | 0) % 4 + 4) % 4;
 
-    if (kind === "stairs" && (rot === 1 || rot === 3)) {
-      console.warn("[building] stairs rot 1/3 (x-axis ramp) unsupported this wave — CBZ.platforms' ramp record only interpolates along z (core/interfaces.js #4); B3 TODO if the ramp shape grows an x-axis variant.");
-      return null;
-    }
-
     const slot = slotFor(kind, rot);
     const key = occKey(gx, gy, gz, slot);
-    if (occupancy.has(key)) return null; // duplicate — same logical slot already built
-
     const cx = gx * CELL, cz = gz * CELL, baseY = gy * WALL_H;
     const isEdge = slot !== "fill";
     let pos;
@@ -377,11 +373,65 @@
       stackable: true,
     };
 
-    const sup = checkSupport(kind, gx, gy, gz, cx, cz);
-    if (!opts.skipValidity) {
-      if (!sup.ok) return null;                                              // (b) support
-      if (!CBZ.placement || !CBZ.placement.isFree(rect)) return null;        // (c) world-collision (F5 Y-ranged rect)
+    if (kind === "stairs" && (rot === 1 || rot === 3)) {
+      return {
+        ok: false,
+        reason: "stairs: rot 1/3 (x-axis ramp) unsupported this wave — CBZ.platforms' ramp record only interpolates along z (core/interfaces.js #4); B3 TODO if the ramp shape grows an x-axis variant.",
+        slot: slot, key: key, pos: pos, fp: fp, rect: rect,
+      };
     }
+    if (occupancy.has(key)) return { ok: false, reason: "slot already occupied", slot: slot, key: key, pos: pos, fp: fp, rect: rect };
+
+    const sup = checkSupport(kind, gx, gy, gz, cx, cz);
+    if (!sup.ok) return { ok: false, reason: "no support at this position", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
+    if (!CBZ.placement || !CBZ.placement.isFree(rect)) return { ok: false, reason: "blocked by existing geometry", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
+
+    return { ok: true, reason: null, slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
+  }
+
+  /* ============================================================
+     CBZ.building.place(kind, gx, gy, gz, rot, opts) -> Piece | null
+       opts: { skipValidity=false, ownerId=null, hp } — skipValidity is
+       ONLY for serialize()/apply() replay (trust the save); ownerId/hp
+       let a replayed piece carry its saved owner + damage state.
+     ============================================================ */
+  const B = (CBZ.building = {});
+  B.CELL = CELL; B.WALL_H = WALL_H; B.FLOOR_T = FLOOR_T; B.WALL_T = WALL_T;
+  B.CATALOG = CATALOG;
+
+  // Convenience for B2's ghost preview: grid coords -> world origin
+  // (the SAME formula as the file-header contract; exposed so callers
+  // never hand-roll it).
+  B.gridToWorld = function (gx, gy, gz) { return { x: gx * CELL, y: gy * WALL_H, z: gz * CELL }; };
+
+  // B2: CBZ.building.validate(kind, gx, gy, gz, rot) -> {ok, reason} —
+  // the read-only preview building.place() itself now runs internally.
+  // Also carries `pos` (world transform, edge-offset included) so B2's
+  // ghost mesh never has to re-derive the wall/doorframe edge offset by
+  // hand; that's additive beyond the documented {ok,reason} contract, not
+  // a replacement for it.
+  B.validate = function (kind, gx, gy, gz, rot) {
+    const v = computeValidity(kind, gx, gy, gz, rot);
+    return { ok: v.ok, reason: v.reason, pos: v.pos || null, fp: v.fp || null };
+  };
+
+  B.place = function (kind, gx, gy, gz, rot, opts) {
+    opts = opts || {};
+    const def = CATALOG[kind];
+    if (!def) { console.warn("[building] place: unknown kind", kind); return null; }
+    gx |= 0; gy |= 0; gz |= 0;
+    rot = ((rot | 0) % 4 + 4) % 4;
+
+    const v = computeValidity(kind, gx, gy, gz, rot);
+
+    // HARD fails — enforced even under opts.skipValidity (a replayed save
+    // still can't double-claim a slot or resurrect an unsupported ramp
+    // rot); only support/world-collision are the trust-the-save skip.
+    if (v.reason === "slot already occupied") return null;
+    if (v.reason && v.reason.indexOf("stairs:") === 0) { console.warn("[building] place: " + v.reason); return null; }
+    if (!opts.skipValidity && !v.ok) return null;
+
+    const pos = v.pos, fp = v.fp, rect = v.rect, sup = v.sup, key = v.key;
 
     const piece = CBZ.spawnPiece(def, {
       pos: pos, rot: rot, kind: kind,
@@ -415,11 +465,11 @@
       const ramp = {
         minX: pos.x - fp.hx, maxX: pos.x + fp.hx,
         minZ: pos.z - fp.hz, maxZ: pos.z + fp.hz,
-        top: baseY + WALL_H,
+        top: pos.y + WALL_H,
         ramp: {
           z0: dir > 0 ? pos.z - CELL / 2 : pos.z + CELL / 2,
           z1: dir > 0 ? pos.z + CELL / 2 : pos.z - CELL / 2,
-          y0: baseY, y1: baseY + WALL_H,
+          y0: pos.y, y1: pos.y + WALL_H,
         },
         pieceId: piece.id,
       };
