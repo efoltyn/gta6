@@ -89,8 +89,13 @@ let _three = null;
 function _checkReady() {
   const CBZ = window.CBZ;
   const THREE = window.THREE;
+  // Any truthy state counts as ready: config seeds state:"title" and main.js
+  // re-asserts it as the FIRST setState of the boot, so every later state
+  // ("playing", ...) implies the world objects already exist. Requiring
+  // strict === "title" here stranded integrations forever if the state
+  // advanced (fast Play click) between rAF polls.
   return !!(CBZ && THREE && CBZ.scene && CBZ.camera && CBZ.renderer &&
-    CBZ.onUpdate && CBZ.onAlways && CBZ.game && CBZ.game.state === "title");
+    CBZ.onUpdate && CBZ.onAlways && CBZ.game && CBZ.game.state);
 }
 
 function _pump() {
@@ -185,3 +190,22 @@ export const THREE = new Proxy({}, {
 if (typeof console !== "undefined") {
   console.log("[bootstrap] module world active (src/bootstrap.js loaded)");
 }
+
+// O2+: the module-world integrations registry (vendored/OSS adapters, e.g.
+// src/integrations/grass.js). MUST be a DYNAMIC import, not a static one:
+// integrations import { registerModule } etc. FROM this file, so a static
+// `import "./integrations/index.js"` here would form a circular import
+// graph — and because static imports are always fully evaluated BEFORE any
+// of this module's OWN top-level statements run (regardless of where the
+// import line sits in the file), that circle would try to read `_pending`/
+// `_ready` above while they're still in their temporal dead zone
+// ("Cannot access '_pending' before initialization"). A dynamic import()
+// is its own microtask, scheduled AFTER this module's synchronous body
+// (everything above, including the exports) has already finished — by the
+// time integrations/grass.js's `import { registerModule } from
+// "../bootstrap.js"` resolves, this file is fully initialized. See
+// src/integrations/index.js's own header for why this only ever runs in
+// the module world (never for a dumb static server).
+import("./integrations/index.js").catch((err) => {
+  console.error("[bootstrap] integrations registry failed to load", err);
+});
