@@ -11,6 +11,12 @@
   const THREE = window.THREE;
   const scene = CBZ.scene;
   const bursts = [], rings = [], chunks = [], scorches = [];
+  // B5: scratch reused by applyBlastDamage's piece-damage pass below (no
+  // per-blast allocation) — a Set to dedupe pieceIds across the multiple
+  // AABB colliders one piece can register (doorframe = 3), an Array for
+  // CBZ.queryCollidersNear's own out-param convention (systems/physics.js).
+  const blastPieceScratch = [];
+  const blastPieceSeen = new Set();
   const chunkGeo = new THREE.BoxGeometry(0.28, 0.18, 0.42);
   chunkGeo._shared = true;
   // base box half-height (the 0.18 dim above ÷2) — a chunk must rest with its
@@ -705,6 +711,33 @@
     for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
     const PL = CBZ.player;
     if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, "caught in an explosion", false, null, false); } }
+
+    // ---- B5: STRUCTURAL BLAST DAMAGE — every player-built piece (systems/
+    // pieces.js) within the FULL blast sphere R (not the reduced ped lethal
+    // core LR above — a wall doesn't get to "survive by standing further
+    // back" the way a scattering crowd does) takes damage on the SAME
+    // linear 1→0 falloff shape as the player's own blast damage just above.
+    // queryCollidersNear is a broadphase (square, not circular) so we still
+    // gate on real distance below; pieceId can repeat across a piece's own
+    // multiple AABBs (e.g. a doorframe's 3 colliders), hence the Set dedupe.
+    // BASE tuned so a single C4 charge (power 1.4, structDamage.js's wood-
+    // tier explosive mult 4.0) one-shots a full-hp (250) wood wall at close
+    // range: 70 * 1.4 * 4.0 = 392 ≥ 250.
+    if (CBZ.structDamage && CBZ.queryCollidersNear && CBZ.pieces) {
+      const near = CBZ.queryCollidersNear(x, z, R, blastPieceScratch);
+      blastPieceSeen.clear();
+      for (let i = 0; i < near.length; i++) {
+        const c = near[i];
+        if (c.pieceId == null || blastPieceSeen.has(c.pieceId)) continue;
+        blastPieceSeen.add(c.pieceId);
+        const piece = CBZ.pieces.get(c.pieceId);
+        if (!piece || !piece.alive) continue;
+        const dx = piece.pos.x - x, dz = piece.pos.z - z, d = Math.hypot(dx, dz);
+        if (d >= R) continue;
+        const amt = 70 * power * (1 - d / R);
+        if (amt > 0) CBZ.structDamage.hit(c.pieceId, amt, "explosive");
+      }
+    }
   }
 
   // ============================================================

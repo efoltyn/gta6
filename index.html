@@ -429,6 +429,13 @@
      (needs spawnPiece/despawnPiece/findSupport) and after placement.js
      above (needs CBZ.placement.isFree/reserve for the world-collision gate). -->
 <script src="src/systems/building.js?v=bld1"></script>
+<!-- B5 — the raid-tool damage matrix: CBZ.structDamage.hit/repair on top
+     of B1's CATALOG hp + B4's cascade/stability (CBZ.building.remove).
+     Loads right after building.js (needs CBZ.building.remove + CBZ.pieces,
+     both already defined by this point); explosives.js/fpsmode.js's bullet
+     hook call CBZ.structDamage.hit at runtime, so load order relative to
+     THEM doesn't matter — only relative to building.js/pieces.js does. -->
+<script src="src/systems/structdamage.js?v=bld1"></script>
 <!-- B2 — the walking skeleton: CBZ.buildMode ghost preview + hotbar strip
      + confirm/rotate/level/demolish/undo, all calling B1's place()/remove().
      Loads right after building.js (needs CBZ.building.CATALOG/validate/

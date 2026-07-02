@@ -1499,6 +1499,18 @@
         // above. Once the pane is open, follow-up rounds get hit.wall === false
         // (cityShotHole skips the open frame) and fly past normally.
       } else if (hit.wall) {
+        // B5: a confirmed losBlockers hit whose struck object carries
+        // userData.pieceId (systems/pieces.js stamps this on every piece
+        // mesh it builds) is a player-built piece taking a bullet — chip it
+        // for the weapon's base damage (structdamage.js applies the wood-
+        // tier bullet mult, ~0.35, so ~30 rifle rounds fell a 250hp wall).
+        // Only wall/doorframe-shaped pieces register as losBlockers today
+        // (systems/building.js's blockLOS flags), so this is the whole
+        // hit-testable set this wave; other bullet paths (car/actor/corpse/
+        // crowd/aircraft above) have no piece concept to hook.
+        const wallObj = hit.wallHit && hit.wallHit.object;
+        const pieceId = wallObj && wallObj.userData && wallObj.userData.pieceId;
+        if (pieceId != null && CBZ.structDamage) CBZ.structDamage.hit(pieceId, w.damage, "bullet");
         spawnImpact(hit.point, false, cal >= 1.3);
         // surface normal of the struck wall (faces back toward the shooter):
         // walls in this game are near-vertical, so reflect the shot dir onto the
