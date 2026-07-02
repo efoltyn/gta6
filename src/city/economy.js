@@ -421,19 +421,21 @@
     // is OVERSUPPLIED (a district dumped, or a glut event) it's cheap to stock
     // up — buy low. Everything else is flat retail.
     if (it.tag === "drug") return wholesalePrice(name);
-    // E1: FOOD prices now track the city-wide living-economy shim
-    // (sim/market.js) — one category first, per the plan's milestone; E2
-    // extends the multiplier to every other tag. Guarded: CBZ.market may not
-    // be loaded (load order / feature-detect), so this falls back to the
-    // flat ×1.0 retail it's always been.
-    if (it.tag === "food" && CBZ.market) return Math.round(it.value * CBZ.market.price("food"));
+    // E2: every non-drug tag now tracks its live city-wide category price via
+    // sim/market.js's itemPrice() (E1 wired food only; this generalizes the
+    // multiplier to goods/guns/materials/fuel/luxury too). Guarded: CBZ.market
+    // may not be loaded (load order / feature-detect), so this falls back to
+    // the flat ×1.0 retail it's always been.
+    if (CBZ.market) return CBZ.market.itemPrice(name);
     return Math.round(it.value * 1.0);
   }
   function sellPrice(name, kind) {
     const it = ITEMS[name]; if (!it) return 0;
-    // E1: symmetric with buyPrice above — the fence/counter pays off the same
-    // live food price level, not just the flat catalog value.
-    const base = (it.tag === "food" && CBZ.market) ? it.value * CBZ.market.price("food") : it.value;
+    // E2: symmetric with buyPrice above — every non-drug tag's fence/counter
+    // price tracks the live category level now (E1 wired food only). Drugs
+    // stay untouched: the district engine (streetPrice/wholesalePrice above)
+    // is the sole authority on drug economics.
+    const base = (it.tag !== "drug" && CBZ.market) ? CBZ.market.itemPrice(name) : it.value;
     let mul = 0.45;
     if (kind === "pawn") mul = it.tag === "valuable" ? 0.65 : 0.5;
     if (kind === "jewelry" && it.tag === "wearable") mul = 0.6;

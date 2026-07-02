@@ -173,9 +173,14 @@
 
   // ---- the hourly-ish tick: mean-revert + noise, day-boundary snapshot ---
   function hourTick(m) {
+    // E2: revert toward the city's live `activity` (sim/econstate.js) instead
+    // of a flat 1.0 — a booming city has structurally higher prices. Guarded
+    // so day one (activity starts at 1.0) and a missing econstate.js are both
+    // byte-identical to the old flat-1.0 behavior.
+    const target = (CBZ.econState && typeof CBZ.econState.activity === "function") ? CBZ.econState.activity() : 1.0;
     for (const c of CATS) {
       const lv = m.lvl[c];
-      lv.p += (1 - lv.p) * REVERT;              // mean-revert toward 1.0
+      lv.p += (target - lv.p) * REVERT;          // mean-revert toward activity
       lv.p += (rng() - 0.5) * 2 * NOISE;         // seeded noise, ±NOISE/hr
       lv.p = clamp(lv.p);
     }
