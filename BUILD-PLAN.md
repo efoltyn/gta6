@@ -52,7 +52,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **E3** Legibility: adboard price/CPI ticker creative + phone Markets app with sparklines.
 - [x] **E4** NPC circulation: ledger rent/spend, cohort wallets (20 rows), robbery debits cohorts, vacancies become real.
 - [x] **E5** `sim/corporations.js` (new): Bunbros with real outlet revenue from cohort spend; read-only ticker line.
-- [ ] **E6** `sim/stocks.js` (new): exchange building role + buy/sell UI + price formation off real earnings.
+- [x] **E6** `sim/stocks.js` (new): exchange building role + buy/sell UI + price formation off real earnings.
 - [ ] **E7** Full 8-company roster + national index + dividends + IPO for player businesses.
 - [ ] **E8** Billionaires as persistent shareholder NPCs (MAGNATE VIP wiring, mark-to-market net worth, assassination shocks + succession via family tree from W9).
 - [ ] **E9** Casino: minigame house-take books into Royale Casino Corp; NPC whales; vault heist = earnings shock.

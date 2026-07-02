@@ -142,6 +142,7 @@
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
     if (CBZ.npcEcon && CBZ.npcEcon.serialize) try { blob.npce = CBZ.npcEcon.serialize(); } catch (e) {}
     if (CBZ.corps && CBZ.corps.serialize) try { blob.corp = CBZ.corps.serialize(); } catch (e) {}
+    if (CBZ.stocks && CBZ.stocks.serialize) try { blob.stk = CBZ.stocks.serialize(); } catch (e) {}
     return blob;
   }
 
@@ -243,6 +244,7 @@
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }
     if (w.npce && CBZ.npcEcon && CBZ.npcEcon.apply) try { CBZ.npcEcon.apply(w.npce); } catch (e) { console.error("[netpersist]", e); }
     if (w.corp && CBZ.corps && CBZ.corps.apply) try { CBZ.corps.apply(w.corp); } catch (e) { console.error("[netpersist]", e); }
+    if (w.stk && CBZ.stocks && CBZ.stocks.apply) try { CBZ.stocks.apply(w.stk); } catch (e) { console.error("[netpersist]", e); }
   }
 
   function applyGangs(rows) {

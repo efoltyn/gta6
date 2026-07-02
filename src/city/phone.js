@@ -27,6 +27,10 @@
   const GREEN = "#7ed957", GOLD = "#ffd451", RED = "#ff5b5b", CYAN = "#7fd0ff", DIM = "#8a93a3";
 
   let panel = null, body = null, open_ = false, lastRender = 0;
+  // E6: which stock ticker (if any) has its detail view expanded in the
+  // MARKETS app right now — null when every row is collapsed. A transient
+  // one-line status message (trade success/failure) rides alongside it.
+  let stockOpen = null, stockMsg = "";
 
   // ---- small helpers --------------------------------------------------------
   function esc(s) {
@@ -186,14 +190,82 @@
     // E5: Bunbros (sim/corporations.js) — the first real corporation, one
     // read-only row (name, today's-so-far/last daily earnings, cash-trend
     // arrow). Absent entirely until outlets are actually built.
+    // E6: that row is now TAPPABLE (sim/stocks.js lists it once outlets
+    // exist) — tap toggles a detail view: price, sparkline, over/undervalued
+    // hint, BUY/SELL buttons, position + P&L.
     const co = (CBZ.corps && typeof CBZ.corps.summary === "function") ? CBZ.corps.summary() : null;
     if (co) {
       const coCol = co.cashTrend === "up" ? GOLD : (co.cashTrend === "down" ? GREEN : DIM);
       const coArrow = co.cashTrend === "up" ? "▲" : (co.cashTrend === "down" ? "▼" : "–");
+      const tradable = !!(CBZ.stocks && typeof CBZ.stocks.quote === "function" && CBZ.stocks.quote(co.tickerSym));
       inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
-      inner += row(co.tickerSym + " · " + co.name, money(co.dailyEarnings) + "/day " + coArrow, coCol);
+      inner += "<div" + (tradable ? " data-stock='" + esc(co.tickerSym) + "' style='cursor:pointer'" : "") + ">" +
+        row(co.tickerSym + " · " + co.name, money(co.dailyEarnings) + "/day " + coArrow, coCol) + "</div>";
+      if (tradable && stockOpen === co.tickerSym) inner += stockDetailHtml(co.tickerSym);
     }
     return card("📈 MARKETS", inner);
+  }
+  // ---- STOCK DETAIL — sim/stocks.js's data layer (quote()/position()) laid
+  // out the same card-with-rows way every other app here does. A tiny
+  // <canvas> sparkline (painted post-render by drawStockSpark(), same
+  // DOM/canvas-only split as drawSparklines() above) and five trade buttons.
+  function tradeBtn(sym, action, n, label) {
+    return "<div data-trade='" + esc(action) + "' data-sym='" + esc(sym) + "' data-n='" + n + "' " +
+      "style='background:rgba(126,217,87,.14);border:1px solid #4a8a3a;border-radius:8px;padding:6px 10px;" +
+      "font-size:12px;font-weight:700;color:#dff5d0;cursor:pointer'>" + esc(label) + "</div>";
+  }
+  function stockDetailHtml(sym) {
+    const Q = CBZ.stocks.quote(sym);
+    if (!Q) return "";
+    const pos = (typeof CBZ.stocks.position === "function") ? CBZ.stocks.position(sym) : null;
+    const hint = Q.valuation === "over" ? "Overvalued vs. fundamentals" :
+      (Q.valuation === "under" ? "Undervalued vs. fundamentals" : "Fairly valued vs. fundamentals");
+    const hintCol = Q.valuation === "over" ? RED : (Q.valuation === "under" ? GREEN : DIM);
+    let inner = "<div style='margin:8px 0 4px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)'>";
+    inner += row("Price", "$" + Q.price.toFixed(2), CYAN);
+    inner += row("Fair value (anchor)", "$" + Q.anchor.toFixed(2), DIM);
+    inner += "<div style='font-size:11px;color:" + hintCol + ";margin:2px 0 6px'>" + esc(hint) + "</div>";
+    inner += "<canvas id='stockSpark_" + esc(sym) + "' width='260' height='40' style='display:block;margin-bottom:8px'></canvas>";
+    if (pos && pos.qty > 0) {
+      inner += row("Position", pos.qty + " sh @ avg $" + pos.avgCost.toFixed(2));
+      inner += row("Value", money(pos.value), CYAN);
+      const pnlCol = pos.pnl >= 0 ? GREEN : RED;
+      inner += row("P&L", (pos.pnl >= 0 ? "+" : "") + money(pos.pnl) + " (" + (pos.pnlPct * 100).toFixed(1) + "%)", pnlCol);
+    } else {
+      inner += "<div style='font-size:11px;color:" + DIM + ";margin:4px 0'>No position.</div>";
+    }
+    if (stockMsg) inner += "<div style='font-size:11px;color:" + GOLD + ";margin:4px 0'>" + esc(stockMsg) + "</div>";
+    inner += "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px'>";
+    inner += tradeBtn(sym, "buy", 10, "BUY 10");
+    inner += tradeBtn(sym, "buy", 100, "BUY 100");
+    inner += tradeBtn(sym, "sell", 10, "SELL 10");
+    inner += tradeBtn(sym, "sell", 100, "SELL 100");
+    inner += tradeBtn(sym, "sellall", 0, "SELL ALL");
+    inner += "</div></div>";
+    return inner;
+  }
+  function drawStockSpark(sym) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    const cv = document.getElementById("stockSpark_" + sym);
+    if (!cv || typeof cv.getContext !== "function") return;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const Q = CBZ.stocks.quote(sym);
+    const w = cv.width || 260, h = cv.height || 40;
+    if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+    const hist = Q && Q.history;
+    if (!hist || hist.length < 2) return;
+    const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+    const span = (hi - lo) || 0.01;
+    ctx.strokeStyle = Q.trend === "up" ? GOLD : (Q.trend === "down" ? GREEN : DIM);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    hist.forEach(function (v, i) {
+      const x = (i / (hist.length - 1)) * w;
+      const y = h - ((v - lo) / span) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
   }
   // paints each category's sparkline canvas from its history ring. Silently a
   // no-op outside a real DOM (no document / no live canvas context) — the node
@@ -431,6 +503,7 @@
     body.innerHTML = html;
     // sparkline canvases only exist now that innerHTML landed — paint them.
     try { drawSparklines(marketRows); } catch (e) {}
+    try { if (stockOpen) drawStockSpark(stockOpen); } catch (e) {}
   }
 
   // ---- DOM ------------------------------------------------------------------
@@ -500,6 +573,37 @@
             gigOffers = [];
           }
         } catch (err) { gigOffers = []; }
+        render();
+        return;
+      }
+      // ---- E6: STOCKS clicks — tap the BUN row to expand/collapse the
+      // detail view; tap a BUY/SELL button to trade through sim/stocks.js.
+      const sk = e.target && e.target.closest ? e.target.closest("[data-stock]") : null;
+      if (sk) {
+        const sym = sk.getAttribute("data-stock");
+        stockOpen = (stockOpen === sym) ? null : sym;
+        stockMsg = "";
+        render();
+        return;
+      }
+      const tr = e.target && e.target.closest ? e.target.closest("[data-trade]") : null;
+      if (tr) {
+        const sym = tr.getAttribute("data-sym");
+        const action = tr.getAttribute("data-trade");
+        const n = parseInt(tr.getAttribute("data-n"), 10) || 0;
+        stockMsg = "";
+        if (CBZ.stocks) {
+          try {
+            let res = null;
+            if (action === "buy") res = CBZ.stocks.buy(sym, n);
+            else if (action === "sell") res = CBZ.stocks.sell(sym, n);
+            else if (action === "sellall" && typeof CBZ.stocks.sellAll === "function") res = CBZ.stocks.sellAll(sym);
+            if (res && res.ok === false) {
+              stockMsg = res.reason === "cash" ? "Not enough cash." :
+                (res.reason === "shares-owned" ? "You only own " + (res.have || 0) + " shares." : "Trade failed.");
+            }
+          } catch (err) { stockMsg = "Trade failed."; }
+        }
         render();
         return;
       }

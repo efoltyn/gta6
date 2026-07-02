@@ -297,6 +297,9 @@
     const co = g.corps.list[lot._bunCo];
     if (!co) return false;
     co.cash -= amount;
+    // E6: a robbed till is a real (tiny) shock to the exchange too — momentum
+    // reacts before the next earnings print does (sim/stocks.js's shock API).
+    if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(co.tickerSym, -amount / 500000);
     if (co.cash <= 0 && !co.bankrupt) bankrupt(co);
     return true;
   }
@@ -321,7 +324,14 @@
     const s = summary();
     if (!s) return "";
     const arrow = s.cashTrend === "up" ? "▲" : (s.cashTrend === "down" ? "▼" : "–");
-    return s.tickerSym + " earnings " + (s.dailyEarnings >= 0 ? "$" : "-$") + Math.abs(Math.round(s.dailyEarnings)).toLocaleString() + " " + arrow;
+    let line = s.tickerSym + " earnings " + (s.dailyEarnings >= 0 ? "$" : "-$") + Math.abs(Math.round(s.dailyEarnings)).toLocaleString() + " " + arrow;
+    // E6: fold the live exchange price in alongside earnings (sim/stocks.js) —
+    // guarded no-op until that module actually lists this ticker.
+    if (CBZ.stocks && typeof CBZ.stocks.tickerLine === "function") {
+      const pl = CBZ.stocks.tickerLine(s.tickerSym);
+      if (pl) line += " · " + pl;
+    }
+    return line;
   }
 
   // ---- persistence ------------------------------------------------------
