@@ -649,6 +649,12 @@
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
      loaded in the earlier P-wave) since it reads/subscribes to both. -->
 <script src="src/city/relations.js?v=world1"></script>
+<!-- P6: the regime state machine (govType transitions + first effects —
+     fascist curfew, communist price controls, anarchist collapse). Loads
+     LAST in the P/X-wave block: it reads CBZ.relations.warPressure +
+     CBZ.hunger.miseryIndex (both above) on top of polity/approval/elections
+     (also above), so every dependency is already live by the time it parses. -->
+<script src="src/city/regimes.js?v=pol1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>

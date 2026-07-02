@@ -89,6 +89,10 @@
   // reset the roster for a fresh city run (called from clearCityCops + spawn).
   function cityPoliceForceReset() { forcePool = POLICE_FORCE_MAX(); replenishT = 0; }
   CBZ.cityPoliceForceReset = cityPoliceForceReset;
+  // P6: anarchist collapse zeroes the reserve outright (city/regimes.js calls
+  // this once on the transition — the force isn't "reset", it's GONE; the
+  // cops themselves were converted to former-cop peds, not despawned).
+  CBZ.cityPoliceForceZero = function () { forcePool = 0; };
   // {alive,deployed,max} for the HUD / map: alive = officers still on the books
   // (the pool you can still field + the ones currently deployed). Falls only as
   // cops are killed; crawls back via the academy trickle.
@@ -1073,6 +1077,9 @@
     maintainT -= dt;
     if (maintainT > 0) return;
     maintainT = 1.1;
+    // P6: anarchist collapse — no spawn, no replenish, no roadblocks/patrol
+    // top-ups while it holds (city/regimes.js already zeroed forcePool).
+    if (CBZ.regimes && CBZ.regimes.policeAllowed && !CBZ.regimes.policeAllowed()) return;
     const stars = g.wanted | 0;
     // ESCAPED CONVICT all-points bulletin: the first maintain tick after you hit
     // the street as a jailbreaker, dispatch puts your description out — sells WHY

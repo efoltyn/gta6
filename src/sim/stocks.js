@@ -323,6 +323,8 @@
     return s;
   }
   function payDividends() {
+    // P6: communism suspends dividends outright (city/regimes.js).
+    if (CBZ.regimes && CBZ.regimes.dividendsAllowed && !CBZ.regimes.dividendsAllowed()) return;
     for (const sym in LISTINGS) {
       const meta = LISTINGS[sym];
       const co = (CBZ.corps && CBZ.corps.get) ? CBZ.corps.get(meta.corpId) : null;

@@ -91,7 +91,14 @@
   let _seed = 918273645 & 0x7fffffff;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
 
-  function clamp(p) { return Math.max(CLAMP_LO, Math.min(CLAMP_HI, p)); }
+  // P6: communism's price-control override — a per-category upper-clamp that
+  // replaces CLAMP_HI when set (city/regimes.js's CBZ.market.setControls()
+  // below). Undefined/absent = the original flat CLAMP_HI for every category.
+  let controlMaxP = Object.create(null);
+  function clamp(p, cat) {
+    const hi = (cat && controlMaxP[cat] != null) ? controlMaxP[cat] : CLAMP_HI;
+    return Math.max(CLAMP_LO, Math.min(hi, p));
+  }
 
   // ---- state lives on g.cityMarket (mirrors g.cityDrugDist) so it saves/
   // resets with the rest of the run's world state ------------------------
@@ -99,6 +106,30 @@
     const lvl = {}, yest = {}, hist = {}, buyVol = {};
     for (const c of CATS) { lvl[c] = { p: 1.0 }; yest[c] = 1.0; hist[c] = []; buyVol[c] = 0; }
     g.cityMarket = { lvl: lvl, yest: yest, hist: hist, buyVol: buyVol, hrAcc: 0, dayHrAcc: 0, bigFired: {} };
+    controlMaxP = Object.create(null);   // P6: a fresh run starts with no price-control override
+  }
+  // P6: CBZ.market.setControls({maxP}) — communism's price-control override.
+  // Applies to food + goods (the two categories P6's task brief names; other
+  // categories are untouched this wave). setControls(null) lifts it. Also
+  // clamps the LIVE price down immediately if it's currently above the new
+  // ceiling — a price control that only bites on the NEXT hourly tick would
+  // read as a no-op for a harness (or a player) checking right after it's
+  // announced. Controlled prices ALSO cutting shop STOCK ("shortages") has
+  // no home yet — there is no stock-quantity concept anywhere in this
+  // codebase (shops sell off an infinite catalog); that lands with whatever
+  // future wave adds real inventory, not this shim.
+  const CONTROLLED_CATS = ["food", "goods"];
+  function setControls(opts) {
+    ensureInit();
+    if (opts && isFinite(opts.maxP)) {
+      for (const c of CONTROLLED_CATS) {
+        controlMaxP[c] = +opts.maxP;
+        const lv = g.cityMarket.lvl[c];
+        if (lv && lv.p > controlMaxP[c]) lv.p = controlMaxP[c];
+      }
+    } else {
+      for (const c of CONTROLLED_CATS) delete controlMaxP[c];
+    }
   }
   function ensureInit() {
     if (!g.cityMarket) { reset(); return; }
@@ -185,7 +216,7 @@
     ensureInit();
     const lv = g.cityMarket.lvl[cat]; if (!lv) return;
     qty = qty || 1;
-    lv.p = clamp(lv.p - Math.min(SIGNAL_CAP, SIGNAL_BUMP * qty));
+    lv.p = clamp(lv.p - Math.min(SIGNAL_CAP, SIGNAL_BUMP * qty), cat);
   }
   // recordBuy: the player BUYING drains supply and signals demand — price
   // ticks up (same direction as economy.js's recordBuy draining a district).
@@ -193,7 +224,7 @@
     ensureInit();
     const lv = g.cityMarket.lvl[cat]; if (!lv) return;
     qty = qty || 1;
-    lv.p = clamp(lv.p + Math.min(SIGNAL_CAP, SIGNAL_BUMP * qty));
+    lv.p = clamp(lv.p + Math.min(SIGNAL_CAP, SIGNAL_BUMP * qty), cat);
     // E7: a raw cumulative buy-volume counter per category (NOT the clamped
     // price nudge above) — sim/corporations.js's Granite & Sons reads this
     // as its citywide materials-demand proxy (drainBuyVolume() below).
@@ -246,7 +277,7 @@
       const lv = m.lvl[c];
       lv.p += (target - lv.p) * REVERT;          // mean-revert toward activity
       lv.p += (rng() - 0.5) * 2 * NOISE;         // seeded noise, ±NOISE/hr
-      lv.p = clamp(lv.p);
+      lv.p = clamp(lv.p, c);
       // E3: one hourly sample into this category's sparkline ring.
       const h = m.hist[c] || (m.hist[c] = []);
       h.push(lv.p);
@@ -284,8 +315,8 @@
     if (!obj || obj.v !== 1) return;
     reset();
     const m = g.cityMarket;
-    if (obj.p) for (const c of CATS) if (obj.p[c] != null && isFinite(obj.p[c])) m.lvl[c].p = clamp(+obj.p[c]);
-    if (obj.y) for (const c of CATS) if (obj.y[c] != null && isFinite(obj.y[c])) m.yest[c] = clamp(+obj.y[c]);
+    if (obj.p) for (const c of CATS) if (obj.p[c] != null && isFinite(obj.p[c])) m.lvl[c].p = clamp(+obj.p[c], c);
+    if (obj.y) for (const c of CATS) if (obj.y[c] != null && isFinite(obj.y[c])) m.yest[c] = clamp(+obj.y[c], c);
     m.dayHrAcc = obj.dayHrAcc || 0;
   }
 
@@ -298,6 +329,7 @@
     recordSale: recordSale,
     recordBuy: recordBuy,
     drainBuyVolume: drainBuyVolume,
+    setControls: setControls,
     serialize: serialize,
     apply: apply,
     reset: reset,

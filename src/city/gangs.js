@@ -1819,7 +1819,8 @@
         // attacker bias: richest / most aggrieved crew presses first — and an
         // EXPANSIONIST archetype (cartel: high expandW) weighs in heavier, so
         // the land-hungry crews start the most wars (visibly more aggressive map).
-        const press = (x) => ((x.treasury || 0) + (x.hostility || 0) * 300 + (x.warIntensity || 0) * 200) * (x.expandW || 1);
+        // P6: anarchist collapse ×1.5's every gang's land-hunger (city/regimes.js).
+        const press = (x) => ((x.treasury || 0) + (x.hostility || 0) * 300 + (x.warIntensity || 0) * 200) * (x.expandW || 1) * (CBZ.regimes && CBZ.regimes.gangBoostMul ? CBZ.regimes.gangBoostMul() : 1);
         live.sort((p, q) => press(q) - press(p));
         // pick from the top couple of pressers (not always the single richest) so
         // wars don't always involve the same crew — more varied flashpoints.
