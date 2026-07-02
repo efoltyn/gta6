@@ -71,6 +71,15 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [ ] **P8** `city/polwar.js` (new): state/country wars generalizing gang wars — fronts at causeways, counted matériel consumption, procurement contracts to corporations.
 - [ ] **P9** Migration: policy per country (president legislates, dictator decrees), individual migration evaluation, brain drain/refugee flows, border-escape gigs.
 
+## Stage X — The world: countries, demographics, villages, hunger, relations
+
+- [ ] **X1** De-stub officials: generated names everywhere (no "Rosa Vale"); officials minted like all persistent people.
+- [ ] **X2** Hunger: player hunger stat (Minecraft-style — food fills, high hunger blocks sprint/regen, starvation damages) + NPC hunger driven by wallet food spending; hungry+broke NPCs steal (shoplift/pickpocket routine override); famine→crime→unrest loop wired to food prices.
+- [ ] **X3** Country registry v2: 5+ countries as data records {wealthLevel, demographics config, settlement mix, currencyId placeholder} with varied state/city counts; polity tree + worldmap landmasses for the new territories (new islands/landmasses across the archipelago).
+- [ ] **X4** Demographics: per-region population config (skin-tone distribution, name pools per culture, dress palettes) read by makePed/crowds at spawn; region-correct populations, migration mixes them over time.
+- [ ] **X5** Village kit: hut/shack/well prefab set for towngen (mud-brick, thatch, corrugated shacks, dirt paths); poor-country settlements generate as villages; a poor capital = few towers over shacks.
+- [ ] **X6** Relations: affinity matrix (country/state/city, -100..100) seeded by data, moved by events (trade, insults, war, refugees); feeds tariffs, migration choice, war pressure, street reactions.
+
 ## Stage M — Money
 
 - [ ] **M1** `sim/currency.js` (new): multi-currency wallet map; `g.cash`/`g.cityBank` become LBD compatibility accessors — day one unchanged.
