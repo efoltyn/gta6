@@ -761,13 +761,22 @@
     CBZ.city.note("🍸 Drink — loosened up.", 1.6);
     render();
   }
+  const MAKER_CORP_ID = { KAI: "kaido", VLT: "volante" };   // economy.js CARS .maker -> sim/corporations.js id
   function buyCar() {
     if (!CBZ.city.spend(1500)) { CBZ.city.note("Need $1,500 for a car.", 1.6); return; }
-    // E7: Apex Dealership Holdings books half of every player car purchase
-    // as real revenue (sim/corporations.js's creditRevenue).
-    if (CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("apex", 1500 * 0.5);
     const A = CBZ.city.arena, door = openLot.building.door;
-    if (CBZ.citySpawnOwnedCar) CBZ.citySpawnOwnedCar(door.x + door.nx * 3, door.z + door.nz * 3);
+    const car = CBZ.citySpawnOwnedCar ? CBZ.citySpawnOwnedCar(door.x + door.nx * 3, door.z + door.nz * 3) : null;
+    // E7: Apex Dealership Holdings books half the sale as dealer-margin
+    // revenue. E10: the OTHER half goes to the model's actual MAKER (economy.js
+    // CARS .maker), boosted by that maker's brandHeat (win-on-Sunday-sell-on-
+    // Monday — sim/motorsport.js). A model with no .maker (e.g. the Yellow
+    // Cab) leaves that half simply uncredited — no manufacturer to book it to.
+    const mkId = car && car.model && MAKER_CORP_ID[car.model.maker];
+    const mkCo = mkId && CBZ.corps ? CBZ.corps.get(mkId) : null;
+    if (CBZ.corps && CBZ.corps.creditRevenue) {
+      CBZ.corps.creditRevenue("apex", 375);
+      if (mkId) CBZ.corps.creditRevenue(mkId, 375 * (mkCo ? (mkCo.brandHeat || 1) : 1));
+    }
     CBZ.city.note("Your new ride is parked out front!", 2.2);
     close();
   }

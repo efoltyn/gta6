@@ -66,6 +66,15 @@
                               steady rent-roll yield on that book value — a
                               REIT in stock form, literally wrapping the
                               existing property index.
+     kaido/KAI,                E10 — CAR MANUFACTURERS: NO retail lots (Apex's
+     volante/VLT   auto        carlot outlets ARE the dealership network).
+                   manufacturing Revenue = a steady fleet-sales base scaled by
+                              citywide activity x brandHeat, PLUS half of every
+                              player dealership purchase of one of their
+                              models (economy.js CARS' new .maker field routes
+                              it — see city/shops.js's buyCar()). Racing teams/
+                              drivers/results/sponsorship live in the new sim/
+                              motorsport.js — see that file's header.
 
    ACTIVE FLAG: `co.active` replaces the old bare `co.outlets.length` gate —
    true once an outlet-based company claims real lots (or falls back to a
@@ -137,6 +146,19 @@
       special: "media",     startCash: 60000 },
     { id: "goldspire", sym: "GLD", name: "Goldspire Trust REIT",         sector: "reit",
       special: "reit",      startCash: 500000 },
+    // E10 — CAR MANUFACTURERS (MASTER-PLAN VI.6 "motorsport is corporate"):
+    // no retail lots of their own (Apex's carlot outlets ARE the dealership
+    // network — see city/shops.js's buyCar() split hook + economy.js CARS'
+    // .maker field this wave adds). Revenue = a steady fleet-sales base
+    // scaled by citywide activity (traffic full of your cars is product
+    // placement) x brandHeat (win-on-Sunday-sell-on-Monday — sim/motorsport.js
+    // decays this back to 1.0 daily), PLUS the maker's half of every player
+    // dealership purchase of one of its models. Scope-bounded to 2 launch
+    // manufacturers — more can join later (comment, not code, per E10 spec).
+    { id: "kaido",     sym: "KAI", name: "Kaido Motors",                 sector: "auto manufacturing",
+      special: "manufacturer", startCash: 220000, fleetBase: 45 },
+    { id: "volante",   sym: "VLT", name: "Volante Auto Group",           sector: "auto manufacturing",
+      special: "manufacturer", startCash: 260000, fleetBase: 70 },
   ];
 
   // ---- special-sector tuning (all in one place, VI.6-style) ---------------
@@ -159,6 +181,8 @@
   const GLD_RENT_YIELD_HOURLY = 0.00003; // goldspire: steady rent-roll yield per hour (~0.26%/in-game day)
   const GLD_OVERHEAD = 120;
   const INPUT_DOLLARS_PER_UNIT = 20; // $ of inputs -> a market.js recordBuy "quantity" (bulk-buy divisor)
+  const MFR_OVERHEAD_FRAC = 0.6;     // manufacturer: flat $/hr overhead as a fraction of fleetBase
+  const BRANDHEAT_DAILY_DECAY = 0.4; // manufacturer: how far brandHeat relaxes back to 1.0 each city-day
 
   // own seeded LCG (never Math.random — repo convention for world state).
   const INITIAL_SEED = 314159265 & 0x7fffffff;
@@ -182,6 +206,7 @@
       bankrupt: false,
       rebuildQueue: 0,          // granite only — queued destruction-rebuild jobs
       lastPropIndex: null,      // goldspire only — last hour's propIndex() reading (NAV delta basis)
+      brandHeat: 1.0,           // manufacturers only — E10 win-on-Sunday-sell-on-Monday multiplier
       _builtForArena: null,
     };
   }
@@ -357,6 +382,15 @@
       // STREAM 2 (E9): NPC WHALES — named rich ledger NPCs' real gambling
       // sessions, booked straight into co.cash/revAcc, independent of `revenue`.
       try { whaleSession(co); } catch (e) {}
+    } else if (spec.special === "manufacturer") {
+      // CAR MANUFACTURER (E10): no retail lots of its own — a steady fleet-
+      // sales base (traffic full of your cars is product placement) scaled by
+      // citywide activity and by brandHeat (a race win 1.3x's this for ~24h,
+      // decaying back to 1.0 daily below). The OTHER half of every player
+      // dealership purchase of one of this maker's models books straight in
+      // via creditRevenue() — see city/shops.js's buyCar() split hook.
+      revenue = (spec.fleetBase || 40) * activity * (co.brandHeat || 1);
+      costs = (spec.fleetBase || 40) * MFR_OVERHEAD_FRAC;
     } else if (spec.special === "ipo") {
       // PLAYER IPO: this wave's minimal-but-real model — the seeded dailyEPS
       // basis IS the daily earnings, spread flat across the 24 hourly ticks
@@ -416,6 +450,9 @@
         co.revAcc = 0; co.costAcc = 0;
         co.cashTrend = co.cash >= co.cashDayStart ? "up" : "down";
         co.cashDayStart = co.cash;
+        // E10: brandHeat relaxes back toward 1.0 a bit each city-day (a
+        // championship win's showroom buzz fades — it doesn't last forever).
+        if (spec.special === "manufacturer") co.brandHeat = 1 + ((co.brandHeat || 1) - 1) * BRANDHEAT_DAILY_DECAY;
       }
     }
   }
@@ -554,6 +591,7 @@
       earningsHistory: co.earningsHistory.slice(), revAcc: co.revAcc || 0, costAcc: co.costAcc || 0,
       cashDayStart: co.cashDayStart, cashTrend: co.cashTrend || "flat", bankrupt: !!co.bankrupt,
       rebuildQueue: co.rebuildQueue || 0, lastPropIndex: co.lastPropIndex,
+      brandHeat: co.brandHeat != null ? co.brandHeat : 1.0,
     };
   }
   function applyCompany(co, src) {
@@ -569,6 +607,7 @@
     co.bankrupt = !!src.bankrupt;
     if (isFinite(src.rebuildQueue)) co.rebuildQueue = +src.rebuildQueue;
     if (isFinite(src.lastPropIndex)) co.lastPropIndex = +src.lastPropIndex;
+    if (isFinite(src.brandHeat)) co.brandHeat = +src.brandHeat;
   }
   function serialize() {
     ensureInit();
