@@ -775,6 +775,21 @@
      CBZ.onOfficialDeath, every one already live above. -->
 <script src="src/city/civilwar.js?v=pol1"></script>
 
+<!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
+     feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
+     spin-up at parse time); CBZ.sqlitedb.js kicks off its OWN async init
+     on parse and only THEN, if a backend is available, dynamically loads
+     src/vendor/sqlite-wasm/ (via `new Worker(...)` or an injected
+     <script> tag — never a blocking tag here) and src/workers/
+     sqlitedb-worker.js. Loads after city/worldstate.js (city/*.js's own
+     wave, well above) since that file's save()/load() check
+     CBZ.sqlitedb at CALL time, not parse time — load order doesn't
+     matter, but this is the natural home: same "net wave, after
+     everything it might touch already exists" placement as net/
+     netpersist.js above. Absent/failed sqlite-wasm changes nothing —
+     day one (localStorage-only) behavior is untouched. -->
+<script src="src/net/sqlitedb.js?v=sql1"></script>
+
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>
 <script src="src/core/batch.js"></script>

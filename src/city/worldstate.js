@@ -74,8 +74,22 @@
     };
   }
 
+  // S5 (BUILD-PLAN.md Stage S): sqlite-wasm single-player parity. src/net/
+  // sqlitedb.js is loaded AFTER this file and inits itself lazily/async
+  // (feature-detected, never blocking boot) — CBZ.sqlitedb only ever
+  // exists as a fully-formed object once its own script has parsed, and
+  // its backend only comes up some time after that, so every touch below
+  // is a runtime check, never a parse-time dependency. Until it's ready,
+  // load()/save() are BYTE-IDENTICAL to before this wave — that's the
+  // "bulletproof fallback" requirement: no wasm, no Worker, or a file://
+  // page all resolve to CBZ.sqlitedb being absent/inert and this file
+  // behaving exactly as it always has.
   function load() {
     try {
+      if (CBZ.sqlitedb && CBZ.sqlitedb.isAvailable && CBZ.sqlitedb.isAvailable()) {
+        const cached = CBZ.sqlitedb.cachedWorld();
+        if (cached && cached.version === 2) return cached;
+      }
       if (!window.localStorage) return null;
       const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return null;
@@ -87,9 +101,21 @@
   function save(w) {
     if (!w) return;
     w.lastSaved = now();
+    let json = null;
+    try { json = JSON.stringify(w); } catch (e) { return; }
+    // sqlite becomes the size-uncapped primary the moment its backend is
+    // ready (fire-and-forget — saveWorld() never throws); localStorage
+    // keeps riding as a safety mirror UNLESS the blob has grown past what
+    // it can hold, which is exactly the scenario sqlite exists to fix —
+    // a write that would throw QuotaExceededError is logged once (not on
+    // every 5s autosave tick) and skipped instead of crashing the save path.
+    const sqlite = CBZ.sqlitedb;
+    const usingSqlite = !!(sqlite && sqlite.saveWorld && sqlite.saveWorld(w, json));
     try {
-      if (window.localStorage) localStorage.setItem(STORE_KEY, JSON.stringify(w));
-    } catch (e) {}
+      if (window.localStorage) localStorage.setItem(STORE_KEY, json);
+    } catch (e) {
+      if (usingSqlite && sqlite.warnMirrorSkipOnce) sqlite.warnMirrorSkipOnce(e);
+    }
   }
 
   function ensure() {

@@ -96,7 +96,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **S2** `people` table replaces the ledger blob (cap removed); chunk-indexed spawn queries.
 - [x] **S3** structures/bases/containers tables (chunk-indexed, protocol-transparent); real deletion + FK cascade to containers.
 - [x] **S4** econ/market/political tables + server-side ticks.
-- [ ] **S5** sqlite-wasm single-player parity.
+- [x] **S5** sqlite-wasm single-player parity.
 
 ## Stage O — OSS/Vite (workflow change; scheduled after core waves stabilize)
 
