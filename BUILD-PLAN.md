@@ -43,7 +43,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **B5** HP/damage: material × damage-type table; explosives integration; carve-compatible wall meshes.
 - [x] **B6** Tool cupboard + `BaseRecord` + placement rejection radius + door locks/keycodes + lockable containers.
 - [x] **B7** Resources & crafting: harvest nodes (instanced near-field scatter), tools, `systems/craft.js`, deployable items entering build mode; city scrap drops from destroyed cars/props.
-- [ ] **B8** `bsave` persistence channel (fracture-style ledger) + upkeep/decay.
+- [x] **B8** `bsave` persistence channel (fracture-style ledger) + upkeep/decay.
 
 ## Stage E — Economy & corporations
 

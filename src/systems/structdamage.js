@@ -26,7 +26,11 @@
   if (CBZ.structDamage) return;    // idempotent (same guard idiom as the rest of this family)
 
   const TIERS = {
-    wood: { melee: 1.0, bullet: 0.35, explosive: 4.0, vehicle: 2.0 },
+    // decay: 1.0 (B8, systems/baseclaim.js's upkeep tick) — face-value, no
+    // material resistance; explicit row entry even though multFor's own
+    // fallback already returns 1.0 for an unlisted type, so the rate reads
+    // as a deliberate design choice here, not an accidental default.
+    wood: { melee: 1.0, bullet: 0.35, explosive: 4.0, vehicle: 2.0, decay: 1.0 },
     // stone: { melee: 0.6,  bullet: 0.20, explosive: 2.5, vehicle: 1.4 },  // B-later material tier
     // metal: { melee: 0.35, bullet: 0.12, explosive: 1.6, vehicle: 0.9 }, // B-later material tier
   };

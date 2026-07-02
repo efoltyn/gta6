@@ -603,6 +603,15 @@
 <script src="src/city/marriage.js?v=famtree1"></script>
 <script src="src/city/familypanel.js?v=famtree1"></script>
 
+<!-- B8: single-player persistence bridge for player building's piece
+     geometry (localStorage ledger, arena-gated deferred apply) — see that
+     file's header for why this rides as its own bridge instead of another
+     _xWrap inside systems/building.js itself. Loads after net/netpersist.js
+     (needs CBZ.cityWorldCommit/Collect, already wrapped by then) and after
+     city/familytree.js/systems/baseclaim.js (same save-wrap install-tick
+     family, slotted right beside their 45.92/45.93 ticks). -->
+<script src="src/systems/basesave.js?v=bld1"></script>
+
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>
 <script src="src/core/batch.js"></script>

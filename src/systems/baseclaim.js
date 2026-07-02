@@ -58,7 +58,47 @@
    file's B6 edits) — this file is the only thing that gives them meaning.
    Also wrapped into the single-player g.cityWorld ledger, copying
    city/familytree.js's exact `_xWrap` idiom (own guard flag `_bcWrap`).
-   ============================================================ */
+
+   ------------------------------------------------------------------
+   B8 — UPKEEP & DECAY (Rust-style "unmaintained bases rot"):
+     • Every BaseRecord gains `upkeepUntil`, a stamp in PLAY-CLOCK units
+       (see `playClock` below) — NOT Date.now() wall-clock. A solo player
+       who closes the tab for a week shouldn't come back to a demolished
+       base just because real-world time passed while nobody was even
+       looking at the screen; only ACCUMULATED PLAYED time (mirroring
+       net/netpersist.js's own `playT` accumulator, netpersist.js:287-293)
+       counts against the clock. `playClock` itself rides this file's own
+       serialize()/apply() so it survives reloads exactly like the bases.
+     • New bases start with a 24h-of-play grace (UPKEEP_GRACE). "Deposit
+       upkeep" (the B6 stub) now really costs Wood — scaled by base size,
+       `max(10, piecesInRadius/10)` — and extends upkeepUntil by another
+       24h play-time (UPKEEP_GRANT), stacking off whichever is later
+       (now or the current expiry) so topping up early never wastes time.
+     • DECAY TICK (near CBZ.PRIO.ECON): once playClock passes upkeepUntil,
+       every piece within the base's radius loses 1% maxHp/minute via
+       structdamage.js's hit(pieceId, amount, "decay") — same hp->remove
+       cascade path every other damage type already uses, so a fully
+       rotted piece collapses/tears down for free, no new code needed.
+     • RUINS (2x decay): onRemove's cupboard branch used to just delete
+       the whole BaseRecord the instant its founding cupboard died (Rust:
+       privilege lifts immediately — kept, unchanged, CBZ.baseAt/building
+       privilege never sees a dead claim). But the leftover pieces aren't
+       "based" anymore either, so with nothing left to read upkeepUntil
+       off them, the old code could never make them rot. `ruins` is a
+       tiny position-only shadow Map (cx/cz/radius, no owner/authorized/
+       upkeep — nothing CBZ.baseAt or building.js's placement gate ever
+       reads) that decayTick alone iterates, always-expired, at 2x the
+       normal rate ("unclaimed ruins rot faster") — self-cleaning once a
+       ruin's last piece is gone.
+     • HUD: a throttled flashHint fires while any base you're authorized
+       on has under 2h of play-time upkeep left.
+     • Gated to CITY mode only (`g.mode==="city"`) — the same city-only
+       scope as this file's own single-player persistence and the [E]
+       verb panel; systems/baseclaim.js's SURVIVAL fallback keydown block
+       has no free key left for a 3rd verb this wave (see that block's own
+       comment), so a survival-placed base neither decays nor can be paid
+       up — consistent with survival's existing "no save, per-run" scope.
+   ------------------------------------------------------------------ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
@@ -70,6 +110,15 @@
 
   const BASE_RADIUS = 30;     // metres — a founding cupboard's claim
   const BREACH_WINDOW = 300;  // seconds (5 min) — the W9-style raider window
+
+  // ---- B8: upkeep/decay tuning (all times in PLAY-CLOCK seconds — see
+  // the file header's B8 section for why this isn't Date.now()) ----
+  const UPKEEP_GRACE = 24 * 3600;   // a freshly-founded base's free grace window
+  const UPKEEP_GRANT = 24 * 3600;   // one "deposit upkeep" buys another 24h of play
+  const DECAY_PER_MIN = 0.01;      // 1% of maxHp lost per play-minute once overdue
+  const DECAY_RUIN_MULT = 2;       // cupboardless ruins (see `ruins` below) rot at 2x
+  const UPKEEP_WARN_WINDOW = 2 * 3600; // HUD nag once under 2h of play-time upkeep left
+  const UPKEEP_WARN_COOLDOWN = 120;    // don't renag more than once per ~2 played minutes
 
   function pid() { return CBZ.netPid ? CBZ.netPid() : "solo"; }
   function nowSec() { return (g && g.elapsed) || 0; }
@@ -144,6 +193,13 @@
      ============================================================ */
   const bases = new Map(); // id -> BaseRecord
   let baseSeq = 0;
+  // B8: cupboardless "ruins" (position-only: cx/cz/radius) — see the file
+  // header's RUINS paragraph. Keyed by the dissolved BaseRecord's old id
+  // purely for traceability in a dump; decayTick is the only reader.
+  const ruins = new Map();
+  // B8: ACCUMULATED PLAY TIME (not Date.now()) — the upkeep clock. Rides
+  // this file's own serialize()/apply() so it survives reloads.
+  let playClock = 0;
 
   CBZ.baseAt = function (x, z) {
     let best = null, bd = Infinity;
@@ -215,6 +271,7 @@
           ownerPid: owner, cx: piece.pos.x, cz: piece.pos.z, radius: BASE_RADIUS,
           authorized: [owner], createdAt: nowSec(), upkeepPaid: nowSec(), lastBreach: 0,
           cupboardId: piece.id,
+          upkeepUntil: playClock + UPKEEP_GRACE, // B8: fresh base, free 24h-of-play grace
         };
         bases.set(rec.id, rec);
       }
@@ -236,7 +293,15 @@
       // claim (building privilege lifts for the entire radius) — a
       // secondary/redundant cupboard inside the same claim dying does
       // nothing (rec.cupboardId still points at the founder).
-      if (rec && rec.cupboardId === piece.id) bases.delete(rec.id);
+      if (rec && rec.cupboardId === piece.id) {
+        // B8: privilege lifts IMMEDIATELY (bases.delete, unchanged) but the
+        // pieces still standing become an unclaimed RUIN — a position-only
+        // shadow record (see file header) that decayTick alone reads, so
+        // they keep rotting (at 2x) instead of silently stopping decay the
+        // moment nothing owns them anymore.
+        ruins.set(rec.id, { cx: rec.cx, cz: rec.cz, radius: rec.radius });
+        bases.delete(rec.id);
+      }
     }
     if (containerPanelPiece === piece) closeContainerPanel();
   }
@@ -257,6 +322,99 @@
     if (rec && !CBZ.pieces.has(rec.cupboardId)) rec.cupboardId = piece.id;
   }
   CBZ.onPieceReplay = onReplay;
+
+  /* ============================================================
+     B8 — UPKEEP & DECAY (see file header). All of this is CITY-mode only
+     (gated at the onUpdate tick below), all times are PLAY-CLOCK seconds.
+     ============================================================ */
+  function piecesNear(cx, cz, radius) {
+    const out = [];
+    const r2 = radius * radius;
+    CBZ.pieces.forEach(function (p) {
+      if (!p.alive) return;
+      const dx = p.pos.x - cx, dz = p.pos.z - cz;
+      if (dx * dx + dz * dz <= r2) out.push(p);
+    });
+    return out;
+  }
+  // upkeepCost(rec) -> Wood — scales with base size (pieces inside the
+  // radius / 10), floored at 10 so even a bare cupboard-only claim costs
+  // something (per the task's own formula).
+  function upkeepCost(rec) {
+    const n = piecesNear(rec.cx, rec.cz, rec.radius).length;
+    return Math.max(10, Math.round(n / 10));
+  }
+  // depositUpkeep(rec) -> {ok, reason?, cost, upkeepUntil?} — the real verb
+  // logic, factored out so both the city-zone UI option below AND a harness/
+  // console caller can drive it identically. Spends through CBZ.craft's
+  // shared item-store bridge (systems/craft.js) — the SAME accessor
+  // buildmode.js's own cost gate and craft.js's tool recipes already use,
+  // so there's one source of truth for "what item store is the current
+  // mode's economy" (this verb only ever fires from the CITY zone, so the
+  // store always resolves to CBZ.cityEcon's Wood count).
+  function depositUpkeep(rec) {
+    if (!rec) return { ok: false, reason: "no base" };
+    const cost = upkeepCost(rec);
+    const store = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
+    if (!store || store.count("Wood") < cost) return { ok: false, reason: "insufficient Wood", cost: cost };
+    store.take("Wood", cost);
+    rec.upkeepUntil = Math.max(rec.upkeepUntil || 0, playClock) + UPKEEP_GRANT;
+    return { ok: true, cost: cost, upkeepUntil: rec.upkeepUntil };
+  }
+  // decayTick(dt) — once a base's upkeepUntil is in the past, every piece
+  // inside its radius loses DECAY_PER_MIN%/minute of its OWN maxHp via
+  // structdamage.js's normal hit() path ("decay" type, TIERS.wood.decay =
+  // 1.0 — see that file's B8 edit): same hp<=0 -> CBZ.building.remove
+  // cascade every other damage type already drives, so a fully-rotted
+  // piece tears itself (and anything only it supported) down for free.
+  // `ruins` (cupboardless leftovers, see onRemove above) decay ALWAYS, at
+  // DECAY_RUIN_MULT — and self-GC once nothing is left to rot.
+  function decayTick(dt) {
+    const frac = DECAY_PER_MIN * (dt / 60); // fraction of maxHp lost THIS frame at 1x
+    bases.forEach(function (rec) {
+      if (playClock <= (rec.upkeepUntil || 0)) return; // paid up / still in grace
+      const pieces = piecesNear(rec.cx, rec.cz, rec.radius);
+      for (let i = 0; i < pieces.length; i++) {
+        const p = pieces[i];
+        if (CBZ.structDamage) CBZ.structDamage.hit(p.id, p.maxHp * frac, "decay");
+      }
+    });
+    ruins.forEach(function (r, id) {
+      const pieces = piecesNear(r.cx, r.cz, r.radius);
+      if (!pieces.length) { ruins.delete(id); return; } // nothing left — drop the shadow record
+      for (let i = 0; i < pieces.length; i++) {
+        const p = pieces[i];
+        if (CBZ.structDamage) CBZ.structDamage.hit(p.id, p.maxHp * frac * DECAY_RUIN_MULT, "decay");
+      }
+    });
+  }
+  // HUD nag: any base the current pid is AUTHORIZED on (owner or invited —
+  // "your base" reads as "one you can actually act on"), under 2h of
+  // play-time upkeep left. Throttled by play-clock, not wall-clock, so it
+  // can't fire in a tight burst across frames.
+  let lastWarnAt = -1e9;
+  function checkUpkeepWarning() {
+    const who = pid();
+    let soonest = Infinity;
+    bases.forEach(function (rec) {
+      if (rec.authorized.indexOf(who) < 0) return;
+      const remain = (rec.upkeepUntil || 0) - playClock;
+      if (remain > 0 && remain <= UPKEEP_WARN_WINDOW && remain < soonest) soonest = remain;
+    });
+    if (soonest === Infinity) return;
+    if (playClock - lastWarnAt < UPKEEP_WARN_COOLDOWN) return;
+    lastWarnAt = playClock;
+    if (CBZ.flashHint) CBZ.flashHint("🏚 base upkeep low — deposit Wood at the cupboard", 3.0);
+  }
+  // The tick itself: CITY-mode only (see file header's scope note), right
+  // beside city/economy.js's own 30/30.2/.../30.8 ladder (CBZ.PRIO.ECON)
+  // but at its own +0.09 slot so it never collides with that family.
+  CBZ.onUpdate(CBZ.PRIO ? CBZ.PRIO.after(CBZ.PRIO.ECON, 9) : 30.09, function (dt) {
+    if (!g || g.mode !== "city" || g.state !== "playing") return;
+    playClock += dt;
+    decayTick(dt);
+    checkUpkeepWarning();
+  });
 
   /* ============================================================
      CITY-MODE VERBS — city/interactions.js's registry loads AFTER this
@@ -298,10 +456,22 @@
           },
         },
         {
-          // stub: B8 wires real decay/upkeep cost — this just surfaces the verb
-          // so the panel/UX contract exists before the economy lands behind it.
-          id: "tc-upkeep", slot: "i", prio: 1, label: "Deposit upkeep",
-          onSelect: function () { CBZ.flashHint && CBZ.flashHint("🚧 Upkeep not yet required", 1.6); },
+          // B8: real upkeep — costs Wood (base-size scaled, upkeepCost) and
+          // extends the base's upkeepUntil play-clock stamp by 24h of play.
+          id: "tc-upkeep", slot: "i", prio: 1,
+          label: function (t) {
+            const rec = recFor(t);
+            if (!rec) return "Deposit upkeep";
+            const cost = upkeepCost(rec);
+            const remainH = Math.max(0, Math.floor(((rec.upkeepUntil || 0) - playClock) / 3600));
+            return "Deposit upkeep (" + cost + " Wood, " + remainH + "h left)";
+          },
+          onSelect: function (t) {
+            const rec = recFor(t); if (!rec) return;
+            const res = depositUpkeep(rec);
+            if (!res.ok) CBZ.flashHint && CBZ.flashHint("Need " + res.cost + " Wood for upkeep", 1.8);
+            else CBZ.flashHint && CBZ.flashHint("🧰 Upkeep paid (" + res.cost + " Wood) — +24h", 1.8);
+          },
         },
         {
           id: "tc-demolish", slot: "j", prio: 1, bad: true, label: "Demolish base",
@@ -539,12 +709,21 @@
         id: rec.id, ownerPid: rec.ownerPid, cx: rec.cx, cz: rec.cz, radius: rec.radius,
         authorized: rec.authorized.slice(), createdAt: rec.createdAt, upkeepPaid: rec.upkeepPaid,
         lastBreach: rec.lastBreach, cupboardId: rec.cupboardId,
+        upkeepUntil: rec.upkeepUntil != null ? rec.upkeepUntil : 0, // B8
       });
     });
-    return { v: 1, bases: out };
+    // B8: ruins (position-only shadow records) + the play-clock they and
+    // every upkeepUntil stamp are measured against — additive fields, same
+    // v1 blob (every pre-B8 reader already ignores unknown keys).
+    const ru = [];
+    ruins.forEach(function (r, id) { ru.push({ id: id, cx: r.cx, cz: r.cz, radius: r.radius }); });
+    return { v: 1, bases: out, ruins: ru, playClock: playClock };
   }
   function apply(blob) {
     if (!blob || blob.v !== 1 || !Array.isArray(blob.bases)) { if (blob) console.warn("[baseclaim] apply: blob v" + blob.v + " — skipped"); return; }
+    // B8: restore the play-clock FIRST — the per-record upkeepUntil default
+    // below (for a pre-B8 save that never had the field) is stamped off it.
+    playClock = blob.playClock > 0 ? blob.playClock : 0;
     bases.clear();
     let maxSeq = 0;
     for (let i = 0; i < blob.bases.length; i++) {
@@ -555,18 +734,38 @@
         authorized: Array.isArray(r.authorized) ? r.authorized.slice() : [],
         createdAt: r.createdAt || 0, upkeepPaid: r.upkeepPaid || 0, lastBreach: r.lastBreach || 0,
         cupboardId: r.cupboardId || null,
+        // pre-B8 save (field never existed): a fresh grace period, not an
+        // instantly-overdue base — never retroactively punish an old save.
+        upkeepUntil: r.upkeepUntil != null ? r.upkeepUntil : (playClock + UPKEEP_GRACE),
       });
       const m = /^base_([a-z0-9]+)$/.exec(r.id);
       if (m) { const n = parseInt(m[1], 36); if (n > maxSeq) maxSeq = n; }
     }
     if (maxSeq > baseSeq) baseSeq = maxSeq;
+    ruins.clear();
+    if (Array.isArray(blob.ruins)) {
+      for (let i = 0; i < blob.ruins.length; i++) {
+        const r = blob.ruins[i];
+        if (r && r.id) ruins.set(r.id, { cx: r.cx || 0, cz: r.cz || 0, radius: r.radius || BASE_RADIUS });
+      }
+    }
   }
-  function reset() { bases.clear(); baseSeq = 0; }
+  function reset() { bases.clear(); baseSeq = 0; ruins.clear(); playClock = 0; }
 
   CBZ.baseClaim = {
     BASE_RADIUS: BASE_RADIUS, BREACH_WINDOW: BREACH_WINDOW,
+    UPKEEP_GRACE: UPKEEP_GRACE, UPKEEP_GRANT: UPKEEP_GRANT, // B8
     list: function () { return Array.from(bases.values()); },
     get: function (id) { return bases.get(id) || null; },
+    ruins: function () { return Array.from(ruins.values()); },   // B8 dev/harness accessor
+    playClock: function () { return playClock; },                 // B8 dev/harness accessor
+    // B8 dev/harness accessor: fast-forward the play-clock without simulating
+    // real dt frames (a 24h grace window is otherwise a lot of onUpdate ticks
+    // to drive from a test) — same idiom as structdamage.js's SD.tintStage.
+    _advancePlayClock: function (sec) { playClock += (sec || 0); return playClock; },
+    upkeepCost: upkeepCost,                                       // B8
+    depositUpkeep: depositUpkeep,                                 // B8 — same fn the UI verb calls
+    decayTick: decayTick,                                         // B8 dev/harness accessor (drive a tick without waiting on onUpdate)
     canAccess: canAccess, isAuthorizedOwner: isAuthorizedOwner,
     serialize: serialize, apply: apply, reset: reset,
   };
