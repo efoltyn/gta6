@@ -122,17 +122,33 @@
   let _seed = INITIAL_SEED;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
 
-  // ---- office roster this wave covers (V.1's hierarchy) --------------------
-  const MAYOR_ID = "libertyville";
-  const GOV_IDS = ["liberty", "costa", "westmark"];
-  const PRESIDENT_ID = "republic";
-  const TERM_DAYS = { libertyville: 7, liberty: 14, costa: 14, westmark: 14, republic: 28 };  // V.2's staggered clock
-  const TITLES = {
-    libertyville: "Mayor", liberty: "Governor", costa: "Governor", westmark: "Governor", republic: "President",
-  };
-  const JOBS = {
-    libertyville: "mayor", liberty: "governor", costa: "governor", westmark: "governor", republic: "president",
-  };
+  // ---- office roster: X3 generalized this off the original hardcoded
+  // 5-id list (libertyville/liberty/costa/westmark/republic) to EVERY
+  // city/state/country/federal polity record, so city/countries.js's new
+  // nations mint officials for free with zero edits here the next time one
+  // is registered. Term length is by KIND (V.2: "mayor 7d, governor 14d,
+  // president 28d" — federal reuses the state-tier 14d, no V.2 number was
+  // ever specified for Fort Brandt). Title/job is by KIND + govType + tier,
+  // not a per-id map: a "city" record is "Mayor" unless its tier says
+  // "village" ("Chief"); a "country" record is "President" unless its
+  // govType says "monarchy" (King/Queen, by the CURRENT holder's rolled
+  // gender — see titleFor()); "state"/"federal" stay "Governor" (no distinct
+  // federal-territory title exists yet).
+  const MAYOR_ID = "libertyville";   // libertyville keeps ITS OWN special-cased physical presence (see header)
+  const KIND_TERM_DAYS = { city: 7, state: 14, federal: 14, country: 28 };
+  function termDaysFor(rec) { return (rec && KIND_TERM_DAYS[rec.kind]) || 7; }
+  function titleFor(rec) {
+    if (!rec) return "Official";
+    if (rec.kind === "country") {
+      if (rec.govType !== "monarchy") return "President";
+      const gender = rec.office && rec.office.holder ? identityOf(rec.office.holder).gender : "f";
+      return gender === "f" ? "Queen" : "King";
+    }
+    if (rec.kind === "state" || rec.kind === "federal") return "Governor";
+    if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
+    return "Official";
+  }
+  function jobFor(rec) { return titleFor(rec).toLowerCase(); }
   const CARETAKER_DAYS = 2;   // V.2: "power vacuum ... the world heals" — P4 replaces with real elections
 
   // ---- state: g.officials (own guard for the one-shot mint pass) ----------
@@ -177,8 +193,9 @@
   //  office.holder is never overwritten, same gate as billionaires.js's
   //  mintFounderFor's `if (co.founderSid) return;`)
   // ============================================================
-  function mintHolder(rec, id, founding) {
+  function mintHolder(rec, founding) {
     if (!rec || rec.office.holder) return;   // already minted or restored from a save
+    const id = rec.id;
     const isMayor = id === MAYOR_ID;
     // MASTER-PLAN promotes worldstate.js:70's dormant stub verbatim — but only
     // for the FOUNDING mayor (the one minted at world boot). A caretaker who
@@ -191,37 +208,52 @@
     // included, gets a minted name like every other person in the world.
     // The old worldstate "Mayor Rosa Vale" flavor string stays retired.
     const name = mintName(gender);
+    // job label: titleFor() needs rec.office.holder set to read the JUST-
+    // rolled gender for a monarchy's King/Queen pick, so mint the identity
+    // with a generic "official" job first, then correct it below once the
+    // holder is live (mirrors elections.js's own post-mint job stamp).
     const official = mintIdentity({
-      name: name, gender: gender, archetype: "official", job: JOBS[id] || "official",
-      wealth: isMayor ? 0.7 : 0.8, aggr: 0.12, cash: 2000 + Math.round(rng() * 6000),
+      name: name, gender: gender, archetype: "official", job: "official",
+      wealth: isMayor ? 0.7 : (rec.wealthLevel != null ? 0.5 + 0.4 * rec.wealthLevel : 0.8),
+      aggr: 0.12, cash: 2000 + Math.round(rng() * 6000),
     });
     if (!official) return;
     const sid = official._sid;
     rec.office.holder = sid;
-    rec.office.termDay = (CBZ.worldDay ? CBZ.worldDay() : 0) + (TERM_DAYS[id] || 7);
+    rec.office.termDay = (CBZ.worldDay ? CBZ.worldDay() : 0) + termDaysFor(rec);
     rec.vacuum = null;
+    const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(sid);
+    if (e) e.job = jobFor(rec);   // now that office.holder is live, titleFor() resolves the real (govType/gender-aware) title
     const S = ensureState();
     if (isMayor) {
       S.mayorSid = sid;
-      // DEPUTY: only the mayor's office gets one this wave (V.2's stability-
-      // gated deputy check needs a real deputy to swear in — see header).
+      // DEPUTY: every "city"-kind office (mayor AND village chiefs) gets one
+      // — X3 generalized this off "only the mayor" so a village chief's
+      // death has the same deputy-succession path as libertyville's.
       const depGender = rng() < 0.5 ? "f" : "m";
       const dep = mintIdentity({
-        name: mintName(depGender), gender: depGender, archetype: "official", job: "deputy mayor",
+        name: mintName(depGender), gender: depGender, archetype: "official", job: "deputy " + jobFor(rec),
         wealth: 0.55, aggr: 0.1, cash: 1000 + Math.round(rng() * 3000),
       });
       if (dep) { rec.office.deputy = dep._sid; S.deputySid = dep._sid; }
-    } else if (id === PRESIDENT_ID) {
-      S.presidentSid = sid;
+    } else if (rec.kind === "city") {
+      // every OTHER city (mini-cities, and X3's countries' towns/villages)
+      // also gets a deputy, keyed generically alongside governors/presidents.
+      const depGender = rng() < 0.5 ? "f" : "m";
+      const dep = mintIdentity({
+        name: mintName(depGender), gender: depGender, archetype: "official", job: "deputy " + jobFor(rec),
+        wealth: 0.5, aggr: 0.1, cash: 800 + Math.round(rng() * 2500),
+      });
+      if (dep) { rec.office.deputy = dep._sid; S.govSids["deputy:" + id] = dep._sid; }
+      S.govSids[id] = sid;
     } else {
       S.govSids[id] = sid;
     }
   }
   function mintAllOfficials() {
     if (!CBZ.polity || typeof CBZ.polity.get !== "function") return false;
-    mintHolder(CBZ.polity.get(MAYOR_ID), MAYOR_ID, true);   // founding mint (rolled name — X1)
-    for (let i = 0; i < GOV_IDS.length; i++) mintHolder(CBZ.polity.get(GOV_IDS[i]), GOV_IDS[i], true);
-    mintHolder(CBZ.polity.get(PRESIDENT_ID), PRESIDENT_ID, true);
+    const recs = allOfficeRecords();
+    for (let i = 0; i < recs.length; i++) mintHolder(recs[i], true);   // founding mint (rolled name — X1)
     ensureState().inited = true;
     return true;
   }
@@ -238,9 +270,10 @@
   });
 
   // ============================================================
-  //  ALL FIVE OFFICES: succession lookup (generic — a governor/president can
-  //  be killed and succeeded the moment a later wave gives them a body; only
-  //  the SPAWNING below is mayor-only this wave).
+  //  EVERY OFFICE: succession lookup (X3: generic over EVERY city/state/
+  //  country/federal record, not just the original five — a governor,
+  //  village chief, or king can be killed and succeeded the moment a later
+  //  wave gives them a body; only the SPAWNING below is mayor-only this wave).
   // ============================================================
   function allOfficeRecords() {
     if (!CBZ.polity) return [];
@@ -263,7 +296,7 @@
     const info = officeOf(sid);
     if (!info) return;
     const rec = info.rec;
-    const title = TITLES[rec.id] || "Official";
+    const title = titleFor(rec);
     const victimName = (ped && ped.name) || nameOf(sid);
 
     // (a) worldstate: the EXISTING "assassination" path (scandal/emergencyPowers
@@ -328,14 +361,13 @@
       // file's own term-extend/caretaker stub defers entirely to it (see this
       // file's header + city/elections.js's own header for the coordination).
       const S = ensureState();
-      const ids = [MAYOR_ID].concat(GOV_IDS, [PRESIDENT_ID]);
-      for (let i = 0; i < ids.length; i++) {
-        const id = ids[i];
-        const rec = CBZ.polity.get(id);
-        if (!rec) continue;
+      const recs = allOfficeRecords();   // X3: every office, not the old fixed 5-id list
+      for (let i = 0; i < recs.length; i++) {
+        const rec = recs[i];
+        const id = rec.id;
         // term reached, no election system yet (P4) -> silently extend.
         if (rec.office.termDay != null && day >= rec.office.termDay) {
-          rec.office.termDay = day + (TERM_DAYS[id] || 7);
+          rec.office.termDay = day + termDaysFor(rec);
         }
         // vacant with no deputy for CARETAKER_DAYS+ -> auto-appoint (P4
         // replaces this with a real snap election).
@@ -343,9 +375,9 @@
         if (since == null) continue;
         if (rec.office.holder) { delete S.vacantSince[id]; continue; }   // already resolved elsewhere
         if (day - since >= CARETAKER_DAYS) {
-          mintHolder(rec, id);
+          mintHolder(rec, false);
           delete S.vacantSince[id];
-          if (CBZ.cityFeed) CBZ.cityFeed("🏛️ " + nameOf(rec.office.holder) + " appointed caretaker " + (TITLES[id] || "official") + " of " + rec.name, "#ffd76a");
+          if (CBZ.cityFeed) CBZ.cityFeed("🏛️ " + nameOf(rec.office.holder) + " appointed caretaker " + titleFor(rec) + " of " + rec.name, "#ffd76a");
         }
       }
     });

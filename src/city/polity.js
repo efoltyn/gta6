@@ -206,6 +206,50 @@
       { id: "fortbrandt", kind: "federal", name: "Fort Brandt", parent: "republic", rect: Object.assign({}, FORTBRANDT_RECT) },
       seedMutable("federal")));
 
+    // ============================================================
+    // X3: COUNTRY REGISTRY V2 — 5+ countries, V.1a's "unequal size/wealth"
+    // roster. city/countries.js publishes CBZ.COUNTRIES (a pure DATA table:
+    // {id, name, wealthLevel, govType, settlements:[{id,name,capital,tier,
+    // cx,cz,hx,hz}], states:[{id,name,settlementIds}]}) — read HERE, at
+    // buildRecords()-call time (every polityReset(), i.e. every fresh run),
+    // NOT at module-parse time, so <script> load order between this file and
+    // countries.js never matters (countries.js loads later in index.html's
+    // X-wave block, long before the first real reset() fires — see that
+    // file's header for why relying on its addLandmass builder to self-
+    // register via registerCity() would NOT survive this same buildRecords()
+    // rebuild the mini-cities' hardcoded-copy precedent above already works
+    // around).
+    // registerCountry/registerState (new, below) + registerCity (existing,
+    // extended below with wealthLevel/govType/tier) do the actual record
+    // construction; govType propagates DOWN from country -> state -> city
+    // unless a level specifies its own (kesh's whole tree is "monarchy" this
+    // way — city/elections.js's govType guard then skips EVERY kesh office,
+    // not just the crown, with one shared check).
+    // ============================================================
+    const extraCountries = CBZ.COUNTRIES || [];
+    for (let ci = 0; ci < extraCountries.length; ci++) {
+      const cd = extraCountries[ci];
+      if (!cd || !cd.id) continue;
+      registerCountry({ id: cd.id, name: cd.name, wealthLevel: cd.wealthLevel, govType: cd.govType });
+      const settleList = cd.settlements || [];
+      const stateList = cd.states || [];
+      for (let si = 0; si < stateList.length; si++) {
+        const sd = stateList[si];
+        const members = settleList.filter(function (s) { return sd.settlementIds.indexOf(s.id) >= 0; });
+        const rect = members.length ? unionRect(members.map(function (s) { return { cx: s.cx, cz: s.cz, hx: s.hx, hz: s.hz }; })) : null;
+        registerState({ id: sd.id, name: sd.name, parent: cd.id, rect: rect, wealthLevel: cd.wealthLevel });
+      }
+      for (let sk = 0; sk < settleList.length; sk++) {
+        const s = settleList[sk];
+        const parentState = stateList.find(function (sd) { return sd.settlementIds.indexOf(s.id) >= 0; });
+        registerCity({
+          id: s.id, name: s.name, parent: parentState ? parentState.id : null,
+          rect: { cx: s.cx, cz: s.cz, hx: s.hx, hz: s.hz },
+          wealthLevel: cd.wealthLevel, govType: cd.govType, tier: s.tier,
+        });
+      }
+    }
+
     invalidateCache();
   }
 
@@ -280,9 +324,64 @@
     if (records[opts.id]) return records[opts.id]; // idempotent re-register
     const rect = { cx: opts.rect.cx, cz: opts.rect.cz, hx: opts.rect.hx, hz: opts.rect.hz };
     const parent = opts.parent || nearestStateId(rect);
+    const parentRec = records[parent];
+    // X3: wealthLevel/govType/tier are OPTIONAL — a caller that omits them
+    // (any pre-X3 self-registration) gets the exact old behaviour (flat
+    // 25000 treasury, "democracy", tier "town"). wealthLevel scales the
+    // seeded treasury by "wealthLevel × base" (V.1a); govType defaults to
+    // the parent state/country's own (so a monarchy's cities are monarchy
+    // too, without every settlement having to say so) else "democracy".
+    const base = seedMutable("city");
     const rec = Object.assign(
-      { id: opts.id, kind: "city", name: opts.name || opts.id, parent: parent, rect: rect },
-      seedMutable("city"));
+      { id: opts.id, kind: "city", name: opts.name || opts.id, parent: parent, rect: rect, tier: opts.tier || "town" },
+      base);
+    if (opts.wealthLevel != null) {
+      rec.wealthLevel = Math.max(0, Math.min(1, +opts.wealthLevel));
+      rec.treasury = Math.round(rec.wealthLevel * base.treasury);
+    }
+    rec.govType = opts.govType || (parentRec && parentRec.govType) || base.govType;
+    records[opts.id] = rec;
+    invalidateCache();
+    return rec;
+  }
+
+  // ---- registerState/registerCountry: X3's "records for new countries/
+  // states need direct registry additions" (registerCity alone only ever
+  // self-registered cities). Same idempotent-by-id shape as registerCity;
+  // treasuries scaled "wealthLevel × base" per V.1a, govType inherited from
+  // the parent unless given explicitly (registerCountry has no parent to
+  // inherit from — it's seeded straight off the data table's own govType,
+  // "democracy" default). -----------------------------------------------
+  function registerState(opts) {
+    if (!opts || !opts.id) return null;
+    if (records[opts.id]) return records[opts.id];
+    const parent = opts.parent || "republic";
+    const parentRec = records[parent];
+    const base = seedMutable("state");
+    const rec = Object.assign(
+      { id: opts.id, kind: "state", name: opts.name || opts.id, parent: parent, rect: opts.rect || null },
+      base);
+    if (opts.wealthLevel != null) {
+      rec.wealthLevel = Math.max(0, Math.min(1, +opts.wealthLevel));
+      rec.treasury = Math.round(rec.wealthLevel * base.treasury);
+    }
+    rec.govType = opts.govType || (parentRec && parentRec.govType) || base.govType;
+    records[opts.id] = rec;
+    invalidateCache();
+    return rec;
+  }
+  function registerCountry(opts) {
+    if (!opts || !opts.id) return null;
+    if (records[opts.id]) return records[opts.id];
+    const base = seedMutable("country");
+    const rec = Object.assign(
+      { id: opts.id, kind: "country", name: opts.name || opts.id, parent: null, rect: null },
+      base);
+    if (opts.wealthLevel != null) {
+      rec.wealthLevel = Math.max(0, Math.min(1, +opts.wealthLevel));
+      rec.treasury = Math.round(rec.wealthLevel * base.treasury);
+    }
+    if (opts.govType) rec.govType = opts.govType;
     records[opts.id] = rec;
     invalidateCache();
     return rec;
@@ -367,7 +466,7 @@
 
   CBZ.polity = {
     of: of, stateOf: stateOf, countryOf: countryOf, get: get, list: list,
-    registerCity: registerCity,
+    registerCity: registerCity, registerState: registerState, registerCountry: registerCountry,
     serialize: serialize, apply: apply, reset: reset,
     _checkDayWrap: checkDayWrap, // harness/test hook only — not part of the public contract
   };

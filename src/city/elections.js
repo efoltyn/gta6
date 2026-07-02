@@ -211,16 +211,35 @@
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
   function clampNum(lo, hi, v) { return Math.max(lo, Math.min(hi, v)); }
 
-  // ---- office roster — MIRRORS officials.js's own constants exactly (that
-  // file does not export TERM_DAYS/TITLES/JOBS) — same duplication call the
-  // header's JOIN section documents for economy.js's districtAnchor. ---------
-  const MAYOR_ID = "libertyville";
-  const GOV_IDS = ["liberty", "costa", "westmark"];
-  const PRESIDENT_ID = "republic";
-  const ALL_IDS = [MAYOR_ID].concat(GOV_IDS, [PRESIDENT_ID]);
-  const TERM_DAYS = { libertyville: 7, liberty: 14, costa: 14, westmark: 14, republic: 28 };
-  const TITLES = { libertyville: "Mayor", liberty: "Governor", costa: "Governor", westmark: "Governor", republic: "President" };
-  const JOBS = { libertyville: "mayor", liberty: "governor", costa: "governor", westmark: "governor", republic: "president" };
+  // ---- office roster — X3 generalized this off the original hardcoded 5-id
+  // list to EVERY city/state/country/federal polity record (MIRRORS
+  // officials.js's own KIND-based helpers exactly — that file does not
+  // export termDaysFor/titleFor/jobFor — same duplication call the header's
+  // JOIN section documents for economy.js's districtAnchor). Term length by
+  // KIND (V.2: mayor 7d / governor 14d / president 28d; federal reuses the
+  // state-tier 14d). Title/job by KIND (+ tier for "village" chiefs) — no
+  // per-id map, so a new country's mayors/governors/president need zero
+  // edits here. ---------------------------------------------------------
+  const KIND_TERM_DAYS = { city: 7, state: 14, federal: 14, country: 28 };
+  function termDaysFor(rec) { return (rec && KIND_TERM_DAYS[rec.kind]) || 7; }
+  function titleFor(rec) {
+    if (!rec) return "Official";
+    if (rec.kind === "country") return "President";   // monarchy never reaches here — govType guard below skips it
+    if (rec.kind === "state" || rec.kind === "federal") return "Governor";
+    if (rec.kind === "city") return rec.tier === "village" ? "Chief" : "Mayor";
+    return "Official";
+  }
+  function jobFor(rec) { return titleFor(rec).toLowerCase(); }
+  // every office id currently on the polity roster — recomputed per onNewDay
+  // tick (cheap, ≤~30 records) rather than cached, so a country registered
+  // after boot is picked up the very next day with zero extra wiring.
+  function allOfficeIds() {
+    if (!CBZ.polity) return [];
+    return [].concat(
+      CBZ.polity.list("city"), CBZ.polity.list("state"),
+      CBZ.polity.list("country"), CBZ.polity.list("federal")
+    ).map(function (r) { return r.id; });
+  }
 
   const CAMPAIGN_DAYS = 2;                    // V.2: the lead-in window, both cycle and snap
   const BASE_TURNOUT = 0.55;                  // flavor constant — no voter-registration model exists
@@ -299,9 +318,15 @@
   // ============================================================
   //  BLOCS
   // ============================================================
-  // CITY blocs (only ever called for MAYOR_ID — the only "city"-kind record
-  // this file's ALL_IDS roster covers, see header) — real npcecon.js cohort
-  // data + real turf.js zone ownership, read through PUBLIC accessors only.
+  // CITY blocs — real npcecon.js cohort data + real turf.js zone ownership,
+  // read through PUBLIC accessors only. X3 NARROWING (same spirit as the
+  // STATE/COUNTRY BLOCS gap below): npcEcon's cohort table is still
+  // mainland-only (5 libertyville districts) — every OTHER "city"-kind
+  // record (mini-cities, and now city/countries.js's new settlements) reads
+  // that SAME global bloc list rather than its own population, so a
+  // goldspire or veridia mayoral race tallies against libertyville's
+  // district data. Real per-city cohort data is X4's demographics wave;
+  // until then this is a shared, documented simplification, not a bug.
   function cityBlocs(rec) {
     const dkeys = (CBZ.npcEcon && CBZ.npcEcon.DISTRICT_KEYS) || DISTRICT_KEYS_FALLBACK;
     const summary = (CBZ.npcEcon && CBZ.npcEcon.summary) ? CBZ.npcEcon.summary() : [];
@@ -429,7 +454,7 @@
   //  CALL / CAMPAIGN / RESOLVE
   // ============================================================
   function callElection(id, rec, race, day, isSnap) {
-    const title = TITLES[id] || "Official";
+    const title = titleFor(rec);
     const candidates = [];
     if (!isSnap && rec.office.holder) candidates.push(incumbentCandidate(rec));
     const gid = machineGangId();
@@ -485,7 +510,7 @@
   }
 
   function resolve(id, rec, race, day) {
-    const title = TITLES[id] || "Official";
+    const title = titleFor(rec);
     const t = tally(rec, race.candidates);
     let bestI = 0;
     for (let i = 1; i < t.votes.length; i++) if (t.votes[i] > t.votes[bestI]) bestI = i;
@@ -506,9 +531,9 @@
     if (winner) {
       rec.office.holder = winner.sid;
       const holderEntry = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(winner.sid);
-      if (holderEntry) holderEntry.job = JOBS[id] || "official";
+      if (holderEntry) holderEntry.job = jobFor(rec);
     }
-    rec.office.termDay = day + (TERM_DAYS[id] || 7);
+    rec.office.termDay = day + termDaysFor(rec);
 
     if (CBZ.approvalShock) CBZ.approvalShock(rec.id, winnerIsIncumbent ? 4 : 0);
 
@@ -534,6 +559,15 @@
     if (!CBZ.polity) return;
     const rec = CBZ.polity.get(id);
     if (!rec) return;
+    // X3: MONARCHY GUARD — a monarchy office is never a ballot; the crown is
+    // a bloodline (V.4/P6b's heirOf succession lands later — this wave the
+    // crown just never calls an election, same "vacuum on assassination, no
+    // resolution machine yet" gap officials.js already accepts for it).
+    // govType propagates country -> state -> city (polity.js's
+    // registerState/registerCity), so this ONE check skips a monarchy's
+    // whole tree (king, its governors, its village chiefs) with no
+    // per-office special-casing needed.
+    if (rec.govType === "monarchy") return;
     const race = ensureRace(id);
     if (race.phase === "campaign") {
       if (day >= race.electionDay) { resolve(id, rec, race, day); return; }
@@ -556,8 +590,9 @@
   }
   if (CBZ.onNewDay) {
     CBZ.onNewDay(function (day) {
-      for (let i = 0; i < ALL_IDS.length; i++) {
-        try { tickOffice(ALL_IDS[i], day); } catch (e) { try { console.error("[elections] tick failed", ALL_IDS[i], e); } catch (e2) {} }
+      const ids = allOfficeIds();   // X3: every registered office, not a fixed 5-id list
+      for (let i = 0; i < ids.length; i++) {
+        try { tickOffice(ids[i], day); } catch (e) { try { console.error("[elections] tick failed", ids[i], e); } catch (e2) {} }
       }
     });
   }
