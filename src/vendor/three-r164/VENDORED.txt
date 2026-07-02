@@ -1,0 +1,86 @@
+Vendored for BUILD-PLAN.md O3 (three.js upgrade with legacy-visual flags).
+
+WHAT
+  A self-built classic-script (IIFE) global bundle of three.js r164
+  (npm `three@0.164.1`) plus the two examples/jsm addons the game actually
+  touches (GLTFLoader, DRACOLoader). Replaces the old CDN-vendored r128
+  (cdnjs three.min.js + unpkg examples/js loaders) that index.html loaded
+  directly through O1/O2. The old r128 CDN <script> tags are gone from
+  index.html; nothing on disk from that era needed removing (they were
+  never vendored as files — always fetched from cdnjs.cloudflare.com /
+  unpkg.com at page-load time).
+
+WHY r164, NOT NEWER
+  three.js stopped shipping ANY non-module (global/UMD) build years ago
+  (examples/js non-module addons ended r147; the core non-module build not
+  long after) — every release from roughly r150 onward is ESM-only on npm.
+  That is NOT what capped this at r164: esbuild bundles the real ESM
+  package into a classic IIFE regardless of whether upstream ships a UMD
+  build (see build-entry.js), so in principle any current three version
+  could be vendored this way.
+  What actually caps it at r164 is LIGHTING PARITY without touching legacy
+  game files (BUILD-PLAN.md's O-wave rule): `renderer.useLegacyLights`
+  (added r155, replacing the older `physicallyCorrectLights` flag) restores
+  the exact pre-r155 light-intensity math for every light type (verified
+  by reading the bundled source: WebGLRenderer.js's lighting setup applies
+  a `scaleFactor = useLegacyLights ? Math.PI : 1` uniformly, not just to
+  punctual lights) with a ONE-LINE flag flip at renderer-construction time
+  — no per-light-call-site edits needed anywhere in src/core/lights.js,
+  src/core/daynight.js, src/city/charpanel.js, src/city/biome_snow.js, or
+  src/entities/searchlight.js (the 5 files that construct/tune lights).
+  That flag was REMOVED in r165 (confirmed empirically: downloaded npm
+  tarballs for 0.155.0 through 0.170.0 and grepped build/three.module.js —
+  `useLegacyLights` present with 18-22 hits through 0.164.0, ZERO hits at
+  0.165.0 and every version after). Past r165, physically-based lighting
+  is the only mode, and matching the old look would require multiplying
+  every light's `intensity` by ~Math.PI at its construction site — which
+  means editing src/core/lights.js and friends, which the O-wave rule
+  forbids. r164 (0.164.1, the latest 0.164.x patch) is therefore the
+  newest version where full visual parity is reachable through a flag
+  alone. See src/compat/three-legacy.js for where the flag gets set.
+
+SOURCE
+  npm package: three@0.164.1  (https://www.npmjs.com/package/three/v/0.164.1)
+  Addons:      three/examples/jsm/loaders/GLTFLoader.js
+               three/examples/jsm/loaders/DRACOLoader.js
+               (both part of the same npm package, same version)
+
+BUILD COMMAND (exact, reproducible from repo root)
+  npm install --save-dev three@0.164.1
+  npx esbuild src/vendor/three-r164/build-entry.js \
+    --bundle --format=iife --minify --target=es2019 \
+    --outfile=src/vendor/three-r164/three.iife.min.js
+
+  build-entry.js (checked in alongside the output, same directory) is the
+  esbuild entry point: `import * as THREE_NS from "three"` + the two
+  addons above, merged into one flat object and assigned to `window.THREE`
+  directly (NOT via esbuild's --global-name, which would have put the
+  bundle's {default:...} export shape on window instead of a flat THREE —
+  see that file's own comment for why).
+
+OUTPUT
+  three.iife.min.js — 702KB minified. Verified after build (node, stubbed
+  `window`/`self`): THREE.REVISION === "164", THREE.GLTFLoader and
+  THREE.DRACOLoader are functions, THREE.BoxGeometry etc. all present,
+  THREE.sRGBEncoding is undefined (removed upstream at r162 — see
+  src/compat/three-legacy.js for why that's fine here), THREE.ColorManagement
+  exists and defaults enabled (also flipped off by the compat shim).
+
+WHAT'S NOT BUNDLED, AND WHY
+  BufferGeometryUtils — NOT re-bundled from three/examples/jsm/utils/.
+  The game already vendors its own standalone copy at
+  src/vendor/BufferGeometryUtils.js (a plain global-patching IIFE, loaded
+  by its own <script> tag, decoupled from whatever three version sits
+  under it — it only calls stable BufferGeometry/BufferAttribute APIs).
+  That file needed no version-related changes; O3 only fixed one
+  pre-existing, version-unrelated bug in it (a detached-`this` crash risk
+  in src/systems/resources.js's call pattern) — see that file's own tail
+  comment for the fix and rationale.
+
+ROLLBACK SAFETY
+  Nothing to roll back to on disk — the previous "vendored" three was
+  always a CDN reference in index.html, never a committed file. Reverting
+  is a one-line index.html change (restore the old <script src="https://
+  cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"> + the two
+  unpkg examples/js loader tags) plus deleting the src/compat/three-legacy.js
+  <script> tag.

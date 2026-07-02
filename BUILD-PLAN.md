@@ -102,4 +102,4 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 - [x] **O1** package.json + Vite + `src/bootstrap.js` compat shim (legacy files untouched).
 - [x] **O2** First integration: vendored grass repo + adapter.
-- [ ] **O3** three.js upgrade with legacy-visual flags.
+- [x] **O3** three.js upgrade with legacy-visual flags.

@@ -242,10 +242,15 @@
   </div>
 </div>
 
-<!-- Three.js (CDN) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Three.js — O3 (BUILD-PLAN.md Stage O, final step): vendored r164
+     (self-built classic/IIFE global bundle; GLTFLoader+DRACOLoader baked
+     in — the old CDN r128 + separate unpkg loader tags are gone, nothing
+     was ever vendored to disk for them so there's nothing to delete) +
+     the legacy-visual compat shim, loaded immediately after so every file
+     below sees an r128-shaped THREE. Full reasoning + exact build command:
+     src/vendor/three-r164/VENDORED.txt. Shim contents: src/compat/three-legacy.js -->
+<script src="src/vendor/three-r164/three.iife.min.js"></script>
+<script src="src/compat/three-legacy.js"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
      the terrain builder. BOTH must load before city/world.js runs, since
