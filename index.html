@@ -688,6 +688,21 @@
      kind-agnostic public API — X6b's civil war (a country splitting into
      two warring polity records) builds directly on this machinery. -->
 <script src="src/city/polwar.js?v=pol1"></script>
+<!-- P9: migration — policy per country (president legislates over
+     LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
+     decrees instantly), daily individual-migration-evaluation propensity
+     (misery gap, wage gap, war, relations affinity, demographic kinship)
+     gated by emigration/immigration policy, brain drain (skilled flight
+     hits the origin's economy ×1.5 vs unskilled — the doom loop), refugee
+     waves (war/famine routed to the friendliest open neighbor, straining
+     relations on arrival), the border-escape gig, and the X4 demographics
+     mix seam (sustained immigration nudges a country's population mix
+     toward polyglot, gradually, capped/day). Loads LAST in the P-wave
+     block, right after polwar.js: it reads CBZ.polity/CBZ.relations/
+     CBZ.hunger/CBZ.econState/CBZ.npcEcon/CBZ.demographics/CBZ.polwar
+     (activeWarFor)/CBZ.COUNTRIES/CBZ.cityPopulation*/CBZ.cityMakePed,
+     every one of those already live above. -->
+<script src="src/city/migration.js?v=pol1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>

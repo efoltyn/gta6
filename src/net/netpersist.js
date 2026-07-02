@@ -144,6 +144,7 @@
     if (CBZ.crown && CBZ.crown.serialize) try { blob.crown = CBZ.crown.serialize(); } catch (e) {}
     if (CBZ.militia && CBZ.militia.serialize) try { blob.mil = CBZ.militia.serialize(); } catch (e) {}
     if (CBZ.polwar && CBZ.polwar.serialize) try { blob.war = CBZ.polwar.serialize(); } catch (e) {}
+    if (CBZ.migration && CBZ.migration.serialize) try { blob.mig = CBZ.migration.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -263,6 +264,13 @@
     // P8: polwar's own apply() re-stamps rec.warCrime mirrors off w.pol's
     // already-restored polity records, so it must run after w.pol above.
     if (w.war && CBZ.polwar && CBZ.polwar.apply) try { CBZ.polwar.apply(w.war); } catch (e) { console.error("[netpersist]", e); }
+    // P9: migration's own apply() reads CBZ.polity/CBZ.relations govType-free
+    // (policy is its OWN rider, not stuffed onto polity records) but its
+    // mixOverride re-stamp wants CBZ.demographics.CONFIGS already loaded —
+    // true by this point regardless of ordering (module-parse time, not
+    // apply-time). Runs after w.war so a restored active war's belligerents
+    // are already resolvable by CBZ.polwar.activeWarFor() for misery/wave reads.
+    if (w.mig && CBZ.migration && CBZ.migration.apply) try { CBZ.migration.apply(w.mig); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }

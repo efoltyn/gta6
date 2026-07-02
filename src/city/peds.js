@@ -374,7 +374,13 @@
     // defers to global.
     const demo = (CBZ.demographics && CBZ.demographics.rollFor) ? CBZ.demographics.rollFor(x, z, r, gender) : null;
     const outfit = opts.outfit || (demo && demo.shirt != null ? demo.shirt : pick(SHIRT, r()));
-    const skin = (demo && demo.skin != null) ? demo.skin : pick(SKIN, r());
+    // P9 MIGRATION: opts.skin is a direct override — a migrant arrival minted
+    // at the republic's docks/airport (x,z here) still resolves the MAINLAND's
+    // own demo (mix:1.0 -> null, see demographics.js), so migration.js instead
+    // rolls the ORIGIN country's config off-site (its own capital coordinates)
+    // and passes the result straight through here, the same "opts wins" shape
+    // opts.outfit/opts.gender/opts.name already use one line above/below.
+    const skin = opts.skin != null ? opts.skin : ((demo && demo.skin != null) ? demo.skin : pick(SKIN, r()));
     const wealth = opts.wealth != null ? opts.wealth : richWealth(r);
     const econ = CBZ.cityEcon;
     // ~45% of plain civvies wear the tee SHORT-SLEEVED. A bare-skin WHOLE arm
