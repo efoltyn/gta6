@@ -141,6 +141,7 @@
     if (CBZ.protection && CBZ.protection.serialize) try { blob.prot = CBZ.protection.serialize(); } catch (e) {}
     if (CBZ.regimes && CBZ.regimes.serialize) try { blob.reg = CBZ.regimes.serialize(); } catch (e) {}
     if (CBZ.relations && CBZ.relations.serialize) try { blob.rel = CBZ.relations.serialize(); } catch (e) {}
+    if (CBZ.crown && CBZ.crown.serialize) try { blob.crown = CBZ.crown.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -250,6 +251,10 @@
     // after CBZ.polity.apply() above.
     if (w.reg && CBZ.regimes && CBZ.regimes.apply) try { CBZ.regimes.apply(w.reg); } catch (e) { console.error("[netpersist]", e); }
     if (w.rel && CBZ.relations && CBZ.relations.apply) try { CBZ.relations.apply(w.rel); } catch (e) { console.error("[netpersist]", e); }
+    // P6b: crown's own apply() only restores houses/legitimacy/counters — it
+    // must run after w.pol (office.holder already restored) and after w.rel
+    // (relations affinity already restored), matching regimes' own ordering note.
+    if (w.crown && CBZ.crown && CBZ.crown.apply) try { CBZ.crown.apply(w.crown); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }

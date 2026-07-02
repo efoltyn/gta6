@@ -655,6 +655,14 @@
      CBZ.hunger.miseryIndex (both above) on top of polity/approval/elections
      (also above), so every dependency is already live by the time it parses. -->
 <script src="src/city/regimes.js?v=pol1"></script>
+<!-- P6b: the crown as a bloodline (monarchy succession/legitimacy/royal
+     marriages) — regimes.js's own tickCountry() deliberately never enters
+     monarchy; this file owns that regime entirely. Loads LAST in the P/X-
+     wave block, right after regimes.js, since it reuses CBZ.regimes.transition
+     for its two cross-regime triggers (dictator self-coronation, anarchist
+     restoration) and needs CBZ.officials/CBZ.relations/CBZ.demographics/
+     CBZ.cityFamilyTree, all already live above. -->
+<script src="src/city/crown.js?v=pol1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>

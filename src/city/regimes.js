@@ -413,7 +413,14 @@
     const gov = rec.govType;
 
     if (gov === "anarchism") {
-      if (s.anarchyStartDay != null && day - s.anarchyStartDay >= STRONGMAN_DAYS) strongmanRestore(rec, day);
+      if (s.anarchyStartDay != null && day - s.anarchyStartDay >= STRONGMAN_DAYS) {
+        // P6b: a country whose royal house survives with a living claimant
+        // rallies to the pretender, not a warlord — defer to crown.js's
+        // restoration (fires at its own day-7 threshold). The strongman only
+        // takes a throne nobody living can claim.
+        const royalist = !!(CBZ.crown && CBZ.crown.hasLivingLine && CBZ.crown.hasLivingLine(rec.id));
+        if (!royalist) strongmanRestore(rec, day);
+      }
       return;   // no other transitions evaluated while anarchism holds
     }
 

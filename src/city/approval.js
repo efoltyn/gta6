@@ -705,6 +705,21 @@
         c.appendChild(rBox);
       }
     }
+    // P6b: CROWN section — monarchy countries only. Data owned entirely by
+    // city/crown.js — this panel just renders CBZ.crown.summary(), the same
+    // elections.js/relations.js "panel owns rendering" split above.
+    if (rec.kind === "country" && rec.govType === "monarchy" && CBZ.crown && CBZ.crown.summary) {
+      const cs = CBZ.crown.summary(rec.id);
+      if (cs) {
+        const cBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(255,215,106,0.08);border-radius:7px;");
+        cBox.appendChild(el("div", "font:700 11px system-ui;color:#ffd76a;text-transform:uppercase;letter-spacing:0.4px;", "👑 House of " + cs.dynasty));
+        cBox.appendChild(row("Legitimacy", cs.legitimacy + "%", cs.legitimacy >= 40 ? "#8fe08a" : "#ff9e6b"));
+        if (cs.regent) cBox.appendChild(row("Regent", cs.regent));
+        if (cs.line.length) cBox.appendChild(row("Line of succession", cs.line.join(" → ")));
+        cBox.appendChild(row("Reigning", cs.monarch));
+        c.appendChild(cBox);
+      }
+    }
     const day = CBZ.worldDay ? CBZ.worldDay() : 0;
     const termDay = rec.office && rec.office.termDay != null ? rec.office.termDay : null;
     c.appendChild(row("Term ends", termDay != null ? Math.max(0, termDay - day) + " day(s)" : "—"));
