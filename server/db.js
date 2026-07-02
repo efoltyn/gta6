@@ -266,6 +266,93 @@ const MIGRATIONS = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_containers_piece ON containers (pieceId);`);
     },
   },
+  // S4 (BUILD-PLAN.md Stage S): econ/political tables + the world-clock
+  // bookkeeping the offline tick (server/ticks.js) reads and writes. THREE
+  // tables:
+  //
+  //   worldmeta — a tiny generic key/value store (key TEXT PRIMARY KEY,
+  //     value the JSON-encoded blob). One row this wave, key "world":
+  //     { worldDay, lastTickAt, tickLog:[...] } — see server/ticks.js's own
+  //     header for what each field means and how "no double-advance" is
+  //     enforced (every real client wsave re-stamps lastTickAt to now,
+  //     the offline tick only ever reads/advances it while the room is
+  //     empty). A generic key/value shape (not a one-off `world_meta` table
+  //     with named columns) because this is server-bookkeeping data, not a
+  //     queryable game-entity registry the way econ/polity below are — no
+  //     caller ever needs "every worldmeta row where X", just "the current
+  //     value of key K".
+  //
+  //   econ — a MIRROR of sim/econstate.js's `blob.econ` rider (one row per
+  //     jurisdiction id `blob.econ.reg` tracks — THIS wave that is exactly
+  //     "libertyville", the one real economy econstate.js's own header says
+  //     it ships) PLUS the one field that rider doesn't carry: `pi`,
+  //     mirrored in from sim/inflation.js's OWN per-COUNTRY `blob.inf`
+  //     rider (server/ticks.js's own header explains the hardcoded
+  //     "libertyville" <-> "republic" id-space bridge, the same one
+  //     inflation.js's own capIdFor("republic") special-cases client-side).
+  //     MIRROR, not strip-and-reassemble (unlike people/structures/bases):
+  //     `blob.econ`/`blob.pol` are never stripped out of the stored world
+  //     blob — they keep riding it in full, exactly as before S2/S3, so a
+  //     reconnecting client's applyWorld() needs zero new code. This table
+  //     exists so (a) the econ state is queryable/uncapped outside a full
+  //     blob deserialize and (b) the offline tick (which runs with NO
+  //     client connected, nothing to apply() onto) has something to read
+  //     and write. Every wsave re-mirrors the tables from the freshly
+  //     stripped... no — freshly RECEIVED blob (extractEconFromWorld in
+  //     server.js), so the table is never more than one autosave stale
+  //     relative to a connected client's own live simulation. `data` keeps
+  //     the jurisdiction's full econstate.js record shape (activity/
+  //     employment/priceIndex/piYest/taxRate/treasury) so nothing is lost
+  //     that a future column doesn't yet cover.
+  //
+  //   polity — a MIRROR of city/polity.js's `blob.pol` rider (one row per
+  //     jurisdiction id `blob.pol.rec` carries — every country/state/city/
+  //     federal-territory record the world has registered, X3-added
+  //     countries included). Same mirror rationale as econ above. `kind`
+  //     is NOT derivable from the rider (polity.js's serialize() only ever
+  //     carries the MUTABLE fields — govType/treasury/taxRate/approval/
+  //     office/currencyId — never `kind`, which is static geography
+  //     rebuilt fresh by buildRecords() every run and never persisted) —
+  //     left NULL; nothing this wave's tick logic reads needs it (the one
+  //     govType check elections.js's own tickOffice() makes — "skip a
+  //     monarchy" — is by govType, not kind). `termDay`/`officeHolder` are
+  //     `office.termDay`/`office.holder` pulled up into named, queryable
+  //     columns; `data` keeps the full per-id sub-object.
+  {
+    version: 4,
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS worldmeta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS econ (
+          countryId TEXT PRIMARY KEY,
+          activity REAL NOT NULL DEFAULT 1.0,
+          employment REAL NOT NULL DEFAULT 0.92,
+          priceIndex REAL NOT NULL DEFAULT 1.0,
+          pi REAL NOT NULL DEFAULT 0.02,
+          treasury REAL NOT NULL DEFAULT 0,
+          data TEXT NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS polity (
+          id TEXT PRIMARY KEY,
+          kind TEXT,
+          govType TEXT,
+          approval REAL NOT NULL DEFAULT 55,
+          termDay REAL,
+          officeHolder TEXT,
+          data TEXT NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 // 16m-square chunks (matches F4's systems/chunks.js grid) — a person's
@@ -739,6 +826,123 @@ function open(file) {
     return existed;
   }
 
+  // ---- worldmeta table (S4): generic key/value store ----------------------
+  const stMetaUpsert = db.prepare(
+    "INSERT INTO worldmeta (key, value) VALUES (?, ?) " +
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  );
+  const stMetaGet = db.prepare("SELECT value FROM worldmeta WHERE key = ?");
+  // metaGet(key) -> parsed JSON value, or null if the key was never set (or
+  // its stored JSON is somehow corrupt — treated as absent, never thrown).
+  function metaGet(key) {
+    const row = stMetaGet.get(key);
+    if (!row) return null;
+    try { return JSON.parse(row.value); } catch (e) { return null; }
+  }
+  function metaSet(key, value) { stMetaUpsert.run(key, JSON.stringify(value)); }
+
+  // ---- econ table (S4): a mirror of sim/econstate.js's blob.econ rider,
+  // one row per tracked jurisdiction id, plus the `pi` mirror-in from
+  // sim/inflation.js's own per-country rider (see migration v4's own
+  // comment for the id-space bridge and the mirror-not-strip rationale).
+  const stEconUpsert = db.prepare(`
+    INSERT INTO econ (countryId, activity, employment, priceIndex, pi, treasury, data, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(countryId) DO UPDATE SET
+      activity = excluded.activity, employment = excluded.employment, priceIndex = excluded.priceIndex,
+      pi = excluded.pi, treasury = excluded.treasury, data = excluded.data, updatedAt = excluded.updatedAt
+  `);
+  const stEconGet = db.prepare("SELECT * FROM econ WHERE countryId = ?");
+  const stEconAll = db.prepare("SELECT * FROM econ ORDER BY countryId ASC");
+
+  function rowToEconEntry(row) {
+    if (!row) return null;
+    let data = null;
+    try { data = JSON.parse(row.data); } catch (e) { data = null; }
+    return {
+      countryId: row.countryId, activity: row.activity, employment: row.employment,
+      priceIndex: row.priceIndex, pi: row.pi, treasury: row.treasury,
+      updatedAt: row.updatedAt, data,
+    };
+  }
+  // econPut: transactional upsert, idempotent by countryId (mirrors
+  // structPut's shape). Never deletes — a jurisdiction that stops appearing
+  // in a save's blob.econ.reg (never happens this wave; the registry only
+  // ever grows) simply stops being refreshed, same "no delete" posture
+  // peoplePut takes for the population registry.
+  function econPut(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    let n = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of rows) {
+        if (!r || !r.countryId) continue;
+        stEconUpsert.run(
+          String(r.countryId), +r.activity || 0, +r.employment || 0, +r.priceIndex || 0,
+          isFinite(r.pi) ? +r.pi : 0.02, +r.treasury || 0,
+          JSON.stringify(r.data !== undefined ? r.data : r), r.updatedAt || Date.now()
+        );
+        n++;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch (e2) {}
+      throw err;
+    }
+    return n;
+  }
+  function econGet(countryId) { return rowToEconEntry(stEconGet.get(countryId)); }
+  function econAll() { return stEconAll.all().map(rowToEconEntry); }
+
+  // ---- polity table (S4): a mirror of city/polity.js's blob.pol rider,
+  // one row per registered jurisdiction id (see migration v4's own comment
+  // for why `kind` is always NULL this wave).
+  const stPolityUpsert = db.prepare(`
+    INSERT INTO polity (id, kind, govType, approval, termDay, officeHolder, data, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      kind = excluded.kind, govType = excluded.govType, approval = excluded.approval,
+      termDay = excluded.termDay, officeHolder = excluded.officeHolder, data = excluded.data, updatedAt = excluded.updatedAt
+  `);
+  const stPolityGet = db.prepare("SELECT * FROM polity WHERE id = ?");
+  const stPolityAll = db.prepare("SELECT * FROM polity ORDER BY id ASC");
+
+  function rowToPolityEntry(row) {
+    if (!row) return null;
+    let data = null;
+    try { data = JSON.parse(row.data); } catch (e) { data = null; }
+    return {
+      id: row.id, kind: row.kind || null, govType: row.govType || null, approval: row.approval,
+      termDay: row.termDay != null ? row.termDay : null, officeHolder: row.officeHolder || null,
+      updatedAt: row.updatedAt, data,
+    };
+  }
+  function polityPut(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    let n = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of rows) {
+        if (!r || !r.id) continue;
+        stPolityUpsert.run(
+          String(r.id), r.kind != null ? String(r.kind) : null, r.govType != null ? String(r.govType) : null,
+          isFinite(r.approval) ? +r.approval : 55,
+          (r.termDay != null && isFinite(r.termDay)) ? +r.termDay : null,
+          r.officeHolder != null ? String(r.officeHolder) : null,
+          JSON.stringify(r.data !== undefined ? r.data : r), r.updatedAt || Date.now()
+        );
+        n++;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch (e2) {}
+      throw err;
+    }
+    return n;
+  }
+  function polityGet(id) { return rowToPolityEntry(stPolityGet.get(id)); }
+  function polityAll() { return stPolityAll.all().map(rowToPolityEntry); }
+
   function close() {
     try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch (e) {}
     try { db.close(); } catch (e) {}
@@ -775,6 +979,14 @@ function open(file) {
     containerAll,
     containersByBase,
     containerDelete,
+    metaGet,
+    metaSet,
+    econPut,
+    econGet,
+    econAll,
+    polityPut,
+    polityGet,
+    polityAll,
     close,
   };
 }

@@ -21,6 +21,7 @@ const fs = require("fs");
 const path = require("path");
 const wsmini = require("./wsmini");
 const cbzdb = require("./db");
+const ticks = require("./ticks");
 
 const ROOT = path.dirname(__dirname); // repo root
 const CFG_PATH = process.env.CBZ_CONFIG || path.join(__dirname, "server.json");
@@ -501,12 +502,11 @@ function assembleBasesForWire(w) {
   const playClock = (w.base && w.base.playClock) || 0;
   return Object.assign({}, w, { base: { v: 1, bases, ruins: ruinsOut, playClock } });
 }
-// B8 DECAY-SEAM FIELD MAPPING (S4's future server tick reads these — this
-// wave only carries the data, per BUILD-PLAN.md S3's own scope: "don't
-// implement the tick"):
+// B8 DECAY-SEAM FIELD MAPPING (S3's own note; S4 — server/ticks.js — is the
+// tick that actually reads these now):
 //   BaseRecord.upkeepUntil  -> bases.upkeepUntil column (per-base decay
-//     clock; a server tick can `SELECT * FROM bases WHERE upkeepUntil <
-//     <play-clock-equivalent>` directly, no JSON parse needed).
+//     clock; server/ticks.js's decayLiveBase reads it directly, no JSON
+//     parse needed).
 //   BaseRecord.authorized[] -> bases.auth column (JSON) + rowToBaseEntry's
 //     `.authorized` field.
 //   ruins (position/radius only, always-overdue) -> bases rows with
@@ -516,14 +516,76 @@ function assembleBasesForWire(w) {
 //   playClock (global, NOT per-base — src/systems/baseclaim.js's
 //     ACCUMULATED PLAY TIME accumulator) has no per-base column to live in
 //     — it rides in the un-extracted remainder of `w.base` (`{v,
-//     playClock}`, same "remaining channel data" treatment S2 gave
-//     whatever isn't the `npc` rider). S4's tick, running server-side with
-//     no client connected, will need its OWN clock source (this global
-//     accumulator is fundamentally single-player-derived, measured in
-//     CBZ.game.elapsed deltas) — left as that stage's problem; the
-//     upkeepUntil COLUMN is what actually lets a tick decide "is this base
-//     overdue" without a client in the loop, which is the seam this step
-//     is scoped to build.
+//     playClock}`). S4's offline tick (server/ticks.js) advances THIS same
+//     scalar by one DAY_SEC per simulated offline day — see that file's own
+//     "BASE DECAY" header section for why advancing playClock itself
+//     (rather than inventing a wall-clock-based decay path) is the correct,
+//     documented adaptation of baseclaim.js's single-player-derived clock
+//     to a persistent multiplayer world.
+
+// ============================================================
+// S4 (BUILD-PLAN.md Stage S): econ/polity table mirrors + worldmeta —
+// see server/ticks.js's own file header for the full design (mirror-not-
+// strip rationale, which of the five named clocks tick vs mark-due, the
+// day-length convention, the offline-day cap). THIS file only owns: (a)
+// mirroring the still-fully-inline blob.econ/blob.pol/blob.pol.day riders
+// into their SQL tables on every real wsave (extractEconFromWorld/
+// extractPolityFromWorld/extractWorldMetaFromWorld — no blob stripping,
+// unlike S2/S3's npc/structures/bases, since blob.econ/blob.pol are NOT
+// capped or slow to query as inline blobs at this wave's data size — see
+// ticks.js's "MIRROR, NOT AUTHORITY" section for the full justification),
+// and (b) calling server/ticks.js's runOfflineTick on boot and on a
+// periodic interval, ONLY while zero clients are connected (the guard that
+// keeps this file's tick from EVER fighting a live client's own real-time
+// simulation — see runOfflineTickIfIdle below).
+function extractWorldMetaFromWorld(w) {
+  if (!db || !w || !w.pol || !isFinite(w.pol.day)) return;
+  try {
+    const meta = db.metaGet("world") || { worldDay: 0, lastTickAt: Date.now(), tickLog: [] };
+    meta.worldDay = w.pol.day;
+    // a real client save just happened — the "how much wall time is
+    // unaccounted for" clock resets HERE, so time spent connected and
+    // playing is never later mistaken for offline time (see ticks.js's
+    // "NO DOUBLE-ADVANCE" section).
+    meta.lastTickAt = Date.now();
+    db.metaSet("world", meta);
+  } catch (e) { console.error(`[server] worldmeta mirror failed: ${e.message}`); }
+}
+function extractEconFromWorld(w) {
+  if (!db || !w || !w.econ || !w.econ.reg) return;
+  try {
+    const rows = [];
+    for (const id in w.econ.reg) {
+      const st = w.econ.reg[id];
+      if (!st) continue;
+      const countryId = ticks.ECON_COUNTRY_OF[id] || null;
+      const infCountry = countryId && w.inf && w.inf.countries && w.inf.countries[countryId];
+      const pi = (infCountry && isFinite(infCountry.pi)) ? infCountry.pi : 0.02;
+      rows.push({
+        countryId: id, activity: st.activity, employment: st.employment,
+        priceIndex: st.priceIndex, pi, treasury: st.treasury, data: st, updatedAt: Date.now(),
+      });
+    }
+    if (rows.length) db.econPut(rows);
+  } catch (e) { console.error(`[server] econ mirror failed: ${e.message}`); }
+}
+function extractPolityFromWorld(w) {
+  if (!db || !w || !w.pol || !w.pol.rec) return;
+  try {
+    const rows = [];
+    for (const id in w.pol.rec) {
+      const rec = w.pol.rec[id];
+      if (!rec) continue;
+      rows.push({
+        id, kind: null, govType: rec.govType || null, approval: rec.approval,
+        termDay: (rec.office && rec.office.termDay != null) ? rec.office.termDay : null,
+        officeHolder: (rec.office && rec.office.holder) || null,
+        data: rec, updatedAt: Date.now(),
+      });
+    }
+    if (rows.length) db.polityPut(rows);
+  } catch (e) { console.error(`[server] polity mirror failed: ${e.message}`); }
+}
 
 // ev subtypes the server consumes (or emits) itself — never relayed between clients
 const RESERVED_EV = { to: 1, wsave: 1, csave: 1, wload: 1, cload: 1 };
@@ -862,6 +924,14 @@ function onConnection(conn, req) {
             let w = extractPeopleFromWorld(m.world);
             w = extractStructuresFromWorld(w);
             w = extractBasesFromWorld(w);
+            // S4: mirror (not strip — see server/ticks.js's own header)
+            // econ/polity into their queryable tables, and worldDay/lastTickAt
+            // into worldmeta, so the offline tick (server/ticks.js) always
+            // reads state at most one autosave stale relative to whatever a
+            // connected client just simulated live.
+            extractEconFromWorld(w);
+            extractPolityFromWorld(w);
+            extractWorldMetaFromWorld(w);
             world.world = w;
             queueFlush();
           }
@@ -978,6 +1048,41 @@ setInterval(() => {
     try { p.conn.ping(); } catch (e) {}
   }
 }, HEARTBEAT ? HEARTBEAT_MS : 20000);
+
+// S4 (BUILD-PLAN.md Stage S): the offline world-clock — server/ticks.js's
+// runOfflineTick, called (a) once at boot (covers "the server was off/idle
+// since it last ran") and (b) on a periodic interval sized to ticks.js's
+// own DAY_MS (one simulated day's worth of wall time — so a server that
+// stays empty for a long stretch keeps advancing without needing a
+// restart), ONLY while zero clients are connected. That guard is the
+// entire "never fight a live client" contract: a connected client is
+// already advancing worldDay/econ/approval/elections in real time through
+// its own onAlways/onUpdate ticks and its own periodic wsave — this file's
+// tick has no idea that's happening and must never run alongside it.
+// No-op end to end when SQLite isn't available (runOfflineTick's own
+// `if (!db) return null` guard) — legacy JSON-file worlds see zero change
+// in behavior, exactly like every other S-stage feature.
+function runOfflineTickIfIdle(reason) {
+  if (!db) return;
+  if (players.size > 0) return; // a live client owns the clock right now
+  const result = ticks.runOfflineTick(db, world, {
+    log: (line) => console.log(`[server] tick (${reason}): ${line}`),
+  });
+  if (result && result.ranDays > 0) {
+    // an advanced worldDay/econ/approval must never sit ONLY in memory —
+    // flush immediately rather than folding into the normal 5s-debounced
+    // queueFlush (this only ever runs at most once per DAY_MS while idle,
+    // so the extra fsync cost is negligible).
+    flushWorld();
+  }
+}
+runOfflineTickIfIdle("boot");
+// CBZ_TICK_INTERVAL_MS: test-only override (same idiom as CBZ_HEARTBEAT_MS
+// above) — lets a harness observe "the periodic idle tick eventually picks
+// up a backdated lastTickAt without a restart" on a human timescale instead
+// of waiting a real DAY_MS (150s). Defaults to ticks.DAY_MS in production.
+const TICK_INTERVAL_MS = Number(process.env.CBZ_TICK_INTERVAL_MS) || ticks.DAY_MS;
+setInterval(() => runOfflineTickIfIdle("interval"), TICK_INTERVAL_MS);
 
 // optional directory announce
 if (cfg.directory) {
