@@ -6,6 +6,9 @@
      • WANTED   — stars, heat, crime label, body count, mask, heat-to-next-star
      • TERRITORY— per-gang district control, takeover leader, your share of 9
      • EMPIRE   — cash, bank, respect, home, car business notoriety
+     • MARKETS  — sim/market.js's 6 category prices + sim/econstate.js's CPI/
+                  activity/employment/treasury, each row with a tiny inline
+                  sparkline (E3 legibility: the invisible economy, on your phone)
      • CREW     — your founded gang: name, live members, turf held
      • VITALS   — HP, hunger, tiredness, injuries
 
@@ -149,6 +152,65 @@
       inner += row("Car yard", "Not running", DIM);
     }
     return card("🏙️ EMPIRE", inner);
+  }
+
+  // ---- MARKETS: the phone's window into the invisible economy (E3 legibility) -
+  //      sim/market.js's 6 category price levels + sim/econstate.js's CPI/
+  //      activity/employment/treasury, one glance instead of six systems. Each
+  //      row gets a tiny inline sparkline (last ≤48 hourly samples) drawn into
+  //      a small <canvas> AFTER body.innerHTML is set (a fresh string can't
+  //      carry live pixels) — see drawSparklines(), called from render().
+  //      DATA/RENDER SPLIT ON PURPOSE: CBZ.market.rows()/CBZ.econState.summary()
+  //      are the pure data layer (node-harness-testable); marketsHtml()/
+  //      drawSparklines() are DOM/canvas-only and can't be exercised headless.
+  function marketsHtml(rowsData, sum) {
+    let inner = "";
+    if (sum) {
+      inner += row("CPI", sum.priceIndex.toFixed(2), CYAN);
+      inner += row("Activity", sum.activity.toFixed(2), CYAN);
+      inner += row("Employment", pct(sum.employment * 100), sum.employment > 0.8 ? GREEN : (sum.employment < 0.5 ? RED : GOLD));
+      inner += row("Treasury", money(sum.treasury), GOLD);
+      inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+    }
+    rowsData.forEach(function (r) {
+      const col = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
+      inner += "<div style='display:flex;justify-content:space-between;align-items:center;padding:3px 0'>" +
+        "<span style='font-size:12px;color:" + DIM + "'>" + esc(r.label) + "</span>" +
+        "<span style='display:flex;align-items:center;gap:8px'>" +
+        "<span style='font-weight:600;font-size:13px;color:" + col + "'>&times;" + r.price.toFixed(2) + " " + arrow + "</span>" +
+        "<canvas id='mktSpark_" + esc(r.cat) + "' width='56' height='18' style='display:block'></canvas>" +
+        "</span></div>";
+    });
+    if (!rowsData.length) inner = "<div style='font-size:13px;color:" + DIM + "'>Market data unavailable.</div>";
+    return card("📈 MARKETS", inner);
+  }
+  // paints each category's sparkline canvas from its history ring. Silently a
+  // no-op outside a real DOM (no document / no live canvas context) — the node
+  // e3 harness only exercises the data layer this feeds (rows()/history()).
+  function drawSparklines(rowsData) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    rowsData.forEach(function (r) {
+      const cv = document.getElementById("mktSpark_" + r.cat);
+      if (!cv || typeof cv.getContext !== "function") return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const w = cv.width || 56, h = cv.height || 18;
+      if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+      const hist = r.hist;
+      if (!hist || hist.length < 2) return;
+      const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+      const span = (hi - lo) || 0.01;
+      ctx.strokeStyle = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach(function (v, i) {
+        const x = (i / (hist.length - 1)) * w;
+        const y = h - ((v - lo) / span) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
   }
 
   function crewApp() {
@@ -343,14 +405,22 @@
   function render() {
     if (!body) return;
     let html = "";
+    let marketRows = [];
     try { html += servicesApp(); } catch (e) {}
     try { html += wantedApp(); } catch (e) {}
     try { html += territoryApp(); } catch (e) {}
     try { html += empireApp(); } catch (e) {}
+    try {
+      marketRows = (CBZ.market && typeof CBZ.market.rows === "function") ? CBZ.market.rows() : [];
+      const sum = (CBZ.econState && typeof CBZ.econState.summary === "function") ? CBZ.econState.summary() : null;
+      html += marketsHtml(marketRows, sum);
+    } catch (e) {}
     try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}
     try { html += vitalsApp(); } catch (e) {}
     body.innerHTML = html;
+    // sparkline canvases only exist now that innerHTML landed — paint them.
+    try { drawSparklines(marketRows); } catch (e) {}
   }
 
   // ---- DOM ------------------------------------------------------------------

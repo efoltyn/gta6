@@ -80,6 +80,10 @@
   const BIGMOVE = 0.10;      // >10% from 1.0 fires the city-feed line
   const BIGMOVE_RESET = 0.05; // must settle back under this to re-arm
   const FEED_COOLDOWN_MS = 20000; // throttle: one feed line per 20s, any category
+  const HIST_CAP = 48;       // E3: ring-buffer length backing the adboard ticker
+                             // + phone Markets app sparklines — one hourly sample
+                             // each, so 48 = two in-game days of trail. EPHEMERAL
+                             // UI data, deliberately excluded from serialize().
 
   // own seeded LCG (never Math.random — repo convention for world state),
   // a distinct seed from economy.js's drug-market rng so the two streams
@@ -92,11 +96,20 @@
   // ---- state lives on g.cityMarket (mirrors g.cityDrugDist) so it saves/
   // resets with the rest of the run's world state ------------------------
   function reset() {
-    const lvl = {}, yest = {};
-    for (const c of CATS) { lvl[c] = { p: 1.0 }; yest[c] = 1.0; }
-    g.cityMarket = { lvl: lvl, yest: yest, hrAcc: 0, dayHrAcc: 0, bigFired: {} };
+    const lvl = {}, yest = {}, hist = {};
+    for (const c of CATS) { lvl[c] = { p: 1.0 }; yest[c] = 1.0; hist[c] = []; }
+    g.cityMarket = { lvl: lvl, yest: yest, hist: hist, hrAcc: 0, dayHrAcc: 0, bigFired: {} };
   }
-  function ensureInit() { if (!g.cityMarket) reset(); }
+  function ensureInit() {
+    if (!g.cityMarket) { reset(); return; }
+    // backfill for a market object that predates the history rings (e.g. a
+    // blob applied via apply() before this wave — apply() calls reset() first
+    // so this is mostly belt-and-suspenders for hand-built test state).
+    if (!g.cityMarket.hist) {
+      g.cityMarket.hist = {};
+      for (const c of CATS) g.cityMarket.hist[c] = [];
+    }
+  }
 
   // ---- reads -------------------------------------------------------------
   // price(category) -> current multiplier, 1.0 fallback for unknown/absent.
@@ -127,6 +140,37 @@
     if (delta > TREND_EPS) return "up";
     if (delta < -TREND_EPS) return "down";
     return "flat";
+  }
+
+  // ---- E3 LEGIBILITY: history rings + formatters for the adboard ticker and
+  // the phone Markets app. Pure data — no DOM/canvas here, so both are
+  // node-harness-testable (see scratchpad e3harness.js). ---------------------
+  const CAT_LABEL = { food: "FOOD", goods: "GOODS", guns: "GUNS", materials: "MATS", fuel: "FUEL", luxury: "LUX" };
+  function arrowFor(t) { return t === "up" ? "▲" : t === "down" ? "▼" : "–"; }   // ▲ / ▼ / –
+  // history(cat) -> up to the last 48 hourly samples (oldest first), a COPY
+  // so callers can never mutate the live ring.
+  function history(cat) {
+    ensureInit();
+    const h = g.cityMarket.hist[cat];
+    return h ? h.slice() : [];
+  }
+  // tickerLine(cat) -> "FOOD ×1.24 ▲" — what the adboard ticker creative and
+  // the phone Markets app both render (the phone re-colors it; the board
+  // paints it straight into a canvas). Unknown category -> "".
+  function tickerLine(cat) {
+    ensureInit();
+    const lv = g.cityMarket.lvl[cat];
+    if (!lv) return "";
+    const lbl = CAT_LABEL[cat] || String(cat).toUpperCase();
+    return lbl + " ×" + lv.p.toFixed(2) + " " + arrowFor(trend(cat));
+  }
+  // rows() -> the phone Markets app's data layer: one row per category, all
+  // the fields its render needs (label, live price, trend, sparkline history).
+  function rows() {
+    ensureInit();
+    return CATS.map(function (c) {
+      return { cat: c, label: CAT_LABEL[c] || c.toUpperCase(), price: g.cityMarket.lvl[c].p, trend: trend(c), hist: history(c) };
+    });
   }
 
   // ---- demand signals (drug-engine semantics, kept identical) -----------
@@ -183,6 +227,10 @@
       lv.p += (target - lv.p) * REVERT;          // mean-revert toward activity
       lv.p += (rng() - 0.5) * 2 * NOISE;         // seeded noise, ±NOISE/hr
       lv.p = clamp(lv.p);
+      // E3: one hourly sample into this category's sparkline ring.
+      const h = m.hist[c] || (m.hist[c] = []);
+      h.push(lv.p);
+      if (h.length > HIST_CAP) h.shift();
     }
     m.dayHrAcc = (m.dayHrAcc || 0) + 1;
     if (m.dayHrAcc >= 24) {                      // a game-day wrapped — snapshot
@@ -203,6 +251,9 @@
   });
 
   // ---- persistence --------------------------------------------------------
+  // NOTE: `hist` (the E3 sparkline rings) is deliberately NOT serialized — it's
+  // ephemeral UI trail data, cheaply rebuilt by an hour of live ticks, and
+  // keeping it out of the blob keeps world saves lean.
   function serialize() {
     ensureInit();
     const m = g.cityMarket, p = {}, y = {};
@@ -229,6 +280,10 @@
     serialize: serialize,
     apply: apply,
     reset: reset,
+    // E3 legibility
+    history: history,
+    tickerLine: tickerLine,
+    rows: rows,
   };
 
   // ============================================================

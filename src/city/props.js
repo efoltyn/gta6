@@ -309,7 +309,9 @@
   // dynamic gang/wanted boards rebuild only when their text changes.
   const adCache = new Map();      // key -> CanvasTexture
   const adMatCache = new Map();   // key -> MeshLambertMaterial
-  function adKey(ad) { return ad[0] + "|" + ad[1] + "|" + ((ad[4] && ad[4].kind) || "ad"); }
+  // E3: the trailing "|line3" keeps the MARKET TICKER's third line (CPI) part
+  // of the cache key too — every other kind leaves it "" (no behavior change).
+  function adKey(ad) { return ad[0] + "|" + ad[1] + "|" + ((ad[4] && ad[4].kind) || "ad") + "|" + ((ad[4] && ad[4].line3) || ""); }
 
   function adTextureFor(ad) {
     const key = adKey(ad);
@@ -365,6 +367,26 @@
       const ycw = x.measureText(yCorner).width + 12;
       x.fillStyle = fgCss; x.fillRect(256 - ycw - 10, 10, ycw, 16);
       x.fillStyle = bgCss; x.fillText(yCorner, 256 - ycw / 2 - 10, 18);
+    } else if (kind === "ticker") {
+      // E3 LEGIBILITY: the MARKET TICKER — a dark ticker-tape board reading
+      // sim/market.js's live category levels + sim/econstate.js's CPI, straight
+      // off the skyline. head/tag are two category lines ("FOOD ×1.24 ▲"),
+      // opt.line3 is the CPI line; each line's own color reads its trend arrow
+      // (no separate metadata needed — the arrow character IS the signal).
+      x.fillStyle = "#05060a"; x.fillRect(0, 0, 256, 128);
+      x.strokeStyle = "rgba(80,255,170,.4)"; x.lineWidth = 3; x.strokeRect(5, 5, 246, 118);
+      x.textAlign = "center"; x.textBaseline = "middle";
+      const lines = [head, tag, opt.line3 || ""];
+      const ys = [34, 64, 94];
+      lines.forEach(function (ln, i) {
+        if (!ln) return;
+        x.font = "bold 22px 'Courier New', monospace";
+        x.fillStyle = ln.indexOf("▲") >= 0 ? "#ff9e6b" : (ln.indexOf("▼") >= 0 ? "#7ed957" : "#9fd8ff");
+        x.fillText(ln, 128, ys[i]);
+      });
+      x.font = "bold 10px Fredoka, Arial, sans-serif";
+      x.fillStyle = "rgba(140,255,200,.6)";
+      x.fillText("CITY MARKETS", 128, 114);
     } else {
       // accent rules + corner tag
       x.fillStyle = fgCss;
@@ -460,10 +482,18 @@
     // panels, shelter ad-lights, neon shop signs). Driven once/frame in city mode.
     const nightLamps = city._nightLamps = city._nightLamps || [];
     const nightAds = city._nightAds = city._nightAds || [];
-    // boards whose ad CONTENT is live (e.g. the player WANTED poster). Each
-    // entry is { mesh, dyn, lastKey } so the driver re-skins only the few that
-    // actually change, never every frame.
+    // boards whose ad CONTENT is live (e.g. the player WANTED poster, or the
+    // E3 market ticker below). Each entry is { mesh, dyn, lastKey, cats? } so
+    // the driver re-skins only the few that actually change, never every frame.
     const dynAds = city._dynAds = city._dynAds || [];
+    // registers a board's mesh for the live-content driver iff pickAd() flagged
+    // it dynamic (wanted poster or market ticker) — shared by every board type
+    // below so busShelter/billboard/roofBillboard don't each repeat this check.
+    function regDynAd(mesh, pick) {
+      if (pick && (pick.dyn === "wanted" || pick.dyn === "ticker")) {
+        dynAds.push({ mesh: mesh, dyn: pick.dyn, lastKey: adKey(pick.ad), cats: pick.cats });
+      }
+    }
     // RENTABLE AD SURFACES — every billboard face / shelter panel / rooftop
     // board placed below registers here so city/adboard.js can put it on the
     // market (money → skyline visibility → show-off). Each record carries the
@@ -496,12 +526,58 @@
       const bounty = "BOUNTY $" + (wl * 2500 + (gm.cityKills | 0) * 250).toLocaleString() + "   " + stars;
       return [who, bounty, 0x1a0d0d, 0xffe2a0, { kind: "wanted", tag: "WANTED" }];
     }
+    // ---- E3 LEGIBILITY: the MARKET TICKER creative ---------------------------
+    // A deterministic 0..1 hash of a WORLD POSITION — never city.rng(). props.js
+    // is the LAST consumer of the shared seeded city.rng stream this build (see
+    // world.js: "sibling modules build from city.rng stays byte-identical"), so
+    // mixing the ticker in via rng() would still be safe, but a position hash
+    // keeps pickAd() trivially reusable from anywhere without any ordering worry.
+    function posHash01(x, z) {
+      const h = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+      return h - Math.floor(h);
+    }
+    // the same two categories every time this exact (x,z) is asked — so the
+    // ~1Hz live-refresh driver (below) recomputes the SAME board's ticker
+    // instead of reshuffling which categories it tracks.
+    function tickerCatsFor(x, z) {
+      const CATS = (CBZ.market && CBZ.market.CATS) || ["food", "goods", "guns", "materials", "fuel", "luxury"];
+      const n = CATS.length;
+      const i = Math.floor(posHash01(x, z) * n) % n;
+      let j = Math.floor(posHash01(z, x) * n) % n;   // swapped args -> an independent-looking hash
+      if (j === i) j = (j + 1) % n;
+      return [CATS[i], CATS[j]];
+    }
+    // builds the live 3-line ad record: two category levels (sim/market.js,
+    // with trend arrows) + the city CPI (sim/econstate.js). Returns null if
+    // neither system is loaded (a plain city build without Stage E still works).
+    function tickerAd(cats) {
+      const M = CBZ.market;
+      if (!M || typeof M.tickerLine !== "function") return null;
+      const line1 = M.tickerLine(cats[0]), line2 = M.tickerLine(cats[1]);
+      const E = CBZ.econState;
+      const line3 = (E && typeof E.tickerLine === "function") ? E.tickerLine() : "";
+      if (!line1 && !line2 && !line3) return null;
+      return [line1, line2, 0x05060a, 0x9fd8ff, { kind: "ticker", tag: "MKT", line3: line3 }];
+    }
     // returns an ad record for a board at (x,z): mostly static brand/shop/radio,
-    // but a roadside board near a gang's turf shows THAT gang, and a fraction of
-    // boards become live WANTED posters once you have heat. `register` lets the
-    // caller flag a board as dynamic (gets re-skinned later).
+    // but a roadside board near a gang's turf shows THAT gang, a fraction of
+    // boards become live WANTED posters once you have heat, and (E3) ~1-in-4
+    // boards become a live MARKET TICKER instead — the economy readable right
+    // off the skyline, no menu needed. `register` lets the caller flag a board
+    // as dynamic (gets re-skinned later as those live values move).
     function pickAd(x, z, opts) {
       opts = opts || {};
+      // TICKER, gated on the position hash above — checked FIRST and returns
+      // before any rng() draw so the existing brand/shop/radio/gang/wanted mix
+      // (still ~75% of boards) keeps its exact draw pattern unperturbed.
+      if (opts.allowTicker !== false) {
+        const th = posHash01(x, z);
+        if (th < 0.25) {
+          const cats = tickerCatsFor(x, z);
+          const ad = tickerAd(cats);
+          if (ad) return { ad: ad, dyn: "ticker", cats: cats };
+        }
+      }
       const r = rng();
       // 1 in ~7 big boards is a (potential) live WANTED poster
       if (opts.allowWanted && r < 0.14) {
@@ -960,6 +1036,7 @@
       const ad = new THREE.Mesh(geo("shelterAd", () => new THREE.PlaneGeometry(1.0, 1.7)), adM);
       ad.position.set(1.74, 1.2, 0); ad.rotation.y = -Math.PI / 2; g.add(ad);
       nightAds.push(adM);
+      regDynAd(ad, pick);   // wanted poster or E3 market ticker -> live-refresh driver
       // rentable: walk-up point is the PANEL end of the shelter (world coords)
       adBoards.push({ mesh: ad, x: x + Math.cos(yaw) * 1.74, z: z - Math.sin(yaw) * 1.74, y: 0, kind: "shelter", mat0: adM });
       // bus-stop sign pole at the end
@@ -994,9 +1071,10 @@
       const front = new THREE.Mesh(boardG, adMatFor(pickF.ad)); front.position.set(0, post + H / 2, 0.18); g.add(front);
       const back = new THREE.Mesh(boardG, adMatFor(pickB.ad)); back.position.set(0, post + H / 2, -0.18); back.rotation.y = Math.PI; g.add(back);
       nightAds.push(adMatFor(pickF.ad), adMatFor(pickB.ad));
-      // register the front face if it's a live WANTED poster so the driver can
-      // re-skin its material when the player's wanted level changes.
-      if (pickF.dyn === "wanted") dynAds.push({ mesh: front, dyn: "wanted", lastKey: adKey(pickF.ad) });
+      // register either face if it's live (WANTED poster or E3 market ticker)
+      // so the driver can re-skin its material as those values change.
+      regDynAd(front, pickF);
+      regDynAd(back, pickB);
       // rentable: a lease takes BOTH faces (the flex reads from either direction)
       adBoards.push({ mesh: front, mesh2: back, x, z, y: 0, kind: big ? "bill" : "small", mat0: adMatFor(pickF.ad), mat0b: adMatFor(pickB.ad) });
       // walkway light bar under the board
@@ -1374,7 +1452,7 @@
         const board = new THREE.Mesh(geo("roofBillBoard", () => new THREE.PlaneGeometry(6.0, 2.4)), adM);
         board.position.set(0, 3.4, 0.14); bg.add(board);
         nightAds.push(adM);
-        if (pick.dyn === "wanted") dynAds.push({ mesh: board, dyn: "wanted", lastKey: adKey(pick.ad) });
+        regDynAd(board, pick);   // wanted poster or E3 market ticker -> live-refresh driver
         // rentable from THIS roof (y gates the walk-up): the apex flex — your
         // name over the skyline, reachable via the building's elevator.
         adBoards.push({ mesh: board, x: bg.position.x, z: bg.position.z, y: h, kind: "roof", mat0: adM });
@@ -1583,34 +1661,51 @@
     }
 
     // =====================================================================
-    //  LIVE WANTED-POSTER DRIVER — re-skins the handful of billboards that
-    //  carry a WANTED poster whenever your wanted level (or kill count) shifts.
-    //  Runs at ~1 Hz, only swaps a material map on the rare boards that change,
-    //  so it costs nothing the rest of the time. City mode only.
+    //  LIVE-CONTENT DRIVER — re-skins the handful of boards whose ad is dynamic:
+    //  a WANTED poster (your face, as your heat climbs) or an E3 MARKET TICKER
+    //  (sim/market.js + sim/econstate.js). Runs at ~1 Hz, only swaps a material
+    //  map on the boards that actually changed, so it costs nothing the rest of
+    //  the time. City mode only.
+    //
+    //  Throttling: the wanted branch is gated on a signature (unchanged →
+    //  skipped entirely, as before this wave). The ticker branch has no single
+    //  signature to gate on (many boards, each tracking its own category pair),
+    //  so it recomputes every ~1s tick — but adKey() dedupes per board: a
+    //  ticker's canvas/material is only actually rebuilt (cache miss) when its
+    //  displayed text changes, i.e. when a price's 2-decimal readout moves,
+    //  which is the ">1%" cheap-repaint throttle the plan calls for.
     // =====================================================================
     if (CBZ.onAlways && dynAds.length && !city._propWantedHooked) {
       city._propWantedHooked = true;
       let acc = 0, lastSig = "";
+      const tickerCache = new Map();   // "cat0|cat1" -> this tick's ad record (recomputed once per pair, not per board)
       CBZ.onAlways(8, function (dt) {
         const g = CBZ.game;
         if (!g || g.mode !== "city" || !root.visible) return;
         acc += (dt || 0.016);
         if (acc < 1.0) return; acc = 0;
         const sig = (g.wanted | 0) + ":" + (g.cityKills | 0) + ":" + (g.playerGang && g.playerGang.name || "");
-        if (sig === lastSig) return;                // nothing the posters care about changed
-        lastSig = sig;
-        const wAd = wantedAd();
-        const fallback = BRAND_ADS[0];
-        const ad = wAd || fallback;                 // clean record → generic brand
-        const mat2 = adMatFor(ad);
+        const sigChanged = sig !== lastSig;
+        if (sigChanged) lastSig = sig;
+        const wAd = sigChanged ? (wantedAd() || BRAND_ADS[0]) : null;
         const lit = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
+        tickerCache.clear();
         for (const e of dynAds) {
-          if (e.dyn !== "wanted") continue;
-          if (e.mesh.userData.adLease) continue;    // the player RENTS this face (adboard.js) — their creative outranks the precinct's poster
+          if (e.mesh.userData.adLease) continue;    // the player RENTS this face (adboard.js) — their creative outranks any live driver
+          let ad = null;
+          if (e.dyn === "wanted") {
+            if (!sigChanged) continue;              // nothing the poster cares about changed
+            ad = wAd;
+          } else if (e.dyn === "ticker") {
+            const ck = (e.cats || []).join("|");
+            ad = tickerCache.get(ck);
+            if (!ad) { ad = tickerAd(e.cats || []) || BRAND_ADS[0]; tickerCache.set(ck, ad); }
+          } else continue;
           const key = adKey(ad);
           if (key === e.lastKey) continue;          // this board already shows it
           e.lastKey = key;
-          e.mesh.material = mat2;                   // swap to the live poster material
+          const mat2 = adMatFor(ad);
+          e.mesh.material = mat2;                   // swap to the live material
           mat2.emissiveIntensity = 0.06 + lit * 0.6;
           if (nightAds.indexOf(mat2) < 0) nightAds.push(mat2);
         }

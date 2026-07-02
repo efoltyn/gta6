@@ -88,6 +88,8 @@
   const TREASURY_TAX_UNIT = 1000; // toy fiscal flow: taxRate · (activity · this) this wave
   const TREASURY_UPKEEP = 200;    // flat daily upkeep spend, same toy flow
   const SAFETY_HEAT_NORM = 600;   // g.heat normalizer for the safety term (~just past 2-star)
+  const HIST_CAP = 48;            // E3: sparkline ring length (48 hourly samples, matches market.js)
+  const PI_TREND_EPS = 0.015;     // ±1.5% vs the last day-boundary snapshot = "flat" (market.js's TREND_EPS)
 
   // priceIndex weights — VI.2's category set, sums to 1.00 (see e2harness).
   const PI_WEIGHTS = {
@@ -103,14 +105,28 @@
       activity: 1.0,
       employment: EMPLOYMENT_BASE,
       priceIndex: 1.0,
+      piYest: 1.0,       // E3: priceIndex snapshotted at the last day boundary (trend() reference)
       taxRate: START_TAX_RATE,
       treasury: START_TREASURY,
     };
   }
+  function freshHist() { return { priceIndex: [], activity: [] }; }
   function reset() {
-    g.cityEconState = { reg: { [DEFAULT_ID]: freshJur() }, hrAcc: 0, dayHrAcc: 0 };
+    g.cityEconState = { reg: { [DEFAULT_ID]: freshJur() }, hist: { [DEFAULT_ID]: freshHist() }, hrAcc: 0, dayHrAcc: 0 };
   }
-  function ensureInit() { if (!g.cityEconState) reset(); }
+  function ensureInit() {
+    if (!g.cityEconState) { reset(); return; }
+    if (!g.cityEconState.hist) g.cityEconState.hist = {};
+  }
+  // E3: push one hourly sample into id's {priceIndex, activity} rings, capped
+  // at HIST_CAP. Lazily creates the id's ring set (covers ids registered after
+  // reset(), e.g. via apply()).
+  function pushHist(m, id, field, v) {
+    if (!m.hist[id]) m.hist[id] = freshHist();
+    const arr = m.hist[id][field] || (m.hist[id][field] = []);
+    arr.push(v);
+    if (arr.length > HIST_CAP) arr.shift();
+  }
 
   // ---- reads ---------------------------------------------------------------
   function get(id) {
@@ -134,6 +150,35 @@
       taxRate: st.taxRate,
       treasury: Math.round(st.treasury),
     };
+  }
+  // ---- E3 LEGIBILITY: priceIndex trend + sparkline history for the adboard
+  // ticker and the phone Markets app. Pure data (no DOM/canvas) — node-harness
+  // testable. trend() mirrors market.js's trend(cat): vs the value snapshotted
+  // at the last day boundary (piYest), ±1.5% reads "flat".
+  function trend(id) {
+    const st = get(id);
+    if (!st) return "flat";
+    const y = st.piYest != null ? st.piYest : 1.0;
+    if (y <= 0) return "flat";
+    const delta = (st.priceIndex - y) / y;
+    if (delta > PI_TREND_EPS) return "up";
+    if (delta < -PI_TREND_EPS) return "down";
+    return "flat";
+  }
+  // history(field, id) -> up to the last 48 hourly samples (oldest first) of
+  // "priceIndex" or "activity", a COPY so callers can't mutate the live ring.
+  function history(field, id) {
+    ensureInit();
+    const h = g.cityEconState.hist[id || DEFAULT_ID];
+    const arr = h && h[field];
+    return arr ? arr.slice() : [];
+  }
+  // tickerLine(id) -> "CPI 1.06 ▲" — the adboard ticker's third line.
+  function tickerLine(id) {
+    const st = get(id);
+    if (!st) return "";
+    const arrow = trend(id) === "up" ? "▲" : trend(id) === "down" ? "▼" : "–";
+    return "CPI " + st.priceIndex.toFixed(2) + " " + arrow;
   }
 
   // ---- priceIndex: Σ w_G·p_G (city-wide this wave; market.js is the one
@@ -195,10 +240,19 @@
   // ---- the hourly tick: priceIndex every hour, settlement every 24 --------
   function hourTick(m) {
     const idx = computePriceIndex();
-    for (const id in m.reg) m.reg[id].priceIndex = idx;
+    for (const id in m.reg) {
+      const st = m.reg[id];
+      st.priceIndex = idx;
+      // E3: one hourly sample into this jurisdiction's sparkline rings.
+      pushHist(m, id, "priceIndex", idx);
+      pushHist(m, id, "activity", st.activity);
+    }
     m.dayHrAcc = (m.dayHrAcc || 0) + 1;
     if (m.dayHrAcc >= 24) {
       m.dayHrAcc -= 24;
+      // snapshot BEFORE settlement so trend()'s "yesterday" reference is the
+      // priceIndex that stood at the boundary, same shape as market.js's yest.
+      for (const id in m.reg) m.reg[id].piYest = m.reg[id].priceIndex;
       for (const id in m.reg) dailySettlement(m.reg[id]);
     }
   }
@@ -214,6 +268,10 @@
   });
 
   // ---- persistence ----------------------------------------------------------
+  // NOTE: `hist` (the E3 sparkline rings) is deliberately NOT serialized — see
+  // market.js's identical note; ephemeral, cheaply rebuilt, keeps blobs lean.
+  // piYest DOES persist (it's a real state field, like market.js's `yest`),
+  // so trend() doesn't glitch back to "flat" on every load.
   function serialize() {
     ensureInit();
     const m = g.cityEconState, reg = {};
@@ -221,7 +279,7 @@
       const st = m.reg[id];
       reg[id] = {
         activity: st.activity, employment: st.employment,
-        priceIndex: st.priceIndex, taxRate: st.taxRate, treasury: st.treasury,
+        priceIndex: st.priceIndex, piYest: st.piYest, taxRate: st.taxRate, treasury: st.treasury,
       };
     }
     return { v: 1, reg: reg, hrAcc: m.hrAcc || 0, dayHrAcc: m.dayHrAcc || 0 };
@@ -237,6 +295,7 @@
       const st = m.reg[id];
       if (isFinite(src.activity)) st.activity = clampNum(0.1, 3.0, +src.activity);
       if (isFinite(src.employment)) st.employment = clampNum(0, 1, +src.employment);
+      if (isFinite(src.piYest)) st.piYest = clampNum(0.1, 3.0, +src.piYest);
       if (isFinite(src.priceIndex)) st.priceIndex = clampNum(0.1, 3.0, +src.priceIndex);
       if (isFinite(src.taxRate)) st.taxRate = clampNum(0, 1, +src.taxRate);
       if (isFinite(src.treasury) && src.treasury != null) st.treasury = +src.treasury;
@@ -254,6 +313,10 @@
     serialize: serialize,
     apply: apply,
     reset: reset,
+    // E3 legibility
+    trend: trend,
+    history: history,
+    tickerLine: tickerLine,
   };
 
   // ============================================================
