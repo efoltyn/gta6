@@ -164,6 +164,9 @@
     // M5: bonds' own rider (NOT folded into blob.inf/blob.cb — see sim/
     // bonds.js's header for why a clean top-level rider is the smaller diff).
     if (CBZ.bonds && CBZ.bonds.serialize) try { blob.bond = CBZ.bonds.serialize(); } catch (e) {}
+    // M6: hyperinflation's own rider (NOT folded into blob.inf/blob.bond/
+    // blob.cb/blob.fx — see sim/hyperinflation.js's header for why).
+    if (CBZ.hyperinflation && CBZ.hyperinflation.serialize) try { blob.hyp = CBZ.hyperinflation.serialize(); } catch (e) {}
     return blob;
   }
 
@@ -321,6 +324,12 @@
     // key resolves through the ledger/corp registry the moment it's read,
     // same as any other sid/corpId reference elsewhere in this file).
     if (w.bond && CBZ.bonds && CBZ.bonds.apply) try { CBZ.bonds.apply(w.bond); } catch (e) { console.error("[netpersist]", e); }
+    // M6: hyperinflation's own apply() restores stage/ending/soros/
+    // counterfeit BOOKKEEPING only — the functional effects of an ending
+    // (currencyId/dormant/delisted/alias) already rode w.pol/w.cb/w.fx/w.inf
+    // above via each of THOSE file's own persistence, so there's no ordering
+    // dependency on this line's position either.
+    if (w.hyp && CBZ.hyperinflation && CBZ.hyperinflation.apply) try { CBZ.hyperinflation.apply(w.hyp); } catch (e) { console.error("[netpersist]", e); }
   }
 
   function applyGangs(rows) {

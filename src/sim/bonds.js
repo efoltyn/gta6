@@ -365,6 +365,7 @@
     _seed = INITIAL_SEED;
     g.bondsState = { countries: {}, series: {}, nextSeriesId: 1 };
     _payoutLog = [];
+    _appetiteDamp = Object.create(null);
   }
   function ensureInit() {
     if (!g.bondsState || !g.bondsState.countries || !g.bondsState.series) reset();
@@ -452,8 +453,33 @@
   // ============================================================
   //  AUCTION — billionaires + cash-rich corporations. See header.
   // ============================================================
-  function appetiteFor(coupon, riskFactor) {
-    return clamp01((coupon - EARNINGS_YIELD_BASE) * APPETITE_SENS) * (riskFactor != null ? riskFactor : 1);
+  // M6 (sim/hyperinflation.js): the GALLOPING+/HYPER doom-loop closure — "bond
+  // appetite -> ~0, auctions mostly unsold". Note the coupon itself already
+  // saturates HIGH under runaway pi (COUPON_CEIL=250%, via PI_COEF above),
+  // which makes the raw appetiteFor() formula below WANT to buy MORE, not
+  // less — a real economics wrinkle (a rational nominal buyer chases the
+  // yield) that the task brief's own read of real hyperinflation history says
+  // doesn't happen: capital scarcity/distrust overwhelms the nominal coupon.
+  // Rather than reshape this file's own, already-harnessed (M5, 98
+  // assertions) coupon/appetite math to fight that, sim/hyperinflation.js's
+  // stage machine applies an EXTERNAL multiplicative damp per country here —
+  // the exact same "small guarded external lever" idiom sim/npcecon.js's own
+  // adjustEmployedFrac/adjustEmployedFracForDistrict hooks already are for
+  // city/polwar.js/city/civilwar.js. Ephemeral (NOT persisted): ANY reload
+  // simply defaults every country back to damp=1 for a single day until
+  // hyperinflation.js's own daily tick (which re-derives it fresh from the
+  // country's — itself persisted — stage every single day, idempotently)
+  // reasserts it; a harmless one-day grace period, same "self-heals next
+  // tick" precedent every sim/* module's own ensureInit() already documents.
+  let _appetiteDamp = Object.create(null);
+  function dampOf(id) { const v = _appetiteDamp[id]; return (v != null && isFinite(v)) ? v : 1; }
+  function setAppetiteDamp(id, mult) {
+    if (!id) return 1;
+    _appetiteDamp[id] = clamp01(finite(mult, 1));
+    return _appetiteDamp[id];
+  }
+  function appetiteFor(coupon, riskFactor, countryId) {
+    return clamp01((coupon - EARNINGS_YIELD_BASE) * APPETITE_SENS) * (riskFactor != null ? riskFactor : 1) * dampOf(countryId);
   }
   function runNpcAuction(series) {
     let remaining = series.face;
@@ -462,7 +488,7 @@
       const sid = founders[i].sid;
       const cash = cashOfSid(sid);
       if (cash < MIN_CASH_TO_BID) continue;
-      const appetite = appetiteFor(series.coupon, riskFactorOf(sid));
+      const appetite = appetiteFor(series.coupon, riskFactorOf(sid), series.countryId);
       if (appetite <= 0) continue;
       const bid = Math.min(remaining, cash * BID_CASH_FRAC * appetite);
       if (bid < 1) continue;
@@ -474,7 +500,7 @@
     for (let i = 0; i < corps.length && remaining > 0.5; i++) {
       const co = corps[i];
       if (!co || co.bankrupt || !(co.cash > CORP_CASH_FLOOR)) continue;
-      const appetite = appetiteFor(series.coupon, 1);
+      const appetite = appetiteFor(series.coupon, 1, series.countryId);
       if (appetite <= 0) continue;
       const bid = Math.min(remaining, co.cash * CORP_BID_FRAC * appetite);
       if (bid < 1) continue;
@@ -742,6 +768,33 @@
   // ============================================================
   //  M6 DATA SEAMS — see header.
   // ============================================================
+  // M6 (sim/hyperinflation.js): rescaleCountry(id, factor) — multiplies every
+  // ACTIVE series' face + every holder's claim (player/billionaire/corp/
+  // centralBank alike) by `factor`, for ANY country. ONE primitive, TWO
+  // callers: redenomination passes factor=1/10^k (knock zeros off — a bond
+  // claim stated in old-currency units shrinks exactly like every other
+  // balance, conserving real value), dollarization passes factor=the market
+  // conversion rate (a local-currency claim becomes its LBD-equivalent claim,
+  // same conservation contract). Matured/defaulted/rolled series are already
+  // closed (their holders are already zeroed by handleMaturity/defaultSeries/
+  // rollSeries) so touching only "active" series is exhaustive, not a
+  // narrowing. Returns the count of series touched (0 is a legitimate,
+  // non-error result — a country with no outstanding debt).
+  function rescaleCountry(countryId, factor) {
+    ensureInit();
+    factor = +factor;
+    if (!(factor > 0) || !isFinite(factor)) return 0;
+    const S = g.bondsState.series;
+    let touched = 0;
+    for (const sid in S) {
+      const s = S[sid];
+      if (!s || s.countryId !== countryId || s.status !== "active") continue;
+      s.face = s.face * factor;
+      for (const k in s.holders) s.holders[k] = (s.holders[k] || 0) * factor;
+      touched++;
+    }
+    return touched;
+  }
   function distressOf(id) { return ensureCountry(id).distress || 0; }
   function printedTotal(id, windowDays) {
     ensureInit();
@@ -762,6 +815,10 @@
     debtOf: debtOf,
     distressOf: distressOf,
     printedTotal: printedTotal,
+    // M6 (sim/hyperinflation.js) public hooks — see their own header comments.
+    setAppetiteDamp: setAppetiteDamp,
+    appetiteDampOf: dampOf,
+    rescaleCountry: rescaleCountry,
     reset: reset,
     // harness/test-only hooks — not part of the public contract (mirrors
     // sim/centralbank.js's/sim/inflation.js's own _state()/_dayTick precedent).

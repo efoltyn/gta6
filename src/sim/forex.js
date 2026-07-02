@@ -331,7 +331,11 @@
   function freshRow(ccyId) {
     const wealth = wealthOf(CCY_META[ccyId].countryId);
     const r0 = rate0(wealth);
-    return { rate: r0, momentum: 0, history: [r0], prevWar: false, prevFracture: false, prevAnarchic: false };
+    // M6 (sim/hyperinflation.js): `delisted` — dollarization's "currency
+    // delists from forex (rate frozen/removed from active set — keep
+    // history)". A frozen row is simply skipped by dayTick/list() below;
+    // quote()/history() still resolve it on purpose (keep history readable).
+    return { rate: r0, momentum: 0, history: [r0], prevWar: false, prevFracture: false, prevAnarchic: false, delisted: false };
   }
   function reset() {
     _seed = INITIAL_SEED;
@@ -434,8 +438,10 @@
     const repPI = econPI((CBZ.econState && CBZ.econState.DEFAULT_ID) || "libertyville");
     const repPolicyRate = policyRateOf("republic");
     for (let i = 0; i < FOREIGN_CCYS.length; i++) {
-      try { stepCurrency(FOREIGN_CCYS[i], repPI, repPolicyRate); }
-      catch (e) { try { console.error("[forex] dayTick failed for " + FOREIGN_CCYS[i], e); } catch (e2) {} }
+      const id = FOREIGN_CCYS[i];
+      if (g.forexState.rates[id] && g.forexState.rates[id].delisted) continue;   // M6: frozen, see delist()
+      try { stepCurrency(id, repPI, repPolicyRate); }
+      catch (e) { try { console.error("[forex] dayTick failed for " + id, e); } catch (e2) {} }
     }
   }
   // CBZ.onNewDay is city/polity.js's own function — polity.js loads LATER
@@ -480,7 +486,11 @@
   function list() {
     ensureInit();
     const out = [];
-    for (let i = 0; i < FOREIGN_CCYS.length; i++) { const q = quote(FOREIGN_CCYS[i]); if (q) out.push(q); }
+    for (let i = 0; i < FOREIGN_CCYS.length; i++) {
+      const id = FOREIGN_CCYS[i];
+      if (g.forexState.rates[id] && g.forexState.rates[id].delisted) continue;   // M6: removed from the active set, see delist()
+      const q = quote(id); if (q) out.push(q);
+    }
     return out;
   }
   function history(ccyId) {
@@ -531,6 +541,42 @@
     pushHist(st, st.rate);
     return true;
   }
+  // ============================================================
+  //  M6 (sim/hyperinflation.js) PUBLIC HOOKS
+  // ============================================================
+  // delist(ccyId, flag=true) — dollarization: the currency stops moving
+  // (dayTick/list() above both skip it) but quote()/history() keep resolving
+  // it so a save/UI can still show "this used to be VDM" after the fact.
+  // Idempotent, reversible (flag=false re-lists it) though M6 never actually
+  // calls it that way — documented as the seam a future re-issue wave would
+  // use (see sim/hyperinflation.js's own dollarization header for why
+  // reversal is out of scope this wave).
+  function delist(ccyId, flag) {
+    ensureInit();
+    const st = g.forexState.rates[ccyId];
+    if (!st) return false;
+    st.delisted = flag !== false;
+    return true;
+  }
+  function isDelisted(ccyId) {
+    ensureInit();
+    const st = g.forexState.rates[ccyId];
+    return !!(st && st.delisted);
+  }
+  // rescale(ccyId, factor) — redenomination's "forex rate ×= 10^k (real rate
+  // unchanged)": a straight multiply of the live rate AND every history
+  // sample (so a phone sparkline doesn't show a fake cliff the instant the
+  // zeros come off) — never routed through applyShockOn (that's a REAL
+  // devaluation/relief event; this is pure unit relabeling, no economic
+  // content, so momentum is deliberately left untouched).
+  function rescale(ccyId, factor) {
+    ensureInit();
+    const st = g.forexState.rates[ccyId];
+    if (!st || !(factor > 0) || !isFinite(factor)) return false;
+    st.rate = Math.max(RATE_FLOOR, st.rate * factor);
+    for (let i = 0; i < st.history.length; i++) st.history[i] = Math.max(RATE_FLOOR, st.history[i] * factor);
+    return true;
+  }
 
   // ============================================================
   //  PERSISTENCE
@@ -543,6 +589,7 @@
       out.rates[id] = {
         rate: st.rate, momentum: st.momentum, history: st.history.slice(),
         prevWar: !!st.prevWar, prevFracture: !!st.prevFracture, prevAnarchic: !!st.prevAnarchic,
+        delisted: !!st.delisted,
       };
     }
     return out;
@@ -558,6 +605,7 @@
       st.momentum = isFinite(src.momentum) ? +src.momentum : 0;
       st.history = Array.isArray(src.history) ? src.history.slice(-HIST_CAP) : [st.rate];
       st.prevWar = !!src.prevWar; st.prevFracture = !!src.prevFracture; st.prevAnarchic = !!src.prevAnarchic;
+      st.delisted = !!src.delisted;
     }
   }
 
@@ -570,6 +618,9 @@
     history: history,
     convert: convert,
     shock: shock,
+    delist: delist,
+    isDelisted: isDelisted,
+    rescale: rescale,
     serialize: serialize,
     apply: apply,
     reset: reset,

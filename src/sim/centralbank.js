@@ -284,6 +284,15 @@
       independence: INDEPENDENCE_BY_GOV[govType] != null ? INDEPENDENCE_BY_GOV[govType] : DEFAULT_INDEPENDENCE,
       depositsBase: DEPOSITS_BASE_SEED,
       suspended: govType === "anarchism",
+      // M6 (sim/hyperinflation.js): `dormant` — dollarization's "central bank
+      // goes dormant (suspension precedent)". Distinct from `suspended`
+      // (which tickBank() below recomputes from govType EVERY tick, so it
+      // can't hold a permanent state on its own): dormant is a one-way,
+      // govType-INDEPENDENT flag (a dollarized country keeps its own
+      // govType — dictatorship, democracy, whatever — dollarization is a
+      // monetary event, not a regime change) that forces suspended=true and
+      // freezes the rate every tick regardless of what govType says.
+      dormant: false,
       decree: null,
       lastMove: 0,
       _independenceFloor: null,
@@ -475,6 +484,13 @@
     bank.independence = INDEPENDENCE_BY_GOV[govType] != null ? INDEPENDENCE_BY_GOV[govType] : DEFAULT_INDEPENDENCE;
     if (bank._independenceFloor != null) bank.independence = Math.min(bank.independence, bank._independenceFloor);
 
+    // M6: DORMANT (dollarization) — permanently frozen, govType-independent;
+    // reuses the exact same `suspended` gate creditCap()/the phone badge
+    // already check, so nothing downstream needs its own dormant branch.
+    // Checked BEFORE the anarchic branch below so a dormant bank never has
+    // its `suspended` flag flipped back off by a later govType change.
+    if (bank.dormant) { bank.suspended = true; bank.lastMove = 0; return; }
+
     const isAnarchic = govType === "anarchism";
     bank.suspended = isAnarchic;
     if (isAnarchic) { bank.lastMove = 0; return; }   // rate frozen while suspended — see header
@@ -587,6 +603,43 @@
   }
 
   // ============================================================
+  //  M6 (sim/hyperinflation.js) PUBLIC HOOKS
+  // ============================================================
+  // setDormant(id, flag=true) — dollarization. Forces suspended+frozen THIS
+  // call too (not just on the next tickBank pass) so a harness/caller reading
+  // snapshot() immediately after sees the effect with zero tick lag.
+  function setDormant(countryId, flag) {
+    const bank = getBank(countryId);
+    if (!bank) return false;
+    bank.dormant = flag !== false;
+    if (bank.dormant) { bank.suspended = true; bank.lastMove = 0; }
+    return true;
+  }
+  // scarIndependence(id, floor) — a Soros-run "break" scars the bank's
+  // credibility permanently, same mechanism decree() already uses
+  // (_independenceFloor), just triggered from outside this file. Only ever
+  // TIGHTENS the floor (min of whatever's already there), mirroring decree()'s
+  // own one-way-ratchet contract exactly.
+  function scarIndependence(countryId, floor) {
+    const bank = getBank(countryId);
+    if (!bank) return false;
+    const f = clampNum(0, 1, num(floor, 0));
+    bank._independenceFloor = (bank._independenceFloor != null) ? Math.min(bank._independenceFloor, f) : f;
+    bank.independence = Math.min(bank.independence, bank._independenceFloor);
+    return true;
+  }
+  // shrinkDeposits(id, frac) — the HYPER-stage "bank run" symptom: a
+  // multiplicative haircut on the SAME depositsBase the reserve-requirement
+  // credit cap already reads (creditCap() above) — a real, felt credit
+  // crunch, not just flavor text.
+  function shrinkDeposits(countryId, frac) {
+    const bank = getBank(countryId);
+    if (!bank) return false;
+    bank.depositsBase = Math.max(0, num(bank.depositsBase, 0) * (1 - clamp01(num(frac, 0))));
+    return true;
+  }
+
+  // ============================================================
   //  READS
   // ============================================================
   function rate(countryId) { const b = getBank(countryId); return b ? b.policyRate : NEUTRAL_POLICY_RATE; }
@@ -607,7 +660,13 @@
       policyRate: bank.policyRate, reserveReq: bank.reserveReq, independence: bank.independence,
       governorSid: bank.governorSid, governorName: governorName(bank),
       suspended: !!bank.suspended, decreed: !!(bank.decree && bank.decree.active),
+      dormant: !!bank.dormant,
       lastMove: bank.lastMove,
+      // M6 (sim/hyperinflation.js): exposed so a bank-run's own shrinkDeposits()
+      // effect is actually OBSERVABLE (a UI reserves gauge, a harness
+      // assertion) — previously computed internally (creditCap()) but never
+      // surfaced on the public snapshot.
+      depositsBase: bank.depositsBase,
     };
   }
   function list() {
@@ -629,7 +688,7 @@
       banks[id] = {
         governorSid: b.governorSid || null, vacantSince: b.vacantSince,
         policyRate: b.policyRate, reserveReq: b.reserveReq, independence: b.independence,
-        depositsBase: b.depositsBase, suspended: !!b.suspended,
+        depositsBase: b.depositsBase, suspended: !!b.suspended, dormant: !!b.dormant,
         decree: b.decree ? { active: !!b.decree.active, rate: b.decree.rate, day: b.decree.day } : null,
         lastMove: b.lastMove, independenceFloor: b._independenceFloor != null ? b._independenceFloor : null,
       };
@@ -653,6 +712,7 @@
       if (isFinite(src.independence)) b.independence = clamp01(+src.independence);
       if (isFinite(src.depositsBase)) b.depositsBase = Math.max(0, +src.depositsBase);
       b.suspended = !!src.suspended;
+      b.dormant = !!src.dormant;
       b.decree = src.decree ? { active: !!src.decree.active, rate: isFinite(src.decree.rate) ? +src.decree.rate : b.policyRate, day: src.decree.day || 0 } : null;
       b.lastMove = isFinite(src.lastMove) ? +src.lastMove : 0;
       b._independenceFloor = (src.independenceFloor != null && isFinite(src.independenceFloor)) ? +src.independenceFloor : null;
@@ -667,6 +727,10 @@
     setReserveReq: setReserveReq,
     creditCap: creditCap,
     creditHeadroom: creditHeadroom,
+    // M6 (sim/hyperinflation.js) public hooks — see their own header comments.
+    setDormant: setDormant,
+    scarIndependence: scarIndependence,
+    shrinkDeposits: shrinkDeposits,
     reset: reset,
     serialize: serialize,
     apply: apply,

@@ -441,6 +441,14 @@
       rec[id] = {
         govType: r.govType, treasury: r.treasury, taxRate: r.taxRate, approval: r.approval,
         office: { holder: r.office.holder, deputy: r.office.deputy, termDay: r.office.termDay },
+        // M6 (sim/hyperinflation.js): a dollarization event flips rec.currencyId
+        // to "LBD" at runtime (sim/bonds.js/sim/centralbank.js/sim/inflation.js
+        // all read THIS field directly, unlike CBZ.currency's own static
+        // countryId->currency table) — without persisting it here, a reload
+        // would silently un-dollarize a country (buildRecords() reseeds it from
+        // city/countries.js's original static value). Only written when
+        // present, so an old save with no currencyId ever set is unaffected.
+        currencyId: r.currencyId || null,
       };
     }
     return { v: 1, day: day, rec: rec };
@@ -463,6 +471,7 @@
           r.office.deputy = m.office.deputy != null ? m.office.deputy : null;
           r.office.termDay = m.office.termDay != null ? m.office.termDay : null;
         }
+        if (m.currencyId) r.currencyId = m.currencyId;   // M6: dollarization survives reload
       }
     }
   }

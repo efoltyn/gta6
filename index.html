@@ -657,6 +657,16 @@
      onNewDay tick / the player's buy()), long after every script on the
      page has loaded. See that file's own header. -->
 <script src="src/sim/bonds.js?v=cur1"></script>
+<!-- M6: hyperinflation.js — stages (CREEPING/WARNING/GALLOPING/HYPER, off
+     M4's own pi + M5's own distress) + redenomination/dollarization endings
+     + Soros runs + counterfeiting. Loads immediately after bonds.js (same
+     v=cur1 bucket, per BUILD-PLAN's own instruction) — BEFORE sim/market.js/
+     sim/econstate.js/sim/npcecon.js/sim/corporations.js/sim/billionaires.js
+     and every P/X-wave file (city/polity.js included); fine, every
+     cross-module read here is guarded and resolved at CALL time (its own
+     onNewDay tick / a directly-invoked public function). See that file's
+     own header. -->
+<script src="src/sim/hyperinflation.js?v=cur1"></script>
 <script src="src/sim/market.js?v=econ1"></script>
 <script src="src/sim/econstate.js?v=econ1"></script>
 <script src="src/sim/npcecon.js?v=econ1"></script>

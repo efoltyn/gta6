@@ -88,7 +88,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **M3** `sim/centralbank.js` (new): governor NPCs, policy rate wired into bank.js RATES, reserve-requirement credit cap.
 - [x] **M4** Inflation: π equation → priceIndex compounding → every price; CPI ticker; approval term −12·max(0, π−5%).
 - [x] **M5** `sim/bonds.js` (new): deficit-triggered auctions (billionaires' real cash, corporations' real cash, player via the exchange UI) → unsold remainder printed subject to the central bank's own independence gate (~20% cap for an independent bank, full absorption for a captured one) → printed money feeds a new explicit term in sim/inflation.js's π equation. Coupon service, maturity repay/roll (distress rises on roll), and default (haircut on the recovery, real forex/approval shocks) all wired; debtOf/distressOf/printedTotal expose the M6 doom-loop seams.
-- [ ] **M6** Hyperinflation stages + doom loop + redenomination/dollarization endings; Soros runs + counterfeiting.
+- [x] **M6** Hyperinflation stages + doom loop + redenomination/dollarization endings; Soros runs + counterfeiting.
 
 ## Stage S — SQLite backbone (server)
 

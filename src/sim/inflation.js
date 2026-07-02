@@ -260,6 +260,11 @@
   const PRINT_COEF = 3.0;
   const PRINT_WINDOW_DAYS = 10;         // matches sim/bonds.js's own PRINT_WINDOW_DAYS
   const PRINT_NORM_FLOOR = 5000;
+  // M6 (sim/hyperinflation.js): the counterfeiting externality — a guarded
+  // read of a file that loads AFTER this one (resolved at CALL time inside
+  // dailyTick, same "zero whenever the sibling isn't loaded" contract
+  // printingPassThroughTerm() above already documents for sim/bonds.js).
+  const COUNTERFEIT_COEF = 0.4;
   const INERTIA = 0.1;                 // /day — adaptive expectations
   const PI_FLOOR = -0.5, PI_CEIL = 20; // -50% deflation .. +2000%/yr (M6 hyperinflation headroom)
   const LEVEL_FLOOR = 1e-6, LEVEL_CEIL = 1e9;   // numeric safety only, not economically meaningful
@@ -348,8 +353,36 @@
   // ============================================================
   //  STATE — g.inflationState.countries[countryId]
   // ============================================================
+  // M6 (sim/hyperinflation.js) ADDENDUM: two new per-country fields, read/
+  // written ONLY through the public setters below (setAlias/setControlsFactor)
+  // — everything else in this file treats them as opaque state, same as
+  // prevTreasury/hist already are.
+  //   alias: null | countryId — dollarization's "π := the republic's π
+  //     thereafter" (MASTER-PLAN money section): stepCountry() skips its own
+  //     equation entirely for an aliased country and copies the SOURCE
+  //     country's freshly-stepped pi instead (see dailyTick's two-pass split
+  //     below — the source is always stepped in PASS 1 so an aliased
+  //     country's copy in PASS 2 is never a day stale).
+  //   controlsFactor: 1 (default, no effect) .. 0 — a desperate-leader price-
+  //     control decree (any govType, "regardless of ideology" per the task
+  //     brief) multiplies the DISPLAYED/consumed pi by this factor at every
+  //     public read (rate/rateForJurisdiction/summary/tickerLine) while
+  //     `level`'s own compounding step keeps using the REAL, un-suppressed
+  //     st.pi — "the classic lie": the official number lies, the real price
+  //     level keeps compounding at the true pace underneath it. Because
+  //     every OTHER M-wave file that wants inflation (sim/bonds.js's coupon
+  //     pricing, city/approval.js's anti-incumbent term, sim/npcecon.js's
+  //     wage catch-up which reads priceLevel not rate()) calls THIS public
+  //     rate()/rateForJurisdiction(), the suppression ripples through those
+  //     exact channels for free — no separate plumbing needed per consumer.
+  //     sim/centralbank.js's own `_inflationTerm` hook is the one documented
+  //     exception: it reads `countryState(id).pi` directly (this file's own
+  //     internal closure, assigned once at parse time — see the CENTRAL BANK
+  //     HOOK section below), so the bank's OWN reaction function keeps
+  //     seeing the real number even under a controls regime, same as a real
+  //     central bank's internal models would.
   function freshCountry() {
-    return { pi: BASE_DRIFT, level: 1.0, prevTreasury: null, hist: [] };
+    return { pi: BASE_DRIFT, level: 1.0, prevTreasury: null, hist: [], alias: null, controlsFactor: 1 };
   }
   function reset() {
     const ids = countryIds();
@@ -415,6 +448,16 @@
     const norm = Math.max(PRINT_NORM_FLOOR, treas);
     return PRINT_COEF * clamp01(printed / norm);
   }
+  // M6 (sim/hyperinflation.js): counterfeit cash in circulation debases
+  // confidence — see that file's own header for the counterfeitPressure()
+  // contract (a 0..1 read, decaying while no fresh counterfeit cash enters).
+  function counterfeitPassThroughTerm(countryId) {
+    if (!CBZ.hyperinflation || typeof CBZ.hyperinflation.counterfeitPressure !== "function") return 0;
+    let p = 0;
+    try { p = +CBZ.hyperinflation.counterfeitPressure(countryId); } catch (e) {}
+    if (!(p > 0)) return 0;
+    return COUNTERFEIT_COEF * clamp01(p);
+  }
   function importPassThroughTerm(rec, wealth) {
     const ccy = rec && rec.currencyId;
     if (!ccy || ccy === "LBD" || !CBZ.forex || typeof CBZ.forex.quote !== "function") return 0;
@@ -445,10 +488,11 @@
     const warTerm = warDeficitTerm(countryId, rec, st);
     const importTerm = importPassThroughTerm(rec, wealth);
     const printingTerm = printingPassThroughTerm(countryId, rec);
+    const counterfeitTerm = counterfeitPassThroughTerm(countryId);
 
     const independence = independenceOf(countryId);
     const credibilityFactor = clamp01(1 - CRED_COEF * independence);
-    const pressureSum = monetaryTerm + demandTerm + warTerm + importTerm + printingTerm;
+    const pressureSum = monetaryTerm + demandTerm + warTerm + importTerm + printingTerm + counterfeitTerm;
 
     let piTarget = BASE_DRIFT + credibilityFactor * pressureSum;
     piTarget = clampNum(PI_FLOOR, PI_CEIL, finite(piTarget, BASE_DRIFT));
@@ -464,12 +508,43 @@
     if (!isFinite(level) || level <= 0) level = st.level;   // defensive: never let a bad step corrupt the level
     st.level = clampNum(LEVEL_FLOOR, LEVEL_CEIL, level);
   }
+  // M6 (sim/hyperinflation.js): dollarization's "π := the republic's π
+  // thereafter" — an aliased country skips the full π equation and instead
+  // copies its alias SOURCE's just-stepped pi verbatim, then compounds its
+  // OWN `level` with that same pi (so priceLevel(id) keeps moving in lock-
+  // step with the source from the aliasing day forward, exactly as if this
+  // country now transacts in the source's money — which, post-dollarization,
+  // it does). Copies an already-finite value, so this can never introduce
+  // NaN/Infinity even at the source's own clamp extremes.
+  function stepAlias(countryId) {
+    const st = countryState(countryId);
+    const src = g.inflationState.countries[st.alias];
+    if (!src) return;   // alias source vanished (shouldn't happen) — leave st untouched this tick
+    st.pi = src.pi;
+    pushHist(st, st.pi);
+    const factor = 1 + st.pi / 365;
+    let level = st.level * factor;
+    if (!isFinite(level) || level <= 0) level = st.level;
+    st.level = clampNum(LEVEL_FLOOR, LEVEL_CEIL, level);
+  }
   function dailyTick() {
     ensureInit();
     const ids = countryIds();
+    // PASS 1: every NON-aliased country steps its own real π equation first
+    // (this is also where an alias SOURCE, e.g. "republic", gets its fresh
+    // value for today — order-independent by construction).
     for (let i = 0; i < ids.length; i++) {
-      try { stepCountry(ids[i]); }
-      catch (e) { try { console.error("[inflation] stepCountry failed for " + ids[i], e); } catch (e2) {} }
+      const id = ids[i];
+      if (countryState(id).alias) continue;
+      try { stepCountry(id); }
+      catch (e) { try { console.error("[inflation] stepCountry failed for " + id, e); } catch (e2) {} }
+    }
+    // PASS 2: aliased countries copy their (now-fresh) source, same day.
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (!countryState(id).alias) continue;
+      try { stepAlias(id); }
+      catch (e) { try { console.error("[inflation] stepAlias failed for " + id, e); } catch (e2) {} }
     }
   }
   // CBZ.onNewDay is city/polity.js's own function — polity.js loads LATER
@@ -491,9 +566,18 @@
   // ============================================================
   //  READS — accept either a country id or a jurisdiction id (see header).
   // ============================================================
+  // M6: the "measured" pi a price-controls decree can suppress — see
+  // freshCountry()'s own header comment for the full rationale. Every public
+  // read below goes through this so a controls suppression ripples into
+  // every consumer that calls THIS file's own public API (bonds' coupon
+  // pricing, approval.js's anti-incumbent term, the phone ticker) with zero
+  // per-consumer edits — the exact same "one seam, many readers" idiom this
+  // file's own printingPassThroughTerm/counterfeitPassThroughTerm already use
+  // on the WRITE side.
+  function displayPi(st) { return st.pi * (st.controlsFactor != null ? st.controlsFactor : 1); }
   function rate(id) {
     const cid = countryIdFor(id);
-    return countryState(cid).pi;
+    return displayPi(countryState(cid));
   }
   // priceLevel(id?) -> the compounding multiplier. No-arg call defaults to
   // the republic (sim/market.js's own city-wide, republic-only caller).
@@ -517,7 +601,7 @@
   function tickerLine(id) {
     const cid = countryIdFor(id);
     const rec = countryRec(cid);
-    const pi = countryState(cid).pi;
+    const pi = displayPi(countryState(cid));
     const arrow = trendOf(cid) === "up" ? "▲" : trendOf(cid) === "down" ? "▼" : "–";
     const name = rec ? rec.name : cid;
     return (name || cid).toUpperCase() + " CPI " + (pi >= 0 ? "+" : "") + (pi * 100).toFixed(1) + "%/yr " + arrow;
@@ -526,7 +610,76 @@
     const cid = countryIdFor(id);
     const rec = countryRec(cid);
     const st = countryState(cid);
-    return { id: cid, name: rec ? rec.name : cid, pi: Math.round(st.pi * 10000) / 10000, level: Math.round(st.level * 1000) / 1000, trend: trendOf(cid) };
+    return { id: cid, name: rec ? rec.name : cid, pi: Math.round(displayPi(st) * 10000) / 10000, level: Math.round(st.level * 1000) / 1000, trend: trendOf(cid) };
+  }
+  // ============================================================
+  //  M6 (sim/hyperinflation.js) PUBLIC HOOKS — stages/endings live entirely
+  //  in that file; this file only exposes the three primitives it needs
+  //  (alias, controls, redenomination) so its own state stays the single
+  //  source of truth for pi/level, exactly like printedTotal()/debtOf() are
+  //  sim/bonds.js's own equivalent M6 data seams (see that file's header).
+  // ============================================================
+  // setAlias(id, sourceId|null) — dollarization. Guards against a country
+  // aliasing itself (a no-op that would otherwise read its own stale value
+  // forever) and against chaining through an already-aliased source (this
+  // file only ever aliases to "republic", which is never itself aliased —
+  // a one-level chain is all M6 needs, so a deeper walk is unnecessary
+  // complexity, not a silent limitation: dollarize() in sim/hyperinflation.js
+  // never targets anything but the republic).
+  function setAlias(id, sourceId) {
+    const cid = countryIdFor(id);
+    const st = countryState(cid);
+    st.alias = (sourceId && sourceId !== cid) ? sourceId : null;
+    return st.alias;
+  }
+  function aliasOf(id) { return countryState(countryIdFor(id)).alias || null; }
+  // rawRate(id) — the TRUE, un-suppressed pi (bypasses controlsFactor).
+  // sim/hyperinflation.js's own "genuine tightening" credibility-bump check
+  // (independent bank + POSITIVE REAL POLICY RATE) needs the real number —
+  // reading the controls-suppressed rate() there would let a regime buy a
+  // credibility bump merely by LYING harder, which defeats the entire point
+  // of the mechanic. Internal/policy-correctness use only; player-facing
+  // reads should keep using rate()/summary()/tickerLine().
+  function rawRate(id) { return countryState(countryIdFor(id)).pi; }
+  // setControlsFactor(id, factor) — the price-controls "classic lie" lever;
+  // 1 = no suppression (default), 0 = pi reads as flat 0% regardless of the
+  // real underlying rate. clamp01'd — a factor above 1 would INFLATE the
+  // measured number, which no caller ever wants.
+  function setControlsFactor(id, factor) {
+    const st = countryState(countryIdFor(id));
+    st.controlsFactor = clamp01(finite(factor, 1));
+    return st.controlsFactor;
+  }
+  function controlsFactorOf(id) {
+    const st = countryState(countryIdFor(id));
+    return st.controlsFactor != null ? st.controlsFactor : 1;
+  }
+  // redenominate(id, k) -> knocks 10^k zeros off `level` ONLY (the task
+  // brief's own division: sim/bonds.js's rescaleCountry() handles bond
+  // face/holders, sim/hyperinflation.js's own redenominate() orchestrates
+  // treasury/wallet/corp/billionaire balances — this file owns just the
+  // price-LEVEL side of the operation, the one piece only IT can touch).
+  // Returns the divisor actually applied (1 if k<=0, a no-op).
+  function redenominate(id, k) {
+    k = Math.max(0, Math.round(finite(k, 0)));
+    if (!k) return 1;
+    const st = countryState(countryIdFor(id));
+    const div = Math.pow(10, k);
+    st.level = clampNum(LEVEL_FLOOR, LEVEL_CEIL, finite(st.level / div, st.level));
+    return div;
+  }
+  // applyCredibilityBump(id, frac) — redenomination's "genuine tightening"
+  // credibility bonus (sim/hyperinflation.js only calls this when independent
+  // + positive-real-rate conditions hold): pi is cut by `frac` immediately,
+  // one time. Absent this call, pi is left exactly as-is and simply
+  // re-targets upward again on the next daily tick if the underlying
+  // pressure terms haven't actually changed — "the Argentina lesson" falls
+  // out of NOT calling this, for free.
+  function applyCredibilityBump(id, frac) {
+    frac = clamp01(finite(frac, 0));
+    const st = countryState(countryIdFor(id));
+    st.pi = clampNum(PI_FLOOR, PI_CEIL, finite(st.pi * (1 - frac), st.pi));
+    return st.pi;
   }
   function list() {
     ensureInit();
@@ -544,7 +697,10 @@
     const C = g.inflationState.countries;
     for (const id in C) {
       const st = C[id];
-      countries[id] = { pi: st.pi, level: st.level, prevTreasury: st.prevTreasury };
+      countries[id] = {
+        pi: st.pi, level: st.level, prevTreasury: st.prevTreasury,
+        alias: st.alias || null, controlsFactor: st.controlsFactor != null ? st.controlsFactor : 1,
+      };
     }
     return { v: 1, countries: countries };
   }
@@ -560,6 +716,8 @@
       if (isFinite(src.pi)) st.pi = clampNum(PI_FLOOR, PI_CEIL, +src.pi);
       if (isFinite(src.level)) st.level = clampNum(LEVEL_FLOOR, LEVEL_CEIL, +src.level);
       st.prevTreasury = (src.prevTreasury != null && isFinite(src.prevTreasury)) ? +src.prevTreasury : null;
+      st.alias = src.alias || null;
+      st.controlsFactor = isFinite(src.controlsFactor) ? clamp01(+src.controlsFactor) : 1;
     }
   }
 
@@ -574,6 +732,14 @@
     reset: reset,
     serialize: serialize,
     apply: apply,
+    // M6 (sim/hyperinflation.js) public hooks — see their own header comments.
+    setAlias: setAlias,
+    aliasOf: aliasOf,
+    rawRate: rawRate,
+    setControlsFactor: setControlsFactor,
+    controlsFactorOf: controlsFactorOf,
+    redenominate: redenominate,
+    applyCredibilityBump: applyCredibilityBump,
     // constants a caller may want to display/reason about (read-only use)
     BASE_DRIFT: BASE_DRIFT,
     // harness/test-only hooks — not part of the public contract (mirrors
