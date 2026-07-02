@@ -36,7 +36,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 ## Stage B — Player building
 
-- [ ] **B1** Piece catalog (wood tier: foundation/wall/floor/stairs/roof/door) as `assets.define` entries with `sockets[]`; `CBZ.building.place(kind, gridPos, rot)` end to end (no UI).
+- [x] **B1** Piece catalog (wood tier: foundation/wall/floor/stairs/roof/door) as `assets.define` entries with `sockets[]`; `CBZ.building.place(kind, gridPos, rot)` end to end (no UI).
 - [ ] **B2** Build mode: ghost preview + hotbar strip + confirm/rotate/undo — **the walking skeleton**: place, stack, stand on, demolish.
 - [ ] **B3** Socket snap + compatibility table (wall-on-foundation-edge feel).
 - [ ] **B4** Structural integrity graph + cascade collapse (deferred reap; debris via fx).

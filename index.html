@@ -424,6 +424,11 @@
      either load order works. -->
 <script src="src/systems/chunks.js?v=arch2"></script>
 <script src="src/systems/pieces.js?v=arch2"></script>
+<!-- B1 — the wood-tier build catalog + CBZ.building.place() (no UI yet;
+     B2 lands the ghost preview/hotbar). Loads right after pieces.js
+     (needs spawnPiece/despawnPiece/findSupport) and after placement.js
+     above (needs CBZ.placement.isFree/reserve for the world-collision gate). -->
+<script src="src/systems/building.js?v=bld1"></script>
 <!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
      (moved from the "2. world geometry" wave above, right after
      towers.js): they now need spawnPiece to exist at parse time. -->

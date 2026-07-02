@@ -78,6 +78,8 @@
   // ============================================================
   // CBZ.spawnPiece(assetKeyOrDef, opts) -> Piece | null
   //   opts: { pos:{x,y,z}, rot(0-3), ownerId, hp, solid=true, walkTop=false, parent }
+  //   def MAY also supply colliders(ctx)->specs[] for a multi-AABB piece
+  //   (B1, systems/building.js's doorframe) — see the collider block below.
   // ============================================================
   CBZ.spawnPiece = function (assetKeyOrDef, opts) {
     opts = opts || {};
@@ -127,7 +129,35 @@
     // ---- collider (footprint+pos AABB) ------------------------------
     const pieceColliders = [];
     const solid = opts.solid !== false && !def.noCollide;
-    if (solid) {
+    if (solid && typeof def.colliders === "function") {
+      // ---- MULTI-COLLIDER PATH (B1 addition) -------------------------
+      // A def that needs more than one AABB per piece (e.g. a doorframe's
+      // two side posts + a height-gated header, so the gap between them
+      // stays walkable) supplies colliders(ctx) -> [{dx=0,dz=0,hx,hz,
+      // y0,y1}, ...]. Each spec is a LOCAL offset (dx/dz) from the piece's
+      // world pos, with its own half-extents (hx/hz — default to the
+      // piece's already-rotated footprint) and its own vertical band
+      // (y0/y1 — default to def.y0/def.y1). This is ADDITIVE: every
+      // existing def (none define colliders()) takes the single-AABB
+      // branch in the `else` below, byte-identical to before this change.
+      const specs = def.colliders({ pos: pos, hx: hx, hz: hz, y0: y0, y1: y1, rot: rot, rotRad: rotRad, def: def }) || [];
+      for (let i = 0; i < specs.length; i++) {
+        const s = specs[i];
+        const sdx = s.dx || 0, sdz = s.dz || 0;
+        const shx = s.hx != null ? s.hx : hx, shz = s.hz != null ? s.hz : hz;
+        const sy0 = s.y0 != null ? s.y0 : y0, sy1 = s.y1 != null ? s.y1 : y1;
+        const c = {
+          minX: pos.x + sdx - shx, maxX: pos.x + sdx + shx,
+          minZ: pos.z + sdz - shz, maxZ: pos.z + sdz + shz,
+          y0: pos.y + sy0, y1: pos.y + sy1,
+          pieceId: id, ref: mesh,
+        };
+        CBZ.colliders.push(c);
+        pieceColliders.push(c);
+      }
+      if (pieceColliders.length) mesh.userData.collider = pieceColliders[0]; // convention parity w/ addBox (first collider is "the" one)
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    } else if (solid) {
       const c = {
         minX: pos.x - hx, maxX: pos.x + hx,
         minZ: pos.z - hz, maxZ: pos.z + hz,
