@@ -145,6 +145,7 @@
     if (CBZ.militia && CBZ.militia.serialize) try { blob.mil = CBZ.militia.serialize(); } catch (e) {}
     if (CBZ.polwar && CBZ.polwar.serialize) try { blob.war = CBZ.polwar.serialize(); } catch (e) {}
     if (CBZ.migration && CBZ.migration.serialize) try { blob.mig = CBZ.migration.serialize(); } catch (e) {}
+    if (CBZ.civilwar && CBZ.civilwar.serialize) try { blob.cwar = CBZ.civilwar.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -247,6 +248,13 @@
     if (w.base && CBZ.baseClaim && CBZ.baseClaim.apply) try { CBZ.baseClaim.apply(w.base); } catch (e) { console.error("[netpersist]", e); }
     if (w.bld && CBZ.building && CBZ.building.apply) try { CBZ.building.apply(w.bld); } catch (e) { console.error("[netpersist]", e); }
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
+    // X6b: a runtime-created rebel-fragment/partition country id does NOT
+    // exist in polity.js's own records table on a fresh boot (it's never
+    // one of CBZ.COUNTRIES's static rows) — polity.js's own apply() silently
+    // skips any id nobody has registered yet (its own header says so), so
+    // civilwar.js's preRegister() must run FIRST, re-minting the shell
+    // record so the w.pol apply just below actually finds it.
+    if (w.cwar && CBZ.civilwar && CBZ.civilwar.preRegister) try { CBZ.civilwar.preRegister(w.cwar); } catch (e) { console.error("[netpersist]", e); }
     if (w.pol && CBZ.polity && CBZ.polity.apply) try { CBZ.polity.apply(w.pol); } catch (e) { console.error("[netpersist]", e); }
     if (w.prot && CBZ.protection && CBZ.protection.apply) try { CBZ.protection.apply(w.prot); } catch (e) { console.error("[netpersist]", e); }
     // P6: regimes' own apply() re-asserts config-level effects (police mult/
@@ -271,6 +279,11 @@
     // apply-time). Runs after w.war so a restored active war's belligerents
     // are already resolvable by CBZ.polwar.activeWarFor() for misery/wave reads.
     if (w.mig && CBZ.migration && CBZ.migration.apply) try { CBZ.migration.apply(w.mig); } catch (e) { console.error("[netpersist]", e); }
+    // X6b: civilwar's own full apply() (unrest counters, active fracture
+    // bookkeeping, the permanent partition ledger) runs LAST — after
+    // polity/relations/regimes/polwar/migration have all already restored,
+    // matching every other module's own "runs after its dependencies" note.
+    if (w.cwar && CBZ.civilwar && CBZ.civilwar.apply) try { CBZ.civilwar.apply(w.cwar); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }

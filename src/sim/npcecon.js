@@ -276,6 +276,16 @@
     for (const row of g.npcEcon.rows) row.employedFrac = clampNum(0, 1, row.employedFrac + delta);
     return delta;
   }
+  // adjustEmployedFracForDistrict(dk, delta) -> X6b: city/civilwar.js's own
+  // rebel-held-district conscription (only THAT district's 4 cohort rows
+  // take the hit/release, not the whole city) — the exact same guarded-hook
+  // convention as adjustEmployedFrac() just above, scoped by district.
+  function adjustEmployedFracForDistrict(dk, delta) {
+    ensureInit();
+    if (!delta || !dk) return 0;
+    for (const row of g.npcEcon.rows) if (row.d === dk) row.employedFrac = clampNum(0, 1, row.employedFrac + delta);
+    return delta;
+  }
   // summary() -> a COPY of the 20 rows (diagnostics / a future phone app;
   // callers can't mutate the live state through it).
   function summary() {
@@ -378,6 +388,7 @@
     entPool: entPool,
     drainEntPool: drainEntPool,
     adjustEmployedFrac: adjustEmployedFrac,
+    adjustEmployedFracForDistrict: adjustEmployedFracForDistrict,
     summary: summary,
     serialize: serialize,
     apply: apply,

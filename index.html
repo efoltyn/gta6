@@ -703,6 +703,24 @@
      (activeWarFor)/CBZ.COUNTRIES/CBZ.cityPopulation*/CBZ.cityMakePed,
      every one of those already live above. -->
 <script src="src/city/migration.js?v=pol1"></script>
+<!-- X6b: civil war — a cohort misery index (hunger + real wages + approval)
+     past threshold in 2+ districts, sustained days, with low approval ->
+     armed uprising; a seeded coup roll for authoritarian countries in
+     crisis (full success/full failure/partial); the partial-coup and
+     misery roads both fracture the polity into two warring polity records
+     via THIS SAME fracture() — a rebel country record, a real transitioned
+     leader, counted matériel defecting proportional to collapse — then
+     fight it out through P8's own war machinery (declareWar/fronts/
+     casualties/conscription/procurement, all already generic). Endings:
+     reconquest (fragment dissolves, districts return), partition (the map
+     PERMANENTLY gains a country), or warlordism (parent -> anarchism,
+     regimes.js's own strongman race takes it from there; strongest gangs
+     absorb the fragment's people/treasury). Loads LAST in the P/X-wave
+     block, right after migration.js: it reads CBZ.polity/CBZ.relations/
+     CBZ.regimes/CBZ.polwar/CBZ.hunger/CBZ.npcEcon/CBZ.migration/
+     CBZ.cityGangs/CBZ.cityEcon/CBZ.officials-family mint hooks/
+     CBZ.onOfficialDeath, every one already live above. -->
+<script src="src/city/civilwar.js?v=pol1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>

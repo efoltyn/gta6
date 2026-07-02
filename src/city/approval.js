@@ -705,6 +705,21 @@
         c.appendChild(rBox);
       }
     }
+    // X6b: CIVIL WAR section — country cards only. Data owned entirely by
+    // city/civilwar.js — this panel just renders CBZ.civilwar.unrest()/
+    // fractureOf(), the same relations.js/crown.js "panel owns rendering,
+    // the data module owns the query" split used just above/below.
+    if (rec.kind === "country" && CBZ.civilwar) {
+      const fr = CBZ.civilwar.fractureOf ? CBZ.civilwar.fractureOf(rec.id) : null;
+      const un = CBZ.civilwar.unrest ? CBZ.civilwar.unrest(rec.id) : 0;
+      if (fr || un > 0.15) {
+        const wBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(255,77,77,0.08);border-radius:7px;");
+        wBox.appendChild(el("div", "font:700 11px system-ui;color:#ff6a5e;text-transform:uppercase;letter-spacing:0.4px;", fr ? "🚩 Civil War" : "⚠ Unrest"));
+        if (fr) wBox.appendChild(row("Rebel faction", ((CBZ.polity.get(fr.rebelId) || {}).name) || fr.rebelId, "#ff9e6b"));
+        else wBox.appendChild(row("Unrest level", Math.round(un * 100) + "%"));
+        c.appendChild(wBox);
+      }
+    }
     // P6b: CROWN section — monarchy countries only. Data owned entirely by
     // city/crown.js — this panel just renders CBZ.crown.summary(), the same
     // elections.js/relations.js "panel owns rendering" split above.

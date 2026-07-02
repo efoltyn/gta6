@@ -176,7 +176,12 @@
   //  harness so assertions compute expected values off the SAME numbers,
   //  never a duplicated magic-number copy).
   // ============================================================
-  const GOV_MUL = { dictatorship: 1.5, fascism: 1.4, communism: 1.0, emergencyRule: 1.0, monarchy: 0.9, democracy: 0.6, anarchism: 0 };
+  // insurgency/juntaRebel: X6b's own civil-war fragment govTypes (a rebel
+  // record fracture() mints — see city/civilwar.js's header) — a motivated
+  // breakaway faction escalates readily; anything else unlisted here still
+  // falls back to the neutral ×1 default a few lines below, so this table
+  // stays additive, never a required edit for that file's own contract.
+  const GOV_MUL = { dictatorship: 1.5, fascism: 1.4, communism: 1.0, emergencyRule: 1.0, monarchy: 0.9, democracy: 0.6, anarchism: 0, insurgency: 1.1, juntaRebel: 1.3 };
   const BASE_SOLDIERS = 260, BASE_PLANES = 7, BASE_MISSILES = 35;
   const READINESS_DECAY = 0.05;
   const UPKEEP_SOLDIER = 0.5, UPKEEP_PLANE = 15, UPKEEP_MISSILE = 3;
