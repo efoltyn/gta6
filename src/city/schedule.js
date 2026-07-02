@@ -222,6 +222,23 @@
   CBZ.cityLedgerEntry = function (sid) { return (sid && led[sid]) || null; };
   CBZ.cityLedgerLive = function (sid) { return (sid && liveBy[sid]) || null; };
 
+  // E9 (sim/corporations.js's casino whale sessions): cheap "give me up to n
+  // ledger pages matching pred" accessor — no consumer needs its own copy of
+  // this module's private led/list state. Rotates a cursor each call (not
+  // Math.random — repo convention) so repeated sampling sees different slices
+  // of the ledger instead of always the same prefix.
+  let _sampleCursor = 0;
+  CBZ.cityLedgerSample = function (n, pred) {
+    const out = [];
+    if (!list.length) return out;
+    for (let i = 0; i < list.length && out.length < n; i++) {
+      const e = list[(_sampleCursor + i) % list.length];
+      if (!pred || pred(e)) out.push(e);
+    }
+    _sampleCursor = (_sampleCursor + 1) % list.length;
+    return out;
+  };
+
   // bank a live ped into its entry. Called when a body leaves play (crowd.js
   // park), just before an hour-recast rewrites it, and on the live refresh
   // sweep, so the page is never more than a couple of seconds stale.

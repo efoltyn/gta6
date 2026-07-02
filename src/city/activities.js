@@ -319,16 +319,27 @@
   ========================================================= */
   let casino = null;
   function openCasino() {
-    casino = casino || { game: "menu", chips: 0, bj: null, bet: 25, rouletteHist: [] };
+    casino = casino || { game: "menu", chips: 0, bj: null, bet: 25, rouletteHist: [], hr: false };
     openModal();
     renderCasino();
   }
+  // HIGH-ROLLER GATE (E9): members-only VIP tables at 10x stakes — gated by
+  // wealth tier (baller+) OR max DRIP (the club's own VIP threshold).
+  const STAKE_MAX_NORMAL = 5000, STAKE_MAX_HIGH = 50000;
+  function highRoller() {
+    const tier = CBZ.cityEcon && CBZ.cityEcon.wealthTier ? CBZ.cityEcon.wealthTier() : null;
+    const tierOk = !!tier && (tier.id === "baller" || tier.id === "kingpin");
+    const drip = CBZ.cityPlayerDrip ? CBZ.cityPlayerDrip() : 0;
+    return tierOk || drip >= ((CBZ.CITY && CBZ.CITY.VIP_DRIP) || 70);
+  }
+  function stakeCap() { return (casino.hr && highRoller()) ? STAKE_MAX_HIGH : STAKE_MAX_NORMAL; }
   function casinoBetControls(min, max) {
     const b = casino.bet;
     return "<div style='display:flex;gap:6px;align-items:center;margin:6px 0 10px'>" +
       "<span style='font-size:12px;color:#8a93a3'>Stake</span>" +
       btn("-25", "betdown") + "<div style='min-width:64px;text-align:center;font-weight:700;font-size:16px;color:#ffd166'>$" + b + "</div>" + btn("+25", "betup") +
-      btn("Min", "betmin") + btn("Max", "betmax") + "</div>";
+      btn("Min", "betmin") + btn("Max", "betmax") +
+      btn(casino.hr ? "High Roller ✓" : "High Roller", "hiroll", casino.hr) + "</div>";
   }
   function renderCasino() {
     const m = modalEl();
@@ -359,6 +370,19 @@
   function casinoCommit(profit, label) {
     // profit already net of stake (stake removed up front via takeStake)
     if (profit > 0) payout(profit);
+    // E9: the HOUSE side of every settled bet books straight into Royale
+    // Casino Corp (sim/corporations.js). Player loses -> real house revenue;
+    // player wins -> the house pays out of its own bankroll (floored at 0).
+    if (CBZ.corps) {
+      if (profit < 0 && typeof CBZ.corps.creditRevenue === "function") CBZ.corps.creditRevenue("royale", -profit);
+      else if (profit > 0 && typeof CBZ.corps.debitCash === "function") CBZ.corps.debitCash("royale", profit);
+    }
+    // BIG WIN SHOCK: a jackpot big enough to make the news dents confidence
+    // in the house's stock — tiny per-dollar effect, but a real one.
+    if (profit > 25000 && CBZ.stocks && typeof CBZ.stocks.shock === "function") {
+      CBZ.stocks.shock("RYL", -profit / 2000000);
+      if (CBZ.cityFeed) CBZ.cityFeed("🎰 Casino floor jackpot rattles Royale Casino Corp — RYL dips", "#ffd166");
+    }
     CBZ.cityEvent && CBZ.cityEvent("casino", { profit, faction: "casino", factionDelta: profit > 0 ? -1 : 1 }, { silent: true });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -572,10 +596,16 @@
     };
   }
   function bindBet() {
-    modalBtns.betup = function () { casino.bet = Math.min(5000, casino.bet + 25); reRenderCasinoGame(); };
+    modalBtns.betup = function () { casino.bet = Math.min(stakeCap(), casino.bet + 25); reRenderCasinoGame(); };
     modalBtns.betdown = function () { casino.bet = Math.max(25, casino.bet - 25); reRenderCasinoGame(); };
     modalBtns.betmin = function () { casino.bet = 25; reRenderCasinoGame(); };
-    modalBtns.betmax = function () { casino.bet = Math.max(25, Math.min(5000, Math.floor(bankroll() / 25) * 25)) || 25; reRenderCasinoGame(); };
+    modalBtns.betmax = function () { casino.bet = Math.max(25, Math.min(stakeCap(), Math.floor(bankroll() / 25) * 25)) || 25; reRenderCasinoGame(); };
+    modalBtns.hiroll = function () {
+      if (!casino.hr && !highRoller()) { note("⛔ Members only — VIP tables need Baller wealth or max DRIP.", 2.4); return; }
+      casino.hr = !casino.hr;
+      casino.bet = Math.min(stakeCap(), casino.bet);
+      reRenderCasinoGame();
+    };
   }
   function reRenderCasinoGame() {
     if (casino.game === "blackjack") renderBlackjack();

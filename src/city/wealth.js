@@ -480,14 +480,26 @@
     // odds nudged up a touch by respect (rep = better connections)
     const win = rng() < clamp(o.odds + Math.min(0.06, (g.respect || 0) / 8000), 0.2, 0.9);
     if (win) {
-      const mult = o.lo > 0 ? (o.lo + rng() * (o.hi - o.lo)) : (1 + rng() * (o.hi - 1));
-      let payout = Math.round(o.stake * mult);
+      let payout, mult = null;
+      if (id === "heist") {
+        // E9: ROYALE VAULT HEIST — payout is the REAL house's cash, not an
+        // abstract stake multiplier. Hitting an already-drained casino nets
+        // little; the score also dents RYL's stock, same as any other shock.
+        const ryl = CBZ.corps && CBZ.corps.get ? CBZ.corps.get("royale") : null;
+        payout = Math.round(ryl ? Math.min(ryl.cash * 0.25, 150000) : 0);
+        if (ryl) ryl.cash = Math.max(0, ryl.cash - payout);
+        if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock("RYL", -0.15);
+        if (CBZ.cityFeed) CBZ.cityFeed("💎 ROYALE VAULT HIT — the crew hits the cage for " + money(payout), "#ffd166");
+      } else {
+        mult = o.lo > 0 ? (o.lo + rng() * (o.hi - o.lo)) : (1 + rng() * (o.hi - 1));
+        payout = Math.round(o.stake * mult);
+      }
       // NB: no scoreReward juice on ops — that compounding turned them into +EV
       // money PUMPS. Ops are pure stake×mult GAMBLES now (with a house edge below).
       if (CBZ.city) { CBZ.city.addCash(payout); CBZ.city.addRespect(clamp(Math.round(payout / 8000), 4, 80)); }
       state().cityWealthLog.opsDone++;
       bumpNotoriety(Math.round(o.heat * 3));
-      big(o.emoji + " " + o.name + " PAID OFF — " + money(payout) + " (×" + mult.toFixed(1) + ")");
+      big(o.emoji + " " + o.name + " PAID OFF — " + money(payout) + (mult != null ? " (×" + mult.toFixed(1) + ")" : ""));
       note("Net +" + money(payout - o.stake) + " on the play.", 2.8);
       sfx("coin"); if (CBZ.shake) CBZ.shake(0.25);
     } else {

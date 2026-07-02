@@ -141,6 +141,14 @@
 
   // ---- special-sector tuning (all in one place, VI.6-style) ---------------
   const DRAIN_FRAC = 0.15;           // royale: fraction of pooled entPool drained/hr, weighted by citywide share
+  // E9 — NPC WHALES: royale's SECOND revenue stream (the entPool drain above
+  // is stream 1 — ambient "ent" propensity money). 30% of hours a rich ledger
+  // NPC (20% a billionaire founder, else any ledger page with cash>800) sits
+  // down for a session; the house's ~3% edge is baked into WHALE_EDGE_SHIFT.
+  const WHALE_CHANCE = 0.30;
+  const WHALE_FOUNDER_FRAC = 0.20;
+  const WHALE_STAKE_FRAC = 0.15, WHALE_STAKE_CAP = 400, WHALE_MIN_CASH = 800;
+  const WHALE_EDGE_SHIFT = 0.485;    // see whaleSession() below for the sign note
   const GRN_UNIT_VALUE = 25;         // granite: $ booked per market.js materials "unit" of citywide buy volume
   const GRN_OVERHEAD = 60;           // granite: flat $/hr overhead
   const REBUILD_RATE = 6;            // granite: max queued rebuild "jobs" paid off per hour
@@ -259,6 +267,40 @@
     if (CBZ.cityFeed) CBZ.cityFeed("💥 " + co.name + " has gone BANKRUPT — outlets revert to independents", "#ff9a6b");
   }
 
+  // ---- E9 NPC WHALES: royale's stream 2 (stream 1 is the entPool drain in
+  // the "casino" branch below). A rich ledger NPC's session settles straight
+  // into co.cash/revAcc here — the entPool `revenue` var in hourlyEarnOne is
+  // untouched, so the two streams stay additive and separately auditable.
+  function whaleSession(co) {
+    if (rng() >= WHALE_CHANCE) return;
+    let sid = null;
+    if (rng() < WHALE_FOUNDER_FRAC && CBZ.billionaires && typeof CBZ.billionaires.founders === "function") {
+      const founders = CBZ.billionaires.founders();
+      if (founders.length) sid = founders[(rng() * founders.length) | 0].sid;
+    }
+    if (!sid && CBZ.cityLedgerSample) {
+      const rich = CBZ.cityLedgerSample(12, function (e) { return (e.cash || 0) > WHALE_MIN_CASH; });
+      if (rich.length) sid = rich[(rng() * rich.length) | 0].sid;
+    }
+    if (!sid) return;
+    const rec = (CBZ.cityLedgerLive && CBZ.cityLedgerLive(sid)) || (CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(sid));
+    if (!rec) return;
+    const stake = Math.min((rec.cash || 0) * WHALE_STAKE_FRAC, WHALE_STAKE_CAP);
+    if (!(stake >= 25)) return;
+    // NOTE ON SIGN: the E9 spec's raw formula stake*(lcg()-0.485)*2 averages
+    // POSITIVE (E[lcg()]=0.5 -> mean +0.03*stake), which would make the NPC
+    // profit on average — backwards for a "house edge". Flipping the operand
+    // order (shift-minus-lcg instead of lcg-minus-shift) keeps the same
+    // 0.485 constant from the spec but makes the mean -0.03*stake, i.e. the
+    // NPC is expected to LOSE ~3% of stake — the house's actual edge.
+    let outcome = stake * (WHALE_EDGE_SHIFT - rng()) * 2;
+    outcome = Math.max(-stake, Math.min(stake, outcome));
+    rec.cash = Math.max(0, (rec.cash || 0) + outcome);
+    // house's side: NPC loses (outcome<0) -> RYL gains; NPC wins -> RYL pays.
+    co.cash -= outcome;
+    co.revAcc = (co.revAcc || 0) - outcome;
+  }
+
   // ---- REVENUE + COSTS: one hourly pass, branching on spec.special --------
   function hourlyEarnOne(spec) {
     const co = g.corps.list[spec.id];
@@ -312,6 +354,9 @@
       revenue = drain;
       const n = co.outlets.length || 1;
       costs = n * WORKERS_PER_OUTLET * spec.wage * priceAdj + n * spec.rent;
+      // STREAM 2 (E9): NPC WHALES — named rich ledger NPCs' real gambling
+      // sessions, booked straight into co.cash/revAcc, independent of `revenue`.
+      try { whaleSession(co); } catch (e) {}
     } else if (spec.special === "ipo") {
       // PLAYER IPO: this wave's minimal-but-real model — the seeded dailyEPS
       // basis IS the daily earnings, spread flat across the 24 hourly ticks
@@ -410,6 +455,20 @@
     if (!co || co.bankrupt) return false;
     co.cash += amount;
     co.revAcc = (co.revAcc || 0) + amount;
+    return true;
+  }
+  // debitCash(id, amount) -> the house PAYS OUT (E9: a player casino win).
+  // Floors at 0 rather than going negative/bankrupting the corp outright — a
+  // giant jackpot shakes the vault, it doesn't end Royale Casino Corp.
+  function debitCash(id, amount) {
+    if (!(amount > 0)) return false;
+    ensureInit();
+    const co = g.corps.list[id];
+    if (!co || co.bankrupt) return false;
+    const drained = co.cash > 0 && co.cash - amount <= 0;
+    co.cash = Math.max(0, co.cash - amount);
+    co.revAcc = (co.revAcc || 0) - amount;
+    if (drained && CBZ.cityFeed) CBZ.cityFeed("🎰 " + co.name + " — the house is shaken, a giant win drains the vault", "#ff9a6b");
     return true;
   }
   // notifyDestruction(n) -> a player-built piece was just destroyed (systems/
@@ -552,6 +611,7 @@
     companyOfLot: function (lot) { ensureInit(); const id = lot && lot._corpOutlet; return id ? g.corps.list[id] : null; },
     robOutlet: robOutlet,
     creditRevenue: creditRevenue,
+    debitCash: debitCash,
     notifyDestruction: notifyDestruction,
     createIPO: createIPO,
     serialize: serialize,
