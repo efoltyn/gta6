@@ -161,6 +161,9 @@
     // M4: inflation's own rider (NOT folded into blob.cb — see sim/
     // inflation.js's header for why the two lifecycles stay separate).
     if (CBZ.inflation && CBZ.inflation.serialize) try { blob.inf = CBZ.inflation.serialize(); } catch (e) {}
+    // M5: bonds' own rider (NOT folded into blob.inf/blob.cb — see sim/
+    // bonds.js's header for why a clean top-level rider is the smaller diff).
+    if (CBZ.bonds && CBZ.bonds.serialize) try { blob.bond = CBZ.bonds.serialize(); } catch (e) {}
     return blob;
   }
 
@@ -313,6 +316,11 @@
     // country — no ordering dependency on anything above (rides right
     // beside w.stk, same "no ordering dependency" family as w.fx/w.cb).
     if (w.inf && CBZ.inflation && CBZ.inflation.apply) try { CBZ.inflation.apply(w.inf); } catch (e) { console.error("[netpersist]", e); }
+    // M5: bonds' own apply() just restores series/holders/distress per
+    // country — no ordering dependency on anything above either (a holder
+    // key resolves through the ledger/corp registry the moment it's read,
+    // same as any other sid/corpId reference elsewhere in this file).
+    if (w.bond && CBZ.bonds && CBZ.bonds.apply) try { CBZ.bonds.apply(w.bond); } catch (e) { console.error("[netpersist]", e); }
   }
 
   function applyGangs(rows) {

@@ -65,6 +65,22 @@
        "print/spend to cover it" channel; polwar.js's own militaryOf(id).
        desperateDays (already public, already the loser's own escalation
        signal) adds an extra kicker once a country is in that ladder.
+     printingTerm    = PRINT_COEF · clamp(0,1, printedRecent(id,10d) / norm)
+       M5 ADDENDUM (sim/bonds.js, added when that file landed): the explicit
+       money-printing channel the MASTER-PLAN's money section calls out as
+       the repo's one deliberate honest-money exception. warDeficitTerm just
+       above already senses a shrinking treasury as a proxy for "print/spend
+       to cover it" — this term is the REAL thing: sim/bonds.js issues bond
+       auctions against a deficit, and only whatever the auction fails to
+       sell and the central bank actually prints (gated by that bank's own
+       independence — sim/centralbank.js) lands here, via the guarded read
+       CBZ.bonds.printedTotal(id, 10 days). A fully-subscribed auction (real
+       buyers, real cash) contributes NOTHING to this term — only literal
+       money creation does. Zero whenever sim/bonds.js isn't loaded (this
+       file's own m4harness.js never loads it — every M4 assertion, including
+       the day-one-unchanged ones, stays exactly as it was) or hasn't printed
+       anything for this country. See sim/bonds.js's own header for the full
+       auction→printing chain.
      importTerm      = IMPORT_COEF · max(0, −dayOverDayPctChange(forex rate))
                         · importShare(wealth)
        a currency that just fell in LBD terms (sim/forex.js's own quote()
@@ -84,7 +100,8 @@
        trusted institution). Applied to the PRESSURE SUM only, never to
        BASE_DRIFT (structural background inflation isn't a policy failure).
      piTarget = clamp(PI_FLOOR, PI_CEIL, BASE_DRIFT + credibilityFactor ·
-                (monetaryTerm + demandTerm + warDeficitTerm + importTerm))
+                (monetaryTerm + demandTerm + warDeficitTerm + importTerm +
+                 printingTerm))
      pi      ← pi + (piTarget − pi) · INERTIA          (adaptive expectations,
                 ~0.1/day — inflation doesn't jump to its target, it drifts
                 toward it, same "expectations are sticky" idea every real
@@ -234,6 +251,15 @@
   const IMPORT_SHARE_LO = 0.05, IMPORT_SHARE_HI = 0.5;
   const IMPORT_COEF = 2.0;
   const CRED_COEF = 0.6;
+  // M5 (sim/bonds.js): the printing/monetization term — see the header
+  // addendum below and printingPassThroughTerm(). Zero whenever sim/bonds.js
+  // isn't loaded or hasn't printed anything for this country (guarded read,
+  // resolved at CALL time — bonds.js parses AFTER this file, see that file's
+  // own LOAD ORDER note) — m4harness.js never loads sim/bonds.js, so this
+  // term is always exactly 0 there and every M4 assertion stays green.
+  const PRINT_COEF = 3.0;
+  const PRINT_WINDOW_DAYS = 10;         // matches sim/bonds.js's own PRINT_WINDOW_DAYS
+  const PRINT_NORM_FLOOR = 5000;
   const INERTIA = 0.1;                 // /day — adaptive expectations
   const PI_FLOOR = -0.5, PI_CEIL = 20; // -50% deflation .. +2000%/yr (M6 hyperinflation headroom)
   const LEVEL_FLOOR = 1e-6, LEVEL_CEIL = 1e9;   // numeric safety only, not economically meaningful
@@ -370,6 +396,25 @@
     st.prevTreasury = treas;
     return term;
   }
+  // M5 (sim/bonds.js): the MONETIZATION term — real, explicit printed-money
+  // pressure, distinct from warDeficitTerm's own treasury-drain MEMORY above
+  // (a bond auction that fully sells contributes NOTHING here — the deficit
+  // was financed by real buyers, not the printing press; only the portion
+  // sim/bonds.js's own independence-gated printing actually created feeds
+  // this). printed(id, window) is CBZ.bonds's own printedTotal() — the exact
+  // dollar figure sim/bonds.js records the instant it prints, normalized
+  // against the country's OWN current treasury scale (mirrors warDeficitTerm's
+  // own `norm` idiom just above) so a small country's printing binge reads as
+  // proportionally severe, not diluted against a big country's absolute scale.
+  function printingPassThroughTerm(countryId, rec) {
+    if (!CBZ.bonds || typeof CBZ.bonds.printedTotal !== "function") return 0;
+    let printed = 0;
+    try { printed = +CBZ.bonds.printedTotal(countryId, PRINT_WINDOW_DAYS); } catch (e) {}
+    if (!(printed > 0)) return 0;
+    const treas = (rec && isFinite(rec.treasury)) ? Math.max(1, rec.treasury) : 1;
+    const norm = Math.max(PRINT_NORM_FLOOR, treas);
+    return PRINT_COEF * clamp01(printed / norm);
+  }
   function importPassThroughTerm(rec, wealth) {
     const ccy = rec && rec.currencyId;
     if (!ccy || ccy === "LBD" || !CBZ.forex || typeof CBZ.forex.quote !== "function") return 0;
@@ -399,10 +444,11 @@
 
     const warTerm = warDeficitTerm(countryId, rec, st);
     const importTerm = importPassThroughTerm(rec, wealth);
+    const printingTerm = printingPassThroughTerm(countryId, rec);
 
     const independence = independenceOf(countryId);
     const credibilityFactor = clamp01(1 - CRED_COEF * independence);
-    const pressureSum = monetaryTerm + demandTerm + warTerm + importTerm;
+    const pressureSum = monetaryTerm + demandTerm + warTerm + importTerm + printingTerm;
 
     let piTarget = BASE_DRIFT + credibilityFactor * pressureSum;
     piTarget = clampNum(PI_FLOOR, PI_CEIL, finite(piTarget, BASE_DRIFT));

@@ -646,6 +646,17 @@
      CALL time (its own onNewDay tick), not at parse time. See that file's
      header. -->
 <script src="src/sim/inflation.js?v=cur1"></script>
+<!-- M5: bonds.js — deficit -> bond auctions (billionaires/companies/player)
+     -> unsold remainder printed, feeding sim/inflation.js's own new
+     printing term. Loads immediately after inflation.js (same v=cur1
+     bucket, per BUILD-PLAN's own instruction) — BEFORE sim/corporations.js/
+     sim/stocks.js/sim/billionaires.js; fine, every cross-module read here
+     (CBZ.billionaires.founders, CBZ.corps.list/debitCash/creditRevenue,
+     CBZ.centralbank, CBZ.inflation, CBZ.forex.shock, CBZ.approvalShock,
+     CBZ.city.spend/addCash) is guarded and resolved at CALL time (its own
+     onNewDay tick / the player's buy()), long after every script on the
+     page has loaded. See that file's own header. -->
+<script src="src/sim/bonds.js?v=cur1"></script>
 <script src="src/sim/market.js?v=econ1"></script>
 <script src="src/sim/econstate.js?v=econ1"></script>
 <script src="src/sim/npcecon.js?v=econ1"></script>

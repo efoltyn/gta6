@@ -10,9 +10,11 @@
                   activity/employment/treasury, each row with a tiny inline
                   sparkline (E3 legibility: the invisible economy, on your phone);
                   sibling cards 💱 CURRENCY EXCHANGE (M2), 🏦 CENTRAL BANKS
-                  (M3: policy rate/independence/governor per country), and
+                  (M3: policy rate/independence/governor per country),
                   📉 INFLATION (M4: real π%/yr per country + sparkline,
-                  republic sorted first) all ride here too
+                  republic sorted first), and 🏛 SOVEREIGN BONDS (M5: active
+                  series by country — coupon, days to maturity, $ on offer —
+                  BUY at par, your holdings) all ride here too
      • CREW     — your founded gang: name, live members, turf held
      • VITALS   — HP, hunger, tiredness, injuries
 
@@ -35,6 +37,9 @@
   // MARKETS app right now — null when every row is collapsed. A transient
   // one-line status message (trade success/failure) rides alongside it.
   let stockOpen = null, stockMsg = "";
+  // M5: a transient one-line status message for the SOVEREIGN BONDS card's
+  // BUY buttons — same idiom as stockMsg just above.
+  let bondMsg = "";
 
   // ---- small helpers --------------------------------------------------------
   function esc(s) {
@@ -456,6 +461,52 @@
     });
   }
 
+  // ---- M5: SOVEREIGN BONDS — the exchange UI's bond seam, right beside the
+  //      MARKETS app's own stock trading (same "read-only rows + trade
+  //      buttons" idiom E6/M2/M3/M4 already established on this phone): one
+  //      row per ACTIVE series (country, coupon, days to maturity, $ still
+  //      on offer this series) with BUY $1k/$10k buttons wired to
+  //      CBZ.bonds.buy() (buys at par — the exact price every series
+  //      auctions at), plus a compact "your holdings" summary. Coupon/
+  //      maturity/default payouts already surface as ordinary cityFeed lines
+  //      (sim/bonds.js's own feed calls) — no separate notification system
+  //      needed here.
+  function bondBtn(seriesId, amount, label) {
+    return "<div data-bond='" + esc(seriesId) + "' data-bondamt='" + amount + "' " +
+      "style='background:rgba(255,215,118,.14);border:1px solid #a0812f;border-radius:8px;padding:5px 9px;" +
+      "font-size:11px;font-weight:700;color:#ffe9b8;cursor:pointer;display:inline-block;margin-right:6px'>" + esc(label) + "</div>";
+  }
+  function bondsHtml(rowsData, holdings) {
+    if (!rowsData || !rowsData.length) {
+      let inner = "<div style='font-size:13px;color:" + DIM + "'>No sovereign bonds on offer right now — auctions open when a country's treasury runs a deficit.</div>";
+      return card("🏛 SOVEREIGN BONDS", inner);
+    }
+    let inner = "";
+    rowsData.forEach(function (r) {
+      inner += "<div style='padding:4px 0;border-top:1px solid rgba(255,255,255,.05)'>";
+      inner += row(esc(r.countryName), (r.coupon * 100).toFixed(1) + "% · " + r.daysToMaturity + "d", GOLD);
+      inner += "<div style='font-size:10px;color:" + DIM + ";margin:1px 0 4px'>" +
+        money(r.available) + " available at par" + (r.playerHolding > 0 ? " · you hold " + money(r.playerHolding) : "") + "</div>";
+      if (r.available >= 1000) {
+        inner += bondBtn(r.id, 1000, "BUY $1k");
+        if (r.available >= 10000) inner += bondBtn(r.id, 10000, "BUY $10k");
+      } else if (r.available >= 1) {
+        inner += bondBtn(r.id, Math.floor(r.available), "BUY REST");
+      }
+      inner += "</div>";
+    });
+    if (holdings && holdings.length) {
+      inner += "<div style='margin:8px 0 4px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px;font-size:11px;color:" + DIM + "'>Your holdings</div>";
+      holdings.forEach(function (h) {
+        const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(h.countryId) : null;
+        const label = (rec ? rec.name : h.countryId) + (h.status !== "active" ? " (" + h.status + ")" : "");
+        inner += row(label, money(h.amount) + " @ " + (h.coupon * 100).toFixed(1) + "%", h.status === "active" ? GREEN : DIM);
+      });
+    }
+    if (bondMsg) inner += "<div style='font-size:11px;color:" + GOLD + ";margin-top:4px'>" + esc(bondMsg) + "</div>";
+    return card("🏛 SOVEREIGN BONDS", inner);
+  }
+
   function crewApp() {
     const pg = g.playerGang;
     if (pg && pg.founded) {
@@ -672,6 +723,11 @@
       inflRows = (CBZ.inflation && typeof CBZ.inflation.list === "function") ? CBZ.inflation.list() : [];
       html += inflHtml(inflRows);
     } catch (e) {}
+    try {
+      const bondRows = (CBZ.bonds && typeof CBZ.bonds.list === "function") ? CBZ.bonds.list() : [];
+      const bondHoldings = (CBZ.bonds && typeof CBZ.bonds.myHoldings === "function") ? CBZ.bonds.myHoldings() : [];
+      html += bondsHtml(bondRows, bondHoldings);
+    } catch (e) {}
     try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}
     try { html += vitalsApp(); } catch (e) {}
@@ -780,6 +836,24 @@
                 (res.reason === "shares-owned" ? "You only own " + (res.have || 0) + " shares." : "Trade failed.");
             }
           } catch (err) { stockMsg = "Trade failed."; }
+        }
+        render();
+        return;
+      }
+      // ---- M5: SOVEREIGN BONDS clicks — BUY at par through sim/bonds.js. ----
+      const bd = e.target && e.target.closest ? e.target.closest("[data-bond]") : null;
+      if (bd) {
+        const seriesId = bd.getAttribute("data-bond");
+        const amt = parseInt(bd.getAttribute("data-bondamt"), 10) || 0;
+        bondMsg = "";
+        if (CBZ.bonds && typeof CBZ.bonds.buy === "function") {
+          try {
+            const res = CBZ.bonds.buy(seriesId, amt);
+            if (res && res.ok === false) {
+              bondMsg = res.reason === "cash" ? "Not enough cash." :
+                (res.reason === "unavailable" ? "That series is no longer on offer." : "Purchase failed.");
+            }
+          } catch (err) { bondMsg = "Purchase failed."; }
         }
         render();
         return;
