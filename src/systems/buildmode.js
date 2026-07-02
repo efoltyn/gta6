@@ -448,6 +448,9 @@
       if (afford.cost) {
         const S = CBZ.craft && CBZ.craft.itemStore ? CBZ.craft.itemStore() : null;
         if (S) for (const mat in afford.cost) S.take(mat, afford.cost[mat]);
+        // E1: placing consumes Wood — signal materials demand to the living
+        // economy shim (sim/market.js), guarded (may not be loaded yet).
+        if (CBZ.market && afford.cost.Wood) CBZ.market.recordBuy("materials", afford.cost.Wood / 10);
       }
       bm.placedStack.push(piece.id);
       // audio.js's BANK has no "place" entry yet (grepped) — "coin" is

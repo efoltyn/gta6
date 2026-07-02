@@ -991,6 +991,7 @@
     const A = CBZ.buildCity();
     _s = 555 + n;
     if (CBZ.cityEcon && CBZ.cityEcon.initMarket) CBZ.cityEcon.initMarket();
+    if (CBZ.market && CBZ.market.reset) CBZ.market.reset();   // E1: fresh city → levels back to 1.0
     CBZ.cityDrops.length = 0;
     // the homeless are carved out of the ped budget so the TOTAL stays flat
     // (perf: redistribute, never add). Deterministic from the seeded stream.

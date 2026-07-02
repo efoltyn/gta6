@@ -421,10 +421,19 @@
     // is OVERSUPPLIED (a district dumped, or a glut event) it's cheap to stock
     // up — buy low. Everything else is flat retail.
     if (it.tag === "drug") return wholesalePrice(name);
+    // E1: FOOD prices now track the city-wide living-economy shim
+    // (sim/market.js) — one category first, per the plan's milestone; E2
+    // extends the multiplier to every other tag. Guarded: CBZ.market may not
+    // be loaded (load order / feature-detect), so this falls back to the
+    // flat ×1.0 retail it's always been.
+    if (it.tag === "food" && CBZ.market) return Math.round(it.value * CBZ.market.price("food"));
     return Math.round(it.value * 1.0);
   }
   function sellPrice(name, kind) {
     const it = ITEMS[name]; if (!it) return 0;
+    // E1: symmetric with buyPrice above — the fence/counter pays off the same
+    // live food price level, not just the flat catalog value.
+    const base = (it.tag === "food" && CBZ.market) ? it.value * CBZ.market.price("food") : it.value;
     let mul = 0.45;
     if (kind === "pawn") mul = it.tag === "valuable" ? 0.65 : 0.5;
     if (kind === "jewelry" && it.tag === "wearable") mul = 0.6;
@@ -442,7 +451,7 @@
       const cap = it.luxe ? 0.95 : 0.92;
       mul = Math.min(cap, mul + fence);
     }
-    return Math.max(1, Math.round(it.value * mul));
+    return Math.max(1, Math.round(base * mul));
   }
   // Pawn/fence loyalty: each fence sale nudges a hidden rep up; it bumps your
   // resale multiplier (capped). This rewards the buy-low/sell-high loop without

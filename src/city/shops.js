@@ -320,6 +320,14 @@
           : (meta.gun ? "gun" + ((meta.dmg || 0) > 1 ? " · " + meta.dmg + " dmg" : "") : (wear ? (slot ? slot + " · " : "") + "+" + (meta.drip || 0) + " drip" : meta.tag));
         const worn = wear && isWorn(it);
         const line = qty > 1 ? (fmt$(each) + " ea · " + fmt$(each * qty) + "/×" + qty) : fmt$(each);
+        // E1: FOOD rows get a live ▲▼ off the shim's trend() (sim/market.js) —
+        // the moving price tag milestone. Guarded/food-only this wave.
+        let trendGlyph = "";
+        if (kind === "food" && CBZ.market) {
+          const tr = CBZ.market.trend("food");
+          trendGlyph = tr === "up" ? " <span style='color:#ff9e6b'>▲</span>"
+            : tr === "down" ? " <span style='color:#7ed957'>▼</span>" : "";
+        }
         // for a wearable you don't yet wear, preview DRIP x → y (and call out the
         // piece it REPLACES in that slot) so the drip gain is obvious before you buy.
         let dripHint = "";
@@ -332,7 +340,7 @@
         html += "<div style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
           " <span style='color:#7f8794;font-size:11px'>(" + tagN + ")</span>" +
           (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : dripHint) +
-          "</span><span style='color:#7ed957'>" + line + "</span></div>";
+          "</span><span style='color:#7ed957'>" + line + trendGlyph + "</span></div>";
       });
     }
     // BARBER chair / CLOTHING rack. The rack sells whole OUTFITS (the canonical

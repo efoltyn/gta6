@@ -47,7 +47,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 ## Stage E — Economy & corporations
 
-- [ ] **E1** `sim/market.js` (new): `CBZ.market.price(good)` shim (falls back to 1.0) + dynamic **food** prices + moving shop price tags with ▲▼.
+- [x] **E1** `sim/market.js` (new): `CBZ.market.price(good)` shim (falls back to 1.0) + dynamic **food** prices + moving shop price tags with ▲▼.
 - [ ] **E2** `sim/econstate.js` (new): per-jurisdiction EconState, hourly tick (order 29.5), all 7 good categories, daily settlement.
 - [ ] **E3** Legibility: adboard price/CPI ticker creative + phone Markets app with sparklines.
 - [ ] **E4** NPC circulation: ledger rent/spend, cohort wallets (20 rows), robbery debits cohorts, vacancies become real.
