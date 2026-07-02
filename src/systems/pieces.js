@@ -30,6 +30,14 @@
        supportedBy,   // [] pieceIds this piece rests on (structural graph)
        supports,      // [] pieceIds resting on this piece
        hp, maxHp,     // damage model scaffolding (B5 wires real damage)
+       stability,     // (B4) BFS hop count from the nearest foundation/
+                      // ground root (root = 0). Set by the CALLER at spawn
+                      // (opts.stability) — this file never derives it,
+                      // only compares it to maxSpan on a supporter change.
+       maxSpan,       // (B4) how many stability hops this piece tolerates
+                      // before it collapses on its own weight (opts.maxSpan,
+                      // Infinity if the caller never set one — e.g. every
+                      // pre-B4 spawnPiece call site, so this is additive).
        weightClass,   // load this piece exerts on what it rests on
        maxLoad,       // load this piece can carry before B4's integrity math
        colliders,     // [] the actual CBZ.colliders entries this piece owns
@@ -77,7 +85,12 @@
 
   // ============================================================
   // CBZ.spawnPiece(assetKeyOrDef, opts) -> Piece | null
-  //   opts: { pos:{x,y,z}, rot(0-3), ownerId, hp, solid=true, walkTop=false, parent }
+  //   opts: { pos:{x,y,z}, rot(0-3), ownerId, hp, solid=true, walkTop=false,
+  //           parent, stability=0, maxSpan=Infinity }
+  //   stability/maxSpan (B4) are CALLER-COMPUTED numbers this file only
+  //   ever stores + later compares — building.js derives them from its own
+  //   grid/support rules; this file has zero knowledge of what a
+  //   "foundation" or "wall" is.
   //   def MAY also supply colliders(ctx)->specs[] for a multi-AABB piece
   //   (B1, systems/building.js's doorframe) — see the collider block below.
   // ============================================================
@@ -220,6 +233,8 @@
       supports: [],
       hp: opts.hp != null ? opts.hp : 100,
       maxHp: opts.maxHp != null ? opts.maxHp : (opts.hp != null ? opts.hp : 100),
+      stability: opts.stability != null ? opts.stability : 0,
+      maxSpan: opts.maxSpan != null ? opts.maxSpan : Infinity,
       weightClass: opts.weightClass != null ? opts.weightClass : 1,
       maxLoad: opts.maxLoad != null ? opts.maxLoad : Infinity,
       colliders: pieceColliders,
@@ -345,16 +360,22 @@
   };
 
   // ============================================================
-  // Reap drain — deferred cleanup for everything despawnPiece queued.
-  // Batches ALL reaped ids into one Set, then does exactly ONE filter pass
-  // over CBZ.colliders and ONE over CBZ.platforms (not one pass per piece),
-  // followed by O(reaped) per-piece mesh/chunk/index teardown.
+  // teardownBatch(ids) — the array/mesh/index cleanup for one Set of
+  // already-marked-dead pieceIds (factored out of reapDrain so B4's
+  // stability recompute can run a SECOND teardown pass, in the same
+  // drain, for whatever it additionally despawns). Batches ALL ids into
+  // one Set, does exactly ONE filter pass over CBZ.colliders and ONE
+  // over CBZ.platforms (not one pass per piece), followed by O(ids)
+  // per-piece mesh/chunk/index teardown.
+  //
+  // Returns `frontier`: the Set of still-ALIVE pieces that directly
+  // depended on something THIS batch just killed (i.e. each dead piece's
+  // .supports list, filtered to survivors) — exactly the seed set B4's
+  // recompute walk needs (a dependent's shortest supporter path may have
+  // just gotten longer, even though it still has a live supporter and so
+  // was never a cascade casualty itself).
   // ============================================================
-  function reapDrain() {
-    if (!reapQueue.size) return;
-    const ids = new Set(reapQueue);
-    reapQueue.clear();
-
+  function teardownBatch(ids) {
     let touchedColliders = false;
     if (CBZ.colliders.length) {
       const next = [];
@@ -394,6 +415,7 @@
     }
 
     const dirtyChunks = new Set();
+    const frontier = new Set(); // B4: surviving dependents of this batch's dead pieces
     ids.forEach(function (id) {
       const p = CBZ.pieces.get(id);
       if (!p) return;
@@ -416,12 +438,123 @@
       });
       (p.supports || []).forEach(function (did) {
         const dp = CBZ.pieces.get(did);
-        if (dp && dp.supportedBy) { const i = dp.supportedBy.indexOf(id); if (i >= 0) dp.supportedBy.splice(i, 1); }
+        if (dp && dp.supportedBy) {
+          const i = dp.supportedBy.indexOf(id);
+          if (i >= 0) dp.supportedBy.splice(i, 1);
+          // still alive (didn't die alongside its supporter, or this same
+          // batch would already contain it) → a recompute candidate.
+          if (dp.alive && !ids.has(did)) frontier.add(did);
+        }
       });
       CBZ.pieces.delete(id);
       CBZ.pieceIndex.delete(id);
     });
     if (CBZ.markChunkDirty) dirtyChunks.forEach(function (k) { CBZ.markChunkDirty(k); });
+    return frontier;
+  }
+
+  // ============================================================
+  // B4 STABILITY RECOMPUTE — bounded re-walk over the piece(s) whose
+  // supporter set just lost a member but is still non-empty (pure
+  // cascade already killed everyone whose supportedBy went fully empty;
+  // this catches the OTHER case: a piece that keeps a live supporter but
+  // whose SHORTEST path to a root just got longer, e.g. a bridge losing
+  // its near-foundation wall and leaning entirely on a farther one).
+  //
+  // Pure numeric comparison — this file has no idea what a "wall" or
+  // "foundation" is; it only ever reads piece.stability/piece.maxSpan,
+  // both caller-supplied at spawn (building.js's job to compute them).
+  //
+  // BOUNDED: a visited set kills cycles outright (can't happen in a
+  // supports/supportedBy DAG, but cheap insurance), and the walk stops
+  // after STABILITY_WALK_CAP pieces — a pathological mega-base defers
+  // its remainder to pendingRecompute, picked up by the NEXT drain tick
+  // instead of spending unbounded time in one frame.
+  // ============================================================
+  const STABILITY_WALK_CAP = 512;
+  let pendingRecompute = new Set(); // ids deferred past this drain's walk cap
+
+  function recomputeStability(frontier) {
+    const visited = new Set();
+    const queue = [];
+    frontier.forEach(function (id) { queue.push(id); });
+    let steps = 0;
+    while (queue.length) {
+      if (steps >= STABILITY_WALK_CAP) {
+        // pathological mega-base: stop here, pick the rest up next drain.
+        for (let i = 0; i < queue.length; i++) pendingRecompute.add(queue[i]);
+        break;
+      }
+      const id = queue.shift();
+      if (visited.has(id)) continue;
+      visited.add(id);
+      steps++;
+
+      const p = CBZ.pieces.get(id);
+      if (!p || !p.alive) continue;
+      const sb = p.supportedBy || [];
+      if (!sb.length) continue; // ground/root piece — nothing to lose, stability stays put
+
+      let minStability = Infinity;
+      for (let i = 0; i < sb.length; i++) {
+        const sp = CBZ.pieces.get(sb[i]);
+        if (sp && sp.alive && sp.stability != null && sp.stability < minStability) minStability = sp.stability;
+      }
+      if (minStability === Infinity) continue; // no living supporter left — the ORIGINAL cascade already deals with this piece
+
+      const newStability = minStability + 1;
+      if (newStability === p.stability) continue; // unchanged — nothing to propagate further
+      p.stability = newStability;
+
+      if (p.maxSpan != null && newStability > p.maxSpan) {
+        // exceeds this piece's material span — it collapses on its own
+        // weight. despawnPiece's own cascade handles ITS dependents (don't
+        // also propagate them through this walk — that would double up
+        // with despawnPiece's BFS over the same supports edges).
+        CBZ.despawnPiece(id, { cascade: true });
+        continue;
+      }
+
+      (p.supports || []).forEach(function (did) { if (!visited.has(did)) queue.push(did); });
+    }
+  }
+
+  // ============================================================
+  // Reap drain — deferred cleanup for everything despawnPiece queued,
+  // PLUS (B4) the stability recompute pass over whatever that teardown's
+  // dependents just lost part of their support.
+  // ============================================================
+  function reapDrain() {
+    if (!reapQueue.size) return;
+    const ids1 = new Set(reapQueue);
+    reapQueue.clear();
+    const frontier = teardownBatch(ids1);
+
+    // B4: fold in anything a PREVIOUS drain's walk-cap deferred.
+    if (pendingRecompute.size) {
+      pendingRecompute.forEach(function (id) { frontier.add(id); });
+      pendingRecompute.clear();
+    }
+
+    if (frontier.size) recomputeStability(frontier);
+
+    // The recompute pass above may have called despawnPiece (marks dead +
+    // queues here, doesn't tear down yet) — resolve THOSE in this same
+    // drain so a stability collapse reads as one beat, not one frame
+    // lagged behind its cause. This is exactly ONE extra pass (not a
+    // loop): any THIRD-order ripple from what this pass kills is left for
+    // pendingRecompute / the next drain tick — bounded cost per frame
+    // instead of chasing an arbitrarily long chain to completion now.
+    if (reapQueue.size) {
+      const ids2 = new Set(reapQueue);
+      reapQueue.clear();
+      const frontier2 = teardownBatch(ids2);
+      frontier2.forEach(function (id) { pendingRecompute.add(id); });
+
+      // a base section giving way should feel like something — only for
+      // a real collapse (3+ pieces), not every single-piece stability tweak.
+      if (ids2.size >= 3 && CBZ.shake) CBZ.shake(Math.min(1.2, 0.3 + ids2.size * 0.05));
+    }
   }
   CBZ._piecesReapDrain = reapDrain; // internal hook: CBZ.piecesSelfTest calls this directly for a synchronous result
 

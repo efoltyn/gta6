@@ -79,6 +79,29 @@
 
   const HP = 250; // wood tier — flat for all 6 pieces this wave (B5 wires the material x damage-type table)
 
+  /* ---- STRUCTURAL INTEGRITY (B4) ------------------------------------
+     piece.stability = BFS hop count from the nearest foundation/ground
+     ROOT (root = 0: a foundation, or any fill piece resting straight on
+     the ground). Computed CHEAPLY at place() time — no full-graph BFS
+     needed, since a piece's supporter(s) are already placed (and thus
+     already carry their own settled stability) by the time this piece
+     goes down: stability = min(live supporters' stability) + 1.
+
+     MAX_SPAN bounds how many hops a kind may sit from that root before
+     computeValidity rejects it ("too far from foundation") — a flat
+     wood-tier table this wave; B5's material tiers replace this one
+     table with one per tier (stone/metal spanning further than wood).
+     ------------------------------------------------------------------ */
+  const MAX_SPAN = {
+    foundation: Infinity, // always the root itself — never rejected on distance
+    wall: 6,
+    floor: 5,
+    roof: 5,
+    stairs: 5,
+    doorframe: 6,
+  };
+  function maxSpanFor(kind) { return MAX_SPAN[kind] != null ? MAX_SPAN[kind] : Infinity; }
+
   // Quarter-turn footprint swap — same math as pieces.js's local
   // rotateFootprint / city/assets.js's rotatedFootprint, reimplemented
   // here (integer 0-3 rot, this file's native unit) so building.js has
@@ -264,6 +287,15 @@
   function slotFor(kind, rot) { return (kind === "wall" || kind === "doorframe") ? ("e" + rot) : "fill"; }
 
   // ---- support rules (documented per-kind; see file header for the model) --
+  // Every branch now ALSO returns `stability` (B4): 0 for a ground/root
+  // rest, else min(live supporter stability) + 1. floor/roof additionally
+  // return `pieceIds` (ALL supporting walls on the cell below, not just
+  // the first) alongside `pieceId` (kept = pieceIds[0] for backward
+  // compatibility with any caller still reading the single-id field).
+  function stabilityOf(pieceId) {
+    const p = pieceId != null && CBZ.pieces ? CBZ.pieces.get(pieceId) : null;
+    return (p && p.stability != null) ? p.stability : 0;
+  }
   function checkSupport(kind, gx, gy, gz, cx, cz) {
     if (kind === "foundation") {
       // ground-only, ground floor only: findSupport must land within
@@ -272,31 +304,54 @@
       if (gy !== 0) return { ok: false };
       const s = CBZ.findSupport ? CBZ.findSupport(cx, cz, -0.5, 0.5) : null;
       if (!s) return { ok: false };
-      return { ok: true, pieceId: s.pieceId || null };
+      return { ok: true, pieceId: s.pieceId || null, stability: 0 };
     }
     if (kind === "wall" || kind === "doorframe") {
       // simplest correct rule (task's own resolution of the ambiguity):
       // a wall/doorframe needs a FILL piece (foundation/floor/roof) at
-      // its own cell + level, full stop.
+      // its own cell + level, full stop. Single supporter — stability
+      // rides straight off that one fill piece.
       const fillId = occupancy.get(occKey(gx, gy, gz, "fill"));
       if (!fillId) return { ok: false };
-      return { ok: true, pieceId: fillId };
+      return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
     if (kind === "floor" || kind === "roof") {
       // ground floor (gy===0): same ground rule as foundation (a floor
       // CAN be laid straight on the ground instead of a foundation).
+      // Ground-supported fill pieces are ALSO roots (stability 0) — same
+      // simplification as foundation, regardless of which candidate
+      // findSupport actually picked (ground vs. a piece's platform at
+      // the same level).
       if (gy === 0) {
         const s = CBZ.findSupport ? CBZ.findSupport(cx, cz, -0.5, 0.5) : null;
         if (!s) return { ok: false };
-        return { ok: true, pieceId: s.pieceId || null };
+        return { ok: true, pieceId: s.pieceId || null, stability: 0 };
       }
       // gy>0: Rust-LENIENT rule — ONE wall on ANY edge of the cell below
       // is enough (not all 4, "for rigor" — explicitly not required).
+      // B4 MULTI-SUPPORT: collect EVERY wall on the cell's 4 edges (not
+      // just the first) into pieceIds, so losing one still leaves the
+      // others wired into supportedBy — pieces.js's recompute then finds
+      // the survivor(s) instead of the floor going straight through the
+      // old "supportedBy emptied" cascade. stability = min of all of
+      // them + 1 (the SHORTEST path to a root wins, same BFS-hop meaning
+      // as a single supporter). NOTE: every edge of one cell shares the
+      // SAME underlying fill piece, so in THIS wave's grid all sibling
+      // supporters of one floor are always stability-EQUAL by
+      // construction (min() is still the generally-correct operation —
+      // it just never actually has to pick a smaller of two DIFFERENT
+      // values until a future wave adds cross-cell/diagonal bracing).
+      const pieceIds = [];
+      let minStability = Infinity;
       for (let r = 0; r < 4; r++) {
         const wid = occupancy.get(occKey(gx, gy - 1, gz, "e" + r));
-        if (wid) return { ok: true, pieceId: wid };
+        if (!wid) continue;
+        pieceIds.push(wid);
+        const ws = stabilityOf(wid);
+        if (ws < minStability) minStability = ws;
       }
-      return { ok: false };
+      if (!pieceIds.length) return { ok: false };
+      return { ok: true, pieceId: pieceIds[0], pieceIds: pieceIds, stability: minStability + 1 };
     }
     if (kind === "stairs") {
       // INTERPRETATION NOTE: stairs occupy the "fill" slot at their OWN
@@ -308,11 +363,11 @@
       if (gy === 0) {
         const s = CBZ.findSupport ? CBZ.findSupport(cx, cz, -0.5, 0.5) : null;
         if (!s) return { ok: false };
-        return { ok: true, pieceId: s.pieceId || null };
+        return { ok: true, pieceId: s.pieceId || null, stability: 0 };
       }
       const fillId = occupancy.get(occKey(gx, gy - 1, gz, "fill"));
       if (!fillId) return { ok: false };
-      return { ok: true, pieceId: fillId };
+      return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
     return { ok: false };
   }
@@ -378,6 +433,13 @@
 
     const sup = checkSupport(kind, gx, gy, gz, cx, cz);
     if (!sup.ok) return { ok: false, reason: "no support at this position", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
+    // B4: structural integrity — reject a placement whose candidate
+    // stability (hops from the nearest root) exceeds this kind's
+    // MAX_SPAN, so cantilevers/towers can't stack forever off one
+    // foundation. Checked AFTER support (a candidate needs a stability
+    // number to compare) but BEFORE the world-collision gate (cheaper,
+    // and gives B2's ghost the more specific reason first).
+    if (sup.stability > maxSpanFor(kind)) return { ok: false, reason: "too far from foundation", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
     if (!CBZ.placement || !CBZ.placement.isFree(rect)) return { ok: false, reason: "blocked by existing geometry", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
 
     return { ok: true, reason: null, slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
@@ -392,6 +454,7 @@
   const B = (CBZ.building = {});
   B.CELL = CELL; B.WALL_H = WALL_H; B.FLOOR_T = FLOOR_T; B.WALL_T = WALL_T;
   B.CATALOG = CATALOG;
+  B.MAX_SPAN = MAX_SPAN; // exposed read-only for tooling/harness/B5 (per-tier scaling)
 
   // Convenience for B2's ghost preview: grid coords -> world origin
   // (the SAME formula as the file-header contract; exposed so callers
@@ -436,6 +499,10 @@
       walkTop: !!def.walkTop,
       blockLOS: !!def.blockLOS,
       gridPos: { gx: gx, gy: gy, gz: gz },
+      // B4: stability/maxSpan live ON the piece (pieces.js stays generic —
+      // it only ever compares these two numbers, never re-derives them).
+      stability: sup.stability != null ? sup.stability : 0,
+      maxSpan: maxSpanFor(kind),
     });
     if (!piece) return null;
 
@@ -445,10 +512,18 @@
     occupancy.set(key, piece.id);
     pieceIdToOccKey.set(piece.id, key);
 
-    if (sup.ok && sup.pieceId) {
-      piece.supportedBy.push(sup.pieceId);
-      const sp = CBZ.pieces.get(sup.pieceId);
-      if (sp) sp.supports.push(piece.id);
+    // B4 MULTI-SUPPORT: wire EVERY supporter into supportedBy/supports —
+    // sup.pieceIds (floor/roof, may hold >1 wall) when present, else the
+    // single sup.pieceId (wall/doorframe/stairs/foundation, or null on
+    // bare ground — nothing to wire).
+    if (sup.ok) {
+      const supporterIds = (sup.pieceIds && sup.pieceIds.length) ? sup.pieceIds : (sup.pieceId ? [sup.pieceId] : []);
+      for (let i = 0; i < supporterIds.length; i++) {
+        const sid = supporterIds[i];
+        piece.supportedBy.push(sid);
+        const sp = CBZ.pieces.get(sid);
+        if (sp) sp.supports.push(piece.id);
+      }
     }
 
     if (kind === "stairs") {
