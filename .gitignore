@@ -2,3 +2,8 @@ node_modules/
 *.log
 .DS_Store
 server/worlds/
+
+# O1 (BUILD-PLAN.md Stage O): `vite build` output — a copied-through static
+# bundle (legacy tree + dist/assets/bootstrap.js), regenerable via
+# `npm run build`. Never the source of truth; not committed.
+dist/
