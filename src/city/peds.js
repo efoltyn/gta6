@@ -1017,6 +1017,7 @@
     if (CBZ.hunger && CBZ.hunger.reset) CBZ.hunger.reset();   // X2: fresh city → cohort hungerAvg back to its seeded baseline
     if (CBZ.corps && CBZ.corps.reset) CBZ.corps.reset();   // E5: fresh city → the roster resets (re-claims outlets on the next build tick)
     if (CBZ.stocks && CBZ.stocks.reset) CBZ.stocks.reset();   // E7: fresh city → exchange/portfolio/index reset (no stale prior-run IPO tickers)
+    if (CBZ.forex && CBZ.forex.reset) CBZ.forex.reset();   // M2: fresh city → FX rates back to their wealth-implied par values
     if (CBZ.billionaires && CBZ.billionaires.reset) CBZ.billionaires.reset();   // E8: fresh city → founders/holdings re-mint on the next tick
     if (CBZ.motorsport && CBZ.motorsport.reset) CBZ.motorsport.reset();   // E10: fresh city → teams/drivers re-mint on the next tick
     CBZ.cityDrops.length = 0;

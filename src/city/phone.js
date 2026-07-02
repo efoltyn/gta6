@@ -316,6 +316,62 @@
     });
   }
 
+  // ---- M2: CURRENCY EXCHANGE — read-only (trading is a real-venue verb, at
+  //      the airport FX counter / exchange desk — sim/forex.js) window onto
+  //      the 4 foreign currencies' live LBD rate, same row+sparkline idiom
+  //      as marketsHtml()/drawSparklines() above, reusing that exact shape.
+  function fmtFxRate(r) { return r >= 1 ? r.toFixed(2) : r.toFixed(4); }
+  function fxHtml(rowsData) {
+    if (!rowsData || !rowsData.length) {
+      return card("💱 CURRENCY EXCHANGE", "<div style='font-size:13px;color:" + DIM + "'>No exchange data available.</div>");
+    }
+    let inner = "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Quoted vs the Liberty Dollar — trade at an airport FX counter or the exchange desk.</div>";
+    rowsData.forEach(function (r) {
+      const col = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
+      const perDollar = r.rate > 0 ? 1 / r.rate : 0;
+      inner += "<div style='padding:3px 0'>" +
+        "<div style='display:flex;justify-content:space-between;align-items:center'>" +
+        "<span style='font-size:12px;color:" + DIM + "'>" + esc(r.id) + "</span>" +
+        "<span style='display:flex;align-items:center;gap:8px'>" +
+        "<span style='font-weight:600;font-size:13px;color:" + col + "'>1 " + esc(r.id) + " = $" + fmtFxRate(r.rate) + " " + arrow + "</span>" +
+        "<canvas id='fxSpark_" + esc(r.id) + "' width='56' height='18' style='display:block'></canvas>" +
+        "</span></div>" +
+        "<div style='font-size:10px;color:" + DIM + ";text-align:right'>$1 &asymp; " +
+        perDollar.toFixed(perDollar >= 100 ? 0 : (perDollar >= 1 ? 2 : 4)) + " " + esc(r.id) + "</div>" +
+        "</div>";
+    });
+    return card("💱 CURRENCY EXCHANGE", inner);
+  }
+  // paints each currency's sparkline canvas from its history ring — same
+  // DOM/canvas-only split as drawSparklines()/drawStockSpark() above (a
+  // no-op outside a real DOM; the node harness only exercises CBZ.forex's
+  // own data layer this feeds).
+  function drawFxSparklines(rowsData) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    (rowsData || []).forEach(function (r) {
+      const cv = document.getElementById("fxSpark_" + r.id);
+      if (!cv || typeof cv.getContext !== "function") return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const w = cv.width || 56, h = cv.height || 18;
+      if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+      const hist = r.history;
+      if (!hist || hist.length < 2) return;
+      const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+      const span = (hi - lo) || 0.01;
+      ctx.strokeStyle = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach(function (v, i) {
+        const x = (i / (hist.length - 1)) * w;
+        const y = h - ((v - lo) / span) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
   function crewApp() {
     const pg = g.playerGang;
     if (pg && pg.founded) {
@@ -509,6 +565,7 @@
     if (!body) return;
     let html = "";
     let marketRows = [];
+    let fxRows = [];
     try { html += servicesApp(); } catch (e) {}
     try { html += wantedApp(); } catch (e) {}
     try { html += territoryApp(); } catch (e) {}
@@ -518,12 +575,17 @@
       const sum = (CBZ.econState && typeof CBZ.econState.summary === "function") ? CBZ.econState.summary() : null;
       html += marketsHtml(marketRows, sum);
     } catch (e) {}
+    try {
+      fxRows = (CBZ.forex && typeof CBZ.forex.list === "function") ? CBZ.forex.list() : [];
+      html += fxHtml(fxRows);
+    } catch (e) {}
     try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}
     try { html += vitalsApp(); } catch (e) {}
     body.innerHTML = html;
     // sparkline canvases only exist now that innerHTML landed — paint them.
     try { drawSparklines(marketRows); } catch (e) {}
+    try { drawFxSparklines(fxRows); } catch (e) {}
     try { if (stockOpen) drawStockSpark(stockOpen); } catch (e) {}
   }
 

@@ -146,6 +146,9 @@
     if (CBZ.polwar && CBZ.polwar.serialize) try { blob.war = CBZ.polwar.serialize(); } catch (e) {}
     if (CBZ.migration && CBZ.migration.serialize) try { blob.mig = CBZ.migration.serialize(); } catch (e) {}
     if (CBZ.civilwar && CBZ.civilwar.serialize) try { blob.cwar = CBZ.civilwar.serialize(); } catch (e) {}
+    // M2: forex rates are WORLD state (shared economy), not per-player —
+    // rides the same rider family as blob.mig/blob.cwar right beside them.
+    if (CBZ.forex && CBZ.forex.serialize) try { blob.fx = CBZ.forex.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -284,6 +287,10 @@
     // polity/relations/regimes/polwar/migration have all already restored,
     // matching every other module's own "runs after its dependencies" note.
     if (w.cwar && CBZ.civilwar && CBZ.civilwar.apply) try { CBZ.civilwar.apply(w.cwar); } catch (e) { console.error("[netpersist]", e); }
+    // M2: forex's own apply() just restores its rates/history/momentum
+    // rows — no ordering dependency on anything above, rides right beside
+    // w.mig/w.cwar per the same-family rider convention.
+    if (w.fx && CBZ.forex && CBZ.forex.apply) try { CBZ.forex.apply(w.fx); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }
