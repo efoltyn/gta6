@@ -67,7 +67,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **P5** `city/protection.js` (new): unified `ProtectionDetail` — secret-service details for officials, hireable/armable security for the player, gang crews adopt the same record.
 - [x] **P6** `city/regimes.js` (new): govType state machine + first effects (fascist curfew, communist price controls via market.js, **anarchist collapse transitions cops → former cops who keep their guns**).
 - [x] **P6b** Monarchy: crown-as-bloodline regime — succession via familytree heirOf (spouse regency, eldest child, collateral line), legitimacy stat, royal marriages as alliances, visible line of succession, dictator self-coronation + restoration/pretender triggers.
-- [ ] **P7** Militia: protection details past headcount threshold become factions (turf/treasury via gang machinery); regime reactions.
+- [x] **P7** Militia: protection details past headcount threshold become factions (turf/treasury via gang machinery); regime reactions.
 - [ ] **P8** `city/polwar.js` (new): state/country wars generalizing gang wars — fronts at causeways, counted matériel consumption, procurement contracts to corporations.
 - [ ] **P9** Migration: policy per country (president legislates, dictator decrees), individual migration evaluation, brain drain/refugee flows, border-escape gigs.
 

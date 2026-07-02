@@ -663,6 +663,15 @@
      restoration) and needs CBZ.officials/CBZ.relations/CBZ.demographics/
      CBZ.cityFamilyTree, all already live above. -->
 <script src="src/city/crown.js?v=pol1"></script>
+<!-- P7: militia — protection details past a headcount threshold escalate
+     into real CBZ.cityGangs factions (gang machinery reused, not forked),
+     with regime reactions (democracy watches, fascism/dictatorship cracks
+     down or absorbs a loyalist, communism nationalizes, anarchism lets them
+     thrive). Loads LAST in the P/X-wave block: it reads CBZ.protection's own
+     details(), CBZ.cityGangs/cityGangById, CBZ.polity/regimes' govType, and
+     CBZ.cityLedgerEntry/cityPoliceForceAdd — every one of those already live
+     above. -->
+<script src="src/city/militia.js?v=pol1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>

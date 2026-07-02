@@ -564,6 +564,7 @@
   function launchWar(a, b, opts) {
     if (!a || !b || a === b || !b.turf.length) return 0;
     if (a.isPlayer) return 0;   // your gang only raids on YOUR orders, never on its own
+    if (a.playerOwned) return 0;   // P7: a player-owned militia defends turf but never launches wars on its own
     opts = opts || {};
     const targetLot = opts.lot || b.turf[(rng() * b.turf.length) | 0];
     // BIGGER set-piece battles: a flush treasury / hot war buys a deeper push.
@@ -1814,7 +1815,7 @@
       // crews shooting it out (was 18-34s). Still cadence-limited + treasury-gated
       // in launchWar so it never spawns unbounded squads or bankrupts the economy.
       warT = 8 + rng() * 9;
-      const live = CBZ.cityGangs.filter((x) => !x.isPlayer && x.turf.length && gangStrength(x) >= 2);
+      const live = CBZ.cityGangs.filter((x) => !x.isPlayer && !x.playerOwned && x.turf.length && gangStrength(x) >= 2);
       if (live.length >= 2) {
         // attacker bias: richest / most aggrieved crew presses first — and an
         // EXPANSIONIST archetype (cartel: high expandW) weighs in heavier, so

@@ -28,8 +28,14 @@
    - Secret Service + Hired Security are REAL, owned ProtectionDetail records
      (this file's own registry, g.protection.details). Militia (P7 — hired
      security past a headcount threshold becoming a faction) is NOT built
-     here; hire() caps at 4 for exactly that reason (a militia needs its own
-     turf/treasury wiring the plan reserves for P7).
+     here; hire() capped at 4 for exactly that reason (a militia needs its own
+     turf/treasury wiring the plan reserves for P7). [P7 UPDATE: that wiring
+     now exists in city/militia.js — HIRE_CAP is raised to 8 there and this
+     file's own onNewDay sweep is joined by militia.js's escalation check,
+     which watches every detail (this one AND officials.js's off_* Secret
+     Service records) and converts any that cross MILITIA_HEADCOUNT into a
+     real gang-machinery faction, zeroing this record's memberCount back to 0
+     so it never double-pays a roster it no longer drives.]
    - Gangs are NOT refactored (too risky — gangs.js's guard/loyalty/rank
      machinery is a large, load-bearing, independently-evolving system with
      its own succession/war/turf ties). Instead this file exposes a
@@ -128,7 +134,13 @@
     { weapon: "SMG", ammo: 90, hp: 150, hireCost: 550, wage: 18 },
     { weapon: "Rifle", ammo: 60, hp: 190, hireCost: 1100, wage: 30 },
   ];
-  const HIRE_CAP = 4;                 // "Cap 4" — past this is P7's militia, not this wave
+  // P7: raised from the original P5 cap of 4 ("past this is P7's militia,
+  // not this wave" — this IS that wave now). Hired security can grow to 8;
+  // city/militia.js watches every detail daily and, once a roster crosses
+  // its own MILITIA_HEADCOUNT threshold (6 — comfortably inside this cap),
+  // escalates it into a real gang-machinery faction and zeroes this record
+  // out from under it (see that file's escalate()).
+  const HIRE_CAP = 8;
   const SUBORN_BASE_COST = 400;       // scaled by the member's loyalty axis (see suborn())
   const SUBORN_WINDOW = 30;           // seconds the member steps aside for, per the plan
 

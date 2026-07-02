@@ -93,6 +93,10 @@
   // this once on the transition — the force isn't "reset", it's GONE; the
   // cops themselves were converted to former-cop peds, not despawned).
   CBZ.cityPoliceForceZero = function () { forcePool = 0; };
+  // P7: communist nationalization folds a disbanded militia's headcount into
+  // the force's reserve (city/militia.js calls this once on nationalization —
+  // these bodies are absorbed personnel, not a config-level force bump).
+  CBZ.cityPoliceForceAdd = function (n) { forcePool = Math.max(0, forcePool + (n | 0)); };
   // {alive,deployed,max} for the HUD / map: alive = officers still on the books
   // (the pool you can still field + the ones currently deployed). Falls only as
   // cops are killed; crawls back via the academy trickle.
