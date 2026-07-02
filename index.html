@@ -626,6 +626,14 @@
      fine, every cross-module read it does is guarded and resolved at CALL
      time (its own onNewDay tick), not at parse time. See that file's header. -->
 <script src="src/sim/forex.js?v=cur1"></script>
+<!-- M3: centralbank.js — governor NPCs, the policy rate feeding bank.js's
+     RATES (a compatibility-accessor design so day one is byte-identical —
+     see that file's own header) + the reserve-requirement credit cap.
+     Loads immediately after forex.js (same v=cur1 bucket, per BUILD-PLAN's
+     own instruction) — forex.js's own carryTerm seam
+     (CBZ.centralbank && CBZ.centralbank.rate(id)) picks this up with ZERO
+     forex.js edits the moment this file exists. -->
+<script src="src/sim/centralbank.js?v=cur1"></script>
 <script src="src/sim/market.js?v=econ1"></script>
 <script src="src/sim/econstate.js?v=econ1"></script>
 <script src="src/sim/npcecon.js?v=econ1"></script>

@@ -87,7 +87,38 @@
   // the whole world economy stays balanced. The level payment is computed on
   // the per-cycle rate too, so offer + tick are fully self-consistent.
   const CYCLES_PER_YR = 240;
-  const RATES = { mortgage: 0.06, personal: 0.15, auto: 0.09, pawn: 0.0 };  // headline APR
+  // M3 (sim/centralbank.js): RATES used to be a flat headline-APR table.
+  // Compatibility-first design (the M1 lesson — see that file's header):
+  // every headline rate is now POLICY RATE + a fixed spread, never edited
+  // directly. NEUTRAL_POLICY_RATE (4%) is centralbank.js's own documented
+  // seed for every bank's policyRate at world-boot — so on day one (and in
+  // every pre-M3 harness that never loads sim/centralbank.js at all, since
+  // this file loads BEFORE it in index.html) headlineRate() falls back to
+  // this exact constant and reproduces the old flat numbers BYTE-IDENTICAL:
+  // mortgage 0.04+0.02=0.06, personal 0.04+0.11=0.15, auto 0.04+0.05=0.09.
+  // pawn keeps its own flat 0 — that product is owned entirely by
+  // pawnshop.js (see the big comment below) and was never a policy-linked
+  // bank rate to begin with.
+  const NEUTRAL_POLICY_RATE = 0.04;
+  const RATE_SPREAD = { mortgage: 0.02, personal: 0.11, auto: 0.05, pawn: 0.0 };
+  // the republic's live policy rate — guarded read, resolved at CALL time
+  // (never at parse time: sim/centralbank.js loads AFTER this file). Absent
+  // centralbank.js entirely, or before it's ticked once, this is exactly
+  // NEUTRAL_POLICY_RATE — the whole point of the accessor design.
+  function policyRate() {
+    if (CBZ.centralbank && typeof CBZ.centralbank.rate === "function") {
+      const r = CBZ.centralbank.rate("republic");
+      if (isFinite(r)) return r;
+    }
+    return NEUTRAL_POLICY_RATE;
+  }
+  // headline rate for a loan purpose, right now: policy rate + that
+  // product's fixed spread (never below 0 — a policy rate near zero still
+  // prices a real spread, it just can't go negative on the player-facing side).
+  function headlineRate(purpose) {
+    const spread = RATE_SPREAD[purpose] != null ? RATE_SPREAD[purpose] : RATE_SPREAD.personal;
+    return Math.max(0, policyRate() + spread);
+  }
   // amortization horizon in billing cycles. Kept GAME-SCALE (a session, not a
   // 30-yr slog): a mortgage clears in a couple hundred cycles, a personal note
   // far quicker. The level-payment floor below keeps a low per-cycle rate from
@@ -152,11 +183,11 @@
   // the loan correctly even when the caller (zillow.financeBuy) passes the offer
   // straight to take() without re-tagging it — otherwise a mortgage would book
   // as a personal loan and DISBURSE cash (a double-pay / free-house exploit).
-  function offer(purpose, principal, ctx) {
+  function rawOffer(purpose, principal, ctx) {
     purpose = (purpose === "mortgage" || purpose === "auto") ? purpose : "personal";
     ctx = ctx || {};
     principal = Math.max(0, Math.round(num(principal, 0)));
-    const rate = RATES[purpose] != null ? RATES[purpose] : RATES.personal;
+    const rate = headlineRate(purpose);
     const termTicks = TERMS[purpose] || TERMS.personal;
     const base = { approved: false, principal: principal, rate: rate, termTicks: termTicks, payment: 0, reason: "", purpose: purpose };
 
@@ -214,6 +245,48 @@
     return base;
   }
 
+  // ============================================================
+  //  M3: RESERVE-REQUIREMENT CREDIT CAP — a system-wide ceiling layered on
+  //  top of rawOffer()'s own per-loan underwriting above.
+  //  CBZ.centralbank.creditHeadroom("republic", totalOwed()) answers "how
+  //  much MORE credit can this system issue right now", off the central
+  //  bank's own reserveReq/deposits bookkeeping (sim/centralbank.js) — this
+  //  file is the ONE real credit-issuance ledger in the game today (no NPC
+  //  loan book exists anywhere else yet), so "republic" is the one
+  //  jurisdiction this cap actually binds against; see that file's own
+  //  header for the documented scope note (a future wave that adds NPC
+  //  credit sums it into the same totalOwed()-shaped read, zero shape
+  //  change here). GUARDED: centralbank.js loads AFTER this file in
+  //  index.html, and every pre-M3 harness never loads it at all — absent it,
+  //  headroom is Infinity and this whole gate is a silent no-op (day one,
+  //  and every existing loan-flow test, unchanged).
+  // ------------------------------------------------------------
+  function creditHeadroom() {
+    if (!CBZ.centralbank || typeof CBZ.centralbank.creditHeadroom !== "function") return Infinity;
+    const h = CBZ.centralbank.creditHeadroom("republic", totalOwed());
+    return isFinite(h) ? Math.max(0, h) : Infinity;
+  }
+  function offer(purpose, principal, ctx) {
+    const o = rawOffer(purpose, principal, ctx);
+    if (!o.approved) return o;
+    const headroom = creditHeadroom();
+    if (o.principal > headroom) {
+      if (headroom < MIN_PRINCIPAL) {
+        // the reserve requirement fully binds — same refusal shape (approved:
+        // false + a human reason) every other offer() decline already uses.
+        o.approved = false; o.principal = 0; o.payment = 0;
+        o.reason = "credit ceiling reached — the central bank's reserve requirement is binding";
+        return o;
+      }
+      // partial room left: offer what the system can actually still lend,
+      // same "approved up to X" UX the personal-capacity gate above uses.
+      o.principal = Math.floor(headroom);
+      o.payment = paymentFor(o.principal, o.rate, o.termTicks);
+      o.reason = "approved up to " + fmt$(o.principal) + " — bank credit ceiling binding";
+    }
+    return o;
+  }
+
   // TAKE — book an approved offer. Disburses to g.cash for personal/auto
   // (the money hits your pocket); MORTGAGE proceeds go to "escrow" (the seller
   // is paid by zillow's down+register flow — the engine only carries the debt,
@@ -227,7 +300,7 @@
     const kind = (o.purpose === "mortgage" || o.purpose === "auto") ? o.purpose
                : (o.kind === "mortgage" || o.kind === "auto" || o.kind === "personal") ? o.kind
                : "personal";
-    const rate = Math.max(0, num(o.rate, RATES[kind] != null ? RATES[kind] : RATES.personal));
+    const rate = Math.max(0, num(o.rate, headlineRate(kind)));
     const termTicks = Math.max(1, Math.round(num(o.termTicks, TERMS[kind] || TERMS.personal)));
     const payment = Math.max(1, Math.round(num(o.payment, paymentFor(principal, rate, termTicks))));
     const id = "loan" + (_nextId++) + "_" + (CBZ.now ? (CBZ.now | 0) : Date.now() % 1e7);

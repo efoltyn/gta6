@@ -149,6 +149,9 @@
     // M2: forex rates are WORLD state (shared economy), not per-player —
     // rides the same rider family as blob.mig/blob.cwar right beside them.
     if (CBZ.forex && CBZ.forex.serialize) try { blob.fx = CBZ.forex.serialize(); } catch (e) {}
+    // M3: centralbank's own blob — rates/governors/independence/decrees.
+    // Rides the same rider family as blob.fx, right beside it.
+    if (CBZ.centralbank && CBZ.centralbank.serialize) try { blob.cb = CBZ.centralbank.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -291,6 +294,12 @@
     // rows — no ordering dependency on anything above, rides right beside
     // w.mig/w.cwar per the same-family rider convention.
     if (w.fx && CBZ.forex && CBZ.forex.apply) try { CBZ.forex.apply(w.fx); } catch (e) { console.error("[netpersist]", e); }
+    // M3: centralbank's own apply() just restores rates/governors/
+    // independence/decrees — no ordering dependency on anything above
+    // (a restored governor sid resolves through the ledger the moment it's
+    // referenced, same as any other officeholder sid); rides right beside
+    // w.fx per the same rider-family convention.
+    if (w.cb && CBZ.centralbank && CBZ.centralbank.apply) try { CBZ.centralbank.apply(w.cb); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }

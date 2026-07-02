@@ -8,7 +8,9 @@
      • EMPIRE   — cash, bank, respect, home, car business notoriety
      • MARKETS  — sim/market.js's 6 category prices + sim/econstate.js's CPI/
                   activity/employment/treasury, each row with a tiny inline
-                  sparkline (E3 legibility: the invisible economy, on your phone)
+                  sparkline (E3 legibility: the invisible economy, on your phone);
+                  sibling cards 💱 CURRENCY EXCHANGE (M2) and 🏦 CENTRAL BANKS
+                  (M3: policy rate/independence/governor per country) ride here too
      • CREW     — your founded gang: name, live members, turf held
      • VITALS   — HP, hunger, tiredness, injuries
 
@@ -372,6 +374,31 @@
     });
   }
 
+  // ---- M3: CENTRAL BANKS — read-only, one row per country: policy rate,
+  //      independence badge, governor, and a captured/suspended flag.
+  //      Reuses the exact row idiom every other card here uses; lives on
+  //      the phone (not city/bank.js's own branch UI) because that branch
+  //      is ONE physical building serving only the republic, while the
+  //      phone already aggregates every country in one glanceable list —
+  //      the same reasoning M2's own "💱 CURRENCY EXCHANGE" card documents
+  //      for why IT lives here instead of only at the FX kiosks.
+  function cbHtml(rowsData) {
+    if (!rowsData || !rowsData.length) {
+      return card("🏦 CENTRAL BANKS", "<div style='font-size:13px;color:" + DIM + "'>No central bank data available.</div>");
+    }
+    let inner = "";
+    rowsData.forEach(function (r) {
+      const flag = r.suspended ? " <span style='color:" + RED + "'>🔒 SUSPENDED</span>"
+        : r.decreed ? " <span style='color:" + GOLD + "'>⚡ DECREED</span>" : "";
+      const indColor = r.independence >= 0.6 ? GREEN : (r.independence >= 0.35 ? GOLD : RED);
+      const label = esc(r.name) + (r.governorName ? " · " + esc(r.governorName) : "");
+      inner += row(label, (r.policyRate * 100).toFixed(2) + "%" + flag) +
+        "<div style='font-size:10px;color:" + DIM + ";text-align:right;margin:-2px 0 4px'>" +
+        "independence <span style='color:" + indColor + "'>" + Math.round(r.independence * 100) + "%</span></div>";
+    });
+    return card("🏦 CENTRAL BANKS", inner);
+  }
+
   function crewApp() {
     const pg = g.playerGang;
     if (pg && pg.founded) {
@@ -578,6 +605,10 @@
     try {
       fxRows = (CBZ.forex && typeof CBZ.forex.list === "function") ? CBZ.forex.list() : [];
       html += fxHtml(fxRows);
+    } catch (e) {}
+    try {
+      const cbRows = (CBZ.centralbank && typeof CBZ.centralbank.list === "function") ? CBZ.centralbank.list() : [];
+      html += cbHtml(cbRows);
     } catch (e) {}
     try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}

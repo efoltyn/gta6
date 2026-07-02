@@ -85,7 +85,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 - [x] **M1** `sim/currency.js` (new): multi-currency wallet map; `g.cash`/`g.cityBank` become LBD compatibility accessors — day one unchanged.
 - [x] **M2** `sim/forex.js` (new): rates over the 5 currencies M1 registered (PPP+carry+confidence+momentum), quoted vs LBD; airport FX counter + exchange desk. Scope adaptation (recorded in the file's own header): the "Countries CRE/WMK registered" clause is superseded — that dates from a MASTER-PLAN draft where costa/westmark were the only other polities; X3 shipped 5 real countries instead and M1 already registered 5 currencies for that exact roster. costa/westmark remain republic STATES; CRE/WMK are not created.
-- [ ] **M3** `sim/centralbank.js` (new): governor NPCs, policy rate wired into bank.js RATES, reserve-requirement credit cap.
+- [x] **M3** `sim/centralbank.js` (new): governor NPCs, policy rate wired into bank.js RATES, reserve-requirement credit cap.
 - [ ] **M4** Inflation: π equation → priceIndex compounding → every price; CPI ticker; approval term −12·max(0, π−5%).
 - [ ] **M5** Bonds: deficit → auctions (billionaires/companies/player) → unsold remainder printed.
 - [ ] **M6** Hyperinflation stages + doom loop + redenomination/dollarization endings; Soros runs + counterfeiting.
