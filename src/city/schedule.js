@@ -300,6 +300,11 @@
     if (hrs > 0) {
       if (hrs > 48) hrs = 48;                        // two city days max — no infinities
       let cash = e.cash | 0;
+      // X2: the ledger half of the hunger loop — a compact 0..100 hunger
+      // rides beside cash and drains/auto-eats over the SAME offline hours,
+      // so a broke identity goes hungry exactly like a broke live one.
+      let hunger = e.hunger == null ? 75 : e.hunger;
+      const meal = (CBZ.hunger && CBZ.hunger.mealCost) ? CBZ.hunger.mealCost() : 3;
       const n = Math.ceil(hrs);
       for (let i = 0; i < n; i++) {
         const span = Math.min(1, hrs - i);
@@ -308,8 +313,12 @@
         if (act === "stash") cash = Math.min(cash, 40);
         else if (act === "work") cash += wageOf(e.job) * span * (0.6 + (e.wealth || 0.3) * 0.8);
         else if (RATE[act]) cash += RATE[act] * span * (0.6 + (e.wealth || 0.3) * 0.8);
+        hunger = Math.max(0, hunger - 6 * span);
+        if (hunger < 60 && cash >= meal) { cash -= meal; hunger = Math.min(100, hunger + 30); }
       }
       e.cash = Math.max(0, Math.min(2500, cash | 0));
+      e.hunger = Math.max(0, Math.min(100, Math.round(hunger)));
+      e.hungry = e.hunger < 30 ? 1 : 0;   // a cheap flag a future aigoals read could use (X2 — not consumed here)
     }
     // where the timetable puts them RIGHT NOW (the deal-in spawn match)
     const act = actOf(e.k, _h, e.salt, e.job) || "home";

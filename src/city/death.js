@@ -685,7 +685,9 @@
     const P = CBZ.player;
     if (!P.dead) {
       if (P._hurtT > 0) P._hurtT -= dt;
-      else if (P.hp < (P.maxHp || 200)) { P.hp = Math.min(P.maxHp || 200, P.hp + 16 * dt); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
+      // X2: systems/hunger.js sets _hungryNoRegen while hunger<30 — a hungry
+      // body doesn't patch itself up for free.
+      else if (!P._hungryNoRegen && P.hp < (P.maxHp || 200)) { P.hp = Math.min(P.maxHp || 200, P.hp + 16 * dt); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
     }
   });
 

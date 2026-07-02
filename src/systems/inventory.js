@@ -140,6 +140,10 @@
 
   // ---------- effects ----------
   function effect(name) {
+    // X2: escape mode's hunger loop (survival/escape had none before) — the
+    // snack items top up CBZ.player.hunger; a no-op for anything else/any
+    // other mode (city owns its own food loop via cityEat).
+    if (CBZ.hunger && CBZ.hunger.onConsume) CBZ.hunger.onConsume(name);
     if (FENCEABLE.has(name)) {
       const v = (CBZ.econ && CBZ.econ.ITEMS[name] && CBZ.econ.ITEMS[name].value) || 10;
       CBZ.econ && CBZ.econ.addCigs(v);
