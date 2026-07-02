@@ -51,7 +51,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **E2** `sim/econstate.js` (new): per-jurisdiction EconState, hourly tick (order 29.5), all 7 good categories, daily settlement.
 - [x] **E3** Legibility: adboard price/CPI ticker creative + phone Markets app with sparklines.
 - [x] **E4** NPC circulation: ledger rent/spend, cohort wallets (20 rows), robbery debits cohorts, vacancies become real.
-- [ ] **E5** `sim/corporations.js` (new): Bunbros with real outlet revenue from cohort spend; read-only ticker line.
+- [x] **E5** `sim/corporations.js` (new): Bunbros with real outlet revenue from cohort spend; read-only ticker line.
 - [ ] **E6** `sim/stocks.js` (new): exchange building role + buy/sell UI + price formation off real earnings.
 - [ ] **E7** Full 8-company roster + national index + dividends + IPO for player businesses.
 - [ ] **E8** Billionaires as persistent shareholder NPCs (MAGNATE VIP wiring, mark-to-market net worth, assassination shocks + succession via family tree from W9).

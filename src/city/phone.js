@@ -183,6 +183,16 @@
         "</span></div>";
     });
     if (!rowsData.length) inner = "<div style='font-size:13px;color:" + DIM + "'>Market data unavailable.</div>";
+    // E5: Bunbros (sim/corporations.js) — the first real corporation, one
+    // read-only row (name, today's-so-far/last daily earnings, cash-trend
+    // arrow). Absent entirely until outlets are actually built.
+    const co = (CBZ.corps && typeof CBZ.corps.summary === "function") ? CBZ.corps.summary() : null;
+    if (co) {
+      const coCol = co.cashTrend === "up" ? GOLD : (co.cashTrend === "down" ? GREEN : DIM);
+      const coArrow = co.cashTrend === "up" ? "▲" : (co.cashTrend === "down" ? "▼" : "–");
+      inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+      inner += row(co.tickerSym + " · " + co.name, money(co.dailyEarnings) + "/day " + coArrow, coCol);
+    }
     return card("📈 MARKETS", inner);
   }
   // paints each category's sparkline canvas from its history ring. Silently a

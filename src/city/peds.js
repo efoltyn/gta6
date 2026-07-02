@@ -1002,6 +1002,7 @@
     if (CBZ.market && CBZ.market.reset) CBZ.market.reset();   // E1: fresh city → levels back to 1.0
     if (CBZ.econState && CBZ.econState.reset) CBZ.econState.reset();   // E2: fresh city → EconState back to equilibrium
     if (CBZ.npcEcon && CBZ.npcEcon.reset) CBZ.npcEcon.reset();   // E4: fresh city → cohort wallets re-seeded off the fresh population
+    if (CBZ.corps && CBZ.corps.reset) CBZ.corps.reset();   // E5: fresh city → Bunbros resets (re-claims outlets on the next build tick)
     CBZ.cityDrops.length = 0;
     // the homeless are carved out of the ped budget so the TOTAL stays flat
     // (perf: redistribute, never add). Deterministic from the seeded stream.

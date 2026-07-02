@@ -253,6 +253,12 @@
     const activity = (CBZ.econState && typeof CBZ.econState.activity === "function") ? CBZ.econState.activity() : 1.0;
     const est = (CBZ.econState && CBZ.econState.get) ? CBZ.econState.get() : null;
     const priceAdj = clampNum(0.85, 1.15, (est && est.priceIndex != null) ? est.priceIndex : 1.0);
+    // E5 seam: this hour's per-district food/goods spend, for sim/
+    // corporations.js's outletRevenue (Bunbros reads it instead of
+    // duplicating this income/propensity math). Ephemeral like market.js's
+    // hist rings — rebuilt every pass, never serialized.
+    const spend = {};
+    for (const dk of DISTRICT_KEYS) spend[dk] = { food: 0, goods: 0 };
     for (const row of M.rows) {
       const income = row.pop * row.employedFrac * CLASS_WAGE[row.c] * activity * priceAdj;
       row.wallet += income;
@@ -262,11 +268,14 @@
       // wallet this wave — see the file header's PERSISTENCE/rent note.
       row.wallet = Math.max(0, row.wallet - (foodSpend + goodsSpend + entSpend));
       M.entPool = (M.entPool || 0) + entSpend;
+      spend[row.d].food += foodSpend;
+      spend[row.d].goods += goodsSpend;
       if (CBZ.market && CBZ.market.recordBuy) {
         if (foodSpend > 0) CBZ.market.recordBuy("food", foodSpend / DOLLARS_PER_UNIT);
         if (goodsSpend > 0) CBZ.market.recordBuy("goods", goodsSpend / DOLLARS_PER_UNIT);
       }
     }
+    CBZ.npcEcon.lastSpend = spend;
   }
   // VI.4: "one trivial pass per game hour" — order 29.6, right after
   // econstate.js's 29.55 so this hour's freshly-settled activity/priceIndex

@@ -555,7 +555,12 @@
       if (!M || typeof M.tickerLine !== "function") return null;
       const line1 = M.tickerLine(cats[0]), line2 = M.tickerLine(cats[1]);
       const E = CBZ.econState;
-      const line3 = (E && typeof E.tickerLine === "function") ? E.tickerLine() : "";
+      // E5: every ~20s window in 4, the CPI line makes way for Bunbros's
+      // read-only earnings line (sim/corporations.js) — "" (falls back to
+      // CPI) until that company actually has outlets built.
+      const C = CBZ.corps;
+      const corpLine = (C && typeof C.tickerLine === "function" && Math.floor((CBZ.now || 0) / 20000) % 4 === 3) ? C.tickerLine() : "";
+      const line3 = corpLine || ((E && typeof E.tickerLine === "function") ? E.tickerLine() : "");
       if (!line1 && !line2 && !line3) return null;
       return [line1, line2, 0x05060a, 0x9fd8ff, { kind: "ticker", tag: "MKT", line3: line3 }];
     }

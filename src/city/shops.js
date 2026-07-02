@@ -647,6 +647,10 @@
     }
     take = Math.max(20, take);
     CBZ.city.addCash(take);
+    // E5: robbing a Bunbros outlet's till hits the SAME dollars off the
+    // company's books (city/shops.js is the till-robbery site; guarded no-op
+    // for every non-outlet shop, i.e. almost all of them this wave).
+    if (CBZ.corps && CBZ.corps.robOutlet) CBZ.corps.robOutlet(openLot, take);
     if (CBZ.sfx) CBZ.sfx("coin");
     // CRIME: this is armed robbery — big heat, marks your last-known position,
     // panics the block, and rolls a chance a unit is already responding.
