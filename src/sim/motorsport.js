@@ -357,7 +357,16 @@
     const led = g.cityWorld;
     if (led && typeof led === "object") led.msp = CBZ.motorsport.serialize();
   }
+  let _ensureMspSaveWraps_done = false;
   function ensureMspSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensureMspSaveWraps_done) return;
+    _ensureMspSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._mspSaveWrap) {
       const w = function () { stampMsp(); return commit.apply(this, arguments); };

@@ -15,12 +15,12 @@
    dormant stub worldstate.js:70 (politics.official = "Mayor Rosa Vale")
    and the existing "assassination" cityEvent (worldstate.js:265-271).
 
-   THIS WAVE'S DELIBERATE NARROWING (P4/P5 finish the rest):
-   - No election system yet (P4) — a term simply auto-extends silently.
+   THIS WAVE'S DELIBERATE NARROWING (P4 shipped elections; P5 below finishes
+   the physical-presence half):
    - No stability-gated deputy check, no gang-boss-becomes-ruler branch, no
-     govType flip to anarchism, no snap-election timer — this wave's vacancy
-     resolution is: deputy sworn in if one exists, else a flat POWER VACUUM
-     that a P4 caretaker/election later resolves (worldDay-flagged for it).
+     govType flip to anarchism — this wave's vacancy resolution is still:
+     deputy sworn in if one exists, else a flat POWER VACUUM that P4's
+     election machinery resolves (worldDay-flagged for it).
    - castKey/actOf (schedule.js:66-120) is NOT given a new "official" key —
      officials are PARKED ledger identities exactly like billionaires.js's
      founders (never spawned by the normal daily-schedule deal-in machinery;
@@ -30,16 +30,29 @@
      entirely by THIS file's own tick, same shape as billionaires.js's
      MAGNATE tie-in: a body is manufactured on demand and its `_sid` is
      hand-assigned to the CURRENT officeholder's sid, read fresh off
-     polity.js every time — so a succession (deputy sworn in, or a P4
-     election) is picked up for free the next time a body is needed; this
-     file never hard-codes which sid is "the mayor".
-   - Only the MAYOR (libertyville) gets the physical treatment (spawn near
-     city hall, 2 bodyguards, the 17-19 appearance walk) this wave. Governors
-     (liberty/costa/westmark) and the president (republic) are minted as real
-     ledger identities with real polity.office wiring — so they can be
-     killed and succeeded exactly like the mayor the moment a later wave
-     gives them a body — but they never physically spawn yet (comment:
-     motorcades for higher offices land in P5, per V.2b's Secret Service).
+     polity.js every time — so a succession (deputy sworn in, or an election)
+     is picked up for free the next time a body is needed; this file never
+     hard-codes which sid is "the mayor".
+
+   P5 — SECRET SERVICE (MASTER-PLAN V.2b): every office with a findable city
+   hall now gets a body, not just the mayor. The PHYSICAL PRESENCE section
+   below is generalized from "the mayor, hardcoded" to "every office record
+   whose city hall is the one in the CURRENTLY LOADED arena" — since only one
+   arena is ever loaded at a time, that is always the LOCAL mayor plus, when
+   this happens to be a state or country's CAPITAL city (see capitalCityOf()
+   below), that state's governor and/or that country's president too (up to
+   all three at once — libertyville is both). Detail sizing/gear/rarity are
+   table-driven by office KIND (KIND_PRESENCE below); the guard SPAWN/FOLLOW/
+   TEARDOWN lifecycle this file used to hand-roll (moveToward/driveGuards,
+   a hardcoded 2-guard SMG detail) now lives in city/protection.js's
+   ProtectionDetail record — this file calls THROUGH it (spawnMembers/
+   driveEscort/despawnMembers/notePrincipalHp) and keeps only what it alone
+   knows: WHEN a body should exist (office hours window, distance-to-player,
+   succession swaps, the president/governor's rarer appearance roll). One
+   protection.js detail per office record, id "off_"+rec.id, created
+   idempotently (protection.js's create() hands back an existing one by id —
+   so a save's escalated headcount survives a mourn/redeploy cycle, or a
+   reload, without a duplicate detail ever getting minted).
 
    MINTING (billionaires.js's founder-minting shape, reused verbatim):
    a synthetic, NEVER-SPAWNED "ped" object stashed straight into schedule.js's
@@ -134,7 +147,7 @@
   // govType says "monarchy" (King/Queen, by the CURRENT holder's rolled
   // gender — see titleFor()); "state"/"federal" stay "Governor" (no distinct
   // federal-territory title exists yet).
-  const MAYOR_ID = "libertyville";   // libertyville keeps ITS OWN special-cased physical presence (see header)
+  const MAYOR_ID = "libertyville";   // still used to seed the founding mayor's identity wealth (see mintHolder) — P5 generalized the PHYSICAL PRESENCE section below off every office, not just this one
   const KIND_TERM_DAYS = { city: 7, state: 14, federal: 14, country: 28 };
   function termDaysFor(rec) { return (rec && KIND_TERM_DAYS[rec.kind]) || 7; }
   function titleFor(rec) {
@@ -160,7 +173,7 @@
   // ---- state: g.officials (own guard for the one-shot mint pass) ----------
   function reset() {
     g.officials = { inited: false, mayorSid: null, deputySid: null, govSids: {}, presidentSid: null, vacantSince: {} };
-    presence.state = "none"; presence.principal = null; presence.guards = []; presence.mode = null; presence.mournT = 0;
+    for (const id in presences) delete presences[id];   // physical presence is runtime-only (see PHYSICAL PRESENCE header)
   }
   function ensureState() {
     if (!g.officials) g.officials = { inited: false, mayorSid: null, deputySid: null, govSids: {}, presidentSid: null, vacantSince: {} };
@@ -278,8 +291,9 @@
   // ============================================================
   //  EVERY OFFICE: succession lookup (X3: generic over EVERY city/state/
   //  country/federal record, not just the original five — a governor,
-  //  village chief, or king can be killed and succeeded the moment a later
-  //  wave gives them a body; only the SPAWNING below is mayor-only this wave).
+  //  village chief, or king can be killed and succeeded the moment a body
+  //  exists for them; P5's PHYSICAL PRESENCE section below now spawns one for
+  //  every office whose city hall is reachable — see that section's header).
   // ============================================================
   function allOfficeRecords() {
     if (!CBZ.polity) return [];
@@ -394,13 +408,29 @@
   }
 
   // ============================================================
-  //  PHYSICAL PRESENCE — mayor only this wave (see header). Runtime-only,
-  //  never persisted (billionaires.js's `_embodied` pattern).
+  //  PHYSICAL PRESENCE — every office whose city hall is the one in the
+  //  CURRENTLY LOADED arena (see header). Runtime-only, never persisted
+  //  (billionaires.js's `_embodied` pattern) — the `presences` map below is
+  //  keyed by polity record id and rebuilt from scratch on demand; what
+  //  SURVIVES a reload is each office's ProtectionDetail (city/protection.js,
+  //  keyed "off_"+rec.id, escalated headcount and all).
   // ============================================================
   const PRESENCE_RADIUS = 80;
-  const HALL_SPEED = 1.55, GUARD_SPEED = 2.1;
-  const GUARD_OFFSETS = [{ f: -1.8, s: -1.5 }, { f: -1.8, s: 1.5 }];
-  const presence = { state: "none", principal: null, guards: [], mode: null, mournT: 0 };
+  const HALL_SPEED = 1.55;
+  // per-office-KIND sizing (MASTER-PLAN V.2b: "the president's detail
+  // (governors/mayors get smaller ones scaled by office)... elite gear tier
+  // through the existing armor system, treasury-funded... grows after failed
+  // attempts"). rarity: the fraction of qualifying office-hours checks that
+  // actually roll the officeholder OUT today — the mayor runs city hall daily
+  // (1.0, unchanged from pre-P5 behaviour); a governor's an occasional
+  // visitor to any one city in the state; the head of state rarer still
+  // ("10% of office-hours checks" per the plan, verbatim for country).
+  const KIND_PRESENCE = {
+    city: { count: 2, gearTier: 1, rarity: 1.0, wealth: 0.7 },
+    state: { count: 2, gearTier: 1, rarity: 0.3, wealth: 0.78 },
+    country: { count: 4, gearTier: 2, rarity: 0.1, wealth: 0.9 },
+  };
+  const presences = Object.create(null);   // rec.id -> {state, principal, mode, mournT, _rollPhase, _rollShow}
 
   function arena() { return CBZ.city && CBZ.city.arena; }
   function cityHallDoor(A) {
@@ -426,7 +456,10 @@
     return { x: door.x + 18, z: door.z + 18 };
   }
   function hallPoint(door) { return { x: door.x - door.nx * 2.4, z: door.z - door.nz * 2.4 }; }
-  // hours 9-17 city hall, 17-19 the public appearance walk, else no presence.
+  // hours 9-17 city hall, 17-19 the public appearance walk, else no presence
+  // — the SAME office-hours window at every level this wave (a president or
+  // governor "visiting" a city hall keeps that city's own business hours;
+  // a distinct national calendar is future work, not this wave's).
   function phaseFor(h) {
     if (h >= 9 && h < 17) return "hall";
     if (h >= 17 && h < 19) return "plaza";
@@ -437,6 +470,44 @@
     return phase === "plaza" ? plazaPoint(A, door) : hallPoint(door);
   }
 
+  // the FIRST-registered city (insertion order — plain objects preserve it)
+  // whose parent chain reaches `rec` is that state/country's CAPITAL for
+  // this wave's purposes (polity.js has no dedicated `.capital` field yet —
+  // this is a deterministic, zero-storage stand-in: libertyville is liberty's
+  // and the republic's, goldspire is costa's, neonreef is westmark's, and
+  // every X3 country/state gets its own first-registered settlement for
+  // free). A governor/president only ever appears at THIS one city; every
+  // other city in their jurisdiction only ever sees its own mayor.
+  function capitalCityOf(rec) {
+    if (!rec) return null;
+    if (rec.kind === "city") return rec;
+    if (!CBZ.polity) return null;
+    const cities = CBZ.polity.list("city");
+    for (let i = 0; i < cities.length; i++) {
+      let r = cities[i];
+      while (r) { if (r.id === rec.id) return cities[i]; r = r.parent ? CBZ.polity.get(r.parent) : null; }
+    }
+    return null;
+  }
+  // which office records could plausibly show up at THIS arena's one city
+  // hall this frame: always the local city; plus its state's governor and/or
+  // its country's president IFF this city is that jurisdiction's capital
+  // (see capitalCityOf) — so at most 3 offices ever share one building,
+  // and libertyville (mayor+governor+president all at once) is the richest
+  // case, not the only one, the moment X3's other countries grow multi-city
+  // states of their own.
+  function candidatesForDoor(door) {
+    if (!CBZ.polity) return [];
+    const cityRec = CBZ.polity.of(door.x, door.z);
+    if (!cityRec || cityRec.kind !== "city") return [];
+    const out = [{ rec: cityRec, kind: "city" }];
+    const stateRec = CBZ.polity.stateOf(cityRec.id);
+    if (stateRec && stateRec.kind === "state" && capitalCityOf(stateRec) === cityRec) out.push({ rec: stateRec, kind: "state" });
+    const countryRec = CBZ.polity.countryOf(cityRec.id);
+    if (countryRec && capitalCityOf(countryRec) === cityRec) out.push({ rec: countryRec, kind: "country" });
+    return out;
+  }
+
   function removePed(p) {
     if (!p) return;
     try {
@@ -444,67 +515,106 @@
       if (CBZ.cityPeds) { const i = CBZ.cityPeds.indexOf(p); if (i >= 0) CBZ.cityPeds.splice(i, 1); }
     } catch (e) {}
   }
-  function despawnPresence() {
-    removePed(presence.principal);
-    for (let i = 0; i < presence.guards.length; i++) removePed(presence.guards[i]);
-    presence.state = "none"; presence.principal = null; presence.guards.length = 0;
-    presence.mode = null; presence.mournT = 0;
+  function despawnPresence(pr) {
+    removePed(pr.principal);
+    const det = CBZ.protection && CBZ.protection.get ? CBZ.protection.get("off_" + pr.recId) : null;
+    if (det && CBZ.protection.despawnMembers) CBZ.protection.despawnMembers(det);
+    pr.state = "none"; pr.principal = null; pr.mode = null; pr.mournT = 0;
   }
 
-  // the simplest follow mechanism in the codebase (social.js's own companion-
-  // follow tick, generalized off the player onto an arbitrary principal — see
-  // header): step `pos` straight toward a target point, no pathfinding.
-  function moveToward(ped, tx, tz, speed, dt) {
-    const dx = tx - ped.pos.x, dz = tz - ped.pos.z, d = Math.hypot(dx, dz);
-    if (d < 0.6) { ped.state = "idle"; ped.speed = 0; return; }
-    ped.state = "walk"; ped.speed = speed;
-    ped.pos.x += (dx / d) * speed * dt; ped.pos.z += (dz / d) * speed * dt;
-    const yaw = Math.atan2(dx, dz);
-    ped.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ped.group.rotation.y, yaw, 1 - Math.pow(0.001, dt)) : yaw;
-  }
-  function driveMayor(pr, A, phase, dt) {
+  function driveOfficeholder(pr, A, phase, dt) {
     const door = cityHallDoor(A);
     const tp = door ? targetPointFor(phase, A, door) : { x: pr.pos.x, z: pr.pos.z };
-    moveToward(pr, tp.x, tp.z, HALL_SPEED, dt);
-  }
-  function driveGuards(dt) {
-    const pr = presence.principal; if (!pr) return;
-    const h = pr.group.rotation.y;
-    const dx = Math.sin(h), dz = Math.cos(h), lx = Math.cos(h), lz = -Math.sin(h);
-    for (let i = 0; i < presence.guards.length; i++) {
-      const gd = presence.guards[i]; if (!gd || gd.dead) continue;
-      const o = GUARD_OFFSETS[i % GUARD_OFFSETS.length];
-      const fx = pr.pos.x + dx * o.f + lx * o.s, fz = pr.pos.z + dz * o.f + lz * o.s;
-      moveToward(gd, fx, fz, GUARD_SPEED, dt);
-    }
+    CBZ.protection.moveToward(pr, tp.x, tp.z, HALL_SPEED, dt);
   }
 
-  function spawnPresence(A, sid, door, phase) {
+  // this office's ProtectionDetail — idempotent by id (protection.js's
+  // create() hands back an existing record for a repeated id), so calling
+  // this every frame/spawn is cheap and never mints a duplicate. Re-points
+  // principal.ref at the CURRENT holder every call (successions) and never
+  // lets memberCount shrink below the office's base size (only attempt
+  // escalation, city/protection.js's notePrincipalHp, grows it further).
+  function officeDetailFor(rec, kind) {
+    if (!CBZ.protection) return null;
+    const cfg = KIND_PRESENCE[kind];
+    const det = CBZ.protection.create({
+      id: "off_" + rec.id, principal: { kind: "sid", ref: rec.office.holder },
+      gearTier: cfg.gearTier, formation: "escort", fundingSource: "treasury",
+      legalStatus: "state", memberCount: cfg.count,
+    });
+    det.principal.ref = rec.office.holder;
+    if (det.memberCount < cfg.count) det.memberCount = cfg.count;
+    return det;
+  }
+
+  function spawnPresence(pr, rec, kind, A, holderSid, door, phase) {
     if (!CBZ.cityMakePed || !A || !A.root) return;
-    const id = identityOf(sid);
+    const id = identityOf(holderSid);
+    const cfg = KIND_PRESENCE[kind];
     const sp = targetPointFor(phase, A, door) || hallPoint(door);
     let p;
     try {
       p = CBZ.cityMakePed(sp.x, sp.z, rng, {
-        name: id.name, gender: id.gender, archetype: "official", job: "mayor", wealth: 0.7, armed: false, aggr: 0.12,
+        name: id.name, gender: id.gender, archetype: "official", job: jobFor(rec), wealth: cfg.wealth, armed: false, aggr: 0.12,
       });
     } catch (e) { p = null; }
     if (!p) return;
-    p._sid = sid; p.controlled = true; p.nameKnown = true; p.state = "idle"; p.speed = 0;
+    p._sid = holderSid; p.controlled = true; p.nameKnown = true; p.state = "idle"; p.speed = 0;
     A.root.add(p.group); CBZ.cityPeds.push(p);
 
-    const guards = [];
-    for (let i = 0; i < 2; i++) {
-      let q = null;
-      try {
-        q = CBZ.cityMakePed(sp.x + (i ? 1 : -1) * 1.6, sp.z - 1.2, rng, {
-          archetype: "security", job: "secret service", wealth: 0.4, armed: true, weapon: "SMG", aggr: 0.6, hp: 150,
-        });
-      } catch (e) { q = null; }
-      if (q) { q.controlled = true; A.root.add(q.group); CBZ.cityPeds.push(q); guards.push(q); }
+    const det = officeDetailFor(rec, kind);
+    if (det && CBZ.protection.spawnMembers) CBZ.protection.spawnMembers(det, A, sp.x, sp.z, rng);
+
+    pr.state = "live"; pr.principal = p; pr.mode = phase; pr.mournT = 0;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("🏛️ " + titleFor(rec) + " " + (id.name || "") + " is out, flanked by security.", 2.4);
+  }
+
+  function tickOffice(rec, kind, door, A, phase, dt) {
+    let pr = presences[rec.id];
+    if (!pr) pr = presences[rec.id] = { recId: rec.id, state: "none", principal: null, mode: null, mournT: 0, _rollPhase: null, _rollShow: true };
+    const holderSid = rec.office.holder;
+
+    if (pr.state === "mourn") {
+      pr.mournT -= dt;
+      const det = CBZ.protection && CBZ.protection.get ? CBZ.protection.get("off_" + rec.id) : null;
+      if (det) for (let i = 0; i < det.memberPedRefs.length; i++) { const gd = det.memberPedRefs[i]; if (gd && !gd.dead) { gd.state = "idle"; gd.speed = 0; } }
+      if (pr.mournT <= 0) despawnPresence(pr);
+      return;
     }
-    presence.state = "live"; presence.principal = p; presence.guards = guards; presence.mode = phase; presence.mournT = 0;
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("🏛️ " + (id.name || "The Mayor") + " is out, flanked by security.", 2.4);
+    if (pr.state === "live") {
+      const p = pr.principal;
+      if (!p || (CBZ.cityPeds || []).indexOf(p) < 0) { despawnPresence(pr); return; }
+      if (p.dead) { pr.state = "mourn"; pr.mournT = 4; return; }
+      // succession swapped the officeholder out from under this body — drop
+      // the old body; a fresh one embodies whoever holds office next time.
+      if (p._sid !== holderSid) { despawnPresence(pr); return; }
+      if (phase === "none") { despawnPresence(pr); return; }
+      driveOfficeholder(p, A, phase, dt);
+      const det = CBZ.protection && CBZ.protection.get ? CBZ.protection.get("off_" + rec.id) : null;
+      if (det) {
+        if (CBZ.protection.notePrincipalHp) CBZ.protection.notePrincipalHp(det, p);   // attempt escalation watch
+        if (CBZ.protection.driveEscort) CBZ.protection.driveEscort(det, p, dt);
+      }
+      const tp = targetPointFor(phase, A, door);
+      const P = CBZ.player;
+      if (P && tp && Math.hypot(P.pos.x - tp.x, P.pos.z - tp.z) > PRESENCE_RADIUS * 1.5) despawnPresence(pr);
+      return;
+    }
+
+    // state === "none": consider spawning.
+    if (!holderSid || phase === "none") return;
+    // RARITY: rolled once per (phase) WINDOW, not every frame — a governor/
+    // president either is or isn't "in town" for the whole hall/plaza window,
+    // never flickering frame to frame. The mayor's rarity is 1.0 so this is a
+    // no-op for city-kind offices (unchanged pre-P5 behaviour).
+    const cfg = KIND_PRESENCE[kind];
+    if (pr._rollPhase !== phase) { pr._rollPhase = phase; pr._rollShow = rng() < cfg.rarity; }
+    if (!pr._rollShow) return;
+    const P = CBZ.player; if (!P) return;
+    const tp = targetPointFor(phase, A, door);
+    const d = Math.hypot(P.pos.x - tp.x, P.pos.z - tp.z);
+    if (d > PRESENCE_RADIUS) return;
+    spawnPresence(pr, rec, kind, A, holderSid, door, phase);
   }
 
   // order 35.73 — right after sim/billionaires.js's own 35.72 "who's embodied
@@ -512,47 +622,24 @@
   CBZ.onUpdate(35.73, function (dt) {
     const gm = CBZ.game; if (!gm || gm.mode !== "city") return;
     const A = arena(); if (!A) return;
-    const rec = CBZ.polity && CBZ.polity.get(MAYOR_ID);
-    if (!rec) return;
-    const holderSid = rec.office.holder;
+    const door = cityHallDoor(A);
+    if (!door) {
+      // no city hall in this arena at all — mourn/teardown anything still live.
+      for (const id in presences) { const pr = presences[id]; if (pr.state !== "none") despawnPresence(pr); }
+      return;
+    }
     const h = CBZ.citySunHour ? CBZ.citySunHour() : 12;
     const phase = phaseFor(h);
-
-    if (presence.state === "mourn") {
-      presence.mournT -= dt;
-      for (let i = 0; i < presence.guards.length; i++) {
-        const gd = presence.guards[i];
-        if (gd && !gd.dead) { gd.state = "idle"; gd.speed = 0; }
-      }
-      if (presence.mournT <= 0) despawnPresence();
-      return;
+    const cands = candidatesForDoor(door);
+    const seen = Object.create(null);
+    for (let i = 0; i < cands.length; i++) {
+      seen[cands[i].rec.id] = true;
+      tickOffice(cands[i].rec, cands[i].kind, door, A, phase, dt);
     }
-    if (presence.state === "live") {
-      const pr = presence.principal;
-      if (!pr || (CBZ.cityPeds || []).indexOf(pr) < 0) { despawnPresence(); return; }
-      if (pr.dead) { presence.state = "mourn"; presence.mournT = 4; return; }
-      // succession swapped the officeholder out from under this body (a new
-      // mayor now holds office) — drop the old body; a fresh one embodies
-      // whoever holds office next time the gate below passes.
-      if (pr._sid !== holderSid) { despawnPresence(); return; }
-      if (phase === "none") { despawnPresence(); return; }
-      driveMayor(pr, A, phase, dt);
-      driveGuards(dt);
-      const door = cityHallDoor(A);
-      const tp = door ? targetPointFor(phase, A, door) : null;
-      const P = CBZ.player;
-      if (P && tp && Math.hypot(P.pos.x - tp.x, P.pos.z - tp.z) > PRESENCE_RADIUS * 1.5) despawnPresence();
-      return;
-    }
-
-    // state === "none": consider spawning.
-    if (!holderSid || phase === "none") return;
-    const P = CBZ.player; if (!P) return;
-    const door = cityHallDoor(A); if (!door) return;
-    const tp = targetPointFor(phase, A, door);
-    const d = Math.hypot(P.pos.x - tp.x, P.pos.z - tp.z);
-    if (d > PRESENCE_RADIUS) return;
-    spawnPresence(A, holderSid, door, phase);
+    // an office that no longer qualifies this frame (player warped arenas
+    // between frames — the only way "candidates" changes underneath a live
+    // presence) tears down too, same as a phase-out.
+    for (const id in presences) { const pr = presences[id]; if (pr.state !== "none" && !seen[id]) despawnPresence(pr); }
   });
 
   // ============================================================
@@ -607,7 +694,16 @@
     const led = g.cityWorld;
     if (led && typeof led === "object") led.off = CBZ.officials.serialize();
   }
+  let _ensureOfficialsSaveWraps_done = false;
   function ensureOfficialsSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensureOfficialsSaveWraps_done) return;
+    _ensureOfficialsSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._offSaveWrap) {
       const w = function () { stampOfficials(); return commit.apply(this, arguments); };

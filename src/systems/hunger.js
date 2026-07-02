@@ -436,7 +436,16 @@
     const led = g.cityWorld;
     if (led && typeof led === "object") led.hng = serialize();
   }
+  let _ensureHungerSaveWraps_done = false;
   function ensureHungerSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensureHungerSaveWraps_done) return;
+    _ensureHungerSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._hngWrap) {
       const w = function () { stampHunger(); return commit.apply(this, arguments); };

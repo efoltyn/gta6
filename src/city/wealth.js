@@ -796,6 +796,23 @@
     h += row("👮 " + PERK_LABELS.bribeDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bribeDisc") * 100) + "%</b>", "Cheaper to pay off the cops", "#7fd0ff");
     h += row("🛡️ " + PERK_LABELS.bodyguardDisc, "<b style='color:#7ed957'>−" + Math.round(tierPerk("bodyguardDisc") * 100) + "%</b>", "Cheaper crew & bodyguards", "#9fd07e");
     h += row("🎟️ " + PERK_LABELS.vip, hasVIP() ? "<b style='color:#7ed957'>UNLOCKED ✓</b>" : "<b style='color:#a06b6b'>locked</b>", "Casino high-roller & club back rooms", hasVIP() ? "#7ed957" : "#5a4a2a");
+    // P5: a tiny UI seam onto city/protection.js's ProtectionDetail — the SAME
+    // hire() the bodyguardDisc perk above already discounts. One row, one
+    // hotkey (G — unused elsewhere in this menu); it always hires the next
+    // SMG-tier (1) guard, upgrading an existing pistol-tier detail's gear in
+    // the process — a fuller tier picker is a later interact.js verb, per the
+    // BUILD-PLAN note ("console/API-level this wave").
+    if (CBZ.protection) {
+      const HIRE_CAP = CBZ.protection.HIRE_CAP || 4;
+      const gear = CBZ.protection.GEAR ? CBZ.protection.GEAR[1] : null;
+      const have = (CBZ.protection.details() || []).find((d) => d.principal && d.principal.kind === "player");
+      const n = have ? have.memberCount : 0;
+      const cost = gear ? Math.round(gear.hireCost * (1 - tierPerk("bodyguardDisc"))) : 0;
+      const right = n >= HIRE_CAP
+        ? "<b style='color:#7ed957'>FULL STRENGTH</b>"
+        : "<div style='color:#ffd166'>" + money(cost) + "</div><div style='margin-top:3px'>" + btn("G", "hire (SMG)", "#4a3a1a") + "</div>";
+      h += row("🕴️ Hire Security", right, "Own detail: " + n + "/" + HIRE_CAP + " guards, wages drain daily — grudge or missed payroll and they walk.", n ? "#7ed957" : "#5a4a2a");
+    }
     return h;
   }
   function renderOps() {
@@ -831,7 +848,7 @@
     bar += "</div>";
     let body = tab === "biz" ? renderBiz() : tab === "lux" ? renderLux() : tab === "ops" ? renderOps() : renderPerks();
     let foot = "<div style='font-size:11px;color:#8a7d5a;margin-top:12px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px'>" +
-      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>I</b> IPO · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
+      "<b>,</b>/<b>.</b> switch tab · number keys <b>1–9,0</b> act · <b>U</b> upgrade · <b>H</b> hire driver · <b>S</b> security · <b>I</b> IPO · <b>G</b> hire bodyguard (Status tab) · <b>C</b>/<b>L</b>/<b>P</b> · <b>Esc</b> close" + (flash_ ? " &nbsp;·&nbsp; <span style='color:#ffd166'>" + flash_ + "</span>" : "") + "</div>";
     el().innerHTML = head + bar + body + foot;
   }
 
@@ -887,6 +904,8 @@
         if (k === "s") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return; }
         if (k === "i") { e.preventDefault(); for (const b of BUSINESSES) { if (ipoEligible(b.id)) { ipoBiz(b.id); break; } } return; }
       }
+      // P5: hire the next SMG-tier security guard (perks tab only — see renderPerks)
+      if (tab === "perks" && k === "g" && CBZ.protection) { e.preventDefault(); CBZ.protection.hire(1); if (open_) render(); return; }
       // number keys act on the visible list row (0 = the 10th row)
       if (k >= "0" && k <= "9") { e.preventDefault(); actNum(parseInt(k, 10)); return; }
       return;

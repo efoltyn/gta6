@@ -624,6 +624,12 @@
 
 <!-- P-wave: politics -->
 <script src="src/city/polity.js?v=pol1"></script>
+<!-- P5: the ONE protector system (secret service / hired security / gangs'
+     read-only adapter) — loaded before officials.js, which consumes it for
+     every office's guard lifecycle (officials.js's calls are runtime-lazy so
+     load order is soft either way, but this keeps "the record before its
+     first consumer" honest). -->
+<script src="src/city/protection.js?v=pol1"></script>
 <script src="src/city/officials.js?v=pol1"></script>
 <script src="src/city/approval.js?v=pol1"></script>
 <script src="src/city/elections.js?v=pol1"></script>

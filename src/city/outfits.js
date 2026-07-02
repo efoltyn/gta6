@@ -1020,7 +1020,16 @@
     ledger.cityItemsOwned = Object.assign({}, itemsOwned());
     ledger.cityOutfitsOwned = Object.assign({}, ownedMap());   // catalog fits (tux etc.) too
   }
+  let _ensureSaveWraps_done = false;
   function ensureSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensureSaveWraps_done) return;
+    _ensureSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._fitWrap) {
       const w = function () { stampFit(); return commit.apply(this, arguments); };

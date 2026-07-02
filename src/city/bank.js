@@ -337,7 +337,16 @@
     const led = g.cityWorld;
     if (led && typeof led === "object") led.cityLoans = (g.cityLoans || []).map(function (r) { return Object.assign({}, r); });
   }
+  let _ensureLoanSaveWraps_done = false;
   function ensureLoanSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensureLoanSaveWraps_done) return;
+    _ensureLoanSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._loanWrap) {
       const w = function () { stampLoans(); return commit.apply(this, arguments); };

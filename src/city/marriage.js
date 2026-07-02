@@ -286,7 +286,16 @@
       led.marriage = { strain: g.cityMarriageStrain || 0, warned: !!_warnedUnhappy, lastAffection: _lastAffection };
     }
   }
+  let _ensureMarriageSaveWraps_done = false;
   function ensureMarriageSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensureMarriageSaveWraps_done) return;
+    _ensureMarriageSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._marWrap) {
       const w = function () { stampMarriage(); return commit.apply(this, arguments); };
