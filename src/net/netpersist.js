@@ -371,8 +371,15 @@
   function sendChar() { try { net.sendEv({ e: "csave", char: charBlob() }); } catch (e) {} }
   function sendWorld() {
     try {
-      const w = worldBlob(); // the relay hard-drops sockets past ~1.5MB — never risk the host's
-      if (JSON.stringify(w).length > 1400 * 1024) return;
+      const w = worldBlob(); // the relay hard-drops sockets past ~16MB — never risk the host's
+      // S1 (BUILD-PLAN.md Stage S): this guard used to be 1400KB, sized right
+      // under the OLD ~1.5MB wsmini.js transport cap. The server now stores
+      // world/char blobs chunked in SQLite (server/db.js) with no storage-side
+      // size limit, and wsmini.js's transport cap was raised to 16MB in
+      // tandem — so this guard is raised the same way, still comfortably
+      // under the transport limit, never removed outright (a socket-killing
+      // send is still worse than a skipped autosave tick).
+      if (JSON.stringify(w).length > 15 * 1024 * 1024) return;
       net.sendEv({ e: "wsave", world: w });
     } catch (e) {}
   }

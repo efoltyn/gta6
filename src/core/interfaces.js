@@ -84,9 +84,11 @@
   //      object and CBZ.<thing>.apply(obj) -> void; netpersist.js picks
   //      it up by name, both calls wrapped in try/catch (one throwing
   //      rider never breaks the save for the rest).
-  //    RULE: keep the blob small (relay hard-drops sockets past ~1.5MB;
-  //      sendWorld() itself refuses past 1400KB) and version it (`v`
-  //      field) so a shape change can no-op an old blob.
+  //    RULE: keep the blob small (relay hard-drops sockets past ~16MB;
+  //      sendWorld() itself refuses past 15MB — S1 raised both from the
+  //      old ~1.5MB/1400KB in tandem with server/db.js's chunked SQLite
+  //      storage, which removed the server-side reason to cap it tighter)
+  //      and version it (`v` field) so a shape change can no-op an old blob.
   //    CURRENT RIDERS (netpersist.js:130-135): gangs (inlined), fracture
   //      (CBZ.cityFracture.serialize), npc (cityNpcLedger.serialize),
   //      fam (cityFamilyTree.serialize), day (CBZ.dayPhase()), propMkt

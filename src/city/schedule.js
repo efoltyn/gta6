@@ -166,7 +166,10 @@
   //  too (worth() below), so households persist instead of respawning as
   //  strangers. Cost stays flat: the sweep window is fixed-size and the deal
   //  scan is one bounded squared-dist pass. JSON budget re-checked: entries
-  //  run ~280B, so 900 × 280B ≈ 250KB — still far under the 1.4MB wsave cap.)
+  //  run ~280B, so 900 × 280B ≈ 250KB — still far under the wsave cap (S1,
+  //  BUILD-PLAN.md Stage S: raised from 1.4MB to 15MB once server/db.js's
+  //  chunked SQLite storage removed the server-side reason to keep it
+  //  tight; this LRU cap itself is S2's job to lift, not S1's).
   // ============================================================
   const CAP = 900, DEAL_R2 = 45 * 45;
   let led = {};                  // sid -> entry (plain JSON-able objects only)

@@ -20,6 +20,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const wsmini = require("./wsmini");
+const cbzdb = require("./db");
 
 const ROOT = path.dirname(__dirname); // repo root
 const CFG_PATH = process.env.CBZ_CONFIG || path.join(__dirname, "server.json");
@@ -85,36 +86,109 @@ const HEARTBEAT_MS = Number(process.env.CBZ_HEARTBEAT_MS) || 15000;
 const HEARTBEAT_DEAD_MS = Number(process.env.CBZ_HEARTBEAT_DEAD_MS) || 50000;
 
 // ----------------------------------------------------------------- world ---
-// The world lives in server/worlds/<name>.json — saved characters keyed by
-// pid, turf, building damage. Ambient peds/traffic regenerate (never saved).
+// The world lives in server/worlds/<name>.sqlite (S1: node:sqlite, chunked
+// blob storage — see server/db.js) — saved characters keyed by pid, turf,
+// building damage. Ambient peds/traffic regenerate (never saved). The old
+// server/worlds/<name>.json single-file store is kept as: (a) the automatic
+// fallback when node:sqlite isn't available on this Node build, and (b) a
+// one-time import source the FIRST time a SQLite DB boots empty next to an
+// existing legacy file. Nothing here changes the wire protocol's shape —
+// only where bytes land once they arrive.
 const WORLD_DIR = (cfg.world && cfg.world.dir) ? path.resolve(cfg.world.dir) : path.join(__dirname, "worlds");
 const worldName = (cfg.world && cfg.world.name) || cfg.name || "world";
 const autosaveSec = (cfg.world && cfg.world.autosaveSec) || 120;
 const sanitizeWorldName = (n) =>
   String(n || "").replace(/[^a-zA-Z0-9_\-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "world";
 const WORLD_FILE = path.join(WORLD_DIR, sanitizeWorldName(worldName) + ".json");
+const DB_FILE = path.join(WORLD_DIR, sanitizeWorldName(worldName) + ".sqlite");
+
+// db is null when node:sqlite isn't available (older Node) — every read/
+// write path below branches on it so the legacy file behavior is preserved
+// byte-for-byte in that case.
+let db = null;
+try { db = cbzdb.open(DB_FILE); } catch (e) { console.error(`[server] SQLite open failed (${e.message}) — falling back to legacy JSON world file`); db = null; }
 
 const world = { v: 1, name: worldName, savedAt: null, world: null, chars: {} };
-try {
-  const d = JSON.parse(fs.readFileSync(WORLD_FILE, "utf8"));
-  if (d && d.v === 1) {
-    world.world = d.world || null;
-    world.chars = d.chars || {};
-    world.savedAt = d.savedAt || null;
+let worldDirtyImportPending = false; // set below when a legacy file was just imported into a fresh DB
+
+function loadLegacyFile() {
+  try {
+    const d = JSON.parse(fs.readFileSync(WORLD_FILE, "utf8"));
+    if (d && d.v === 1) return d;
+  } catch (e) { /* no save yet */ }
+  return null;
+}
+
+if (db) {
+  console.log(`[server] world "${worldName}" storage: SQLite (node:sqlite) <- ${DB_FILE}`);
+  let worldBuf = null, charIds = [];
+  try {
+    worldBuf = db.blobGet("world", "world");
+    charIds = db.blobList("char");
+  } catch (e) { console.error(`[server] SQLite read failed: ${e.message}`); }
+
+  if (worldBuf == null && charIds.length === 0) {
+    // first boot against this DB: if a legacy blob-cap-era save exists,
+    // import it once so nobody loses a world by upgrading the server.
+    const legacy = loadLegacyFile();
+    if (legacy) {
+      world.world = legacy.world || null;
+      world.chars = legacy.chars || {};
+      world.savedAt = legacy.savedAt || null;
+      console.log(`[server] first boot: imported legacy world file (${WORLD_FILE}, ${Object.keys(world.chars).length} characters) into SQLite`);
+      worldDirtyImportPending = true; // written out below, once helpers exist
+    }
+  } else {
+    try {
+      if (worldBuf) {
+        const parsed = JSON.parse(worldBuf.toString("utf8"));
+        world.world = parsed && parsed.world !== undefined ? parsed.world : parsed;
+        if (parsed && parsed.savedAt) world.savedAt = parsed.savedAt;
+      }
+    } catch (e) { console.error(`[server] world blob parse failed: ${e.message}`); }
+    for (const pid of charIds) {
+      try {
+        const buf = db.blobGet("char", pid);
+        if (buf) world.chars[pid] = JSON.parse(buf.toString("utf8"));
+      } catch (e) { console.error(`[server] char blob "${pid}" parse failed: ${e.message}`); }
+    }
+    console.log(`[server] world "${worldName}" loaded <- SQLite (${Object.keys(world.chars).length} characters)`);
+  }
+} else {
+  console.log(`[server] world "${worldName}" storage: legacy JSON file (node:sqlite unavailable)`);
+  const legacy = loadLegacyFile();
+  if (legacy) {
+    world.world = legacy.world || null;
+    world.chars = legacy.chars || {};
+    world.savedAt = legacy.savedAt || null;
     console.log(`[server] world "${worldName}" loaded <- ${WORLD_FILE} (${Object.keys(world.chars).length} characters)`);
   }
-} catch (e) { /* no save yet */ }
+}
 
 // ev subtypes the server consumes (or emits) itself — never relayed between clients
 const RESERVED_EV = { to: 1, wsave: 1, csave: 1, wload: 1, cload: 1 };
 
 let worldDirty = false, lastFlush = 0, flushTimer = null;
-function flushWorld() {
-  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  if (!worldDirty) return;
-  lastFlush = Date.now();
+
+function flushWorldSqlite() {
   const prevStamp = world.savedAt;
-  world.savedAt = lastFlush;
+  world.savedAt = Date.now();
+  try {
+    // Each blob is its own chunked row-set, written in its own transaction
+    // (server/db.js blobPut) — this is exactly the "no single blob is
+    // capped by transport or a single-row size" property S1 exists for.
+    // A 3MB+ world blob (gangs/npc ledger/politics/econ/etc riders) round-
+    // trips the same way a 3KB one does; see server/db.js's header.
+    db.blobPut("world", "world", Buffer.from(JSON.stringify({ savedAt: world.savedAt, world: world.world || null })));
+    for (const pid in world.chars) {
+      db.blobPut("char", pid, Buffer.from(JSON.stringify(world.chars[pid])));
+    }
+    worldDirty = false;
+  } catch (e) { world.savedAt = prevStamp; console.error(`[server] SQLite world save failed: ${e.message}`); } // stays dirty -> retried on the next save
+}
+function flushWorldLegacy() {
+  const prevStamp = world.savedAt;
+  world.savedAt = Date.now();
   try {
     fs.mkdirSync(WORLD_DIR, { recursive: true });
     const tmp = WORLD_FILE + ".tmp";
@@ -123,14 +197,22 @@ function flushWorld() {
     worldDirty = false;
   } catch (e) { world.savedAt = prevStamp; console.error(`[server] world save failed: ${e.message}`); } // stays dirty -> retried on the next save
 }
+function flushWorld() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (!worldDirty) return;
+  lastFlush = Date.now();
+  if (db) flushWorldSqlite(); else flushWorldLegacy();
+}
 function queueFlush() { // disk writes >=5s apart
   worldDirty = true;
   const wait = 5000 - (Date.now() - lastFlush);
   if (wait <= 0) return flushWorld();
   if (!flushTimer) flushTimer = setTimeout(flushWorld, wait);
 }
-process.on("SIGINT", () => { flushWorld(); process.exit(0); });
-process.on("SIGTERM", () => { flushWorld(); process.exit(0); });
+if (worldDirtyImportPending) queueFlush(); // persist the freshly-imported legacy save into the new DB right away
+function shutdown() { flushWorld(); if (db) db.close(); process.exit(0); }
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 // ---------------------------------------------------------------- static ---
 const MIME = {
@@ -494,7 +576,7 @@ server.listen(cfg.port, () => {
   console.log(`  ─ websocket:       ws://localhost:${cfg.port}/ws`);
   console.log(`  ─ server info:     http://localhost:${cfg.port}/api/info`);
   console.log(`  ─ config:          server/server.json  (name, motd, password, maxPlayers)`);
-  console.log(`  ─ world save:      ${path.relative(ROOT, WORLD_FILE)}  (autosave ${autosaveSec}s${world.savedAt ? ", loaded" : ", new"})`);
+  console.log(`  ─ world save:      ${path.relative(ROOT, db ? DB_FILE : WORLD_FILE)}  (autosave ${autosaveSec}s${world.savedAt ? ", loaded" : ", new"}${db ? ", SQLite" : ", legacy JSON"})`);
   console.log("");
   console.log(`  To let friends join over the internet:`);
   console.log(`    cloudflared tunnel --url http://localhost:${cfg.port}`);
