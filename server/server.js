@@ -93,6 +93,14 @@ const HEARTBEAT_DEAD_MS = Number(process.env.CBZ_HEARTBEAT_DEAD_MS) || 50000;
 const PQUERY_COOLDOWN_MS = Number(process.env.CBZ_PQUERY_COOLDOWN_MS) || 500;
 const PQUERY_MAX_R = 20; // chunks (320m at 16m/chunk) — plenty for a spawn radius
 
+// S3: chunk-indexed structure/base query, same shape/cooldown idiom as
+// pquery above — {t:"bquery",cx,cz,r} -> pieces+bases near (cx,cz). No
+// client this wave actually sends one (S4's server tick is the intended
+// first consumer, per BUILD-PLAN.md S3/S4) — it's wired and tested now so
+// S4 has a ready-made read path instead of retrofitting one later.
+const BQUERY_COOLDOWN_MS = Number(process.env.CBZ_BQUERY_COOLDOWN_MS) || 500;
+const BQUERY_MAX_R = 20;
+
 // ----------------------------------------------------------------- world ---
 // The world lives in server/worlds/<name>.sqlite (S1: node:sqlite, chunked
 // blob storage — see server/db.js) — saved characters keyed by pid, turf,
@@ -116,11 +124,135 @@ const DB_FILE = path.join(WORLD_DIR, sanitizeWorldName(worldName) + ".sqlite");
 let db = null;
 try { db = cbzdb.open(DB_FILE); } catch (e) { console.error(`[server] SQLite open failed (${e.message}) — falling back to legacy JSON world file`); db = null; }
 
-// S2: advertised only when a people table actually exists to answer it —
-// clients (and this codebase's OWN client, per BUILD-PLAN.md S2) MAY use
-// this to prefer a server-side chunk-indexed spawn query over local-only
-// data; a client that doesn't recognize "pquery" simply never sends one.
-const FEAT = db ? ["to", "persist", "pquery"] : ["to", "persist"];
+// S2/S3: advertised only when the relevant table actually exists to answer
+// it — clients (and this codebase's OWN client, per BUILD-PLAN.md S2/S3)
+// MAY use this to prefer a server-side chunk-indexed query over local-only
+// data; a client that doesn't recognize "pquery"/"bquery" simply never
+// sends one.
+const FEAT = db ? ["to", "persist", "pquery", "bquery"] : ["to", "persist"];
+
+// ---------------------------------------------------------------------
+// S3 (BUILD-PLAN.md Stage S): structures/bases/containers extraction +
+// reassembly helpers, following S2's extractPeopleFromWorld/
+// assembleWorldForWire precedent for the OTHER two worldBlob riders
+// src/net/netpersist.js already sends: `blob.bld` (src/systems/
+// building.js's placed pieces) and `blob.base` (src/systems/
+// baseclaim.js's BaseRecords + upkeep/decay ruins). Both riders already
+// travel on the SAME "wsave" channel S2 hooked `npc` into — there is no
+// separate bsave channel on the wire; "B8's bsave channel" is systems/
+// basesave.js, a SINGLE-PLAYER bridge that stamps building.js's
+// serialize() onto the local ledger (g.cityWorld) so single-player
+// persistence keeps working untouched — the SERVER only ever sees
+// `blob.bld`/`blob.base` inside a multiplayer wsave, exactly like
+// `blob.npc`. Declared HERE (ahead of the world-load/first-boot-import
+// code below, which calls buildStructureRows/buildBaseRows immediately at
+// module-load time) rather than near their extract/assemble callers
+// further down — a `const` referenced by top-level synchronous code
+// before its own declaration line has run is a TDZ ReferenceError, not a
+// hoisting no-op, so these have to sit above every caller that can fire
+// during boot.
+//
+// PIECE IDENTITY: building.js hands out fresh, session-only "pc_"+seq ids
+// (systems/pieces.js's pieceSeq resets every boot) — those never survive
+// a save/reload and can't be a stable table key. Every placed piece DOES
+// already have a genuinely stable identity, though: building.js's own
+// occupancy key (occKey(gx,gy,gz,slot), building.js:292) — its own
+// occupancy Map enforces at most one LIVE piece per key, forever, so it's
+// already collision-free by construction. slotFor (building.js:304) is
+// duplicated here in full (kind->slot is a 4-line, effectively-frozen
+// mapping — B1's wood-tier catalog) rather than sharing code with a
+// client-only file the server can't require().
+const PIECE_CELL = 3;     // src/systems/building.js's own CELL (B.CELL) — mirrored, see file header
+const PIECE_WALL_H = 2.5; // src/systems/building.js's own WALL_H (B.WALL_H) — mirrored, see file header
+function pieceSlot(kind, rot) {
+  if (kind === "wall" || kind === "doorframe") return "e" + (rot | 0);
+  if (kind === "door") return "dr" + (rot | 0);
+  if (kind === "cupboard") return "tc";
+  if (kind === "container") return "box";
+  return "fill";
+}
+function pieceWorldPos(rec) {
+  return { x: (rec.gx || 0) * PIECE_CELL, y: (rec.gy || 0) * PIECE_WALL_H, z: (rec.gz || 0) * PIECE_CELL };
+}
+// coveringBase: mirrors src/systems/baseclaim.js's CBZ.baseAt exactly
+// (nearest BaseRecord whose radius covers the point) — NOTE BaseRecord's
+// own `cx`/`cz` fields are WORLD POSITION (piece.pos.x/z), not chunk
+// coordinates, a naming quirk that file's own header now documents; this
+// function reads them as the world position they actually are.
+function coveringBase(basesArr, x, z) {
+  let best = null, bd = Infinity;
+  for (const rec of (basesArr || [])) {
+    if (!rec || rec.cx == null || rec.cz == null) continue;
+    const dx = rec.cx - x, dz = rec.cz - z, dd = dx * dx + dz * dz;
+    const r = rec.radius || 0;
+    if (dd <= r * r && dd < bd) { bd = dd; best = rec; }
+  }
+  return best;
+}
+// buildStructureRows(pieces, basesArr) -> {structRows, containerRows} —
+// pure transform from the wire shape to the two row-sets server/db.js's
+// structPut/containerPut expect. Shared by both the first-boot import
+// path below and extractStructuresFromWorld (further down) so there's one
+// place that knows how a wire piece record becomes a row.
+function buildStructureRows(pieces, basesArr) {
+  const now = Date.now();
+  const structRows = [], containerRows = [];
+  for (const rec of pieces) {
+    if (!rec || !rec.kind) continue;
+    const slot = pieceSlot(rec.kind, rec.rot | 0);
+    const pieceId = (rec.gx | 0) + "," + (rec.gy | 0) + "," + (rec.gz | 0) + "," + slot;
+    const pos = pieceWorldPos(rec);
+    const base = coveringBase(basesArr, pos.x, pos.z);
+    structRows.push({
+      pieceId, baseId: base ? base.id : null, kind: rec.kind,
+      x: pos.x, y: pos.y, z: pos.z, rot: rec.rot | 0,
+      hp: rec.hp != null ? rec.hp : 0,
+      // material: no source field yet (building.js's B.serialize doesn't
+      // carry piece.tier — see migration v3's own comment in server/db.js)
+      // — B1-B8's catalog is wood tier only, so this is accurate today and
+      // is where B5's future material tiers will land without a migration.
+      material: "wood",
+      data: rec, updatedAt: now,
+    });
+    if (rec.kind === "container") {
+      containerRows.push({
+        containerId: pieceId, pieceId, baseId: base ? base.id : null,
+        inventory: rec.contents || {}, locked: !!rec.locked,
+        code: null, // no keycode field exists client-side yet — forward-compat column, see migration v3
+        updatedAt: now,
+      });
+    }
+  }
+  return { structRows, containerRows };
+}
+// buildBaseRows(bases, ruins) -> rows[] for basePut — a live BaseRecord and
+// a ruins shadow record both become `bases` rows (ruin=1 for the latter);
+// see migration v3's header for why ruins fold into this table instead of
+// a 4th one.
+function buildBaseRows(bases, ruins) {
+  const now = Date.now();
+  const rows = [];
+  for (const rec of (bases || [])) {
+    if (!rec || !rec.id) continue;
+    rows.push({
+      baseId: rec.id, ownerId: rec.ownerPid || null,
+      x: rec.cx || 0, z: rec.cz || 0, // BaseRecord's own cx/cz ARE world position — see coveringBase's comment
+      radius: rec.radius || 0, upkeepUntil: rec.upkeepUntil || 0, ruin: false,
+      authorized: rec.authorized || [], data: rec, updatedAt: now,
+    });
+  }
+  for (const rec of (ruins || [])) {
+    if (!rec || !rec.id) continue;
+    rows.push({
+      baseId: rec.id, ownerId: null,
+      x: rec.cx || 0, z: rec.cz || 0,
+      radius: rec.radius || 0, upkeepUntil: 0, ruin: true, // always-overdue, decayTick's own rule
+      authorized: [], data: { ruin: true, cx: rec.cx || 0, cz: rec.cz || 0, radius: rec.radius || 0 },
+      updatedAt: now,
+    });
+  }
+  return rows;
+}
 
 const world = { v: 1, name: worldName, savedAt: null, world: null, chars: {} };
 let worldDirtyImportPending = false; // set below when a legacy file was just imported into a fresh DB
@@ -198,6 +330,39 @@ if (db && world.world && world.world.npc && Array.isArray(world.world.npc.ids) &
   } catch (e) { console.error(`[server] people-table first-boot import failed: ${e.message}`); }
 }
 
+// S3 (BUILD-PLAN.md Stage S): first-boot import of a legacy world blob that
+// still carries player-building state inline (`world.world.bld.pieces`/
+// `world.world.base.bases`/`.ruins`, the pre-S3 shape) — import it into the
+// structures/bases/containers tables ONCE, then strip the arrays and mark
+// `structuresInDb`/`basesInDb` so every save from here on goes through
+// extractStructuresFromWorld()/extractBasesFromWorld() below instead.
+// STRUCTURES import runs FIRST, while `world.world.base.bases` is still the
+// raw array (buildStructureRows needs it to compute each piece's baseId —
+// see that function's own comment) — BASES import runs second and strips it.
+if (db && world.world && world.world.bld && Array.isArray(world.world.bld.pieces) && !world.world.structuresInDb) {
+  try {
+    const basesArr = (world.world.base && Array.isArray(world.world.base.bases)) ? world.world.base.bases : [];
+    const { structRows, containerRows } = buildStructureRows(world.world.bld.pieces, basesArr);
+    const n = db.structPut(structRows);
+    const nc = containerRows.length ? db.containerPut(containerRows) : 0;
+    world.world = Object.assign({}, world.world, { structuresInDb: true, bld: { v: world.world.bld.v || 1 } });
+    console.log(`[server] first boot: imported ${n} structures (${nc} containers) into the structures table`);
+    worldDirtyImportPending = true;
+  } catch (e) { console.error(`[server] structures-table first-boot import failed: ${e.message}`); }
+}
+if (db && world.world && world.world.base && (Array.isArray(world.world.base.bases) || Array.isArray(world.world.base.ruins)) && !world.world.basesInDb) {
+  try {
+    const rows = buildBaseRows(world.world.base.bases, world.world.base.ruins);
+    const n = db.basePut(rows);
+    world.world = Object.assign({}, world.world, {
+      basesInDb: true,
+      base: { v: world.world.base.v || 1, playClock: world.world.base.playClock || 0 },
+    });
+    console.log(`[server] first boot: imported ${n} bases/ruins into the bases table`);
+    worldDirtyImportPending = true;
+  } catch (e) { console.error(`[server] bases-table first-boot import failed: ${e.message}`); }
+}
+
 // people-table extraction/reassembly (S2): the worldBlob's `npc` rider
 // (net/netpersist.js worldBlob(), src/city/schedule.js's cityNpcLedger)
 // is the ONLY thing that moves between the wire shape and this table —
@@ -242,6 +407,123 @@ function assembleWorldForWire(w) {
   catch (e) { console.error(`[server] peopleAll failed: ${e.message}`); }
   return Object.assign({}, w, { npc: { v: 1, ids } });
 }
+
+// S3 (BUILD-PLAN.md Stage S): structures/bases/containers extraction +
+// reassembly — the extract/assemble functions themselves (the pure row-
+// building helpers they call are declared up near FEAT, see that block's
+// own header comment for why).
+//
+// extractStructuresFromWorld(w): called on every incoming wsave, BEFORE
+// extractBasesFromWorld (below) so `w.base.bases` is still the raw array
+// buildStructureRows needs for baseId lookup. Each save's `w.bld.pieces`
+// is building.js's own COMPLETE current set (B.serialize() re-walks
+// CBZ.pieces fresh every call, not a delta) — so this function treats it
+// as authoritative: anything in the table but NOT in this save's list is
+// really gone (a demolished/decayed/collapsed piece), and is deleted —
+// see migration v3's header for why that's different from `people`.
+function extractStructuresFromWorld(w) {
+  if (!db || !w || !w.bld || !Array.isArray(w.bld.pieces)) return w;
+  const basesArr = (w.base && Array.isArray(w.base.bases)) ? w.base.bases : [];
+  const { structRows, containerRows } = buildStructureRows(w.bld.pieces, basesArr);
+  const keepIds = new Set(structRows.map((r) => r.pieceId));
+  try {
+    let existing = [];
+    try { existing = db.structAll().map((r) => r.pieceId); } catch (e) { existing = []; }
+    for (const id of existing) if (!keepIds.has(id)) db.structDelete(id); // real delete; cascades to its container row (FK)
+    db.structPut(structRows);
+    if (containerRows.length) db.containerPut(containerRows);
+  } catch (e) {
+    console.error(`[server] structure extraction failed (${e.message}) — keeping the bld rider inline this save`);
+    return w; // never silently drop pieces: on failure, leave bld inline
+  }
+  return Object.assign({}, w, { structuresInDb: true, bld: { v: w.bld.v || 1 } });
+}
+
+// extractBasesFromWorld(w): called AFTER extractStructuresFromWorld above
+// (so structures extraction still saw the raw bases array). Same
+// authoritative-full-set-per-save treatment as structures: a dissolved
+// BaseRecord (cupboard destroyed) or a fully-decayed ruin no longer in
+// this save's arrays is deleted from the table.
+function extractBasesFromWorld(w) {
+  if (!db || !w || !w.base || (!Array.isArray(w.base.bases) && !Array.isArray(w.base.ruins))) return w;
+  const rows = buildBaseRows(w.base.bases, w.base.ruins);
+  const keepIds = new Set(rows.map((r) => r.baseId));
+  try {
+    let existing = [];
+    try { existing = db.baseAll().map((r) => r.baseId); } catch (e) { existing = []; }
+    for (const id of existing) if (!keepIds.has(id)) db.baseDelete(id);
+    db.basePut(rows);
+  } catch (e) {
+    console.error(`[server] base extraction failed (${e.message}) — keeping the base rider inline this save`);
+    return w;
+  }
+  return Object.assign({}, w, {
+    basesInDb: true,
+    base: { v: w.base.v || 1, playClock: w.base.playClock || 0 }, // B8's global play-clock: see the mapping note below
+  });
+}
+
+// assembleStructuresForWire(w)/assembleBasesForWire(w): the reassembly
+// half, called whenever `world.world` is about to be sent DOWN to a
+// client (wload). Mirrors assembleWorldForWire above — a joining client,
+// old or new, receives a world blob shape-identical to pre-S3, with zero
+// idea a table exists on the other end.
+function assembleStructuresForWire(w) {
+  if (!db || !w || !w.structuresInDb) return w;
+  let rows = [], containers = [];
+  try { rows = db.structAll(); } catch (e) { console.error(`[server] structAll failed: ${e.message}`); }
+  try { containers = db.containerAll(); } catch (e) { console.error(`[server] containerAll failed: ${e.message}`); }
+  const contByPiece = new Map(containers.map((c) => [c.pieceId, c]));
+  const pieces = rows.map((r) => {
+    const rec = Object.assign({}, r.data);
+    // The containers table is the live source of truth for contents/locked
+    // (a future S4 server-side mutation to JUST that table — a loot
+    // rebalance, a raid draining a box — must be visible here without
+    // touching `structures.data`), so it wins over whatever's baked into
+    // the structure row's own stored `data.contents`/`data.locked`.
+    if (r.kind === "container") {
+      const c = contByPiece.get(r.pieceId);
+      if (c) { rec.contents = c.inventory; rec.locked = !!c.locked; }
+    }
+    return rec;
+  });
+  return Object.assign({}, w, { bld: { v: 1, pieces } });
+}
+function assembleBasesForWire(w) {
+  if (!db || !w || !w.basesInDb) return w;
+  let rows = [];
+  try { rows = db.baseAll(); } catch (e) { console.error(`[server] baseAll failed: ${e.message}`); }
+  const bases = [], ruinsOut = [];
+  for (const r of rows) {
+    if (r.ruin) ruinsOut.push({ id: r.baseId, cx: r.x, cz: r.z, radius: r.radius });
+    else bases.push(Object.assign({}, r.data));
+  }
+  const playClock = (w.base && w.base.playClock) || 0;
+  return Object.assign({}, w, { base: { v: 1, bases, ruins: ruinsOut, playClock } });
+}
+// B8 DECAY-SEAM FIELD MAPPING (S4's future server tick reads these — this
+// wave only carries the data, per BUILD-PLAN.md S3's own scope: "don't
+// implement the tick"):
+//   BaseRecord.upkeepUntil  -> bases.upkeepUntil column (per-base decay
+//     clock; a server tick can `SELECT * FROM bases WHERE upkeepUntil <
+//     <play-clock-equivalent>` directly, no JSON parse needed).
+//   BaseRecord.authorized[] -> bases.auth column (JSON) + rowToBaseEntry's
+//     `.authorized` field.
+//   ruins (position/radius only, always-overdue) -> bases rows with
+//     ruin=1, upkeepUntil=0 (decayTick's own "ruins always overdue" rule,
+//     baseclaim.js's B8 section — pre-computed here rather than re-derived
+//     by every future reader).
+//   playClock (global, NOT per-base — src/systems/baseclaim.js's
+//     ACCUMULATED PLAY TIME accumulator) has no per-base column to live in
+//     — it rides in the un-extracted remainder of `w.base` (`{v,
+//     playClock}`, same "remaining channel data" treatment S2 gave
+//     whatever isn't the `npc` rider). S4's tick, running server-side with
+//     no client connected, will need its OWN clock source (this global
+//     accumulator is fundamentally single-player-derived, measured in
+//     CBZ.game.elapsed deltas) — left as that stage's problem; the
+//     upkeepUntil COLUMN is what actually lets a tick decide "is this base
+//     overdue" without a client in the loop, which is the seam this step
+//     is scoped to build.
 
 // ev subtypes the server consumes (or emits) itself — never relayed between clients
 const RESERVED_EV = { to: 1, wsave: 1, csave: 1, wload: 1, cload: 1 };
@@ -538,9 +820,15 @@ function onConnection(conn, req) {
       // resume: an empty room's new simulator gets the saved world; a saved
       // character follows its pid anywhere. Mid-session host migrations never
       // reload from disk — the live sim stays authoritative.
-      // S2: reassemble the ledger rider from the people table (no-op, and
-      // byte-identical to pre-S2 behavior, if peopleInDb was never stamped).
-      if (firstIn && world.world) send(p, { t: "ev", e: "wload", world: assembleWorldForWire(world.world) });
+      // S2/S3: reassemble the ledger/structure/base riders from their
+      // tables (each a no-op, byte-identical to pre-S2/S3 behavior, if its
+      // own …InDb flag was never stamped).
+      if (firstIn && world.world) {
+        let wire = assembleWorldForWire(world.world);
+        wire = assembleBasesForWire(wire);
+        wire = assembleStructuresForWire(wire);
+        send(p, { t: "ev", e: "wload", world: wire });
+      }
       if (p.pid && world.chars[p.pid]) send(p, { t: "ev", e: "cload", char: world.chars[p.pid] });
       return;
     }
@@ -566,10 +854,15 @@ function onConnection(conn, req) {
         }
         if (m.e === "wsave") { // only the sim host writes the world
           if (p.id === hostId && m.world && typeof m.world === "object") {
-            // S2: extract the ledger rider into the people table before
-            // storing (see extractPeopleFromWorld's header above) — a
-            // no-op fallthrough (unstripped blob) when SQLite is absent.
-            world.world = extractPeopleFromWorld(m.world);
+            // S2/S3: extract the ledger/structure/base riders into their
+            // tables before storing — structures BEFORE bases (structure
+            // extraction needs the raw bases array for baseId lookup; see
+            // extractStructuresFromWorld's own comment). No-op fallthrough
+            // (unstripped blob) for any of the three when SQLite is absent.
+            let w = extractPeopleFromWorld(m.world);
+            w = extractStructuresFromWorld(w);
+            w = extractBasesFromWorld(w);
+            world.world = w;
             queueFlush();
           }
           break;
@@ -613,6 +906,32 @@ function onConnection(conn, req) {
         try { rows = db.peopleByChunk(cx, cz, r); } catch (e) { console.error(`[server] peopleByChunk failed: ${e.message}`); }
         const people = rows.map((row) => ({ sid: row.sid, name: row.name, x: row.x, z: row.z, cash: row.cash, alive: row.alive }));
         send(p, { t: "presult", cx, cz, people });
+        break;
+      }
+      // S3: chunk-indexed structure/base query — {t:"bquery", cx, cz, r} ->
+      // every piece/base within r chunks of (cx,cz), stripped to light
+      // fields (never the full `data` JSON — same "no full row over the
+      // wire" convention as pquery/presult above). SERVER-ONLY consumer
+      // for now (no client sends this yet — it's the read path S4's
+      // server-side tick is expected to use); answerable by any player,
+      // same rate-limit idiom as pquery.
+      case "bquery": {
+        if (!db) { send(p, { t: "bresult", cx: m.cx | 0, cz: m.cz | 0, structures: [], bases: [] }); break; }
+        const now2 = Date.now();
+        if (p._bqCooldown && now2 < p._bqCooldown) break;
+        p._bqCooldown = now2 + BQUERY_COOLDOWN_MS;
+        const bcx = m.cx | 0, bcz = m.cz | 0;
+        // NOTE: `m.r | 0 || 3` (pquery's own existing idiom above) would
+        // silently treat an explicit r:0 as "unset" (0 is falsy) and widen
+        // it to 3 — kept correct here instead: only fall back to 3 when r
+        // truly wasn't sent.
+        const br = Math.max(0, Math.min(BQUERY_MAX_R, m.r != null ? (m.r | 0) : 3));
+        let structRows = [], baseRows = [];
+        try { structRows = db.structByChunk(bcx, bcz, br); } catch (e) { console.error(`[server] structByChunk failed: ${e.message}`); }
+        try { baseRows = db.baseByChunk(bcx, bcz, br); } catch (e) { console.error(`[server] baseByChunk failed: ${e.message}`); }
+        const structures = structRows.map((row) => ({ pieceId: row.pieceId, kind: row.kind, x: row.x, y: row.y, z: row.z, hp: row.hp, baseId: row.baseId }));
+        const bases = baseRows.map((row) => ({ baseId: row.baseId, ownerId: row.ownerId, x: row.x, z: row.z, radius: row.radius, ruin: row.ruin }));
+        send(p, { t: "bresult", cx: bcx, cz: bcz, structures, bases });
         break;
       }
     }

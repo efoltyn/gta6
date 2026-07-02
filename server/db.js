@@ -25,6 +25,22 @@
 //                              server.js for how the `blob.npc` worldBlob
 //                              rider gets extracted into it / reassembled
 //                              out of it (the wire protocol is unchanged).
+//   - structPut/structGet/structAll/structByChunk/structDelete
+//     basePut/baseGet/baseAll/baseByChunk/baseDelete
+//     containerPut/containerGet/containerAll/containersByBase/containerDelete
+//                              S3's three tables — player-built pieces,
+//                              BaseRecords (+ruins), and container inventories.
+//                              See migration v3's own comment below for the
+//                              shape and server.js for how `blob.bld`/
+//                              `blob.base` (net/netpersist.js worldBlob
+//                              riders, fed by src/systems/building.js and
+//                              src/systems/baseclaim.js) get extracted/
+//                              reassembled. UNLIKE `people`, rows here are
+//                              REALLY deleted when a piece/base/container
+//                              stops existing — see that migration's
+//                              comment for why (rubble doesn't stay in the
+//                              books; only an event log would, and this
+//                              wave doesn't add one).
 //   - migrate(db, target)     schema_version tracked in PRAGMA user_version;
 //                              MIGRATIONS is an ordered array of {version,up}
 //                              — never edit a shipped migration, only append.
@@ -118,6 +134,136 @@ const MIGRATIONS = [
       db.exec(`CREATE INDEX IF NOT EXISTS idx_people_chunk ON people (cx, cz);`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_people_workchunk ON people (workCx, workCz);`);
       db.exec(`CREATE INDEX IF NOT EXISTS idx_people_alive ON people (alive);`);
+    },
+  },
+  // S3 (BUILD-PLAN.md Stage S): player-building persistence — the SAME
+  // chunk-indexed-table treatment S2 gave `people`, now for pieces/bases/
+  // containers. Three tables:
+  //
+  //   structures — one row per placed piece (src/systems/building.js's
+  //     `blob.bld.pieces[]`, net/netpersist.js's worldBlob rider). `pieceId`
+  //     is NOT the client's ephemeral in-memory id (building.js hands out
+  //     fresh "pc_"+seq ids every boot, see pieces.js's pieceSeq — those
+  //     never survive a reload). Instead it's building.js's own occupancy
+  //     key (`gx,gy,gz,slot` — building.js:292 occKey, slotFor:304), which
+  //     IS already a stable, collision-free identity: building.js's own
+  //     occupancy Map enforces at most one live piece per key, forever, by
+  //     construction. server.js derives it the same way from the wire
+  //     record (kind+gx+gy+gz+rot are all it has). `x/y/z` are the piece's
+  //     world position (building.js's gridToWorld: x=gx*CELL, y=gy*WALL_H,
+  //     z=gz*CELL — CELL=3, WALL_H=2.5, mirrored server-side since the
+  //     server has no access to that client module); `cx/cz` are those
+  //     bucketed into the SAME 16m chunk grid systems/chunks.js and S2's
+  //     `people` table already use (chunkCoord below — one convention, one
+  //     function). `baseId` is which BaseRecord's radius (if any) covers
+  //     this piece's position at save time — nullable (unclaimed/wild
+  //     piece). `material` has no source data yet (building.js's B.serialize
+  //     doesn't carry piece.tier — B1-B8 shipped wood tier only) — server.js
+  //     always writes "wood" today; the column exists so B5's future
+  //     material×damage tiers have somewhere to land without another
+  //     migration. `data` keeps the full wire record (kind/gx/gy/gz/rot/hp/
+  //     ownerId/open/locked/contents) so reassembly is exact.
+  //
+  //   bases — one row per BaseRecord OR ruin (src/systems/baseclaim.js's
+  //     `blob.base.bases[]`/`.ruins[]`). NOTE the client's own BaseRecord
+  //     names its world-position fields `cx`/`cz` (baseclaim.js: "cx:
+  //     piece.pos.x, cz: piece.pos.z") — those are NOT chunk coordinates,
+  //     despite the name; a pre-existing naming quirk in that file, not
+  //     this one. This table's `x`/`z` columns hold that world position;
+  //     THIS table's own `cx`/`cz` columns are the real chunk bucket
+  //     (chunkCoord(x), chunkCoord(z)), consistent with `structures` and
+  //     `people`. `ruin` (0/1) distinguishes a live, owned BaseRecord from
+  //     a cupboardless "ruins" shadow record (baseclaim.js's B8 RUINS
+  //     paragraph) — folded into this one table rather than a 4th, since a
+  //     ruin is structurally identical (position+radius, decays at 2x) and
+  //     the task's own table list only names three. `upkeepUntil` is the
+  //     B8 decay clock (0 for a ruin — always overdue, decayTick's own
+  //     rule) — see server.js's mapping-comment for the full B8 field
+  //     mapping and why the global `playClock` scalar (not per-base) rides
+  //     in the un-extracted remainder of `blob.base` instead of a column
+  //     here. `auth` is the authorized-pid JSON array (empty for a ruin).
+  //
+  //   containers — one row per container-KIND piece's inventory (a subset
+  //     of `structures`; `containerId` == that piece's `pieceId`, kept as
+  //     its own column per the task's schema rather than reusing the name,
+  //     so a caller never has to remember which table's PK is aliased).
+  //     `pieceId` is declared REFERENCES structures(pieceId) ON DELETE
+  //     CASCADE — this is the cascade-semantics DECISION for S3: when a
+  //     structure row is deleted (structDelete, or a save's diff removing
+  //     a demolished/decayed piece), SQLite itself removes any orphaned
+  //     container row in the SAME transaction, at the engine level, rather
+  //     than server.js hand-rolling a second delete. `code` (a keypad
+  //     code) has no source data yet either — src/systems/baseclaim.js's
+  //     lock model is a plain boolean `locked`, no keycode string exists
+  //     client-side this wave — the column is forward-compat scaffolding,
+  //     always NULL today.
+  //
+  // DELETIONS ARE REAL (unlike `people`): a demolished/decayed/collapsed
+  // piece is actually gone from the world — "rubble doesn't stay in the
+  // books" the way a dead person's ledger row does (MASTER-PLAN Part V.0's
+  // persistence principle is about PEOPLE; a destroyed structure has no
+  // equivalent "stays in the books" requirement). If a future wave wants a
+  // raid/demolition HISTORY, that's an EVENT LOG (a new table recording
+  // "piece X destroyed by Y at time T"), not a tombstone flag on this row
+  // — the row's job is "what currently exists", full stop. server.js's
+  // extraction treats each save's full piece/base list as authoritative
+  // (building.js's B.serialize() already re-walks CBZ.pieces and emits the
+  // COMPLETE current set every time, same shape peopleAll's `data` already
+  // assumed for people) and deletes whatever's no longer in it.
+  {
+    version: 3,
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS structures (
+          pieceId TEXT PRIMARY KEY,
+          baseId TEXT,
+          kind TEXT NOT NULL,
+          x REAL NOT NULL DEFAULT 0,
+          y REAL NOT NULL DEFAULT 0,
+          z REAL NOT NULL DEFAULT 0,
+          cx INTEGER NOT NULL DEFAULT 0,
+          cz INTEGER NOT NULL DEFAULT 0,
+          rot INTEGER NOT NULL DEFAULT 0,
+          hp REAL NOT NULL DEFAULT 0,
+          material TEXT,
+          data TEXT NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_structures_chunk ON structures (cx, cz);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_structures_base ON structures (baseId);`);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS bases (
+          baseId TEXT PRIMARY KEY,
+          ownerId TEXT,
+          x REAL NOT NULL DEFAULT 0,
+          z REAL NOT NULL DEFAULT 0,
+          cx INTEGER NOT NULL DEFAULT 0,
+          cz INTEGER NOT NULL DEFAULT 0,
+          radius REAL NOT NULL DEFAULT 0,
+          upkeepUntil REAL NOT NULL DEFAULT 0,
+          ruin INTEGER NOT NULL DEFAULT 0,
+          auth TEXT NOT NULL DEFAULT '[]',
+          data TEXT NOT NULL,
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_bases_chunk ON bases (cx, cz);`);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS containers (
+          containerId TEXT PRIMARY KEY,
+          pieceId TEXT NOT NULL REFERENCES structures(pieceId) ON DELETE CASCADE,
+          baseId TEXT,
+          inventory TEXT NOT NULL DEFAULT '{}',
+          locked INTEGER NOT NULL DEFAULT 0,
+          code TEXT,
+          updatedAt INTEGER NOT NULL
+        );
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_containers_base ON containers (baseId);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_containers_piece ON containers (pieceId);`);
     },
   },
 ];
@@ -388,6 +534,211 @@ function open(file) {
 
   function peopleCount() { return stPeopleCount.get().n | 0; }
 
+  // ---- structures table (S3): player-placed pieces ------------------------
+  const stStructUpsert = db.prepare(`
+    INSERT INTO structures (pieceId, baseId, kind, x, y, z, cx, cz, rot, hp, material, data, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(pieceId) DO UPDATE SET
+      baseId = excluded.baseId, kind = excluded.kind, x = excluded.x, y = excluded.y, z = excluded.z,
+      cx = excluded.cx, cz = excluded.cz, rot = excluded.rot, hp = excluded.hp, material = excluded.material,
+      data = excluded.data, updatedAt = excluded.updatedAt
+  `);
+  const stStructGet = db.prepare("SELECT * FROM structures WHERE pieceId = ?");
+  const stStructDelete = db.prepare("DELETE FROM structures WHERE pieceId = ?");
+  const stStructAll = db.prepare("SELECT * FROM structures ORDER BY pieceId ASC");
+  const stStructByBase = db.prepare("SELECT * FROM structures WHERE baseId = ? ORDER BY pieceId ASC");
+  // INDEXED BY pin — same rationale as idx_people_chunk (peopleByChunk's own
+  // comment above): a tiny/fresh table can't be trusted to have ANALYZE
+  // stats good enough for the planner to prefer this range index on its own.
+  const stStructByChunk = db.prepare(
+    "SELECT * FROM structures INDEXED BY idx_structures_chunk WHERE cx BETWEEN ? AND ? AND cz BETWEEN ? AND ? ORDER BY pieceId ASC"
+  );
+
+  function rowToStructEntry(row) {
+    if (!row) return null;
+    let data = null;
+    try { data = JSON.parse(row.data); } catch (e) { data = null; }
+    return {
+      pieceId: row.pieceId, baseId: row.baseId || null, kind: row.kind,
+      x: row.x, y: row.y, z: row.z, cx: row.cx | 0, cz: row.cz | 0,
+      rot: row.rot | 0, hp: row.hp, material: row.material || null,
+      updatedAt: row.updatedAt, data,
+    };
+  }
+
+  // structPut: transactional upsert, idempotent by pieceId — mirrors
+  // peoplePut's shape but this is the ONLY of the two families where the
+  // CALLER (server.js) is expected to also call structDelete for ids that
+  // dropped out of the latest save's full piece list (see migration v3's
+  // header: deletions are real here). Returns rows written.
+  function structPut(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    let n = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of rows) {
+        if (!r || !r.pieceId) continue;
+        stStructUpsert.run(
+          String(r.pieceId), r.baseId != null ? String(r.baseId) : null, String(r.kind || "piece"),
+          +r.x || 0, +r.y || 0, +r.z || 0, chunkCoord(r.x), chunkCoord(r.z),
+          (r.rot | 0), +r.hp || 0, r.material != null ? String(r.material) : null,
+          JSON.stringify(r.data !== undefined ? r.data : r), r.updatedAt || Date.now()
+        );
+        n++;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch (e2) {}
+      throw err;
+    }
+    return n;
+  }
+  function structGet(pieceId) { return rowToStructEntry(stStructGet.get(pieceId)); }
+  function structAll() { return stStructAll.all().map(rowToStructEntry); }
+  function structByBase(baseId) { return stStructByBase.all(baseId).map(rowToStructEntry); }
+  // structByChunk: square (Chebyshev) radius, same shape as peopleByChunk.
+  function structByChunk(cx, cz, r) {
+    cx = cx | 0; cz = cz | 0; r = Math.max(0, r | 0);
+    return stStructByChunk.all(cx - r, cx + r, cz - r, cz + r).map(rowToStructEntry);
+  }
+  // structDelete: REAL delete (see migration v3 header) — cascades to any
+  // container row referencing this pieceId via the FK's ON DELETE CASCADE
+  // (containers.pieceId REFERENCES structures(pieceId)), enforced by
+  // SQLite itself (open()'s `PRAGMA foreign_keys = ON`), not hand-rolled
+  // here. Returns whether a row existed.
+  function structDelete(pieceId) {
+    const existed = !!stStructGet.get(pieceId);
+    if (existed) stStructDelete.run(pieceId);
+    return existed;
+  }
+
+  // ---- bases table (S3): BaseRecords + ruins (see migration v3 header) ---
+  const stBaseUpsert = db.prepare(`
+    INSERT INTO bases (baseId, ownerId, x, z, cx, cz, radius, upkeepUntil, ruin, auth, data, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(baseId) DO UPDATE SET
+      ownerId = excluded.ownerId, x = excluded.x, z = excluded.z, cx = excluded.cx, cz = excluded.cz,
+      radius = excluded.radius, upkeepUntil = excluded.upkeepUntil, ruin = excluded.ruin,
+      auth = excluded.auth, data = excluded.data, updatedAt = excluded.updatedAt
+  `);
+  const stBaseGet = db.prepare("SELECT * FROM bases WHERE baseId = ?");
+  const stBaseDelete = db.prepare("DELETE FROM bases WHERE baseId = ?");
+  const stBaseAll = db.prepare("SELECT * FROM bases ORDER BY baseId ASC");
+  const stBaseByChunk = db.prepare(
+    "SELECT * FROM bases INDEXED BY idx_bases_chunk WHERE cx BETWEEN ? AND ? AND cz BETWEEN ? AND ? ORDER BY baseId ASC"
+  );
+
+  function rowToBaseEntry(row) {
+    if (!row) return null;
+    let data = null, auth = [];
+    try { data = JSON.parse(row.data); } catch (e) { data = null; }
+    try { auth = JSON.parse(row.auth); } catch (e) { auth = []; }
+    return {
+      baseId: row.baseId, ownerId: row.ownerId || null,
+      x: row.x, z: row.z, cx: row.cx | 0, cz: row.cz | 0,
+      radius: row.radius, upkeepUntil: row.upkeepUntil, ruin: !!row.ruin,
+      authorized: auth, updatedAt: row.updatedAt, data,
+    };
+  }
+
+  function basePut(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    let n = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of rows) {
+        if (!r || !r.baseId) continue;
+        stBaseUpsert.run(
+          String(r.baseId), r.ownerId != null ? String(r.ownerId) : null,
+          +r.x || 0, +r.z || 0, chunkCoord(r.x), chunkCoord(r.z),
+          +r.radius || 0, +r.upkeepUntil || 0, r.ruin ? 1 : 0,
+          JSON.stringify(r.authorized || []), JSON.stringify(r.data !== undefined ? r.data : r),
+          r.updatedAt || Date.now()
+        );
+        n++;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch (e2) {}
+      throw err;
+    }
+    return n;
+  }
+  function baseGet(baseId) { return rowToBaseEntry(stBaseGet.get(baseId)); }
+  function baseAll() { return stBaseAll.all().map(rowToBaseEntry); }
+  function baseByChunk(cx, cz, r) {
+    cx = cx | 0; cz = cz | 0; r = Math.max(0, r | 0);
+    return stBaseByChunk.all(cx - r, cx + r, cz - r, cz + r).map(rowToBaseEntry);
+  }
+  // baseDelete: REAL delete — does NOT cascade to structures (a base's
+  // pieces outlive its BaseRecord, per baseclaim.js's own RUINS design;
+  // the caller is expected to write a `ruin` row separately if that's the
+  // desired shadow-record behavior, exactly as basePut's `ruin` rows do).
+  function baseDelete(baseId) {
+    const existed = !!stBaseGet.get(baseId);
+    if (existed) stBaseDelete.run(baseId);
+    return existed;
+  }
+
+  // ---- containers table (S3): container-piece inventories -----------------
+  const stContUpsert = db.prepare(`
+    INSERT INTO containers (containerId, pieceId, baseId, inventory, locked, code, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(containerId) DO UPDATE SET
+      pieceId = excluded.pieceId, baseId = excluded.baseId, inventory = excluded.inventory,
+      locked = excluded.locked, code = excluded.code, updatedAt = excluded.updatedAt
+  `);
+  const stContGet = db.prepare("SELECT * FROM containers WHERE containerId = ?");
+  const stContDelete = db.prepare("DELETE FROM containers WHERE containerId = ?");
+  const stContAll = db.prepare("SELECT * FROM containers ORDER BY containerId ASC");
+  const stContByBase = db.prepare("SELECT * FROM containers WHERE baseId = ? ORDER BY containerId ASC");
+
+  function rowToContEntry(row) {
+    if (!row) return null;
+    let inventory = {};
+    try { inventory = JSON.parse(row.inventory); } catch (e) { inventory = {}; }
+    return {
+      containerId: row.containerId, pieceId: row.pieceId, baseId: row.baseId || null,
+      inventory, locked: !!row.locked, code: row.code || null, updatedAt: row.updatedAt,
+    };
+  }
+
+  // containerPut: transactional upsert. NOTE: the FK (pieceId REFERENCES
+  // structures(pieceId)) means a container row can only be written for a
+  // pieceId that ALREADY has a structures row — callers (server.js) must
+  // structPut() the owning piece first, in an earlier transaction, same
+  // save. Throws (surfaced to the caller, same as any other constraint
+  // violation) if that invariant is broken.
+  function containerPut(rows) {
+    if (!Array.isArray(rows) || !rows.length) return 0;
+    let n = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of rows) {
+        if (!r || !r.containerId) continue;
+        stContUpsert.run(
+          String(r.containerId), String(r.pieceId || r.containerId), r.baseId != null ? String(r.baseId) : null,
+          JSON.stringify(r.inventory || {}), r.locked ? 1 : 0, r.code != null ? String(r.code) : null,
+          r.updatedAt || Date.now()
+        );
+        n++;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch (e2) {}
+      throw err;
+    }
+    return n;
+  }
+  function containerGet(containerId) { return rowToContEntry(stContGet.get(containerId)); }
+  function containerAll() { return stContAll.all().map(rowToContEntry); }
+  function containersByBase(baseId) { return stContByBase.all(baseId).map(rowToContEntry); }
+  function containerDelete(containerId) {
+    const existed = !!stContGet.get(containerId);
+    if (existed) stContDelete.run(containerId);
+    return existed;
+  }
+
   function close() {
     try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch (e) {}
     try { db.close(); } catch (e) {}
@@ -408,6 +759,22 @@ function open(file) {
     peopleByChunk,
     peopleDelete,
     peopleCount,
+    structPut,
+    structGet,
+    structAll,
+    structByBase,
+    structByChunk,
+    structDelete,
+    basePut,
+    baseGet,
+    baseAll,
+    baseByChunk,
+    baseDelete,
+    containerPut,
+    containerGet,
+    containerAll,
+    containersByBase,
+    containerDelete,
     close,
   };
 }
