@@ -99,6 +99,12 @@
     roof: 5,
     stairs: 5,
     doorframe: 6,
+    // B6 (systems/baseclaim.js registers the actual CATALOG entries for these
+    // 3 kinds into CBZ.building.CATALOG directly — this file only needs to
+    // know their span/slot/support rules, same as every other kind here):
+    cupboard: 6,  // tool cupboard — rides a fill cell, same reach as a wall
+    container: 6, // storage container — same
+    door: 6,      // fills a doorframe's gap — same span as the doorframe itself
   };
   function maxSpanFor(kind) { return MAX_SPAN[kind] != null ? MAX_SPAN[kind] : Infinity; }
 
@@ -284,7 +290,24 @@
   const pieceIdToOccKey = new Map();
 
   function occKey(gx, gy, gz, slot) { return gx + "," + gy + "," + gz + "," + slot; }
-  function slotFor(kind, rot) { return (kind === "wall" || kind === "doorframe") ? ("e" + rot) : "fill"; }
+  // B6: 3 new slot kinds, added here (not just in the CATALOG) because a
+  // piece's occupancy bookkeeping key is exactly what lets it COEXIST with
+  // (rather than compete for) whatever else already sits on that cell:
+  //   cupboard/container -> "tc"/"box", a cell-level slot distinct from
+  //     "fill" so a tool cupboard or storage box can sit ON TOP of a
+  //     foundation/floor without the two ever fighting over one slot.
+  //   door -> "dr"+rot, an edge-level slot distinct from doorframe's own
+  //     "e"+rot so the door PANEL (which fills a doorframe's gap) can rest
+  //     at the very same cell+edge as the doorframe it depends on (see
+  //     checkSupport's door branch below) without double-claiming that
+  //     doorframe's slot.
+  function slotFor(kind, rot) {
+    if (kind === "wall" || kind === "doorframe") return "e" + rot;
+    if (kind === "door") return "dr" + rot;
+    if (kind === "cupboard") return "tc";
+    if (kind === "container") return "box";
+    return "fill";
+  }
 
   // ---- support rules (documented per-kind; see file header for the model) --
   // Every branch now ALSO returns `stability` (B4): 0 for a ground/root
@@ -296,7 +319,7 @@
     const p = pieceId != null && CBZ.pieces ? CBZ.pieces.get(pieceId) : null;
     return (p && p.stability != null) ? p.stability : 0;
   }
-  function checkSupport(kind, gx, gy, gz, cx, cz) {
+  function checkSupport(kind, gx, gy, gz, cx, cz, rot) {
     if (kind === "foundation") {
       // ground-only, ground floor only: findSupport must land within
       // 0.5m of y=0 at the cell centre (terrain-flatness assumption —
@@ -369,6 +392,25 @@
       if (!fillId) return { ok: false };
       return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
     }
+    // B6: cupboard/container — deployables that ride a fill cell (occupy
+    // their OWN "tc"/"box" slot, see slotFor above, so they don't compete
+    // with the fill piece itself for the "fill" slot). Same support feel
+    // as a wall: needs a foundation/floor/roof/stairs already at this
+    // exact cell+level.
+    if (kind === "cupboard" || kind === "container") {
+      const fillId = occupancy.get(occKey(gx, gy, gz, "fill"));
+      if (!fillId) return { ok: false };
+      return { ok: true, pieceId: fillId, stability: stabilityOf(fillId) + 1 };
+    }
+    // B6: door — a panel that fills a doorframe's walk-through gap. Needs
+    // the doorframe ALREADY standing at this exact cell's e+rot edge slot
+    // (the door rides that same edge, in its own "dr"+rot slot).
+    if (kind === "door") {
+      const dfId = occupancy.get(occKey(gx, gy, gz, "e" + rot));
+      const dfPiece = dfId != null && CBZ.pieces ? CBZ.pieces.get(dfId) : null;
+      if (!dfPiece || dfPiece.kind !== "doorframe") return { ok: false };
+      return { ok: true, pieceId: dfId, stability: stabilityOf(dfId) + 1 };
+    }
     return { ok: false };
   }
 
@@ -390,8 +432,15 @@
      (replay trusts the save for support/world-collision only, never a
      double claim on one logical slot or a structurally-impossible ramp)
      — see place() below.
+
+     ownerId (B6, optional 6th param): the PLACER's pid — defaults to
+     CBZ.netPid() (always available once net/netpersist.js has loaded;
+     "solo" if somehow it hasn't) when omitted, since every call site this
+     wave is "whoever is standing here right now placing this". Used ONLY
+     for the new base-ownership gate (d) below; every other kind's
+     validity math is completely unaware of who's placing it.
      ============================================================ */
-  function computeValidity(kind, gx, gy, gz, rot) {
+  function computeValidity(kind, gx, gy, gz, rot, ownerId) {
     const def = CATALOG[kind];
     if (!def) return { ok: false, reason: "unknown kind: " + kind };
     gx |= 0; gy |= 0; gz |= 0;
@@ -400,7 +449,11 @@
     const slot = slotFor(kind, rot);
     const key = occKey(gx, gy, gz, slot);
     const cx = gx * CELL, cz = gz * CELL, baseY = gy * WALL_H;
-    const isEdge = slot !== "fill";
+    // B6: positioning is now keyed off KIND, not off "is this slot != fill"
+    // — cupboard/container occupy non-"fill" slots ("tc"/"box") but still
+    // sit at the CELL CENTER like any other fill piece (see slotFor above);
+    // only wall/doorframe/door actually live on an edge offset.
+    const isEdge = (kind === "wall" || kind === "doorframe" || kind === "door");
     let pos;
     if (isEdge) {
       switch (rot) {
@@ -431,7 +484,22 @@
 
     if (occupancy.has(key)) return { ok: false, reason: "slot already occupied", slot: slot, key: key, pos: pos, fp: fp, rect: rect };
 
-    const sup = checkSupport(kind, gx, gy, gz, cx, cz);
+    // (d) B6 BASE OWNERSHIP GATE — Rust-style "building privilege": once a
+    // tool cupboard's BaseRecord claims this ground (CBZ.baseAt, systems/
+    // baseclaim.js), only pids on its authorized list may place anything
+    // inside the radius. Guarded — baseclaim.js loads after this file, and
+    // single-player-with-no-bases-yet must behave exactly as before B6.
+    // Not a HARD fail: opts.skipValidity (replay) bypasses it like every
+    // other soft gate below, so a saved world always restores intact.
+    if (CBZ.baseAt) {
+      const placerId = ownerId != null ? ownerId : (CBZ.netPid ? CBZ.netPid() : "solo");
+      const rec = CBZ.baseAt(cx, cz);
+      if (rec && rec.authorized.indexOf(placerId) < 0) {
+        return { ok: false, reason: "building blocked (foreign base)", slot: slot, key: key, pos: pos, fp: fp, rect: rect };
+      }
+    }
+
+    const sup = checkSupport(kind, gx, gy, gz, cx, cz, rot);
     if (!sup.ok) return { ok: false, reason: "no support at this position", slot: slot, key: key, pos: pos, fp: fp, rect: rect, sup: sup };
     // B4: structural integrity — reject a placement whose candidate
     // stability (hops from the nearest root) exceeds this kind's
@@ -453,6 +521,7 @@
      ============================================================ */
   const B = (CBZ.building = {});
   B.CELL = CELL; B.WALL_H = WALL_H; B.FLOOR_T = FLOOR_T; B.WALL_T = WALL_T;
+  B.DOOR_GAP_W = DOOR_GAP_W; B.DOOR_GAP_H = DOOR_GAP_H; // B6: baseclaim.js's door piece sizes itself off the doorframe's own gap
   B.CATALOG = CATALOG;
   B.MAX_SPAN = MAX_SPAN; // exposed read-only for tooling/harness/B5 (per-tier scaling)
 
@@ -467,8 +536,12 @@
   // ghost mesh never has to re-derive the wall/doorframe edge offset by
   // hand; that's additive beyond the documented {ok,reason} contract, not
   // a replacement for it.
-  B.validate = function (kind, gx, gy, gz, rot) {
-    const v = computeValidity(kind, gx, gy, gz, rot);
+  // B6: optional 6th arg `ownerId` — the placer's pid, forwarded to the
+  // computeValidity gate (d) so a ghost preview reads "blocked" for a
+  // foreign base exactly like a real place() attempt would. Omitted calls
+  // (every pre-B6 call site) default to CBZ.netPid() inside computeValidity.
+  B.validate = function (kind, gx, gy, gz, rot, ownerId) {
+    const v = computeValidity(kind, gx, gy, gz, rot, ownerId);
     return { ok: v.ok, reason: v.reason, pos: v.pos || null, fp: v.fp || null };
   };
 
@@ -479,7 +552,7 @@
     gx |= 0; gy |= 0; gz |= 0;
     rot = ((rot | 0) % 4 + 4) % 4;
 
-    const v = computeValidity(kind, gx, gy, gz, rot);
+    const v = computeValidity(kind, gx, gy, gz, rot, opts.ownerId);
 
     // HARD fail — enforced even under opts.skipValidity (a replayed save
     // still can't double-claim a slot); support/world-collision are the
@@ -549,6 +622,15 @@
       piece.platforms.push(ramp); // keep the piece's own bookkeeping array in sync (reapDrain filters CBZ.platforms globally by pieceId, so cleanup works either way — this just keeps piece.platforms truthful)
     }
 
+    // B6 EXTENSION POINT: fires after EVERY successful placement, fresh OR
+    // replayed through B.apply() below — a single optional hook so
+    // systems/baseclaim.js can react (mint/extend a BaseRecord for a
+    // cupboard, seed open/locked/contents state for a door/container,
+    // register its interaction verbs) without this file knowing what any
+    // of those kinds MEAN. Not an array/bus — this wave has exactly one
+    // consumer; widen to a list if a second one ever needs it.
+    if (CBZ.onPiecePlace) CBZ.onPiecePlace(piece, opts);
+
     return piece;
   };
 
@@ -597,6 +679,12 @@
     toKill.forEach(function (id) {
       const key = pieceIdToOccKey.get(id);
       if (key != null) { occupancy.delete(key); pieceIdToOccKey.delete(id); }
+      // B6 EXTENSION POINT: mirror of onPiecePlace above — fires for EVERY
+      // piece this cascade is about to kill (not just the explicit target),
+      // so a cupboard caught in a collapse dissolves its BaseRecord exactly
+      // like a direct demolish/raid-kill would (Rust semantics: the TC
+      // falling drops building privilege for the whole radius).
+      if (CBZ.onPieceRemove) { const kp = CBZ.pieces.get(id); if (kp) CBZ.onPieceRemove(kp); }
     });
     return CBZ.despawnPiece(pieceId, { cascade: true });
   };
@@ -612,7 +700,16 @@
     const pieces = [];
     CBZ.pieces.forEach(function (p) {
       if (!p.alive || !p.gridPos || pieceIdToOccKey.get(p.id) == null) return; // only building-placed pieces
-      pieces.push({ kind: p.kind, gx: p.gridPos.gx, gy: p.gridPos.gy, gz: p.gridPos.gz, rot: p.rot, hp: p.hp, ownerId: p.ownerId });
+      const rec = { kind: p.kind, gx: p.gridPos.gx, gy: p.gridPos.gy, gz: p.gridPos.gz, rot: p.rot, hp: p.hp, ownerId: p.ownerId };
+      // B6: generic optional passthrough — this file has no idea what a
+      // door's `open`/`locked` or a container's `contents` MEAN, it just
+      // carries whatever systems/baseclaim.js stamped onto the piece
+      // (undefined fields are skipped so every pre-B6 piece serializes
+      // byte-identical to before).
+      if (p.open !== undefined) rec.open = p.open;
+      if (p.locked !== undefined) rec.locked = p.locked;
+      if (p.contents !== undefined) rec.contents = p.contents;
+      pieces.push(rec);
     });
     return { v: 1, pieces: pieces };
   };
@@ -621,7 +718,17 @@
     if (!blob || blob.v !== 1 || !Array.isArray(blob.pieces)) { if (blob) console.warn("[building] apply: blob v" + (blob && blob.v) + " — skipped"); return; }
     for (let i = 0; i < blob.pieces.length; i++) {
       const rec = blob.pieces[i];
-      B.place(rec.kind, rec.gx, rec.gy, rec.gz, rec.rot, { skipValidity: true, ownerId: rec.ownerId, hp: rec.hp });
+      const piece = B.place(rec.kind, rec.gx, rec.gy, rec.gz, rec.rot, { skipValidity: true, ownerId: rec.ownerId, hp: rec.hp });
+      if (!piece) continue;
+      // B6: restore the generic extras (CBZ.onPiecePlace already fired
+      // inside B.place, against the pre-extras defaults — a second,
+      // explicitly-named hook lets baseclaim.js re-sync anything DERIVED
+      // from these fields, e.g. an open door's collider must stay OUT of
+      // CBZ.colliders on replay, not get re-added by the default-closed path).
+      if (rec.open !== undefined) piece.open = rec.open;
+      if (rec.locked !== undefined) piece.locked = rec.locked;
+      if (rec.contents !== undefined) piece.contents = rec.contents;
+      if (CBZ.onPieceReplay) CBZ.onPieceReplay(piece, rec);
     }
   };
 

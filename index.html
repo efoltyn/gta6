@@ -436,6 +436,16 @@
      hook call CBZ.structDamage.hit at runtime, so load order relative to
      THEM doesn't matter — only relative to building.js/pieces.js does. -->
 <script src="src/systems/structdamage.js?v=bld1"></script>
+<!-- B6 — OWNERSHIP: the tool cupboard + BaseRecord + placement-rejection
+     radius + door locks/lockable containers, on top of B1's CATALOG and
+     B5's damage matrix (structdamage.js's destroy path stamps the
+     BaseRecord breach window this file reads). Loads right after
+     structdamage.js per the family's own load-order convention; the
+     city-mode interaction verbs it registers (city/interactions.js,
+     which loads much later in this file) are wired LAZILY on first
+     sight of CBZ.interactions, so relative order to THAT file doesn't
+     matter — only relative to building.js/structdamage.js does. -->
+<script src="src/systems/baseclaim.js?v=bld1"></script>
 <!-- B2 — the walking skeleton: CBZ.buildMode ghost preview + hotbar strip
      + confirm/rotate/level/demolish/undo, all calling B1's place()/remove().
      Loads right after building.js (needs CBZ.building.CATALOG/validate/

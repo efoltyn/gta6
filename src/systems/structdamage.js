@@ -132,6 +132,12 @@
 
     if (p.hp <= 0) {
       forget(pieceId);
+      // B6 BREACH STAMP: any piece destroyed inside a base's radius marks
+      // this instant as a breach — systems/baseclaim.js's lockable doors/
+      // containers stay open to non-owners for a short window afterward
+      // (the W9-style "raiders exploit the hole they just made" rule).
+      // Guarded — baseclaim.js loads after this file.
+      if (CBZ.baseAt) { const rec = CBZ.baseAt(p.pos.x, p.pos.z); if (rec) rec.lastBreach = (CBZ.game && CBZ.game.elapsed) || 0; }
       if (CBZ.building && CBZ.building.remove) CBZ.building.remove(pieceId);
       else CBZ.despawnPiece(pieceId, { cascade: true }); // building.js not loaded — still tear the piece down
       return true;

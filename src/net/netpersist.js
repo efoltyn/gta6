@@ -132,6 +132,10 @@
     if (CBZ.cityNpcLedger && CBZ.cityNpcLedger.serialize) try { blob.npc = CBZ.cityNpcLedger.serialize(); } catch (e) {}
     if (CBZ.cityFamilyTree && CBZ.cityFamilyTree.serialize) try { blob.fam = CBZ.cityFamilyTree.serialize(); } catch (e) {}
     if (CBZ.building && CBZ.building.serialize) try { blob.bld = CBZ.building.serialize(); } catch (e) {}
+    // B6: BaseRecords ride their OWN rider (NOT folded into blob.bld) so a
+    // world's ownership claims restore independently of piece geometry —
+    // see systems/baseclaim.js's file header for why.
+    if (CBZ.baseClaim && CBZ.baseClaim.serialize) try { blob.base = CBZ.baseClaim.serialize(); } catch (e) {}
     if (CBZ.dayPhase) blob.day = CBZ.dayPhase();
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     return blob;
@@ -222,6 +226,12 @@
     if (w.fracture && CBZ.cityFracture && CBZ.cityFracture.apply) try { CBZ.cityFracture.apply(w.fracture); } catch (e) { console.error("[netpersist]", e); }
     if (w.npc && CBZ.cityNpcLedger && CBZ.cityNpcLedger.apply) try { CBZ.cityNpcLedger.apply(w.npc); } catch (e) { console.error("[netpersist]", e); }
     if (w.fam && CBZ.cityFamilyTree && CBZ.cityFamilyTree.apply) try { CBZ.cityFamilyTree.apply(w.fam); } catch (e) { console.error("[netpersist]", e); }
+    // B6: restore BaseRecords BEFORE the pieces (w.bld) below — a replayed
+    // cupboard's onPiecePlace hook checks CBZ.baseAt() to decide whether to
+    // mint a NEW record; applying blob.base first means it finds the
+    // already-restored record (matching id/authorized/lastBreach) instead
+    // of manufacturing a duplicate.
+    if (w.base && CBZ.baseClaim && CBZ.baseClaim.apply) try { CBZ.baseClaim.apply(w.base); } catch (e) { console.error("[netpersist]", e); }
     if (w.bld && CBZ.building && CBZ.building.apply) try { CBZ.building.apply(w.bld); } catch (e) { console.error("[netpersist]", e); }
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }

@@ -384,7 +384,10 @@
   function tryPlace() {
     if (!bm.active) return;
     if (bm.gx == null) { CBZ.flashHint && CBZ.flashHint("🚫 No target", 1.0); return; }
-    const piece = B.place(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot);
+    // B6: thread the builder's stable pid through so every piece carries
+    // its owner (foreign-base placement gate + the demolish gate below both
+    // key off this) — CBZ.netPid() always resolves, online or offline.
+    const piece = B.place(bm.kind, bm.gx, bm.gy, bm.gz, bm.rot, { ownerId: CBZ.netPid ? CBZ.netPid() : null });
     if (piece) {
       bm.placedStack.push(piece.id);
       // audio.js's BANK has no "place" entry yet (grepped) — "coin" is
@@ -402,10 +405,22 @@
     const hit = raycastNearbyPiece();
     if (!hit) { CBZ.flashHint && CBZ.flashHint("🚫 Nothing in range to demolish", 1.0); return; }
     const piece = CBZ.pieces.get(hit.pieceId);
-    // ownerId gate: every piece is ownerless this wave (B6 lands real
-    // ownership/tool-cupboard locks) — the check is here so B6 only has
-    // to fill in the "matching" half, not invent this gate from scratch.
-    if (!piece || piece.ownerId != null) { CBZ.flashHint && CBZ.flashHint("🚫 Can't demolish that", 1.0); return; }
+    // B6 OWNERSHIP GATE: X only works on (a) ownerless pieces — legacy/
+    // pre-B6 saves and anything spawned outside the build system, same
+    // permissive default as before this wave — (b) pieces YOU built, or
+    // (c) any piece sitting inside a BaseRecord radius you're authorized
+    // on (your own base's tool cupboard covers your whole claim, not just
+    // the pieces you personally placed). Raiders demolish someone else's
+    // base through DAMAGE (systems/structdamage.js), never through this
+    // verb — there is no "break in and demolish" shortcut.
+    if (!piece) { CBZ.flashHint && CBZ.flashHint("🚫 Can't demolish that", 1.0); return; }
+    const me = CBZ.netPid ? CBZ.netPid() : null;
+    const ownedByMe = piece.ownerId == null || piece.ownerId === me;
+    const inMyBase = !ownedByMe && CBZ.baseAt && (function () {
+      const rec = CBZ.baseAt(piece.pos.x, piece.pos.z);
+      return !!(rec && rec.authorized.indexOf(me) >= 0);
+    })();
+    if (!ownedByMe && !inMyBase) { CBZ.flashHint && CBZ.flashHint("🚫 Can't demolish that", 1.0); return; }
     const idx = bm.placedStack.indexOf(hit.pieceId);
     if (idx >= 0) bm.placedStack.splice(idx, 1);
     B.remove(hit.pieceId);
