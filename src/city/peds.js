@@ -367,8 +367,14 @@
     // above; everyone else draws off the SAME deterministic stream (r) every
     // other appearance roll here uses — never Math.random.
     const gender = opts.gender || (FEMALE_ARCH[opts.archetype] ? "f" : (r() < 0.48 ? "f" : "m"));
-    const outfit = opts.outfit || pick(SHIRT, r());
-    const skin = pick(SKIN, r());
+    // X4 DEMOGRAPHICS: the spawn region's population config (skin-tone dist,
+    // name pools, dress palette — city/demographics.js; wealth-independent,
+    // see that file's header) for skin/name/dress. Guarded + falls back to
+    // the global pools above when absent (mainland today) or its mix roll
+    // defers to global.
+    const demo = (CBZ.demographics && CBZ.demographics.rollFor) ? CBZ.demographics.rollFor(x, z, r, gender) : null;
+    const outfit = opts.outfit || (demo && demo.shirt != null ? demo.shirt : pick(SHIRT, r()));
+    const skin = (demo && demo.skin != null) ? demo.skin : pick(SKIN, r());
     const wealth = opts.wealth != null ? opts.wealth : richWealth(r);
     const econ = CBZ.cityEcon;
     // ~45% of plain civvies wear the tee SHORT-SLEEVED. A bare-skin WHOLE arm
@@ -406,7 +412,7 @@
     }
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
-    const nm = opts.name || name(r, gender);
+    const nm = opts.name || (demo && demo.name) || name(r, gender);
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
     if (tag) { tag.position.y = 3.0; tag.scale.set(3, 0.75, 1); tag.visible = false; ch.group.add(tag); }
     let aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
