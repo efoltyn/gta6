@@ -62,7 +62,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 
 - [x] **P1** `city/polity.js` (new): jurisdiction registry (city→state→country over existing geography), `worldDay` counter off dayPhase wrap, serialize/apply.
 - [x] **P2** `city/officials.js` (new): Mayor Rosa Vale as a real scheduled ledger NPC (city hall hours, appearance window, 2 bodyguards), assassination → succession machine, `cityKillPed` wrap.
-- [ ] **P3** `city/approval.js` (new): the 5-input approval equation @ 1Hz slices + POLITICS tab with sparkline.
+- [x] **P3** `city/approval.js` (new): the 5-input approval equation @ 1Hz slices + POLITICS tab with sparkline.
 - [ ] **P4** `city/elections.js` (new): 7-day mayoral cycle, 2 candidates, voter blocs from district data, campaign events, results feed.
 - [ ] **P5** `city/protection.js` (new): unified `ProtectionDetail` — secret-service details for officials, hireable/armable security for the player, gang crews adopt the same record.
 - [ ] **P6** `city/regimes.js` (new): govType state machine + first effects (fascist curfew, communist price controls via market.js, **anarchist collapse transitions cops → former cops who keep their guns**).
