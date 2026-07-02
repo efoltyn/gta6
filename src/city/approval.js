@@ -657,6 +657,19 @@
     c.appendChild(titleRow);
     c.appendChild(row("Officeholder", holderNameOf(rec) + (rec.office && !rec.office.holder ? " (vacant)" : ""), "#8fc1ff"));
     c.appendChild(approvalBar(rec));
+    // P4 tie: city/elections.js owns the election DATA (status()), this
+    // panel just renders it — same officials.js/holderNameOf() split.
+    const elStatus = CBZ.elections && CBZ.elections.status ? CBZ.elections.status(rec.id) : null;
+    if (elStatus) {
+      const eBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(143,193,255,0.08);border-radius:7px;");
+      eBox.appendChild(el("div", "font:700 11px system-ui;color:#8fc1ff;text-transform:uppercase;letter-spacing:0.4px;", "🗳️ Election in " + elStatus.daysLeft + " day(s)"));
+      for (let k = 0; k < elStatus.candidates.length; k++) {
+        const cd = elStatus.candidates[k];
+        eBox.appendChild(row(cd.name + " (" + cd.type + ")", "chr " + cd.charisma.toFixed(2) + " · mom " + cd.momentum.toFixed(1)));
+      }
+      if (elStatus.lastPoll) eBox.appendChild(row("Latest poll", elStatus.lastPoll.aPct + " - " + elStatus.lastPoll.bPct));
+      c.appendChild(eBox);
+    }
     const inp = CBZ.approvalState.inputs(rec.id);
     if (inp && inp.hasEcon) {
       const bars = el("div", "margin-top:6px;");

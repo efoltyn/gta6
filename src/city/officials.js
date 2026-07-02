@@ -324,6 +324,9 @@
   if (CBZ.onNewDay) {
     CBZ.onNewDay(function (day) {
       if (!CBZ.polity) return;
+      if (CBZ.elections) return;   // P4: a real election system exists now — this
+      // file's own term-extend/caretaker stub defers entirely to it (see this
+      // file's header + city/elections.js's own header for the coordination).
       const S = ensureState();
       const ids = [MAYOR_ID].concat(GOV_IDS, [PRESIDENT_ID]);
       for (let i = 0; i < ids.length; i++) {
