@@ -151,6 +151,12 @@
   function jobFor(rec) { return titleFor(rec).toLowerCase(); }
   const CARETAKER_DAYS = 2;   // V.2: "power vacuum ... the world heals" — P4 replaces with real elections
 
+  // ---- X6: relations.js listens for officeholder deaths (own subscriber
+  // list, polity.js's onNewDay shape) — the ONLY change this file makes for
+  // that wave: no other line here knows relations.js exists.
+  const officialDeathSubs = [];
+  CBZ.onOfficialDeath = function (fn) { if (typeof fn === "function") officialDeathSubs.push(fn); };
+
   // ---- state: g.officials (own guard for the one-shot mint pass) ----------
   function reset() {
     g.officials = { inited: false, mayorSid: null, deputySid: null, govSids: {}, presidentSid: null, vacantSince: {} };
@@ -331,6 +337,10 @@
 
     // (d) max heat — same call shape worldstate.js's own crimeHeat routes through.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(300, { type: "murder" }); } catch (e) {} }
+
+    // (e) X6: notify relations.js (and any future subscriber) — the actual
+    // country-degradation logic lives entirely over there, not here.
+    for (let i = 0; i < officialDeathSubs.length; i++) { try { officialDeathSubs[i](rec, sid, ped); } catch (e) {} }
 
     // if this was the mayor's own physical body, let the presence tick's
     // "principal.dead" branch handle the mourn/despawn — nothing more to do here.

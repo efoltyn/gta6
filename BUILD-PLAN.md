@@ -79,7 +79,7 @@ Waves are parse-verified; not play-tested per owner's standing rule.
 - [x] **X4** Demographics: per-region population config (skin-tone distribution, name pools per culture, dress palettes) read by makePed/crowds at spawn; region-correct populations, migration mixes them over time.
 - [x] **X5** Village kit: hut/shack/well prefab set for towngen (mud-brick, thatch, corrugated shacks, dirt paths); poor-country settlements generate as villages; a poor capital = few towers over shacks.
 - [ ] **X6b** Civil war triggers: a cohort misery index (hunger + real wages + approval) past threshold in multiple districts -> armed uprising with rebel-held territory; partially-failed coups (capital taken but military island or loyalist states hold out) fracture the polity into two warring records; endings: reconquest, partition (the map permanently gains a country), or warlordism. Builds on P8's war machinery.
-- [ ] **X6** Relations: affinity matrix (country/state/city, -100..100) seeded by data, moved by events (trade, insults, war, refugees); feeds tariffs, migration choice, war pressure, street reactions.
+- [x] **X6** Relations: affinity matrix (country/state/city, -100..100) seeded by data, moved by events (trade, insults, war, refugees); feeds tariffs, migration choice, war pressure, street reactions.
 
 ## Stage M — Money
 

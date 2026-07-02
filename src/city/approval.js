@@ -683,6 +683,19 @@
     } else {
       c.appendChild(el("div", "font:12px system-ui;color:#7e8aa3;margin-top:4px;", "Not simulated yet — no live EconState behind this jurisdiction."));
     }
+    // X6: RELATIONS section — country cards only (city/relations.js's affinity
+    // matrix is seeded/queried per-country this wave; see that file's header).
+    // Data owned entirely by relations.js — this panel just renders it, the
+    // exact CBZ.elections.status()/holderNameOf() split already above.
+    if (rec.kind === "country" && CBZ.relations && CBZ.relations.summaryFor) {
+      const rel = CBZ.relations.summaryFor(rec.id);
+      if (rel && (rel.best || rel.worst)) {
+        const rBox = el("div", "margin-top:6px;padding:7px 8px;background:rgba(255,255,255,0.03);border-radius:7px;");
+        if (rel.best) rBox.appendChild(row("Best friend", rel.best.name + " (" + (rel.best.rel >= 0 ? "+" : "") + rel.best.rel + ")", "#8fe08a"));
+        if (rel.worst) rBox.appendChild(row("Worst enemy", rel.worst.name + " (" + (rel.worst.rel >= 0 ? "+" : "") + rel.worst.rel + ")", "#ff6a5e"));
+        c.appendChild(rBox);
+      }
+    }
     const day = CBZ.worldDay ? CBZ.worldDay() : 0;
     const termDay = rec.office && rec.office.termDay != null ? rec.office.termDay : null;
     c.appendChild(row("Term ends", termDay != null ? Math.max(0, termDay - day) + " day(s)" : "—"));

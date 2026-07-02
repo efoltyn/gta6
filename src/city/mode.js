@@ -309,6 +309,7 @@
       if (CBZ.cityFamilyReset) CBZ.cityFamilyReset();   // households re-cast after peds spawn
       if (CBZ.cityFamilyTreeReset) CBZ.cityFamilyTreeReset(); // W6: fresh run starts with no kinship edges
       if (CBZ.polityReset) CBZ.polityReset(); // P1: fresh run rebuilds the jurisdiction roster + worldDay=0
+      if (CBZ.relationsReset) CBZ.relationsReset(); // X6: fresh run reseeds the affinity matrix
       if (CBZ.cityBirthsReset) CBZ.cityBirthsReset();     // W11: fresh cadence timer for the birth tick
       if (CBZ.cityMarriageReset) CBZ.cityMarriageReset(); // W13: fresh run starts with zero marriage strain
       if (CBZ.citySocialReset) CBZ.citySocialReset();

@@ -639,6 +639,10 @@
 <script src="src/city/villagekit.js?v=world1"></script>
 <script src="src/city/countries.js?v=world1"></script>
 <script src="src/city/demographics.js?v=world1"></script>
+<!-- X6: the affinity matrix (country/state/city relations) — after
+     countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
+     loaded in the earlier P-wave) since it reads/subscribes to both. -->
+<script src="src/city/relations.js?v=world1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale2"></script>
