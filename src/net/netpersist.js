@@ -137,6 +137,7 @@
     // see systems/baseclaim.js's file header for why.
     if (CBZ.baseClaim && CBZ.baseClaim.serialize) try { blob.base = CBZ.baseClaim.serialize(); } catch (e) {}
     if (CBZ.dayPhase) blob.day = CBZ.dayPhase();
+    if (CBZ.polity && CBZ.polity.serialize) try { blob.pol = CBZ.polity.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
     if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
     if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
@@ -239,6 +240,7 @@
     if (w.base && CBZ.baseClaim && CBZ.baseClaim.apply) try { CBZ.baseClaim.apply(w.base); } catch (e) { console.error("[netpersist]", e); }
     if (w.bld && CBZ.building && CBZ.building.apply) try { CBZ.building.apply(w.bld); } catch (e) { console.error("[netpersist]", e); }
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
+    if (w.pol && CBZ.polity && CBZ.polity.apply) try { CBZ.polity.apply(w.pol); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
     if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
     if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }
