@@ -3744,6 +3744,31 @@
       // are hidden inside a building, so skip them.
       const visAnim = vis && p.enterT <= 0;
       move(p, dt, near || important || visAnim);
+      // ---- diegetic witness tells (post-anim, so animChar's damping can't
+      //      pull them back): a dialing witness holds the phone to their EAR,
+      //      a gawker films two-handed, a grudge witness POINTS you out to the
+      //      officer. These in-world reads replace the old narration toasts
+      //      (owner's rule: you SEE someone see you — no popup tells you). ----
+      if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && p.char && p.char.parts) {
+        const ch = p.char, J = ch.low || {};
+        if (!ch.surrender && !ch.handsUp && !ch.aimingPose && !p.armed) {
+          // (armed peds skip these — their weapon-ready pose owns the arms,
+          //  and an armed witness draws instead of dialing anyway)
+          if (p.reportState === "phone") {
+            ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
+            if (J.ra) J.ra.rotation.x = -2.35;
+            if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+          } else if (p.posePoint > 0) {
+            ch.parts.ra.rotation.set(-1.52, 0, 0);           // arm out: "that's the one"
+            if (J.ra) J.ra.rotation.x = -0.04;
+          } else if (p.state === "film") {
+            ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
+            if (J.ra) J.ra.rotation.x = -0.55;
+            ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
+            if (J.la) J.la.rotation.x = -0.75;
+          }
+        }
+      }
     }
 
     // age out / pick up dropped weapons (player auto-grabs by walking over)

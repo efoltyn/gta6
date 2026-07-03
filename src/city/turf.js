@@ -553,9 +553,9 @@
     if (launched && (nearPlayer(leadGang.center.x, leadGang.center.z, 240) ||
         nearPlayer((CBZ.player && CBZ.player.pos && CBZ.player.pos.x) || 0, (CBZ.player && CBZ.player.pos && CBZ.player.pos.z) || 0, 1))) {
       CBZ.city && CBZ.city.note("⚔ The other crews are uniting against " + ldr.name + ".", 3.0);
-      if (CBZ.cityFeed) { try { CBZ.cityFeed("⚔ " + ldr.name + " is running away with the city — the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
+      if (CBZ.cityFlavor) { try { CBZ.cityFlavor("⚔ " + ldr.name + " is running away with the city — the others are uniting against them.", "#ff9b6b"); } catch (e) {} }
     } else if (launched && CBZ.cityFeed) {
-      try { CBZ.cityFeed("⚔ The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
+      try { CBZ.cityFlavor && CBZ.cityFlavor("⚔ The crews are uniting against " + ldr.name + ".", "#ff9b6b"); } catch (e) {}
     }
     hudDirty = true;
   }

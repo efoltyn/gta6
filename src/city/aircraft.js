@@ -472,7 +472,7 @@
     if (CBZ.shake) CBZ.shake(0.4);
     // (no banner — the falling fireball IS the message)
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(50);
-    if (CBZ.cityFeed) CBZ.cityFeed("You shot down a police gunship!", "#ff8b6b");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a police gunship!", "#ff8b6b");
   }
   function fallHeli(dt) {
     if (!heli) return;
