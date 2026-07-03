@@ -32,7 +32,8 @@
      --url <http://...>        reuse a running dev server
      --day | --night           studio lighting flavor (default day)
      --zoom <f>                camera distance multiplier (default 1)
-     --gif                     also encode an animated gif of the strip (ffmpeg)
+     --video (alias --gif)     also encode a .webm clip of the strip (the
+                               bundled ffmpeg only speaks mjpeg-in/vp8-out)
 
    Examples:
      node tools/studio.mjs rig --anim run
@@ -62,7 +63,7 @@ for (let i = 1; i < argv.length; i++) {
   const a = argv[i];
   if (!a.startsWith("--")) continue;
   const k = a.slice(2);
-  const flag = ["day", "night", "gif"].includes(k);
+  const flag = ["day", "night", "gif", "video"].includes(k);
   opt[k] = flag ? true : argv[++i];
 }
 const isRig = subject.startsWith("rig") || subject.startsWith("expr:");
@@ -72,6 +73,7 @@ const frames = +(opt.frames || 10);
 const angles = +(opt.angles || 8);
 const zoom = +(opt.zoom || 1);
 const night = !!opt.night;
+const wantVideo = !!(opt.video || opt.gif);
 const slug = subject.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 40);
 const outBase = opt.out
   ? opt.out.replace(/\.png$/i, "")
@@ -295,7 +297,7 @@ const HARNESS = String.raw`(() => {
     const n = Math.ceil(seconds / (1 / 60));
     for (let i = 0; i < n; i++) S.step(1 / 60, speed);
   };
-  S.frameGrab = () => S.renderer.domElement.toDataURL("image/png");
+  S.frameGrab = () => S.renderer.domElement.toDataURL("image/jpeg", 0.92);
   window.__studio = S;
   return "ready";
 })()`;
@@ -417,13 +419,13 @@ async function captureStrip() {
         S.stamp(${JSON.stringify(label)});
         return true;
       })()`);
-      if (opt.gif && v === 0) gifFrames.push(await evaluate(`__studio.frameGrab()`));
+      if (wantVideo && v === 0) gifFrames.push(await evaluate(`__studio.frameGrab()`));
     }
   }
   const data = await evaluate(`__studio.endSheet(${JSON.stringify(subject + " — " + anim + " @" + speed + "u/s over " + dur + "s")})`);
   const out = outBase + "-strip.png";
   await savePng(data, out);
-  if (opt.gif && gifFrames.length) await encodeGif(gifFrames, outBase + ".gif", frames / Math.max(0.2, +(opt.dur || ANIMS[anim].dur)));
+  if (wantVideo && gifFrames.length) await encodeVideo(gifFrames, outBase + ".webm", frames / Math.max(0.2, +(opt.dur || ANIMS[anim].dur)));
   return out;
 }
 
@@ -432,18 +434,22 @@ async function savePng(dataUrl, file) {
   await writeFile(file, Buffer.from(dataUrl.split(",")[1], "base64"));
 }
 
-async function encodeGif(dataUrls, file, fps) {
-  const dir = `/tmp/cbz-studio-gif-${Date.now()}`;
-  await mkdir(dir, { recursive: true });
-  for (let i = 0; i < dataUrls.length; i++) {
-    await writeFile(path.join(dir, `f${String(i).padStart(3, "0")}.png`), Buffer.from(dataUrls[i].split(",")[1], "base64"));
-  }
+async function encodeVideo(dataUrls, file, fps) {
+  // Playwright's bundled ffmpeg is minimal: mjpeg/vp8 decode, vp8/webm encode,
+  // image2pipe only — so we pipe canvas JPEG frames to stdin and emit .webm.
   const ff = existsSync("/opt/pw-browsers/ffmpeg-1011/ffmpeg-linux") ? "/opt/pw-browsers/ffmpeg-1011/ffmpeg-linux" : "ffmpeg";
-  await new Promise((res) => {
-    const p = spawn(ff, ["-y", "-framerate", String(Math.max(4, Math.round(fps))), "-i", path.join(dir, "f%03d.png"), "-vf", "scale=480:-1", file], { stdio: "ignore" });
-    p.on("exit", res); p.on("error", res);
+  const code = await new Promise((res) => {
+    const p = spawn(ff, ["-y", "-f", "image2pipe", "-c:v", "mjpeg",
+      "-framerate", String(Math.max(4, Math.round(fps))), "-i", "pipe:0",
+      "-c:v", "libvpx", "-b:v", "1.5M", "-vf", "scale=640:-2", file],
+      { stdio: ["pipe", "ignore", "inherit"] });
+    p.stdin.on("error", () => {});          // EPIPE if ffmpeg rejects input — exit code tells the story
+    for (const d of dataUrls) p.stdin.write(Buffer.from(d.split(",")[1], "base64"));
+    p.stdin.end();
+    p.on("exit", res); p.on("error", (e) => { console.error("ffmpeg spawn:", e.message); res(1); });
   });
-  await rm(dir, { recursive: true, force: true }).catch(() => {});
+  if (code !== 0) console.error("video encode failed");
+  else console.log(file);
 }
 
 // ---------- main ----------
