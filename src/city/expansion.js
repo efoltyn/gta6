@@ -327,12 +327,28 @@
       }
       return false;
     }
-    let made = 0, attempts = 0;
-    while (made < 15 && attempts++ < 900) {
-      const a = rng() * Math.PI * 2, dist = 46 + rng() * (R - 60);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
+    // METHOD (PROCGEN.md #1): no rejection sampling. The legal spots are
+    // known by construction — the cell interiors between the island's road
+    // lines, inside the buildable annulus. Enumerate them, shuffle
+    // deterministically, take the first 15. The old loop threw up to 900
+    // random polar darts against an O(n) clash scan to land the same count.
+    const slots = [];
+    for (let gi = -3; gi <= 2; gi++) for (let gj = -3; gj <= 2; gj++) {
+      const sx = cx + (gi + 0.5) * GRID, sz = cz + (gj + 0.5) * GRID;
+      const dc = Math.hypot(sx - cx, sz - cz);
+      if (dc < 40 || dc > R - 28) continue;              // keep the ring read
+      slots.push({ x: sx, z: sz });
+    }
+    for (let i = slots.length - 1; i > 0; i--) { const j = (rng() * (i + 1)) | 0; const t = slots[i]; slots[i] = slots[j]; slots[j] = t; }
+    let made = 0;
+    for (const sl of slots) {
+      if (made >= 15) break;
       const w = 8 + rng() * 4.5, d = 8 + rng() * 4.5;
-      if (clashes(x, z, w, d, 4) || nearRoad(x, z, w, d)) continue;
+      // jitter inside the cell, clear of the road margins by construction
+      const play = Math.max(0, (GRID - ROADW) / 2 - Math.max(w, d) / 2 - 1.4);
+      const x = sl.x + (rng() - 0.5) * 2 * play;
+      const z = sl.z + (rng() - 0.5) * 2 * play;
+      if (clashes(x, z, w, d, 4)) continue;              // hand-placed anchors only
       const storeys = 1 + ((rng() * 3) | 0);
       const rec = registerBuilding(x, z, w, d, storeys, PALETTE[(rng() * PALETTE.length) | 0], "Island Apartments", "tower");
       if (rng() < 0.22) tag(rec.b.group, "ISLAND BLOCK", rec.b.h + 1.5, 4.5);

@@ -81,6 +81,34 @@ await evl(`(() => {
   return true;
 })()`);
 await sleep(RUN_S * 1000);
+// ---- GENERATOR INVARIANTS (PROCGEN.md #8): cheap per-seed sanity ----
+const inv = await evl(`(() => {
+  const A = CBZ.city && CBZ.city.arena;
+  if (!A) return "no arena";
+  const out = [];
+  const lots = A.lots || [], shops = A.shopLots || [], roads = A.roads || [];
+  if (!lots.length) out.push("FAIL: no lots");
+  if (shops.length < 12) out.push("FAIL: only " + shops.length + " shops (essentials missing?)");
+  // every shop door must sit near a road segment (reachability proxy)
+  let orphans = 0;
+  for (const l of shops) {
+    const d = l.building && l.building.door; if (!d) { orphans++; continue; }
+    let best = 1e9;
+    for (const r of roads) {
+      const dx = r.vertical ? Math.abs(d.x - r.x) : Math.max(0, Math.abs(d.x - r.x) - r.len / 2);
+      const dz = r.vertical ? Math.max(0, Math.abs(d.z - r.z) - r.len / 2) : Math.abs(d.z - r.z);
+      best = Math.min(best, Math.hypot(dx, dz));
+    }
+    if (best > 45) orphans++;
+  }
+  if (orphans) out.push("FAIL: " + orphans + " shop doors far from any road");
+  // regions must all carry finite bounds
+  let badR = 0;
+  for (const r of (A.regions || [])) if (!isFinite(r.minX) || !isFinite(r.maxX)) badR++;
+  if (badR) out.push("FAIL: " + badR + " regions with non-finite bounds");
+  return out.length ? out.join(" | ") : "ok (" + lots.length + " lots, " + shops.length + " shops, " + roads.length + " roads)";
+})()`);
+console.log("invariants:", inv);
 const state = await evl(`JSON.stringify({
   state: CBZ.game && CBZ.game.state,
   mode: CBZ.game && CBZ.game.mode,
