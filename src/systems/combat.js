@@ -217,6 +217,7 @@
     CBZ.shake(heavy ? 0.55 : 0.3);
     flashSpark(actor, heavy);
     if (CBZ.body) CBZ.body.hit(actor, { fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z, force: heavy ? 8 : 4.5 });
+    if (CBZ.reactPunch) CBZ.reactPunch(actor, { kind: attack.kind, heavy, fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z });
     CBZ.sfx("punch");
     CBZ.reportCrime(7, { type: "melee", actorRole: CBZ.game.role });
     if (guardish) actor.hunt = 3; else if (CBZ.provokeGang) CBZ.provokeGang(actor, 12);

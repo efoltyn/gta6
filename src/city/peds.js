@@ -1565,6 +1565,7 @@
     }
     if (tgt.kind === "cop") {
       if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz });
+      if (melee && !tgt.dead && CBZ.reactPunch) CBZ.reactPunch(tgt, { kind: "cross", fromX: fx, fromZ: fz });
       if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 60 : 110, "attacked-officer");
       return;
     }
@@ -1579,7 +1580,10 @@
     const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
     if (!tgt.rage && dare && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back
     if (tgt.hp <= 0) CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
-    else if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
+    else {
+      if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
+      if (melee && CBZ.reactPunch) CBZ.reactPunch(tgt, { kind: "cross", fromX: fx, fromZ: fz });
+    }
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
   }
 
