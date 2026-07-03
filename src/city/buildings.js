@@ -4638,6 +4638,37 @@
     shopQueue = shopQueue.filter((s) => ESSENTIAL.has(s.kind)).concat(shopQueue.filter((s) => !ESSENTIAL.has(s.kind)));
     const nEssential = shopQueue.filter((s) => ESSENTIAL.has(s.kind)).length;
     let shopIdx = 0;
+    // ---- DISTRICT AFFINITY (the method behind which trade lands where) ----
+    // Districts had personality in name only: the shop queue was dealt to lots
+    // in plain iteration order, so a jewelry flagship could land in the
+    // projects by shuffle luck. Every deal below now picks the REMAINING trade
+    // with the best affinity for the lot's district — banks/jewelry/casinos
+    // gravitate downtown, chop shops and gun stores to industrial/projects,
+    // groceries and gyms to residential. Pure argmax over the queue (no new
+    // rng draws), so the deterministic stream is untouched.
+    const AFFINITY = {
+      core:        { bank: 4, jewelry: 4, casino: 4, cityhall: 4, transit: 3, clothing: 3, arena: 3, realtor: 2, food: 1, gym: 1, hospital: 2, drugs: 0.2, chop: 0.2, guns: 0.4, pawn: 0.4 },
+      commercial:  { food: 3, clothing: 3, gym: 3, realtor: 3, carlot: 3, hospital: 3, bank: 2, transit: 2, casino: 1, pawn: 1, jewelry: 1, arena: 2, drugs: 0.4 },
+      industrial:  { chop: 4, guns: 3, carlot: 3, gas: 3, pawn: 2, transit: 2, food: 1, drugs: 1.5, bank: 0.3, jewelry: 0.2, casino: 0.3, clothing: 0.4 },
+      projects:    { drugs: 4, pawn: 3, guns: 3, chop: 2, food: 2, gas: 1.5, gym: 1, bank: 0.3, jewelry: 0.15, casino: 0.5, clothing: 0.5, realtor: 0.4 },
+      residential: { food: 3, gym: 2, realtor: 2, hospital: 2, clothing: 1.5, transit: 1.5, bank: 1, drugs: 0.5, chop: 0.3, guns: 0.5, casino: 0.4 },
+    };
+    function shopAffinity(kind, dk) {
+      const row = AFFINITY[dk];
+      const v = row && row[kind];
+      return v != null ? v : 1;
+    }
+    // swap the best-affinity entry in queue[from..to) up to `from`
+    function dealBestFor(lot, from, to) {
+      const dk = districtKind(lot);
+      let best = from, bs = -1;
+      for (let q = from; q < to; q++) {
+        const wq = shopAffinity(shopQueue[q].kind, dk);
+        if (wq > bs) { bs = wq; best = q; }
+      }
+      if (best !== from) { const t = shopQueue[from]; shopQueue[from] = shopQueue[best]; shopQueue[best] = t; }
+      return shopQueue[from];
+    }
 
     // pick the flagship LUXURY tower lot up front. CH5 — the flagship Spire/mega-
     // tower should CROWN Midtown, not sulk in a corner: a 30-storey apex landing
@@ -4744,8 +4775,8 @@
       // the remaining real lots become furnished, sellable HOMES.
       let shop = null;
       if (!isLux && !forcedTier) {
-        if (shopIdx < nEssential) shop = shopQueue[shopIdx++];
-        else if (shopIdx < shopQueue.length && rng() < 0.4) shop = shopQueue[shopIdx++];
+        if (shopIdx < nEssential) { shop = dealBestFor(lot, shopIdx, nEssential); shopIdx++; }
+        else if (shopIdx < shopQueue.length && rng() < 0.4) { shop = dealBestFor(lot, shopIdx, shopQueue.length); shopIdx++; }
       }
 
       if (shop) {
