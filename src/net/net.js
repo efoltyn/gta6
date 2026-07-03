@@ -239,8 +239,16 @@
     const fx = A ? A.pos.x : CBZ.player.pos.x + 1, fz = A ? A.pos.z : CBZ.player.pos.z;
     if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(m.dmg, fx, fz, (m.melee ? "beaten down by " : "shot by ") + who, !!m.head, A, !!m.nl);
     if (m.melee) {
-      // show their swing + a real chance the blow knocks you off your feet
-      if (A && A.ch) { A.ch.punchT = 0.001; A.ch.punchDur = 0.22; }
+      // show their swing + a real chance the blow knocks you off your feet.
+      // Full-duration punch (0.001s left the remote attacker's arm frozen at
+      // the recovery frame — their swing was invisible): heavy blows read as
+      // a hook, lights as a jab, arms alternate so a flurry looks like one.
+      if (A && A.ch) {
+        A.ch.punchKind = m.heavy ? "hook" : "jab";
+        A.ch.punchArm = ((A.ch._netCombo = (A.ch._netCombo || 0) + 1) % 2) ? "r" : "l";
+        A.ch.punchDur = m.heavy ? 0.38 : 0.30;
+        A.ch.punchT = A.ch.punchDur;
+      }
       if (CBZ.body && CBZ.body.knockdown && CBZ.city && CBZ.city.playerActor && Math.random() < 0.3 && !CBZ.body.busy(CBZ.city.playerActor)) {
         CBZ.body.knockdown(CBZ.city.playerActor, { fromX: fx, fromZ: fz, force: 7, t: 1.0 });
       }

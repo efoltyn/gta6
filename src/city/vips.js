@@ -209,17 +209,17 @@
     if (!p._vipFit0) p._vipFit0 = { torso: first(ss.torso), collar: first(ss.collar), legs: first(ss.legs) };
     if (!p._vipFitIso) {
       const iso = (arr) => (arr || []).forEach((m) => { if (m && m.material) m.material = m.material.clone(); });
-      iso(ss.torso); iso(ss.collar); iso(ss.legs);
+      iso(ss.torso); iso(ss.collar); iso(ss.legs); iso(ss.legsLower);
       p._vipFitIso = true;
     }
     const paint = (arr, h) => { if (h == null) return; (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(h); }); };
-    paint(ss.torso, hex); paint(ss.collar, hex); paint(ss.legs, hex);
+    paint(ss.torso, hex); paint(ss.collar, hex); paint(ss.legs, hex); paint(ss.legsLower, hex);
   }
   function restoreFit(p) {
     const f = p._vipFit0; if (!f) return;
     const ss = p.char && p.char.skinSlots; if (!ss) return;
     const paint = (arr, h) => { if (h == null) return; (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(h); }); };
-    paint(ss.torso, f.torso); paint(ss.collar, f.collar); paint(ss.legs, f.legs);
+    paint(ss.torso, f.torso); paint(ss.collar, f.collar); paint(ss.legs, f.legs); paint(ss.legsLower, f.legs);
     p._vipFit0 = null;
   }
 

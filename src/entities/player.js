@@ -47,9 +47,11 @@
     const cop = role === "cop";
     const s = playerChar.skinSlots;
     paint(s.legs, cop ? 0x202a44 : 0xff7a1a);
+    paint(s.legsLower, cop ? 0x202a44 : 0xff7a1a);
     paint(s.torso, cop ? 0x263a67 : 0xff7a1a);
     paint(s.collar, cop ? 0x1b2848 : 0xff9747);
     paint(s.arms, cop ? 0x263a67 : 0xff7a1a);
+    paint(s.armsLower, cop ? 0x263a67 : 0xff7a1a);
     paint(s.shoes, cop ? 0x101010 : 0x2b2b2b);
     paint(s.stripes, 0xc85c00, !cop);
     paint(s.belt, cop ? 0x0d111c : 0x6b4a2a, true);

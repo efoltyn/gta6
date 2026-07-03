@@ -1320,7 +1320,7 @@
       CBZ.cityRecolorRig(ch, { torso: shirt, arms: shirt, legs, collar: shirt, shoes: 0x2b2b2b }, null);
     } else {
       const s = ch.skinSlots, setHex = (list, hex) => { if (list) for (const m of list) if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } };
-      setHex(s.torso, shirt); setHex(s.arms, shirt); setHex(s.legs, legs); setHex(s.collar, shirt);
+      setHex(s.torso, shirt); setHex(s.arms, shirt); setHex(s.armsLower, shirt); setHex(s.legs, legs); setHex(s.legsLower, legs); setHex(s.collar, shirt);
     }
     // a blazer/bomber shell rides through the painted jacket shell (silhouette
     // + open front) so it reads as a real jacket, tinted to the item color.

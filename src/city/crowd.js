@@ -848,7 +848,7 @@
     const iso = (arr) => (arr || []).forEach((m) => { if (m && m.material) m.material = m.material.clone(); });
     if (ch.head && ch.head.material) ch.head.material = ch.head.material.clone();
     const ss = ch.skinSlots || {};
-    iso(ss.hands); iso(ss.arms); iso(ss.hair); iso(ss.torso); iso(ss.collar);
+    iso(ss.hands); iso(ss.arms); iso(ss.armsLower); iso(ss.hair); iso(ss.torso); iso(ss.collar);
   }
   function setLook(ped, skinHex, shirtHex, hairHex) {
     const ch = ped.char; if (!ch) return;
@@ -866,7 +866,7 @@
     const paint = (arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(hex); });
     if (ch.head && ch.head.material && ch.head.material.color) ch.head.material.color.setHex(skinHex);
     const ss = ch.skinSlots || {};
-    paint(ss.hands, skinHex); paint(ss.arms, skinHex); paint(ss.hair, hairHex);
+    paint(ss.hands, skinHex); paint(ss.arms, skinHex); paint(ss.armsLower, skinHex); paint(ss.hair, hairHex);
     paint(ss.torso, shirtHex); paint(ss.collar, shirtHex);
   }
   function makePooled() {

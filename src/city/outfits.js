@@ -400,9 +400,9 @@
       return true;
     }
     const pp = CBZ.cityApplyClothes ? CBZ.cityApplyClothes(ch, rec || null, opts) : null;
-    if (!pp || !pp.legs) paint(s.legs, c.legs);
+    if (!pp || !pp.legs) { paint(s.legs, c.legs); paint(s.legsLower, c.legs); }
     if (!pp || !pp.torso) paint(s.torso, c.torso);
-    if (!pp || !pp.arms) paint(s.arms, c.arms != null ? c.arms : c.torso);
+    if (!pp || !pp.arms) { const ah = c.arms != null ? c.arms : c.torso; paint(s.arms, ah); paint(s.armsLower, ah); }
     paint(s.collar, c.collar != null ? c.collar : c.torso);
     paint(s.shoes, c.shoes != null ? c.shoes : 0x2b2b2b);
     sheen(s.shoes, !!c.gloss);
