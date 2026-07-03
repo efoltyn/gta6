@@ -538,7 +538,7 @@
     ped._goreStained = true;
     const ch = ped.char; if (!ch || !ch.skinSlots) return;
     const slots = ch.skinSlots;
-    const lists = [slots.torso, slots.legs, slots.arms, slots.collar];
+    const lists = [slots.torso, slots.legs, slots.arms, slots.collar, slots.legsLower, slots.armsLower];
     for (let li = 0; li < lists.length; li++) {
       const list = lists[li]; if (!list) continue;
       for (let mi = 0; mi < list.length; mi++) {
@@ -639,9 +639,13 @@
     // the part's exact world transform. Never a generic red cube.
     if (!opts.noFly && bits.length < 500) {
       const fly = part.clone();
-      for (let i = fly.children.length - 1; i >= 0; i--) {
-        if (!fly.children[i].isMesh) fly.remove(fly.children[i]); // hand/weapon sockets stay behind
-      }
+      // strip SOCKETS (hand/weapon mounts) but keep the two-segment limb's
+      // `low` joint group — it holds the forearm/shin mesh + cap, and the old
+      // "remove every non-Mesh child" loop would amputate the flying gib at
+      // the elbow/knee. Sockets are tagged userData.isSocket in character.js.
+      const stripQ = [];
+      fly.traverse((o) => { if (o !== fly && o.userData && o.userData.isSocket) stripQ.push(o); });
+      for (let i = 0; i < stripQ.length; i++) { if (stripQ[i].parent) stripQ[i].parent.remove(stripQ[i]); }
       fly.visible = true;
       part.matrixWorld.decompose(fly.position, fly.quaternion, fly.scale);
       scene().add(fly);

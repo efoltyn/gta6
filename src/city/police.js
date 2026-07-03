@@ -179,8 +179,12 @@
   // doesn't fight it; when the call ends animChar eases the arm back down.
   function radioPose(ch) {
     if (!ch || !ch.parts || !ch.parts.la) return;
-    ch.parts.la.rotation.set(-1.95, 0.55, -0.30);
+    // real mic-key gesture: upper arm raises partway, the ELBOW folds the
+    // hand up to the shoulder mic (a straight arm to the ear read as a salute)
+    ch.parts.la.rotation.set(-0.85, 0.35, -0.30);
     ch.parts.la.position.z = 0.12;
+    const low = ch.low && ch.low.la || ch.parts.la.userData.low;
+    if (low) low.rotation.set(-1.9, 0, 0);
   }
 
   function standIdle(c, faceY, dt, near) {

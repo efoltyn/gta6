@@ -123,12 +123,21 @@
     if ((headFlag || y > 1.98) && S.head && S.head[0]) return { mesh: S.head[0], region: "head" };
     if (y > 1.02) {
       if (Math.abs(x) > 0.47 && S.arms && S.arms.length === 2) {
-        return x < 0 ? { mesh: S.arms[0], region: "armL" } : { mesh: S.arms[1], region: "armR" };
+        // two-segment arms: below the elbow line (~1.38 in root space) the
+        // round hit the FOREARM mesh, not the upper arm — seat the decal on
+        // the mesh that actually contains the point or it clamps to the
+        // upper segment's end face and every arm wound bunches at the elbow.
+        const lower = y < 1.40 && S.armsLower && S.armsLower.length === 2 ? S.armsLower : null;
+        const list = lower || S.arms;
+        return x < 0 ? { mesh: list[0], region: "armL" } : { mesh: list[1], region: "armR" };
       }
       return { mesh: S.torso && S.torso[0], region: "torso" };
     }
     if (S.legs && S.legs.length === 2) {
-      return x < 0 ? { mesh: S.legs[0], region: "legL" } : { mesh: S.legs[1], region: "legR" };
+      // knee line sits ~0.47 in root space; below it the shin took the hit
+      const lower = y < 0.47 && S.legsLower && S.legsLower.length === 2 ? S.legsLower : null;
+      const list = lower || S.legs;
+      return x < 0 ? { mesh: list[0], region: "legL" } : { mesh: list[1], region: "legR" };
     }
     return { mesh: S.torso && S.torso[0], region: "torso" };
   }

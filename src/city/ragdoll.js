@@ -87,7 +87,8 @@
 
   // scratch — zero per-frame allocation
   const _r = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3();
-  const _a = new THREE.Vector3();
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3();
+  const _q2 = new THREE.Quaternion();
   const _m = new THREE.Matrix4(), _qt = new THREE.Quaternion(), _qi = new THREE.Quaternion();
   const _c = { x: 0, y: 0, z: 0 };
   const _np = { x: 0, y: 0, z: 0 }, _nd = { x: 0, y: 0, z: 0 };
@@ -252,6 +253,7 @@
     if (P.ra) P.ra.position.z = 0;
     if (P.ll) P.ll.scale.y = 1;
     if (P.rl) P.rl.scale.y = 1;
+    if (ch.low) { for (const k in ch.low) { const j = ch.low[k]; if (j) j.rotation.set(0, 0, 0); } }
     if (ch.body) { ch.body.rotation.set(0, 0, 0); ch.body.position.y = 0; }
     bumpPhys(target);
     kick(s, point, dir, imp);
@@ -405,16 +407,29 @@
       }
     }
     const P = ch.parts;
-    limb(P.la, p, 3, 21); limb(P.ra, p, 6, 24);     // shoulder → hand
-    limb(P.ll, p, 9, 33); limb(P.rl, p, 12, 36);    // hip → foot
+    // two-segment limbs: the solver already carries REAL elbow (5,6) and knee
+    // (9,10) mass points — orient the upper segment shoulder→elbow / hip→knee
+    // and the joint group elbow→hand / knee→foot, so a ragdolled body finally
+    // shows bent joints instead of plank limbs.
+    limb(P.la, p, 3, 15, 21); limb(P.ra, p, 6, 18, 24);   // shoulder → elbow → hand
+    limb(P.ll, p, 9, 27, 33); limb(P.rl, p, 12, 30, 36);  // hip → knee → foot
   }
-  function limb(part, p, si, ei) {
+  function limb(part, p, si, mi, ei) {
     if (!part) return;
-    _a.set(p[ei] - p[si], p[ei + 1] - p[si + 1], p[ei + 2] - p[si + 2]).applyQuaternion(_qi);
-    const l = _a.length();
+    _a.set(p[mi] - p[si], p[mi + 1] - p[si + 1], p[mi + 2] - p[si + 2]).applyQuaternion(_qi);
+    let l = _a.length();
     if (l < 0.001) return;
     _a.multiplyScalar(1 / l);
     part.rotation.set(Math.atan2(-_a.z, -_a.y), 0, Math.asin(cl1(_a.x)));
+    const low = part.userData && part.userData.low;
+    if (!low) return;
+    _b.set(p[ei] - p[mi], p[ei + 1] - p[mi + 1], p[ei + 2] - p[mi + 2]).applyQuaternion(_qi);
+    l = _b.length();
+    if (l < 0.001) return;
+    _b.multiplyScalar(1 / l);
+    _q2.setFromEuler(part.rotation).invert();     // into the upper segment's frame
+    _b.applyQuaternion(_q2);
+    low.rotation.set(Math.atan2(-_b.z, -_b.y), 0, Math.asin(cl1(_b.x)));
   }
 
   CBZ.onUpdate(25, function (dt) {

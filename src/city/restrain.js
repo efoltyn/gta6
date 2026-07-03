@@ -64,8 +64,13 @@
     for (const k of ["la", "ra"]) {
       const arm = ch.parts[k]; if (!arm) continue;
       const m = cuffMesh();
-      m.position.set(0, -0.66, 0);
-      arm.add(m); out.push(m);
+      // two-segment arms: the wrist lives in the elbow group's frame — mount
+      // there so the cuff rides the forearm when the elbow bends. Falls back
+      // to the old shoulder-frame offset on a legacy single-segment rig.
+      const low = arm.userData && arm.userData.low;
+      if (low) { m.position.set(0, -0.22, 0); low.add(m); }
+      else { m.position.set(0, -0.66, 0); arm.add(m); }
+      out.push(m);
     }
     ped._cuffMeshes = out;
   }

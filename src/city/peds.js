@@ -314,19 +314,11 @@
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
         : /soldier/i.test(opts.job || "") ? 0x44503a : null;
-    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol });
-    // SHORT SLEEVE: bare the forearm (lower ~45% of the arm) with a skin box on
-    // each arm pivot — reads as a tee sleeve ending mid-bicep, no sleeveless
-    // skin shoulder blending into the shirt. Rides the arm swing; shared geo.
-    if (shortSleeve && ch.parts && CBZ.cmat && window.THREE) {
-      [ch.parts.la, ch.parts.ra].forEach(function (arm) {
-        if (!arm) return;
-        const fa = new window.THREE.Mesh(CBZ.boxGeom(0.31, 0.42, 0.31), CBZ.cmat(skin));
-        fa.position.y = -0.72;                 // below mid-arm, above the hand cap (-0.93)
-        fa.castShadow = true;
-        arm.add(fa);
-      });
-    }
+    // SHORT SLEEVE: the two-segment rig has a real forearm mesh now —
+    // makeCharacter paints it skin-colored when shortSleeve is set, which
+    // reads as a tee ending mid-bicep and bends correctly at the elbow
+    // (the old bolt-on forearm box detached the moment the elbow bent).
+    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, shortSleeve: shortSleeve });
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
     const nm = opts.name || name(r);

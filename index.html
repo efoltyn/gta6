@@ -241,10 +241,11 @@
   </div>
 </div>
 
-<!-- Three.js (CDN) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Three.js (vendored locally — same r128 build the CDN served; local files load
+     offline, deterministically, and inside the headless screenshot harness) -->
+<script src="src/vendor/three.r128.min.js"></script>
+<script src="src/vendor/DRACOLoader.js"></script>
+<script src="src/vendor/GLTFLoader.js"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
      the terrain builder. BOTH must load before city/world.js runs, since

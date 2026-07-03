@@ -206,13 +206,13 @@
     if (s.indexOf("piguet") >= 0 || s.indexOf("patek") >= 0 || s.indexOf("mille") >= 0 || s.indexOf("iced") >= 0) { band = M.ice; face = M.glint; }
     else if (s.indexOf("omega") >= 0) { band = M.silver; face = M.silver; }
     return [
-      { kind: "cuff", mat: band, x: 0, y: -0.66, z: 0 },
-      { kind: "face", mat: face, x: 0, y: -0.66, z: 0.165 },
+      { kind: "cuff", mat: band, x: 0, y: -0.20, z: 0 },
+      { kind: "face", mat: face, x: 0, y: -0.20, z: 0.165 },
     ];
   }
   function ringParts() {
     const M = jmats(); if (!M) return null;
-    return [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.80, z: 0.17 }];
+    return [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.34, z: 0.17 }];
   }
 
   // a stable signature of the player's WORN jewellery — chains/watch/ring re-mount
@@ -254,7 +254,9 @@
     const neck = blingWornIn("neck"), wrist = blingWornIn("wristL"), ring = blingWornIn("ring");
     if (!neck && !wrist && !ring) return;           // nothing worn — fabric only
     const out = [];
-    const la = rig.parts && rig.parts.la, ra = rig.parts && rig.parts.ra;
+    // wrist jewellery rides the ELBOW group (forearm frame) on two-segment rigs
+    const la = rig.low && rig.low.la || (rig.parts && rig.parts.la);
+    const ra = rig.low && rig.low.ra || (rig.parts && rig.parts.ra);
     if (neck) mountJewelParts(chainParts(neck), rig.body, out);
     if (wrist) mountJewelParts(watchParts(wrist), la, out);
     if (ring) mountJewelParts(ringParts(), ra, out);
