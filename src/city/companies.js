@@ -62,7 +62,9 @@
   }
 
   function note(msg, color) {
-    try { if (CBZ.cityFeed) CBZ.cityFeed(msg, color || "#8fc7e0"); } catch (e) {}
+    // corporate market ambience (acquired/sold/booming/collapsed) is world
+    // FLAVOR — routed through the default-off flavor channel, not the HUD feed
+    try { if (CBZ.cityFlavor) CBZ.cityFlavor(msg, color || "#8fc7e0"); } catch (e) {}
   }
 
   // Overlay the managing company onto the EXISTING ownership label (plain-string

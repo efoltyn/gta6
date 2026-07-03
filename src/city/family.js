@@ -178,7 +178,7 @@
         }
       }
     }
-    if (families.length && CBZ.cityFeed) CBZ.cityFeed("🏠 The big houses are lived in now. Families, pools — leverage.", "#9fd0ff");
+    if (families.length && CBZ.cityFlavor) CBZ.cityFlavor("🏠 The big houses are lived in now. Families, pools — leverage.", "#9fd0ff");
   }
 
   // ---- DAILY ROUTINE -------------------------------------------------------
@@ -269,7 +269,7 @@
             if (m.target && m.target.set) { m.target.set(P.pos.x + (rng() - 0.5) * 2, 0, P.pos.z - 1.5); }
             if (reactCD <= 0 && (playerHurt || playerHot)) {
               reactCD = 12;
-              if (CBZ.cityFeed) CBZ.cityFeed(playerHurt
+              if (CBZ.cityFlavor) CBZ.cityFlavor(playerHurt
                 ? "🏠 " + (m.name || "Family") + ": “You're bleeding — get inside.”"
                 : "🏠 " + (m.name || "Family") + ": “The whole block's watching you. Be careful.”", "#9fd0ff");
             }
@@ -295,8 +295,8 @@
           if (fam.mine) {
             if (CBZ.cityFeed) CBZ.cityFeed("🕯 They got " + (m.name || "your people") + " at the house. This can't stand.", "#ff7a7a");
             if (CBZ.city && CBZ.city.note) CBZ.city.note("They hit your HOME. " + (m.name || "Family") + " is gone.", 4);
-          } else if (CBZ.cityFeed) {
-            CBZ.cityFeed("🕯 " + (m.name || "Someone") + " — somebody's whole world — is gone. The set won't forget.", "#ffce7a");
+          } else if (CBZ.cityFlavor) {
+            CBZ.cityFlavor("🕯 " + (m.name || "Someone") + " — somebody's whole world — is gone. The set won't forget.", "#ffce7a");
           }
         }
       }

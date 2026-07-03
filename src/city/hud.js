@@ -330,6 +330,12 @@
     if (feed.length > 5) feed.shift();
     renderFeed();
   };
+  // world-FLAVOR lines (lore/ambience, nothing to act on) — a separate channel
+  // so they can exist in code without ever reaching the HUD. Default OFF via
+  // CBZ.CONFIG.CITY_FLAVOR_FEED (owner: "the HUD is not a tutorial space").
+  CBZ.cityFlavor = function (msg, color) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CITY_FLAVOR_FEED) CBZ.cityFeed(msg, color);
+  };
   function renderFeed() {
     if (!feedEl) return;
     let html = "";
