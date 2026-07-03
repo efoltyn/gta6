@@ -139,7 +139,8 @@
         c.translate(0, L.y + L.h / 2, 0);
         parts.push(c);
       }
-      const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+      const BGU = THREE.BufferGeometryUtils;
+      const merge = BGU && BGU.mergeBufferGeometries && BGU.mergeBufferGeometries.bind(BGU);
       if (merge) { const g = merge(parts, false); if (g) return g; }
       // fallback (BufferGeometryUtils absent): single tall cone
       const f = new THREE.ConeGeometry(0.6, 1.2, 6); f.translate(0, 0.6, 0); return f;
@@ -165,7 +166,8 @@
     // any angle). Built by hand so it is one small merged geometry; each quad
     // has its base at y=0 (so per-instance Y-scale grows the blade upward).
     const grassGeo = (function () {
-      const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+      const BGU = THREE.BufferGeometryUtils;
+      const merge = BGU && BGU.mergeBufferGeometries && BGU.mergeBufferGeometries.bind(BGU);
       if (merge) {
         const quads = [];
         for (let i = 0; i < 3; i++) {
