@@ -44,7 +44,9 @@
   // ----------------------------------------------------------------------
   //  SEED — fixed constant (deterministic world, matching the repo style).
   // ----------------------------------------------------------------------
-  const SEED = 1337;
+  // derived from the one world-seed knob (core/seed.js); 1337 is the legacy
+  // fallback so a partial load without seed.js still builds the same backdrop.
+  const SEED = (window.CBZ && CBZ.hashN) ? (CBZ.hashN(1337) % 65536) : 1337;
   if (window.noise && window.noise.seed) window.noise.seed(SEED);
 
   // ----------------------------------------------------------------------

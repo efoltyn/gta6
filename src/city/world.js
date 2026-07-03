@@ -39,13 +39,16 @@
 
   let city = null;
 
-  // deterministic RNG so the city is the same each run (learnable streets)
-  let _s = 90210;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // deterministic RNG so the city is the same each run (learnable streets).
+  // The stream derives from the ONE world-seed knob (core/seed.js) — change
+  // CBZ.CONFIG.WORLD_SEED and every layer of the world re-rolls coherently.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream("world") : (function () { let s = 90210; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
 
   CBZ.buildCity = function () {
     if (city) return city;
-    _s = 90210;
+    armRng();
     const C = CBZ.CITY;
     const cx = C.center.x, cz = C.center.z;
     const N = C.blocks, BLK = C.block, ROAD = C.road;
@@ -739,8 +742,9 @@
     //      only — it all sits OUTSIDE the perimeter wall, so no colliders.
     //      LOCAL rng: the shared city/runtime stream stays untouched. ----
     (function eastHarbor() {
+      const hrng = CBZ.seedStream ? CBZ.seedStream("harbor") : null;
       let hs = 70707;
-      function hr() { hs = (hs * 1103515245 + 12345) & 0x7fffffff; return hs / 0x7fffffff; }
+      function hr() { if (hrng) return hrng(); hs = (hs * 1103515245 + 12345) & 0x7fffffff; return hs / 0x7fffffff; }
       const hm = new Map();
       function hmat(c) { let m = hm.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); hm.set(c, m); } return m; }
       const EEx = maxX + 26;                  // the east seawall line

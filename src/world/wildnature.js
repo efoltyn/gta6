@@ -78,7 +78,7 @@
     _built = true;
 
     const root = city.root;
-    const rng = makeRng(0x5C3E77);                    // "scatter"
+    const rng = CBZ.seedStream ? CBZ.seedStream("wildnature") : makeRng(0x5C3E77);
     const dummy = new THREE.Object3D();
     const col = new THREE.Color();
 

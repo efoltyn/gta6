@@ -61,7 +61,7 @@
 
   CBZ.addLandmass(function (city) {
     const root = city.root;
-    const rng = makeRng(0x0F02E57); // "forest"
+    const rng = CBZ.seedStream ? CBZ.seedStream("forest") : makeRng(0x0F02E57);
 
     // register the walkable region + the causeway (drivable land bridge).
     CBZ.registerCityRegion(city, {

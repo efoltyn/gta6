@@ -24,8 +24,12 @@
   const THREE = window.THREE;
   const mat = CBZ.mat;
 
-  let _s = 60601;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  // — one world-seed knob instead of a per-file magic literal. rng() is
+  // re-armed at build entry so a rebuild replays the identical stream.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('expansion') : (function () { let s = 60601; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
 
   let annexCarHook = null, _trafWrapped = false;
   // the island's parking refills right after every traffic respawn —
@@ -42,7 +46,7 @@
     if (city.annex) return city.annex;
     const build = CBZ.cityMakeBuilding;
     if (!build) return null;
-    _s = 60601;
+    armRng();
 
     const root = city.root;
     const R = 120, ROADW = 7, GRID = 40;

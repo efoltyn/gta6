@@ -34,8 +34,12 @@
   const mat = CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
   // local seeded rng (owner rule #5 — deterministic, no Math.random in layout)
-  let _s = 0x5eed1180;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  // — one world-seed knob instead of a per-file magic literal. rng() is
+  // re-armed at build entry so a rebuild replays the identical stream.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('farmland') : (function () { let s = 0x5eed1180; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
   function rr(a, b) { return a + rng() * (b - a); }
   function ri(a, b) { return a + ((rng() * (b - a + 1)) | 0); }
   function pick(arr) { return arr[(rng() * arr.length) | 0]; }
@@ -106,7 +110,7 @@
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
-    _s = 0x5eed1180;
+    armRng();
 
     const cols = CBZ.colliders || (CBZ.colliders = []);
 
