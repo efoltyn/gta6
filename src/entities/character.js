@@ -341,6 +341,10 @@
       ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.5, 10, dt);
       ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.5, 10, dt);
       setElbow(J.la, -0.55, 10); setElbow(J.ra, -0.55, 10);
+    } else if (ch.surrender || ch.handsUp) {
+      // the hands-up layer below OWNS the arms — if the idle counter-swing
+      // also wrote them, the two damps fight and the arms equilibrate at a
+      // half-raised ~40° (filmstrip-diagnosed) instead of reaching the pose.
     } else {
       // counter-swing with an elbow that deepens with pace: relaxed ~14° at
       // idle, a soft 35-45° at a walk, a real ~90° runner's pump at sprint.
@@ -374,8 +378,21 @@
     ch.body.position.y = ch.bob + idleBreath;
 
     // weight shifts over the stance foot; a touch of idle sway keeps a
-    // standing rig alive instead of statue-frozen.
-    const swayTarget = moving ? sinP * (0.015 + 0.03 * norm) : Math.sin(ch.breath * 0.9) * 0.012;
+    // standing rig alive instead of statue-frozen. Turning while moving BANKS
+    // the body into the turn like a runner rounding a corner — yaw rate is
+    // derived from the root's facing so no caller has to pass anything.
+    let turnBank = 0;
+    if (ch.group) {
+      const yaw = ch.group.rotation.y;
+      if (ch._prevYaw !== undefined && dt > 0.0001) {
+        let dy = yaw - ch._prevYaw;
+        if (dy > Math.PI) dy -= Math.PI * 2; else if (dy < -Math.PI) dy += Math.PI * 2;
+        const yawRate = Math.max(-6, Math.min(6, dy / dt));
+        turnBank = moving ? -yawRate * 0.045 * (0.4 + 0.6 * norm) : 0;
+      }
+      ch._prevYaw = yaw;
+    }
+    const swayTarget = (moving ? sinP * (0.015 + 0.03 * norm) : Math.sin(ch.breath * 0.9) * 0.012) + turnBank;
     ch.sway = damp(ch.sway, swayTarget, 10, dt);
     ch.body.rotation.z = ch.sway;
 
@@ -497,19 +514,22 @@
     // Hands-up surrender/intimidation: shoulders raise, elbows fold so the
     // palms actually face the gunman at head height (not flagpole arms).
     if (ch.surrender || ch.handsUp) {
+      // upper arms drive well past vertical and splay outward; a SMALL elbow
+      // bend tips the palms forward beside the head. (Filmstrip caught the
+      // first attempt: a -0.9 elbow folded the forearms flat across the face.)
       if (ch.parts.la) {
-        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -2.15, 18, dt);
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -2.60, 18, dt);
         ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0.16, 14, dt);
-        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.55, 14, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.32, 14, dt);
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.20, 14, dt);
       }
       if (ch.parts.ra) {
-        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -2.15, 18, dt);
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -2.60, 18, dt);
         ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, -0.16, 14, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.55, 14, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.32, 14, dt);
         ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.20, 14, dt);
       }
-      setElbow(J.la, -0.9, 16); setElbow(J.ra, -0.9, 16);
+      setElbow(J.la, -0.20, 16); setElbow(J.ra, -0.20, 16);
       ch.body.rotation.x = damp(ch.body.rotation.x, -0.07, 10, dt);
       ch.body.rotation.y = damp(ch.body.rotation.y, 0, 12, dt);
       ch.body.rotation.z = damp(ch.body.rotation.z, 0, 12, dt);
