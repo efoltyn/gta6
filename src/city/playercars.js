@@ -908,39 +908,40 @@
     const cabBaseY = bodyTop - peakY * 0.08;
     const cabCx = -len * 0.02;                         // slightly rearward (long hood)
     const cb = len * 0.52 * 0.5, ct = len * 0.52 * 0.38;   // upright => gentle rake
-    const suvCab = [[cabCx - cb, 0], [cabCx - ct, peakY], [cabCx + ct, peakY], [cabCx + cb, 0]];
-    addPrism(root, w * 0.9, suvCab, cabBaseY, paint);
-    // inset dark glass: windshield, backlight, side windows.
-    const rT = suvCab[1], fT = suvCab[2], rB = suvCab[0], fB = suvCab[3];
-    function suvGlass(zT, zB, sign) {
-      const dz = zT - zB, dy = peakY, fl = Math.hypot(dz, dy);
-      const nz = (dy / fl) * sign, ny = (-dz / fl) * sign;
-      const m = new THREE.Mesh(boxGeo(w * 0.72, fl * 0.84, 0.02), dark);
-      // proud, not inset — see rakeGlass's note: the cab prism is a thin shell.
-      m.position.set(0, cabBaseY + peakY * 0.5 + ny * 0.016, (zT + zB) * 0.5 + nz * 0.016);
-      m.rotation.x = -Math.atan2(dz, dy);
-      m.material.polygonOffset = true; m.material.polygonOffsetFactor = -1;
-      root.add(m);
-    }
-    suvGlass(fT[0], fB[0], 1);
-    suvGlass(rT[0], rB[0], -1);
-    const sideMidZ = (suvCab[1][0] + suvCab[2][0]) * 0.5;
-    const sideLen = (suvCab[2][0] - suvCab[1][0]) * 0.92;
+    // glass-tub cab (same pattern as makeRoadCar): tinted prism + painted
+    // roof + pillars + interior. The old paint-shell + proud-glass sandwich
+    // read as a small hut with fins on a limo body (orbit-diagnosed).
+    const cabWs = w * 0.94, roofTuck = 0.88;
+    const suvCab = [[cabCx - cb, 0, 1.0], [cabCx - ct, peakY, roofTuck], [cabCx + ct, peakY, roofTuck], [cabCx + cb, 0, 1.0]];
+    addPrism(root, cabWs, suvCab, cabBaseY, dark);
+    const rB = suvCab[0], rT = suvCab[1], fT = suvCab[2], fB = suvCab[3];
+    addBox(root, cabWs * 0.88, peakY * 0.45, cb + ct, 0, cabBaseY + peakY * 0.24, cabCx, sharedMat("interior", 0x2a2f36));
+    const roofWs = cabWs * roofTuck;
+    const sideMidZ = (rT[0] + fT[0]) * 0.5;
+    const sideLen = (fT[0] - rT[0]) * 1.0;
+    addBox(root, roofWs + 0.02, 0.08, sideLen + 0.08, 0, cabBaseY + peakY + 0.028, sideMidZ, paint);   // roof skin
+    addBox(root, 0.07, 0.08, sideLen, w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);  // roof rails
+    addBox(root, 0.07, 0.08, sideLen, -w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);
+    const pillarXs = (cabWs * 0.5 + roofWs * 0.5) * 0.5 - 0.005;
     [1, -1].forEach(function (side) {
-      const sw = addBox(root, 0.02, peakY * 0.78, sideLen, side * (w * 0.9 * 0.5 + 0.011), cabBaseY + peakY * 0.56, sideMidZ, dark);
-      sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
+      const bp = addBox(root, 0.04, peakY * 0.94, 0.06, side * pillarXs, cabBaseY + peakY * 0.48, sideMidZ, paint);
+      bp.castShadow = false;
+      [[fB, fT], [rB, rT]].forEach(function (edge) {
+        const bot = edge[0], top = edge[1];
+        const dz = top[0] - bot[0], dy = top[1] - bot[1];
+        const el = Math.hypot(dz, dy);
+        const pm = addBox(root, 0.055, el * 1.02, 0.06, side * pillarXs, cabBaseY + (bot[1] + top[1]) * 0.5, (bot[0] + top[0]) * 0.5, paint);
+        pm.rotation.x = Math.atan2(dz, dy);
+        pm.castShadow = false;
+      });
     });
-    // flat roof ON the greenhouse peak + roof rails.
-    const suvRoofY = cabBaseY + peakY + 0.05;
-    addBox(root, w * 0.84, 0.1, sideLen * 1.04, 0, suvRoofY, sideMidZ, paint);   // flat roof ON glass
-    addBox(root, 0.07, 0.08, sideLen, w * 0.36, suvRoofY + 0.09, sideMidZ, rail);  // roof rails
-    addBox(root, 0.07, 0.08, sideLen, -w * 0.36, suvRoofY + 0.09, sideMidZ, rail);
     addBox(root, w * 0.9, 0.16, 0.08, 0, bodyY + baseH * 0.5, len * 0.5 + 0.04, white);
     addBox(root, w * 0.9, 0.18, 0.08, 0, bodyY + baseH * 0.55, -len * 0.5 - 0.04, red);
     addBox(root, w * 0.7, 0.4, 0.12, 0, wheelR + 0.18, len * 0.5 + 0.06, trim);   // brush-guard bumper
     [1, -1].forEach(function (side) {
-      addBox(root, 0.18, 0.14, 0.28, side * (w * 0.54), bodyTop + peakY * 0.2, len * 0.22, trim);  // mirrors
+      addBox(root, 0.16, 0.12, 0.24, side * (w * 0.55), bodyTop + 0.10, fB[0] - 0.05, trim);  // door mirrors at the A-pillar base
     });
+    const suvRoofY = cabBaseY + peakY + 0.05;
     addSphere(root, wheelR * 1.05, 0, bodyY + baseH * 0.56, -len * 0.51, trim, 1, 1, 0.3);   // rear spare, sized off the real wheel radius (was fixed at 0.46 — bigger than the road wheels on every SUV size)
     addWheels(root, w + 0.14, len, wheelR, 0.40, trim);
     root.userData.vehicleDims = { width: w, length: len, height: suvRoofY + 0.05, wheelbase: len * 0.66 };
@@ -968,9 +969,18 @@
     addBox(root, w + 0.02, 0.18, len * 0.72, 0, bodyY + 0.1, -len * 0.1, trim);
     // sloped short hood up front (rises toward the cab, merging into the box)
     addPrism(root, w * 0.96, [[len * 0.18, 0], [len * 0.18, boxH * 0.9], [len * 0.5, boxH * 0.55], [len * 0.5, 0.2]], bodyY + 0.06, paint);
-    // raked windshield: INSET dark panel on the hood's front rake face.
-    addBox(root, w * 0.84, boxH * 0.34, 0.03, 0, bodyY + boxH * 0.62, len * 0.46, dark);  // windshield (recessed)
-    addBox(root, w * 0.86, boxH * 0.34, 0.03, 0, bodyY + boxH * 0.5, len * 0.355, dark);   // cab side/door glass front
+    // raked windshield: a dark panel LYING ON the hood's rake plane (the old
+    // vertical slab poked through the slope and floated off the nose —
+    // orbit-diagnosed). Face runs (len*0.5, boxH*0.55) -> (len*0.18, boxH*0.9).
+    (function () {
+      const botZ = len * 0.5, botY = boxH * 0.55, topZ = len * 0.18, topY = boxH * 0.9;
+      const dz = topZ - botZ, dy = topY - botY, fl = Math.hypot(dz, dy);
+      const nz = dy / fl, ny = -dz / fl;               // outward (up-forward) normal
+      const m = new THREE.Mesh(boxGeo(w * 0.84, fl * 0.72, 0.03), dark);
+      m.position.set(0, bodyY + 0.06 + (botY + topY) * 0.5 + ny * 0.02, (botZ + topZ) * 0.5 + nz * 0.02);
+      m.rotation.x = Math.atan2(dz, dy);
+      root.add(m);
+    })();
     addBox(root, w * 0.9, 0.18, 0.07, 0, bodyY + 0.32, len * 0.5 + 0.02, white);
     addBox(root, w * 0.92, 0.22, 0.07, 0, bodyY + boxH - 0.16, -len * 0.47 - 0.04, red);   // tall rear-door lights ON the box rear face
     [1, -1].forEach(function (side) {
