@@ -265,7 +265,12 @@
     const STRIDE_LEN = 1.15;
     ch.phase += dt * 0.9 + (speed * dt) / STRIDE_LEN;
     const sinP = Math.sin(ch.phase), cosP = Math.cos(ch.phase);
-    const hipAmp = 0.30 + 0.26 * norm + 0.16 * run2;
+    // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
+    // not the old whole-group scale.y accordion squash. cb eases 0→1 so
+    // entering/leaving a crouch flows through the same damped targets.
+    ch._cb = damp(ch._cb || 0, ch.crouch ? 1 : 0, 12, dt);
+    const cb = ch._cb;
+    const hipAmp = (0.30 + 0.26 * norm + 0.16 * run2) * (1 - 0.35 * cb);
     const swing = sinP * hipAmp;
 
     // ---- LEG WOUND / LIMP STATE ----
@@ -292,8 +297,9 @@
     const rSwing = moving ? -swing * (hurtSide > 0 ? 1 - sev * 0.62 : 1) : 0;
     const lBend = hurtSide < 0 ? sev * 0.22 : 0;
     const rBend = hurtSide > 0 ? sev * 0.22 : 0;
-    ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, lSwing - lBend, legRate, dt);
-    ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, rSwing - rBend, legRate, dt);
+    const crouchHip = cb * 0.52;                 // thighs fold toward the chest
+    ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, lSwing - lBend - crouchHip, legRate, dt);
+    ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, rSwing - rBend - crouchHip, legRate, dt);
     // CROSS-LEG GUARD: pose layers own z/y; recycled corpse splay must not
     // ride into a fresh walker (animChar only runs on live upright actors).
     ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0, 12, dt);
@@ -311,8 +317,8 @@
     const stanceK = moving ? 0.10 + 0.10 * norm : 0.04;
     const kneeL = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, -cosP), 1.3) * (hurtSide < 0 ? 1 - sev * 0.7 : 1) : 0.04;
     const kneeR = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, cosP), 1.3) * (hurtSide > 0 ? 1 - sev * 0.7 : 1) : 0.04;
-    setKnee(J.ll, kneeL + lBend * 1.4, legRate);
-    setKnee(J.rl, kneeR + rBend * 1.4, legRate);
+    setKnee(J.ll, kneeL + lBend * 1.4 + cb * 1.00, legRate);
+    setKnee(J.rl, kneeR + rBend * 1.4 + cb * 1.00, legRate);
 
     // ---- arms ----
     if (ch.aimingPose) {
@@ -372,7 +378,7 @@
 
     // ---- body: bob (2× stride), side sway, forward lean, counter-rotation --
     // CoM is lowest at double support (feet furthest apart, |sinθ| max).
-    const bobTarget = moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) : 0;
+    const bobTarget = (moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) : 0) - cb * 0.38;
     const idleBreath = moving ? 0 : Math.sin(ch.breath * 2.2) * 0.012;
     ch.bob = damp(ch.bob, bobTarget, 12, dt);
     ch.body.position.y = ch.bob + idleBreath;
@@ -396,7 +402,7 @@
     ch.sway = damp(ch.sway, swayTarget, 10, dt);
     ch.body.rotation.z = ch.sway;
 
-    const leanTarget = norm * 0.12 + run2 * 0.10;   // lean into the run
+    const leanTarget = norm * 0.12 + run2 * 0.10 + cb * 0.16;   // lean into the run / hunch the crouch
     ch.lean = damp(ch.lean, leanTarget, 8, dt);
     ch.body.rotation.x = ch.lean;
 
