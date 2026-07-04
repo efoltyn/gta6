@@ -234,6 +234,25 @@
   });
   setMode(g.mode || "escape");
 
+  // ---- CITY: character-origin picker (index.html #originSelect, city/
+  // origins.js applies the pick at run-start). Selection just lives on
+  // g.cityOrigin for the session — no persistence hook needed here; city/
+  // origins.js reads it once per city reset and stamps its own choice onto
+  // the world ledger the first time a character is actually started.
+  const originButtons = Array.from(document.querySelectorAll(".origin-btn"));
+  function setOrigin(id) {
+    g.cityOrigin = (id === "exec" || id === "barfly") ? id : "tenant";
+    originButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.origin === g.cityOrigin));
+  }
+  CBZ.setCityOrigin = setOrigin;
+  originButtons.forEach((btn) => {
+    // picking another character here is a GTA5-style SWITCH (city/origins.js
+    // vaults the active character's ledger and activates this one) — never a
+    // reset, so a plain click is all the intent we need.
+    btn.addEventListener("click", () => setOrigin(btn.dataset.origin));
+  });
+  setOrigin(g.cityOrigin || "tenant");
+
   function bindButton(id, fn) {
     const btn = document.getElementById(id);
     if (!btn) return;
@@ -252,8 +271,17 @@
   function startRun() {
     CBZ.initAudio(); resetGame(); setState("playing");
     screens.title.classList.add("hidden");
-    if (g.mode === "escape" && CBZ.armFPSAfterIntro) CBZ.armFPSAfterIntro();
-    CBZ.startIntro(); CBZ.requestLock();
+    // CITY origin intro: city/mode.js's reset() (just run inside resetGame())
+    // already called CBZ.cityOriginApply and knows whether a fresh character's
+    // one-time scripted opening scene is active this run. Same jail-style
+    // cinematic (front reveal -> orbit -> FP push-in), armed exactly like
+    // escape mode; a returning character (no intro) behaves as before —
+    // CBZ.startIntro() still fires but camera.js's own FPS-already-active
+    // check neutralizes it instantly (unchanged legacy behavior).
+    const cityIntro = g.mode === "city" && CBZ.cityOriginIntroActive && CBZ.cityOriginIntroActive();
+    if ((g.mode === "escape" || cityIntro) && CBZ.armFPSAfterIntro) CBZ.armFPSAfterIntro();
+    const introOpts = cityIntro && CBZ.cityOriginIntroOpts ? CBZ.cityOriginIntroOpts() : undefined;
+    CBZ.startIntro(introOpts); CBZ.requestLock();
   }
   CBZ.startRun = startRun;
   bindButton("playBtn", startRun);

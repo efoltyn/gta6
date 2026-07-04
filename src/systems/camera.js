@@ -178,11 +178,26 @@
   const introPos = new THREE.Vector3();
   const introEye = new THREE.Vector3();
   const introAim = new THREE.Vector3();
-  CBZ.startIntro = function () {
+  // opts.compact (city/origins.js): the two INDOOR origin scenes (a top-floor
+  // office, a tiny apartment) spawn the player inside a real room, where the
+  // default huge outdoor pull-back (-24,+34,+58 world-space) fights
+  // keepIntroCamInRoom through an entire building's walls the whole beat. In
+  // compact mode the "far" establishing anchor computed in the per-frame tick
+  // below is instead a MODEST, FACING-RELATIVE pull-back (a few metres beyond
+  // the front-reveal distance) that's room-clamped just like the reveal shot
+  // — same front-reveal -> orbit -> FP push-in shape, scaled for an interior.
+  // No-arg / non-compact calls are 100% unchanged.
+  const introFarPt = new THREE.Vector3();
+  let introOpts = null;
+  CBZ.startIntro = function (opts) {
     introT = INTRO;
     introYaw0 = cam.yaw;
+    introOpts = opts || null;
     const spawn = CBZ.player ? CBZ.player.pos : CBZ.SPAWN;
     // snap to a much farther establishing shot so frame one feels deliberate
+    // (irrelevant for compact mode too — the very next onAlways(50) tick
+    // overwrites this before any frame renders; left as the same default
+    // snap so the pre-tick camera state is never literally undefined).
     camera.position.set(spawn.x - 24, spawn.y + 34, spawn.z + 58);
     camera.lookAt(spawn.x, spawn.y + 1.18, spawn.z);
   };
@@ -502,7 +517,21 @@
       const frontCp = Math.cos(frontPitch), frontSp = Math.sin(frontPitch);
       if (p < 0.62) {
         const k = p < 0.10 ? 0 : easeInOut((p - 0.10) / 0.52);
-        const wx = player.pos.x - 24, wy = player.pos.y + 34, wz = player.pos.z + 58;
+        let wx, wy, wz;
+        if (introOpts && introOpts.compact) {
+          // facing-relative near pull-back (see CBZ.startIntro comment above),
+          // clamped inside the room exactly like the front-reveal point below.
+          const farDist = introOpts.dist != null ? introOpts.dist : introDist + 1.6;
+          introFarPt.set(
+            baseX + Math.sin(introYaw0) * frontCp * farDist,
+            baseY + frontSp * farDist + 0.85,
+            baseZ + Math.cos(introYaw0) * frontCp * farDist
+          );
+          keepIntroCamInRoom(baseX, baseY, baseZ, introFarPt);
+          wx = introFarPt.x; wy = introFarPt.y; wz = introFarPt.z;
+        } else {
+          wx = player.pos.x - 24; wy = player.pos.y + 34; wz = player.pos.z + 58;
+        }
         const frontX = baseX + Math.sin(introYaw0) * frontCp * introDist;
         const frontY = baseY + frontSp * introDist + 0.35;
         const frontZ = baseZ + Math.cos(introYaw0) * frontCp * introDist;
@@ -548,6 +577,7 @@
       if (introT <= 0) {
         introT = 0;
         cam.yaw = introYaw0 + Math.PI;
+        introOpts = null;
         if (CBZ.onIntroComplete) CBZ.onIntroComplete();
       }
       return;
