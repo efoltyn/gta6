@@ -191,7 +191,11 @@
     // pool can be far smaller — a shootout can never leave a huge persistent
     // pile. Jail/survival keep the original "true world" 520-gib budget.
     const city = cityMode();
-    const cap = kind === "mist" ? 620 : (kind === "gib" && city ? 90 : 520);
+    // pool caps now ride the quality tier — read LIVE per spawn (the slider can
+    // move mid-run); fallbacks = the old constants for qScale-less test runs.
+    const cap = kind === "mist" ? (CBZ.qScale ? CBZ.qScale(310, 1100) : 620)
+      : (kind === "gib" && city ? (CBZ.qScale ? CBZ.qScale(45, 180) : 90)
+        : (CBZ.qScale ? CBZ.qScale(260, 900) : 520));
     if (bits.length > cap) {
       // CITY gibs are fading debris: make room by recycling a far/old LANDED gib
       // instead of refusing to spawn the new piece. Jail/survival keep the
@@ -246,7 +250,8 @@
     rm(splats.shift().m);
   }
   function spawnSplat(x, z, grow, color, linger) {
-    if (splats.length > 170) recycleFarSplat();
+    // splat cap rides the quality tier (read live; fallback = old 170)
+    if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
     const m = new THREE.Mesh(blob(),
       new THREE.MeshBasicMaterial({ color: color || BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     m.rotation.x = -Math.PI / 2;
@@ -269,7 +274,8 @@
   // the wheel pulls the pool with it, so the decal stretches out over ~half a
   // second along the car's direction instead of blooming in place.
   function spawnStreak(x0, z0, dx, dz, len) {
-    if (splats.length > 170) recycleFarSplat();
+    // splat cap rides the quality tier (read live; fallback = old 170)
+    if (splats.length > (CBZ.qScale ? CBZ.qScale(85, 300) : 170)) recycleFarSplat();
     const m = new THREE.Mesh(G_PLANE,
       new THREE.MeshBasicMaterial({ color: BLOOD_D, map: bloodTexture(), transparent: true, opacity: 0, depthWrite: false }));
     m.rotation.x = -Math.PI / 2;
