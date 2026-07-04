@@ -2437,8 +2437,29 @@
       }
       if (insideInt && !c._intActive) {
         c._intActive = true;
-        if (c.v > 1 && (c._mustTurn || (c.turnCD <= 0 && rng() < 0.38))) {
-          beginTurn(c, it, A);
+        // METHOD (PROCGEN.md #4): purposeful routing, not a coin flip. Every
+        // ambient car carries a destination intersection; at each box it
+        // turns exactly when turning reduces the remaining Manhattan
+        // distance (the grid staircase citynav uses for peds). On arrival it
+        // picks a fresh destination and drives on — traffic goes SOMEWHERE.
+        if (c.destX == null || (Math.abs(c.destX - it.x) < 30 && Math.abs(c.destZ - it.z) < 30)) pickCarDest(c, A);
+        const ddx = c.destX - it.x, ddz = c.destZ - it.z;
+        const wantV = Math.abs(ddz) > Math.abs(ddx);
+        let wantTurn = false, prefDir = null;
+        if (wantV !== c.vertical) {
+          wantTurn = true;
+          prefDir = wantV ? (ddz > 0 ? 1 : -1) : (ddx > 0 ? 1 : -1);
+        } else {
+          // right axis, wrong way → turn off toward the larger cross
+          // component (two staircase turns flip a grid car around)
+          const alongSign = (c.vertical ? ddz : ddx) >= 0 ? 1 : -1;
+          if (alongSign !== c.dirSign) {
+            wantTurn = true;
+            prefDir = c.vertical ? (ddx > 0 ? 1 : -1) : (ddz > 0 ? 1 : -1);
+          }
+        }
+        if (c.v > 1 && (c._mustTurn || (c.turnCD <= 0 && wantTurn))) {
+          beginTurn(c, it, A, prefDir);
           if (c.turning) c._mustTurn = false;
         }
       } else if (!insideInt && c._intActive) c._intActive = false;
@@ -2530,15 +2551,26 @@
     return { v: Math.max(0, ov.x * fx + ov.z * fz), gap: _caBg, car: best, along: _caAlong };
   }
 
+  // a fresh errand for an ambient car: a random far-ish intersection —
+  // destination-driven turning replaces the old aimless 38% coin flip.
+  function pickCarDest(c, A) {
+    const its = A.intersections;
+    if (!its || !its.length) { c.destX = c.pos.x; c.destZ = c.pos.z; return; }
+    let t = its[(rng() * its.length) | 0];
+    // prefer somewhere actually worth driving to (2 tries for a far one)
+    if (Math.hypot(t.x - c.pos.x, t.z - c.pos.z) < 90) t = its[(rng() * its.length) | 0];
+    c.destX = t.x; c.destZ = t.z;
+  }
+
   // set up a smooth quarter-arc onto the perpendicular road. The arc is a
   // quadratic Bézier from the car's current lane position, through the corner
   // where the two lane centre-lines meet, out onto the new lane — so the car
   // sweeps the turn instead of teleporting + snapping its heading.
-  function beginTurn(c, it, A) {
+  function beginTurn(c, it, A, prefDir) {
     const wantVertical = !c.vertical;
     const road = findRoad(A, wantVertical, wantVertical ? it.x : it.z);
     if (!road) return;
-    let newDir = rng() < 0.5 ? 1 : -1;
+    let newDir = prefDir != null ? prefDir : (rng() < 0.5 ? 1 : -1);
     // don't turn INTO a dead end: if this direction runs out of road in a couple
     // of car lengths, take the other one (real drivers turn toward the city,
     // not the wall — and it kills the U-turn-right-after-turning read).

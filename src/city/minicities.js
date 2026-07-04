@@ -87,7 +87,7 @@
     const root = city.root; if (!root) return;
     const cx = place.cx, cz = place.cz, hx = place.hx, hz = place.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
-    const rng = lcg((Math.abs(cx) * 73856093) ^ (Math.abs(cz) * 19349663) ^ 0x53170);
+    const rng = lcg((Math.abs(cx) * 73856093) ^ (Math.abs(cz) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
 
     // (a) GROUND PAD — a settled town floor under the whole footprint, a touch
     //     above grade so it reads as reclaimed land/plaza, then seed placement so

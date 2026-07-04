@@ -2,3 +2,5 @@ node_modules/
 *.log
 .DS_Store
 server/worlds/
+tools/shots/
+rust/**/target/

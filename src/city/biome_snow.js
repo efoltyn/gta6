@@ -52,7 +52,7 @@
     const root = city.root;
     if (!root) return;
     const mat = CBZ.mat, cmat = CBZ.cmat || CBZ.mat;
-    const rng = mulberry(0x53170 ^ ((CX * 73856093) ^ (CZ * 19349663)));
+    const rng = mulberry((CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170) ^ ((CX * 73856093) ^ (CZ * 19349663)));
 
     // shared materials (one instance each — draw-call friendly)
     const mSnow = cmat(COL.snow), mSnowShade = cmat(COL.snowShade);

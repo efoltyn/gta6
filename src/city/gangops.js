@@ -414,7 +414,7 @@
       // it's still extortion — a witness can phone it in (low heat, existing path)
       if (CBZ.cityCrime) CBZ.cityCrime(16, { x: mark.pos.x, z: mark.pos.z, type: "extortion" });
       if (CBZ.cityFeed && nearPlayer(mark.pos.x, mark.pos.z, 55) && rng() < 0.5) {
-        try { CBZ.cityFeed("💰 " + gang.name + " is shaking down the block", "#ffce8f"); } catch (e) {}
+        try { CBZ.cityFlavor && CBZ.cityFlavor("💰 " + gang.name + " is shaking down the block", "#ffce8f"); } catch (e) {}
       }
       // mark paid — let them off, they hurry away once the pose relaxes
       m._exMark = null; endOp(m); gang._extorter = null;

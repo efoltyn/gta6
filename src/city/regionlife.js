@@ -66,6 +66,27 @@
     capeharbor: 4, goldspire: 4, neonreef: 4, foundry: 3,
   };
 
+  // ---- TIME-OF-DAY DENSITY (GTA popcycle pattern, PROCGEN.md roadmap #4/5) --
+  // WHY: a base isn't the same place at noon and at 3am — the farm empties out
+  // after dark, the lodge crowd thickens in the evening. A small per-biome
+  // {day, night} multiplier on BIOME_BUDGET; anything not listed stays flat
+  // (1/1). Feature-detects schedule.js's cached sun-hour clock so this is a
+  // no-op (flat budgets) on a headless build / before schedule.js loads.
+  // Runtime-only (Math.random-adjacent territory, no rng()/build-time effect).
+  var BIOME_DAYNIGHT = {
+    military: { day: 1.2, night: 0.6 },   // base ops run the daylight shift
+    farmland: { day: 1.3, night: 0.4 },   // farmers/ranchers work daylight, thin out at night
+    snow:     { day: 0.75, night: 1.25 }, // the lodge crowd thickens toward evening
+    airport:  { day: 1.15, night: 0.7 },  // travelers cluster around daytime flights
+  };
+  function dayNightMul(biome) {
+    var h = CBZ.citySunHour ? CBZ.citySunHour() : null;
+    var f = BIOME_DAYNIGHT[biome];
+    if (h == null || !f) return 1;
+    var night = (h < 6 || h >= 20);
+    return night ? f.night : f.day;
+  }
+
   // ---- biome cast: archetype/job/look/behaviour fed straight into makePed --
   // Each entry returns makePed opts. WHY-first: every cast belongs to its land.
   var CAST = {
@@ -350,6 +371,7 @@
       var biome = reg.biome;
       var budget = BIOME_BUDGET[biome];
       if (!budget) return;                  // 'city' or unknown → leave it alone
+      budget = Math.max(1, Math.round(budget * dayNightMul(biome)));
       budget = Math.min(budget, REGION_CAP);
 
       // 3) STROLL: hand our nearby peds a believable new wander goal on a timer.

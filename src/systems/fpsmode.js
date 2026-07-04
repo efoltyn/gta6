@@ -1318,6 +1318,13 @@
         // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
         // the same wall a second time — it only adds flavor (scar/debris/breach).
         if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
+        // a guest's blast never reaches the host's sim otherwise — the host
+        // can't count structural HP for a detonation it never saw (mirrors
+        // localGunHit's "hit" forwarding in net.js). FX stays local (above);
+        // this only feeds the host's demolition ledger.
+        if (CBZ.net && CBZ.net.active && !CBZ.net.isHost()) {
+          CBZ.net.sendEv({ e: "blast", to: CBZ.net.hostId, x: pt.x, z: pt.z, y: pt.y, power: w.blastPower || 1.4, radius: w.blastRadius || 7 });
+        }
         // wreck the storefront HARD — shatter a wide radius of glass (was +2)
         if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
         // AND ray-shatter every pane in the rocket's ACTUAL flight path (eye→impact):

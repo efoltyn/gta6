@@ -84,6 +84,7 @@
     let best = null, bestD = Infinity, bestInLot = false;
     for (let i = 0; i < list.length; i++) {
       const d = list[i];
+      if (d.lot && d.lot.demolished) continue;                 // no desk in a rubble pile
       if (d.occupant && d.occupant !== ped) continue;          // taken by someone else
       if (d.occupant === ped) return (ped._deskAnchor = d);    // re-grab our own
       const inLot = wantLot && d.lot === wantLot;
@@ -293,6 +294,15 @@
       }
     }
 
+    // DEMOLITION hygiene: a desk whose lot just came down mid-shift still has an
+    // occupant seated in it — release them so they walk away instead of sitting
+    // in a rubble pile (demolition.js only toggles lot.demolished, it doesn't
+    // know about desks).
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      if (d.occupant && d.lot && d.lot.demolished) CBZ.cityReleaseDesk(d.occupant);
+    }
+
     const peds = CBZ.cityPeds;
     const PA = CBZ.city && CBZ.city.playerActor;
     const ppos = CBZ.player && CBZ.player.pos;
@@ -360,7 +370,7 @@
     }
     // a single ambient feed line so the disturbance reads in the ticker (no popup).
     if (evicted >= 2 && CBZ.cityFeed && Math.random() < 0.5) {
-      try { CBZ.cityFeed("🏢 Workers scatter as the floor is stormed", "#ffce8f"); } catch (e) {}
+      try { CBZ.cityFlavor && CBZ.cityFlavor("🏢 Workers scatter as the floor is stormed", "#ffce8f"); } catch (e) {}
     }
 
     // ---- optional cash carrot: lazily place ONE stack, grab on walk-over ----

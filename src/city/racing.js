@@ -267,18 +267,19 @@
     if (!p._racerFit0) p._racerFit0 = { torso: first(ss.torso), collar: first(ss.collar), legs: first(ss.legs) };
     if (!p._racerFitIso) {
       const iso = (arr) => (arr || []).forEach((m) => { if (m && m.material) m.material = m.material.clone(); });
-      iso(ss.torso); iso(ss.collar); iso(ss.legs);
+      iso(ss.torso); iso(ss.collar); iso(ss.legs); iso(ss.legsLower);
       p._racerFitIso = true;
     }
     const paint = (arr, h) => { if (h == null) return; (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(h); }); };
     // jacket = team colour on the torso; legs a dark race trouser.
-    paint(ss.torso, hex); paint(ss.collar, hex); paint(ss.legs, pick(SUITS));
+    const legHex = pick(SUITS);
+    paint(ss.torso, hex); paint(ss.collar, hex); paint(ss.legs, legHex); paint(ss.legsLower, legHex);
   }
   function restoreFit(p) {
     const f = p._racerFit0; if (!f) return;
     const ss = p.char && p.char.skinSlots; if (!ss) { p._racerFit0 = null; return; }
     const paint = (arr, h) => { if (h == null) return; (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(h); }); };
-    paint(ss.torso, f.torso); paint(ss.collar, f.collar); paint(ss.legs, f.legs);
+    paint(ss.torso, f.torso); paint(ss.collar, f.collar); paint(ss.legs, f.legs); paint(ss.legsLower, f.legs);
     p._racerFit0 = null;
   }
 

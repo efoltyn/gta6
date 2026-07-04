@@ -61,6 +61,31 @@
   const heading = new Float32Array(CAP), spd = new Float32Array(CAP), phase = new Float32Array(CAP);
   const skin = new Int32Array(CAP), shirt = new Int32Array(CAP), hairC = new Int32Array(CAP);
 
+  // ---- WALKING GROUPS (2-4 bodies) + SIDEWALK LANE BIAS ----------------------
+  // groupLeader[i]: -1 = solo. Else the index of i's leader — a leader's own
+  // slot points to itself, so `groupLeader[i] === i` is the leader test.
+  // Followers never think for themselves: they copy the leader's (already
+  // lane-biased) target with a fixed side-by-side lateral slot (groupOffset),
+  // so a pair/trio reads as walking TOGETHER instead of merely adjacent.
+  // groupMemA/B/C hold up to 3 followers per leader slot — a leader event
+  // (death/promotion/suppression/teleport) unlinks its group in O(1) (a
+  // handful of array writes) instead of an O(count) scan for members.
+  const groupLeader = new Int32Array(CAP); groupLeader.fill(-1);
+  const groupOffset = new Float32Array(CAP);            // this follower's fixed lateral slot (m)
+  const groupMemA = new Int32Array(CAP), groupMemB = new Int32Array(CAP), groupMemC = new Int32Array(CAP);
+  groupMemA.fill(-1); groupMemB.fill(-1); groupMemC.fill(-1);
+  const LANE_MIN = 0.8, LANE_MAX = 1.2;                 // right-of-travel sidewalk lane offset (m)
+  // NOTE: this is the per-candidate-slot probability of STARTING a group, not
+  // the resulting body share — each hit consumes ~3 slots on average (1 leader
+  // + ~2 followers), so ~0.15 here nets out to ~35% of the crowd ending up
+  // grouped (verified empirically; see tools/verify-crowd.mjs-style query on
+  // CBZ.cityCrowdAgent(i).leader).
+  const GROUP_SHARE = 0.15;
+  // lateral slots (m) for a group's followers, indexed by [followerCount-1] —
+  // asymmetric so a duo isn't perfectly mirrored and a trio/quad fans out
+  // without any two bodies overlapping.
+  const SLOT_OFFSETS = [[1.0], [-1.0, 1.0], [-1.0, 1.0, 1.9]];
+
   const SKINS = [0xf1c9a5, 0xe0a878, 0xc68642, 0x8d5524, 0xffdbac, 0xa66a3c];
   // 0-9: the everyday base palette — plain tee colors people actually buy
   // (white/gray/black/navy/forest/maroon/mustard + two muted blues), matched
@@ -478,6 +503,108 @@
     }
     drawPoint(out);
   }
+
+  // ---- lane bias + group target propagation (helpers for repick() below) ----
+  // Offset a freshly-picked target ~0.8-1.2u to the RIGHT of the travel
+  // direction from (px[i],pz[i]) to it — one vector op at target-pick time,
+  // never per-frame. "Right" is just a fixed rotation of each agent's OWN
+  // heading (consistent across all agents), so opposing foot traffic ends up
+  // on opposite physical sides of the sidewalk, exactly like real lane
+  // discipline, with zero notion of a "true" world-space side.
+  function applyLaneBias(i, out) {
+    const dx = out.x - px[i], dz = out.z - pz[i];
+    const dlen = Math.hypot(dx, dz) || 1;
+    const bias = LANE_MIN + Math.random() * (LANE_MAX - LANE_MIN);
+    out.x += (dz / dlen) * bias;
+    out.z += (-dx / dlen) * bias;
+  }
+  // seat follower i's target off leader L's CURRENT target, offset to i's
+  // fixed lateral slot (perpendicular to the leader's travel direction), and
+  // ease i's speed toward the leader's so the pair paces together instead of
+  // snapping. Cheap: only runs when the leader repicks (arrival/interrupt),
+  // never per-frame.
+  function followTarget(i, L) {
+    const dx = tx[L] - px[L], dz = tz[L] - pz[L], dlen = Math.hypot(dx, dz) || 1;
+    const rx = dz / dlen, rz = -dx / dlen;
+    tx[i] = tx[L] + rx * groupOffset[i]; tz[i] = tz[L] + rz * groupOffset[i];
+    heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+    dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+    spd[i] += (spd[L] - spd[i]) * 0.5;               // slight follow damping, not a hard snap
+  }
+  function propagateGroup(L) {
+    if (groupMemA[L] >= 0) followTarget(groupMemA[L], L);
+    if (groupMemB[L] >= 0) followTarget(groupMemB[L], L);
+    if (groupMemC[L] >= 0) followTarget(groupMemC[L], L);
+  }
+  // unlink a single agent from whatever group role it holds (leader or
+  // follower). Leader case cascades to every living follower (O(1) — at most
+  // 3 array writes, no O(count) scan) so they fall back to solo strolling
+  // instead of forever chasing a leader that died/was promoted/suppressed/
+  // teleported. Safe to call on any agent, grouped or not.
+  function ungroup(i) {
+    const L = groupLeader[i];
+    if (L < 0) return;
+    if (L === i) {                                    // i IS a leader — release its followers
+      const a = groupMemA[i], b = groupMemB[i], c = groupMemC[i];
+      if (a >= 0 && groupLeader[a] === i) groupLeader[a] = -1;
+      if (b >= 0 && groupLeader[b] === i) groupLeader[b] = -1;
+      if (c >= 0 && groupLeader[c] === i) groupLeader[c] = -1;
+      groupMemA[i] = -1; groupMemB[i] = -1; groupMemC[i] = -1;
+    } else {                                          // i is a follower — free its slot on the leader
+      if (groupMemA[L] === i) groupMemA[L] = -1;
+      else if (groupMemB[L] === i) groupMemB[L] = -1;
+      else if (groupMemC[L] === i) groupMemC[L] = -1;
+    }
+    groupLeader[i] = -1;
+  }
+  // central repick used by every stroll/arrival/interrupt site: solo agents
+  // (and leaders) draw a fresh lane-biased target and push it to their group;
+  // followers skip the independent think entirely and just re-seat off their
+  // leader's existing target. Replaces the old repeated pickWaypoint+heading
+  // boilerplate at every call site, so lane bias + group propagation are free
+  // everywhere a target is (re)picked.
+  function repick(i) {
+    const L = groupLeader[i];
+    if (L >= 0 && L !== i) {
+      if (groupLeader[L] === L) { followTarget(i, L); return; }
+      groupLeader[i] = -1;               // stale leader ref (shouldn't happen) — fall through solo
+    }
+    pickWaypoint(_tmp, px[i], pz[i]);
+    applyLaneBias(i, _tmp);
+    tx[i] = _tmp.x; tz[i] = _tmp.z;
+    heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
+    dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+    if (L === i) propagateGroup(i);
+  }
+  // form ~GROUP_SHARE of [0,n) into leader+1..3-follower walking groups.
+  // Deterministic (CBZ.seedStream) so WHO is grouped is byte-identical across
+  // clients; runtime jitter (huddle wobble) stays Math.random per file
+  // convention. Consecutive followers are snapped next to the leader's spawn
+  // position so a group reads as together from frame 0, not just after its
+  // first shared arrival.
+  function formGroups(n) {
+    const rand = CBZ.seedStream ? CBZ.seedStream("crowdGroups") : Math.random;
+    let i = 0;
+    while (i < n - 1) {
+      if (rand() < GROUP_SHARE) {
+        const room = Math.min(3, n - i - 1);           // followers available before running off the array
+        const size = 1 + ((rand() * room) | 0);        // 1..3 followers → group of 2..4
+        const offs = SLOT_OFFSETS[size - 1];
+        const L = i;
+        for (let k = 1; k <= size; k++) {
+          const m = L + k;
+          groupLeader[m] = L; groupOffset[m] = offs[k - 1];
+          if (k === 1) groupMemA[L] = m; else if (k === 2) groupMemB[L] = m; else groupMemC[L] = m;
+          // huddle the follower next to the leader's spawn spot (small jitter)
+          px[m] = px[L] + (rand() - 0.5) * 0.6;
+          pz[m] = pz[L] + (rand() - 0.5) * 0.6;
+        }
+        groupLeader[L] = L;
+        propagateGroup(L);                             // seat every follower's target now, not on first arrival
+        i += 1 + size;
+      } else i++;
+    }
+  }
   // cast the shirt for wherever this agent stands (district wardrobe above);
   // skin/hair stay city-wide. Used at spawn and when a body is recycled into
   // a NEW district (it walks in as a local, not a teleported stranger).
@@ -511,20 +638,21 @@
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
     stagT.fill(0); collapsedQ.fill(0); panicT.fill(0);
+    groupLeader.fill(-1); groupOffset.fill(0);
+    groupMemA.fill(-1); groupMemB.fill(-1); groupMemC.fill(-1);
     liveTarget = count;                          // full street at the start of a run
     for (let i = 0; i < count; i++) {
       // pop-weighted spawn (Midtown packed, Dockyard thin), then a stroll
       // target inside the home district so the gradient survives the walking.
       pickWaypoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;
-      pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-      heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-      dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+      repick(i);                                 // lane-biased target (groups aren't formed yet — solo path)
       spd[i] = 1.0 + Math.random() * 1.6;
       phase[i] = Math.random() * 6.2832;
       skin[i] = (Math.random() * SKINS.length) | 0;
       castTint(i, px[i], pz[i]);
       hairC[i] = (Math.random() * HAIRS.length) | 0;
     }
+    formGroups(count);                           // ~35% link into 2-4 body walking groups (deterministic)
     paintColors();
     if (ready) {
       // park EVERY slot ≥ count across ALL body parts + the blob, so a re-seed
@@ -549,7 +677,7 @@
   CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 700)); };
   // tiny debug accessors (used by the headless harness; cheap, read-only)
   CBZ.cityCrowdCount = function () { return count; };
-  CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i] }; };
+  CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i], leader: groupLeader[i] }; };
 
   function paintColors() {
     if (!ready) return;
@@ -592,11 +720,7 @@
           CBZ.collide(_col, 0.5, 0, 1.7);
           px[i] = _col.x; pz[i] = _col.z;
         }
-        if (stagT[i] <= 0) {
-          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
-        }
+        if (stagT[i] <= 0) repick(i);
         continue;
       }
       // PANIC: sprint away from a recent threat (set by cityCrowdFlee). Runs every
@@ -619,11 +743,7 @@
           }
           px[i] = _col.x; pz[i] = _col.z;
         }
-        if (panicT[i] <= 0) {                      // calmed → pick a fresh stroll
-          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
-        }
+        if (panicT[i] <= 0) repick(i);              // calmed → pick a fresh stroll
         continue;
       }
       const cdx = px[i] - ppx, cdz = pz[i] - ppz, cd2 = cdx * cdx + cdz * cdz;
@@ -658,10 +778,7 @@
           _col.x = px[i]; _col.z = pz[i];
           if (CBZ.collideSlide(_col, 0.5, 0, 1.7, 2)) {
             px[i] = _col.x; pz[i] = _col.z;          // shoved out of a wall on the dead-reckoned line
-            // repick so it doesn't grind back in (mirrors the think-tick block below)
-            pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-            heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-            dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+            repick(i);                                // repick so it doesn't grind back in (mirrors the think-tick block below)
           } else { px[i] = _col.x; pz[i] = _col.z; }   // converged in open street; keep the (unchanged) resolved pos
         } else if (CBZ.collide) {
           // fallback if the slide helper isn't loaded (partial load order): single push
@@ -669,15 +786,13 @@
           CBZ.collide(_col, 0.5, 0, 1.7);
           if (_col.x !== px[i] || _col.z !== pz[i]) {
             px[i] = _col.x; pz[i] = _col.z;
-            pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-            heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-            dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+            repick(i);
           }
         }
         continue;
       }
       let dx = tx[i] - px[i], dz = tz[i] - pz[i], d = Math.hypot(dx, dz);
-      if (d < 1.4) { pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z; dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
+      if (d < 1.4) { repick(i); dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
       const inv = 1 / (d || 1);
       const want = Math.atan2(dx, dz);
       heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], want, 1 - Math.pow(0.0015, dt)) : want;
@@ -708,9 +823,7 @@
         }
         if (_col.x !== px[i] || _col.z !== pz[i]) {
           px[i] = _col.x; pz[i] = _col.z;            // shoved out of the wall
-          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;   // repick so it doesn't grind back in
-          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);     // don't reckon back into the wall
+          repick(i);                                 // repick so it doesn't grind back in; don't reckon back into the wall
         }
       }
     }
@@ -848,7 +961,7 @@
     const iso = (arr) => (arr || []).forEach((m) => { if (m && m.material) m.material = m.material.clone(); });
     if (ch.head && ch.head.material) ch.head.material = ch.head.material.clone();
     const ss = ch.skinSlots || {};
-    iso(ss.hands); iso(ss.arms); iso(ss.hair); iso(ss.torso); iso(ss.collar);
+    iso(ss.hands); iso(ss.arms); iso(ss.armsLower); iso(ss.hair); iso(ss.torso); iso(ss.collar);
   }
   function setLook(ped, skinHex, shirtHex, hairHex) {
     const ch = ped.char; if (!ch) return;
@@ -866,7 +979,7 @@
     const paint = (arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) m.material.color.setHex(hex); });
     if (ch.head && ch.head.material && ch.head.material.color) ch.head.material.color.setHex(skinHex);
     const ss = ch.skinSlots || {};
-    paint(ss.hands, skinHex); paint(ss.arms, skinHex); paint(ss.hair, hairHex);
+    paint(ss.hands, skinHex); paint(ss.arms, skinHex); paint(ss.armsLower, skinHex); paint(ss.hair, hairHex);
     paint(ss.torso, shirtHex); paint(ss.collar, shirtHex);
   }
   function makePooled() {
@@ -948,6 +1061,7 @@
   }
   function assign(e, s, i) {
     const ped = e.ped;
+    ungroup(i);          // promoted to a real rig → any walking-group link releases (followers go solo)
     e.idx = i; promotedBy[i] = s;
     ped._parked = false; ped.dead = false; ped.deadT = 0; ped.ko = 0; ped.culled = false; ped.collected = false; ped.needsPickup = false;
     ped.pos.set(px[i], 0, pz[i]); ped.char.group.rotation.y = heading[i];
@@ -993,7 +1107,7 @@
     for (let s = 0; s < pool.length; s++) {
       const e = pool[s]; if (e.idx < 0) continue;
       const i = e.idx, ped = e.ped;
-      if (ped.dead) { deadAgent[i] = 1; promotedBy[i] = -1; pool[s] = { ped: makePooled(), idx: -1 }; continue; } // killed → consume agent, fresh pool ped
+      if (ped.dead) { ungroup(i); deadAgent[i] = 1; promotedBy[i] = -1; pool[s] = { ped: makePooled(), idx: -1 }; continue; } // killed → consume agent, fresh pool ped
       px[i] = ped.pos.x; pz[i] = ped.pos.z; heading[i] = ped.char.group.rotation.y;   // mirror live motion back
       const dx = ped.pos.x - ppx, dz = ped.pos.z - ppz;
       // keep YOUR killer promoted + on-map while you spectate it after WASTED
@@ -1106,11 +1220,10 @@
           drawPoint(_tmp);
           const rx = _tmp.x - ppx, rz = _tmp.z - ppz;
           if (rx * rx + rz * rz < NEAR_R2) continue;   // must land OUTSIDE the local disc
+          ungroup(i);                                  // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z;
           castTint(i, px[i], pz[i]); repaintShirt(i);  // re-dress for the district it lands in
-          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          repick(i);
           moved++; break;
         }
       } else {
@@ -1123,11 +1236,10 @@
           fieldPoint(_tmp);                        // biome bubble pulls fill INTO the active region
           const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd = Math.hypot(rx, rz) || 1;
           if (rd < FILL_NEAR || rd > FILL_FAR) continue;   // land in the around-player ring
+          ungroup(i);                                  // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z;
           castTint(i, px[i], pz[i]); repaintShirt(i);
-          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          repick(i);
           moved++; break;
         }
       }
@@ -1475,6 +1587,7 @@
     opts = opts || {};
     if (i < 0 || i >= count || !shootable(i)) return false;
     const x = px[i], z = pz[i];
+    ungroup(i);                                         // corpse → drop any walking-group link
     corpseT[i] = 28;                                   // lie on the ground a good long while, then fade
     if (CBZ.gore) try { CBZ.gore(x, 1.4, z, { dir: opts.fromX != null ? { x: x - opts.fromX, z: z - opts.fromZ } : null, amount: opts.head ? 1.4 : 1.0, player: false }); } catch (e) {}
     if (CBZ.sfx && !opts.quiet) CBZ.sfx(opts.byCar ? "ko" : (opts.head ? "headshot" : "hit"));
@@ -1556,6 +1669,7 @@
         if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
         const dx = px[i] - ppx, dz = pz[i] - ppz;
         if (dx * dx + dz * dz < FAR2) continue;  // close enough to see → leave it alone
+        ungroup(i);                              // off-street → drop any walking-group link
         suppressed[i] = 1; need--;
       }
     } else if (c.live < liveTarget && c.sup > 0) {
@@ -1568,11 +1682,10 @@
         if (!suppressed[i] || deadAgent[i]) continue;
         suppressed[i] = 0;
         if (A && A.randomSidewalkPoint) {        // fresh pop-weighted spot, dressed for it
+          ungroup(i);                            // teleport → drop any walking-group link (already unlinked normally)
           fieldPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;   // biome bubble seats un-suppressed bodies in-region
           castTint(i, px[i], pz[i]); repaintShirt(i);
-          pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-          heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-          dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+          repick(i);
         }
         add--;
       }
@@ -1590,11 +1703,10 @@
         if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) { turnover--; continue; }
         const dx = px[i] - ppx, dz = pz[i] - ppz;
         if (dx * dx + dz * dz < FAR2) { turnover--; continue; }   // in sight → it keeps walking; the draw fields still converge
+        ungroup(i);                                               // teleport → drop any walking-group link
         fieldPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;         // biome bubble routes turnover INTO the active region
         castTint(i, px[i], pz[i]); repaintShirt(i);               // walks on dressed for the hour/biome
-        pickWaypoint(_tmp, px[i], pz[i]); tx[i] = _tmp.x; tz[i] = _tmp.z;
-        heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
-        dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+        repick(i);
         moved++; turnover--;
       }
     }

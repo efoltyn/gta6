@@ -48,8 +48,10 @@
   const CW_CZ = (CW_MINZ + CW_MAXZ) / 2;      // -700, lines up with base centre
 
   // ---- local seeded RNG (owner rule: deterministic world) ----------------
-  let _s = 0x5eed ^ 0x4d494c54;               // "MILT"
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream("military") : (function () { let s = 0x5eed ^ 0x4d494c54; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
   function rr(a, b) { return a + rng() * (b - a); }
 
   // ---- shared material palette (one material per colour, reused) ----------

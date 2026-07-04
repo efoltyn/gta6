@@ -47,8 +47,12 @@
   const ANNEX = { cx: 348.5, cz: -700, r: 120 }; // existing commerce island (DO NOT TOUCH)
 
   // ---- deterministic LCG (no Math.random per owner rule) -------------------
-  let _s = 990217;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  // — one world-seed knob instead of a per-file magic literal. rng() is
+  // re-armed at build entry so a rebuild replays the identical stream.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('speedway') : (function () { let s = 990217; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
 
   // ---- track geometry (a tri-oval centreline) ------------------------------
   // A superspeedway is an elongated oval; the tri-oval is the start/finish
@@ -87,7 +91,7 @@
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
-    _s = 990217;
+    armRng();
 
     // ---- shared palette ----
     const C_GRASS = 0x4f7a3a, C_INFIELD = 0x5d8a44, C_ASPHALT = 0x2b2d31,

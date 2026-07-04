@@ -337,7 +337,7 @@
         // the buildings cluster stamps lot.building.owner on every building — if
         // it's there, claim this derelict for the gang (guard: owner may not exist).
         if (lot.building && lot.building.owner) { lot.building.owner.id = gang.id; lot.building.owner.type = "gang"; }
-        if (lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
+        if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
           try { lot.building.stash.mesh.material.emissive.setHex(gang.color); } catch (e) {}
         }
         // bench size scales with the archetype: a SET / BRAWLER mob is deeper,
@@ -677,7 +677,7 @@
     lot.building.gang = winner.id;
     lot.building.gangColor = winner.color;
     if (lot.building.stash) lot.building.stash.gang = winner.id;
-    if (lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
+    if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
       try { lot.building.stash.mesh.material.emissive.setHex(winner.color); } catch (e) {}
     }
     // re-home any winner members who raided here so they hold the new ground
@@ -978,7 +978,7 @@
     gang.hostility = Math.min(5, Math.max(gang.hostility || 0, 3 * dW)); // the WHOLE set hunts
     gang.provoke = 1;
     gang.strikeT = 0;                                                    // first squad rolls NOW
-    if (CBZ.cityFeed) CBZ.cityFeed("🔪 Word reached the " + gang.name + ". The whole set is out for you.", "#ff7a7a");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("🔪 Word reached the " + gang.name + ". The whole set is out for you.", "#ff7a7a");
   }
   function startSnitchRun(gang, w, victim) {
     w._snitchT = 20 + Math.random() * 18;    // word travels even if he hides
@@ -987,7 +987,7 @@
     w.alarmed = Math.max(w.alarmed || 0, 9);
     if (gang.hq && w.target && w.target.set) { w.target.set(gang.hq.x, 0, gang.hq.z); w.finalGoal = null; }
     snitches.push(w);
-    if (CBZ.cityFeed) CBZ.cityFeed("👁 " + (w.name || "One of theirs") + " saw it — he's running to tell the " + gang.name + ".", "#ffce7a");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("👁 " + (w.name || "One of theirs") + " saw it — he's running to tell the " + gang.name + ".", "#ffce7a");
   }
   function loyaltyBattle(gang, victim) {
     const PA = playerActor(); if (!PA) return;
@@ -1007,9 +1007,9 @@
       }
     }
     avengers.victim = victim.name || "him";
-    if (CBZ.cityFeed) {
-      if (turned) CBZ.cityFeed("⚔ " + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect — settle it.", "#ffce7a");
-      else CBZ.cityFeed("The crew looks away. " + (victim.name || "He") + " didn't have the love.", "#9aa6bd");
+    if (CBZ.cityFlavor) {
+      if (turned) CBZ.cityFlavor("⚔ " + turned + " of the crew ride for " + (victim.name || "him") + ". Loyalty against respect — settle it.", "#ffce7a");
+      else CBZ.cityFlavor("The crew looks away. " + (victim.name || "He") + " didn't have the love.", "#9aa6bd");
     }
   }
   CBZ.cityVendettaReset = function () { snitches.length = 0; avengers.list.length = 0; avengers.victim = null; };
@@ -1020,7 +1020,7 @@
       if (!w || w._snitchGangId == null) { snitches.splice(i, 1); continue; }
       if (w.dead || w.ko > 0) {
         snitches.splice(i, 1); w._snitchGangId = null;
-        if (CBZ.cityFeed) CBZ.cityFeed("🤫 The witness never made it. The street stays quiet.", "#9aa6bd");
+        if (CBZ.cityFlavor) CBZ.cityFlavor("🤫 The witness never made it. The street stays quiet.", "#9aa6bd");
         continue;
       }
       const sg = gangById(w._snitchGangId);
@@ -1040,7 +1040,7 @@
         const who = avengers.victim || "him";
         avengers.list.length = 0; avengers.victim = null;
         if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(6);
-        if (CBZ.cityFeed) CBZ.cityFeed("👑 You buried everyone who rode for " + who + ". The set falls in line.", "#7fe0a0");
+        if (CBZ.cityFlavor) CBZ.cityFlavor("👑 You buried everyone who rode for " + who + ". The set falls in line.", "#7fe0a0");
       }
     }
   });
@@ -1071,11 +1071,11 @@
       if (own) {
         if (wasBoss) { /* killing your own boss = the takeover path below owns it */ }
         else if (w) loyaltyBattle(gang, ped);
-        else if (CBZ.cityFeed) CBZ.cityFeed("Nobody from the set saw " + (ped.name || "him") + " drop.", "#9aa6bd");
+        else if (CBZ.cityFlavor) CBZ.cityFlavor("Nobody from the set saw " + (ped.name || "him") + " drop.", "#9aa6bd");
       } else if (w) {
         startSnitchRun(gang, w, ped);
       } else if (CBZ.cityFeed) {
-        CBZ.cityFeed("No one who'd talk saw it. Clean.", "#9aa6bd");
+        CBZ.cityFlavor && CBZ.cityFlavor("No one who'd talk saw it. Clean.", "#9aa6bd");
       }
       CBZ.cityGangAddStanding(ped.gang, -8);
       // REWARD only a SANCTIONED kill (a rival of the crew you ride with — the
@@ -1601,7 +1601,7 @@
 
   // ---- rob a gang's stash (interact.js [I] near the stash duffel) ----
   CBZ.cityRobStash = function (lot) {
-    const st = lot && lot.building && lot.building.stash;
+    const st = lot && !lot.demolished && lot.building && lot.building.stash;
     if (!st || st.looted) { CBZ.city && CBZ.city.note("Nothing left here.", 1.4); return; }
     st.looted = true;
     const econ = CBZ.cityEcon;
@@ -1621,6 +1621,7 @@
   CBZ.cityNearestStash = function (x, z, maxd) {
     let best = null, bd = (maxd || 4) * (maxd || 4);
     for (const gang of CBZ.cityGangs) for (const lot of gang.turf) {
+      if (lot.demolished) continue;
       const st = lot.building.stash; if (!st || st.looted) continue;
       const dd = (st.x - x) * (st.x - x) + (st.z - z) * (st.z - z);
       if (dd < bd) { bd = dd; best = lot; }

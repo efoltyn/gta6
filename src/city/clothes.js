@@ -990,22 +990,31 @@
   // ---- UV-remapped part geometries: ONE per part type, shared ---------------
   const geoms = {};
   const FACE_COL = ["side", "side", "cap", "cap", "front", "back"]; // +x -x +y -y +z -z
-  function clothGeom(part) {
-    let g = geoms[part];
+  // dims/band are optional overrides: two-segment limbs (entities/character.js)
+  // tag each segment mesh with its own box size + the vertical BAND of the
+  // garment row that segment shows (band [0,1] = whole row = legacy). An upper
+  // arm shows ~the top half of the sleeve row; the forearm shows the bottom —
+  // so a cuff painted low in the row still lands on the actual wrist.
+  function clothGeom(part, dims, band) {
+    const d = dims || DIMS[part];
+    const b0 = band ? band[0] : 0, b1 = band ? band[1] : 1;
+    const key = band || dims ? part + "|" + d.join(",") + "|" + b0.toFixed(3) + "," + b1.toFixed(3) : part;
+    let g = geoms[key];
     if (g) return g;
-    const d = DIMS[part], row = part === "jacket" ? "jacket" : part;
+    const row = part === "jacket" ? "jacket" : part;
     g = new THREE.BoxGeometry(d[0], d[1], d[2]);
     const uv = g.attributes.uv, ry0 = ROWS[row][0], ry1 = ROWS[row][1];
     for (let f = 0; f < 6; f++) {
       const col = COLS[FACE_COL[f]];
       for (let v = 0; v < 4; v++) {
-        const i = f * 4 + v, u = uv.getX(i), vv = uv.getY(i);
+        const i = f * 4 + v, u = uv.getX(i), vv0 = uv.getY(i);
+        const vv = b0 + vv0 * (b1 - b0);            // this segment's slice of the row
         uv.setXY(i, (col[0] + u * (col[1] - col[0])) / W, 1 - (ry1 - vv * (ry1 - ry0)) / H);
       }
     }
     uv.needsUpdate = true;
     g._shared = true;
-    geoms[part] = g;
+    geoms[key] = g;
     return g;
   }
 
@@ -1020,7 +1029,8 @@
       const mesh = list[i];
       if (!mesh) continue;
       if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
-      mesh.geometry = clothGeom(part);
+      // split-limb segments carry their own dims + row band (character.js tags)
+      mesh.geometry = clothGeom(part, mesh.userData.clothDims, mesh.userData.clothBand);
       mesh.material = m;
     }
   }
@@ -1048,6 +1058,7 @@
       if (ch._clothesKey != null) {
         const s = ch.skinSlots;
         restore(s.torso); restore(s.arms); restore(s.legs);
+        restore(s.armsLower); restore(s.legsLower);
         if (ch._jacketMesh) ch._jacketMesh.visible = false;
         ch._clothesKey = null;
       }
@@ -1057,8 +1068,10 @@
     if (ch._clothesKey === key && ch._clothesMat === m) return set.parts;   // already wearing it
     const s = ch.skinSlots;
     dress(s.torso, "torso", m);
-    if (set.parts.arms) dress(s.arms, "arm", m); else restore(s.arms);
-    if (set.parts.legs) dress(s.legs, "leg", m); else restore(s.legs);
+    if (set.parts.arms) { dress(s.arms, "arm", m); dress(s.armsLower, "arm", m); }
+    else { restore(s.arms); restore(s.armsLower); }
+    if (set.parts.legs) { dress(s.legs, "leg", m); dress(s.legsLower, "leg", m); }
+    else { restore(s.legs); restore(s.legsLower); }
     // ---- the JACKET SHELL (tux/suit/police): silhouette via one inflated
     //      torso shell, structure via the alpha-cut open-jacket paint ----
     if (set.parts.jacket) {
@@ -1307,7 +1320,7 @@
       CBZ.cityRecolorRig(ch, { torso: shirt, arms: shirt, legs, collar: shirt, shoes: 0x2b2b2b }, null);
     } else {
       const s = ch.skinSlots, setHex = (list, hex) => { if (list) for (const m of list) if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } };
-      setHex(s.torso, shirt); setHex(s.arms, shirt); setHex(s.legs, legs); setHex(s.collar, shirt);
+      setHex(s.torso, shirt); setHex(s.arms, shirt); setHex(s.armsLower, shirt); setHex(s.legs, legs); setHex(s.legsLower, legs); setHex(s.collar, shirt);
     }
     // a blazer/bomber shell rides through the painted jacket shell (silhouette
     // + open front) so it reads as a real jacket, tinted to the item color.

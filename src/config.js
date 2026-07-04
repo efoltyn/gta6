@@ -443,6 +443,13 @@
   // seams (collar/placket/waistband) on every nobody. clothes.js, outfits.js and
   // crowd.js all read this; undefined is treated as ON.
   if (CBZ.CONFIG.CITY_PLAIN_CIVVIES == null) CBZ.CONFIG.CITY_PLAIN_CIVVIES = true;
+  // FLAVOR FEED (owner's rule: the HUD is not a tutorial/lore space). Pure
+  // world-narration lines — "the big houses are lived in now", "line out the
+  // door at X's store", corporate market chatter, eulogy prose for strangers —
+  // route through CBZ.cityFlavor and are DROPPED unless this is flipped on.
+  // Actionable alerts (your family attacked, ransom demands, robbery nearby,
+  // the city uniting against you) stay on CBZ.cityFeed and are unaffected.
+  if (CBZ.CONFIG.CITY_FLAVOR_FEED == null) CBZ.CONFIG.CITY_FLAVOR_FEED = false;
 
   // SMART TEAM COMBAT (city/squadai.js + city/loyalty.js): armed NPCs that were
   // engaged would all sprint to ~9m and trade shots in a scrum. With this ON, a

@@ -314,19 +314,11 @@
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
         : /soldier/i.test(opts.job || "") ? 0x44503a : null;
-    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol });
-    // SHORT SLEEVE: bare the forearm (lower ~45% of the arm) with a skin box on
-    // each arm pivot — reads as a tee sleeve ending mid-bicep, no sleeveless
-    // skin shoulder blending into the shirt. Rides the arm swing; shared geo.
-    if (shortSleeve && ch.parts && CBZ.cmat && window.THREE) {
-      [ch.parts.la, ch.parts.ra].forEach(function (arm) {
-        if (!arm) return;
-        const fa = new window.THREE.Mesh(CBZ.boxGeom(0.31, 0.42, 0.31), CBZ.cmat(skin));
-        fa.position.y = -0.72;                 // below mid-arm, above the hand cap (-0.93)
-        fa.castShadow = true;
-        arm.add(fa);
-      });
-    }
+    // SHORT SLEEVE: the two-segment rig has a real forearm mesh now —
+    // makeCharacter paints it skin-colored when shortSleeve is set, which
+    // reads as a tee ending mid-bicep and bends correctly at the elbow
+    // (the old bolt-on forearm box detached the moment the elbow bent).
+    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, shortSleeve: shortSleeve });
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
     const nm = opts.name || name(r);
@@ -1582,6 +1574,7 @@
     }
     if (tgt.kind === "cop") {
       if (CBZ.cityHurtCop) CBZ.cityHurtCop(tgt, dmg, { fromX: fx, fromZ: fz });
+      if (melee && !tgt.dead && CBZ.reactPunch) CBZ.reactPunch(tgt, { kind: "cross", fromX: fx, fromZ: fz });
       if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 60 : 110, "attacked-officer");
       return;
     }
@@ -1596,7 +1589,10 @@
     const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
     if (!tgt.rage && dare && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back
     if (tgt.hp <= 0) CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 });
-    else if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
+    else {
+      if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: melee ? 5 : 3, knockdown: melee && rng() < 0.3 ? 1 : 0 });
+      if (melee && CBZ.reactPunch) CBZ.reactPunch(tgt, { kind: "cross", fromX: fx, fromZ: fz });
+    }
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
   }
 
@@ -1991,7 +1987,7 @@
     // residents have a persistent "home" lot they drift back to after dark
     if (homeward) {
       const h = homeLot(ped, A);
-      if (h) {
+      if (h && !h.demolished) {
         const door = h.building && h.building.door;
         if (door) return { x: door.x, z: door.z, enter: true };
         return { x: h.cx + (rng() - 0.5) * (h.w || 6), z: h.cz + (rng() - 0.5) * (h.d || 6) };
@@ -2001,14 +1997,14 @@
     if (phase === "morning" || phase === "work") {
       if (ped.archetype === "merchant") return null;   // vendors are posted; don't pull them
       const w = workLot(ped, A);
-      if (w && w.building && w.building.door) return { x: w.building.door.x, z: w.building.door.z, enter: true };
+      if (w && !w.demolished && w.building && w.building.door) return { x: w.building.door.x, z: w.building.door.z, enter: true };
     }
     // by day, gravitate to the kind of place that fits the hour / archetype
     let prefer = null;
     if (phase === "lunch") prefer = rng() < 0.6 ? "food" : "bar";
     else if (phase === "evening") prefer = ["bar", "casino", "food", "gym"][(rng() * 4) | 0];
     if (prefer) {
-      const matches = A.shopLots.filter((l) => l.kind === prefer);
+      const matches = A.shopLots.filter((l) => l.kind === prefer && !l.demolished);
       if (matches.length) {
         const l = matches[(rng() * matches.length) | 0];
         return { x: l.building.door.x, z: l.building.door.z, enter: true };
@@ -2081,6 +2077,7 @@
       for (let i = 0; i < A.shopLots.length; i++) {
         const l = A.shopLots[i];
         if (l.kind !== "food" && l.kind !== "bar") continue;
+        if (l.demolished) continue;
         const d = l.building && l.building.door; if (!d) continue;
         const dd = (d.x - ped.pos.x) * (d.x - ped.pos.x) + (d.z - ped.pos.z) * (d.z - ped.pos.z);
         if (dd < bd) { bd = dd; foodDoor = d; }
@@ -2157,6 +2154,7 @@
         // lingers near a busy spot (a shop door / plaza) and begs — barely moves.
         const spot = nearestLotKind(A, ped.pos.x, ped.pos.z, ["park"], 50)
           || (A.shopLots && A.shopLots.length ? A.shopLots[(rng() * A.shopLots.length) | 0] : null);
+        if (spot && spot.demolished) return null;    // don't beg at a rubble pile
         if (spot) {
           const sx = spot.cx != null ? spot.cx : spot.building.door.x, sz = spot.cz != null ? spot.cz : spot.building.door.z;
           ped._beg = { x: sx, z: sz };
@@ -2241,7 +2239,11 @@
     let goal = (rng() < 0.7 ? roleGoal(ped, A) : null);
     if (!goal) goal = scheduledGoal(ped, A);     // try a time-of-day destination
     if (!goal) {
-      if (r < 0.25 && A.shopLots && A.shopLots.length) { const l = A.shopLots[(rng() * A.shopLots.length) | 0]; goal = { x: l.building.door.x, z: l.building.door.z, enter: true }; }
+      if (r < 0.25 && A.shopLots && A.shopLots.length) {
+        const l = A.shopLots[(rng() * A.shopLots.length) | 0];
+        if (l.demolished) { const p = A.randomSidewalkPoint(); goal = { x: p.x, z: p.z }; }
+        else goal = { x: l.building.door.x, z: l.building.door.z, enter: true };
+      }
       else if (r < 0.4 && A.lots) { const l = A.lots[(rng() * A.lots.length) | 0]; goal = { x: l.cx + (rng() - 0.5) * l.w, z: l.cz + (rng() - 0.5) * l.d }; }
       else { const p = A.randomSidewalkPoint(); goal = { x: p.x, z: p.z }; }
     }
@@ -2940,7 +2942,7 @@
     if (active && ped.drugUser && ped.erratic > 0 && ped.tweakT <= 0 && !ped.rage) {
       ped.tweakT = 3 + rng() * 7;
       const A = CBZ.city.arena;
-      const trap = A && A.shopLots && A.shopLots.find((l) => l.kind === "drugs");
+      const trap = A && A.shopLots && A.shopLots.find((l) => l.kind === "drugs" && !l.demolished);
       if (trap && rng() < 0.42) {
         ped.path = null; ped.finalGoal = { x: trap.building.door.x, z: trap.building.door.z, enter: true };
         ped.target.set(ped.finalGoal.x, 0, ped.finalGoal.z); ped.state = "walk"; ped.pause = 0;
@@ -3089,7 +3091,7 @@
     if (NAV) {
       // INDOORS: head for THIS building's door, then 2m out along -inwardNormal.
       const lot = NAV.indoorLotAt ? NAV.indoorLotAt(ped.pos.x, ped.pos.z) : null;
-      const door = lot && lot.building && lot.building.door;
+      const door = lot && !lot.demolished && lot.building && lot.building.door;
       if (door && (door.nx || door.nz)) {           // real entrance with an inward normal (parks/stubs lack it → fall through to the exit scorer)
         // door.nx/nz is the INWARD normal → stepping along -(nx,nz) walks OUT.
         const nx = door.nx || 0, nz = door.nz || 0;
@@ -3152,6 +3154,7 @@
         if (A && A.shopLots && A.shopLots.length) {
           let bd = 40 * 40, best = null;
           for (let i = 0; i < A.shopLots.length; i++) {
+            if (A.shopLots[i].demolished) continue;
             const d = A.shopLots[i].building && A.shopLots[i].building.door; if (!d) continue;
             const dd = (d.x - ped.pos.x) * (d.x - ped.pos.x) + (d.z - ped.pos.z) * (d.z - ped.pos.z);
             if (dd < bd) { bd = dd; best = d; }
@@ -3768,6 +3771,31 @@
       const moveStride = (vis || important) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : 1);
       if (moveStride === 1 || (frame + p.slice) % moveStride === 0) {
         move(p, dt * moveStride, near || important || visAnim);
+      }
+      // ---- diegetic witness tells (post-anim, so animChar's damping can't
+      //      pull them back): a dialing witness holds the phone to their EAR,
+      //      a gawker films two-handed, a grudge witness POINTS you out to the
+      //      officer. These in-world reads replace the old narration toasts
+      //      (owner's rule: you SEE someone see you — no popup tells you). ----
+      if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && p.char && p.char.parts) {
+        const ch = p.char, J = ch.low || {};
+        if (!ch.surrender && !ch.handsUp && !ch.aimingPose && !p.armed) {
+          // (armed peds skip these — their weapon-ready pose owns the arms,
+          //  and an armed witness draws instead of dialing anyway)
+          if (p.reportState === "phone") {
+            ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
+            if (J.ra) J.ra.rotation.x = -2.35;
+            if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+          } else if (p.posePoint > 0) {
+            ch.parts.ra.rotation.set(-1.52, 0, 0);           // arm out: "that's the one"
+            if (J.ra) J.ra.rotation.x = -0.04;
+          } else if (p.state === "film") {
+            ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
+            if (J.ra) J.ra.rotation.x = -0.55;
+            ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
+            if (J.la) J.la.rotation.x = -0.75;
+          }
+        }
       }
     }
 

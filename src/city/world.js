@@ -39,13 +39,16 @@
 
   let city = null;
 
-  // deterministic RNG so the city is the same each run (learnable streets)
-  let _s = 90210;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // deterministic RNG so the city is the same each run (learnable streets).
+  // The stream derives from the ONE world-seed knob (core/seed.js) — change
+  // CBZ.CONFIG.WORLD_SEED and every layer of the world re-rolls coherently.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream("world") : (function () { let s = 90210; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
 
   CBZ.buildCity = function () {
     if (city) return city;
-    _s = 90210;
+    armRng();
     const C = CBZ.CITY;
     const cx = C.center.x, cz = C.center.z;
     const N = C.blocks, BLK = C.block, ROAD = C.road;
@@ -506,6 +509,49 @@
       p.x = best.x; p.z = best.z;
     }
 
+    // ---- LAND-VALUE FIELD (PROCGEN.md roadmap #3) -----------------------
+    // WHY: "field → structure → detail" (Minecraft's pipeline / SimCity land
+    // value) — a cheap global scalar sampled by structures downstream (right
+    // now: districtStoreys' height gradient + the abandoned-lot gate in
+    // buildings.js), instead of every consumer hand-rolling its own distance
+    // math. Three ingredients, purely geometric + a coarse deterministic
+    // noise field — NO rng draw, so this is byte-identical every build:
+    //   1) distance-to-centre falloff (money concentrates downtown)
+    //   2) waterfront/seawall proximity bonus (coastal lots command a premium)
+    //   3) low-frequency smoothed hash noise so the falloff isn't a perfect
+    //      bullseye — a few "good blocks near the edge" / "so-so blocks near
+    //      the core" the way real land value maps are lumpy, not radial.
+    // Returns roughly [0,1]; consumers may exceed slightly at the water/core
+    // overlap corners, which is fine (they treat it as a continuous weight).
+    const _lvRmax = Math.hypot(half, half) || 1;   // centre→corner distance
+    // smoothstep-interpolated CBZ.hash01 over a coarse (140m) grid: cheap,
+    // deterministic, order-independent (no dependency on window.noise / the
+    // terrain module's seeding order).
+    const LV_CELL = 140, LV_SALT = 0xA17;
+    function lvSmooth(t) { return t * t * (3 - 2 * t); }
+    function lvNoise(x, z) {
+      const gx = x / LV_CELL, gz = z / LV_CELL;
+      const x0 = Math.floor(gx), z0 = Math.floor(gz);
+      const fx = lvSmooth(gx - x0), fz = lvSmooth(gz - z0);
+      const h00 = CBZ.hash01(x0 * LV_CELL, z0 * LV_CELL, LV_SALT);
+      const h10 = CBZ.hash01((x0 + 1) * LV_CELL, z0 * LV_CELL, LV_SALT);
+      const h01 = CBZ.hash01(x0 * LV_CELL, (z0 + 1) * LV_CELL, LV_SALT);
+      const h11 = CBZ.hash01((x0 + 1) * LV_CELL, (z0 + 1) * LV_CELL, LV_SALT);
+      const a = h00 + (h10 - h00) * fx, b = h01 + (h11 - h01) * fx;
+      return a + (b - a) * fz;   // [0,1)
+    }
+    // distance (rectilinear, to the nearest seawall line) — 0 right at the
+    // water, growing inland. EW/EE/ES/EN are the four seawall lines above.
+    const LV_WATER_RANGE = 140;   // waterfront premium fades out by ~140m inland
+    function landValueAt(x, z) {
+      const dd = Math.hypot(x - cx, z - cz);
+      const distScore = 1 - Math.min(1, dd / _lvRmax);                  // 1 centre → 0 rim
+      const distToWater = Math.max(0, Math.min(x - EW, EE - x, z - ES, EN - z));
+      const waterBonus = Math.max(0, 1 - distToWater / LV_WATER_RANGE) * 0.35;
+      const jitter = (lvNoise(x, z) - 0.5) * 0.3;                       // ±0.15, low-frequency
+      return Math.max(0, Math.min(1, distScore * 0.6 + waterBonus + jitter));
+    }
+
     city = {
       root, center: { x: cx, z: cz },
       N, step, BLK, ROAD, xLines, zLines, minX, maxX, minZ, maxZ,
@@ -523,6 +569,11 @@
       // only the far backdrop ring has relief. Falls back to flat 0 if
       // terrain.js / PROC_TERRAIN is off.
       groundHeightAt(x, z) { return (window.CBZ.terrainHeight ? CBZ.terrainHeight(x, z) : 0); },
+      // land-value field (PROCGEN.md roadmap #3): distance-to-centre falloff +
+      // waterfront proximity bonus + low-freq deterministic noise, ~[0,1].
+      // Sampled by buildings.js (height gradient, abandoned-lot gate) — cheap
+      // enough to call per-lot at build time or per-frame at runtime.
+      landValue: landValueAt,
       lotAt, randomSidewalkPoint, randomRoadPoint, nearestIntersection, clampToCity,
       // district personality field (peds/crowd density, casting, cop beats)
       districts: DISTRICTS, districtAt, weightedSidewalkPoint, copBeatPoint,
@@ -739,8 +790,9 @@
     //      only — it all sits OUTSIDE the perimeter wall, so no colliders.
     //      LOCAL rng: the shared city/runtime stream stays untouched. ----
     (function eastHarbor() {
+      const hrng = CBZ.seedStream ? CBZ.seedStream("harbor") : null;
       let hs = 70707;
-      function hr() { hs = (hs * 1103515245 + 12345) & 0x7fffffff; return hs / 0x7fffffff; }
+      function hr() { if (hrng) return hrng(); hs = (hs * 1103515245 + 12345) & 0x7fffffff; return hs / 0x7fffffff; }
       const hm = new Map();
       function hmat(c) { let m = hm.get(c); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); hm.set(c, m); } return m; }
       const EEx = maxX + 26;                  // the east seawall line

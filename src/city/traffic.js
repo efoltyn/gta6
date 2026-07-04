@@ -256,6 +256,21 @@
   //     way off (far from player + camera) and teleport it onto a road just
   //     out of sight ahead of you, ready to drive into frame.
   let targetNear = 0, upkeepT = 0, lastArena = null, _farSeedT = 0;
+  // ---- TIME-OF-DAY DENSITY (GTA popcycle pattern, PROCGEN.md roadmap #4) ----
+  // WHY: a city that's equally busy at 3am and at rush hour doesn't read as
+  // alive — real streets swell for the commute and go quiet overnight. Feature-
+  // detects schedule.js's cached sun-hour clock (CBZ.citySunHour(), 0..24,
+  // 8Hz-cached off CBZ.sunAngle) so this degrades to a flat 1.0 multiplier if
+  // schedule.js hasn't loaded (headless / older build). Runtime-only density —
+  // no rng() draw, no effect on the deterministic world build.
+  function hourDensityMul() {
+    const h = CBZ.citySunHour ? CBZ.citySunHour() : null;
+    if (h == null) return 1.0;
+    if ((h >= 7 && h < 9) || (h >= 16 && h < 19)) return 1.25;   // rush hour
+    if (h >= 2 && h < 5) return 0.35;                            // deep night
+    if (h >= 19 || h < 2) return 0.8;                            // evening (19:00-02:00)
+    return 1.0;                                                  // day (5:00-7:00, 9:00-16:00)
+  }
   function computeTarget(A) {
     // base on number of road segments (≈ block grid) — bigger grid → more cars.
     const roads = (A.roads && A.roads.length) || 16;
@@ -267,7 +282,7 @@
     // cars active near the camera so the recycle never costs frames.
     const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
     const qmul = q <= 1 ? 0.5 : (q === 2 ? 0.74 : 0.95);
-    return Math.max(6, Math.min(40, Math.round(scaled * 0.42 * qmul)));
+    return Math.max(6, Math.min(40, Math.round(scaled * 0.42 * qmul * hourDensityMul())));
   }
   const NEAR2 = 80 * 80;     // "near the camera" radius²
   const FAR2 = 150 * 150;    // "way off, fair to recycle" radius² (past the cull)
@@ -450,7 +465,10 @@
     upkeepT -= dt;
     if (upkeepT <= 0) {
       upkeepT = 0.5;
-      if (!targetNear) targetNear = computeTarget(A);
+      // recompute every upkeep beat (not just once at bind) so the hour
+      // curve inside computeTarget actually tracks the sun as the day
+      // advances — cheap (a handful of arithmetic ops at ~2Hz).
+      targetNear = computeTarget(A);
       if (!(CBZ.player.driving && (g.wanted | 0) >= 2)) {
         const near = countNear();
         if (near < targetNear) recycleOne(A);

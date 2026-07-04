@@ -166,6 +166,22 @@
     beatCD: 0,         // sub-beat timer (gunshot ticks, etc.)
   };
   let _cooldown = 8;   // seconds until the FIRST scene may fire (after load)
+  // ---- L4D ADAPTIVE PACING (PROCGEN.md #5): a decaying TENSION accumulator
+  // gates staging on top of the cooldown. Combat, heat, and a just-fired
+  // scene push tension up; calm decays it. Scenes only stage once the street
+  // has genuinely settled — quiet stretches BUILD toward a set-piece instead
+  // of a timer firing into the middle of a gunfight's afterglow.
+  let _tension = 0;
+  function tickTension(dt) {
+    const P = playerActor();
+    let target = 0;
+    if (P && P._fighting > 0) target = Math.max(target, 1);
+    target = Math.max(target, Math.min(1, (g.wanted | 0) / 3));
+    if (liveScene()) target = Math.max(target, 0.8);
+    // fast rise toward danger, slow decay toward calm (~20s to settle)
+    if (target > _tension) _tension += (target - _tension) * Math.min(1, dt * 2.5);
+    else _tension = Math.max(0, _tension - dt * 0.05);
+  }
 
   function liveScene() { return SCENE.kind != null; }
 
@@ -471,7 +487,9 @@
     // RELAX: count the cooldown down; only attempt a stage when it expires and
     // all gates are open. A failed attempt re-arms a SHORT retry (so a transient
     // "no offscreen stage" doesn't waste the whole long cooldown).
+    tickTension(dt);
     if (_cooldown > 0) { _cooldown -= dt; return; }
+    if (_tension > 0.25) { _cooldown = 4 + rng() * 4; return; }   // street hasn't settled — keep building
     if (!gatesOpen()) { _cooldown = 3 + rng() * 4; return; }
     const staged = tryStage();
     if (staged) {

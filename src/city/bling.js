@@ -159,8 +159,8 @@
     };
     const watch = function (band, faceM) {
       return [
-        { kind: "cuff", mat: band, x: 0, y: -0.66, z: 0 },
-        { kind: "face", mat: faceM, x: 0, y: -0.66, z: 0.165 },
+        { kind: "cuff", mat: band, x: 0, y: -0.20, z: 0 },
+        { kind: "face", mat: faceM, x: 0, y: -0.20, z: 0.165 },
       ];
     };
     _looks = {
@@ -173,13 +173,13 @@
       watchSilver: watch(M.silver, M.silver),
       watchIced: watch(M.ice, M.glint),
       watchSteel: watch(M.silver, M.silver),                                   // clean steel dress watch
-      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.66, z: 0 },      // steel band
-        { kind: "face", mat: M.blueDial, x: 0, y: -0.66, z: 0.165 },           // signature blue dial
-        { kind: "ring", mat: M.glint, x: 0, y: -0.60, z: 0.18 }],              // lume pip
+      watchDiver: [{ kind: "cuff", mat: M.silver, x: 0, y: -0.20, z: 0 },      // steel band
+        { kind: "face", mat: M.blueDial, x: 0, y: -0.20, z: 0.165 },           // signature blue dial
+        { kind: "ring", mat: M.glint, x: 0, y: -0.14, z: 0.18 }],              // lume pip
       // tennis bracelet — band only
-      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.66, z: 0 }],
+      bracelet: [{ kind: "cuff", mat: M.ice, x: 0, y: -0.20, z: 0 }],
       // ring — a glint dot on the hand's front edge
-      ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.80, z: 0.17 }],
+      ring: [{ kind: "ring", mat: M.glint, x: 0.10, y: -0.34, z: 0.17 }],
       // grill — a small iced bar across the lower face (the mouth)
       grill: [{ kind: "grill", mat: M.glint, x: 0, y: 0.28, z: 0.265 }],
       // shades — two lenses + bridge + temples sitting on the eyes (neck-local,
@@ -315,7 +315,9 @@
   function anchorsOf(ped) {
     const ch = ped.char;
     if (!ch) return null;
-    return { body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra };
+    const laLow = ch.low && ch.low.la || (ch.parts && ch.parts.la && ch.parts.la.userData.low) || (ch.parts && ch.parts.la);
+    const raLow = ch.low && ch.low.ra || (ch.parts && ch.parts.ra && ch.parts.ra.userData.low) || (ch.parts && ch.parts.ra);
+    return { body: ch.body, neck: ch.neck, la: laLow, ra: raLow };
   }
   function dress(ped, want) {
     const an = anchorsOf(ped);

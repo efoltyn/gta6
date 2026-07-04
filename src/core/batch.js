@@ -73,6 +73,59 @@
   // a console toggle before the city's first batch takes effect.
   if (CBZ.wallBatch === undefined) CBZ.wallBatch = true;
 
+  // ---- PER-GROUP MERGE LEDGER (demolition support) -----------------------
+  // The merges below are one-way: inert deco is disposed into city-wide
+  // colour buckets, wall shells into per-building merged copies parented to
+  // the root. That makes "remove ONE building" impossible after the fact —
+  // unless we remember, at merge time, which slice of which merged buffer
+  // each top-level group contributed. groupRanges does exactly that:
+  //   topGroup → [ {mesh, whole:true}            (wall-pass merged copy —
+  //                                               the whole mesh is one
+  //                                               building's shell)
+  //              | {mesh, start, count} ]        (vertex range inside a
+  //                                               shared inert-deco mesh)
+  // CBZ.batchHideGroup(g)/batchShowGroup(g) then hide/restore a building's
+  // batched geometry: whole meshes flip .visible; shared ranges stash their
+  // position slice and zero it (all verts collapse to the origin → zero-area
+  // triangles → nothing rasterizes), reversibly. Zero draw-call cost either
+  // way — the buffers stay merged.
+  const groupRanges = new WeakMap();
+  function addRange(top, entry) {
+    if (!top) return;
+    let arr = groupRanges.get(top);
+    if (!arr) { arr = []; groupRanges.set(top, arr); }
+    arr.push(entry);
+  }
+  CBZ.batchHideGroup = function (top) {
+    const arr = groupRanges.get(top);
+    if (!arr) return 0;
+    let n = 0;
+    for (const e of arr) {
+      if (e.whole) { if (e.mesh.visible) { e.mesh.visible = false; n++; } continue; }
+      if (e._stash) continue;                       // already hidden
+      const attr = e.mesh.geometry.attributes.position;
+      const i0 = e.start * 3, i1 = (e.start + e.count) * 3;
+      e._stash = attr.array.slice(i0, i1);          // keep the verts for restore
+      attr.array.fill(0, i0, i1);
+      attr.needsUpdate = true; n++;
+    }
+    return n;
+  };
+  CBZ.batchShowGroup = function (top) {
+    const arr = groupRanges.get(top);
+    if (!arr) return 0;
+    let n = 0;
+    for (const e of arr) {
+      if (e.whole) { if (!e.mesh.visible) { e.mesh.visible = true; n++; } continue; }
+      if (!e._stash) continue;
+      const attr = e.mesh.geometry.attributes.position;
+      attr.array.set(e._stash, e.start * 3);
+      e._stash = null;
+      attr.needsUpdate = true; n++;
+    }
+    return n;
+  };
+
   // mergeableKey decides the visually-identical bucket. `allowColored` opens
   // it up for the wall pass: structural LOS boxes carry a fake-AO `color`
   // vertex attribute (vertexColors:true) — historically the reason the
@@ -197,12 +250,13 @@
       return { gi, top: g };
     }
 
-    const buckets = new Map();      // key -> {meshes:[…], hide:bool}
+    const buckets = new Map();      // key -> {meshes:[…], tops:[…], hide:bool}
 
-    function add(key, m, hide) {
+    function add(key, m, top, hide) {
       let b = buckets.get(key);
-      if (!b) { b = { meshes: [], hide: hide }; buckets.set(key, b); }
+      if (!b) { b = { meshes: [], tops: [], hide: hide }; buckets.set(key, b); }
       b.meshes.push(m);
+      b.tops.push(top);              // parallel array: which top-level group contributed this mesh
     }
 
     function consider(m) {
@@ -221,14 +275,16 @@
         if (!key) return;
         // bucket PER BUILDING so each merged shell frustum-culls independently.
         const tg = topGroupIndex(m);
-        add("W" + tg.gi + "|" + key, m, true);   // hide=true: original stays for LOS/collider, draws nothing
+        add("W" + tg.gi + "|" + key, m, tg.top, true);   // hide=true: original stays for LOS/collider, draws nothing
         return;
       }
       if (m.userData && Object.keys(m.userData).length > 0) return;  // referenced/interactive
       if (m.userData && m.userData.collider) return;                 // physics box — keep identity
       const key = mergeableKey(m, false);
       if (!key) return;
-      add(key, m, false);                          // inert deco: removed outright (unchanged)
+      // inert deco: removed outright (unchanged) — but remember whose it was,
+      // so batchHideGroup can later zero this building's slice of the shared mesh.
+      add(key, m, topGroupIndex(m).top, false);
     }
     function walk(o) {
       // never descend into a subtree flagged dynamic (peds/cars/crowd rigs that
@@ -252,7 +308,6 @@
         return g;
       });
       const merged = mergeGeometries(geos);
-      geos.forEach((g) => g.dispose && g.dispose());
       const proto = meshes[0];
       const mesh = new THREE.Mesh(merged, proto.material);
       mesh.castShadow = proto.castShadow;         // invisible originals can't cast — merged copy carries it
@@ -267,12 +322,30 @@
         // r128; collider.ref + camera-occlusion read rects, not the mesh) — just
         // stop them drawing. Do NOT remove from the graph or dispose geometry.
         meshes.forEach((m) => { m.visible = false; wallHidden++; });
+        // the bucket key is per-building ("W<gi>|…") — the whole merged copy
+        // belongs to ONE top group; register it for batchHideGroup/ShowGroup.
+        addRange(b.tops[0], { mesh, whole: true });
         wallMerged++;
       } else {
         // INERT deco: nothing references these — remove + dispose outright.
+        // Before disposing, ledger each top group's vertex range in the shared
+        // merged buffer (consecutive meshes from one group coalesce into one
+        // range — walk order is depth-first per building, so slices are contiguous).
+        let off = 0, runTop = null, runStart = 0;
+        for (let i = 0; i < geos.length; i++) {
+          const cnt = geos[i].attributes.position.count;
+          const top = b.tops[i];
+          if (top !== runTop) {
+            if (runTop && off > runStart) addRange(runTop, { mesh, start: runStart, count: off - runStart });
+            runTop = top; runStart = off;
+          }
+          off += cnt;
+        }
+        if (runTop && off > runStart) addRange(runTop, { mesh, start: runStart, count: off - runStart });
         meshes.forEach((m) => { if (m.parent) m.parent.remove(m); m.geometry.dispose && m.geometry.dispose(); removed++; });
         mergedMeshes++;
       }
+      geos.forEach((g) => g.dispose && g.dispose());
     });
 
     // the shadow map was baked from the pre-merge scene; force one refresh

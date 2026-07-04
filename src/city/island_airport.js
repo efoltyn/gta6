@@ -34,8 +34,12 @@
   const cmat = CBZ.cmat || CBZ.mat;
 
   // ---- deterministic LCG: same airfield every run ----
-  let _s = 0x51A1A0;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  // — one world-seed knob instead of a per-file magic literal. rng() is
+  // re-armed at build entry so a rebuild replays the identical stream.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('airport') : (function () { let s = 0x51A1A0; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
 
   // ---- boardable capture: the parked airliners + private jets register as
   // STEALABLE aircraft (kind 'plane') so the player can climb in and fly one off
@@ -76,7 +80,7 @@
 
   CBZ.addLandmass(function (city) {
     const root = city.root;
-    _s = 0x51A1A0;
+    armRng();
     // a city rebuild re-runs this builder → fresh plane groups. Clear the capture
     // + one-shot guard so the rebuilt fleet re-registers as boardable.
     placed.length = 0; _reg = false;

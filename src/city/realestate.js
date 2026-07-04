@@ -131,7 +131,7 @@
 
   // ---- standing at your own home: the safehouse menu ----
   CBZ.cityHomeNear = function (x, z) {
-    if (!g.cityHome) return null;
+    if (!g.cityHome || g.cityHome.lot.demolished) return null;    // rubble — no safehouse menu to open
     const lot = g.cityHome.lot, d = Math.hypot(x - lot.building.door.x, z - lot.building.door.z);
     return d < 4.5 ? lot : null;
   };

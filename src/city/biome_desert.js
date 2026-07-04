@@ -82,8 +82,12 @@
   }
 
   // ---- deterministic LCG ---------------------------------------------------
-  let _s = 0x5dec7;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  // — one world-seed knob instead of a per-file magic literal. rng() is
+  // re-armed at build entry so a rebuild replays the identical stream.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('desert') : (function () { let s = 0x5dec7; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
   function rr(a, b) { return a + rng() * (b - a); }
 
   const BGU = THREE.BufferGeometryUtils;
@@ -91,7 +95,7 @@
   CBZ.addLandmass(function (city) {
     const root = (city && city.root) || (CBZ.scene);
     if (!root) return;
-    _s = 0x5dec7;
+    armRng();
     const dummy = new THREE.Object3D();
 
     // ---- merge helper: many transformed geometries → ONE mesh -------------

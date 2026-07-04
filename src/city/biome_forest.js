@@ -61,7 +61,7 @@
 
   CBZ.addLandmass(function (city) {
     const root = city.root;
-    const rng = makeRng(0x0F02E57); // "forest"
+    const rng = CBZ.seedStream ? CBZ.seedStream("forest") : makeRng(0x0F02E57);
 
     // register the walkable region + the causeway (drivable land bridge).
     CBZ.registerCityRegion(city, {
@@ -324,15 +324,21 @@
 
     const bushes = [], rocks = [];
     const NB = 900, NR = 260;
-    // retry-on-clearing kept bounded to avoid infinite spins.
+    // METHOD (PROCGEN.md #1): jittered-grid scatter instead of rejection
+    // retries — cell size derives from the requested count, one candidate
+    // per cell with sub-cell jitter, clearings simply leave their cells
+    // empty. Even spacing by construction (no two samples share a cell),
+    // deterministic, and never spins: exactly one pass over the grid.
     function fillScatter(arr, count) {
-      let tries = 0;
-      while (arr.length < count && tries < count * 6) {
-        tries++;
-        const x = MINX + 10 + rng() * (HX * 2 - 20);
-        const z = MINZ + 10 + rng() * (HZ * 2 - 20);
-        if (inClearing(x, z)) continue;
-        arr.push({ x, z, s: 0.5 + rng() * 1.0, rot: rng() * 6.28 });
+      const W = HX * 2 - 20, D = HZ * 2 - 20;
+      const step = Math.sqrt((W * D) / count);
+      for (let gx = MINX + 10 + step / 2; gx < MINX + 10 + W; gx += step) {
+        for (let gz = MINZ + 10 + step / 2; gz < MINZ + 10 + D; gz += step) {
+          const x = gx + (rng() - 0.5) * step * 0.9;
+          const z = gz + (rng() - 0.5) * step * 0.9;
+          if (inClearing(x, z)) continue;
+          arr.push({ x, z, s: 0.5 + rng() * 1.0, rot: rng() * 6.28 });
+        }
       }
     }
     fillScatter(bushes, NB);

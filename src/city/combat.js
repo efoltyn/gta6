@@ -313,6 +313,11 @@
     // a broken foe eats EVERYTHING amplified — this is the payoff window
     if (broken) dmg = Math.round(dmg * 1.55);
 
+    // --- HEAD SNAP + clutch/daze reaction: the blow genuinely connected (we're
+    // past the block-check above), so drive the target's neck whip + a beat of
+    // wound-clutch on anything heavy — direction-aware from the real swing.
+    if (CBZ.reactPunch) CBZ.reactPunch(t, { kind: opts.kind || (finisher ? "hook" : "cross"), heavy: heavy || broken || counter, fromX: fx, fromZ: fz });
+
     // --- POSTURE damage: how much this blow batters their guard. Heavies and
     // the finisher pump it hard; the weapon profile scales it (a bat shatters
     // a guard, a knife barely dents it). Capping it = GUARD BREAK (handled in
@@ -436,7 +441,7 @@
     // jab/cross scale up through the chain; the hook (3rd) is the big one
     const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (combo - 1) * 0.18));
     if (t) {
-      const ok = land(t, dmg, finisher ? "finisher" : "light");
+      const ok = land(t, dmg, finisher ? "finisher" : "light", { kind });
       if (!ok) { /* blocked → combo already reset in land() */ }
       else if (finisher) { combo = 0; comboT = 0; }
     } else if (CBZ.cityShatterRay) {
@@ -465,7 +470,7 @@
     if (CBZ.sfx) CBZ.sfx("whoosh");
     const base = it() ? it().dmg : 16;
     const dmg = Math.round(base * 2.4);
-    if (t) land(t, dmg, "heavy");
+    if (t) land(t, dmg, "heavy", { kind: "upper" });
     else if (CBZ.cityShatterRay) {
       // a heavy (bat/pipe-class swing) puts a window straight through
       const L2 = lookDir();
@@ -519,7 +524,7 @@
             // a deflect alone deals heavy posture damage — repeated parries break them
             addPosture(attacker, 38 + weaponFeel().post * 18);
             const base = (it() && it().dmg) || 16;
-            land(attacker, Math.round(base * 1.8), "heavy", { lethalIntent: true });
+            land(attacker, Math.round(base * 1.8), "heavy", { lethalIntent: true, kind: "hook" });
           }
           return;   // blow fully negated
         }

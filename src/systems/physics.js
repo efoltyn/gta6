@@ -558,9 +558,10 @@
       const tYaw = Math.atan2(mx, mz);
       playerChar.group.rotation.y = lerpAngle(playerChar.group.rotation.y, tYaw, 1 - Math.pow(0.0006, fdt));
     }
-    // crouch squash
-    const cs = player.crouch ? 0.62 : 1.0;
-    playerChar.group.scale.y += (cs - playerChar.group.scale.y) * (1 - Math.pow(0.001, fdt));
+    // crouch: a real pose (knees/hips fold — entities/character.js) instead of
+    // the old scale.y accordion squash; ease any legacy squash back out.
+    playerChar.crouch = !!player.crouch;
+    playerChar.group.scale.y += (1 - playerChar.group.scale.y) * (1 - Math.pow(0.001, fdt));
     // get back up after a knockdown (ease the fall-over rotation out)
     if (playerChar.group.rotation.x) playerChar.group.rotation.x = CBZ.damp(playerChar.group.rotation.x, 0, 9, fdt);
     animChar(playerChar, player.speed, fdt);

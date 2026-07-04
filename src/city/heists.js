@@ -243,7 +243,7 @@
     let best = null, bd = maxd || 7;
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i];
-      if (!lot || !lot.building) continue;
+      if (!lot || !lot.building || lot.demolished) continue;
       const kind = (lot.building.shop && lot.building.shop.kind) || lot.kind;
       if (tier.kinds.indexOf(kind) < 0) continue;
       const d = dist2(px, pz, lot.cx, lot.cz);
@@ -260,7 +260,7 @@
     const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i];
-      if (!lot || !lot.building) continue;
+      if (!lot || !lot.building || lot.demolished) continue;
       const kind = (lot.building.shop && lot.building.shop.kind) || lot.kind;
       const w = (lot.w || 10) * 0.6, d = (lot.d || 10) * 0.6;
       if (Math.abs(px - lot.cx) < w && Math.abs(pz - lot.cz) < d) return { kind, lot };

@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>worldgen-probe wasm check</title>
+<style>
+  body { font: 14px/1.5 monospace; background: #111; color: #ddd; padding: 2rem; }
+  h1 { font-size: 16px; }
+  .ok { color: #6f6; }
+  .fail { color: #f66; }
+  pre { background: #000; padding: 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>worldgen-probe: browser WASM load check</h1>
+<p>Confirms the exact same <code>.wasm</code> file used by the Node benchmark
+loads and runs via <code>WebAssembly.instantiateStreaming</code> in a real
+browser tab (no bundler, no wasm-bindgen glue — open this file directly,
+e.g. <code>python3 -m http.server</code> from this directory, then visit
+<code>/check.html</code>; opening via <code>file://</code> will hit CORS/mime
+restrictions on <code>fetch</code>, hence the small local server note).</p>
+<pre id="out">loading...</pre>
+<script>
+const out = document.getElementById("out");
+function log(line, cls) {
+  const span = document.createElement("div");
+  if (cls) span.className = cls;
+  span.textContent = line;
+  out.appendChild(span);
+}
+out.textContent = "";
+
+async function main() {
+  const t0 = performance.now();
+  // Same loader pattern as loader.js / worker_loader_example.js: no imports
+  // object needed, the module is fully self-contained.
+  const { instance } = await WebAssembly.instantiateStreaming(
+    fetch("./target/wasm32-unknown-unknown/release/worldgen_probe.wasm")
+  );
+  const wasm = instance.exports;
+  const t1 = performance.now();
+  log(`loaded in ${(t1 - t0).toFixed(2)}ms`, "ok");
+  log(`exports: ${Object.keys(wasm).join(", ")}`);
+
+  const h = wasm.hash_u32(42, 90210) >>> 0;
+  log(`hash_u32(42, 90210) = ${h}  (expect 1971548486, matches Node + src/core/seed.js)`,
+      h === 1971548486 ? "ok" : "fail");
+
+  const capBytes = 4096 * 4 * 4;
+  const ptr = wasm.alloc(capBytes);
+  const count = wasm.scatter_chunk(90210, 0, 0, ptr, capBytes) >>> 0;
+  const floats = new Float32Array(wasm.memory.buffer, ptr, count * 4);
+  log(`scatter_chunk(90210, 0, 0) -> ${count} instances`, count > 0 ? "ok" : "fail");
+  log(`first instance: x=${floats[0].toFixed(3)} z=${floats[1].toFixed(3)} scale=${floats[2].toFixed(3)} rot=${floats[3].toFixed(3)}`);
+
+  log("\nWASM loads and runs correctly in the browser context.", "ok");
+}
+
+main().catch((e) => {
+  log(String(e.stack || e), "fail");
+});
+</script>
+</body>
+</html>

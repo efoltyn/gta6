@@ -52,8 +52,12 @@
   const RESPAWN = 280;        // s — the beach crowd "comes back" with new valuables
 
   // deterministic LCG — same sand, same towels, every run
-  let _s = 51420;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
+  // — one world-seed knob instead of a per-file magic literal. rng() is
+  // re-armed at build entry so a rebuild replays the identical stream.
+  let rng = null;
+  function armRng() { rng = CBZ.seedStream ? CBZ.seedStream('beach') : (function () { let s = 51420; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
+  armRng();
 
   // ---- shared looks (cmat pool: zero new materials per repeated color) ----
   const SAND = 0xe6d49a, SAND_WET = 0xc4ad79;
@@ -69,7 +73,7 @@
   CBZ.cityBuildBeach = function (city) {
     if (built || !city || !city.shore) return;
     built = true;
-    _s = 51420;
+    armRng();
     const root = city.root;
     const S = city.shore, B = S.beach;
     const cx = city.center.x, cz = city.center.z;

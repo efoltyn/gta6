@@ -1962,7 +1962,7 @@
     _rampTipT = t;
     const E = CBZ.cityEcon;
     const where = (E && E.districtAt && E.districtName) ? E.districtName(E.districtAt(ped.pos.x, ped.pos.z)) : "the city";
-    if (CBZ.cityFeed) CBZ.cityFeed("📱 " + who + ": somebody's spraying up " + where + " — stay clear.", "#9fb0c6");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("📱 " + who + ": somebody's spraying up " + where + " — stay clear.", "#9fb0c6");
   }
 
   // expose a manual trigger (debug / scripted events can force a spree on a ped)
@@ -2109,7 +2109,7 @@
     }
     _evicted++;
     if (CBZ.cityFeed && CBZ.player && Math.hypot(ped.pos.x - CBZ.player.pos.x, ped.pos.z - CBZ.player.pos.z) < 60) {
-      CBZ.cityFeed("🏚️ Evicted — another soul put out on the street.", "#9a8d7a");
+      CBZ.cityFlavor && CBZ.cityFlavor("🏚️ Evicted — another soul put out on the street.", "#9a8d7a");
     }
   }
 
