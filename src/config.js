@@ -469,4 +469,17 @@
   }
   CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource() }); };
   CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource() }); };
+
+  // ---- THE ONE QUALITY KNOB (owner rule: NO hardcoded content budgets). ----
+  // Every content system (decal pools, gore counts, rain density, LOD draw
+  // ranges, scenery scatter…) sizes itself through this instead of a magic
+  // constant. lo = the emergency tier-0 value, hi = the full-fat tier-4 value,
+  // linear in between. Reads the LIVE tier (core/quality.js keeps
+  // CBZ.qualityLevel in sync with the pause-menu perf/quality slider and the
+  // adaptive governor), so the slider is the single authority on how much the
+  // GPU is asked to draw — never a hardcoded number in some file.
+  CBZ.qScale = function (lo, hi) {
+    const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+    return lo + (hi - lo) * (Math.max(0, Math.min(4, q)) / 4);
+  };
 })();
