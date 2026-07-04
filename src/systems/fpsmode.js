@@ -957,7 +957,7 @@
         if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; }
       }
     };
-    if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); }   // same gun, city targets
+    if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); }   // same gun, city targets (wildlife are huntable too)
     else { scan(CBZ.guards); scan(CBZ.npcs); }
     // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());
@@ -1047,6 +1047,9 @@
   // CITY mode reuses this exact hitscan but routes the hit into the city's own
   // death/loot/crime systems (cops, gangs, wanted) instead of the prison AI.
   function cityGunHit(a, hit, w) {
+    // WILDLIFE: an animal routes into the hunting system (its own damage/skin
+    // path — never the human death/wanted/gore chain). See city/wildlife.js.
+    if (a.animal && CBZ.cityWildlifeHit) return CBZ.cityWildlifeHit(a, hit, w);
     // multiplayer target (remote player or synced puppet): authority is over the
     // wire — net code routes the damage and plays the local juice.
     if (a.netKind && CBZ.net && CBZ.net.localGunHit) return CBZ.net.localGunHit(a, hit, w);
