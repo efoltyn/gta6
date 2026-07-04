@@ -338,7 +338,7 @@
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=cityfix1"></script>
+<script src="src/systems/camera.js?v=scope1"></script>
 <script src="src/systems/physics.js?v=map1"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
@@ -366,7 +366,11 @@
 <script src="src/systems/state.js?v=gore1"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/touch.js?v=camera14"></script>
-<script src="src/systems/fpsmode.js?v=drop1"></script>
+<!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
+     per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
+     the keyboard + touch layers use. -->
+<script src="src/systems/gamepad.js?v=pad1"></script>
+<script src="src/systems/fpsmode.js?v=scope1"></script>
 <script src="src/systems/gunfx.js?v=shoot2"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -454,7 +458,11 @@
 <script src="src/city/playerair.js?v=air1"></script>
 <script src="src/city/playeraircraft.js?v=air1"></script>
 <script src="src/city/shops.js?v=city3"></script>
-<script src="src/city/gunstore.js?v=demo1"></script>
+<script src="src/city/gunstore.js?v=mods1"></script>
+<!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
+     gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
+<script src="src/city/gunmods.js?v=mods1"></script>
+<script src="src/city/scopeview.js?v=mods1"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
 <script src="src/city/careers.js?v=citysec1"></script>
 <script src="src/city/activities.js?v=hub1"></script>

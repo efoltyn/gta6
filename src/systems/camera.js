@@ -582,9 +582,13 @@
 
     // FOV kick at speed for a sense of pace — wider base + a bigger kick make
     // movement feel quicker without changing the actual move speed.
-    const targetFov = TP
+    let targetFov = TP
       ? (shoulder ? TP.FOV_AIM : TP.FOV + Math.min(spd / 6, 1) * 5)
       : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
+    // a fitted optic (city/gunmods.js + city/scopeview.js) overrides the aimed
+    // lens with its own magnification while you're holding aim on foot.
+    const scopeF = CBZ.cityScopeFov && CBZ.cityScopeFov();
+    if (scopeF) targetFov = scopeF;
     fov = smoothDamp(fov, targetFov, fovV, 0.18, fdt);
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   }
