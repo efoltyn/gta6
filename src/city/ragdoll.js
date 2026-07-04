@@ -60,11 +60,113 @@
     const dx = OFF[i * 3] - OFF[j * 3], dy = OFF[i * 3 + 1] - OFF[j * 3 + 1], dz = OFF[i * 3 + 2] - OFF[j * 3 + 2];
     STICKS.push(i, j, Math.sqrt(dx * dx + dy * dy + dz * dz), minOnly ? 1 : 0);
   }
+  // same one-sided (minOnly) mechanic as stick()'s head spacer, but with an
+  // EXPLICIT separation distance instead of the rest-pose gap — these are
+  // SELF-COLLISION guards (Jakobsen §"Self collision"), not anatomical spacers,
+  // so the minimum is sized off the point's own ground-contact radius (RAD),
+  // not off where the limb happens to sit standing at T-pose. (The relaxation
+  // loop below shaves every minOnly rest by *0.8 same as the head spacer, so
+  // the effective floor lands a hair under the raw radius sum — still plenty
+  // to stop a full pass-through, never tight enough to fight a normal stance.)
+  function stickMin(i, j, minDist) { STICKS.push(i, j, minDist, 1); }
   stick(1, 2); stick(3, 4); stick(1, 3); stick(2, 4); stick(1, 4); stick(2, 3); // rigid torso quad + braces
   stick(0, 1); stick(0, 2); stick(0, 3, 1); stick(0, 4, 1);                     // head hung off both shoulders
   stick(1, 5); stick(5, 7); stick(2, 6); stick(6, 8);                           // arms
   stick(3, 9); stick(9, 11); stick(4, 10); stick(10, 12);                       // legs
+  // SELF-COLLISION: knees/elbows can swing to either side of the sagittal
+  // midline as a body ragdolls (falls sideways, tumbles down stairs) — plain
+  // distance sticks never stop the left limb passing straight through the
+  // right one. A one-sided min-separation stick between the pair (same
+  // mechanic as the head spacer above) shoves them apart the instant they'd
+  // overlap, and does nothing otherwise, so it never fights the normal spread
+  // stance or a crossed-legs sit/slump.
+  stickMin(9, 10, RAD[9] + RAD[10]);   // knee vs knee
+  stickMin(5, 6, RAD[5] + RAD[6]);     // elbow vs elbow
   const NS = STICKS.length / 4;
+
+  // JOINT ANGLE LIMITS (Jakobsen §"Angular constraints"): plain distance
+  // sticks keep bone LENGTH honest but say nothing about bend DIRECTION, so a
+  // tumbling body can hyperextend a knee/elbow straight backward — the limb
+  // still measures the right length, it's just bent the wrong way, which
+  // reads as broken the instant the camera lingers on a corpse.
+  //
+  // [top, mid, end, axisA, axisB, minBend, maxBend] per hinge:
+  //   top/mid/end   — the 3 points of the 2-bone chain (hip/knee/foot etc).
+  //   axisA/axisB   — a live pair of points (opposite hip or shoulder) whose
+  //                   connecting line approximates the hinge's rotation axis
+  //                   (knees/elbows only really hinge side-to-side around the
+  //                   body's left-right line, never twist arbitrarily).
+  //   minBend/maxBend — signed bend range where 0 == dead straight. With THIS
+  //                   file's point order (top always the lower-index/"left"
+  //                   joint, axis always low-index→high-index) gravity/verlet
+  //                   sag on a falling body drives the bend NEGATIVE — checked
+  //                   empirically off both the dying-beat knee buckle (existing
+  //                   code above) and a gravity-drooped arm, both land negative
+  //                   — so minBend is the deep, permissive limit (legs/arms may
+  //                   fold a long way that direction) and maxBend is pinned
+  //                   just barely above 0: only a hair of positive slack so a
+  //                   dead-straight limb doesn't jitter at the boundary, but a
+  //                   real hyperextension (bend the OTHER way) gets pushed back.
+  const JOINTS = [
+    [3, 9, 11, 3, 4, -2.35, 0.06],   // left knee  (hinge axis = hip line)
+    [4, 10, 12, 3, 4, -2.35, 0.06],  // right knee
+    [1, 5, 7, 1, 2, -2.55, 0.06],    // left elbow (hinge axis = shoulder line)
+    [2, 6, 8, 1, 2, -2.55, 0.06],    // right elbow
+  ];
+  const NJ = JOINTS.length;
+  // scratch for the angle pass — zero per-call allocation, mirrors the file's
+  // existing _r/_u/_f/_a scratch-vector convention (kept as plain numbers
+  // here since this runs NJ*ITER*2 times per body per frame and a Vector3
+  // method-call chain would be needless overhead at that rate).
+  let _ux, _uy, _uz, _lx, _ly, _lz, _hx2, _hy2, _hz2;
+  // Soft angular correction: whenever the signed bend falls outside
+  // [minBend, maxBend], rotate the LOWER segment direction around the hinge
+  // axis by the excess angle to get where "end" *should* sit for a legal
+  // bend, then nudge the elbow/knee's MIDDLE point (never the fixed top/end
+  // anchors) a small fraction of the way to close that gap — moving mid
+  // opposite the would-be end displacement rotates the mid→end vector back
+  // toward legal without ever touching end directly. Blended at 35% per call
+  // (same soft-correction spirit as the stick pass above: several relaxation
+  // passes converge it, no single pass snaps it, so no velocity spike gets
+  // injected into the verlet integrator).
+  function clampJointAngle(p, top, mid, end, aA, aB, minBend, maxBend) {
+    const ti = top * 3, mi = mid * 3, ei = end * 3, aAi = aA * 3, aBi = aB * 3;
+    _ux = p[mi] - p[ti]; _uy = p[mi + 1] - p[ti + 1]; _uz = p[mi + 2] - p[ti + 2];
+    _lx = p[ei] - p[mi]; _ly = p[ei + 1] - p[mi + 1]; _lz = p[ei + 2] - p[mi + 2];
+    const ul = Math.sqrt(_ux * _ux + _uy * _uy + _uz * _uz) || 0.0001;
+    const ll = Math.sqrt(_lx * _lx + _ly * _ly + _lz * _lz) || 0.0001;
+    _ux /= ul; _uy /= ul; _uz /= ul;
+    _lx /= ll; _ly /= ll; _lz /= ll;
+    _hx2 = p[aBi] - p[aAi]; _hy2 = p[aBi + 1] - p[aAi + 1]; _hz2 = p[aBi + 2] - p[aAi + 2];
+    const hl = Math.sqrt(_hx2 * _hx2 + _hy2 * _hy2 + _hz2 * _hz2) || 0.0001;
+    _hx2 /= hl; _hy2 /= hl; _hz2 /= hl;
+    // signed bend around the hinge axis: 0 == dead straight. Gravity/verlet
+    // sag on a falling body drives this NEGATIVE for both knee and elbow with
+    // this file's point/axis order (see the JOINTS comment above) — so
+    // negative is the deep, anatomically-normal fold and positive is
+    // hyperextension.
+    const cx = _uy * _lz - _uz * _ly, cy = _uz * _lx - _ux * _lz, cz = _ux * _ly - _uy * _lx;
+    const sinA = cx * _hx2 + cy * _hy2 + cz * _hz2;
+    const cosA = _ux * _lx + _uy * _ly + _uz * _lz;
+    const bend = Math.atan2(sinA, cosA);
+    let target = bend;
+    if (bend < minBend) target = minBend; else if (bend > maxBend) target = maxBend;
+    if (target === bend) return;                     // inside the legal range — untouched
+    const dAngle = target - bend;
+    const c = Math.cos(dAngle), sn = Math.sin(dAngle);
+    // Rodrigues' rotation of the (unit) lower-segment direction around the
+    // (unit) hinge axis by dAngle — l' = l*cosθ + (h×l)*sinθ + h*(h·l)*(1-cosθ)
+    const hxl_x = _hy2 * _lz - _hz2 * _ly, hxl_y = _hz2 * _lx - _hx2 * _lz, hxl_z = _hx2 * _ly - _hy2 * _lx;
+    const hdl = _hx2 * _lx + _hy2 * _ly + _hz2 * _lz;
+    const lpx = _lx * c + hxl_x * sn + _hx2 * hdl * (1 - c);
+    const lpy = _ly * c + hxl_y * sn + _hy2 * hdl * (1 - c);
+    const lpz = _lz * c + hxl_z * sn + _hz2 * hdl * (1 - c);
+    // where "end" would need to be for that legal bend, holding mid fixed —
+    // then nudge MID by the opposite (blended) delta so the mid→end vector
+    // rotates toward legal without moving the end/top anchors this pass.
+    const k = (0.35 * ll);
+    p[mi] -= (lpx - _lx) * k; p[mi + 1] -= (lpy - _ly) * k; p[mi + 2] -= (lpz - _lz) * k;
+  }
 
   function makeSlot(idx) {
     return {
@@ -333,6 +435,13 @@
           dx *= k; dy *= k; dz *= k;
           p[i] -= dx; p[i + 1] -= dy; p[i + 2] -= dz;
           p[j] += dx; p[j + 1] += dy; p[j + 2] += dz;
+        }
+        // knee/elbow angle limits — same relaxation pass, same soft-blend
+        // philosophy as the sticks above, just correcting bend DIRECTION
+        // instead of bone LENGTH (see clampJointAngle's header comment).
+        for (let jn = 0; jn < NJ; jn++) {
+          const J = JOINTS[jn];
+          clampJointAngle(p, J[0], J[1], J[2], J[3], J[4], J[5], J[6]);
         }
       }
       // ground: clamp + friction + a whisper of bounce

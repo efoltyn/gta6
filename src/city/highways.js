@@ -17,6 +17,16 @@
    Deterministic: no global rng — jitter (if any) comes from opts.rng, the
    caller's seeded fn. Headless-safe: no <canvas> → flat coloured deck.
 
+   TERRAIN-FOLLOWING DECKS (opts.heightAt): optional per-vertex height sample
+   fn(x,z)->y (callers pass CBZ.terrainHeight). When supplied, the deck mesh,
+   lane paint, curb colliders, guardrail posts and light poles all sample it
+   instead of riding one constant deckY — so a long causeway crossing the
+   far-backdrop relief (world/terrain.js, non-flat near the map rim) reads as
+   grade-following instead of a flat slab floating over/clipping through
+   hills. Omit it (default) for byte-identical flat decks; terrainHeight is
+   itself exactly 0 over the in-grid mainland's flat contract, so even a
+   caller that DOES pass it sees zero change there.
+
    Returns { group, deckTop(x,z)->y, footprint:{minX,maxX,minZ,maxZ} }.
 ============================================================ */
 (function () {
@@ -34,6 +44,97 @@
     dirt:     { deck: "#6b5a42", edge: "#5a4b37", rumble: 0x7a6850 }
   };
 
+  // ============================================================
+  //  CATENARY SOLVER (ported by hand from the dulnan/catenary-curve algorithm
+  //  — a small Newton-Raphson root-find, no library needed). A real hanging
+  //  cable between two anchors settles into y = a*cosh((x-offsetX)/a) +
+  //  offsetY; `a` controls how tight/saggy the curve reads and has NO
+  //  closed-form solution from (span, drop, desired sag) alone, so we solve
+  //  for it iteratively. WHY here instead of a per-frame physics cable: the
+  //  bridge's main cable is static set-dressing — solving once at build time
+  //  and baking the sampled curve into a TubeGeometry costs zero runtime,
+  //  unlike an actual verlet rope would.
+  //
+  //  Parameterized by SAG (metres the lowest point of the curve droops below
+  //  the straight A→B chord) rather than raw cable length/slack: the original
+  //  dulnan algorithm solves from cable length, but that formulation needs
+  //  `cableLen - straightDist` (a tiny difference of two near-equal large
+  //  numbers for a realistically-taut suspension cable) and loses precision
+  //  catastrophically right where suspension bridges actually live — sag
+  //  ratios of a few percent. Sag is also the more useful knob for an artist
+  //  call-site anyway ("droop 6 metres") and starting Newton-Raphson from the
+  //  standard shallow-cable parabolic approximation (a≈dx²/8·sag) converges
+  //  in a handful of iterations with no cancellation error.
+  //
+  //  solveCatenary(dx, dy, sag) -> {a, offsetX, offsetY} describing
+  //  y(x) = a*cosh((x-offsetX)/a) + offsetY for x in [0,dx], passing through
+  //  (0,0) and (dx,dy), whose lowest point sits `sag` metres below the
+  //  straight chord connecting those two endpoints. Never throws: a
+  //  degenerate/non-converging input falls back to the parabolic estimate
+  //  for `a` rather than propagate a NaN into the caller's geometry.
+  // ============================================================
+  function solveCatenary(dx, dy, sag) {
+    sag = Math.max(0.05, sag);
+    if (dx <= 1e-4) return { a: 1e6, offsetX: dx / 2, offsetY: -1e6 };
+    // vertex sag relative to the straight chord, for a trial `a` — the exact
+    // (non-approximated) quantity Newton-Raphson drives to zero below.
+    function vertexSag(a) {
+      const half = dx / 2;
+      const sh = Math.sinh(half / a) || 1e-12;
+      const offX = half - a * Math.asinh(dy / (2 * a * sh));
+      const offY = -a * Math.cosh(-offX / a);
+      const chordY = dy * (offX / dx);           // straight chord's height at x=offX
+      return chordY - (offY + a);                // chord height minus the curve's vertex height
+    }
+    // shallow-cable parabolic approximation (exact in the small-sag limit) —
+    // a well-conditioned starting guess with no large-number cancellation.
+    let a = (dx * dx) / (8 * sag);
+    for (let i = 0; i < 40; i++) {
+      const h = Math.max(a * 1e-4, 1e-6);
+      const g = vertexSag(a) - sag;
+      const gPrime = (vertexSag(a + h) - sag - g) / h;
+      if (!isFinite(g) || Math.abs(gPrime) < 1e-9) break;
+      let next = a - g / gPrime;
+      if (!isFinite(next) || next <= 0) next = a / 2;    // keep it in-domain
+      if (Math.abs(next - a) < 1e-4) { a = next; break; }
+      a = next;
+    }
+    if (!isFinite(a) || a <= 0) a = (dx * dx) / (8 * sag);   // non-convergent — safe fallback
+    const half = dx / 2;
+    const sh = Math.sinh(half / a) || 1e-12;
+    const offX = half - a * Math.asinh(dy / (2 * a * sh));
+    const offY = -a * Math.cosh(-offX / a);
+    return { a, offsetX: offX, offsetY: offY };
+  }
+  // sample nPts points along the solved catenary from anchor A to anchor B
+  // (world-space, A/B are {x,y,z}); returns an array of THREE.Vector3 in the
+  // curve's own local sag plane mapped back into world XYZ. `sag` is metres
+  // of droop below the straight A→B chord at the curve's lowest point.
+  function catenaryPoints(A, B, sag, nPts) {
+    const dx = Math.hypot(B.x - A.x, B.z - A.z);   // horizontal span (XZ plane)
+    const dy = B.y - A.y;
+    const { a, offsetX, offsetY } = solveCatenary(dx, dy, sag);
+    const ux = dx > 1e-6 ? (B.x - A.x) / dx : 0, uz = dx > 1e-6 ? (B.z - A.z) / dx : 0;
+    const pts = [];
+    for (let i = 0; i <= nPts; i++) {
+      const t = i / nPts, x = t * dx;
+      const y = a * Math.cosh((x - offsetX) / a) + offsetY;
+      pts.push(new THREE.Vector3(A.x + ux * x, A.y + y, A.z + uz * x));
+    }
+    return pts;
+  }
+
+  // seeded LCG for the grain speckle below — FIX: this used to call
+  // Math.random() directly, so the asphalt texture's grain pattern differed
+  // every reload (determinism contract violation). Seeded per theme deck
+  // color so each theme still gets its own fixed, reproducible speckle.
+  function grainRng(seedStr) {
+    let s = 0;
+    for (let i = 0; i < seedStr.length; i++) s = (s * 31 + seedStr.charCodeAt(i)) | 0;
+    s = (s ^ 0x9e3779b9) & 0x7fffffff || 0x2f6e2b1;
+    return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  }
+
   // SMALL TILING ASPHALT texture (no baked lane lines). WHY the rewrite: lane
   // lines baked into a 128px-wide canvas and stretched over a 24m × up-to-286m
   // ribbon MIP-COLLAPSED at grazing angle into a broken, shimmering stripe that
@@ -48,10 +149,11 @@
     const g = cv.getContext("2d"); if (!g) return null;
     g.fillStyle = theme.deck; g.fillRect(0, 0, S, S);
     // faint grain so the tarmac reads as a real surface, not a flat slab
+    const rng = grainRng(theme.deck + "|" + theme.edge);
     for (let i = 0; i < 800; i++) {
-      const lvl = (Math.random() - 0.5) * 0.12;
+      const lvl = (rng() - 0.5) * 0.12;
       g.fillStyle = (lvl >= 0 ? "rgba(255,255,255," : "rgba(0,0,0,") + Math.abs(lvl).toFixed(3) + ")";
-      g.fillRect((Math.random() * S) | 0, (Math.random() * S) | 0, 1, 1);
+      g.fillRect((rng() * S) | 0, (rng() * S) | 0, 1, 1);
     }
     const tex = new THREE.CanvasTexture(cv);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;     // tiles across AND along
@@ -65,13 +167,20 @@
   // how long the road — every dash/line accumulates into shared arrays then builds
   // once (the world.js paintMesh discipline). Lane offsets match the lanes the
   // traffic AI drives (±k·laneW dividers, ±(width/2−0.4) edge lines).
-  function buildLanePaint(path, width, lanesPerDir, laneW, deckY, median) {
-    const white = [], yellow = [], y = deckY + 0.015;
+  function buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt) {
+    const white = [], yellow = [], yOff = 0.015;
+    // grade-following: sample the same terrain height the deck used, plus the
+    // fixed clearance above it, so painted lines never float off / sink into
+    // a sloped deck. Flat callers (heightAt omitted) keep the old constant y.
+    const hAt = typeof heightAt === "function"
+      ? function (x, z) { return heightAt(x, z) + yOff; }
+      : function () { return deckY + yOff; };
     function quad(arr, ax, az, bx, bz, dx, dz, off, hw) {
       const px = -dz, pz = dx, oL = off - hw, oR = off + hw;        // unit perpendicular
       const aLx = ax + px * oL, aLz = az + pz * oL, aRx = ax + px * oR, aRz = az + pz * oR;
       const bLx = bx + px * oL, bLz = bz + pz * oL, bRx = bx + px * oR, bRz = bz + pz * oR;
-      arr.push(aLx, y, aLz, aRx, y, aRz, bRx, y, bRz, aLx, y, aLz, bRx, y, bRz, bLx, y, bLz);
+      const aLy = hAt(aLx, aLz), aRy = hAt(aRx, aRz), bLy = hAt(bLx, bLz), bRy = hAt(bRx, bRz);
+      arr.push(aLx, aLy, aLz, aRx, aRy, aRz, bRx, bRy, bRz, aLx, aLy, aLz, bRx, bRy, bRz, bLx, bLy, bLz);
     }
     function solid(arr, off, hw) {
       for (let i = 0; i < path.length - 1; i++) {
@@ -106,10 +215,26 @@
     return out;
   }
 
-  // turn the centreline polyline into per-segment quads (a flat ribbon at y),
-  // accumulating positions/uvs into a merged BufferGeometry. UV: u across
-  // (0..1), v along (metres → texture repeat handled by tex.repeat).
-  function buildDeck(path, width, y, mat, vRepeatPerM) {
+  // turn the centreline polyline into per-segment quads (a ribbon at y, or
+  // grade-following if heightAt is supplied), accumulating positions/uvs into
+  // a merged BufferGeometry. UV: u across (0..1), v along (metres → texture
+  // repeat handled by tex.repeat).
+  //
+  // TERRAIN-FOLLOWING DECKS (heightAt): macro highways/causeways crossing the
+  // far backdrop relief (world/terrain.js — non-flat near the map rim) used
+  // to sit at one CONSTANT y per call, so a long causeway floated above or
+  // clipped into the rising ground it crossed. `heightAt(x,z)` is an OPTIONAL
+  // per-vertex sampling callback (the caller passes CBZ.terrainHeight, already
+  // offset by the caller's deckY so the deck still rides its usual clearance
+  // above grade); when present each of the 4 quad corners is displaced to
+  // heightAt(x,z) instead of the flat constant `y`. This is purely additive:
+  // every existing caller that omits heightAt gets byte-identical flat decks
+  // (heightAt defaults to "always return the constant y"), so the in-grid
+  // mainland — which is dead flat by contract — is completely unaffected
+  // (terrainHeight is itself exactly 0 there, so even a caller that DID pass
+  // it would see no change inside the flat region).
+  function buildDeck(path, width, y, mat, vRepeatPerM, heightAt) {
+    const hAt = typeof heightAt === "function" ? heightAt : function () { return y; };
     const pos = [], uv = [], nrm = [];
     let vAcc = 0;
     for (let i = 0; i < path.length - 1; i++) {
@@ -119,16 +244,19 @@
       dx /= segLen; dz /= segLen;
       const px = -dz * width / 2, pz = dx * width / 2;   // half-width perpendicular
       const v0 = vAcc, v1 = vAcc + segLen * vRepeatPerM; vAcc = v1;
-      // corners: left/right at a and b
-      const aL = [a.x - px, a.z - pz], aR = [a.x + px, a.z + pz];
-      const bL = [b.x - px, b.z - pz], bR = [b.x + px, b.z + pz];
+      // corners: left/right at a and b, each sampled for its own grade height
+      const aLx = a.x - px, aLz = a.z - pz, aRx = a.x + px, aRz = a.z + pz;
+      const bLx = b.x - px, bLz = b.z - pz, bRx = b.x + px, bRz = b.z + pz;
+      const aLy = hAt(aLx, aLz), aRy = hAt(aRx, aRz), bLy = hAt(bLx, bLz), bRy = hAt(bRx, bRz);
+      const aL = [aLx, aLy, aLz], aR = [aRx, aRy, aRz];
+      const bL = [bLx, bLy, bLz], bR = [bRx, bRy, bRz];
       const quad = [
         [aL, 0, v0], [aR, 1, v0], [bR, 1, v1],
         [aL, 0, v0], [bR, 1, v1], [bL, 0, v1]
       ];
       for (const c of quad) {
-        pos.push(c[0][0], y, c[0][1]);
-        nrm.push(0, 1, 0);
+        pos.push(c[0][0], c[0][1], c[0][2]);
+        nrm.push(0, 1, 0);     // placeholder; recomputed below when grade-following
         uv.push(c[1], c[2]);
       }
     }
@@ -136,9 +264,133 @@
     geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(nrm), 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(uv), 2));
+    if (heightAt) geo.computeVertexNormals();   // grade-following: real per-face slope lighting
     const m = new THREE.Mesh(geo, mat);
     m.receiveShadow = true; m.matrixAutoUpdate = false;
     return { mesh: m, length: vAcc / vRepeatPerM };
+  }
+
+  // ============================================================
+  //  SUSPENSION-BRIDGE DRESSING (ONE span only — the airport causeway, the
+  //  longest water-gap crossing in the city). Purely a VISUAL layer added
+  //  ON TOP of the already-built flat deck above: two towers, a sagging main
+  //  cable (real catenary curve via solveCatenary/catenaryPoints) rendered as
+  //  a TubeGeometry along a CatmullRomCurve3 of sampled points, plus straight
+  //  TubeGeometry hanger cables dropping from the main cable down to the deck
+  //  at regular intervals. NOTHING here touches deckTop/colliders/city.roads —
+  //  a car still drives the identical flat deck buildDeck() laid down earlier;
+  //  this only adds geometry above/beside it. Cheap: 2 tower groups (a
+  //  handful of merged-scale boxes each), 2 cable tubes (one per side), and
+  //  one small InstancedMesh for every hanger — a few draw calls total for
+  //  the whole span, not per-hanger meshes.
+  // ============================================================
+  function buildSuspensionDressing(group, path, width, deckY, gradeAt) {
+    if (!THREE.TubeGeometry || !THREE.CatmullRomCurve3) return;   // headless/minimal THREE stub — skip gracefully
+    // the span runs along path[0]->path[1] (the fingerprinted call is a
+    // straight 2-point causeway); towers stand 1/5 of the way in from each
+    // end so the cable's central sag reads clearly over the main gap, with a
+    // shorter "back-stay" segment from each tower down to its own deck anchor.
+    const a0 = path[0], a1 = path[path.length - 1];
+    let dx = a1.x - a0.x, dz = a1.z - a0.z;
+    const span = Math.hypot(dx, dz) || 1e-3;
+    dx /= span; dz /= span;
+    const px = -dz, pz = dx;                    // unit perpendicular (across the deck)
+    const towerT = span * 0.18;                 // towers stand 18% of the way in from each end
+    const towerY = deckY + 26;                   // tower deck-top height (tall enough to read over the gap)
+    const railOff = width / 2 - 1.2;             // cables run just inboard of the guardrail line
+
+    const towerMat = new THREE.MeshLambertMaterial({ color: 0x8b929c });
+    const cableMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+    const hangerMat = new THREE.MeshLambertMaterial({ color: 0x3a3e46 });
+
+    function towerAt(t) {
+      const bx = a0.x + dx * t, bz = a0.z + dz * t;
+      return { x: bx, z: bz, y: gradeAt(bx, bz) };
+    }
+    const towers = [towerAt(towerT), towerAt(span - towerT)];
+
+    // ---- two A-frame towers straddling the deck (one leg each side + a
+    //      crossbeam near the top, like a real suspension tower silhouette) ----
+    towers.forEach((tw) => {
+      const tg = new THREE.Group();
+      tg.position.set(tw.x, tw.y, tw.z);
+      const yaw = Math.atan2(dx, dz);
+      tg.rotation.y = yaw;
+      const legH = towerY - tw.y;
+      const legGeo = new THREE.BoxGeometry(1.1, legH, 1.1);
+      for (const s of [-1, 1]) {
+        const leg = new THREE.Mesh(legGeo, towerMat);
+        leg.position.set(s * railOff, legH / 2, 0);
+        leg.castShadow = true;
+        tg.add(leg);
+      }
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(railOff * 2 + 1.1, 1.0, 1.0), towerMat);
+      beam.position.set(0, legH - 3.0, 0);
+      tg.add(beam);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(railOff * 2 + 1.4, 0.8, 1.4), towerMat);
+      cap.position.set(0, legH + 0.4, 0);
+      tg.add(cap);
+      group.add(tg);
+    });
+
+    // ---- main cable per side: three catenary spans (back-stay/main/back-stay)
+    //      strung tower-to-tower over deck anchors, sampled into one smooth
+    //      CatmullRomCurve3 per side and extruded as a single TubeGeometry ----
+    const hangerSpots = [];   // {x,y,z, hx,hy,hz (deck point)} accumulated across both sides
+    [-1, 1].forEach((s) => {
+      const offX = px * s * railOff, offZ = pz * s * railOff;
+      const anchorA = { x: a0.x + offX, y: gradeAt(a0.x, a0.z) + 1.2, z: a0.z + offZ };
+      const tA = { x: towers[0].x + offX, y: towerY, z: towers[0].z + offZ };
+      const tB = { x: towers[1].x + offX, y: towerY, z: towers[1].z + offZ };
+      const anchorB = { x: a1.x + offX, y: gradeAt(a1.x, a1.z) + 1.2, z: a1.z + offZ };
+
+      // sample each of the 3 sub-spans with its own catenary SAG in metres
+      // (Newton-solved `a` per span — a real hanging cable, not a hand-tuned
+      // bezier), stitched into one point list for the smooth CatmullRomCurve3
+      // below. A real suspension bridge's main cable sags gently (roughly
+      // span/9..span/11 — the classic engineering ratio) while the back-stay
+      // from tower down to the low deck anchor is short and much straighter.
+      const mainSag = Math.hypot(tB.x - tA.x, tB.z - tA.z) / 10;
+      const backSag = Math.max(0.3, Math.hypot(tA.x - anchorA.x, tA.z - anchorA.z) / 30);
+      const segPts = [];
+      [[anchorA, tA, backSag], [tA, tB, mainSag], [tB, anchorB, backSag]].forEach(([A, B, sag], si) => {
+        const pts = catenaryPoints(A, B, sag, 14);
+        for (let i = si === 0 ? 0 : 1; i < pts.length; i++) segPts.push(pts[i]);   // skip dup joint point
+      });
+      const curve = new THREE.CatmullRomCurve3(segPts);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.22, 6, false), cableMat);
+      tube.castShadow = false;
+      group.add(tube);
+
+      // ---- hangers: vertical drops from the MAIN span (tA..tB, the sagging
+      //      part) down to the existing deck, every ~10m. Sampled straight off
+      //      the same segPts (the main-span slice) rather than re-solving. ----
+      const mainSpan = catenaryPoints(tA, tB, mainSag, 20);
+      for (let i = 1; i < mainSpan.length - 1; i += 2) {   // every other sample ≈ 10 spots
+        const p = mainSpan[i];
+        const deckY2 = gradeAt(p.x, p.z);
+        if (p.y - deckY2 < 1.0) continue;   // near the towers the cable is nearly AT deck height — skip degenerate hangers
+        hangerSpots.push({ x: p.x, y: p.y, z: p.z, dy: deckY2 + 0.3 });
+      }
+    });
+
+    // one InstancedMesh for every hanger cable (thin vertical tube, scaled per
+    // instance to its own drop length) — a single draw call no matter how many
+    // hangers the span has.
+    if (hangerSpots.length) {
+      const hangGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 5);
+      const him = new THREE.InstancedMesh(hangGeo, hangerMat, hangerSpots.length);
+      const m4 = new THREE.Matrix4(), pos = new THREE.Vector3(), q0 = new THREE.Quaternion(), scl = new THREE.Vector3();
+      hangerSpots.forEach((hs, i) => {
+        const drop = Math.max(0.1, hs.y - hs.dy);
+        pos.set(hs.x, (hs.y + hs.dy) / 2, hs.z);
+        scl.set(1, drop, 1);
+        m4.compose(pos, q0, scl);
+        him.setMatrixAt(i, m4);
+      });
+      him.instanceMatrix.needsUpdate = true; him.castShadow = false;
+      group.add(him);
+    }
   }
 
   CBZ.buildHighway = function (root, opts) {
@@ -150,8 +402,24 @@
     const elevated = !!opts.elevated;
     const theme = THEME[opts.theme] || THEME.asphalt;
     const median = !!opts.median;
-    const rng = typeof opts.rng === "function" ? opts.rng : Math.random;
+    // NOTE: opts.rng (the caller's seeded fn) is accepted for API compat /
+    // future jitter use, but nothing in this function currently consumes it
+    // — removed the old `|| Math.random` fallback (dead code that was also
+    // a determinism-contract violation) rather than leave an unused random
+    // source lying around.
     const deckY = elevated ? 2.5 : 0.05;
+
+    // ---- TERRAIN-FOLLOWING GRADE (optional): long causeways cross genuinely
+    //      non-flat world/terrain.js relief near the map rim. opts.heightAt
+    //      (callers pass CBZ.terrainHeight) lets the deck ride that grade
+    //      instead of sitting at one constant y. Over the flat in-grid
+    //      mainland terrainHeight is EXACTLY 0 (terrain.js's contract), so
+    //      gradeAt collapses to the same constant deckY there — zero change
+    //      to anything load-bearing for collision/AI/placement. Omitted
+    //      entirely (the default), every existing caller is byte-identical.
+    const heightAt = typeof opts.heightAt === "function"
+      ? function (x, z) { return opts.heightAt(x, z) + deckY; }
+      : null;
 
     const group = new THREE.Group();
     (root || CBZ.scene).add(group);
@@ -167,10 +435,14 @@
     if (tex) { tex.repeat.set(width / 8, 1); deckMat = new THREE.MeshLambertMaterial({ map: tex }); }
     else deckMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(theme.deck) });
     const vRepeatPerM = tex ? (1 / 8) : 0.0625;        // tile every ~8m along (U tiles via tex.repeat.x)
-    const deck = buildDeck(path, width, deckY, deckMat, vRepeatPerM);
+    const deck = buildDeck(path, width, deckY, deckMat, vRepeatPerM, heightAt);
     group.add(deck.mesh);
-    const lanePaint = buildLanePaint(path, width, lanesPerDir, laneW, deckY, median);
+    const lanePaint = buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt);
     for (let i = 0; i < lanePaint.length; i++) group.add(lanePaint[i]);
+    // per-point grade sample used by every prop below (colliders/rails/poles/
+    // pylons/ramps) so the WHOLE highway — not just the deck mesh — rises and
+    // falls together; flat callers (heightAt null) get the old constant deckY.
+    function gradeAt(x, z) { return heightAt ? heightAt(x, z) : deckY; }
 
     // footprint (axis-aligned bounds over all corners)
     let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
@@ -208,10 +480,13 @@
         for (let s = -1; s <= 1; s += 2) {
           const x0 = a.x + s * px * hw, z0 = a.z + s * pz * hw;
           const x1 = b.x + s * px * hw, z1 = b.z + s * pz * hw;
+          // grade-following: sample at the segment's own deck height so the
+          // fall-guard band tracks a sloped causeway instead of a flat layer.
+          const segY = Math.max(gradeAt(x0, z0), gradeAt(x1, z1));
           CBZ.colliders.push({
             minX: Math.min(x0, x1) - 0.25, maxX: Math.max(x0, x1) + 0.25,
             minZ: Math.min(z0, z1) - 0.25, maxZ: Math.max(z0, z1) + 0.25,
-            y0: deckY, y1: deckY + (opts.guardrail ? 1.1 : 0.4)
+            y0: segY, y1: segY + (opts.guardrail ? 1.1 : 0.4)
           });
         }
       }
@@ -234,7 +509,7 @@
         const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
         const v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
         spots.forEach((s, i) => {
-          e.set(0, s.h, 0); q.setFromEuler(e); v.set(s.x, deckY + 0.55, s.z);
+          e.set(0, s.h, 0); q.setFromEuler(e); v.set(s.x, gradeAt(s.x, s.z) + 0.55, s.z);
           m4.compose(v, q, one); im.setMatrixAt(i, m4);
         });
         im.instanceMatrix.needsUpdate = true; im.castShadow = false;
@@ -259,8 +534,9 @@
         const him = new THREE.InstancedMesh(headGeo, headMat, poles.length);
         const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), q0 = new THREE.Quaternion();
         poles.forEach((s, i) => {
-          p.set(s.x, deckY + 3.5, s.z); m4.compose(p, q0, one); pim.setMatrixAt(i, m4);
-          p.set(s.x, deckY + 7, s.z); m4.compose(p, q0, one); him.setMatrixAt(i, m4);
+          const gy = gradeAt(s.x, s.z);
+          p.set(s.x, gy + 3.5, s.z); m4.compose(p, q0, one); pim.setMatrixAt(i, m4);
+          p.set(s.x, gy + 7, s.z); m4.compose(p, q0, one); him.setMatrixAt(i, m4);
         });
         pim.instanceMatrix.needsUpdate = true; him.instanceMatrix.needsUpdate = true;
         pim.castShadow = false; him.castShadow = false;
@@ -296,6 +572,24 @@
         ramp.position.set(end.x + dx * rampLen / 2, deckY / 2, end.z + dz * rampLen / 2);
         ramp.receiveShadow = true; group.add(ramp);
       });
+    }
+
+    // ---- SUSPENSION-BRIDGE VISUAL UPGRADE (ONE span only): the airport
+    //      causeway (mainland ↔ airport island, straight 2-point path over
+    //      water at x≈0, z -566..-280) is the longest, most visually
+    //      prominent gap any highway crosses — a flat deck floating over open
+    //      water reads as unfinished. Fingerprinted (not opt-in'd through the
+    //      caller, since island_airport.js is out of this task's file list)
+    //      by matching this exact call's geometry: a straight, non-elevated,
+    //      width-24 span whose length lands in the causeway's known ~286m
+    //      range. Any OTHER buildHighway call (every biome/other island
+    //      causeway, the desert arterial, etc.) simply doesn't match and is
+    //      byte-identical to before — this never rewrites the deck/collision
+    //      machinery above, only adds cable/tower dressing over it.
+    if (!elevated && path.length === 2 && Math.abs(width - 24) < 0.01 &&
+        Math.abs(path[0].x - path[1].x) < 0.5 && totLen > 280 && totLen < 292) {
+      try { buildSuspensionDressing(group, path, width, deckY, gradeAt); }
+      catch (e) { /* pure visual dressing — never sink the highway build over it */ }
     }
 
     // ---- HWY-3: REGISTER DRIVABLE ROAD SEGMENTS (the WHY: a highway you can
@@ -336,7 +630,7 @@
 
     const rec = {
       group,
-      deckTop: function () { return deckY; },           // flat deck → constant height
+      deckTop: function (x, z) { return gradeAt(x, z); },  // grade-following if heightAt was supplied, else constant deckY
       footprint: { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ },
       length: totLen, deckY: deckY, width: width,
       roads: builtRoads                                  // HWY-3: the drivable segs this highway registered
@@ -419,10 +713,15 @@
     // overland route, so traffic actually flows out to the dunes town/outposts.
     if (!city._arterialDesertBuilt && CBZ.buildHighway) {
       city._arterialDesertBuilt = true;
+      // heightAt: grade-follow world/terrain.js relief — this arterial runs
+      // entirely inside the dead-flat mainland today (terrainHeight==0 along
+      // its whole path) so this is a free, safe hook; it only starts reading
+      // as a grade if the route is ever extended nearer the backdrop rim.
       CBZ.buildHighway(root, {
         path: [{ x: 158, z: -700 }, { x: 670, z: -700 }, { x: 670, z: -20 }],
         width: 18, lanesPerDir: 2, laneW: 3.6, lights: true, guardrail: true,
-        theme: "asphalt", registerRoads: true, cityRoads: roads
+        theme: "asphalt", registerRoads: true, cityRoads: roads,
+        heightAt: CBZ.terrainHeight,
       });
     }
   };

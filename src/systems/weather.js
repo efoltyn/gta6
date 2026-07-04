@@ -161,29 +161,47 @@
   const _fogTmp = new THREE.Color();
   const FOG_DARK = 0x2a3340; // cool storm-grey we lerp toward
 
-  // ---- lightning ------------------------------------------------------
+  // ---- lightning (Technique 2: storm flashes) --------------------------
+  // Full-scene spike = BOTH light objects lights.js exposes: hemi (sky/
+  // ground ambient fill) AND sun (the shadow-casting key light) get the
+  // same additive bump, so a bolt reads on lit AND shadowed faces alike,
+  // not just as a wash over the ambient term. Both are feature-detected —
+  // lights.js always makes them in the real build, but this file must
+  // never throw if a future headless/menu context is missing one.
+  // Composes with daynight.js (order 2) instead of fighting it: daynight
+  // rewrites hemi/sun.intensity every frame BEFORE weather ticks (order
+  // 90), so "baseline" is re-sampled every frame a flash isn't active —
+  // we only ever ADD on top of whatever daynight/city-mode last wrote.
   const hemi = CBZ.hemi || null;
+  const sunL = CBZ.sun || null;
   let baseHemi = hemi ? hemi.intensity : 0.4;
-  let flash = 0;            // current extra hemi intensity from lightning
+  let baseSun = sunL ? sunL.intensity : 1.0;
+  let flash = 0;            // current extra intensity from lightning
   let flashT = 0;          // remaining flash time
   let strikeCD = 5;        // cooldown before next possible strike
   let pendingThunder = 0;  // seconds until thunder follows the flash (delay)
 
   function tryLightning(dt) {
-    if (!hemi) return;
+    if (!hemi && !sunL) return;
     // remember the (daynight-driven) baseline so we add on top of it.
-    if (flashT <= 0) baseHemi = hemi.intensity;
+    if (flashT <= 0) {
+      if (hemi) baseHemi = hemi.intensity;
+      if (sunL) baseSun = sunL.intensity;
+    }
 
     strikeCD -= dt;
     const night = !!(CBZ.sun && CBZ.sun.position.y < 0);
-    // strikes need: night + meaningful rain + cooldown elapsed
-    if (night && intensity > 0.45 && strikeCD <= 0) {
+    // STORM gate: night + storm-grade rain (rollWeather's "heavy storm"
+    // branch targets 0.7+; 0.6 catches a storm easing in/out too) + a
+    // deterministic (LCG, not Math.random) low-frequency roll + cooldown.
+    const STORM = 0.6;
+    if (night && intensity > STORM && strikeCD <= 0) {
       // chance scales with how hard it's pouring
-      const p = (intensity - 0.45) * 0.9 * dt; // per-frame probability
+      const p = (intensity - STORM) * 0.7 * dt; // per-frame probability — kept low so strikes stay rare
       if (rng() < p) {
         flash = 0.9 + rng() * 1.3;            // brightness of the bolt
         flashT = 0.10 + rng() * 0.10;         // very brief
-        strikeCD = 2.5 + rng() * 6;           // space strikes out
+        strikeCD = 6 + rng() * 12;            // space strikes out — a storm has a handful, not a strobe
         // thunder arrives after a short, distance-y delay
         pendingThunder = 0.25 + rng() * 1.6;
         // double-flicker on big strikes
@@ -196,10 +214,13 @@
       flashT -= dt;
       // flicker so it reads like a real bolt rather than a fade
       const flick = 0.6 + 0.4 * Math.abs(Math.sin(CBZ.now * 0.05));
-      hemi.intensity = baseHemi + flash * flick * Math.max(0, flashT) * 6;
+      const bump = flash * flick * Math.max(0, flashT) * 6;
+      if (hemi) hemi.intensity = baseHemi + bump;
+      if (sunL) sunL.intensity = baseSun + bump * 0.7; // sun bump a touch softer — it's already the brighter light
     }
 
-    // delayed recorded thunder after the visible flash
+    // delayed recorded thunder after the visible flash — a sfx cue kept
+    // separate from the flash itself (thunder always trails the light).
     if (pendingThunder > 0) {
       pendingThunder -= dt;
       if (pendingThunder <= 0 && CBZ.sfx) CBZ.sfx("thunder");

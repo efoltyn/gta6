@@ -116,15 +116,23 @@
     // OFFICE STAFF — a cluster outside the entrance; headcount scales with the
     // managing company's real-estate portfolio (a property empire keeps more
     // people on site). These figures are that company's employees.
+    //
+    // ONE of them isn't decoration: companies.js stages a REAL, killable owner
+    // ped (CBZ.cityMakePed, added to CBZ.cityPeds) right outside every
+    // company's HQ door — see companies.js's spawnOwner(). At the HQ lot we
+    // shave one body off the decorative cluster so the headcount reads right
+    // (the owner stands in the spot a decorative figure would have), instead
+    // of double-counting a person who's now a real, targetable NPC.
     for (const lot of offices) {
       if (count >= CAP) break;
       const co = companyOf(lot);
+      const isHQ = !!(co && co.hq === lot && co.owner);
       const d = lot.building.door;
       const nx = d.nx != null ? d.nx : 0, nz = d.nz != null ? d.nz : 1;
       const nl = Math.hypot(nx, nz) || 1, ux = nx / nl, uz = nz / nl;
       const port = co ? co.lots.length : 1;
-      const n = 2 + Math.min(5, Math.floor(port / 2));
-      let placed = 0;
+      const n = Math.max(0, 2 + Math.min(5, Math.floor(port / 2)) - (isHQ ? 1 : 0));
+      let placed = isHQ ? 1 : 0;     // the real owner ped counts toward this lot's headcount too
       for (let j = 0; j < n && count < CAP; j++) {
         const fx = d.x + ux * (1.4 + Math.random() * 2.2) + (-uz) * (Math.random() - 0.5) * 3.0;
         const fz = d.z + uz * (1.4 + Math.random() * 2.2) + (ux) * (Math.random() - 0.5) * 3.0;

@@ -4,6 +4,12 @@
    any GPU. Strong devices get full-res crisp shadows; weak ones step
    down quietly instead of dropping frames, and step back up when
    there's headroom — nothing is permanently nerfed.
+
+   CBZ.qualityLocked (default false) lets src/systems/settings.js pin a
+   manual tier: sampleFPS() below no-ops while it's true, and
+   CBZ.setQualityLevel(n) is the one call the settings panel needs to set
+   qLevel + applyQuality() together (capped at the live host-aware
+   CBZ.qualityTopTier()). Untouched (panel never opened) → byte-identical.
 ============================================================ */
 (function () {
   "use strict";
@@ -43,12 +49,17 @@
     }
   } catch (e) {}
 
+  // ONE setQualityLevel for both manual surfaces (pause slider + settings
+  // panel): pins the tier, disables auto (qualityAuto=false is what the
+  // sampler checks), persists, and never exceeds the live host-aware ceiling.
   function setQualityLevel(n) {
     n = Math.max(0, Math.min(QUALITY.length - 1, n | 0));
+    n = Math.min(n, topTier());
     qLevel = n;
     CBZ.qualityAuto = false;
     try { localStorage.setItem("cbz_qualityLevel", String(n)); } catch (e) {}
     applyQuality();
+    return qLevel;
   }
   CBZ.setQualityLevel = setQualityLevel;
   CBZ.qualityLabels = QUALITY_LABELS;
@@ -87,6 +98,21 @@
   // any net hook: only the pre-existing pr/shadow/crowd-render/pedLOD knobs.
   if (CBZ.qualityV2 === undefined) CBZ.qualityV2 = true;
 
+  // ---- MANUAL QUALITY LOCK (src/systems/settings.js) -----------------------
+  // The settings panel lets a player pick a fixed tier instead of letting the
+  // V2/legacy sampler drive it. CBZ.qualityLocked is the ONLY new piece of
+  // state needed for that: when true, sampleFPS() below returns immediately
+  // before touching qLevel, so a manual pick sticks until the player flips
+  // back to Auto. Default false (=Auto) → untouched byte-identical sampler
+  // behaviour for anyone who never opens the panel. CBZ.setQualityLevel is the
+  // single entry point settings.js calls — it owns the qLevel write + the
+  // applyQuality() call so the panel never has to poke qLevel directly.
+  if (CBZ.qualityLocked === undefined) CBZ.qualityLocked = false;
+  // (setQualityLevel is defined once above — shared by the pause slider and
+  // the settings panel; it already clamps to the host-aware ceiling.)
+  CBZ.getQualityLevel = function () { return qLevel; };
+  CBZ.qualityTierCount = QUALITY.length;
+
   // host-aware eligible-top-tier cap. Live-evaluated so promotion is handled.
   function topTier() {
     let top = QUALITY.length - 1;
@@ -97,6 +123,24 @@
     }
     return top;
   }
+  CBZ.qualityTopTier = topTier; // exposed so the settings panel can grey out / cap its slider
+
+  // ---- shadow-frustum info (for core/daynight.js's texel-snapped re-centering)
+  // The ortho frustum's world-space WIDTH changes at runtime (city/mode.js and
+  // modes/survival.js both widen it for their arenas), so this reads the LIVE
+  // camera rect rather than caching the boot-time value — texel size must track
+  // whatever frustum is actually active this frame. Returns a reused object
+  // (called once/frame from onAlways(2); no allocation churn).
+  const _shadowInfo = { width: 140, mapSize: 2048, texel: 140 / 2048 };
+  CBZ.shadowFrustumInfo = function () {
+    const cam = sun.shadow && sun.shadow.camera;
+    const width = cam ? (cam.right - cam.left) : _shadowInfo.width;
+    const mapSize = sun.shadow.mapSize.x || _shadowInfo.mapSize;
+    _shadowInfo.width = width;
+    _shadowInfo.mapSize = mapSize;
+    _shadowInfo.texel = width / mapSize;
+    return _shadowInfo;
+  };
 
   function syncSliderUI() {
     const slider = document.getElementById("qualitySlider");
@@ -150,8 +194,10 @@
   let _vSpikeRun = 0;         // consecutive spiky windows
 
   function sampleFPS(dt) {
-    // manual pin (pause-screen slider) — user's choice, no auto-adjustment.
-    if (!CBZ.qualityAuto) return;
+    // manual pin — user's choice, no auto-adjustment. Two flags feed this:
+    // qualityAuto=false (pause-screen slider) and qualityLocked=true (settings
+    // panel); either one wins over the auto-tuner.
+    if (!CBZ.qualityAuto || CBZ.qualityLocked) return;
 
     // ---- legacy path (flag off) : EXACTLY today's behaviour ----------------
     if (!CBZ.qualityV2) {

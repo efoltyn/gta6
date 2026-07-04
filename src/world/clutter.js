@@ -6,10 +6,19 @@
    dark semi-transparent puddles, cone markers, and a laundry line
    strung along the east wall with cloth hanging off it.
 
-   Most pieces are purely decorative (no collider). Only the benches
-   are solid (you can hide behind / get stopped by them). Everything
-   is placed once at startup — no per-frame work — so it stays cheap
-   on phones. Placement uses Math.random() with rejection sampling
+   NO-DECOY FIX: trashBag / scrap / cone used to be fully pass-through —
+   zero collider, so they were pure visual noise a body or a car ghosted
+   straight through. They now carry a light `solid` collider (the exact
+   pattern the benches below already use: `addBox(..., {solid:true})`),
+   sized to each prop's real footprint — a bag or a cone is trivially
+   small, so it reads as "something's there" without acting like a wall.
+   puddle stays non-solid on purpose: it's a flat ground decal, not a 3D
+   obstacle, and giving it a collider would make you bump into a stain.
+
+   Only the benches are BIG solid cover (hide behind / get stopped by
+   them); the small clutter above is collidable but easy to shoulder past.
+   Everything is placed once at startup — no per-frame work — so it stays
+   cheap on phones. Placement uses Math.random() with rejection sampling
    to avoid the central walkway, the spawn/cell area, and the three
    indoor room footprints.
 ============================================================ */
@@ -69,6 +78,15 @@
     return false;
   }
 
+  // a tiny solid collider for clutter whose visual isn't a box (bag = sphere,
+  // cone = cone+bands) — same shape world/props.js pushes directly for its
+  // non-box solids, so a body/car depenetrates against it exactly like any
+  // other CBZ.colliders entry, with zero extra draw calls (no invisible mesh).
+  function smallCollider(x, z, r, ref) {
+    if (!CBZ.colliders) return;
+    CBZ.colliders.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r, ref: ref || null });
+  }
+
   // pick a free spot inside the yard; returns null if it couldn't.
   // yard x in [-30,30], z in [-8,52]; we inset to keep off the walls.
   function pickSpot(selfR, minGap) {
@@ -120,6 +138,9 @@
     knot.position.set(x, 0.45 * sy + 0.42 * sy, z);
     knot.castShadow = false;
     scene.add(knot);
+    // light collider sized to the actual squish (sx/sz) — a bag is soft and
+    // small, so a foot or bumper barely notices it, but it's no longer a ghost.
+    smallCollider(x, z, 0.45 * Math.max(sx, sz), body);
     // a single escaped wrapper next to ~half of them
     if (Math.random() < 0.5) scrap(x + (Math.random() - 0.5) * 1.4, z + (Math.random() - 0.5) * 1.4);
   }
@@ -138,6 +159,10 @@
     p.rotation.z = Math.random() * Math.PI;     // (becomes spin around up after the x-tilt)
     p.castShadow = false; p.receiveShadow = true;
     scene.add(p);
+    // trivial collider — a scrap is paper-thin, but per the same convention
+    // as the bag above it should register as "something's there" rather
+    // than being a pure ghost like the puddle decal below.
+    smallCollider(x, z, Math.max(w, h) * 0.3, p);
   }
 
   // ---------------- puddles ----------------
@@ -160,9 +185,12 @@
     c.position.set(x, 0.4, z);
     c.castShadow = true; c.receiveShadow = false;
     scene.add(c);
-    // reflective band + flat base so it reads as a traffic cone, not a spike
+    // reflective band + flat base so it reads as a traffic cone, not a spike.
+    // The base doubles as the collider (bench's own trick: opts.solid on a
+    // real mesh instead of a separate invisible box) — light and small, same
+    // treatment as the bag/scrap above.
     addBox(x, 0.42, z, 0.42, 0.1, 0.42, 0xf2f2f2, { cast: false });
-    addBox(x, 0.04, z, 0.62, 0.08, 0.62, 0xe25c12, { cast: false });
+    addBox(x, 0.04, z, 0.62, 0.08, 0.62, 0xe25c12, { cast: false, solid: true });
   }
 
   // ---------------- wooden benches (solid) ----------------

@@ -5,7 +5,9 @@
      - charBlob: this player's progress (the shared worldstate
        ledger + portfolio/garage/outfit/ammo/position) → csave.
      - worldBlob (WORLD HOST only): gang control, wall holes,
-       the NPC ledger, day phase → wsave.
+       the NPC ledger, the permanent-identity registry (CBZ.cityIdentities —
+       killed racers/gang bosses/VIPs/tycoons stay dead across a restart),
+       day phase → wsave.
    Inert in single-player and on servers without the "persist"
    feature — everything here is feature-detected off the welcome.
 ============================================================ */
@@ -131,6 +133,7 @@
     if (CBZ.cityFracture && CBZ.cityFracture.serialize) try { blob.fracture = CBZ.cityFracture.serialize(); } catch (e) {}
     if (CBZ.cityDemolition && CBZ.cityDemolition.serialize) try { blob.demo = CBZ.cityDemolition.serialize(); } catch (e) {}
     if (CBZ.cityNpcLedger && CBZ.cityNpcLedger.serialize) try { blob.npc = CBZ.cityNpcLedger.serialize(); } catch (e) {}
+    if (CBZ.cityIdentities && CBZ.cityIdentities.serialize) try { blob.identities = CBZ.cityIdentities.serialize(); } catch (e) {}
     if (CBZ.dayPhase) blob.day = CBZ.dayPhase();
     if (CBZ.dayCount) blob.dayN = CBZ.dayCount();   // calendar day (rebuild timers count in these)
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
@@ -222,6 +225,7 @@
     if (w.fracture && CBZ.cityFracture && CBZ.cityFracture.apply) try { CBZ.cityFracture.apply(w.fracture); } catch (e) { console.error("[netpersist]", e); }
     if (w.demo && CBZ.cityDemolition && CBZ.cityDemolition.apply) try { CBZ.cityDemolition.apply(w.demo); } catch (e) { console.error("[netpersist]", e); }
     if (w.npc && CBZ.cityNpcLedger && CBZ.cityNpcLedger.apply) try { CBZ.cityNpcLedger.apply(w.npc); } catch (e) { console.error("[netpersist]", e); }
+    if (w.identities && CBZ.cityIdentities && CBZ.cityIdentities.apply) try { CBZ.cityIdentities.apply(w.identities); } catch (e) { console.error("[netpersist]", e); }
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
     if (w.dayN != null && CBZ.dayCount) CBZ.dayCount(w.dayN);
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }

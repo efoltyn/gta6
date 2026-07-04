@@ -116,7 +116,14 @@
     cam.locked = document.pointerLockElement === canvas;
     // don't pause while spectating a death — the cursor is intentionally free
     // so you can click the Play Again / Menu buttons, and the world keeps going
-    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
+    // CBZ.settingsOpen (src/systems/settings.js): the pause/settings panel
+    // calls document.exitPointerLock() itself while open. MP-CRITICAL: this
+    // client may be the elected sim-host (see GO-LIVE.md) — setState("paused")
+    // freezes core/loop.js's `g.state === "playing"` gate, which stops the
+    // WORLD SIM (NPCs/traffic/physics) for every connected guest, not just the
+    // local view. The settings panel must never trigger that, so it's added to
+    // this exemption list exactly like cityMenuOpen/fullMap.active above.
+    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.settingsOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
     else if (cam.locked && CBZ.game.state === "paused") CBZ.setState("playing");
   });
   document.addEventListener("mousemove", (e) => {

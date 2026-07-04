@@ -106,9 +106,41 @@
       g.position.set(CX, 0.02, CZ);
       g.receiveShadow = true;
       root.add(g);
-      // a faint shaded apron so the white plateau isn't a single flat slab
-      const apron = new THREE.Mesh(new THREE.PlaneGeometry(HX * 2 + 220, HZ * 2 + 220),
-        new THREE.MeshLambertMaterial({ color: COL.snowShade }));
+      // ---- BIOME-EDGE BLEND APRON: was a single flat-color rect (a hard cut
+      // from snow straight to nothing past the rim). Now a per-vertex-colored
+      // grid: snowShade near the plateau, fading via MOISTURE NOISE (not a
+      // clean ring — window.noise.simplex2, the same field terrain.js uses)
+      // toward a neutral sandy/scrub "wild ground" tone at the outer edge, so
+      // the biome reads as melting into the surrounding land rather than
+      // stopping at a ruler-straight rectangle. Purely cosmetic: still one
+      // mesh, still sits a hair below the snow plateau, no collider/region
+      // change — the walkable footprint and causeway corridor are untouched.
+      const apronW = HX * 2 + 220, apronD = HZ * 2 + 220;
+      const SEG = 18;
+      const apronGeo = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
+      const cShade = new THREE.Color(COL.snowShade);
+      const cWild = new THREE.Color(0xb7a878);     // neutral sand/scrub edge tone (matches terrain.js COL_SAND family)
+      const _ac = new THREE.Color();
+      const apos = apronGeo.attributes.position;
+      const acolors = new Float32Array(apos.count * 3);
+      const hasNoise = !!(window.noise && window.noise.simplex2);
+      for (let i = 0; i < apos.count; i++) {
+        // local plane coords (pre-rotation): the mesh itself is rotated
+        // -PI/2 about X (set below), which maps local (x,y,0) -> world
+        // (x,0,-y) — so world z = CZ - localY, not CZ + localY.
+        const lx = apos.getX(i), lz = apos.getY(i);
+        const wx = CX + lx, wz = CZ - lz;
+        // 0 at the plateau edge .. 1 at the apron's outer rim
+        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
+        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
+        // blend weight ramps with distance-from-plateau, wobbled by moisture
+        // noise so the fade-out isn't a perfect concentric ring.
+        const t = Math.min(1, Math.max(0, (edge - 0.18) / 0.7 + (moist - 0.5) * 0.35));
+        _ac.copy(cShade).lerp(cWild, t);
+        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      }
+      apronGeo.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
+      const apron = new THREE.Mesh(apronGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
       apron.rotation.x = -Math.PI / 2;
       apron.position.set(CX, -0.01, CZ);
       apron.receiveShadow = true;
@@ -129,144 +161,24 @@
       //  ragged snowline, dark cliff faces, lit/shaded snow facets. A
       //  valleyGuard term forces the valley-facing edge to y=0 so the flat
       //  walkable floor is never lifted. All ridges merge to 2 meshes.
+      //
+      //  CONSOLIDATED (was its own hand-rolled copy of this math with a
+      //  silently-drifted 0.42 snowline vs world/terrain.js's 0.48): both now
+      //  call the ONE shared window.noise.buildRidgedRange helper in
+      //  src/vendor/noise.js, so the noise + altitude/slope shading are
+      //  byte-identical between the two ranges. Only the LAYOUT (rect edges,
+      //  valley-side footGuard threshold, peak amplitudes) stays local — that
+      //  is genuinely this biome's own geometry, not duplicated math.
       // ----------------------------------------------------------------
       const BGU = THREE.BufferGeometryUtils;
+      const buildRidge = window.noise && window.noise.buildRidgedRange;
+      if (!buildRidge) return;     // headless / noise.js missing: skip the range, biome still stands
 
-      // -- seeded value-noise (hash + smoothstep-lerp), 2-D -------------
-      function hash2(ix, iz) {
-        let h = (ix * 374761393 + iz * 668265263) | 0;
-        h = Math.imul(h ^ (h >>> 13), 1274126177);
-        h = (h ^ (h >>> 16)) >>> 0;
-        return h / 4294967296;                 // 0..1
-      }
-      function smooth(t) { return t * t * (3 - 2 * t); }
-      function vnoise(x, z) {
-        const ix = Math.floor(x), iz = Math.floor(z);
-        const fx = x - ix, fz = z - iz;
-        const a = hash2(ix, iz), b = hash2(ix + 1, iz);
-        const c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
-        const ux = smooth(fx), uz = smooth(fz);
-        return (a * (1 - ux) + b * ux) * (1 - uz) + (c * (1 - ux) + d * ux) * uz;
-      }
-      // -- RIDGED fbm: sharp connected ridgelines (5 octaves) ----------
-      function ridged(x, z) {
-        let sum = 0, freq = 1, amp = 0.5, prev = 1;
-        for (let o = 0; o < 5; o++) {
-          let n = vnoise(x * freq, z * freq);
-          n = 1 - Math.abs(2 * n - 1);         // ridge fold
-          n = n * n;                            // sharpen
-          sum += n * amp * prev;                // weight by previous octave
-          prev = n;
-          freq *= 2;                            // lacunarity
-          amp *= 0.5;                           // gain
-        }
-        return sum;                             // ~0..1-ish
-      }
-
-      // -- altitude+slope vertex color -> rock / ragged snow / cliff ---
-      const cRock = new THREE.Color(COL.rock);
-      const cRockDk = new THREE.Color(COL.rockDark);
-      const cSnow = new THREE.Color(COL.snow);
-      const cSnowSh = new THREE.Color(COL.snowShade);
-      const _cu = new THREE.Color();
-      function shadeVert(y, peakH, upDot, snowWobble, out) {
-        // ragged snowline ~42% of peak height, wobbled by low-freq noise
-        const snowline = peakH * (0.42 + (snowWobble - 0.5) * 0.26);
-        const above = y > snowline;
-        const steep = upDot < 0.52;            // cliff: snow slides off
-        if (!above || steep) {
-          // rock: darker low + on steep faces
-          const dk = steep ? 0.7 : (1 - Math.min(1, y / Math.max(1, snowline))) * 0.5;
-          out.copy(cRock).lerp(cRockDk, dk);
-        } else {
-          // snow: lit (sun-facing / flat-ish facets) vs shaded
-          const lit = Math.min(1, Math.max(0, (upDot - 0.55) / 0.45));
-          out.copy(cSnowSh).lerp(cSnow, lit);
-        }
-        return out;
-      }
-
-      // -- build ONE ridge strip as non-indexed displaced grid ---------
-      // p0->p1 = ridge spine on the valley rim; depthDir = unit vector
-      // pointing AWAY from the valley (the range body extends that way).
-      // Returns { geo, spine:[{x,z,h}] } (spine sampled for colliders).
-      function buildRidge(p0, p1, depthDir, cfg) {
-        const cols = cfg.cols, rows = cfg.rows;
-        const peakAmp = cfg.peakAmp, depthLen = cfg.depthLen;
-        const seedOff = cfg.seedOff, noiseScale = cfg.noiseScale;
-        const dx = p1.x - p0.x, dz = p1.z - p0.z;
-        // grid of world positions + crest heights
-        const gx = [], gz = [], gy = [];
-        const spine = [];
-        for (let r = 0; r <= rows; r++) {
-          const dv = r / rows;                       // 0 at valley edge .. 1 deep
-          gx[r] = []; gz[r] = []; gy[r] = [];
-          for (let c = 0; c <= cols; c++) {
-            const t = c / cols;
-            const bx = p0.x + dx * t + depthDir.x * (dv * depthLen);
-            const bz = p0.z + dz * t + depthDir.z * (dv * depthLen);
-            // noise sample coords (offset per ridge so none are identical)
-            const nx = (bx + seedOff) * noiseScale;
-            const nz = (bz - seedOff) * noiseScale;
-            let h = ridged(nx, nz) * peakAmp;
-            // low-freq envelope along the ridge: tall peaks + saddles
-            const env = 0.45 + 0.55 * vnoise(t * 3.3 + seedOff * 0.01, seedOff * 0.02);
-            h *= env;
-            // depth TENT: crest near mid-depth, falls off front & back
-            const tent = Math.sin(Math.min(1, dv * 1.15) * Math.PI);
-            h *= 0.25 + 0.75 * tent;
-            // valleyGuard: force y->0 at the valley-facing edge (flat floor)
-            const guard = Math.min(1, dv / 0.28);      // 0 at edge, 1 by row ~28%
-            h *= guard * guard;
-            gx[r][c] = bx; gz[r][c] = bz; gy[r][c] = h;
-          }
-        }
-        // record spine (crest) heights along the ridge for colliders:
-        // take the max height across depth at each column.
-        for (let c = 0; c <= cols; c++) {
-          let mh = 0, mr = 1;
-          for (let r = 1; r <= rows; r++) if (gy[r][c] > mh) { mh = gy[r][c]; mr = r; }
-          spine.push({ x: gx[mr][c], z: gz[mr][c], h: mh });
-        }
-        // emit 2 triangles per cell as 6 independent verts (flat facets)
-        const tris = cols * rows * 2;
-        const pos = new Float32Array(tris * 3 * 3);
-        const col = new Float32Array(tris * 3 * 3);
-        let pi = 0, ci = 0;
-        const up = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
-        const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), D = new THREE.Vector3();
-        function emitTri(a, b, cc) {
-          // face normal up-ness (for slope-based color)
-          e1.subVectors(b, a); e2.subVectors(cc, a);
-          up.crossVectors(e1, e2);
-          let up_y = up.y; if (up_y < 0) up_y = -up_y;
-          const len = up.length() || 1;
-          const upDot = up_y / len;
-          const verts = [a, b, cc];
-          for (let k = 0; k < 3; k++) {
-            const vv = verts[k];
-            pos[pi++] = vv.x; pos[pi++] = vv.y; pos[pi++] = vv.z;
-            const wob = vnoise(vv.x * 0.02 + seedOff, vv.z * 0.02 - seedOff);
-            shadeVert(vv.y, peakAmp, upDot, wob, _cu);
-            col[ci++] = _cu.r; col[ci++] = _cu.g; col[ci++] = _cu.b;
-          }
-        }
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            A.set(gx[r][c], gy[r][c], gz[r][c]);
-            B.set(gx[r][c + 1], gy[r][c + 1], gz[r][c + 1]);
-            C.set(gx[r + 1][c], gy[r + 1][c], gz[r + 1][c]);
-            D.set(gx[r + 1][c + 1], gy[r + 1][c + 1], gz[r + 1][c + 1]);
-            emitTri(A, C, B);
-            emitTri(B, C, D);
-          }
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-        geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-        geo.computeVertexNormals();              // crisp flat facets w/ flatShading
-        return { geo, spine };
-      }
+      // -- palette: rock / ragged snow / cliff (this biome's own COL set) --
+      const rangePalette = {
+        rock: new THREE.Color(COL.rock), rockDark: new THREE.Color(COL.rockDark),
+        snow: new THREE.Color(COL.snow), snowShade: new THREE.Color(COL.snowShade),
+      };
 
       // -- RANGE LAYOUT: foreground ring (carries colliders) + distant -
       // foreground spines run along each rect edge, depthDir points OUT.
@@ -285,8 +197,10 @@
           peakAmp: 100 + rng() * 20,             // ~100-120
           seedOff: 1000 + ei * 137 + rng() * 50,
           noiseScale: 0.012,
+          footGuard: 0.28,                       // valleyGuard: y->0 by row ~28% (flat floor)
+          palette: rangePalette,
         };
-        const built = buildRidge(e.p0, e.p1, e.dir, cfg);
+        const built = buildRidge(THREE, e.p0, e.p1, e.dir, cfg);
         fgGeoms.push(built.geo);
         spines.push({ edge: e, spine: built.spine, peakAmp: cfg.peakAmp });
       }
@@ -305,8 +219,10 @@
           peakAmp: 190 + rng() * 30,             // ~190-220
           seedOff: 5000 + di * 211 + rng() * 80,
           noiseScale: 0.009,
+          footGuard: 0.28,
+          palette: rangePalette,
         };
-        distGeoms.push(buildRidge(e.p0, e.p1, e.dir, cfg).geo);
+        distGeoms.push(buildRidge(THREE, e.p0, e.p1, e.dir, cfg).geo);
       }
 
       // -- MERGE: foreground -> 1 mesh, distant -> 1 mesh (2 draw calls)
@@ -485,27 +401,109 @@
     })();
 
     // ---- mountain CABIN + frozen-over OUTPOST ----------------------------
+    // NO-DECOY FIX: both landmarks used to be sealed doorless box() shells
+    // that only carried a name sign — a promise ("cabin"/"outpost" reads as
+    // "go inside") the geometry never paid off. Rebuilt on the SAME
+    // cityMakeBuilding + cityFurnishApartment pattern the lodge above already
+    // uses (real door/collider/interior), each single-storey with a real
+    // one-room interior, plus one small interaction matching its name: the
+    // cabin is a HUNTER'S rest/warm-up spot (fireplace glow, a stamina nudge),
+    // the outpost is a derelict LOOT CACHE (one-time cash grab, then empty).
     (function cabinAndOutpost() {
-      // a small log cabin tucked near the trees
-      const cx = 600, cz = -1600;
-      box(cx, 2, cz, 9, 4, 7, mTimber, true);
-      box(cx, 4.6, cz, 10.4, 1.6, 8.4, new THREE.MeshLambertMaterial({ color: COL.roofSnow }), false);
+      // ---- a small log cabin tucked near the trees — enterable, one room ----
+      const cx = 600, cz = -1600, cw = 9, cd = 7;
+      let cb = null;
+      if (CBZ.cityMakeBuilding) {
+        try {
+          cb = CBZ.cityMakeBuilding(root, cx, cz, cw, cd, 1, COL.timber, 0, { retail: true, glassKind: "clear", facade: "retail" });
+          if (cb && CBZ.cityFurnishApartment) CBZ.cityFurnishApartment(cb, 0, (cx | 0) + (cz | 0));
+        } catch (e) { cb = null; }   // never let a rejected opt sink the biome
+      }
+      if (!cb) box(cx, 2, cz, cw, 4, cd, mTimber, true);   // headless/no-buildings.js fallback: old sealed shell
+      box(cx, 4.6, cz, cw + 1.4, 1.6, cd + 1.4, new THREE.MeshLambertMaterial({ color: COL.roofSnow }), false);
       box(cx + 3, 5.4, cz - 2, 1, 2, 1, mTimberDk, false);  // chimney
       const cabL = new THREE.PointLight(0xffd9a0, 0.4, 14, 2);
       cabL.position.set(cx, 2.4, cz - 3.2); root.add(cabL);
       const g1 = new THREE.Group(); g1.position.set(cx, 6.6, cz); root.add(g1);
       tag(g1, "HUNTER'S CABIN", 0);
+      if (cb && city.lots) {
+        city.lots.push({ cx, cz, w: cw, d: cd, kind: "cabin", district: "snow",
+          building: Object.assign({}, cb, { name: "Hunter's Cabin",
+            door: { x: cx, z: cz - cd / 2 + 1.6, nx: 0, nz: 1 } }) });
+      }
+      // ---- REST/WARM-UP interaction: a small zone at the fireplace corner ----
+      // a hunter ducking out of the cold gets a small HP top-up (mirrors the
+      // hospital's healFull idiom in shops.js, just free + tiny + on a cooldown
+      // so it reads as "resting by a fire", not a full-heal battery).
+      if (CBZ.interactions && CBZ.interactions.registerZone) {
+        const warmSpot = { x: cx - cw / 2 + 1.5, z: cz - cd / 2 + 1.2, kind: "cabin-hearth" };
+        let nextWarmT = 0;
+        CBZ.interactions.registerZone({
+          id: "snow-cabin-hearth", kind: "cabin-hearth", radius: 3.2,
+          find: function (px, pz) {
+            const dx = warmSpot.x - px, dz = warmSpot.z - pz;
+            return (dx * dx + dz * dz) < 3.2 * 3.2 ? warmSpot : null;
+          },
+          options: [{
+            id: "cabin-warmup", slot: "e",
+            label: function () { return (CBZ.now || 0) < nextWarmT ? "Warming up (still cozy)" : "Warm up by the fire"; },
+            canShow: function () { return (CBZ.now || 0) >= nextWarmT; },
+            onSelect: function () {
+              nextWarmT = (CBZ.now || 0) + 120000;      // ~2 min cooldown — a rest, not a battery
+              const P = CBZ.player;
+              if (P && P.hp != null && P.maxHp) P.hp = Math.min(P.maxHp, P.hp + Math.round(P.maxHp * 0.08));
+              if (CBZ.sfx) CBZ.sfx("door");
+              CBZ.city.note("🔥 You warm up by the hearth — the cold eases off.", 2.2);
+            },
+          }],
+        });
+      }
 
-      // a derelict frozen-over outpost: a low concrete shell crusted in ice
-      const ox = 90, oz = -1640;
-      box(ox, 2.4, oz, 14, 4.8, 10, new THREE.MeshLambertMaterial({ color: COL.rockDark }), true);
+      // ---- a derelict frozen-over outpost: enterable concrete shell --------
+      const ox = 90, oz = -1640, ow = 14, od = 10;
+      let ob = null;
+      if (CBZ.cityMakeBuilding) {
+        try {
+          ob = CBZ.cityMakeBuilding(root, ox, oz, ow, od, 1, COL.rockDark, 0, { retail: true, facade: "office" });
+        } catch (e) { ob = null; }
+      }
+      if (!ob) box(ox, 2.4, oz, ow, 4.8, od, new THREE.MeshLambertMaterial({ color: COL.rockDark }), true);
       // ice crust on the roof
-      box(ox, 5.2, oz, 14.4, 0.6, 10.4, new THREE.MeshLambertMaterial({ color: COL.ice, transparent: true, opacity: 0.85 }), false);
+      box(ox, 5.2, oz, ow + 0.4, 0.6, od + 0.4, new THREE.MeshLambertMaterial({ color: COL.ice, transparent: true, opacity: 0.85 }), false);
       // a tilted broken radio mast
       const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 12, 5), mSteel);
       mast.position.set(ox + 4, 8, oz + 2); mast.rotation.z = 0.22; mast.castShadow = true; root.add(mast);
       const g2 = new THREE.Group(); g2.position.set(ox, 7.2, oz); root.add(g2);
       tag(g2, "FROZEN OUTPOST", 0);
+      if (ob && city.lots) {
+        city.lots.push({ cx: ox, cz: oz, w: ow, d: od, kind: "outpost", district: "snow",
+          building: Object.assign({}, ob, { name: "Frozen Outpost",
+            door: { x: ox, z: oz - od / 2 + 1.6, nx: 0, nz: 1 } }) });
+      }
+      // ---- LOOT CACHE interaction: a one-time cash grab in the abandoned shell ----
+      if (CBZ.interactions && CBZ.interactions.registerZone) {
+        const cacheSpot = { x: ox, z: oz + od / 2 - 2.2, kind: "outpost-cache" };
+        let looted = false;
+        CBZ.interactions.registerZone({
+          id: "snow-outpost-cache", kind: "outpost-cache", radius: 3.0,
+          find: function (px, pz) {
+            if (looted) return null;
+            const dx = cacheSpot.x - px, dz = cacheSpot.z - pz;
+            return (dx * dx + dz * dz) < 3.0 * 3.0 ? cacheSpot : null;
+          },
+          options: [{
+            id: "outpost-loot", slot: "e", label: "Search the abandoned supply crate",
+            onSelect: function () {
+              if (looted) return;
+              looted = true;
+              const take = 60 + (((cx * 7 + oz * 13) & 0x3f));   // deterministic small payout, no Math.random
+              if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(take);
+              if (CBZ.sfx) CBZ.sfx("coin");
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("🎒 Frozen supply crate — found $" + take + ". Picked clean now.", 2.4);
+            },
+          }],
+        });
+      }
     })();
 
     // ---- CHAIRLIFT line up a slope (towers + cable + moving chairs) ------
@@ -632,10 +630,14 @@
       const cxMid = (rMinX + rMaxX) / 2;
       if (CBZ.buildHighway) {
         // REAL wide plowed concrete highway over the water toward the speedway.
+        // heightAt: grade-follow world/terrain.js relief (it's exactly 0 over
+        // this rect's flat playable footprint, so this is a free, safe hook —
+        // it only matters if the deck ever extends nearer the backdrop rim).
         CBZ.buildHighway(root, {
           path: [{ x: cxMid, z: rMinZ }, { x: cxMid, z: rMaxZ }],
           width: 24, lanesPerDir: 2, laneW: 3.6, theme: "concrete",
           guardrail: true, lights: true, elevated: false, rng: rng,
+          heightAt: CBZ.terrainHeight,
         });
         // snow berms flanking the wider deck (visual edge + read)
         for (const ex of [cxMid - 13.2, cxMid + 13.2]) {

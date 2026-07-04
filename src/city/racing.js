@@ -82,21 +82,58 @@
     { name: "Erik Holt",      team: 0x4053b8, accent: 0xf2b133, skill: 0.70, homeStyle: "muscle",    purse: 2.7 },
   ];
 
+  // ---- ROOKIE pool — when a racer dies permanently (city/identity.js), the
+  // field still needs to hold TARGET field-size for island_speedway's grid, so
+  // a fresh zero-stat rookie is built from this pool via makeRacerFromDef (the
+  // SAME constructor the launch roster uses). Styles/colors mirror ROSTER_DEF's
+  // range so a rookie's car/jacket never looks out of place on the grid.
+  const ROOKIE_FIRST = ["Jonas", "Theo", "Mika", "Pia", "Iris", "Dex", "Nadia", "Owen", "Soraya", "Lukas", "Wren", "Ezra", "Talia", "Cole", "Ines"];
+  const ROOKIE_LAST = ["Faraday", "Lindqvist", "Okafor", "Brandt", "Salinas", "Hartley", "Moreau", "Asher", "Kowalski", "Pemberton", "Castel", "Drummond"];
+  const ROOKIE_STYLES = ["aventador", "ferrari", "porsche", "enzo", "muscle", "veyron"];
+  const ROOKIE_TEAMS = [
+    { team: 0x8a2be2, accent: 0xeef2f6 }, { team: 0x2e8a5e, accent: 0xf2e23a },
+    { team: 0xc77b1f, accent: 0x14171f }, { team: 0x3a3f8a, accent: 0xbfe6f2 },
+    { team: 0x7a1f3d, accent: 0xf2b133 }, { team: 0x1f7a7a, accent: 0xeef2f6 },
+  ];
+  function makeRookieDef() {
+    const tc = pick(ROOKIE_TEAMS);
+    return {
+      name: pick(ROOKIE_FIRST) + " " + pick(ROOKIE_LAST),
+      team: tc.team, accent: tc.accent,
+      // a rookie is competitive-but-unproven: lower band than the established
+      // aces, with a little spread so the field doesn't clone one skill value.
+      skill: 0.62 + rng() * 0.12,
+      homeStyle: pick(ROOKIE_STYLES),
+      purse: 1.2 + rng() * 0.8,   // modest seed net worth — they haven't earned yet
+    };
+  }
+
+  // single-driver constructor — buildRoster() below and the rookie-promotion
+  // path (see promoteRookie near the death-permanence block) both funnel
+  // through this ONE place so a freshly-minted driver always has the exact
+  // same shape as a launch-roster one (no second copy of the field list to drift).
+  function makeRacerFromDef(d, number) {
+    return {
+      name: d.name, number: number,
+      teamColor: d.team, accent: d.accent, skill: d.skill,
+      homeStyle: d.homeStyle,
+      // championship stats
+      points: 0, wins: 0, podiums: 0, raced: 0,
+      // purse seed scales their derived net worth (so they read rich)
+      purseSeed: d.purse,
+      // permanence (city/identity.js, feature-detected): retired === a dead
+      // driver kept for history/Hall-of-Fame but pulled from active racing.
+      retired: false,
+      _identityId: null,
+    };
+  }
+
   function buildRoster() {
     const racers = [];
     let nextNum = 1;
     for (let i = 0; i < ROSTER_DEF.length; i++) {
-      const d = ROSTER_DEF[i];
       const number = nextNum++;            // SEQUENTIAL → guaranteed unique 1..N
-      racers.push({
-        name: d.name, number: number,
-        teamColor: d.team, accent: d.accent, skill: d.skill,
-        homeStyle: d.homeStyle,
-        // championship stats
-        points: 0, wins: 0, podiums: 0, raced: 0,
-        // purse seed scales their derived net worth (so they read rich)
-        purseSeed: d.purse,
-      });
+      racers.push(makeRacerFromDef(ROSTER_DEF[i], number));
     }
     return racers;
   }
@@ -129,16 +166,28 @@
       }
     },
 
-    // the championship table: roster sorted by points desc (ties → more wins,
-    // then lower number). Cheap — called by HUD/leaderboard render.
+    // the championship table: ACTIVE roster (retired/deceased excluded — a
+    // permanently-dead driver doesn't race, doesn't show on the live board, and
+    // can't be re-cast onto a body) sorted by points desc (ties → more wins,
+    // then lower number). Cheap — called by HUD/leaderboard render + the
+    // island_speedway AI field builder.
     standings: function () {
-      const a = cityRacing.racers.slice();
+      const a = cityRacing.racers.filter(function (r) { return !r.retired; });
       a.sort(function (x, y) {
         if (y.points !== x.points) return y.points - x.points;
         if (y.wins !== x.wins) return y.wins - x.wins;
         return x.number - y.number;
       });
       return a;
+    },
+
+    // retired/deceased drivers — kept for a Hall-of-Fame / "Living Rich List"
+    // deceased row (leaderboard.js owns the actual rendering; this is just the
+    // read-only data source). Sorted most-recently-retired first when history
+    // entries are present (city/identity.js stamps killedAt on the linked
+    // identity record, which is the real source of truth for the timestamp).
+    deceased: function () {
+      return cityRacing.racers.filter(function (r) { return !!r.retired; });
     },
 
     // a racer's STANDING (1-based position in the table) — used for tags/why.
@@ -180,6 +229,58 @@
     },
   };
   CBZ.cityRacing = cityRacing;
+
+  // ============================================================
+  //  PERMANENCE — racing.js's wiring into city/identity.js (this wave's new
+  //  registry, feature-detected since cross-file load order isn't guaranteed).
+  //  Fixes the racing-permanence bug: a killed racer used to just vanish from
+  //  R.list (the walking-NPC pool) while the ROSTER ENTRY lived forever, so
+  //  nextUnclaimedRacer() kept re-picking the "dead" racer and castRacer()
+  //  re-cast it onto a brand-new random body next spawn — an unkillable
+  //  immortal driver. Now: death is recorded on the ROSTER entry itself
+  //  (retired=true, pulled from standings()/nextUnclaimedRacer()'s pool,
+  //  but kept in cityRacing.racers for history) and a fresh zero-stat rookie
+  //  is promoted to backfill the field — mirrors gangs.js's succeedBoss()
+  //  heir-promotion beat, just rank-less (no bench here, only a clean slate).
+  // ============================================================
+  function nextRacerNumber() {
+    let max = 0;
+    for (let i = 0; i < cityRacing.racers.length; i++) {
+      const n = cityRacing.racers[i].number | 0;
+      if (n > max) max = n;
+    }
+    return max + 1;
+  }
+
+  // promote a fresh rookie into the field so headcount stays constant after a
+  // permanent death. Reuses makeRacerFromDef (the SAME constructor buildRoster
+  // uses) — no second copy of the racer-shape. Returns the new racer object.
+  function promoteRookie() {
+    const def = makeRookieDef();
+    const racer = makeRacerFromDef(def, nextRacerNumber());
+    cityRacing.racers.push(racer);
+    return racer;
+  }
+
+  // death callback for kind 'racer' — fired by city/identity.js's markDead(),
+  // which is in turn called by peds.js's cityKillPed hook (a separate task in
+  // this wave) reading the _identityId we stamp in castRacer() below.
+  if (CBZ.cityIdentities && CBZ.cityIdentities.onDeathRegister) {
+    CBZ.cityIdentities.onDeathRegister("racer", function (rec) {
+      // find the roster entry this identity belongs to (stamped at cast time).
+      let racer = null;
+      for (let i = 0; i < cityRacing.racers.length; i++) {
+        if (cityRacing.racers[i]._identityId === rec.id) { racer = cityRacing.racers[i]; break; }
+      }
+      if (!racer || racer.retired) return;     // unknown id, or already processed (idempotent)
+      racer.retired = true;
+      const rookie = promoteRookie();
+      if (CBZ.cityIdentities.setSuccessor) CBZ.cityIdentities.setSuccessor(rec.id, rookie._identityId);
+      const msg = "🏁 Racer #" + racer.number + " (" + racer.name + ") has died — rookie #" + rookie.number + " (" + rookie.name + ") enters the field.";
+      if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) { /* */ } }
+      else note(msg, 4.0);
+    });
+  }
 
   // ============================================================
   //  WALKABLE RACER NPCs — keep ~3-5 named drivers strolling the
@@ -315,6 +416,16 @@
     p.baseSpeed = 1.7; p.snitch = 0.3;
     paintFit(p, racer.teamColor);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
+    // PERMANENCE: mint (or reuse) a stable identity for this roster entry so a
+    // death sticks city-wide. Feature-detected — no cityIdentities loaded (older
+    // save / module missing) → falls back to today's exact behavior, no crash.
+    if (CBZ.cityIdentities && CBZ.cityIdentities.register) {
+      if (!racer._identityId) {
+        const rec = CBZ.cityIdentities.register("racer", racer.name, { number: racer.number });
+        racer._identityId = rec.id;
+      }
+      p._identityId = racer._identityId;   // peds.js cityKillPed hook reads this to call markDead
+    }
   }
   function releaseRacer(rec) {
     const p = rec.ped;
@@ -331,6 +442,8 @@
   // pick the next roster racer to put on the street that ISN'T already walking.
   function nextUnclaimedRacer() {
     // prefer the TOP of the championship (the stars people want to see/take out)
+    // — standings() already excludes retired/deceased racers, so a permanently
+    // dead driver can never be re-picked here (the racing-permanence fix).
     const s = cityRacing.standings();
     for (let i = 0; i < s.length; i++) {
       if (!R.claimed.has(s[i].number)) return s[i];
@@ -419,7 +532,25 @@
         const gone = !p || (CBZ.cityPeds.indexOf(p) < 0);
         const dead = p && p.dead;
         if (gone) { if (rec.racer) R.claimed.delete(rec.racer.number); R.list.splice(i, 1); continue; }
-        if (dead) { if (rec.racer) R.claimed.delete(rec.racer.number); R.list.splice(i, 1); continue; }
+        if (dead) {
+          // PERMANENCE SAFETY NET: peds.js's cityKillPed hook (a separate task
+          // this wave) is the primary path to markDead via p._identityId, but
+          // it may fire a frame late or — on a pre-existing save / partial load
+          // — not be wired at all. Calling markDead here too is harmless: it's
+          // idempotent (city/identity.js no-ops a second call) and guarantees
+          // retired gets set the moment we observe the body is gone, so the
+          // SAME racer is never silently recycled by nextUnclaimedRacer() one
+          // walking-pool slot later. If cityIdentities isn't loaded at all,
+          // this whole block is skipped and behavior matches the original
+          // (unfixed) recycle path exactly — the documented regression-free
+          // fallback for older saves / partial loads.
+          if (rec.racer && CBZ.cityIdentities && CBZ.cityIdentities.markDead && rec.racer._identityId) {
+            CBZ.cityIdentities.markDead(rec.racer._identityId);
+          }
+          if (rec.racer) R.claimed.delete(rec.racer.number);
+          R.list.splice(i, 1);
+          continue;
+        }
         const far = camD2(p.pos.x, p.pos.z) > FAR2 && rng() < 0.25;
         if (far && camD2(p.pos.x, p.pos.z) > OFFSCREEN2) {
           releaseRacer(rec); R.list.splice(i, 1);

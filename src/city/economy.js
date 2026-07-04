@@ -328,6 +328,32 @@
     { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "veyron" },
   ];
 
+  // ---- NO-DECOY FIX: motorcycles + a boat — playercars.js already has full
+  // makeBoat()/makeMotorcycle() rigs (V-hull/console/seats/animated prop;
+  // clip-ons/tank/tail-cowl/rider) that were reachable ONLY via the player's
+  // [C] style-cycler on a car already being driven, never as a real world
+  // spawn. These entries make them real, discoverable ambient vehicles.
+  // `body`/`detailStyle: "motorcycle"|"boat"` route straight through
+  // cityInferCarStyle (playercars.js) to the matching rig — the SAME visual,
+  // no parallel geometry.
+  //   Kept OUT of the `CARS` array (a SEPARATE catalog, same shape) rather
+  // than appended to it: CARS feeds every generic "pick a car" caller
+  // (pickCar/street traffic, empire.js's flip market, island_speedway's
+  // showroom floor, buildings.js car lots) AND tools/harness.js's named-
+  // vehicle audit, which asserts every CARS entry builds through the
+  // standard 4-wheel car-hull pipeline (body in a fixed sedan/hatch/van/
+  // pickup/coupe/suv/muscle set, dims.width>1.5, dims.length>3.5, a merged
+  // car-hull mesh budget) — assumptions a 2-wheeled bike or an open boat
+  // hull can never satisfy (and rightly shouldn't be asked to: the harness
+  // is validating car BODIES, not the whole vehicle roster). Splitting them
+  // out keeps that contract intact while still giving carByName() one
+  // combined namespace to resolve either catalog by name.
+  const SPECIAL_VEHICLES = [
+    { name: "Street Bike",      value: 4200,  rarity: 0.2, color: 0x2a2d33, s: 1.0, body: "motorcycle", detailStyle: "motorcycle", designStyle: "streetbike" },
+    { name: "Ducati Superbike", value: 21000, rarity: 0.7, color: 0x16a0e0, s: 1.0, body: "motorcycle", detailStyle: "motorcycle", designStyle: "superbike" },
+    { name: "Speedboat",        value: 15000, rarity: 0.5, color: 0xeceff2, s: 1.0, body: "boat",       detailStyle: "boat",       designStyle: "speedboat" },
+  ];
+
   let _seed = 1357913 & 0x7fffffff;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
 
@@ -1041,13 +1067,22 @@
   // ---- car helpers ----------------------------------------------------------
   function pickCar(rare) {
     // rarity-weighted: bias toward common unless `rare` asks for the good stuff
+    // (deliberately CARS-only, never SPECIAL_VEHICLES — a boat has no business
+    // rolling up as random street traffic or a random garage pull; see the
+    // SPECIAL_VEHICLES comment above)
     const r = rare ? Math.pow(rng(), 0.4) : Math.pow(rng(), 2.2);  // skew
     // map r∈[0,1] onto the rarity-sorted list
     let best = CARS[0], bd = 9;
     for (const c of CARS) { const d = Math.abs(c.rarity - r); if (d < bd) { bd = d; best = c; } }
     return best;
   }
-  function carByName(name) { return CARS.find((c) => c.name === name) || CARS[0]; }
+  // Resolve a model by name across BOTH catalogs — ordinary cars first (the
+  // common case), then the special (motorcycle/boat) roster, so callers like
+  // world.js's harbor (carByName("Speedboat")) and any future named-motorcycle
+  // spawn get one lookup function regardless of which array actually holds it.
+  function carByName(name) {
+    return CARS.find((c) => c.name === name) || SPECIAL_VEHICLES.find((c) => c.name === name) || CARS[0];
+  }
 
   // ---- the city PROPERTY market index --------------------------------------
   // A single macro index that drifts slowly around 1.0. Zillow multiplies every
@@ -1250,7 +1285,7 @@
   const MISSILE_RESUPPLY = ITEMS["Air-to-Ground Missile"].value;   // $/crate to rearm airpower
 
   CBZ.cityEcon = {
-    ITEMS, SHOP_STOCK, CARS, rng,
+    ITEMS, SHOP_STOCK, CARS, SPECIAL_VEHICLES, rng,
     // --- airpower prices (the F-22 + its rearm) ---
     JET_PRICE, MISSILE_RESUPPLY,
     add, has, count, take, drip, buyPrice, sellPrice, wholesalePrice,

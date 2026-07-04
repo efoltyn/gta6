@@ -26,6 +26,17 @@
   const MELEE = 2.7;
   const BODY_R = 0.85;
 
+  // ---- DETERMINISM (owner rule): every roll in this file — shot spread,
+  // recoil jitter, casing tumble, the death-drop toss — goes through this
+  // seeded LCG instead of Math.random(). Combat outcome (where a bullet
+  // actually lands) used to be the one place in fpsmode.js that broke the
+  // project's seeded-RNG contract; fixed here for all of it, cosmetic rolls
+  // included (a death-drop toss isn't decision-critical, but a stray
+  // Math.random() left in a file this central is exactly the kind of thing
+  // that quietly reintroduces non-determinism later).
+  let _s = 77345;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+
   const WEAPONS = (CBZ.FPS_WEAPONS && CBZ.FPS_WEAPONS.length) ? CBZ.FPS_WEAPONS : [{
     key: "sidearm", label: "9MM SIDEARM", short: "9MM",
     mag: 15, reserve: 75, reload: 1.15, interval: 0.16, range: 78,
@@ -129,7 +140,7 @@
   const thudSfxOpts = { pitch: 1, volume: 1, dist: null, far: false };
   function surfaceThud(name, cal, dist) {
     if (!CBZ.sfx) return;
-    thudSfxOpts.pitch = Math.max(0.6, 1.18 - cal * 0.3) * (0.95 + Math.random() * 0.1);  // heavier round = deeper smack
+    thudSfxOpts.pitch = Math.max(0.6, 1.18 - cal * 0.3) * (0.95 + rng() * 0.1);  // heavier round = deeper smack
     thudSfxOpts.volume = 0.35 + cal * 0.4;
     thudSfxOpts.dist = dist;
     thudSfxOpts.far = false;
@@ -177,8 +188,8 @@
 
   function spreadDir(base, cone, out) {
     buildBasis(base);
-    const a = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random()) * cone;
+    const a = rng() * Math.PI * 2;
+    const r = Math.sqrt(rng()) * cone;
     out.copy(base)
       .addScaledVector(right, Math.cos(a) * r)
       .addScaledVector(aimUp, Math.sin(a) * r)
@@ -463,6 +474,100 @@
     t.max = t.life;
   }
 
+  // ---- REAL ROCKET FLIGHT (b) -------------------------------------------------
+  // The RPG used to be "a hitscan-to-impact rocket" (resolve impact instantly,
+  // draw a tracer, detonate the same frame) — every other heavy-ordnance game
+  // gives a rocket actual hang time you can see and react to. The impact POINT
+  // (and the wall it lands on) is still resolved up-front at the moment of
+  // firing, exactly like before (so it always lands precisely under the
+  // reticle — the existing "no recoil bias, ever" contract is unchanged) and
+  // handed to launchRocket() as the flight's fixed endpoint; only WHEN the
+  // detonation actually fires moved, from instant to a real flight-time delay.
+  // shoot()'s explosive branch builds a `detonate` closure that runs the
+  // EXACT same FX call sequence the old instant branch ran and passes it in
+  // as onArrive — see (b) there for the full original-vs-new diff explanation.
+  const rocketGeo = new THREE.CylinderGeometry(0.06, 0.07, 0.42, 8);
+  const rocketMat = new THREE.MeshLambertMaterial({ color: 0x2a2e22 });
+  const rockets = [];
+  for (let i = 0; i < 3; i++) {
+    const body = new THREE.Mesh(rocketGeo, rocketMat);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending, opacity: 0.85,
+    }));
+    glow.scale.setScalar(0.5);
+    glow.position.z = 0.24;   // exhaust glow trails the tail
+    body.add(glow);
+    body.visible = false;
+    CBZ.scene.add(body);
+    rockets.push({
+      mesh: body, active: false, t: 0, dur: 0.3,
+      ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0,   // origin + impact point (straight-line endpoints)
+      sagY: 0,                                     // peak mid-flight gravity sag (world units, visual only)
+      detonate: null,                               // bound closure: () => runs the exact old detonation block
+    });
+  }
+  let rocketIdx = 0;
+  // launch a projectile from `from`→`to` over `dur` seconds, sagging under
+  // `sag` world-units of (visual) gravity at the midpoint, then call `onArrive`.
+  function launchRocket(from, to, dur, sag, onArrive) {
+    const r = rockets[rocketIdx];
+    rocketIdx = (rocketIdx + 1) % rockets.length;
+    r.active = true; r.t = 0; r.dur = Math.max(0.02, dur);
+    r.ox = from.x; r.oy = from.y; r.oz = from.z;
+    r.dx = to.x; r.dy = to.y; r.dz = to.z;
+    r.sagY = sag;
+    r.detonate = onArrive;
+    r.mesh.position.copy(from);
+    r.mesh.visible = true;
+    return r;
+  }
+  // quadratic sag added to a straight-line lerp (peaks at the midpoint, zero
+  // at both ends) — reads as gravity without a full ballistic re-solve, and
+  // the rocket still ARRIVES exactly at the pre-resolved impact point.
+  const _rocketPos = new THREE.Vector3(), _rocketPrev = new THREE.Vector3();
+  function updateRockets(dt) {
+    for (let i = 0; i < rockets.length; i++) {
+      const r = rockets[i];
+      if (!r.active) continue;
+      _rocketPrev.copy(r.mesh.position);
+      r.t += dt;
+      const k = Math.min(1, r.t / r.dur);
+      const sag = r.sagY * 4 * k * (1 - k);
+      _rocketPos.set(
+        r.ox + (r.dx - r.ox) * k,
+        r.oy + (r.dy - r.oy) * k - sag,
+        r.oz + (r.dz - r.oz) * k
+      );
+      r.mesh.position.copy(_rocketPos);
+      // orient along the instantaneous travel direction so the body+exhaust
+      // glow visibly pitches through the arc instead of staying level.
+      tmp.copy(_rocketPos).sub(_rocketPrev);
+      if (tmp.lengthSq() > 1e-6) r.mesh.quaternion.setFromUnitVectors(UP, tmp.normalize());
+      if (k >= 1) {
+        r.active = false; r.mesh.visible = false;
+        const fn = r.detonate; r.detonate = null;
+        if (fn) fn();
+      }
+    }
+  }
+
+  // ---- tiny deferred-call queue (sniper travel-time feedback) ---------------
+  // GENERIC, NOT just for the sniper: a short list of {t, fn} pairs ticked
+  // every frame in the same onAlways(52,...) loop as everything else here.
+  // Used ONLY for the sniper's "travel time" (b): damage/game-state still
+  // resolves THIS frame (hit-scan, deterministic, doesn't risk the per-pellet
+  // branch logic below — see resolveShotSniper's header comment), but the
+  // PLAYER-FACING feedback (tracer draw, hit-thwack sfx/marker) is held back
+  // by the round's real flight time so a 200m headshot doesn't feel instant.
+  const deferred = [];
+  function deferCall(delay, fn) { if (delay > 0.001) deferred.push({ t: delay, fn }); else fn(); }
+  function updateDeferred(dt) {
+    for (let i = deferred.length - 1; i >= 0; i--) {
+      deferred[i].t -= dt;
+      if (deferred[i].t <= 0) { const fn = deferred[i].fn; deferred.splice(i, 1); fn(); }
+    }
+  }
+
   // ---- impact puff pool ----
   function radialTexture(stops) {
     const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -523,13 +628,13 @@
       .addScaledVector(right, 0.18)
       .addScaledVector(aimUp, -0.16)
       .addScaledVector(fwd, -0.08);
-    c.vel.copy(right).multiplyScalar(2.4 + Math.random() * 1.2)
-      .addScaledVector(aimUp, 1.0 + Math.random() * 0.9)
-      .addScaledVector(fwd, -0.25 + Math.random() * 0.25);
-    c.mesh.rotation.set(Math.random() * 4, Math.random() * 4, Math.random() * 4);
+    c.vel.copy(right).multiplyScalar(2.4 + rng() * 1.2)
+      .addScaledVector(aimUp, 1.0 + rng() * 0.9)
+      .addScaledVector(fwd, -0.25 + rng() * 0.25);
+    c.mesh.rotation.set(rng() * 4, rng() * 4, rng() * 4);
     c.mesh.visible = true;
     c.life = 1.5;
-    if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + Math.random() * 80);
+    if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + rng() * 80);
   }
 
   // ---- DEATH DROP: the gun leaves your hands when you die -------------------
@@ -556,14 +661,14 @@
     const p = CBZ.player.pos;
     dropMesh = buildWeaponModel(w);
     dropMesh.scale.setScalar(1.05);
-    const a = Math.random() * 6.28;
+    const a = rng() * 6.28;
     dropMesh.position.set(p.x + Math.cos(a) * 0.3, p.y + 1.35, p.z + Math.sin(a) * 0.3);   // out of the dying grip, hand-high
-    dropMesh.rotation.set(Math.random() * 6.28, Math.random() * 6.28, 0);
+    dropMesh.rotation.set(rng() * 6.28, rng() * 6.28, 0);
     CBZ.scene.add(dropMesh);
-    dropVx = Math.cos(a) * (1.2 + Math.random() * 1.2);
-    dropVz = Math.sin(a) * (1.2 + Math.random() * 1.2);
-    dropVy = 2.0 + Math.random() * 1.2;
-    dropSx = (Math.random() - 0.5) * 14; dropSy = (Math.random() - 0.5) * 10; dropSz = (Math.random() - 0.5) * 14;
+    dropVx = Math.cos(a) * (1.2 + rng() * 1.2);
+    dropVz = Math.sin(a) * (1.2 + rng() * 1.2);
+    dropVy = 2.0 + rng() * 1.2;
+    dropSx = (rng() - 0.5) * 14; dropSy = (rng() - 0.5) * 10; dropSz = (rng() - 0.5) * 14;
     dropLife = 30; dropLanded = false;
   }
   // called by city/death.js the frame you die; returns true when the
@@ -1033,6 +1138,162 @@
     };
   }
 
+  // ---- SNIPER BULLET DROP / TRAVEL TIME (b) ----------------------------------
+  // Bullets stay hitscan for every weapon (the owner's call — see the file
+  // header's rocket section for the one weapon that gets a real projectile).
+  // The sniper alone gets a believable LONG-RANGE correction instead of the
+  // same flat linear falloff every other gun uses: past w.sniperDrop.start,
+  // the shot direction is bent DOWN by a small angle so the round lands lower
+  // than dead-center-of-reticle at extreme range (a real slow heavy bullet
+  // sags over a long flight), and resolution is delayed by a short, scaled
+  // "time of flight" so a 200m shot doesn't register as instant. Two-stage:
+  // resolve once with the TRUE aim to learn the real distance, then (only if
+  // past `start`) bend by an angle sized to that distance and re-resolve —
+  // so the bend amount always matches how far the round actually travels,
+  // not a guess. Returns the hit (possibly the original, undropped one) plus
+  // the flight delay (seconds, 0 for non-snipers / under `start`).
+  function resolveShotSniper(w, dir) {
+    const drop = w.sniperDrop;
+    if (!drop) return { hit: resolveShot(w, dir), delay: 0 };
+    const probe = resolveShot(w, dir);
+    const dist = probe.dist != null ? probe.dist : w.range;
+    if (dist <= drop.start) return { hit: probe, delay: 0 };
+    const over = Math.min(dist - drop.start, (w.range - drop.start) || dist);
+    const dropAmt = Math.min(drop.maxDrop || 1.6, over * (drop.perM || 0.01));
+    // bend the AIM down by the small angle whose tangent over `dist` yields
+    // dropAmt world-units of sag at that range — small-angle, single basis
+    // rebuild (buildBasis already ran inside spreadDir's caller; redo it here
+    // since `dir` may have been perturbed by spread since). Uses `hitPoint`
+    // (an otherwise-unused module scratch Vector3) — NOT tmp2, which IS the
+    // live `origin` reference for this shot (muzzleWorld(tmp2) aliases it; a
+    // shared scratch write here would silently relocate the muzzle origin).
+    buildBasis(dir);
+    const ang = Math.atan2(dropAmt, Math.max(1, dist));
+    hitPoint.copy(dir).addScaledVector(aimUp, -ang).normalize();   // aimUp is "up" from buildBasis; bend DOWN
+    const dropped = resolveShot(w, hitPoint);
+    dir.copy(hitPoint);   // caller's shotDir must reflect the bent path (tracer, glass-shatter ray, etc. all read it after this call)
+    const flight = Math.min(0.55, dist * (drop.flightPerM || 0));   // capped — a delay, not a simulated arc
+    return { hit: dropped, delay: flight };
+  }
+
+  // ---- BULLET PENETRATION + RICOCHET (d) -------------------------------------
+  // Every raycast used to stop dead at the first solid hit. Two small, RARE,
+  // clearly-telegraphed additions (own request: flavor/danger, not a core
+  // mechanic — neither fires often and both are capped to a single extra
+  // event per shot, so a firefight doesn't turn into a pinball table):
+  //   PENETRATION — a "thin" wall (read the SAME way los.js derives real wall
+  //   thickness: BoxGeometry.parameters along the struck face's axis) lets a
+  //   sufficiently powerful round carry through to whatever's standing right
+  //   behind it, at reduced exit damage. Pellet guns (shotgun) never
+  //   penetrate (a shot charge dumps its energy into the first thing it
+  //   hits — also keeps a 9-pellet blast from rolling 9 penetration checks).
+  //   RICOCHET — a hit on a THICK/hard wall at a shallow GRAZING angle (the
+  //   shot direction nearly parallel to the surface, not punching square into
+  //   it) has a small chance to kick a deflected tracer off along the
+  //   reflection vector, with a much smaller chance of clipping a nearby
+  //   actor for token stray damage. Visual-first: the deflected beam is what
+  //   sells it ("that round just skipped off the wall"), the stray hit is a
+  //   rare bonus, never the point.
+  const PEN_THIN_MAX = 0.22;      // at/under this real thickness, a wall is "thin" (PWT≈0.16 partitions qualify; WT=0.4 exterior walls don't)
+  const PEN_MIN_CAL = 0.9;        // rounds lighter than this (uzi/sidearm/taser) don't reliably punch even thin cover
+  const PEN_DMG_MUL = 0.45;       // reduced exit damage on whatever's struck behind the cover
+  const RICOCHET_GRAZE = 0.16;    // |shotDir·wallNormal| below this = a shallow enough graze to maybe deflect
+  const RICOCHET_CHANCE = 0.16;   // telegraphed-rare: most grazing hits do NOT ricochet
+  const RICOCHET_STRAY_CHANCE = 0.12;  // of the ricochets that DO fire, how often a nearby actor catches token stray damage
+  const RICOCHET_STRAY_DMG = 6;        // flavor-tier, never a real threat on its own
+
+  // Real thickness of the struck axis-aligned wall box, along the face's
+  // horizontal normal — identical technique to los.js's boxThicknessAlong
+  // (separate IIFE closures can't share the helper, so this is the fpsmode
+  // copy; both read the same BoxGeometry.parameters convention). Returns
+  // Infinity (never "thin") for non-box geometry — can't penetrate what we
+  // can't measure.
+  function wallThickness(wallHit) {
+    const obj = wallHit && wallHit.object, n = wallHit && wallHit.face && wallHit.face.normal;
+    const geo = obj && obj.geometry, p = geo && geo.parameters;
+    if (!p || p.width == null || p.depth == null) return Infinity;
+    const nx = n ? n.x : 0, nz = n ? n.z : 0;
+    return Math.abs(nx) >= Math.abs(nz) ? p.width : p.depth;
+  }
+
+  // Attempts penetration first; if it doesn't apply, attempts a ricochet.
+  // Mutually exclusive per shot (a round either punches through OR skips off,
+  // never both) — called once from the hit.wall branch in shoot()'s pellet
+  // loop, AFTER the normal wall pock/spark/hole have already been stamped.
+  // `wnx,wnz` is the wall-facing normal the caller already computed (a
+  // SYNTHETIC reflected-shot-direction approximation used for the spark
+  // cone's cosmetics — NOT the wall's true face normal). The grazing-angle
+  // test below needs the REAL face normal instead (the synthetic one is, by
+  // construction, always anti-parallel-ish to shotDir and would make every
+  // shot read as a square hit) — read straight off wallHit.face, the same
+  // axis-aligned-object-space-equals-world-space assumption this file
+  // already relies on elsewhere (wallDistance/cityShotHole). Fires RARELY
+  // (thin-wall gate / grazing-angle-plus-dice-roll gate below), so this
+  // deliberately allocates plain Vector3s instead of fighting over the
+  // file's hot-path scratch pool — clarity over micro-reuse for a cold path.
+  function tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz) {
+    if (w.pellets) return;                       // shotgun: no penetration/ricochet rolls
+    const wallHit = hit.wallHit;
+    if (!wallHit) return;
+    const faceN = wallHit.face && wallHit.face.normal;
+    const fnx = faceN ? faceN.x : wnx, fnz = faceN ? faceN.z : wnz;
+    const graze = Math.abs(shotDir.x * fnx + shotDir.z * fnz);   // ~0 = parallel to the TRUE wall face, ~1 = square hit
+    const thickness = wallThickness(wallHit);
+
+    // PENETRATION — thin cover + a round heavy enough to carry through.
+    if (thickness <= PEN_THIN_MAX && cal >= PEN_MIN_CAL && hit.dist < w.range - 0.5) {
+      const exitPt = hit.point.clone().addScaledVector(shotDir, thickness + 0.06);
+      const remaining = Math.max(0.5, w.range - hit.dist - thickness);
+      const beyondActor = findActorHit(exitPt, shotDir, Math.min(remaining, 24), w);
+      if (beyondActor && beyondActor.actor) {
+        // a SECOND, lighter gunHit on whatever was standing behind the cover —
+        // same damage pipeline (falloff, headshot, city/prison routing), just
+        // pre-multiplied down for the energy the wall already ate.
+        const exitHit = { actor: beyondActor.actor, head: beyondActor.head, dist: hit.dist + thickness + beyondActor.dist, point: beyondActor.point };
+        const penW = Object.create(w); penW.damage = w.damage * PEN_DMG_MUL;   // cheap prototype override — never mutates the shared weapon table
+        gunHit(exitHit, penW);
+        spawnImpact(beyondActor.point, true, false);
+        if (CBZ.gore) CBZ.gore(beyondActor.point.x, beyondActor.point.y, beyondActor.point.z, { dir: shotDir, amount: 0.45, player: true });
+        fireTracer(exitPt, beyondActor.point, w.tracer * 0.8, 0.05);
+      } else {
+        // nothing behind it: still show the round carrying through the cover —
+        // a short, visibly DIFFERENT exit puff so a penetration clearly reads
+        // as "that went through", not a second impossible impact on the wall.
+        const farPt = exitPt.clone().addScaledVector(shotDir, Math.min(remaining, 6));
+        fireTracer(exitPt, farPt, w.tracer * 0.7, 0.04);
+      }
+      return;
+    }
+
+    // RICOCHET — thick/hard surface, shallow grazing angle, rare + telegraphed.
+    if (graze < RICOCHET_GRAZE && rng() < RICOCHET_CHANCE) {
+      // reflect shotDir off the TRUE wall normal (horizontal-plane reflection
+      // — walls here are near-vertical, same simplification the wall-impact
+      // branch above already makes for its spark cone, but using fnx/fnz
+      // here — not the synthetic wnx/wnz — so the deflection is a real
+      // physical reflection, not just "back roughly the way it came".
+      const dot = shotDir.x * fnx + shotDir.z * fnz;
+      const rx = shotDir.x - 2 * dot * fnx, rz = shotDir.z - 2 * dot * fnz;
+      const rl = Math.hypot(rx, rz) || 1;
+      const deflectDir = new THREE.Vector3(rx / rl, shotDir.y * 0.4, rz / rl).normalize();
+      const deflectEnd = hit.point.clone().addScaledVector(deflectDir, 7 + rng() * 5);
+      fireTracer(hit.point, deflectEnd, w.tracer * 0.6, 0.06);
+      if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: fnx, y: 0.25, z: fnz }, { kind: "spark", power: cal * 1.2 });
+      CBZ.sfx && CBZ.sfx("hit", { pitch: 1.3, volume: 0.5 });
+      // tiny stray-damage roll: a nearby actor along the deflection MIGHT eat
+      // a token hit. Deliberately small range + flat damage — this is flavor,
+      // never the headline outcome of firing a gun near a wall.
+      if (rng() < RICOCHET_STRAY_CHANCE) {
+        const strayHit = findActorHit(hit.point, deflectDir, 9, w);
+        if (strayHit && strayHit.actor) {
+          const strayW = Object.create(w); strayW.damage = RICOCHET_STRAY_DMG; strayW.headMult = 1;
+          gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW);
+          spawnImpact(strayHit.point, true, false);
+        }
+      }
+    }
+  }
+
   function aimedActor(maxRange) {
     aimForward(fwd);
     const p = CBZ.player;
@@ -1050,8 +1311,11 @@
     // multiplayer target (remote player or synced puppet): authority is over the
     // wire — net code routes the damage and plays the local juice.
     if (a.netKind && CBZ.net && CBZ.net.localGunHit) return CBZ.net.localGunHit(a, hit, w);
-    const fall = hit.dist <= w.dropStart ? 1
-      : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage));
+    // (e) per-weapon-CLASS falloff SHAPE, not one shared linear ramp — the
+    // shotgun/sniper/smg/rifle curves live once in weapon-data.js and every
+    // shooter (this + the prison gunHit below) calls the same evaluator.
+    const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
+      : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
     const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
     const lethalHead = hit.head && !w.nonlethal;
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
@@ -1092,9 +1356,9 @@
     if (CBZ.game.mode === "city") return cityGunHit(a, hit, w);
     const guardish = a.kind === "guard" || a.kind === "warden";
     if (a.hp == null) a.hp = maxHpOf(a);
-    const fall = hit.dist <= w.dropStart
-      ? 1
-      : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage));
+    // (e) same shared per-class falloff evaluator as cityGunHit above.
+    const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
+      : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
     const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
     const lethalHeadshot = hit.head && !w.nonlethal;
     if (lethalHeadshot) a.hp = 0;
@@ -1216,7 +1480,7 @@
     // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
     // just softened under ADS so holding RMB visibly settles the gun.
     recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK);
-    recoilSide += (Math.random() * 2 - 1) * w.sideKick * RK * adsK;
+    recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK;
     recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
     // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
     // capped so even mag-dumps stay usable. moving adds extra below in the loop.
@@ -1228,22 +1492,22 @@
       // first shot of a fresh burst is SOFTER (0.6x) + dead-centre — pinpoint tap.
       const firstShot = shotsInBurst === 0 ? 0.6 : 1;
       const basePitch = w.climb * RK;
-      const jitter = 0.92 + Math.random() * 0.16;                       // <=8% noise
+      const jitter = 0.92 + rng() * 0.16;                       // <=8% noise
       const pitchKick = basePitch * ramp * firstShot * jitter * adsK;
       const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
-      const yawKick = (pat * (w.yawWeave || 0.6) + (Math.random() * 2 - 1) * 0.15) * basePitch * ramp * adsK;
+      const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK;
       recoilPitch = Math.min(0.5, recoilPitch + pitchKick);   // cap so a mag-dump tops out
       recoilYaw = Math.max(-0.32, Math.min(0.32, recoilYaw + yawKick));
       shotsInBurst++;
     }
     pumpT = w.pump ? 1 : pumpT;
 
-    const flashScale = w.flash * (0.9 + Math.random() * 0.28);
+    const flashScale = w.flash * (0.9 + rng() * 0.28);
     if (fps.active) {
       const activeModel = weaponModels[fps.weapon];
       if (!setMuzzleSpriteFromModel(muzzle, activeModel)) muzzle.position.copy(activeModel.userData.muzzle);
       muzzle.scale.setScalar(flashScale);
-      muzzle.rotation.z = Math.random() * Math.PI * 2;
+      muzzle.rotation.z = rng() * Math.PI * 2;
       muzzle.visible = true;
       muzzleT = w.key === "shotgun" ? 0.065 : 0.04;
     } else {
@@ -1256,7 +1520,7 @@
 
     if (CBZ.sfx) {
       if (w.sfxPitch || w.sfxVol) {
-        shotSfxOpts.pitch = (w.sfxPitch || 1) * (0.96 + Math.random() * 0.08);  // jitter so bursts don't sound machine-stamped
+        shotSfxOpts.pitch = (w.sfxPitch || 1) * (0.96 + rng() * 0.08);  // jitter so bursts don't sound machine-stamped
         shotSfxOpts.volume = w.sfxVol || 1;
         CBZ.sfx(w.sfx || "shoot", shotSfxOpts);
       } else CBZ.sfx(w.sfx || "shoot");
@@ -1274,10 +1538,15 @@
     if (w.explosive) aimForward(fwd); else aimWithRecoil(fwd);
     if (CBZ.net && CBZ.net.active && CBZ.net.onShot) CBZ.net.onShot(origin, fwd, w);
 
-    // EXPLOSIVE (RPG/bazooka): a hitscan-to-impact rocket. Resolve where the
-    // shot lands, draw a tracer there, then detonate via the city explosion +
-    // glass-shatter systems (CITY-ONLY — escape/survival never see these). The
-    // BLAST is the kill, so we skip the normal per-pellet damage loop entirely.
+    // EXPLOSIVE (RPG/bazooka) — REAL PROJECTILE FLIGHT (b): the impact POINT is
+    // still resolved synchronously at the moment of firing (so it always lands
+    // exactly under the reticle — unchanged from before), but the rocket no
+    // longer detonates the same frame it's fired. A visible projectile now
+    // flies the eye→impact line over a real flight time (launchRocket, with a
+    // gravity sag), and `detonate()` below — the EXACT same FX call sequence
+    // the old instant branch ran, unchanged line-for-line — fires once it
+    // actually arrives. CITY-ONLY (escape/survival never see these systems).
+    // The BLAST is the kill, so the normal per-pellet damage loop is skipped.
     if (w.explosive) {
       const MIN_DET = 4;
       // a rocket REACHES across the whole map — its detonation must not be capped
@@ -1308,72 +1577,103 @@
       const wallPoint = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.point
         : (farWall && Math.abs(farWall.distance - detT) < 0.6 && farWall.point) ? farWall.point.clone() : null;
       const pt = eye.clone().addScaledVector(fwd, detT);
-      fireTracer(origin, pt, w.tracer, 0.07);
-      if (CBZ.game.mode === "city") {
-        const groundHit = pt.y < 3.5;   // the blast actually couples to the street
-        // the fireball/smoke/damage bloom AT the impact height — a tower hit
-        // 30u up no longer pops at the kerb below it (crashfx reads opts.y). This
-        // single call is ALSO what carves the facade: cityExplosion is wrapped to
-        // run the fracture chain (cityFracture.blastAt at opts.y, power-scaled), so
-        // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
-        // the same wall a second time — it only adds flavor (scar/debris/breach).
-        if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
-        // a guest's blast never reaches the host's sim otherwise — the host
-        // can't count structural HP for a detonation it never saw (mirrors
-        // localGunHit's "hit" forwarding in net.js). FX stays local (above);
-        // this only feeds the host's demolition ledger.
-        if (CBZ.net && CBZ.net.active && !CBZ.net.isHost()) {
-          CBZ.net.sendEv({ e: "blast", to: CBZ.net.hostId, x: pt.x, z: pt.z, y: pt.y, power: w.blastPower || 1.4, radius: w.blastRadius || 7 });
-        }
-        // wreck the storefront HARD — shatter a wide radius of glass (was +2)
-        if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
-        // AND ray-shatter every pane in the rocket's ACTUAL flight path (eye→impact):
-        // the radial burst above only reaches glass near where the blast LANDS, so a
-        // rocket that detonates a hair short of (or beside) a tower used to leave the
-        // window you aimed at intact. This is the SAME path ray-shatter that makes the
-        // rifle reliably break far glass — now on the rocket, so "even RPGs" break it.
-        if (CBZ.cityShatterRay) CBZ.cityShatterRay(eye.x, eye.y, eye.z, fwd.x, fwd.y, fwd.z, detT + (w.blastRadius || 7), true);
-        if (groundHit && CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
-        // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
-        // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in).
-        // GROUND-ONLY BONUS: the facade carve at any height already came from the
-        // cityExplosion chain above; this just widens a street-level hit into a
-        // walkable breach. cityBreach self-dedups via cityFracture.recent() (which
-        // blastAt armed synchronously a tick ago) so it never double-carves.
-        if (groundHit && CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
-        // detonated ON a building face (near OR far) → the facade REACTS (crashfx):
-        // debris avalanche pouring down the facade, a lingering smoke column from
-        // the wound, a parapet block near the roofline, concrete dust. NO carve
-        // (cityBlastWall is flavor only — the real hole is the cityExplosion chain).
-        // DEGATED: now fires for a far facade too, not just a near-wall hit.
-        if (wallStruck && CBZ.cityBlastWall) {
-          // wall-face normal: the raycast's struck face rotated to world (the
-          // exact face-entry normal, same idea as findCarHit's AABB slabs);
-          // falls back to the reflected horizontal shot direction.
-          shotDir.set(-fwd.x, 0, -fwd.z);
-          if (shotDir.lengthSq() < 1e-6) shotDir.set(0, 1, 0); else shotDir.normalize();
-          const wf = wallStruck.face, wo = wallStruck.object;
-          if (wf && wo && wo.getWorldQuaternion) {
-            tmp.copy(wf.normal).applyQuaternion(wo.getWorldQuaternion(wallQ));
-            if (tmp.lengthSq() > 0.25) {
-              if (tmp.dot(fwd) > 0) tmp.multiplyScalar(-1);   // always face the shooter
-              shotDir.copy(tmp.normalize());
-            }
+      // pre-resolved shot direction + origin for the detonation closure below.
+      // MUST be clones, not the shared `eye`/`fwd` scratch vectors — detonate()
+      // can now run many frames after this shot (real flight time), by which
+      // point other shots/frames will have overwritten the shared vectors.
+      const launchDir = fwd.clone();
+      const launchEye = eye.clone();
+      const detonate = function () {
+        if (CBZ.game.mode === "city") {
+          const groundHit = pt.y < 3.5;   // the blast actually couples to the street
+          // the fireball/smoke/damage bloom AT the impact height — a tower hit
+          // 30u up no longer pops at the kerb below it (crashfx reads opts.y). This
+          // single call is ALSO what carves the facade: cityExplosion is wrapped to
+          // run the fracture chain (cityFracture.blastAt at opts.y, power-scaled), so
+          // the hole/scar appears at ANY impact height. The RPG branch must NOT carve
+          // the same wall a second time — it only adds flavor (scar/debris/breach).
+          if (CBZ.cityExplosion) CBZ.cityExplosion(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y });
+          // a guest's blast never reaches the host's sim otherwise — the host
+          // can't count structural HP for a detonation it never saw (mirrors
+          // localGunHit's "hit" forwarding in net.js). FX stays local (above);
+          // this only feeds the host's demolition ledger.
+          if (CBZ.net && CBZ.net.active && !CBZ.net.isHost()) {
+            CBZ.net.sendEv({ e: "blast", to: CBZ.net.hostId, x: pt.x, z: pt.z, y: pt.y, power: w.blastPower || 1.4, radius: w.blastRadius || 7 });
           }
-          // MIN_DET can push pt past a point-blank wall — stamp at the wall point
-          CBZ.cityBlastWall(wallPoint || pt, shotDir, { power: w.blastPower || 1.4 });
+          // wreck the storefront HARD — shatter a wide radius of glass (was +2)
+          if (CBZ.cityShatter) CBZ.cityShatter(pt.x, pt.z, (w.blastRadius || 7) + 8);
+          // AND ray-shatter every pane in the rocket's ACTUAL flight path (eye→impact):
+          // the radial burst above only reaches glass near where the blast LANDS, so a
+          // rocket that detonates a hair short of (or beside) a tower used to leave the
+          // window you aimed at intact. This is the SAME path ray-shatter that makes the
+          // rifle reliably break far glass — now on the rocket, so "even RPGs" break it.
+          if (CBZ.cityShatterRay) CBZ.cityShatterRay(launchEye.x, launchEye.y, launchEye.z, launchDir.x, launchDir.y, launchDir.z, detT + (w.blastRadius || 7), true);
+          if (groundHit && CBZ.cityScorch) CBZ.cityScorch(pt.x, pt.z, (w.blastRadius || 7) * 0.6);   // big scorch on the building/ground
+          // a DIRECT hit on a ground-floor wall blasts a real, WALKABLE hole through
+          // it (blastRadius 13 → r≈3.6, a satisfying car-sized breach you can run in).
+          // GROUND-ONLY BONUS: the facade carve at any height already came from the
+          // cityExplosion chain above; this just widens a street-level hit into a
+          // walkable breach. cityBreach self-dedups via cityFracture.recent() (which
+          // blastAt armed synchronously a tick ago) so it never double-carves.
+          if (groundHit && CBZ.cityBreach) CBZ.cityBreach(pt.x, pt.z, (w.blastRadius || 7) * 0.28);
+          // detonated ON a building face (near OR far) → the facade REACTS (crashfx):
+          // debris avalanche pouring down the facade, a lingering smoke column from
+          // the wound, a parapet block near the roofline, concrete dust. NO carve
+          // (cityBlastWall is flavor only — the real hole is the cityExplosion chain).
+          // DEGATED: now fires for a far facade too, not just a near-wall hit.
+          if (wallStruck && CBZ.cityBlastWall) {
+            // wall-face normal: the raycast's struck face rotated to world (the
+            // exact face-entry normal, same idea as findCarHit's AABB slabs);
+            // falls back to the reflected horizontal shot direction.
+            const sd = new THREE.Vector3(-launchDir.x, 0, -launchDir.z);
+            if (sd.lengthSq() < 1e-6) sd.set(0, 1, 0); else sd.normalize();
+            const wf = wallStruck.face, wo = wallStruck.object;
+            if (wf && wo && wo.getWorldQuaternion) {
+              const wn = wf.normal.clone().applyQuaternion(wo.getWorldQuaternion(wallQ));
+              if (wn.lengthSq() > 0.25) {
+                if (wn.dot(launchDir) > 0) wn.multiplyScalar(-1);   // always face the shooter
+                sd.copy(wn.normalize());
+              }
+            }
+            // MIN_DET can push pt past a point-blank wall — stamp at the wall point
+            CBZ.cityBlastWall(wallPoint || pt, sd, { power: w.blastPower || 1.4 });
+          }
+          // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
+          if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
         }
-        // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
-        if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
+        // kick scales with how close the blast is to the lens — a rocket at your
+        // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
+        // its own explosion shake the same way)
+        const camD = CBZ.camera ? CBZ.camera.position.distanceTo(pt) : 0;
+        CBZ.shake && CBZ.shake(((w.shake || 1) + 0.6) * Math.max(0.3, Math.min(1, 1.25 - camD / 130)));
+        CBZ.doHitstop && CBZ.doHitstop(0.05);
+      };
+      // FLIGHT TIME + visible arc: projSpeed/projGravity (weapon-data.js) drive
+      // a real travel delay instead of detonating the instant the trigger is
+      // pulled. Weapons without projSpeed (defensive default) keep the OLD
+      // instant-detonate behaviour so this never silently breaks a future
+      // explosive that doesn't carry the new fields.
+      const projSpeed = w.projSpeed || 0;
+      if (projSpeed > 0) {
+        const flightDist = origin.distanceTo(pt);
+        const flightDur = Math.max(0.04, flightDist / projSpeed);
+        // visual sag: how far the arc dips at its midpoint under projGravity
+        // over the flight time (s = 1/8 * g * t^2 for a midpoint sag — the
+        // peak of a parabola released over the full duration), capped so a
+        // very long shot doesn't sag the rocket into the ground mid-flight.
+        const sag = Math.min(flightDist * 0.18, 0.125 * (w.projGravity || 0) * flightDur * flightDur);
+        launchRocket(origin, pt, flightDur, sag, detonate);
+        // a brief launch flare only (the flying mesh IS the tracer now) — no
+        // fireTracer() instant line all the way to `pt`, which would visibly
+        // spoil the flight by drawing the whole path before the rocket arrives.
+      } else {
+        fireTracer(origin, pt, w.tracer, 0.07);
+        detonate();
       }
-      // kick scales with how close the blast is to the lens — a rocket at your
-      // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
-      // its own explosion shake the same way)
-      const camD = CBZ.camera ? CBZ.camera.position.distanceTo(pt) : 0;
-      CBZ.shake && CBZ.shake(((w.shake || 1) + 0.6) * Math.max(0.3, Math.min(1, 1.25 - camD / 130)));
-      CBZ.doHitstop && CBZ.doHitstop(0.05);
       // firing still raises wanted: replicate the witnessed-crime block below so
-      // launching a rocket is at least as loud as discharging a firearm.
+      // launching a rocket is at least as loud as discharging a firearm. This
+      // fires at LAUNCH (the report is "shots fired", not "it landed") so a
+      // witness reacts to the whoosh/launch sound immediately, same as before.
       if (CBZ.game.mode === "city" && CBZ.cityCrime) {
         CBZ.cityCrime(120, { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
         CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: 4, damage: 0.3 }, { silent: true, noWanted: true });
@@ -1394,15 +1694,39 @@
     // single biggest accuracy change, à la CoD. Applies in all modes (strict
     // improvement); hip cone unchanged when RMB isn't held.
     const adsSpreadK = aimHeld ? 0.4 : 1;
-    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK;
+    // SUPPRESSION (c): a round that just buzzed the player rattles their aim
+    // for a few seconds (gunfx.js tracks it off the SAME near-miss test that
+    // already drives the "you're being shot at" muzzle-flash/bolt juice — no
+    // new detection, just a real cost wired onto an existing read). Feature-
+    // detected so this file degrades gracefully if gunfx.js isn't loaded.
+    const suppressK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
+    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK * suppressK;
     const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
     let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
+    let feedbackDelay = 0;   // (b) sniper travel-time: hoisted out of the loop so the post-loop hit-marker/sfx can wait for it too (sniper is always single-pellet, so there's exactly one value to carry)
     for (let i = 0; i < pellets; i++) {
       spreadDir(fwd, cone, shotDir);
-      const hit = resolveShot(w, shotDir);
+      // (b) SNIPER DROP/TRAVEL-TIME: every other weapon resolves exactly as
+      // before (resolveShotSniper no-ops to plain resolveShot when the
+      // weapon carries no sniperDrop table). For the sniper at long range,
+      // shotDir is bent down in-place to the real drop-compensated path
+      // BEFORE resolveShot runs, so every system below (glass shatter ray,
+      // wall pock, gore, etc.) reads the SAME dropped trajectory — there's
+      // only one resolved path per shot, not a cosmetic one and a real one.
+      const sniperShot = resolveShotSniper(w, shotDir);
+      const hit = sniperShot.hit;
+      feedbackDelay = sniperShot.delay;
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
-      if (i < 5 || pellets === 1) fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
+      // Damage/world-state above (gunHit, glass, wall pocks...) still resolve
+      // THIS frame — only the player-FACING feedback (tracer beam + the
+      // worst-of-the-burst hit marker/hit-sfx further down) waits for the
+      // round's real flight time, so a 200m headshot doesn't feel instant
+      // without touching the deterministic hit-resolution timing at all.
+      if (i < 5 || pellets === 1) {
+        if (sniperShot.delay > 0) deferCall(sniperShot.delay, function () { fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055); });
+        else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
+      }
       // city: a window in this pellet's path shatters (glass never blocks the
       // shot). EVERY round breaks the pane it actually passes through, out to
       // wherever the bullet really travels (reach = the hit distance, already
@@ -1519,7 +1843,7 @@
           // knocked clean off the face (LOD: only worth drawing inside ~45u)
           if (cal >= 1.2 && hit.dist < 45) {
             CBZ.bulletImpact(hit.point, { x: wnx, y: 0.3, z: wnz }, { kind: "dust", power: cal - 0.3 });
-            if (CBZ.cityChunk && Math.random() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
+            if (CBZ.cityChunk && rng() < (cal - 1.1) * 0.45) CBZ.cityChunk(hit.point.x, hit.point.y, hit.point.z, { count: 1, force: 1.6 });
           }
         }
         // persistent pock — the wall you magdumped STAYS pocked, 7.62 > 9mm
@@ -1530,6 +1854,9 @@
         if (CBZ.game.mode === "city" && cal >= 1.2 && !w.pellets && CBZ.cityFracture && CBZ.cityFracture.chewWall)
           CBZ.cityFracture.chewWall(hit.point.x, hit.point.y, hit.point.z);
         if (wallThudDist < 0) wallThudDist = hit.dist;
+        // (d) PENETRATION / RICOCHET — purely additive flavor on top of the
+        // normal wall mark above; rare + telegraphed (see the function header).
+        tryPenetrateOrRicochet(w, hit, shotDir, cal, wnx, wnz);
       }
     }
     // impact THUD by caliber — a 7.62 lands a deeper, louder smack on whatever
@@ -1538,10 +1865,20 @@
     if (carThudDist >= 0) surfaceThud("clank", cal, carThudDist);
     else if (wallThudDist >= 0 && !hitSomething) surfaceThud("hit", cal, wallThudDist);
     // HIT MARKER: one flash per trigger pull that connected. Kills paint it red.
-    if (hitSomething) flashHitMarker(down, head);
-    // (no "HEADSHOT"/"TARGET DOWN" text — the red hit marker, gore and foley own the kill)
-    if (head) { CBZ.sfx && CBZ.sfx("headshot"); }
-    else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
+    // (b) sniper travel-time: the marker/sfx wait for feedbackDelay too (same
+    // "round's still in the air" feel as the deferred tracer above) — game
+    // STATE (damage, kills, crime) already happened this frame; only the
+    // confirmation the PLAYER sees/hears is held back to match the flight.
+    if (feedbackDelay > 0) {
+      if (hitSomething) deferCall(feedbackDelay, function () { flashHitMarker(down, head); });
+      if (head) deferCall(feedbackDelay, function () { CBZ.sfx && CBZ.sfx("headshot"); });
+      else if (hitSomething) deferCall(feedbackDelay, function () { CBZ.sfx && CBZ.sfx("hit"); });
+    } else {
+      if (hitSomething) flashHitMarker(down, head);
+      // (no "HEADSHOT"/"TARGET DOWN" text — the red hit marker, gore and foley own the kill)
+      if (head) { CBZ.sfx && CBZ.sfx("headshot"); }
+      else if (hitSomething) { CBZ.sfx && CBZ.sfx("hit"); }
+    }
     // discharging a firearm in the city is a witnessed crime (city wanted system)
     if (CBZ.game.mode === "city" && CBZ.cityCrime) {
       CBZ.cityCrime(w.nonlethal ? 20 : (hitSomething ? 100 : 55), { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
@@ -1878,6 +2215,8 @@
         if (t.life <= 0) t.mesh.visible = false;
       }
     }
+    updateRockets(dt);   // (b) in-flight RPG projectiles: fly the arc, detonate on arrival
+    updateDeferred(dt);  // (b) sniper travel-time feedback queue
     for (let i = 0; i < impacts.length; i++) {
       const p = impacts[i];
       if (p.life > 0) {
@@ -2188,11 +2527,14 @@
     if (cross) {
       const aim = aimedActor(armed() ? w.range : MELEE);
       // reticle breathes with the live cone: tight at rest, blooms with recoil,
-      // bloom accumulation and movement — so the crosshair HONESTLY shows where
-      // shots will land (the AAA contract between reticle and spread).
+      // bloom accumulation, movement AND suppression — so the crosshair
+      // HONESTLY shows where shots will land (the AAA contract between
+      // reticle and spread; suppressK mirrors the same penalty shoot() folds
+      // into the actual cone, so a rattled player SEES why they're missing).
       const mv = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
+      const suppK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
       const size = armed()
-        ? 18 + w.spread * 280 + bloom * 300 + recoil * 34 + mv * 10 + (fps.reloading > 0 ? 8 : 0)
+        ? (18 + w.spread * 280 + bloom * 300 + recoil * 34 + mv * 10 + (fps.reloading > 0 ? 8 : 0)) * suppK
         : 22;
       cross.style.width = size.toFixed(1) + "px";
       cross.style.height = size.toFixed(1) + "px";

@@ -174,6 +174,41 @@
     // a few grass tinted overlays so the bare lanes read as soil, the rest green
     plane(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, M.grass, 0.012);
 
+    // ---- BIOME-EDGE BLEND APRON: was a hard cut from soil straight to
+    // nothing past the rim. A per-vertex-colored ring just outside the valley
+    // fades soil -> a neutral wild-grass edge tone via MOISTURE NOISE
+    // (window.noise.simplex2, the same field terrain.js uses) so the farm
+    // reads as melting into the surrounding land instead of stopping at a
+    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
+    // region change — walkable footprint + causeway corridor untouched.
+    (function edgeBlendApron() {
+      const apronW = (MAXX - MINX) + 220, apronD = (MAXZ - MINZ) + 220;
+      const SEG = 18;
+      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
+      const cSoil = new THREE.Color(0x6b4f33);
+      const cWild = new THREE.Color(0x6e7a48);   // neutral wild-grass edge tone
+      const _ac = new THREE.Color();
+      const apos = ag.attributes.position;
+      const acolors = new Float32Array(apos.count * 3);
+      const hasNoise = !!(window.noise && window.noise.simplex2);
+      for (let i = 0; i < apos.count; i++) {
+        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
+        const lx = apos.getX(i), lz = apos.getY(i);
+        const wx = CX + lx, wz = CZ - lz;
+        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
+        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
+        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
+        _ac.copy(cSoil).lerp(cWild, t);
+        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      }
+      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
+      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      apron.rotation.x = -Math.PI / 2;
+      apron.position.set(CX, 0.0, CZ);
+      apron.receiveShadow = true;
+      root.add(apron);
+    })();
+
     // =====================================================================
     // 2) FIELD PARCELS — patchwork of big rectangular fields. Each parcel:
     //    a single striped bulk quad (ONE draw call) + ONE InstancedMesh of
@@ -331,10 +366,43 @@
     }
 
     // -- SILOS (cylinders, solid colliders) --
+    // NO-DECOY FIX: a silo can't take cityMakeBuilding's box shell (wrong
+    // footprint entirely), but a real grain silo DOES have a real exterior
+    // ladder to a roof hatch — so instead of a sealed doorless cylinder we
+    // give each one a climbable rung ladder (CBZ.platforms ramp, the same
+    // z-axis-interpolated rig the fire lookout tower / building stairs use)
+    // up to a small standable cap platform, plus a work-anchor so a farmhand
+    // is actually seen tending the silo line, not just walking past it.
+    const siloTop = 14 + 0.2;                 // just above the cone cap's base
     for (let i = 0; i < 3; i++) {
-      const sx = HX - 6 + i * 7, sz = HZ - 30;
-      cyl(sx, 7, sz, 2.6, 2.6, 14, M.silo, true);
+      const sx = HX - 6 + i * 7, sz = HZ - 30, sr = 2.6;
+      cyl(sx, 7, sz, sr, sr, 14, M.silo, true);
       cyl(sx, 14 + 1.2, sz, 0.2, 2.7, 2.6, M.siloCap, false);
+      // exterior rung ladder up the +z face (clear of the silo's own AABB, a
+      // thin z-aligned ramp so groundAt sees a real climbable surface)
+      const lz0 = sz + sr + 0.02, lz1 = sz + sr + 0.9;
+      CBZ.platforms.push({
+        minX: sx - 0.5, maxX: sx + 0.5, minZ: Math.min(lz0, lz1), maxZ: Math.max(lz0, lz1),
+        top: siloTop, ramp: { z0: sz + sr + 0.35, z1: sz + sr + 0.75, y0: 0, y1: siloTop },
+      });
+      // small round cap platform (stand on the roof hatch)
+      CBZ.platforms.push({ minX: sx - 1.6, maxX: sx + 1.6, minZ: sz - 1.6, maxZ: sz + 1.6, top: siloTop });
+      // rung visuals (instanced-free — only 3 silos, cheap as plain meshes)
+      for (let r = 0; r < 10; r++) {
+        const ry = 0.8 + r * 1.3;
+        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
+        rung.position.set(sx, ry, sz + sr + 0.35); root.add(rung);
+      }
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 14, 0.06), M.metal);
+      rail.position.set(sx - 0.32, 7, sz + sr + 0.35); root.add(rail);
+      const rail2 = rail.clone(); rail2.position.x = sx + 0.32; root.add(rail2);
+    }
+    if (CBZ.registerWorkAnchor) {
+      CBZ.registerWorkAnchor({
+        biome: "farmland", kind: "silo", role: "farmhand",
+        x: HX, z: HZ - 30, cap: 1, home: { x: HX + 22, z: HZ + 6 },
+        spots: [{ x: HX - 6, z: HZ - 30 }, { x: HX + 1, z: HZ - 30 }, { x: HX + 8, z: HZ - 30 }],
+      });
     }
 
     // -- FARMHOUSE (enterable, where the farm family lives) --
@@ -356,6 +424,10 @@
     }
 
     // -- WATER TOWER / WINDMILL (tank on legs + spinning blades) --
+    // NO-DECOY FIX: same treatment as the silos — a real exterior ladder up
+    // one leg to a small catwalk ring platform under the tank, registered as
+    // a real climbable/standable surface (CBZ.platforms), not just a solid
+    // collider you bump into.
     const wtx = HX + 4, wtz = HZ + 34;
     for (const lx of [-3, 3]) for (const lz of [-3, 3]) {
       const leg = box(wtx + lx, 5, wtz + lz, 0.4, 10, 0.4, M.metal, false);
@@ -363,6 +435,23 @@
     }
     cyl(wtx, 11.5, wtz, 3, 3, 4, M.metal, true);
     cyl(wtx, 14.5, wtz, 0.1, 3, 2, M.metal, false);
+    (function waterTowerLadder() {
+      const catwalkY = 9.5;                  // just under the tank
+      const lz0 = wtz + 3 + 0.02, lz1 = wtz + 3 + 0.85;
+      CBZ.platforms.push({
+        minX: wtx - 0.5, maxX: wtx + 0.5, minZ: Math.min(lz0, lz1), maxZ: Math.max(lz0, lz1),
+        top: catwalkY, ramp: { z0: wtz + 3.3, z1: wtz + 3.7, y0: 0, y1: catwalkY },
+      });
+      CBZ.platforms.push({ minX: wtx - 2.4, maxX: wtx + 2.4, minZ: wtz - 2.4, maxZ: wtz + 2.4, top: catwalkY });
+      for (let r = 0; r < 7; r++) {
+        const ry = 0.8 + r * 1.25;
+        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
+        rung.position.set(wtx, ry, wtz + 3.3); root.add(rung);
+      }
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 9.5, 0.06), M.metal);
+      rail.position.set(wtx - 0.32, 4.75, wtz + 3.3); root.add(rail);
+      const rail2 = rail.clone(); rail2.position.x = wtx + 0.32; root.add(rail2);
+    })();
     // windmill blades (animated)
     const millHub = new THREE.Group();
     millHub.position.set(wtx, 15.5, wtz - 3.2);
@@ -377,24 +466,91 @@
     }
 
     // -- CHICKEN COOP (small box + run) --
-    box(HX + 30, 1.2, HZ - 24, 5, 2.4, 4, M.woodLt, true);
-    box(HX + 30, 3.2, HZ - 24, 5.4, 1.2, 4.4, M.houseRoof, false);
+    // NO-DECOY FIX: too small to fit cityMakeBuilding's real-room shell
+    // proportionately (a 5x4 coop would be a comically tiny "building"), so
+    // per the task's own sanctioned fallback this gets a simple WORK-ANCHOR +
+    // a lightweight "collect eggs" interaction instead of a full interior —
+    // proportionate to what a coop actually is.
+    const coopX = HX + 30, coopZ = HZ - 24;
+    box(coopX, 1.2, coopZ, 5, 2.4, 4, M.woodLt, true);
+    box(coopX, 3.2, coopZ, 5.4, 1.2, 4.4, M.houseRoof, false);
     // a handful of chickens (instanced)
     const chickMats = [];
     for (let i = 0; i < 8; i++) {
       _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rng() * Math.PI * 2);
-      _p.set(HX + 30 + rr(-3, 3), 0.3, HZ - 24 + rr(-3, 3)); _scl.set(1, 1, 1);
+      _p.set(coopX + rr(-3, 3), 0.3, coopZ + rr(-3, 3)); _scl.set(1, 1, 1);
       _m.compose(_p, _q, _scl); chickMats.push(_m.clone());
     }
     buildInstanced(new THREE.BoxGeometry(0.4, 0.4, 0.6), M.chick, chickMats, false);
+    if (CBZ.registerWorkAnchor) {
+      CBZ.registerWorkAnchor({
+        biome: "farmland", kind: "coop", role: "farmhand",
+        x: coopX, z: coopZ, cap: 1, home: { x: HX + 22, z: HZ + 6 },
+        spots: [{ x: coopX - 2, z: coopZ + 3 }, { x: coopX + 2, z: coopZ + 3 }],
+      });
+    }
+    if (CBZ.interactions && CBZ.interactions.registerZone) {
+      const coopSpot = { x: coopX, z: coopZ + 3.2, kind: "coop-eggs" };
+      let nextEggT = 0;
+      CBZ.interactions.registerZone({
+        id: "farm-coop-eggs", kind: "coop-eggs", radius: 3.0,
+        find: function (px, pz) {
+          const dx = coopSpot.x - px, dz = coopSpot.z - pz;
+          return (dx * dx + dz * dz) < 3.0 * 3.0 ? coopSpot : null;
+        },
+        options: [{
+          id: "coop-collect-eggs", slot: "e",
+          label: function () { return (CBZ.now || 0) < nextEggT ? "Coop's picked clean for now" : "Collect eggs"; },
+          canShow: function () { return (CBZ.now || 0) >= nextEggT; },
+          onSelect: function () {
+            nextEggT = (CBZ.now || 0) + 180000;        // ~3 min — a real coop refills slowly
+            if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(12);
+            if (CBZ.sfx) CBZ.sfx("coin");
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("🥚 Collected a basket of eggs — sold for $12.", 2.0);
+          },
+        }],
+      });
+    }
 
     // -- ROADSIDE FARM STAND (next to the causeway) --
-    box(ROAD_X + 14, 1.6, MAXZ - 16, 6, 3.2, 4, M.woodLt, true);
-    box(ROAD_X + 14, 3.6, MAXZ - 16, 7.5, 0.4, 5, M.barnRed, false);
+    // NO-DECOY FIX: had a "FRESH PRODUCE" sign but zero vendor wiring, unlike
+    // every other shop in the game. Mirrors the exact owner+counter+vendorSpot
+    // contract city/buildings.js stamps on every hand-placed shop lot (see the
+    // barn/farmhouse above for the cityMakeBuilding half of that contract) and
+    // pushes into city.shopLots the same way city/towngen.js exposes its town
+    // shops to the arena (A.shopLots) — that's the ONE list peds.js's finishSpawn
+    // walks to actually staff a counter with a vendor ped, and shops.js's
+    // generic ped:vendor registry (interact.js) opens the buy menu off it. No
+    // new vendor system invented — this is the existing one, reused.
+    const standX = ROAD_X + 14, standZ = MAXZ - 16, standW = 6, standD = 4;
+    box(standX, 1.6, standZ, standW, 3.2, standD, M.woodLt, true);
+    box(standX, 3.6, standZ, standW + 1.5, 0.4, standD + 1, M.barnRed, false);
     if (CBZ.makeLabelSprite) {
       const s = CBZ.makeLabelSprite("FARM STAND — FRESH PRODUCE");
-      if (s) { s.position.set(ROAD_X + 14, 5.4, MAXZ - 16); s.scale.set(9, 2.1, 1); root.add(s); }
+      if (s) { s.position.set(standX, 5.4, standZ); s.scale.set(9, 2.1, 1); root.add(s); }
     }
+    (function farmStandVendor() {
+      // the road (ROAD_X=1180) sits WEST of the stand (standX=ROAD_X+14), so
+      // the customer-facing counter/door is the -x face; door/vendorSpot both
+      // sit just OUTSIDE the solid stand box (half-width standW/2=3) so the
+      // vendor ped never spawns overlapping its own collider.
+      const standDoor = { x: standX - standW / 2 - 1.2, z: standZ, nx: -1, nz: 0 };
+      const vendorSpot = { x: standX - standW / 2 - 0.9, z: standZ, face: Math.PI / 2 };   // at the counter, facing the road
+      const standLot = {
+        cx: standX, cz: standZ, w: standW, d: standD, kind: "food", district: "farmland",
+        building: {
+          name: "Farm Stand", sign: 0xa33327, shop: { kind: "food", name: "Farm Stand", sign: 0xa33327 },
+          door: standDoor, vendorSpot,
+          owner: { type: "business", id: null, name: "Farmer Dale", buyable: true, _acct: { cash: 700 } },
+        },
+      };
+      // lots IS city.lots (aliased above) — one push covers both. Then mirror
+      // towngen.js's T1 exposure: also push into city.shopLots (== A.shopLots,
+      // the arena), the ONE list peds.js's finishSpawn walks to actually spawn
+      // a vendor ped at vendorSpot, and every generic vendor interaction reads.
+      lots.push(standLot);
+      (city.shopLots = city.shopLots || []).push(standLot);
+    })();
 
     // =====================================================================
     // 6) HAY BALES + SCARECROWS (instanced / cheap)
@@ -516,10 +672,13 @@
     // =====================================================================
     if (CBZ.buildHighway) {
       // REAL wide dirt country-road highway over the water to the desert.
+      // heightAt: grade-follow world/terrain.js relief (0 over this rect's
+      // flat playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
         path: [{ x: ROAD_X, z: ROAD_MINZ }, { x: ROAD_X, z: ROAD_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
         guardrail: true, lights: true, elevated: false, rng: rng,
+        heightAt: CBZ.terrainHeight,
       });
       // soft soil shoulder so the deck reads as raised land over the sea
       plane(ROAD_X, (ROAD_MINZ + ROAD_MAXZ) / 2, 24 + 8, ROAD_MAXZ - ROAD_MINZ, M.soil, 0.025);

@@ -1170,11 +1170,27 @@
   //     distant districts refill instead of starving. This is what stops the blob.
   //   • SPARSE FILL — only when the player's own block is genuinely empty AND the
   //     player stands in a district the field says should be busy, trickle a
-  //     couple of far agents into a ring AROUND the player in ALL directions (not
-  //     a forward cone), drawn through the SAME density field so a quiet quarter
-  //     (docks / 3am) stays quiet. No forward bias — coverage, not a spotlight.
+  //     couple of far agents into a ring AROUND the player, drawn through the SAME
+  //     density field so a quiet quarter (docks / 3am) stays quiet.
   // No bodies are created/destroyed (finite headcount preserved); we only retarget
   // a few existing agents per frame. Draw-call neutral (instanced; count fixed).
+  //
+  // POP-IN FIX (2026-06-30): the omnidirectional ring above used to be the WHOLE
+  // story, and it landed bodies as close as FILL_NEAR=26m in an arbitrary
+  // direction — including right where the camera is already looking, so a body
+  // could materialize 26m dead ahead with nothing stopping it (this is distinct
+  // from the old forward-VACUUM bug above: that one *continuously* re-funnelled
+  // the WHOLE crowd into the cone every frame with no distance floor; this is a
+  // one-shot bias on an already rate/budget-gated relocation, with a forced
+  // FARTHER floor in front of you and an omni fallback, so it can't reproduce the
+  // blob). Mirrors the promotion step's existing forward-cone mechanism (AHEAD_DOT/
+  // PROMO_AHEAD2 above): candidates landing inside the camera's forward cone are
+  // now allowed/preferred to seat FARTHER out (AHEAD ring), so a relocated body
+  // that happens to land in your sightline is already distant when you first see
+  // it, instead of popping in at the same close 26m used for behind-you coverage.
+  // Bodies landing outside the cone (beside/behind you, off-screen) still use the
+  // original close-in ring — that's coverage, not a spotlight, and is what keeps
+  // this from re-funnelling the whole crowd forward like the old bug.
   const NEAR_R = 90;                              // "local" radius around the player
   const NEAR_R2 = NEAR_R * NEAR_R;
   // fair share of the LIVING crowd allowed inside NEAR_R. The near disc is a small
@@ -1182,9 +1198,24 @@
   // of the crowd to it already reads as a believably busier foreground without
   // draining the rest. Surplus past this gets re-spread.
   const NEAR_SHARE = 0.45;
-  const FILL_NEAR = 26, FILL_FAR = 60;            // ring around the player for sparse-fill
+  const FILL_NEAR = 26, FILL_FAR = 60;            // ring around the player for sparse-fill (off-cone / behind)
+  // AHEAD ring: candidates that land INSIDE the forward cone get pushed to this
+  // farther band instead — same idea as PROMO_AHEAD2, just applied one step
+  // earlier (at the instanced-body relocation, before promotion ever looks at
+  // it), so the underlying body itself never appears close-and-ahead.
+  const FILL_AHEAD_NEAR = 45, FILL_AHEAD_FAR = 90;
   const FILL_MIN = 10;                            // below this many locals → allow a fill
   let reseedScan = 0;
+  // shared forward-cone test (mirrors the promotion pass's AHEAD_DOT check):
+  // true when (rx,rz) — a vector FROM the player TO the candidate point — falls
+  // inside the camera's forward cone. Cheap (one normalize + one dot); only
+  // called a handful of times per frame (DRAIN/FILL are already rate-capped).
+  function inForwardCone(rx, rz) {
+    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const rd = Math.hypot(rx, rz) || 1;
+    return (rx / rd) * fx + (rz / rd) * fz >= AHEAD_DOT;
+  }
   function aheadReseed() {
     const P = CBZ.player; if (!P || P.dead) return;
     const A = arena(); if (!A || !A.randomSidewalkPoint) return;
@@ -1218,8 +1249,15 @@
         if (d2 < (NEAR_R * 0.6) * (NEAR_R * 0.6) || d2 >= NEAR_R2) continue;
         for (let t = 0; t < 4; t++) {
           drawPoint(_tmp);
-          const rx = _tmp.x - ppx, rz = _tmp.z - ppz;
-          if (rx * rx + rz * rz < NEAR_R2) continue;   // must land OUTSIDE the local disc
+          const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd2 = rx * rx + rz * rz;
+          if (rd2 < NEAR_R2) continue;   // must land OUTSIDE the local disc
+          // POP-IN: a draw that happens to fall in front of the camera must clear
+          // the same farther AHEAD floor sparse-fill uses below — otherwise the
+          // drain could hand a sightline slot right back at the close edge of the
+          // local disc (NEAR_R, ~90m — already closer than this game wants a
+          // forward body to first appear). Off-cone draws are untouched (that's
+          // the coverage path, not a spotlight).
+          if (inForwardCone(rx, rz) && rd2 < FILL_AHEAD_NEAR * FILL_AHEAD_NEAR) continue;
           ungroup(i);                                  // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z;
           castTint(i, px[i], pz[i]); repaintShirt(i);  // re-dress for the district it lands in
@@ -1228,14 +1266,22 @@
         }
       } else {
         // SPARSE FILL: only pull bodies from genuinely FAR away, and seat them in a
-        // ring all the way AROUND the player (omnidirectional), drawn through the
-        // density field so a quiet district refuses to fill. No forward cone — even
-        // coverage, never a spotlight that follows your gaze.
+        // ring around the player, drawn through the density field so a quiet
+        // district refuses to fill. POP-IN FIX: a candidate that lands inside the
+        // camera's forward cone (where you're actually looking, and where you're
+        // about to WALK) is required to clear the farther FILL_AHEAD ring instead
+        // of the close FILL_NEAR one — so a body materializing in your sightline
+        // is already distant the first time you see it. Off-cone candidates
+        // (beside/behind you, off-screen either way) still use the close ring —
+        // that's coverage, not a spotlight, and is what keeps this from
+        // re-funnelling the whole crowd forward like the old aheadReseed bug.
         if (d2 < NEAR_R2 * 1.6) continue;         // only recycle distant agents
         for (let t = 0; t < 4; t++) {
           fieldPoint(_tmp);                        // biome bubble pulls fill INTO the active region
           const rx = _tmp.x - ppx, rz = _tmp.z - ppz, rd = Math.hypot(rx, rz) || 1;
-          if (rd < FILL_NEAR || rd > FILL_FAR) continue;   // land in the around-player ring
+          const ahead = inForwardCone(rx, rz);
+          const lo = ahead ? FILL_AHEAD_NEAR : FILL_NEAR, hi = ahead ? FILL_AHEAD_FAR : FILL_FAR;
+          if (rd < lo || rd > hi) continue;        // land in the appropriate ring
           ungroup(i);                                  // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z;
           castTint(i, px[i], pz[i]); repaintShirt(i);
@@ -1554,6 +1600,109 @@
     }
   }
 
+  // ---- COARSE OBSTACLE AVOIDANCE: stop the filler crowd walking THROUGH walls ----
+  // ROOT CAUSE: sim()'s collide()/collideSlide() calls are purely REACTIVE — they
+  // depenetrate a body AFTER it has already stepped into a wall, which keeps it
+  // from ending up embedded inside geometry but does nothing to stop the visible
+  // act of walking face-first into a building face and being shoved aside frame
+  // after frame (reads as grinding along the wall, not as a person who SAW it
+  // coming). The instanced background crowd has zero look-ahead: the only other
+  // spatial awareness it has is SEP_R personal-space separation (above), which is
+  // agent-vs-agent, never agent-vs-building.
+  //
+  // FIX (cheap, NOT the active tier's full contextSteer kernel — this is the
+  // background/filler tier, budgeted accordingly): once a body is selected this
+  // frame, cast one short probe point out along its current heading and ask the
+  // SAME broadphase the player/ped collision already indexes (CBZ.queryCollidersNear
+  // — an O(local walls) grid lookup, not a scene raycast) whether anything sits
+  // there. If the probe lands inside (or within AVOID_R of) a collider box, the body
+  // is about to walk into a wall within the next ~AVOID_LOOKAHEAD metres — repick a
+  // fresh stroll waypoint (the SAME "hit a wall → pickWaypoint" idiom sim() already
+  // uses after a REACTIVE shove, just triggered proactively here) so it visibly
+  // turns away instead of grinding along the face. This is coarse on purpose: a
+  // single forward probe, not a multi-ray fan or a steering field — good enough to
+  // kill the "walks straight through a building footprint" complaint without
+  // spending the active tier's per-frame budget on 700+ background bodies.
+  //
+  // AMORTIZED: only a small ROTATING SLICE of the live crowd is probed per frame
+  // (mirrors separate()'s SEP_SLICES idiom), so the added cost is a fixed handful
+  // of grid lookups/frame regardless of crowd size — not O(count) every frame.
+  // collide()'s own per-frame depenetration stays the safety net for whatever this
+  // coarse, infrequent probe misses between an agent's turns.
+  const AVOID_LOOKAHEAD = 2.6;        // probe this far ahead of the body (m)
+  const AVOID_R = 0.55;               // probe radius — slightly more than the body's 0.5 collide radius
+  const AVOID_PER_FRAME = 40;         // agents probed per frame (flat cost, independent of CAP/count)
+  const _avoidCols = [];              // queryCollidersNear scratch (reused; alloc-free after warm-up)
+  let _avoidScan = 0;                 // rolling cursor, round-robins the whole live crowd over several frames
+  // true if a probe circle (px,pz,r) overlaps any nearby full-height-or-body-height
+  // wall box. Reuses the exact box test collide() uses, just read-only (no push).
+  function probeBlocked(qx, qz, r) {
+    const cols = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(qx, qz, r, _avoidCols) : null;
+    if (!cols || !cols.length) return false;
+    for (let c = 0; c < cols.length; c++) {
+      const box = cols[c];
+      // height-gated colliders (windows/sills) only block a body in that vertical
+      // span; the instanced crowd's body occupies ~0..1.7m like the stroll collide
+      // call above, so the same gate applies — a body can walk under a high sill.
+      if (box.y0 != null && (1.7 <= box.y0 || 0 >= box.y1)) continue;
+      const cx = qx < box.minX ? box.minX : (qx > box.maxX ? box.maxX : qx);
+      const cz = qz < box.minZ ? box.minZ : (qz > box.maxZ ? box.maxZ : qz);
+      const dx = qx - cx, dz = qz - cz;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  }
+  function avoidPass() {
+    if (!count || !CBZ.queryCollidersNear) return;     // no broadphase loaded → nothing to probe against
+    let scanned = 0;
+    for (; scanned < AVOID_PER_FRAME && scanned < count; scanned++) {
+      const i = _avoidScan; _avoidScan = (_avoidScan + 1) % count;
+      // only a normally-strolling, think-tick-eligible body needs steering — the
+      // staggered/panicked/promoted/dead/suppressed/corpse states already have
+      // their own movement (or none) and either ignore walls on purpose (panic
+      // sprint already 2-pass collides) or aren't walking at all.
+      if (!separable(i)) continue;
+      const ax = px[i], az = pz[i];
+      const lx = ax + dirX[i] * AVOID_LOOKAHEAD, lz = az + dirZ[i] * AVOID_LOOKAHEAD;
+      if (!probeBlocked(lx, lz, AVOID_R)) continue;     // clear ahead — nothing to steer around
+      // STEER AROUND: try the body's left and right flank (perpendicular to its
+      // current heading) before giving up and repicking a whole new waypoint —
+      // a 90°-ish side-step around a corner reads as "noticed the wall and
+      // walked around it", which is the whole point; a full waypoint repick is
+      // only the fallback when both flanks are also blocked (a dead-end nook).
+      const sideX = -dirZ[i], sideZ = dirX[i];            // unit perpendicular (left)
+      const tryFlank = AVOID_LOOKAHEAD * 0.85;
+      let steered = false;
+      for (let side = 0; side < 2 && !steered; side++) {
+        const sgn = side === 0 ? 1 : -1;
+        const fx = ax + (dirX[i] * 0.4 + sideX * sgn) * tryFlank;
+        const fz = az + (dirZ[i] * 0.4 + sideZ * sgn) * tryFlank;
+        if (probeBlocked(fx, fz, AVOID_R)) continue;
+        // aim the existing stroll target at the clear flank point.
+        tx[i] = fx; tz[i] = fz;
+        steered = true;
+      }
+      if (!steered) {
+        // both flanks blocked too (a corner/dead end) — fall back to the existing
+        // "hit something → repick a fresh sidewalk waypoint" idiom used elsewhere
+        // in this file, so the body picks an entirely new direction to try.
+        pickWaypoint(_tmp, ax, az); tx[i] = _tmp.x; tz[i] = _tmp.z;
+      }
+      // REFRESH THE DEAD-RECKONING CACHE NOW, not just the target: a far/mid-tier
+      // body may not get another think-tick for up to 15 frames (sim()'s NEAR2/
+      // MID2 stride), and the off-tick branch walks the CACHED dirX/dirZ every
+      // frame regardless — so if we only repointed tx/tz the body would keep
+      // dead-reckoning straight at the wall it just "saw" until its next brain
+      // tick. Updating heading/dirX/dirZ immediately makes the steer take effect
+      // on the very next off-tick step, matching the lerpAngle smoothing sim()
+      // itself uses on a real think-tick (no snap; a body still turns, not warps).
+      const ndx = tx[i] - ax, ndz = tz[i] - az;
+      const want = Math.atan2(ndx, ndz);
+      heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], want, 0.5) : want;
+      dirX[i] = Math.sin(heading[i]); dirZ[i] = Math.cos(heading[i]);
+    }
+  }
+
   // ---- COMBAT: the ambient crowd is now shootable + run-over-able ----
   // (previously only the ~14 promoted peds could be hit; far NPCs were phantoms).
   function shootable(i) { return !deadAgent[i] && !suppressed[i] && corpseT[i] <= 0 && promotedBy[i] < 0; }
@@ -1735,6 +1884,7 @@
     // promotion pool is finished and parked before updatePromotion() reaches for it.
     // No-op once the pool is full or when PREWARM_POOL is off (prewarming stays false).
     if (prewarming) prewarmTick();
+    avoidPass();           // coarse look-ahead: steer a rotating slice away from walls before sim() walks into them
     sim(dt);
     separate(dt);         // personal-space repulsion: no bodies standing inside each other
     bumpPass(dt);         // physical bump reactions: stumble / bowl bodies over

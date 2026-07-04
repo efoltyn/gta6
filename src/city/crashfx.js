@@ -3,6 +3,17 @@
 
    Crashes are infrequent, so a short-lived point burst and a few shared-geo
    body fragments buy a lot of impact without adding steady frame cost.
+
+   DETERMINISM: every jitter/scatter draw in this file (particle spread,
+   scorch/splat texture mottling, chunk/rubble placement, rebar angles, smoke
+   and fire puff variance) runs off a local seeded LCG (rng()) — NEVER
+   Math.random() — so replay/multiplayer-sync stays bit-exact across clients.
+
+   FIREBALL LIFETIME: the dramatic flame core (the additive white→orange→red
+   puffs in cityCrashFX/cityExplosion/cityAirstrikeExplosion) now lives a few
+   seconds instead of well under one — only the background smoke/smolder was
+   stretched long before; the fireball itself used to die before the eye could
+   register it.
 ============================================================ */
 (function () {
   "use strict";
@@ -10,6 +21,11 @@
   if (!CBZ || !window.THREE || !CBZ.scene) return;
   const THREE = window.THREE;
   const scene = CBZ.scene;
+
+  // ---- deterministic seeded LCG (NEVER Math.random() — replay/MP sync) ------
+  let _rs = 78451;
+  function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
+
   const bursts = [], rings = [], chunks = [], scorches = [];
   const chunkGeo = new THREE.BoxGeometry(0.28, 0.18, 0.42);
   chunkGeo._shared = true;
@@ -142,13 +158,13 @@
       vel = new Float32Array(count * 3);
     }
     for (let i = 0; i < count; i++) {
-      const o = i * 3, a = Math.random() * Math.PI * 2;
-      const sp = speed * (0.35 + Math.random() * 0.8);
-      pos[o] = x + (Math.random() - 0.5) * 0.8;
-      pos[o + 1] = baseY + Math.random() * (dust ? 0.5 : 1.0);
-      pos[o + 2] = z + (Math.random() - 0.5) * 0.8;
+      const o = i * 3, a = rng() * Math.PI * 2;
+      const sp = speed * (0.35 + rng() * 0.8);
+      pos[o] = x + (rng() - 0.5) * 0.8;
+      pos[o + 1] = baseY + rng() * (dust ? 0.5 : 1.0);
+      pos[o + 2] = z + (rng() - 0.5) * 0.8;
       vel[o] = Math.cos(a) * sp;
-      vel[o + 1] = (dust ? 0.9 : 2.5) + Math.random() * (dust ? 1.7 : 4.5);
+      vel[o + 1] = (dust ? 0.9 : 2.5) + rng() * (dust ? 1.7 : 4.5);
       vel[o + 2] = Math.sin(a) * sp;
     }
     const op0 = dust ? 0.5 : 0.95;
@@ -220,26 +236,26 @@
     const baseY = y0 != null ? y0 : 0.4;
     const fall = y0 != null ? Math.sqrt(Math.max(0.5, y0) / 8.8) : 0;   // grav*0.8 fall time to street
     for (let i = 0; i < count; i++) {
-      const a = Math.random() * Math.PI * 2;
+      const a = rng() * Math.PI * 2;
       // mostly charred grey, a few glowing-hot shards on an explosion
-      const glow = hot && Math.random() < 0.5;
+      const glow = hot && rng() < 0.5;
       const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = (0.65 + Math.random() * 0.8) * (hot ? 1.1 : 1);
-      mesh.position.set(x, baseY + Math.random() * 0.8, z);
-      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      const sc = (0.65 + rng() * 0.8) * (hot ? 1.1 : 1);
+      mesh.position.set(x, baseY + rng() * 0.8, z);
+      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
       mesh.scale.setScalar(sc);
       scene.add(mesh);
       // debris flies fast then arcs down under gravity (slightly damped so it
       // hangs a touch longer like AAA shrapnel), heavier shards thrown lower
-      const up = hot ? (3 + Math.random() * 6) : (2 + Math.random() * 4);
-      const sp = force * (0.4 + Math.random() * 1.0);
+      const up = hot ? (3 + rng() * 6) : (2 + rng() * 4);
+      const sp = force * (0.4 + rng() * 1.0);
       let vx = Math.cos(a) * sp, vz = Math.sin(a) * sp;
-      if (biased) { vx += dx * force * (0.6 + Math.random() * 0.8); vz += dz * force * (0.6 + Math.random() * 0.8); }
+      if (biased) { vx += dx * force * (0.6 + rng() * 0.8); vz += dz * force * (0.6 + rng() * 0.8); }
       // hh = this chunk's half-height so it RESTS on the road, not buried to its
       // centre; rest = up to 60s of permanence once it has settled (true world).
       chunks.push({
         mesh, vx, vy: up, vz, hh: CHUNK_HH * sc,
-        spin: (Math.random() - 0.5) * 16, t: 0, life: fall + 1.2 + Math.random() * 1.1,
+        spin: (rng() - 0.5) * 16, t: 0, life: fall + 1.2 + rng() * 1.1,
         rest: 0, settled: false,
         trail: glow ? 0 : -1, // glowing shards drip a tiny ember trail
       });
@@ -262,7 +278,7 @@
     try { mesh.geometry.computeBoundingBox(); const bb = mesh.geometry.boundingBox; if (bb) hh = Math.max(0.04, (bb.max.y - bb.min.y) * 0.5 * (mesh.scale.y || 1)); } catch (e) {}
     chunks.push({
       mesh, vx: vx || 0, vy: vy == null ? 3 : vy, vz: vz || 0, hh,
-      spin: (Math.random() - 0.5) * 9, t: 0, life: 2.6 + Math.random() * 1.2, rest: 0, settled: false, trail: -1,
+      spin: (rng() - 0.5) * 9, t: 0, life: 2.6 + rng() * 1.2, rest: 0, settled: false, trail: -1,
     });
   };
 
@@ -280,9 +296,9 @@
     // mottled soot flecks so it doesn't read as a perfect circle
     ctx.globalCompositeOperation = "destination-out";
     for (let i = 0; i < 90; i++) {
-      const a = Math.random() * 6.2832, rr = 18 + Math.random() * 44;
-      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 2 + Math.random() * 5, 0, 6.2832);
-      ctx.fillStyle = "rgba(0,0,0," + (0.2 + Math.random() * 0.5) + ")"; ctx.fill();
+      const a = rng() * 6.2832, rr = 18 + rng() * 44;
+      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 2 + rng() * 5, 0, 6.2832);
+      ctx.fillStyle = "rgba(0,0,0," + (0.2 + rng() * 0.5) + ")"; ctx.fill();
     }
     const t = new THREE.Texture(c); t.needsUpdate = true; return t;
   }
@@ -292,11 +308,11 @@
     while (scorches.length > 12) { const o = scorches.shift(); scene.remove(o.mesh); o.mesh.material.dispose(); }
     const mat = new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
     const mesh = new THREE.Mesh(scorchGeo, mat);
-    mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = Math.random() * 6.28;
+    mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = rng() * 6.28;
     mesh.position.set(x, 0.045, z); mesh.scale.setScalar(radius * 2);
     mesh.renderOrder = 1; scene.add(mesh);
     // scorch marks linger as black road stains; airstrikes pass a longer hold
-    scorches.push({ mesh, mat, t: 0, hold: (hold || 11) + Math.random() * 5, grow: 0 });
+    scorches.push({ mesh, mat, t: 0, hold: (hold || 11) + rng() * 5, grow: 0 });
   }
 
   // ---- GORY FALL/HARD-IMPACT splat — a body hitting the ground at speed ----
@@ -317,15 +333,15 @@
     ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
     // ragged limbs of spatter flicked out past the pool's edge (Tarantino fan)
     for (let i = 0; i < 26; i++) {
-      const a = Math.random() * 6.2832, rr = 40 + Math.random() * 24;
-      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 2 + Math.random() * 6, 0, 6.2832);
-      ctx.fillStyle = "rgba(110,6,6," + (0.3 + Math.random() * 0.55) + ")"; ctx.fill();
+      const a = rng() * 6.2832, rr = 40 + rng() * 24;
+      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 2 + rng() * 6, 0, 6.2832);
+      ctx.fillStyle = "rgba(110,6,6," + (0.3 + rng() * 0.55) + ")"; ctx.fill();
     }
     // a couple of darker clots near the centre so it doesn't read as a flat disc
     ctx.globalCompositeOperation = "multiply";
     for (let i = 0; i < 10; i++) {
-      const a = Math.random() * 6.2832, rr = Math.random() * 30;
-      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 4 + Math.random() * 9, 0, 6.2832);
+      const a = rng() * 6.2832, rr = rng() * 30;
+      ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 4 + rng() * 9, 0, 6.2832);
       ctx.fillStyle = "rgba(60,0,0,0.6)"; ctx.fill();
     }
     const t = new THREE.Texture(c); t.needsUpdate = true; return t;
@@ -335,10 +351,10 @@
     while (splats.length > 10) { const o = splats.shift(); scene.remove(o.mesh); o.mat.dispose(); }
     const mat = new THREE.MeshBasicMaterial({ map: splatTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
     const mesh = new THREE.Mesh(scorchGeo, mat);   // reuse the shared 1x1 plane
-    mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = Math.random() * 6.28;
+    mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = rng() * 6.28;
     mesh.position.set(x, 0.05, z); mesh.scale.setScalar(0.4);
     mesh.renderOrder = 2; scene.add(mesh);
-    splats.push({ mesh, mat, t: 0, r0: 0.4, r1: radius * 2, hold: 16 + Math.random() * 8 });
+    splats.push({ mesh, mat, t: 0, r0: 0.4, r1: radius * 2, hold: 16 + rng() * 8 });
   }
 
   // x,y,z = impact point; opts.player flags the player's own splat (more gore),
@@ -386,9 +402,9 @@
     const c = document.createElement("canvas"); c.width = c.height = 64;
     const ctx = c.getContext("2d");
     for (let i = 0; i < 7; i++) {
-      const px = 16 + Math.random() * 32, py = 16 + Math.random() * 32, rr = 10 + Math.random() * 16;
+      const px = 16 + rng() * 32, py = 16 + rng() * 32, rr = 10 + rng() * 16;
       const g = ctx.createRadialGradient(px, py, 0, px, py, rr);
-      g.addColorStop(0, "rgba(255,255,255," + (0.45 + Math.random() * 0.35) + ")");
+      g.addColorStop(0, "rgba(255,255,255," + (0.45 + rng() * 0.35) + ")");
       g.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, rr, 0, 6.2832); ctx.fill();
     }
@@ -419,7 +435,7 @@
   function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
   function spawnPuff(x, y, z, o) {
     const p = getPuff(o.additive !== false, o.smoke);
-    p.position.set(x, y, z); p.material.rotation = Math.random() * 6.2832;
+    p.position.set(x, y, z); p.material.rotation = rng() * 6.2832;
     p.scale.set(o.base, o.base, 1); p.material.opacity = 0; p.visible = (o.delay || 0) <= 0;
     puffs.push({
       s: p, age: -(o.delay || 0), life: o.life, base: o.base, pop: o.pop,
@@ -484,20 +500,22 @@
         if (CBZ.shake) CBZ.shake(1.6);
         // a clutch of small lingering flames + a thin smoke wisp so a wrecked car
         // looks like it's actually cooking, not just sparking for a frame.
+        // LIFETIME STRETCHED (was 1.1-2.0s): the flame core lingers a couple of
+        // seconds now, same fix as the bigger explosion fireballs above.
         for (let i = 0; i < 5; i++) {
-          const a = Math.random() * 6.2832, rr = Math.random() * 1.1;
+          const a = rng() * 6.2832, rr = rng() * 1.1;
           spawnPuff(x + Math.cos(a) * rr, 0.45, z + Math.sin(a) * rr,
-            { additive: true, base: 0.4, pop: 1.6 + Math.random() * 0.9, life: 1.1 + Math.random() * 0.9,
-              maxOp: 0.85, spin: (Math.random() - 0.5) * 2, vy: 0.5 + Math.random() * 0.7,
-              delay: Math.random() * 0.2 });
+            { additive: true, base: 0.4, pop: 1.6 + rng() * 0.9, life: 2.2 + rng() * 1.4,
+              maxOp: 0.85, spin: (rng() - 0.5) * 2, vy: 0.5 + rng() * 0.7,
+              delay: rng() * 0.2 });
         }
         for (let i = 0; i < 4; i++) {
-          const a = Math.random() * 6.2832, dr = 0.3 + Math.random() * 0.5;
-          spawnPuff(x + (Math.random() - 0.5) * 1.2, 0.9 + Math.random() * 0.5, z + (Math.random() - 0.5) * 1.2,
-            { additive: false, smoke: true, base: 1.2, pop: 4 + Math.random() * 2,
-              life: 2.4 + Math.random() * 1.4, maxOp: 0.34, shade: 0.15, spin: (Math.random() - 0.5),
-              vx: Math.cos(a) * dr, vy: 1.0 + Math.random() * 0.6, vz: Math.sin(a) * dr,
-              delay: 0.15 + Math.random() * 0.3 });
+          const a = rng() * 6.2832, dr = 0.3 + rng() * 0.5;
+          spawnPuff(x + (rng() - 0.5) * 1.2, 0.9 + rng() * 0.5, z + (rng() - 0.5) * 1.2,
+            { additive: false, smoke: true, base: 1.2, pop: 4 + rng() * 2,
+              life: 2.4 + rng() * 1.4, maxOp: 0.34, shade: 0.15, spin: (rng() - 0.5),
+              vx: Math.cos(a) * dr, vy: 1.0 + rng() * 0.6, vz: Math.sin(a) * dr,
+              delay: 0.15 + rng() * 0.3 });
         }
       }
     }
@@ -534,29 +552,33 @@
     // ---- LAYER 2: FIREBALL — a cluster of soft additive puffs that punch
     // outward and ramp white→yellow→orange→deep-red. Overlap sums toward
     // white-hot in the middle; outer puffs drift out a little for a roiling rim.
+    // LIFETIMES STRETCHED (was 0.7-1.45s — gone before the eye registered it):
+    // the fireball core now visibly burns for a couple of seconds, same as the
+    // ramp/fade math in updatePuffs already supports — only the spawn-side
+    // `life` was too short. Background smoke (LAYER 3 below) was already long.
     const nFire = Math.round(14 * P);
     for (let i = 0; i < nFire; i++) {
-      const a = Math.random() * 6.2832, rr = Math.random() * 0.9 * P, sp = (1.0 + Math.random() * 2.2);
-      spawnPuff(x + Math.cos(a) * rr, cy + (Math.random() - 0.15) * P, z + Math.sin(a) * rr,
-        { additive: true, base: 0.6, pop: (3.4 + Math.random() * 1.8) * P, life: 0.7 + Math.random() * 0.75,
-          maxOp: 1, spin: (Math.random() - 0.5) * 3,
-          vx: Math.cos(a) * sp, vy: 0.4 + Math.random() * 1.2, vz: Math.sin(a) * sp });
+      const a = rng() * 6.2832, rr = rng() * 0.9 * P, sp = (1.0 + rng() * 2.2);
+      spawnPuff(x + Math.cos(a) * rr, cy + (rng() - 0.15) * P, z + Math.sin(a) * rr,
+        { additive: true, base: 0.6, pop: (3.4 + rng() * 1.8) * P, life: 1.9 + rng() * 1.3,
+          maxOp: 1, spin: (rng() - 0.5) * 3,
+          vx: Math.cos(a) * sp, vy: 0.4 + rng() * 1.2, vz: Math.sin(a) * sp });
     }
     // a few low fireballs that hug the ground (blast spreading along the road —
     // meaningless 30u up a facade, so elevated blasts skip the road wash)
     if (!elevated) for (let i = 0; i < Math.round(5 * P); i++) {
-      const a = Math.random() * 6.2832, sp = 3 + Math.random() * 4 * P;
-      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + Math.random()) * P, life: 0.5 + Math.random() * 0.45,
+      const a = rng() * 6.2832, sp = 3 + rng() * 4 * P;
+      spawnPuff(x, 0.55, z, { additive: true, base: 0.5, pop: (2.2 + rng()) * P, life: 1.4 + rng() * 0.9,
         maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.2, vz: Math.sin(a) * sp });
     }
     // lingering FLAMES that keep licking up from the blast seat for a beat
     // after the fireball collapses — sells a "still burning" crater cheaply.
     for (let i = 0; i < Math.round(4 * P); i++) {
-      const a = Math.random() * 6.2832, rr = Math.random() * 0.7 * P;
+      const a = rng() * 6.2832, rr = rng() * 0.7 * P;
       spawnPuff(x + Math.cos(a) * rr, elevated ? cy - 0.4 : 0.5, z + Math.sin(a) * rr,
-        { additive: true, base: 0.4, pop: (1.4 + Math.random() * 0.8) * P, life: 1.0 + Math.random() * 0.8,
-          maxOp: 0.85, spin: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 0.7,
-          delay: 0.12 + Math.random() * 0.25 });
+        { additive: true, base: 0.4, pop: (1.4 + rng() * 0.8) * P, life: 2.6 + rng() * 1.6,
+          maxOp: 0.85, spin: (rng() - 0.5) * 2, vy: 0.6 + rng() * 0.7,
+          delay: 0.12 + rng() * 0.25 });
     }
 
     // ---- LAYER 3: SMOKE — lumpy dark plume that emerges as the flame cools,
@@ -564,33 +586,33 @@
     // densities: a tall central column + wider low billows for volume.
     const nSmoke = Math.round(6 * P);
     for (let i = 0; i < nSmoke; i++) {
-      const a = Math.random() * 6.2832, dr = 0.4 + Math.random() * 0.6;
-      spawnPuff(x + (Math.random() - 0.5) * 1.4 * P, cy + 0.3 + Math.random() * 0.6, z + (Math.random() - 0.5) * 1.4 * P,
-        { additive: false, smoke: true, base: 1.6, pop: (5.5 + Math.random() * 3) * P,
-          life: 2.6 + Math.random() * 1.8, maxOp: 0.42, shade: 0.13 + Math.random() * 0.06,
-          spin: (Math.random() - 0.5) * 1.2,
-          vx: Math.cos(a) * dr, vy: 1.1 + Math.random() * 0.8, vz: Math.sin(a) * dr,
-          delay: 0.08 + Math.random() * 0.18 });
+      const a = rng() * 6.2832, dr = 0.4 + rng() * 0.6;
+      spawnPuff(x + (rng() - 0.5) * 1.4 * P, cy + 0.3 + rng() * 0.6, z + (rng() - 0.5) * 1.4 * P,
+        { additive: false, smoke: true, base: 1.6, pop: (5.5 + rng() * 3) * P,
+          life: 2.6 + rng() * 1.8, maxOp: 0.42, shade: 0.13 + rng() * 0.06,
+          spin: (rng() - 0.5) * 1.2,
+          vx: Math.cos(a) * dr, vy: 1.1 + rng() * 0.8, vz: Math.sin(a) * dr,
+          delay: 0.08 + rng() * 0.18 });
     }
     // ROLLING HANDOFF: a few smoke billows spawn ON the fireball's rim with its
     // outward velocity inherited, so the orange roils visibly into black-orange
     // smoke instead of the plume just appearing at the centre (their early
     // heat-glow in updatePuffs paints them fire-orange before they sooty out).
     for (let i = 0; i < Math.round(3 * P); i++) {
-      const a = Math.random() * 6.2832, rr = (0.8 + Math.random() * 0.8) * P, sp = 1.6 + Math.random() * 1.8;
-      spawnPuff(x + Math.cos(a) * rr, cy + 0.4 + Math.random() * 0.8 * P, z + Math.sin(a) * rr,
-        { additive: false, smoke: true, base: 1.2, pop: (4.5 + Math.random() * 2.5) * P,
-          life: 2.2 + Math.random() * 1.4, maxOp: 0.46, shade: 0.12 + Math.random() * 0.05,
-          spin: (Math.random() - 0.5) * 1.6,
-          vx: Math.cos(a) * sp, vy: 1.4 + Math.random() * 1.0, vz: Math.sin(a) * sp,
-          delay: 0.18 + Math.random() * 0.2 });
+      const a = rng() * 6.2832, rr = (0.8 + rng() * 0.8) * P, sp = 1.6 + rng() * 1.8;
+      spawnPuff(x + Math.cos(a) * rr, cy + 0.4 + rng() * 0.8 * P, z + Math.sin(a) * rr,
+        { additive: false, smoke: true, base: 1.2, pop: (4.5 + rng() * 2.5) * P,
+          life: 2.2 + rng() * 1.4, maxOp: 0.46, shade: 0.12 + rng() * 0.05,
+          spin: (rng() - 0.5) * 1.6,
+          vx: Math.cos(a) * sp, vy: 1.4 + rng() * 1.0, vz: Math.sin(a) * sp,
+          delay: 0.18 + rng() * 0.2 });
     }
     // low rolling billows that spread outward at the base (ground blasts only)
     if (!elevated) for (let i = 0; i < Math.round(4 * P); i++) {
-      const a = Math.random() * 6.2832, sp = 1.4 + Math.random() * 1.6;
-      spawnPuff(x, 0.6, z, { additive: false, smoke: true, base: 1.2, pop: (4 + Math.random() * 2) * P,
-        life: 2.2 + Math.random() * 1.3, maxOp: 0.3, shade: 0.15, spin: (Math.random() - 0.5),
-        vx: Math.cos(a) * sp, vy: 0.4 + Math.random() * 0.5, vz: Math.sin(a) * sp, delay: 0.05 + Math.random() * 0.12 });
+      const a = rng() * 6.2832, sp = 1.4 + rng() * 1.6;
+      spawnPuff(x, 0.6, z, { additive: false, smoke: true, base: 1.2, pop: (4 + rng() * 2) * P,
+        life: 2.2 + rng() * 1.3, maxOp: 0.3, shade: 0.15, spin: (rng() - 0.5),
+        vx: Math.cos(a) * sp, vy: 0.4 + rng() * 0.5, vz: Math.sin(a) * sp, delay: 0.05 + rng() * 0.12 });
     }
 
     // ---- LAYER 4: SHOCKWAVE — a fast thin bright additive ring on the ground
@@ -605,12 +627,12 @@
       // a blast read as touching the WORLD instead of floating on it.
       pointBurst(x, z, Math.round(16 * P), 0x8b8175, 0.42, 2 + power * 0.5, 0.95, true);
       for (let i = 0; i < Math.round(5 * P); i++) {
-        const a = Math.random() * 6.2832, sp = 4.5 + Math.random() * 3.5 * P;
+        const a = rng() * 6.2832, sp = 4.5 + rng() * 3.5 * P;
         spawnPuff(x + Math.cos(a) * 0.6, 0.45, z + Math.sin(a) * 0.6,
-          { additive: false, smoke: true, base: 0.9, pop: (3 + Math.random() * 1.6) * P,
-            life: 0.9 + Math.random() * 0.5, maxOp: 0.3, shade: 0.34 + Math.random() * 0.06,
-            spin: (Math.random() - 0.5), vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp,
-            delay: 0.03 + Math.random() * 0.05 });
+          { additive: false, smoke: true, base: 0.9, pop: (3 + rng() * 1.6) * P,
+            life: 0.9 + rng() * 0.5, maxOp: 0.3, shade: 0.34 + rng() * 0.06,
+            spin: (rng() - 0.5), vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp,
+            delay: 0.03 + rng() * 0.05 });
       }
     }
 
@@ -619,10 +641,10 @@
     // glowing embers that arc up and rain down, lingering longer than sparks
     const nEmber = Math.round(16 * P);
     for (let i = 0; i < nEmber; i++) {
-      const a = Math.random() * 6.2832, sp = 1.5 + Math.random() * 3.5 * P;
-      spawnPuff(x + Math.cos(a) * 0.5, cy + Math.random() * 0.8, z + Math.sin(a) * 0.5,
-        { additive: true, base: 0.18 + Math.random() * 0.16, pop: 0.1, life: 1.0 + Math.random() * 1.1,
-          maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + Math.random() * 4, vz: Math.sin(a) * sp });
+      const a = rng() * 6.2832, sp = 1.5 + rng() * 3.5 * P;
+      spawnPuff(x + Math.cos(a) * 0.5, cy + rng() * 0.8, z + Math.sin(a) * 0.5,
+        { additive: true, base: 0.18 + rng() * 0.16, pop: 0.1, life: 1.0 + rng() * 1.1,
+          maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + rng() * 4, vz: Math.sin(a) * sp });
     }
     addChunks(x, z, Math.round(10 * P), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris
     if (!elevated) {
@@ -729,64 +751,68 @@
 
     // ---- FIREBALL: a dense cluster that punches out then BALLOONS upward into a
     // mushroom head (buoyant rise). White→yellow→orange→deep-red, longer life. ----
+    // LIFETIMES STRETCHED (was 1.0-2.0s — an "airstrike" whose flame died faster
+    // than the eye could track it): the heavy-ordnance fireball now visibly burns
+    // for several seconds, bigger than a car blast's, before it sootily collapses
+    // into the smoke column (LAYER below, already long-lived).
     const nFire = Math.round(22 * P);
     for (let i = 0; i < nFire; i++) {
-      const a = Math.random() * 6.2832, rr = Math.random() * 1.2 * P, sp = (1.4 + Math.random() * 3.0);
-      spawnPuff(x + Math.cos(a) * rr, cy + (Math.random() - 0.1) * 1.4 * P, z + Math.sin(a) * rr,
-        { additive: true, base: 0.8, pop: (4.2 + Math.random() * 2.4) * P, life: 1.0 + Math.random() * 1.0,
-          maxOp: 1, spin: (Math.random() - 0.5) * 3,
-          vx: Math.cos(a) * sp, vy: 1.0 + Math.random() * 2.4, vz: Math.sin(a) * sp });
+      const a = rng() * 6.2832, rr = rng() * 1.2 * P, sp = (1.4 + rng() * 3.0);
+      spawnPuff(x + Math.cos(a) * rr, cy + (rng() - 0.1) * 1.4 * P, z + Math.sin(a) * rr,
+        { additive: true, base: 0.8, pop: (4.2 + rng() * 2.4) * P, life: 2.6 + rng() * 1.6,
+          maxOp: 1, spin: (rng() - 0.5) * 3,
+          vx: Math.cos(a) * sp, vy: 1.0 + rng() * 2.4, vz: Math.sin(a) * sp });
     }
     // the rising MUSHROOM HEAD — a few big slow fireballs that climb and bloom
     for (let i = 0; i < Math.round(5 * P); i++) {
-      const a = Math.random() * 6.2832, dr = 0.4 + Math.random() * 0.7;
+      const a = rng() * 6.2832, dr = 0.4 + rng() * 0.7;
       spawnPuff(x + Math.cos(a) * dr * P, cy + 1.2 * P, z + Math.sin(a) * dr * P,
-        { additive: true, base: 1.2, pop: (5 + Math.random() * 3) * P, life: 1.3 + Math.random() * 0.9,
-          maxOp: 1, spin: (Math.random() - 0.5) * 1.5,
-          vx: Math.cos(a) * 0.8, vy: 3.2 + Math.random() * 2.2, vz: Math.sin(a) * 0.8,
-          delay: 0.05 + Math.random() * 0.12 });
+        { additive: true, base: 1.2, pop: (5 + rng() * 3) * P, life: 3.2 + rng() * 1.8,
+          maxOp: 1, spin: (rng() - 0.5) * 1.5,
+          vx: Math.cos(a) * 0.8, vy: 3.2 + rng() * 2.2, vz: Math.sin(a) * 0.8,
+          delay: 0.05 + rng() * 0.12 });
     }
     // low fireballs spreading along the ground (blast wash)
     for (let i = 0; i < Math.round(8 * P); i++) {
-      const a = Math.random() * 6.2832, sp = 4 + Math.random() * 6 * P;
-      spawnPuff(x, 0.6, z, { additive: true, base: 0.6, pop: (2.6 + Math.random() * 1.4) * P, life: 0.6 + Math.random() * 0.5,
+      const a = rng() * 6.2832, sp = 4 + rng() * 6 * P;
+      spawnPuff(x, 0.6, z, { additive: true, base: 0.6, pop: (2.6 + rng() * 1.4) * P, life: 1.6 + rng() * 1.0,
         maxOp: 0.9, vx: Math.cos(a) * sp, vy: 0.25, vz: Math.sin(a) * sp });
     }
     // lingering flames cooking in the crater after the fireball collapses
     for (let i = 0; i < Math.round(7 * P); i++) {
-      const a = Math.random() * 6.2832, rr = Math.random() * 1.0 * P;
+      const a = rng() * 6.2832, rr = rng() * 1.0 * P;
       spawnPuff(x + Math.cos(a) * rr, 0.5, z + Math.sin(a) * rr,
-        { additive: true, base: 0.5, pop: (1.8 + Math.random() * 1.1) * P, life: 1.4 + Math.random() * 1.1,
-          maxOp: 0.88, spin: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 0.8,
-          delay: 0.15 + Math.random() * 0.35 });
+        { additive: true, base: 0.5, pop: (1.8 + rng() * 1.1) * P, life: 3.4 + rng() * 2.0,
+          maxOp: 0.88, spin: (rng() - 0.5) * 2, vy: 0.6 + rng() * 0.8,
+          delay: 0.15 + rng() * 0.35 });
     }
 
     // ---- SMOKE: a tall black COLUMN — many puffs with strong upward velocity and
     // long life so the plume towers and lingers, plus wide low billows for girth. ----
     const nSmoke = Math.round(10 * P);
     for (let i = 0; i < nSmoke; i++) {
-      const a = Math.random() * 6.2832, dr = 0.3 + Math.random() * 0.6;
-      spawnPuff(x + (Math.random() - 0.5) * 1.6 * P, cy + 0.4 + Math.random() * 1.0, z + (Math.random() - 0.5) * 1.6 * P,
-        { additive: false, smoke: true, base: 1.8, pop: (6.5 + Math.random() * 3.5) * P,
-          life: 4.2 + Math.random() * 2.6, maxOp: 0.5, shade: 0.1 + Math.random() * 0.05,
-          spin: (Math.random() - 0.5) * 1.0,
-          vx: Math.cos(a) * dr, vy: 2.2 + Math.random() * 1.6, vz: Math.sin(a) * dr,
-          delay: 0.06 + Math.random() * 0.2 });
+      const a = rng() * 6.2832, dr = 0.3 + rng() * 0.6;
+      spawnPuff(x + (rng() - 0.5) * 1.6 * P, cy + 0.4 + rng() * 1.0, z + (rng() - 0.5) * 1.6 * P,
+        { additive: false, smoke: true, base: 1.8, pop: (6.5 + rng() * 3.5) * P,
+          life: 4.2 + rng() * 2.6, maxOp: 0.5, shade: 0.1 + rng() * 0.05,
+          spin: (rng() - 0.5) * 1.0,
+          vx: Math.cos(a) * dr, vy: 2.2 + rng() * 1.6, vz: Math.sin(a) * dr,
+          delay: 0.06 + rng() * 0.2 });
     }
     // the column's upper reaches — slower, darker, the longest-lived smoke
     for (let i = 0; i < Math.round(5 * P); i++) {
-      spawnPuff(x + (Math.random() - 0.5) * 1.0 * P, cy + 2.0 + Math.random() * 1.5, z + (Math.random() - 0.5) * 1.0 * P,
-        { additive: false, smoke: true, base: 2.2, pop: (7 + Math.random() * 3) * P,
-          life: 5.0 + Math.random() * 3.0, maxOp: 0.42, shade: 0.09,
-          spin: (Math.random() - 0.5) * 0.8, vy: 1.6 + Math.random() * 1.2,
-          delay: 0.25 + Math.random() * 0.5 });
+      spawnPuff(x + (rng() - 0.5) * 1.0 * P, cy + 2.0 + rng() * 1.5, z + (rng() - 0.5) * 1.0 * P,
+        { additive: false, smoke: true, base: 2.2, pop: (7 + rng() * 3) * P,
+          life: 5.0 + rng() * 3.0, maxOp: 0.42, shade: 0.09,
+          spin: (rng() - 0.5) * 0.8, vy: 1.6 + rng() * 1.2,
+          delay: 0.25 + rng() * 0.5 });
     }
     // wide low billows rolling out at the base
     for (let i = 0; i < Math.round(6 * P); i++) {
-      const a = Math.random() * 6.2832, sp = 1.8 + Math.random() * 2.2;
-      spawnPuff(x, 0.7, z, { additive: false, smoke: true, base: 1.4, pop: (5 + Math.random() * 2.5) * P,
-        life: 3.0 + Math.random() * 1.6, maxOp: 0.34, shade: 0.14, spin: (Math.random() - 0.5),
-        vx: Math.cos(a) * sp, vy: 0.5 + Math.random() * 0.6, vz: Math.sin(a) * sp, delay: 0.05 + Math.random() * 0.15 });
+      const a = rng() * 6.2832, sp = 1.8 + rng() * 2.2;
+      spawnPuff(x, 0.7, z, { additive: false, smoke: true, base: 1.4, pop: (5 + rng() * 2.5) * P,
+        life: 3.0 + rng() * 1.6, maxOp: 0.34, shade: 0.14, spin: (rng() - 0.5),
+        vx: Math.cos(a) * sp, vy: 0.5 + rng() * 0.6, vz: Math.sin(a) * sp, delay: 0.05 + rng() * 0.15 });
     }
 
     // ---- SHOCKWAVE: a bigger, faster bright ground ring + a slower glowing rim ----
@@ -800,10 +826,10 @@
     pointBurst(x, z, Math.round(26 * P), 0x8b8175, 0.5, 2 + power * 0.4, 1.1, true);  // big dust kick-up
     const nEmber = Math.round(26 * P);
     for (let i = 0; i < nEmber; i++) {
-      const a = Math.random() * 6.2832, sp = 2 + Math.random() * 5 * P;
-      spawnPuff(x + Math.cos(a) * 0.6, cy + Math.random() * 1.0, z + Math.sin(a) * 0.6,
-        { additive: true, base: 0.2 + Math.random() * 0.18, pop: 0.1, life: 1.3 + Math.random() * 1.4,
-          maxOp: 1, vx: Math.cos(a) * sp, vy: 4 + Math.random() * 6, vz: Math.sin(a) * sp });
+      const a = rng() * 6.2832, sp = 2 + rng() * 5 * P;
+      spawnPuff(x + Math.cos(a) * 0.6, cy + rng() * 1.0, z + Math.sin(a) * 0.6,
+        { additive: true, base: 0.2 + rng() * 0.18, pop: 0.1, life: 1.3 + rng() * 1.4,
+          maxOp: 1, vx: Math.cos(a) * sp, vy: 4 + rng() * 6, vz: Math.sin(a) * sp });
     }
     addChunks(x, z, Math.round(18 * P), 9 + 7 * power, true);   // lots of chunky glowing debris
     addScorch(x, z, R * 0.55, 16);                              // big, long-lasting crater scorch
@@ -870,12 +896,12 @@
     _scarN.set(nx, ny, nz);
     if (_scarN.lengthSq() < 1e-6) _scarN.set(0, 0, 1); else _scarN.normalize();
     mesh.quaternion.setFromUnitVectors(_scarZ, _scarN);
-    mesh.rotateZ(Math.random() * Math.PI * 2);
+    mesh.rotateZ(rng() * Math.PI * 2);
     mesh.position.set(x + _scarN.x * 0.08, y + _scarN.y * 0.08, z + _scarN.z * 0.08);
     mesh.scale.set(size, size, 1);
     mesh.renderOrder = 3;
     scene.add(mesh);
-    scars.push({ mesh, mat, t: 0, hold: 80 + Math.random() * 40 });
+    scars.push({ mesh, mat, t: 0, hold: 80 + rng() * 40 });
   }
 
   // debris + dust knocked off the face, biased DOWN the wall (an avalanche,
@@ -888,20 +914,20 @@
     while (chunks.length > CHUNK_CAP - n) recycleChunk();
     const fall = Math.sqrt(Math.max(0.5, y) / 8.8);   // time to reach the street under chunk gravity
     for (let i = 0; i < n; i++) {
-      const glow = Math.random() < 0.25;
+      const glow = rng() < 0.25;
       const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = 0.7 + Math.random() * 1.1;
-      const along = (Math.random() - 0.5) * 2.4;
-      mesh.position.set(x + tx * along + nx * 0.3, y + (Math.random() - 0.3) * 1.6, z + tz * along + nz * 0.3);
-      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      const sc = 0.7 + rng() * 1.1;
+      const along = (rng() - 0.5) * 2.4;
+      mesh.position.set(x + tx * along + nx * 0.3, y + (rng() - 0.3) * 1.6, z + tz * along + nz * 0.3);
+      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
       mesh.scale.setScalar(sc);
       scene.add(mesh);
       chunks.push({
         mesh, hh: CHUNK_HH * sc,
-        vx: nx * (0.8 + Math.random() * 2.4) + tx * (Math.random() - 0.5) * 3,
-        vy: 0.5 - Math.random() * 3,                  // DOWNWARD bias — it pours off the wound
-        vz: nz * (0.8 + Math.random() * 2.4) + tz * (Math.random() - 0.5) * 3,
-        spin: (Math.random() - 0.5) * 14, t: 0, life: fall + 1.3 + Math.random() * 0.9,
+        vx: nx * (0.8 + rng() * 2.4) + tx * (rng() - 0.5) * 3,
+        vy: 0.5 - rng() * 3,                  // DOWNWARD bias — it pours off the wound
+        vz: nz * (0.8 + rng() * 2.4) + tz * (rng() - 0.5) * 3,
+        spin: (rng() - 0.5) * 14, t: 0, life: fall + 1.3 + rng() * 0.9,
         rest: 0, settled: false, trail: glow ? 0 : -1,
       });
     }
@@ -911,12 +937,12 @@
     const nd = Math.round(7 + 4 * power);
     for (let i = 0; i < nd; i++) {
       const f = i / nd;
-      spawnPuff(x + tx * (Math.random() - 0.5) * 2 + nx * 0.5, y - f * drop, z + tz * (Math.random() - 0.5) * 2 + nz * 0.5, {
-        additive: false, smoke: true, base: 1.0, pop: 3.2 + Math.random() * 2.2,
-        life: 1.7 + Math.random(), maxOp: 0.42, shade: 0.4 + Math.random() * 0.08,
-        spin: (Math.random() - 0.5),
-        vx: nx * 0.7 + tx * (Math.random() - 0.5), vy: -(1.5 + Math.random() * 2.5), vz: nz * 0.7 + tz * (Math.random() - 0.5),
-        delay: f * 0.5 + Math.random() * 0.08,
+      spawnPuff(x + tx * (rng() - 0.5) * 2 + nx * 0.5, y - f * drop, z + tz * (rng() - 0.5) * 2 + nz * 0.5, {
+        additive: false, smoke: true, base: 1.0, pop: 3.2 + rng() * 2.2,
+        life: 1.7 + rng(), maxOp: 0.42, shade: 0.4 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: nx * 0.7 + tx * (rng() - 0.5), vy: -(1.5 + rng() * 2.5), vz: nz * 0.7 + tz * (rng() - 0.5),
+        delay: f * 0.5 + rng() * 0.08,
       });
     }
   }
@@ -942,19 +968,19 @@
       while (chunks.length > CHUNK_CAP - 1) recycleChunk();
       // bias placement toward the wall + low; pieces farther out sit lower so the
       // heap mounds against the facade and tapers onto the pavement.
-      const out = Math.random() * Math.random() * spread;       // r^2 → clusters near 0 (the wall)
-      const along = (Math.random() - 0.5) * spread * 1.6;
+      const out = rng() * rng() * spread;       // r^2 → clusters near 0 (the wall)
+      const along = (rng() - 0.5) * spread * 1.6;
       const px = cx + gx * (0.35 + out) + tx * along;
       const pz = cz + gz * (0.35 + out) + tz * along;
       // mound height: tall against the wall, thinning outward, plus jitter
       const mound = Math.max(0, (1 - out / (spread + 0.01))) * size * 0.9;
-      const big = Math.random() < 0.28;
-      const sc = (big ? 1.3 + Math.random() * 1.1 : 0.6 + Math.random() * 0.8) * size;
-      const mesh = new THREE.Mesh(big ? rubbleGeo : chunkGeo, Math.random() < 0.5 ? rubbleMat : rubbleMat2);
-      mesh.scale.set(sc, sc * (0.6 + Math.random() * 0.5), sc * (0.8 + Math.random() * 0.5));
+      const big = rng() < 0.28;
+      const sc = (big ? 1.3 + rng() * 1.1 : 0.6 + rng() * 0.8) * size;
+      const mesh = new THREE.Mesh(big ? rubbleGeo : chunkGeo, rng() < 0.5 ? rubbleMat : rubbleMat2);
+      mesh.scale.set(sc, sc * (0.6 + rng() * 0.5), sc * (0.8 + rng() * 0.5));
       const hh = (big ? 0.2 : CHUNK_HH) * sc;
-      mesh.position.set(px, floorAt(px, pz) + hh + Math.random() * mound, pz);
-      mesh.rotation.set(Math.random() * 3, Math.random() * 6.28, Math.random() * 3);
+      mesh.position.set(px, floorAt(px, pz) + hh + rng() * mound, pz);
+      mesh.rotation.set(rng() * 3, rng() * 6.28, rng() * 3);
       scene.add(mesh);
       // born SETTLED — it's a heap, it doesn't fly. Long rest = persistent prop.
       chunks.push({ mesh, vx: 0, vy: 0, vz: 0, hh, spin: 0, t: 0, life: 1,
@@ -974,34 +1000,34 @@
     let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
     for (let i = 0; i < n; i++) {
       while (rebar.length >= REBAR_CAP) { const o = rebar.shift(); scene.remove(o.group); }
-      const along = (Math.random() - 0.5) * width * 0.85;
+      const along = (rng() - 0.5) * width * 0.85;
       const x = cx + tx * along + nx * 0.12;
       const z = cz + tz * along + nz * 0.12;
       const g = new THREE.Group();
       g.position.set(x, topY - 0.05, z);
       // root segment hangs DOWN out of the broken header, kinked outward
-      const len1 = 0.5 + Math.random() * 0.7;
+      const len1 = 0.5 + rng() * 0.7;
       const s1 = new THREE.Mesh(rebarGeo, rebarMat);
       s1.scale.y = len1; s1.position.y = -len1 / 2;
       // tilt it outward + a little sideways so bars splay instead of hanging neat
-      s1.rotation.z = (Math.random() - 0.5) * 0.5;
-      s1.rotation.x = (nz !== 0 ? 1 : 0) * (0.3 + Math.random() * 0.5) * (nz > 0 ? 1 : -1);
+      s1.rotation.z = (rng() - 0.5) * 0.5;
+      s1.rotation.x = (nz !== 0 ? 1 : 0) * (0.3 + rng() * 0.5) * (nz > 0 ? 1 : -1);
       g.add(s1);
       // a kinked tip on most bars (the L-bend that sells "torn from concrete")
-      if (Math.random() < 0.75) {
-        const len2 = 0.25 + Math.random() * 0.4;
+      if (rng() < 0.75) {
+        const len2 = 0.25 + rng() * 0.4;
         const s2 = new THREE.Mesh(rebarGeo, rebarMat);
         s2.scale.y = len2;
         // hang the tip off the bottom of the first segment, bent ~60-100°
-        s2.position.set((Math.random() - 0.5) * 0.1, -len1 - len2 / 2 * 0.4, (Math.random() - 0.5) * 0.1);
-        s2.rotation.z = (Math.random() - 0.5) * 1.8;
-        s2.rotation.x = (Math.random() - 0.5) * 1.8;
+        s2.position.set((rng() - 0.5) * 0.1, -len1 - len2 / 2 * 0.4, (rng() - 0.5) * 0.1);
+        s2.rotation.z = (rng() - 0.5) * 1.8;
+        s2.rotation.x = (rng() - 0.5) * 1.8;
         g.add(s2);
       }
       // splay the whole bundle outward from the facade
-      g.rotation.y = Math.atan2(nx, nz) + (Math.random() - 0.5) * 0.6;
+      g.rotation.y = Math.atan2(nx, nz) + (rng() - 0.5) * 0.6;
       scene.add(g);
-      rebar.push({ group: g, t: 0, hold: 78 + Math.random() * 40 });
+      rebar.push({ group: g, t: 0, hold: 78 + rng() * 40 });
     }
   }
 
@@ -1060,31 +1086,31 @@
     //     rolls down to the heap (this is the "dust sheet" the owner asked for)
     pointBurst(x, z, Math.round(22 + 14 * power), 0xa39a8c, 0.5, 3.5 + power * 1.2, 1.2, true, y);
     for (let i = 0; i < Math.round(5 + power * 3); i++) {
-      const a = Math.random() * 6.2832, sp = 1.2 + Math.random() * 1.8;
-      spawnPuff(x + nx * (0.4 + Math.random() * 0.6), y + (Math.random() - 0.4) * width * 0.5, z + nz * (0.4 + Math.random() * 0.6), {
-        additive: false, smoke: true, base: 1.4, pop: (4 + Math.random() * 3) * power,
-        life: 2.0 + Math.random() * 1.4, maxOp: 0.4, shade: 0.36 + Math.random() * 0.08,
-        spin: (Math.random() - 0.5),
-        vx: nx * sp + (Math.random() - 0.5), vy: 0.3 + Math.random() * 0.8, vz: nz * sp + (Math.random() - 0.5),
-        delay: Math.random() * 0.25,
+      const a = rng() * 6.2832, sp = 1.2 + rng() * 1.8;
+      spawnPuff(x + nx * (0.4 + rng() * 0.6), y + (rng() - 0.4) * width * 0.5, z + nz * (0.4 + rng() * 0.6), {
+        additive: false, smoke: true, base: 1.4, pop: (4 + rng() * 3) * power,
+        life: 2.0 + rng() * 1.4, maxOp: 0.4, shade: 0.36 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: nx * sp + (rng() - 0.5), vy: 0.3 + rng() * 0.8, vz: nz * sp + (rng() - 0.5),
+        delay: rng() * 0.25,
       });
     }
     // low dust rolling down the facade to the rubble pile (staggered cascade)
     const drop = Math.min(Math.max(2, top - bottom), 16);
     for (let i = 0; i < Math.round(5 + power * 2); i++) {
-      const f = Math.random();
-      spawnPuff(x + (Math.random() - 0.5) * width + nx * 0.5, top - f * drop, z + (Math.random() - 0.5) * width + nz * 0.5, {
-        additive: false, smoke: true, base: 1.0, pop: 3.4 + Math.random() * 2.0,
-        life: 1.6 + Math.random(), maxOp: 0.4, shade: 0.4 + Math.random() * 0.08,
-        spin: (Math.random() - 0.5),
-        vx: nx * 0.5, vy: -(1.5 + Math.random() * 2.0), vz: nz * 0.5,
+      const f = rng();
+      spawnPuff(x + (rng() - 0.5) * width + nx * 0.5, top - f * drop, z + (rng() - 0.5) * width + nz * 0.5, {
+        additive: false, smoke: true, base: 1.0, pop: 3.4 + rng() * 2.0,
+        life: 1.6 + rng(), maxOp: 0.4, shade: 0.4 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: nx * 0.5, vy: -(1.5 + rng() * 2.0), vz: nz * 0.5,
         delay: f * 0.5,
       });
     }
 
     // (6) the wound keeps smoking for a minute-plus — the show-off plume that
     //     tells the whole block a rocket hit here.
-    addBlastWound(x, y, z, nx, 0, nz, 60 + Math.random() * 30);
+    addBlastWound(x, y, z, nx, 0, nz, 60 + rng() * 30);
   };
 
   // ---- CBZ.cityDustKick — a cheap pooled DUST CLOUD at a blast seat ----------
@@ -1101,13 +1127,13 @@
     // a fast pale dust spray + a couple of slow rolling billows that linger
     pointBurst(x, z, Math.round(10 + 10 * P), 0x9a9082, 0.45, 2.2 + P * 1.2, 1.0, true, cy);
     for (let i = 0; i < Math.round(2 + P * 2); i++) {
-      const a = Math.random() * 6.2832, sp = 0.8 + Math.random() * 1.4;
-      spawnPuff(x + (Math.random() - 0.5) * 0.8, cy + 0.2 + Math.random() * 0.6, z + (Math.random() - 0.5) * 0.8, {
-        additive: false, smoke: true, base: 1.1, pop: (3.2 + Math.random() * 2.0) * P,
-        life: 1.6 + Math.random() * 1.0, maxOp: 0.34, shade: 0.36 + Math.random() * 0.08,
-        spin: (Math.random() - 0.5),
-        vx: Math.cos(a) * sp, vy: 0.5 + Math.random() * 0.8, vz: Math.sin(a) * sp,
-        delay: Math.random() * 0.12,
+      const a = rng() * 6.2832, sp = 0.8 + rng() * 1.4;
+      spawnPuff(x + (rng() - 0.5) * 0.8, cy + 0.2 + rng() * 0.6, z + (rng() - 0.5) * 0.8, {
+        additive: false, smoke: true, base: 1.1, pop: (3.2 + rng() * 2.0) * P,
+        life: 1.6 + rng() * 1.0, maxOp: 0.34, shade: 0.36 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: Math.cos(a) * sp, vy: 0.5 + rng() * 0.8, vz: Math.sin(a) * sp,
+        delay: rng() * 0.12,
       });
     }
   };
@@ -1125,24 +1151,24 @@
     while (chunks.length > CHUNK_CAP - n) recycleChunk();
     const span = Math.max(1, topY - bottomY);
     for (let i = 0; i < n; i++) {
-      const glow = Math.random() < 0.18;
+      const glow = rng() < 0.18;
       const mesh = new THREE.Mesh(chunkGeo, glow ? chunkMatHot : chunkMat);
-      const sc = 0.7 + Math.random() * 1.3;
+      const sc = 0.7 + rng() * 1.3;
       // distribute up the column (biased toward the upper half — the wall above
       // the wound is what comes down) and across the wound width along the face
-      const h = bottomY + Math.pow(Math.random(), 0.7) * span;
-      const along = (Math.random() - 0.5) * width * 1.1;
+      const h = bottomY + Math.pow(rng(), 0.7) * span;
+      const along = (rng() - 0.5) * width * 1.1;
       mesh.position.set(x + tx * along + nx * 0.3, h, z + tz * along + nz * 0.3);
-      mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
       mesh.scale.setScalar(sc);
       scene.add(mesh);
       const fall = Math.sqrt(Math.max(0.5, h) / 8.8);
       chunks.push({
         mesh, hh: CHUNK_HH * sc,
-        vx: nx * (0.4 + Math.random() * 1.8) + tx * (Math.random() - 0.5) * 2.2,
-        vy: -(0.5 + Math.random() * 2.5),               // pours straight down the face
-        vz: nz * (0.4 + Math.random() * 1.8) + tz * (Math.random() - 0.5) * 2.2,
-        spin: (Math.random() - 0.5) * 12, t: 0, life: fall + 1.4 + Math.random() * 1.0,
+        vx: nx * (0.4 + rng() * 1.8) + tx * (rng() - 0.5) * 2.2,
+        vy: -(0.5 + rng() * 2.5),               // pours straight down the face
+        vz: nz * (0.4 + rng() * 1.8) + tz * (rng() - 0.5) * 2.2,
+        spin: (rng() - 0.5) * 12, t: 0, life: fall + 1.4 + rng() * 1.0,
         rest: 0, settled: false, trail: glow ? 0 : -1,
       });
     }
@@ -1180,13 +1206,13 @@
     const nCol = Math.round(8 + power * 4);
     for (let i = 0; i < nCol; i++) {
       const f = i / nCol;                                 // staggered top→bottom
-      spawnPuff(x + (Math.random() - 0.5) * width * 1.2 + nx * 0.5, top - f * drop,
-        z + (Math.random() - 0.5) * width * 1.2 + nz * 0.5, {
-          additive: false, smoke: true, base: 1.2, pop: (4.0 + Math.random() * 2.6) * power,
-          life: 2.0 + Math.random() * 1.4, maxOp: 0.44, shade: 0.38 + Math.random() * 0.08,
-          spin: (Math.random() - 0.5),
-          vx: nx * 0.6 + (Math.random() - 0.5), vy: -(1.6 + Math.random() * 2.6), vz: nz * 0.6 + (Math.random() - 0.5),
-          delay: f * 0.6 + Math.random() * 0.08,
+      spawnPuff(x + (rng() - 0.5) * width * 1.2 + nx * 0.5, top - f * drop,
+        z + (rng() - 0.5) * width * 1.2 + nz * 0.5, {
+          additive: false, smoke: true, base: 1.2, pop: (4.0 + rng() * 2.6) * power,
+          life: 2.0 + rng() * 1.4, maxOp: 0.44, shade: 0.38 + rng() * 0.08,
+          spin: (rng() - 0.5),
+          vx: nx * 0.6 + (rng() - 0.5), vy: -(1.6 + rng() * 2.6), vz: nz * 0.6 + (rng() - 0.5),
+          delay: f * 0.6 + rng() * 0.08,
         });
     }
     // a tall dust COLUMN boiling up off the wound (the bomb's signature plume)
@@ -1282,36 +1308,36 @@
     // (3) knock a parapet/coping block loose off the roofline (it tumbles down)
     if (topY > 7) {
       let px = fnx, pz = fnz;
-      if (Math.hypot(px, pz) < 0.3) { const a = Math.random() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
+      if (Math.hypot(px, pz) < 0.3) { const a = rng() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
       parapetChunk(faceX, topY, faceZ, px, pz);
-      if (power >= 2.2) parapetChunk(faceX + (Math.random() - 0.5) * width, topY, faceZ + (Math.random() - 0.5) * width, px, pz);
+      if (power >= 2.2) parapetChunk(faceX + (rng() - 0.5) * width, topY, faceZ + (rng() - 0.5) * width, px, pz);
     }
     // (4) a fat dust PALL rolling off the collapsing section + a tall column
     pointBurst(faceX, faceZ, Math.round(24 + 16 * power), 0xa39a8c, 0.6, 2.4 + power, 1.5, true, woundY);
     for (let i = 0; i < Math.round(6 + power * 3); i++) {
-      const a = Math.random() * 6.2832, sp = 1.4 + Math.random() * 2.2;
-      spawnPuff(faceX + fnx * (0.4 + Math.random()), woundY + (Math.random() - 0.3) * width, faceZ + fnz * (0.4 + Math.random()), {
-        additive: false, smoke: true, base: 1.6, pop: (5 + Math.random() * 3) * power,
-        life: 3.0 + Math.random() * 1.8, maxOp: 0.42, shade: 0.34 + Math.random() * 0.08,
-        spin: (Math.random() - 0.5),
-        vx: fnx * sp + (Math.random() - 0.5), vy: 0.6 + Math.random() * 1.0, vz: fnz * sp + (Math.random() - 0.5),
-        delay: Math.random() * 0.3,
+      const a = rng() * 6.2832, sp = 1.4 + rng() * 2.2;
+      spawnPuff(faceX + fnx * (0.4 + rng()), woundY + (rng() - 0.3) * width, faceZ + fnz * (0.4 + rng()), {
+        additive: false, smoke: true, base: 1.6, pop: (5 + rng() * 3) * power,
+        life: 3.0 + rng() * 1.8, maxOp: 0.42, shade: 0.34 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: fnx * sp + (rng() - 0.5), vy: 0.6 + rng() * 1.0, vz: fnz * sp + (rng() - 0.5),
+        delay: rng() * 0.3,
       });
     }
     // low dust cascading down the whole face to the heap (staggered)
     const drop = Math.min(Math.max(3, top - bottom), 26);
     for (let i = 0; i < Math.round(7 + power * 3); i++) {
-      const f = Math.random();
-      spawnPuff(faceX + (Math.random() - 0.5) * width + fnx * 0.5, top - f * drop, faceZ + (Math.random() - 0.5) * width + fnz * 0.5, {
-        additive: false, smoke: true, base: 1.2, pop: 3.6 + Math.random() * 2.4,
-        life: 1.8 + Math.random() * 1.2, maxOp: 0.42, shade: 0.4 + Math.random() * 0.08,
-        spin: (Math.random() - 0.5),
-        vx: fnx * 0.5, vy: -(1.6 + Math.random() * 2.4), vz: fnz * 0.5,
+      const f = rng();
+      spawnPuff(faceX + (rng() - 0.5) * width + fnx * 0.5, top - f * drop, faceZ + (rng() - 0.5) * width + fnz * 0.5, {
+        additive: false, smoke: true, base: 1.2, pop: 3.6 + rng() * 2.4,
+        life: 1.8 + rng() * 1.2, maxOp: 0.42, shade: 0.4 + rng() * 0.08,
+        spin: (rng() - 0.5),
+        vx: fnx * 0.5, vy: -(1.6 + rng() * 2.4), vz: fnz * 0.5,
         delay: f * 0.6,
       });
     }
     // (5) the collapse keeps smoking for a minute-plus + a ground scorch ring
-    addBlastWound(faceX, woundY, faceZ, fnx, 0, fnz, 60 + Math.random() * 30);
+    addBlastWound(faceX, woundY, faceZ, fnx, 0, fnz, 60 + rng() * 30);
     addScorch(faceX + fnx * 1.2, faceZ + fnz * 1.2, width * 0.5 + 2, 18);
     // (6) feedback — a heavy structural rumble (sound is owned by the caller's
     // explosion; we add the felt shake of a section coming down).
@@ -1328,15 +1354,15 @@
   function parapetChunk(x, topY, z, nx, nz) {
     while (chunks.length > CHUNK_CAP - 1) recycleChunk();
     const mesh = new THREE.Mesh(chunkGeo, chunkMat);
-    const sy = 3 + Math.random() * 2;
-    mesh.scale.set(4 + Math.random() * 2.5, sy, 4 + Math.random() * 2.5);  // a ~1.2–1.8u coping block
+    const sy = 3 + rng() * 2;
+    mesh.scale.set(4 + rng() * 2.5, sy, 4 + rng() * 2.5);  // a ~1.2–1.8u coping block
     mesh.position.set(x + nx * 0.8, topY + 0.5, z + nz * 0.8);
-    mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     scene.add(mesh);
     chunks.push({
       mesh, hh: CHUNK_HH * sy,
-      vx: nx * (1.5 + Math.random() * 2), vy: 1.2 + Math.random() * 1.5, vz: nz * (1.5 + Math.random() * 2),
-      spin: (Math.random() - 0.5) * 6, t: 0, life: Math.sqrt(Math.max(1, topY) / 8.8) + 2.2,
+      vx: nx * (1.5 + rng() * 2), vy: 1.2 + rng() * 1.5, vz: nz * (1.5 + rng() * 2),
+      spin: (rng() - 0.5) * 6, t: 0, life: Math.sqrt(Math.max(1, topY) / 8.8) + 2.2,
       rest: 0, settled: false, trail: -1,
     });
   }
@@ -1361,7 +1387,7 @@
     // a breath of concrete dust out of the wound itself
     pointBurst(x, z, Math.round(16 + 10 * power), 0x9a9082, 0.42, 3.5 + power, 1.0, true, y);
     // (3) the wound smokes for a minute-plus — visible across the district
-    addBlastWound(x, y, z, nx, ny, nz, 60 + Math.random() * 30);
+    addBlastWound(x, y, z, nx, ny, nz, 60 + rng() * 30);
     // (4) a hit near the roofline knocks a parapet block loose. Collider tops
     // under the impact point locate the roof (the same wall AABBs cityScorch /
     // cityBreach search).
@@ -1375,7 +1401,7 @@
     }
     if (topY > 7 && (roof || y > topY - 3.2)) {
       let px = nx, pz = nz;
-      if (Math.hypot(px, pz) < 0.3) { const a = Math.random() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
+      if (Math.hypot(px, pz) < 0.3) { const a = rng() * 6.2832; px = Math.cos(a); pz = Math.sin(a); }
       parapetChunk(x, topY, z, px, pz);
     }
   };
@@ -1416,19 +1442,19 @@
       if (w.t >= w.dur) { wounds.splice(i, 1); continue; }
       w.acc -= dt;
       if (w.acc > 0) continue;
-      w.acc = 0.45 + Math.random() * 0.35;
+      w.acc = 0.45 + rng() * 0.35;
       const cool = 1 - w.t / w.dur;
-      spawnPuff(w.x + w.nx * 0.6 + (Math.random() - 0.5) * 0.5, w.y + 0.3, w.z + w.nz * 0.6 + (Math.random() - 0.5) * 0.5, {
-        additive: false, smoke: true, base: 0.9, pop: (3.2 + Math.random() * 2.2) * (0.55 + 0.45 * cool),
-        life: 3.6 + Math.random() * 1.6, maxOp: 0.32 * (0.45 + 0.55 * cool), shade: 0.12 + Math.random() * 0.04,
-        spin: (Math.random() - 0.5) * 0.8,
-        vx: w.nx * (0.5 + Math.random() * 0.4) + (Math.random() - 0.5) * 0.3,
-        vy: 1.1 + Math.random() * 0.8,
-        vz: w.nz * (0.5 + Math.random() * 0.4) + (Math.random() - 0.5) * 0.3,
+      spawnPuff(w.x + w.nx * 0.6 + (rng() - 0.5) * 0.5, w.y + 0.3, w.z + w.nz * 0.6 + (rng() - 0.5) * 0.5, {
+        additive: false, smoke: true, base: 0.9, pop: (3.2 + rng() * 2.2) * (0.55 + 0.45 * cool),
+        life: 3.6 + rng() * 1.6, maxOp: 0.32 * (0.45 + 0.55 * cool), shade: 0.12 + rng() * 0.04,
+        spin: (rng() - 0.5) * 0.8,
+        vx: w.nx * (0.5 + rng() * 0.4) + (rng() - 0.5) * 0.3,
+        vy: 1.1 + rng() * 0.8,
+        vz: w.nz * (0.5 + rng() * 0.4) + (rng() - 0.5) * 0.3,
       });
       if (w.t < 6) spawnPuff(w.x + w.nx * 0.3, w.y, w.z + w.nz * 0.3, {
-        additive: true, base: 0.35, pop: 1.1 + Math.random() * 0.7, life: 0.6 + Math.random() * 0.4,
-        maxOp: 0.85, vy: 0.7, spin: (Math.random() - 0.5) * 2,
+        additive: true, base: 0.35, pop: 1.1 + rng() * 0.7, life: 0.6 + rng() * 0.4,
+        maxOp: 0.85, vy: 0.7, spin: (rng() - 0.5) * 2,
       });
     }
     // smoking craters: a thin smoke column rises off each big-blast scorch,
@@ -1438,17 +1464,17 @@
       if (w.t >= w.dur) { smolders.splice(i, 1); continue; }
       w.acc -= dt;
       if (w.acc > 0) continue;
-      w.acc = 0.5 + Math.random() * 0.4;
+      w.acc = 0.5 + rng() * 0.4;
       const cool = 1 - w.t / w.dur;
-      spawnPuff(w.x + (Math.random() - 0.5) * 0.9, 0.6, w.z + (Math.random() - 0.5) * 0.9, {
-        additive: false, smoke: true, base: 1.0, pop: (3.4 + Math.random() * 2.4) * (0.5 + 0.5 * cool),
-        life: 3.4 + Math.random() * 1.8, maxOp: 0.3 * (0.4 + 0.6 * cool), shade: 0.12 + Math.random() * 0.04,
-        spin: (Math.random() - 0.5) * 0.8,
-        vx: (Math.random() - 0.5) * 0.4, vy: 1.2 + Math.random() * 0.7, vz: (Math.random() - 0.5) * 0.4,
+      spawnPuff(w.x + (rng() - 0.5) * 0.9, 0.6, w.z + (rng() - 0.5) * 0.9, {
+        additive: false, smoke: true, base: 1.0, pop: (3.4 + rng() * 2.4) * (0.5 + 0.5 * cool),
+        life: 3.4 + rng() * 1.8, maxOp: 0.3 * (0.4 + 0.6 * cool), shade: 0.12 + rng() * 0.04,
+        spin: (rng() - 0.5) * 0.8,
+        vx: (rng() - 0.5) * 0.4, vy: 1.2 + rng() * 0.7, vz: (rng() - 0.5) * 0.4,
       });
       if (w.t < 5) spawnPuff(w.x, 0.4, w.z, {
-        additive: true, base: 0.35, pop: 1.0 + Math.random() * 0.6, life: 0.6 + Math.random() * 0.4,
-        maxOp: 0.8, vy: 0.7, spin: (Math.random() - 0.5) * 2,
+        additive: true, base: 0.35, pop: 1.0 + rng() * 0.6, life: 0.6 + rng() * 0.4,
+        maxOp: 0.8, vy: 0.7, spin: (rng() - 0.5) * 2,
       });
     }
     const grav = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
@@ -1518,8 +1544,8 @@
           c.settled = true; c.rest = 0;
           c.vx = c.vy = c.vz = 0; c.spin = 0;
           // lie flat on the deck rather than frozen at a tumble angle
-          c.mesh.rotation.x = (Math.random() - 0.5) * 0.5;
-          c.mesh.rotation.z = (Math.random() - 0.5) * 0.5;
+          c.mesh.rotation.x = (rng() - 0.5) * 0.5;
+          c.mesh.rotation.z = (rng() - 0.5) * 0.5;
         }
       }
       // glowing shards drip a faint ember spark every so often as they fly

@@ -81,6 +81,36 @@
     pedLethal: 14, npcDriverLethal: 30,
   };
 
+  // ---- MARINE (boat) HANDLING — NO-DECOY FIX -------------------------------
+  // playercars.js's FEEL table already tags style "boat" with `marine:true`,
+  // but nothing downstream ever branched on it: a player who cycled into the
+  // boat visual was still driving ordinary road physics wearing a hull mesh.
+  // This is the minimal real branch: (a) a boat drifting over open water
+  // skips the building/seawall wall-resolver + clampToCity — a hull nosing
+  // out of the harbor toward the sea shouldn't crunch on the same knee-wall
+  // collider that stops a pedestrian at the quay; (b) it rides at a fixed
+  // near-water Y instead of the flat car y=0 (this engine has no terrain-
+  // following suspension at all — every car sits at y=0 — so "float" here
+  // just means "don't sit at the car height"); (c) slower/wider turning, tuned
+  // in carDynamics below. No buoyancy sim — the bar is "reads like a boat,
+  // not a car", not physical accuracy. WATER_Y is a shade above swim.js's
+  // SURF_Y (-0.38, a half-submerged SWIMMER's chest height) since a boat
+  // rides ON the surface, not in it.
+  const WATER_Y = -0.12;
+  // true iff this car's CURRENT handling class is the boat one — checks the
+  // live playercars.js feel hook first (style-cycler can change it mid-drive)
+  // and falls back to the model's own body so a freshly-entered boat (before
+  // cityPromotePlayerCar has run) still reads as marine.
+  function isMarineCar(car) {
+    if (!car) return false;
+    const feel = car._playerCarFeel;
+    if (feel) return !!feel.marine;
+    return !!(car.model && car.model.body === "boat");
+  }
+  // feature-detected: swim.js exposes "is this point open water" (used for the
+  // player's own swim state); reuse it here instead of re-deriving shorelines.
+  function overWater(x, z) { return !!(CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)); }
+
   // ---- RUN-OVER JUICE ------------------------------------------------------
   // A lethal run-over currently fires shake + a speed-bleed but — unlike a melee
   // land() (combat.js) — NO hit-stop and NO bass impact, so a kill at speed reads
@@ -867,7 +897,8 @@
   //      position/heading.y every frame but never these), so the wreck persists. ----
   function crumpleCar(car, sev, impact) {
     car.crumple = Math.min(1, (car.crumple || 0) + sev);
-    if (car._cside == null) car._cside = Math.random() < 0.5 ? -1 : 1;
+    if (car._cside == null) car._cside = rng() < 0.5 ? -1 : 1;
+    addCornerDamage(car, sev, impact);   // localized handling: mirrors crashdeform's per-corner split
     const c = car.crumple, grp = car.group, ud = grp.userData;
     // unified visuals now carry REAL panel craters (crashdeform.js), so the
     // whole-body squash drops to a hint — the old full squash stacked on the
@@ -1438,6 +1469,135 @@
     return { pct, label, valueMul, engine, crumple: cr };
   }
   CBZ.cityVehicleCondition = vehicleCondition;
+
+  // ---- SURFACE-DEPENDENT GRIP ------------------------------------------------
+  // GTA-r128 tarmac is the implicit default everywhere; nothing previously asked
+  // "what's actually under this car". Roads carry a `district` tag already used
+  // by traffic.js's far-seeder (highway/desert/snow/farmland/forest/town/island/
+  // bridge, or untagged = city grid asphalt) — cheap, already-loaded data, zero
+  // new colliders. A car still glued to its lane (the common case: ~all ambient
+  // traffic, the player on a road) reads its OWN road's district for free. A car
+  // that's left the road network entirely (the player free-roaming a beach/
+  // field, a wrecked AI car spun onto the sidewalk) falls back to
+  // CBZ.cityBiomeAt(x,z) — a short linear scan over the registered landmasses
+  // (a handful of entries), so still cheap and only paid off-road. Rain
+  // (CBZ.weather.intensity) layers a wet-asphalt penalty on top of whichever
+  // surface we land on — pavement loses the most (it has the most grip to lose),
+  // a dirt/sand road barely changes (already loose).
+  const SURFACE_GRIP = {
+    asphalt: 1.0, dirt: 0.74, sand: 0.62, snow: 0.5, grass: 0.7,
+  };
+  function districtSurface(d) {
+    if (d === "desert") return "sand";
+    if (d === "snow") return "snow";
+    if (d === "farmland" || d === "forest") return "dirt";
+    return "asphalt";   // highway / city grid / town / island / bridge / untagged
+  }
+  function biomeSurface(b) {
+    if (b === "desert") return "sand";
+    if (b === "snow") return "snow";
+    if (b === "forest" || b === "farmland") return "dirt";
+    if (b === "city") return "grass";    // off the paved lane but still in town = verge/sidewalk planter
+    return "asphalt";                    // purpose-built islands (speedway/airport/military/etc) are paved
+  }
+  function surfaceFor(car) {
+    const r = car && car.road;
+    if (r) {
+      // still within (roughly) this road's width of its stored centreline? keep
+      // reading ITS district even off to the shoulder a touch — exactly matches
+      // what the AI lane-keeper already treats as "on this road".
+      const A = CBZ.city && CBZ.city.arena;
+      const half = (A && A.ROAD ? A.ROAD : 9) * 0.7;
+      const lat = r.vertical ? car.pos.x - r.x : car.pos.z - r.z;
+      if (Math.abs(lat) < half) return districtSurface(r.district);
+    }
+    if (CBZ.cityBiomeAt) return biomeSurface(CBZ.cityBiomeAt(car.pos.x, car.pos.z));
+    return "asphalt";
+  }
+  // PUBLIC: surface grip multiplier (0..1] for a car right now — read by the
+  // friction-circle math below and exposed for HUD/debug or other modules.
+  function surfaceGripMul(car) {
+    const kind = surfaceFor(car);
+    let mul = SURFACE_GRIP[kind] || 1.0;
+    // wet asphalt sheds grip fast; an already-loose surface has less to lose.
+    const wet = (CBZ.weather && CBZ.weather.intensity) || 0;
+    if (wet > 0) {
+      const wetLoss = kind === "asphalt" ? 0.3 : kind === "grass" ? 0.22 : 0.08;
+      mul *= 1 - wetLoss * wet;
+    }
+    return { mul: Math.max(0.32, mul), kind };
+  }
+  CBZ.cityCarSurfaceGrip = surfaceGripMul;
+
+  // ---- LOCALIZED (per-corner) CRASH DAMAGE -----------------------------------
+  // crashdeform.js owns the VISUAL per-corner crater state (front/rear/sideL/
+  // sideR) but keeps it in a private LRU registry with no public getter — we
+  // can't reach into it without editing a file outside this task's scope. Every
+  // call site that feeds crashdeform.js (cityCarImpact) already computes the
+  // SAME impact-direction split crumpleCar uses below, so we mirror it into a
+  // small persistent accumulator on the car itself (car._cornerDmg), driven by
+  // the identical front/rear/side math at the identical call sites. This stays
+  // in lock-step with the visual craters (same inputs, same frame) without
+  // touching crashdeform.js. Values are 0..1ish and only grow (a corner that's
+  // been hit stays weaker — matches the permanent crumple read).
+  function addCornerDamage(car, sev, impact) {
+    if (!sev || sev <= 0) return;
+    const cd = car._cornerDmg || (car._cornerDmg = { front: 0, rear: 0, sideL: 0, sideR: 0 });
+    if (!impact) { cd.front = Math.min(1, cd.front + sev * 0.5); cd.rear = Math.min(1, cd.rear + sev * 0.5); return; }
+    const fx = Math.sin(car.heading || 0), fz = Math.cos(car.heading || 0);
+    const sx = Math.cos(car.heading || 0), sz = -Math.sin(car.heading || 0);
+    const f = impact.x * fx + impact.z * fz, s = impact.x * sx + impact.z * sz;
+    if (Math.abs(f) >= Math.abs(s)) {
+      if (f > 0) cd.front = Math.min(1, cd.front + sev); else cd.rear = Math.min(1, cd.rear + sev);
+    } else if (s >= 0) cd.sideR = Math.min(1, cd.sideR + sev); else cd.sideL = Math.min(1, cd.sideL + sev);
+  }
+  // PUBLIC: read a car's corner-damage record (or a pristine one if undamaged).
+  CBZ.cityCarCornerDamage = function (car) {
+    return (car && car._cornerDmg) || { front: 0, rear: 0, sideL: 0, sideR: 0 };
+  };
+
+  // ---- LIGHTWEIGHT AI SLIP MODEL (shared, NOT the full player grip block) ---
+  // Ordinary calm traffic stays on the cheap lane-snap path (order-37's main
+  // loop below) for performance — hundreds of cars don't need tire physics to
+  // sit in a lane. But the moment a car is in a HIGH-STAKES state — wrecked/
+  // spinning out, mid road-rage ram, fleeing a PIT, off-rails after a crash —
+  // it deserves to actually carry lateral momentum and lose control like the
+  // player can, instead of just curving on a fixed spin rate. This reuses (not
+  // duplicates) the same forward/lateral split + slip-curve + surface-grip
+  // shape as the player's carDynamics/grip code, trimmed to the handful of
+  // terms that matter for a car that's already out of normal driving control:
+  // no steering input, no per-gear torque, no weight-transfer friction circle
+  // (those only matter for a DRIVEN car) — just "how fast does this car's
+  // sideways momentum bleed off, on whatever it's currently sliding across".
+  // State carried on the car: vx/vz (world-space velocity — already a field
+  // every car has from the solid-collision code), spin (yaw rate, rad/s).
+  function aiSlipStep(car, dt, gripBase) {
+    const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+    let vx = car.vx == null ? fx * (car.v || 0) : car.vx;
+    let vz = car.vz == null ? fz * (car.v || 0) : car.vz;
+    const fwdDot = vx * fx + vz * fz;
+    let latX = vx - fx * fwdDot, latZ = vz - fz * fwdDot;
+    const speed = Math.hypot(vx, vz);
+    const rawSlip = Math.hypot(latX, latZ);
+    const slipRatio = rawSlip / Math.max(3, speed);
+    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(0.4, 1 - (slipRatio - 0.18) * 1.6);
+    const surf = surfaceGripMul(car).mul;
+    const grip = Math.max(0.5, (gripBase == null ? 6 : gripBase)) * slideGrip * surf;
+    const latKeep = Math.max(0, 1 - grip * dt);
+    latX *= latKeep; latZ *= latKeep;
+    // heading follows the spin (already decaying in the caller) PLUS a touch of
+    // the surviving slip feeding back into yaw — a sliding tail visibly drags
+    // the nose with it instead of the body translating sideways like a puck.
+    car.heading += (latX * fz - latZ * fx) * 0.03 * dt;
+    vx = fx * fwdDot + latX; vz = fz * fwdDot + latZ;
+    car.vx = vx; car.vz = vz;
+    // car.v stays a non-negative SPEED MAGNITUDE (every other reader in this
+    // file — crash thresholds, damage curves, audio — assumes that), even
+    // though the velocity vector itself can now point off-heading mid-slide.
+    car.v = Math.hypot(vx, vz);
+    return Math.hypot(latX, latZ);
+  }
+
   function carDynamics(car) {
     const bk = bodyKind(car);
     const rarity = car.model ? Math.max(0, Math.min(1, car.model.rarity || 0)) : 0.35;
@@ -1473,6 +1633,13 @@
       accel *= feel.accel; top *= feel.top; turn *= feel.turn; grip *= feel.grip; brake *= feel.brake;
       roll = feel.roll == null ? 0.6 : feel.roll; drift = feel.drift == null ? 1.0 : feel.drift;
       if (feel.twoWheel) roll = 0;   // a bike leans via its own rider rig, not whole-body roll
+      // MARINE: a hull doesn't carve like a car — it comes around SLOW and WIDE.
+      // FEEL.boat's turn:1.0 is a straight sedan-rate multiplier (playercars.js
+      // never branches on `marine` itself — that's this fix), so cut the yaw
+      // rate + widen the effective turning circle here instead of in the FEEL
+      // table: a long, low steerLock means holding full rudder still sweeps a
+      // big arc rather than snapping the bow around like a wheeled steer lock.
+      if (feel.marine) { turn *= 0.5; steerLock *= 0.55; wheelbase *= 1.6; }
     } else {
       if (bk === "coupe") { roll = 0.4; drift = 0.9; }
       else if (bk === "muscle") { roll = 0.7; drift = 1.35; }
@@ -1498,7 +1665,27 @@
       // front flats steer the car: pull toward the flat side (left = +heading)
       flatPull = (f & 1 ? 0.14 : 0) - (f & 2 ? 0.14 : 0);
     }
-    return { accel, top, turn, grip, brake, dmg: d, roll, drift, wheelbase, steerLock, drag, rolling, flatPull };
+    // LOCALIZED (per-corner) CRASH DAMAGE folded into the grip computation: a
+    // car hit hard on one corner handles worse FROM that corner specifically,
+    // not just a flat global cut. Front/rear damage eats overall grip+turn
+    // (a crumpled axle can't transmit cornering force cleanly); a side hit
+    // (sideL/sideR) biases the car toward its undamaged side, same as a blown
+    // front tire's flatPull. cd mirrors crashdeform.js's per-corner craters —
+    // see addCornerDamage above, fed by the identical impact-direction math at
+    // every crumpleCar() call site.
+    const cd = car._cornerDmg;
+    let cornerGripMul = 1, cornerPull = 0;
+    if (cd) {
+      cornerGripMul = Math.max(0.45, 1 - Math.max(cd.front, cd.rear) * 0.32 - Math.max(cd.sideL, cd.sideR) * 0.16);
+      grip *= cornerGripMul; turn *= 1 - Math.max(cd.front, cd.rear) * 0.18;
+      cornerPull = (cd.sideR - cd.sideL) * 0.16;     // a dead side drags the nose toward the healthy one
+    }
+    // SURFACE: asphalt is the baseline; dirt/sand/snow/wet tarmac loosen the
+    // tires' hold on the road. Sampled here (once per carDynamics call, i.e.
+    // once a frame for the driven car) so callers don't each re-derive it.
+    const surf = surfaceGripMul(car);
+    grip *= surf.mul;
+    return { accel, top, turn, grip, brake, dmg: d, roll, drift, wheelbase, steerLock, drag, rolling, flatPull, cornerGripMul, cornerPull, surfMul: surf.mul, surfKind: surf.kind };
   }
   function vehicleDims(car) {
     return (car && (car._visualDims || car.dims)) || { width: 2, length: 4.4, wheelbase: 2.7 };
@@ -1524,12 +1711,73 @@
   // through each band and DROP on the shift — five fake gears read as a real
   // box without simulating one.
   const GEAR_TOP = [0.14, 0.30, 0.50, 0.74, 1.01];
+  // ---- PER-GEAR TORQUE-BAND CURVE ----------------------------------------
+  // Real engines aren't a flat taper to top speed: torque is soft right off
+  // idle, builds to a mid-band peak, then falls again near the redline (where
+  // you'd shift). A handful of (revFrac, torqueMul) keypoints per gear is
+  // cheap (one lerp per frame) and makes a downshift/upshift actually feel
+  // like it changed available power, instead of one smooth accel taper for
+  // the whole speed range. revFrac is this gear's OWN 0..1 band (matches the
+  // `sN`/`glo`/GEAR_TOP[gear] math the audio rev code already computes), so
+  // the same curve drives both throttle response and the engine voice — sound
+  // and power stay in sync by construction (one curve, two readers).
+  // 1st gear bites hard off idle (launch torque); top gear is long and flat
+  // (cruise gear, no torque headroom to spare); middle gears get the classic
+  // low→peak→fall hump. modshop.js Stage N performance reshapes this curve
+  // (flatter, higher peak, later fall-off) rather than just scaling a number.
+  const GEAR_TORQUE = [
+    [[0, 0.62], [0.18, 1.0], [0.55, 0.96], [1, 0.74]],     // 1st: bites instantly, eases late
+    [[0, 0.7], [0.3, 1.0], [0.65, 0.92], [1, 0.7]],        // 2nd
+    [[0, 0.68], [0.35, 0.97], [0.7, 0.88], [1, 0.66]],     // 3rd
+    [[0, 0.64], [0.4, 0.92], [0.75, 0.82], [1, 0.62]],     // 4th
+    [[0, 0.6], [0.45, 0.84], [0.8, 0.76], [1, 0.58]],      // 5th/top: long, flatter, less headroom
+  ];
+  // PUBLIC (read-only reference): modshop.js's Stage N performance mod builds
+  // a RESHAPED copy of this table (flatter, higher-peak, later-falling curves)
+  // instead of just multiplying a flat scalar — see cityApplyCarMod("perf",...).
+  CBZ.cityGearTorqueBase = GEAR_TORQUE;
+  function lerpCurve(curve, t) {
+    t = Math.max(0, Math.min(1, t));
+    for (let i = 1; i < curve.length; i++) {
+      if (t <= curve[i][0]) {
+        const a = curve[i - 1], b = curve[i], span = b[0] - a[0];
+        const u = span > 1e-5 ? (t - a[0]) / span : 0;
+        return a[1] + (b[1] - a[1]) * u;
+      }
+    }
+    return curve[curve.length - 1][1];
+  }
+  // gear index + this-gear rev fraction for a given speedNorm (0..1 of top
+  // speed) — shared by the throttle integrator AND the audio rev code so a
+  // shift always lands on the same gear both readers agree on.
+  function gearFor(sN) {
+    let gear = 0; while (gear < GEAR_TOP.length - 1 && sN >= GEAR_TOP[gear]) gear++;
+    const glo = gear === 0 ? 0 : GEAR_TOP[gear - 1];
+    const revFrac = Math.max(0, Math.min(1, (sN - glo) / Math.max(0.05, GEAR_TOP[gear] - glo)));
+    return { gear, revFrac };
+  }
+  // torque multiplier for the gear/rev-fraction a car is CURRENTLY turning,
+  // optionally reshaped by a performance-mod curve override (modshop.js
+  // publishes car._perfGearTorque — same [revFrac,mul] keypoint shape).
+  function gearTorqueMul(car, sN) {
+    const { gear, revFrac } = gearFor(sN);
+    const table = (car && car._perfGearTorque) || GEAR_TORQUE;
+    const curve = table[Math.min(gear, table.length - 1)];
+    return { mul: lerpCurve(curve, revFrac), gear, revFrac };
+  }
   function wallRadius(car) {
     const d = vehicleDims(car);
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
   }
   function collideVehicle(car) {
     if (!CBZ.collide || !car || !car.pos) return 0;
+    // MARINE: a boat out on open water has no buildings/seawall to bump — skip
+    // the road-car wall resolver entirely so it can nose past the harbor's
+    // knee-wall collider (height-gated for a JUMPING pedestrian, not a boat
+    // hull sitting at y=0) instead of crunching to a stop at the dock like it
+    // hit a building. Still resolves normally over land (a beached/marooned
+    // boat, or the moment it noses back toward the quay, behaves like any car).
+    if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) return 0;
     const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
     CBZ.collide(car.pos, radius);
     const d = vehicleDims(car);
@@ -1562,7 +1810,33 @@
     const handbrake = !!k[" "];   // SPACE = handbrake → break grip and DRIFT
     if (throttle > 0) {
       if (car.v < 0) car.v += D.brake * dt;           // brake out of reverse first
-      else car.v += ACCEL * dt * (1 - Math.min(0.7, car.v / MAXV));   // accel tapers near top end
+      else {
+        // REAL GEAR/TORQUE: the old flat top-end taper is replaced by a
+        // per-gear torque-band curve (gearTorqueMul) — same gear math the
+        // engine-voice code below reads, so a downshift's extra grunt and its
+        // sound stay in sync. A loose surface also caps how much of that
+        // torque the tires can put down (wheelspin on sand/snow/wet tarmac)
+        // instead of pure ground friction silently eating the power.
+        const sN0 = Math.min(1, Math.abs(car.v) / MAXV);
+        const gt = gearTorqueMul(car, sN0);
+        const wheelspinCap = throttle > 0 && Math.abs(car.v) < MAXV * 0.4 ? Math.min(1, 0.55 + D.surfMul * 0.6) : 1;
+        // AERO DRAG TAPER: the gear-torque curve alone models engine/gearbox
+        // power delivery per gear -- it has no notion of the car's own
+        // aerodynamic drag rising with v^2, which is what actually caps real
+        // top speed (the old flat taper this replaced folded that in
+        // implicitly). Without an equivalent term a car sustains far more of
+        // its peak torque all the way to MAXV than before and reaches a given
+        // speed dramatically sooner (verified: without this, a full-throttle
+        // run into a wall a fixed distance away hits at a meaningfully higher
+        // speed than the pre-existing formula produced for the same run,
+        // enough to flip a survivable "hard" wall hit into a fatal
+        // "catastrophic" one). Keep the same overall envelope the old taper
+        // guaranteed -- multiply the gear curve by it directly -- while still
+        // letting the per-gear shape do its job in the low/mid range where
+        // the old taper was close to 1 anyway.
+        const dragTaper = 1 - Math.min(0.7, sN0);
+        car.v += ACCEL * gt.mul * dragTaper * wheelspinCap * dt;
+      }
     } else if (throttle < 0) {
       if (car.v > 0.5) car.v -= D.brake * dt;         // S brakes hard when rolling forward
       else car.v -= (ACCEL * 0.55) * dt;              // then backs up
@@ -1599,6 +1873,9 @@
       // a blown FRONT tire drags the wheel steadily toward the flat — you hold
       // opposite lock the whole way home (carDynamics signs it per corner)
       if (D.flatPull) car.heading += D.flatPull * dt * Math.min(1, vmag / 8);
+      // a dead corner from CRASH damage (sideL/sideR) drags the nose toward
+      // its healthy side, same channel as the flat-tire pull above.
+      if (D.cornerPull) car.heading += D.cornerPull * dt * Math.min(1, vmag / 8);
     }
     // ---- GRIP model: split the PREVIOUS velocity into forward + lateral
     //      (relative to the now-steered heading), bleed the lateral slip down by
@@ -1618,11 +1895,32 @@
     const power = throttle > 0 && vmag > 10 ? 1.4 * driftMul : 0;
     const rawSlip = Math.hypot(latX, latZ);
     const slipRatio = rawSlip / Math.max(3, vmag);
+    // ---- WEIGHT TRANSFER feeds the grip curve (Marco Monster "Car Physics for
+    //      Games"): braking dives the nose (front axle load UP, rear DOWN —
+    //      the rear has LESS grip to resist a slide, which is exactly why
+    //      trail-braking into a corner can snap the tail loose); accelerating
+    //      squats the tail (rear load UP, front DOWN — power-on understeer).
+    //      accelG mirrors the cosmetic pitch-lean's sign convention below so the
+    //      body dive you SEE is the same load shift the tires actually feel.
+    const accelG = throttle > 0 ? -1 : (throttle < 0 && car.v > 0.5 ? 1.3 : 0);
+    // FRICTION CIRCLE: a tire has one shared budget for longitudinal (brake/
+    // accel) + lateral (cornering) force — you can't have 100% of both. Hard
+    // braking (accelG>0, i.e. nose-dive) eats into the rear's lateral budget on
+    // top of the static load shift, so a hard stop mid-corner genuinely induces
+    // a slide instead of just scrubbing speed. brakeDemand is how much of the
+    // rear tire's grip the braking itself is currently spending.
+    const brakeDemand = throttle < 0 && car.v > 0.5 ? Math.min(0.55, vmag / Math.max(8, MAXV) * 0.6) : 0;
+    const rearLoadGrip = 1 - Math.max(-0.22, Math.min(0.3, accelG * 0.18)) - brakeDemand;   // dive/brake steals rear grip
     // Tire force peaks at modest slip, then falls once the tire is sliding. It
     // makes a drift recoverable without the rear snapping unrealistically back.
     const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(0.38, 1 - (slipRatio - 0.18) * 1.75);
-    const gripFactor = handbrake ? 0.75 : Math.max(0.42, (D.grip + (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0) - power) * slideGrip);
-    const latKeep = handbrake ? Math.min(0.95, 0.9 + driftMul * 0.02) : Math.max(0, 1 - gripFactor * dt);
+    // D.grip already carries SURFACE (asphalt/dirt/sand/snow/rain) and
+    // LOCALIZED CORNER DAMAGE (carDynamics folds both in — see surfaceGripMul
+    // + cornerGripMul there) — this block only adds the per-frame DYNAMIC
+    // terms (weight transfer / friction circle / slip curve) on top.
+    const gripFactor = handbrake ? 0.75 * D.surfMul
+      : Math.max(0.42, (D.grip * rearLoadGrip + (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0) - power) * slideGrip);
+    const latKeep = handbrake ? Math.min(0.95, 0.9 + driftMul * 0.02 + (1 - D.surfMul) * 0.5) : Math.max(0, 1 - gripFactor * dt);
     latX *= latKeep; latZ *= latKeep;
     const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
     const slip = Math.hypot(latX, latZ);
@@ -1649,25 +1947,52 @@
       if (car._rimT > 0.16) { car._rimT = 0; emitTireSmoke(car, 1); emitTireSmoke(car, -1); }
     }
     laySkids(car, skidAmt, fwdX, fwdZ);
+    // ---- POOLED fading skid-TRAILS + drift/burnout DUST (systems/skidmarks.js
+    //      + systems/dustfx.js) — feature-detected, ADDITIVE to the opaque
+    //      laySkids() rubber above; reuses the exact same skidAmt slip signal
+    //      so both effects only ever run while the tyres are actually working.
+    //      Smallest possible hook: compute the two rear-wheel world seats (same
+    //      rb/tw geometry laySkids already derives) and hand them to the pooled
+    //      systems, which own all their own pooling/eviction/fade internally.
+    if (skidAmt > 0.3 && (CBZ.cityBeginSkid || CBZ.cityDriftDust)) {
+      const rd = vehicleDims(car);
+      const rb2 = (rd.wheelbase || 2.7) * 0.45;
+      const two2 = car._playerCarFeel && car._playerCarFeel.twoWheel;
+      const tw2 = two2 ? 0 : (rd.width || 2) * 0.4;
+      const wlx = car.pos.x - fwdX * rb2 + fwdZ * tw2, wlz = car.pos.z - fwdZ * rb2 - fwdX * tw2;
+      const wrx = car.pos.x - fwdX * rb2 - fwdZ * tw2, wrz = car.pos.z - fwdZ * rb2 + fwdX * tw2;
+      if (CBZ.cityBeginSkid && CBZ.cityUpdateSkid) {
+        CBZ.cityBeginSkid(car, 0, wlx, wlz); CBZ.cityUpdateSkid(car, 0, wlx, wlz);
+        if (!two2) { CBZ.cityBeginSkid(car, 1, wrx, wrz); CBZ.cityUpdateSkid(car, 1, wrx, wrz); }
+      }
+      if (CBZ.cityDriftDust) {
+        CBZ.cityDriftDust(wlx, 0.15, wlz, { amt: skidAmt });
+        if (!two2) CBZ.cityDriftDust(wrx, 0.15, wrz, { amt: skidAmt });
+      }
+    } else if (CBZ.cityEndSkid) { CBZ.cityEndSkid(car, 0); CBZ.cityEndSkid(car, 1); }
     // ---- ENGINE VOICE: revs climb through the fake gear band, snap down on
-    //      the upshift. Reverse whines low; revving at a standstill screams. ----
+    //      the upshift. Reverse whines low; revving at a standstill screams.
+    //      gear/revFrac come from the SAME gearFor() the throttle integrator
+    //      above reads (via gearTorqueMul), so a downshift's extra grunt and
+    //      the note you hear are always the same gear, every frame. ----
     if (CBZ.carAudio) {
       const sN = Math.min(1, vmag / Math.max(1, MAXV));
-      let gear = 0; while (gear < GEAR_TOP.length - 1 && sN >= GEAR_TOP[gear]) gear++;
-      const glo = gear === 0 ? 0 : GEAR_TOP[gear - 1];
-      let rev = car.v < 0 ? Math.min(1, vmag / REV) * 0.4
-        : (sN - glo) / Math.max(0.05, GEAR_TOP[gear] - glo);
+      const gf = gearFor(sN);
+      const gear = gf.gear;
+      let rev = car.v < 0 ? Math.min(1, vmag / REV) * 0.4 : gf.revFrac;
       rev = 0.06 + Math.max(0, Math.min(1, rev)) * 0.9;
       if (throttle > 0 && vmag < 2.5) rev = Math.max(rev, 0.5);   // revving it off the line / mid-burnout
       const shifted = car._gear != null && gear > car._gear && throttle > 0;
       car._gear = gear;
       CBZ.carAudio.update(rev, throttle > 0 ? 1 : 0, skidAmt, engineFlavor(car), shifted);
     }
-    // ---- WEIGHT TRANSFER (visual game-feel): the body PITCHES (squat on
-    //      throttle, dive on brake) and ROLLS into a turn, eased so it reads as
-    //      mass shifting. softer cars (high D.roll) lean more. Touches only the
-    //      group rotation x/z, which the crash crumple leaves alone. ----
-    const accelG = throttle > 0 ? -1 : (throttle < 0 && car.v > 0.5 ? 1.3 : 0);
+    // ---- WEIGHT TRANSFER (visual + physical — accelG is the SAME load-shift
+    //      signal the grip model above already consumed, so the dive/squat you
+    //      SEE here is exactly the load shift the tires felt this frame, not a
+    //      decorative coincidence): the body PITCHES (squat on throttle, dive
+    //      on brake) and ROLLS into a turn, eased so it reads as mass shifting.
+    //      softer cars (high D.roll) lean more. Touches only the group rotation
+    //      x/z, which the crash crumple leaves alone. ----
     const pitchTarget = Math.max(-0.07, Math.min(0.09, accelG * 0.05 * Math.min(1, vmag / 14)));
     // body leans OUTWARD of the turn: steering at speed plus any tail-out slip.
     const latG = car._steerInput * Math.min(1, vmag / 12) + (latX * fwdZ - latZ * fwdX) * 0.16;
@@ -1783,8 +2108,16 @@
         if (P.dead) return;                  // death.js ejects + ragdolls the driver
       }
     }
-    if (CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
-    car.group.position.set(car.pos.x, 0, car.pos.z);
+    // MARINE: skip the mainland-bounds clamp while out on open water (it would
+    // otherwise yank a boat leaving the harbor straight back onto the quay —
+    // the same clamp a pedestrian/road car needs to never sail off the map
+    // edge doesn't apply to something that's SUPPOSED to be out past it), and
+    // ride at the water surface instead of the flat car-height y=0 (this
+    // engine has no terrain-following suspension — every car sits at y=0 — so
+    // this is the one place a vehicle's Y ever moves off it).
+    const marine = isMarineCar(car) && overWater(car.pos.x, car.pos.z);
+    if (!marine && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
+    car.group.position.set(car.pos.x, marine ? WATER_Y : 0, car.pos.z);
     car.group.rotation.set(car._pitch || 0, car.heading, car._roll || 0);   // y=heading, x/z = weight-transfer lean
     if (vmag > 6) runOver(car, vmag);
     P.pos.set(car.pos.x, 0, car.pos.z);
@@ -2127,9 +2460,24 @@
     const top = Math.max(13, car.baseV || 13);
     car.v += Math.min(18 * dt, top - car.v);
     car.v = Math.max(0, car.v);
-    car.pos.x += Math.sin(car.heading) * car.v * dt;
-    car.pos.z += Math.cos(car.heading) * car.v * dt;
-    collideVehicle(car);
+    car.vx = Math.sin(car.heading) * car.v; car.vz = Math.cos(car.heading) * car.v;
+    car.pos.x += car.vx * dt; car.pos.z += car.vz * dt;
+    const before = car.pos.x, beforeZ = car.pos.z;
+    const pushed = collideVehicle(car);
+    // a PIT-chaser that clips a wall/roadblock mid-ram now actually loses
+    // control instead of silently absorbing the push-back: this is a real
+    // high-stakes state (a ram, by definition, is driven flat-out and reckless)
+    // so it earns the same slip-capable response a wrecked car gets — a glance
+    // off a corner kicks real lateral momentum into vx/vz, then aiSlipStep
+    // bleeds it off by surface grip over the following frames instead of the
+    // car just snapping back onto its beeline next frame.
+    if (pushed > 0.04 && car.v > 7) {
+      const nx = before - car.pos.x, nz = beforeZ - car.pos.z, nl = Math.hypot(nx, nz) || 1;
+      const kick = Math.min(car.v * 0.5, 6);
+      car.vx += (nx / nl) * kick; car.vz += (nz / nl) * kick;
+      car.spin = (car.spin || 0) + (rng() - 0.5) * Math.min(2.2, car.v * 0.12);
+    }
+    aiSlipStep(car, dt, 6);   // decays any slide; keeps car.v/vx/vz consistent (no-op when undisturbed)
     if (arena) arena.clampToCity(car.pos, wallRadius(car));
     car.group.position.set(car.pos.x, 0, car.pos.z);
     car.group.rotation.y = car.heading;
@@ -2250,14 +2598,23 @@
       }
       // WRECKED (just crashed): spin out off-rails and coast to a stop, then
       // recover and drive on — skips all lane-keeping so the crash actually reads.
+      // SLIP-CAPABLE: a hard hit already left real sideways momentum in c.vx/vz
+      // (setCrashVelocity, offRails=true) that the OLD code threw away every
+      // frame by re-deriving motion purely from the scalar c.v along c.heading
+      // — a spin-out could never actually carry a slide. aiSlipStep (the same
+      // lightweight grip/slip shape the player uses, trimmed for an
+      // uncontrolled car) now decays that real lateral momentum against
+      // whatever surface it's sliding across instead of discarding it, so a
+      // PIT/T-bone genuinely skids before it settles, not just curves.
       if (c.wreckT > 0) {
         setBrake(c, false);               // nobody's on the pedal mid-spin
         c.wreckT -= dt;
         c.v *= Math.pow(0.04, dt);
+        if (c.vx != null) { c.vx *= Math.pow(0.04, dt); c.vz *= Math.pow(0.04, dt); }
         c.spin = (c.spin || 0) * Math.pow(0.25, dt);
         c.heading += c.spin * dt;
-        c.pos.x += Math.sin(c.heading) * c.v * dt;
-        c.pos.z += Math.cos(c.heading) * c.v * dt;
+        aiSlipStep(c, dt, 5.5);           // bleeds lateral slip by surface grip; rewrites c.vx/vz/v
+        c.pos.x += c.vx * dt; c.pos.z += c.vz * dt;
         const pushed = collideVehicle(c);
         if (A.clampToCity) A.clampToCity(c.pos, wallRadius(c));
         // slammed a building / lamppost mid-spin: crumple the car (the structure

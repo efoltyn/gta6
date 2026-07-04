@@ -288,6 +288,24 @@
     return null;
   }
 
+  // ---------- PERMANENT IDENTITY (city/identity.js, feature-detected) --------
+  // def._identityId names the CURRENT living holder of this archetype's title
+  // ("the Magnate" etc. — the def object itself is a stable, long-lived
+  // singleton, never recreated, so it's the natural home for "who currently
+  // holds this title"). Minted ONCE per incumbent: if a previous identity is
+  // already alive on the def we just reuse it (e.g. ensureDetail/recast paths
+  // never mint twice for the same body); a dead/cleared def mints a fresh one,
+  // which is exactly the "new individual" promotion onDeath produces below.
+  function identityFor(def, p) {
+    const R = CBZ.cityIdentities; if (!R || !R.register) return null;
+    let rec = def._identityId ? R.get(def._identityId) : null;
+    if (!rec || rec.status === "dead") {
+      rec = R.register("vip", p.name || def.title, { vipKind: def.kind, title: def.title });
+      def._identityId = rec.id;
+    }
+    return rec;
+  }
+
   // ---------- casting ------------------------------------------------------
   function castPrincipal(p, slot, def, gang, A) {
     stashPed(p);
@@ -319,6 +337,8 @@
       paintFit(p, gang.color);
     } else if (def.suit != null) paintFit(p, def.suit);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
+    const idRec = identityFor(def, p);
+    p._identityId = idRec ? idRec.id : null;       // peds.js death hook (separate task) reads this
     slot.principal = p;
   }
 
@@ -342,6 +362,57 @@
     q.hp = Math.max(q.hp, 150); q.maxHp = Math.max(q.maxHp || 0, 150);
     q.baseSpeed = 2.3; q.guard = null; q.rage = null; q.fear = 0; q.alarmed = 0;
     q.state = "walk"; q.path = null; q.pause = 0;
+  }
+
+  // ---------- PERMANENT DEATH: retire the incumbent, announce, history -------
+  // Snapshots final stats onto the identity record (extra fields survive
+  // serialize/apply per identity.js's contract) so leaderboard.js's Hall of
+  // Fame can show what they had when they went down. Idempotent: identity.js's
+  // markDead() no-ops a second call on an already-dead id, and we guard the
+  // snapshot/announce on that same first-call transition.
+  function retireIdentity(p, slot, killedBy) {
+    const R = CBZ.cityIdentities;
+    if (!R || !R.markDead || !p || !p._identityId) return;
+    const before = R.get(p._identityId);
+    if (!before || before.status === "dead") return;     // already processed (e.g. peds.js hook beat us to it)
+    const rec = R.markDead(p._identityId, { killedBy: killedBy || null });
+    if (!rec) return;
+    // final stats for leaderboard.js's Hall of Fame row (extra fields survive
+    // serialize/apply per identity.js's contract — see its `apply` loop).
+    rec.finalLevel = p.vipLvl || 0;
+    rec.finalLoot = (p.cash || 0) + valuablesValue(p.valuables);
+    if (!rec._vipAnnounced) {
+      rec._vipAnnounced = true;
+      const title = (slot && slot.def && slot.def.title) || rec.title || "VIP";
+      const msg = "💀 " + title + " " + (rec.name || "") + " has been killed — the title passes to someone new.";
+      if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) {} }
+      else if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 3.6);
+    }
+  }
+  // economy.js item value lookup (same shape leaderboard.js uses) — local copy
+  // since vips.js doesn't otherwise need cityEcon, kept tiny + guarded.
+  function valuablesValue(vals) {
+    const e = CBZ.cityEcon; if (!e || !e.ITEMS || !vals) return 0;
+    let s = 0;
+    for (const v of vals) { const it = e.ITEMS[v]; if (it && it.value) s += it.value; }
+    return s;
+  }
+  // death callback for kind 'vip' — registered so that IF peds.js's
+  // cityKillPed hook (a separate task this wave) calls markDead directly via
+  // p._identityId before our own per-frame scan below observes pr.dead, the
+  // identity still flips to dead/announced exactly once (markDead is
+  // idempotent; retireIdentity's own status check keeps OUR call a no-op in
+  // that race). The "promote a new individual" half needs no extra code here:
+  // identityFor() mints a fresh id the next time castPrincipal() runs for
+  // this def, because def._identityId then points at a dead record.
+  if (CBZ.cityIdentities && CBZ.cityIdentities.onDeathRegister) {
+    CBZ.cityIdentities.onDeathRegister("vip", function (rec) {
+      if (rec._vipAnnounced) return;          // our own scan already announced this one
+      rec._vipAnnounced = true;
+      const msg = "💀 " + (rec.title || "VIP") + " " + (rec.name || "") + " has been killed — the title passes to someone new.";
+      if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(msg); } catch (e) {} }
+      else if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 3.6);
+    });
   }
 
   // ---------- the LEVEL tag: "Lv.91 Magnate" over the head -----------------
@@ -764,6 +835,13 @@
       if (pr.dead) {
         // the body is the payday (deadLoot carries the ice). The detail finishes
         // the fight over it, holds a beat, then stands down and the slot rotates.
+        // PERMANENCE: retire the identity the moment we observe the body is
+        // gone — idempotent against peds.js's cityKillPed hook (separate task)
+        // also calling markDead via p._identityId, whichever fires first wins.
+        // No killer reference survives on the ped itself (cityKillPed's `imp`
+        // is transient), so we record the cause as "killed" with no attacker —
+        // the identity record's `killedAt` timestamp is still real and useful.
+        retireIdentity(pr, slot, null);
         scanThreat(slot, dt);
         driveGuards(slot, dt);
         driveCops(slot, dt);

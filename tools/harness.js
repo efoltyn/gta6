@@ -60,6 +60,14 @@ Obj3D.prototype.add = function () { for (const o of arguments) { if (o) { o.pare
 Obj3D.prototype.remove = function (o) { const i = this.children.indexOf(o); if (i >= 0) { this.children.splice(i, 1); o.parent = null; } return this; };
 Obj3D.prototype.traverse = function (fn) { fn(this); for (const c of this.children.slice()) c.traverse(fn); };
 Obj3D.prototype.lookAt = function () {};
+// real THREE.Object3D has rotateX/Y/Z (rotate about a local axis); the stub
+// lacked them (only Geo.prototype had them) even though real Mesh/Group/Sprite
+// objects support this -- approximate by accumulating onto the plain Euler
+// stub's fields, which is exact for a single axis and good enough for tests
+// that only care that the mesh visibly picked a random-ish orientation.
+Obj3D.prototype.rotateX = function (a) { this.rotation.x = (this.rotation.x || 0) + a; return this; };
+Obj3D.prototype.rotateY = function (a) { this.rotation.y = (this.rotation.y || 0) + a; return this; };
+Obj3D.prototype.rotateZ = function (a) { this.rotation.z = (this.rotation.z || 0) + a; return this; };
 Obj3D.prototype.updateMatrix = function () { if (!this.matrix) this.matrix = new Matrix4(); return this.matrix; };
 Obj3D.prototype.updateMatrixWorld = function () {};
 Obj3D.prototype.getWorldPosition = function (v) { if (v && v.copy) v.copy(this.position); return v; };

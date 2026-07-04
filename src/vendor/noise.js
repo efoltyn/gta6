@@ -313,3 +313,181 @@
   };
 
 })(typeof window !== "undefined" ? window : (typeof self !== "undefined" ? self : this));
+
+/* ============================================================
+   SHARED RIDGED-MOUNTAIN BUILDER — window.noise.buildRidgedRange()
+
+   WHY this lives here (consolidation, not a new system): world/terrain.js
+   (the far backdrop "hero peaks") and city/biome_snow.js (the snow biome's
+   ringing range) each hand-rolled an IDENTICAL pipeline — seeded value-noise
+   -> ridged-fbm -> per-vertex altitude/slope shading -> a displaced grid
+   strip emitted as non-indexed flat-shaded triangles. They had drifted apart
+   in small but visible ways (snowline 0.48 vs 0.42, slightly different snow-
+   wobble amplitude) for no documented reason. This is now the ONE place that
+   math lives; both callers pass their own layout/amplitude/seed config and
+   get byte-identical noise + shading behaviour. Desert's box-stack mesas are
+   a deliberately different aesthetic and do NOT use this (left alone).
+
+   Pure-function core (hash2/vnoise/ridgedFbm) has zero THREE dependency, so
+   it's safe to call from anywhere. buildRidge()/buildRidgedRange() need
+   THREE (BufferGeometry/Color/Vector3) and no-op (return null) if absent —
+   keeps tools/harness.js (headless) safe even if this file is reordered.
+
+   SHARED SNOWLINE: 0.45 of peak height (the terrain.js 0.48 and biome_snow.js
+   0.42 values were unexplained drift around the same intent — "snow starts
+   a bit below the summit" — so 0.45 is the single reasoned middle, with the
+   same +/-0.25-ish wobble amplitude both callers already used).
+============================================================ */
+(function (global) {
+  "use strict";
+  const noise = global.noise || (global.noise = {});
+
+  // -- seeded value-noise (hash + smoothstep-lerp), 2-D, deterministic -----
+  function hash2(ix, iz) {
+    let h = (ix * 374761393 + iz * 668265263) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967296;                   // 0..1
+  }
+  function smoothN(t) { return t * t * (3 - 2 * t); }
+  function vnoise(x, z) {
+    const ix = Math.floor(x), iz = Math.floor(z);
+    const fx = x - ix, fz = z - iz;
+    const a = hash2(ix, iz), b = hash2(ix + 1, iz);
+    const c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
+    const ux = smoothN(fx), uz = smoothN(fz);
+    return (a * (1 - ux) + b * ux) * (1 - uz) + (c * (1 - ux) + d * ux) * uz;
+  }
+  // -- RIDGED fbm: sharp connected ridgelines (5 octaves) -------------------
+  function ridgedFbm(x, z) {
+    let sum = 0, freq = 1, amp = 0.5, prev = 1;
+    for (let o = 0; o < 5; o++) {
+      let n = vnoise(x * freq, z * freq);
+      n = 1 - Math.abs(2 * n - 1);            // ridge fold
+      n = n * n;                              // sharpen
+      sum += n * amp * prev;                  // weight by previous octave
+      prev = n;
+      freq *= 2;                              // lacunarity
+      amp *= 0.5;                             // gain
+    }
+    return sum;                               // ~0..1-ish
+  }
+  noise.rangeHash2 = hash2;
+  noise.rangeVnoise = vnoise;
+  noise.rangeRidgedFbm = ridgedFbm;
+
+  // SHARED snowline fraction (see file header WHY) — exported so callers /
+  // tooling can read the single source of truth instead of re-typing it.
+  const SNOWLINE_FRAC = 0.45;
+  const SNOWLINE_WOBBLE = 0.25;
+  noise.RANGE_SNOWLINE_FRAC = SNOWLINE_FRAC;
+
+  function shadeVert(palette, y, peakH, upDot, snowWobble, fogT, out) {
+    // ragged snowline ~45% of peak height, wobbled by low-freq noise
+    const snowline = peakH * (SNOWLINE_FRAC + (snowWobble - 0.5) * SNOWLINE_WOBBLE);
+    const above = y > snowline;
+    const steep = upDot < 0.52;              // cliff: snow slides off
+    if (!above || steep) {
+      const dk = steep ? 0.71 : (1 - Math.min(1, y / Math.max(1, snowline))) * 0.5;
+      out.copy(palette.rock).lerp(palette.rockDark, dk);
+    } else {
+      const lit = Math.min(1, Math.max(0, (upDot - 0.55) / 0.45));
+      out.copy(palette.snowShade).lerp(palette.snow, lit);
+    }
+    if (fogT > 0 && palette.fog) out.lerp(palette.fog, fogT);
+    return out;
+  }
+  noise.rangeShadeVert = shadeVert;
+
+  // -- build ONE ridge strip as a non-indexed displaced grid ----------------
+  //    p0->p1 = ridge spine; depthDir = unit vector pointing AWAY from the
+  //    playable side (the range body extends that way). Returns
+  //    { geo, spine:[{x,z,h}] } (spine = crest sample per column, for
+  //    colliders). `cfg` fields:
+  //      cols, rows, peakAmp, depthLen, seedOff, noiseScale  (required)
+  //      footGuard: 0..1 fraction of rows over which height ramps from 0 at
+  //                 the near edge (valley/flat-floor guard) — omit/0 to skip.
+  //      fogBase, fogDepth: baked distance-haze lerp (0 = none)
+  //      palette: {rock,rockDark,snow,snowShade,fog?} THREE.Color instances
+  function buildRidge(THREE, p0, p1, depthDir, cfg) {
+    if (!THREE) return null;
+    const cols = cfg.cols, rows = cfg.rows;
+    const peakAmp = cfg.peakAmp, depthLen = cfg.depthLen;
+    const seedOff = cfg.seedOff, noiseScale = cfg.noiseScale;
+    const fogBase = cfg.fogBase || 0, fogDepth = cfg.fogDepth || 0;
+    const footGuard = cfg.footGuard || 0;          // e.g. 0.18 or 0.28
+    const dx = p1.x - p0.x, dz = p1.z - p0.z;
+    const gx = [], gz = [], gy = [], gf = [];
+    for (let r = 0; r <= rows; r++) {
+      const dv = r / rows;                          // 0 at spine edge .. 1 deep
+      gx[r] = []; gz[r] = []; gy[r] = []; gf[r] = [];
+      for (let c = 0; c <= cols; c++) {
+        const t = c / cols;
+        const bx = p0.x + dx * t + depthDir.x * (dv * depthLen);
+        const bz = p0.z + dz * t + depthDir.z * (dv * depthLen);
+        const nx = (bx + seedOff) * noiseScale;
+        const nz = (bz - seedOff) * noiseScale;
+        let h = ridgedFbm(nx, nz) * peakAmp;
+        // low-freq envelope along the ridge: tall peaks + saddles
+        const env = 0.45 + 0.55 * vnoise(t * 3.3 + seedOff * 0.01, seedOff * 0.02);
+        h *= env;
+        // depth TENT: crest near mid-depth, falls off front & back
+        const tent = Math.sin(Math.min(1, dv * 1.15) * Math.PI);
+        h *= 0.25 + 0.75 * tent;
+        if (footGuard > 0) {
+          // guard: force y->0 at the near edge (flat floor / taper to ground)
+          const guard = Math.min(1, dv / footGuard);
+          h *= guard * guard;
+        }
+        gx[r][c] = bx; gz[r][c] = bz; gy[r][c] = h;
+        gf[r][c] = Math.min(1, fogBase + dv * fogDepth);
+      }
+    }
+    // record spine (crest) heights along the ridge for colliders: max height
+    // across depth at each column.
+    const spine = [];
+    for (let c = 0; c <= cols; c++) {
+      let mh = 0, mr = 1;
+      for (let r = 1; r <= rows; r++) if (gy[r][c] > mh) { mh = gy[r][c]; mr = r; }
+      spine.push({ x: gx[mr][c], z: gz[mr][c], h: mh });
+    }
+    const tris = cols * rows * 2;
+    const pos = new Float32Array(tris * 3 * 3);
+    const col = new Float32Array(tris * 3 * 3);
+    let pi = 0, ci = 0;
+    const up = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), D = new THREE.Vector3();
+    const _cu = new THREE.Color();
+    const palette = cfg.palette;
+    function emitTri(a, b, cc, fa, fb, fc) {
+      e1.subVectors(b, a); e2.subVectors(cc, a);
+      up.crossVectors(e1, e2);
+      let up_y = up.y; if (up_y < 0) up_y = -up_y;
+      const len = up.length() || 1;
+      const upDot = up_y / len;
+      const verts = [a, b, cc], fogs = [fa, fb, fc];
+      for (let k = 0; k < 3; k++) {
+        const vv = verts[k];
+        pos[pi++] = vv.x; pos[pi++] = vv.y; pos[pi++] = vv.z;
+        const wob = vnoise(vv.x * 0.02 + seedOff, vv.z * 0.02 - seedOff);
+        shadeVert(palette, vv.y, peakAmp, upDot, wob, fogs[k], _cu);
+        col[ci++] = _cu.r; col[ci++] = _cu.g; col[ci++] = _cu.b;
+      }
+    }
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        A.set(gx[r][c], gy[r][c], gz[r][c]);
+        B.set(gx[r][c + 1], gy[r][c + 1], gz[r][c + 1]);
+        C.set(gx[r + 1][c], gy[r + 1][c], gz[r + 1][c]);
+        D.set(gx[r + 1][c + 1], gy[r + 1][c + 1], gz[r + 1][c + 1]);
+        emitTri(A, C, B, gf[r][c], gf[r + 1][c], gf[r][c + 1]);
+        emitTri(B, C, D, gf[r][c + 1], gf[r + 1][c], gf[r + 1][c + 1]);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    return { geo: g, spine: spine };
+  }
+  noise.buildRidgedRange = buildRidge;
+})(typeof window !== "undefined" ? window : (typeof self !== "undefined" ? self : this));

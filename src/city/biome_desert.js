@@ -92,6 +92,83 @@
 
   const BGU = THREE.BufferGeometryUtils;
 
+  // ===========================================================================
+  //  DUNE-RIPPLE SHADER (modeled on keaukraine/webgl-dunes) — applied to the
+  //  basin's main sand plane below. WHY a shader instead of another static
+  //  tint pass: the basin already reads as "sand-colored," but static ground
+  //  never reads as SAND — the wind-carved ripple pattern is what sells grain
+  //  underfoot. Ported by hand into plain GLSL strings (no bundler, no new
+  //  dependency): the vertex shader dots the (flat-shaded, so effectively
+  //  world-up) normal against a fixed wind direction to get a windward/
+  //  leeward slope coefficient; the fragment shader scrolls TWO UV sets over
+  //  time — a slow coarse ripple crest pattern and a faster fine-grain
+  //  texture — blended by that coefficient so windward faces show crisper
+  //  ripple crests and leeward faces blur/soften, exactly the read of sand
+  //  grains migrating with the wind on a static mesh. Pure GLSL procedural
+  //  stripes (sin-based) stand in for a texture map — no image asset needed,
+  //  matching this repo's no-texture-dependency convention for procedural
+  //  ground (see the vertex-colored apron above).
+  //  ONE material, ONE mesh — this replaces the ground plane's flat cmat()
+  //  with zero extra draw calls (still exactly the 1 draw call section 1
+  //  budgeted for the basin plane).
+  // ===========================================================================
+  function makeDuneRippleMaterial(baseHex) {
+    const base = new THREE.Color(baseHex == null ? SAND : baseHex);
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uWindDir: { value: new THREE.Vector2(0.86, 0.51) },  // fixed prevailing wind (normalized-ish)
+        uBaseColor: { value: base },
+      },
+      vertexShader: [
+        "varying vec2 vUv;",
+        "varying float vWind;",           // windward(+1)..leeward(-1) slope coefficient
+        "uniform vec2 uWindDir;",
+        "void main() {",
+        "  vUv = uv;",
+        // world-space normal (flat ground plane: this is ~straight up, but the
+        // dot product still gives a stable per-fragment coefficient so the
+        // same material drops onto any dune-shaped mesh unmodified later).
+        "  vec3 wn = normalize(mat3(modelMatrix) * normal);",
+        "  vWind = dot(wn.xz, normalize(uWindDir));",
+        "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "precision mediump float;",
+        "varying vec2 vUv;",
+        "varying float vWind;",
+        "uniform float uTime;",
+        "uniform vec2 uWindDir;",
+        "uniform vec3 uBaseColor;",
+        // cheap 1D ripple stripe: a sharpened sine gives a crest/trough read
+        // without a texture sample (no image asset — pure procedural GLSL).
+        "float ripple(vec2 p, float freq) {",
+        "  float s = sin(p.x * freq) * 0.6 + sin((p.x + p.y) * freq * 0.53) * 0.4;",
+        "  return s;",
+        "}",
+        "void main() {",
+        "  vec2 wind = normalize(uWindDir);",
+        "  vec2 perp = vec2(-wind.y, wind.x);",
+        // two scrolling UV sets: coarse wind-ripple crests drift SLOWLY along
+        // the wind axis; a finer detail set drifts a bit faster (grain read).
+        "  float alongCoarse = dot(vUv, wind) * 26.0 + uTime * 0.06;",
+        "  float alongFine   = dot(vUv, wind) * 140.0 + uTime * 0.22;",
+        "  float coarse = ripple(vec2(alongCoarse, dot(vUv, perp) * 26.0), 1.0);",
+        "  float fine   = ripple(vec2(alongFine,   dot(vUv, perp) * 140.0), 1.0);",
+        // windward/leeward blend: windward faces (vWind>0) show crisp coarse
+        // ripple crests; leeward faces blend toward the soft fine grain (sand
+        // sheltered from the wind reads smoother/duned-over).
+        "  float w = clamp(vWind * 0.5 + 0.5, 0.0, 1.0);",
+        "  float pattern = mix(fine, coarse, w);",
+        "  float shade = 1.0 + pattern * 0.06;",           // subtle grain relief, not a stripe painting
+        "  vec3 col = uBaseColor * shade;",
+        "  gl_FragColor = vec4(col, 1.0);",
+        "}",
+      ].join("\n"),
+    });
+  }
+
   CBZ.addLandmass(function (city) {
     const root = (city && city.root) || (CBZ.scene);
     if (!root) return;
@@ -146,8 +223,27 @@
     //     darker/paler quad patches so it reads weathered, not a flat slab.
     //     World is flat y=0; this sits a hair above so it z-fights nothing.
     // =====================================================================
-    const groundGeoms = [plane(CX, CZ, HX * 2, HZ * 2, 0.02)];
-    mergeAdd(groundGeoms, cmat(SAND), { cast: false, receive: true });
+    // TECHNIQUE 2 (dune-ripple shader): the main sand plane gets the
+    // ShaderMaterial above instead of a flat cmat() — still ONE mesh / ONE
+    // draw call, just a live material instead of a static color. Built by
+    // hand (not via mergeAdd) since it's a single plane; the ripple pattern
+    // needs the plane's own UVs, which mergeAdd's BufferGeometryUtils merge
+    // preserves anyway, but skipping the merge for a 1-geometry list avoids
+    // a no-op dependency on BGU for this specific mesh.
+    const groundGeo = plane(CX, CZ, HX * 2, HZ * 2, 0.02);
+    const duneMat = makeDuneRippleMaterial(SAND);
+    const groundMesh = new THREE.Mesh(groundGeo, duneMat);
+    groundMesh.castShadow = false; groundMesh.receiveShadow = true;
+    groundMesh.matrixAutoUpdate = false; groundMesh.updateMatrix();
+    root.add(groundMesh);
+    // tick the ripple's time uniform — a single float write per frame,
+    // gated so it never runs (or leaks an updater) outside city mode.
+    if (CBZ.onAlways) {
+      CBZ.onAlways(8.05, function () {
+        if (!CBZ.game || CBZ.game.mode !== "city") return;
+        duneMat.uniforms.uTime.value = (typeof CBZ.now === "number") ? CBZ.now : 0;
+      });
+    }
     // wind-streak patches (two tones, two merged meshes — 2 draw calls)
     const patchDk = [], patchPale = [];
     for (let i = 0; i < 60; i++) {
@@ -160,6 +256,41 @@
     }
     mergeAdd(patchDk, cmat(SAND_DK), { receive: true });
     mergeAdd(patchPale, cmat(SAND_PALE), { receive: true });
+
+    // ---- BIOME-EDGE BLEND APRON: was a hard cut from sand straight to
+    // nothing past the rim. A per-vertex-colored ring just outside the basin
+    // fades sand -> a neutral scrubby "wild ground" tone via MOISTURE NOISE
+    // (window.noise.simplex2, the same field terrain.js uses) so the desert
+    // reads as melting into the surrounding land instead of stopping at a
+    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
+    // region change — walkable footprint + causeway corridor untouched.
+    (function edgeBlendApron() {
+      const apronW = HX * 2 + 200, apronD = HZ * 2 + 200;
+      const SEG = 16;
+      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
+      const cSand = new THREE.Color(SAND);
+      const cWild = new THREE.Color(0x8a8a5c);   // neutral dry-scrub edge tone
+      const _ac = new THREE.Color();
+      const apos = ag.attributes.position;
+      const acolors = new Float32Array(apos.count * 3);
+      const hasNoise = !!(window.noise && window.noise.simplex2);
+      for (let i = 0; i < apos.count; i++) {
+        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
+        const lx = apos.getX(i), lz = apos.getY(i);
+        const wx = CX + lx, wz = CZ - lz;
+        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
+        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
+        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
+        _ac.copy(cSand).lerp(cWild, t);
+        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      }
+      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
+      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      apron.rotation.x = -Math.PI / 2;
+      apron.position.set(CX, 0.0, CZ);
+      apron.receiveShadow = true;
+      root.add(apron);
+    })();
 
     // =====================================================================
     //  2) DUNES — low rolling mounds you walk OVER visually (no colliders).
@@ -265,6 +396,47 @@
     });
     rockIM.instanceMatrix.needsUpdate = true; rockIM.matrixAutoUpdate = false;
     root.add(rockIM);
+
+    // =====================================================================
+    //  5b) FRACTURED ROCK CLUSTERS (world/rockscliffs.js) — a handful of
+    //      chipped-boulder clusters ringing Dry Gulch's outskirts. WHY a
+    //      second rock system's OUTPUT here instead of the icosa boulders
+    //      above: the plain-icosa field (5) is deliberately smooth basin
+    //      clutter (cheap, thousands of candidates); these few clusters use
+    //      the SAME shared scrape geometry the mountain backdrop uses (one
+    //      system, not two), just re-skinned smaller/paler for desert rock
+    //      vs mountain granite (a palette+scale call, per the task — no new
+    //      rock system). Candidates are drawn in a ring just outside the
+    //      TOWN rect so they read as "the rock the town got built next to,"
+    //      not scattered randomly across the whole basin. Ground here is
+    //      flat (y=0 basin, no terrain relief in this biome) so the slope
+    //      test always passes — the exclusion still runs (defensive, keeps
+    //      the same code path terrain.js uses) but never rejects on this
+    //      flat basin; it exists so a future sloped desert edge inherits the
+    //      same angle-of-repose safety for free.
+    // =====================================================================
+    if (CBZ.scatterRocks) {
+      function pickTownOutskirt(r) {
+        // ring around the town rect, biased just outside its edge
+        const ang = r() * Math.PI * 2;
+        const ringR = Math.max(TOWN_HX, TOWN_HZ) + rr(30, 90);
+        const x = TOWN_CX + Math.cos(ang) * ringR;
+        const z = TOWN_CZ + Math.sin(ang) * ringR;
+        return { x, z };
+      }
+      CBZ.scatterRocks(root, {
+        count: 22,
+        pick: pickTownOutskirt,
+        heightAt: function () { return 0; },        // desert basin is flat (no terrain relief here)
+        normalAt: function (x, z, out) { return out.set(0, 1, 0); },
+        repeatAngleDeg: 38,
+        minSize: 0.6, maxSize: 1.8,                  // desert-scale clusters — smaller than mountain boulders
+        baseRadius: 1, detail: 0,                    // cheaper/lower-poly than the mountain rock (desert reads small anyway)
+        variants: 2,
+        colorHex: ROCK_GREY,                          // desert rock palette, not mountain granite
+        seed: 0x5dec7 ^ 0x2222,
+      });
+    }
 
     // =====================================================================
     //  6) DEAD SCRUB + TUMBLEWEEDS — instanced. Scrub = a small dome of
@@ -381,10 +553,13 @@
     // ---- CAUSEWAY: a REAL wide highway land-bridge to the speedway -----------
     const cwLen = Math.abs(CW_X1 - CW_X0);
     if (CBZ.buildHighway) {
+      // heightAt: grade-follow world/terrain.js relief (0 over this rect's
+      // flat playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
         path: [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "asphalt",
         guardrail: true, lights: true, elevated: false, rng: rng,
+        heightAt: CBZ.terrainHeight,
       });
     } else {
       // ---- fallback: bespoke narrow deck (only if buildHighway absent) ----

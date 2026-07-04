@@ -100,17 +100,55 @@
       p.receiveShadow = true; root.add(p);
     }
 
+    // ---- BIOME-EDGE BLEND APRON: was a hard cut from moss-green straight to
+    // nothing past the rim. A per-vertex-colored ring just outside the floor
+    // fades duff -> a neutral wild-ground tone via MOISTURE NOISE
+    // (window.noise.simplex2, the same field terrain.js uses) so the forest
+    // reads as melting into the surrounding land instead of stopping at a
+    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
+    // region change — walkable footprint + causeway corridor untouched.
+    (function edgeBlendApron() {
+      const apronW = HX * 2 + 200, apronD = HZ * 2 + 200;
+      const SEG = 16;
+      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
+      const cFloor = new THREE.Color(0x35451f);
+      const cWild = new THREE.Color(0x6a7a4a);   // neutral grassy edge tone
+      const _ac = new THREE.Color();
+      const apos = ag.attributes.position;
+      const acolors = new Float32Array(apos.count * 3);
+      const hasNoise = !!(window.noise && window.noise.simplex2);
+      for (let i = 0; i < apos.count; i++) {
+        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
+        const lx = apos.getX(i), lz = apos.getY(i);
+        const wx = CX + lx, wz = CZ - lz;
+        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
+        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
+        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
+        _ac.copy(cFloor).lerp(cWild, t);
+        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      }
+      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
+      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      apron.rotation.x = -Math.PI / 2;
+      apron.position.set(CX, 0.005, CZ);
+      apron.receiveShadow = true;
+      root.add(apron);
+    })();
+
     // ================================================================
     //  CAUSEWAY — dirt logging road deck (drive the bridge to the woods).
     // ================================================================
     const cwW = CW_MAXX - CW_MINX, cwL = CW_MAXZ - CW_MINZ;
     const cwCX = (CW_MINX + CW_MAXX) / 2;
     if (CBZ.buildHighway) {
-      // REAL wide dirt-logging highway over the water to the woods.
+      // REAL wide dirt-logging highway over the water to the woods. heightAt:
+      // grade-follow world/terrain.js relief (0 over this rect's flat
+      // playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
         path: [{ x: cwCX, z: CW_MINZ }, { x: cwCX, z: CW_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
         guardrail: true, lights: true, elevated: false, rng: rng,
+        heightAt: CBZ.terrainHeight,
       });
     } else {
       // ---- fallback: bespoke narrow dirt deck (only if buildHighway absent) ----
@@ -197,34 +235,45 @@
     }
 
     // ================================================================
-    //  THE FOREST — INSTANCED. Two InstancedMesh objects carry every tree:
-    //    1) trunks  (one tapered cylinder geometry, brown material)
-    //    2) foliage (one cone geometry, conifer-green material)
-    //  Broadleaf trees reuse the SAME instanced meshes but with a squashed,
-    //  rounder foliage scale + lighter tint via instanceColor — so a few
-    //  deciduous trees cost zero extra draw calls.
+    //  THE FOREST — INSTANCED. Two InstancedMesh objects carry the conifer +
+    //  broadleaf species (shared cone foliage geo, distinguished by scale +
+    //  instanceColor): 1) trunks (tapered cylinder) 2) foliage (cone).
+    //  A THIRD species — ROUND-CANOPY birch-like trees — gets its own
+    //  icosahedron crown InstancedMesh (a genuinely distinct silhouette, not
+    //  just a recolor) so the canopy reads varied from a distance, not just
+    //  three shades of the same cone. Still only +1 draw call total.
     //
     //  Density rises toward the interior (a denser core, thinner at edges),
     //  trees are skipped in clearings / on trails / in the lake.
+    //
+    //  SIMPLE DISTANCE LOD: a throttled onUpdate (see lodUpdate below) flips
+    //  the ground-detail InstancedMeshes (bushes/rocks — the fine clutter
+    //  that reads at point-blank but is wasted detail far away) invisible
+    //  once the player is far from this biome's whole footprint, and back on
+    //  when they approach. O(1) per check (one distance test), not per-tree.
     // ================================================================
     // shared low-poly geometries (small radial segment counts = cheap).
     const trunkGeo = new THREE.CylinderGeometry(0.22, 0.42, 1, 5); // unit height; scaled per-instance
     const conGeo = new THREE.ConeGeometry(1, 1, 6);                // unit cone; scaled per-instance
+    const roundGeo = new THREE.IcosahedronGeometry(1, 0);          // unit round canopy; scaled per-instance
     trunkGeo.translate(0, 0.5, 0);  // base at y=0 so scaling grows upward
     conGeo.translate(0, 0.5, 0);
+    roundGeo.translate(0, 0.5, 0);
 
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // tinted via instanceColor
     const foliMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    trunkMat._shared = true; foliMat._shared = true;
+    const roundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }); // crisp facets read as a distinct species silhouette
+    trunkMat._shared = true; foliMat._shared = true; roundMat._shared = true;
 
     // first pass: decide every tree's transform (so we know the exact count
     // before allocating the InstancedMesh buffers — InstancedMesh needs a
     // fixed capacity at construction).
-    const trees = [];
+    const trees = [], roundTrees = [];
     const STEP = 11;                                  // grid pitch (jittered)
     const dummy = new THREE.Object3D();
     const colTrunk = new THREE.Color(), colFoli = new THREE.Color();
     const trunkColors = [], foliColors = [];
+    const roundTrunkColors = [], roundColors = [];
 
     for (let gx = MINX + 14; gx <= MAXX - 14; gx += STEP) {
       for (let gz = MINZ + 14; gz <= MAXZ - 14; gz += STEP) {
@@ -242,7 +291,29 @@
         const keepP = 0.55 + Math.min(0.42, edge * 0.6);
         if (rng() > keepP) continue;
 
-        const broad = rng() < 0.12;                   // ~12% broadleaf
+        // species pick: ~12% squat broadleaf (cone), ~10% round-canopy
+        // (icosahedron — a distinct silhouette), rest conifer.
+        const speciesRoll = rng();
+        const broad = speciesRoll < 0.12;
+        const round = !broad && speciesRoll < 0.22;
+        const tShade = 0.34 + rng() * 0.18;
+        colTrunk.setRGB(tShade, tShade * 0.66, tShade * 0.38);
+
+        if (round) {
+          // ROUND CANOPY — pale airy crown (birch-like), thin trunk.
+          const h = 6 + rng() * 6;
+          const tr = 0.32 + rng() * 0.22;
+          const rot = rng() * Math.PI * 2;
+          const lean = (rng() - 0.5) * 0.08;
+          const folR = h * (0.30 + rng() * 0.12);
+          const folY = h * (0.66 + rng() * 0.1);
+          colFoli.setRGB(0.40 + rng() * 0.16, 0.54 + rng() * 0.14, 0.22 + rng() * 0.10);
+          roundTrees.push({ x, z, h, tr, rot, lean, folR, folY });
+          roundTrunkColors.push(colTrunk.r, colTrunk.g, colTrunk.b);
+          roundColors.push(colFoli.r, colFoli.g, colFoli.b);
+          continue;
+        }
+
         const h = broad ? 6 + rng() * 5 : 9 + rng() * 12;
         const tr = (broad ? 0.5 : 0.5) + rng() * 0.4; // trunk radius scale
         const rot = rng() * Math.PI * 2;
@@ -254,8 +325,6 @@
         const folY = broad ? h * 0.55 : h * 0.35;
 
         // colour variety via instanceColor (still ONE material / draw call).
-        const tShade = 0.34 + rng() * 0.18;
-        colTrunk.setRGB(tShade, tShade * 0.66, tShade * 0.38);
         if (broad) colFoli.setRGB(0.30 + rng() * 0.18, 0.46 + rng() * 0.16, 0.16 + rng() * 0.10);
         else colFoli.setRGB(0.10 + rng() * 0.08, 0.30 + rng() * 0.14, 0.13 + rng() * 0.08);
 
@@ -292,6 +361,39 @@
     foliInst.instanceMatrix.needsUpdate = true;
     root.add(trunkInst);
     root.add(foliInst);
+
+    // ---- 4TH SPECIES: ROUND-CANOPY trees (its own trunk + crown InstancedMesh
+    // pair — +2 draw calls total for the whole biome, still well inside the
+    // "thousands of trees, ~6 draw calls" budget). Distinct silhouette from
+    // both the narrow conifer cone and the squat broadleaf cone.
+    const RN = roundTrees.length;
+    const roundTrunkGeo = new THREE.CylinderGeometry(0.13, 0.2, 1, 5);
+    roundTrunkGeo.translate(0, 0.5, 0);
+    const roundTrunkMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    roundTrunkMat._shared = true;
+    const roundTrunkInst = new THREE.InstancedMesh(roundTrunkGeo, roundTrunkMat, RN);
+    const roundCrownInst = new THREE.InstancedMesh(roundGeo, roundMat, RN);
+    roundTrunkInst.castShadow = true; roundCrownInst.castShadow = true;
+    roundTrunkInst.receiveShadow = true; roundCrownInst.receiveShadow = true;
+    roundTrunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundTrunkColors), 3);
+    roundCrownInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(roundColors), 3);
+    for (let i = 0; i < RN; i++) {
+      const t = roundTrees[i];
+      dummy.position.set(t.x, 0, t.z);
+      dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+      dummy.scale.set(t.tr, t.h, t.tr);
+      dummy.updateMatrix();
+      roundTrunkInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(t.x, t.folY, t.z);
+      dummy.rotation.set(t.lean, t.rot, t.lean * 0.5);
+      dummy.scale.set(t.folR, t.folR, t.folR);
+      dummy.updateMatrix();
+      roundCrownInst.setMatrixAt(i, dummy.matrix);
+    }
+    roundTrunkInst.instanceMatrix.needsUpdate = true;
+    roundCrownInst.instanceMatrix.needsUpdate = true;
+    root.add(roundTrunkInst);
+    root.add(roundCrownInst);
 
     // a HANDFUL of big landmark trunks get real colliders (near the spine
     // landing) so the forest feels solid where you'd actually brush a trunk —
@@ -374,6 +476,34 @@
     root.add(bushInst); root.add(rockInst);
 
     // ================================================================
+    //  SIMPLE DISTANCE LOD — fine ground clutter (bushes/ferns/rocks) reads
+    //  at point-blank but is wasted fill-rate + vertex cost when the player
+    //  is nowhere near this biome (the forest is a big chunk of the far
+    //  archipelago; a player in the city or on the desert highway is paying
+    //  for ~1160 instances of detail they can't see). A throttled distance
+    //  check (one sqrt, not per-instance) flips both InstancedMeshes
+    //  invisible past LOD_FAR and back on inside LOD_NEAR — cheap hysteresis
+    //  band so it doesn't flicker at the boundary. Trees/landmarks stay
+    //  visible always (the canopy silhouette reads from far away and is the
+    //  point of the biome); this only trims the close-range clutter layer.
+    // ================================================================
+    (function groundDetailLOD() {
+      if (!CBZ.onUpdate) return;
+      const LOD_NEAR = HX + 260, LOD_FAR = HX + 420;   // hysteresis band (forest half-extent + margin)
+      let detailOn = true;
+      CBZ.onUpdate(46.25, function () {
+        const P = CBZ.player;
+        if (!P || !P.pos) return;
+        const d = Math.hypot(P.pos.x - CX, P.pos.z - CZ);
+        if (detailOn && d > LOD_FAR) {
+          detailOn = false; bushInst.visible = false; rockInst.visible = false;
+        } else if (!detailOn && d < LOD_NEAR) {
+          detailOn = true; bushInst.visible = true; rockInst.visible = true;
+        }
+      });
+    })();
+
+    // ================================================================
     //  FALLEN LOGS — a few plain meshes (small count). One is the bridge.
     // ================================================================
     const logMat = mat(0x5a4327);
@@ -421,8 +551,18 @@
     }
 
     // ================================================================
-    //  LANDMARK: LOOKOUT TOWER — four legs + a cabin on top + ladder feel.
-    //  A vista landmark; gets a collider so you can't walk through the legs.
+    //  LANDMARK: LOOKOUT TOWER — four legs + a cabin on top + a REAL climb.
+    //  A vista landmark. NO-DECOY FIX: this used to be pure decoration (a
+    //  small ground-level collider only) despite its own header comment
+    //  calling it "a vista landmark" — nothing let you actually reach the
+    //  deck. Fixed with the SAME z-axis ramp-platform rig city buildings use
+    //  for stairs (city/buildings.js / city/elevators.js: CBZ.platforms
+    //  ramp records interpolate height along Z only — see systems/physics.js
+    //  groundAt — so every flight below runs along Z, switching back on a
+    //  mid-landing, exactly like the proven fire-escape rig). The deck itself
+    //  is ALSO a registered platform (a real standable surface, not a
+    //  decorative box), and a lookout/vista interaction fires once you're up
+    //  there — the payoff the header comment promised.
     // ================================================================
     const twX = -460, twZ = -1560, twH = 14;
     const towerWoodA = mat(0x7a5d38), towerWoodB = mat(0x4a3a22);
@@ -433,6 +573,7 @@
       leg.castShadow = true; root.add(leg);
     });
     // deck
+    const deckHalf = 4.25;
     const deck = new THREE.Mesh(CBZ.boxGeom(8.5, 0.4, 8.5), towerWoodB);
     deck.position.set(twX, twH, twZ); deck.castShadow = true; deck.receiveShadow = true; root.add(deck);
     // cabin shell on top (open-front lookout)
@@ -444,6 +585,76 @@
     if (CBZ.makeLabelSprite) {
       const ts = CBZ.makeLabelSprite("FIRE LOOKOUT");
       ts.position.set(twX, twH + 7, twZ); ts.scale.set(9, 2.2, 1); root.add(ts);
+    }
+
+    // ---- THE CLIMB: a switchback staircase up the +x face (clear of the
+    // legs at ±3), two flights around a mid-landing, exactly the elevators.js
+    // fire-escape idiom (tilted stringer slab + rail visual, CBZ.platforms
+    // ramp records for the actual walk-surface). CBZ.platforms only exists
+    // once city/buildings.js has loaded (it inits the array) — guard so a
+    // headless/stripped build never throws.
+    if (CBZ.platforms) {
+      const railMat = mat(0x2c333d);
+      const stairX0 = twX + deckHalf - 0.05, stairX1 = twX + deckHalf + 1.15;   // stringer strip, just past the deck edge
+      const stairXC = (stairX0 + stairX1) / 2;
+      const zA = twZ - 6.5, zB = twZ + 6.5, LD = 1.0;      // flight run bounds + landing depth (~35° slope, matches elevators.js's fire-escape feel)
+      const midY = twH / 2;                                 // mid-landing height (half the climb)
+      function flight(zStart, zEnd, y0, y1) {
+        const dir = zEnd > zStart ? 1 : -1;
+        const rampEnd = zEnd - dir * LD;
+        CBZ.platforms.push({
+          minX: stairX0, maxX: stairX1,
+          minZ: Math.min(zStart, rampEnd), maxZ: Math.max(zStart, rampEnd),
+          top: y1, ramp: { z0: zStart, z1: rampEnd, y0, y1 },
+        });
+        // flat landing nosing at the top of this flight
+        CBZ.platforms.push({
+          minX: stairX0, maxX: stairX1,
+          minZ: Math.min(rampEnd, zEnd), maxZ: Math.max(rampEnd, zEnd), top: y1,
+        });
+        // visual: one tilted stringer slab (mesh-count bound — no per-tread boxes)
+        const run = Math.abs(rampEnd - zStart), rise = y1 - y0;
+        const hyp = Math.hypot(run, rise), tilt = -dir * Math.atan2(rise, run);
+        const slab = new THREE.Mesh(CBZ.boxGeom(1.2, 0.1, hyp), towerWoodB);
+        slab.position.set(stairXC, (y0 + y1) / 2 - 0.05, (zStart + rampEnd) / 2);
+        slab.rotation.x = tilt; slab.castShadow = true; root.add(slab);
+        const rail = new THREE.Mesh(CBZ.boxGeom(0.07, 0.9, hyp), railMat);
+        rail.position.set(stairX1 + 0.03, (y0 + y1) / 2 + 0.4, (zStart + rampEnd) / 2);
+        rail.rotation.x = tilt; root.add(rail);
+      }
+      // flight 1: ground -> mid-landing (rising +z), flight 2: mid-landing -> deck (rising -z)
+      flight(zA, zB, 0, midY);
+      flight(zB, zA, midY, twH);
+      // mid-landing platform (small square where the flights meet)
+      CBZ.platforms.push({ minX: stairX0, maxX: stairX1, minZ: zB - LD, maxZ: zB + LD, top: midY });
+      // guard rail colliders on the outer stringer edge, y-gated above 1.6m so
+      // ground-level foot traffic never snags on them (mirrors elevators.js's
+      // y-gated fall-guard rail).
+      CBZ.colliders.push({ minX: stairX1 - 0.05, maxX: stairX1 + 0.12, minZ: zA - LD, maxZ: zB + LD, y0: 1.6, y1: twH + 1.0 });
+      // THE DECK is a real standable platform (was purely decorative before —
+      // groundAt() never saw it, so the box was a visual lie). Registered flat
+      // (no ramp) at the deck's walking height.
+      CBZ.platforms.push({ minX: twX - deckHalf, maxX: twX + deckHalf, minZ: twZ - deckHalf, maxZ: twZ + deckHalf, top: twH + 0.2 });
+
+      // ---- VISTA interaction: a simple lookout payoff once you're up top ----
+      if (CBZ.interactions && CBZ.interactions.registerZone) {
+        const vistaSpot = { x: twX, z: twZ, kind: "lookout-vista" };
+        CBZ.interactions.registerZone({
+          id: "forest-lookout-vista", kind: "lookout-vista", radius: deckHalf + 0.5,
+          find: function (px, pz) {
+            const P = CBZ.player;
+            if (!P || P.pos.y < twH - 1.0) return null;        // only up on the deck, not from the ground below
+            const dx = vistaSpot.x - px, dz = vistaSpot.z - pz;
+            return (dx * dx + dz * dz) < (deckHalf + 0.5) * (deckHalf + 0.5) ? vistaSpot : null;
+          },
+          options: [{
+            id: "lookout-scan", slot: "e", label: "Scan the treeline",
+            onSelect: function () {
+              if (CBZ.city && CBZ.city.note) CBZ.city.note("🔭 From up here the whole of Redhollow Woods spreads out below.", 2.6);
+            },
+          }],
+        });
+      }
     }
 
     // ================================================================
@@ -556,22 +767,28 @@
     for (let i = 0; i < deerSpots.length; i++) makeDeer(deerSpots[i][0], deerSpots[i][1]);
 
     if (CBZ.onUpdate && deer.length) {
+      // WHY rng (not Math.random): owner determinism contract — every other
+      // placement decision in this file already routes through the seeded
+      // mulberry32 `rng` above; the deer wander loop was the one spot still
+      // calling Math.random() directly, which would make deer paths differ
+      // between runs of the SAME seed. Fixed to reuse the same closure-
+      // captured rng so wander is deterministic like everything else here.
       CBZ.onUpdate(46.3, function (dt) {
         if (!dt || dt > 0.5) dt = 0.05;           // clamp pauses / first frame
         for (let i = 0; i < deer.length; i++) {
           const d = deer[i];
           d.turnT -= dt;
           if (d.turnT <= 0) {                      // pick a new heading occasionally
-            d.heading += (Math.random() - 0.5) * 1.6;
-            d.turnT = 2 + Math.random() * 4;
-            d.spd = 0.8 + Math.random() * 1.6;
+            d.heading += (rng() - 0.5) * 1.6;
+            d.turnT = 2 + rng() * 4;
+            d.spd = 0.8 + rng() * 1.6;
           }
           const nx = d.g.position.x + Math.cos(d.heading) * d.spd * dt;
           const nz = d.g.position.z + Math.sin(d.heading) * d.spd * dt;
           // stay inside the forest rect (turn back at the edge); avoid the lake.
           let ok = nx > MINX + 12 && nx < MAXX - 12 && nz > MINZ + 12 && nz < MAXZ - 12;
           if (ok && d2(nx, nz, lakeX, lakeZ) < (lakeR + 6) * (lakeR + 6)) ok = false;
-          if (!ok) { d.heading += Math.PI * (0.6 + Math.random() * 0.4); continue; }
+          if (!ok) { d.heading += Math.PI * (0.6 + rng() * 0.4); continue; }
           d.g.position.x = nx; d.g.position.z = nz;
           d.g.rotation.y = -d.heading + Math.PI / 2;
         }

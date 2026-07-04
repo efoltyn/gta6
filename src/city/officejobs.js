@@ -95,6 +95,9 @@
     }
     if (!best) return null;
     best.occupant = ped;
+    best._since = CBZ.now || 0;   // SENIORITY stamp: companies.js's owner-succession bench
+                                   // (and our own succeedManager below) rank candidates by
+                                   // how long they've actually held this desk.
     ped._deskAnchor = best;
     return best;
   };
@@ -104,13 +107,117 @@
   CBZ.cityReleaseDesk = function (ped) {
     if (!ped) return;
     const d = ped._deskAnchor;
-    if (d) { if (d.occupant === ped) d.occupant = null; ped._deskAnchor = null; }
+    if (d) { if (d.occupant === ped) { d.occupant = null; d._since = null; } ped._deskAnchor = null; }
     // a held desk can also be found by back-scan if the ref was dropped elsewhere
     else {
       const list = CBZ.cityOfficeDesks;
-      for (let i = 0; i < list.length; i++) if (list[i].occupant === ped) list[i].occupant = null;
+      for (let i = 0; i < list.length; i++) if (list[i].occupant === ped) { list[i].occupant = null; list[i]._since = null; }
     }
     if (ped.char) ped.char.sitting = false;   // keep the pose flag honest
+  };
+
+  // ============================================================
+  //  THE LEGIT RANK LADDER — a minimal, two-tier mirror of gangs.js's full
+  //  Prospect→Boss pyramid for ordinary office jobs: WORKER and MANAGER. You
+  //  don't need six tiers for a cubicle floor; you DO need the same shape the
+  //  owner's vision asks for everywhere else — "killing/firing the person in
+  //  charge triggers a REAL promotion among the people under them", not a
+  //  silent respawn. One manager per staffed HQ lot (CBZ.cityOfficeDesks'
+  //  .lot key), tracked here; companies.js's succeedCompanyOwner() also reads
+  //  CBZ.cityIsOfficeManager() so a standing manager always outranks a
+  //  rank-and-file desk worker when the OWNER himself goes down and the bench
+  //  gets ranked.
+  // ============================================================
+  const officeManagers = new Map();   // lot -> manager ped (the lot's CURRENT desk-floor lead)
+
+  // who runs lot's floor right now? null if nobody's been promoted there yet
+  // (or the manager has since died/left — back-scan keeps this honest).
+  CBZ.cityOfficeManagerOf = function (lot) {
+    const m = officeManagers.get(lot);
+    if (m && m.dead) { officeManagers.delete(lot); return null; }
+    return m || null;
+  };
+  CBZ.cityIsOfficeManager = function (ped) { return !!(ped && ped._mgr); };
+
+  // crown a desk worker the manager of their own floor. Pure data + a tag, the
+  // same "rank lives on the ped, gear/label follow" shape gangs.js's
+  // promoteMember uses — there's no gear here, just the floating-tag pip and
+  // a small pay/seniority bump so a manager genuinely reads as senior.
+  function tagManager(ped) {
+    if (!ped || !ped.tag || !ped.char || !ped.char.group || !CBZ.makeLabelSprite) return;
+    const txt = (ped.name || "Manager") + " · Manager";
+    const lbl = CBZ.makeLabelSprite(txt, { color: "#ffd166" });
+    lbl.position.y = ped.tag.position.y || 3.0; lbl.scale.copy(ped.tag.scale);
+    if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
+    ped.char.group.add(lbl); ped.tag = lbl; ped.tag.visible = false;
+  }
+  function untagManager(ped) {
+    // best-effort: drop back to the plain name tag peds.js cast at spawn.
+    // We don't cache the original sprite (rare path — death/promotion only),
+    // so just rebuild a plain one the same way tagWithRank's callers do.
+    if (!ped || !ped.tag || !ped.char || !ped.char.group || !CBZ.makeLabelSprite) return;
+    const lbl = CBZ.makeLabelSprite(ped.name || "Worker");
+    lbl.position.y = ped.tag.position.y || 3.0; lbl.scale.copy(ped.tag.scale);
+    if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
+    ped.char.group.add(lbl); ped.tag = lbl; ped.tag.visible = false;
+  }
+  function promoteManager(lot, ped) {
+    if (!lot || !ped || ped.dead) return false;
+    ped._mgr = true; ped._mgrLot = lot;
+    ped.wealth = Math.min(0.95, (ped.wealth || 0.4) + 0.1);    // a manager's wage shows
+    tagManager(ped);
+    officeManagers.set(lot, ped);
+    return true;
+  }
+  CBZ.cityPromoteOfficeManager = promoteManager;
+
+  // demote/clear whoever runs lot's floor (their post is being vacated for a
+  // bigger promotion — e.g. companies.js's succeedCompanyOwner just made them
+  // the OWNER, so the manager seat is open again — or they died/quit).
+  CBZ.cityOfficeClearManager = function (lot) {
+    const m = officeManagers.get(lot);
+    if (m) { m._mgr = false; m._mgrLot = null; untagManager(m); }
+    officeManagers.delete(lot);
+  };
+
+  // SUCCESSION — modeled on gangs.js's succeedBoss(): rank the live desk
+  // occupants at this lot (by seniority — time spent AT a desk here, the only
+  // currency we track for ordinary office workers) and promote the senior
+  // one. Fired when a manager dies (peds.js's central death chain calling
+  // CBZ.cityOfficeManagerDown, mirroring cityGangMemberDown's contract) or is
+  // otherwise removed from the floor (fired, transferred — any caller may
+  // invoke this directly).
+  function deskTenure(p) { return (p && p._deskAnchor && p._deskAnchor._since != null) ? (CBZ.now || 0) - p._deskAnchor._since : 0; }
+  function succeedManager(lot) {
+    const list = CBZ.cityOfficeDesks;
+    let best = null, bestT = -1;
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      if (d.lot !== lot || !d.occupant || d.occupant.dead) continue;
+      const t = deskTenure(d.occupant);
+      if (t > bestT) { bestT = t; best = d.occupant; }
+    }
+    officeManagers.delete(lot);
+    if (best) {
+      promoteManager(lot, best);
+      try { if (CBZ.cityFeed) CBZ.cityFeed("📈 " + (best.name || "A worker") + " is promoted to floor manager.", "#ffd166"); } catch (e) {}
+    }
+    return best;
+  }
+  CBZ.citySucceedOfficeManager = succeedManager;
+
+  // a manager went down (killed, or simply removed from the floor) — fire the
+  // same shape gangs.js's cityGangMemberDown uses for a boss kill: clear the
+  // post, then promote the bench. Safe to call for a ped who was never a
+  // manager (no-op). Feature-detected callers: peds.js's central death chain
+  // (a separate task) is free to call this for any office-worker kill; we
+  // don't require it — officejobs.js's own staffing sweep below also catches
+  // a manager whose body has gone .dead, as a permanence safety net.
+  CBZ.cityOfficeManagerDown = function (ped) {
+    if (!ped || !ped._mgr || !ped._mgrLot) return;
+    const lot = ped._mgrLot;
+    ped._mgr = false; ped._mgrLot = null;
+    succeedManager(lot);
   };
 
   // ---- BIOME WORK-ANCHORS: claim / release (the desk pattern, ported) -----
@@ -242,6 +349,7 @@
   let acc = 0;
   let cashT = 0;
   let seenArena = null;
+  let mgrScanT = 4;   // first auto-crown pass fires a few seconds into a fresh city
   CBZ.onUpdate(41.9, function (dt) {
     if (!inCity()) return;
     if (noSim()) return;                     // host simulates; guests puppet
@@ -303,6 +411,18 @@
       if (d.occupant && d.lot && d.lot.demolished) CBZ.cityReleaseDesk(d.occupant);
     }
 
+    // MANAGER PERMANENCE SAFETY NET: a killed/recycled manager's body going
+    // .dead doesn't automatically run succession (peds.js's central death
+    // chain calling CBZ.cityOfficeManagerDown is the fast path, but it's a
+    // separate task this wave and may not be wired). Cheap — bounded to the
+    // handful of lots that currently HAVE a crowned manager, mirrors gangs.js's
+    // own "boss.dead && !bossDead → succeed" upkeep check.
+    if (officeManagers.size) {
+      for (const [lot, mgr] of officeManagers) {
+        if (mgr && mgr.dead) CBZ.cityOfficeManagerDown(mgr);
+      }
+    }
+
     const peds = CBZ.cityPeds;
     const PA = CBZ.city && CBZ.city.playerActor;
     const ppos = CBZ.player && CBZ.player.pos;
@@ -329,6 +449,25 @@
           if ((d.x - wx) * (d.x - wx) + (d.z - wz) * (d.z - wz) < 28 * 28) { near = true; break; }
         }
         if (near) CBZ.cityClaimDesk(p);
+      }
+    }
+
+    // ---- (a2) AUTO-CROWN a manager for any staffed floor that doesn't have
+    // one yet. A floor only needs a manager once it actually has desk
+    // occupants to lead (no point crowning an empty office); this keeps the
+    // ladder honest without a scripted "day one" promotion event. Slow
+    // cadence + bounded to distinct lots actually present in the desk list
+    // (≤ a few dozen office floors citywide).
+    mgrScanT -= tick;
+    if (mgrScanT <= 0 && list.length) {
+      mgrScanT = 8;
+      const seenLots = new Set();
+      for (let i = 0; i < list.length; i++) {
+        const lot = list[i].lot;
+        if (seenLots.has(lot)) continue;
+        seenLots.add(lot);
+        if (officeManagers.has(lot)) continue;
+        succeedManager(lot);   // no-op (no live occupant) until someone's actually staffing the floor
       }
     }
 

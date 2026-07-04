@@ -272,140 +272,23 @@
     //        placed well OUTSIDE the flat region (radius ~1850-2300) so they
     //        tower on the skyline without ever being reachable — NO valleyGuard
     //        and the playable floor (terrainHeight over the flat region) is
-    //        untouched. Technique mirrors city/biome_snow.js peaks(): each
-    //        ridge spine is a DISPLACED RIDGED-NOISE grid strip emitted as
-    //        non-indexed flat-shaded triangles (craggy faceted silhouettes),
-    //        VERTEX-COLORED by altitude+slope (rock base → ragged snowline ~50%
-    //        → snow, steep faces stay dark rock), with a far-distance fog
-    //        desaturation baked into the vertex colors so the peaks recede.
+    //        untouched. Technique + math are the SHARED window.noise.buildRidgedRange
+    //        helper (src/vendor/noise.js) — the exact same ridged-fbm + altitude/
+    //        slope vertex shading city/biome_snow.js's range uses (consolidated
+    //        so the two can't silently drift apart), with a far-distance fog
+    //        desaturation baked into the vertex colors via the palette.fog term
+    //        so the peaks recede (a feature only this caller uses).
     const BGU = THREE.BufferGeometryUtils;
+    const buildRidge = window.noise && window.noise.buildRidgedRange;
 
-    // -- seeded value-noise (hash + smoothstep-lerp), 2-D (deterministic) --
-    function hash2(ix, iz) {
-      let h = (ix * 374761393 + iz * 668265263) | 0;
-      h = Math.imul(h ^ (h >>> 13), 1274126177);
-      h = (h ^ (h >>> 16)) >>> 0;
-      return h / 4294967296;                 // 0..1
-    }
-    function smoothN(t) { return t * t * (3 - 2 * t); }
-    function vnoise(x, z) {
-      const ix = Math.floor(x), iz = Math.floor(z);
-      const fx = x - ix, fz = z - iz;
-      const a = hash2(ix, iz), b = hash2(ix + 1, iz);
-      const c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
-      const ux = smoothN(fx), uz = smoothN(fz);
-      return (a * (1 - ux) + b * ux) * (1 - uz) + (c * (1 - ux) + d * ux) * uz;
-    }
-    // -- RIDGED fbm: sharp connected ridgelines (5 octaves) ----------------
-    function ridgedN(x, z) {
-      let sum = 0, freq = 1, amp = 0.5, prev = 1;
-      for (let o = 0; o < 5; o++) {
-        let n = vnoise(x * freq, z * freq);
-        n = 1 - Math.abs(2 * n - 1);         // ridge fold
-        n = n * n;                            // sharpen
-        sum += n * amp * prev;
-        prev = n;
-        freq *= 2; amp *= 0.5;
-      }
-      return sum;                             // ~0..1-ish
-    }
-
-    // -- palette + altitude/slope vertex color (rock / ragged snow / cliff) -
-    const cRock   = new THREE.Color(0x6f6a63);
-    const cRockDk = new THREE.Color(0x4a463f);
-    const cSnow   = new THREE.Color(0xeef3f8);
-    const cSnowSh = new THREE.Color(0xd6e0ea);
-    const cFog    = new THREE.Color(0x9fb4c4);   // distance haze tint (sky/sea-ish)
-    const _cu = new THREE.Color();
-    function shadeVert(y, peakH, upDot, snowWobble, fogT, out) {
-      // ragged snowline ~48% of peak height, wobbled by low-freq noise
-      const snowline = peakH * (0.48 + (snowWobble - 0.5) * 0.24);
-      const above = y > snowline;
-      const steep = upDot < 0.52;            // cliff: snow slides off
-      if (!above || steep) {
-        const dk = steep ? 0.72 : (1 - Math.min(1, y / Math.max(1, snowline))) * 0.5;
-        out.copy(cRock).lerp(cRockDk, dk);
-      } else {
-        const lit = Math.min(1, Math.max(0, (upDot - 0.55) / 0.45));
-        out.copy(cSnowSh).lerp(cSnow, lit);
-      }
-      // bake fog/distance desaturation so far peaks recede into the haze
-      if (fogT > 0) out.lerp(cFog, fogT);
-      return out;
-    }
-
-    // -- build ONE ridge strip as a non-indexed displaced grid -------------
-    //    p0->p1 = ridge spine on the backdrop ring; depthDir = unit vector
-    //    pointing radially AWAY from the field centre (the range body extends
-    //    that way). distFog: 0 near .. 1 far (for the baked haze).
-    function buildRidge(p0, p1, depthDir, cfg) {
-      const cols = cfg.cols, rows = cfg.rows;
-      const peakAmp = cfg.peakAmp, depthLen = cfg.depthLen;
-      const seedOff = cfg.seedOff, noiseScale = cfg.noiseScale;
-      const fogBase = cfg.fogBase || 0, fogDepth = cfg.fogDepth || 0;
-      const dx = p1.x - p0.x, dz = p1.z - p0.z;
-      const gx = [], gz = [], gy = [], gf = [];
-      for (let r = 0; r <= rows; r++) {
-        const dv = r / rows;                       // 0 at ring edge .. 1 deep
-        gx[r] = []; gz[r] = []; gy[r] = []; gf[r] = [];
-        for (let c = 0; c <= cols; c++) {
-          const t = c / cols;
-          const bx = p0.x + dx * t + depthDir.x * (dv * depthLen);
-          const bz = p0.z + dz * t + depthDir.z * (dv * depthLen);
-          const nx = (bx + seedOff) * noiseScale;
-          const nz = (bz - seedOff) * noiseScale;
-          let h = ridgedN(nx, nz) * peakAmp;
-          // low-freq envelope along the ridge: tall peaks + saddles
-          const env = 0.45 + 0.55 * vnoise(t * 3.3 + seedOff * 0.01, seedOff * 0.02);
-          h *= env;
-          // depth TENT: crest near mid-depth, falls off front & back
-          const tent = Math.sin(Math.min(1, dv * 1.15) * Math.PI);
-          h *= 0.25 + 0.75 * tent;
-          // taper the front edge to the ground so the range meets the relief
-          // field smoothly (NO valleyGuard needed — pure backdrop, far out).
-          const foot = Math.min(1, dv / 0.18);
-          h *= foot;
-          gx[r][c] = bx; gz[r][c] = bz; gy[r][c] = h;
-          // farther rows recede more into the haze
-          gf[r][c] = Math.min(1, fogBase + dv * fogDepth);
-        }
-      }
-      const tris = cols * rows * 2;
-      const pos = new Float32Array(tris * 3 * 3);
-      const col = new Float32Array(tris * 3 * 3);
-      let pi = 0, ci = 0;
-      const up = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
-      const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), D = new THREE.Vector3();
-      function emitTri(a, b, cc, fa, fb, fc) {
-        e1.subVectors(b, a); e2.subVectors(cc, a);
-        up.crossVectors(e1, e2);
-        let up_y = up.y; if (up_y < 0) up_y = -up_y;
-        const len = up.length() || 1;
-        const upDot = up_y / len;
-        const verts = [a, b, cc], fogs = [fa, fb, fc];
-        for (let k = 0; k < 3; k++) {
-          const vv = verts[k];
-          pos[pi++] = vv.x; pos[pi++] = vv.y; pos[pi++] = vv.z;
-          const wob = vnoise(vv.x * 0.02 + seedOff, vv.z * 0.02 - seedOff);
-          shadeVert(vv.y, peakAmp, upDot, wob, fogs[k], _cu);
-          col[ci++] = _cu.r; col[ci++] = _cu.g; col[ci++] = _cu.b;
-        }
-      }
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          A.set(gx[r][c], gy[r][c], gz[r][c]);
-          B.set(gx[r][c + 1], gy[r][c + 1], gz[r][c + 1]);
-          C.set(gx[r + 1][c], gy[r + 1][c], gz[r + 1][c]);
-          D.set(gx[r + 1][c + 1], gy[r + 1][c + 1], gz[r + 1][c + 1]);
-          emitTri(A, C, B, gf[r][c], gf[r + 1][c], gf[r][c + 1]);
-          emitTri(B, C, D, gf[r][c + 1], gf[r + 1][c], gf[r + 1][c + 1]);
-        }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      return g;
-    }
+    // -- palette (rock / ragged snow / cliff + this caller's distance haze) -
+    const heroPalette = {
+      rock: new THREE.Color(0x6f6a63),
+      rockDark: new THREE.Color(0x4a463f),
+      snow: new THREE.Color(0xeef3f8),
+      snowShade: new THREE.Color(0xd6e0ea),
+      fog: new THREE.Color(0x9fb4c4),   // distance haze tint (sky/sea-ish)
+    };
 
     // -- RANGE LAYOUT: ridge spines on the backdrop ring (radius ~1850-2300
     //    around the field centre). Each spine is an arc segment; depthDir
@@ -413,7 +296,9 @@
     //    (foggier) backdrop ring give layered depth.
     const RING_SEG = 9;            // arc segments around the ring
     const heroGeoms = [];
+    const heroSpines = [];         // crest sample arrays [{x,z,h}, ...] per segment — reused below for rock scatter candidates
     function ringSpines(radius, span, cfg, fogBase, fogDepth) {
+      if (!buildRidge) return;
       for (let i = 0; i < RING_SEG; i++) {
         const a0 = (i / RING_SEG) * Math.PI * 2;
         const a1 = ((i + span) / RING_SEG) * Math.PI * 2;
@@ -425,8 +310,13 @@
         const c = Object.assign({}, cfg, {
           seedOff: cfg.seedBase + i * 137.1,
           fogBase: fogBase, fogDepth: fogDepth,
+          // taper the front edge to the ground so the range meets the relief
+          // field smoothly (NO valleyGuard needed — pure backdrop, far out).
+          footGuard: 0.18,
+          palette: heroPalette,
         });
-        heroGeoms.push(buildRidge(p0, p1, dir, c));
+        const built = buildRidge(THREE, p0, p1, dir, c);
+        if (built) { heroGeoms.push(built.geo); if (built.spine) heroSpines.push(built.spine); }
       }
     }
     // near ring — the dominant craggy peaks
@@ -466,6 +356,54 @@
       for (const g of geoms) g.dispose();
     }
     addMergedHero(heroGeoms);
+
+    // --- 3) BOULDER SCATTER — a modest field of fractured rocks (world/
+    //        rockscliffs.js) dressing the mountain ring's slopes. WHY: the
+    //        hero-peak facets alone read as a smooth folded surface; a
+    //        scatter of chipped boulders sitting IN the slope (not glued on
+    //        top) sells "this is a real rockfall-strewn mountainside" from
+    //        the vantage points the player actually sees it from (city
+    //        edges looking out). Candidates are drawn from the ridge
+    //        spine samples every ringSpines() call already computed (free —
+    //        no extra sampling pass), jittered around each spine point so
+    //        rocks scatter near the crest instead of sitting in a dead-
+    //        straight line. Slope-aware exclusion (scatterRocks' angle-of-
+    //        repose cutoff) throws out anything on a cliff face too steep to
+    //        hold a loose rock — using THIS file's own terrainNormal, so the
+    //        scatter always agrees with the actual relief mesh it sits on.
+    //        Pure backdrop: every candidate is already outside the flat
+    //        playable region (spine points come from the ring layout, which
+    //        starts at radius ~1900) — nothing here can land on walkable
+    //        ground. One extra InstancedMesh cluster (a couple variants),
+    //        not a new draw-call category.
+    if (CBZ.scatterRocks) {
+      // gather every spine sample from both rings as jittered candidates —
+      // reuses the ridge builder's own crest data instead of re-deriving it.
+      const spinePts = [];
+      for (const g of heroSpines) {
+        for (const s of g) spinePts.push(s);
+      }
+      if (spinePts.length) {
+        function pickNearSpine(rng) {
+          const p = spinePts[(rng() * spinePts.length) | 0];
+          if (!p) return null;
+          // jitter around the crest sample so rocks don't line up in a row
+          return { x: p.x + (rng() - 0.5) * 90, z: p.z + (rng() - 0.5) * 90 };
+        }
+        CBZ.scatterRocks(root, {
+          count: 90,
+          pick: pickNearSpine,
+          heightAt: CBZ.terrainHeight,
+          normalAt: CBZ.terrainNormal,
+          repeatAngleDeg: 38,             // angle of repose — matches the requested 35-40deg band
+          minSize: 3, maxSize: 9,          // mountain-scale boulders, bigger than desert clutter
+          baseRadius: 1, detail: 1,
+          variants: 3,
+          colorHex: 0x716b60,             // dark weathered granite, close to terrain's COL_ROCK band
+          seed: 4242,
+        });
+      }
+    }
 
     _built = terrain;
     return terrain;

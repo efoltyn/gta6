@@ -192,6 +192,31 @@
     const TRAF = (C.traf) || {};
     const lanesPerDir = Math.max(1, (TRAF.lanesPerDir != null ? TRAF.lanesPerDir : 2) | 0);
     const laneW = (TRAF.laneW != null ? TRAF.laneW : 3.6);
+    // ---- THE TWO ARTERIAL AVENUES (xLines[2]/xLines[4]) ----------------------
+    // WHY: road "hierarchy" used to be pure paint (double-yellow, zero geometry
+    // difference) — every street drove identically. A real downtown has a couple
+    // of avenues that are GENUINELY bigger: more lanes, a hard median. We can't
+    // widen the asphalt itself (ROAD is baked into xLines/step — every block
+    // position and the fast nearestIntersection() lookup assume a UNIFORM step,
+    // and city.maxX anchors expansion.js's bridge/island; reflowing the grid to
+    // free real width is exactly the regen this task forbids). So we spend the
+    // EXISTING ROAD envelope differently at just these 2 lines: narrower lanes
+    // (2.35m vs the ordinary 3.6m) buy room for a THIRD lane per direction plus
+    // a permanent physical median, all still inside the same ROAD=16 footprint
+    // (3 lanes * 2.35m * 2 sides + a 0.7m median = 14.8m, under ROAD with a
+    // 0.3m shoulder to spare before the curb edge-line). AVE_LANES/AVE_LANEW
+    // are stamped onto these two road records (avenue:true) for any future
+    // traffic.js pass that wants to read a per-segment lane count; today's
+    // vehicles.js/traffic.js only read the GLOBAL CBZ.CITY.traf.lanesPerDir/
+    // laneW (verified: lanesPerDir()/laneWidth() in traffic.js and vehicles.js
+    // take no road argument), so ambient AI still cruises these avenues at the
+    // ordinary global lane count — the extra lane is real, walkable/driveable
+    // pavement with its own paint, just not yet AI-claimed. That wiring is a
+    // traffic.js change, out of this file's scope; flagged here rather than
+    // silently faked.
+    const AVENUE_LINES = [2, 4];
+    function isAvenueLine(i) { return AVENUE_LINES.indexOf(i) >= 0; }
+    const AVE_LANES = 3, AVE_LANEW = 2.35, AVE_MEDIAN = 0.7;
     const whiteRects = [], yellowRects = [];   // {x,z,w,d}
     // one centred white DASHED line down a span (axis: 'v' along z, 'h' along x)
     function pushDashes(cx, cz, vertical, len, off) {
@@ -209,23 +234,37 @@
       if (vertical) arr.push({ x: cx + off, z: cz, w: 0.18, d: len });
       else arr.push({ x: cx, z: cz + off, w: len, d: 0.18 });
     }
-    // paint the whole lane set for ONE street centred at (cx,cz)
-    function paintStreet(cx, cz, vertical, len, core) {
-      // centre line
-      if (core) { pushSolid(cx, cz, vertical, len, -0.26, true); pushSolid(cx, cz, vertical, len, 0.26, true); }
+    // paint the whole lane set for ONE street centred at (cx,cz). `avenue` swaps
+    // in the wider-capacity 3-lanes-per-direction layout (narrower lane width,
+    // a hard median gap) instead of the ordinary lanesPerDir/laneW pair — it is
+    // the ONLY caller of the double-yellow-with-median centreline now (ordinary
+    // streets keep the original single-yellow centreline).
+    function paintStreet(cx, cz, vertical, len, avenue) {
+      const nLanes = avenue ? AVE_LANES : lanesPerDir, lw = avenue ? AVE_LANEW : laneW;
+      // centre line: avenues get a wider double-yellow straddling the median;
+      // every ordinary street keeps the original single-yellow centreline.
+      if (avenue) { pushSolid(cx, cz, vertical, len, -AVE_MEDIAN / 2 - 0.08, true); pushSolid(cx, cz, vertical, len, AVE_MEDIAN / 2 + 0.08, true); }
       else pushSolid(cx, cz, vertical, len, 0, true);
-      // dashed dividers between lanes on each side
+      // dashed dividers BETWEEN lanes on each side (k=1..nLanes-1 — the k=0 slot
+      // is the median/centreline itself, already marked above, never re-striped)
       for (let s = -1; s <= 1; s += 2) {
-        for (let k = 1; k < lanesPerDir; k++) pushDashes(cx, cz, vertical, len, s * k * laneW);
+        const base = avenue ? AVE_MEDIAN / 2 : 0;
+        for (let k = 1; k < nLanes; k++) pushDashes(cx, cz, vertical, len, s * (base + k * lw));
         // solid edge/fog line just inside the curb
         pushSolid(cx, cz, vertical, len, s * (ROAD / 2 - 0.3), false);
       }
     }
     const aveRects = [], crossRects = [];
     xLines.forEach((x, i) => {              // avenues (run along z)
+      const ave = isAvenueLine(i);
       aveRects.push({ x, z: (minZ + maxZ) / 2, w: ROAD, d: spanZ });
-      paintStreet(x, (minZ + maxZ) / 2, true, spanZ, i === 2 || i === 4);
-      roads.push({ x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ });
+      paintStreet(x, (minZ + maxZ) / 2, true, spanZ, ave);
+      // stamp the avenue's real per-segment lane data (lanesPerDir/laneW/avenue)
+      // alongside the ordinary {x,z,vertical,len} shape every consumer expects —
+      // a plain additive field, invisible to anything that doesn't look for it.
+      const seg = { x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ };
+      if (ave) { seg.avenue = true; seg.lanesPerDir = AVE_LANES; seg.laneW = AVE_LANEW; }
+      roads.push(seg);
     });
     zLines.forEach((z) => {                 // cross-streets (run along x)
       crossRects.push({ x: (minX + maxX) / 2, z, w: spanX, d: ROAD });
@@ -244,14 +283,41 @@
     }
     paintMesh(whiteRects, 0xeef1f5, 0.06);
     paintMesh(yellowRects, 0xf2c83a, 0.062);
-    // optional raised concrete MEDIAN on the two core avenues (flag-gated).
-    if (CBZ.CONFIG && CBZ.CONFIG.CITY_MEDIANS) {
+    // permanent raised concrete MEDIAN on the two avenues — was flag-gated decor
+    // (CITY_MEDIANS) shared by every line; now it's the avenues' OWN structural
+    // tell (always on), sized to the lane layout above (AVE_MEDIAN), and GAPPED
+    // at every cross-street so it reads as a real left-turn-pocket median
+    // instead of a concrete island bulldozed straight through every intersection
+    // (decor only — no collider either way — but a median floating through a
+    // 4-way crossing looked wrong once this stopped being an occasional flag).
+    // One merged mesh per avenue (BoxGeometry per segment, BGU-folded), so two
+    // avenues still cost about 1 extra draw call total, same budget as before.
+    {
       const medMat = mat(0x9aa0a6);
-      [2, 4].forEach((i) => {
+      const medGeoms = [];
+      AVENUE_LINES.forEach((i) => {
         const x = xLines[i];
-        const med = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.28, spanZ), medMat);
-        med.position.set(x, 0.14, (minZ + maxZ) / 2); med.castShadow = false; root.add(med);
+        zLines.forEach((z, j) => {
+          const zNext = zLines[j + 1];
+          if (zNext == null) return;
+          const gapLen = Math.max(0, (zNext - z) - ROAD);   // clear of both intersection boxes (each eats ROAD/2 on its near side)
+          if (gapLen < 1) return;
+          const segZ = (z + zNext) / 2;
+          const g = new THREE.BoxGeometry(AVE_MEDIAN, 0.28, gapLen);
+          g.translate(x, 0.14, segZ);
+          medGeoms.push(g);
+        });
       });
+      if (medGeoms.length) {
+        const BGU = THREE.BufferGeometryUtils;
+        if (BGU && BGU.mergeBufferGeometries) {
+          const merged = BGU.mergeBufferGeometries(medGeoms);
+          const med = new THREE.Mesh(merged, medMat);
+          med.castShadow = false; med.matrixAutoUpdate = false; med.updateMatrix(); root.add(med);
+        } else {
+          for (const g of medGeoms) { const med = new THREE.Mesh(g, medMat); med.castShadow = false; root.add(med); }
+        }
+      }
     }
 
     // ---- intersections + crosswalk stripes ----
@@ -783,6 +849,47 @@
       }
     }
 
+    // ---- NO-DECOY FIX: the harbor's moored hulls used to be dead THREE.Mesh
+    //      boxes — no collider, no cityCars entry, no [E] prompt: a boat you
+    //      could see but never reach, the classic "decoy" prop. The 3 EAST
+    //      HARBOR hulls (the ones you actually pass close to, crossing the
+    //      bridge) are now REAL vehicles.js cars: recorded here as spawn
+    //      spots, then handed to cityMakeCar with economy.js's "Speedboat"
+    //      model once vehicles.js exists — same pipeline expansion.js uses for
+    //      the island's parked cars (spawnCityTraffic clears cityCars on every
+    //      run, so re-fire this hook right after it, or the harbor goes empty
+    //      after the first respawn). They get playercars.js's real makeBoat()
+    //      visual (via cityInferCarStyle reading detailStyle:"boat") and are
+    //      enterable through the exact same cityEnterVehicle every car uses.
+    //      The other coast hulls (west/south/north) stay pure decor — the
+    //      task only asks for 2-3 real ones, and this keeps the draw-call/
+    //      cityCars-array cost of the change minimal. ----
+    const _harborBoatSpots = [];
+    let _harborHookWrapped = false;
+    function wrapHarborBoatSpawn() {
+      if (_harborHookWrapped || !CBZ.spawnCityTraffic) return;
+      _harborHookWrapped = true;
+      const orig = CBZ.spawnCityTraffic;
+      CBZ.spawnCityTraffic = function (n) {
+        const r = orig(n);
+        spawnHarborBoats();
+        return r;
+      };
+    }
+    function spawnHarborBoats() {
+      // cityMakeCar reaches into CBZ.city.arena — which mode.js only assigns
+      // AFTER this whole buildCity() call returns, so this must NEVER run
+      // synchronously from inside buildCity() itself (only from the
+      // spawnCityTraffic hook below, which always fires later, post-build).
+      if (!CBZ.cityMakeCar || !CBZ.cityEcon || !CBZ.cityEcon.carByName || !CBZ.city || !CBZ.city.arena) return;
+      const model = CBZ.cityEcon.carByName("Speedboat");
+      if (!model) return;
+      for (const s of _harborBoatSpots) {
+        const c = CBZ.cityMakeCar(s.x, s.z, s.yaw, false, model, 0);
+        if (!c) continue;
+        c.ai = false; c.v = 0; c.baseV = 0; c.road = null;   // moored — sits still until jacked
+      }
+    }
     // ---- EAST HARBOR: the bridge-approach gap used to be bare void over
     //      nothing. A sand shoulder under the seawall, rip-rap armour at the
     //      waterline (it also hides the ground apron's hard edge) and a few
@@ -822,9 +929,14 @@
         const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 2.0), hmat(0xe8ebee));
         cab.position.set(0, 1.15, -1.2); cab.castShadow = true; b.add(cab);
       }
-      boat(EEx + 34, cz - 26, 0.35, 0x9e3434);
-      boat(EEx + 46, cz + 24, -0.5, 0x2f5d8a);
-      boat(EEx + 38, cz + 44, 0.15, 0x9e3434);
+      // these 3 east-harbor hulls are the ones the player actually passes
+      // close to crossing the bridge, so they're the ones promoted to REAL
+      // vehicles (see spawnHarborBoats above) instead of the old dead
+      // boat(...) box-mesh decor — recorded here, spawned once vehicles.js's
+      // cityMakeCar exists, at the exact spot/yaw the decor used to sit.
+      _harborBoatSpots.push({ x: EEx + 34, z: cz - 26, yaw: 0.35 });
+      _harborBoatSpots.push({ x: EEx + 46, z: cz + 24, yaw: -0.5 });
+      _harborBoatSpots.push({ x: EEx + 38, z: cz + 44, yaw: 0.15 });
 
       // ---- THE WATERFRONT RING: the other three coasts get the same harbor
       //      treatment (the east already has it) — rip-rap rock armour where
@@ -865,6 +977,14 @@
       boat(cx - 60, SQ - 16, 1.25, 0x9e3434);
       boat(cx + 70, NQ + 17, -1.0, 0xd9a13a);
     })();
+    // Install the respawn hook (buildCity() runs once at city-mode entry, well
+    // after every script — incl. vehicles.js, which loads AFTER world.js in
+    // index.html — has loaded, so CBZ.spawnCityTraffic is live by now despite
+    // the script tag order). Do NOT spawn here directly: mode.js's build()
+    // only sets CBZ.city.arena AFTER this buildCity() call returns, and
+    // cityMakeCar needs it — the first real spawn happens when mode.js calls
+    // CBZ.spawnCityTraffic() right after, same as expansion.js's annex cars.
+    wrapHarborBoatSpawn();
 
     // ---- THE WATERFRONT WITH A PURPOSE (city/beach.js): sand beach +
     //      boardwalk + pier in the south seawall gap, parking lot + container

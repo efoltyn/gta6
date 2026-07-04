@@ -31,7 +31,10 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const g = CBZ.game;
-  const rng = Math.random;
+  // seeded LCG (project convention — NEVER Math.random). Was aliased straight
+  // to Math.random; fixed while this module is open for the flight-physics pass.
+  let _s = 47711;
+  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
   // ---- tunables -------------------------------------------------------------
   const CRUISE_Y    = 48;     // ride cruise altitude (clears every core-tower parapet at FH=4.6)
@@ -219,8 +222,15 @@
       const dl = Math.hypot(dx, dz);
       const step = HELI_SPEED * dt;
       if (dl > 0.4) { c.pos.x += (dx / dl) * Math.min(step, dl); c.pos.z += (dz / dl) * Math.min(step, dl); }
-      // descend only once roughly over the pad
-      const vstep = HELI_CLIMB * dt;
+      // descend only once roughly over the pad — GROUND EFFECT (shared aero
+      // core, same curve the gunship/player heli use) gently slows the final
+      // few metres of descent so the touchdown reads like a real rotor
+      // cushioning on its own downwash, not a lift snapping to a stop.
+      let vstep = HELI_CLIMB * dt;
+      if (CBZ.aeroPhysics && dy < 0) {
+        const gMul = CBZ.aeroPhysics.groundEffectMul(Math.max(0, c.pos.y - L.y), 9.4);
+        vstep *= 1 / gMul;   // bigger ground-effect bonus → smaller allowed descent step
+      }
       if (dl < 6) c.pos.y += Math.max(-vstep, Math.min(vstep, dy));
       c.group.rotation.y = Math.atan2(dx, dz);
       if (dl < 0.8 && Math.abs(dy) < 0.6) { c.phase = "landed"; c.waitT = LAND_WAIT; note("🚁 Chopper down — walk under it to board.", 3); }
