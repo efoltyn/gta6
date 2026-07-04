@@ -523,6 +523,10 @@
     return false;
   };
   // re-glaze the whole city for a new game (restore panes + their colliders)
+  // internal export for city/demolition.js: per-pane show/hide against the
+  // instanced pools (demolition hides a whole building's panes on collapse and
+  // re-seats them on rebuild — same primitive burstPane/cityGlassReset use).
+  CBZ._paneShow = paneShow;
   CBZ.cityGlassReset = function () {
     shatteredPanes = 0;
     for (const gp of cityGlass) {
@@ -541,6 +545,9 @@
     for (const cq of crackQuads) { CBZ.scene.remove(cq.mesh); if (cq.mesh.material) cq.mesh.material.dispose(); cq.mesh.geometry.dispose(); }
     crackQuads.length = 0;
     CBZ.cityDamageReset && CBZ.cityDamageReset();
+    // demolition FIRST (it clears the door demolished flags + re-registers a
+    // rebuilt building's colliders), THEN doors reset can re-seat every leaf.
+    if (CBZ.cityDemolition && CBZ.cityDemolition.reset) try { CBZ.cityDemolition.reset(); } catch (e) {}
     CBZ.cityDoorsReset && CBZ.cityDoorsReset();
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
