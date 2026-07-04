@@ -39,12 +39,14 @@
   // ---- the 4 standalone placements (all footprints VERIFIED clear of the
   //      known island/biome rects: mainland(0,-700 ±~184), annex(348,-700 r120),
   //      speedway(470,-330 r200), airport(-40,-120 rect), military(-620,-700),
-  //      desert(1050,-20), forest(-560,-1350), snow(350,-1450), farmland(1180,-880)).
+    //      desert(1115,150 ±445,470 → x[670,1560] z[-320,620], MASSIVE),
+  //      forest(-560,-1350), snow(350,-1450), farmland(1180,-880)).
   //      Each city is its OWN biome string so crowd/regionlife populate it. The
   //      `road` point is where its causeway plugs toward the existing network. ----
   const PLACEMENTS = [
-    // FINANCE — SE plains, south of the desert, east of the port.
-    { id: "goldspire",  cx: 760,   cz: 430,  hx: 118, hz: 120, road: { x: 470, z: 430 } },
+    // FINANCE — south-central plains, WEST of the (now much larger) desert.
+    // Moved off its old SE spot (760,430), which the enlarged desert swallowed.
+    { id: "goldspire",  cx: 150,   cz: 470,  hx: 118, hz: 120, road: { x: 340, z: 470 } },
     // PORT — south coast, south of the speedway, west of the desert.
     { id: "capeharbor", cx: 430,   cz: 175,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
     // CASINO — west plains, west of the military base.

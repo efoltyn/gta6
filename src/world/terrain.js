@@ -58,16 +58,19 @@
   //    speedway island ....... x[270,670]      z[-530,-130]
   //    airport island ........ x[-370,290]     z[-280,40]
   //    military island ....... x[-860,-380]    z[-950,-450]
-  //    desert biome .......... x[670,1430]     z[-320,280]
+  //    desert biome .......... x[670,1560]     z[-320,620]   (MASSIVE south basin)
   //    forest biome .......... x[-950,-170]    z[-1680,-1020]
   //    farmland biome ........ x[780,1580]     z[-1280,-480]
   //    snow biome ............ x[-70,770]      z[-1780,-1120]
   //    + every causeway between them.
-  //  Union: x[-960,1580]  z[-1790,290].  We KEEP IT FLAT generously —
+  //  Union: x[-960,1580]  z[-1790,760].  We KEEP IT FLAT generously —
   //  when unsure, flat wins (owner rule). Margin pushes the relief ring
-  //  well clear of anywhere anyone can stand.
+  //  well clear of anywhere anyone can stand. maxZ was pushed 290→760 to
+  //  hold the enlarged desert basin; the backdrop rings sit at radius
+  //  1900-2380 from the field centre so the south flat edge (z760, ~1510
+  //  from centre) stays well clear of them.
   // ----------------------------------------------------------------------
-  const FLAT = { minX: -960, maxX: 1580, minZ: -1790, maxZ: 290 };
+  const FLAT = { minX: -960, maxX: 1580, minZ: -1790, maxZ: 760 };
   const MARGIN = 150;        // dead-flat for this much PAST the union edge
   const RAMP = 460;          // smoothstep distance from flat edge → full relief
 
@@ -335,22 +338,52 @@
     //  country beneath it. Pure backdrop like every other peak — you look AT
     //  it, never on it (terrainHeight stays 0 over all walkable ground).
     // ====================================================================
-    (function colossus() {
-      const bearing = -Math.PI / 2;                 // due north of the field centre (−z)
-      const R = 2050;
+    //  A shared helper so both signature titans are built the RIGHT way — the
+    //  ring code passes (THREE, p0, p1, dir, cfg) and reads .geo/.spine; the
+    //  old Colossus block dropped the THREE arg and the palette and pushed the
+    //  raw {geo,spine} object, which threw a TypeError inside an un-guarded IIFE
+    //  and silently killed EVERY hero peak + the boulder scatter (world went
+    //  flat-backdrop-only). This routes both through buildRidge correctly.
+    function heroPeak(name, bearing, R, half, cfg) {
+      if (!buildRidge) return;
       const cx0 = CX + Math.cos(bearing) * R, cz0 = CZ + Math.sin(bearing) * R;
       const perp = { x: -Math.sin(bearing), z: Math.cos(bearing) };
-      const half = 150;                             // narrow footprint → one dominant summit
       const p0 = { x: cx0 - perp.x * half, z: cz0 - perp.z * half };
       const p1 = { x: cx0 + perp.x * half, z: cz0 + perp.z * half };
       const dir = { x: Math.cos(bearing), z: Math.sin(bearing) };
-      heroGeoms.push(buildRidge(p0, p1, dir, {
+      const built = buildRidge(THREE, p0, p1, dir, Object.assign({
+        footGuard: 0.16, palette: heroPalette,
+      }, cfg));
+      if (built) { heroGeoms.push(built.geo); if (built.spine) heroSpines.push(built.spine); }
+      return { x: cx0, z: cz0, height: cfg.peakAmp };
+    }
+
+    // ====================================================================
+    //  MOUNT COLOSSUS — the original narrow snow-capped titan, due north.
+    // ====================================================================
+    {
+      const c = heroPeak("Mount Colossus", -Math.PI / 2, 2050, 150, {
         cols: 28, rows: 9, depthLen: 560, peakAmp: 1050, noiseScale: 0.006,
         seedOff: 90210, fogBase: 0.10, fogDepth: 0.12,
-      }));
-      // expose the landmark (a compass / map pin can use it later).
-      CBZ.MOUNT_COLOSSUS = { name: "Mount Colossus", x: cx0, z: cz0, height: 1050 };
-    })();
+      });
+      CBZ.MOUNT_COLOSSUS = { name: "Mount Colossus", x: c.x, z: c.z, height: c.height };
+    }
+
+    // ====================================================================
+    //  MOUNT EVEREST — the ROOF OF THE WORLD. Taller than Colossus (peakAmp
+    //  1500 vs 1050) and set on a WIDE footprint so its shoulders read as a
+    //  true Himalayan massif, not a lone spire. Placed north-north-east so it
+    //  and Colossus both loom on the skyline as two distinct giants instead of
+    //  overlapping. Snowline is shared (45% of peak) → a huge white summit that
+    //  towers over everything. Pure backdrop — walkable ground stays y=0.
+    // ====================================================================
+    {
+      const e = heroPeak("Mount Everest", -Math.PI / 2 + 0.62, 2380, 360, {
+        cols: 52, rows: 11, depthLen: 820, peakAmp: 1500, noiseScale: 0.0048,
+        seedOff: 29029, fogBase: 0.12, fogDepth: 0.16,
+      });
+      CBZ.MOUNT_EVEREST = { name: "Mount Everest", x: e.x, z: e.z, height: e.height };
+    }
 
     const heroMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     function addMergedHero(geoms) {

@@ -57,41 +57,70 @@
   const NAMES = ["Rex", "Bella", "Max", "Luna", "Duke", "Rocky", "Cooper", "Zeus", "Buddy", "Ghost", "Bandit", "Nala", "Scout", "Loki", "Sadie"];
 
   // ============================================================
-  //  DOG MESH — a compact blocky good boy. Feet at y=0, nose +X.
+  //  DOG MESH — a blocky Minecraft-wolf good boy, drawn to HUMAN SCALE.
+  //  Everything is an axis-aligned box (the same intentional-cuboid look as
+  //  the human rig + MC mobs) so it reads as a deliberate low-poly animal,
+  //  not a mush of primitives. Feet plant at y=0, nose faces +X.
+  //
+  //  SCALE (a human is ~2.5u tall, hip 0.95, knee 0.47): this is a LARGE dog
+  //  — its back sits at ~0.68 (your knee) and the ear tips reach ~1.0 (mid-
+  //  thigh), so when it looks up its head comes to about your hip. A big
+  //  shepherd/husky next to a person, never a pony and never a rat.
   // ============================================================
+  const LEG_H = 0.34, LEG_W = 0.17;          // straight blocky legs
+  const BODY_L = 0.86, BODY_H = 0.34, BODY_W = 0.44;
+  const BODY_Y = LEG_H + BODY_H / 2;         // 0.51 — torso rides on the legs
+  const HEAD = 0.36, HEAD_X = BODY_L / 2 + 0.16, HEAD_Y = BODY_Y + 0.16;
+
   function buildDog(breed) {
     const gp = new THREE.Group();
-    const coat = mat(breed.coat), belly = mat(breed.belly), dark = mat(0x1a1712);
+    const coat = mat(breed.coat), belly = mat(breed.belly), dark = mat(0x141110), inner = mat(0x8a5b52);
     function box(w, h, d, m) { return new THREE.Mesh(CBZ.boxGeom(w, h, d), m); }
-    const body = box(0.9, 0.42, 0.4, coat); body.position.set(0, 0.55, 0); gp.add(body);
-    const chest = box(0.5, 0.36, 0.42, coat); chest.position.set(0.34, 0.56, 0); gp.add(chest);
-    const under = box(0.85, 0.16, 0.36, belly); under.position.set(0, 0.4, 0); gp.add(under);
-    const neck = box(0.3, 0.34, 0.3, coat); neck.position.set(0.52, 0.66, 0); gp.add(neck);
-    const head = box(0.36, 0.34, 0.34, coat); head.position.set(0.72, 0.78, 0); gp.add(head);
-    const snout = box(0.26, 0.18, 0.2, coat); snout.position.set(0.94, 0.72, 0); gp.add(snout);
-    const nose = box(0.08, 0.08, 0.12, dark); nose.position.set(1.07, 0.74, 0); gp.add(nose);
-    // ears
+
+    // ---- torso: a chunky cuboid, with a slightly taller rear haunch and a
+    //      lighter underbelly + chest bib for the two-tone MC-wolf read.
+    const body = box(BODY_L, BODY_H, BODY_W, coat); body.position.set(0, BODY_Y, 0); gp.add(body);
+    const rump = box(0.30, BODY_H + 0.06, BODY_W + 0.02, coat); rump.position.set(-BODY_L / 2 + 0.13, BODY_Y + 0.03, 0); gp.add(rump);
+    const under = box(BODY_L - 0.06, 0.12, BODY_W - 0.06, belly); under.position.set(0, LEG_H + 0.06, 0); gp.add(under);
+    const bib = box(0.13, BODY_H - 0.04, BODY_W - 0.06, belly); bib.position.set(BODY_L / 2 - 0.05, BODY_Y, 0); gp.add(bib);
+
+    // ---- head: a cube up front on a short neck, with a boxy snout + nose.
+    const neck = box(0.24, 0.30, 0.32, coat); neck.position.set(BODY_L / 2 - 0.02, BODY_Y + 0.08, 0); gp.add(neck);
+    const head = box(HEAD, HEAD, HEAD, coat); head.position.set(HEAD_X, HEAD_Y, 0); gp.add(head);
+    const snout = box(0.22, 0.16, 0.22, coat); snout.position.set(HEAD_X + 0.24, HEAD_Y - 0.05, 0); gp.add(snout);
+    const nose = box(0.09, 0.08, 0.12, dark); nose.position.set(HEAD_X + 0.37, HEAD_Y - 0.02, 0); gp.add(nose);
+    // eyes — tiny dark blocks give it a face (MC-skin detailing).
+    [-1, 1].forEach(function (s) { const e = box(0.06, 0.08, 0.05, dark); e.position.set(HEAD_X + 0.15, HEAD_Y + 0.06, s * 0.11); gp.add(e); });
+    // ears — perked ("up") or folded ("flop"), each with a pink inner block.
     [-1, 1].forEach(function (s) {
-      let ear;
-      if (breed.ear === "up") { ear = box(0.1, 0.2, 0.06, coat); ear.position.set(0.64, 1.02, s * 0.14); }
-      else { ear = box(0.1, 0.24, 0.06, coat); ear.position.set(0.66, 0.82, s * 0.19); ear.rotation.z = -0.3; }
-      gp.add(ear);
+      let ear, ex, ey, rot = 0;
+      if (breed.ear === "up") { ear = box(0.10, 0.18, 0.08, coat); ex = HEAD_X - 0.03; ey = HEAD_Y + HEAD / 2 + 0.06; }
+      else { ear = box(0.10, 0.20, 0.07, coat); ex = HEAD_X + 0.00; ey = HEAD_Y + HEAD / 2 - 0.02; rot = -0.55; }
+      ear.position.set(ex, ey, s * 0.12); ear.rotation.z = rot; gp.add(ear);
+      const ie = box(0.05, 0.10, 0.04, inner); ie.position.set(ex + 0.03, ey - 0.02, s * 0.12); ie.rotation.z = rot; gp.add(ie);
     });
-    // legs
-    [[0.34, 0.15], [0.34, -0.15], [-0.32, 0.15], [-0.32, -0.15]].forEach(function (o) {
-      const l = box(0.13, 0.55, 0.13, coat); l.position.set(o[0], 0.28, o[1]); gp.add(l);
+
+    // ---- legs: four straight blocky legs (diagonal-gait animated in tick).
+    const legs = [];
+    const lx = BODY_L / 2 - 0.15, lz = BODY_W / 2 - 0.09;
+    [[lx, lz], [lx, -lz], [-lx + 0.02, lz], [-lx + 0.02, -lz]].forEach(function (o) {
+      const l = box(LEG_W, LEG_H, LEG_W, coat); l.position.set(o[0], LEG_H / 2, o[1]);
+      l.userData.baseX = o[0]; l.userData.baseY = LEG_H / 2; gp.add(l); legs.push(l);
     });
-    // tail (wags in update)
-    const tail = box(0.34, 0.12, 0.12, coat); tail.position.set(-0.55, 0.66, 0); tail.rotation.z = 0.6;
-    tail.name = "tail"; gp.add(tail);
+
+    // ---- tail: a blocky plume angled up & back; wags in the update loop.
+    const tail = box(0.30, 0.14, 0.14, coat); tail.position.set(-BODY_L / 2 - 0.08, BODY_Y + 0.13, 0);
+    tail.rotation.z = 0.7; tail.name = "tail"; gp.add(tail);
+
     gp.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+    gp.userData.legs = legs;
     return gp;
   }
 
   function addCollar(dog) {
     if (dog.collarMesh) return;
-    const c = new THREE.Mesh(CBZ.boxGeom(0.34, 0.1, 0.34), mat(dog.collar));
-    c.position.set(0.52, 0.7, 0); c.frustumCulled = false;
+    const c = new THREE.Mesh(CBZ.boxGeom(0.30, 0.10, 0.36), mat(dog.collar));
+    c.position.set(BODY_L / 2 - 0.06, BODY_Y + 0.06, 0); c.frustumCulled = false;
     dog.group.add(c); dog.collarMesh = c;
   }
 
@@ -286,6 +315,25 @@
       d.wag += dt * (6 + (d.wagBoost || 0) * 4); if (d.wagBoost) d.wagBoost = Math.max(0, d.wagBoost - dt);
       const tail = grp.getObjectByName && grp.getObjectByName("tail");
       if (tail) tail.rotation.y = Math.sin(d.wag) * 0.5;
+
+      // TROT: swing the legs (diagonal gait) by how far the dog actually moved
+      // last frame — so it animates in every branch (wander/heel/chase) without
+      // each one having to know. Legs settle to base when standing still.
+      const legs = grp.userData && grp.userData.legs;
+      if (legs) {
+        const px0 = d.prevX == null ? grp.position.x : d.prevX;
+        const pz0 = d.prevZ == null ? grp.position.z : d.prevZ;
+        const moved = Math.hypot(grp.position.x - px0, grp.position.z - pz0);
+        d.prevX = grp.position.x; d.prevZ = grp.position.z;
+        const walking = moved > 0.004;
+        if (walking) d.step = (d.step || 0) + dt * 11;
+        const sw = walking ? Math.sin(d.step || 0) : 0, amp = 0.10;
+        for (let li = 0; li < legs.length; li++) {
+          const L = legs[li], diag = (li === 0 || li === 3) ? 1 : -1;   // FL+RR vs FR+RL
+          L.position.x = L.userData.baseX + sw * amp * diag;
+          L.position.y = L.userData.baseY + (walking ? Math.abs(Math.sin((d.step || 0) + (diag > 0 ? 0 : Math.PI))) * amp * 0.35 : 0);
+        }
+      }
 
       if (!d.tamed) {
         // strays mill about a little, deterministic-ish idle wander.

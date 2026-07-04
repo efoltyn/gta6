@@ -14,8 +14,8 @@
    ARCHIPELAGO CONTRACT (worldmap.js):
      CBZ.addLandmass(builder, order)  — builder gets the live `city`.
      CBZ.registerCityRegion(city, reg) — declare the walkable land.
-   Footprint: rect center (1050,-20), half-extents (380,300):
-     minX 670  maxX 1430  minZ -320  maxZ 280.
+   Footprint: rect center (1115,150), half-extents (445,470):
+     minX 670  maxX 1560  minZ -320  maxZ 620  (a MASSIVE south basin).
    Causeway: a ~14-wide desert highway deck from the desert's west
    edge (~x670, z-300) to the speedway island's east edge (~x670,
    z-330, the circle center 470,-330 r200). Registered as its own
@@ -39,10 +39,15 @@
   const THREE = window.THREE;
   const cmat = CBZ.cmat || CBZ.mat;
 
-  // ---- footprint -----------------------------------------------------------
-  const CX = 1050, CZ = -20, HX = 380, HZ = 300;
-  const MINX = CX - HX, MAXX = CX + HX;   // 670 .. 1430
-  const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -320 .. 280
+  // ---- footprint (MASSIVE basin) -------------------------------------------
+  // North edge stays anchored at z-320 (the causeway tuck to the speedway
+  // island) and the west edge at x670 (speedway's east shore); the desert
+  // sprawls EAST to the flat limit and DEEP to the south (flat maxZ was
+  // pushed to 760 in terrain.js to hold it). ~1.8x the old footprint — a
+  // genuinely vast empty tan basin you drive across, not a lobby.
+  const CX = 1115, CZ = 150, HX = 445, HZ = 470;
+  const MINX = CX - HX, MAXX = CX + HX;   // 670 .. 1560
+  const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -320 .. 620
 
   // ---- causeway (land-bridge to the speedway island) -----------------------
   // speedway: circle center (470,-330) r200 → east edge ~ x670, z-330.
@@ -246,7 +251,7 @@
     }
     // wind-streak patches (two tones, two merged meshes — 2 draw calls)
     const patchDk = [], patchPale = [];
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 90; i++) {
       const x = rr(MINX + 20, MAXX - 20), z = rr(MINZ + 20, MAXZ - 20);
       const w = rr(10, 34), d = rr(8, 26);
       const g = new THREE.PlaneGeometry(w, d);
@@ -298,7 +303,7 @@
     //     A pale crest cap mesh on top for the sun-hit ridge read.
     // =====================================================================
     const duneGeoms = [], crestGeoms = [];
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 180; i++) {   // scaled up for the ~1.8x larger basin
       const x = rr(MINX + 14, MAXX - 14), z = rr(MINZ + 14, MAXZ - 14);
       const r = rr(7, 22), h = rr(1.0, 3.0);
       const g = new THREE.SphereGeometry(r, 7, 4, 0, Math.PI * 2, 0, Math.PI * 0.5);
@@ -514,6 +519,11 @@
       { x: CX + 180, z: CZ + 120, w: 95, d: 70, h: 30 },
       { x: CX + 120, z: CZ - 200, w: 55, d: 60, h: 20 },
       { x: CX - 140, z: CZ + 180, w: 60, d: 48, h: 22 },
+      // three more out in the deep southern expanse — tall buttes that give the
+      // enlarged basin far-off orientation cues (you steer BY them).
+      { x: CX - 260, z: CZ + 340, w: 84, d: 66, h: 38 },
+      { x: CX + 250, z: CZ + 300, w: 62, d: 74, h: 28 },
+      { x: CX + 40,  z: CZ + 400, w: 100, d: 80, h: 44 },
     ];
     const mesaBase = [], mesaCap = [], mesaBand = [];
     mesas.forEach(m => {
