@@ -755,6 +755,7 @@
 
   // ---- open / close + input ----
   function open(lot) {
+    if (!lot || lot.demolished) return;        // no counter to walk up to — it's rubble
     // a clerk you've ROBBED remembers (social.js shopkeeper memory) — the till
     // stays shut to YOU until the heat of it fades.
     const _v = lot && lot.building && lot.building.vendor;
@@ -951,7 +952,7 @@
         let best = null, bd = 4.2 * 4.2;
         for (let i = 0; i < A.shopLots.length; i++) {
           const lot = A.shopLots[i], b = lot.building;
-          if (!b || !b.vendorSpot) continue;
+          if (!b || !b.vendorSpot || lot.demolished) continue;
           const vs = b.vendorSpot;
           const dd = (vs.x - px) * (vs.x - px) + (vs.z - pz) * (vs.z - pz);
           if (dd >= bd) continue;

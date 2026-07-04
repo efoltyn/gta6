@@ -337,7 +337,7 @@
         // the buildings cluster stamps lot.building.owner on every building — if
         // it's there, claim this derelict for the gang (guard: owner may not exist).
         if (lot.building && lot.building.owner) { lot.building.owner.id = gang.id; lot.building.owner.type = "gang"; }
-        if (lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
+        if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
           try { lot.building.stash.mesh.material.emissive.setHex(gang.color); } catch (e) {}
         }
         // bench size scales with the archetype: a SET / BRAWLER mob is deeper,
@@ -677,7 +677,7 @@
     lot.building.gang = winner.id;
     lot.building.gangColor = winner.color;
     if (lot.building.stash) lot.building.stash.gang = winner.id;
-    if (lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
+    if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
       try { lot.building.stash.mesh.material.emissive.setHex(winner.color); } catch (e) {}
     }
     // re-home any winner members who raided here so they hold the new ground
@@ -1601,7 +1601,7 @@
 
   // ---- rob a gang's stash (interact.js [I] near the stash duffel) ----
   CBZ.cityRobStash = function (lot) {
-    const st = lot && lot.building && lot.building.stash;
+    const st = lot && !lot.demolished && lot.building && lot.building.stash;
     if (!st || st.looted) { CBZ.city && CBZ.city.note("Nothing left here.", 1.4); return; }
     st.looted = true;
     const econ = CBZ.cityEcon;
@@ -1621,6 +1621,7 @@
   CBZ.cityNearestStash = function (x, z, maxd) {
     let best = null, bd = (maxd || 4) * (maxd || 4);
     for (const gang of CBZ.cityGangs) for (const lot of gang.turf) {
+      if (lot.demolished) continue;
       const st = lot.building.stash; if (!st || st.looted) continue;
       const dd = (st.x - x) * (st.x - x) + (st.z - z) * (st.z - z);
       if (dd < bd) { bd = dd; best = lot; }

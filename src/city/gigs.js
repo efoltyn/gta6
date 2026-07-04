@@ -87,18 +87,18 @@
   function allLots() {
     const a = arena(); if (!a) return [];
     const out = [];
-    const push = (arr) => { if (arr) for (const l of arr) if (l && l.building && l.building.door) out.push(l); };
+    const push = (arr) => { if (arr) for (const l of arr) if (l && l.building && l.building.door && !l.demolished) out.push(l); };
     push(a.lots); push(CBZ.city && CBZ.city.lots);
     return out;
   }
   function shopLots() {
     const a = arena();
     const arr = (CBZ.city && CBZ.city.shopLots) || (a && a.shopLots) || [];
-    return arr.filter((l) => l && l.building && l.building.door);
+    return arr.filter((l) => l && l.building && l.building.door && !l.demolished);
   }
   function homeLots() {
     const arr = (CBZ.city && CBZ.city.homeLots) || (arena() && arena().homeLots) || [];
-    return arr.filter((l) => l && l.building && l.building.door);
+    return arr.filter((l) => l && l.building && l.building.door && !l.demolished);
   }
   function lotName(l) { return (l && l.building && (l.building.name || "")) || ""; }
   function nameMatches(l, re) { return re.test(lotName(l)); }

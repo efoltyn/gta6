@@ -117,7 +117,7 @@
       const a = regAnchor({
         biome: "city", kind: "gig-pickup", x: d.x, z: d.z,
         role: isCab ? "cabstand" : "courier",
-        gig: "pickup", lotKind: l.kind, cap: 4,
+        gig: "pickup", lotKind: l.kind, cap: 4, lot: l,
         // a curb spot just off the door so the car has somewhere to pull up
         spots: [{ x: d.x, z: d.z }],
       });
@@ -129,7 +129,7 @@
       const dx = (l.building && l.building.door) ? l.building.door.x : l.cx;
       const dz = (l.building && l.building.door) ? l.building.door.z : l.cz;
       if (dx == null) continue;
-      const a = regAnchor({ biome: "city", kind: "gig-drop", x: dx, z: dz, role: "resident", gig: "drop", cap: 99 });
+      const a = regAnchor({ biome: "city", kind: "gig-drop", x: dx, z: dz, role: "resident", gig: "drop", cap: 99, lot: l });
       if (a) _drops.push(a);
     }
     for (let i = 0; i < shop.length; i++) {
@@ -138,7 +138,7 @@
       const dx = (l.building && l.building.door) ? l.building.door.x : l.cx;
       const dz = (l.building && l.building.door) ? l.building.door.z : l.cz;
       if (dx == null) continue;
-      const a = regAnchor({ biome: "city", kind: "gig-drop", x: dx, z: dz, role: "office", gig: "drop", cap: 99 });
+      const a = regAnchor({ biome: "city", kind: "gig-drop", x: dx, z: dz, role: "office", gig: "drop", cap: 99, lot: l });
       if (a) _drops.push(a);
     }
   }
@@ -172,6 +172,7 @@
     let best = null, bd = Infinity;
     for (let i = 0; i < _pickups.length; i++) {
       const a = _pickups[i];
+      if (a.lot && a.lot.demolished) continue;      // no counter/curb left to stage at
       const roleOk = wantCab ? (a.role === "cabstand") : (a.role === "courier");
       if (!roleOk) continue;
       if (a.occupants.length >= (a.cap | 0) && a.occupants.indexOf(ped) < 0) continue;
@@ -181,6 +182,7 @@
     // cab fallback: if no dedicated stand, a cab can pick up at any pickup point
     if (!best && wantCab) for (let i = 0; i < _pickups.length; i++) {
       const a = _pickups[i];
+      if (a.lot && a.lot.demolished) continue;
       if (a.occupants.length >= (a.cap | 0)) continue;
       const dd = (a.x - px) * (a.x - px) + (a.z - pz) * (a.z - pz);
       if (dd < bd) { bd = dd; best = a; }
@@ -205,6 +207,7 @@
     let best = null, bestScore = -1;
     for (let i = 0; i < _drops.length; i++) {
       const a = _drops[i];
+      if (a.lot && a.lot.demolished) continue;      // no door to drop the package at
       const d = Math.hypot(a.x - fromX, a.z - fromZ);
       if (d < minDist) continue;
       // prefer mid-range drops (visible trip, not a cross-map slog), small jitter
@@ -213,7 +216,8 @@
     }
     // if everything's too close, just take the farthest we have
     if (!best) for (let i = 0; i < _drops.length; i++) {
-      const a = _drops[i], d = Math.hypot(a.x - fromX, a.z - fromZ);
+      const a = _drops[i]; if (a.lot && a.lot.demolished) continue;
+      const d = Math.hypot(a.x - fromX, a.z - fromZ);
       if (d > bestScore) { bestScore = d; best = a; }
     }
     return best;

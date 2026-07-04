@@ -824,13 +824,13 @@
     id: "vendor-shop", slot: "e",
     // hide ONLY when a rich kind's own in-world module has taken over the
     // walk-up; otherwise this counter is always offered (text-menu fallback).
-    canShow: (v) => !!v.vendor && !richModuleLive(v.vendor),
+    canShow: (v) => !!v.vendor && !v.vendor.demolished && !richModuleLive(v.vendor),
     label: (v) => { const d = VERB[vendorKind(v)]; return d ? d.verb : "Shop here"; },
     sub:   (v) => { const d = VERB[vendorKind(v)]; return d ? d.sub : ""; },
     onSelect: (v) => CBZ.cityOpenShop(v.vendor),
   });
-  I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor, label: "Rob the register", onSelect: (v) => robRegister(v) });
-  I.register("ped:vendor", { id: "vendor-talk", slot: "j", canShow: (v) => !!v.vendor, label: "Talk to the clerk", onSelect: () => CBZ.city.note("“Welcome in. Take a look around.”", 1.6) });
+  I.register("ped:vendor", { id: "vendor-rob", slot: "i", bad: true, canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Rob the register", onSelect: (v) => robRegister(v) });
+  I.register("ped:vendor", { id: "vendor-talk", slot: "j", canShow: (v) => !!v.vendor && !v.vendor.demolished, label: "Talk to the clerk", onSelect: () => CBZ.city.note("“Welcome in. Take a look around.”", 1.6) });
 
   // ---- CORPSE: take the fit (loot is automatic — see the walk-over loop) ----
   I.register("corpse", {
