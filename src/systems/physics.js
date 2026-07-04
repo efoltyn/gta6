@@ -482,7 +482,9 @@
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
-    const woundScale = player._moveScale != null ? player._moveScale : 1;
+    // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
+    // the mount's gait). It COMPOSES with the limp — a wounded rider still rides.
+    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1);
     const moveSpeed = (player.crouch ? T.crouchSpeed : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale;
     let desX = 0, desZ = 0;
     if (len > 0) { mx /= len; mz /= len; desX = mx * moveSpeed; desZ = mz * moveSpeed; }

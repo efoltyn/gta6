@@ -201,7 +201,13 @@
     for (let h = 0; h < herd; h++) {
       const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
       const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-      makeActor(sp, jx, jz); n++;
+      const a = makeActor(sp, jx, jz); n++;
+      // herds come with a BABY: the last member of any 2+ herd spawns part-grown
+      // (a tiny scaled-down copy trailing the adults — see the grow logic).
+      if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
+        a.grow = rng() * 0.4;
+        a.group.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+      }
     }
     return n;
   }
@@ -309,7 +315,8 @@
         // don't pop a newborn in right under the player's nose
         if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
         const kid = makeActor(sp, nx, nz);
-        kid.grow = 0;                            // born small; grows up in tick()
+        kid.grow = 0;                            // born tiny; grows up in tick()
+        kid.group.scale.setScalar((sp.scale || 1) * 0.4);   // small from frame one
         kid.home = { x: parent.home.x, z: parent.home.z };
       }
     }
@@ -336,7 +343,9 @@
       killAnimal(a, hit);
       return { head: !!(hit && hit.head), down: true, dmg: dmg };
     }
-    // WOUNDED — predators charge, prey bolts.
+    // WOUNDED — predators charge, prey bolts. (A TAMED animal never turns on
+    // its owner: it just takes the hit — shooting your own pet is on you.)
+    if (a.tamed) return { head: !!(hit && hit.head), down: false, dmg: dmg };
     a.alarm = 8;
     const P = CBZ.player && CBZ.player.pos;
     if (a.species.danger > 0.15 && P) { a.state = "charge"; }
@@ -438,12 +447,16 @@
         if (a.skinned && a.skinT < 6) grp.position.y -= dt * 0.05;
         continue;
       }
-      // ---- newborns grow up: born at half size, full-grown in GROW_TIME ---
+      // ---- BABIES grow up: born tiny (a scaled-down copy of the adult — cute
+      //      is the point), full-grown in GROW_TIME ------------------------
       if (a.grow != null && a.grow < 1) {
         a.grow = Math.min(1, a.grow + dt / GROW_TIME);
-        grp.scale.setScalar((sp.scale || 1) * (0.5 + 0.5 * a.grow));
+        grp.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
         if (a.grow >= 1) a.grow = null;
       }
+      // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
+      if (a.ridden) continue;                                  // glued under the rider
+      if (a.tamed && !sp.aquatic) { if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt); continue; }
       // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
       if (sp.aquatic) {
         a.bob += dt * (1.2 + a.spd * 0.2);
@@ -487,6 +500,18 @@
         a.heading += (Math.random() - 0.5) * 1.5;
         a.turnT = 2 + Math.random() * 4;
         if (a.state === "wander") a.spd = (sp.spd || 1.4) * (0.6 + Math.random() * 0.8);
+        // a BABY sticks close to the grown-ups: when it drifts from the herd it
+        // re-aims at the nearest adult of its species instead of wandering off.
+        if (a.grow != null && a.grow < 1 && a.state === "wander") {
+          let ad = null, bd = 45 * 45;
+          for (let j = 0; j < animals.length; j++) {
+            const o = animals[j];
+            if (o === a || o.dead || o.grow != null || o.species !== sp) continue;
+            const dx = o.pos.x - grp.position.x, dz = o.pos.z - grp.position.z, q = dx * dx + dz * dz;
+            if (q < bd) { bd = q; ad = o; }
+          }
+          if (ad && bd > 6 * 6) a.heading = Math.atan2(ad.pos.z - grp.position.z, ad.pos.x - grp.position.x) + (Math.random() - 0.5) * 0.5;
+        }
       }
       // integrate + keep inside the home region (turn back at the fence)
       const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
