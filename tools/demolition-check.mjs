@@ -41,7 +41,7 @@ ws.addEventListener("message", (ev) => {
   if (m.method === "Runtime.exceptionThrown") errors.push(((m.params.exceptionDetails.exception || {}).description || m.params.exceptionDetails.text || "").split("\n")[0]);
 });
 const send = (method, params = {}) => new Promise((r) => { const i = id++; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
-const evl = async (e) => { const r = await send("Runtime.evaluate", { expression: e, returnByValue: true }); return r.result && r.result.result && r.result.result.value; };
+const evl = async (e) => { const r = await send("Runtime.evaluate", { expression: e, returnByValue: true, awaitPromise: true }); return r.result && r.result.result && r.result.result.value; };
 const shot = async (f) => { const s = await send("Page.captureScreenshot", { format: "png" }); await writeFile(path.join(OUTDIR, f), Buffer.from(s.result.data, "base64")); console.log("shot:", f); };
 await send("Runtime.enable"); await send("Page.enable");
 for (let i = 0; i < 60; i++) { if (await evl("!!(window.CBZ && CBZ.game && document.getElementById('playBtn'))")) break; await sleep(500); }
@@ -49,6 +49,18 @@ let playing = false;
 for (let i = 0; i < 120 && !playing; i++) { await evl("(() => { const b = document.getElementById('playBtn'); if (b) b.click(); return true; })()"); await sleep(600); playing = await evl("!!(CBZ.game && CBZ.game.state === 'playing')"); }
 console.log("playing:", playing);
 await sleep(3000);
+const failures = [];
+// self-verifying camera (tools/aimlib.js): every shot below PROVES its
+// subject is in frame by projecting it through the live camera — a probe
+// once spent two rounds photographing the WRONG building; never again.
+const { readFileSync } = await import("node:fs");
+await evl(readFileSync(path.join(ROOT, "tools/aimlib.js"), "utf8"));
+const aimAtLot = async (label) => {
+  const r = JSON.parse(await evl("__aim.atLot(window.__lot)"));
+  console.log("aim[" + label + "]:", r.ok ? "ok ndc=" + JSON.stringify(r.ndc) + " blockers=" + r.blockers : "FAILED " + JSON.stringify(r.tried));
+  if (!r.ok) failures.push("aim-" + label + ": target not in frame");
+  return r;
+};
 
 // pick a target: an eligible 2-4 storey building; teleport player to face it
 const pick = await evl(`(() => {
@@ -64,18 +76,10 @@ const pick = await evl(`(() => {
   const lot = cands[(cands.length * 0.3) | 0];
   window.__lot = lot;
   const b = lot.building;
-  // stand on the street the DOOR faces (guaranteed clear of neighbours),
-  // far enough back to frame the whole facade
-  const door = b0door(lot);
-  const back = Math.max(lot.w, lot.d) * 0.55 + 26;
-  const px = door.x + door.nx * back, pz = door.z + door.nz * back;
-  window.__view = { px, pz };
-  CBZ.player.pos.x = px; CBZ.player.pos.z = pz; CBZ.player.pos.y = 1.5;
-  if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - px, b.oz - pz) + Math.PI; if (typeof CBZ.cam.pitch === "number") CBZ.cam.pitch = -0.02; }
   return JSON.stringify({ kind: lot.kind, storeys: b.storeys, w: b.w, d: b.d, hp: D.hp(lot) });
 })()`);
 console.log("target:", pick);
-await sleep(1200);
+await aimAtLot("intact");
 await shot("demo-e2e-0-intact.png");
 
 // collapse directly (blast-driven HP -> destroy already proven in the prior
@@ -115,7 +119,6 @@ const floatCheck = async (label) => {
   console.log("float-check[" + label + "]:", r);
   try { if (JSON.parse(r).floating > 0) failures.push(label + ": " + r); } catch (e) { failures.push(label + ": " + r); }
 };
-const failures = [];
 
 const boom = await evl(`(() => {
   const lot = window.__lot, D = CBZ.cityDemolition;
@@ -124,8 +127,7 @@ const boom = await evl(`(() => {
 })()`);
 console.log("blasts:", boom);
 await sleep(1500);
-await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
-await sleep(700);
+await aimAtLot("rubble");
 await shot("demo-e2e-1-rubble.png");
 await floatCheck("rubble");
 
@@ -133,8 +135,7 @@ await floatCheck("rubble");
 const p2 = await evl(`(() => { CBZ.dayCount(CBZ.dayCount() + 3); return "day=" + CBZ.dayTime().toFixed(2); })()`);
 await sleep(1600);  // > one 0.7s tick even at crawling sim time? ticks are real-dt based — 1.6s covers 2 ticks
 console.log("jump:", p2, "phase:", await evl("JSON.stringify(CBZ.cityDemolition.list())"));
-await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
-await sleep(700);
+await aimAtLot("cleared");
 await shot("demo-e2e-2-cleared.png");
 await floatCheck("cleared");
 
@@ -142,8 +143,7 @@ await floatCheck("cleared");
 await evl("CBZ.dayCount(CBZ.dayCount() + 2)");
 await sleep(1600);
 console.log("phase:", await evl("JSON.stringify(CBZ.cityDemolition.list())"));
-await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
-await sleep(700);
+await aimAtLot("scaffold");
 await shot("demo-e2e-3-scaffold.png");
 await floatCheck("scaffold");
 
@@ -162,8 +162,7 @@ const done = await evl(`(() => {
   });
 })()`);
 console.log("rebuilt:", done);
-await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
-await sleep(700);
+await aimAtLot("rebuilt");
 await shot("demo-e2e-4-rebuilt.png");
 
 // serialize/apply round-trip (destroy again, save, reset, load)
@@ -181,7 +180,7 @@ const rt = await evl(`(() => {
 })()`);
 console.log("roundtrip:", rt);
 const uniq = [...new Set(errors)];
-if (failures.length) console.log("FLOATING GEOMETRY FAILURES:", failures.join(" | "));
+if (failures.length) console.log("GATE FAILURES:", failures.join(" | "));
 console.log(uniq.length ? "PAGE ERRORS (" + uniq.length + "):\n" + uniq.slice(0, 10).join("\n") : "PAGE ERRORS: none");
 chrome.kill("SIGTERM"); server.kill("SIGTERM");
 await rm(profile, { recursive: true, force: true }).catch(() => {});

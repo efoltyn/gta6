@@ -59,11 +59,15 @@ physics change needs all four. Never commit on (1) alone.
 - **Sim time crawls headless** (~60x slower: SwiftShader fps + clamped dt).
   Don't wait wall-clock for game-time events — jump state directly
   (`CBZ.dayCount(n)`, `CBZ.dayPhase(x)`) or sleep generously.
-- **Camera aiming from probes**: `CBZ.cam.yaw = Math.atan2(tx-px, tz-pz) +
-  Math.PI` faces the player camera AT (tx,tz) — note the +π. Teleport the
-  player (`CBZ.player.pos`) to frame; overriding camera transforms directly
-  gets stomped per-frame. When unsure what's in frame, drop a bright beacon
-  box at the target first.
+- **Camera aiming from probes**: NEVER hand-roll teleport+yaw math — a
+  sign-convention mistake once had a probe photographing the WRONG BUILDING
+  for two rounds while every numeric check passed. Inject `tools/aimlib.js`
+  (plain in-page JS) and use `__aim.atLot(lot)` / `__aim.at(...)`: it aims
+  the player camera, waits real frames, PROJECTS the target through the
+  live camera (NDC must be in-frustum and central), self-calibrates across
+  yaw/pitch candidates, and reports collider occlusion. `ok:false` means
+  your screenshot would be a lie — fail the gate, don't shoot. (See
+  demolition-check.mjs for the wiring; evl needs `awaitPromise: true`.)
 - Lots live at `CBZ.city.arena.lots` (the `arena` level, not `CBZ.city`).
 
 ## Hard rules that keep the game correct
