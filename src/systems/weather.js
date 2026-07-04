@@ -3,8 +3,9 @@
 
    Rain that comes and goes: a target intensity drifts over minutes
    so storms build, peak, and fade rather than snapping on/off. The
-   rain itself is ONE pooled THREE.Points cloud (capped at ~400 drops,
-   one shared geometry, one shared material) that rides along with the
+   rain itself is ONE pooled THREE.Points cloud (drop cap rides the live
+   quality tier; buffer sized once at the tier-4 cap, one shared geometry,
+   one shared material) that rides along with the
    camera so it always surrounds the player without ever needing more
    particles. Drops fall, drift sideways with the wind, and once they
    sink below the ground (y<0) they're recycled to a fresh spot up high
@@ -31,7 +32,13 @@
   const cam = CBZ.camera;
 
   // ---- tunables -------------------------------------------------------
-  const MAX = 400;            // hard cap on drops (phones!)
+  // Drop count rides the LIVE quality tier (pause-menu perf/quality slider).
+  // The Points buffer is allocated ONCE at the tier-4 size; each frame only
+  // the tier's share of drops is activated via setDrawRange, so a mid-storm
+  // slider move costs nothing (no realloc). qScale may be absent in headless
+  // tests → fall back to the old 400.
+  const MAX_BUF = 800;        // buffer size (tier-4 cap) — allocated once
+  function maxDrops() { return (CBZ.qScale ? CBZ.qScale(200, 800) : 400) | 0; }
   const RADIUS = 16;          // horizontal spread around the camera
   const TOP = 16;             // spawn height above camera
   const BOTTOM = -1.5;        // recycle a touch below ground for a clean exit
@@ -62,12 +69,12 @@
 
   // ---- pooled rain cloud ----------------------------------------------
   // single geometry; positions are the only thing we touch per frame.
-  const positions = new Float32Array(MAX * 3);
-  const velY = new Float32Array(MAX);   // per-drop fall speed (variety)
+  const positions = new Float32Array(MAX_BUF * 3);
+  const velY = new Float32Array(MAX_BUF);   // per-drop fall speed (variety)
   // base ring near the camera; absolute positions are kept in `positions`
   // (we add the cloud to the SCENE, not the camera, and move points in
   //  world space so wind drift reads correctly).
-  for (let i = 0; i < MAX; i++) {
+  for (let i = 0; i < MAX_BUF; i++) {
     seedDrop(i, cam.position.x, cam.position.z, true);
   }
 
@@ -228,7 +235,8 @@
     }
 
     // ---- how many drops are live this frame ----
-    const live = Math.round(intensity * MAX);
+    // (cap read at USE time — the quality slider retunes the rain live)
+    const live = Math.round(intensity * maxDrops());
     // suppress the cloud entirely while under a roof — re-shows the instant the
     // next throttled test clears `indoors` after stepping back outside.
     rain.visible = live > 0 && !indoors;

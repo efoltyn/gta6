@@ -23,10 +23,11 @@
      CBZ.bulletImpact(pos,n,o)   — debris burst; o.power scales it by
                                    CALIBER, o.kind "chip" + o.color =
                                    paint flecks in a shot car's coat.
-     CBZ.bulletHole(pos, n, o)   — PERSISTENT pocked decal (pooled,
-                                   64 cap, oldest recycled, skipped
-                                   past 50u). o.parent mounts it on a
-                                   car body so the hole RIDES the car.
+     CBZ.bulletHole(pos, n, o)   — PERSISTENT pocked decal (pooled;
+                                   cap + draw distance ride the LIVE
+                                   quality tier, oldest recycled).
+                                   o.parent mounts it on a car body
+                                   so the hole RIDES the car.
 
    WHY the holes: the evidence a firefight leaves is half its drama —
    a wall you magdumped must STAY pocked, and a 7.62 hole must read
@@ -337,17 +338,23 @@
   };
 
   // ---- PERSISTENT BULLET HOLES — the world REMEMBERS the firefight ---------
-  // A fixed pool of small dark pock decals (cap 64, oldest recycled) stamped at
+  // A pooled set of small dark pock decals (oldest recycled) stamped at
   // the hit point along the surface normal. opts.size carries CALIBER (an AK
   // pock reads visibly bigger than a 9mm), opts.parent mounts the decal on a
   // moving body (a car group) so the hole rides the panel it punched —
   // parented hits are SNAPPED onto the real bodywork by a short refinement
   // ray (the caller's point/normal come off the car's bounding box) and
-  // capped at HOLE_PER_CAR per body (oldest on that body reused). LOD: a
-  // pock you can't see isn't worth a slot — skipped beyond 50u of the camera.
+  // capped per body (oldest on that body reused). LOD: a pock you can't
+  // see isn't worth a slot — skipped beyond the tier-scaled draw distance.
   // The shared geo/material are flagged _shared so vehicles.js' teardown
   // traversal (explodeCar/clearCars disposes non-shared resources) spares them.
-  const HOLE_CAP = 64, HOLE_LOD = 50, HOLE_PER_CAR = 10;
+  // Pool cap, draw distance and per-car cap all ride the LIVE quality tier
+  // (pause-menu perf/quality slider) — read at use time so a mid-game slider
+  // move takes effect immediately. qScale may be absent in headless tests →
+  // fall back to the old fixed values.
+  function holeCap()    { return (CBZ.qScale ? CBZ.qScale(32, 128) : 64) | 0; }
+  function holeLod()    { return CBZ.qScale ? CBZ.qScale(30, 90) : 50; }
+  function holePerCar() { return (CBZ.qScale ? CBZ.qScale(6, 18) : 10) | 0; }
   const holes = [];
   let holeIdx = 0, holeSeq = 0, holeGeo = null, holeMat = null;
   const _zAxis = new THREE.Vector3(0, 0, 1);
@@ -379,8 +386,8 @@
     // PLAYER-SHOT PROP ROUTING: fpsmode is the only caller that stamps holes,
     // and the player's eye IS the camera — so camera→impact is the round's
     // real path. Street furniture along it reacts (props.js cityShootProp:
-    // lamps die, hydrants geyser, cans fly). Runs BEFORE the 50u decal LOD so
-    // a sniped hydrant still pops. opts.noProp opts out (NPC ground stamps
+    // lamps die, hydrants geyser, cans fly). Runs BEFORE the tier-scaled
+    // decal-distance LOD so a sniped hydrant still pops. opts.noProp opts out (NPC ground stamps
     // come in via CBZ.tracer, which already routed the true shooter→target line).
     if (!routingProps && !opts.noProp && CBZ.cityShootProp && CBZ.game && CBZ.game.mode === "city" && cam) {
       routingProps = true;
@@ -388,7 +395,7 @@
     }
     const d = opts.dist != null ? opts.dist
       : (cam ? Math.hypot(pos.x - cam.position.x, pos.y - cam.position.y, pos.z - cam.position.z) : 0);
-    if (d > HOLE_LOD) return null;
+    if (d > holeLod()) return null;
     if (!holeMat) {
       holeMat = makeHoleMat();
       holeGeo = new THREE.PlaneGeometry(1, 1);
@@ -426,8 +433,8 @@
       if (_hn.lengthSq() < 1e-6) _hn.set(0, 1, 0);
     }
     let m = null;
-    // PER-CAR CAP: one riddled sedan must not eat the whole pool — past
-    // HOLE_PER_CAR on this body, recycle ITS oldest pock instead of a slot.
+    // PER-CAR CAP: one riddled sedan must not eat the whole pool — past the
+    // tier-scaled per-car cap, recycle ITS oldest pock instead of a slot.
     if (parent !== scene) {
       let count = 0, oldest = null;
       for (let i = 0; i < holes.length; i++) {
@@ -436,17 +443,18 @@
         count++;
         if (!oldest || h._holeSeq < oldest._holeSeq) oldest = h;
       }
-      if (count >= HOLE_PER_CAR) m = oldest;
+      if (count >= holePerCar()) m = oldest;
     }
     if (!m) {
-      if (holes.length < HOLE_CAP) {
+      const cap = holeCap();   // live tier-scaled pool cap
+      if (holes.length < cap) {
         m = new THREE.Mesh(holeGeo, holeMat);
         m.renderOrder = 4;
         m._bulletHole = true;
         holes.push(m);
       } else {
         m = holes[holeIdx];
-        holeIdx = (holeIdx + 1) % HOLE_CAP;
+        holeIdx = (holeIdx + 1) % cap;
       }
     }
     m._holeSeq = ++holeSeq;
