@@ -38,8 +38,8 @@
 
   // ---- the FOV hook read every frame by camera.js (shoulder) + fpsmode (FP) --
   CBZ.cityScopeFov = function () { const s = currentScope(); return s ? s.fov : null; };
-  // camera.js also asks whether to collapse the over-shoulder offset (a magnified
-  // optic wants a near-centred boresight before the FP snap takes over).
+  // true when a MAGNIFIED optic is live — systems/gamepad.js reads this to slow
+  // the right-stick look right down for fine long-range aim.
   CBZ.cityScopeHigh = function () { const s = currentScope(); return !!(s && s.highMag); };
 
   if (typeof document === "undefined") return;   // headless: FOV hook only

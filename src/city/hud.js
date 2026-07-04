@@ -985,12 +985,14 @@
           if (e.kind !== "gun" || !e.active) continue;
           const m = weaponMetaByLabel(e.label, e.short);
           let cur = 0, mag = 0, res = 0, reloading = false;
+          // effective mag capacity respects a fitted extended/drum mag (gunmods.js)
+          const magCap = m ? (CBZ.gunModsMag ? CBZ.gunModsMag(m.w.id || m.w.key, m.w.mag || 0) : (m.w.mag || 0)) : 0;
           if (m && fps && fps.rounds && fps.reserves) {
-            cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
+            cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : magCap;
             res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-            mag = m.w.mag || 0;
+            mag = magCap;
             reloading = (m.i === fps.weapon) && (fps.reloading > 0);
-          } else if (m) { cur = m.w.mag || 0; mag = m.w.mag || 0; res = m.w.reserve || 0; }
+          } else if (m) { cur = magCap; mag = magCap; res = m.w.reserve || 0; }
           if (reloading) line = "<span class='rl'>RELOADING…</span> ";
           line += "<b>" + cur + "</b><span class='res'> / " + mag + " · " + res + " res</span>";
           break;

@@ -57,7 +57,7 @@
     }
   });
   addEventListener("gamepaddisconnected", function (e) {
-    if (e.gamepad.index === padIndex) { releaseAllKeys(); padIndex = -1; }
+    if (e.gamepad.index === padIndex) { releaseAllKeys(); setAim(false); setFire(false); padIndex = -1; }
   });
 
   function activePad() {
@@ -124,7 +124,7 @@
   // ==========================================================================
   CBZ.onAlways(2, function (dt) {
     const pad = activePad();
-    if (!pad) { if (Object.keys(held).length) releaseAllKeys(); return; }
+    if (!pad) { if (Object.keys(held).length) releaseAllKeys(); setAim(false); setFire(false); return; }
     dt = Math.min(dt || 0.016, 0.05);
 
     // ---- menu / flow (works on the title + pause screens) ----
@@ -171,8 +171,10 @@
       if (aiming && CBZ.cityScopeHigh && CBZ.cityScopeHigh()) mul *= 0.4;   // magnified optic → very fine
       CBZ.cam.yaw -= curve(rx) * LOOK_YAW * mul * dt;
       const dpitch = curve(ry) * LOOK_PITCH * mul * dt * (INVERT_Y ? -1 : 1);
+      // both conventions subtract the same delta (matches mouse + touch.js): a
+      // right-stick pull DOWN tilts the view down in third AND first person.
       CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch - dpitch));
-      if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + dpitch));
+      if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - dpitch));
     }
 
     const want = {};

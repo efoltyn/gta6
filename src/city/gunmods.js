@@ -433,6 +433,14 @@
     if (!g || g.mode !== "city") return;
     if (!dressed && CBZ.fpsWeaponModels && CBZ.fpsWeaponModels.length) { dressAll(); dressed = true; }
   });
+  // safety: never leave the bench menu (and its cityMenuOpen soft-lock) up if the
+  // player dies, leaves the city, or the run ends while standing at it. onAlways
+  // so it fires even once state leaves "playing".
+  CBZ.onAlways(38, function () {
+    if (panel && panel.style.display === "block") {
+      if (!g || g.mode !== "city" || g.state !== "playing" || (CBZ.player && CBZ.player.dead)) closeBench();
+    }
+  });
   // a fresh run wipes fitted mods (weapons reset too) — re-dress clean next time
   CBZ.gunModsReset = function () { g.cityGunMods = {}; dressed = false; dressAll(); };
 })();

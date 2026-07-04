@@ -1871,6 +1871,7 @@
     const el = (CBZ.game.elapsed || 0);
     if (el + 0.001 < lastElapsed) {
       if (fps.active) setActive(false);
+      if (CBZ.gunModsReset) CBZ.gunModsReset();   // a fresh run strips fitted attachments before rounds re-seed
       resetWeapons();
       // a fresh run starts on unmarked streets — wipe last run's bullet pocks
       // and rocket scars/smoking wounds
