@@ -73,7 +73,9 @@
 
   // dress within 45u, undress past 60u (hysteresis so border peds don't flicker)
   const DRESS_D2 = 45 * 45, UNDRESS_D2 = 60 * 60;
-  const CAP = 60;          // hard cap on dressed peds (≤ ~300 tiny meshes total)
+  // cap on dressed peds — rides the LIVE quality tier (lo 30 → hi 120, ≈ up to
+  // ~5 tiny meshes each); read at every check so the slider applies instantly.
+  const CAP = () => Math.round(CBZ.qScale ? CBZ.qScale(30, 120) : 60);
   const SLICE = 14;        // peds scanned per frame (full roster every ~0.2s)
   const POOL_MAX = 48;     // per-kind pool bound; extras just drop (shared geo/mat)
 
@@ -354,7 +356,7 @@
     undress(ped);
     if (!ped || ped.culled || !ped.group || !ped.group.parent) return;
     const cam = CBZ.camera;
-    if (!cam || !cam.position || dressed.length >= CAP) return;
+    if (!cam || !cam.position || dressed.length >= CAP()) return;
     const dx = ped.pos.x - cam.position.x, dz = ped.pos.z - cam.position.z;
     if (dx * dx + dz * dz > UNDRESS_D2) return;
     const want = computeWant(ped);
@@ -527,9 +529,9 @@
 
     // 2) sliced scan: dress newly-near peds (a few per frame; full roster ~every
     //    0.2s — fast enough that bling appears before you can read the face).
-    const n = peds.length;
-    if (!n || dressed.length >= CAP) return;
-    for (let k = 0; k < SLICE && dressed.length < CAP; k++) {
+    const n = peds.length, cap = CAP();   // live read: slider moves the cap this frame
+    if (!n || dressed.length >= cap) return;
+    for (let k = 0; k < SLICE && dressed.length < cap; k++) {
       cursor = (cursor + 1) % n;
       const p = peds[cursor];
       if (!p || p._bling || p.culled || p._parked || p.inCar) continue;

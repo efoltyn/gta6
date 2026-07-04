@@ -30,14 +30,16 @@
   let incomeT = 0;       // territory payday cooldown (GTA: turf = money)
   let reprisalT = 0;     // escalation tick for provoked gangs hunting the player
   let driveT = 0;        // global drive-by cadence limiter
-  let activeDrivebys = 0;// hard cap so phones survive
+  let activeDrivebys = 0;// capped by the quality tier so low tiers survive
 
   // GTA San Andreas turf logic: more held blocks = more income + a deeper bench.
   // We model a gang TREASURY that fills from held turf and funds bigger raids,
   // and a WAR has an INTENSITY the player can read + exploit.
   const TURF_PAYDAY = 30;          // seconds between paydays
   const TURF_INCOME_PER_LOT = 42;  // base $ per held block per payday
-  const MAX_DRIVEBYS = 3;          // concurrent gang cars strafing (raised: more action, still phone-safe)
+  // concurrent gang cars strafing — rides the LIVE quality tier (lo 2 → hi 6;
+  // read at every check so the pause-menu slider takes effect immediately).
+  const MAX_DRIVEBYS = () => Math.round(CBZ.qScale ? CBZ.qScale(2, 6) : 3);
 
   function gangColor(id) { const def = (CBZ.CITY.gangs || []).find((x) => x.id === id); return def ? def.color : 0xb079ea; }
 
@@ -763,7 +765,7 @@
   }
 
   function spawnDriveby(gang, aim, victimGang) {
-    if (activeDrivebys >= MAX_DRIVEBYS || g.mode !== "city") return false;
+    if (activeDrivebys >= MAX_DRIVEBYS() || g.mode !== "city") return false;
     const A = CBZ.city && CBZ.city.arena; if (!A || !A.root) return false;
     // approach from a road edge a comfortable distance out, on the side the
     // player can see it coming (more readable / fairer than spawning on top).
@@ -1877,7 +1879,7 @@
             sendReprisal(gang);
           }
           // a hot crew also rolls a DRIVE-BY at the player (cadence-limited)
-          if ((gang.hostility || 0) >= 2 && driveT <= 0 && activeDrivebys < MAX_DRIVEBYS && rng() < 0.7) {
+          if ((gang.hostility || 0) >= 2 && driveT <= 0 && activeDrivebys < MAX_DRIVEBYS() && rng() < 0.7) {
             driveT = 9 + rng() * 6;
             if (spawnDriveby(gang, { x: P.pos.x, z: P.pos.z }, null)) {
               const db = drivebys[drivebys.length - 1]; if (db) db.huntPlayer = true;
