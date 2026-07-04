@@ -68,6 +68,29 @@
 #pause .card-box{background:rgba(255,247,236,.97);}
 @media (max-width:520px){ .keys{grid-template-columns:1fr;} }
 
+/* performance/quality slider — pause screen */
+.qslider-row{width:min(360px,100%); margin:20px auto 0;}
+.qslider-ends{
+  display:flex; justify-content:space-between; font-size:11px; font-weight:700;
+  letter-spacing:1px; text-transform:uppercase; color:#9a8a76; margin-bottom:6px;
+}
+.qslider{
+  -webkit-appearance:none; appearance:none; width:100%; height:8px; border-radius:6px;
+  background:linear-gradient(90deg,var(--green) 0%,var(--orange) 100%);
+  outline:none; pointer-events:auto; cursor:pointer;
+}
+.qslider::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:24px; height:24px; border-radius:50%;
+  background:#fff; border:3px solid #2a2622; box-shadow:0 3px 0 rgba(0,0,0,.2); cursor:pointer;
+}
+.qslider::-moz-range-thumb{
+  width:24px; height:24px; border-radius:50%; background:#fff; border:3px solid #2a2622;
+  box-shadow:0 3px 0 rgba(0,0,0,.2); cursor:pointer;
+}
+.qslider-current{
+  text-align:center; margin-top:8px; font-size:14px; font-weight:700; color:#3a3026;
+}
+
 /* ============================================================
    game-mode selector (title) + per-mode title blocks
 ============================================================ */

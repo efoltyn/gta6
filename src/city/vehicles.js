@@ -2233,7 +2233,12 @@
       if (!_critical && (_cdx * _cdx + _cdz * _cdz) > FARCAR_D2) {
         if (c._vsl == null) c._vsl = (_vslice++ & 3);
         c._acc = (c._acc || 0) + baseDt;
-        if ((_vframe + c._vsl) % 3 !== 0) continue;     // skipped this frame
+        // PERF: default far-car stride is 3 (unchanged at Balanced+); Fastest/Fast
+        // skip far cars even more often — same reasoning as the ped move() throttle
+        // above, invisible traffic doesn't need per-frame simulation.
+        const _q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+        const farStride = _q === 0 ? 6 : _q === 1 ? 4 : 3;
+        if ((_vframe + c._vsl) % farStride !== 0) continue;     // skipped this frame
         dt = c._acc; c._acc = 0;                         // catch-up step
       }
       // DRIVER SHOT DEAD AT THE WHEEL (cops / gunfire): drop the body out and let

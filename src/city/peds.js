@@ -905,6 +905,15 @@
   if (CBZ.spawnSlice === undefined) CBZ.spawnSlice = true;
 
   CBZ.spawnCityPeds = function (n) {
+    // PERF: full-rig peds are the single most expensive per-frame system in the
+    // city (each one runs think()/move() — steering, collision, state machine —
+    // every few frames regardless of visibility). Population size drives that
+    // cost directly, so scale it down at low quality tiers the same way
+    // traffic.js already scales car count. This is the actual lever for
+    // "Fastest" — pixelRatio/shadows never touched population cost at all.
+    const _pq = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+    const _popMul = _pq === 0 ? 0.4 : _pq === 1 ? 0.6 : _pq === 2 ? 0.8 : 1;
+    n = Math.max(6, Math.round(n * _popMul));
     CBZ.clearCityPeds();
     CBZ.cityPopulationReset();          // fresh city → reset the finite headcount
     _fugitives = 0; _megaFugitiveSpawned = false;   // fresh fugitive roster (bounties re-roll)
@@ -3747,7 +3756,19 @@
       // and the instanced ambient crowd covers everything past 95m). enterT rigs
       // are hidden inside a building, so skip them.
       const visAnim = vis && p.enterT <= 0;
-      move(p, dt, near || important || visAnim);
+      // PERF: move() (movement integration + collision resolve) is the single
+      // most expensive per-ped call, and it used to run unconditionally every
+      // frame for the WHOLE population regardless of quality tier — pixelRatio/
+      // shadow knobs never touched this, which is why low tiers didn't actually
+      // run faster. A ped nobody can see (not vis, not important) doesn't need
+      // per-frame integration; throttle it at low tiers only (same amortized-dt
+      // trick as the think() stride above). Visible/important peds are
+      // untouched — this only trims the invisible mass.
+      const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+      const moveStride = (vis || important) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : 1);
+      if (moveStride === 1 || (frame + p.slice) % moveStride === 0) {
+        move(p, dt * moveStride, near || important || visAnim);
+      }
     }
 
     // age out / pick up dropped weapons (player auto-grabs by walking over)

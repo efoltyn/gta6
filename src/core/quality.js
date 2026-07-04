@@ -20,13 +20,38 @@
   // pulling in their visibility radius and killing their shadows. Resolution
   // scaling (pr) alone never fixed it because pixels were never the bottleneck.
   const QUALITY = [
-    { pr: 0.6, shadow: 512,  crowd: 220,  ped: { vis: 55,  shadow: 0  } },  // 0 — emergency: rigs close-only, no rig shadows
+    { pr: 0.28, shadow: 512, crowd: 24,   ped: { vis: 20,  shadow: 0  }, sunShadow: false },  // 0 — emergency: sun shadows OFF, minimal render budget/radius/res
     { pr: 0.8, shadow: 1024, crowd: 360,  ped: { vis: 70,  shadow: 28 } },  // 1
     { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 } },  // 2
     { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 } },  // 3
     { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 } },  // 4 — full fat
   ];
-  let qLevel = QUALITY.length - 1; // start optimistic; only fall if needed
+  const QUALITY_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
+  let qLevel = 0; // default to Fastest; auto-adjust climbs up from here if there's headroom
+
+  // ---- manual override (pause-screen Performance↔Quality slider) ----------
+  // Default is full auto (the adaptive sampler below). Dragging the slider
+  // pins qLevel to the chosen tier and disables auto-adjust entirely — a
+  // manual choice should stick, not get silently overridden. Persisted so it
+  // survives a reload.
+  CBZ.qualityAuto = true;
+  try {
+    const saved = localStorage.getItem("cbz_qualityLevel");
+    if (saved !== null) {
+      const n = parseInt(saved, 10);
+      if (n >= 0 && n < QUALITY.length) { qLevel = n; CBZ.qualityAuto = false; }
+    }
+  } catch (e) {}
+
+  function setQualityLevel(n) {
+    n = Math.max(0, Math.min(QUALITY.length - 1, n | 0));
+    qLevel = n;
+    CBZ.qualityAuto = false;
+    try { localStorage.setItem("cbz_qualityLevel", String(n)); } catch (e) {}
+    applyQuality();
+  }
+  CBZ.setQualityLevel = setQualityLevel;
+  CBZ.qualityLabels = QUALITY_LABELS;
 
   // ---- QUALITY-V2 (smarter FEEL-aware tier control) -----------------------
   // Gated behind CBZ.qualityV2 (default ON). When OFF we run the ORIGINAL
@@ -73,9 +98,17 @@
     return top;
   }
 
+  function syncSliderUI() {
+    const slider = document.getElementById("qualitySlider");
+    const label = document.getElementById("qualityCurrentLabel");
+    if (slider) slider.value = qLevel;
+    if (label) label.textContent = QUALITY_LABELS[qLevel];
+  }
+
   function applyQuality() {
     const q = QUALITY[qLevel];
     CBZ.qualityLevel = qLevel;
+    syncSliderUI();
     CBZ.crowdRenderBudget = q.crowd;
     if (CBZ.refreshCrowdBudget) CBZ.refreshCrowdBudget();
     CBZ.pedLOD = q.ped;
@@ -86,6 +119,10 @@
       sun.shadow.mapSize.set(q.shadow, q.shadow);
       if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     }
+    // tier 0: kill the sun's shadow pass outright — this is the single biggest
+    // GPU cost in the scene (a full shadow-map render every frame), way more
+    // impactful than shrinking its resolution.
+    sun.castShadow = q.sunShadow !== false;
     renderer.shadowMap.needsUpdate = true;
   }
   applyQuality();
@@ -113,6 +150,9 @@
   let _vSpikeRun = 0;         // consecutive spiky windows
 
   function sampleFPS(dt) {
+    // manual pin (pause-screen slider) — user's choice, no auto-adjustment.
+    if (!CBZ.qualityAuto) return;
+
     // ---- legacy path (flag off) : EXACTLY today's behaviour ----------------
     if (!CBZ.qualityV2) {
       if (_warmup > 0) { _warmup -= dt; return; } // ignore first 1.5s of upload jank
@@ -182,4 +222,9 @@
   }
 
   CBZ.sampleFPS = sampleFPS;
+
+  // pause-screen slider: drag → pin tier immediately (manual takes over auto).
+  // Initial value/label are already set by applyQuality()'s syncSliderUI() call above.
+  const slider = document.getElementById("qualitySlider");
+  if (slider) slider.addEventListener("input", () => setQualityLevel(parseInt(slider.value, 10)));
 })();

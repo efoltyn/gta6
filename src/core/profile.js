@@ -360,6 +360,10 @@
       try {
         CBZ.setMode("city");
         CBZ.resetGame();
+        // test-only hook: ?qforce=N pins a quality tier BEFORE the scenario
+        // spawns peds/cars, so population-scaling perf A/B tests are reproducible.
+        const qforce = params.get("qforce");
+        if (qforce !== null && CBZ.setQualityLevel) CBZ.setQualityLevel(parseInt(qforce, 10));
         applyScenario();
         CBZ.setState("playing");
         startedAt = performance.now();
