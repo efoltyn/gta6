@@ -53,6 +53,9 @@
   const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
   const SKIN_REACH = 4.2;        // how close you must be to skin a carcass
   const CARCASS_LINGER = 150;    // s a skinned/ignored carcass stays before fading
+  const BREED_EVERY = 26;        // s between breeding passes
+  const BREED_RATE = 0.09;       // per LIVE animal chance to reproduce each pass (× room left)
+  const GROW_TIME = 75;          // s a newborn takes to reach full size
 
   // ---- deterministic rng (mulberry32) -----------------------------------
   function makeRng(seed) {
@@ -245,9 +248,72 @@
     }
   }
 
-  // NOTHING RESPAWNS. Animals are stocked ONCE at world build. Hunt one and
-  // it's gone for good — the world thins out as you hunt it, by design. (No
-  // top-up / repopulation pass exists.)
+  // ============================================================
+  //  BREEDING — population-relative spawning. There is NO magic respawn: new
+  //  animals only ever come FROM living animals of the same species (each pass,
+  //  every live animal has a small chance to produce a newborn beside it,
+  //  logistic-damped by how full the world is). The consequence is real
+  //  ecology: a thriving herd recovers on its own, a hunted-down herd recovers
+  //  SLOWLY, and a species hunted to ZERO is EXTINCT — forever. Zero breeds
+  //  zero. Legendaries (respawn:false) are unique and never breed: kill the
+  //  White Stag and there will never be another.
+  // ============================================================
+  function liveCount() {
+    let n = 0;
+    for (let i = 0; i < animals.length; i++) if (!animals[i].dead) n++;
+    return n;
+  }
+
+  // per-species carrying capacity = the population the world was SEEDED with.
+  // Recorded once right after spawnAll so every herd has a natural size it
+  // breeds back toward (and a hard total so the world can't overgrow).
+  const CAPS = {};
+  let TOTAL_CAP = 0;
+  function recordCaps() {
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i]; if (a.dead) continue;
+      CAPS[a.species.id] = (CAPS[a.species.id] || 0) + 1;
+    }
+    TOTAL_CAP = liveCount();
+  }
+
+  function breed() {
+    if (liveCount() >= TOTAL_CAP) return;        // world at natural equilibrium
+    // bucket the LIVING by species (the dead don't reproduce)
+    const bySpecies = {};
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (a.dead) continue;
+      const sp = a.species;
+      if (sp.rarity === "legendary" || sp.respawn === false) continue;   // unique — never bred
+      (bySpecies[sp.id] || (bySpecies[sp.id] = [])).push(a);
+    }
+    const P = CBZ.player && CBZ.player.pos;
+    for (const id in bySpecies) {
+      const herd = bySpecies[id];               // extinct species simply aren't here
+      const sp = herd[0].species;
+      // logistic growth toward THIS species' own carrying capacity: births ∝
+      // current population × how far below its natural size the herd is. A
+      // full herd births nothing; a herd of 1 recovers slowly; 0 breeds 0.
+      const cap = CAPS[id] || 4;
+      const room = 1 - herd.length / cap;
+      if (room <= 0) continue;
+      let births = 0;
+      for (let i = 0; i < herd.length; i++) if (Math.random() < BREED_RATE * room) births++;
+      births = Math.min(births, 2);             // one pass never explodes a herd
+      for (let b = 0; b < births && liveCount() < TOTAL_CAP; b++) {
+        const parent = herd[(Math.random() * herd.length) | 0];
+        const jit = sp.aquatic ? 26 : 8;
+        const nx = parent.pos.x + (Math.random() - 0.5) * jit;
+        const nz = parent.pos.z + (Math.random() - 0.5) * jit;
+        // don't pop a newborn in right under the player's nose
+        if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
+        const kid = makeActor(sp, nx, nz);
+        kid.grow = 0;                            // born small; grows up in tick()
+        kid.home = { x: parent.home.x, z: parent.home.z };
+      }
+    }
+  }
 
   // ============================================================
   //  THE KILL — routed here from fpsmode.cityGunHit for any a.animal target.
@@ -372,6 +438,12 @@
         if (a.skinned && a.skinT < 6) grp.position.y -= dt * 0.05;
         continue;
       }
+      // ---- newborns grow up: born at half size, full-grown in GROW_TIME ---
+      if (a.grow != null && a.grow < 1) {
+        a.grow = Math.min(1, a.grow + dt / GROW_TIME);
+        grp.scale.setScalar((sp.scale || 1) * (0.5 + 0.5 * a.grow));
+        if (a.grow >= 1) a.grow = null;
+      }
       // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
       if (sp.aquatic) {
         a.bob += dt * (1.2 + a.spd * 0.2);
@@ -447,8 +519,14 @@
     registerPelts();
     registerInteractions();
     spawnAll();
+    recordCaps();                 // each herd's seeded size = its carrying capacity
 
-    CBZ.onUpdate(47.1, function (dt) { tick(dt); });
+    let breedAcc = 0;
+    CBZ.onUpdate(47.1, function (dt) {
+      tick(dt);
+      breedAcc += (dt && dt < 0.5 ? dt : 0.016);
+      if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
+    });
     return null;
   }, 95);
 
