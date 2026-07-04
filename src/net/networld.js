@@ -193,6 +193,7 @@
     if (snapAcc < 1 / SNAP_HZ) return;
     snapAcc = 0;
     hookFracture();
+    hookDemolition();
 
     const freshPeds = [], freshCars = [];
     tagNew(CBZ.cityPeds || [], false, freshPeds, null);
@@ -321,6 +322,14 @@
     if (CBZ.cityAlarm && R && !m.melee) CBZ.cityAlarm(a.pos.x, a.pos.z, 16, 1, R);
   });
 
+  // a guest's explosive detonation: the host is the only HP authority, so it
+  // re-runs the blast against its own ledger (netBlast — HP-only, no FX: the
+  // guest already showed the fireball locally, this just feeds the counter)
+  net.onEv("blast", function (m) {
+    if (!net.isHost() || !CBZ.cityDemolition || !CBZ.cityDemolition.netBlast) return;
+    CBZ.cityDemolition.netBlast(m.x, m.z, { power: m.power, radius: m.radius, y: m.y, _fromHost: true });
+  });
+
   // car ownership requests
   net.onEv("carReq", function (m) {
     if (!net.isHost()) return;
@@ -378,6 +387,21 @@
     CBZ.cityFracture.onHole = function (hole) {
       if (typeof prev === "function") try { prev(hole); } catch (e) {}
       if (net.isHost()) net.sendEv({ e: "frx", hole });
+    };
+  }
+
+  // every building collapse/rebuild on the host replicates (same lazy-poll
+  // wrap as hookFracture above — cityDemolition lands in parallel)
+  let demoHooked = false;
+  function hookDemolition() {
+    if (demoHooked || !CBZ.cityDemolition) return;
+    demoHooked = true;
+    const prev = CBZ.cityDemolition.onEvent;
+    CBZ.cityDemolition.onEvent = function (ev) {
+      if (typeof prev === "function") try { prev(ev); } catch (e) {}
+      if (!net.isHost()) return;
+      if (ev.t === "destroy") net.sendEv({ e: "bldx", x: ev.x, z: ev.z, at: ev.at });
+      else if (ev.t === "rebuild") net.sendEv({ e: "bldr", x: ev.x, z: ev.z });
     };
   }
 
@@ -478,6 +502,17 @@
   net.onEv("frx", function (m) {
     if (!net.guest() || !m.hole) return;
     if (CBZ.cityFracture && CBZ.cityFracture.applyOne) try { CBZ.cityFracture.applyOne(m.hole); } catch (e) {}
+  });
+
+  // host collapsed/rebuilt a building: mirror it here (silent — ledger.has
+  // inside demolition.js already makes both idempotent, no extra state needed)
+  net.onEv("bldx", function (m) {
+    if (!net.guest() || !CBZ.cityDemolition) return;
+    try { CBZ.cityDemolition.applyOne({ x: m.x, z: m.z, at: m.at }); } catch (e) {}
+  });
+  net.onEv("bldr", function (m) {
+    if (!net.guest() || !CBZ.cityDemolition) return;
+    try { CBZ.cityDemolition.rebuildAt({ x: m.x, z: m.z }); } catch (e) {}
   });
 
   net.on("world", function (m) {
