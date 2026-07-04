@@ -505,6 +505,21 @@
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
 <script src="src/world/wildnature.js?v=wild1"></script>
+<!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
+     then every biome batch of species, then the hunting engine and the dog
+     companion system (both self-register as high-order landmasses). -->
+<script src="src/city/wildlife_species.js?v=wild1"></script>
+<script src="src/city/wildlife/forest_deer.js?v=wild1"></script>
+<script src="src/city/wildlife/bears.js?v=wild1"></script>
+<script src="src/city/wildlife/canines.js?v=wild1"></script>
+<script src="src/city/wildlife/bigcats.js?v=wild1"></script>
+<script src="src/city/wildlife/megafauna.js?v=wild1"></script>
+<script src="src/city/wildlife/farm.js?v=wild1"></script>
+<script src="src/city/wildlife/snow_ungulates.js?v=wild1"></script>
+<script src="src/city/wildlife/small_game.js?v=wild1"></script>
+<script src="src/city/wildlife/aquatic.js?v=wild1"></script>
+<script src="src/city/wildlife.js?v=wild1"></script>
+<script src="src/city/dogs.js?v=wild1"></script>
 <script src="src/city/props.js?v=shoot1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=citysec1"></script>

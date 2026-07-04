@@ -328,6 +328,30 @@
       cols: 38, rows: 5, depthLen: 360, peakAmp: 470, noiseScale: 0.0045, seedBase: 5000,
     }, 0.22, 0.22);
 
+    // ====================================================================
+    //  MOUNT COLOSSUS — the ONE super-super-tall signature mountain. A single
+    //  narrow spine with a MASSIVE peakAmp (~2x the far ring) placed due north,
+    //  so a lone snow-capped titan looms over the whole range and the snow
+    //  country beneath it. Pure backdrop like every other peak — you look AT
+    //  it, never on it (terrainHeight stays 0 over all walkable ground).
+    // ====================================================================
+    (function colossus() {
+      const bearing = -Math.PI / 2;                 // due north of the field centre (−z)
+      const R = 2050;
+      const cx0 = CX + Math.cos(bearing) * R, cz0 = CZ + Math.sin(bearing) * R;
+      const perp = { x: -Math.sin(bearing), z: Math.cos(bearing) };
+      const half = 150;                             // narrow footprint → one dominant summit
+      const p0 = { x: cx0 - perp.x * half, z: cz0 - perp.z * half };
+      const p1 = { x: cx0 + perp.x * half, z: cz0 + perp.z * half };
+      const dir = { x: Math.cos(bearing), z: Math.sin(bearing) };
+      heroGeoms.push(buildRidge(p0, p1, dir, {
+        cols: 28, rows: 9, depthLen: 560, peakAmp: 1050, noiseScale: 0.006,
+        seedOff: 90210, fogBase: 0.10, fogDepth: 0.12,
+      }));
+      // expose the landmark (a compass / map pin can use it later).
+      CBZ.MOUNT_COLOSSUS = { name: "Mount Colossus", x: cx0, z: cz0, height: 1050 };
+    })();
+
     const heroMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
     function addMergedHero(geoms) {
       if (!geoms.length) return;
