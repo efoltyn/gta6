@@ -52,7 +52,6 @@
   const AQUATIC_R1 = 1500;       // ..outer radius (still inside the terrain ring)
   const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
   const SKIN_REACH = 4.2;        // how close you must be to skin a carcass
-  const RESPAWN_EVERY = 42;      // s between top-up passes
   const CARCASS_LINGER = 150;    // s a skinned/ignored carcass stays before fading
 
   // ---- deterministic rng (mulberry32) -----------------------------------
@@ -246,25 +245,9 @@
     }
   }
 
-  function topUp() {
-    // gently refill toward the cap so hunted-out meadows recover over time.
-    if (animals.length >= POP_CAP - 6) return;
-    const S = CBZ.WILDLIFE_SPECIES || {};
-    const ids = [];
-    for (const id in S) if (S[id].rarity !== "legendary" && (S[id].respawn !== false)) ids.push(id);
-    if (!ids.length) return;
-    let added = 0;
-    for (let i = 0; i < ids.length && animals.length < POP_CAP && added < 8; i++) {
-      const sp = S[ids[(rng() * ids.length) | 0]];
-      let pt;
-      if (sp.aquatic) pt = oceanPoint(rng);
-      else { const regs = biomeRegions(sp.biome); if (!regs.length) continue; pt = regionPoint(regs[(rng() * regs.length) | 0], rng); }
-      // never pop in right on top of the player.
-      const P = CBZ.player && CBZ.player.pos;
-      if (P && Math.hypot(pt.x - P.x, pt.z - P.z) < 60) continue;
-      makeActor(sp, pt.x, pt.z); added++;
-    }
-  }
+  // NOTHING RESPAWNS. Animals are stocked ONCE at world build. Hunt one and
+  // it's gone for good — the world thins out as you hunt it, by design. (No
+  // top-up / repopulation pass exists.)
 
   // ============================================================
   //  THE KILL — routed here from fpsmode.cityGunHit for any a.animal target.
@@ -465,12 +448,7 @@
     registerInteractions();
     spawnAll();
 
-    let respAcc = 0;
-    CBZ.onUpdate(47.1, function (dt) {
-      tick(dt);
-      respAcc += (dt || 0.016);
-      if (respAcc >= RESPAWN_EVERY) { respAcc = 0; topUp(); }
-    });
+    CBZ.onUpdate(47.1, function (dt) { tick(dt); });
     return null;
   }, 95);
 
