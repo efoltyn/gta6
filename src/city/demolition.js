@@ -288,6 +288,10 @@
   function onBlast(x, z, opts) {
     if (!CBZ.CONFIG.CITY_DEMOLITION) return;
     if (opts && opts.noDamage) return;                 // cosmetic (heli embers)
+    // multiplayer: the HOST is the only authority on structural HP. A guest's
+    // local blast is FX-only — networld forwards it to the host, whose
+    // destroy decision comes back as a bldx event (fracture's frx pattern).
+    if (CBZ.net && CBZ.net.active && !CBZ.net.isHost() && !(opts && opts._fromHost)) return;
     // the wrap chain (buildings/armored/us) can end up layered more than once
     // when siblings re-wrap without copying each other's markers — the SAME
     // opts object flows through every layer, so tag it: one blast, one count.
@@ -370,6 +374,16 @@
     if (!blob || blob.v !== 1 || !Array.isArray(blob.list)) return;
     for (const row of blob.list) try { D.applyOne(row); } catch (e) {}
   };
+  // net-relay surface (networld): a guest applies the host's rebuild event by
+  // address; the host applies a guest's forwarded blast without re-running FX.
+  D.rebuildAt = function (row) {
+    if (!row) return false;
+    const rec = ledger.get(Math.round(row.x) + "," + Math.round(row.z));
+    if (!rec) return false;
+    rebuild(rec, { silent: true });
+    return true;
+  };
+  D.netBlast = function (x, z, opts) { try { onBlast(x, z, opts || {}) } catch (e) {} };
   // full restore for a new run (called from cityGlassReset)
   D.reset = function () {
     for (const rec of Array.from(ledger.values())) rebuild(rec, { silent: true });
