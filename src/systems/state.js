@@ -246,14 +246,10 @@
   }
   CBZ.setCityOrigin = setOrigin;
   originButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      // an actual CLICK is real intent — origins.js only lets a differing
-      // origin reset a saved character when this flag is set. The default
-      // selection below (and origins.js's own saved-origin sync via
-      // CBZ.setCityOrigin) must never count as "the player picked this".
-      g.cityOriginPicked = true;
-      setOrigin(btn.dataset.origin);
-    });
+    // picking another character here is a GTA5-style SWITCH (city/origins.js
+    // vaults the active character's ledger and activates this one) — never a
+    // reset, so a plain click is all the intent we need.
+    btn.addEventListener("click", () => setOrigin(btn.dataset.origin));
   });
   setOrigin(g.cityOrigin || "tenant");
 
