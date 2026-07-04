@@ -303,15 +303,16 @@
       const toPx = P.x - grp.position.x, toPz = P.z - grp.position.z;
       const distP = Math.hypot(toPx, toPz);
 
-      // teleport to owner if left far behind (MC).
-      if (distP > TELEPORT_R) {
-        const a = Math.random() * 6.283;
-        grp.position.set(P.x + Math.cos(a) * 2.4, groundY(P.x, P.z), P.z + Math.sin(a) * 2.4);
-        continue;
-      }
+      // NO TELEPORTING. However far you get, the dog just runs flat-out toward
+      // you at full dog speed and closes the gap on foot — the chase IS the
+      // point. (When you're far, threat-hunting is suppressed below so it makes
+      // a beeline for you instead of stopping to fight.)
+      const FAR = distP > TELEPORT_R;
 
-      // threat response overrides sit/heel — defend the owner.
-      let threat = d.sit ? null : findThreat(d);
+      // threat response overrides sit/heel — defend the owner (but only when the
+      // dog is actually near you; if you've bolted across the map it prioritises
+      // catching up over picking fights).
+      let threat = (d.sit || FAR) ? null : findThreat(d);
       if (threat) {
         const tx = threat.pos ? threat.pos.x : threat.group.position.x;
         const tz = threat.pos ? threat.pos.z : threat.group.position.z;
