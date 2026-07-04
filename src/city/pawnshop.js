@@ -301,7 +301,16 @@
   // us. cityWorldCommit (local save) AND cityWorldCollect (the MP/persistence
   // collector) both point at the same inner commit — wrap BOTH so localStorage
   // and the server blob carry the tickets.
+  let _ensurePawnSaveWraps_done = false;
   function ensurePawnSaveWraps() {
+    // ONE-SHOT INSTALL (chain-growth fix): the old guard checked the
+    // module flag on the CURRENT top-of-chain function, so once any
+    // later module wrapped above us the flag vanished from the top and
+    // we re-wrapped EVERY tick - ~20 such modules made the commit chain
+    // grow unboundedly (stack overflow on save; found by the P5 full-
+    // stack harness). A module-local boolean wraps exactly once, ever.
+    if (_ensurePawnSaveWraps_done) return;
+    _ensurePawnSaveWraps_done = true;
     const commit = CBZ.cityWorldCommit;
     if (typeof commit === "function" && !commit._pawnWrap) {
       const w = function () { stampTickets(); return commit.apply(this, arguments); };

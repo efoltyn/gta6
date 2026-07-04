@@ -801,7 +801,12 @@
     // as the season builds toward the finale).
     const roundMul = RC ? (1 + RC.round * 0.10) : 1;
     const purse = Math.max(500, Math.round(LAP_PURSE * (7 - playerPlace) / 6 * (RACE.laps) * roundMul));
-    if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(purse);
+    // E10: the purse used to be printed money — now it's sponsorship spend the
+    // two manufacturer treasuries actually fund (sim/motorsport.js's
+    // paySponsorship, which also cuts the winning driver's fame bonus off this
+    // same purse). Guarded fallback keeps this working headless / pre-E10.
+    if (CBZ.motorsport && CBZ.motorsport.paySponsorship) CBZ.motorsport.paySponsorship(purse);
+    else if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(purse);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(playerPlace <= 1 ? 12 : playerPlace <= 3 ? 5 : 1);
     const ptsGained = pointsForPlace(playerPlace);
     const ord = playerPlace === 1 ? "1st — CHECKERED FLAG!" : playerPlace === 2 ? "2nd" : playerPlace === 3 ? "3rd" : playerPlace + "th";

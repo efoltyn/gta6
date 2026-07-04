@@ -341,7 +341,12 @@
   function spouseName(head, kind) {
     const first = WIFE_FIRST[(rng() * WIFE_FIRST.length) | 0];
     const lbl = kind === "boss" ? "Boss's wife" : kind === "tycoon" ? "Tycoon's wife" : "Socialite";
-    return first + " (" + lbl + ")";
+    // W12 DYNASTY NAMING: graft the head's own surname onto her first name
+    // ("Mrs <Surname>") so the couple reads as one family — only if his
+    // ledger name actually carries a surname token to borrow.
+    const parts = head && head.name ? String(head.name).trim().split(/\s+/) : [];
+    const named = parts.length > 1 ? first + " " + parts[parts.length - 1] : first;
+    return named + " (" + lbl + ")";
   }
   // spawn ONE extra ped (spouse/kid) near a head, on the same ground. Returns the
   // ped or null (cap hit / no arena). Fully guarded; uses social.js's own rng so
@@ -384,6 +389,11 @@
       const spouse = spawnFamilyMember(head, {
         kind: "civilian",
         archetype: wifeArch,
+        // the wife archetypes above are always cast female by peds.js's
+        // FEMALE_ARCH table anyway — stamped explicitly here too so the
+        // couple reads as opposite-gender even if the head is a rare female
+        // boss/tycoon (head.gender "f" → a husband, not another wife).
+        gender: head.gender === "f" ? "m" : "f",
         wealth: Math.min(0.99, Math.max(0.9, head.wealth || 0.9)),
         aggr: 0.18 + rng() * 0.14,        // non-combatant — she flees, never fights her own crew
         armed: false,
@@ -401,11 +411,21 @@
       head.family = head.family || []; if (head.family.indexOf(spouse) < 0) head.family.push(spouse);
       spouse.family = [head];
       head.together = spouse.together = 0.85 + rng() * 0.15;   // a tight, committed pair
+      // bosses/tycoons/socialites are always ledger-worthy (isFamily, see
+      // schedule.js worth()) — unlike the street-couple budget gate above,
+      // ALWAYS record the marriage in the persistent family tree.
+      if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.marry(head, spouse);
+      // W8: move the spouse INTO the head's own leased unit (or lease one for
+      // the head first if he doesn't have one yet) — a couple shares one
+      // address, one rent bill, not two strangers' leases. Guarded: housing.js
+      // may be disabled/absent, same as every other optional layer here.
+      if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(spouse, head);
       // a BOSS sometimes also has a kid at his side (one more protected mouth). Kept
       // rare + capped so we don't bloat the crowd. Modest wealth (a kid, not a vault).
       if (isBoss && rng() < 0.4 && _familySpawns.length < FAMILY_CAP) {
         const kid = spawnFamilyMember(head, {
           kind: "civilian", archetype: "resident", wealth: 0.5,
+          gender: rng() < 0.5 ? "f" : "m",   // 50/50, off this module's own seeded rng
           aggr: 0.12 + rng() * 0.1, armed: false,
           name: "Young " + (head.name || "one").split(" ")[0],
           protectGang: head.gang, protectedBy: head, isFamily: true,
@@ -413,6 +433,10 @@
         if (kid) {
           kid.family = [head, spouse];
           head.family.push(kid); spouse.family.push(kid);
+          if (CBZ.cityFamilyTree) CBZ.cityFamilyTree.bearChild(head, spouse, kid);
+          // W8: the kid joins the same household unit as the head (falls back
+          // to the spouse's seat if the head's is somehow full/gone).
+          if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(kid, head) || CBZ.cityHouseholdJoin(kid, spouse);
         }
       }
     }
@@ -429,11 +453,35 @@
     const civ = CBZ.cityPeds.filter((p) => p.kind === "civilian" && !p.vendor && !p.gang);
     // shuffle-ish pairing into couples (45%)
     for (let i = 0; i + 1 < civ.length; i += 2) {
+      const a = civ[i];
+      if (a.partner) continue;   // already claimed by an earlier scan-ahead below
       if (rng() < 0.45) {
-        const a = civ[i], b = civ[i + 1];
+        // prefer an OPPOSITE-GENDER partner: scan a short deterministic window
+        // ahead (this module's seeded rng) before falling back to the plain
+        // next-slot pairing — O(n), and we don't force it: a same-gender
+        // couple is fine when the scan misses.
+        let bi = i + 1;
+        for (let s = i + 1; s < Math.min(civ.length, i + 6); s++) {
+          if (!civ[s].partner && civ[s].gender !== a.gender) { bi = s; break; }
+        }
+        const b = civ[bi];
+        if (b.partner) continue;   // the fallback slot got claimed by a scan-ahead pick
         a.partner = b; b.partner = a;
         a.family = [b]; b.family = [a];
         a.together = b.together = 0.5 + rng() * 0.5;   // relationship strength
+        // BUDGET GATE: force-minting a family-tree sid for every street couple
+        // would mint ~150 sids nobody ever meets. Only record the couple in
+        // the persistent tree when a side is already ledger-worthy (gang/
+        // vendor/known) — an inline approximation of schedule.js's worth()
+        // (kept local to avoid a load-order dependency on schedule.js).
+        if (CBZ.cityFamilyTree && (a.gang || a.vendor || a.nameKnown || b.gang || b.vendor || b.nameKnown)) {
+          CBZ.cityFamilyTree.marry(a, b);
+        }
+        // W8: move in together — every matched couple shares one leased unit
+        // (not just the ledger-worthy subset above; the family tree entry is
+        // gated for budget reasons, housing isn't). Guarded: housing.js may be
+        // disabled/absent.
+        if (CBZ.cityHouseholdJoin) CBZ.cityHouseholdJoin(b, a);
       }
     }
     // friend cliques: small groups (3-5) of nearby civilians who hang together,
@@ -523,6 +571,16 @@
     if (g.citySpouse) { CBZ.city.note("You're already married 💍", 1.6); return; }
     if (!econ.has(ring)) { CBZ.city.note("You need a " + ring + " to propose.", 2); return; }
     econ.take(ring, 1); g.citySpouse = true;
+    // W7 minimal persistent hook: force-mint a sid so this marriage can be
+    // found later (spouseOf/heirOf) even if the spouse despawns. NOTE:
+    // cityPedStash (schedule.js) skips companion/controlled peds, and the
+    // partner is BOTH by the time they're proposed to — so this only sticks
+    // if a sid was already minted earlier (e.g. via worth()'s nameKnown gate
+    // before commitment). Full player-in-tree wiring (a real player sid +
+    // a marry() edge) is a later step; this just remembers the sid if we
+    // have one.
+    if (CBZ.cityPedStash) CBZ.cityPedStash(ped);
+    g.citySpouseSid = ped._sid || null;
     CBZ.cityRelShift(ped, "gift", 4);     // a ring is the ultimate gift → max affection/loyalty
     CBZ.city.big("💍 You married " + ped.name + "!");
     CBZ.city.addRespect(10);
@@ -613,6 +671,10 @@
   //   in the street has a real social cost — GTA crowd reactions, but persistent.
   CBZ.citySocialDeath = function (ped, byPlayer) {
     if (!ped) return;
+    // record the death in the persistent family tree (if this identity was
+    // ever minted a sid there); W9 revisits SEVERING the tree's links for
+    // inheritance — this step only records the fact of death.
+    if (ped._sid && CBZ.cityFamilyTree) CBZ.cityFamilyTree.markDeath(ped._sid);
     // The legacy caller passes only (ped); without an explicit flag, infer the
     // player's involvement from proximity so an NPC gang war across town doesn't
     // wrongly turn the whole map against you. An explicit flag always wins.
@@ -627,8 +689,17 @@
       CBZ.city && CBZ.city.big("💔 Your partner was killed");
     }
     if (ped === g.cityHostage) { g.cityHostage = null; }
-    // sever relationship links so survivors don't reference a corpse
-    if (ped.partner) { ped.partner.partner = null; if (ped.partner.family) ped.partner.family = ped.partner.family.filter((x) => x !== ped); }
+    // sever LIVE refs so survivors don't reference a corpse (a live ped.partner
+    // must never point at a dead rig — move(), flirt, etc. all deref it) — but
+    // the family TREE above already kept the marriage on record (endMarriage
+    // stamped end/why:"death" via markDeath), so this is cosmetic bookkeeping
+    // on the live object graph only, not a loss of kinship (W9: heirOf/spouseOf
+    // still resolve the dead spouse's edges for inheritance/grudges later).
+    if (ped.partner) {
+      ped.partner._widowed = true;                 // grief flag: still "was married", just alone now
+      ped.partner.partner = null;
+      if (ped.partner.family) ped.partner.family = ped.partner.family.filter((x) => x !== ped);
+    }
     if (ped.friends) for (const f of ped.friends) if (f && f.friends) f.friends = f.friends.filter((x) => x !== ped);
   };
 
@@ -963,6 +1034,10 @@
           a.partner = null; b.partner = null; a.together = b.together = 0; a.engaged = b.engaged = false;
           if (a.family) a.family = a.family.filter((x) => x !== b);
           if (b.family) b.family = b.family.filter((x) => x !== a);
+          // if this pair was ever recorded in the persistent family tree
+          // (both have sids — the budget gate/weaveFamilies only mints for
+          // ledger-worthy couples), end that marriage too — divorce, not death.
+          if (a._sid && b._sid && CBZ.cityFamilyTree) CBZ.cityFamilyTree.endMarriage(a._sid, b._sid, "divorce");
           gossipFrom(a, "breakup", 0.5);
         }
       } else if (roll < 0.45 && !a.engaged) {

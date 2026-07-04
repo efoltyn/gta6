@@ -60,6 +60,12 @@
   const tx = new Float32Array(CAP), tz = new Float32Array(CAP);   // current sidewalk target
   const heading = new Float32Array(CAP), spd = new Float32Array(CAP), phase = new Float32Array(CAP);
   const skin = new Int32Array(CAP), shirt = new Int32Array(CAP), hairC = new Int32Array(CAP);
+  // WOMEN IN THE CROWD (W3): per-instance female flag, rolled ~48% alongside
+  // skin/shirt/hair on the SAME Math.random() stream this file already uses
+  // for every other appearance roll (city/crowd.js has no seeded rng — see
+  // spawnCityCrowd below). Read by drawParts() to vary the shared put() scale
+  // args for that one instance; the male path stays byte-identical.
+  const fem = new Uint8Array(CAP);
 
   // ---- WALKING GROUPS (2-4 bodies) + SIDEWALK LANE BIAS ----------------------
   // groupLeader[i]: -1 = solo. Else the index of i's leader — a leader's own
@@ -137,6 +143,16 @@
     // instanced bodies into these towns and tints them to fit — zero new draw
     // calls, zero new entities (same shared crowd material, per-instance tint).
     capeharbor: [46, 47], goldspire: [48, 49], neonreef: [50, 51], foundry: [52, 53],
+    // X5 — the 4 new countries' settlements (city/countries.js), keyed by
+    // settlement id (same convention as the mini-cities above). Trivial reuse
+    // of the existing farmland range (26-28, earth tones) rather than minting
+    // new SHIRTS entries — every one of these settlements, from a rural
+    // capital to a hut village, reads earthy/agrarian, the same "why" the
+    // farmland range already covers.
+    veridiacity: [26, 28], lowport: [26, 28],
+    keshtown: [26, 28], kesh_north: [26, 28], kesh_east: [26, 28],
+    solaracity: [26, 28],
+    mbeyacity: [26, 28], mbeya_west: [26, 28], mbeya_south: [26, 28], mbeya_east: [26, 28],
   };
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
   // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads
@@ -651,6 +667,7 @@
       skin[i] = (Math.random() * SKINS.length) | 0;
       castTint(i, px[i], pz[i]);
       hairC[i] = (Math.random() * HAIRS.length) | 0;
+      fem[i] = Math.random() < 0.48 ? 1 : 0;   // ~48% female, same unseeded stream as the rolls above
     }
     formGroups(count);                           // ~35% link into 2-4 body walking groups (deterministic)
     paintColors();
@@ -856,15 +873,34 @@
     wm.multiplyMatrices(rootD.matrix, partD.matrix);
     mesh.setMatrixAt(i, wm);
   }
-  // the 10 body parts at standard proportions (matches the jail mass-crowd)
+  // the 10 body parts at standard proportions (matches the jail mass-crowd).
+  // WOMEN IN THE CROWD (W3): fem[i] set → a narrower/shallower torso, a
+  // slightly smaller head, slimmer + closer-in arms, slimmer legs, and hair
+  // that reads LONG (dropped y-offset + stretched y-scale so it cascades down
+  // behind the head instead of sitting as a short cap). Every number below is
+  // ONLY a scale/offset tweak on the SAME put() calls/instances — the male
+  // (else) branch is byte-identical to the original single path.
   function drawParts(i, sw, bob) {
-    put(torso, i, 0, 1.42 + bob, 0, 0.82, 0.88, 0.44, 0);
-    put(hd, i, 0, 2.18 + bob, 0, 0.54, 0.54, 0.54, 0);
-    put(hair, i, 0, 2.50 + bob, 0, 0.58, 0.14, 0.58, 0);
-    put(legL, i, -0.20, 0.52, 0, 0.28, 0.92, 0.28, sw);
-    put(legR, i, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -sw);
-    put(armL, i, -0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, -sw * 0.82);
-    put(armR, i, 0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, sw * 0.82);
+    if (fem[i]) {
+      put(torso, i, 0, 1.42 + bob, 0, 0.82 * 0.85, 0.88, 0.44 * 0.88, 0);
+      put(hd, i, 0, 2.18 + bob, 0, 0.54 * 0.92, 0.54 * 0.92, 0.54 * 0.92, 0);
+      // LONG HAIR: same cap width, dropped ~0.35 lower and stretched ~4.4x
+      // taller so it drapes down behind the head to shoulder height instead
+      // of reading as a short crown.
+      put(hair, i, 0, 2.15 + bob, 0, 0.58, 0.62, 0.58, 0);
+      put(legL, i, -0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, sw);
+      put(legR, i, 0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, -sw);
+      put(armL, i, -0.55 * 0.9, 1.40 + bob, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, -sw * 0.82);
+      put(armR, i, 0.55 * 0.9, 1.40 + bob, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, sw * 0.82);
+    } else {
+      put(torso, i, 0, 1.42 + bob, 0, 0.82, 0.88, 0.44, 0);
+      put(hd, i, 0, 2.18 + bob, 0, 0.54, 0.54, 0.54, 0);
+      put(hair, i, 0, 2.50 + bob, 0, 0.58, 0.14, 0.58, 0);
+      put(legL, i, -0.20, 0.52, 0, 0.28, 0.92, 0.28, sw);
+      put(legR, i, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -sw);
+      put(armL, i, -0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, -sw * 0.82);
+      put(armR, i, 0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, sw * 0.82);
+    }
     // FACE — the head box is 0.54 deep (front face at local z 0.27). The old
     // z 0.235 + 0.06-deep eyes put the face's FRONT at 0.265 — fully BURIED
     // inside the head, so the whole instanced crowd read as faceless mannequins.
@@ -1028,6 +1064,28 @@
     ped.rage = null; ped.mem = null; ped.state = "walk"; ped.path = null; ped.finalGoal = null;
     e.idx = -1;
   }
+  // ---- GENDER-MATCHED SLOT PICK (W3) ----
+  // A pooled rig's BUILD ("f"/"m") is baked into its actual geometry at
+  // construction (makePooled → cityMakePed → makeCharacter's build param) and
+  // can't be reshaped when the slot is reused for a different agent — so we
+  // can't literally "make the promoted ped inherit fem" after the fact. What
+  // we CAN do cheaply: cityMakePed already rolls its own gender per pooled rig
+  // (makePed's own ~48/52 split, independent of any instanced agent), so the
+  // pool already reads as a mixed crowd — pick the FREE slot whose rig gender
+  // already matches this instance's fem[] flag when one is free, so the body
+  // that walks up doesn't flip silhouette from what you were watching. Falls
+  // back to any free slot (never blocks a promotion over a cosmetic match).
+  function pickFreeSlot(wantFem) {
+    const wantG = wantFem ? "f" : "m";
+    let fallback = -1;
+    for (let s = 0; s < pool.length; s++) {
+      const e = pool[s];
+      if (e.idx >= 0) continue;
+      if (fallback < 0) fallback = s;
+      if (e.ped.gender === wantG) return s;
+    }
+    return fallback;
+  }
   // ---- NO CLOTHING-CHANGE POP ON PROMOTION (LOD continuity) ----
   // The instanced body can only ever render a FLAT shirt — it has no badge, no
   // lapels, no bandana — so to the player every distant ambient body reads as an
@@ -1144,7 +1202,11 @@
         if (d2 < range && d2 < bd) { bd = d2; best = i; }
       }
       if (best < 0) break;
-      assign(e, s, best);
+      // gender-matched slot pick (W3): e/s is only a guaranteed-free anchor —
+      // prefer whichever free pooled rig already matches this agent's fem[]
+      // flag (falls back to e/s itself when none free matches).
+      const slotIdx = pickFreeSlot(!!fem[best]);
+      assign(pool[slotIdx], slotIdx, best);
       // ONE promotion per frame: filling every free slot in one frame is
       // O(slots×agents) (worst ~18×360 sqrt scans after a mass release);
       // refilling over ~0.3s instead is invisible at promotion distances.
@@ -1359,21 +1421,24 @@
     if (kd && !guest && _promoBudget > 0) {
       // promote → real rig → real knockdown physics (the comedy payoff)
       if (!poolBuilt) buildPool();
-      if (poolBuilt) for (let s = 0; s < pool.length; s++) {
-        const e = pool[s];
-        if (e.idx >= 0) continue;
-        assign(e, s, i);
-        _promoBudget--;                                // spent one of this frame's rig slots
-        const ped = e.ped;
-        if (CBZ.body && CBZ.body.knockdown) {
-          CBZ.body.knockdown(ped, { fromX: px[i] - nx, fromZ: pz[i] - nz, force: 7 + Math.min(8, sp * 0.6), t: 1.1 + Math.random() * 0.7 });
+      if (poolBuilt) {
+        // gender-matched slot pick (W3) — see pickFreeSlot() above.
+        const slotIdx = pickFreeSlot(!!fem[i]);
+        if (slotIdx >= 0) {
+          const e = pool[slotIdx];
+          assign(e, slotIdx, i);
+          _promoBudget--;                                // spent one of this frame's rig slots
+          const ped = e.ped;
+          if (CBZ.body && CBZ.body.knockdown) {
+            CBZ.body.knockdown(ped, { fromX: px[i] - nx, fromZ: pz[i] - nz, force: 7 + Math.min(8, sp * 0.6), t: 1.1 + Math.random() * 0.7 });
+          }
+          if (CBZ.humanContact) {                        // gets up cursing / swinging / fleeing per aggr
+            _bumpSrc.pos = CBZ.player.pos;
+            CBZ.humanContact.react(ped, { mode: "city", source: ref || _bumpSrc, kind: "run-over", severity: 1 });
+          }
+          if (CBZ.sfx) CBZ.sfx("ko");
+          return;
         }
-        if (CBZ.humanContact) {                        // gets up cursing / swinging / fleeing per aggr
-          _bumpSrc.pos = CBZ.player.pos;
-          CBZ.humanContact.react(ped, { mode: "city", source: ref || _bumpSrc, kind: "run-over", severity: 1 });
-        }
-        if (CBZ.sfx) CBZ.sfx("ko");
-        return;
       }
     }
     if (kd) {

@@ -827,4 +827,31 @@
 
 	THREE.BufferGeometryUtils = BufferGeometryUtils;
 
+	// ---- O3 bundle-level fix (BUILD-PLAN.md; not a legacy-file edit) ----
+	// mergeBufferGeometries() internally calls `this.mergeBufferAttributes(...)`
+	// (see above). Several call sites across src/ destructure the method off
+	// the object before calling it —
+	//   const merge = THREE.BufferGeometryUtils && THREE.BufferGeometryUtils.mergeBufferGeometries;
+	//   if (merge) { const m = merge([trunk, canopy], false); ... }
+	// (src/systems/resources.js:66-67; the same detached pattern also
+	// appears in src/world/wildnature.js:142/168) — which detaches `this`,
+	// so the internal `this.mergeBufferAttributes` call throws against
+	// `undefined` the moment a merge needs to combine >1 geometry's
+	// attributes. This is a pre-existing bug, orthogonal to the three.js
+	// version bump; three-r164's own BufferGeometryUtils addon has the
+	// identical shape and would fail the same way if it were used instead
+	// (it isn't — see VENDORED.txt in src/vendor/three-r164/). Rather than
+	// touch the legacy call sites, bind every static method to the class
+	// here so a detached reference behaves exactly like a bound one no
+	// matter how (or from where) it's called.
+	for ( const _k of Object.getOwnPropertyNames( BufferGeometryUtils ) ) {
+
+		if ( typeof BufferGeometryUtils[ _k ] === 'function' ) {
+
+			THREE.BufferGeometryUtils[ _k ] = BufferGeometryUtils[ _k ].bind( BufferGeometryUtils );
+
+		}
+
+	}
+
 } )();

@@ -58,6 +58,7 @@
   <div id="survBars">
     <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
     <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
+    <div class="sbar"><span class="slab">HUNGER</span><div class="sbarbg"><div id="hungerBarSurv"></div></div></div>
   </div>
   <div id="disasterBanner"></div>
 
@@ -257,7 +258,12 @@
 </div>
 
 <!-- Three.js (vendored locally — same r128 build the CDN served; local files load
-     offline, deterministically, and inside the headless screenshot harness) -->
+     offline, deterministically, and inside the headless screenshot harness).
+     NOTE: an r164 IIFE bundle + legacy compat shim exist on disk
+     (src/vendor/three-r164/ + src/compat/three-legacy.js) from the O3
+     migration spike — verified pixel-identical on its branch but NOT yet
+     re-verified against this tree's newest THREE usage, so r128 stays the
+     loaded build for now. -->
 <script src="src/vendor/three.r128.min.js"></script>
 <script src="src/vendor/DRACOLoader.js"></script>
 <script src="src/vendor/GLTFLoader.js"></script>
@@ -288,6 +294,8 @@
 <!-- 0. namespace + constants -->
 <script src="src/config.js?v=abandon1"></script>
 <script src="src/core/seed.js"></script>
+<script src="src/core/prio.js?v=arch2"></script>
+<script src="src/core/interfaces.js?v=arch2"></script>
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js"></script>
@@ -305,13 +313,21 @@
 <script src="src/world/razorwire.js?v=mapflow2"></script>
 <script src="src/world/graffiti.js"></script>
 <script src="src/world/towers.js"></script>
-<script src="src/world/crates.js"></script>
-<script src="src/world/props.js"></script>
+<!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
+     CBZ.spawnPiece at parse time, so they must load after chunks.js/
+     pieces.js define it. Nothing else in this file's original 283-284 slot
+     depended on their (synchronous, load-time) execution happening this
+     early — every cross-file reader (e.g. CBZ.breaker) only touches them
+     from inside a runtime callback, long after all scripts have loaded. -->
 <script src="src/world/clutter.js"></script>
 <script src="src/world/door.js?v=scale2"></script>
 <script src="src/world/exit.js"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
+
+<!-- 2c. the prop-type registry (generic object lifecycle) — must load
+     before any entity that registers a prop type, e.g. coins.js below -->
+<script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
 <script src="src/entities/character.js?v=fall1"></script>
@@ -436,6 +452,46 @@
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>
 <script src="src/city/placement.js?v=sims1"></script>
+<!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
+     sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
+     findSupport built on top of it + the CBZ.assets/physics.js contracts
+     above. chunks.js first (pieces.js registers pieces into it), though
+     either load order works. -->
+<script src="src/systems/chunks.js?v=arch2"></script>
+<script src="src/systems/pieces.js?v=arch2"></script>
+<!-- B1 — the wood-tier build catalog + CBZ.building.place() (no UI yet;
+     B2 lands the ghost preview/hotbar). Loads right after pieces.js
+     (needs spawnPiece/despawnPiece/findSupport) and after placement.js
+     above (needs CBZ.placement.isFree/reserve for the world-collision gate). -->
+<script src="src/systems/building.js?v=bld1"></script>
+<!-- B5 — the raid-tool damage matrix: CBZ.structDamage.hit/repair on top
+     of B1's CATALOG hp + B4's cascade/stability (CBZ.building.remove).
+     Loads right after building.js (needs CBZ.building.remove + CBZ.pieces,
+     both already defined by this point); explosives.js/fpsmode.js's bullet
+     hook call CBZ.structDamage.hit at runtime, so load order relative to
+     THEM doesn't matter — only relative to building.js/pieces.js does. -->
+<script src="src/systems/structdamage.js?v=bld1"></script>
+<!-- B6 — OWNERSHIP: the tool cupboard + BaseRecord + placement-rejection
+     radius + door locks/lockable containers, on top of B1's CATALOG and
+     B5's damage matrix (structdamage.js's destroy path stamps the
+     BaseRecord breach window this file reads). Loads right after
+     structdamage.js per the family's own load-order convention; the
+     city-mode interaction verbs it registers (city/interactions.js,
+     which loads much later in this file) are wired LAZILY on first
+     sight of CBZ.interactions, so relative order to THAT file doesn't
+     matter — only relative to building.js/structdamage.js does. -->
+<script src="src/systems/baseclaim.js?v=bld1"></script>
+<!-- B2 — the walking skeleton: CBZ.buildMode ghost preview + hotbar strip
+     + confirm/rotate/level/demolish/undo, all calling B1's place()/remove().
+     Loads right after building.js (needs CBZ.building.CATALOG/validate/
+     place/remove) and after CBZ.camera/CBZ.pieces already exist (systems/
+     camera.js, systems/pieces.js — both load earlier in this file). -->
+<script src="src/systems/buildmode.js?v=bm1"></script>
+<!-- F7 — world/crates.js + world/props.js migrated onto CBZ.spawnPiece
+     (moved from the "2. world geometry" wave above, right after
+     towers.js): they now need spawnPiece to exist at parse time. -->
+<script src="src/world/crates.js"></script>
+<script src="src/world/props.js"></script>
 <script src="src/city/towngen.js?v=sims1"></script>
 <script src="src/city/island_speedway.js?v=arch1"></script>
 <script src="src/city/island_airport.js?v=arch1"></script>
@@ -496,6 +552,14 @@
 <script src="src/city/interact.js?v=registry1"></script>
 <script src="src/city/restrain.js?v=collar1"></script>
 <script src="src/city/combat.js?v=grenade1"></script>
+<!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
+     CBZ.CITY already loaded, and CBZ.cityEcon's new Wood/Stone/Scrap/
+     Hatchet/Pickaxe entries above) + the [C] craft panel (needs
+     CBZ.cityGiveWeapon, just above, to auto-equip a freshly-crafted tool).
+     Loads right after city/combat.js, whose lightAttack/heavyAttack call
+     CBZ.resourceHarvestSwing when a swing finds no ped in the cone. -->
+<script src="src/systems/resources.js?v=bld1"></script>
+<script src="src/systems/craft.js?v=bld1"></script>
 <script src="src/city/explosives.js?v=c4-1"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
 <script src="src/city/death.js?v=drop1"></script>
@@ -579,6 +643,199 @@
 <script src="src/net/networld.js?v=mp3"></script>
 <script src="src/net/netvoice.js?v=mp2"></script>
 <script src="src/net/netui.js?v=mp2"></script>
+
+<!-- W-wave: women & families -->
+<script src="src/city/familytree.js?v=famtree1"></script>
+<script src="src/city/inheritance.js?v=famtree1"></script>
+<script src="src/city/births.js?v=famtree1"></script>
+<script src="src/city/marriage.js?v=famtree1"></script>
+<script src="src/city/familypanel.js?v=famtree1"></script>
+
+<!-- B8: single-player persistence bridge for player building's piece
+     geometry (localStorage ledger, arena-gated deferred apply) — see that
+     file's header for why this rides as its own bridge instead of another
+     _xWrap inside systems/building.js itself. Loads after net/netpersist.js
+     (needs CBZ.cityWorldCommit/Collect, already wrapped by then) and after
+     city/familytree.js/systems/baseclaim.js (same save-wrap install-tick
+     family, slotted right beside their 45.92/45.93 ticks). -->
+<script src="src/systems/basesave.js?v=bld1"></script>
+
+<!-- E-wave: living economy -->
+<!-- M1: multi-currency wallet + registry — loads FIRST in the sim wave, on
+     purpose: market.js/econstate.js consume nothing from it yet (day one is
+     unchanged), but M2's forex.js/M3's centralbank.js wire into the registry
+     this ships, so it needs to exist before every other sim/* money module. -->
+<script src="src/sim/currency.js?v=cur1"></script>
+<!-- M2: forex.js — rates over the 5 currencies M1 registered (PPP+carry+
+     confidence+momentum) + airport FX counter/exchange desk. Loads
+     immediately after currency.js (needs CBZ.currency.walletGet/Add/Take),
+     BEFORE city/countries.js/polity.js/polwar.js/civilwar.js/migration.js —
+     fine, every cross-module read it does is guarded and resolved at CALL
+     time (its own onNewDay tick), not at parse time. See that file's header. -->
+<script src="src/sim/forex.js?v=cur1"></script>
+<!-- M3: centralbank.js — governor NPCs, the policy rate feeding bank.js's
+     RATES (a compatibility-accessor design so day one is byte-identical —
+     see that file's own header) + the reserve-requirement credit cap.
+     Loads immediately after forex.js (same v=cur1 bucket, per BUILD-PLAN's
+     own instruction) — forex.js's own carryTerm seam
+     (CBZ.centralbank && CBZ.centralbank.rate(id)) picks this up with ZERO
+     forex.js edits the moment this file exists. -->
+<script src="src/sim/centralbank.js?v=cur1"></script>
+<!-- M4: inflation.js — the π equation (monetary/demand/war-deficit/import
+     pass-through/credibility terms) + the compounding price LEVEL every
+     price reads (sim/econstate.js's priceIndex, sim/market.js's itemPrice,
+     systems/hunger.js's mealCost) + the sim/centralbank.js `_inflationTerm`
+     seam (assigned at this file's own parse time — centralbank.js is
+     already loaded, immediately above). Loads immediately after
+     centralbank.js (same v=cur1 bucket, per BUILD-PLAN's own instruction),
+     BEFORE sim/market.js/sim/econstate.js/sim/npcecon.js and every P-wave
+     file — fine, every cross-module read here is guarded and resolved at
+     CALL time (its own onNewDay tick), not at parse time. See that file's
+     header. -->
+<script src="src/sim/inflation.js?v=cur1"></script>
+<!-- M5: bonds.js — deficit -> bond auctions (billionaires/companies/player)
+     -> unsold remainder printed, feeding sim/inflation.js's own new
+     printing term. Loads immediately after inflation.js (same v=cur1
+     bucket, per BUILD-PLAN's own instruction) — BEFORE sim/corporations.js/
+     sim/stocks.js/sim/billionaires.js; fine, every cross-module read here
+     (CBZ.billionaires.founders, CBZ.corps.list/debitCash/creditRevenue,
+     CBZ.centralbank, CBZ.inflation, CBZ.forex.shock, CBZ.approvalShock,
+     CBZ.city.spend/addCash) is guarded and resolved at CALL time (its own
+     onNewDay tick / the player's buy()), long after every script on the
+     page has loaded. See that file's own header. -->
+<script src="src/sim/bonds.js?v=cur1"></script>
+<!-- M6: hyperinflation.js — stages (CREEPING/WARNING/GALLOPING/HYPER, off
+     M4's own pi + M5's own distress) + redenomination/dollarization endings
+     + Soros runs + counterfeiting. Loads immediately after bonds.js (same
+     v=cur1 bucket, per BUILD-PLAN's own instruction) — BEFORE sim/market.js/
+     sim/econstate.js/sim/npcecon.js/sim/corporations.js/sim/billionaires.js
+     and every P/X-wave file (city/polity.js included); fine, every
+     cross-module read here is guarded and resolved at CALL time (its own
+     onNewDay tick / a directly-invoked public function). See that file's
+     own header. -->
+<script src="src/sim/hyperinflation.js?v=cur1"></script>
+<script src="src/sim/market.js?v=econ1"></script>
+<script src="src/sim/econstate.js?v=econ1"></script>
+<script src="src/sim/npcecon.js?v=econ1"></script>
+<script src="src/sim/corporations.js?v=econ1"></script>
+<script src="src/sim/stocks.js?v=econ1"></script>
+<script src="src/sim/billionaires.js?v=econ1"></script>
+<script src="src/sim/motorsport.js?v=econ1"></script>
+
+<!-- P-wave: politics -->
+<script src="src/city/polity.js?v=pol1"></script>
+<!-- P5: the ONE protector system (secret service / hired security / gangs'
+     read-only adapter) — loaded before officials.js, which consumes it for
+     every office's guard lifecycle (officials.js's calls are runtime-lazy so
+     load order is soft either way, but this keeps "the record before its
+     first consumer" honest). -->
+<script src="src/city/protection.js?v=pol1"></script>
+<script src="src/city/officials.js?v=pol1"></script>
+<script src="src/city/approval.js?v=pol1"></script>
+<script src="src/city/elections.js?v=pol1"></script>
+
+<!-- X-wave: the world -->
+<script src="src/systems/hunger.js?v=world1"></script>
+<!-- X5: the village hut/shack/well/market-stall kit (CBZ.assets.define +
+     CBZ.CITY_TEMPLATES.village). Must load before countries.js CONSUMES it
+     via buildTown/CBZ.cityTemplate — countries.js builds lazily through
+     CBZ.addLandmass so load order isn't strictly load-bearing today, but
+     this keeps the "assets define before buildTown reads them" contract
+     honest for any future eager caller. -->
+<script src="src/city/villagekit.js?v=world1"></script>
+<script src="src/city/countries.js?v=world1"></script>
+<script src="src/city/demographics.js?v=world1"></script>
+<!-- X6: the affinity matrix (country/state/city relations) — after
+     countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
+     loaded in the earlier P-wave) since it reads/subscribes to both. -->
+<script src="src/city/relations.js?v=world1"></script>
+<!-- P6: the regime state machine (govType transitions + first effects —
+     fascist curfew, communist price controls, anarchist collapse). Loads
+     LAST in the P/X-wave block: it reads CBZ.relations.warPressure +
+     CBZ.hunger.miseryIndex (both above) on top of polity/approval/elections
+     (also above), so every dependency is already live by the time it parses. -->
+<script src="src/city/regimes.js?v=pol1"></script>
+<!-- P6b: the crown as a bloodline (monarchy succession/legitimacy/royal
+     marriages) — regimes.js's own tickCountry() deliberately never enters
+     monarchy; this file owns that regime entirely. Loads LAST in the P/X-
+     wave block, right after regimes.js, since it reuses CBZ.regimes.transition
+     for its two cross-regime triggers (dictator self-coronation, anarchist
+     restoration) and needs CBZ.officials/CBZ.relations/CBZ.demographics/
+     CBZ.cityFamilyTree, all already live above. -->
+<script src="src/city/crown.js?v=pol1"></script>
+<!-- P7: militia — protection details past a headcount threshold escalate
+     into real CBZ.cityGangs factions (gang machinery reused, not forked),
+     with regime reactions (democracy watches, fascism/dictatorship cracks
+     down or absorbs a loyalist, communism nationalizes, anarchism lets them
+     thrive). Loads LAST in the P/X-wave block: it reads CBZ.protection's own
+     details(), CBZ.cityGangs/cityGangById, CBZ.polity/regimes' govType, and
+     CBZ.cityLedgerEntry/cityPoliceForceAdd — every one of those already live
+     above. -->
+<script src="src/city/militia.js?v=pol1"></script>
+<!-- P8: state/country wars — generalizes the gang-war machinery (declare/
+     upkeep/decay, treasury-funded raids) to whole polities: counted
+     matériel (soldiers/planes/missiles) per country, fronts at causeway
+     chokepoints (falling back to the capital midpoint where no causeway
+     connects the two sides — see that file's own header), procurement
+     contracts routing real treasury dollars into KAI/VLT/Granite revenue
+     (defense stocks inflate honestly through earnings, not a fake pump),
+     conscription (cohort employment down), and the losing-authoritarian
+     desperate-measures ladder (nationalization, child-soldier war crimes).
+     Loads LAST in the P/X-wave block, right after militia.js: it reads
+     CBZ.polity/CBZ.relations/CBZ.regimes(govType only)/CBZ.hunger/
+     CBZ.econState/CBZ.npcEcon/CBZ.corps/CBZ.COUNTRIES, every one of those
+     already live above. declareWar()/endWar()/warsOf()/frontsOf() are a
+     kind-agnostic public API — X6b's civil war (a country splitting into
+     two warring polity records) builds directly on this machinery. -->
+<script src="src/city/polwar.js?v=pol1"></script>
+<!-- P9: migration — policy per country (president legislates over
+     LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
+     decrees instantly), daily individual-migration-evaluation propensity
+     (misery gap, wage gap, war, relations affinity, demographic kinship)
+     gated by emigration/immigration policy, brain drain (skilled flight
+     hits the origin's economy ×1.5 vs unskilled — the doom loop), refugee
+     waves (war/famine routed to the friendliest open neighbor, straining
+     relations on arrival), the border-escape gig, and the X4 demographics
+     mix seam (sustained immigration nudges a country's population mix
+     toward polyglot, gradually, capped/day). Loads LAST in the P-wave
+     block, right after polwar.js: it reads CBZ.polity/CBZ.relations/
+     CBZ.hunger/CBZ.econState/CBZ.npcEcon/CBZ.demographics/CBZ.polwar
+     (activeWarFor)/CBZ.COUNTRIES/CBZ.cityPopulation*/CBZ.cityMakePed,
+     every one of those already live above. -->
+<script src="src/city/migration.js?v=pol1"></script>
+<!-- X6b: civil war — a cohort misery index (hunger + real wages + approval)
+     past threshold in 2+ districts, sustained days, with low approval ->
+     armed uprising; a seeded coup roll for authoritarian countries in
+     crisis (full success/full failure/partial); the partial-coup and
+     misery roads both fracture the polity into two warring polity records
+     via THIS SAME fracture() — a rebel country record, a real transitioned
+     leader, counted matériel defecting proportional to collapse — then
+     fight it out through P8's own war machinery (declareWar/fronts/
+     casualties/conscription/procurement, all already generic). Endings:
+     reconquest (fragment dissolves, districts return), partition (the map
+     PERMANENTLY gains a country), or warlordism (parent -> anarchism,
+     regimes.js's own strongman race takes it from there; strongest gangs
+     absorb the fragment's people/treasury). Loads LAST in the P/X-wave
+     block, right after migration.js: it reads CBZ.polity/CBZ.relations/
+     CBZ.regimes/CBZ.polwar/CBZ.hunger/CBZ.npcEcon/CBZ.migration/
+     CBZ.cityGangs/CBZ.cityEcon/CBZ.officials-family mint hooks/
+     CBZ.onOfficialDeath, every one already live above. -->
+<script src="src/city/civilwar.js?v=pol1"></script>
+
+<!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
+     feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
+     spin-up at parse time); CBZ.sqlitedb.js kicks off its OWN async init
+     on parse and only THEN, if a backend is available, dynamically loads
+     src/vendor/sqlite-wasm/ (via `new Worker(...)` or an injected
+     <script> tag — never a blocking tag here) and src/workers/
+     sqlitedb-worker.js. Loads after city/worldstate.js (city/*.js's own
+     wave, well above) since that file's save()/load() check
+     CBZ.sqlitedb at CALL time, not parse time — load order doesn't
+     matter, but this is the natural home: same "net wave, after
+     everything it might touch already exists" placement as net/
+     netpersist.js above. Absent/failed sqlite-wasm changes nothing —
+     day one (localStorage-only) behavior is untouched. -->
+<script src="src/net/sqlitedb.js?v=sql1"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale4"></script>

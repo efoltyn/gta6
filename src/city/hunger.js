@@ -32,10 +32,13 @@
     if (P._boost) P._boost = Math.max(0, P._boost - dt);
 
     if (g.hunger <= 0 && g.invuln <= 0) {
-      P.hp -= C.starveDmg * dt;
+      // X2 mercy floor: hunger alone can no longer finish you off in the
+      // city (combat/falls/etc. can still take you the rest of the way) —
+      // per MASTER-PLAN V.1b, starvation stays fully lethal outside the
+      // city (see systems/hunger.js's survival/escape branch).
+      P.hp = Math.max(5, P.hp - C.starveDmg * dt);
       warnT -= dt;
       if (warnT <= 0) { warnT = 5; CBZ.city && CBZ.city.note("🍔 You're starving! Find food.", 2); }
-      if (P.hp <= 0 && CBZ.cityKillPlayer) CBZ.cityKillPlayer("starved to death");
     }
 
     // ---- TIREDNESS: night wears you down; resting (standing still) sleeps it

@@ -19,12 +19,43 @@
    Draw-call discipline unchanged: same 3 boxes per crate, shared
    COL palette materials. The pry-open path adds zero new geometry —
    only a material swap on crack (same cached CBZ.mat/addBox pool).
+
+   F7 MIGRATION: crate(x,z,s) now routes through CBZ.spawnPiece (systems/
+   pieces.js, F4) instead of calling world/materials.js's addBox directly.
+   This is the migration PROOF for the Piece model — same compound-box
+   geometry/materials/dimensions as before (moved into the inline def's
+   build()), same solid + blockLOS behaviour, byte-identical scene.
+
+   Geometry convention: build() returns the MAIN box Mesh itself (not
+   ctx.group) with the two decorative boxes attached as ITS children at
+   LOCAL offsets from the piece origin. This matters for two reasons:
+     1. spawnPiece positions whatever build() returns at the piece's
+        world pos — returning the main box directly (rather than wrapping
+        it in a group) means its children inherit the correct world
+        position for free, with no extra bookkeeping.
+     2. CBZ.losBlockers is a flat Mesh[] tested via a NON-recursive
+        raycast (see systems/pieces.js's new blockLOS handling) — a
+        THREE.Group has no raycastable geometry of its own, so only a
+        real Mesh registers as a sightline blocker. The old code only
+        ever set blockLOS on the main box (the banding/bracket details
+        never blocked LOS), so returning that specific mesh keeps the
+        LOS-blocker count identical: 1 per crate, not 3.
+
+   NOTE (documented, not "papered over"): addBox's collider omits y0/y1
+   entirely for crates (never passed), which systems/physics.js treats as
+   an unconditionally full-height wall that can never be stepped/vaulted
+   over. spawnPiece's collider ALWAYS carries y0/y1 (here: the crate's
+   real physical footprint, 0..s above its base) — a height-GATED
+   collider. For every actor's actual traversal capability in this game
+   (no vault/jump reaches a 2.6m+ box top), this is behaviourally
+   identical to the old full-height collider; it only theoretically
+   differs if something could get its feet above the crate's own top.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
-  const { addBox, COL } = CBZ;
+  const { COL } = CBZ;
   const g = CBZ.game;
 
   const REACH = 2.2;          // [E] pry reach — a hair tighter than roofloot (ground-level, tighter yard)
@@ -39,13 +70,43 @@
 
   function crate(x, z, s) {
     s = s || 2.6;
-    addBox(x, s / 2, z, s, s, s, COL.CRATE, { solid: true, blockLOS: true });
-    // darker plank banding so it reads as wood, not a flat cube
-    addBox(x, s / 2, z, s + 0.06, s * 0.34, s + 0.06, COL.CRATE_D, { cast: false });
-    // a little corner bracket detail — kept as `lid` so crackOpen can swap it
-    // dark once busted open (roofloot's "material SWAP reads looted" trick)
-    const lid = addBox(x, s * 0.92, z, s * 1.02, 0.08, s * 1.02, 0x6e4a22, { cast: false });
+    const half = s / 2;
+    let lid = null;   // captured out of build() so the pry-open loot path can swap it dark
+
+    const def = {
+      footprint: { hx: half, hz: half },
+      y0: -half, y1: half, // world y-range [0, s] once offset by pos.y (=half)
+      build: function () {
+        const main = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), CBZ.mat(COL.CRATE, {}));
+        main.castShadow = true;
+        main.receiveShadow = true;
+
+        // darker plank banding so it reads as wood, not a flat cube
+        // (same x/z/pos as the main box in the old code -> local (0,0,0))
+        const band = new THREE.Mesh(new THREE.BoxGeometry(s + 0.06, s * 0.34, s + 0.06), CBZ.mat(COL.CRATE_D, {}));
+        band.castShadow = false;
+        band.receiveShadow = true;
+        main.add(band);
+
+        // a little corner bracket detail (old world y = s*0.92 -> local
+        // offset from the main box's own centre at s/2 is s*0.42). Kept as
+        // `lid` so crackOpen can swap it dark once busted open (roofloot's
+        // "material SWAP reads looted" trick) — cloned mat so the swap never
+        // repaints every crate sharing the cached CBZ.mat instance.
+        const bracket = new THREE.Mesh(new THREE.BoxGeometry(s * 1.02, 0.08, s * 1.02), CBZ.mat(0x6e4a22, {}).clone());
+        bracket.position.set(0, s * 0.42, 0);
+        bracket.castShadow = false;
+        bracket.receiveShadow = true;
+        main.add(bracket);
+        lid = bracket;
+
+        return main;
+      },
+    };
+
+    const piece = CBZ.spawnPiece(def, { pos: { x: x, y: half, z: z }, solid: true, blockLOS: true });
     crateList.push({ x, z, s, lid, cracked: false });
+    return piece;
   }
 
   crate(-9, 22);

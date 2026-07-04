@@ -8,11 +8,28 @@
   CBZ.SPAWN = new THREE.Vector3(-11, 0, -39);
   CBZ.COP_SPAWN = new THREE.Vector3(23, 0, 36);
 
+  // ---- W4: player build (m/f) — persisted across sessions -------------------
+  // The rig's proportions (character.js's c.build gate) are baked in at
+  // makeCharacter() time, and everything downstream (cop accessories below,
+  // bling/armor/outfit systems in 30+ other files) grabs live mesh references
+  // off THIS object at various points during play. Re-pointing every one of
+  // those in place is fragile, so the choice is only read at BOOT: change it
+  // via CBZ.setPlayerBuild(), which persists + reloads. See that function for
+  // the full reasoning.
+  function readSavedBuild() {
+    try {
+      const v = localStorage.getItem("cbz_playerBuild");
+      return v === "f" ? "f" : "m";
+    } catch (e) { return "m"; }
+  }
+  const playerBuild = readSavedBuild();
+
   // orange prison jumpsuit with darker stripes — unmistakably "the convict"
   const playerChar = CBZ.makeCharacter({
     legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
     skin: 0xf0c39a, hair: 0x4a3526, shoes: 0x2b2b2b,
     stripes: 0xc85c00, belt: 0x6b4a2a,
+    build: playerBuild, longHair: playerBuild === "f",
   });
   CBZ.scene.add(playerChar.group);
 
@@ -82,4 +99,39 @@
   CBZ.player = player;
   CBZ.playerChar = playerChar;
   CBZ.applyPlayerRole = applyPlayerRole;
+
+  // current saved build ("m"/"f") — read once at boot; the panel toggle
+  // (city/charpanel.js) reads this to highlight the active choice.
+  CBZ.getPlayerBuild = function () { return playerBuild; };
+
+  // ---- W4: change build ------------------------------------------------------
+  // WHY RELOAD INSTEAD OF A LIVE REBUILD: makeCharacter's fem/male proportions
+  // (leg/torso/arm width, head size, hip flare — character.js) are structural,
+  // not a recolor, and CBZ.playerChar is dereferenced live all over the place —
+  // cop accessories mounted directly onto THIS rig's neck/body at boot above,
+  // bling.js/armor.js mounting worn jewellery+kit shells onto specific mesh
+  // anchors, gore.js severed-leg state tied to specific leg meshes, facial.js
+  // rewriting eye/mouth mesh positions, ragdoll/physics/capture/combat reading
+  // ch.parts directly, plus outfit/clothes canvas painting on the current
+  // skinSlots meshes. Re-pointing every one of those consumers to a freshly
+  // built rig's new meshes (and moving/re-mounting every attachment) is a long
+  // tail of easy-to-miss breakage for a cosmetic toggle. Persist + reload is
+  // simple, always correct, and the boot path above already re-creates the
+  // rig with the saved build.
+  CBZ.setPlayerBuild = function (build) {
+    build = (build === "f") ? "f" : "m";
+    if (build === readSavedBuild()) return false;   // already the active build
+    try { localStorage.setItem("cbz_playerBuild", build); } catch (e) {}
+    if (typeof CBZ.flashHint === "function") {
+      CBZ.flashHint((build === "f" ? "Female" : "Male") + " build set — reloading…", 1.6);
+    }
+    const doReload = function () { try { location.reload(); } catch (e) {} };
+    // small delay so the hint has a chance to paint before a blocking confirm()
+    setTimeout(function () {
+      let ok = true;
+      try { ok = window.confirm ? window.confirm("Changing build reloads the game. Continue?") : true; } catch (e) { ok = true; }
+      if (ok) doReload();
+    }, 30);
+    return true;
+  };
 })();

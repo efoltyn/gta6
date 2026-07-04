@@ -1074,6 +1074,7 @@
   //      chips, value-sorted so the jackpot (a lifted Rolex / Gold Bar) leads. ------
   const LOOT_ICON = {
     drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔",
+    resource: "📦",   // B7: harvest-node materials (Wood/Stone/Scrap) fallback
   };
   // a handful of nicer per-item glyphs so the row reads instantly
   const LOOT_ITEM_ICON = {
@@ -1081,6 +1082,8 @@
     "Richard Mille": "⌚", "Gold Bar": "🥇", "Gold Chain": "📿", "Diamond Ring": "💍",
     "Engagement Ring": "💍", Medkit: "🩹", "Body Armor": "🦺", Weed: "🌿", Coke: "❄️",
     "Cash Stack": "💵", "Briefcase of Cash": "💼", Phone: "📱", Laptop: "💻", Wallet: "👛",
+    // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
+    Wood: "🪵", Stone: "🪨", Scrap: "⚙️", Hatchet: "🪓", Pickaxe: "⛏️",
   };
   function renderLoot() {
     if (!lootEl) return;

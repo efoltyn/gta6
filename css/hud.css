@@ -340,6 +340,8 @@ body.mode-survival #disasterBanner{ display:block; }
 #survBars .sbarbg{ flex:1; height:14px; border-radius:10px; background:rgba(0,0,0,.45); overflow:hidden; box-shadow:inset 0 2px 4px rgba(0,0,0,.5); }
 #hpBar{ height:100%; width:100%; border-radius:10px; background:#3ad17a; transition:width .12s linear, background .2s; }
 #stamBar{ height:100%; width:100%; border-radius:10px; background:#5bc8ff; transition:width .12s linear; }
+/* X2: survival/escape hunger meter (city mode already has its own #cFood bar) */
+#hungerBarSurv{ height:100%; width:100%; border-radius:10px; background:#e0a030; transition:width .12s linear, background .2s; }
 
 /* big disaster warning banner — centre */
 #disasterBanner{

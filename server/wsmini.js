@@ -5,7 +5,17 @@
 const crypto = require("crypto");
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const MAX_MSG = 1536 * 1024; // hard cap per message: snapshots are ~10-40KB, a world save (wsave) can run to a few hundred KB
+// hard cap per message: snapshots are ~10-40KB, a world save (wsave) can run
+// to a few hundred KB. S1 (BUILD-PLAN.md Stage S): this used to be 1536KB
+// (~1.5MB), which is WHY net/netpersist.js pre-checked a wsave against 1.4MB
+// before sending — sending more would have gotten the sending socket killed
+// outright by this same limit. Now that server/db.js stores world/char blobs
+// chunked in SQLite (no single-row or JSON-in-memory size limit on the
+// storage side), the only remaining ceiling was this transport frame cap —
+// raised in tandem with netpersist.js's guard so a multi-MB world blob
+// (10k+ NPCs, politics/econ/market riders) can actually reach the DB. Old
+// clients that still self-cap at 1.4MB keep working unmodified either way.
+const MAX_MSG = 16 * 1024 * 1024; // 16MB
 
 class WSConn {
   constructor(socket) {

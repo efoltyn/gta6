@@ -1,0 +1,105 @@
+# BUILD PLAN — executing MASTER-PLAN.md, one commit per step
+
+Each step is one commit; each step unlocks the next. Status: `[ ]` todo · `[x]` done.
+All steps follow the repo conventions: IIFE on `window.CBZ`, `node --check` every changed file,
+never edit `src/config.js`, seeded LCG (never Math.random) for world state, decimal `onUpdate`
+order slotted near related systems with a comment, `serialize()/apply()` for world-blob
+persistence, idempotent `_xWrap` wraps for the single-player ledger, self-styled DOM panels,
+new script tags added as a wave-comment block before `<!-- 5. quality + loop + boot -->`.
+Waves are parse-verified; not play-tested per owner's standing rule.
+
+## Stage W — Women & Families (the least-built part; first priority)
+
+- [x] **W1** `entities/character.js`: add `c.build` ("m"/"f") to `makeCharacter` — narrower shoulders (arm x-offset 0.62→~0.54), tapered torso, hip-flared leg pivots, smaller head ratio, and a real long-hair mesh option (second box hanging from the neck, gated like `cap`). Animation is proportion-agnostic; nothing else changes. *Enables everything in Stage W.*
+- [x] **W2** `city/peds.js`: `ped.gender` rolled ~50/50 (archetype-biased), threaded into `makeCharacter({build})` and `cityOutfitFor({sex})` — which activates the dormant dress branch at outfits.js:762. Split `FIRST` into `FIRST_M`/`FIRST_F`. `family.js`/`social.js` wife/mistress/spouse spawns pass `gender:"f"` explicitly. Women exist.
+- [x] **W3** Crowds: `city/crowd.js` + `entities/crowd.js` per-instance `fem[]` flag varying the existing `put()` scale args + hair instance drop (long hair) — half the ambient crowd reads female with zero new draw calls.
+- [x] **W4** Player gender: option on the character panel; rebuilds `playerChar` with `build`, wardrobe paints correctly.
+- [x] **W5** Ledger: `schedule.js` stash/deal carries `sex`; `worth()` gains an `isFamily/_famId` clause so spouses/kids become ledger-worthy persistent people.
+- [x] **W6** `city/familytree.js` (new): `family_edges` array `{kind: spouse|parent|child, a: sid, b: sid, since, endedAt, endReason}` — edges survive death. API: `addEdge/spouseOf/kidsOf/heirOf/serialize/apply` (netpersist auto-pickup). Force-mints sids at pairing time via `cityPedStash`.
+- [x] **W7** Wire couples into the tree: `social.js` pairing becomes mixed-gender and writes spouse edges; `weaveFamilies` kids get parent edges; unify the `ped.family` type collision (array everywhere; family.js's role string moves to `ped.famRole`).
+- [x] **W8** Households: `housing.js` units gain `occupants[]` + per-tier capacity; spouses/kids join the partner's unit; `family.js` families anchor through real housing units; `householdId` (lot key) on ledger entries. Families actually live together.
+- [x] **W9** Inheritance: `cityKillPed` hook — heir lookup (living spouse → eldest child), ledger-cash transfer, zillow `ownerId` transfer for NPC owners; `citySocialDeath` stops severing links (stamps `endedAt:"death"` instead); mourning preserved.
+- [x] **W10** Generational grudges: persisted grudge records keyed by sid, inherited at fractional weight by spouse/kids, restored on deal-in — kill a boss and his son remembers, sessions later.
+- [x] **W11** Births: married couple + shared home + time → a crowd body is *promoted* into a named child (parent edges, small rig, household join) — population stays finite, "the crowd already contained this future person."
+- [x] **W12** FAMILY panel: self-styled overlay showing the player's family + known NPCs' trees; dynasty surnames (kids inherit last names — upgrade the single-letter `LAST` to real surname lists per gender-neutral family name).
+- [x] **W13** Marriage strain & divorce: per-marriage strain score fed by poverty (household income vs cost of living), neglect (affection decay), danger (wanted/kidnaps), and gossip-carried betrayal; past threshold the spouse files — endMarriage(divorce), moves household, asset split, custody by bond, remarriage; reconciliation window; same model for NPC couples (depressions cause divorce waves).
+
+## Stage F — Foundations (make every later feature a 1-file change)
+
+- [x] **F1** `core/prio.js` (new): `CBZ.PRIO` named bands + one-time collision warn in dev; new code uses bands.
+- [x] **F2** `core/interfaces.js` (new): the contracts index — feelDt, collide signature, colliders/platforms shapes, serialize/apply, region records, day-phase API, with file:line pointers.
+- [x] **F3** `systems/proptypes.js` (new): `CBZ.registerPropType({id, build, onUpdate, onInteract, save})` + generic loop; migrate coins as proof.
+- [x] **F4** `systems/pieces.js` + `systems/chunks.js` (new, additive, zero call sites): `spawnPiece/despawnPiece/findSupport`, 16m chunk registry, reap queue, per-chunk dirty batching skeleton.
+- [x] **F5** `city/placement.js`: rects gain `minY/maxY` (default full-height so behavior is unchanged); `overlaps()` gains the Y test. The one shared PR four building systems need.
+- [x] **F6** `city/assets.js`: pool free-list (remove/recycle instances) — the most load-bearing gap; spike first, then land.
+- [x] **F7** Migrate `world/props.js` + `world/crates.js` compound props through `spawnPiece` (proof of the piece model; broadphase stats must match).
+
+## Stage B — Player building
+
+- [x] **B1** Piece catalog (wood tier: foundation/wall/floor/stairs/roof/door) as `assets.define` entries with `sockets[]`; `CBZ.building.place(kind, gridPos, rot)` end to end (no UI).
+- [x] **B2** Build mode: ghost preview + hotbar strip + confirm/rotate/undo — **the walking skeleton**: place, stack, stand on, demolish.
+- [x] **B3** Socket snap + compatibility table (wall-on-foundation-edge feel).
+- [x] **B4** Structural integrity graph + cascade collapse (deferred reap; debris via fx).
+- [x] **B5** HP/damage: material × damage-type table; explosives integration; carve-compatible wall meshes.
+- [x] **B6** Tool cupboard + `BaseRecord` + placement rejection radius + door locks/keycodes + lockable containers.
+- [x] **B7** Resources & crafting: harvest nodes (instanced near-field scatter), tools, `systems/craft.js`, deployable items entering build mode; city scrap drops from destroyed cars/props.
+- [x] **B8** `bsave` persistence channel (fracture-style ledger) + upkeep/decay.
+
+## Stage E — Economy & corporations
+
+- [x] **E1** `sim/market.js` (new): `CBZ.market.price(good)` shim (falls back to 1.0) + dynamic **food** prices + moving shop price tags with ▲▼.
+- [x] **E2** `sim/econstate.js` (new): per-jurisdiction EconState, hourly tick (order 29.5), all 7 good categories, daily settlement.
+- [x] **E3** Legibility: adboard price/CPI ticker creative + phone Markets app with sparklines.
+- [x] **E4** NPC circulation: ledger rent/spend, cohort wallets (20 rows), robbery debits cohorts, vacancies become real.
+- [x] **E5** `sim/corporations.js` (new): Bunbros with real outlet revenue from cohort spend; read-only ticker line.
+- [x] **E6** `sim/stocks.js` (new): exchange building role + buy/sell UI + price formation off real earnings.
+- [x] **E7** Full 8-company roster + national index + dividends + IPO for player businesses.
+- [x] **E8** Billionaires as persistent shareholder NPCs (MAGNATE VIP wiring, mark-to-market net worth, assassination shocks + succession via family tree from W9).
+- [x] **E9** Casino: minigame house-take books into Royale Casino Corp; NPC whales; vault heist = earnings shock.
+- [x] **E10** Motorsport: car manufacturers as listed corporations owning the CARS catalog models (dealership sales = their revenue); racing teams per manufacturer with persistent driver NPCs on salary; race results move brand demand + stock ("win on Sunday, sell on Monday"); purse pool becomes sponsorship spend; race-fixing/sabotage = market manipulation with SEC heat.
+
+## Stage P — Politics & protection
+
+- [x] **P1** `city/polity.js` (new): jurisdiction registry (city→state→country over existing geography), `worldDay` counter off dayPhase wrap, serialize/apply.
+- [x] **P2** `city/officials.js` (new): Mayor Rosa Vale as a real scheduled ledger NPC (city hall hours, appearance window, 2 bodyguards), assassination → succession machine, `cityKillPed` wrap.
+- [x] **P3** `city/approval.js` (new): the 5-input approval equation @ 1Hz slices + POLITICS tab with sparkline.
+- [x] **P4** `city/elections.js` (new): 7-day mayoral cycle, 2 candidates, voter blocs from district data, campaign events, results feed.
+- [x] **P5** `city/protection.js` (new): unified `ProtectionDetail` — secret-service details for officials, hireable/armable security for the player, gang crews adopt the same record.
+- [x] **P6** `city/regimes.js` (new): govType state machine + first effects (fascist curfew, communist price controls via market.js, **anarchist collapse transitions cops → former cops who keep their guns**).
+- [x] **P6b** Monarchy: crown-as-bloodline regime — succession via familytree heirOf (spouse regency, eldest child, collateral line), legitimacy stat, royal marriages as alliances, visible line of succession, dictator self-coronation + restoration/pretender triggers.
+- [x] **P7** Militia: protection details past headcount threshold become factions (turf/treasury via gang machinery); regime reactions.
+- [x] **P8** `city/polwar.js` (new): state/country wars generalizing gang wars — fronts at causeways, counted matériel consumption, procurement contracts to corporations.
+- [x] **P9** Migration: policy per country (president legislates, dictator decrees), individual migration evaluation, brain drain/refugee flows, border-escape gigs.
+
+## Stage X — The world: countries, demographics, villages, hunger, relations
+
+- [x] **X1** De-stub officials: generated names everywhere (no "Rosa Vale"); officials minted like all persistent people.
+- [x] **X2** Hunger: player hunger stat (Minecraft-style — food fills, high hunger blocks sprint/regen, starvation damages) + NPC hunger driven by wallet food spending; hungry+broke NPCs steal (shoplift/pickpocket routine override); famine→crime→unrest loop wired to food prices.
+- [x] **X3** Country registry v2: 5+ countries as data records {wealthLevel, demographics config, settlement mix, currencyId placeholder} with varied state/city counts; polity tree + worldmap landmasses for the new territories (new islands/landmasses across the archipelago).
+- [x] **X4** Demographics: per-region population config (skin-tone distribution, name pools per culture, dress palettes) read by makePed/crowds at spawn; region-correct populations, migration mixes them over time.
+- [x] **X5** Village kit: hut/shack/well prefab set for towngen (mud-brick, thatch, corrugated shacks, dirt paths); poor-country settlements generate as villages; a poor capital = few towers over shacks.
+- [x] **X6b** Civil war triggers: a cohort misery index (hunger + real wages + approval) past threshold in multiple districts -> armed uprising with rebel-held territory; partially-failed coups (capital taken but military island or loyalist states hold out) fracture the polity into two warring records; endings: reconquest, partition (the map permanently gains a country), or warlordism. Builds on P8's war machinery.
+- [x] **X6** Relations: affinity matrix (country/state/city, -100..100) seeded by data, moved by events (trade, insults, war, refugees); feeds tariffs, migration choice, war pressure, street reactions.
+
+## Stage M — Money
+
+- [x] **M1** `sim/currency.js` (new): multi-currency wallet map; `g.cash`/`g.cityBank` become LBD compatibility accessors — day one unchanged.
+- [x] **M2** `sim/forex.js` (new): rates over the 5 currencies M1 registered (PPP+carry+confidence+momentum), quoted vs LBD; airport FX counter + exchange desk. Scope adaptation (recorded in the file's own header): the "Countries CRE/WMK registered" clause is superseded — that dates from a MASTER-PLAN draft where costa/westmark were the only other polities; X3 shipped 5 real countries instead and M1 already registered 5 currencies for that exact roster. costa/westmark remain republic STATES; CRE/WMK are not created.
+- [x] **M3** `sim/centralbank.js` (new): governor NPCs, policy rate wired into bank.js RATES, reserve-requirement credit cap.
+- [x] **M4** Inflation: π equation → priceIndex compounding → every price; CPI ticker; approval term −12·max(0, π−5%).
+- [x] **M5** `sim/bonds.js` (new): deficit-triggered auctions (billionaires' real cash, corporations' real cash, player via the exchange UI) → unsold remainder printed subject to the central bank's own independence gate (~20% cap for an independent bank, full absorption for a captured one) → printed money feeds a new explicit term in sim/inflation.js's π equation. Coupon service, maturity repay/roll (distress rises on roll), and default (haircut on the recovery, real forex/approval shocks) all wired; debtOf/distressOf/printedTotal expose the M6 doom-loop seams.
+- [x] **M6** Hyperinflation stages + doom loop + redenomination/dollarization endings; Soros runs + counterfeiting.
+
+## Stage S — SQLite backbone (server)
+
+- [x] **S1** `server/db.js` (node:sqlite): blobs stored chunked in SQLite — the 1.4MB socket cap dies.
+- [x] **S2** `people` table replaces the ledger blob (cap removed); chunk-indexed spawn queries.
+- [x] **S3** structures/bases/containers tables (chunk-indexed, protocol-transparent); real deletion + FK cascade to containers.
+- [x] **S4** econ/market/political tables + server-side ticks.
+- [x] **S5** sqlite-wasm single-player parity.
+
+## Stage O — OSS/Vite (workflow change; scheduled after core waves stabilize)
+
+- [x] **O1** package.json + Vite + `src/bootstrap.js` compat shim (legacy files untouched).
+- [x] **O2** First integration: vendored grass repo + adapter.
+- [x] **O3** three.js upgrade with legacy-visual flags.

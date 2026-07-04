@@ -99,17 +99,61 @@
   let kidnap = null;   // {ped, gangId, captors:[], ransom, t, x, z}
   let kidnapCD = 90;   // first window opens a minute and a half in
 
-  function famPed(x, z, name, role, gangId, kid) {
+  // `gender` is REQUIRED from the caller (never left to makePed's internal
+  // 48/52 fallback): famPed hands makePed `Math.random` as its rng, so an
+  // un-set gender would roll off Math.random instead of this module's
+  // seeded `rng()` — breaking the "deterministic from the seed" contract.
+  // W12 DYNASTY NAMING: "Mrs <Surname>" — graft the head's own surname onto a
+  // spawned first name (wife pool is given-names-only) so she reads as part
+  // of his family, not an unrelated woman. No-op (returns firstName as-is)
+  // if the head's name has no surname token to borrow.
+  function withSurname(firstName, headName) {
+    if (!headName) return firstName;
+    const parts = String(headName).trim().split(/\s+/);
+    return parts.length > 1 ? firstName + " " + parts[parts.length - 1] : firstName;
+  }
+
+  function famPed(x, z, name, role, gangId, kid, gender) {
     if (!CBZ.cityMakePed) return null;
     const p = CBZ.cityMakePed(x, z, Math.random, {
-      name, aggr: 0, armed: false, archetype: "resident",
+      name, aggr: 0, armed: false, archetype: "resident", gender,
       job: role, behavior: "timid", cash: 20 + ((rng() * 60) | 0),
     });
     if (!p) return null;
     if (gangId) p.gang = gangId;        // wears the colors in the books — kill her
-    p.family = role;                    // and the SET takes it personally (gangs.js)
+    // W7: renamed from p.family (a STRING role label) to p.famRole — social.js's
+    // ped.family is an ARRAY of kin refs; the two collided under one name. See
+    // schedule.js's worth() for the matching read-side migration.
+    p.famRole = role;                   // and the SET takes it personally (gangs.js)
     if (kid && p.char && p.char.group) { p.char.group.scale.setScalar(0.62); p.hp = 40; p.maxHp = 40; }
     return p;
+  }
+
+  // ---- W8: HOUSING BRIDGE --------------------------------------------------
+  // castFamilies anchors a family straight to lot GEOMETRY (backyardOf) —
+  // it never touches housing.js at all, so the household's rent/occupancy/
+  // persistence layers never see them. This is a DATA-level bridge only: the
+  // visual/routine anchor above (fam.homeX/houseX etc., read by dayGoalFor)
+  // is untouched — members still wander the yard exactly as before. We just
+  // ALSO register them as occupants of a real unit on that same lot, so
+  // economy.js's rent tick and schedule.js's ledger know this household
+  // exists. Best-effort: if the lot has no rentable floor (deriveUnitsForLot
+  // returns []) or the unit is already full (MICRO tier caps at 1 seat), a
+  // member simply keeps no housing tie — harmless, matches how ungated NPCs
+  // already behave with housing absent/disabled.
+  function bridgeHousehold(fam) {
+    if (!CBZ.cityFloorUnits || !fam || !fam._lot || !fam.members.length) return;
+    let units;
+    try { units = CBZ.cityFloorUnits(fam._lot); } catch (e) { return; }
+    if (!units || !units.length) return;               // no rentable floor on this lot
+    const lead = fam.members[0];                        // wife (or the mistress, solo) leases first
+    // hint homeOf() to lease ON this exact lot (the same "adopt a cached _digs"
+    // path aigoals' own fallback already relies on) rather than the citywide
+    // affordability pick — the family's housing tie must match their actual home.
+    lead._digs = fam._lot;
+    if (CBZ.cityHomeOf) CBZ.cityHomeOf(lead);
+    if (!CBZ.cityHouseholdJoin) return;
+    for (let i = 1; i < fam.members.length; i++) CBZ.cityHouseholdJoin(fam.members[i], lead);
   }
 
   function castFamilies() {
@@ -147,16 +191,30 @@
         label: mine ? "Your family" : (boss + "'s family"),
         members: [],
       };
-      const wife = famPed(fam.homeX, fam.homeZ, WIVES[(rng() * WIVES.length) | 0],
-        mine ? "your wife" : (boss + "'s wife"), fam.gangId, false);
+      const wifeFirst = WIVES[(rng() * WIVES.length) | 0];
+      const wifeName = gang && gang.boss ? withSurname(wifeFirst, gang.boss.name) : wifeFirst;
+      const wife = famPed(fam.homeX, fam.homeZ, wifeName,
+        mine ? "your wife" : (boss + "'s wife"), fam.gangId, false, "f");
       if (wife) { wife._fam = fam; wife._role = "wife"; fam.members.push(wife); }
+      // W7: link a BOSS family into the persistent family tree — gang.boss is
+      // a real ped ref (gangs.js), reachable right here, so marry() has an
+      // actual head to hang the edge off. The PLAYER's own family (mine, gang
+      // is null) has no ped-with-a-sid to be the "head" — the player isn't a
+      // ped yet — so it's skipped for now; full player-in-tree wiring is a
+      // later step (see also cityPropose's citySpouseSid hook in social.js).
+      if (wife && gang && gang.boss && !gang.boss.dead && CBZ.cityFamilyTree) {
+        CBZ.cityFamilyTree.marry(gang.boss, wife);
+      }
       const nKids = 1 + ((rng() * 2) | 0);
       for (let k = 0; k < nKids; k++) {
         const kid = famPed(fam.homeX + 1.5 + k, fam.homeZ + 1.2,
-          KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, true);
+          KIDS[(rng() * KIDS.length) | 0], "the kid", fam.gangId, true, rng() < 0.5 ? "f" : "m");
         if (kid) { kid._fam = fam; kid._role = "kid"; fam.members.push(kid); }
+        if (kid && gang && gang.boss && !gang.boss.dead && CBZ.cityFamilyTree) {
+          CBZ.cityFamilyTree.bearChild(gang.boss, wife, kid);
+        }
       }
-      if (fam.members.length) families.push(fam);
+      if (fam.members.length) { families.push(fam); bridgeHousehold(fam); }
       if (gang && gi === 1) sideLot = sideLot || lots.find((l) => l !== lot && (l.building.home.tier || 0) >= 2);
       // the FIRST boss also keeps a mistress at a second address — the secret
       // the street can sell: she wears no colors herself, but he pays to keep
@@ -164,7 +222,7 @@
       if (gang && gi === 1 && sideLot) {
         const sby = backyardOf(sideLot), spool = lotPool.get(sideLot) || null;
         const her = famPed(sby.bx, sby.bz, SIDE[(rng() * SIDE.length) | 0],
-          "a friend of " + boss, fam.gangId, false);
+          "a friend of " + boss, fam.gangId, false, "f");
         if (her) {
           const sf = {
             gangId: fam.gangId, mine: false,
@@ -175,6 +233,7 @@
           };
           her._fam = sf; her._role = "mistress";
           families.push(sf);
+          bridgeHousehold(sf);
         }
       }
     }

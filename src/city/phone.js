@@ -6,6 +6,15 @@
      • WANTED   — stars, heat, crime label, body count, mask, heat-to-next-star
      • TERRITORY— per-gang district control, takeover leader, your share of 9
      • EMPIRE   — cash, bank, respect, home, car business notoriety
+     • MARKETS  — sim/market.js's 6 category prices + sim/econstate.js's CPI/
+                  activity/employment/treasury, each row with a tiny inline
+                  sparkline (E3 legibility: the invisible economy, on your phone);
+                  sibling cards 💱 CURRENCY EXCHANGE (M2), 🏦 CENTRAL BANKS
+                  (M3: policy rate/independence/governor per country),
+                  📉 INFLATION (M4: real π%/yr per country + sparkline,
+                  republic sorted first), and 🏛 SOVEREIGN BONDS (M5: active
+                  series by country — coupon, days to maturity, $ on offer —
+                  BUY at par, your holdings) all ride here too
      • CREW     — your founded gang: name, live members, turf held
      • VITALS   — HP, hunger, tiredness, injuries
 
@@ -24,6 +33,13 @@
   const GREEN = "#7ed957", GOLD = "#ffd451", RED = "#ff5b5b", CYAN = "#7fd0ff", DIM = "#8a93a3";
 
   let panel = null, body = null, open_ = false, lastRender = 0;
+  // E6: which stock ticker (if any) has its detail view expanded in the
+  // MARKETS app right now — null when every row is collapsed. A transient
+  // one-line status message (trade success/failure) rides alongside it.
+  let stockOpen = null, stockMsg = "";
+  // M5: a transient one-line status message for the SOVEREIGN BONDS card's
+  // BUY buttons — same idiom as stockMsg just above.
+  let bondMsg = "";
 
   // ---- small helpers --------------------------------------------------------
   function esc(s) {
@@ -149,6 +165,346 @@
       inner += row("Car yard", "Not running", DIM);
     }
     return card("🏙️ EMPIRE", inner);
+  }
+
+  // ---- MARKETS: the phone's window into the invisible economy (E3 legibility) -
+  //      sim/market.js's 6 category price levels + sim/econstate.js's CPI/
+  //      activity/employment/treasury, one glance instead of six systems. Each
+  //      row gets a tiny inline sparkline (last ≤48 hourly samples) drawn into
+  //      a small <canvas> AFTER body.innerHTML is set (a fresh string can't
+  //      carry live pixels) — see drawSparklines(), called from render().
+  //      DATA/RENDER SPLIT ON PURPOSE: CBZ.market.rows()/CBZ.econState.summary()
+  //      are the pure data layer (node-harness-testable); marketsHtml()/
+  //      drawSparklines() are DOM/canvas-only and can't be exercised headless.
+  function marketsHtml(rowsData, sum) {
+    let inner = "";
+    if (sum) {
+      inner += row("CPI", sum.priceIndex.toFixed(2), CYAN);
+      inner += row("Activity", sum.activity.toFixed(2), CYAN);
+      inner += row("Employment", pct(sum.employment * 100), sum.employment > 0.8 ? GREEN : (sum.employment < 0.5 ? RED : GOLD));
+      inner += row("Treasury", money(sum.treasury), GOLD);
+      inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+    }
+    rowsData.forEach(function (r) {
+      const col = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
+      inner += "<div style='display:flex;justify-content:space-between;align-items:center;padding:3px 0'>" +
+        "<span style='font-size:12px;color:" + DIM + "'>" + esc(r.label) + "</span>" +
+        "<span style='display:flex;align-items:center;gap:8px'>" +
+        "<span style='font-weight:600;font-size:13px;color:" + col + "'>&times;" + r.price.toFixed(2) + " " + arrow + "</span>" +
+        "<canvas id='mktSpark_" + esc(r.cat) + "' width='56' height='18' style='display:block'></canvas>" +
+        "</span></div>";
+    });
+    if (!rowsData.length) inner = "<div style='font-size:13px;color:" + DIM + "'>Market data unavailable.</div>";
+    // E7: the LBX national index (sim/stocks.js) — a Dow-divisor index over
+    // every listed company's price x sharesOutstanding, seeded to start at
+    // exactly 100. Absent until at least one company has ever listed.
+    const idx = (CBZ.stocks && typeof CBZ.stocks.indexQuote === "function") ? CBZ.stocks.indexQuote() : null;
+    if (idx) {
+      const idxCol = idx.trend === "up" ? GOLD : (idx.trend === "down" ? GREEN : DIM);
+      const idxArrow = idx.trend === "up" ? "▲" : (idx.trend === "down" ? "▼" : "–");
+      inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+      inner += row("LBX index", idx.value.toFixed(1) + " " + idxArrow, idxCol);
+    }
+    // E5 landed Bunbros alone (one read-only row); E6 made it tappable
+    // (sim/stocks.js lists it once outlets exist — detail view: price,
+    // sparkline, over/undervalued hint, BUY/SELL buttons, position + P&L).
+    // E7: the FULL 8-company roster (+ any player IPOs), one row each —
+    // summaryAll() replaces the single summary() read.
+    const roster = (CBZ.corps && typeof CBZ.corps.summaryAll === "function") ? CBZ.corps.summaryAll() : [];
+    if (roster.length) inner += "<div style='margin:6px 0;border-top:1px solid rgba(255,255,255,.06)'></div>";
+    roster.forEach(function (co) {
+      const coCol = co.cashTrend === "up" ? GOLD : (co.cashTrend === "down" ? GREEN : DIM);
+      const coArrow = co.cashTrend === "up" ? "▲" : (co.cashTrend === "down" ? "▼" : "–");
+      const tradable = !!(CBZ.stocks && typeof CBZ.stocks.quote === "function" && CBZ.stocks.quote(co.tickerSym));
+      inner += "<div" + (tradable ? " data-stock='" + esc(co.tickerSym) + "' style='cursor:pointer'" : "") + ">" +
+        row(co.tickerSym + " · " + co.name, money(co.dailyEarnings) + "/day " + coArrow, coCol) + "</div>";
+      if (tradable && stockOpen === co.tickerSym) inner += stockDetailHtml(co.tickerSym);
+    });
+    return card("📈 MARKETS", inner);
+  }
+  // ---- STOCK DETAIL — sim/stocks.js's data layer (quote()/position()) laid
+  // out the same card-with-rows way every other app here does. A tiny
+  // <canvas> sparkline (painted post-render by drawStockSpark(), same
+  // DOM/canvas-only split as drawSparklines() above) and five trade buttons.
+  function tradeBtn(sym, action, n, label) {
+    return "<div data-trade='" + esc(action) + "' data-sym='" + esc(sym) + "' data-n='" + n + "' " +
+      "style='background:rgba(126,217,87,.14);border:1px solid #4a8a3a;border-radius:8px;padding:6px 10px;" +
+      "font-size:12px;font-weight:700;color:#dff5d0;cursor:pointer'>" + esc(label) + "</div>";
+  }
+  function stockDetailHtml(sym) {
+    const Q = CBZ.stocks.quote(sym);
+    if (!Q) return "";
+    const pos = (typeof CBZ.stocks.position === "function") ? CBZ.stocks.position(sym) : null;
+    const hint = Q.valuation === "over" ? "Overvalued vs. fundamentals" :
+      (Q.valuation === "under" ? "Undervalued vs. fundamentals" : "Fairly valued vs. fundamentals");
+    const hintCol = Q.valuation === "over" ? RED : (Q.valuation === "under" ? GREEN : DIM);
+    let inner = "<div style='margin:8px 0 4px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)'>";
+    inner += row("Price", "$" + Q.price.toFixed(2), CYAN);
+    inner += row("Fair value (anchor)", "$" + Q.anchor.toFixed(2), DIM);
+    inner += "<div style='font-size:11px;color:" + hintCol + ";margin:2px 0 6px'>" + esc(hint) + "</div>";
+    // E8: the founder line — sim/billionaires.js mints a persistent
+    // shareholder NPC per company (co.founderSid); "estate-held" once one
+    // has been assassinated without an heir (co.founderSid goes null).
+    const foundCo = (CBZ.corps && typeof CBZ.corps.list === "function") ? CBZ.corps.list().find(function (c) { return c.tickerSym === sym; }) : null;
+    if (foundCo && foundCo.founderSid && CBZ.billionaires && typeof CBZ.billionaires.netWorthOf === "function") {
+      const fLive = CBZ.cityLedgerLive && CBZ.cityLedgerLive(foundCo.founderSid);
+      const fEntry = !fLive && CBZ.cityLedgerEntry ? CBZ.cityLedgerEntry(foundCo.founderSid) : null;
+      const fName = (fLive && fLive.name) || (fEntry && fEntry.name) || "Unknown";
+      inner += row("Founder", fName + " · " + money(CBZ.billionaires.netWorthOf(foundCo.founderSid)), GOLD);
+    } else if (foundCo && !foundCo.founderSid) {
+      inner += row("Founder", "None (estate-held)", DIM);
+    }
+    inner += "<canvas id='stockSpark_" + esc(sym) + "' width='260' height='40' style='display:block;margin-bottom:8px'></canvas>";
+    if (pos && pos.qty > 0) {
+      inner += row("Position", pos.qty + " sh @ avg $" + pos.avgCost.toFixed(2));
+      inner += row("Value", money(pos.value), CYAN);
+      const pnlCol = pos.pnl >= 0 ? GREEN : RED;
+      inner += row("P&L", (pos.pnl >= 0 ? "+" : "") + money(pos.pnl) + " (" + (pos.pnlPct * 100).toFixed(1) + "%)", pnlCol);
+    } else {
+      inner += "<div style='font-size:11px;color:" + DIM + ";margin:4px 0'>No position.</div>";
+    }
+    if (stockMsg) inner += "<div style='font-size:11px;color:" + GOLD + ";margin:4px 0'>" + esc(stockMsg) + "</div>";
+    inner += "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px'>";
+    inner += tradeBtn(sym, "buy", 10, "BUY 10");
+    inner += tradeBtn(sym, "buy", 100, "BUY 100");
+    inner += tradeBtn(sym, "sell", 10, "SELL 10");
+    inner += tradeBtn(sym, "sell", 100, "SELL 100");
+    inner += tradeBtn(sym, "sellall", 0, "SELL ALL");
+    inner += "</div></div>";
+    return inner;
+  }
+  function drawStockSpark(sym) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    const cv = document.getElementById("stockSpark_" + sym);
+    if (!cv || typeof cv.getContext !== "function") return;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const Q = CBZ.stocks.quote(sym);
+    const w = cv.width || 260, h = cv.height || 40;
+    if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+    const hist = Q && Q.history;
+    if (!hist || hist.length < 2) return;
+    const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+    const span = (hi - lo) || 0.01;
+    ctx.strokeStyle = Q.trend === "up" ? GOLD : (Q.trend === "down" ? GREEN : DIM);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    hist.forEach(function (v, i) {
+      const x = (i / (hist.length - 1)) * w;
+      const y = h - ((v - lo) / span) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  // paints each category's sparkline canvas from its history ring. Silently a
+  // no-op outside a real DOM (no document / no live canvas context) — the node
+  // e3 harness only exercises the data layer this feeds (rows()/history()).
+  function drawSparklines(rowsData) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    rowsData.forEach(function (r) {
+      const cv = document.getElementById("mktSpark_" + r.cat);
+      if (!cv || typeof cv.getContext !== "function") return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const w = cv.width || 56, h = cv.height || 18;
+      if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+      const hist = r.hist;
+      if (!hist || hist.length < 2) return;
+      const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+      const span = (hi - lo) || 0.01;
+      ctx.strokeStyle = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach(function (v, i) {
+        const x = (i / (hist.length - 1)) * w;
+        const y = h - ((v - lo) / span) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
+  // ---- M2: CURRENCY EXCHANGE — read-only (trading is a real-venue verb, at
+  //      the airport FX counter / exchange desk — sim/forex.js) window onto
+  //      the 4 foreign currencies' live LBD rate, same row+sparkline idiom
+  //      as marketsHtml()/drawSparklines() above, reusing that exact shape.
+  function fmtFxRate(r) { return r >= 1 ? r.toFixed(2) : r.toFixed(4); }
+  function fxHtml(rowsData) {
+    if (!rowsData || !rowsData.length) {
+      return card("💱 CURRENCY EXCHANGE", "<div style='font-size:13px;color:" + DIM + "'>No exchange data available.</div>");
+    }
+    let inner = "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Quoted vs the Liberty Dollar — trade at an airport FX counter or the exchange desk.</div>";
+    rowsData.forEach(function (r) {
+      const col = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
+      const perDollar = r.rate > 0 ? 1 / r.rate : 0;
+      inner += "<div style='padding:3px 0'>" +
+        "<div style='display:flex;justify-content:space-between;align-items:center'>" +
+        "<span style='font-size:12px;color:" + DIM + "'>" + esc(r.id) + "</span>" +
+        "<span style='display:flex;align-items:center;gap:8px'>" +
+        "<span style='font-weight:600;font-size:13px;color:" + col + "'>1 " + esc(r.id) + " = $" + fmtFxRate(r.rate) + " " + arrow + "</span>" +
+        "<canvas id='fxSpark_" + esc(r.id) + "' width='56' height='18' style='display:block'></canvas>" +
+        "</span></div>" +
+        "<div style='font-size:10px;color:" + DIM + ";text-align:right'>$1 &asymp; " +
+        perDollar.toFixed(perDollar >= 100 ? 0 : (perDollar >= 1 ? 2 : 4)) + " " + esc(r.id) + "</div>" +
+        "</div>";
+    });
+    return card("💱 CURRENCY EXCHANGE", inner);
+  }
+  // paints each currency's sparkline canvas from its history ring — same
+  // DOM/canvas-only split as drawSparklines()/drawStockSpark() above (a
+  // no-op outside a real DOM; the node harness only exercises CBZ.forex's
+  // own data layer this feeds).
+  function drawFxSparklines(rowsData) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    (rowsData || []).forEach(function (r) {
+      const cv = document.getElementById("fxSpark_" + r.id);
+      if (!cv || typeof cv.getContext !== "function") return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const w = cv.width || 56, h = cv.height || 18;
+      if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+      const hist = r.history;
+      if (!hist || hist.length < 2) return;
+      const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+      const span = (hi - lo) || 0.01;
+      ctx.strokeStyle = r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach(function (v, i) {
+        const x = (i / (hist.length - 1)) * w;
+        const y = h - ((v - lo) / span) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
+  // ---- M3: CENTRAL BANKS — read-only, one row per country: policy rate,
+  //      independence badge, governor, and a captured/suspended flag.
+  //      Reuses the exact row idiom every other card here uses; lives on
+  //      the phone (not city/bank.js's own branch UI) because that branch
+  //      is ONE physical building serving only the republic, while the
+  //      phone already aggregates every country in one glanceable list —
+  //      the same reasoning M2's own "💱 CURRENCY EXCHANGE" card documents
+  //      for why IT lives here instead of only at the FX kiosks.
+  function cbHtml(rowsData) {
+    if (!rowsData || !rowsData.length) {
+      return card("🏦 CENTRAL BANKS", "<div style='font-size:13px;color:" + DIM + "'>No central bank data available.</div>");
+    }
+    let inner = "";
+    rowsData.forEach(function (r) {
+      const flag = r.suspended ? " <span style='color:" + RED + "'>🔒 SUSPENDED</span>"
+        : r.decreed ? " <span style='color:" + GOLD + "'>⚡ DECREED</span>" : "";
+      const indColor = r.independence >= 0.6 ? GREEN : (r.independence >= 0.35 ? GOLD : RED);
+      const label = esc(r.name) + (r.governorName ? " · " + esc(r.governorName) : "");
+      inner += row(label, (r.policyRate * 100).toFixed(2) + "%" + flag) +
+        "<div style='font-size:10px;color:" + DIM + ";text-align:right;margin:-2px 0 4px'>" +
+        "independence <span style='color:" + indColor + "'>" + Math.round(r.independence * 100) + "%</span></div>";
+    });
+    return card("🏦 CENTRAL BANKS", inner);
+  }
+
+  // ---- M4: INFLATION — read-only, one row per country: π%/yr + a trailing
+  //      sparkline, same row+sparkline idiom marketsHtml()/fxHtml()/cbHtml()
+  //      above all use. The republic's own row sorts first (task brief:
+  //      "Republic's CPI prominent") — every other country follows in
+  //      sim/inflation.js's own list() order.
+  function inflHtml(rowsData) {
+    if (!rowsData || !rowsData.length) {
+      return card("📉 INFLATION", "<div style='font-size:13px;color:" + DIM + "'>No inflation data available.</div>");
+    }
+    const sorted = rowsData.slice().sort(function (a, b) {
+      if (a.id === "republic") return -1;
+      if (b.id === "republic") return 1;
+      return 0;
+    });
+    let inner = "";
+    sorted.forEach(function (r) {
+      const hot = r.pi > 0.05;
+      const col = hot ? RED : (r.trend === "up" ? GOLD : (r.trend === "down" ? GREEN : DIM));
+      const arrow = r.trend === "up" ? "▲" : (r.trend === "down" ? "▼" : "–");
+      inner += "<div style='display:flex;justify-content:space-between;align-items:center;padding:3px 0'>" +
+        "<span style='font-size:12px;color:" + DIM + "'>" + esc(r.name || r.id) + "</span>" +
+        "<span style='display:flex;align-items:center;gap:8px'>" +
+        "<span style='font-weight:600;font-size:13px;color:" + col + "'>" + (r.pi >= 0 ? "+" : "") + (r.pi * 100).toFixed(1) + "%/yr " + arrow + "</span>" +
+        "<canvas id='inflSpark_" + esc(r.id) + "' width='56' height='18' style='display:block'></canvas>" +
+        "</span></div>";
+    });
+    return card("📉 INFLATION", inner);
+  }
+  // paints each country's π sparkline canvas — same DOM/canvas-only split as
+  // drawSparklines()/drawFxSparklines() above (a no-op outside a real DOM).
+  function drawInflSparklines(rowsData) {
+    if (typeof document === "undefined" || !document.getElementById) return;
+    (rowsData || []).forEach(function (r) {
+      const cv = document.getElementById("inflSpark_" + r.id);
+      if (!cv || typeof cv.getContext !== "function") return;
+      const ctx = cv.getContext("2d");
+      if (!ctx) return;
+      const w = cv.width || 56, h = cv.height || 18;
+      if (ctx.clearRect) ctx.clearRect(0, 0, w, h);
+      const hist = (CBZ.inflation && typeof CBZ.inflation.history === "function") ? CBZ.inflation.history(r.id) : [];
+      if (!hist || hist.length < 2) return;
+      const lo = Math.min.apply(null, hist), hi = Math.max.apply(null, hist);
+      const span = (hi - lo) || 0.0001;
+      ctx.strokeStyle = r.trend === "up" ? RED : (r.trend === "down" ? GREEN : DIM);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      hist.forEach(function (v, i) {
+        const x = (i / (hist.length - 1)) * w;
+        const y = h - ((v - lo) / span) * h;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
+  // ---- M5: SOVEREIGN BONDS — the exchange UI's bond seam, right beside the
+  //      MARKETS app's own stock trading (same "read-only rows + trade
+  //      buttons" idiom E6/M2/M3/M4 already established on this phone): one
+  //      row per ACTIVE series (country, coupon, days to maturity, $ still
+  //      on offer this series) with BUY $1k/$10k buttons wired to
+  //      CBZ.bonds.buy() (buys at par — the exact price every series
+  //      auctions at), plus a compact "your holdings" summary. Coupon/
+  //      maturity/default payouts already surface as ordinary cityFeed lines
+  //      (sim/bonds.js's own feed calls) — no separate notification system
+  //      needed here.
+  function bondBtn(seriesId, amount, label) {
+    return "<div data-bond='" + esc(seriesId) + "' data-bondamt='" + amount + "' " +
+      "style='background:rgba(255,215,118,.14);border:1px solid #a0812f;border-radius:8px;padding:5px 9px;" +
+      "font-size:11px;font-weight:700;color:#ffe9b8;cursor:pointer;display:inline-block;margin-right:6px'>" + esc(label) + "</div>";
+  }
+  function bondsHtml(rowsData, holdings) {
+    if (!rowsData || !rowsData.length) {
+      let inner = "<div style='font-size:13px;color:" + DIM + "'>No sovereign bonds on offer right now — auctions open when a country's treasury runs a deficit.</div>";
+      return card("🏛 SOVEREIGN BONDS", inner);
+    }
+    let inner = "";
+    rowsData.forEach(function (r) {
+      inner += "<div style='padding:4px 0;border-top:1px solid rgba(255,255,255,.05)'>";
+      inner += row(esc(r.countryName), (r.coupon * 100).toFixed(1) + "% · " + r.daysToMaturity + "d", GOLD);
+      inner += "<div style='font-size:10px;color:" + DIM + ";margin:1px 0 4px'>" +
+        money(r.available) + " available at par" + (r.playerHolding > 0 ? " · you hold " + money(r.playerHolding) : "") + "</div>";
+      if (r.available >= 1000) {
+        inner += bondBtn(r.id, 1000, "BUY $1k");
+        if (r.available >= 10000) inner += bondBtn(r.id, 10000, "BUY $10k");
+      } else if (r.available >= 1) {
+        inner += bondBtn(r.id, Math.floor(r.available), "BUY REST");
+      }
+      inner += "</div>";
+    });
+    if (holdings && holdings.length) {
+      inner += "<div style='margin:8px 0 4px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px;font-size:11px;color:" + DIM + "'>Your holdings</div>";
+      holdings.forEach(function (h) {
+        const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(h.countryId) : null;
+        const label = (rec ? rec.name : h.countryId) + (h.status !== "active" ? " (" + h.status + ")" : "");
+        inner += row(label, money(h.amount) + " @ " + (h.coupon * 100).toFixed(1) + "%", h.status === "active" ? GREEN : DIM);
+      });
+    }
+    if (bondMsg) inner += "<div style='font-size:11px;color:" + GOLD + ";margin-top:4px'>" + esc(bondMsg) + "</div>";
+    return card("🏛 SOVEREIGN BONDS", inner);
   }
 
   function crewApp() {
@@ -343,14 +699,44 @@
   function render() {
     if (!body) return;
     let html = "";
+    let marketRows = [];
+    let fxRows = [];
     try { html += servicesApp(); } catch (e) {}
     try { html += wantedApp(); } catch (e) {}
     try { html += territoryApp(); } catch (e) {}
     try { html += empireApp(); } catch (e) {}
+    try {
+      marketRows = (CBZ.market && typeof CBZ.market.rows === "function") ? CBZ.market.rows() : [];
+      const sum = (CBZ.econState && typeof CBZ.econState.summary === "function") ? CBZ.econState.summary() : null;
+      html += marketsHtml(marketRows, sum);
+    } catch (e) {}
+    try {
+      fxRows = (CBZ.forex && typeof CBZ.forex.list === "function") ? CBZ.forex.list() : [];
+      html += fxHtml(fxRows);
+    } catch (e) {}
+    try {
+      const cbRows = (CBZ.centralbank && typeof CBZ.centralbank.list === "function") ? CBZ.centralbank.list() : [];
+      html += cbHtml(cbRows);
+    } catch (e) {}
+    let inflRows = [];
+    try {
+      inflRows = (CBZ.inflation && typeof CBZ.inflation.list === "function") ? CBZ.inflation.list() : [];
+      html += inflHtml(inflRows);
+    } catch (e) {}
+    try {
+      const bondRows = (CBZ.bonds && typeof CBZ.bonds.list === "function") ? CBZ.bonds.list() : [];
+      const bondHoldings = (CBZ.bonds && typeof CBZ.bonds.myHoldings === "function") ? CBZ.bonds.myHoldings() : [];
+      html += bondsHtml(bondRows, bondHoldings);
+    } catch (e) {}
     try { html += gigApp(); } catch (e) {}
     try { html += crewApp(); } catch (e) {}
     try { html += vitalsApp(); } catch (e) {}
     body.innerHTML = html;
+    // sparkline canvases only exist now that innerHTML landed — paint them.
+    try { drawSparklines(marketRows); } catch (e) {}
+    try { drawFxSparklines(fxRows); } catch (e) {}
+    try { drawInflSparklines(inflRows); } catch (e) {}
+    try { if (stockOpen) drawStockSpark(stockOpen); } catch (e) {}
   }
 
   // ---- DOM ------------------------------------------------------------------
@@ -420,6 +806,55 @@
             gigOffers = [];
           }
         } catch (err) { gigOffers = []; }
+        render();
+        return;
+      }
+      // ---- E6: STOCKS clicks — tap the BUN row to expand/collapse the
+      // detail view; tap a BUY/SELL button to trade through sim/stocks.js.
+      const sk = e.target && e.target.closest ? e.target.closest("[data-stock]") : null;
+      if (sk) {
+        const sym = sk.getAttribute("data-stock");
+        stockOpen = (stockOpen === sym) ? null : sym;
+        stockMsg = "";
+        render();
+        return;
+      }
+      const tr = e.target && e.target.closest ? e.target.closest("[data-trade]") : null;
+      if (tr) {
+        const sym = tr.getAttribute("data-sym");
+        const action = tr.getAttribute("data-trade");
+        const n = parseInt(tr.getAttribute("data-n"), 10) || 0;
+        stockMsg = "";
+        if (CBZ.stocks) {
+          try {
+            let res = null;
+            if (action === "buy") res = CBZ.stocks.buy(sym, n);
+            else if (action === "sell") res = CBZ.stocks.sell(sym, n);
+            else if (action === "sellall" && typeof CBZ.stocks.sellAll === "function") res = CBZ.stocks.sellAll(sym);
+            if (res && res.ok === false) {
+              stockMsg = res.reason === "cash" ? "Not enough cash." :
+                (res.reason === "shares-owned" ? "You only own " + (res.have || 0) + " shares." : "Trade failed.");
+            }
+          } catch (err) { stockMsg = "Trade failed."; }
+        }
+        render();
+        return;
+      }
+      // ---- M5: SOVEREIGN BONDS clicks — BUY at par through sim/bonds.js. ----
+      const bd = e.target && e.target.closest ? e.target.closest("[data-bond]") : null;
+      if (bd) {
+        const seriesId = bd.getAttribute("data-bond");
+        const amt = parseInt(bd.getAttribute("data-bondamt"), 10) || 0;
+        bondMsg = "";
+        if (CBZ.bonds && typeof CBZ.bonds.buy === "function") {
+          try {
+            const res = CBZ.bonds.buy(seriesId, amt);
+            if (res && res.ok === false) {
+              bondMsg = res.reason === "cash" ? "Not enough cash." :
+                (res.reason === "unavailable" ? "That series is no longer on offer." : "Purchase failed.");
+            }
+          } catch (err) { bondMsg = "Purchase failed."; }
+        }
         render();
         return;
       }

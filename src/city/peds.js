@@ -142,8 +142,32 @@
     _popDead = Math.min(_popTotal, _popDead + (n || 1));
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();   // headcount changed → refresh the HUD
   };
+  // W11 — BIRTHS: the one and only way `dead` ever goes back DOWN. This is
+  // NOT population growth — total never moves. A birth just PROMOTES a body
+  // that was already inside the finite headcount (the "few hundred unseen
+  // slack" from _ensurePop's +200, or literally a death's own vacated slot)
+  // into a named, living child, and spends exactly one unit of the headroom
+  // a death created to pay for it. births.js is the sole caller: it already
+  // refuses to attempt a birth unless CBZ.cityPopulation().dead > 0 (see its
+  // header for the full "Path A vs Path B" reasoning), so in practice this
+  // only ever consumes headroom that was checked a moment earlier in the same
+  // synchronous tick — but it re-clamps at 0 here too, defensively, so no
+  // caller can ever push `dead` negative (which would let alive > total).
+  // Returns how many births this call actually funded (0 or `n`, never a
+  // partial credit) so the caller can detect the (should-never-happen) case
+  // where headroom evaporated between its own check and this call.
+  CBZ.cityPopulationBirth = function (n) {
+    _ensurePop();
+    const want = n || 1;
+    const take = Math.min(_popDead, want);
+    if (take <= 0) return 0;
+    _popDead -= take;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();   // headcount changed → refresh the HUD
+    return take;
+  };
   // {alive,total,dead} — the live battle-royale-style headcount for the HUD /
-  // kill feed. alive NEVER rises on its own; it only falls as deaths accrue.
+  // kill feed. alive only ever moves via cityPopulationDie/cityPopulationBirth
+  // above (never both up AND down without a matching cause — see W11 note).
   CBZ.cityPopulation = function () {
     _ensurePop();
     return { alive: Math.max(0, _popTotal - _popDead), total: _popTotal, dead: _popDead };
@@ -163,13 +187,43 @@
   // tourists stay LOUD on purpose (downtown's walking wallets read at a
   // glance) — matched to crowd.js's bright pool so promotion doesn't shift hue
   const BRIGHTS = [0xe2574c, 0x4fa3e0, 0xe8c84a, 0xd96bb0, 0xe8e4da];
-  const FIRST = ["Marcus", "Tanya", "Vince", "Lola", "Dee", "Rosa", "Cam", "Jax", "Trey", "Mona", "Otis", "Bree", "Sal", "Kira", "Boon", "Nia", "Rex", "Gita", "Hank", "Suze", "Marlo", "Pim", "Dro", "Esi", "Ray", "Val", "Cyd", "Nyla"];
-  const LAST = "ABCDEFGHJKLMNPRSTVW";
+  // WOMEN EXIST: the name pool splits by gender so a female ped draws a
+  // female first name (see makePed's `gender` roll below). FIRST_F carries
+  // the original female half PLUS ~15 new names in the same short-punchy
+  // style; FIRST_M is the original male half, untouched. FIRST stays a
+  // combined pool (kept for backward compat / the gender-less name(r) call).
+  const FIRST_M = ["Marcus", "Vince", "Cam", "Jax", "Trey", "Otis", "Sal", "Boon", "Rex", "Hank", "Marlo", "Pim", "Dro", "Ray"];
+  const FIRST_F = ["Tanya", "Lola", "Dee", "Mona", "Rosa", "Bree", "Kira", "Nia", "Gita", "Suze", "Esi", "Val", "Cyd", "Nyla",
+    "Nadia", "Trish", "Simone", "Coco", "Reyna", "Zola", "Ivy", "Wren", "Mabel", "Fawn", "Solange", "Priya", "Yara", "Tess", "Bianca"];
+  const FIRST = FIRST_M.concat(FIRST_F);
+  // W12: real surnames — replaces the old single random LAST initial ("First
+  // X."). Audited before widening: city/props.js:24's makeLabelSprite
+  // auto-shrinks the font to fit whatever text width it's given (no
+  // truncation), and city/level.js overwrites a ped's tag wholesale with
+  // "Lv.N Title" rather than ever reading ped.name — so nothing in the
+  // codebase depends on the short single-letter form. Mixed origins to match
+  // FIRST_M/FIRST_F's own tone.
+  const SURNAMES = [
+    "Reyes", "Okafor", "Volkov", "Nakamura", "Marino", "Delgado", "Kowalski", "Haddad",
+    "Silva", "Petrov", "Nguyen", "Brennan", "Castillo", "Yamamoto", "Adeyemi", "Novak",
+    "Torres", "Hassan", "Larsen", "Moreau", "Kim", "Abara", "Rossi", "Fitzgerald",
+    "Kaur", "Mensah", "Ibarra", "Chen", "Duarte", "Bianchi", "Salazar", "Okonkwo",
+    "Whitfield", "Suzuki", "Park", "Alvi", "Dimitriou", "Wozniak", "Fontaine", "Osei",
+  ];
   function pick(a, r) { return a[(r * a.length) | 0]; }
 
   let _s = 555;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
-  function name(r) { return pick(FIRST, r()) + " " + LAST[(r() * LAST.length) | 0] + "."; }
+  // gender-aware: pass the ped's rolled gender ("f"/"m") to draw from the
+  // matching pool; omit it (existing callers, if any) to keep the old
+  // combined-pool behavior byte-identical. W12: mints "First Last" off the
+  // real SURNAMES pool; exported below as CBZ.cityMintName so births.js can
+  // mint a gendered first name and then graft on a parent's surname (the
+  // dynasty rule) instead of a fresh random one.
+  function name(r, gender) {
+    const pool = gender === "f" ? FIRST_F : gender === "m" ? FIRST_M : FIRST;
+    return pick(pool, r()) + " " + pick(SURNAMES, r());
+  }
 
   // Scream audio is intentionally disabled. Panic/fear behavior still runs, but
   // the human scream sample was too intrusive during city chaos.
@@ -294,11 +348,39 @@
     "retail worker", "delivery driver",
   ];
 
+  // DEFINITIONALLY-FEMALE archetypes — the wife/socialite identities family.js
+  // and social.js spawn for a boss/tycoon's household (mirrors ARCH_DRIP's
+  // wife-tier keys further down this file). A ped cast as one of these is
+  // always a woman; every other archetype splits ~48/52 (see makePed's gender
+  // roll below).
+  const FEMALE_ARCH = {
+    socialite: 1, mobwife: 1, "mob-wife": 1, bosswife: 1, kingpinwife: 1,
+    tycoonwife: 1, heiress: 1, richwoman: 1, "rich woman": 1,
+  };
+
   function makePed(x, z, r, opts) {
     opts = opts || {};
     const ag = A0();
-    const outfit = opts.outfit || pick(SHIRT, r());
-    const skin = pick(SKIN, r());
+    // GENDER: who this ped IS — drives makeCharacter's build/hair below, the
+    // name pool, and (via cityOutfitFor's sex flag, further down) the
+    // nightlife dress branch. Forced female for the wife/socialite archetypes
+    // above; everyone else draws off the SAME deterministic stream (r) every
+    // other appearance roll here uses — never Math.random.
+    const gender = opts.gender || (FEMALE_ARCH[opts.archetype] ? "f" : (r() < 0.48 ? "f" : "m"));
+    // X4 DEMOGRAPHICS: the spawn region's population config (skin-tone dist,
+    // name pools, dress palette — city/demographics.js; wealth-independent,
+    // see that file's header) for skin/name/dress. Guarded + falls back to
+    // the global pools above when absent (mainland today) or its mix roll
+    // defers to global.
+    const demo = (CBZ.demographics && CBZ.demographics.rollFor) ? CBZ.demographics.rollFor(x, z, r, gender) : null;
+    const outfit = opts.outfit || (demo && demo.shirt != null ? demo.shirt : pick(SHIRT, r()));
+    // P9 MIGRATION: opts.skin is a direct override — a migrant arrival minted
+    // at the republic's docks/airport (x,z here) still resolves the MAINLAND's
+    // own demo (mix:1.0 -> null, see demographics.js), so migration.js instead
+    // rolls the ORIGIN country's config off-site (its own capital coordinates)
+    // and passes the result straight through here, the same "opts wins" shape
+    // opts.outfit/opts.gender/opts.name already use one line above/below.
+    const skin = opts.skin != null ? opts.skin : ((demo && demo.skin != null) ? demo.skin : pick(SKIN, r()));
     const wealth = opts.wealth != null ? opts.wealth : richWealth(r);
     const econ = CBZ.cityEcon;
     // ~45% of plain civvies wear the tee SHORT-SLEEVED. A bare-skin WHOLE arm
@@ -314,14 +396,21 @@
     const capCol = /construction/i.test(opts.job || "") ? 0xe8c020
       : /sheriff|deputy/i.test(opts.job || "") ? 0x8a7752
         : /soldier/i.test(opts.job || "") ? 0x44503a : null;
+    // stashed on the ped below (_longHair) so schedule.js's ledger can persist
+    // this roll — otherwise a woman who despawns and re-deals comes back bald.
+    const longHair = gender === "f" && r() < 0.6;
     // SHORT SLEEVE: the two-segment rig has a real forearm mesh now —
     // makeCharacter paints it skin-colored when shortSleeve is set, which
     // reads as a tee ending mid-bicep and bends correctly at the elbow
     // (the old bolt-on forearm box detached the moment the elbow bent).
-    const ch = makeCharacter({ legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()), shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, shortSleeve: shortSleeve });
+    const ch = makeCharacter({
+      legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: pick(HAIR, r()),
+      shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, shortSleeve: shortSleeve,
+      build: gender === "f" ? "f" : "m", longHair,
+    });
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
-    const nm = opts.name || name(r);
+    const nm = opts.name || (demo && demo.name) || name(r, gender);
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
     if (tag) { tag.position.y = 3.0; tag.scale.set(3, 0.75, 1); tag.visible = false; ch.group.add(tag); }
     let aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
@@ -374,7 +463,7 @@
     const _plain = !CBZ.CONFIG || CBZ.CONFIG.CITY_PLAIN_CIVVIES == null || !!CBZ.CONFIG.CITY_PLAIN_CIVVIES;
     let _castFit = null;
     if (!opts.outfit && CBZ.cityOutfitFor && CBZ.cityRecolorRig) {
-      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0 });
+      const fit = CBZ.cityOutfitFor({ archetype, job: opts.job, gang: opts.gang, vendor: opts.vendor, rng: r, seed: (skin ^ outfit) | 0, sex: gender });
       if (fit && fit.colors) {
         CBZ.cityRecolorRig(ch, fit.colors, fit);
         _castFit = fit.id;                          // stamped on the ped below (redress revert read)
@@ -387,8 +476,16 @@
     }
     // cash: econ.rollCashFor(archetype, wealth, r) when present, else a who-aware
     // fallback (boss/tycoon fat, dealer big, ordinary modest). Guarded per contract.
-    const cash = opts.cash != null ? opts.cash
+    let cash = opts.cash != null ? opts.cash
       : (econ && econ.rollCashFor ? econ.rollCashFor(archetype, mWealth, r) : fallbackCashFor(archetype, mWealth, r));
+    // E4 CIRCULATION (sim/npcecon.js): an ordinary resident's spawn cash is
+    // drawn from their district cohort's wallet mean instead of pure RNG —
+    // this closes the robbery money-printer (strip-mine a district and its
+    // FUTURE spawns carry less, not just its current pedestrians).
+    if (opts.cash == null && archetype === "resident" && CBZ.npcEcon && CBZ.npcEcon.drawCash && econ && econ.districtAt) {
+      const drawn = CBZ.npcEcon.drawCash(econ.districtAt(x, z), mWealth, r);
+      if (drawn != null) cash = drawn;
+    }
     // valuables: array of item NAMES this ped carries (watch/ring/chain/etc). Most
     // people none/Phone; the whales carry a luxury jackpot. Guarded per contract.
     const valuables = opts.valuables != null ? opts.valuables
@@ -447,7 +544,8 @@
           : mr < 0.997 ? "colonel" : "general";
     }
     const ped = {
-      char: ch, group: ch.group, pos: ch.group.position, name: nm,
+      char: ch, group: ch.group, pos: ch.group.position, name: nm, gender,
+      _longHair: longHair, // W5: persisted by schedule.js's ledger (deal-in restores it)
       tag, outfit, skin, kind: opts.kind || "civilian", milRank,
       aggr, wealth: mWealth, valuables, bounty, bountyTag,
       archetype: rareArch || traits.archetype || opts.archetype || "resident",
@@ -515,6 +613,8 @@
     return ped;
   }
   CBZ.cityMakePed = makePed;        // used by gangs.js / social.js
+  CBZ.cityMintName = name;          // W12: exposed so births.js can mint a gendered
+                                     // first name, then swap in a parent's surname.
 
   // ---- NPC DRIP: an NPC's visible STATUS, read by club.js's bouncer ---------
   // The velvet rope only works if MOST people fail it. cityPedDrip(ped) scores a
@@ -912,6 +1012,15 @@
     const A = CBZ.buildCity();
     _s = 555 + n;
     if (CBZ.cityEcon && CBZ.cityEcon.initMarket) CBZ.cityEcon.initMarket();
+    if (CBZ.market && CBZ.market.reset) CBZ.market.reset();   // E1: fresh city → levels back to 1.0
+    if (CBZ.econState && CBZ.econState.reset) CBZ.econState.reset();   // E2: fresh city → EconState back to equilibrium
+    if (CBZ.npcEcon && CBZ.npcEcon.reset) CBZ.npcEcon.reset();   // E4: fresh city → cohort wallets re-seeded off the fresh population
+    if (CBZ.hunger && CBZ.hunger.reset) CBZ.hunger.reset();   // X2: fresh city → cohort hungerAvg back to its seeded baseline
+    if (CBZ.corps && CBZ.corps.reset) CBZ.corps.reset();   // E5: fresh city → the roster resets (re-claims outlets on the next build tick)
+    if (CBZ.stocks && CBZ.stocks.reset) CBZ.stocks.reset();   // E7: fresh city → exchange/portfolio/index reset (no stale prior-run IPO tickers)
+    if (CBZ.forex && CBZ.forex.reset) CBZ.forex.reset();   // M2: fresh city → FX rates back to their wealth-implied par values
+    if (CBZ.billionaires && CBZ.billionaires.reset) CBZ.billionaires.reset();   // E8: fresh city → founders/holdings re-mint on the next tick
+    if (CBZ.motorsport && CBZ.motorsport.reset) CBZ.motorsport.reset();   // E10: fresh city → teams/drivers re-mint on the next tick
     CBZ.cityDrops.length = 0;
     // the homeless are carved out of the ped budget so the TOTAL stays flat
     // (perf: redistribute, never add). Deterministic from the seeded stream.
@@ -1155,15 +1264,19 @@
       // HOME-BOND release (H2): a recycled/wiped body must let go of its leased
       // unit so the next city's tenants aren't blocked. Prefer the housing.js
       // contract; else clear the occupancy fields aigoals/housing stamp directly
-      // (unit.occupant + the home._tenants tally). All optional-chained — no-op
-      // when no housing layer is loaded.
+      // (unit.occupants[] + the home._tenants tally — W8: an array now, since a
+      // unit can hold a whole household, not just one ped). All optional-chained
+      // — no-op when no housing layer is loaded.
       if (CBZ.cityHomeRelease) { try { CBZ.cityHomeRelease(p); } catch (e) {} }
       else {
-        if (p._unit && p._unit.occupant === p) p._unit.occupant = null;
+        if (p._unit && p._unit.occupants) {
+          const oi = p._unit.occupants.indexOf(p);
+          if (oi >= 0) p._unit.occupants.splice(oi, 1);
+        }
         const hm = p._digs && p._digs.building && p._digs.building.home;
         if (hm && hm._tenants) hm._tenants = Math.max(0, hm._tenants - 1);
       }
-      p._unit = null; p._digs = null; p._home = null;
+      p._unit = null; p._digs = null; p._home = null; p._household = null;
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
       if (p.group) p.group.traverse(function (o) {
         if (o.isSprite) return;     // sprites share an r128 geometry singleton — never dispose
@@ -1306,6 +1419,13 @@
     const econ = CBZ.cityEcon;
     let got = ped.cash; ped.cash = 0;
     if (got > 0 && CBZ.city) CBZ.city.addCash(got);
+    // E4 CIRCULATION: the cash that just left this ped's pocket also leaves
+    // their district+class cohort's aggregate wallet (sim/npcecon.js) — rob
+    // enough of a district and its cohort spending (and the market it drives)
+    // visibly sags. Guarded no-op if npcecon.js/districtAt aren't loaded.
+    if (got > 0 && CBZ.npcEcon && CBZ.npcEcon.debit && econ && econ.districtAt && ped.pos) {
+      CBZ.npcEcon.debit(econ.districtAt(ped.pos.x, ped.pos.z), CBZ.npcEcon.classFor(ped.wealth), got);
+    }
     let item = "";
     if (ped.loot && econ) { econ.add(ped.loot, 1); item = ped.loot; ped.loot = null; }
     ped.robbed = true; ped.alarmed = 8; ped.fear = 10;
@@ -1522,6 +1642,11 @@
     const dl = ped.deadLoot; dl.looted = true;
     const econ = CBZ.cityEcon;
     if (dl.cash > 0 && CBZ.city) CBZ.city.addCash(dl.cash);
+    // E4 CIRCULATION: same debit as a live robbery (see cityRobPed) — a
+    // looted corpse's cash leaves its district+class cohort wallet too.
+    if (dl.cash > 0 && CBZ.npcEcon && CBZ.npcEcon.debit && econ && econ.districtAt && ped.pos) {
+      CBZ.npcEcon.debit(econ.districtAt(ped.pos.x, ped.pos.z), CBZ.npcEcon.classFor(ped.wealth), dl.cash);
+    }
     const got = [];
     for (const it of dl.items) { if (it && econ) { econ.add(it, 1); got.push(it); } }
     if (CBZ.sfx) CBZ.sfx("loot");

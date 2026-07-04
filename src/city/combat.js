@@ -444,6 +444,11 @@
       const ok = land(t, dmg, finisher ? "finisher" : "light", { kind });
       if (!ok) { /* blocked → combo already reset in land() */ }
       else if (finisher) { combo = 0; comboT = 0; }
+    } else if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) {
+      // B7: no ped in the cone, but a harvest node (tree/rock/scrap pile —
+      // systems/resources.js) is — the swing lands on that instead. aimTarget()
+      // only ever considers cityCops/cityPeds, so `t` is guaranteed null here
+      // whenever a node (not a person) is what's actually in front of you.
     } else if (CBZ.cityShatterRay) {
       // a swing that hits no one can hit a WINDOW: first punch spider-cracks
       // it, the next blows it out (cityShatterRay's two-stage default)
@@ -471,7 +476,10 @@
     const base = it() ? it().dmg : 16;
     const dmg = Math.round(base * 2.4);
     if (t) land(t, dmg, "heavy", { kind: "upper" });
-    else if (CBZ.cityShatterRay) {
+    else if (CBZ.resourceHarvestSwing && CBZ.resourceHarvestSwing()) {
+      // B7: same harvest fallback as lightAttack — a heavy swing chops/mines
+      // just as well (no extra yield bonus, keeps this simple).
+    } else if (CBZ.cityShatterRay) {
       // a heavy (bat/pipe-class swing) puts a window straight through
       const L2 = lookDir();
       CBZ.cityShatterRay(P.pos.x, (P.pos.y || 0) + 1.5, P.pos.z, L2.x, 0, L2.z, 3.0, true);

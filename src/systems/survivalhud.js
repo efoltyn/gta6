@@ -20,6 +20,7 @@
     banner: document.getElementById("disasterBanner"),
     zone: document.getElementById("survZoneText"),
     flash: document.getElementById("survFlash"),
+    hunger: document.getElementById("hungerBarSurv"),   // X2: systems/hunger.js's survival-mode meter
   };
   const cv = document.getElementById("minimap");
   const ctx = cv ? cv.getContext("2d") : null;
@@ -79,6 +80,11 @@
     if (el.alive) el.alive.textContent = surv.aliveCount();
     if (el.hp) { const h = Math.max(0, CBZ.player.hp); el.hp.style.width = h + "%"; el.hp.style.background = h > 50 ? "#3ad17a" : (h > 22 ? "#ffd451" : "#ff4d4d"); }
     if (el.stam) el.stam.style.width = Math.max(0, CBZ.player.stamina || 0) + "%";
+    if (el.hunger) {
+      const hg = Math.max(0, Math.min(100, CBZ.player.hunger == null ? 100 : CBZ.player.hunger));
+      el.hunger.style.width = hg + "%";
+      el.hunger.style.background = hg > 40 ? "#e0a030" : (hg > 15 ? "#ff9e4d" : "#ff4d4d");
+    }
 
     // disaster status line (no safe zone — disasters are the only threat)
     if (el.zone) {

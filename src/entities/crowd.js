@@ -119,8 +119,14 @@
   const rigOf = new Int32Array(TOTAL); rigOf.fill(-1);
   const facePool = [];
   function cloneShared(m) { if (m && m.material && m.material._shared) m.material = m.material.clone(); }
+  // WOMEN IN THE CROWD (W3): this pool is built ONCE at load (not per-agent,
+  // like city/crowd.js's own promotion pool), so there's no ambient id to
+  // stream a seeded roll off yet — Math.random() here only decides the
+  // pool's fixed build split (~48% female), never a per-frame/per-agent
+  // outcome. build/longHair reuse character.js's existing fem geometry path.
   function makeFaceEntry(pi) {
-    const rig = CBZ.makeCharacter({ legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xd8a177, hair: 0x2a2018, stripes: 0xc85c00, shoes: 0x2b2b2b });
+    const fem = Math.random() < 0.48;
+    const rig = CBZ.makeCharacter({ legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xd8a177, hair: 0x2a2018, stripes: 0xc85c00, shoes: 0x2b2b2b, build: fem ? "f" : "m", longHair: fem && Math.random() < 0.6 });
     (rig.skinSlots.hands || []).forEach(cloneShared);   // per-rig skin/hair so recolour can't bleed onto the cache
     (rig.skinSlots.hair || []).forEach(cloneShared);
     rig.group.position.y = FAR_AWAY;
@@ -136,7 +142,7 @@
       hp: 70, maxHp: 70, ko: 0, dead: true, escaped: false, looted: false,
       aiState: "wander", target: new THREE.Vector3(), loadout: null, pause: 0, speed: 2,
     };
-    facePool.push({ rig: rig, actor: actor, id: -1, pi: pi });
+    facePool.push({ rig: rig, actor: actor, id: -1, pi: pi, fem: fem });
     CBZ.npcs.push(actor);
   }
   for (let i = 0; i < FACE_RIGS; i++) makeFaceEntry(i);
@@ -201,10 +207,22 @@
     }
     // 2) release rigs whose agent dropped out of range
     for (let i = 0; i < facePool.length; i++) { const e = facePool[i]; if (e.id >= 0 && !faceWanted(e.id)) freeRig(e); }
-    // 3) hand free rigs to newly-near agents
+    // 3) hand free rigs to newly-near agents. GENDER-MATCHED PICK (W3): a
+    //    pooled rig's build is baked into its geometry at load (makeFaceEntry
+    //    rolled a fixed ~48/52 split), so it can't be reshaped per-agent —
+    //    prefer the free rig whose build already matches S.fem[id] so the
+    //    silhouette doesn't flip when the instanced body becomes a real face.
+    //    Falls back to any free rig (never blocks a promotion over this).
     for (let i = 0; i < faceN; i++) {
       const id = faceTmpId[i]; if (rigOf[id] >= 0) continue;
-      for (let j = 0; j < facePool.length; j++) if (facePool[j].id < 0) { assignRig(facePool[j], id); break; }
+      const wantFem = !!S.fem[id];
+      let pick = -1;
+      for (let j = 0; j < facePool.length; j++) {
+        const e = facePool[j]; if (e.id >= 0) continue;
+        if (pick < 0) pick = j;
+        if (!!e.fem === wantFem) { pick = j; break; }
+      }
+      if (pick >= 0) assignRig(facePool[pick], id);
     }
     // 4) drive the assigned rigs; persist loot/death back to the analytical store
     for (let i = 0; i < facePool.length; i++) {
@@ -386,10 +404,22 @@
       rootDummy.rotation.set(0, S.heading[id], down ? Math.PI / 2 : 0); rootDummy.scale.set(1, 1, 1); rootDummy.updateMatrix();
       // promoted to a real face-rig? hide this instanced copy (the rig is drawn instead)
       if (rigOf[id] >= 0) { for (let mi = 0; mi < meshes.length; mi++) put(meshes[mi], slot, 0, 0, 0, 0.0001, 0.0001, 0.0001, 0); continue; }
-      put(torso, slot, 0, 1.42, 0, 0.82, 0.88, 0.44, 0); put(head, slot, 0, 2.18, 0, 0.54, 0.54, 0.54, 0);
-      put(hair, slot, 0, 2.50, 0, 0.58, 0.14, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28, 0.92, 0.28, swing);
-      put(legR, slot, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -swing); put(armL, slot, -0.55, 1.40, 0, 0.24, 0.78, 0.24, -swing * 0.82);
-      put(armR, slot, 0.55, 1.40, 0, 0.24, 0.78, 0.24, swing * 0.82);
+      // WOMEN IN THE CROWD (W3): S.fem[id] (ambientstate.js, rolled ~48% off the
+      // same deterministic rnd(id) stream as skin/hair) narrows the torso, trims
+      // the head, slims + closes in the arms/legs, and stretches the hair box
+      // down behind the head so it reads long. Male (else) path is byte-
+      // identical to the original single-path numbers.
+      if (S.fem[id]) {
+        put(torso, slot, 0, 1.42, 0, 0.82 * 0.85, 0.88, 0.44 * 0.88, 0); put(head, slot, 0, 2.18, 0, 0.54 * 0.92, 0.54 * 0.92, 0.54 * 0.92, 0);
+        put(hair, slot, 0, 2.15, 0, 0.58, 0.62, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, swing);
+        put(legR, slot, 0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, -swing); put(armL, slot, -0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, -swing * 0.82);
+        put(armR, slot, 0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, swing * 0.82);
+      } else {
+        put(torso, slot, 0, 1.42, 0, 0.82, 0.88, 0.44, 0); put(head, slot, 0, 2.18, 0, 0.54, 0.54, 0.54, 0);
+        put(hair, slot, 0, 2.50, 0, 0.58, 0.14, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28, 0.92, 0.28, swing);
+        put(legR, slot, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -swing); put(armL, slot, -0.55, 1.40, 0, 0.24, 0.78, 0.24, -swing * 0.82);
+        put(armR, slot, 0.55, 1.40, 0, 0.24, 0.78, 0.24, swing * 0.82);
+      }
       // FACE — two eyes + a mouth on the front of the head (z+ = forward)
       put(eyeL, slot, -0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);
       put(eyeR, slot, 0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);

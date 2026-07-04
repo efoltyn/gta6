@@ -661,6 +661,10 @@
       "#cpInv .cpHs .a{font-size:9px;color:#7f8ba0;margin-top:1px}" +
       "#cpInv .cpHs.active{border-color:rgba(125,231,255,.6);box-shadow:0 0 0 1px rgba(125,231,255,.35)}" +
       "#cpInv .cpHs .ct{position:absolute;right:2px;top:1px;font-size:8px;font-weight:800;color:#fff;background:rgba(8,11,17,.85);border-radius:5px;padding:0 3px}" +
+      "#cpInv .cpBuild{display:flex;gap:6px;width:100%}" +
+      "#cpInv .cpBuildBtn{flex:1;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.3px;color:#9fb0c6;background:rgba(255,255,255,.04);border:1px solid rgba(232,236,242,.12);border-radius:8px;padding:6px 4px;cursor:pointer;transition:border-color .1s,background .1s,color .1s}" +
+      "#cpInv .cpBuildBtn:hover{border-color:rgba(125,231,255,.5);color:#e8ecf2}" +
+      "#cpInv .cpBuildBtn.active{border-color:rgba(255,209,102,.55);background:rgba(255,209,102,.1);color:#ffd166}" +
       "#cpInv .cpClose{margin-top:10px;font-size:11px;color:#7f8ba0;text-align:center}" +
       "#cpInv .cpClose b{color:#9fb0c6}";
     document.head.appendChild(st);
@@ -736,15 +740,17 @@
   // ============================================================
   //  [I] INVENTORY OVERLAY DOM
   // ============================================================
-  let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invHot = null;
+  let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invHot = null, invBuild = null;
   let invOpen = false, invBigSig = "";
 
-  const LOOT_ICON = { drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔", weapon: "🔫", ammo: "📦" };
+  const LOOT_ICON = { drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", food: "🍔", weapon: "🔫", ammo: "📦", resource: "📦" };
   const ITEM_ICON = {
     Grenade: "🧨", "C4 Charge": "🧨", Rolex: "⌚", Omega: "⌚", "Audemars Piguet": "⌚", "Patek Philippe": "⌚",
     "Richard Mille": "⌚", "Gold Bar": "🥇", "Gold Chain": "📿", "Diamond Ring": "💍", "Engagement Ring": "💍",
     Medkit: "🩹", "Body Armor": "🦺", Weed: "🌿", Coke: "❄️", "Cash Stack": "💵", "Briefcase of Cash": "💼",
     Phone: "📱", Laptop: "💻", Wallet: "👛", Burger: "🍔", Soda: "🥤",
+    // B7: resources (systems/resources.js) + gathering tools (systems/craft.js)
+    Wood: "🪵", Stone: "🪨", Scrap: "⚙️", Hatchet: "🪓", Pickaxe: "⛏️",
   };
 
   function buildInv() {
@@ -758,6 +764,11 @@
       "<div class='cpTitle'>CHARACTER</div>" +
       "<div class='cpSub'></div>" +
       "<div class='cpBigCanvasWrap'><canvas width='230' height='300'></canvas></div>" +
+      "<div class='cpH' style='margin-top:10px'>Build</div>" +
+      "<div class='cpBuild'>" +
+      "<button type='button' class='cpBuildBtn' data-build='m'>Male</button>" +
+      "<button type='button' class='cpBuildBtn' data-build='f'>Female</button>" +
+      "</div>" +
       "<div class='cpClose'><b>[I]</b> / <b>[Esc]</b> to close</div>" +
       "</div>" +
       "<div class='cpRight'>" +
@@ -771,8 +782,28 @@
     invAcc = inv.querySelector(".cpAcc");
     invGrid = inv.querySelector(".cpGrid");
     invHot = inv.querySelector(".cpHot");
+    invBuild = inv.querySelector(".cpBuild");
     // a click on the dim backdrop (outside the wrap) closes
     inv.addEventListener("click", function (e) { if (e.target === inv) closeInv(); });
+    // BUILD toggle (W4): Male/Female — persists + reloads via CBZ.setPlayerBuild
+    if (invBuild) invBuild.addEventListener("click", function (e) {
+      const btn = e.target.closest && e.target.closest(".cpBuildBtn");
+      if (!btn) return;
+      e.preventDefault();
+      if (e.stopPropagation) e.stopPropagation();
+      if (CBZ.setPlayerBuild) CBZ.setPlayerBuild(btn.dataset.build);
+    });
+  }
+
+  // highlight the active build button (reads CBZ.getPlayerBuild(), set at boot)
+  function renderBuild() {
+    if (!invBuild) return;
+    const cur = (CBZ.getPlayerBuild && CBZ.getPlayerBuild()) || "m";
+    const btns = invBuild.querySelectorAll(".cpBuildBtn");
+    for (let i = 0; i < btns.length; i++) {
+      const b = btns[i];
+      b.classList.toggle("active", b.dataset.build === cur);
+    }
   }
 
   function renderAcc() {
@@ -843,6 +874,7 @@
     renderAcc();
     renderGrid();
     renderHot();
+    renderBuild();
     // big portrait — redraw on look change (or first open)
     const sig = lookSig();
     if (sig !== invBigSig) { invBigSig = sig; drawBigPortrait(); }

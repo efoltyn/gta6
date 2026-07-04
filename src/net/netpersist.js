@@ -136,7 +136,42 @@
     if (CBZ.cityIdentities && CBZ.cityIdentities.serialize) try { blob.identities = CBZ.cityIdentities.serialize(); } catch (e) {}
     if (CBZ.dayPhase) blob.day = CBZ.dayPhase();
     if (CBZ.dayCount) blob.dayN = CBZ.dayCount();   // calendar day (rebuild timers count in these)
+    if (CBZ.cityFamilyTree && CBZ.cityFamilyTree.serialize) try { blob.fam = CBZ.cityFamilyTree.serialize(); } catch (e) {}
+    if (CBZ.building && CBZ.building.serialize) try { blob.bld = CBZ.building.serialize(); } catch (e) {}
+    // B6: BaseRecords ride their OWN rider (NOT folded into blob.bld) so a
+    // world's ownership claims restore independently of piece geometry —
+    // see systems/baseclaim.js's file header for why.
+    if (CBZ.baseClaim && CBZ.baseClaim.serialize) try { blob.base = CBZ.baseClaim.serialize(); } catch (e) {}
+    if (CBZ.polity && CBZ.polity.serialize) try { blob.pol = CBZ.polity.serialize(); } catch (e) {}
+    if (CBZ.protection && CBZ.protection.serialize) try { blob.prot = CBZ.protection.serialize(); } catch (e) {}
+    if (CBZ.regimes && CBZ.regimes.serialize) try { blob.reg = CBZ.regimes.serialize(); } catch (e) {}
+    if (CBZ.relations && CBZ.relations.serialize) try { blob.rel = CBZ.relations.serialize(); } catch (e) {}
+    if (CBZ.crown && CBZ.crown.serialize) try { blob.crown = CBZ.crown.serialize(); } catch (e) {}
+    if (CBZ.militia && CBZ.militia.serialize) try { blob.mil = CBZ.militia.serialize(); } catch (e) {}
+    if (CBZ.polwar && CBZ.polwar.serialize) try { blob.war = CBZ.polwar.serialize(); } catch (e) {}
+    if (CBZ.migration && CBZ.migration.serialize) try { blob.mig = CBZ.migration.serialize(); } catch (e) {}
+    if (CBZ.civilwar && CBZ.civilwar.serialize) try { blob.cwar = CBZ.civilwar.serialize(); } catch (e) {}
+    // M2: forex rates are WORLD state (shared economy), not per-player —
+    // rides the same rider family as blob.mig/blob.cwar right beside them.
+    if (CBZ.forex && CBZ.forex.serialize) try { blob.fx = CBZ.forex.serialize(); } catch (e) {}
+    // M3: centralbank's own blob — rates/governors/independence/decrees.
+    // Rides the same rider family as blob.fx, right beside it.
+    if (CBZ.centralbank && CBZ.centralbank.serialize) try { blob.cb = CBZ.centralbank.serialize(); } catch (e) {}
     if (g.cityPropMkt) blob.propMkt = copy(g.cityPropMkt);   // macro market rides the save
+    if (CBZ.market && CBZ.market.serialize) try { blob.mkt = CBZ.market.serialize(); } catch (e) {}
+    if (CBZ.econState && CBZ.econState.serialize) try { blob.econ = CBZ.econState.serialize(); } catch (e) {}
+    if (CBZ.npcEcon && CBZ.npcEcon.serialize) try { blob.npce = CBZ.npcEcon.serialize(); } catch (e) {}
+    if (CBZ.corps && CBZ.corps.serialize) try { blob.corp = CBZ.corps.serialize(); } catch (e) {}
+    if (CBZ.stocks && CBZ.stocks.serialize) try { blob.stk = CBZ.stocks.serialize(); } catch (e) {}
+    // M4: inflation's own rider (NOT folded into blob.cb — see sim/
+    // inflation.js's header for why the two lifecycles stay separate).
+    if (CBZ.inflation && CBZ.inflation.serialize) try { blob.inf = CBZ.inflation.serialize(); } catch (e) {}
+    // M5: bonds' own rider (NOT folded into blob.inf/blob.cb — see sim/
+    // bonds.js's header for why a clean top-level rider is the smaller diff).
+    if (CBZ.bonds && CBZ.bonds.serialize) try { blob.bond = CBZ.bonds.serialize(); } catch (e) {}
+    // M6: hyperinflation's own rider (NOT folded into blob.inf/blob.bond/
+    // blob.cb/blob.fx — see sim/hyperinflation.js's header for why).
+    if (CBZ.hyperinflation && CBZ.hyperinflation.serialize) try { blob.hyp = CBZ.hyperinflation.serialize(); } catch (e) {}
     return blob;
   }
 
@@ -228,7 +263,81 @@
     if (w.identities && CBZ.cityIdentities && CBZ.cityIdentities.apply) try { CBZ.cityIdentities.apply(w.identities); } catch (e) { console.error("[netpersist]", e); }
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
     if (w.dayN != null && CBZ.dayCount) CBZ.dayCount(w.dayN);
+    if (w.fam && CBZ.cityFamilyTree && CBZ.cityFamilyTree.apply) try { CBZ.cityFamilyTree.apply(w.fam); } catch (e) { console.error("[netpersist]", e); }
+    // B6: restore BaseRecords BEFORE the pieces (w.bld) below — a replayed
+    // cupboard's onPiecePlace hook checks CBZ.baseAt() to decide whether to
+    // mint a NEW record; applying blob.base first means it finds the
+    // already-restored record (matching id/authorized/lastBreach) instead
+    // of manufacturing a duplicate.
+    if (w.base && CBZ.baseClaim && CBZ.baseClaim.apply) try { CBZ.baseClaim.apply(w.base); } catch (e) { console.error("[netpersist]", e); }
+    if (w.bld && CBZ.building && CBZ.building.apply) try { CBZ.building.apply(w.bld); } catch (e) { console.error("[netpersist]", e); }
+    // X6b: a runtime-created rebel-fragment/partition country id does NOT
+    // exist in polity.js's own records table on a fresh boot (it's never
+    // one of CBZ.COUNTRIES's static rows) — polity.js's own apply() silently
+    // skips any id nobody has registered yet (its own header says so), so
+    // civilwar.js's preRegister() must run FIRST, re-minting the shell
+    // record so the w.pol apply just below actually finds it.
+    if (w.cwar && CBZ.civilwar && CBZ.civilwar.preRegister) try { CBZ.civilwar.preRegister(w.cwar); } catch (e) { console.error("[netpersist]", e); }
+    if (w.pol && CBZ.polity && CBZ.polity.apply) try { CBZ.polity.apply(w.pol); } catch (e) { console.error("[netpersist]", e); }
+    if (w.prot && CBZ.protection && CBZ.protection.apply) try { CBZ.protection.apply(w.prot); } catch (e) { console.error("[netpersist]", e); }
+    // P6: regimes' own apply() re-asserts config-level effects (police mult/
+    // market controls) off whatever govType w.pol just restored — must run
+    // after CBZ.polity.apply() above.
+    if (w.reg && CBZ.regimes && CBZ.regimes.apply) try { CBZ.regimes.apply(w.reg); } catch (e) { console.error("[netpersist]", e); }
+    if (w.rel && CBZ.relations && CBZ.relations.apply) try { CBZ.relations.apply(w.rel); } catch (e) { console.error("[netpersist]", e); }
+    // P6b: crown's own apply() only restores houses/legitimacy/counters — it
+    // must run after w.pol (office.holder already restored) and after w.rel
+    // (relations affinity already restored), matching regimes' own ordering note.
+    if (w.crown && CBZ.crown && CBZ.crown.apply) try { CBZ.crown.apply(w.crown); } catch (e) { console.error("[netpersist]", e); }
+    // P7: militia's own apply() reads govType off w.pol/w.reg (both already
+    // restored above) and cityGangs, so it must run after every one of those.
+    if (w.mil && CBZ.militia && CBZ.militia.apply) try { CBZ.militia.apply(w.mil); } catch (e) { console.error("[netpersist]", e); }
+    // P8: polwar's own apply() re-stamps rec.warCrime mirrors off w.pol's
+    // already-restored polity records, so it must run after w.pol above.
+    if (w.war && CBZ.polwar && CBZ.polwar.apply) try { CBZ.polwar.apply(w.war); } catch (e) { console.error("[netpersist]", e); }
+    // P9: migration's own apply() reads CBZ.polity/CBZ.relations govType-free
+    // (policy is its OWN rider, not stuffed onto polity records) but its
+    // mixOverride re-stamp wants CBZ.demographics.CONFIGS already loaded —
+    // true by this point regardless of ordering (module-parse time, not
+    // apply-time). Runs after w.war so a restored active war's belligerents
+    // are already resolvable by CBZ.polwar.activeWarFor() for misery/wave reads.
+    if (w.mig && CBZ.migration && CBZ.migration.apply) try { CBZ.migration.apply(w.mig); } catch (e) { console.error("[netpersist]", e); }
+    // X6b: civilwar's own full apply() (unrest counters, active fracture
+    // bookkeeping, the permanent partition ledger) runs LAST — after
+    // polity/relations/regimes/polwar/migration have all already restored,
+    // matching every other module's own "runs after its dependencies" note.
+    if (w.cwar && CBZ.civilwar && CBZ.civilwar.apply) try { CBZ.civilwar.apply(w.cwar); } catch (e) { console.error("[netpersist]", e); }
+    // M2: forex's own apply() just restores its rates/history/momentum
+    // rows — no ordering dependency on anything above, rides right beside
+    // w.mig/w.cwar per the same-family rider convention.
+    if (w.fx && CBZ.forex && CBZ.forex.apply) try { CBZ.forex.apply(w.fx); } catch (e) { console.error("[netpersist]", e); }
+    // M3: centralbank's own apply() just restores rates/governors/
+    // independence/decrees — no ordering dependency on anything above
+    // (a restored governor sid resolves through the ledger the moment it's
+    // referenced, same as any other officeholder sid); rides right beside
+    // w.fx per the same rider-family convention.
+    if (w.cb && CBZ.centralbank && CBZ.centralbank.apply) try { CBZ.centralbank.apply(w.cb); } catch (e) { console.error("[netpersist]", e); }
     if (w.propMkt) { const m = copy(w.propMkt); if (m) g.cityPropMkt = m; }
+    if (w.mkt && CBZ.market && CBZ.market.apply) try { CBZ.market.apply(w.mkt); } catch (e) { console.error("[netpersist]", e); }
+    if (w.econ && CBZ.econState && CBZ.econState.apply) try { CBZ.econState.apply(w.econ); } catch (e) { console.error("[netpersist]", e); }
+    if (w.npce && CBZ.npcEcon && CBZ.npcEcon.apply) try { CBZ.npcEcon.apply(w.npce); } catch (e) { console.error("[netpersist]", e); }
+    if (w.corp && CBZ.corps && CBZ.corps.apply) try { CBZ.corps.apply(w.corp); } catch (e) { console.error("[netpersist]", e); }
+    if (w.stk && CBZ.stocks && CBZ.stocks.apply) try { CBZ.stocks.apply(w.stk); } catch (e) { console.error("[netpersist]", e); }
+    // M4: inflation's own apply() just restores pi/level/prevTreasury per
+    // country — no ordering dependency on anything above (rides right
+    // beside w.stk, same "no ordering dependency" family as w.fx/w.cb).
+    if (w.inf && CBZ.inflation && CBZ.inflation.apply) try { CBZ.inflation.apply(w.inf); } catch (e) { console.error("[netpersist]", e); }
+    // M5: bonds' own apply() just restores series/holders/distress per
+    // country — no ordering dependency on anything above either (a holder
+    // key resolves through the ledger/corp registry the moment it's read,
+    // same as any other sid/corpId reference elsewhere in this file).
+    if (w.bond && CBZ.bonds && CBZ.bonds.apply) try { CBZ.bonds.apply(w.bond); } catch (e) { console.error("[netpersist]", e); }
+    // M6: hyperinflation's own apply() restores stage/ending/soros/
+    // counterfeit BOOKKEEPING only — the functional effects of an ending
+    // (currencyId/dormant/delisted/alias) already rode w.pol/w.cb/w.fx/w.inf
+    // above via each of THOSE file's own persistence, so there's no ordering
+    // dependency on this line's position either.
+    if (w.hyp && CBZ.hyperinflation && CBZ.hyperinflation.apply) try { CBZ.hyperinflation.apply(w.hyp); } catch (e) { console.error("[netpersist]", e); }
   }
 
   function applyGangs(rows) {
@@ -270,8 +379,15 @@
   function sendChar() { try { net.sendEv({ e: "csave", char: charBlob() }); } catch (e) {} }
   function sendWorld() {
     try {
-      const w = worldBlob(); // the relay hard-drops sockets past ~1.5MB — never risk the host's
-      if (JSON.stringify(w).length > 1400 * 1024) return;
+      const w = worldBlob(); // the relay hard-drops sockets past ~16MB — never risk the host's
+      // S1 (BUILD-PLAN.md Stage S): this guard used to be 1400KB, sized right
+      // under the OLD ~1.5MB wsmini.js transport cap. The server now stores
+      // world/char blobs chunked in SQLite (server/db.js) with no storage-side
+      // size limit, and wsmini.js's transport cap was raised to 16MB in
+      // tandem — so this guard is raised the same way, still comfortably
+      // under the transport limit, never removed outright (a socket-killing
+      // send is still worse than a skipped autosave tick).
+      if (JSON.stringify(w).length > 15 * 1024 * 1024) return;
       net.sendEv({ e: "wsave", world: w });
     } catch (e) {}
   }

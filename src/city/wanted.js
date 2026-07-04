@@ -147,7 +147,9 @@
     // petty crimes (1★) barely charge; only real (2★+) acts get the full rate.
     const K = (info.stars >= 2 ? 1.6 : 0.7);
     // a corroborating witness of an act already on record only nudges the heat.
-    const charge = Math.max(1, sev || 1) * K * (sameEvent ? 0.25 : 1);
+    // P6: fascism/dictatorship charges heat faster (CBZ.regimeHeatMul() ×1.4
+    // while the player stands in one — city/regimes.js; guarded, defaults to 1).
+    const charge = Math.max(1, sev || 1) * K * (sameEvent ? 0.25 : 1) * (CBZ.regimeHeatMul ? CBZ.regimeHeatMul() : 1);
     const gain = (g.heat || 0) + charge;
     // ceiling: climb toward just under the next star up, but a GRANTED tier must
     // always at least reach its own floor (so a target=5 spree kill can finally

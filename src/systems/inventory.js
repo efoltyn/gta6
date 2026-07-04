@@ -32,6 +32,9 @@
     "Handcuff Key": "🔑", "Bedsheet Rope": "🪢", "Hacksaw Blade": "🪚",
     "Contraband Map": "🗺️", "Stolen Wallet": "👛", "Cash Roll": "💵",
     "Gold Tooth": "🦷", "Gold Chain": "📿", "Luxury Watch": "⌚",
+    // B7: resource/tool catalog parity (systems/economy.js) — see city/hud.js
+    // + city/charpanel.js for the city-mode equivalents.
+    "Wood": "🪵", "Stone": "🪨", "Scrap": "⚙️", "Hatchet": "🪓", "Pickaxe": "⛏️",
   };
   // items you can FENCE for their cigarette value straight from the bag
   const FENCEABLE = new Set(["Cash Roll", "Cigarette Carton", "Stolen Wallet", "Gold Tooth", "Gold Chain", "Luxury Watch"]);
@@ -137,6 +140,10 @@
 
   // ---------- effects ----------
   function effect(name) {
+    // X2: escape mode's hunger loop (survival/escape had none before) — the
+    // snack items top up CBZ.player.hunger; a no-op for anything else/any
+    // other mode (city owns its own food loop via cityEat).
+    if (CBZ.hunger && CBZ.hunger.onConsume) CBZ.hunger.onConsume(name);
     if (FENCEABLE.has(name)) {
       const v = (CBZ.econ && CBZ.econ.ITEMS[name] && CBZ.econ.ITEMS[name].value) || 10;
       CBZ.econ && CBZ.econ.addCigs(v);

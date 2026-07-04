@@ -320,6 +320,14 @@
           : (meta.gun ? "gun" + ((meta.dmg || 0) > 1 ? " · " + meta.dmg + " dmg" : "") : (wear ? (slot ? slot + " · " : "") + "+" + (meta.drip || 0) + " drip" : meta.tag));
         const worn = wear && isWorn(it);
         const line = qty > 1 ? (fmt$(each) + " ea · " + fmt$(each * qty) + "/×" + qty) : fmt$(each);
+        // E1: FOOD rows get a live ▲▼ off the shim's trend() (sim/market.js) —
+        // the moving price tag milestone. Guarded/food-only this wave.
+        let trendGlyph = "";
+        if (kind === "food" && CBZ.market) {
+          const tr = CBZ.market.trend("food");
+          trendGlyph = tr === "up" ? " <span style='color:#ff9e6b'>▲</span>"
+            : tr === "down" ? " <span style='color:#7ed957'>▼</span>" : "";
+        }
         // for a wearable you don't yet wear, preview DRIP x → y (and call out the
         // piece it REPLACES in that slot) so the drip gain is obvious before you buy.
         let dripHint = "";
@@ -332,7 +340,7 @@
         html += "<div style='display:flex;justify-content:space-between;padding:3px 0'><span><b style='color:#ffd166'>" + (i + 1) + "</b> " + it +
           " <span style='color:#7f8794;font-size:11px'>(" + tagN + ")</span>" +
           (worn ? " <span style='color:#7ed957;font-size:11px'>✓worn</span>" : dripHint) +
-          "</span><span style='color:#7ed957'>" + line + "</span></div>";
+          "</span><span style='color:#7ed957'>" + line + trendGlyph + "</span></div>";
       });
     }
     // BARBER chair / CLOTHING rack. The rack sells whole OUTFITS (the canonical
@@ -518,6 +526,10 @@
       if (CBZ.sfx) CBZ.sfx("glass");
       return;
     }
+    // E7: Ironclad Arms books half of every player gun-store purchase as
+    // real revenue (sim/corporations.js's creditRevenue) — a guns lot the
+    // company doesn't even need to have claimed as an outlet.
+    if (openLot.kind === "guns" && CBZ.corps && CBZ.corps.creditRevenue) CBZ.corps.creditRevenue("ironclad", total * 0.5);
     if (CBZ.sfx) CBZ.sfx("coin");
     if (openLot.kind === "food" && meta.heal) {
       for (let k = 0; k < n; k++) { g.hunger = Math.min(100, (g.hunger || 0) + meta.heal); if (CBZ.player.hp != null && CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, CBZ.player.hp + Math.round(meta.heal * 0.4)); }
@@ -639,6 +651,10 @@
     }
     take = Math.max(20, take);
     CBZ.city.addCash(take);
+    // E5: robbing a Bunbros outlet's till hits the SAME dollars off the
+    // company's books (city/shops.js is the till-robbery site; guarded no-op
+    // for every non-outlet shop, i.e. almost all of them this wave).
+    if (CBZ.corps && CBZ.corps.robOutlet) CBZ.corps.robOutlet(openLot, take);
     if (CBZ.sfx) CBZ.sfx("coin");
     // CRIME: this is armed robbery — big heat, marks your last-known position,
     // panics the block, and rolls a chance a unit is already responding.
@@ -750,10 +766,22 @@
     CBZ.city.note("🍸 Drink — loosened up. That's gonna add up...", 1.8);
     render();
   }
+  const MAKER_CORP_ID = { KAI: "kaido", VLT: "volante" };   // economy.js CARS .maker -> sim/corporations.js id
   function buyCar() {
     if (!CBZ.city.spend(1500)) { CBZ.city.note("Need $1,500 for a car.", 1.6); return; }
     const A = CBZ.city.arena, door = openLot.building.door;
-    if (CBZ.citySpawnOwnedCar) CBZ.citySpawnOwnedCar(door.x + door.nx * 3, door.z + door.nz * 3);
+    const car = CBZ.citySpawnOwnedCar ? CBZ.citySpawnOwnedCar(door.x + door.nx * 3, door.z + door.nz * 3) : null;
+    // E7: Apex Dealership Holdings books half the sale as dealer-margin
+    // revenue. E10: the OTHER half goes to the model's actual MAKER (economy.js
+    // CARS .maker), boosted by that maker's brandHeat (win-on-Sunday-sell-on-
+    // Monday — sim/motorsport.js). A model with no .maker (e.g. the Yellow
+    // Cab) leaves that half simply uncredited — no manufacturer to book it to.
+    const mkId = car && car.model && MAKER_CORP_ID[car.model.maker];
+    const mkCo = mkId && CBZ.corps ? CBZ.corps.get(mkId) : null;
+    if (CBZ.corps && CBZ.corps.creditRevenue) {
+      CBZ.corps.creditRevenue("apex", 375);
+      if (mkId) CBZ.corps.creditRevenue(mkId, 375 * (mkCo ? (mkCo.brandHeat || 1) : 1));
+    }
     CBZ.city.note("Your new ride is parked out front!", 2.2);
     close();
   }

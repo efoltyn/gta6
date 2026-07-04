@@ -1,0 +1,38 @@
+Vendored for BUILD-PLAN.md S5 (sqlite-wasm single-player parity).
+
+Source:  https://www.sqlite.org/2026/sqlite-wasm-3530300.zip
+Version: SQLite 3.53.3 (sqlite-wasm-3530300.zip)
+SHA3-256 (whole archive, matches sqlite.org/download.html's published digest):
+  cae64fe0107faf041a1af2dbf544699ae49af71976a15819ad7639bfedce7dcf
+Archive size: 720,513 bytes
+
+Files taken from the archive's jswasm/ directory, UNMODIFIED:
+  jswasm/sqlite3.js    432,966 bytes  - the "vanilla JS" (non-ESM, classic-script/
+                                        importScripts-loadable) build. This is the
+                                        file both src/net/sqlitedb.js (main thread,
+                                        kvvfs backend) and src/net/sqlitedb.worker.js
+                                        (Worker thread, opfs-sahpool backend) load
+                                        lazily at runtime — never a blocking <script>
+                                        tag in index.html.
+  jswasm/sqlite3.wasm  868,996 bytes  - the WASM binary sqlite3.js fetches relative
+                                        to its own URL.
+  README.txt                          - upstream's own README, unmodified, for
+                                        provenance/reference.
+
+NOT vendored (not needed by this integration): sqlite3.mjs (ESM build — the game
+has no bundler, see MASTER-PLAN Part II.2, so the classic-script build is used
+everywhere instead), the worker1/promiser convenience wrappers (sqlitedb.worker.js
+hand-rolls the small message protocol S5 actually needs instead), and the demo/
+tester HTML+JS (not runtime dependencies).
+
+Public domain (upstream SQLite's own licensing — "the author disclaims copyright").
+Do not hand-edit these two files; re-vendor from a newer sqlite.org release instead.
+
+Docs consulted for the VFS/backend choice (S5's own header in sqlitedb.js has the
+full writeup): https://sqlite.org/wasm/doc/trunk/persistence.md — opfs-sahpool
+needs no COOP/COEP headers and works from a Worker on plain static hosting; the
+plain "opfs" VFS needs COOP/COEP + SharedArrayBuffer (not assumed available here);
+kvvfs (localStorage/sessionStorage) is main-thread-only and doesn't lift the
+5MB-ish quota ceiling, so it's the last-resort browser backend, not the target.
+None of the three can load over a file:// URL (no static hosting) — sqlite3.js's
+own fetch of sqlite3.wasm requires http(s).

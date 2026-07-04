@@ -127,6 +127,18 @@
     "Burner Phone":{ value: 60,   tag: "tool" },
     Medkit:        { value: 150,  tag: "tool", medkit: 40 },
     "Body Armor":  { value: 400,  tag: "tool", armor: 60 },
+    // --- B7: RESOURCES (harvested from city nodes — trees/rocks/scrap piles;
+    // see systems/resources.js) + the two gathering TOOLS that craft against
+    // them (systems/craft.js). Hatchet/Pickaxe also carry melee:true/dmg so
+    // equipping one routes through the EXACT SAME slot city/combat.js already
+    // uses for Bat/Knife (CBZ.cityGiveWeapon → g.cityMeleeWeapon) with zero
+    // special-casing — weaponFeel() just doesn't recognize their name, so
+    // they swing with the plain "melee" profile rather than a tuned one.
+    Wood:          { value: 2,   tag: "resource" },
+    Stone:         { value: 3,   tag: "resource" },
+    Scrap:         { value: 4,   tag: "resource" },
+    Hatchet:       { value: 40,  tag: "tool", melee: true, dmg: 24 },
+    Pickaxe:       { value: 45,  tag: "tool", melee: true, dmg: 22 },
   };
 
   // ============================================================
@@ -304,28 +316,35 @@
   // rarity 0 = everywhere, 1 = exotic. `s` = body length scale (visual variety).
   // The NAME tells you the tier (a Prius is clearly a shitbox, a Ferrari clearly
   // isn't) — the actual $ value stays HIDDEN until you chop it at the shop.
+  // E10 (sim/motorsport.js + sim/corporations.js's kaido/volante rows): `maker`
+  // groups these real-world-named models under TWO fictional umbrella
+  // manufacturers so dealership sales + race results have somewhere real to
+  // book to — "KAI" (Kaido Motors, the Japanese-named models) and "VLT"
+  // (Volante Auto Group, the American/European rest). Scope-bounded to 2 makers
+  // this wave; more can join later (a model with no `maker` stays independent —
+  // Yellow Cab is a taxi livery, not a manufacturer's product).
   const CARS = [
-    { name: "Toyota Prius",   value: 1200,  rarity: 0.0,  color: 0x6b6f78, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "prius" },
-    { name: "Honda Civic",    value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "civic" },
+    { name: "Toyota Prius",   value: 1200,  rarity: 0.0,  color: 0x6b6f78, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "prius", maker: "KAI" },
+    { name: "Honda Civic",    value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "civic", maker: "KAI" },
     { name: "Yellow Cab",     value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  livery: "taxi", designStyle: "cab" },
-    { name: "Chevy Malibu",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  designStyle: "malibu" },
-    { name: "Dodge Caravan",  value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "caravan" },
-    { name: "Ford F-150",     value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", designStyle: "f150" },
-    { name: "Nissan 370Z",    value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "370z" },
-    { name: "Jeep Cherokee",  value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "cherokee" },
-    { name: "Dodge Charger",  value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "charger" },
-    { name: "Chevy Corvette", value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "corvette" },
-    { name: "Mercedes S-Class", value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1, body: "sedan", detailStyle: "tesla-s", designStyle: "sclass" },
-    { name: "Tesla Model 3",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan", detailStyle: "tesla-3", designStyle: "model3" },
-    { name: "Tesla Model Y",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",   detailStyle: "tesla-y", designStyle: "modely" },
-    { name: "Tesla Model S",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan", detailStyle: "tesla-s", designStyle: "models" },
-    { name: "Tesla Model X",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",   detailStyle: "tesla-x", designStyle: "modelx" },
-    { name: "Cybertruck",     value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "cybertruck" },
-    { name: "Porsche 911 Turbo", value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe", detailStyle: "porsche", designStyle: "porsche" },
-    { name: "Lamborghini Aventador", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe", detailStyle: "aventador", designStyle: "aventador" },
-    { name: "Ferrari 488",    value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe", detailStyle: "ferrari", designStyle: "ferrari" },
-    { name: "Ferrari Enzo",   value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "enzo" },
-    { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "veyron" },
+    { name: "Chevy Malibu",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  designStyle: "malibu", maker: "VLT" },
+    { name: "Dodge Caravan",  value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "caravan", maker: "VLT" },
+    { name: "Ford F-150",     value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", designStyle: "f150", maker: "VLT" },
+    { name: "Nissan 370Z",    value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "370z", maker: "KAI" },
+    { name: "Jeep Cherokee",  value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "cherokee", maker: "VLT" },
+    { name: "Dodge Charger",  value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "charger", maker: "VLT" },
+    { name: "Chevy Corvette", value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "corvette", maker: "VLT" },
+    { name: "Mercedes S-Class", value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1, body: "sedan", detailStyle: "tesla-s", designStyle: "sclass", maker: "VLT" },
+    { name: "Tesla Model 3",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan", detailStyle: "tesla-3", designStyle: "model3", maker: "VLT" },
+    { name: "Tesla Model Y",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",   detailStyle: "tesla-y", designStyle: "modely", maker: "VLT" },
+    { name: "Tesla Model S",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan", detailStyle: "tesla-s", designStyle: "models", maker: "VLT" },
+    { name: "Tesla Model X",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",   detailStyle: "tesla-x", designStyle: "modelx", maker: "VLT" },
+    { name: "Cybertruck",     value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "cybertruck", maker: "VLT" },
+    { name: "Porsche 911 Turbo", value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe", detailStyle: "porsche", designStyle: "porsche", maker: "VLT" },
+    { name: "Lamborghini Aventador", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe", detailStyle: "aventador", designStyle: "aventador", maker: "VLT" },
+    { name: "Ferrari 488",    value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe", detailStyle: "ferrari", designStyle: "ferrari", maker: "VLT" },
+    { name: "Ferrari Enzo",   value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "enzo", maker: "VLT" },
+    { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "veyron", maker: "VLT" },
   ];
 
   // ---- NO-DECOY FIX: motorcycles + a boat — playercars.js already has full
@@ -435,10 +454,21 @@
     // is OVERSUPPLIED (a district dumped, or a glut event) it's cheap to stock
     // up — buy low. Everything else is flat retail.
     if (it.tag === "drug") return wholesalePrice(name);
+    // E2: every non-drug tag now tracks its live city-wide category price via
+    // sim/market.js's itemPrice() (E1 wired food only; this generalizes the
+    // multiplier to goods/guns/materials/fuel/luxury too). Guarded: CBZ.market
+    // may not be loaded (load order / feature-detect), so this falls back to
+    // the flat ×1.0 retail it's always been.
+    if (CBZ.market) return CBZ.market.itemPrice(name);
     return Math.round(it.value * 1.0);
   }
   function sellPrice(name, kind) {
     const it = ITEMS[name]; if (!it) return 0;
+    // E2: symmetric with buyPrice above — every non-drug tag's fence/counter
+    // price tracks the live category level now (E1 wired food only). Drugs
+    // stay untouched: the district engine (streetPrice/wholesalePrice above)
+    // is the sole authority on drug economics.
+    const base = (it.tag !== "drug" && CBZ.market) ? CBZ.market.itemPrice(name) : it.value;
     let mul = 0.45;
     if (kind === "pawn") mul = it.tag === "valuable" ? 0.65 : 0.5;
     if (kind === "jewelry" && it.tag === "wearable") mul = 0.6;
@@ -456,7 +486,7 @@
       const cap = it.luxe ? 0.95 : 0.92;
       mul = Math.min(cap, mul + fence);
     }
-    return Math.max(1, Math.round(it.value * mul));
+    return Math.max(1, Math.round(base * mul));
   }
   // Pawn/fence loyalty: each fence sale nudges a hidden rep up; it bumps your
   // resale multiplier (capped). This rewards the buy-low/sell-high loop without
@@ -1218,7 +1248,11 @@
     let ownerIncome = 0;                          // rent owed to the PLAYER
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
-      const occ = u.occupant;
+      // W8: a unit can hold a whole household now (occupants[]) — rent is
+      // billed ONCE per unit, to the PRIMARY leaseholder only (occupants[0]).
+      // A spouse/kid who joined via cityHouseholdJoin never gets their own
+      // rent line — one address, one bill, exactly like a real lease.
+      const occ = u.occupants && u.occupants[0];
       if (!occ || occ.dead) continue;             // empty/dead → no rent flows
       const rent = u.rent || 0;
       if (rent <= 0) continue;

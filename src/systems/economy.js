@@ -49,6 +49,16 @@
     // --- keys / weapon ---
     "Gun-Room Key":    { value: 40, tag: "key",       rarity: "rare" },
     Gun:               { value: 50, tag: "key",       rarity: "epic" },
+    // --- B7: catalog parity with city/economy.js's harvest-node resources +
+    // tools (systems/resources.js / systems/craft.js are CITY-only — no
+    // gather nodes in the yard/disaster arena — so these entries exist just
+    // to keep the two item stores in sync; no shop/loot table references them
+    // here, kept minimal per the task). ---
+    Wood:              { value: 2,  tag: "resource",  rarity: "common" },
+    Stone:             { value: 3,  tag: "resource",  rarity: "common" },
+    Scrap:             { value: 4,  tag: "resource",  rarity: "common" },
+    Hatchet:           { value: 40, tag: "tools",     rarity: "uncommon" },
+    Pickaxe:           { value: 45, tag: "tools",     rarity: "uncommon" },
   };
   const SELLABLE = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "goods");
   const DRUGS = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "drugs");

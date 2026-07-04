@@ -842,7 +842,13 @@
       if (isHome(rec)) { net -= tax; continue; }
       n++;
       const t = tenants()[rec.id] || (tenants()[rec.id] = { occupied: true });
-      const vacChance = VACANCY_BASE * (rec.category === "commercial" ? 1.2 : 1) * (0.6 + 600 / Math.max(600, v));
+      // E4: real vacancies — VACANCY_BASE was a dead 0; a district's cohort
+      // wallet stress (sim/npcecon.js, fed by robbery draining that district)
+      // now drives it, guarded with the old 0 fallback if npcecon.js/the
+      // district lookup is unreachable.
+      const vacDk = (CBZ.cityEcon && CBZ.cityEcon.districtAt && rec.lot) ? CBZ.cityEcon.districtAt(rec.lot.cx || 0, rec.lot.cz || 0) : null;
+      const vacBase = (CBZ.npcEcon && CBZ.npcEcon.vacancyRate && vacDk) ? CBZ.npcEcon.vacancyRate(vacDk) : VACANCY_BASE;
+      const vacChance = vacBase * (rec.category === "commercial" ? 1.2 : 1) * (0.6 + 600 / Math.max(600, v));
       if (Math.random() < vacChance) { t.occupied = false; vac++; }
       else if (!t.occupied) { t.occupied = true; }
       // GANG TIE: income is scaled by who controls the district (your turf pays
