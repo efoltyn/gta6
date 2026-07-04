@@ -988,6 +988,13 @@
       return "suit|" + si;
     }
     if (id === "construction") return "hivis|" + (c.torso != null ? c.torso | 0 : 0xffb43a); // same painter, site-orange default
+    // skin-showing garments: the bare shoulders/arms in the atlas must match
+    // the WEARER's actual skin, so the tone joins the cache key (one atlas per
+    // tone actually seen — a handful, not per-rig).
+    if (id === "wifebeater") {
+      const sk = (c.skin != null) ? c.skin | 0 : (ch && ch.skinTone != null ? ch.skinTone | 0 : 0xcf9a72);
+      return "wifebeater|" + sk;
+    }
     if (PAINT[id]) return id;
     return null;                                    // leather/tactical/designer… stay flat
   }
@@ -1013,6 +1020,7 @@
     else if (kind === "basics") parts = PAINT.basics(P, { torso: key.split("|")[1] | 0 });
     else if (kind === "hivis") parts = PAINT.hivis(P, { torso: key.split("|")[1] | 0, legs: c.legs, arms: c.arms }); // shared by construction key
     else if (kind === "gang") { const seg = key.split("|"); parts = PAINT.gang(P, { torso: seg[1] | 0, collar: seg[2] | 0, legs: c.legs }); }
+    else if (kind === "wifebeater") parts = PAINT.wifebeater(P, { torso: c.torso, skin: key.split("|")[1] | 0 });   // tone rides the key (see keyOf)
     else if (PAINT[kind]) parts = PAINT[kind](P, c);
     if (!parts) return null;
     const tex = new THREE.CanvasTexture(cv);

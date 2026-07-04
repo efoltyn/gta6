@@ -250,6 +250,10 @@
       phase: Math.random() * 6.28,  // desync gaits between actors
       bob: 0, breath: Math.random() * 6.28,
       lean: 0, sway: 0, headYaw: 0,
+      // the tone this rig was BUILT with — skin-showing painted garments
+      // (clothes.js wifebeater etc.) read it so a bare shoulder matches the
+      // face instead of a hard-coded shared-atlas tan.
+      skinTone: c.skin != null ? c.skin : 0xcf9a72,
     };
     if (c.clothes && CBZ.applyClothes) CBZ.applyClothes(rig, c.clothes);
     return rig;

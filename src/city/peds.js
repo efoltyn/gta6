@@ -4124,7 +4124,9 @@
       //      a gawker films two-handed, a grudge witness POINTS you out to the
       //      officer. These in-world reads replace the old narration toasts
       //      (owner's rule: you SEE someone see you — no popup tells you). ----
-      if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && p.char && p.char.parts) {
+      // (guard ra/la individually — gore can strip a whole arm off the rig,
+      //  and a one-armed witness must not crash the frame loop)
+      if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && p.char && p.char.parts && p.char.parts.ra) {
         const ch = p.char, J = ch.low || {};
         if (!ch.surrender && !ch.handsUp && !ch.aimingPose && !p.armed) {
           // (armed peds skip these — their weapon-ready pose owns the arms,
@@ -4136,7 +4138,7 @@
           } else if (p.posePoint > 0) {
             ch.parts.ra.rotation.set(-1.52, 0, 0);           // arm out: "that's the one"
             if (J.ra) J.ra.rotation.x = -0.04;
-          } else if (p.state === "film") {
+          } else if (p.state === "film" && ch.parts.la) {
             ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
             if (J.ra) J.ra.rotation.x = -0.55;
             ch.parts.la.rotation.set(-1.15, 0.22, 0.15);

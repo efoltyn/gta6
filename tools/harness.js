@@ -39,6 +39,34 @@ Color.prototype.setHex = function (h) { this._h = h; this.r = ((h >> 16) & 255) 
 Color.prototype.getHex = function () { return this._h; };
 Color.prototype.setRGB = function (r, g, b) { this.r = r; this.g = g; this.b = b; this._h = ((Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255)) >>> 0; return this; };
 Color.prototype.clone = function () { return new Color(this._h); };
+// HSL round-trip (matches three r128 semantics closely enough for the harness:
+// districtWallColor jitters hue/sat/light then reads back a hex).
+Color.prototype.getHSL = function (t) {
+  const r = this.r, g = this.g, b = this.b;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0; const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  t = t || {}; t.h = h; t.s = s; t.l = l; return t;
+};
+Color.prototype.setHSL = function (h, s, l) {
+  h = ((h % 1) + 1) % 1;
+  function f(p, q, t) {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  }
+  if (s === 0) return this.setRGB(l, l, l);
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  return this.setRGB(f(p, q, h + 1 / 3), f(p, q, h), f(p, q, h - 1 / 3));
+};
 Color.prototype.copy = function (c) { return this.setRGB(c.r || 0, c.g || 0, c.b || 0); };
 Color.prototype.lerp = function (c, k) { return this.setRGB(this.r + (c.r - this.r) * k, this.g + (c.g - this.g) * k, this.b + (c.b - this.b) * k); };
 Color.prototype.lerpColors = function (a, b, k) { return this.setRGB(a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k); };
@@ -291,6 +319,11 @@ CBZ.registerMode = CBZ.registerMode || function (id, def) { CBZ.modes[id] = def;
 // ---------- load city files (index.html order) ----------
 // Use the engine's real collider broadphase so navigation profiles reflect the
 // browser runtime instead of the old no-op collision stub.
+// deterministic seed architecture (CBZ.WORLD_SEED / seedStream / hash01) —
+// index.html loads it right after config.js; buildings/expansion now call
+// CBZ.hash01 at build time, so the harness must load it too or the island
+// annex/facade-kit paths throw and silently vanish.
+load("src/core/seed.js");
 load("src/systems/physics.js");
 // the shared body-physics layer (knockback/flinch/fling/HEAD-FLASH + order-24
 // step that integrates cityPeds/cityCops). Provides the REAL CBZ.body (the stub
