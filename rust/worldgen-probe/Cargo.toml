@@ -1,0 +1,18 @@
+[package]
+name = "worldgen-probe"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Hand-rolled extern "C" exports — no wasm-bindgen, no wasm-pack. Keeps the
+# toolchain to just `rustc`/`cargo` + the wasm32-unknown-unknown target.
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true
