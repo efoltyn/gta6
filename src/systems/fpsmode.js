@@ -74,6 +74,13 @@
   const wallQ = new THREE.Quaternion();   // rocket impacts: raycast face normal → world
 
   function weaponIdOf(i) { return WEAPONS[i] && (WEAPONS[i].id || WEAPONS[i].key); }
+  // effective magazine size for weapon slot i — a bought Extended/Drum mag
+  // (city/gunmods.js) bumps the base capacity. One helper so syncAmmo, reload,
+  // finishReloadStep and resetWeapons all agree on the true mag size.
+  function magOf(i) {
+    const w = WEAPONS[i]; if (!w) return 0;
+    return (CBZ.gunModsMag) ? CBZ.gunModsMag(weaponIdOf(i), w.mag) : w.mag;
+  }
   function weaponIndex(id) {
     for (let i = 0; i < WEAPONS.length; i++) if (weaponIdOf(i) === id || WEAPONS[i].key === id) return i;
     return -1;
@@ -148,9 +155,8 @@
   }
 
   function syncAmmo() {
-    const w = weapon();
     fps.ammo = fps.rounds[fps.weapon];
-    fps.mag = w.mag;
+    fps.mag = magOf(fps.weapon);
     fps.reserve = fps.reserves[fps.weapon];
   }
 
@@ -158,7 +164,7 @@
     if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // a fresh run / respawn is never holstered (PROG also zeroes it)
     fps.weapon = CBZ.currentWeaponId ? Math.max(0, weaponIndex(CBZ.currentWeaponId)) : 0;
     normalizeWeapon();
-    fps.rounds = WEAPONS.map((w) => w.mag);
+    fps.rounds = WEAPONS.map((w, i) => magOf(i));
     fps.reserves = WEAPONS.map((w) => w.reserve);
     fps.reloading = 0;
     shotCD = 0;
@@ -1333,7 +1339,9 @@
       if (lethalHead) a.hp = 0; else a.hp -= dmg;
       if (a.hp <= 0) { CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: 6, fling: 3, cal: caliber(w), wkey: w.key, dist: hit.dist, point: hit.point }, hit.head ? "headshot" : "shot"); down = true; }
       else {
-        CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, 16, 1, CBZ.city.playerActor);
+        // a suppressed round barely carries — far fewer bystanders snap to it
+        const supp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(CBZ.currentWeaponId));
+        CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, supp ? 6 : 16, 1, CBZ.city.playerActor);
         CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: (hit.head ? 6.5 : 4.5) * (0.6 + 0.45 * caliber(w)) });
         // getting shot provokes fight-or-flight. ANYONE HOLDING A GUN shoots BACK —
         // a person who's strapped and gets hit draws and returns fire (self-defence),
@@ -1400,15 +1408,16 @@
   // ---- firing and reload control ----
   function finishReloadStep() {
     const w = WEAPONS[reloadWeapon];
+    const cap = magOf(reloadWeapon);   // extended/drum mag capacity (gunmods.js)
     if (reloadWeapon !== fps.weapon) { fps.reloading = 0; syncAmmo(); setAmmoHud(); return; }
 
     if (w.shellReload) {
-      if (fps.rounds[reloadWeapon] < w.mag && fps.reserves[reloadWeapon] > 0) {
+      if (fps.rounds[reloadWeapon] < cap && fps.reserves[reloadWeapon] > 0) {
         fps.rounds[reloadWeapon]++;
         fps.reserves[reloadWeapon]--;
         CBZ.sfx && CBZ.sfx("shell");
       }
-      if (fps.rounds[reloadWeapon] < w.mag && fps.reserves[reloadWeapon] > 0 && !triggerHeld) {
+      if (fps.rounds[reloadWeapon] < cap && fps.reserves[reloadWeapon] > 0 && !triggerHeld) {
         fps.reloading = w.reload;
       } else {
         fps.reloading = 0;
@@ -1419,7 +1428,7 @@
       return;
     }
 
-    const need = w.mag - fps.rounds[reloadWeapon];
+    const need = cap - fps.rounds[reloadWeapon];
     const give = Math.min(need, fps.reserves[reloadWeapon]);
     fps.rounds[reloadWeapon] += give;
     fps.reserves[reloadWeapon] -= give;
@@ -1432,7 +1441,7 @@
   function reload() {
     if (!(fps.active || shoulderActive()) || !armed()) return;
     const w = weapon();
-    if (fps.reloading > 0 || fps.rounds[fps.weapon] >= w.mag || fps.reserves[fps.weapon] <= 0) return;
+    if (fps.reloading > 0 || fps.rounds[fps.weapon] >= magOf(fps.weapon) || fps.reserves[fps.weapon] <= 0) return;
     reloadWeapon = fps.weapon;
     fps.reloading = w.reload;
     CBZ.sfx && CBZ.sfx("reload");
@@ -1458,6 +1467,14 @@
     }
 
     const w = weapon();
+    // ---- attached weapon mods (city/gunmods.js): a suppressor kills the flash
+    // + muffles the report, a muzzle brake / grip settles the recoil, a grip /
+    // laser tightens the cone. All no-ops (mul 1, supp false) when nothing's on
+    // the gun or gunmods.js isn't loaded, so every other mode is byte-identical.
+    const _mid = weaponIdOf(fps.weapon);
+    const modSupp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(_mid));
+    const modRec = (CBZ.gunModsRecoilMul && CBZ.gunModsRecoilMul(_mid)) || 1;
+    const modSpr = (CBZ.gunModsSpreadMul && CBZ.gunModsSpreadMul(_mid)) || 1;
     if (shotCD > 0) return;
     if (fps.reloading > 0) {
       if (w.shellReload && fps.rounds[fps.weapon] > 0) {
@@ -1482,8 +1499,8 @@
     const adsK = adsRecoilMul();
     // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
     // just softened under ADS so holding RMB visibly settles the gun.
-    recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK);
-    recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK;
+    recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK * modRec);
+    recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK * modRec;
     recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
     // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
     // capped so even mag-dumps stay usable. moving adds extra below in the loop.
@@ -1496,35 +1513,39 @@
       const firstShot = shotsInBurst === 0 ? 0.6 : 1;
       const basePitch = w.climb * RK;
       const jitter = 0.92 + rng() * 0.16;                       // <=8% noise
-      const pitchKick = basePitch * ramp * firstShot * jitter * adsK;
+      const pitchKick = basePitch * ramp * firstShot * jitter * adsK * modRec;
       const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
-      const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK;
+      const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK * modRec;
       recoilPitch = Math.min(0.5, recoilPitch + pitchKick);   // cap so a mag-dump tops out
       recoilYaw = Math.max(-0.32, Math.min(0.32, recoilYaw + yawKick));
       shotsInBurst++;
     }
     pumpT = w.pump ? 1 : pumpT;
 
-    const flashScale = w.flash * (0.9 + rng() * 0.28);
+    // a suppressor chokes the muzzle flash down to a dim spit and clips the tail
+    const flashScale = w.flash * (0.9 + rng() * 0.28) * (modSupp ? 0.2 : 1);
+    const flashT = modSupp ? 0.02 : (w.key === "shotgun" ? 0.065 : 0.04);
     if (fps.active) {
       const activeModel = weaponModels[fps.weapon];
       if (!setMuzzleSpriteFromModel(muzzle, activeModel)) muzzle.position.copy(activeModel.userData.muzzle);
       muzzle.scale.setScalar(flashScale);
       muzzle.rotation.z = rng() * Math.PI * 2;
-      muzzle.visible = true;
-      muzzleT = w.key === "shotgun" ? 0.065 : 0.04;
+      muzzle.visible = flashScale > 0.02;
+      muzzleT = flashT;
     } else {
       worldMuzzle.position.copy(muzzleWorld(tmp2));
       worldMuzzle.scale.setScalar(flashScale * 1.2);
       worldMuzzle.material.opacity = 1;
-      worldMuzzle.visible = true;
-      worldMuzzleT = w.key === "shotgun" ? 0.065 : 0.04;
+      worldMuzzle.visible = flashScale > 0.02;
+      worldMuzzleT = flashT;
     }
 
     if (CBZ.sfx) {
-      if (w.sfxPitch || w.sfxVol) {
-        shotSfxOpts.pitch = (w.sfxPitch || 1) * (0.96 + rng() * 0.08);  // jitter so bursts don't sound machine-stamped
-        shotSfxOpts.volume = w.sfxVol || 1;
+      // suppressed: drop the volume + pitch to a muffled "thup" (the audio system
+      // reads {pitch,volume}); otherwise the weapon's own sfx tuning stands.
+      if (modSupp || w.sfxPitch || w.sfxVol) {
+        shotSfxOpts.pitch = (w.sfxPitch || 1) * (modSupp ? 0.78 : 1) * (0.96 + rng() * 0.08);  // jitter so bursts don't sound machine-stamped
+        shotSfxOpts.volume = (w.sfxVol || 1) * (modSupp ? 0.34 : 1);
         CBZ.sfx(w.sfx || "shoot", shotSfxOpts);
       } else CBZ.sfx(w.sfx || "shoot");
     }
@@ -1702,8 +1723,9 @@
     // already drives the "you're being shot at" muzzle-flash/bolt juice — no
     // new detection, just a real cost wired onto an existing read). Feature-
     // detected so this file degrades gracefully if gunfx.js isn't loaded.
+    // modSpr = the equipped scope/grip's spread multiplier (gun-mods branch).
     const suppressK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
-    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK * suppressK;
+    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK * suppressK * modSpr;
     const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
     let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
@@ -2086,6 +2108,20 @@
     setAmmoHud();
   };
   CBZ.fpsActive = function () { return fps.active; };
+  CBZ.fpsSetActive = setActive;                       // programmatic FP enter/exit (scope snap)
+  // ---- gamepad + weapon-mod hooks ----
+  // let a controller (systems/gamepad.js) drive ADS the same as holding RMB.
+  CBZ.fpsSetAim = function (on) { aimHeld = !!on; };
+  CBZ.fpsAimHeld = function () { return aimHeld; };
+  // expose the per-weapon view/carry model arrays + id lookup so city/gunmods.js
+  // can bolt scope / suppressor / grip child meshes onto the actual held guns.
+  CBZ.fpsWeaponModels = weaponModels;      // first-person viewmodels (index === weapon slot)
+  CBZ.fpsCarriedModels = carriedModels;    // third-person carried guns
+  CBZ.fpsWeaponIdOf = weaponIdOf;
+  CBZ.fpsWeaponCount = function () { return WEAPONS.length; };
+  CBZ.fpsWeaponIndex = function () { return fps.weapon; };
+  // re-seed the current mag/reserve display after a mod purchase changes capacity
+  CBZ.fpsResyncAmmo = function () { syncAmmo(); setAmmoHud(); };
   // TRUE while the player is HOLDING RMB to aim down sights, with a gun out and
   // mid-play (FPS or the 3PS shoulder). Read by city/camera.js to punch the
   // over-shoulder cam IN + narrow FOV on ADS. (Spread/recoil reduction is read
@@ -2195,6 +2231,7 @@
     const el = (CBZ.game.elapsed || 0);
     if (el + 0.001 < lastElapsed) {
       if (fps.active) setActive(false);
+      if (CBZ.gunModsReset) CBZ.gunModsReset();   // a fresh run strips fitted attachments before rounds re-seed
       resetWeapons();
       // a fresh run starts on unmarked streets — wipe last run's bullet pocks
       // and rocket scars/smoking wounds
@@ -2386,7 +2423,10 @@
         // every right-click zoom in further and never zoom back out. A fixed hip
         // means RMB eases to hip−DROP and release eases cleanly back to hip.
         if (fpsHipFov === 0) fpsHipFov = 75;   // FP hip → ADS lands ~50 (hip − ADS_FOV_DROP)
-        const wantFov = ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov;
+        // a mounted scope (city/gunmods.js) overrides the ADS target with a much
+        // tighter lens — a red-dot barely nudges it, a sniper scope slams it to ~12°.
+        const scopeF = CBZ.cityScopeFov && CBZ.cityScopeFov();
+        const wantFov = scopeF ? scopeF : (ads ? fpsHipFov - ADS_FOV_DROP : fpsHipFov);
         if (Math.abs(CBZ.camera.fov - wantFov) > 0.05) {
           CBZ.camera.fov += (wantFov - CBZ.camera.fov) * Math.min(1, dt * 12);
           CBZ.camera.updateProjectionMatrix();

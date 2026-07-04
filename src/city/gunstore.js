@@ -223,6 +223,29 @@
       if (c4.tag) { c4.tag.position.set(bx, 0.92, bz); group.add(c4.tag); }
       S.slots.push(c4);
     }
+
+    // ---- THE GUNSMITH BENCH: walk up, [E], and fit the gun in your hands with
+    //      scopes / bigger mags / a suppressor / grips (city/gunmods.js owns the
+    //      catalog + the menu; this is just the in-world workbench you approach).
+    //      Placed toward the store interior (customer side) so it's always
+    //      reachable inside the browse apron. ----
+    if (CBZ.gunModsOpenBench) {
+      let inx = S.cx - C.x, inz = S.cz - C.z; const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
+      const wx = C.x + C.tx * (longLen * 0.28) + inx * 1.6;
+      const wz = C.z + C.tz * (longLen * 0.28) + inz * 1.6;
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.12, 0.7), m.board);
+      top.position.set(wx, 0.92, wz); top.castShadow = false; group.add(top);
+      const legGeo = new THREE.BoxGeometry(0.08, 0.86, 0.08);
+      [[-0.42, -0.28], [0.42, -0.28], [-0.42, 0.28], [0.42, 0.28]].forEach((o) => {
+        const lg = new THREE.Mesh(legGeo, m.board); lg.position.set(wx + o[0], 0.43, wz + o[1]); lg.castShadow = false; group.add(lg);
+      });
+      const vise = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.16), m.glow);
+      vise.position.set(wx, 1.06, wz); vise.castShadow = false; group.add(vise);
+      const bench = { name: "Gunsmith Bench", mod: true, sold: false, x: wx, y: 1.06, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 };
+      bench.tag = tagSprite("🔧 Gunsmith Bench · scopes · mags · silencer", "#7ed957", 3.2, 0.52);
+      if (bench.tag) { bench.tag.position.set(wx, 1.55, wz); group.add(bench.tag); }
+      S.slots.push(bench);
+    }
   }
 
   // which kits the store SELLS, in display order. swatVest is intentionally NOT
@@ -299,6 +322,7 @@
   function buySlot(s) {
     const e = econ();
     if (!s || !e || !CBZ.city) return;
+    if (s.mod) { if (CBZ.gunModsOpenBench) CBZ.gunModsOpenBench(); return; }   // open the gunsmith menu
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {}, price = e.buyPrice("Ammo Box");
       if (!CBZ.city.spend(price)) { CBZ.city.note("Ammo runs " + fmt$(price) + " a box.", 1.6); if (CBZ.sfx) CBZ.sfx("glass"); return; }
@@ -381,6 +405,7 @@
 
   function promptText(s) {
     const e = econ();
+    if (s.mod) return "<b style='color:#ffd166'>[E]</b> Gunsmith Bench — <span style='color:#7ed957'>fit scopes · bigger mags · silencer · grips</span>";
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {};
       return "<b style='color:#ffd166'>[E]</b> Ammo Box — <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>· +" + (meta.rounds || 60) + " rounds</span>";
