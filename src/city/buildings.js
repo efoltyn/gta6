@@ -1841,6 +1841,62 @@
   const ABANDONED_PALETTE = [0x4a4438, 0x3f4640, 0x534a44, 0x46423c, 0x4c4640];
   const BOARD = 0x6b4a2a;
 
+  // ---- DISTRICT MATERIAL / FACADE KITS (PROCGEN.md roadmap #7) -----------
+  // Wall palette + glass-tint bias + split-grammar terminal weights, keyed by
+  // district kind (city/config.js CITY.districts[].kind, read via the city's
+  // districtKind(lot) and threaded into makeBuilding as opts.district). Same
+  // shell code, different NEIGHBOURHOOD READ per district: core glassy/clean,
+  // commercial a notch busier, residential balconied, projects/industrial
+  // boarded + AC-heavy. `terminals` weights are read in a fixed accumulation
+  // order (blankPanel → balconyWindow → acUnit); whatever probability mass is
+  // left over falls through to "window" — the required default terminal.
+  const DISTRICT_KITS = {
+    core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0,
+                   terminals: { blankPanel: 0.03, balconyWindow: 0.02, acUnit: 0.04 } },
+    commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1,
+                   terminals: { blankPanel: 0.06, balconyWindow: 0.05, acUnit: 0.08 } },
+    residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0,
+                   terminals: { blankPanel: 0.08, balconyWindow: 0.24, acUnit: 0.08 } },
+    projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2,
+                   terminals: { blankPanel: 0.22, balconyWindow: 0.04, acUnit: 0.24 } },
+    industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2,
+                   terminals: { blankPanel: 0.25, balconyWindow: 0.02, acUnit: 0.26 } },
+  };
+  const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0,
+                         terminals: { blankPanel: 0.08, balconyWindow: 0.06, acUnit: 0.07 } };
+
+  // hue-locked wall jitter: keep the district's hue family but jitter sat/light
+  // a touch per-building so a whole block isn't one flat colour. Position-hashed
+  // (CBZ.hash01) off the building's world origin — deterministic, no rng() draw,
+  // so this can never desync the city's shared RNG stream.
+  function districtWallColor(hex, kit, ox, oz) {
+    const c = new THREE.Color(hex);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    const hj = CBZ.hash01(ox, oz, 0xd15c) - 0.5;         // -0.5..0.5
+    const sj = CBZ.hash01(ox, oz, 0xd15d);
+    const lj = CBZ.hash01(ox, oz, 0xd15e);
+    hsl.h = (hsl.h + hj * (kit.hueJitter / 360) + 1) % 1;
+    hsl.s = Math.max(0, Math.min(1, hsl.s * (kit.satMul[0] + sj * (kit.satMul[1] - kit.satMul[0]))));
+    hsl.l = Math.max(0, Math.min(1, hsl.l * (kit.lightMul[0] + lj * (kit.lightMul[1] - kit.lightMul[0]))));
+    c.setHSL(hsl.h, hsl.s, hsl.l);
+    return c.getHex();
+  }
+
+  // weighted terminal pick for one (floor,bay) facade cell. Fixed accumulation
+  // order; "window" is whatever probability mass is left over (the required
+  // default). balconyWindow only rolls on upper floors (floorK >= 1).
+  function pickFacadeTerminal(kit, wx, wz, salt, floorK) {
+    const r = CBZ.hash01(wx, wz, salt);
+    const T = kit.terminals;
+    let acc = T.blankPanel || 0;
+    if (r < acc) return "blankPanel";
+    if (floorK >= 1) { acc += T.balconyWindow || 0; if (r < acc) return "balconyWindow"; }
+    acc += T.acUnit || 0;
+    if (r < acc) return "acUnit";
+    return "window";
+  }
+
   // cached graffiti texture (a coloured tag splat) so abandoned walls vary cheaply
   const grafCache = new Map();
   function graffitiTex(hex) {
@@ -1875,11 +1931,16 @@
     const stairW = Math.min(SW, Math.max(0, ixMax - ixMin - 4.2));
     const hasStairs = opts.stairs !== false && storeys > 1 && stairW >= 4.4 && (izMax - izMin) >= 8.5;
     const localDoor = doorInfo(0, 0, w, d, doorSide);
+    // DISTRICT MATERIAL KIT (opts.district — threaded in by cityBuildings via
+    // districtKind(lot)): wall hue-lock, glass-tint bias, facade terminal
+    // weights. Falls back to a neutral kit for callers that don't pass one
+    // (island/expansion buildings, etc.) so nothing regresses.
+    const DKIT = DISTRICT_KITS[opts.district] || DEFAULT_KIT;
 
     // per-building deterministic VARIETY seed (glass tint, parapet height) —
     // derived from the lot position so the same lot reads the same every run.
     const vhash = Math.abs(Math.sin(ox * 12.9898 + oz * 78.233) * 43758.5453) % 1;
-    const tintIdx = ((vhash * 7.13) | 0) % GLASS_TINTS;
+    const tintIdx = (((vhash * 7.13) | 0) + (DKIT.glassTintBias || 0)) % GLASS_TINTS;
     // GLASS KIND: retail/showrooms = CLEAR (see-through storefronts, always);
     // everything else (offices/apartments) = REFLECTIVE (mirror-ish until shot).
     // opts.glassKind overrides. City-only opts, default falsy elsewhere.
@@ -1907,6 +1968,13 @@
     // pilaster derives from `color`, so reassigning it once paints the whole
     // building brick (residential) or keeps the cool curtain tint (office).
     color = wallColor;
+    // DISTRICT WALL KIT: hue-locked jitter so buildings in the same district
+    // read as a coherent palette family (core cool/clean, projects/industrial
+    // grimier/desaturated) while still varying building-to-building. Applied
+    // only when a district was actually threaded in, so callers that don't
+    // pass one (island buildings, the flagship's raw 0x223040, etc.) render
+    // exactly as before.
+    if (opts.district) color = districtWallColor(color, DKIT, ox, oz);
     // trim palette: darks derived from the wall colour (shared palettes →
     // shared colour buckets, so the batcher still collapses trim city-wide)
     const MULL = 0x262b31;                 // mullion-frame dark
@@ -2512,44 +2580,102 @@
               else { const fx = f.x + outSgn * (WT / 2 + 0.05); dbox(fx, winCy - winPh / 2 - 0.06, cz, 0.12, 0.1, winW + 0.2, TRIM); }
             }
           } else {
-            // ===== OFFICE: one wide curtain-wall BAND per storey (loved towers) =
-            // window vertical extent: a sill lip off the floor up to a header lip
-            // under the ceiling (near floor-to-ceiling on modern towers).
+            // ===== SPLIT-GRAMMAR FACADE (PROCGEN.md #7) ===========================
+            // floors → ~1.5m bays → one TERMINAL resolved per (floor,bay) cell:
+            //   window        — the default (plain curtain-wall pane, as before)
+            //   blankPanel    — solid wall-coloured infill, breaks the grid
+            //   balconyWindow — window + a thin projecting slab & rail (upper floors)
+            //   acUnit        — window + a small AC box tucked under the sill
+            // Weighted per DISTRICT_KITS (opts.district) so core reads glassy/
+            // clean, projects/industrial read boarded + AC-heavy, residential gets
+            // balconies. Contiguous plain "window" bays are merged back into ONE
+            // glazeOpening call (same pooled-pane grid + interior glow as the old
+            // single curtain-wall band) so the common case is draw-call IDENTICAL;
+            // only the accent bays (balcony/AC/blank) get individual treatment.
             const sillH = modern ? 0.55 : 0.9;                  // sill top above floor
             const hdrH = modern ? 0.45 : 0.7;                   // header depth below ceiling
             const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
             const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
             const jamb = 0.55;                                  // end jambs centre the opening
+            const span = (f.horiz ? w : d) - 2 * jamb;
+            const BAY = 1.5;                                    // facade bay pitch (m) — matches glazeOpening's own pane module
+            const nBays = Math.max(1, Math.min(10, Math.round(span / BAY)));
+            const bayW = span / nBays;
             if (f.horiz) {
               lbox(f.x, fy0 + sillH / 2, f.z, f.w, sillH, f.dd, color, wallOpt);   // sill
               lbox(f.x, fy1 - hdrH / 2, f.z, f.w, hdrH, f.dd, color, wallOpt);     // header
               lbox(-w / 2 + jamb / 2, winCy, f.z, jamb, winPh, f.dd, color, wallOpt);   // jambs
               lbox(w / 2 - jamb / 2, winCy, f.z, jamb, winPh, f.dd, color, wallOpt);
-              const span = w - 2 * jamb;
-              glazeOpening(0, winCy, f.z, span, winPh);
-              const faceZ = f.z + outSgn * (WT / 2 + 0.04);
-              // CLEAN-GLASS mullions: hairline vertical reveals on the curtain-
-              // wall module (research: modern all-glass facades minimize framing,
-              // mullion ~5-10mm) — slimmed 0.07→0.035 and the heavy mid-storey
-              // horizontal TRANSOM bar DROPPED, so the glass reads continuous,
-              // not gridded into a cage. Pitch widened a touch (1.6→2.0) for
-              // fewer, finer lines.
-              const nn = Math.max(2, Math.min(6, Math.round(span / 2.0))), step = span / nn;
-              for (let i = 1; i < nn; i++) dbox(-span / 2 + i * step, winCy, faceZ, 0.035, winPh, 0.04, MULL);
-              dbox(0, winY0 - 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);   // slim sill reveal
-              dbox(0, winY1 + 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);   // slim header reveal
             } else {
               lbox(f.x, fy0 + sillH / 2, f.z, f.w, sillH, f.dd, color, wallOpt);
               lbox(f.x, fy1 - hdrH / 2, f.z, f.w, hdrH, f.dd, color, wallOpt);
               lbox(f.x, winCy, -d / 2 + jamb / 2, f.w, winPh, jamb, color, wallOpt);
               lbox(f.x, winCy, d / 2 - jamb / 2, f.w, winPh, jamb, color, wallOpt);
-              const span = d - 2 * jamb;
-              glazeOpening(f.x, winCy, 0, span, winPh);
-              const faceX = f.x + outSgn * (WT / 2 + 0.04);
-              // CLEAN-GLASS mullions (see horiz face note): hairline reveals, no
-              // mid-storey transom bar, slim sill/header.
-              const nn = Math.max(2, Math.min(6, Math.round(span / 2.0))), step = span / nn;
-              for (let i = 1; i < nn; i++) dbox(faceX, winCy, -span / 2 + i * step, 0.04, winPh, 0.035, MULL);
+            }
+            // CLEAN-GLASS mullions: hairline vertical reveals on the curtain-wall
+            // module (research: modern all-glass facades minimize framing, mullion
+            // ~5-10mm) — the heavy mid-storey horizontal TRANSOM bar stays dropped.
+            const faceOut = f.horiz ? f.z + outSgn * (WT / 2 + 0.04) : f.x + outSgn * (WT / 2 + 0.04);
+            // deterministic per-cell terminal draw: position-hashed off the bay's
+            // world centre + a floor/face salt (never city.rng — see seed.js).
+            const TERM_SALT = 0x5a17 + k * 131 + f.s * 7919;
+            const terms = new Array(nBays);
+            for (let i = 0; i < nBays; i++) {
+              const t = -span / 2 + (i + 0.5) * bayW;
+              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
+              terms[i] = pickFacadeTerminal(DKIT, ox + cx, oz + cz, TERM_SALT, k);
+            }
+            let bi = 0;
+            while (bi < nBays) {
+              const term = terms[bi];
+              const t = -span / 2 + (bi + 0.5) * bayW;
+              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
+              if (term === "blankPanel") {
+                if (f.horiz) lbox(t, winCy, f.z, bayW - 0.06, winPh, f.dd, color, wallOpt);
+                else lbox(f.x, winCy, t, f.w, winPh, bayW - 0.06, color, wallOpt);
+                bi++;
+              } else if (term === "window") {
+                // merge a run of contiguous plain-window bays into ONE glazeOpening
+                // call — degenerates to the old single wide band when the district
+                // kit rolls no accents (identical pane/glow count either way).
+                let bj = bi; while (bj < nBays && terms[bj] === "window") bj++;
+                const t0 = -span / 2 + bi * bayW, t1 = -span / 2 + bj * bayW;
+                const runW = t1 - t0, runT = (t0 + t1) / 2;
+                const rcx = f.horiz ? runT : f.x, rcz = f.horiz ? f.z : runT;
+                glazeOpening(rcx, winCy, rcz, runW - 0.04, winPh);
+                bi = bj;
+              } else {
+                // balconyWindow / acUnit: an individually-glazed bay + accessory
+                glazeOpening(cx, winCy, cz, bayW - 0.04, winPh);
+                if (term === "balconyWindow") {
+                  const bw = bayW - 0.2, projD = 0.55, railH = 0.85, slabY = winY0 - 0.35;
+                  if (f.horiz) {
+                    dbox(t, slabY, f.z + outSgn * (WT / 2 + projD / 2), bw, 0.08, projD, TRIM);       // balcony slab
+                    dbox(t, slabY + railH / 2, f.z + outSgn * (WT / 2 + projD - 0.03), bw, railH, 0.05, MULL);   // rail
+                  } else {
+                    dbox(f.x + outSgn * (WT / 2 + projD / 2), slabY, t, projD, 0.08, bw, TRIM);
+                    dbox(f.x + outSgn * (WT / 2 + projD - 0.03), slabY + railH / 2, t, 0.05, railH, bw, MULL);
+                  }
+                } else {
+                  const acw = Math.min(0.6, bayW * 0.35), ach = 0.32, acd = 0.28, acY = winY0 - ach / 2 - 0.08;
+                  if (f.horiz) dbox(t, acY, f.z + outSgn * (WT / 2 + acd / 2), acw, ach, acd, 0x8a8f96);
+                  else dbox(f.x + outSgn * (WT / 2 + acd / 2), acY, t, acd, ach, acw, 0x8a8f96);
+                }
+                bi++;
+              }
+            }
+            // hairline module ticks at every bay boundary — pure rhythm, cheap
+            // merged deco (dbox), independent of which terminal sits either side.
+            for (let i = 1; i < nBays; i++) {
+              const tb = -span / 2 + i * bayW;
+              if (f.horiz) dbox(tb, winCy, faceOut, 0.035, winPh, 0.04, MULL);
+              else dbox(faceOut, winCy, tb, 0.04, winPh, 0.035, MULL);
+            }
+            // slim sill/header reveal across the whole face (unchanged)
+            if (f.horiz) {
+              dbox(0, winY0 - 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);
+              dbox(0, winY1 + 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);
+            } else {
               dbox(f.x + outSgn * (WT / 2 + 0.05), winY0 - 0.04, 0, 0.08, 0.06, span + 0.2, TRIM);
               dbox(f.x + outSgn * (WT / 2 + 0.05), winY1 + 0.04, 0, 0.08, 0.06, span + 0.2, TRIM);
             }
@@ -4304,7 +4430,10 @@
     // reuse the proven shell: tall enough that makeBuilding's `modern` (storeys>=3)
     // curtain-wall path lights up on every floor; garageGround makes the ground a
     // drive-in deck. Stairs auto-engage (storeys>1, lot is wide), so it's climbable.
-    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side, { garageGround: true });
+    // the flagship always lands on a core/commercial lot (see the lux-lot pick
+    // above) — kit it as "core" explicitly (makeMegaTower has no city/districtKind
+    // in scope) so it keeps the glassiest, cleanest split-grammar mix.
+    const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side, { garageGround: true, district: "core" });
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
     furnishPenthouse(b, topY);
@@ -4612,7 +4741,16 @@
       const dd = Math.hypot((lot.cx || 0) - city.center.x, (lot.cz || 0) - city.center.z);
       const t = Math.max(0, Math.min(1, dd / _maxR));            // 0 at centre → 1 at rim
       const peak = kind === "core" ? 5 : kind === "commercial" ? 3 : 2;
-      return Math.round((1 - t) * peak);                         // fades to 0 at the edge
+      // PROCGEN #3 — blend the pure concentric falloff with the land-value
+      // field (world.js: distance + waterfront + low-freq noise) so height
+      // gradients aren't a perfect bullseye: a waterfront lot or a lucky
+      // noise bump can out-value a purely-closer one, and vice versa. Still
+      // geometry-only (landValue() is a pure function of x,z — no rng draw),
+      // so the world build stays byte-identical. Falls back to the old pure-
+      // distance shape if landValue is absent (older world.js / headless test).
+      const lv = city.landValue ? city.landValue(lot.cx || 0, lot.cz || 0) : (1 - t);
+      const score = (1 - t) * 0.6 + lv * 0.4;
+      return Math.round(score * peak);                          // fades to 0 at the edge
     }
     function districtStoreys(lot) {
       const kind = districtKind(lot);
@@ -4752,7 +4890,16 @@
       const doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
 
       // ---- GANG-RUN HIDEOUT ----
-      if (!isLux && !forcedTier && r < (C.parkFrac || 0.08) + (C.abandonedFrac || 0.30)) {
+      // PROCGEN #3 — land value nudges the odds: a low-value lot (far from
+      // the core, no waterfront, an unlucky noise dip) is somewhat MORE
+      // likely to end up abandoned; a high-value lot somewhat LESS likely.
+      // This reuses the SAME r draw from above (no new rng() call — the
+      // draw-count/order the rest of the loop depends on is untouched); only
+      // the threshold r is compared against shifts with the lot's geometry.
+      const lv = city.landValue ? city.landValue(lot.cx || 0, lot.cz || 0) : 0.5;
+      const abandonedMul = Math.max(0.5, Math.min(1.5, 1 + (0.5 - lv) * 0.8));
+      const abandonedFrac = Math.min(0.6, (C.abandonedFrac || 0.30) * abandonedMul);
+      if (!isLux && !forcedTier && r < (C.parkFrac || 0.08) + abandonedFrac) {
         // Keep the gang turf/stash gameplay, but remove the old boarded derelict
         // visual shell. Those near-windowless boxes were clipping into the read of
         // shops like Cluckin' Diner / The Trap House and made good glass blocks feel
@@ -4761,7 +4908,7 @@
         const storeys = Math.max(1, Math.min(4, districtStoreys(lot)));
         const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];
         rng(); // preserve the old facade-variant draw so later shop placement stays stable
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: "office" });
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: "office", district: districtKind(lot) });
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot, 0x4caf6e);
@@ -4793,7 +4940,7 @@
         // get normal office-style windows so they cannot become the blank blocks
         // that visually crowd or clip into neighboring shops.
         const specialFacade = (shop.kind === "bank" || shop.kind === "security") ? "office" : undefined;
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, { showroom: !!(shop.gas || shop.carlot || shop.chop), retail: !!shop.retail, facade: specialFacade });
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, { showroom: !!(shop.gas || shop.carlot || shop.chop), retail: !!shop.retail, facade: specialFacade, district: dk });
         signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. On climbable buildings the
         // counter is shifted onto the solid side of the room so it never crosses
@@ -4993,6 +5140,7 @@
         // floor of 2 so every HOME keeps an upstairs to furnish.
         const storeys = Math.max(2, districtStoreys(lot));
         const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];   // drawn for BOTH paths so RNG stays stable
+        const dk = districtKind(lot);
         // OFFICE TOWER? world.js owns the policy (city.officeLot): a downtown/
         // midtown subset of TALL, NON-listed towers become workplaces, not homes.
         // The listed home ladder (forcedTier) is always a HOME. Decided off a
@@ -5003,7 +5151,7 @@
           // a glass OFFICE shell — clear curtain wall so the seated workers READ
           // through it from the street (the living-floor "why"). Same enterable/
           // climbable rig; upper floors get desks instead of flats.
-          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { office: true, glassKind: "clear" });
+          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { office: true, glassKind: "clear", district: dk });
           // dress EVERY storey above the lobby with a working office floor and
           // collect the seat anchors building-wide, then register them ONCE so
           // city/officejobs.js can seat a payroll of workers (witnesses + cash).
@@ -5021,7 +5169,7 @@
           placed.push(lot);
           continue;
         }
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side);
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { district: dk });
         const listed = !!forcedTier;                 // only reserved lots are on the market
         const tierDef = forcedTier || GENERIC;
         // THE HOME lives on the TOP floor — home.floorY below — which is where
