@@ -112,9 +112,22 @@
   // at distance anyway). Looting + death persist into the analytical store, so
   // it sticks and the same named inmate remembers you (worker PLAYER_SEEN).
   // ============================================================
-  const FACE_RIGS = Math.max(0, Math.min(RIG_CAP, CBZ.CROWD_FACE_RIGS == null ? 40 : CBZ.CROWD_FACE_RIGS | 0));
-  const FD = CBZ.CROWD_FACE_DIST == null ? 30 : +CBZ.CROWD_FACE_DIST;
-  const FACE_DIST2 = FD * FD;
+  // Pool is allocated ONCE at the biggest count the live budget can ever ask
+  // for (tier-4 value, or the explicit CBZ.CROWD_FACE_RIGS override); the
+  // per-frame budget below rides the quality tier, so spare rigs just idle.
+  const FACE_POOL = Math.max(0, Math.min(RIG_CAP, CBZ.CROWD_FACE_RIGS == null ? 72 : CBZ.CROWD_FACE_RIGS | 0));
+  // LIVE face-rig budget + promotion range: defaults ride the quality tier
+  // (CBZ.qScale, read at use time each frame — pause-menu perf/quality
+  // slider; mid-tier ≈ the old fixed 40 rigs / 30u). Explicit
+  // CBZ.CROWD_FACE_RIGS / CBZ.CROWD_FACE_DIST overrides still win.
+  function faceBudget() {
+    const n = (CBZ.CROWD_FACE_RIGS != null ? CBZ.CROWD_FACE_RIGS : (CBZ.qScale ? CBZ.qScale(20, 72) : 40)) | 0;
+    return Math.max(0, Math.min(FACE_POOL, n));
+  }
+  function faceDist2() {
+    const d = CBZ.CROWD_FACE_DIST != null ? +CBZ.CROWD_FACE_DIST : (CBZ.qScale ? CBZ.qScale(20, 42) : 30);
+    return d * d;
+  }
   const FAR_AWAY = -1000;
   const rigOf = new Int32Array(TOTAL); rigOf.fill(-1);
   const facePool = [];
@@ -139,7 +152,7 @@
     facePool.push({ rig: rig, actor: actor, id: -1, pi: pi });
     CBZ.npcs.push(actor);
   }
-  for (let i = 0; i < FACE_RIGS; i++) makeFaceEntry(i);
+  for (let i = 0; i < FACE_POOL; i++) makeFaceEntry(i);
 
   function setRigSkin(rig, skin, hair) {
     if (rig.head.material && rig.head.material.color) rig.head.material.color.setHex(skin);
@@ -180,24 +193,25 @@
   }
   function freeAllRigs() { for (let i = 0; i < facePool.length; i++) if (facePool[i].id >= 0) freeRig(facePool[i]); }
 
-  const faceTmpId = new Int32Array(Math.max(1, FACE_RIGS)), faceTmpD2 = new Float64Array(Math.max(1, FACE_RIGS));
+  const faceTmpId = new Int32Array(Math.max(1, FACE_POOL)), faceTmpD2 = new Float64Array(Math.max(1, FACE_POOL));
   let faceN = 0, faceMaxAt = 0;
   function faceMax() { faceMaxAt = 0; for (let i = 1; i < faceN; i++) if (faceTmpD2[i] > faceTmpD2[faceMaxAt]) faceMaxAt = i; }
-  function faceConsider(id, d2) {
-    if (faceN < FACE_RIGS) { faceTmpId[faceN] = id; faceTmpD2[faceN] = d2; faceN++; if (faceN === FACE_RIGS) faceMax(); }
-    else if (d2 < faceTmpD2[faceMaxAt]) { faceTmpId[faceMaxAt] = id; faceTmpD2[faceMaxAt] = d2; faceMax(); }
+  function faceConsider(id, d2, budget) {   // budget = live per-frame face-rig count
+    if (faceN < budget) { faceTmpId[faceN] = id; faceTmpD2[faceN] = d2; faceN++; if (faceN === budget) faceMax(); }
+    else if (budget > 0 && d2 < faceTmpD2[faceMaxAt]) { faceTmpId[faceMaxAt] = id; faceTmpD2[faceMaxAt] = d2; faceMax(); }
   }
   function faceWanted(id) { for (let i = 0; i < faceN; i++) if (faceTmpId[i] === id) return true; return false; }
 
   function syncFaceRigs(alpha, dt) {
-    if (!FACE_RIGS) return;
+    if (!FACE_POOL) return;
     const p = CBZ.player.pos;
-    // 1) nearest FACE_RIGS active, alive agents within face range
+    const FR = faceBudget(), FD2 = faceDist2();   // live reads — ride the quality tier this frame
+    // 1) nearest FR active, alive agents within face range
     faceN = 0;
     for (let slot = 0; slot < activeCount; slot++) {
       const id = activeId[slot]; if (S.dead[id]) continue;
       const dx = S.posX[id] - p.x, dz = S.posZ[id] - p.z, d2 = dx * dx + dz * dz;
-      if (d2 <= FACE_DIST2) faceConsider(id, d2);
+      if (d2 <= FD2) faceConsider(id, d2, FR);
     }
     // 2) release rigs whose agent dropped out of range
     for (let i = 0; i < facePool.length; i++) { const e = facePool[i]; if (e.id >= 0 && !faceWanted(e.id)) freeRig(e); }

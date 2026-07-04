@@ -101,10 +101,13 @@
   //   near : full animation every frame + brain every ~3rd frame
   //   far  : frozen pose (no animChar) + brain crawls (~7th/16th frame)
   //   detail/tag: face quads, hair and the name tag shown only up close
-  const ANIM2 = 55 * 55;       // animate within this; freeze beyond
-  const FAR2 = 95 * 95;        // brain barely ticks beyond this
-  const DETAIL2 = 40 * 40;     // show face/hair/name-tag within this (faces read across the yard, not just point-blank)
-  const RIG2 = 52 * 52;        // hide the full mesh rig beyond this
+  //   These ranges now ride the LIVE quality tier (CBZ.qScale, read at use
+  //   time each frame — pause-menu perf/quality slider); mid-tier ≈ the old
+  //   fixed radii (55/95/40/52).
+  function ANIM2() { const d = CBZ.qScale ? CBZ.qScale(36, 77) : 55; return d * d; }    // animate within this; freeze beyond
+  function FAR2() { const d = CBZ.qScale ? CBZ.qScale(62, 133) : 95; return d * d; }    // brain barely ticks beyond this
+  function DETAIL2() { const d = CBZ.qScale ? CBZ.qScale(26, 56) : 40; return d * d; }  // show face/hair/name-tag within this (faces read across the yard, not just point-blank)
+  function RIG2() { const d = CBZ.qScale ? CBZ.qScale(34, 73) : 52; return d * d; }     // hide the full mesh rig beyond this
   let frame = 0;
 
   // NPCs the player is actively engaged with stay FULL-detail at any range
@@ -143,10 +146,10 @@
     const gp = n.group.position;
     const ddx = gp.x - cx, ddz = gp.z - cz, d2 = ddx * ddx + ddz * ddz;
     const imp = important(n);
-    const wantRig = !n.escaped && (imp || d2 < RIG2);
+    const wantRig = !n.escaped && (imp || d2 < RIG2());
     if (n._rigOn !== wantRig) { n._rigOn = wantRig; n.group.visible = wantRig; }
-    const near = wantRig && (imp || d2 < ANIM2);       // animate this frame?
-    const wantDetail = wantRig && (imp || d2 < DETAIL2);
+    const near = wantRig && (imp || d2 < ANIM2());       // animate this frame?
+    const wantDetail = wantRig && (imp || d2 < DETAIL2());
     if (n._detailOn !== wantDetail) {       // toggle only on tier change
       n._detailOn = wantDetail;
       const det = n.char.detail;
@@ -175,7 +178,7 @@
     //      integrates every frame toward the last target (no stutter). ----
     let speed;
     if (CBZ.aiThink) {
-      const stride = imp ? 1 : (near ? 3 : (d2 < FAR2 ? 7 : 16));
+      const stride = imp ? 1 : (near ? 3 : (d2 < FAR2() ? 7 : 16));
       n._aiAcc = (n._aiAcc || 0) + dt;
       if (stride === 1 || ((frame + n.slice) % stride === 0)) {
         speed = CBZ.aiThink(n, n._aiAcc) || n.speed;
