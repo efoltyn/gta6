@@ -18,8 +18,9 @@
        from rest: ~0.34u on outer panels, ~0.12u in the cabin band, so
        pillars/roof crumple less than fenders and the hull can never turn
        inside out.
-     • LRU cap of 14 concurrently-deformed cars — the least-recently-hit one
-       is silently restored to pristine when a 15th takes damage.
+     • LRU cap on concurrently-deformed cars (rides the LIVE quality tier,
+       ~7..28) — the least-recently-hit one is silently restored to pristine
+       when one past the cap takes damage.
      • Consequences past thresholds: headlights smashed dark (material
        pointer swap, pooled like the brake lights), hood hangs + sin-jitters
        while driving then detaches as debris (crashfx chunk pool), struck-side
@@ -35,7 +36,10 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  const MAX_CARS = 14;
+  // concurrently-deformed cars (LRU) — rides the LIVE quality tier
+  // (pause-menu slider): ~7 at tier 0 up to ~28 at tier 4 (mid-tier ≈ the
+  // old 14). Read at use time — never snapshot the tier.
+  function MAX_CARS() { return CBZ.qScale ? CBZ.qScale(7, 28) : 14; }
   const OUTER_BUDGET = 0.34, CABIN_BUDGET = 0.12;
   const DIMS_FALLBACK = { width: 2, length: 4.4, height: 1.5 };
   const damaged = [];          // LRU registry, oldest first; entries move to the tail when re-hit
@@ -73,7 +77,7 @@
       const e = damaged[i];
       if (e.car.dead || !e.car.group || !e.car.group.parent) release(e, true);
     }
-    if (damaged.length >= MAX_CARS) release(damaged[0], false);   // oldest goes back to pristine
+    if (damaged.length >= MAX_CARS()) release(damaged[0], false);   // oldest goes back to pristine
     const e = {
       car, meshes: null, heads: null, glass: null,
       front: 0, rear: 0, sideL: 0, sideR: 0, total: 0,

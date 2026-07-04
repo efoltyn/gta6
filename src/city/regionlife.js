@@ -41,14 +41,20 @@
   // (armed AK soldiers, hunters with shotguns, jobbed farmers). Rosters are
   // disjoint: crowd.js only manages its own indices, regionlife only manages
   // _regionLife-tagged peds — so the two never double-spawn the same body.
-  var REGION_CAP    = 6;     // hard ceiling on simultaneous live region NPCs (flavour rigs only)
+  // hard ceiling on simultaneous live region NPCs (flavour rigs only) —
+  // rides the LIVE quality tier (pause-menu slider): ~3 at tier 0 up to ~12
+  // at tier 4 (mid-tier ≈ the old 6). Read at use time — never snapshotted.
+  function REGION_CAP() { return CBZ.qScale ? CBZ.qScale(3, 12) : 6; }
   var SPAWN_RING_IN = 46;    // spawn no closer than this (just out of sight)
   var SPAWN_RING_OUT= 74;    // spawn no farther than this
   var DESPAWN_RAD   = 118;   // past this from player → recycle the body
   var ACTIVE_RAD    = 140;   // only stream when player is within this of a region edge
   var SPAWN_COOLDOWN= 0.42;  // seconds between spawns (≈2-3/sec) — no hitch bursts
   var STROLL_RETARGET = 6.5; // seconds between fresh wander goals per ped
-  // per-biome desired live count of FLAVOUR rigs (kept under REGION_CAP). 'city'
+  // per-biome desired live count of FLAVOUR rigs — the table is the RELATIVE
+  // mix; the actual count rides the LIVE quality tier (scaled ×0.5..×2 at the
+  // read site, mid-tier ≈ these base numbers), then clamped under REGION_CAP.
+  // 'city'
   // = 0: the mainland crowd owns those streets — we never add there. These are
   // small "special" counts: the instanced biome bubble in crowd.js carries the
   // ambient mass now, so here we keep only the characterful/armed/jobbed rigs.
@@ -59,7 +65,7 @@
     city: 0, military: 5, farmland: 3, forest: 3,
     desert: 3, airport: 3, speedway: 2, snow: 2,
     // T6 — the 4 urban mini-cities (citytemplates/minicities). Kept modest
-    // (≤4, under REGION_CAP=6): the instanced crowd bubble carries the MASS;
+    // (≤4, under REGION_CAP): the instanced crowd bubble carries the MASS;
     // regionlife only streams the few characterful/jobbed full rigs each
     // place needs to read as itself (dockworkers, suits, gamblers, factory
     // hands) — plus its lone guard/bouncer/foreman.
@@ -350,7 +356,9 @@
       var biome = reg.biome;
       var budget = BIOME_BUDGET[biome];
       if (!budget) return;                  // 'city' or unknown → leave it alone
-      budget = Math.min(budget, REGION_CAP);
+      // table = RELATIVE mix; scale by the LIVE quality tier at read time
+      budget = Math.max(1, Math.round(budget * (CBZ.qScale ? CBZ.qScale(0.5, 2) : 1)));
+      budget = Math.min(budget, REGION_CAP());
 
       // 3) STROLL: hand our nearby peds a believable new wander goal on a timer.
       //    BUT: a ped whose job now routes to a WORK-ANCHOR (farmer/rancher/
@@ -373,7 +381,7 @@
       // 4) SPAWN: throttle, then top up toward the biome budget (and cap).
       spawnCD -= dt;
       var live = countInRegion(reg);
-      if (spawnCD <= 0 && live < budget && mine.length < REGION_CAP) {
+      if (spawnCD <= 0 && live < budget && mine.length < REGION_CAP()) {
         if (spawnOne(reg, biome, px, pz)) spawnCD = SPAWN_COOLDOWN;
         else spawnCD = SPAWN_COOLDOWN * 0.5;   // failed point find — retry sooner
       }

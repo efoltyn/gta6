@@ -27,8 +27,11 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
 
-  const MAX_ACTIVE = 14;      // bodies actually solving (LRU early-freeze past this) —
-                              // sized for a sprint/burst through the 1000-strong street
+  // bodies actually solving (LRU early-freeze past this) — rides the LIVE
+  // quality tier (pause-menu slider): ~7 at tier 0 up to ~28 at tier 4
+  // (mid-tier ≈ the old 14, sized for a sprint/burst through the
+  // 1000-strong street). Read at use time — never snapshot the tier.
+  function MAX_ACTIVE() { return CBZ.qScale ? CBZ.qScale(7, 28) : 14; }
   const POOL = 36;            // total slots incl. frozen corpses still holding pose
   const RANGE2 = 60 * 60;     // only kills this close to the camera get the flop
   const SLEEP_V = 0.22;       // u/s — under this the body counts as still
@@ -216,7 +219,7 @@
       const t = slots[i];
       if (t.used && !t.asleep) { active++; if (t.life > 0.5 && (!oldest || t.age < oldest.age)) oldest = t; }
     }
-    if (active >= MAX_ACTIVE) {
+    if (active >= MAX_ACTIVE()) {
       if (oldest) oldest.asleep = true;
       else return false;                 // everyone's still flying: this kill keeps the legacy fling
     }
