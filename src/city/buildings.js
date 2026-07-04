@@ -1736,6 +1736,7 @@
     const px = P ? P.x : 0, pz = P ? P.z : 0;
     for (let i = 0; i < cityDoors.length; i++) {
       const dr = cityDoors[i];
+      if (dr.demolished) continue;                 // building is rubble — no door to swing
       const dxp = dr.wx - px, dzp = dr.wz - pz;
       const farFromPlayer = dxp * dxp + dzp * dzp > 1600;   // 40m: skip cold distant doors
       if (farFromPlayer && !dr.open && dr.t <= 0.001) continue;
@@ -1782,6 +1783,7 @@
   CBZ.cityDoorsReset = function () {
     for (const dr of cityDoors) {
       dr.open = false; dr.hold = 0; dr.t = 0; dr.pivot.rotation.y = 0;
+      if (dr.demolished) continue;                 // demolition owns this door's collider until rebuilt
       if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -1925,7 +1927,12 @@
     const bgroup = new THREE.Group();
     bgroup.position.set(ox, 0, oz);
     root.add(bgroup);
-    const cols = [], plats = [], windows = [];
+    // losMeshes/doorRecs: per-building mirrors of the global CBZ.losBlockers /
+    // cityDoors registrations (cols/plats already mirror CBZ.colliders/platforms).
+    // Without these a demolished building would leave ghost LOS blockers
+    // (Raycaster hits meshes regardless of scene membership) and a phantom
+    // swinging door. demolition reads b.losMeshes / b.doors to splice them.
+    const cols = [], plats = [], windows = [], losMeshes = [], doorRecs = [];
     const ixMin = -w / 2 + WT, ixMax = w / 2 - WT;
     const izMin = -d / 2 + WT, izMax = d / 2 - WT;
     const stairW = Math.min(SW, Math.max(0, ixMax - ixMin - 4.2));
@@ -2061,7 +2068,7 @@
         CBZ.colliders.push(c); cols.push(c);
       }
       if (o.plat) { const p = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, top: ly + bh / 2 }; CBZ.platforms.push(p); plats.push(p); }
-      if (o.los) CBZ.losBlockers.push(m);
+      if (o.los) { CBZ.losBlockers.push(m); losMeshes.push(m); }
       return m;
     }
 
@@ -2225,7 +2232,7 @@
       // floor read so the interior reads as a real room through the clear glass
       lbox(0, 0.06, 0, w - 2 * WT, 0.08, d - 2 * WT, 0xc8ccd4, { cast: false });
       // keep the openable swinging door in the gap
-      if (!opts.boarded) makeDoorPanel(bgroup, ox, oz, localDoor, DOORW);
+      if (!opts.boarded) { const _dr = makeDoorPanel(bgroup, ox, oz, localDoor, DOORW); if (_dr) doorRecs.push(_dr); }
     }
 
     // WRAPAROUND PARKING DECK (opts.garageGround): the flagship's whole ground
@@ -2338,7 +2345,7 @@
           // only — derelicts stay gaping). Abandoned (boarded) buildings skip it.
           // retailFront hangs its own door, so skip it here for city retail.
           const cityRetail = opts.retail && CBZ.game && CBZ.game.mode === "city";
-          if (!opts.showroom && !opts.boarded && !cityRetail) makeDoorPanel(bgroup, ox, oz, localDoor, DOORW);
+          if (!opts.showroom && !opts.boarded && !cityRetail) { const _dr = makeDoorPanel(bgroup, ox, oz, localDoor, DOORW); if (_dr) doorRecs.push(_dr); }
         } else if (opts.boarded) {
           // DERELICT: not a blank wall — a real apartment grid of SMASHED-DARK /
           // boarded-over windows in the same residential rhythm, so an abandoned
@@ -2892,7 +2899,7 @@
     const floorTops = [0.14];
     for (let L = 1; L <= storeys; L++) floorTops.push(L * FH);
 
-    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, lbox, FH,
+    return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract

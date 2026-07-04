@@ -20,10 +20,19 @@
   const sun = CBZ.sun, hemi = CBZ.hemi, scene = CBZ.scene, dome = CBZ.skyDome;
 
   const CYCLE = 150;        // seconds for a full day
+                            // NOTE: city/schedule.js DAY_SECS mirrors this
+                            // literal — change them together.
   let t = 0.18;             // start mid-morning
   // the sky clock, exposed for the multiplayer world save (net/netpersist.js):
   // no arg reads the phase 0..1; a number sets it (host restoring a saved day)
   CBZ.dayPhase = function (v) { if (v != null && isFinite(v)) t = (((+v) % 1) + 1) % 1; return t; };
+  // the CALENDAR: which day it is. The sun cycle above wraps and forgets;
+  // anything that must outlast a day (building rebuild timers, rent, …) counts
+  // in dayCount units. Persisted next to dayPhase in the world save, and
+  // fractional day-time reads as dayCount + dayPhase (dayTime below).
+  let dayN = 0;
+  CBZ.dayCount = function (v) { if (v != null && isFinite(v)) dayN = Math.max(0, Math.floor(+v)); return dayN; };
+  CBZ.dayTime = function () { return dayN + t; };   // continuous days-elapsed clock
 
   // palette keyframes across the day (0..1): [fog, sunColor, sunInt, hemiInt].
   // dusk fog is a touch deeper than the old 0xff9e6b pastel — the haze near
@@ -38,6 +47,7 @@
   const sunC = new THREE.Color(), fogC = new THREE.Color();
 
   CBZ.onAlways(2, function (dt) {
+    if (t + dt / CYCLE >= 1) dayN++;          // midnight wrap → next calendar day
     t = (t + dt / CYCLE) % 1;
 
     // sun arcs across the sky; height drives "how day" it is
