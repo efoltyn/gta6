@@ -25,10 +25,11 @@
    its home biome, rarity, HP, pelt name + value, and a low-poly build(ctx)
    that returns a THREE.Group (feet at y=0, nose toward +X).
 
-   DRAW-CALL DISCIPLINE (owner rule #4 — ~1000-NPC draw-call bound): live
-   animals are capped (POP_CAP) and each is a small hand-built mesh group, the
-   same cheap approach biome_forest used for its deer. No physics, no per-limb
-   colliders — a light wander integrator moves them and they never leave home.
+   PERFORMANCE (owner rule #4 — draw-call bound): there is NO population
+   budget. Species spawn their natural populations; the ONE quality knob
+   (core/quality.js tier, the pause-menu perf/quality slider) governs cost via
+   a per-tier LOD visibility radius + default frustum culling. Each animal is
+   a small hand-built mesh group with no physics or per-limb colliders.
 
    Deterministic (owner rule #5): a single seeded rng places every herd, so the
    same animals stand in the same meadow every run. Ambient motion uses
@@ -46,8 +47,12 @@
   const mat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
   // ---- tuning -----------------------------------------------------------
-  const POP_CAP = 56;            // max live animals across the whole world (draw-call budget)
-  const HERD_MAX = 4;            // clamp a spawned herd so no one species floods the cap
+  // NO POPULATION BUDGET. Every species spawns its NATURAL population (packs ×
+  // real herd sizes). Render cost is governed by the game's one true knob —
+  // the performance/quality tier (core/quality.js, CBZ.qualityLevel): animals
+  // LOD-hide beyond a tier-driven visibility radius, and frustum culling does
+  // the rest. Gameplay content is never clamped by a hardcoded perf number.
+  const ANIMAL_VIS = [90, 130, 190, 270, 360];   // vis radius (u) per quality tier 0..4
   const AQUATIC_R0 = 560;        // ocean band (from field centre) inner radius
   const AQUATIC_R1 = 1500;       // ..outer radius (still inside the terrain ring)
   const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
@@ -191,12 +196,12 @@
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
 
   function seedHerd(sp) {
-    // place ONE herd of a species in its home biome (or the sea band).
+    // place ONE herd of a species in its home biome (or the sea band), at its
+    // NATURAL size — no clamps, no budget.
     const regs = sp.aquatic ? null : biomeRegions(sp.biome);
     if (!sp.aquatic && (!regs || !regs.length)) return 0;
     const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
-    let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
-    herd = Math.min(herd, HERD_MAX, POP_CAP - animals.length);
+    const herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
     let n = 0;
     for (let h = 0; h < herd; h++) {
       const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
@@ -214,35 +219,17 @@
 
   function spawnAll() {
     const S = CBZ.WILDLIFE_SPECIES || {};
-    // Build an INTERLEAVED work list so the cap is shared FAIRLY across biomes
-    // (filling forest-first would starve farmland/water). Bucket species by
-    // biome, then round-robin one biome at a time; each species contributes
-    // `packs` herds spread across the rounds.
-    const buckets = {};
+    // NATURAL POPULATIONS, no budget: every species simply spawns all of its
+    // packs at its real herd sizes. There is nothing to ration and no fill
+    // order to get starved by — every species always exists. Performance is
+    // the quality tier's job (LOD visibility below), never a spawn cap's.
     for (const id in S) {
       const sp = S[id]; if (sp.rarity === "legendary") continue;
-      (buckets[sp.biome] || (buckets[sp.biome] = [])).push(sp);
+      const packs = sp.packs || 2;
+      for (let p = 0; p < packs; p++) seedHerd(sp);
     }
-    const biomes = Object.keys(buckets);
-    // remaining herd allowance per species
-    const left = {};
-    for (const b of biomes) for (const sp of buckets[b]) left[sp.id] = Math.max(1, sp.packs || (sp.aquatic ? 2 : 2));
-    let progress = true;
-    while (animals.length < POP_CAP && progress) {
-      progress = false;
-      for (let bi = 0; bi < biomes.length && animals.length < POP_CAP; bi++) {
-        const list = buckets[biomes[bi]];
-        // one species from this biome per round (rotate through the bucket)
-        const rot = (buckets[biomes[bi]]._rot || 0);
-        for (let k = 0; k < list.length && animals.length < POP_CAP; k++) {
-          const sp = list[(rot + k) % list.length];
-          if (left[sp.id] > 0) { const added = seedHerd(sp); if (added > 0) { left[sp.id]--; progress = true; } buckets[biomes[bi]]._rot = (rot + k + 1) % list.length; break; }
-        }
-      }
-    }
-    // LEGENDARY — the incredibly rare ones. Each gets ONE guaranteed spawn deep
-    // in its home range (exempt from POP_CAP — there are only a handful and they
-    // ARE the marquee "incredibly rare animal" encounters).
+    // LEGENDARY — the incredibly rare ones. Each gets ONE spawn deep in its
+    // home range; they ARE the marquee "incredibly rare animal" encounters.
     for (const id in S) {
       const sp = S[id];
       if (sp.rarity !== "legendary") continue;
@@ -271,20 +258,17 @@
   }
 
   // per-species carrying capacity = the population the world was SEEDED with.
-  // Recorded once right after spawnAll so every herd has a natural size it
-  // breeds back toward (and a hard total so the world can't overgrow).
+  // This is ECOLOGY, not a perf budget: it's the natural herd size each species
+  // breeds back toward (a herd at its natural size simply has no room to grow).
   const CAPS = {};
-  let TOTAL_CAP = 0;
   function recordCaps() {
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i]; if (a.dead) continue;
       CAPS[a.species.id] = (CAPS[a.species.id] || 0) + 1;
     }
-    TOTAL_CAP = liveCount();
   }
 
   function breed() {
-    if (liveCount() >= TOTAL_CAP) return;        // world at natural equilibrium
     // bucket the LIVING by species (the dead don't reproduce)
     const bySpecies = {};
     for (let i = 0; i < animals.length; i++) {
@@ -307,7 +291,7 @@
       let births = 0;
       for (let i = 0; i < herd.length; i++) if (Math.random() < BREED_RATE * room) births++;
       births = Math.min(births, 2);             // one pass never explodes a herd
-      for (let b = 0; b < births && liveCount() < TOTAL_CAP; b++) {
+      for (let b = 0; b < births; b++) {
         const parent = herd[(Math.random() * herd.length) | 0];
         const jit = sp.aquatic ? 26 : 8;
         const nx = parent.pos.x + (Math.random() - 0.5) * jit;
@@ -438,8 +422,19 @@
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
+    // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
+    // tier): animals beyond the tier's radius don't render or animate their
+    // meshes — same pattern as the ped rig LOD. Big species read farther
+    // (you SHOULD spot an elephant across the savanna before a rabbit).
+    const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : ANIMAL_VIS.length - 1;
+    const visR = ANIMAL_VIS[Math.max(0, Math.min(ANIMAL_VIS.length - 1, q))];
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species, grp = a.group;
+      if (P) {
+        const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
+        const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);
+        grp.visible = a.ridden || a.tamed || (vdx * vdx + vdz * vdz) < vr * vr;
+      }
       if (a.dead) {
         a.skinT -= dt;
         if (a.skinT <= 0) { removeCarcass(a); i--; continue; }
