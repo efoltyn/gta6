@@ -57,6 +57,41 @@
   function normOrigin(id) { return IDS[id] ? id : "tenant"; }
   CBZ.cityOriginNormalize = normOrigin;
 
+  // ---- boot-time ledger peek --------------------------------------------
+  // Read the saved world ledger ONCE at script load, BEFORE any run starts:
+  //   • a save WITH an origin on record syncs the title-screen picker to it,
+  //     so a returning player who never touches the picker can't be misread
+  //     as "picked a different origin" (which would reset their character);
+  //   • a PRE-ORIGIN save (a real character from before this feature — no
+  //     originPlayed stamp but visible progress) must NEVER be wiped or have
+  //     an intro scene played over its money/state: it's adopted silently on
+  //     the first cityOriginApply instead. A stale do-nothing ledger (fresh
+  //     startCash, nothing logged, nothing owned) is NOT protected — that
+  //     player never really began, so they get the full opening scene.
+  let legacyLedger = false;
+  (function peekLedger() {
+    let raw = null;
+    try { raw = localStorage.getItem("CBZ_CITY_WORLD_V2"); } catch (e) { return; }
+    if (!raw) return;
+    let p = null;
+    try { p = JSON.parse(raw); } catch (e) { return; }
+    if (!p || p.version !== 2) return;
+    if (p.originPlayed && IDS[p.origin]) {
+      if (CBZ.game) CBZ.game.cityOrigin = p.origin;
+      if (CBZ.setCityOrigin) CBZ.setCityOrigin(p.origin);   // picker sync only — no "picked" intent
+      return;
+    }
+    const startCash = (CBZ.CITY && CBZ.CITY.econ && CBZ.CITY.econ.startCash) || 30;
+    const progressed =
+      (p.activityLog && p.activityLog.length > 0) ||
+      (p.weapons && p.weapons.length > 0) ||
+      (p.bank || 0) > 0 || (p.debt || 0) > 0 || (p.respect || 0) > 0 ||
+      (p.cash != null && Math.round(p.cash) !== startCash) ||
+      (p.criminalRecord && ((p.criminalRecord.arrests || 0) > 0 || (p.criminalRecord.charges || []).length > 0)) ||
+      (p.assets && Object.keys(p.assets).length > 0);
+    if (progressed) legacyLedger = true;
+  })();
+
   // ---- active scripted-scene state (one at a time) --------------------------
   let scene = null;
   let introActiveFlag = false;
@@ -110,8 +145,49 @@
     c.pos.y = floorY;
     const targetYaw = Math.atan2(dx, dz);
     c.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(c.group.rotation.y, targetYaw, Math.min(1, dt * 8)) : targetYaw;
+    // don't run THROUGH desks/walls on the way — and pass the actor's real
+    // standing band, else collide() treats every collider on every OTHER
+    // floor of the tower as blocking too (its height gate needs feetY/headY).
+    if (CBZ.collide) CBZ.collide(c.pos, 0.45, floorY + 0.1, floorY + 1.9);
+    c.pos.y = floorY;                            // re-seat on the slab after any nudge
     if (CBZ.animChar) CBZ.animChar(c.char, spd, dt);
     return gd;
+  }
+
+  // Every origin defines its own armament — mode.js's default CITY test
+  // loadout (bazooka/carbine/sidearm, granted earlier in the same reset())
+  // would make "starts with (only) a pistol" meaningless, so each opening
+  // strips back to bare hands first and grants exactly what its story says.
+  function stripLoadout() {
+    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
+    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
+  }
+
+  // Find an OPEN standing spot on a furnished floor: honors the building's
+  // own clearFloorPoint gate (door swing / stairwell run / lift shafts — the
+  // same gate the furnisher itself places around) AND the real solid
+  // colliders (desks, beds, partition walls) in the floor's standing band,
+  // so neither the player nor a scripted cop ever spawns inside furniture.
+  // Falls back to the preferred point if the spiral finds nothing.
+  function clearSpot(b, floorY, wx, wz, maxR) {
+    const bx = (b && b.ox != null) ? b.ox : 0, bz = (b && b.oz != null) ? b.oz : 0;
+    const cols = (b && b.colliders) || [];
+    function open(x, z) {
+      if (b && typeof b.clearFloorPoint === "function" && !b.clearFloorPoint(x - bx, z - bz, 0.6)) return false;
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        if (c.y1 != null && (c.y1 < floorY + 0.2 || c.y0 > floorY + 1.9)) continue;   // outside the standing band
+        if (x > c.minX - 0.35 && x < c.maxX + 0.35 && z > c.minZ - 0.35 && z < c.maxZ + 0.35) return false;
+      }
+      return true;
+    }
+    if (open(wx, wz)) return { x: wx, z: wz };
+    for (let r = 0.8; r <= (maxR || 6.5); r += 0.8)
+      for (let a = 0; a < 6.28; a += 0.524) {
+        const x = wx + Math.cos(a) * r, z = wz + Math.sin(a) * r;
+        if (open(x, z)) return { x: x, z: z };
+      }
+    return { x: wx, z: wz };
   }
 
   // ---- lot finders ------------------------------------------------------
@@ -182,11 +258,15 @@
     const FH = b.FH || 4.6;
     const storeys = b.storeys || 1;
     const floorY = (b.floorTops && b.floorTops[storeys - 1] != null) ? b.floorTops[storeys - 1] : (storeys - 1) * FH;
-    const w = b.w || (lot.w || 24), d = b.d || (lot.d || 24);
-    const door = b.door || { x: lot.cx, z: lot.cz + d / 2, nx: 0, nz: 1 };
-    const half = Math.max(4, Math.min(w, d) / 2 - 3);
-    const entry = { x: lot.cx - door.nx * half, z: lot.cz - door.nz * half };
-    const spot = { x: lot.cx + door.nx * half, z: lot.cz + door.nz * half };
+    const w = b.w || (lot.w || 24);
+    const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
+    // The raid arrives the way anyone reaches an upper floor — the STAIRWELL,
+    // which makeBuilding always runs along the local -X edge (buildings.js's
+    // roofCx comment: "clear of the -x stairwell"). Entry = just past the
+    // stair run; the exec stands across the plate by the far window wall.
+    // Both points are validated open (walls/desks/shaft) by clearSpot.
+    const entry = clearSpot(b, floorY, bx - w / 2 + (b.stairW || 3.2) + 1.4, bz);
+    const spot = clearSpot(b, floorY, bx + w / 2 - 2.4, bz);
 
     const P = CBZ.player;
     P.pos.set(spot.x, floorY, spot.z); P.vy = 0; P.grounded = true;
@@ -194,8 +274,8 @@
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.32; }
 
-    game.cash = 2000000; game.cityBank = 8000000;
-    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+    stripLoadout();                                // a fraudster carries a pen, not an RPG
+    game.cash = 2000000; game.cityBank = 8000000;  // cityOriginApply commits right after
     if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("suit", { silent: true });
     if (CBZ.city) CBZ.city.note("💼 Marcus Sterling. Top floor. On paper, worth more than the building.", 3);
 
@@ -265,8 +345,8 @@
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.3; }
 
-    game.cash = 45; game.cityDebt = 350;
-    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+    stripLoadout();                                // he drank the gun money
+    game.cash = 45; game.cityDebt = 350;           // cityOriginApply commits right after
     if (CBZ.cityDrink) { try { CBZ.cityDrink(2.5); } catch (e) {} }
     if (CBZ.city) CBZ.city.note("🍺 Last call came early tonight.", 2.6);
 
@@ -288,6 +368,7 @@
 
     scene = {
       kind: "barfly", t: 0, phase: "stand", bouncer, nx, nz,
+      doorX, doorZ, gy,
       cleanup: function () {
         if (this.bouncer) {
           const peds = CBZ.cityPeds;
@@ -303,22 +384,46 @@
   function tickBarfly(dt) {
     const s = scene;
     s.t += dt;
+    // keep the scripted doorman breathing while he stands there — controlled
+    // peds are skipped by the civilian brain (peds.js), so nobody else
+    // animates him; a statue at the door reads as a bug, not a bouncer.
+    if (s.bouncer && s.bouncer.char && CBZ.animChar && (s.phase === "stand" || s.phase === "toss")) {
+      CBZ.animChar(s.bouncer.char, 0, dt);
+    }
     if (s.phase === "stand") {
       if (s.t < 2.2) return;
-      s.phase = "toss";
+      s.phase = "toss"; s.t = 0;   // toss clock restarts — he watches you land before turning away
+      // The real "picked up and THROWN" contract (systems/physics.js's
+      // ph.air branch — the same channel grapple.js's fling uses): ballistic
+      // vx/vz/vy plus a tumble spin; physics carries him through the air,
+      // lands him in a knockdown (ph.down) flat on his back, and he gets
+      // back up. (The old kx/kz knockback only integrates for a player who
+      // is ALREADY knocked down — a standing player ignores it completely,
+      // so it never visibly threw anyone.)
       const P = CBZ.player;
-      P._phys = P._phys || {};
-      const FORCE = 8.5;
-      P._phys.kx = (P._phys.kx || 0) + s.nx * FORCE;
-      P._phys.kz = (P._phys.kz || 0) + s.nz * FORCE;
-      P.vy = Math.max(P.vy || 0, 3.2);
-      P.grounded = false;
+      const ph = P._phys = P._phys || {};
+      ph.air = true; ph.down = 0;
+      ph.vx = s.nx * 6.2; ph.vz = s.nz * 6.2;
+      ph.vy = 3.6; ph.spin = 2.4;
       if (CBZ.shake) CBZ.shake(0.5);
       if (CBZ.city) { CBZ.city.big("“AND STAY OUT!”"); CBZ.city.note("Tossed out on your ass — $45 and a bar tab you'll never pay off.", 3); }
       if (s.bouncer && s.bouncer.group) s.bouncer.group.rotation.y = Math.atan2(-s.nx, -s.nz);
       return;
     }
-    if (s.phase === "toss" && s.t >= 4.0) { s.phase = "done"; clearScene(); }
+    if (s.phase === "toss") {
+      // let the landing play out, then the doorman turns and walks back
+      // inside — he only despawns once he's in the doorway (or the beat
+      // times out), never blinking out of existence in front of the player.
+      if (s.t >= 2.4) { s.phase = "return"; s.rt = 0; }
+      return;
+    }
+    if (s.phase === "return") {
+      s.rt = (s.rt || 0) + dt;
+      const bn = s.bouncer;
+      if (!bn || !bn.group) { s.phase = "done"; clearScene(); return; }
+      const gd = stepScriptedTo(bn, s.gy || 0, s.doorX - s.nx * 1.2, s.doorZ - s.nz * 1.2, 1.7, dt);
+      if (gd < 0.5 || s.rt > 5) { s.phase = "done"; clearScene(); }
+    }
   }
 
   // ---------------------------------------------------------------
@@ -327,34 +432,48 @@
   function applyTenant(game) {
     const A = arena();
     const lot = findTenantTower();
-    let px, pz, floorY;
+    let px, pz, mx, mz, floorY;
     if (lot && lot.building) {
+      const b = lot.building;
       const units = CBZ.cityFloorUnits ? CBZ.cityFloorUnits(lot) : [];
       let unit = null;
       for (const u of units) { if (u && u.tier === 0) { unit = u; break; } }
       if (!unit && units.length) unit = units[0];
       floorY = unit ? unit.floorY : 0.14;
-      px = lot.cx; pz = lot.cz;
+      const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
+      // both the standing spot and the mattress get validated OPEN floor
+      // (clearSpot: walls / stair run / shaft / the floor's real furniture
+      // colliders) — a micro-unit floor plate is already furnished, and
+      // spawning the player inside a partition wall reads as a broken game.
+      const sp = clearSpot(b, floorY, bx + 1.2, bz + 0.8);
+      px = sp.x; pz = sp.z;
+      const ms = clearSpot(b, floorY, px - 1.7, pz - 0.4);
+      mx = ms.x; mz = ms.z;
+      if (Math.hypot(mx - px, mz - pz) < 0.9) { mx = px - 1.7; mz = pz - 0.4; }   // never on top of the player
     } else if (A && A.spawn) {
       px = A.spawn.x; pz = A.spawn.z; floorY = 0.14;
+      mx = px - 1.6; mz = pz - 0.3;
     } else return null;
 
-    const mx = px - 1.6, mz = pz - 0.3;
     const P = CBZ.player;
     P.pos.set(px, floorY, pz); P.vy = 0; P.grounded = true;
     const facing = Math.atan2(mx - px, mz - pz);
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.34; }
 
-    game.cash = 12; game.cityBank = 0;
-    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+    game.cash = 12; game.cityBank = 0;             // cityOriginApply commits right after
 
     const cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
     const outfitId = (cat && cat.wifebeater) ? "wifebeater" : "street";
     if (CBZ.cityWearOutfit) CBZ.cityWearOutfit(outfitId, { silent: true });
 
+    // $12 buys ONE gun's worth of story — strip the test loadout, grant the
+    // pistol, THEN seed the viewmodel/mags (the exact reset→unlock→fpsReset
+    // order mode.js itself uses, so the pistol arrives with clean base mags).
+    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
     if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon("Pistol");
     else if (CBZ.unlockWeapon) CBZ.unlockWeapon("sidearm", { select: true });
+    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
 
     if (A && A.root) buildAirMattress(A.root, mx, floorY, mz, facing + Math.PI);
     if (CBZ.city) CBZ.city.note("🔫 One room, one mattress, one way out.", 2.8);
@@ -384,19 +503,43 @@
       if (!CBZ.cityWorldEnsure) return { introActive: false };
       let w = CBZ.cityWorldEnsure();
       const selected = normOrigin(game.cityOrigin);
-      if (w.origin && w.origin !== selected && CBZ.cityWorldReset) {
-        CBZ.cityWorldReset();
-        w = CBZ.cityWorldEnsure();
+
+      // PRE-ORIGIN character (see peekLedger): a real save from before this
+      // feature. Adopt whatever's selected as their origin-on-record — play
+      // nothing, wipe nothing, override nothing.
+      if (legacyLedger && !w.originPlayed) {
+        legacyLedger = false;
+        w.origin = selected; w.originPlayed = true;
+        if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+        return { introActive: false };
       }
-      if (!w.originPlayed) {
-        const opts = applyOrigin(selected, game);
-        if (opts) {
-          w.origin = selected;
-          w.originPlayed = true;
-          if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-          introActiveFlag = true;
-          introOptsCache = opts.compact ? opts : null;
+      legacyLedger = false;
+
+      if (w.originPlayed) {
+        // A DIFFERENT origin only counts if the player actually CLICKED the
+        // picker this session (state.js stamps game.cityOriginPicked on the
+        // click, never on the default selection) — otherwise the picker's
+        // default would silently wipe a returning player's character.
+        if (game.cityOriginPicked && w.origin && w.origin !== selected && CBZ.cityWorldReset) {
+          CBZ.cityWorldReset();
+          w = CBZ.cityWorldEnsure();
+          if (CBZ.city && CBZ.city.note) CBZ.city.note("🆕 New story — fresh character.", 2.4);
+        } else {
+          if (w.origin && game.cityOrigin !== w.origin) {
+            game.cityOrigin = w.origin;                       // adopt the character on record
+            if (CBZ.setCityOrigin) CBZ.setCityOrigin(w.origin);
+          }
+          return { introActive: false };                      // saved character: default spawn stands
         }
+      }
+
+      const opts = applyOrigin(selected, game);
+      if (opts) {
+        w.origin = selected;
+        w.originPlayed = true;
+        if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+        introActiveFlag = true;
+        introOptsCache = opts.compact ? opts : null;
       }
     } catch (e) { try { console.error("[city origin] apply:", e); } catch (e2) {} }
     return { introActive: introActiveFlag };

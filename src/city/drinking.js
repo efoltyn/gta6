@@ -140,7 +140,7 @@
   //      own pos (physics.js already ran this frame at onUpdate(10), so this
   //      rides on top of it), perpendicular to the current look direction —
   //      plus, past LURCH_LEVEL, an occasional bigger one-off lurch + shake. -
-  let lurchT = 0;
+  let lurchT = 0, lurchVX = 0, lurchVZ = 0;
   function applyStumble(level, dt, t) {
     const P = CBZ.player, cam = CBZ.cam;
     if (!P || !P.pos || P.driving || P.dead) return;
@@ -149,15 +149,30 @@
     const sway = Math.sin(t * 0.7) * DRIFT_PER_LEVEL * level;
     P.pos.x += rx * sway * dt;
     P.pos.z += rz * sway * dt;
+    // big lurches are a short DECAYING VELOCITY, not an instant jump — an
+    // instant 0.5-1.2m pos write can cross a whole wall in one frame (this
+    // runs AFTER physics has already resolved the frame), i.e. tunneling.
+    // A burst integrated per-frame keeps every step small, and the collide()
+    // below (the same resolver physics.js exports) settles each step against
+    // the real world colliders immediately.
     if (level >= LURCH_LEVEL) {
       lurchT -= dt;
       if (lurchT <= 0) {
         lurchT = 3 + Math.random() * 4;
-        const dir = Math.random() * Math.PI * 2, mag = 0.5 + Math.random() * 0.7;
-        P.pos.x += Math.cos(dir) * mag; P.pos.z += Math.sin(dir) * mag;
+        const dir = Math.random() * Math.PI * 2, mag = 2.2 + Math.random() * 2.0;   // m/s burst ≈ 0.35-0.7m total
+        lurchVX = Math.cos(dir) * mag; lurchVZ = Math.sin(dir) * mag;
         if (CBZ.shake) CBZ.shake(0.3);
       }
-    } else lurchT = 0;
+    } else { lurchT = 0; lurchVX = lurchVZ = 0; }
+    if (lurchVX || lurchVZ) {
+      P.pos.x += lurchVX * dt; P.pos.z += lurchVZ * dt;
+      const dec = Math.pow(0.002, dt); lurchVX *= dec; lurchVZ *= dec;
+      if (Math.abs(lurchVX) < 0.05 && Math.abs(lurchVZ) < 0.05) lurchVX = lurchVZ = 0;
+    }
+    // never end a drunk frame inside a wall — with the player's real standing
+    // band, so collide()'s height gate ignores floors above/below (same
+    // feetY/headY contract physics.js's own resolver passes).
+    if (CBZ.collide) CBZ.collide(P.pos, 0.5, P.pos.y + 0.1, P.pos.y + 1.8);
   }
 
   // ---- soft vignette pulse on OUR OWN div (never #vignette) --------------
@@ -258,7 +273,11 @@
       return;
     }
 
-    if (state.level >= BLACKOUT_LEVEL) { beginBlackout(); return; }
+    // blacking out is DEFERRED while driving — a black screen with the car
+    // still rolling (stun only zeroes on-foot input; city/vehicles.js owns
+    // the wheel) is a crash you never saw. The level holds past the
+    // threshold and the collapse lands the moment both feet hit pavement.
+    if (state.level >= BLACKOUT_LEVEL && !(P && P.driving)) { beginBlackout(); return; }
 
     applyCanvasFilter(state.level);
     applySway(state.level, t);
