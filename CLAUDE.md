@@ -26,7 +26,12 @@ this order:
    - `node tools/city-atlas.mjs <seed>` — whole-world top-down render per
      seed. For procgen/layout changes; farm several seeds for regressions.
    - `node tools/demolition-check.mjs` — full destroy→rubble→cleared→
-     scaffold→rebuilt arc with phase screenshots + restore assertions.
+     scaffold→rebuilt arc with phase screenshots + restore assertions, plus
+     a FLOATING-GEOMETRY invariant: every prop box must be support-connected
+     to the ground (AABB chain). Copy that pattern for any new structure
+     builder — screenshots judge aesthetics, connectivity checks judge
+     physics, and thin members can LOOK floating at distance even when
+     connected (make members chunky: ≥0.3u, this is a voxel-look game).
    Shots land in `tools/shots/` (gitignored). READ the images — the loop has
    repeatedly caught defects that numeric checks missed (inside-out geometry,
    zombie-arm poses, floating trim), and numeric checks caught what images

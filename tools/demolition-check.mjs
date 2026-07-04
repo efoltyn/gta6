@@ -80,6 +80,43 @@ await shot("demo-e2e-0-intact.png");
 
 // collapse directly (blast-driven HP -> destroy already proven in the prior
 // run; cityExplosion chains ignite street cars whose cook-offs wreck the shoot)
+
+// ---- FLOATING-GEOMETRY INVARIANT --------------------------------------------
+// Every phase-prop box must be SUPPORTED: grounded (AABB bottom near y=0) or
+// resting on / pierced by another member below it, transitively down to the
+// ground. Catches "roof railing floating in the sky" numerically — screenshots
+// judge aesthetics, this judges connectivity (user-filmed defect class).
+const floatCheck = async (label) => {
+  const r = await evl(`(() => {
+    const lot = window.__lot;
+    const g = CBZ.cityDemolition.propGroup && CBZ.cityDemolition.propGroup(lot);
+    if (!g) return JSON.stringify({ err: "no prop group found" });
+    const boxes = [];
+    g.traverse((o) => { if (o.isMesh) { o.updateWorldMatrix(true, false); boxes.push(new THREE.Box3().setFromObject(o)); } });
+    const GROUND = 0.45, EPS = 0.15;
+    const supported = boxes.map((b) => b.min.y <= GROUND);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < boxes.length; i++) {
+        if (supported[i]) continue;
+        const bi = boxes[i];
+        for (let j = 0; j < boxes.length; j++) {
+          if (i === j || !supported[j]) continue;
+          const bj = boxes[j];
+          const xz = bi.min.x < bj.max.x - 0.02 && bi.max.x > bj.min.x + 0.02 && bi.min.z < bj.max.z - 0.02 && bi.max.z > bj.min.z + 0.02;
+          if (xz && bj.max.y >= bi.min.y - EPS && bj.min.y <= bi.min.y + EPS + 0.35) { supported[i] = true; changed = true; break; }
+        }
+      }
+    }
+    const floating = supported.filter((v) => !v).length;
+    return JSON.stringify({ boxes: boxes.length, floating });
+  })()`);
+  console.log("float-check[" + label + "]:", r);
+  try { if (JSON.parse(r).floating > 0) failures.push(label + ": " + r); } catch (e) { failures.push(label + ": " + r); }
+};
+const failures = [];
+
 const boom = await evl(`(() => {
   const lot = window.__lot, D = CBZ.cityDemolition;
   const ok = D.destroy(lot);
@@ -90,6 +127,7 @@ await sleep(1500);
 await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
 await sleep(700);
 await shot("demo-e2e-1-rubble.png");
+await floatCheck("rubble");
 
 // day-jump to CLEARED
 const p2 = await evl(`(() => { CBZ.dayCount(CBZ.dayCount() + 3); return "day=" + CBZ.dayTime().toFixed(2); })()`);
@@ -98,6 +136,7 @@ console.log("jump:", p2, "phase:", await evl("JSON.stringify(CBZ.cityDemolition.
 await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
 await sleep(700);
 await shot("demo-e2e-2-cleared.png");
+await floatCheck("cleared");
 
 // day-jump to SCAFFOLD
 await evl("CBZ.dayCount(CBZ.dayCount() + 2)");
@@ -106,6 +145,7 @@ console.log("phase:", await evl("JSON.stringify(CBZ.cityDemolition.list())"));
 await evl("(() => { const v = window.__view, b = window.__lot.building; CBZ.player.pos.x = v.px; CBZ.player.pos.z = v.pz; CBZ.player.pos.y = 1.5; if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(b.ox - v.px, b.oz - v.pz) + Math.PI; CBZ.cam.pitch = -0.02; } return 1; })()");
 await sleep(700);
 await shot("demo-e2e-3-scaffold.png");
+await floatCheck("scaffold");
 
 // day-jump past REBUILT
 const fin = await evl(`(() => { window.__colsBefore = CBZ.colliders.length; CBZ.dayCount(CBZ.dayCount() + 3); return true; })()`);
@@ -141,6 +181,7 @@ const rt = await evl(`(() => {
 })()`);
 console.log("roundtrip:", rt);
 const uniq = [...new Set(errors)];
+if (failures.length) console.log("FLOATING GEOMETRY FAILURES:", failures.join(" | "));
 console.log(uniq.length ? "PAGE ERRORS (" + uniq.length + "):\n" + uniq.slice(0, 10).join("\n") : "PAGE ERRORS: none");
 chrome.kill("SIGTERM"); server.kill("SIGTERM");
 await rm(profile, { recursive: true, force: true }).catch(() => {});
