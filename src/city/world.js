@@ -178,7 +178,15 @@
     photoLayer(roadTex, "assets/textures/asphalt512.jpg", function (g2, c) {
       g2.globalAlpha = 0.42; g2.fillStyle = "#26282e"; g2.fillRect(0, 0, c.width, c.height); g2.globalAlpha = 1;
     });
-    const roadMat = new THREE.MeshLambertMaterial({ map: roadTex });
+    // wet-road tie-in (feature-detected): CBZ.roadMat() hands back ONE shared
+    // MeshStandardMaterial that materials.js keeps darkening/shining as
+    // CBZ.weather.intensity rises — same map, same texture, so the merged
+    // quadField batching below is untouched (still one material instance
+    // shared across both merged meshes). Falls back to the original flat
+    // Lambert road if materials.js hasn't loaded (load-order safe).
+    const roadMat = CBZ.roadMat
+      ? CBZ.roadMat({ map: roadTex, color: 0xffffff })
+      : new THREE.MeshLambertMaterial({ map: roadTex });
     const roads = [];     // {x,z,vertical,len} drivable centre-line segments
     // LANE PAINT (multi-lane US street): off the centreline we paint, per side,
     // (lanesPerDir-1) DASHED WHITE lane dividers at ±k*laneW and a SOLID WHITE

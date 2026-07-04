@@ -351,6 +351,22 @@
         if (m && m.dead && !m._mourned) {
           m._mourned = true;
           if (m.kidnapped) { m.kidnapped = false; m.captiveOf = 0; }
+          // W7/W9 WIRING: a boss-family wife/kid was minted into the persistent
+          // family tree at cast time (marry()/bearChild() above, castFamilies())
+          // — that mint calls sidOf() which force-stamps m._sid via schedule.js's
+          // cityPedStash, so m._sid is reliably present here for anyone who went
+          // through that path. peds.js's own death funnel (cityKillPed) only
+          // reaches CBZ.cityFamilyTree.markDeath via social.js's citySocialDeath,
+          // which fires ONLY when ped.partner was set (peds.js:1613) — family.js's
+          // members never set .partner (that's social.js's own couple field, a
+          // different mechanism than fam/_role/famRole here), so a family.js
+          // death would otherwise never reach the tree and heirOf()/isLiving()
+          // would keep treating a dead wife/kid as alive forever. One guarded
+          // call closes that gap without touching familytree.js's own contract
+          // (mine's members never get a _sid — marry/bearChild are skipped for
+          // the player's own family per the W7 note above — so this is a no-op
+          // there, exactly matching "mine" families having no tree presence).
+          if (m._sid && CBZ.cityFamilyTree) CBZ.cityFamilyTree.markDeath(m._sid);
           if (fam.mine) {
             if (CBZ.cityFeed) CBZ.cityFeed("🕯 They got " + (m.name || "your people") + " at the house. This can't stand.", "#ff7a7a");
             if (CBZ.city && CBZ.city.note) CBZ.city.note("They hit your HOME. " + (m.name || "Family") + " is gone.", 4);

@@ -176,8 +176,14 @@
   // Prison population tiers. Named inmates always use the full social/combat
   // brain. JAIL_CROWD adds extra rich rigs; MASS_CROWD adds cheap instanced
   // ambient agents that still move, separate, and react locally.
+  // MASS_CROWD was 900, which read as a wall-to-wall mosh pit across the yard
+  // zones (the owner's "way too crowded" report). 140 is a packed-but-navigable
+  // yard: roughly 1 body per ~30m² across the ~4600m² of yard zones, layered
+  // on top of the ~54 named/procedural rigs + 11 guards. Raise it live via the
+  // Settings panel "Total Population" slider, or set CBZ_POP_OVERRIDE_V1 in
+  // localStorage (applied by index.html's pre-config shim before this file runs).
   CBZ.JAIL_CROWD = typeof CBZ.JAIL_CROWD === "number" ? CBZ.JAIL_CROWD : 14;
-  CBZ.MASS_CROWD = typeof CBZ.MASS_CROWD === "number" ? CBZ.MASS_CROWD : 900;
+  CBZ.MASS_CROWD = typeof CBZ.MASS_CROWD === "number" ? CBZ.MASS_CROWD : 140;
   // Production uses compact GPU points. Set window.CBZ.AB_TEST="A" before
   // load, or press P in overview, only when benchmarking legacy box markers.
   CBZ.AB_TEST = CBZ.AB_TEST === "A" ? "A" : "B";

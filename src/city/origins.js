@@ -58,7 +58,86 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const IDS = { exec: 1, barfly: 1, tenant: 1 };
+  // ========================================================================
+  // ORIGIN_TUNING — every magic number from the three openings, hoisted here
+  // so balancing a beat never means hunting through scene-logic code. Each
+  // origin owns its own block; shared beat-timing constants stay per-origin
+  // too (exec's raid cadence and barfly's toss cadence are unrelated).
+  // ========================================================================
+  const ORIGIN_TUNING = {
+    exec: {
+      startCash: 2000000,        // "millions on the books" — wiped by the bust
+      startBank: 8000000,
+      waitSec: 7,                 // seconds standing on the top floor before the raid announces
+      copSpeed: 3.8,               // m/s the scripted raid cops close at
+      bustRadius: 2.2,             // metres — first cop within this range triggers the cuff
+      raidMinSec: 0.6,             // raid phase must run at least this long before it CAN resolve
+      raidTimeoutSec: 6,           // raid force-resolves by this point even if nobody got close
+      copCount: 2,                 // regular officers (kept separate from the SWAT lead below)
+      swatCount: 1,                // exactly one SWAT lead — no coin flip
+      untouchableBarkCooldown: 2.5, // seconds between "Don't make this worse." barks on a wasted shot
+      missedLotFeed: "The firm's tower is being watched — you got out just ahead of the raid.",
+    },
+    barfly: {
+      startCash: 45,
+      startDebt: 350,
+      drunkLevel: 2.5,
+      standSec: 2.2,               // beat: stand at the door before the shove
+      tossSec: 2.4,                // beat: airborne / landing before the doorman turns away
+      returnTimeoutSec: 5,         // doorman gives up walking back and just despawns
+      tossSpeedXZ: 6.2,
+      tossSpeedY: 3.6,
+      tossSpin: 2.4,
+      shakeAmt: 0.5,
+      returnSpeed: 1.7,            // m/s the doorman walks back to the door
+      missedLotFeed: "The bar's shuttered for the night — you wake up in the gutter anyway, $45 and a tab you'll never pay off.",
+    },
+    tenant: {
+      startCash: 12,
+      startBank: 0,
+      missedLotFeed: "Your building's stairwell is roped off tonight — you crash on a friend's floor instead. One room, one way out, same as ever.",
+    },
+  };
+
+  // ========================================================================
+  // ONE REGISTRY (defect #5): id -> {meta, tuning, findSpawn, grants, scene}.
+  // A 4th protagonist is a data addition here — nothing else in this file
+  // (the vault, the wheel, the dispatcher) hard-codes exec/barfly/tenant by
+  // name anymore; they all walk Object.keys(ORIGINS). Declared up here
+  // (rather than down by the scene functions it references) because the
+  // boot-time ledger peek right below runs SYNCHRONOUSLY at load and needs
+  // IDS (derived from these keys) already live — a `const` this file
+  // referenced before its own declaration would throw (TDZ). The functions
+  // it points at (findOfficeLot/grantExec/sceneExec/…) are plain `function`
+  // declarations further down and are fully hoisted, so forward-referencing
+  // them here is safe.
+  // ========================================================================
+  const ORIGINS = {
+    exec: {
+      meta: { icon: "💼", name: "The Executive", blurb: "fraud, allegedly" },
+      get tuning() { return ORIGIN_TUNING.exec; },
+      findSpawn: function () { return findOfficeLot(); },
+      grants: function (game) { return grantExec(game); },
+      scene: function (game) { return sceneExec(game); },
+    },
+    barfly: {
+      meta: { icon: "🍺", name: "The Barfly", blurb: "last call regular" },
+      get tuning() { return ORIGIN_TUNING.barfly; },
+      findSpawn: function () { return findBarLot(); },
+      grants: function (game) { return grantBarfly(game); },
+      scene: function (game) { return sceneBarfly(game); },
+    },
+    tenant: {
+      meta: { icon: "🔫", name: "The Tenant", blurb: "one room, one way out" },
+      get tuning() { return ORIGIN_TUNING.tenant; },
+      findSpawn: function () { return findTenantTower(); },
+      grants: function (game) { return grantTenant(game); },
+      scene: function (game) { return sceneTenant(game); },
+    },
+  };
+  // hard-wired to the registry's own keys (defect #5) — no second literal
+  // id list to keep in sync when a 4th protagonist ships.
+  const IDS = Object.keys(ORIGINS).reduce(function (o, k) { o[k] = 1; return o; }, {});
   function normOrigin(id) { return IDS[id] ? id : "tenant"; }
   CBZ.cityOriginNormalize = normOrigin;
 
@@ -119,6 +198,18 @@
   const VAULT_KEY = "CBZ_CITY_CHARS_V1";
   const SHARED_KEYS = ["world", "economy", "politics"];   // the city, not the character
   let pendingShared = null;                 // shared-world payload for a not-yet-minted fresh ledger
+  // (defect #8 — audited, kept as-is: correct design.) A per-session memo,
+  // NOT persisted: id -> true once that character has been vaulted (parked)
+  // during THIS browser session via a real live handoff (switchLedgerTo with
+  // no preservePos). It exists purely to answer one question in restorePos():
+  // "is this character's saved lastPos.y trustworthy as an exact height, or
+  // should we re-derive standing height from the ground oracle instead?" A
+  // position saved by an EARLIER session (or by preservePos's title-screen
+  // freeze, which never trusts liveSession) may sit inside a procedurally
+  // re-rolled floor after a fresh page load — this session's own handoffs
+  // can't have drifted, so they get the cheap exact-height fast path. Reset
+  // implicitly every page load (module-scoped, never round-tripped to
+  // localStorage) — which is exactly the lifetime it needs.
   const liveSession = {};                   // ids vaulted THIS session — their exact lastPos.y is trustworthy
 
   function loadVault() {
@@ -335,8 +426,22 @@
     }
     return best;
   }
-  const TOWN_IDS = { goldspire: 1, capeharbor: 1, neonreef: 1, foundry: 1 };
+  // Derived from the LIVE town registry (city/citytemplates.js's
+  // CBZ.CITY_TEMPLATES — the one place every themed town, present and
+  // future, is defined) instead of a literal snapshot that goes stale the
+  // moment a new town ships (harvestmarket/pinecrest shipped after the
+  // original literal here and were silently never preferred). Falls back to
+  // the last-known-good literal only if the registry hasn't loaded yet.
+  function townIds() {
+    if (CBZ.CITY_TEMPLATES) {
+      const out = {};
+      for (const k in CBZ.CITY_TEMPLATES) out[k] = 1;
+      return out;
+    }
+    return { goldspire: 1, capeharbor: 1, neonreef: 1, foundry: 1, harvestmarket: 1, pinecrest: 1 };
+  }
   function findBarLot() {
+    const TOWN_IDS = townIds();
     const A = arena(); if (!A || !A.lots) return null;
     let town = null, any = null;
     for (const lot of A.lots) {
@@ -382,10 +487,37 @@
     return grp;
   }
 
+  // Generic safe fallback spawn used whenever an origin's SCENE can't be
+  // staged (its lot came back null on procedural bad luck — defect #3): the
+  // character's GRANTS (cash/bank/debt/outfit/weapon/drunk-level) already
+  // landed unconditionally before this runs, so the player is never worse
+  // off — they just wake up on the street instead of inside a staged beat.
+  function genericSafeSpawn() {
+    const A = arena();
+    const P = CBZ.player;
+    const sx = (A && A.spawn) ? A.spawn.x : 0, sz = (A && A.spawn) ? A.spawn.z : 0;
+    const gy = CBZ.floorAt ? CBZ.floorAt(sx, sz) : 0;
+    if (P && P.pos) { P.pos.set(sx, gy, sz); P.vy = 0; P.grounded = true; }
+    if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, 0, 0); }
+    if (CBZ.cam) { CBZ.cam.yaw = 0; CBZ.cam.pitch = 0.28; }
+    scene = null;
+  }
+
   // ---------------------------------------------------------------
   // EXEC — top-floor office, millions on the books, busted for fraud
   // ---------------------------------------------------------------
-  function applyExec(game) {
+  // GRANTS (defect #3): cash/bank/outfit/weapon-strip apply unconditionally,
+  // whether or not a real office lot can be found for the scripted raid.
+  function grantExec(game) {
+    const T = ORIGIN_TUNING.exec;
+    stripLoadout();                                 // a fraudster carries a pen, not an RPG
+    game.cash = T.startCash; game.cityBank = T.startBank;  // cityOriginApply commits right after
+    if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("suit", { silent: true });
+  }
+  // SCENE (may fail — bad procedural luck, no office lot this run): stages
+  // the top-floor spawn + scripted raid beat. Returns null (never throws) so
+  // the dispatcher can fall back to a generic safe spawn + cover story.
+  function sceneExec(game) {
     const lot = findOfficeLot();
     if (!lot || !lot.building) return null;
     const b = lot.building;
@@ -408,13 +540,10 @@
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.32; }
 
-    stripLoadout();                                // a fraudster carries a pen, not an RPG
-    game.cash = 2000000; game.cityBank = 8000000;  // cityOriginApply commits right after
-    if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("suit", { silent: true });
     if (CBZ.city) CBZ.city.note("💼 Marcus Sterling. Top floor. On paper, worth more than the building.", 3);
 
     scene = {
-      kind: "exec", t: 0, phase: "wait", cops: [], floorY, entry,
+      kind: "exec", t: 0, phase: "wait", cops: [], floorY, entry, barkT: -99,
       cleanup: function () { for (const c of this.cops) despawnActor(c); this.cops.length = 0; },
     };
     return { compact: true };
@@ -435,14 +564,36 @@
     clearScene();
   }
 
+  // EXEC SCENE AGENCY (defect #6): the raid cops are genuinely untouchable —
+  // this is a scripted arrest, not a fight the player can win or lose their
+  // way out of — but "untouchable" has to be LEGIBLE, not just a giant hp
+  // number that silently no-sells damage. Every tick we check each cop's hp
+  // against what we stamped it to last frame; if something knocked it down
+  // (a bullet, a car, anything), we snap it back to full AND surface the
+  // beat with a bark line + a light shake, throttled so unloading a mag
+  // doesn't spam the line every frame.
+  function holdUntouchable(s, c, dt) {
+    if (c.hp !== 999999) {
+      if (s.t - s.barkT > ORIGIN_TUNING.exec.untouchableBarkCooldown) {
+        s.barkT = s.t;
+        if (CBZ.city) CBZ.city.note("👮 \"Don't make this worse.\"", 2.2, { urgent: true });
+        if (CBZ.shake) CBZ.shake(0.15);
+      }
+      c.hp = 999999;
+    }
+    c.dead = false;
+  }
+
   function tickExec(dt) {
     const s = scene;
+    const T = ORIGIN_TUNING.exec;
     s.t += dt;
     if (s.phase === "wait") {
-      if (s.t < 7) return;
+      if (s.t < T.waitSec) return;
       s.phase = "raid"; s.t = 0;
-      const swatCount = 1, extra = 1 + (Math.random() < 0.6 ? 1 : 0);
-      for (let i = 0; i < swatCount + extra; i++) {
+      // deterministic count (defect #6): no coin flip — always copCount
+      // regulars + exactly one SWAT lead.
+      for (let i = 0; i < T.copCount + T.swatCount; i++) {
         const jx = (Math.random() - 0.5) * 3, jz = (Math.random() - 0.5) * 3;
         const c = scriptedCop(s.entry.x + jx, s.entry.z + jz, s.floorY, i === 0);
         if (c) s.cops.push(c);
@@ -455,17 +606,29 @@
       let minD = 1e9;
       for (const c of s.cops) {
         if (!c) continue;
-        const gd = stepScriptedTo(c, s.floorY, P.pos.x, P.pos.z, 3.8, dt);
+        holdUntouchable(s, c, dt);
+        const gd = stepScriptedTo(c, s.floorY, P.pos.x, P.pos.z, T.copSpeed, dt);
         if (gd < minD) minD = gd;
       }
-      if (s.t > 0.6 && (minD <= 2.2 || s.t >= 6)) { s.phase = "bust"; fireExecBust(); }
+      if (s.t > T.raidMinSec && (minD <= T.bustRadius || s.t >= T.raidTimeoutSec)) { s.phase = "bust"; fireExecBust(); }
     }
   }
 
   // ---------------------------------------------------------------
   // BARFLY — thrown out of a small-town bar, broke and in debt
   // ---------------------------------------------------------------
-  function applyBarfly(game) {
+  // GRANTS (defect #3): apply unconditionally — a broke drunk is broke and
+  // in debt whether or not a bar lot can be found for the toss scene.
+  function grantBarfly(game) {
+    const T = ORIGIN_TUNING.barfly;
+    stripLoadout();                                // he drank the gun money
+    game.cash = T.startCash; game.cityDebt = T.startDebt;   // cityOriginApply commits right after
+    if (CBZ.cityDrink) { try { CBZ.cityDrink(T.drunkLevel); } catch (e) {} }
+    if (CBZ.city) CBZ.city.note("🍺 Last call came early tonight.", 2.6);
+  }
+  // SCENE (may fail — no bar lot AND no arena spawn to fall back to, which
+  // only happens if the arena itself never built): the door + bouncer toss.
+  function sceneBarfly(game) {
     const A = arena();
     const lot = findBarLot();
     let doorX, doorZ, nx = 0, nz = 1;
@@ -483,11 +646,6 @@
     const facing = Math.atan2(doorX - px, doorZ - pz);
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.3; }
-
-    stripLoadout();                                // he drank the gun money
-    game.cash = 45; game.cityDebt = 350;           // cityOriginApply commits right after
-    if (CBZ.cityDrink) { try { CBZ.cityDrink(2.5); } catch (e) {} }
-    if (CBZ.city) CBZ.city.note("🍺 Last call came early tonight.", 2.6);
 
     let bouncer = null;
     if (CBZ.cityMakePed && CBZ.cityPeds && A && A.root) {
@@ -522,6 +680,7 @@
 
   function tickBarfly(dt) {
     const s = scene;
+    const T = ORIGIN_TUNING.barfly;
     s.t += dt;
     // keep the scripted doorman breathing while he stands there — controlled
     // peds are skipped by the civilian brain (peds.js), so nobody else
@@ -530,7 +689,7 @@
       CBZ.animChar(s.bouncer.char, 0, dt);
     }
     if (s.phase === "stand") {
-      if (s.t < 2.2) return;
+      if (s.t < T.standSec) return;
       s.phase = "toss"; s.t = 0;   // toss clock restarts — he watches you land before turning away
       // The real "picked up and THROWN" contract (systems/physics.js's
       // ph.air branch — the same channel grapple.js's fling uses): ballistic
@@ -542,9 +701,9 @@
       const P = CBZ.player;
       const ph = P._phys = P._phys || {};
       ph.air = true; ph.down = 0;
-      ph.vx = s.nx * 6.2; ph.vz = s.nz * 6.2;
-      ph.vy = 3.6; ph.spin = 2.4;
-      if (CBZ.shake) CBZ.shake(0.5);
+      ph.vx = s.nx * T.tossSpeedXZ; ph.vz = s.nz * T.tossSpeedXZ;
+      ph.vy = T.tossSpeedY; ph.spin = T.tossSpin;
+      if (CBZ.shake) CBZ.shake(T.shakeAmt);
       if (CBZ.city) { CBZ.city.big("“AND STAY OUT!”"); CBZ.city.note("Tossed out on your ass — $45 and a bar tab you'll never pay off.", 3); }
       if (s.bouncer && s.bouncer.group) s.bouncer.group.rotation.y = Math.atan2(-s.nx, -s.nz);
       return;
@@ -553,22 +712,40 @@
       // let the landing play out, then the doorman turns and walks back
       // inside — he only despawns once he's in the doorway (or the beat
       // times out), never blinking out of existence in front of the player.
-      if (s.t >= 2.4) { s.phase = "return"; s.rt = 0; }
+      if (s.t >= T.tossSec) { s.phase = "return"; s.rt = 0; }
       return;
     }
     if (s.phase === "return") {
       s.rt = (s.rt || 0) + dt;
       const bn = s.bouncer;
       if (!bn || !bn.group) { s.phase = "done"; clearScene(); return; }
-      const gd = stepScriptedTo(bn, s.gy || 0, s.doorX - s.nx * 1.2, s.doorZ - s.nz * 1.2, 1.7, dt);
-      if (gd < 0.5 || s.rt > 5) { s.phase = "done"; clearScene(); }
+      const gd = stepScriptedTo(bn, s.gy || 0, s.doorX - s.nx * 1.2, s.doorZ - s.nz * 1.2, T.returnSpeed, dt);
+      if (gd < 0.5 || s.rt > T.returnTimeoutSec) { s.phase = "done"; clearScene(); }
     }
   }
 
   // ---------------------------------------------------------------
   // TENANT — a wife-beater, a twin air mattress, $12 and a pistol
   // ---------------------------------------------------------------
-  function applyTenant(game) {
+  // GRANTS (defect #3): cash/outfit/pistol apply unconditionally, whether or
+  // not a real tower unit can be found for the mattress dressing.
+  function grantTenant(game) {
+    const T = ORIGIN_TUNING.tenant;
+    game.cash = T.startCash; game.cityBank = T.startBank;    // cityOriginApply commits right after
+    const cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
+    const outfitId = (cat && cat.wifebeater) ? "wifebeater" : "street";
+    if (CBZ.cityWearOutfit) CBZ.cityWearOutfit(outfitId, { silent: true });
+    // $12 buys ONE gun's worth of story — strip the test loadout, grant the
+    // pistol, THEN seed the viewmodel/mags (the exact reset→unlock→fpsReset
+    // order mode.js itself uses, so the pistol arrives with clean base mags).
+    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
+    if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon("Pistol");
+    else if (CBZ.unlockWeapon) CBZ.unlockWeapon("sidearm", { select: true });
+    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
+  }
+  // SCENE (may fail — no tower unit AND no arena spawn, i.e. the arena never
+  // built): places the player + the air-mattress dressing.
+  function sceneTenant(game) {
     const A = arena();
     const lot = findTenantTower();
     let px, pz, mx, mz, floorY;
@@ -600,20 +777,6 @@
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.34; }
 
-    game.cash = 12; game.cityBank = 0;             // cityOriginApply commits right after
-
-    const cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
-    const outfitId = (cat && cat.wifebeater) ? "wifebeater" : "street";
-    if (CBZ.cityWearOutfit) CBZ.cityWearOutfit(outfitId, { silent: true });
-
-    // $12 buys ONE gun's worth of story — strip the test loadout, grant the
-    // pistol, THEN seed the viewmodel/mags (the exact reset→unlock→fpsReset
-    // order mode.js itself uses, so the pistol arrives with clean base mags).
-    if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
-    if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon("Pistol");
-    else if (CBZ.unlockWeapon) CBZ.unlockWeapon("sidearm", { select: true });
-    if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
-
     if (A && A.root) buildAirMattress(A.root, mx, floorY, mz, facing + Math.PI);
     if (CBZ.city) CBZ.city.note("🔫 One room, one mattress, one way out.", 2.8);
 
@@ -624,15 +787,24 @@
   // ---------------------------------------------------------------
   // dispatch + public contract
   // ---------------------------------------------------------------
+  // (defect #3) GRANTS always apply first — cash/bank/debt/outfit/weapon are
+  // the character's story and must land no matter what the procedural city
+  // rolled this run. The SCENE (the scripted beat: raid / toss / dressing)
+  // is best-effort: if its lot came back null, we fall back to a generic
+  // safe street spawn and cover the fiction with a feed line instead of
+  // silently skipping the whole origin (the old landmine — it used to stamp
+  // originPlayed=true and grant NOTHING when the lot roll failed).
   function applyOrigin(id, game) {
-    try {
-      if (id === "exec") return applyExec(game);
-      if (id === "barfly") return applyBarfly(game);
-      return applyTenant(game);
-    } catch (e) {
-      try { console.error("[city origin] apply failed:", id, e); } catch (e2) {}
-      return null;
+    const o = ORIGINS[normOrigin(id)];
+    try { o.grants(game); } catch (e) { try { console.error("[city origin] grants failed:", id, e); } catch (e2) {} }
+    let opts = null;
+    try { opts = o.scene(game); } catch (e) { try { console.error("[city origin] scene failed:", id, e); } catch (e2) {} opts = null; }
+    if (!opts) {
+      genericSafeSpawn();
+      if (CBZ.city) CBZ.city.note(o.tuning.missedLotFeed || "You get out just ahead of trouble.", 3);
+      opts = { compact: true };
     }
+    return opts;
   }
 
   CBZ.cityOriginApply = function (game) {
@@ -716,11 +888,9 @@
   // swap ledgers, restart the city run (mode reset resumes the newcomer
   // where they were), fade back in.
   // ========================================================================
-  const CHAR_META = {
-    exec: { icon: "💼", name: "The Executive", blurb: "fraud, allegedly" },
-    barfly: { icon: "🍺", name: "The Barfly", blurb: "last call regular" },
-    tenant: { icon: "🔫", name: "The Tenant", blurb: "one room, one way out" },
-  };
+  // (defect #5) meta now lives on the ORIGINS registry above — the vault's
+  // key list below is derived from it too, so a 4th protagonist just needs
+  // a new ORIGINS entry, never a second literal id list here.
   let wheelEl = null, fadeEl = null;
 
   function moneyFmt(n) { return "$" + Math.round(n || 0).toLocaleString(); }
@@ -753,8 +923,8 @@
     const v = loadVault();
     const act = activeCharId();
     let rows = "";
-    for (const id of ["exec", "barfly", "tenant"]) {
-      const m = CHAR_META[id];
+    for (const id of Object.keys(ORIGINS)) {
+      const m = ORIGINS[id].meta;
       let status, dim = "";
       if (id === act) { status = "<span style='color:#7ed957'>YOU · " + moneyFmt(g.cash) + "</span>"; dim = "opacity:.55;pointer-events:none;"; }
       else if (v.chars[id]) status = "<span style='color:#ffd451'>" + moneyFmt(v.chars[id].cash) + "</span>";
@@ -775,8 +945,17 @@
   }
 
   function wheelOpen() { return wheelEl && wheelEl.style.display === "block"; }
+  // KEY OWNERSHIP (see captives.js's matching block): [U] is contextual and
+  // three-way shared with captives.js's custody HUD and wealth.js's business
+  // panel. wealth.js already sets CBZ.cityMenuOpen while its panel is open,
+  // which the guard above already blocks on; this extra check is defense in
+  // depth for captives.js specifically, since its own capture-phase handler
+  // is the one that actually decides whether the wheel even sees the
+  // keypress (it only lets U fall through when it has nothing of its own to
+  // show or isn't itself open).
   function openWheel() {
     if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
+    if (CBZ.cityCaptivesHudOpen && CBZ.cityCaptivesHudOpen()) return;
     const P = CBZ.player;
     if (!P || P.dead || g.busted) return;
     if (P.driving) { if (CBZ.city) CBZ.city.note("Park it first — no switching from the driver's seat.", 1.8); return; }
@@ -814,6 +993,15 @@
     }, 470);
   }
 
+  // KEY OWNERSHIP: this is a BUBBLE-phase listener, registered after
+  // captives.js's CAPTURE-phase one. captives.js only preventDefault +
+  // stopPropagation's the keydown when it has custody state to show (or its
+  // own panel is already open) — any other press of U reaches here
+  // untouched. openWheel() additionally stands down while the captives HUD
+  // or wealth's business panel (via CBZ.cityMenuOpen) is open. No listener
+  // here ever needs to check "is this key already handled" — the capture-
+  // phase stopPropagation from captives.js (when it fires) prevents this
+  // handler from running at all for that keydown.
   document.addEventListener("keydown", function (e) {
     if (e.repeat) return;
     const k = (e.key || "").toLowerCase();

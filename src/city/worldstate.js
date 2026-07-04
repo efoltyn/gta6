@@ -58,6 +58,31 @@
       cityPawnTickets: [],
       cityOutfit: {},
       cityFenceRep: 0,
+      // ---- per-character state that used to BLEED across the three-
+      //      protagonist vault (origins.js) because it lived only on
+      //      CBZ.game and was never carried by this ledger: wardrobe
+      //      (g.cityFit/g.cityWornOutfit — actually persisted by outfits.js's
+      //      own commit/collect wrap + hydrateFitFromLedger(), the
+      //      established "stamp before commit" pattern in this file — see
+      //      outfits.js), the property ladder (home/rent/garage/penthouse/
+      //      heli/hangar — persisted here, RESTORED by realestate.js's
+      //      cityRealEstateReset() because mode.js's reset() calls that
+      //      AFTER cityWorldBeginRun and unconditionally wipes these fields
+      //      for "a fresh run" — restoring in applyToGame() alone would just
+      //      get clobbered a few lines later in mode.js), and gang state
+      //      (playerGang/cityMembership/playerGangId — restored by a lazy
+      //      wrap around CBZ.cityPlayerGangReset(), since that call — via
+      //      cityCareersReset() — runs even later in the same reset() and
+      //      also nulls everything unconditionally).
+      cityHome: null,            // {tier,id,name,doorX,doorZ} — see realestate.js cityHomeSerialize/Restore
+      cityRentTier: null,
+      cityGarage: [],
+      cityOwnsPenthouse: false,
+      cityOwnsHeli: false,
+      cityOwnsHangar: false,
+      playerGang: null,           // safe subset only: {id,name,color,founded,order} — never live ped refs
+      cityMembership: null,       // {gangId,rank,standing,bodies,contrib,loyalty,how} — plain data, safe whole
+      playerGangId: null,
       assets: { properties: [], businesses: [], vehicles: [], weapons: [] },
       injuries: 0,
       criminalRecord: { wantedPeak: 0, heatPeak: 0, arrests: 0, escapes: 0, charges: [] },
@@ -150,6 +175,30 @@
     w.cityPawnTickets = copy(g.cityPawnTickets || []);
     w.cityOutfit = copy(g.cityOutfit || {});
     w.cityFenceRep = g.cityFenceRep || 0;
+    // ---- property ladder (LEDGER GAP fix — see fresh()'s comment). cityHome
+    // holds a LIVE lot reference (buildings/meshes) that must never be
+    // JSON.stringify'd directly — realestate.js's cityHomeSerialize() gives us
+    // back a small plain descriptor {tier,id,name,doorX,doorZ} instead.
+    w.cityHome = (CBZ.cityHomeSerialize && CBZ.cityHomeSerialize()) || null;
+    w.cityRentTier = (g.cityRentTier != null) ? g.cityRentTier : null;
+    w.cityGarage = Array.isArray(g.cityGarage) ? g.cityGarage.slice() : [];
+    w.cityOwnsPenthouse = !!g.cityOwnsPenthouse;
+    w.cityOwnsHeli = !!g.cityOwnsHeli;
+    w.cityOwnsHangar = !!g.cityOwnsHangar;
+    // wire the dead assets.vehicles field to the real garage list (defect: it
+    // used to sit empty forever — nothing wrote to it).
+    w.assets = w.assets || { properties: [], businesses: [], vehicles: [], weapons: [] };
+    w.assets.vehicles = w.cityGarage.slice();
+    // ---- gang state. g.playerGang carries LIVE ped refs (members/boss/turf)
+    // that are NOT JSON-safe (circular THREE refs would throw inside copy()
+    // and abort the whole save) — snapshot only the safe identity subset.
+    // g.cityMembership (patched into an NPC gang) is already plain data.
+    w.playerGang = g.playerGang
+      ? { id: g.playerGang.id, name: g.playerGang.name, color: g.playerGang.color,
+          founded: !!g.playerGang.founded, order: g.playerGang.order || "follow" }
+      : null;
+    w.cityMembership = g.cityMembership ? copy(g.cityMembership) : null;
+    w.playerGangId = g.playerGangId || null;
     const stowed = g._copStow;
     w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
     w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
@@ -182,6 +231,30 @@
     g.cityOutfit = copy(w.cityOutfit || {});
     g.cityFenceRep = w.cityFenceRep || 0;
     g.cityMeleeWeapon = w.meleeWeapon || null;
+    // ---- property ladder + gang identity (LEDGER GAP fix). Restoring these
+    // here covers the MP-adopt path and any future caller of applyToGame()
+    // directly; the NORMAL single-player run path additionally relies on
+    // realestate.js's cityRealEstateReset() and the cityPlayerGangReset()
+    // wrap below re-reading g.cityWorld — mode.js's reset() calls those
+    // AFTER cityWorldBeginRun (this function) and unconditionally zeroes
+    // these same fields for "a fresh run", so setting them here ALONE would
+    // get silently clobbered a few lines later. Both restore paths read the
+    // SAME w object, so they always agree.
+    g.cityRentTier = (w.cityRentTier != null) ? w.cityRentTier : null;
+    g.cityGarage = Array.isArray(w.cityGarage) ? w.cityGarage.slice() : [];
+    g.cityOwnsPenthouse = !!w.cityOwnsPenthouse;
+    g.cityOwnsHeli = !!w.cityOwnsHeli;
+    g.cityOwnsHangar = !!w.cityOwnsHangar;
+    if (w.cityHome && CBZ.cityHomeRestore) { try { CBZ.cityHomeRestore(w.cityHome); } catch (e) {} }
+    g.playerGang = w.playerGang ? copy(w.playerGang) : null;
+    g.cityMembership = w.cityMembership ? copy(w.cityMembership) : null;
+    g.playerGangId = w.playerGangId || null;
+    // wardrobe (cityFit/cityWornOutfit) + a body/portrait redress: outfits.js
+    // owns this state's shape (composite items, painted specials, drip) —
+    // delegate the actual restore + redraw to it so there's one source of
+    // truth. Synchronous (not "next tick") so a freshly-loaded corner
+    // portrait never flashes the default white-tee before catching up.
+    if (CBZ.cityWardrobeHydrate) { try { CBZ.cityWardrobeHydrate(); } catch (e) {} }
     g.cityTransport = w.transport;
     g.cityPolitics = w.politics;
     g.cityFactions = w.factions;
@@ -366,8 +439,38 @@
     return "";
   };
 
+  // ---- gang-state re-hydrate wrap (LEDGER GAP fix, cont'd) ----------------
+  // playergang.js's CBZ.cityPlayerGangReset() unconditionally nulls
+  // g.playerGang/g.cityMembership/g.playerGangId every run (called from
+  // careers.js's cityCareersReset(), which mode.js's reset() runs LAST of
+  // all the per-run resets — after cityWorldBeginRun already re-pointed
+  // g.cityWorld at the right character). We don't own playergang.js, so we
+  // wrap its exported reset function the same way origins.js already wraps
+  // ours (the established pattern here): let the real reset run first (it
+  // nulls everything), then restore this character's own safe-subset state
+  // off the CURRENT g.cityWorld. Installed lazily/idempotently from a tick
+  // because playergang.js may load before OR after this file.
+  let _gangResetWrapped = false;
+  function ensureGangResetWrap() {
+    if (_gangResetWrapped) return;
+    const prev = CBZ.cityPlayerGangReset;
+    if (typeof prev !== "function") return;   // playergang.js not loaded yet — retry next tick
+    _gangResetWrapped = true;
+    CBZ.cityPlayerGangReset = function () {
+      const r = prev.apply(this, arguments);
+      try {
+        const w = ensure();
+        if (w.playerGang) g.playerGang = copy(w.playerGang);
+        if (w.cityMembership) g.cityMembership = copy(w.cityMembership);
+        if (w.playerGangId) g.playerGangId = w.playerGangId;
+      } catch (e) {}
+      return r;
+    };
+  }
+
   CBZ.onUpdate(32.4, function (dt) {
     if (g.mode !== "city") return;
+    ensureGangResetWrap();
     const w = ensure();
     w.world.panic = Math.max(0, (w.world.panic || 0) - dt * 0.18);
     w.world.emergency = Math.max(0, (w.world.emergency || 0) - dt * 0.05);

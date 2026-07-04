@@ -586,10 +586,37 @@
     //      causeway, the desert arterial, etc.) simply doesn't match and is
     //      byte-identical to before — this never rewrites the deck/collision
     //      machinery above, only adds cable/tower dressing over it.
-    if (!elevated && path.length === 2 && Math.abs(width - 24) < 0.01 &&
-        Math.abs(path[0].x - path[1].x) < 0.5 && totLen > 280 && totLen < 292) {
+    // Explicit opts flag takes priority over the geometry fingerprint below —
+    // island_airport.js (or any future causeway caller) is out of this task's
+    // file list, so it can't be edited to pass this, but ANY caller that
+    // already has (or later gains) the opts object can just say
+    // `suspensionBridge: true/false` and skip the guesswork entirely.
+    // FP = the tolerant fingerprint, overridable in one place via
+    // CBZ.CONFIG.BRIDGE_FINGERPRINT so future drift (a re-tuned causeway
+    // length/width) doesn't require touching this file blind.
+    const FP = Object.assign({
+      width: 24, widthTol: 0.01, lenMin: 280, lenMax: 292,
+      // wider band used only to detect a "near miss" worth warning about —
+      // catches e.g. a causeway nudged to len 295 or width 22 that would
+      // otherwise silently stop getting its bridge dressing.
+      nearWidthTol: 2, nearLenMin: 250, nearLenMax: 320,
+    }, (CBZ.CONFIG && CBZ.CONFIG.BRIDGE_FINGERPRINT) || {});
+    const straight2pt = !elevated && path.length === 2 && Math.abs(path[0].x - path[1].x) < 0.5;
+    const fpMatch = straight2pt && Math.abs(width - FP.width) < FP.widthTol &&
+      totLen > FP.lenMin && totLen < FP.lenMax;
+    const wantBridge = opts.suspensionBridge != null ? !!opts.suspensionBridge : fpMatch;
+    if (wantBridge) {
       try { buildSuspensionDressing(group, path, width, deckY, gradeAt); }
       catch (e) { /* pure visual dressing — never sink the highway build over it */ }
+    } else if (opts.suspensionBridge == null && straight2pt &&
+        Math.abs(width - FP.width) < FP.nearWidthTol &&
+        totLen > FP.nearLenMin && totLen < FP.nearLenMax) {
+      // near-miss: looks like it WANTS to be the dressed causeway (close width,
+      // plausible length) but fails the tight fingerprint — flag it loudly so
+      // drift in a caller we don't own doesn't silently drop the bridge visual.
+      console.warn("[highways] suspension-bridge fingerprint near-miss (width=" + width +
+        ", len=" + totLen.toFixed(1) + ") — no dressing built. Pass opts.suspensionBridge " +
+        "or tune CBZ.CONFIG.BRIDGE_FINGERPRINT if this span should get it.");
     }
 
     // ---- HWY-3: REGISTER DRIVABLE ROAD SEGMENTS (the WHY: a highway you can

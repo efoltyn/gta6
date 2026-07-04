@@ -358,6 +358,53 @@
   function close() { if (panel) panel.style.display = "none"; CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
   CBZ.cityCloseRealty = close;
 
+  // ---- LEDGER GAP fix: serialize/restore the property ladder ----------------
+  // g.cityHome.lot is a LIVE lot reference (building meshes/colliders) — never
+  // JSON-safe to drop straight onto the world ledger. worldstate.js's commit()
+  // calls cityHomeSerialize() for a small plain descriptor instead; on the
+  // restore side, cityRealEstateReset() (below) calls cityHomeRestore() to
+  // re-find the matching lot. Because build() only runs city.arena ONCE per
+  // page load (mode.js's reset() reuses the same arena on every subsequent
+  // run/character-switch), the SAME lot object is still live all session, so
+  // matching by door position round-trips exactly. A true page reload rebuilds
+  // the arena from scratch (new lot objects) — we do our best via tier+id
+  // matching in that case, but an exact re-find isn't guaranteed; that's an
+  // inherent limit of a procedurally-rebuilt city, not a regression here.
+  CBZ.cityHomeSerialize = function () {
+    if (!g.cityHome || !g.cityHome.lot) return null;
+    const lot = g.cityHome.lot;
+    const door = lot.building && lot.building.door;
+    return {
+      tier: g.cityHome.tier, id: g.cityHome.id, name: g.cityHome.name,
+      doorX: door ? door.x : null, doorZ: door ? door.z : null,
+    };
+  };
+  CBZ.cityHomeRestore = function (desc) {
+    if (!desc) return false;
+    const A = CBZ.city && CBZ.city.arena;
+    const pool = A && A.homeLots;
+    if (!pool || !pool.length) return false;
+    let best = null, bestD = Infinity;
+    for (const lot of pool) {
+      const h = lot.building && lot.building.home;
+      if (!h || (desc.id != null && h.id !== desc.id)) continue;
+      const door = lot.building.door;
+      const d = (door && desc.doorX != null) ? Math.hypot(door.x - desc.doorX, door.z - desc.doorZ) : 0;
+      if (d < bestD) { bestD = d; best = lot; }
+    }
+    if (!best) {
+      // last-resort: same tier, any lot (an exact id/door match failed —
+      // likely a fresh procedural rebuild across a real page reload)
+      for (const lot of pool) { const h = lot.building && lot.building.home; if (h && h.tier === desc.tier) { best = lot; break; } }
+    }
+    if (!best) return false;
+    best.building.home.owned = true;
+    g.cityHome = { lot: best, tier: desc.tier, id: desc.id, name: desc.name };
+    g.citySpawnPoint = g.citySpawnPoint || { x: best.building.door.x, z: best.building.door.z };
+    armPenthouse(best);   // re-arms the heli/penthouse flags if this is the flagship tower
+    return true;
+  };
+
   CBZ.cityRealEstateReset = function () {
     g.cityHome = null; g.cityRentTier = null; g.cityGarage = []; g.citySpawnPoint = null;
     // apex-home airpower (penthouse helicopter + bought hangar) resets per run
@@ -366,6 +413,21 @@
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.homeLots) for (const l of A.homeLots) if (l.building.home) l.building.home.owned = false;
     if (panel) panel.style.display = "none";
+    // LEDGER GAP fix: mode.js's reset() calls this AFTER cityWorldBeginRun
+    // (which already re-pointed g.cityWorld at the correct character), so the
+    // hard-wipe above would otherwise permanently erase the property ladder
+    // on every run/character-switch. Re-hydrate from the CURRENT ledger right
+    // here — the one place guaranteed to run after both the wipe above and
+    // the ledger swap.
+    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
+    if (w) {
+      g.cityRentTier = (w.cityRentTier != null) ? w.cityRentTier : null;
+      g.cityGarage = Array.isArray(w.cityGarage) ? w.cityGarage.slice() : [];
+      g.cityOwnsPenthouse = !!w.cityOwnsPenthouse;
+      g.cityOwnsHeli = !!w.cityOwnsHeli;
+      g.cityOwnsHangar = !!w.cityOwnsHangar;
+      if (w.cityHome) CBZ.cityHomeRestore(w.cityHome);
+    }
   };
 
   addEventListener("keydown", function (e) {

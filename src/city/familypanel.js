@@ -363,6 +363,14 @@
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
       if ((e.key || "").toLowerCase() !== KEY) return;
       if (!inCity()) return;
+      // COLLISION GUARD: city/interactions.js's contextual slots (e/i/j/k/l)
+      // fire on the SAME raw "l" keydown whenever a nearby ped/prop is
+      // actually offering that slot's verb (charpanel.js's own [I] guard uses
+      // this identical feature-detected pattern — see its cityInteractHasSlot
+      // call). Defer to a live world interaction instead of double-firing:
+      // if something is offering an "l" verb right now, let it win and don't
+      // open/close the family panel this press.
+      if (CBZ.cityInteractHasSlot && CBZ.cityInteractHasSlot("l")) return;
       e.preventDefault();
       e.stopPropagation();
       toggle();

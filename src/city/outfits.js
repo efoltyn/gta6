@@ -1027,6 +1027,15 @@
     ledger.cityFit = { shirt: fit().shirt, legs: fit().legs, items: fit().items.slice() };
     ledger.cityItemsOwned = Object.assign({}, itemsOwned());
     ledger.cityOutfitsOwned = Object.assign({}, ownedMap());   // catalog fits (tux etc.) too
+    // LEDGER GAP fix: the actual WORN record (a catalog fit — tux/uniform/gang
+    // colors — can override the composite while worn) never round-tripped at
+    // all before. Without this, switching to a DIFFERENT character kept
+    // whatever the outgoing character had g.cityWornOutfit set to (worn()'s
+    // "only initialize if falsy" guard never resets it), so the newcomer would
+    // visibly wear the last character's tux/uniform until they changed
+    // clothes themselves. Plain data (catalog literal or the fitRecord()
+    // synthetic record) — safe to structuredClone/JSON-copy whole.
+    try { ledger.cityWornOutfit = JSON.parse(JSON.stringify(g.cityWornOutfit || null)); } catch (e) { ledger.cityWornOutfit = null; }
   }
   let _ensureSaveWraps_done = false;
   function ensureSaveWraps() {
@@ -1063,14 +1072,37 @@
     if (!ledger || ledger === _hydratedLedger) return;
     _hydratedLedger = ledger;
     if (ledger.cityItemsOwned) g.cityItemsOwned = Object.assign({}, ledger.cityItemsOwned);
-    if (ledger.cityOutfitsOwned) g.cityOutfitsOwned = Object.assign(ownedMap(), ledger.cityOutfitsOwned);
+    // FIX (found during the ledger-gap audit): this used to Object.assign INTO
+    // the current ownedMap() (merge), so a fit bought by the OUTGOING
+    // character stayed "owned" after switching to a different one — a real
+    // cross-character bleed, not just a display bug (cityOwnsItem/cityWear
+    // would let the newcomer wear it). REPLACE the set instead — every
+    // ledger always at least has "street" seeded by ownedMap()'s own default.
+    g.cityOutfitsOwned = Object.assign({ street: true }, ledger.cityOutfitsOwned || {});
     if (ledger.cityFit && typeof ledger.cityFit === "object") {
       g.cityFit = { shirt: ledger.cityFit.shirt, legs: ledger.cityFit.legs, items: Array.isArray(ledger.cityFit.items) ? ledger.cityFit.items.slice() : [] };
-      // re-dress the player from the restored composite if they're on a plain base
-      const cur = worn();
-      if (PLAIN_BASE[cur.id]) applyPlayer();
+    } else {
+      g.cityFit = { shirt: FIT_DEFAULT.shirt, legs: FIT_DEFAULT.legs, items: [] };
     }
+    // LEDGER GAP fix: restore the actual WORN record too (not just the
+    // composite) — a catalog fit (tux/uniform/gang colors) worn by the
+    // OUTGOING character must not bleed onto the incoming one. Falls back to
+    // null (worn()'s own lazy-init then defaults to Street Basics) when the
+    // incoming ledger never wore anything.
+    g.cityWornOutfit = (ledger.cityWornOutfit && typeof ledger.cityWornOutfit === "object") ? ledger.cityWornOutfit : null;
+    g.cityOutfitId = g.cityWornOutfit ? g.cityWornOutfit.id : null;
+    // always redress (body) here — a ledger swap changed SOMETHING (composite,
+    // owned set, or the worn record itself), whether or not the current base
+    // happens to be a "plain" one.
+    applyPlayer();
   }
+  // exposed so worldstate.js's applyToGame() can force a SYNCHRONOUS
+  // hydrate+redress right after a ledger swap/load — this onUpdate(34.8) tick
+  // only fires on the NEXT frame, which is late enough that a corner portrait
+  // drawn this same frame would flash the pre-restore look (the reported
+  // "resets to a white shirt after reload" symptom).
+  CBZ.cityWardrobeHydrate = hydrateFitFromLedger;
+  CBZ.cityOutfitApplyPlayer = applyPlayer;
   CBZ.onUpdate(34.8, function (dt) {
     if (g.mode !== "city") {
       if (_appliedId !== null) {

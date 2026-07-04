@@ -899,6 +899,11 @@
         if (k === "c") { e.preventDefault(); collectAll(); return; }
         if (k === "l") { e.preventDefault(); launderAll(); return; }
         if (k === "p") { e.preventDefault(); partySpend(); return; }
+        // KEY OWNERSHIP: [U] here is fully PANEL-GATED (this whole block only
+        // runs `if (open_)`, wealth's own panel-open flag) — verified safe to
+        // share with origins.js's character wheel and captives.js's custody
+        // HUD, both of which stand down while any menu (incl. this one, via
+        // CBZ.cityMenuOpen) is open. Left as-is.
         if (k === "u") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && r.tier < b.maxTier) { upgradeBiz(b.id); break; } } return; }
         if (k === "h") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && b.gig && workerCount(b.id) < WORKER_MAX) { hireWorker(b.id); break; } } return; }
         if (k === "s") { e.preventDefault(); for (const b of BUSINESSES) { const r = rec(b.id); if (r && (r.secLevel | 0) < SEC_MAX) { upgradeSecurity(b.id); break; } } return; }

@@ -356,7 +356,14 @@
     }
 
     // ---- copied island street grid, clipped around the replacement towers ----
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0x33363d });
+    // wet-road tie-in (feature-detected, load-order safe): one shared
+    // CBZ.roadMat() instance reused for every segment plane below (same
+    // sharing pattern as the flat Lambert it replaces), kept damp-looking by
+    // materials.js as CBZ.weather.intensity rises. Falls back to the plain
+    // Lambert if materials.js hasn't loaded yet.
+    const roadMat = CBZ.roadMat
+      ? CBZ.roadMat({ color: 0x33363d })
+      : new THREE.MeshLambertMaterial({ color: 0x33363d });
     const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a });
     function blocked(x, z) {
       for (const p of placed) {

@@ -994,7 +994,16 @@
     return root;
   }
 
-  // --- superbike: two fat wheels, fuel tank, low clip-on bars, tail cowl, rider. ---
+  // --- superbike (Fable art pass): true sportbike stance — raked twin forks,
+  //     wrapping nose fairing + screen, sculpted tank with a rising tail over a
+  //     real swingarm, side exhaust can, and a rider folded into the tank.
+  //     PROPORTION LAW (real 1000cc sportbike, meters): wheel R≈0.33 (17" rim +
+  //     tire), wheelbase 1.42, seat height 0.83, tank peak 0.95, screen 1.13.
+  //     The old draft's 0.42m wheels + 1.56m wheelbase read as a cartoon
+  //     minibike under a fridge-torso rider; every mass below is placed off
+  //     the axle line (y = wheelR) the way the real machine hangs off its
+  //     spine: engine slung LOW between the axles, tank ABOVE the frame spine,
+  //     tail kicked UP past the rear axle. ---
   function makeMotorcycle() {
     const root = new THREE.Group();
     const paint = roleMat("moto-paint", "paint", 0x16a0e0);
@@ -1002,36 +1011,87 @@
     const chrome = chromeMat();
     const seat = roleMat("moto-seat", "interior", 0x18191c);
     const rider = roleMat("moto-rider", "plastic", 0x20242c);
+    const glass = glassMat();
     const red = lightTailMat();
     const white = lightFrontMat();
-    const wheelR = 0.42, wb = 0.78;   // wheelbase half-length
-    // two in-line wheels (front/back along z) — proper alloy rims via makeWheel.
-    [[wb, 0.46], [-wb, 0.5]].forEach(function (p) {
-      const wheel = makeWheel(wheelR, p[1]);
+    const R = 0.33;                 // wheel radius (17" + rubber)
+    const wb = 0.71;                // wheelbase half-length → 1.42m total
+    const axleY = R;                // both axles sit at wheel-center height
+    // wheels: rear visibly fatter (190-section) than the front (120-section)
+    [[wb, 0.13], [-wb, 0.19]].forEach(function (p) {
+      const wheel = makeWheel(R, p[1]);
       wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(0, wheelR, p[0]);
+      wheel.position.set(0, axleY, p[0]);
       root.add(wheel);
     });
-    // engine block + tank + tail, set low between the wheels
-    addBox(root, 0.4, 0.42, 0.9, 0, wheelR + 0.18, -0.05, black);   // engine/gearbox mass
-    addPrism(root, 0.46, [[0.45, 0.1], [0.2, 0.62], [-0.35, 0.55], [-0.45, 0.1]], wheelR + 0.36, paint);  // tank
-    addBox(root, 0.34, 0.12, 0.5, 0, wheelR + 0.62, -0.42, seat);   // seat
-    addPrism(root, 0.3, [[-0.3, 0.0], [-0.55, 0.34], [-0.7, 0.12]], wheelR + 0.62, paint);  // tail cowl
-    // front fork + fairing + headlamp, raked forward over the front wheel
-    addBox(root, 0.12, 0.95, 0.12, 0, wheelR + 0.5, wb - 0.05, chrome);   // fork tubes
-    addPrism(root, 0.42, [[wb + 0.06, 0.0], [wb - 0.18, 0.62], [wb - 0.4, 0.2]], wheelR + 0.2, paint);  // front fairing
-    addBox(root, 0.34, 0.18, 0.08, 0, wheelR + 0.55, wb + 0.04, white);   // headlamp
-    addBox(root, 0.5, 0.06, 0.06, 0, wheelR + 0.95, wb - 0.18, black);   // clip-on bars
-    addBox(root, 0.26, 0.14, 0.07, 0, wheelR + 0.68, -wb + 0.06, red);   // tail light
-    // a hunched rider so it reads as ridden, not a parked bike
+    // front fender hugging the tire
+    const fender = addBox(root, 0.16, 0.07, 0.52, 0, axleY + R * 0.72, wb + 0.02, paint);
+    fender.rotation.x = -0.12;
+    // RAKED FORK: twin tubes at ~24° from vertical, steering head to axle.
+    // Tube length spans head (y≈0.98) to axle (y=0.33) → ~0.72 at that angle.
+    [0.075, -0.075].forEach(function (x) {
+      const tube = addBox(root, 0.055, 0.74, 0.055, x, axleY + 0.33, wb - 0.145, chrome);
+      tube.rotation.x = 0.42;       // rake: bottom kicks FORWARD to the axle
+    });
+    // engine/gearbox: the low-slung dense mass between the axles
+    addBox(root, 0.40, 0.34, 0.62, 0, axleY + 0.04, -0.02, black);
+    // belly pan closing the fairing under the engine
+    addPrism(root, 0.42, [[0.42, 0.0], [0.42, 0.16], [-0.30, 0.16], [-0.22, 0.0]], axleY - 0.14, paint);
+    // frame spine rising from steering head back over the engine
+    const spine = addBox(root, 0.14, 0.10, 0.78, 0, axleY + 0.42, 0.22, black);
+    spine.rotation.x = -0.10;
+    // TANK: peak just behind the steering head, spilling back toward the seat
+    addPrism(root, 0.40, [[0.44, 0.02], [0.34, 0.34], [0.02, 0.30], [-0.14, 0.04]], axleY + 0.36, paint);
+    // seat dished BELOW the tank peak…
+    addBox(root, 0.30, 0.08, 0.42, 0, axleY + 0.50, -0.34, seat);
+    // …and the tail cowl kicking UP and back over the rear wheel
+    addPrism(root, 0.28, [[-0.30, 0.0], [-0.42, 0.22], [-0.86, 0.30], [-0.78, 0.10]], axleY + 0.50, paint);
+    addBox(root, 0.22, 0.10, 0.05, 0, axleY + 0.72, -1.10, red);      // LED tail strip in the cowl tip
+    // SWINGARM: from the engine back to the rear axle (the old draft's rear
+    // wheel floated unconnected), plus a chain-side detail plate
+    const swing = addBox(root, 0.30, 0.09, 0.62, 0, axleY + 0.01, -0.42, black);
+    swing.rotation.x = 0.06;
+    addBox(root, 0.03, 0.10, 0.46, 0.14, axleY, -0.44, black);        // chain guard
+    // EXHAUST: header sweeping under the engine into a fat side can, tipped up
+    const can = addBox(root, 0.13, 0.13, 0.52, 0.20, axleY + 0.16, -0.62, chrome);
+    can.rotation.x = -0.20;
+    // NOSE FAIRING wrapping the steering head: painted wedge + twin lamps + screen
+    addPrism(root, 0.38, [[wb + 0.10, 0.28], [wb - 0.10, 0.62], [wb - 0.42, 0.56], [wb - 0.30, 0.20]], axleY + 0.16, paint);
+    [0.09, -0.09].forEach(function (x) {
+      addBox(root, 0.10, 0.09, 0.05, x, axleY + 0.66, wb + 0.055, white);   // twin projector lamps
+    });
+    const screen = addBox(root, 0.30, 0.24, 0.03, 0, axleY + 0.86, wb - 0.28, glass);
+    screen.rotation.x = 0.62;       // double-bubble screen laid back over the clocks
+    // clip-on bars BELOW the tank line (racing posture), bar-end mirrors
+    [0.19, -0.19].forEach(function (x) {
+      const bar = addBox(root, 0.16, 0.035, 0.035, x, axleY + 0.60, wb - 0.20, black);
+      bar.rotation.y = x > 0 ? -0.35 : 0.35;
+      addBox(root, 0.07, 0.04, 0.02, x * 1.35, axleY + 0.70, wb - 0.24, black);  // mirror
+    });
+    // SIDE FAIRING panels closing the mid-body (thin, tucked in at the knees)
+    [0.185, -0.185].forEach(function (x) {
+      const panel = addBox(root, 0.02, 0.30, 0.72, x, axleY + 0.22, 0.16, paint);
+      panel.rotation.z = x > 0 ? -0.10 : 0.10;   // tumblehome: panels lean in
+    });
+    // RIDER folded onto the tank: hips over the seat, chest low, arms to the
+    // clip-ons, helmet down in the bubble — reads "pinned" not "sitting".
     const r = new THREE.Group();
-    addBox(r, 0.42, 0.6, 0.34, 0, wheelR + 1.06, -0.18, rider);   // torso
-    addBox(r, 0.24, 0.24, 0.24, 0, wheelR + 1.46, -0.05, sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }));  // helmet
-    addBox(r, 0.5, 0.16, 0.5, 0, wheelR + 0.74, -0.42, rider);   // legs/hips
+    addBox(r, 0.34, 0.24, 0.40, 0, axleY + 0.58, -0.36, rider);       // hips/thighs on the seat
+    const chest = addBox(r, 0.36, 0.46, 0.26, 0, axleY + 0.84, 0.02, rider);
+    chest.rotation.x = 0.78;        // chest folded toward the tank
+    [0.20, -0.20].forEach(function (x) {
+      const arm = addBox(r, 0.09, 0.09, 0.46, x, axleY + 0.72, 0.30, rider);
+      arm.rotation.x = 0.30;
+    });
+    addSphere(r, 0.15, 0, axleY + 1.02, 0.34, sharedMat("moto-helmet", 0x0d0f12, { emissive: 0x05080a, ei: 0.3 }), 1, 0.92, 1.1);
+    [0.17, -0.17].forEach(function (x) {
+      const shin = addBox(r, 0.09, 0.34, 0.10, x, axleY + 0.22, -0.30, rider);  // boots on the rearsets
+      shin.rotation.x = -0.5;
+    });
     r.name = "moto_rider";
     root.add(r);
     root.userData.leanRider = r;
-    root.userData.vehicleDims = { width: 0.72, length: wb * 2 + 0.85, height: 1.9, wheelbase: wb * 2 };
+    root.userData.vehicleDims = { width: 0.74, length: wb * 2 + 0.7, height: 1.55, wheelbase: wb * 2 };
     return root;
   }
 
@@ -1087,42 +1147,101 @@
     return root;
   }
 
-  // --- speedboat: V-hull, raked windshield, seats, outboard, animated prop wake. ---
+  // --- speedboat (Fable art pass): the old draft was one constant-width slab
+  //     with a glass triangle — no bow taper in PLAN, so it read as a barge.
+  //     A prism only tapers in profile (z,y); plan taper is faked the way real
+  //     low-poly boats do it: the hull is THREE width-stepped segments
+  //     (stern→mid→bow) whose profiles overlap, capped by a narrow raked stem
+  //     wedge — five prisms total and the silhouette finally points. Layout is
+  //     a proper runabout: full-beam stern with a bench + sun pad over the
+  //     engine well, console amidships behind a three-panel wraparound screen,
+  //     bowrider nose with a chrome rail, deep-V spray strakes at the chine. ---
   function makeBoat() {
     const root = new THREE.Group();
     const hull = roleMat("boat-hull", "paint", 0xeceff2);
     const stripe = roleMat("boat-stripe", "paint", 0x1574d6);
-    const deck = roleMat("boat-deck", "plastic", 0x6b4a2c);
+    const deck = roleMat("boat-deck", "plastic", 0xb4885c);      // teak-ish deck
+    const pad = roleMat("boat-pad", "interior", 0xd8dde4);       // white vinyl
     const glass = glassMat();
     const dark = roleMat("boat-dark", "plastic", 0x101317);
     const chrome = chromeMat();
     const w = 2.1, len = 6.2;
-    const baseY = 0.25;
-    // pointed planing V-hull (prism profile along z gives the bow rake)
-    addPrism(root, w, [[len * 0.5, 0.0], [len * 0.2, 0.55], [-len * 0.5, 0.55], [-len * 0.5, 0.0]], baseY, hull);
-    addBox(root, w + 0.02, 0.14, len * 0.7, 0, baseY + 0.34, -len * 0.06, stripe);   // waterline stripe
-    addBox(root, w * 0.82, 0.06, len * 0.6, 0, baseY + 0.56, -len * 0.08, deck);   // open deck
-    // raked windshield + low console mid-ship
-    addPrism(root, w * 0.7, [[len * 0.08, 0.0], [len * 0.08, 0.4], [len * 0.24, 0.0]], baseY + 0.56, glass);
-    addBox(root, w * 0.7, 0.22, 0.5, 0, baseY + 0.68, len * 0.04, dark);   // dash console
-    // two bucket seats
-    addBox(root, 0.5, 0.36, 0.5, w * 0.22, baseY + 0.74, -len * 0.06, dark);
-    addBox(root, 0.5, 0.36, 0.5, -w * 0.22, baseY + 0.74, -len * 0.06, dark);
-    // chrome bow rail
-    addBox(root, w * 0.6, 0.05, 0.05, 0, baseY + 0.62, len * 0.34, chrome);
-    // outboard engine at the transom + animated screw
-    addBox(root, 0.46, 0.7, 0.5, 0, baseY + 0.4, -len * 0.5 - 0.1, dark);
+    const baseY = 0.22;
+    const H = 0.58;                                              // freeboard
+    // HULL in three width steps — the plan-view taper. Segment seams hide
+    // under the rubbing strake (chrome line) below.
+    // stern block: full beam, transom to amidships
+    addPrism(root, w, [[-len * 0.5, 0.0], [-len * 0.5, H], [len * 0.06, H], [len * 0.10, 0.0]], baseY, hull);
+    // mid block: slightly pinched, carries the sheer forward
+    addPrism(root, w * 0.86, [[len * 0.02, 0.0], [len * 0.02, H], [len * 0.30, H + 0.03], [len * 0.34, 0.0]], baseY, hull);
+    // bow block: strongly pinched, sheer still rising
+    addPrism(root, w * 0.60, [[len * 0.28, 0.0], [len * 0.28, H + 0.03], [len * 0.44, H + 0.07], [len * 0.46, 0.02]], baseY, hull);
+    // stem wedge: the pointed nose itself, narrow + raked back to the deck
+    addPrism(root, w * 0.26, [[len * 0.42, 0.0], [len * 0.42, H + 0.07], [len * 0.52, H + 0.08], [len * 0.50, 0.12]], baseY, hull);
+    // deep-V keel line: a shallow angled slab under the centerline so the
+    // boat reads as sitting ON a V, not a flat pan (visible in turns/wake)
+    const keel = addBox(root, 0.42, 0.16, len * 0.82, 0, baseY - 0.04, len * 0.02, hull);
+    keel.rotation.z = Math.PI / 4;
+    // spray strakes at the chine — thin chrome rubbing strakes hide the seams
+    [1, -1].forEach(function (side) {
+      const strake = addBox(root, 0.04, 0.05, len * 0.78, side * (w * 0.5 - 0.02), baseY + H * 0.55, len * 0.0, chrome);
+      strake.rotation.y = side * 0.045;                          // follow the taper in
+    });
+    // hull stripe along the sheer (the classic gelcoat accent)
+    [1, -1].forEach(function (side) {
+      const st = addBox(root, 0.025, 0.12, len * 0.62, side * (w * 0.5 - 0.045), baseY + H * 0.78, -len * 0.04, stripe);
+      st.rotation.y = side * 0.045;
+    });
+    // DECK: teak cockpit sole aft, vinyl sun pad over the engine well at the
+    // transom, and a raised bow deck the rail rings.
+    addBox(root, w * 0.78, 0.05, len * 0.34, 0, baseY + H - 0.02, -len * 0.10, deck);      // cockpit sole
+    addBox(root, w * 0.72, 0.12, len * 0.16, 0, baseY + H + 0.05, -len * 0.40, pad);       // stern sun pad
+    addBox(root, w * 0.52, 0.06, len * 0.20, 0, baseY + H + 0.05, len * 0.36, pad);        // bow pad
+    // stern bench + two bucket seats at the console
+    addBox(root, w * 0.66, 0.26, 0.30, 0, baseY + H + 0.10, -len * 0.26, pad);             // bench back
+    [0.48, -0.48].forEach(function (x) {
+      addBox(root, 0.46, 0.14, 0.46, x, baseY + H + 0.04, -len * 0.02, pad);               // seat base
+      addBox(root, 0.46, 0.34, 0.10, x, baseY + H + 0.22, -len * 0.02 - 0.20, pad);        // seat back
+    });
+    // CONSOLE amidships: dash pod + wheel + three-panel wraparound windscreen
+    addPrism(root, w * 0.56, [[len * 0.06, 0.0], [len * 0.06, 0.30], [len * 0.16, 0.34], [len * 0.20, 0.0]], baseY + H, dark);
+    const wheel = addBox(root, 0.26, 0.26, 0.04, 0.30, baseY + H + 0.34, len * 0.05, dark);
+    wheel.rotation.x = -0.5;
+    const centerGlass = addBox(root, w * 0.58, 0.34, 0.03, 0, baseY + H + 0.44, len * 0.20, glass);
+    centerGlass.rotation.x = -0.42;                              // raked back
+    [1, -1].forEach(function (side) {
+      const wing = addBox(root, 0.34, 0.30, 0.03, side * (w * 0.30), baseY + H + 0.40, len * 0.16, glass);
+      wing.rotation.x = -0.42;
+      wing.rotation.y = side * 0.55;                             // wrap around the console
+    });
+    // chrome bow rail: two side runs meeting at the stem + a nav-light stub
+    [1, -1].forEach(function (side) {
+      const rail = addBox(root, 0.035, 0.035, len * 0.30, side * (w * 0.24), baseY + H + 0.20, len * 0.34, chrome);
+      rail.rotation.y = side * 0.16;                             // converge toward the point
+      addBox(root, 0.035, 0.14, 0.035, side * (w * 0.28), baseY + H + 0.12, len * 0.26, chrome);  // stanchion
+    });
+    addBox(root, 0.05, 0.09, 0.05, 0, baseY + H + 0.16, len * 0.50, chrome);               // stem light
+    // cleats at the stern quarters (the detail that says "boat", costs 2 boxes)
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.16, 0.04, 0.05, side * (w * 0.36), baseY + H + 0.03, -len * 0.46, chrome);
+    });
+    // OUTBOARD: cowled head (painted, like the real premium rigs), midsection
+    // leg into the water, anti-vent plate, animated 3-blade screw
+    addBox(root, 0.40, 0.34, 0.44, 0, baseY + H + 0.06, -len * 0.5 - 0.16, stripe);        // cowl
+    addBox(root, 0.34, 0.10, 0.38, 0, baseY + H - 0.08, -len * 0.5 - 0.16, dark);          // cowl base
+    addBox(root, 0.14, 0.52, 0.20, 0, baseY + 0.18, -len * 0.5 - 0.16, dark);              // leg
+    addBox(root, 0.30, 0.03, 0.30, 0, baseY + 0.10, -len * 0.5 - 0.16, dark);              // anti-vent plate
     const prop = new THREE.Group();
-    prop.position.set(0, baseY + 0.05, -len * 0.5 - 0.28);
+    prop.position.set(0, baseY + 0.02, -len * 0.5 - 0.30);
     for (let i = 0; i < 3; i++) {
-      const b = new THREE.Mesh(boxGeo(0.05, 0.5, 0.16), chrome);
+      const b = new THREE.Mesh(boxGeo(0.05, 0.44, 0.14), chrome);
       b.rotation.z = (i / 3) * Math.PI * 2;
       prop.add(b);
     }
     prop.name = "boat_prop";
     root.add(prop);
     root.userData.boatProp = prop;
-    root.userData.vehicleDims = { width: w, length: len, height: 1.25, wheelbase: len * 0.6 };
+    root.userData.vehicleDims = { width: w, length: len, height: 1.35, wheelbase: len * 0.6 };
     return root;
   }
 

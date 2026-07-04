@@ -61,6 +61,26 @@
   var THREE = window.THREE;
   var CBZ = window.CBZ;
   if (!CBZ || !THREE) return;
+
+  /* ============================================================
+     RETIRED in favor of systems/building.js + systems/buildmode.js —
+     the deep builder (wood-tier catalog, 3m grid, socket snapping,
+     structural integrity + collapse, tool-cupboard ownership claims
+     via systems/baseclaim.js, C4/bullet damage matrix via systems/
+     structdamage.js, gather+craft via resources.js/craft.js, offline
+     decay, save/load via basesave.js). Two branches independently
+     shipped a player construction system and both bound [N]; the lead
+     decided systems/building.js+buildmode.js is THE builder going
+     forward. This lot-scoped prototype (2m grid, player-owned CITY
+     LOTS only, 200-piece cap, LMB place/Shift+LMB remove) is kept
+     in-tree for reference only. Verified (grep) nothing else in the
+     codebase reads CBZ.construction / CBZ.constructionSockets /
+     CBZ.cityConstructionReset, so an early return here is a clean,
+     total no-op — nothing to stub.
+     ============================================================ */
+  return;
+
+  // eslint-disable-next-line no-unreachable
   if (!CBZ.assets || !CBZ.placement) return;     // hard deps — load order guard
   if (CBZ.construction) return;                  // idempotent
   var g = CBZ.game;

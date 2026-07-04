@@ -290,4 +290,79 @@
     if (Math.hypot(ddx, ddz) < 2.2 || actor.sees) { actor._doorGoal = null; return null; }   // reached / sightline opened
     return { kind: "door", x: ddx, z: ddz };
   };
+
+  // ============================================================
+  //  ENGAGE / TICK — the thin composition non-cop callers actually invoke.
+  //  (peds.js's important-ped tactical handoff: CBZ.aiTactics.engage(actor,
+  //  target, dt) — called every think() tick while an important armed ped is
+  //  mid-fight. Composes the primitives above exactly the way police.js's
+  //  hunting branch chains them, but as one cheap call so a non-cop system
+  //  doesn't need to hand-roll the LOS→search/flank/cover state machine.)
+  //
+  //  Call signature MUST match peds.js ~3146: tac.engage(actor, target, dt).
+  //  `actor` is the ped (has .pos Vector3-like, .target Vector3 w/ .set,
+  //  .armed). `target` is the thing it's raging at (has .pos), i.e. the
+  //  actor's `.rage`. opts (optional 4th arg) lets a future caller tune
+  //  ranges/chances without touching this file again; every field defaults.
+  //
+  //  Effect: refines actor.target (already pointed straight at target.pos by
+  //  the caller) into a tactical steer goal — flank arc while it can see,
+  //  cover-peek sidesteps while close, blind-dodge/search/door-route while it
+  //  can't see. Attack range/fire checks in peds.js compare real distance to
+  //  target.pos (not actor.target), so nudging actor.target only changes HOW
+  //  the ped closes in, never whether it's allowed to shoot once in range.
+  //  Returns true if it ran (false if actor/target lack .pos — caller's
+  //  try/catch means a false here is harmless either way).
+  // ============================================================
+  let _tacIdxNext = 0;
+  CBZ.aiTactics.engage = function (actor, target, dt, opts) {
+    if (!actor || !actor.pos || !actor.target || !target || !target.pos) return false;
+    opts = opts || {};
+    const rng = rngOf(opts);
+    const tx = target.pos.x, tz = target.pos.z;
+    const dx = tx - actor.pos.x, dz = tz - actor.pos.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+
+    if (actor._tacIdx == null) actor._tacIdx = _tacIdxNext++;
+    if (actor._flank == null) CBZ.aiTactics.flankLane(actor, actor._tacIdx, opts.lanes);
+
+    const los = CBZ.aiTactics.updateLOS(actor, tx, tz, dt, opts.los);
+    let goal = null;
+
+    if (!los.sees) {
+      goal = CBZ.aiTactics.breachOrRoute(actor, target, tx, tz, dist, dt, opts.breach || {
+        canBreach: !!actor.armed, canRouteDoors: true, rng: rng,
+      });
+      if (!goal) {
+        if (los.justLost) CBZ.aiTactics.searchStart(actor, { x: actor.lkx, z: actor.lkz }, opts.search);
+        goal = CBZ.aiTactics.searchTick(actor, dt, opts.search);
+      }
+      if (!goal) goal = CBZ.aiTactics.blindFlank(actor, dx, dz, dist, dt, opts.blind);
+    } else {
+      actor.searchT = 0; actor.searchGoal = null;   // re-spotted — drop any stale search
+      goal = CBZ.aiTactics.coverPeek(actor, dx, dz, dist, dt, opts.cover);
+      if (!goal) {
+        const amt = opts.flankAmt != null ? opts.flankAmt : 5;
+        goal = CBZ.aiTactics.flankApproach(actor, dx, dz, dist, amt);
+        // occasionally duck into a cover-peek beat while armed and close, same
+        // chance-gated arm() police.js does after a shot — here just rate-limited
+        // since this module has no shot-callback hook of its own.
+        if (actor.armed) {
+          actor._tacCoverCD = (actor._tacCoverCD || 0) - (dt || 0);
+          if (actor._tacCoverCD <= 0) {
+            actor._tacCoverCD = 1.0 + rng() * 1.5;
+            const coverRange = opts.coverRange != null ? opts.coverRange : 14;
+            const coverChance = opts.coverChance != null ? opts.coverChance : 0.15;
+            if (dist < coverRange && rng() < coverChance) CBZ.aiTactics.coverArm(actor, opts.cover);
+          }
+        }
+      }
+    }
+
+    if (goal) actor.target.set(actor.pos.x + goal.x, 0, actor.pos.z + goal.z);
+    return true;
+  };
+  // tick: alias kept for forward/backward compat — peds.js falls back to
+  // tac.tick() if .engage isn't present; same primitive composition either name.
+  CBZ.aiTactics.tick = CBZ.aiTactics.engage;
 })();

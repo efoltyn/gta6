@@ -170,7 +170,18 @@
 
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
-    if (e.code === "KeyN" || e.key.toLowerCase() === "n") detonateNuke();
+    if (e.code !== "KeyN" && e.key.toLowerCase() !== "n") return;
+    // BUILD-MODE / N-KEY COLLISION: systems/buildmode.js also binds N (build
+    // mode toggle) via a CAPTURE-phase window listener + stopPropagation, so
+    // in the normal case this bubble-phase listener never even sees the N
+    // keydown while build mode can be toggled (see buildmode.js's file
+    // header for the capture-vs-bubble ordering proof). This check is
+    // defense-in-depth for any path that reaches here anyway (e.g. a future
+    // refactor of that listener, or this file loading in a context where
+    // build mode's own gates differ) — a build-mode session in progress
+    // must never let N slip through and detonate the tactical nuke.
+    if (CBZ.buildMode && CBZ.buildMode.active) return;
+    detonateNuke();
   });
 
   CBZ.killstreakOnDown = onDown;

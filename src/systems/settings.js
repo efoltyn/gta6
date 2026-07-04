@@ -146,7 +146,7 @@
         "<h4>NPC POPULATION</h4>" +
         rangeRow("stgCrowdDensity", "Crowd density (visible nearby)", 0, 1600, 20, 720, false) +
         "<div class='stg-note'>Live — applies immediately.</div>" +
-        rangeRow("stgTotalPop", "Total population", 100, 2400, 50, 900, false) +
+        rangeRow("stgTotalPop", "Total population", 60, 900, 20, 140, false) +
         "<div class='stg-note warn'>Applies next time you load in — not instant (total population is fixed at boot).</div>" +
       "</div>" +
       "<button class='stg-close' id='stgCloseBtn'>Done</button>";
@@ -184,9 +184,9 @@
     }
     function refreshPopUI() {
       const override = loadPopOverride();
-      const current = (typeof CBZ.MASS_CROWD === "number") ? CBZ.MASS_CROWD : 900;
+      const current = (typeof CBZ.MASS_CROWD === "number") ? CBZ.MASS_CROWD : 140;
       const v = override != null ? override : current;
-      elPop.value = String(Math.max(100, Math.min(2400, v)));
+      elPop.value = String(Math.max(60, Math.min(900, v)));
       elPopVal.textContent = elPop.value + (override != null && override !== current ? " (pending reload)" : "");
     }
 
@@ -228,7 +228,7 @@
       elDensityVal.textContent = String(v);
     });
     elPop.addEventListener("input", function () {
-      const v = parseInt(elPop.value, 10) || 900;
+      const v = parseInt(elPop.value, 10) || 140;
       savePopOverride(v);
       refreshPopUI();
     });

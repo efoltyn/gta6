@@ -33,6 +33,24 @@
  *
  *  Self-contained DOM. Touches no other file. No-ops outside city mode and
  *  whenever an export it needs is absent.
+ *
+ *  ---------------------------------------------------------------------
+ *  KEY OWNERSHIP — [U] is a CONTEXTUAL, three-way-shared key (origins.js's
+ *  character wheel / wealth.js's business-upgrade both also bind it):
+ *    - This module registers its keydown listener in the CAPTURE phase (see
+ *      below), so without a guard it would swallow EVERY press of U in city
+ *      mode before origins.js's wheel (bubble phase) ever saw the event —
+ *      the wheel would never open. FIXED: we only claim the key (preventDefault
+ *      + stopPropagation + toggle) when there is something of ours to show
+ *      (an active hold/taken — hasAnyCustody()) OR our own panel is already
+ *      open (so U can close it). Any other press falls through untouched to
+ *      origins.js's wheel handler.
+ *    - wealth.js's U (upgrade-business) is gated inside its OWN open-panel
+ *      check (`if (open_) { ... if (k==='u') ... }`) — verified panel-gated,
+ *      left as-is.
+ *    - origins.js's wheel additionally checks CBZ.cityCaptivesHudOpen()
+ *      before opening (defense in depth, in case ownership here ever changes).
+ *  ---------------------------------------------------------------------
  * ========================================================================== */
 (function () {
   "use strict";
@@ -441,7 +459,16 @@
     setInterval(refresh, 250);
   }
 
+  // does this module have any reason at all to claim [U] right now?
+  function hasAnyCustody() {
+    return gatherHeld().length > 0 || gatherTaken().length > 0;
+  }
+
   // ---- key toggle -----------------------------------------------------------
+  // CAPTURE-phase listener (see KEY OWNERSHIP note up top): only claims the
+  // key when there's a held/taken captive to show, or our panel is already
+  // open (so U closes it) — otherwise it does NOT preventDefault/stopPropagation
+  // and the press falls through to origins.js's character wheel (bubble phase).
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("keydown", function (e) {
       if (!e || e.repeat) return;
@@ -450,6 +477,7 @@
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
       if ((e.key || "").toLowerCase() !== KEY) return;
       if (!inCity()) return;
+      if (!openState && !hasAnyCustody()) return;   // nothing of ours — let it fall through
       e.preventDefault();
       e.stopPropagation();
       toggle();
@@ -459,6 +487,10 @@
   // small handle for debugging / other systems.
   CBZ.cityCaptives = {
     open: open, hide: hide, toggle: toggle, refresh: refresh,
-    held: gatherHeld, taken: gatherTaken, key: KEY
+    held: gatherHeld, taken: gatherTaken, key: KEY,
+    hudOpen: function () { return openState; }
   };
+  // origins.js reads this to skip opening the character wheel while the
+  // captives panel is open (defense in depth alongside the capture-phase guard above).
+  CBZ.cityCaptivesHudOpen = function () { return openState; };
 })();
