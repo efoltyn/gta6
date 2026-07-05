@@ -55,6 +55,8 @@ const CHROME = "/opt/pw-browsers/chromium";
 const argv = process.argv.slice(2);
 if (!argv.length || argv[0] === "--help") {
   console.log("usage: node tools/studio.mjs <subject> [--mode orbit|strip|both] [--anim walk] [--frames 10] [--angles 8] [--out file.png]");
+  console.log("  subjects: rig | rig:<preset> | car:<name> | cars | pcar:<style> | pcars | expr:<js>");
+  console.log("            lot:<kind|name|x,z> | at:<x,z[,r]>   (in-world: boots the city, orbits the real thing; --seed N)");
   process.exit(argv.length ? 0 : 1);
 }
 const subject = argv[0];
@@ -67,10 +69,15 @@ for (let i = 1; i < argv.length; i++) {
   opt[k] = flag ? true : argv[++i];
 }
 const isRig = subject.startsWith("rig") || subject.startsWith("expr:");
-const mode = opt.mode || (isRig ? "both" : "orbit");
+// WORLD subjects photograph a thing where it stands in the LIVE CITY —
+// lot:<kind|name-substring|x,z> or at:<x,z[,r]>. The game is booted to
+// playing, frozen, and orbited in place (batched shells, glass pools and
+// all — exactly what a player would see). Orbit-only: no rig to animate.
+const isWorld = subject.startsWith("lot:") || subject.startsWith("at:");
+const mode = isWorld ? "orbit" : (opt.mode || (isRig ? "both" : "orbit"));
 const anim = opt.anim || "walk";
 const frames = +(opt.frames || 10);
-const angles = +(opt.angles || 8);
+const angles = +(opt.angles || (subject.startsWith("lot:") || subject.startsWith("at:") ? 6 : 8));
 const zoom = +(opt.zoom || 1);
 const night = !!opt.night;
 const wantVideo = !!(opt.video || opt.gif);
@@ -159,8 +166,15 @@ async function launchChrome() {
     ws.addEventListener("open", res, { once: true });
     ws.addEventListener("error", rej, { once: true });
   });
+  ws.addEventListener("close", () => console.error("CDP websocket CLOSED (browser died?)"));
+  ws.addEventListener("error", (e) => console.error("CDP websocket error"));
   ws.addEventListener("message", (ev) => {
     const msg = JSON.parse(ev.data);
+    if (msg.method === "Runtime.exceptionThrown") {
+      const d = msg.params.exceptionDetails;
+      console.error("PAGE EXC:", ((d.exception && d.exception.description) || d.text || "").split("\n")[0]);
+      return;
+    }
     if (!msg.id || !pending.has(msg.id)) return;
     const p = pending.get(msg.id);
     pending.delete(msg.id);
@@ -176,41 +190,59 @@ const HARNESS = String.raw`(() => {
   if (window.__studio) return "ready";
   if (!window.CBZ || !window.THREE || !CBZ.renderer || !CBZ.makeCharacter) return null;
   const S = {};
-  const W = 1440, H = 1000;
+  const WORLD = __WORLD__;
+  const W = WORLD ? 1120 : 1440, H = WORLD ? 780 : 1000;   // SwiftShader pays per pixel; city frames are heavy
   // freeze the game loop's interest: it renders CBZ.scene/CBZ.camera; we own both.
   try { if (CBZ.game) CBZ.game.state = "studio"; } catch (e) {}
 
-  const scene = new THREE.Scene();
   const NIGHT = __NIGHT__;
-  scene.background = new THREE.Color(NIGHT ? 0x0b1018 : 0xbfd4e6);
-  scene.fog = new THREE.Fog(scene.background.getHex(), 60, 160);
-  const hemi = new THREE.HemisphereLight(NIGHT ? 0x30405c : 0xe8f2ff, NIGHT ? 0x11151c : 0x6b7480, NIGHT ? 0.55 : 0.95);
-  scene.add(hemi);
-  const key = new THREE.DirectionalLight(NIGHT ? 0xaac4ff : 0xfff2df, NIGHT ? 0.65 : 1.15);
-  key.position.set(14, 22, 10);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -14; key.shadow.camera.right = 14;
-  key.shadow.camera.top = 14; key.shadow.camera.bottom = -14;
-  key.shadow.camera.far = 80;
-  scene.add(key);
-  const rim = new THREE.DirectionalLight(0xdde8ff, NIGHT ? 0.35 : 0.5);
-  rim.position.set(-16, 12, -18);
-  scene.add(rim);
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(60, 48),
-    new THREE.MeshLambertMaterial({ color: NIGHT ? 0x1a2028 : 0x8b929c })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-  // subtle radial ring so scale reads
-  const ring = new THREE.Mesh(new THREE.RingGeometry(3.96, 4.04, 64), new THREE.MeshBasicMaterial({ color: NIGHT ? 0x2c3644 : 0x757c86 }));
-  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
-  scene.add(ring);
+  let scene;
+  if (WORLD) {
+    // photograph the LIVE city in place — its own lights/sky, fog off so a
+    // wide orbit isn't a wall of haze. Freeze shadow-map updates: SwiftShader
+    // re-rendering the whole city's shadow pass per still is what blows the
+    // frame budget, and the sun isn't moving anyway (state=studio).
+    scene = CBZ.scene;
+    scene.fog = null;
+    try { CBZ.renderer.shadowMap.autoUpdate = false; } catch (e) {}
+    // the game's RAF keeps re-rendering the WHOLE CITY every frame while we
+    // work — under SwiftShader that starves our stills (a competing full-city
+    // render per frame). No-op the public render; S.shoot calls the original.
+    S._render = CBZ.renderer.render.bind(CBZ.renderer);
+    CBZ.renderer.render = function () {};
+  } else {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(NIGHT ? 0x0b1018 : 0xbfd4e6);
+    scene.fog = new THREE.Fog(scene.background.getHex(), 60, 160);
+    const hemi = new THREE.HemisphereLight(NIGHT ? 0x30405c : 0xe8f2ff, NIGHT ? 0x11151c : 0x6b7480, NIGHT ? 0.55 : 0.95);
+    scene.add(hemi);
+    const key = new THREE.DirectionalLight(NIGHT ? 0xaac4ff : 0xfff2df, NIGHT ? 0.65 : 1.15);
+    key.position.set(14, 22, 10);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.left = -14; key.shadow.camera.right = 14;
+    key.shadow.camera.top = 14; key.shadow.camera.bottom = -14;
+    key.shadow.camera.far = 80;
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0xdde8ff, NIGHT ? 0.35 : 0.5);
+    rim.position.set(-16, 12, -18);
+    scene.add(rim);
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(60, 48),
+      new THREE.MeshLambertMaterial({ color: NIGHT ? 0x1a2028 : 0x8b929c })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    // subtle radial ring so scale reads
+    const ring = new THREE.Mesh(new THREE.RingGeometry(3.96, 4.04, 64), new THREE.MeshBasicMaterial({ color: NIGHT ? 0x2c3644 : 0x757c86 }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
+    scene.add(ring);
+  }
 
-  const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 400);
-  CBZ.scene = scene; CBZ.camera = cam;   // even if the RAF renders, it renders US
+  const cam = new THREE.PerspectiveCamera(WORLD ? 35 : 30, W / H, 0.1, WORLD ? 2000 : 400);
+  if (!WORLD) CBZ.scene = scene;
+  CBZ.camera = cam;   // even if the RAF renders, it renders US
   const renderer = CBZ.renderer;
   renderer.shadowMap.enabled = true;
   renderer.setPixelRatio(1);
@@ -233,19 +265,90 @@ const HARNESS = String.raw`(() => {
     obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
     scene.add(obj);
   };
+  // world subjects have an analytic target (batched shells aren't reachable
+  // from the building's own group, so Box3-from-object would undercount)
+  S.worldT = null;
+  S.setWorldTarget = (cx, cy, cz, r) => { S.worldT = { cx, cy, cz, r }; };
   S.fit = () => {
+    if (S.worldT) return S.worldT;
     const box = new THREE.Box3().setFromObject(S.subject);
     const c = box.getCenter(new THREE.Vector3());
     const s = box.getSize(new THREE.Vector3());
     const r = s.length() * 0.5 || 1;   // bounding-sphere radius (fits ALL of it)
     return { cx: c.x, cy: c.y, cz: c.z, r };
   };
+  // world mode: a camera orbiting inside a DENSE CITY can land inside a
+  // neighbouring building (two ruined cells on the first casino sheet).
+  // Verify the position against the collider AABBs and the sightline to the
+  // subject; if buried, climb — a higher vantage always clears in a city.
+  S._clear = (x, y, z, f) => {
+    // test walls (colliders) AND roof slabs/parapets (platforms — the actual
+    // frame-fillers when an orbit camera skims a neighbouring rooftop)
+    const boxes = [];
+    for (const c of CBZ.colliders || []) if (c && c.y1 != null) boxes.push(c);
+    for (const p of CBZ.platforms || []) if (p && p.top != null && p.top > 2)
+      boxes.push({ minX: p.minX, maxX: p.maxX, minZ: p.minZ, maxZ: p.maxZ, y0: p.top - 0.5, y1: p.top + 2.5 }); // +2.5 headroom: a ray SKIMMING a rooftop still fills the frame with roof
+    const own = (c) => Math.abs((c.minX + c.maxX) / 2 - f.cx) < f.r && Math.abs((c.minZ + c.maxZ) / 2 - f.cz) < f.r;
+    const dx = f.cx - x, dy = f.cy - y, dz = f.cz - z;
+    for (let i = 0; i < boxes.length; i++) {
+      const c = boxes[i];
+      if (own(c)) continue;
+      // camera itself inside (with margin)?
+      if (x > c.minX - 1 && x < c.maxX + 1 && z > c.minZ - 1 && z < c.maxZ + 1 && y > c.y0 - 0.5 && y < c.y1 + 1) return false;
+      // ray-AABB slab test on the camera→subject segment: walls are thin, so
+      // point-sampling misses them — intersect the interval exactly. Anything
+      // crossed CLOSE to the camera (t < 0.35) fills the frame; far crossings
+      // near the subject occlude little and are fine.
+      let t0 = 0, t1 = 1, blocked = true;
+      const axes = [[x, dx, c.minX, c.maxX], [y, dy, c.y0, c.y1], [z, dz, c.minZ, c.maxZ]];
+      for (const [o, d, lo, hi] of axes) {
+        if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) { blocked = false; break; } continue; }
+        let a = (lo - o) / d, b = (hi - o) / d;
+        if (a > b) { const tmp = a; a = b; b = tmp; }
+        t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+        if (t0 > t1) { blocked = false; break; }
+      }
+      if (blocked && t0 < 0.5 && t1 > 0.005) return false;
+    }
+    // composition guard: the CENTRE may be visible while the whole street-
+    // level presence hides behind a foreground roof (half the frame turns
+    // into blank rooftop). Require the ray to the subject's BASE to be clear
+    // for most of its run too.
+    const bdy = 1.2 - y;
+    for (let i = 0; i < boxes.length; i++) {
+      const c = boxes[i];
+      if (own(c)) continue;
+      let t0 = 0, t1 = 1, blocked = true;
+      const axes2 = [[x, dx, c.minX, c.maxX], [y, bdy, c.y0, c.y1], [z, dz, c.minZ, c.maxZ]];
+      for (const [o, d2, lo, hi] of axes2) {
+        if (Math.abs(d2) < 1e-9) { if (o < lo || o > hi) { blocked = false; break; } continue; }
+        let a = (lo - o) / d2, b2 = (hi - o) / d2;
+        if (a > b2) { const tmp = a; a = b2; b2 = tmp; }
+        t0 = Math.max(t0, a); t1 = Math.min(t1, b2);
+        if (t0 > t1) { blocked = false; break; }
+      }
+      if (blocked && t0 < 0.75 && t1 > 0.005) return false;
+    }
+    return true;
+  };
   S.shoot = (az, elevDeg, distMul, look) => {
     const f = S.fit();
     // distance that guarantees the bounding sphere fits the vertical fov,
     // with margin; horizontal fov is wider (aspect 1.44) so vertical governs.
     const d = (f.r / Math.sin((cam.fov / 2) * Math.PI / 180)) * 1.12 * (distMul || 1);
-    const el = (elevDeg || 12) * Math.PI / 180;
+    let elDeg = elevDeg || 12;
+    if (WORLD) {
+      const el0 = elDeg;
+      for (; elDeg < 75; elDeg += 7) {
+        const e = elDeg * Math.PI / 180;
+        const x = f.cx + Math.sin(az) * Math.cos(e) * d;
+        const y = Math.max(0.6, f.cy + Math.sin(e) * d);
+        const z = f.cz + Math.cos(az) * Math.cos(e) * d;
+        if (S._clear(x, y, z, f)) break;
+      }
+      if (elDeg !== el0) S._climbs = (S._climbs || 0) + 1;
+    }
+    const el = elDeg * Math.PI / 180;
     cam.position.set(
       f.cx + Math.sin(az) * Math.cos(el) * d,
       Math.max(0.6, f.cy + Math.sin(el) * d),
@@ -253,7 +356,7 @@ const HARNESS = String.raw`(() => {
     );
     cam.lookAt(look ? new THREE.Vector3(look[0], look[1], look[2]) : new THREE.Vector3(f.cx, f.cy, f.cz));
     cam.updateMatrixWorld();
-    renderer.render(scene, cam);
+    (S._render || renderer.render.bind(renderer))(scene, cam);
   };
   // ---- contact-sheet composer (2D canvas) ----
   S.sheet = null;
@@ -289,7 +392,9 @@ const HARNESS = String.raw`(() => {
     const sh = S.sheet;
     sh.ctx.fillStyle = "#9fb2c8"; sh.ctx.font = "600 15px monospace";
     sh.ctx.fillText(title || "", 8, sh.rows * sh.cellH + 21);
-    return sh.c.toDataURL("image/png");
+    // world pages carry the whole city — a large PNG encode has OOM-killed
+    // the renderer there; JPEG is a fraction of the encode footprint.
+    return WORLD ? sh.c.toDataURL("image/jpeg", 0.92) : sh.c.toDataURL("image/png");
   };
   // ---- rig animation stepping ----
   S.step = (dt, speed) => { if (S.rig) CBZ.animChar(S.rig, speed || 0, dt); };
@@ -373,15 +478,19 @@ async function captureOrbit() {
   await evaluate(`__studio.beginSheet(${cols}, ${rows}, 700, 486)`);
   for (let i = 0; i < angles; i++) {
     const az = (i / angles) * Math.PI * 2 + Math.PI / angles;
-    await evaluate(`(__studio.shoot(${az}, 11, ${zoom}), __studio.stamp(${JSON.stringify("az " + Math.round((az * 180) / Math.PI) + "°")}))`);
+    if (isWorld) console.log(`  cell ${i + 1}/${angles}…`);
+    await evaluate(`(__studio.shoot(${az}, 11, ${zoom}), __studio.stamp(${JSON.stringify("az " + Math.round((az * 180) / Math.PI) + "°")}))`, 240000);
   }
   // extra row: high 3/4, top-down, front low, rear low
   const extras = [[0.7, 38, "high 3/4"], [0.01, 74, "top"], [0, 4, "front low"], [Math.PI, 4, "rear low"]];
-  for (const [az, el, label] of extras.slice(0, cols)) {
-    await evaluate(`(__studio.shoot(${az}, ${el}, ${zoom}), __studio.stamp(${JSON.stringify(label)}))`);
+  for (const [az, el, label] of extras.slice(0, isWorld ? 2 : cols)) {
+    if (isWorld) console.log(`  extra: ${label}…`);
+    await evaluate(`(__studio.shoot(${az}, ${el}, ${zoom}), __studio.stamp(${JSON.stringify(label)}))`, 240000);
   }
-  const data = await evaluate(`__studio.endSheet(${JSON.stringify(subject + " — orbit")})`);
-  const out = outBase + "-orbit.png";
+  if (isWorld) console.log("  climbed cells:", await evaluate("__studio._climbs || 0"));
+  if (isWorld) console.log("  composing sheet…");
+  const data = await evaluate(`__studio.endSheet(${JSON.stringify(subject + " — orbit")})`, 240000);
+  const out = outBase + "-orbit" + (data.startsWith("data:image/jpeg") ? ".jpg" : ".png");
   await savePng(data, out);
   return out;
 }
@@ -456,18 +565,70 @@ async function encodeVideo(dataUrls, file, fps) {
 let chromeHandle = null;
 try {
   await ensureServer();
+  if (opt.seed) baseUrl += (baseUrl.includes("?") ? "&" : "?") + "seed=" + opt.seed;
   chromeHandle = await launchChrome();
+  if (isWorld) {
+    // the city only exists once the game is PLAYING — press PLAY, wait for
+    // the arena, and only then freeze everything with the studio harness
+    for (let i = 0; i < 60; i++) {
+      if (await evaluate("!!(window.CBZ && CBZ.game && document.getElementById('playBtn'))")) break;
+      await sleep(500);
+    }
+    let playing = false;
+    for (let i = 0; i < 120 && !playing; i++) {
+      await evaluate("(() => { const b = document.getElementById('playBtn'); if (b) b.click(); return true; })()");
+      await sleep(600);
+      playing = await evaluate("!!(CBZ.game && CBZ.game.state === 'playing' && CBZ.city && (CBZ.city.arena || CBZ.city).lots)");
+    }
+    if (!playing) throw new Error("city never reached playing state");
+    await sleep(2500);           // glass pools + batch pass settle
+  }
   // wait for game scripts to be parsed & studio harness to accept
   let ready = null;
-  const harness = HARNESS.replace("__NIGHT__", String(night));
+  const harness = HARNESS.replace("__NIGHT__", String(night)).replace("__WORLD__", String(isWorld));
   for (let i = 0; i < 200 && ready !== "ready"; i++) {
     try { ready = await evaluate(harness); } catch (e) { /* still loading */ }
     if (ready !== "ready") await sleep(300);
   }
   if (ready !== "ready") throw new Error("game APIs never became ready (CBZ/THREE/renderer/makeCharacter)");
 
-  const built = await evaluate(`(() => { const r = ${subjectExpr(subject)}; __studio.setSubject(r.group, r.rig); return { ok: true, grid: r.gridNames || 0 }; })()`);
-  if (!built || !built.ok) throw new Error("subject failed to build");
+  if (isWorld) {
+    const found = await evaluate(`(() => {
+      const q = ${JSON.stringify(subject)};
+      const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+      if (!A || !A.lots) return { err: "no city" };
+      if (q.startsWith("at:")) {
+        const p = q.slice(3).split(",").map(Number);
+        if (!isFinite(p[0]) || !isFinite(p[1])) return { err: "at: needs x,z" };
+        const r = isFinite(p[2]) ? p[2] : 12;
+        return { cx: p[0], cy: Math.min(r * 0.5, 6), cz: p[1], r, label: "at " + p[0] + "," + p[1] };
+      }
+      const want = q.slice(4).toLowerCase();
+      const lots = A.lots.concat(A.shopLots || []);
+      const name = (l) => ((l.building && (l.building.name || (l.building.shop && l.building.shop.name))) || "").toLowerCase();
+      let matches = lots.filter((l) => l.building && l.kind === want);
+      if (!matches.length) matches = lots.filter((l) => l.building && name(l).includes(want));
+      if (!matches.length) {
+        const p = want.split(",").map(Number);
+        if (isFinite(p[0]) && isFinite(p[1])) {
+          let best = null, bd = 1e9;
+          for (const l of lots) { if (!l.building) continue; const d = Math.hypot(l.cx - p[0], l.cz - p[1]); if (d < bd) { bd = d; best = l; } }
+          if (best && bd < 40) matches = [best];
+        }
+      }
+      if (!matches.length) return { err: "no lot matches " + JSON.stringify(want) + " — kinds present: " + [...new Set(lots.filter(l => l.building).map(l => l.kind))].join(",") };
+      const lot = matches[0], b = lot.building;
+      return { cx: b.ox, cy: b.h * 0.45, cz: b.oz, r: 0.55 * Math.hypot(b.w, b.d, b.h) + 2,
+               label: (b.name || lot.kind || "lot") + " @" + Math.round(lot.cx) + "," + Math.round(lot.cz), matches: matches.length };
+    })()`);
+    if (!found || found.err) throw new Error("world subject: " + (found ? found.err : "resolve failed"));
+    if (found.matches > 1) console.log(`(${found.matches} matches — shooting the first: ${found.label})`);
+    await evaluate(`__studio.setWorldTarget(${found.cx}, ${found.cy}, ${found.cz}, ${found.r})`);
+    console.log("subject:", found.label);
+  } else {
+    const built = await evaluate(`(() => { const r = ${subjectExpr(subject)}; __studio.setSubject(r.group, r.rig); return { ok: true, grid: r.gridNames || 0 }; })()`);
+    if (!built || !built.ok) throw new Error("subject failed to build");
+  }
 
   const outputs = [];
   if (mode === "orbit" || mode === "both") outputs.push(await captureOrbit());
