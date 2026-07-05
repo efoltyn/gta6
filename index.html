@@ -11,7 +11,7 @@
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=route1">
-<link rel="stylesheet" href="css/screens.css?v=ctrl3">
+<link rel="stylesheet" href="css/screens.css?v=intro1">
 <link rel="stylesheet" href="css/mobile.css?v=ctrl1">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
 <link rel="stylesheet" href="css/inventory.css?v=ctrl1">
@@ -107,27 +107,6 @@
     <div class="mode-escape-only">
       <div class="logo">CELL BLOCK <span class="z">Z</span></div>
       <div class="sub">Prison Escape</div>
-      <div class="keys">
-        <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Crouch &amp; sneak</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Space</span></span><span class="lab">Jump</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch (unarmed) — chain for combos</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Interaction options (talk / trade…)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">1–9</span></span><span class="lab">Hotbar — select / use item</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Sabotage / Crawl in vent</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">Open stash (when not interacting)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">F</span></span><span class="lab">Fire weapon</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Q</span></span><span class="lab">Swap gun</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Raise &amp; aim gun</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">N</span></span><span class="lab">Tactical Nuke (25 streak)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person mode</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Yard Rankings</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">B</span></span><span class="lab">Bird's-eye mass simulation</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Full map · click to set waypoint</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">+ / -</span></span><span class="lab">Society time speed (overview)</span></div>
-      </div>
       <div id="roleSelect" class="role-select" aria-label="Choose role">
         <button class="role-btn active" type="button" data-role="inmate">
           <span>Inmate</span><small>Escape the block</small>
@@ -136,25 +115,36 @@
           <span>Cop</span><small>Patrol with gear</small>
         </button>
       </div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sneak</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire · reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Rankings</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
+        </div>
+      </details>
     </div>
 
     <!-- SURVIVAL mode -->
     <div class="mode-survival-only">
       <div class="logo">DISASTER <span class="z">ZONE</span></div>
       <div class="sub">Natural Disaster Survival</div>
-      <div class="keys">
-        <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Space</span></span><span class="lab">Jump</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Push (shove)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab &amp; hold · release to set down</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Throw (while holding)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Interact menu (grab / punch / shove)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person · climb to high ground</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Full map · click to set waypoint</span></div>
-      </div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · throw</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab / set down</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">Climb high</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
+        </div>
+      </details>
     </div>
 
     <!-- CITY mode -->
@@ -169,32 +159,28 @@
         <button class="origin-btn" type="button" data-origin="barfly"><b>🍺 The Barfly</b><span>Thrown out at closing time. In debt.</span></button>
         <button class="origin-btn active" type="button" data-origin="tenant"><b>🔫 The Tenant</b><span>$12, an air mattress, and a pistol.</span></button>
       </div>
-      <div class="origin-hint">Three lives, one city. Each keeps their own money, gear and record — switch any time with <span class="kbd">U</span> in game.</div>
-      <div class="keys">
-        <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Mouse</span></span><span class="lab">Look around</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch / fire weapon</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Do the thing you're looking at — the card shows it (cars, shops, food, people)</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">The other options on the card</span></div>
-        <div class="row"><span class="keycol">Hold <span class="kbd">E</span></span><span class="lab">The rougher option — drag a driver out, etc.</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">1–9 · 0</span></span><span class="lab">Shop: buy items · sell all</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power — bosses, heirs, rich targets, turf</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow — buy/sell any property or business</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">H</span></span><span class="lab">When prompted: heist step / safehouse at your door</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">E</span> @ Auto lot</span><span class="lab">Open a car-resale yard · drive stolen cars in to flip</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">K</span> on card</span><span class="lab">Recruit, prospect, talk, shake down — depends who you're facing</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Full map · click to set waypoint</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">Y</span></span><span class="lab">Jobs from the City Power board or venue counters</span></div>
-        <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character — three lives, one shared city</span></div>
-      </div>
+      <div class="origin-hint">Each life keeps its own money, gear and record. <span class="kbd">U</span> switches in game.</div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · fire</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact (hold = rough)</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Card options</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map · waypoint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
+        </div>
+        <div class="controls-note">Everything else is on the card in front of you — walk up and it shows the buttons.</div>
+      </details>
     </div>
 
     <button class="btn" id="playBtn">Play</button>
-    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Brawl, steal, or trespass and the heat rises — then they hunt. Bent cops look the other way for cheap.</div>
-    <div class="smallnote mode-city-only">Make money any way you can — hustle, deal, steal cars, take contracts, or go legit. Obey the lights or run them. Cops escalate to 5 stars; get cuffed and you're hauled to the jail game.</div>
+    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
+    <div class="smallnote mode-city-only">Make money any way you can. Cops escalate to 5 stars — get cuffed and it's the jail game.</div>
     <div class="smallnote mode-escape-only" id="bestStat"></div>
-    <div class="smallnote mode-survival-only">Reach the mountain when the water rises. Watch the ground markers. The storm closes in — and so does everyone else.</div>
+    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
   </div>
 </div>
 

@@ -164,3 +164,26 @@ body.mode-survival .mode-survival-only{display:block;}
 #settingsPanel .stg-close:active{transform:translateY(1px);}
 #settingsOpenBtn{margin-top:12px;}
 
+
+/* ---- title-screen Controls expander: keybinds live behind one small toggle
+   so the title card stays a title card. Two-column grid keeps it short. ---- */
+.controls { margin: 10px 0 2px; }
+.controls summary {
+  cursor: pointer; text-align: center; list-style: none;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #9a8f80; padding: 4px 0;
+}
+.controls summary::-webkit-details-marker { display: none; }
+.controls summary::after { content: " ▾"; font-size: 10px; }
+.controls[open] summary::after { content: " ▴"; }
+.controls summary:hover { color: #5b5348; }
+.controls .keys {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 18px;
+  margin-top: 8px; max-height: none;
+}
+.controls .keys .row { display: flex; align-items: center; gap: 8px; }
+.controls .keys .lab { font-size: 12.5px; }
+.controls-note {
+  margin-top: 8px; text-align: center; font-size: 12px; color: #9a8f80;
+}
+@media (max-width: 560px) { .controls .keys { grid-template-columns: 1fr; } }
