@@ -460,71 +460,12 @@
     });
   }
 
+  // Per-model trim on the LEGACY BOX RIG. The branch table moved to
+  // city/carparts.js (applyBoxIdentity) — the same file that owns the brand
+  // design languages for the unified visuals — so all model identity lives in
+  // one place. Accepts both new fictional designStyles and old strings.
   function addModelIdentity(grp, model, d) {
-    const style = model && model.designStyle;
-    if (!style) return;
-    const { w, len, hullH, hullY, roofW, roofH, roofY, roofZ, paint, trim } = d;
-    const bodyY = 0.78 + (hullY - 0.72);
-    const front = len * 0.5 + 0.055, rear = -len * 0.5 - 0.055;
-    const chrome = vmat("chrome", 0xaeb7c0, { emissive: 0x24292e, ei: 0.3 });
-    const head = vmat("lightFront", 0xeaf6ff, { emissive: 0xbfe6ff, ei: 0.85 });   // exact colour kept
-    const tail = vmat("lightTail", 0xff3038, { emissive: 0xff2630, ei: 0.8 });     // for brake/crash detectors
-    const add = (ww, hh, dd, x, y, z, material) => {
-      const mesh = boxMesh(ww, hh, dd, material);
-      mesh.position.set(x, y, z); grp.add(mesh); return mesh;
-    };
-
-    if (style === "prius") {
-      [1, -1].forEach((side) => add(0.12, roofH * 0.62, 0.065, side * w * 0.39, roofY - roofH * 0.08, rear, tail));
-    } else if (style === "civic") {
-      [1, -1].forEach((side) => add(0.18, 0.12, 0.16, side * w * 0.28, bodyY - hullH * 0.32, rear, chrome));
-    } else if (style === "malibu") {
-      [-0.1, 0.1].forEach((yy) => add(w * 0.58, 0.035, 0.035, 0, bodyY + yy, front, chrome));
-    } else if (style === "caravan") {
-      [1, -1].forEach((side) => {
-        add(0.05, 0.05, len * 0.64, side * roofW * 0.45, roofY + roofH * 0.55, roofZ - len * 0.04, trim);
-        add(0.035, 0.035, len * 0.44, side * w * 0.505, bodyY + hullH * 0.24, -len * 0.12, trim);
-      });
-    } else if (style === "f150") {
-      [1, -1].forEach((side) => add(0.07, 0.08, len * 0.38, side * w * 0.46, bodyY + hullH * 0.62, -len * 0.22, trim));
-      [-0.13, 0.13].forEach((yy) => add(w * 0.62, 0.045, 0.04, 0, bodyY + yy, front, chrome));
-    } else if (style === "370z") {
-      add(roofW * 0.68, 0.035, len * 0.2, 0, roofY + roofH * 0.52, roofZ - len * 0.02, trim);
-      [1, -1].forEach((side) => add(0.18, 0.1, 0.14, side * w * 0.3, bodyY - hullH * 0.28, rear, chrome));
-    } else if (style === "cherokee") {
-      [1, -1].forEach((side) => add(0.055, 0.06, len * 0.58, side * roofW * 0.43, roofY + roofH * 0.54, roofZ, trim));
-      for (let i = -3; i <= 3; i++) add(0.055, hullH * 0.42, 0.04, i * w * 0.075, bodyY, front, trim);
-    } else if (style === "charger") {
-      [1, -1].forEach((side) => add(w * 0.16, 0.035, len * 0.34, side * w * 0.19, bodyY + hullH * 0.53, len * 0.18, trim));
-    } else if (style === "corvette") {
-      [1, -1].forEach((side) => {
-        add(0.18, 0.1, 0.14, side * w * 0.28, bodyY - hullH * 0.3, rear, chrome);
-        add(w * 0.1, 0.035, len * 0.44, side * w * 0.12, bodyY + hullH * 0.5, len * 0.1, trim);
-      });
-    } else if (style === "sclass") {
-      [-0.12, 0, 0.12].forEach((yy) => add(w * 0.56, 0.035, 0.035, 0, bodyY + yy, front, chrome));
-      add(0.035, 0.18, 0.035, 0, bodyY + hullH * 0.62, len * 0.38, chrome);
-    } else if (style === "models") {
-      add(w * 0.7, 0.055, 0.09, 0, bodyY + hullH * 0.47, rear, paint);
-    } else if (style === "modelx") {
-      [1, -1].forEach((side) => add(0.04, roofH * 0.48, 0.04, side * roofW * 0.5, roofY, roofZ, trim));
-    } else if (style === "porsche") {
-      [1, -1].forEach((side) => add(0.26, 0.24, 0.07, side * w * 0.29, bodyY + hullH * 0.45, front, head));
-    } else if (style === "aventador") {
-      [1, -1].forEach((side) => {
-        const lamp = add(w * 0.24, 0.08, 0.075, side * w * 0.3, bodyY + hullH * 0.42, front, head);
-        lamp.rotation.z = side * -0.18;
-      });
-      add(w * 0.74, 0.07, 0.18, 0, bodyY + hullH * 0.65, -len * 0.43, trim);
-    } else if (style === "ferrari") {
-      [1, -1].forEach((side) => add(w * 0.13, 0.05, len * 0.24, side * w * 0.18, bodyY + hullH * 0.52, len * 0.13, trim));
-    } else if (style === "enzo") {
-      [1, -1].forEach((side) => add(w * 0.14, 0.055, len * 0.32, side * w * 0.2, bodyY + hullH * 0.5, len * 0.12, trim));
-      add(w * 0.16, 0.06, len * 0.38, 0, bodyY + hullH * 0.53, len * 0.12, paint);
-    } else if (style === "veyron") {
-      add(w * 0.24, 0.045, len * 0.66, 0, bodyY + hullH * 0.53, -len * 0.02, chrome);
-      [1, -1].forEach((side) => add(0.18, 0.16, 0.06, side * w * 0.2, bodyY, front, trim));
-    }
+    if (CBZ.carParts && CBZ.carParts.applyBoxIdentity) CBZ.carParts.applyBoxIdentity(grp, model, d);
   }
 
   // Every named model has a stable body class. The old random fallback could
@@ -571,7 +512,9 @@
     const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
     const style = CBZ.cityInferCarStyle(model) || "tesla-3";
     let visual = null;
-    try { visual = CBZ.cityBuildPlayerCarVisual(style, paintHex); } catch (e) { visual = null; }
+    // model rides along so carparts.js can apply the BRAND face + per-model
+    // identity (incl. the taxi roof sign the unified path used to drop).
+    try { visual = CBZ.cityBuildPlayerCarVisual(style, paintHex, null, model); } catch (e) { visual = null; }
     if (!visual) return buildCarBox(model);
     grp.add(visual);
     // Wheels stay as individual meshes (tagged playerWheel) so the driven car can

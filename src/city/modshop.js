@@ -68,6 +68,14 @@
     launcherCD: 0.9,          // seconds between rockets
     launcherAmmoMax: 12,
     crimeShots: 120,          // CBZ.cityCrime weight for opening fire
+    // ---- THE WEDGE (hydraulic ram blade) ----
+    wedgeMinSpeed: 11,        // m/s — below this the blade just shoves like any bumper
+    wedgeReach: 1.6,          // blade reach beyond the nose (scoop trigger distance)
+    wedgeCone: 0.45,          // dot(dirToVictim, forward) must exceed this (nose-mounted)
+    wedgeLaunchDmg: 30,       // engine damage on the scoop (plus a speed term)
+    wedgeLandDmg: 46,         // extra slam damage when the flipped car lands
+    wedgeGravity: 24,         // m/s² for the flip arc
+    wedgeArmor: 0.3,          // the plow soaks crash energy for the rammer (car.armor floor)
   };
 
   // tiered prices (gated on cash). Sell has no price (it pays YOU).
@@ -79,7 +87,13 @@
     launcher:  26000,
     launcherAmmo: 4000,       // a full resupply
     perf:     { 1: 5000, 2: 11000, 3: 20000 },
+    wedge:     24000,
+    glow:      1500,
   };
+
+  // underglow colour menu (name → hex). One shared additive material per colour.
+  const GLOW_COLORS = { violet: 0x8a2be2, cyan: 0x22d3ee, red: 0xff2d2d, lime: 0x7cfc00 };
+  const glowMats = {};
 
   // shared materials (one set, reused across every bolt-on → draw-call cheap).
   let MAT = null;
@@ -94,6 +108,8 @@
       flame:  new THREE.MeshBasicMaterial({ color: 0xffae3a }),
       pod:    new THREE.MeshLambertMaterial({ color: 0x2b2f36 }),
       tip:    new THREE.MeshBasicMaterial({ color: 0xff6a3a }),
+      hazard: new THREE.MeshLambertMaterial({ color: 0xe7c11f }),  // wedge warning stripe
+      chrome: new THREE.MeshLambertMaterial({ color: 0xd7dde4 }),  // exhaust / intercooler
     };
     for (const k in MAT) MAT[k]._shared = true;
     return MAT;
@@ -249,6 +265,103 @@
     return grp;
   }
 
+  // THE WEDGE — a chunky raked plow blade over the nose (battering-ram
+  // snowplow). Purely visual here; the flip physics live in the 37.7 step.
+  function buildWedge(root, dims) {
+    const M = assets();
+    const hl = dims.length / 2;
+    const grp = new THREE.Group();
+    grp.userData._wedge = true;
+    const bladeW = dims.width * 1.18, bladeH = dims.height * 0.62;
+    // main slab, raked back toward the hood
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(bladeW, bladeH, 0.3), M.plate);
+    blade.position.set(0, bladeH * 0.5 + 0.12, hl + 0.42);
+    blade.rotation.x = -0.5;
+    grp.add(blade);
+    // hazard stripe riding the blade's top edge (child → follows the rake)
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(bladeW, 0.12, 0.34), M.hazard);
+    edge.position.set(0, bladeH * 0.5 + 0.04, 0);
+    blade.add(edge);
+    // low cutting lip that scoops under bumpers
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(bladeW, 0.16, 0.55), M.plateE);
+    lip.position.set(0, 0.14, hl + 0.58);
+    grp.add(lip);
+    [-1, 1].forEach(function (sx) {
+      // angled side wings so struck cars slide UP the blade, not around it
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(0.3, bladeH * 0.8, 0.9), M.plate);
+      wing.position.set(sx * (bladeW / 2 - 0.14), bladeH * 0.44, hl + 0.02);
+      wing.rotation.y = sx * 0.35;
+      grp.add(wing);
+      // hydraulic struts back to the chassis (the "ram" in ram wedge)
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.05, 6), M.metal);
+      strut.rotation.x = Math.PI / 2 - 0.35;
+      strut.position.set(sx * dims.width * 0.3, dims.height * 0.32, hl - 0.12);
+      grp.add(strut);
+    });
+    root.add(grp);
+    return grp;
+  }
+
+  // PERFORMANCE bolt-ons — the money must be VISIBLE on the car:
+  //   tier 1: fat chrome exhaust tips
+  //   tier 2: + front intercooler slab and hood vents
+  //   tier 3: + supercharger scoop through the hood and the big trunk wing
+  function buildPerf(root, dims, tier) {
+    const M = assets();
+    const hl = dims.length / 2;
+    [-1, 1].forEach(function (sx) {
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.44, 8), M.chrome);
+      tip.rotation.x = Math.PI / 2;
+      tip.position.set(sx * dims.width * 0.3, 0.3, -hl - 0.16);
+      root.add(tip);
+    });
+    if (tier >= 2) {
+      const ic = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.55, 0.28, 0.16), M.chrome);
+      ic.position.set(0, 0.36, hl + 0.04);
+      root.add(ic);
+      [-1, 1].forEach(function (sx) {
+        const vent = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.2, 0.06, dims.length * 0.14), M.barrel);
+        vent.position.set(sx * dims.width * 0.2, dims.height * 0.66, hl * 0.42);
+        root.add(vent);
+      });
+    }
+    if (tier >= 3) {
+      const scoop = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.3, 0.24, dims.length * 0.16), M.metal);
+      scoop.position.set(0, dims.height * 0.72, hl * 0.5);
+      root.add(scoop);
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.24, 0.13, 0.07), M.barrel);
+      mouth.position.set(0, dims.height * 0.74, hl * 0.5 + dims.length * 0.085);
+      root.add(mouth);
+      [-1, 1].forEach(function (sx) {
+        const up = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.22), M.metal);
+        up.position.set(sx * dims.width * 0.3, dims.height * 0.6 + 0.15, -hl * 0.82);
+        root.add(up);
+      });
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(dims.width * 0.96, 0.09, 0.42), M.plate);
+      wing.position.set(0, dims.height * 0.6 + 0.33, -hl * 0.82);
+      wing.rotation.x = -0.12;
+      root.add(wing);
+    }
+  }
+
+  // UNDERGLOW — one additive plane under the car; shared material per colour.
+  function buildGlow(root, dims, colorName) {
+    let mat = glowMats[colorName];
+    if (!mat) {
+      mat = new THREE.MeshBasicMaterial({
+        color: GLOW_COLORS[colorName] || GLOW_COLORS.violet,
+        transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      mat._shared = true;
+      glowMats[colorName] = mat;
+    }
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(dims.width + 0.9, dims.length + 1.1), mat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.y = 0.07;
+    root.add(m);
+    return m;
+  }
+
   // ============================================================
   // APPLY: (re)build every saved mod from car.mods onto car.group.
   // ============================================================
@@ -263,6 +376,9 @@
     car._modFx = car._modFx || {};
     try {
       if (m.armor) buildArmor(root, dims, m.armor);
+      if (m.wedge) buildWedge(root, dims);
+      if (m.perf) buildPerf(root, dims, m.perf | 0);
+      if (m.glow) car._modFx.glow = buildGlow(root, dims, m.glow);
       if (m.booster) car._modFx.booster = buildBooster(root, dims);
       if (m.turret) car._modFx.turret = buildTurret(root, dims);
       if (m.launcher) car._modFx.launcher = buildLauncher(root, dims);
@@ -285,6 +401,8 @@
       case "turret":   m.turret = true; break;
       case "launcher": m.launcher = m.launcher || { ammo: 0 }; m.launcher.ammo = TUNE.launcherAmmoMax; break;
       case "perf":     m.perf = Math.max(m.perf || 0, tier | 0 || 1); applyPerf(car); break;
+      case "wedge":    m.wedge = true; car.armor = Math.max(car.armor || 0, TUNE.wedgeArmor); break;
+      case "glow":     m.glow = (GLOW_COLORS[tier] != null) ? tier : "violet"; break;
       case "paint":    m.paint = tier || m.paint; break;
       default: return false;
     }
@@ -312,6 +430,7 @@
     if (f.accel != null) f.accel *= k;
     if (f.top != null) f.top *= (1 + tier * 0.1);
     if (f.grip != null) f.grip *= (1 + tier * 0.06);
+    f._perfTier = tier;          // marker: promote/restyle resets the feel — we re-assert off this
     car._playerCarFeel = f;
     reshapeGearTorque(car, tier);
   }
@@ -339,6 +458,30 @@
       });
     });
   }
+
+  // ============================================================
+  // RESTORE: re-dress a freshly-spawned car from a garage record
+  // ({ name, color, mods }). Used by realestate.js retrieve (and safe for any
+  // future spawner). Old string records are up-converted by the caller.
+  // ============================================================
+  CBZ.cityRestoreCarMods = function (car, rec) {
+    if (!car || !rec) return car;
+    if (rec.color != null && rec.color !== car.color) {
+      car.color = rec.color;
+      // repaint via the public re-skin path (rebuilds the visual in car.color)
+      const ud = car.group && car.group.userData;
+      const style = (ud && ud.carStyle) || car.detailStyle;
+      if (style && CBZ.citySetCarVisual) { try { CBZ.citySetCarVisual(car, style); } catch (e) { /* keep old paint */ } }
+    }
+    if (rec.mods) {
+      try { car.mods = JSON.parse(JSON.stringify(rec.mods)); } catch (e) { car.mods = rec.mods; }
+      if (car.mods.wedge) car.armor = Math.max(car.armor || 0, TUNE.wedgeArmor);
+      car._perfBaseFeel = null;                 // fresh visual → fresh base feel
+      if (car.mods.perf) applyPerf(car);
+      applyMods(car);
+    }
+    return car;
+  };
 
   // ============================================================
   // ARMOR: wrap cityDamageCar ONCE (idempotent), mirroring armored.js.
@@ -372,6 +515,26 @@
     wrapped._origArmored = orig._origArmored;
     wrapped._origMod = orig;
     CBZ.cityDamageCar = wrapped;
+  }
+
+  // PERF must survive re-entry SYNCHRONOUSLY: cityPromotePlayerCar (inside
+  // cityEnterVehicle) resets car._playerCarFeel to the stock style feel, so we
+  // re-compose the tier right after every enter — not a frame later (the
+  // per-frame re-assert in the 12.2 loop stays as the restyle safety net).
+  // Same idempotent wrap style as installDamageWrap.
+  function installEnterWrap() {
+    const orig = CBZ.cityEnterVehicle;
+    if (typeof orig !== "function" || orig._modPerfWrapped) return;
+    const wrapped = function (car) {
+      const r = orig.apply(this, arguments);
+      try {
+        if (r && car && car.mods && car.mods.perf) { car._perfBaseFeel = null; applyPerf(car); }
+      } catch (e) { /* never break entering a car */ }
+      return r;
+    };
+    wrapped._modPerfWrapped = true;
+    wrapped._origModPerf = orig;
+    CBZ.cityEnterVehicle = wrapped;
   }
 
   // ============================================================
@@ -621,11 +784,170 @@
   }
 
   // ============================================================
+  // THE WEDGE — flip physics. Runs at order 37.7: AFTER the AI traffic loop
+  // (37) and the solid collision resolve (37.6) have written this frame's car
+  // transforms, so the flip arc owns the FINAL pose (car.pos aliases
+  // group.position, and those writers stomp y to 0 / rotation.y to heading).
+  //
+  // Lifecycle per victim:
+  //   scoop  — player's wedge car at speed, victim inside the blade cone →
+  //            launch: ai=false + abandoned=true (AI loop and traffic
+  //            recyclers both leave such cars alone), damage ONCE through the
+  //            public CBZ.cityDamageCar chain (opts tagged _wedgeHit so any
+  //            wrapper can identify/idempote the impact).
+  //   flight — ballistic arc + tumble (rollRate/pitchRate chosen so total
+  //            rotation = π × halfTurns: odd → lands on its roof).
+  //   land   — roof landing = wrecked/disabled (slam damage, stays a solid
+  //            obstacle, pose re-asserted every frame); wheels landing =
+  //            battered but alive, handed back to traffic with a spin-out.
+  // ============================================================
+  const flips = [];
+  function wedgeVmag(car) {
+    return Math.max(Math.abs(car.v || 0), Math.hypot(car.vx || 0, car.vz || 0));
+  }
+  // PRE-COLLISION speed sample (order 11.5 — right after the player drive at
+  // 11, BEFORE resolveCars at 37.6). The solid-collision pass bleeds most of
+  // the rammer's speed in the very frame first contact happens, so sampling
+  // speed at 37.7 would read the post-crash value and the scoop would never
+  // arm. This is the speed the blade actually ARRIVED with.
+  CBZ.onUpdate(11.5, function () {
+    if (g.mode !== "city" || g.state !== "playing") return;
+    const car = liveCar();
+    if (car && car.mods && car.mods.wedge) car._wedgePreV = wedgeVmag(car);
+  });
+  function stepWedgeScoop(car, dt) {
+    const vmag = Math.max(wedgeVmag(car), car._wedgePreV || 0);
+    if (vmag < TUNE.wedgeMinSpeed) return;
+    const fx = Math.sin(car.heading || 0), fz = Math.cos(car.heading || 0);
+    const myHalf = carDims(car).length / 2;
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || c === car || c.dead || c.player || c._wedgeFlip) continue;
+      if ((c._wedgeUntil || 0) > (CBZ.now || 0)) continue;
+      const dx = c.pos.x - car.pos.x, dz = c.pos.z - car.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.001) continue;
+      const cd = carDims(c);
+      const reach = myHalf + Math.hypot(cd.length, cd.width) * 0.5 + TUNE.wedgeReach + vmag * dt;
+      if (dist > reach) continue;
+      if ((dx * fx + dz * fz) / dist < TUNE.wedgeCone) continue;   // not on the blade
+      launchFlip(car, c, vmag, dx / dist, dz / dist);
+    }
+  }
+  function launchFlip(rammer, victim, speed, dirx, dirz) {
+    victim._wedgeFlip = true;
+    victim._wedgeUntil = (CBZ.now || 0) + 4000;
+    // park the AI: the loop skips !ai cars, recyclers skip abandoned ones —
+    // from here until landing, the flip record owns this car's transform.
+    victim.ai = false; victim.abandoned = true;
+    victim.wreckT = 0; victim.spin = 0; victim.v = 0; victim.vx = 0; victim.vz = 0;
+    victim.pullover = 0; victim.turning = null; victim.roadRageTarget = null;
+    const vy0 = Math.min(13, 5.5 + speed * 0.28);
+    const T = 2 * vy0 / TUNE.wedgeGravity;                 // ballistic flight time
+    const halfTurns = speed > 24 ? 3 : 1;                  // fast ram = 1.5 flips; both land roof-down
+    const rate = Math.PI * halfTurns / Math.max(0.25, T);
+    // tumble about the axis that reads right for the contact: side hit → roll
+    // along its own length; head-on/rear → end-over-end pitch.
+    const vh = victim.heading || 0;
+    const along = dirx * Math.sin(vh) + dirz * Math.cos(vh);
+    const lat = dirx * Math.cos(vh) - dirz * Math.sin(vh);
+    const f = {
+      car: victim, y: 0, vy: vy0,
+      vx: dirx * speed * 0.6, vz: dirz * speed * 0.6,
+      pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
+      yawRate: (Math.random() - 0.5) * 2.2,
+      halfTurns, landed: false, restY: 0,
+    };
+    if (Math.abs(lat) >= Math.abs(along)) f.rollRate = rate * (lat >= 0 ? 1 : -1);
+    else f.pitchRate = rate * (along >= 0 ? -1 : 1);
+    flips.push(f);
+    // the scoop is a real hit — once, through the public damage chain (armor
+    // wraps et al. see it; _wedgeHit lets any wrapper idempote this impact).
+    if (CBZ.cityDamageCar) CBZ.cityDamageCar(victim, TUNE.wedgeLaunchDmg + speed * 0.8, { byPlayer: true, _wedgeHit: true });
+    if (CBZ.cityCrashFX) CBZ.cityCrashFX(victim.pos.x, victim.pos.z, { speed: speed, hard: true, dir: { x: dirx, z: dirz } });
+    if (CBZ.sfx) CBZ.sfx("ko");
+    if (CBZ.shake) CBZ.shake(0.5);
+    if (CBZ.doHitstop) CBZ.doHitstop(0.05);
+    if (CBZ.cityCrime) CBZ.cityCrime(28, { type: "vehicular-assault", x: victim.pos.x, z: victim.pos.z });
+    if (CBZ.cityRankEvent) { try { CBZ.cityRankEvent("crash", { speed: speed, hard: true, carA: rammer, carB: victim }); } catch (e) {} }
+  }
+  function landFlip(f) {
+    const c = f.car, dims = carDims(c);
+    f.landed = true;
+    const upside = (f.halfTurns % 2) === 1;
+    // snap the tumble to its exact final pose (integration ≈ π×halfTurns)
+    f.pitch = f.pitchRate ? Math.sign(f.pitchRate) * Math.PI * (upside ? 1 : 0) : 0;
+    f.roll = f.rollRate ? Math.sign(f.rollRate) * Math.PI * (upside ? 1 : 0) : 0;
+    if (upside) {
+      // resting on its roof: raise the group so the cabin sits ON the road,
+      // with a touch of roof-crush settle + a lazy resting tilt.
+      f.restY = dims.height * 0.88;
+      if (f.roll) f.pitch = (Math.random() - 0.5) * 0.12; else f.roll = (Math.random() - 0.5) * 0.12;
+      if (CBZ.cityDamageCar) CBZ.cityDamageCar(c, TUNE.wedgeLandDmg, { byPlayer: true, _wedgeHit: true });
+      c.ai = false; c.abandoned = true;          // wrecked — stays a dead solid obstacle
+    } else {
+      // 360° — slammed back onto its wheels: battered, spins out, drives on
+      f.restY = 0;
+      if (CBZ.cityDamageCar) CBZ.cityDamageCar(c, TUNE.wedgeLandDmg * 0.5, { byPlayer: true, _wedgeHit: true });
+      c._wedgeFlip = false;
+      c.ai = true; c.abandoned = false;
+      c.wreckT = 1.4; c.spin = (Math.random() - 0.5) * 2.4;
+    }
+    if (CBZ.cityCrashFX) CBZ.cityCrashFX(c.pos.x, c.pos.z, { speed: 14, hard: true });
+    if (CBZ.sfx) CBZ.sfx("clank");
+    if (CBZ.shake && CBZ.camera) {
+      const cm = CBZ.camera.position, dx = c.pos.x - cm.x, dz = c.pos.z - cm.z;
+      if (dx * dx + dz * dz < 70 * 70) CBZ.shake(0.4);
+    }
+  }
+  function stepFlips(dt) {
+    for (let i = flips.length - 1; i >= 0; i--) {
+      const f = flips[i], c = f.car;
+      // wreck exploded / world rebuilt / car reaped / player climbed into it →
+      // drop the record (a driven car belongs to the drive loop, not us)
+      if (!c || c.dead || c._reap || !c.group || !c.group.parent || c.player) {
+        if (c) c._wedgeFlip = false;
+        flips.splice(i, 1);
+        continue;
+      }
+      if (!f.landed) {
+        f.vy -= TUNE.wedgeGravity * dt;
+        f.y += f.vy * dt;
+        c.pos.x += f.vx * dt; c.pos.z += f.vz * dt;
+        f.vx *= Math.pow(0.6, dt); f.vz *= Math.pow(0.6, dt);   // air drag
+        f.pitch += f.pitchRate * dt; f.roll += f.rollRate * dt;
+        c.heading = (c.heading || 0) + f.yawRate * dt;
+        const A = CBZ.city && CBZ.city.arena;
+        if (A && A.clampToCity) { try { A.clampToCity(c.pos, 2); } catch (e) {} }
+        if (f.y <= 0 && f.vy < 0) landFlip(f);
+      } else if (!c._wedgeFlip) {
+        // landed upright and handed back to traffic — restore + release
+        c.pos.y = 0;
+        c.group.rotation.set(0, c.heading, 0);
+        flips.splice(i, 1);
+        continue;
+      }
+      // own the FINAL pose this frame (earlier writers zero y / rotation.y)
+      c.pos.y = f.landed ? f.restY : Math.max(0, f.y);
+      c.group.rotation.set(f.pitch, c.heading, f.roll);
+    }
+  }
+  CBZ.onUpdate(37.7, function (dt) {
+    if (g.mode !== "city") { if (flips.length) flips.length = 0; return; }
+    if (g.state !== "playing") return;
+    const car = liveCar();
+    if (car && !car.dead && car.mods && car.mods.wedge) stepWedgeScoop(car, dt);
+    if (flips.length) stepFlips(dt);
+  });
+
+  // ============================================================
   // PER-FRAME (order 12 — just after the player drive at order 11): aim,
   // booster physics, cooldowns, weapon, HUD.
   // ============================================================
   CBZ.onUpdate(12.2, function (dt) {
     installDamageWrap();   // idempotent; survives load-order + hot reloads
+    installEnterWrap();
     stepTracers(dt);
     if (g.mode !== "city") { hideHud(); return; }
     if (g.state !== "playing") { hideHud(); return; }
@@ -633,14 +955,29 @@
     if (!car) { hideHud(); return; }
     // ensure attachments exist (MP puppet / after a visual swap)
     if (car.mods && (!car._modFx || (car.mods.turret && !car._modFx.turret) ||
-        (car.mods.launcher && !car._modFx.launcher) || (car.mods.booster && !car._modFx.booster))) {
+        (car.mods.launcher && !car._modFx.launcher) || (car.mods.booster && !car._modFx.booster) ||
+        (car.mods.glow && !car._modFx.glow) ||
+        !(car.group && car.group.userData && car.group.userData._modRoot))) {
       applyMods(car);
+    }
+    // PERF feel survives re-entry/restyle: promote/citySetCarVisual reset
+    // car._playerCarFeel to the stock style feel — re-compose when the marker
+    // is missing (the fresh stock feel becomes the new base).
+    if (car.mods && car.mods.perf &&
+        (!car._playerCarFeel || car._playerCarFeel._perfTier !== (car.mods.perf | 0))) {
+      car._perfBaseFeel = null;
+      applyPerf(car);
     }
     car._modLaunchCD = Math.max(0, (car._modLaunchCD || 0) - dt);
     if (car.mods && car.mods.booster) stepBooster(car, dt);
     if (car.mods && car.mods.turret) stepTurret(car, dt);
+    // underglow breathes a little (shared material per colour — all glow cars
+    // of that colour pulse together; one uniform write, no per-car cost)
+    _glowT += dt;
+    for (const k in glowMats) glowMats[k].opacity = 0.34 + 0.14 * (0.5 + 0.5 * Math.sin(_glowT * 2.4));
     updateHud(car);
   });
+  let _glowT = 0;
 
   // ============================================================
   // HUD: a small DOM strip — boost meter + active-weapon + rocket ammo.
@@ -662,9 +999,13 @@
   let _hudTxt = "";
   function updateHud(car) {
     const m = car.mods;
-    if (!m || (!m.booster && !m.turret && !m.launcher)) { hideHud(); return; }
+    if (!m || (!m.booster && !m.turret && !m.launcher && !m.wedge)) { hideHud(); return; }
     const el = hudEl(); if (!el) return;
     let parts = [];
+    if (m.wedge) {
+      const sp = wedgeVmag(car);
+      parts.push(sp >= TUNE.wedgeMinSpeed ? "🔺 WEDGE ARMED" : "🔺 wedge " + (sp | 0) + "/" + TUNE.wedgeMinSpeed);
+    }
     if (m.booster) {
       const r = (car._boostReady == null ? 1 : car._boostReady);
       const pct = Math.round(r * 100);
@@ -717,8 +1058,9 @@
   }
 
   const TABS = [
-    ["sell", "Sell"], ["respray", "Respray"], ["armor", "Armor"],
-    ["booster", "Booster"], ["turret", "Turret"], ["launcher", "Launcher"], ["perf", "Performance"],
+    ["sell", "Sell"], ["respray", "Respray"], ["armor", "Armor"], ["wedge", "Ram Wedge"],
+    ["booster", "Booster"], ["turret", "Turret"], ["launcher", "Launcher"],
+    ["perf", "Performance"], ["glow", "Underglow"],
   ];
 
   function sellPayout(car) {
@@ -732,10 +1074,12 @@
     let modBonus = 1;
     const m = car.mods || {};
     if (m.armor) modBonus += m.armor === "heavy" ? 0.18 : 0.09;
+    if (m.wedge) modBonus += 0.12;
     if (m.booster) modBonus += 0.08;
     if (m.turret) modBonus += 0.12;
     if (m.launcher) modBonus += 0.14;
     if (m.perf) modBonus += m.perf * 0.05;
+    if (m.glow) modBonus += 0.02;
     return { pay: Math.round(base * frac * (cond.valueMul || 1) * modBonus), cond: cond };
   }
 
@@ -772,13 +1116,23 @@
           action: function () { doResupply(car); } });
         return rows;
       }
+      case "wedge":
+        return [{ label: "Hydraulic ram wedge", price: PRICE.wedge,
+          sub: "ram traffic over " + TUNE.wedgeMinSpeed + " m/s → they FLIP",
+          owned: !!m.wedge, action: function () { doMod(car, "wedge", null, PRICE.wedge); } }];
       case "perf": {
         const cur = m.perf | 0;
+        const sub = { 1: "faster · chrome exhaust", 2: "grippier · intercooler + vents", 3: "top stage · scoop + big wing" };
         return [1, 2, 3].map(function (t) {
-          return { label: "Performance — Stage " + t, price: PRICE.perf[t], sub: "faster · grippier",
+          return { label: "Performance — Stage " + t, price: PRICE.perf[t], sub: sub[t],
             owned: cur >= t, action: function () { doMod(car, "perf", t, PRICE.perf[t]); } };
         });
       }
+      case "glow":
+        return Object.keys(GLOW_COLORS).map(function (name) {
+          return { label: "Underglow — " + name.toUpperCase(), price: PRICE.glow, sub: "neon kit · pulses",
+            owned: m.glow === name, action: function () { doMod(car, "glow", name, PRICE.glow); } };
+        });
       default: return [];
     }
   }
@@ -815,7 +1169,7 @@
         "<span>" + priceTxt + "</span></div>";
     });
     html += "<div style='border-top:1px solid #2a3122;margin:12px 0 4px'></div>";
-    html += "<div style='color:#8a93a3;font-size:12px'>[1-7] tab · [a-d] buy/select · [Esc]/[E] close</div>";
+    html += "<div style='color:#8a93a3;font-size:12px'>[1-" + TABS.length + "] tab · [a-d] buy/select · [Esc]/[E] close</div>";
     d.innerHTML = html;
   }
 

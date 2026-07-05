@@ -16,22 +16,25 @@
     "tesla-s", "tesla-3", "tesla-x", "tesla-y", "hatch", "suv", "van",
     "cybertruck", "motorcycle", "helicopter", "boat",
   ];
+  // Fictional-marque labels (the manufacturer universe lives in
+  // city/carparts.js + the economy.js catalog; these silhouette KEYS are
+  // load-bearing across racing/modshop/net code and never change).
   const STYLE_LABEL = {
-    ferrari: "Ferrari",
-    enzo: "Ferrari Enzo",
-    veyron: "Bugatti Veyron",
-    aventador: "Aventador",
-    porsche: "Porsche 911",
-    muscle: "Muscle Car",
-    lowrider: "Lowrider",
-    "tesla-s": "Tesla Model S",
-    "tesla-3": "Tesla Model 3",
-    "tesla-x": "Tesla Model X",
-    "tesla-y": "Tesla Model Y",
-    hatch: "Hot Hatch",
-    suv: "SUV",
-    van: "Cargo Van",
-    cybertruck: "Cybertruck",
+    ferrari: "Falcone Rondine",
+    enzo: "Falcone Tempesta",
+    veyron: "Vitesse Millenne",
+    aventador: "Falcone Furia",
+    porsche: "Adler 901",
+    muscle: "Bison Stampede",
+    lowrider: "Bison Eldorado",
+    "tesla-s": "Voltra Surge",
+    "tesla-3": "Voltra Ion",
+    "tesla-x": "Voltra Nova",
+    "tesla-y": "Voltra Halo",
+    hatch: "Kotori Pip",
+    suv: "Bison Frontier",
+    van: "Bison Hauler",
+    cybertruck: "Voltra Colossus",
     motorcycle: "Superbike",
     helicopter: "Helicopter",
     boat: "Speedboat",
@@ -304,39 +307,80 @@
   }
 
   // ---- one TIRE mesh per size: rounder 28-seg sidewall (the dark rubber). The
-  // bright RIM (disc + spokes) is a SEPARATE merged mesh added as a child so it
-  // can carry the shiny vmat('rim') material while the tire stays vmat('tire').
-  // Both are cached & flagged _shared (templates live forever; clones reuse). ----
+  // bright RIM (spokes + lip + hub) is a SEPARATE merged mesh added as a child
+  // so it can carry the shiny vmat('rim') material while the tire stays
+  // vmat('tire'). Rims are now OPENWORK (no solid face disc except the EV aero
+  // wheel) built AT THE TIRE CAP PLANE, with a dark BRAKE DISC visible in the
+  // gaps between spokes — the old design centred the rim assembly INSIDE the
+  // closed tire cylinder, so all that ever showed was a ~2cm proud sliver:
+  // the "flat coin rim" critique. Local y=0 in rimGeo = the tire cap plane.
+  // Spoke style is a per-brand signature (carparts.js rimStyleFor). ----
+  const RIM_PARAMS = {
+    sport5:  { n: 5,  sw: 0.16, hub: 0.18 },                 // classic alloy
+    twin10:  { n: 10, sw: 0.10, hub: 0.15 },                 // Falcone twin-five
+    turbine: { n: 7,  sw: 0.13, hub: 0.17 },                 // Adler/Vitesse turbine
+    aero:    { n: 0,  sw: 0,    hub: 0.15, disc: 0.80 },     // Voltra flush aero cover
+    steel:   { n: 4,  sw: 0.20, hub: 0.22 },                 // Kotori steelie
+    sixlug:  { n: 6,  sw: 0.17, hub: 0.24 },                 // Bison truck six-spoke
+    wire:    { n: 12, sw: 0.07, hub: 0.13, dish: true },     // Eldorado wire wheel
+  };
   const rimGeos = new Map();
-  function rimGeo(radius, width) {
-    const key = radius + "|" + width;
+  // rimFrac = rim-face radius / tire radius — THE sidewall knob. Real cars:
+  // supercar low-profile ≈ 0.70-0.75 rim (thin rubber band of sidewall),
+  // sedans ≈ 0.62-0.68, muscle/SUV ≈ 0.58-0.62, work van/truck ≈ 0.50-0.58
+  // (fat sidewall). The old fixed 0.86-0.92 put rubber-band tires on
+  // EVERYTHING — one reason the fleet's wheels read wrong.
+  function rimGeo(radius, width, style, rimFrac) {
+    const p = RIM_PARAMS[style] || RIM_PARAMS.sport5;
+    const rf = rimFrac || 0.7;
+    const rr = radius * rf;                   // rim face radius
+    const key = radius + "|" + width + "|" + (style || "sport5") + "|" + rf;
     let geo = rimGeos.get(key);
     if (geo) return geo;
-    const rimR = radius * 0.66;          // rim face inside the tire
     const parts = [];
-    // rim face disc (axis along Y like the tire), sitting on the outboard side.
-    parts.push(new THREE.CylinderGeometry(rimR, rimR, width * 0.5, 24));
-    // outer rim LIP: an open barrel ring reaching almost to the tire radius, so
-    // the wheel reads as a dished alloy (visible depth between the face disc and
-    // the tire bead) instead of a flat coin floating inside the tire.
-    parts.push(new THREE.CylinderGeometry(radius * 0.93, radius * 0.87, width * 0.2, 24, 1, true));
-    // 5 thin spokes radiating from the hub across the rim face. Each spoke is a
-    // box built pointing +X from center, then SPUN about the wheel axis (Y).
-    const spokeLen = rimR * 0.95, spokeW = radius * 0.13, spokeT = width * 0.52;
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      const s = new THREE.BoxGeometry(spokeLen, spokeW, spokeT);
-      s.translate(spokeLen * 0.5, 0, 0);              // root at hub, extend out +X
-      s.applyMatrix4(new THREE.Matrix4().makeRotationY(a));   // spin into the disc
+    const lipY = p.dish ? width * 0.10 : 0;   // wire wheels: lip proud, face sunk = deep dish
+    // outer rim LIP: an open barrel straddling the cap plane, AT the rim
+    // radius — the tire cylinder beyond it reads as sidewall.
+    const lip = new THREE.CylinderGeometry(rr * 1.02, rr * 0.94, width * 0.22, 24, 1, true);
+    lip.translate(0, lipY, 0);
+    parts.push(lip);
+    // spokes: hub → lip, mostly PROUD of the cap so they read as real metalwork.
+    const spokeLen = rr * 0.97, spokeW = Math.max(0.028, rr * p.sw * 1.15), spokeT = width * 0.30;
+    for (let i = 0; i < p.n; i++) {
+      const a = (i / p.n) * Math.PI * 2;
+      const s = new THREE.BoxGeometry(spokeLen, spokeT, spokeW);
+      s.translate(spokeLen * 0.5, spokeT * 0.2 - (p.dish ? width * 0.06 : 0), 0);
+      // spoke runs +X with its THICKNESS along the wheel axis (Y)
+      s.applyMatrix4(new THREE.Matrix4().makeRotationY(a));
       parts.push(s);
     }
-    // small hub cap at the very center, proud of the spokes.
-    parts.push(new THREE.CylinderGeometry(radius * 0.17, radius * 0.17, width * 0.62, 12));
+    // EV aero cover: one flush disc instead of spokes.
+    if (p.disc) parts.push(new THREE.CylinderGeometry(rr * p.disc / 0.88, rr * p.disc / 0.88, width * 0.10, 24).translate(0, width * 0.03, 0));
+    // hub cap, proud of everything.
+    parts.push(new THREE.CylinderGeometry(rr * p.hub / 0.88, rr * p.hub / 0.88, width * 0.18, 12).translate(0, width * 0.07 - (p.dish ? width * 0.06 : 0), 0));
     geo = mergeGeo(parts);
     geo._shared = true;
     rimGeos.set(key, geo);
     return geo;
   }
+  // brake disc: a thin dark-steel rotor sitting just proud of the tire cap,
+  // filling the openwork behind the spokes (child of the tire → spins with it,
+  // which is physically right for a rotor).
+  const discGeos = new Map();
+  function discGeo(radius) {
+    const key = radius.toFixed(4);
+    let geo = discGeos.get(key);
+    if (!geo) {
+      geo = new THREE.CylinderGeometry(radius * 0.62, radius * 0.62, 0.03, 20);
+      geo._shared = true;
+      discGeos.set(key, geo);
+    }
+    return geo;
+  }
+  // dark-steel rotor: Lambert (carfx's 'metal' role returns the CHROME
+  // singleton regardless of colour — a mirror rotor would kill the openwork
+  // depth contrast the new rims exist for).
+  function discMat() { return sharedMat("brake-disc", 0x3f444b, { emissive: 0x101317, ei: 0.3 }); }
 
   // minimal BufferGeometry merge (position+normal) — local to playercars so we
   // don't depend on BufferGeometryUtils. Inputs are disposed by caller if needed.
@@ -404,13 +448,20 @@
   let _tireMat = null, _rimMat = null;
   function tireMat() { if (!_tireMat) { _tireMat = vmat("tire", 0x14161a); _tireMat._shared = true; } return _tireMat; }
   function rimMat() { if (!_rimMat) { _rimMat = vmat("rim", 0xc2c9d1, { emissive: 0x20242a, ei: 0.3 }); _rimMat._shared = true; } return _rimMat; }
-  function makeWheel(radius, width) {
+  function makeWheel(radius, width, rimStyle, rimFrac) {
     const tire = new THREE.Mesh(wheelGeo(radius, width), tireMat());
     tire.castShadow = false;
     tire.userData.playerWheel = true;
-    const rim = new THREE.Mesh(rimGeo(radius, width), rimMat());
-    // rim sits PROUD on the OUTBOARD face; +Y is outboard before the z-rotation.
-    rim.position.y = width * 0.30;
+    // brake rotor first (visually behind the spokes), flush on the cap plane —
+    // sized to sit INSIDE the rim face, whatever the sidewall fraction.
+    const disc = new THREE.Mesh(discGeo(radius * (rimFrac || 0.7) * 0.86 / 0.62), discMat());
+    disc.position.y = width * 0.5 + 0.004;
+    disc.castShadow = false;
+    tire.add(disc);
+    // openwork rim AT the cap plane (rimGeo local y=0 = cap); +Y is outboard
+    // before the caller's z-rotation lays the wheel on its side.
+    const rim = new THREE.Mesh(rimGeo(radius, width, rimStyle, rimFrac), rimMat());
+    rim.position.y = width * 0.5 + 0.01;
     rim.castShadow = false;
     tire.add(rim);
     return tire;
@@ -480,18 +531,27 @@
     return mesh;
   }
 
-  function addWheels(root, width, length, radius, wheelWidth, archMat) {
+  function addWheels(root, width, length, radius, wheelWidth, archMat, rimStyle, caliperMat, rimFrac) {
     const wz = length * 0.32;
     // Lay each wheel on its side. The rim child sits at local +Y; a z-rotation of
     // +PI/2 sends local +Y to world -X, and -PI/2 sends it to world +X. So +x
     // wheels use -PI/2 (rim faces +x = OUTboard) and -x wheels use +PI/2 — keeping
     // the bright alloy face pointing OUT on both sides.
     [[width / 2, wz, -1], [-width / 2, wz, 1], [width / 2, -wz, -1], [-width / 2, -wz, 1]].forEach(function (p) {
-      const wheel = makeWheel(radius, wheelWidth);
+      const wheel = makeWheel(radius, wheelWidth, rimStyle, rimFrac);
       wheel.rotation.z = p[2] * Math.PI / 2;
       wheel.position.set(p[0], radius, p[1]);
       root.add(wheel);
       if (archMat) addWheelArch(root, p[0] + Math.sign(p[0]) * 0.03, radius, p[1], radius, archMat);
+      // brake CALIPER: a static block hugging the rotor at the trailing edge —
+      // a root child (calipers don't spin), sitting just outboard of the cap
+      // where the openwork spokes sweep past it. Merged with the statics.
+      if (caliperMat) {
+        const cal = new THREE.Mesh(boxGeo(0.05, radius * 0.34, radius * 0.30), caliperMat);
+        cal.position.set(p[0] + Math.sign(p[0]) * (wheelWidth * 0.5 + 0.02), radius + radius * 0.12, p[1] - radius * 0.42);
+        cal.castShadow = false;
+        root.add(cal);
+      }
     });
   }
 
@@ -503,17 +563,17 @@
     root.userData.playerWheels = out;
   }
 
-  function addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, glass, trim, white, red, bodyYIn, cabBaseYIn) {
+  function addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, glass, trim, bodyYIn, cabBaseYIn) {
     const bodyY = bodyYIn == null ? wheelR * 0.42 : bodyYIn, bodyTop = bodyY + baseH;
     const peakY = cabin[1][1];
     const plate = plateMat();
-    const chrome = chromeMat();             // shiny chromed trim / exhaust
-    const grilleMat = roleMat("grille", "plastic", 0x0d1014, { emissive: 0, ei: 0 });   // matte dark grille slab
-    const noGrille = /^tesla/.test(style);
+    const chrome = chromeMat();             // shiny chromed trim
 
     // Hood/trunk breaks, mirrors, door cuts and wheel-arch brows give every
-    // silhouette readable vehicle anatomy before model-specific trim is added.
-    // Anchored on the TALL hull (baseH is now ~0.6*H), so deck breaks sit on top.
+    // silhouette readable vehicle anatomy. The FACE (grille, lamps, badge,
+    // bumpers, exhaust) is a BRAND design language now — applied per instance
+    // via carparts.js (see makeProcedural), NOT here, so two marques sharing
+    // one silhouette still read as different manufacturers.
     addBox(root, w * 0.78, 0.035, len * 0.27, 0, bodyTop + 0.02, len * 0.31, paint);
     addBox(root, w * 0.74, 0.035, len * 0.18, 0, bodyTop + 0.02, -len * 0.39, paint);
     [1, -1].forEach(function (side) {
@@ -531,58 +591,11 @@
     addBox(root, w * 0.28, 0.13, 0.025, 0, bodyY + baseH * 0.32, -len * 0.5 - 0.075, plate);
     addBox(root, w * 0.96, 0.12, 0.16, 0, bodyY + 0.04, len * 0.5 - 0.03, trim);
     addBox(root, w * 0.96, 0.13, 0.14, 0, bodyY + 0.05, -len * 0.5 + 0.02, trim);
-    // grille: a recessed DARK slab (matte) so the nose reads as a face, with a
-    // thin chrome surround lip on combustion cars (teslas get a slim closed nose).
-    if (!noGrille) {
-      addBox(root, w * 0.56, 0.2, 0.05, 0, bodyY + baseH * 0.3, len * 0.5 + 0.03, grilleMat);
-      addBox(root, w * 0.6, 0.24, 0.035, 0, bodyY + baseH * 0.3, len * 0.5 + 0.045, chrome);   // chrome grille frame
-    } else addBox(root, w * 0.5, 0.07, 0.045, 0, bodyY + baseH * 0.22, len * 0.5 + 0.03, chrome);
     // thin chrome window-surround on the greenhouse beltline (catches light, reads
     // as a real DLO trim strip wrapping the glass). Cheap pair of low boxes.
     [1, -1].forEach(function (side) {
       addBox(root, 0.03, 0.035, (cabin[2][0] - cabin[1][0]) * 0.9, side * (w * 0.44 * 0.94), bodyTop + peakY * 0.08, (cabin[1][0] + cabin[2][0]) * 0.5, chrome);
     });
-
-    // Headlights set high on the hull face (upper third), not on the greenhouse.
-    // Each cluster is now a recessed dark HOUSING behind the lens instead of a
-    // single bare emissive box — reads as a lamp assembly with depth instead
-    // of a light stuck to the paint (still just 2 meshes/side, mesh-budget-safe).
-    if (style === "porsche") {
-      [1, -1].forEach(function (side) {
-        addSphere(root, 0.20, side * w * 0.3, bodyY + baseH * 0.66, len * 0.465, trim, 1.3, 0.8, 0.32);   // housing
-        addSphere(root, 0.18, side * w * 0.3, bodyY + baseH * 0.66, len * 0.48, white, 1.2, 0.72, 0.38);  // lens
-      });
-    } else {
-      [1, -1].forEach(function (side) {
-        const lightW = style === "aventador" || style === "enzo" ? w * 0.25 : w * 0.3;
-        const rotZ = (style === "aventador" || style === "enzo") ? side * -0.16 : 0;
-        const bez = addBox(root, lightW + 0.05, 0.18, 0.03, side * w * 0.28, bodyY + baseH * 0.58, len * 0.5 + 0.02, trim);
-        const light = addBox(root, lightW, 0.13, 0.065, side * w * 0.28, bodyY + baseH * 0.58, len * 0.5 + 0.045, white);
-        bez.rotation.z = light.rotation.z = rotZ;
-      });
-    }
-    // Tail lamps + reflectors flush on the actual VERTICAL rear face (z=-len*0.5),
-    // sitting in the upper-mid of the tall hull rear wall. A dark housing sits
-    // just behind each lamp so it reads as an inset cluster, not a red decal.
-    if (/tesla|veyron/.test(style)) {
-      addBox(root, w * 0.86, 0.14, 0.05, 0, bodyY + baseH * 0.55, -len * 0.5 - 0.006, trim);
-      addBox(root, w * 0.82, 0.1, 0.06, 0, bodyY + baseH * 0.55, -len * 0.5 + 0.01, red);
-    } else [1, -1].forEach(function (side) {
-      addBox(root, w * 0.3, 0.18, 0.03, side * w * 0.29, bodyY + baseH * 0.55, -len * 0.5 - 0.006, trim);
-      addBox(root, w * 0.28, 0.14, 0.065, side * w * 0.29, bodyY + baseH * 0.55, -len * 0.5 + 0.01, red);
-    });
-
-    // chrome exhaust tips poking from the rear valance. Supercars get a centred
-    // quad-ish pair; muscle/lowrider/hatch get offset twin pipes; teslas (EV) none.
-    if (/ferrari|enzo|aventador|porsche|veyron/.test(style)) {
-      [1, -1].forEach(function (side) {
-        addBox(root, 0.2, 0.12, 0.12, side * w * 0.25, bodyY + 0.11, -len * 0.5 + 0.02, chrome);
-      });
-    } else if (/muscle|lowrider|hatch/.test(style)) {
-      [1, -1].forEach(function (side) {
-        addBox(root, 0.12, 0.1, 0.14, side * w * 0.3, bodyY + 0.08, -len * 0.5 - 0.04, chrome);
-      });
-    }
     // total height = hull top + greenhouse peak (greenhouse base sunk into deck).
     const cabBaseY = cabBaseYIn == null ? bodyTop - peakY * 0.08 : cabBaseYIn;
     root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.64 };
@@ -638,8 +651,6 @@
       muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6,
     })[style] || 0xd1262f, PAINT_OPTS[style]);   // shiny clearcoat, _bodyPaint-tagged for per-car recolour
     const dark = glassMat();   // reflective tinted glass
-    const red = lightTailMat();
-    const white = lightFrontMat();
 
     // ===================================================================
     // PROPORTION LAW (drives the whole silhouette off total height H):
@@ -650,25 +661,38 @@
     // Result: hull ~62% of H, greenhouse ~25% of H, wheel dia ~ half hull.
     // ===================================================================
     // Per-body table: [W, L, H, hullFrac, cabinLenFrac, cabinCenterX(frac of L), ghFrac]
+    // Per-body table now carries REAL wheel math (derived from published tire
+    // specs, e.g. 235/45R18 → 669mm on a 1443mm-tall Model 3):
+    //   tD   = tire DIAMETER as a fraction of H. Real cars: supercar 0.55-0.60
+    //          (the body is LOW, so the same ~700mm tire dominates), sedan/EV
+    //          0.45-0.49, hatch 0.45, muscle 0.50, SUV 0.43 of a taller H.
+    //          The old fixed 0.32 is why the whole fleet looked like it was
+    //          rolling on shopping-cart casters.
+    //   rf   = rim-face radius / tire radius (sidewall profile): supercar
+    //          ~0.72 rubber-band, sedan ~0.66, muscle 0.62, lowrider wire 0.55.
+    //   ride = hull-bottom clearance as a fraction of wheelR (rocker height):
+    //          supercar ~0.38 (sills hug the ground), sedan ~0.55, crossover 0.62.
     const SPEC = {
-      "tesla-s":  { W: 1.95, L: 4.70, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42 },
-      "tesla-3":  { W: 1.92, L: 4.55, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42 },
-      "tesla-x":  { W: 2.05, L: 4.85, H: 1.72, hull: 0.66, cab: 0.50, cx: -0.02, gh: 0.44 },
-      "tesla-y":  { W: 2.02, L: 4.78, H: 1.66, hull: 0.65, cab: 0.50, cx: -0.02, gh: 0.44 },
-      porsche:    { W: 1.94, L: 4.45, H: 1.40, hull: 0.64, cab: 0.42, cx: -0.05, gh: 0.40 },
-      ferrari:    { W: 2.05, L: 4.60, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
-      enzo:       { W: 2.04, L: 4.62, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
-      aventador:  { W: 2.05, L: 4.65, H: 1.28, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
-      veyron:     { W: 2.05, L: 4.55, H: 1.32, hull: 0.66, cab: 0.38, cx: -0.04, gh: 0.36 },
-      muscle:     { W: 2.05, L: 4.95, H: 1.45, hull: 0.64, cab: 0.40, cx: -0.10, gh: 0.40 },
-      lowrider:   { W: 2.04, L: 5.05, H: 1.42, hull: 0.66, cab: 0.44, cx: -0.02, gh: 0.36 },
-      hatch:      { W: 1.84, L: 4.05, H: 1.50, hull: 0.60, cab: 0.50, cx: -0.04, gh: 0.46 },
+      "tesla-s":  { W: 1.95, L: 4.70, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42, tD: 0.50, rf: 0.68, ride: 0.36 },
+      "tesla-3":  { W: 1.92, L: 4.55, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42, tD: 0.48, rf: 0.67, ride: 0.40 },
+      "tesla-x":  { W: 2.05, L: 4.85, H: 1.72, hull: 0.66, cab: 0.50, cx: -0.02, gh: 0.44, tD: 0.46, rf: 0.64, ride: 0.52 },
+      "tesla-y":  { W: 2.02, L: 4.78, H: 1.66, hull: 0.65, cab: 0.50, cx: -0.02, gh: 0.44, tD: 0.46, rf: 0.64, ride: 0.48 },
+      porsche:    { W: 1.94, L: 4.45, H: 1.40, hull: 0.64, cab: 0.42, cx: -0.05, gh: 0.40, tD: 0.54, rf: 0.71, ride: 0.30 },
+      ferrari:    { W: 2.05, L: 4.60, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.58, rf: 0.72, ride: 0.30 },
+      enzo:       { W: 2.04, L: 4.62, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.56, rf: 0.72, ride: 0.38 },
+      aventador:  { W: 2.05, L: 4.65, H: 1.28, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.60, rf: 0.73, ride: 0.26 },
+      veyron:     { W: 2.05, L: 4.55, H: 1.32, hull: 0.66, cab: 0.38, cx: -0.04, gh: 0.36, tD: 0.58, rf: 0.72, ride: 0.26 },
+      muscle:     { W: 2.05, L: 4.95, H: 1.45, hull: 0.64, cab: 0.40, cx: -0.10, gh: 0.40, tD: 0.52, rf: 0.62, ride: 0.36 },
+      lowrider:   { W: 2.04, L: 5.05, H: 1.42, hull: 0.66, cab: 0.44, cx: -0.02, gh: 0.36, tD: 0.43, rf: 0.57, ride: 0.22 },
+      hatch:      { W: 1.84, L: 4.05, H: 1.50, hull: 0.60, cab: 0.50, cx: -0.04, gh: 0.46, tD: 0.45, rf: 0.63, ride: 0.40 },
     };
     const s = SPEC[style] || SPEC["tesla-3"];
     const w = s.W, len = s.L, H = s.H;
-    const wheelR = +(0.16 * H).toFixed(3);            // tire dia ~0.33H
-    const bodyY = +(wheelR * 0.42).toFixed(3);        // hull bottom just below axle
-    const baseH = +(s.hull * H).toFixed(3);           // TALL dominant hull
+    const wheelR = +((s.tD || 0.46) * H / 2).toFixed(3);
+    const bodyY = +(wheelR * (s.ride || 0.52)).toFixed(3);   // rocker clearance off the REAL wheel
+    // hull band height rebalanced so roofline stays ≈ H despite the taller
+    // ride: bodyY + baseH + gh*baseH ≈ H  →  baseH = (H − bodyY)/(1 + gh)
+    const baseH = +((H - bodyY) / (1 + s.gh)).toFixed(3);
     const bodyTop = bodyY + baseH;
     const peakY = +(s.gh * baseH).toFixed(3);         // slim greenhouse, < baseH
     const cabLen = len * s.cab;
@@ -769,7 +793,7 @@
     const sill = sharedMat("sill-" + style, 0x14171c);
     addBox(root, w + 0.04, 0.14, len * 0.9, 0, wheelR + 0.08, 0, sill);
     addBox(root, w * 0.96, 0.1, 0.18, 0, wheelR + 0.06, len * 0.5 - 0.04, sill);   // front splitter
-    addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, dark, sill, white, red, bodyY, cabBaseY);
+    addRoadDetails(root, style, w, len, wheelR, baseH, cabin, paint, dark, sill, bodyY, cabBaseY);
 
     // ---- per-model accents (Y anchors re-based on the TALL hull) ----
     const wingY = bodyTop + 0.14;   // wing/spoiler height above the tall hull
@@ -810,7 +834,25 @@
       // roof-edge spoiler over the tailgate
       addBox(root, w * 0.82, 0.06, 0.14, 0, cabBaseY + peakY + 0.02, cabin[0][0] - 0.04, black);
     }
-    addWheels(root, w + 0.08, len, wheelR, 0.30 * (H / 1.5), sill);
+    // brand-signature rims + brake rotors; performance cars flash red calipers.
+    const rimStyle = CBZ.carParts ? CBZ.carParts.rimStyleFor(style) : "sport5";
+    const calMat = /ferrari|enzo|aventador|veyron|porsche|muscle/.test(style)
+      ? sharedMat("caliper-red", 0xc23030, { emissive: 0x2a0808, ei: 0.4 })
+      : sharedMat("caliper-dk", 0x3a3f45);
+    addWheels(root, w + 0.08, len, wheelR, Math.max(0.26, wheelR * 0.92), sill, rimStyle, calMat, s.rf || 0.66);
+    // anchor frame for the carparts.js brand face + per-model identity, applied
+    // per INSTANCE in makeProcedural (templates stay faceless so one silhouette
+    // can serve several marques). Read-only; cloned by reference with userData.
+    root.userData.partCtx = {
+      w: w, len: len, style: style,
+      frontZ: len * 0.5, rearZ: -len * 0.5,
+      baseY: wheelR + 0.10,
+      headY: bodyY + baseH * 0.58, tailY: bodyY + baseH * 0.55,
+      noseTopY: bodyTop, bodyY: bodyY, baseH: baseH,
+      roofY: cabBaseY + peakY, roofZ: (fT[0] + rT[0]) * 0.5,
+      roofW: roofW, roofLen: roofLen,
+      paint: paint,
+    };
     return root;
   }
 
@@ -824,12 +866,10 @@
     })();
     const trim = roleMat("cyber-trim", "plastic", 0x20262a);
     const glass = glassMat();
-    const red = lightTailMat();
-    const white = lightFrontMat();
     // PROPORTION LAW: pickup, tall hull + cab forward of an open bed. H~1.80.
     const w = 2.2, len = 5.35, H = 1.80;
-    const wheelR = +(0.16 * H).toFixed(3);            // ~0.29
-    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const wheelR = +(0.245 * H).toFixed(3);           // tire dia 0.49H (Cybertruck 285/65R20 = 879mm / 1795mm — Edmunds)
+    const bodyY = +(wheelR * 0.62).toFixed(3);        // truck rocker rides high
     const baseH = +(0.58 * H).toFixed(3);             // ~1.04 tall hull (pickup body)
     const bodyTop = bodyY + baseH;
     // body shell (tall hull). bed crease via a lower trim band.
@@ -865,15 +905,23 @@
       const sw = addBox(root, 0.02, peakY * 0.72, (ct + cb), side * (w * 0.93 * 0.5 + 0.011), cabBaseY + peakY * 0.55, cabCx, glass);
       sw.material.polygonOffset = true; sw.material.polygonOffsetFactor = -1;
     });
-    addBox(root, w * 0.88, 0.13, 0.09, 0, bodyTop - 0.06, len * 0.5 + 0.05, white);
-    addBox(root, w * 0.88, 0.14, 0.09, 0, bodyTop - 0.02, -len * 0.5 - 0.05, red);
     [1, -1].forEach(function (side) {
       addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), bodyY + baseH * 0.3, 0, trim);
       addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), bodyTop - 0.08, len * 0.32, trim);   // mirrors
     });
     addBox(root, w * 0.84, 0.08, len * 0.3, 0, bodyTop + 0.04, -len * 0.29, trim);   // dark tonneau cover over bed
-    addWheels(root, w + 0.13, len, wheelR, 0.40, trim);
+    addWheels(root, w + 0.13, len, wheelR, 0.34, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.56);
     root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.68 };
+    // Voltra face anchors (full-width LED brow + tail blade land on the wedge
+    // hull faces); the angular EV truck skips the bumper blocks.
+    root.userData.partCtx = {
+      w: w, len: len, style: "cybertruck",
+      frontZ: len * 0.5, rearZ: -len * 0.5,
+      baseY: wheelR + 0.12, headY: bodyTop - 0.09, tailY: bodyTop - 0.06,
+      noseTopY: bodyTop, bodyY: bodyY, baseH: baseH,
+      roofY: cabBaseY + peakY, roofZ: cabCx, roofW: w * 0.8, roofLen: cb + ct,
+      paint: silver, noBumpers: true,
+    };
     return root;
   }
 
@@ -884,12 +932,10 @@
     const dark = glassMat();
     const trim = roleMat("suv-trim", "plastic", 0x14171c);
     const rail = roleMat("suv-rail", "metal", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
-    const red = lightTailMat();
-    const white = lightFrontMat();
     // PROPORTION LAW: tall 3-box SUV. H~1.74, tall hull + upright greenhouse.
     const w = 2.16, len = 5.1, H = 1.74;
-    const wheelR = +(0.16 * H).toFixed(3);            // ~0.28
-    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const wheelR = +(0.23 * H).toFixed(3);            // tire dia 0.46H (Grand Cherokee 245/70R17 → 0.44 + art bump)
+    const bodyY = +(wheelR * 0.60).toFixed(3);
     const baseH = +(0.60 * H).toFixed(3);             // ~1.04 tall hull
     const bodyTop = bodyY + baseH;
     // hull as a hullRing prism (not a flat box): near-full height/width at the
@@ -935,16 +981,22 @@
         pm.castShadow = false;
       });
     });
-    addBox(root, w * 0.9, 0.16, 0.08, 0, bodyY + baseH * 0.5, len * 0.5 + 0.04, white);
-    addBox(root, w * 0.9, 0.18, 0.08, 0, bodyY + baseH * 0.55, -len * 0.5 - 0.04, red);
-    addBox(root, w * 0.7, 0.4, 0.12, 0, wheelR + 0.18, len * 0.5 + 0.06, trim);   // brush-guard bumper
     [1, -1].forEach(function (side) {
       addBox(root, 0.16, 0.12, 0.24, side * (w * 0.55), bodyTop + 0.10, fB[0] - 0.05, trim);  // door mirrors at the A-pillar base
     });
     const suvRoofY = cabBaseY + peakY + 0.05;
     addSphere(root, wheelR * 1.05, 0, bodyY + baseH * 0.56, -len * 0.51, trim, 1, 1, 0.3);   // rear spare, sized off the real wheel radius (was fixed at 0.46 — bigger than the road wheels on every SUV size)
-    addWheels(root, w + 0.14, len, wheelR, 0.40, trim);
+    addWheels(root, w + 0.14, len, wheelR, 0.34, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.58);
     root.userData.vehicleDims = { width: w, length: len, height: suvRoofY + 0.05, wheelbase: len * 0.66 };
+    // Bison face anchors (tall slatted grille, quad lamps, vertical tails).
+    root.userData.partCtx = {
+      w: w, len: len, style: "suv",
+      frontZ: len * 0.5, rearZ: -len * 0.5,
+      baseY: wheelR + 0.16, headY: bodyY + baseH * 0.52, tailY: bodyY + baseH * 0.55,
+      noseTopY: bodyTop, bodyY: bodyY, baseH: baseH,
+      roofY: suvRoofY, roofZ: sideMidZ, roofW: roofWs, roofLen: sideLen,
+      paint: paint,
+    };
     return root;
   }
 
@@ -954,12 +1006,10 @@
     const paint = paintMat("van", 0xe9ebee, { metalness: 0.4, roughness: 0.48, envMapIntensity: 0.8 });
     const dark = glassMat();
     const trim = roleMat("van-trim", "plastic", 0x202428);
-    const red = lightTailMat();
-    const white = lightFrontMat();
     // PROPORTION LAW: tall cab-forward box van. H~1.95, greenhouse merges into box.
     const w = 2.18, len = 5.6, H = 1.95;
-    const wheelR = +(0.16 * H).toFixed(3);            // ~0.31
-    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const wheelR = +(0.185 * H).toFixed(3);           // tire dia 0.37H (Transit low-roof: small wheels under a tall box IS correct)
+    const bodyY = +(wheelR * 0.58).toFixed(3);
     const boxH = +(0.82 * H).toFixed(3);              // ~1.60 very tall cargo box
     const boxTop = bodyY + boxH;
     // big slab cargo box (the dominant tall mass)
@@ -981,16 +1031,32 @@
       m.rotation.x = Math.atan2(dz, dy);
       root.add(m);
     })();
-    addBox(root, w * 0.9, 0.18, 0.07, 0, bodyY + 0.32, len * 0.5 + 0.02, white);
-    addBox(root, w * 0.92, 0.22, 0.07, 0, bodyY + boxH - 0.16, -len * 0.47 - 0.04, red);   // tall rear-door lights ON the box rear face
     [1, -1].forEach(function (side) {
       addBox(root, 0.03, boxH * 0.28, len * 0.14, side * (w * 0.505), bodyY + boxH * 0.62, len * 0.32, dark);  // cab side window
       addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), bodyY + boxH * 0.51, -len * 0.1, trim);
       addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), bodyY + boxH * 0.66, len * 0.4, trim);  // mirrors
     });
     addBox(root, 0.035, boxH * 0.74, 0.04, 0, bodyY + boxH * 0.5, -len * 0.47, trim);   // split rear doors
-    addWheels(root, w + 0.1, len, wheelR, 0.38, trim);
+    // trucker jewellery: three amber clearance markers along the front roof edge
+    // (kills the "rolling fridge" read — the roofline gets a working-vehicle cue).
+    const marker = sharedMat("van-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
+    [-0.3, 0, 0.3].forEach(function (fx) {
+      addBox(root, 0.12, 0.06, 0.09, fx * w, bodyY + boxH - 0.06, len * 0.27, marker);
+    });
+    addWheels(root, w + 0.1, len, wheelR, 0.32, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.52);
     root.userData.vehicleDims = { width: w, length: len, height: boxTop, wheelbase: len * 0.68 };
+    // Bison face anchors: lamps low on the nose, VERTICAL tails riding the tall
+    // box rear corners (rearZ is the box face, not len/2 — the box is set back).
+    root.userData.partCtx = {
+      w: w, len: len, style: "van",
+      // headY well ABOVE the bumper band (baseY): the first render buried the
+      // grille + quad lamps behind the bumper block (both landed at y≈0.49).
+      frontZ: len * 0.5, rearZ: -len * 0.47,
+      baseY: wheelR + 0.12, headY: bodyY + 0.68, tailY: bodyY + boxH - 0.46,
+      noseTopY: bodyY + boxH * 0.55, bodyY: bodyY, baseH: boxH,
+      roofY: boxTop, roofZ: -len * 0.1, roofW: w * 0.9, roofLen: len * 0.5,
+      paint: paint,
+    };
     return root;
   }
 
@@ -1268,7 +1334,7 @@
     });
   }
 
-  function makeProcedural(style, color) {
+  function makeProcedural(style, color, model) {
     let template = procTemplates.get(style);
     if (!template) {
       if (style === "cybertruck") template = makeCybertruck();
@@ -1288,6 +1354,17 @@
     if (template.userData.tailRotor) clone.userData.tailRotor = clone.getObjectByName("heli_tailRotor");
     if (template.userData.boatProp) clone.userData.boatProp = clone.getObjectByName("boat_prop");
     if (template.userData.leanRider) clone.userData.leanRider = clone.getObjectByName("moto_rider");
+    // BRAND FACE (grille/lamps/badge/bumpers/exhaust) + per-model identity are
+    // applied to the INSTANCE, not the template: several marques share one
+    // silhouette (a Kanzler and a Surge are both "tesla-s"), so the face must
+    // follow the catalog model, defaulting to the silhouette's home marque.
+    // Applied BEFORE recolorBody so body-colour face panels get the car's paint.
+    const ctx = template.userData.partCtx;
+    if (ctx && CBZ.carParts) {
+      const brand = (model && model.brand) || CBZ.carParts.brandForStyle(style);
+      CBZ.carParts.applyBrandFace(clone, brand, ctx);
+      if (model) CBZ.carParts.applyModelIdentity(clone, model, ctx);
+    }
     if (color != null) recolorBody(clone, color);
     return clone;
   }
@@ -1528,11 +1605,13 @@
 
   CBZ.cityPlayerCarStyles = STYLE_ORDER.slice();
   CBZ.cityPlayerCarStyleLabels = Object.assign({}, STYLE_LABEL);
-  CBZ.cityBuildPlayerCarVisual = function (style, color, livery) {
+  CBZ.cityBuildPlayerCarVisual = function (style, color, livery, model) {
     // The gallery uses the lightweight fallback so auditing all styles never
     // blocks on the optional high-poly GLB/network decoder. `color` (optional)
     // paints THIS instance's body without touching the shared style template.
-    const v = makeProcedural(style, color);
+    // `model` (optional catalog record) selects the BRAND face + model trim —
+    // omitted, the silhouette's home marque is used (gallery/style-cycler).
+    const v = makeProcedural(style, color, model);
     // RACE LIVERY (optional, additive seam): when a livery descriptor is passed,
     // paint a number + scheme onto THIS instance before it's returned/merged, so
     // both the showroom/AI field and ambient race cars opt in here with no change

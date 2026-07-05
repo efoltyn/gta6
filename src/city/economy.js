@@ -314,37 +314,48 @@
 
   // ---- car models with real values (chop-shop payouts + spawning) ----------
   // rarity 0 = everywhere, 1 = exotic. `s` = body length scale (visual variety).
-  // The NAME tells you the tier (a Prius is clearly a shitbox, a Ferrari clearly
-  // isn't) — the actual $ value stays HIDDEN until you chop it at the shop.
-  // E10 (sim/motorsport.js + sim/corporations.js's kaido/volante rows): `maker`
-  // groups these real-world-named models under TWO fictional umbrella
-  // manufacturers so dealership sales + race results have somewhere real to
-  // book to — "KAI" (Kaido Motors, the Japanese-named models) and "VLT"
-  // (Volante Auto Group, the American/European rest). Scope-bounded to 2 makers
-  // this wave; more can join later (a model with no `maker` stays independent —
-  // Yellow Cab is a taxi livery, not a manufacturer's product).
+  // The NAME tells you the tier (a Kotori is clearly a shitbox, a Falcone
+  // clearly isn't) — the actual $ value stays HIDDEN until you chop it.
+  //
+  // THE MANUFACTURER UNIVERSE (design languages live in city/carparts.js):
+  //   kotori  — Japanese economy giant        (Sprout / Pip / Kaze)
+  //   bison   — American muscle, trucks, vans (Vista / Hauler / Rampart /
+  //             Frontier / Stampede / Eldorado / Apex — and the Metro Cab
+  //             is a fleet-livery Vista)
+  //   voltra  — the EV disruptor              (Ion / Halo / Surge / Nova /
+  //             Colossus)
+  //   adler   — German precision marque       (Kanzler / 901 Turbo)
+  //   falcone — Italian exotic house          (Furia / Rondine / Tempesta)
+  //   vitesse — French hyper-luxury           (Millenne)
+  // `detailStyle` still selects the playercars.js SILHOUETTE (those keys are
+  // load-bearing across racing/modshop/net code); `designStyle` + `brand`
+  // drive the carparts.js identity chain. `maker` ("KAI" = Kaido Motors for
+  // kotori, "VLT" = Volante Auto Group for the rest) books dealership sales
+  // to sim/corporations.js via shops.js — the Metro Cab stays makerless
+  // (fleet livery, not a manufacturer\u2019s product).
   const CARS = [
-    { name: "Toyota Prius",   value: 1200,  rarity: 0.0,  color: 0x6b6f78, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "prius", maker: "KAI" },
-    { name: "Honda Civic",    value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "civic", maker: "KAI" },
-    { name: "Yellow Cab",     value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  livery: "taxi", designStyle: "cab" },
-    { name: "Chevy Malibu",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  designStyle: "malibu", maker: "VLT" },
-    { name: "Dodge Caravan",  value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "caravan", maker: "VLT" },
-    { name: "Ford F-150",     value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", designStyle: "f150", maker: "VLT" },
-    { name: "Nissan 370Z",    value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "370z", maker: "KAI" },
-    { name: "Jeep Cherokee",  value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "cherokee", maker: "VLT" },
-    { name: "Dodge Charger",  value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "charger", maker: "VLT" },
-    { name: "Chevy Corvette", value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "corvette", maker: "VLT" },
-    { name: "Mercedes S-Class", value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1, body: "sedan", detailStyle: "tesla-s", designStyle: "sclass", maker: "VLT" },
-    { name: "Tesla Model 3",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan", detailStyle: "tesla-3", designStyle: "model3", maker: "VLT" },
-    { name: "Tesla Model Y",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",   detailStyle: "tesla-y", designStyle: "modely", maker: "VLT" },
-    { name: "Tesla Model S",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan", detailStyle: "tesla-s", designStyle: "models", maker: "VLT" },
-    { name: "Tesla Model X",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",   detailStyle: "tesla-x", designStyle: "modelx", maker: "VLT" },
-    { name: "Cybertruck",     value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "cybertruck", maker: "VLT" },
-    { name: "Porsche 911 Turbo", value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe", detailStyle: "porsche", designStyle: "porsche", maker: "VLT" },
-    { name: "Lamborghini Aventador", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe", detailStyle: "aventador", designStyle: "aventador", maker: "VLT" },
-    { name: "Ferrari 488",    value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe", detailStyle: "ferrari", designStyle: "ferrari", maker: "VLT" },
-    { name: "Ferrari Enzo",   value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "enzo", maker: "VLT" },
-    { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "veyron", maker: "VLT" },
+    { name: "Kotori Sprout",   brand: "kotori", maker: "KAI",  value: 1200,  rarity: 0.0,  color: 0x9fb4c4, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "sprout" },
+    { name: "Kotori Pip",      brand: "kotori", maker: "KAI",  value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "pip" },
+    { name: "Metro Cab",       brand: "bison",   value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  detailStyle: "tesla-3", livery: "taxi", designStyle: "cab" },
+    { name: "Bison Vista",     brand: "bison", maker: "VLT",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  detailStyle: "tesla-3", designStyle: "vista" },
+    { name: "Bison Hauler",    brand: "bison", maker: "VLT",   value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "hauler" },
+    { name: "Bison Rampart",   brand: "bison", maker: "VLT",   value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", detailStyle: "suv", designStyle: "rampart" },
+    { name: "Kotori Kaze",     brand: "kotori", maker: "KAI",  value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "kaze" },
+    { name: "Bison Frontier",  brand: "bison", maker: "VLT",   value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "frontier" },
+    { name: "Bison Stampede",  brand: "bison", maker: "VLT",   value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "stampede" },
+    { name: "Bison Eldorado",  brand: "bison", maker: "VLT",   value: 21000, rarity: 0.68, color: 0x7d2bd6, s: 1.1,  body: "muscle", detailStyle: "lowrider", designStyle: "eldorado" },
+    { name: "Bison Apex",      brand: "bison", maker: "VLT",   value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "apex" },
+    { name: "Voltra Ion",      brand: "voltra", maker: "VLT",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan",  detailStyle: "tesla-3", designStyle: "ion" },
+    { name: "Voltra Halo",     brand: "voltra", maker: "VLT",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",    detailStyle: "tesla-y", designStyle: "halo" },
+    { name: "Adler Kanzler",   brand: "adler", maker: "VLT",   value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1,  body: "sedan",  detailStyle: "tesla-s", designStyle: "kanzler" },
+    { name: "Voltra Surge",    brand: "voltra", maker: "VLT",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan",  detailStyle: "tesla-s", designStyle: "surge" },
+    { name: "Voltra Nova",     brand: "voltra", maker: "VLT",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",    detailStyle: "tesla-x", designStyle: "nova" },
+    { name: "Voltra Colossus", brand: "voltra", maker: "VLT",  value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "colossus" },
+    { name: "Adler 901 Turbo", brand: "adler", maker: "VLT",   value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe",  detailStyle: "porsche", designStyle: "adler901" },
+    { name: "Falcone Furia",   brand: "falcone", maker: "VLT", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe",  detailStyle: "aventador", designStyle: "furia" },
+    { name: "Falcone Rondine", brand: "falcone", maker: "VLT", value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe",  detailStyle: "ferrari", designStyle: "rondine" },
+    { name: "Falcone Tempesta", brand: "falcone", maker: "VLT", value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "tempesta" },
+    { name: "Vitesse Millenne", brand: "vitesse", maker: "VLT", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "millenne" },
   ];
 
   // ---- NO-DECOY FIX: motorcycles + a boat — playercars.js already has full
@@ -372,6 +383,22 @@
     { name: "Ducati Superbike", value: 21000, rarity: 0.7, color: 0x16a0e0, s: 1.0, body: "motorcycle", detailStyle: "motorcycle", designStyle: "superbike" },
     { name: "Speedboat",        value: 15000, rarity: 0.5, color: 0xeceff2, s: 1.0, body: "boat",       detailStyle: "boat",       designStyle: "speedboat" },
   ];
+  // Old real-world names → the fictional roster. Keeps every stored garage
+  // string (realestate/netpersist saves), millionaires.js's supercar list and
+  // island_airport's carByName("Taxi") resolving after the rebrand.
+  const CAR_NAME_ALIASES = {
+    "Toyota Prius": "Kotori Sprout", "Honda Civic": "Kotori Pip",
+    "Yellow Cab": "Metro Cab", "Taxi": "Metro Cab", "Sedan": "Bison Vista",
+    "Chevy Malibu": "Bison Vista", "Dodge Caravan": "Bison Hauler",
+    "Ford F-150": "Bison Rampart", "Nissan 370Z": "Kotori Kaze",
+    "Jeep Cherokee": "Bison Frontier", "Dodge Charger": "Bison Stampede",
+    "Chevy Corvette": "Bison Apex", "Mercedes S-Class": "Adler Kanzler",
+    "Tesla Model 3": "Voltra Ion", "Tesla Model Y": "Voltra Halo",
+    "Tesla Model S": "Voltra Surge", "Tesla Model X": "Voltra Nova",
+    "Cybertruck": "Voltra Colossus", "Porsche 911 Turbo": "Adler 901 Turbo",
+    "Lamborghini Aventador": "Falcone Furia", "Ferrari 488": "Falcone Rondine",
+    "Ferrari Enzo": "Falcone Tempesta", "Bugatti Veyron": "Vitesse Millenne",
+  };
 
   let _seed = 1357913 & 0x7fffffff;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
@@ -1114,12 +1141,14 @@
     for (const c of CARS) { const d = Math.abs(c.rarity - r); if (d < bd) { bd = d; best = c; } }
     return best;
   }
-  // Resolve a model by name across BOTH catalogs — ordinary cars first (the
+  // Resolve a model by name across BOTH catalogs — old real-world names are
+  // canonicalized through CAR_NAME_ALIASES first, then ordinary cars (the
   // common case), then the special (motorcycle/boat) roster, so callers like
-  // world.js's harbor (carByName("Speedboat")) and any future named-motorcycle
-  // spawn get one lookup function regardless of which array actually holds it.
+  // world.js's harbor (carByName("Speedboat")) and legacy-named callers
+  // (millionaires.js SUPERCARS) all resolve through one lookup.
   function carByName(name) {
-    return CARS.find((c) => c.name === name) || SPECIAL_VEHICLES.find((c) => c.name === name) || CARS[0];
+    const canon = CAR_NAME_ALIASES[name] || name;
+    return CARS.find((c) => c.name === canon) || SPECIAL_VEHICLES.find((c) => c.name === canon) || CARS[0];
   }
 
   // ---- the city PROPERTY market index --------------------------------------

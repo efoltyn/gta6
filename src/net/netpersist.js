@@ -106,7 +106,10 @@
       ammo: ammoMap(),
       outfit: { id: g.cityOutfitId || null, owned: copy(g.cityOutfitsOwned || null) },
       props: propsBlob(),
-      garage: (g.cityGarage || []).slice(),
+      // garage entries are now { name, color, mods } records (legacy: bare
+      // name strings — applyChar/retrieveCar accept both shapes). Deep-copy so
+      // the blob never aliases a live car.mods object.
+      garage: copy(g.cityGarage || []) || [],
       air: { pent: !!g.cityOwnsPenthouse, heli: !!g.cityOwnsHeli, hangar: !!g.cityOwnsHangar },
       jail: { busted: !!g.busted },
     };

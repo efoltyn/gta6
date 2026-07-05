@@ -319,7 +319,13 @@
     g.cityGarage = g.cityGarage || [];
     if (g.cityGarage.length >= home.garage) { CBZ.city.note("Garage is full.", 1.6); return; }
     const car = P._vehicle;
-    g.cityGarage.push(car.model ? car.model.name : "Sedan");
+    // full garage record — name + paint + every installed mod — so the war
+    // machine you park is the war machine you get back. (Old saves hold plain
+    // name strings; retrieveCar migrates them.)
+    const rec = { name: car.model ? car.model.name : "Sedan" };
+    if (car.color != null) rec.color = car.color;
+    if (car.mods) { try { rec.mods = JSON.parse(JSON.stringify(car.mods)); } catch (e) {} }
+    g.cityGarage.push(rec);
     if (CBZ.cityExitVehicle) CBZ.cityExitVehicle();
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     const idx = CBZ.cityCars.indexOf(car); if (idx >= 0) CBZ.cityCars.splice(idx, 1);
@@ -329,10 +335,14 @@
   function retrieveCar() {
     g.cityGarage = g.cityGarage || [];
     if (!g.cityGarage.length) return;
-    const model = g.cityGarage.pop();
+    const entry = g.cityGarage.pop();
+    // migrate: old records are bare model-name strings; new ones carry
+    // { name, color, mods } so a modded ride comes back fully dressed.
+    const rec = (typeof entry === "string") ? { name: entry } : (entry || { name: "Sedan" });
     const lot = g.cityHome.lot, gz = lot.building.garage || { x: lot.building.door.x, z: lot.building.door.z };
-    if (CBZ.citySpawnOwnedCar) CBZ.citySpawnOwnedCar(gz.x, gz.z, model);
-    CBZ.city.note("Your " + model + " is out front.", 2);
+    const car = CBZ.citySpawnOwnedCar ? CBZ.citySpawnOwnedCar(gz.x, gz.z, rec.name) : null;
+    if (car && CBZ.cityRestoreCarMods) { try { CBZ.cityRestoreCarMods(car, rec); } catch (e) {} }
+    CBZ.city.note("Your " + rec.name + " is out front.", 2);
     close();
   }
   function elevatorUp() {

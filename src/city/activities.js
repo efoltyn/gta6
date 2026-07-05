@@ -863,6 +863,7 @@
         simulated race instead (rivals + bet + payout).
   ========================================================= */
   let raceRun = null, raceBeacons = [];
+  CBZ.cityStreetRaceState = function () { return raceRun; };   // probe/debug peek (headless gates)
   function clearRaceBeacons() {
     for (const b of raceBeacons) { if (b.parent) b.parent.remove(b); if (b.geometry) b.geometry.dispose(); if (b.material) b.material.dispose(); }
     raceBeacons = [];
@@ -925,22 +926,116 @@
       else simulateRace(s);
     };
   }
+  // ---- REAL RIVALS: road-legal waypoint path threading every checkpoint.
+  // CBZ.cityNav.routeTo walks the street grid between legs (its point objects
+  // are pooled — copy the values out immediately), so rival cars drive ROADS
+  // to the same checkpoints the player does instead of ghosting through blocks.
+  function buildRivalPath(course) {
+    const path = [];
+    const NAV = CBZ.cityNav;
+    let sx = CBZ.player.pos.x, sz = CBZ.player.pos.z;
+    for (let i = 0; i < course.length; i++) {
+      const c = course[i];
+      if (NAV && NAV.routeTo) {
+        try {
+          const legs = NAV.routeTo(sx, sz, c.x, c.z);
+          for (const p of legs) path.push({ x: p.x, z: p.z, cp: null });   // COPY — pooled objects
+        } catch (e) { /* nav unavailable → straight leg */ }
+      }
+      // the checkpoint itself (drop routeTo's final goal point — it IS the cp)
+      if (path.length && Math.hypot(path[path.length - 1].x - c.x, path[path.length - 1].z - c.z) < 2) path.pop();
+      path.push({ x: c.x, z: c.z, cp: i });
+      sx = c.x; sz = c.z;
+    }
+    return path;
+  }
+  const RIVAL_NAMES = ["Crimson", "Viper", "Ghost", "Nitro"];
+  function spawnStreetRivals(s, course) {
+    const RD = CBZ.raceDrivers;
+    if (!RD || !RD.enabled() || !CBZ.cityMakeCar) return null;
+    const path = buildRivalPath(course);
+    if (path.length < 2) return null;
+    const P = CBZ.player, car = P._vehicle;
+    const h = (car && car.heading) || 0;
+    const fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
+    const CARS = (CBZ.cityEcon && CBZ.cityEcon.CARS) || [];
+    const fast = CARS.filter((c) => (c.value || 0) >= 9000 && /coupe|muscle/.test(c.body || ""));
+    const slots = [[3.0, -1], [-3.0, -6], [3.0, -6], [-3.0, -11]];
+    const drivers = [];
+    for (let i = 0; i < s.rivalCount; i++) {
+      const off = slots[i % slots.length];
+      const x = P.pos.x + rx * off[0] + fx * off[1];
+      const z = P.pos.z + rz * off[0] + fz * off[1];
+      const model = fast.length ? fast[(i * 2 + 1) % fast.length] : null;
+      const name = RIVAL_NAMES[i] || "Rival " + (i + 1);
+      const number = 11 * (i + 1);
+      const m = RD.spawn({
+        x: x, z: z, heading: h, model: model,
+        livery: { number: number, scheme: CBZ.cityRaceSchemeFor ? CBZ.cityRaceSchemeFor(name) : null },
+        name: name, number: number,
+        skill: 0.68 + i * 0.07 + Math.min(0.12, s.driverRep * 0.001),
+        aggr: 0.55 + i * 0.1, consistency: 0.55 + i * 0.08,
+        tag: "street", mode: "path",
+        path: path.map((p) => ({ x: p.x, z: p.z, cp: p.cp })),   // own copy per driver
+        cpTotal: course.length,
+      });
+      if (m) { m.state = "race"; drivers.push(m); }
+    }
+    return drivers.length ? drivers : null;
+  }
+  // player street-race progress in course units (cp passed + a smooth fraction)
+  function playerStreetProgress(r) {
+    let frac = 0;
+    const c = r.course[Math.min(r.cp, r.course.length - 1)];
+    if (c) {
+      const d = Math.hypot(CBZ.player.pos.x - c.x, CBZ.player.pos.z - c.z);
+      frac = Math.max(0, Math.min(0.95, 1 - d / 40));
+    }
+    return (r.cp + frac) / r.course.length;
+  }
+
   function startLiveRace(s) {
     const course = buildRaceCourse();
     if (!course) { note("No room for a course — running it simulated.", 2); simulateRace(s); return; }
     closeModal();
     clearRaceBeacons();
-    // rivals: virtual progress racers with rubber-band catch-up
+    // REAL rivals when the driver brain is loaded; virtual progress ghosts as
+    // the one-line-revert fallback (CBZ.CONFIG.RACE_REAL_DRIVERS = false).
+    const rivalDrivers = spawnStreetRivals(s, course);
     const rivals = [];
-    for (let i = 0; i < s.rivalCount; i++) rivals.push({ name: ["Crimson", "Viper", "Ghost", "Nitro"][i] || "Rival", prog: 0, skill: 0.9 + Math.random() * 0.35 });
+    if (!rivalDrivers) {
+      for (let i = 0; i < s.rivalCount; i++) rivals.push({ name: RIVAL_NAMES[i] || "Rival", prog: 0, skill: 0.9 + Math.random() * 0.35 });
+    }
     raceRun = {
-      setup: s, stage: "live", course, cp: 0, rivals,
+      setup: s, stage: "live", course, cp: 0, rivals, rivalDrivers,
       t: 0, limit: 18 + course.length * 8, startPos: { x: CBZ.player.pos.x, z: CBZ.player.pos.z },
       playerProg: 0, totalLen: course.length,
     };
+    // one scorer for positions/gaps (same kit the speedway uses)
+    if (rivalDrivers && CBZ.raceKit) {
+      const RD = CBZ.raceDrivers;
+      const entrants = rivalDrivers.map(function (m) {
+        return {
+          id: "r" + m.number, name: m.name, number: m.number, color: m.car && m.car.model ? m.car.model.color : null,
+          driver: m,
+          progress: function () { return RD.progressOf(m); },
+          speed: function () { return Math.abs((m.car && m.car.v) || 0); },
+        };
+      });
+      entrants.push({
+        id: "you", name: "YOU", isPlayer: true,
+        progress: function () { return raceRun ? playerStreetProgress(raceRun) : 0; },
+        speed: function () { const c = CBZ.player && CBZ.player._vehicle; return Math.abs((c && c.v) || 0); },
+      });
+      // trackLen ≈ course span so progress gaps convert to honest seconds
+      let L = 0;
+      for (let i = 1; i < course.length; i++) L += Math.hypot(course[i].x - course[i - 1].x, course[i].z - course[i - 1].z);
+      raceRun.kit = CBZ.raceKit.create({ laps: 1, trackLen: Math.max(120, L), entrants: entrants });
+      if (CBZ.raceHud) { CBZ.raceHud.show(); }
+    }
     // place first two beacons
     refreshBeacons();
-    note("RACE ON — hit the gold checkpoints! " + course.length + " to go.", 2.6);
+    note("RACE ON — hit the gold checkpoints! " + course.length + " to go." + (rivalDrivers ? " " + rivalDrivers.length + " rivals on the road." : ""), 2.6);
     big("3.. 2.. 1.. GO!");
     if (CBZ.sfx) CBZ.sfx("siren");
   }
@@ -956,6 +1051,31 @@
   function endLiveRace(won, crashed) {
     const r = raceRun, s = r.setup;
     clearRaceBeacons();
+    // pack up the rival field + the race HUD, and post the results board
+    if (r.rivalDrivers) {
+      if (r.kit && CBZ.raceHud) {
+        r.kit.update(0);
+        let order = r.kit.order.slice();
+        const pRow = r.kit.playerRow();
+        if (!won && pRow) { order = order.filter((e) => e !== pRow); order.push(pRow); }
+        else if (won && pRow) { order = order.filter((e) => e !== pRow); order.unshift(pRow); }
+        const rows = order.map(function (e, i) {
+          return {
+            pos: i + 1, name: e.name, number: e.number, color: e.color,
+            time: e === pRow ? "" : (Math.round(e.total * 100) + "% of course"),
+            pts: null, purse: (e === pRow && won) ? s.def.reward : 0, you: e === pRow,
+            dnf: !!(e.driver && (e.driver.dnf || (e.driver.car && e.driver.car.dead))),
+          };
+        });
+        CBZ.raceHud.hide();
+        CBZ.raceHud.results(rows, {
+          title: won ? "STREET RACE — YOU WIN" : "STREET RACE — BEATEN",
+          sub: r.course.length + " checkpoints · illegal",
+          foot: won ? "Prize $" + s.def.reward + (s.bet ? " + side bet $" + Math.round(s.bet * 2.2) : "") + " · Esc closes" : "Entry forfeited · Esc closes",
+        });
+      } else if (CBZ.raceHud) CBZ.raceHud.hide();
+      if (CBZ.raceDrivers) CBZ.raceDrivers.despawnAll("street");
+    } else if (CBZ.raceHud) CBZ.raceHud.hide();
     let net = 0;
     if (won) {
       payout(s.def.reward);
@@ -1040,15 +1160,40 @@
           if (CBZ.sfx) CBZ.sfx("coin");
           if (r.cp >= r.course.length) {
             // player finished — did rivals beat them?
-            const lead = r.rivals.every((rv) => rv.prog < 0.985);
+            const lead = r.rivalDrivers
+              ? r.rivalDrivers.every((m) => !m.finished)
+              : r.rivals.every((rv) => rv.prog < 0.985);
             endLiveRace(lead, false);
           } else {
             note("Checkpoint " + r.cp + "/" + r.course.length + "!", 1.2);
             refreshBeacons();
           }
         }
-        // advance rivals with rubber-band catch-up vs player's checkpoint progress
-        if (raceRun) {
+        // ---- rivals ----
+        if (raceRun && r.rivalDrivers) {
+          // REAL cars on the road: their brains drive; we just read the scoreboard.
+          if (r.kit) {
+            r.kit.update(dt);
+            const ctx = r.kit.playerContext();
+            if (ctx && CBZ.raceHud) {
+              CBZ.raceHud.update({
+                pos: ctx.row.pos, count: r.kit.entrants.length,
+                lap: r.cp, laps: r.course.length,
+                lapT: r.kit.time, best: 0,
+                gapA: ctx.ahead ? { name: ctx.ahead.name, s: ctx.gapA } : null,
+                gapB: ctx.behind ? { name: ctx.behind.name, s: ctx.gapB } : null,
+              });
+            }
+          }
+          for (const m of r.rivalDrivers) {
+            if (m.finished) {
+              note(m.name + " took the checkered flag. You lost.", 2.4);
+              endLiveRace(false, false);
+              break;
+            }
+          }
+        } else if (raceRun) {
+          // fallback: virtual progress racers with rubber-band catch-up
           const pProg = r.cp / r.course.length;
           for (const rv of r.rivals) {
             const behind = pProg - rv.prog;
