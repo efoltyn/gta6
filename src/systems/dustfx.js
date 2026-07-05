@@ -127,7 +127,11 @@
     opts = opts || {};
     const amt = Math.max(0, Math.min(1, opts.amt == null ? 0.6 : opts.amt));
     if (amt <= 0.05) return;
-    const n = Math.max(1, Math.round(2 + amt * 4));   // 2..6 motes per call
+    // per-emit budget rides the perf/quality slider — tier0 sheds ~60% of dust
+    // motes, Best (tier 4) is byte-identical. The pool stays MAX=220 (allocation
+    // never shrinks — the tier can rise again mid-run); only the spawn rate dips.
+    const fxq = CBZ.qScale ? CBZ.qScale(0.4, 1) : 1;
+    const n = Math.max(1, Math.round((2 + amt * 4) * fxq));   // 2..6 motes per call at Best
     for (let i = 0; i < n; i++) {
       const a = rng() * Math.PI * 2;
       const sp = (0.4 + rng() * 0.9) * (0.5 + amt * 0.7);

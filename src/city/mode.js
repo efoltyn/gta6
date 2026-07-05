@@ -197,7 +197,13 @@
     // so the SEA and ground are 100% dissolved into fog exactly where the
     // painted silhouettes + haze band (core/sky.js) take over — at 460 a
     // not-quite-fogged blue water strip stayed visible between the rings.
-    if (CBZ.scene.fog) { CBZ.scene.fog.near = 80; CBZ.scene.fog.far = 430; }
+    // The RANGE now rides the perf/quality slider (core/quality.js publishes
+    // cityFogFar; tier 4 = the same 430 as always, low tiers pull it in so
+    // farcull.js can stop drawing what the fog has already dissolved).
+    if (CBZ.scene.fog) {
+      const ff = CBZ.cityFogFar || 430;
+      CBZ.scene.fog.near = Math.round(80 * ff / 430); CBZ.scene.fog.far = ff;
+    }
     if (!cityShadow && CBZ.sun && CBZ.sun.shadow) {
       cityShadow = true;
       const sc = 190, cam = CBZ.sun.shadow.camera;

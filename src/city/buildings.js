@@ -151,6 +151,36 @@
       gp.litPool.instanceMatrix.needsUpdate = true;
     }
   }
+  // SECTORED pools: with the solid curtain-wall panes now pooled too there
+  // are ~60k+ instances — one city-spanning frustumCulled=false pool would
+  // dodge the draw-call cost but still push EVERY pane through the vertex
+  // shader every frame. So pools are built per (tint, kind, 320u world cell),
+  // each with its own cloned unit-box geometry carrying a hand-set bounding
+  // sphere over exactly its instances → real frustum culling per sector, and
+  // core/farcull.js can drop far cells wholesale at low tiers. Dozens of draw
+  // calls city-wide instead of tens of thousands of meshes.
+  const GLASS_SECT = 320;
+  function sectorKey(r) { return Math.floor(r.x / GLASS_SECT) + "," + Math.floor(r.z / GLASS_SECT); }
+  function pooledIM(recs, mat) {
+    // per-pool geometry clone so the bounding sphere can be OURS: centred on
+    // the recs' true extents (+ the fattest pane half-span as margin).
+    const geo = unitBox().clone();
+    let nx = 1e9, xx = -1e9, ny = 1e9, xy = -1e9, nz = 1e9, xz = -1e9, span = 0;
+    for (const r of recs) {
+      if (r.x < nx) nx = r.x; if (r.x > xx) xx = r.x;
+      if (r.y < ny) ny = r.y; if (r.y > xy) xy = r.y;
+      if (r.z < nz) nz = r.z; if (r.z > xz) xz = r.z;
+      const s = Math.max(r.hw, r.hh, r.hd); if (s > span) span = s;
+    }
+    const cx = (nx + xx) / 2, cy = (ny + xy) / 2, cz = (nz + xz) / 2;
+    const rad = Math.hypot(xx - nx, xy - ny, xz - nz) / 2 + span + 1;
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), rad);
+    const im = new THREE.InstancedMesh(geo, mat, recs.length);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.castShadow = false; im.receiveShadow = false; im.renderOrder = 1;
+    im.userData.glassPool = true;   // frustumCulled stays true — the sphere is correct
+    return im;
+  }
   function buildGlassPools() {
     if (!pendingGlass.length) return;
     const batch = pendingGlass; pendingGlass = [];
@@ -161,41 +191,38 @@
     for (const r of batch) { if (r._grp && r._grp.parent) { root = r._grp.parent; break; } }
     if (!root) root = CBZ.scene;
     const mats = tintMats(), rmats = reflectMats();
-    // partition by tint THEN kind (0=clear, 1=reflective) — one InstancedMesh
-    // per (tint, kind) bucket so reflective offices and see-through retail both
-    // stay pooled. At most GLASS_TINTS*2 (+lit) = 7 city-wide draw calls.
-    const byBucket = [[], [], [], [], [], []], litRecs = [];   // [tint*2 + kind]
-    for (const r of batch) { byBucket[r.tint * 2 + (r.kind === "reflective" ? 1 : 0)].push(r); if (r.lit) litRecs.push(r); r._grp = null; }
-    for (let t = 0; t < GLASS_TINTS; t++) {
-      for (let kn = 0; kn < 2; kn++) {
-        const recs = byBucket[t * 2 + kn]; if (!recs.length) continue;
-        const im = new THREE.InstancedMesh(unitBox(), kn ? rmats[t] : mats[t], recs.length);
-        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        im.castShadow = false; im.receiveShadow = false; im.renderOrder = 1;
-        im.frustumCulled = false;       // instances span the city; the unit-box bound would cull them all
-        im.userData.glassPool = true;
-        for (let i = 0; i < recs.length; i++) {
-          const r = recs[i]; r.pool = im; r.inst = i;
-          im.setMatrixAt(i, r.shattered ? _zeroM : paneMatrix(r));
-        }
-        im.instanceMatrix.needsUpdate = true;
-        root.add(im); glassPools.push(im);
-      }
+    // partition by (tint, kind, sector) — see the sectored-pools note above.
+    const buckets = new Map(), litBuckets = new Map();
+    for (const r of batch) {
+      const k = (r.tint * 2 + (r.kind === "reflective" ? 1 : 0)) + "|" + sectorKey(r);
+      let a = buckets.get(k); if (!a) { a = []; buckets.set(k, a); } a.push(r);
+      if (r.lit) { const lk = sectorKey(r); let la = litBuckets.get(lk); if (!la) { la = []; litBuckets.set(lk, la); } la.push(r); }
+      r._grp = null;
     }
-    if (litRecs.length) {
-      const lp = new THREE.InstancedMesh(unitBox(), litWinMat(), litRecs.length);
-      lp.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      lp.castShadow = false; lp.receiveShadow = false; lp.renderOrder = 1;
-      lp.frustumCulled = false; lp.userData.glassPool = true;
-      for (let i = 0; i < litRecs.length; i++) {
-        const r = litRecs[i]; r.litPool = lp; r.litId = i;
+    buckets.forEach(function (recs, k) {
+      const bidx = parseInt(k, 10);                 // tint*2+kind prefix of the key
+      const t = (bidx / 2) | 0, kn = bidx % 2;
+      const im = pooledIM(recs, kn ? rmats[t] : mats[t]);
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i]; r.pool = im; r.inst = i;
+        im.setMatrixAt(i, r.shattered ? _zeroM : paneMatrix(r));
+      }
+      im.instanceMatrix.needsUpdate = true;
+      root.add(im); glassPools.push(im);
+    });
+    const litAll = [];
+    litBuckets.forEach(function (recs) {
+      const lp = pooledIM(recs, litWinMat());
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i]; r.litPool = lp; r.litId = i;
         lp.setMatrixAt(i, _zeroM);    // lit pool stays dark until dusk
+        litAll.push(r);
       }
       lp.instanceMatrix.needsUpdate = true;
       root.add(lp); glassPools.push(lp);
-    }
+    });
     // a build landing mid-night flips its lit panes on immediately
-    if (glassNightOn) for (const r of litRecs) if (!r.shattered) paneShow(r, true);
+    if (glassNightOn) for (const r of litAll) if (!r.shattered) paneShow(r, true);
   }
 
   // ---- INTERIOR WINDOW DRESSING POOLS -------------------------------------
@@ -229,15 +256,20 @@
     let root = null;
     for (const r of batch) { if (r._grp && r._grp.parent) { root = r._grp.parent; break; } }
     if (!root) root = CBZ.scene;
-    const byKind = { sky: [], mull: [] };
-    for (const r of batch) { (byKind[r.kind] || byKind.mull).push(r); r._grp = null; }
-    [["sky", 0xd6e6f2], ["mull", 0x262b31]].forEach(function (kc) {
-      const recs = byKind[kc[0]]; if (!recs.length) return;
-      const m = CBZ.cmat ? CBZ.cmat(kc[1]) : new THREE.MeshLambertMaterial({ color: kc[1] });
-      const im = new THREE.InstancedMesh(unitBox(), m, recs.length);
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      im.castShadow = false; im.receiveShadow = false;
-      im.frustumCulled = false;       // instances span the city
+    // sectored like the pane pools (same 320u cells) so interior dressing
+    // frustum-culls per city cell instead of always-drawing city-wide.
+    const byKS = new Map();
+    for (const r of batch) {
+      const kind = (r.kind === "sky") ? "sky" : "mull";
+      const k = kind + "|" + sectorKey(r);
+      let a = byKS.get(k); if (!a) { a = []; byKS.set(k, a); } a.push(r);
+      r._grp = null;
+    }
+    byKS.forEach(function (recs, k) {
+      const col = k.charAt(0) === "s" ? 0xd6e6f2 : 0x262b31;
+      const m = CBZ.cmat ? CBZ.cmat(col) : new THREE.MeshLambertMaterial({ color: col });
+      const im = pooledIM(recs, m);
+      im.renderOrder = 0;             // opaque interior dressing — no glass ordering needed
       for (let i = 0; i < recs.length; i++) {
         const r = recs[i]; r.pool = im; r.inst = i;
         im.setMatrixAt(i, r.hidden ? _zeroM : decoMatrix(r));
@@ -316,7 +348,9 @@
       kind: o.kind === "reflective" ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
       x: ox + lx, y: ly, z: oz + lz, span: Math.max(pw, pd) * 0.5, hw: pw / 2, hh: ph / 2, hd: pd / 2,
       shattered: false, col: null };
-    if (o.solid || o.external) {
+    if (o.external) {
+      // EXTERNAL one-offs (jewelry cases) keep a real individual mesh — the
+      // owner watches rec.mesh directly. A handful city-wide, never a cost.
       const m = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), glassMat());
       m.position.set(lx, ly, lz); m.castShadow = false; m.receiveShadow = false; m.renderOrder = 1;
       group.add(m); rec.mesh = m;
@@ -325,10 +359,29 @@
         CBZ.colliders.push(c); rec.col = c;
       }
     } else {
-      // pooled pane. ~15% are flagged "lit after dusk" — deterministic per
-      // world position so the night skyline doesn't reshuffle every run.
-      const hsh = Math.sin(rec.x * 12.9898 + rec.y * 78.233 + rec.z * 37.719) * 43758.5453;
-      rec.lit = (hsh - Math.floor(hsh)) < 0.15;
+      // POOLED pane — the ONLY rendered form now. Solid (collider-backed)
+      // panes used to get an individual Mesh + unique BoxGeometry each; the
+      // curtain-wall pane grids made that ~63,000 meshes/geometries — the
+      // single biggest draw-call + heap cost in the whole game (measured).
+      // A solid pane now keeps its physics via an INVISIBLE proxy mesh
+      // (shared unit-box geometry, zero draw calls, kept only because
+      // collider consumers identify glass through c.ref.material) while the
+      // instanced pools carry its pixels like every other pane. rec.mesh
+      // stays null so every show/hide site takes the paneShow() path.
+      if (o.solid) {
+        const m = new THREE.Mesh(unitBox(), glassMat());
+        m.position.set(lx, ly, lz); m.scale.set(pw, ph, pd);
+        m.visible = false;                       // pool renders it — proxy never draws
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        group.add(m); rec.proxy = m;
+        const c = { minX: ox + lx - pw / 2, maxX: ox + lx + pw / 2, minZ: oz + lz - pd / 2, maxZ: oz + lz + pd / 2, ref: m, y0: ly - ph / 2, y1: ly + ph / 2 };
+        CBZ.colliders.push(c); rec.col = c;
+      } else {
+        // ~15% of non-solid panes are flagged "lit after dusk" — deterministic
+        // per world position so the night skyline doesn't reshuffle every run.
+        const hsh = Math.sin(rec.x * 12.9898 + rec.y * 78.233 + rec.z * 37.719) * 43758.5453;
+        rec.lit = (hsh - Math.floor(hsh)) < 0.15;
+      }
       rec._grp = group;
       pendingGlass.push(rec);
     }

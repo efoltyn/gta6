@@ -371,13 +371,17 @@
     const player = !!opts.player;
     const speed = opts.speed || 18;
     const power = Math.min(2.4, Math.max(1, speed / 16));   // visual dial, clamped
+    // FX budget rides the perf/quality slider — tier0 sheds ~65% of burst
+    // particles, Best (tier 4) is byte-identical. Sampled ONCE per burst.
+    const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
     // crimson sheet skidding out low across the ground (the splash on impact)
-    pointBurst(x, z, Math.round((player ? 40 : 26) * power), 0x8a0a0a, 0.17, 3 + speed * 0.28, 0.6, false);
-    pointBurst(x, z, Math.round(14 * power), 0xc01818, 0.12, 5 + speed * 0.3, 0.42, false);
+    pointBurst(x, z, Math.max(1, Math.round((player ? 40 : 26) * power * fxq)), 0x8a0a0a, 0.17, 3 + speed * 0.28, 0.6, false);
+    pointBurst(x, z, Math.max(1, Math.round(14 * power * fxq)), 0xc01818, 0.12, 5 + speed * 0.3, 0.42, false);
     // a lingering dark-red blood POOL spreading at the impact seat
     addBloodPool(x, z, (player ? 2.4 : 1.7) * power);
-    // a few chunky dark gibs tumbling off the splat (reuse the debris pool)
-    addChunks(x, z, Math.round((player ? 6 : 4) * power), 2.2 + speed * 0.1, false, opts.dir || null);
+    // a few chunky dark gibs tumbling off the splat (reuse the debris pool —
+    // the pool KEEPS its full cap; only the per-event spawn rides the tier)
+    addChunks(x, z, Math.max(1, Math.round((player ? 6 : 4) * power * fxq)), 2.2 + speed * 0.1, false, opts.dir || null);
     // the layered blood event (spray/mist/gibs/pool/wall) — gibs-lite, the works
     if (CBZ.gore) { try { CBZ.gore(x, y != null ? y : 1.0, z, { dir: opts.dir || null, amount: player ? 1.7 : 1.3, player: player, explosion: false }); } catch (e) {} }
     // bone-crunch + wet impact (layered real foley), heavy shake + hitstop
@@ -489,18 +493,22 @@
     const hard = !!opts.hard, catastrophic = !!opts.catastrophic;
     const dir = opts.dir || null;   // downrange impact direction, for biased debris
     if ((hard || catastrophic) && CBZ.cityEvent) CBZ.cityEvent("crash", { x, z, damage: catastrophic ? 6 : 2, panic: catastrophic ? 7 : 3 }, { silent: true, noWanted: true, throttle: 0.9 });
+    // FX budget rides the perf/quality slider — tier0 sheds ~65% of burst
+    // particles, Best (tier 4) is byte-identical. Sampled ONCE per burst.
+    const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
     // hot orange impact sparks (additive) that shoot out fast and die quick
-    pointBurst(x, z, catastrophic ? 58 : (hard ? 38 : 12), 0xff9a38, catastrophic ? 0.19 : 0.13, 2 + speed * 0.2, catastrophic ? 0.7 : 0.48, false);
+    pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 58 : (hard ? 38 : 12)) * fxq)), 0xff9a38, catastrophic ? 0.19 : 0.13, 2 + speed * 0.2, catastrophic ? 0.7 : 0.48, false);
     // a tight WHITE-hot spark spray at the contact point (metal grinding)
-    pointBurst(x, z, catastrophic ? 30 : (hard ? 18 : 6), 0xfff0c0, 0.1, 4 + speed * 0.25, catastrophic ? 0.45 : 0.32, false);
+    pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 30 : (hard ? 18 : 6)) * fxq)), 0xfff0c0, 0.1, 4 + speed * 0.25, catastrophic ? 0.45 : 0.32, false);
     // kicked-up dust
-    pointBurst(x, z, catastrophic ? 34 : (hard ? 22 : 8), 0x8b8175, catastrophic ? 0.44 : 0.3, 1 + speed * 0.07, catastrophic ? 0.9 : 0.62, true);
+    pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 34 : (hard ? 22 : 8)) * fxq)), 0x8b8175, catastrophic ? 0.44 : 0.3, 1 + speed * 0.07, catastrophic ? 0.9 : 0.62, true);
     // shattered GLASS — pale blue-white shimmering shards (additive twinkle)
-    if (hard) pointBurst(x, z, catastrophic ? 30 : 16, 0xcfe6ff, 0.09, 3 + speed * 0.16, catastrophic ? 0.8 : 0.6, false);
+    if (hard) pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 30 : 16) * fxq)), 0xcfe6ff, 0.09, 3 + speed * 0.16, catastrophic ? 0.8 : 0.6, false);
     if (hard && CBZ.sfx) CBZ.sfx("glass");
     if (hard) {
       ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.7 : 0.55 });
-      addChunks(x, z, catastrophic ? 10 : 5, 2.5 + speed * 0.12, false, dir);
+      // debris pool keeps its full cap; only the per-event spawn rides the tier
+      addChunks(x, z, Math.max(1, Math.round((catastrophic ? 10 : 5) * fxq)), 2.5 + speed * 0.12, false, dir);
       addScorch(x, z, catastrophic ? 3 : 1.4, catastrophic ? 9 : 5);   // a scuff/skid stain even on a hard (non-fatal) wall hit
       if (catastrophic) {
         if (CBZ.shake) CBZ.shake(1.6);
@@ -542,6 +550,9 @@
     opts = opts || {};
     const power = opts.power || 1, R = (opts.radius || 6) * power, byPlayer = !!opts.byPlayer;
     const P = Math.min(2.2, power);            // visual scale is clamped so huge blasts stay cheap
+    // FX budget rides the perf/quality slider — tier0 sheds ~65% of burst
+    // particles, Best (tier 4) is byte-identical. Sampled ONCE per blast.
+    const fxq = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
     // opts.y = detonation HEIGHT. A rocket that lands 30u up a tower face must
     // bloom THERE — not pop at the kerb below it (the filmed "dumb" hit). Every
     // ground-level caller passes no y and keeps the exact old seat; elevated
@@ -631,7 +642,7 @@
       // dust skirt races outward just behind the bright ring (fast, low, short-
       // lived) plus a kicked-up dust haze that hangs a beat. This is what makes
       // a blast read as touching the WORLD instead of floating on it.
-      pointBurst(x, z, Math.round(16 * P), 0x8b8175, 0.42, 2 + power * 0.5, 0.95, true);
+      pointBurst(x, z, Math.max(1, Math.round(16 * P * fxq)), 0x8b8175, 0.42, 2 + power * 0.5, 0.95, true);
       for (let i = 0; i < Math.round(5 * P); i++) {
         const a = rng() * 6.2832, sp = 4.5 + rng() * 3.5 * P;
         spawnPuff(x + Math.cos(a) * 0.6, 0.45, z + Math.sin(a) * 0.6,
@@ -643,7 +654,7 @@
     }
 
     // ---- LAYER 5: SPARKS + EMBERS + DEBRIS (nearest layer) ----
-    pointBurst(x, z, Math.round(28 * P), 0xffe08a, 0.16, 9 + 7 * power, 0.6, false, elevated ? cy : null); // fast bright sparks
+    pointBurst(x, z, Math.max(1, Math.round(28 * P * fxq)), 0xffe08a, 0.16, 9 + 7 * power, 0.6, false, elevated ? cy : null); // fast bright sparks
     // glowing embers that arc up and rain down, lingering longer than sparks
     const nEmber = Math.round(16 * P);
     for (let i = 0; i < nEmber; i++) {
@@ -652,7 +663,7 @@
         { additive: true, base: 0.18 + rng() * 0.16, pop: 0.1, life: 1.0 + rng() * 1.1,
           maxOp: 1, vx: Math.cos(a) * sp, vy: 3 + rng() * 4, vz: Math.sin(a) * sp });
     }
-    addChunks(x, z, Math.round(10 * P), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris
+    addChunks(x, z, Math.max(1, Math.round(10 * P * fxq)), 6 + 5 * power, true, null, elevated ? cy : null); // chunky glowing debris (pool cap untouched — only the per-blast spawn rides the tier)
     if (!elevated) {
       addScorch(x, z, R * 0.5);                                        // lasting ground scorch
       // big blasts leave a SMOKING crater: a thin column keeps seeping off the

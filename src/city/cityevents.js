@@ -138,11 +138,41 @@
   const PANIC_THRESH = 0.55;         // base break point (scaled DOWN by bravery)
   const GAWK_HOLD = 1.6;             // seconds a gawker faces the event
 
+  // ---- IDLE GATE state ----------------------------------------------------
+  // Most frames NOTHING is happening — no live event, nobody panicked — yet the
+  // gather still walked all ~1000 peds. We skip the whole gather when the module
+  // can prove it's idle: no live ring event, no panic/gawk left over from the
+  // last full pass (_panicLive — panic can only APPEAR via a live event or a
+  // panicked neighbour, both of which keep the pass running until it drains),
+  // and no fresh corpse (_freshCorpse, below). A slow heartbeat still runs a
+  // full pass every 0.5s as a belt-and-braces catch-all for any death path that
+  // might bypass the cityKillPed chokepoint. Behaviour with anything LIVE is
+  // unchanged — the gate only removes provably-dead frames.
+  let _panicLive = true;             // start true: first pass establishes real state
+  let _freshCorpse = false;          // a ped died since the last full pass
+  let _idleT = 0;                    // heartbeat countdown while idle
+
+  // FRESH-CORPSE WAKE: peds.js cityKillPed is the central city death chain
+  // (loyalty/approval/crown already wrap it). The lightest possible wrap — set
+  // the wake flag so the gate runs one full pass and posts the dead-body scare
+  // with zero added latency. Lazy + marker-guarded (peds.js may load after us);
+  // every existing *Wrapped marker is carried forward so other lazy wrappers
+  // don't re-wrap through us.
+  function wrapKillForWake() {
+    const ok = CBZ.cityKillPed;
+    if (typeof ok !== "function" || ok._panicWakeWrapped) return;
+    const w = function () { _freshCorpse = true; return ok.apply(this, arguments); };
+    for (const k in ok) w[k] = ok[k];          // carry forward other wrappers' markers
+    w._panicWakeWrapped = true; w._panicWakeOrig = ok;
+    CBZ.cityKillPed = w;
+  }
+
   CBZ.onUpdate(33.5, function (dt) {
     if (g.mode !== "city") return;
     const peds = CBZ.cityPeds;
     if (!peds || !peds.length) return;
     if (!grid && CBZ.makeGrid) grid = CBZ.makeGrid(GRID_CELL);
+    wrapKillForWake();
 
     // age the ring; find whether ANY event is still live this frame. (Cheap —
     // RING is tiny.) If nothing's radiating we still want to decay standing
@@ -154,6 +184,17 @@
       if (evAge[i] > EVENT_TTL) { evAge[i] = -1; evType[i] = null; }
       else anyLive = true;
     }
+
+    // ---- IDLE GATE: nothing radiating, nothing panicked, nobody freshly dead
+    // → the full gather below would touch ~1000 peds to do nothing. Skip it,
+    // except on the slow heartbeat (see the gate state block above). The ring
+    // aging above already ran, so event decay always ticks; ped panic decay is
+    // vacuous while _panicLive is false (there is provably no panic to decay).
+    _idleT -= dt;
+    if (!anyLive && !_panicLive && !_freshCorpse && _idleT > 0) return;
+    _idleT = 0.5;
+    _freshCorpse = false;              // this pass sweeps every unseen corpse
+    let seen = false;                  // any panic/gawk still alive after decay?
 
     // ---- gather SUBJECTS (alive, reactive, near camera) -------------------
     const cam = CBZ.camera;
@@ -179,17 +220,19 @@
         // frozen mid-fear when it walks back into view, but no event/contagion work.
         if (p.panic > 0) p.panic = Math.max(0, p.panic - DECAY * dt);
         if (p._gawkT > 0) p._gawkT -= dt;
+        if (p.panic > 0 || p._gawkT > 0) seen = true;   // still draining → keep passing
         continue;
       }
       subjects.push(p);
     }
     const ns = subjects.length;
-    if (!ns) return;
+    if (!ns) { _panicLive = seen; return; }
 
     // phase 1: standing-panic decay + gawk-hold tick for every near subject.
     for (let s = 0; s < ns; s++) {
       const p = subjects[s];
       if (p.panic > 0) p.panic = Math.max(0, p.panic - DECAY * dt);
+      if (p.panic > 0 || p._gawkT > 0) seen = true;     // still draining → keep passing
       if (p._gawkT > 0) {
         p._gawkT -= dt;
         // keep the gawker turned toward what they're watching while the hold lasts
@@ -258,6 +301,11 @@
       if (p.panic <= 0) continue;
       resolve(p, dt);
     }
+
+    // arm the gate for the next frame. `|| anyLive` matters: a live event may
+    // have ADDED panic in phase 2a AFTER phase 1's tracking ran, so any frame
+    // with a live event always chains one more full pass to pick it up.
+    _panicLive = seen || anyLive;
   });
 
   // getVec for the grid rebuild — module-level so it's not a per-frame closure.

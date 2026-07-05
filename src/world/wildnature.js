@@ -227,12 +227,18 @@
     const conifers = [], broadleaves = [], birches = [], snags = [], rockList = [], grasses = [];
     const STEP = 26;                                  // grid pitch (jittered)
     const J = STEP * 0.62;                            // jitter amplitude
-    // Scatter density rides the quality tier, read ONCE here at build time
-    // (the world is generated once; a slider move applies on the next build).
-    // qScale may be absent in headless tests → fall back to the old caps.
-    const CAP_TREES = (CBZ.qScale ? CBZ.qScale(2600, 7500) : 5200) | 0;
-    const CAP_ROCKS = (CBZ.qScale ? CBZ.qScale(700, 2100) : 1400) | 0;
-    const CAP_GRASS = (CBZ.qScale ? CBZ.qScale(1600, 4800) : 3200) | 0;
+    // Scatter caps are FIXED at the full-fat values now. They used to read
+    // CBZ.qScale at build time, which (a) meant the slider couldn't touch a
+    // world after it was built and (b) broke build determinism: the caps gate
+    // how many rng() draws the tree branch consumes, so two clients on
+    // different tiers generated DIFFERENT forests (an MP desync). Every
+    // client now builds the identical full forest; the LIVE quality tier
+    // thins what's RENDERED via InstancedMesh.count (see the lodIMs listener
+    // below) — placements are hash-shuffled so a truncated count is a
+    // uniform thinning, not a map-corner wipe.
+    const CAP_TREES = 7500;
+    const CAP_ROCKS = 2100;
+    const CAP_GRASS = 4800;
 
     function classify(x, z) {
       // playable keep-out + the flat-ground / water / cliff rules
@@ -337,10 +343,26 @@
       }
     }
 
+    // ---- deterministic shuffle so live count-thinning is spatially uniform.
+    // Instance i of each IM is placement i of its list; the render loop draws
+    // instances [0, im.count). Shuffling by position hash means "the first K"
+    // is a uniform random K-subset of the map — cheap density LOD with zero
+    // per-frame work. Position-hash (not Math.random) keeps it byte-identical
+    // per seed across clients.
+    function lodShuffle(list, salt) {
+      const h = CBZ.hash01
+        ? function (p) { return CBZ.hash01(p.x, p.z, salt); }
+        : function (p) { const s = Math.sin(p.x * 12.9898 + p.z * 78.233 + salt) * 43758.5453; return s - Math.floor(s); };
+      list.sort(function (a, b) { return h(a) - h(b); });
+    }
+    lodShuffle(conifers, 101); lodShuffle(broadleaves, 102); lodShuffle(birches, 103);
+    lodShuffle(snags, 104); lodShuffle(rockList, 105); lodShuffle(grasses, 106);
+
     // ============================================================
     //  BUILD the InstancedMeshes. Helper builds one species (trunk + crown)
     //  with per-instance matrix + instanceColor in a single pass.
     // ============================================================
+    const lodIMs = [];       // [{im, full}] — every scatter IM, for live count-thinning
     const speciesIMs = [];   // every trunk/crown InstancedMesh built below (for the distance LOD pass)
     function buildSpecies(list, trunkGeo, crownGeo, opts) {
       const N = list.length;
@@ -394,6 +416,7 @@
       crownIM.instanceMatrix.needsUpdate = true;
       root.add(trunkIM); root.add(crownIM);
       speciesIMs.push(trunkIM, crownIM);
+      lodIMs.push({ im: trunkIM, full: N }, { im: crownIM, full: N });
     }
 
     // CONIFER — dark blue-green needles, brown bark
@@ -441,6 +464,7 @@
       snagIM.instanceMatrix.needsUpdate = true;
       root.add(snagIM);
       snagIMs.push(snagIM);
+      lodIMs.push({ im: snagIM, full: N });
     }
 
     // ============================================================
@@ -468,6 +492,7 @@
       rockIM.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
       rockIM.instanceMatrix.needsUpdate = true;
       root.add(rockIM);
+      lodIMs.push({ im: rockIM, full: NR });
     }
 
     // ============================================================
@@ -497,7 +522,23 @@
       grassIM.instanceColor = new THREE.InstancedBufferAttribute(gCol, 3);
       grassIM.instanceMatrix.needsUpdate = true;
       root.add(grassIM);
+      lodIMs.push({ im: grassIM, full: NG });
     }
+
+    // ---- LIVE density LOD: the perf/quality slider thins the scatter -------
+    // instantly by shrinking each InstancedMesh's draw count (tier 0 renders
+    // ~35% of the forest, Best renders 100% = the full build — byte-identical
+    // to before). The shuffle above makes any prefix a uniform subset. The
+    // build itself never changes, so MP world determinism is untouched.
+    function applyScatterLOD() {
+      const frac = CBZ.qScale ? CBZ.qScale(0.35, 1) : 1;
+      for (let i = 0; i < lodIMs.length; i++) {
+        const e = lodIMs[i];
+        e.im.count = Math.max(1, Math.round(e.full * frac));
+      }
+    }
+    if (CBZ.onQualityChange) CBZ.onQualityChange(applyScatterLOD);
+    else applyScatterLOD();
 
     // ============================================================
     //  SIMPLE DISTANCE LOD — thousands of tree instances render full detail

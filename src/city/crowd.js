@@ -1927,6 +1927,7 @@
   }
 
   // ambient layer: runs during city play (own order, independent of peds @34).
+  let _cosmFrame = 0;      // stride counter for the cosmetic passes below
   CBZ.onUpdate(23.7, function (dt) {
     if (CBZ.game.mode !== "city") { if (root) { root.visible = false; } if (poolBuilt) releaseAll(); return; }
     if (root) root.visible = true;
@@ -1951,8 +1952,21 @@
     if (prewarming) prewarmTick();
     avoidPass();           // coarse look-ahead: steer a rotating slice away from walls before sim() walks into them
     sim(dt);
-    separate(dt);         // personal-space repulsion: no bodies standing inside each other
-    bumpPass(dt);         // physical bump reactions: stumble / bowl bodies over
+    // COSMETIC-PASS STRIDE: separate() (personal-space nudge) and bumpPass()
+    // (near-camera bump theatre) are pure polish — nothing downstream reads
+    // their output the same frame — so at low tiers they run every 2nd
+    // (tiers 1-2) or 3rd (tier 0) frame with dt scaled up to cover the skipped
+    // frames (separate's push is dt-capped, so per-second drift is unchanged;
+    // the absolute step ceiling still prevents pops). Tiers 3-4 keep N=1 →
+    // byte-identical to before. They stride TOGETHER so their shared
+    // per-frame agent-grid rebuild is still amortized across both.
+    const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+    const stride = q >= 3 ? 1 : (q >= 1 ? 2 : 3);
+    _cosmFrame++;
+    if (_cosmFrame % stride === 0) {
+      separate(dt * stride);   // personal-space repulsion: no bodies standing inside each other
+      bumpPass(dt * stride);   // physical bump reactions: stumble / bowl bodies over
+    }
     thin(dt);             // keep on-street density in step with the finite headcount
     aheadReseed();        // pull distant bodies into the street ahead of you
     updatePromotion();

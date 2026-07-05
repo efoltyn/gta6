@@ -260,7 +260,7 @@
      CBZ.terrainHeight. terrain.js depends on BufferGeometryUtils (above). -->
 <script src="src/vendor/noise.js"></script>
 <script src="src/world/rockscliffs.js?v=rock1"></script>
-<script src="src/world/terrain.js?v=everest1"></script>
+<script src="src/world/terrain.js?v=tiles1"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -424,7 +424,7 @@
      frame-work is included in the sort. mode.js defines CBZ.city first; the
      rest augment it. -->
 <script src="src/city/world.js?v=beach1"></script>
-<script src="src/city/buildings.js?v=derelict2"></script>
+<script src="src/city/buildings.js?v=glasspool1"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
@@ -490,11 +490,11 @@
 <script src="src/city/biome_desert.js?v=bigdesert1"></script>
 <script src="src/city/biome_forest.js?v=arch1"></script>
 <script src="src/city/biome_farmland.js?v=arch1"></script>
-<script src="src/city/biome_snow.js?v=arch1"></script>
+<script src="src/city/biome_snow.js?v=cull1"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=wild1"></script>
+<script src="src/world/wildnature.js?v=lod1"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -519,7 +519,7 @@
 <script src="src/city/arena_fights.js?v=fight1"></script>
 <script src="src/city/props.js?v=shoot1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
-<script src="src/city/mode.js?v=citysec1"></script>
+<script src="src/city/mode.js?v=fogtier1"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
 <script src="src/city/clothes.js?v=fit3"></script>
 <script src="src/city/outfits.js?v=fits1"></script>
@@ -858,7 +858,8 @@
 <script src="src/net/sqlitedb.js?v=sql1"></script>
 
 <!-- 5. quality + loop + boot -->
-<script src="src/core/quality.js?v=scale4"></script>
+<script src="src/core/quality.js?v=scale5"></script>
+<script src="src/core/farcull.js?v=fc1"></script>
 <script src="src/systems/settings.js?v=settings1"></script>
 <script src="src/core/batch.js"></script>
 <script src="src/core/profile.js"></script>

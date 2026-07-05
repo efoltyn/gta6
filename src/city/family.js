@@ -295,7 +295,10 @@
     castFamilies();
     tick += dt;
     reactCD -= dt;
-    if (tick < 1.2) return;
+    // home-life cadence rides the perf/quality slider — tier0 ticks every 3s
+    // instead of 1.2s (the family sweep is sim-correctness tolerant; goals just
+    // refresh slower), Best (tier 4) keeps today's 1.2s exactly.
+    if (tick < (CBZ.qScale ? CBZ.qScale(3, 1.2) : 1.2)) return;
     tick = 0;
     const P = CBZ.player;
     const playerHurt = !!(P && !P.dead && P.maxHp && P.hp < P.maxHp * 0.45);

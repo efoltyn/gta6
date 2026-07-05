@@ -34,8 +34,11 @@
   CBZ.onUpdate(47, function (dt) {
     if (CBZ.game.mode !== "escape") return; // survival draws its own minimap
     drawAcc += dt;
-    if (drawAcc < 1 / 12) return;            // radar does not need a 60 Hz redraw
-    drawAcc %= 1 / 12;
+    // redraw cadence rides the perf/quality slider — tier0 drops to 6Hz (canvas
+    // repaints are pure CPU), Best (tier 4) keeps today's 12Hz exactly.
+    const period = 1 / (CBZ.qScale ? CBZ.qScale(6, 12) : 12);
+    if (drawAcc < period) return;            // radar does not need a 60 Hz redraw
+    drawAcc %= period;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "rgba(10,18,30,.55)"; ctx.fillRect(0, 0, W, H);
 

@@ -295,13 +295,17 @@
 
   // ---- the slow tick: one attempt every ~90-150s. Ordered 34.8 (just after
   // social.js's 34.5/34.6 and gangops.js's 34.7 — see header). ----
-  let _t = 90 + rng() * 60;
+  // Interval rides the perf/quality slider: tier0 stretches it ~1.8x (fewer
+  // eligibleCouples() sweeps on weak machines — the sim tolerates slower
+  // births), Best (tier 4) keeps today's exact 90-150s. Read live each re-arm.
+  function nextBirthT() { return (90 + rng() * 60) * (CBZ.qScale ? CBZ.qScale(1.8, 1) : 1); }
+  let _t = nextBirthT();
   CBZ.onUpdate(34.8, function (dt) {
     if (!g || g.mode !== "city") return;
     if (noSim()) return;                     // host simulates; guests puppet, never birth locally
     _t -= dt;
     if (_t > 0) return;
-    _t = 90 + rng() * 60;
+    _t = nextBirthT();
     try { tryBirth(); } catch (err) {}
   });
 
@@ -309,6 +313,6 @@
   // cityFamilyTreeReset). Per-run state is just the cadence timer — the
   // cooldown stamps live on the tree's OWN edges, which cityFamilyTreeReset
   // already wipes by dropping the edges array. ----
-  function reset() { _t = 90 + rng() * 60; }
+  function reset() { _t = nextBirthT(); }   // same tier-stretched cadence on a fresh run
   CBZ.cityBirthsReset = reset;
 })();

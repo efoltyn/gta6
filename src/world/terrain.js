@@ -211,64 +211,76 @@
     const root = parent || CBZ.scene;
     if (!root) return null;
 
-    // --- 1) the big relief mesh ---------------------------------------
-    const SPAN = 6000, SEG = 280;
+    // --- 1) the big relief field --------------------------------------
+    // PERF: this used to be ONE 6000×6000 mesh at 280×280 segments —
+    // ~157k flat-shaded triangles (~470k de-indexed verts) with
+    // frustumCulled=false, so the ENTIRE relief was vertex-processed
+    // every frame no matter where the camera looked. It's now a 4×4 grid
+    // of tiles with the SAME vertex spacing (1500/70 == 6000/280 → the
+    // geometry is byte-identical where tiles meet, flat shading keeps
+    // per-face normals so there is no seam), each with a real bounding
+    // sphere and default frustum culling: looking down a street submits
+    // ~a third of the verts the monolith did, for +15 draw calls.
+    const SPAN = 6000, TILES = 4, TSPAN = SPAN / TILES, TSEG = 70; // 4×(70·4)=280 → same density
     // centre the field over the archipelago (the sea plane sits ~(150,-900)).
     const CX = (FLAT.minX + FLAT.maxX) / 2;   // ~310
     const CZ = (FLAT.minZ + FLAT.maxZ) / 2;   // ~-750
 
-    const geo = new THREE.PlaneGeometry(SPAN, SPAN, SEG, SEG);
-    // lay it flat in XZ and recentre.
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(CX, 0, CZ);
-
-    const pos = geo.attributes.position;
-    const vcount = pos.count;
-    const colors = new Float32Array(vcount * 3);
-
-    // displace every vertex by terrainHeight, then colour by band.
-    for (let i = 0; i < vcount; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const h = CBZ.terrainHeight(x, z);
-      pos.setY(i, h);
-    }
-    pos.needsUpdate = true;
-
-    // flat-shaded crisp facets: drop the index so each tri owns its verts,
-    // then recompute per-face normals.
-    const flatGeo = geo.toNonIndexed();
-    flatGeo.computeVertexNormals();
-
-    // colour per (now de-indexed) vertex from its height + local slope.
-    const fp = flatGeo.attributes.position;
-    const fn = flatGeo.attributes.normal;
-    const fcount = fp.count;
-    const fcolors = new Float32Array(fcount * 3);
-    for (let i = 0; i < fcount; i++) {
-      const y = fp.getY(i);
-      // slope from the face normal (1 = flat-up, 0 = vertical) → invert.
-      const ny = fn.getY(i);
-      const slope = 1 - Math.min(1, Math.max(0, ny));
-      bandColor(y, slope, _c);
-      fcolors[i * 3] = _c.r; fcolors[i * 3 + 1] = _c.g; fcolors[i * 3 + 2] = _c.b;
-    }
-    flatGeo.setAttribute("color", new THREE.BufferAttribute(fcolors, 3));
-    geo.dispose();   // the indexed source is no longer needed
-
     const terrMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    const terrain = new THREE.Mesh(flatGeo, terrMat);
-    // The relief is coincident with the city ground plane at y=0 across the
-    // flat region (both are exactly 0 there). Nudge the WHOLE relief down a
-    // hair so the city's textured ground always wins the depth fight; the
-    // far ring (where it actually rises) is unaffected at any visible scale.
-    terrain.position.y = -0.06;
-    terrain.rotation.y = 0;
-    terrain.frustumCulled = false;          // never pop as the camera turns
-    terrain.receiveShadow = true;
-    terrain.castShadow = false;
-    terrain.matrixAutoUpdate = false; terrain.updateMatrix();
-    terrain.userData.terrain = true;
-    root.add(terrain);
+    const terrainTiles = [];
+    for (let tj = 0; tj < TILES; tj++) for (let ti = 0; ti < TILES; ti++) {
+      const tcx = CX - SPAN / 2 + (ti + 0.5) * TSPAN;
+      const tcz = CZ - SPAN / 2 + (tj + 0.5) * TSPAN;
+      const geo = new THREE.PlaneGeometry(TSPAN, TSPAN, TSEG, TSEG);
+      // lay it flat in XZ and centre this tile.
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(tcx, 0, tcz);
+
+      const pos = geo.attributes.position;
+      const vcount = pos.count;
+      // displace every vertex by terrainHeight (same sampler as before —
+      // shared edges get identical heights on both tiles).
+      for (let i = 0; i < vcount; i++) {
+        pos.setY(i, CBZ.terrainHeight(pos.getX(i), pos.getZ(i)));
+      }
+      pos.needsUpdate = true;
+
+      // flat-shaded crisp facets: drop the index so each tri owns its verts,
+      // then recompute per-face normals.
+      const flatGeo = geo.toNonIndexed();
+      flatGeo.computeVertexNormals();
+
+      // colour per (now de-indexed) vertex from its height + local slope.
+      const fp = flatGeo.attributes.position;
+      const fn = flatGeo.attributes.normal;
+      const fcount = fp.count;
+      const fcolors = new Float32Array(fcount * 3);
+      for (let i = 0; i < fcount; i++) {
+        const y = fp.getY(i);
+        // slope from the face normal (1 = flat-up, 0 = vertical) → invert.
+        const ny = fn.getY(i);
+        const slope = 1 - Math.min(1, Math.max(0, ny));
+        bandColor(y, slope, _c);
+        fcolors[i * 3] = _c.r; fcolors[i * 3 + 1] = _c.g; fcolors[i * 3 + 2] = _c.b;
+      }
+      flatGeo.setAttribute("color", new THREE.BufferAttribute(fcolors, 3));
+      geo.dispose();   // the indexed source is no longer needed
+      flatGeo.computeBoundingSphere();       // real bounds → frustum culling works
+
+      const tile = new THREE.Mesh(flatGeo, terrMat);
+      // The relief is coincident with the city ground plane at y=0 across the
+      // flat region (both are exactly 0 there). Nudge the WHOLE relief down a
+      // hair so the city's textured ground always wins the depth fight; the
+      // far ring (where it actually rises) is unaffected at any visible scale.
+      tile.position.y = -0.06;
+      tile.receiveShadow = true;
+      tile.castShadow = false;
+      tile.matrixAutoUpdate = false; tile.updateMatrix();
+      tile.userData.terrain = true;          // spares it from batch + farcull
+      root.add(tile);
+      terrainTiles.push(tile);
+    }
+    const terrain = terrainTiles[0];         // legacy return value (first tile)
 
     // --- 2) HERO PEAKS — a dramatic snow-capped MOUNTAIN RANGE in the
     //        backdrop ring, merged into ONE mesh. These are pure backdrop,
@@ -386,33 +398,25 @@
     }
 
     const heroMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    function addMergedHero(geoms) {
-      if (!geoms.length) return;
-      let merged = null;
-      if (BGU && BGU.mergeBufferGeometries) merged = BGU.mergeBufferGeometries(geoms);
-      if (!merged) {
-        // manual Float32 concat fallback (position + color)
-        let np = 0, nc = 0;
-        for (const g of geoms) { np += g.attributes.position.array.length; nc += g.attributes.color.array.length; }
-        const P = new Float32Array(np), Cc = new Float32Array(nc);
-        let po = 0, co = 0;
-        for (const g of geoms) {
-          P.set(g.attributes.position.array, po); po += g.attributes.position.array.length;
-          Cc.set(g.attributes.color.array, co); co += g.attributes.color.array.length;
-        }
-        merged = new THREE.BufferGeometry();
-        merged.setAttribute("position", new THREE.BufferAttribute(P, 3));
-        merged.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+    // PERF: the spines used to be merged into ONE frustumCulled=false mesh —
+    // the whole 360° mountain ring was vertex-processed every frame. Each
+    // spine is now its OWN mesh with a real bounding sphere: the ridges
+    // behind the camera cull away (same pixels on screen, ~20 extra draw
+    // calls, most of the ring's verts skipped whenever you aren't panning).
+    const heroMeshes = [];
+    function addHeroSpines(geoms) {
+      for (const g of geoms) {
+        g.computeVertexNormals();                // crisp flat facets w/ flatShading
+        g.computeBoundingSphere();               // real bounds → frustum culling works
+        const m = new THREE.Mesh(g, heroMat);
+        m.castShadow = false; m.receiveShadow = true;
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        m.userData.terrain = true;
+        root.add(m);
+        heroMeshes.push(m);
       }
-      merged.computeVertexNormals();             // crisp flat facets w/ flatShading
-      const m = new THREE.Mesh(merged, heroMat);
-      m.frustumCulled = false; m.castShadow = false; m.receiveShadow = true;
-      m.matrixAutoUpdate = false; m.updateMatrix();
-      m.userData.terrain = true;
-      root.add(m);
-      for (const g of geoms) g.dispose();
     }
-    addMergedHero(heroGeoms);
+    addHeroSpines(heroGeoms);
 
     // --- 3) BOULDER SCATTER — a modest field of fractured rocks (world/
     //        rockscliffs.js) dressing the mountain ring's slopes. WHY: the
@@ -447,7 +451,7 @@
           // jitter around the crest sample so rocks don't line up in a row
           return { x: p.x + (rng() - 0.5) * 90, z: p.z + (rng() - 0.5) * 90 };
         }
-        CBZ.scatterRocks(root, {
+        const scat = CBZ.scatterRocks(root, {
           count: 90,
           pick: pickNearSpine,
           heightAt: CBZ.terrainHeight,
@@ -459,8 +463,31 @@
           colorHex: 0x716b60,             // dark weathered granite, close to terrain's COL_ROCK band
           seed: 4242,
         });
+        if (scat && scat.meshes) for (const m of scat.meshes) heroMeshes.push(m);
       }
     }
+
+    // ---- perf/quality tier gate -----------------------------------------
+    // At tiers 0-1 the city fog is pulled in to ~170-260u (core/quality.js)
+    // while the mountain ring starts at radius ~1900: every hero peak +
+    // boulder is 100% fog-dissolved — invisible — yet still costs its full
+    // vertex/raster pass. Hide them outright there; tiers 2-4 (fog ≥ 350)
+    // keep today's skyline byte-identical. Shadow RECEIVE on the relief is
+    // also dropped at tiers 0-1 (the shadow pass is off/minimal there
+    // anyway) — one material flip for all tiles, not per-mesh churn.
+    function applyTerrainTier() {
+      const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+      const showBackdrop = q >= 2;
+      for (const m of heroMeshes) m.visible = showBackdrop;
+      const recv = q >= 2;
+      if (terrMat.userData._recv !== recv) {
+        terrMat.userData._recv = recv;
+        for (const t of terrainTiles) t.receiveShadow = recv;
+        for (const m of heroMeshes) if (m.receiveShadow !== undefined && !m.isInstancedMesh) m.receiveShadow = recv;
+        terrMat.needsUpdate = true; heroMat.needsUpdate = true;
+      }
+    }
+    if (CBZ.onQualityChange) CBZ.onQualityChange(applyTerrainTier);
 
     _built = terrain;
     return terrain;

@@ -62,7 +62,7 @@
   let arenaRef = null;     // the arena this roster was built for (rebuild on a new city)
   let tickT = 0;
   let buildCool = 0;
-  const MOVE_EVERY = 22;   // seconds between market moves (one feed line at most)
+  const MOVE_EVERY = 22;   // seconds between market moves at Best (one feed line at most); tier-stretched at the tick below so the LIVE quality slider applies
 
   function rint(n) { return (rng() * n) | 0; }
   function pick(a) { return a[rint(a.length)]; }
@@ -402,7 +402,11 @@
     // HQ so a long-serving worker genuinely outranks a fresh hire when the
     // owner falls. Cheap: bounded to companies × their own staff, not a scan.
     serveT += dt;
-    if (serveT >= 1) {
+    // accrual cadence rides the perf/quality slider — tier0 batches seniority
+    // every ~2s instead of 1s. Lossless: `step = serveT` credits the FULL
+    // elapsed span whatever the interval, so tenure math is unchanged; Best
+    // (tier 4) keeps today's 1s exactly.
+    if (serveT >= (CBZ.qScale ? CBZ.qScale(2, 1) : 1)) {
       const step = serveT; serveT = 0;
       for (let i = 0; i < companies.length; i++) {
         const co = companies[i];
@@ -411,6 +415,9 @@
       }
     }
     tickT += dt;
-    if (tickT >= MOVE_EVERY) { tickT = 0; try { marketMove(); } catch (e) {} }
+    // market cadence rides the perf/quality slider — tier0 moves every ~44s
+    // instead of 22 (fewer marketMove() sweeps + feed lines on weak machines;
+    // the economy tolerates a slower pulse), Best (tier 4) keeps today's 22s.
+    if (tickT >= MOVE_EVERY * (CBZ.qScale ? CBZ.qScale(2, 1) : 1)) { tickT = 0; try { marketMove(); } catch (e) {} }
   });
 })();

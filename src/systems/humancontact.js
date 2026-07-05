@@ -261,8 +261,20 @@
   }
 
   // City had no actor separation pass. Run after pedestrians, police, and cars.
+  // THROTTLED: rebuilding cityList + the spatial grid + the 3×3 neighbour sweep
+  // every frame was a steady per-frame cost that buys nothing visible —
+  // separation impulses are POSITIONAL pushes, so running the identical code at
+  // ~30Hz (tier 4) down to ~12Hz (tier 0) with the SUMMED dt closes the same
+  // overlap per second. 30Hz is visually indistinguishable for walking peds;
+  // the dt clamp keeps one post-hitch catch-up pass from turning into a pop.
+  let cityAcc = 0;
   CBZ.onUpdate(38, function (dt) {
     if (CBZ.game.mode !== "city" || !CBZ.city || CBZ.player.driving) return;
+    cityAcc += dt;
+    const hz = CBZ.qScale ? CBZ.qScale(12, 30) : 30;  // qScale may not exist yet in some boot orders
+    if (cityAcc < 1 / hz) return;
+    const step = Math.min(cityAcc, 0.1);              // sane ceiling on the accumulated push
+    cityAcc = 0;
     cityList.length = 0;
     for (let i = 0; i < CBZ.cityPeds.length; i++) {
       const p = CBZ.cityPeds[i];
@@ -273,7 +285,7 @@
       if (!c.dead && !(CBZ.body && CBZ.body.busy(c))) cityList.push(c);
     }
     if (!CBZ.player.dead) { cityPlayer.pos = CBZ.player.pos; cityPlayer.r = CBZ.player.radius || 0.55; cityList.push(cityPlayer); }
-    resolve(cityList, dt, { mode: "city", clamp: clampCity });
+    resolve(cityList, step, { mode: "city", clamp: clampCity });
   });
 
   CBZ.humanContact = {

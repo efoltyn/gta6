@@ -39,7 +39,11 @@
   // ---------------------------------------------------------------
   fx.particleCloud = function (o) {
     o = o || {};
-    const MAX = o.count || 300;
+    // cloud budget rides the perf/quality slider — tier0 sheds ~60% of motes
+    // (default AND explicit counts), Best (tier 4) is byte-identical. Scaled
+    // here only, never at call sites, so every disaster def inherits it.
+    const fxq = CBZ.qScale ? CBZ.qScale(0.4, 1) : 1;
+    const MAX = Math.max(1, Math.round((o.count || 300) * fxq));
     const radius = o.radius || 16;
     const top = o.top != null ? o.top : 18;
     const bottom = o.bottom != null ? o.bottom : -1.5;

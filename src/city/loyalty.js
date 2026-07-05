@@ -172,9 +172,17 @@
   // principal and a transient _protect link THIS module owns. The squad layer (if
   // loaded) then keeps the protector interposed when a threat appears.
   // =========================================================================
+  // registry of live protectors: scanning ALL ~1000 peds at 4Hz for a flag only
+  // a handful of hired guards ever carry was pure waste. cityProtect below is
+  // the ONLY place _protect is assigned (checked repo-wide), so the set is
+  // complete by construction; the pass iterates just the set and drops
+  // released / dead / despawned entries itself.
+  const protectors = new Set();
+
   CBZ.cityProtect = function (protector, principal) {
     if (!protector || protector.dead || !principal || principal === protector) return false;
     protector._protect = principal;                   // our transient guard link
+    protectors.add(protector);                        // registry for the trail pass
     protector.companion = false;                      // they peel off YOU to mind the principal
     protector.rage = null;
     if (principal.pos && protector.guard) { protector.guard.x = principal.pos.x; protector.guard.z = principal.pos.z; }
@@ -191,12 +199,16 @@
   if (CBZ.onUpdate) CBZ.onUpdate(34.57, function (dt) {
     if (!g || g.mode !== "city") return;
     protT -= dt; if (protT > 0) return; protT = 0.25;
+    if (!protectors.size) return;                     // common case: nobody on guard duty
     const peds = CBZ.cityPeds; if (!peds) return;
-    for (let i = 0; i < peds.length; i++) {
-      const p = peds[i];
-      if (!p || p.dead || !p._protect) continue;
+    for (const p of protectors) {
+      if (!p || p.dead || !p._protect) { protectors.delete(p); continue; }
       const pr = p._protect;
-      if (!pr || pr.dead) { p._protect = null; continue; }   // principal gone → released
+      if (!pr || pr.dead) { p._protect = null; protectors.delete(p); continue; }   // principal gone → released
+      // despawned protector (no longer in the live ped list): release the link so a
+      // recycled body never resumes someone else's guard duty. Cheap — the set is
+      // tiny and this only runs at 4Hz while anyone is actually on duty.
+      if (peds.indexOf(p) < 0) { p._protect = null; protectors.delete(p); continue; }
       // trail the principal at a short stand-off so they shadow them around the map
       if (pr.pos && p.guard) { p.guard.x = pr.pos.x; p.guard.z = pr.pos.z; }
       // if the principal has a live attacker, point the protector at it (the squad

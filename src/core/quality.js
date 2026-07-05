@@ -25,12 +25,18 @@
   // single most effective thing a weak tier can do is render FEWER full rigs —
   // pulling in their visibility radius and killing their shadows. Resolution
   // scaling (pr) alone never fixed it because pixels were never the bottleneck.
+  // fog  = city fog.far per tier (near scales with it). Tier 4 = today's 430.
+  // cull = distance-cull radius for whole static city groups (core/farcull.js);
+  //        0 = off. Set a hair past the tier's fog.far so everything culled is
+  //        ALREADY 100% fog-dissolved — the player can't see the difference,
+  //        the GPU absolutely can (it stops drawing entire building shells +
+  //        their un-batchable glass). Tiers 3-4 keep cull OFF = today, exactly.
   const QUALITY = [
-    { pr: 0.28, shadow: 512, crowd: 24,   ped: { vis: 20,  shadow: 0  }, sunShadow: false },  // 0 — emergency: sun shadows OFF, minimal render budget/radius/res
-    { pr: 0.8, shadow: 1024, crowd: 360,  ped: { vis: 70,  shadow: 28 } },  // 1
-    { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 } },  // 2
-    { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 } },  // 3
-    { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 } },  // 4 — full fat
+    { pr: 0.28, shadow: 512, crowd: 24,   ped: { vis: 20,  shadow: 0  }, sunShadow: false, fog: 170, cull: 235 },  // 0 — emergency: sun shadows OFF, minimal render budget/radius/res
+    { pr: 0.8, shadow: 1024, crowd: 360,  ped: { vis: 70,  shadow: 28 }, fog: 260, cull: 330 },  // 1
+    { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 }, fog: 350, cull: 430 },  // 2
+    { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 430, cull: 0 },  // 3
+    { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 430, cull: 0 },  // 4 — full fat
   ];
   const QUALITY_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
   let qLevel = 0; // default to Fastest; auto-adjust climbs up from here if there's headroom
@@ -149,6 +155,15 @@
     if (label) label.textContent = QUALITY_LABELS[qLevel];
   }
 
+  // ---- quality-change listener bus ----------------------------------------
+  // Systems with tier-dependent state that can't just read CBZ.qScale live
+  // every frame (fog ranges, InstancedMesh counts, receiveShadow flips…)
+  // register here and get called after every tier change. Fired once at boot
+  // too (via the applyQuality() below), so late registrants should self-apply
+  // on registration if they need boot-time state.
+  const qListeners = [];
+  CBZ.onQualityChange = function (fn) { qListeners.push(fn); try { fn(qLevel); } catch (e) {} };
+
   function applyQuality() {
     const q = QUALITY[qLevel];
     CBZ.qualityLevel = qLevel;
@@ -168,6 +183,17 @@
     // impactful than shrinking its resolution.
     sun.castShadow = q.sunShadow !== false;
     renderer.shadowMap.needsUpdate = true;
+    // per-tier draw distance: city fog range + the farcull radius. Published
+    // as plain numbers; city/mode.js reads cityFogFar on reset and
+    // core/farcull.js reads cityCullRadius every sweep. Survival/prison fog
+    // is owned per-frame by their own overrides — only the city consumes these.
+    CBZ.cityFogFar = q.fog;
+    CBZ.cityCullRadius = q.cull;
+    if (CBZ.game && CBZ.game.mode === "city" && CBZ.scene && CBZ.scene.fog) {
+      CBZ.scene.fog.far = q.fog;
+      CBZ.scene.fog.near = Math.round(80 * q.fog / 430);   // keep today's 80/430 shape
+    }
+    for (const fn of qListeners) { try { fn(qLevel); } catch (e) { console.error("[quality listener]", e); } }
   }
   applyQuality();
 

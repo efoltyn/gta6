@@ -294,7 +294,9 @@
                   Math.abs(p.rag.la.rx) > 0.01 || Math.abs(p.rag.la.rz) > 0.01)) {
       integRag(a, p, dt);
       p._lateWrite = 1;       // upright body still settling its limbs → write late
-    } else { p._lateWrite = 0; }
+      p._lateStamp = physFrame;   // refreshed every step() — a stale stamp means "left the world"
+      lateSet.add(a);
+    } else if (p._lateWrite) { p._lateWrite = 0; lateSet.delete(a); }
   }
 
   // integrate one actor's body state; returns true if it OWNS the actor
@@ -552,12 +554,23 @@
     if (e.key.toLowerCase() === "e") release(false);   // let go = set down safely
   });
 
+  // ---- LATE-WRITE REGISTRY: only a handful of freshly-hit upright bodies ever
+  //      need the order-90 rig re-write, yet the old pass walked EVERY bot/ped/
+  //      cop each frame just to early-out on each. poseActor (the ONLY place
+  //      _lateWrite is armed/cleared) registers actors here; order 90 walks just
+  //      this set. _lateStamp is refreshed by every order-24 step — an entry
+  //      whose stamp is stale wasn't stepped this frame (the actor left the
+  //      world / its arrays), so it's dropped instead of written forever. ----
+  const lateSet = new Set();
+  let physFrame = 0;          // bumped once per order-24 pass (the stamp epoch)
+
   // ---- per-frame body integration over bots/peds/cops + the player (order 24).
   //      Runs in any non-escape mode (survival bots, city peds & cops) so every
   //      mode gets the shared knockback / fling / knockdown physics. The grab/
   //      throw verbs above stay survival-only (gated by active()). ----
   CBZ.onUpdate(24, function (dt) {
     if (CBZ.game.mode === "escape") return;
+    physFrame++;
 
     // carry a held bot in front of the player (this is how you SAVE someone)
     if (held && !held.dead) {
@@ -596,10 +609,19 @@
     if (p.air || p.down > 0 || p.heldBy) return;   // owned bodies wrote at step()
     writeRag(a, p);
   }
+  //      Registry-driven: iterate only the actors poseActor armed this frame
+  //      (lateSet, usually empty or a handful) instead of every bot/ped/cop.
+  //      lateWrite keeps its own air/down/held early-outs, so behaviour for a
+  //      registered actor is byte-identical to the old full scan.
   CBZ.onUpdate(90, function () {
     if (CBZ.game.mode === "escape") return;
-    for (const b of CBZ.bots) lateWrite(b);
-    if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) lateWrite(CBZ.cityPeds[i]);
-    if (CBZ.cityCops) for (let i = 0; i < CBZ.cityCops.length; i++) lateWrite(CBZ.cityCops[i]);
+    if (!lateSet.size) return;
+    for (const a of lateSet) {
+      const p = a._phys;
+      // stale: flag cleared, or the actor wasn't stepped at order 24 this frame
+      // (removed from the world arrays) — drop it rather than write forever.
+      if (!p || !p._lateWrite || p._lateStamp !== physFrame) { lateSet.delete(a); continue; }
+      lateWrite(a);
+    }
   });
 })();

@@ -348,7 +348,9 @@
   let feedAcc = 0;
   function pruneFeed(dt) {
     feedAcc += dt;
-    if (feedAcc < 0.25) return; feedAcc = 0;
+    // prune cadence rides the perf/quality slider — tier0 drops to 2Hz (DOM
+    // rewrites are pure main-thread cost), Best (tier 4) keeps today's 4Hz.
+    if (feedAcc < 1 / (CBZ.qScale ? CBZ.qScale(2, 4) : 4)) return; feedAcc = 0;
     const nowMs = performance.now();
     let changed = false;
     while (feed.length && nowMs - feed[0].born > 6500) { feed.shift(); changed = true; }
@@ -1308,7 +1310,9 @@
     // population headcount + kill feed (throttled — they change steadily, not
     // every frame; ~4Hz keeps phones smooth)
     popAcc += 1 / 60;
-    if (popAcc >= 0.25) {
+    // cadence rides the perf/quality slider — tier0 drops to 2Hz, Best keeps
+    // today's 4Hz exactly (all writes below are already signature-gated).
+    if (popAcc >= 1 / (CBZ.qScale ? CBZ.qScale(2, 4) : 4)) {
       popAcc = 0;
       renderPop(); renderKill();
       // wave-5 depth surfaces, all throttled here at ~4Hz (cheap on phones)
@@ -1316,7 +1320,9 @@
     }
     // radar (throttled), turf + home/partner status
     radarAcc += 1 / 60;
-    if (radarAcc >= 1 / 14) { radarAcc = 0; drawRadar(); }
+    // radar repaint rides the perf/quality slider — tier0 drops to 7Hz (the
+    // canvas redraw is the HUD's priciest CPU line), Best keeps today's 14Hz.
+    if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); }
     if (turfEl) {
       const gang = CBZ.cityGangOf ? CBZ.cityGangOf(P.pos.x, P.pos.z) : null;
       if (gang) { const prov = gang.provoke > 0.4; turfEl.innerHTML = "<span style='color:#" + ("000000" + gang.color.toString(16)).slice(-6) + "'>" + gang.name.toUpperCase() + " TURF</span>" + (prov ? " <span style='color:#ff5b5b'>⚠ HOSTILE</span>" : ""); }

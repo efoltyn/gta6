@@ -228,7 +228,13 @@
     if (!t || !t.owner) return;
     t.active = true;
     const dx = x - t.lastX, dz = z - t.lastZ;
-    if (t.live === 0 || dx * dx + dz * dz >= MIN_STEP * MIN_STEP) writeSegment(t, x, z);
+    // segment emission rate rides the perf/quality slider: tier0 lays ~half the
+    // quads per metre of skid (longer step between segments — coarser but still
+    // continuous rubber); Best (tier 4) keeps today's exact MIN_STEP. Track pool
+    // allocation (TRACK_CAP/SEGS) is untouched.
+    const eq = CBZ.qScale ? CBZ.qScale(0.5, 1) : 1;
+    const step = MIN_STEP / eq;
+    if (t.live === 0 || dx * dx + dz * dz >= step * step) writeSegment(t, x, z);
   };
 
   CBZ.cityEndSkid = function (car, wheelIndex) {

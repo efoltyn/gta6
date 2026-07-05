@@ -248,7 +248,10 @@
           mesh = new THREE.Mesh(merged, rangeMat);
         }
         mesh.castShadow = !!cast; mesh.receiveShadow = true;
-        mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+        // verts are baked in WORLD space, so a computed bounding sphere is
+        // correct — let the range frustum-cull instead of always drawing.
+        if (mesh.geometry && !mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+        mesh.matrixAutoUpdate = false; mesh.updateMatrix();
         root.add(mesh);
         return mesh;
       }
@@ -328,6 +331,15 @@
       }
       trunkIM.count = canopyIM.count = capIM.count = n;
       trunkIM.instanceMatrix.needsUpdate = canopyIM.instanceMatrix.needsUpdate = capIM.instanceMatrix.needsUpdate = true;
+      // r128 frustum-culls an InstancedMesh by its GEOMETRY's bounding sphere
+      // (a ~2u cone at the origin — nowhere near the instances), so these
+      // culled in and out at the wrong times. Hand the geometries a sphere
+      // that actually covers the snow region → correct culling, and the whole
+      // stand (plus its shadow-pass cost) drops when you look away.
+      const bs = new THREE.Sphere(
+        new THREE.Vector3((MINX + MAXX) / 2, 6, (MINZ + MAXZ) / 2),
+        Math.hypot(MAXX - MINX, MAXZ - MINZ) / 2 + 14);
+      trunkG.boundingSphere = bs.clone(); canopyG.boundingSphere = bs.clone(); capG.boundingSphere = bs.clone();
       root.add(trunkIM); root.add(canopyIM); root.add(capIM);
     })();
 
