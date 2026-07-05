@@ -195,6 +195,39 @@
 
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
 
+  // ============================================================
+  //  HERDS — a herd moves as ONE cohesive body (boids: alignment + cohesion +
+  //  separation) and PANICS as one: spook or shoot a single member and the
+  //  alarm ripples through the whole herd, so a bison herd stampedes as a wall
+  //  and a deer herd bolts together. Each herd carries a live centroid + mean
+  //  heading (recomputed once per frame, O(n) total, not O(n²)).
+  // ============================================================
+  const herds = [];
+  function newHerd(sp) { const hr = { sp: sp, members: [], cx: 0, cz: 0, heading: rng() * 6.283, n: 0, panic: 0, fleeHx: 0, fleeHz: 0 }; herds.push(hr); return hr; }
+  function joinHerd(a, hr) { a.herd = hr; if (hr) hr.members.push(a); }
+  function leaveHerd(a) {
+    const hr = a.herd; if (!hr) return;
+    const i = hr.members.indexOf(a); if (i >= 0) hr.members.splice(i, 1);
+    a.herd = null;
+  }
+  function updateHerds(dt) {
+    for (let h = 0; h < herds.length; h++) {
+      const hr = herds[h];
+      let sx = 0, sz = 0, hx = 0, hz = 0, n = 0, panic = 0;
+      for (let m = 0; m < hr.members.length; m++) {
+        const a = hr.members[m];
+        if (a.dead || a.tamed || a.ridden) continue;          // corpses & pets leave the wander flock
+        sx += a.pos.x; sz += a.pos.z;
+        hx += Math.cos(a.heading); hz += Math.sin(a.heading);
+        n++;
+        if (a.alarm > panic) panic = a.alarm;                 // loudest alarm carries the herd
+      }
+      hr.n = n;
+      if (n) { hr.cx = sx / n; hr.cz = sz / n; if (hx || hz) hr.heading = Math.atan2(hz, hx); }
+      hr.panic = Math.max(0, panic);
+    }
+  }
+
   function seedIndividuals(sp, count) {
     // place `count` individuals of a species, clustered into herds of the
     // species' NATURAL size. Herd size is a per-species TRAIT (how they group);
@@ -207,10 +240,12 @@
       const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
       let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
       herd = Math.min(herd, count - placed);
+      const hr = newHerd(sp);            // this cluster moves & panics as ONE unit
       for (let h = 0; h < herd; h++) {
         const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
         const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
         const a = makeActor(sp, jx, jz); placed++;
+        joinHerd(a, hr);
         // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
         if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
           a.grow = rng() * 0.4;
@@ -371,6 +406,7 @@
         kid.grow = 0;                            // born tiny; grows up in tick()
         kid.group.scale.setScalar((sp.scale || 1) * 0.4);   // small from frame one
         kid.home = { x: parent.home.x, z: parent.home.z };
+        joinHerd(kid, parent.herd);              // born into the parent's herd
       }
     }
   }
@@ -454,6 +490,7 @@
   function removeCarcass(a) {
     const gi = animals.indexOf(a); if (gi >= 0) animals.splice(gi, 1);
     const ci = carcasses.indexOf(a); if (ci >= 0) carcasses.splice(ci, 1);
+    leaveHerd(a);                                 // drop the stale member ref
     if (a.group && a.group.parent) a.group.parent.remove(a.group);
   }
 
@@ -491,6 +528,7 @@
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
+    updateHerds(dt);               // live centroid + mean heading + herd alarm
     // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
     // tier): animals beyond the tier's radius don't render or animate their
     // meshes — same pattern as the ped rig LOD. Big species read farther
@@ -539,6 +577,15 @@
       if (a.alarm > 0) a.alarm -= dt;
       let nearP = 0;
       if (P) { const dpx = grp.position.x - P.x, dpz = grp.position.z - P.z; nearP = dpx * dpx + dpz * dpz; }
+      // HERD PANIC RIPPLE: if a herd-mate is alarmed, this animal reacts too,
+      // even if it never saw the threat itself — the whole herd bolts (prey) or
+      // stampedes (aggressive herd like bison) together, not one at a time.
+      const hr = a.herd;
+      if (hr && hr.panic > 0.3 && a.state === "wander" && a.alarm <= 0.1) {
+        a.alarm = Math.max(a.alarm, hr.panic * 0.85);
+        a.state = (sp.danger >= 0.5) ? "charge" : "flee";
+        if (a.state === "flee") a.heading = hr.heading;        // flee WITH the herd
+      }
       if (P && a.state !== "charge") {
         const spookR = (sp.spook || 26);
         if (nearP < spookR * spookR && sp.danger < 0.15) { a.state = "flee"; a.alarm = Math.max(a.alarm, 4); a.heading = Math.atan2(grp.position.z - P.z, grp.position.x - P.x); }
@@ -560,21 +607,41 @@
         }
         if (a._biteT > 0) a._biteT -= dt;
         if (nearP > 55 * 55) a.state = "wander";              // gave up
-      } else if (a.turnT <= 0) {
-        a.heading += (Math.random() - 0.5) * 1.5;
-        a.turnT = 2 + Math.random() * 4;
-        if (a.state === "wander") a.spd = (sp.spd || 1.4) * (0.6 + Math.random() * 0.8);
-        // a BABY sticks close to the grown-ups: when it drifts from the herd it
-        // re-aims at the nearest adult of its species instead of wandering off.
-        if (a.grow != null && a.grow < 1 && a.state === "wander") {
-          let ad = null, bd = 45 * 45;
-          for (let j = 0; j < animals.length; j++) {
-            const o = animals[j];
-            if (o === a || o.dead || o.grow != null || o.species !== sp) continue;
-            const dx = o.pos.x - grp.position.x, dz = o.pos.z - grp.position.z, q = dx * dx + dz * dz;
-            if (q < bd) { bd = q; ad = o; }
+      } else {
+        // ---- HERD MOVEMENT (boids): every frame, steer gently toward the
+        //      herd's shared heading (alignment) + its centre (cohesion), while
+        //      pushing off the nearest herd-mate (separation) so they move as a
+        //      tight travelling body, not a scattering of loners. A stampeding
+        //      (fleeing/charging) herd aligns HARDER so it reads as one wall. --
+        if (hr && hr.n > 1) {
+          let dx = Math.cos(a.heading), dz = Math.sin(a.heading);
+          const align = (a.state === "wander") ? 0.5 : 1.4;   // panic = move as one
+          dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
+          // cohesion: pull toward the centre only once the herd spreads out
+          const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
+          const cd = Math.hypot(toCx, toCz) || 1;
+          const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+          dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
+          // separation: shove away from the closest herd-mate inside ~2.6u
+          const sepR = 2.2 + (sp.scale || 1) * 1.0;
+          let sx = 0, sz = 0;
+          for (let m = 0; m < hr.members.length; m++) {
+            const o = hr.members[m]; if (o === a || o.dead) continue;
+            const ox = grp.position.x - o.pos.x, oz = grp.position.z - o.pos.z;
+            const od = Math.hypot(ox, oz);
+            if (od > 0.001 && od < sepR) { sx += (ox / od) * (sepR - od); sz += (oz / od) * (sepR - od); }
           }
-          if (ad && bd > 6 * 6) a.heading = Math.atan2(ad.pos.z - grp.position.z, ad.pos.x - grp.position.x) + (Math.random() - 0.5) * 0.5;
+          dx += sx * 0.9; dz += sz * 0.9;
+          // ease the heading toward the blended desire (turn rate, not a snap)
+          const desired = Math.atan2(dz, dx);
+          let d = desired - a.heading;
+          while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+          a.heading += d * Math.min(1, dt * (a.state === "wander" ? 2.2 : 5.0));
+        }
+        // occasional idle jitter + a fresh grazing speed (loners & flavour)
+        if (a.turnT <= 0) {
+          a.turnT = 2 + Math.random() * 4;
+          if (a.state === "wander") { a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5); a.spd = (sp.spd || 1.4) * (0.6 + Math.random() * 0.8); }
         }
       }
       // integrate + keep inside the home region (turn back at the fence)
