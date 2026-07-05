@@ -15,7 +15,7 @@
   S({
     id: "fish", name: "Mackerel", biome: "water", rarity: "common",
     hp: 5, fur: "Fresh Fish", furValue: 8, meat: "Fish Fillet", meatValue: 5,
-    herd: [5, 9], packs: 4, spd: 2.0, danger: 0, aquatic: true,
+    herd: [10, 20], packs: 4, spd: 2.0, danger: 0, aquatic: true,
     scale: 0.5, color: 0x6a8fa8,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat;
@@ -145,7 +145,7 @@
   // ============================================================
   S({
     id: "dolphin", name: "Dolphin", biome: "water", rarity: "common",
-    hp: 40, fur: "Dolphin Hide", furValue: 70, packs: 3, herd: [2, 4],
+    hp: 40, fur: "Dolphin Hide", furValue: 70, packs: 3, herd: [4, 8],
     spd: 3.0, danger: 0, aquatic: true, scale: 0.9, color: 0x8b98a3,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat;

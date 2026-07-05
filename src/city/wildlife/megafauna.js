@@ -118,7 +118,7 @@
   // ------------------------------------------------------------------
   S({
     id: "giraffe", name: "Giraffe", biome: "desert", rarity: "uncommon",
-    hp: 220, fur: "Giraffe Hide", furValue: 260, herd: [1, 3], packs: 1,
+    hp: 220, fur: "Giraffe Hide", furValue: 260, herd: [3, 7], packs: 1,
     spd: 2.2, danger: 0, spook: 30, scale: 1.0, color: 0xd9b46a,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat;
@@ -174,7 +174,7 @@
   S({
     id: "zebra", name: "Zebra", biome: "desert", rarity: "common",
     hp: 90, fur: "Zebra Hide", furValue: 120, meat: "Game Meat", meatValue: 12,
-    herd: [3, 6], packs: 2, spd: 3.0, danger: 0, spook: 28, scale: 1.0, color: 0xf2f0ea,
+    herd: [8, 18], packs: 2, spd: 3.0, danger: 0, spook: 28, scale: 1.0, color: 0xf2f0ea,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat;
       function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }

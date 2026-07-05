@@ -276,8 +276,14 @@
   //                      (the pyramid backstop); the surplus reweights to prey.
   //  Legendaries are outside all of this: exactly ONE individual each.
   // ============================================================
-  const DENSITY = 300;
-  const BIOME_SHARE = { forest: 0.24, farmland: 0.20, desert: 0.22, snow: 0.14, water: 0.20 };
+  // DENSITY sized so a gregarious species forms a REAL herd, not a few strays:
+  // e.g. snow ~16% x 850 ≈ 136 animals, of which bison (an uncommon) work out
+  // to ~18 — one proper stampeding herd. A world of a few hundred could never
+  // hold a legit herd. This is ECOLOGICAL richness (a design knob), NOT a perf
+  // budget: distant animals FREEZE (see tick) and LOD-hide (quality slider), so
+  // only the herds near you actually think and draw — the world scales cheaply.
+  const DENSITY = 850;
+  const BIOME_SHARE = { forest: 0.25, farmland: 0.16, desert: 0.23, snow: 0.16, water: 0.20 };
   const RARITY_WEIGHT = { common: 12, uncommon: 4, rare: 1 };
   const PRED_MAX = 0.20;                    // ≤ ~1 predator per 4 prey per biome
   // TROPHIC ROLE (diet), for the pyramid — distinct from `danger` (will it hurt
@@ -561,6 +567,7 @@
       if (a.tamed && !sp.aquatic) { if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt); continue; }
       // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
       if (sp.aquatic) {
+        if (grp.visible === false) continue;          // far sea life idles (no sim)
         a.bob += dt * (1.2 + a.spd * 0.2);
         a.turnT -= dt;
         if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 0.8; a.turnT = 3 + Math.random() * 4; }
@@ -573,6 +580,11 @@
         grp.rotation.y = -a.heading + Math.PI / 2;
         continue;
       }
+      // ---- FAR + CALM land animals FREEZE (no per-frame steering) so a big
+      //      world stays cheap — only the herds near you actually think & move.
+      //      They resume instantly when you approach, or if their herd panics.
+      if (grp.visible === false && a.state === "wander" && (a.alarm || 0) <= 0 &&
+          (!a.herd || a.herd.panic <= 0.3)) { a.turnT -= dt; continue; }
       // ---- land: alarm decays; react to the player -----------------------
       if (a.alarm > 0) a.alarm -= dt;
       let nearP = 0;

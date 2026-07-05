@@ -134,7 +134,7 @@
   S({
     id: "bighorn_sheep", name: "Bighorn Sheep", biome: "desert", rarity: "uncommon",
     hp: 60, fur: "Bighorn Hide", furValue: 130, meat: "Mutton", meatValue: 12,
-    herd: [1, 3], packs: 2, spd: 2.6, danger: 0.2, bite: 12, scale: 0.9, color: 0x8a6f4e,
+    herd: [3, 8], packs: 2, spd: 2.6, danger: 0.2, bite: 12, scale: 0.9, color: 0x8a6f4e,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const g = new T.Group();
