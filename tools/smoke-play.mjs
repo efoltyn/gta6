@@ -22,7 +22,7 @@ const dbg = 9950 + Math.floor(Math.random() * 40);
 const profile = `/tmp/cbz-smoke-${dbg}`;
 await rm(profile, { recursive: true, force: true });
 await sleep(700);
-const chrome = spawn("/opt/pw-browsers/chromium", [
+const chrome = spawn(process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium"), [
   "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
   "--enable-webgl", "--mute-audio", "--window-size=1440,900",

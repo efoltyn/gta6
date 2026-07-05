@@ -49,7 +49,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const CHROME = "/opt/pw-browsers/chromium";
+const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium");
 
 // ---------- CLI ----------
 const argv = process.argv.slice(2);

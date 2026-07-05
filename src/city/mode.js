@@ -389,7 +389,10 @@
       CBZ.playerChar.group.position.copy(P.pos);
       CBZ.playerChar.group.rotation.set(0, Math.random() * 6.28, 0);
       CBZ.playerChar.group.scale.y = 1;
-      if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = 0.4; }
+      // spawn pitch: near-level CITY_TP default, NOT a steep look-down — the
+      // armed-3PS look target scales pitch by ~12m of aim lead, so 0.4 here
+      // meant "stare at the ceiling" until the player dragged the mouse down.
+      if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = CBZ.CITY_TP ? CBZ.CITY_TP.PITCH : 0.06; }
       if (CBZ.resetZoom) CBZ.resetZoom();
       if (CBZ.cityDeathReset) CBZ.cityDeathReset();
       // ORIGIN: a fresh character (or one who just picked a different origin

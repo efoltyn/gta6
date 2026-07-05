@@ -140,7 +140,9 @@
         "}",
       ].join("\n"),
       fragmentShader: [
-        "precision mediump float;",
+        // NOTE: no explicit precision line — three.js injects matching highp
+        // headers into BOTH stages; forcing mediump here made uWindDir's
+        // precision differ between stages and the whole program fail to link.
         "varying vec2 vUv;",
         "varying float vWind;",
         "uniform float uTime;",

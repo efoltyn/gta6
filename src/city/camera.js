@@ -29,7 +29,10 @@
   /* ---- CITY THIRD-PERSON FRAMING (RDR2 feel) — taste-tune HERE ----
      Consumed every frame by systems/camera.js (its generic third-person path
      reads CBZ.CITY_TP when mode==="city" and you're on foot). One block so the
-     owner tunes the whole on-foot feel in one place. */
+     owner tunes the whole on-foot feel in one place.
+     NOTE: systems/camera.js carries a guarded fallback copy of this object
+     (it loads FIRST). THIS file loads later and is the authoritative tuning
+     surface — edit HERE, never the fallback, or your change is overwritten. */
   CBZ.CITY_TP = {
     HEIGHT: 1.6,       // rig pivot above feet — over-shoulder height (lifts the eye): camera rides above the character so the street reads ahead, not buried
     DIST: 5.2,         // behind-the-back distance — far enough to shrink the character so it no longer occludes the frame; scroll wheel still scales around this

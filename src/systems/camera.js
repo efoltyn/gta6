@@ -12,18 +12,12 @@
   const { camera, canvas, player } = CBZ;
   const SENS = CBZ.TUNE.sens;
 
-  // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — BROKEN-LINK FIX ----
-  // The armed over-shoulder + ADS tier the city third-person path consumes lives
-  // in CBZ.CITY_TP. That object was authored in src/city/camera.js — but that file
-  // is NOT loaded by index.html (only this systems/camera.js is), so CBZ.CITY_TP
-  // came up UNDEFINED at runtime: the whole `TP` path below fell through to the
-  // generic wide/high chase, the armed shoulder cam never engaged, and holding RMB
-  // (ADS) did NOTHING in third person (the filmed bug). We define it HERE — in the
-  // file that actually loads and reads it — so the tier always engages. If
-  // src/city/camera.js IS ever added to index.html it simply re-assigns this object
-  // with identical values (no conflict). Values match the Fortnite reference:
-  // default armed = behind-shoulder at chest height (char LARGE, world ahead); RMB
-  // = punch TIGHT over the right shoulder with a real lens zoom, gun raised/centred.
+  // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — guarded FALLBACK ----
+  // src/city/camera.js IS loaded by index.html (later than this file) and is the
+  // AUTHORITATIVE tuning surface: it re-assigns CBZ.CITY_TP unconditionally, so
+  // any edit made to the copy below is silently overwritten at load time. This
+  // guarded copy exists only so the TP path never sees CITY_TP undefined if the
+  // city file is ever dropped from the page. TUNE IN src/city/camera.js, NOT HERE.
   if (!CBZ.CITY_TP) CBZ.CITY_TP = {
     HEIGHT: 1.6,       // relaxed (un-armed) rig pivot height — over-shoulder height, lifts the eye
     DIST: 5.2,         // relaxed behind-the-back distance — char shrinks, more world ahead
@@ -123,7 +117,10 @@
     // WORLD SIM (NPCs/traffic/physics) for every connected guest, not just the
     // local view. The settings panel must never trigger that, so it's added to
     // this exemption list exactly like cityMenuOpen/fullMap.active above.
-    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.settingsOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
+    // g.busted: the BUSTED cutscene (city/wanted.js bust()) releases the lock
+    // itself while mode is still "city"/"playing" — without this exemption the
+    // release spuriously paused the world mid-cutscene.
+    if (!cam.locked && CBZ.game.state === "playing" && !(CBZ.surv && CBZ.surv.spectating) && !(CBZ.fullMap && CBZ.fullMap.active) && !CBZ.cityMenuOpen && !CBZ.settingsOpen && !(CBZ.cityCam && CBZ.cityCam.death) && !CBZ.game.busted && !(CBZ.game.mode === "city" && CBZ.player && CBZ.player.dead)) CBZ.setState("paused");
     else if (cam.locked && CBZ.game.state === "paused") CBZ.setState("playing");
   });
   document.addEventListener("mousemove", (e) => {
@@ -193,6 +190,11 @@
     introT = INTRO;
     introYaw0 = cam.yaw;
     introOpts = opts || null;
+    // re-arm the once-per-ENTRY city pitch level (below) EVERY run: the latch
+    // used to fire once per page, so run 2+ kept mode.js's steep spawn pitch —
+    // armed-3PS amplifies pitch by aimLead (~12m), so a stale 0.4 slung the
+    // look target metres overhead (ceiling stare, character out of frame).
+    _cityPitchInit = false;
     const spawn = CBZ.player ? CBZ.player.pos : CBZ.SPAWN;
     // snap to a much farther establishing shot so frame one feels deliberate
     // (irrelevant for compact mode too — the very next onAlways(50) tick

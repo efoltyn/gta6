@@ -2073,7 +2073,14 @@
     document.body.classList.toggle("fps", on);
     setAmmoHud();
     if (on && fps.fp === 0) fps.fp = 0.06;
-    if (!on) triggerHeld = false;
+    if (!on) {
+      triggerHeld = false;
+      // hand the FP look pitch to the third-person orbit so toggling out of
+      // first person keeps looking where you were looking — the orbit used to
+      // inherit whatever stale cam.pitch was left over (often the steep spawn
+      // value), which armed-3PS turned into a sky/ceiling stare.
+      if (CBZ.cam && typeof fps.fp === "number") CBZ.cam.pitch = Math.max(-0.6, Math.min(0.9, fps.fp));
+    }
     // toggling FPS on hides the body; clear the 3PS present-weapon pose so the
     // rig's arms are not stuck raised when the body re-appears unarmed/holstered.
     if (CBZ.playerChar && on) CBZ.playerChar.aimingPose = false;

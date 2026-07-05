@@ -245,7 +245,7 @@ CBZ.addLandmass(function(city){
     CBZ.registerCityRegion(city,{name:"Ironjaw Arena",subtitle:"Fight Complex",biome:"arena",
       kind:"circle",cx:CX,cz:CZ,r:R,pad:6});
     CBZ.registerCityRegion(city,{name:"Ironjaw Causeway",subtitle:"Arena Approach",biome:"arena",
-      kind:"rect",x0:651,x1:707,z0:CZ-10,z1:CZ+10,cx:679,cz:CZ,w:56,d:20,hw:28,hd:10,pad:4});
+      kind:"rect",minX:651,maxX:707,minZ:CZ-10,maxZ:CZ+10,cx:679,cz:CZ,pad:4});
   }
   return null;
 },40);
