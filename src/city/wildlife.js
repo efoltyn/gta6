@@ -195,49 +195,118 @@
 
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
 
-  function seedHerd(sp) {
-    // place ONE herd of a species in its home biome (or the sea band), at its
-    // NATURAL size — no clamps, no budget.
-    const regs = sp.aquatic ? null : biomeRegions(sp.biome);
-    if (!sp.aquatic && (!regs || !regs.length)) return 0;
-    const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
-    const herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
-    let n = 0;
-    for (let h = 0; h < herd; h++) {
-      const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-      const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-      const a = makeActor(sp, jx, jz); n++;
-      // herds come with a BABY: the last member of any 2+ herd spawns part-grown
-      // (a tiny scaled-down copy trailing the adults — see the grow logic).
-      if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
-        a.grow = rng() * 0.4;
-        a.group.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+  function seedIndividuals(sp, count) {
+    // place `count` individuals of a species, clustered into herds of the
+    // species' NATURAL size. Herd size is a per-species TRAIT (how they group);
+    // `count` is set by the ratio system (how many exist). The two are
+    // decoupled — that's what makes the mix scalable.
+    let placed = 0, guard = 0;
+    while (placed < count && guard++ < 400) {
+      const regs = sp.aquatic ? null : biomeRegions(sp.biome);
+      if (!sp.aquatic && (!regs || !regs.length)) return placed;
+      const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
+      let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
+      herd = Math.min(herd, count - placed);
+      for (let h = 0; h < herd; h++) {
+        const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        const a = makeActor(sp, jx, jz); placed++;
+        // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
+        if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
+          a.grow = rng() * 0.4;
+          a.group.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+        }
       }
     }
-    return n;
+    return placed;
+  }
+
+  // ============================================================
+  //  THE RATIO SYSTEM — population by PROPORTION, not per-species numbers.
+  //
+  //  Grounded in real ecology (energy pyramid / 10% rule: predators are far
+  //  rarer than prey) and RDR2's feel (prey in big herds, pack hunters in
+  //  packs, apex predators lurking singly & rare, legendaries unique).
+  //
+  //  Three layers of pure ratios + ONE design scalar. Nothing per-species is
+  //  hardcoded, so adding/removing a species auto-rebalances and the world
+  //  total never drifts. NOTE: DENSITY is ECOLOGICAL richness (a design knob),
+  //  NOT a perf budget — render cost is the quality slider's job (LOD below).
+  //    1. DENSITY        how many animals conceptually inhabit the world.
+  //    2. BIOME_SHARE    how that splits across biomes (sums to 1).
+  //    3. RARITY_WEIGHT  a common is 12x a rare — so "rare" stays rare no
+  //                      matter how many rare species exist. Species in a tier
+  //                      split their tier's slice evenly.
+  //    4. PRED_MAX       predators can't exceed this fraction of a biome
+  //                      (the pyramid backstop); the surplus reweights to prey.
+  //  Legendaries are outside all of this: exactly ONE individual each.
+  // ============================================================
+  const DENSITY = 300;
+  const BIOME_SHARE = { forest: 0.24, farmland: 0.20, desert: 0.22, snow: 0.14, water: 0.20 };
+  const RARITY_WEIGHT = { common: 12, uncommon: 4, rare: 1 };
+  const PRED_MAX = 0.20;                    // ≤ ~1 predator per 4 prey per biome
+  // TROPHIC ROLE (diet), for the pyramid — distinct from `danger` (will it hurt
+  // you). Only true CARNIVORES count as predators; a bison, moose, rhino or boar
+  // is dangerous PREY (charges when threatened but eats plants), so it must NOT
+  // suppress the predator pool. A species can override via sp.predator (true =
+  // hunter). This is the one place trophic role lives; extend the set for new
+  // carnivores, or set sp.predator on the species itself.
+  const CARNIVORE = {
+    gray_wolf: 1, arctic_wolf: 1, coyote: 1, red_fox: 1,
+    black_bear: 1, brown_bear: 1, polar_bear: 1,
+    bengal_tiger: 1, lion: 1, white_lion: 1, cheetah: 1, snow_leopard: 1,
+    rattlesnake: 1, great_white_shark: 1, megalodon: 1,
+  };
+  function isPredator(sp) { return sp.predator != null ? !!sp.predator : !!CARNIVORE[sp.id]; }
+
+  function planBiome(list, target) {
+    // list = non-legendary species in one biome. Returns { id: count }.
+    let wSum = 0;
+    for (const sp of list) wSum += (RARITY_WEIGHT[sp.rarity] || 1);
+    const ideal = {};
+    for (const sp of list) ideal[sp.id] = target * (RARITY_WEIGHT[sp.rarity] || 1) / wSum;
+    // PREDATOR CEILING: if predators overshoot their share of the biome, scale
+    // them down and hand the freed budget to prey (proportionally) — a biome
+    // rich in predator SPECIES still stays prey-dominated, per the pyramid.
+    let predSum = 0, preySum = 0;
+    for (const sp of list) (isPredator(sp) ? (predSum += ideal[sp.id]) : (preySum += ideal[sp.id]));
+    const predCap = target * PRED_MAX;
+    if (predSum > predCap && preySum > 0) {
+      const kPred = predCap / predSum, freed = predSum - predCap;
+      for (const sp of list) if (isPredator(sp)) ideal[sp.id] *= kPred;
+      for (const sp of list) if (!isPredator(sp)) ideal[sp.id] += freed * (ideal[sp.id] / preySum);
+    }
+    // round to integers with largest-remainder so the biome total is exact,
+    // and guarantee every species is PRESENT (min 1 — presence is not optional).
+    const counts = {}; let floorSum = 0; const rema = [];
+    for (const sp of list) {
+      const v = Math.max(1, ideal[sp.id]);
+      const f = Math.floor(v); counts[sp.id] = f; floorSum += f;
+      rema.push({ id: sp.id, r: v - f });
+    }
+    let leftover = Math.max(0, Math.round(target) - floorSum);
+    rema.sort((a, b) => b.r - a.r);
+    for (let i = 0; i < leftover; i++) counts[rema[i % rema.length].id]++;
+    return counts;
   }
 
   function spawnAll() {
     const S = CBZ.WILDLIFE_SPECIES || {};
-    // NATURAL POPULATIONS, no budget: every species simply spawns all of its
-    // packs at its real herd sizes. There is nothing to ration and no fill
-    // order to get starved by — every species always exists. Performance is
-    // the quality tier's job (LOD visibility below), never a spawn cap's.
-    for (const id in S) {
-      const sp = S[id]; if (sp.rarity === "legendary") continue;
-      const packs = sp.packs || 2;
-      for (let p = 0; p < packs; p++) seedHerd(sp);
+    // bucket non-legendary species by biome
+    const buckets = {};
+    for (const id in S) { const sp = S[id]; if (sp.rarity === "legendary") continue; (buckets[sp.biome] || (buckets[sp.biome] = [])).push(sp); }
+    for (const biome in buckets) {
+      const target = Math.round(DENSITY * (BIOME_SHARE[biome] || 0.15));
+      const counts = planBiome(buckets[biome], target);
+      for (const sp of buckets[biome]) seedIndividuals(sp, counts[sp.id] || 1);
     }
-    // LEGENDARY — the incredibly rare ones. Each gets ONE spawn deep in its
-    // home range; they ARE the marquee "incredibly rare animal" encounters.
+    // LEGENDARY — the incredibly rare ones. Exactly ONE each, deep in range.
     for (const id in S) {
-      const sp = S[id];
-      if (sp.rarity !== "legendary") continue;
+      const sp = S[id]; if (sp.rarity !== "legendary") continue;
       let pt;
       if (sp.aquatic) pt = oceanPoint(rng);
       else { const regs = biomeRegions(sp.biome); if (!regs.length) continue; pt = regionPoint(regs[(rng() * regs.length) | 0], rng); }
-      const a = makeActor(sp, pt.x, pt.z);
-      a.legendary = true;
+      const a = makeActor(sp, pt.x, pt.z); a.legendary = true;
     }
   }
 
