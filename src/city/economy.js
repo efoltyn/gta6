@@ -332,7 +332,7 @@
   // drive the carparts.js identity chain. `maker` ("KAI" = Kaido Motors for
   // kotori, "VLT" = Volante Auto Group for the rest) books dealership sales
   // to sim/corporations.js via shops.js — the Metro Cab stays makerless
-  // (fleet livery, not a manufacturer\u2019s product).
+  // (fleet livery, not a manufacturer's product).
   const CARS = [
     { name: "Kotori Sprout",   brand: "kotori", maker: "KAI",  value: 1200,  rarity: 0.0,  color: 0x9fb4c4, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "sprout" },
     { name: "Kotori Pip",      brand: "kotori", maker: "KAI",  value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "pip" },
