@@ -515,7 +515,7 @@
     const PA = CBZ.city && CBZ.city.playerActor; if (!PA || PA.dead) return;
     const flex = flexLevel();
     const tid = tierId();
-    const loaded = flex >= 6 || tid === "baller" || tid === "kingpin";
+    const loaded = flex >= 6 || tid === "millionaire" || tid === "rich" || tid === "kingpin" || tid === "billionaire";
     const broke = flex < 1 && (tid === "broke" || tid === "hustler");
     let n = 0;
     for (let i = 0; i < M.tycoons.length && n < 2; i++) {

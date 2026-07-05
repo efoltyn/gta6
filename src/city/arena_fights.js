@@ -44,7 +44,7 @@ var arenaRoot=null;
 var redCh=null, blueCh=null, refCh=null;
 
 function note(msg,secs,opts){ if(CBZ.city&&typeof CBZ.city.note==="function")CBZ.city.note(msg,secs||3,opts); }
-function money(n){ return "$"+Math.round(n); }
+function money(n){ n=Math.round(n); try{ return "$"+n.toLocaleString("en-US"); }catch(e){ return "$"+n; } }
 function anim(ch,mv,dt){ if(ch&&typeof CBZ.animChar==="function")CBZ.animChar(ch,mv,dt); }
 function face(ch,tx,tz){ var p=ch.group.position; ch.group.rotation.y=Math.atan2(tx-p.x,tz-p.z); }
 function moveTo(pos,tx,tz,step){
@@ -313,7 +313,86 @@ var NAMES=["Rico \"Hammer\" Vega","Sonny Malone","Dee \"Cobra\" Kane","Marek Sto
   "Otis Braddock","\"Iron\" Ada Cole","Felix Marrow","Juno Blackwood","Big Tam Docherty",
   "Ray \"Cyclone\" Ito","Vusi Dlamini","Karla \"Nitro\" Reyes"];
 var PUNCHES=["jab","cross","hook","upper"];
-var bout=null, boutSeq=0, ringBet=null, nearRing=false;
+var bout=null, boutSeq=0, ringBet=null, nearRing=false, ringSuspended=false;
+
+// ================================================================ FIGHTER CAREER
+// PURSES ARE LOGIC, NOT NUMBERS. There is no purse table and no cap. A purse
+// is what the gate + broadcast would pay for THIS matchup: computed from YOUR
+// drawing power (fame), your OPPONENT's fame and record, the stakes (title
+// fights x3) and the discipline's economics (boxing pays far beyond MMA at
+// the top — real life). Fame is earned the real way: beat a man and you
+// absorb a cut of HIS fame — beat nobodies and stay a nobody, beat a star
+// and become one; a loss slashes your drawing power. Club fights pay ~$500;
+// a legend-vs-legend boxing title fight pays nine figures because the
+// formula says so, and nothing stops it climbing past that.
+function careerState(){
+  var w=(g&&g.cityWorld)||g;
+  if(!w.fighterCareer)w.fighterCareer={fame:0,wins:0,losses:0,kos:0,streak:0,beltMMA:false,beltBox:false,defenses:0};
+  return w.fighterCareer;
+}
+function commitCareer(){ if(typeof CBZ.cityWorldCommit==="function"){try{CBZ.cityWorldCommit();}catch(e){}} }
+function rankLabel(f){
+  return f<200?"club fighter":f<2000?"prospect":f<20000?"contender":
+         f<200000?"headliner":f<5000000?"superstar":"living legend";
+}
+function makeOpponent(box){
+  var c=careerState();
+  // the matchmaker books around YOUR level — sometimes a tune-up, sometimes a
+  // step-up (bigger name, bigger purse, harder night).
+  var f=c.fame*(0.35+Math.random()*1.35)+40+Math.random()*160;
+  var wins=Math.max(1,Math.round(3+Math.log(1+f)*2.1+Math.random()*5));
+  var losses=Math.round(Math.random()*5);
+  return {name:NAMES[(Math.random()*NAMES.length)|0],fame:f,wins:wins,losses:losses,
+          skill:0.35+Math.min(0.55,Math.log(1+f)/26),box:!!box};
+}
+function isTitle(c,box){ return box?(c.beltBox||c.streak>=5):(c.beltMMA||c.streak>=5); }
+function purseFor(c,opp,box){
+  var draw=c.fame+opp.fame*0.7;                 // combined drawing power
+  var p=500+draw*(box?2.6:0.9);                 // boxing economics >> MMA at the top
+  if(isTitle(c,box))p*=3;                       // title stakes
+  return Math.round(p);
+}
+// the NEXT booked opponent per discipline (so the prompt shows the actual card)
+var nextOpp={mma:null,box:null};
+function bookedOpp(box){ var k=box?"box":"mma"; if(!nextOpp[k])nextOpp[k]=makeOpponent(box); return nextOpp[k]; }
+// The one law that keeps nine figures MEANING something: the paying fight
+// audience is finite (real earth: ~$300M was the ceiling of PPV economics —
+// Mayweather couldn't have earned $5B because the buyers don't exist). Fame
+// growth saturates asymptotically as you approach "everyone who pays for
+// fights already knows you". NOT a cap — purses keep inching up forever, but
+// the days of doubling every win end once you're a household name.
+var AUDIENCE=30000000;
+function recordWin(opp,box,ko,war,purse){
+  var c=careerState(), title=isTitle(c,box), oldRank=rankLabel(c.fame);
+  c.wins++; c.streak++; if(ko)c.kos++;
+  var room=Math.max(0.02,1-c.fame/AUDIENCE);      // market saturation, never quite zero
+  c.fame+=(30+opp.fame*0.28)*(ko?1.3:1)*(title?1.35:1)*room;
+  if(title){
+    if(box){ if(c.beltBox){c.defenses++;} else {c.beltBox=true;c.defenses=0;note("🏆 NEW "+(box?"BOXING":"MMA")+" CHAMPION OF IRONJAW!",6,{urgent:true});} }
+    else { if(c.beltMMA){c.defenses++;} else {c.beltMMA=true;c.defenses=0;note("🏆 NEW MMA CHAMPION OF IRONJAW!",6,{urgent:true});} }
+  }
+  if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(purse);
+  if(CBZ.city&&CBZ.city.addRespect)CBZ.city.addRespect(title?12:6);
+  // Fight of the Night: not a fixed bonus — it fires when the bout was a WAR
+  // and scales with the size of the event (a cut of the purse).
+  if(war&&Math.random()<0.55){
+    var bonus=Math.max(1500,Math.round(purse*0.45));
+    if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(bonus);
+    note("🔥 FIGHT OF THE NIGHT — bonus "+money(bonus),5,{urgent:true});
+  }
+  var newRank=rankLabel(c.fame);
+  if(newRank!==oldRank)note("Your name is growing — the papers call you a "+newRank.toUpperCase()+".",5,{urgent:true});
+  nextOpp[box?"box":"mma"]=null;
+  commitCareer();
+}
+function recordLoss(box){
+  var c=careerState();
+  c.losses++; c.streak=0; c.fame*=0.68;         // the market stops believing
+  if(box&&c.beltBox){c.beltBox=false;note("You LOST THE BOXING TITLE.",5,{urgent:true});}
+  if(!box&&c.beltMMA){c.beltMMA=false;note("You LOST THE MMA TITLE.",5,{urgent:true});}
+  nextOpp[box?"box":"mma"]=null;
+  commitCareer();
+}
 
 function resetFighter(ch,x){
   if(!ch)return;
@@ -435,29 +514,48 @@ function tickRing(dt){
 
 // ============================================================ PLAYER v CAGE
 var pfight=null;
-function startCageFight(){
+function startBout(box){
   if(pfight){ note("You're already in a bout.",2); return; }
-  if(!arenaRoot||typeof CBZ.makeCharacter!=="function"){ note("The cage is closed tonight.",3); return; }
+  if(!arenaRoot||typeof CBZ.makeCharacter!=="function"){ note("The card is closed tonight.",3); return; }
   if(CBZ.player&&CBZ.player.dead){ return; }
-  var opp=CBZ.makeCharacter({legs:0x111111,torso:0x40342a,collar:0x40342a,arms:0x40342a,
+  var c=careerState(), card=bookedOpp(box);
+  var cx=box?RX:CGX, cz=box?RZ:CGZ, cy=box?RY:CGY, rad=box?3.1:5.2;
+  if(box){
+    // the player takes over the RING: refund any live ringside bet, park the
+    // house fighters out of sight, resume the card after.
+    if(ringBet&&bout&&ringBet.boutId===bout.id){ if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(ringBet.stake); note("Card interrupted — your stake is refunded.",3); }
+    ringBet=null; bout=null; ringSuspended=true;
+    if(redCh)redCh.group.visible=false; if(blueCh)blueCh.group.visible=false; if(refCh)refCh.group.visible=false;
+  }
+  var opp=CBZ.makeCharacter({legs:0x111111,torso:box?0x8a1f1f:0x40342a,collar:box?0x8a1f1f:0x40342a,arms:box?0x8a1f1f:0x40342a,
     skin:0xc89878,hair:0x0a0a0a,shoes:0x222222,cap:0});
-  opp.group.position.set(CGX+3.6,CGY,CGZ);
+  opp.group.position.set(cx+rad*0.7,cy,cz);
   opp.fightStance=true;
   arenaRoot.add(opp.group);
-  if(CBZ.player&&CBZ.player.pos)CBZ.player.pos.set(CGX-3.6,CBZ.player.pos.y,CGZ);
-  pfight={opp:opp,oppHp:100,myHp:60,pcd:0.6,ocd:1.4,over:0,won:false,
-    name:NAMES[(Math.random()*NAMES.length)|0]};
-  note("Cage bout vs "+pfight.name+" — stay close and work the body. Purse "+money(500)+".",5,{urgent:true});
+  if(CBZ.player&&CBZ.player.pos)CBZ.player.pos.set(cx-rad*0.7,CBZ.player.pos.y,cz);
+  var purse=purseFor(c,card,box);
+  pfight={opp:opp,card:card,box:!!box,purse:purse,cx:cx,cz:cz,cy:cy,rad:rad,t:0,
+    oppHp:100*(0.75+card.skill*0.8),oppHpMax:100*(0.75+card.skill*0.8),
+    myHp:60,pcd:0.6,ocd:1.4,over:0,won:false,name:card.name};
+  note((box?"BOXING":"MMA")+(isTitle(c,box)?" TITLE":"")+" bout vs "+card.name+" ("+card.wins+"-"+card.losses+
+    ") — purse "+money(purse)+".",6,{urgent:true});
 }
+function startCageFight(){ startBout(false); }
+function startBoxMatch(){ startBout(true); }
 function endCageFight(){
   if(!pfight)return;
   if(arenaRoot&&pfight.opp)arenaRoot.remove(pfight.opp.group);
+  if(pfight.box){ // hand the ring back to the house card
+    ringSuspended=false;
+    if(redCh)redCh.group.visible=true; if(blueCh)blueCh.group.visible=true; if(refCh)refCh.group.visible=true;
+  }
   pfight=null;
 }
 function clampCage(p){
-  var dx=p.x-CGX,dz=p.z-CGZ,d=Math.hypot(dx,dz);
-  if(d>5.2){p.x=CGX+dx/d*5.2;p.z=CGZ+dz/d*5.2;}
-  p.y=CGY;
+  var f=pfight, cx=f?f.cx:CGX, cz=f?f.cz:CGZ, cy=f?f.cy:CGY, r=f?f.rad:5.2;
+  var dx=p.x-cx,dz=p.z-cz,d=Math.hypot(dx,dz);
+  if(d>r){p.x=cx+dx/d*r;p.z=cz+dz/d*r;}
+  p.y=cy;
 }
 function tickCage(dt,pp){
   var f=pfight; if(!f)return;
@@ -468,26 +566,29 @@ function tickCage(dt,pp){
     return;
   }
   var d=Math.hypot(pp.x-og.position.x,pp.z-og.position.z);
-  if(d>22){ note("You fled the cage. No purse for runners.",4); endCageFight(); return; }
+  if(d>22){ note("You fled the "+(f.box?"ring":"cage")+". No purse for runners.",4); recordLoss(f.box); endCageFight(); return; }
+  f.t+=dt;
+  var sk=(f.card&&f.card.skill)||0.45;
   var mv=0.3;
   if(d>1.5){
-    var s=2.1*dt;
+    var s=(1.8+sk*1.1)*dt;                                   // better fighters cut the ring off
     og.position.x+=(pp.x-og.position.x)/d*s;
     og.position.z+=(pp.z-og.position.z)/d*s;
     mv=1.6;
   }
   clampCage(og.position);
   face(opp,pp.x,pp.z);
-  if(Math.random()<dt*0.5)opp.blockT=0.5;                    // brings the guard up
+  if(Math.random()<dt*(0.3+sk*0.6))opp.blockT=0.5;           // brings the guard up
   f.ocd-=dt;
   if(d<2.0&&f.ocd<=0){                                       // he swings at you
-    f.ocd=1.0+Math.random()*0.8;
-    if(Math.random()<0.25){opp.kickDur=0.55;opp.kickT=0.55;}
+    f.ocd=Math.max(0.55,1.35-sk*0.9)+Math.random()*0.7;
+    if(!f.box&&Math.random()<0.25){opp.kickDur=0.55;opp.kickT=0.55;}   // kicks are MMA-only
     else{opp.punchKind=PUNCHES[(Math.random()*PUNCHES.length)|0];
       opp.punchArm=(Math.random()<0.5)?"l":"r";opp.punchDur=0.34;opp.punchT=0.34;}
-    if(Math.random()<0.55){
-      if(typeof CBZ.cityHurtPlayer==="function"){try{CBZ.cityHurtPlayer(8,f.name);}catch(e){}}
-      f.myHp-=8;
+    if(Math.random()<0.35+sk*0.45){
+      var oh=6+sk*10;
+      if(typeof CBZ.cityHurtPlayer==="function"){try{CBZ.cityHurtPlayer(oh,f.name);}catch(e){}}
+      f.myHp-=oh;
     }
   }
   f.pcd-=dt;
@@ -495,18 +596,19 @@ function tickCage(dt,pp){
     f.pcd=0.85;
     var dmg=10+Math.random()*5;
     if(opp.blockT&&opp.blockT>0)dmg*=0.3;
-    else if(Math.random()<0.15){opp.dodgeT=0.35;opp.dodgeDir=(Math.random()<0.5)?-1:1;dmg=0;}
+    else if(Math.random()<0.08+sk*0.15){opp.dodgeT=0.35;opp.dodgeDir=(Math.random()<0.5)?-1:1;dmg=0;}
     if(dmg>0){f.oppHp-=dmg;opp.staggerT=0.3;}
   }
   anim(opp,mv,dt);
   if(f.oppHp<=0){
     opp.koT=5; opp.fightStance=false;
-    if(CBZ.city&&CBZ.city.addCash)CBZ.city.addCash(500);
-    if(CBZ.city&&CBZ.city.addRespect)CBZ.city.addRespect(6);
-    note("You KO "+f.name+"! Purse +"+money(500)+", the crowd knows your name.",5,{urgent:true});
+    var war=f.t>30&&f.myHp<=24;                              // a genuine WAR, not a walkover
+    note("You KO "+f.name+"! Purse +"+money(f.purse)+".",5,{urgent:true});
+    recordWin(f.card,f.box,true,war,f.purse);
     f.won=true; f.over=4;
   }else if(f.myHp<=0||(CBZ.player&&CBZ.player.dead)){
-    note(f.name+" leaves you folded on the mat. No purse tonight.",5,{urgent:true});
+    note(f.name+" leaves you folded. No purse tonight, and your stock just dropped.",5,{urgent:true});
+    recordLoss(f.box);
     f.over=3;
   }
 }
@@ -661,6 +763,14 @@ if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
           }
         });
       }
+    },{
+      id:"arena_ring_box", slot:"j",
+      label:function(){
+        if(pfight)return "Bout in progress";
+        var c=careerState(),o=bookedOpp(true);
+        return "BOXING"+(isTitle(c,true)?" TITLE":"")+" match vs "+o.name+" ("+o.wins+"-"+o.losses+") · purse "+money(purseFor(c,o,true));
+      },
+      onSelect:startBoxMatch
     }]
   });
   CBZ.interactions.registerZone({
@@ -668,7 +778,11 @@ if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
     find:function(px,pz){ return Math.hypot(px-CGX,pz-CGZ)<11?{x:CGX,z:CGZ}:null; },
     options:[{
       id:"arena_cage_fight", slot:"i",
-      label:function(){ return pfight?"Bout in progress":"Step into the cage ($500 purse)"; },
+      label:function(){
+        if(pfight)return "Bout in progress";
+        var c=careerState(),o=bookedOpp(false);
+        return "MMA"+(isTitle(c,false)?" TITLE":"")+" bout vs "+o.name+" ("+o.wins+"-"+o.losses+") · purse "+money(purseFor(c,o,false));
+      },
       onSelect:startCageFight
     }]
   });
@@ -693,8 +807,16 @@ if(CBZ.interactions&&typeof CBZ.interactions.registerZone==="function"){
     ]
   });
   if(typeof CBZ.interactions.describe==="function"){
-    CBZ.interactions.describe("arena_ring",function(){return{label:"Ironjaw Ring",note:"Live bout — bet ringside"};});
-    CBZ.interactions.describe("arena_cage",function(){return{label:"Ironjaw Cage",note:"Amateur night — step in"};});
+    CBZ.interactions.describe("arena_ring",function(){
+      var c=careerState();
+      return {label:"Ironjaw Ring"+(c.beltBox?" · 🏆 BOXING CHAMP":""),
+        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Live bout — bet ringside"};
+    });
+    CBZ.interactions.describe("arena_cage",function(){
+      var c=careerState();
+      return {label:"Ironjaw Cage"+(c.beltMMA?" · 🏆 MMA CHAMP":""),
+        note:c.wins+c.losses>0?("You: "+c.wins+"-"+c.losses+" ("+c.kos+" KO) · "+rankLabel(c.fame)):"Open card — step in"};
+    });
     CBZ.interactions.describe("arena_pit",function(){return{label:"Beast Pit",note:"Where animals settle it"};});
   }
 }
@@ -704,9 +826,10 @@ CBZ.onUpdate(40,function(dt){
   if(!dt||dt>0.5)dt=0.05;
   if(!arenaRoot||!CBZ.player||!CBZ.player.pos)return;
   var pp=CBZ.player.pos;
-  // ring bout: only simulate while the player can actually see it (~90u)
+  // ring bout: only simulate while the player can actually see it (~90u) and
+  // the ring isn't handed over to the player's own boxing match.
   nearRing=Math.hypot(pp.x-RX,pp.z-RZ)<90;
-  if(nearRing){
+  if(nearRing&&!ringSuspended){
     if(!bout)newBout();
     tickRing(dt);
   }
