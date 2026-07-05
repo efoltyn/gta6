@@ -141,22 +141,37 @@
     const H = Math.min(b.h * 0.75, b.FH * 3.2);                // frame climbs partway up
     const hw = b.w / 2 - 0.5, hd = b.d / 2 - 0.5;
     const POLE = 0x8a8577, PLANK = 0xa88c5f;
-    // perimeter poles on a ~3.5u pitch + plank walkways per storey line
+    // Perimeter standards + ledgers + plank decks + one diagonal brace per
+    // face. MEMBER SIZES ARE VISUAL LOAD-BEARING: at street distance under
+    // low-res AA a 0.14u pole disappears and the plank lines read as a
+    // FLOATING roof frame (user-filmed). 0.32u posts + 0.2u ledger rails
+    // directly under every deck keep the frame visibly CONNECTED to the
+    // ground from any range this can be seen at.
     for (let s = 0; s < 4; s++) {
       const horiz = s < 2, sign = s % 2 ? 1 : -1;
       const span = (horiz ? hw : hd) * 2;
-      const nP = Math.max(3, Math.round(span / 3.5) + 1);
+      const nP = Math.max(3, Math.round(span / 3.0) + 1);
       for (let i = 0; i < nP; i++) {
         const t = -span / 2 + i * (span / (nP - 1));
         const x = horiz ? b.ox + t : b.ox + sign * hw;
         const z = horiz ? b.oz + sign * hd : b.oz + t;
-        box(g, x, H / 2, z, 0.14, H, 0.14, POLE);
+        box(g, x, H / 2, z, 0.32, H, 0.32, POLE);              // standard (corner posts fall out of i=0/nP-1)
       }
-      for (let y = b.FH; y < H; y += b.FH) {
+      for (let y = b.FH; y <= H - 0.3; y += b.FH) {
         const x = horiz ? b.ox : b.ox + sign * hw;
         const z = horiz ? b.oz + sign * hd : b.oz;
-        box(g, x, y, z, horiz ? span : 0.9, 0.09, horiz ? 0.9 : span, PLANK);
+        box(g, x, y - 0.16, z, horiz ? span : 0.2, 0.2, horiz ? 0.2 : span, POLE);   // ledger rail under the deck
+        box(g, x, y, z, horiz ? span : 1.0, 0.14, horiz ? 1.0 : span, PLANK);        // plank deck
       }
+      // top cap rail ties the pole heads together (no orphan pole tips)
+      box(g, horiz ? b.ox : b.ox + sign * hw, H - 0.1, horiz ? b.oz + sign * hd : b.oz,
+        horiz ? span + 0.32 : 0.24, 0.2, horiz ? 0.24 : span + 0.32, POLE);
+      // one full-face diagonal brace — the single strongest "scaffold, not
+      // railing" cue a construction frame has
+      const bl = Math.hypot(span * 0.92, H * 0.92);
+      const brace = box(g, horiz ? b.ox : b.ox + sign * hw, H / 2, horiz ? b.oz + sign * hd : b.oz, 0.16, bl, 0.16, POLE);
+      if (horiz) brace.rotation.z = Math.atan2(span * 0.92, H * 0.92) * (sign === 1 ? 1 : -1);
+      else brace.rotation.x = Math.atan2(span * 0.92, H * 0.92) * (sign === 1 ? -1 : 1);
     }
     // the rising CORE: a plain concrete storey-or-two inside the frame —
     // the diegetic "they're getting somewhere" beat before the reveal
@@ -352,6 +367,8 @@
   D.count = function () { return ledger.size; };
   D.hp = function (lot) { const b = lot && lot.building; return b ? { cur: hp.get(lot) || 0, max: hpMax(b) } : null; };
   D.list = function () { return Array.from(ledger.values()).map((r) => ({ k: r.k, at: r.at, phase: r.phase })); };
+  // tooling accessor (tools/demolition-check.mjs floating-geometry invariant)
+  D.propGroup = function (lot) { const rec = ledger.get(keyOf(lot)); return rec ? rec.propGroup : null; };
   // save / late-join snapshot (netpersist worldBlob.demo — see fracture's twin)
   D.serialize = function () {
     return { v: 1, list: Array.from(ledger.values()).map((r) => ({ x: Math.round(r.lot.cx), z: Math.round(r.lot.cz), at: +r.at.toFixed(3) })) };
