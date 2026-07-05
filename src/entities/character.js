@@ -417,6 +417,20 @@
         guard.rotation.z = -sgn * 0.30;
         ch.body.rotation.x = ch.lean - 0.34 * drive + 0.16 * wind;
         ch.body.rotation.y = sgn * (0.24 * wind + 0.68 * drive - 0.16 * recover);
+      } else if (ch.punchKind === "hook") {             // horizontal rounded hook
+        // the fist travels a lateral arc: rotation.y sweeps the arm from just
+        // outside the shoulder (sgn*0.2) around across the body (sgn*-1.1)
+        // while rotation.x lifts it to chin height; the torso whips harder
+        // than a jab — the hook's power is the shoulder turn.
+        const swp = Math.min(1, prog / 0.7);            // arc position over the swing
+        arm.rotation.x = 0.3 * wind - 1.3 * drive + 0.18 * recover;
+        arm.rotation.y = sgn * (0.2 - 1.3 * swp) * drive;   // 0.2 -> -1.1 around the side
+        arm.rotation.z = sgn * (0.3 + 0.34 * drive);        // elbow up and out
+        arm.position.z = 0.02 * wind + 0.2 * drive;
+        guard.rotation.x = -0.72 * drive;
+        guard.rotation.z = -sgn * 0.3;
+        ch.body.rotation.x = ch.lean - 0.1 * drive + 0.06 * wind;
+        ch.body.rotation.y = sgn * (0.3 * wind + 0.95 * drive - 0.22 * recover);
       } else {                                          // straight jab/cross
         arm.rotation.x = 0.45 * wind - 2.42 * drive + 0.24 * recover;
         arm.rotation.y = sgn * -0.18 * drive;
@@ -429,6 +443,147 @@
       }
     } else {
       ch.body.rotation.y = damp(ch.body.rotation.y, 0, 10, dt);
+    }
+
+    // ==== FIGHT LAYERS (all additive, all flag-gated: when the fight director
+    // sets none of these, every block below is a single falsy check and the
+    // frame is byte-identical to before). They run AFTER the punch block so a
+    // director can layer/override mid-exchange; they SET pose values directly
+    // (like the punch block) so the gait/idle damps above restore everything
+    // automatically the frame after a flag clears. ====
+
+    // ---- FIGHT STANCE idle: bladed, hands-up, ready. Only when not mid-move,
+    // so any actual strike/reaction below (or the punch above) wins outright.
+    if (ch.fightStance && !(ch.punchT > 0) && !(ch.kickT > 0) && !(ch.blockT > 0) &&
+        !(ch.dodgeT > 0) && !(ch.staggerT > 0) && !(ch.koT > 0) && !ch.koPose &&
+        !ch.aimingPose && !ch.cuffed && !ch.surrender && !ch.handsUp) {
+      ch.fightPh = (ch.fightPh || 0) + dt;              // own phase: weave, don't walk
+      const w = Math.sin(ch.fightPh * 2.6);             // slow weave
+      const w2 = Math.sin(ch.fightPh * 5.2 + 1.3);      // faster forearm pump
+      // forearms up near the chin, tucked slightly inward, a touch forward
+      ch.parts.la.rotation.x = -0.9 + w2 * 0.05;
+      ch.parts.la.rotation.z = -0.26;
+      ch.parts.la.rotation.y = 0.1;
+      ch.parts.la.position.z = 0.1;
+      ch.parts.ra.rotation.x = -0.98 - w2 * 0.05;
+      ch.parts.ra.rotation.z = 0.26;
+      ch.parts.ra.rotation.y = -0.1;
+      ch.parts.ra.position.z = 0.1;
+      // bladed torso + subtle rhythmic weave; soft knees when standing still
+      ch.body.rotation.y = -0.18 + w * 0.1;
+      ch.body.rotation.x = ch.lean + 0.08;
+      ch.body.rotation.z = ch.sway + w * 0.04;
+      if (!moving) {
+        ch.body.position.y -= 0.05 + w * 0.02;          // sit into the stance, bob
+        ch.parts.ll.scale.y = 0.96;
+        ch.parts.rl.scale.y = 0.96;
+      }
+    }
+
+    // ---- KICK: chamber -> extend -> recover, same envelope family as the
+    // punch. kickKind "front" (default) snaps the foot straight out with the
+    // torso leaning back; "round" whips the leg around the side off a hip turn.
+    if (ch.kickT > 0) {
+      ch.kickT -= dt;
+      const kdur = ch.kickDur || 0.5;
+      const kprog = 1 - Math.max(0, ch.kickT) / kdur;
+      const kwind = Math.max(0, 1 - kprog / 0.24);
+      const kdrive = Math.sin(Math.min(1, Math.max(0, (kprog - 0.16) / 0.54)) * Math.PI);
+      const krec = Math.max(0, (kprog - 0.62) / 0.38);
+      const kleft = ch.kickLeg === "l";
+      const kleg = kleft ? ch.parts.ll : ch.parts.rl;
+      const kplant = kleft ? ch.parts.rl : ch.parts.ll;
+      const ksgn = kleft ? 1 : -1;
+      if (ch.kickKind === "round") {                    // roundhouse off the hip
+        const kswp = Math.min(1, kprog / 0.7);
+        kleg.rotation.x = 0.28 * kwind - 1.3 * kdrive;
+        kleg.rotation.y = ksgn * (0.3 - 1.35 * kswp) * kdrive;   // sweeps around the side
+        kleg.rotation.z = ksgn * (0.5 * kdrive + 0.15 * kwind);  // splayed out through the arc
+        kleg.scale.y = 1 - 0.1 * kwind;                          // slight chamber shortening
+        ch.body.rotation.y = ksgn * (0.3 * kwind + 1.0 * kdrive - 0.3 * krec);  // big hip turn
+        ch.body.rotation.x = ch.lean - 0.18 * kdrive;
+        ch.body.rotation.z = -ksgn * 0.14 * kdrive;              // counter-tilt over the plant leg
+      } else {                                          // front snap kick
+        kleg.rotation.x = 0.35 * kwind - 1.75 * kdrive + 0.2 * krec;  // cock back, drive up
+        kleg.rotation.y = 0;
+        kleg.rotation.z = ksgn * 0.06;
+        kleg.scale.y = 1 - 0.2 * kwind - 0.06 * (1 - kdrive);    // knee chamber, straight at impact
+        ch.body.rotation.x = ch.lean - 0.3 * kdrive + 0.08 * kwind;  // torso leans back
+        ch.body.rotation.y = ksgn * 0.16 * kdrive;
+      }
+      // plant the standing leg: braced, soft knee, no swing
+      kplant.rotation.x = 0.14 * kdrive;
+      kplant.rotation.y = 0;
+      kplant.scale.y = 1 - 0.05 * kdrive;
+      // arms counter-balance out and back
+      ch.parts.la.rotation.x = -0.4 * kdrive - 0.1 * kwind;
+      ch.parts.ra.rotation.x = -0.4 * kdrive - 0.1 * kwind;
+      ch.parts.la.rotation.z = 0.55 * kdrive + 0.08;
+      ch.parts.ra.rotation.z = -0.55 * kdrive - 0.08;
+      ch.body.position.y -= 0.05 * kdrive;              // sink into the plant leg
+    }
+
+    // ---- BLOCK / GUARD: both forearms up in front of the face, torso hunched.
+    // Onset eases in via a small accumulator (reset when the timer runs out);
+    // release is free — the gait damps above pull everything home next frame.
+    if (ch.blockT > 0) {
+      ch.blockT -= dt;
+      ch.blockK = Math.min(1, (ch.blockK || 0) + dt * 12);   // quick raise
+      const bk = ch.blockK;
+      // optional impact jitter: director sets ch.blockHitT (~0.15) on a blocked hit
+      let bjit = 0;
+      if (ch.blockHitT > 0) {
+        ch.blockHitT -= dt;
+        bjit = Math.sin(ch.blockHitT * 55) * Math.max(0, ch.blockHitT) * 0.8;
+      }
+      ch.parts.la.rotation.x = (-1.5 + bjit * 0.12) * bk;
+      ch.parts.la.rotation.z = -0.35 * bk;              // tuck inward
+      ch.parts.la.rotation.y = 0.12 * bk;
+      ch.parts.la.position.z = 0.12 * bk;
+      ch.parts.ra.rotation.x = (-1.5 - bjit * 0.12) * bk;
+      ch.parts.ra.rotation.z = 0.35 * bk;
+      ch.parts.ra.rotation.y = -0.12 * bk;
+      ch.parts.ra.position.z = 0.12 * bk;
+      ch.body.rotation.x = ch.lean + (0.16 + bjit * 0.05) * bk;   // hunch behind the guard
+      ch.body.position.y -= 0.04 * bk;
+      if (ch.blockT <= 0) ch.blockK = 0;                // clean slate for the next guard
+    }
+
+    // ---- DODGE / SLIP: a quick weave to dodgeDir (-1 left, +1 right) that
+    // peaks mid-timer and eases back out by itself (sin envelope -> 0 at end).
+    if (ch.dodgeT > 0) {
+      ch.dodgeT -= dt;
+      const ddur = ch.dodgeDur || 0.35;
+      const dprog = 1 - Math.max(0, ch.dodgeT) / ddur;
+      const denv = Math.sin(Math.min(1, dprog) * Math.PI);   // out and back
+      const ddir = ch.dodgeDir || 1;
+      ch.body.rotation.z = ch.sway + ddir * 0.42 * denv;     // whole-torso lean
+      ch.body.rotation.y = ddir * 0.28 * denv;               // shoulders slip with it
+      ch.body.position.y -= 0.16 * denv;                     // bob down under the shot
+      ch.parts.ll.scale.y = 1 - 0.08 * denv;                 // knees give a touch
+      ch.parts.rl.scale.y = 1 - 0.08 * denv;
+      // keep the hands home while slipping
+      ch.parts.la.rotation.x = -0.8 * denv + ch.parts.la.rotation.x * (1 - denv);
+      ch.parts.ra.rotation.x = -0.8 * denv + ch.parts.ra.rotation.x * (1 - denv);
+    }
+
+    // ---- STAGGER: took a hit — snap back hard, wobble out over the timer.
+    if (ch.staggerT > 0) {
+      ch.staggerT -= dt;
+      const sdur = ch.staggerDur || 0.55;
+      const sk = Math.max(0, ch.staggerT) / sdur;             // 1 at impact -> 0
+      const swob = Math.sin((1 - sk) * 18) * sk;              // damping head/torso wobble
+      ch.body.rotation.x = ch.lean - (0.48 * sk * sk + 0.1 * swob);   // lean-back snap
+      ch.body.rotation.y = swob * 0.22;
+      ch.body.rotation.z = ch.sway + swob * 0.14;
+      ch.body.position.y -= 0.07 * sk;                        // knees buckle a touch
+      ch.body.position.z = -0.14 * sk;                        // small backward recoil
+      // arms fling out loose
+      ch.parts.la.rotation.x = -0.6 * sk;
+      ch.parts.ra.rotation.x = -0.65 * sk;
+      ch.parts.la.rotation.z = 0.55 * sk + 0.08;
+      ch.parts.ra.rotation.z = -0.6 * sk - 0.08;
+      if (ch.staggerT <= 0) ch.body.position.z = 0;           // no residual recoil offset
     }
 
     // Hands-up surrender/intimidation pose. This is a late animation layer so
@@ -455,6 +610,59 @@
     if (ch.neck) {
       ch.neck.rotation.x = damp(ch.neck.rotation.x, -ch.lean * 0.7 + (moving ? Math.sin(ch.phase * 2) * 0.02 : 0), 9, dt);
       ch.neck.rotation.z = damp(ch.neck.rotation.z, -ch.sway * 0.6, 9, dt);
+    }
+
+    // ---- KO / KNOCKDOWN: crumple to the canvas. LAST layer on purpose — it
+    // blends every pose channel (including the head layer just above) toward
+    // the downed shape, so nothing pulls a KO'd fighter back upright. koT
+    // animates the fall over koDur; ch.koPose=true holds the downed pose after
+    // (or indefinitely, without koT at all). Clearing both restores upright:
+    // the gate below hands the rig straight back to the gait/idle writes above,
+    // and the delta-tracked group drop is refunded exactly once.
+    if (ch.koT > 0 || ch.koPose) {
+      if (ch.koT > 0) ch.koT -= dt;
+      const kodur = ch.koDur || 0.7;
+      const kraw = ch.koT > 0 ? 1 - Math.max(0, ch.koT) / kodur : 1;
+      ch.koK = Math.max(ch.koK || 0, Math.min(1, kraw));      // never un-fall mid-hold
+      const e = ch.koK * ch.koK * (3 - 2 * ch.koK);           // smoothstep crumple
+      const inv = 1 - e;
+      // torso pitches back and down onto the canvas, a slight roll so it
+      // reads as a body, not a plank
+      ch.body.rotation.x = ch.body.rotation.x * inv - 1.25 * e;
+      ch.body.rotation.y = ch.body.rotation.y * inv;
+      ch.body.rotation.z = ch.body.rotation.z * inv + 0.12 * e;
+      ch.body.position.y = ch.body.position.y * inv - 0.62 * e;
+      // legs fold — one knee drawn up, the other flopped, both shortened so
+      // the feet come off their standing plant
+      ch.parts.ll.rotation.x = ch.parts.ll.rotation.x * inv - 0.6 * e;
+      ch.parts.ll.rotation.z = ch.parts.ll.rotation.z * inv + 0.28 * e;
+      ch.parts.ll.scale.y = ch.parts.ll.scale.y * inv + 0.78 * e;
+      ch.parts.rl.rotation.x = ch.parts.rl.rotation.x * inv - 0.25 * e;
+      ch.parts.rl.rotation.z = ch.parts.rl.rotation.z * inv - 0.34 * e;
+      ch.parts.rl.scale.y = ch.parts.rl.scale.y * inv + 0.9 * e;
+      // arms splayed loose, palms-up-ish — not a T-pose
+      ch.parts.la.rotation.x = ch.parts.la.rotation.x * inv - 0.55 * e;
+      ch.parts.la.rotation.z = ch.parts.la.rotation.z * inv + 0.95 * e;
+      ch.parts.la.rotation.y = ch.parts.la.rotation.y * inv;
+      ch.parts.la.position.z = ch.parts.la.position.z * inv;
+      ch.parts.ra.rotation.x = ch.parts.ra.rotation.x * inv - 0.3 * e;
+      ch.parts.ra.rotation.z = ch.parts.ra.rotation.z * inv - 1.05 * e;
+      ch.parts.ra.rotation.y = ch.parts.ra.rotation.y * inv;
+      ch.parts.ra.position.z = ch.parts.ra.position.z * inv;
+      if (ch.neck) {
+        ch.neck.rotation.x = ch.neck.rotation.x * inv - 0.35 * e;   // head lolled back
+        ch.neck.rotation.z = ch.neck.rotation.z * inv + 0.22 * e;
+      }
+      // sink the whole rig toward the floor. Delta-tracked (koLift remembers
+      // what we've added) so the offset never compounds frame-over-frame and
+      // is refunded exactly when the KO clears.
+      const lift = -0.5 * e;
+      ch.group.position.y += lift - (ch.koLift || 0);
+      ch.koLift = lift;
+    } else if (ch.koLift) {
+      ch.group.position.y -= ch.koLift;                       // refund the sink
+      ch.koLift = 0;
+      ch.koK = 0;
     }
   }
 

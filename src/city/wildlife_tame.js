@@ -113,6 +113,9 @@
   //  animal. NEVER teleports: however far you get, it runs your way.
   // ============================================================
   CBZ.cityTameFollow = function (a, dt) {
+    // companions.js takes over movement while the pet is actively fighting a
+    // threat or fleeing one (trait-driven defense) — yield to it this frame.
+    if (a.companionBusy) return;
     const P = CBZ.player && CBZ.player.pos, grp = a.group, sp = a.species;
     if (!P) return;
     const dx = P.x - grp.position.x, dz = P.z - grp.position.z;
