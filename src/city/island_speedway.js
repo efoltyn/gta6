@@ -637,16 +637,45 @@
   }
 
   // ====================================================================== //
-  //  THE RACE — zone interaction + procedural AI field + lap timer          //
+  //  THE RACE — zone interaction + a REAL race weekend.                     //
+  //  Two engines behind one green flag:                                     //
+  //   • REAL DRIVERS (default, CBZ.raceDrivers): the field is 6 liveried    //
+  //     championship cars that actually DRIVE — grid start under a light    //
+  //     gantry, braking into the turns, defending, colliding through the    //
+  //     shared car-car crash pass, spinning + recovering. Laps/positions/   //
+  //     gaps/lap-times come from CBZ.raceKit; the race reads on the         //
+  //     racing HUD (racehud.js); the finish pays through the championship.  //
+  //   • LEGACY spline puppets, kept verbatim as the one-line-revert         //
+  //     fallback (CBZ.CONFIG.RACE_REAL_DRIVERS = false, or headless rigs    //
+  //     without the driver module).                                         //
   // ====================================================================== //
   const RACE = {
     active: false, lap: 0, laps: 3, t0: 0,
     playerLastT: 0, playerProg: 0, playerLaps: 0,
-    racers: [],         // {group, t, speed, place, laps, lastT, racer}
+    racers: [],         // legacy: {group, t, speed, place, laps, lastT, racer}
     checks: 0, lastCross: false, label: null,
+    // real-driver race state
+    rd: false, phase: "idle", kit: null, drivers: [], countT: 0,
+    playerTotal: 0, lightsOffT: 0,
   };
+  CBZ.speedwayRaceState = function () { return RACE; };   // probe/debug peek (headless gates)
   const LAP_PURSE = 7500;       // per finishing-position-scaled payout base
-  const FIELD_N = 5;            // AI opponents on the grid
+  const FIELD_N = 5;            // legacy AI opponents on the grid
+  const FIELD_RD = 6;           // real driving opponents on the grid
+  let LINE_LEN = 0;             // oval centreline length (m), computed lazily
+  function lineLen() {
+    if (LINE_LEN) return LINE_LEN;
+    let L = 0, p = CBZ_FRAME(0);
+    for (let i = 1; i <= 96; i++) {
+      const f = CBZ_FRAME(i / 96);
+      L += Math.hypot(f.x - p.x, f.z - p.z); p = f;
+    }
+    return (LINE_LEN = L);
+  }
+  function useRD() {
+    if (RACE._rdBroken) return false;   // spawn failed once (headless rig) → legacy for good
+    return !!(CBZ.raceDrivers && CBZ.raceDrivers.enabled() && CBZ.raceKit && CBZ.cityMakeCar);
+  }
 
   function ovalFrame(t) { // local alias usable by zone/tick (defined again for closure scope)
     return CBZ_FRAME(t);
@@ -672,6 +701,7 @@
     if (RACE.active) { note("You're already racing!", 1.5); return; }
     const P = CBZ.player;
     if (!P || !P.driving) { note("Get in a car to race.", 1.8); return; }
+    if (useRD()) { startRaceRD(); return; }
     RACE.active = true; RACE.laps = 3;
     RACE.playerLaps = 0; RACE.playerProg = 0; RACE.t0 = Date.now() / 1000;
     RACE.lastCross = false;
@@ -755,6 +785,230 @@
     return best;
   }
 
+  // ====================================================================== //
+  //  REAL RACE WEEKEND (CBZ.raceDrivers path)                               //
+  // ====================================================================== //
+  // the painted grid slot i (0 = pole): two staggered columns behind the S/F
+  // line — the SAME geometry the painted grid boxes use (builder step 4).
+  function gridSlot(i) {
+    const f = CBZ_FRAME(SF_T);
+    const row = i >> 1, lane = (i % 2 === 0) ? 1 : -1;
+    const COLW = 2.6, ROWGAP = 6.0;
+    const back = -(row * ROWGAP + (lane > 0 ? 0 : ROWGAP * 0.5) + 3.0);
+    const x = f.x + f.tx * back + f.nx * (lane * COLW);
+    const z = f.z + f.tz * back + f.nz * (lane * COLW);
+    // heading follows the track tangent at the slot's own param
+    const t = ((back / lineLen()) % 1 + 1) % 1;
+    return { x, z, heading: CBZ_FRAME(t).heading };
+  }
+
+  function startRaceRD() {
+    const P = CBZ.player, car = P._vehicle;
+    if (!car) { note("Get in a car to race.", 1.8); return; }
+    const RD = CBZ.raceDrivers, RC = CBZ.cityRacing;
+    RACE.active = true; RACE.rd = true; RACE.phase = "grid";
+    RACE.laps = 3; RACE.countT = 3.9; RACE.lightsOffT = 0;
+    RACE.playerLaps = -1;                    // grid sits BEHIND the line: the
+    RACE.playerTotal = -0.02;                // roll-over crossing arms lap 1
+    RACE.drivers = [];
+
+    // === the field: top-6 championship drivers, pole by standing ===
+    let field = (RC && RC.standings) ? RC.standings().slice(0, FIELD_RD) : [];
+    if (!field.length) {
+      // roster module absent: anonymous fast rivals so the race still runs
+      for (let i = 0; i < FIELD_RD; i++) field.push({ name: "Rival " + (i + 1), number: 90 + i, teamColor: [0xc0392b, 0x1b6ec8, 0x2ba24a, 0xd66a2e, 0x6a2bd6, 0xe0a92e][i], accent: 0xeef2f6, skill: 0.72 + i * 0.04, homeStyle: "muscle" });
+    }
+    for (let i = 0; i < field.length; i++) {
+      const racer = field[i], slot = gridSlot(i);
+      const m = RD.spawn({
+        x: slot.x, z: slot.z, heading: slot.heading,
+        style: racer.homeStyle || "muscle", color: racer.teamColor,
+        livery: RC && RC.liveryFor ? RC.liveryFor(racer) : { number: racer.number, base: racer.teamColor, accent: racer.accent },
+        name: racer.name, number: racer.number,
+        skill: racer.skill || 0.8,
+        aggr: 0.35 + (racer.skill || 0.8) * 0.45,
+        consistency: 0.55 + (racer.skill || 0.8) * 0.4,
+        lane0: (i % 2 === 0 ? 1 : -1) * 2.6,     // hold your grid column off the launch
+        tag: "speedway", mode: "line",
+        line: CBZ_FRAME, lineLen: lineLen(), trackHalf: TRACK_W / 2,
+        playerProgress: function () { return RACE.playerTotal; },
+      });
+      if (!m) continue;
+      m.laps = -1;                            // behind the line, same as the player
+      m._racer = racer;
+      RACE.drivers.push(m);
+    }
+    if (!RACE.drivers.length) {               // spawn failed (headless rig) → legacy
+      RACE.active = false; RACE.rd = false; RACE._rdBroken = true;
+      if (CBZ.raceHud) CBZ.raceHud.hide();
+      startRace();
+      return;
+    }
+
+    // === the player takes the last grid slot (you qualify at the back —
+    //     beating the champions means DRIVING through them) ===
+    const ps = gridSlot(RACE.drivers.length);
+    car.pos.x = ps.x; car.pos.z = ps.z; car.heading = ps.heading;
+    car.v = 0; car.vx = 0; car.vz = 0;
+    car.group.position.set(ps.x, 0, ps.z);
+    car.group.rotation.y = ps.heading;
+    P.pos.set(ps.x, 0, ps.z);
+    RACE.playerLastT = paramAt(ps.x, ps.z);
+
+    // === the scorer ===
+    const entrants = RACE.drivers.map(function (m) {
+      return {
+        id: "n" + m.number, name: m.name, number: m.number, color: m._racer.teamColor,
+        driver: m,
+        progress: function () { return m.laps + m.t; },
+        speed: function () { return Math.abs((m.car && m.car.v) || 0); },
+        lapFloor0: -1,
+      };
+    });
+    entrants.push({
+      id: "you", name: "YOU", number: null, color: null, isPlayer: true,
+      progress: function () { return RACE.playerTotal; },
+      speed: function () { const c = CBZ.player && CBZ.player._vehicle; return Math.abs((c && c.v) || 0); },
+      lapFloor0: -1,
+    });
+    RACE.kit = CBZ.raceKit.create({ laps: RACE.laps, trackLen: lineLen(), entrants: entrants });
+
+    if (CBZ.raceHud) { CBZ.raceHud.show(); CBZ.raceHud.lights(0); }
+    const rnd = RC ? (RC.round + 1) : 1;
+    note("ROUND " + rnd + " — " + RACE.drivers.length + " championship cars on the grid. Lights out and away we go…", 3.0);
+  }
+
+  function tickRD(dt) {
+    const P = CBZ.player;
+    // bailed out of the car mid-weekend
+    if (!P || !P.driving || !P._vehicle || P._vehicle.dead) {
+      if (RACE.phase === "grid") cancelRD("Race scratched — you left the grid.");
+      else endRaceRD({ dnf: true });
+      return;
+    }
+    const car = P._vehicle;
+
+    // ---- GRID: the light gantry counts down; the field is held ----
+    if (RACE.phase === "grid") {
+      RACE.countT -= dt;
+      const c = RACE.countT;
+      if (c > 0) {
+        if (CBZ.raceHud) CBZ.raceHud.lights(c > 2.4 ? 1 : c > 1.2 ? 2 : 3);
+        return;
+      }
+      RACE.phase = "green"; RACE.lightsOffT = 1.4;
+      if (CBZ.raceHud) CBZ.raceHud.lights("go");
+      CBZ.raceDrivers.setState("race", "speedway");
+      note("GREEN GREEN GREEN!", 1.8);
+      if (CBZ.sfx) CBZ.sfx("coin");
+    }
+    if (RACE.lightsOffT > 0) {
+      RACE.lightsOffT -= dt;
+      if (RACE.lightsOffT <= 0 && CBZ.raceHud) CBZ.raceHud.lights(-1);
+    }
+
+    // ---- player progress (the same S/F-crossing lap counter the AI uses) ----
+    const pt = paramAt(car.pos.x, car.pos.z);
+    if (RACE.playerLastT > 0.85 && pt < 0.15) RACE.playerLaps++;
+    else if (RACE.playerLastT < 0.15 && pt > 0.85) RACE.playerLaps--;   // backed over the line
+    RACE.playerLastT = pt;
+    RACE.playerTotal = RACE.playerLaps + pt;
+
+    RACE.kit.update(dt);
+
+    // ---- the racing HUD strip ----
+    const ctx = RACE.kit.playerContext();
+    if (ctx && CBZ.raceHud) {
+      CBZ.raceHud.update({
+        pos: ctx.row.pos, count: RACE.kit.entrants.length,
+        lap: Math.max(1, Math.min(RACE.laps, RACE.playerLaps + 1)),
+        laps: RACE.laps,
+        lapT: RACE.kit.time - ctx.row.lapStart, best: ctx.row.best,
+        gapA: ctx.ahead ? { name: ctx.ahead.name, s: ctx.gapA } : null,
+        gapB: ctx.behind ? { name: ctx.behind.name, s: ctx.gapB } : null,
+      });
+    }
+
+    // ---- checkered flag ----
+    if (RACE.playerLaps >= RACE.laps) endRaceRD({});
+  }
+
+  // race scratched before the green — no result, no round burned.
+  function cancelRD(msg) {
+    CBZ.raceDrivers.despawnAll("speedway");
+    RACE.active = false; RACE.rd = false; RACE.phase = "idle";
+    RACE.drivers = []; RACE.kit = null;
+    if (CBZ.raceHud) CBZ.raceHud.hide();
+    note(msg, 2.4);
+  }
+
+  function endRaceRD(opts) {
+    opts = opts || {};
+    const kit = RACE.kit, RC = CBZ.cityRacing;
+    kit.update(0);
+    let order = kit.order.slice();
+    const pRow = kit.playerRow();
+    if (opts.dnf) { order = order.filter((e) => e !== pRow); order.push(pRow); }
+    const place = order.indexOf(pRow) + 1;
+
+    // === CHAMPIONSHIP: the finishing order IS the awards order ===
+    if (RC && RC.awardRace) {
+      RC.awardRace(order.map((e) => e.isPlayer ? { player: true } : (e.driver && e.driver._racer) || { name: e.name }));
+      RC.bumpRound();
+    }
+
+    // === purse: position × laps × season-build multiplier (a DNF pays $0) ===
+    const roundMul = RC ? (1 + RC.round * 0.10) : 1;
+    const purse = opts.dnf ? 0 : Math.max(500, Math.round(LAP_PURSE * (7 - Math.min(7, place)) / 6 * RACE.laps * roundMul));
+    if (purse && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(purse);
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(place <= 1 ? 12 : place <= 3 ? 5 : 1);
+
+    // === settle the ticket-office book on this round's winner ===
+    const w = order[0];
+    settleBook(w && !w.isPlayer && w.driver ? w.driver._racer : null, !!(w && w.isPlayer));
+
+    // === the results board ===
+    const leader = order[0];
+    const rows = order.map(function (e, i) {
+      const drv = e.driver;
+      const dnf = (drv && (drv.dnf || (drv.car && drv.car.dead))) || (e.isPlayer && !!opts.dnf);
+      let time = "";
+      if (dnf) time = "";
+      else if (e.finished) time = (i === 0 || !leader.finished) ? (CBZ.raceHud ? CBZ.raceHud.fmtT(e.finishT) : e.finishT.toFixed(1)) : "+" + Math.max(0, e.finishT - leader.finishT).toFixed(1) + "s";
+      else time = "+" + kit.gapSeconds(leader, e).toFixed(1) + "s";
+      return {
+        pos: i + 1, name: e.name, number: e.number, color: e.color,
+        time: time, pts: pointsForPlace(i + 1), purse: e.isPlayer ? purse : 0,
+        you: e.isPlayer, dnf: dnf,
+      };
+    });
+    if (CBZ.raceHud) {
+      CBZ.raceHud.hide();
+      CBZ.raceHud.results(rows, {
+        title: opts.dnf ? "DNF — OUT OF THE RACE" : (place === 1 ? "CHECKERED FLAG — YOU WIN!" : "RACE RESULTS"),
+        sub: RC ? "Diamond Speedway · Season " + RC.season : "Diamond Speedway",
+        foot: purse ? ("Purse $" + fmt(purse) + " · +" + pointsForPlace(place) + " championship points · Esc closes") : "No purse for a DNF · Esc closes",
+      });
+    }
+    const ord = place === 1 ? "1st — CHECKERED FLAG!" : place === 2 ? "2nd" : place === 3 ? "3rd" : place + "th";
+    note(opts.dnf ? "DNF — the field takes the money." : ("FINISH: " + ord + "  +$" + fmt(purse)), 4.0);
+
+    // === SEASON FINALE: crown the champion when the calendar wraps ===
+    if (RC && RC.round === 0 && RC.standings) {
+      const champ = RC.standings()[0];
+      if (champ) {
+        const banner = "🏆 SEASON " + (RC.season - 1) + " CHAMPION: " + champ.name + " #" + champ.number +
+          " (" + champ.points + " pts, " + champ.wins + " wins)";
+        if (CBZ.city && CBZ.city.big) CBZ.city.big(banner); else note(banner, 4.5);
+      }
+    }
+
+    // === teardown: the field packs up ===
+    CBZ.raceDrivers.despawnAll("speedway");
+    RACE.active = false; RACE.rd = false; RACE.phase = "idle";
+    RACE.drivers = []; RACE.kit = null;
+  }
+
   // dispose a liveried AI car visual the same way it was added — it carries
   // _playerCarOwned cloned paint, so detach + drop the cloned material (shared
   // geo/accents are flagged _shared and survive). Mirrors playercars cleanup.
@@ -790,6 +1044,9 @@
       while (ri2 < ranked.length) order.push(ranked[ri2++].racer);
       RC.awardRace(order);
       RC.bumpRound();
+      // settle the ticket-office book on this round's winner
+      const w0 = order[0];
+      settleBook(w0 && !w0.player && w0.points != null ? w0 : null, !!(w0 && w0.player));
     }
 
     // remove AI cars (dispose their cloned livery materials)
@@ -832,6 +1089,7 @@
     if (g.mode !== "city") return;
     if (g.state && g.state !== "playing") return;
     if (!RACE.active) return;
+    if (RACE.rd) { tickRD(dt); return; }            // the REAL race weekend
     const P = CBZ.player;
     if (!P || !P.driving) { endRace(6); return; }   // bailed out of the car
 
@@ -951,7 +1209,117 @@
     addEventListener("keydown", function (e) {
       if (g.mode !== "city") return;
       if (e.key === "Escape" && standOpen) { e.preventDefault(); toggleStandings(false); }
+      if (e.key === "Escape" && bookOpen) { e.preventDefault(); toggleBook(false); }
     });
+  }
+
+  // ====================================================================== //
+  //  THE RACE BOOK — the City Speedway lot downtown is the ticket office /  //
+  //  betting parlor for the island (buildings.js dresses its interior).     //
+  //  One open ticket at a time: back a championship driver — or yourself —  //
+  //  to WIN the next speedway round; the ticket settles when that round's   //
+  //  checkered flag falls (both race engines call settleBook).              //
+  // ====================================================================== //
+  const BOOK = { bet: null, stake: 500 };
+  CBZ.cityRaceBook = BOOK;                    // read-only peek for other UIs
+  const STAKES = [200, 500, 1000, 2000];
+
+  // odds by championship standing: the title leader pays short, the tail of
+  // the field pays long. You always pay a touch over "fair" (the house eats).
+  function oddsFor(pos, n) { return Math.round((1.8 + (pos - 1) * (9 / Math.max(1, n - 1))) * 10) / 10; }
+  const PLAYER_ODDS = 4.0;
+
+  function settleBook(winnerRacer, playerWon) {
+    const bet = BOOK.bet;
+    if (!bet) return;
+    BOOK.bet = null;
+    const won = bet.number === "you" ? playerWon : !!(winnerRacer && winnerRacer.number === bet.number);
+    if (won) {
+      const pay = Math.round(bet.stake * bet.odds);
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay);
+      note("🎫 RACE BOOK: " + bet.label + " WINS — ticket pays $" + fmt(pay) + "!", 3.6);
+    } else {
+      note("🎫 RACE BOOK: " + bet.label + " didn't win. Ticket's a coaster (−$" + fmt(bet.stake) + ").", 3.0);
+    }
+  }
+
+  let bookEl = null, bookOpen = false;
+  function bookOverlay() {
+    if (bookEl) return bookEl;
+    bookEl = document.createElement("div");
+    bookEl.id = "speedwayBook";
+    bookEl.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:48;display:none;width:min(540px,92vw);max-height:84vh;overflow:auto;background:rgba(12,14,20,.97);border:2px solid #2c3140;border-radius:12px;padding:14px 18px;box-sizing:border-box;color:#e8eef7;font-family:Fredoka,system-ui,sans-serif;box-shadow:0 14px 44px rgba(0,0,0,.6)";
+    bookEl.addEventListener("click", function (e) {
+      const t = e.target.closest && e.target.closest("[data-act]");
+      if (!t) return;
+      const act = t.dataset.act;
+      if (act === "stake") {
+        const i = STAKES.indexOf(BOOK.stake);
+        BOOK.stake = STAKES[(i + 1) % STAKES.length];
+        renderBook();
+      } else if (act === "bet") {
+        if (BOOK.bet) { note("One ticket at a time — yours rides on " + BOOK.bet.label + ".", 2.2); return; }
+        if ((g.cash || 0) < BOOK.stake) { note("Not enough cash for that stake.", 1.8); return; }
+        const num = t.dataset.num === "you" ? "you" : (t.dataset.num | 0);
+        const odds = parseFloat(t.dataset.odds);
+        if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(-BOOK.stake);
+        BOOK.bet = { number: num, label: t.dataset.name, stake: BOOK.stake, odds: odds };
+        note("🎫 Ticket placed: $" + fmt(BOOK.stake) + " on " + t.dataset.name + " @ " + odds + "x. Settles at the next checkered flag.", 3.2);
+        renderBook();
+      } else if (act === "close") toggleBook(false);
+    });
+    document.body.appendChild(bookEl);
+    return bookEl;
+  }
+  function renderBook() {
+    const el = bookOverlay();
+    const RC = CBZ.cityRacing;
+    const rows = RC && RC.standings ? RC.standings().slice(0, 8) : [];
+    let h = "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px'>" +
+      "<div style='font-size:18px;font-weight:700'>🎫 Speedway Race Book</div>" +
+      "<div style='font-size:12px;color:#8a93a3'>" + (RC ? "Season " + RC.season + " · next: Round " + (RC.round + 1) + "/" + RC.ROUNDS : "next race") + "</div></div>";
+    h += "<div style='font-size:12px;color:#9fb0c6;margin-bottom:8px'>Back a driver to WIN the next race at Diamond Speedway. Ticket settles at the flag.</div>";
+    h += "<div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>" +
+      "<span style='font-size:12px;color:#8a93a3'>Stake</span>" +
+      "<button data-act='stake' style='cursor:pointer;background:#1d2430;border:1px solid #2c3140;border-radius:8px;color:#ffd166;font-weight:700;font-size:14px;padding:4px 14px;font-family:inherit'>$" + BOOK.stake + " ⟳</button>" +
+      (BOOK.bet ? "<span style='font-size:12px;color:#7ed957'>ticket live: $" + fmt(BOOK.bet.stake) + " on " + esc(BOOK.bet.label) + " @ " + BOOK.bet.odds + "x</span>" : "") +
+      "</div>";
+    const btn = (num, name, odds) =>
+      "<button data-act='bet' data-num='" + num + "' data-name='" + esc(name) + "' data-odds='" + odds + "' " +
+      "style='cursor:pointer;background:#16301f;border:1px solid #2c5c3a;border-radius:8px;color:#7ed957;font-weight:700;font-size:12px;padding:3px 10px;font-family:inherit'>" + odds + "x</button>";
+    h += "<div style='display:grid;grid-template-columns:26px 1.4fr 70px 64px;gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'><span>No</span><span>Driver</span><span style='text-align:right'>Points</span><span style='text-align:right'>Win</span></div>";
+    rows.forEach(function (r, i) {
+      h += "<div style='display:grid;grid-template-columns:26px 1.4fr 70px 64px;gap:6px;align-items:center;font-size:13px;padding:2px 4px'>" +
+        "<span style='font-weight:700;color:" + hex6(r.teamColor) + "'>" + r.number + "</span>" +
+        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + esc(r.name) + "</span>" +
+        "<span style='text-align:right;color:#9fe6c8'>" + r.points + "</span>" +
+        "<span style='text-align:right'>" + btn(r.number, r.name + " #" + r.number, oddsFor(i + 1, rows.length)) + "</span></div>";
+    });
+    h += "<div style='display:grid;grid-template-columns:26px 1.4fr 70px 64px;gap:6px;align-items:center;font-size:13px;padding:4px;margin-top:4px;border-top:1px solid #2c3140'>" +
+      "<span style='color:#7de7ff;font-weight:700'>—</span><span style='color:#7de7ff'>YOURSELF (drive the race and win it)</span><span></span>" +
+      "<span style='text-align:right'>" + btn("you", "YOU", PLAYER_ODDS) + "</span></div>";
+    h += "<div style='display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px'>" +
+      "<span>Races run at Diamond Speedway — take the causeway north.</span>" +
+      "<button data-act='close' style='cursor:pointer;background:#1d2430;border:1px solid #2c3140;border-radius:8px;color:#e8eef7;font-size:12px;padding:3px 12px;font-family:inherit'>Close</button></div>";
+    el.innerHTML = h;
+  }
+  function toggleBook(force) {
+    bookOpen = force != null ? force : !bookOpen;
+    if (bookOpen) { renderBook(); bookOverlay().style.display = "block"; }
+    else if (bookEl) bookEl.style.display = "none";
+  }
+  CBZ.cityOpenRaceBook = toggleBook;
+
+  // the CITY-side ticket office: an interaction zone over the "City Speedway"
+  // lot (kind "raceway") — the betting parlor buildings.js dresses.
+  let _bookLot, _bookArena = null;
+  function racewayLot() {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.shopLots) return null;                 // not built yet — retry
+    if (_bookLot !== undefined && _bookArena === A) return _bookLot;
+    _bookArena = A; _bookLot = null;                    // re-scan per world build
+    for (const l of A.shopLots) { if (l.kind === "raceway") { _bookLot = l; break; } }
+    return _bookLot;
   }
 
   // ---- the START/FINISH zone: "JOIN THE RACE" (driving) + "View standings" --
@@ -992,13 +1360,42 @@
         onSelect: function () { toggleStandings(true); },
       }],
     });
+    // THE TICKET OFFICE / BETTING PARLOR: the downtown "City Speedway" lot.
+    // On foot inside/near the shop you can open the book or read the table —
+    // the lot finally does what its sign says and points at the island.
+    I.registerZone({
+      id: "zone-raceway-book", kind: "raceway-book", prio: 5,
+      find: function (px, pz) {
+        const lot = racewayLot();
+        if (!lot) return null;
+        const reach = Math.max(lot.w || 14, lot.d || 12) * 0.5 + 4;
+        if (Math.hypot(px - lot.cx, pz - lot.cz) > reach) return null;
+        if (!RACE._zk) RACE._zk = { x: lot.cx, z: lot.cz };
+        return RACE._zk;
+      },
+      options: [{
+        id: "raceway-bet", slot: "i",
+        label: function () {
+          return BOOK.bet ? ("🎫 Ticket live: " + BOOK.bet.label + " @ " + BOOK.bet.odds + "x") : "🎫 Bet on the next speedway race";
+        },
+        onSelect: function () { toggleBook(true); },
+      }, {
+        id: "raceway-standings", slot: "e",
+        label: function () { return "🏆 Championship standings"; },
+        onSelect: function () { toggleStandings(true); },
+      }],
+    });
     if (I.describe) {
       I.describe("speedway", function () {
-        return { label: "🏁 Start / Finish", note: RACE.active ? "On track · " + RACE.laps + " laps" : "Pull up to the line · 3-lap purse" };
+        return { label: "🏁 Start / Finish", note: RACE.active ? "On track · " + RACE.laps + " laps" : "Grid start · 3-lap purse" };
       });
       I.describe("speedway-board", function () {
         const RC = CBZ.cityRacing;
         return { label: "🏆 Championship", note: RC ? "Season " + RC.season + " · Round " + (RC.round + 1) + "/" + RC.ROUNDS : "Race standings" };
+      });
+      I.describe("raceway-book", function () {
+        const RC = CBZ.cityRacing;
+        return { label: "🎫 Speedway Race Book", note: RC ? "Round " + (RC.round + 1) + " odds board · bets settle at the flag" : "Race betting" };
       });
     }
   }

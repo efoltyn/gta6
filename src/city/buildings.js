@@ -3612,6 +3612,74 @@
         for (const st of shelfTops) stockRow(st, [0x49566b, 0x2a2f37, 0x6a7078], 4, 0.22, 0.24);
         break;
       }
+      case "raceway": {
+        // ===== THE SPEEDWAY TICKET OFFICE / BETTING PARLOR =====
+        // "City Speedway" downtown is the island's city-side front door: an
+        // odds board over real betting windows, a lit tri-oval TRACK MAP of
+        // Diamond Speedway, a champions' trophy case and team-colour poster
+        // wall. The live verbs (bet on the next round, read the standings)
+        // are the island's zone interactions (island_speedway.js
+        // "raceway-book"); this room is the SET they play on.
+        const RWB = 0x2f6fed;                            // the lot's sign blue
+        const TEAM = [0xc0392b, 0x1b6ec8, 0x2ba24a, 0xd66a2e, 0x6a2bd6, 0xe0a92e];
+        // stay in FRONT of the universal back-of-house partition when the room
+        // is deep enough to have one (backDepth = 2*halfIn - 5.5)
+        const deepRoom = (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
+        const winD = deepRoom ? 2 * halfIn - 6.8 : 2 * halfIn - 3.0;
+        // --- BETTING WINDOWS: three teller-style counters, screens glowing ---
+        const lat0 = -(halfTan - 1.8);
+        for (let i = 0; i < 3; i++) {
+          const p = pt(winD, lat0 + i * 1.8, 0.5);
+          if (!p) continue;
+          decor(p, 0.8, 1.5, 1.6, 0.6, 0x2a2f3a);        // counter body
+          decor(p, 1.9, 1.5, 1.0, 0.06, GLASS);          // teller glass
+          glow({ x: p.x, z: p.z }, 1.0, 0.3, 0.1, 0.06, RWB, 0.7);   // odds screen
+        }
+        // --- THE ODDS BOARD: a big lit board above the windows, striped with
+        //     dark "runner rows" so it reads as tote odds from the door ---
+        const ob = pt(winD + 0.6, 0, 0.5) || pt(winD, 0, 0.5);
+        if (ob) {
+          glow(ob, 2.6, along ? 0.08 : halfTan * 1.3, 1.1, along ? halfTan * 1.3 : 0.08, RWB, 0.5);
+          for (let i = -1; i <= 1; i++) { const lat = i * (halfTan * 0.4); const lx = ob.x + tx * lat, lz = ob.z + tz * lat; b.lbox(lx, 2.6, lz, along ? 0.05 : 0.62, 0.16, along ? 0.62 : 0.05, 0x141a24, { cast: false }); }
+        }
+        // --- THE TRACK MAP: a wall panel with a glowing tri-oval ring, the
+        //     start/finish tick in red — Diamond Speedway, drawn to covet ---
+        const tm = pt(halfIn + 0.6, halfTan - 0.6, 0.6) || pt(halfIn, halfTan - 0.6, 0.6);
+        if (tm) {
+          decor(tm, 1.7, 0.06, 2.2, 3.6, 0x141a22);      // the dark map board
+          const SEG = 18;
+          for (let s2 = 0; s2 < SEG; s2++) {
+            const a = (s2 / SEG) * Math.PI * 2;
+            const dIn = Math.cos(a) * 1.35, dy = Math.sin(a) * 0.72;
+            const sf = s2 === Math.floor(SEG * 0.25);    // top of the oval = S/F
+            b.lbox(tm.x + inx * dIn, 1.7 + dy, tm.z + inz * dIn,
+              along ? 0.14 : 0.1, 0.1, along ? 0.1 : 0.14,
+              sf ? 0xc23a36 : 0xeef2f6, { emissive: sf ? 0xc23a36 : 0x7da8d8, ei: sf ? 0.7 : 0.45, cast: false });
+          }
+          // infield tag: a little gold pylon block inside the ring
+          b.lbox(tm.x, 1.7, tm.z, along ? 0.1 : 0.08, 0.34, along ? 0.08 : 0.1, 0xffd451, { emissive: 0xffd451, ei: 0.5, cast: false });
+        }
+        // --- CHAMPIONS' TROPHY CASE: lit glass island, a gold cup inside ---
+        const tc = pt(halfIn - 1.6, -(halfTan - 2.0), 0.8);
+        if (tc) {
+          decor(tc, 0.55, 1.1, 1.1, 0.8, 0x2a2f37);      // plinth
+          decor(tc, 1.45, 1.0, 0.7, 0.7, GLASS);         // glass bonnet
+          b.lbox(tc.x, 1.32, tc.z, 0.3, 0.42, 0.3, 0xe0b53a, { emissive: 0xe0b53a, ei: 0.4, cast: false });   // the cup
+          glow({ x: tc.x, z: tc.z }, 1.12, 0.9, 0.04, 0.6, 0xffe08a, 0.5);   // case light
+        }
+        // --- TEAM POSTER WALL: driver posters in championship team colours ---
+        for (let i = 0; i < 3; i++) {
+          const pp = pt(4.6 + i * 2.6, -(halfTan - 0.55), 0.6);
+          if (!pp) continue;
+          decor(pp, 1.6, 0.05, 1.5, 1.0, 0x10141c);      // poster frame
+          glow(pp, 1.6, 0.04, 1.3, 0.8, TEAM[i % TEAM.length], 0.35);   // the team wash
+          b.lbox(pp.x, 2.05, pp.z, along ? 0.03 : 0.5, 0.14, along ? 0.5 : 0.03, 0xeef2f6, { emissive: 0xeef2f6, ei: 0.3, cast: false });  // name strip
+        }
+        // --- ticket counters: stacks of team-colour betting slips ---
+        wallShelves({ body: 0x232a36, top: 0x3a4354, h: 1.1, count: 2, span: 2.0, start: 4.2 });
+        for (const st of shelfTops) { glow(st.p, st.top + 0.02, st.across, 0.04, st.deep, RWB, 0.3); stockRow(st, TEAM, 5, 0.16, 0.14); }
+        break;
+      }
       default: {
         // generic store: stocked wall shelving + a central GONDOLA aisle of
         // product the customer walks BETWEEN to the counter — a real shop floor,

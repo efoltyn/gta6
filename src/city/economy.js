@@ -302,31 +302,62 @@
 
   // ---- car models with real values (chop-shop payouts + spawning) ----------
   // rarity 0 = everywhere, 1 = exotic. `s` = body length scale (visual variety).
-  // The NAME tells you the tier (a Prius is clearly a shitbox, a Ferrari clearly
-  // isn't) — the actual $ value stays HIDDEN until you chop it at the shop.
+  // The NAME tells you the tier (a Kotori is clearly a shitbox, a Falcone
+  // clearly isn't) — the actual $ value stays HIDDEN until you chop it.
+  //
+  // THE MANUFACTURER UNIVERSE (design languages live in city/carparts.js):
+  //   kotori  — Japanese economy giant        (Sprout / Pip / Kaze)
+  //   bison   — American muscle, trucks, vans (Vista / Hauler / Rampart /
+  //             Frontier / Stampede / Eldorado / Apex — and the Metro Cab
+  //             is a fleet-livery Vista)
+  //   voltra  — the EV disruptor              (Ion / Halo / Surge / Nova /
+  //             Colossus)
+  //   adler   — German precision marque       (Kanzler / 901 Turbo)
+  //   falcone — Italian exotic house          (Furia / Rondine / Tempesta)
+  //   vitesse — French hyper-luxury           (Millenne)
+  // `detailStyle` still selects the playercars.js SILHOUETTE (those keys are
+  // load-bearing across racing/modshop/net code); `designStyle` + `brand`
+  // drive the carparts.js identity chain.
   const CARS = [
-    { name: "Toyota Prius",   value: 1200,  rarity: 0.0,  color: 0x6b6f78, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "prius" },
-    { name: "Honda Civic",    value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "civic" },
-    { name: "Yellow Cab",     value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  livery: "taxi", designStyle: "cab" },
-    { name: "Chevy Malibu",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  designStyle: "malibu" },
-    { name: "Dodge Caravan",  value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "caravan" },
-    { name: "Ford F-150",     value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", designStyle: "f150" },
-    { name: "Nissan 370Z",    value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "370z" },
-    { name: "Jeep Cherokee",  value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "cherokee" },
-    { name: "Dodge Charger",  value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "charger" },
-    { name: "Chevy Corvette", value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "corvette" },
-    { name: "Mercedes S-Class", value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1, body: "sedan", detailStyle: "tesla-s", designStyle: "sclass" },
-    { name: "Tesla Model 3",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan", detailStyle: "tesla-3", designStyle: "model3" },
-    { name: "Tesla Model Y",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",   detailStyle: "tesla-y", designStyle: "modely" },
-    { name: "Tesla Model S",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan", detailStyle: "tesla-s", designStyle: "models" },
-    { name: "Tesla Model X",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",   detailStyle: "tesla-x", designStyle: "modelx" },
-    { name: "Cybertruck",     value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "cybertruck" },
-    { name: "Porsche 911 Turbo", value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe", detailStyle: "porsche", designStyle: "porsche" },
-    { name: "Lamborghini Aventador", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe", detailStyle: "aventador", designStyle: "aventador" },
-    { name: "Ferrari 488",    value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe", detailStyle: "ferrari", designStyle: "ferrari" },
-    { name: "Ferrari Enzo",   value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "enzo" },
-    { name: "Bugatti Veyron", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "veyron" },
+    { name: "Kotori Sprout",   brand: "kotori",  value: 1200,  rarity: 0.0,  color: 0x9fb4c4, s: 1.0,  body: "hatch",  detailStyle: "hatch", designStyle: "sprout" },
+    { name: "Kotori Pip",      brand: "kotori",  value: 2800,  rarity: 0.0,  color: 0x4caf6e, s: 0.92, body: "hatch",  detailStyle: "hatch", designStyle: "pip" },
+    { name: "Metro Cab",       brand: "bison",   value: 3000,  rarity: 0.05, color: 0xf2c43d, s: 1.0,  body: "sedan",  detailStyle: "tesla-3", livery: "taxi", designStyle: "cab" },
+    { name: "Bison Vista",     brand: "bison",   value: 3800,  rarity: 0.0,  color: 0x3c6fd6, s: 1.05, body: "sedan",  detailStyle: "tesla-3", designStyle: "vista" },
+    { name: "Bison Hauler",    brand: "bison",   value: 4600,  rarity: 0.1,  color: 0xe8e8ee, s: 1.12, body: "van",    detailStyle: "van", designStyle: "hauler" },
+    { name: "Bison Rampart",   brand: "bison",   value: 5400,  rarity: 0.15, color: 0xe24b4b, s: 1.15, body: "pickup", detailStyle: "suv", designStyle: "rampart" },
+    { name: "Kotori Kaze",     brand: "kotori",  value: 9500,  rarity: 0.4,  color: 0x2a2d33, s: 0.98, body: "coupe",  detailStyle: "porsche", designStyle: "kaze" },
+    { name: "Bison Frontier",  brand: "bison",   value: 12000, rarity: 0.45, color: 0x44505e, s: 1.18, body: "suv",    detailStyle: "suv", designStyle: "frontier" },
+    { name: "Bison Stampede",  brand: "bison",   value: 17000, rarity: 0.6,  color: 0xe88a3c, s: 1.08, body: "muscle", detailStyle: "muscle", designStyle: "stampede" },
+    { name: "Bison Eldorado",  brand: "bison",   value: 21000, rarity: 0.68, color: 0x7d2bd6, s: 1.1,  body: "muscle", detailStyle: "lowrider", designStyle: "eldorado" },
+    { name: "Bison Apex",      brand: "bison",   value: 26000, rarity: 0.78, color: 0xd03b3b, s: 0.96, body: "coupe",  detailStyle: "porsche", designStyle: "apex" },
+    { name: "Voltra Ion",      brand: "voltra",  value: 31000, rarity: 0.72, color: 0x67717b, s: 1.0,  body: "sedan",  detailStyle: "tesla-3", designStyle: "ion" },
+    { name: "Voltra Halo",     brand: "voltra",  value: 39000, rarity: 0.78, color: 0x1470e3, s: 1.04, body: "suv",    detailStyle: "tesla-y", designStyle: "halo" },
+    { name: "Adler Kanzler",   brand: "adler",   value: 44000, rarity: 0.88, color: 0x1c2230, s: 1.1,  body: "sedan",  detailStyle: "tesla-s", designStyle: "kanzler" },
+    { name: "Voltra Surge",    brand: "voltra",  value: 54000, rarity: 0.86, color: 0xd1262f, s: 1.06, body: "sedan",  detailStyle: "tesla-s", designStyle: "surge" },
+    { name: "Voltra Nova",     brand: "voltra",  value: 61000, rarity: 0.9,  color: 0x185bd6, s: 1.12, body: "suv",    detailStyle: "tesla-x", designStyle: "nova" },
+    { name: "Voltra Colossus", brand: "voltra",  value: 68000, rarity: 0.91, color: 0xa8afb2, s: 1.18, body: "pickup", detailStyle: "cybertruck", designStyle: "colossus" },
+    { name: "Adler 901 Turbo", brand: "adler",   value: 69000, rarity: 0.93, color: 0xf3cf39, s: 0.94, body: "coupe",  detailStyle: "porsche", designStyle: "adler901" },
+    { name: "Falcone Furia",   brand: "falcone", value: 71000, rarity: 0.95, color: 0xf28c28, s: 0.98, body: "coupe",  detailStyle: "aventador", designStyle: "furia" },
+    { name: "Falcone Rondine", brand: "falcone", value: 72000, rarity: 0.96, color: 0xffd451, s: 0.94, body: "coupe",  detailStyle: "ferrari", designStyle: "rondine" },
+    { name: "Falcone Tempesta", brand: "falcone", value: 86000, rarity: 0.975, color: 0xe02025, s: 0.96, body: "coupe", detailStyle: "enzo", designStyle: "tempesta" },
+    { name: "Vitesse Millenne", brand: "vitesse", value: 99000, rarity: 0.99, color: 0x202225, s: 0.97, body: "coupe", detailStyle: "veyron", designStyle: "millenne" },
   ];
+  // Old real-world names → the fictional roster. Keeps every stored garage
+  // string (realestate/netpersist saves), millionaires.js's supercar list and
+  // island_airport's carByName("Taxi") resolving after the rebrand.
+  const CAR_NAME_ALIASES = {
+    "Toyota Prius": "Kotori Sprout", "Honda Civic": "Kotori Pip",
+    "Yellow Cab": "Metro Cab", "Taxi": "Metro Cab", "Sedan": "Bison Vista",
+    "Chevy Malibu": "Bison Vista", "Dodge Caravan": "Bison Hauler",
+    "Ford F-150": "Bison Rampart", "Nissan 370Z": "Kotori Kaze",
+    "Jeep Cherokee": "Bison Frontier", "Dodge Charger": "Bison Stampede",
+    "Chevy Corvette": "Bison Apex", "Mercedes S-Class": "Adler Kanzler",
+    "Tesla Model 3": "Voltra Ion", "Tesla Model Y": "Voltra Halo",
+    "Tesla Model S": "Voltra Surge", "Tesla Model X": "Voltra Nova",
+    "Cybertruck": "Voltra Colossus", "Porsche 911 Turbo": "Adler 901 Turbo",
+    "Lamborghini Aventador": "Falcone Furia", "Ferrari 488": "Falcone Rondine",
+    "Ferrari Enzo": "Falcone Tempesta", "Bugatti Veyron": "Vitesse Millenne",
+  };
 
   let _seed = 1357913 & 0x7fffffff;
   function rng() { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; }
@@ -1047,7 +1078,10 @@
     for (const c of CARS) { const d = Math.abs(c.rarity - r); if (d < bd) { bd = d; best = c; } }
     return best;
   }
-  function carByName(name) { return CARS.find((c) => c.name === name) || CARS[0]; }
+  function carByName(name) {
+    const canon = CAR_NAME_ALIASES[name] || name;
+    return CARS.find((c) => c.name === canon) || CARS[0];
+  }
 
   // ---- the city PROPERTY market index --------------------------------------
   // A single macro index that drifts slowly around 1.0. Zillow multiplies every
