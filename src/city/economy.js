@@ -906,13 +906,21 @@
   //  and let other modules react ("the kingpin walks in"). NET WORTH is the
   //  scoreboard, not raw cash.
   // ============================================================
+  // EARTH-CALIBRATED, log-scale (one rung ≈ 10x the last — how real money
+  // works). $250k is a paid-off house, not rich; RICH is never-work-again
+  // money (~$10M), a real KINGPIN clears $100M, and the summit is the
+  // billionaire class. The bottom of the economy already mirrors real prices
+  // (a $9 burger, a $3M jet), so the ladder extends UP — nothing rebalances.
+  // Career-fame faucets (fight purses, racing renown, business empires) are
+  // what reach the top rungs; crime money is the early ladder.
   const TIERS = [
-    { id: "broke",       name: "Broke",        min: 0,        color: "#8a93a3" },
-    { id: "hustler",     name: "Hustler",      min: 2500,     color: "#9fd07e" },
-    { id: "comfortable", name: "Comfortable",  min: 25000,    color: "#7fd0ff" },
-    { id: "rich",        name: "Rich",         min: 150000,   color: "#ffd166" },
-    { id: "baller",      name: "Baller",       min: 600000,   color: "#ff9e6b" },
-    { id: "kingpin",     name: "KINGPIN",      min: 2500000,  color: "#ff5d7e" },
+    { id: "broke",       name: "Broke",        min: 0,          color: "#8a93a3" },
+    { id: "hustler",     name: "Hustler",      min: 10000,      color: "#9fd07e" },
+    { id: "comfortable", name: "Comfortable",  min: 100000,     color: "#7fd0ff" },
+    { id: "millionaire", name: "Millionaire",  min: 1000000,    color: "#ffd166" },
+    { id: "rich",        name: "Rich",         min: 10000000,   color: "#ff9e6b" },
+    { id: "kingpin",     name: "KINGPIN",      min: 100000000,  color: "#ff5d7e" },
+    { id: "billionaire", name: "BILLIONAIRE",  min: 1000000000, color: "#e8c1ff" },
   ];
   // total value of items the player is carrying (jewellery, valuables, drugs)
   function invWorth() {

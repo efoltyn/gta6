@@ -56,10 +56,15 @@
   // byte-identical. Both stay LRU-recycled oldest-first so draw calls stay
   // bounded no matter how long the magdump runs.
   function cityWounds() { return !!(CBZ.game && CBZ.game.mode === "city"); }
-  const CAP_BASE = 200, CAP_CITY = 320;      // global live-mesh cap (each is 1 tiny draw call)
-  const PER_ACTOR_BASE = 10, PER_ACTOR_CITY = 22; // wound+stain pairs per body
-  function capGlobal() { return cityWounds() ? CAP_CITY : CAP_BASE; }
-  function perActor() { return cityWounds() ? PER_ACTOR_CITY : PER_ACTOR_BASE; }
+  // global live-mesh cap (each is 1 tiny draw call) — now rides the quality tier,
+  // read LIVE per check (the slider can move mid-run); fallback = old constants.
+  function capBase() { return (CBZ.qScale ? CBZ.qScale(100, 400) : 200) | 0; }
+  function capCity() { return (CBZ.qScale ? CBZ.qScale(160, 640) : 320) | 0; }
+  // wound+stain pairs per body — also rides the quality tier
+  function perActorBase() { return (CBZ.qScale ? CBZ.qScale(5, 20) : 10) | 0; }
+  function perActorCity() { return (CBZ.qScale ? CBZ.qScale(11, 44) : 22) | 0; }
+  function capGlobal() { return cityWounds() ? capCity() : capBase(); }
+  function perActor() { return cityWounds() ? perActorCity() : perActorBase(); }
   const SPAWN_D2 = 45 * 45; // matches gore.js's "only where it can be seen" band
   const DRY_T = 12;         // seconds until a fresh wound dries brown
   const PROUD = 0.013;      // how far the disc sits off the surface (no z-fight)

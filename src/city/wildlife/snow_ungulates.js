@@ -67,7 +67,7 @@
   S({
     id: "caribou", name: "Caribou", biome: "snow", rarity: "uncommon",
     hp: 70, fur: "Caribou Pelt", furValue: 110, meat: "Venison", meatValue: 12,
-    scale: 1.05, herd: [3, 6], packs: 2, spd: 2.8, danger: 0, spook: 28, color: 0x8a7256,
+    scale: 1.05, herd: [10, 20], packs: 2, spd: 2.8, danger: 0, spook: 28, color: 0x8a7256,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const body2 = m(0x8a7256), pale = m(0xd8cdba), dark = m(0x4a3c2a), antler = m(0x6b5233);
@@ -112,7 +112,7 @@
   S({
     id: "mountain_goat", name: "Mountain Goat", biome: "snow", rarity: "uncommon",
     hp: 50, fur: "Mountain Goat Hide", furValue: 140,
-    scale: 0.85, herd: [1, 3], packs: 2, spd: 2.4, danger: 0.1, spook: 24, color: 0xf2f0ea,
+    scale: 0.85, herd: [3, 8], packs: 2, spd: 2.4, danger: 0.1, spook: 24, color: 0xf2f0ea,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const wool = m(0xf2f0ea), wool2 = m(0xe2ded2), black = m(0x171512), horn = m(0x201d18);
@@ -157,7 +157,7 @@
   S({
     id: "bison", name: "Bison", biome: "snow", rarity: "uncommon",
     hp: 200, fur: "Bison Pelt", furValue: 190, meat: "Beef", meatValue: 18, meatYield: 3,
-    scale: 1.3, herd: [2, 5], packs: 2, spd: 2.4, danger: 0.5, bite: 20, spook: 22, color: 0x4a3323,
+    scale: 1.3, herd: [12, 24], packs: 2, spd: 2.4, danger: 0.5, bite: 20, spook: 22, color: 0x4a3323,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const hair = m(0x4a3323), mane = m(0x2e2012), dark = m(0x1e150c), horn = m(0x14110c);

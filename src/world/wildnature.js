@@ -227,9 +227,12 @@
     const conifers = [], broadleaves = [], birches = [], snags = [], rockList = [], grasses = [];
     const STEP = 26;                                  // grid pitch (jittered)
     const J = STEP * 0.62;                            // jitter amplitude
-    const CAP_TREES = 5200;                          // hard caps protect the frame budget
-    const CAP_ROCKS = 1400;
-    const CAP_GRASS = 3200;
+    // Scatter density rides the quality tier, read ONCE here at build time
+    // (the world is generated once; a slider move applies on the next build).
+    // qScale may be absent in headless tests → fall back to the old caps.
+    const CAP_TREES = (CBZ.qScale ? CBZ.qScale(2600, 7500) : 5200) | 0;
+    const CAP_ROCKS = (CBZ.qScale ? CBZ.qScale(700, 2100) : 1400) | 0;
+    const CAP_GRASS = (CBZ.qScale ? CBZ.qScale(1600, 4800) : 3200) | 0;
 
     function classify(x, z) {
       // playable keep-out + the flat-ground / water / cliff rules

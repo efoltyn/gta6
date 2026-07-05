@@ -64,7 +64,7 @@
   S({
     id: "whitetail_deer", name: "Whitetail Deer", biome: "forest", rarity: "common",
     hp: 30, fur: "Deer Hide", furValue: 45, meat: "Venison", meatValue: 12, meatYield: 2,
-    scale: 1, herd: [3, 6], packs: 4, spd: 2.6, danger: 0, spook: 30, color: 0x8a5a32,
+    scale: 1, herd: [6, 14], packs: 4, spd: 2.6, danger: 0, spook: 30, color: 0x8a5a32,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const tan = m(0x9a6a3c), belly = m(0xd9c3a0), dark = m(0x5c3a20);

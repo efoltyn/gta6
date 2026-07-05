@@ -49,45 +49,8 @@
     },
   });
 
-  // ============================================================
-  //  RATTLESNAKE (western diamondback) — coiled low on the ground,
-  //  tan/brown body with dark DIAMOND blotches, raised S-curve neck
-  //  & TRIANGULAR head at the front (+X), banded segmented RATTLE.
-  // ============================================================
-  S({
-    id: "rattlesnake", name: "Rattlesnake", biome: "desert", rarity: "uncommon",
-    hp: 12, fur: "Snakeskin", furValue: 34, packs: 3, spd: 1.2, danger: 0.4, bite: 12,
-    scale: 0.7, color: 0xb59367,
-    build: function (ctx) {
-      const T = ctx.THREE, m = ctx.mat;
-      const g = new T.Group();
-      function box(w, h, d, mm) { return new T.Mesh(CBZ.boxGeom(w, h, d), mm); }
-      const tan = m(0xb59367), dark = m(0x6b4d31), pale = m(0xe6d6b4), black = m(0x1a1712);
-      // coiled body — two concentric flat tori laid on the ground
-      const outer = new T.Mesh(new T.TorusGeometry(0.42, 0.12, 6, 14), tan);
-      outer.rotation.x = Math.PI / 2; outer.position.set(-0.05, 0.13, 0); g.add(outer);
-      const inner = new T.Mesh(new T.TorusGeometry(0.22, 0.11, 6, 12), tan);
-      inner.rotation.x = Math.PI / 2; inner.position.set(0.02, 0.2, 0.06); g.add(inner);
-      // dark diamond blotches along the top of the coil
-      [[0.4, 0.14, 0.25], [0.0, 0.14, 0.45], [-0.4, 0.14, 0.1], [-0.15, 0.14, -0.4], [0.3, 0.2, -0.2]].forEach(function (o) {
-        const d1 = box(0.12, 0.05, 0.12, dark); d1.position.set(o[0], o[1] + 0.1, o[2]); d1.rotation.y = 0.78; g.add(d1);
-      });
-      // raised S-curve neck lifting toward the front
-      const neck1 = box(0.14, 0.14, 0.16, tan); neck1.position.set(0.36, 0.28, 0.2); g.add(neck1);
-      const neck2 = box(0.13, 0.16, 0.14, tan); neck2.position.set(0.5, 0.42, 0.1); neck2.rotation.z = 0.4; g.add(neck2);
-      const neck3 = box(0.12, 0.14, 0.13, tan); neck3.position.set(0.62, 0.54, 0.02); neck3.rotation.z = 0.2; g.add(neck3);
-      // TRIANGULAR head at the front (+X), cone snout
-      const head = box(0.18, 0.12, 0.2, tan); head.position.set(0.76, 0.56, 0); g.add(head);
-      const snout = new T.Mesh(new T.ConeGeometry(0.09, 0.18, 4), tan); snout.rotation.z = -Math.PI / 2; snout.position.set(0.9, 0.55, 0); g.add(snout);
-      // segmented banded RATTLE at the tail tip, held up
-      let ry = 0.32;
-      for (let i = 0; i < 4; i++) {
-        const seg = new T.Mesh(new T.ConeGeometry(0.06 - i * 0.008, 0.07, 4), (i % 2 === 0) ? pale : black);
-        seg.position.set(-0.55, ry, -0.02); g.add(seg); ry += 0.07;
-      }
-      return g;
-    },
-  });
+  // (RATTLESNAKE moved to city/wildlife/snakes.js — all snakes now share the
+  //  segment-chain SLITHER animation + venom/strike logic in the engine.)
 
   // ============================================================
   //  SNOWSHOE HARE — WHITE winter coat, medium ears with dark tips,
@@ -134,7 +97,7 @@
   S({
     id: "bighorn_sheep", name: "Bighorn Sheep", biome: "desert", rarity: "uncommon",
     hp: 60, fur: "Bighorn Hide", furValue: 130, meat: "Mutton", meatValue: 12,
-    herd: [1, 3], packs: 2, spd: 2.6, danger: 0.2, bite: 12, scale: 0.9, color: 0x8a6f4e,
+    herd: [3, 8], packs: 2, spd: 2.6, danger: 0.2, bite: 12, scale: 0.9, color: 0x8a6f4e,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const g = new T.Group();

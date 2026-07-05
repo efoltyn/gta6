@@ -766,7 +766,9 @@
   // ---- per-guard movement / facing ----
   function updateGuard(g, dt) {
     const pdx = player.pos.x - g.group.position.x, pdz = player.pos.z - g.group.position.z;
-    const renderNear = pdx * pdx + pdz * pdz < 52 * 52;
+    // rig draw range rides the LIVE quality tier (mid-tier ≈ the old fixed 52u)
+    const nr = CBZ.qScale ? CBZ.qScale(34, 73) : 52;
+    const renderNear = pdx * pdx + pdz * pdz < nr * nr;
     const renderImportant = g.alert > 0 || g.hunt > 0 || g.approach || g.investigate || g.kind === "warden";
     g.group.visible = renderNear || renderImportant;
     if (g.dead) {

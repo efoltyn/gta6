@@ -32,7 +32,10 @@
   const scene = CBZ.scene;
 
   // ---- tuning ----
-  const CAP = 40;             // hard pool cap (oldest recycled when full)
+  // hard pool cap (oldest recycled when full) — now rides the quality tier,
+  // read LIVE at each use (the slider can move mid-run); fallback = old 40.
+  function capLive() { return (CBZ.qScale ? CBZ.qScale(20, 72) : 40) | 0; }
+  const POOL_MAX = 72;        // backing store = capLive()'s ceiling, pre-warmed once
   const Y = 0.03;             // float just above ground to avoid z-fight
   const FADE_START = 24;      // decals older than this (by recency rank) begin to fade
   const MIN_OP = 0.16;        // never fade fully out — keep a faint stain
@@ -71,15 +74,18 @@
     return m;
   }
 
-  // pre-warm the whole pool once (no churn during play)
-  for (let i = 0; i < CAP; i++) pool.push({ mesh: makeMesh(), born: 0, op: MAX_OP });
+  // pre-warm the whole pool once to the knob's ceiling (no churn during play,
+  // even if the quality tier is raised mid-run); capLive() bounds the live ring.
+  for (let i = 0; i < POOL_MAX; i++) pool.push({ mesh: makeMesh(), born: 0, op: MAX_OP });
 
   // ---- drop a splat at (x,z) ----
   function drop(x, z) {
     if (!isFinite(x) || !isFinite(z)) return;
+    const cap = capLive();               // live cap — the tier may have moved
+    if (writeIdx >= cap) writeIdx = 0;   // cap shrank since last drop: rewind the ring
     const slot = pool[writeIdx];
-    writeIdx = (writeIdx + 1) % CAP;
-    if (used < CAP) used++;
+    writeIdx = (writeIdx + 1) % cap;
+    if (used < cap) used++;
 
     const mesh = slot.mesh;
     // randomized look: scale, spin (around the now-vertical axis), tint
@@ -157,14 +163,15 @@
   // This is O(used) and allocation-free.
   function fade(dt) {
     if (used <= FADE_START) return;
+    const cap = capLive();               // live cap — the tier may have moved
     // newest slot index is (writeIdx-1); walk backward through live slots.
     for (let rank = 0; rank < used; rank++) {
-      const idx = ((writeIdx - 1 - rank) % CAP + CAP) % CAP;
+      const idx = ((writeIdx - 1 - rank) % cap + cap) % cap;
       const slot = pool[idx];
       if (!slot.mesh.visible) continue;
       const target = rank < FADE_START
         ? slot.op
-        : MIN_OP + (slot.op - MIN_OP) * Math.max(0, 1 - (rank - FADE_START) / (CAP - FADE_START));
+        : MIN_OP + (slot.op - MIN_OP) * Math.max(0, 1 - (rank - FADE_START) / Math.max(1, cap - FADE_START));
       const cur = slot.mesh.material.opacity;
       if (cur > target) {
         slot.mesh.material.opacity = Math.max(target, cur - 0.06 * dt);

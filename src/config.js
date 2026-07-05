@@ -190,9 +190,12 @@
   CBZ.CROWD_RIG_CAP = typeof CBZ.CROWD_RIG_CAP === "number" ? CBZ.CROWD_RIG_CAP : 1600;
   // Face-rig promotion: how many nearby agents wear a full generated face and
   // from how far they start "generating" (the closest N within range get a rig
-  // each frame). Bumped so faces appear SOONER as you approach (less pop-in).
-  CBZ.CROWD_FACE_RIGS = typeof CBZ.CROWD_FACE_RIGS === "number" ? CBZ.CROWD_FACE_RIGS : 48;
-  CBZ.CROWD_FACE_DIST = typeof CBZ.CROWD_FACE_DIST === "number" ? CBZ.CROWD_FACE_DIST : 42;
+  // each frame). No numeric default is stamped here any more — the default
+  // budget/range now ride the LIVE quality tier (CBZ.qScale) inside
+  // entities/crowd.js. A pre-load window.CBZ.CROWD_FACE_RIGS / _DIST
+  // override still wins over the tier-scaled default.
+  if (typeof CBZ.CROWD_FACE_RIGS !== "number") CBZ.CROWD_FACE_RIGS = undefined;
+  if (typeof CBZ.CROWD_FACE_DIST !== "number") CBZ.CROWD_FACE_DIST = undefined;
   CBZ.SIM_OVERVIEW_BUDGET = typeof CBZ.SIM_OVERVIEW_BUDGET === "number" ? CBZ.SIM_OVERVIEW_BUDGET : 12000;
   CBZ.SURV = {
     arena: { cx: 0, cz: 600, radius: 120 }, // far from the prison; own ground+sun
@@ -482,4 +485,17 @@
   }
   CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource() }); };
   CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource() }); };
+
+  // ---- THE ONE QUALITY KNOB (owner rule: NO hardcoded content budgets). ----
+  // Every content system (decal pools, gore counts, rain density, LOD draw
+  // ranges, scenery scatter…) sizes itself through this instead of a magic
+  // constant. lo = the emergency tier-0 value, hi = the full-fat tier-4 value,
+  // linear in between. Reads the LIVE tier (core/quality.js keeps
+  // CBZ.qualityLevel in sync with the pause-menu perf/quality slider and the
+  // adaptive governor), so the slider is the single authority on how much the
+  // GPU is asked to draw — never a hardcoded number in some file.
+  CBZ.qScale = function (lo, hi) {
+    const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
+    return lo + (hi - lo) * (Math.max(0, Math.min(4, q)) / 4);
+  };
 })();

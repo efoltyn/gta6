@@ -20,7 +20,7 @@
   S({
     id: "cow", name: "Cow", biome: "farmland", rarity: "common",
     hp: 80, fur: "Cowhide", furValue: 40, meat: "Beef", meatValue: 18, meatYield: 3,
-    scale: 1.1, herd: [2, 4], packs: 3, spd: 1.6, danger: 0, spook: 18, color: 0xffffff,
+    scale: 1.1, herd: [4, 9], packs: 3, spd: 1.6, danger: 0, spook: 18, color: 0xffffff,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const white = m(0xffffff), black = m(0x1c1c1a), pink = m(0xe8a0a0), horn = m(0xd8cba0), dark = m(0x2a241c);
@@ -112,7 +112,7 @@
   S({
     id: "sheep", name: "Sheep", biome: "farmland", rarity: "common",
     hp: 35, fur: "Wool", furValue: 30, meat: "Mutton", meatValue: 12,
-    herd: [3, 6], packs: 3, spd: 1.8, danger: 0, spook: 20, scale: 0.8, color: 0xf0ece2,
+    herd: [8, 16], packs: 3, spd: 1.8, danger: 0, spook: 20, scale: 0.8, color: 0xf0ece2,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const wool = m(0xf0ece2), wool2 = m(0xe4dfd2), face = m(0x2c2822), leg = m(0x35302a);
@@ -145,7 +145,7 @@
   S({
     id: "goat", name: "Goat", biome: "farmland", rarity: "common",
     hp: 35, fur: "Goat Hide", furValue: 26, meat: "Mutton", meatValue: 12,
-    herd: [2, 4], packs: 2, spd: 2.2, danger: 0.1, scale: 0.75, color: 0xd8cdbb,
+    herd: [4, 8], packs: 2, spd: 2.2, danger: 0.1, scale: 0.75, color: 0xd8cdbb,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       // white or tan coat, chosen per-animal
@@ -188,7 +188,7 @@
   // ============================================================
   S({
     id: "horse", name: "Horse", biome: "farmland", rarity: "uncommon",
-    hp: 120, fur: "Horsehide", furValue: 90, herd: [2, 4], packs: 2,
+    hp: 120, fur: "Horsehide", furValue: 90, herd: [4, 9], packs: 2,
     spd: 3.4, danger: 0, spook: 24, scale: 1.1, color: 0x6e4326,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
@@ -235,7 +235,7 @@
   S({
     id: "chicken", name: "Chicken", biome: "farmland", rarity: "common",
     hp: 6, fur: "Feathers", furValue: 6, meat: "Chicken", meatValue: 6,
-    herd: [3, 6], packs: 3, spd: 1.6, danger: 0, scale: 0.35, color: 0xf2f2f2,
+    herd: [4, 9], packs: 3, spd: 1.6, danger: 0, scale: 0.35, color: 0xf2f2f2,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       // white or light-brown plumage per-bird

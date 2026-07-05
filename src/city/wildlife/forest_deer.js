@@ -19,7 +19,7 @@
   S({
     id: "elk", name: "Elk", biome: "forest", rarity: "uncommon",
     hp: 75, fur: "Elk Pelt", furValue: 95, meat: "Elk Meat", meatValue: 16, meatYield: 2,
-    scale: 1.15, herd: [2, 4], packs: 3, spd: 2.4, danger: 0, spook: 30, color: 0x6b4a2c,
+    scale: 1.15, herd: [4, 9], packs: 3, spd: 2.4, danger: 0, spook: 30, color: 0x6b4a2c,
     build: function (ctx) {
       const T = ctx.THREE, m = ctx.mat, r = ctx.rng;
       const tan = m(0x8a5f34), body2 = m(0x6b4a2c), mane = m(0x3a2716), rump = m(0xd8c79a), dark = m(0x2c1c10);

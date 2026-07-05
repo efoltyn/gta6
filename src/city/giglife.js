@@ -62,9 +62,11 @@
   //  and the WHY is "a run you can WATCH", not "gridlock". Keep it to a
   //  handful citywide; respects the spirit of vehicles.js' npcDrivers>=3
   //  carjack cap (we can't read that private counter, so we cap our own
-  //  pool — the two are independent kinds of NPC driver).
+  //  pool — the two are independent kinds of NPC driver). The cap RIDES the
+  //  LIVE quality tier (lo 2 → hi 6) and is read at every check, so the
+  //  pause-menu slider takes effect immediately.
   // ============================================================
-  const GIG_CAR_MAX = 3;
+  const GIG_CAR_MAX = () => Math.round(CBZ.qScale ? CBZ.qScale(2, 6) : 3);
   let _gigCars = [];                  // live gig cars we own + steer (bounded by GIG_CAR_MAX)
 
   function activeGigCars() {
@@ -76,7 +78,7 @@
     return _gigCars.length;
   }
   CBZ.cityGigCount = activeGigCars;   // gigfleet.js reads this for HUD / dispatch budget
-  CBZ.cityGigCap = function () { return GIG_CAR_MAX; };
+  CBZ.cityGigCap = function () { return GIG_CAR_MAX(); };
 
   // ============================================================
   //  GIG ANCHORS — registered at city build into CBZ.cityWorkAnchors.
@@ -274,7 +276,7 @@
   // ============================================================
   CBZ.cityGigSpawnCar = function (ped, dropAnchor, opts) {
     if (!ped || ped.dead || !inCity() || noSim()) return null;
-    if (activeGigCars() >= GIG_CAR_MAX) return null;
+    if (activeGigCars() >= GIG_CAR_MAX()) return null;
     const A = arena(); if (!A || !CBZ.cityMakeCar) return null;
     opts = opts || {};
     const econ = CBZ.cityEcon;

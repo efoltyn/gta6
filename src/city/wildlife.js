@@ -25,10 +25,11 @@
    its home biome, rarity, HP, pelt name + value, and a low-poly build(ctx)
    that returns a THREE.Group (feet at y=0, nose toward +X).
 
-   DRAW-CALL DISCIPLINE (owner rule #4 — ~1000-NPC draw-call bound): live
-   animals are capped (POP_CAP) and each is a small hand-built mesh group, the
-   same cheap approach biome_forest used for its deer. No physics, no per-limb
-   colliders — a light wander integrator moves them and they never leave home.
+   PERFORMANCE (owner rule #4 — draw-call bound): there is NO population
+   budget. Species spawn their natural populations; the ONE quality knob
+   (core/quality.js tier, the pause-menu perf/quality slider) governs cost via
+   a per-tier LOD visibility radius + default frustum culling. Each animal is
+   a small hand-built mesh group with no physics or per-limb colliders.
 
    Deterministic (owner rule #5): a single seeded rng places every herd, so the
    same animals stand in the same meadow every run. Ambient motion uses
@@ -46,14 +47,20 @@
   const mat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
   // ---- tuning -----------------------------------------------------------
-  const POP_CAP = 56;            // max live animals across the whole world (draw-call budget)
-  const HERD_MAX = 4;            // clamp a spawned herd so no one species floods the cap
+  // NO POPULATION BUDGET. Every species spawns its NATURAL population (packs ×
+  // real herd sizes). Render cost is governed by the game's one true knob —
+  // the performance/quality tier (core/quality.js, CBZ.qualityLevel): animals
+  // LOD-hide beyond a tier-driven visibility radius, and frustum culling does
+  // the rest. Gameplay content is never clamped by a hardcoded perf number.
+  const ANIMAL_VIS = [90, 130, 190, 270, 360];   // vis radius (u) per quality tier 0..4
   const AQUATIC_R0 = 560;        // ocean band (from field centre) inner radius
   const AQUATIC_R1 = 1500;       // ..outer radius (still inside the terrain ring)
   const FIELD_CX = 0, FIELD_CZ = -700;   // matches terrain.js CX/CZ field centre
   const SKIN_REACH = 4.2;        // how close you must be to skin a carcass
-  const RESPAWN_EVERY = 42;      // s between top-up passes
   const CARCASS_LINGER = 150;    // s a skinned/ignored carcass stays before fading
+  const BREED_EVERY = 26;        // s between breeding passes
+  const BREED_RATE = 0.09;       // per LIVE animal chance to reproduce each pass (× room left)
+  const GROW_TIME = 75;          // s a newborn takes to reach full size
 
   // ---- deterministic rng (mulberry32) -----------------------------------
   function makeRng(seed) {
@@ -169,6 +176,18 @@
       state: "wander", alarm: 0, home: { x: x, z: z },
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
     };
+    // snakes carry a segment chain the engine undulates (slither) — cache the
+    // parts the build() registered on userData so the anim loop is allocation-free.
+    if (sp.snake && grp.userData) {
+      a.snake = true;
+      a.segs = grp.userData.segs || [];
+      a.hood = grp.userData.hood || null;
+      a.rattle = grp.userData.rattle || null;
+      a.rear = grp.userData.rear || 0;
+      a.spacing = grp.userData.spacing || 0.2;
+      a.baseY = grp.userData.baseY || 0.08;
+      a.phase = rng() * 6.283; a.reared = false; a.strikeT = 0; a.strikeAnim = 0; a.grabT = 0;
+    }
     animals.push(a);
     return a;
   }
@@ -188,81 +207,226 @@
 
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
 
-  function seedHerd(sp) {
-    // place ONE herd of a species in its home biome (or the sea band).
-    const regs = sp.aquatic ? null : biomeRegions(sp.biome);
-    if (!sp.aquatic && (!regs || !regs.length)) return 0;
-    const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
-    let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
-    herd = Math.min(herd, HERD_MAX, POP_CAP - animals.length);
-    let n = 0;
-    for (let h = 0; h < herd; h++) {
-      const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-      const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-      makeActor(sp, jx, jz); n++;
+  // ============================================================
+  //  HERDS — a herd moves as ONE cohesive body (boids: alignment + cohesion +
+  //  separation) and PANICS as one: spook or shoot a single member and the
+  //  alarm ripples through the whole herd, so a bison herd stampedes as a wall
+  //  and a deer herd bolts together. Each herd carries a live centroid + mean
+  //  heading (recomputed once per frame, O(n) total, not O(n²)).
+  // ============================================================
+  const herds = [];
+  function newHerd(sp) { const hr = { sp: sp, members: [], cx: 0, cz: 0, heading: rng() * 6.283, n: 0, panic: 0, fleeHx: 0, fleeHz: 0 }; herds.push(hr); return hr; }
+  function joinHerd(a, hr) { a.herd = hr; if (hr) hr.members.push(a); }
+  function leaveHerd(a) {
+    const hr = a.herd; if (!hr) return;
+    const i = hr.members.indexOf(a); if (i >= 0) hr.members.splice(i, 1);
+    a.herd = null;
+  }
+  function updateHerds(dt) {
+    for (let h = 0; h < herds.length; h++) {
+      const hr = herds[h];
+      let sx = 0, sz = 0, hx = 0, hz = 0, n = 0, panic = 0;
+      for (let m = 0; m < hr.members.length; m++) {
+        const a = hr.members[m];
+        if (a.dead || a.tamed || a.ridden) continue;          // corpses & pets leave the wander flock
+        sx += a.pos.x; sz += a.pos.z;
+        hx += Math.cos(a.heading); hz += Math.sin(a.heading);
+        n++;
+        if (a.alarm > panic) panic = a.alarm;                 // loudest alarm carries the herd
+      }
+      hr.n = n;
+      if (n) { hr.cx = sx / n; hr.cz = sz / n; if (hx || hz) hr.heading = Math.atan2(hz, hx); }
+      hr.panic = Math.max(0, panic);
     }
-    return n;
+  }
+
+  function seedIndividuals(sp, count) {
+    // place `count` individuals of a species, clustered into herds of the
+    // species' NATURAL size. Herd size is a per-species TRAIT (how they group);
+    // `count` is set by the ratio system (how many exist). The two are
+    // decoupled — that's what makes the mix scalable.
+    let placed = 0, guard = 0;
+    while (placed < count && guard++ < 400) {
+      const regs = sp.aquatic ? null : biomeRegions(sp.biome);
+      if (!sp.aquatic && (!regs || !regs.length)) return placed;
+      const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
+      let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
+      herd = Math.min(herd, count - placed);
+      const hr = newHerd(sp);            // this cluster moves & panics as ONE unit
+      for (let h = 0; h < herd; h++) {
+        const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        const a = makeActor(sp, jx, jz); placed++;
+        joinHerd(a, hr);
+        // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
+        if (h === herd - 1 && herd >= 2 && rng() < 0.75) {
+          a.grow = rng() * 0.4;
+          a.group.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+        }
+      }
+    }
+    return placed;
+  }
+
+  // ============================================================
+  //  THE RATIO SYSTEM — population by PROPORTION, not per-species numbers.
+  //
+  //  Grounded in real ecology (energy pyramid / 10% rule: predators are far
+  //  rarer than prey) and RDR2's feel (prey in big herds, pack hunters in
+  //  packs, apex predators lurking singly & rare, legendaries unique).
+  //
+  //  Three layers of pure ratios + ONE design scalar. Nothing per-species is
+  //  hardcoded, so adding/removing a species auto-rebalances and the world
+  //  total never drifts. NOTE: DENSITY is ECOLOGICAL richness (a design knob),
+  //  NOT a perf budget — render cost is the quality slider's job (LOD below).
+  //    1. DENSITY        how many animals conceptually inhabit the world.
+  //    2. BIOME_SHARE    how that splits across biomes (sums to 1).
+  //    3. RARITY_WEIGHT  a common is 12x a rare — so "rare" stays rare no
+  //                      matter how many rare species exist. Species in a tier
+  //                      split their tier's slice evenly.
+  //    4. PRED_MAX       predators can't exceed this fraction of a biome
+  //                      (the pyramid backstop); the surplus reweights to prey.
+  //  Legendaries are outside all of this: exactly ONE individual each.
+  // ============================================================
+  // DENSITY sized so a gregarious species forms a REAL herd, not a few strays:
+  // e.g. snow ~16% x 850 ≈ 136 animals, of which bison (an uncommon) work out
+  // to ~18 — one proper stampeding herd. A world of a few hundred could never
+  // hold a legit herd. This is ECOLOGICAL richness (a design knob), NOT a perf
+  // budget: distant animals FREEZE (see tick) and LOD-hide (quality slider), so
+  // only the herds near you actually think and draw — the world scales cheaply.
+  const DENSITY = 850;
+  const BIOME_SHARE = { forest: 0.25, farmland: 0.16, desert: 0.23, snow: 0.16, water: 0.20 };
+  const RARITY_WEIGHT = { common: 12, uncommon: 4, rare: 1 };
+  const PRED_MAX = 0.20;                    // ≤ ~1 predator per 4 prey per biome
+  // TROPHIC ROLE (diet), for the pyramid — distinct from `danger` (will it hurt
+  // you). Only true CARNIVORES count as predators; a bison, moose, rhino or boar
+  // is dangerous PREY (charges when threatened but eats plants), so it must NOT
+  // suppress the predator pool. A species can override via sp.predator (true =
+  // hunter). This is the one place trophic role lives; extend the set for new
+  // carnivores, or set sp.predator on the species itself.
+  const CARNIVORE = {
+    gray_wolf: 1, arctic_wolf: 1, coyote: 1, red_fox: 1,
+    black_bear: 1, brown_bear: 1, polar_bear: 1,
+    bengal_tiger: 1, lion: 1, white_lion: 1, cheetah: 1, snow_leopard: 1,
+    rattlesnake: 1, king_cobra: 1, black_mamba: 1, green_anaconda: 1,
+    great_white_shark: 1, megalodon: 1,
+  };
+  function isPredator(sp) { return sp.predator != null ? !!sp.predator : !!CARNIVORE[sp.id]; }
+
+  function planBiome(list, target) {
+    // list = non-legendary species in one biome. Returns { id: count }.
+    let wSum = 0;
+    for (const sp of list) wSum += (RARITY_WEIGHT[sp.rarity] || 1);
+    const ideal = {};
+    for (const sp of list) ideal[sp.id] = target * (RARITY_WEIGHT[sp.rarity] || 1) / wSum;
+    // PREDATOR CEILING: if predators overshoot their share of the biome, scale
+    // them down and hand the freed budget to prey (proportionally) — a biome
+    // rich in predator SPECIES still stays prey-dominated, per the pyramid.
+    let predSum = 0, preySum = 0;
+    for (const sp of list) (isPredator(sp) ? (predSum += ideal[sp.id]) : (preySum += ideal[sp.id]));
+    const predCap = target * PRED_MAX;
+    if (predSum > predCap && preySum > 0) {
+      const kPred = predCap / predSum, freed = predSum - predCap;
+      for (const sp of list) if (isPredator(sp)) ideal[sp.id] *= kPred;
+      for (const sp of list) if (!isPredator(sp)) ideal[sp.id] += freed * (ideal[sp.id] / preySum);
+    }
+    // round to integers with largest-remainder so the biome total is exact,
+    // and guarantee every species is PRESENT (min 1 — presence is not optional).
+    const counts = {}; let floorSum = 0; const rema = [];
+    for (const sp of list) {
+      const v = Math.max(1, ideal[sp.id]);
+      const f = Math.floor(v); counts[sp.id] = f; floorSum += f;
+      rema.push({ id: sp.id, r: v - f });
+    }
+    let leftover = Math.max(0, Math.round(target) - floorSum);
+    rema.sort((a, b) => b.r - a.r);
+    for (let i = 0; i < leftover; i++) counts[rema[i % rema.length].id]++;
+    return counts;
   }
 
   function spawnAll() {
     const S = CBZ.WILDLIFE_SPECIES || {};
-    // Build an INTERLEAVED work list so the cap is shared FAIRLY across biomes
-    // (filling forest-first would starve farmland/water). Bucket species by
-    // biome, then round-robin one biome at a time; each species contributes
-    // `packs` herds spread across the rounds.
+    // bucket non-legendary species by biome
     const buckets = {};
-    for (const id in S) {
-      const sp = S[id]; if (sp.rarity === "legendary") continue;
-      (buckets[sp.biome] || (buckets[sp.biome] = [])).push(sp);
+    for (const id in S) { const sp = S[id]; if (sp.rarity === "legendary") continue; (buckets[sp.biome] || (buckets[sp.biome] = [])).push(sp); }
+    for (const biome in buckets) {
+      const target = Math.round(DENSITY * (BIOME_SHARE[biome] || 0.15));
+      const counts = planBiome(buckets[biome], target);
+      for (const sp of buckets[biome]) seedIndividuals(sp, counts[sp.id] || 1);
     }
-    const biomes = Object.keys(buckets);
-    // remaining herd allowance per species
-    const left = {};
-    for (const b of biomes) for (const sp of buckets[b]) left[sp.id] = Math.max(1, sp.packs || (sp.aquatic ? 2 : 2));
-    let progress = true;
-    while (animals.length < POP_CAP && progress) {
-      progress = false;
-      for (let bi = 0; bi < biomes.length && animals.length < POP_CAP; bi++) {
-        const list = buckets[biomes[bi]];
-        // one species from this biome per round (rotate through the bucket)
-        const rot = (buckets[biomes[bi]]._rot || 0);
-        for (let k = 0; k < list.length && animals.length < POP_CAP; k++) {
-          const sp = list[(rot + k) % list.length];
-          if (left[sp.id] > 0) { const added = seedHerd(sp); if (added > 0) { left[sp.id]--; progress = true; } buckets[biomes[bi]]._rot = (rot + k + 1) % list.length; break; }
-        }
-      }
-    }
-    // LEGENDARY — the incredibly rare ones. Each gets ONE guaranteed spawn deep
-    // in its home range (exempt from POP_CAP — there are only a handful and they
-    // ARE the marquee "incredibly rare animal" encounters).
+    // LEGENDARY — the incredibly rare ones. Exactly ONE each, deep in range.
     for (const id in S) {
-      const sp = S[id];
-      if (sp.rarity !== "legendary") continue;
+      const sp = S[id]; if (sp.rarity !== "legendary") continue;
       let pt;
       if (sp.aquatic) pt = oceanPoint(rng);
       else { const regs = biomeRegions(sp.biome); if (!regs.length) continue; pt = regionPoint(regs[(rng() * regs.length) | 0], rng); }
-      const a = makeActor(sp, pt.x, pt.z);
-      a.legendary = true;
+      const a = makeActor(sp, pt.x, pt.z); a.legendary = true;
     }
   }
 
-  function topUp() {
-    // gently refill toward the cap so hunted-out meadows recover over time.
-    if (animals.length >= POP_CAP - 6) return;
-    const S = CBZ.WILDLIFE_SPECIES || {};
-    const ids = [];
-    for (const id in S) if (S[id].rarity !== "legendary" && (S[id].respawn !== false)) ids.push(id);
-    if (!ids.length) return;
-    let added = 0;
-    for (let i = 0; i < ids.length && animals.length < POP_CAP && added < 8; i++) {
-      const sp = S[ids[(rng() * ids.length) | 0]];
-      let pt;
-      if (sp.aquatic) pt = oceanPoint(rng);
-      else { const regs = biomeRegions(sp.biome); if (!regs.length) continue; pt = regionPoint(regs[(rng() * regs.length) | 0], rng); }
-      // never pop in right on top of the player.
-      const P = CBZ.player && CBZ.player.pos;
-      if (P && Math.hypot(pt.x - P.x, pt.z - P.z) < 60) continue;
-      makeActor(sp, pt.x, pt.z); added++;
+  // ============================================================
+  //  BREEDING — population-relative spawning. There is NO magic respawn: new
+  //  animals only ever come FROM living animals of the same species (each pass,
+  //  every live animal has a small chance to produce a newborn beside it,
+  //  logistic-damped by how full the world is). The consequence is real
+  //  ecology: a thriving herd recovers on its own, a hunted-down herd recovers
+  //  SLOWLY, and a species hunted to ZERO is EXTINCT — forever. Zero breeds
+  //  zero. Legendaries (respawn:false) are unique and never breed: kill the
+  //  White Stag and there will never be another.
+  // ============================================================
+  function liveCount() {
+    let n = 0;
+    for (let i = 0; i < animals.length; i++) if (!animals[i].dead) n++;
+    return n;
+  }
+
+  // per-species carrying capacity = the population the world was SEEDED with.
+  // This is ECOLOGY, not a perf budget: it's the natural herd size each species
+  // breeds back toward (a herd at its natural size simply has no room to grow).
+  const CAPS = {};
+  function recordCaps() {
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i]; if (a.dead) continue;
+      CAPS[a.species.id] = (CAPS[a.species.id] || 0) + 1;
+    }
+  }
+
+  function breed() {
+    // bucket the LIVING by species (the dead don't reproduce)
+    const bySpecies = {};
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (a.dead) continue;
+      const sp = a.species;
+      if (sp.rarity === "legendary" || sp.respawn === false) continue;   // unique — never bred
+      (bySpecies[sp.id] || (bySpecies[sp.id] = [])).push(a);
+    }
+    const P = CBZ.player && CBZ.player.pos;
+    for (const id in bySpecies) {
+      const herd = bySpecies[id];               // extinct species simply aren't here
+      const sp = herd[0].species;
+      // logistic growth toward THIS species' own carrying capacity: births ∝
+      // current population × how far below its natural size the herd is. A
+      // full herd births nothing; a herd of 1 recovers slowly; 0 breeds 0.
+      const cap = CAPS[id] || 4;
+      const room = 1 - herd.length / cap;
+      if (room <= 0) continue;
+      let births = 0;
+      for (let i = 0; i < herd.length; i++) if (Math.random() < BREED_RATE * room) births++;
+      births = Math.min(births, 2);             // one pass never explodes a herd
+      for (let b = 0; b < births; b++) {
+        const parent = herd[(Math.random() * herd.length) | 0];
+        const jit = sp.aquatic ? 26 : 8;
+        const nx = parent.pos.x + (Math.random() - 0.5) * jit;
+        const nz = parent.pos.z + (Math.random() - 0.5) * jit;
+        // don't pop a newborn in right under the player's nose
+        if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
+        const kid = makeActor(sp, nx, nz);
+        kid.grow = 0;                            // born tiny; grows up in tick()
+        kid.group.scale.setScalar((sp.scale || 1) * 0.4);   // small from frame one
+        kid.home = { x: parent.home.x, z: parent.home.z };
+        joinHerd(kid, parent.herd);              // born into the parent's herd
+      }
     }
   }
 
@@ -287,7 +451,9 @@
       killAnimal(a, hit);
       return { head: !!(hit && hit.head), down: true, dmg: dmg };
     }
-    // WOUNDED — predators charge, prey bolts.
+    // WOUNDED — predators charge, prey bolts. (A TAMED animal never turns on
+    // its owner: it just takes the hit — shooting your own pet is on you.)
+    if (a.tamed) return { head: !!(hit && hit.head), down: false, dmg: dmg };
     a.alarm = 8;
     const P = CBZ.player && CBZ.player.pos;
     if (a.species.danger > 0.15 && P) { a.state = "charge"; }
@@ -343,6 +509,7 @@
   function removeCarcass(a) {
     const gi = animals.indexOf(a); if (gi >= 0) animals.splice(gi, 1);
     const ci = carcasses.indexOf(a); if (ci >= 0) carcasses.splice(ci, 1);
+    leaveHerd(a);                                 // drop the stale member ref
     if (a.group && a.group.parent) a.group.parent.remove(a.group);
   }
 
@@ -377,11 +544,122 @@
   // ============================================================
   //  THE UPDATE — wander / graze / flee / charge, aquatic bob, carcass fade.
   // ============================================================
+  // VENOM — a bite from a venomous snake leaves poison that keeps draining your
+  // health for a few seconds AFTER the snake is gone (ticked once/sec here).
+  function applyVenom(sp) {
+    const v = g._venom || (g._venom = { t: 0, acc: 0, dps: 0, name: "" });
+    v.t = Math.max(v.t, sp.venom === true ? 6 : 4);   // refresh/extend
+    v.dps = Math.max(v.dps, sp.venomDps || 5);
+    v.name = sp.name;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("☠ VENOM — " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
+  }
+  function venomTick(dt) {
+    const v = g._venom; if (!v || v.t <= 0) return;
+    v.t -= dt; v.acc += dt;
+    if (v.acc >= 1) { v.acc -= 1; if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(v.dps, (v.name || "Venom") + " venom"); } catch (e) {} } }
+    if (v.t <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("The venom wears off.", 2);
+  }
+
+  // ============================================================
+  //  SNAKES — no legs, so they SLITHER: a travelling sine wave runs down the
+  //  body-segment chain each frame. Cobras REAR + flare a hood as a warning,
+  //  vipers/mambas STRIKE (a head lunge) to deliver a venom bite, and the
+  //  anaconda CONSTRICTS on contact. All allocation-free, reading the cached
+  //  segment refs (a.segs / a.hood / a.rattle) the build() registered.
+  // ============================================================
+  function snakeAnimate(a, dt) {
+    const segs = a.segs; if (!segs || !segs.length) return;
+    const striking = a.strikeAnim > 0;
+    const waveSpd = a.state === "flee" ? 12 : (a.reared ? 2.5 : 5.5);
+    a.phase += dt * waveSpd;
+    const amp = a.reared ? 0.05 : 0.17 * (a.moving ? 1 : 0.35);
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i]; if (!s) continue;
+      // base: laid out behind the head along local −X; head (i=0) lunges on a strike
+      s.position.x = -i * a.spacing + (striking && i < 3 ? (3 - i) * a.spacing * 1.0 * a.strikeAnim : 0);
+      s.position.z = Math.sin(a.phase - i * 0.7) * amp * Math.min(1, i / 2 + 0.35);
+      s.position.y = (a.reared && i < a.rear) ? a.baseY + (a.rear - i) * a.spacing * 0.85 : a.baseY;
+    }
+    if (a.strikeAnim > 0) a.strikeAnim = Math.max(0, a.strikeAnim - dt * 4);
+    if (a.hood) { const f = a.reared ? 1 : 0.12; for (let h = 0; h < a.hood.length; h++) if (a.hood[h]) a.hood[h].scale.setScalar(f); }
+    if (a.rattle && (a.reared || a.alarm > 0.1)) a.rattle.rotation.y = Math.sin(a.phase * 3.5) * 0.6;
+  }
+
+  function snakeTick(a, dt, P) {
+    const sp = a.species, grp = a.group;
+    if (grp.visible === false) return;                 // far snakes idle — no sim
+    if (a.alarm > 0) a.alarm -= dt;
+    if (a.strikeT > 0) a.strikeT -= dt;
+    if (a.grabT > 0) a.grabT -= dt;
+    a.reared = false; a.moving = false;
+    let spd = 0, nearP = Infinity, towardP = a.heading;
+    if (P) { const dx = P.x - grp.position.x, dz = P.z - grp.position.z; nearP = dx * dx + dz * dz; towardP = Math.atan2(dz, dx); }
+    const senseR = Math.max(sp.spook || 0, 11);
+    const strikeR = sp.constrictor ? 2.5 : 2.9;
+
+    if (P && nearP < senseR * senseR) {
+      if (sp.constrictor) {
+        // ANACONDA — ambush hunter: close the gap, then CONSTRICT on contact.
+        if (nearP < strikeR * strikeR) {
+          if (a.grabT <= 0) {
+            if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(sp.bite || 20, a); } catch (e) {} }
+            a.grabT = 0.9;
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + sp.name + " coils around you — thrash free!", 1.6, { urgent: true });
+          }
+        } else { a.heading = towardP; spd = (sp.spd || 1.4) * 1.6; a.moving = true; a.state = "hunt"; }
+      } else if (sp.venom || sp.danger >= 0.4) {
+        // VIPER / COBRA / MAMBA — warn, then STRIKE (venom on the bite).
+        if (nearP < strikeR * strikeR) {
+          a.reared = !!a.rear; a.heading = towardP;
+          if (a.strikeT <= 0) {
+            a.strikeAnim = 1; a.strikeT = 1.6;
+            if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(sp.bite || 12, a); } catch (e) {} }
+            if (sp.venom) applyVenom(sp);
+          }
+        } else if ((sp.spd || 0) >= 3 && nearP > (strikeR + 3) * (strikeR + 3)) {
+          a.state = "flee"; a.heading = towardP + Math.PI; spd = (sp.spd || 3) * 1.4; a.moving = true;   // mamba bolts
+        } else { a.reared = !!a.rear; a.heading = towardP; a.alarm = Math.max(a.alarm, 2); }             // rear & hold ground
+      } else {
+        a.state = "flee"; a.heading = towardP + Math.PI + (Math.random() - 0.5) * 0.6; spd = (sp.spd || 1.4) * 1.8; a.moving = true;  // garter flees
+      }
+    } else {
+      // wander: a slow, near-constant slither with the odd pause + turn
+      a.state = "wander";
+      a.turnT -= dt;
+      if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 1.2; a.turnT = 3 + Math.random() * 4; }
+      spd = (sp.spd || 1.4) * 0.6; a.moving = true;
+    }
+
+    if (spd > 0 && !a.reared) {
+      const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
+      const nz = grp.position.z + Math.sin(a.heading) * spd * dt;
+      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
+      const onHome = reg && reg.biome === sp.biome && CBZ.cityRegionHit(reg, nx, nz, 4);
+      if (onHome) { grp.position.x = nx; grp.position.z = nz; grp.position.y = groundY(nx, nz); }
+      else { a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6; a.moving = false; }
+    }
+    grp.rotation.y = -a.heading + Math.PI / 2;
+    snakeAnimate(a, dt);
+  }
+
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
+    venomTick(dt);                 // poison keeps draining after a venomous bite
+    updateHerds(dt);               // live centroid + mean heading + herd alarm
+    // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
+    // tier): animals beyond the tier's radius don't render or animate their
+    // meshes — same pattern as the ped rig LOD. Big species read farther
+    // (you SHOULD spot an elephant across the savanna before a rabbit).
+    const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : ANIMAL_VIS.length - 1;
+    const visR = ANIMAL_VIS[Math.max(0, Math.min(ANIMAL_VIS.length - 1, q))];
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species, grp = a.group;
+      if (P) {
+        const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
+        const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);
+        grp.visible = a.ridden || a.tamed || (vdx * vdx + vdz * vdz) < vr * vr;
+      }
       if (a.dead) {
         a.skinT -= dt;
         if (a.skinT <= 0) { removeCarcass(a); i--; continue; }
@@ -389,8 +667,21 @@
         if (a.skinned && a.skinT < 6) grp.position.y -= dt * 0.05;
         continue;
       }
+      // ---- BABIES grow up: born tiny (a scaled-down copy of the adult — cute
+      //      is the point), full-grown in GROW_TIME ------------------------
+      if (a.grow != null && a.grow < 1) {
+        a.grow = Math.min(1, a.grow + dt / GROW_TIME);
+        grp.scale.setScalar((sp.scale || 1) * (0.4 + 0.6 * a.grow));
+        if (a.grow >= 1) a.grow = null;
+      }
+      // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
+      if (a.ridden) continue;                                  // glued under the rider
+      if (a.tamed && !sp.aquatic) { if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt); if (a.snake) { a.moving = true; snakeAnimate(a, dt); } continue; }
+      // ---- SNAKES slither (own locomotion + strike/rear/constrict logic) --
+      if (a.snake) { snakeTick(a, dt, P); continue; }
       // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
       if (sp.aquatic) {
+        if (grp.visible === false) continue;          // far sea life idles (no sim)
         a.bob += dt * (1.2 + a.spd * 0.2);
         a.turnT -= dt;
         if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 0.8; a.turnT = 3 + Math.random() * 4; }
@@ -403,10 +694,24 @@
         grp.rotation.y = -a.heading + Math.PI / 2;
         continue;
       }
+      // ---- FAR + CALM land animals FREEZE (no per-frame steering) so a big
+      //      world stays cheap — only the herds near you actually think & move.
+      //      They resume instantly when you approach, or if their herd panics.
+      if (grp.visible === false && a.state === "wander" && (a.alarm || 0) <= 0 &&
+          (!a.herd || a.herd.panic <= 0.3)) { a.turnT -= dt; continue; }
       // ---- land: alarm decays; react to the player -----------------------
       if (a.alarm > 0) a.alarm -= dt;
       let nearP = 0;
       if (P) { const dpx = grp.position.x - P.x, dpz = grp.position.z - P.z; nearP = dpx * dpx + dpz * dpz; }
+      // HERD PANIC RIPPLE: if a herd-mate is alarmed, this animal reacts too,
+      // even if it never saw the threat itself — the whole herd bolts (prey) or
+      // stampedes (aggressive herd like bison) together, not one at a time.
+      const hr = a.herd;
+      if (hr && hr.panic > 0.3 && a.state === "wander" && a.alarm <= 0.1) {
+        a.alarm = Math.max(a.alarm, hr.panic * 0.85);
+        a.state = (sp.danger >= 0.5) ? "charge" : "flee";
+        if (a.state === "flee") a.heading = hr.heading;        // flee WITH the herd
+      }
       if (P && a.state !== "charge") {
         const spookR = (sp.spook || 26);
         if (nearP < spookR * spookR && sp.danger < 0.15) { a.state = "flee"; a.alarm = Math.max(a.alarm, 4); a.heading = Math.atan2(grp.position.z - P.z, grp.position.x - P.x); }
@@ -428,10 +733,42 @@
         }
         if (a._biteT > 0) a._biteT -= dt;
         if (nearP > 55 * 55) a.state = "wander";              // gave up
-      } else if (a.turnT <= 0) {
-        a.heading += (Math.random() - 0.5) * 1.5;
-        a.turnT = 2 + Math.random() * 4;
-        if (a.state === "wander") a.spd = (sp.spd || 1.4) * (0.6 + Math.random() * 0.8);
+      } else {
+        // ---- HERD MOVEMENT (boids): every frame, steer gently toward the
+        //      herd's shared heading (alignment) + its centre (cohesion), while
+        //      pushing off the nearest herd-mate (separation) so they move as a
+        //      tight travelling body, not a scattering of loners. A stampeding
+        //      (fleeing/charging) herd aligns HARDER so it reads as one wall. --
+        if (hr && hr.n > 1) {
+          let dx = Math.cos(a.heading), dz = Math.sin(a.heading);
+          const align = (a.state === "wander") ? 0.5 : 1.4;   // panic = move as one
+          dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
+          // cohesion: pull toward the centre only once the herd spreads out
+          const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
+          const cd = Math.hypot(toCx, toCz) || 1;
+          const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+          dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
+          // separation: shove away from the closest herd-mate inside ~2.6u
+          const sepR = 2.2 + (sp.scale || 1) * 1.0;
+          let sx = 0, sz = 0;
+          for (let m = 0; m < hr.members.length; m++) {
+            const o = hr.members[m]; if (o === a || o.dead) continue;
+            const ox = grp.position.x - o.pos.x, oz = grp.position.z - o.pos.z;
+            const od = Math.hypot(ox, oz);
+            if (od > 0.001 && od < sepR) { sx += (ox / od) * (sepR - od); sz += (oz / od) * (sepR - od); }
+          }
+          dx += sx * 0.9; dz += sz * 0.9;
+          // ease the heading toward the blended desire (turn rate, not a snap)
+          const desired = Math.atan2(dz, dx);
+          let d = desired - a.heading;
+          while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+          a.heading += d * Math.min(1, dt * (a.state === "wander" ? 2.2 : 5.0));
+        }
+        // occasional idle jitter + a fresh grazing speed (loners & flavour)
+        if (a.turnT <= 0) {
+          a.turnT = 2 + Math.random() * 4;
+          if (a.state === "wander") { a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5); a.spd = (sp.spd || 1.4) * (0.6 + Math.random() * 0.8); }
+        }
       }
       // integrate + keep inside the home region (turn back at the fence)
       const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
@@ -464,12 +801,13 @@
     registerPelts();
     registerInteractions();
     spawnAll();
+    recordCaps();                 // each herd's seeded size = its carrying capacity
 
-    let respAcc = 0;
+    let breedAcc = 0;
     CBZ.onUpdate(47.1, function (dt) {
       tick(dt);
-      respAcc += (dt || 0.016);
-      if (respAcc >= RESPAWN_EVERY) { respAcc = 0; topUp(); }
+      breedAcc += (dt && dt < 0.5 ? dt : 0.016);
+      if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
     });
     return null;
   }, 95);

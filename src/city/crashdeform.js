@@ -18,8 +18,9 @@
        from rest: ~0.34u on outer panels, ~0.12u in the cabin band, so
        pillars/roof crumple less than fenders and the hull can never turn
        inside out.
-     • LRU cap of 14 concurrently-deformed cars — the least-recently-hit one
-       is silently restored to pristine when a 15th takes damage.
+     • LRU cap on concurrently-deformed cars (rides the LIVE quality tier,
+       ~7..28) — the least-recently-hit one is silently restored to pristine
+       when one past the cap takes damage.
      • Consequences past thresholds: headlights smashed dark (material
        pointer swap, pooled like the brake lights), hood hangs + sin-jitters
        while driving then detaches as debris (crashfx chunk pool), struck-side
@@ -59,7 +60,10 @@
   let _rs = 24631;
   function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
 
-  const MAX_CARS = 14;
+  // concurrently-deformed cars (LRU) — rides the LIVE quality tier
+  // (pause-menu slider): ~7 at tier 0 up to ~28 at tier 4 (mid-tier ≈ the
+  // old 14). Read at use time — never snapshot the tier.
+  function MAX_CARS() { return CBZ.qScale ? CBZ.qScale(7, 28) : 14; }
   const OUTER_BUDGET = 0.34, CABIN_BUDGET = 0.12;
   const DIMS_FALLBACK = { width: 2, length: 4.4, height: 1.5 };
   const FADE_T = 0.5;           // eviction fade-to-pristine window, seconds
@@ -147,7 +151,7 @@
     // settle any fades that finished while we weren't ticking (e.g. several
     // impacts land in the same frame) before counting toward the cap
     for (let i = fading.length - 1; i >= 0; i--) if (fading[i].fadeT >= FADE_T) { release(fading[i], false); fading.splice(i, 1); }
-    if (damaged.length - fading.length >= MAX_CARS) startFade(evictPick());   // distance-aware eviction, faded not snapped
+    if (damaged.length - fading.length >= MAX_CARS()) startFade(evictPick());   // distance-aware eviction, faded not snapped
     const e = {
       car, meshes: null, heads: null, glass: null,
       front: 0, rear: 0, sideL: 0, sideR: 0, total: 0,

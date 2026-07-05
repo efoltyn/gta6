@@ -4360,10 +4360,12 @@
     const BAY = 4.2;
     let cols = Math.max(1, Math.floor((xHi - xLo) / BAY) + 1);
     let rows = Math.max(1, Math.floor((zHi - zLo) / BAY) + 1);
-    cols = Math.min(cols, 3); rows = Math.min(rows, 4);   // cap ≈ up to ~10 cars/floor (perf)
+    // cars/floor cap rides the quality tier (build-once read): ≈6 lo → ≈30 hi (perf)
+    cols = Math.min(cols, Math.round(CBZ.qScale ? CBZ.qScale(2, 5) : 3));
+    rows = Math.min(rows, Math.round(CBZ.qScale ? CBZ.qScale(3, 6) : 4));
     const dxc = cols > 1 ? (xHi - xLo) / (cols - 1) : 0;
     const dzc = rows > 1 ? (zHi - zLo) / (rows - 1) : 0;
-    let idx = startIdx | 0, placed = 0, MAXPF = 10;
+    let idx = startIdx | 0, placed = 0, MAXPF = Math.round(CBZ.qScale ? CBZ.qScale(6, 30) : 10);
     const PADC = kind === "chop" ? 0x201f22 : 0x26282e;
     for (let c = 0; c < cols && placed < MAXPF; c++) {
       for (let r = 0; r < rows && placed < MAXPF; r++) {
@@ -5342,7 +5344,9 @@
       // central so the biggest/most-visited towers are always served and the cap
       // (if hit) only drops the shortest fringe walk-ups (which still have stairs
       // where present). elevators.js (VERT) makes the rig robust on ANY building.
-      const EV_CAP = 80;     // bounded for mesh-count; covers ~every real tower
+      // bounded for mesh-count; rides the quality tier (build-once read,
+      // lo 48 → hi 140); at mid tier it still covers ~every real tower.
+      const EV_CAP = Math.round(CBZ.qScale ? CBZ.qScale(48, 140) : 80);
       const ctr = city.center || { x: 0, z: 0 };
       const evCand = placed.filter((l) =>
         l.building && l.building.group && l.building.storeys >= 2 &&
