@@ -176,6 +176,18 @@
       state: "wander", alarm: 0, home: { x: x, z: z },
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
     };
+    // snakes carry a segment chain the engine undulates (slither) — cache the
+    // parts the build() registered on userData so the anim loop is allocation-free.
+    if (sp.snake && grp.userData) {
+      a.snake = true;
+      a.segs = grp.userData.segs || [];
+      a.hood = grp.userData.hood || null;
+      a.rattle = grp.userData.rattle || null;
+      a.rear = grp.userData.rear || 0;
+      a.spacing = grp.userData.spacing || 0.2;
+      a.baseY = grp.userData.baseY || 0.08;
+      a.phase = rng() * 6.283; a.reared = false; a.strikeT = 0; a.strikeAnim = 0; a.grabT = 0;
+    }
     animals.push(a);
     return a;
   }
@@ -296,7 +308,8 @@
     gray_wolf: 1, arctic_wolf: 1, coyote: 1, red_fox: 1,
     black_bear: 1, brown_bear: 1, polar_bear: 1,
     bengal_tiger: 1, lion: 1, white_lion: 1, cheetah: 1, snow_leopard: 1,
-    rattlesnake: 1, great_white_shark: 1, megalodon: 1,
+    rattlesnake: 1, king_cobra: 1, black_mamba: 1, green_anaconda: 1,
+    great_white_shark: 1, megalodon: 1,
   };
   function isPredator(sp) { return sp.predator != null ? !!sp.predator : !!CARNIVORE[sp.id]; }
 
@@ -531,9 +544,108 @@
   // ============================================================
   //  THE UPDATE — wander / graze / flee / charge, aquatic bob, carcass fade.
   // ============================================================
+  // VENOM — a bite from a venomous snake leaves poison that keeps draining your
+  // health for a few seconds AFTER the snake is gone (ticked once/sec here).
+  function applyVenom(sp) {
+    const v = g._venom || (g._venom = { t: 0, acc: 0, dps: 0, name: "" });
+    v.t = Math.max(v.t, sp.venom === true ? 6 : 4);   // refresh/extend
+    v.dps = Math.max(v.dps, sp.venomDps || 5);
+    v.name = sp.name;
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("☠ VENOM — " + sp.name + " bit you! Find an antidote or ride it out.", 3.2, { urgent: true });
+  }
+  function venomTick(dt) {
+    const v = g._venom; if (!v || v.t <= 0) return;
+    v.t -= dt; v.acc += dt;
+    if (v.acc >= 1) { v.acc -= 1; if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(v.dps, (v.name || "Venom") + " venom"); } catch (e) {} } }
+    if (v.t <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("The venom wears off.", 2);
+  }
+
+  // ============================================================
+  //  SNAKES — no legs, so they SLITHER: a travelling sine wave runs down the
+  //  body-segment chain each frame. Cobras REAR + flare a hood as a warning,
+  //  vipers/mambas STRIKE (a head lunge) to deliver a venom bite, and the
+  //  anaconda CONSTRICTS on contact. All allocation-free, reading the cached
+  //  segment refs (a.segs / a.hood / a.rattle) the build() registered.
+  // ============================================================
+  function snakeAnimate(a, dt) {
+    const segs = a.segs; if (!segs || !segs.length) return;
+    const striking = a.strikeAnim > 0;
+    const waveSpd = a.state === "flee" ? 12 : (a.reared ? 2.5 : 5.5);
+    a.phase += dt * waveSpd;
+    const amp = a.reared ? 0.05 : 0.17 * (a.moving ? 1 : 0.35);
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i]; if (!s) continue;
+      // base: laid out behind the head along local −X; head (i=0) lunges on a strike
+      s.position.x = -i * a.spacing + (striking && i < 3 ? (3 - i) * a.spacing * 1.0 * a.strikeAnim : 0);
+      s.position.z = Math.sin(a.phase - i * 0.7) * amp * Math.min(1, i / 2 + 0.35);
+      s.position.y = (a.reared && i < a.rear) ? a.baseY + (a.rear - i) * a.spacing * 0.85 : a.baseY;
+    }
+    if (a.strikeAnim > 0) a.strikeAnim = Math.max(0, a.strikeAnim - dt * 4);
+    if (a.hood) { const f = a.reared ? 1 : 0.12; for (let h = 0; h < a.hood.length; h++) if (a.hood[h]) a.hood[h].scale.setScalar(f); }
+    if (a.rattle && (a.reared || a.alarm > 0.1)) a.rattle.rotation.y = Math.sin(a.phase * 3.5) * 0.6;
+  }
+
+  function snakeTick(a, dt, P) {
+    const sp = a.species, grp = a.group;
+    if (grp.visible === false) return;                 // far snakes idle — no sim
+    if (a.alarm > 0) a.alarm -= dt;
+    if (a.strikeT > 0) a.strikeT -= dt;
+    if (a.grabT > 0) a.grabT -= dt;
+    a.reared = false; a.moving = false;
+    let spd = 0, nearP = Infinity, towardP = a.heading;
+    if (P) { const dx = P.x - grp.position.x, dz = P.z - grp.position.z; nearP = dx * dx + dz * dz; towardP = Math.atan2(dz, dx); }
+    const senseR = Math.max(sp.spook || 0, 11);
+    const strikeR = sp.constrictor ? 2.5 : 2.9;
+
+    if (P && nearP < senseR * senseR) {
+      if (sp.constrictor) {
+        // ANACONDA — ambush hunter: close the gap, then CONSTRICT on contact.
+        if (nearP < strikeR * strikeR) {
+          if (a.grabT <= 0) {
+            if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(sp.bite || 20, a); } catch (e) {} }
+            a.grabT = 0.9;
+            if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + sp.name + " coils around you — thrash free!", 1.6, { urgent: true });
+          }
+        } else { a.heading = towardP; spd = (sp.spd || 1.4) * 1.6; a.moving = true; a.state = "hunt"; }
+      } else if (sp.venom || sp.danger >= 0.4) {
+        // VIPER / COBRA / MAMBA — warn, then STRIKE (venom on the bite).
+        if (nearP < strikeR * strikeR) {
+          a.reared = !!a.rear; a.heading = towardP;
+          if (a.strikeT <= 0) {
+            a.strikeAnim = 1; a.strikeT = 1.6;
+            if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(sp.bite || 12, a); } catch (e) {} }
+            if (sp.venom) applyVenom(sp);
+          }
+        } else if ((sp.spd || 0) >= 3 && nearP > (strikeR + 3) * (strikeR + 3)) {
+          a.state = "flee"; a.heading = towardP + Math.PI; spd = (sp.spd || 3) * 1.4; a.moving = true;   // mamba bolts
+        } else { a.reared = !!a.rear; a.heading = towardP; a.alarm = Math.max(a.alarm, 2); }             // rear & hold ground
+      } else {
+        a.state = "flee"; a.heading = towardP + Math.PI + (Math.random() - 0.5) * 0.6; spd = (sp.spd || 1.4) * 1.8; a.moving = true;  // garter flees
+      }
+    } else {
+      // wander: a slow, near-constant slither with the odd pause + turn
+      a.state = "wander";
+      a.turnT -= dt;
+      if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 1.2; a.turnT = 3 + Math.random() * 4; }
+      spd = (sp.spd || 1.4) * 0.6; a.moving = true;
+    }
+
+    if (spd > 0 && !a.reared) {
+      const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
+      const nz = grp.position.z + Math.sin(a.heading) * spd * dt;
+      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
+      const onHome = reg && reg.biome === sp.biome && CBZ.cityRegionHit(reg, nx, nz, 4);
+      if (onHome) { grp.position.x = nx; grp.position.z = nz; grp.position.y = groundY(nx, nz); }
+      else { a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6; a.moving = false; }
+    }
+    grp.rotation.y = -a.heading + Math.PI / 2;
+    snakeAnimate(a, dt);
+  }
+
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
+    venomTick(dt);                 // poison keeps draining after a venomous bite
     updateHerds(dt);               // live centroid + mean heading + herd alarm
     // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
     // tier): animals beyond the tier's radius don't render or animate their
@@ -564,7 +676,9 @@
       }
       // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
       if (a.ridden) continue;                                  // glued under the rider
-      if (a.tamed && !sp.aquatic) { if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt); continue; }
+      if (a.tamed && !sp.aquatic) { if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt); if (a.snake) { a.moving = true; snakeAnimate(a, dt); } continue; }
+      // ---- SNAKES slither (own locomotion + strike/rear/constrict logic) --
+      if (a.snake) { snakeTick(a, dt, P); continue; }
       // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
       if (sp.aquatic) {
         if (grp.visible === false) continue;          // far sea life idles (no sim)
