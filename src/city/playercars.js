@@ -325,19 +325,27 @@
     wire:    { n: 12, sw: 0.07, hub: 0.13, dish: true },     // Eldorado wire wheel
   };
   const rimGeos = new Map();
-  function rimGeo(radius, width, style) {
+  // rimFrac = rim-face radius / tire radius — THE sidewall knob. Real cars:
+  // supercar low-profile ≈ 0.70-0.75 rim (thin rubber band of sidewall),
+  // sedans ≈ 0.62-0.68, muscle/SUV ≈ 0.58-0.62, work van/truck ≈ 0.50-0.58
+  // (fat sidewall). The old fixed 0.86-0.92 put rubber-band tires on
+  // EVERYTHING — one reason the fleet's wheels read wrong.
+  function rimGeo(radius, width, style, rimFrac) {
     const p = RIM_PARAMS[style] || RIM_PARAMS.sport5;
-    const key = radius + "|" + width + "|" + (style || "sport5");
+    const rf = rimFrac || 0.7;
+    const rr = radius * rf;                   // rim face radius
+    const key = radius + "|" + width + "|" + (style || "sport5") + "|" + rf;
     let geo = rimGeos.get(key);
     if (geo) return geo;
     const parts = [];
     const lipY = p.dish ? width * 0.10 : 0;   // wire wheels: lip proud, face sunk = deep dish
-    // outer rim LIP: an open barrel straddling the cap plane.
-    const lip = new THREE.CylinderGeometry(radius * 0.92, radius * 0.86, width * 0.22, 24, 1, true);
+    // outer rim LIP: an open barrel straddling the cap plane, AT the rim
+    // radius — the tire cylinder beyond it reads as sidewall.
+    const lip = new THREE.CylinderGeometry(rr * 1.02, rr * 0.94, width * 0.22, 24, 1, true);
     lip.translate(0, lipY, 0);
     parts.push(lip);
     // spokes: hub → lip, mostly PROUD of the cap so they read as real metalwork.
-    const spokeLen = radius * 0.88, spokeW = Math.max(0.028, radius * p.sw), spokeT = width * 0.30;
+    const spokeLen = rr * 0.97, spokeW = Math.max(0.028, rr * p.sw * 1.15), spokeT = width * 0.30;
     for (let i = 0; i < p.n; i++) {
       const a = (i / p.n) * Math.PI * 2;
       const s = new THREE.BoxGeometry(spokeLen, spokeT, spokeW);
@@ -347,9 +355,9 @@
       parts.push(s);
     }
     // EV aero cover: one flush disc instead of spokes.
-    if (p.disc) parts.push(new THREE.CylinderGeometry(radius * p.disc, radius * p.disc, width * 0.10, 24).translate(0, width * 0.03, 0));
+    if (p.disc) parts.push(new THREE.CylinderGeometry(rr * p.disc / 0.88, rr * p.disc / 0.88, width * 0.10, 24).translate(0, width * 0.03, 0));
     // hub cap, proud of everything.
-    parts.push(new THREE.CylinderGeometry(radius * p.hub, radius * p.hub, width * 0.18, 12).translate(0, width * 0.07 - (p.dish ? width * 0.06 : 0), 0));
+    parts.push(new THREE.CylinderGeometry(rr * p.hub / 0.88, rr * p.hub / 0.88, width * 0.18, 12).translate(0, width * 0.07 - (p.dish ? width * 0.06 : 0), 0));
     geo = mergeGeo(parts);
     geo._shared = true;
     rimGeos.set(key, geo);
@@ -440,18 +448,19 @@
   let _tireMat = null, _rimMat = null;
   function tireMat() { if (!_tireMat) { _tireMat = vmat("tire", 0x14161a); _tireMat._shared = true; } return _tireMat; }
   function rimMat() { if (!_rimMat) { _rimMat = vmat("rim", 0xc2c9d1, { emissive: 0x20242a, ei: 0.3 }); _rimMat._shared = true; } return _rimMat; }
-  function makeWheel(radius, width, rimStyle) {
+  function makeWheel(radius, width, rimStyle, rimFrac) {
     const tire = new THREE.Mesh(wheelGeo(radius, width), tireMat());
     tire.castShadow = false;
     tire.userData.playerWheel = true;
-    // brake rotor first (visually behind the spokes), flush on the cap plane.
-    const disc = new THREE.Mesh(discGeo(radius), discMat());
+    // brake rotor first (visually behind the spokes), flush on the cap plane —
+    // sized to sit INSIDE the rim face, whatever the sidewall fraction.
+    const disc = new THREE.Mesh(discGeo(radius * (rimFrac || 0.7) * 0.86 / 0.62), discMat());
     disc.position.y = width * 0.5 + 0.004;
     disc.castShadow = false;
     tire.add(disc);
     // openwork rim AT the cap plane (rimGeo local y=0 = cap); +Y is outboard
     // before the caller's z-rotation lays the wheel on its side.
-    const rim = new THREE.Mesh(rimGeo(radius, width, rimStyle), rimMat());
+    const rim = new THREE.Mesh(rimGeo(radius, width, rimStyle, rimFrac), rimMat());
     rim.position.y = width * 0.5 + 0.01;
     rim.castShadow = false;
     tire.add(rim);
@@ -522,14 +531,14 @@
     return mesh;
   }
 
-  function addWheels(root, width, length, radius, wheelWidth, archMat, rimStyle, caliperMat) {
+  function addWheels(root, width, length, radius, wheelWidth, archMat, rimStyle, caliperMat, rimFrac) {
     const wz = length * 0.32;
     // Lay each wheel on its side. The rim child sits at local +Y; a z-rotation of
     // +PI/2 sends local +Y to world -X, and -PI/2 sends it to world +X. So +x
     // wheels use -PI/2 (rim faces +x = OUTboard) and -x wheels use +PI/2 — keeping
     // the bright alloy face pointing OUT on both sides.
     [[width / 2, wz, -1], [-width / 2, wz, 1], [width / 2, -wz, -1], [-width / 2, -wz, 1]].forEach(function (p) {
-      const wheel = makeWheel(radius, wheelWidth, rimStyle);
+      const wheel = makeWheel(radius, wheelWidth, rimStyle, rimFrac);
       wheel.rotation.z = p[2] * Math.PI / 2;
       wheel.position.set(p[0], radius, p[1]);
       root.add(wheel);
@@ -652,25 +661,38 @@
     // Result: hull ~62% of H, greenhouse ~25% of H, wheel dia ~ half hull.
     // ===================================================================
     // Per-body table: [W, L, H, hullFrac, cabinLenFrac, cabinCenterX(frac of L), ghFrac]
+    // Per-body table now carries REAL wheel math (derived from published tire
+    // specs, e.g. 235/45R18 → 669mm on a 1443mm-tall Model 3):
+    //   tD   = tire DIAMETER as a fraction of H. Real cars: supercar 0.55-0.60
+    //          (the body is LOW, so the same ~700mm tire dominates), sedan/EV
+    //          0.45-0.49, hatch 0.45, muscle 0.50, SUV 0.43 of a taller H.
+    //          The old fixed 0.32 is why the whole fleet looked like it was
+    //          rolling on shopping-cart casters.
+    //   rf   = rim-face radius / tire radius (sidewall profile): supercar
+    //          ~0.72 rubber-band, sedan ~0.66, muscle 0.62, lowrider wire 0.55.
+    //   ride = hull-bottom clearance as a fraction of wheelR (rocker height):
+    //          supercar ~0.38 (sills hug the ground), sedan ~0.55, crossover 0.62.
     const SPEC = {
-      "tesla-s":  { W: 1.95, L: 4.70, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42 },
-      "tesla-3":  { W: 1.92, L: 4.55, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42 },
-      "tesla-x":  { W: 2.05, L: 4.85, H: 1.72, hull: 0.66, cab: 0.50, cx: -0.02, gh: 0.44 },
-      "tesla-y":  { W: 2.02, L: 4.78, H: 1.66, hull: 0.65, cab: 0.50, cx: -0.02, gh: 0.44 },
-      porsche:    { W: 1.94, L: 4.45, H: 1.40, hull: 0.64, cab: 0.42, cx: -0.05, gh: 0.40 },
-      ferrari:    { W: 2.05, L: 4.60, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
-      enzo:       { W: 2.04, L: 4.62, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
-      aventador:  { W: 2.05, L: 4.65, H: 1.28, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34 },
-      veyron:     { W: 2.05, L: 4.55, H: 1.32, hull: 0.66, cab: 0.38, cx: -0.04, gh: 0.36 },
-      muscle:     { W: 2.05, L: 4.95, H: 1.45, hull: 0.64, cab: 0.40, cx: -0.10, gh: 0.40 },
-      lowrider:   { W: 2.04, L: 5.05, H: 1.42, hull: 0.66, cab: 0.44, cx: -0.02, gh: 0.36 },
-      hatch:      { W: 1.84, L: 4.05, H: 1.50, hull: 0.60, cab: 0.50, cx: -0.04, gh: 0.46 },
+      "tesla-s":  { W: 1.95, L: 4.70, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42, tD: 0.50, rf: 0.68, ride: 0.36 },
+      "tesla-3":  { W: 1.92, L: 4.55, H: 1.50, hull: 0.62, cab: 0.46, cx: 0.00, gh: 0.42, tD: 0.48, rf: 0.67, ride: 0.40 },
+      "tesla-x":  { W: 2.05, L: 4.85, H: 1.72, hull: 0.66, cab: 0.50, cx: -0.02, gh: 0.44, tD: 0.46, rf: 0.64, ride: 0.52 },
+      "tesla-y":  { W: 2.02, L: 4.78, H: 1.66, hull: 0.65, cab: 0.50, cx: -0.02, gh: 0.44, tD: 0.46, rf: 0.64, ride: 0.48 },
+      porsche:    { W: 1.94, L: 4.45, H: 1.40, hull: 0.64, cab: 0.42, cx: -0.05, gh: 0.40, tD: 0.54, rf: 0.71, ride: 0.30 },
+      ferrari:    { W: 2.05, L: 4.60, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.58, rf: 0.72, ride: 0.30 },
+      enzo:       { W: 2.04, L: 4.62, H: 1.30, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.56, rf: 0.72, ride: 0.38 },
+      aventador:  { W: 2.05, L: 4.65, H: 1.28, hull: 0.66, cab: 0.38, cx: -0.05, gh: 0.34, tD: 0.60, rf: 0.73, ride: 0.26 },
+      veyron:     { W: 2.05, L: 4.55, H: 1.32, hull: 0.66, cab: 0.38, cx: -0.04, gh: 0.36, tD: 0.58, rf: 0.72, ride: 0.26 },
+      muscle:     { W: 2.05, L: 4.95, H: 1.45, hull: 0.64, cab: 0.40, cx: -0.10, gh: 0.40, tD: 0.52, rf: 0.62, ride: 0.36 },
+      lowrider:   { W: 2.04, L: 5.05, H: 1.42, hull: 0.66, cab: 0.44, cx: -0.02, gh: 0.36, tD: 0.43, rf: 0.57, ride: 0.22 },
+      hatch:      { W: 1.84, L: 4.05, H: 1.50, hull: 0.60, cab: 0.50, cx: -0.04, gh: 0.46, tD: 0.45, rf: 0.63, ride: 0.40 },
     };
     const s = SPEC[style] || SPEC["tesla-3"];
     const w = s.W, len = s.L, H = s.H;
-    const wheelR = +(0.16 * H).toFixed(3);            // tire dia ~0.33H
-    const bodyY = +(wheelR * 0.42).toFixed(3);        // hull bottom just below axle
-    const baseH = +(s.hull * H).toFixed(3);           // TALL dominant hull
+    const wheelR = +((s.tD || 0.46) * H / 2).toFixed(3);
+    const bodyY = +(wheelR * (s.ride || 0.52)).toFixed(3);   // rocker clearance off the REAL wheel
+    // hull band height rebalanced so roofline stays ≈ H despite the taller
+    // ride: bodyY + baseH + gh*baseH ≈ H  →  baseH = (H − bodyY)/(1 + gh)
+    const baseH = +((H - bodyY) / (1 + s.gh)).toFixed(3);
     const bodyTop = bodyY + baseH;
     const peakY = +(s.gh * baseH).toFixed(3);         // slim greenhouse, < baseH
     const cabLen = len * s.cab;
@@ -817,7 +839,7 @@
     const calMat = /ferrari|enzo|aventador|veyron|porsche|muscle/.test(style)
       ? sharedMat("caliper-red", 0xc23030, { emissive: 0x2a0808, ei: 0.4 })
       : sharedMat("caliper-dk", 0x3a3f45);
-    addWheels(root, w + 0.08, len, wheelR, 0.30 * (H / 1.5), sill, rimStyle, calMat);
+    addWheels(root, w + 0.08, len, wheelR, Math.max(0.26, wheelR * 0.92), sill, rimStyle, calMat, s.rf || 0.66);
     // anchor frame for the carparts.js brand face + per-model identity, applied
     // per INSTANCE in makeProcedural (templates stay faceless so one silhouette
     // can serve several marques). Read-only; cloned by reference with userData.
@@ -846,8 +868,8 @@
     const glass = glassMat();
     // PROPORTION LAW: pickup, tall hull + cab forward of an open bed. H~1.80.
     const w = 2.2, len = 5.35, H = 1.80;
-    const wheelR = +(0.16 * H).toFixed(3);            // ~0.29
-    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const wheelR = +(0.245 * H).toFixed(3);           // tire dia 0.49H (Cybertruck 285/65R20 = 879mm / 1795mm — Edmunds)
+    const bodyY = +(wheelR * 0.62).toFixed(3);        // truck rocker rides high
     const baseH = +(0.58 * H).toFixed(3);             // ~1.04 tall hull (pickup body)
     const bodyTop = bodyY + baseH;
     // body shell (tall hull). bed crease via a lower trim band.
@@ -888,7 +910,7 @@
       addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), bodyTop - 0.08, len * 0.32, trim);   // mirrors
     });
     addBox(root, w * 0.84, 0.08, len * 0.3, 0, bodyTop + 0.04, -len * 0.29, trim);   // dark tonneau cover over bed
-    addWheels(root, w + 0.13, len, wheelR, 0.40, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45));
+    addWheels(root, w + 0.13, len, wheelR, 0.34, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.56);
     root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.68 };
     // Voltra face anchors (full-width LED brow + tail blade land on the wedge
     // hull faces); the angular EV truck skips the bumper blocks.
@@ -912,8 +934,8 @@
     const rail = roleMat("suv-rail", "metal", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
     // PROPORTION LAW: tall 3-box SUV. H~1.74, tall hull + upright greenhouse.
     const w = 2.16, len = 5.1, H = 1.74;
-    const wheelR = +(0.16 * H).toFixed(3);            // ~0.28
-    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const wheelR = +(0.23 * H).toFixed(3);            // tire dia 0.46H (Grand Cherokee 245/70R17 → 0.44 + art bump)
+    const bodyY = +(wheelR * 0.60).toFixed(3);
     const baseH = +(0.60 * H).toFixed(3);             // ~1.04 tall hull
     const bodyTop = bodyY + baseH;
     // hull as a hullRing prism (not a flat box): near-full height/width at the
@@ -964,7 +986,7 @@
     });
     const suvRoofY = cabBaseY + peakY + 0.05;
     addSphere(root, wheelR * 1.05, 0, bodyY + baseH * 0.56, -len * 0.51, trim, 1, 1, 0.3);   // rear spare, sized off the real wheel radius (was fixed at 0.46 — bigger than the road wheels on every SUV size)
-    addWheels(root, w + 0.14, len, wheelR, 0.40, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45));
+    addWheels(root, w + 0.14, len, wheelR, 0.34, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.58);
     root.userData.vehicleDims = { width: w, length: len, height: suvRoofY + 0.05, wheelbase: len * 0.66 };
     // Bison face anchors (tall slatted grille, quad lamps, vertical tails).
     root.userData.partCtx = {
@@ -986,8 +1008,8 @@
     const trim = roleMat("van-trim", "plastic", 0x202428);
     // PROPORTION LAW: tall cab-forward box van. H~1.95, greenhouse merges into box.
     const w = 2.18, len = 5.6, H = 1.95;
-    const wheelR = +(0.16 * H).toFixed(3);            // ~0.31
-    const bodyY = +(wheelR * 0.42).toFixed(3);
+    const wheelR = +(0.185 * H).toFixed(3);           // tire dia 0.37H (Transit low-roof: small wheels under a tall box IS correct)
+    const bodyY = +(wheelR * 0.58).toFixed(3);
     const boxH = +(0.82 * H).toFixed(3);              // ~1.60 very tall cargo box
     const boxTop = bodyY + boxH;
     // big slab cargo box (the dominant tall mass)
@@ -1021,7 +1043,7 @@
     [-0.3, 0, 0.3].forEach(function (fx) {
       addBox(root, 0.12, 0.06, 0.09, fx * w, bodyY + boxH - 0.06, len * 0.27, marker);
     });
-    addWheels(root, w + 0.1, len, wheelR, 0.38, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45));
+    addWheels(root, w + 0.1, len, wheelR, 0.32, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.52);
     root.userData.vehicleDims = { width: w, length: len, height: boxTop, wheelbase: len * 0.68 };
     // Bison face anchors: lamps low on the nose, VERTICAL tails riding the tall
     // box rear corners (rearZ is the box face, not len/2 — the box is set back).
