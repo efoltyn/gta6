@@ -123,6 +123,8 @@ Geo.prototype.rotateX = function () { return this; };
 Geo.prototype.rotateY = function () { return this; };
 Geo.prototype.rotateZ = function () { return this; };
 Geo.prototype.computeVertexNormals = function () {};
+Geo.prototype.clone = function () { return new this.constructor(); };
+Geo.prototype.computeBoundingSphere = function () {};
 function BufferGeometry() { Geo.call(this); this.attributes = {}; }
 BufferGeometry.prototype = Object.create(Geo.prototype);
 BufferGeometry.prototype.setAttribute = function (name, attr) { this.attributes[name] = attr; return this; };
@@ -190,6 +192,7 @@ const THREE = {
   BoxGeometry, PlaneGeometry, CylinderGeometry, SphereGeometry, IcosahedronGeometry, ConeGeometry, CircleGeometry, TorusGeometry,
   BufferGeometry, Float32BufferAttribute, BufferAttribute, InstancedBufferAttribute: BufferAttribute, Raycaster, Matrix4, InstancedMesh,
   DynamicDrawUsage: 35048, StaticDrawUsage: 35044,
+  Sphere: function (center, radius) { this.center = center || new V3(); this.radius = radius || 0; },
   MeshLambertMaterial: Mtl, MeshBasicMaterial: Mtl, MeshStandardMaterial: Mtl, SpriteMaterial: Mtl,
   CanvasTexture: Tex, Texture: Tex, Vector3: V3, Color, Quaternion: Quat, Euler,
   DoubleSide: 2, FrontSide: 0, BackSide: 1, RepeatWrapping: 1000, NearestFilter: 1003, LinearFilter: 1006,
