@@ -65,7 +65,7 @@
        the dead sid's page — "the estate"), a bigger shock (-0.4), and the
        founder record is dropped from the roster.
    Both branches post a killfeed/city.big line + a market-chaos/succession
-   feed line (city/hud.js's CBZ.cityFeed, same as corporations.js's own
+   feed line (city/hud.js's CBZ.cityFlavor, same as corporations.js's own
    bankrupt() line).
 
    MAGNATE SPAWN TIE-IN: vips.js's MAGNATE principal is drafted/spawned with
@@ -356,14 +356,14 @@
       rec.sid = heir;                       // this RECORD now tracks the heir going forward
       rec.spouseSid = FT ? FT.spouseOf(heir) : null;
       rec.kidSids = FT ? FT.kidsOf(heir) : [];
-      if (CBZ.cityFeed) CBZ.cityFeed("👑 " + nameOf(heir) + " inherits control of " + coName, "#ffd76a");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("👑 " + nameOf(heir) + " inherits control of " + coName, "#ffd76a");
     } else {
       // NO HEIR: shares dissolve into "the estate" (left unreachable on the
       // dead sid's page — nobody left to claim founder-of-record) + a bigger
       // shock than the succession case.
       if (co) co.founderSid = null;
       if (CBZ.stocks && typeof CBZ.stocks.shock === "function") CBZ.stocks.shock(sym, -NO_HEIR_SHOCK);
-      if (CBZ.cityFeed) CBZ.cityFeed("⚠️ " + sym + " in chaos — founder dies without heir", "#ff6a5e");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("⚠️ " + sym + " in chaos — founder dies without heir", "#ff6a5e");
       const list = ensureState().founders;
       const idx = list.indexOf(rec);
       if (idx >= 0) list.splice(idx, 1);

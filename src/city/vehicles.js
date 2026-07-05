@@ -1716,6 +1716,7 @@
     const d = vehicleDims(car);
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
   }
+  const _sweepPt = { x: 0, y: 0, z: 0 };   // scratch — zero per-call allocation
   function collideVehicle(car) {
     if (!CBZ.collide || !car || !car.pos) return 0;
     // MARINE: a boat out on open water has no buildings/seawall to bump — skip
@@ -1724,8 +1725,35 @@
     // hull sitting at y=0) instead of crunching to a stop at the dock like it
     // hit a building. Still resolves normally over land (a beached/marooned
     // boat, or the moment it noses back toward the quay, behaves like any car).
-    if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) return 0;
+    if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) {
+      car._sweepX = car.pos.x; car._sweepZ = car.pos.z;   // keep the sweep anchor fresh over water
+      return 0;
+    }
     const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
+    // ---- ANTI-TUNNEL SWEEP: every caller integrates position FIRST and only
+    // then depenetrates here, so a frame whose displacement exceeds the body
+    // radius could jump clean over a thin collider (signal poles, lampposts —
+    // 0.5m boxes) with both endpoints outside it. Walk the segment from the
+    // LAST resolved position and stop the car at the first sample a collider
+    // pushes back. Skipped for small steps (can't tunnel) and huge ones
+    // (teleport/spawn/respawn, not motion).
+    const px0 = car._sweepX, pz0 = car._sweepZ;
+    if (px0 != null) {
+      const sdx = ox - px0, sdz = oz - pz0;
+      const sdist = Math.hypot(sdx, sdz), step = radius * 0.8;
+      if (sdist > step && sdist < 12) {
+        const n = Math.min(8, Math.ceil(sdist / step));
+        for (let i = 1; i < n; i++) {
+          _sweepPt.x = px0 + sdx * (i / n); _sweepPt.z = pz0 + sdz * (i / n); _sweepPt.y = car.pos.y || 0;
+          const sx = _sweepPt.x, sz = _sweepPt.z;
+          CBZ.collide(_sweepPt, radius);
+          if (_sweepPt.x !== sx || _sweepPt.z !== sz) {
+            car.pos.x = _sweepPt.x; car.pos.z = _sweepPt.z;   // hit mid-frame: stop AT the obstacle
+            break;
+          }
+        }
+      }
+    }
     CBZ.collide(car.pos, radius);
     const d = vehicleDims(car);
     const reach = Math.max(0, d.length * 0.5 - radius * 0.45);
@@ -1738,6 +1766,7 @@
       car.pos.x += probe.x - px;
       car.pos.z += probe.z - pz;
     }
+    car._sweepX = car.pos.x; car._sweepZ = car.pos.z;   // anchor for next frame's sweep
     return Math.hypot(car.pos.x - ox, car.pos.z - oz);
   }
   CBZ.cityCollideVehicle = collideVehicle;
@@ -1860,13 +1889,18 @@
     const rearLoadGrip = 1 - Math.max(-0.22, Math.min(0.3, accelG * 0.18)) - brakeDemand;   // dive/brake steals rear grip
     // Tire force peaks at modest slip, then falls once the tire is sliding. It
     // makes a drift recoverable without the rear snapping unrealistically back.
-    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(0.38, 1 - (slipRatio - 0.18) * 1.75);
+    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(0.5, 1 - (slipRatio - 0.18) * 1.75);
     // D.grip already carries SURFACE (asphalt/dirt/sand/snow/rain) and
     // LOCALIZED CORNER DAMAGE (carDynamics folds both in — see surfaceGripMul
     // + cornerGripMul there) — this block only adds the per-frame DYNAMIC
     // terms (weight transfer / friction circle / slip curve) on top.
+    // floor 1.6 (was 0.42): the old floor let a broken-loose car keep its slide
+    // for a ~1.7s half-life — "drifts way too far" (owner). Slides still happen
+    // (steer penalty + power-oversteer below) but now recover in a beat unless
+    // the handbrake is deliberately holding them. Steer penalty trimmed
+    // -2.25→-1.3 for the same reason: plain cornering shouldn't butter the rear.
     const gripFactor = handbrake ? 0.75 * D.surfMul
-      : Math.max(0.42, (D.grip * rearLoadGrip + (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0) - power) * slideGrip);
+      : Math.max(1.6, (D.grip * rearLoadGrip + (car._steerInput && vmag > 8 ? -1.3 * driftMul : 0) - power) * slideGrip);
     const latKeep = handbrake ? Math.min(0.95, 0.9 + driftMul * 0.02 + (1 - D.surfMul) * 0.5) : Math.max(0, 1 - gripFactor * dt);
     latX *= latKeep; latZ *= latKeep;
     const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;

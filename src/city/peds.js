@@ -68,7 +68,10 @@
   // build its short ped.path array there — cityNav.routeTo writes into the caller
   // array we hand it (ped owns ped.path; move() shifts it as the ped advances).
 
-  const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 26 * 26, FAR_D2 = 110 * 110;
+  // TAG_D2 15m (was 26): head tags on every ped within 26m papered the whole
+  // screen in text (owner: "way less words"). 15m keeps the read on whoever
+  // you're actually near/facing without labelling the entire block.
+  const PED_R = 0.5, ANIM_D2 = 58 * 58, TAG_D2 = 15 * 15, FAR_D2 = 110 * 110;
   // Full-rig render distance. The instanced ambient crowd covers everything past
   // this, so drawing 16-mesh rigs out to 150u was pure waste — tightened to 95u.
   // Adaptive quality (core/quality.js -> CBZ.pedLOD) scales it down further on

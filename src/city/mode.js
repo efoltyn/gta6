@@ -61,6 +61,8 @@
     "bouncer waves a sharp-dressed guest", "turned away at the rope",
     // --- shopkeeper / store ambience (citystaff.js, companies.js feed direct) ---
     "Line out the door",
+    // --- officials pageantry (officials.js): pure narration, nothing to act on ---
+    "flanked by security", "motorcade",
   ].join("|"), "i");
 
   // CATEGORY throttle: ambient chatter (witnesses snitching, traffic stops,

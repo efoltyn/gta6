@@ -327,7 +327,9 @@
     if (opts && opts.collapseOnly) return;   // throttled note, nothing to collapse onto
     // default edge is neutral — money-green is reserved for actual cash events
     feed.push({ msg: msg, base: base, count: 1, color: color || "#9fb0c6", t: CBZ.now || 0, born: nowMs });
-    if (feed.length > 5) feed.shift();
+    // 3 rows max (owner: "way less words on screen") — was 5, which stacked a
+    // wall of banners down the left side.
+    if (feed.length > 3) feed.shift();
     renderFeed();
   };
   // world-FLAVOR lines (lore/ambience, nothing to act on) — a separate channel
@@ -351,7 +353,7 @@
     if (feedAcc < 0.25) return; feedAcc = 0;
     const nowMs = performance.now();
     let changed = false;
-    while (feed.length && nowMs - feed[0].born > 6500) { feed.shift(); changed = true; }
+    while (feed.length && nowMs - feed[0].born > 4500) { feed.shift(); changed = true; }   // was 6500 — banners linger less
     if (changed) renderFeed();
   }
 

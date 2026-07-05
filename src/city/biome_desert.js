@@ -140,7 +140,9 @@
         "}",
       ].join("\n"),
       fragmentShader: [
-        "precision mediump float;",
+        // NOTE: no explicit precision statement — three injects matching
+        // highp into BOTH stages; declaring mediump here only made uWindDir's
+        // precision differ between vertex and fragment (GL link error 1282).
         "varying vec2 vUv;",
         "varying float vWind;",
         "uniform float uTime;",

@@ -273,7 +273,7 @@
           _lastFeedAt = now;
           const label = FEED_LABEL[c] || c;
           const msg = label + " prices " + (dev > 0 ? "climbing" : "dropping");
-          if (CBZ.cityFeed) CBZ.cityFeed(msg, dev > 0 ? "#ff9e6b" : "#7ed957");
+          if (CBZ.cityFlavor) CBZ.cityFlavor(msg, dev > 0 ? "#ff9e6b" : "#7ed957");
         }
       } else if (Math.abs(dev) < BIGMOVE_RESET) {
         m.bigFired[c] = null;   // settled back near baseline — can re-arm

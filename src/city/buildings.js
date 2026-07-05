@@ -2437,7 +2437,7 @@
           // ---- helper: glaze ONE punched opening (clear pane + interior glow +
           //   thin exterior trim). Coordinates are local; spanW/spanH = clear
           //   opening size; (cx,cy,cz) its centre. Deterministic per-window lit.
-          function glazeOpening(cx, cy, cz, spanW, spanH) {
+          function glazeOpening(cx, cy, cz, spanW, spanH, vacant) {
             // ===== PANE GRID (Sub-idea C: one shot must not shatter a whole wall)
             // A wide curtain-wall / storefront opening used to be ONE big solid
             // pane = ONE breakable mesh, so a single round removed the entire
@@ -2481,7 +2481,9 @@
               const hsh = Math.abs(Math.sin(wx * 12.9898 + cy * 4.137 + wz * 78.233) * 43758.5453) % 1;
               const litFrac = punched ? 0.26 : 0.15;
               const warm = punched ? 0.9 : 0.35;
-              CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: hsh < litFrac, warm: warm });
+              // `vacant` (ex-blankPanel facade bays): the room never lights up —
+              // indistinguishable glass by day, one of the DARK windows at night.
+              CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: !vacant && hsh < litFrac, warm: warm });
             }
           }
 
@@ -2651,8 +2653,13 @@
               const t = -span / 2 + (bi + 0.5) * bayW;
               const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
               if (term === "blankPanel") {
-                if (f.horiz) lbox(t, winCy, f.z, bayW - 0.06, winPh, f.dd, color, wallOpt);
-                else lbox(f.x, winCy, t, f.w, winPh, bayW - 0.06, color, wallOpt);
+                // OWNER'S RULE: no opaque infill panels by day — every facade bay
+                // is real glass, uniform with its neighbours. The bay's "blank"
+                // roll is expressed at NIGHT instead: it glazes like any window
+                // but its room is permanently VACANT (interior glow lit:false),
+                // so after dusk it reads as one of the dark units while others
+                // light up. Day = clean uniform curtain wall, night = variety.
+                glazeOpening(cx, winCy, cz, bayW - 0.04, winPh, true);
                 bi++;
               } else if (term === "window") {
                 // merge a run of contiguous plain-window bays into ONE glazeOpening

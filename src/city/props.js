@@ -865,6 +865,9 @@
       head.position.set(px + sx, 0, pz + sz); head.rotation.y = rotY;
       const pole = new THREE.Mesh(sigPoleG, sigPoleM);
       pole.position.y = 2.6; pole.castShadow = true; head.add(pole);
+      // the pole is solid street furniture like the lamppost below — without
+      // this, cars drove straight through every signal.
+      solidCollider(px + sx, pz + sz, 0.25, pole);
       const box = new THREE.Mesh(sigBoxG, sigBoxM);
       box.position.set(0, 4.6, 0); head.add(box);
       const red = new THREE.Mesh(sigLampG, lampMat(0xff3b3b));

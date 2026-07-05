@@ -289,7 +289,7 @@
     co.bankrupt = true;
     for (const o of co.outlets) { if (o.lot) delete o.lot._corpOutlet; }
     co.outlets = []; co.shareByDistrict = {}; co.active = false;
-    if (CBZ.cityFeed) CBZ.cityFeed("💥 " + co.name + " has gone BANKRUPT — outlets revert to independents", "#ff9a6b");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("💥 " + co.name + " has gone BANKRUPT — outlets revert to independents", "#ff9a6b");
   }
 
   // ---- E9 NPC WHALES: royale's stream 2 (stream 1 is the entPool drain in
@@ -505,7 +505,7 @@
     const drained = co.cash > 0 && co.cash - amount <= 0;
     co.cash = Math.max(0, co.cash - amount);
     co.revAcc = (co.revAcc || 0) - amount;
-    if (drained && CBZ.cityFeed) CBZ.cityFeed("🎰 " + co.name + " — the house is shaken, a giant win drains the vault", "#ff9a6b");
+    if (drained && CBZ.cityFlavor) CBZ.cityFlavor("🎰 " + co.name + " — the house is shaken, a giant win drains the vault", "#ff9a6b");
     return true;
   }
   // notifyDestruction(n) -> a player-built piece was just destroyed (systems/

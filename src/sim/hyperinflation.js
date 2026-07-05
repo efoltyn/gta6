@@ -335,7 +335,7 @@
    every cross-module read here (CBZ.polity.get/list, CBZ.inflation.*,
    CBZ.bonds.*, CBZ.forex.*, CBZ.centralbank.*, CBZ.billionaires.founders,
    CBZ.corps.list, CBZ.npcEcon.adjustEmployedFrac, CBZ.cityLedgerLive/Entry,
-   CBZ.currency.*, CBZ.approvalShock, CBZ.cityFeed/city.big/cityForceStars)
+   CBZ.currency.*, CBZ.approvalShock, CBZ.cityFlavor/city.big/cityForceStars)
    is guarded and resolved at CALL time inside the daily tick or a directly-
    invoked public function, long after every script on the page has loaded —
    the identical discipline every sibling M-wave file's own header documents
@@ -540,18 +540,18 @@
     const ccy = ccyOf(rec.id, rec);
     const name = rec.name || rec.id;
     const up = stageIndex(newStage) > stageIndex(prevStage);
-    if (!up) { if (CBZ.cityFeed) CBZ.cityFeed("📉 " + name + "'s inflation eases back to " + newStage + ".", "#8fe08a"); return; }
+    if (!up) { if (CBZ.cityFlavor) CBZ.cityFlavor("📉 " + name + "'s inflation eases back to " + newStage + ".", "#8fe08a"); return; }
     if (newStage === "WARNING") {
-      if (CBZ.cityFeed) CBZ.cityFeed("⚠️ " + name + "'s inflation crosses into WARNING territory.", "#ffd76a");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("⚠️ " + name + "'s inflation crosses into WARNING territory.", "#ffd76a");
       if (ccy && ccy !== "LBD" && CBZ.forex && CBZ.forex.shock) CBZ.forex.shock(ccy, WARN_FX_SHOCK);
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, WARN_APPROVAL);
     } else if (newStage === "GALLOPING") {
-      if (CBZ.cityFeed) CBZ.cityFeed("🔥 " + name + " enters GALLOPING inflation — shelves reprice weekly.", "#ff9e6b");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("🔥 " + name + " enters GALLOPING inflation — shelves reprice weekly.", "#ff9e6b");
       if (ccy && ccy !== "LBD" && CBZ.forex && CBZ.forex.shock) CBZ.forex.shock(ccy, GALLOP_FX_SHOCK);
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, GALLOP_APPROVAL);
     } else if (newStage === "HYPER") {
       if (CBZ.city && CBZ.city.big) CBZ.city.big("💀 " + name.toUpperCase() + " HYPERINFLATION");
-      if (CBZ.cityFeed) CBZ.cityFeed("💀 " + name + " — prices reprice DAILY, barter spreads through the markets.", "#ff3b3b");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("💀 " + name + " — prices reprice DAILY, barter spreads through the markets.", "#ff3b3b");
       if (ccy && ccy !== "LBD" && CBZ.forex && CBZ.forex.shock) CBZ.forex.shock(ccy, HYPER_FX_SHOCK);
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, HYPER_APPROVAL);
     }
@@ -568,8 +568,8 @@
       }
       cs.controlsActive = wantControls;
       const name = rec.name || id;
-      if (CBZ.cityFeed) {
-        CBZ.cityFeed(wantControls
+      if (CBZ.cityFlavor) {
+        CBZ.cityFlavor(wantControls
           ? ("🏷️ " + name + " imposes emergency price controls — the official numbers stop telling the truth.")
           : ("🏷️ " + name + " lifts price controls — real prices reassert themselves."),
           wantControls ? "#ffb27a" : "#8fe08a");
@@ -583,7 +583,7 @@
       cs._bankRunFeedT = (cs._bankRunFeedT || 0) + 1;
       if (cs._bankRunFeedT >= BANK_RUN_FEED_EVERY) {
         cs._bankRunFeedT = 0;
-        if (CBZ.cityFeed) CBZ.cityFeed("🏃 Depositors queue outside " + (rec.name || id) + "'s banks — a run is on.", "#ff6a5e");
+        if (CBZ.cityFlavor) CBZ.cityFlavor("🏃 Depositors queue outside " + (rec.name || id) + "'s banks — a run is on.", "#ff6a5e");
       }
     }
   }
@@ -661,8 +661,8 @@
 
     const name = rec.name || id;
     if (CBZ.city && CBZ.city.big) CBZ.city.big("💵 " + name.toUpperCase() + " REDENOMINATES — 10^" + k + " ZEROS CUT");
-    if (CBZ.cityFeed) {
-      CBZ.cityFeed("💵 " + name + " knocks " + k + " zero" + (k > 1 ? "s" : "") + " off its currency" +
+    if (CBZ.cityFlavor) {
+      CBZ.cityFlavor("💵 " + name + " knocks " + k + " zero" + (k > 1 ? "s" : "") + " off its currency" +
         (genuine ? " alongside real fiscal tightening — credibility partially restored." : " — nothing else changes underneath it."),
         "#ffd76a");
     }
@@ -700,7 +700,7 @@
 
     const name = rec.name || id;
     if (CBZ.city && CBZ.city.big) CBZ.city.big("💵 " + name.toUpperCase() + " ADOPTS THE LIBERTY DOLLAR");
-    if (CBZ.cityFeed) CBZ.cityFeed("💵 " + name + " abandons " + ccy + " and dollarizes — the central bank goes dormant, monetary sovereignty is gone.", "#ffd76a");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("💵 " + name + " abandons " + ccy + " and dollarizes — the central bank goes dormant, monetary sovereignty is gone.", "#ffd76a");
     return { ok: true, rate: rate };
   }
   function maybeTriggerEnding(id, rec, cs, day) {
@@ -756,7 +756,7 @@
     const day = CBZ.worldDay ? CBZ.worldDay() : 0;
     const name = rec.name || id;
     if (run.defenseScore >= 0) {
-      if (CBZ.cityFeed) CBZ.cityFeed("🛡️ " + name + "'s defense holds — the speculator eats the loss.", "#8fe08a");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("🛡️ " + name + "'s defense holds — the speculator eats the loss.", "#8fe08a");
     } else {
       const gapFrac = -(SOROS_BREAK_GAP_MIN + rng() * SOROS_BREAK_GAP_RANGE);
       if (CBZ.forex && CBZ.forex.shock) CBZ.forex.shock(run.ccy, gapFrac);
@@ -767,7 +767,7 @@
       if (CBZ.centralbank && CBZ.centralbank.scarIndependence) CBZ.centralbank.scarIndependence(id, SOROS_INDEP_SCAR);
       if (CBZ.approvalShock) CBZ.approvalShock(id, SOROS_APPROVAL_BREAK);
       if (CBZ.city && CBZ.city.big) CBZ.city.big("📉 " + name.toUpperCase() + "'S CURRENCY DEFENSE BREAKS");
-      if (CBZ.cityFeed) CBZ.cityFeed("📉 The peg breaks — " + name + "'s currency craters, and the speculator walks away richer.", "#ff6a5e");
+      if (CBZ.cityFlavor) CBZ.cityFlavor("📉 The peg breaks — " + name + "'s currency craters, and the speculator walks away richer.", "#ff6a5e");
     }
     S.sorosCooldown[id] = day + SOROS_COOLDOWN_DAYS;
     delete S.soros[id];
@@ -790,7 +790,7 @@
     if (distressOf(id) < SOROS_DISTRESS_T) return;
     if (rng() >= SOROS_DAILY_CHANCE) return;
     const run = openSorosRun(id, ccy);
-    if (run && CBZ.cityFeed) CBZ.cityFeed("📉 A speculator opens a short against " + (rec.name || id) + "'s currency as it defends a losing peg.", "#ffb27a");
+    if (run && CBZ.cityFlavor) CBZ.cityFlavor("📉 A speculator opens a short against " + (rec.name || id) + "'s currency as it defends a losing peg.", "#ffb27a");
   }
 
   // ============================================================
@@ -831,7 +831,7 @@
       } else g.cash = Math.max(0, (g.cash || 0) - credited);
       bumpHeat(COUNTERFEIT_BUST_HEAT);
       if (CBZ.cityFeed) CBZ.cityFeed("🚔 The plates get made — counterfeit bills seized, heat's up.", "#ff6a5e");
-    } else if (CBZ.cityFeed) {
+    } else if (CBZ.cityFlavor) {
       CBZ.cityFeed("🖨️ Fresh " + ccy + " off an underworld press lands in your pocket, discounted and dirty.", "#ffd166");
     }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

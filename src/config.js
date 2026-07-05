@@ -469,6 +469,14 @@
   // raw vanilla brain (every steer is gated on this flag).
   if (CBZ.CONFIG.CITY_SMART_COMBAT == null) CBZ.CONFIG.CITY_SMART_COMBAT = true;
 
+  // FAKE HORIZON BACKDROP (world/terrain.js, owner's rule): the decorative
+  // mountain ring that encircled the map read as flat black silhouette
+  // cutouts clashing with the real world geometry behind it. terrain.js's
+  // own kill switch honors this; the real in-biome mountains (biome_snow's
+  // walkable range) are a separate system and unaffected. Delete this line
+  // to bring the backdrop ring back.
+  CBZ.PROC_TERRAIN = false;
+
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous
   // updater functions without adding any normal-game stack-capture overhead.

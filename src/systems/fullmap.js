@@ -60,8 +60,12 @@
           minZ = Math.min(minZ, A.annex.cz - A.annex.radius);
           maxZ = Math.max(maxZ, A.annex.cz + A.annex.radius);
         }
-        // worldmap.js islands & biomes extend the map to the whole archipelago
+        // worldmap.js islands & biomes extend the map to the whole archipelago.
+        // Skip malformed regions: Math.min(x, undefined) is NaN and one bad
+        // region would poison the projection for EVERY region (the
+        // createLinearGradient non-finite crash).
         if (A.regions) for (const rg of A.regions) {
+          if (!isFinite(rg.minX) || !isFinite(rg.maxX) || !isFinite(rg.minZ) || !isFinite(rg.maxZ)) continue;
           minX = Math.min(minX, rg.minX); maxX = Math.max(maxX, rg.maxX);
           minZ = Math.min(minZ, rg.minZ); maxZ = Math.max(maxZ, rg.maxZ);
         }
@@ -549,7 +553,11 @@
   // texture, then coastline + surf strokes.
   function paintLandTop(rg, p, biome) {
     const path = coastPath(rg, p), pal = biomePal(biome), g = regionGeo(rg);
-    const grad = ctx.createLinearGradient(p.x(g.cx - g.hx), p.z(g.cz - g.hz), p.x(g.cx + g.hx), p.z(g.cz + g.hz));
+    const gx0 = p.x(g.cx - g.hx), gz0 = p.z(g.cz - g.hz), gx1 = p.x(g.cx + g.hx), gz1 = p.z(g.cz + g.hz);
+    // a region with non-finite geometry skips its own paint instead of
+    // throwing and killing the whole static-plate bake
+    if (!isFinite(gx0) || !isFinite(gz0) || !isFinite(gx1) || !isFinite(gz1)) return;
+    const grad = ctx.createLinearGradient(gx0, gz0, gx1, gz1);
     grad.addColorStop(0, shade(pal.fill, 0.14));
     grad.addColorStop(1, shade(pal.fill, -0.16));
     ctx.fillStyle = grad;

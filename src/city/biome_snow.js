@@ -230,7 +230,12 @@
       function mergeAddRange(geoms, cast) {
         let mesh;
         if (BGU && BGU.mergeBufferGeometries) {
-          mesh = new THREE.Mesh(BGU.mergeBufferGeometries(geoms), rangeMat);
+          const merged = BGU.mergeBufferGeometries(geoms);
+          // buildRidge emits position+color ONLY — without normals a Lambert
+          // mesh lights to solid BLACK (the owner-filmed silhouette mountains).
+          // The fallback branch below always computed them; this branch must too.
+          merged.computeVertexNormals();
+          mesh = new THREE.Mesh(merged, rangeMat);
         } else {
           // manual Float32 concat fallback (position + color)
           let np = 0, nc = 0;
