@@ -19,23 +19,23 @@
   // guarded copy exists only so the TP path never sees CITY_TP undefined if the
   // city file is ever dropped from the page. TUNE IN src/city/camera.js, NOT HERE.
   if (!CBZ.CITY_TP) CBZ.CITY_TP = {
-    HEIGHT: 1.6,       // relaxed (un-armed) rig pivot height — over-shoulder height, lifts the eye
-    DIST: 5.2,         // relaxed behind-the-back distance — char shrinks, more world ahead
-    SIDE: 1.0,         // relaxed lateral offset to the player's RIGHT (char hard left-of-centre)
-    PITCH: 0.06,       // default orbit pitch on city entry — near-level, horizon high
-    LOOK_Y: 1.62,      // relaxed look-target height above feet (shoulder aim point)
-    LEAD: 4.6,         // relaxed forward look-ahead
-    DAMP_POS: 0.16,    // relaxed position SmoothDamp time (lazy settle)
+    // (values mirror src/city/camera.js — the authoritative copy; keep in sync)
+    HEIGHT: 1.7,       // rig pivot height — a touch above the head
+    DIST: 4.0,         // behind-the-back distance (Fortnite default frame)
+    SIDE: 0.55,        // subtle lateral offset RIGHT — char just left of centre
+    PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze
+    LOOK_Y: 1.52,      // look-target height above feet
+    LEAD: 4.6,         // forward look-ahead
+    DAMP_POS: 0.16,    // position SmoothDamp time (lazy settle)
     DAMP_YAW: 9.0,     // relaxed yaw chase rate
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
-    FOV: 59,           // relaxed base FOV (less claustrophobic)
-    // ARMED / ADS over-shoulder tier (read every frame via the `shoulder` boolean).
-    // The *_AIM getters re-evaluate CBZ.isADS() each frame so holding RMB punches
-    // the cam IN + FURTHER over the shoulder + narrows the lens — a real ADS read.
-    DIST_AIM_BASE: 4.8, DIST_AIM_ADS: 1.45,   // resting over-shoulder → punched in TIGHT on RMB (pushed back: char in lower-third, world open)
-    SIDE_AIM_BASE: 1.3, SIDE_AIM_ADS: 1.4,    // over-shoulder offset → further over the shoulder on RMB (char hard-left, frame-center clear)
-    FOV_AIM_BASE: 68,   FOV_AIM_ADS: 48,      // armed FOV → wider lens shrinks the char + shows world/headroom; narrows (real zoom) on RMB
-    HEIGHT_AIM_BASE: 1.72, HEIGHT_AIM_ADS: 1.46,  // armed rig-pivot height (shoulder, never overhead; lifted for headroom)
+    FOV: 60,           // base FOV
+    // ARMED / ADS tier: armed-at-rest = the SAME frame as relaxed (holding a gun
+    // doesn't move the camera); only RMB/ADS punches to the tight over-shoulder.
+    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.0,
+    SIDE_AIM_BASE: 0.55, SIDE_AIM_ADS: 0.85,
+    FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,
+    HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.62,
     PITCH_LOOK: 1.0,   // how strongly the armed look target follows player pitch (FIX 1: aim vertically + stable framing)
     get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
     get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
@@ -489,7 +489,14 @@
     // ease the forward lead (a long lead drops the player low in frame when
     // sprinting) and raise the look height so you sit centred, not bottom-third.
     const lead = shoulder ? 0.05 : (meleeFocus ? 0.08 : 0.08);
-    const aimLead = driving ? 8.5 : (shoulder ? 12.0 : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))));
+    // FORTNITE parity (owner reference shots): merely HOLDING a weapon must not
+    // reshape the frame — the long 12m aim lead (and the shoulder look height
+    // below) apply only while actually scoping (RMB/ADS). Armed-at-rest in the
+    // city uses the same LEAD/LOOK_Y as the relaxed chase, so equipping a gun
+    // leaves the camera exactly where it was. Jail/survival shoulder (no TP)
+    // keeps the old constants.
+    const tpADS = !!(TP && shoulder && CBZ.isADS && CBZ.isADS());
+    const aimLead = driving ? 8.5 : (shoulder ? (TP ? (tpADS ? 12.0 : TP.LEAD) : 12.0) : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))));
     // The look target carries the VIEW DIRECTION via the aimLead·forward term.
     // Derive that forward/right from yawView (= live cam.yaw under feelCam) so
     // the aim tracks the mouse 1:1; off (or non-TP) yawView===yaw → identical.
@@ -507,7 +514,7 @@
     const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
     const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
     const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
-    const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? 1.72 : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))
+    const lty = player.pos.y + (player.crouch ? (TP ? 1.18 : 1.24) : (driving ? 1.9 : (shoulder ? (TP ? (tpADS ? 1.72 : TP.LOOK_Y) : 1.72) : (meleeFocus ? 1.52 : (TP ? TP.LOOK_Y : (surv ? 2.06 : 1.88))))))
       + (pitchFollow ? Math.sin(cam.pitch) * aimLead * pitchFollow : 0);
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
@@ -621,8 +628,10 @@
 
     // FOV kick at speed for a sense of pace — wider base + a bigger kick make
     // movement feel quicker without changing the actual move speed.
+    // armed-at-rest keeps the default lens + speed kick (Fortnite parity —
+    // holding a gun doesn't change the camera); only scoping narrows to FOV_AIM.
     let targetFov = TP
-      ? (shoulder ? TP.FOV_AIM : TP.FOV + Math.min(spd / 6, 1) * 5)
+      ? (tpADS ? TP.FOV_AIM : TP.FOV + Math.min(spd / 6, 1) * 5)
       : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
     // a fitted optic (city/gunmods.js + city/scopeview.js) overrides the aimed
     // lens with its own magnification while you're holding aim on foot.

@@ -34,46 +34,36 @@
      (it loads FIRST). THIS file loads later and is the authoritative tuning
      surface — edit HERE, never the fallback, or your change is overwritten. */
   CBZ.CITY_TP = {
-    HEIGHT: 1.6,       // rig pivot above feet — over-shoulder height (lifts the eye): camera rides above the character so the street reads ahead, not buried
-    DIST: 5.2,         // behind-the-back distance — far enough to shrink the character so it no longer occludes the frame; scroll wheel still scales around this
-    SIDE: 1.0,         // camera lateral offset to the player's RIGHT — character sits hard left-of-center, world/crosshair stay clear
-    PITCH: 0.06,       // default orbit pitch on city entry — near-level (was 0.46 looking down): horizon sits high in frame, more world, less pavement
-    LOOK_Y: 1.62,      // look-target height above feet — shoulder aim point; with the near-level pitch this gives a subtle down-gaze, not a top-down stare
-    LEAD: 4.6,         // forward look-ahead (was 3.6) — a touch more breathing room down-street
-    DAMP_POS: 0.16,    // position SmoothDamp time (was 0.085) — the lazy settle; bigger = floatier follow
-    DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly instead of rigid-locking; bigger = stiffer
+    // FORTNITE reference (owner-supplied screenshots, 2026-07-05): NOT scoping
+    // = the wide default frame — camera ~4m back, a SUBTLE right offset (the
+    // character reads just left of centre, not pinned to the edge), slightly
+    // above the head with a mild down-gaze, character ~half the frame tall.
+    // Carrying a gun does NOT change the camera — only RMB (scoping) punches
+    // to the tight over-shoulder. That's why the AIM_BASE tier below equals
+    // this relaxed frame instead of being its own third framing.
+    HEIGHT: 1.7,       // rig pivot above feet — a touch above the head so the street reads ahead
+    DIST: 4.0,         // behind-the-back distance — Fortnite default: char large enough to matter, world still open
+    SIDE: 0.55,        // camera lateral offset RIGHT — subtle: char just left of centre (1.0 pinned him to the edge)
+    PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze, horizon high
+    LOOK_Y: 1.52,      // look-target height above feet — with the mild pitch this centres the char vertically
+    LEAD: 4.6,         // forward look-ahead — breathing room down-street
+    DAMP_POS: 0.16,    // position SmoothDamp time — the lazy settle; bigger = floatier follow
+    DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
-    FOV: 59,           // base FOV — less claustrophobic; speed kick still widens it
-    // ---- ARMED / ADS over-shoulder tier (read EVERY frame by systems/camera.js
-    //      via the `shoulder` boolean). These three are GETTERS so holding RMB
-    //      (CBZ.isADS) punches the cam IN + narrows the lens for a precise ADS
-    //      frame, WITHOUT editing systems/camera.js — the AIM values it already
-    //      reads (DIST_AIM/SIDE_AIM/FOV_AIM) now simply respond to RMB. The
-    //      smoothing there (camDist/fov SmoothDamp) eases the transition. When
-    //      RMB isn't held these return the same always-ready armed frame as before. ----
-    // FORTNITE-style over-shoulder ADS punch-in (owner reference): holding RMB
-    // pulls the cam IN TIGHT and FURTHER over the RIGHT shoulder so the character
-    // shifts hard LEFT of screen and gets BIG, with a real zoom toward the aim.
-    // DIST_AIM_ADS pulls the boom in tight; SIDE_AIM_ADS goes UP (not down) so the
-    // cam rides further over the shoulder — systems/camera.js applies camSide along
-    // the player's RIGHT vector, so a BIGGER value pushes the character left, which
-    // is the Fortnite ADS read (the old 0.82 < 1.0 base pulled it the WRONG way,
-    // toward center); FOV narrows for the zoom. SmoothDamp eases the transition.
-    //
-    // DEFAULT-ARMED (no RMB) is the Fortnite resting 3PS over-shoulder: ~3.3m
-    // behind at chest height — the character sits LARGE in the lower-left and you
-    // see the street ahead. RMB then PUNCHES to a tight ~1.45m over-shoulder with a
-    // real lens zoom (FOV 42), the character hard-left + big, the gun raised. The
-    // BASE was pulled out slightly (2.9→3.3) and the orbit pitch lowered so the
-    // default frame is a clean behind-the-shoulder shot, NOT a top-down look-down.
-    DIST_AIM_BASE: 4.8, DIST_AIM_ADS: 1.45,   // armed distance → resting over-shoulder (pushed back: char lower-third, world open), punched in TIGHT on RMB
-    SIDE_AIM_BASE: 1.3, SIDE_AIM_ADS: 1.4,    // over-shoulder offset → FURTHER over the shoulder on RMB (char hard-left, frame-center clear)
-    FOV_AIM_BASE: 68,   FOV_AIM_ADS: 48,      // armed FOV → wider lens shrinks the char + shows world/headroom; narrows (real zoom) on RMB
-    // HEIGHT_AIM: rig-pivot height while armed — the camera rides at chest/shoulder
-    // height so the framing is a behind-the-shoulder shot, never an overhead stare.
-    // ADS drops a hair so the raised gun + crosshair sit centred. Read by
-    // systems/camera.js (shoulder branch) in place of the old HEIGHT+0.1 fudge.
-    HEIGHT_AIM_BASE: 1.72, HEIGHT_AIM_ADS: 1.46,
+    FOV: 60,           // base FOV
+    // ---- ARMED / ADS tier (read EVERY frame by systems/camera.js via the
+    //      `shoulder` boolean; the getters below switch on CBZ.isADS()). ----
+    // NOT scoping (armed base) = the SAME frame as relaxed above — per the
+    // owner's Fortnite reference, holding a weapon leaves the camera alone.
+    // Scoping (RMB/ADS) = the image-2 frame: ~2m over the RIGHT shoulder at
+    // shoulder height, character waist-up on the left third, gun on the
+    // crosshair, a real (moderate) lens zoom. SmoothDamp eases the punch-in.
+    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.0,   // armed = default distance; RMB punches to a close over-shoulder
+    SIDE_AIM_BASE: 0.55, SIDE_AIM_ADS: 0.85,  // armed = default offset; RMB rides further over the shoulder (char left third)
+    FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,     // armed = default lens; RMB = moderate zoom toward the aim
+    // HEIGHT_AIM: rig-pivot height while armed. ADS sits at shoulder height so
+    // the raised gun + crosshair line up (image 2: camera level with the head).
+    HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.62,
     // PITCH_LOOK: how strongly the armed 3PS LOOK target follows the player's
     // pitch (systems/camera.js drops/raises the look point by this * camDist).
     // WHY (FIX 1 root cause): the old TP look target was pitch-BLIND (fixed
