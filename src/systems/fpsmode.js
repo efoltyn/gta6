@@ -300,6 +300,11 @@
   // crosshair instead of double-rotating it skyward.
   carriedGun.rotation.set(-1.571, 0, 0);
   carriedGun.visible = false;
+  // world barrel-lock scratch (no per-frame allocation)
+  const _blGunPos = new THREE.Vector3(), _blDir = new THREE.Vector3(), _blTarget = new THREE.Vector3();
+  const _blZero = new THREE.Vector3(0, 0, 0), _blUp = new THREE.Vector3(0, 1, 0);
+  const _blMat = new THREE.Matrix4();
+  const _blWorldQ = new THREE.Quaternion(), _blParentQ = new THREE.Quaternion();
   function attachCarriedGun() {
     const ch = CBZ.playerChar;
     const socket = ch && ch.sockets && (ch.sockets.thirdPersonWeapon || ch.sockets.weapon);
@@ -2541,15 +2546,35 @@
         (aim ? (longGun ? 0.04 : 0.01) : -0.12) - reloadDip * 0.16,
         (aim ? (longGun ? 0.30 : (util ? 0.14 : 0.22)) : 0.02) - recoil * 0.07
       );
-      // Barrel-down-the-forearm baseline (-π/2, no Math.PI on Y) so the carried
-      // gun's muzzle reads forward at the crosshair once animChar holds the arm
-      // at its -1.571 horizontal-forward baseline. Recoil/reload stay as small
-      // additive perturbations on top of the new baseline.
+      // Barrel-down-the-forearm baseline (-π/2, no Math.PI on Y) — the FALLBACK
+      // orientation if the world barrel-lock below can't run (no parent yet).
       carriedGun.rotation.set(
         -1.571 + (aim ? 0.0 : 0.18) + recoil * 0.12 + reloadDip * 0.22,
         -0.04,
         -0.03 + recoilSide * 0.75
       );
+      // ---- WORLD BARREL LOCK (the owner-reported "gun faces the wrong way" in
+      // third person): the pose chain (body-yaw damp → shoulder → elbow → hand)
+      // only APPROXIMATES the aim, so the barrel visibly drifted off the
+      // crosshair — FP is exact because it draws its own viewmodel. Standard TP
+      // fix: keep the gun's POSITION parented to the hand, but override its
+      // ORIENTATION in world space every frame so the barrel points exactly at
+      // the crosshair ray's far point (parallax-correct from the gun's own
+      // position). Recoil/reload kick re-applied as local perturbations on top.
+      if (carriedGun.parent && CBZ.camera) {
+        carriedGun.parent.updateWorldMatrix(true, false);
+        carriedGun.getWorldPosition(_blGunPos);
+        _blDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
+        _blTarget.copy(CBZ.camera.position).addScaledVector(_blDir, 120);
+        _blDir.copy(_blTarget).sub(_blGunPos).normalize();
+        // matrix with -Z along the aim dir (+Y kept upright) = barrel on target
+        _blMat.lookAt(_blZero, _blDir, _blUp);
+        _blWorldQ.setFromRotationMatrix(_blMat);
+        carriedGun.parent.getWorldQuaternion(_blParentQ);
+        carriedGun.quaternion.copy(_blParentQ.invert()).multiply(_blWorldQ);
+        // kick: muzzle climbs on recoil, dips on reload — about the gun's own X
+        carriedGun.rotateX(recoil * 0.12 + reloadDip * 0.22);
+      }
       if (CBZ.playerChar) {
         const yaw = Math.atan2(-Math.sin(CBZ.cam.yaw), -Math.cos(CBZ.cam.yaw));
         CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, yaw, 1 - Math.pow(0.00008, dt));
