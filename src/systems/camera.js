@@ -32,10 +32,10 @@
     FOV: 60,           // base FOV
     // ARMED / ADS tier: armed-at-rest = the SAME frame as relaxed (holding a gun
     // doesn't move the camera); only RMB/ADS punches to the tight over-shoulder.
-    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.0,
+    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.4,
     SIDE_AIM_BASE: 0.55, SIDE_AIM_ADS: 0.85,
     FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,
-    HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.62,
+    HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.58,
     PITCH_LOOK: 1.0,   // how strongly the armed look target follows player pitch (FIX 1: aim vertically + stable framing)
     get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
     get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },
@@ -477,7 +477,7 @@
       // boom from 4.8 → ~1.1, ballooning the character + dropping the angle low —
       // THE main 3PS framing bug). Only RMB/ADS may ride in close for the punch-in.
       const minCam = (CBZ.game.mode === "city" && !player.driving)
-        ? (shoulder ? ((CBZ.isADS && CBZ.isADS()) ? 1.3 : 2.6) : 3.0)
+        ? (shoulder ? ((CBZ.isADS && CBZ.isADS()) ? 1.8 : 2.6) : 3.0)
         : 0.28;
       const d = Math.max(minCam, occ - 0.25);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;

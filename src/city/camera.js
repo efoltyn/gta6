@@ -58,12 +58,12 @@
     // Scoping (RMB/ADS) = the image-2 frame: ~2m over the RIGHT shoulder at
     // shoulder height, character waist-up on the left third, gun on the
     // crosshair, a real (moderate) lens zoom. SmoothDamp eases the punch-in.
-    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.0,   // armed = default distance; RMB punches to a close over-shoulder
+    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.4,   // armed = default distance; RMB punches to a close over-shoulder
     SIDE_AIM_BASE: 0.55, SIDE_AIM_ADS: 0.85,  // armed = default offset; RMB rides further over the shoulder (char left third)
     FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,     // armed = default lens; RMB = moderate zoom toward the aim
     // HEIGHT_AIM: rig-pivot height while armed. ADS sits at shoulder height so
     // the raised gun + crosshair line up (image 2: camera level with the head).
-    HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.62,
+    HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.58,
     // PITCH_LOOK: how strongly the armed 3PS LOOK target follows the player's
     // pitch (systems/camera.js drops/raises the look point by this * camDist).
     // WHY (FIX 1 root cause): the old TP look target was pitch-BLIND (fixed

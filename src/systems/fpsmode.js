@@ -286,7 +286,10 @@
     const carried = buildWeaponModel(w);
     if (!carried.userData.muzzle) carried.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
     carried.visible = i === 0;
-    carried.scale.setScalar(1.05);
+    // TP guns read BIGGER than FP-scale (standard third-person trick — the
+    // over-shoulder camera sits metres away; at 1.05 the held gun vanished
+    // into the blocky hand and the owner couldn't see it at all).
+    carried.scale.setScalar(1.45);
     carriedModels.push(carried);
     carriedGun.add(carried);
   });
