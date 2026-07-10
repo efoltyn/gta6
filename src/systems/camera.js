@@ -240,9 +240,11 @@
     const cs = CBZ.queryCollidersNear
       ? CBZ.queryCollidersNear(ox + dx * dist * 0.5, oz + dz * dist * 0.5, dist * 0.5 + rad + 1, _sweepNear)
       : CBZ.colliders;
+    const sweepCityOn = !CBZ.game || CBZ.game.mode === "city";
     for (let i = 0; i < cs.length; i++) {
       const c = cs[i];
       if (c.noCam) continue;
+      if (c._city && !sweepCityOn) continue;   // hidden city geometry never grabs the jail camera
       const minX = c.minX - rad, maxX = c.maxX + rad, minZ = c.minZ - rad, maxZ = c.maxZ + rad;
       const minY = (c.y0 != null ? c.y0 : -1e4) - rad, maxY = (c.y1 != null ? c.y1 : 1e4) + rad;
       let t0 = 0, t1 = best, ta, tb, tmp;

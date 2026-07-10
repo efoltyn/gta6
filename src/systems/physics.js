@@ -74,6 +74,9 @@
     out = out || [];
     out.length = 0;
     colQuerySeen.clear();
+    // same mode gate as collide(): stamped city colliders are phantom walls
+    // in the prison/survival coordinate space, so queries skip them there.
+    const cityOn = !CBZ.game || CBZ.game.mode === "city";
     const gx0 = Math.floor((x - radius) / COL_CELL), gx1 = Math.floor((x + radius) / COL_CELL);
     const gz0 = Math.floor((z - radius) / COL_CELL), gz1 = Math.floor((z + radius) / COL_CELL);
     for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
@@ -81,6 +84,7 @@
       if (!bucket) continue;
       for (let i = 0; i < bucket.length; i++) {
         const c = bucket[i];
+        if (c._city && !cityOn) continue;
         if (colQuerySeen.has(c)) continue;
         colQuerySeen.add(c);
         out.push(c);
@@ -119,8 +123,13 @@
   // instead.
   function collide(pos, radius, feetY, headY) {
     const cols = nearbyColliders(pos);
+    // city-owned colliders (stamped by city/mode.js's build) are only solid in
+    // city mode: the airport/military rects overlap the prison's coordinate
+    // space, and their hidden geometry must not wall off jail rooms.
+    const cityOn = !CBZ.game || CBZ.game.mode === "city";
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
+      if (c._city && !cityOn) continue;
       if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue; // body clears this wall
       const cx = Math.max(c.minX, Math.min(pos.x, c.maxX));
       const cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));

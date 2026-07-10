@@ -610,6 +610,7 @@
       col.y0 = rec.pos.y + (rec._colliderY0Offset || 0);
       col.y1 = col.y0 + rec._colliderHeight;
     }
+    col._city = true;   // aircraft are city-world objects; never solid in the prison space
     if (CBZ.colliders && CBZ.colliders.indexOf(col) < 0) CBZ.colliders.push(col);
     rec._colliderDetached = false;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();

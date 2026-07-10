@@ -171,7 +171,21 @@
 
   function build() {
     if (city.built) return;
+    const colStart = CBZ.colliders ? CBZ.colliders.length : 0;
     city.arena = CBZ.buildCity();
+    // CITY COLLIDER STAMP: the airport rect (x -370..290, z -280..40) — and
+    // potentially other city content — OVERLAPS the prison arena's coordinate
+    // space around the origin. The meshes hide on mode switch but these AABBs
+    // stayed live, so jail rooms had invisible force fields (parked airliners,
+    // jet-bridge props) once the campaign started building the city before
+    // prison. Stamp everything the city build registered; the shared collide
+    // resolver skips stamped boxes outside city mode.
+    if (CBZ.colliders) {
+      for (let i = colStart; i < CBZ.colliders.length; i++) {
+        const c = CBZ.colliders[i];
+        if (c && typeof c === "object") c._city = true;
+      }
+    }
     baseFloor = CBZ.floorAt || null;
     // _city marks this wrapper so reset()'s reinstall check below never captures
     // it back into baseFloor. Without the marker, reset() set baseFloor to this
