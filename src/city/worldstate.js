@@ -141,6 +141,10 @@
 
   function save(w) {
     if (!w) return;
+    // PERMADEATH (city/death.js): once the run is declared over and the slot
+    // wiped, nothing may write it back — the 5s autosave would otherwise
+    // resurrect the erased world between the GAME OVER card and the reload.
+    if (g._cityGameOver) return;
     w.lastSaved = now();
     let json = null;
     try { json = JSON.stringify(w); } catch (e) { return; }

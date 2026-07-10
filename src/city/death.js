@@ -22,6 +22,7 @@
 
   let overlay = null, titleEl = null, subEl = null;
   let respawnT = 0, dying = false, wastedT = 0, pendingWasted = null;
+  let finalDeath = false, finalDeathLine = "";   // permadeath: this death ends the run
   // the orbit cam is HELD a beat while the first-person gun-drop tumble plays
   // (fpsmode.js) so the weapon visibly falls from YOUR eye before the WASTED
   // replay pulls out to third person.
@@ -72,7 +73,7 @@
     titleEl.style.opacity = "0"; titleEl.style.transform = "scale(1.25)"; subEl.style.opacity = "0";
   }
 
-  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; pendingDeathCam = null; deathCamHoldT = 0; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset(); };
+  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; pendingDeathCam = null; deathCamHoldT = 0; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; finalDeath = false; finalDeathLine = ""; g._cityGameOver = false; if (goCard) goCard.style.display = "none"; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset(); };
 
   // a red damage flash (the engine never defined CBZ.hitFlash) — drives the
   // existing #hitfx overlay so getting shot reads dramatically.
@@ -287,6 +288,59 @@
            r.indexOf("pavement") >= 0;
   }
 
+  // ============================================================
+  //  PERMADEATH — dying and getting hurt are now DIFFERENT events.
+  //  Getting shot down / beaten / run over is "critically hurt": you wake up
+  //  at the hospital (the classic flow below). But an unambiguously FATAL end
+  //  — a bullet through the skull, an explosion, hitting the pavement from a
+  //  rooftop, or a scripted execution (imp.fatal, used by campaign scenes) —
+  //  is the end of the story: the saved run is erased and the only way
+  //  forward is a fresh start. CBZ.CONFIG.CITY_PERMADEATH=false reverts to
+  //  hospital-for-everything in one line.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_PERMADEATH == null) CBZ.CONFIG.CITY_PERMADEATH = true;
+  function isFinalCause(reason, imp) {
+    if (!CBZ.CONFIG || CBZ.CONFIG.CITY_PERMADEATH === false) return false;
+    if (imp && imp.fatal) return true;                    // scripted executions opt in
+    if (imp && imp.headshot) return true;                 // through the skull
+    if (isExplosionCause(reason)) return true;
+    if (isImpactCause(reason)) return true;               // the pavement always wins
+    return ("" + (reason || "")).toLowerCase().indexOf("executed") >= 0;
+  }
+
+  // erase the run. g._cityGameOver gates worldstate's autosave so the wiped
+  // slot can't be re-written by a 5s tick between here and the reload.
+  function wipeSavedRun() {
+    g._cityGameOver = true;
+    try { localStorage.removeItem("CBZ_CITY_WORLD_V2"); } catch (e) {}
+    try {
+      if (CBZ.sqlitedb && CBZ.sqlitedb.saveWorld) CBZ.sqlitedb.saveWorld(null, "null");
+    } catch (e) {}
+    g.cityWorld = null; g.cityCampaign = null; g.cityCampaignPending = null;
+  }
+
+  let goCard = null;
+  function showGameOverCard(line) {
+    if (!goCard) {
+      goCard = document.createElement("div");
+      goCard.id = "cityGameOver";
+      goCard.style.cssText = "position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font-family:Fredoka,system-ui,sans-serif;text-align:center;background:rgba(6,2,2,.92)";
+      goCard.innerHTML =
+        "<div style='font-size:clamp(50px,10vw,120px);font-weight:700;letter-spacing:6px;color:#c9202a;text-shadow:0 6px 0 #5e070b,0 10px 26px rgba(0,0,0,.7)'>GAME OVER</div>" +
+        "<div id='cityGameOverSub' style='font-size:clamp(18px,2.6vw,26px);color:#c9b9b9;max-width:640px;line-height:1.5'></div>" +
+        "<button id='cityGameOverBtn' class='btn' style='margin-top:10px'>START A NEW LIFE</button>";
+      document.body.appendChild(goCard);
+      goCard.querySelector("#cityGameOverBtn").addEventListener("click", function () {
+        wipeSavedRun();   // idempotent — belt and braces before the reload
+        try { location.reload(); } catch (e) {}
+      });
+    }
+    const sub = goCard.querySelector("#cityGameOverSub");
+    if (sub) sub.textContent = (line ? line + ". " : "") + "There is no hospital for this one. The save is gone — the city starts over without you.";
+    goCard.style.display = "flex";
+    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
+  }
+
   // ---- does YOUR fatal headshot take the head OFF? ----
   // Same rule gore.js applies to NPCs (a 9mm head wound is a snap + blood
   // burst, never a decapitation): sniper always, a shotgun in your face
@@ -487,7 +541,17 @@
     // it fades in — no jarring instant pop on the exact frame you die. When the
     // exterior cinematic plays, hold the title until the street shot has done its
     // job (the full beat + a touch of the orbit hand-off) so the reveal lands.
-    pendingWasted = line + "  ·  respawning at " + where + "…";
+    // PERMADEATH split: a truly fatal end skips the hospital line (and the
+    // kill-cam — there is nothing after this to spectate for) and routes the
+    // post-title beat to the GAME OVER card instead of respawn().
+    finalDeath = isFinalCause(reason, imp);
+    if (finalDeath) {
+      finalDeathLine = line;
+      pendingSpecKiller = null; g._citySpecTarget = null;
+      pendingWasted = line + "  ·  no coming back from this one";
+    } else {
+      pendingWasted = line + "  ·  respawning at " + where + "…";
+    }
     const titleDelay = extBeat > 0 ? (extBeat + 0.6) : 1.8;
     wastedT = titleDelay;
     g._cityKiller = null; g._cityKillerActor = null;
@@ -673,10 +737,16 @@
           pendingDeathCam = null;
         }
       }
-      if (pendingWasted && wastedT > 0) { wastedT -= dt; if (wastedT <= 0) { showOverlay("WASTED", pendingWasted, "#c9202a"); pendingWasted = null; } }
+      if (pendingWasted && wastedT > 0) { wastedT -= dt; if (wastedT <= 0) { showOverlay(finalDeath ? "DEAD" : "WASTED", pendingWasted, "#c9202a"); pendingWasted = null; } }
       if (spectating) { tickSpectate(dt); return; }
       respawnT -= dt;
       if (respawnT <= 0) {
+        // PERMADEATH: a final death never reaches respawn() — the run is wiped
+        // and the GAME OVER card is the only exit (its button reloads fresh).
+        if (finalDeath) {
+          if (!g._cityGameOver) { wipeSavedRun(); showGameOverCard(finalDeathLine); }
+          return;
+        }
         // the WASTED beat is done — if a real person did this, SPECTATE them now
         // instead of snapping straight to the hospital. Nothing to watch → respawn.
         if (pendingSpecKiller && specValid(pendingSpecKiller)) { beginSpectate(pendingSpecKiller); pendingSpecKiller = null; return; }
