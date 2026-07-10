@@ -478,7 +478,8 @@
     if (keys["a"]) { mx -= rx; mz -= rz; }
     const overview = !!(CBZ.simView && CBZ.simView.active);
     const mapOpen = !!(CBZ.fullMap && CBZ.fullMap.active);
-    if (overview || mapOpen) { mx = 0; mz = 0; } // WASD belongs to the active overlay instead
+    const cine = !!(CBZ.cineActive && CBZ.cineActive());  // scripted scene owns the body
+    if (overview || mapOpen || cine) { mx = 0; mz = 0; } // WASD belongs to the active overlay instead
 
     // stunned (baton / taser): no input this frame, gravity still applies
     if (player.stun > 0) { player.stun -= dt; mx = mz = 0; }

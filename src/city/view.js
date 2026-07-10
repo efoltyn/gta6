@@ -43,6 +43,10 @@
   // a car or die so fpsmode never fights the driving / death cameras.
   CBZ.onAlways(49, function () {
     if (g.mode !== "city") return;
+    // a scripted cinematic (city/cinematics.js) owns rig visibility for its
+    // first-person shots — re-showing the body here put the player's own head
+    // in front of the scene camera.
+    if (CBZ.cineActive && CBZ.cineActive()) return;
     const cc = CBZ.cityCam, P = CBZ.player, ch = CBZ.playerChar;
     if (!ch || !ch.group) return;
     const fpsOn = !!(CBZ.fps && CBZ.fps.active);

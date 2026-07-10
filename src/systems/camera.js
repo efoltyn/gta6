@@ -152,6 +152,8 @@
 
   // smoothed state
   const camV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };
+  const cineV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };            // scripted-scene dolly
+  const _cineLook = new THREE.Vector3();                              // scripted-scene look ease
   const look = new THREE.Vector3(player.pos.x, player.pos.y + 1.4, player.pos.z);
   const lookV = { x: { v: 0 }, y: { v: 0 }, z: { v: 0 } };
   let fov = 62, fovV = { v: 0 }, heightV = { v: 0 };
@@ -266,6 +268,28 @@
     // BIRD'S-EYE SOCIETY VIEW: a strategic camera for the math-only mass
     // simulation. It intentionally bypasses spring-arm collision and close
     // camera effects; the player remains frozen while the prison keeps living.
+    // SCRIPTED CINEMATIC (city/cinematics.js): an authored scene owns the lens
+    // outright — damped dolly toward the shot's position/look, hard snap on a
+    // CUT. Highest priority: a cutscene must win over FP/driving/shoulder.
+    const cc0 = CBZ.cineCam;
+    if (cc0 && cc0.active) {
+      introT = 0; prev.copy(player.pos); shakeAmt = 0;
+      if (cc0.snap) {
+        cc0.snap = false;
+        camera.position.set(cc0.x, cc0.y, cc0.z);
+        cineV.x.v = cineV.y.v = cineV.z.v = 0;
+        _cineLook.set(cc0.lx, cc0.ly, cc0.lz);
+      } else {
+        camera.position.x = smoothDamp(camera.position.x, cc0.x, cineV.x, 0.34, fdt);
+        camera.position.y = smoothDamp(camera.position.y, cc0.y, cineV.y, 0.34, fdt);
+        camera.position.z = smoothDamp(camera.position.z, cc0.z, cineV.z, 0.34, fdt);
+      }
+      _cineLook.x += (cc0.lx - _cineLook.x) * (1 - Math.exp(-6 * fdt));
+      _cineLook.y += (cc0.ly - _cineLook.y) * (1 - Math.exp(-6 * fdt));
+      _cineLook.z += (cc0.lz - _cineLook.z) * (1 - Math.exp(-6 * fdt));
+      camera.lookAt(_cineLook);
+      return;
+    }
     const sv = CBZ.simView;
     if (sv && sv.active && CBZ.game.mode === "escape") {
       introT = 0;

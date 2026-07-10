@@ -953,12 +953,14 @@
   });
 
   // ---- CARS (the old F key, surfaced): tap E gets in, HOLD E jacks a driver ----
+  // _cineLocked: an authored scene car (city/cinematics.js) — its seats are the
+  // scene's own labeled choices, never a boost/get-in target.
   I.register("vehicle", {
-    id: "car-get-in", slot: "e", canShow: (car) => !car.npcDriver && (car.owned || car.stolen),
+    id: "car-get-in", slot: "e", canShow: (car) => !car.npcDriver && !car._cineLocked && (car.owned || car.stolen),
     label: (car) => "Get in" + (car.owned ? " your ride" : ""), onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   I.register("vehicle", {
-    id: "car-boost", slot: "e", bad: true, canShow: (car) => !car.npcDriver && !car.owned && !car.stolen,
+    id: "car-boost", slot: "e", bad: true, canShow: (car) => !car.npcDriver && !car._cineLocked && !car.owned && !car.stolen,
     label: "Boost it", onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   // someone's behind the wheel: a HOLD — you rip the door open and drag them out
