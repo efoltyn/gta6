@@ -35,8 +35,12 @@
     { pr: 0.28, shadow: 512, crowd: 24,   ped: { vis: 20,  shadow: 0  }, sunShadow: false, fog: 170, cull: 235 },  // 0 — emergency: sun shadows OFF, minimal render budget/radius/res
     { pr: 0.8, shadow: 1024, crowd: 360,  ped: { vis: 70,  shadow: 28 }, fog: 260, cull: 330 },  // 1
     { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 }, fog: 350, cull: 430 },  // 2
-    { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 430, cull: 0 },  // 3
-    { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 430, cull: 0 },  // 4 — full fat
+    // Tiers 3-4 now cull too (at 500, past their 430 fog wall): profiling shows
+    // the top-tier frame is DRAW-CALL bound (~2.8k calls, 78% of render CPU in
+    // per-draw uniform uploads) and everything past full fog dissolution is
+    // invisible anyway. Aircraft views stay exempt via farcull's own gate.
+    { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 430, cull: 500 },  // 3
+    { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 430, cull: 500 },  // 4 — full fat
   ];
   const QUALITY_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
   // A fresh session is a first impression, not a benchmark screen. Starting at

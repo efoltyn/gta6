@@ -228,9 +228,16 @@
   // clamped to `dist`. Colliders carry an optional [y0,y1] vertical span (the
   // survival buildings); prison walls have none and act full-height. Tree
   // trunks opt out via noCam so they don't jostle the camera.
+  // Broadphase (perf): the camera arm is a few metres, but this used to slab-
+  // test EVERY collider (~82k in the city) every frame — measured ~5.4ms. Query
+  // the collider grid around the arm's midpoint instead; the radius covers the
+  // whole segment so behaviour is identical, the candidate list is O(local).
+  const _sweepNear = [];
   function sweepColliders(ox, oy, oz, dx, dy, dz, dist, rad) {
     let best = dist;
-    const cs = CBZ.colliders;
+    const cs = CBZ.queryCollidersNear
+      ? CBZ.queryCollidersNear(ox + dx * dist * 0.5, oz + dz * dist * 0.5, dist * 0.5 + rad + 1, _sweepNear)
+      : CBZ.colliders;
     for (let i = 0; i < cs.length; i++) {
       const c = cs[i];
       if (c.noCam) continue;

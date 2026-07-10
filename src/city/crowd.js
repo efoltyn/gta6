@@ -924,22 +924,35 @@
     put(mouth, i, 0, 2.045 + bob, 0.255, 0.22, 0.055, 0.10, 0);
   }
   const FARDRAW2 = 95 * 95;     // beyond this, matrix rewrites drop to every 4th frame
+  let _wroteMatrices = false;   // perf: skip the needsUpdate re-upload (12 buffers,
+                                // ~570KB) on frames where no matrix changed at all
   function render() {
     if (!ready || !count) return;
     const frame = _simFrame;
     const P = CBZ.player;
     const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
+    // Anything past full fog dissolution is invisible — park its matrices like
+    // a collapsed body instead of rewriting 11 of them (at tier 0's 170m fog
+    // most of a 700-agent crowd is beyond the wall). collapsedQ already owns
+    // the park/rehydrate handshake, so returning inside the fog rewrites live.
+    const fogFar = (CBZ.scene && CBZ.scene.fog && CBZ.game && CBZ.game.mode === "city") ? CBZ.scene.fog.far + 25 : 1e9;
+    const fogGone2 = fogFar * fogFar;
+    _wroteMatrices = false;
     for (let i = 0; i < count; i++) {
-      if (deadAgent[i] || suppressed[i] || promotedBy[i] >= 0) {  // faded corpse, thinned off-street, or promoted to a real rig → collapse the instanced body
+      const fdx = px[i] - ppx, fdz = pz[i] - ppz;
+      const dist2 = fdx * fdx + fdz * fdz;
+      if (deadAgent[i] || suppressed[i] || promotedBy[i] >= 0 || dist2 > fogGone2) {  // faded corpse, thinned off-street, promoted to a real rig, or fog-invisible → collapse the instanced body
         if (collapsedQ[i]) continue;                   // park matrices already written — skip the 11 rewrites
         collapsedQ[i] = 1;
         wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
         for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
         if (shadowQ) shadowQ.setMatrixAt(i, wm);   // blob collapses with the body
+        _wroteMatrices = true;
         continue;
       }
       collapsedQ[i] = 0;                               // visible again → park matrices need rewriting next collapse
       if (corpseT[i] > 0) {                            // freshly killed → lie flat ON the ground
+        _wroteMatrices = true;
         // Rotating the standing rig 90° about X lays it on its back: each part's
         // local +Z (body depth) becomes the world-vertical extent. The thickest
         // parts (head/torso, ~0.27 half-depth) set how high the whole body must
@@ -962,9 +975,9 @@
       }
       // far bodies move sub-pixel per frame — rewrite their 11 matrices every
       // 4th frame (round-robin) and let the stale pose coast in between.
-      const rdx = px[i] - ppx, rdz = pz[i] - ppz;
-      const isFar = rdx * rdx + rdz * rdz > FARDRAW2;
+      const isFar = dist2 > FARDRAW2;
       if (isFar && ((frame + i) & 3) !== 0) continue;
+      _wroteMatrices = true;
       // FEET ON THE GROUND: the city is flat (groundHeightAt→0) so this is 0
       // today, but route through floorAt like the corpse path so a body never
       // sinks/floats if it walks onto raised terrain (beach/boardwalk/etc).
@@ -997,8 +1010,10 @@
         shadowQ.setMatrixAt(i, shadD.matrix);
       }
     }
-    for (let m = 0; m < meshes.length; m++) meshes[m].instanceMatrix.needsUpdate = true;
-    if (shadowQ) shadowQ.instanceMatrix.needsUpdate = true;
+    if (_wroteMatrices) {
+      for (let m = 0; m < meshes.length; m++) meshes[m].instanceMatrix.needsUpdate = true;
+      if (shadowQ) shadowQ.instanceMatrix.needsUpdate = true;
+    }
   }
 
   // ---- promotion pool: real makeCharacter peds reused as you move ----

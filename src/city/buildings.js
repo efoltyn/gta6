@@ -131,6 +131,7 @@
     return _reflectMats;
   }
   const glassPools = [];     // every live pool (all generations)
+  const litPools = [];       // the warm night pools only (count-gated by day)
   let pendingGlass = [];     // recs registered this build, awaiting a pool
   let glassNightOn = false;  // the dusk flip state (lit panes swapped in)
   const _pPos = new THREE.Vector3(), _pScl = new THREE.Vector3(), _pQ = new THREE.Quaternion(), _pM = new THREE.Matrix4();
@@ -165,6 +166,19 @@
     // per-pool geometry clone so the bounding sphere can be OURS: centred on
     // the recs' true extents (+ the fattest pane half-span as margin).
     const geo = unitBox().clone();
+    // Panes are vertical sheets: their ±Y faces are millimetre top/bottom
+    // slivers nobody can see, yet they were a third of every pool's triangles
+    // (the pools carry ~2/3 of ALL drawn city tris). Keep faces ±X,±Z only.
+    // r128 BoxGeometry index layout verified: 6 indices per face in order
+    // +X,-X,+Y,-Y,+Z,-Z. Groups are cleared (single material ignores them).
+    (function () {
+      const idx = geo.index.array;
+      const kept = new idx.constructor(24);
+      kept.set(idx.subarray(0, 12), 0);      // +X, -X
+      kept.set(idx.subarray(24, 36), 12);    // +Z, -Z
+      geo.setIndex(new THREE.BufferAttribute(kept, 1));
+      geo.clearGroups();
+    })();
     let nx = 1e9, xx = -1e9, ny = 1e9, xy = -1e9, nz = 1e9, xz = -1e9, span = 0;
     for (const r of recs) {
       if (r.x < nx) nx = r.x; if (r.x > xx) xx = r.x;
@@ -219,6 +233,12 @@
         litAll.push(r);
       }
       lp.instanceMatrix.needsUpdate = true;
+      // By day every instance is zero-scaled — degenerate but still submitted
+      // (~60k instances through the vertex shader for nothing). count=0 skips
+      // the draw outright; the dusk flip below restores full capacity.
+      lp.userData.litCapacity = recs.length;
+      if (!glassNightOn) lp.count = 0;
+      litPools.push(lp);
       root.add(lp); glassPools.push(lp);
     });
     // a build landing mid-night flips its lit panes on immediately
@@ -285,6 +305,11 @@
     on = !!on;
     if (on === glassNightOn) return;
     glassNightOn = on;
+    // day → the all-zero lit pools stop being submitted at all (count 0);
+    // night → restore capacity BEFORE the matrices flip in.
+    for (let i = 0; i < litPools.length; i++) {
+      litPools[i].count = on ? (litPools[i].userData.litCapacity || 0) : 0;
+    }
     for (let i = 0; i < cityGlass.length; i++) {
       const gp = cityGlass[i];
       if (!gp.lit || !gp.pool || gp.shattered) continue;

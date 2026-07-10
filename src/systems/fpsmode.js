@@ -2281,10 +2281,14 @@
   }
 
   // ---- camera override and effects update ----
+  let _crossShown = null;   // change-only style write: a per-frame style.display
+                            // set (even to the same value) invalidates style and
+                            // measured milliseconds across a session (perf pass)
   CBZ.onAlways(52, function (dt) {
     checkReset();
     const aiming = fps.active || shoulderActive();
-    if (cross) cross.style.display = (aiming && CBZ.game.state === "playing") ? "block" : "none";
+    const crossShow = aiming && CBZ.game.state === "playing";
+    if (cross && crossShow !== _crossShown) { cross.style.display = crossShow ? "block" : "none"; _crossShown = crossShow; }
 
     if (shotCD > 0) shotCD = Math.max(0, shotCD - dt);
     if (dryCD > 0) dryCD = Math.max(0, dryCD - dt);

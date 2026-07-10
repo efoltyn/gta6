@@ -22,7 +22,7 @@ for (const seed of seeds) {
   const dbg = 9850 + Math.floor(Math.random() * 100);
   const profile = `/tmp/cbz-atlas-${dbg}`;
   await rm(profile, { recursive: true, force: true });
-  const chrome = spawn("/opt/pw-browsers/chromium", [
+  const chrome = spawn(process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium"), [
     "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
     "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
     "--enable-webgl", "--mute-audio", "--window-size=1400,1400",

@@ -99,10 +99,19 @@
     // whole city re-evaluates every ~1s, still far faster than you can drive
     // through a fog wall. Hysteresis (show at R-20) stops boundary flicker.
     const slice = Math.max(64, Math.ceil(kids.length / 4));
+    // First-time measurements are the expensive part (a group pays a Box3
+    // subtree walk) — measured 30-50ms hitch-stacks right after a tier drop
+    // when ~1000 unmeasured children landed in one sweep. Cap fresh measures
+    // per sweep; already-measured children stay full-rate (they're a Map hit).
+    let freshMeasures = 32;
     for (let n = 0; n < slice; n++) {
       cursor = (cursor + 1) % kids.length;
       const o = kids[cursor];
       if (!o || (!o.isMesh && !o.isGroup)) continue;
+      if (!bounds.has(o)) {
+        if (freshMeasures <= 0) continue;
+        freshMeasures--;
+      }
       const b = boundsFor(o);
       if (b.dynamic) continue;
       if (o.position.x !== b.px || o.position.z !== b.pz) {

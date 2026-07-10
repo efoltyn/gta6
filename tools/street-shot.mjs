@@ -15,7 +15,7 @@ const base = `http://127.0.0.1:${port}/`;
 const dbg = 9930 + Math.floor(Math.random() * 40);
 await rm(`/tmp/cbz-street-${dbg}`, { recursive: true, force: true });
 await sleep(700);
-const chrome = spawn("/opt/pw-browsers/chromium", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", "--window-size=1600,1000", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-street-${dbg}`, base], { stdio: "ignore" });
+const chrome = spawn(process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium"), ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", "--window-size=1600,1000", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-street-${dbg}`, base], { stdio: "ignore" });
 let page = null;
 for (let i = 0; i < 80 && !page; i++) { try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); page = ps.find((p) => p.type === "page" && p.url.startsWith(base)); } catch (_) {} if (!page) await sleep(250); }
 const ws = new WebSocket(page.webSocketDebuggerUrl);
