@@ -115,17 +115,31 @@
 
   function famPed(x, z, name, role, gangId, kid, gender) {
     if (!CBZ.cityMakePed) return null;
-    const p = CBZ.cityMakePed(x, z, Math.random, {
+    const p = CBZ.cityMakePed(x, z, rng, {
       name, aggr: 0, armed: false, archetype: "resident", gender,
       job: role, behavior: "timid", cash: 20 + ((rng() * 60) | 0),
     });
     if (!p) return null;
+    registerPed(p);
     if (gangId) p.gang = gangId;        // wears the colors in the books — kill her
     // W7: renamed from p.family (a STRING role label) to p.famRole — social.js's
     // ped.family is an ARRAY of kin refs; the two collided under one name. See
     // schedule.js's worth() for the matching read-side migration.
     p.famRole = role;                   // and the SET takes it personally (gangs.js)
     if (kid && p.char && p.char.group) { p.char.group.scale.setScalar(0.62); p.hp = 40; p.maxHp = 40; }
+    return p;
+  }
+
+  // cityMakePed builds an actor but deliberately does not attach it to the
+  // arena or simulation list; ordinary spawn call sites own that registration.
+  // Family members and authored captors are full city actors too, so keep the
+  // same invariant here and make the operation idempotent for restored casts.
+  function registerPed(p) {
+    if (!p || !p.group) return p;
+    const A = CBZ.city && CBZ.city.arena;
+    if (A && A.root && !p.group.parent) A.root.add(p.group);
+    const list = CBZ.cityPeds || (CBZ.cityPeds = []);
+    if (list.indexOf(p) < 0) list.push(p);
     return p;
   }
 
@@ -382,6 +396,10 @@
 
     // ---- KIDNAP DIRECTOR: a crew you've bled snatches one of YOURS ----------
     if (!kidnap) {
+      // The hitman campaign authors its own hostage beat. Do not let the
+      // ambient timer create a competing family crisis underneath that mission;
+      // cityStartFamilyKidnap remains available to the campaign director below.
+      if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) return;
       kidnapCD -= 1.2;
       if (kidnapCD <= 0) {
         kidnapCD = 120 + rng() * 120;
@@ -397,7 +415,8 @@
     }
   });
 
-  function startKidnap(ped, gang) {
+  function startKidnap(ped, gang, opts) {
+    opts = opts || {};
     const hx = gang.hq.x + 4, hz = gang.hq.z + 4;
     ped.kidnapped = true;          // PUBLIC state for an external captives panel
     ped.captiveOf = gang.id;
@@ -409,14 +428,14 @@
     if (ped.target && ped.target.set) ped.target.set(hx, 0, hz);
     const captors = [];
     for (let i = 0; i < 3; i++) {
-      const c = CBZ.cityMakePed && CBZ.cityMakePed(hx + Math.cos(i * 2.1) * 2.2, hz + Math.sin(i * 2.1) * 2.2, Math.random, {
+      const c = CBZ.cityMakePed && CBZ.cityMakePed(hx + Math.cos(i * 2.1) * 2.2, hz + Math.sin(i * 2.1) * 2.2, rng, {
         armed: true, aggr: 0.95, gang: gang.id, job: "holding your people",
       });
-      if (c) captors.push(c);
+      if (c) { registerPed(c); captors.push(c); }
     }
     const ransom = Math.max(2000, Math.round((g.cash || 0) * 0.12 / 100) * 100);
     ped.ransom = ransom; ped.captiveT = 180;
-    kidnap = { ped, gangId: gang.id, captors, ransom, t: 180, x: hx, z: hz };
+    kidnap = { ped, gangId: gang.id, captors, ransom, t: 180, x: hx, z: hz, authored: !!opts.authored };
     if (CBZ.cityFeed) CBZ.cityFeed("📞 The " + gang.name + " took " + (ped.name || "your girl") + ". They want $" + ransom.toLocaleString() + ".", "#ff7a7a");
     if (CBZ.city && CBZ.city.note) CBZ.city.note("📞 They have " + (ped.name || "your family") + ". $" + ransom.toLocaleString() + " — or come take them back.", 5);
     if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(hx, hz, "THEY HAVE " + (ped.name || "FAMILY").toUpperCase());
@@ -445,6 +464,14 @@
     let live = 0;
     for (const c of k.captors) if (c && !c.dead && !(c.ko > 0)) live++;
     if (!live) {
+      // An authored rescue is not complete merely because the gunfire stopped.
+      // Hold the captive in place until the player physically reaches them;
+      // ambient kidnaps retain their original immediate-release behavior.
+      if (k.authored && P && !P.dead && Math.hypot(P.pos.x - k.ped.pos.x, P.pos.z - k.ped.pos.z) > 4.5) {
+        k.ped.state = "idle"; k.ped.speed = 0;
+        if (k.ped.char) k.ped.char.handsUp = true;
+        return;
+      }
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(5);
       endKidnap(true, "🏠 You took " + (k.ped.name || "them") + " back the hard way. The street saw it.", "#7fe0a0");
       return;
@@ -472,6 +499,24 @@
       endKidnap(false, "🕯 The clock ran out. They put " + (k.ped.name || "your family") + " down.", "#ff7a7a");
     }
   }
+
+  // Authored story missions need to inspect and deliberately trigger the same
+  // hostage system as the ambient director. Keep the record read-only to
+  // callers; startKidnap remains the single mutation path.
+  CBZ.cityKidnap = function () { return kidnap; };
+  CBZ.cityStartFamilyKidnap = function (ped, gang) {
+    if (kidnap) return kidnap;
+    if (!ped) {
+      const mine = families.find((f) => f.mine && f.members.some((m) => !m.dead && !m.kidnapped));
+      ped = mine && mine.members.find((m) => !m.dead && !m.kidnapped);
+    }
+    if (!gang) {
+      gang = (CBZ.cityGangs || []).find((x) => x && !x.isPlayer && x.hq);
+    }
+    if (!ped || !gang) return null;
+    startKidnap(ped, gang, { authored: true });
+    return kidnap;
+  };
 
   // a fresh run re-casts everything (peds were wiped by spawnCityPeds anyway)
   CBZ.cityFamilyReset = function () {

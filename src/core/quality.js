@@ -39,7 +39,12 @@
     { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 430, cull: 0 },  // 4 — full fat
   ];
   const QUALITY_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
-  let qLevel = 0; // default to Fastest; auto-adjust climbs up from here if there's headroom
+  // A fresh session is a first impression, not a benchmark screen. Starting at
+  // the emergency tier hid most of the archipelago behind a 170m fog wall and
+  // made the aerial world look unfinished until the tuner slowly climbed up.
+  // Start from the coherent High presentation; the adaptive sampler still
+  // steps down immediately when a device genuinely needs it.
+  let qLevel = 3;
 
   // ---- manual override (pause-screen Performance↔Quality slider) ----------
   // Default is full auto (the adaptive sampler below). Dragging the slider

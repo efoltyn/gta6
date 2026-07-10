@@ -1335,7 +1335,7 @@
         else if (!c._armorKit && rng() < 0.5) CBZ.cityArmorDressPed(c, ["softVest"]);
         else if (c._armorKit) CBZ.cityArmorDressPed(c, c._armorKit.slice());
       }
-      if (c.tag) c.tag.visible = true;
+      if (c.tag) c.tag.visible = !(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
     } else c = makeCop(x, z, swat, false);
     A.root.add(c.group);
     if (CBZ.cityCops.indexOf(c) < 0) CBZ.cityCops.push(c);

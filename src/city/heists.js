@@ -550,7 +550,14 @@
     renderHud();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
-  CBZ.cityStartHeist = function (tierId) { if (tierId) startCase(tierId); else showBoard(); };
+  CBZ.cityStartHeist = function (tierId) {
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
+      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
+      return false;
+    }
+    if (tierId) startCase(tierId); else showBoard();
+    return true;
+  };
 
   // ---- spawn the BANK's armed security: real cops (armed, shootable, hostile)
   // posted at the vault as private guards. They resist the robbery — you have to

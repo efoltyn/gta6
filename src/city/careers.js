@@ -296,6 +296,10 @@
   // the live bits (defend spawns the raid; take/run point the marker).
   function acceptGangContract(j) {
     if (!j) return;
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
+      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
+      return;
+    }
     g.cityJob = j;
     const c = myCrew();
     j.gangId = c ? c.gangId : null;
@@ -502,6 +506,11 @@
   function closeBoard() { if (board) { board.style.display = "none"; board._gang = false; } CBZ.cityMenuOpen = false; if (CBZ.requestLock && g.state === "playing") CBZ.requestLock(); }
   function accept(i) {
     const j = offered[i]; if (!j) return;
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
+      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
+      closeBoard();
+      return;
+    }
     // gang contracts route through the crew-job path (beacon + rank reward)
     if (isGangJob(j.type)) { acceptGangContract(j); return; }
     g.cityJob = j;

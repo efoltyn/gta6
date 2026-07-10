@@ -954,6 +954,7 @@
   // keypress (it only lets U fall through when it has nothing of its own to
   // show or isn't itself open).
   function openWheel() {
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
     if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
     if (CBZ.cityCaptivesHudOpen && CBZ.cityCaptivesHudOpen()) return;
     const P = CBZ.player;
@@ -1007,6 +1008,7 @@
     const k = (e.key || "").toLowerCase();
     if (k !== "u") return;
     if (g.mode !== "city") return;
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
     if (wheelOpen()) { e.preventDefault(); closeWheel(); return; }
     if (g.state !== "playing" || CBZ.cityMenuOpen) return;
     e.preventDefault(); openWheel();

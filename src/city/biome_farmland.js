@@ -129,6 +129,16 @@
     function inTown(x, z) {
       return HAS_TOWN && x > TOWN.minX - 8 && x < TOWN.maxX + 8 && z > TOWN.minZ - 8 && z < TOWN.maxZ + 8;
     }
+    // A parcel is an area, not a point. The old centre-point check let a field
+    // straddle the market boundary, so crops/fences could visibly continue
+    // underneath buildings. Reject any parcel whose actual footprint meets the
+    // protected town rectangle.
+    function parcelTouchesTown(x, z, w, d) {
+      if (!HAS_TOWN) return false;
+      return x - w / 2 < TOWN.maxX + 8 && x + w / 2 > TOWN.minX - 8 &&
+             z - d / 2 < TOWN.maxZ + 8 && z + d / 2 > TOWN.minZ - 8;
+    }
+    if (CBZ.worldLayout && HAS_TOWN) CBZ.worldLayout.reserve("farm:harvest-market", TOWN, { pad: 12 });
 
     // ---- helpers (mirror expansion.js idioms) ----------------------------
     function plane(x, z, w, d, material, y, rotY) {
@@ -174,40 +184,15 @@
     // a few grass tinted overlays so the bare lanes read as soil, the rest green
     plane(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, M.grass, 0.012);
 
-    // ---- BIOME-EDGE BLEND APRON: was a hard cut from soil straight to
-    // nothing past the rim. A per-vertex-colored ring just outside the valley
-    // fades soil -> a neutral wild-grass edge tone via MOISTURE NOISE
-    // (window.noise.simplex2, the same field terrain.js uses) so the farm
-    // reads as melting into the surrounding land instead of stopping at a
-    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
-    // region change — walkable footprint + causeway corridor untouched.
-    (function edgeBlendApron() {
-      const apronW = (MAXX - MINX) + 220, apronD = (MAXZ - MINZ) + 220;
-      const SEG = 18;
-      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
-      const cSoil = new THREE.Color(0x6b4f33);
-      const cWild = new THREE.Color(0x6e7a48);   // neutral wild-grass edge tone
-      const _ac = new THREE.Color();
-      const apos = ag.attributes.position;
-      const acolors = new Float32Array(apos.count * 3);
-      const hasNoise = !!(window.noise && window.noise.simplex2);
-      for (let i = 0; i < apos.count; i++) {
-        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
-        const lx = apos.getX(i), lz = apos.getY(i);
-        const wx = CX + lx, wz = CZ - lz;
-        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
-        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
-        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
-        _ac.copy(cSoil).lerp(cWild, t);
-        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
-      }
-      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
-      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
-      apron.rotation.x = -Math.PI / 2;
-      apron.position.set(CX, 0.0, CZ);
-      apron.receiveShadow = true;
-      root.add(apron);
-    })();
+    // A true exterior feather replaces the old larger full rectangle, so the
+    // valley no longer reads as an overlapping square layer from the air.
+    if (CBZ.makeBiomeEdgeRing) {
+      CBZ.makeBiomeEdgeRing(root, {
+        cx: CX, cz: CZ, hx: (MAXX - MINX) / 2 + 8, hz: (MAXZ - MINZ) / 2 + 8,
+        feather: 104, segments: 20, inner: 0x6b4f33, outer: 0x6e7a48,
+        y: 0.006, seed: 0xfa411,
+      });
+    }
 
     // =====================================================================
     // 2) FIELD PARCELS — patchwork of big rectangular fields. Each parcel:
@@ -251,7 +236,7 @@
         const px = fieldArea.minX + cellW / 2 + c * (cellW + LANE);
         const pz = fieldArea.minZ + cellD / 2 + r * (cellD + LANE);
         if (c === homesteadCol && r === homesteadRow) { parcels.push({ px, pz, crop: null, homestead: true }); continue; }
-        if (inTown(px, pz)) continue;       // T7 — this cell is the market town, not a field
+        if (parcelTouchesTown(px, pz, cellW, cellD)) continue; // town gets a clean block, never crop fragments under it
         const crop = pick(CROPS);
         // striped bulk quad — the field "body" in one draw call
         const tex = stripeTex(crop.base, crop.row, crop.gap, crop.period);

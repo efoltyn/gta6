@@ -83,6 +83,10 @@
       playerGang: null,           // safe subset only: {id,name,color,founded,order} — never live ped refs
       cityMembership: null,       // {gangId,rank,standing,bodies,contrib,loyalty,how} — plain data, safe whole
       playerGangId: null,
+      // Authored campaign checkpoint. Plain data only: the director rebuilds
+      // live targets/sets from this on observation rather than persisting THREE
+      // objects or actor references.
+      campaign: null,
       assets: { properties: [], businesses: [], vehicles: [], weapons: [] },
       injuries: 0,
       criminalRecord: { wantedPeak: 0, heatPeak: 0, arrests: 0, escapes: 0, charges: [] },
@@ -199,6 +203,9 @@
       : null;
     w.cityMembership = g.cityMembership ? copy(g.cityMembership) : null;
     w.playerGangId = g.playerGangId || null;
+    if (CBZ.cityCampaignSnapshot) {
+      try { w.campaign = copy(CBZ.cityCampaignSnapshot()); } catch (e) {}
+    }
     const stowed = g._copStow;
     w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
     w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
@@ -249,6 +256,13 @@
     g.playerGang = w.playerGang ? copy(w.playerGang) : null;
     g.cityMembership = w.cityMembership ? copy(w.cityMembership) : null;
     g.playerGangId = w.playerGangId || null;
+    if (w.campaign && CBZ.cityCampaignRestore) {
+      try { CBZ.cityCampaignRestore(copy(w.campaign)); } catch (e) {}
+    } else if (w.campaign) {
+      // campaign.js loads later in the classic-script graph; hold the plain
+      // checkpoint where it can adopt it once its APIs mount.
+      g.cityCampaignPending = copy(w.campaign);
+    }
     // wardrobe (cityFit/cityWornOutfit) + a body/portrait redress: outfits.js
     // owns this state's shape (composite items, painted specials, drip) —
     // delegate the actual restore + redraw to it so there's one source of

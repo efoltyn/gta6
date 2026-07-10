@@ -16,8 +16,9 @@
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
 <link rel="stylesheet" href="css/inventory.css?v=ctrl1">
 <link rel="stylesheet" href="css/city.css?v=city1">
+<link rel="stylesheet" href="css/campaign.css?v=story2">
 </head>
-<body>
+<body class="campaign-build">
 <div id="game"></div>
 
 <!-- HUD -->
@@ -260,7 +261,7 @@
      CBZ.terrainHeight. terrain.js depends on BufferGeometryUtils (above). -->
 <script src="src/vendor/noise.js"></script>
 <script src="src/world/rockscliffs.js?v=rock1"></script>
-<script src="src/world/terrain.js?v=tiles1"></script>
+<script src="src/world/terrain.js?v=tiles2"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -278,7 +279,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=abandon1"></script>
+<script src="src/config.js?v=abandon2"></script>
 <script src="src/core/seed.js"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/interfaces.js?v=arch2"></script>
@@ -367,12 +368,12 @@
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=tpgun1"></script>
-<script src="src/systems/physics.js?v=map1"></script>
+<script src="src/systems/camera.js?v=tpgun3"></script>
+<script src="src/systems/physics.js?v=map3"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=skin1"></script>
-<script src="src/systems/simulation.js?v=scale7"></script>
+<script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=npcgoal51"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <script src="src/systems/capture.js?v=npc-react1"></script>
@@ -390,17 +391,17 @@
 <script src="src/systems/dashboard.js?v=ranks1"></script>
 <script src="src/systems/combat.js?v=phys1"></script>
 <script src="src/systems/killstreaks.js"></script>
-<script src="src/systems/interact.js?v=lines2"></script>
+<script src="src/systems/interact.js?v=lines3"></script>
 <script src="src/systems/interactions.js?v=mapflow2"></script>
 <script src="src/systems/inventory.js?v=loot1"></script>
-<script src="src/systems/state.js?v=gore1"></script>
+<script src="src/systems/state.js?v=gore3"></script>
 <script src="src/systems/save.js"></script>
 <script src="src/systems/touch.js?v=camera14"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=pad1"></script>
-<script src="src/systems/fpsmode.js?v=barrel1"></script>
+<script src="src/systems/fpsmode.js?v=barrel3"></script>
 <script src="src/systems/gunfx.js?v=shoot2"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -437,12 +438,12 @@
 <script src="src/city/expansion.js?v=realcars1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=arch1"></script>
-<script src="src/city/highways.js?v=hwy1"></script>
+<script src="src/city/worldmap.js?v=arch2"></script>
+<script src="src/city/highways.js?v=hwy2"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>
-<script src="src/city/placement.js?v=sims1"></script>
+<script src="src/city/placement.js?v=sims2"></script>
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
      sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
      findSupport built on top of it + the CBZ.assets/physics.js contracts
@@ -485,12 +486,12 @@
 <script src="src/world/props.js"></script>
 <script src="src/city/towngen.js?v=sims1"></script>
 <script src="src/city/island_speedway.js?v=arch1"></script>
-<script src="src/city/island_airport.js?v=arch1"></script>
+<script src="src/city/island_airport.js?v=arch2"></script>
 <script src="src/city/island_military.js?v=arch1"></script>
-<script src="src/city/biome_desert.js?v=bigdesert1"></script>
-<script src="src/city/biome_forest.js?v=arch1"></script>
-<script src="src/city/biome_farmland.js?v=arch1"></script>
-<script src="src/city/biome_snow.js?v=cull1"></script>
+<script src="src/city/biome_desert.js?v=bigdesert2"></script>
+<script src="src/city/biome_forest.js?v=arch2"></script>
+<script src="src/city/biome_farmland.js?v=arch2"></script>
+<script src="src/city/biome_snow.js?v=cull2"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -519,31 +520,31 @@
 <script src="src/city/arena_fights.js?v=fight1"></script>
 <script src="src/city/props.js?v=shoot1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
-<script src="src/city/mode.js?v=fncam1"></script>
+<script src="src/city/mode.js?v=fncam3"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
 <script src="src/city/clothes.js?v=fit3"></script>
 <script src="src/city/outfits.js?v=fits1"></script>
 <script src="src/city/hunger.js?v=roof1"></script>
 <script src="src/city/wanted.js?v=city3"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=hub1"></script>
+<script src="src/city/worldstate.js?v=hub2"></script>
 <script src="src/city/gangs.js?v=citysec1"></script>
 <script src="src/city/social.js?v=city3"></script>
 <script src="src/city/realestate.js?v=city3"></script>
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=brains1"></script>
-<script src="src/city/level.js?v=lvl1"></script>
+<script src="src/city/peds.js?v=brains2"></script>
+<script src="src/city/level.js?v=lvl2"></script>
 <script src="src/city/sizeup.js?v=lvl1"></script>
 <script src="src/city/bling.js?v=fit3"></script>
 <script src="src/city/club.js?v=club1"></script>
-<script src="src/city/crowd.js?v=sep1"></script>
+<script src="src/city/crowd.js?v=sep2"></script>
 <script src="src/city/blobshadows.js?v=blob1"></script>
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=citysec1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=beam1"></script>
+<script src="src/city/police.js?v=beam2"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=beam1"></script>
 <script src="src/city/traffic.js?v=smart1"></script>
@@ -555,7 +556,7 @@
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/vehicles.js?v=smartai1"></script>
 <script src="src/city/playerair.js?v=air1"></script>
-<script src="src/city/playeraircraft.js?v=air1"></script>
+<script src="src/city/playeraircraft.js?v=air3"></script>
 <script src="src/city/shops.js?v=city3"></script>
 <script src="src/city/gunstore.js?v=mods1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
@@ -563,10 +564,10 @@
 <script src="src/city/gunmods.js?v=mods1"></script>
 <script src="src/city/scopeview.js?v=mods1"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
-<script src="src/city/careers.js?v=citysec1"></script>
-<script src="src/city/activities.js?v=hub1"></script>
-<script src="src/city/heists.js?v=night4"></script>
-<script src="src/city/interactions.js?v=registry1"></script>
+<script src="src/city/careers.js?v=citysec2"></script>
+<script src="src/city/activities.js?v=hub2"></script>
+<script src="src/city/heists.js?v=night5"></script>
+<script src="src/city/interactions.js?v=registry2"></script>
 <script src="src/city/interact.js?v=registry1"></script>
 <script src="src/city/restrain.js?v=collar1"></script>
 <script src="src/city/combat.js?v=grenade1"></script>
@@ -580,7 +581,7 @@
 <script src="src/systems/craft.js?v=bld1"></script>
 <script src="src/city/explosives.js?v=c4-1"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
-<script src="src/city/death.js?v=drop1"></script>
+<script src="src/city/death.js?v=drop2"></script>
 <script src="src/city/camera.js?v=tpgun1"></script>
 <script src="src/city/ragdoll.js?v=fall1"></script>
 <script src="src/city/leaderboard.js?v=city3"></script>
@@ -590,7 +591,7 @@
 <script src="src/city/pawnshop.js?v=pawn1"></script>
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
-<script src="src/city/family.js?v=fam1"></script>
+<script src="src/city/family.js?v=fam2"></script>
 <script src="src/city/swim.js?v=swim1"></script>
 <script src="src/city/empire.js?v=empire1"></script>
 <script src="src/city/construction.js?v=build1"></script>
@@ -607,7 +608,7 @@
 <script src="src/city/turf.js?v=night3"></script>
 <script src="src/city/gangops.js?v=living1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
-<script src="src/city/militaryvehicles.js?v=sim1"></script>
+<script src="src/city/militaryvehicles.js?v=sim2"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=sim1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -624,31 +625,35 @@
 <script src="src/city/racehud.js?v=race1"></script>
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
 <script src="src/city/interactions_rich.js?v=arch1"></script>
-<script src="src/city/captives.js?v=arch1"></script>
+<script src="src/city/captives.js?v=arch2"></script>
 <script src="src/city/millionaires.js?v=arch1"></script>
 <script src="src/city/regionlife.js?v=arch1"></script>
 <script src="src/city/modshop.js?v=veh1"></script>
 <script src="src/city/storage.js?v=veh1"></script>
 <script src="src/city/armor.js?v=armor1"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
-<script src="src/city/gigs.js?v=gig1"></script>
+<script src="src/city/gigs.js?v=gig2"></script>
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig1"></script>
-<script src="src/city/hud.js?v=route1"></script>
+<script src="src/city/hud.js?v=route2"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
 <script src="src/city/charpanel.js?v=cp1"></script>
-<script src="src/city/phone.js"></script>
+<script src="src/city/phone.js?v=story1"></script>
 <script src="src/city/killfeed.js?v=night3"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=origins1"></script>
+<script src="src/city/origins.js?v=origins2"></script>
+<!-- Canonical story layer: the diegetic phone mounts first, then the campaign
+     director drives the rooftop arrest, prison choice and contract chain. -->
+<script src="src/city/campaign_ui.js?v=story1"></script>
+<script src="src/city/campaign.js?v=story6"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
-<script src="src/systems/fullmap.js?v=route1"></script>
+<script src="src/systems/fullmap.js?v=route2"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -858,8 +863,8 @@
 <script src="src/net/sqlitedb.js?v=sql1"></script>
 
 <!-- 5. quality + loop + boot -->
-<script src="src/core/quality.js?v=scale5"></script>
-<script src="src/core/farcull.js?v=fc1"></script>
+<script src="src/core/quality.js?v=scale6"></script>
+<script src="src/core/farcull.js?v=fc2"></script>
 <script src="src/systems/settings.js?v=settings1"></script>
 <script src="src/core/batch.js"></script>
 <script src="src/core/profile.js"></script>

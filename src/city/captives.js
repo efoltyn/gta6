@@ -208,7 +208,9 @@
         if (!f || f.gangId || !f.members) continue;   // gangId 0/falsy = the player's
         for (var j = 0; j < f.members.length; j++) {
           var m = f.members[j];
-          if (m && m._kidnapped) add(m, { crew: gangNameById(m._kidnapped) });
+          if (m && (m.kidnapped || m._kidnapped)) {
+            add(m, { crew: gangNameById(m.captiveOf || m._kidnapped) });
+          }
         }
       }
     }
@@ -232,7 +234,9 @@
   }
   function crewName(ped, info) {
     if (info && info.crew) return info.crew;
-    if (ped && ped._kidnapped) return gangNameById(ped._kidnapped);
+    if (ped && (ped.kidnapped || ped._kidnapped)) {
+      return gangNameById(ped.captiveOf || ped._kidnapped);
+    }
     return "";
   }
 

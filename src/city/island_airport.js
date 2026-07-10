@@ -53,9 +53,20 @@
     if (!grp) return grp;
     grp.userData.milKind = "plane";
     grp.userData.milName = name || "Aircraft";
+    grp.userData.hijackable = true;
     placed.push({
       group: grp, pos: grp.position, heading: heading || 0,
       kind: "plane", model: { name: name || "Aircraft" },
+      // Civil airport aircraft are not military-jet stand-ins. The player-air
+      // bridge reuses this exact parked group as the flyable so taking an
+      // airliner visibly removes THAT airliner from its gate. Airport models
+      // point down local +X while the shared flight model treats local +Z as
+      // forward, hence the -90deg visual yaw offset.
+      civilian: true,
+      flightKind: (name === "Airliner") ? "airliner" : "privatejet",
+      modelYawOffset: -Math.PI / 2,
+      groundOffset: 0,
+      collider: grp.userData.worldCollider || null,
       footW: footW || 18, footL: footL || 18, taken: false, hot: true,
     });
     return grp;
@@ -105,6 +116,7 @@
       if (y0 != null) c.y0 = y0;
       if (y1 != null) c.y1 = y1;
       CBZ.colliders.push(c);
+      return c;
     }
     // a flat painted quad lying on the ground (collected for merging)
     function quadGeo(x, z, w, d, y) {
@@ -400,7 +412,7 @@
       root.add(g);
       // body collider (fuselage footprint), oriented-agnostic AABB approx
       const span = Math.max(L, 18);
-      solid(x, z, span, span * 0.7, 0, R + 3, g);
+      g.userData.worldCollider = solid(x, z, span, span * 0.7, 0, R + 3, g);
       return g;
     }
 
@@ -453,7 +465,7 @@
         wheel.rotation.x = Math.PI / 2; wheel.position.set(gp[0], 0.35, gp[1]); g.add(wheel);
       }
       root.add(g);
-      solid(x, z, 14, 12, 0, R + 3, g);
+      g.userData.worldCollider = solid(x, z, 14, 12, 0, R + 3, g);
       return g;
     }
 

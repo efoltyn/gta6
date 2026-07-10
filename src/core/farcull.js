@@ -77,14 +77,22 @@
     acc = 0;
     const g = CBZ.game;
     const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
-    const R = (CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false && g && g.mode === "city")
+    // City player state lives in `.pos`, not `.position`. Falling back to the
+    // camera made street culling follow the look rig rather than the actor and
+    // masked the true player location whenever the camera was offset.
+    const P = CBZ.player && (CBZ.player.pos || CBZ.player.position)
+      ? (CBZ.player.pos || CBZ.player.position)
+      : (CBZ.camera ? CBZ.camera.position : null);
+    const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
+    // A city block can be fog-invisible from a sidewalk yet fully visible from
+    // above. Never apply the street-level static culler to an aircraft view.
+    const R = (!airborne && CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false && g && g.mode === "city")
       ? (CBZ.cityCullRadius || 0) : 0;
     if (!root) return;
     if (!R) {                       // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
       return;
     }
-    const P = CBZ.player && CBZ.player.position ? CBZ.player.position : (CBZ.camera ? CBZ.camera.position : null);
     if (!P) return;
     const kids = root.children;
     // amortize: at most ~1/4 of the children measured/tested per sweep → the

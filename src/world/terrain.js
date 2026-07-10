@@ -226,7 +226,10 @@
     const CX = (FLAT.minX + FLAT.maxX) / 2;   // ~310
     const CZ = (FLAT.minZ + FLAT.maxZ) / 2;   // ~-750
 
-    const terrMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // Always supply the white base multiplier for r128's vertex-colour path.
+    // Without it, a driver/compatibility path can multiply every terrain band
+    // by black even though the geometry has valid per-vertex colours.
+    const terrMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true });
     const terrainTiles = [];
     for (let tj = 0; tj < TILES; tj++) for (let ti = 0; ti < TILES; ti++) {
       const tcx = CX - SPAN / 2 + (ti + 0.5) * TSPAN;
@@ -397,7 +400,18 @@
       CBZ.MOUNT_EVEREST = { name: "Mount Everest", x: e.x, z: e.z, height: e.height };
     }
 
-    const heroMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // The distant range is authored entirely by its vertex palette. Lambert
+    // lighting made it depend on one-sided normals and a sun that can be below
+    // the horizon, which produced the solid black mountain wall in aircraft
+    // views. Basic shading preserves the authored rock/snow palette; fog still
+    // recedes it naturally into the sky.
+    const heroMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      flatShading: true,
+      side: THREE.DoubleSide,
+      fog: true,
+    });
     // PERF: the spines used to be merged into ONE frustumCulled=false mesh —
     // the whole 360° mountain ring was vertex-processed every frame. Each
     // spine is now its OWN mesh with a real bounding sphere: the ridges

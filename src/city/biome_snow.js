@@ -97,6 +97,22 @@
     function inTown(x, z) {
       return HAS_TOWN && x > TOWN.minX - 8 && x < TOWN.maxX + 8 && z > TOWN.minZ - 8 && z < TOWN.maxZ + 8;
     }
+    const layout = CBZ.worldLayout;
+    // Declare the resort's future landmarks before vegetation is scattered.
+    // This prevents pines, rocks, and drifts from being generated through the
+    // lodge, lake, lift, ski run, village, and causeway.
+    if (layout) {
+      if (HAS_TOWN) layout.reserve("snow:pinecrest", TOWN, { pad: 12 });
+      layout.reserveCircle("snow:lake", 180, -1380, 104, { pad: 2 });
+      layout.reserve("snow:lodge", { minX: 344, maxX: 376, minZ: -1264, maxZ: -1236 }, { pad: 8 });
+      layout.reserve("snow:cabin", { minX: 590, maxX: 610, minZ: -1610, maxZ: -1590 }, { pad: 8 });
+      layout.reserve("snow:outpost", { minX: 76, maxX: 104, minZ: -1654, maxZ: -1626 }, { pad: 8 });
+      layout.reserve("snow:ski-run", { minX: 448, maxX: 492, minZ: -1735, maxZ: -1285 }, { pad: 5 });
+      layout.reserve("snow:lift", { minX: 226, maxX: 484, minZ: -1734, maxZ: -1166 }, { pad: 5 });
+      layout.reserve("snow:causeway", { minX: 458, maxX: 482, minZ: -1120, maxZ: -530 }, { pad: 3 });
+    }
+    function claimNature(x, z, r) { return !layout || layout.claimNature(x, z, r, { pad: 0.35 }); }
+    function openNature(x, z, r) { return !layout || layout.canPlaceNature(x, z, r, { pad: 0.2 }); }
 
     // ---- snowy GROUND plane (flat valley, y just above 0) ----------------
     (function ground() {
@@ -106,45 +122,14 @@
       g.position.set(CX, 0.02, CZ);
       g.receiveShadow = true;
       root.add(g);
-      // ---- BIOME-EDGE BLEND APRON: was a single flat-color rect (a hard cut
-      // from snow straight to nothing past the rim). Now a per-vertex-colored
-      // grid: snowShade near the plateau, fading via MOISTURE NOISE (not a
-      // clean ring — window.noise.simplex2, the same field terrain.js uses)
-      // toward a neutral sandy/scrub "wild ground" tone at the outer edge, so
-      // the biome reads as melting into the surrounding land rather than
-      // stopping at a ruler-straight rectangle. Purely cosmetic: still one
-      // mesh, still sits a hair below the snow plateau, no collider/region
-      // change — the walkable footprint and causeway corridor are untouched.
-      const apronW = HX * 2 + 220, apronD = HZ * 2 + 220;
-      const SEG = 18;
-      const apronGeo = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
-      const cShade = new THREE.Color(COL.snowShade);
-      const cWild = new THREE.Color(0xb7a878);     // neutral sand/scrub edge tone (matches terrain.js COL_SAND family)
-      const _ac = new THREE.Color();
-      const apos = apronGeo.attributes.position;
-      const acolors = new Float32Array(apos.count * 3);
-      const hasNoise = !!(window.noise && window.noise.simplex2);
-      for (let i = 0; i < apos.count; i++) {
-        // local plane coords (pre-rotation): the mesh itself is rotated
-        // -PI/2 about X (set below), which maps local (x,y,0) -> world
-        // (x,0,-y) — so world z = CZ - localY, not CZ + localY.
-        const lx = apos.getX(i), lz = apos.getY(i);
-        const wx = CX + lx, wz = CZ - lz;
-        // 0 at the plateau edge .. 1 at the apron's outer rim
-        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
-        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
-        // blend weight ramps with distance-from-plateau, wobbled by moisture
-        // noise so the fade-out isn't a perfect concentric ring.
-        const t = Math.min(1, Math.max(0, (edge - 0.18) / 0.7 + (moist - 0.5) * 0.35));
-        _ac.copy(cShade).lerp(cWild, t);
-        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
+      // Feather only beyond the snow plateau; a larger full plane underneath
+      // made the biome visibly overlap the sea/terrain as a square tile.
+      if (CBZ.makeBiomeEdgeRing) {
+        CBZ.makeBiomeEdgeRing(root, {
+          cx: CX, cz: CZ, hx: HX + 20, hz: HZ + 20, feather: 108, segments: 20,
+          inner: COL.snowShade, outer: 0xb7a878, y: 0.006, seed: 0x53170,
+        });
       }
-      apronGeo.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
-      const apron = new THREE.Mesh(apronGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
-      apron.rotation.x = -Math.PI / 2;
-      apron.position.set(CX, -0.01, CZ);
-      apron.receiveShadow = true;
-      root.add(apron);
     })();
 
     // ---- THE RANGE: tall snow-capped PEAKS ringing the valley edges ------
@@ -226,7 +211,13 @@
       }
 
       // -- MERGE: foreground -> 1 mesh, distant -> 1 mesh (2 draw calls)
-      const rangeMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+      // Vertex colour is the authored mountain shading. Keep it independent of
+      // one-sided normals / sun direction so the range cannot collapse into a
+      // black silhouette at night or when viewed from aircraft height.
+      const rangeMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, vertexColors: true, flatShading: true,
+        side: THREE.DoubleSide, fog: true,
+      });
       function mergeAddRange(geoms, cast) {
         let mesh;
         if (BGU && BGU.mergeBufferGeometries) {
@@ -317,6 +308,7 @@
         if (Math.hypot(p.x - 180, p.z - (-1380)) < 100) continue;
         if (Math.abs(p.x - 470) < 26 && p.z > MAXZ - 120) continue;
         if (inTown(p.x, p.z)) continue;          // T8 — no pines in the resort village
+        if (!claimNature(p.x, p.z, 2.2)) continue;
         const sc = 0.8 + rng() * 1.3;
         const ry = rng() * Math.PI * 2;
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry);
@@ -362,13 +354,13 @@
         q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rng() * Math.PI * 2);
         // T8 — skip rocks/drifts that fall in the resort village (keep the rng
         // draws above so determinism + the drift below are unchanged).
-        if (!inTown(a.x, a.z)) {
+        if (!inTown(a.x, a.z) && claimNature(a.x, a.z, Math.max(0.9, sc * 0.9))) {
           s.set(sc, sc * (0.7 + rng() * 0.5), sc); v.set(a.x, sc * 0.35, a.z);
           m4.compose(v, q, s); rockIM.setMatrixAt(rn++, m4);
         } else { rng(); }                        // consume the height-jitter draw
         const b = pd[i], dc = 1.4 + rng() * 3.2;
         s.set(dc, dc * (0.32 + rng() * 0.2), dc * (0.7 + rng() * 0.6));
-        if (!inTown(b.x, b.z)) {
+        if (!inTown(b.x, b.z) && openNature(b.x, b.z, dc * 0.8)) {
           v.set(b.x, 0.02, b.z); m4.compose(v, q, s); driftIM.setMatrixAt(dn++, m4);
         }
       }

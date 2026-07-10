@@ -652,7 +652,10 @@
     CBZ.playerChar.group.position.copy(P.pos);
     g.invuln = 2.5;       // brief grace after the ER
     if (CBZ.cam) CBZ.cam.pitch = 0.4;
-    if (CBZ.setFPS) CBZ.setFPS(true);     // back to first-person after the death orbit
+    if (CBZ.setFPS) {
+      const campaignTP = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+      CBZ.setFPS(!campaignTP);            // campaign returns to its shoulder camera; legacy city keeps FP
+    }
     if (CBZ.requestLock) CBZ.requestLock();
     if (CBZ.city) CBZ.city.note(atHome ? "🏡 You wake up at home, patched up." : ("🏥 City Hospital. Bill: $" + (g._lastBill || 0)), 2.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

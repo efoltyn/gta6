@@ -52,12 +52,21 @@
 
   // hash: "ix,iz" → array of reserved rects.
   var hash = {};
+  // seedFromColliders() is called by several independently-authored biome
+  // builders.  Re-inserting the same collider every time made the hash grow
+  // with duplicate rectangles and, more importantly, meant generator order
+  // changed the amount of work a later placement had to do.  Track the actual
+  // collider objects so seeding is idempotent until an explicit reset.
+  var seededColliders = new WeakSet();
   function ck(ix, iz) { return ix + ',' + iz; }
   function ci(v) { return Math.floor(v / CELL); }
 
   P.cellSize = CELL;
 
-  P.reset = function () { hash = {}; };
+  P.reset = function () {
+    hash = {};
+    seededColliders = new WeakSet();
+  };
 
   // Iterate every cell an AABB overlaps, calling fn(key). Returns early if
   // fn returns true (used for short-circuit overlap tests).
@@ -140,9 +149,10 @@
     var n = 0;
     for (var i = 0; i < cols.length; i++) {
       var c = cols[i];
-      if (c.minX == null) continue;
+      if (c.minX == null || seededColliders.has(c)) continue;
       P.reserve({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ,
                   stackable: false, zone: 'world', ref: c });
+      seededColliders.add(c);
       n++;
     }
     return n;
@@ -313,6 +323,78 @@
     }
     if (!def.noCollide && placed.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return placed;
+  };
+
+  /* ---- worldLayout -------------------------------------------------
+     The old world generators had their own local keep-out rules: a forest
+     knew about its lake, a desert knew about its town, but neither knew about
+     roads, buildings, or another generator's claimed space.  This small layer
+     gives all of them one authoritative reservation path on top of the same
+     placement hash used by player construction.
+
+     It deliberately reserves *features*, never an entire biome floor.  Land
+     may contain nature; a road, town square, runway, lodge, or trail may not.
+     `claimNature` also reserves accepted trunks/rocks so independently-built
+     scatter passes cannot land on top of one another later in world build.
+  ------------------------------------------------------------------- */
+  var L = CBZ.worldLayout || (CBZ.worldLayout = {});
+  var layoutIds = {};
+
+  function copyRect(rect, extra) {
+    var out = {
+      minX: rect.minX, maxX: rect.maxX,
+      minZ: rect.minZ, maxZ: rect.maxZ,
+      minY: rect.minY, maxY: rect.maxY,
+      stackable: false,
+      zone: (extra && extra.zone) || rect.zone || 'world'
+    };
+    if (extra && extra.ref) out.ref = extra.ref;
+    return out;
+  }
+
+  L.reset = function () { layoutIds = {}; };
+
+  // Named protected footprint. Repeating a declaration is harmless, which
+  // lets a biome state its roads/landmarks beside the code that uses them.
+  L.reserve = function (id, rect, opts) {
+    if (!rect || rect.minX == null || rect.maxX == null || rect.minZ == null || rect.maxZ == null) return null;
+    id = id || ('rect:' + rect.minX + ':' + rect.minZ + ':' + rect.maxX + ':' + rect.maxZ);
+    if (layoutIds[id]) return layoutIds[id];
+    var pad = opts && opts.pad ? opts.pad : 0;
+    var r = copyRect({
+      minX: rect.minX - pad, maxX: rect.maxX + pad,
+      minZ: rect.minZ - pad, maxZ: rect.maxZ + pad,
+      minY: rect.minY, maxY: rect.maxY,
+      zone: (opts && opts.zone) || rect.zone
+    }, opts);
+    layoutIds[id] = P.reserve(r);
+    return layoutIds[id];
+  };
+
+  L.reserveCircle = function (id, x, z, radius, opts) {
+    radius = Math.max(0, radius || 0);
+    return L.reserve(id, { minX: x - radius, maxX: x + radius, minZ: z - radius, maxZ: z + radius }, opts);
+  };
+
+  function naturalRect(x, z, radius, opts) {
+    var r = Math.max(0.15, radius || 0.5);
+    var pad = opts && opts.pad ? opts.pad : 0;
+    return {
+      minX: x - r - pad, maxX: x + r + pad,
+      minZ: z - r - pad, maxZ: z + r + pad,
+      stackable: false, zone: 'nature'
+    };
+  }
+
+  L.canPlaceNature = function (x, z, radius, opts) {
+    return P.isFree(naturalRect(x, z, radius, opts));
+  };
+
+  L.claimNature = function (x, z, radius, opts) {
+    var r = naturalRect(x, z, radius, opts);
+    if (!P.isFree(r)) return false;
+    P.reserve(r);
+    return true;
   };
 
   /* ---- debugDraw ---------------------------------------------- */

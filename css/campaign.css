@@ -1,0 +1,591 @@
+/* ============================================================
+   campaign.css — diegetic campaign handset + character dialogue.
+
+   The campaign-active city rules are intentionally strict: prose lives on
+   the phone, and the only prose permitted over the observed world is spoken
+   by a character through #campaignDialogue. Mechanical crosshair/ammo remain.
+============================================================ */
+
+:root {
+  --campaign-ink: #eef4f8;
+  --campaign-muted: #8d9ba6;
+  --campaign-paper: #111820;
+  --campaign-card: rgba(255, 255, 255, .055);
+  --campaign-line: rgba(224, 239, 246, .12);
+  --campaign-green: #8ee39b;
+  --campaign-amber: #ffc766;
+  --campaign-red: #ff776e;
+  --campaign-blue: #82d7ff;
+}
+
+/* Canonical campaign title treatment. Reusable by the title/menu integration
+   without forcing this stylesheet to edit index.html itself. */
+.campaign-title {
+  margin: 0;
+  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: .095em;
+  line-height: 1.02;
+  text-transform: uppercase;
+}
+
+/* When the campaign feature flag is on, campaign_ui.js applies this class and
+   rewrites the live city title copy. The old mode/origin/role choice scaffolding
+   stays in the DOM for compatibility, but it no longer presents parallel games. */
+body.campaign-canonical-title #title #modeSelect,
+body.campaign-canonical-title #title #originSelect,
+body.campaign-canonical-title #title .origin-label,
+body.campaign-canonical-title #title .origin-hint,
+body.campaign-canonical-title #title #roleSelect,
+body.campaign-canonical-title #title .controls,
+body.campaign-canonical-title #title .smallnote {
+  display: none !important;
+}
+body.campaign-canonical-title #title .mode-city-only { display: block !important; }
+body.campaign-canonical-title #title .mode-escape-only,
+body.campaign-canonical-title #title .mode-survival-only { display: none !important; }
+body.campaign-canonical-title #title .card-box { width: min(610px, 92vw); }
+body.campaign-canonical-title #title .mode-city-only .logo {
+  color: #e8ecf2;
+  font-size: clamp(42px, 8vw, 74px);
+  text-shadow: 0 4px 0 #171c22, 0 7px 22px rgba(0, 0, 0, .36);
+}
+body.campaign-canonical-title #title .mode-city-only .logo .z {
+  color: #c9202a;
+  text-shadow: 0 4px 0 #5e070b, 0 7px 22px rgba(0, 0, 0, .32);
+}
+body.campaign-canonical-title #title .mode-city-only .sub {
+  margin-top: 12px;
+  color: #7c5a3a;
+  font-size: 12px;
+  letter-spacing: .24em;
+}
+
+/* ---------- closed phone: glyph + LED only, never notification copy ---------- */
+.campaign-phone-peek {
+  position: fixed;
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 115;
+  display: none;
+  width: 45px;
+  height: 45px;
+  padding: 0;
+  border: 1px solid rgba(225, 239, 246, .22);
+  border-radius: 14px;
+  color: #eaf4f8;
+  background: linear-gradient(145deg, rgba(37, 45, 53, .92), rgba(8, 12, 17, .96));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .1);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.campaign-phone-peek.available { display: block; }
+body.campaign-phone-open .campaign-phone-peek { display: none !important; }
+
+.campaign-phone-peek-icon {
+  display: block;
+  transform: translateY(-1px);
+  font: 800 29px/1 system-ui, sans-serif;
+  color: rgba(233, 245, 250, .9);
+}
+
+.campaign-phone-led {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #53606a;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .28);
+  opacity: .35;
+}
+
+.campaign-phone-led.on {
+  background: #ff6258;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .28), 0 0 10px #ff6258;
+  opacity: 1;
+}
+
+.campaign-phone-peek.campaign-phone-pulse { animation: campaignPhonePulse .82s ease; }
+@keyframes campaignPhonePulse {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  18% { transform: translateY(-4px) rotate(-5deg); }
+  38% { transform: translateY(-2px) rotate(5deg); }
+  58% { transform: translateY(-1px) rotate(-3deg); }
+}
+
+/* ---------- raised physical handset ---------- */
+.campaign-phone-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: block;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .17s ease, visibility 0s linear .2s;
+  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
+  color: var(--campaign-ink);
+}
+
+.campaign-phone-layer.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity .17s ease;
+}
+
+.campaign-phone-scrim {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: linear-gradient(90deg, rgba(1, 4, 7, .02), rgba(1, 4, 7, .22));
+  cursor: default;
+}
+
+.campaign-phone-device {
+  position: absolute;
+  right: calc(22px + env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  width: min(374px, calc(100vw - 28px));
+  height: min(724px, calc(100vh - 28px));
+  padding: 9px;
+  box-sizing: border-box;
+  border: 1px solid #66717a;
+  border-radius: 43px;
+  background:
+    linear-gradient(105deg, #11161c 0%, #343d45 18%, #0b0e12 45%, #273038 75%, #090c0f 100%);
+  box-shadow:
+    0 28px 70px rgba(0, 0, 0, .62),
+    0 5px 0 #050608,
+    inset 0 1px 1px rgba(255, 255, 255, .3),
+    inset 0 -1px 1px rgba(0, 0, 0, .9);
+  transform: translate(34px, 48px) rotate(2.4deg) scale(.91);
+  transform-origin: 82% 100%;
+  opacity: 0;
+  transition: transform .24s cubic-bezier(.18, .82, .2, 1), opacity .18s ease;
+}
+
+.campaign-phone-layer.open .campaign-phone-device {
+  transform: translate(0, 0) rotate(.35deg) scale(1);
+  opacity: 1;
+}
+
+.campaign-phone-side {
+  position: absolute;
+  left: -4px;
+  width: 4px;
+  border-radius: 3px 0 0 3px;
+  background: linear-gradient(#525d66, #151b20);
+  box-shadow: -1px 0 1px rgba(0, 0, 0, .5);
+}
+.campaign-phone-side-a { top: 115px; height: 52px; }
+.campaign-phone-side-b { top: 178px; height: 78px; }
+
+.campaign-phone-glass {
+  position: relative;
+  display: grid;
+  grid-template-rows: 31px auto minmax(0, 1fr) 70px 18px;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 35px;
+  background:
+    radial-gradient(circle at 88% 8%, rgba(73, 150, 176, .24), transparent 26%),
+    radial-gradient(circle at 5% 92%, rgba(151, 68, 75, .16), transparent 32%),
+    linear-gradient(155deg, #121b23, #090e14 63%, #101821);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .8);
+}
+
+.campaign-phone-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, rgba(255, 255, 255, .055), transparent 26%, transparent 73%, rgba(255, 255, 255, .025));
+  pointer-events: none;
+}
+
+.campaign-phone-island {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 8px;
+  width: 104px;
+  height: 24px;
+  transform: translateX(-50%);
+  border-radius: 15px;
+  background: #020304;
+  box-shadow: inset 0 -1px 1px rgba(255, 255, 255, .08);
+}
+.campaign-phone-island i {
+  position: absolute;
+  right: 16px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #294e78, #05080d 65%);
+}
+.campaign-phone-island span {
+  position: absolute;
+  left: 28px;
+  top: 10px;
+  width: 38px;
+  height: 4px;
+  border-radius: 3px;
+  background: #14191e;
+}
+
+.campaign-phone-status {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px 0;
+  color: rgba(238, 244, 248, .78);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+.campaign-phone-clock { margin-right: auto; font-variant-numeric: tabular-nums; }
+.campaign-phone-signal { font-size: 7px; letter-spacing: 1px; }
+.campaign-phone-battery { font-size: 12px; }
+
+.campaign-phone-head {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 17px 10px;
+  border-bottom: 1px solid var(--campaign-line);
+}
+.campaign-phone-head small {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--campaign-blue);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .22em;
+}
+.campaign-phone-app-title { font-size: 24px; }
+.campaign-phone-close {
+  position: relative;
+  z-index: 3;
+  width: 35px;
+  height: 35px;
+  padding: 0 0 3px;
+  border: 1px solid var(--campaign-line);
+  border-radius: 50%;
+  color: var(--campaign-ink);
+  background: rgba(255, 255, 255, .055);
+  font: 500 25px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.campaign-phone-close:hover { background: rgba(255, 255, 255, .11); }
+
+.campaign-phone-screen {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 13px 13px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, .18) transparent;
+}
+
+.campaign-phone-screen::-webkit-scrollbar { width: 5px; }
+.campaign-phone-screen::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .17); border-radius: 8px; }
+
+.campaign-phone-nav {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 8px 9px 7px;
+  border-top: 1px solid var(--campaign-line);
+  background: rgba(6, 10, 14, .78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.campaign-phone-nav button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 5px 3px;
+  border: 0;
+  border-radius: 11px;
+  color: #6f7c87;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+.campaign-phone-nav button > span { font-size: 20px; line-height: 1; }
+.campaign-phone-nav button > b { font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+.campaign-phone-nav button.active { color: var(--campaign-blue); background: rgba(130, 215, 255, .07); }
+.campaign-phone-nav button > i {
+  position: absolute;
+  top: 2px;
+  right: calc(50% - 19px);
+  display: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff6258;
+  box-shadow: 0 0 7px rgba(255, 98, 88, .8);
+}
+.campaign-phone-nav button > i.on { display: block; }
+
+.campaign-phone-home {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 5px 0 7px;
+  border: 0;
+  background: rgba(6, 10, 14, .78);
+  cursor: pointer;
+}
+.campaign-phone-home i { width: 105px; height: 4px; border-radius: 5px; background: rgba(238, 244, 248, .7); }
+
+/* ---------- phone app content ---------- */
+.campaign-empty {
+  display: flex;
+  min-height: 280px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+}
+.campaign-empty-icon { margin-bottom: 16px; color: rgba(130, 215, 255, .58); font-size: 48px; }
+.campaign-empty-title { color: var(--campaign-ink); font-size: 17px; }
+.campaign-empty-copy { max-width: 230px; margin-top: 8px; color: var(--campaign-muted); font-size: 12px; line-height: 1.45; }
+
+.campaign-mission-card,
+.campaign-feed-card,
+.campaign-history {
+  border: 1px solid var(--campaign-line);
+  border-radius: 17px;
+  background: var(--campaign-card);
+  box-shadow: 0 9px 22px rgba(0, 0, 0, .16);
+}
+.campaign-mission-card { padding: 15px; }
+.campaign-eyebrow { color: var(--campaign-red); font-size: 9px; font-weight: 700; letter-spacing: .18em; }
+.campaign-mission-title { margin-top: 6px; color: var(--campaign-ink); font-size: 22px; }
+.campaign-mission-brief { margin: 11px 0 0; color: #c9d3d9; font-size: 13px; line-height: 1.46; }
+.campaign-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 13px; }
+.campaign-info-chip { min-width: 0; padding: 8px 9px; border: 1px solid rgba(255, 255, 255, .07); border-radius: 11px; background: rgba(0, 0, 0, .17); }
+.campaign-info-label { display: block; color: var(--campaign-muted); font-size: 8px; font-weight: 700; letter-spacing: .13em; }
+.campaign-info-value { display: block; overflow: hidden; margin-top: 3px; color: var(--campaign-amber); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.campaign-mission-progress { height: 5px; margin-top: 13px; overflow: hidden; border-radius: 4px; background: rgba(255, 255, 255, .08); }
+.campaign-mission-progress-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--campaign-red), var(--campaign-amber)); }
+.campaign-objectives { margin-top: 13px; padding-top: 8px; border-top: 1px solid var(--campaign-line); }
+.campaign-objective { display: flex; align-items: flex-start; gap: 9px; padding: 6px 1px; color: #d4dde2; font-size: 12px; line-height: 1.35; }
+.campaign-objective-mark { flex: 0 0 16px; color: var(--campaign-blue); text-align: center; }
+.campaign-objective.done { color: #74818a; text-decoration: line-through; }
+.campaign-objective.done .campaign-objective-mark { color: var(--campaign-green); text-decoration: none; }
+.campaign-objective.failed .campaign-objective-mark { color: var(--campaign-red); }
+.campaign-mission-updates { margin-top: 10px; padding-top: 7px; border-top: 1px solid var(--campaign-line); }
+.campaign-mission-update { display: grid; grid-template-columns: 48px 1fr; gap: 7px; padding: 4px 0; color: #aebbc3; font-size: 10px; line-height: 1.35; }
+.campaign-mission-update time { color: #65727b; font-variant-numeric: tabular-nums; }
+
+.campaign-history { margin-top: 11px; padding: 12px 13px; }
+.campaign-section-title { margin-bottom: 5px; color: var(--campaign-muted); font-size: 11px; }
+.campaign-history-row { display: flex; align-items: center; gap: 9px; padding: 7px 0; border-top: 1px solid rgba(255, 255, 255, .06); }
+.campaign-history-state { color: var(--campaign-green); }
+.campaign-history-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.campaign-history-copy b { overflow: hidden; color: #cbd5db; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.campaign-history-copy small { color: #697680; font-size: 9px; text-transform: uppercase; }
+
+.campaign-feed-card { margin-bottom: 9px; padding: 12px 13px; }
+.campaign-feed-card.news { border-left: 3px solid var(--campaign-amber); }
+.campaign-feed-card.message { border-left: 3px solid var(--campaign-blue); }
+.campaign-feed-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.campaign-feed-from { overflow: hidden; color: var(--campaign-ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.campaign-feed-time { flex: none; color: #697680; font-size: 9px; font-variant-numeric: tabular-nums; }
+.campaign-feed-body { margin: 6px 0 0; color: #bcc8cf; font-size: 12px; line-height: 1.43; white-space: pre-wrap; }
+
+/* ---------- the one allowed prose surface outside the phone: speech ---------- */
+.campaign-dialogue {
+  position: fixed;
+  z-index: 125;
+  left: 50%;
+  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  visibility: hidden;
+  width: min(720px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 8px;
+  transform: translate(-50%, 12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .16s ease, transform .16s ease, visibility 0s linear .18s;
+  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
+}
+.campaign-dialogue.show {
+  visibility: visible;
+  transform: translate(-50%, 0);
+  opacity: 1;
+  transition: opacity .16s ease, transform .16s ease;
+}
+.campaign-dialogue-line {
+  padding: 13px 17px 14px;
+  border: 1px solid rgba(255, 255, 255, .17);
+  border-left: 4px solid var(--campaign-blue);
+  border-radius: 7px 16px 16px 7px;
+  background: linear-gradient(100deg, rgba(4, 7, 10, .92), rgba(10, 15, 20, .82));
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.campaign-dialogue-speaker { color: var(--campaign-blue); font-size: 11px; }
+.campaign-dialogue-text { margin-top: 5px; color: #f0f4f7; font-size: 17px; line-height: 1.4; text-shadow: 0 1px 2px #000; }
+.campaign-dialogue-choices { display: grid; gap: 6px; pointer-events: auto; }
+.campaign-dialogue-choices:empty { display: none; }
+.campaign-dialogue-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, .15);
+  border-radius: 11px;
+  color: #dce6eb;
+  background: rgba(7, 11, 15, .88);
+  font: 600 13px/1.3 Fredoka, ui-rounded, system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.campaign-dialogue-choice:hover { border-color: rgba(130, 215, 255, .62); background: rgba(24, 45, 56, .92); }
+.campaign-dialogue-key {
+  display: inline-flex;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(130, 215, 255, .48);
+  border-radius: 6px;
+  color: var(--campaign-blue);
+  font-size: 10px;
+}
+
+/* ---------- CITY declutter contract ----------
+   Deliberate full-screen menus (shops, map, inventory, pause) are not hidden.
+   Transient narration, status wallpaper, objectives, feeds and proximity prose
+   are. The physical world, crosshair, ammo, effects, and speech remain. */
+body.campaign-active #objective,
+body.campaign-active #topright,
+body.campaign-active #keycard,
+body.campaign-active #inventory,
+body.campaign-active #detectWrap,
+body.campaign-active #gangHud,
+body.campaign-active #hint,
+body.campaign-active #toast,
+body.campaign-active #streakHud,
+body.campaign-active #streakMeter,
+body.campaign-active #compass,
+body.campaign-active #minimap,
+body.campaign-active #simHud,
+body.campaign-active #dashBtn,
+body.campaign-active #dashboard,
+body.campaign-active #fullMap,
+body.campaign-active #waypointGuide,
+body.campaign-active #weaponStrip,
+body.campaign-active #hotbar,
+body.campaign-active #invScreen {
+  display: none !important;
+}
+
+/* The prison interaction card is character conversation and remains. The city
+   registry's floating prose card does not. */
+body.campaign-active.mode-city #interact,
+body.campaign-active.mode-city #cTurfMeta,
+body.campaign-active.mode-city #cKillFeed,
+body.campaign-active.mode-city #cpPanel,
+body.campaign-active.mode-city #cityOrders,
+body.campaign-active.mode-city #cityGigBar,
+body.campaign-active.mode-city #cityHeistHud,
+body.campaign-active.mode-city #raceHud,
+body.campaign-active.mode-city #raceLights .go,
+body.campaign-active.mode-city #cityFlightHud,
+body.campaign-active.mode-city #cityAircraftPrompt,
+body.campaign-active.mode-city #cityStoragePrompt,
+body.campaign-active.mode-city #modshopHud,
+body.campaign-active.mode-city #bankPrompt,
+body.campaign-active.mode-city #fxPrompt,
+body.campaign-active.mode-city #gunstorePrompt,
+body.campaign-active.mode-city #clothingPrompt,
+body.campaign-active.mode-city #pawnPrompt,
+body.campaign-active.mode-city #jewelryPrompt,
+body.campaign-active.mode-city #realtyPrompt,
+body.campaign-active.mode-city #adChip,
+body.campaign-active.mode-city #elevChip,
+body.campaign-active.mode-city #roofStashChip,
+body.campaign-active.mode-city #beachLootChip,
+body.campaign-active.mode-city #crateChip,
+body.campaign-active.mode-city #citySpectate,
+body.campaign-active.mode-city [title^="Open captives panel"] {
+  display: none !important;
+}
+
+/* Keep the arrest/death fade as a wordless physical transition. death.js may
+   show the shared overlay, but its BUSTED/WASTED prose never leaves the phone. */
+body.campaign-active.mode-city #cityWasted > * { display: none !important; }
+
+/* Hide every top-level city instrument except the weapon/ammo anchor and the
+   crosshair. Then remove the weapon-name/loot prose while retaining live ammo. */
+body.campaign-active.mode-city #cityHud #cHud > :not(#cWpn):not(#cCross) {
+  display: none !important;
+}
+body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
+body.campaign-active.mode-city #cityHud #cLoot,
+body.campaign-active.mode-city #cityHud #cSlots { display: none !important; }
+body.campaign-active.mode-city #cityHud #cAmmo { display: block !important; }
+
+/* Build mode's two legacy floating elements have no IDs. These constrained
+   selectors match their fixed slots without touching modal inventory panels. */
+body.campaign-active.mode-city > .panel[style*="bottom: 78px"],
+body.campaign-active.mode-city > div[style*="bottom: 132px"][style*="z-index: 15"] {
+  display: none !important;
+}
+
+/* Prison/escape mode intentionally keeps #interact and its character dialogue
+   intact. Campaign notifications still never create a global toast. */
+body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none; }
+
+@media (max-width: 720px), (max-height: 650px) {
+  .campaign-phone-device {
+    right: 50%;
+    bottom: max(7px, env(safe-area-inset-bottom, 0px));
+    width: min(370px, calc(100vw - 12px));
+    height: min(700px, calc(100vh - 14px));
+    transform: translate(50%, 54px) rotate(0) scale(.92);
+  }
+  .campaign-phone-layer.open .campaign-phone-device { transform: translate(50%, 0) rotate(0) scale(1); }
+  .campaign-phone-scrim { background: rgba(1, 4, 7, .22); }
+  .campaign-dialogue { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .campaign-dialogue-text { font-size: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .campaign-phone-layer,
+  .campaign-phone-device,
+  .campaign-dialogue { transition: none; }
+  .campaign-phone-peek.campaign-phone-pulse { animation: none; }
+}

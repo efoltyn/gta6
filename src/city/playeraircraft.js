@@ -182,6 +182,21 @@
     if (CBZ.floorAt) { try { return CBZ.floorAt(x, z) || 0; } catch (e) { return 0; } }
     return 0;
   }
+  function campaignActive() {
+    try { return !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive()); } catch (e) { return false; }
+  }
+  // Story mode owns the physical phone. Aircraft status/control prose goes there
+  // instead of becoming another floating toast; if the campaign phone has not
+  // loaded yet, silence is preferable to putting words back over the world.
+  function aircraftNote(body, seconds, from) {
+    if (campaignActive()) {
+      if (CBZ.campaignUI && typeof CBZ.campaignUI.notify === "function") {
+        try { CBZ.campaignUI.notify("personal", from || "Flight Ops", body); } catch (e) {}
+      }
+      return;
+    }
+    if (CBZ.city && CBZ.city.note) { try { CBZ.city.note(body, seconds); } catch (e) {} }
+  }
 
   // ============================================================
   //  MODELS — both reuse cached shared mats/geoms (cmat/boxGeom) so a fleet of
@@ -401,20 +416,36 @@
     });
   }
 
-  function makeCraft(kind) {
+  function makeCraft(kind, opts) {
+    opts = opts || {};
     const root = arenaRoot(); if (!root) return null;
-    const grp = kind === "jet" ? buildJet() : buildHeli();
-    root.add(grp);
+    // Civilian airport theft reuses the exact parked airliner/private-jet group.
+    // Owned/military craft keep using the purpose-built flight models.
+    const grp = opts.group || (kind === "jet" ? buildJet() : buildHeli());
+    if (!grp.parent) root.add(grp);
+    const armed = opts.armed !== false;
     const craft = {
       kind, group: grp, muzzle: grp.userData.muzzleLocal || new THREE.Vector3(0, 0, 3),
       pos: grp.position, heading: 0, pitch: 0, roll: 0,
-      vx: 0, vy: 0, vz: 0, speed: kind === "jet" ? JET_MIN : 0,
-      throttle: kind === "jet" ? JET_MIN : 0,   // ENGINE power setting (jet only) — has an idle floor,
+      vx: 0, vy: 0, vz: 0, speed: opts.speed != null ? opts.speed : (kind === "jet" ? JET_MIN : 0),
+      throttle: opts.throttle != null ? opts.throttle : (kind === "jet" ? JET_MIN : 0),   // ENGINE power setting (jet only) — has an idle floor,
                                                  // unlike craft.speed (true airspeed), which can now sag
                                                  // below it in a stall (see flyJet).
-      fireCD: 0, ammo: kind === "jet" ? JET_AMMO : HELI_AMMO, maxAmmo: kind === "jet" ? JET_AMMO : HELI_AMMO,
+      fireCD: 0,
+      ammo: armed ? (kind === "jet" ? JET_AMMO : HELI_AMMO) : 0,
+      maxAmmo: armed ? (kind === "jet" ? JET_AMMO : HELI_AMMO) : 0,
       rotorSpin: 0,
-      belly: grp.userData.belly || 1.0,
+      belly: opts.belly != null ? opts.belly : (grp.userData.belly || 1.0),
+      groundOffset: opts.groundOffset,
+      modelYawOffset: opts.modelYawOffset || 0,
+      externalGroup: !!opts.group,
+      sourceRec: opts.sourceRec || null,
+      civilian: !!opts.civilian,
+      armed,
+      displayName: opts.name || (kind === "jet" ? "F-22 RAPTOR" : "MISSILE CHOPPER"),
+      cameraBack: opts.cameraBack,
+      cameraUp: opts.cameraUp,
+      cameraAhead: opts.cameraAhead,
       // ---- damage / aero state (new) ----
       hp: CRAFT_MAX_HP, maxHp: CRAFT_MAX_HP,
       torqueYaw: 0,            // reactive yaw rate from the tail-rotor coupling model (heli only)
@@ -425,6 +456,24 @@
     };
     grp.userData.craft = craft;
     return craft;
+  }
+
+  const _craftEuler = new THREE.Euler();
+  const _craftYawQ = new THREE.Quaternion();
+  const _craftUp = new THREE.Vector3(0, 1, 0);
+  function setCraftRotation(craft, pitch, heading, roll) {
+    if (!craft || !craft.group) return;
+    const off = craft.modelYawOffset || 0;
+    if (!off) {
+      craft.group.rotation.set(pitch || 0, heading, roll || 0);
+      return;
+    }
+    // The airport meshes point down local +X, while the shared flight rig points
+    // down +Z. Compose the model correction AFTER the complete flight attitude;
+    // merely adding -90deg to Euler yaw makes pitch act like roll once airborne.
+    craft.group.quaternion
+      .setFromEuler(_craftEuler.set(pitch || 0, heading, roll || 0, "XYZ"))
+      .multiply(_craftYawQ.setFromAxisAngle(_craftUp, off));
   }
 
   // ---- CRAFT DAMAGE: hostile fire/blast hitting the player's OWN flown
@@ -477,7 +526,7 @@
     heli.pos.set(px, py, pz);
     heli.heading = 0; heli.pitch = 0; heli.roll = 0;
     heli.vx = heli.vy = heli.vz = 0; heli.speed = 0; heli.torqueYaw = 0; heli.autorotating = false;
-    heli.group.rotation.set(0, 0, 0);
+    setCraftRotation(heli, 0, 0, 0);
     if (RESUPPLY_AT_BASE) { heli.ammo = heli.maxAmmo; heli.hp = heli.maxHp; }
   }
 
@@ -493,7 +542,7 @@
     jet.pos.set(px, py, pz);
     jet.heading = 0; jet.pitch = 0; jet.roll = 0;
     jet.vx = jet.vy = jet.vz = 0; jet.speed = JET_MIN; jet.throttle = JET_MIN;
-    jet.group.rotation.set(0, 0, 0);
+    setCraftRotation(jet, 0, 0, 0);
     if (RESUPPLY_AT_BASE) { jet.ammo = jet.maxAmmo; jet.hp = jet.maxHp; }
   }
 
@@ -525,40 +574,109 @@
     craft.heading = (heading || 0); craft.pitch = 0; craft.roll = 0;
     craft.vx = craft.vy = craft.vz = 0; craft.speed = JET_MIN; craft.throttle = JET_MIN;
     craft.group.position.copy(craft.pos);
-    craft.group.rotation.set(0, craft.heading, 0);
+    setCraftRotation(craft, 0, craft.heading, 0);
     craft.hot = !opts.owned;          // owned retrieval spawns already-yours
     enterAircraft(craft);
     return craft;
   }
   CBZ.citySpawnStolenJet = spawnStolenJet;
 
+  function detachPropCollider(rec) {
+    const col = rec && rec.collider;
+    if (!col || rec._colliderDetached) return;
+    if (rec._colliderHeight == null && col.y0 != null && col.y1 != null) {
+      rec._colliderHeight = col.y1 - col.y0;
+      rec._colliderY0Offset = col.y0 - (rec.pos.y || 0);
+    }
+    const i = CBZ.colliders ? CBZ.colliders.indexOf(col) : -1;
+    if (i >= 0) CBZ.colliders.splice(i, 1);
+    rec._colliderDetached = true;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
+  function restorePropCollider(rec) {
+    const col = rec && rec.collider;
+    if (!col || !rec.group) return;
+    // Rebuild an AABB around the now-parked oriented footprint. It can be left
+    // anywhere after a hijack, so the original gate bounds are no longer valid.
+    const a = rec.group.rotation.y || 0;
+    const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+    const hw = Math.max(0.5, rec.footW || 3) * 0.5;
+    const hl = Math.max(0.5, rec.footL || 5) * 0.5;
+    const ex = ca * hw + sa * hl, ez = sa * hw + ca * hl;
+    col.minX = rec.pos.x - ex; col.maxX = rec.pos.x + ex;
+    col.minZ = rec.pos.z - ez; col.maxZ = rec.pos.z + ez;
+    if (rec._colliderHeight != null) {
+      col.y0 = rec.pos.y + (rec._colliderY0Offset || 0);
+      col.y1 = col.y0 + rec._colliderHeight;
+    }
+    if (CBZ.colliders && CBZ.colliders.indexOf(col) < 0) CBZ.colliders.push(col);
+    rec._colliderDetached = false;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
+  function parkExternalCraft(craft) {
+    if (!craft || !craft.externalGroup || !craft.sourceRec) return false;
+    const rec = craft.sourceRec;
+    const gy = floorY(craft.pos.x, craft.pos.z);
+    craft.pitch = craft.roll = 0;
+    craft.vx = craft.vy = craft.vz = 0;
+    craft.speed = 0;
+    craft.pos.y = gy + (craft.groundOffset != null ? craft.groundOffset : 0);
+    setCraftRotation(craft, 0, craft.heading, 0);
+    rec.heading = craft.heading + (craft.modelYawOffset || 0);
+    rec.taken = false;
+    rec.group.visible = true;
+    rec.group.userData.craft = null;
+    restorePropCollider(rec);
+    if (stolenAir === craft) stolenAir = null;
+    return true;
+  }
+
   // ---- STEAL A FLYABLE FROM A PARKED PROP — the entry militaryvehicles.js calls
   // when you commandeer a base helicopter or an airport/airliner/private jet.
-  // We spawn a REAL player-flyable (so it gets rotors, missiles, the chase cam,
-  // the ceiling/ground clamp) at the prop's spot + heading and board it. It's
-  // HOT (craft.hot=true): bail/die/leave and it's impounded — you don't keep base
-  // hardware for free. WHY a flyable stand-in instead of animating the static
-  // island prop: the parked island models have no flight rig — reusing the proven
-  // makeCraft heli/jet gives honest, weaponised flight with zero new sim. We store
-  // it in the SEPARATE `stolenAir` slot so the owned heli/Raptor are untouched.
-  // rec.kind 'heli' → the missile chopper; anything else ('plane') → the jet.
+  // Military props still get the proven weaponised stand-in. Civil airport planes
+  // instead attach the flight state to their EXACT parked group: no F-22 swap, no
+  // duplicate left at the gate, no missiles on a commercial airframe. Both live in
+  // the separate `stolenAir` slot so owned heli/Raptor singletons are untouched.
   function spawnFlyableFromProp(rec) {
     if (!rec || !rec.pos) return null;
     const root = arenaRoot(); if (!root) return null;
     if (CBZ.player && CBZ.player._aircraft) return null;       // already airborne
     const kind = rec.kind === "heli" ? "heli" : "jet";
+    const civil = !!(rec.civilian && rec.kind === "plane");
     // recycle a prior stolen bird if it's lying around un-flown
-    if (stolenAir && _aircraftFlying() !== stolenAir) { disposeGroup(stolenAir.group); stolenAir = null; }
-    const craft = makeCraft(kind); if (!craft) return null;
+    if (stolenAir && _aircraftFlying() !== stolenAir) {
+      if (!parkExternalCraft(stolenAir)) disposeGroup(stolenAir.group);
+      stolenAir = null;
+    }
+    const craft = makeCraft(kind, civil ? {
+      group: rec.group,
+      sourceRec: rec,
+      civilian: true,
+      armed: false,
+      name: (rec.model && rec.model.name) || "Airliner",
+      modelYawOffset: rec.modelYawOffset != null ? rec.modelYawOffset : -Math.PI / 2,
+      groundOffset: rec.groundOffset != null ? rec.groundOffset : 0,
+      speed: 0,
+      throttle: 0,
+      cameraBack: rec.flightKind === "airliner" ? 30 : 16,
+      cameraUp: rec.flightKind === "airliner" ? 14 : 10,
+      cameraAhead: rec.flightKind === "airliner" ? 18 : 10,
+    } : null); if (!craft) return null;
     stolenAir = craft;
-    const heading = rec.heading != null ? rec.heading : 0;
+    // rec.heading is the parked MODEL yaw; convert back to the shared flight
+    // heading before the per-model visual offset is reapplied.
+    const heading = (rec.heading != null ? rec.heading : 0) - (craft.modelYawOffset || 0);
     const gy = floorY(rec.pos.x, rec.pos.z);
-    craft.pos.set(rec.pos.x, gy + craft.belly + GROUND_PAD, rec.pos.z);
+    const groundOffset = craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD;
+    craft.pos.set(rec.pos.x, gy + groundOffset, rec.pos.z);
     craft.heading = heading; craft.pitch = 0; craft.roll = 0;
     craft.vx = craft.vy = craft.vz = 0;
-    craft.speed = kind === "jet" ? JET_MIN : 0;
+    craft.speed = civil ? 0 : (kind === "jet" ? JET_MIN : 0);
     craft.group.position.copy(craft.pos);
-    craft.group.rotation.set(0, craft.heading, 0);
+    setCraftRotation(craft, 0, craft.heading, 0);
+    if (civil) detachPropCollider(rec);
     craft.hot = true;                                          // never keepable: a base bird, not yours
     craft.fromProp = true;                                    // so the keep-gate ignores it (only the Raptor launders)
     enterAircraft(craft);
@@ -573,7 +691,7 @@
     const P = CBZ.player;
     return P && P._aircraft ? P._aircraft : null;
   }
-  function craftLabel(c) { return c && c.kind === "jet" ? "F-22" : "Heli"; }
+  function craftLabel(c) { return (c && c.displayName) || (c && c.kind === "jet" ? "F-22" : "Heli"); }
 
   function enterAircraft(craft) {
     if (!craft || !craft.group) return false;
@@ -588,32 +706,35 @@
     // point the chase-cam down the craft's nose
     if (CBZ.cam) CBZ.cam.yaw = craft.heading + Math.PI;
     if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
-    if (CBZ.city && CBZ.city.note) {
-      const ctrl = craft.kind === "jet"
+    const ctrl = craft.civilian
+      ? "W/S throttle · A/D bank · SPACE/CTRL climb/dive · [F] land"
+      : craft.kind === "jet"
         ? "W/S throttle · A/D bank · SPACE/CTRL climb/dive · L-click missiles · [F] eject"
         : "W/S thrust · A/D yaw · SPACE/CTRL up/down · mouse look · L-click missiles · [F] land";
-      CBZ.city.note("✈ Flying the " + (craft.kind === "jet" ? "F-22 RAPTOR" : "missile chopper") + " — " + ctrl, 3.2);
-    }
+    aircraftNote("Flying the " + craftLabel(craft) + " — " + ctrl, 3.2, "Flight Ops");
     return true;
   }
 
-  // ---- HOT-JET CLEANUP: a stolen jet you haven't KEPT yet vanishes the moment
-  // you stop flying it (eject/die/leave). You can't park a hot bird and walk off
-  // with it for free — it must be laundered through an owned hangar first. Only
-  // touches the module `jet` when it IS the hot craft; never disposes a kept one.
+  // ---- HOT-JET CLEANUP: military stand-ins vanish when abandoned; a civilian
+  // external group is parked where it landed and returned to the hijack registry.
+  // Never dispose an airport-owned model or a kept craft.
   function despawnHotJet(craft) {
     if (!craft || !craft.hot) return false;
+    if (craft.externalGroup && craft.sourceRec) {
+      const name = craftLabel(craft);
+      parkExternalCraft(craft);
+      aircraftNote(name + " left where you landed. It remains hot and can be taken again.", 2.6, "Flight Ops");
+      return true;
+    }
     // null whichever module slot held it so we never dispose a kept craft. A
     // prop-sourced bird lives in `stolenAir`; the base Raptor lives in `jet`.
     if (stolenAir === craft) { disposeGroup(stolenAir.group); stolenAir = null; }
     else if (jet === craft) { disposeGroup(jet.group); jet = null; }
     else disposeGroup(craft.group);
-    if (CBZ.city && CBZ.city.note) {
-      // a commandeered base machine is impounded; only the Raptor talks hangars.
-      CBZ.city.note(craft.fromProp
-        ? "The commandeered aircraft was impounded — military hardware doesn't stay yours."
-        : "The stolen F-22 was impounded — you never got it to a hangar.", 2.6);
-    }
+    // a commandeered base machine is impounded; only the Raptor talks hangars.
+    aircraftNote(craft.fromProp
+      ? "The commandeered aircraft was impounded — military hardware doesn't stay yours."
+      : "The stolen F-22 was impounded — you never got it to a hangar.", 2.6, "Flight Ops");
     return true;
   }
 
@@ -625,8 +746,16 @@
     // ejecting from a still-HOT stolen jet loses it (you didn't keep it)
     if (craft && craft.hot) {
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !P.dead;
-      const gy = floorY(craft.pos.x, craft.pos.z);
-      P.pos.set(craft.pos.x, Math.max(gy, gy), craft.pos.z);
+      let px = craft.pos.x, pz = craft.pos.z;
+      if (craft.externalGroup && craft.sourceRec) {
+        // Leave the pilot beside the persistent airframe, not inside the solid
+        // collider we restore when the commercial aircraft is parked.
+        const r = Math.min(craft.sourceRec.footW || 6, craft.sourceRec.footL || 6) * 0.5 + 1.5;
+        px += Math.cos(craft.heading) * r;
+        pz -= Math.sin(craft.heading) * r;
+      }
+      const gy = floorY(px, pz);
+      P.pos.set(px, gy, pz);
       P.vy = 0; P.grounded = true;
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
       despawnHotJet(craft);
@@ -636,7 +765,7 @@
     if (craft) {
       // settle the craft flat where it is, then drop the player onto the surface
       // beside it, never through the ground
-      craft.group.rotation.set(0, craft.heading, 0);
+      setCraftRotation(craft, 0, craft.heading, 0);
       craft.pitch = craft.roll = 0; craft.vx = craft.vy = craft.vz = 0; craft.speed = craft.kind === "jet" ? JET_MIN : 0;
       if (craft.kind === "jet") craft.throttle = JET_MIN;
       const gy = floorY(craft.pos.x, craft.pos.z);
@@ -698,8 +827,8 @@
   // jet just another purchase; risking your life to lift it off a 4★ base and
   // sweating it back to your hangar is the felt earn.
   function jetNotBuyable() {
-    if (g.cityOwnsJet) { if (CBZ.city && CBZ.city.note) CBZ.city.note("The F-22 is already yours — it's in your hangar.", 2.4); return false; }
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("The F-22 can't be bought — steal it from the military base and land it in a hangar you own.", 3.4);
+    if (g.cityOwnsJet) { aircraftNote("The F-22 is already yours — it's in your hangar.", 2.4, "Flight Ops"); return false; }
+    aircraftNote("The F-22 can't be bought — steal it from the military base and land it in a hangar you own.", 3.4, "Flight Ops");
     return false;
   }
   CBZ.cityBuyJet = jetNotBuyable;
@@ -734,8 +863,9 @@
   // ============================================================
   function fireMissile(craft) {
     if (!craft || craft.fireCD > 0) return;
+    if (craft.armed === false) return;          // commercial aircraft do not grow F-22 weapons when hijacked
     if (craft.ammo <= 0) {
-      if (CBZ.city && CBZ.city.note) CBZ.city.note("Out of missiles — land on the pad/hangar to resupply.", 1.6);
+      aircraftNote("Out of missiles — land on the pad/hangar to resupply.", 1.6, "Flight Ops");
       return;
     }
     // world-space muzzle position + forward direction
@@ -1026,7 +1156,7 @@
     craft.pos.z += craft.vz * dt;
     // altitude ceiling + ground floor (never sink the belly through terrain)
     const gy = floorY(craft.pos.x, craft.pos.z);
-    const minY = gy + craft.belly + GROUND_PAD;
+    const minY = gy + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     if (craft.pos.y < minY) {
       // HARD-LANDING CHECK (autorotation payoff): if the heli touches down
       // sinking faster than the flare can bleed off, that's a hard landing —
@@ -1047,7 +1177,7 @@
     clampToCity(craft.pos, 2.0);
     // apply transform
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
-    craft.group.rotation.set(craft.pitch || 0, craft.heading, craft.roll || 0);
+    setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
   }
 
   CBZ.onUpdate(12, function (dt) {
@@ -1078,7 +1208,8 @@
       _lastJetFlag = true;
       if (CBZ.cityClearWanted) CBZ.cityClearWanted();
       else if (CBZ.city && CBZ.city.clearWanted) CBZ.city.clearWanted();
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 THE RAPTOR IS YOURS");
+      if (campaignActive()) aircraftNote("The Raptor is yours.", 2.8, "Flight Ops");
+      else if (CBZ.city && CBZ.city.big) CBZ.city.big("🛩 THE RAPTOR IS YOURS");
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(60);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
@@ -1131,15 +1262,15 @@
   }
   function drawHud(craft) {
     const el = hudEl(); if (!el) return;
-    if (!craft) { el.style.display = "none"; return; }
+    if (!craft || campaignActive()) { el.style.display = "none"; return; }
     const alt = Math.max(0, craft.pos.y - floorY(craft.pos.x, craft.pos.z));
     el.style.display = "block";
     const hpPct = craft.maxHp > 0 ? Math.round(100 * craft.hp / craft.maxHp) : 100;
     const hpTag = craft.autorotating ? "AUTOROTATING" : (craft.stalled ? "STALL" : (hpPct + "%"));
-    el.innerHTML = "✈ " + (craft.kind === "jet" ? "F-22 RAPTOR" : "MISSILE CHOPPER") +
+    el.innerHTML = "✈ " + craftLabel(craft).toUpperCase() +
       "  ·  ALT " + alt.toFixed(0) + "m" +
       "  ·  SPD " + (craft.speed || 0).toFixed(0) +
-      "  ·  MISSILES " + craft.ammo + "/" + craft.maxAmmo +
+      (craft.armed === false ? "" : "  ·  MISSILES " + craft.ammo + "/" + craft.maxAmmo) +
       "  ·  HP " + hpTag;
   }
   function hideHud() { if (_hudEl) _hudEl.style.display = "none"; }
@@ -1168,7 +1299,7 @@
   // on-foot context: a board prompt near an owned craft, or a buy prompt at the
   // hangar. Cheap distance checks; only runs when not flying / not driving.
   function updatePrompt(P) {
-    if (!P || P.dead || P._aircraft || P.driving || g.state !== "playing") { hidePrompt(); return; }
+    if (campaignActive() || !P || P.dead || P._aircraft || P.driving || g.state !== "playing") { hidePrompt(); return; }
     const x = P.pos.x, z = P.pos.z;
     const c = nearestBoardable(x, z, 6.5);
     if (c) { showPrompt("[F] Fly the " + (c.kind === "jet" ? "F-22 RAPTOR" : "Missile Heli")); return; }
@@ -1215,7 +1346,24 @@
     if (P && CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.visible = !P.dead;
     disposeGroup(heli && heli.group); heli = null;
     disposeGroup(jet && jet.group); jet = null;
-    disposeGroup(stolenAir && stolenAir.group); stolenAir = null;   // hot prop-bird never persists
+    if (stolenAir) {
+      // A civilian prop group belongs to the airport landmass. World teardown
+      // removes that root; disposing it here would free shared airport material /
+      // geometry out from under the rebuild. Only module-built stand-ins are ours.
+      if (stolenAir.externalGroup) {
+        // A city/prison reset keeps the airport root alive. Park the exact flown
+        // airframe and restore its detached collider before returning its registry
+        // record; simply clearing `taken` left a boardable jet hanging in mid-air
+        // with no physical hull after the handoff.
+        if (stolenAir.group && stolenAir.group.parent && stolenAir.sourceRec) {
+          parkExternalCraft(stolenAir);
+        } else {
+          if (stolenAir.sourceRec) stolenAir.sourceRec.taken = false;
+          if (stolenAir.group && stolenAir.group.userData) stolenAir.group.userData.craft = null;
+        }
+      } else disposeGroup(stolenAir.group);
+      stolenAir = null;
+    }
     g.cityOwnsJet = false;          // heli/hangar flags belong to realestate's reset
     _lastHeliFlag = false; _lastJetFlag = false;
     hideHud(); hidePrompt();

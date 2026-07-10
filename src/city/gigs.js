@@ -365,6 +365,10 @@
   // ---------------------------------------------------------
   function accept(def) {
     if (!def || !def.kind) { note("No gig to accept.", 1.6); return false; }
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
+      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
+      return false;
+    }
     if (g.cityGig) { note("Finish your current gig first.", 1.8); return false; }
     if (g.cityJob) { note("Wrap your current job first.", 1.8); return false; }
     const gig = {

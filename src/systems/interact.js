@@ -213,6 +213,13 @@
   }
 
   function verbsFor(a) {
+    // Authored prison beats can temporarily replace the warden's generic
+    // bribe/loot menu without teaching this legacy interaction system about
+    // campaign state. The provider returns verb ids and owns their dispatch.
+    if (CBZ.cityCampaignPrisonVerbs) {
+      const authored = CBZ.cityCampaignPrisonVerbs(a);
+      if (authored && authored.length) return authored;
+    }
     if (a.approach && a.approach.t > 0) {
       if (a.approach.kind === "gangInvite") return ["listen", "accept", "refuse"];
       if (a.approach.kind === "gangJob") return ["listen", "accept", "refuse"];
@@ -253,6 +260,10 @@
     return base;
   }
   function subFor(a, v) {
+    if (CBZ.cityCampaignPrisonSub) {
+      const authored = CBZ.cityCampaignPrisonSub(a, v);
+      if (authored != null) return authored;
+    }
     // price / target info now lives in the label line itself — keep the sub
     // for pure STATUS only (meters, "armed", "clean/risk"), never a price echo.
     if (v === "accept" || v === "join" || v === "trade" || v === "bribe" ||
@@ -334,6 +345,10 @@
     }
   }
   function labelFor(a, v) {
+    if (CBZ.cityCampaignPrisonLabel) {
+      const authored = CBZ.cityCampaignPrisonLabel(a, v);
+      if (authored != null) return authored;
+    }
     const nm = shortText(cleanName(a), 14);
     switch (v) {
       case "romance":  return (a.love || 0) >= 60 ? `Get closer to ${nm}` : `Flirt with ${nm}`;
@@ -395,7 +410,8 @@
         `<span class="ilab">${labelFor(a, v)}</span>` +
         `<span class="isub">${subFor(a, v)}</span></div>`;
       // teach this button until it's been used at least once
-      const tip = (showTips && !learned[v]) ? `<div class="idesc">${DESC[v]}</div>` : "";
+      const desc = (CBZ.cityCampaignPrisonDesc && CBZ.cityCampaignPrisonDesc(a, v)) || DESC[v] || "";
+      const tip = (showTips && !learned[v] && desc) ? `<div class="idesc">${desc}</div>` : "";
       return row + tip;
     }).join("");
     html += `<div class="ihelp">[H] Tips: ${helpOn ? "ON" : "OFF"}</div>`;
@@ -443,8 +459,14 @@
     cooldown = 0.35;
     const v = verbs[idx];
     if (!learned[v]) { learned[v] = true; persist(); } // seen it → stop teaching it
-    const res = VERB[v].fn(current);
-    if (res && res.msg) CBZ.flashHint(res.msg, 2.8);
+    const res = CBZ.cityCampaignPrisonAct && CBZ.cityCampaignPrisonAct(v, current);
+    if (res && res.handled) {
+      if (res.msg) CBZ.flashHint(res.msg, 2.8);
+      return;
+    }
+    if (!VERB[v]) return;
+    const fallback = VERB[v].fn(current);
+    if (fallback && fallback.msg) CBZ.flashHint(fallback.msg, 2.8);
   }
 
   addEventListener("keydown", (e) => {

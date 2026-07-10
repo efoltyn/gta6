@@ -1368,7 +1368,13 @@
   addEventListener("keydown", function (e) {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === "m") { map.toggle(); e.preventDefault(); }
+    if (k === "m" && CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
+      // Campaign navigation lives on the diegetic phone; never cover the world
+      // with a separate prose-heavy map overlay.
+      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
+      e.preventDefault();
+    }
+    else if (k === "m") { map.toggle(); e.preventDefault(); }
     else if (map.active && e.key === "Escape") { close(); e.preventDefault(); }
     else if (map.active && (e.key === "Backspace" || e.key === "Delete")) { clearWaypoint(); e.preventDefault(); }
     else if (map.active && mode() === "city" && k === "f") { setCityView(true); draw(); e.preventDefault(); }   // F = fit the whole archipelago

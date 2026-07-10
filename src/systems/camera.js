@@ -298,7 +298,13 @@
     if (CBZ.game.mode === "city" && player.driving && !player.dead) {
       introT = 0; prev.copy(player.pos);
       const cfx = -Math.sin(cam.yaw), cfz = -Math.cos(cam.yaw);   // = the car's forward
-      const back = 9.5, up = 10.0, ahead = 6.0;
+      // Aircraft publish framing dimensions. A fixed car-sized 9.5m boom sat
+      // inside a 30m commercial airliner, so the "third-person" hijack view was
+      // mostly tail/fuselage. Cars and older craft keep the exact defaults.
+      const craft = player._aircraft;
+      const back = craft && craft.cameraBack != null ? craft.cameraBack : 9.5;
+      const up = craft && craft.cameraUp != null ? craft.cameraUp : 10.0;
+      const ahead = craft && craft.cameraAhead != null ? craft.cameraAhead : 6.0;
       const tx = player.pos.x - cfx * back, ty = player.pos.y + up, tz = player.pos.z - cfz * back;
       camera.position.x = smoothDamp(camera.position.x, tx, camV.x, 0.12, fdt);
       camera.position.y = smoothDamp(camera.position.y, ty, camV.y, 0.12, fdt);
@@ -419,11 +425,23 @@
     // mouse" lag). Off → identical to today (smYaw frames both, world-dt chase).
     let yaw = cam.yaw, yawView = cam.yaw;
     if (TP) {
-      if (!smYawOn) { smYaw = cam.yaw; smYawOn = true; }
-      const yawDt = CBZ.feelCam ? fdt : dt;
-      smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(shoulder ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * yawDt));
-      yaw = smYaw;
-      yawView = CBZ.feelCam ? cam.yaw : smYaw;   // crisp view dir vs lazy body
+      let campaignTP = false;
+      try { campaignTP = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive()); } catch (e) {}
+      if (campaignTP) {
+        // Campaign movement is calculated from cam.yaw in physics.js. Framing
+        // the visible orbit from a different, delayed smYaw made WASD and the
+        // camera disagree about "forward": the body drifted off-axis while the
+        // lens swung around it, which read as movement controlling the camera.
+        // One yaw now owns input, orbit, look target, and shoulder aim.
+        smYaw = cam.yaw; smYawOn = true;
+        yaw = yawView = cam.yaw;
+      } else {
+        if (!smYawOn) { smYaw = cam.yaw; smYawOn = true; }
+        const yawDt = CBZ.feelCam ? fdt : dt;
+        smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(shoulder ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * yawDt));
+        yaw = smYaw;
+        yawView = CBZ.feelCam ? cam.yaw : smYaw;   // crisp view dir vs lazy body
+      }
     } else smYawOn = false;
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
@@ -510,7 +528,10 @@
     // the view pitch with the mouse instead of ballooning the cam up into a
     // top-down stare. Only the armed city tier opts in (pf>0); the relaxed TP
     // chase, driving, melee and jail/survival paths are byte-identical (pf=0).
-    const pitchFollow = TP ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) : 0;
+    // Only the armed shoulder needs its far aim target to carry pitch. Applying
+    // this to relaxed third person as well double-pitched the orbit/look target
+    // and made ordinary mouse-look change the character's screen framing.
+    const pitchFollow = (TP && shoulder) ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) : 0;
     const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
     const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
     const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
@@ -564,7 +585,11 @@
         );
         keepIntroCamInRoom(baseX, baseY, baseZ, introPos);
         const handoff = easeInOut(Math.max(0, Math.min(1, (k - 0.70) / 0.30)));
-        if (handoff > 0) {
+        // Legacy intros finish by pushing all the way into the player's eyes,
+        // ready for fpsmode's handoff.  Campaign prison uses one continuous
+        // third-person grammar, so retain the close orbit instead of briefly
+        // becoming a first-person camera before springing back out.
+        if (handoff > 0 && !(introOpts && introOpts.keepThirdPerson)) {
           const finalYaw = introYaw0 + Math.PI;
           const fpPitch = Math.max(-0.05, Math.min(0.26, cam.pitch * 0.55));
           const fcp = Math.cos(fpPitch);

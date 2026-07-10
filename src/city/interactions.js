@@ -122,9 +122,45 @@
     return ((ctx.items && ctx.items[need]) | 0) > 0;
   }
 
+  // The authored hitman campaign owns progression while it is active. Keep the
+  // physical interaction fabric (vehicles, aircraft, doors, loot, counters,
+  // food, etc.) live, but do not let a hidden legacy prompt silently start a
+  // second job/fight/activity or a free-roam pedestrian branch underneath the
+  // current contract. Explicit campaignSafe/campaignBlocked flags give future
+  // registrations a feature-detected override without coupling them here.
+  const CAMPAIGN_ACTIVITY_ID = /(^|[-_])(activity|arena|bet|bout|boxing|career|challenge|club|crew|fare|fight|gala|gig|heist|job|mma|paintball|payroll|prospect|race|racer|raceway|recruit|speedway)([-_]|$)/i;
+  const CAMPAIGN_ACTIVITY_VENDOR = {
+    bar: 1, gym: 1, security: 1, casino: 1, raceway: 1,
+    arena: 1, paintball: 1, cityhall: 1, airfield: 1, racepark: 1,
+  };
+  function campaignOwnsMission() {
+    try { return !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); }
+    catch (e) { return false; }
+  }
+  function campaignAllows(o, t, cand) {
+    if (!campaignOwnsMission()) return true;
+    if (o.campaignSafe === true) return true;
+    if (o.campaignBlocked === true) return false;
+
+    const ls = (cand && cand.layers) || [];
+    const vendor = ls.indexOf("ped:vendor") >= 0;
+    // All ordinary city-ped/city-cop branches are free-roam side content. A
+    // future authored character verb can opt back in with campaignSafe:true.
+    if (!vendor && (ls.indexOf("ped") >= 0 || ls.indexOf("ped:civ") >= 0 || ls.indexOf("ped:cop") >= 0)) return false;
+
+    const id = String(o.id || "");
+    if (id === "vendor-shop") {
+      const kind = t && t.vendor && t.vendor.kind;
+      if (kind && CAMPAIGN_ACTIVITY_VENDOR[kind]) return false;
+    }
+    if (id === "rs-turn-in") return false;
+    return !CAMPAIGN_ACTIVITY_ID.test(id);
+  }
+
   // ---- option gating ---------------------------------------------------------
   // gunpoint=true → ONLY needsGunDrawn options (the demands replace street verbs)
-  function passes(o, t, ctx, gunpoint, d) {
+  function passes(o, t, ctx, gunpoint, d, cand) {
+    if (!campaignAllows(o, t, cand)) return false;
     if (gunpoint !== !!o.needsGunDrawn) return false;
     if (o.needsGunDrawn && !ctx.gunDrawn) return false;
     if (o.role && ctx.role !== o.role) return false;
@@ -144,7 +180,7 @@
     if (t && t._iopts) pool = pool.concat(t._iopts);
     if (cand.zone && cand.zone.options) pool = pool.concat(cand.zone.options);
     const pass = [];
-    for (const o of pool) if (passes(o, t, ctx, gp, cand.d)) pass.push(o);
+    for (const o of pool) if (passes(o, t, ctx, gp, cand.d, cand)) pass.push(o);
     if (!pass.length) return null;
     // slot winners: per (slot, tap/hold) keep the highest prio
     const win = Object.create(null);      // "e0"/"e1"… -> option
@@ -203,6 +239,10 @@
   function fire(r) {
     if (!r || !r.opt || !current) return;
     const ctx = buildCtx();
+    // Re-check ownership at dispatch too. This closes the sub-100ms window in
+    // which a row resolved before a campaign/state change could otherwise fire
+    // from the cached panel or a held key.
+    if (!campaignAllows(r.opt, current.t, current)) { dirty = true; return; }
     r.opt.onSelect(current.t, ctx);
     dirty = true;              // verbs change state → re-resolve next pass
   }

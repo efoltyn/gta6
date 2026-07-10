@@ -892,6 +892,9 @@
   // ---- key: [P] toggles ------------------------------------------------------
   addEventListener("keydown", function (e) {
     if (g.mode !== "city" || g.state !== "playing") return;
+    // The story campaign owns a physical, cross-mode phone (missions/messages/
+    // news). Do not open the legacy city-dashboard modal on the same [P] press.
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) return;
     const k = (e.key || "").toLowerCase();
     if (open_) {
       if (k === "escape" || k === "p") { e.preventDefault(); close(); }

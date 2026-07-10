@@ -121,6 +121,10 @@
 
   function start(id) {
     const def = defById(id); if (!def) return;
+    if (CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()) {
+      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
+      return;
+    }
     if (active || g.cityActivity || raceRun) { note("Finish the current activity first.", 1.8); return; }
     if (def.id === "survival-island") {
       CBZ.cityEvent && CBZ.cityEvent("disaster", { panic: 4, emergency: 4, political: 1, label: "Disaster island deployment", message: "Disaster deployment logged." });

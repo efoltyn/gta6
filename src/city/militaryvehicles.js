@@ -64,22 +64,60 @@
   }
   CBZ.cityRegisterMilitaryVehicle = registerVehicle;
 
+  // Distance to the outside of a vehicle's oriented footprint. Centre-distance
+  // made the airport fleet impossible to board: an airliner is ~30m across and
+  // its solid collider keeps the player far more than the old 5.5m centre radius
+  // away. Measuring from the hull edge keeps small vehicles unchanged while an
+  // airliner becomes interactable where a real door/fuselage would be.
+  function footprintDistance(v, x, z) {
+    const dx = x - v.pos.x, dz = z - v.pos.z;
+    const a = -(v.heading || 0), ca = Math.cos(a), sa = Math.sin(a);
+    const lx = dx * ca - dz * sa, lz = dx * sa + dz * ca;
+    const ox = Math.max(0, Math.abs(lx) - Math.max(0.5, v.footW || 3) * 0.5);
+    const oz = Math.max(0, Math.abs(lz) - Math.max(0.5, v.footL || 5) * 0.5);
+    return Math.hypot(ox, oz);
+  }
+
   // nearest NON-taken boardable within maxd (mirrors CBZ.cityNearestCar)
   function nearestVehicle(x, z, maxd) {
     let best = null, bd = (maxd == null ? 5.5 : maxd);
     for (let i = 0; i < props.length; i++) {
       const v = props[i];
       if (!v || v.taken || !v.group || !v.group.parent) continue;
-      const d = Math.hypot(v.pos.x - x, v.pos.z - z);
+      const d = footprintDistance(v, x, z);
       if (d < bd) { bd = d; best = v; }
     }
     return best;
   }
   CBZ.cityNearestMilitaryVehicle = nearestVehicle;
 
+  function nearestCivilAircraft(x, z, maxd) {
+    let best = null, bd = maxd == null ? 10 : maxd;
+    for (let i = 0; i < props.length; i++) {
+      const v = props[i];
+      if (!v || !v.civilian || v.kind !== "plane" || v.taken || !v.group || !v.group.parent) continue;
+      const d = footprintDistance(v, x, z);
+      if (d < bd) { bd = d; best = v; }
+    }
+    return best;
+  }
+
   // ---- small feature-detected helpers (match the storage.js voice) ----------
-  function note(m, s) { if (CBZ.city && CBZ.city.note) { try { CBZ.city.note(m, s); } catch (e) {} } }
-  function big(m) { if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(m); } catch (e) {} } }
+  function campaignActive() {
+    try { return !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive()); } catch (e) { return false; }
+  }
+  function campaignNotify(from, body) {
+    if (!CBZ.campaignUI || typeof CBZ.campaignUI.notify !== "function") return;
+    try { CBZ.campaignUI.notify("personal", from || "Vehicle", body); } catch (e) {}
+  }
+  function note(m, s) {
+    if (campaignActive()) { campaignNotify("Vehicle", m); return; }
+    if (CBZ.city && CBZ.city.note) { try { CBZ.city.note(m, s); } catch (e) {} }
+  }
+  function big(m) {
+    if (campaignActive()) { campaignNotify("Dispatch", m); return; }
+    if (CBZ.city && CBZ.city.big) { try { CBZ.city.big(m); } catch (e) {} }
+  }
   function sfx(n) { if (CBZ.sfx) { try { CBZ.sfx(n); } catch (e) {} } }
   function floorY(x, z) { if (CBZ.floorAt) { try { return CBZ.floorAt(x, z) || 0; } catch (e) {} } return 0; }
   function clampToCity(pos, r) {
@@ -105,14 +143,19 @@
       id: "src-milveh", kind: "milvehicle", layers: ["milvehicle"], prio: 3, driving: false,
       find: function (px, pz, ctx, push) {
         const v = CBZ.cityNearestMilitaryVehicle && CBZ.cityNearestMilitaryVehicle(px, pz, 5.5);
-        if (v) push(v, Math.hypot(v.pos.x - px, v.pos.z - pz));
+        if (v) push(v, footprintDistance(v, px, pz));
       },
     });
     if (I.describe) {
       I.describe("milvehicle", function (v) {
+        const civil = !!v.civilian;
+        const airliner = v.flightKind === "airliner";
         return {
-          label: "🪖 " + (v.model ? v.model.name : (v.name || "Vehicle")),
-          note: (v.kind === "tank" ? "Commandeer the tank"
+          label: civil
+            ? "✈ " + (airliner ? "AIRLINER" : "PRIVATE JET") + " — HIJACKABLE"
+            : "🪖 " + (v.model ? v.model.name : (v.name || "Vehicle")),
+          note: (civil ? (airliner ? "Hijack this commercial flight" : "Steal this aircraft")
+            : v.kind === "tank" ? "Commandeer the tank"
             : v.kind === "heli" ? "Steal the helicopter"
             : v.kind === "plane" ? "Steal the aircraft"
             : "Steal the vehicle") + " · expect heat",
@@ -121,9 +164,10 @@
     }
     if (I.register) {
       I.register("milvehicle", {
-        id: "milveh-take", slot: "e", bad: true,
+        id: "milveh-take", slot: "e", bad: true, campaignSafe: true,
         label: function (v) {
-          return v.kind === "tank" ? "Commandeer the tank"
+          return v.civilian ? (v.flightKind === "airliner" ? "Hijack the airliner" : "Steal the private jet")
+            : v.kind === "tank" ? "Commandeer the tank"
             : v.kind === "heli" ? "Steal the helicopter"
             : v.kind === "plane" ? "Steal the aircraft"
             : "Steal the vehicle";
@@ -134,6 +178,22 @@
     wireInteraction._done = true;
     return true;
   }
+
+  // Campaign CSS deliberately keeps the legacy interaction card hidden. Give
+  // the first nearby passenger aircraft a one-time diegetic phone tip instead:
+  // no prose floats over the apron, while the unchanged [E] registry action is
+  // still discoverable before the player reaches the hull interaction radius.
+  let campaignAircraftTipShown = false;
+  if (CBZ.onUpdate) CBZ.onUpdate(14.65, function () {
+    if (campaignAircraftTipShown || !campaignActive() || !activeCtx()) return;
+    const P = CBZ.player;
+    if (!P || !P.pos || P.dead || P.driving || P._aircraft) return;
+    const rec = nearestCivilAircraft(P.pos.x, P.pos.z, 10);
+    if (!rec) return;
+    campaignAircraftTipShown = true;
+    const airliner = rec.flightKind === "airliner";
+    campaignNotify("GHOSTLINE", (airliner ? "The gate airliner" : "The private jet") + " is live. Walk to the hull and use [E] to board.");
+  });
 
   // ============================================================
   //  COMMANDEER — the shared theft entry. Guards the two-owner rule HARD, fires
@@ -163,9 +223,9 @@
     rec.taken = true;
     // THEFT + HEAT (mirror storage.js stealBaseJet): grand theft of military
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
-    if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
     if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" ? 3 : 4); } catch (e) {} }
-    big("🪖 " + name + " COMMANDEERED");
+    big(rec.civilian ? "✈ " + name + " HIJACKED" : "🪖 " + name + " COMMANDEERED");
     sfx("alarm");
   }
   CBZ.cityBoardMilitaryVehicle = boardVehicle;
@@ -406,9 +466,11 @@
 
   // ============================================================
   //  RESET — chain onto CBZ.cityVehiclesReset (mode.js fires it on every fresh
-  //  run) so a new run clears the registry + drops us out of any armor. We do NOT
-  //  dispose the prop GROUPS — they belong to the island root and the island
-  //  rebuild owns them; we only clear our bookkeeping + control state.
+  //  run) so a new run drops us out of any armor. The island itself is persistent
+  //  across city/prison hand-offs, so its boardable records must remain registered;
+  //  otherwise the one-shot island registrars have nothing to hand back and the
+  //  airport fleet becomes scenery after the first reset. Prune only records whose
+  //  world group was actually removed by a landmass rebuild.
   // ============================================================
   function teardown() {
     if (armor) {
@@ -417,7 +479,10 @@
       if (_restoreChar && CBZ.playerChar && CBZ.playerChar.group && P) CBZ.playerChar.group.visible = !P.dead;
       armor = null; _restoreChar = false;
     }
-    props.length = 0;
+    for (let i = props.length - 1; i >= 0; i--) {
+      const rec = props[i];
+      if (!rec || !rec.group || !rec.group.parent) props.splice(i, 1);
+    }
   }
   CBZ.cityMilitaryVehiclesReset = teardown;
 

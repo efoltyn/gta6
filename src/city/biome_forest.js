@@ -62,6 +62,7 @@
   CBZ.addLandmass(function (city) {
     const root = city.root;
     const rng = CBZ.seedStream ? CBZ.seedStream("forest") : makeRng(0x0F02E57);
+    const layout = CBZ.worldLayout;
 
     // register the walkable region + the causeway (drivable land bridge).
     CBZ.registerCityRegion(city, {
@@ -100,40 +101,14 @@
       p.receiveShadow = true; root.add(p);
     }
 
-    // ---- BIOME-EDGE BLEND APRON: was a hard cut from moss-green straight to
-    // nothing past the rim. A per-vertex-colored ring just outside the floor
-    // fades duff -> a neutral wild-ground tone via MOISTURE NOISE
-    // (window.noise.simplex2, the same field terrain.js uses) so the forest
-    // reads as melting into the surrounding land instead of stopping at a
-    // ruler-straight rectangle. Purely cosmetic: one extra mesh, no collider/
-    // region change — walkable footprint + causeway corridor untouched.
-    (function edgeBlendApron() {
-      const apronW = HX * 2 + 200, apronD = HZ * 2 + 200;
-      const SEG = 16;
-      const ag = new THREE.PlaneGeometry(apronW, apronD, SEG, SEG);
-      const cFloor = new THREE.Color(0x35451f);
-      const cWild = new THREE.Color(0x6a7a4a);   // neutral grassy edge tone
-      const _ac = new THREE.Color();
-      const apos = ag.attributes.position;
-      const acolors = new Float32Array(apos.count * 3);
-      const hasNoise = !!(window.noise && window.noise.simplex2);
-      for (let i = 0; i < apos.count; i++) {
-        // mesh is rotated -PI/2 about X below: local (x,y,0) -> world (x,0,-y)
-        const lx = apos.getX(i), lz = apos.getY(i);
-        const wx = CX + lx, wz = CZ - lz;
-        const edge = Math.min(1, Math.max(Math.abs(lx) / (apronW / 2), Math.abs(lz) / (apronD / 2)));
-        const moist = hasNoise ? (window.noise.simplex2(wx * 0.01, wz * 0.01) * 0.5 + 0.5) : 0.5;
-        const t = Math.min(1, Math.max(0, (edge - 0.2) / 0.65 + (moist - 0.5) * 0.35));
-        _ac.copy(cFloor).lerp(cWild, t);
-        acolors[i * 3] = _ac.r; acolors[i * 3 + 1] = _ac.g; acolors[i * 3 + 2] = _ac.b;
-      }
-      ag.setAttribute("color", new THREE.BufferAttribute(acolors, 3));
-      const apron = new THREE.Mesh(ag, new THREE.MeshLambertMaterial({ vertexColors: true }));
-      apron.rotation.x = -Math.PI / 2;
-      apron.position.set(CX, 0.005, CZ);
-      apron.receiveShadow = true;
-      root.add(apron);
-    })();
+    // Only draw the feather OUTSIDE the forest floor. A second, larger full
+    // plane looked like a hard rectangular map layer from the air.
+    if (CBZ.makeBiomeEdgeRing) {
+      CBZ.makeBiomeEdgeRing(root, {
+        cx: CX, cz: CZ, hx: HX + 8, hz: HZ + 8, feather: 92, segments: 18,
+        inner: 0x35451f, outer: 0x6a7a4a, y: 0.008, seed: 0x0f02e57,
+      });
+    }
 
     // ================================================================
     //  CAUSEWAY — dirt logging road deck (drive the bridge to the woods).
@@ -198,6 +173,14 @@
         seg.position.set((px + nx) / 2, 0.06, (pz + nz) / 2);
         seg.receiveShadow = true; root.add(seg);
         trailPts.push({ x: (px + nx) / 2, z: (pz + nz) / 2 });
+        if (layout) {
+          // AABB intentionally covers the rotated ribbon plus shoulder: tree
+          // placement is conservative around a path, never clipped through it.
+          layout.reserve("forest:trail:" + trailPts.length, {
+            minX: Math.min(px, nx) - wid, maxX: Math.max(px, nx) + wid,
+            minZ: Math.min(pz, nz) - wid, maxZ: Math.max(pz, nz) + wid,
+          }, { pad: 2 });
+        }
         px = nx; pz = nz;
       }
     }
@@ -224,6 +207,13 @@
       { x: -700, z: -1250, r: 30 },              // campsite clearing
       { x: -460, z: -1560, r: 36 },              // deep-woods vista
     ];
+    if (layout) {
+      layout.reserveCircle("forest:lake", lakeX, lakeZ, lakeR + 18, { pad: 2 });
+      layout.reserve("forest:causeway", { minX: CW_MINX - 12, maxX: CW_MAXX + 12, minZ: CW_MINZ, maxZ: MAXZ }, { pad: 2 });
+      clearings.forEach(function (c, i) { layout.reserveCircle("forest:clearing:" + i, c.x, c.z, c.r, { pad: 2 }); });
+    }
+    function claimNature(x, z, r) { return !layout || layout.claimNature(x, z, r, { pad: 0.35 }); }
+    function openNature(x, z, r) { return !layout || layout.canPlaceNature(x, z, r, { pad: 0.2 }); }
     function inClearing(x, z) {
       for (let i = 0; i < clearings.length; i++) {
         const c = clearings[i];
@@ -290,6 +280,7 @@
         );                                            // 0 at rim .. ~1 deep inside
         const keepP = 0.55 + Math.min(0.42, edge * 0.6);
         if (rng() > keepP) continue;
+        if (!claimNature(x, z, 2.4)) continue;
 
         // species pick: ~12% squat broadleaf (cone), ~10% round-canopy
         // (icosahedron — a distinct silhouette), rest conifer.
@@ -438,7 +429,7 @@
         for (let gz = MINZ + 10 + step / 2; gz < MINZ + 10 + D; gz += step) {
           const x = gx + (rng() - 0.5) * step * 0.9;
           const z = gz + (rng() - 0.5) * step * 0.9;
-          if (inClearing(x, z)) continue;
+          if (inClearing(x, z) || !openNature(x, z, 0.9)) continue;
           arr.push({ x, z, s: 0.5 + rng() * 1.0, rot: rng() * 6.28 });
         }
       }
@@ -518,7 +509,10 @@
     for (let i = 0; i < 8; i++) {
       const x = MINX + 40 + rng() * (HX * 2 - 80);
       const z = MINZ + 40 + rng() * (HZ * 2 - 80);
-      if (inClearing(x, z)) continue;
+      // A fallen trunk is large enough to be a landmark; it must respect the
+      // same reserved clearings, trails, and tree claims as every other
+      // generated object rather than clipping through them.
+      if (inClearing(x, z) || !claimNature(x, z, 6.5)) continue;
       fallenLog(x, z, 5 + rng() * 5, 0.35 + rng() * 0.25, rng() * 6.28);
     }
 

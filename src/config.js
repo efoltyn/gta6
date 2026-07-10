@@ -443,6 +443,10 @@
   // CBZ.CITY's tuning numbers: these flip whole rendering/identity behaviours on
   // or off, so a single line here reverts a system to its old look.
   CBZ.CONFIG = CBZ.CONFIG || {};
+  // Canonical authored game: one hitman campaign owns the city/prison handoff,
+  // communicates through a diegetic phone, and continually assigns a mission.
+  // Flip false to expose the legacy multi-mode sandbox during development.
+  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
   // PLAIN CIVILIANS (owner's rule): when on, ordinary civilians — anyone with no
   // role uniform, no gang, and no business/tycoon identity — render PLAIN (a
   // solid shirt color over blue-jean legs + shoes, NO painted canvas atlas).

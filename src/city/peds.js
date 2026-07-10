@@ -995,8 +995,10 @@
   // is in one place (spawnCityPeds below) and degrades to today when this is
   // false, the scheduler is missing, or under the profiler.
   if (CBZ.spawnSlice === undefined) CBZ.spawnSlice = true;
+  let _campaignPopulationDeferred = false;
 
   CBZ.spawnCityPeds = function (n) {
+    _campaignPopulationDeferred = false;
     // PERF: full-rig peds are the single most expensive per-frame system in the
     // city (each one runs think()/move() — steering, collision, state machine —
     // every few frames regardless of visibility). Population size drives that
@@ -1226,7 +1228,33 @@
   let _spawnJob = null;
   const _SPAWN_BUDGET_MS = 4;     // ~a few rigs/frame; the full count lands in ~1-2s
   const _SPAWN_MAX_FRAME = 8;     // hard cap regardless of a coarse clock
+
+  // A mode reset normally owns the whole population lifecycle through
+  // spawnCityPeds(). The campaign prologue is the one intentional exception:
+  // cancel any old sliced job and leave no live street roster until its
+  // observation gate opens. This does not touch city geometry.
+  CBZ.cityDeferPedPopulation = function () {
+    _spawnJob = null;
+    CBZ.citySpawnDraining = false;
+    _campaignPopulationDeferred = true;
+    if (CBZ.clearCityPeds) CBZ.clearCityPeds();
+    if (CBZ.cityPopulationReset) CBZ.cityPopulationReset();
+  };
+  CBZ.cityPedPopulationDeferred = function () { return _campaignPopulationDeferred; };
+
   if (CBZ.onUpdate) CBZ.onUpdate(0.5, function () {
+    if (_campaignPopulationDeferred) {
+      if (g.mode !== "city") return;
+      let observed = true;
+      if (CBZ.cityCampaignObservationGate) {
+        try { observed = CBZ.cityCampaignObservationGate("peds") !== false; }
+        catch (e) { observed = true; }
+      }
+      if (!observed) return;
+      _campaignPopulationDeferred = false;
+      CBZ.spawnCityPeds((CBZ.CITY && CBZ.CITY.peds) || 90);
+      return;
+    }
     const job = _spawnJob;
     if (!job) return;
     // left the city mid-drain → drop the job. We do NOT force-finish: a re-entry
@@ -4039,6 +4067,13 @@
   // ---- per-frame update ----
   CBZ.onUpdate(34, function (dt) {
     if (g.mode !== "city") return;
+    // A few specialist modules may cast their own actors after the canonical
+    // roster was deferred. They remain parked logically until the street layer
+    // is observed, so the prologue never grows a second hidden simulation.
+    if (CBZ.cityCampaignObservationGate) {
+      try { if (CBZ.cityCampaignObservationGate("peds") === false) return; }
+      catch (e) {}
+    }
     frame++;
     // advance the cheap internal day clock (loops 0..24); drives loose schedules
     _dayClock = (_dayClock + (dt * 24 / DAY_LEN)) % 24;
@@ -4076,7 +4111,7 @@
       }
       if (p.inCar) continue;     // vehicles.js owns it while it drives
       const dx = p.pos.x - camx, dz = p.pos.z - camz, d2 = dx * dx + dz * dz;
-      if (p.tag) p.tag.visible = d2 < TAG_D2;
+      if (p.tag) p.tag.visible = !(CBZ.cityCampaignActive && CBZ.cityCampaignActive()) && d2 < TAG_D2;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(p)) continue;
       if (p.ko > 0) { p.speed = 0; if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
       const near = d2 < ANIM_D2;

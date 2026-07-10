@@ -210,6 +210,12 @@
   let sweepT = 0, hudT = 0, lvlEl = null, lvlShown = -1;
   CBZ.onUpdate(35.5, function (dt) {
     if (g.mode !== "city") return;
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
+      const peds = CBZ.cityPeds || [], cops = CBZ.cityCops || [];
+      for (let i = 0; i < peds.length; i++) if (peds[i] && peds[i].tag) peds[i].tag.visible = false;
+      for (let i = 0; i < cops.length; i++) if (cops[i] && cops[i].tag) cops[i].tag.visible = false;
+      return;
+    }
     sweepT -= dt;
     if (sweepT <= 0) {
       sweepT = 0.33;                                   // levels shift (gun drawn, rank up) — keep the read honest

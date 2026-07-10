@@ -688,10 +688,22 @@
     // ready, off-map BEFORE your first encounter. If the pool was already built
     // (a re-seed within the same run), leave it: releaseAll() above already freed
     // its held slots, so it's warm and reusable as-is. Guests skip (cosmetic crowd).
-    if (PREWARM_POOL && !poolBuilt && !(CBZ.net && CBZ.net.noSim())) prewarming = true;
+    let observed = true;
+    if (CBZ.cityCampaignObservationGate) {
+      try { observed = CBZ.cityCampaignObservationGate("crowd") !== false; }
+      catch (e) { observed = true; }
+    }
+    if (observed && PREWARM_POOL && !poolBuilt && !(CBZ.net && CBZ.net.noSim())) prewarming = true;
     return count;
   };
-  CBZ.cityCrowdReset = function () { CBZ.spawnCityCrowd(count || ((CBZ.CITY && CBZ.CITY.crowd) || 700)); };
+  CBZ.cityCrowdReset = function () {
+    let observed = true;
+    if (CBZ.cityCampaignObservationGate) {
+      try { observed = CBZ.cityCampaignObservationGate("crowd") !== false; }
+      catch (e) { observed = true; }
+    }
+    CBZ.spawnCityCrowd(observed ? (count || ((CBZ.CITY && CBZ.CITY.crowd) || 700)) : 0);
+  };
   // tiny debug accessors (used by the headless harness; cheap, read-only)
   CBZ.cityCrowdCount = function () { return count; };
   CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i], leader: groupLeader[i] }; };
@@ -1928,8 +1940,22 @@
 
   // ambient layer: runs during city play (own order, independent of peds @34).
   let _cosmFrame = 0;      // stride counter for the cosmetic passes below
+  let _observationHeld = false;
   CBZ.onUpdate(23.7, function (dt) {
     if (CBZ.game.mode !== "city") { if (root) { root.visible = false; } if (poolBuilt) releaseAll(); return; }
+    let observed = true;
+    if (CBZ.cityCampaignObservationGate) {
+      try { observed = CBZ.cityCampaignObservationGate("crowd") !== false; }
+      catch (e) { observed = true; }
+    }
+    if (!observed) {
+      if (root) root.visible = false;
+      if (!_observationHeld && poolBuilt) releaseAll();
+      _observationHeld = true;
+      prewarming = false;
+      return;
+    }
+    _observationHeld = false;
     if (root) root.visible = true;
     if (!count && arena()) CBZ.spawnCityCrowd((CBZ.CITY && CBZ.CITY.crowd) || 700);
     // BIOME BUBBLE: cache the player's active region/biome ONCE per tick (never

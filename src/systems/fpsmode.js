@@ -124,7 +124,14 @@
     if (CBZ.game.mode === "city" && CBZ.game.cityHolstered) return false;   // holstered = read as unarmed (fists show, de-escalates)
     return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
   }
-  function shoulderActive() { return !fps.active && armed() && CBZ.game.state === "playing"; }
+  function shoulderActive() {
+    const p = CBZ.player;
+    // The shoulder owner is strictly an alive, on-foot third-person state.
+    // Previously it stayed true in cars/aircraft and after death, leaving the
+    // crosshair/context-menu capture and aim pose active while another controller
+    // owned the player. Downstream one-off guards hid some symptoms, not the state.
+    return !fps.active && !!p && !p.dead && !p.driving && armed() && CBZ.game.state === "playing";
+  }
   function maxHpOf(a) { return (a.kind === "guard" || a.kind === "warden") ? 140 : 100; }
 
   // ---- CALIBER: how hard each round MARKS the world -----------------------
@@ -904,8 +911,16 @@
     if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed()) {
       const w = weapon();
       ammoEl.style.display = "block";
-      const top = fps.reloading > 0 ? "RELOADING " + w.short : w.label;
-      ammoEl.textContent = top + "\n" + fps.ammo + " / " + fps.mag + "   RES " + fps.reserve;
+      const campaignMinimal = !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
+      if (campaignMinimal) {
+        // Prison shares the engine ammo panel rather than city/hud.js. Keep the
+        // same campaign rule here: reload is a glyph and every other character
+        // is numeric, with no weapon/reserve labels floating over the world.
+        ammoEl.textContent = (fps.reloading > 0 ? "↻\n" : "") + fps.ammo + " / " + fps.mag + " · " + fps.reserve;
+      } else {
+        const top = fps.reloading > 0 ? "RELOADING " + w.short : w.label;
+        ammoEl.textContent = top + "\n" + fps.ammo + " / " + fps.mag + "   RES " + fps.reserve;
+      }
     } else ammoEl.style.display = "none";
     setWeaponStrip();
   }
@@ -2098,6 +2113,14 @@
   CBZ.setFPS = function (on) { setActive(!!on); };
   CBZ.armFPSAfterIntro = function () {
     introWantsFPS = true;
+    if (fps.active) setActive(false);
+  };
+  // Campaign prison runs deliberately stay in the same over-the-shoulder
+  // language as the city.  State.js calls this before starting the prison
+  // reveal so a stale one-shot arm from an earlier run cannot flip the camera
+  // back to first person when camera.js announces intro completion.
+  CBZ.disarmFPSAfterIntro = function () {
+    introWantsFPS = false;
     if (fps.active) setActive(false);
   };
   const prevIntroComplete = CBZ.onIntroComplete;

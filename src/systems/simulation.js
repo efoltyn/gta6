@@ -80,6 +80,11 @@
   }
 
   function setActive(on) {
+    // The authored campaign never exposes the strategic society console. Its
+    // HUD is intentionally hidden there, so allowing this mode to activate left
+    // the player in an invisible state where WASD pans the camera and on-foot
+    // physics is disabled—the exact opposite of story-mode controls.
+    if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) on = false;
     view.active = !!on && CBZ.game.mode === "escape";
     document.body.classList.toggle("sim-view", view.active);
     CBZ.camera.layers.set(view.active ? 1 : 0);
@@ -104,7 +109,8 @@
   addEventListener("keydown", function (e) {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === "u" && CBZ.game.mode === "escape") {   // B now opens the bag; sim-overview moved to U
+    const campaign = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    if (k === "u" && CBZ.game.mode === "escape" && !campaign) {   // B now opens the bag; sim-overview moved to U
       CBZ.toggleSimulationView();
       e.preventDefault();
     } else if (view.active && (e.key === "+" || e.key === "=")) {
@@ -133,6 +139,10 @@
   function n(v) { return Math.round(v || 0).toLocaleString(); }
   let hudAcc = 0;
   CBZ.onAlways(49, function (dt) {
+    if (view.active && CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
+      setActive(false);
+      return;
+    }
     if (!view.active) return;
     const keys = CBZ.keys || {};
     const pan = view.height * 0.48 * dt;

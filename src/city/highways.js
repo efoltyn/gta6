@@ -702,17 +702,15 @@
     return pushConnector(roads, seg);
   };
 
-  // ---- HWY-4 driver + HWY-5 arterial: ONE registrar the world tail runs after
-  //      every landmass/causeway is built. It lays the causeway connectors and
-  //      the long city→desert arterial, then registers both via city.roads so
-  //      HWY-3/traffic pick them up. Operates on the LIVE city descriptor passed
-  //      in (city.roads) — robust during the build phase where CBZ.city may not
-  //      be wired yet. Self-guards if the grid lines aren't present (headless). -
+  // ---- HWY-4 connector registrar. The world tail runs this after every
+  //      landmass/causeway is built so the short, data-only joins enter
+  //      city.roads for HWY-3/traffic. It operates on the LIVE city descriptor
+  //      passed in (city.roads), robust during the build phase where CBZ.city
+  //      may not be wired yet. ------------------------------------------------
   CBZ.buildArterials = function (city) {
     city = city || CBZ.city;
     const roads = city && city.roads;
     if (!roads) return;
-    const root = (city.arena && city.arena.root) || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
 
     // HWY-4: the causeway mouths that meet the CITY GRID (coords VERIFIED against
     // config CITY center 0,-700, block 34 + road 16 → step 50, grid lines
@@ -731,34 +729,18 @@
     CBZ.buildHighwayConnector({ x: 0, z: -558, vertical: true, len: 24 }, roads);            // airport
     CBZ.buildHighwayConnector({ x: -141, z: -700, vertical: false, len: 24 }, roads);        // military
 
-    // HWY-5: ONE long arterial from the city EAST edge out to the desert basin's
-    // west edge, as an L of two axis-aligned legs (so vehicles.js can drive +
-    // turn it). East grid edge ≈ x150 on cross-street z=-700; desert center
-    // 1050,-20 half-X 380 → west edge ≈670. Build it as a real highway ribbon so
-    // it's visibly an arterial (and HWY-3 auto-registers both legs as drivable).
-    // The WHY: the desert is currently an island with no road IN — this is the
-    // overland route, so traffic actually flows out to the dunes town/outposts.
-    if (!city._arterialDesertBuilt && CBZ.buildHighway) {
-      city._arterialDesertBuilt = true;
-      // heightAt: grade-follow world/terrain.js relief — this arterial runs
-      // entirely inside the dead-flat mainland today (terrainHeight==0 along
-      // its whole path) so this is a free, safe hook; it only starts reading
-      // as a grade if the route is ever extended nearer the backdrop rim.
-      CBZ.buildHighway(root, {
-        path: [{ x: 158, z: -700 }, { x: 670, z: -700 }, { x: 670, z: -20 }],
-        width: 18, lanesPerDir: 2, laneW: 3.6, lights: true, guardrail: true,
-        theme: "asphalt", registerRoads: true, cityRoads: roads,
-        heightAt: CBZ.terrainHeight,
-      });
-    }
+    // The desert is already connected by real, authored infrastructure:
+    // city bridge -> commerce annex -> Diamond Speedway causeway -> Saltlands
+    // causeway. The former direct L-shaped arterial duplicated the bridge deck,
+    // cut through the annex, and then projected a bright centreline into open
+    // space at its turn. Leave the existing connected roads as the sole owner
+    // of that route instead of drawing a second, overlapping highway.
   };
 
-  // SELF-REGISTER the arterial/connector registrar as a LATE landmass builder so
-  // it runs in cityWorldGeo AFTER every island/biome causeway has pushed its own
-  // road segments (default order 50 → we use 90). This is the wiring HWY-5 asks
-  // for "called from world.js's cityWorldGeo tail" — done without touching
-  // world.js: addLandmass IS that tail. Headless-safe (addLandmass is a no-op if
-  // worldmap.js didn't load; the build phase just skips us).
+  // SELF-REGISTER the connector registrar as a late landmass builder so it runs
+  // in cityWorldGeo AFTER every island/biome causeway has pushed its own road
+  // segments (default order 50 -> we use 90). This is the safe world-tail hook
+  // without touching world.js. Headless-safe when worldmap.js is absent.
   if (CBZ.addLandmass) {
     CBZ.addLandmass(function (city) {
       try { CBZ.buildArterials(city); } catch (e) { /* never break the world build */ }

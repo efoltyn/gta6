@@ -939,6 +939,20 @@
     if (tag && LOOT_ICON[tag]) return LOOT_ICON[tag];
     return "";
   }
+  function campaignAmmoMinimal() {
+    try { return !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); }
+    catch (e) { return false; }
+  }
+  function ammoReadout(cur, mag, reserve, reloading) {
+    if (campaignAmmoMinimal()) {
+      // The campaign HUD is instrumentation, not narration: a rotating-arrow
+      // glyph carries reload state and every remaining character is numeric.
+      return (reloading ? "<span class='rl'>↻</span> " : "") +
+        "<b>" + cur + "</b><span class='res'> / " + mag + " · " + reserve + "</span>";
+    }
+    return (reloading ? "<span class='rl'>RELOADING…</span> " : "") +
+      "<b>" + cur + "</b><span class='res'> / " + mag + " · " + reserve + " res</span>";
+  }
   function renderHotbar() {
     if (!slotsEl) return;
     const fps = CBZ.fps;                            // engine ammo store (guarded)
@@ -1001,8 +1015,7 @@
             mag = magCap;
             reloading = (m.i === fps.weapon) && (fps.reloading > 0);
           } else if (m) { cur = magCap; mag = magCap; res = m.w.reserve || 0; }
-          if (reloading) line = "<span class='rl'>RELOADING…</span> ";
-          line += "<b>" + cur + "</b><span class='res'> / " + mag + " · " + res + " res</span>";
+          line = ammoReadout(cur, mag, res, reloading);
           break;
         }
         const armorU = (CBZ.player && CBZ.player._armor) || 0;
@@ -1060,8 +1073,7 @@
         mag = m.w.mag || 0;
         reloading = (m.i === fps.weapon) && (fps.reloading > 0);
       } else if (m) { cur = m.w.mag || 0; mag = m.w.mag || 0; res = m.w.reserve || 0; }
-      if (reloading) line = "<span class='rl'>RELOADING…</span> ";
-      line += "<b>" + cur + "</b><span class='res'> / " + mag + " · " + res + " res</span>";
+      line = ammoReadout(cur, mag, res, reloading);
     }
     // melee / fists show NOTHING here — the lit chip already names them; a
     // "Bat — melee" caption under a lit Bat chip was the HUD reading itself
