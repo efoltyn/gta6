@@ -255,6 +255,11 @@
       ped.group.rotation.y = car.heading;
     }
     ped._cineSeated = car;
+    // the per-frame hold (onUpdate 14.6) re-sinks the rig here after the ped
+    // update has re-grounded it — without this the seated cast pops up
+    // through the roof between frames.
+    ped._cineSeatAt = { x: w.x, z: w.z };
+    ped._cineSeatYaw = car.heading;
   }
 
   // =================================================================
