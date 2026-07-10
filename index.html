@@ -190,11 +190,8 @@
   <div class="card-box">
     <div class="logo" style="font-size:clamp(32px,6vw,46px)">PAUSED</div>
     <p class="blurb">Click below to dive back in.</p>
-    <div class="qslider-row">
-      <div class="qslider-ends"><span>Performance</span><span>Quality</span></div>
-      <input type="range" id="qualitySlider" class="qslider" min="0" max="4" step="1" value="4">
-      <div class="qslider-current" id="qualityCurrentLabel">Best</div>
-    </div>
+    <!-- Performance/quality controls live in ONE place: the Settings panel
+         (systems/settings.js injects its button below; [Esc] from here opens it). -->
     <button class="btn" id="resumeBtn">Resume</button>
   </div>
 </div>

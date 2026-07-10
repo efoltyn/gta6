@@ -300,8 +300,7 @@
 
   CBZ.sampleFPS = sampleFPS;
 
-  // pause-screen slider: drag → pin tier immediately (manual takes over auto).
-  // Initial value/label are already set by applyQuality()'s syncSliderUI() call above.
-  const slider = document.getElementById("qualitySlider");
-  if (slider) slider.addEventListener("input", () => setQualityLevel(parseInt(slider.value, 10)));
+  // The pause-card quality slider was removed — systems/settings.js's panel is
+  // the single performance surface and drives setQualityLevel directly.
+  // syncSliderUI() above self-no-ops with the DOM gone.
 })();

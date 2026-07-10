@@ -109,7 +109,10 @@
   applyStartupPrefs();
 
   // ---- quality tier labels ----------------------------------------------
-  const TIER_LABELS = ["Low", "Medium", "High", "Very High", "Ultra"];
+  // Match core/quality.js's QUALITY_LABELS — this panel is now the ONLY
+  // performance surface (the old pause-card slider was removed), so the two
+  // vocabularies must not diverge.
+  const TIER_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
   function tierLabel(i) { return TIER_LABELS[i] || ("Tier " + i); }
 
   // ---- DOM --------------------------------------------------------------
