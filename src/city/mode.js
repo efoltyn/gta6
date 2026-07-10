@@ -112,6 +112,14 @@
     // stays the headline channel (flashToast) untouched.
     note(msg, sec, opts) {
       if (!msg) return;
+      if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
+        // Campaign information belongs to the player's phone. The closed phone
+        // only lights/vibrates; prose never floats over the world.
+        if (CBZ.campaignUI && CBZ.campaignUI.notify) {
+          CBZ.campaignUI.notify("personal", "FIELD PHONE", String(msg));
+        }
+        return;
+      }
       const force = !!(opts && opts.urgent);
       // FOURTH-WALL DROP: kill ambient world-narration toasts outright (owner
       // rule). Runs first so "reported you"/"running from police" can't sneak
@@ -143,7 +151,15 @@
       if (CBZ.cityFeed) CBZ.cityFeed(msg, "#9fb0c6");
       else if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2);
     },
-    big(msg) { if (CBZ.flashToast) CBZ.flashToast(msg); },
+    big(msg) {
+      if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
+        if (CBZ.campaignUI && CBZ.campaignUI.notify) {
+          CBZ.campaignUI.notify("news", "CITY DESK", String(msg));
+        }
+        return;
+      }
+      if (CBZ.flashToast) CBZ.flashToast(msg);
+    },
 
     forEachActor(fn) {
       if (!CBZ.player.dead) fn(playerActor);
@@ -157,7 +173,14 @@
     if (city.built) return;
     city.arena = CBZ.buildCity();
     baseFloor = CBZ.floorAt || null;
-    CBZ.floorAt = function (x, z) { return g.mode === "city" ? city.arena.groundHeightAt(x, z) : (baseFloor ? baseFloor(x, z) : 0); };
+    // _city marks this wrapper so reset()'s reinstall check below never captures
+    // it back into baseFloor. Without the marker, reset() set baseFloor to this
+    // very function and every non-city floorAt call recursed to a stack overflow
+    // (the prison leg after a city visit crashed the update loop every frame:
+    // mouse-look still ran but WASD no longer moved the player).
+    const cityFloor = function (x, z) { return g.mode === "city" ? city.arena.groundHeightAt(x, z) : (baseFloor && baseFloor !== cityFloor ? baseFloor(x, z) : 0); };
+    cityFloor._city = true;
+    CBZ.floorAt = cityFloor;
     city.built = true;
   }
   city.build = build;
@@ -200,9 +223,22 @@
     // The RANGE now rides the perf/quality slider (core/quality.js publishes
     // cityFogFar; tier 4 = the same 430 as always, low tiers pull it in so
     // farcull.js can stop drawing what the fog has already dissolved).
+    // Aircraft are explicitly an aerial sightseeing mode. Keeping the normal
+    // street-level fog/cull envelope while the player is 70m up made whole
+    // districts disappear outside a small bubble — the "Truman Show" effect
+    // in the flight screenshot. Expand only while an aircraft owns the player;
+    // ground play keeps the normal quality-tier budget.
+    const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
     if (CBZ.scene.fog) {
-      const ff = CBZ.cityFogFar || 430;
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 430, 1100) : (CBZ.cityFogFar || 430);
       CBZ.scene.fog.near = Math.round(80 * ff / 430); CBZ.scene.fog.far = ff;
+    }
+    if (CBZ.camera) {
+      const wantFar = airborne ? 2200 : 1000;
+      if (CBZ.camera.far !== wantFar) {
+        CBZ.camera.far = wantFar;
+        CBZ.camera.updateProjectionMatrix();
+      }
     }
     if (!cityShadow && CBZ.sun && CBZ.sun.shadow) {
       cityShadow = true;
@@ -251,6 +287,44 @@
     return { x: pick.x, y: pick.y, z: pick.z };
   }
 
+  // Campaign observation gate. Geometry is always built, but the rooftop
+  // prologue cannot observe street life hundreds of metres below it and lasts
+  // only until the forced prison handoff. Keep the expensive live layers cold
+  // for that beat. A future campaign director may replace this hook with a
+  // finer per-scene policy; true means the named layer is currently observed.
+  if (!CBZ.cityCampaignObservationGate) {
+    CBZ.cityCampaignObservationGate = function () {
+      if (!(CBZ.cityCampaignActive && CBZ.cityCampaignActive())) return true;
+      const c = g.cityCampaign || g.cityCampaignPending;
+      if (!c || !c.phase) return false;
+      // campaign.js checkpoints the prison phase before wanted.js's bust overlay
+      // finishes switching modes. Keep the street cold through that handoff too;
+      // otherwise the full roster would hydrate for the overlay's final seconds
+      // only to be torn down immediately on entering prison.
+      return c.phase !== "prologue_drop" && c.phase.indexOf("prison_") !== 0;
+    };
+  }
+
+  function campaignLayerObserved(layer) {
+    if (!(CBZ.cityCampaignActive && CBZ.cityCampaignActive())) return true;
+    if (!CBZ.cityCampaignObservationGate) return true;
+    try { return CBZ.cityCampaignObservationGate(layer) !== false; }
+    catch (e) { return true; }
+  }
+
+  // Peds and crowd own their own deferred rehydration loops. Traffic's public
+  // surface is intentionally smaller, so mode.js keeps its one pending bit and
+  // invokes the normal canonical spawner if a scene opens observation without
+  // crossing a mode-reset boundary.
+  let campaignTrafficDeferred = false;
+  if (CBZ.onUpdate) CBZ.onUpdate(0.6, function () {
+    if (!campaignTrafficDeferred || g.mode !== "city") return;
+    if (!campaignLayerObserved("traffic")) return;
+    if (CBZ.net && CBZ.net.noSim()) { campaignTrafficDeferred = false; return; }
+    campaignTrafficDeferred = false;
+    if (CBZ.spawnCityTraffic) CBZ.spawnCityTraffic((CBZ.CITY && CBZ.CITY.traffic) || 0);
+  });
+
   CBZ.registerMode("city", {
     id: "city",
     label: "City",
@@ -259,6 +333,7 @@
     reset(game) {
       build();
       const A = city.arena;
+      const campaignMode = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
       // Collapse the city's thousands of static decoration boxes into a handful
       // of merged meshes. Runs ONCE (guarded per-root) — after buildCity built
       // the root but BEFORE spawnCityPeds/Traffic add dynamic rigs to it. The
@@ -272,7 +347,7 @@
       // re-install the floor wrapper in case survival rebuilt CBZ.floorAt after us
       if (!CBZ.floorAt || !CBZ.floorAt._city) {
         baseFloor = (CBZ.floorAt && CBZ.floorAt._city) ? baseFloor : CBZ.floorAt;
-        const f = function (x, z) { return g.mode === "city" ? A.groundHeightAt(x, z) : (baseFloor ? baseFloor(x, z) : 0); };
+        const f = function (x, z) { return g.mode === "city" ? A.groundHeightAt(x, z) : (baseFloor && baseFloor !== f ? baseFloor(x, z) : 0); };
         f._city = true; CBZ.floorAt = f;
       }
 
@@ -289,15 +364,21 @@
       // TEST LOADOUT: spawn with an RPG + a rifle + a sidearm so weapon switching
       // (number keys 1-9) and the rocket/helicopter systems are testable from the
       // first second. Toggle CBZ.CITY_TEST_LOADOUT=false to ship a clean start.
-      if (CBZ.CITY_TEST_LOADOUT !== false && CBZ.unlockWeapon) {
+      if (!campaignMode && CBZ.CITY_TEST_LOADOUT !== false && CBZ.unlockWeapon) {
         CBZ.unlockWeapon("sidearm", { select: false });
         CBZ.unlockWeapon("carbine", { select: false });
         CBZ.unlockWeapon("bazooka", { select: true });
+      } else if (campaignMode && CBZ.unlockWeapon) {
+        // Story starts as a professional hit, not a weapon sandbox. One sidearm
+        // is enough; later dossiers can grant mission-specific equipment.
+        CBZ.unlockWeapon("sidearm", { select: true });
       }
       if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
       // top the test loadout's reserves right up (fpsResetWeapons set base mags)
-      if (CBZ.CITY_TEST_LOADOUT !== false && CBZ.fpsAddAmmo) {
+      if (!campaignMode && CBZ.CITY_TEST_LOADOUT !== false && CBZ.fpsAddAmmo) {
         CBZ.fpsAddAmmo(20, "bazooka"); CBZ.fpsAddAmmo(300, "carbine"); CBZ.fpsAddAmmo(120, "sidearm");
+      } else if (campaignMode && CBZ.fpsAddAmmo) {
+        CBZ.fpsAddAmmo(48, "sidearm");
       }
       if (CBZ.cityWorldBeginRun) CBZ.cityWorldBeginRun(game);
 
@@ -333,12 +414,27 @@
       // Multiplayer GUEST: the sim host owns peds/cops/traffic — we render its
       // snapshots as puppets (src/net/networld.js), so nothing spawns locally.
       const netGuest = CBZ.net && CBZ.net.noSim();
-      if (!netGuest && CBZ.spawnCityPeds) CBZ.spawnCityPeds(CBZ.CITY.peds);
+      const observePeds = campaignLayerObserved("peds");
+      const observeCrowd = campaignLayerObserved("crowd");
+      const observeTraffic = campaignLayerObserved("traffic");
+      if (!netGuest && observePeds && CBZ.spawnCityPeds) CBZ.spawnCityPeds(CBZ.CITY.peds);
+      else if (!netGuest && !observePeds) {
+        // Cancels an in-flight sliced spawn as well as clearing a prior roster.
+        // The peds module rehydrates automatically if observation opens without
+        // a mode reset; the normal prison->city return also takes the full path.
+        if (CBZ.cityDeferPedPopulation) CBZ.cityDeferPedPopulation();
+        else if (CBZ.clearCityPeds) CBZ.clearCityPeds();
+      }
       // the instanced ambient crowd is COSMETIC and stays local on guests too
       // (crowd.js skips promotion-to-real-peds when net.noSim())
-      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd((CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280));
+      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(observeCrowd ? (CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280) : 0);
       if (CBZ.clearCityCops) CBZ.clearCityCops();
-      if (!netGuest && CBZ.spawnCityTraffic) CBZ.spawnCityTraffic(CBZ.CITY.traffic);
+      if (!netGuest && CBZ.spawnCityTraffic) {
+        campaignTrafficDeferred = !observeTraffic;
+        CBZ.spawnCityTraffic(observeTraffic ? CBZ.CITY.traffic : 0);
+      } else {
+        campaignTrafficDeferred = false;
+      }
       if (CBZ.cityWantedReset) CBZ.cityWantedReset();
       // ESCAPED CONVICT: you didn't get released — you BROKE OUT. The city should
       // not greet you clean. After cityWantedReset() zeroed the slate, stamp a
@@ -407,7 +503,11 @@
       // to FP the same way the escape game does.
       const originResult = CBZ.cityOriginApply ? CBZ.cityOriginApply(game) : null;
       // CITY defaults to FIRST-PERSON (the jail's fpsmode); [V] toggles to 3rd-person.
-      if (!(originResult && originResult.introActive)) {
+      if (campaignMode) {
+        // The campaign is authored and verified around the shoulder camera;
+        // first-person remains an explicit [V] choice, never the story default.
+        if (CBZ.setFPS) CBZ.setFPS(false);
+      } else if (!(originResult && originResult.introActive)) {
         if (CBZ.setFPS) CBZ.setFPS(true);
       }
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
