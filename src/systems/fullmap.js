@@ -782,7 +782,7 @@
   function snapEndpointToLand(ex, ez, cx, cz, regions, mainland) {
     let dx = ex - cx, dz = ez - cz; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
     let best = null, bestT = Infinity;
-    const cands = (regions || []).filter(function (r) { return !isLink(r); });
+    const cands = (regions || []).filter(function (r) { return !isLink(r) && !r.underlay; });
     if (mainland) cands.push(mainland);
     for (const r of cands) {
       // march outward a short way to find where this ray first hits a landmass
@@ -965,7 +965,10 @@
     onPlate(plates.base, function () {
       // ---- LAND pass 1: every landmass drops its shadow + shallow-water halo
       //      onto the open sea first, so no island's glow smears a neighbour.
-      const landRegions = (A.regions || []).filter(function (r) { return !isLink(r); });
+      // continental underlay (city/continent.js) paints FIRST, as the ground
+      // every specific place sits on — sort is stable for everything else.
+      const landRegions = (A.regions || []).filter(function (r) { return !isLink(r); })
+        .sort(function (a, b) { return (b.underlay ? 1 : 0) - (a.underlay ? 1 : 0); });
       for (const rg of landRegions) paintLandUnder(rg, p);
       paintLandUnder(mainRg, p);
       if (annexRg) paintLandUnder(annexRg, p);
@@ -977,7 +980,7 @@
       for (const rg of A.regions || []) {
         if (!isLink(rg)) continue;
         const ax = linkAxis(rg);
-        const others = (A.regions || []).filter(function (r) { return r !== rg; });
+        const others = (A.regions || []).filter(function (r) { return r !== rg && !r.underlay; });
         const a = snapEndpointToLand(ax.ax, ax.az, (ax.ax + ax.bx) / 2, (ax.az + ax.bz) / 2, others, mainRect);
         const b = snapEndpointToLand(ax.bx, ax.bz, (ax.ax + ax.bx) / 2, (ax.az + ax.bz) / 2, others, mainRect);
         drawHighway(a.x, a.z, b.x, b.z, ax.wWorld, p, true);
@@ -1035,7 +1038,7 @@
       // names like "Redhollow Woods" stay readable), with a smaller, fainter
       // subtitle below (e.g. "International Airport"). Sized to the region width.
       for (const rg of A.regions || []) {
-        if (isLink(rg)) continue;
+        if (isLink(rg) || rg.underlay) continue;
         const c = regionCentroid(rg);
         const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
         const name = rg.name || rg.biome || "";

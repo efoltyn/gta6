@@ -649,6 +649,7 @@
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=story1"></script>
 <script src="src/city/campaign.js?v=story6"></script>
+<script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
 <script src="src/systems/fullmap.js?v=route2"></script>
@@ -767,6 +768,9 @@
      honest for any future eager caller. -->
 <script src="src/city/villagekit.js?v=world1"></script>
 <script src="src/city/countries.js?v=world1"></script>
+<!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
+     ocean between POIs with walkable backcountry — one world, not circles. -->
+<script src="src/city/continent.js?v=1"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
