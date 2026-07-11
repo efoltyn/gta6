@@ -368,9 +368,14 @@
   // forces an individual mesh because the owner watches rec.mesh directly.
   function addCityGlass(group, lx, ly, lz, pw, ph, pd, ox, oz, o, list) {
     o = o || {};
+    // OWNER RULE: no gray windows. The "reflective" mirror panes read as flat
+    // gray slabs next to the see-through tints, so every pane is CLEAR unless
+    // CBZ.CONFIG.CITY_REFLECTIVE_GLASS is flipped back on (one-line revert).
+    if (CBZ.CONFIG && CBZ.CONFIG.CITY_REFLECTIVE_GLASS == null) CBZ.CONFIG.CITY_REFLECTIVE_GLASS = false;
+    const allowMirror = !!(CBZ.CONFIG && CBZ.CONFIG.CITY_REFLECTIVE_GLASS);
     const rec = { mesh: null, pool: null, inst: -1, litPool: null, litId: -1, lit: false,
       tint: (o.tint || 0) % GLASS_TINTS,
-      kind: o.kind === "reflective" ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
+      kind: (allowMirror && o.kind === "reflective") ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
       x: ox + lx, y: ly, z: oz + lz, span: Math.max(pw, pd) * 0.5, hw: pw / 2, hh: ph / 2, hd: pd / 2,
       shattered: false, col: null };
     if (o.external) {
