@@ -384,7 +384,7 @@
     if (blk && blk.length) {
       _upOrigin.set(px, py + 1.5, pz);
       _upRay.set(_upOrigin, _upDir); _upRay.far = 26;
-      const hit = _upRay.intersectObjects(blk, false);
+      const hit = CBZ.losRaycast ? CBZ.losRaycast(_upRay, blk) : _upRay.intersectObjects(blk, false);
       if (hit.length) return true;
     }
     return false;
@@ -809,7 +809,7 @@
       let best = d;
       ray.set(_ro, _rd); ray.far = d;
       const blk = CBZ.losBlockers;
-      if (blk && blk.length) { const hit = ray.intersectObjects(blk, false); if (hit.length && hit[0].distance < best) best = hit[0].distance; }
+      if (blk && blk.length) { const hit = CBZ.losRaycast ? CBZ.losRaycast(ray, blk) : ray.intersectObjects(blk, false); if (hit.length && hit[0].distance < best) best = hit[0].distance; }
       const rad = 0.34, cs = CBZ.colliders;
       if (cs) {
         for (let i = 0; i < cs.length; i++) {

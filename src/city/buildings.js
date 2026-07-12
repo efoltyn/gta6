@@ -1087,8 +1087,14 @@
       }
       // pull every remnant collider back out of the broadphase
       for (const rc of b.remnCols) { const i = CBZ.colliders.indexOf(rc); if (i >= 0) { CBZ.colliders.splice(i, 1); dirty = true; } }
-      // restore the original wall mesh + its collider
-      if (b.wall) { b.wall.visible = true; b.wall._breached = false; if (CBZ.losBlockers && b.wallWasLos && CBZ.losBlockers.indexOf(b.wall) === -1) CBZ.losBlockers.push(b.wall); }
+      // restore the original wall mesh + its collider. A BATCH-V2 merged wall
+      // renders through its slice in the merged shell — restore the slice and
+      // keep the original invisible (visible=true would double-draw it).
+      if (b.wall) {
+        if (!(CBZ.batchWallShow && CBZ.batchWallShow(b.wall))) b.wall.visible = true;
+        b.wall._breached = false;
+        if (CBZ.losBlockers && b.wallWasLos && CBZ.losBlockers.indexOf(b.wall) === -1) CBZ.losBlockers.push(b.wall);
+      }
       if (b.col && CBZ.colliders.indexOf(b.col) === -1) { CBZ.colliders.push(b.col); dirty = true; }
     }
     cityBreaches.length = 0;
@@ -1187,8 +1193,11 @@
     const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false,
       gap: { horiz, fixed, thick, u0, u1, v0, v1, y0, y1, px, pz, outS, parent, minU, maxU } };
 
-    // hide the solid wall mesh + remove it from LOS (cops can see/shoot through)
+    // hide the solid wall mesh + remove it from LOS (cops can see/shoot through).
+    // BATCH-V2 merged this wall's verts into the building shell — zero just its
+    // slice there too (visible=false only silences the already-hidden original).
     wall.visible = false;
+    if (CBZ.batchWallHide) CBZ.batchWallHide(wall);
     if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(wall); if (li >= 0) { CBZ.losBlockers.splice(li, 1); rec.wallWasLos = true; } }
 
     // --- SURVIVING REMNANTS: full-height flanks either side of the gap plus
@@ -1740,6 +1749,7 @@
     // pivot group at the hinge jamb (local); the leaf hangs from it, its centre
     // offset back to the doorway centre so the CLOSED leaf sits FLUSH in the gap.
     const pivot = new THREE.Group();
+    pivot.userData.mover = true;   // swings every frame — core/staticfreeze.js must not freeze it
     const hx = localDoor.x + tx * (dw / 2) * hingeSign;
     const hz = localDoor.z + tz * (dw / 2) * hingeSign;
     pivot.position.set(hx, dh / 2 + 0.05, hz);

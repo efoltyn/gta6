@@ -97,3 +97,51 @@ Persistent results log for the `/loop` perf build (job bf2cc5d0, every 20 min). 
 - **A/B VALIDATED: test-net.js now 43/43** (was 41) — added a force-shed proof (CBZ_BP_LIMIT=-1): "backpressure KEEPS reliable events while shedding" ✓ + "backpressure DROPS the world snapshot to a backed-up guest" ✓. The inert/forward case = the passing "host world snapshot reaches guests" check at default limit.
 - **SHIPPED + VALIDATED — entity DELTA + slow-heal (CBZ.netDelta, default ON):** networld.js scoped send loop now sends a per-guest in-scope row only when it CHANGED, or every HEAL_MS=2000ms (< the guest's 4000ms absence-drop → an omitted body is ALWAYS refreshed before it could despawn; the apply already tolerates omissions since that's how scoping works, so NO apply-side change). New tools/test-net-delta.js loads the REAL networld.js (minimal stubs) + drives the REAL deltaRows over 60 ticks: **7/7** — MOVING sent 60/60, STATIONARY 3/60 (~20× less), **maxGap 2100ms < 4000ms** (the safety invariant), re-entry re-sends full, flag-off=full rows. A packed plaza is mostly STILL bodies → big real cut. test-net.js still 43/43 (protocol unchanged).
 - **#9 DONE** — FATAL failure-mode fix (backpressure) + bandwidth cut (delta), BOTH validated. The link now survives a packed-firefight overload (sheds, doesn't die) AND sends far fewer bytes (stationary crowd ~20× less). NEXT-optional (research-captured, not needed for robustness): priority accumulator (long-tail fairness, only matters once byte-budget-bound) + Int16/binary framing (~9-11 B/entity vs ~40 JSON).
+
+## ROUND 2 — 2026-07-10 (the "massive optimization" pass; world = post-continent, ~100k objects)
+Fresh baselines showed the June conclusions stale: continent fill + towns doubled draws
+(calm t4 3,741 calls / 2.2M tris; scene 100k objects / 94k meshes; 19.5k unique materials)
+and a CDP CPU profile put **62% of all CPU in uniformMatrix4fv** (per-draw upload tax).
+Six research agents + in-frustum draw census attributed everything before any code moved.
+
+### SHIPPED (all flag-gated, all A/B'd, smoke+demolition+street/atlas/night gates green)
+| Change (flag) | What it does | Measured effect |
+|---|---|---|
+| LOS grid (`CBZ.CONFIG.LOS_GRID`, core/losgrid.js) | XZ-grid + slab-test broadphase behind every raycast on CBZ.losBlockers (camera occlusion, clearLineOfFire ×3 passes, cop/guard vision, fpsmode wallDistance…) — was a full 17k-mesh walk per call | camera onAlways(50) 7.7→0.2ms; fpsmode onAlways(52) 4.8→0.2ms; chaos vehicles order-42 18→6.8ms |
+| Matrix freeze (`CBZ.CONFIG.MATRIX_FREEZE`, core/staticfreeze.js) | matrixAutoUpdate=false for the whole static city (+scene) at build; movers excluded (door pivots tagged `userData.mover`, knockable prop groups via collider→group refs, lights/sprites) | kills the ~100k-object per-frame compose+multiply (was ~30-60ms/frame headless); multiplyMatrices 0.31→0.04% CPU |
+| Batch V2 (`CBZ.CONFIG.BATCH_V2`, core/batch.js) | (1) bakes material.color into vertex colours → merges ACROSS colours (one white shared mat per lighting class); (2) merges CARVEABLE walls with per-wall vertex-range ledger — CBZ.batchWallHide/Show zero/restore a slice when carveHole/reset fire; (3) inert deco buckets per 112u TILE (frustum+farcull can reject) instead of city-wide | wallHidden 8.2k→16.7k; calm t4 city-root draws −25%, tris 2.0M→1.23M; t0 city-root draws 823→321, tris −47% |
+| Signal bulbs instanced (`CBZ.CONFIG.SIGNAL_INSTANCED`, props.js+traffic.js) | 504 per-lamp meshes (each a FRESH material) → 3 InstancedMesh w/ per-instance instanceColor; traffic.js writes one colour on phase change | −~500 draws + −504 unique materials |
+| Street-lamp bulbs+glows instanced (`CBZ.CONFIG.LAMP_INSTANCED`, props.js) | ~150 posts × 2 meshes → 2 InstancedMesh sharing the SAME night-driven materials; shot-out lamp zero-scales its instances | −~300 draws |
+| farcull fixes (core/farcull.js) | (a) WALL-CLOCK sweep pacing (was game-dt — at low fps sweeps degraded to 1/10s and worlds sat unculled for minutes: the exact machines the culler serves); (b) meshes w/ precomputed spheres measured budget-free; (c) InstancedMesh bounds aggregated from instance matrices (was: one prototype at origin → biome/island scatter never culled or wrongly culled) | t0 steady visible batch meshes 931→149; glow-shell pools no longer vanish far from origin |
+| Dead-updater gates (hud.js, detection.js, markers.js) | escape-mode UI (gangHud innerHTML rebuild, detect boxShadow string, guards.concat alloc) ran EVERY frame in city against display:none!important elements | −2-5ms/frame + GC pressure |
+| charpanel prewarm (charpanel.js) | first buildPanel+portrait = ~1.3s hitch (offscreen WebGL renderer) on the FIRST city frame → prebuilt on the title screen | first-city-frame hitch gone |
+| `?cfg_<FLAG>=0/1` URL overrides (config.js) | headless A/B can set CONFIG flags before boot (same-page resets can't re-run one-shot build passes) | the A/B harness for everything above |
+| Also | knockable-prop groups spared from batch (old pass merged far-town cans/cones → tipping moved an EMPTY group — live bug, fixed); farcull stale header fixed; demolition-check.mjs darwin chrome path | |
+
+### A/B TABLE (headless SwiftShader; draw/tri counts exact, ms relative)
+| scenario | metric | legacy | optimized | Δ |
+|---|---|---|---|---|
+| calm t4 | fps | 0.40 | 0.66 | **+65%** |
+| calm t4 | render CPU ms | 2310 | 1432 | **−38%** |
+| calm t4 | triangles | 2.01M | 1.23M | **−39%** |
+| calm t4 | draw calls (avg) | 3367 | 2668 | **−21%** (paired run) |
+| calm t0 | city-root draws (attr) | 823 | 321 | **−61%** |
+| calm t0 | triangles | 1.89M | 1.12M | **−41%** |
+| calm t0 | render CPU ms | 410 | 260 | **−37%** |
+| chaos t4 | fps | 0.38 | 0.53 | **+39%** |
+| chaos t4 | render CPU ms | 2359 | 1663 | **−29%** |
+| chaos t4 | triangles | 1.96M | 1.30M | **−34%** |
+| chaos t4 | camera 50 / fpsmode 52 / vehicles 42 steady ms | 7.0 / 4.6 / 18.1 | 0.2 / ~0 / 6.8 | **−97/−100/−62%** |
+
+### GATES
+syntax ✓ · smoke `invariants: ok` ×4 ✓ · street-shot pixel-sane (glass/doors/signals/shadows) ✓ ·
+demolition-check full arc + float invariants + rebuild asserts ✓ · carve probe (v2 slice hide/restore,
+LOS parity with legacy) ✓ · night probe (instanced bulbs ride the night driver, lampEi 0→1) ✓ ·
+city-atlas seed 1 structurally intact ✓ · zero console errors in every run ✓
+
+### KNOWN FOLLOW-UPS (researched, not built)
+- Hero-ped-rig partial merge (CROWD-GRAND-PLAN 1b): ~20 meshes/rig, ~400-600 draws at street level.
+- Cars: wheels are 12 unmerged draws/car (merge scans direct children only; rim/disc nested); ambient
+  car paint = per-car MeshStandardMaterial (heaviest shader) — palette-cache for parked/traffic.
+- Per-tile instanced pools for wildnature/biome scatter (farcull can only cull whole pools).
+- Emissive statics beyond lamps/signals (beacons/neon) still individual draws.

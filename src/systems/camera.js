@@ -215,7 +215,7 @@
       _rd.normalize();
       raycaster.set(_ro, _rd);
       raycaster.far = d;
-      const hit = raycaster.intersectObjects(CBZ.losBlockers, false);
+      const hit = CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false);
       if (hit.length > 0 && hit[0].distance < d) {
         pos.copy(_ro).addScaledVector(_rd, Math.max(1.5, hit[0].distance - 0.45));
       }
@@ -507,7 +507,7 @@
     _rd.normalize();
     let occ = rayDist;
     raycaster.set(_ro, _rd); raycaster.far = rayDist;
-    const hit = raycaster.intersectObjects(CBZ.losBlockers, false);
+    const hit = CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false);
     if (hit.length > 0 && hit[0].distance < occ) occ = hit[0].distance;
     occ = Math.min(occ, sweepColliders(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.34));
     if (occ < rayDist) {

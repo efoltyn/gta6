@@ -149,6 +149,10 @@
   }
 
   function tick() {
+    // hunt/snitch/approach chevrons ride the PRISON rosters (CBZ.guards/npcs);
+    // the city has its own actors. Skip in city — the concat below allocated a
+    // fresh array every frame in every mode for nothing.
+    if (CBZ.game && CBZ.game.mode === "city") return;
     const bob = 0.12 * Math.sin(CBZ.now * 0.006);
     const all = CBZ.guards.concat(CBZ.npcs);
     for (const a of all) {

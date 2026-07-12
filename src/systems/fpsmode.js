@@ -944,7 +944,7 @@
   function wallDistance(origin, dir, maxRange) {
     ray.set(origin, dir);
     ray.far = maxRange;
-    const hits = ray.intersectObjects(CBZ.losBlockers, false);
+    const hits = CBZ.losRaycast ? CBZ.losRaycast(ray, CBZ.losBlockers) : ray.intersectObjects(CBZ.losBlockers, false);
     // city: a wall hit landing inside an OPEN (shattered) window pane's rect
     // (CBZ.cityShotHole, buildings.js) is a hole, not a wall — skip it and
     // keep tracing, so firing out of (or into) a broken window carries past

@@ -63,8 +63,25 @@
   };
   Object.keys(mat).forEach((k) => { mat[k]._shared = true; });
 
+  // geometry cache: every armed actor rebuilds the same 8-24 boxes/cylinders
+  // per weapon model — cops spawn in bursts, so uncached geometry was pure GC
+  // churn (every other geometry factory in the repo caches; this one didn't).
+  const GEO = new Map();
+  function boxGeo(sx, sy, sz) {
+    const k = "b" + sx + "," + sy + "," + sz;
+    let g = GEO.get(k);
+    if (!g) { g = new THREE.BoxGeometry(sx, sy, sz); g._shared = true; GEO.set(k, g); }
+    return g;
+  }
+  function cylGeo(r, len) {
+    const k = "c" + r + "," + len;
+    let g = GEO.get(k);
+    if (!g) { g = new THREE.CylinderGeometry(r, r, len, 12); g._shared = true; GEO.set(k, g); }
+    return g;
+  }
+
   function box(parent, sx, sy, sz, material, x, y, z, rx, ry, rz) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), material);
+    const m = new THREE.Mesh(boxGeo(sx, sy, sz), material);
     m.position.set(x || 0, y || 0, z || 0);
     m.rotation.set(rx || 0, ry || 0, rz || 0);
     m.castShadow = true;
@@ -73,7 +90,7 @@
   }
 
   function cyl(parent, r, len, material, x, y, z, rx, ry, rz) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), material);
+    const m = new THREE.Mesh(cylGeo(r, len), material);
     m.position.set(x || 0, y || 0, z || 0);
     m.rotation.set(rx || 0, ry || 0, rz || 0);
     m.castShadow = true;
@@ -125,7 +142,9 @@
 
   function disposeGroup(group) {
     group.traverse((obj) => {
-      if (obj.geometry && obj.geometry.dispose) obj.geometry.dispose();
+      // cached weapon geometries (_shared) outlive any one prop — disposing
+      // them would evict the GL buffers out from under every other armed actor
+      if (obj.geometry && obj.geometry.dispose && !obj.geometry._shared) obj.geometry.dispose();
       if (obj.material) {
         const m = obj.material;
         if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose());

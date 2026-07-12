@@ -81,7 +81,7 @@
     probe.set(targetPt, dirAwayFromMuzzle);
     probe.near = 0;
     probe.far = MARGIN_MAX + 0.5;   // a little past the max we'd ever return
-    const hits = probe.intersectObjects(blk, false);
+    const hits = CBZ.losRaycast ? CBZ.losRaycast(probe, blk) : probe.intersectObjects(blk, false);
     if (!hits.length) return MARGIN_DEFAULT;
     const h = hits[0], n = h.face && h.face.normal;
     const t = boxThicknessAlong(h.object, n ? n.x : 0, n ? n.z : 0);
@@ -125,7 +125,7 @@
     ray.set(o, dir);
     ray.near = 0;
     ray.far = Math.max(0.1, dist - margin); // ignore a wall sitting right on the target
-    if (blockedBy(ray.intersectObjects(blk, false))) { ray.near = 0; return false; }
+    if (blockedBy(CBZ.losRaycast ? CBZ.losRaycast(ray, blk) : ray.intersectObjects(blk, false))) { ray.near = 0; return false; }
     // reverse pass: target → muzzle (catches the buried-muzzle case — see top).
     // near mirrors the forward pass's far margin: the first `margin` from the
     // target stays exempt so cover hugging the TARGET still doesn't block.
@@ -134,7 +134,7 @@
     ray.set(o, dir);
     ray.near = margin;
     ray.far = dist;
-    const blocked = blockedBy(ray.intersectObjects(blk, false));
+    const blocked = blockedBy(CBZ.losRaycast ? CBZ.losRaycast(ray, blk) : ray.intersectObjects(blk, false));
     ray.near = 0;   // never leak the near offset into the next caller
     return !blocked;
   };

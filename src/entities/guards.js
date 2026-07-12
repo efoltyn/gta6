@@ -915,7 +915,7 @@
     _rd.set(dx, player.pos.y + 1.0 - 1.5, dz).normalize();
     raycaster.set(_ro, _rd);
     raycaster.far = Math.max(0.1, dist - 0.4);
-    if (raycaster.intersectObjects(CBZ.losBlockers, false).length > 0) return false; // cover
+    if ((CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false)).length > 0) return false; // cover
     return true;
   }
 

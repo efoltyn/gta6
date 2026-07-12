@@ -443,6 +443,19 @@
   // CBZ.CITY's tuning numbers: these flip whole rendering/identity behaviours on
   // or off, so a single line here reverts a system to its old look.
   CBZ.CONFIG = CBZ.CONFIG || {};
+  // URL override for any CONFIG flag — ?cfg_BATCH_V2=0 / ?cfg_LOS_GRID=1 —
+  // applied FIRST so it wins over every `== null` default below and in the
+  // module files. Headless A/B harnesses depend on this (a same-page reset
+  // can't re-run one-shot build passes, so flags must be set before boot).
+  try {
+    if (typeof location !== "undefined" && location.search) {
+      const sp = new URLSearchParams(location.search);
+      sp.forEach(function (v, k) {
+        if (k.slice(0, 4) !== "cfg_") return;
+        CBZ.CONFIG[k.slice(4)] = v === "0" || v === "false" ? false : v === "1" || v === "true" ? true : v;
+      });
+    }
+  } catch (e) {}
   // Canonical authored game: one hitman campaign owns the city/prison handoff,
   // communicates through a diegetic phone, and continually assigns a mission.
   // Flip false to expose the legacy multi-mode sandbox during development.

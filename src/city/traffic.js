@@ -54,7 +54,15 @@
   CBZ.cityIsRed = function (vertical) { const p = phase(); return (vertical ? p.ns : p.ew) !== "green"; };
 
   function lampSet(lamp, on, color) {
-    if (!lamp || !lamp.material) return;
+    if (!lamp) return;
+    // instanced bulb (props.js SIGNAL_INSTANCED): one pooled instanceColor
+    // write instead of three material mutations — only on a real state change.
+    if (lamp.sigPool) {
+      if (lamp.lit !== !!on && CBZ.citySignalSet) CBZ.citySignalSet(lamp, on, color);
+      return;
+    }
+    if (!lamp.material) return;
+    lamp.lit = !!on;   // shared lit-state read (props.js glow/light-pool sync)
     lamp.material.emissiveIntensity = on ? 1.0 : 0.04;
     lamp.material.color.setHex(on ? color : 0x20242a);
     if (lamp.material.emissive) lamp.material.emissive.setHex(color);

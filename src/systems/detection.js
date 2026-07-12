@@ -490,7 +490,7 @@
     _rd.set(player.pos.x - n.group.position.x, player.pos.y + 1.0 - 1.35, player.pos.z - n.group.position.z).normalize();
     raycaster.set(_ro, _rd);
     raycaster.far = Math.max(0.1, dist - 0.4);
-    return raycaster.intersectObjects(CBZ.losBlockers, false).length === 0;
+    return (CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false)).length === 0;
   }
 
   function npcWitness(n, meta) {
@@ -666,6 +666,11 @@
     CBZ.addHeat(-cooling * dt);
 
     // ---- HUD: relabel as WANTED ----
+    // CITY: #detectWrap/#vignette are display:none!important (css/city.css) —
+    // the city runs its own wanted HUD. All the state decay above still ran;
+    // skip only the dead DOM writes + the wantedBreakdown()/label string
+    // building (measured: fresh boxShadow string every frame for a hidden el).
+    if (g.mode === "city") return;
     el.bar.style.width = g.detection.toFixed(1) + "%";
     const trace = CBZ.wantedBreakdown ? CBZ.wantedBreakdown() : null;
     const caseWho = trace && trace.source ? trace.source : (csum && csum.source ? csum.source : "");

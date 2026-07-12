@@ -156,7 +156,7 @@
     if (blk && blk.length) {
       _upOrigin.set(px, py + 0.2, pz);
       _upRay.set(_upOrigin, _upDir); _upRay.far = 26;
-      if (_upRay.intersectObjects(blk, false).length) return true;
+      if ((CBZ.losRaycast ? CBZ.losRaycast(_upRay, blk) : _upRay.intersectObjects(blk, false)).length) return true;
     }
     return false;
   }

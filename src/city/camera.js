@@ -104,7 +104,7 @@
     ray.set(_ro, _rd); ray.far = d;
     const blk = CBZ.losBlockers;
     if (blk && blk.length) {
-      const hit = ray.intersectObjects(blk, false);
+      const hit = CBZ.losRaycast ? CBZ.losRaycast(ray, blk) : ray.intersectObjects(blk, false);
       if (hit.length && hit[0].distance < best) best = hit[0].distance;
     }
     // swept-AABB against solid colliders (walls without an LOS flag)

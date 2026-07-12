@@ -354,6 +354,10 @@
       // load-time batch pass (core/batch.js) can't reach the city: it's built
       // lazily, long after the page-load event that triggers that pass.
       if (CBZ.batchStaticUnder) CBZ.batchStaticUnder(A.root);
+      // Freeze matrix recompute for everything provably static under the root
+      // (core/staticfreeze.js) — after the batch pass (its merged output is
+      // already frozen), before actors spawn (they arrive with live matrices).
+      if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(A.root);
       A.root.visible = true;
       if (A.reset) A.reset();
       if (CBZ.fx) CBZ.fx.clear();

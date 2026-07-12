@@ -10,8 +10,9 @@
    to paint pure fog. This module hides whole top-level city groups
    (building shells + their windows + towns + islands) once they sit
    entirely past the cull radius. Radius comes from the quality tier
-   (CBZ.cityCullRadius; 0 at tiers 3-4 = OFF = today's behaviour, and
-   it's always a hair past that tier's fog.far so nothing visible pops).
+   (CBZ.cityCullRadius — every tier culls now: 235..430 low tiers, 500 at
+   tiers 3-4, always a hair past that tier's fog.far so nothing visible
+   pops; see core/quality.js's QUALITY table).
 
    SAFETY RULES (why this can't break gameplay):
      • visible=false does NOT affect r128 raycasts (LOS keeps hitting),
@@ -50,6 +51,30 @@
     try {
       if (o.userData && (o.userData.dynamic || o.userData.terrain)) { b.dynamic = true; }
       else if (o.name === "city-crowd") { b.dynamic = true; }
+      else if (o.isInstancedMesh) {
+        // an InstancedMesh's geometry sphere is ONE prototype at the object's
+        // own (usually origin) transform — measuring that hid far-flung pools
+        // whenever the player left the origin, or never culled them at all.
+        // Aggregate the true spread from the instance matrices once (positions
+        // live at elements 12/14 of each 16-float block).
+        const a = o.instanceMatrix && o.instanceMatrix.array;
+        const n = o.count | 0;
+        if (!a || !n) { b.dynamic = true; }
+        else {
+          let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+          for (let i = 0; i < n; i++) {
+            const x = a[i * 16 + 12], z = a[i * 16 + 14];
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+          }
+          if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+          const proto = (o.geometry.boundingSphere ? o.geometry.boundingSphere.radius : 2) * 3; // generous per-instance slack (instances scale)
+          // instance positions are pool-local; nearly every pool sits at the
+          // identity, but honour a translated pool object anyway.
+          b.x = (minX + maxX) / 2 + o.position.x; b.z = (minZ + maxZ) / 2 + o.position.z;
+          b.r = Math.hypot(maxX - minX, maxZ - minZ) / 2 + proto;
+        }
+      }
       else if (o.isMesh && o.geometry) {
         if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
         const s = o.geometry.boundingSphere;
@@ -70,11 +95,15 @@
     return b;
   }
 
-  let acc = 0, cursor = 0;
-  CBZ.onAlways(3.6, function (dt) {
-    acc += dt;
-    if (acc < 0.25) return;        // 4Hz sweep is plenty for walking/driving speeds
-    acc = 0;
+  let lastSweepAt = 0, cursor = 0;
+  CBZ.onAlways(3.6, function () {
+    // WALL-CLOCK pacing, not game-dt: dt is clamped to 0.05s/frame, so on a
+    // low-fps machine (the exact machines the cull radius exists FOR) a
+    // dt-accumulated "4Hz" sweep degraded to once per several wall-seconds
+    // and freshly-built worlds sat unculled for minutes.
+    const now = performance.now();
+    if (now - lastSweepAt < 250) return;   // 4Hz is plenty for walking/driving speeds
+    lastSweepAt = now;
     const g = CBZ.game;
     const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
     // City player state lives in `.pos`, not `.position`. Falling back to the
@@ -103,14 +132,23 @@
     // subtree walk) — measured 30-50ms hitch-stacks right after a tier drop
     // when ~1000 unmeasured children landed in one sweep. Cap fresh measures
     // per sweep; already-measured children stay full-rate (they're a Map hit).
+    // MESHES with a precomputed bounding sphere are O(1) to measure (batch.js
+    // computes spheres for every merged tile/shell) — measuring them free of
+    // the budget keeps ~1k merged meshes from sitting unculled for ~30s after
+    // a build/tier change while the budget crawls to them.
     let freshMeasures = 32;
     for (let n = 0; n < slice; n++) {
       cursor = (cursor + 1) % kids.length;
       const o = kids[cursor];
       if (!o || (!o.isMesh && !o.isGroup)) continue;
       if (!bounds.has(o)) {
-        if (freshMeasures <= 0) continue;
-        freshMeasures--;
+        // plain mesh with a precomputed sphere = O(1); instanced pools pay an
+        // O(instances) aggregate scan, so they stay on the budget.
+        const cheap = o.isMesh && !o.isInstancedMesh && o.geometry && o.geometry.boundingSphere;
+        if (!cheap) {
+          if (freshMeasures <= 0) continue;
+          freshMeasures--;
+        }
       }
       const b = boundsFor(o);
       if (b.dynamic) continue;

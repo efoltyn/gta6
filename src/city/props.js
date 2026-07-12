@@ -53,6 +53,12 @@
   // lamp emissive material factory
   function lampMat(color) { return new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.2 }); }
 
+  // LAMP_INSTANCED street-lamp bulb/glow pools (filled by cityProps once the
+  // posts are placed; read by hitProp when a lamp is shot out). _zeroM4 is the
+  // collapse matrix for broken instances.
+  const lampPools = { bulb: null, glow: null };
+  const _zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
+
   // ---- shared geometry / material caches ----------------------------------
   // Hundreds of props get placed, so EVERY repeated mesh must share one geometry
   // and one material instance. Build them lazily, key by a descriptive string,
@@ -145,6 +151,8 @@
     if (!mat2) return null;
     const im = new THREE.InstancedMesh(glowShellGeo, mat2, spots.length);
     im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
+    im.userData.terrain = true;   // farcull: city-spanning pool, prototype bounds
+                                  // sit at the origin — never distance-cull it
     im.renderOrder = 5;
     const aGlow = new Float32Array(spots.length).fill(1);
     // real THREE.BufferGeometry supports setAttribute on the instanced mesh's
@@ -266,6 +274,16 @@
       if (imp) imp(p, n, { kind: "spark", power: 1.2 });
       if (!s.broken) {
         s.broken = true;
+        if (s.lampIdx != null && lampPools.bulb) {
+          // instanced bulbs (LAMP_INSTANCED): a broken lamp's bulb + glow
+          // instances collapse to zero scale — the dark cobra head stays.
+          lampPools.bulb.setMatrixAt(s.lampIdx, _zeroM4);
+          lampPools.bulb.instanceMatrix.needsUpdate = true;
+          if (lampPools.glow) {
+            lampPools.glow.setMatrixAt(s.lampIdx, _zeroM4);
+            lampPools.glow.instanceMatrix.needsUpdate = true;
+          }
+        }
         if (s.bulb) s.bulb.material = deadLampM;       // the head goes DARK
         if (s.glow) s.glow.visible = false;            // and so does its pool on the street
         setGlowOn(s.glowSpot, false);                  // and its Fresnel glow-shell instance dims too
@@ -856,6 +874,16 @@
     const sigBoxG = geo("sigBox", () => new THREE.BoxGeometry(0.6, 1.6, 0.5));
     const sigLampG = geo("sigLamp", () => new THREE.SphereGeometry(0.18, 10, 8));
     const sigPoleM = mat(0x2c2f35), sigBoxM = mat(0x1c1f24);
+    // SIGNAL_INSTANCED (default ON): the 3 bulbs per head used to be 3 meshes
+    // with a FRESH lampMat() each — ~504 un-batchable draw calls + 504 unique
+    // materials city-wide, ~30% of the whole static draw budget (measured).
+    // Instanced mode pools every bulb of a colour slot into ONE InstancedMesh
+    // (3 total) with per-instance instanceColor carrying lit/dark, and hands
+    // traffic.js a tiny {lit, sigPool, sigIdx} handle instead of a mesh —
+    // CBZ.citySignalSet flips one instance colour on phase change.
+    if (CBZ.CONFIG && CBZ.CONFIG.SIGNAL_INSTANCED == null) CBZ.CONFIG.SIGNAL_INSTANCED = true;
+    const sigInstanced = !!(CBZ.CONFIG && CBZ.CONFIG.SIGNAL_INSTANCED && THREE.InstancedMesh);
+    const sigLampHandles = { red: [], yel: [], grn: [] };   // instanced-mode bulb handles
     function makeHead(px, pz, rotY) {
       const head = new THREE.Group();
       // two approaches share a near corner (e.g. the S and E heads both want
@@ -867,20 +895,29 @@
       pole.position.y = 2.6; pole.castShadow = true; head.add(pole);
       const box = new THREE.Mesh(sigBoxG, sigBoxM);
       box.position.set(0, 4.6, 0); head.add(box);
-      const red = new THREE.Mesh(sigLampG, lampMat(0xff3b3b));
-      const yel = new THREE.Mesh(sigLampG, lampMat(0xffcf3b));
-      const grn = new THREE.Mesh(sigLampG, lampMat(0x39ff66));
-      red.position.set(0, 5.1, 0.28); yel.position.set(0, 4.6, 0.28); grn.position.set(0, 4.1, 0.28);
-      head.add(red, yel, grn);
-      root.add(head);
-      // SMARTER STREET-LIGHT RENDERING: a Fresnel glow shell per lamp (world
-      // position = head's world xz + its local sx/sz nudge; local z-offset
-      // 0.28 rotated by rotY) and a light-pool CANDIDATE at the lit lamp's
-      // position (only the currently-green one ever needs a real light, but
-      // registering all three is cheap and the pool driver below only ever
-      // lights whichever bulb is actually ON at pick time).
+      // lamp world position: head's world xz + its face offset (local z=0.28
+      // rotated by rotY) — needed up-front by both the instanced bulbs and the
+      // glow-shell spots below.
       const faceX = Math.sin(rotY) * 0.28, faceZ = Math.cos(rotY) * 0.28;
       const wx = px + sx + faceX, wz = pz + sz + faceZ;
+      let red, yel, grn;
+      if (sigInstanced) {
+        red = { lit: false, x: wx, y: 5.1, z: wz };
+        yel = { lit: false, x: wx, y: 4.6, z: wz };
+        grn = { lit: false, x: wx, y: 4.1, z: wz };
+        sigLampHandles.red.push(red); sigLampHandles.yel.push(yel); sigLampHandles.grn.push(grn);
+      } else {
+        red = new THREE.Mesh(sigLampG, lampMat(0xff3b3b));
+        yel = new THREE.Mesh(sigLampG, lampMat(0xffcf3b));
+        grn = new THREE.Mesh(sigLampG, lampMat(0x39ff66));
+        red.position.set(0, 5.1, 0.28); yel.position.set(0, 4.6, 0.28); grn.position.set(0, 4.1, 0.28);
+        head.add(red, yel, grn);
+      }
+      root.add(head);
+      // SMARTER STREET-LIGHT RENDERING: a Fresnel glow shell per lamp and a
+      // light-pool CANDIDATE at the lit lamp's position (only the currently-
+      // green one ever needs a real light, but registering all three is cheap
+      // and the pool driver below only ever lights whichever bulb is ON).
       const redSpot = { x: wx, y: 5.1, z: wz, r: 0.34 };
       const yelSpot = { x: wx, y: 4.6, z: wz, r: 0.34 };
       const grnSpot = { x: wx, y: 4.1, z: wz, r: 0.34 };
@@ -938,6 +975,15 @@
     const headLampM = lampMat(0xffe9a8);          // shared, glow driven by night
     headLampM.emissiveIntensity = 0.0;
     const glowM = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    // LAMP_INSTANCED (default ON): every post's bulb + street-glow plane used
+    // to be 2 meshes — ~300+ draw calls city-wide that batch.js must spare
+    // (emissive / transparent). Both already share ONE material each and the
+    // night driver writes those materials globally, so the whole population
+    // collapses to 2 InstancedMesh with zero behaviour change; a shot-out
+    // lamp zero-scales its instances (hitProp above).
+    if (CBZ.CONFIG && CBZ.CONFIG.LAMP_INSTANCED == null) CBZ.CONFIG.LAMP_INSTANCED = true;
+    const lampInstanced = !!(CBZ.CONFIG && CBZ.CONFIG.LAMP_INSTANCED && THREE.InstancedMesh);
+    const lampBulbSpots = [];                     // {x,z,ang} per post, world space
     function makeLampPost(x, z, faceX, faceZ) {
       const g = new THREE.Group();
       g.position.set(x, 0, z);
@@ -947,12 +993,18 @@
       const base = new THREE.Mesh(lampBaseG, darkM); base.position.y = 0.25; g.add(base);
       const arm = new THREE.Mesh(lampArmG, poleM); arm.rotation.z = Math.PI / 2; arm.position.set(0, 5.5, 0.7); g.add(arm);
       const head = new THREE.Mesh(lampHeadG, darkM); head.position.set(0, 5.45, 1.45); g.add(head);
-      const bulb = new THREE.Mesh(geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5)), headLampM);
-      bulb.position.set(0, 5.33, 1.45); g.add(bulb);
-      const glow = new THREE.Mesh(lampGlowG, glowM); glow.rotation.x = -Math.PI / 2; glow.position.set(0, 5.27, 1.45); g.add(glow);
+      let bulb = null, glow = null, lampIdx = null;
+      if (lampInstanced) {
+        lampIdx = lampBulbSpots.length;
+        lampBulbSpots.push({ x, z, ang });
+      } else {
+        bulb = new THREE.Mesh(geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5)), headLampM);
+        bulb.position.set(0, 5.33, 1.45); g.add(bulb);
+        glow = new THREE.Mesh(lampGlowG, glowM); glow.rotation.x = -Math.PI / 2; glow.position.set(0, 5.27, 1.45); g.add(glow);
+        nightLamps.push(glow);
+      }
       root.add(g);
       solidCollider(x, z, 0.3, pole);
-      nightLamps.push(glow);
       city.streetProps.push({ x, z, type: "lamp" });
       // SMARTER STREET-LIGHT RENDERING: this bulb's world position (head local
       // (0,5.33,1.45) rotated by `ang`, same rotation the group itself uses)
@@ -964,7 +1016,7 @@
       const glowSpot = { x: bwx, y: 5.33, z: bwz, r: 0.42 };
       lampGlowSpots.push(glowSpot);
       // shoot the HEAD and the light dies (the pole just sparks via walls/ground)
-      const shootRec = { type: "lamp", x, z, y: 5.35, r: 0.7, bulb, glow, broken: false, glowSpot };
+      const shootRec = { type: "lamp", x, z, y: 5.35, r: 0.7, bulb, glow, lampIdx, broken: false, glowSpot };
       shootables.push(shootRec);
       // `ref` lets the pool driver below skip a shot-out lamp (shootRec.broken
       // flips true in hitProp) without a separate "is this lamp dead" lookup.
@@ -986,6 +1038,37 @@
         const fx = r.vertical ? -sgn : 0, fz = r.vertical ? 0 : -sgn;
         makeLampPost(x, z, fx, fz);
       }
+    }
+    // build the pooled bulb + glow InstancedMesh (LAMP_INSTANCED) now that
+    // every post is placed. Both share the SAME night-driven materials the
+    // per-mesh path used, so the global night writes light every instance.
+    if (lampInstanced && lampBulbSpots.length) {
+      const bulbG = geo("lampBulb", () => new THREE.BoxGeometry(0.22, 0.06, 0.5));
+      const bulbIM = new THREE.InstancedMesh(bulbG, headLampM, lampBulbSpots.length);
+      const glowIM = new THREE.InstancedMesh(lampGlowG, glowM, lampBulbSpots.length);
+      bulbIM.castShadow = false; bulbIM.receiveShadow = false;
+      glowIM.castShadow = false; glowIM.receiveShadow = false;
+      bulbIM.userData.terrain = true; glowIM.userData.terrain = true;   // farcull: city-wide pools
+      const _m4 = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
+      const _qy = new THREE.Quaternion(), _qx = new THREE.Quaternion(), _q = new THREE.Quaternion();
+      const _Y = new THREE.Vector3(0, 1, 0), _X = new THREE.Vector3(1, 0, 0);
+      for (let i = 0; i < lampBulbSpots.length; i++) {
+        const sp = lampBulbSpots[i];
+        const bx = sp.x + Math.sin(sp.ang) * 1.45, bz = sp.z + Math.cos(sp.ang) * 1.45;
+        _qy.setFromAxisAngle(_Y, sp.ang);
+        _p.set(bx, 5.33, bz);
+        _m4.compose(_p, _qy, _s);
+        bulbIM.setMatrixAt(i, _m4);
+        _qx.setFromAxisAngle(_X, -Math.PI / 2);
+        _q.copy(_qy).multiply(_qx);
+        _p.set(bx, 5.27, bz);
+        _m4.compose(_p, _q, _s);
+        glowIM.setMatrixAt(i, _m4);
+      }
+      bulbIM.instanceMatrix.needsUpdate = true;
+      glowIM.instanceMatrix.needsUpdate = true;
+      root.add(bulbIM); root.add(glowIM);
+      lampPools.bulb = bulbIM; lampPools.glow = glowIM;
     }
 
     // =====================================================================
@@ -1977,6 +2060,51 @@
     const sigRedIM = buildGlowShellPool(0xff3b3b, sigGlowSpots.red, 0.4);
     const sigYelIM = buildGlowShellPool(0xffcf3b, sigGlowSpots.yel, 0.4);
     const sigGrnIM = buildGlowShellPool(0x39ff66, sigGlowSpots.grn, 0.4);
+
+    // ---- INSTANCED SIGNAL BULBS (SIGNAL_INSTANCED) --------------------------
+    // one InstancedMesh per colour SLOT (red/yel/grn), unlit white Basic
+    // material — the actual hue lives in per-instance instanceColor so ONE
+    // upload flips a bulb between its colour and housing-dark. userData.terrain
+    // keeps core/farcull's distance culler off these city-wide pools (their
+    // prototype bounding sphere sits at the origin and would mis-measure).
+    const _sigDark = new THREE.Color(0x20242a);
+    if (sigInstanced) {
+      const sigBulbM = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      sigBulbM._shared = true;
+      const _m4 = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
+      for (const key of ["red", "yel", "grn"]) {
+        const handles = sigLampHandles[key];
+        if (!handles.length) continue;
+        const im = new THREE.InstancedMesh(sigLampG, sigBulbM, handles.length);
+        im.castShadow = false; im.receiveShadow = false;
+        im.userData.terrain = true;   // farcull: pool spans the city — never distance-cull
+        for (let i = 0; i < handles.length; i++) {
+          _p.set(handles[i].x, handles[i].y, handles[i].z);
+          _m4.compose(_p, _q, _s);
+          im.setMatrixAt(i, _m4);
+          im.setColorAt(i, _sigDark);
+          handles[i].sigPool = im; handles[i].sigIdx = i;
+        }
+        im.instanceMatrix.needsUpdate = true;
+        if (im.instanceColor) im.instanceColor.needsUpdate = true;
+        root.add(im);
+      }
+    }
+    const _sigC = new THREE.Color();
+    CBZ.citySignalSet = function (lamp, on, colorHex) {
+      if (!lamp || !lamp.sigPool) return;
+      lamp.lit = !!on;
+      lamp.sigPool.setColorAt(lamp.sigIdx, on ? _sigC.setHex(colorHex) : _sigDark);
+      if (lamp.sigPool.instanceColor) lamp.sigPool.instanceColor.needsUpdate = true;
+    };
+    // lit-state read that works for BOTH bulb representations: instanced
+    // handles carry .lit (written by traffic.js's lampSet); legacy meshes are
+    // read off their material exactly as before.
+    function sigLit(l) {
+      if (!l) return false;
+      if (l.lit != null) return !!l.lit;
+      return !!(l.material && l.material.emissiveIntensity > 0.5);
+    }
     if (lampGlowIM) root.add(lampGlowIM);
     if (sigRedIM) root.add(sigRedIM);
     if (sigYelIM) root.add(sigYelIM);
@@ -2012,9 +2140,9 @@
           const c = lightCandidates[i];
           if (c.kind !== "signal" || !c.head || !c.spots) continue;
           const h = c.head, sp = c.spots;
-          setGlowOn(sp.red, h.red && h.red.material && h.red.material.emissiveIntensity > 0.5);
-          setGlowOn(sp.yel, h.yel && h.yel.material && h.yel.material.emissiveIntensity > 0.5);
-          setGlowOn(sp.grn, h.grn && h.grn.material && h.grn.material.emissiveIntensity > 0.5);
+          setGlowOn(sp.red, sigLit(h.red));
+          setGlowOn(sp.yel, sigLit(h.yel));
+          setGlowOn(sp.grn, sigLit(h.grn));
         }
       });
     }
@@ -2070,9 +2198,7 @@
           if (c.kind === "lamp" && c.ref && c.ref.broken) continue;
           if (c.kind === "signal" && c.head) {
             const hh = c.head;
-            const litOne = (hh.red && hh.red.material && hh.red.material.emissiveIntensity > 0.5) ||
-                           (hh.yel && hh.yel.material && hh.yel.material.emissiveIntensity > 0.5) ||
-                           (hh.grn && hh.grn.material && hh.grn.material.emissiveIntensity > 0.5);
+            const litOne = sigLit(hh.red) || sigLit(hh.yel) || sigLit(hh.grn);
             if (!litOne) continue;
           }
           const dx = c.x - cam.x, dz = c.z - cam.z;
@@ -2103,9 +2229,9 @@
       });
     }
     function colorForHead(h) {
-      if (h.red && h.red.material && h.red.material.emissiveIntensity > 0.5) return 0xff3b3b;
-      if (h.yel && h.yel.material && h.yel.material.emissiveIntensity > 0.5) return 0xffcf3b;
-      if (h.grn && h.grn.material && h.grn.material.emissiveIntensity > 0.5) return 0x39ff66;
+      if (sigLit(h.red)) return 0xff3b3b;
+      if (sigLit(h.yel)) return 0xffcf3b;
+      if (sigLit(h.grn)) return 0x39ff66;
       return 0xffe0a0;
     }
   };

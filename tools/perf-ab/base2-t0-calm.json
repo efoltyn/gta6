@@ -1,0 +1,924 @@
+{
+  "scenario": "calm",
+  "requestedSeconds": 60,
+  "requestedFrames": 150,
+  "elapsedSeconds": 60.04,
+  "fps": 0.55,
+  "frameMs": {
+    "avg": 1781.341,
+    "p50": 1408.1,
+    "p95": 3015.8,
+    "p99": 11892.742,
+    "max": 11892.742,
+    "over25ms": 33,
+    "over50ms": 33
+  },
+  "render": {
+    "avgCpuMs": 342.774,
+    "peakCpuMs": 10563.3,
+    "avgCalls": 863.9,
+    "avgTriangles": 1902492
+  },
+  "counts": {
+    "peds": 18,
+    "cops": 4,
+    "cars": 19,
+    "crowd": 0,
+    "colliders": 78914,
+    "platforms": 2397,
+    "losBlockers": 16908
+  },
+  "scene": {
+    "objects": 100397,
+    "meshes": 94531,
+    "instancedMeshes": 306,
+    "visibleMeshes": 22707,
+    "groups": 4658,
+    "lights": 17,
+    "sprites": 1176
+  },
+  "renderAttribution": {
+    "full": {
+      "calls": 788,
+      "triangles": 1897602
+    },
+    "withoutPedsAndCops": {
+      "calls": 788,
+      "triangles": 1897602
+    },
+    "withoutCars": {
+      "calls": 788,
+      "triangles": 1897602
+    },
+    "withoutAmbientCrowd": {
+      "calls": 788,
+      "triangles": 1897602
+    },
+    "withoutCityDynamic": {
+      "calls": 788,
+      "triangles": 1897602
+    },
+    "withoutCityRoot": {
+      "calls": 47,
+      "triangles": 4366
+    }
+  },
+  "cityRootCensus": {
+    "meshes": 89747,
+    "visibleMeshes": 18194,
+    "instanced": 278,
+    "textured": 158,
+    "transparent": 63886,
+    "emissive": 67746,
+    "materialArrays": 0,
+    "userData": 700,
+    "losRefs": 16842,
+    "colliderRefs": 77937,
+    "platformRefs": 0,
+    "knownActorDynamic": 970,
+    "mergeEligible": 3684,
+    "staticMergeEligible": 3159,
+    "uniqueGeometries": 20786,
+    "uniqueMaterials": 19544,
+    "repeatedGeometryMaterialPairs": 557,
+    "meshesInRepeatedPairs": 68005,
+    "largestRepeatedPair": 63386,
+    "topLevelChildren": [
+      {
+        "index": 152,
+        "name": "",
+        "type": "Group",
+        "meshes": 1547,
+        "visibleMeshes": 997
+      },
+      {
+        "index": 36,
+        "name": "",
+        "type": "Group",
+        "meshes": 1010,
+        "visibleMeshes": 875
+      },
+      {
+        "index": 35,
+        "name": "",
+        "type": "Group",
+        "meshes": 914,
+        "visibleMeshes": 771
+      },
+      {
+        "index": 33,
+        "name": "",
+        "type": "Group",
+        "meshes": 4303,
+        "visibleMeshes": 569
+      },
+      {
+        "index": 3941,
+        "name": "",
+        "type": "Group",
+        "meshes": 424,
+        "visibleMeshes": 424
+      },
+      {
+        "index": 3936,
+        "name": "",
+        "type": "Group",
+        "meshes": 254,
+        "visibleMeshes": 254
+      },
+      {
+        "index": 70,
+        "name": "",
+        "type": "Group",
+        "meshes": 1629,
+        "visibleMeshes": 212
+      },
+      {
+        "index": 69,
+        "name": "",
+        "type": "Group",
+        "meshes": 1626,
+        "visibleMeshes": 209
+      },
+      {
+        "index": 535,
+        "name": "",
+        "type": "Group",
+        "meshes": 1602,
+        "visibleMeshes": 203
+      },
+      {
+        "index": 537,
+        "name": "",
+        "type": "Group",
+        "meshes": 1454,
+        "visibleMeshes": 167
+      },
+      {
+        "index": 635,
+        "name": "",
+        "type": "Group",
+        "meshes": 1313,
+        "visibleMeshes": 166
+      },
+      {
+        "index": 536,
+        "name": "",
+        "type": "Group",
+        "meshes": 1483,
+        "visibleMeshes": 164
+      },
+      {
+        "index": 538,
+        "name": "",
+        "type": "Group",
+        "meshes": 1318,
+        "visibleMeshes": 153
+      },
+      {
+        "index": 541,
+        "name": "",
+        "type": "Group",
+        "meshes": 1169,
+        "visibleMeshes": 140
+      },
+      {
+        "index": 539,
+        "name": "",
+        "type": "Group",
+        "meshes": 1141,
+        "visibleMeshes": 138
+      },
+      {
+        "index": 540,
+        "name": "",
+        "type": "Group",
+        "meshes": 1233,
+        "visibleMeshes": 138
+      },
+      {
+        "index": 44,
+        "name": "",
+        "type": "Group",
+        "meshes": 953,
+        "visibleMeshes": 133
+      },
+      {
+        "index": 38,
+        "name": "",
+        "type": "Group",
+        "meshes": 891,
+        "visibleMeshes": 128
+      },
+      {
+        "index": 34,
+        "name": "",
+        "type": "Group",
+        "meshes": 782,
+        "visibleMeshes": 127
+      },
+      {
+        "index": 40,
+        "name": "",
+        "type": "Group",
+        "meshes": 776,
+        "visibleMeshes": 125
+      }
+    ]
+  },
+  "batch": {
+    "mergedMeshes": 607,
+    "removed": 31186,
+    "wallMerged": 739,
+    "wallHidden": 8200
+  },
+  "colliderBroadphase": {
+    "colliders": 78914,
+    "buckets": 11560
+  },
+  "heapUsedMB": 485.6,
+  "glitches": {
+    "nanActors": 0,
+    "nearInvisiblePeds": 0,
+    "outOfBoundsActors": 0,
+    "carOverlaps": 0,
+    "duplicateColliders": 0
+  },
+  "errors": [],
+  "topFrameWork": [
+    {
+      "kind": "update",
+      "order": 37.2,
+      "source": "",
+      "calls": 34,
+      "totalMs": 957.5,
+      "avgMs": 28.1618,
+      "peakMs": 955.8,
+      "over2ms": 1
+    },
+    {
+      "kind": "always",
+      "order": 50,
+      "source": "",
+      "calls": 34,
+      "totalMs": 211.7,
+      "avgMs": 6.2265,
+      "peakMs": 23.1,
+      "over2ms": 34
+    },
+    {
+      "kind": "always",
+      "order": 52,
+      "source": "",
+      "calls": 34,
+      "totalMs": 137.1,
+      "avgMs": 4.0324,
+      "peakMs": 7.2,
+      "over2ms": 34
+    },
+    {
+      "kind": "update",
+      "order": 0.01,
+      "source": "",
+      "calls": 34,
+      "totalMs": 40.6,
+      "avgMs": 1.1941,
+      "peakMs": 40.5,
+      "over2ms": 1
+    },
+    {
+      "kind": "always",
+      "order": 90,
+      "source": "",
+      "calls": 34,
+      "totalMs": 28.9,
+      "avgMs": 0.85,
+      "peakMs": 6.2,
+      "over2ms": 7
+    },
+    {
+      "kind": "always",
+      "order": 3.6,
+      "source": "",
+      "calls": 34,
+      "totalMs": 17.3,
+      "avgMs": 0.5088,
+      "peakMs": 13.7,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 35,
+      "source": "",
+      "calls": 34,
+      "totalMs": 15.3,
+      "avgMs": 0.45,
+      "peakMs": 8,
+      "over2ms": 2
+    },
+    {
+      "kind": "update",
+      "order": 10,
+      "source": "",
+      "calls": 34,
+      "totalMs": 13.6,
+      "avgMs": 0.4,
+      "peakMs": 9.4,
+      "over2ms": 1
+    },
+    {
+      "kind": "always",
+      "order": 46,
+      "source": "",
+      "calls": 34,
+      "totalMs": 10.6,
+      "avgMs": 0.3118,
+      "peakMs": 1.5,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 38.6,
+      "source": "",
+      "calls": 34,
+      "totalMs": 8.5,
+      "avgMs": 0.25,
+      "peakMs": 8.5,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 89,
+      "source": "",
+      "calls": 34,
+      "totalMs": 8.4,
+      "avgMs": 0.2471,
+      "peakMs": 1,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 38.2,
+      "source": "",
+      "calls": 34,
+      "totalMs": 6.4,
+      "avgMs": 0.1882,
+      "peakMs": 6.4,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 36.6,
+      "source": "",
+      "calls": 34,
+      "totalMs": 6.2,
+      "avgMs": 0.1824,
+      "peakMs": 5.5,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 37,
+      "source": "",
+      "calls": 34,
+      "totalMs": 4.6,
+      "avgMs": 0.1353,
+      "peakMs": 4.5,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 35.73,
+      "source": "",
+      "calls": 34,
+      "totalMs": 3.7,
+      "avgMs": 0.1088,
+      "peakMs": 2.5,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 46,
+      "source": "",
+      "calls": 34,
+      "totalMs": 3.4,
+      "avgMs": 0.1,
+      "peakMs": 3.4,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 38,
+      "source": "",
+      "calls": 34,
+      "totalMs": 3.4,
+      "avgMs": 0.1,
+      "peakMs": 3.2,
+      "over2ms": 1
+    },
+    {
+      "kind": "always",
+      "order": 99,
+      "source": "",
+      "calls": 34,
+      "totalMs": 3.1,
+      "avgMs": 0.0912,
+      "peakMs": 0.5,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 39,
+      "source": "",
+      "calls": 34,
+      "totalMs": 3,
+      "avgMs": 0.0882,
+      "peakMs": 0.8,
+      "over2ms": 0
+    },
+    {
+      "kind": "always",
+      "order": 60,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.9,
+      "avgMs": 0.0853,
+      "peakMs": 2,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 30,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.8,
+      "avgMs": 0.0824,
+      "peakMs": 0.5,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 34.7,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.7,
+      "avgMs": 0.0794,
+      "peakMs": 0.5,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 36.2,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.6,
+      "avgMs": 0.0765,
+      "peakMs": 1.9,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 38,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.4,
+      "avgMs": 0.0706,
+      "peakMs": 0.5,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 42,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.2,
+      "avgMs": 0.0647,
+      "peakMs": 2.2,
+      "over2ms": 1
+    },
+    {
+      "kind": "update",
+      "order": 37,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2.1,
+      "avgMs": 0.0618,
+      "peakMs": 0.4,
+      "over2ms": 0
+    },
+    {
+      "kind": "always",
+      "order": 88,
+      "source": "",
+      "calls": 34,
+      "totalMs": 2,
+      "avgMs": 0.0588,
+      "peakMs": 0.4,
+      "over2ms": 0
+    },
+    {
+      "kind": "always",
+      "order": 91,
+      "source": "",
+      "calls": 34,
+      "totalMs": 1.9,
+      "avgMs": 0.0559,
+      "peakMs": 0.3,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 41.8,
+      "source": "",
+      "calls": 34,
+      "totalMs": 1.9,
+      "avgMs": 0.0559,
+      "peakMs": 0.6,
+      "over2ms": 0
+    },
+    {
+      "kind": "update",
+      "order": 41.7,
+      "source": "",
+      "calls": 34,
+      "totalMs": 1.7,
+      "avgMs": 0.05,
+      "peakMs": 1.7,
+      "over2ms": 0
+    }
+  ],
+  "browserErrors": [],
+  "qforce": "0",
+  "cpuProfile": {
+    "totalMs": 12379.3,
+    "top": [
+      {
+        "fn": "(idle) @ (native)",
+        "selfMs": 11561.1,
+        "pct": 93.39
+      },
+      {
+        "fn": "(program) @ (native)",
+        "selfMs": 386.7,
+        "pct": 3.12
+      },
+      {
+        "fn": "(garbage collector) @ (native)",
+        "selfMs": 145.3,
+        "pct": 1.17
+      },
+      {
+        "fn": "updateMatrixWorld @ three.r128.min.js",
+        "selfMs": 98.7,
+        "pct": 0.8
+      },
+      {
+        "fn": "At @ three.r128.min.js",
+        "selfMs": 49.3,
+        "pct": 0.4
+      },
+      {
+        "fn": "copy @ three.r128.min.js",
+        "selfMs": 25.1,
+        "pct": 0.2
+      },
+      {
+        "fn": "multiplyMatrices @ three.r128.min.js",
+        "selfMs": 24.7,
+        "pct": 0.2
+      },
+      {
+        "fn": "applyMatrix4 @ three.r128.min.js",
+        "selfMs": 14.9,
+        "pct": 0.12
+      },
+      {
+        "fn": "raycast @ three.r128.min.js",
+        "selfMs": 13.8,
+        "pct": 0.11
+      },
+      {
+        "fn": "intersectsSphere @ three.r128.min.js",
+        "selfMs": 6.9,
+        "pct": 0.06
+      },
+      {
+        "fn": "$c @ three.r128.min.js",
+        "selfMs": 5.3,
+        "pct": 0.04
+      },
+      {
+        "fn": "(anon) @ three.r128.min.js",
+        "selfMs": 4.6,
+        "pct": 0.04
+      },
+      {
+        "fn": "update @ three.r128.min.js",
+        "selfMs": 4.5,
+        "pct": 0.04
+      },
+      {
+        "fn": "setup @ three.r128.min.js",
+        "selfMs": 2.9,
+        "pct": 0.02
+      },
+      {
+        "fn": "It @ three.r128.min.js",
+        "selfMs": 2.4,
+        "pct": 0.02
+      },
+      {
+        "fn": "groundAt @ physics.js?v=map3",
+        "selfMs": 1.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "refreshMaterialUniforms @ three.r128.min.js",
+        "selfMs": 1.6,
+        "pct": 0.01
+      },
+      {
+        "fn": "Rt @ three.r128.min.js",
+        "selfMs": 1.6,
+        "pct": 0.01
+      },
+      {
+        "fn": "entry.fn @ profile.js",
+        "selfMs": 1.5,
+        "pct": 0.01
+      },
+      {
+        "fn": "bindVertexArray @ (native)",
+        "selfMs": 1.3,
+        "pct": 0.01
+      },
+      {
+        "fn": "districtKeys @ hunger.js?v=world1",
+        "selfMs": 0.9,
+        "pct": 0.01
+      },
+      {
+        "fn": "e @ three.r128.min.js",
+        "selfMs": 0.9,
+        "pct": 0.01
+      },
+      {
+        "fn": "refreshGangHud @ hud.js?v=gore1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "get y @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "updateCamera @ camera.js?v=tpgun3",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "(anon) @ combat.js?v=grenade1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "setMeter @ killstreaks.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "wrapped @ outfits.js?v=fits1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "dot @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "max @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "fillText @ (native)",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "intersectObjects @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "updatePlayer @ physics.js?v=map3",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "(anon) @ gore.js?v=rest1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "multiplyScalar @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "ki @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "jewelryDrip @ outfits.js?v=fits1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "test @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "invert @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "clearRect @ (native)",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "expandByObject @ three.r128.min.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "(anon) @ blobshadows.js?v=blob1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "(anon) @ crown.js?v=pol1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "fn": "render @ three.r128.min.js",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "tick @ wildlife.js?v=wild1",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "(anon) @ interactions.js?v=registry2",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "Pt @ three.r128.min.js",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "hostSim @ schedule.js?v=sched1",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "setFromEuler @ three.r128.min.js",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "setFromBufferAttribute @ three.r128.min.js",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "store @ gunmods.js?v=mods1",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "fn": "drawArrays @ (native)",
+        "selfMs": 0.6,
+        "pct": 0
+      },
+      {
+        "fn": "Gi @ three.r128.min.js",
+        "selfMs": 0.5,
+        "pct": 0
+      },
+      {
+        "fn": "safeSetTexture2D @ three.r128.min.js",
+        "selfMs": 0.3,
+        "pct": 0
+      },
+      {
+        "fn": "lampSet @ traffic.js?v=smart1",
+        "selfMs": 0.1,
+        "pct": 0
+      }
+    ],
+    "files": [
+      {
+        "file": "(native)",
+        "selfMs": 12096.4,
+        "pct": 97.71
+      },
+      {
+        "file": "three.r128.min.js",
+        "selfMs": 267.9,
+        "pct": 2.16
+      },
+      {
+        "file": "physics.js?v=map3",
+        "selfMs": 2.5,
+        "pct": 0.02
+      },
+      {
+        "file": "profile.js",
+        "selfMs": 1.5,
+        "pct": 0.01
+      },
+      {
+        "file": "outfits.js?v=fits1",
+        "selfMs": 1.5,
+        "pct": 0.01
+      },
+      {
+        "file": "hunger.js?v=world1",
+        "selfMs": 0.9,
+        "pct": 0.01
+      },
+      {
+        "file": "hud.js?v=gore1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "camera.js?v=tpgun3",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "combat.js?v=grenade1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "killstreaks.js",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "gore.js?v=rest1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "blobshadows.js?v=blob1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "crown.js?v=pol1",
+        "selfMs": 0.8,
+        "pct": 0.01
+      },
+      {
+        "file": "wildlife.js?v=wild1",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "file": "interactions.js?v=registry2",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "file": "schedule.js?v=sched1",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "file": "gunmods.js?v=mods1",
+        "selfMs": 0.7,
+        "pct": 0.01
+      },
+      {
+        "file": "traffic.js?v=smart1",
+        "selfMs": 0.1,
+        "pct": 0
+      }
+    ]
+  }
+}

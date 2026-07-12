@@ -99,6 +99,11 @@
   function refreshGangHud() {
     if (!el.gangHud) return;
     const g = CBZ.game || {};
+    // CITY: #gangHud is display:none!important (css/city.css) — this is the
+    // prison-gang panel. Skip the whole innerHTML rebuild + npc scans there
+    // (measured: a full string build + 3 .find()/.filter() passes EVERY frame
+    // for an invisible element).
+    if (g.mode === "city") return;
     if (g.role === "cop" || g.state !== "playing") {
       el.gangHud.style.display = "none";
       return;

@@ -1028,6 +1028,22 @@
     }
   });
 
+  // PRE-WARM during the title screen: the first buildPanel+drawPortrait costs
+  // ~1.3s (offscreen WebGL renderer creation for the portrait) — measured as
+  // the single biggest hitch of the first city frame. Building it while the
+  // player is still reading the title hides the stall entirely; the panel
+  // stays display:none until the city updater shows it.
+  addEventListener("load", function () {
+    setTimeout(function () {
+      try {
+        if (panel) return;
+        buildPanel();
+        panel.style.display = "none";
+        refreshPanel();     // includes the first portrait render = the real cost
+      } catch (e) {}
+    }, 2500);
+  }, { once: true });
+
   // ---- public hooks (debug / harness) --------------------------------------
   CBZ.cityCharPanel = {
     open: openInv, close: closeInv,

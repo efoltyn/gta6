@@ -127,7 +127,7 @@
     const len = _d.length(); if (len < 0.5) return true;
     _d.multiplyScalar(1 / len);
     _ray.set(_o, _d); _ray.far = len;
-    const hits = _ray.intersectObjects(blk, false);
+    const hits = CBZ.losRaycast ? CBZ.losRaycast(_ray, blk) : _ray.intersectObjects(blk, false);
     return hits.length === 0;
   }
 
