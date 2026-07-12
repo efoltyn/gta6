@@ -517,7 +517,8 @@ body.campaign-active #invScreen {
 body.campaign-active.mode-city #interact,
 body.campaign-active.mode-city #cTurfMeta,
 body.campaign-active.mode-city #cKillFeed,
-body.campaign-active.mode-city #cpPanel,
+/* #cpPanel (top-left character card: portrait/level/stars/bounty/net worth)
+   stays VISIBLE in the campaign — owner asked for it back (2026-07-11). */
 body.campaign-active.mode-city #cityOrders,
 body.campaign-active.mode-city #cityGigBar,
 body.campaign-active.mode-city #cityHeistHud,
