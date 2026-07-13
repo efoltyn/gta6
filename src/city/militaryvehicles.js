@@ -128,6 +128,49 @@
   function activeCtx() { return g.mode === "city" && g.state === "playing"; }
   function aircraftFlying() { const P = CBZ.player; return !!(P && P._aircraft); }
 
+  // ---- PARKED-COLLIDER BOOKKEEPING -----------------------------------------
+  // Every island prop registers a solid world collider so the parked machine
+  // blocks movement. When the machine is STOLEN the collider must leave with
+  // it: the old code left it behind, so an invisible solid block haunted the
+  // empty slot forever — and a commandeered hull was shoved out of its OWN
+  // parked wall by cityCollideVehicle every frame. Detach/restore use the exact
+  // same rec fields as playeraircraft.js (_colliderDetached/_colliderHeight/
+  // _colliderY0Offset) so whichever module runs first wins and the other
+  // no-ops — the two systems share one protocol on the same record.
+  function detachParkedCollider(rec) {
+    const col = rec && rec.collider;
+    if (!col || rec._colliderDetached) return;
+    if (rec._colliderHeight == null && col.y0 != null && col.y1 != null) {
+      rec._colliderHeight = col.y1 - col.y0;
+      rec._colliderY0Offset = col.y0 - (rec.pos.y || 0);
+    }
+    const i = CBZ.colliders ? CBZ.colliders.indexOf(col) : -1;
+    if (i >= 0) CBZ.colliders.splice(i, 1);
+    rec._colliderDetached = true;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  // re-park the solid wherever the hull now rests (abandoned armor stays a
+  // real obstacle, not a ghost you walk through). Oriented footprint → AABB.
+  function restoreParkedCollider(rec) {
+    const col = rec && rec.collider;
+    if (!col || !rec.group) return;
+    const a = rec.group.rotation.y || 0;
+    const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+    const hw = Math.max(0.5, rec.footW || 3) * 0.5;
+    const hl = Math.max(0.5, rec.footL || 5) * 0.5;
+    const ex = ca * hw + sa * hl, ez = sa * hw + ca * hl;
+    col.minX = rec.pos.x - ex; col.maxX = rec.pos.x + ex;
+    col.minZ = rec.pos.z - ez; col.maxZ = rec.pos.z + ez;
+    if (rec._colliderHeight != null) {
+      col.y0 = (rec.pos.y || 0) + (rec._colliderY0Offset || 0);
+      col.y1 = col.y0 + rec._colliderHeight;
+    }
+    col._city = true;   // base hardware is a city-world object; never solid in the prison space
+    if (CBZ.colliders && CBZ.colliders.indexOf(col) < 0) CBZ.colliders.push(col);
+    rec._colliderDetached = false;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
   // ============================================================
   //  BOARD VERB — self-registered into the ONE interaction registry (no
   //  interact.js edit). A source feeds the nearest non-taken machine when you're
@@ -221,11 +264,14 @@
     if (!took) { note("It won't start — try again.", 1.6); return; }
 
     rec.taken = true;
+    // the parked solid leaves with the machine (idempotent — the air path may
+    // have already detached it inside citySpawnFlyableFromProp).
+    detachParkedCollider(rec);
     // THEFT + HEAT (mirror storage.js stealBaseJet): grand theft of military
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
     if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" ? 3 : 4); } catch (e) {} }
-    big(rec.civilian ? "✈ " + name + " HIJACKED" : "🪖 " + name + " COMMANDEERED");
+    big(rec.civilian ? "Tower reports a " + name + " departing with no clearance — owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
     sfx("alarm");
   }
   CBZ.cityBoardMilitaryVehicle = boardVehicle;
@@ -267,6 +313,9 @@
     // 2×4.4 default otherwise) so the heavy machine shoulders walls/props at its
     // true size — a tank shouldn't slide through a fence post.
     if (!rec.dims) rec.dims = { width: rec.footW || 3, length: rec.footL || 5, wheelbase: (rec.footL || 5) * 0.5 };
+    // its own parked wall must go BEFORE the first sim tick or the hull gets
+    // depenetrated out of itself (also covers direct CBZ.cityDriveArmor calls).
+    detachParkedCollider(rec);
     P.driving = true;                               // physics.js yields; chase-cam engages
     P._aircraft = null;                             // belt-and-braces: never both
     P.vy = 0; P.grounded = false;
@@ -305,12 +354,18 @@
       rec.group.position.set(rec.pos.x, gy, rec.pos.z);
     }
     if (P && rec) {
-      const ox = Math.sin(rec.heading) * (rec.footW * 0.5 + 1.6);
-      const oz = Math.cos(rec.heading) * (rec.footW * 0.5 + 1.6);
+      // step out the SIDE (the driver's door), clear of the hull footprint —
+      // the old forward drop landed inside longer hulls (and now inside the
+      // re-parked collider). Right vector of heading = (cos, -sin).
+      const side = rec.footW * 0.5 + 1.1;
+      const ox = Math.cos(rec.heading) * side;
+      const oz = -Math.sin(rec.heading) * side;
       const gy = floorY(rec.pos.x + ox, rec.pos.z + oz);
       P.pos.set(rec.pos.x + ox, gy, rec.pos.z + oz);
       P.vy = 0; P.grounded = true;
     }
+    // the abandoned hull becomes a solid obstacle again wherever it now rests
+    if (rec) restoreParkedCollider(rec);
     if (_restoreChar && CBZ.playerChar && CBZ.playerChar.group && P) {
       CBZ.playerChar.group.visible = !P.dead;
       if (P) CBZ.playerChar.group.position.copy(P.pos);
@@ -477,6 +532,7 @@
       const P = CBZ.player;
       if (P) { P.driving = false; P._aircraft = null; }
       if (_restoreChar && CBZ.playerChar && CBZ.playerChar.group && P) CBZ.playerChar.group.visible = !P.dead;
+      try { restoreParkedCollider(armor); } catch (e) {}  // hull solidifies where the run left it
       armor = null; _restoreChar = false;
     }
     for (let i = props.length - 1; i >= 0; i--) {

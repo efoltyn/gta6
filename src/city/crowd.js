@@ -176,6 +176,51 @@
   const NIGHT_KIND_W = { core: 3.4, commercial: 0.9, projects: 1.5, residential: 0.5, industrial: 0.12 };
   const NIGHT_DENSITY = 0.6;              // the street holds ~60% of the day crowd after dark
 
+  // ---- SIMPLE SCHEDULES (CBZ.CONFIG.NPC_SCHEDULES) ----
+  // The owner's rule made math: every ambient body gets a hash-derived
+  // ARCHETYPE (stable per agent index — no storage, no rng stream touched) and
+  // the day is 6 four-hour BUCKETS off the canonical sun clock. An archetype
+  // is either OUT or IN BED each bucket; thin() suppresses the sleepers first,
+  // so at deep night the survivors are the nightlife/gangster/homeless slice
+  // (~the owner's "almost all in bed except gangsters and homeless") while the
+  // TOTAL headcount never changes — sleepers are parked, not deleted. A
+  // per-agent ±40min hash offset staggers every transition so the street
+  // turns over in waves, never as one synchronized tide.
+  const ARCH_SALT = 0xA5C0, OFF_SALT = 0xA5C1;
+  // cumulative cuts on hash01(i): worker .55 | errand .75 | nightlife .85 | gangster .93 | homeless 1.0
+  const ARCH_CUT = [0.55, 0.75, 0.85, 0.93];   // 0 worker, 1 errand, 2 nightlife, 3 gangster, 4 homeless
+  // asleep bitmask per archetype; bit b = "in bed" during bucket b
+  // (b0 00-04h, b1 04-08h, b2 08-12h, b3 12-16h, b4 16-20h, b5 20-24h)
+  const ARCH_ASLEEP = [
+    0b100001,  // worker    : midnight-4 + 20-24 → in bed
+    0b100011,  // errand    : late sleeper, early to bed
+    0b001110,  // nightlife : sleeps through the DAY, owns the night
+    0b000110,  // gangster  : crashes mid-morning, out all night
+    0b000000,  // homeless  : never housed — always on the street
+  ];
+  // chance an arriving walker STOPS for a few seconds (window, chat, smoke) —
+  // idle texture so the crowd reads as doing errands, not pacing. Homeless and
+  // gangsters linger most (posted up); workers mostly keep moving.
+  const ARCH_PAUSE = [0.18, 0.35, 0.40, 0.5, 0.6];
+  // preferred district KIND per archetype for stroll goals (null = no bias)
+  const ARCH_KIND = ["commercial", "core", "core", "projects", "industrial"];
+  const ARCH_BIAS_P = 0.4;                 // share of biased strolls that honor the preference
+  // on-street density per GLOBAL bucket (multiplies liveTarget; replaces the
+  // flat NIGHT_DENSITY when NPC_NIGHT_DENSITY is on). Deep night ≈ 22%.
+  const BUCKET_DENSITY = [0.22, 0.4, 1.0, 1.0, 0.92, 0.55];
+  let _hour = 9, _gbucket = 2;             // cached per tick (never per agent)
+  function schedOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES); }
+  function archOf(i) {
+    const h = CBZ.hash01(i, 0, ARCH_SALT);
+    return h < ARCH_CUT[0] ? 0 : h < ARCH_CUT[1] ? 1 : h < ARCH_CUT[2] ? 2 : h < ARCH_CUT[3] ? 3 : 4;
+  }
+  // this agent's personal bucket: the shared hour plus a ±40min hash offset
+  function bucketOf(i) {
+    const hr = (_hour + (CBZ.hash01(i, 1, OFF_SALT) - 0.5) * 1.34 + 24) % 24;
+    return (hr / 4) | 0;
+  }
+  function asleepNow(i) { return ((ARCH_ASLEEP[archOf(i)] >> bucketOf(i)) & 1) === 1; }
+
   // ---- BIOME BUBBLE (flag-gated; relocate, never create) ----
   // ROOT CAUSE: every position draw above pulls from A.lots (mainland district
   // lots), so all 760 instanced bodies live on the mainland — islands/biomes had
@@ -300,6 +345,10 @@
   // the body is skidding/recovering from a physical hit instead of strolling —
   // the render leans it with the shove, so a bump READS without any rig anim.
   const stagT = new Float32Array(CAP), stagX = new Float32Array(CAP), stagZ = new Float32Array(CAP);
+  // SCHEDULE PAUSE: >0 = standing at the spot it just reached (window/chat/
+  // smoke beat) instead of immediately strolling on. Purely a sim() hold — the
+  // renderer sees a zero-speed body, legs settled (phase snapped on entry).
+  const pauseT = new Float32Array(CAP);
   // MASS FLEE (flag-gated, default OFF): when a city EVENT (gunshot/explosion, via
   // cityevents.js → cityPostEvent) lands near an instanced body it SPRINTS away for
   // panicT seconds along fleeH. Closes the gap where the 760-strong background crowd
@@ -487,10 +536,39 @@
   }
   // dispatcher for RELOCATION draws only: biome bubble when active, else mainland.
   function fieldPoint(out) { if (bubbleOn()) regionPoint(out); else drawPoint(out); }
+  // lots grouped by DISTRICT KIND (core/commercial/industrial/projects/…),
+  // built lazily per arena like districtLots — the archetype stroll bias
+  // draws from these so a gangster hangs the projects and a worker works
+  // the commercial strip instead of everyone diffusing uniformly.
+  let _klA = null, _klMap = null;
+  function kindLots(A) {
+    if (_klA === A && _klMap) return _klMap;
+    _klA = A; _klMap = {};
+    if (A.lots && A.districts) for (let k = 0; k < A.lots.length; k++) {
+      const l = A.lots[k], d = typeof l.district === "number" ? A.districts[l.district] : null;
+      if (!d || !d.kind) continue;
+      (_klMap[d.kind] || (_klMap[d.kind] = [])).push(l);
+    }
+    return _klMap;
+  }
   // pickWaypoint(out)         → hour-weighted city-wide point (spawn/reseed)
   // pickWaypoint(out, ax, az) → stroll target biased into (ax,az)'s district
-  function pickWaypoint(out, ax, az) {
+  //                (…, agent) → plus this agent's archetype hangout bias
+  function pickWaypoint(out, ax, az, agent) {
     const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
+    // ARCHETYPE HANGOUT: a slice of strolls head for the archetype's preferred
+    // quarter (worker→commercial, nightlife→core, gangster→projects, homeless→
+    // industrial), so the day crowd SPREADS into varied, purposeful places.
+    // Math.random per file convention (runtime stroll, no shared-state draw).
+    if (agent !== undefined && schedOn() && !bubbleOn() && Math.random() < ARCH_BIAS_P) {
+      const k = ARCH_KIND[archOf(agent)];
+      const ls = k ? kindLots(A)[k] : null;
+      if (ls && ls.length) {
+        sidewalkOnLot(ls[(Math.random() * ls.length) | 0], out);
+        if (A.clampToCity) A.clampToCity(out, 0.6);
+        return;
+      }
+    }
     // BIOME STROLL: a body standing INSIDE the active region picks its next stroll
     // goal WITHIN the same region (cityScatterInRegion), not from mainland district
     // lots — otherwise clampToCity would drag every biome goal to the nearest
@@ -585,7 +663,7 @@
       if (groupLeader[L] === L) { followTarget(i, L); return; }
       groupLeader[i] = -1;               // stale leader ref (shouldn't happen) — fall through solo
     }
-    pickWaypoint(_tmp, px[i], pz[i]);
+    pickWaypoint(_tmp, px[i], pz[i], i);
     applyLaneBias(i, _tmp);
     tx[i] = _tmp.x; tz[i] = _tmp.z;
     heading[i] = Math.atan2(tx[i] - px[i], tz[i] - pz[i]);
@@ -653,7 +731,7 @@
     count = Math.max(0, Math.min(CAP, n | 0));
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
-    stagT.fill(0); collapsedQ.fill(0); panicT.fill(0);
+    stagT.fill(0); collapsedQ.fill(0); panicT.fill(0); pauseT.fill(0);
     groupLeader.fill(-1); groupOffset.fill(0);
     groupMemA.fill(-1); groupMemB.fill(-1); groupMemC.fill(-1);
     liveTarget = count;                          // full street at the start of a run
@@ -775,6 +853,10 @@
         if (panicT[i] <= 0) repick(i);              // calmed → pick a fresh stroll
         continue;
       }
+      // SCHEDULE PAUSE: standing at the spot it walked to (window/chat/smoke
+      // beat) — a still body reads as PURPOSE because it walked there. Runs
+      // AFTER the bump/panic branches so a shove or gunshot still interrupts.
+      if (pauseT[i] > 0) { pauseT[i] -= dt; if (pauseT[i] <= 0) repick(i); continue; }
       const cdx = px[i] - ppx, cdz = pz[i] - ppz, cd2 = cdx * cdx + cdz * cdz;
       const stride = cd2 < NEAR2 ? 1 : (cd2 < MID2 ? 4 : 16);
       if (stride > 1 && (frame + i) % stride !== 0) {
@@ -821,7 +903,18 @@
         continue;
       }
       let dx = tx[i] - px[i], dz = tz[i] - pz[i], d = Math.hypot(dx, dz);
-      if (d < 1.4) { repick(i); dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz); }
+      if (d < 1.4) {
+        // ARRIVED. Schedules: some walkers STOP here for a few seconds —
+        // solo/leader only (a paused follower would be dragged by its group),
+        // and the legs settle (phase snapped to a stride node) so the hold
+        // reads as standing, not a freeze-frame mid-step.
+        if (schedOn() && groupLeader[i] < 0 && Math.random() < ARCH_PAUSE[archOf(i)]) {
+          pauseT[i] = 3 + Math.random() * 7;
+          phase[i] = Math.round(phase[i] / Math.PI) * Math.PI;
+          continue;
+        }
+        repick(i); dx = tx[i] - px[i]; dz = tz[i] - pz[i]; d = Math.hypot(dx, dz);
+      }
       const inv = 1 / (d || 1);
       const want = Math.atan2(dx, dz);
       heading[i] = CBZ.lerpAngle ? CBZ.lerpAngle(heading[i], want, 1 - Math.pow(0.0015, dt)) : want;
@@ -1286,7 +1379,9 @@
   // slice of the ~258m-wide map (π·90² ≈ 0.4 of the play area), so allotting ~45%
   // of the crowd to it already reads as a believably busier foreground without
   // draining the rest. Surplus past this gets re-spread.
-  const NEAR_SHARE = 0.45;
+  // 0.45 → 0.38 (owner: "more spread"): drain the foreground surplus into the
+  // wider map a little sooner, so idle mobs never accrete around the player.
+  const NEAR_SHARE = 0.38;
   const FILL_NEAR = 26, FILL_FAR = 60;            // ring around the player for sparse-fill (off-cone / behind)
   // AHEAD ring: candidates that land INSIDE the forward cone get pushed to this
   // farther band instead — same idea as PROMO_AHEAD2, just applied one step
@@ -1304,6 +1399,18 @@
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     const rd = Math.hypot(rx, rz) || 1;
     return (rx / rd) * fx + (rz / rd) * fz >= AHEAD_DOT;
+  }
+  // SPAWN-IN VISIBILITY (CBZ.CONFIG.NPC_SPAWN_HIDE): the one shared "may a body
+  // appear here?" predicate. A placement is rejected only when it is BOTH close
+  // to the player AND inside the camera's forward cone — beside/behind you is
+  // off-screen coverage and stays allowed. Callers re-draw a few times and then
+  // DEFER to the next tick; a placement is never forced into view.
+  const SAFE_R2 = 45 * 45;
+  function placeSafe(x, z) {
+    if (!CBZ.CONFIG || !CBZ.CONFIG.NPC_SPAWN_HIDE) return true;
+    const P = CBZ.player; if (!P || P.dead) return true;
+    const rx = x - P.pos.x, rz = z - P.pos.z, d2 = rx * rx + rz * rz;
+    return !(d2 < SAFE_R2 && inForwardCone(rx, rz));
   }
   function aheadReseed() {
     const P = CBZ.player; if (!P || P.dead) return;
@@ -1348,7 +1455,7 @@
           // the coverage path, not a spotlight).
           if (inForwardCone(rx, rz) && rd2 < FILL_AHEAD_NEAR * FILL_AHEAD_NEAR) continue;
           ungroup(i);                                  // teleport → drop any walking-group link
-          px[i] = _tmp.x; pz[i] = _tmp.z;
+          px[i] = _tmp.x; pz[i] = _tmp.z; pauseT[i] = 0;
           castTint(i, px[i], pz[i]); repaintShirt(i);  // re-dress for the district it lands in
           repick(i);
           moved++; break;
@@ -1372,7 +1479,7 @@
           const lo = ahead ? FILL_AHEAD_NEAR : FILL_NEAR, hi = ahead ? FILL_AHEAD_FAR : FILL_FAR;
           if (rd < lo || rd > hi) continue;        // land in the appropriate ring
           ungroup(i);                                  // teleport → drop any walking-group link
-          px[i] = _tmp.x; pz[i] = _tmp.z;
+          px[i] = _tmp.x; pz[i] = _tmp.z; pauseT[i] = 0;
           castTint(i, px[i], pz[i]); repaintShirt(i);
           repick(i);
           moved++; break;
@@ -1857,7 +1964,7 @@
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {
     const _clear = CBZ.clearCityPeds;
-    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; prewarming = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); collapsedQ.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
+    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; prewarming = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); collapsedQ.fill(0); pauseT.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
   }
 
   // ---- DENSITY THINNING: keep the on-street agent count in step with the finite
@@ -1896,39 +2003,70 @@
     // exactly like a massacre, so it's a MULTIPLIER on liveTarget, not a cap or
     // draw-call change. Flag-off / mainland → biomeMul stays 1 → byte-identical.
     const biomeMul = bubbleOn() && BIOME_DENSITY[_activeBiome] != null ? BIOME_DENSITY[_activeBiome] : 1;
-    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)) * (nightShift ? NIGHT_DENSITY : 1) * biomeMul);
+    // SCHEDULES: the on-street fraction follows the 4h-bucket curve (deep
+    // night ≈ 22% — "almost all in bed") instead of the flat night 60%.
+    const dens = (schedOn() && CBZ.CONFIG.NPC_NIGHT_DENSITY)
+      ? BUCKET_DENSITY[_gbucket]
+      : (nightShift ? NIGHT_DENSITY : 1);
+    liveTarget = Math.round(count * Math.max(0, Math.min(1, frac)) * dens * biomeMul);
     const c = recountAgents();
     const P = CBZ.player;
     const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
     // FAR bias so density changes happen off-screen, never popping at your feet
     const FAR2 = 60 * 60;
     if (c.live > liveTarget) {
-      // too many on the street → suppress a few FAR, non-promoted, living agents
-      let need = Math.min(10, c.live - liveTarget), scanned = 0;   // rate scaled for the 700 crowd
-      while (need > 0 && scanned < count) {
-        const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
-        if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
-        const dx = px[i] - ppx, dz = pz[i] - ppz;
-        if (dx * dx + dz * dz < FAR2) continue;  // close enough to see → leave it alone
-        ungroup(i);                              // off-street → drop any walking-group link
-        suppressed[i] = 1; need--;
+      // too many on the street → suppress a few FAR, non-promoted, living agents.
+      // SCHEDULES: two passes — the first only parks agents whose archetype is
+      // IN BED this bucket (workers at 2am), so the survivors of a deep-night
+      // thin are the nightlife/gangster/homeless slice; if the sleepers alone
+      // can't meet the quota the second pass takes anyone far enough away.
+      let need = Math.min(10, c.live - liveTarget);
+      for (let pass = 0; pass < 2 && need > 0; pass++) {
+        const pickSleepers = schedOn() && pass === 0;
+        let scanned = 0;
+        while (need > 0 && scanned < count) {
+          const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
+          if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
+          if (pickSleepers && !asleepNow(i)) continue;   // spare the awake this pass
+          const dx = px[i] - ppx, dz = pz[i] - ppz;
+          if (dx * dx + dz * dz < FAR2) continue;  // close enough to see → leave it alone
+          ungroup(i);                              // off-street → drop any walking-group link
+          suppressed[i] = 1; pauseT[i] = 0; need--;
+        }
+        if (!schedOn()) break;                     // old behavior: single any-agent pass
       }
     } else if (c.live < liveTarget && c.sup > 0) {
       // population didn't drop further (or a fresh run) → let a few back onto the
       // street, re-seeded at a FAR sidewalk point so they walk IN, not blink in.
+      // SCHEDULES: wake the AWAKE archetypes first (dawn brings the workers out,
+      // not more nightlife), and every seat must pass placeSafe — a body may
+      // never materialize close-and-ahead of the camera (re-draw, else defer).
       const A = arena();
-      let add = Math.min(7, liveTarget - c.live), scanned = 0;     // rate scaled for the 700 crowd
-      while (add > 0 && scanned < count) {
-        const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
-        if (!suppressed[i] || deadAgent[i]) continue;
-        suppressed[i] = 0;
-        if (A && A.randomSidewalkPoint) {        // fresh pop-weighted spot, dressed for it
-          ungroup(i);                            // teleport → drop any walking-group link (already unlinked normally)
-          fieldPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;   // biome bubble seats un-suppressed bodies in-region
-          castTint(i, px[i], pz[i]); repaintShirt(i);
-          repick(i);
+      let add = Math.min(7, liveTarget - c.live);
+      for (let pass = 0; pass < 2 && add > 0; pass++) {
+        const pickAwake = schedOn() && pass === 0;
+        let scanned = 0;
+        while (add > 0 && scanned < count) {
+          const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
+          if (!suppressed[i] || deadAgent[i]) continue;
+          if (pickAwake && asleepNow(i)) continue;   // the sleepers stay in bed this pass
+          if (A && A.randomSidewalkPoint) {          // fresh pop-weighted spot, dressed for it
+            let seated = false;
+            for (let t = 0; t < 4; t++) {
+              fieldPoint(_tmp);                      // biome bubble seats un-suppressed bodies in-region
+              if (!placeSafe(_tmp.x, _tmp.z)) continue;
+              ungroup(i);                            // teleport → drop any walking-group link (already unlinked normally)
+              suppressed[i] = 0; pauseT[i] = 0;
+              px[i] = _tmp.x; pz[i] = _tmp.z;
+              castTint(i, px[i], pz[i]); repaintShirt(i);
+              repick(i);
+              seated = true; break;
+            }
+            if (!seated) continue;                   // every draw was in view → defer to a later tick
+          } else suppressed[i] = 0;
+          add--;
         }
-        add--;
+        if (!schedOn()) break;                       // old behavior: single any-agent pass
       }
     }
     // ---- TURNOVER: spend the dusk/dawn relocation budget, a few bodies per
@@ -1944,10 +2082,19 @@
         if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) { turnover--; continue; }
         const dx = px[i] - ppx, dz = pz[i] - ppz;
         if (dx * dx + dz * dz < FAR2) { turnover--; continue; }   // in sight → it keeps walking; the draw fields still converge
-        ungroup(i);                                               // teleport → drop any walking-group link
-        fieldPoint(_tmp); px[i] = _tmp.x; pz[i] = _tmp.z;         // biome bubble routes turnover INTO the active region
-        castTint(i, px[i], pz[i]); repaintShirt(i);               // walks on dressed for the hour/biome
-        repick(i);
+        // destination must ALSO be out of view — the source being far never
+        // stopped the old draw landing a teleport right in the camera cone.
+        let landed = false;
+        for (let t = 0; t < 4; t++) {
+          fieldPoint(_tmp);                                       // biome bubble routes turnover INTO the active region
+          if (!placeSafe(_tmp.x, _tmp.z)) continue;
+          ungroup(i);                                             // teleport → drop any walking-group link
+          px[i] = _tmp.x; pz[i] = _tmp.z; pauseT[i] = 0;
+          castTint(i, px[i], pz[i]); repaintShirt(i);             // walks on dressed for the hour/biome
+          repick(i);
+          landed = true; break;
+        }
+        if (!landed) { turnover--; continue; }                    // all draws in view → this body just keeps walking
         moved++; turnover--;
       }
     }
@@ -1986,6 +2133,12 @@
                     (CBZ.cityNearestRegion && CBZ.cityNearestRegion(A, ppx, ppz, ACTIVE_RAD));
         if (reg) { _activeReg = reg; _activeBiome = reg.biome || "city"; }  // links carry no biome → 'city'
       }
+    }
+    // SCHEDULES: cache the sun hour + global 4h bucket once per tick (never per
+    // agent) — same derivation as city/schedule.js:58 (sunrise 6, noon 12).
+    if (schedOn() && CBZ.dayPhase) {
+      _hour = (CBZ.dayPhase() * 24 + 6) % 24;
+      _gbucket = (_hour / 4) | 0;
     }
     // amortized pool pre-warm (a couple of rigs/frame at load) — runs FIRST so the
     // promotion pool is finished and parked before updatePromotion() reaches for it.

@@ -504,22 +504,29 @@ body.campaign-active #minimap,
 body.campaign-active #simHud,
 body.campaign-active #dashBtn,
 body.campaign-active #dashboard,
-body.campaign-active #fullMap,
-body.campaign-active #waypointGuide,
 body.campaign-active #weaponStrip,
 body.campaign-active #hotbar,
 body.campaign-active #invScreen {
   display: none !important;
 }
 
+/* The full navigation map [M] and its after-close waypoint arrow are BACK in
+   the campaign (owner's order: M is the map binding, everywhere). #fullMap and
+   #waypointGuide are deliberately absent from the declutter list above — the
+   phone and the map are separate, mutually-exclusive surfaces now: opening one
+   closes the other in JS (fullmap.js open() / campaign_ui.js open()). */
+
 /* The prison interaction card is character conversation and remains. The city
-   registry's floating prose card does not. */
-body.campaign-active.mode-city #interact,
-body.campaign-active.mode-city #cTurfMeta,
-body.campaign-active.mode-city #cKillFeed,
+   registry's floating prose card does not — EXCEPT during ENDLESS free time:
+   campaign_ui.js stamps body.campaign-endless there, and the ambient gang game
+   (interact card, turf meta, kill feed, orders) gets its feedback back while
+   scripted phases stay clean. */
+body.campaign-active.mode-city:not(.campaign-endless) #interact,
+body.campaign-active.mode-city:not(.campaign-endless) #cTurfMeta,
+body.campaign-active.mode-city:not(.campaign-endless) #cKillFeed,
 /* #cpPanel (top-left character card: portrait/level/stars/bounty/net worth)
    stays VISIBLE in the campaign — owner asked for it back (2026-07-11). */
-body.campaign-active.mode-city #cityOrders,
+body.campaign-active.mode-city:not(.campaign-endless) #cityOrders,
 body.campaign-active.mode-city #cityGigBar,
 body.campaign-active.mode-city #cityHeistHud,
 body.campaign-active.mode-city #raceHud,
@@ -558,6 +565,10 @@ body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
 body.campaign-active.mode-city #cityHud #cLoot,
 body.campaign-active.mode-city #cityHud #cSlots { display: none !important; }
 body.campaign-active.mode-city #cityHud #cAmmo { display: block !important; }
+/* PHONE_NOTIS_V2: the bottom-left minimap survives the declutter — it is an
+   instrument, not narration, and lives in the opposite corner from the phone
+   (peek bottom-right), so the two never collide. */
+body.campaign-active.mode-city.notis-v2 #cityHud #cHud > #cRadar { display: block !important; }
 
 /* Build mode's two legacy floating elements have no IDs. These constrained
    selectors match their fixed slots without touching modal inventory panels. */
@@ -589,4 +600,190 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
   .campaign-phone-device,
   .campaign-dialogue { transition: none; }
   .campaign-phone-peek.campaign-phone-pulse { animation: none; }
+}
+
+/* ---------- full-screen campaign moment (the CITY BOSS takeover card) ----------
+   campaign_ui.js raises this for story-scale wins the phone must not swallow.
+   Click or any key puts it away; campaign.js pairs it with a slow-mo pulse. */
+.campaign-takeover {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  visibility: hidden;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(201, 32, 42, .16), transparent 52%),
+    linear-gradient(180deg, rgba(2, 4, 7, .88), rgba(2, 4, 7, .94));
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity .28s ease, visibility 0s linear .3s;
+  text-align: center;
+  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
+}
+.campaign-takeover.show {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity .28s ease;
+}
+.campaign-takeover-inner { max-width: 640px; }
+.campaign-takeover-eyebrow { letter-spacing: .34em; }
+.campaign-takeover-title {
+  margin-top: 14px;
+  color: #eef4f8;
+  font-size: clamp(46px, 9vw, 92px);
+  text-shadow: 0 5px 0 #171c22, 0 10px 34px rgba(201, 32, 42, .35);
+}
+.campaign-takeover.show .campaign-takeover-title { animation: campaignTakeoverPunch .6s cubic-bezier(.16, 1.2, .3, 1) both; }
+@keyframes campaignTakeoverPunch {
+  0% { transform: scale(1.55); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.campaign-takeover-sub { margin-top: 10px; color: var(--campaign-amber); font-size: 14px; letter-spacing: .3em; }
+.campaign-takeover-body { max-width: 520px; margin: 18px auto 0; color: #c9d3d9; font-size: 15px; line-height: 1.55; }
+.campaign-takeover-hint { margin-top: 26px; color: #697680; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; }
+
+@media (prefers-reduced-motion: reduce) {
+  .campaign-takeover { transition: none; }
+  .campaign-takeover.show .campaign-takeover-title { animation: none; }
+}
+
+/* ---------- PHONE_NOTIS_V2: diegetic push-notification banners ----------
+   campaign_ui.js drives these. One banner at a time. Raised phone: the banner
+   drops in from the top of the glass, over the current app. Stowed phone: the
+   handset buzzes (glyph shake + LED) and a compact "sliver" rises beside it.
+   Badges are voxel-look: a colored rounded square + one geometric glyph. */
+.campaign-noti-badge {
+  flex: 0 0 auto;
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #8a93a3;
+  color: #0b0f14;
+  font: 800 13px/1 Fredoka, ui-rounded, system-ui, sans-serif;
+}
+.campaign-noti-badge.app-messages { background: #7fd0ff; }
+.campaign-noti-badge.app-bank     { background: #7ed957; }
+.campaign-noti-badge.app-news     { background: #ffd451; }
+.campaign-noti-badge.app-bounty   { background: #ff5b5b; }
+.campaign-noti-badge.app-phone    { background: #c792ea; }
+.campaign-noti-badge.app-missions { background: #7fd0ff; }
+.campaign-noti-badge.app-system   { background: #8a93a3; }
+.campaign-noti-badge.app-contracts { background: #e8a23c; }
+
+.campaign-noti-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
+.campaign-noti-toprow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.campaign-noti-from {
+  overflow: hidden;
+  color: #eaf4f8;
+  font: 700 12.5px/1.15 Fredoka, ui-rounded, system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.campaign-noti-app {
+  flex: none;
+  color: #697680;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.campaign-noti-text {
+  overflow: hidden;
+  color: rgba(224, 236, 242, .82);
+  font-size: 12px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* in-phone banner: drops from the top of the screen, over the current app */
+.campaign-phone-glass .campaign-noti-banner {
+  position: absolute;
+  z-index: 5; /* above the notch/island (z 4) */
+  left: 8px;
+  right: 8px;
+  top: 38px;  /* just below the 31px status row + notch */
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 16px;
+  background: rgba(18, 25, 32, .93);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transform: translateY(-135%);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  transition: transform .22s cubic-bezier(.18, .82, .2, 1), opacity .16s ease;
+}
+.campaign-phone-glass .campaign-noti-banner.in {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* stowed sliver: rises above the closed-phone glyph, lock-screen style */
+.campaign-noti-sliver {
+  position: fixed;
+  z-index: 128; /* peek 115 < sliver < raised layer 130 */
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px)); /* clears the 45px peek + gap */
+  display: flex;
+  width: min(300px, calc(100vw - 40px));
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid rgba(225, 239, 246, .18);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(37, 45, 53, .96), rgba(8, 12, 17, .97));
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .08);
+  color: inherit;
+  text-align: left;
+  transform: translateY(14px) scale(.96);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  transition: transform .22s cubic-bezier(.18, .82, .2, 1), opacity .18s ease;
+  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
+}
+.campaign-noti-sliver.in {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* the Messages/News history rows carry a smaller per-app badge */
+.campaign-feed-top .campaign-noti-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+/* MUTUAL EXCLUSION with the full map: while the map owns the screen, the
+   closed-phone glyph and any stowed banner step aside (JS also closes a
+   raised phone before the map opens, and vice versa). */
+body.full-map-open #campaignPhonePeek,
+body.full-map-open .campaign-noti-sliver {
+  display: none !important;
+}
+
+@media (max-width: 720px), (max-height: 650px) {
+  .campaign-noti-sliver { right: 50%; transform: translate(50%, 14px) scale(.96); }
+  .campaign-noti-sliver.in { transform: translate(50%, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .campaign-noti-banner,
+  .campaign-noti-sliver { transition: none; }
 }

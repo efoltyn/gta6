@@ -501,7 +501,7 @@
       // JACKPOT FENCE: a single piece pawning for a real fortune gets a headline
       // — pawning a Patek/ring/bonds should FEEL like the score it is.
       if (jackpotItem && jackpotEach >= 50000 && CBZ.city.big) {
-        CBZ.city.big("💰 PAWNED " + jackpotItem + " for " + fmt$(jackpotEach) + "!");
+        CBZ.city.note(fmt$(jackpotEach) + " received — pawn sale: " + jackpotItem + ".", 2.4, { from: "Liberty Bank", app: "bank" });
         if (n > 1) CBZ.city.note("…plus the rest of the haul — " + fmt$(got) + " total.", 2);
       } else {
         CBZ.city.note("Sold " + n + " for " + fmt$(got), 1.8);

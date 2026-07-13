@@ -200,6 +200,42 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   CBZ.cityForceStars = forceStars;
+
+  // ---- SCRIPTED ARREST SETUP (campaign/director API) -------------------------
+  // A scripted beat that must END IN CUFFS (the campaign's rooftop trap) cannot
+  // hand-poke g.wanted/g.heat: police.js's arrest-first AI flips to LETHAL force
+  // at 4★+ (and legacy flag-off cops shoot from 2★), and any stale fired-upon
+  // stamp or spree memory re-escalates the responders. This puts the whole force
+  // into a "close in and take them" posture:
+  //   • heat is FORCED into the highest still-arrestable band (3★ arrest-first,
+  //     2★ legacy) — clamped DOWN too, a prior rampage can't out-rank the script;
+  //   • fired-upon stamps + spree counters get a fresh slate (the officers on
+  //     this call have no reason to shoot first — yet; shooting one of them
+  //     re-stamps fired-upon and lethality returns honestly);
+  //   • any stale bust latch is cleared so the scripted CBZ.cityBust always fires.
+  // opts: { stars, heat, reason }. Returns the stars actually granted.
+  CBZ.cityForceArrestSetup = function (opts) {
+    opts = opts || {};
+    const T = CBZ.CITY.starHeat;
+    // police.js defaults CITY_ARREST_FIRST true; mirror that read here.
+    const arrestFirst = !(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST === false);
+    const cap = arrestFirst ? 3 : 2;
+    const want = Math.max(1, Math.min(cap, opts.stars != null ? (opts.stars | 0) : cap));
+    let heat = opts.heat != null ? +opts.heat : T[want] + 5;
+    heat = Math.max(T[want] + 1, Math.min(T[Math.min(5, cap + 1)] - 1, heat));
+    g.heat = heat;
+    g.wanted = starsFromHeat(g.heat);
+    g._copsFiredUponT = 0; g._copWoundT = 0;          // arrest posture, not payback
+    g.cityMurders = 0; g.cityCopKills = 0;            // spree memory would re-escalate
+    g.busted = false; busting = false;                // a stale latch would eat the scripted bust
+    lastCrimeT = CBZ.now;
+    if (CBZ.player && CBZ.player.pos) g.cityLastKnown = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: CBZ.now };
+    if (opts.reason) g.cityCrimeLabel = String(opts.reason);
+    g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
+    CBZ.city && CBZ.city.big("★".repeat(Math.max(1, g.wanted)) + " WANTED" + (opts.reason ? " · " + opts.reason : ""));
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return g.wanted;
+  };
   CBZ.cityCopKilled = function () { report(9999, { type: "_copkill", x: CBZ.player.pos.x, z: CBZ.player.pos.z }); };
 
   // does a LIVE cop actually SEE the crime happen? close enough AND a clear line of
@@ -261,6 +297,234 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   };
 
+  // ============================================================
+  //  BOUNTIES_V2 — HITMAN CONTRACTS (owner: "wanted posters that spawn a
+  //  mission to find and kill… bounties given to a hitman… some MASSIVE
+  //  bounties"). A live BOARD of open contracts on real city NPCs — gang
+  //  bosses & lieutenants, corrupt company owners, tycoons, and the world's
+  //  own rollBounty fugitives — with an occasional MASSIVE $1M+ contract on
+  //  the richest eligible mark (ties into ECONOMY_V2's cityNetWorthOf).
+  //
+  //  THE TRICK THAT KEEPS THIS SMALL: peds.js ALREADY pays out ped.bounty on
+  //  a player kill (cash + "BOUNTY CLAIMED" + respect, clears the bounty,
+  //  paid once) AND exempts a bountied ped from crowd recycling AND floats a
+  //  ☠ tag over them. So accepting a contract just stamps ped.bounty/
+  //  bountyTag on the target and the engine does kill-detection, payout and
+  //  keep-alive for free. Completion is read back as "target dead + bounty
+  //  cleared" (only a player kill clears it); "dead but bounty intact" means
+  //  someone else got them → contract failed. NO cityKillPed wrap needed —
+  //  and no double payout, because completion here never calls addCash.
+  //
+  //  ONE contract active at a time (one unambiguous waypoint, mirrors the
+  //  campaign's single-mission model, no competing map pins). The board may
+  //  OFFER several. CBZ.bountyFromPoster(poster) is the props-side entry:
+  //  interacting with a wanted poster accepts the nearest/best open offer.
+  //  The contract record is MODULE-LOCAL, never on g — it holds a live ped
+  //  reference (circular three.js graph) that must not enter serialization.
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.BOUNTIES_V2 == null) CBZ.CONFIG.BOUNTIES_V2 = true;
+  function bountiesOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.BOUNTIES_V2); }
+  let contract = null;          // { id, tag, reward, target, targetName, expireT, pingT, lastSeen, massive, _weSetBounty }
+  let bountyBoard = [];         // open offers: { id, kind, tag, reward, ref, name, massive, _weSetBounty }
+  let bountyCooldown = 0;       // seconds until the board deals again after a close
+  let boardT = 0, offerSeq = 1;
+  let _bs = 777001;             // local LCG (runtime mission state — never world-build input)
+  function brng() { _bs = (_bs * 1103515245 + 12345) & 0x7fffffff; return _bs / 0x7fffffff; }
+
+  function bNotify(text) {
+    try {
+      if (CBZ.phoneNotify) { CBZ.phoneNotify({ from: "BLKLST", app: "contracts", text: text }); return; }
+    } catch (e) {}
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(text, 3);
+  }
+  function bMoney(n) { return "$" + Math.round(n || 0).toLocaleString(); }
+  function districtNameAt(x, z) {
+    const e = CBZ.cityEcon;
+    return (e && e.districtAt && e.districtName) ? e.districtName(e.districtAt(x, z)) : "the city";
+  }
+  // gigs/jobs own the shared map pin while active — the contract ping yields.
+  function waypointBusy() { return !!(g.cityJob || g.cityGig); }
+  function contractWaypoint(t) {
+    if (waypointBusy()) return;
+    if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(t.pos.x, t.pos.z, "🎯 " + (t.name || "MARK")); } catch (e) {} }
+  }
+  function dropContractWaypoint() {
+    if (waypointBusy()) return;   // never clear a gig's pin
+    if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) { try { CBZ.fullMap.clearWaypoint("city"); } catch (e) {} }
+  }
+
+  // a ped we may put a contract on: live, in the world, not the player's
+  // people, not already carrying OUR contract, not a scripted campaign target.
+  function contractable(p) {
+    if (!p || p.dead || p.isPlayer || p.vendor || p.companion || p.recruited) return false;
+    if (p._campaignTarget || p._contractId) return false;
+    if (p.protectGang === "player" || p.gang === "player") return false;
+    return true;
+  }
+  function pushOffer(kind, p, reward, tag, massive) {
+    if (!p || reward < 1000) return;
+    for (let i = 0; i < bountyBoard.length; i++) if (bountyBoard[i].ref === p) return;   // one offer per head
+    bountyBoard.push({ id: "bo" + (offerSeq++), kind: kind, tag: tag, reward: Math.round(reward), ref: p, name: p.name || tag, massive: !!massive, _weSetBounty: !(p.bounty > 0) });
+    if (massive) {
+      const dk = districtNameAt(p.pos.x, p.pos.z);
+      if (CBZ.cityFeed) { try { CBZ.cityFeed("🩸 Word on the street: a " + bMoney(reward) + " contract is out on " + (p.name || "a big name") + " (" + dk + ")", "#ff6a5e"); } catch (e) {} }
+    }
+  }
+  // top the board up to 5 open offers from live city sources (throttled ~4s)
+  function topUpBoard() {
+    // drop stale offers (dead/despawned/claimed heads)
+    for (let i = bountyBoard.length - 1; i >= 0; i--) {
+      const o = bountyBoard[i];
+      if (!o.ref || o.ref.dead || (CBZ.cityPeds && CBZ.cityPeds.indexOf(o.ref) < 0)) bountyBoard.splice(i, 1);
+    }
+    if (bountyBoard.length >= 5) return;
+    const peds = CBZ.cityPeds || [];
+    let hasMassive = contract && contract.massive ? 1 : 0;
+    for (let i = 0; i < bountyBoard.length; i++) if (bountyBoard[i].massive) hasMassive++;
+    // 1) adopt the world's own fugitives (rollBounty peds) — their price IS the reward
+    for (let i = 0; i < peds.length && bountyBoard.length < 5; i++) {
+      const p = peds[i];
+      if (p && p.bounty > 0 && contractable(p)) pushOffer("fugitive", p, p.bounty, p.bountyTag || "WANTED", p.bounty >= 1000000);
+    }
+    // 2) gang bosses / lieutenants (crime-war contracts)
+    const gangs = CBZ.cityGangs || [];
+    for (let i = 0; i < gangs.length && bountyBoard.length < 5; i++) {
+      const gn = gangs[i];
+      if (!gn || gn.isPlayer || gn.absorbed) continue;
+      if (gn.boss && contractable(gn.boss) && brng() < 0.35) pushOffer("boss", gn.boss, 80000 + brng() * 170000, "GANG BOSS");
+      else if (gn.members) {
+        for (let j = 0; j < gn.members.length; j++) {
+          const m = gn.members[j];
+          if (m && (m.rank === "lt" || m.rank === "enforcer") && contractable(m) && brng() < 0.2) { pushOffer("lt", m, 25000 + brng() * 55000, "LIEUTENANT"); break; }
+        }
+      }
+    }
+    // 3) corrupt money: company owners + tycoons — priced off their REAL worth
+    //    (ECONOMY_V2), so the MASSIVE contracts land on the ultra-rich.
+    for (let i = 0; i < peds.length && bountyBoard.length < 5; i++) {
+      const p = peds[i];
+      if (!contractable(p)) continue;
+      if (p.isCompanyOwner && brng() < 0.25) {
+        const nw = CBZ.cityNetWorthOf ? CBZ.cityNetWorthOf(p) : 5e6;
+        pushOffer("owner", p, Math.min(500000, Math.max(50000, nw * 0.005)), "CORRUPT EXEC");
+      } else if (p._milli && brng() < 0.18) {
+        const nw = CBZ.cityNetWorthOf ? CBZ.cityNetWorthOf(p) : 5e6;
+        const massive = !hasMassive && nw >= 100e6 && brng() < 0.5;   // the rare ultra-rich head
+        if (massive) hasMassive = 1;
+        pushOffer("tycoon", p, Math.min(massive ? 5000000 : 2000000, Math.max(50000, nw * (massive ? 0.02 : 0.01))), massive ? "HIGH-VALUE CONTRACT" : "TYCOON", massive);
+      }
+    }
+  }
+
+  function stampTarget(o) {
+    const t = o.ref;
+    if (!t || t.dead || !contractable(t)) return null;
+    if (t.bounty > 0) o._weSetBounty = false;              // adopt a world fugitive's own price
+    else { t.bounty = Math.round(o.reward); o._weSetBounty = true; }
+    t.bountyTag = o.tag;
+    t._contractId = o.id;
+    return t;
+  }
+  function clearOurBounty(c) {
+    const t = c && c.target;
+    if (t) { if (c._weSetBounty) { t.bounty = 0; t.bountyTag = null; } t._contractId = null; }
+  }
+  function acceptContract(o) {
+    const t = stampTarget(o);
+    if (!t) { bNotify("Couldn't get a fix on the target. Check the board again later."); return null; }
+    const dk = districtNameAt(t.pos.x, t.pos.z);
+    contract = {
+      id: o.id, tag: o.tag, reward: (t.bounty | 0) || o.reward, target: t,
+      targetName: t.name || o.tag, expireT: CBZ.now + 8 * 60 * 1000, pingT: 12,
+      lastSeen: { x: t.pos.x, z: t.pos.z }, massive: !!o.massive, _weSetBounty: o._weSetBounty,
+    };
+    for (let i = bountyBoard.length - 1; i >= 0; i--) if (bountyBoard[i].id === o.id) bountyBoard.splice(i, 1);
+    contractWaypoint(t);
+    bNotify("🎯 Contract accepted: " + contract.targetName + " (" + bMoney(contract.reward) + ") — last seen in " + dk + ". The map ping refreshes as they move.");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return contract;
+  }
+  function completeContract() {
+    const c = contract; if (!c) return;
+    // peds.js already PAID the cash + announced "BOUNTY CLAIMED" — bookkeeping only here.
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("🎯 Contract fulfilled: " + c.targetName + " · +" + bMoney(c.reward), "#7ed957"); } catch (e) {} }
+    if (CBZ.city) CBZ.city.addRespect(c.reward >= 1000000 ? 20 : 6);
+    // CONSEQUENCE: a sanctioned hit on a KNOWN CRIMINAL earns a partial pardon
+    // ("the law looks the other way"); murdering a respectable tycoon/exec
+    // does NOT — the witnesses saw a murder and you stay hot.
+    const sanctioned = /WANTED|FUGITIVE|DANGEROUS|BOSS|LIEUTENANT/i.test(c.tag || "");
+    if (sanctioned && CBZ.cityReduceWanted) CBZ.cityReduceWanted(1);
+    bNotify("Contract paid: " + bMoney(c.reward) + "." + (sanctioned ? " The law looks the other way this time." : ""));
+    dropContractWaypoint();
+    contract = null; bountyCooldown = 90;
+  }
+  function failContract(why) {
+    const c = contract; if (!c) return;
+    clearOurBounty(c);
+    dropContractWaypoint();
+    bNotify("Contract failed — " + why + ".");
+    if (CBZ.cityFeed) { try { CBZ.cityFeed("❌ Contract failed — " + why, "#ff8a8a"); } catch (e) {} }
+    contract = null; bountyCooldown = 60;
+  }
+  function pingContract(manual) {
+    const c = contract, t = c && c.target;
+    if (!t || t.dead) return;
+    c.lastSeen = { x: t.pos.x, z: t.pos.z };
+    contractWaypoint(t);
+    if (manual) bNotify("Ping: " + c.targetName + " last seen in " + districtNameAt(t.pos.x, t.pos.z) + ".");
+  }
+  // the per-frame contract brain — folded into the existing order-33 tick below
+  function bountyTick(dt) {
+    if (!bountiesOn() || g.mode !== "city") return;
+    if (bountyCooldown > 0) bountyCooldown -= dt;
+    boardT -= dt;
+    if (boardT <= 0) { boardT = 4; try { topUpBoard(); } catch (e) {} }
+    const c = contract; if (!c) return;
+    const t = c.target;
+    if (t && t.dead) {
+      // player kill ⇒ peds.js cleared the bounty as it paid; intact ⇒ rival got them
+      if ((t.bounty | 0) === 0) completeContract();
+      else { t.bounty = 0; t.bountyTag = null; failContract("someone else got to them first"); }
+      return;
+    }
+    if (!t || (CBZ.cityPeds && CBZ.cityPeds.indexOf(t) < 0)) { failContract("the trail went cold"); return; }
+    if (CBZ.now >= c.expireT) { failContract("the contract expired"); return; }
+    c.pingT -= dt;
+    if (c.pingT <= 0) { c.pingT = 12; pingContract(false); }
+  }
+
+  // ---- public surface --------------------------------------------------------
+  // The props agent wires wanted-poster interaction to this: accept the best
+  // open contract (bias: nearest offer to the poster). `poster` may be a lot,
+  // a prop record, a position, or nothing at all — read defensively.
+  CBZ.bountyFromPoster = function (poster) {
+    if (!bountiesOn() || g.mode !== "city") return null;
+    if (contract) {
+      bNotify("You've already got a live contract — " + contract.targetName + " (" + bMoney(contract.reward) + "). Finish it or let it expire.");
+      pingContract(true);
+      return contract;
+    }
+    if (bountyCooldown > 0) { bNotify("The board's quiet right now. Check back soon."); return null; }
+    try { topUpBoard(); } catch (e) {}
+    if (!bountyBoard.length) { bNotify("Just old paper — nothing active on this one."); return null; }
+    const px = (poster && typeof poster.x === "number") ? poster.x : (poster && poster.pos && typeof poster.pos.x === "number") ? poster.pos.x : (CBZ.player ? CBZ.player.pos.x : 0);
+    const pz = (poster && typeof poster.z === "number") ? poster.z : (poster && poster.pos && typeof poster.pos.z === "number") ? poster.pos.z : (CBZ.player ? CBZ.player.pos.z : 0);
+    // MASSIVE contracts headline the poster; otherwise the biggest purse near it
+    let best = null, bs = -1;
+    for (let i = 0; i < bountyBoard.length; i++) {
+      const o = bountyBoard[i];
+      if (!o.ref || o.ref.dead) continue;
+      const d = Math.hypot(o.ref.pos.x - px, o.ref.pos.z - pz);
+      const s = (o.massive ? 1e9 : 0) + o.reward - d * 20;
+      if (s > bs) { bs = s; best = o; }
+    }
+    return best ? acceptContract(best) : null;
+  };
+  CBZ.cityContract = function () { return contract; };
+  CBZ.cityContracts = function () { return bountyBoard.slice(); };
+  CBZ.cityContractPing = function () { if (contract) pingContract(true); };
+  CBZ.cityContractAbandon = function () { if (contract) failContract("abandoned"); };
+
   // ---- BUST: cuffed by police → off to the jail (escape) game ----
   // opts.bigLabel / opts.note (city/origins.js, the EXEC fraud arrest): an
   // optional custom big-text + overlay sub-line for a scripted bust that
@@ -312,12 +576,14 @@
     // (only CBZ.cityClearConvict lifts it). Re-assert AFTER any decay this frame.
     convictFloor();
     g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
+    // BOUNTIES_V2 contract brain rides this same tick (no new update order)
+    try { bountyTick(dt); } catch (e) {}
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   });
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; };
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + hitman contracts die with the run
 
   // ---- DEATH RESET (PROG owns): on player death, drop the player's STREET INFAMY
   // back toward Lv.1 so the level/title visibly falls and the player re-climbs.
@@ -339,6 +605,8 @@
     g.cityCrew = 0;                         // your crew scatters when you go down
     g.cityMembership = null;                // borrowed gang colors lapse (a founded g.playerGang is an asset → kept)
     g.cityHolstered = false;               // back to default stance on respawn
+    // a hitman's contract dies with the hitman (the target keeps walking)
+    if (contract) { clearOurBounty(contract); dropContractWaypoint(); contract = null; bountyCooldown = 30; }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   CBZ.cityInfamyResetOnDeath = infamyResetOnDeath;

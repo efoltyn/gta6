@@ -12,6 +12,7 @@
   const g = CBZ.game;
 
   let hintTimer = 0;
+  let copGateHintT = 0;   // throttles the cop-role "not your exit" flavor line
   const fadeEl = document.getElementById("fade");
 
   function updateInteractions(dt) {
@@ -167,7 +168,21 @@
     // hint fade-out
     if (hintTimer > 0) { hintTimer -= dt; if (hintTimer <= 0) CBZ.hideHint(); }
 
-    // ---- win ----
+    // ---- win ---- (escape-mode only, and role-gated: only the ESCAPING role
+    // wins by crossing the wire. A cop reaching the gate is just on shift —
+    // capture.js:tryCapture uses the same g.role === "cop" predicate for the
+    // other direction. Previously a cop, or even a city/survival run whose
+    // coordinates drifted over the jail EXIT, triggered the inmate escape.)
+    if (g.mode !== "escape") return;
+    if (g.role === "cop") {
+      if (copGateHintT > 0) copGateHintT -= dt;
+      const cx = player.pos.x - CBZ.EXIT.x, cz = player.pos.z - CBZ.EXIT.z;
+      if (cx * cx + cz * cz < 9 && copGateHintT <= 0) {
+        copGateHintT = 10;
+        CBZ.flashHint("You're on shift — the gate clocks you right back in.", 2.2);
+      }
+      return;
+    }
     const ex = player.pos.x - CBZ.EXIT.x, ez = player.pos.z - CBZ.EXIT.z;
     let routeWin = false;
     if (CBZ.altExitZones) {

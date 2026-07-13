@@ -213,6 +213,11 @@
   // ---------- keys ----------
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
+    // this stash is the ESCAPE-mode bag — city mode has its own inventory
+    // (city/inventory.js on I) and uses B for the character front-view, so
+    // reacting here in city would open an invisible panel that wedges
+    // CBZ.invOpen and blocks every other city panel.
+    if (CBZ.game && CBZ.game.mode === "city") return;
     const k = e.key.toLowerCase();
     // B = open the bag/stash. I/J/K/L are RESERVED for interaction slots, so
     // the stash moved off I; E stays sabotage/vent, numbers drive the hotbar.

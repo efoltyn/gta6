@@ -703,7 +703,7 @@
     delete rentals()[rec.id];
     if (g.cityRentedHome === rec.id) {
       g.cityRentedHome = null;
-      if (!g.cityHome) { g.citySpawnPoint = null; if (!quiet) CBZ.city.note("Lease ended — no respawn point until you rent/buy a home.", 2.4); }
+      if (!g.cityHome) { g.citySpawnPoint = null; if (!quiet) CBZ.city.note("Your lease is up — you\u2019ve got no place to crash until you rent or buy again.", 2.4, { from: "Zillow" }); }
     }
     if (!quiet) { flash("Ended your lease on " + rec.name + ".", "ok"); persist(); refresh(); }
   }
@@ -715,7 +715,7 @@
     g.citySpawnPoint = { x: door.x, z: door.z };
     g.cityRentedHome = rec.id;
     flash(rec.name + " is now your home base.", "ok");
-    CBZ.city.note("Respawn point set to " + rec.name + ".", 2.2);
+    CBZ.city.note("You\u2019re all moved in at " + rec.name + " — keys are under the mat.", 2.2, { from: "Zillow" });
     persist(); refresh();
   }
 
@@ -748,7 +748,7 @@
       if (isPenthouseHome(rec.lot.building.home)) { g.cityOwnsPenthouse = false; g.cityOwnsHeli = false; g.cityOwnsHangar = false; }
       rec.lot.building.home.owned = false;
     }
-    if (isHome(rec)) { g.cityHome = null; g.citySpawnPoint = null; CBZ.city.note("Sold your home — no respawn point until you buy another.", 2.6); }
+    if (isHome(rec)) { g.cityHome = null; g.citySpawnPoint = null; CBZ.city.note("Sale closed on your place — you\u2019re off the books until you buy again.", 2.6, { from: "Zillow" }); }
     const plTxt = pl ? " (" + (pl >= 0 ? "+" : "") + money(pl) + " flip)" : "";
     const note = payoff > 0 ? "Sold " + rec.name + " for " + money(gross) + " (-" + money(payoff) + " mortgage = +" + money(got) + ")" + plTxt + "." : "Sold " + rec.name + " for " + money(got) + plTxt + ".";
     flash(note, "ok"); CBZ.city.big("SOLD " + rec.name + " — +" + money(got));
@@ -770,7 +770,7 @@
     g.citySpawnPoint = { x: door.x, z: door.z };
     if (!quiet) {
       flash(home.name + " is now your home" + (movedFrom ? "; " + movedFrom + " becomes a rental" : "") + ".", "ok");
-      CBZ.city.note(home.name + " is now your home. Respawn point set.", 2.4);
+      CBZ.city.note(home.name + " is yours now — welcome home.", 2.4, { from: "Zillow" });
       refresh();
     }
   }

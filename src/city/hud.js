@@ -43,6 +43,13 @@
   let relEl;                // single-ped relationship chip (aim/near target)
   let postWrap, postYouEl, postFoeEl, postFoeNameEl;  // melee posture bars
   let dirty = true;
+  // ---- MINECRAFT-STYLE HUD (owner ask: "inventory on screen and health and
+  //      hunger just like Minecraft"). Hearts / drumsticks / armor-plate icon
+  //      rows above a square-slot hotbar. One-line revert: CBZ.CONFIG.CITY_HUD_MC
+  //      = false restores the slim vitals bars + pill hotbar chips exactly.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_HUD_MC == null) CBZ.CONFIG.CITY_HUD_MC = true;
+  let mcHeartsEl, mcFoodEl, mcArmRowEl, mcArmIconsEl, mcArmLabEl, mcStamFEl;   // MC vitals cluster
+  let mcApplied = null, mcSig = "", mcStamLast = -1, mcArmLabLast = null;      // MC render guards
 
   function build() {
     if (root) return;
@@ -159,6 +166,44 @@
         // feed down so it clears our top-right money/pop stack, and cap its width
         // so a long name never reaches the centre. One cohesive, non-overlapping HUD.
         "#cKillFeed{top:230px !important;width:212px !important}" +
+        // --- MINECRAFT-STYLE HUD (CITY_HUD_MC): the .mc class on #cityHud flips
+        //     the whole skin — hearts left / drumsticks right in two icon rows
+        //     riding the hotbar's width, armor plates above the hearts, stamina
+        //     a slim sliver under them, square MC slots. Flag off = classic bars
+        //     (these selectors simply never match). Icon art itself (SVG data-
+        //     URIs) is appended by mcIconCss() at the sheet's tail.
+        "#cHud #cMcVit{display:none}" +
+        "#cityHud.mc #cMcVit{display:flex;flex-direction:column;align-items:stretch;align-self:stretch;gap:3px;margin-bottom:2px}" +
+        "#cityHud.mc #cVitals{display:none}" +
+        "#cityHud.mc .mcRow{display:flex;gap:2px}" +
+        "#cityHud.mc .mcI{width:18px;height:16px;flex:none;background-repeat:no-repeat;background-size:100% 100%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.65))}" +
+        "#cityHud.mc .mcMid{display:flex;justify-content:space-between;align-items:flex-end;gap:14px}" +
+        "#cityHud.mc .mcColL{display:flex;flex-direction:column;gap:2px}" +
+        "#cityHud.mc #cMcFood{justify-content:flex-end}" +
+        "#cityHud.mc #cMcArmRow{align-items:center;gap:8px}" +
+        "#cityHud.mc .mcLab{font-size:11px;font-weight:700;color:#c9d4e0;letter-spacing:.4px;text-shadow:0 1px 2px rgba(0,0,0,.8);white-space:nowrap}" +
+        "#cityHud.mc .mcStamSlot{height:3px;border-radius:2px;background:rgba(0,0,0,.55);overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}" +
+        "#cityHud.mc .mcStamSlot>i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)}" +
+        // low health (< 3 hearts): a soft per-heart jitter, pure CSS, staggered
+        // by nth-child so the row wobbles like MC rather than bouncing as a slab
+        "@keyframes mcHeartBeat{0%,100%{transform:translateY(0)}20%{transform:translateY(-2px)}60%{transform:translateY(1px)}}" +
+        "#cityHud.mc #cMcHearts.low .mcI{animation:mcHeartBeat .55s ease-in-out infinite}" +
+        "#cityHud.mc #cMcHearts.low .mcI:nth-child(2n){animation-delay:.14s}" +
+        "#cityHud.mc #cMcHearts.low .mcI:nth-child(3n){animation-delay:.28s}" +
+        // MC hotbar skin: fixed square slots with a sunken bevel; the SELECTED
+        // slot gets the thick light frame + slight scale. Same ids / markup /
+        // click delegation as the pill chips — this is CSS-only reskinning.
+        "#cityHud.mc .cSlot{width:44px;height:44px;min-width:44px;box-sizing:border-box;padding:2px;border-radius:3px;background:rgba(10,12,16,.66);border:2px solid #0a0c10;box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),inset -2px -2px 0 rgba(255,255,255,.10),0 2px 6px rgba(0,0,0,.45);transition:transform .07s ease}" +
+        "#cityHud.mc .cSlot.held{border-color:#e8ecf2;box-shadow:0 0 0 2px rgba(232,236,242,.85),inset 2px 2px 0 rgba(0,0,0,.35),inset -2px -2px 0 rgba(255,255,255,.14);transform:scale(1.1);z-index:1}" +
+        "#cityHud.mc .cSlot .s{font-size:12px;letter-spacing:0}" +
+        "#cityHud.mc .cSlot.item .ic{font-size:20px}" +
+        "#cityHud.mc .cSlot.item .s{font-size:10px}" +
+        "#cityHud.mc .cSlot .a{margin-top:0;font-size:9px}" +
+        "#cityHud.mc .cSlot .cnt{top:auto;bottom:1px;right:3px;font-size:10px;background:none;padding:0;text-shadow:1px 1px 0 #000,0 0 3px #000}" +
+        "#cityHud.mc .cSlots{gap:3px}" +
+        // keep the melee-posture/relationship contextual stack clear of the
+        // taller bottom-centre cluster (inline bottom:122px needs the !important)
+        "#cityHud.mc #cCtx{bottom:170px !important}" +
         // --- SMALL SCREENS: the bottom-centre stack (loot+slots+ammo) must never
         // collide or spill — shrink chips/slots/fonts under 900px wide / 560px tall.
         "@media (max-width:900px),(max-height:560px){" +
@@ -181,7 +226,14 @@
         "  #cHud #cTurf{bottom:calc(var(--hud-pad-b) + 152px) !important;font-size:11px !important}" +
         "  #cHud #cHomeLine{bottom:calc(var(--hud-pad-b) + 168px) !important;font-size:11px !important}" +
         "  #cHud #cMemb{bottom:calc(var(--hud-pad-b) + 186px) !important}" +
-        "}";
+        // MC skin shrinks with the same breakpoint: ~36px slots, 14px icons
+        "  #cityHud.mc .cSlot{width:36px;height:36px;min-width:36px}" +
+        "  #cityHud.mc .cSlot .s{font-size:10px}" +
+        "  #cityHud.mc .cSlot.item .ic{font-size:16px}" +
+        "  #cityHud.mc .mcI{width:14px;height:12px}" +
+        "  #cityHud.mc .mcMid{gap:10px}" +
+        "  #cityHud.mc #cCtx{bottom:150px !important}" +
+        "}" + mcIconCss();
       document.head.appendChild(st);
     }
     root = document.createElement("div");
@@ -229,6 +281,18 @@
       // mag/reserve underneath. The loot row sits just above it. Slots + loot are
       // chrome; the live ammo line is content.
       "<div id='cWpn' class='cBar' style='position:absolute;left:50%;bottom:var(--hud-pad-b);transform:translateX(-50%)'>" +
+      // MINECRAFT vitals cluster (CITY_HUD_MC): armor plates over hearts (+ a
+      // stamina sliver) on the left, drumsticks right-aligned opposite — the
+      // strip stretches to the hotbar's width and rides just above it. Icon
+      // rows are BUILT ONCE (fillIcons) and only have classes toggled per
+      // change. Hidden whole (and the classic #cVitals bars shown) when off.
+      "  <div id='cMcVit' class='oM'>" +
+      "    <div id='cMcArmRow' style='display:none'><div id='cMcArm' class='mcRow'></div><span id='cMcArmLab' class='mcLab'></span></div>" +
+      "    <div class='mcMid'>" +
+      "      <div class='mcColL'><div id='cMcHearts' class='mcRow'></div><div id='cMcStam' class='mcStamSlot'><i id='cMcStamF'></i></div></div>" +
+      "      <div id='cMcFood' class='mcRow'></div>" +
+      "    </div>" +
+      "  </div>" +
       "  <div id='cLoot' class='cLoot oC' style='display:none'></div>" +
       "  <div id='cSlots' class='cSlots oC'></div>" +
       "  <div id='cAmmo' class='cAmmo oM'></div>" +
@@ -259,7 +323,7 @@
       // bottom-centre contextual zone: the relationship chip (when targeting one
       // ped) and the melee posture bars (only mid-fight, so alert level). Sits
       // between the bottom-left health stack and the hotbar — no overlap.
-      "<div style='position:absolute;left:50%;bottom:122px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none'>" +
+      "<div id='cCtx' style='position:absolute;left:50%;bottom:122px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none'>" +
       "  <div id='cPost' class='cPost oA' style='display:none'>" +
       "    <div class='lbl'><span>YOU</span><span id='cPostFoeNm' style='color:#ffb37a'></span></div>" +
       "    <div class='pbar you' id='cPostYou'><i style='width:0%'></i></div>" +
@@ -277,6 +341,12 @@
     armBar = root.querySelector("#cArm"); armRowEl = root.querySelector("#cArmRow"); armLabEl = root.querySelector("#cArmLab");
     wpnEl = root.querySelector("#cWpn"); jobEl = root.querySelector("#cJob");
     slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo"); lootEl = root.querySelector("#cLoot");
+    // MC vitals cluster — build the icon rows ONCE (12 hearts is the cap;
+    // 10 shanks / 10 plates); per-frame code only toggles classes/display.
+    mcHeartsEl = root.querySelector("#cMcHearts"); mcFoodEl = root.querySelector("#cMcFood");
+    mcArmRowEl = root.querySelector("#cMcArmRow"); mcArmIconsEl = root.querySelector("#cMcArm"); mcArmLabEl = root.querySelector("#cMcArmLab");
+    mcStamFEl = root.querySelector("#cMcStamF");
+    fillIcons(mcHeartsEl, 12, "mcHrt"); fillIcons(mcFoodEl, 10, "mcFud"); fillIcons(mcArmIconsEl, 10, "mcArm");
     // CLICK-TO-SELECT on the unified hotbar (city-only). Chips carry data-bi (the
     // bar index); a tap routes straight to CBZ.cityHotbarSelect, which handles
     // holster / gun-select / item-use byte-identically. Delegated so re-rendered
@@ -1137,6 +1207,131 @@
     lootEl.style.display = "flex";
   }
 
+  // ============================================================
+  //  MINECRAFT-STYLE VITALS (CITY_HUD_MC) — hearts / hunger shanks / armor
+  //  plates as pixel-art icon rows riding the hotbar. All DOM writes are
+  //  signature-guarded (refreshAmmoLive's pattern): rows are built once and
+  //  only have classes toggled when a QUANTIZED value actually moved.
+  // ============================================================
+  // icon art: tiny 9×8 pixel sprites baked into SVG data-URIs at load — crisp
+  // at the 2× display size (18×16), zero image fetches, one technique for all
+  // three rows so they read as a family. A split paints a LEFT|RIGHT half-icon
+  // (palIn left of the split column, palOut right) for half-hearts/shanks.
+  function mcIconCss() {
+    const HRT = [".OOO.OOO.", "OHHFOFFFO", "OHFFFFFFO", "OFFFFFFFO", ".OFFFFFO.", "..OFFFO..", "...OFO...", "....O...."];
+    const FUD = ["...OOOO..", "..OFFFFO.", ".OFHFFFFO", ".OFFFFFFO", "..OFFFFO.", ".OBOOOO..", "OBBO.....", "OBO......"];
+    const ARM = ["OOO...OOO", "OFFO.OFFO", "OFFOOOFFO", "OFHFFFHFO", "OFFFFFFFO", ".OFFFFFO.", ".OFFFFFO.", "..OOOOO.."];
+    const SOCKET = { O: "#0c0e12", F: "#3a3f47", H: "#525862", B: "#454b54" };   // empty container
+    const P_HRT = { O: "#1a090c", F: "#e8332b", H: "#ff9d94" };                  // red heart + highlight
+    const P_FUD = { O: "#1c1006", F: "#b5622a", H: "#e09a52", B: "#efe4d3" };    // meat brown + bone
+    const P_ARM = { O: "#0d1013", F: "#9aa8b8", H: "#d5dde6" };                  // steel chestplate
+    function uri(rows, palIn, palOut, split) {
+      let r = "";
+      for (let y = 0; y < rows.length; y++) {
+        const row = rows[y];
+        for (let x = 0; x < row.length; x++) {
+          const ch = row[x];
+          if (ch === ".") continue;
+          const pal = (split != null && x > split) ? palOut : palIn;
+          const col = pal[ch];
+          if (col) r += "<rect x='" + x + "' y='" + y + "' width='1' height='1' fill='" + col + "'/>";
+        }
+      }
+      const svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 8' shape-rendering='crispEdges'>" + r + "</svg>";
+      return "url(\"data:image/svg+xml," + encodeURIComponent(svg) + "\")";
+    }
+    return (
+      "#cityHud.mc .mcHrt.f{background-image:" + uri(HRT, P_HRT) + "}" +
+      "#cityHud.mc .mcHrt.h{background-image:" + uri(HRT, P_HRT, SOCKET, 4) + "}" +
+      "#cityHud.mc .mcHrt.e{background-image:" + uri(HRT, SOCKET) + "}" +
+      "#cityHud.mc .mcFud.f{background-image:" + uri(FUD, P_FUD) + "}" +
+      // hunger fills from the RIGHT (mirrored row) → a half-shank keeps its RIGHT half
+      "#cityHud.mc .mcFud.h{background-image:" + uri(FUD, SOCKET, P_FUD, 4) + "}" +
+      "#cityHud.mc .mcFud.e{background-image:" + uri(FUD, SOCKET) + "}" +
+      "#cityHud.mc .mcArm.f{background-image:" + uri(ARM, P_ARM) + "}" +
+      "#cityHud.mc .mcArm.h{background-image:" + uri(ARM, P_ARM, SOCKET, 4) + "}" +
+      "#cityHud.mc .mcArm.e{background-image:" + uri(ARM, SOCKET) + "}"
+    );
+  }
+  // one-time row construction: N icon spans, all starting as empty sockets
+  function fillIcons(rowEl, n, cls) {
+    if (!rowEl) return;
+    let h = "";
+    for (let i = 0; i < n; i++) h += "<span class='mcI " + cls + " e'></span>";
+    rowEl.innerHTML = h;
+  }
+  // toggle each icon to full/half/empty for a half-unit total. mirror=true
+  // anchors the fill at the ROW'S RIGHT edge (Minecraft's hunger bar), so the
+  // last remaining shank sits at the screen edge. Class writes are compared
+  // first — untouched icons cost nothing.
+  function setMcIcons(rowEl, count, halfUnits, mirror, cls) {
+    if (!rowEl) return;
+    const kids = rowEl.children;
+    for (let i = 0; i < kids.length; i++) {
+      const el = kids[i];
+      if (i >= count) { if (el.style.display !== "none") el.style.display = "none"; continue; }
+      if (el.style.display === "none") el.style.display = "";
+      const li = mirror ? (count - 1 - i) : i;   // logical index from the fill origin
+      const st = halfUnits >= (li + 1) * 2 ? "f" : (halfUnits === li * 2 + 1 ? "h" : "e");
+      const cn = "mcI " + cls + " " + st;
+      if (el.className !== cn) el.className = cn;
+    }
+  }
+  // the 🛡 tier label text — shared verbatim with the classic bar HUD's label
+  function armorLabel(P) {
+    const kit = P._armorKit || null;
+    const KITS = CBZ.ARMOR_KITS || null;
+    let nm = "";
+    if (kit && KITS) {
+      const ck = kit.chest, c = ck != null ? KITS[ck] : null;
+      nm = (c && (c.short || c.name)) || (typeof ck === "string" ? ck : "");
+    }
+    return "🛡" + (kit && kit.head ? "⛑" : "") + (nm ? " " + nm : "");
+  }
+  // flip the skin (root .mc class drives ALL the CSS swaps) + reset the render
+  // guards so every MC surface repaints on the next frame.
+  function applyMc(on) {
+    mcApplied = on;
+    if (root) root.classList.toggle("mc", !!on);
+    mcSig = ""; mcStamLast = -1; mcArmLabLast = null;
+  }
+  function renderMcVitals(P, maxHp) {
+    if (!mcHeartsEl) return;
+    // HEARTS: 10 hearts span maxHp at half-heart granularity (20ths of max).
+    // Gym gains past the city's 200 ADD hearts (one per +20) up to a 12 cap,
+    // beyond which each heart is simply worth more — the row never sprawls.
+    const hearts = maxHp > 200 ? Math.min(12, Math.ceil(maxHp / 20)) : 10;
+    const hp = Math.max(0, +P.hp || 0);
+    const hHalf = hp <= 0 ? 0 : Math.min(hearts * 2, Math.max(1, Math.ceil((hp / maxHp) * hearts * 2)));
+    // HUNGER: CBZ.game.hunger 0-100 (hunger.js; null ≈ full) → 20 half-shanks
+    const hu = g.hunger == null ? 100 : Math.max(0, Math.min(100, +g.hunger || 0));
+    const fHalf = hu <= 0 ? 0 : Math.max(1, Math.ceil(hu / 5));
+    // ARMOR plates — only when the armor system dressed the player (aMax > 0)
+    const aMax = +(P._armorMax) || 0;
+    const aCur = Math.max(0, +(P._armor) || 0);
+    const aHalf = aMax > 0 ? (aCur <= 0 ? 0 : Math.min(20, Math.max(1, Math.ceil((aCur / aMax) * 20)))) : -1;
+    const sig = hearts + ":" + hHalf + ":" + fHalf + ":" + aHalf;
+    if (sig !== mcSig) {
+      mcSig = sig;
+      setMcIcons(mcHeartsEl, hearts, hHalf, false, "mcHrt");
+      mcHeartsEl.classList.toggle("low", hHalf > 0 && hHalf < 6);   // < 3 hearts → pulse
+      setMcIcons(mcFoodEl, 10, fHalf, true, "mcFud");               // fills from the right
+      if (mcArmRowEl) {
+        if (aHalf >= 0) { setMcIcons(mcArmIconsEl, 10, aHalf, false, "mcArm"); mcArmRowEl.style.display = "flex"; }
+        else mcArmRowEl.style.display = "none";
+      }
+    }
+    // armor tier label — same text the bar HUD shows, string-guarded
+    if (aMax > 0 && mcArmLabEl) {
+      const lab = armorLabel(P);
+      if (lab !== mcArmLabLast) { mcArmLabLast = lab; mcArmLabEl.innerHTML = lab; }
+    }
+    // stamina keeps a slim sliver under the hearts (integer-quantized → the
+    // width style is only touched when the percent actually moves)
+    const st = Math.round(Math.max(0, Math.min(100, P.stamina == null ? 100 : P.stamina)));
+    if (st !== mcStamLast && mcStamFEl) { mcStamLast = st; mcStamFEl.style.width = st + "%"; }
+  }
+
   // Live ammo follows the engine as you FIRE / RELOAD — firing never flips the HUD
   // `dirty` flag, so the per-frame driver pokes this. It re-renders the hotbar only
   // when the held weapon's mag/reserve/reload actually changed (a cheap signature
@@ -1279,30 +1474,31 @@
     if (dirty) renderText();
     // bars + live job distance update every frame (cheap)
     const P = CBZ.player, maxHp = P.maxHp || 100;
-    hpBar.style.width = Math.max(0, Math.min(100, (P.hp / maxHp) * 100)) + "%";
-    hungerBar.style.width = Math.max(0, Math.min(100, g.hunger || 0)) + "%";
-    stamBar.style.width = Math.max(0, Math.min(100, (P.stamina == null ? 100 : P.stamina))) + "%";
-    // ARMOR — the outer-layer plate gauge. Shown only when the armor system has
-    // given the player a kit (_armorMax > 0); guarded against div-by-zero and a
-    // missing armor module (fields simply absent → row stays hidden). The label
-    // carries the equipped tier name + a ⛑ helmet glyph when a head piece is on.
-    if (armRowEl) {
-      const aMax = +(P._armorMax) || 0;
-      if (aMax > 0) {
-        const aCur = Math.max(0, +(P._armor) || 0);
-        armBar.style.width = Math.max(0, Math.min(100, (aCur / aMax) * 100)) + "%";
-        if (armLabEl) {
-          const kit = P._armorKit || null;
-          const KITS = CBZ.ARMOR_KITS || null;
-          let nm = "";
-          if (kit && KITS) {
-            const ck = kit.chest, c = ck != null ? KITS[ck] : null;
-            nm = (c && (c.short || c.name)) || (typeof ck === "string" ? ck : "");
-          }
-          armLabEl.innerHTML = "🛡" + (kit && kit.head ? "⛑" : "") + (nm ? " " + nm : "");
-        }
-        armRowEl.style.display = "";
-      } else armRowEl.style.display = "none";
+    // MINECRAFT-STYLE vitals (CITY_HUD_MC): hearts / shanks / plates above the
+    // hotbar replace the slim bars. applyMc flips the skin only when the flag
+    // actually changes; the icon renders inside are signature-guarded so the
+    // per-frame cost is a few comparisons. Flag off = the classic writes below.
+    const mcOn = !!(CBZ.CONFIG && CBZ.CONFIG.CITY_HUD_MC);
+    if (mcOn !== mcApplied) applyMc(mcOn);
+    if (mcOn) {
+      renderMcVitals(P, maxHp);
+    } else {
+      hpBar.style.width = Math.max(0, Math.min(100, (P.hp / maxHp) * 100)) + "%";
+      hungerBar.style.width = Math.max(0, Math.min(100, g.hunger || 0)) + "%";
+      stamBar.style.width = Math.max(0, Math.min(100, (P.stamina == null ? 100 : P.stamina))) + "%";
+      // ARMOR — the outer-layer plate gauge. Shown only when the armor system has
+      // given the player a kit (_armorMax > 0); guarded against div-by-zero and a
+      // missing armor module (fields simply absent → row stays hidden). The label
+      // carries the equipped tier name + a ⛑ helmet glyph when a head piece is on.
+      if (armRowEl) {
+        const aMax = +(P._armorMax) || 0;
+        if (aMax > 0) {
+          const aCur = Math.max(0, +(P._armor) || 0);
+          armBar.style.width = Math.max(0, Math.min(100, (aCur / aMax) * 100)) + "%";
+          if (armLabEl) armLabEl.innerHTML = armorLabel(P);
+          armRowEl.style.display = "";
+        } else armRowEl.style.display = "none";
+      }
     }
     if (g.cityJob && (g.cityJob.dest || g.cityJob.type === "hit")) renderText();
     // keep the hotbar ammo live as you fire/reload (cheap: a signature guard means

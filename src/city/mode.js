@@ -68,6 +68,12 @@
   // de-dup never catches the flood. Bucket each non-urgent note into a category
   // and rate-limit per bucket — flavor survives, the spam dies. cooldowns in ms.
   const NOTE_CAT_CD = { witness: 4500, traffic: 8000, dispatch: 6000, loot: 1500, _default: 1200 };
+
+  // KEYBIND/CONTROL-LEGEND filter (PHONE_NOTIS_V2): "[E] Pay …", "[1-5] piece,
+  // LMB place", "press [Z]" are interface mechanics — a real phone never pushes
+  // them. They are dropped from the campaign handset at this chokepoint (the
+  // interact/hint surfaces own that job).
+  const NOTE_KEYBIND = /\[[A-Za-z0-9/\- ]{1,7}\]|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/;
   function noteCategory(msg) {
     if (/saw that|reported you|Reported:|👀|🗣️/i.test(msg)) return "witness";
     if (/Traffic stop|🚓|🎫|ticketed|fleeing the police|🚨/i.test(msg)) return "traffic";
@@ -114,10 +120,29 @@
       if (!msg) return;
       if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
         // Campaign information belongs to the player's phone. The closed phone
-        // only lights/vibrates; prose never floats over the world.
-        if (CBZ.campaignUI && CBZ.campaignUI.notify) {
-          CBZ.campaignUI.notify("personal", "FIELD PHONE", String(msg));
+        // only buzzes; prose never floats over the world.
+        if (!CBZ.campaignUI || !CBZ.campaignUI.notify) return;
+        if (CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2) {
+          const s = String(msg);
+          const force = !!(opts && opts.urgent);
+          // The same 4th-wall drop the ambient path runs below — world
+          // narration never reaches the handset either.
+          if (!force && NOTE_FOURTH_WALL.test(s)) return;
+          // Keybinding/control-legend prose ("[E] Pay …", "LMB place") is UI
+          // mechanics, not something a person would text — never a phone push.
+          if (!force && NOTE_KEYBIND.test(s)) return;
+          // Callers can name the in-world sender/app:
+          //   city.note(msg, sec, { from: "Zillow", app: "messages" })
+          // Unnamed notes are auto-classified (money → Bank, police →
+          // Scanner, …) so no push ever reads as a game-system voice.
+          if (opts && (opts.app || opts.from) && CBZ.phoneNotify) {
+            CBZ.phoneNotify({ app: opts.app, from: opts.from, text: s, priority: force ? 2 : 0, meta: { source: "city.note" } });
+          } else {
+            CBZ.campaignUI.notify("auto", opts && opts.from, s, { source: "city.note", urgent: force });
+          }
+          return;
         }
+        CBZ.campaignUI.notify("personal", "FIELD PHONE", String(msg));
         return;
       }
       const force = !!(opts && opts.urgent);
@@ -153,9 +178,22 @@
     },
     big(msg) {
       if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
-        if (CBZ.campaignUI && CBZ.campaignUI.notify) {
-          CBZ.campaignUI.notify("news", "CITY DESK", String(msg));
+        if (!CBZ.campaignUI || !CBZ.campaignUI.notify) return;
+        if (CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2 && CBZ.phoneNotify) {
+          // Headline channel → the phone's News app (City Desk), except money
+          // headlines, which read as Bank pushes ("$X received"), and control
+          // legends, which are UI mechanics and never a push at all.
+          const s = String(msg);
+          if (NOTE_KEYBIND.test(s)) return;
+          const bankish = /[+\-]?\$\s?[\d,]|\bPAID\b|\bDEPOSIT|\bPAYOUT/i.test(s);
+          // police-flavored headlines read from the Scanner app, not the paper
+          const scannerish = /wanted|police|swat|manhunt|busted|surrender|curfew|lockdown|airstrike/i.test(s);
+          CBZ.phoneNotify(bankish
+            ? { app: "bank", text: s, meta: { source: "city.big" } }
+            : { app: "news", from: scannerish ? "Scanner" : null, text: s, priority: 1, meta: { source: "city.big" } });
+          return;
         }
+        CBZ.campaignUI.notify("news", "CITY DESK", String(msg));
         return;
       }
       if (CBZ.flashToast) CBZ.flashToast(msg);

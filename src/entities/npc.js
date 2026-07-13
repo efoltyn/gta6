@@ -189,6 +189,27 @@
     } else speed = n.speed;
     recoverStuck(n, dt, speed, gp);
 
+    // NPC_SCHEDULES — jail nights: ordinary named inmates drift to the cell-
+    // block side of their own patch after dark and post up there (long
+    // pauses), so the yard reads asleep instead of pacing at 3am. The gang
+    // crews and the merchant/dealer/thief cast keep their night hustle
+    // (owner's rule: gangsters stay out), and any real brain state — fight,
+    // flee, hunt, snitch — outranks the curfew via the calm-state gate.
+    if (CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && !n.gang && !imp &&
+        (CBZ.nightAmount || 0) > 0.72 &&
+        (!n.aiState || n.aiState === "wander" || n.aiState === "socialize")) {
+      if (n._bedX == null) {          // one bunk spot per night, rolled once (runtime-only)
+        const r = n.region;
+        n._bedX = r ? r[0] + 0.5 + Math.random() * Math.max(1, r[1] - r[0] - 1) : gp.x;
+        n._bedZ = r ? r[2] + 0.6 + Math.random() * 1.6 : gp.z;   // low-z edge = the cell-block side
+      }
+      n.target.set(n._bedX, 0, n._bedZ);
+      const bdx = n._bedX - gp.x, bdz = n._bedZ - gp.z;
+      if (bdx * bdx + bdz * bdz < 1.2) n.pause = Math.max(n.pause || 0, 2.0); // settled in for the night
+    } else if (n._bedX != null && (CBZ.nightAmount || 0) < 0.5) {
+      n._bedX = n._bedZ = null;       // dawn — back to the day routine
+    }
+
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
     else {
       const dx = n.target.x - gp.x;

@@ -637,8 +637,8 @@
   function tryEnter() {
     var P = CBZ.player; if (!P || !P.pos) return;
     var lot = lotNear(P.pos.x, P.pos.z, 3.0);
-    if (!lot) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No lot here to build on.", 1.6); return; }
-    if (!CBZ.cityOwnsLot || !CBZ.cityOwnsLot(lot)) { if (CBZ.city && CBZ.city.note) CBZ.city.note("You don't own this lot — buy it at Zillow [Z] first.", 2.2); return; }
+    if (!lot) { if (CBZ.city && CBZ.city.note) CBZ.city.note("No buildable parcel at your location.", 1.6, { from: "Maps", app: "system" }); return; }
+    if (!CBZ.cityOwnsLot || !CBZ.cityOwnsLot(lot)) { if (CBZ.city && CBZ.city.note) CBZ.city.note("That parcel isn't on your deeds — put an offer in first.", 2.2, { from: "Zillow" }); return; }
     T.active = true; T.lot = lot; T.basis = lotBasis(lot);
     ensureGhost();
     if (CBZ.city && CBZ.city.note) CBZ.city.note("🔨 Build mode — [1-5] piece, LMB place, Shift+LMB remove, [N] exit.", 2.6);

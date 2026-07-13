@@ -260,9 +260,13 @@ body.sim-view #simHud{display:block;}
 body.sim-view #crosshair,
 body.sim-view #interact{display:none !important;}
 
-/* full-screen navigation map shared by every game mode */
+/* full-screen navigation map shared by every game mode.
+   z-index 60: above the legacy city modals (40) but BELOW the campaign phone
+   surfaces (peek 115 / sliver 128 / raised handset 130) — the phone always
+   reads as physically in front of the map, and JS keeps them mutually
+   exclusive (fullmap.open() stows the phone; phone open() closes the map). */
 #fullMap{
-  display:none; position:fixed; inset:0; z-index:80; align-items:center; justify-content:center;
+  display:none; position:fixed; inset:0; z-index:60; align-items:center; justify-content:center;
   padding:18px; box-sizing:border-box; background:rgba(3,8,15,.78); backdrop-filter:blur(6px);
 }
 body.full-map-open #fullMap{display:flex;}

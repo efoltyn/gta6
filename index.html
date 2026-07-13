@@ -259,6 +259,11 @@
 <script src="src/vendor/noise.js"></script>
 <script src="src/world/rockscliffs.js?v=rock1"></script>
 <script src="src/world/terrain.js?v=tiles2"></script>
+<!-- terrain overhaul: overrides terrainHeight/buildTerrain with a SOLID
+     mountain heightfield (no hollow ridge sheets) + per-material fog scale.
+     Must load right after terrain.js and before city/world.js.
+     Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
+<script src="src/world/terrain_overhaul.js?v=1"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -276,7 +281,7 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=abandon2"></script>
+<script src="src/config.js?v=abandon3"></script>
 <script src="src/core/seed.js"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/interfaces.js?v=arch2"></script>
@@ -314,7 +319,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-<script src="src/entities/character.js?v=fall1"></script>
+<script src="src/entities/character.js?v=mounts1"></script>
 <script src="src/entities/player.js?v=scale1"></script>
 <script src="src/entities/coins.js"></script>
 <script src="src/entities/decals.js"></script>
@@ -341,7 +346,7 @@
 <script src="src/weapons/appearances/sniper.js"></script>
 <script src="src/weapons/appearances/lmg.js"></script>
 <script src="src/systems/actorweapons.js?v=gunorigin1"></script>
-<script src="src/systems/holsterprops.js?v=1"></script>
+<script src="src/systems/holsterprops.js?v=mounts1"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
@@ -366,7 +371,7 @@
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=tpgun3"></script>
+<script src="src/systems/camera.js?v=tpv2"></script>
 <script src="src/systems/physics.js?v=map3"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
@@ -484,7 +489,7 @@
 <script src="src/world/props.js"></script>
 <script src="src/city/towngen.js?v=sims1"></script>
 <script src="src/city/island_speedway.js?v=arch1"></script>
-<script src="src/city/island_airport.js?v=arch2"></script>
+<script src="src/city/island_airport.js?v=arch3"></script>
 <script src="src/city/island_military.js?v=arch1"></script>
 <script src="src/city/biome_desert.js?v=bigdesert2"></script>
 <script src="src/city/biome_forest.js?v=arch2"></script>
@@ -517,6 +522,9 @@
 <script src="src/city/companions.js?v=fight1"></script>
 <script src="src/city/arena_fights.js?v=fight1"></script>
 <script src="src/city/props.js?v=shoot1"></script>
+<!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
+     wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
+<script src="src/city/propuse.js?v=purpose1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
 <script src="src/city/mode.js?v=fncam3"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
@@ -544,7 +552,7 @@
 <script src="src/city/vips.js?v=vip1"></script>
 <script src="src/city/police.js?v=beam2"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
-<script src="src/city/aircraft.js?v=beam1"></script>
+<script src="src/city/aircraft.js?v=beam2"></script>
 <script src="src/city/traffic.js?v=smart1"></script>
 <script src="src/city/carparts.js?v=brands1"></script>
 <script src="src/city/playercars.js?v=brands1"></script>
@@ -553,8 +561,12 @@
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/vehicles.js?v=smartai1"></script>
-<script src="src/city/playerair.js?v=air1"></script>
-<script src="src/city/playeraircraft.js?v=air3"></script>
+<script src="src/city/playerair.js?v=air2"></script>
+<script src="src/city/playeraircraft.js?v=air4"></script>
+<!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
+     city, banking into their turns) — pure atmosphere, deterministic, gated by
+     CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
+<script src="src/city/airtraffic.js?v=air1"></script>
 <script src="src/city/shops.js?v=city3"></script>
 <script src="src/city/gunstore.js?v=mods1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
@@ -638,6 +650,12 @@
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
 <script src="src/city/charpanel.js?v=cp1"></script>
+<!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
+     renders the interactive [I] slot grid into charpanel's overlay, owns world
+     item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
+     the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
+     death.js/charpanel.js, all loaded above. -->
+<script src="src/city/inventory.js?v=inv1"></script>
 <script src="src/city/phone.js?v=story1"></script>
 <script src="src/city/killfeed.js?v=night3"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,

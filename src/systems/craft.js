@@ -59,13 +59,20 @@
     };
   }
 
+  // KILLED by owner's order (config.js CRAFTING_ENABLED, default false): the
+  // craft actions + the [C] panel refuse unless the flag is explicitly true.
+  // itemStore stays live — buildmode.js/baseclaim.js placement costs read it.
+  function craftingOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.CRAFTING_ENABLED === true); }
+
   function canCraft(id) {
+    if (!craftingOn()) return false;
     const r = RECIPES[id]; if (!r) return false;
     const S = store();
     for (const mat in r) if (S.count(mat) < r[mat]) return false;
     return true;
   }
   function craft(id) {
+    if (!craftingOn()) return false;
     if (!canCraft(id)) return false;
     const r = RECIPES[id], S = store();
     for (const mat in r) S.take(mat, r[mat]);
@@ -154,6 +161,7 @@
   function toggle() { open_ ? close() : open(); }
 
   function canOpen() {
+    if (!craftingOn()) return false;   // crafting is dead (CBZ.CONFIG.CRAFTING_ENABLED)
     const P = CBZ.player;
     return g.state === "playing" && (g.mode === "city" || g.mode === "survival") &&
       !CBZ.cityMenuOpen && !CBZ.invOpen && !(P && (P.driving || P.dead));

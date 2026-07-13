@@ -130,7 +130,7 @@
       heliFin:   shared(taperBox(0.16, 1.1, 0.75, { tz: 0.5, top: 0.55 })),        // swept vertical stabiliser
       heliStab:  shared(new THREE.BoxGeometry(1.7, 0.12, 0.6)),  // horizontal tail stabiliser
       heliSkid:  shared(taperBox(0.16, 0.16, 3.4, { nz: 0.5, tz: 0.5, top: 0.8, bot: 0.8 })), // rounded skid rail
-      heliStrut: shared(new THREE.BoxGeometry(0.12, 0.55, 0.12)),// skid strut
+      heliStrut: shared(new THREE.BoxGeometry(0.2, 0.55, 0.2)), // skid strut (chunky — thin members float at distance)
       heliPod:   shared(taperBox(0.46, 0.46, 1.6, { nz: 0.35, tz: 0.6, top: 0.8, bot: 0.8 })), // faired missile pod
       heliWing:  shared(taperBox(1.1, 0.18, 0.75, { nz: 0.85, tz: 0.75 })),  // stub weapon wing (one side)
       heliHub:   shared(new THREE.CylinderGeometry(0.24, 0.3, 0.26, 8)),     // rotor mast hub
@@ -163,6 +163,26 @@
       missileMat:shared(new THREE.MeshBasicMaterial({ color: 0xffe7a0 })),
       flameMat:  shared(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.9, depthWrite: false })),
       smokeMat:  shared(new THREE.MeshBasicMaterial({ color: 0x9aa0a8, transparent: true, opacity: 0.5, depthWrite: false })),
+      matDarkest:shared(vmat('interior', 0x0b0d10)),                          // gun barrels / nozzle throats / insets
+      // GUNSHIP detail kit — rotor head, chin gun, FLIR, pod muzzles, crew door
+      heliCowl:  shared(taperBox(0.95, 0.5, 2.0, { tz: 0.6, top: 0.7 })),     // engine cowl under the mast
+      heliPlate: shared(new THREE.CylinderGeometry(0.34, 0.42, 0.12, 8)),     // swashplate ring under the hub
+      heliExh:   shared(new THREE.CylinderGeometry(0.13, 0.17, 0.55, 7)),     // exhaust stub pipe
+      heliChin:  shared(taperBox(0.5, 0.42, 0.75, { nz: 0.65, bot: 0.6 })),   // chin-turret cradle
+      heliBarrel:shared(new THREE.CylinderGeometry(0.06, 0.06, 0.95, 6)),     // chin-gun barrel
+      heliFlir:  shared(new THREE.SphereGeometry(0.26, 10, 8)),               // FLIR sensor ball
+      heliLamp:  shared(new THREE.CylinderGeometry(0.17, 0.24, 0.3, 8)),      // searchlight gimbal housing
+      podCap:    shared(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 8)),        // rocket-pod muzzle face
+      podTube:   shared(new THREE.CylinderGeometry(0.07, 0.07, 0.24, 6)),     // pod center tube stub
+      doorPanel: shared(new THREE.BoxGeometry(0.06, 0.72, 0.95)),             // crew-door inset panel
+      doorStep:  shared(new THREE.BoxGeometry(0.08, 0.08, 0.9)),              // boarding step rail
+      // JET detail kit — LERX chines, burner cans, wingtip rails + missiles
+      jetChine:  shared(taperBox(0.5, 0.09, 2.6, { nz: 0.25 })),              // LERX strake (one side)
+      jetCan:    shared(new THREE.CylinderGeometry(0.27, 0.23, 0.75, 8)),     // afterburner can
+      jetCanIn:  shared(new THREE.CylinderGeometry(0.16, 0.16, 0.1, 8)),      // dark nozzle throat
+      tipRail:   shared(new THREE.BoxGeometry(0.09, 0.09, 1.1)),              // wingtip launch rail
+      tipMsl:    shared(new THREE.CylinderGeometry(0.075, 0.075, 1.35, 6)),   // wingtip missile body
+      tipCone:   shared(new THREE.ConeGeometry(0.075, 0.28, 6)),              // missile nose
     };
     return G;
   }
@@ -271,7 +291,7 @@
   function pickPlayerLockSeek(fx, fy, fz, nx, ny, nz) {
     let best = null, bestDot = LOCK_CONE;
     const consider = (obj, isHeli) => {
-      if (!obj || (isHeli && obj.downed) || !obj.pos) return;
+      if (!obj || obj.downed || !obj.pos) return;   // jets are downable now too — never lock a falling wreck
       const dx = obj.pos.x - fx, dy = obj.pos.y - fy, dz = obj.pos.z - fz;
       const d = Math.hypot(dx, dy, dz);
       if (d < 1 || d > LOCK_RANGE) return;
@@ -418,8 +438,9 @@
   }
 
   // ------------------------------------------------------ ATTACK HELICOPTER --
-  function makeHeli() {
-    const r = root(); if (!r) return null;
+  // Mesh-only builder (no scene/arena dependency) — used by makeHeli below and
+  // exposed for tools/studio.mjs asset photography (CBZ.debugBuildPoliceAir).
+  function buildGunshipGroup() {
     const a = assets();
     const grp = new THREE.Group();
     const body = new THREE.Mesh(a.heliBody, a.matDark); grp.add(body);
@@ -449,9 +470,35 @@
     const wingR = new THREE.Mesh(a.heliWing, a.matGrey); wingR.position.set(0.95, 0.05, 0.25); grp.add(wingR);
     const podL = new THREE.Mesh(a.heliPod, a.matDark); podL.position.set(-1.5, -0.05, 0.25); grp.add(podL);
     const podR = new THREE.Mesh(a.heliPod, a.matDark); podR.position.set(1.5, -0.05, 0.25); grp.add(podR);
+    // pod MUZZLE faces — a dark launcher face + center tube stub so the fairings
+    // read as rocket pods, not drop tanks (the x=±1.5 launch offset is unchanged)
+    for (const px of [-1.5, 1.5]) {
+      const cap = new THREE.Mesh(a.podCap, a.matDarkest); cap.rotation.x = Math.PI / 2; cap.position.set(px, -0.05, 1.02); grp.add(cap);
+      const tube = new THREE.Mesh(a.podTube, a.matGrey); tube.rotation.x = Math.PI / 2; tube.position.set(px, -0.05, 1.12); grp.add(tube);
+    }
+    // CHIN GUN under the sensor nose — heliGun's tracers already originate just
+    // below the belly; a visible depressed barrel sells the source of the fire.
+    const chin = new THREE.Mesh(a.heliChin, a.matGrey); chin.position.set(0, -0.62, 2.2); grp.add(chin);
+    const barrel = new THREE.Mesh(a.heliBarrel, a.matDarkest); barrel.rotation.x = Math.PI / 2 + 0.1; barrel.position.set(0, -0.72, 2.85); grp.add(barrel);
+    // FLIR ball offset starboard under the nose + a searchlight gimbal housing
+    // at the beam cone's root (the cosmetic cone itself is untouched below)
+    const flir = new THREE.Mesh(a.heliFlir, a.matGlass); flir.position.set(0.34, -0.6, 2.6); grp.add(flir);
+    const lamp = new THREE.Mesh(a.heliLamp, a.matGrey); lamp.position.set(0, -0.72, 0); grp.add(lamp);
+    // CREW DOOR inset + boarding step on each flank, aft of the wing root
+    for (const sx of [-1, 1]) {
+      const door = new THREE.Mesh(a.doorPanel, a.matDarkest); door.position.set(sx * 0.72, -0.02, -0.35); grp.add(door);
+      const step = new THREE.Mesh(a.doorStep, a.matGrey); step.position.set(sx * 0.78, -0.5, -0.3); grp.add(step);
+    }
     // rotor mast hub + a translucent blur disc + a crossed pair of REAL tapered/
     // drooped blades (the blade geom is rooted at the hub extending +X, so the
     // opposite blade is wrapped in a PI-rotated group; named `rotor` group spun by AI)
+    // rotor head: engine cowl + twin exhaust stubs + swashplate under the hub
+    const cowl = new THREE.Mesh(a.heliCowl, a.matDark); cowl.position.set(0, 0.72, -0.95); grp.add(cowl);
+    for (const sx of [-1, 1]) {
+      const exh = new THREE.Mesh(a.heliExh, a.matDarkest);
+      exh.rotation.x = Math.PI / 2; exh.position.set(sx * 0.3, 0.8, -1.95); grp.add(exh);
+    }
+    const plate = new THREE.Mesh(a.heliPlate, a.matGrey); plate.position.y = 0.88; grp.add(plate);
     const hub = new THREE.Mesh(a.heliHub, a.matGrey); hub.position.y = 1.02; grp.add(hub);
     const disc = new THREE.Mesh(a.pool, a.rotorMat); disc.rotation.x = -Math.PI / 2; disc.scale.setScalar(4.2 / 5); disc.position.y = 1.05; grp.add(disc);
     const rotor = new THREE.Group(); rotor.position.y = 1.06;
@@ -468,8 +515,16 @@
     const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
     nL(a.navR, -1.5, 0.0, 0.25); nL(a.navG, 1.5, 0.0, 0.25); nL(a.navW, 0, 1.25, -4.6);
     [-0.92, 0.92].forEach((sx) => { const s = new THREE.Mesh(a.strip, a.matStrip); s.position.set(sx, 0.18, 0.4); grp.add(s); });
-    // spotlight cone + ground pool (separate, added to root so it lies flat)
+    // spotlight cone (the ground pool is scene-owned — makeHeli adds it)
     const cone = new THREE.Mesh(a.cone, a.lightMat); grp.add(cone);
+    return { grp, rotor, trotor, cone };
+  }
+
+  function makeHeli() {
+    const r = root(); if (!r) return null;
+    const a = assets();
+    const built = buildGunshipGroup();
+    const grp = built.grp, rotor = built.rotor, trotor = built.trotor, cone = built.cone;
     const pool = new THREE.Mesh(a.pool, a.poolMat); pool.rotation.x = -Math.PI / 2; pool.position.y = 0.08;
     r.add(pool);
     // No floating "GUNSHIP" word over the helicopter — the armoured silhouette,
@@ -566,26 +621,102 @@
       despawnHeli();
     }
   }
-  // ray-test the gunship for the player's hitscan (NO damage — the shoot loop
-  // applies it, so a shotgun's pellets each count). dir must be normalized.
+  // ray-test the police AIR — gunship AND jets — for the player's hitscan (NO
+  // damage — the shoot loop applies it, so a shotgun's pellets each count).
+  // dir must be normalized. Which craft the ray struck is remembered so the
+  // cityAircraftDamage call that immediately follows lands on the right frame.
+  let lastRayCraft = null;
   CBZ.cityAircraftRayTest = function (ox, oy, oz, dx, dy, dz, range) {
-    if (!heli || heli.downed || !heli.pos) return null;
-    const cx = heli.pos.x - ox, cy = heli.pos.y - oy, cz = heli.pos.z - oz;
-    const t = cx * dx + cy * dy + cz * dz;                  // projection onto the ray
-    if (t < 0 || t > range) return null;
-    const ex = ox + dx * t - heli.pos.x, ey = oy + dy * t - heli.pos.y, ez = oz + dz * t - heli.pos.z;
-    const RAD = 3.6;                                        // generous hitbox (it's far + moving)
-    if (ex * ex + ey * ey + ez * ez > RAD * RAD) return null;
-    return { x: ox + dx * t, y: oy + dy * t, z: oz + dz * t, dist: t };
+    let best = null, bestT = Infinity, bestCraft = null;
+    const test = function (craft, rad) {
+      if (!craft || craft.downed || !craft.pos) return;
+      const cx = craft.pos.x - ox, cy = craft.pos.y - oy, cz = craft.pos.z - oz;
+      const t = cx * dx + cy * dy + cz * dz;                // projection onto the ray
+      if (t < 0 || t > range || t >= bestT) return;
+      const ex = ox + dx * t - craft.pos.x, ey = oy + dy * t - craft.pos.y, ez = oz + dz * t - craft.pos.z;
+      if (ex * ex + ey * ey + ez * ez > rad * rad) return;  // generous hitbox (far + moving)
+      bestT = t; bestCraft = craft;
+      best = { x: ox + dx * t, y: oy + dy * t, z: oz + dz * t, dist: t };
+    };
+    test(heli, 3.6);
+    for (let i = 0; i < jets.length; i++) test(jets[i], 3.2);
+    lastRayCraft = bestCraft;
+    return best;
   };
-  CBZ.cityAircraftDamage = function (dmg, fromX, fromZ) { damageHeli(dmg, fromX, fromZ); };
-  // explosion splash (rocket / blast near the heli) — damages if in radius.
+  CBZ.cityAircraftDamage = function (dmg, fromX, fromZ) {
+    // route to whatever the ray test just struck; the gunship stays the default
+    // (splash callers and older paths never ray-tested first).
+    const c = lastRayCraft;
+    if (c && c !== heli) {
+      if (jets.indexOf(c) >= 0) damageJet(c, dmg);
+      return;   // the ray hit a jet (possibly gone by now) — never misroute to the heli
+    }
+    damageHeli(dmg, fromX, fromZ);
+  };
+  // explosion splash (rocket / blast near an aircraft) — damages ALL craft in radius.
   CBZ.cityAircraftSplash = function (x, y, z, radius, dmg) {
-    if (!heli || heli.downed || !heli.pos) return false;
-    const dx = heli.pos.x - x, dy = heli.pos.y - y, dz = heli.pos.z - z;
-    if (dx * dx + dy * dy + dz * dz > radius * radius) return false;
-    damageHeli(dmg, x, z); return true;
+    let any = false;
+    if (heli && !heli.downed && heli.pos) {
+      const dx = heli.pos.x - x, dy = heli.pos.y - y, dz = heli.pos.z - z;
+      if (dx * dx + dy * dy + dz * dz <= radius * radius) { damageHeli(dmg, x, z); any = true; }
+    }
+    for (let i = 0; i < jets.length; i++) {
+      const j = jets[i];
+      if (!j || j.downed || !j.pos) continue;
+      const dx = j.pos.x - x, dy = j.pos.y - y, dz = j.pos.z - z;
+      if (dx * dx + dy * dy + dz * dz <= radius * radius) { damageJet(j, dmg); any = true; }
+    }
+    return any;
   };
+
+  // ---- JET SHOOT-DOWN: mirrors the gunship's damage→down→fall→detonate arc.
+  //      Same design rationale as damageHeli: a 5★ jet you could only hide from
+  //      was a wall; one you can swat out of its strafe run is a power fantasy.
+  function damageJet(j, dmg) {
+    if (!j || j.downed) return;
+    j.hp -= dmg;
+    if (CBZ.bulletImpact && j.pos) { try { CBZ.bulletImpact({ x: j.pos.x, y: j.pos.y, z: j.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.2 }); } catch (e) {} }
+    if (j.hp <= 0) downJet(j);
+  }
+  function downJet(j) {
+    if (!j || j.downed) return;               // idempotent — one death per airframe
+    j.downed = true;
+    j.fired = true;                           // a dying jet never gets its missile off
+    if (j.burn) j.burn.visible = false;       // flame out; the smoke trail takes over
+    j.vy = 1.2;                               // a lurch up, then gravity owns it
+    j.rollRate = (rng() < 0.5 ? -1 : 1) * (2.2 + rng() * 2.2);   // wing-loss death roll
+    j.smokeCD = 0;
+    if (CBZ.sfx) CBZ.sfx("explosion");
+    if (CBZ.shake) CBZ.shake(0.4);
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(60);
+    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a police fighter jet!", "#ff8b6b");
+  }
+  // ballistic wreck ride-down (same shape as fallHeli): momentum bleeds off,
+  // gravity + roll take over, smoke trails, and it detonates ON whatever it
+  // hits — rooftop or street — with the same CONTAINED crash blast as the heli
+  // (the block-leveling airstrike blast stays reserved for missiles).
+  // Returns true once it has impacted (caller despawns).
+  function fallJet(j, dt) {
+    j.vy -= 17 * dt;
+    j.crashSpd = Math.max(22, (j.crashSpd || JET_SPEED) - 40 * dt);
+    const step = j.crashSpd * dt;
+    j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
+    j.pos.y += j.vy * dt;
+    j.group.rotation.z += j.rollRate * dt;               // death roll
+    j.group.rotation.x += dt * 0.55;                     // nose falls through the horizon
+    j.smokeCD -= dt;
+    if (j.smokeCD <= 0) {
+      j.smokeCD = 0.05;
+      if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(j.pos.x, j.pos.y, j.pos.z); } catch (e) {} }
+    }
+    const surf = Math.max(CBZ.floorAt ? CBZ.floorAt(j.pos.x, j.pos.z) : 0, roofTopAt(j.pos.x, j.pos.z));
+    if (j.pos.y <= surf + 1.2) {
+      if (CBZ.cityExplosion) CBZ.cityExplosion(j.pos.x, j.pos.z, { power: 1.5, radius: 7, byPlayer: false, y: surf + 1.0 });
+      if (CBZ.shake) CBZ.shake(0.6);
+      return true;
+    }
+    return false;
+  }
 
   // tallest collider top under (x,z) — buildings register wall/slab colliders with
   // y1 = roof height, so this is the rooftop the gunship must stay ABOVE (no more
@@ -804,16 +935,23 @@
   }
 
   // -------------------------------------------------------- FIGHTER JETS ----
-  function makeJet() {
-    const r = root(); if (!r) return null;
+  // Mesh-only builder (no scene dependency) — used by makeJet below and exposed
+  // for tools/studio.mjs asset photography (CBZ.debugBuildPoliceAir).
+  function buildPoliceJetGroup() {
     const a = assets();
     const grp = new THREE.Group();
     const body = new THREE.Mesh(a.jetBody, a.matJet); grp.add(body);
     // fine NEEDLE nose tip extending the fuselage taper to a sharp point (no seam —
-    // the sculpted body already pinches in; this just caps it to a radar boom)
-    const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = -Math.PI / 2; nose.position.z = 4.45; grp.add(nose);
+    // the sculpted body already pinches in; this just caps it to a radar boom).
+    // rotation.x = +PI/2 maps the cone's +Y apex to +Z — apex FORWARD (the old
+    // -PI/2 flew base-first, a flat disc leading the aircraft).
+    const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = Math.PI / 2; nose.position.z = 4.45; grp.add(nose);
     // REFLECTIVE bubble canopy
     const canopy = new THREE.Mesh(a.jetCanopy, a.matGlass); canopy.position.set(0, 0.58, 1.7); grp.add(canopy);
+    // LERX CHINES — thin strakes blending the wing roots up the forward
+    // fuselage; slanted inward so their tips ride the narrowing nose taper
+    const chL = new THREE.Mesh(a.jetChine, a.matJet); chL.position.set(-0.45, 0.1, 1.9); chL.rotation.y = 0.13; grp.add(chL);
+    const chR = new THREE.Mesh(a.jetChine, a.matJet); chR.position.set(0.45, 0.1, 1.9); chR.rotation.y = -0.13; grp.add(chR);
     // side intakes hugging the fuselage
     const inL = new THREE.Mesh(a.jetIntake, a.matJet); inL.position.set(-0.74, -0.14, 0.6); grp.add(inL);
     const inR = new THREE.Mesh(a.jetIntake, a.matJet); inR.position.set(0.74, -0.14, 0.6); grp.add(inR);
@@ -824,18 +962,37 @@
     wingL.position.set(-1.9, -0.16, -0.7); wingL.rotation.y = 0.32; wingL.rotation.z = 0.06; grp.add(wingL);   // slight dihedral
     const wingR = new THREE.Mesh(a.jetWing, a.matJet);
     wingR.position.set(1.9, -0.16, -0.7); wingR.rotation.y = -0.32; wingR.rotation.z = -0.06; grp.add(wingR);
+    // WINGTIP RAILS + AAMs — the 5★ bird visibly carries its ordnance (rail runs
+    // under the tip edge, which sits near x≈±3.5 for z in −1.5..−0.4)
+    for (const sx of [-1, 1]) {
+      const rail = new THREE.Mesh(a.tipRail, a.matGrey); rail.position.set(sx * 3.5, -0.2, -0.95); grp.add(rail);
+      const msl = new THREE.Mesh(a.tipMsl, a.matGrey); msl.rotation.x = Math.PI / 2; msl.position.set(sx * 3.5, -0.32, -0.95); grp.add(msl);
+      const tip = new THREE.Mesh(a.tipCone, a.matDarkest); tip.rotation.x = Math.PI / 2; tip.position.set(sx * 3.5, -0.32, -0.14); grp.add(tip);
+    }
     // tailplanes
     const stabL = new THREE.Mesh(a.jetStab, a.matJet); stabL.position.set(-0.85, 0, -3.3); stabL.rotation.y = 0.2; grp.add(stabL);
     const stabR = new THREE.Mesh(a.jetStab, a.matJet); stabR.position.set(0.85, 0, -3.3); stabR.rotation.y = -0.2; grp.add(stabR);
     // canted twin vertical tails, roots overlapping the rear fuselage top
     const tailL = new THREE.Mesh(a.jetTail, a.matJet); tailL.position.set(-0.42, 0.78, -3.0); tailL.rotation.z = 0.22; grp.add(tailL);
     const tailR = new THREE.Mesh(a.jetTail, a.matJet); tailR.position.set(0.42, 0.78, -3.0); tailR.rotation.z = -0.22; grp.add(tailR);
-    // afterburner glow at the tailpipe
-    const burn = new THREE.Mesh(a.smoke, a.flameMat); burn.scale.set(0.7, 0.7, 1.4); burn.position.z = -4.1; grp.add(burn);
+    // twin AFTERBURNER CANS with dark throats — the glow now sits behind real
+    // nozzles instead of floating off a bare box tail
+    for (const sx of [-1, 1]) {
+      const can = new THREE.Mesh(a.jetCan, a.matGrey); can.rotation.x = Math.PI / 2; can.position.set(sx * 0.24, -0.05, -4.15); grp.add(can);
+      const thr = new THREE.Mesh(a.jetCanIn, a.matDarkest); thr.rotation.x = Math.PI / 2; thr.position.set(sx * 0.24, -0.05, -4.55); grp.add(thr);
+    }
+    const burn = new THREE.Mesh(a.smoke, a.flameMat); burn.scale.set(0.7, 0.7, 1.4); burn.position.set(0, -0.05, -4.75); grp.add(burn);
     grp._burn = burn;
     // NAV LIGHTS: port wingtip red, stbd wingtip green, white tailfin beacon
     const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
     nL(a.navR, -2.5, -0.05, -1.5); nL(a.navG, 2.5, -0.05, -1.5); nL(a.navW, 0, 1.2, -3.4);
+    return { grp, burn };
+  }
+
+  function makeJet() {
+    const r = root(); if (!r) return null;
+    const built = buildPoliceJetGroup();
+    const grp = built.grp, burn = built.burn;
     r.add(grp);
     // a straight pass: pick a heading toward the target, start far off one edge
     const aim = aimPoint();
@@ -848,7 +1005,13 @@
     // velocity straight at (a bit past) the target, level flight
     const dir = new THREE.Vector3(cx - span.x, 0, cz - span.z).normalize();
     grp.rotation.y = Math.atan2(dir.x, dir.z);
-    return { group: grp, burn, dir, pos: grp.position, life: 0, fired: false, target: { x: cx, z: cz } };
+    return {
+      group: grp, burn, dir, pos: grp.position, life: 0, fired: false, target: { x: cx, z: cz },
+      // shoot-down state — mirrors the gunship's (hp / downed / falling wreck).
+      // Lighter than the heli: one rocket splash (90) or a sustained rifle rake
+      // drops it, which is fair for a target you only have a ~6s window on.
+      hp: 70, maxHp: 70, downed: false, vy: 0, rollRate: 0, smokeCD: 0, crashSpd: JET_SPEED,
+    };
   }
 
   function despawnJet(j) {
@@ -863,6 +1026,14 @@
     for (let i = jets.length - 1; i >= 0; i--) {
       const j = jets[i];
       j.life += dt;
+      // a shot-down jet is a ballistic wreck: it rides down trailing smoke and
+      // detonates on whatever it hits (mirrors the gunship's fallHeli arc). It
+      // is exempt from the live-jet reaping below so the crash always lands —
+      // the life>25 clamp is only a can't-happen safety net.
+      if (j.downed) {
+        if (fallJet(j, dt) || j.life > 25) { despawnJet(j); jets.splice(i, 1); }
+        continue;
+      }
       const step = JET_SPEED * dt;
       j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
       // gentle bob so it doesn't look perfectly rigid
@@ -911,6 +1082,12 @@
       }
     }
   }
+
+  // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots ----
+  CBZ.debugBuildPoliceAir = {
+    gunship: function () { return buildGunshipGroup().grp; },
+    jet: function () { return buildPoliceJetGroup().grp; },
+  };
 
   // ----------------------------------------------------------- main tick -----
   let jetCD = 6;

@@ -127,8 +127,10 @@
     // ---- the LAW (never sold — taken off a body; the street reads the badge) ----
     police:    { id: "police",    name: "Police Uniform",   tier: "law",    who: "beat cops",        price: 0,    drip: 1, cop: true,
                  colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
+    // SWAT redesign: dark-olive carrier over graphite-olive fatigues (torso
+    // drives the CARRIER, legs the fatigues — clothes.js PAINT.swat reads both).
     swat:      { id: "swat",      name: "SWAT Fatigues",    tier: "law",    who: "heavy units",      price: 0,    drip: 1, cop: true,
-                 colors: { legs: 0x23262c, torso: 0x2b2f36, collar: 0x14161a, arms: 0x2b2f36, shoes: 0x101216, belt: 0x0d111c } },
+                 colors: { legs: 0x2e332b, torso: 0x3a4034, collar: 0x22261f, arms: 0x33382e, shoes: 0x101216, belt: 0x0d111c } },
     // ---- money fits (boutique racks → the apex tuxedo) ----
     leather:   { id: "leather",   name: "Leather Jacket",   tier: "fit",    who: "the night crowd",  price: 520,  drip: 6,
                  colors: { legs: 0x23262e, torso: 0x241c18, collar: 0x100c0a, arms: 0x241c18, shoes: 0x16110d } },

@@ -174,6 +174,10 @@
     };
     for (const c of CBZ.cityCops) consider(c);
     for (const p of CBZ.cityPeds) if (!p.vendor) consider(p);
+    // WILDLIFE: animals are punchable/batable too — same forward-cone scan.
+    // Damage routes through CBZ.cityWildlifeHit in land(), the exact hit API
+    // gunfire already uses, so wounded-flee/charge + pelts work for melee.
+    if (CBZ.cityWildlife) for (const w of CBZ.cityWildlife) consider(w);
     // multiplayer: remote players + host-synced puppet NPCs take punches too
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) for (const a of CBZ.net.targetList()) consider(a);
     return best;
@@ -281,6 +285,19 @@
     // multiplayer target (remote player / synced puppet): authority is over the
     // wire — net code routes the damage and plays the local juice.
     if (t.netKind && CBZ.net && CBZ.net.localMeleeHit) return CBZ.net.localMeleeHit(t, dmg, tier);
+    // WILDLIFE: an animal is a plain hit receiver — no block/posture/guard
+    // minigame, no cop/ped damage router. Route through the SAME hit API the
+    // gun path uses (CBZ.cityWildlifeHit) so wounded flee/charge, pelt quality
+    // and the carcass flow all fire for a bat swing exactly as for a bullet.
+    if (t.animal) {
+      const heavyA = tier !== "light";
+      if (CBZ.doHitstop) CBZ.doHitstop(heavyA ? 0.08 : 0.05);
+      if (CBZ.shake) CBZ.shake(heavyA ? 0.4 : 0.22);
+      const res = CBZ.cityWildlifeHit ? CBZ.cityWildlifeHit(t, { head: false, point: null }, { damage: dmg }) : null;
+      if (CBZ.sfx) { CBZ.sfx("punch"); CBZ.sfx(res && res.down ? "ko" : "hit"); }
+      lastTarget = t.dead ? null : t;
+      return true;
+    }
     const fx = P.pos.x, fz = P.pos.z;
     const heavy = tier !== "light";
     const finisher = tier === "finisher";
@@ -385,7 +402,7 @@
   // find a guard-broken OR downed foe in finisher range (close, in front)
   function finisherTarget() {
     const t = aimTarget(2.6, 0.1);
-    if (!t) return null;
+    if (!t || t.animal) return null;   // animals aren't execution targets — land() routes them
     const open = (t._broken || 0) > 0 || (t.ko > 0 && !t.dead) ||
                  (CBZ.body && CBZ.body.busy && CBZ.body.busy(t) && t.hp <= (t.maxHp || 100) * 0.45);
     return open ? t : null;
@@ -592,6 +609,153 @@
     a._gunLowered = false;
   }
 
+  // ============================================================
+  //  NPC AIM V2 — make NPCs visibly POINT the gun at what they shoot.
+  //
+  //  THE BUG: actorweapons.js's poseList (onUpdate 36) hard-sets every armed
+  //  NPC's gun arm to a FIXED horizontal pose (-1.45/-1.50 rad) every frame —
+  //  no pitch toward the target, ever. The ballistics (clearLineOfFire, hit
+  //  rolls, tracers) are fully 3D, so a cop firing at a rooftop target shot
+  //  correctly while his gun pointed at the horizon. reactions.js (order 89)
+  //  half-fixes this but ONLY for actors with `.rage` — cops (curTarget) and
+  //  empire crew never get elevation.
+  //
+  //  THE FIX, two places sharing one solver:
+  //    • inside the actorAimAt wrap (fire paths call aimAt → actorMuzzle →
+  //      tracer back-to-back): re-pitch the arm IMMEDIATELY after the orig
+  //      set the flat ready pose, so the muzzle world-matrix the shot reads
+  //      agrees with the aimed pose;
+  //    • an onUpdate(90.5) pass (after poseList@36, reactions@89, grapple@90
+  //      — the LAST arm writer before render): smooth + re-assert the pitch
+  //      every frame so the aim persists between cooldown-gated shots. It
+  //      hard-SETS rotation.x = flatBase + elev, so reactions' additive term
+  //      is absorbed (no double-pitch on rage gang peds) and when the target
+  //      ages out the value decays exactly back to poseList's flat base
+  //      (pop-free hand-off). Only rotation.x of ra (+ la for slot "long")
+  //      is owned here — head/neck/body channels stay with their owners.
+  //
+  //  Tracer realism rides the same pass (see the tracer wrap): per-weapon
+  //  angular jitter around the true muzzle→target line, clipped against the
+  //  LOS grid so a spread round never pokes through a wall.
+  // ============================================================
+  if (CBZ.CONFIG.NPC_AIM_V2 == null) CBZ.CONFIG.NPC_AIM_V2 = true;             // gun-arm elevation toward target
+  if (CBZ.CONFIG.NPC_TRACER_SPREAD == null) CBZ.CONFIG.NPC_TRACER_SPREAD = true; // per-shot bullet spread on NPC tracers
+
+  const AIM_ELEV_MAX = 0.70;   // rad (~40°) arm pitch clamp (reactions used 0.55; raised for rooftops)
+  const AIM_DAMP = 0.0008;     // damp base → ~130ms acquire/release blend (k = 1 - AIM_DAMP^dt)
+  const AIM_HOLD = 1.2;        // s the arm holds its aim after the last shot (> max NPC fire cadence)
+  const AIM_SHOULDER_Y = 1.84; // shoulder height above actor.pos.y (character.js arm socket)
+  const RA_BASE = -1.45, RA_BASE_LONG = -1.50, LA_BASE_LONG = -1.20; // MUST match actorweapons setReadyPose
+  // per-slot tracer spread half-angle (rad); table lives with the weapon data
+  const SPREAD_DEF = { pistol: 0.065, rifle: 0.040, auto: 0.090, long: 0.075, utility: 0.055, _def: 0.055 };
+  const SPREAD_CENTER_FRAC = 0.55; // fraction of shots drawn tight (statistical "hit" look)
+  const SPREAD_CENTER_MUL = 0.30;  // spread multiplier for a centered shot
+
+  function slotOf(a) {
+    const ud = a && a._weaponProp && a._weaponProp.userData;
+    return (ud && ud.weaponSlot) || "pistol";
+  }
+  // mirror poseList's (actorweapons.js, order 36) exact "gun is out & posed"
+  // gate — we may only own the arm on frames poseList just hard-set it.
+  function poseEligible(a) {
+    if (!a || a.dead || a._parked || (a.ko > 0) || !a.armed) return false;
+    if (!a.char || !a.char.parts) return false;
+    if (!a._weaponProp || !a._weaponProp.visible) return false;
+    if (a._holstered || a._gunLowered || a._gunHidden) return false;
+    if (a.surrender || (a.surrenderT || 0) > 0 || a.char.surrender || a.char.handsUp) return false;
+    const ph = a._phys;
+    if (ph && (ph.down > 0 || ph.air || ph.heldBy)) return false;   // ragdolling — body.js owns the limbs
+    return true;
+  }
+  // desired arm-pitch delta (rad, negative = barrel up) toward the aim target —
+  // the SAME chest point the ballistics use (1.5 player / 1.3 NPC), solved from
+  // the actual shoulder world height so slopes/rooftops elevate correctly.
+  function computeArmC(a) {
+    const t = a._aimTgt;
+    if (!t || !t.pos || t.dead || (a._aimTgtT || 0) <= 0) return 0;
+    const hd = Math.hypot(t.pos.x - a.pos.x, t.pos.z - a.pos.z) || 0.001;
+    const ty = (t.pos.y || 0) + (t.isPlayer ? 1.5 : 1.3);
+    let armC = -Math.atan2(ty - ((a.pos.y || 0) + AIM_SHOULDER_Y), hd);
+    if (armC > AIM_ELEV_MAX) armC = AIM_ELEV_MAX;
+    else if (armC < -AIM_ELEV_MAX) armC = -AIM_ELEV_MAX;
+    return armC;
+  }
+  // hard-SET the gun arm to flatBase + smoothed elevation. dt>0 advances the
+  // damp (the 90.5 pass); dt<=0 re-asserts the current value (fire-time call,
+  // so the muzzle matrix agrees with the rendered pose). Writes NOTHING unless
+  // this actor is actively aiming (or easing back), so rage-only actors keep
+  // reactions.js's elevation and idle armed peds keep poseList's flat pose.
+  function applyAimPose(a, dt) {
+    if (!CBZ.CONFIG.NPC_AIM_V2) return;
+    if (!poseEligible(a)) { a._aimElevCur = 0; return; }
+    const engaged = a._aimTgt && (a._aimTgtT || 0) > 0;
+    if (!engaged && Math.abs(a._aimElevCur || 0) < 0.002) { a._aimElevCur = 0; return; }
+    // disengaged but still ENRAGED → reactions.js's own aim-presence term
+    // (order 89, rage actors only) is already at full value under our write —
+    // hand the arm straight back to it instead of decaying over its head.
+    if (!engaged && a.rage && !a.rage.dead && a.rage.pos) { a._aimElevCur = 0; return; }
+    if (dt > 0) {
+      const want = computeArmC(a);
+      const k = 1 - Math.pow(AIM_DAMP, dt);
+      a._aimElevCur = (a._aimElevCur || 0) + (want - (a._aimElevCur || 0)) * k;
+    }
+    const cur = a._aimElevCur || 0;
+    const parts = a.char.parts;
+    const isLong = slotOf(a) === "long";   // poseList's narrow test — its base is what we offset
+    if (parts.ra) parts.ra.rotation.x = (isLong ? RA_BASE_LONG : RA_BASE) + cur;
+    if (isLong && parts.la) parts.la.rotation.x = LA_BASE_LONG + cur;
+  }
+
+  // --- tracer spread: identify the shooter from inside the tracer wrap. The
+  // fire paths call actorMuzzle then tracer back-to-back with the same point,
+  // so the muzzle wrap stashes {shooter, muzzle} and the tracer wrap matches
+  // its `from` against it (consumed either way — never goes stale/misfires).
+  const _pendingShot = { a: null, x: 0, y: 0, z: 0 };
+  const _jitTo = { x: 0, y: 0, z: 0 };
+  let _spreadRC = null;   // lazy THREE.Raycaster (reused, no per-shot alloc)
+
+  // jitter the endpoint around the true muzzle→target direction by a per-slot
+  // angle, then clip the JITTERED ray against the LOS grid so a spread round
+  // that now grazes a corner ends at the wall instead of poking through it.
+  function jitterEndpoint(from, to, slot) {
+    let dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    const dist = Math.hypot(dx, dy, dz) || 0.001;
+    dx /= dist; dy /= dist; dz /= dist;
+    // perpendicular basis u,v around the fire direction
+    let ux = -dz, uz = dx;
+    const ul = Math.hypot(ux, uz);
+    if (ul < 1e-4) { ux = 1; uz = 0; } else { ux /= ul; uz /= ul; }
+    const vx = dy * uz, vy = dz * ux - dx * uz, vz = -dy * ux;   // dir × u
+    const tbl = CBZ.NPC_SPREAD || SPREAD_DEF;
+    let s = tbl[slot] != null ? tbl[slot] : (tbl._def != null ? tbl._def : SPREAD_DEF._def);
+    // runtime-only FX randomness (NEVER the shared seeded rng streams — the
+    // fire paths draw from those and extra draws would shift world state)
+    if (Math.random() < SPREAD_CENTER_FRAC) s *= SPREAD_CENTER_MUL;
+    const au = s * (Math.random() * 2 - 1), av = s * (Math.random() * 2 - 1);
+    let nx = dx + ux * au + vx * av, ny = dy + vy * av, nz = dz + uz * au + vz * av;
+    const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+    let end = dist;
+    if (CBZ.losRaycast && CBZ.losBlockers && CBZ.losBlockers.length) {
+      if (!_spreadRC) _spreadRC = new THREE.Raycaster();
+      _spreadRC.ray.origin.set(from.x, from.y, from.z);
+      _spreadRC.ray.direction.set(nx, ny, nz);
+      _spreadRC.near = 0; _spreadRC.far = dist;
+      const hits = CBZ.losRaycast(_spreadRC, CBZ.losBlockers);
+      // first SOLID hit clips the streak — a shattered-pane hole passes the
+      // round through, exactly like los.js's blockedBy (breach/shoot-through).
+      if (hits) for (let i = 0; i < hits.length; i++) {
+        const h = hits[i];
+        if (h.distance >= dist) break;
+        const n = h.face && h.face.normal;
+        if (CBZ.cityShotHole && CBZ.cityShotHole(h.point.x, h.point.y, h.point.z, n ? n.x : 0, n ? n.z : 0)) continue;
+        end = h.distance * 0.98;
+        break;
+      }
+    }
+    _jitTo.x = from.x + nx * end; _jitTo.y = from.y + ny * end; _jitTo.z = from.z + nz * end;
+    return _jitTo;
+  }
+
   // PUBLIC GATE: true if NPC `att` has a clear muzzle→target line right now.
   // Callers may use it to hold fire / reposition; we also use it internally.
   // Side-effect: lowers/raises the gun prop to match (so it never pokes a wall).
@@ -691,8 +855,15 @@
   const _origAim = CBZ.actorAimAt;
   if (typeof _origAim === "function") {
     CBZ.actorAimAt = function (actor, target, dt) {
-      if (actor && target && target.pos && isCityNpc(actor)) { actor._fireTgt = target; actor._fireTgtT = 0.5; }
-      return _origAim.call(this, actor, target, dt);
+      const cityShooter = g.mode === "city" && actor && !actor.isPlayer && actor.char &&
+                          target && target.pos;
+      if (cityShooter && isCityNpc(actor)) { actor._fireTgt = target; actor._fireTgtT = 0.5; }   // LOS gate memory (cops self-gate)
+      if (cityShooter) { actor._aimTgt = target; actor._aimTgtT = AIM_HOLD; }                    // visual-aim memory (INCLUDES cops)
+      const res = _origAim.call(this, actor, target, dt);   // orig sets the flat ready pose
+      // re-pitch NOW (last frame's smoothed elevation) so the muzzle matrix the
+      // imminent actorMuzzle/tracer read matches the pose the player sees.
+      if (cityShooter) applyAimPose(actor, 0);
+      return res;
     };
   }
 
@@ -705,6 +876,13 @@
   if (typeof _origMuzzle === "function") {
     CBZ.actorMuzzle = function (actor, out) {
       const res = _origMuzzle.call(this, actor, out);
+      // remember this muzzle read as the origin of an imminent shot so the
+      // tracer wrap can identify the shooter + weapon (fire paths call
+      // actorMuzzle → tracer back-to-back with this exact point). Gate/breach
+      // probes run under _muzGate and never mark a pending shot.
+      if (!_muzGate && g.mode === "city" && res && actor && !actor.isPlayer && actor._weaponProp) {
+        _pendingShot.a = actor; _pendingShot.x = res.x; _pendingShot.y = res.y; _pendingShot.z = res.z;
+      }
       if (!_muzGate && g.mode === "city" && isCityNpc(actor) && actor && actor._fireTgt && (actor._fireTgtT || 0) > 0) {
         const t = actor._fireTgt;
         if (t && t.pos && !t.dead && CBZ.clearLineOfFire && res) {
@@ -712,6 +890,10 @@
           if (CBZ.clearLineOfFire(res.x, res.y != null ? res.y : 1.42, res.z, t.pos.x, ty, t.pos.z)) raiseGun(actor);
           else {
             lowerGun(actor);
+            // no shot follows a blocked muzzle read (the caller's own LOS gate
+            // holds fire) — drop the pending-shot stash so breachGlass's own
+            // straight glass-breaking tracer can't inherit it and get jittered.
+            _pendingShot.a = null;
             // BREACH: an armed ped (gang / rampager / empire crew) aiming at a
             // quarry it can't hit because a STOREFRONT WINDOW is in the way shoots
             // the glass OUT — same generic behavior the cops get. breachGlass is a
@@ -736,9 +918,23 @@
   const _origTracer = CBZ.tracer;
   if (typeof _origTracer === "function") {
     CBZ.tracer = function (from, to, opts) {
-      if (g.mode === "city" && from && to && CBZ.clearLineOfFire &&
-          !CBZ.clearLineOfFire(from.x, from.y, from.z, to.x, to.y, to.z)) {
-        return null;   // walled-off shot → no streak, no muzzle flash poking through
+      if (g.mode === "city" && from && to) {
+        if (CBZ.clearLineOfFire &&
+            !CBZ.clearLineOfFire(from.x, from.y, from.z, to.x, to.y, to.z)) {
+          _pendingShot.a = null;
+          return null;   // walled-off shot → no streak, no muzzle flash poking through
+        }
+        // NPC shot (stashed by the muzzle wrap, matched by exact origin) →
+        // spread the streak. The caller's own hit roll stays authoritative —
+        // the jitter is small enough (~0.5-1m at 20m, most shots drawn tight)
+        // to read as real gunfire rather than laser-straight chest beams.
+        const shooter = (_pendingShot.a &&
+                         from.x === _pendingShot.x && from.y === _pendingShot.y && from.z === _pendingShot.z)
+                         ? _pendingShot.a : null;
+        _pendingShot.a = null;   // consume regardless
+        if (shooter && CBZ.CONFIG.NPC_TRACER_SPREAD) {
+          to = jitterEndpoint(from, to, slotOf(shooter));
+        }
       }
       return _origTracer.call(this, from, to, opts);
     };
@@ -766,6 +962,25 @@
         const a = L[i];
         if (a && a._fireTgtT > 0) a._fireTgtT -= dt;
         if (a && (a._breachCD > 0 || a._breachedT > 0)) tickBreach(a, dt);
+      }
+    }
+  });
+
+  // ---- NPC AIM V2: the per-frame arm-pitch pass. Order 90.5 = strictly after
+  // animChar (34/35), poseList's flat hard-set (36), reactions' additive rage
+  // elevation (89) and grapple (90) — the LAST gun-arm writer before render,
+  // so the aimed pose is what actually draws. Cheap: early-outs on !armed and
+  // on actors that aren't engaging (see applyAimPose's `engaged` gate).
+  CBZ.onUpdate(90.5, function (dt) {
+    if (g.mode !== "city" || !CBZ.CONFIG.NPC_AIM_V2) return;
+    const lists = [CBZ.cityPeds, CBZ.cityCops];
+    for (let li = 0; li < lists.length; li++) {
+      const L = lists[li]; if (!L) continue;
+      for (let i = 0; i < L.length; i++) {
+        const a = L[i];
+        if (!a || !a.armed) continue;
+        if (a._aimTgtT > 0) { a._aimTgtT -= dt; if (a._aimTgtT <= 0) a._aimTgt = null; }
+        applyAimPose(a, dt);
       }
     }
   });

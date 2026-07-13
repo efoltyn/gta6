@@ -23,6 +23,12 @@
   const CBZ = window.CBZ;
   const THREE = window.THREE;
   if (!CBZ || !THREE) return;
+  const CFGS = (CBZ.CONFIG = CBZ.CONFIG || {});
+  // SOLID rim ranges: the old buildRidgedRange sheets hang their back edge
+  // ~25% peak height in MID-AIR (hollow shells from the air). The solid
+  // path builds closed "massif pads" whose height envelope reaches the
+  // ground on every border. Revert: CBZ.CONFIG.SNOW_SOLID_RANGE = false.
+  if (CFGS.SNOW_SOLID_RANGE == null) CFGS.SNOW_SOLID_RANGE = true;
 
   // ---- footprint (per spec): rect center (350,-1450), half (420,330) ------
   const CX = 350, CZ = -1450, HX = 420, HZ = 330;
@@ -158,6 +164,82 @@
       const BGU = THREE.BufferGeometryUtils;
       const buildRidge = window.noise && window.noise.buildRidgedRange;
       if (!buildRidge) return;     // headless / noise.js missing: skip the range, biome still stands
+      const NZ = window.noise;
+      const SOLID = CFGS.SNOW_SOLID_RANGE !== false &&
+        !!(NZ.rangeRidgedFbm && NZ.rangeVnoise && NZ.rangeShadeVert);
+
+      // ----------------------------------------------------------------
+      //  CLOSED MASSIF PAD (the SOLID path): same noise/shading family as
+      //  buildRidgedRange, but the height envelope is
+      //      eu (0 at both ridge ENDS)  ×  sin(π·v) (0 at the valley edge
+      //      AND at the back edge)
+      //  so the pad sits closed on the flat ground from every angle —
+      //  no hanging back edge, no hollow shell. Faces are emitted with a
+      //  consistent up-winding so the default FrontSide material works
+      //  (half the fragment cost of the old DoubleSide sheets).
+      //  Same call/return shape as buildRidgedRange: {geo, spine}.
+      // ----------------------------------------------------------------
+      function buildPad(T, p0, p1, depthDir, cfg) {
+        const cols = cfg.cols, rows = cfg.rows + 2;   // +2 depth rows: the closed back wants resolution
+        const peakAmp = cfg.peakAmp, depthLen = cfg.depthLen;
+        const seedOff = cfg.seedOff, ns = cfg.noiseScale;
+        const dx = p1.x - p0.x, dz = p1.z - p0.z;
+        const gx = [], gz = [], gy = [];
+        for (let r = 0; r <= rows; r++) {
+          gx[r] = []; gz[r] = []; gy[r] = [];
+          for (let c = 0; c <= cols; c++) {
+            const u = c / cols, v = r / rows;
+            const bx = p0.x + dx * u + depthDir.x * (v * depthLen);
+            const bz = p0.z + dz * u + depthDir.z * (v * depthLen);
+            const eu = 1 - Math.pow(Math.abs(2 * u - 1), 3);
+            const ev = Math.sin(Math.PI * v);
+            const env = 0.45 + 0.55 * NZ.rangeVnoise(u * 3.3 + seedOff * 0.01, seedOff * 0.02);
+            const crag = 0.4 + 0.6 * NZ.rangeRidgedFbm((bx + seedOff) * ns, (bz - seedOff) * ns);
+            gx[r][c] = bx; gz[r][c] = bz;
+            gy[r][c] = peakAmp * eu * ev * env * crag;
+          }
+        }
+        const spine = [];
+        for (let c = 0; c <= cols; c++) {
+          let mh = 0, mr = 1;
+          for (let r = 1; r <= rows; r++) if (gy[r][c] > mh) { mh = gy[r][c]; mr = r; }
+          spine.push({ x: gx[mr][c], z: gz[mr][c], h: mh });
+        }
+        const tris = cols * rows * 2;
+        const posA = new Float32Array(tris * 9), colA = new Float32Array(tris * 9);
+        let pi = 0, ci = 0;
+        const up = new T.Vector3(), e1 = new T.Vector3(), e2 = new T.Vector3();
+        const A = new T.Vector3(), B = new T.Vector3(), Cc = new T.Vector3(), Dd = new T.Vector3();
+        const _cu = new T.Color();
+        const palette = cfg.palette;
+        function emitTri(a, b, c2) {
+          e1.subVectors(b, a); e2.subVectors(c2, a);
+          up.crossVectors(e1, e2);
+          if (up.y < 0) { const t = b; b = c2; c2 = t; up.y = -up.y; }   // consistent up-winding
+          const upDot = up.y / (up.length() || 1);
+          const verts = [a, b, c2];
+          for (let k = 0; k < 3; k++) {
+            const vv = verts[k];
+            posA[pi++] = vv.x; posA[pi++] = vv.y; posA[pi++] = vv.z;
+            const wob = NZ.rangeVnoise(vv.x * 0.02 + seedOff, vv.z * 0.02 - seedOff);
+            NZ.rangeShadeVert(palette, vv.y, peakAmp, upDot, wob, 0, _cu);
+            colA[ci++] = _cu.r; colA[ci++] = _cu.g; colA[ci++] = _cu.b;
+          }
+        }
+        for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+          A.set(gx[r][c], gy[r][c], gz[r][c]);
+          B.set(gx[r][c + 1], gy[r][c + 1], gz[r][c + 1]);
+          Cc.set(gx[r + 1][c], gy[r + 1][c], gz[r + 1][c]);
+          Dd.set(gx[r + 1][c + 1], gy[r + 1][c + 1], gz[r + 1][c + 1]);
+          emitTri(A, Cc, B); emitTri(B, Cc, Dd);
+        }
+        const g = new T.BufferGeometry();
+        g.setAttribute("position", new T.BufferAttribute(posA, 3));
+        g.setAttribute("color", new T.BufferAttribute(colA, 3));
+        g.computeVertexNormals();
+        return { geo: g, spine };
+      }
+      const build = SOLID ? buildPad : buildRidge;
 
       // -- palette: rock / ragged snow / cliff (this biome's own COL set) --
       const rangePalette = {
@@ -185,7 +267,7 @@
           footGuard: 0.28,                       // valleyGuard: y->0 by row ~28% (flat floor)
           palette: rangePalette,
         };
-        const built = buildRidge(THREE, e.p0, e.p1, e.dir, cfg);
+        const built = build(THREE, e.p0, e.p1, e.dir, cfg);
         fgGeoms.push(built.geo);
         spines.push({ edge: e, spine: built.spine, peakAmp: cfg.peakAmp });
       }
@@ -207,17 +289,26 @@
           footGuard: 0.28,
           palette: rangePalette,
         };
-        distGeoms.push(buildRidge(THREE, e.p0, e.p1, e.dir, cfg).geo);
+        distGeoms.push(build(THREE, e.p0, e.p1, e.dir, cfg).geo);
       }
 
       // -- MERGE: foreground -> 1 mesh, distant -> 1 mesh (2 draw calls)
       // Vertex colour is the authored mountain shading. Keep it independent of
       // one-sided normals / sun direction so the range cannot collapse into a
       // black silhouette at night or when viewed from aircraft height.
-      const rangeMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, vertexColors: true, flatShading: true,
-        side: THREE.DoubleSide, fog: true,
-      });
+      // SOLID pads have real up-facing normals → Lambert lights the massifs
+      // (the hemisphere floor keeps them from ever going black at night) and
+      // the shared fogDepth scale keeps them SOLID past the city fog wall
+      // instead of dissolving into pale sky-colored cutouts. Legacy sheets
+      // keep their old Basic material (they have no usable normals).
+      const rangeMat = SOLID
+        ? (CBZ.terrainFogScale || function (m) { return m; })(new THREE.MeshLambertMaterial({
+            color: 0xffffff, vertexColors: true, flatShading: true, fog: true,
+          }))
+        : new THREE.MeshBasicMaterial({
+            color: 0xffffff, vertexColors: true, flatShading: true,
+            side: THREE.DoubleSide, fog: true,
+          });
       function mergeAddRange(geoms, cast) {
         let mesh;
         if (BGU && BGU.mergeBufferGeometries) {

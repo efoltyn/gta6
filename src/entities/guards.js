@@ -7,6 +7,10 @@
   const CBZ = window.CBZ;
   const { makeCharacter, animChar, lerpAngle, visionWedge, player } = CBZ;
 
+  // jail feature flag (self-defaulting — one-line revert via CBZ.CONFIG):
+  // guards call out their state changes ("STOP RIGHT THERE!") near the player.
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
+
   let guardNo = 0;
   function addFlashlight(ch) {
     const group = new THREE.Group();
@@ -52,6 +56,7 @@
       waypoints: waypoints.map((p) => new THREE.Vector3(p[0], 0, p[1])),
       start: new THREE.Vector3(waypoints[0][0], 0, waypoints[0][1]),
       wi: 0, speed, viewDist, half, alert: 0, dead: false, ko: 0,
+      state: "patrol",   // named AI state — stamped by updateGuard every frame
       kind: opts.kind || "guard", id, bribed: 0, flashlightOn: false,
       flashlightPatrol: opts.flashlightPatrol != null ? !!opts.flashlightPatrol : (warden || (id % 3 === 1)),
       flashlightPhase: opts.flashlightPhase != null ? opts.flashlightPhase : (id * 6.7 + (warden ? 2.4 : 0)),
@@ -763,6 +768,49 @@
     if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
   }
 
+  // ---- named guard states + transition barks --------------------------------
+  // updateGuard's priority cascade now STAMPS the branch it ran as an explicit
+  // guard.state: "patrol"|"social"|"investigate"|"alert"|"hunt"|"capture"|
+  // "ko"|"dead". Pure instrumentation — zero behavior change: a contract for
+  // future content (campaign warden hooks can read real states) plus the
+  // CBZ.jailGuardStates() debug helper. Barks ride the transitions.
+  const BARKS = {
+    hunt: ["STOP RIGHT THERE!", "We got a runner!", "Don't make me chase you!", "You're mine, inmate!"],
+    huntWarden: ["You dare run from ME?", "MY block. MY rules. Take him down!"],
+    investigate: ["I heard something over there…", "Eyes open — something moved.", "Hold up. Checking that out."],
+  };
+  let barkCD = 0;   // global spacing so barks never spam the hint line
+
+  function guardBark(g, s) {
+    if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS)) return;
+    if (barkCD > 0 || !CBZ.game || CBZ.game.mode !== "escape" || CBZ.game.state !== "playing") return;
+    if (g.dead || g.ko > 0 || g.bribed > 0) return;
+    let pool = null;
+    if (s === "hunt") pool = g.kind === "warden" ? BARKS.huntWarden : BARKS.hunt;
+    else if (s === "investigate" && Math.random() < 0.6) pool = BARKS.investigate;
+    if (!pool) return;
+    const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
+    if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
+    barkCD = 6;
+    if (CBZ.flashHint) CBZ.flashHint(`🗣 ${nameOf(g)}: “${pool[(Math.random() * pool.length) | 0]}”`, 1.7);
+  }
+
+  function noteState(g, s) {
+    if (g.state === s) return;
+    g.state = s;
+    guardBark(g, s);
+  }
+
+  // debug/contract helper: live head-count per named guard state
+  CBZ.jailGuardStates = function () {
+    const counts = {};
+    for (const gd of CBZ.guards || []) {
+      const s = gd.state || "patrol";
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    return counts;
+  };
+
   // ---- per-guard movement / facing ----
   function updateGuard(g, dt) {
     const pdx = player.pos.x - g.group.position.x, pdz = player.pos.z - g.group.position.z;
@@ -772,6 +820,7 @@
     const renderImportant = g.alert > 0 || g.hunt > 0 || g.approach || g.investigate || g.kind === "warden";
     g.group.visible = renderNear || renderImportant;
     if (g.dead) {
+      noteState(g, "dead");
       g.hunt = 0; g.alert = 0; g.approach = null; g.investigate = null;
       g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
       updateFlashlight(g, dt);
@@ -784,6 +833,7 @@
 
     // knocked out: topple over, do nothing, then climb back up
     if (g.ko > 0) {
+      noteState(g, "ko");
       g.ko -= dt;
       g.group.rotation.z = CBZ.damp(g.group.rotation.z, Math.PI / 2, 11, dt);
       updateFlashlight(g, dt);
@@ -795,6 +845,7 @@
     }
 
     if (g.approach) {
+      noteState(g, "social");
       const a = g.approach;
       a.t -= dt;
       const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
@@ -828,6 +879,7 @@
       g.investigate = null;
       const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
       const dist = Math.hypot(dx, dz);
+      noteState(g, dist > 1.4 ? "hunt" : "capture");
       g.group.rotation.y = lerpAngle(g.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0001, dt));
       if (dist > 1.4) {
         const sp = g.speed * 1.7;
@@ -843,6 +895,7 @@
     }
 
     if (g.investigate && g.investigate.t > 0) {
+      noteState(g, "investigate");
       const inv = g.investigate;
       inv.t -= dt;
       questionNpcDuringSearch(g, dt);
@@ -873,12 +926,14 @@
 
     if (g.alert > 0) {
       // freeze and stare at the player while alerted
+      noteState(g, "alert");
       const dx = player.pos.x - g.group.position.x;
       const dz = player.pos.z - g.group.position.z;
       g.group.rotation.y = lerpAngle(g.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.0001, dt));
       g.alert -= dt;
       animChar(g.char, 0, dt);
     } else {
+      noteState(g, "patrol");
       const wp = g.waypoints[g.wi];
       const dx = wp.x - g.group.position.x, dz = wp.z - g.group.position.z;
       const dist = Math.hypot(dx, dz);
@@ -919,6 +974,78 @@
     return true;
   }
 
+  // ---- CBZ.jailBoost — ONE shared ledger for "temporarily boost an actor's
+  // fields, restore the exact bases later", plus the run-lifecycle watchers
+  // every jail system used to hand-roll (lockdown / difficulty /
+  // reinforcements each kept private lastElapsed + lastState copies of the
+  // same bookkeeping; difficulty.js even carried a "mirrors reinforcements"
+  // comment). Pure refactor home — semantics preserved by each caller.
+  //   apply(tag, obj, {field: value}) — set absolute values (base saved once)
+  //   scale(tag, obj, {field: mult})  — set base*mult, recomputed from the
+  //                                     SNAPSHOT every call (never compounds)
+  //   held(tag, obj) / count(tag)     — ledger queries
+  //   restore(tag, obj) / restoreAll(tag) — put the saved bases back
+  //   newRunWatcher(eps)              — returns poll(): true once when
+  //                                     game.elapsed falls back (a new run)
+  //   onStateExit(fn, states)         — fn(state) whenever play is left
+  //                                     (one shared onAlways(91) dispatcher;
+  //                                     hooks run in registration order)
+  CBZ.jailBoost = (function () {
+    const ledgers = Object.create(null);       // tag -> Map(obj -> {field: base})
+    function ledger(tag) { return ledgers[tag] || (ledgers[tag] = new Map()); }
+    function put(tag, obj, fields, fromBase) {
+      if (!obj || !fields) return;
+      const led = ledger(tag);
+      let saved = led.get(obj);
+      if (!saved) { saved = {}; led.set(obj, saved); }
+      for (const f in fields) {
+        if (!(f in saved)) saved[f] = obj[f];  // snapshot the base exactly once
+        obj[f] = fromBase ? saved[f] * fields[f] : fields[f];
+      }
+    }
+    const exitHooks = [];
+    let lastState = CBZ.game ? CBZ.game.state : "title";
+    CBZ.onAlways(91, function () {
+      const s = CBZ.game.state;
+      if (s === lastState) return;
+      if (s !== "playing") {
+        for (const h of exitHooks) {
+          if (h.states && h.states.indexOf(s) === -1) continue;
+          try { h.fn(s); } catch (e) {}
+        }
+      }
+      lastState = s;
+    });
+    return {
+      apply(tag, obj, fields) { put(tag, obj, fields, false); },
+      scale(tag, obj, fields) { put(tag, obj, fields, true); },
+      held(tag, obj) { const led = ledgers[tag]; return !!(led && led.has(obj)); },
+      count(tag) { const led = ledgers[tag]; return led ? led.size : 0; },
+      restore(tag, obj) {
+        const led = ledgers[tag]; if (!led) return;
+        const saved = led.get(obj); if (!saved) return;
+        for (const f in saved) obj[f] = saved[f];
+        led.delete(obj);
+      },
+      restoreAll(tag) {
+        const led = ledgers[tag]; if (!led) return;
+        led.forEach(function (saved, obj) { for (const f in saved) obj[f] = saved[f]; });
+        led.clear();
+      },
+      newRunWatcher(eps) {
+        const e0 = eps == null ? 0.5 : eps;
+        let last = (CBZ.game && CBZ.game.elapsed) || 0;
+        return function poll() {
+          const e = (CBZ.game && CBZ.game.elapsed) || 0;
+          const fell = e + e0 < last;
+          last = e;
+          return fell;
+        };
+      },
+      onStateExit(fn, states) { exitHooks.push({ fn: fn, states: states || null }); },
+    };
+  })();
+
   CBZ.updateGuard = updateGuard;
   CBZ.updateGuardFlashlight = updateFlashlight;
   CBZ.resolveGuardApproach = resolveGuardApproach;
@@ -931,6 +1058,7 @@
   // drive all guards every playing frame
   CBZ.onUpdate(20, function (dt) {
     if (CBZ.game.mode !== "escape") return;   // jail-only — prison guards never run in city/disaster
+    if (barkCD > 0) barkCD -= dt;
     for (const g of CBZ.guards) updateGuard(g, dt);
   });
   CBZ.onUpdate(20.5, function (dt) { if (CBZ.game.mode !== "escape") return; updateRacketPressure(dt); });

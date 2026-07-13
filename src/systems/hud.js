@@ -58,7 +58,10 @@
     feed.push({ el: line, t: 0 });
     while (feed.length > 6) { const old = feed.shift(); if (old.el.parentNode) old.el.parentNode.removeChild(old.el); }
   }
-  CBZ.killFeedReset = killFeedReset;
+  // exported as survKillFeedReset: city/killfeed.js (loaded later) claims the
+  // plain CBZ.killFeedReset name for ITS feed, which silently shadowed this
+  // one — survival's reset was clearing the city array instead of this DOM.
+  CBZ.survKillFeedReset = killFeedReset;
   CBZ.pushKill = pushKill;
   // age the feed: fade each line after ~7s, drop it after ~9s
   CBZ.onAlways(94, function (dt) {

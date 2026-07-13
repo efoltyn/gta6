@@ -689,6 +689,58 @@
     }],
   });
 
+  // ---- PROPS WITH PURPOSE (city/propuse.js): every chair/bench/couch is a
+  // SEAT, every bed SLEEPS, wanted posters READ. All feature-detected — when
+  // propuse.js is absent or CBZ.CONFIG.PROPS_PURPOSE=false the registries stay
+  // empty and these zones never surface.
+  I.registerZone({
+    id: "zone-seat", kind: "seat", prio: 6, driving: false,
+    find: function (px, pz, ctx) { return CBZ.propNearestSeat ? CBZ.propNearestSeat(px, pz, REACH, ctx.pos.y) : null; },
+    options: [{ id: "seat-sit", slot: "e", label: "Sit down", onSelect: function (seat) { CBZ.propSit(CBZ.player, seat); } }],
+  });
+  I.registerZone({
+    id: "zone-bed", kind: "bed", prio: 6, driving: false,
+    find: function (px, pz, ctx) { return CBZ.propNearestBed ? CBZ.propNearestBed(px, pz, REACH, ctx.pos.y) : null; },
+    options: [{
+      id: "bed-sleep", slot: "e",
+      label: function (b) { return b.kind === "bedroll" ? "Crash on the bedroll" : "Sleep til morning"; },
+      onSelect: function (bed) { CBZ.propSleep(CBZ.player, bed); },
+    }],
+  });
+  I.registerZone({
+    id: "zone-wanted-poster", kind: "wantedposter", prio: 5, driving: false,
+    find: function (px, pz, ctx) {
+      const p = CBZ.propNearestWantedPoster ? CBZ.propNearestWantedPoster(px, pz, REACH + 1.2) : null;
+      if (!p) return null;
+      if (Math.abs((p.y || 0) - ctx.pos.y) > 12) return null;   // a rooftop board isn't readable from its own roof only — big boards read from the street below
+      return p;
+    },
+    options: [{
+      id: "wanted-read", slot: "i",
+      label: "Read the wanted poster",
+      onSelect: function (poster) { if (CBZ.bountyFromPoster) CBZ.bountyFromPoster(poster); },
+    }],
+  });
+  // seated/asleep: the "get up" verb rides its own zero-distance source so it
+  // always wins the panel while the pose holds (physics stun hides nothing here).
+  I.registerSource({
+    id: "src-propself", kind: "propself", layers: ["propself"], prio: 40, driving: false,
+    find: function (px, pz, ctx, push) {
+      const s = CBZ.player._propSeat, b = CBZ.player._propBed;
+      if (s || b) push(s || b, 0);
+    },
+  });
+  I.register("propself", {
+    id: "propself-stand", slot: "e", prio: 100,
+    canShow: function () { return !!CBZ.player._propSeat; },
+    label: "Stand up", onSelect: function () { CBZ.propStand(CBZ.player); },
+  });
+  I.register("propself", {
+    id: "propself-wake", slot: "e", prio: 100,
+    canShow: function () { return !!CBZ.player._propBed; },
+    label: "Wake up", onSelect: function () { CBZ.propWake(CBZ.player); },
+  });
+
   // ================== DESCRIBERS: the card header per kind ==================
   I.describe("ped", function (p) {
     return {
@@ -735,6 +787,11 @@
   });
   I.describe("modshop", function () { return { label: "🔧 Mod Garage", note: "Sell · respray · armor · booster · turret · rockets" }; });
   I.describe("self", function () { return { label: "Your pockets", note: "what you're carrying" }; });
+  const SEAT_NAMES = { stool: "Bar stool", bench: "Bench", sofa: "Couch", couch: "Couch", booth: "Booth", patio: "Patio chair", waiting: "Waiting chair", chair: "Chair" };
+  I.describe("seat", function (s) { return { label: "🪑 " + (SEAT_NAMES[s.kind] || "Chair"), note: "Take a seat" }; });
+  I.describe("bed", function (b) { return { label: "🛏 " + (b.kind === "bedroll" ? "Bedroll" : "Bed"), note: b.kind === "bedroll" ? "A rough sleep — til morning" : "Sleep until morning" }; });
+  I.describe("wantedposter", function (p) { return { label: "📋 Wanted poster", note: "Bounty $" + ((p && p.bounty) || 0).toLocaleString() }; });
+  I.describe("propself", function () { return { label: CBZ.player._propBed ? "😴 Lying down" : "🪑 Seated", note: "take a load off" }; });
 
   // ================== OPTIONS ==================
   const nm = (p) => p.name || "them";
@@ -836,7 +893,9 @@
   I.register("ped:civ", { id: "ped-pickpocket", slot: "l", prio: 10, bad: true, label: (p) => "Pick " + nm(p) + "'s pocket", onSelect: (p) => pickpocket(p) });
 
   // ---- COPS: the menu is built from the SITUATION, not a fixed list ----
-  I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1, label: "Put your hands up — surrender", onSelect: (c) => copSurrender(c) });
+  // surrender is also live whenever a cop is mid-CHALLENGE (police.js
+  // arrest-first stamps c._challenged) — the FREEZE hint points here.
+  I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1 || !!(c && c._challenged && !c.dead), label: "Put your hands up — surrender", onSelect: (c) => copSurrender(c) });
   I.register("ped:cop", { id: "cop-alibi", slot: "j", canShow: (c, ctx) => ctx.wanted >= 1 && ctx.wanted <= 2, label: "Give the officer an alibi", onSelect: (c) => copAlibi(c) });
   I.register("ped:cop", { id: "cop-directions", slot: "k", canShow: (c, ctx) => ctx.wanted < 1, label: (c) => "Ask " + c.name + " for directions", onSelect: () => talk() });
   // the design rule: there's ALWAYS a malicious option — here, assault

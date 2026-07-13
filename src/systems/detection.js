@@ -16,6 +16,12 @@
   const { player, el, guardSees } = CBZ;
   const g = CBZ.game;
 
+  // jail feature flag (self-defaulting): tower searchlights feed REAL
+  // detection pressure — being in a beam builds heat fast and radios your
+  // position to nearby guards (entities/searchlight.js owns the beam +
+  // CBZ.litBySearchlight; the visual red-flush lives there too).
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
+
   // restricted zones — being seen here is itself a crime
   function zoneOf(p) {
     if (p.x > 18.5 && p.x < 29.5 && p.z > -6.5 && p.z < 8.5) return "the armory";
@@ -24,12 +30,20 @@
     return null;
   }
 
-  // anyone can pour heat on (combat, theft, escape attempts call this)
-  CBZ.addHeat = function (n) { g.detection = Math.max(0, Math.min(100, g.detection + n)); };
+  // anyone can pour heat on (combat, theft, escape attempts call this).
+  // After strike two (systems/capture.js three-strikes arc) the block never
+  // fully relaxes: g.strikeHeatFloor keeps a minimum simmer under the heat
+  // bar. Jail-only — the floor is ignored outside escape mode and cleared by
+  // state.js resetGame().
+  CBZ.addHeat = function (n) {
+    const floor = (g.mode === "escape" && g.strikeHeatFloor) || 0;
+    g.detection = Math.max(floor, Math.min(100, g.detection + n));
+  };
   CBZ.addComplaint = function (n) { g.complaints = Math.max(0, Math.min(100, (g.complaints || 0) + n)); };
 
   const raycaster = new THREE.Raycaster();
   const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
+  let litNow = false, litPingT = 0;   // searchlight exposure state (see below)
 
   function metaWithPlayerPos(meta) {
     const m = Object.assign({}, meta || {});
@@ -647,6 +661,25 @@
       }
       if (CBZ.updateGuardFlashlight) CBZ.updateGuardFlashlight(gd, dt);
     }
+
+    // ---- SEARCHLIGHTS ARE SENSORS (JAIL_SEARCHLIGHT_DETECT) ----
+    // standing in a sweeping beam pours on heat and radios your position to
+    // the nearest guards — the same investigate plumbing witness reports use.
+    // Crouching shrinks the catch radius (litBySearchlight) AND halves the
+    // burn if you're still caught. No pressure while hauled/cuffed/spawning.
+    if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT && g.mode === "escape" &&
+        g.invuln <= 0 && !player.dead &&
+        (!player.captureState || player.captureState === "normal") &&
+        CBZ.litBySearchlight && CBZ.litBySearchlight(player.pos, player.crouch)) {
+      CBZ.addHeat((player.crouch ? 16 : 30) * dt);
+      if (!litNow && CBZ.flashHint) CBZ.flashHint("💡 SEARCHLIGHT — you're lit up!", 1.5);
+      litNow = true;
+      if (litPingT <= 0) {
+        litPingT = 3.0;
+        dispatchSearch(10, { type: "searchlight" }, { data: { name: "the tower" } }, null);
+      }
+    } else litNow = false;
+    if (litPingT > 0) litPingT -= dt;
 
     const csum = CBZ.caseSummary && CBZ.caseSummary();
     if (csum && csum.heat > 18 && csum.lastKnown && (!g.lastKnown || g.lastKnown.t <= 0) && (g.caseSearchCD || 0) <= 0) {

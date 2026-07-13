@@ -206,8 +206,17 @@
       // deterministic decision for the caller (e.g. a seeded roll in
       // city/peds.js), same pattern as c.cap gating the whole hair block.
       if (fem && c.longHair) {
-        const longHair = new THREE.Mesh(boxGeom(0.5, 0.55, 0.16), cmat(c.hair || 0x4a3526));
-        longHair.position.set(0, 0.22, -0.3); neck.add(longHair); hairParts.push(longHair);
+        // ONE CONTINUOUS HAIR MASS (owner bug: "block on top + separate block
+        // on the back"). The old back panel (0.5w, top y=0.495, back z=-0.38)
+        // missed the top slab (bottom y=0.53, back z=-0.32) on all three axes:
+        // a 0.035 skin gap below the slab, a 0.07-per-side width step, and a
+        // 0.06 rear jut. The panel now TUCKS UP INTO the slab (top y=0.62,
+        // 0.09 overlap — same trick as the limb joints), tapers only 0.02 per
+        // side (0.60 vs 0.64), and sits 0.015 proud of the slab's back face
+        // (-0.335..-0.175: flush-reading, but never co-planar → no z-fight;
+        // front edge stays buried inside the head so no head/hair gap).
+        const longHair = new THREE.Mesh(boxGeom(0.6, 0.68, 0.16), cmat(c.hair || 0x4a3526));
+        longHair.position.set(0, 0.28, -0.255); neck.add(longHair); hairParts.push(longHair);
       }
     }
 
@@ -402,6 +411,29 @@
       // the hands-up layer below OWNS the arms — if the idle counter-swing
       // also wrote them, the two damps fight and the arms equilibrate at a
       // half-raised ~40° (filmstrip-diagnosed) instead of reaching the pose.
+    } else if (ch.carryPose) {
+      // LOW-READY carry (player TP, armed but not presenting — systems/
+      // fpsmode.js owns the flag): the gun arm hangs low-forward so the
+      // weapon rides at the hip pointing down-forward (~45°, RDR2/Fortnite
+      // carry) instead of squared-up at the horizon; the left arm keeps the
+      // normal relaxed counter-swing so walking still reads human. A touch
+      // of gait/breath bob on the gun arm keeps it alive without waving the
+      // muzzle around. Cuffed/surrender above outrank the carry; the moment
+      // fpsmode flips aimingPose (RMB/fire/recoil-settle) the present pose
+      // branch takes over through the same damps — smooth raise/lower.
+      // (rotation.y / position.z stay owned by the !aimingPose reset below.)
+      const cr = 12;
+      const carryBob = moving ? swing * 0.10 : Math.sin(ch.breath * 2.2) * 0.02;
+      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.55 + carryBob, cr, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.14, cr, dt);   // slight tuck across the hip
+      setElbow(J.ra, -0.42, cr);                       // forearm angles the gun down-forward
+      const armAmp = hipAmp * (0.95 + 0.25 * run2);
+      const laTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
+      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.08, 6, dt);
+      const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
+      const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;
+      setElbow(J.la, -(elbBase + foldL), armRate - 2);
     } else {
       // counter-swing with an elbow that deepens with pace: relaxed ~14° at
       // idle, a soft 35-45° at a walk, a real ~90° runner's pump at sprint.
@@ -579,7 +611,7 @@
     // so any actual strike/reaction below (or the punch above) wins outright.
     if (ch.fightStance && !(ch.punchT > 0) && !(ch.kickT > 0) && !(ch.blockT > 0) &&
         !(ch.dodgeT > 0) && !(ch.staggerT > 0) && !(ch.koT > 0) && !ch.koPose &&
-        !ch.aimingPose && !ch.cuffed && !ch.surrender && !ch.handsUp) {
+        !ch.aimingPose && !ch.carryPose && !ch.cuffed && !ch.surrender && !ch.handsUp) {
       ch.fightPh = (ch.fightPh || 0) + dt;              // own phase: weave, don't walk
       const w = Math.sin(ch.fightPh * 2.6);             // slow weave
       const w2 = Math.sin(ch.fightPh * 5.2 + 1.3);      // faster forearm pump
@@ -842,9 +874,53 @@
     }
   }
 
+  /* ---- WEAPON MOUNT POINTS (Fortnite-style stow rig) ---------------------
+     Lazy + idempotent: three empty groups parented to rig.body, so mounted
+     props ride the bob/sway/lean and follow every animation for free. Works
+     on ANY rig from makeCharacter (player, peds, cops) — NPC systems may
+     guard-call `CBZ.charMounts && CBZ.charMounts(actor.char)` and parent
+     their stowed props to the returned groups.
+       back  — primary long gun: diagonal across the back, muzzle up over the
+               RIGHT shoulder (~40° off vertical), stock at the left hip,
+               flank to the camera with a ~17° outward roll so the mag/grip
+               tips off the back plane instead of burying in the spine.
+       back2 — secondary long gun: the mirrored diagonal (muzzle over the
+               LEFT shoulder), staggered 0.06 lower and 0.06 further out so
+               two stowed rifles read as a clean X with no z-fighting where
+               they cross.
+       hip   — pistol holster ON the right hip: muzzle down with a ~12°
+               forward cant, grip to the rear, outboard of the thigh
+               (x .46 > leg span .40) so it never buries in the leg.
+     Consumers must OVERWRITE the hand-mount transform CBZ.buildActorWeapon
+     ships on its props: prop.position.set(0,0,0); prop.rotation.set(0,0,0);
+     then their own scale. Prop convention: barrel -Z, rail +Y, grip -Y;
+     Euler order XYZ. Endpoints verified numerically: a 1.5u rifle at 0.92
+     scale spans (-0.33,1.22)→(0.55,2.26) on `back` — clear of the head box
+     (y 1.88..2.48, |x|≤0.3, z≥-0.3), inside the shoulder line (0.62),
+     behind the torso back plane (z=-0.25). */
+  function charMounts(rig) {
+    if (!rig || !rig.body) return null;
+    if (rig._mounts) return rig._mounts;
+    const mk = (px, py, pz, ex, ey, ez) => {
+      const m = new THREE.Group();
+      m.position.set(px, py, pz);
+      m.rotation.set(ex, ey, ez);
+      m.userData.isMount = true;   // non-empty userData: batching spares it
+      rig.body.add(m);
+      return m;
+    };
+    rig._mounts = {
+      back:  mk(-0.14, 1.44, -0.36, 1.571, -0.698, -1.271),
+      back2: mk( 0.14, 1.38, -0.42, 1.571,  0.698, -1.271),
+      hip:   mk( 0.46, 1.05, -0.20, -1.781, -0.26, Math.PI),
+    };
+    return rig._mounts;
+  }
+
   CBZ.makeCharacter = makeCharacter;
   CBZ.animChar = animChar;
   CBZ.deathPose = deathPose;
+  CBZ.charMounts = charMounts;
   CBZ.lerpAngle = lerpAngle;
   CBZ.damp = damp;
 })();

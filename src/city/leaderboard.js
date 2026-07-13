@@ -178,18 +178,26 @@
       // if their carried loot is modest — their fame + purse-winnings are the value.
       const racer = p._racer || null;
       const whale = !!(racer || p.vipTitle || p.vipLvl || p.isBoss || p.rank === "boss" || p.rank === "lt" ||
-        p.rank === "enforcer" || p.bounty || loot >= 1200 || (p.wealth || 0) >= 0.88 || WHALE_ARCH[p.archetype]);
+        p.rank === "enforcer" || p.isCompanyOwner || p._milli || p._bilFounder || p.bounty || loot >= 1200 ||
+        (p.wealth || 0) >= 0.88 || WHALE_ARCH[p.archetype]);
       if (!whale) continue;
       const prot = protectionOf(p);
-      // fold a racer's season purse-winnings into their score so a winning driver
-      // climbs the rich list over the season (read-only of cityRacing).
-      const racerWorth = (racer && CBZ.cityRacing && CBZ.cityRacing.netWorthOf) ? CBZ.cityRacing.netWorthOf(racer) : 0;
-      const score = loot + lv * 1100 + (p.vipLvl || 0) * 900 + (p.gang ? 9000 : 0) + (p.bounty || 0) + racerWorth;
+      // ECONOMY_V2: rank by REAL NET WORTH (economy.js's role power-law —
+      // founders/CEOs/tycoons on top, a racer at their honest purse, workers
+      // at the floor). The old formula summed carried cash + level noise + a
+      // player-scaled racer purse, which is exactly how one driver ended up
+      // "richer" than every tycoon in town. `loot` stays the ROBBABLE take —
+      // net worth is what they're WORTH, take is what's in reach on the street.
+      const nw = CBZ.cityNetWorthOf ? CBZ.cityNetWorthOf(p)
+        : loot + lv * 1100 + (p.vipLvl || 0) * 900 + (p.gang ? 9000 : 0) + (p.bounty || 0);
+      const take = loot + ((p._milli && !p._milliShaken) ? (p._milliBag || 0) : 0);
       out.push({
         actor: p, name: p.name || titleOf(p),
-        title: racer ? ("Racer #" + racer.number) : titleOf(p), level: lv,
-        loot: racer ? Math.max(loot, racerWorth) : loot,
-        score: score, why: whyOf(p, loot), where: districtOf(p),
+        title: (CBZ.cityOccupationOf ? CBZ.cityOccupationOf(p) : (racer ? ("Racer #" + racer.number) : titleOf(p))),
+        level: lv,
+        loot: take, netWorth: nw,
+        score: nw, why: whyOf(p, take) + (take >= 5000 ? " · take ~" + money(take) : ""),
+        where: districtOf(p),
         protection: prot, you: false,
       });
     }
@@ -260,7 +268,8 @@
 
   CBZ.cityLeaderboardRank = function () {
     const me = playerRow();
-    const rows = targetRows().concat([me]).sort(function (a, b) { return b.loot - a.loot; });
+    const worth = function (r) { return r.netWorth != null ? r.netWorth : r.loot; };
+    const rows = targetRows().concat([me]).sort(function (a, b) { return worth(b) - worth(a); });
     return { rank: rows.indexOf(me) + 1, total: rows.length, score: me.score };
   };
 
@@ -343,14 +352,19 @@
   }
 
   function renderTargets(rows, me) {
-    const all = rows.slice(0, 8);
-    const cols = "24px 1.2fr 70px 76px 1.35fr";
+    // ECONOMY_V2: 12 rows (more ultra-rich faces), ranked/shown by NET WORTH
+    // with an occupation read — the board finally looks like a real rich list.
+    const all = rows.slice(0, 12);
+    const cols = "24px 1.2fr 86px 84px 1.2fr";
     let h = "<div style='margin-top:10px'>" +
       "<div style='font-size:13px;font-weight:700;margin-bottom:3px'>Living Rich List</div>" +
       "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
-      "<span>#</span><span>Person</span><span style='text-align:right'>Read</span><span style='text-align:right'>Take</span><span>Why</span></div>";
+      "<span>#</span><span>Person</span><span style='text-align:right'>Tier</span><span style='text-align:right'>Worth</span><span>Why</span></div>";
     all.forEach(function (r, i) {
-      const level = r.level ? "Lv." + r.level : "";
+      const nw = r.netWorth != null ? r.netWorth : r.loot;
+      const tier = (CBZ.cityEcon && CBZ.cityEcon.wealthTier) ? CBZ.cityEcon.wealthTier(nw) : null;
+      const level = tier ? tier.name : (r.level ? "Lv." + r.level : "");
+      const tierCol = r.dead ? "#8a93a3" : (tier ? tier.color : "#ffd166");
       // DECEASED rows (Hall of Fame — permanently-dead VIPs/tycoons/racers,
       // see deceasedNotables()) read dim/greyed with a skull tag instead of the
       // usual bright name, same "this entry is gone but on record" language
@@ -360,15 +374,16 @@
       h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px;" + (r.dead ? "opacity:.6" : "") + "'>" +
         "<span style='color:#8a93a3'>" + (i + 1) + "</span>" +
         "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + (r.dead ? "💀 " : "") + "<b style='color:" + nameCol + "'>" + esc(r.name) + "</b> <span style='color:#8a93a3'>" + esc(r.title) + "</span></span>" +
-        "<span style='text-align:right;color:#ffd166;font-weight:700'>" + esc(level) + "</span>" +
-        "<span style='text-align:right;color:" + (r.dead ? "#8a93a3" : "#7ed957") + ";font-weight:700'>" + money(r.loot) + "</span>" +
+        "<span style='text-align:right;color:" + tierCol + ";font-weight:700;font-size:10px'>" + esc(level) + "</span>" +
+        "<span style='text-align:right;color:" + (r.dead ? "#8a93a3" : "#7ed957") + ";font-weight:700'>" + money(nw) + "</span>" +
         "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:" + (r.dead ? "#ff8a8a" : "#aeb6c2") + "'>" + esc(r.why) + "</span>" +
         "</div>";
     });
     if (!all.length) h += "<div style='font-size:12px;color:#8a93a3;padding:4px'>No high-value people visible yet.</div>";
     // "ranks against live targets" should mean LIVE — exclude Hall of Fame rows.
     const liveRows = rows.filter(function (r) { return !r.dead; });
-    const richer = liveRows.filter(function (r) { return r.loot > me.loot; }).length + 1;
+    // compare on the NET-WORTH axis (me.loot IS the player's net worth)
+    const richer = liveRows.filter(function (r) { return (r.netWorth != null ? r.netWorth : r.loot) > me.loot; }).length + 1;
     h += "<div style='font-size:11px;color:#6b7480;margin-top:5px;display:flex;justify-content:space-between'>" +
       "<span>Your net worth ranks #" + richer + "/" + (liveRows.length + 1) + " against live targets.</span>" +
       "<span>Cash " + money(g.cash || 0) + " · Bank " + money(g.cityBank || 0) + "</span></div></div>";

@@ -98,7 +98,7 @@
     const after = securityRankIdx();
     if (after > before) {
       const r = SECURITY_RANKS[after];
-      CBZ.city.note("⬆ Promoted to " + r.pip + " — wage's better now.", 2.4);
+      CBZ.city.note("Promoted to " + r.pip + " — the new wage starts today.", 2.4, { from: "Payroll", app: "bank" });
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     }
   }
@@ -327,7 +327,7 @@
     const total = j.reward + (bonus || 0);
     CBZ.city.addCash(total);
     if (j.respect) CBZ.city.addRespect(j.respect);
-    CBZ.city.big("CREW PAID + $" + total);
+    CBZ.city.note("Crew payout — $" + total + " received.", 2.4, { from: "Liberty Bank", app: "bank" });
     // notoriety on the street still grows (your name carries)
     gainNotoriety(Math.round(j.reward * 0.45) + 30);
     // climb the crew ladder: bodies + cash kicked up = the promotion currency
@@ -521,7 +521,7 @@
     else if (j.dest) makeBeacon(j.dest.x, j.dest.z, 0x7ed957);
     else if (j.type === "hit" && j.target) makeBeacon(j.target.pos.x, j.target.pos.z, 0xff5b5b);
     else if (j.type === "heist" && j.lot) makeBeacon(j.lot.building.door.x, j.lot.building.door.z, 0xff9e6b);
-    CBZ.city.note("Job accepted: " + j.desc, 2.4);
+    CBZ.city.note("You're on: " + j.desc, 2.4, { from: "Dispatch" });
     closeBoard();
   }
 
@@ -555,7 +555,7 @@
     const total = j.reward + (bonus || 0);
     CBZ.city.addCash(total);
     CBZ.city.addRespect(Math.ceil(j.reward / 80));
-    CBZ.city.big("+ $" + total);
+    CBZ.city.note("$" + total + " received.", 2.2, { from: "Liberty Bank", app: "bank" });
     // every finished contract grows your criminal CV (≈ a fraction of the pay)
     gainNotoriety(Math.round(j.reward * 0.5) + 40);
     g.cityJobsDone = (g.cityJobsDone || 0) + 1;

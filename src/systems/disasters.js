@@ -3,15 +3,22 @@
 
    A director runs an escalating sequence of disasters, each a small
    data def with a lifecycle:  warn → active → (gap) → next, intensity
-   ramping every round. Defs compose the shared kit (CBZ.fx) + the
-   damage helpers (CBZ.surv) so the engine never needs to know what a
-   "tsunami" is. Each def can also expose threat(x,z)/safeDir(x,z) so
-   the bots flee intelligently (uphill from a flood, away from a funnel,
-   off the lightning markers).
+   ramping every round. The ORDER is seeded-shuffled per run (gentle
+   opener, mega-hazards never back-to-back, the nuke always last) so
+   no two matches play the same arc. Defs compose the shared kit
+   (CBZ.fx) + the damage helpers (CBZ.surv) so the engine never needs
+   to know what a "tsunami" is. Each def can also expose
+   threat(x,z)/safeDir(x,z) so the bots flee intelligently (uphill from
+   a flood, away from a funnel, off the lightning markers), plus a
+   `tint` mood colour the universal warn telegraph dims the sky toward
+   while the banner counts down.
 
-   Roster: earthquake · lightning storm · tsunami/flood · wildfire ·
-   tornado · volcanic eruption · blizzard · meteor shower · sinkholes ·
-   and a finale NUKE.
+   Roster (all 12): earthquake · lightning storm · tsunami ·
+   flash flood · hurricane · wildfire · tornado · volcanic eruption ·
+   blizzard · meteor shower · sinkholes · and a finale NUKE.
+
+   Flags: CBZ.CONFIG.SURV_SHUFFLE (seeded per-run order, default on) ·
+   CBZ.CONFIG.SURV_TELEGRAPH (warn tint/shake/cue, default on).
 ============================================================ */
 (function () {
   "use strict";
@@ -19,6 +26,8 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const surv = () => CBZ.surv;
+  if (CBZ.CONFIG.SURV_SHUFFLE == null) CBZ.CONFIG.SURV_SHUFFLE = true;
+  if (CBZ.CONFIG.SURV_TELEGRAPH == null) CBZ.CONFIG.SURV_TELEGRAPH = true;
 
   function rnd() { return Math.random(); }
   function camPos() { return CBZ.camera.position; }
@@ -43,7 +52,7 @@
 
     // ---- EARTHQUAKE: shake + toppling buildings + crushing debris ----
     quake: {
-      name: "EARTHQUAKE", emoji: "🌋", warnSecs: 5, activeSecs: 15, gap: 7, cause: "crushed under collapsing rubble",
+      name: "EARTHQUAKE", emoji: "🌋", warnSecs: 5, activeSecs: 15, gap: 7, cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("The ground is rumbling…", 2.2); sound("rumble"); },
       start(ctx) {
         ctx.st.dust = CBZ.fx.particleCloud({ mode: "rise", color: 0xb6a892, count: 160, radius: ctx.R, top: 8, size: 0.32, opacity: 0.34, vMin: 1, vMax: 3 });
@@ -94,8 +103,8 @@
 
     // ---- LIGHTNING STORM: telegraphed strikes that instakill ----
     storm: {
-      name: "LIGHTNING STORM", emoji: "⚡", warnSecs: 4, activeSecs: 16, gap: 6, cause: "struck by lightning",
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("Storm rolling in — keep moving!", 2.4); },
+      name: "LIGHTNING STORM", emoji: "⚡", warnSecs: 4, activeSecs: 16, gap: 6, cause: "struck by lightning", tint: 0x3a4150,
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("Storm rolling in — keep moving!", 2.4); sound("thunder"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0xaebfd0, count: 360, radius: 20, top: 22, size: 0.14, opacity: 0.5, vMin: 30, vMax: 46, drift: 6 });
         ctx.st.pending = []; ctx.st.bolts = []; ctx.st.cd = 0.6;
@@ -127,7 +136,7 @@
     //      flinging everyone it catches, then the flood pool rises behind it
     //      and drowns whoever isn't on high ground. ----
     flood: {
-      name: "TSUNAMI", emoji: "🌊", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami",
+      name: "TSUNAMI", emoji: "🌊", warnSecs: 7, activeSecs: 20, gap: 7, cause: "swept away by the tsunami", tint: 0x35607e,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("TSUNAMI — get to HIGH GROUND!", 3); sound("alarm"); sound("water"); },
       start(ctx) {
         // the rising flood pool that ultimately drowns the low ground
@@ -230,7 +239,7 @@
     //      rising flood pool). Less wall-of-doom than the tsunami; the rain is
     //      the mood. ----
     flashflood: {
-      name: "FLASH FLOOD", emoji: "🌧️", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flood surge",
+      name: "FLASH FLOOD", emoji: "🌧️", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flood surge", tint: 0x59636b,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("FLASH FLOOD — water rising, get HIGH!", 3); sound("alarm"); sound("water"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0x9fb4c4, count: 460, radius: ctx.R, top: 26, size: 0.13, opacity: 0.55, vMin: 34, vMax: 52, drift: 10 });
@@ -288,7 +297,7 @@
     //      swirling debris, and violent gusts that knock you flat. The wind
     //      direction slowly veers, so high ground alone won't save you. ----
     hurricane: {
-      name: "HURRICANE", emoji: "🌀", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris",
+      name: "HURRICANE", emoji: "🌀", warnSecs: 5, activeSecs: 20, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("HURRICANE inbound — brace and hold on!", 3); sound("alarm"); sound("wind"); },
       start(ctx) {
         ctx.st.rain = CBZ.fx.particleCloud({ mode: "fall", color: 0xb3c4d2, count: 520, radius: ctx.R, top: 24, size: 0.12, opacity: 0.5, vMin: 40, vMax: 60, drift: 22 });
@@ -331,8 +340,8 @@
 
     // ---- WILDFIRE: fire spreads tree to tree, burns on contact ----
     wildfire: {
-      name: "WILDFIRE", emoji: "🔥", warnSecs: 5, activeSecs: 18, gap: 6, cause: "burned alive in the wildfire",
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("Wildfire spreading — don't get cornered!", 2.6); },
+      name: "WILDFIRE", emoji: "🔥", warnSecs: 5, activeSecs: 18, gap: 6, cause: "burned alive in the wildfire", tint: 0x4a2814,
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("Wildfire spreading — don't get cornered!", 2.6); sound("fire"); },
       start(ctx) {
         ctx.st.embers = CBZ.fx.particleCloud({ mode: "rise", color: 0xff7a1a, count: 320, radius: 28, top: 16, size: 0.26, opacity: 0.7, vMin: 5, vMax: 12, drift: 6 });
         ctx.st.embers.setActive(0.9);
@@ -374,7 +383,7 @@
 
     // ---- TORNADO: a wandering funnel that sucks in and flings ----
     tornado: {
-      name: "TORNADO", emoji: "🌪️", warnSecs: 5, activeSecs: 18, gap: 6, cause: "torn apart by the tornado",
+      name: "TORNADO", emoji: "🌪️", warnSecs: 5, activeSecs: 18, gap: 6, cause: "torn apart by the tornado", tint: 0x6a6f7a,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("TORNADO touching down!", 2.6); sound("wind"); },
       start(ctx) {
         const grp = new THREE.Group();
@@ -410,7 +419,7 @@
 
     // ---- VOLCANO: ash-out, lava flows from the mountain, lava bombs ----
     volcano: {
-      name: "VOLCANIC ERUPTION", emoji: "🌋", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava",
+      name: "VOLCANIC ERUPTION", emoji: "🌋", warnSecs: 6, activeSecs: 20, gap: 7, cause: "incinerated by lava", tint: 0x2e211c,
       warn(ctx) { CBZ.flashHint && CBZ.flashHint("THE VOLCANO IS WAKING — get clear of the mountain!", 3); sound("rumble"); if (CBZ.shake) CBZ.shake(0.5); },
       start(ctx) { startEruption(ctx); },
       active(dt, ctx) { tickEruption(dt, ctx); tick0(ctx, dt); },
@@ -421,8 +430,8 @@
 
     // ---- BLIZZARD: whiteout; freeze if you stop moving ----
     blizzard: {
-      name: "BLIZZARD", emoji: "❄️", warnSecs: 5, activeSecs: 17, gap: 6, cause: "frozen solid in the blizzard",
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("Blizzard incoming — keep moving or freeze!", 2.8); },
+      name: "BLIZZARD", emoji: "❄️", warnSecs: 5, activeSecs: 17, gap: 6, cause: "frozen solid in the blizzard", tint: 0xdbe6f0,
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("Blizzard incoming — keep moving or freeze!", 2.8); sound("wind"); },
       start(ctx) { ctx.st.snow = CBZ.fx.particleCloud({ mode: "fall", color: 0xffffff, count: 380, radius: 22, top: 22, size: 0.2, opacity: 0.8, vMin: 10, vMax: 20, drift: 8 }); ctx.st.snow.setActive(1); },
       active(dt, ctx) {
         ctx.env.fog = 0xdbe6f0; ctx.env.fogNear = 8; ctx.env.fogFar = 60; ctx.env.sunInt = 0.6; ctx.env.sunColor = 0xcfe0ff; ctx.env.hemiInt = 1.1; ctx.env.hemiColor = 0xeaf2ff;
@@ -438,8 +447,8 @@
 
     // ---- METEOR SHOWER: telegraphed impacts, big blast ----
     meteor: {
-      name: "METEOR SHOWER", emoji: "☄️", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor",
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("METEORS — watch the shadows!", 2.6); },
+      name: "METEOR SHOWER", emoji: "☄️", warnSecs: 5, activeSecs: 17, gap: 6, cause: "flattened by a meteor", tint: 0x4a3a3a,
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("METEORS — watch the shadows!", 2.6); sound("rumble"); },
       start(ctx) { ctx.st.pending = []; ctx.st.cd = 0.5; ctx.env.sunInt = 0.7; ctx.st.timers = []; },
       active(dt, ctx) {
         ctx.env.fog = 0x4a3a3a; ctx.env.fogNear = 40; ctx.env.fogFar = 240; ctx.env.hemiColor = 0xffb0a0;
@@ -467,8 +476,8 @@
 
     // ---- SINKHOLES: ground gives way; fall in = death ----
     sinkhole: {
-      name: "SINKHOLES", emoji: "🕳️", warnSecs: 5, activeSecs: 16, gap: 6, cause: "swallowed by a sinkhole",
-      warn(ctx) { CBZ.flashHint && CBZ.flashHint("The ground is giving way!", 2.6); },
+      name: "SINKHOLES", emoji: "🕳️", warnSecs: 5, activeSecs: 16, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
+      warn(ctx) { CBZ.flashHint && CBZ.flashHint("The ground is giving way!", 2.6); sound("rumble"); },
       start(ctx) { ctx.st.holes = []; ctx.st.pending = []; ctx.st.cd = 0.4; },
       active(dt, ctx) {
         if (CBZ.shake) CBZ.shake(0.12);
@@ -493,7 +502,7 @@
 
     // ---- NUKE: the finale. Blinding flash, expanding lethal shockwave ----
     nuke: {
-      name: "NUCLEAR STRIKE", emoji: "☢️", warnSecs: 7, activeSecs: 12, gap: 8, cause: "vaporized by the nuclear blast",
+      name: "NUCLEAR STRIKE", emoji: "☢️", warnSecs: 7, activeSecs: 12, gap: 8, cause: "vaporized by the nuclear blast", tint: 0x2a2a30,
       warn(ctx) {
         CBZ.flashToast && CBZ.flashToast("☢ INCOMING ☢");
         banner("☢ NUCLEAR STRIKE INCOMING ☢", true);
@@ -769,7 +778,34 @@
   // ============================================================
   // DIRECTOR
   // ============================================================
+  // the classic arc — also the fallback when SURV_SHUFFLE is off
   const SEQUENCE = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado", "hurricane", "blizzard", "meteor", "sinkhole", "volcano", "nuke"];
+  // pacing classes for the shuffled order: a run OPENS gentle, and the three
+  // island-wreckers never land back-to-back (the nuke is pinned last, so a
+  // gentle opener also keeps every cycle boundary legal when the arc repeats)
+  const GENTLE = { storm: 1, wildfire: 1, blizzard: 1, sinkhole: 1 };
+  const MEGA = { flood: 1, volcano: 1, nuke: 1 };
+  let runNo = 0, orderRng = null;
+  let order = SEQUENCE.slice();
+
+  // per-run SEEDED order (CBZ.seedStream ⇒ deterministic per world seed +
+  // run counter — never Math.random: the arc is shared run structure).
+  // Rejection-sample a Fisher–Yates shuffle of the 11 non-nuke hazards until
+  // the pacing constraints hold, then pin the nuke as the finale.
+  function buildOrder() {
+    if (CBZ.CONFIG.SURV_SHUFFLE === false || !orderRng) return SEQUENCE.slice();
+    const pool = SEQUENCE.filter((id) => id !== "nuke");
+    for (let tries = 0; tries < 40; tries++) {
+      for (let i = pool.length - 1; i > 0; i--) { const j = (orderRng() * (i + 1)) | 0; const t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+      if (!GENTLE[pool[0]]) continue;                    // gentle opener
+      if (MEGA[pool[pool.length - 1]]) continue;         // nothing mega abuts the nuke
+      let ok = true;
+      for (let i = 1; i < pool.length; i++) if (MEGA[pool[i]] && MEGA[pool[i - 1]]) { ok = false; break; }
+      if (ok) return pool.concat("nuke");
+    }
+    return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
+  }
+
   const dir = { state: "idle", t: 6, cur: null, st: {}, idx: 0, occ: 0, intensity: 0.2, prog: 0 };
   let curCtx = null;
 
@@ -778,13 +814,37 @@
     return { dt, now: CBZ.now, arena: A, cx: A.center.x, cz: A.center.z, R: A.radius, zone: CBZ.surv.zone, surv: CBZ.surv, fx: CBZ.fx, env: CBZ.survEnv, st: dir.st, intensity: dir.intensity, prog: dir.prog };
   }
 
+  // universal warn-phase ambience: as the countdown runs, the sun dims and
+  // the fog/sky lerps toward the incoming hazard's `tint` mood colour — the
+  // whole world says "something is coming" even if you missed the banner.
+  // A def's own warnTick runs after this and can still override (the nuke).
+  function lerpHex(a, b, t) {
+    const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+    const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+    return (((ar + (br - ar) * t) | 0) << 16) | (((ag + (bg - ag) * t) | 0) << 8) | ((ab + (bb - ab) * t) | 0);
+  }
+  function warnAmbience() {
+    if (CBZ.CONFIG.SURV_TELEGRAPH === false || !dir.cur) return;
+    const k = Math.min(1, Math.max(0, 1 - dir.t / (dir.cur.warnSecs || 1)));
+    const e = CBZ.survEnv;
+    e.sunInt *= 1 - 0.3 * k;
+    e.hemiInt *= 1 - 0.18 * k;
+    if (dir.cur.tint != null) e.fog = lerpHex(e.fog, dir.cur.tint, 0.5 * k);
+  }
+
   function beginWarn() {
-    const id = SEQUENCE[dir.idx % SEQUENCE.length];
+    // survived a whole arc? reshuffle the next cycle from the same run stream
+    // (nuke-last + gentle-first keeps the wraparound pacing legal by itself)
+    if (dir.idx > 0 && dir.idx % order.length === 0) order = buildOrder();
+    const id = order[dir.idx % order.length];
     dir.idx++; dir.occ++;
     dir.intensity = Math.min(1.7, 0.2 + dir.occ * 0.16);
     dir.cur = DEFS[id]; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
     curCtx = makeCtx(0);
     banner(dir.cur.emoji + " " + dir.cur.name + " — INCOMING", true);
+    // universal telegraph: every warning lands with a physical jolt on top of
+    // the banner + hint + per-def audio; warnAmbience() below tints the sky
+    if (CBZ.CONFIG.SURV_TELEGRAPH !== false && CBZ.shake) CBZ.shake(0.22);
     try { dir.cur.warn(curCtx); } catch (e) { console.error("[disaster warn]", e); }
   }
   function beginActive(ctx) {
@@ -806,6 +866,11 @@
       // if a previous match ended mid-disaster, tear its meshes down cleanly
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       banner("", false);
+      // a fresh SEEDED arc for this run: world seed + run counter → the same
+      // match order for every client, a different order every match
+      runNo++;
+      orderRng = CBZ.seedStream ? CBZ.seedStream("surv-sequence-" + runNo) : null;
+      order = buildOrder();
       dir.state = "idle"; dir.t = 7; dir.cur = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
     },
     threatAt(x, z) { return (dir.cur && curCtx && dir.cur.threat) ? dir.cur.threat(x, z, curCtx) : 0; },
@@ -823,7 +888,7 @@
     timeLeft() { return Math.max(0, dir.t); },
     // jump straight to a named disaster's warning (debug / verification aid)
     force(id) {
-      const i = SEQUENCE.indexOf(id);
+      const i = order.indexOf(id);   // this run's shuffled arc
       if (i < 0) return false;
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       dir.idx = i; dir.state = "idle"; dir.t = 0.01; dir.cur = null;
@@ -869,7 +934,7 @@
     curCtx = ctx; // refresh for bot fleeVector (1-frame latency is fine)
 
     if (dir.state === "idle") { dir.t -= dt; if (dir.t <= 0) beginWarn(); }
-    else if (dir.state === "warn") { dir.t -= dt; if (dir.cur.warnTick) try { dir.cur.warnTick(dt, ctx); } catch (e2) {} if (dir.t <= 0) beginActive(ctx); }
+    else if (dir.state === "warn") { dir.t -= dt; warnAmbience(); if (dir.cur.warnTick) try { dir.cur.warnTick(dt, ctx); } catch (e2) {} if (dir.t <= 0) beginActive(ctx); }
     else if (dir.state === "active") { dir.t -= dt; try { dir.cur.active(dt, ctx); } catch (e3) { console.error("[disaster active]", e3); } if (dir.t <= 0) endActive(ctx); }
   });
 })();

@@ -74,6 +74,11 @@
     downT: array(Float32Array, total), contactCD: array(Float32Array, total),
     item: array(Uint8Array, total, true), cigs: array(Uint8Array, total, true),
     dead: array(Uint8Array, total, true),   // 1 = killed by the player; removed from the live crowd
+    // NPC_SCHEDULES night lockdown: 1 = "in their cell" — frozen at a per-id
+    // bunk spot inside the cell block, skipped by selection/sim (still a dot
+    // on the overview map, so the cells READ full at night). Not dead; dawn
+    // unparks them back into the yard, staggered — total count never changes.
+    parked: array(Uint8Array, total, true),
     skin: array(Uint32Array, total), hair: array(Uint32Array, total),
     // WOMEN IN THE CROWD (W3): per-agent female flag, rolled ~48% off the SAME
     // deterministic per-agent xorshift stream (rnd(id)) as skin/hair below —
@@ -180,6 +185,7 @@
   }
 
   function materialize(id, now) {
+    if (S.parked[id]) return;          // in their cell — frozen at the bunk spot
     if (S.explicit[id]) return;
     let arrival = S.routeArrival[id];
     let loops = 0;
@@ -261,10 +267,60 @@
     S.cigs[id] = 0; S.item[id] = 0;
     return out;
   };
+  // ---- NPC_SCHEDULES: the jail's daily regime (simple math off the sun) ----
+  // Hour off the canonical sun arc (sunrise 6, noon 12 — same derivation as
+  // city/schedule.js:58; daynight.js runs onAlways so this is live in escape
+  // mode too, which previously kept NO hours at all).
+  S.jailHour = function () {
+    return CBZ.sunAngle != null ? (((CBZ.sunAngle / (Math.PI * 2)) * 24) + 6) % 24 : 12;
+  };
+  // activity regime by hour: 0 yard laps, 1 stand-circles, 2 chow line,
+  // 3 mixed (circles/wall-sits/wander), 4 wind-down, 5 LOCKDOWN (in cells)
+  S.jailAct = function (h) {
+    return h < 7 ? 5 : h < 9 ? 0 : h < 12 ? 1 : h < 13 ? 2 : h < 18 ? 3 : h < 21 ? 4 : 5;
+  };
+  // order-independent per-id hash in [0,1) — CBZ.hashN when loaded (repo
+  // convention), else a local avalanche so this file stands alone.
+  S.idHash = function (id, salt) {
+    if (CBZ.hashN) return CBZ.hashN(id | 0, salt | 0) / 4294967296;
+    let x = ((id + 1) * 2654435761 ^ (salt | 0)) >>> 0;
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+    return (x >>> 0) / 4294967296;
+  };
+  // LOCKDOWN: freeze this agent at a per-id bunk spot inside the cell block
+  // (CBZ.WORLD.cellBlock) — off the zone graph, so it must be skipped by the
+  // sim/selection while parked (entities/crowd.js guards on S.parked).
+  const CELLS = (WORLD && WORLD.cellBlock) || { x0: -16, x1: 16, z0: -44, z1: -8 };
+  S.park = function (id) {
+    if (S.parked[id]) return;
+    S.parked[id] = 1; S.explicit[id] = 0;
+    S.posX[id] = CELLS.x0 + 2 + S.idHash(id, 0xCE11) * (CELLS.x1 - CELLS.x0 - 4);
+    S.posZ[id] = CELLS.z0 + 2 + S.idHash(id, 0xCE12) * (CELLS.z1 - CELLS.z0 - 4);
+    S.velX[id] = S.velZ[id] = S.panic[id] = 0;
+    updateDensityCell(id);
+  };
+  // dawn: back into the yard. (x,z) optional — the caller pre-checks the seat
+  // against the player's view so nobody materializes on camera.
+  S.unpark = function (id, now, x, z) {
+    if (!S.parked[id]) return;
+    S.parked[id] = 0;
+    if (x == null) { randomPoint(id, S.zone[id], point); x = point.x; z = point.z; }
+    S.posX[id] = x; S.posZ[id] = z;
+    updateDensityCell(id);
+    planRoute(id, now, x, z);
+  };
+
   // match restart: revive the killed, re-roll everyone's pockets fresh
   S.respawnAll = function () {
     for (let id = 0; id < total; id++) {
       S.dead[id] = 0; S.grudge[id] = 0; S.downT[id] = 0; S.contactCD[id] = 0;
+      if (S.parked[id]) {                 // lockdown doesn't survive a restart
+        S.parked[id] = 0;
+        randomPoint(id, S.zone[id], point);
+        S.posX[id] = point.x; S.posZ[id] = point.z;
+        updateDensityCell(id);
+        planRoute(id, 0, point.x, point.z);
+      }
       rollInventory(id);
     }
   };

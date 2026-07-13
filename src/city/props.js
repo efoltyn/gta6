@@ -149,7 +149,11 @@
     if (!spots.length) return null;
     const mat2 = makeGlowShellMat(colorHex);
     if (!mat2) return null;
-    const im = new THREE.InstancedMesh(glowShellGeo, mat2, spots.length);
+    // per-pool geometry CLONE: the aGlow instanced attribute below is
+    // per-pool state — setting it on the shared prototype let the last-built
+    // pool (green) drive every pool's shells (red+yellow halos lit during
+    // green phase, no halo at all during red/yellow).
+    const im = new THREE.InstancedMesh(glowShellGeo.clone(), mat2, spots.length);
     im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
     im.userData.terrain = true;   // farcull: city-spanning pool, prototype bounds
                                   // sit at the origin — never distance-cull it
@@ -698,9 +702,16 @@
     // registers a board's mesh for the live-content driver iff pickAd() flagged
     // it dynamic (wanted poster or market ticker) — shared by every board type
     // below so busShelter/billboard/roofBillboard don't each repeat this check.
-    function regDynAd(mesh, pick) {
+    // (x,y,z) = the board face's world position: wanted-capable boards also
+    // register with city/propuse.js so the player can walk up and READ the
+    // live poster (the sole floating-words exception — CBZ.bountyFromPoster).
+    function regDynAd(mesh, pick, x, y, z) {
       if (pick && (pick.dyn === "wanted" || pick.dyn === "ticker")) {
-        dynAds.push({ mesh: mesh, dyn: pick.dyn, lastKey: adKey(pick.ad), cats: pick.cats });
+        const entry = { mesh: mesh, dyn: pick.dyn, lastKey: adKey(pick.ad), cats: pick.cats };
+        dynAds.push(entry);
+        if (pick.dyn === "wanted" && CBZ.propRegisterWantedPoster && x != null) {
+          CBZ.propRegisterWantedPoster(mesh, x, y || 0, z, entry);
+        }
       }
     }
     // RENTABLE AD SURFACES — every billboard face / shelter panel / rooftop
@@ -1284,6 +1295,15 @@
         const cx = Math.cos(a) * 0.95, cz = Math.sin(a) * 0.95;
         const seat = new THREE.Mesh(chairSeatG, chairM); seat.position.set(cx, 0.42, cz); g.add(seat);
         const back = new THREE.Mesh(chairBackG, chairM); back.position.set(cx - Math.cos(a) * 0.2, 0.62, cz - Math.sin(a) * 0.2); back.rotation.y = a; g.add(back);
+        // PROPS_PURPOSE: the chair is a SEAT (local→world via the group's yaw:
+        // wx = x + lx·cos + lz·sin, wz = z − lx·sin + lz·cos). The back panel
+        // sits between seat and table, so the sitter faces OUTWARD (local
+        // (cos a, sin a)) — register that yaw so the pose matches the build.
+        if (CBZ.propRegisterSeat) {
+          const cy = Math.cos(yaw), sy = Math.sin(yaw);
+          const fdx = Math.cos(a) * cy + Math.sin(a) * sy, fdz = -Math.cos(a) * sy + Math.sin(a) * cy;
+          CBZ.propRegisterSeat(x + cx * cy + cz * sy, 0, z - cx * sy + cz * cy, Math.atan2(fdx, fdz), "patio", null);
+        }
       }
       root.add(g);
       city.streetProps.push({ x, z, type: "patio" });   // soft furniture, no collider
@@ -1364,6 +1384,14 @@
       bench.position.set(0, 0.55, -0.35); bench.castShadow = true; g.add(bench);
       const legG = geo("shelterBenchLeg", () => new THREE.BoxGeometry(0.1, 0.5, 0.4));
       for (const lx of [-1.1, 1.1]) { const l = new THREE.Mesh(legG, shelterPostM); l.position.set(lx, 0.25, -0.35); g.add(l); }
+      // PROPS_PURPOSE: 3 SEAT anchors along the bench, facing out of the
+      // shelter (local +z → world (sin yaw, cos yaw), i.e. face = yaw).
+      if (CBZ.propRegisterSeat) {
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        for (const lx of [-0.8, 0, 0.8]) {
+          CBZ.propRegisterSeat(x + lx * cy + (-0.35) * sy, 0, z - lx * sy + (-0.35) * cy, yaw, "bench", null);
+        }
+      }
       // lit advertising panel on one end (glows at night). Bus shelters carry
       // our brand/shop/radio + gang ads (no wanted posters at street level).
       const pick = pickAd(x, z, { allowWanted: false });
@@ -1371,7 +1399,7 @@
       const ad = new THREE.Mesh(geo("shelterAd", () => new THREE.PlaneGeometry(1.0, 1.7)), adM);
       ad.position.set(1.74, 1.2, 0); ad.rotation.y = -Math.PI / 2; g.add(ad);
       nightAds.push(adM);
-      regDynAd(ad, pick);   // wanted poster or E3 market ticker -> live-refresh driver
+      regDynAd(ad, pick, x + Math.cos(yaw) * 1.74, 1.2, z - Math.sin(yaw) * 1.74);   // wanted poster or E3 market ticker -> live-refresh driver
       // rentable: walk-up point is the PANEL end of the shelter (world coords)
       adBoards.push({ mesh: ad, x: x + Math.cos(yaw) * 1.74, z: z - Math.sin(yaw) * 1.74, y: 0, kind: "shelter", mat0: adM });
       // bus-stop sign pole at the end
@@ -1408,8 +1436,8 @@
       nightAds.push(adMatFor(pickF.ad), adMatFor(pickB.ad));
       // register either face if it's live (WANTED poster or E3 market ticker)
       // so the driver can re-skin its material as those values change.
-      regDynAd(front, pickF);
-      regDynAd(back, pickB);
+      regDynAd(front, pickF, x, post + H / 2, z);
+      regDynAd(back, pickB, x, post + H / 2, z);
       // rentable: a lease takes BOTH faces (the flex reads from either direction)
       adBoards.push({ mesh: front, mesh2: back, x, z, y: 0, kind: big ? "bill" : "small", mat0: adMatFor(pickF.ad), mat0b: adMatFor(pickB.ad) });
       // walkway light bar under the board
@@ -1787,7 +1815,7 @@
         const board = new THREE.Mesh(geo("roofBillBoard", () => new THREE.PlaneGeometry(6.0, 2.4)), adM);
         board.position.set(0, 3.4, 0.14); bg.add(board);
         nightAds.push(adM);
-        regDynAd(board, pick);   // wanted poster or E3 market ticker -> live-refresh driver
+        regDynAd(board, pick, bg.position.x, h + 3.4, bg.position.z);   // wanted poster or E3 market ticker -> live-refresh driver
         // rentable from THIS roof (y gates the walk-up): the apex flex — your
         // name over the skyline, reachable via the building's elevator.
         adBoards.push({ mesh: board, x: bg.position.x, z: bg.position.z, y: h, kind: "roof", mat0: adM });
@@ -1817,7 +1845,9 @@
       return t;
     });
     const flapG = geo("campFlap", () => new THREE.PlaneGeometry(0.55, 0.75));
-    const cardG = geo("campCard", () => new THREE.BoxGeometry(0.95, 0.025, 1.5));
+    // PROPS_PURPOSE: sized so a ~1.8u character actually FITS lying on it —
+    // these register as "bedroll" beds (vagrants sleep here; so can you).
+    const cardG = geo("campCard", () => new THREE.BoxGeometry(0.95, 0.025, 1.9));
     const barrelG = geo("campBarrel", () => new THREE.CylinderGeometry(0.34, 0.3, 0.95, 8));
     const emberG = geo("campEmber", () => new THREE.CircleGeometry(0.27, 8));
     const poolGeo = geo("campPool", () => new THREE.CircleGeometry(2.0, 12));
@@ -1907,12 +1937,17 @@
       pool.rotation.x = -Math.PI / 2; pool.position.set(bp.x, 0.165, bp.z); root.add(pool);   // floats above pad+cardboard (no z-fight)
       campFires.push({ flame, smoke, y0: GY + 1.4, ph: rng() * 6.28 });
       solidCollider(bp.x, bp.z, 0.42, barrel);
-      // flattened CARDBOARD bedding between the tents and the fire
+      // flattened CARDBOARD bedding between the tents and the fire — each one
+      // is a real BEDROLL anchor (same rng draw count: the yaw draw is just
+      // captured before use, so the deterministic stream is untouched).
       const nC = 2 + ((rng() * 2) | 0);
       for (let i = 0; i < nC; i++) {
         const p = at(tOff + (rng() - 0.5) * 5.0, 0.7 + rng() * 0.8);
         const card = new THREE.Mesh(cardG, cardM);
-        card.position.set(p.x, 0.12, p.z); card.rotation.y = rng() * 6.28; root.add(card);
+        const cyaw = rng() * 6.28;
+        card.position.set(p.x, 0.12, p.z); card.rotation.y = cyaw; root.add(card);
+        // head toward the card's local +z end (world (sin cyaw, cos cyaw))
+        if (CBZ.propRegisterBed) CBZ.propRegisterBed(p.x, 0, p.z, Math.sin(cyaw), Math.cos(cyaw), 1.9, 0.14, "bedroll", null);
       }
       // a loaded SHOPPING CART parked at the end of the row
       const cp = at(tOff + (rng() < 0.5 ? -1 : 1) * 3.4, 1.2 + rng() * 0.6);

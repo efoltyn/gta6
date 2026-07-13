@@ -33,8 +33,9 @@
    make guards permanently fast. To kill that window we detect the
    reset (elapsed dropping / leaving play) in BOTH ticks and restore
    guard speeds eagerly, never trusting a single deferred frame. We
-   only ever touch guards we ourselves boosted (tagged _lockBoosted),
-   never the rest of the roster.
+   only ever touch guards we ourselves boosted — bases live in the
+   shared CBZ.jailBoost ledger (entities/guards.js) under the
+   "lockdown" tag, never the rest of the roster.
 ============================================================ */
 (function () {
   "use strict";
@@ -59,8 +60,10 @@
   let elapsedT = 0;            // seconds this lockdown has been live (for GRACE)
   let pulse = 0;              // 0..1 vignette intensity envelope (eased)
   let fading = false;          // overlay is fading out after a lift
-  let lastElapsed = 0;         // to detect new-run resets (elapsed drops to ~0)
-  const boosted = [];          // [{guard, base}] so we can restore exactly
+  // boosted-guard bases live in the shared CBZ.jailBoost ledger (tag
+  // "lockdown"); new-run detection shares its elapsed watcher too. The tight
+  // 0.001 epsilon is this module's original threshold, kept verbatim.
+  const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher(0.001) : null;
 
   // ---- the overlay DIV (built lazily, once) ----
   let overlay = null;
@@ -101,31 +104,18 @@
       // keep them locked onto the player
       if (!(gd.hunt > HUNT_TOPUP)) gd.hunt = HUNT_TOPUP;
       gd.alert = Math.max(gd.alert || 0, 1.0);
-      // apply the boost once per guard; remember its real base speed
-      if (!gd._lockBoosted && typeof gd.speed === "number") {
-        gd._lockBoosted = true;
-        const base = gd.speed;
-        gd.speed = base * SPEED_BOOST;
-        boosted.push({ guard: gd, base: base });
+      // apply the boost once per guard; the ledger remembers its real base
+      // speed (snapshotted on first scale) so repeats can never compound
+      if (typeof gd.speed === "number" && CBZ.jailBoost && !CBZ.jailBoost.held("lockdown", gd)) {
+        CBZ.jailBoost.scale("lockdown", gd, { speed: SPEED_BOOST });
       }
     }
   }
 
   function restoreGuards() {
-    for (const b of boosted) {
-      const gd = b.guard;
-      if (gd && gd._lockBoosted) {
-        // restore the real base speed (so ai.js can never snapshot a
-        // boosted value as baseSpeed after a reset / combat join)
-        if (typeof gd.speed === "number") gd.speed = b.base;
-        gd._lockBoosted = false;
-      }
-    }
-    boosted.length = 0;
-    // also clear the flag on any guard we might have missed (e.g. spawned
-    // and despawned by reinforcements while we held it). Best-effort: we
-    // no longer hold their base, so just clear the flag.
-    if (CBZ.guards) for (const gd of CBZ.guards) if (gd && gd._lockBoosted) gd._lockBoosted = false;
+    // restore every base we snapshotted (so ai.js can never snapshot a
+    // boosted value as baseSpeed after a reset / combat join)
+    if (CBZ.jailBoost) CBZ.jailBoost.restoreAll("lockdown");
   }
 
   // ---- begin / end ----
@@ -175,7 +165,7 @@
   // fully reset everything (new run / leaving play). Hard-clears the overlay
   // (no fade) and restores guard speeds immediately.
   function teardown() {
-    if (boosted.length) restoreGuards();
+    restoreGuards();
     active = false;
     fading = false;
     sirenT = 0; clearT = 0; elapsedT = 0; pulse = 0;
@@ -183,13 +173,11 @@
   }
 
   // watch for a new run: elapsed resets to ~0 in state.js resetGame().
-  // Returns true if a reset was just detected (and torn down).
+  // Returns true if a reset was just detected (and torn down). One shared
+  // poll closure serves BOTH ticks, exactly like the old single lastElapsed.
   function checkReset() {
-    const el = g.elapsed || 0;
-    let reset = false;
-    if (el + 0.001 < lastElapsed) { teardown(); reset = true; }
-    lastElapsed = el;
-    return reset;
+    if (pollNewRun && pollNewRun()) { teardown(); return true; }
+    return false;
   }
 
   // ---- the live driver: only while playing ----
@@ -240,7 +228,7 @@
       // never wash the title / pause / win screens red. Restore eagerly so a
       // lockdown that was live when the player paused/won/quit can't leave
       // guards boosted or strand the siren mid-loop.
-      if (active || boosted.length) teardown();
+      if (active || (CBZ.jailBoost && CBZ.jailBoost.count("lockdown"))) teardown();
       else if (overlay && overlay.style.opacity !== "0") { overlay.style.opacity = "0"; pulse = 0; fading = false; }
       return;
     }

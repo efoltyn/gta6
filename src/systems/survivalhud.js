@@ -49,6 +49,15 @@
     ctx.fillStyle = "rgba(90,150,90,.30)";
     ctx.beginPath(); ctx.arc(W / 2, H / 2, A.radius * sc, 0, 7); ctx.fill();
 
+    // the shrinking safe zone: a ring that reddens as it closes (matches the
+    // 3D storm-wall tint in safezone.js)
+    if (zone) {
+      const closeK = 1 - Math.min(1, zone.radius / 60);
+      ctx.strokeStyle = "rgba(" + ((77 + closeK * 178) | 0) + "," + ((140 - closeK * 115) | 0) + "," + ((255 - closeK * 180) | 0) + ",.9)";
+      ctx.lineWidth = zone.shrinking ? 2 : 1.4;
+      ctx.beginPath(); ctx.arc(mx(zone.cx), mz(zone.cz), Math.max(2, zone.radius * sc), 0, 7); ctx.stroke();
+    }
+
     // bots
     ctx.fillStyle = "rgba(220,225,235,.8)";
     const bots = CBZ.bots;
@@ -86,12 +95,24 @@
       el.hunger.style.background = hg > 40 ? "#e0a030" : (hg > 15 ? "#ff9e4d" : "#ff4d4d");
     }
 
-    // disaster status line (no safe zone — disasters are the only threat)
+    // status line: active/incoming disaster + the safe-zone state (an
+    // out-of-zone player gets an explicit GET INSIDE warning)
     if (el.zone) {
       const D = CBZ.disasters;
       let s = "";
       if (D && D.state() === "warn" && D.current()) s = "⚠ " + D.current() + " · " + Math.ceil(D.timeLeft()) + "s";
       else if (D && D.state() === "active" && D.current()) s = D.current() + " · " + Math.ceil(D.timeLeft()) + "s";
+      const Z = surv.zone;
+      if (Z) {
+        let zs;
+        const dx = CBZ.player.pos.x - Z.cx, dz = CBZ.player.pos.z - Z.cz;
+        if (!CBZ.player.dead && dx * dx + dz * dz > Z.radius * Z.radius) zs = "🚫 OUTSIDE ZONE — get inside!";
+        else if (Z.shrinking) zs = "⭕ zone closing · " + Math.round(Z.radius) + "m";
+        else if (Z.last) zs = "⭕ final zone";
+        else if (Z.t <= 0) zs = "⭕ zone closing soon…";   // holding for the active disaster to pass
+        else zs = "⭕ zone holds · " + Math.ceil(Z.t) + "s";
+        s = s ? s + "   " + zs : zs;
+      }
       el.zone.textContent = s;
     }
 

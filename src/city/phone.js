@@ -744,8 +744,10 @@
     if (panel) return panel;
     panel = document.createElement("div");
     panel.id = "cityPhone";
+    // z-index 40: the legacy-modal band — below the full map (60) and far below
+    // the campaign handset (130), so a stale open can never cover either.
     panel.style.cssText = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);" +
-      "z-index:48;display:none;width:min(560px,92vw);max-height:88vh;overflow-y:auto;" +
+      "z-index:40;display:none;width:min(560px,92vw);max-height:88vh;overflow-y:auto;" +
       "background:rgba(16,18,24,.94);border:2px solid #2c3140;border-radius:16px;" +
       "padding:16px 18px;box-sizing:border-box;color:#e8eef7;" +
       "font-family:Fredoka,system-ui,sans-serif;box-shadow:0 18px 50px rgba(0,0,0,.5);pointer-events:auto";
@@ -866,6 +868,12 @@
 
   // ---- open / close ---------------------------------------------------------
   function open() {
+    // MUTUAL EXCLUSION with the full map: taking the phone out puts the map
+    // away first — the two overlays never stack (fullmap.open() reciprocates
+    // via CBZ.cityClosePhone).
+    if (CBZ.fullMap && CBZ.fullMap.active && CBZ.fullMap.close) {
+      try { CBZ.fullMap.close(false); } catch (e) {}
+    }
     if (CBZ.cityMenuOpen) return;
     open_ = true; CBZ.cityMenuOpen = true;
     el().style.display = "block";
@@ -873,12 +881,15 @@
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
   }
   function close() {
+    if (!open_) return;   // no-op unless we own the menu lock (callers may probe)
     open_ = false;
     if (panel) panel.style.display = "none";
     CBZ.cityMenuOpen = false;
-    if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
+    // skip the relock while the full map owns the cursor (it opened over us)
+    if (CBZ.requestLock && g.state === "playing" && !(CBZ.fullMap && CBZ.fullMap.active)) CBZ.requestLock();
   }
   CBZ.cityOpenPhone = open;
+  CBZ.cityClosePhone = close;   // fullmap.js calls this when the map opens
 
   // ---- live re-render while open (~3/sec) -----------------------------------
   CBZ.onUpdate(50.5, function (dt) {

@@ -582,6 +582,8 @@
       // door-seam pillars on the upper flank of the tall hull
       [-len * 0.14, len * 0.12].forEach(function (z) {
         addBox(root, 0.025, baseH * 0.6, 0.028, side * (w * 0.505), bodyY + baseH * 0.62, z, trim);
+        // chrome door-handle inset at the beltline just ahead of each seam
+        addBox(root, 0.028, 0.032, 0.11, side * (w * 0.505), bodyY + baseH * 0.80, z - 0.11, chrome);
       });
       // wheel-arch brows over each axle (top of arch ~ mid-hull)
       [len * 0.32, -len * 0.32].forEach(function (z) {
@@ -858,12 +860,17 @@
 
   function makeCybertruck() {
     const root = new THREE.Group();
-    // brushed-stainless body: route through the 'metal' role for a cold reflective
-    // sheen, still tagged _bodyPaint so it recolours per car.
+    // brushed-stainless body: a FRESH 'paint'-role standard material driven to
+    // high metalness (cold steel sheen), _bodyPaint so it recolours per car.
+    // (Was vmat('metal') — but that role returns the fleet-wide CHROME
+    // SINGLETON with colour/opts ignored, so tagging it _bodyPaint made
+    // recolorBody repaint every chrome trim piece on every car built after
+    // the first cybertruck template. 'paint' is fresh-per-call by contract.)
     const silver = (function () {
       let m = mats.get("cyber-silver"); if (m) return m;
-      m = vmat("metal", 0xa8afb2, { metalness: 0.86, roughness: 0.32, envMapIntensity: 1.2 }); m._bodyPaint = true; m._shared = true; mats.set("cyber-silver", m); return m;
+      m = vmat("paint", 0xa8afb2, { metalness: 0.86, roughness: 0.32, envMapIntensity: 1.2 }); m._bodyPaint = true; m._shared = true; mats.set("cyber-silver", m); return m;
     })();
+    const creaseM = sharedMat("cyber-crease", 0xd4d9dc, { emissive: 0x2e3236, ei: 0.35 });
     const trim = roleMat("cyber-trim", "plastic", 0x20262a);
     const glass = glassMat();
     // PROPORTION LAW: pickup, tall hull + cab forward of an open bed. H~1.80.
@@ -908,9 +915,36 @@
     [1, -1].forEach(function (side) {
       addBox(root, 0.08, 0.2, len * 0.84, side * (w * 0.51), bodyY + baseH * 0.3, 0, trim);
       addBox(root, 0.16, 0.13, 0.3, side * (w * 0.54), bodyTop - 0.08, len * 0.32, trim);   // mirrors
+      // the SINGLE stamped crease line, nose to tail at door-top height — the
+      // signature fold. Colour-true bright lambert so it reads as a caught
+      // highlight whatever the body recolours to.
+      addBox(root, 0.022, 0.05, len * 0.98, side * (w * 0.5 + 0.005), bodyY + baseH * 0.74, 0, creaseM);
     });
+    // full-width LIGHT BAR capping the nose top edge (headlight-contract
+    // emissive; the Voltra face brow lands just below and the two stack into
+    // one tall bright band, the truck's face signature).
+    addBox(root, w * 0.92, 0.035, 0.06, 0, bodyTop - 0.02, len * 0.5 - 0.01, lightFrontMat());
+    // bed: ribbed roll-cover + bright rail caps + tailgate seam
     addBox(root, w * 0.84, 0.08, len * 0.3, 0, bodyTop + 0.04, -len * 0.29, trim);   // dark tonneau cover over bed
-    addWheels(root, w + 0.13, len, wheelR, 0.34, trim, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.56);
+    [-0.18, -0.255, -0.33, -0.405].forEach(function (fz) {
+      addBox(root, w * 0.78, 0.022, 0.055, 0, bodyTop + 0.088, len * fz, trim);      // roll-cover ribs
+    });
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.06, 0.03, len * 0.34, side * (w * 0.5 - 0.03), bodyTop + 0.015, -len * 0.29, creaseM);   // bed rail caps
+    });
+    addBox(root, w * 0.68, 0.025, 0.02, 0, bodyTop - 0.34, -len * 0.5 - 0.005, trim);   // tailgate seam
+    // CHUNKY ANGULAR arch flares (the real truck's cue) instead of the round
+    // torus lips: solid trapezoid prisms proud of each flank, wheel below.
+    [len * 0.32, -len * 0.32].forEach(function (wz) {
+      [1, -1].forEach(function (side) {
+        const flare = addPrism(root, 0.18, [
+          [wz - wheelR * 1.62, 0.30], [wz - wheelR * 0.78, wheelR * 2.2],
+          [wz + wheelR * 0.78, wheelR * 2.2], [wz + wheelR * 1.62, 0.30],
+        ], 0, trim);
+        flare.position.x = side * (w * 0.5 + 0.03);
+      });
+    });
+    addWheels(root, w + 0.13, len, wheelR, 0.34, null, "sixlug", sharedMat("caliper-dk", 0x3a3f45), 0.56);
     root.userData.vehicleDims = { width: w, length: len, height: cabBaseY + peakY, wheelbase: len * 0.68 };
     // Voltra face anchors (full-width LED brow + tail blade land on the wedge
     // hull faces); the angular EV truck skips the bumper blocks.
@@ -931,7 +965,10 @@
     const paint = paintMat("suv", 0x2e3a4a, { metalness: 0.45, roughness: 0.42, envMapIntensity: 0.9 });
     const dark = glassMat();
     const trim = roleMat("suv-trim", "plastic", 0x14171c);
-    const rail = roleMat("suv-rail", "metal", 0x40474f, { emissive: 0x1a1d22, ei: 0.3 });
+    // colour-true satin alu — vmat('metal') would hand back the bright chrome
+    // singleton (colour ignored), and rack hardware should read duller than
+    // the brightwork trim.
+    const rail = sharedMat("suv-rail", 0x596069, { emissive: 0x1a1d22, ei: 0.3 });
     // PROPORTION LAW: tall 3-box SUV. H~1.74, tall hull + upright greenhouse.
     const w = 2.16, len = 5.1, H = 1.74;
     const wheelR = +(0.23 * H).toFixed(3);            // tire dia 0.46H (Grand Cherokee 245/70R17 → 0.44 + art bump)
@@ -968,6 +1005,9 @@
     addBox(root, roofWs + 0.02, 0.08, sideLen + 0.08, 0, cabBaseY + peakY + 0.028, sideMidZ, paint);   // roof skin
     addBox(root, 0.07, 0.08, sideLen, w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);  // roof rails
     addBox(root, 0.07, 0.08, sideLen, -w * 0.36, cabBaseY + peakY + 0.11, sideMidZ, rail);
+    [-0.28, 0.28].forEach(function (fz) {                                                  // rack crossbars between the rails
+      addBox(root, w * 0.72 + 0.14, 0.045, 0.07, 0, cabBaseY + peakY + 0.13, sideMidZ + sideLen * fz, rail);
+    });
     const pillarXs = (cabWs * 0.5 + roofWs * 0.5) * 0.5 - 0.005;
     [1, -1].forEach(function (side) {
       const bp = addBox(root, 0.04, peakY * 0.94, 0.06, side * pillarXs, cabBaseY + peakY * 0.48, sideMidZ, paint);
@@ -983,6 +1023,19 @@
     });
     [1, -1].forEach(function (side) {
       addBox(root, 0.16, 0.12, 0.24, side * (w * 0.55), bodyTop + 0.10, fB[0] - 0.05, trim);  // door mirrors at the A-pillar base
+      // door seam insets + chrome handles at the beltline (front/rear door split)
+      [-len * 0.135, len * 0.115].forEach(function (z) {
+        addBox(root, 0.02, baseH * 0.5, 0.03, side * (w * 0.502), bodyY + baseH * 0.58, z, trim);
+        addBox(root, 0.028, 0.032, 0.11, side * (w * 0.502), bodyY + baseH * 0.80, z - 0.12, chromeMat());
+      });
+    });
+    // tailgate ladder (overlander cue): two rails + three rungs, in the gap
+    // between the rear spare (|x| < ~0.49) and the Bison vertical tails (~0.76+)
+    [0.54, 0.72].forEach(function (fx) {
+      addBox(root, 0.035, baseH * 0.6, 0.04, fx, bodyY + baseH * 0.52, -len * 0.5 - 0.035, rail);
+    });
+    [0.30, 0.52, 0.74].forEach(function (fy) {
+      addBox(root, 0.24, 0.032, 0.045, 0.63, bodyY + baseH * fy, -len * 0.5 - 0.035, rail);
     });
     const suvRoofY = cabBaseY + peakY + 0.05;
     addSphere(root, wheelR * 1.05, 0, bodyY + baseH * 0.56, -len * 0.51, trim, 1, 1, 0.3);   // rear spare, sized off the real wheel radius (was fixed at 0.46 — bigger than the road wheels on every SUV size)
@@ -1036,7 +1089,23 @@
       addBox(root, 0.025, boxH * 0.72, 0.035, side * (w * 0.505), bodyY + boxH * 0.51, -len * 0.1, trim);
       addBox(root, 0.17, 0.13, 0.28, side * (w * 0.55), bodyY + boxH * 0.66, len * 0.4, trim);  // mirrors
     });
+    // fleet livery band down both flanks — an accent lambert that is NOT
+    // _bodyPaint, so a recoloured van keeps its working-fleet stripe.
+    const livery = sharedMat("van-livery", 0x2f5f9e, { emissive: 0x0c1828, ei: 0.35 });
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.02, 0.40, len * 0.42, side * (w * 0.5 + 0.006), bodyY + boxH * 0.38, -len * 0.08, livery);
+    });
+    // kerb-side sliding-door gear: seam, lower roller track, grab handle
+    addBox(root, 0.025, boxH * 0.52, 0.035, w * 0.505, bodyY + boxH * 0.40, len * 0.02, trim);
+    addBox(root, 0.02, 0.035, len * 0.28, w * 0.505, bodyY + boxH * 0.10, -len * 0.06, trim);
+    addBox(root, 0.03, 0.05, 0.15, w * 0.508, bodyY + boxH * 0.42, len * 0.09, trim);
     addBox(root, 0.035, boxH * 0.74, 0.04, 0, bodyY + boxH * 0.5, -len * 0.47, trim);   // split rear doors
+    [1, -1].forEach(function (side) {                                                   // rear-door hinges + handle bar
+      [0.30, 0.72].forEach(function (fy) {
+        addBox(root, 0.035, 0.09, 0.05, side * (w * 0.5 - 0.05), bodyY + boxH * fy, -len * 0.47 - 0.02, trim);
+      });
+    });
+    addBox(root, 0.03, 0.26, 0.04, 0.11, bodyY + boxH * 0.45, -len * 0.47 - 0.025, trim);
     // trucker jewellery: three amber clearance markers along the front roof edge
     // (kills the "rolling fridge" read — the roofline gets a working-vehicle cue).
     const marker = sharedMat("van-marker", 0xffb347, { emissive: 0xffa028, ei: 0.7 });
@@ -1121,8 +1190,17 @@
     // EXHAUST: header sweeping under the engine into a fat side can, tipped up
     const can = addBox(root, 0.13, 0.13, 0.52, 0.20, axleY + 0.16, -0.62, chrome);
     can.rotation.x = -0.20;
+    // header plumbing that actually CONNECTS head → belly → can (the can used
+    // to float beside the engine with no pipework), plus a dark tip outlet
+    const header = addBox(root, 0.075, 0.075, 0.34, 0.16, axleY - 0.02, 0.18, chrome);   // downpipe off the cylinder head
+    header.rotation.x = -0.85;
+    const link = addBox(root, 0.075, 0.075, 0.56, 0.185, axleY + 0.03, -0.15, chrome);   // link pipe under the engine
+    link.rotation.x = 0.69;
+    const tip = addBox(root, 0.105, 0.105, 0.05, 0.20, axleY + 0.11, -0.885, black);     // exhaust outlet
+    tip.rotation.x = -0.20;
     // NOSE FAIRING wrapping the steering head: painted wedge + twin lamps + screen
     addPrism(root, 0.38, [[wb + 0.10, 0.28], [wb - 0.10, 0.62], [wb - 0.42, 0.56], [wb - 0.30, 0.20]], axleY + 0.16, paint);
+    addBox(root, 0.32, 0.14, 0.035, 0, axleY + 0.655, wb + 0.03, black);    // dark bezel panel: lamps read as lenses set in it
     [0.09, -0.09].forEach(function (x) {
       addBox(root, 0.10, 0.09, 0.05, x, axleY + 0.66, wb + 0.055, white);   // twin projector lamps
     });
@@ -1161,55 +1239,148 @@
     return root;
   }
 
-  // --- light helicopter: fuselage pod, tail boom, skids, animated main + tail rotor. ---
+  // --- light helicopter (art pass): plan-tapered fuselage pod with a glass
+  //     nose bubble, engine cowl + exhaust stub, TAPERED tail boom carrying a
+  //     raked fin + stabilizer, 4-blade tapered main rotor on a real hub/mast,
+  //     2-blade tapered tail rotor, skid gear with cross-tubes, and a two-tone
+  //     accent livery that survives recolor. Ground-driven cosmetic skin by
+  //     design (it never flies); rotor groups keep their names so
+  //     makeProcedural re-resolves them and cityUpdatePlayerCarVisual spins
+  //     them per instance. ---
+  // tapered rotor blade: a box along +X (root at the origin) whose chord (z)
+  // and thickness (y) shrink toward the tip. Cached + _shared so clone
+  // disposal never eats it; pure arithmetic, fully deterministic.
+  const bladeGeos = new Map();
+  function bladeGeo(len, rootW, tipW, rootT, tipT) {
+    const key = [len, rootW, tipW, rootT, tipT].join("|");
+    let geo = bladeGeos.get(key);
+    if (geo) return geo;
+    geo = new THREE.BoxGeometry(len, rootT, rootW);
+    geo.translate(len / 2, 0, 0);
+    const arr = geo.attributes.position.array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const t = arr[i] / len;                    // 0 at the root -> 1 at the tip
+      arr[i + 1] *= 1 + (tipT / rootT - 1) * t;  // thin toward the tip
+      arr[i + 2] *= 1 + (tipW / rootW - 1) * t;  // narrow toward the tip
+    }
+    geo.attributes.position.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo._shared = true;
+    bladeGeos.set(key, geo);
+    return geo;
+  }
+
   function makeHelicopter() {
     const root = new THREE.Group();
     const body = roleMat("heli-body", "paint", 0x1b2b3c);
+    // two-tone accent: a fresh 'paint' material with _bodyPaint STRIPPED so
+    // the livery keeps its signal-orange when recolorBody repaints the shell.
+    const accent = (function () {
+      let m = mats.get("heli-accent"); if (m) return m;
+      m = vmat("paint", 0xd14a2a, { metalness: 0.5, roughness: 0.3 });
+      m._bodyPaint = false; m._shared = true; mats.set("heli-accent", m); return m;
+    })();
     const glass = glassMat();
     const dark = roleMat("heli-dark", "plastic", 0x14171c);
-    const blade = roleMat("heli-blade", "metal", 0x202428);
-    const tail = roleMat("heli-tail", "paint", 0xd14a2a);
+    // blades want DARK metal — vmat('metal') returns the bright chrome
+    // singleton (colour ignored), so use a colour-true lambert instead.
+    const blade = sharedMat("heli-blade", 0x23272c, { emissive: 0x0a0c0e, ei: 0.3 });
     const groundY = 0.34;   // skid clearance above the ground plane
-    // rounded cockpit pod
-    addPrism(root, 1.5, [[-1.4, 0], [-1.1, 1.0], [0.9, 1.0], [1.7, 0.55], [1.55, 0]], groundY, body);
-    addPrism(root, 1.36, [[-0.4, 0.08], [0.2, 0.92], [1.4, 0.5], [1.3, 0.1]], groundY + 0.02, glass);  // bubble canopy
-    // tapered tail boom reaching back
-    addBox(root, 0.34, 0.34, 2.6, 0, groundY + 0.95, -2.4, body);
-    addPrism(root, 0.4, [[0, 0.0], [0, 0.7], [-0.7, 0.5], [-0.6, 0.0]], groundY + 0.95, tail);  // tail fin
-    // skids
+    // fuselage pod, tapered in PLAN via prismGeo width scales (nose and tail
+    // pull in) instead of running as a constant-width slab
+    addPrism(root, 1.5, [
+      [-1.4, 0, 0.72], [-1.1, 1.0, 0.95], [0.9, 1.0, 1.0], [1.7, 0.55, 0.66], [1.55, 0, 0.66],
+    ], groundY, body);
+    // canopy: raked glass tub over the front half + a rounded glass NOSE
+    // BUBBLE (the light-heli signature). Both use the opaque reflective glass
+    // singleton, which satisfies the b-r>0.045 glass value contract.
+    addPrism(root, 1.36, [
+      [-0.4, 0.08, 1.0], [0.2, 0.92, 0.94], [1.4, 0.5, 0.7], [1.3, 0.1, 0.7],
+    ], groundY + 0.02, glass);
+    addSphere(root, 0.5, 0, groundY + 0.5, 1.38, glass, 0.92, 0.8, 0.95);   // nose bubble
+    // accent cheat-line down both flanks (two-tone livery, recolor-proof)
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.025, 0.16, 1.7, side * 0.755, groundY + 0.52, 0, accent);
+    });
+    addBox(root, 0.16, 0.07, 0.07, 0, groundY + 0.16, 1.56, lightFrontMat());   // chin landing light
+    // engine cowl on the roof + exhaust stub kicked back
+    addBox(root, 0.66, 0.26, 1.15, 0, groundY + 1.1, -0.35, dark);
+    const exh = addBox(root, 0.11, 0.11, 0.3, 0.2, groundY + 1.16, -0.98, dark);
+    exh.rotation.x = 0.5;
+    // TAPERED tail boom: slims in height AND width toward the tail, root
+    // buried in the pod's upper rear, tip swept slightly up.
+    addPrism(root, 0.4, [
+      [-3.8, 0.54, 0.5], [-3.8, 0.78, 0.5], [-1.0, 0.9, 1.0], [-1.0, 0.38, 1.0],
+    ], groundY, body);
+    addBox(root, 0.36, 0.42, 0.22, 0, groundY + 0.64, -2.5, accent);   // accent band wrapping the boom
+    // raked tail fin (accent) + horizontal stabilizer + anti-collision beacon
+    addPrism(root, 0.09, [
+      [-4.0, 0.30], [-3.86, 1.55], [-3.66, 1.55], [-3.6, 0.55],
+    ], groundY, accent);
+    addBox(root, 1.0, 0.05, 0.30, 0, groundY + 0.80, -3.0, accent);
+    addBox(root, 0.055, 0.05, 0.055, 0, groundY + 1.58, -3.74, lightTailMat());
+    // skid gear: tubes with upturned toes, down-struts, cross-tubes under the
+    // belly (the old gear had struts floating with no cross members)
     const skidY = 0.06;
-    addBox(root, 0.08, 0.08, 2.0, 0.75, skidY, 0.2, dark);
-    addBox(root, 0.08, 0.08, 2.0, -0.75, skidY, 0.2, dark);
-    addBox(root, 0.1, 0.4, 0.1, 0.62, skidY + 0.22, 0.7, dark);   // skid struts
-    addBox(root, 0.1, 0.4, 0.1, -0.62, skidY + 0.22, 0.7, dark);
-    addBox(root, 0.1, 0.4, 0.1, 0.62, skidY + 0.22, -0.3, dark);
-    addBox(root, 0.1, 0.4, 0.1, -0.62, skidY + 0.22, -0.3, dark);
-    // main rotor: hub + 3 long blades, spins about Y
-    const mast = groundY + 1.4;
-    addBox(root, 0.18, 0.5, 0.18, 0, mast - 0.2, 0.1, dark);   // mast
+    [1, -1].forEach(function (side) {
+      addBox(root, 0.07, 0.07, 2.3, side * 0.75, skidY, 0.2, dark);
+      const toe = addBox(root, 0.07, 0.07, 0.34, side * 0.75, skidY + 0.09, 1.44, dark);
+      toe.rotation.x = -0.55;
+      [0.7, -0.3].forEach(function (z) {
+        addBox(root, 0.075, 0.30, 0.085, side * 0.72, skidY + 0.16, z, dark);
+      });
+    });
+    [0.7, -0.3].forEach(function (z) {
+      addBox(root, 1.44, 0.075, 0.085, 0, skidY + 0.26, z, dark);
+    });
+    // MAIN ROTOR: cylindrical mast out of the cowl, hub disc + 4 tapered
+    // blades with a touch of coning (tips ride up), spins about Y.
+    const mastGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.44, 10);
+    mastGeo._shared = true;
+    const mastMesh = new THREE.Mesh(mastGeo, dark);
+    mastMesh.position.set(0, groundY + 1.40, 0.05);
+    mastMesh.castShadow = false;
+    root.add(mastMesh);
+    const rotorY = groundY + 1.58;
     const mainRotor = new THREE.Group();
-    mainRotor.position.set(0, mast, 0.1);
-    const hub = new THREE.Mesh(boxGeo(0.3, 0.12, 0.3), dark); mainRotor.add(hub);
-    for (let i = 0; i < 3; i++) {
-      const b = new THREE.Mesh(boxGeo(6.4, 0.05, 0.26), blade);
-      b.rotation.y = (i / 3) * Math.PI * 2;
+    mainRotor.position.set(0, rotorY, 0.05);
+    const hubGeo = new THREE.CylinderGeometry(0.11, 0.13, 0.13, 12);
+    hubGeo._shared = true;
+    const hub = new THREE.Mesh(hubGeo, dark);
+    hub.castShadow = false;
+    mainRotor.add(hub);
+    for (let i = 0; i < 4; i++) {
+      const b = new THREE.Mesh(bladeGeo(2.95, 0.30, 0.16, 0.055, 0.03), blade);
+      b.position.y = 0.03;
+      b.rotation.set(0, (i / 4) * Math.PI * 2, 0.028);   // azimuth + coning (XYZ order: Z first)
+      b.castShadow = false;
       mainRotor.add(b);
     }
     mainRotor.name = "heli_mainRotor";
     root.add(mainRotor);
     root.userData.mainRotor = mainRotor;
-    // tail rotor: 2 blades, spins about X at the tail
+    // TAIL ROTOR: side-mounted hub + 2 tapered blades sweeping the Y-Z plane,
+    // spins about X beside the fin. A static gearbox nub bridges the boom
+    // face to the hub so the rotor doesn't float beside the fin.
+    addBox(root, 0.14, 0.14, 0.14, 0.08, groundY + 1.02, -3.82, dark);
     const tailRotor = new THREE.Group();
-    tailRotor.position.set(0.22, groundY + 1.05, -3.55);
-    for (let i = 0; i < 2; i++) {
-      const b = new THREE.Mesh(boxGeo(0.06, 1.5, 0.16), blade);
-      b.rotation.x = i * Math.PI / 2;
+    tailRotor.position.set(0.17, groundY + 1.02, -3.82);
+    const tHubGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.11, 10);
+    tHubGeo._shared = true;
+    const tHub = new THREE.Mesh(tHubGeo, dark);
+    tHub.rotation.z = Math.PI / 2;
+    tHub.castShadow = false;
+    tailRotor.add(tHub);
+    [1, -1].forEach(function (dir) {
+      const b = new THREE.Mesh(bladeGeo(0.62, 0.13, 0.08, 0.035, 0.025), blade);
+      b.rotation.z = dir * Math.PI / 2;   // blade along ±Y, thickness along the X shaft
+      b.castShadow = false;
       tailRotor.add(b);
-    }
+    });
     tailRotor.name = "heli_tailRotor";
     root.add(tailRotor);
     root.userData.tailRotor = tailRotor;
-    root.userData.vehicleDims = { width: 2.1, length: 5.8, height: 2.1, wheelbase: 2.8 };
+    root.userData.vehicleDims = { width: 2.1, length: 5.8, height: 2.05, wheelbase: 2.8 };
     return root;
   }
 
@@ -1290,7 +1461,17 @@
     // cleats at the stern quarters (the detail that says "boat", costs 2 boxes)
     [1, -1].forEach(function (side) {
       addBox(root, 0.16, 0.04, 0.05, side * (w * 0.36), baseY + H + 0.03, -len * 0.46, chrome);
+      addBox(root, 0.14, 0.04, 0.05, side * (w * 0.22), baseY + H + 0.10, len * 0.30, chrome);   // bow cleats
     });
+    // nav lights on the bow gunwales: port red (+x, facing the bow) /
+    // starboard green — colours/emissives tuned to stay OUTSIDE all three
+    // detector contracts (red emissive r<0.78; green emissive b<0.6; green
+    // BODY colour keeps b-r<0.045 so it can't read as glass).
+    addBox(root, 0.05, 0.045, 0.07, w * 0.255, baseY + H + 0.05, len * 0.31, sharedMat("boat-port", 0x8e1c24, { emissive: 0xb02030, ei: 0.8 }));
+    addBox(root, 0.05, 0.045, 0.07, -w * 0.255, baseY + H + 0.05, len * 0.31, sharedMat("boat-stbd", 0x28642c, { emissive: 0x1f9e4b, ei: 0.8 }));
+    // chrome header rail capping the centre windscreen panel (same rake)
+    const wsFrame = addBox(root, w * 0.60, 0.035, 0.035, 0, baseY + H + 0.60, len * 0.189, chrome);
+    wsFrame.rotation.x = -0.42;
     // OUTBOARD: cowled head (painted, like the real premium rigs), midsection
     // leg into the water, anti-vent plate, animated 3-blade screw
     addBox(root, 0.40, 0.34, 0.44, 0, baseY + H + 0.06, -len * 0.5 - 0.16, stripe);        // cowl

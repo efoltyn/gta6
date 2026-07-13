@@ -207,8 +207,17 @@
       if (!arr.length) return;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(arr), 3));
-      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color }));
+      // PAINTED, NOT GEOMETRY: polygonOffset pulls the paint toward the camera
+      // in DEPTH, so the tiny yOff above is coplanarity insurance, not the thing
+      // holding the line off the deck — markings hug the tarmac like paint.
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
       m.matrixAutoUpdate = false; m.receiveShadow = false; m.renderOrder = 1;
+      // batch-exempt (non-empty userData): the V2 merge re-materials its buckets
+      // with a shared plain material, which would silently DROP polygonOffset +
+      // renderOrder; kept live, the paint also culls by its own full-span sphere
+      // — always in lockstep with the textured (equally batch-exempt) deck.
+      m.userData.roadPaint = true;
       out.push(m);
     }
     mesh(white, 0xeef1f5); mesh(yellow, 0xf2c83a);
@@ -557,18 +566,26 @@
         pim.instanceMatrix.needsUpdate = true; pim.castShadow = false;
         group.add(pim);
       }
-      // simple ramp wedge at each end down to grade (one mesh each)
+      // simple ramp wedge at each end down to grade (one mesh each).
+      // FIX (dormant branch — every current caller passes elevated:false): the
+      // old code left rotation.z = 0 at the deck-height centre, so the "ramp"
+      // was a FLAT plane floating at deckY/2. Real math: yaw to the heading
+      // first (YXZ order), then pitch about the yawed X axis by
+      // atan2(deckY, rampLen); the plane's length is the true hypotenuse, so
+      // its high edge meets the deck at exactly deckY and its low edge lands
+      // exactly on grade rampLen out along the heading.
       const rampMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(theme.deck) });
       [[path[0], path[1]], [path[path.length - 1], path[path.length - 2]]].forEach(([end, prev]) => {
         let dx = end.x - prev.x, dz = end.z - prev.z;
         const L = Math.hypot(dx, dz) || 1e-3; dx /= L; dz /= L;
         const rampLen = 14;
-        const geo = new THREE.PlaneGeometry(width, rampLen);
+        const slope = Math.atan2(deckY, rampLen);
+        const geo = new THREE.PlaneGeometry(width, Math.hypot(rampLen, deckY));
         const ramp = new THREE.Mesh(geo, rampMat);
-        ramp.rotation.x = -Math.PI / 2;
-        // tilt down toward grade along the heading
         const h = Math.atan2(dx, dz);
-        ramp.rotation.z = 0; ramp.rotation.y = h;
+        ramp.rotation.order = "YXZ";
+        ramp.rotation.y = h;
+        ramp.rotation.x = -Math.PI / 2 + slope;   // lie flat, then tilt down toward grade
         ramp.position.set(end.x + dx * rampLen / 2, deckY / 2, end.z + dz * rampLen / 2);
         ramp.receiveShadow = true; group.add(ramp);
       });

@@ -107,11 +107,26 @@
     //      ocean's exact colour/shadow flags (expansion.js) so the batch pass
     //      folds both planes into one mesh still driven by THIS material. ----
     const seaMat = new THREE.MeshLambertMaterial({ color: 0x2f6f9e, fog: true });
-    // widened to 6200 so the whole archipelago (worldmap.js's far islands &
-    // biomes, out past ±1500) sits ON open water, not past the plane's edge.
-    const sea = new THREE.Mesh(new THREE.PlaneGeometry(6200, 6200), seaMat);
-    sea.rotation.x = -Math.PI / 2; sea.position.set(cx + 150, -0.5, cz - 200);   // recentred over the spread-out island ring
-    sea.receiveShadow = false; root.add(sea);
+    // ---- SEA OVERHAUL (flagged): the flat single-color plane becomes a
+    //      segmented, vertex-tinted, gently animated sea (built at the END of
+    //      buildCity, once every landmass has registered, so the depth tint
+    //      can be baked from real distance-to-land). seaMat stays alive as
+    //      the day/night colour master — expansion.js's island ocean plane
+    //      still shares it, and the new sea copies its colour every frame.
+    //      Revert: CBZ.CONFIG.SEA_OVERHAUL = false (old plane returns). ----
+    const CFGW = (CBZ.CONFIG = CBZ.CONFIG || {});
+    if (CFGW.SEA_OVERHAUL == null) CFGW.SEA_OVERHAUL = true;
+    const SEA_Y = -0.48;                 // mean surface (waves ride ±0.055)
+    CBZ.SEA_Y = SEA_Y;                   // single source of truth for tooling
+    let seaMat2 = null;                  // the animated sea material (below)
+    const seaTimeU = { value: 0 };       // shared shader clock (runtime-only FX)
+    if (CFGW.SEA_OVERHAUL === false) {
+      // legacy path: one giant flat plane, widened to 6200 so the whole
+      // archipelago sits ON open water, not past the plane's edge.
+      const sea = new THREE.Mesh(new THREE.PlaneGeometry(6200, 6200), seaMat);
+      sea.rotation.x = -Math.PI / 2; sea.position.set(cx + 150, -0.5, cz - 200);
+      sea.receiveShadow = false; root.add(sea);
+    }
     // ---- PROCEDURAL BACKDROP TERRAIN (world/terrain.js): a snow-capped
     //      mountain range + rolling hills in the FAR ring around the map.
     //      It is EXACTLY flat (y=0) across the whole playable archipelago, so
@@ -128,12 +143,21 @@
       const k = CBZ.dayness != null ? CBZ.dayness : 1;
       seaMat.color.copy(seaNight).lerp(seaDay, k);
       if (CBZ.duskness) seaMat.color.lerp(seaDusk, CBZ.duskness * 0.5);
+      if (seaMat2) {
+        // the animated sea follows the same day/night tone (one colour copy)
+        // and advances the wave clock. Wrapped so sin() args stay small.
+        seaMat2.color.copy(seaMat.color);
+        const tNow = (typeof performance !== "undefined" ? performance.now() : Date.now());
+        seaTimeU.value = (tNow * 0.001) % 3600;
+      }
     });
 
-    // flat plane helper (decor, no collider)
-    function plane(x, z, w, d, color, y, basic) {
+    // flat plane helper (decor, no collider). Optional `paintM` supplies a
+    // SHARED material (road-paint decals reuse one polygonOffset singleton
+    // instead of minting a material per stripe); color/basic are ignored then.
+    function plane(x, z, w, d, color, y, basic, paintM) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
-        basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }));
+        paintM || (basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color })));
       m.rotation.x = -Math.PI / 2; m.position.set(x, y == null ? 0.02 : y, z);
       m.receiveShadow = !basic; root.add(m);
       return m;
@@ -282,15 +306,22 @@
     quadField(aveRects, roadMat, 0.04);
     quadField(crossRects, roadMat, 0.045);
     // bake ALL lane paint into two merged flat meshes (white + yellow).
+    // PAINTED, NOT GEOMETRY: every marking material is a polygonOffset decal —
+    // the depth offset (factor/units -2) does the separation from the asphalt,
+    // so the markings sit near-coplanar (tiny y ladder kept only to order the
+    // markings among THEMSELVES) instead of visibly hovering above the road.
+    function paintMat(color) {
+      return new THREE.MeshBasicMaterial({ color: color,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    }
     function paintMesh(rects, color, y) {
       if (!rects.length) return;
-      const flat = new THREE.MeshBasicMaterial({ color });
-      const m = quadField(rects, flat, y);
+      const m = quadField(rects, paintMat(color), y);
       m.receiveShadow = false;
       return m;
     }
-    paintMesh(whiteRects, 0xeef1f5, 0.06);
-    paintMesh(yellowRects, 0xf2c83a, 0.062);
+    paintMesh(whiteRects, 0xeef1f5, 0.055);
+    paintMesh(yellowRects, 0xf2c83a, 0.057);
     // permanent raised concrete MEDIAN on the two avenues — was flag-gated decor
     // (CITY_MEDIANS) shared by every line; now it's the avenues' OWN structural
     // tell (always on), sized to the lane layout above (AVE_MEDIAN), and GAPPED
@@ -330,6 +361,9 @@
 
     // ---- intersections + crosswalk stripes ----
     const intersections = [];
+    // ONE shared polygonOffset decal material for every zebra stripe in the
+    // city (was a fresh MeshBasicMaterial per stripe) — paint, not geometry.
+    const zebraM = paintMat(0xeef1f5);
     xLines.forEach((x, i) => zLines.forEach((z, j) => {
       plane(x, z, ROAD, ROAD, 0x202227, 0.05);   // darker box at the crossing
       // zebra stripes on all four approaches — stripe COUNT scales with the
@@ -338,8 +372,8 @@
       const zk = Math.max(2, Math.ceil(ROAD / 1.2) >> 1);
       for (let s = -1; s <= 1; s += 2) {
         for (let k = -zk; k <= zk; k++) {
-          plane(x + k * 1.1, z + s * (ROAD / 2 + 1.2), 0.7, 2.0, 0xeef1f5, 0.07, true);
-          plane(x + s * (ROAD / 2 + 1.2), z + k * 1.1, 2.0, 0.7, 0xeef1f5, 0.07, true);
+          plane(x + k * 1.1, z + s * (ROAD / 2 + 1.2), 0.7, 2.0, 0xeef1f5, 0.063, true, zebraM);
+          plane(x + s * (ROAD / 2 + 1.2), z + k * 1.1, 2.0, 0.7, 0xeef1f5, 0.063, true, zebraM);
         }
       }
       intersections.push({ x, z, i, j, phase: (i + j) % 2 === 0 ? 0 : 1, t: rng() * 6, ns: true, light: null });
@@ -684,7 +718,15 @@
       const M = new Map();
       function dm(color, basic) {
         let m = M.get(color + "|" + (basic ? 1 : 0));
-        if (!m) { m = basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }); M.set(color + "|" + (basic ? 1 : 0), m); }
+        if (!m) {
+          // basic == a flat painted marking → polygonOffset decal so it hugs
+          // the asphalt like paint; lambert stays plain (curbs/manholes are
+          // raised/shadowed geometry, not paint).
+          m = basic
+            ? new THREE.MeshBasicMaterial({ color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+            : new THREE.MeshLambertMaterial({ color });
+          M.set(color + "|" + (basic ? 1 : 0), m);
+        }
         return m;
       }
       // a flat decal quad lying on the ground
@@ -727,10 +769,10 @@
       const stopOff = ROAD / 2 + 2.6;
       intersections.forEach((it) => {
         // thick white bar across each of the four entries, set back behind the zebra
-        decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.072, true);
-        decal(it.x + ROAD / 4, it.z + stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.072, true);
-        decal(it.x - stopOff, it.z + ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.072, true);
-        decal(it.x + stopOff, it.z - ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.072, true);
+        decal(it.x - ROAD / 4, it.z - stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.065, true);
+        decal(it.x + ROAD / 4, it.z + stopOff, ROAD / 2 - 0.4, 0.4, 0xeef1f5, 0.065, true);
+        decal(it.x - stopOff, it.z + ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.065, true);
+        decal(it.x + stopOff, it.z - ROAD / 4, 0.4, ROAD / 2 - 0.4, 0xeef1f5, 0.065, true);
       });
 
       // ---- 3) manhole covers + storm-drain grates -------------------------
@@ -783,7 +825,7 @@
       intersections.forEach((it) => {
         if (rng() > 0.5) return;
         for (let s = 0; s < 2; s++) {
-          decal(it.x + (rng() - 0.5) * ROAD * 0.5, it.z + (rng() - 0.5) * ROAD * 0.5, 0.18, 1.4 + rng() * 1.2, 0x141519, 0.058, true, (rng() - 0.5) * 1.4);
+          decal(it.x + (rng() - 0.5) * ROAD * 0.5, it.z + (rng() - 0.5) * ROAD * 0.5, 0.18, 1.4 + rng() * 1.2, 0x141519, 0.053, true, (rng() - 0.5) * 1.4);
         }
       });
 
@@ -798,10 +840,10 @@
         // shaft along the lane; the head sits at the shaft's front, rotated
         // 90° toward the curb — reads as a right-turn lane marking
         const sM = new THREE.Mesh(fx ? shaftGH : shaftGV, arrowM);
-        sM.rotation.x = -Math.PI / 2; sM.position.set(x, 0.072, z); root.add(sM);
+        sM.rotation.x = -Math.PI / 2; sM.position.set(x, 0.065, z); root.add(sM);
         const h = new THREE.Mesh(headG, arrowM);
         h.rotation.x = -Math.PI / 2; h.rotation.z = rotZ;
-        h.position.set(x + fx * 0.95, 0.072, z + fz * 0.95); root.add(h);
+        h.position.set(x + fx * 0.95, 0.065, z + fz * 0.95); root.add(h);
       }
       // PER-LANE turn arrows at the new lane centres (laneW*(idx+0.5)): the
       // outermost lane on each approach gets the right-turn marking, so the
@@ -999,6 +1041,98 @@
     //      dockyard breaking up the rest of the gray apron. Runs LAST so the
     //      seawall lines / harbor decor already exist around it. ----
     if (CBZ.cityBuildBeach) try { CBZ.cityBuildBeach(city); } catch (e) { console.error("[city beach]", e); }
+
+    // =====================================================================
+    //  THE SEA, REBUILT (CBZ.CONFIG.SEA_OVERHAUL, default on). Runs LAST so
+    //  every landmass/region exists and the shore tint can be baked from the
+    //  real land extent. One indexed grid mesh (~21k verts), ONE Lambert
+    //  material with a tiny onBeforeCompile vertex program:
+    //    • baked per-vertex DEPTH TINT (bright turquoise shallows at the
+    //      coast → open-sea mid tone → dark deep water) as a multiplier
+    //      around 1.0, so the existing day/night material.color lerp still
+    //      drives the whole sea;
+    //    • three world-space sine swells (λ ≈ 120/155/570u, total ±0.055u)
+    //      displace the surface and tilt the per-vertex normal (exaggerated
+    //      ×60 — the honest slope of a 5cm swell is invisible) so the water
+    //      MOVES under the sun instead of sitting like painted glass;
+    //    • wave crests brighten vColor slightly — cheap sparkle, no Phong.
+    //  Determinism: vertex bake uses CBZ.hash01 only; the wave clock is
+    //  runtime-only FX (allowed). userData.terrain spares it from the batch
+    //  pass and farcull. Costs 1 draw call.
+    // =====================================================================
+    if (CFGW.SEA_OVERHAUL !== false) (function buildSea() {
+      // land union = every registered region + the mainland (same math the
+      // continent plate uses, recomputed here so there's no load-order tie).
+      let lminX = minX, lmaxX = maxX, lminZ = minZ, lmaxZ = maxZ;
+      const regsAll = city.regions || [];
+      for (const r of regsAll) {
+        if (r.minX < lminX) lminX = r.minX; if (r.maxX > lmaxX) lmaxX = r.maxX;
+        if (r.minZ < lminZ) lminZ = r.minZ; if (r.maxZ > lmaxZ) lmaxZ = r.maxZ;
+      }
+      const SPAN = 7000, SEG = 144;
+      const CXs = 310, CZs = -750;      // world/terrain.js relief-field centre
+      const geo = new THREE.PlaneGeometry(SPAN, SPAN, SEG, SEG);
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(CXs, SEA_Y, CZs);   // verts are FINAL world coords (mesh at identity)
+      const pos = geo.attributes.position;
+      const colors = new Float32Array(pos.count * 3);
+      // depth-tint ramp: multipliers around 1.0 so material.color still rules
+      const shR = 1.34, shG = 1.32, shB = 1.10;    // sunlit sandy shallows
+      const dpR = 0.55, dpG = 0.72, dpB = 0.92;    // cold open deep
+      function smoothT(a, b, x) { let t = (x - a) / (b - a); t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
+      for (let i = 0; i < pos.count; i++) {
+        const wx = pos.getX(i), wz = pos.getZ(i);
+        const dx = Math.max(lminX - wx, 0, wx - lmaxX);
+        const dz = Math.max(lminZ - wz, 0, wz - lmaxZ);
+        const d = Math.sqrt(dx * dx + dz * dz);    // 0 at/inside the landmass
+        const t1 = smoothT(4, 120, d);             // shallows fade out by ~120u
+        const t2 = smoothT(140, 480, d);           // deep begins past ~140u
+        let r = shR + (1 - shR) * t1, g = shG + (1 - shG) * t1, b = shB + (1 - shB) * t1;
+        r += (dpR - 1) * t2; g += (dpG - 1) * t2; b += (dpB - 1) * t2;
+        // low-freq deterministic dither so the ramp never bands
+        const dth = 1 + ((CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 60), Math.floor(wz / 60), 9101) : 0.5) - 0.5) * 0.08;
+        colors[i * 3] = r * dth; colors[i * 3 + 1] = g * dth; colors[i * 3 + 2] = b * dth;
+      }
+      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      seaMat2 = new THREE.MeshLambertMaterial({ color: 0x2f6f9e, vertexColors: true, fog: true });
+      seaMat2.onBeforeCompile = function (shader) {
+        shader.uniforms.uSeaTime = seaTimeU;
+        shader.vertexShader = "uniform float uSeaTime;\n" + shader.vertexShader
+          .replace("#include <color_vertex>",
+            "float _p1 = position.x * 0.052 + position.z * 0.030 + uSeaTime * 1.1;\n" +
+            "float _p2 = position.x * -0.020 + position.z * 0.041 + uSeaTime * 0.7;\n" +
+            "float _p3 = (position.x + position.z) * 0.011 - uSeaTime * 0.4;\n" +
+            "float _wY = sin(_p1) * 0.018 + sin(_p2) * 0.022 + sin(_p3) * 0.015;\n" +
+            "#include <color_vertex>\n" +
+            "#ifdef USE_COLOR\n vColor.xyz *= (1.0 + max(_wY, 0.0) * 3.0);\n#endif")
+          .replace("#include <beginnormal_vertex>",
+            "#include <beginnormal_vertex>\n" +
+            "float _dx = 0.018*cos(_p1)*0.052 - 0.022*cos(_p2)*0.020 + 0.015*cos(_p3)*0.011;\n" +
+            "float _dz = 0.018*cos(_p1)*0.030 + 0.022*cos(_p2)*0.041 + 0.015*cos(_p3)*0.011;\n" +
+            "objectNormal = normalize(vec3(-_dx * 60.0, 1.0, -_dz * 60.0));")
+          .replace("#include <begin_vertex>",
+            "#include <begin_vertex>\ntransformed.y += _wY;");
+      };
+      const sea = new THREE.Mesh(geo, seaMat2);
+      sea.receiveShadow = false; sea.castShadow = false;
+      sea.frustumCulled = false;                   // the horizon is everywhere
+      sea.matrixAutoUpdate = false;                // identity — verts are world-space
+      sea.userData.terrain = true;                 // batch + farcull exempt
+      root.add(sea);
+      CBZ.citySea = sea;
+      // the island annex's own flat ocean plane (expansion.js, y=-0.44) sat
+      // ABOVE parts of the wave band — with the real sea in place it could
+      // only ever show through as a dead calm disk. REMOVE it (not just
+      // visible=false): the static batch pass runs after buildCity and
+      // would otherwise fold the plane into a merged bucket where the
+      // original's visibility no longer matters. Same material instance =
+      // safe identity test; nothing else shares seaMat.
+      const oldSeas = [];
+      root.traverse(function (o) {
+        if (o !== sea && o.isMesh && o.material === seaMat) oldSeas.push(o);
+      });
+      for (const o of oldSeas) if (o.parent) o.parent.remove(o);
+    })();
 
     root.visible = false;     // hidden until city mode activates
     return city;

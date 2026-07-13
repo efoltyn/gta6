@@ -99,6 +99,11 @@
   function box(mat, w, h, d, x, y, z) { const m = mesh(geos().box, mat, w, h, d); m.position.set(x, y, z); return m; }
 
   function tagSprite(text, color, sx, sy) {
+    // PROPS_PURPOSE (owner order): NO floating words over the counter — the
+    // barred teller window + neon LOANS sign already read as the pawn desk;
+    // the walk-up prompt carries the verbs. All call sites null-guard, so
+    // returning null degrades cleanly. Revert: CBZ.CONFIG.PROPS_PURPOSE=false.
+    if (!CBZ.CONFIG || CBZ.CONFIG.PROPS_PURPOSE !== false) return null;
     if (!CBZ.makeLabelSprite) return null;
     const s = CBZ.makeLabelSprite(text, { color: color || "#ffd166" });
     s.scale.set(sx || 1.8, sy || 0.45, 1);

@@ -605,41 +605,130 @@
   const emg = [];
   let emgScanT = 0;
 
-  // shared meshes (built lazily, tagged _shared so resets never dispose them)
+  // shared meshes (built lazily, tagged _shared so resets never dispose them).
+  // ONE unit box, scaled per mesh, builds every hull/trim block — zero per-spawn
+  // geometry allocation, and despawnEmergency never has to dispose geometry.
   let G = null;
   function geos() {
     if (G) return G;
     G = {
-      body: new THREE.BoxGeometry(2.2, 1.7, 5.4),
-      cab: new THREE.BoxGeometry(2.1, 1.1, 1.7),
+      unit: new THREE.BoxGeometry(1, 1, 1),
       wheel: new THREE.CylinderGeometry(0.5, 0.5, 0.46, 10),
-      bar: new THREE.BoxGeometry(1.9, 0.22, 0.5),
-      beacon: new THREE.BoxGeometry(0.42, 0.24, 0.42),
     };
     for (const k in G) G[k]._shared = true;
     return G;
   }
   const tireMat = (function () { const m = new THREE.MeshLambertMaterial({ color: 0x14161b }); m._shared = true; return m; })();
+  // shared accent materials — shiny carfx roles when available (glass/steel are
+  // SHARED cache entries there), plain Lambert otherwise. All _shared: the
+  // despawn disposer must never free them.
+  let EMS = null;
+  function emgAccents() {
+    if (EMS) return EMS;
+    function sh(role, hex) {
+      let m = null;
+      if (CBZ.vehicleMat) { try { m = CBZ.vehicleMat(role, hex); } catch (e) { m = null; } }
+      if (!m || !m.isMaterial) m = new THREE.MeshLambertMaterial({ color: hex });
+      m._shared = true;
+      return m;
+    }
+    EMS = { glass: sh("glass", 0x10161c), steel: sh("metal", 0x9aa3ab) };
+    return EMS;
+  }
+  // scaled-unit-box brick: the whole emergency build is this call over and over
+  function ebox(grp, mat, sx, sy, sz, px, py, pz) {
+    const m = new THREE.Mesh(geos().unit, mat);
+    m.scale.set(sx, sy, sz);
+    m.position.set(px, py, pz);
+    grp.add(m);
+    return m;
+  }
 
   function buildEmergency(kind) {
     const gg = geos();
+    const acc = emgAccents();
     const grp = new THREE.Group();
     const isFire = kind === "firetruck";
-    const bodyCol = isFire ? 0xc4231b : 0xeef3f6;
-    const trimCol = isFire ? 0x2a2d33 : 0xd23b3b;
-    const bodyMat = new THREE.MeshLambertMaterial({ color: bodyCol });
-    const cabMat = new THREE.MeshLambertMaterial({ color: trimCol });
-    const body = new THREE.Mesh(gg.body, bodyMat); body.position.y = 1.25; grp.add(body);
-    const cab = new THREE.Mesh(gg.cab, cabMat); cab.position.set(0, 1.9, 1.5); grp.add(cab);
-    // a red + blue beacon on a roof bar that flashes alternately
+    // Per-instance paints — despawnEmergency disposes EXACTLY the five keys we
+    // return (body/cab/bar/redMat/bluMat); every other material here is _shared.
+    // ambulance: white box + red livery. firetruck: crimson rig + white cab roof.
+    const bodyMat = new THREE.MeshLambertMaterial({ color: isFire ? 0xc4231b : 0xeef3f6 });
+    const cabMat = new THREE.MeshLambertMaterial({ color: isFire ? 0xe8ecef : 0xd23b3b });
     const barMat = new THREE.MeshLambertMaterial({ color: 0x111316 });
-    const bar = new THREE.Mesh(gg.bar, barMat);
-    bar.position.set(0, 2.35, 0.3); grp.add(bar);
+    // flash mats — flashBeacon() drives emissiveIntensity on these two, KEEP.
     const redMat = new THREE.MeshLambertMaterial({ color: 0xff2a2a, emissive: 0xff0000, emissiveIntensity: 1 });
     const bluMat = new THREE.MeshLambertMaterial({ color: 0x2a6bff, emissive: 0x1133ff, emissiveIntensity: 0.2 });
-    const red = new THREE.Mesh(gg.beacon, redMat); red.position.set(-0.55, 2.5, 0.3); grp.add(red);
-    const blu = new THREE.Mesh(gg.beacon, bluMat); blu.position.set(0.55, 2.5, 0.3); grp.add(blu);
-    // four wheels
+
+    if (isFire) {
+      // FIRE ENGINE — crimson cab-over rig: pump body, white cab roof, silver
+      // diamond-plate skirt, roof ladder on a turntable, rear hose-reel drum.
+      ebox(grp, bodyMat, 2.2, 1.5, 3.3, 0, 1.15, -1.0);           // pump body (top 1.9)
+      ebox(grp, bodyMat, 2.1, 1.15, 1.7, 0, 1.05, 1.7);           // cab-over nose
+      ebox(grp, cabMat, 2.14, 0.16, 1.74, 0, 1.7, 1.7);           // white cab roof
+      ebox(grp, acc.glass, 1.88, 0.55, 0.1, 0, 1.3, 2.57);        // windshield
+      ebox(grp, acc.glass, 0.08, 0.5, 1.0, -1.07, 1.22, 1.7);     // cab side glass
+      ebox(grp, acc.glass, 0.08, 0.5, 1.0, 1.07, 1.22, 1.7);
+      ebox(grp, barMat, 1.6, 0.45, 0.12, 0, 0.68, 2.6);           // grille block
+      ebox(grp, acc.steel, 2.34, 0.3, 0.3, 0, 0.4, 2.62);         // front bumper
+      ebox(grp, acc.steel, 2.3, 0.26, 0.28, 0, 0.4, -2.7);        // rear step
+      ebox(grp, acc.steel, 0.08, 0.4, 3.3, -1.12, 0.55, -1.0);    // diamond-plate skirt
+      ebox(grp, acc.steel, 0.08, 0.4, 3.3, 1.12, 0.55, -1.0);
+      ebox(grp, acc.steel, 2.2, 0.4, 0.08, 0, 0.55, -2.66);
+      // ladder assembly: turntable block, two rails, rungs spanning them
+      ebox(grp, barMat, 0.9, 0.24, 0.9, 0, 2.0, -0.4);            // turntable
+      ebox(grp, acc.steel, 0.1, 0.12, 3.2, -0.3, 2.26, -0.8);     // rails
+      ebox(grp, acc.steel, 0.1, 0.12, 3.2, 0.3, 2.26, -0.8);
+      for (let rz = -2.2; rz <= 0.65; rz += 0.7) ebox(grp, acc.steel, 0.52, 0.06, 0.1, 0, 2.26, rz);
+      const drum = new THREE.Mesh(gg.wheel, barMat);              // rear hose-reel drum
+      drum.rotation.x = Math.PI / 2;
+      drum.scale.set(0.72, 0.62, 0.72);
+      drum.position.set(0, 1.5, -2.52); grp.add(drum);
+      // lightbar on the cab roof: red / white / blue segments (flash logic below)
+      ebox(grp, barMat, 1.9, 0.14, 0.42, 0, 1.85, 1.7);
+      ebox(grp, redMat, 0.55, 0.2, 0.38, -0.6, 2.0, 1.7);
+      ebox(grp, cabMat, 0.36, 0.16, 0.36, 0, 1.99, 1.7);
+      ebox(grp, bluMat, 0.55, 0.2, 0.38, 0.6, 2.0, 1.7);
+      ebox(grp, barMat, 0.14, 0.3, 0.12, -1.18, 1.42, 2.42);      // mirrors
+      ebox(grp, barMat, 0.14, 0.3, 0.12, 1.18, 1.42, 2.42);
+    } else {
+      // AMBULANCE — white patient module towering over a lower cab, red stripe
+      // band + red crosses, rear double-door seam, chunky bumpers.
+      ebox(grp, bodyMat, 2.2, 1.7, 3.5, 0, 1.3, -0.9);            // patient module (top 2.15)
+      ebox(grp, bodyMat, 2.06, 0.95, 1.5, 0, 1.0, 1.6);           // cab shell
+      ebox(grp, bodyMat, 2.06, 0.55, 0.5, 0, 0.78, 2.42);         // hood nose
+      ebox(grp, acc.glass, 1.82, 0.5, 0.1, 0, 1.26, 2.36);        // windshield
+      ebox(grp, acc.glass, 0.08, 0.42, 0.85, -1.05, 1.18, 1.55);  // cab side glass
+      ebox(grp, acc.glass, 0.08, 0.42, 0.85, 1.05, 1.18, 1.55);
+      // red stripe band: module flanks, cab flanks, tail
+      ebox(grp, cabMat, 0.06, 0.34, 3.5, -1.12, 1.26, -0.9);
+      ebox(grp, cabMat, 0.06, 0.34, 3.5, 1.12, 1.26, -0.9);
+      ebox(grp, cabMat, 0.05, 0.3, 1.5, -1.05, 0.95, 1.6);
+      ebox(grp, cabMat, 0.05, 0.3, 1.5, 1.05, 0.95, 1.6);
+      ebox(grp, cabMat, 2.2, 0.34, 0.06, 0, 1.26, -2.68);
+      // red cross blocks above the stripe: both module sides + the rear doors
+      ebox(grp, cabMat, 0.06, 0.6, 0.2, -1.12, 1.82, -0.9);
+      ebox(grp, cabMat, 0.06, 0.2, 0.6, -1.12, 1.82, -0.9);
+      ebox(grp, cabMat, 0.06, 0.6, 0.2, 1.12, 1.82, -0.9);
+      ebox(grp, cabMat, 0.06, 0.2, 0.6, 1.12, 1.82, -0.9);
+      ebox(grp, cabMat, 0.2, 0.6, 0.06, 0, 1.85, -2.68);
+      ebox(grp, cabMat, 0.6, 0.2, 0.06, 0, 1.85, -2.68);
+      // rear double-door seam inset + handles
+      ebox(grp, barMat, 0.05, 1.35, 0.05, 0, 1.32, -2.67);
+      ebox(grp, barMat, 0.18, 0.06, 0.05, -0.32, 1.5, -2.67);
+      ebox(grp, barMat, 0.18, 0.06, 0.05, 0.32, 1.5, -2.67);
+      ebox(grp, acc.steel, 2.3, 0.28, 0.3, 0, 0.42, 2.6);         // chunky bumpers
+      ebox(grp, acc.steel, 2.3, 0.28, 0.3, 0, 0.42, -2.7);
+      // lightbar on the cab roof: red / white / blue segments (flash logic below)
+      ebox(grp, barMat, 1.9, 0.14, 0.42, 0, 1.55, 1.5);
+      ebox(grp, redMat, 0.55, 0.2, 0.38, -0.6, 1.7, 1.5);
+      ebox(grp, bodyMat, 0.36, 0.16, 0.36, 0, 1.69, 1.5);
+      ebox(grp, bluMat, 0.55, 0.2, 0.38, 0.6, 1.7, 1.5);
+      ebox(grp, barMat, 0.14, 0.28, 0.12, -1.14, 1.32, 2.28);     // mirrors
+      ebox(grp, barMat, 0.14, 0.28, 0.12, 1.14, 1.32, 2.28);
+    }
+    // wheel arches over each axle
+    for (const ax of [-1.1, 1.1]) for (const az of [1.7, -1.7]) ebox(grp, tireMat, 0.14, 0.32, 1.15, ax, 0.92, az);
+    // four wheels (footprint unchanged — spawnEmergency's dims {2.2, 5.4} still true)
     for (let i = 0; i < 4; i++) {
       const w = new THREE.Mesh(gg.wheel, tireMat);
       w.rotation.z = Math.PI / 2;

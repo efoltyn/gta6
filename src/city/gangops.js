@@ -44,9 +44,20 @@
   const g = CBZ.game;
   const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
-  // own RNG stream so we never perturb gangs.js's deterministic spawn rng
+  // own RNG stream so we never perturb gangs.js's deterministic spawn rng.
+  // GANG_SEEDED (self-defaulted true in gangs.js): the stream derives from the
+  // WORLD seed via CBZ.seedStream("gangops") so op flavour varies with ?seed=N;
+  // flag off keeps the classic 0x5c0ef1 literal. Same draw order either way.
   let _s = 0x5c0ef1;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  let _sStream, _sInit = false;
+  function rng() {
+    if (!_sInit) {
+      _sInit = true;
+      if ((!CBZ.CONFIG || CBZ.CONFIG.GANG_SEEDED !== false) && CBZ.seedStream) _sStream = CBZ.seedStream("gangops");
+    }
+    if (_sStream) return _sStream();
+    _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff;
+  }
   function pick(a) { return a[(rng() * a.length) | 0]; }
 
   // ---- guards / small helpers --------------------------------------------

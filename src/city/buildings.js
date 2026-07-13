@@ -3140,7 +3140,13 @@
       if (gapZ != null && gapZ > lo && gapZ < hi)
         b.lbox(x, Y + WALLH - 0.18, gapZ, PWT, 0.36, gapW, PCOL, { cast: false });
     }
-    return { W: W, D: D, FHl: FHl, Y: Y, xLo: xLo, xHi: xHi, zLo: zLo, zHi: zHi, put: put, glow: glow, wallX: wallX, wallZ: wallZ };
+    // PROPS_PURPOSE anchors — seats/beds the kit's furniture sets place
+    // register sit/sleep spots for city/propuse.js (world = building-local +
+    // b.ox/b.oz; y = this floor's Y). Feature-detected no-ops when absent.
+    const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
+    function seatAt(x, z, face, kind) { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null); }
+    function bedAt(x, z, hx, hz, len, topLocalY) { if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + x, Y, abz + z, hx, hz, len, Y + topLocalY, "bed", null); }
+    return { W: W, D: D, FHl: FHl, Y: Y, xLo: xLo, xHi: xHi, zLo: zLo, zHi: zHi, put: put, glow: glow, wallX: wallX, wallZ: wallZ, seatAt: seatAt, bedAt: bedAt };
   }
 
   // ---- FURNITURE-SET VOCABULARY ------------------------------------------
@@ -3155,8 +3161,11 @@
     linen = linen || 0x6b7da0;
     const cx = rcx(r), z0 = r.z0;
     k.put(cx, 0.02, rcz(r), Math.min(r.x1 - r.x0 - 0.6, 3.2), 0.04, Math.min(r.z1 - r.z0 - 0.6, 3.0), 0x4a3f4a, 1.2);  // rug
-    k.put(cx, 0.35, z0 + 1.3, 2.0, 0.4, 1.7, 0x4a4036, 1.0);          // bed frame AGAINST wall
-    k.put(cx, 0.62, z0 + 1.3, 1.9, 0.2, 1.6, linen, 1.0);             // mattress
+    // PROPS_PURPOSE: bed ENLARGED to fit a ~1.8u character (lie axis 1.7→2.2)
+    // and registered as a SLEEP anchor (head at the z0/headboard end).
+    k.put(cx, 0.35, z0 + 1.5, 2.0, 0.4, 2.2, 0x4a4036, 1.0);          // bed frame AGAINST wall
+    if (k.put(cx, 0.62, z0 + 1.5, 1.9, 0.2, 2.1, linen, 1.0))         // mattress
+      k.bedAt(cx, z0 + 1.5, 0, -1, 2.1, 0.72);
     k.put(cx, 0.8, z0 + 0.6, 1.9, 0.22, 0.5, 0xe8e8ee, 1.0);          // pillows
     k.put(cx, 1.15, z0 + 0.2, 2.1, 0.95, 0.16, 0x55606e, 1.0);        // headboard against wall
     for (const s of [-1, 1]) { k.put(cx + s * 1.35, 0.4, z0 + 0.7, 0.5, 0.5, 0.5, 0x55452e, 0.9); }  // 2 nightstands
@@ -3167,7 +3176,10 @@
     sofa = sofa || 0x8a5a2b;
     const cx = rcx(r), cz = rcz(r);
     k.put(cx, 0.02, cz, Math.min(r.x1 - r.x0 - 0.6, 3.4), 0.04, Math.min(r.z1 - r.z0 - 0.8, 2.8), 0x4a3f55, 1.4);  // rug
-    k.put(cx, 0.45, r.z1 - 1.0, 2.6, 0.55, 0.9, sofa, 1.1);           // sofa FLOATED, back to +z, ≥0.9 walkway behind
+    if (k.put(cx, 0.45, r.z1 - 1.0, 2.6, 0.55, 0.9, sofa, 1.1)) {     // sofa FLOATED, back to +z, ≥0.9 walkway behind
+      // 3 SEAT anchors along the sofa, facing the TV wall (-z → face π)
+      for (const sx of [-0.85, 0, 0.85]) k.seatAt(cx + sx, r.z1 - 1.0, Math.PI, "sofa");
+    }
     k.put(cx, 0.88, r.z1 - 0.7, 2.6, 0.5, 0.22, sofa, 1.1);          // sofa back
     k.put(cx, 0.34, cz, 1.4, 0.34, 0.8, 0x6b4a2a, 0.9);              // coffee table
     k.put(cx, 0.4, r.z0 + 0.3, Math.min(r.x1 - r.x0 - 0.8, 3.2), 0.8, 0.4, 0x2a2f37, 0.9);  // media wall console
@@ -3184,7 +3196,8 @@
     k.put(rcx(r), 1.95, r.z1 - 0.4, r.x1 - r.x0 - 1.0, 0.7, 0.4, 0x49505b, 0.9);   // upper cabinets
     k.put(rcx(r), 0.55, cz, 1.6, 1.0, 1.0, 0x49505b, 1.0);                          // island
     k.put(rcx(r), 1.08, cz, 1.7, 0.08, 1.1, 0xc8ccd4, 1.0);                         // island top
-    for (const s of [-1, 1]) k.put(rcx(r) + s * 0.55, 0.45, cz - 0.9, 0.38, 0.9, 0.38, 0x3a2b1e, 0.9);  // 2 stools
+    for (const s of [-1, 1]) if (k.put(rcx(r) + s * 0.55, 0.45, cz - 0.9, 0.38, 0.9, 0.38, 0x3a2b1e, 0.9))  // 2 stools
+      k.seatAt(rcx(r) + s * 0.55, cz - 0.9, Math.atan2(-s * 0.55, 0.9), "stool");   // face the island
     k.put(r.x0 + 0.6, 0.55, r.z1 - 0.55, 0.6, 1.0, 0.6, 0x2a2f37, 0.9);             // range/sink block
   }
   function setBath(k, r) {
@@ -3200,21 +3213,23 @@
     const cx = rcx(r), cz = rcz(r);
     k.put(cx, 0.02, cz, Math.min(r.x1 - r.x0 - 0.6, 3.4), 0.04, Math.min(r.z1 - r.z0 - 0.6, 3.0), 0x3a2f3a, 1.4);  // rug
     k.put(cx, 0.5, cz, 1.4, 0.5, 2.4, 0x6b4a2a, 1.2);                                // table centred, ≥1.2 clearance
-    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) k.put(cx + s * 1.0, 0.45, cz + i * 0.85, 0.45, 0.9, 0.45, 0x49505b, 1.0);  // chairs
+    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) if (k.put(cx + s * 1.0, 0.45, cz + i * 0.85, 0.45, 0.9, 0.45, 0x49505b, 1.0))  // chairs
+      k.seatAt(cx + s * 1.0, cz + i * 0.85, Math.atan2(-s * 1.0, -i * 0.85), "chair");   // face the table
   }
   function setReception(k, r, accent) {
     accent = accent || 0x9fd8ee;
     const cx = rcx(r), cz = rcz(r);
     k.put(cx, 0.5, cz, 2.4, 1.0, 0.9, 0x49505b, 1.0);                                // reception desk
     k.put(cx, 1.08, cz, 2.5, 0.08, 1.0, 0xe6e8ee, 1.0);                              // desk top
-    for (const s of [-1, 1]) { k.put(cx + s * 1.8, 0.42, r.z1 - 0.9, 0.7, 0.4, 0.7, 0x2a2f37, 0.9); k.put(cx + s * 1.8, 0.85, r.z1 - 0.6, 0.7, 0.5, 0.16, 0x2a2f37, 0.9); }  // 2 waiting chairs
+    for (const s of [-1, 1]) { if (k.put(cx + s * 1.8, 0.42, r.z1 - 0.9, 0.7, 0.4, 0.7, 0x2a2f37, 0.9)) k.seatAt(cx + s * 1.8, r.z1 - 0.9, Math.PI, "waiting"); k.put(cx + s * 1.8, 0.85, r.z1 - 0.6, 0.7, 0.5, 0.16, 0x2a2f37, 0.9); }  // 2 waiting chairs (face the desk, -z)
     k.glow(cx, 2.2, r.z0 + 0.18, 2.6, 0.9, 0.06, accent, 0.4, 0.9);                  // logo wall
   }
   function setMeeting(k, r) {
     const cx = rcx(r), cz = rcz(r);
     // a glass-wall conference room: table + chairs + a wall screen
     k.put(cx, 0.5, cz, Math.min(r.x1 - r.x0 - 1.6, 2.6), 0.5, Math.min(r.z1 - r.z0 - 1.6, 1.4), 0x3a2b1e, 1.0);  // table
-    for (const s of [-1, 1]) for (let i = -1; i <= 1; i++) k.put(cx + i * 0.9, 0.45, cz + s * 0.95, 0.42, 0.9, 0.42, 0x2a2f37, 0.9);  // chairs
+    for (const s of [-1, 1]) for (let i = -1; i <= 1; i++) if (k.put(cx + i * 0.9, 0.45, cz + s * 0.95, 0.42, 0.9, 0.42, 0x2a2f37, 0.9))  // chairs
+      k.seatAt(cx + i * 0.9, cz + s * 0.95, Math.atan2(-i * 0.9, -s * 0.95), "chair");   // face the table
     k.put(cx, 1.5, r.z0 + 0.2, Math.min(r.x1 - r.x0 - 1.4, 2.2), 1.1, 0.1, 0x14171c, 0.9);  // wall screen
     k.glow(cx, 1.5, r.z0 + 0.15, Math.min(r.x1 - r.x0 - 1.8, 1.8), 0.8, 0.05, 0x39516a, 0.4, 0.9);
   }
@@ -3224,7 +3239,8 @@
     k.put(cx, 1.08, r.z1 - 0.5, Math.min(r.x1 - r.x0 - 0.9, 2.5), 0.08, 0.8, 0xe6e8ee, 0.9); // counter top
     k.put(r.x0 + 0.7, 1.0, r.z1 - 0.5, 0.8, 1.8, 0.8, 0xd8dde6, 0.9);                // fridge
     k.put(cx, 0.45, cz, 1.1, 0.5, 1.1, 0x6b4a2a, 0.9);                               // small table
-    for (const s of [-1, 1]) k.put(cx + s * 0.9, 0.42, cz, 0.42, 0.85, 0.42, 0x2a2f37, 0.9);  // chairs
+    for (const s of [-1, 1]) if (k.put(cx + s * 0.9, 0.42, cz, 0.42, 0.85, 0.42, 0x2a2f37, 0.9))  // chairs
+      k.seatAt(cx + s * 0.9, cz, -s * Math.PI / 2, "chair");   // face the little table
   }
   function setBackroom(k, r) {
     // tall shelving runs + crates: a stockroom that reads as the back of house
@@ -3271,6 +3287,11 @@
     function decor(p, y, across, h, deep, col) { return box(p, y, across, h, deep, col, { cast: false }); }
     function solidBox(p, y, across, h, deep, col) { return box(p, y, across, h, deep, col, { solid: true, cast: false }); }
     function glow(p, y, across, h, deep, col, ei) { return box(p, y, across, h, deep, col, { emissive: col, ei: ei || 0.5, cast: false }); }
+    // PROPS_PURPOSE anchors for the seats/beds this dresser places (ground
+    // floor; world = building-local + b.ox/b.oz). Feature-detected no-ops.
+    const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
+    function seatP(p, face, kind) { if (p && CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + p.x, 0, abz + p.z, face, kind, null); }
+    function bedP(p, hx, hz, len, topY) { if (p && CBZ.propRegisterBed) CBZ.propRegisterBed(abx + p.x, 0, abz + p.z, hx, hz, len, topY, "bed", null); }
 
     // ---- always-on dressing: floor mat + lit ceiling fixture ----
     const matP = pt(2.4, 0, 0.5);                  // just inside the doorway
@@ -3354,7 +3375,7 @@
       // a couple of customer STOOLS / a waiting CHAIR near the entrance
       for (const side of [-1, 1]) {
         const s = pt(3.4, side * (halfTan - 1.0), 0.6);
-        if (s) { decor(s, 0.45, 0.5, 0.9, 0.5, 0x2a2f37); decor(s, 0.92, 0.55, 0.1, 0.55, accent || 0x55606e); }
+        if (s) { decor(s, 0.45, 0.5, 0.9, 0.5, 0x2a2f37); decor(s, 0.92, 0.55, 0.1, 0.55, accent || 0x55606e); seatP(s, Math.atan2(-side * tx, -side * tz), "stool"); }  // face the room
       }
     }
     baseClutter(kindAccent(kind));
@@ -3444,7 +3465,7 @@
         const np = pt(2 * halfIn - 2.0, 0, 0.6);
         if (np) glow(np, 2.3, along ? 0.06 : halfTan * 1.4, 0.14, along ? halfTan * 1.4 : 0.06, neon, 0.95);
         // a row of bar stools facing the back counter
-        for (let i = -1; i <= 1; i++) { const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (p) { decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); } }
+        for (let i = -1; i <= 1; i++) { const p = pt(2 * halfIn - 4.4, i * 1.6, 0.6); if (p) { decor(p, 0.5, 0.5, 1.0, 0.5, 0x2a2f37); decor(p, 1.02, 0.55, 0.12, 0.55, 0x6b4a2a); seatP(p, Math.atan2(inx, inz), "stool"); } }
         if (kind === "bar") {
           // ===== THE VELVET CLUB — a real VIP nightclub interior =====
           // a glowing multi-colour DANCE FLOOR mid-room, VIP velvet BOOTHS down
@@ -3473,6 +3494,7 @@
             if (!bp) continue;
             decor(bp, 0.5, 2.0, 0.9, 0.7, 0x6a1622);                          // velvet booth back+seat
             decor(bp, 0.95, 2.0, 0.16, 0.7, 0x8a1f2b);                        // padded top trim
+            seatP(bp, Math.atan2(-side * tx, -side * tz), "booth");           // face the cocktail table
             const tp = pt(5.4 + i * 3.2, side * (halfTan - 2.3), 0.6);
             if (tp) { decor(tp, 0.55, 0.7, 0.1, 0.7, 0x1c1f24); glow({ x: tp.x, z: tp.z }, 0.62, 0.5, 0.05, 0.5, 0xffd166, 0.6); }   // lit cocktail table
           }
@@ -3516,7 +3538,7 @@
               decor(p, 0.45, 1.0, 0.1, 0.7, 0x9aa0a8); decor(p, 0.22, 0.6, 0.44, 0.06, 0x6b4a2a); decor(p, 0.55, 1.0, 0.08, 0.7, 0xe8e8ee);  // top
               // a red vinyl bench on the wall side of each booth
               const bp = pt(5.0 + i * 3.2, side * (halfTan - 0.7), 0.8);
-              if (bp) { decor(bp, 0.45, 1.2, 0.5, 0.4, 0xb23b3b); decor(bp, 0.95, 1.2, 0.5, 0.16, 0xc14b4b); }
+              if (bp) { decor(bp, 0.45, 1.2, 0.5, 0.4, 0xb23b3b); decor(bp, 0.95, 1.2, 0.5, 0.16, 0xc14b4b); seatP(bp, Math.atan2(-side * tx, -side * tz), "booth"); }  // face the booth table
             }
           }
         }
@@ -3604,6 +3626,7 @@
             if (!p) continue;
             decor(p, 0.45, 0.7, 0.9, 0.7, 0x32363d);            // chair base
             decor(p, 1.0, 0.6, 0.5, 0.6, 0x6b1f1f);            // seat
+            seatP(p, Math.atan2(side * tx, side * tz), "chair"); // face the mirror
             const mp = pt(6.0, side * (halfTan - 0.5), 0.9); if (mp) decor(mp, 1.4, along ? 0.04 : 1.4, 1.8, along ? 1.4 : 0.04, 0xb9e6f7);
           }
         }
@@ -3612,7 +3635,12 @@
       case "drugs": {
         // trap house: a beat couch, a low table with baggies, stash shelves
         const cp = pt(2 * halfIn - 4.0, halfTan - 1.7, 0.9);
-        if (cp) { decor(cp, 0.4, along ? 0.9 : 2.4, 0.5, along ? 2.4 : 0.9, 0x4a423a); decor(cp, 0.75, along ? 0.9 : 2.4, 0.4, along ? 2.4 : 0.9, 0x3a352e); }
+        if (cp) {
+          decor(cp, 0.4, along ? 0.9 : 2.4, 0.5, along ? 2.4 : 0.9, 0x4a423a); decor(cp, 0.75, along ? 0.9 : 2.4, 0.4, along ? 2.4 : 0.9, 0x3a352e);
+          // 2 SEATS along the couch (its long axis runs on the IN axis), both
+          // facing the room centre (-tangent side).
+          for (const e of [-0.6, 0.6]) seatP({ x: cp.x + inx * e, z: cp.z + inz * e }, Math.atan2(-tx, -tz), "couch");
+        }
         const tp = pt(2 * halfIn - 6.0, halfTan - 2.4, 0.9);
         if (tp) { decor(tp, 0.4, 1.2, 0.1, 0.8, 0x2a2f37); stockRow({ p: tp, top: 0.45, across: 1.0 }, [0x4caf6e, 0xffffff, 0x4caf6e], 4, 0.14, 0.1); }
         wallShelves({ body: 0x3a352e, top: 0x4a423a, h: 1.6, count: 2 });
@@ -3651,6 +3679,7 @@
           if (!p) continue;
           decor(p, 0.45, 1.0, 0.16, 2.0, 0xe8e8ee);          // bed
           decor(p, 0.75, 1.0, 0.25, 0.5, 0xbfd8e6);          // pillow end
+          bedP(p, inx, inz, 2.0, 0.53);                      // SLEEP anchor (lie axis = IN)
           const cp = pt(5.6 + i * 3.2, -(halfTan - 0.6), 0.9); if (cp) decor(cp, 1.4, along ? 0.05 : 2.2, 2.0, along ? 2.2 : 0.05, 0xbfe6d8);  // curtain
         }
         wallShelves({ body: 0xd8dde2, top: 0xffffff, h: 1.6, count: 2 });
@@ -3916,6 +3945,10 @@
     function glowAt(x, y, z, w, h, d, color, ei, pad) {
       if (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad)) b.lbox(x, Y + y, z, w, h, d, color, { emissive: color, ei: ei || 0.5, cast: false });
     }
+    // PROPS_PURPOSE anchors (world = local + b.ox/b.oz, y = this floor)
+    const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
+    function seatH(x, z, face, kind) { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null); }
+    function bedH(x, z, hx, hz, len, topLocalY) { if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + x, Y, abz + z, hx, hz, len, Y + topLocalY, "bed", null); }
     // emissive CEILING FIXTURE (warm) — homes read lit. Higher tiers add a second
     // back-of-room fixture so the bigger spaces aren't dark in the corners.
     b.lbox(0, Y + FHl - 0.3, 0, 2.0, 0.1, 0.5, 0xffd9a0, { emissive: 0xffd9a0, ei: 0.42, cast: false });
@@ -3978,16 +4011,20 @@
     // PRIMARY BED in the back corner (base + mattress + pillow). Linen colour +
     // a headboard richen with tier.
     const linen = [0x6b7da0, 0x6b7da0, 0x5a6f9a, 0x7a6f8c, 0x8a6f9c][Math.min(4, t)];
-    decor(-W / 2 + 2.0, 0.35, -D / 2 + 2.2, 2.0, 0.4, 1.3, 0x4a4036, 1.1);   // frame
-    decor(-W / 2 + 2.0, 0.62, -D / 2 + 2.2, 1.9, 0.2, 1.25, linen, 1.1);     // mattress
+    // PROPS_PURPOSE: bed ENLARGED (lie axis 1.3→2.2 — it was far too short for
+    // a 1.8u character) + registered as a SLEEP anchor, head at the -z pillow end.
+    decor(-W / 2 + 2.0, 0.35, -D / 2 + 2.6, 2.0, 0.4, 2.2, 0x4a4036, 1.1);   // frame
+    if (decor(-W / 2 + 2.0, 0.62, -D / 2 + 2.6, 1.9, 0.2, 2.1, linen, 1.1))  // mattress
+      bedH(-W / 2 + 2.0, -D / 2 + 2.6, 0, -1, 2.1, 0.72);
     decor(-W / 2 + 2.0, 0.8, -D / 2 + 1.7, 1.9, 0.22, 0.5, 0xe8e8ee, 1.1);   // pillow
-    if (t >= 2) decor(-W / 2 + 2.0, 1.1, -D / 2 + 2.8, 2.0, 0.9, 0.16, [0x55606e, 0x6b4a2a, 0x5a1622][Math.min(2, t - 2)], 1.1);  // headboard
+    if (t >= 2) decor(-W / 2 + 2.0, 1.1, -D / 2 + 1.4, 2.0, 0.9, 0.16, [0x55606e, 0x6b4a2a, 0x5a1622][Math.min(2, t - 2)], 1.1);  // headboard (head end)
     if (t >= 3) { decor(-W / 2 + 0.9, 0.45, -D / 2 + 2.2, 0.5, 0.5, 0.5, 0x55452e, 1.1); glowAt(-W / 2 + 0.9, 0.85, -D / 2 + 2.2, 0.4, 0.16, 0.4, 0xffe6b0, 0.5, 1.1); }  // nightstand + lamp
-    // a SECOND bed for multi-bed tiers
+    // a SECOND bed for multi-bed tiers (same enlargement, head at the +z wall)
     if (beds >= 2) {
-      decor(-W / 2 + 2.0, 0.35, D / 2 - 2.4, 1.8, 0.4, 1.2, 0x4a4036, 1.1);
-      decor(-W / 2 + 2.0, 0.62, D / 2 - 2.4, 1.7, 0.2, 1.15, 0x7a6f8c, 1.1);
-      decor(-W / 2 + 2.0, 0.8, D / 2 - 1.95, 1.7, 0.22, 0.5, 0xe8e8ee, 1.1);
+      decor(-W / 2 + 2.0, 0.35, D / 2 - 2.6, 1.8, 0.4, 2.2, 0x4a4036, 1.1);
+      if (decor(-W / 2 + 2.0, 0.62, D / 2 - 2.6, 1.7, 0.2, 2.1, 0x7a6f8c, 1.1))
+        bedH(-W / 2 + 2.0, D / 2 - 2.6, 0, 1, 2.1, 0.72);
+      decor(-W / 2 + 2.0, 0.8, D / 2 - 1.7, 1.7, 0.22, 0.5, 0xe8e8ee, 1.1);
     }
 
     // KITCHEN counter along the back wall (every tier gets a real kitchen). Higher
@@ -3998,7 +4035,8 @@
 
     // ---- a STUDIO (t1) keeps it sparse: a single chair + a small rug + a lamp ----
     if (t <= 1) {
-      decor(W / 2 - 2.4, 0.45, -D / 2 + 2.6, 0.9, 0.5, 0.9, 0x6b5a4a, 1.0);          // armchair seat
+      if (decor(W / 2 - 2.4, 0.45, -D / 2 + 2.6, 0.9, 0.5, 0.9, 0x6b5a4a, 1.0))      // armchair seat
+        seatH(W / 2 - 2.4, -D / 2 + 2.6, Math.PI, "chair");                          // back at +z → faces -z
       decor(W / 2 - 2.4, 0.95, -D / 2 + 3.0, 0.9, 0.6, 0.16, 0x6b5a4a, 1.0);         // chair back
       decor(W / 2 - 2.0, 0.02, -D / 2 + 2.8, 2.2, 0.04, 2.0, 0x5a4a4a, 1.2);         // small rug
       decor(W / 2 - 1.6, 0.7, -D / 2 + 1.4, 0.12, 1.4, 0.12, 0x2a2f37, 0.7);         // lamp pole
@@ -4010,10 +4048,15 @@
     // ---- t2+ : a full LIVING set (couch + coffee table + TV on a stand + rug) ----
     const sofaC = t >= 4 ? 0x5a4f6a : 0x8a5a2b;
     if (t >= 4) { // aerie gets an L-sectional
-      decor(W / 2 - 2.6, 0.45, -D / 2 + 2.6, 2.8, 0.6, 1.0, sofaC, 1.2);
-      decor(W / 2 - 1.4, 0.45, -D / 2 + 4.0, 1.0, 0.6, 2.4, sofaC, 1.2);
+      if (decor(W / 2 - 2.6, 0.45, -D / 2 + 2.6, 2.8, 0.6, 1.0, sofaC, 1.2))
+        for (const sx of [-0.8, 0.8]) seatH(W / 2 - 2.6 + sx, -D / 2 + 2.6, 0, "sofa");   // main run faces +z (the room)
+      if (decor(W / 2 - 1.4, 0.45, -D / 2 + 4.0, 1.0, 0.6, 2.4, sofaC, 1.2))
+        seatH(W / 2 - 1.4, -D / 2 + 4.0, -Math.PI / 2, "sofa");                          // return faces -x
     } else {
-      decor(W / 2 - 2.4, 0.45, -D / 2 + 2.4, 2.4, 0.6, 1.0, sofaC, 1.2);             // couch
+      if (decor(W / 2 - 2.4, 0.45, -D / 2 + 2.4, 2.4, 0.6, 1.0, sofaC, 1.2)) {           // couch
+        // 2 SEATS facing the TV stand at (W/2-1.6, 0)
+        for (const sx of [-0.7, 0.7]) seatH(W / 2 - 2.4 + sx, -D / 2 + 2.4, Math.atan2((W / 2 - 1.6) - (W / 2 - 2.4 + sx), 0 - (-D / 2 + 2.4)), "sofa");
+      }
     }
     decor(0, 0.4, 0, 1.4, 0.5, 0.9, t >= 4 ? 0xcaa64a : 0x9aa0a8, 1.0);             // coffee table (gold on aerie)
     decor(W / 2 - 1.4, 0.02, -D / 2 + 2.6, 3.0, 0.04, 2.6, [0,0,0x5a4a6a,0x4a3f55,0x4a3550][Math.min(4, t)], 1.4);  // rug
@@ -4038,7 +4081,8 @@
     // ---- t3+ : a DINING set + a second plant + extra art for the lived-in feel ----
     if (t >= 3) {
       decor(0, 0.5, cz - 0.4, 1.2, 0.5, 2.6, 0x6b4a2a, 1.1);                          // dining table
-      for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) decor(0 + s * 0.95, 0.45, cz - 0.4 + i * 0.9, 0.45, 0.9, 0.45, 0x49505b, 1.1);  // chairs
+      for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) if (decor(0 + s * 0.95, 0.45, cz - 0.4 + i * 0.9, 0.45, 0.9, 0.45, 0x49505b, 1.1))  // chairs
+        seatH(s * 0.95, cz - 0.4 + i * 0.9, Math.atan2(-s * 0.95, -i * 0.9), "chair");   // face the table
       decor(-W / 2 + 2.0, 0.4, D / 2 - 2.2, 0.8, 0.8, 0.8, 0x3f9a4f, 0.9);            // second planter
       glowAt(-W / 2 + 0.22, 2.0, 0, 0.05, 1.2, 2.0, 0xc792ea, 0.18, 0.4);            // side-wall art column
     }
@@ -4114,16 +4158,23 @@
     }
 
     // ---- OPEN-PLAN FALLBACK (tiny plates) — the original studio dressing -------
-    const bx = W / 2 - 2.0, bz = -D / 2 + 2.2;
-    if (put(bx, 0.35, bz, 1.9, 0.4, 1.3, 0x4a4036, 1.1)) {
-      put(bx, 0.62, bz, 1.8, 0.2, 1.25, linen, 1.1);
-      put(bx, 0.8, bz - 0.45, 1.8, 0.2, 0.5, 0xe8e8ee, 1.1);
+    // PROPS_PURPOSE: bed enlarged (lie axis 1.3→2.2) + registered sleepable.
+    const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
+    const bx = W / 2 - 2.0, bz = -D / 2 + 2.6;
+    if (put(bx, 0.35, bz, 1.9, 0.4, 2.2, 0x4a4036, 1.1)) {
+      if (put(bx, 0.62, bz, 1.8, 0.2, 2.1, linen, 1.1) && CBZ.propRegisterBed)
+        CBZ.propRegisterBed(abx + bx, Y, abz + bz, 0, -1, 2.1, Y + 0.72, "bed", null);   // head at the -z pillow end
+      put(bx, 0.8, bz - 0.75, 1.8, 0.2, 0.5, 0xe8e8ee, 1.1);
     }
     const kw = Math.min(W * 0.32, 3.6), kz = D / 2 - 1.6;
     if (put(W / 2 - 2.6, 0.5, kz, kw, 1.0, 0.9, 0x55606e, 1.0))
       put(W / 2 - 2.6, 1.06, kz, kw + 0.1, 0.08, 1.0, 0xe6e8ee, 1.0);
     put(1.2, 0.02, 0.2, 3.0, 0.04, 2.4, 0x4a3f55, 1.6);
-    if (put(1.2, 0.42, 1.0, 2.2, 0.55, 0.9, sofa, 1.2)) put(1.2, 0.85, 1.35, 2.2, 0.5, 0.22, sofa, 1.2);
+    if (put(1.2, 0.42, 1.0, 2.2, 0.55, 0.9, sofa, 1.2)) {
+      put(1.2, 0.85, 1.35, 2.2, 0.5, 0.22, sofa, 1.2);
+      if (CBZ.propRegisterSeat) for (const sx of [-0.65, 0.65])          // couch back at +z → faces -z
+        CBZ.propRegisterSeat(abx + 1.2 + sx, Y, abz + 1.0, Math.PI, "sofa", null);
+    }
     put(1.2, 0.3, -0.5, 1.1, 0.32, 0.7, 0x6b4a2a, 0.9);
     if (put(W / 2 - 1.2, 0.7, -0.6, 0.12, 1.4, 0.12, 0x2a2f37, 0.7))
       put(W / 2 - 1.2, 1.5, -0.6, 0.42, 0.3, 0.42, 0xffe6b0, 0.7);
@@ -4272,6 +4323,9 @@
     const Y = baseY || 0;
     const lb = (x, y, z, w, h, d, c, o) => b.lbox(x, Y + y, z, w, h, d, c, o || { cast: false });
     const glow = (x, y, z, w, h, d, c, ei) => b.lbox(x, Y + y, z, w, h, d, c, { emissive: c, ei: ei || 0.5, cast: false });
+    // PROPS_PURPOSE anchors (world = local + b.ox/b.oz; y = the penthouse floor)
+    const abx = b.ox != null ? b.ox : 0, abz = b.oz != null ? b.oz : 0;
+    const seatPH = (x, z, face, kind) => { if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(abx + x, Y, abz + z, face, kind, null); };
     const MARBLE = 0xe6e8ee, GOLD = 0xcaa64a, DARKWOOD = 0x3a2b1e, VELVET = 0x5a1622, STONE = 0x9aa0a8;
     // ---- a polished MARBLE floor slab covering the whole penthouse ----
     lb(0, 0.02, 0, W - 1.4, 0.04, D - 1.4, 0xc8ccd4);
@@ -4283,6 +4337,9 @@
     lb(-W / 2 + 3.0, 0.08, -D / 2 + 3.2, 6.2, 0.16, 5.4, MARBLE);                   // plinth
     lb(-W / 2 + 3.0, 0.55, -D / 2 + 3.2, 3.0, 0.5, 2.4, DARKWOOD);                  // king frame
     lb(-W / 2 + 3.0, 0.9, -D / 2 + 3.2, 2.8, 0.26, 2.3, 0x6b7da0);                  // mattress
+    // PROPS_PURPOSE: the king is already character-sized — register it
+    // sleepable (head at the -z pillow end, mattress top 1.03).
+    if (CBZ.propRegisterBed) CBZ.propRegisterBed(abx + (-W / 2 + 3.0), Y, abz + (-D / 2 + 3.2), 0, -1, 2.3, Y + 1.03, "bed", null);
     lb(-W / 2 + 3.0, 1.12, -D / 2 + 2.2, 2.8, 0.3, 0.6, 0xe8e8ee);                  // pillows
     lb(-W / 2 + 3.0, 2.0, -D / 2 + 4.5, 3.2, 1.6, 0.2, VELVET);                     // velvet headboard wall
     for (const s of [-1, 1]) { lb(-W / 2 + 3.0 + s * 1.7, 1.4, -D / 2 + 2.0, 0.12, 2.6, 0.12, GOLD); }  // four-poster posts (front)
@@ -4290,14 +4347,15 @@
     // ---- SUNKEN LOUNGE: wraparound sectional facing a wall-spanning media wall ----
     lb(0, 0.02, D / 2 - 5.0, 8.5, 0.04, 5.0, 0x4a3550);                             // luxe rug
     lb(0, 0.5, D / 2 - 3.2, 7.0, 0.65, 1.2, 0x6b2230);                              // sofa back run (velvet)
-    for (const s of [-1, 1]) lb(s * 3.4, 0.5, D / 2 - 4.6, 1.2, 0.65, 3.0, 0x6b2230);  // sectional returns
+    for (const sx of [-2.2, 0, 2.2]) seatPH(sx, D / 2 - 3.2, 0, "sofa");            // main run faces the TV (+z)
+    for (const s of [-1, 1]) { lb(s * 3.4, 0.5, D / 2 - 4.6, 1.2, 0.65, 3.0, 0x6b2230); seatPH(s * 3.4, D / 2 - 4.6, -s * Math.PI / 2, "sofa"); }  // sectional returns face centre
     lb(0, 0.42, D / 2 - 5.6, 2.6, 0.42, 1.1, GOLD);                                 // gold coffee table
     lb(0, 1.5, D / 2 - 0.3, 5.0, 2.2, 0.12, 0x101319);                             // wall-spanning TV
     glow(0, 1.5, D / 2 - 0.38, 4.6, 1.8, 0.05, 0x39516a, 0.45);                    // screen glow
     // ---- MARBLE KITCHEN: island w/ waterfall counter + stools + back run ----
     lb(W / 2 - 3.4, 0.55, 0.4, 2.2, 1.0, 4.6, STONE);                              // island body
     lb(W / 2 - 3.4, 1.08, 0.4, 2.4, 0.1, 4.9, MARBLE);                             // waterfall worktop
-    for (let i = -1; i <= 1; i++) { const sz = 0.4 + i * 1.4; lb(W / 2 - 5.0, 0.45, sz, 0.5, 0.9, 0.5, DARKWOOD); glow(W / 2 - 5.0, 0.92, sz, 0.42, 0.1, 0.42, GOLD, 0.3); }  // bar stools
+    for (let i = -1; i <= 1; i++) { const sz = 0.4 + i * 1.4; lb(W / 2 - 5.0, 0.45, sz, 0.5, 0.9, 0.5, DARKWOOD); glow(W / 2 - 5.0, 0.92, sz, 0.42, 0.1, 0.42, GOLD, 0.3); seatPH(W / 2 - 5.0, sz, Math.PI / 2, "stool"); }  // bar stools face the island (+x)
     lb(W / 2 - 1.3, 0.6, -D / 2 + 3.4, 1.0, 1.1, 4.4, 0x49505b);                   // back counter run
     glow(W / 2 - 1.0, 1.7, -D / 2 + 3.4, 0.05, 0.9, 3.2, 0x9fe0ff, 0.3);           // backsplash glow
     // ---- a HOME BAR with a backlit bottle wall in the far corner ----
@@ -4307,7 +4365,7 @@
     // ---- a long DINING table with chairs ----
     lb(W / 2 - 7.5, 0.5, D / 2 - 4.5, 1.4, 0.5, 3.8, DARKWOOD);
     glow(W / 2 - 7.5, 0.78, D / 2 - 4.5, 0.9, 0.04, 3.2, 0xffe6c0, 0.18);          // candlelit runner
-    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) lb(W / 2 - 7.5 + s * 1.1, 0.45, D / 2 - 4.5 + i * 1.2, 0.5, 0.9, 0.5, VELVET);  // chairs
+    for (let i = -1; i <= 1; i++) for (const s of [-1, 1]) { lb(W / 2 - 7.5 + s * 1.1, 0.45, D / 2 - 4.5 + i * 1.2, 0.5, 0.9, 0.5, VELVET); seatPH(W / 2 - 7.5 + s * 1.1, D / 2 - 4.5 + i * 1.2, Math.atan2(-s * 1.1, -i * 1.2), "chair"); }  // chairs face the table
     // ---- a GRAND PIANO near the lounge ----
     lb(-W / 2 + 3.0, 0.45, D / 2 - 4.0, 2.4, 0.5, 1.6, 0x14171c);                  // body
     lb(-W / 2 + 3.0, 0.78, D / 2 - 3.2, 2.4, 0.08, 0.4, 0x14171c);                 // open lid hint
@@ -4714,17 +4772,23 @@
       const s = 0.3 + rng() * 0.6;
       b.lbox(x, s / 2, z, s, s * (0.4 + rng()), s, [0x2f2c28, 0x3a352e, 0x444038][(rng() * 3) | 0], { cast: false });
     }
-    // a busted-out couch
+    // a busted-out couch — still a SEAT (a squat's furniture works, barely)
     if (!b.clearFloorPoint || b.clearFloorPoint(-b.w / 2 + 2.2, b.d / 2 - 2.4, 1.2)) {
       b.lbox(-b.w / 2 + 2.2, 0.4, b.d / 2 - 2.4, 2.0, 0.5, 0.9, 0x4a423a, { cast: false });
+      if (CBZ.propRegisterSeat) {
+        const scx = (b.ox || 0) + (-b.w / 2 + 2.2), scz = (b.oz || 0) + (b.d / 2 - 2.4);
+        for (const sx of [-0.55, 0.55]) CBZ.propRegisterSeat(scx + sx, 0, scz, Math.atan2(b.w / 2 - 2.2, -(b.d / 2 - 2.4)), "couch", null);  // face the room centre
+      }
     }
     const clear = (x, z, pad) => (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad == null ? 1.0 : pad));
-    // a filthy MATTRESS PILE in a corner (a squatter's bed)
+    // a filthy MATTRESS PILE in a corner (a squatter's bed) — PROPS_PURPOSE:
+    // sized up so a character actually fits (1.9→2.0 × 1.1→1.2) + sleepable.
     {
       const mx = b.w / 2 - 2.2, mz = -b.d / 2 + 2.4;
       if (clear(mx, mz, 1.1)) {
-        b.lbox(mx, 0.18, mz, 1.9, 0.3, 1.1, 0x6a5f50, { cast: false });           // mattress
+        b.lbox(mx, 0.18, mz, 2.0, 0.3, 1.2, 0x6a5f50, { cast: false });           // mattress
         b.lbox(mx + 0.3, 0.42, mz - 0.2, 1.2, 0.2, 0.8, 0x5a5246, { cast: false }); // crumpled blanket
+        if (CBZ.propRegisterBed) CBZ.propRegisterBed((b.ox || 0) + mx, 0, (b.oz || 0) + mz, 1, 0, 2.0, 0.33, "bedroll", null);  // head at the +x wall end
       }
     }
     // an OIL-DRUM FIRE: a rusty drum with an emissive ember glow + flame cube
@@ -4899,6 +4963,9 @@
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;
     const placed = [], abandonedLots = [], homeLots = [];
+    // PROPS_PURPOSE: fresh world → drop every seat/bed/poster anchor from the
+    // old one; the furnishing below re-registers them in placement lockstep.
+    if (CBZ.propPurposeReset) CBZ.propPurposeReset();
 
     // ---- DISTRICT HEIGHT FIELD --------------------------------------------
     // WHY: the skyline should TELL you where the money is — the core towers

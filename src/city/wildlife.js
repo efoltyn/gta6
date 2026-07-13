@@ -46,6 +46,16 @@
 
   const mat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
+  // ---- WILDLIFE_LIVE — the one-line revert for the living-wildlife overhaul.
+  // ON (default): animal groups are tagged userData.dynamic so the static
+  // batcher (core/batch.js) and matrix freezer (core/staticfreeze.js) leave
+  // them alone (without the tag the build-time sweep at city/mode.js merges
+  // their meshes into static deco and freezes their matrices — the "statues
+  // that can't be shot" bug), plus gaits, grazing, stalking, gunshot panic,
+  // hit flinches and the animated death topple. OFF: exactly the old build.
+  if (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_LIVE == null) CBZ.CONFIG.WILDLIFE_LIVE = true;
+  function LIVE() { return !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_LIVE === false); }
+
   // ---- tuning -----------------------------------------------------------
   // NO POPULATION BUDGET. Every species spawns its NATURAL population (packs ×
   // real herd sizes). Render cost is governed by the game's one true knob —
@@ -167,6 +177,15 @@
     // dozens of animals scattered across the map only draw when actually on
     // screen — never force ~1000 wildlife meshes to render every frame.
     grp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
+    // CRITICAL (the "statues" bug): animals spawn DURING buildCity(), i.e.
+    // BEFORE city/mode.js runs CBZ.batchStaticUnder + CBZ.freezeStaticUnder
+    // over the same root. Without this tag the batcher merges every animal
+    // mesh into static per-tile deco (originals removed!) and the freezer
+    // stamps matrixAutoUpdate=false on the group — the sim keeps moving the
+    // (now invisible) hitbox while a frozen statue stays behind, so animals
+    // neither move nor line up with the player's crosshair. userData.dynamic
+    // is the batcher's & freezer's own "leave this subtree alive" contract.
+    if (LIVE()) grp.userData.dynamic = true;
     root.add(grp);
     const a = {
       species: sp, kind: "animal", animal: true,
@@ -175,7 +194,9 @@
       heading: rng() * 6.283, turnT: rng() * 3, spd: sp.spd || 1.4,
       state: "wander", alarm: 0, home: { x: x, z: z },
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
+      stateT: 0,                          // seconds left in the current timed behavior
     };
+    if (LIVE()) buildGaitRig(a);          // discover legs/head for the gait & graze reads
     // snakes carry a segment chain the engine undulates (slither) — cache the
     // parts the build() registered on userData so the anim loop is allocation-free.
     if (sp.snake && grp.userData) {
@@ -206,6 +227,211 @@
   }
 
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
+
+  // ============================================================
+  //  BEHAVIOR CLASSES — every species maps to ONE class that fixes its gait
+  //  read and its temperament numbers. Derived (not hand-listed) so new
+  //  species auto-classify: trophic role + size + the creature_combat style.
+  //    stepFreq  rad of leg-swing per unit walked (before leg-height scaling)
+  //    bob       body bounce amplitude while moving (× scale)
+  //    hop       flee-bound hop height (× scale) — cervids/rabbits BOUND
+  //    sway      slow roll while walking (bears LUMBER)
+  //    grazeP    chance to stop & graze when a wander leg ends
+  //    stalker   big cats: long crouched approach, then a burst charge
+  // ============================================================
+  //  grazeT [lo,hi]s   how long a graze stop lasts
+  //  wanderM/fleeM     speed multipliers on sp.spd
+  //  fleeT             s of committed flight after the threat is gone
+  //  hearR             u — how far away a GUNSHOT spooks/alerts this class
+  //  aggro             u — a dangerous animal this close attacks (danger>=0.5)
+  //  giveUp            u — a charging animal further than this quits
+  //  atkM              charge speed multiplier
+  //  stalk/burst/crouch  big cats: creep-in trigger, pounce-charge trigger,
+  //                      crouch speed multiplier
+  const CLASSES = {
+    herd_prey:  { stepFreq: 2.6, bob: 0.05, hop: 0.16, sway: 0,    grazeP: 0.60, grazeT: [3, 7],   wanderM: 0.6, fleeM: 2.6, fleeT: 5,   hearR: 45 },
+    small_game: { stepFreq: 4.2, bob: 0.04, hop: 0.24, sway: 0,    grazeP: 0.50, grazeT: [1.5, 4], wanderM: 0.7, fleeM: 3.0, fleeT: 3.5, hearR: 55 },
+    farm:       { stepFreq: 2.4, bob: 0.04, hop: 0,    sway: 0.03, grazeP: 0.70, grazeT: [4, 9],   wanderM: 0.4, fleeM: 1.8, fleeT: 3,   hearR: 30 },
+    big_neutral:{ stepFreq: 2.0, bob: 0.05, hop: 0,    sway: 0.05, grazeP: 0.60, grazeT: [4, 8],   wanderM: 0.5, fleeM: 1.6, fleeT: 2,   hearR: 38, aggro: 16, giveUp: 45, atkM: 2.2 },
+    lumberer:   { stepFreq: 2.1, bob: 0.07, hop: 0,    sway: 0.10, grazeP: 0.40, grazeT: [4, 8],   wanderM: 0.5, fleeM: 1.8, fleeT: 2,   hearR: 35, aggro: 20, giveUp: 40, atkM: 2.0 },
+    stalker:    { stepFreq: 2.8, bob: 0.05, hop: 0,    sway: 0,    grazeP: 0.30, grazeT: [3, 6],   wanderM: 0.5, fleeM: 2.0, fleeT: 3,   hearR: 60, aggro: 12, giveUp: 60, atkM: 2.2, stalk: 55, burst: 18, crouch: 0.35 },
+    pack:       { stepFreq: 3.2, bob: 0.05, hop: 0.08, sway: 0,    grazeP: 0.35, grazeT: [3, 6],   wanderM: 0.6, fleeM: 2.0, fleeT: 3,   hearR: 55, aggro: 30, giveUp: 50, atkM: 2.2 },
+  };
+  function classify(sp) {
+    if (sp._bclass) return sp._bclass;
+    let c;
+    const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : "bite";
+    const danger = sp.danger || 0;
+    if (style === "pounce" && danger >= 0.4) c = CLASSES.stalker;
+    else if (style === "maul" && danger >= 0.4) c = /bear/.test(sp.id) ? CLASSES.lumberer : CLASSES.pack;
+    else if (danger >= 0.5) c = CLASSES.big_neutral;          // boar/bison/rhino/elephant — dangerous PREY
+    else if (sp.biome === "farmland") c = CLASSES.farm;       // barnyard ambler (incl. chicken/sheep)
+    else if ((sp.scale || 1) <= 0.85) c = CLASSES.small_game; // rabbits, foxes, raccoons, coyotes
+    else if ((sp.scale || 1) >= 1.6) c = CLASSES.big_neutral;
+    else c = CLASSES.herd_prey;
+    sp._bclass = c;
+    if (/rabbit|hare/.test(sp.id)) sp._hopAlways = true;     // rabbits bounce even at a stroll
+    if (sp.id === "cheetah") sp._stalk = { trig: 70, burst: 26, giveUp: 80, burstT: 6 };  // the sprinter
+    return c;
+  }
+  function sq(v) { return v * v; }
+
+  // ============================================================
+  //  GAIT RIG — the species builds are flat groups of unnamed boxes (feet at
+  //  y=0, nose +X), so the rig is DISCOVERED, not declared: any tall, thin,
+  //  ground-touching child is a leg; anything stacked on the same (x,z)
+  //  column (feet, paw pads, the tiger's leg stripes) rides along with it.
+  //  Head parts (far-forward, off the ground) are collected for the graze
+  //  dip. Everything is cached per ACTOR (groups are per-animal; geometries
+  //  are shared and never mutated — only mesh .position moves, exactly the
+  //  dogs.js trot pattern).
+  // ============================================================
+  function meshDims(m) {
+    const p = m.geometry && m.geometry.parameters;
+    if (p && p.width != null) return { w: Math.max(p.width, p.depth || p.width), h: p.height };
+    const bb = m.geometry && (m.geometry.boundingBox || (m.geometry.computeBoundingBox(), m.geometry.boundingBox));
+    if (!bb) return null;
+    return { w: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z), h: bb.max.y - bb.min.y };
+  }
+  function buildGaitRig(a) {
+    const sp = a.species, grp = a.group;
+    if (sp.snake || sp.aquatic) return;
+    const kids = grp.children, cols = [], rest = [];
+    let maxX = 0;
+    for (let i = 0; i < kids.length; i++) {
+      const m = kids[i]; if (!m.isMesh) continue;
+      const d = meshDims(m); if (!d) continue;
+      if (m.position.x > maxX) maxX = m.position.x;
+      const bottom = m.position.y - d.h / 2;
+      // a LEG: taller than wide, planted at the ground
+      if (d.h >= 0.14 && d.h >= d.w * 1.1 && bottom <= 0.16 && bottom >= -0.05) {
+        let col = null;
+        for (let c = 0; c < cols.length; c++) {
+          if (Math.abs(cols[c].x - m.position.x) <= 0.14 && Math.abs(cols[c].z - m.position.z) <= 0.14) { col = cols[c]; break; }
+        }
+        if (!col) { col = { x: m.position.x, z: m.position.z, top: 0, h: d.h, parts: [] }; cols.push(col); }
+        col.top = Math.max(col.top, m.position.y + d.h / 2);
+        col.h = Math.max(col.h, d.h);
+        col.parts.push({ m: m, bx: m.position.x, by: m.position.y });
+      } else {
+        rest.push({ m: m, d: d, bottom: bottom });
+      }
+    }
+    if (cols.length < 2 || cols.length > 8) return;      // no readable legs — glide
+    // sweep 2: feet / pads / leg stripes stacked on a column ride with it
+    const head = [];
+    for (let i = 0; i < rest.length; i++) {
+      const r = rest[i], m = r.m;
+      let joined = false;
+      for (let c = 0; c < cols.length; c++) {
+        const col = cols[c];
+        if (Math.abs(col.x - m.position.x) <= 0.13 && Math.abs(col.z - m.position.z) <= 0.13 &&
+            m.position.y - r.d.h / 2 < col.top && r.d.h <= col.h * 1.2) {
+          col.parts.push({ m: m, bx: m.position.x, by: m.position.y });
+          joined = true; break;
+        }
+      }
+      // head cluster (for the graze dip): far forward, up off the ground
+      if (!joined && maxX > 0.4 && m.position.x >= maxX * 0.55 && r.bottom >= 0.3) {
+        head.push({ m: m, bx: m.position.x, by: m.position.y, bottom: r.bottom });
+      }
+    }
+    // diagonal-gait phase: FL+RR swing together, FR+RL oppose (a trot). Two
+    // legs (birds) degrade to left/right alternation via the same XOR.
+    let legH = 0;
+    for (let c = 0; c < cols.length; c++) {
+      const col = cols[c];
+      col.diag = (((col.x >= 0) ? 1 : 0) ^ ((col.z >= 0) ? 1 : 0)) ? -1 : 1;
+      legH = Math.max(legH, col.h);
+    }
+    let dip = 0;
+    if (head.length) {
+      dip = Infinity;
+      for (let i = 0; i < head.length; i++) dip = Math.min(dip, head[i].bottom);
+      dip = Math.max(0, Math.min(1.1, dip * 0.7));
+    }
+    const cls = classify(sp);
+    a.gait = {
+      cols: cols, head: head.length ? head : null, dip: dip,
+      amp: Math.max(0.04, Math.min(0.3, legH * 0.32)),
+      freq: Math.max(1.4, Math.min(9, (cls.stepFreq * 2.2) / Math.max(0.22, legH * (sp.scale || 1)))),
+      step: 0, k: 0, grazeK: 0,
+    };
+  }
+
+  // ---- the per-frame gait: legs swing by DISTANCE ACTUALLY MOVED (so every
+  //      state — wander, flee, stalk, tame-follow, ridden — animates for free),
+  //      plus the class flourishes: bound hop, lumber sway, run bob, graze dip.
+  function gaitAnimate(a, dt) {
+    const gt = a.gait; if (!gt) return;
+    const grp = a.group, sp = a.species, cls = classify(sp);
+    const mx = grp.position.x, mz = grp.position.z;
+    const moved = (a._gpx == null) ? 0 : Math.hypot(mx - a._gpx, mz - a._gpz);
+    a._gpx = mx; a._gpz = mz;
+    const walking = moved > 0.0025;
+    // stride rate rides distance moved, but is CAPPED (~2.4 strides/s): at a
+    // flat-out sprint animals lengthen their stride, they don't blur it.
+    if (walking) gt.step += Math.min(Math.min(moved, 1.5) * gt.freq, dt * 15);
+    // ease the swing weight in/out so legs settle instead of snapping
+    gt.k += ((walking ? 1 : 0) - gt.k) * Math.min(1, dt * 8);
+    if (gt.k > 0.02) {
+      const sw = Math.sin(gt.step) * gt.amp * gt.k;
+      const lift = gt.amp * 0.35 * gt.k;
+      for (let c = 0; c < gt.cols.length; c++) {
+        const col = gt.cols[c], s = sw * col.diag;
+        const up = Math.max(0, Math.sin(gt.step + (col.diag > 0 ? 0 : Math.PI))) * lift;
+        for (let p = 0; p < col.parts.length; p++) {
+          const pt = col.parts[p];
+          pt.m.position.x = pt.bx + s;
+          pt.m.position.y = pt.by + up;
+        }
+      }
+    } else if (gt.k <= 0.02 && gt._setl !== 1) {
+      gt._setl = 1;
+      for (let c = 0; c < gt.cols.length; c++) {
+        const col = gt.cols[c];
+        for (let p = 0; p < col.parts.length; p++) { const pt = col.parts[p]; pt.m.position.x = pt.bx; pt.m.position.y = pt.by; }
+      }
+    }
+    if (walking) gt._setl = 0;
+    // class flourishes on the GROUP (after tick set y to ground level):
+    const fleeing = a.state === "flee" || a.state === "charge";
+    if (walking) {
+      if (cls.hop && (fleeing || sp._hopAlways)) {
+        grp.position.y += Math.abs(Math.sin(gt.step * 0.5)) * cls.hop * (sp.scale || 1) * 2.2;   // the BOUND
+      } else if (cls.bob) {
+        grp.position.y += Math.abs(Math.sin(gt.step)) * cls.bob * (sp.scale || 1) * gt.k;
+      }
+      if (cls.sway && (a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
+        grp.rotation.z = Math.sin(gt.step * 0.5) * cls.sway * gt.k;                              // the LUMBER
+      }
+    } else if (cls.sway && grp.rotation.z !== 0 && (a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
+      grp.rotation.z *= Math.max(0, 1 - dt * 6);                 // settle the roll when it stops
+    }
+    // graze dip: the head cluster eases down to the grass and back up
+    if (gt.head) {
+      const want = (a.state === "graze") ? 1 : 0;
+      gt.grazeK += (want - gt.grazeK) * Math.min(1, dt * 3);
+      if (gt.grazeK > 0.01 || gt._setg === 1) {
+        gt._setg = gt.grazeK > 0.01 ? 1 : 0;
+        const dy = gt.dip * gt.grazeK, dx = gt.dip * 0.3 * gt.grazeK;
+        for (let i = 0; i < gt.head.length; i++) {
+          const h = gt.head[i];
+          h.m.position.y = h.by - dy;
+          h.m.position.x = h.bx + dx;
+        }
+      }
+    }
+  }
+
+  // ---- matrix LOD: a hidden animal's subtree stops paying r128's per-frame
+  //      updateMatrix() tax (the whole point of core/staticfreeze.js — we keep
+  //      its saving without its bug by freezing/thawing on visibility flips).
+  function setLiveMats(a, on) {
+    if (a._mOn === on) return;
+    a._mOn = on;
+    a.group.traverse(function (o) { o.matrixAutoUpdate = on; if (!on) o.updateMatrix(); });
+  }
 
   // ============================================================
   //  HERDS — a herd moves as ONE cohesive body (boids: alignment + cohesion +
@@ -437,7 +663,12 @@
   // ============================================================
   CBZ.cityWildlifeHit = function (a, hit, w) {
     if (!a || a.dead) return { head: false, down: false, dmg: 0 };
-    const dmg = Math.max(1, Math.round((w && w.damage || 20) * (hit && hit.head ? (w && w.headMult || 2) : 1)));
+    // same range falloff the human targets get (WILDLIFE_LIVE only — flag
+    // off keeps the old flat multiply). Callers that pass a bare {damage:n}
+    // (dogs, companions) have no hit.dist and skip the falloff.
+    const fall = (LIVE() && CBZ.weaponFalloffMul && hit && hit.dist != null && w && w.damage != null)
+      ? (CBZ.weaponFalloffMul(w, hit.dist) || 1) : 1;
+    const dmg = Math.max(1, Math.round((w && w.damage || 20) * (hit && hit.head ? (w && w.headMult || 2) : 1) * fall));
     a.hitCount++;
     a.hp -= dmg;
     // blood spritz where reachable (reuse the shared gore if present).
@@ -456,7 +687,18 @@
     if (a.tamed) return { head: !!(hit && hit.head), down: false, dmg: dmg };
     a.alarm = 8;
     const P = CBZ.player && CBZ.player.pos;
-    if (a.species.danger > 0.15 && P) { a.state = "charge"; }
+    if (LIVE()) {
+      // a visible recoil so every hit READS (creature_combat's shudder), then
+      // the wound decides: anything with teeth turns on you, prey bolts hard.
+      if (!a.snake && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(a); } catch (e) {} }
+      const cls = classify(a.species);
+      if (a.species.danger > 0.15 && P) { a.state = "charge"; a._burstT = null; }
+      else {
+        a.state = "flee"; a.stateT = (cls.fleeT || 4) + 2;
+        if (P) a.heading = Math.atan2(a.pos.z - P.z, a.pos.x - P.x);
+        a.spd = (a.species.spd || 1.4) * 2.2;
+      }
+    } else if (a.species.danger > 0.15 && P) { a.state = "charge"; }
     else { a.state = "flee"; if (P) { a.heading = Math.atan2(a.pos.z - P.z, a.pos.x - P.x); } a.spd = (a.species.spd || 1.4) * 2.2; }
     return { head: !!(hit && hit.head), down: false, dmg: dmg };
   };
@@ -466,8 +708,17 @@
     a.skinnable = true; a.skinT = CARCASS_LINGER;
     // topple onto its side (feet were at y=0; drop + roll the group).
     const grp = a.group;
-    grp.rotation.z = (Math.random() < 0.5 ? 1 : -1) * (1.15 + Math.random() * 0.25);
-    grp.position.y = Math.max(0, grp.position.y) + 0.05;
+    if (LIVE()) {
+      // ANIMATED fall (~0.55s ease-out) instead of an instant snap — the
+      // dead branch of tick() drives it. Skinnable immediately, as before.
+      a._dieT = 0.55;
+      a._toppleTo = (Math.random() < 0.5 ? 1 : -1) * (1.15 + Math.random() * 0.25);
+      a._dieZ0 = grp.rotation.z; a._dieX0 = grp.rotation.x;
+      grp.position.y = Math.max(0, grp.position.y) + 0.05;
+    } else {
+      grp.rotation.z = (Math.random() < 0.5 ? 1 : -1) * (1.15 + Math.random() * 0.25);
+      grp.position.y = Math.max(0, grp.position.y) + 0.05;
+    }
     carcasses.push(a);
     // score/notify — a kill is a kill.
     if (CBZ.city) {
@@ -642,11 +893,286 @@
     snakeAnimate(a, dt);
   }
 
+  // ============================================================
+  //  THE LIVING STATE MACHINE (CBZ.CONFIG.WILDLIFE_LIVE) — graze / wander /
+  //  flee / stalk / charge, with flinch as an overlay and dying animated in
+  //  the dead branch. The legacy block further down is untouched and runs
+  //  verbatim when the flag is off.
+  // ============================================================
+  const HUNTER_CAP = 3;            // at most this many predators hunt YOU at once
+  let hunters = 0;                 // recounted at the top of every tick
+  const SHOT = { win: 0, n: 0 };   // repeated-gunshot tracker (0.9s window)
+  // reusable player-as-target for creature_combat (allocation-free hot path;
+  // hp is a decoy — damage lands through opts.onHit, never on this object).
+  const PT = { pos: null, group: { position: null }, dead: false, hp: 1e9 };
+
+  function landLive(a, dt, P) {
+    const sp = a.species, grp = a.group, cls = classify(sp);
+    // hit recoil owns the transform while it lasts; the state resumes after.
+    if ((a._flinchT || 0) > 0) { if (CBZ.creatureAnimateFlinch) CBZ.creatureAnimateFlinch(a, dt); return; }
+    if (a.alarm > 0) a.alarm -= dt;
+    a.stateT = (a.stateT || 0) - dt;
+    a.turnT -= dt;
+    const hr = a.herd, danger = sp.danger || 0;
+    let nearP = Infinity, dpx = 0, dpz = 0;
+    if (P) { dpx = grp.position.x - P.x; dpz = grp.position.z - P.z; nearP = dpx * dpx + dpz * dpz; }
+    const playerGone = !P || (CBZ.player && CBZ.player.dead);
+
+    // HERD PANIC RIPPLE — one spooked member carries the whole herd.
+    if (hr && hr.panic > 0.3 && (a.state === "wander" || a.state === "graze") && a.alarm <= 0.1) {
+      a.alarm = Math.max(a.alarm, hr.panic * 0.85);
+      if (danger >= 0.5) { a.state = "charge"; }
+      else { a.state = "flee"; a.stateT = cls.fleeT; a.heading = hr.heading; }   // flee WITH the herd
+    }
+
+    // SENSES — calm animals notice you: prey bolts, hunters commit (capped).
+    if (!playerGone && (a.state === "wander" || a.state === "graze")) {
+      const spookR = sp.spook || 26;
+      if (danger < 0.5 && nearP < spookR * spookR) {
+        a.state = "flee"; a.stateT = cls.fleeT; a.alarm = Math.max(a.alarm, 4);
+        a.heading = Math.atan2(dpz, dpx);                       // away from you
+      } else if (danger >= 0.5) {
+        const trig = (sp._stalk && sp._stalk.trig) || cls.stalk;
+        if (nearP < sq(cls.aggro || 16) && hunters < HUNTER_CAP) { a.state = "charge"; a.alarm = 6; hunters++; }
+        else if (trig && nearP < sq(trig) && hunters < HUNTER_CAP && grp.visible !== false) { a.state = "stalk"; hunters++; }
+      }
+    }
+
+    // ---- per-state steering ---------------------------------------------
+    let spd = 0;
+    if (a.state === "graze") {
+      if (a.stateT <= 0) { a.state = "wander"; a.stateT = 2 + Math.random() * 3; }
+    } else if (a.state === "flee") {
+      spd = (sp.spd || 1.4) * cls.fleeM;
+      if (!playerGone && nearP < sq((sp.spook || 26) * 1.2)) {   // still on your heels — keep running
+        a.heading = Math.atan2(dpz, dpx);
+        a.stateT = Math.max(a.stateT, 1.5);
+      }
+      if (a.stateT <= 0 && a.alarm <= 0 && (playerGone || nearP > sq((sp.spook || 26) * 1.6))) {
+        a.state = "wander"; a.stateT = 2 + Math.random() * 3;
+      }
+    } else if (a.state === "stalk") {
+      const st = sp._stalk || cls;
+      if (playerGone || nearP > sq((st.trig || cls.stalk || 55) * 1.25)) { a.state = "wander"; a.stateT = 2; }
+      else if (nearP < sq(st.burst || cls.burst || 18)) { a.state = "charge"; a.alarm = 6; a._burstT = st.burstT || 3.5; }
+      else {
+        spd = (sp.spd || 1.4) * (cls.crouch || 0.35);
+        // curve in on the target — a hunt, not a beeline
+        let want = Math.atan2(-dpz, -dpx), d = want - a.heading;
+        while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        const mt = dt * 2; if (d > mt) d = mt; else if (d < -mt) d = -mt;
+        a.heading += d;
+      }
+    } else if (a.state === "charge") {
+      const giveUp = (sp._stalk && sp._stalk.giveUp) || cls.giveUp || 55;
+      if (a._burstT != null) {
+        a._burstT -= dt;
+        if (a._burstT <= 0 && nearP > sq(cls.aggro || 12)) {     // the sprint died — short-winded cat rests
+          a._burstT = null; a.state = "graze"; a.stateT = 3;
+        }
+      }
+      if (a.state === "charge") {
+        if (playerGone || nearP > sq(giveUp)) { a.state = "wander"; a.stateT = 2; a._burstT = null; }
+        else {
+          const reach = 1.6 + (sp.scale || 1) + 0.5;
+          const engaged = a._atkAnim != null && a._atkAnim >= 0;  // mid-strike: let it finish
+          if ((nearP <= sq(reach * 1.6) || engaged) && CBZ.creatureFight) {
+            // hand the last stretch + the strike to creature_combat: it
+            // closes, choreographs the pounce/maul/gore/stomp, and lands the
+            // bite through onHit (the decoy target's hp is never real).
+            PT.pos = P; PT.group.position = P; PT.dead = false; PT.hp = 1e9;
+            let o = a._atkOpts;
+            if (!o) {
+              o = a._atkOpts = {
+                reach: reach, rate: 1.1, dmg: sp.bite || 12,
+                speed: (sp.spd || 1.4) * (cls.atkM || 2.0),
+                onHit: function (d2) { if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(d2, a); } catch (e) {} } },
+              };
+              const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : null;
+              if (style === "gore" || style === "stomp") o.rate = 1.3;   // heavy hitters swing slower
+              if (sp.id === "cheetah") o.rate = 0.9;
+            }
+            CBZ.creatureFight(a, PT, dt, o);
+            return;                                    // creatureFight owns the transform this frame
+          }
+          spd = (sp.spd || 1.4) * (cls.atkM || 2.0) * (a._burstT != null ? 1.2 : 1);
+          a.heading = Math.atan2(-dpz, -dpx);
+          // fallback contact bite if creature_combat isn't around (legacy rule)
+          if (!CBZ.creatureFight && nearP < 3.2 * 3.2 && CBZ.cityHurtPlayer && (a._biteT || 0) <= 0) {
+            try { CBZ.cityHurtPlayer(sp.bite || 10, a); } catch (e) {}
+            a._biteT = 1.1;
+          }
+          if (a._biteT > 0) a._biteT -= dt;
+        }
+      }
+    }
+    if (a.state === "wander") {
+      spd = a.spd;
+      if (a.stateT <= 0) {
+        if (Math.random() < cls.grazeP && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
+          a.state = "graze";                           // stop & put the head down
+          a.stateT = cls.grazeT[0] + Math.random() * (cls.grazeT[1] - cls.grazeT[0]);
+          spd = 0;
+        } else {
+          a.stateT = 2 + Math.random() * 4;
+          a.heading += (hr && hr.n > 1 ? 0.3 : 1.5) * (Math.random() - 0.5);
+          a.spd = (sp.spd || 1.4) * cls.wanderM * (0.7 + Math.random() * 0.6);
+          spd = a.spd;
+        }
+      }
+    }
+
+    // HERD MOVEMENT (boids — same math as the legacy block): alignment +
+    // cohesion + separation; a panicked herd aligns harder and moves as one.
+    if ((a.state === "wander" || a.state === "flee") && hr && hr.n > 1 && spd > 0) {
+      let dx = Math.cos(a.heading), dz = Math.sin(a.heading);
+      const align = (a.state === "wander") ? 0.5 : 1.4;
+      dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
+      const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
+      const cd = Math.hypot(toCx, toCz) || 1;
+      const coh = Math.min(1.1, Math.max(0, cd - 5) / 14) * (a.state === "wander" ? 1 : 1.6);
+      dx += (toCx / cd) * coh; dz += (toCz / cd) * coh;
+      const sepR = 2.2 + (sp.scale || 1) * 1.0;
+      let sx = 0, szz = 0;
+      for (let m = 0; m < hr.members.length; m++) {
+        const o2 = hr.members[m]; if (o2 === a || o2.dead) continue;
+        const ox = grp.position.x - o2.pos.x, oz = grp.position.z - o2.pos.z;
+        const od = Math.hypot(ox, oz);
+        if (od > 0.001 && od < sepR) { sx += (ox / od) * (sepR - od); szz += (oz / od) * (sepR - od); }
+      }
+      dx += sx * 0.9; dz += szz * 0.9;
+      const desired = Math.atan2(dz, dx);
+      let dd = desired - a.heading;
+      while (dd > Math.PI) dd -= 2 * Math.PI; while (dd < -Math.PI) dd += 2 * Math.PI;
+      a.heading += dd * Math.min(1, dt * (a.state === "wander" ? 2.2 : 5.0));
+    }
+
+    // integrate + home fence + ground + facing + the gait layer
+    if (spd > 0) {
+      const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
+      const nz = grp.position.z + Math.sin(a.heading) * spd * dt;
+      const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
+      const onHome = reg && (reg.biome === sp.biome) && CBZ.cityRegionHit(reg, nx, nz, 6);
+      if (!onHome && a.state !== "charge") {
+        // steer back toward home anchor instead of leaving the biome.
+        a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
+      } else {
+        grp.position.x = nx; grp.position.z = nz;
+      }
+    }
+    grp.position.y = groundY(grp.position.x, grp.position.z);
+    if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
+    grp.rotation.y = -a.heading + Math.PI / 2;
+    // settle any leftover attack pitch back to rest while roaming
+    if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
+    gaitAnimate(a, dt);
+  }
+
+  // ============================================================
+  //  GUNSHOT PANIC + BLAST DAMAGE — wildlife hooks the combat side-effects
+  //  from OUR side of the fence: every player shot already calls
+  //  CBZ.cityAlarm at the muzzle (fpsmode.js) and every blast goes through
+  //  CBZ.cityExplosion — both get the codebase's standard capture-and-wrap
+  //  (foreign markers copied forward; blast handler idempotent per blast
+  //  via opts._wlSeen, same pattern as demolition's _demoSeen).
+  // ============================================================
+  function spookFromShot(x, z) {
+    if (!LIVE()) return;
+    const extra = 0.8 * Math.min(SHOT.n, 5);           // sustained fire extends the panic
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i], sp = a.species;
+      if (a.dead || a.tamed || a.ridden || sp.aquatic) continue;
+      const cls = classify(sp), danger = sp.danger || 0;
+      const hearR = cls.hearR || 45;
+      const dx = a.pos.x - x, dz = a.pos.z - z, d2 = dx * dx + dz * dz;
+      if (d2 > hearR * hearR) continue;
+      if (a.snake) { a.alarm = Math.max(a.alarm, 3); continue; }   // snakes coil, they don't run
+      // never interrupt/downgrade a committed animal — just keep it hot.
+      if (a.state === "flee" || a.state === "charge" || a.state === "stalk" || (a._flinchT || 0) > 0) {
+        a.alarm = Math.max(a.alarm, 4 + extra);
+        if (a.state === "flee") a.stateT = Math.max(a.stateT || 0, cls.fleeT + extra);
+        continue;
+      }
+      if (danger >= 0.5) {
+        // predators: a shot close by provokes; further out they orient/creep.
+        if (d2 < sq((cls.aggro || 16) * 1.4) && hunters < HUNTER_CAP) { a.state = "charge"; a.alarm = 6; hunters++; }
+        else if (cls.stalk && hunters < HUNTER_CAP && a.group.visible !== false) { a.state = "stalk"; hunters++; }
+        else { a.alarm = Math.max(a.alarm, 4); a.heading = Math.atan2(z - a.pos.z, x - a.pos.x); }
+      } else {
+        a.state = "flee";
+        a.stateT = cls.fleeT + extra;
+        a.alarm = Math.max(a.alarm, 4 + extra);
+        a.heading = Math.atan2(dz, dx);                // straight away from the shot
+      }
+    }
+  }
+
+  function blastWildlife(x, z, opts) {
+    if (!LIVE()) return;
+    if (opts && opts._wlSeen) return;                  // idempotent per blast
+    if (opts) opts._wlSeen = true;
+    const R = ((opts && opts.radius) || 6) * ((opts && opts.power) || 1);
+    const kr = Math.max(4, R * 1.5);
+    for (let i = animals.length - 1; i >= 0; i--) {
+      const a = animals[i];
+      if (a.dead || a.ridden) continue;
+      const dx = a.pos.x - x, dz = a.pos.z - z, d2 = dx * dx + dz * dz;
+      if (d2 > kr * kr) continue;
+      const dmg = Math.round(140 * Math.max(0.15, 1 - Math.sqrt(d2) / kr));
+      CBZ.cityWildlifeHit(a, { head: false, point: null }, { damage: dmg });
+    }
+    SHOT.n = Math.max(SHOT.n, 3); SHOT.win = 0.9;      // a blast panics like a volley
+    spookFromShot(x, z);
+  }
+
+  let wrapsOk = false;
+  function installWraps() {
+    if (!LIVE()) { wrapsOk = true; return; }
+    const alarm = CBZ.cityAlarm;
+    if (typeof alarm === "function" && !alarm._wildlifeWrapped) {
+      const wrapA = function (x, z, radius, intensity, offender) {
+        try {
+          if (SHOT.win > 0) SHOT.n++; else SHOT.n = 1;
+          SHOT.win = 0.9;
+          spookFromShot(x, z);
+        } catch (e) {}
+        return alarm.apply(this, arguments);
+      };
+      for (const k in alarm) wrapA[k] = alarm[k];      // carry other wrappers' markers forward
+      wrapA._wildlifeWrapped = true;
+      CBZ.cityAlarm = wrapA;
+    }
+    const boom = CBZ.cityExplosion;
+    if (typeof boom === "function" && !boom._wildlifeWrapped) {
+      const wrapB = function (x, z, opts) {
+        const r = boom.apply(this, arguments);
+        try { blastWildlife(x, z, opts); } catch (e) {}
+        return r;
+      };
+      for (const k in boom) wrapB[k] = boom[k];        // carry other wrappers' markers forward
+      wrapB._wildlifeWrapped = true;
+      CBZ.cityExplosion = wrapB;
+    }
+    wrapsOk = !!(CBZ.cityAlarm && CBZ.cityAlarm._wildlifeWrapped &&
+                 CBZ.cityExplosion && CBZ.cityExplosion._wildlifeWrapped);
+  }
+
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
     venomTick(dt);                 // poison keeps draining after a venomous bite
     updateHerds(dt);               // live centroid + mean heading + herd alarm
+    if (!wrapsOk) installWraps();  // retry until the combat hooks exist (idempotent)
+    if (SHOT.win > 0) SHOT.win -= dt;   // repeated-gunshot window cools here
+    // recount the predators currently committed to the player (stalk/charge)
+    // so the HUNTER_CAP can bound both the dogpile and the per-frame cost.
+    hunters = 0;
+    if (LIVE()) {
+      for (let i = 0; i < animals.length; i++) {
+        const st = animals[i].state;
+        if (!animals[i].dead && (st === "charge" || st === "stalk")) hunters++;
+      }
+    }
     // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
     // tier): animals beyond the tier's radius don't render or animate their
     // meshes — same pattern as the ped rig LOD. Big species read farther
@@ -660,7 +1186,19 @@
         const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);
         grp.visible = a.ridden || a.tamed || (vdx * vdx + vdz * vdz) < vr * vr;
       }
+      // matrix LOD: hidden animals stop paying r128's per-frame matrix math
+      // (the saving staticfreeze.js was after) and thaw the moment they show.
+      if (LIVE()) setLiveMats(a, grp.visible !== false);
       if (a.dead) {
+        // animated death topple (WILDLIFE_LIVE): ease onto the side.
+        if (a._dieT != null) {
+          a._dieT -= dt;
+          const k = Math.max(0, Math.min(1, 1 - a._dieT / 0.55));
+          const e = 1 - (1 - k) * (1 - k);                       // ease-out
+          grp.rotation.z = (a._dieZ0 || 0) + (a._toppleTo - (a._dieZ0 || 0)) * e;
+          grp.rotation.x = (a._dieX0 || 0) * (1 - e);
+          if (a._dieT <= 0) a._dieT = null;
+        }
         a.skinT -= dt;
         if (a.skinT <= 0) { removeCarcass(a); i--; continue; }
         // gently sink a skinned husk before it's culled.
@@ -675,8 +1213,15 @@
         if (a.grow >= 1) a.grow = null;
       }
       // ---- TAMED / RIDDEN animals are driven by wildlife_tame.js ----------
-      if (a.ridden) continue;                                  // glued under the rider
-      if (a.tamed && !sp.aquatic) { if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt); if (a.snake) { a.moving = true; snakeAnimate(a, dt); } continue; }
+      // (their position is set elsewhere; the gait layer keys off distance
+      //  actually moved, so their legs animate for free.)
+      if (a.ridden) { if (LIVE()) gaitAnimate(a, dt); continue; }   // glued under the rider
+      if (a.tamed && !sp.aquatic) {
+        if (CBZ.cityTameFollow) CBZ.cityTameFollow(a, dt);
+        if (a.snake) { a.moving = true; snakeAnimate(a, dt); }
+        else if (LIVE()) gaitAnimate(a, dt);
+        continue;
+      }
       // ---- SNAKES slither (own locomotion + strike/rear/constrict logic) --
       if (a.snake) { snakeTick(a, dt, P); continue; }
       // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
@@ -697,8 +1242,28 @@
       // ---- FAR + CALM land animals FREEZE (no per-frame steering) so a big
       //      world stays cheap — only the herds near you actually think & move.
       //      They resume instantly when you approach, or if their herd panics.
-      if (grp.visible === false && a.state === "wander" && (a.alarm || 0) <= 0 &&
+      //      Hot states (flee/charge/stalk) keep running off-screen so a shot
+      //      herd genuinely LEAVES instead of pausing at the horizon.
+      if (grp.visible === false && (a.state === "wander" || a.state === "graze") &&
+          (a.alarm || 0) <= 0 &&
           (!a.herd || a.herd.panic <= 0.3)) { a.turnT -= dt; continue; }
+      // ---- WILDLIFE_LIVE: the living state machine ------------------------
+      if (LIVE()) {
+        // AI throttle: calm animals beyond 90u think at half rate (with dt
+        // doubled so speeds stay true); the gait only shows when visible.
+        let edt = dt;
+        if (P && (a.state === "wander" || a.state === "graze") && (a.alarm || 0) <= 0 &&
+            (!a.herd || a.herd.panic <= 0.3)) {
+          const ddx = grp.position.x - P.x, ddz = grp.position.z - P.z;
+          if (ddx * ddx + ddz * ddz > 8100) {
+            a._lodF = !a._lodF;
+            if (a._lodF) continue;
+            edt = dt * 2;
+          }
+        }
+        landLive(a, edt, P);
+        continue;
+      }
       // ---- land: alarm decays; react to the player -----------------------
       if (a.alarm > 0) a.alarm -= dt;
       let nearP = 0;
@@ -800,6 +1365,7 @@
 
     registerPelts();
     registerInteractions();
+    installWraps();               // gunshot panic + blast damage (capture-and-wrap)
     spawnAll();
     recordCaps();                 // each herd's seeded size = its carrying capacity
 

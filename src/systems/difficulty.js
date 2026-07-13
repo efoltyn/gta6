@@ -44,8 +44,10 @@
   // ---- run-local state ----
   let ramp = 0;                 // smooth 0..1 difficulty
   let tier = 0;                 // last announced tier
-  let lastElapsed = 0;          // to detect a run reset (elapsed falling)
   let scanRollT = 0;            // throttle for picking a scanner
+  // run-reset detection shares CBZ.jailBoost's elapsed watcher (same 0.5
+  // epsilon this module always used)
+  const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher() : null;
 
   // single shared rng (seeded econ rng if present, else Math.random) so the
   // hot path never allocates a fresh closure per frame.
@@ -55,40 +57,16 @@
   const lerpAngle = CBZ.lerpAngle || function (a, b, t) { return a + (b - a) * t; };
 
   // ---- per-guard base capture / restore ----
-  // We store the natural patrol values ONCE, the first time we see a guard
-  // at its base (the difficulty module hasn't touched it yet). Reinforcement
-  // guards spawned mid-run are captured the frame they appear, so they get
-  // boosted from THEIR own natural values, never compounded.
-  function ensureBase(gd) {
-    if (gd._diffBase) return;
-    gd._diffBase = {
-      viewDist: gd.viewDist,
-      speed: gd.speed,
-    };
-  }
-
-  // apply the current ramp multiplier, always recomputed from the stored
-  // base so repeated frames never compound the boost.
-  function applyBoost(gd, mult) {
-    const b = gd._diffBase;
-    if (!b) return;
-    gd.viewDist = b.viewDist * mult;
-    gd.speed = b.speed * mult;
-  }
-
-  // hard restore to natural values (new run / leaving play / cleanup)
-  function restore(gd) {
-    const b = gd._diffBase;
-    if (!b) return;
-    gd.viewDist = b.viewDist;
-    gd.speed = b.speed;
-    // drop any in-progress scan so the guard resumes patrol cleanly
-    if (gd._scan) endScan(gd);
-  }
-
+  // Bases live in the shared CBZ.jailBoost ledger (entities/guards.js) under
+  // the "difficulty" tag. scale() stores the natural patrol values ONCE, the
+  // first time it touches a guard, and recomputes from that snapshot every
+  // call — repeated frames never compound, and reinforcement guards spawned
+  // mid-run are captured the frame they appear, from THEIR own natural
+  // values. restoreAll puts every stored base back and empties the ledger.
   function restoreAll() {
-    if (!CBZ.guards) return;
-    for (const gd of CBZ.guards) restore(gd);
+    if (CBZ.jailBoost) CBZ.jailBoost.restoreAll("difficulty");
+    // drop any in-progress scan so the guards resume patrol cleanly
+    if (CBZ.guards) for (const gd of CBZ.guards) if (gd._scan) endScan(gd);
   }
 
   function endScan(gd) {
@@ -99,13 +77,11 @@
 
   // ---- reset handling: watch elapsed drop toward 0 ----
   function maybeReset() {
-    const e = g.elapsed || 0;
-    // a fresh run zeroes elapsed; treat any meaningful backward jump as a reset.
-    if (e + 0.5 < lastElapsed) {
+    // a fresh run zeroes elapsed; any meaningful backward jump is a reset.
+    if (pollNewRun && pollNewRun()) {
       ramp = 0; tier = 0; scanRollT = 0;
       restoreAll();
     }
-    lastElapsed = e;
   }
 
   // ---- the difficulty curve: smooth ease toward 1 over RAMP_SECS ----
@@ -242,12 +218,12 @@
     ramp = computeRamp(g.elapsed || 0);
 
     // make sure every guard (including any spawned mid-run) has a stored base,
-    // then apply the current boost from that base.
+    // then apply the current boost from that base (scale() = snapshot-once +
+    // recompute-from-base, so this is safe to run every frame).
     const mult = 1 + MAX_BOOST * ramp;
-    if (CBZ.guards) {
+    if (CBZ.guards && CBZ.jailBoost) {
       for (const gd of CBZ.guards) {
-        ensureBase(gd);
-        applyBoost(gd, mult);
+        CBZ.jailBoost.scale("difficulty", gd, { viewDist: mult, speed: mult });
       }
     }
 
@@ -259,18 +235,12 @@
 
   // ---- safety net: if we leave 'playing' without a reset (win screen, or a
   // pause that later drops back to title), make sure no guard is left boosted
-  // or frozen mid-scan. onUpdate only fires while playing, so we watch state
-  // on an always-runner (mirrors systems/reinforcements.js). A fresh run's
+  // or frozen mid-scan. onUpdate only fires while playing, so we ride
+  // CBZ.jailBoost's shared state-exit dispatcher (one onAlways(91) for every
+  // jail system instead of a private lastState copy each). A fresh run's
   // resetGame() does NOT touch guard viewDist/speed, so this restore is what
   // keeps the next run from inheriting a stale boost. ----
-  let lastState = g.state;
-  CBZ.onAlways(91, function () {
-    const s = g.state;
-    if (s !== lastState) {
-      if (s !== "playing") restoreAll();
-      lastState = s;
-    }
-  });
+  if (CBZ.jailBoost) CBZ.jailBoost.onStateExit(function () { restoreAll(); });
 
   // expose a tiny read-only hook for other systems / debugging
   CBZ.difficulty = {

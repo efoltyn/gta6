@@ -35,6 +35,9 @@
   const g = CBZ.game;
   const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
   const boxGeo = CBZ.boxGeom || function (w, h, d) { return new THREE.BoxGeometry(w, h, d); };
+  // one-line revert for the military-theft swap fix (commandeered base jets/
+  // bombers/helis fly their REAL parked model instead of a generic stand-in)
+  if (CBZ.CONFIG && CBZ.CONFIG.AIR_MILITARY_REUSE == null) CBZ.CONFIG.AIR_MILITARY_REUSE = true;
 
   // ---- NEW MATERIAL API (carfx.js) — fake-reflection env-mapped vehicle mats
   // for instant shine. Falls back to the flat cached cmat() if carfx hasn't
@@ -135,6 +138,36 @@
   const JET_TURN    = 1.15;        // bank/turn rate (wide)
   const JET_SPAN    = 10.8;        // wingspan — feeds ground-effect threshold
 
+  // ---- FLIGHT MODEL V2 (CBZ.CONFIG.AIRCRAFT_FLIGHT_V2) --------------------
+  // Per-class fixed-wing tuning. The V2 wing model is a SCALAR-AIRSPEED craft:
+  // throttle drives airspeed along the nose, bank commands a coordinated turn
+  // (turn rate ∝ sin(bank)), climb bleeds airspeed / dives regain it, and a
+  // persistent gravity "sag" term accumulates whenever airspeed drops under
+  // the lift band — that sag IS the stall sink, and it decays the moment
+  // flying speed returns. Velocity is rebuilt from (heading,pitch,airspeed)
+  // each frame, which is unconditionally stable at this repo's spiky dt
+  // (full force integration was tried for V1 and abandoned — see flyJet).
+  //   vmax      — max level airspeed (m/s)      thrust — engine accel at full throttle
+  //   dragK     — quadratic drag                vstall — below this, the wing stalls
+  //   vminfly   — below this, no lift at all    vr     — rotate/takeoff speed (ground)
+  //   gacc      — brake decel scale             rollMax/rollRate — bank limit / roll-in
+  //   turnK     — yawRate = turnK·sin(roll)     pitchMax/pitchRate — attitude limits
+  //   bleed     — airspeed lost per s per unit sin(pitch) climbing
+  //   autoLevel — wings-level return rate with no input   span — feeds ground effect
+  const WING_V2 = {
+    prop:     { vmax: 58,  thrust: 22, dragK: 0.00055, vstall: 20, vminfly: 16, vr: 24, gacc: 9,  rollMax: 0.90, rollRate: 2.6, turnK: 0.55, pitchMax: 0.70, pitchRate: 1.8, bleed: 11, autoLevel: 1.4, span: 10 },
+    jet:      { vmax: 120, thrust: 46, dragK: 0.00042, vstall: 42, vminfly: 34, vr: 55, gacc: 14, rollMax: 0.80, rollRate: 2.0, turnK: 0.42, pitchMax: 0.85, pitchRate: 1.5, bleed: 16, autoLevel: 1.1, span: 10.8 },
+    airliner: { vmax: 105, thrust: 28, dragK: 0.00040, vstall: 46, vminfly: 38, vr: 62, gacc: 9,  rollMax: 0.55, rollRate: 1.3, turnK: 0.30, pitchMax: 0.40, pitchRate: 1.0, bleed: 13, autoLevel: 1.6, span: 34 },
+  };
+  // V2 helicopter hover feel: cyclic tilt is a VISUAL read of the body-frame
+  // velocity (nose dips when accelerating forward, rolls into a lateral drift),
+  // and vertical velocity EASES toward the collective command so the hover
+  // breathes instead of snapping.
+  const HELI_TILTMAX = 0.40;   // rad (~23°) max hover tilt
+  const HELI_TILT_K  = 0.012;  // tilt per m/s of body-frame velocity
+  const HELI_VDAMP   = 3.0;    // vertical-velocity ease rate /s
+  function flightV2() { return !CBZ.CONFIG || CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 !== false; }
+
   // weapons
   const FIRE_CD     = 0.6;         // seconds between missiles
   const MISSILE_SPD = 60;          // muzzle ejection speed for the dir hint
@@ -225,9 +258,8 @@
       navR:    shared(vmat('lightTail',  0xff2a22, { emissive: 0xff1810, ei: 0.95 })),
       navG:    shared(cmat(0x18ff3a, { emissive: 0x10ff30, ei: 0.95 })),
       navW:    shared(vmat('lightFront', 0xffffff, { emissive: 0xeaf4ff, ei: 0.9 })),
-      // shared rotor disc (semi-transparent blur) — its own non-cached mat so we
-      // can keep it translucent without poisoning cmat's opaque cache
-      rotorMat: shared(new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0.42, depthWrite: false })),
+      // (the rotor-blur disc material is PER-CRAFT now — spinRotors animates its
+      // opacity with rotor rate, so it can't live in this shared cache)
       // solid blade material (the real spinning blades read as metal, not blur)
       bladeMat: shared(vmat('metal', 0x202833, { emissive: 0x080a0e, ei: 0.2 })),
     };
@@ -271,14 +303,23 @@
     // swept vertical fin at the tail + a small horizontal stabiliser
     const fin = new THREE.Mesh(taperBox(0.18, 1.25, 0.95, { tz: 0.5, top: 0.55 }), a.mDark); fin.position.set(0, 0.95, -5.05); fin.rotation.x = 0.12; grp.add(fin);
     const stab = new THREE.Mesh(boxGeo(1.5, 0.1, 0.55), a.mDark); stab.position.set(0, 0.55, -4.7); grp.add(stab);
+    // tail bumper skid — the angled strut that saves the boom on a hard flare
+    const tskid = new THREE.Mesh(boxGeo(0.12, 0.5, 0.12), a.mDark);
+    tskid.position.set(0, 0.14, -5.0); tskid.rotation.x = 0.35; grp.add(tskid);
     // ROUNDED SKIDS: a tapered tube with up-swept ends + a faired cross-tube to the belly
     [-0.92, 0.92].forEach((sx) => {
       const skid = new THREE.Mesh(taperBox(0.18, 0.18, 3.6, { nz: 0.5, tz: 0.5, top: 0.8, bot: 0.8 }), a.mDark);
       skid.position.set(sx, -1.0, 0.05); grp.add(skid);
       [1.0, -1.0].forEach((sz) => {
-        const strut = new THREE.Mesh(taperBox(0.16, 0.72, 0.16, { top: 0.7 }), a.mGrey);
+        // chunky struts (≥0.2u) — thin members read as floating at distance
+        const strut = new THREE.Mesh(taperBox(0.22, 0.72, 0.22, { top: 0.7 }), a.mGrey);
         strut.position.set(sx * 0.85, -0.56, sz); strut.rotation.z = sx > 0 ? -0.18 : 0.18; grp.add(strut);
       });
+    });
+    // lateral cross-tubes tying the two skids into one frame (under the struts)
+    [1.0, -1.0].forEach((sz) => {
+      const cross = new THREE.Mesh(boxGeo(2.0, 0.18, 0.18), a.mDark);
+      cross.position.set(0, -0.92, sz); grp.add(cross);
     });
     // stub weapon wings (roots buried in the body) + faired missile pods under them
     const wing = new THREE.Mesh(taperBox(3.7, 0.2, 0.95, { nz: 0.85, tz: 0.7 }), a.mGrey); wing.position.set(0, 0.02, 0.4); grp.add(wing);
@@ -286,12 +327,37 @@
       const pod = new THREE.Mesh(taperBox(0.52, 0.52, 1.9, { nz: 0.35, tz: 0.6, top: 0.8, bot: 0.8 }), a.mDark);
       pod.position.set(px, -0.2, 0.4); grp.add(pod);
     });
+    // chin sensor/gun turret under the nose — ties the muzzle point to a weapon
+    const chin = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.34, 10), a.mDark);
+    chin.position.set(0, -0.58, 2.35); grp.add(chin);
+    const barrel = new THREE.Mesh(boxGeo(0.09, 0.09, 0.9), a.mGrey);
+    barrel.position.set(0, -0.6, 2.8); grp.add(barrel);
     // MAIN ROTOR (spins about Y) — visible hub + a translucent blur disc + TWO bars
     // of real tapered/drooped blades. rotor & rotor2 are Groups (each a 2-blade bar
     // crossing the hub) so a .rotation.y still spins them exactly as before.
     const mast = new THREE.Mesh(taperBox(0.26, 0.55, 0.26, { top: 0.6 }), a.mDark); mast.position.y = 1.12; grp.add(mast);
     const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.32, 0.26, 8), a.mGrey); hub.position.y = 1.42; grp.add(hub);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(4.7, 20), a.rotorMat); disc.rotation.x = -Math.PI / 2; disc.position.y = 1.45; grp.add(disc);
+    // swashplate ring + control rods under the hub — the mechanical heart reads
+    const swash = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.07, 10), a.mDark);
+    swash.position.y = 1.3; grp.add(swash);
+    [1, -1].forEach((s) => {
+      const rod = new THREE.Mesh(boxGeo(0.06, 0.3, 0.06), a.mDark);
+      rod.position.set(s * 0.17, 1.16, s * 0.12); rod.rotation.z = s * 0.18; grp.add(rod);
+    });
+    // twin engine cowls flanking the mast + outward-angled exhaust stubs
+    [1, -1].forEach((s) => {
+      const cowl = new THREE.Mesh(taperBox(0.5, 0.36, 1.6, { tz: 0.65, top: 0.7 }), a.mGrey);
+      cowl.position.set(s * 0.42, 0.92, -0.7); grp.add(cowl);
+      const ex = new THREE.Mesh(boxGeo(0.16, 0.16, 0.32), a.mDark);
+      ex.position.set(s * 0.52, 1.0, -1.44); ex.rotation.y = s * 0.35; grp.add(ex);
+    });
+    // ROTOR-BLUR DISC — per-craft material starting INVISIBLE; spinRotors fades
+    // it in with rotor RATE (parked = clean blades, full power = translucent
+    // blur), replacing the old always-on ghost ring over a cold heli.
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(4.7, 20),
+      new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 1.45; grp.add(disc);
+    grp.userData.rotorDisc = disc;
     function bladeBar() {
       const bar = new THREE.Group(); bar.position.y = 1.44;
       bar.add(makeBlade(4.6, a.bladeMat, 0.16));        // blade extends +X from hub
@@ -303,15 +369,17 @@
     const rotor = bladeBar(); grp.add(rotor);
     const rotor2 = bladeBar(); rotor2.rotation.y = Math.PI / 2; grp.add(rotor2);   // crossed → 4-blade look
     // TAIL ROTOR (spins about X) — hub + two crossed bars of small blades on the fin
-    const thub = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 6), a.mGrey); thub.rotation.z = Math.PI / 2; thub.position.set(0.24, 0.9, -5.45); grp.add(thub);
+    const thub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.14, 6), a.mGrey); thub.rotation.z = Math.PI / 2; thub.position.set(0.24, 0.95, -5.45); grp.add(thub);
     function tailBar() {
-      const bar = new THREE.Group(); bar.position.set(0.24, 0.9, -5.45);
+      // tail-rotor disc sized to the reference ratio (~0.15x the main disc —
+      // undersized tail rotors are the classic toy-helicopter tell)
+      const bar = new THREE.Group(); bar.position.set(0.24, 0.95, -5.45);
       [-1, 1].forEach((s) => {
-        const bg = new THREE.BoxGeometry(0.05, 0.92, 0.22, 1, 4, 1);
+        const bg = new THREE.BoxGeometry(0.06, 1.28, 0.26, 1, 4, 1);
         const pos = bg.attributes.position;
-        for (let i = 0; i < pos.count; i++) { const ty = pos.getY(i); pos.setZ(i, pos.getZ(i) * (1 - 0.4 * Math.abs(ty) / 0.46)); }
+        for (let i = 0; i < pos.count; i++) { const ty = pos.getY(i); pos.setZ(i, pos.getZ(i) * (1 - 0.4 * Math.abs(ty) / 0.64)); }
         pos.needsUpdate = true; bg.computeVertexNormals();
-        const bl = new THREE.Mesh(bg, a.bladeMat); bl.position.y = s * 0.46; bar.add(bl);
+        const bl = new THREE.Mesh(bg, a.bladeMat); bl.position.y = s * 0.64; bar.add(bl);
       });
       return bar;
     }
@@ -336,11 +404,14 @@
     // SLEEK SCULPTED FUSELAGE (+Z forward): the spine everything plugs into. The
     // box pinches to a sharp nose (nz small), necks down at the tail, narrows the
     // spine (top) and rounds the belly (bot) — one curved draw call, no seams.
-    const body = new THREE.Mesh(taperBox(1.55, 1.05, 8.8, { nz: 0.22, tz: 0.62, top: 0.72, bot: 0.62, segD: 10 }), a.mJet);
+    const body = new THREE.Mesh(taperBox(1.55, 1.05, 8.8, { nz: 0.18, tz: 0.62, top: 0.72, bot: 0.62, segD: 10 }), a.mJet);
     grp.add(body);
     // a fine needle nose tip extending the taper to a point (radar boom feel)
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.3, 8), a.mJetDk);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.35, 8), a.mJetDk);
     tip.rotation.x = -Math.PI / 2; tip.position.set(0, -0.02, 4.85); grp.add(tip);
+    // radome seam collar where the dark nosecone meets the skin — crisps the nose
+    const seam = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.12, 10), a.mJetDk);
+    seam.rotation.x = Math.PI / 2; seam.position.set(0, -0.01, 4.15); grp.add(seam);
     // REFLECTIVE BUBBLE CANOPY — domed, raked, narrows toward the nose & top
     const canopy = new THREE.Mesh(taperBox(0.9, 0.62, 2.4, { nz: 0.45, tz: 0.95, top: 0.45, bot: 1.0 }), a.mGlass);
     canopy.position.set(0, 0.5, 1.85); grp.add(canopy);
@@ -349,10 +420,13 @@
       const chine = new THREE.Mesh(taperBox(1.1, 0.4, 4.4, { nz: 0.25, tz: 0.85, top: 0.7 }), a.mJetDk);
       chine.position.set(s * 0.78, -0.12, 1.9); chine.rotation.y = s * 0.12; grp.add(chine);
     });
-    // side air intakes hugging the lower fuselage
+    // side air intakes hugging the lower fuselage, with near-black inner mouths
+    // proud of the front face so the duct reads as an opening, not a slab
     [-1, 1].forEach((s) => {
       const intake = new THREE.Mesh(taperBox(0.5, 0.62, 2.0, { nz: 0.7, tz: 1.0, top: 0.7 }), a.mJetDk);
       intake.position.set(s * 0.82, -0.18, 0.7); grp.add(intake);
+      const mouth = new THREE.Mesh(boxGeo(0.3, 0.4, 0.16), a.mDark);
+      mouth.position.set(s * 0.82, -0.2, 1.66); grp.add(mouth);
     });
     // CLEAN DELTA WINGS (swept, tapered) with a touch of DIHEDRAL (tips raised).
     // Roots driven through the fuselage; each wing tapers toward the tip + carries
@@ -393,6 +467,35 @@
     const burn = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), a.mWarn);
     burn.scale.set(0.7, 0.7, 1.6); burn.position.set(0, -0.05, -5.0); grp.add(burn);
     grp.userData.burn = burn;
+    // AFTERBURNER PLUMES — one additive cone per can, base anchored at the
+    // nozzle mouth so scaling only stretches AFT. Invisible cold; flyJet drives
+    // length/brightness from the throttle. Per-craft material (never _shared)
+    // so the disposer frees it and the opacity animation can't leak to a twin.
+    const plumeMat = new THREE.MeshBasicMaterial({ color: 0xff8c3a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const plume = [];
+    [-0.5, 0.5].forEach((s) => {
+      const pg = new THREE.ConeGeometry(0.3, 1.5, 10);
+      pg.translate(0, 0.75, 0);                       // base at the mesh origin
+      const p = new THREE.Mesh(pg, plumeMat);
+      p.rotation.x = -Math.PI / 2;                    // apex points -Z (astern)
+      p.position.set(s, -0.05, -4.9); grp.add(p); plume.push(p);
+    });
+    grp.userData.plume = plume; grp.userData.plumeMat = plumeMat;
+    // LANDING GEAR (nose leg + two mains): chunky struts + wheel drums. The
+    // whole group is toggled by integrate() — down under ~9m AGL, tucked above.
+    // A parked Raptor always shows it (built visible; exitAircraft re-lowers).
+    const gear = new THREE.Group();
+    function leg(x, z, wr, sh) {
+      const strut = new THREE.Mesh(taperBox(0.16, sh, 0.16, { top: 0.75 }), a.mGrey);
+      strut.position.set(x, -0.23 - sh / 2, z); gear.add(strut);
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wr, wr, 0.16, 10), a.mDark);
+      wheel.rotation.z = Math.PI / 2; wheel.position.set(x, -1.0 + wr, z); gear.add(wheel);
+    }
+    leg(0, 3.0, 0.18, 0.62);          // nose leg (under the forward fuselage)
+    leg(-0.78, -0.4, 0.22, 0.58);     // port main (under the intake trunk)
+    leg(0.78, -0.4, 0.22, 0.58);      // stbd main
+    grp.add(gear);
+    grp.userData.gear = gear;
     // NAV LIGHTS: port wingtip red, stbd wingtip green, white tailfin beacon
     navLight(grp, a.navR, -2.7, 0.0, -1.4);
     navLight(grp, a.navG,  2.7, 0.0, -1.4);
@@ -402,6 +505,10 @@
     grp.userData.belly = 0.6;
     return grp;
   }
+
+  // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots
+  // (no arena/scene dependency — returns a fresh Object3D). Dev-only cost: nil.
+  CBZ.debugBuildAircraft = { heli: buildHeli, jet: buildJet };
 
   // ============================================================
   //  SPAWN / PLACEMENT
@@ -416,12 +523,42 @@
     });
   }
 
+  // ---- SWAP-FIX contract with island_military.js: on a parked military craft
+  // the live MAIN rotor mesh is tagged `userData.rotor` (spins about local Y)
+  // and the tail rotor `userData.tailRotor` (spins about local X). Collect them
+  // once at adoption so the per-frame spin is a flat array walk. Object3D-valued
+  // tags are skipped here — that's our OWN builders' group.userData channel,
+  // which spinRotors drives directly.
+  function collectTaggedRotors(grp) {
+    const mains = [], tails = [];
+    if (grp && grp.traverse) {
+      grp.traverse(function (o) {
+        if (o === grp || !o.userData) return;
+        if (o.userData.tailRotor) tails.push(o);
+        else if (o.userData.rotor && !o.userData.rotor.isObject3D) mains.push(o);
+      });
+    }
+    return { mains: mains, tails: tails };
+  }
+  // does a (possibly island-built) group expose a spinnable main rotor at all?
+  function groupHasRotor(grp) {
+    const ud = grp && grp.userData;
+    if (ud && ud.rotor && ud.rotor.isObject3D) return true;    // builder-style pointer tag
+    return collectTaggedRotors(grp).mains.length > 0;          // island-style mesh tags
+  }
+
   function makeCraft(kind, opts) {
     opts = opts || {};
     const root = arenaRoot(); if (!root) return null;
-    // Civilian airport theft reuses the exact parked airliner/private-jet group.
-    // Owned/military craft keep using the purpose-built flight models.
+    // Civilian airport theft reuses the exact parked airliner/private-jet group,
+    // and (swap fix) so does a commandeered MILITARY jet/bomber/heli. Owned
+    // craft keep using the purpose-built flight models.
     const grp = opts.group || (kind === "jet" ? buildJet() : buildHeli());
+    if (opts.group) {
+      // an adopted parked prop may have been matrix-frozen as static scenery by
+      // the perf pass — the root moves every frame now, so wake its matrix.
+      grp.matrixAutoUpdate = true;
+    }
     if (!grp.parent) root.add(grp);
     const armed = opts.armed !== false;
     const craft = {
@@ -453,7 +590,24 @@
       stalled: false,          // jet (or heli rotor) currently past the stall AoA
       aoa: 0,                  // last computed angle-of-attack, deg (HUD/diagnostic)
       destroyed: false,
+      // ---- flight model V2 state ----
+      // airClass picks the per-class WING_V2 tuning row: hijacked airliners fly
+      // heavy and stately, a hijacked private jet flies the light GA profile,
+      // military fast movers fly "jet". Helis dispatch to flyHeliV2 instead.
+      airClass: kind === "heli" ? "heli"
+        : (opts.civilian ? (opts.flightKind === "airliner" ? "airliner" : "prop") : "jet"),
+      airspeed: 0,             // V2: every craft starts from a genuine standstill
+      thr: null,               // V2 throttle 0..1 (lazily seeded on first V2 frame)
+      sag: 0,                  // accumulated stall/gravity sink (m/s)
+      onGround: true,          // ground-roll vs airborne state
+      rotorRate: null,         // eased rotor spin rate (spin-up/spin-down)
     };
+    // island-tagged rotor meshes on an adopted group (military reuse) — collect
+    // once, and un-freeze each so its local spin actually recomposes a matrix.
+    craft.rotorParts = opts.group ? collectTaggedRotors(grp) : null;
+    if (craft.rotorParts) {
+      craft.rotorParts.mains.concat(craft.rotorParts.tails).forEach(function (o) { o.matrixAutoUpdate = true; });
+    }
     grp.userData.craft = craft;
     return craft;
   }
@@ -542,6 +696,7 @@
     jet.pos.set(px, py, pz);
     jet.heading = 0; jet.pitch = 0; jet.roll = 0;
     jet.vx = jet.vy = jet.vz = 0; jet.speed = JET_MIN; jet.throttle = JET_MIN;
+    jet.airspeed = 0; jet.thr = null; jet.sag = 0; jet.onGround = true;
     setCraftRotation(jet, 0, 0, 0);
     if (RESUPPLY_AT_BASE) { jet.ammo = jet.maxAmmo; jet.hp = jet.maxHp; }
   }
@@ -623,8 +778,13 @@
     craft.pitch = craft.roll = 0;
     craft.vx = craft.vy = craft.vz = 0;
     craft.speed = 0;
+    craft.airspeed = 0; craft.thr = null; craft.sag = 0; craft.onGround = true;
     craft.pos.y = gy + (craft.groundOffset != null ? craft.groundOffset : 0);
     setCraftRotation(craft, 0, craft.heading, 0);
+    // keep the registry anchor honest if this rec's pos is a snapshot rather
+    // than an alias of the group's live position (registerVehicle only aliases
+    // when the rec arrives without one) — the collider rebuild reads rec.pos.
+    if (rec.pos && rec.pos !== craft.pos) { rec.pos.x = craft.pos.x; rec.pos.y = craft.pos.y; rec.pos.z = craft.pos.z; }
     rec.heading = craft.heading + (craft.modelYawOffset || 0);
     rec.taken = false;
     rec.group.visible = true;
@@ -635,27 +795,41 @@
   }
 
   // ---- STEAL A FLYABLE FROM A PARKED PROP — the entry militaryvehicles.js calls
-  // when you commandeer a base helicopter or an airport/airliner/private jet.
-  // Military props still get the proven weaponised stand-in. Civil airport planes
-  // instead attach the flight state to their EXACT parked group: no F-22 swap, no
-  // duplicate left at the gate, no missiles on a commercial airframe. Both live in
-  // the separate `stolenAir` slot so owned heli/Raptor singletons are untouched.
+  // when you commandeer a base jet/bomber/helicopter or an airport airliner/
+  // private jet. BOTH paths now attach the flight state to the EXACT parked
+  // group: the distinct bomber/gunship silhouette you walked up to is the one
+  // that takes off — no more swapping in a generic F-22/chopper stand-in. A
+  // military heli only reuses its group when island_military.js tagged a live
+  // rotor on it (userData.rotor); otherwise, and whenever the group is missing,
+  // it falls back to the proven weaponised stand-in so blades never freeze
+  // mid-air. Everything lives in the separate `stolenAir` slot so the owned
+  // heli/Raptor singletons are untouched.
   function spawnFlyableFromProp(rec) {
     if (!rec || !rec.pos) return null;
     const root = arenaRoot(); if (!root) return null;
     if (CBZ.player && CBZ.player._aircraft) return null;       // already airborne
     const kind = rec.kind === "heli" ? "heli" : "jet";
     const civil = !!(rec.civilian && rec.kind === "plane");
+    // THE SWAP FIX — reuse the real military airframe (flag-gated for revert)
+    let milGroup = null;
+    if (!civil && rec.group && rec.group.isObject3D &&
+        (!CBZ.CONFIG || CBZ.CONFIG.AIR_MILITARY_REUSE !== false)) {
+      if (kind !== "heli" || groupHasRotor(rec.group)) milGroup = rec.group;
+    }
     // recycle a prior stolen bird if it's lying around un-flown
     if (stolenAir && _aircraftFlying() !== stolenAir) {
       if (!parkExternalCraft(stolenAir)) disposeGroup(stolenAir.group);
       stolenAir = null;
     }
+    // camera pull-back scales with the airframe footprint, so a bomber gets the
+    // airliner-style frame while a fighter keeps the tight default chase cam.
+    const foot = Math.max(rec.footW || 3, rec.footL || 5);
     const craft = makeCraft(kind, civil ? {
       group: rec.group,
       sourceRec: rec,
       civilian: true,
       armed: false,
+      flightKind: rec.flightKind,     // airliner vs privatejet → V2 airClass
       name: (rec.model && rec.model.name) || "Airliner",
       modelYawOffset: rec.modelYawOffset != null ? rec.modelYawOffset : -Math.PI / 2,
       groundOffset: rec.groundOffset != null ? rec.groundOffset : 0,
@@ -664,8 +838,28 @@
       cameraBack: rec.flightKind === "airliner" ? 30 : 16,
       cameraUp: rec.flightKind === "airliner" ? 14 : 10,
       cameraAhead: rec.flightKind === "airliner" ? 18 : 10,
+    } : milGroup ? {
+      group: milGroup,
+      sourceRec: rec,
+      armed: true,                    // military hardware keeps its missiles
+      name: (rec.model && rec.model.name) || (kind === "heli" ? "Military Gunship" : "Military Jet"),
+      // military island models are built +Z-forward at heading 0 (rec supplies
+      // an offset if a model deviates — same channel the airport recs use)
+      modelYawOffset: rec.modelYawOffset != null ? rec.modelYawOffset : 0,
+      groundOffset: rec.groundOffset != null ? rec.groundOffset : 0,
+      cameraBack: Math.max(9.5, Math.min(32, foot * 0.85)),
+      cameraUp: Math.max(10, Math.min(15, foot * 0.42)),
+      cameraAhead: Math.max(6, Math.min(18, foot * 0.5)),
     } : null); if (!craft) return null;
     stolenAir = craft;
+    // a reused military group has no builder muzzle — pin one to the model's
+    // visual nose (respecting its yaw offset) so missiles leave the airframe,
+    // not its centroid. addMuzzle also drops the small hot marker bead.
+    if (milGroup && !craft.group.userData.muzzle) {
+      const yo = craft.modelYawOffset || 0, nose = (rec.footL || 5) * 0.55;
+      addMuzzle(craft.group, Math.sin(-yo) * nose, 1.1, Math.cos(-yo) * nose);
+      craft.muzzle = craft.group.userData.muzzleLocal;
+    }
     // rec.heading is the parked MODEL yaw; convert back to the shared flight
     // heading before the per-model visual offset is reapplied.
     const heading = (rec.heading != null ? rec.heading : 0) - (craft.modelYawOffset || 0);
@@ -677,7 +871,7 @@
     craft.speed = civil ? 0 : (kind === "jet" ? JET_MIN : 0);
     craft.group.position.copy(craft.pos);
     setCraftRotation(craft, 0, craft.heading, 0);
-    if (civil) detachPropCollider(rec);
+    if (craft.externalGroup) detachPropCollider(rec);   // the hull you fly can't stay solid on the apron
     craft.hot = true;                                          // never keepable: a base bird, not yours
     craft.fromProp = true;                                    // so the keep-gate ignores it (only the Raptor launders)
     enterAircraft(craft);
@@ -769,6 +963,10 @@
       setCraftRotation(craft, 0, craft.heading, 0);
       craft.pitch = craft.roll = 0; craft.vx = craft.vy = craft.vz = 0; craft.speed = craft.kind === "jet" ? JET_MIN : 0;
       if (craft.kind === "jet") craft.throttle = JET_MIN;
+      craft.airspeed = 0; craft.thr = null; craft.sag = 0; craft.onGround = true;
+      const udX = craft.group && craft.group.userData;
+      if (udX && udX.gear) udX.gear.visible = true;         // parked = gear down
+      if (udX && udX.plumeMat) udX.plumeMat.opacity = 0;    // engines back to cold
       const gy = floorY(craft.pos.x, craft.pos.z);
       const ox = Math.sin(craft.heading) * 2.2, oz = Math.cos(craft.heading) * 2.2;
       P.pos.set(craft.pos.x + ox, Math.max(gy, craft.pos.y - craft.belly), craft.pos.z + oz);
@@ -918,6 +1116,31 @@
     if (A && A.clampToCity) { try { A.clampToCity(pos, r); } catch (e) {} }
   }
 
+  // ---- spin every rotor a craft owns: the builder bars on OUR heli (group
+  // userData.rotor/rotor2/trotor/trotor2 — 90° phase keeps the crossed bars a
+  // true 4-blade star) AND any island-tagged meshes on a commandeered military
+  // airframe (craft.rotorParts; mains spin about local Y, tails about local X).
+  // Also fades the blur disc with rotor RATE: parked idle shows clean blades,
+  // full power shows the translucent disc.
+  function spinRotors(craft, dt, rate) {
+    craft.rotorSpin += dt * rate;
+    const ud = craft.group.userData || {};
+    if (ud.rotor && ud.rotor.rotation) ud.rotor.rotation.y = craft.rotorSpin;
+    if (ud.rotor2 && ud.rotor2.rotation) ud.rotor2.rotation.y = craft.rotorSpin + Math.PI / 2;
+    if (ud.trotor && ud.trotor.rotation) ud.trotor.rotation.x = craft.rotorSpin * 1.6;
+    if (ud.trotor2 && ud.trotor2.rotation) ud.trotor2.rotation.x = craft.rotorSpin * 1.6 + Math.PI / 2;
+    const rp = craft.rotorParts;
+    if (rp) {
+      for (let i = 0; i < rp.mains.length; i++) rp.mains[i].rotation.y = craft.rotorSpin + i * (Math.PI / 2);
+      for (let i = 0; i < rp.tails.length; i++) rp.tails[i].rotation.x = craft.rotorSpin * 1.6;
+    }
+    if (ud.rotorDisc && ud.rotorDisc.material) {
+      const target = Math.max(0, Math.min(1, (rate - 8) / 20)) * 0.34;
+      const m = ud.rotorDisc.material;
+      m.opacity += (target - m.opacity) * Math.min(1, dt * 4);
+    }
+  }
+
   function flyHeli(craft, dt) {
     const k = CBZ.keys || {};
     const A = CBZ.aeroPhysics;
@@ -1029,12 +1252,7 @@
     craft.pitch = (craft.pitch || 0) + ((-thr * 0.18 + stallPitch) - craft.pitch) * Math.min(1, dt * 4);
     craft.roll = (craft.roll || 0) + ((yaw * 0.22) - craft.roll) * Math.min(1, dt * 4);
     // spin the rotors (autorotation keeps them windmilling, just slower/no power feel)
-    craft.rotorSpin += dt * (craft.autorotating ? 18 : 30);
-    const ud = craft.group.userData;
-    if (ud.rotor) ud.rotor.rotation.y = craft.rotorSpin;
-    if (ud.rotor2) ud.rotor2.rotation.y = craft.rotorSpin + Math.PI / 4;
-    if (ud.trotor) ud.trotor.rotation.x = craft.rotorSpin * 1.6;
-    if (ud.trotor2) ud.trotor2.rotation.x = craft.rotorSpin * 1.6 + Math.PI / 4;
+    spinRotors(craft, dt, craft.autorotating ? 18 : 30);
     craft.speed = hsp;
     craft.aoa = aoaDeg; craft.stalled = stalled;
   }
@@ -1149,6 +1367,16 @@
     // afterburner pulse
     const ud = craft.group.userData;
     if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (thr > 0 ? 0.6 : 0);
+    // throttle-driven plume cones: a faint shimmer at idle cruise, stretching
+    // and brightening toward full burner (opacity ramps quadratically so the
+    // glow only really blooms in the top half of the throttle range).
+    if (ud.plume && ud.plumeMat) {
+      const frac = Math.max(0, Math.min(1, (craft.throttle - JET_MIN) / (JET_MAX - JET_MIN)));
+      const flick = 0.92 + Math.sin(craft.rotorSpin * 1.7) * 0.08;
+      const len = (0.35 + 1.5 * frac) * flick, rad = 0.55 + 0.45 * frac;
+      for (let i = 0; i < ud.plume.length; i++) ud.plume[i].scale.set(rad, len, rad);
+      ud.plumeMat.opacity = 0.10 + 0.75 * frac * frac;
+    }
   }
 
   function integrate(craft, dt) {
@@ -1174,6 +1402,10 @@
       if (craft.kind === "jet" && craft.pitch < 0) craft.pitch = 0;
     }
     if (craft.pos.y > CEILING) { craft.pos.y = CEILING; if (craft.vy > 0) craft.vy = 0; }
+    // retractable landing gear (jet): legs drop when skimming low, tuck away
+    // with altitude — driven off the same AGL this integrator already knows.
+    const udI = craft.group.userData;
+    if (udI && udI.gear) udI.gear.visible = (craft.pos.y - gy) < 9;
     // keep inside the world bounds
     clampToCity(craft.pos, 2.0);
     // apply transform
@@ -1181,15 +1413,344 @@
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
   }
 
+  // ============================================================
+  //  FLIGHT MODEL V2 — CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 (one-line revert to the
+  //  V1 flyHeli/flyJet/integrate path above). Adds: real ground-roll →
+  //  rotate-at-Vr → climb takeoffs, coordinated bank-to-turn with auto-level,
+  //  a stall that genuinely sinks (persistent gravity sag under the lift
+  //  band), flare/touchdown judgement (slam in or nose-first = fireball),
+  //  wall strikes, rooftop-aware ground clamp (no more flying THROUGH
+  //  towers), rotor spin-up, and a hover model that visibly leans into its
+  //  own velocity.
+  // ============================================================
+
+  // tallest collider top at/below the craft's belly — the surface it can land
+  // on (terrain OR a rooftop). Same CBZ.colliders data aircraft.js's AI uses.
+  function roofUnder(craft) {
+    let topY = 0;
+    const cols = CBZ.colliders || [];
+    const x = craft.pos.x, z = craft.pos.z;
+    const yRef = craft.pos.y - craft.belly + 0.6;    // only tops at/under the belly count
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y1 == null || c.y1 <= topY || c.y1 > yRef) continue;
+      if (x < c.minX - 0.5 || x > c.maxX + 0.5 || z < c.minZ - 0.5 || z > c.maxZ + 0.5) continue;
+      topY = c.y1;
+    }
+    return topY;
+  }
+  // is the craft's nose about to bury itself in a building FACE? (a collider
+  // whose span covers the nose point at the nose's own altitude — a roof we
+  // are safely above never triggers, because the y-range test fails there)
+  function wallAhead(craft) {
+    const cols = CBZ.colliders || [];
+    const reach = 2.5 + (craft.speed || 0) * 0.06;
+    const cp = Math.cos(craft.pitch || 0);
+    const nx = craft.pos.x + Math.sin(craft.heading) * cp * reach;
+    const ny = craft.pos.y + Math.sin(craft.pitch || 0) * reach;
+    const nz = craft.pos.z + Math.cos(craft.heading) * cp * reach;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (nx < c.minX || nx > c.maxX || nz < c.minZ || nz > c.maxZ) continue;
+      const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
+      if (ny >= y0 && ny <= y1) return true;
+    }
+    return false;
+  }
+
+  // the fireball ending: blast, zero the airframe, dump the pilot. Owned craft
+  // are disposed so the self-heal watchdog respawns a fresh one at base; hot /
+  // external craft ride the existing exitAircraft despawn/park paths.
+  function crashCraft(craft) {
+    if (!craft || craft.destroyed) return;
+    craft.destroyed = true;
+    const x = craft.pos.x, y = craft.pos.y, z = craft.pos.z;
+    if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power: 2.4, radius: 13, byPlayer: true, y }); } catch (e) {} }
+    else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 2.0, radius: 10, byPlayer: true }); } catch (e) {} }
+    if (CBZ.shake) { try { CBZ.shake(1.2); } catch (e) {} }
+    craft.hp = 0;
+    exitAircraft();                             // handles hot-craft despawn / external park
+    if (heli === craft) { disposeGroup(heli.group); heli = null; placeHeli(); }
+    else if (jet === craft) { disposeGroup(jet.group); jet = null; placeJet(); }
+    aircraftNote("Airframe destroyed.", 2.4, "Flight Ops");
+  }
+
+  // ---- V2 FIXED-WING (jet / private jet / airliner share the math, the
+  // per-class WING_V2 row is the personality) --------------------------------
+  function flyWingV2(craft, dt) {
+    const k = CBZ.keys || {};
+    const C = WING_V2[craft.airClass] || WING_V2.jet;
+    const authority = controlAuthority(craft);
+    if (craft.thr == null) craft.thr = (craft.kind === "jet" && !craft.civilian) ? 0.35 : 0;
+    if (craft.airspeed == null) craft.airspeed = craft.speed || 0;
+
+    // throttle 0..1, ~1.6s idle→firewall sweep
+    let thr = 0;
+    if (k["w"]) thr += 1;
+    if (k["s"]) thr -= 1;
+    craft.thr = Math.max(0, Math.min(1, craft.thr + thr * 0.6 * dt));
+
+    // ground state off the cached landing surface (terrain or rooftop) —
+    // measured against the craft's REST height (owned craft park GROUND_PAD
+    // above the floor, so a raw belly-AGL test would never read "down")
+    const gy = floorY(craft.pos.x, craft.pos.z);
+    const surfY = Math.max(gy, craft._roof || 0);
+    const restY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
+    const agl = Math.max(0, craft.pos.y - restY);
+    craft.onGround = agl < 0.3;
+
+    // ---- airspeed: engine vs drag, climb bleeds / dive regains ----
+    const engine = craft.thr * C.thrust;
+    const drag = C.dragK * craft.airspeed * craft.airspeed;
+    craft.airspeed += (engine - drag) * dt;
+    craft.airspeed -= C.bleed * Math.sin(craft.pitch || 0) * dt;
+    if (craft.onGround) {
+      craft.airspeed -= 2.2 * dt;                          // rolling friction
+      if (thr < 0) craft.airspeed -= C.gacc * 0.6 * dt;    // wheel brakes on S
+    }
+    craft.airspeed = Math.max(0, Math.min(C.vmax * 1.05, craft.airspeed));
+
+    // ---- bank → coordinated turn (A/D), auto-level hands-off ----
+    let bank = 0;
+    if (k["a"]) bank += 1;
+    if (k["d"]) bank -= 1;
+    if (bank !== 0 && !craft.onGround) {
+      const targetRoll = bank * C.rollMax * authority;
+      craft.roll = (craft.roll || 0) + (targetRoll - craft.roll) * Math.min(1, dt * C.rollRate);
+    } else {
+      craft.roll = (craft.roll || 0) * Math.max(0, 1 - C.autoLevel * dt);
+    }
+    craft.roll = Math.max(-C.rollMax, Math.min(C.rollMax, craft.roll));
+    let pitchComp = 0;
+    if (!craft.onGround && craft.airspeed > C.vminfly) {
+      const vGate = Math.min(1, craft.airspeed / C.vmax);
+      craft.heading += C.turnK * Math.sin(craft.roll) * (0.4 + 0.6 * vGate) * authority * dt;
+      pitchComp = 0.10 * Math.abs(Math.sin(craft.roll));   // hold the nose through the bank
+    } else if (craft.onGround && craft.airspeed > 0.5) {
+      // nosewheel steering — sharper when slow, washing out toward Vr
+      craft.heading += bank * 0.9 * Math.min(1, craft.airspeed / C.vr) * dt;
+    }
+    // mouse look still eases the nose toward where you're looking (airborne)
+    if (CBZ.cam && !craft.onGround) {
+      const camHeading = CBZ.cam.yaw + Math.PI;
+      let dh = camHeading - craft.heading;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      craft.heading += dh * Math.min(1, dt * 1.6) * authority;
+    }
+
+    // ---- pitch: SPACE/CTRL attitude command; can't rotate before Vr ----
+    let climb = 0;
+    if (k[" "]) climb += 1;
+    if (k["control"] || k["shift"]) climb -= 1;
+    const targetPitch = (craft.onGround && craft.airspeed < C.vr)
+      ? 0
+      : climb * C.pitchMax * authority + pitchComp;
+    craft.pitch = (craft.pitch || 0) + (targetPitch - craft.pitch) * Math.min(1, dt * C.pitchRate);
+    craft.pitch = Math.max(-C.pitchMax, Math.min(C.pitchMax, craft.pitch));
+
+    // ---- stall: under Vstall the wing can't hold the nose — it drops and
+    // the roll wallows; recovers the instant speed returns ----
+    craft.stalled = !craft.onGround && craft.airspeed < C.vstall && agl > 2;
+    if (craft.stalled) {
+      craft.pitch += (-0.5 - craft.pitch) * Math.min(1, dt * 1.2);
+      craft.roll *= Math.max(0, 1 - 0.5 * dt);
+    }
+
+    // ---- gravity sag: builds whenever airspeed is under the lift band,
+    // decays once flying speed returns — this is the sink you feel ----
+    const liftFrac = craft.onGround ? 1
+      : Math.max(0, Math.min(1, (craft.airspeed - C.vminfly) / Math.max(1, C.vstall - C.vminfly)));
+    craft.sag = Math.min(25, (craft.sag || 0) + (1 - liftFrac) * 9.8 * dt);
+    craft.sag *= Math.max(0, 1 - (0.8 + 3.2 * liftFrac) * dt);
+
+    // ---- derive world velocity for the integrator ----
+    const cp = Math.cos(craft.pitch);
+    craft.vx = Math.sin(craft.heading) * cp * craft.airspeed;
+    craft.vz = Math.cos(craft.heading) * cp * craft.airspeed;
+    craft.vy = Math.sin(craft.pitch) * craft.airspeed - craft.sag;
+    // ground effect: a floaty cushion right at the deck (reused shared curve)
+    if (CBZ.aeroPhysics && !craft.onGround && agl < C.span * 1.25) {
+      const gm = CBZ.aeroPhysics.groundEffectMul(Math.max(0, agl), C.span);
+      if (gm > 1) craft.vy += (gm - 1) * 6;
+    }
+    craft.speed = craft.airspeed;
+    craft.aoa = craft.stalled ? 24 : Math.abs(craft.pitch) * 12;
+
+    // engine visuals: burner glow + throttle-driven plume off the V2 throttle
+    const ud = craft.group.userData;
+    if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (thr > 0 ? 0.6 : 0);
+    if (ud.plume && ud.plumeMat) {
+      const frac = craft.thr;
+      const flick = 0.92 + Math.sin(craft.rotorSpin * 1.7) * 0.08;
+      const len = (0.35 + 1.5 * frac) * flick, rad = 0.55 + 0.45 * frac;
+      for (let i = 0; i < ud.plume.length; i++) ud.plume[i].scale.set(rad, len, rad);
+      ud.plumeMat.opacity = 0.10 + 0.75 * frac * frac;
+    }
+    // legacy throttle field kept in the old m/s scale for HUD/exit paths
+    craft.throttle = JET_MIN + craft.thr * (JET_MAX - JET_MIN);
+  }
+
+  // ---- V2 HELICOPTER: V1's torque/ETL/autorotation core, plus an eased
+  // vertical command (the hover breathes), skid grip on the ground, rotor
+  // spin-up, and a fuselage that visibly leans into its own velocity ----
+  function flyHeliV2(craft, dt) {
+    const k = CBZ.keys || {};
+    const A = CBZ.aeroPhysics;
+    const authority = controlAuthority(craft);
+    craft.autorotating = craft.maxHp > 0 && (craft.hp / craft.maxHp) <= AUTOROTATE_AT;
+
+    if (CBZ.cam) craft.heading = CBZ.cam.yaw + Math.PI;
+    let yaw = 0;
+    if (k["a"]) yaw += 1;
+    if (k["d"]) yaw -= 1;
+    let thr = 0;
+    if (k["w"]) thr += 1;
+    if (k["s"]) thr -= 1;
+    let liftIn = 0;
+    if (k[" "]) liftIn += 1;
+    if (k["shift"] || k["control"]) liftIn -= 1;
+
+    // torque / tail-rotor coupling (same model as V1 — pulling power fights
+    // the pedals until you trim it out)
+    const powerLoad = Math.max(0, liftIn) * 0.7 + Math.max(0, thr) * 0.3;
+    const targetTorqueYaw = -powerLoad * HELI_TORQUE_GAIN;
+    craft.torqueYaw = (craft.torqueYaw || 0) + (targetTorqueYaw - (craft.torqueYaw || 0)) * Math.min(1, dt * HELI_TORQUE_DAMP);
+    if (CBZ.cam) CBZ.cam.yaw -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;
+
+    const fx = Math.sin(craft.heading), fz = Math.cos(craft.heading);
+    craft.vx += fx * thr * HELI_THRUST * authority * dt;
+    craft.vz += fz * thr * HELI_THRUST * authority * dt;
+
+    // shared aero core: six-axis drag + ETL + ground effect (rooftop-aware AGL,
+    // measured against the skids' REST height — see flyWingV2's note)
+    const groundY = Math.max(floorY(craft.pos.x, craft.pos.z), craft._roof || 0);
+    const restY = groundY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
+    const agl = Math.max(0, craft.pos.y - restY);
+    let etl = 1, groundMul = 1, aoaDeg = 0, stalled = false;
+    if (A) {
+      const local = A.localVelocity(craft.vx, craft.vy, craft.vz, craft.heading, craft.pitch || 0, craft.roll || 0);
+      groundMul = A.groundEffectMul(agl, HELI_SPAN);
+      etl = A.etlMul(Math.max(0, local.z), HELI_ETL_LO, HELI_ETL_HI);
+      const aero = A.aeroForces(local, {
+        liftScale: 0.0065, etl, groundMul,
+        dragCoef: { px: 0.085, nx: 0.085, py: 0.06, ny: 0.06, pz: 0.018, nz: 0.11 },
+      });
+      aoaDeg = aero.aoaDeg; stalled = aero.stalled;
+      const dragWorld = A.worldVelocity(aero.dragLocal.x, 0, aero.dragLocal.z, craft.heading, craft.pitch || 0, craft.roll || 0);
+      craft.vx += dragWorld.x * dt;
+      craft.vz += dragWorld.z * dt;
+    }
+    craft.vx *= Math.max(0, 1 - HELI_DRAG * dt * (thr ? 0.3 : 1));
+    craft.vz *= Math.max(0, 1 - HELI_DRAG * dt * (thr ? 0.3 : 1));
+    const hsp = Math.hypot(craft.vx, craft.vz);
+    if (hsp > HELI_TOP) { const s = HELI_TOP / hsp; craft.vx *= s; craft.vz *= s; }
+
+    craft.onGround = agl < 0.3;
+    const vlift = HELI_VLIFT * authority * (0.85 + (etl - 0.85) + (groundMul - 1) * 0.6);
+    if (craft.autorotating) {
+      // engine out: capped sink, flare near the deck (unchanged from V1)
+      const flareT = agl < FLARE_HEIGHT ? 1 - agl / FLARE_HEIGHT : 0;
+      const targetSink = -AUTOROTATE_SINK + flareT * (AUTOROTATE_SINK - FLARE_SINK) * Math.max(0, liftIn);
+      craft.vy += (targetSink - craft.vy) * Math.min(1, dt * 3);
+    } else {
+      let targetVy = liftIn * vlift;
+      // hover bob: the disc breathes when you're off the collective in the air
+      if (!liftIn && !craft.onGround) targetVy += Math.sin(craft.rotorSpin * 0.22) * 0.35;
+      craft.vy += (targetVy - craft.vy) * Math.min(1, dt * HELI_VDAMP);
+    }
+    // skids grip: a heli sitting on its skids doesn't ice-skate
+    if (craft.onGround && liftIn <= 0) {
+      const s = Math.max(0, 1 - 6 * dt);
+      craft.vx *= s; craft.vz *= s;
+    }
+
+    // visual attitude: lean into the body-frame velocity (cyclic read), bank
+    // with pedal input AND into mouse-steered turns, nose-over on a disc stall
+    let tp = -thr * 0.10 + (stalled ? -0.22 : 0);
+    let trl = yaw * 0.18;
+    // bank into the turn: the mouse IS the heli's steering, so read the
+    // heading RATE and roll into it (purely visual — roll drives nothing on
+    // the heli, so there's no feedback loop), scaled by forward speed
+    if (dt > 0.0001) {
+      let dh = craft.heading - (craft._lastHeading != null ? craft._lastHeading : craft.heading);
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      const hRate = Math.max(-3, Math.min(3, dh / dt));
+      // sign matches the pedal pairing: V1 rolls +0.22 with A (which yaws the
+      // heading NEGATIVE-ward via cam.yaw), so a negative heading rate = the
+      // same positive roll
+      trl += Math.max(-0.3, Math.min(0.3, -hRate * 0.12)) * Math.min(1, hsp / 12);
+    }
+    craft._lastHeading = craft.heading;
+    if (A) {
+      const lv = A.localVelocity(craft.vx, 0, craft.vz, craft.heading, 0, 0);
+      tp += Math.max(-HELI_TILTMAX, Math.min(HELI_TILTMAX, -lv.z * HELI_TILT_K));
+      trl += Math.max(-HELI_TILTMAX, Math.min(HELI_TILTMAX, lv.x * HELI_TILT_K));
+    }
+    craft.pitch = (craft.pitch || 0) + (tp - craft.pitch) * Math.min(1, dt * 4);
+    craft.roll = (craft.roll || 0) + (trl - craft.roll) * Math.min(1, dt * 4);
+
+    // rotor spin-up/down: the commanded rate is eased, so lifting off from
+    // cold visibly winds the disc up and settling down lets it sigh back
+    const wantRate = craft.autorotating ? 18 : (craft.onGround && !liftIn && !thr ? 10 : 30);
+    if (craft.rotorRate == null) craft.rotorRate = wantRate;
+    craft.rotorRate += (wantRate - craft.rotorRate) * Math.min(1, dt * 0.9);
+    spinRotors(craft, dt, craft.rotorRate);
+    craft.speed = hsp;
+    craft.aoa = aoaDeg; craft.stalled = stalled;
+  }
+
+  // ---- V2 integrator: rooftop-aware ground clamp, wall strikes, touchdown
+  // judgement (slam/nose-first = crash), gear + prop-spin animation hooks ----
+  function integrateV2(craft, dt) {
+    const wasAir = !craft.onGround;
+    craft.pos.x += craft.vx * dt;
+    craft.pos.y += craft.vy * dt;
+    craft.pos.z += craft.vz * dt;
+    // landing surface: terrain OR the tallest rooftop under us (throttled scan)
+    craft._surfT = (craft._surfT || 0) - dt;
+    if (craft._surfT <= 0) { craft._surfT = 0.12; craft._roof = roofUnder(craft); }
+    const gy = floorY(craft.pos.x, craft.pos.z);
+    const surfY = Math.max(gy, craft._roof || 0);
+    const minY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
+    // WALL STRIKE: burying the nose in a building face at speed is a crash
+    if (craft.speed > 14 && craft.pos.y - craft.belly > surfY + 1.5 && wallAhead(craft)) {
+      crashCraft(craft);
+      return;
+    }
+    if (craft.pos.y < minY) {
+      const sink = -(craft.vy || 0);
+      if (craft.kind === "heli") {
+        // hard landing: flaring the collective near the deck is a real skill
+        if (sink > FLARE_SINK * 1.6) damageCraft(craft, Math.min(60, (sink - FLARE_SINK) * 4));
+      } else if (wasAir) {
+        // fixed-wing touchdown judgement: slam it in or arrive nose-first and
+        // it's a fireball; grease it on and you roll out
+        if (sink >= 10 || (craft.pitch || 0) < -0.35) { crashCraft(craft); return; }
+        craft.pitch = Math.max(0, craft.pitch || 0) * 0.3;
+        craft.sag = 0;
+      }
+      craft.pos.y = minY;
+      if (craft.vy < 0) craft.vy = 0;
+      craft.onGround = true;
+    }
+    if (craft.pos.y > CEILING) { craft.pos.y = CEILING; if (craft.vy > 0) craft.vy = 0; }
+    const ud = craft.group.userData;
+    if (ud && ud.gear) ud.gear.visible = (craft.pos.y - surfY) < 9;
+    // prop-spin hook: any craft whose builder tags a spinner (userData.prop,
+    // spins about local Z) gets throttle-proportional prop animation for free
+    if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
+    clampToCity(craft.pos, 2.0);
+    craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
+    setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
+  }
+
   CBZ.onUpdate(12, function (dt) {
     if (g.mode !== "city") return;
-    // idle rotor spin for a parked-but-owned heli (it reads as "ready")
-    if (heli && _aircraftFlying() !== heli && heli.group) {
-      heli.rotorSpin += dt * 6;
-      const ud = heli.group.userData;
-      if (ud.rotor) ud.rotor.rotation.y = heli.rotorSpin;
-      if (ud.rotor2) ud.rotor2.rotation.y = heli.rotorSpin + Math.PI / 4;
-    }
+    // idle rotor spin for a parked-but-owned heli (it reads as "ready" — slow
+    // enough that spinRotors keeps the blur disc fully faded out)
+    if (heli && _aircraftFlying() !== heli && heli.group) spinRotors(heli, dt, 6);
     const P = CBZ.player;
     const craft = P && P._aircraft;
     if (!craft || P.dead) {
@@ -1199,8 +1760,16 @@
       return;
     }
     if (craft.fireCD > 0) craft.fireCD = Math.max(0, craft.fireCD - dt);
-    if (craft.kind === "jet") flyJet(craft, dt); else flyHeli(craft, dt);
-    integrate(craft, dt);
+    if (flightV2()) {
+      if (craft.kind === "heli") flyHeliV2(craft, dt); else flyWingV2(craft, dt);
+      integrateV2(craft, dt);
+      // a wall strike / slammed touchdown crashed the craft this frame —
+      // crashCraft already ran exitAircraft, so the pilot owns the transform
+      if (craft.destroyed || !P._aircraft) return;
+    } else {
+      if (craft.kind === "jet") flyJet(craft, dt); else flyHeli(craft, dt);
+      integrate(craft, dt);
+    }
     // ---- KEEP-GATE: land a HOT stolen F-22 inside a hangar you OWN, slow, and
     // it becomes permanently yours. This is the only way to keep the trophy.
     if (craft.hot && !craft.fromProp && craft.kind === "jet" && craft.speed < 16 && hangarKeepHit(craft.pos.x, craft.pos.z)) {

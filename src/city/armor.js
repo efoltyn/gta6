@@ -42,6 +42,13 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
+  // SWAT REDESIGN (city-swat-redesign): the helmet becomes a real tactical lid
+  // (brim + rails + clear visor + NVG stub + counterweight) and the SWAT plate
+  // becomes a full carrier (shoulder pads, side plates, groin flap). One-line
+  // revert: flip the flag and the old plain dome/box mount is back.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_REDESIGN == null) CBZ.CONFIG.CITY_SWAT_REDESIGN = true;
+  function redesignOn() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
+
   // ---- KIT CATALOG ----------------------------------------------------------
   // pts    : armor points the piece contributes to the pool (the bar's length).
   // absorb : fraction of an incoming BODY hit the pool eats (chest pieces).
@@ -75,6 +82,16 @@
     else if (kind === "vestHi") gm = CBZ.boxGeom(1.04, 0.30, 0.64);   // plate band across the chest
     else if (kind === "helmet") gm = CBZ.boxGeom(0.70, 0.46, 0.70);   // dome over the upper head
     else if (kind === "shield") gm = CBZ.boxGeom(0.04, 0.95, 0.62);
+    // tactical-helmet furniture (city-swat-redesign) — all chunky voxel blocks
+    else if (kind === "helmBrim")  gm = CBZ.boxGeom(0.74, 0.09, 0.30);   // brim lip over the eyes
+    else if (kind === "helmRail")  gm = CBZ.boxGeom(0.07, 0.14, 0.46);   // side accessory rails
+    else if (kind === "helmRear")  gm = CBZ.boxGeom(0.30, 0.18, 0.12);   // rear counterweight pack
+    else if (kind === "helmMount") gm = CBZ.boxGeom(0.12, 0.10, 0.10);   // NVG mount stub
+    else if (kind === "visor")     gm = CBZ.boxGeom(0.56, 0.20, 0.05);   // clear face visor slab
+    // plate-carrier furniture (city-swat-redesign)
+    else if (kind === "shPad")     gm = CBZ.boxGeom(0.30, 0.12, 0.44);   // shoulder pad blocks
+    else if (kind === "sidePlate") gm = CBZ.boxGeom(0.08, 0.44, 0.36);   // cummerbund side plates
+    else if (kind === "groin")     gm = CBZ.boxGeom(0.36, 0.28, 0.08);   // groin flap
     else gm = CBZ.boxGeom(1.0, 0.8, 0.6);
     geos[kind] = gm;
     return gm;
@@ -109,11 +126,29 @@
     _kitMat[kitId] = m;
     return m;
   }
+  // the visor is the one see-through piece: ONE shared translucent slab material
+  // (cmat can't do transparency; built once, flagged _shared so nothing disposes it)
+  let _visorMat = null;
+  function visorMat() {
+    if (_visorMat) return _visorMat;
+    if (!THREE || !THREE.MeshLambertMaterial) return null;
+    _visorMat = new THREE.MeshLambertMaterial({ color: 0xaad4e8, transparent: true, opacity: 0.35 });
+    _visorMat._shared = true;
+    return _visorMat;
+  }
 
   // build the pooled meshes for ONE chest kit + helmet onto a rig, push into out[].
   function mountKitMeshes(an, kitId, out) {
     const k = kit(kitId);
     if (!k || !an) return;
+    // tiny local mounter: pooled part + material + position onto a parent
+    function put(parent, kind, mat2, x, y, z) {
+      if (!mat2) return null;
+      const p = acquire(kind);
+      if (!p) return null;
+      p.material = mat2; p.position.set(x, y, z); parent.add(p); out.push(p);
+      return p;
+    }
     if (k.slot === "chest" && an.body && an.body.add) {
       const mat = matFor(k.id, k.color);
       const vest = acquire("vest");
@@ -123,10 +158,32 @@
         const band = acquire("vestHi");
         if (band) { band.material = mat; band.position.set(0, 1.58, 0.02); an.body.add(band); out.push(band); }
       }
+      // SWAT plate → a full CARRIER (city-swat-redesign): shoulder pad blocks,
+      // cummerbund side plates, groin flap. Torso box is 0.92×0.95×0.5 at
+      // body-local y 1.42, so pads cap the shoulders and the flap hangs at the
+      // belt line. Side plates stay slim so swinging arms don't eat them.
+      if (k.id === "swatVest" && redesignOn()) {
+        put(an.body, "shPad", mat, -0.40, 1.90, 0);
+        put(an.body, "shPad", mat, 0.40, 1.90, 0);
+        put(an.body, "sidePlate", mat, -0.50, 1.32, 0);
+        put(an.body, "sidePlate", mat, 0.50, 1.32, 0);
+        put(an.body, "groin", mat, 0, 0.88, 0.28);
+      }
     } else if (k.slot === "head" && an.neck && an.neck.add) {
       const mat = matFor(k.id, k.color);
       const helm = acquire("helmet");
       if (helm) { helm.material = mat; helm.position.set(0, 0.40, 0); an.neck.add(helm); out.push(helm); }
+      // real tactical lid (city-swat-redesign): brim lip, side rails, a clear
+      // visor slab under the brim, NVG mount stub + rear counterweight. Head is
+      // the 0.6 cube at neck-local y 0.3; the dome spans y 0.17–0.63.
+      if (redesignOn()) {
+        put(an.neck, "helmBrim", mat, 0, 0.22, 0.26);
+        put(an.neck, "helmRail", mat, -0.37, 0.40, 0.02);
+        put(an.neck, "helmRail", mat, 0.37, 0.40, 0.02);
+        put(an.neck, "helmRear", mat, 0, 0.42, -0.40);
+        put(an.neck, "helmMount", mat, 0, 0.55, 0.32);
+        put(an.neck, "visor", visorMat(), 0, 0.30, 0.36);
+      }
     } else if (k.slot === "hand" && an.la && an.la.add) {
       const mat = matFor("shield", 0x3a3f47);
       const sh = acquire("shield");

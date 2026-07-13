@@ -5,15 +5,20 @@
    structured state through CBZ.campaignUI:
 
      setMission(def)
-     notify(type, from, body, meta?)
+     notify(type, from, body, meta?)          — legacy; delegates to phoneNotify
+     phoneNotify({from, app, text, ...})      — canonical (also CBZ.phoneNotify)
      say(speaker, text, choices?) -> Promise<choice|null>
      choice({ id, prompt, options, onChoose }) -> Promise<choice|null>
      choose(idOrIndex)
      clearDialogue()
      open(app?) / close()
 
-   Notification copy is only ever rendered on the raised phone. While the
-   phone is down, the sole signal is the unlabelled phone glyph + LED.
+   PHONE_NOTIS_V2 (CBZ.CONFIG flag): notifications are real-phone pushes from
+   in-world senders (contacts / Bank / News / Bounty / missed calls). With the
+   phone raised, a banner drops in from the top of the glass; stowed, the
+   handset buzzes (glyph shake + LED) and a compact banner rises beside it.
+   Flag off restores the old behavior: copy only on the raised phone, the
+   stowed signal being just the glyph + LED.
 ============================================================ */
 (function () {
   "use strict";
@@ -54,7 +59,62 @@
   const compatRecent = new Map();
   const COMPAT_DEDUPE_MS = 4000;
 
+  // ---- PHONE_NOTIS_V2: diegetic push notifications ---------------------------
+  // Every notice is a real-phone push FROM someone/something in-world. Payload:
+  //   CBZ.phoneNotify({ app, from, text, icon?, priority?, ttl?, onTap?, meta? })
+  // apps: messages | bank | news | bounty | phone (missed call) | missions |
+  // system | contracts (the BLKLST job board — economy systems push to it).
+  // Non-tab apps log into the Messages tab but keep their own badge.
+  const APPS_V2 = ["messages", "bank", "news", "bounty", "phone", "missions", "system", "contracts"];
+  const APP_GLYPH = { messages: "◇", bank: "▤", news: "◫", bounty: "◈", phone: "◐", missions: "◎", system: "▢", contracts: "◆" };
+  const APP_LABEL = { messages: "Messages", bank: "Bank", news: "News", bounty: "Bounty", phone: "Phone", missions: "Ghostline", system: "Phone", contracts: "Contracts" };
+  const BANNER_OUT_MS = 200, BANNER_GAP_MS = 220;
+  const BANNER_HOLD = [3600, 4200, 5200];   // hold ms by priority 0/1/2
+  const MAX_QUEUE = 4, COALESCE_MS = 1500;
+  let bannerQueue = [];
+  let bannerCurrent = null;
+  let bannerState = "idle";                 // idle | hold | out
+  let bannerTimer = 0;
+  let bannerEl = null;                      // in-phone banner (drops from screen top)
+  let sliverEl = null;                      // stowed compact banner by the peek glyph
+
+  function notisV2() { return !!(CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2); }
+  function appTab(app) { return app === "news" ? "news" : (app === "missions" ? "missions" : "messages"); }
+  function resolveSender(app, from) {
+    if (from != null && from !== "") return String(from);
+    if (app === "news") return "City Desk";
+    if (app === "bank") return "Liberty Bank";
+    if (app === "bounty") return "Bounty Board";
+    if (app === "phone") return "Unknown Caller";
+    if (app === "missions") return "GHOSTLINE";
+    if (app === "system") return "Phone";
+    if (app === "contracts") return "BLKLST";
+    return "Unknown";
+  }
+  // Keybinding/control-legend prose ("[E] Pay …", "W/S throttle · LMB fire")
+  // is interface mechanics — a real phone never pushes it. Non-mission pushes
+  // carrying it are dropped at the door (mission briefs keep authored text).
+  const KEYBIND_RE = /\[[A-Za-z0-9/\- ]{1,7}\]|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/;
+  // Legacy single-string calls get auto-classified into an in-world app +
+  // sender so an unmigrated caller still reads like a real push, never like
+  // game-system prose. Mirrors mode.js's noteCategory() heuristics.
+  function classifyLegacyString(s) {
+    s = String(s == null ? "" : s);
+    if (/missed call|voicemail|calling you|tried to call/i.test(s)) return { app: "phone", text: s };
+    if (/[+\-]?\$\s?[\d,]|deposit|payout|wired|transfer|received|refund|paid (you|out)/i.test(s)) return { app: "bank", text: s };
+    if (/bounty|dead or alive|reward on/i.test(s)) return { app: "bounty", text: s, priority: 1 };
+    if (/waypoint|route|destination|fast travel/i.test(s)) return { app: "system", from: "Maps", text: s.replace(/^Waypoint set/i, "Route set") };
+    if (/wanted|police|swat|cops|manhunt|curfew|lockdown|airstrike/i.test(s)) return { app: "news", from: "Scanner", text: s };
+    if (/breaking|report|district|gang war|earthquake|storm|city (hall|desk)/i.test(s)) return { app: "news", text: s };
+    return { app: "system", text: s };
+  }
+
   function campaignEnabled() {
+    // Canonical owner: campaign.js (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN with a
+    // one-time migration of the legacy flag locations). The OR-chain below is
+    // only the fallback for the beat before campaign.js — which loads directly
+    // after this file — has evaluated.
+    if (typeof CBZ.cityCampaignEnabled === "function") return !!CBZ.cityCampaignEnabled();
     return !!(
       (CBZ.CONFIG && CBZ.CONFIG.CITY_HITMAN_CAMPAIGN) ||
       CBZ.CITY_HITMAN_CAMPAIGN ||
@@ -162,6 +222,7 @@
       briefing: textOf(def.briefing || def.body || def.description || def.desc || def.objective, ""),
       target: textOf(def.targetName || (def.target && def.target.name) || def.target, ""),
       location: textOf(def.locationName || def.location, ""),
+      prestige: textOf(def.prestige, ""),
       reward: rewardText,
       status: textOf(def.status, "active"),
       progress: typeof def.progress === "number" ? Math.max(0, Math.min(1, def.progress)) : null,
@@ -224,6 +285,10 @@
   function markRead(app) {
     if (app === "missions") state.unread.missions = false;
     else if (app === "messages" || app === "news") state.unread[app] = 0;
+    // reading a tab retires its queued banners — no stale sliver later
+    if (bannerQueue.length) {
+      bannerQueue = bannerQueue.filter(function (q) { return appTab(q.app) !== app; });
+    }
     syncUnread();
   }
 
@@ -264,6 +329,7 @@
       if (mission.target) chips.appendChild(infoChip("TARGET", mission.target));
       if (mission.location) chips.appendChild(infoChip("LOCATION", mission.location));
       if (mission.reward) chips.appendChild(infoChip("PAY", mission.reward));
+      if (mission.prestige) chips.appendChild(infoChip("STANDING", mission.prestige));
       if (chips.childNodes.length) card.appendChild(chips);
 
       if (mission.progress != null) {
@@ -323,6 +389,12 @@
     items.slice().reverse().forEach(function (item) {
       const article = make("article", "campaign-feed-card " + (kind === "news" ? "news" : "message"));
       const top = make("div", "campaign-feed-top");
+      // per-app badge (V2): bank/bounty/missed-call pushes stay visually
+      // distinct inside the Messages list — the list IS the notification center.
+      const app = item.app || (kind === "news" ? "news" : "messages");
+      const badge = make("i", "campaign-noti-badge app-" + app, item.icon || APP_GLYPH[app] || "◇");
+      badge.setAttribute("aria-hidden", "true");
+      top.appendChild(badge);
       top.appendChild(make("b", "campaign-feed-from", item.from));
       top.appendChild(make("time", "campaign-feed-time", item.time));
       article.appendChild(top);
@@ -381,6 +453,7 @@
       "  <div class='campaign-phone-glass'>" +
       "    <div class='campaign-phone-island'><i></i><span></span></div>" +
       "    <header class='campaign-phone-status'><time class='campaign-phone-clock'>--:--</time><span class='campaign-phone-signal' aria-hidden='true'>▮▮▮</span><span class='campaign-phone-battery' aria-hidden='true'>▰</span></header>" +
+      "    <div class='campaign-noti-banner' role='button' tabindex='0' aria-live='polite'><i class='campaign-noti-badge' aria-hidden='true'>▢</i><div class='campaign-noti-copy'><div class='campaign-noti-toprow'><b class='campaign-noti-from'></b><small class='campaign-noti-app'></small></div><span class='campaign-noti-text'></span></div></div>" +
       "    <div class='campaign-phone-head'><div><small>GHOSTLINE</small><h1 class='campaign-title campaign-phone-app-title'>Missions</h1></div><button class='campaign-phone-close' type='button' aria-label='Put phone away'>×</button></div>" +
       "    <main class='campaign-phone-screen'></main>" +
       "    <nav class='campaign-phone-nav' aria-label='Phone apps'>" +
@@ -396,6 +469,18 @@
     screen = root.querySelector(".campaign-phone-screen");
     appTitle = root.querySelector(".campaign-phone-app-title");
     clockEl = root.querySelector(".campaign-phone-clock");
+    bannerEl = root.querySelector(".campaign-noti-banner");
+    if (bannerEl) bannerEl.addEventListener("click", notiTap);
+
+    // stowed-phone notification sliver: rises beside the peek glyph when the
+    // handset buzzes; tapping it raises the phone on the notice's app.
+    sliverEl = make("button", "campaign-noti-sliver");
+    sliverEl.id = "campaignNotiSliver";
+    sliverEl.type = "button";
+    sliverEl.setAttribute("aria-live", "polite");
+    sliverEl.innerHTML = "<i class='campaign-noti-badge' aria-hidden='true'>▢</i><div class='campaign-noti-copy'><div class='campaign-noti-toprow'><b class='campaign-noti-from'></b><small class='campaign-noti-app'></small></div><span class='campaign-noti-text'></span></div>";
+    sliverEl.addEventListener("click", notiTap);
+    document.body.appendChild(sliverEl);
 
     root.querySelector(".campaign-phone-scrim").addEventListener("click", close);
     root.querySelector(".campaign-phone-close").addEventListener("click", close);
@@ -444,6 +529,12 @@
     const legacy = document.getElementById("cityPhone");
     if (legacy) legacy.style.display = "none";
 
+    // MUTUAL EXCLUSION with the full map: raising the phone puts the map away
+    // (and vice versa — fullmap.open() closes the phone). Never both at once.
+    if (CBZ.fullMap && CBZ.fullMap.active && CBZ.fullMap.close) {
+      try { CBZ.fullMap.close(false); } catch (e) {}
+    }
+
     if (g.mode === "city" && CBZ.cityMenuOpen && !state.open) return false;
     state.open = true;
     ownsMenuLock = true;
@@ -456,6 +547,7 @@
     root.classList.add("open");
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("campaign-phone-open");
+    retargetBanner();   // a stowed sliver mid-flight re-presents inside the glass
     selectApp(app || state.app);
     return true;
   }
@@ -471,8 +563,10 @@
       root.setAttribute("aria-hidden", "true");
     }
     document.body.classList.remove("campaign-phone-open");
+    retargetBanner();   // an in-glass banner mid-flight re-presents as a sliver
     syncUnread();
-    if (CBZ.requestLock && g.state === "playing" && !CBZ.touchMode) {
+    if (CBZ.requestLock && g.state === "playing" && !CBZ.touchMode &&
+        !(CBZ.fullMap && CBZ.fullMap.active)) {
       try { CBZ.requestLock(); } catch (e) {}
     }
     return true;
@@ -507,31 +601,104 @@
     return next;
   }
 
-  function notify(type, from, body, meta) {
-    // Object form is convenient for event buses while keeping the requested
-    // positional API fully supported.
-    if (type && typeof type === "object") {
-      const event = type;
-      type = event.type || event.channel || "message";
-      from = event.from || event.sender || event.title || from;
-      body = event.body || event.text || event.message || body;
-      meta = event.meta || meta;
+  // ---- V2 banner machine ------------------------------------------------------
+  // One banner on screen at a time (real-phone feel). Raised phone → it drops in
+  // from the top of the glass, over the current app. Stowed phone → the handset
+  // buzzes (glyph shake + LED via pulsePeek) and a compact banner rises by it.
+  function bannerSuppressed() {
+    if (!notisV2()) return true;
+    if (CBZ.fullMap && CBZ.fullMap.active) return true;   // never banner over the map
+    if (takeoverOpen()) return true;
+    return !livePlay();
+  }
+  function fillNotiEl(el, item) {
+    if (!el) return;
+    const badge = el.querySelector(".campaign-noti-badge");
+    if (badge) {
+      badge.className = "campaign-noti-badge app-" + item.app;
+      badge.textContent = item.icon || APP_GLYPH[item.app] || "▢";
     }
-    type = String(type || "message").toLowerCase();
-    const isNews = type === "news" || type === "bulletin" || type === "headline";
-    const isMission = type === "mission" || type === "contract" || type === "objective";
-    const app = isMission ? "missions" : (isNews ? "news" : "messages");
-    const item = {
-      id: "notice-" + Date.now() + "-" + (++serial),
-      type: type,
-      from: textOf(from, isNews ? "City Desk" : (isMission ? "Handler" : "Unknown")),
-      body: textOf(body, ""),
-      time: nowLabel(),
-      born: Date.now(),
-      meta: meta || null,
-    };
+    const from = el.querySelector(".campaign-noti-from");
+    if (from) from.textContent = item.from || "";
+    const app = el.querySelector(".campaign-noti-app");
+    if (app) app.textContent = (APP_LABEL[item.app] || "Phone") + " · " + (item.time || "");
+    const text = el.querySelector(".campaign-noti-text");
+    if (text) text.textContent = item.text || item.body || "";
+  }
+  function coalesceView(item) {
+    if (!item || !item._n || item._n < 2) return item;
+    return Object.assign({}, item, { from: item.from + " · " + item._n + " new" });
+  }
+  function enqueueBanner(item) {
+    const tail = bannerQueue.length ? bannerQueue[bannerQueue.length - 1]
+      : (bannerState === "hold" ? bannerCurrent : null);
+    if (tail && tail.app === item.app && tail.from === item.from && item.born - tail.born < COALESCE_MS) {
+      // repeated pushes from the same sender collapse: "Lena · 3 new"
+      tail.text = item.text; tail.body = item.body;
+      tail._n = (tail._n || 1) + 1;
+      if (tail === bannerCurrent) fillNotiEl(state.open ? bannerEl : sliverEl, coalesceView(tail));
+      return;
+    }
+    if ((item.priority | 0) >= 2 && bannerState === "hold") {
+      bannerQueue.unshift(item);   // urgent preempts the held banner
+      hideBanner(true);
+      return;
+    }
+    bannerQueue.push(item);
+    while (bannerQueue.length > MAX_QUEUE) {
+      const i = bannerQueue.findIndex(function (q) { return (q.priority | 0) < 1; });
+      bannerQueue.splice(i >= 0 ? i : 0, 1);   // overflow drops the oldest normal item
+    }
+    pumpBanner();
+  }
+  function pumpBanner() {
+    if (bannerState !== "idle" || !bannerQueue.length || bannerSuppressed()) return;
+    ensureDom();
+    const el = state.open ? bannerEl : sliverEl;
+    if (!el) return;
+    bannerCurrent = bannerQueue.shift();
+    fillNotiEl(el, coalesceView(bannerCurrent));
+    void el.offsetWidth;   // restart the slide transition
+    el.classList.add("in");
+    if (el === sliverEl) pulsePeek();   // the buzz: glyph shake + LED
+    bannerState = "hold";
+    const hold = bannerCurrent.ttl > 0 ? bannerCurrent.ttl : BANNER_HOLD[Math.max(0, Math.min(2, bannerCurrent.priority | 0))];
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(function () { hideBanner(false); }, hold);
+  }
+  function hideBanner(fast) {
+    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = 0; }
+    if (bannerState === "idle") return;
+    bannerState = "out";
+    if (bannerEl) bannerEl.classList.remove("in");
+    if (sliverEl) sliverEl.classList.remove("in");
+    setTimeout(function () {
+      bannerCurrent = null;
+      bannerState = "idle";
+      setTimeout(pumpBanner, fast ? 30 : BANNER_GAP_MS);
+    }, fast ? 40 : BANNER_OUT_MS);
+  }
+  // phone raised/stowed (or the map opened) mid-banner: requeue the current
+  // banner so it re-presents on the correct surface once allowed again.
+  function retargetBanner() {
+    if (bannerState === "idle" || !bannerCurrent) return;
+    bannerQueue.unshift(bannerCurrent);
+    hideBanner(true);
+  }
+  function notiTap() {
+    const item = bannerCurrent;
+    hideBanner(true);
+    if (!item) return;
+    if (typeof item.onTap === "function") {
+      try { item.onTap(item); return; } catch (e) {}
+    }
+    open(appTab(item.app));
+  }
 
-    if (isMission) {
+  // store an item into the app lists (the phone's own history/notification center)
+  function logItem(item) {
+    const tab = appTab(item.app);
+    if (tab === "missions") {
       if (state.mission) {
         if (!state.mission.updates) state.mission.updates = [];
         state.mission.updates.push(item);
@@ -542,15 +709,88 @@
       }
       state.unread.missions = !(state.open && state.app === "missions");
     } else {
-      const list = isNews ? state.news : state.messages;
+      const list = tab === "news" ? state.news : state.messages;
       list.push(item);
       trimList(list);
-      state.unread[app] = (state.open && state.app === app) ? 0 : (state.unread[app] + 1);
+      state.unread[tab] = (state.open && state.app === tab) ? 0 : (state.unread[tab] + 1);
     }
+  }
 
+  // ---- CBZ.phoneNotify — the canonical diegetic notification entry -----------
+  // Accepts { app, from, text, icon?, priority?, ttl?, onTap?, meta? } or a bare
+  // legacy string (auto-classified). Logs into the matching app, then banners.
+  function phoneNotify(payload) {
+    if (typeof payload === "string") payload = classifyLegacyString(payload);
+    payload = payload || {};
+    let app = String(payload.app || "messages").toLowerCase();
+    if (APPS_V2.indexOf(app) < 0) app = "messages";
+    const text = textOf(payload.text != null ? payload.text : (payload.body != null ? payload.body : payload.message), "");
+    if (!text) return null;
+    // control legends / key prompts are UI mechanics, never a push (V2 only;
+    // mission briefs keep their authored text untouched)
+    if (notisV2() && app !== "missions" && KEYBIND_RE.test(text)) return null;
+    const item = {
+      id: "notice-" + Date.now() + "-" + (++serial),
+      type: payload.type || app,
+      app: app,
+      from: resolveSender(app, payload.from),
+      text: text,
+      body: text,          // renderItems()/mission updates read .body
+      icon: payload.icon || APP_GLYPH[app],
+      priority: Math.max(0, Math.min(2, payload.priority | 0)),
+      ttl: (typeof payload.ttl === "number" && payload.ttl > 0) ? payload.ttl : 0,
+      onTap: typeof payload.onTap === "function" ? payload.onTap : null,
+      time: nowLabel(),
+      born: Date.now(),
+      meta: payload.meta || null,
+    };
+    // No handset outside the campaign: fall back to the street feed so the
+    // notice is never silently lost (new systems can call phoneNotify blind).
+    if (!campaignEnabled() || !playableMode()) {
+      const feed = CBZ.cityFeed && CBZ.cityFeed._campaignOriginal ? CBZ.cityFeed._campaignOriginal : CBZ.cityFeed;
+      if (typeof feed === "function") { try { feed(item.from + ": " + item.text); } catch (e) {} }
+      return item;
+    }
+    logItem(item);
     render();
-    if (!(state.open && state.app === app)) pulsePeek();
+    const seen = state.open && state.app === appTab(app);
+    if (!seen) {
+      if (notisV2()) enqueueBanner(item);
+      else pulsePeek();
+    }
     return item;
+  }
+
+  function notify(type, from, body, meta) {
+    // Object form is convenient for event buses while keeping the requested
+    // positional API fully supported.
+    if (type && typeof type === "object") {
+      const event = type;
+      if (event.app) return phoneNotify(event);   // V2 payloads pass through whole
+      type = event.type || event.channel || "message";
+      from = event.from || event.sender || event.title || from;
+      body = event.body || event.text || event.message || body;
+      meta = event.meta || meta;
+    }
+    type = String(type || "message").toLowerCase();
+    // "auto": classify a legacy free-string into an in-world app + sender.
+    if (type === "auto") {
+      const c = classifyLegacyString(body);
+      if (from) c.from = from;
+      c.meta = meta || null;
+      if (meta && meta.urgent) c.priority = 2;
+      return phoneNotify(c);
+    }
+    const isNews = type === "news" || type === "bulletin" || type === "headline";
+    const isMission = type === "mission" || type === "contract" || type === "objective";
+    return phoneNotify({
+      app: isMission ? "missions" : (isNews ? "news" : "messages"),
+      type: type,
+      from: from,
+      text: body,
+      meta: meta,
+      priority: (meta && meta.urgent) ? 2 : 0,
+    });
   }
 
   function compatActive() {
@@ -577,11 +817,14 @@
   }
 
   function installCompatibilityWrappers() {
+    // V2: free-string sinks (flashHint/flashToast) auto-classify into an
+    // in-world app + sender instead of the old meta "Status"/"Alert" labels;
+    // objectives come from the handler, not an "Objective" system voice.
     const specs = [
-      { name: "flashHint", channel: "message", from: "Status" },
-      { name: "flashToast", channel: "news", from: "Alert" },
+      { name: "flashHint", channel: "message", from: "Status", v2: "auto" },
+      { name: "flashToast", channel: "news", from: "Alert", v2: "auto" },
       { name: "cityFeed", channel: "news", from: "City Desk" },
-      { name: "setObjective", channel: "mission", from: "Objective" },
+      { name: "setObjective", channel: "mission", from: "Objective", v2From: null },
     ];
     specs.forEach(function (spec) {
       const current = CBZ[spec.name];
@@ -589,6 +832,10 @@
       const wrapped = function () {
         if (compatActive()) {
           const body = arguments[0];
+          if (notisV2()) {
+            if (spec.v2) return compatNotify(spec.v2, null, body, { source: spec.name });
+            if ("v2From" in spec) return compatNotify(spec.channel, spec.v2From, body, { source: spec.name });
+          }
           return compatNotify(spec.channel, spec.from, body, { source: spec.name });
         }
         return current.apply(this, arguments);
@@ -697,6 +944,49 @@
     finishDialogue(null, false);
   }
 
+  // ---- full-screen campaign moment (the CITY BOSS takeover card) ------------
+  // The one deliberate exception to "prose lives on the phone": an earned,
+  // story-scale ending gets a real full-screen beat. Any click/keypress or the
+  // timer puts it away; it owns no game state beyond its own visibility.
+  let takeoverEl = null, takeoverTimer = 0;
+  function takeoverOpen() {
+    return !!(takeoverEl && takeoverEl.classList.contains("show"));
+  }
+  function hideTakeover() {
+    if (takeoverTimer) { clearTimeout(takeoverTimer); takeoverTimer = 0; }
+    if (takeoverEl) takeoverEl.classList.remove("show");
+    if (document.body) document.body.classList.remove("campaign-takeover-open");
+  }
+  function takeover(def) {
+    def = def || {};
+    ensureDom();
+    if (!document.body) return false;
+    if (!takeoverEl) {
+      takeoverEl = make("div", "campaign-takeover");
+      takeoverEl.id = "campaignTakeover";
+      takeoverEl.setAttribute("aria-live", "assertive");
+      takeoverEl.innerHTML =
+        "<div class='campaign-takeover-inner'>" +
+        "  <div class='campaign-eyebrow campaign-takeover-eyebrow'></div>" +
+        "  <h1 class='campaign-title campaign-takeover-title'></h1>" +
+        "  <div class='campaign-title campaign-takeover-sub'></div>" +
+        "  <p class='campaign-takeover-body'></p>" +
+        "  <div class='campaign-takeover-hint'>click to continue</div>" +
+        "</div>";
+      takeoverEl.addEventListener("click", hideTakeover);
+      document.body.appendChild(takeoverEl);
+    }
+    takeoverEl.querySelector(".campaign-takeover-eyebrow").textContent = textOf(def.eyebrow, "THE CONTRACT");
+    takeoverEl.querySelector(".campaign-takeover-title").textContent = textOf(def.title, "CITY BOSS");
+    takeoverEl.querySelector(".campaign-takeover-sub").textContent = textOf(def.sub, "");
+    takeoverEl.querySelector(".campaign-takeover-body").textContent = textOf(def.body, "");
+    takeoverEl.classList.add("show");
+    document.body.classList.add("campaign-takeover-open");
+    if (takeoverTimer) clearTimeout(takeoverTimer);
+    takeoverTimer = setTimeout(hideTakeover, 10000);
+    return true;
+  }
+
   function hideWorldNameTags() {
     if (!playableMode() || !document.body.classList.contains("campaign-active")) return;
     const pools = [CBZ.cityPeds, CBZ.cityCops, CBZ.npcs, CBZ.guards];
@@ -715,6 +1005,18 @@
     canonicalizeTitle();
     const active = campaignEnabled() && playableMode();
     document.body.classList.toggle("campaign-active", active);
+    // V2 body stamp: campaign.css gates the map/minimap restore + banner styles
+    // on this class so CBZ.CONFIG.PHONE_NOTIS_V2 stays a one-line revert.
+    document.body.classList.toggle("notis-v2", notisV2());
+    // banner upkeep: flush queued notices once suppression (map open, takeover,
+    // pause) clears; shelve a held banner if suppression starts mid-hold.
+    if (bannerState === "hold" && bannerSuppressed()) retargetBanner();
+    else if (bannerState === "idle" && bannerQueue.length) pumpBanner();
+    // ENDLESS free time re-opens the ambient gang-game surfaces (turf meta,
+    // kill feed, orders, interact card) that scripted beats keep dark —
+    // campaign.css scopes its hides with :not(.campaign-endless).
+    const endlessFree = active && typeof CBZ.cityCampaignInEndless === "function" && CBZ.cityCampaignInEndless();
+    document.body.classList.toggle("campaign-endless", !!endlessFree);
     installCompatibilityWrappers();
     if (!livePlay() && state.open) close();
     if (peek) peek.classList.toggle("available", livePlay() && !state.open);
@@ -725,6 +1027,14 @@
 
   function keydown(event) {
     const key = String(event.key || "").toLowerCase();
+
+    // A raised full-screen moment: any key puts it away (one press is eaten).
+    if (takeoverOpen()) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      hideTakeover();
+      return;
+    }
 
     // A visible choice line owns 1-9. Character speech remains the only prose
     // outside the phone, and these buttons are part of that conversation.
@@ -749,6 +1059,12 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     if (key === "escape") close();
+    else if (key === "m" || event.code === "KeyM") {
+      // [M] works from inside the raised phone too: hand the screen to the
+      // map. fullMap.open() stows the phone itself (mutual exclusion), with
+      // close() as the fallback when the map module isn't loaded.
+      if (!(CBZ.fullMap && CBZ.fullMap.open && CBZ.fullMap.open())) close();
+    }
     else if (/^[1-3]$/.test(key)) selectApp(APPS[parseInt(key, 10) - 1]);
   }
 
@@ -768,10 +1084,12 @@
   const api = {
     setMission: setMission,
     notify: notify,
+    phoneNotify: phoneNotify,
     say: say,
     choice: choice,
     choose: choose,
     clearDialogue: clearDialogue,
+    takeover: takeover,
     open: open,
     close: close,
     isOpen: function () { return state.open; },
@@ -779,6 +1097,11 @@
     state: function () { return state; },
   };
   CBZ.campaignUI = api;
+  // The clean cross-module notification API: any system (bounties, inventory,
+  // banking, news) sends a diegetic push with
+  //   CBZ.phoneNotify({ from, app, text, icon?, priority?, ttl?, onTap? })
+  // Legacy CBZ.campaignUI.notify(type, from, body) delegates into it.
+  CBZ.phoneNotify = phoneNotify;
 
   // Programmatic callers of the old status phone land on the campaign phone.
   // Keep the legacy reference for debugging without leaving two visible phones.

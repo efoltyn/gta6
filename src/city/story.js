@@ -38,8 +38,7 @@
   CBZ.cityWin = function (how) {
     if (g.cityWon) return;
     g.cityWon = true;
-    if (CBZ.doSlowmo) { try { CBZ.doSlowmo(0.45); } catch (e) {} }
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("YOU OWN THE CITY");
+    // The material rewards land unconditionally, up front.
     const tribute = 50000;
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(tribute);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(150);
@@ -47,6 +46,18 @@
     if (CBZ.cityEvent) {
       try { CBZ.cityEvent("story", { label: "TOOK THE CITY (" + (how || "takeover") + ")" }, { silent: true }); } catch (e) {}
     }
+    // Campaign-aware ceremony: while the hitman campaign runs, city.big() is a
+    // silent phone bulletin, which buried the entire gang-game ending. The
+    // campaign owns the presentation instead — a full-screen CITY BOSS moment,
+    // deferred past any scripted beat (campaign.js cityCampaignTakeover). The
+    // legacy slow-mo + big-text path stays for campaign-off saves.
+    if (CBZ.cityCampaignTakeover) {
+      let handled = false;
+      try { handled = !!CBZ.cityCampaignTakeover(how); } catch (e) { handled = false; }
+      if (handled) { if (CBZ.cityHudDirty) CBZ.cityHudDirty(); return; }
+    }
+    if (CBZ.doSlowmo) { try { CBZ.doSlowmo(0.45); } catch (e) {} }
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("YOU OWN THE CITY");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   };
 })();

@@ -212,8 +212,46 @@
     const isMgr = CBZ.cityIsOfficeManager ? CBZ.cityIsOfficeManager(p) : !!p._mgr;
     return (isMgr ? 1000 : 0) + ownerStats(p).served;
   }
+  // ============================================================
+  //  ECONOMY_V2 — COMPANY VALUATION + THE CEO-DEATH STOCK SHOCK.
+  //  A firm's live value = cash + Σ lot values, × stockMult. Killing the CEO
+  //  craters stockMult 18–40% (deterministic per company + death count via
+  //  CBZ.hash01 — no Math.random in shared company state) and haircuts cash;
+  //  marketMove()'s pulse slowly mean-reverts stockMult back toward 1. The
+  //  heir inherits a genuinely poorer firm: ownerNetWorth() reads the shocked
+  //  value, so the successor's personal fortune drops with the stock.
+  // ============================================================
+  function companyValue(co) {
+    if (!co) return 0;
+    let s = co.cash || 0;
+    for (let i = 0; i < co.lots.length; i++) s += lotValue(co.lots[i]);
+    return Math.round(s * (co.stockMult == null ? 1 : co.stockMult));
+  }
+  // the CEO's personal fortune: a deterministic 6–16× multiple of the firm's
+  // live value (bigger company ⇒ richer CEO), plus whatever's in his pockets.
+  function ownerNetWorth(co) {
+    if (!co) return 0;
+    const idn = (parseInt(String(co.id).replace(/^\D+/, ""), 10) || 0);
+    const u = CBZ.hash01 ? CBZ.hash01(idn, 9, 73010) : 0.5;
+    const own = co.owner ? (co.owner.cash || 0) : 0;
+    return Math.round(companyValue(co) * (6 + u * 10)) + own;
+  }
+  function applyCeoShock(co) {
+    if (!co || co.stockMult == null) { if (co) { co.stockMult = 1; co._deaths = 0; } }
+    const idn = (parseInt(String(co.id).replace(/^\D+/, ""), 10) || 0);
+    const frac = 0.18 + (CBZ.hash01 ? CBZ.hash01(idn, (co._deaths || 0) + 20, 91007) : 0.5) * 0.22;   // 18–40%, varies per successive death
+    co._deaths = (co._deaths || 0) + 1;
+    co.stockMult = Math.max(0.35, (co.stockMult || 1) * (1 - frac));
+    co.cash = Math.round((co.cash || 0) * (1 - frac * 0.5));   // confidence run on the treasury
+    try { if (CBZ.cityFeed) CBZ.cityFeed("📉 " + co.name + " craters " + Math.round(frac * 100) + "% after its owner was killed", "#ff8a6b"); } catch (e) {}
+  }
   function succeedCompanyOwner(co) {
     if (!co) return;
+    // the shock lands FIRST, whoever inherits: this function is the single
+    // choke point for an owner death (identity.js's onDeathRegister callback
+    // AND the sweepOwners no-registry fallback both funnel here, and
+    // markDead's idempotency means only one of them ever fires per death).
+    applyCeoShock(co);
     const bench = candidateBench(co);
     bench.sort((a, b) => rankCandidate(b) - rankCandidate(a));
     const heir = bench[0];
@@ -304,7 +342,8 @@
       used[name] = 1;
       const hq = pool[pi++];
       const co = { id: "co" + i, name: name, sector: pick(SECTORS), hq: hq,
-        cash: 60000 + rint(420000), lots: [hq], growth: 0, owner: null };
+        cash: 60000 + rint(420000), lots: [hq], growth: 0, owner: null,
+        stockMult: 1, _deaths: 0 };   // ECONOMY_V2: live valuation multiplier (CEO-death shocks dent it)
       hq._company = co; tagOwner(hq, co);
       companies.push(co);
       co.owner = spawnOwner(co, A);
@@ -330,6 +369,13 @@
   function marketMove() {
     if (!companies.length || !arenaRef) return;
     const arena = arenaRef;
+    // ECONOMY_V2: shocked valuations mean-revert a little on every market
+    // pulse — a CEO assassination is a dent the market slowly forgets, not a
+    // permanent hole (≈2%/pulse back toward 1).
+    for (let i = 0; i < companies.length; i++) {
+      const c = companies[i];
+      if (c.stockMult != null && c.stockMult < 1) c.stockMult = Math.min(1, c.stockMult + 0.02);
+    }
     const co = companies[rint(companies.length)];
     prune(co);
     co.cash += co.lots.reduce((s, l) => s + lotValue(l) * 0.012, 0);   // rent roll
@@ -375,6 +421,16 @@
     forDistrict: function (dq) { return companies.filter(function (c) { return c.lots.some(function (l) { return l.district === dq; }); }); },
     count: function () { return companies.length; },
     ownerOf: function (lot) { const c = lot && lot._company; return c ? c.owner : null; },   // the live owner ped, or null
+    // --- ECONOMY_V2 valuation surface (economy.js's cityNetWorthOf reads these) ---
+    valueOf: companyValue,
+    ownerNetWorth: ownerNetWorth,
+    coByOwnerPed: function (ped) {
+      if (!ped) return null;
+      for (let i = 0; i < companies.length; i++) if (companies[i].owner === ped) return companies[i];
+      if (ped.company) for (let i = 0; i < companies.length; i++) if (companies[i].id === ped.company) return companies[i];
+      return null;
+    },
+    titleOfSector: function (s) { return OWNER_TITLE[s] || "executive"; },
     reset: function () {
       for (const co of companies) { for (const lot of co.lots) restoreOwner(lot); despawnOwner(co); }
       companies = []; arenaRef = null; tickT = 0;

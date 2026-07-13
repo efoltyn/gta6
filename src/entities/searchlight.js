@@ -8,6 +8,11 @@
   const CBZ = window.CBZ;
   const scene = CBZ.scene;
 
+  // searchlights are real SENSORS when this is on: systems/detection.js
+  // consumes CBZ.litBySearchlight (heat + guard pings), and down in update()
+  // the beam that is actually holding the player flushes red as feedback.
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
+
   function makeLight(towerX, towerZ, phase, sweep, sweepZ, sweepZAmp) {
     // the lamp head on the tower
     const head = new THREE.Mesh(
@@ -88,6 +93,28 @@
       sl.cone.position.set((sl.gx + tx) / 2, (6.2) / 2, (sl.gz + tz) / 2);
       sl.cone.lookAt(sl.target);
       sl.cone.rotateX(Math.PI / 2);
+
+      // ---- caught-in-the-beam feedback (JAIL_SEARCHLIGHT_DETECT) ----
+      // the pool that's actually holding the player flushes red and throbs;
+      // systems/detection.js applies the matching heat + guard pings.
+      let hot = false;
+      if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT && !(sl.disabled > 0) &&
+          CBZ.game.mode === "escape" && CBZ.game.state === "playing" &&
+          CBZ.player && CBZ.player.pos) {
+        const pdx = CBZ.player.pos.x - tx, pdz = CBZ.player.pos.z - tz;
+        const pr = sl.poolRadius * (CBZ.player.crouch ? 0.6 : 1.0);
+        hot = pdx * pdx + pdz * pdz < pr * pr;
+      }
+      if (hot !== !!sl._hot) {
+        sl._hot = hot;
+        const col = hot ? 0xff6a55 : 0xfff3c0;   // per-light materials, safe to tint
+        sl.cone.material.color.setHex(col);
+        sl.pool.material.color.setHex(col);
+      }
+      if (hot) {
+        sl.pool.material.opacity = 0.3 + 0.08 * Math.sin(CBZ.now * 0.02);
+        sl.cone.material.opacity = 0.16;
+      }
     }
   }
 

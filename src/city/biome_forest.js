@@ -84,9 +84,29 @@
     //  GROUND — mossy forest floor (one big plane, slightly above the
     //  sea/ground so it reads as its own terrain).
     // ================================================================
-    const floorGeo = new THREE.PlaneGeometry(HX * 2 + 16, HZ * 2 + 16);
-    const floor = new THREE.Mesh(floorGeo, mat(0x35451f)); // moss/duff green-brown
-    floor.rotation.x = -Math.PI / 2;
+    // baked hash-colour variation (moss / fern / leaf-litter / duff patches)
+    // so kilometres of floor stop reading as one flat slab. Deterministic per
+    // seed (position hash only — the biome's rng stream is untouched).
+    const floorGeo = new THREE.PlaneGeometry(HX * 2 + 16, HZ * 2 + 16, 56, 44);
+    floorGeo.rotateX(-Math.PI / 2);
+    {
+      const fpos = floorGeo.attributes.position;
+      const fcol = new Float32Array(fpos.count * 3);
+      const cMoss = new THREE.Color(0x35451f), cDuffC = new THREE.Color(0x2c3a18);
+      const cLeaf = new THREE.Color(0x4a5526), cFern = new THREE.Color(0x3b5a28);
+      const fc = new THREE.Color();
+      for (let i = 0; i < fpos.count; i++) {
+        const wx = fpos.getX(i) + CX, wz = fpos.getZ(i) + CZ;
+        const h1 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 34), Math.floor(wz / 34), 8821) : 0.5;
+        const h2 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 11), Math.floor(wz / 11), 8822) : 0.5;
+        fc.copy(h1 < 0.5 ? cMoss : (h1 < 0.78 ? cFern : cLeaf));
+        if (h2 > 0.88) fc.copy(cDuffC);
+        const shade = 0.9 + h2 * 0.14;
+        fcol[i * 3] = fc.r * shade; fcol[i * 3 + 1] = fc.g * shade; fcol[i * 3 + 2] = fc.b * shade;
+      }
+      floorGeo.setAttribute("color", new THREE.BufferAttribute(fcol, 3));
+    }
+    const floor = new THREE.Mesh(floorGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     floor.position.set(CX, 0.02, CZ);
     floor.receiveShadow = true;
     root.add(floor);

@@ -490,7 +490,7 @@
             return;
           }
         } else if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note("You're short of $" + k.ransom.toLocaleString() + " — guns will have to do it", 1.4);
+          CBZ.city.note("No $" + k.ransom.toLocaleString() + ", no deal. Don't waste my time.", 1.4, { from: "UNKNOWN NUMBER" });
         }
       }
     }

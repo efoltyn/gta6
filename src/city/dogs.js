@@ -114,6 +114,11 @@
 
     gp.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
     gp.userData.legs = legs;
+    // dogs spawn DURING buildCity(), before city/mode.js sweeps the root with
+    // batchStaticUnder + freezeStaticUnder — without this tag the dog's body
+    // meshes get merged into static deco and its matrices frozen (the same
+    // "statue" bug as wildlife). userData.dynamic is the sweep's own skip tag.
+    if (!(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_LIVE === false)) gp.userData.dynamic = true;
     return gp;
   }
 

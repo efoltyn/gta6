@@ -783,8 +783,19 @@
     invGrid = inv.querySelector(".cpGrid");
     invHot = inv.querySelector(".cpHot");
     invBuild = inv.querySelector(".cpBuild");
-    // a click on the dim backdrop (outside the wrap) closes
-    inv.addEventListener("click", function (e) { if (e.target === inv) closeInv(); });
+    // INVENTORY V2 (city/inventory.js): the Carried grid becomes the live
+    // Minecraft-style 27-slot grid — the module binds its own click handlers.
+    if (CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false && CBZ.cityInventory && CBZ.cityInventory.attach) {
+      CBZ.cityInventory.attach(invGrid);
+    }
+    // a click on the dim backdrop (outside the wrap): with an item held on the
+    // V2 cursor it DROPS the stack to the ground (Minecraft rule); else closes.
+    inv.addEventListener("click", function (e) {
+      if (e.target !== inv) return;
+      const ci = CBZ.cityInventory;
+      if (CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false && ci && ci.hasCursor && ci.hasCursor()) { ci.dropCursorToGround(); return; }
+      closeInv();
+    });
     // BUILD toggle (W4): Male/Female — persists + reloads via CBZ.setPlayerBuild
     if (invBuild) invBuild.addEventListener("click", function (e) {
       const btn = e.target.closest && e.target.closest(".cpBuildBtn");
@@ -826,6 +837,11 @@
 
   function renderGrid() {
     if (!invGrid) return;
+    // INVENTORY V2: the interactive slot grid renders itself (falls through to
+    // the legacy read-only grid when the flag/module is off — one-line revert).
+    if (CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false && CBZ.cityInventory && CBZ.cityInventory.renderPlayerGrid) {
+      if (CBZ.cityInventory.renderPlayerGrid(invGrid)) return;
+    }
     const econ = CBZ.cityEcon, items = econ && econ.ITEMS, invMap = g.cityInv || {};
     const rows = [];
     for (const name in invMap) {
@@ -932,6 +948,7 @@
     invOpen = true;
     CBZ.cityMenuOpen = true;
     try { if (document.exitPointerLock) document.exitPointerLock(); } catch (e) { /* ignore */ }
+    if (CBZ.cityInventory && CBZ.cityInventory.onOpen) CBZ.cityInventory.onOpen();   // V2: resync slots vs truth
     invBigSig = "";                                    // force a fresh portrait
     renderInvAll();
     inv.style.display = "flex";
@@ -940,6 +957,7 @@
     if (!invOpen) return;
     invOpen = false;
     if (inv) inv.style.display = "none";
+    if (CBZ.cityInventory && CBZ.cityInventory.onClose) CBZ.cityInventory.onClose(); // V2: stash cursor + persist
     CBZ.cityMenuOpen = false;
     if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
   }
@@ -963,7 +981,7 @@
     const k = (e.key || "").toLowerCase();
     // while the inventory overlay is up, it owns I / Esc
     if (invOpen) {
-      if (k === "i" || k === "escape") {
+      if (k === "i" || e.code === "KeyI" || k === "escape") {
         e.preventDefault();
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         e.stopPropagation();
@@ -979,7 +997,7 @@
       // still allow the hide-HUD toggle while driving/dead; [I] is gated to on-foot
       if (k !== "o") return;
     }
-    if (k === "i") {
+    if (k === "i" || e.code === "KeyI") {
       // CONTEXT PRIORITY: if a world interaction is currently offered on the
       // "i" slot (aiming at / next to a ped/corpse/vendor/stash with an "i"
       // action — take-clothes, mug, rob-stash, surrender…), [I] runs THAT and

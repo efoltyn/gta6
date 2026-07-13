@@ -147,10 +147,71 @@
     const SIDE = 8.7;                 // deck-edge / barrier centre on Z
     // colour buckets reused across all elements (keeps Lambert count low)
     const C_DECK = 0x8d939c, C_CURB = 0x707782, C_RAIL = 0x9aa3ad, C_PYLON = 0xb9c0c8, C_CABLE = 0xd9dde2;
-    // deck base (slightly proud, with a structural fascia look) + road surface + centre dashes
-    plane(bridgeX, cz, bridgeLen, 18, C_DECK, 0.025);
-    plane(bridgeX, cz, bridgeLen, ROADW, 0x33363d, 0.055);
-    for (let x = bridgeStart + 3; x < bridgeEnd; x += 7) plane(x, cz, 2.8, 0.28, 0xf2d14a, 0.075, true);
+    // deck base (slightly proud, with a structural fascia look) + road surface + centre dashes.
+    // PAINTED, NOT GEOMETRY (floating-yellow-line fix): the old deck/road were
+    // untextured Lambert planes and every dash was its OWN MeshBasicMaterial
+    // plane — core/batch.js folded them into DIFFERENT per-tile colour buckets
+    // (Lambert vs Basic), and core/farcull.js then hid each merged bucket by
+    // its own bounding sphere, so the dashes and the deck popped in/out OUT OF
+    // SYNC = a yellow line floating over open water. Now both surfaces carry a
+    // tiling grain texture (textured materials are batch-EXEMPT, same as every
+    // other road surface — see mergeableKeyV2), and ALL dashes merge into ONE
+    // full-span geometry (userData keeps it live) whose cull sphere matches the
+    // deck's — the paint and the deck can never cull apart again.
+    function bakeTarmac(hex) {
+      let cv = null;
+      try { cv = document.createElement("canvas"); } catch (e) { return null; }
+      if (!cv || !cv.getContext) return null;
+      const S = 64; cv.width = S; cv.height = S;
+      const g = cv.getContext("2d"); if (!g) return null;
+      g.fillStyle = hex; g.fillRect(0, 0, S, S);
+      // deterministic string-seeded LCG grain (build-time code — no Math.random)
+      let s = 0;
+      for (let i = 0; i < hex.length; i++) s = (s * 31 + hex.charCodeAt(i)) | 0;
+      s = (s ^ 0x9e3779b9) & 0x7fffffff || 0x2f6e2b1;
+      const rnd = function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+      for (let i = 0; i < 800; i++) {
+        const lvl = (rnd() - 0.5) * 0.12;
+        g.fillStyle = (lvl >= 0 ? "rgba(255,255,255," : "rgba(0,0,0,") + Math.abs(lvl).toFixed(3) + ")";
+        g.fillRect((rnd() * S) | 0, (rnd() * S) | 0, 1, 1);
+      }
+      const tex = new THREE.CanvasTexture(cv);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.anisotropy = 4;
+      return tex;
+    }
+    function deckPlane(w, d, hex, fallbackColor, y) {
+      const tex = bakeTarmac(hex);
+      let mtl;
+      if (tex) { tex.repeat.set(w / 8, d / 8); mtl = new THREE.MeshLambertMaterial({ map: tex }); }
+      else mtl = new THREE.MeshLambertMaterial({ color: fallbackColor });   // no-canvas stub — colour fallback
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mtl);
+      p.rotation.x = -Math.PI / 2; p.position.set(bridgeX, y, cz);
+      p.receiveShadow = true; root.add(p);
+      return p;
+    }
+    deckPlane(bridgeLen, 18, "#8d939c", C_DECK, 0.025);
+    deckPlane(bridgeLen, ROADW, "#33363d", 0x33363d, 0.055);
+    {
+      // same dash cadence/footprint as the old per-plane loop (centres at x,
+      // 2.8×0.28), accumulated into one BufferGeometry; y sits paint-thin over
+      // the road (0.015) with a polygonOffset decal material doing the real
+      // depth separation — paint, not hovering geometry.
+      const dashPos = [], dashY = 0.07, hw = 0.14;
+      for (let x = bridgeStart + 3; x < bridgeEnd; x += 7) {
+        const x0 = x - 1.4, x1 = x + 1.4;
+        dashPos.push(
+          x0, dashY, cz - hw, x0, dashY, cz + hw, x1, dashY, cz + hw,
+          x0, dashY, cz - hw, x1, dashY, cz + hw, x1, dashY, cz - hw);
+      }
+      const dg = new THREE.BufferGeometry();
+      dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashPos), 3));
+      const dash = new THREE.Mesh(dg, new THREE.MeshBasicMaterial({
+        color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      dash.matrixAutoUpdate = false; dash.renderOrder = 1;
+      dash.userData.roadPaint = true;   // batch-exempt: keeps its decal material + culls as one full span
+      root.add(dash);
+    }
 
     // continuous SOLID fall-guard curb, one per side (low + thin, part of the
     // railing base). noCam so the chase camera doesn't clip on it. This is the
@@ -364,7 +425,10 @@
     const roadMat = CBZ.roadMat
       ? CBZ.roadMat({ color: 0x33363d })
       : new THREE.MeshLambertMaterial({ color: 0x33363d });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a });
+    // road-paint decal material: polygonOffset (not y-lift) does the depth
+    // separation, so the dashes read as paint on the asphalt (shared by every
+    // merged per-segment dash mesh below).
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     function blocked(x, z) {
       for (const p of placed) {
         if (Math.abs(p.x - x) < p.w / 2 + ROADW / 2 + 0.8 && Math.abs(p.z - z) < p.d / 2 + ROADW / 2 + 0.8) return true;
@@ -403,12 +467,28 @@
         const x = vertical ? fixed : cx + mid, z = vertical ? cz + mid : fixed;
         const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
         m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.receiveShadow = true; root.add(m);
+        // centre dashes: ONE merged mesh per road segment (was one plane per
+        // dash — the batch pass scattered those into per-tile buckets that
+        // farcull hid out of sync with this live road plane, the same floating-
+        // line bug the bridge had). Merged per SEGMENT, the dash mesh's cull
+        // sphere matches its own road plane's, so they always hide together.
         const dashes = Math.max(1, Math.floor(len / 6));
+        const dashPos = [], dashY = 0.065;   // paint-thin over the 0.05 road; polygonOffset does the rest
         for (let i = 0; i < dashes; i++) {
           const tt = a + (i + 0.5) * (len / dashes);
           const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
-          const dm = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3), lineMat);
-          dm.rotation.x = -Math.PI / 2; dm.position.set(lx, 0.07, lz); root.add(dm);
+          const hx = vertical ? 0.15 : 1.2, hz = vertical ? 1.2 : 0.15;   // the old 0.3×2.4 dash footprint
+          dashPos.push(
+            lx - hx, dashY, lz - hz, lx - hx, dashY, lz + hz, lx + hx, dashY, lz + hz,
+            lx - hx, dashY, lz - hz, lx + hx, dashY, lz + hz, lx + hx, dashY, lz - hz);
+        }
+        if (dashPos.length) {
+          const dg = new THREE.BufferGeometry();
+          dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashPos), 3));
+          const dmesh = new THREE.Mesh(dg, lineMat);
+          dmesh.matrixAutoUpdate = false; dmesh.renderOrder = 1;
+          dmesh.userData.roadPaint = true;   // batch-exempt: keeps the decal material, culls with its segment
+          root.add(dmesh);
         }
         const seg = { x, z, len, vertical, district: "island" };
         roadSegs.push(seg); city.roads.push(seg);

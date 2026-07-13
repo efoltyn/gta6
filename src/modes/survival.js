@@ -45,6 +45,7 @@
     const c = cause || "";
     if (/lava|burn|incinerat|nuclear|vaporiz|fallout|meteor|bomb/.test(c)) return "#ff8a3a";
     if (/lightning/.test(c)) return "#9fd0ff";
+    if (/\bstorm\b|\bzone\b/.test(c)) return "#c792ea";
     if (/drown|swept|flood/.test(c)) return "#6fc6ff";
     if (/frozen|blizzard/.test(c)) return "#bfe6ff";
     if (/rubble|sinkhole|crushed|fell/.test(c)) return "#cbb89a";
@@ -96,8 +97,12 @@
   }
 
   // ---- spectate takeover: you stay in the still-running world (death-cam +
-  //      slow orbit) while disasters keep going. A compact overlay offers
-  //      Play Again / Main Menu — the round does NOT freeze until you choose.
+  //      slow orbit) while disasters keep going. A compact overlay shows your
+  //      placement and keeps counting the field down; the round does NOT
+  //      freeze until you press RESULTS or a winner is decided — then the
+  //      REAL end screen (#survlose via CBZ.loseGame, systems/state.js) takes
+  //      over with its already-bound Try Again / Main Menu buttons.
+  if (CBZ.CONFIG.SURV_SPECTATE == null) CBZ.CONFIG.SURV_SPECTATE = true;   // false → death cuts straight to the lose card
   let overlay = null, titleEl = null, subEl = null, btnRow = null;
   function buildOverlay() {
     if (overlay) return;
@@ -117,20 +122,22 @@
       b.style.cssText = "font-family:inherit;font-weight:600;font-size:16px;color:#fff;border:0;border-radius:14px;padding:12px 22px;cursor:pointer;background:" + bg + ";box-shadow:0 6px 0 " + sh + ",0 10px 18px rgba(0,0,0,.3)";
       return b;
     };
-    const againBtn = mkBtn("↻ Play Again", "#39c06a", "#1f8a45");
-    const menuBtn = mkBtn("⌂ Main Menu", "#6b7686", "#4a5562");
-    btnRow.appendChild(againBtn); btnRow.appendChild(menuBtn);
+    const resultsBtn = mkBtn("Results ➜", "#39c06a", "#1f8a45");
+    btnRow.appendChild(resultsBtn);
     overlay.appendChild(titleEl); overlay.appendChild(subEl); overlay.appendChild(btnRow);
     document.body.appendChild(overlay);
-    againBtn.addEventListener("click", () => { clearSpectate(); if (CBZ.startRun) CBZ.startRun(); });
-    menuBtn.addEventListener("click", () => { clearSpectate(); if (CBZ.setState) CBZ.setState("title"); });
+    resultsBtn.addEventListener("click", finishRound);
+  }
+  // the live spectate status line (refreshed while the field keeps dying)
+  function spectateLine() {
+    const s = surv.stats;
+    const how = surv._deathCause ? "You were " + surv._deathCause + "  ·  " : "";
+    return how + "Placement #" + (s.placement || 1) + " of " + (s.total || "?") +
+      "  ·  " + surv.aliveCount() + " still alive  ·  spectating…";
   }
   function showSpectateOverlay() {
     buildOverlay();
-    const s = surv.stats;
-    const how = surv._deathCause ? "You were " + surv._deathCause + "  ·  " : "";
-    subEl.textContent = how + "Placement #" + (s.placement || 1) + " of " + (s.total || "?") +
-      "  ·  " + (s.disastersSurvived || 0) + " disasters survived  ·  spectating…";
+    subEl.textContent = spectateLine();
     overlay.style.display = "flex";
     void overlay.offsetWidth;                  // reflow so the fade-in plays
     titleEl.style.opacity = "1"; titleEl.style.transform = "translateY(0)";
@@ -138,9 +145,32 @@
   }
   function enterSpectate(reason) {
     if (surv.spectating) return;
+    // nothing left to watch (a lone survivor or a full wipe decides the round
+    // instantly), or spectate disabled → straight to the results card
+    if (CBZ.CONFIG.SURV_SPECTATE === false || liveBots() <= 1) { finishRound(); return; }
     surv.spectating = true; surv.spectateT = 0;
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     showSpectateOverlay();
+  }
+  // resolve the round for a dead player: leave spectate, record the run in
+  // the persistent survival stats, fill the lose card's flavor line (cause,
+  // round winner, lifetime record), and hand over to CBZ.loseGame() — the
+  // proper #survlose screen whose buttons state.js already wired.
+  function finishRound() {
+    if (g.state === "won" || g.state === "lost") return;
+    let winner = null;
+    if (liveBots() === 1) { const b = CBZ.bots; for (let i = 0; i < b.length; i++) if (!b[i].dead) { winner = b[i].name; break; } }
+    clearSpectate();
+    recordSurvRun(surv.stats.placement || (liveBots() + 1));
+    const sub = document.querySelector("#survlose .sub");
+    if (sub) {
+      const s = CBZ.survStats();
+      const bits = ["You were " + (surv._deathCause || "eliminated")];
+      if (winner) bits.push(winner + " outlasted everyone");
+      if (s.runs) bits.push("Wins " + s.wins + "/" + s.runs + (s.bestPlacement ? " · best #" + s.bestPlacement : ""));
+      sub.textContent = bits.join("  ·  ");
+    }
+    if (CBZ.loseGame) CBZ.loseGame(surv._deathCause || "eliminated");
   }
   function clearSpectate() {
     surv.spectating = false;
@@ -222,6 +252,38 @@
   };
   CBZ.surv = surv;
 
+  // ---- persistent survival record (mirrors systems/save.js's localStorage
+  //      pattern, own key). state.js's winGame() calls CBZ.recordSurvWin();
+  //      the death path calls recordSurvRun(placement) via finishRound().
+  //      Guarded by surv._runRecorded so each round counts exactly once.
+  //      Read back on the title card's survival note + both end screens. ----
+  const STATS_KEY = "cellblockz_surv_stats";
+  let survSaved = (function () { try { return JSON.parse(localStorage.getItem(STATS_KEY)) || {}; } catch (e) { return {}; } })();
+  function persistSurvStats() { try { localStorage.setItem(STATS_KEY, JSON.stringify(survSaved)); } catch (e) {} }
+  const titleNote = document.querySelector("#title .smallnote.mode-survival-only");
+  const titleNoteBase = titleNote ? titleNote.textContent : "";
+  function refreshSurvTitle() {
+    if (!titleNote) return;
+    titleNote.textContent = !survSaved.runs ? titleNoteBase
+      : titleNoteBase + "  ·  Wins " + (survSaved.wins || 0) + "/" + survSaved.runs +
+        (survSaved.bestPlacement ? "  ·  Best #" + survSaved.bestPlacement : "");
+  }
+  function recordSurvRun(placement) {
+    if (surv._runRecorded) return;
+    surv._runRecorded = true;
+    survSaved.runs = (survSaved.runs || 0) + 1;
+    if (placement === 1) survSaved.wins = (survSaved.wins || 0) + 1;
+    if (placement >= 1 && (!survSaved.bestPlacement || placement < survSaved.bestPlacement)) survSaved.bestPlacement = placement;
+    persistSurvStats();
+    refreshSurvTitle();
+  }
+  CBZ.recordSurvWin = function () {
+    if (!surv.stats.placement) surv.stats.placement = 1;
+    recordSurvRun(1);
+  };
+  CBZ.survStats = function () { return { wins: survSaved.wins || 0, runs: survSaved.runs || 0, bestPlacement: survSaved.bestPlacement || 0 }; };
+  refreshSurvTitle();
+
   // ---- arena lighting override: re-aim the sun onto the far island and
   //      let CBZ.survEnv (written by disasters) recolour sky/fog/flash ----
   let shadowMode = "escape";
@@ -250,7 +312,8 @@
     if (CBZ.skyDome && CBZ.skyDome.material) CBZ.skyDome.material.color.setHex(e.fog);
   });
 
-  // ---- stamina + last-one-standing check ----
+  // ---- stamina + spectate watcher + last-one-standing check ----
+  let specHudT = 0;
   CBZ.onUpdate(30, function (dt) {
     if (g.mode !== "survival") return;
     const P = CBZ.player, S = CBZ.SURV;
@@ -260,7 +323,19 @@
 
     if (g.state === "playing" && !P.dead && liveBots() === 0) {
       surv.stats.placement = 1;
-      if (CBZ.winGame) CBZ.winGame("survival");
+      if (CBZ.winGame) CBZ.winGame("survival");   // fills #survwin + CBZ.recordSurvWin
+      const sub = document.querySelector("#survwin .sub");
+      if (sub) { const s = CBZ.survStats(); sub.textContent = "Last one standing" + (s.runs ? "  ·  Wins " + s.wins + "/" + s.runs : ""); }
+      return;
+    }
+
+    // spectating: keep the overlay's field count live; the moment a single
+    // survivor remains the round is decided → the real results screen.
+    if (surv.spectating && g.state === "playing") {
+      surv.spectateT += dt;
+      if (liveBots() <= 1) { finishRound(); return; }
+      specHudT -= dt;
+      if (specHudT <= 0 && subEl) { specHudT = 0.5; subEl.textContent = spectateLine(); }
     }
   });
 
@@ -275,13 +350,13 @@
   CBZ.registerMode("survival", {
     id: "survival",
     label: "Disaster Survival",
-    objective: "Outlast every disaster. Get inside, take the stairs to the roof, reach high ground, dodge the strikes — be the last one standing. There is no safe zone: the disasters never stop.",
+    objective: "Outlast every disaster. Get inside, take the stairs to the roof, reach high ground, dodge the strikes — and stay inside the shrinking safe zone. The disasters never stop. Be the last one standing.",
     build,
     reset(game) {
       build();
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();
-      surv._cause = null; surv._lastImp = null; surv._deathCause = null;
+      surv._cause = null; surv._lastImp = null; surv._deathCause = null; surv._runRecorded = false;
       const A = surv.arena;
       A.root.visible = true;
       if (A.reset) A.reset();   // restore buildings/trees/craters from a prior match
@@ -316,12 +391,16 @@
         flash: 0, flashColor: 0xffffff,
       });
 
-      // No Fortnite zone — the disasters themselves are the threat. (safezone
-      // is left dormant; bots flee hazards, not a storm wall.)
+      // the shrinking storm ring (systems/safezone.js) runs ALONGSIDE the
+      // disasters: it prefers to close between waves, squeezes the field
+      // together as the hazards peak, and eliminates anyone caught outside.
+      // SURV_ZONE=false reverts to the old disasters-only island.
+      if (CBZ.safezone) { if (CBZ.CONFIG.SURV_ZONE !== false) CBZ.safezone.start(); else CBZ.safezone.stop(); }
       if (CBZ.disasters) CBZ.disasters.start();
       // the prison "objective" panel becomes the survival KILL FEED instead of
-      // a static paragraph — it fills in as people start dying
-      if (CBZ.killFeedReset) CBZ.killFeedReset();
+      // a static paragraph — it fills in as people start dying. (survival's
+      // own reset export — CBZ.killFeedReset belongs to city/killfeed.js.)
+      if (CBZ.survKillFeedReset) CBZ.survKillFeedReset();
     },
     winStats(game) {
       return [

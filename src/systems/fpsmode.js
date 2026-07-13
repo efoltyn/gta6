@@ -132,6 +132,29 @@
     // owned the player. Downstream one-off guards hid some symptoms, not the state.
     return !fps.active && !!p && !p.dead && !p.driving && armed() && CBZ.game.state === "playing";
   }
+  // ---- TP PRESENT SIGNAL (owner: "TP camera moves too much / arms always up") --
+  // The twitchy armed camera tier and the raised aim pose used to key off merely
+  // OWNING an un-holstered gun (shoulderActive), and the default city loadout
+  // hands you one at spawn — so the player lived permanently in the aim stance.
+  // "Presenting" is the actual intent signal: scoping (RMB/ADS), holding the
+  // trigger, or a short post-shot linger while the recoil settles. Merely-armed
+  // now reads as the relaxed carry (camera AND pose).
+  if (CBZ.CONFIG.CITY_TP_ADS_CAMERA == null) CBZ.CONFIG.CITY_TP_ADS_CAMERA = true;
+  if (CBZ.CONFIG.CITY_TP_LOWREADY == null) CBZ.CONFIG.CITY_TP_LOWREADY = true;
+  const PRESENT_LINGER = 0.9;   // s after the last shot before the gun lowers
+  function presenting() {
+    if (!shoulderActive()) return false;
+    return aimHeld || triggerHeld || sinceShot < PRESENT_LINGER;
+  }
+  // Camera-side hook (systems/camera.js): gates the tight armed tier — yaw
+  // snap, tight position/look damps, pitch-follow, close collision floor —
+  // on presenting instead of merely-armed. Framing (DIST/SIDE/FOV/HEIGHT) is
+  // already flat for merely-armed by design and is not touched by this. With
+  // CITY_TP_ADS_CAMERA=false it reverts to the old merely-armed gate exactly.
+  CBZ.tpPresenting = function () {
+    if (CBZ.CONFIG.CITY_TP_ADS_CAMERA === false) return shoulderActive();
+    return presenting();
+  };
   function maxHpOf(a) { return (a.kind === "guard" || a.kind === "warden") ? 140 : 100; }
 
   // ---- CALIBER: how hard each round MARKS the world -----------------------
@@ -2104,9 +2127,10 @@
       // value), which armed-3PS turned into a sky/ceiling stare.
       if (CBZ.cam && typeof fps.fp === "number") CBZ.cam.pitch = Math.max(-0.6, Math.min(0.9, fps.fp));
     }
-    // toggling FPS on hides the body; clear the 3PS present-weapon pose so the
-    // rig's arms are not stuck raised when the body re-appears unarmed/holstered.
-    if (CBZ.playerChar && on) CBZ.playerChar.aimingPose = false;
+    // toggling FPS on hides the body; clear the 3PS present-weapon/carry poses
+    // so the rig's arms are not stuck raised when the body re-appears
+    // unarmed/holstered.
+    if (CBZ.playerChar && on) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
   }
 
   CBZ.toggleFPS = function () { setActive(!fps.active); };
@@ -2411,6 +2435,12 @@
     // don't hold your weapon when you die"). The death tumble above owns the vm.
     if (!aiming || (CBZ.player && CBZ.player.dead)) {
       carriedGun.visible = false;
+      // STUCK-POSE FIX: this early-out skips the pose writer at the bottom of
+      // the TP branch, so holstering / switching to melee / dying while in TP
+      // used to leave aimingPose latched true and the rig frozen squared-up
+      // forever ("holds arms up like squaring up all the time"). Clear both
+      // stance flags on the way out so animChar's natural idle takes over.
+      if (CBZ.playerChar) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
       return;
     }
 
@@ -2527,9 +2557,9 @@
     const w = weapon();
     const reloadDip = fps.reloading > 0 ? 0.13 + Math.sin(CBZ.now * 0.018) * 0.025 : 0;
     if (fps.active) {
-      // First-person: the player body is hidden, so the 3PS aim pose must not
-      // linger on the rig (animChar reads this flag). Clear it here.
-      if (CBZ.playerChar) CBZ.playerChar.aimingPose = false;
+      // First-person: the player body is hidden, so the 3PS aim/carry poses
+      // must not linger on the rig (animChar reads these flags). Clear here.
+      if (CBZ.playerChar) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
       if (armed()) {
         // Sustained-fire climb is kept SMALL on purpose: the bullet origin is
         // clamped to a tight camera-space box (muzzleWorld), so if the visible
@@ -2557,13 +2587,16 @@
       const util = w.slot === "utility";
       // Two carry stances: a relaxed LOW-READY (gun lowered and tucked to
       // the side so it never juts through the chest when viewed from
-      // behind) and a raised AIM pose. We only raise when actually aiming
-      // (RMB), firing, or while recoil is settling — so by default the
-      // convict just carries the weapon instead of permanently pointing it.
-      // ALWAYS hold the gun forward-ready (pointed where the crosshair is) — no
-      // need to ADS/zoom to point it. RMB still zooms for those who want it, but
-      // the pose no longer drops to a lowered idle. Put it away by switching slots.
-      const aim = true;
+      // behind) and a raised AIM pose. We only raise when actually PRESENTING
+      // — aiming (RMB), holding the trigger, or while recoil settles after a
+      // shot — so by default the player CARRIES the weapon (RDR2/Fortnite
+      // carry) instead of permanently pointing it. A regression had hard-wired
+      // `aim = true`, which both squared the arms up forever AND barrel-locked
+      // the gun along the camera ray every frame — from the over-shoulder cam
+      // a forward-locked barrel is foreshortened to a few pixels behind the
+      // torso, which is why the owner never SAW the gun in third person.
+      // CITY_TP_LOWREADY=false reverts to the old always-raised behavior.
+      const aim = CBZ.CONFIG.CITY_TP_LOWREADY === false ? true : presenting();
       // gun sits a touch lower / tilted down when at the ready
       // Nudge the carried gun a touch UP + FORWARD so the muzzle clears the
       // chest silhouette when the arm is raised into the present-weapon pose
@@ -2588,7 +2621,10 @@
       // ORIENTATION in world space every frame so the barrel points exactly at
       // the crosshair ray's far point (parallax-correct from the gun's own
       // position). Recoil/reload kick re-applied as local perturbations on top.
-      if (carriedGun.parent && CBZ.camera) {
+      // Only while PRESENTING — the low-ready carry keeps the local
+      // down-forward fallback pose above (a lowered gun locked to the horizon
+      // crosshair would twist against the hip-carry arm).
+      if (aim && carriedGun.parent && CBZ.camera) {
         carriedGun.parent.updateWorldMatrix(true, false);
         carriedGun.getWorldPosition(_blGunPos);
         _blDir.set(0, 0, -1).applyQuaternion(CBZ.camera.quaternion);
@@ -2611,7 +2647,12 @@
         // animChar pass can HOLD the aim pose without a tug-of-war damping the
         // arm back toward idle. animChar reads aimingPose / aimLong / aimRecoil /
         // aimRecoilSide and builds the Fortnite-style present-weapon pose.
-        CBZ.playerChar.aimingPose = armed();
+        // TWO-STANCE: present pose only while actually presenting; otherwise
+        // the LOW-READY carry (armed() is guaranteed true in this branch —
+        // shoulderActive() gates `aiming`). Unarmed/holstered never reaches
+        // here (early-out above clears both flags), giving the NPC-style idle.
+        CBZ.playerChar.aimingPose = aim;
+        CBZ.playerChar.carryPose = !aim;
         CBZ.playerChar.aimLong = longGun;
         CBZ.playerChar.aimRecoil = recoil;
         CBZ.playerChar.aimRecoilSide = recoilSide;

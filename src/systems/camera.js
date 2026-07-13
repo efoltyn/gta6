@@ -12,6 +12,27 @@
   const { camera, canvas, player } = CBZ;
   const SENS = CBZ.TUNE.sens;
 
+  // ---- CAM_TP_V2 (owner: "TP camera zooms in and out on its own — kill
+  // that. Behave like Fortnite: FIXED follow distance, locked over-shoulder
+  // offset, rigid orbit around a pivot above the character, aim pulls to a
+  // slightly tighter FIXED shoulder view"). Under the flag, city on-foot TP:
+  //   · distance is a CONSTANT (DIST 4.0 / ADS 2.4) — no wheel-zoom scaling,
+  //     no melee zoom; the only distance changes are the fast fixed-target
+  //     ADS punch-in and the collision clamp (both snappy, never a drift);
+  //   · FOV is a CONSTANT (60 / ADS 50) — the speed kick is off;
+  //   · yaw orbit is RIGID 1:1 with the mouse (no smYaw trail) and the
+  //     relaxed tier gets the same pitch-true look target as presenting;
+  //   · position/look SmoothDamp collapse to near-rigid so the collision
+  //     clamp engages/releases instantly (UE spring-arm behavior) instead of
+  //     re-zooming gradually.
+  // Also under V2: hold [B] on foot to swing the camera around and view your
+  // character from the FRONT (outfit check); release to swing back.
+  // FIRST PERSON IS UNTOUCHED: every FP path returns before this tier runs.
+  // CAM_VEHICLE_RESTORE: city/view.js force-exits FP when you enter a car and
+  // nothing put you back — remember the on-foot view and restore FP on exit.
+  if (CBZ.CONFIG.CAM_TP_V2 == null) CBZ.CONFIG.CAM_TP_V2 = true;
+  if (CBZ.CONFIG.CAM_VEHICLE_RESTORE == null) CBZ.CONFIG.CAM_VEHICLE_RESTORE = true;
+
   // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — guarded FALLBACK ----
   // src/city/camera.js IS loaded by index.html (later than this file) and is the
   // AUTHORITATIVE tuning surface: it re-assigns CBZ.CITY_TP unconditionally, so
@@ -26,7 +47,7 @@
     PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze
     LOOK_Y: 1.52,      // look-target height above feet
     LEAD: 4.6,         // forward look-ahead
-    DAMP_POS: 0.16,    // position SmoothDamp time (lazy settle)
+    DAMP_POS: 0.18,    // position SmoothDamp time (lazy settle; mirror of city/camera.js)
     DAMP_YAW: 9.0,     // relaxed yaw chase rate
     DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
     FOV: 60,           // base FOV
@@ -131,6 +152,21 @@
     cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
     cam.pitch = Math.max(-PITCH_SAFETY, Math.min(PITCH_SAFETY, cam.pitch));
   });
+  // ---- FRONT VIEW (hold [B]): swing the orbit 180° to face your character —
+  // outfit/loadout check, Fortnite locker-style. Hold-to-view (release swings
+  // back); only reachable in the city on-foot TP tier below, and never while
+  // presenting a weapon (aim always wins). Pointer lock gates it so a stray
+  // B in menus/typing does nothing. frontK eases 0↔1 and simply ADDS π·frontK
+  // to the orbit yaw while collapsing the forward look-lead, so the camera
+  // sweeps around and settles looking back at the character.
+  let frontHeld = false, frontK = 0;
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "KeyB" && cam.locked && !e.repeat) frontHeld = true;
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.code === "KeyB") frontHeld = false;
+  });
+
   // scroll wheel zooms the third-person camera (ignored in first-person)
   addEventListener("wheel", (e) => {
     if ((CBZ.simView && CBZ.simView.active) || (CBZ.fullMap && CBZ.fullMap.active)) return; // overview/map owns the pointer
@@ -168,6 +204,8 @@
   let smYaw = 0, smYawOn = false;
   // one-shot: settle the orbit pitch to the CITY_TP near-level default on city entry
   let _cityPitchInit = false;
+  // vehicle view memory (CAM_VEHICLE_RESTORE): was the player in FP on foot?
+  let _drvPrev = false, _fpOnFoot = false, _preDriveFP = false;
 
   // cinematic spawn intro: far reveal -> push in -> 180 orbit handoff
   let introT = 0;
@@ -267,6 +305,21 @@
     // Used ONLY for time-integration of the damps/exp-chase below; the velocity
     // calc keeps the world dt so look-ahead/FOV pacing is unchanged.
     const fdt = (CBZ.feelCam && CBZ.feelDt != null) ? CBZ.feelDt : dt;
+    // ---- VEHICLE VIEW MEMORY: city/view.js force-drops FP the moment you
+    // drive (the car owns the camera) and nothing ever restored it — every
+    // car ride silently dumped an FP player into third person. Track the
+    // on-foot view each frame; on the enter-edge remember it (the previous
+    // frame's value — captured BEFORE view.js's forced setFPS(false)), on the
+    // exit-edge give FP back. Guard-called; CAM_VEHICLE_RESTORE=false reverts.
+    if (CBZ.CONFIG.CAM_VEHICLE_RESTORE !== false && CBZ.game.mode === "city") {
+      const drv = !!player.driving;
+      if (drv && !_drvPrev) _preDriveFP = _fpOnFoot;
+      if (!drv && _drvPrev && _preDriveFP && !player.dead &&
+          CBZ.game.state === "playing" && !(CBZ.cityCam && CBZ.cityCam.death) &&
+          CBZ.setFPS && CBZ.fps && !CBZ.fps.active) CBZ.setFPS(true);
+      if (!drv) _fpOnFoot = !!(CBZ.fps && CBZ.fps.active);
+      _drvPrev = drv;
+    } else _drvPrev = !!player.driving;
     // BIRD'S-EYE SOCIETY VIEW: a strategic camera for the math-only mass
     // simulation. It intentionally bypasses spring-arm collision and close
     // camera effects; the player remains frozen while the prison keeps living.
@@ -432,11 +485,29 @@
       if (!_cityPitchInit) { cam.pitch = TP.PITCH; _cityPitchInit = true; }
     } else _cityPitchInit = false;
 
+    // ADS-GATED CAMERA TIER (owner: "third person moves too much"): merely
+    // OWNING an un-holstered gun used to flip every twitchy armed-tier switch
+    // below — yaw snap 9→26, position damp 0.16→0.07, look damp →0.06,
+    // pitch-follow 0→1, collision floor 3.0→2.6 — and the default city loadout
+    // arms you at spawn, so the relaxed tier effectively never ran. tpPresent
+    // narrows those switches to ACTUAL presenting: RMB/ADS, firing, or the
+    // short post-shot settle (CBZ.tpPresenting, systems/fpsmode.js — honors
+    // CBZ.CONFIG.CITY_TP_ADS_CAMERA; false = old merely-armed gate). Framing
+    // (DIST/SIDE/FOV/HEIGHT + their _AIM_BASE twins) already ignores
+    // merely-armed by design and keeps reading `shoulder`/`tpADS` unchanged.
+    // Non-city shoulder (jail/survival, TP=null) keeps the old gate exactly.
+    const tpPresent = shoulder && (!TP || !CBZ.tpPresenting || CBZ.tpPresenting());
+
     // ease the zoom distance toward its target. Normal third person is
     // a wider chase camera; armed third person becomes readable over-shoulder.
     // City scales the wheel-zoom around its own (much closer) default.
     const desiredZoom = TP
-      ? (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF)))
+      ? (CBZ.CONFIG.CAM_TP_V2
+          // FORTNITE LOCK: the boom is a constant — DIST at rest and merely-
+          // armed, DIST_AIM_ADS only while scoping (fixed targets; the fast
+          // ease below is the whole ADS punch-in). Wheel + melee zoom are out.
+          ? (shoulder ? TP.DIST_AIM : TP.DIST)
+          : (shoulder ? TP.DIST_AIM : (meleeFocus ? TP.DIST * 0.85 : TP.DIST * (zoomTarget / DEF))))
       : (driving ? Math.max(zoomTarget, 11) : (shoulder ? Math.min(zoomTarget, 7.6) : (meleeFocus ? Math.min(zoomTarget, 7.0) : zoomTarget)));
     camDist += (desiredZoom - camDist) * (1 - Math.pow(0.0015, fdt));
 
@@ -460,22 +531,34 @@
     if (TP) {
       let campaignTP = false;
       try { campaignTP = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive()); } catch (e) {}
-      if (campaignTP) {
+      if (campaignTP || CBZ.CONFIG.CAM_TP_V2) {
         // Campaign movement is calculated from cam.yaw in physics.js. Framing
         // the visible orbit from a different, delayed smYaw made WASD and the
         // camera disagree about "forward": the body drifted off-axis while the
         // lens swung around it, which read as movement controlling the camera.
         // One yaw now owns input, orbit, look target, and shoulder aim.
+        // CAM_TP_V2 adopts the same RIGID orbit everywhere in the city —
+        // Fortnite's camera has no yaw trail; the mouse IS the orbit.
         smYaw = cam.yaw; smYawOn = true;
         yaw = yawView = cam.yaw;
       } else {
         if (!smYawOn) { smYaw = cam.yaw; smYawOn = true; }
         const yawDt = CBZ.feelCam ? fdt : dt;
-        smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(shoulder ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * yawDt));
+        smYaw += (cam.yaw - smYaw) * (1 - Math.exp(-(tpPresent ? TP.DAMP_YAW_AIM : TP.DAMP_YAW) * yawDt));
         yaw = smYaw;
         yawView = CBZ.feelCam ? cam.yaw : smYaw;   // crisp view dir vs lazy body
       }
     } else smYawOn = false;
+    // ---- FRONT VIEW (hold [B], city on-foot TP only): ease frontK 0↔1 and
+    // add π·frontK to BOTH yaws — the orbit sweeps smoothly around to the
+    // character's face and back. Presenting a weapon vetoes it (aim wins);
+    // losing pointer lock releases a stuck key. The look-lead collapse that
+    // re-centres the character happens at aimLead/pitchFollow below.
+    if (!cam.locked) frontHeld = false;
+    const frontWant = (frontHeld && TP && !tpPresent && !player.driving && !player.dead) ? 1 : 0;
+    frontK += (frontWant - frontK) * (1 - Math.exp(-9 * fdt));
+    if (frontK < 0.0005) frontK = 0;
+    if (frontK > 0) { yaw += Math.PI * frontK; yawView += Math.PI * frontK; }
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
     const targetSide = TP ? TP.SIDE * 0.25 : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
@@ -528,7 +611,7 @@
       // boom from 4.8 → ~1.1, ballooning the character + dropping the angle low —
       // THE main 3PS framing bug). Only RMB/ADS may ride in close for the punch-in.
       const minCam = (CBZ.game.mode === "city" && !player.driving)
-        ? (shoulder ? ((CBZ.isADS && CBZ.isADS()) ? 1.8 : 2.6) : 3.0)
+        ? (tpPresent ? ((CBZ.isADS && CBZ.isADS()) ? 1.8 : 2.6) : 3.0)
         : 0.28;
       const d = Math.max(minCam, occ - 0.25);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
@@ -547,7 +630,9 @@
     // leaves the camera exactly where it was. Jail/survival shoulder (no TP)
     // keeps the old constants.
     const tpADS = !!(TP && shoulder && CBZ.isADS && CBZ.isADS());
-    const aimLead = driving ? 8.5 : (shoulder ? (TP ? (tpADS ? 12.0 : TP.LEAD) : 12.0) : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))));
+    // front view: the forward look-lead collapses with frontK so the camera
+    // settles looking AT the character (LOOK_Y height), not past them.
+    const aimLead = (driving ? 8.5 : (shoulder ? (TP ? (tpADS ? 12.0 : TP.LEAD) : 12.0) : (meleeFocus ? 2.2 : (TP ? TP.LEAD : (surv ? 2.4 : 3.6))))) * (1 - frontK);
     // The look target carries the VIEW DIRECTION via the aimLead·forward term.
     // Derive that forward/right from yawView (= live cam.yaw under feelCam) so
     // the aim tracks the mouse 1:1; off (or non-TP) yawView===yaw → identical.
@@ -564,7 +649,19 @@
     // Only the armed shoulder needs its far aim target to carry pitch. Applying
     // this to relaxed third person as well double-pitched the orbit/look target
     // and made ordinary mouse-look change the character's screen framing.
-    const pitchFollow = (TP && shoulder) ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) : 0;
+    // (Gated on tpPresent: merely-armed is the relaxed chase now, so it must
+    // stay pitch-blind like unarmed; presenting restores the pitch-true aim.)
+    // CAM_TP_V2: the RELAXED tier gets the SAME pitch-true look target — the
+    // pitch-blind relaxed math was the "weird" TP feel (mouse-up ballooned the
+    // camera into a top-down stare instead of pitching the view). With
+    // aimLead(4.6) ≈ camDist(4.0) the look target and the orbit rise together,
+    // so the view pitches ~1:1 with the mouse and the character stays framed —
+    // exactly the presenting-tier math the owner already liked. A partial
+    // factor would be WORSE, not safer: below aimLead·pf = camDist (pf≈0.87)
+    // the vertical response INVERTS (look-up pitches the view down).
+    const pitchFollow = (TP && (tpPresent || CBZ.CONFIG.CAM_TP_V2))
+      ? (TP.PITCH_LOOK != null ? TP.PITCH_LOOK : 1.0) * (1 - frontK)
+      : 0;
     const aimLeadH = pitchFollow ? aimLead * Math.cos(cam.pitch) : aimLead;
     const ltx = tx + vel.x * lead + rightVX * targetSide + fwdVX * aimLeadH;
     const ltz = tz + vel.z * lead + rightVZ * targetSide + fwdVZ * aimLeadH;
@@ -656,9 +753,13 @@
     // POSITION smoothTime is UNCHANGED (translation stays floaty); we only swap
     // the integration dt → feel-dt so the floaty follow settles in REAL time
     // instead of the ~25%-speed slow-mo the world-clamped dt produced at 5 FPS.
-    const posS = TP ? (shoulder ? 0.07 : TP.DAMP_POS) : 0.085;
+    // CAM_TP_V2: near-rigid position follow (0.02s) — Fortnite's boom has no
+    // positional lag, and the rigidity is ALSO what makes the collision clamp
+    // engage/release instantly instead of the old 0.18s drift that read as
+    // "the camera zooms in and out on its own" next to every wall.
+    const posS = TP ? (CBZ.CONFIG.CAM_TP_V2 ? 0.02 : (tpPresent ? 0.07 : TP.DAMP_POS)) : 0.085;
     camera.position.x = smoothDamp(camera.position.x, dx, camV.x, posS, fdt);
-    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (shoulder ? 0.08 : TP.DAMP_POS * 1.1) : 0.10, fdt);
+    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (CBZ.CONFIG.CAM_TP_V2 ? 0.025 : (tpPresent ? 0.08 : TP.DAMP_POS * 1.1)) : 0.10, fdt);
     camera.position.z = smoothDamp(camera.position.z, dz, camV.z, posS, fdt);
 
     // The look target carries the view DIRECTION (its target already tracks live
@@ -667,16 +768,20 @@
     // NOT the position follow, so translation stays floaty. A small residue
     // (LOOK_TIGHTEN, not zero) keeps player-position noise from jittering the
     // view at low FPS. Off → today's lookS settle on world dt exactly.
-    let lookS = TP ? (shoulder ? 0.06 : TP.DAMP_POS * 0.65) : 0.07;
+    let lookS = TP ? (CBZ.CONFIG.CAM_TP_V2 ? 0.02 : (tpPresent ? 0.06 : TP.DAMP_POS * 0.65)) : 0.07;
     if (CBZ.feelCam) lookS *= LOOK_TIGHTEN;
     look.x = smoothDamp(look.x, ltx, lookV.x, lookS, fdt);
     look.y = smoothDamp(look.y, lty, lookV.y, lookS * 1.2, fdt);
     look.z = smoothDamp(look.z, ltz, lookV.z, lookS, fdt);
     camera.lookAt(look);
 
-    // screen shake offset, decaying (applied after positioning)
+    // screen shake offset, decaying (applied after positioning). City on-foot
+    // TP takes shake at 60% unless actively presenting a weapon — FP never
+    // receives CBZ.shake at all, so full-strength TP shake read as a camera
+    // that never sits still while just walking around (owner complaint). The
+    // decay still runs on the full shakeAmt, so timing is unchanged.
     if (shakeAmt > 0.001) {
-      const s = shakeAmt;
+      const s = shakeAmt * (TP && !tpPresent ? 0.6 : 1);
       camera.position.x += (Math.random() - 0.5) * s;
       camera.position.y += (Math.random() - 0.5) * s;
       camera.position.z += (Math.random() - 0.5) * s;
@@ -688,14 +793,18 @@
     // movement feel quicker without changing the actual move speed.
     // armed-at-rest keeps the default lens + speed kick (Fortnite parity —
     // holding a gun doesn't change the camera); only scoping narrows to FOV_AIM.
+    // CAM_TP_V2: the lens is a CONSTANT (60 hip / 50 ADS) — Fortnite never
+    // changes FOV with speed, and the ±5° sprint kick was half of the
+    // "camera zooms on its own" complaint.
     let targetFov = TP
-      ? (tpADS ? TP.FOV_AIM : TP.FOV + Math.min(spd / 6, 1) * 5)
+      ? (tpADS ? TP.FOV_AIM : (CBZ.CONFIG.CAM_TP_V2 ? TP.FOV : TP.FOV + Math.min(spd / 6, 1) * 5))
       : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
     // a fitted optic (city/gunmods.js + city/scopeview.js) overrides the aimed
     // lens with its own magnification while you're holding aim on foot.
     const scopeF = CBZ.cityScopeFov && CBZ.cityScopeFov();
     if (scopeF) targetFov = scopeF;
-    fov = smoothDamp(fov, targetFov, fovV, 0.18, fdt);
+    // V2: snappier ADS lens punch (~0.12s, Fortnite's targeting transition)
+    fov = smoothDamp(fov, targetFov, fovV, TP && CBZ.CONFIG.CAM_TP_V2 ? 0.12 : 0.18, fdt);
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   }
 

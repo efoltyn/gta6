@@ -21,9 +21,28 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const g = CBZ.game;
+  const CFG = CBZ.CONFIG = CBZ.CONFIG || {};
+  // ---- feature flags (self-defaulted here; each is a one-line revert) ----
+  //   GANG_SEEDED     — the gang layout/personality rng derives from the WORLD
+  //                     seed (CBZ.seedStream) instead of a hardcoded literal,
+  //                     so ?seed=N finally varies the crews like the rest of
+  //                     procgen. Off = the classic 99173 LCG, bit-for-bit.
+  //   GANG_PERSIST    — the takeover war's truth (turf, treasuries, rosters,
+  //                     relations, your crew) rides the g.cityWorld ledger and
+  //                     survives a reload (same registration idiom as
+  //                     civilwar's "cwar" / militia's "mil" blobs).
+  //   GANG_WAR_EVENTS — the rival-war director stages visible set-pieces
+  //                     (lieutenant defense, car reinforcements, second waves).
+  if (CFG.GANG_SEEDED == null) CFG.GANG_SEEDED = true;
+  if (CFG.GANG_PERSIST == null) CFG.GANG_PERSIST = true;
+  if (CFG.GANG_WAR_EVENTS == null) CFG.GANG_WAR_EVENTS = true;
 
+  // GANG_SEEDED: a named world-seed stream replaces the magic literal. The
+  // draw ORDER is identical either way (every rng() call site is untouched —
+  // only the source of bits changes), so the flag is a clean A/B.
   let _s = 99173;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  let _sStream = null;   // set at spawn from CBZ.seedStream("gangs") when GANG_SEEDED
+  function rng() { if (_sStream) return _sStream(); _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
   CBZ.cityGangs = CBZ.cityGangs || [];
   let warT = 0;          // ambient rival-vs-rival war director cooldown
@@ -249,7 +268,10 @@
 
   CBZ.spawnCityGangs = function () {
     const A = CBZ.city && CBZ.city.arena; if (!A) return;
-    _s = 99173;
+    // GANG_SEEDED: derive this build's stream from the world seed so gang
+    // layout/personality varies with ?seed=N; off = the classic literal.
+    if (CFG.GANG_SEEDED !== false && CBZ.seedStream) _sStream = CBZ.seedStream("gangs");
+    else { _sStream = null; _s = 99173; }
     CBZ.cityGangs.length = 0;
     const defs = CBZ.CITY.gangs || [];
     if (!defs.length) return;
@@ -372,6 +394,10 @@
       gang.lastDownT = 0;   // counts up since the player last dropped one of theirs
       CBZ.cityGangs.push(gang);
     }
+    // GANG_PERSIST: a fresh spawn is the default per-seed layout — if the
+    // ledger carries a saved takeover state for THIS world, the next upkeep
+    // tick fast-forwards the board to it (see the PERSISTENCE block below).
+    _pNeedApply = true;
   };
 
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -689,6 +715,14 @@
       a.warIntensity = Math.min(3, (a.warIntensity || 0) + 1);
       b.warIntensity = Math.min(3, (b.warIntensity || 0) + 0.6);
       a._raidTarget = targetLot;   // contested lot, used for capture resolution
+      // GANG_WAR_EVENTS: arm this war's visible set-pieces (a second attacker
+      // wave; the defender's lieutenant stand + car reinforcements). Never on
+      // a free push (a second wave must not arm its own second wave), and the
+      // player's crew never gets auto-defended — defense is the PLAYER's call.
+      if (CFG.GANG_WAR_EVENTS !== false && !opts.free) {
+        if (!a._wev) a._wev = { t: 6 + rng() * 6, lot: targetLot, foe: b.id };
+        if (!b.isPlayer && !b._wevDef) b._wevDef = { t: 4 + rng() * 4, done: 0, lot: targetLot, foe: a.id };
+      }
       const big = sent >= 5;
       CBZ.city && CBZ.city.note((big ? "⚔ TURF WAR: " : "Gang war: ") + a.name + " hit " + b.name + " turf (" + sent + ").", big ? 3 : 2.4);
       // a war push rolls a drive-by car into the rival block — common on a heavy
@@ -706,6 +740,106 @@
     return sent;
   }
   CBZ.cityStartGangWar = launchWar;
+
+  // ============================================================
+  //  WAR ESCALATION EVENTS (flag GANG_WAR_EVENTS) — the rival-war director's
+  //  visible SET-PIECES on contested turf, built ONLY from plumbing this file
+  //  already runs: spawnDriveby cars ("arriving by car"), guard/raidT squad
+  //  movement (the same fields launchWar/sendReprisal write), and the
+  //  applyRankGear/tagWithRank named-ped mechanisms. Each war arms at most
+  //  one attacker wave + one defender ladder (launchWar above), the timers
+  //  live on the gang records, and everything clears with the war itself.
+  // ============================================================
+  const BARK_DEFEND = ["Hold the block!", "They ain't taking this corner!", "Stand your ground!", "Push 'em back off our street!"];
+  const BARK_TAKEN = ["Block's ours now!", "New colours on this corner!", "That's how you take a street!"];
+
+  // the defender's champion steps up: the top-ranked survivor is healed, hard
+  // to drop, strapped with the status rifle (the same war-footing crate crack
+  // launchWar uses) and re-tagged — a tougher NAMED ped anchoring the lot.
+  function stageLtDefense(gang, lot) {
+    let best = null;
+    for (const m of gang.members) {
+      if (!m || m.dead || m.ko > 0 || m.inCar || m === gang.boss || m.rank === "boss") continue;
+      if (!best || rankTier(m) > rankTier(best)) best = m;
+    }
+    if (!best) return;
+    // one-shot toughness latch — repeat wars re-heal the champion but never
+    // compound the buff (no accidental 2000hp tank after ten skirmishes)
+    if (!best._champion) { best._champion = true; best.maxHp = Math.round((best.maxHp || 140) * 1.3); }
+    best.hp = best.maxHp;
+    if (best.weapon !== "AK-47") {
+      best.armed = true; best.weapon = "AK-47"; best.ammo = Math.max(best.ammo || 0, 90);
+      if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(best);
+    }
+    tagWithRank(best, gang.color);
+    best.homeGuard = best.homeGuard || best.guard;
+    best.guard = { x: lot.cx + (rng() - 0.5) * 3, z: lot.cz + (rng() - 0.5) * 3 };
+    if (best.target) best.target.set(best.guard.x, 0, best.guard.z);
+    best.pause = 0; best.path = null;
+    if (!(best.raidT > 0)) best.raidT = 24 + rng() * 8;
+    wbark(gang, best, BARK_DEFEND);
+    if (nearPlayer(lot.cx, lot.cz, 130)) {
+      CBZ.city && CBZ.city.note("🛡 " + (best.name || "A veteran") + " is holding the " + gang.name + " block.", 2.4);
+    }
+  }
+
+  // defender reinforcements ARRIVE BY CAR: a gang car rolls onto the contested
+  // block spraying the attackers (the existing drive-by path is the arrival),
+  // while up to three bodies posted on OTHER blocks converge to hold this one.
+  function stageReinforcements(gang, lot, foe) {
+    const rolled = spawnDriveby(gang, { x: lot.cx, z: lot.cz }, foe || null);
+    let sent = 0;
+    for (const m of gang.members) {
+      if (sent >= 3) break;
+      if (!m || m.dead || m.ko > 0 || m.inCar || m.companion || m.raidT > 0 || m.rage) continue;
+      if (m === gang.boss || m.rank === "boss") continue;
+      const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz;
+      if (dx * dx + dz * dz < 14 * 14) continue;          // already on the block
+      m.homeGuard = m.homeGuard || m.guard;
+      m.guard = { x: lot.cx + (rng() - 0.5) * 6, z: lot.cz + (rng() - 0.5) * 6 };
+      m.target.set(m.guard.x, 0, m.guard.z);
+      m.pause = 0; m.path = null; m.raidT = 18 + rng() * 8;
+      sent++;
+    }
+    if ((rolled || sent) && nearPlayer(lot.cx, lot.cz, 150)) {
+      CBZ.city && CBZ.city.note("🚙 " + gang.name + " reinforcements rolling in.", 2.2);
+    }
+  }
+
+  // the attacker commits a SECOND WAVE — a free launchWar re-runs the whole
+  // arc/press/call formation machinery against the same contested lot.
+  function stageSecondWave(a, lot, b) {
+    if (!a || !b || b.isPlayer || !(a.warRemain > 0)) return;
+    if (b.turf.indexOf(lot) < 0) return;                  // already flipped / moved on
+    const sent = launchWar(a, b, { lot, free: true });
+    if (sent && nearPlayer(lot.cx, lot.cz, 160)) {
+      CBZ.city && CBZ.city.note("⚔ " + a.name + " commits a second wave (" + sent + ").", 2.4);
+    }
+  }
+
+  // advance one gang's armed set-pieces (called from the upkeep tick while its
+  // war runs; both records are cleared when the war ends or the lot flips).
+  function tickWarEvents(gang, dt) {
+    const dv = gang._wevDef;
+    if (dv) {
+      if (!(gang.warRemain > 0) || gang.turf.indexOf(dv.lot) < 0) gang._wevDef = null;
+      else {
+        dv.t -= dt;
+        if (dv.t <= 0) {
+          if (dv.done === 0) { dv.done = 1; dv.t = 7 + rng() * 6; stageLtDefense(gang, dv.lot); }
+          else { gang._wevDef = null; stageReinforcements(gang, dv.lot, gangById(dv.foe)); }
+        }
+      }
+    }
+    const av = gang._wev;
+    if (av) {
+      if (!(gang.warRemain > 0) || !gang.warWith) gang._wev = null;
+      else {
+        av.t -= dt;
+        if (av.t <= 0) { gang._wev = null; stageSecondWave(gang, av.lot, gangById(av.foe)); }
+      }
+    }
+  }
 
   // ---- TURF CAPTURE: resolve a contested rival block after a raid ----
   // GTA SA flips a hood when the attacker clears the defenders. We approximate:
@@ -738,6 +872,21 @@
     }
     recenter(winner); recenter(loser);
     loser.lostTurfT = 8;
+    // the flip settles this war's set-pieces over the lot
+    if (winner._wev && winner._wev.lot === lot) winner._wev = null;
+    if (loser._wevDef && loser._wevDef.lot === lot) loser._wevDef = null;
+    // GANG_WAR_EVENTS: post-battle AFTERMATH the street can read — the fight
+    // scorches the pavement (existing buildings.js decal) and the takers talk.
+    if (CFG.GANG_WAR_EVENTS !== false) {
+      if (CBZ.cityScorch) { try { CBZ.cityScorch(lot.cx + (rng() - 0.5) * 4, lot.cz + (rng() - 0.5) * 4, 1.6 + rng() * 1.2); } catch (e) {} }
+      let crier = null, cd = 20 * 20;
+      for (const m of winner.members) {
+        if (!m || m.dead || m.ko > 0) continue;
+        const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz, dd = dx * dx + dz * dz;
+        if (dd < cd) { cd = dd; crier = m; }
+      }
+      if (crier) wbark(winner, crier, BARK_TAKEN);
+    }
     if (nearPlayer(lot.cx, lot.cz, 90)) {
       CBZ.city && CBZ.city.note("🚩 " + winner.name + " seized a block from " + loser.name + ".", 2.6);
     }
@@ -760,14 +909,20 @@
 
   // is the player riding with / courting a crew this victim's gang is hostile to?
   // A SANCTIONED kill = a body that satisfies an active player-gang task: the
-  // victim belongs to a rival of the gang the player is patched into (g.cityMembership),
-  // runs (g.playerGangId), or has defected to (g.playerGangAffiliation). Allies +
-  // your own crew never count. playergang.creditPlayerKill computes the same signal
-  // for its task ladder; this mirror lets the kill REWARD (respect/standing) gate on it.
+  // victim belongs to a rival of the gang the player is patched into or runs.
+  // Allies + your own crew never count. playergang.creditPlayerKill computes the
+  // same signal for its task ladder; this mirror lets the kill REWARD gate on it.
+  // ONE canonical read: CBZ.cityPlayerGangId() (playergang.js) — the old
+  // g.playerGangAffiliation orphan is gone (turf.js's defect path now writes
+  // the canonical membership fields instead).
+  function myGangId() {
+    if (CBZ.cityPlayerGangId) return CBZ.cityPlayerGangId();
+    const m = g.cityMembership;
+    return (m && m.gangId) || g.playerGangId || null;
+  }
   function killSanctioned(victimGangId) {
     if (!victimGangId || victimGangId === "player") return false;
-    const m = g.cityMembership;
-    const myGang = (m && m.gangId) || g.playerGangId || g.playerGangAffiliation || null;
+    const myGang = myGangId();
     if (!myGang) return false;
     if (victimGangId === myGang) return false;                          // never your own crew
     if (CBZ.cityAreAllied && CBZ.cityAreAllied(myGang, victimGangId)) return false;
@@ -800,17 +955,25 @@
       if (real) return real;
     }
     // last-resort box rig — only reached when the visual system isn't loaded
-    // (headless / gallery). Keeps drive-bys working there without the hero mesh.
+    // (headless / gallery). A low-slung two-tone sedan silhouette (gang paint
+    // over a near-black greenhouse) so drive-bys still read as gang iron there.
     const grp = new THREE.Group();
-    const body = new THREE.Mesh(dbCarGeo(), new THREE.MeshLambertMaterial({ color: 0x16181d }));
-    body.position.y = 0.75; grp.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 2.0), new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: 0.18 }));
-    cabin.position.set(0, 1.45, -0.2); grp.add(cabin);
+    const paint = new THREE.MeshLambertMaterial({ color: color, emissive: color, emissiveIntensity: 0.12 });
+    const dark = new THREE.MeshLambertMaterial({ color: 0x14171c });
+    const body = new THREE.Mesh(dbCarGeo(), paint);
+    body.position.y = 0.62; grp.add(body);                        // slammed: sills ride the wheels
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.6, 2.0), dark);
+    cabin.position.set(0, 1.3, -0.25); grp.add(cabin);            // greenhouse set back = sedan profile
+    const bmpG = new THREE.BoxGeometry(2.06, 0.22, 0.3);
+    const bf = new THREE.Mesh(bmpG, dark); bf.position.set(0, 0.4, 2.12); grp.add(bf);
+    const br = new THREE.Mesh(bmpG, dark); br.position.set(0, 0.4, -2.12); grp.add(br);
+    const sp = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.3), dark);
+    sp.position.set(0, 1.14, -2.0); grp.add(sp);                  // trunk-lip spoiler
     const wm = new THREE.MeshLambertMaterial({ color: 0x0a0a0c });
     for (const wx of [-0.95, 0.95]) for (const wz of [1.35, -1.35]) {
       const w = new THREE.Mesh(_dbWheelGeo, wm); w.position.set(wx, 0.42, wz); grp.add(w);
     }
-    grp._cabinMat = cabin.material;
+    grp._cabinMat = paint;   // same gang-tint handle as before (now the body paint)
     return grp;
   }
 
@@ -1116,9 +1279,7 @@
       // WITNESS-GATED grudge: the set only hunts you if one of theirs saw it
       // (and lives long enough to report). Your OWN crew runs the loyalty
       // battle instead. STANDING always sinks — kin is kin, the books know.
-      const mem = g.cityMembership;
-      const myGangId = (mem && mem.gangId) || g.playerGangId || g.playerGangAffiliation || null;
-      const own = gang.isPlayer || gang.playerFriendly || gang.id === myGangId;
+      const own = gang.isPlayer || gang.playerFriendly || gang.id === myGangId();
       const w = nearestGangWitness(gang, ped);
       if (own) {
         if (wasBoss) { /* killing your own boss = the takeover path below owns it */ }
@@ -1719,10 +1880,306 @@
     }
   };
 
+  // ============================================================
+  //  PERSISTENCE (flag GANG_PERSIST) — the takeover war finally SURVIVES a
+  //  reload. Registration follows the exact worldstate.js idiom the sibling
+  //  systems use (civilwar "cwar", polwar "war", militia "mil"): wrap
+  //  CBZ.cityWorldCommit/Collect to stamp a version-guarded blob under
+  //  led.gangwar, hydrate whenever the g.cityWorld REFERENCE changes, and
+  //  fast-forward the freshly-spawned per-seed board to the saved state.
+  //
+  //  THE BLOB (v1, guarded by the WORLD SEED — a save from another world is
+  //  skipped, never misapplied): per street gang a SAFE SHELL only —
+  //  {id, name, color, treasury, standing, hostility, recruitPool/rosterCap,
+  //   playerFriendly, bossAlive/bossName, absorbed, turf as INDICES into
+  //   city.arena.lots (stable per seed — worlds are seed-deterministic),
+  //   roster as live COUNTS per rank}. Never live ped refs (worldstate.js's
+  //  own warning: they are not JSON-safe). The player's crew rides the same
+  //  blob ({founded,name,color,order,turf,roster}); militia gangs are
+  //  excluded — militia.js already owns their "mil" shells.
+  //
+  //  RESTORE SEMANTICS: spawnCityGangs builds the default seed layout first,
+  //  then (next upkeep tick) we reassign turf lot refs from the saved
+  //  indices, trim/respawn each bench to the saved rank counts through the
+  //  ONE shared spawnGangMember path, restore treasuries/standing, remove
+  //  absorbed crews the way a live takeover does (spliced), and hand the
+  //  player rec to playergang.js's cityPlayerGangRestore. Relations/won live
+  //  in turf.js's own "turfrel" blob (same idiom).
+  // ============================================================
+  let _pNeedApply = false;   // a fresh spawn (or fresh ledger) wants the saved board applied
+  let _pBlob = null;         // the authoritative saved state (updated on stamp + hydrate)
+  let _pHydrated = null;     // last g.cityWorld reference we read
+  let _pWrapsDone = false;
+
+  function serializeGangs() {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.lots || !CBZ.cityGangs.length) return null;
+    const lots = A.lots;
+    const packTurf = (turfArr) => {
+      const t = [];
+      for (const lot of turfArr || []) { const i = lots.indexOf(lot); if (i >= 0) t.push(i); }
+      return t;
+    };
+    const packRoster = (gang) => {
+      const r = {};
+      for (const m of gang.members || []) {
+        if (!m || m.dead) continue;
+        if (m === gang.boss || m.rank === "boss") continue;
+        const rk = RANK_BY_KEY[m.rank] ? m.rank : "soldier";
+        r[rk] = (r[rk] || 0) + 1;
+      }
+      return r;
+    };
+    const seen = {};
+    const out = [];
+    for (const gang of CBZ.cityGangs) {
+      if (!gang || gang.kind === "militia") continue;   // militia.js owns its own blob
+      seen[gang.id] = 1;
+      if (gang.isPlayer) {
+        const pg = g.playerGang;
+        out.push({
+          id: "player", isPlayer: true, founded: !!(pg && pg.founded),
+          name: (pg && pg.name) || gang.name || null,
+          color: (pg && pg.color != null) ? pg.color : gang.color,
+          order: (pg && pg.order) || "follow",
+          turf: packTurf(gang.turf), roster: packRoster(gang),
+        });
+        continue;
+      }
+      out.push({
+        id: gang.id, name: gang.name, color: gang.color,
+        absorbed: !!gang.absorbed,
+        treasury: Math.round(gang.treasury || 0),
+        standing: Math.round(gang.standing || 0),
+        hostility: Math.round((gang.hostility || 0) * 100) / 100,
+        recruitPool: gang.recruitPool | 0,
+        rosterCap: gang.rosterCap | 0,
+        peakTurf: gang.peakTurf | 0,
+        playerFriendly: !!gang.playerFriendly,
+        leaderless: !!gang.leaderless,
+        bossAlive: !!(gang.boss && !gang.boss.dead),
+        bossName: gang.bossName || null,
+        turf: packTurf(gang.turf), roster: packRoster(gang),
+      });
+    }
+    // a config crew ABSENT from the live roster was absorbed + spliced (player
+    // takeover) — record that, or a reload would resurrect it at spawn.
+    for (const d of (CBZ.CITY && CBZ.CITY.gangs) || []) {
+      if (d && d.id && !seen[d.id]) out.push({ id: d.id, absorbed: true, turf: [], roster: {} });
+    }
+    // a founded crew that never registered in the list still saves (edge)
+    if (!seen.player && g.playerGang && g.playerGang.founded) {
+      const pg = g.playerGang;
+      out.push({ id: "player", isPlayer: true, founded: true, name: pg.name, color: pg.color, order: pg.order || "follow", turf: packTurf(pg.turf), roster: {} });
+    }
+    return { v: 1, seed: CBZ.WORLD_SEED >>> 0, gangs: out };
+  }
+  CBZ.cityGangsSerialize = serializeGangs;   // probe/debug read
+
+  function stampGangs() {
+    if (CFG.GANG_PERSIST === false) return;
+    const led = g.cityWorld;
+    if (!led || typeof led !== "object") return;
+    if (_pNeedApply) return;                  // never clobber a not-yet-applied save
+    if (g.mode !== "city" || !CBZ.cityGangs.length) return;
+    const blob = serializeGangs();
+    if (blob) { led.gangwar = blob; _pBlob = blob; }
+  }
+
+  function ensureGangSaveWraps() {
+    if (_pWrapsDone) return;
+    const commit = CBZ.cityWorldCommit;
+    if (typeof commit !== "function") return; // worldstate.js not up yet — retry next tick
+    _pWrapsDone = true;
+    if (!commit._gangWrap) {
+      const w = function () { stampGangs(); return commit.apply(this, arguments); };
+      w._gangWrap = true; CBZ.cityWorldCommit = w;
+    }
+    if (CBZ.cityWorldCollect && !CBZ.cityWorldCollect._gangWrap) {
+      const col = CBZ.cityWorldCollect;
+      const wc = function () { stampGangs(); return col.apply(this, arguments); };
+      wc._gangWrap = true; CBZ.cityWorldCollect = wc;
+    }
+  }
+
+  function hydrateGangLedger() {
+    const led = g.cityWorld;
+    if (!led || led === _pHydrated) return;
+    _pHydrated = led;
+    if (CFG.GANG_PERSIST === false) return;
+    const b = led.gangwar;
+    if (b && b.v === 1) { _pBlob = b; _pNeedApply = true; }
+    else _pBlob = null;                        // fresh/wiped ledger → default board
+  }
+
+  // remove a restored-surplus body the way the corpse pipeline retires one
+  // (dead + collected + culled, group off the scene) — never a splice of
+  // CBZ.cityPeds, so no other system's iteration shifts under it.
+  function despawnMember(m) {
+    if (!m) return;
+    m.dead = true; m.hp = 0; m.collected = true; m.culled = true;
+    m.rage = null; m.raidT = 0; m.raidGang = null; m.raidLot = null; m.hunting = false;
+    if (m.tag && m.tag.parent) m.tag.parent.remove(m.tag);
+    if (m.group && m.group.parent) m.group.parent.remove(m.group);
+  }
+
+  function clearLotClaim(lot) {
+    if (!lot || !lot.building) return;
+    lot.building.gang = null; lot.building.gangColor = null; lot.building.playerTurf = false;
+    if (lot.building.stash) lot.building.stash.gang = null;
+  }
+  function paintLotFor(lot, gang, playerTurf) {
+    lot.building = lot.building || {};
+    lot.building.gang = gang.id; lot.building.gangColor = gang.color;
+    lot.building.playerTurf = !!playerTurf;
+    if (lot.building.stash) lot.building.stash.gang = gang.id;
+    if (!lot.demolished && lot.building.stash && lot.building.stash.mesh && lot.building.stash.mesh.material && lot.building.stash.mesh.material.emissive) {
+      try { lot.building.stash.mesh.material.emissive.setHex(gang.color); } catch (e) {}
+    }
+  }
+
+  // trim/respawn one crew's bench to the saved per-rank counts, through the
+  // SAME spawnGangMember factory the build + recruit tick use.
+  function adjustRoster(gang, rec) {
+    const want = rec.roster || {};
+    const have = {}, byRank = {};
+    for (const m of gang.members) {
+      if (!m || m.dead || m === gang.boss || m.rank === "boss") continue;
+      const rk = RANK_BY_KEY[m.rank] ? m.rank : "soldier";
+      have[rk] = (have[rk] || 0) + 1;
+      (byRank[rk] || (byRank[rk] = [])).push(m);
+    }
+    for (const rk in have) {
+      let extra = have[rk] - (want[rk] | 0);
+      const list = byRank[rk];
+      while (extra > 0 && list && list.length) {
+        const m = list.pop(); extra--;
+        const i = gang.members.indexOf(m); if (i >= 0) gang.members.splice(i, 1);
+        despawnMember(m);
+      }
+    }
+    for (const rk in want) {
+      let need = (want[rk] | 0) - (have[rk] || 0);
+      let k = 0;
+      while (need > 0) {
+        const lot = gang.turf.length ? gang.turf[k++ % gang.turf.length]
+          : (gang.hq && gang.hq.lot) || { cx: gang.center.x, cz: gang.center.z };
+        const ped = spawnGangMember(gang, lot, rk);
+        if (!ped) break;
+        need--;
+      }
+    }
+  }
+
+  function applyGangsBlob(blob) {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.lots || !A.lots.length) return false;
+    if (!blob || blob.v !== 1) return false;
+    if ((blob.seed >>> 0) !== (CBZ.WORLD_SEED >>> 0)) return false;  // another world's save
+    // 0) release every street-gang lot claim we're about to reassign (militia
+    //    turf is militia.js's blob — its claims stay untouched; the player's
+    //    only when the playergang restore path exists to rebuild it).
+    for (const gang of CBZ.cityGangs) {
+      if (!gang || gang.kind === "militia") continue;
+      if (gang.isPlayer && !CBZ.cityPlayerGangRestore) continue;
+      for (const lot of gang.turf) clearLotClaim(lot);
+      gang.turf.length = 0;
+    }
+    // 1) NPC crews
+    for (const rec of blob.gangs || []) {
+      if (!rec || rec.isPlayer) continue;
+      const gang = gangById(rec.id);
+      if (!gang) continue;
+      if (rec.absorbed) {
+        // mirror the live takeover path: bodies gone, record off the roster
+        if (gang.boss) retireBossIdentity(gang.boss, null);   // don't leave a live gangBoss identity for a wiped crew
+        for (const m of gang.members.slice()) despawnMember(m);
+        gang.members.length = 0;
+        gang.boss = null; gang.absorbed = true;
+        const gi = CBZ.cityGangs.indexOf(gang);
+        if (gi >= 0) CBZ.cityGangs.splice(gi, 1);
+        continue;
+      }
+      for (const li of rec.turf || []) {
+        const lot = A.lots[li];
+        if (!lot) continue;
+        gang.turf.push(lot);
+        paintLotFor(lot, gang, false);
+        if (lot.building && lot.building.owner) { lot.building.owner.id = gang.id; lot.building.owner.type = "gang"; }
+      }
+      recenter(gang);
+      gang.treasury = rec.treasury || 0;
+      gang.standing = rec.standing || 0;
+      gang.hostility = rec.hostility || 0;
+      gang.provoke = 0;
+      gang.recruitPool = rec.recruitPool | 0;
+      if (rec.rosterCap) gang.rosterCap = rec.rosterCap;
+      if (rec.peakTurf) gang.peakTurf = Math.max(gang.peakTurf || 0, rec.peakTurf);
+      gang.playerFriendly = !!rec.playerFriendly;
+      if (gang.playerFriendly) { gang.hostility = 0; gang.strikeT = 9e9; }
+      adjustRoster(gang, rec);
+      // boss continuity: dead-at-save → drop the fresh spawn's boss and let the
+      // existing succession tick crown the bench (or leave the crew leaderless);
+      // alive → carry the saved (possibly succession-renamed) name forward.
+      if (!rec.bossAlive) {
+        const b = gang.boss;
+        if (b && !b.dead) {
+          retireBossIdentity(b, null);
+          const bi = gang.members.indexOf(b); if (bi >= 0) gang.members.splice(bi, 1);
+          despawnMember(b);
+        }
+        gang.boss = null;
+        const bench = gang.members.some((m) => m && !m.dead);
+        gang.bossDead = bench;
+        gang.leaderless = !bench;
+      } else if (rec.bossName && gang.boss && !gang.boss.dead && gang.boss.name !== rec.bossName) {
+        gang.boss.name = rec.bossName; gang.bossName = rec.bossName;
+        tagWithRank(gang.boss, gang.color);
+      }
+    }
+    // 2) the player's crew (playergang.js owns that rebuild)
+    const prec = (blob.gangs || []).find((r) => r && r.isPlayer);
+    if (prec && prec.founded && CBZ.cityPlayerGangRestore) {
+      try { CBZ.cityPlayerGangRestore(prec); } catch (e) {}
+    }
+    // 3) the crew the player is patched into stays friendly across the reload.
+    // Set the flag DIRECTLY (not via cityGangSetPlayerFriendly — its +30
+    // standing windfall would drift the restored standing on every reload).
+    const mem = g.cityMembership;
+    if (mem && mem.gangId) {
+      const mg = gangById(mem.gangId);
+      if (mg) { mg.playerFriendly = true; mg.provoke = 0; mg.hostility = 0; mg.strikeT = 9e9; }
+    }
+    // 4) settle the derived layers: mute the zone-flip toasts while ownership
+    //    snaps to the saved board, drop op caches aimed at the pre-restore
+    //    roster, re-derive zones/colours.
+    if (CBZ.cityTurfMuteFlips) CBZ.cityTurfMuteFlips(5);
+    if (CBZ.cityGangOpsReset) CBZ.cityGangOpsReset();
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    return true;
+  }
+  CBZ.cityGangsApply = applyGangsBlob;       // probe/debug hook
+
+  function maybeApplyPersist() {
+    if (!_pNeedApply) return;
+    if (CFG.GANG_PERSIST === false) { _pNeedApply = false; return; }
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.lots || !A.lots.length || !CBZ.cityGangs.length) return;
+    _pNeedApply = false;                      // one shot per spawn/ledger — stamps resume after
+    if (!_pBlob) return;
+    try { applyGangsBlob(_pBlob); }
+    catch (e) { try { console.error("[gangs] persist restore failed", e); } catch (e2) {} }
+  }
+
   // ---- per-gang upkeep: provoke/hostility decay, war timers, raider return ----
   let reviewT = 0;   // merit-review / loyalty-economy cadence (cheap, time-sliced)
   CBZ.onUpdate(34.5, function (dt) {
     if (g.mode !== "city") return;
+    // GANG_PERSIST plumbing: install the ledger stamp wraps once, adopt a
+    // changed ledger, then fast-forward a fresh spawn to the saved board.
+    ensureGangSaveWraps();
+    hydrateGangLedger();
+    maybeApplyPersist();
     updateDrivebys(dt);
     // DOOR-AWARE ATTACK ROUTING: walk walled-out attackers to the building DOOR
     // instead of grinding/straight-lining the facade toward a target inside.
@@ -1785,10 +2242,12 @@
       }
       if (gang.warRemain > 0) {
         gang.warRemain -= dt;
+        // GANG_WAR_EVENTS: advance this war's staged set-pieces while it runs
+        if (gang._wev || gang._wevDef) tickWarEvents(gang, dt);
         // war's over → the AFTERMATH plays out: regroup, the hurt kneel, one
         // body bags the dropped iron (both sides run their own, on their own timer)
-        if (gang.warRemain <= 0) { gang.warWith = null; gang._raidTarget = null; warAftermath(gang); }
-      }
+        if (gang.warRemain <= 0) { gang.warWith = null; gang._raidTarget = null; gang._wev = null; gang._wevDef = null; warAftermath(gang); }
+      } else if (gang._wev || gang._wevDef) { gang._wev = null; gang._wevDef = null; }
       for (const m of gang.members) {
         if (!(m.raidT > 0)) continue;
         m.raidT -= dt;
@@ -1820,7 +2279,11 @@
           if (pay > 0) {
             g.cityBank = (g.cityBank || 0) + pay;
             if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-            CBZ.city && CBZ.city.note("💵 Turf payday: +$" + pay + " (" + lots + " blocks) → bank", 2.2);
+            // payday reads as takeover PROGRESS: blocks collected + districts held
+            const zc = CBZ.cityZoneControl ? CBZ.cityZoneControl() : null;
+            const zHeld = zc && zc.byGang ? (zc.byGang.player || 0) : 0;
+            CBZ.city && CBZ.city.note("💵 Turf payday: +$" + pay + " (" + lots + " blocks" +
+              (zc && zc.total ? " · " + zHeld + "/" + zc.total + " districts" : "") + ") → bank", 2.2);
           }
           // credit each soldier's "earned" by their rank cut so YOUR crew also
           // climbs on merit (autoPromotePlayerCrew reads gstat.earned). A bigger

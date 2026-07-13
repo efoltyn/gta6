@@ -61,8 +61,10 @@
   let spawnCd = 0;           // cooldown gate between spawns
   let reprimeCd = 0;         // cooldown gate for topping up hunt timers
   let nextSlot = 0;          // round-robins through SPAWNS so waves fan out
-  let lastElapsed = 0;       // to detect a run reset (elapsed falling)
   let announced = false;     // one-shot "reinforcements!" toast per surge
+  // run-reset detection shares CBZ.jailBoost's elapsed watcher (same 0.5
+  // epsilon this module always used)
+  const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher() : null;
 
   // ---- teardown of a single reinforcement ------------------------------
   // Pull the group from the scene, free its meshes, and remove the guard
@@ -82,6 +84,13 @@
     if (!gd) return;
     // make absolutely sure it can't be doing anything this frame
     gd.hunt = 0; gd.alert = 0; gd.ko = 0; gd.dead = true;
+    // release any boost-ledger entries other jail systems hold on this guard
+    // (harmless field restore on a rig we're about to free; without it the
+    // shared ledger would retain the disposed guard until the next restoreAll)
+    if (CBZ.jailBoost) {
+      CBZ.jailBoost.restore("difficulty", gd);
+      CBZ.jailBoost.restore("lockdown", gd);
+    }
     // detach + free the whole rig (recursively walk the group)
     if (gd.group) {
       if (gd.group.parent) gd.group.parent.remove(gd.group);
@@ -163,9 +172,7 @@
 
   // ---- new-run reset: watch elapsed fall toward 0 ----------------------
   function maybeReset() {
-    const e = g.elapsed || 0;
-    if (e + 0.5 < lastElapsed) recallAll();  // a fresh run zeroes elapsed
-    lastElapsed = e;
+    if (pollNewRun && pollNewRun()) recallAll();  // a fresh run zeroes elapsed
   }
 
   // ---- main driver (playing only) --------------------------------------
@@ -241,18 +248,11 @@
   });
 
   // ---- safety net: if we ever leave 'playing' without a reset (e.g. a win
-  // screen), make sure our extras don't linger into the next session. We use
-  // an always-runner because onUpdate only fires while playing. ----
-  let lastState = g.state;
-  CBZ.onAlways(91, function () {
-    const s = g.state;
-    if (s !== lastState) {
-      // on WIN or back to TITLE, clear our reinforcements (a fresh run will
-      // resetGame() anyway, but this keeps the scene clean on the win screen)
-      if (s === "won" || s === "title") recallAll();
-      lastState = s;
-    }
-  });
+  // screen), make sure our extras don't linger into the next session. Rides
+  // CBZ.jailBoost's shared state-exit dispatcher (onUpdate only fires while
+  // playing): on WIN or back to TITLE, clear our reinforcements — a fresh
+  // run will resetGame() anyway, but this keeps the win screen's scene clean.
+  if (CBZ.jailBoost) CBZ.jailBoost.onStateExit(function () { recallAll(); }, ["won", "title"]);
 
   // tiny read-only hook for debugging / other systems
   CBZ.reinforcements = {

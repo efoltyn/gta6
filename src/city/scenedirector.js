@@ -185,6 +185,22 @@
 
   function liveScene() { return SCENE.kind != null; }
 
+  // ---- CAMPAIGN COMPOSITION (campaign.js) ----------------------------------
+  // The hitman campaign allows ambient set-pieces only during its ENDLESS
+  // free-time (scripted beats own their own cadence). It also publishes the
+  // active contract point; we never stage a robbery/mugging on top of the
+  // player's live assignment — the two directors would fight over the street.
+  function campaignBlocked() {
+    return !!(CBZ.cityCampaignScenesBlocked && CBZ.cityCampaignScenesBlocked());
+  }
+  function nearCampaignContract(x, z) {
+    if (!CBZ.cityCampaignContractPoint) return false;
+    let p = null;
+    try { p = CBZ.cityCampaignContractPoint(); } catch (e) { p = null; }
+    if (!p) return false;
+    return hyp(x - p.x, z - p.z) < 45;
+  }
+
   function disband() {
     for (let i = 0; i < SCENE.actors.length; i++) restore(SCENE.actors[i]);
     SCENE.actors.length = 0;
@@ -209,6 +225,7 @@
     for (let t = 0; t < 14; t++) {
       const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : (A.randomSidewalkPoint ? A.randomSidewalkPoint() : null);
       if (!p) break;
+      if (nearCampaignContract(p.x, p.z)) continue;   // never stage on the live contract
       const d2 = hyp(p.x - P.pos.x, p.z - P.pos.z); const dd = d2 * d2;
       if (dd <= NEAR2 && camD2(p.x, p.z) > OFFSCREEN2) return { x: p.x, z: p.z };
     }
@@ -228,6 +245,7 @@
       const d = hyp(vs.x - P.pos.x, vs.z - P.pos.z);
       if (d < 25 || d > 90) continue;                  // close enough to find, not in your lap
       if (camD2(vs.x, vs.z) <= OFFSCREEN2) continue;   // stage out of view
+      if (nearCampaignContract(vs.x, vs.z)) continue;  // the contract lot is off-limits
       if (d > bestD) { bestD = d; best = l; }
     }
     return best;
@@ -331,6 +349,7 @@
       const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : (A.randomSidewalkPoint ? A.randomSidewalkPoint() : null);
       if (!p) break;
       const d = hyp(p.x - P.pos.x, p.z - P.pos.z);
+      if (nearCampaignContract(p.x, p.z)) continue;
       if (d < 28 && camD2(p.x, p.z) > OFFSCREEN2) { sp = { x: p.x, z: p.z }; break; }
     }
     if (!sp) return false;
@@ -464,6 +483,7 @@
   function gatesOpen() {
     if (g.mode !== "city") return false;
     if (CBZ.CONFIG.CITY_SCENE_DIRECTOR === false) return false;
+    if (campaignBlocked()) return false;                // scripted campaign beat owns the street
     if (CBZ.citySpawnDraining) return false;            // wait until the roster's whole
     const P = playerActor(); if (!P || P.dead) return false;
     if ((g.wanted | 0) >= 2) return false;              // you've got your own heat — no piling on
@@ -480,6 +500,9 @@
 
   function sceneTick(dt) {
     if (g.mode !== "city") { if (liveScene()) disband(); return; }
+    // A scripted campaign beat taking over mid-scene reclaims the street: the
+    // drafted cast is restored to plain civilians, exactly like a far drift.
+    if (campaignBlocked()) { if (liveScene()) disband(); return; }
     const A = arena(); if (!A || !CBZ.cityPeds || !CBZ.cityPeds.length) return;
 
     if (liveScene()) { runScene(dt); return; }

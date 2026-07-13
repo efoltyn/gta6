@@ -47,12 +47,13 @@
     PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze, horizon high
     LOOK_Y: 1.52,      // look-target height above feet — with the mild pitch this centres the char vertically
     LEAD: 4.6,         // forward look-ahead — breathing room down-street
-    DAMP_POS: 0.16,    // position SmoothDamp time — the lazy settle; bigger = floatier follow
+    DAMP_POS: 0.18,    // position SmoothDamp time — the lazy settle; bigger = floatier follow (0.16→0.18: calmer default walk now that merely-armed no longer forces the tight 0.07 aim damp)
     DAMP_YAW: 9.0,     // yaw chase rate (1-exp(-k*dt)) — the camera trails your mouse turn slightly
-    DAMP_YAW_AIM: 26,  // yaw chase while armed — near-rigid so aiming never feels mushy
+    DAMP_YAW_AIM: 26,  // yaw chase while PRESENTING (RMB/ADS, firing, or the ~0.9s post-shot settle — CBZ.tpPresenting) — near-rigid so aiming never feels mushy. Merely carrying a gun stays on DAMP_YAW.
     FOV: 60,           // base FOV
-    // ---- ARMED / ADS tier (read EVERY frame by systems/camera.js via the
-    //      `shoulder` boolean; the getters below switch on CBZ.isADS()). ----
+    // ---- PRESENTING / ADS tier (read EVERY frame by systems/camera.js via
+    //      its `tpPresent` boolean = CBZ.tpPresenting(), NOT merely-armed;
+    //      the getters below switch on CBZ.isADS()). ----
     // NOT scoping (armed base) = the SAME frame as relaxed above — per the
     // owner's Fortnite reference, holding a weapon leaves the camera alone.
     // Scoping (RMB/ADS) = the image-2 frame: ~2m over the RIGHT shoulder at
@@ -71,7 +72,9 @@
     // so pitching up ballooned the camera UP and tilted the view top-down, and you
     // could not aim vertically in 3PS. With the look target tracking pitch, the
     // camera looks where you point and the framing stays a stable over-shoulder
-    // shot through the whole pitch range.
+    // shot through the whole pitch range. Engages only while PRESENTING
+    // (CBZ.tpPresenting) — the merely-armed relaxed chase stays pitch-blind
+    // like unarmed, so walking around with a gun never reshapes the frame.
     PITCH_LOOK: 1.0,
     get DIST_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.DIST_AIM_ADS : this.DIST_AIM_BASE; },
     get SIDE_AIM() { return (CBZ.isADS && CBZ.isADS()) ? this.SIDE_AIM_ADS : this.SIDE_AIM_BASE; },

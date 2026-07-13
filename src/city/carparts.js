@@ -194,11 +194,14 @@
         bez.rotation.z = lamp.rotation.z = side * -0.20;
       });
       add(root, 0.11, 0.15, 0.035, 0, ctx.headY + 0.03, ctx.frontZ + 0.045, badgeGold());   // shield badge
-      // twin ROUND tail lamps per side in a dark panel — the house signature
+      // twin ROUND tail lamps per side in a dark panel — the house signature,
+      // each lamp ringed by a chrome bezel (exotic-house jewellery)
       add(root, w * 0.9, 0.24, 0.04, 0, ctx.tailY, ctx.rearZ - 0.005, darkTrim());
       [1, -1].forEach(function (side) {
-        addRound(root, 0.085, 0.06, side * w * 0.34, ctx.tailY, ctx.rearZ - 0.03, tail());
-        addRound(root, 0.085, 0.06, side * w * 0.19, ctx.tailY, ctx.rearZ - 0.03, tail());
+        [0.34, 0.19].forEach(function (fx) {
+          addRound(root, 0.085, 0.06, side * w * fx, ctx.tailY, ctx.rearZ - 0.03, tail());
+          addRing(root, 0.092, 0.014, side * w * fx, ctx.tailY, ctx.rearZ - 0.062, chrome());
+        });
       });
       add(root, 0.10, 0.13, 0.03, 0, ctx.tailY, ctx.rearZ - 0.035, badgeGold());
       // centred quad exhaust + finned diffuser
@@ -228,6 +231,7 @@
         add(root, 0.06, 0.055, 0.05, side * w * 0.465, ctx.headY, ctx.frontZ + 0.02, amber());
       });
       addRound(root, 0.07, 0.035, 0, ctx.headY + 0.11, ctx.frontZ + 0.04, chrome(), 14);   // roundel badge
+      addRound(root, 0.032, 0.02, 0, ctx.headY + 0.11, ctx.frontZ + 0.062, grille(), 10);  // dark quartered centre
       // full-width slim tail bar with a chrome underline
       add(root, w * 0.86, 0.05, 0.04, 0, ctx.tailY - 0.08, ctx.rearZ - 0.02, chrome());
       add(root, w * 0.84, 0.10, 0.06, 0, ctx.tailY, ctx.rearZ - 0.012, tail());

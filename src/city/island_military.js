@@ -80,12 +80,95 @@
     return m;
   }
   // a vertical-span world collider (engine AABB). wx/wz are WORLD coords.
+  // Returns the collider object so callers can keep a handle to it (a stolen
+  // vehicle must take its parked collider WITH it — see placeModel).
   function col(wx, wz, w, d, y0, y1, ref) {
-    CBZ.colliders.push({ minX: wx - w / 2, maxX: wx + w / 2, minZ: wz - d / 2, maxZ: wz + d / 2, y0: y0 || 0, y1: y1 == null ? 0 : y1, ref: ref || null });
+    const c = { minX: wx - w / 2, maxX: wx + w / 2, minZ: wz - d / 2, maxZ: wz + d / 2, y0: y0 || 0, y1: y1 == null ? 0 : y1, ref: ref || null };
+    CBZ.colliders.push(c);
+    return c;
   }
   // cylinder (barrels, rotors, fuel tanks, gun barrels) — fresh geo (few used).
   function cyl(parent, x, y, z, rt, rb, h, hex, seg) {
     const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 12), cm(hex));
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
+    return m;
+  }
+
+  // ---- vehicle-detail helpers (the "look at all vehicles" pass) ------------
+  // NEW MATERIAL API (world/carfx.js loads before the islands): military hulls
+  // stay deliberately MATTE Lambert (army paint doesn't gleam) — vehicleMat is
+  // only for the accents that SHOULD catch light: canopy glass, gun steel,
+  // rubber. All three roles are shared carfx singletons → zero extra material
+  // cost per vehicle. Falls back to flat Lambert when carfx is absent.
+  function vmat(role, fallbackHex) {
+    if (CBZ.vehicleMat) {
+      try { const m = CBZ.vehicleMat(role); if (m && m.isMaterial) return m; } catch (e) {}
+    }
+    return cm(fallbackHex != null ? fallbackHex : M.dark);
+  }
+  // box/cylinder with an EXPLICIT material (glass, gun steel, rubber)
+  function mbox(parent, x, y, z, w, h, d, material) {
+    const m = new THREE.Mesh(bg(w, h, d), material);
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
+    return m;
+  }
+  function mcyl(parent, x, y, z, rt, rb, h, material, seg) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 12), material);
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
+    return m;
+  }
+  // small static emissive marker (wingtip nav lights) — cached per colour.
+  function navBox(parent, x, y, z, s, hex) {
+    return box(parent, x, y, z, s, s, s, hex, { matOpts: { emissive: hex, ei: 0.9 }, cast: false });
+  }
+  // SHAPE HELPERS (r128 idiom — sculpt the position attribute, recompute
+  // normals; same pattern as aircraft.js taperBox/bladeGeo). Fully constant
+  // per inputs → deterministic worlds.
+  // taperBox: scales each vertex's X/Y by a factor of its Z (nose=+Z → nz,
+  // tail=-Z → tz) with optional roofline (top) / keel (bot) narrowing.
+  function taperBox(w, h, d, opt) {
+    opt = opt || {};
+    const nz = opt.nz != null ? opt.nz : 1, tz = opt.tz != null ? opt.tz : 1;
+    const top = opt.top != null ? opt.top : 1, bot = opt.bot != null ? opt.bot : 1;
+    const geo = new THREE.BoxGeometry(w, h, d, opt.segW || 2, opt.segH || 2, opt.segD || 6);
+    const pos = geo.attributes.position, hd = d / 2, hh = h / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const f = z / hd, zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
+      let sx = zt, sy = zt;
+      const vy = hh > 0 ? y / hh : 0;
+      if (vy > 0) sx *= (1 + (top - 1) * vy);
+      if (vy < 0) sx *= (1 + (bot - 1) * -vy);
+      pos.setX(i, x * sx); pos.setY(i, y * sy);
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals();
+    return geo;
+  }
+  // sculpted taperBox mesh (fuselage fairings, canopies, hulls)
+  function tbox(parent, x, y, z, w, h, d, opt, material) {
+    const m = new THREE.Mesh(taperBox(w, h, d, opt), material);
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
+    return m;
+  }
+  // WING slab rooted at the fuselage flank, reaching outboard along ±X
+  // (side −1/+1): as a vertex goes outboard (t 0→1) the chord narrows (taper),
+  // shifts rearward (sweep), the slab thins (thin) and optionally droops
+  // (rotor blades). Root edge sits AT the mesh position → bury it in the hull.
+  function wingGeo(side, span, chord, thick, sweep, taper, thin, droop) {
+    const geo = new THREE.BoxGeometry(span, thick, chord, 6, 1, 2);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), t = (x + span / 2) / span;    // 0 root → 1 tip
+      pos.setX(i, side * (x + span / 2));                  // root edge at x=0
+      pos.setZ(i, pos.getZ(i) * (1 - (taper || 0) * t) - (sweep || 0) * t);
+      pos.setY(i, pos.getY(i) * (1 - (thin || 0) * t) - (droop || 0) * t * t);
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals();
+    return geo;
+  }
+  function wing(parent, x, y, z, side, span, chord, thick, sweep, taper, thin, hexOrMat, droop) {
+    const mat = (hexOrMat && hexOrMat.isMaterial) ? hexOrMat : cm(hexOrMat);
+    const m = new THREE.Mesh(wingGeo(side, span, chord, thick, sweep, taper, thin, droop), mat);
     m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
     return m;
   }
@@ -97,155 +180,203 @@
   //   (Research idiom: low-poly hardware = primitives only, no external mesh.)
   // ========================================================================
 
-  // FIGHTER JET — tapered nose, swept delta wings rooted into the fuselage,
-  // twin canted tails + tailplanes, canopy. ~12m long.
-  // KEY FIX: wing/tail ROOTS sink ~0.2m into the fuselage so there is no gap;
-  // delta wings are a single un-rotated swept slab (no rotation.y seam); nose
-  // is a 14-side cone whose fat base overlaps the body.
-  // returns {group, footW, footL} for collider sizing.
+  // FIGHTER JET — sculpted swept/tapered wings (position-attribute wing slabs,
+  // not rotation-faked boxes), glass canopy, intake trunks, twin canted fins,
+  // FULL LANDING GEAR (the old jet had none and sat on its belly) and wingtip
+  // nav lights. ~12.5m long, nose +Z, parked on its wheels at y=0.
+  // returns {group, footW, footL, height} for collider sizing.
   function makeJet() {
     const g = new THREE.Group();
-    const len = 12, fw = 0.9, body0 = 0.55;                 // body centreline y
-    // main fuselage tube (round so wings can sink into a curved flank)
-    const fus = cyl(g, 0, body0 + 0.45, 0.2, fw * 0.5, fw * 0.5, len * 0.78, M.jetGrey, 14);
-    fus.rotation.x = Math.PI / 2;
-    // tapered nose cone — fat base overlaps the fuselage front, fine tip
-    const nose = cyl(g, 0, body0 + 0.45, len * 0.5, 0.04, fw * 0.5, 2.6, M.jetGrey, 14);
-    nose.rotation.x = Math.PI / 2;
-    // tapered tail/afterbody — overlaps the rear of the tube
-    const tail = cyl(g, 0, body0 + 0.45, -len * 0.46, 0.5, fw * 0.5, 2.4, M.jetGreyD, 14);
-    tail.rotation.x = Math.PI / 2;
-    // canopy — sits on the spine, slight forward bubble
-    box(g, 0, body0 + 0.92, len * 0.16, 0.52, 0.42, 2.0, M.canopy);
-    // spine fairing behind the canopy (blends canopy into the tail)
-    box(g, 0, body0 + 0.78, -len * 0.18, 0.34, 0.32, 4.0, M.jetGreyD);
-    // DELTA WINGS — one swept slab per side. Built as an angled box whose inner
-    // edge sinks 0.25m into the round flank (root overlap → no gap). The sweep
-    // is baked by offsetting the box rearward as it goes outboard via rotation
-    // about its INNER edge: do it with a tapered box + a small y-rotation that
-    // keeps the root buried.
+    const cy = 1.15;                                        // body centreline (on gear)
+    const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
+    // fuselage tube + tapered nose + afterbody (round flanks the wings sink into)
+    cyl(g, 0, cy, 0.2, 0.5, 0.5, 8.6, M.jetGrey, 14).rotation.x = Math.PI / 2;
+    cyl(g, 0, cy, 4.9, 0.06, 0.5, 2.6, M.jetGrey, 14).rotation.x = Math.PI / 2;    // nose cone
+    cyl(g, 0, cy, -4.6, 0.42, 0.5, 2.0, M.jetGreyD, 14).rotation.x = Math.PI / 2;  // afterbody
+    mcyl(g, 0, cy, -5.85, 0.3, 0.38, 0.6, GUN, 12).rotation.x = Math.PI / 2;       // nozzle
+    // glass canopy (tapers to the windscreen) + spine fairing flowing aft
+    tbox(g, 0, cy + 0.5, 1.7, 0.72, 0.5, 2.2, { nz: 0.45, tz: 0.85, top: 0.55 }, GLASS);
+    tbox(g, 0, cy + 0.38, -1.9, 0.55, 0.45, 4.6, { tz: 0.6 }, cm(M.jetGreyD));
+    // intake trunks flanking the fuselage, dark mouths up front
     [-1, 1].forEach(function (s) {
-      const wing = box(g, s * 2.4, body0 + 0.35, -0.5, 4.6, 0.14, 3.4, M.jetGreyD);
-      wing.rotation.y = s * -0.30;                          // leading-edge sweep
-      // root filler block buried in the fuselage so the angled root never gaps
-      box(g, s * 0.35, body0 + 0.35, -0.4, 0.9, 0.16, 2.4, M.jetGreyD);
+      box(g, s * 0.75, cy - 0.05, 0.9, 0.6, 0.72, 2.8, M.jetGreyD);
+      mbox(g, s * 0.75, cy - 0.05, 2.35, 0.5, 0.6, 0.16, GUN);
     });
-    // TAILPLANES (horizontal) — roots buried in the tail cone flank
+    // WINGS — sculpted slabs: swept leading edge, tapering chord, thinning tip.
+    // Root edge buried in the round flank → no gap, no rotation seam.
     [-1, 1].forEach(function (s) {
-      const tp = box(g, s * 1.0, body0 + 0.42, -len * 0.42, 2.0, 0.1, 1.3, M.jetGreyD);
-      tp.rotation.y = s * -0.22;
+      wing(g, s * 0.5, cy + 0.05, -0.4, s, 3.9, 3.6, 0.22, 2.2, 0.62, 0.35, M.jetGreyD);
+      wing(g, s * 0.45, cy + 0.1, -4.7, s, 1.8, 1.6, 0.16, 1.0, 0.5, 0.3, M.jetGreyD); // tailplane
     });
-    // TWIN VERTICAL STABILIZERS — canted out, roots sunk into the spine/tail
+    // TWIN FINS — a sculpted "wing" stood upright (rotation.z), raked by its
+    // sweep, canted outboard; root wedge buried in the afterbody so no float.
     [-1, 1].forEach(function (s) {
-      const v = box(g, s * 0.42, body0 + 1.25, -len * 0.4, 0.12, 1.7, 1.7, M.jetGrey);
-      v.rotation.z = s * 0.18;                              // cant outward
-      v.rotation.x = -0.22;                                 // raked back
+      const fin = wing(g, s * 0.28, cy + 0.3, -4.3, s, 1.9, 2.0, 0.16, 1.1, 0.55, 0.3, M.jetGrey);
+      fin.rotation.z = s * 1.25;                            // ~72°: up + canted out
+      box(g, s * 0.28, cy + 0.25, -4.3, 0.2, 0.4, 1.6, M.jetGrey); // root wedge
     });
-    // engine nozzle — recessed into the tail cone
-    cyl(g, 0, body0 + 0.45, -len * 0.56, 0.36, 0.42, 0.55, M.dark, 12).rotation.x = Math.PI / 2;
-    return { group: g, footW: 9.5, footL: len };
+    // LANDING GEAR — chunky voxel legs, wheels touch y=0 (nose + two mains)
+    box(g, 0, 0.5, 3.2, 0.3, 0.55, 0.3, M.steelD);          // nose strut
+    mcyl(g, 0, 0.3, 3.2, 0.3, 0.3, 0.26, RUBBER, 10).rotation.z = Math.PI / 2;
+    [-1, 1].forEach(function (s) {
+      box(g, s * 0.85, 0.62, 0.2, 0.3, 0.6, 0.3, M.steelD); // main strut (under trunk)
+      mcyl(g, s * 0.85, 0.36, 0.2, 0.36, 0.36, 0.3, RUBBER, 10).rotation.z = Math.PI / 2;
+    });
+    // nav lights: red port wingtip, green starboard, white tail
+    navBox(g, -4.3, cy + 0.05, -2.55, 0.16, 0xff4a3d);
+    navBox(g, 4.3, cy + 0.05, -2.55, 0.16, 0x37d67a);
+    navBox(g, 0, cy + 0.45, -5.35, 0.14, 0xf2f4ff);
+    return { group: g, footW: 9.0, footL: 12.4, height: 3.5 };
   }
 
-  // HEAVY BOMBER — round body, broad swept wings rooted into the fuselage with
-  // 2 underslung engine pods PER WING (4 total), tapered nose, tall tail.
-  // KEY FIX: wing roots sink into the round fuselage flank (no gap); 4 pods
-  // total hang UNDER the wing and overlap its underside; nose tapers from body.
+  // HEAVY BOMBER — round body, sculpted swept wings, 4 DIFFERENTIATED engine
+  // nacelles (dark intake lip + tapered exhaust, not four identical drums),
+  // cockpit glass band, aft tail-gunner blister with twin guns, bomb-bay door
+  // seams on the belly, full landing gear (nose + twin main bogies — the old
+  // bomber levitated 1m off the tarmac with nothing under it) and nav lights.
   function makeBomber() {
     const g = new THREE.Group();
-    const len = 26, body = 2.4, cy = 2.2;                   // body centreline y
-    // round fuselage tube
-    const fus = cyl(g, 0, cy, 0, body * 0.5, body * 0.5, len * 0.8, M.jetGrey, 16);
-    fus.rotation.x = Math.PI / 2;
-    // tapered nose — fat base overlaps the front
-    const nose = cyl(g, 0, cy, len * 0.46, 0.12, body * 0.5, 4.2, M.jetGrey, 16);
-    nose.rotation.x = Math.PI / 2;
-    // tapered tail cone
-    const tail = cyl(g, 0, cy, -len * 0.46, 0.18, body * 0.5, 4.0, M.jetGrey, 16);
-    tail.rotation.x = Math.PI / 2;
-    // cockpit windows on the upper nose
-    box(g, 0, cy + 0.7, len * 0.3, 1.1, 0.5, 1.8, M.canopy);
-    // BROAD SWEPT WINGS — root buried 0.6m into the round flank
+    const cy = 2.2;                                         // body centreline y
+    const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
+    // round fuselage tube + tapered nose + tail cone
+    cyl(g, 0, cy, 0, 1.2, 1.2, 20.8, M.jetGrey, 16).rotation.x = Math.PI / 2;
+    cyl(g, 0, cy, 11.5, 0.14, 1.2, 4.0, M.jetGrey, 16).rotation.x = Math.PI / 2;
+    cyl(g, 0, cy, -11.5, 0.5, 1.2, 4.0, M.jetGrey, 16).rotation.x = Math.PI / 2;
+    // cockpit glass band on the nose slope + graphite brow frame
+    mbox(g, 0, cy + 0.62, 10.4, 1.4, 0.55, 1.6, GLASS);
+    box(g, 0, cy + 0.95, 10.4, 1.46, 0.14, 1.7, M.jetGreyD);
+    // TAIL GUNNER BLISTER — glass pod facing aft, twin gun tubes poking out
+    tbox(g, 0, cy, -13.55, 0.95, 0.8, 1.4, { tz: 0.45 }, GLASS);
     [-1, 1].forEach(function (s) {
-      const wing = box(g, s * 7.2, cy, 0.6, 12.5, 0.42, 5.0, M.jetGreyD);
-      wing.rotation.y = s * -0.10;                          // gentle sweep
-      // root filler so the swept root edge can't gap against the round body
-      box(g, s * 1.2, cy, 0.6, 2.4, 0.46, 4.4, M.jetGreyD);
-      // 2 engine pods per wing, hung UNDER the wing, base overlaps wing skin
-      [4.0, 8.0].forEach(function (off) {
-        const pod = cyl(g, s * off, cy - 0.7, 1.6, 0.62, 0.62, 3.0, M.steelD, 12);
-        pod.rotation.x = Math.PI / 2;
-        // pylon connecting pod to wing underside (overlap both)
-        box(g, s * off, cy - 0.35, 1.0, 0.3, 0.7, 1.2, M.jetGreyD);
-        // dark intake face
-        cyl(g, s * off, cy - 0.7, 3.1, 0.5, 0.5, 0.3, M.dark, 12).rotation.x = Math.PI / 2;
+      mcyl(g, s * 0.2, cy, -14.4, 0.06, 0.06, 1.0, GUN, 8).rotation.x = Math.PI / 2;
+    });
+    // WINGS — sculpted: swept, tapered, thinning; roots buried in the flank
+    [-1, 1].forEach(function (s) {
+      wing(g, s * 1.0, cy + 0.15, 1.2, s, 12.5, 5.6, 0.5, 3.4, 0.6, 0.4, M.jetGreyD);
+      // 2 nacelles per wing, slung under it, noses proud of the leading edge
+      [[4.2, 1.5], [8.2, 0.2]].forEach(function (p) {
+        const off = p[0], pz = p[1];
+        cyl(g, s * off, 1.55, pz, 0.62, 0.62, 3.0, M.steel, 12).rotation.x = Math.PI / 2;
+        mcyl(g, s * off, 1.55, pz + 1.42, 0.66, 0.62, 0.35, GUN, 12).rotation.x = Math.PI / 2;   // intake lip
+        mcyl(g, s * off, 1.55, pz - 1.6, 0.34, 0.48, 0.5, GUN, 12).rotation.x = Math.PI / 2;     // exhaust
+        box(g, s * off, 1.95, pz - 0.4, 0.34, 0.8, 1.4, M.jetGreyD);                             // pylon
       });
     });
-    // tall vertical tail (root sunk into the tail cone)
-    box(g, 0, cy + 2.3, -len * 0.4, 0.42, 4.4, 3.2, M.jetGrey);
-    // horizontal stabilizers (roots sunk into the fin/tail)
+    // tall swept fin (sculpted wing stood upright) + swept stabilizers
+    wing(g, 0, cy + 0.8, -10.4, 1, 3.8, 3.2, 0.34, 2.0, 0.5, 0.3, M.jetGrey).rotation.z = Math.PI / 2;
     [-1, 1].forEach(function (s) {
-      const hs = box(g, s * 2.6, cy + 0.4, -len * 0.42, 5.0, 0.32, 2.6, M.jetGreyD);
-      hs.rotation.y = s * -0.08;
+      wing(g, s * 0.5, cy + 0.55, -11.6, s, 4.4, 2.4, 0.28, 1.5, 0.5, 0.3, M.jetGreyD);
     });
-    return { group: g, footW: 27, footL: len };
+    // BOMB BAY — recessed belly panel + twin door seam strips
+    box(g, 0, cy - 1.16, 2.0, 1.4, 0.14, 7.5, M.jetGreyD);
+    [-1, 1].forEach(function (s) { box(g, s * 0.36, cy - 1.21, 2.0, 0.1, 0.06, 7.3, M.dark); });
+    // LANDING GEAR — nose leg with twin wheels + two main bogies under the wings
+    box(g, 0, 0.6, 9.0, 0.3, 1.0, 0.3, M.steelD);
+    [-1, 1].forEach(function (s) {
+      mcyl(g, s * 0.24, 0.42, 9.0, 0.42, 0.42, 0.24, RUBBER, 10).rotation.z = Math.PI / 2;
+    });
+    [-1, 1].forEach(function (s) {
+      box(g, s * 2.6, 1.3, 0.2, 0.34, 1.8, 0.34, M.steelD);   // main strut (into wing)
+      box(g, s * 2.6, 0.5, 0.2, 0.4, 0.28, 2.3, M.steelD);    // bogie beam
+      [-0.85, 0.85].forEach(function (wz) {
+        mcyl(g, s * 2.6, 0.5, 0.2 + wz, 0.5, 0.5, 0.44, RUBBER, 10).rotation.z = Math.PI / 2;
+      });
+    });
+    // nav lights: red port wingtip, green starboard, white on the fin tip
+    navBox(g, -13.4, cy + 0.15, -2.15, 0.2, 0xff4a3d);
+    navBox(g, 13.4, cy + 0.15, -2.15, 0.2, 0x37d67a);
+    navBox(g, 0, 6.6, -12.3, 0.18, 0xf2f4ff);
+    return { group: g, footW: 27, footL: 28, height: 6.9 };
   }
 
-  // HELICOPTER — body, glass nose, tail boom + rotor, main rotor, skids.
+  // HELICOPTER — sculpted cabin + glass greenhouse nose, tapered tail boom,
+  // rotor mast/hub with 4 sculpted drooped blades in ONE spinnable group
+  // (userData.rotor), a crossed tail rotor group (userData.tailRotor), skids,
+  // a door gun stub and nav lights. Parked rotors DON'T spin — the flyable
+  // path (playeraircraft citySpawnFlyableFromProp) drives the tagged groups.
   function makeHeli() {
     const g = new THREE.Group();
-    box(g, 0, 1.5, 0, 1.9, 1.7, 4.0, M.olive);           // cabin
-    box(g, 0, 1.45, 2.2, 1.6, 1.4, 1.6, M.canopy);       // glass nose (overlaps cabin)
-    box(g, 0, 2.0, -0.4, 1.6, 0.9, 2.6, M.oliveD);       // engine deck hump above cabin rear
-    // tail boom — front overlaps the cabin so there's no gap
-    box(g, 0, 1.85, -3.2, 0.5, 0.5, 4.8, M.oliveD);
-    // tapered tail-boom collar where it meets the cabin
-    box(g, 0, 1.7, -1.4, 0.9, 0.8, 1.2, M.oliveD);
-    box(g, 0, 2.55, -5.5, 0.12, 1.3, 1.0, M.oliveD);     // tail fin (vertical stab)
-    box(g, 0, 1.85, -5.5, 1.4, 0.16, 0.7, M.oliveD);     // tail horizontal stab
-    // tail rotor (on the fin)
-    const tr = cyl(g, 0.42, 2.4, -5.55, 0.06, 0.06, 1.4, M.dark, 8);
-    tr.rotation.z = Math.PI / 2;
-    box(g, 0.25, 2.4, -5.55, 0.18, 0.16, 0.16, M.steelD); // tail rotor hub
-    // mast (sunk into the engine hump) + main rotor
-    cyl(g, 0, 2.7, -0.4, 0.13, 0.13, 0.9, M.steelD, 8);
-    const hub = new THREE.Mesh(bg(0.45, 0.2, 0.45), cm(M.steelD)); hub.position.set(0, 3.05, -0.4); g.add(hub);
-    [0, Math.PI / 2].forEach(function (a) {
-      const blade = new THREE.Mesh(bg(11, 0.06, 0.5), cm(M.dark));
-      blade.position.set(0, 3.08, -0.4); blade.rotation.y = a; blade.castShadow = true; g.add(blade);
+    const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark);
+    // cabin (nose narrows, keel tucks) + glass greenhouse + chin block
+    tbox(g, 0, 1.55, 0.2, 1.9, 1.6, 4.4, { nz: 0.75, tz: 0.8, bot: 0.85 }, cm(M.olive));
+    tbox(g, 0, 1.5, 2.5, 1.6, 1.2, 1.8, { nz: 0.5, top: 0.6 }, GLASS);
+    box(g, 0, 0.95, 2.6, 1.2, 0.55, 1.2, M.oliveD);       // chin/avionics block
+    // engine deck + twin exhaust stubs
+    box(g, 0, 2.55, -0.3, 1.5, 0.55, 2.8, M.oliveD);
+    [-1, 1].forEach(function (s) { mcyl(g, s * 0.62, 2.62, -1.5, 0.15, 0.15, 0.5, GUN, 8).rotation.x = Math.PI / 2; });
+    // tapered tail boom (front buried in the cabin) + fin + stab
+    tbox(g, 0, 2.0, -3.5, 0.72, 0.72, 4.8, { tz: 0.5 }, cm(M.olive));
+    box(g, 0, 2.8, -5.7, 0.22, 1.5, 0.9, M.oliveD);       // tail fin
+    box(g, 0, 2.15, -5.3, 1.7, 0.16, 0.6, M.oliveD);      // horizontal stab
+    // MAIN ROTOR — static mast on the deck; hub + 4 tapered drooped blades in
+    // ONE group so the flyable path can spin it (rotation.y).
+    cyl(g, 0, 2.95, -0.2, 0.15, 0.17, 0.7, M.steelD, 8);  // mast
+    const rotor = new THREE.Group();
+    rotor.position.set(0, 3.32, -0.2);
+    const hub = new THREE.Mesh(bg(0.5, 0.26, 0.5), cm(M.steelD));
+    hub.castShadow = true; rotor.add(hub);
+    for (let i = 0; i < 4; i++) {
+      const bl = wing(rotor, 0, 0.02, 0, 1, 4.8, 0.42, 0.09, 0.12, 0.55, 0.3, M.dark, 0.14);
+      bl.rotation.y = i * Math.PI / 2;
+    }
+    g.add(rotor);
+    g.userData.rotor = rotor;                             // flyable contract: spin .rotation.y
+    // TAIL ROTOR — hub + crossed blade bars on the fin's starboard cheek, its
+    // own group on a short shaft so the flyable path can spin it (rotation.x).
+    mcyl(g, 0.18, 2.75, -5.75, 0.07, 0.07, 0.28, GUN, 8).rotation.z = Math.PI / 2; // shaft
+    const trot = new THREE.Group();
+    trot.position.set(0.32, 2.75, -5.75);
+    const thub = new THREE.Mesh(bg(0.22, 0.22, 0.22), cm(M.steelD));
+    thub.castShadow = true; trot.add(thub);
+    const tb1 = new THREE.Mesh(bg(0.09, 1.7, 0.26), cm(M.dark));
+    tb1.castShadow = true; trot.add(tb1);
+    const tb2 = new THREE.Mesh(bg(0.09, 1.7, 0.26), cm(M.dark));
+    tb2.rotation.x = Math.PI / 2; tb2.castShadow = true; trot.add(tb2);
+    g.add(trot);
+    g.userData.tailRotor = trot;                          // flyable contract: spin .rotation.x
+    // SKIDS — chunky rails + 4 struts rising into the cabin floor
+    [-1, 1].forEach(function (s) {
+      box(g, s * 0.85, 0.18, 0.2, 0.16, 0.16, 4.0, M.steelD);
+      [1.4, -1.0].forEach(function (z) { box(g, s * 0.8, 0.55, z, 0.16, 0.75, 0.16, M.steelD); });
     });
-    // skids — cross-tubes rise INTO the cabin floor (overlap), longitudinal rails
-    [-0.8, 0.8].forEach(function (s) {
-      box(g, s, 0.35, 0, 0.13, 0.13, 3.6, M.steelD);      // landing rail
-    });
-    [1.1, -1.1].forEach(function (z) {
-      box(g, 0, 0.9, z, 1.6, 0.12, 0.12, M.steelD);       // cross-tube top
-      [-0.8, 0.8].forEach(function (s) { box(g, s, 0.62, z, 0.1, 0.65, 0.1, M.steelD); }); // struts
-    });
-    return { group: g, footW: 2.4, footL: 9.0 };
+    // DOOR GUN stub on the starboard door: pintle post + receiver + barrel
+    box(g, 0.95, 1.3, 0.6, 0.12, 0.4, 0.12, M.steelD);
+    mbox(g, 1.08, 1.5, 0.75, 0.24, 0.24, 0.6, GUN);
+    mcyl(g, 1.08, 1.5, 1.25, 0.06, 0.06, 0.55, GUN, 8).rotation.x = Math.PI / 2;
+    // nav lights: red port cheek, green starboard, white tail fin
+    navBox(g, -0.84, 1.7, 1.5, 0.14, 0xff4a3d);
+    navBox(g, 0.84, 1.7, 1.5, 0.14, 0x37d67a);
+    navBox(g, 0, 3.4, -6.05, 0.14, 0xf2f4ff);
+    return { group: g, footW: 2.4, footL: 9.3, height: 3.6 };
   }
 
-  // MAIN BATTLE TANK — hull, tracks, turret, long barrel.
+  // MAIN BATTLE TANK — hull with side skirts over rubber track runs, road
+  // wheels + drive sprocket/idler, tow hooks; angular sculpted turret with
+  // mantlet, barrel + chunky muzzle end block, commander cupola w/ MG, smoke
+  // launcher clusters, stowage basket and antenna.
   function makeTank() {
     const g = new THREE.Group();
-    // hull — slightly raised so the running gear shows beneath
-    box(g, 0, 1.0, 0, 3.0, 0.85, 5.4, M.olive);          // hull
-    box(g, 0, 0.62, 0, 2.4, 0.4, 5.6, M.oliveD);         // lower hull / sponson
-    // glacis (sloped front plate, overlaps the hull front)
-    const glacis = box(g, 0, 0.85, 2.7, 2.4, 0.7, 1.0, M.oliveD);
+    const GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
+    // hull — upper + lower, sloped glacis, rear plate + exhausts
+    box(g, 0, 1.05, 0, 3.0, 0.8, 5.6, M.olive);
+    box(g, 0, 0.6, 0, 2.4, 0.45, 5.8, M.oliveD);
+    const glacis = box(g, 0, 0.88, 2.72, 2.4, 0.72, 1.1, M.oliveD);
     glacis.rotation.x = 0.5;
-    // TRACKS — track skirt boxes each side; ROAD WHEELS roll beneath them
+    box(g, 0, 0.95, -2.75, 2.4, 0.65, 0.5, M.oliveD);     // rear plate
+    [-1, 1].forEach(function (s) { mbox(g, s * 0.85, 1.2, -2.9, 0.5, 0.3, 0.3, GUN); }); // exhausts
+    // tow hooks — two on the glacis toe, one on the rear plate
+    [-1, 1].forEach(function (s) { box(g, s * 0.7, 0.62, 3.2, 0.2, 0.2, 0.35, M.steelD); });
+    box(g, 0, 0.7, -3.05, 0.2, 0.2, 0.3, M.steelD);
+    // RUNNING GEAR — side skirt over a rubber track run; 4 road wheels roll
+    // beneath it with a dark-steel drive sprocket (rear) + idler (front)
     [-1, 1].forEach(function (s) {
-      box(g, s * 1.45, 0.7, 0, 0.65, 0.9, 6.0, M.tire);  // track run
-      // 6 road wheels per side (cyl row instead of one flat strip)
-      for (let i = 0; i < 6; i++) {
-        const wz = -2.4 + i * 0.96;
-        const w = cyl(g, s * 1.45, 0.42, wz, 0.42, 0.42, 0.4, M.dark, 10);
-        w.rotation.z = Math.PI / 2;                       // wheel face outward
-      }
-      // drive sprocket (rear) + idler (front), a touch larger
-      [-2.9, 2.9].forEach(function (wz) {
-        const w = cyl(g, s * 1.45, 0.46, wz, 0.46, 0.46, 0.42, M.steelD, 10);
-        w.rotation.z = Math.PI / 2;
+      box(g, s * 1.42, 1.08, 0, 0.22, 0.5, 5.9, M.oliveD);          // side skirt
+      mbox(g, s * 1.42, 0.55, 0, 0.68, 0.7, 6.1, RUBBER);           // track run
+      [-1.8, -0.6, 0.6, 1.8].forEach(function (wz) {
+        mcyl(g, s * 1.44, 0.44, wz, 0.44, 0.44, 0.5, RUBBER, 10).rotation.z = Math.PI / 2;
+      });
+      [-2.75, 2.75].forEach(function (wz) {
+        mcyl(g, s * 1.44, 0.5, wz, 0.5, 0.5, 0.46, GUN, 10).rotation.z = Math.PI / 2;
       });
     });
     // TURRET — its OWN sub-group so the player tank can SLEW it independently of
@@ -261,47 +392,71 @@
     g.add(turret);
     g.userData.turret = turret;
     // local-space muzzle node (barrel tip, in TURRET space): the gun fires here.
-    g.userData.muzzleLocal = new THREE.Vector3(0, 1.62 - TPY, 5.7);
-    // turret body + mantlet + barrel + muzzle-brake, re-rooted to the turret
-    // (subtract TPY from each child y so world placement is unchanged).
-    box(turret, 0, 1.65 - TPY, -0.3, 2.2, 0.75, 2.8, M.oliveD);   // turret body
-    box(turret, 0, 1.62 - TPY, 1.0, 1.2, 0.6, 0.7, M.oliveD);     // gun mantlet (front)
-    const bar = cyl(turret, 0, 1.62 - TPY, 3.4, 0.14, 0.16, 4.6, M.steelD, 10);
-    bar.rotation.x = Math.PI / 2;
-    cyl(turret, 0, 1.62 - TPY, 5.5, 0.2, 0.2, 0.5, M.steelD, 10).rotation.x = Math.PI / 2; // muzzle brake
-    box(turret, 0.5, 2.1 - TPY, -0.7, 0.55, 0.45, 0.6, M.oliveD); // commander cupola (turns with the turret)
-    cyl(turret, -0.6, 2.2 - TPY, -0.2, 0.04, 0.04, 1.4, M.dark, 6); // antenna
-    return { group: g, footW: 3.4, footL: 5.6 };
+    g.userData.muzzleLocal = new THREE.Vector3(0, 1.62 - TPY, 6.6);
+    // angular turret body (narrows to the face) + mantlet + barrel + muzzle block
+    tbox(turret, 0, 1.65 - TPY, -0.2, 2.3, 0.8, 3.0, { nz: 0.72, tz: 0.92 }, cm(M.olive));
+    box(turret, 0, 1.62 - TPY, 1.4, 1.15, 0.6, 0.6, M.oliveD);      // gun mantlet
+    mcyl(turret, 0, 1.62 - TPY, 3.85, 0.12, 0.16, 4.4, GUN, 10).rotation.x = Math.PI / 2;
+    mbox(turret, 0, 1.62 - TPY, 6.2, 0.36, 0.36, 0.55, GUN);        // muzzle end block
+    // commander cupola + hatch + pintle MG (all turn with the turret)
+    cyl(turret, 0.55, 2.15 - TPY, -0.75, 0.34, 0.36, 0.28, M.oliveD, 10);
+    box(turret, 0.55, 2.31 - TPY, -0.75, 0.5, 0.08, 0.5, M.olive);
+    box(turret, 0.55, 2.43 - TPY, -0.55, 0.1, 0.22, 0.1, M.steelD); // MG post
+    mbox(turret, 0.55, 2.55 - TPY, -0.25, 0.14, 0.14, 0.85, GUN);   // MG
+    // smoke launcher clusters angled off both turret cheeks
+    [-1, 1].forEach(function (s) {
+      const base = box(turret, s * 0.98, 1.75 - TPY, 0.55, 0.5, 0.24, 0.24, M.oliveD);
+      base.rotation.y = s * 0.55;
+      const tubes = mbox(turret, s * 1.12, 1.75 - TPY, 0.78, 0.44, 0.18, 0.18, GUN);
+      tubes.rotation.y = s * 0.55;
+    });
+    cyl(turret, -0.85, 2.25 - TPY, -1.35, 0.03, 0.03, 1.3, M.dark, 6); // antenna
+    box(turret, 0, 1.67 - TPY, -1.95, 1.9, 0.55, 0.6, M.oliveD);       // stowage basket
+    return { group: g, footW: 3.5, footL: 6.4, height: 2.7 };
   }
 
-  // ARMORED TRUCK — boxy cab + canvas-back bed, big wheels.
+  // ARMY TRUCK (6x6) — glass cab with sloped hood, brush guard + bumper +
+  // grille + headlights, mirrors, canvas bed with visible rib bows and a
+  // tailgate, fenders over every axle, jerry cans on the bed side, exhaust
+  // stack. Chunky voxel blocks in olive two-tone.
   function makeTruck() {
     const g = new THREE.Group();
-    // chassis rail (overlaps under cab + bed)
-    box(g, 0, 0.55, 0, 2.1, 0.4, 6.0, M.steelD);         // chassis
-    // CAB — body + lower hood, windshield set INTO the cab face (overlap)
-    box(g, 0, 1.25, 1.9, 2.2, 1.5, 1.8, M.oliveD);       // cab body
-    box(g, 0, 0.85, 2.9, 2.1, 0.8, 0.9, M.oliveD);       // hood (overlaps cab)
-    box(g, 0, 1.6, 2.78, 1.9, 0.7, 0.12, M.glassDark, { cast: false }); // windshield
-    [-1, 1].forEach(function (s) {                        // side windows
-      box(g, s * 1.06, 1.55, 1.9, 0.06, 0.55, 0.9, M.glassDark, { cast: false });
-    });
-    box(g, 0, 0.55, 3.4, 2.0, 0.35, 0.2, M.steelD);      // front bumper
-    // COVERED BED — canvas back, base overlaps the chassis
-    box(g, 0, 1.45, -1.6, 2.4, 1.9, 3.8, M.olive);       // bed cover
-    box(g, 0, 0.85, -1.6, 2.2, 0.5, 3.8, M.oliveD);      // bed sides (lower)
-    // FENDERS over each wheel (overlap the body)
+    const GLASS = vmat("glass", M.glassDark), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
+    box(g, 0, 0.55, 0.2, 1.9, 0.35, 7.4, M.steelD);       // chassis rails
+    // CAB — body + sculpted sloped hood + raked windshield + door glass
+    box(g, 0, 1.4, 2.1, 2.2, 1.3, 1.6, M.oliveD);
+    tbox(g, 0, 1.0, 3.45, 2.0, 0.7, 1.2, { nz: 0.85, top: 0.75 }, cm(M.oliveD));
+    const ws = mbox(g, 0, 1.75, 2.95, 1.85, 0.6, 0.12, GLASS);
+    ws.rotation.x = -0.1;                                 // raked back
+    [-1, 1].forEach(function (s) { mbox(g, s * 1.11, 1.62, 2.1, 0.08, 0.5, 0.85, GLASS); });
+    // FRONT END — bumper, dark grille, headlights, brush guard over it all
+    box(g, 0, 0.6, 4.1, 2.1, 0.4, 0.3, M.steelD);         // bumper
+    mbox(g, 0, 1.1, 4.07, 1.3, 0.5, 0.12, GUN);           // grille
     [-1, 1].forEach(function (s) {
-      [-1.7, 1.5].forEach(function (z) { box(g, s * 1.05, 0.95, z, 0.35, 0.45, 1.3, M.oliveD); });
+      box(g, s * 0.82, 1.1, 4.06, 0.22, 0.22, 0.1, 0xffe9b0, { matOpts: { emissive: 0xffe9b0, ei: 0.35 }, cast: false });
+      box(g, s * 0.65, 1.05, 4.12, 0.12, 0.85, 0.12, M.steelD); // guard upright
     });
-    // WHEELS — 6x6 feel: paired rear, single front, faces outward
+    box(g, 0, 1.35, 4.12, 1.7, 0.14, 0.12, M.steelD);     // guard cross bar
+    // mirrors off the cab front corners
+    [-1, 1].forEach(function (s) { box(g, s * 1.25, 1.8, 2.8, 0.36, 0.3, 0.08, M.steelD); });
+    // COVERED BED — lower sides, tailgate, canvas volume + 3 rib bows proud of
+    // the canvas, jerry cans racked on the port side
+    box(g, 0, 1.0, -1.35, 2.3, 0.6, 3.6, M.oliveD);       // bed sides
+    box(g, 0, 1.05, -3.22, 2.3, 0.7, 0.14, M.oliveD);     // tailgate
+    box(g, 0, 1.95, -1.35, 2.26, 1.3, 3.5, M.olive);      // canvas cover
+    [-0.35, -1.35, -2.35].forEach(function (z) { box(g, 0, 2.62, z, 2.34, 0.1, 0.14, M.oliveL); });
+    box(g, -1.21, 1.05, -2.6, 0.14, 0.5, 0.34, M.sand);   // jerry can (flush on the side wall)
+    box(g, -1.21, 1.05, -3.0, 0.14, 0.5, 0.34, M.red);    // fuel can (red = petrol)
+    // fenders over every axle + 6 wheels (single front, paired rear)
     [-1, 1].forEach(function (s) {
-      [-2.0, -1.2, 1.5].forEach(function (z) {
-        cyl(g, s * 1.05, 0.55, z, 0.55, 0.55, 0.42, M.tire, 12).rotation.z = Math.PI / 2;
-        cyl(g, s * 1.05, 0.55, z, 0.2, 0.2, 0.44, M.steelD, 8).rotation.z = Math.PI / 2; // hub
+      box(g, s * 1.08, 1.0, 2.5, 0.4, 0.3, 1.4, M.oliveD);
+      box(g, s * 1.18, 0.95, -1.5, 0.42, 0.28, 2.9, M.oliveD);
+      [2.5, -0.7, -2.3].forEach(function (z) {
+        mcyl(g, s * 1.05, 0.55, z, 0.55, 0.55, 0.44, RUBBER, 12).rotation.z = Math.PI / 2;
       });
     });
-    return { group: g, footW: 2.6, footL: 6.4 };
+    mcyl(g, 1.02, 1.75, 1.24, 0.09, 0.09, 1.5, GUN, 8);   // exhaust stack behind the cab
+    return { group: g, footW: 2.8, footL: 7.7, height: 2.7 };
   }
 
   // ========================================================================
@@ -475,7 +630,14 @@
     // guard shack
     box(root, gx, 1.4, CW_MAXZ + 4, 3, 2.8, 3, M.olive);
     box(root, gx, 2.6, CW_MAXZ + 4, 3.4, 0.3, 3.4, M.oliveD);   // roof
-    box(root, gx, 1.7, CW_MAXZ + 2.5, 2.6, 1.0, 0.1, M.glassDark, { cast: false }); // window
+    // window — OWNER RULE (bda61ab): no gray panes; same clear tinted glass as
+    // every city facade. FRESH material (never cmat(): transparent glass must
+    // stay out of the shared cache, and batch.js skips transparent from merge).
+    const shackWin = new THREE.Mesh(bg(2.6, 1.0, 0.1), new THREE.MeshLambertMaterial({
+      color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
+    shackWin.position.set(gx, 1.7, CW_MAXZ + 2.5);
+    shackWin.castShadow = false; shackWin.receiveShadow = true;
+    root.add(shackWin);
     col(gx, CW_MAXZ + 4, 3, 3, 0, 2.8);
     // boom barrier (a striped bar across the lane), raised slightly so it reads
     const boom = box(root, cx, 1.1, CW_CZ, w * 0.9, 0.18, 0.18, M.warn);
@@ -574,17 +736,28 @@
     made.group.rotation.y = rotY || 0;
     made.group.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     root.add(made.group);
-    // collider: rotate the footprint roughly by snapping to nearest axis
+    // collider: rotate the footprint roughly by snapping to nearest axis.
+    // Height is PER MODEL (each maker measures itself): the old flat y1=3.0
+    // let you jump straight through the bomber's ~7m tail fin.
     const fw = made.footW * (footScale || 1), fl = made.footL * (footScale || 1);
     const sideways = Math.abs(Math.sin(rotY || 0)) > 0.5;
     const cw = sideways ? fl : fw, cd = sideways ? fw : fl;
-    col(wx, wz, cw, cd, 0, 3.0, made.group);
+    const solid = col(wx, wz, cw, cd, 0, made.height != null ? made.height : 3.0, made.group);
     if (kind) {
       made.group.userData.milKind = kind;
       made.group.userData.milName = name || kind;
       placed.push({
         group: made.group, pos: made.group.position, heading: rotY || 0,
         kind: kind, model: { name: name || kind },
+        // the parked collider rides on the record so STEALING the machine can
+        // remove it (militaryvehicles/playeraircraft detach it via the shared
+        // rec._colliderDetached protocol; without this an invisible solid
+        // block haunted the empty slot forever). Same field the airport uses.
+        collider: solid,
+        // flight-model hints for playeraircraft's fly-the-actual-prop path:
+        // these models face +Z = flight forward (no yaw offset) and park on
+        // their gear/tracks at y=0 (no ground offset).
+        modelYawOffset: 0, groundOffset: 0,
         footW: fw, footL: fl, taken: false, hot: true,
       });
     }

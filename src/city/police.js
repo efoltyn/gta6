@@ -56,6 +56,18 @@
   // Self-defaults so a partial/older config never throws.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_CARS == null) CBZ.CONFIG.CITY_PATROL_CARS = true;
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_DISTRICT_WEIGHT == null) CBZ.CONFIG.CITY_PATROL_DISTRICT_WEIGHT = true;
+  // ARREST-FIRST (city-arrest-first): cops try to TAKE YOU IN by default —
+  // lethal force needs a reason (4★+, being fired upon, or SWAT out of
+  // patience at 3★+). false = the legacy shoot-from-2★ logic, kept intact.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST == null) CBZ.CONFIG.CITY_ARREST_FIRST = true;
+  // SWAT REDESIGN (city-swat-redesign): olive/graphite silhouette + the riot
+  // shield issued to ~1 in 3 SWAT (armor.js carries the helmet/carrier flag).
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_REDESIGN == null) CBZ.CONFIG.CITY_SWAT_REDESIGN = true;
+  // SWAT VAN (city-swat-van): at 4★+ the heavy units arrive AS a unit — a dark
+  // liveried van parks a block out and an entry team deploys around its doors.
+  if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_VAN == null) CBZ.CONFIG.CITY_SWAT_VAN = true;
+  function arrestFirst() { return !!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST); }
+  function swatRedesign() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
   // MORE BOOTS ON THE BEAT: a city this big read EMPTY of police with only 3
   // ambient cops. Raise the standing foot patrol to ~7 (the streets are policed
   // everywhere, not just where you stand) — comfortably under POLICE_FORCE_MAX
@@ -164,6 +176,30 @@
     if (Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z) > 13) return;   // overheard, not broadcast
     barkCD = 26 + rng() * 20;
     if (CBZ.city && CBZ.city.note) CBZ.city.note("💬 " + (c.name || "Officer") + ": " + lines[(rng() * lines.length) | 0], 1.8);
+  }
+
+  // ---- ARREST-FIRST CHALLENGE (city-arrest-first) ---------------------------
+  // A cop who gets eyes on a wanted suspect inside barking range CHALLENGES
+  // before anything else: weapon out at the ready, "FREEZE", a patience timer.
+  // Re-challenges after losing you come with LESS patience each time. One
+  // global text cooldown keeps a whole squad from stacking ten FREEZE lines,
+  // and the "you can surrender" hint prints at most every ~30s (the interact.js
+  // surrender option is live whenever a cop is challenging).
+  let challengeNoteCD = 0, surrenderHintT = -1e9;
+  function copPatience(c) { return c.swat ? 1.5 : 6.0; }
+  function challengeCall(c) {
+    c._chalN = (c._chalN || 0) + 1;
+    c._challenged = true;
+    c._patience = Math.max(0.8, copPatience(c) / c._chalN);   // escalating: each re-challenge is shorter
+    if (challengeNoteCD > 0) return;
+    challengeNoteCD = 4.5;
+    if (CBZ.city && CBZ.city.note) {
+      CBZ.city.note(c.swat ? "🚔 \"POLICE! DOWN — HANDS BEHIND YOUR HEAD!\"" : "🚔 \"FREEZE! Hands where I can see them!\"", 2.0);
+      if (CBZ.now - surrenderHintT > 30000) {
+        surrenderHintT = CBZ.now;
+        CBZ.city.note("Stand still to be cuffed — or walk up and surrender. Fighting back gets you shot.", 3.2);
+      }
+    }
   }
 
   // ---- HOLSTER / DRAW -------------------------------------------------------
@@ -580,7 +616,14 @@
   let chopper = null, pitCD = 0;
 
   function makeCop(x, z, swat, ambient) {
-    const ch = makeCharacter({
+    // SWAT silhouette (city-swat-redesign): dark-OLIVE carrier over graphite
+    // fatigues — distinct from police navy at a glance, and consistent with
+    // clothes.js PAINT.swat + the outfits.js catalog (the redress sweep paints
+    // the same two-tone over these flat colors within a beat).
+    const ch = makeCharacter(swat && swatRedesign() ? {
+      legs: 0x2e332b, torso: 0x3a4034, collar: 0x22261f, arms: 0x33382e,
+      skin: 0xe8b58c, hair: 0x101820, shoes: 0x101216,
+    } : {
       legs: swat ? 0x23262c : 0x1b2a44, torso: swat ? 0x2b2f36 : 0x24407a,
       collar: swat ? 0x14161a : 0x16264a, arms: swat ? 0x2b2f36 : 0x24407a,
       skin: 0xe8b58c, hair: 0x101820, shoes: 0x101216,
@@ -612,7 +655,10 @@
     // The clothes.js PAINT.swat painted plate-vest stays underneath; this is the
     // real 3D armor layer on top.
     if (CBZ.cityArmorDressPed) {
-      if (swat) CBZ.cityArmorDressPed(cop, ["swatVest", "helmet"]);
+      // ~1 in 3 SWAT carries the riot SHIELD (armor.js "shield" kit, slot
+      // "hand" → mounts on the LEFT forearm, so the gun hand stays free and
+      // the aim pose is untouched). Visual/loot only — 0 pts.
+      if (swat) CBZ.cityArmorDressPed(cop, (swatRedesign() && rng() < 0.34) ? ["swatVest", "helmet", "shield"] : ["swatVest", "helmet"]);
       else if (rng() < 0.5) CBZ.cityArmorDressPed(cop, ["softVest"]);
     }
     // cops ride blob shadows (city/blobshadows.js) — swept AFTER the weapon
@@ -666,6 +712,7 @@
     pursuers.length = 0;
     rbReset();    // drop wall colliders + dispose pooled cruiser/officer rigs (posted cops were in cityCops → already disposed above)
     patrolCarsReset();   // clear patrol-cruiser handles (the cars are disposed by vehicles.js clearCars)
+    swatVanReset();      // drop the SWAT-van handle (the van itself is a cityCars record — clearCars owns it)
     if (typeof despawnChopper === "function") despawnChopper();
     pitCD = 0;
     dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
@@ -680,39 +727,136 @@
 
   // ---- POLICE HELICOPTER (3+ stars): a maverick that orbits your last-known and
   //      paints you with a searchlight, keeping cops fed your position. ----------
+  // r128 sculpt helper — LOCAL copy of aircraft.js's taperBox (builders stay
+  // self-contained per file). Scales each vertex's X/Y by a factor of its Z
+  // (nose=+Z → nz, tail=-Z → tz) with optional roofline/keel narrowing.
+  function chopTaperBox(w, h, d, opt) {
+    opt = opt || {};
+    const nz = opt.nz != null ? opt.nz : 1, tz = opt.tz != null ? opt.tz : 1;
+    const top = opt.top != null ? opt.top : 1, bot = opt.bot != null ? opt.bot : 1;
+    const geo = new THREE.BoxGeometry(w, h, d, opt.segW || 2, opt.segH || 2, opt.segD || 6);
+    const pos = geo.attributes.position, hd = d / 2, hh = h / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const f = z / hd, zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
+      let sx = zt, sy = zt;
+      const vy = hh > 0 ? y / hh : 0;
+      if (vy > 0) sx *= (1 + (top - 1) * vy);
+      if (vy < 0) sx *= (1 + (bot - 1) * -vy);
+      pos.setX(i, x * sx); pos.setY(i, y * sy);
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals();
+    return geo;
+  }
+  // one thin tapered/drooped rotor blade rooted at the hub, extending +X
+  function chopBladeGeo(len, droop) {
+    const geo = new THREE.BoxGeometry(len, 0.06, 0.34, 6, 1, 1);
+    const pos = geo.attributes.position, hl = len / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), t = (x + hl) / len;
+      pos.setX(i, x + hl);
+      pos.setZ(i, pos.getZ(i) * (1 - 0.45 * t));
+      pos.setY(i, pos.getY(i) - (droop || 0) * t * t);
+    }
+    pos.needsUpdate = true; geo.computeVertexNormals();
+    return geo;
+  }
+  // env-mapped vehicle materials (carfx.js) with the module's Lambert fallback.
+  // The chopper spawns at RUNTIME (3★), so carfx is always loaded by then.
+  function chopMat(role, color, opts) {
+    if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
+    return CBZ.mat ? CBZ.mat(color, opts) : new THREE.MeshLambertMaterial({ color: color });
+  }
   function makeChopper() {
     const A = CBZ.city.arena; if (!A) return null;
     const grp = new THREE.Group();
-    const matBody = CBZ.mat ? CBZ.mat(0x1a1d24, { ei: 0.02 }) : new THREE.MeshStandardMaterial({ color: 0x1a1d24 });
-    const skidMat = CBZ.mat ? CBZ.mat(0x2a2e36) : matBody;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.2, 4.0), matBody);
+    // BLACK-AND-WHITE UNIT LIVERY — the same palette rbDecorate() puts on the
+    // ground cruisers (white panels over a near-black hull, red/blue flashers),
+    // through the env-mapped vehicle roles so the hull sheen matches the cars.
+    const matWhite = chopMat('paint', 0xe9edf2);
+    const matNavy  = chopMat('paint', 0x161a24);
+    const matTrim  = chopMat('metal', 0x2a2e36);
+    const matGlass = chopMat('glass', 0x10161c);
+    const matBlade = chopMat('metal', 0x1c2229);
+    // sculpted white cab over a navy belly band — cruiser doors in the sky
+    const body = new THREE.Mesh(chopTaperBox(1.9, 1.25, 4.2, { nz: 0.5, tz: 0.45, top: 0.7, bot: 0.62, segD: 8 }), matWhite);
     body.castShadow = false; grp.add(body);
-    // forward glass cabin overlapping the fuselage front
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.7, 1.7), skidMat);
-    canopy.position.set(0, 0.5, 1.25); grp.add(canopy);
-    // tapered tail boom — front sunk into the rear of the cabin (no gap)
-    const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 2.7), matBody);
-    boom.position.set(0, 0.26, -2.95); grp.add(boom);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.95, 0.6), matBody);
-    fin.position.set(0, 0.7, -4.0); grp.add(fin);
-    // skids on struts that meet the belly
-    const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 3.2), skidMat); skidL.position.set(-0.75, -0.82, 0.1); grp.add(skidL);
-    const skidR = skidL.clone(); skidR.position.x = 0.75; grp.add(skidR);
-    for (const sx of [-0.75, 0.75]) {
-      for (const sz of [0.85, -0.85]) {
-        const st = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.1), skidMat);
-        st.position.set(sx, -0.52, sz + 0.1); grp.add(st);
+    const belly = new THREE.Mesh(chopTaperBox(1.95, 0.5, 3.4, { nz: 0.55, tz: 0.5, bot: 0.55 }), matNavy);
+    belly.position.set(0, -0.42, 0.15); grp.add(belly);
+    // GLASS bubble canopy — a real windshield (it used to share the skid metal)
+    const canopy = new THREE.Mesh(chopTaperBox(1.55, 0.85, 1.9, { nz: 0.5, tz: 0.95, top: 0.55 }), matGlass);
+    canopy.position.set(0, 0.42, 1.15); grp.add(canopy);
+    // tapered tail boom (white) with a navy cheatline + swept navy fin
+    const boom = new THREE.Mesh(chopTaperBox(0.5, 0.5, 3.0, { tz: 0.45, top: 0.8, bot: 0.8 }), matWhite);
+    boom.position.set(0, 0.3, -3.3); grp.add(boom);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.2, 1.6), matNavy);
+    band.position.set(0, 0.34, -2.6); grp.add(band);
+    const fin = new THREE.Mesh(chopTaperBox(0.16, 1.0, 0.7, { tz: 0.5, top: 0.55 }), matNavy);
+    fin.position.set(0, 0.72, -4.35); grp.add(fin);
+    const stab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 0.5), matWhite);
+    stab.position.set(0, 0.3, -4.05); grp.add(stab);
+    // skids: tapered rails on angled cross-brace struts into the belly
+    for (const sx of [-1, 1]) {
+      const skid = new THREE.Mesh(chopTaperBox(0.15, 0.15, 3.3, { nz: 0.45, tz: 0.45 }), matTrim);
+      skid.position.set(sx * 0.72, -1.02, 0.15); grp.add(skid);
+      for (const sz of [1.0, -0.75]) {
+        const st = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.55, 0.11), matTrim);
+        st.position.set(sx * 0.66, -0.78, sz + 0.15); st.rotation.z = sx * 0.5; grp.add(st);
       }
     }
-    // main rotor — crossed thin blades on a mast hub (group spun by updateChopper)
-    const hub = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.32, 0.3), skidMat); hub.position.y = 0.82; grp.add(hub);
-    const rotorMat = new THREE.MeshBasicMaterial({ color: 0x101216, transparent: true, opacity: 0.55, depthWrite: false });
-    const bladeGeo = new THREE.BoxGeometry(7.5, 0.05, 0.46);
-    const rotor = new THREE.Group(); rotor.position.y = 0.92;
-    const rb1 = new THREE.Mesh(bladeGeo, rotorMat); rotor.add(rb1);
-    const rb2 = new THREE.Mesh(bladeGeo, rotorMat); rb2.rotation.y = Math.PI / 2; rotor.add(rb2);
+    // rotor head: engine cowl + swashplate + mast hub + two REAL tapered blades
+    // + a translucent blur disc (group still spun by updateChopper — unchanged)
+    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.3, 1.4), matWhite);
+    cowl.position.set(0, 0.68, -0.3); grp.add(cowl);
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.1, 8), matTrim);
+    plate.position.y = 0.88; grp.add(plate);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.24, 8), matTrim);
+    hub.position.y = 1.0; grp.add(hub);
+    const bladeG = chopBladeGeo(3.9, 0.12);
+    const rotor = new THREE.Group(); rotor.position.y = 1.06;
+    rotor.add(new THREE.Mesh(bladeG, matBlade));                    // +X blade
+    const opp = new THREE.Group(); opp.rotation.y = Math.PI;
+    opp.add(new THREE.Mesh(bladeG, matBlade)); rotor.add(opp);      // -X blade
     grp.add(rotor);
-    // belly searchlight: a visible cone + a ground pool (like searchlight.js)
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(4.0, 18),
+      new THREE.MeshBasicMaterial({ color: 0x101216, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 1.04; grp.add(disc);
+    // TAIL ROTOR on the fin's starboard side (this bird finally has one)
+    const trotor = new THREE.Group(); trotor.position.set(0.17, 0.72, -4.5);
+    const tgeo = new THREE.BoxGeometry(0.05, 1.3, 0.24);
+    const tb1 = new THREE.Mesh(tgeo, matBlade); trotor.add(tb1);
+    const tb2 = new THREE.Mesh(tgeo, matBlade); tb2.rotation.x = Math.PI / 2; trotor.add(tb2);
+    const thub = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 6), matTrim);
+    thub.rotation.z = Math.PI / 2; trotor.add(thub);
+    grp.add(trotor);
+    // nav lights + strobes — beads like the cruiser lightbar (visibility-flip)
+    const beadG = new THREE.BoxGeometry(0.16, 0.16, 0.16);
+    const mkLight = (color, x, y, z) => {
+      const b = new THREE.Mesh(beadG, new THREE.MeshBasicMaterial({ color }));
+      b.position.set(x, y, z); grp.add(b); return b;
+    };
+    mkLight(0xff2a22, -0.9, -0.35, 0.4);            // port red (steady)
+    mkLight(0x18ff3a, 0.9, -0.35, 0.4);             // stbd green (steady)
+    mkLight(0xeaf4ff, 0, 1.25, -4.35);              // white fin bead (steady)
+    const flashR = mkLight(0xff2d3e, -0.2, 0.9, -0.3);   // roof strobe pair — red/blue,
+    const flashB = mkLight(0x2d6bff, 0.2, 0.9, -0.3);    // flips like the cruiser bar
+    // The tail rotor + strobes are DRIVEN state: updateChopper only spins the
+    // main rotor, so a per-render hook on the always-visible body gears the
+    // tail disc to it (5.6:1) and flips the strobe pair — no update-loop edit,
+    // and it idles for free when the chopper is off-screen or despawned.
+    body.onBeforeRender = function () {
+      trotor.rotation.x = rotor.rotation.y * 5.6;
+      const on = ((((CBZ.now || 0) * 3) | 0) % 2) === 0;
+      flashR.visible = on; flashB.visible = !on;
+    };
+    // belly SEARCHLIGHT — now hangs from a real gimbal housing + lens. The cone
+    // + pool refs and updateChopper's aim/stretch math are UNCHANGED: the cone
+    // still runs from this belly point down to whatever surface the beam lands on.
+    const gim = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 0.26, 8), matTrim);
+    gim.position.set(0, -0.68, 0); grp.add(gim);
+    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.12, 8),
+      new THREE.MeshBasicMaterial({ color: 0xfff3c0 }));
+    lens.position.set(0, -0.8, 0); grp.add(lens);
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 5.5, 1, 16, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
     grp.add(cone);
@@ -915,6 +1059,26 @@
   // damage a cop; killing one spikes player heat + drops the cop's gun
   CBZ.cityHurtCop = function (cop, dmg, imp) {
     if (!cop || cop.dead) return;
+    // ---- ARREST-FIRST SIGNALS (city-arrest-first): the player striking an
+    // officer — bullet OR melee, even one the armor stops — marks THIS cop and
+    // the whole force as FIRED UPON, which is what flips the arrest posture
+    // lethal (see the hunt branch). Wounding an officer is also a reported
+    // crime in its own right (a modest heat bump via the wanted.js report API,
+    // throttled so an auto burst doesn't stack a report per pellet). Same
+    // attribution rules as the kill branch below: an NPC attacker or an
+    // explicit byPlayer:false never charges the player.
+    {
+      const attHit = imp && imp.attacker && imp.attacker.pos ? imp.attacker : null;
+      const hitByPlayer = (imp ? imp.byPlayer !== false : true) && (!attHit || attHit === (CBZ.city && CBZ.city.playerActor));
+      if (hitByPlayer && dmg > 0) {
+        cop._firedUponT = copClock;
+        g._copsFiredUponT = CBZ.now;
+        if (CBZ.cityCrime && (CBZ.now - (g._copWoundT || 0)) > 1500) {
+          g._copWoundT = CBZ.now;
+          CBZ.cityCrime(25, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "assault-officer" });
+        }
+      }
+    }
     // ARMOR SOAK: a vest/plate carrier eats the first hits before flesh — this is
     // WHY a plated SWAT survives the opening burst. Drain the pool, then bleed any
     // overflow into hp. (No-op when the cop has no armor pool / armor.js absent.)
@@ -1054,7 +1218,7 @@
     // an active roadblock/response, so a cruising unit reads as on-the-beat, not
     // mid-call. (rbUpdate only flashes RB.cars, never our patrol pool, so these
     // stay dark unless we ever wire a response.)
-    if (c._rbBar) { if (c._rbBar.red) c._rbBar.red.visible = false; if (c._rbBar.blue) c._rbBar.blue.visible = false; }
+    if (c._rbBar) { if (c._rbBar.red) c._rbBar.red.visible = false; if (c._rbBar.blue) c._rbBar.blue.visible = false; if (c._rbBar.mid) c._rbBar.mid.visible = false; }
     // bind to lane AI exactly like an ambient car
     c.road = r; c.lane = lane; c.dirSign = dir; c.laneIdx = laneIdx;
     c.baseV = (TRP().cruise ? TRP().cruise[0] : 7) + 2.5;   // a steady patrol pace
@@ -1086,6 +1250,130 @@
   // reset hook: clear the registry on a fresh run (the cars themselves are
   // disposed by vehicles.js clearCars). Called from clearCityCops.
   function patrolCarsReset() { for (const c of _patrolCars) if (c) c._patrolCar = false; _patrolCars.length = 0; }
+
+  // ============================================================
+  //  SWAT VAN (city-swat-van) — at 4★+ the heavy units arrive AS A UNIT: a
+  //  dark "SWAT"-liveried van parks at a curb a block out and an entry team
+  //  (up to 4 SWAT, drawn from the SAME finite roster as any dispatch)
+  //  deploys around its rear doors, then hunts through the normal cop AI.
+  //  V1 is deliberately simple: the van spawns PARKED near the player (no
+  //  bespoke driving AI to entangle with lane logic); it's a real cityCars
+  //  record, so it can be rammed, torched — or stolen, at which point it's
+  //  just a very black van. Runtime-only spawn (rng/Math.random-safe zone).
+  // ============================================================
+  const SWAT_VAN_MODEL = { name: "SWAT Van", value: 12000, color: 0x181c1f, s: 1.16, body: "van", detailStyle: "van", designStyle: "armored" };
+  let swatVan = null, swatVanCD = 0, svFlashT = 0;
+  let _svMats = null;
+  function svMatsGet() {
+    if (_svMats) return _svMats;
+    const dark = new THREE.MeshLambertMaterial({ color: 0x22262b }); dark._shared = true;
+    // "SWAT" side placard: one tiny canvas → ONE shared texture/material for
+    // every van this run (runtime visual — canvas text is fine here).
+    let plate = dark;
+    try {
+      const cv = document.createElement("canvas"); cv.width = 64; cv.height = 24;
+      const cx = cv.getContext("2d");
+      cx.fillStyle = "#101316"; cx.fillRect(0, 0, 64, 24);
+      cx.strokeStyle = "#3a4046"; cx.strokeRect(0.5, 0.5, 63, 23);
+      cx.fillStyle = "#e8ecef"; cx.font = "bold 16px Arial, sans-serif";
+      cx.textAlign = "center"; cx.textBaseline = "middle"; cx.fillText("SWAT", 32, 13);
+      const tex = new THREE.CanvasTexture(cv);
+      plate = new THREE.MeshLambertMaterial({ map: tex });
+      plate._shared = true;
+    } catch (e) { /* stub canvas — placard falls back to plain armor dark */ }
+    _svMats = { dark, plate };
+    return _svMats;
+  }
+  // bolt the SWAT dressing onto a freshly-built van (armored.js dressTruck
+  // language, self-contained): armor skirts, big SWAT flank placards, a rear
+  // blast-door slab, nose bumper + a mini red/blue bar updateSwatVan flashes.
+  function dressSwatVan(c) {
+    const M = rbMats(), S = svMatsGet();
+    const w = (c.dims && c.dims.width) || 2.14, l = (c.dims && c.dims.length) || 4.9, h = (c.dims && c.dims.height) || 2.27;
+    [1, -1].forEach((s) => {
+      const sk = new THREE.Mesh(M.geo, S.dark); sk.scale.set(0.06, 0.42, l * 0.55);
+      sk.position.set(s * (w / 2 + 0.02), 0.66, 0); c.group.add(sk);
+      const pl = new THREE.Mesh(M.geo, S.plate); pl.scale.set(0.04, 0.62, 1.9);
+      pl.position.set(s * (w / 2 + 0.04), h * 0.6, 0.15); c.group.add(pl);
+    });
+    const rear = new THREE.Mesh(M.geo, S.dark); rear.scale.set(w * 0.85, 1.5, 0.1);
+    rear.position.set(0, h * 0.52, -l / 2 - 0.04); c.group.add(rear);
+    const seam = new THREE.Mesh(M.geo, M.dark); seam.scale.set(0.07, 1.5, 0.12);
+    seam.position.set(0, h * 0.52, -l / 2 - 0.05); c.group.add(seam);
+    const bumper = new THREE.Mesh(M.geo, S.dark); bumper.scale.set(w * 0.7, 0.3, 0.14);
+    bumper.position.set(0, 0.62, l / 2 + 0.08); c.group.add(bumper);
+    const base = new THREE.Mesh(M.geo, M.dark); base.scale.set(1.3, 0.1, 0.36);
+    base.position.set(0, h + 0.1, l * 0.16); c.group.add(base);
+    const red = new THREE.Mesh(M.geo, M.red); red.scale.set(0.5, 0.16, 0.3);
+    red.position.set(-0.34, h + 0.18, l * 0.16); c.group.add(red);
+    const blue = new THREE.Mesh(M.geo, M.blue); blue.scale.set(0.5, 0.16, 0.3);
+    blue.position.set(0.34, h + 0.18, l * 0.16); c.group.add(blue);
+    c._rbBar = { red, blue, phase: 0 };
+  }
+  // one van at a time, on the maintain beat (1.1s). Only rolls when there's a
+  // genuine SWAT deficit to fill — the van IS the dispatch wave, not a bonus.
+  function maintainSwatVan(stars) {
+    if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_VAN)) return;
+    if (swatVanCD > 0) swatVanCD -= 1.1;
+    if (swatVan && (swatVan.dead || swatVan._exploded || swatVan.player || CBZ.cityCars.indexOf(swatVan) < 0)) swatVan = null;
+    if (stars < 4 || g.state !== "playing" || swatVan || swatVanCD > 0) return;
+    if (!CBZ.cityMakeCar || forcePool < 2) return;
+    const A = CBZ.city && CBZ.city.arena; if (!A || !A.randomRoadPoint) return;
+    const swatTarget = Math.round((g.cityCopTarget || 0) * (SWAT_FRAC[Math.min(5, stars)] || 0));
+    if (liveSwat() >= swatTarget) return;
+    const P = CBZ.player;
+    // a curb point ~55u out: close enough to join the fight, far enough that
+    // the team visibly ARRIVES rather than materialising on your shoulder.
+    let pt = null, bs = 1e9;
+    for (let t = 0; t < 8; t++) {
+      const p = A.randomRoadPoint(); if (!p) break;
+      const sc = Math.abs(Math.hypot(p.x - P.pos.x, p.z - P.pos.z) - 55);
+      if (sc < bs) { bs = sc; pt = p; }
+    }
+    if (!pt || Math.hypot(pt.x - P.pos.x, pt.z - P.pos.z) > 130) return;   // nothing near this beat — retry next
+    const r = nearestRoadSeg(A, pt.x, pt.z); if (!r) return;
+    const dir = rng() < 0.5 ? 1 : -1;
+    const lane = dir * laneWidthP() * ((lanesPerDirP() - 1) + 0.5);   // curb lane
+    const half = (r.len || 0) / 2;
+    const along = Math.max(-half * 0.8, Math.min(half * 0.8, r.vertical ? pt.z - r.z : pt.x - r.x));
+    const x = r.vertical ? r.x + lane : r.x + along;
+    const z = r.vertical ? r.z + along : r.z + lane;
+    const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    const van = CBZ.cityMakeCar(x, z, heading, r.vertical, SWAT_VAN_MODEL, 0.2);
+    if (!van) return;
+    try { dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
+    van.ai = false; van.v = 0; van._swatVan = true;
+    swatVan = van; swatVanCD = 42 + rng() * 26;
+    // the ENTRY TEAM deploys around the rear doors — real roster officers (a
+    // wiped force fields no van teams; every one of these is killable-for-keeps)
+    const bx = -Math.sin(heading), bz = -Math.cos(heading);           // rear of the van
+    const px2 = Math.cos(heading), pz2 = -Math.sin(heading);          // perpendicular
+    const L2 = ((van.dims && van.dims.length) || 4.9) / 2;
+    let deployed = 0;
+    for (let i = 0; i < 4 && forcePool > 0; i++) {
+      const back = L2 + 1.0 + (i >> 1) * 1.2;
+      const side = (i % 2 ? 1 : -1) * (0.9 + (i >> 1) * 0.4);
+      const cop = makeCop(van.pos.x + bx * back + px2 * side, van.pos.z + bz * back + pz2 * side, true, false);
+      cop._force = true; forcePool--;
+      A.root.add(cop.group);
+      CBZ.cityCops.push(cop);
+      deployed++;
+    }
+    if (deployed && CBZ.city && CBZ.city.note && Math.hypot(x - P.pos.x, z - P.pos.z) < 85) CBZ.city.note("🚨 A SWAT van screeches in — an entry team pours out.", 2.2);
+  }
+  // per-frame: flash the mini bar; release the handle the moment the van stops
+  // being ours (wrecked, reaped, or stolen — a stolen van is just a black van).
+  function updateSwatVan(dt) {
+    const v = swatVan;
+    if (!v) return;
+    if (v.dead || v._exploded || v.player || CBZ.cityCars.indexOf(v) < 0) { swatVan = null; return; }
+    if (v._rbBar) {
+      svFlashT += dt;
+      const on = ((svFlashT * 5) | 0) & 1;
+      v._rbBar.red.visible = !!on; v._rbBar.blue.visible = !on;
+    }
+  }
+  function swatVanReset() { swatVan = null; swatVanCD = 0; svFlashT = 0; }
 
   // ---- maintain the right number of cops --------------------------------
   function maintain(dt) {
@@ -1164,6 +1452,7 @@
       if (pitCD <= 0) { pitCD = 4 + rng() * 3; tryPIT(P._vehicle, stars); }
     }
     rbMaintain(stars, P);
+    maintainSwatVan(stars);   // 4★+: the heavy column arrives as a van-load
     // patrol cruisers cruise the city on lane AI — top the pool up here (1.1s
     // beat). Skipped while you're driving with heat up so we never pop a fresh
     // cruiser into a tense chase (the chase units are spawned by the ramp above).
@@ -1261,29 +1550,52 @@
     if (rbM) return rbM;
     function bm(color) { const m = new THREE.MeshBasicMaterial({ color }); m._shared = true; return m; }
     const white = new THREE.MeshLambertMaterial({ color: 0xe9edf2 }); white._shared = true;
-    rbM = { red: bm(0xff2d3e), blue: bm(0x2d6bff), dark: bm(0x101216), white, geo: new THREE.BoxGeometry(1, 1, 1) };
+    rbM = { red: bm(0xff2d3e), blue: bm(0x2d6bff), dark: bm(0x101216), lamp: bm(0xdfe9f4), white, geo: new THREE.BoxGeometry(1, 1, 1) };
     rbM.geo._shared = true;
     return rbM;
   }
-  // turn a plain black sedan into a black-and-white: white door panels + a roof
-  // bar whose red/blue halves FLASH by visibility flip (zero material churn).
+  // turn a plain black sedan into a black-and-white pursuit unit: white door
+  // panels against matte hood/trunk contrast panels, a chunky 3-segment
+  // red|white|blue roof bar (the red/blue halves keep the EXACT visibility-flip
+  // flash contract — rbUpdate flips .red/.blue, patrol parks them dark; the
+  // white centre is a steady lamp), a nose push-bar and an A-pillar spotlight.
+  // All cheap shared-material boxes; CRUISER_MODEL is always a sedan, so the
+  // hull-top ≈ y 1.10 the panels ride is a constant of this one body type.
   function rbDecorate(c) {
     if (c._rbBar) return;
     const M = rbMats();
     const h = (c.dims && c.dims.height) || 1.55, w = (c.dims && c.dims.width) || 1.9;
+    const l = (c.dims && c.dims.length) || 4.2;
     const bar = new THREE.Group();
-    const base = new THREE.Mesh(M.geo, M.dark); base.scale.set(1.2, 0.09, 0.32); bar.add(base);
-    const red = new THREE.Mesh(M.geo, M.red); red.scale.set(0.52, 0.14, 0.28); red.position.set(-0.31, 0.1, 0); bar.add(red);
-    const blue = new THREE.Mesh(M.geo, M.blue); blue.scale.set(0.52, 0.14, 0.28); blue.position.set(0.31, 0.1, 0); bar.add(blue);
+    const base = new THREE.Mesh(M.geo, M.dark); base.scale.set(1.34, 0.1, 0.4); bar.add(base);
+    const red = new THREE.Mesh(M.geo, M.red); red.scale.set(0.46, 0.17, 0.34); red.position.set(-0.42, 0.1, 0); bar.add(red);
+    const mid = new THREE.Mesh(M.geo, M.lamp); mid.scale.set(0.28, 0.15, 0.3); mid.position.set(0, 0.09, 0); bar.add(mid);
+    const blue = new THREE.Mesh(M.geo, M.blue); blue.scale.set(0.46, 0.17, 0.34); blue.position.set(0.42, 0.1, 0); bar.add(blue);
     bar.position.set(0, h + 0.05, 0.12);
     c.group.add(bar);
+    // the black-and-white: white DOOR panels…
     [1, -1].forEach((s) => {
       const door = new THREE.Mesh(M.geo, M.white);
-      door.scale.set(0.05, 0.6, 1.2);
-      door.position.set(s * (w / 2 + 0.015), 0.98, 0.25);
+      door.scale.set(0.05, 0.64, 1.36);
+      door.position.set(s * (w / 2 + 0.015), 0.97, 0.25);
       c.group.add(door);
     });
-    c._rbBar = { red, blue, phase: (rng() * 2) | 0 };
+    // …between matte-black HOOD + TRUNK contrast panels riding the hull top
+    const hood = new THREE.Mesh(M.geo, M.dark); hood.scale.set(w * 0.56, 0.07, l * 0.2);
+    hood.position.set(0, 1.09, l * 0.28); c.group.add(hood);
+    const trunk = new THREE.Mesh(M.geo, M.dark); trunk.scale.set(w * 0.56, 0.07, l * 0.15);
+    trunk.position.set(0, 1.09, -l * 0.31); c.group.add(trunk);
+    // nose PUSH-BAR (blade + two uprights)
+    const pb = new THREE.Mesh(M.geo, M.dark); pb.scale.set(w * 0.58, 0.3, 0.09);
+    pb.position.set(0, 0.66, l / 2 + 0.1); c.group.add(pb);
+    [0.22, -0.22].forEach((ux) => {
+      const up = new THREE.Mesh(M.geo, M.dark); up.scale.set(0.07, 0.5, 0.09);
+      up.position.set(ux * w, 0.56, l / 2 + 0.1); c.group.add(up);
+    });
+    // A-pillar SPOTLIGHT block (driver side)
+    const spot = new THREE.Mesh(M.geo, M.lamp); spot.scale.set(0.1, 0.12, 0.22);
+    spot.position.set(-(w / 2 + 0.05), 1.28, l * 0.16); c.group.add(spot);
+    c._rbBar = { red, blue, mid, phase: (rng() * 2) | 0 };
   }
   function rbDispose(grp) {   // same dispose discipline as clearCityCops/clearCars
     if (!grp) return;
@@ -1327,6 +1639,7 @@
       c.state = "patrol"; c.giveUp = false; c.searchT = 0; c.curTarget = null; c.npcTarget = null;
       c.arrestT = 0; c._radioT = 0; c._duty = null; c.sees = false; c.retarget = 0; c.lostT = 0;
       c._gunLowered = false; c._gunHidden = false; c.chaseCar = null; c._coverT = 0;
+      c._challenged = false; c._patience = 0; c._chalN = 0; c._firedUponT = null;   // fresh arrest-first slate
       // re-issue armor on a recycled officer (refills the soak pool, re-mounts the
       // vest/helmet if the kill stripped them, clears the prior corpse loot stamp)
       c._armorLoot = null;
@@ -1663,7 +1976,11 @@
         if (c._losCD <= 0) { c._losCD = 0.22 + rng() * 0.12; c._losClear = pd < 40 && !P.dead && losClear(c.pos.x, c.pos.z, P.pos.x, P.pos.z); }
         c.sees = pd < 40 && !P.dead && stars >= 1 && !!c._losClear;
         c.curTarget = c.sees ? CBZ.city.playerActor : null;    // feeds the aim pose + gun visibility
-        if (c.sees && c.shootCD <= 0) {
+        // arrest-first: the wall is PRESSURE, not an execution squad — posted
+        // officers hold fire until deep heat (4★+) or the force has been fired
+        // upon. Flag off = the old fire-on-sight wall.
+        const postLethal = !arrestFirst() || stars >= 4 || (CBZ.now - (g._copsFiredUponT || -1e9)) < 15000;
+        if (c.sees && postLethal && c.shootCD <= 0) {
           c.shootCD = (c.swat ? 0.2 : 0.55) + rng() * 0.3;
           fireAt(c, CBZ.city.playerActor, pd);
         }
@@ -1755,20 +2072,64 @@
         }
 
         const npcThreat = !isPlayer && (tgt.armed || tgt.aggr >= 0.85 || (tgt.npcWanted | 0) >= 2);
-        const wantArrest = isPlayer ? (stars <= 2 && !P.driving) : !npcThreat;
-        const wantShoot = isPlayer ? stars >= 2 : npcThreat;
+        let wantArrest = isPlayer ? (stars <= 2 && !P.driving) : !npcThreat;
+        let wantShoot = isPlayer ? stars >= 2 : npcThreat;
+        // ---- ARREST-FIRST (city-arrest-first, player only — the NPC branch
+        // above already arrests non-threats): the default posture is TAKE THEM
+        // IN, weapon at the ready, holding fire. Lethal force needs a REASON:
+        //   (a) FIRED UPON — the player shot/struck an officer (cityHurtCop
+        //       stamps both a 15s force-wide window and a per-cop memory);
+        //   (b) deep heat (4★+);
+        //   (c) SWAT whose challenge went ignored at 3★+ (patience is ~1.5s).
+        // A DRIVING suspect is pursued at any stars (the cuff itself only
+        // lands on foot). Flag false = the legacy shoot-from-2★ lines above.
+        if (isPlayer && arrestFirst()) {
+          const firedUpon = (CBZ.now - (g._copsFiredUponT || -1e9)) < 15000 ||
+            (c._firedUponT != null && (copClock - c._firedUponT) < 25);
+          const lethal = stars >= 4 || firedUpon ||
+            (c.swat && stars >= 3 && c._challenged && (c._patience || 0) <= 0);
+          wantShoot = lethal;
+          wantArrest = !lethal;
+        }
         // PROCEDURE: the gun leaves the belt only when the stop calls for it —
         // an armed suspect (or gunfire-grade heat nearby) gets drawn on; a plain
-        // 0★ collar of an unarmed brawler stays hands-on, holster snapped.
+        // 0★ collar of an unarmed brawler stays hands-on, holster snapped. A
+        // CHALLENGING arrest-first cop draws too, but holds it LOWERED (the
+        // gun-stop stance) — fireAt clears the lowering the moment it's live.
         if (wantShoot || tgt.armed) drawGun(c);
+        else if (isPlayer && c._challenged) { drawGun(c); c._gunLowered = true; }
         c._calmT = 0;
 
         // assign each cop a FLANK lane so they don't bunch up — left/right/center
         // by index so a squad surrounds you instead of conga-lining single file.
         if (AT) AT.flankLane(c, i, 3); else if (c._flank == null) c._flank = ((i % 3) - 1);   // -1 left, 0 center, +1 right
 
-        // ---- ARREST: only when we actually see them + are right on top ----
-        if (wantArrest && c.sees && dist < 1.9) {
+        // ---- ARREST ----
+        // arrest-first (player): a SEQUENCE, not a point-blank tag — CHALLENGE
+        // at ~10u with eyes on, close in, and CUFF a slow suspect who holds
+        // still ~2.5s inside 3.2u (interact.js "surrender" stays the instant
+        // voluntary version, and is offered whenever a cop is challenging).
+        // Fleeing burns the challenge patience (SWAT lethality above) and
+        // re-challenges come shorter. Legacy flag-off path + the NPC collar
+        // keep the old point-blank window below, byte-for-byte.
+        if (isPlayer && arrestFirst()) {
+          if (wantArrest) {
+            if (c.sees && dist < 10 && !c._challenged) challengeCall(c);
+            if (c._challenged) {
+              if (!c.sees || P.speed > 3 || P.driving) c._patience = (c._patience || 0) - dt;   // ignoring the order
+              if (!c.sees && (c.lostT || 0) > 8) c._challenged = false;   // long blind spell → fresh challenge on re-contact
+            }
+            if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
+              if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("🚔 \"Easy now — hold still.\"", 1.2); }
+              c.arrestT += dt;
+              if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust(); return; }
+              // close the last stretch slowly, cuffs out; square up on top
+              if (dist > 2.0) stepTo(c, dx, dz, c.baseSpeed * 0.62, dt, near);
+              else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (near) animChar(c.char, 0, dt); }
+              continue;
+            } else c.arrestT = 0;
+          } else c.arrestT = 0;
+        } else if (wantArrest && c.sees && dist < 1.9) {
           if (isPlayer) {
             if (P.speed < 2.4 && !P._fighting) {
               if (c.arrestT === 0 && CBZ.city && CBZ.city.note) CBZ.city.note("🚔 \"FREEZE! Hands where I can see them!\"", 1.0);
@@ -1924,6 +2285,9 @@
 
       // ---- patrol (ambient, no target) — BEAT PROCEDURE, not wandering drones --
       c.sees = false; c.npcTarget = null;
+      // de-escalation: back on the beat the challenge state clears (a future
+      // hunt starts with a fresh FREEZE and full patience, gun un-lowered)
+      if (c._challenged) { c._challenged = false; c._patience = 0; c._chalN = 0; c._gunLowered = false; }
       // calm streets: after a few quiet seconds the sidearm goes back on the belt
       if (stars === 0 && !c.swat && c.armed) { c._calmT = (c._calmT || 0) + dt; if (c._calmT > 2.5) holsterGun(c); }
 
@@ -2001,10 +2365,12 @@
     updateChopper(dt);
     updatePursuers(dt);
     rbUpdate(dt);
+    updateSwatVan(dt);
     updateGunStop(dt);
     hideOccludedGuns(dt);
     copClock += dt;
     if (barkCD > 0) barkCD -= dt;
+    if (challengeNoteCD > 0) challengeNoteCD -= dt;
     scanDuty(dt);
   });
 

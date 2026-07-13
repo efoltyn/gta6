@@ -9,12 +9,23 @@
 
    Exposes CBZ.surv.zone {cx,cz,radius,...} which the bots flee toward
    and the HUD/minimap draw.
+
+   COMPOSITION with the disaster director (systems/disasters.js): the
+   ring prefers to START each shrink between waves (idle/warn), so you
+   dodge hazards DURING a disaster and reposition BETWEEN them — and
+   the disasters already aim inside the ring (strikes/meteors/sinkholes
+   target zone.radius, the tornado bounces off its edge, the nuke drops
+   on its centre), so the two systems tighten each other.
+
+   Flag: CBZ.CONFIG.SURV_ZONE (default true; false = dormant, the old
+   disasters-only island — survival.js's reset checks it).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
+  if (CBZ.CONFIG.SURV_ZONE == null) CBZ.CONFIG.SURV_ZONE = true;
 
   // [radius, holdSecs, shrinkSecs, dpsOutside]
   const PHASES = [
@@ -28,7 +39,7 @@
   ];
 
   let wall = null, ring = null;
-  const zone = { cx: 0, cz: 0, radius: 120, phase: 0, t: 0, shrinking: false, from: 120, to: 120, dps: 1.5 };
+  const zone = { cx: 0, cz: 0, radius: 120, phase: 0, t: 0, shrinking: false, from: 120, to: 120, dps: 1.5, last: false };
 
   function ensureVisuals() {
     if (wall) return;
@@ -48,12 +59,19 @@
   CBZ.safezone = {
     start() {
       ensureVisuals();
+      wall.visible = true; ring.visible = true;
       const arena = CBZ.surv.arena;
       zone.cx = arena.center.x; zone.cz = arena.center.z;
-      zone.phase = 0; zone.shrinking = false;
+      zone.phase = 0; zone.shrinking = false; zone.last = false;
       zone.radius = PHASES[0][0]; zone.from = zone.radius; zone.to = zone.radius;
       zone.t = PHASES[0][1]; zone.dps = PHASES[0][3];
       CBZ.surv.zone = zone;
+    },
+    // dormant: no CBZ.surv.zone → the update below and every zone consumer
+    // (bots, HUD, disaster targeting) fall back to the whole-island game
+    stop() {
+      CBZ.surv.zone = null;
+      if (wall) { wall.visible = false; ring.visible = false; }
     },
   };
 
@@ -62,7 +80,10 @@
     const ph = PHASES[zone.phase];
 
     if (zone.shrinking) {
-      const dur = PHASES[zone.phase + 1] ? PHASES[zone.phase][2] : 8;
+      // shrinkSecs describes the shrink INTO a row (like its dps): use the
+      // destination row's, or the first close would snap shut in one frame
+      // (row 0's shrinkSecs is 0 — nothing ever shrinks INTO the start ring)
+      const dur = PHASES[zone.phase + 1] ? PHASES[zone.phase + 1][2] : 8;
       zone.t -= dt;
       const k = 1 - Math.max(0, zone.t) / Math.max(0.001, dur);
       zone.radius = zone.from + (zone.to - zone.from) * (k * k * (3 - 2 * k)); // smoothstep
@@ -72,25 +93,33 @@
         zone.radius = PHASES[zone.phase][0];
         zone.t = PHASES[zone.phase][1];
         zone.dps = PHASES[zone.phase][3];
+        zone.last = zone.phase === PHASES.length - 1;   // the endgame circle
       }
     } else {
       zone.t -= dt;
       if (zone.t <= 0 && PHASES[zone.phase + 1]) {
-        const next = PHASES[zone.phase + 1];
-        zone.shrinking = true;
-        zone.from = zone.radius; zone.to = next[0];
-        zone.t = PHASES[zone.phase][2];
-        zone.dps = next[3];
-        CBZ.flashHint && CBZ.flashHint("⚠ The safe zone is closing!", 2.4);
-        CBZ.sfx && CBZ.sfx("alarm");
+        // compose with the disaster director: hold the ring while a disaster
+        // is ACTIVE (you're busy dodging) and start the shrink in the lull —
+        // bounded by 25s overdue so a long wave can never stall the storm.
+        const midDisaster = CBZ.disasters && CBZ.disasters.state() === "active";
+        if (!midDisaster || zone.t < -25) {
+          const next = PHASES[zone.phase + 1];
+          zone.shrinking = true;
+          zone.from = zone.radius; zone.to = next[0];
+          zone.t = next[2];          // destination row's shrinkSecs (see above)
+          zone.dps = next[3];
+          CBZ.flashHint && CBZ.flashHint("⚠ The safe zone is closing!", 2.4);
+          CBZ.sfx && CBZ.sfx("alarm");
+        }
       }
     }
 
-    // out-of-zone storm damage to EVERY actor (player + bots)
+    // out-of-zone storm damage to EVERY actor (player + bots) — with its own
+    // kill-feed cause so a storm death isn't blamed on the active disaster
     const r2 = zone.radius * zone.radius;
     CBZ.surv.forEachActor(function (a) {
       const dx = a.pos.x - zone.cx, dz = a.pos.z - zone.cz;
-      if (dx * dx + dz * dz > r2) CBZ.surv.hurt(a, zone.dps * dt);
+      if (dx * dx + dz * dz > r2) CBZ.surv.hurt(a, zone.dps * dt, { cause: "swallowed by the storm" });
     });
 
     // visuals

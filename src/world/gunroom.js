@@ -140,9 +140,9 @@
           armory.lamp.material.color.setHex(0x39ff88);
           armory.lamp.material.emissive.setHex(0x14c258);
           CBZ.sfx("door");
-          CBZ.flashHint("Armory unlocked — walk the rack to collect weapons.", 2.6);
+          CBZ.flashHint("The armory rack's open — take what you need.", 2.6);
         } else {
-          CBZ.flashHint("Armory locked. Find the keycard first.", 1.2);
+          CBZ.flashHint("The armory door won't budge — it wants a keycard.", 1.2);
         }
       }
     } else if (armory.t < 1) {

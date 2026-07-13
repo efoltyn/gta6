@@ -20,7 +20,21 @@
   if (!CBZ || !THREE || !CBZ.game) return;
   const g = CBZ.game;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  // ONE canonical campaign flag: CBZ.CONFIG.CITY_HITMAN_CAMPAIGN. Older embeds
+  // and saves toggled it in four legacy locations; migrate the first defined one
+  // exactly once, then every reader goes through CBZ.cityCampaignEnabled().
+  if (CFG.CITY_HITMAN_CAMPAIGN == null) {
+    const legacyFlags = [CBZ.CITY_HITMAN_CAMPAIGN, window.CITY_HITMAN_CAMPAIGN, g.CITY_HITMAN_CAMPAIGN, g.cityHitmanCampaign];
+    for (let i = 0; i < legacyFlags.length; i++) {
+      if (legacyFlags[i] != null) { CFG.CITY_HITMAN_CAMPAIGN = !!legacyFlags[i]; break; }
+    }
+  }
   if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = true;
+  // Endless-line archetypes (sniper/disguise/vehicle/high-value contracts).
+  if (CFG.CAMPAIGN_CONTRACT_VARIETY == null) CFG.CAMPAIGN_CONTRACT_VARIETY = true;
+  // Ambient scenedirector set-pieces during ENDLESS free time (scripted phases
+  // always suppress them — see CBZ.cityCampaignScenesBlocked below).
+  if (CFG.CAMPAIGN_AMBIENT_SCENES == null) CFG.CAMPAIGN_AMBIENT_SCENES = true;
 
   const VERSION = 1;
   const PHASE = {
@@ -64,10 +78,12 @@
     required: 0,
     lastProgress: -1,
     transportReleased: false,
+    contract: null,
   };
 
   function active() { return CFG.CITY_HITMAN_CAMPAIGN !== false; }
   CBZ.cityCampaignActive = active;
+  CBZ.cityCampaignEnabled = active;   // canonical flag read (campaign_ui + siblings delegate here)
   CBZ.cityCampaignOwnsMission = function () { return active(); };
 
   function freshState() {
@@ -223,6 +239,8 @@
     const hidPlayerForTransport = R.kind === "prologue" || R.kind === "spy_insertion";
     const P = player();
     clearDialogue();
+    if (R.contract && R.contract.car) unseatContractCar(false);   // never leak an invisible driver
+    R.contract = null;
     if (R.marker) disposeProp(R.marker);
     R.marker = null; R.markerTarget = null; R.markerPoint = null;
     for (let i = 0; i < R.props.length; i++) disposeProp(R.props[i]);
@@ -590,12 +608,21 @@
       cop.sees = true; cop.alert = 1; cop.arrestT = 0; cop._campaignRoofSwat = true;
       R.swat.push(cop);
     }
-    if (CBZ.cityForceStars) {
-      try { CBZ.cityForceStars(4); } catch (e) {}
+    if (CBZ.cityForceArrestSetup) {
+      // wanted.js's scripted-arrest API: heat forced into the highest still-
+      // ARRESTABLE band (police.js arrest-first goes lethal at 4★+), fired-upon
+      // stamps and spree memory cleared, stale bust latch reset. The cordon
+      // closes in to cuff; the scripted CBZ.cityBust below owns the handoff.
+      // Bolting still burns SWAT patience and honestly returns lethal force —
+      // the roof is a trap either way.
+      try { CBZ.cityForceArrestSetup({ stars: 4, reason: "Rooftop Ambush" }); } catch (e) {}
+    } else {
+      // legacy fallback: the old hand-poked heat table
+      if (CBZ.cityForceStars) { try { CBZ.cityForceStars(4); } catch (e) {} }
+      const thresholds = CBZ.CITY && CBZ.CITY.starHeat;
+      if (thresholds) g.heat = Math.max(g.heat || 0, (thresholds[4] || 3200) + 5);
+      g.wanted = Math.max(g.wanted || 0, 4);
     }
-    const thresholds = CBZ.CITY && CBZ.CITY.starHeat;
-    if (thresholds) g.heat = Math.max(g.heat || 0, (thresholds[4] || 3200) + 5);
-    g.wanted = Math.max(g.wanted || 0, 4);
     say("SWAT COMMANDER", "On your knees. The roof was the trap.", 3.2, R.swat[0]);
     notify("news", "VERIDIA LIVE", "Tactical units have sealed the Spire after an unidentified helicopter landing.");
     setMission({
@@ -637,7 +664,12 @@
       }
     }
     if (R.t >= 5.2) spawnRooftopSwat();
-    if (R.t >= 9.4 && !state().flags.arrested) {
+    // The arrest-first cordon can legitimately complete its own cuff a beat
+    // before the scripted 9.4s handoff (both funnel into CBZ.cityBust, which
+    // stamps g.busted immediately). Converge on the durable flags the moment
+    // EITHER arrest lands, so the prison arrival is always chapter 1 — never a
+    // mid-DROP "detention" that thinks the contract is still outside.
+    if ((R.t >= 9.4 || g.busted) && !state().flags.arrested) {
       const c = state();
       c.flags.arrested = true;
       c.phase = PHASE.PRISON;
@@ -649,11 +681,14 @@
         // mode switch. Pin the new phase key while that callback is pending;
         // otherwise the next campaign tick sees city:prison_arrival, invokes
         // goToPrison immediately, and the still-pending callback resets prison a
-        // second time when it fires.
+        // second time when it fires. If the cordon's own arrest already stamped
+        // g.busted, that pending overlay owns the switch — don't double-bust.
         R.key = g.mode + ":" + c.phase;
         R.kind = "awaiting_prison_handoff";
-        try { CBZ.cityBust({ peaceful: true, note: "Processed off the Spire roof." }); }
-        catch (e) { goToPrison(); }
+        if (!g.busted) {
+          try { CBZ.cityBust({ peaceful: true, note: "Processed off the Spire roof." }); }
+          catch (e) { goToPrison(); }
+        }
       } else {
         goToPrison();
       }
@@ -1223,6 +1258,171 @@
     return 9000 + Math.min(41000, n * 1750) + (c.flags.airportChoice === "refuse" ? 2500 : 0) + (c.flags.familySaved ? 1000 : 0);
   }
 
+  // ============================================================
+  //  ENDLESS CONTRACT VARIETY (CFG.CAMPAIGN_CONTRACT_VARIETY)
+  //
+  //  Five archetypes over the same observed-scene machinery, each reusing an
+  //  existing city system rather than inventing one:
+  //    classic   — the original close hit (castExisting street mark)
+  //    sniper    — the mark holds a forecourt position behind watchers; a kill
+  //                from beyond SNIPER_RANGE pays a fieldcraft bonus
+  //                (scopeview.js/gunmods optics make the distance practical)
+  //    disguise  — a door crew guards the venue; the outfits.js uniform on a
+  //                spawned steward (interact.js corpse swap) walks you past them
+  //    vehicle   — the mark drives live traffic (vehicles.js npcDriver seat);
+  //                stop, wreck, or burn the car and they run on foot
+  //    highvalue — every 5th contract, "DIRECTOR'S LIST": bodyguard ring,
+  //                2.25× pay, and a permadeath-honest warning
+  //  Every parameter of contract n derives from CBZ.seedStream("endless-<n>")
+  //  with a FIXED draw order, so a checkpoint/death/jail restage rebuilds the
+  //  identical assignment for the same (world seed, contract index).
+  // ============================================================
+  const SNIPER_RANGE = 40;
+  const ARCH_MULT = { classic: 1, sniper: 1.35, disguise: 1.5, vehicle: 1.4, highvalue: 2.25 };
+  const ARCH_TITLES = {
+    classic: ENDLESS_TITLES,
+    sniper: ["LONG LENS", "WIDE SHOT", "CRANE SHOT", "DEEP FOCUS"],
+    disguise: ["COSTUME DEPARTMENT", "DRESS REHEARSAL", "EXTRAS CALL", "WARDROBE CHANGE"],
+    vehicle: ["PICTURE CAR", "MOVING SHOT", "CHASE UNIT", "PROCESS TRAILER"],
+    highvalue: ["DIRECTOR'S LIST"],
+  };
+  const ARCH_NEWS = {
+    classic: [
+      "Police found a body on a commercial lot this morning. Neighbors report no dispute, no robbery, no suspect.",
+      "Another quiet killing in the production district. Investigators privately call the wounds professional.",
+    ],
+    sniper: [
+      "A single long-range shot killed a man in the open today. Police canvassed every roofline and found nothing.",
+      "Witnesses heard one distant report, then saw a body. The shooter was never inside the cordon.",
+    ],
+    disguise: [
+      "A guarded venue lost its principal last night. Staff swear nobody unfamiliar crossed the rope.",
+      "Private security is under review citywide after a protected host died inside his own perimeter.",
+    ],
+    vehicle: [
+      "A vehicle was forced off the road and its driver killed. Traffic cameras in the area had been dark for weeks.",
+      "The morning commute stalled around a burned-out sedan. The medical examiner says its driver never made it out.",
+    ],
+    highvalue: [
+      "A heavily protected figure and his entire detail were found dead. The city's private-security rates doubled overnight.",
+      "Bodyguards, cameras, money — none of it mattered. Another name from the old production network is gone.",
+    ],
+  };
+
+  // soft prestige ladder surfaced on the phone (STANDING chip + rank-up line)
+  function prestigeTitle(done) {
+    if (done >= 35) return "Director's Own";
+    if (done >= 20) return "Wraith";
+    if (done >= 10) return "Specialist";
+    if (done >= 5) return "Cleaner";
+    return "Freelancer";
+  }
+  function prestigeLine(c, n) {
+    let s = "Contract " + n + " · " + prestigeTitle(Math.max(0, n - 1));
+    if (c.flags.cityBoss) s += " · CITY BOSS";
+    return s;
+  }
+
+  function contractStream(n) {
+    return CBZ.seedStream ? CBZ.seedStream("endless-" + n) : seeded(0x6e57 + n * 131);
+  }
+  function pickArchetype(n, r) {
+    if (CFG.CAMPAIGN_CONTRACT_VARIETY === false) return "classic";
+    if (n % 5 === 0) return "highvalue";           // the escalation beat
+    if (r < 0.30) return "classic";
+    if (r < 0.55) return "sniper";
+    if (r < 0.80) return "disguise";
+    return "vehicle";
+  }
+
+  // is the player dressed for the venue? The exact staff blacks pass; so does a
+  // police uniform (outfits.js already teaches that cloth buys deference).
+  function disguiseWornOk(need) {
+    const w = CBZ.cityOutfitGet ? CBZ.cityOutfitGet() : null;
+    if (!w) return false;
+    return w.id === need || !!w.cop;
+  }
+  function disguiseName(id) {
+    return id === "waiter" ? "Waiter Blacks" : "Guard Blacks";
+  }
+
+  // ---- vehicle hits: seat the cast mark behind the wheel of live traffic ----
+  function seatTargetInCar(target) {
+    const cars = CBZ.cityCars || [];
+    let car = null, best = Infinity;
+    for (let i = 0; i < cars.length; i++) {
+      const cc = cars[i];
+      if (!cc || cc.player || cc.owned || cc.dead || cc.npcDriver || cc.abandoned) continue;
+      if (cc.stolen || (cc.wreckT || 0) > 0 || !cc.ai || !cc.road) continue;
+      const d = Math.hypot(cc.pos.x - target.pos.x, cc.pos.z - target.pos.z);
+      if (d < best) { best = d; car = cc; }
+    }
+    if (!car) return null;
+    // exactly the vehicles.js npcDriver contract, minus the carjack flags —
+    // this car is not stolen and not wanted; it just carries the mark.
+    car.npcDriver = target;
+    car._campaignBaseV0 = car.baseV != null ? car.baseV : null;
+    car.baseV = Math.min(car.baseV || 8, 6.5);      // catchable on foot or wheels
+    target.inCar = car; target.controlled = true;
+    if (target.group) target.group.visible = false;
+    target._campaignAnchor = null;                  // the car owns position now
+    target._campaignHold = false;
+    return car;
+  }
+  function unseatContractCar(fleeing) {
+    const con = R.contract;
+    const car = con && con.car;
+    if (!car) return;
+    const ped = car.npcDriver;
+    if (ped) {
+      // mirror vehicles.js ejectNpcDriver for a driver we seated ourselves
+      car.npcDriver = null;
+      ped.inCar = null; ped.controlled = false;
+      if (ped.group) ped.group.visible = !ped.dead;
+      if (!ped.dead && ped.pos) {
+        const ex = car.pos.x + 1.6, ez = car.pos.z;
+        ped.pos.set(ex, floorY(ex, ez), ez);
+        if (ped.group) ped.group.position.copy(ped.pos);
+        if (ped.target && ped.target.set) ped.target.set(ex, 0, ez);
+        if (fleeing) {
+          ped.state = "flee"; ped.fear = 4; ped.pause = 0;
+          if (CBZ.cityFleeFrom) { try { CBZ.cityFleeFrom(ped, car.pos.x, car.pos.z); } catch (e) {} }
+        }
+      }
+    }
+    if (car._campaignBaseV0 != null) { car.baseV = car._campaignBaseV0; car._campaignBaseV0 = null; }
+    con.car = null;
+  }
+
+  // the live mission card for the current generated contract (re-issued when a
+  // sub-objective flips so the phone reflects the disguise/stop state).
+  function missionForContract(con) {
+    const objectives = [];
+    if (con.type === "disguise" && con.outfit) {
+      objectives.push({ id: "dress", text: "Optional: take a " + disguiseName(con.outfit) + " uniform — the door crew waves staff through", done: !!con.dressed });
+    }
+    if (con.type === "vehicle" && con.hadCar) {
+      objectives.push({ id: "stop", text: "Force the car to stop — box it, wreck it, or burn it", done: !!con.bailed || !!(R.target && R.target.dead) });
+    }
+    objectives.push({
+      id: "hit",
+      text: (R.target ? "Eliminate " + con.name : "Recover " + con.name + "'s dossier") +
+        (con.type === "sniper" ? " — from beyond " + SNIPER_RANGE + "m for the bonus" : ""),
+      done: false,
+    });
+    return {
+      id: "open-contract-" + con.n,
+      title: con.title,
+      briefing: con.brief,
+      target: R.target ? con.name : con.name + " dossier",
+      location: con.loc,
+      reward: con.bonus ? con.pay + " (+" + con.bonus + " range bonus)" : con.pay,
+      prestige: prestigeLine(state(), con.n),
+      status: "active",
+      objectives: objectives,
+    };
+  }
+
   function stageEndless() {
     const c = state();
     // contractNo names the currently active generated contract. Incrementing
@@ -1234,52 +1434,310 @@
       commit();
     }
     R.kind = "endless";
+    fireTakeoverMoment();          // a queued gang-game win lands in free time
     const n = c.contractNo;
-    const lot = chooseLot(600 + n * 17, 60);
+    const rng = contractStream(n);
+    // FIXED draw order — restaging contract n replays identical values.
+    const rType = rng(), rTitle = rng(), rOutfit = rng(), rNews = rng(), rGuard = rng();
+    const type = pickArchetype(n, rType);
+    const lot = chooseLot(600 + n * 17, type === "sniper" ? 80 : 60);
     const anchor = lotAnchor(lot);
     const name = ENDLESS_NAMES[(n - 1) % ENDLESS_NAMES.length];
-    const target = castExisting(name, anchor, {
+    const basePay = endlessPay(n, c);
+    const titles = ARCH_TITLES[type] || ENDLESS_TITLES;
+    const con = R.contract = {
+      n: n, type: type, name: name,
+      title: CFG.CAMPAIGN_CONTRACT_VARIETY === false
+        ? ENDLESS_TITLES[(n - 1) % ENDLESS_TITLES.length]
+        : titles[(rTitle * titles.length) | 0],
+      pay: Math.round(basePay * (ARCH_MULT[type] || 1) / 50) * 50,
+      bonus: 0, newsIdx: rNews, brief: "", loc: "Generated field location",
+      point: { x: anchor.x, z: anchor.z },
+      car: null, hadCar: false, bailed: false, bailT: 0,
+      guards: [], steward: null, outfit: null, dressed: false, blown: false,
+    };
+
+    const target = castExisting(name, { x: anchor.x, z: anchor.z - (type === "classic" ? 0 : 1.2) }, {
       target: true,
       role: "contract target",
-      armed: n % 3 === 0,
-      weapon: n % 3 === 0 ? "Pistol" : null,
-      aggr: n % 3 === 0 ? 0.8 : 0.34,
+      armed: type === "highvalue" || (type === "classic" && n % 3 === 0),
+      weapon: type === "highvalue" ? "SMG" : (type === "classic" && n % 3 === 0 ? "Pistol" : null),
+      aggr: type === "highvalue" ? 0.92 : (type === "classic" && n % 3 === 0 ? 0.8 : 0.34),
+      hostile: type === "highvalue",
     });
     R.target = target;
-    makeMarker(target, target ? null : anchor, 0xffc766);
-    const pay = endlessPay(n, c);
+    if (!target && con.type !== "classic") con.type = "classic";   // dossier fallback keeps the old shape
+
+    // ---- archetype dressing (existing systems only) ----
+    if (con.type === "sniper") {
+      con.loc = "Open forecourt — long sightlines";
+      target._campaignHold = true;   // the scripted outdoor position
+      for (let i = 0; i < 2; i++) {
+        const a = rGuard * 6.28 + i * 2.6;
+        const p = spawnPed("Watcher " + (i + 1), anchor.x + Math.cos(a) * 4.6, anchor.z + Math.sin(a) * 4.6, {
+          armed: true, weapon: "Pistol", aggr: 0.9, role: "watcher", hostile: true, salt: 610 + n * 7 + i,
+        });
+        if (p) con.guards.push(p);
+      }
+    } else if (con.type === "disguise") {
+      con.loc = "Guarded venue";
+      con.outfit = rOutfit < 0.5 ? "security" : "waiter";
+      target._campaignHold = true;
+      for (let i = 0; i < 3; i++) {
+        const a = i * 2.1 + 0.5;
+        const p = spawnPed("Door Crew " + (i + 1), anchor.x + Math.cos(a) * 3.8, anchor.z + Math.sin(a) * 3.8, {
+          armed: true, weapon: i === 0 ? "SMG" : "Pistol", aggr: 0.9, role: "venue guard", salt: 640 + n * 7 + i,
+        });
+        if (p) { p._campaignHostile = false; con.guards.push(p); }   // tickEndless decides who they hate
+      }
+      // the disguise walks the street on a steward's back (outfits.js job
+      // wardrobe + interact.js "take their clothes" once he's down)
+      con.steward = spawnPed("Steward", anchor.x + 8 + rOutfit * 5, anchor.z + 7, {
+        role: "steward", job: con.outfit, aggr: 0.04, salt: 660 + n * 7,
+      });
+    } else if (con.type === "vehicle") {
+      con.car = seatTargetInCar(target);
+      if (con.car) {
+        con.hadCar = true;
+        con.loc = "Mobile — tracked vehicle";
+      } else {
+        // no live traffic anywhere near the cast point — degrade to a guarded
+        // street hit so the briefing never promises a car that does not exist
+        con.type = "classic";
+        const p = spawnPed("Wheelman", anchor.x + 2.6, anchor.z + 1.4, {
+          armed: true, weapon: "Pistol", aggr: 0.9, role: "wheelman", hostile: true, salt: 670 + n * 7,
+        });
+        if (p) con.guards.push(p);
+      }
+    } else if (con.type === "highvalue") {
+      con.loc = "Fortified lot";
+      for (let i = 0; i < 3; i++) {
+        const a = i * 2.1 + rGuard;
+        const p = spawnPed("Bodyguard " + (i + 1), anchor.x + Math.cos(a) * 3.4, anchor.z + Math.sin(a) * 3.4, {
+          armed: true, weapon: i === 0 ? "SMG" : "Pistol", aggr: 0.95, role: "bodyguard", hostile: true, salt: 690 + n * 7 + i,
+        });
+        if (p) con.guards.push(p);
+      }
+    }
+
+    makeMarker(target, target ? null : anchor, con.type === "highvalue" ? 0xff776e : 0xffc766);
+
     const refused = c.flags.airportChoice === "refuse";
-    setMission({
-      id: "open-contract-" + n,
-      title: ENDLESS_TITLES[(n - 1) % ENDLESS_TITLES.length],
-      briefing: (refused
-        ? "The names recovered by refusing Halloran are still moving through the production network. "
-        : "Halloran remains on your ledger; each new hit cuts one producer out of the network that staged it. ") +
-        (c.flags.familySaved ? "Your family is out of their hands. " : "The family loss remains part of every contract. ") +
-        "This target is cast only when the assignment begins and the next contract is already waiting.",
-      target: target ? name : name + " dossier",
-      location: "Generated field location",
-      reward: pay,
-      status: "active",
-      objectives: [{ id: "hit", text: target ? "Eliminate " + name : "Recover " + name + "'s dossier", done: false }],
-    });
+    const lore = (refused
+      ? "The names recovered by refusing Halloran are still moving through the production network. "
+      : "Halloran remains on your ledger; each new hit cuts one producer out of the network that staged it. ") +
+      (c.flags.familySaved ? "Your family is out of their hands. " : "The family loss remains part of every contract. ");
+    if (con.type === "sniper") {
+      con.brief = lore + con.name + " holds a forecourt mark behind armed watchers who clock every face inside forty meters. " +
+        "Take the kill from beyond " + SNIPER_RANGE + "m and the fee carries a fieldcraft bonus — a magnified optic from the gun bench makes the distance honest.";
+    } else if (con.type === "disguise") {
+      con.brief = lore + con.name + " hosts behind a door crew that pats down strangers. " + disguiseName(con.outfit) +
+        " walk straight past the rope — a steward on his smoke break beside the venue wears a set. Work close, keep it quiet: one loud mistake and the calm ends.";
+    } else if (con.type === "vehicle") {
+      con.brief = lore + con.name + " is rolling — a marked car threading live traffic. Box it in, wreck it, or burn it; a mark whose wheels stop will run, and a hard enough hit ends it at the wheel.";
+    } else if (con.type === "highvalue") {
+      con.brief = "DIRECTOR'S LIST. " + lore + con.name + " travels with a paid ring of professional guns, and they shoot first. " +
+        "You die once in this city — walk in with a plan or do not walk in.";
+    } else {
+      con.brief = lore + "This target is cast only when the assignment begins and the next contract is already waiting.";
+    }
+
+    setMission(missionForContract(con));
     notify("personal", cHandler(), (refused ? "Rook's list" : "The Halloran atonement list") +
-      " marks contract " + n + ". No empire building. No errands. Just the target.");
+      " marks contract " + n + (con.type === "highvalue" ? " — a Director's List name. Bring everything." :
+        ". No empire building. No errands. Just the target."));
   }
 
-  function tickEndless() {
-    if (R.target && !R.target.dead) return;
-    if (!R.target && (!R.markerPoint || distTo(R.markerPoint.x, R.markerPoint.z) > 5)) return;
+  // ---- per-archetype live logic --------------------------------------------
+  function tickDisguise(con) {
+    const dressed = disguiseWornOk(con.outfit);
+    if (dressed !== con.dressed) {
+      con.dressed = dressed;
+      setMission(missionForContract(con));
+      if (dressed && con.point && distTo(con.point.x, con.point.z) < 30) {
+        say("DOOR CREW", "Staff comes through the side. Go on.", 2.4, con.guards[0]);
+      }
+    }
+    if (!con.blown) {
+      let down = 0;
+      for (let i = 0; i < con.guards.length; i++) {
+        const p = con.guards[i];
+        if (!p || p.dead || p.ko > 0) down++;
+      }
+      if (down > 0 || (R.target && R.target.dead)) con.blown = true;
+    }
+    // hostile only to undisguised strangers inside the rope (or once blown);
+    // presentCampaign's hostile branch then drives the actual aggression.
+    const hot = con.blown || (!dressed && con.point && distTo(con.point.x, con.point.z) < 15);
+    for (let i = 0; i < con.guards.length; i++) {
+      const p = con.guards[i];
+      if (!p || p.dead) continue;
+      p._campaignHostile = hot;
+      if (!hot && p.rage) { p.rage = null; p.state = "idle"; p.pause = 1.2; }
+    }
+  }
+
+  function tickVehicle(con, dt) {
+    const car = con.car, t = R.target;
+    if (!car || !t || t.dead) return;
+    if (t.inCar !== car) {
+      // ejected by another system (cop stop, crash): restore the car profile
+      // and continue as a foot contract — the marker already follows the body.
+      unseatContractCar(false);
+      con.bailed = true;
+      setMission(missionForContract(con));
+      return;
+    }
+    const gone = car.dead || !car.group || !car.group.parent;
+    const burning = !!car._onFire;
+    if (gone || burning) {
+      unseatContractCar(true);
+      con.bailed = true;
+      setMission(missionForContract(con));
+      notify("personal", cHandler(), con.name + " bailed out. On foot now — finish it.");
+      return;
+    }
+    // A bail needs DISTRESS, not a red light: a wrecked/beaten car with the
+    // player closing, or the player physically on the stopped car's door.
+    const wrecked = (car.wreckT || 0) > 0 || (car.crumple || 0) > 0.2;
+    const stalled = Math.abs(car.v || 0) < 0.8;
+    const d = distTo(car.pos.x, car.pos.z);
+    if ((wrecked && d < 40) || (stalled && d < 9)) {
+      con.bailT += dt;
+      if (con.bailT > (wrecked ? 0.7 : 2.2)) {
+        unseatContractCar(true);
+        con.bailed = true;
+        setMission(missionForContract(con));
+        notify("personal", cHandler(), con.name + " is out of the car and running.");
+      }
+    } else con.bailT = 0;
+  }
+
+  function tickEndless(dt) {
+    fireTakeoverMoment();
     const c = state();
+    const con = R.contract;
+    if (con && R.target) {
+      if (con.type === "disguise") tickDisguise(con);
+      else if (con.type === "vehicle") tickVehicle(con, dt || 0);
+    }
+    const killed = R.target ? R.target.dead : false;
+    if (!killed && !(R.target == null && R.markerPoint && distTo(R.markerPoint.x, R.markerPoint.z) <= 5)) return;
     const n = c.contractNo;
-    const pay = endlessPay(n, c);
+    let pay = con ? con.pay : endlessPay(n, c);
+    // sniper fieldcraft bonus: the player's own kill, measured at the death
+    // frame (cityKillPed stamps g._cityKillDetail for player kills).
+    if (con && con.type === "sniper" && killed && R.target) {
+      // measure to the HELD position, not the corpse — the ragdoll fling could
+      // otherwise rob a shot taken exactly on the line.
+      const px = con.point ? con.point.x : R.target.pos.x;
+      const pz = con.point ? con.point.z : R.target.pos.z;
+      const d = distTo(px, pz);
+      const mine = !!R.target._campaignKilledByPlayer ||
+        !!(g._cityKillDetail && g._cityKillDetail.ped === R.target);
+      if (mine && d >= SNIPER_RANGE) {
+        con.bonus = Math.round(con.pay * 0.4 / 50) * 50;
+        pay += con.bonus;
+      }
+    }
     award(pay, "Open contract " + n);
+    const doneCount = n;
+    const rankBefore = prestigeTitle(n - 1), rankAfter = prestigeTitle(doneCount);
+    notify("personal", cHandler(), "Contract " + n + " settled — $" + pay.toLocaleString() +
+      (con && con.bonus ? " (fieldcraft bonus included)" : "") + ". Standing: " + rankAfter + ".");
+    if (rankAfter !== rankBefore) notify("personal", cHandler(), "The network has a new word for you: " + rankAfter.toUpperCase() + ". Rates follow reputation.");
+    if (con) {
+      const pool = ARCH_NEWS[con.type] || ARCH_NEWS.classic;
+      notify("news", "CITY DESK", pool[(con.newsIdx * pool.length) | 0]);
+    }
     c.contractNo = n + 1;
     commit();
-    // Never leave the player missionless: stage the next assignment in this
-    // same tick, at the far edge of observation, before the old set is released.
-    activatePhase(true);
+    // Settle beat: clear the mark, hold a short rest so the kill can breathe,
+    // then stage the next assignment (activatePhase re-runs stageEndless).
+    if (con && con.car) unseatContractCar(false);
+    if (R.marker) { disposeProp(R.marker); R.marker = null; R.markerTarget = null; R.markerPoint = null; }
+    R.kind = "endless_rest";
+    R.transitionT = 6.5;
+    setMission({
+      id: "contract-settled-" + n,
+      title: "PAYMENT CLEARED",
+      briefing: "Contract " + n + " is settled and the fee has landed. The next name is already being pulled.",
+      status: "complete",
+      prestige: prestigeLine(c, n + 1),
+      objectives: [{ id: "done", text: "Await the next contract", done: false }],
+    });
   }
+
+  function tickEndlessRest(dt) {
+    fireTakeoverMoment();
+    R.transitionT -= dt;
+    if (R.transitionT <= 0) activatePhase(true);
+  }
+
+  // ============================================================
+  //  CITY BOSS — the gang-game win becomes a real campaign moment.
+  //
+  //  turf.js → story.js cityWin("takeover") used to end the entire ambient
+  //  gang game with one silent phone bulletin (city.big is rerouted into the
+  //  handset while the campaign runs). story.js now grants the material
+  //  rewards and routes the CEREMONY here: a full-screen CITY BOSS card plus
+  //  slow-mo in endless free time, or a queued moment that fires the instant
+  //  a scripted beat hands the street back. flags.cityBoss is permanent
+  //  campaign state and rides every prestige line afterward.
+  // ============================================================
+  function fireTakeoverMoment() {
+    const c = state();
+    if (!c.flags.takeoverPending || c.flags.takeoverShown) return;
+    if (g.mode !== "city" || g.state !== "playing") return;
+    c.flags.takeoverPending = false;
+    c.flags.takeoverShown = true;
+    commit();
+    if (CBZ.doSlowmo) { try { CBZ.doSlowmo(0.45); } catch (e) {} }
+    const ui = UI();
+    if (ui && ui.takeover) {
+      ui.takeover({
+        title: "CITY BOSS",
+        sub: "EVERY BLOCK FLIES YOUR COLORS",
+        body: "The takeover is complete. The crews answer to you now — the contracts keep coming, but from tonight the city itself is yours.",
+      });
+    } else if (CBZ.flashToast && CBZ.flashToast._campaignOriginal) {
+      try { CBZ.flashToast._campaignOriginal("CITY BOSS — YOU OWN THE CITY"); } catch (e) {}
+    }
+    say(cHandler(), "The whole map answers to you now. That does not cancel the list.", 4.6);
+  }
+
+  CBZ.cityCampaignTakeover = function (how) {
+    if (!active()) return false;   // legacy slow-mo + big-text path in story.js
+    const c = state();
+    if (c.flags.cityBoss) return true;
+    c.flags.cityBoss = true;
+    c.flags.takeoverPending = true;
+    c.flags.takeoverShown = false;
+    c.flags.takeoverHow = how || "takeover";
+    commit();
+    notify("news", "CITY DESK", "Street sources say every crew in the city now answers to a single organization. Nobody will print the name.");
+    // In endless free time the ceremony fires this frame; mid-script it waits
+    // for the next endless tick instead of interrupting an authored beat.
+    if (c.phase === PHASE.ENDLESS && g.mode === "city" && g.state === "playing") fireTakeoverMoment();
+    return true;
+  };
+
+  // ---- composition reads for siblings (scenedirector.js, campaign_ui.js) ----
+  CBZ.cityCampaignInEndless = function () {
+    return active() && g.mode === "city" && state().phase === PHASE.ENDLESS;
+  };
+  CBZ.cityCampaignScenesBlocked = function () {
+    if (!active()) return false;
+    if (CFG.CAMPAIGN_AMBIENT_SCENES === false) return true;
+    return !(g.mode === "city" && state().phase === PHASE.ENDLESS);
+  };
+  CBZ.cityCampaignContractPoint = function () {
+    if (!active() || (R.kind !== "endless" && R.kind !== "endless_rest")) return null;
+    if (R.markerTarget && R.markerTarget.pos) return { x: R.markerTarget.pos.x, z: R.markerTarget.pos.z };
+    if (R.markerPoint) return { x: R.markerPoint.x, z: R.markerPoint.z };
+    const con = R.contract;
+    return con && con.point ? { x: con.point.x, z: con.point.z } : null;
+  };
 
   function activatePhase(force) {
     if (!active()) return;
@@ -1333,7 +1791,8 @@
     else if (R.kind === "airport_comply") tickAirportComply(dt);
     else if (R.kind === "airport_refuse") tickAirportRefuse();
     else if (R.kind === "reckoning") tickReckoning();
-    else if (R.kind === "endless") tickEndless();
+    else if (R.kind === "endless") tickEndless(dt);
+    else if (R.kind === "endless_rest") tickEndlessRest(dt);
   }
 
   // Presentation pass after police/ped movement: the prologue squad is an
@@ -1506,6 +1965,20 @@
     cityMode.reset = wrappedReset;
   }
 
+  // Sniper fieldcraft attribution: stamp player kills on the body itself.
+  // g._cityKillDetail is consumed + nulled SYNCHRONOUSLY by promotion.js's
+  // addKill wrapper, so a poll one frame later (tickEndless) never sees it.
+  // campaign.js is the last-loaded script; the wrap preserves every earlier one.
+  if (typeof CBZ.cityKillPed === "function" && !CBZ.cityKillPed._campaignWrapped) {
+    const baseKillPed = CBZ.cityKillPed;
+    const wrappedKillPed = function (ped, imp, cause) {
+      if (ped && !ped.dead) ped._campaignKilledByPlayer = imp ? imp.byPlayer !== false : true;
+      return baseKillPed.apply(this, arguments);
+    };
+    wrappedKillPed._campaignWrapped = true;
+    CBZ.cityKillPed = wrappedKillPed;
+  }
+
   const originalWinGame = CBZ.winGame;
   CBZ.winGame = function (reason, actor) {
     if (active() && g.mode === "escape") {
@@ -1523,7 +1996,10 @@
 
   if (g.cityCampaignPending) CBZ.cityCampaignRestore(g.cityCampaignPending);
   state();
-  if (active()) CFG.CITY_SCENE_DIRECTOR = false; // authored scenes own the campaign cadence
+  // The scene director is no longer hard-disabled here: scenedirector.js asks
+  // CBZ.cityCampaignScenesBlocked() per tick, so ambient set-pieces run during
+  // ENDLESS free time (CFG.CAMPAIGN_AMBIENT_SCENES) and stay silent through
+  // every scripted beat. CITY_SCENE_DIRECTOR itself remains the master switch.
   if (CBZ.onUpdate) CBZ.onUpdate(36.85, update);
   if (CBZ.onUpdate) CBZ.onUpdate(99.1, presentCampaign);
 })();

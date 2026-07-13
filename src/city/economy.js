@@ -1355,6 +1355,105 @@
   const JET_PRICE = 3000000;                              // $3,000,000 — the F-22 Raptor
   const MISSILE_RESUPPLY = ITEMS["Air-to-Ground Missile"].value;   // $/crate to rearm airpower
 
+  // ============================================================
+  //  ECONOMY_V2 — A REAL WEALTH DISTRIBUTION (owner: "the richest ones are
+  //  not rich at all… one super rich driver is such a dumb rich list").
+  //  ONE function answers "what is this person actually WORTH?" on a
+  //  power-law by ROLE: listed-corp founders at the very top ($100M–$10B,
+  //  read from sim/billionaires.js's shareholder ledger), city-company CEOs
+  //  next (fortune ∝ their firm's live value — bigger company, richer CEO),
+  //  tycoons/moguls $5M–$500M with a rare ultra outlier, crime bosses & VIPs
+  //  in the low millions, PRO RACERS at their honest purse (mid-tier — a
+  //  driver must never top this board again), and workers at the floor.
+  //
+  //  DETERMINISM SCOPE: a runtime UI/mission read, NEVER a world-build input
+  //  — do not call from any generation path. The shared fortunes (company
+  //  value, billionaire ledger) are already deterministic; the per-identity
+  //  CBZ.hash01 channels below key on identity ids (spawn-order dependent),
+  //  which is fine for a local read and keeps one individual's fortune
+  //  STABLE for their whole life (no jitter between renders).
+  // ============================================================
+  if (CBZ.CONFIG && CBZ.CONFIG.ECONOMY_V2 == null) CBZ.CONFIG.ECONOMY_V2 = true;
+  const SALT_TY = 73020, SALT_TY2 = 73021, SALT_BOSS = 73030, SALT_VIP = 73040;
+  function idNum(id) { const n = parseInt(String(id == null ? "" : id).replace(/^\D+/, ""), 10); return isFinite(n) ? n : 0; }
+  function pedValuables(p) {
+    let s = 0; const vals = p && p.valuables;
+    if (vals) for (let i = 0; i < vals.length; i++) { const it = ITEMS[vals[i]]; if (it && it.value) s += it.value; }
+    return s;
+  }
+  function pocketOf(p) { return Math.max(0, (p.cash || 0) + pedValuables(p)); }
+  // is this ped one of the listed-corp founders? (ordinary peds carry _sid too,
+  // so membership in the founder roster is the test — never sid presence alone)
+  function founderRecOf(p) {
+    const B = CBZ.billionaires; if (!B || !B.founders) return null;
+    const sid = p._bilFounder || p._sid; if (!sid) return null;
+    const fs = B.founders();
+    for (let i = 0; i < fs.length; i++) if (fs[i].sid === sid) return fs[i];
+    return null;
+  }
+  function netWorthOf(p) {
+    if (!p) return 0;
+    const pk = pocketOf(p);
+    if (!(CBZ.CONFIG && CBZ.CONFIG.ECONOMY_V2)) return pk + (p.bounty || 0);
+    // 1) LISTED-CORP FOUNDER — shares × live price + ledger cash: the true top.
+    const fr = founderRecOf(p);
+    if (fr && CBZ.billionaires.netWorthOf) return Math.round(CBZ.billionaires.netWorthOf(fr.sid) + pk);
+    // 2) CITY-COMPANY CEO — fortune ∝ the firm's live value (companies.js owns the math).
+    if (p.isCompanyOwner && CBZ.cityCompanies && CBZ.cityCompanies.ownerNetWorth) {
+      const co = CBZ.cityCompanies.coByOwnerPed ? CBZ.cityCompanies.coByOwnerPed(p) : null;
+      if (co) return Math.round(CBZ.cityCompanies.ownerNetWorth(co) + pk);
+    }
+    // 3) TYCOON / MOGUL — power-law $5M–$500M; the top decile goes ultra (to ~$5B).
+    if (p._milli) {
+      const idn = idNum(p._identityId) || idNum(p.name) || 7;
+      const u = CBZ.hash01(idn, 1, SALT_TY);
+      let nw = 5e6 * Math.pow(100, Math.pow(u, 1.6));
+      if (u > 0.9) nw *= 4 + CBZ.hash01(idn, 2, SALT_TY2) * 16;
+      return Math.round(nw + (p._milliBag || 0));
+    }
+    // 4) CRIME BOSS — treasury-linked millions.
+    if (p.gang && (p.isBoss || p.rank === "boss")) {
+      const gRec = CBZ.cityGangById ? CBZ.cityGangById(p.gang) : null;
+      const u = CBZ.hash01(idNum(p.gang) || 3, 4, SALT_BOSS);
+      const strength = (gRec && CBZ.cityGangStrength) ? CBZ.cityGangStrength(gRec) : 0;
+      return Math.round(400000 + (((gRec && gRec.treasury) || 0) * 8) + strength * 15000 + u * 2e6 + pk);
+    }
+    // 5) VIP principal (vips.js) — famous money, not founder money.
+    if (p.vipTitle || p.vipLvl) {
+      const u = CBZ.hash01(idNum(p._identityId) || 5, 6, SALT_VIP);
+      return Math.round(2e6 * (1 + (p.vipLvl || 0)) * (0.7 + u * 0.9) + pk);
+    }
+    // 6) PRO RACER — the honest purse (seed + points + wins, NO player-scale
+    //    inflation), capped mid-tier: a hot season reads rich, never #1.
+    if (p._racer) {
+      const r = p._racer;
+      const purse = (r.purseSeed || 3) * 1e6 + (r.points || 0) * 120000 + (r.wins || 0) * 750000;
+      return Math.round(Math.min(20e6, purse) + pk);
+    }
+    // 7) everyone else — pocket + a wage-class cushion. Drivers/service stay at the floor.
+    return Math.round(pk + (p.bounty || 0) + Math.pow(p.wealth || 0, 3) * 40000);
+  }
+  // short role text for the rich list's occupation column
+  function occupationOf(p) {
+    if (!p) return "Civilian";
+    const fr = founderRecOf(p);
+    if (fr) {
+      const co = CBZ.corps && CBZ.corps.get ? CBZ.corps.get(fr.companyId) : null;
+      return "Founder · " + ((co && co.name) || fr.sym || "listed corp");
+    }
+    if (p.isCompanyOwner && CBZ.cityCompanies && CBZ.cityCompanies.coByOwnerPed) {
+      const co = CBZ.cityCompanies.coByOwnerPed(p);
+      if (co) return "CEO · " + co.name;
+    }
+    if (p._milli) return p._milliTitle || "Tycoon";
+    if (p.gang && (p.isBoss || p.rank === "boss")) return "Crime Boss";
+    if (p.vipTitle) return p.vipTitle;
+    if (p._racer) return "Racer #" + (p._racer.number != null ? p._racer.number : "?");
+    return p.job || p.archetype || "Civilian";
+  }
+  CBZ.cityNetWorthOf = netWorthOf;
+  CBZ.cityOccupationOf = occupationOf;
+
   CBZ.cityEcon = {
     ITEMS, SHOP_STOCK, CARS, SPECIAL_VEHICLES, rng,
     // --- airpower prices (the F-22 + its rearm) ---
@@ -1375,6 +1474,8 @@
     turfIncome, turfIncomeInfo,
     // --- wealth tiers, faucets & sinks ---
     TIERS, netWorth, invWorth, holdingsWorth, wealthTier, tierProgress,
+    // ECONOMY_V2: NPC net worth + occupation (mirrors CBZ.cityNetWorthOf/-OccupationOf)
+    netWorthOf, occupationOf,
     scoreReward, SINKS, upkeepDue, launder,
     // property market: a drifting macro index Zillow multiplies prices by
     propIndex, propMarket, initPropMarket, FINANCE,

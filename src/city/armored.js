@@ -109,41 +109,57 @@
   // shared armor-detail material (one Lambert, reused across every bolt-on box →
   // these merge into the same draw bucket as the truck's dark trim, so the armored
   // dressing is draw-call-cheap). The beacon is its own tiny emissive.
-  let ARMOR_MAT = null, BEACON_MAT = null, PLATE_MAT = null;
+  let ARMOR_MAT = null, BEACON_MAT = null, PLATE_MAT = null, GOLD_MAT = null;
   function armorAssets() {
     if (ARMOR_MAT) return;
     ARMOR_MAT = new THREE.MeshLambertMaterial({ color: 0x2c3036 });
     PLATE_MAT = new THREE.MeshLambertMaterial({ color: 0x4a5158 });
+    GOLD_MAT = new THREE.MeshLambertMaterial({ color: 0xd9a520, emissive: 0x3a2a05 });  // company livery stripe
     BEACON_MAT = new THREE.MeshBasicMaterial({ color: 0xffb030 });
-    ARMOR_MAT._shared = PLATE_MAT._shared = BEACON_MAT._shared = true;
+    ARMOR_MAT._shared = PLATE_MAT._shared = GOLD_MAT._shared = BEACON_MAT._shared = true;
   }
 
   // ---- bolt the armored dressing onto a freshly-built truck group -----------
+  // FIXED CONSTANTS ONLY in here: dressTruck runs between spawns, so a draw on
+  // the module rng() would shift every later spawn roll. Geometry is per-truck
+  // (max one alive) and NOT _shared — the normal car disposer frees it.
   function dressTruck(grp) {
     armorAssets();
     const dress = new THREE.Group();
     dress.userData._armoredDress = true;
-    // skirt of reinforced plating low along each flank (reads as bolted armor)
-    const plate = new THREE.BoxGeometry(2.4, 0.5, 0.06);
-    [-1.18, 1.18].forEach((sx) => {
-      const m = new THREE.Mesh(plate, PLATE_MAT);
-      m.position.set(sx, 1.0, 0); m.rotation.y = Math.PI / 2; dress.add(m);
-    });
-    // a slit-windowed reinforced cab band across the nose
-    const band = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.34, 0.12), ARMOR_MAT);
-    band.position.set(0, 1.78, 2.0); dress.add(band);
-    // rear blast doors — a thick double-leaf seam the player learns to aim explosives at
-    const door = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.5, 0.14), ARMOR_MAT);
-    door.position.set(0, 1.45, -2.45); dress.add(door);
-    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.5, 0.16), PLATE_MAT);
-    seam.position.set(0, 1.45, -2.49); dress.add(seam);
-    // a small hardened roof cupola so it stands out in traffic from above
-    const cupola = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.9), ARMOR_MAT);
-    cupola.position.set(0, 2.45, -0.2); dress.add(cupola);
+    const B = function (mat, sx, sy, sz, px, py, pz) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+      m.position.set(px, py, pz); dress.add(m); return m;
+    };
+    // FULL SLAB SIDE ARMOR down each flank: plate wall + darker rivet-line
+    // strips (two horizontal runs, two vertical seams) + the gold company
+    // stripe riding proudest — a SECURIS-style color block, no text needed.
+    for (const sx of [-1, 1]) {
+      B(PLATE_MAT, 0.1, 1.15, 3.9, sx * 1.22, 1.35, -0.25);       // armor slab
+      B(ARMOR_MAT, 0.05, 0.1, 3.9, sx * 1.28, 0.98, -0.25);       // rivet lines
+      B(ARMOR_MAT, 0.05, 0.1, 3.9, sx * 1.28, 1.72, -0.25);
+      B(ARMOR_MAT, 0.05, 1.15, 0.1, sx * 1.28, 1.35, -1.7);       // bolted seams
+      B(ARMOR_MAT, 0.05, 1.15, 0.1, sx * 1.28, 1.35, 1.2);
+      B(GOLD_MAT, 0.04, 0.3, 3.9, sx * 1.3, 1.35, -0.25);         // company stripe
+    }
+    // barred windshield grill across the nose + a heavy ram bumper below it
+    B(ARMOR_MAT, 2.15, 0.42, 0.1, 0, 1.76, 2.02);
+    for (const bx of [-0.72, -0.24, 0.24, 0.72]) B(PLATE_MAT, 0.07, 0.46, 0.14, bx, 1.76, 2.04);
+    B(ARMOR_MAT, 2.3, 0.38, 0.28, 0, 0.55, 2.14);
+    // REAR BLAST DOORS — thick double leaf, centre seam, four proud hinge
+    // blocks, gold stripe carrying across (the wall the player aims C4 at)
+    B(ARMOR_MAT, 2.05, 1.6, 0.16, 0, 1.4, -2.46);
+    B(PLATE_MAT, 0.08, 1.6, 0.2, 0, 1.4, -2.48);
+    for (const hy of [0.85, 1.95]) for (const hx of [-0.95, 0.95]) B(PLATE_MAT, 0.16, 0.22, 0.24, hx, hy, -2.5);
+    B(GOLD_MAT, 1.5, 0.3, 0.05, 0, 1.35, -2.6);
+    // hardened roof cupola: stepped turret with a forward vision slit
+    B(ARMOR_MAT, 0.95, 0.34, 1.05, 0, 2.4, -0.2);
+    B(PLATE_MAT, 0.68, 0.3, 0.78, 0, 2.72, -0.2);
+    B(ARMOR_MAT, 0.5, 0.09, 0.06, 0, 2.74, 0.22);
     // amber roof beacon (security escort look) — a tiny emissive box, blinked by
     // visibility toggle (no material churn)
     const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.34), BEACON_MAT);
-    beacon.position.set(0, 2.78, -0.2); dress.add(beacon);
+    beacon.position.set(0, 2.95, -0.2); dress.add(beacon);
     dress.userData.beacon = beacon;
     grp.add(dress);
     grp.userData._armoredDress = dress;
@@ -249,8 +265,8 @@
     spikeHeat("crack");                          // ensure a 4★ armed-robbery spike even if guards were already out
     spillCash(x, z, truck.armoredHaul);
     if (CBZ.sfx) CBZ.sfx("explosion");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("💰 TRUCK CRACKED — $" + fmt(truck.armoredHaul) + " ON THE STREET");
-    if (CBZ.city && CBZ.city.note) CBZ.city.note("Doors blown — grab the cash before the heat closes in.", 3);
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Armored truck cracked open downtown — $" + fmt(truck.armoredHaul) + " loose on the street.", 3, { from: "Scanner", app: "news" });
+    if (CBZ.city && CBZ.city.note) CBZ.city.note("Doors are open. Grab it and go — sirens already rolling.", 3, { from: "UNKNOWN NUMBER" });
   }
 
   function fmt(n) { return (n | 0).toLocaleString ? (n | 0).toLocaleString("en-US") : ("" + (n | 0)); }

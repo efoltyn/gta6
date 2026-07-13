@@ -21,6 +21,22 @@
 
   const fadeEl = document.getElementById("fade");
 
+  // ---- THREE STRIKES (JAIL_STRIKES) ----
+  // Getting caught finally MATTERS. Every capture (tower haul or cuffed
+  // escort) is a strike:
+  //   1 — warning: shakedown (half your cigs) + a short cell confinement beat
+  //   2 — final warning: same, plus a permanent heat floor (detection.js
+  //       reads g.strikeHeatFloor) and extra guard sweeps past your cell
+  //       block (g.cellWatch drives the pulse below)
+  //   3 — TRANSFERRED TO MAX SECURITY: the run is LOST (CBZ.loseGame)
+  // The campaign's prison phase never hard-fails ("no mission fails · the
+  // manhunt follows"): there, strike 3+ repeats the strike-2 squeeze.
+  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_STRIKES == null) CBZ.CONFIG.JAIL_STRIKES = true;
+  let confineT = 0;          // cell-confinement countdown after a strike
+  let confineShown = -1;     // last whole second painted on the hint line
+  let cellWatchCD = 0;       // strike-2+: cadence of extra cell-block sweeps
+  const pollStrikeRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher() : null;
+
   // ---- watch-tower armed response (telegraphed, escalating) ----
   let towerSeq = 0;        // 0 idle · 1 warning shots · 2 final volley · 3 hit
   let towerT = 0;          // seconds elapsed in the current engagement
@@ -68,11 +84,59 @@
     setCaptureState("normal", 0);
     CBZ.playerChar.group.rotation.z = 0;
     g.detection = 0; g.invuln = 1.6; g.caughtCount++;
+    applyStrike();
     CBZ.guards.forEach((gd) => { gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.capCD = 0; });
     CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go");
     CBZ.sfx("alarm");
   }
   CBZ.haulToCell = haulToCell;
+
+  // one CAUGHT = one strike. Called right after g.caughtCount++ from both
+  // capture paths (instant tower haul + cuffed-escort blackout).
+  function applyStrike() {
+    if (!(CBZ.CONFIG && CBZ.CONFIG.JAIL_STRIKES)) return;
+    if (g.mode !== "escape" || g.role === "cop") return;
+    const campaign = !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    const strike = g.caughtCount || 0;
+
+    // a capture closes the manhunt that led to it — the strike IS the payback
+    g.witnessReportT = 0; g.lastKnown = null;
+
+    // shakedown: the screws pocket half your cigs on every strike
+    const taken = Math.floor((g.cigs || 0) / 2);
+    if (taken > 0 && CBZ.econ && CBZ.econ.addCigs) CBZ.econ.addCigs(-taken);
+
+    if (strike >= 3 && !campaign) {
+      // TRANSFERRED TO MAX SECURITY — the run is over. Clean up any capture
+      // theatrics first so the lose screen isn't hidden under the fade.
+      escortT = 0; escorted = false;
+      if (fadeEl) fadeEl.style.opacity = "0";
+      CBZ.playerChar.cuffed = false; player.subdue = 0; player.stun = 0;
+      setCaptureState("normal", 0);
+      CBZ.playerChar.group.rotation.z = 0;
+      confineT = 0; confineShown = -1;
+      if (CBZ.loseGame) CBZ.loseGame("transferred");
+      return;
+    }
+
+    if (strike >= 2) {
+      // strike two (and every campaign strike after it): the block stays hot
+      g.strikeHeatFloor = Math.max(g.strikeHeatFloor || 0, 12);
+      g.detection = Math.max(g.detection, g.strikeHeatFloor);
+      g.cellWatch = true;               // extra sweeps past your cell (below)
+      confineT = 7;
+      CBZ.flashToast(campaign && strike >= 3 ? "STRIKE — THE WARDEN KEEPS YOU" : "STRIKE 2 — FINAL WARNING");
+      CBZ.flashHint(campaign && strike >= 3
+        ? `The warden blocks your transfer${taken ? ` — but the screws take ${taken} cigs` : ""} and the block stays hot.`
+        : `${taken ? taken + " cigs confiscated. " : ""}One more capture = TRANSFER TO MAX SECURITY. Guards now sweep your block.`, 3.4);
+    } else {
+      confineT = 4;
+      CBZ.flashToast("STRIKE 1 — SHAKEDOWN");
+      CBZ.flashHint(`${taken ? taken + " cigs confiscated. " : ""}Two more strikes and you're shipped to max security.`, 3.2);
+    }
+    // the confinement beat is safe time: guards can't re-grab you in the cell
+    g.invuln = Math.max(g.invuln || 0, confineT + 0.5);
+  }
 
   // An NPC (or a tower) lands a hit on the player. Escape mode has no death
   // screen — getting "got" means captured — so a shot stings (stun + heat +
@@ -172,6 +236,48 @@
     if (CBZ.game.mode !== "escape") return;   // prison capture/arrest only in escape (survival + city own theirs)
     if (fireCD > 0) fireCD -= dt;
 
+    // new run? clear strike-beat leftovers before anything else ticks
+    if (pollStrikeRun && pollStrikeRun()) { confineT = 0; confineShown = -1; cellWatchCD = 0; }
+
+    // ---- strike confinement: held in your cell for a beat after a capture ----
+    if (confineT > 0 && !player.dead) {
+      confineT -= dt;
+      if (confineT > 0) {
+        player.stun = Math.max(player.stun || 0, Math.min(confineT, 0.4));
+        const s = Math.ceil(confineT);
+        if (s !== confineShown) { confineShown = s; CBZ.showHint(`🔒 Confined to your cell — ${s}s`); }
+      } else {
+        confineT = 0; confineShown = -1;
+        CBZ.hideHint();
+        CBZ.flashHint("The screws lose interest. Yard time.", 1.6);
+      }
+    }
+
+    // ---- strike-2 cell-block watch: guards sweep past your cell more ----
+    // reuses the ordinary investigate plumbing (guards.js) — no new movement
+    // code, and any disturbance (hunt/social/ko) naturally takes priority.
+    if (g.cellWatch && CBZ.SPAWN) {
+      cellWatchCD -= dt;
+      if (cellWatchCD <= 0) {
+        cellWatchCD = 9 + Math.random() * 6;
+        let best = null, bd = Infinity;
+        for (const gd of CBZ.guards) {
+          if (gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.hunt > 0 || gd.approach || (gd.investigate && gd.investigate.t > 0)) continue;
+          const dx = CBZ.SPAWN.x - gd.group.position.x, dz = CBZ.SPAWN.z - gd.group.position.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < bd) { bd = d2; best = gd; }
+        }
+        if (best) {
+          best.investigate = {
+            x: CBZ.SPAWN.x + (Math.random() - 0.5) * 8,
+            z: CBZ.SPAWN.z + (Math.random() - 0.5) * 8,
+            t: 6, scan: 0, type: "cell check",
+          };
+          best.alert = Math.max(best.alert || 0, 0.4);
+        }
+      }
+    }
+
     if (player.dead) {
       player.captureState = "dead";
       player.captureT = 0;
@@ -206,6 +312,7 @@
         escorted = true;
         player.pos.copy(CBZ.SPAWN); player.vy = 0;
         g.detection = 0; g.invuln = 2.0; g.caughtCount++;
+        applyStrike();                             // strike 3 ends the run here
       }
       if (escortT <= 0) {
         CBZ.playerChar.cuffed = false; player.subdue = 0; player.stun = 0;

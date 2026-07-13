@@ -133,6 +133,17 @@
       const port = co ? co.lots.length : 1;
       const n = Math.max(0, 2 + Math.min(5, Math.floor(port / 2)) - (isHQ ? 1 : 0));
       let placed = isHQ ? 1 : 0;     // the real owner ped counts toward this lot's headcount too
+      // FRONT DESK (CBZ.CONFIG.NPC_SCHEDULES): one clerk INSIDE the entrance,
+      // just behind the doorway facing out — offices have teller counters but
+      // had zero interior presence ("time at the front desk"). Stores are NOT
+      // double-staffed here: every shop already posts a real vendor ped at its
+      // vendorSpot (peds.js finishSpawn), so the desk gap was offices only.
+      // Placed FIRST so the CAP always favors the desk over cluster bodies;
+      // it rides the same openF night-close as every other figure.
+      if (CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && count < CAP) {
+        const ci = place(d.x - ux * 2.4, d.z - uz * 2.4, Math.atan2(ux, uz), -1, -1, co ? co.name : null, lot);
+        if (ci >= 0) placed++;
+      }
       for (let j = 0; j < n && count < CAP; j++) {
         const fx = d.x + ux * (1.4 + Math.random() * 2.2) + (-uz) * (Math.random() - 0.5) * 3.0;
         const fz = d.z + uz * (1.4 + Math.random() * 2.2) + (ux) * (Math.random() - 0.5) * 3.0;
@@ -182,6 +193,25 @@
     return moved;
   }
 
+  // may the open/close flip happen NOW without a visible pop? True when no
+  // staffed slot sits close to the player inside the camera's forward cone.
+  // Runs only when the day/night dial actually wants to flip (rare), so the
+  // ≤CAP distance scan is nothing. Flag off → always true (old behavior).
+  function flipSafe() {
+    if (!CBZ.CONFIG || !CBZ.CONFIG.NPC_SPAWN_HIDE) return true;
+    const P = CBZ.player; if (!P || P.dead) return true;
+    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    for (let i = 0; i < count; i++) {
+      const xz = slotXZ(slots[i]);
+      const rx = xz.x - P.pos.x, rz = xz.z - P.pos.z, d2 = rx * rx + rz * rz;
+      if (d2 >= 45 * 45) continue;
+      const rd = Math.sqrt(d2) || 1;
+      if ((rx / rd) * fx + (rz / rd) * fz >= 0.35) return false;   // close AND on camera
+    }
+    return true;
+  }
+
   // a rare feed line that makes the company↔queue link VISIBLE in the ticker
   function feedTie() {
     const busy = lines.filter(function (l) { return l.co && l.members.length >= 5; });
@@ -209,7 +239,12 @@
     const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
     const want = night < 0.5 ? 1 : 0;
     let dirty = false;
-    if (want !== (openF > 0.5 ? 1 : 0)) { openF = want; dirty = true; }
+    // SPAWN-IN GUARD (CBZ.CONFIG.NPC_SPAWN_HIDE): the open/close flip rewrites
+    // EVERY figure at once — if the player is standing at a staffed lot looking
+    // at it, whole queues would blink in (dawn) or vanish (dusk) on camera.
+    // Defer the flip while any slot is close AND inside the forward cone; the
+    // dial re-tries every tick, so the change lands the moment you look away.
+    if (want !== (openF > 0.5 ? 1 : 0) && flipSafe()) { openF = want; dirty = true; }
     if (openF <= 0.02) { if (dirty) writeAll(); return; }
     feedT -= dt; if (feedT <= 0) { feedT = 26 + Math.random() * 12; feedTie(); }
     swayT += dt;

@@ -310,24 +310,88 @@
   };
 
   PAINT.swat = function (P, c) {
-    const base = (c && c.torso != null) ? c.torso : 0x2b2f36, bc = hx(base);
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(bc);
-    T.rect("front", 0.08, 0.06, 0.84, 0.66, "#1d2026");            // plate vest
-    T.rect("back", 0, 0.06, 1, 0.66, "#1d2026");
-    T.rect("front", 0.16, 0.42, 0.2, 0.18, "#14161b");             // mag pouches
-    T.rect("front", 0.4, 0.42, 0.2, 0.18, "#14161b");
-    T.rect("front", 0.64, 0.42, 0.2, 0.18, "#14161b");
-    T.rect("front", 0.3, 0.14, 0.4, 0.08, "#cfd6e2");              // chest tape
-    T.rect("front", 0, 0.86, 1, 0.14, "#0d1016");                  // duty belt
-    T.rect("side", 0, 0.86, 1, 0.14, "#0d1016");
-    T.rect("back", 0, 0.86, 1, 0.14, "#0d1016");
+    // SWAT REDESIGN — police-parity detail. Two-tone: graphite fatigues under a
+    // dark-OLIVE plate carrier painted on the inflated JACKET shell (the same
+    // silhouette trick the police duty jacket uses), so a SWAT reads as a
+    // bulked-up carrier over a working uniform instead of a near-black smudge.
+    // Contrast trims (pale SWAT placards, differentiated pouches, silver
+    // buckle) keep it READABLE while staying tactical-dark. This painter is
+    // also the player's lootable disguise (outfits.js routes the corpse-swap
+    // through it), so the detail pays twice.
+    const fat = (c && c.legs != null) ? c.legs : 0x2e332b;          // graphite-olive fatigues
+    const carr = (c && c.torso != null) ? c.torso : 0x3a4034;       // dark-olive carrier
+    const fc = hx(fat), cc = hx(carr);
+    const pouch = tone(carr, -0.26), strap = tone(carr, -0.45), plate = tone(carr, 0.09);
+    const T = P.T, J = P.J, A = P.A, L = P.L, ctx = P.ctx;
+    // ---- torso = the uniform SHIRT + duty belt under the carrier ----
+    T.fill(fc);
+    T.rect("front", 0.46, 0, 0.08, 0.3, tone(fat, -0.35));          // zip placket
+    T.rect("front", 0, 0.84, 1, 0.16, "#101218");                   // duty belt
+    T.rect("back", 0, 0.84, 1, 0.16, "#101218");
+    T.rect("side", 0, 0.84, 1, 0.16, "#101218");
+    T.rect("side", 0.15, 0.76, 0.7, 0.22, "#15181f");               // holster block at the hip
+    T.rect("front", 0.08, 0.86, 0.14, 0.11, "#1a1d24");             // cuff case
+    T.rect("front", 0.74, 0.86, 0.15, 0.11, "#1a1d24");             // spare-mag case
+    T.rect("front", 0.465, 0.86, 0.07, 0.1, "#8d949e");             // silver buckle
     T.shade();
-    A.fill(bc); A.rect("front", 0.2, 0.06, 0.6, 0.18, "#1d2026"); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x23262c));
-    L.rect("side", 0.2, 0.45, 0.6, 0.3, "#1d2026");                // thigh rig
+    // ---- the PLATE CARRIER rides the jacket shell (real bulk) ----
+    J.fill(cc);
+    J.clear("cap", 0, 0, 1, 1);
+    J.clear("front", 0, 0.76, 1, 0.24);                             // carrier hem — shirt + belt show below
+    J.clear("back", 0, 0.76, 1, 0.24);
+    J.clear("side", 0, 0.76, 1, 0.24);
+    J.rect("front", 0.18, 0.14, 0.64, 0.48, plate);                 // chest plate bag (raised tone)
+    J.rect("front", 0.18, 0.14, 0.64, 0.035, strap);                //   plate-bag top seam
+    J.rect("front", 0.3, 0.045, 0.4, 0.085, "#e9e7db");             // "SWAT" placard (front)
+    J.rect("back", 0.24, 0.08, 0.52, 0.13, "#e9e7db");              // "SWAT" placard (back)
+    J.rect("front", 0.24, 0.27, 0.26, 0.11, pouch);                 // admin pouch (wide, flapped)
+    J.rect("front", 0.24, 0.27, 0.26, 0.032, strap);
+    J.rect("front", 0.55, 0.38, 0.15, 0.21, pouch);                 // rifle-mag pouch (tall)
+    J.rect("front", 0.55, 0.38, 0.15, 0.04, strap);
+    J.rect("front", 0.73, 0.41, 0.11, 0.15, tone(carr, -0.12));     // pistol-mag pouch (smaller, lighter)
+    J.dot("front", 0.625, 0.4, 0.02, strap);                        // bungee pulls
+    J.dot("front", 0.785, 0.43, 0.016, strap);
+    J.rect("front", 0.07, 0.06, 0.13, 0.2, "#14161a");              // radio block on the left shoulder strap
+    J.rect("front", 0.09, 0.01, 0.035, 0.06, "#14161a");            //   antenna stub
+    J.rect("side", 0.12, 0.28, 0.76, 0.34, plate);                  // cummerbund side plates
+    J.rect("back", 0.28, 0.28, 0.44, 0.4, plate);                   // back plate bag
+    J.shade();
+    // block "SWAT" lettering stamped straight into the atlas (after shade so
+    // the letters stay crisp) — guarded for stub canvases in the harness.
+    if (ctx && ctx.fillText) {
+      ctx.save();
+      ctx.fillStyle = "#1a1c22";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const jy0 = ROWS.jacket[0], jh = ROWS.jacket[1] - ROWS.jacket[0];
+      const f = COLS.front, b = COLS.back;
+      ctx.font = "bold 6px Arial, sans-serif";
+      ctx.fillText("SWAT", f[0] + 0.5 * (f[1] - f[0]), jy0 + 0.09 * jh);
+      ctx.font = "bold 8px Arial, sans-serif";
+      ctx.fillText("SWAT", b[0] + 0.5 * (b[1] - b[0]), jy0 + 0.145 * jh);
+      ctx.restore();
+    }
+    // ---- arms: fatigue sleeves, carrier shoulder cap + subdued patch ----
+    A.fill(fc);
+    A.rect("front", 0.14, 0.03, 0.72, 0.2, cc);                     // shoulder cap
+    A.rect("side", 0.14, 0.03, 0.72, 0.2, cc);
+    A.rect("back", 0.14, 0.03, 0.72, 0.2, cc);
+    A.rect("front", 0.26, 0.08, 0.48, 0.11, tone(carr, -0.35));     // subdued unit patch
+    A.rect("front", 0.14, 0.64, 0.72, 0.09, tone(fat, -0.3));       // elbow-pad strap
+    A.shade();
+    // ---- legs: subtle camo tone break + knee-pad blocks + thigh rig ----
+    L.fill(fc);
+    L.rect("front", 0, 0.1, 1, 0.14, tone(fat, 0.08));              // camo-ish tone break
+    L.rect("front", 0.42, 0.26, 0.58, 0.1, tone(fat, -0.14));
+    L.rect("back", 0, 0.14, 1, 0.16, tone(fat, 0.08));
+    L.rect("side", 0, 0.18, 1, 0.12, tone(fat, -0.14));
+    L.rect("side", 0.2, 0.36, 0.6, 0.26, "#1d2026");                // thigh rig
+    L.rect("side", 0.2, 0.36, 0.6, 0.05, strap);
+    L.rect("front", 0.14, 0.46, 0.72, 0.2, "#23262c");              // knee-pad block
+    L.rect("front", 0.22, 0.5, 0.56, 0.11, "#31353d");              //   pad face
+    L.rect("front", 0, 0.92, 1, 0.08, tone(fat, -0.35));            // boot break
+    L.rect("side", 0, 0.92, 1, 0.08, tone(fat, -0.35));
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
   };
 
   PAINT.gang = function (P, c) {

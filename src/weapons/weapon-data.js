@@ -239,6 +239,13 @@
   }
   CBZ.weaponFalloffMul = falloffMul;
 
+  // NPC tracer spread — per weapon-SLOT half-angle (radians) of the visual
+  // jitter applied to city NPC bullet streaks (city/combat.js tracer wrap,
+  // gated by CBZ.CONFIG.NPC_TRACER_SPREAD). Slots match FPS_WEAPONS above:
+  // pistols/autos are sloppier, rifles tighter, "long" = shotgun/launcher.
+  // Typical miss offset ≈ 0.5 × value × distance (≈0.65m for a pistol at 20m).
+  CBZ.NPC_SPREAD = { pistol: 0.065, rifle: 0.040, auto: 0.090, long: 0.075, utility: 0.055, _def: 0.055 };
+
   CBZ.weaponInventory = CBZ.weaponInventory || [];
   CBZ.currentWeaponId = CBZ.currentWeaponId || null;
 

@@ -18,9 +18,13 @@
   // red trim line along the north wall top
   addBox(0, WH - 0.6, -43.55, 32, 0.5, 0.4, TRIM, { cast: false });
 
-  // barred windows punched into the north wall
+  // barred windows punched into the north wall — OWNER RULE (bda61ab): no
+  // gray panes; glass behind the bars is the same clear tint as the city.
+  // addBox uses mat() (fresh per call) so mutating the material is safe, and
+  // transparent:true keeps the pane out of batch.js's opaque merge pass.
   for (let wx = -11; wx <= 11; wx += 11) {
-    addBox(wx, 6, -43.4, 2.6, 2.6, 0.2, 0x223047, { cast: false });          // dark recess
+    const pane = addBox(wx, 6, -43.4, 2.6, 2.6, 0.2, 0xbfe9f7, { cast: false, emissive: 0x3f8aa6, ei: 0.5 }); // clear glass
+    pane.material.transparent = true; pane.material.opacity = 0.6;
     for (let i = 0; i < 4; i++)
       addBox(wx - 1 + i * 0.66, 6, -43.2, 0.1, 2.4, 0.1, 0x2a2f38, { cast: false }); // bars
   }

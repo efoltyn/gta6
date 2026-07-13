@@ -460,6 +460,15 @@
   // communicates through a diegetic phone, and continually assigns a mission.
   // Flip false to expose the legacy multi-mode sandbox during development.
   if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
+  // REAL-PHONE NOTIFICATIONS V2 (owner rule: no 4th-wall notification copy).
+  // Every phone notice is a diegetic push from someone/something in-world — a
+  // contact texting, the Bank app ("$500 received"), News, the Bounty board, a
+  // missed call. A banner drops from the top of the raised phone screen; when
+  // the handset is stowed it buzzes and a compact banner rises by the phone
+  // glyph. Also restores the full map [M] + minimap alongside the phone with
+  // strict mutual exclusion (opening one closes the other). Flip false to
+  // restore the plain list + LED-shake behavior and the phone-owns-[M] routing.
+  if (CBZ.CONFIG.PHONE_NOTIS_V2 == null) CBZ.CONFIG.PHONE_NOTIS_V2 = true;
   // PLAIN CIVILIANS (owner's rule): when on, ordinary civilians — anyone with no
   // role uniform, no gang, and no business/tycoon identity — render PLAIN (a
   // solid shirt color over blue-jean legs + shoes, NO painted canvas atlas).
@@ -477,6 +486,19 @@
   // the city uniting against you) stay on CBZ.cityFeed and are unaffected.
   if (CBZ.CONFIG.CITY_FLAVOR_FEED == null) CBZ.CONFIG.CITY_FLAVOR_FEED = false;
 
+  // INVENTORY V2 (city/inventory.js + city/charpanel.js): the Minecraft-like
+  // city inventory — [I] opens a real 27-slot grid over g.cityInv +
+  // CBZ.weaponInventory (guns are items), stacks/drag/split, drop-to-ground
+  // pickups, placeable storage CHESTS, and the player's guns DROP on death
+  // (go back for them). Flip false: charpanel reverts to its read-only grid,
+  // chests/death-drops/ground-pickups inert, death keeps your guns again.
+  if (CBZ.CONFIG.INVENTORY_V2 == null) CBZ.CONFIG.INVENTORY_V2 = true;
+  // CRAFTING (systems/craft.js) — owner's call: crafting is dead. Default OFF;
+  // the [C] panel won't open and craft()/canCraft() refuse. CBZ.craft.itemStore
+  // stays live (buildmode/baseclaim placement costs read it). Flip true to
+  // re-enable the whole system in one line.
+  if (CBZ.CONFIG.CRAFTING_ENABLED == null) CBZ.CONFIG.CRAFTING_ENABLED = false;
+
   // SMART TEAM COMBAT (city/squadai.js + city/loyalty.js): armed NPCs that were
   // engaged would all sprint to ~9m and trade shots in a scrum. With this ON, a
   // coordinator LAYERS over the existing per-ped brain (it only writes the
@@ -485,6 +507,36 @@
   // post a shield on a protectee. Purely additive — flip false to restore the
   // raw vanilla brain (every steer is gated on this flag).
   if (CBZ.CONFIG.CITY_SMART_COMBAT == null) CBZ.CONFIG.CITY_SMART_COMBAT = true;
+
+  // FLIGHT MODEL V2 (city/playeraircraft.js): per-class fixed-wing model with
+  // a real ground roll → rotate → climb takeoff, coordinated bank-to-turn,
+  // stall/gravity sag, flare/touchdown + crash conditions, and a velocity-
+  // tilting helicopter hover model. Flip false to restore the previous
+  // flyHeli/flyJet feel — every V2 branch is gated on this flag.
+  if (CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 == null) CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 = true;
+  // AMBIENT AIR TRAFFIC (city/airtraffic.js): a handful of deterministic
+  // civilian aircraft (GA prop planes + a light heli) orbiting the city on
+  // stacked altitude bands, banking into their turns. Pure atmosphere — no
+  // colliders, no weapons, no wanted interaction. Flip false to clear the sky.
+  if (CBZ.CONFIG.AIR_TRAFFIC_AMBIENT == null) CBZ.CONFIG.AIR_TRAFFIC_AMBIENT = true;
+
+  // NPC SCHEDULES (owner's rule: "at night they should almost all be in bed
+  // except maybe gangsters and homeless… simple math and schedules… to give
+  // npcs purpose"). Master flag for the bucketed day-schedule layer over the
+  // instanced crowds: hash-derived archetypes on the city ambient crowd (who
+  // sleeps when, where they hang, pause-and-linger stops), the jail's daily
+  // regime (yard laps → chow line → circles/wall-sits → night lockdown to the
+  // cells) and the citystaff front-desk clerks. Same total headcount —
+  // redistribution only. city/crowd.js, entities/crowd.js, entities/
+  // ambientstate.js, entities/npc.js and city/citystaff.js read this.
+  if (CBZ.CONFIG.NPC_SCHEDULES == null) CBZ.CONFIG.NPC_SCHEDULES = true;
+  // sub-knob: the 4h-bucket on-street density curve (deep night ≈ 22% of the
+  // day crowd, dawn ramp, evening taper). Off → the old flat 60% night dial.
+  if (CBZ.CONFIG.NPC_NIGHT_DENSITY == null) CBZ.CONFIG.NPC_NIGHT_DENSITY = true;
+  // sub-knob: spawn-visibility guard — relocation/un-suppress placements are
+  // rejected when they'd land close AND inside the camera's forward cone, so
+  // the player never watches a body materialize. Off → old placement.
+  if (CBZ.CONFIG.NPC_SPAWN_HIDE == null) CBZ.CONFIG.NPC_SPAWN_HIDE = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

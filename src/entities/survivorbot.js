@@ -151,6 +151,7 @@
     if (fx || fz) {
       const m = Math.hypot(fx, fz);
       b.state = urgent > 0.35 ? "flee" : "move";
+      b.urg = urgent;                 // move() turns this into a visible sprint
       // aim at a point well ahead in the safe direction
       const reach = 14 + urgent * 16;
       b.target.set(b.pos.x + (fx / m) * reach, 0, b.pos.z + (fz / m) * reach);
@@ -158,6 +159,7 @@
     } else {
       // wander inside the zone
       b.state = "wander";
+      b.urg = 0;
       if (b.pause <= 0) {
         const arena = CBZ.surv.arena, zr = zone ? zone.radius * 0.7 : arena.radius * 0.6;
         const a = Math.random() * 6.28, d = Math.random() * zr;
@@ -170,7 +172,9 @@
 
   // ---- locomotion (every frame; only for living, non-busy bots) ----
   function move(b, dt, animate) {
-    const spd = b.state === "flee" ? b.baseSpeed * 1.85 : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
+    // fleeing reads urgency: a bot brushing a threat jogs (~1.55×), one caught
+    // outside the closing zone or under a strike marker SPRINTS (~2.15×)
+    const spd = b.state === "flee" ? b.baseSpeed * (1.55 + 0.6 * (b.urg || 0)) : (b.state === "move" ? b.baseSpeed * 1.25 : b.baseSpeed);
     const dx = b.target.x - b.pos.x, dz = b.target.z - b.pos.z;
     const dist = Math.hypot(dx, dz);
     if (b.pause > 0) b.pause -= dt;

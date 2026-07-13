@@ -336,8 +336,12 @@
       // shaft
       box(cxp, H / 2, czp, base, H, base, 0xb6bdc4, { cast: true });
       solid(cxp, czp, base, base, 0, H + 6);
-      // cab (wider glass box) + roof + dish
-      box(cxp, H + 1.6, czp, base + 4, 3.2, base + 4, C_GLASS, { cast: true, emissive: 0x224455, ei: 0.18 });
+      // cab (wider glass box) + roof + dish — OWNER RULE (bda61ab): no gray
+      // panes; the cab is the same clear tinted glass as every city facade.
+      // mat() is fresh-per-call so mutating is safe; transparent keeps it out
+      // of batch.js's opaque merge. cast:false — clear glass throws no shadow.
+      const cab = box(cxp, H + 1.6, czp, base + 4, 3.2, base + 4, 0xbfe9f7, { cast: false, emissive: 0x3f8aa6, ei: 0.5 });
+      cab.material.transparent = true; cab.material.opacity = 0.6;
       box(cxp, H + 3.6, czp, base + 4.6, 0.6, base + 4.6, 0x3a4046, { cast: true }); // cab roof
       box(cxp, H + 4.6, czp - 1, 0.3, 1.4, 0.3, 0xd24a3a, { emissive: 0xff5a4a, ei: 0.9 }); // beacon
       if (CBZ.makeLabelSprite) {
@@ -347,68 +351,188 @@
     })();
 
     // =====================================================================
-    //  7) AIRCRAFT — reusable low-poly airliner + private-jet builders.
-    //     Built from cylinders (fuselage/engines), swept wing boxes and a
-    //     tail fin. Fleet shares a small set of materials. Each gets a body
-    //     collider so you can take cover behind / climb onto them.
+    //  7) AIRCRAFT — airliner + private-jet builders. These are the EXACT
+    //     groups the player flies (the civil steal path in playeraircraft.js
+    //     attaches the flight state to the parked group), so the airframes
+    //     are sculpted properly: position-attribute tapered noses/tailcones
+    //     (the aircraft.js taperBox pattern adapted to these +X-nosed
+    //     models), real two-tone liveries, nacelles with intake rings,
+    //     bogie gear and nav lights. CONTRACT KEPT: group root at ground
+    //     level (wheels touch y=0, groundOffset 0), nose down local +X,
+    //     same footprint/centreline heights, worldCollider via solid().
+    //     Draw discipline: every material's parts merge into ONE child mesh
+    //     (~12 draws per plane — fewer than the old loose-box builders).
     // =====================================================================
+    // ---- local sculpt helpers (aircraft.js:44 taperBox pattern, r128) ----
+    // fuseGeo: box whose Y/Z cross-section lerps from `tail` scale (-X end)
+    // to `nose` scale (+X end); noseY/tailY shift those ends vertically
+    // (quadratic — droops a cockpit, upsweeps a tailcone).
+    function fuseGeo(len, h, d, o) {
+      o = o || {};
+      const sN = o.nose != null ? o.nose : 1, sT = o.tail != null ? o.tail : 1;
+      const yN = o.noseY || 0, yT = o.tailY || 0;
+      const geo = new THREE.BoxGeometry(len, h, d, o.seg || 5, 2, 2);
+      const pos = geo.attributes.position, hl = len / 2;
+      for (let i = 0; i < pos.count; i++) {
+        const t = (pos.getX(i) + hl) / len;              // 0 tail end → 1 nose end
+        const s = sT + (sN - sT) * t;
+        pos.setY(i, pos.getY(i) * s + yN * t * t + yT * (1 - t) * (1 - t));
+        pos.setZ(i, pos.getZ(i) * s);
+      }
+      pos.needsUpdate = true; geo.computeVertexNormals();
+      return geo;
+    }
+    // wingGeo: ONE symmetric wing pair — chord tapers root→tip, tips sweep
+    // aft (-X) and rise (dihedral). Also used for tailplanes.
+    function wingGeo(span, rootC, tipC, th, sweep, dihedral) {
+      const geo = new THREE.BoxGeometry(rootC, th, span, 2, 1, 6);
+      const pos = geo.attributes.position, hs = span / 2;
+      for (let i = 0; i < pos.count; i++) {
+        const t = Math.abs(pos.getZ(i)) / hs;            // 0 root → 1 tip
+        pos.setX(i, pos.getX(i) * (1 + (tipC / rootC - 1) * t) - sweep * t);
+        pos.setY(i, pos.getY(i) + (dihedral || 0) * t);
+      }
+      pos.needsUpdate = true; geo.computeVertexNormals();
+      return geo;
+    }
+    // finGeo: vertical stabiliser — chord tapers with height, sweeps aft.
+    function finGeo(h, rootC, tipC, th, sweep) {
+      const geo = new THREE.BoxGeometry(rootC, h, th, 2, 6, 1);
+      const pos = geo.attributes.position, hh = h / 2;
+      for (let i = 0; i < pos.count; i++) {
+        const t = (pos.getY(i) + hh) / h;                // 0 base → 1 tip
+        pos.setX(i, pos.getX(i) * (1 + (tipC / rootC - 1) * t) - sweep * t);
+      }
+      pos.needsUpdate = true; geo.computeVertexNormals();
+      return geo;
+    }
+    // fleet materials — carfx vehicle roles when available (metal sheen and
+    // reflective glass beat flat Lambert on an airframe), pooled mat()
+    // fallback. carfx's shared roles are _shared-flagged against disposal;
+    // paint roles are per-colour and live as long as the airport root.
+    function vmat(role, color, opts) {
+      if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
+      return mat(color != null ? color : C_METAL, opts);
+    }
+    const FLEET = {
+      white:  vmat("paint", 0xf2f4f6, { roughness: 0.5, metalness: 0.3 }),
+      navy:   vmat("paint", 0x1b2438, { roughness: 0.55 }),
+      glass:  vmat("glass", 0x10161c),
+      metal:  vmat("metal", 0xc8ccd2),
+      dark:   vmat("plastic", 0x14181d),
+      tire:   vmat("tire", 0x1a1d21),
+      navR:   mat(0xff3524, { emissive: 0xff3524, ei: 0.95 }),
+      navG:   mat(0x2fd45c, { emissive: 0x2fd45c, ei: 0.95 }),
+      navW:   mat(0xf4f8ff, { emissive: 0xf4f8ff, ei: 0.9 }),
+      beacon: mat(0xff2a2a, { emissive: 0xff2a2a, ei: 1.0 }),
+      accents: {},
+    };
+    function accentMat(c) {
+      const k = "a" + c;
+      if (!FLEET.accents[k]) FLEET.accents[k] = vmat("paint", c, { roughness: 0.45 });
+      return FLEET.accents[k];
+    }
+    // per-plane part collector: geometries bucket by material and each
+    // bucket merges into ONE child mesh (loose meshes without BGU). The
+    // children carry no userData/colliders, so the batcher/freezer treat
+    // the parent group exactly as before (collider-ref = live group).
+    function partKit() {
+      const byMat = new Map();
+      return {
+        put: function (m, geo, x, y, z, rx, ry, rz) {
+          if (rz) geo.rotateZ(rz);
+          if (rx) geo.rotateX(rx);
+          if (ry) geo.rotateY(ry);
+          geo.translate(x, y, z);
+          let arr = byMat.get(m);
+          if (!arr) { arr = []; byMat.set(m, arr); }
+          arr.push(geo);
+        },
+        bake: function (g) {
+          byMat.forEach(function (geos, m) {
+            if (geos.length > 1 && BGU && BGU.mergeBufferGeometries) {
+              const mesh = new THREE.Mesh(BGU.mergeBufferGeometries(geos), m);
+              mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
+            } else {
+              for (const gm of geos) {
+                const mesh = new THREE.Mesh(gm, m);
+                mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
+              }
+            }
+          });
+        },
+      };
+    }
+    // tiny static emissive marker (nav lights / beacons)
+    function navBox(g, m, x, y, z, s) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(s || 0.26, s || 0.26, s || 0.26), m);
+      b.position.set(x, y, z); g.add(b);
+      return b;
+    }
+
     function buildAirliner(x, z, heading, livery) {
       const g = new THREE.Group();
       g.position.set(x, 0, z); g.rotation.y = heading;
-      const bodyMat = mat(C_METAL), darkMat = mat(C_DKMET), tailMat = mat(livery || 0x2d5fb0);
-      const winMat = mat(0x12161c, { emissive: 0x0a0d12, ei: 0.35 }); // cabin window stripe (dark/emissive)
-      const tireMat = mat(0x202327);
-      const L = 30, R = 1.9;     // fuselage length / radius
-      const CY = R + 1.6;        // fuselage centreline height
-      // fuselage (capsule-ish: cylinder + nose cone + tail cone, cones OVERLAP the barrel)
-      const fus = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 14), bodyMat);
-      fus.rotation.z = Math.PI / 2; fus.position.set(0, CY, 0); fus.castShadow = true; g.add(fus);
-      // nose: cone base = R, seated INTO the barrel (overlaps ~0.8) so no seam
-      const nose = new THREE.Mesh(new THREE.ConeGeometry(R, 4.4, 14), bodyMat);
-      nose.rotation.z = -Math.PI / 2; nose.position.set(L / 2 + 1.4, CY, 0); g.add(nose);
-      // tail: gentle upswept cone tucked into the barrel
-      const tailcone = new THREE.Mesh(new THREE.ConeGeometry(R, 6, 14), bodyMat);
-      tailcone.rotation.z = Math.PI / 2; tailcone.position.set(-L / 2 - 1.6, CY + 0.6, 0); g.add(tailcone);
-      // cabin window stripe + livery cheat-line (thin boxes hugging the upper flank)
+      const acc = accentMat(livery || 0x2d5fb0);
+      const K = partKit();
+      const L = 30, R = 1.9;      // barrel length / legacy radius (collider height stays R+3)
+      const FH = 3.8, FW = 3.4;   // fuselage box cross-section (old barrel's silhouette)
+      const CY = R + 1.6;         // fuselage centreline height — UNCHANGED (flight/camera anchors)
+      const BELLY = CY - FH / 2;  // 1.6 — struts rise to here, wheels touch y=0
+
+      // fuselage: white barrel + sculpted drooped nose + upswept tailcone
+      // (pieces butt-join at full cross-section with a 0.05 overlap — seamless)
+      K.put(FLEET.white, new THREE.BoxGeometry(L, FH, FW, 2, 1, 1), 0, CY, 0);
+      K.put(FLEET.white, fuseGeo(4.2, FH, FW, { nose: 0.24, noseY: -1.0 }), L / 2 + 2.05, CY, 0);
+      K.put(FLEET.white, fuseGeo(5.6, FH, FW, { tail: 0.16, tailY: 1.25 }), -L / 2 - 2.75, CY, 0);
+      // dark cockpit glass band wrapping the nose root
+      K.put(FLEET.glass, new THREE.BoxGeometry(2.4, 0.95, FW + 0.1), L / 2 + 0.6, CY + 0.8, 0);
+      // livery: coloured belly stripe wrapping under the white upper fuselage,
+      // and the cabin windows as ONE long inset glass strip per side
+      K.put(acc, new THREE.BoxGeometry(L, 0.95, FW + 0.12), 0, BELLY + 0.42, 0);
       for (const sgn of [-1, 1]) {
-        const win = new THREE.Mesh(new THREE.BoxGeometry(L - 4, 0.5, 0.1), winMat);
-        win.position.set(0.5, CY + 0.55, sgn * (R - 0.02)); g.add(win);
-        const band = new THREE.Mesh(new THREE.BoxGeometry(L - 2, 0.7, 0.06), tailMat);
-        band.position.set(0, CY - 0.45, sgn * (R + 0.01)); g.add(band);
+        K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, sgn * (FW / 2 + 0.02));
       }
-      // wings (swept boxes) — root inset under the belly so it overlaps the fuselage
+
+      // ONE swept tapered wing pair + upturned accent winglets
+      K.put(FLEET.white, wingGeo(28, 5.5, 2.2, 0.55, 4.5, 0.9), 0.5, BELLY + 0.55, 0);
+      for (const sgn of [-1, 1]) K.put(acc, new THREE.BoxGeometry(1.5, 2.1, 0.32), -4.2, 3.95, sgn * 13.9);
+
+      // underwing engines: sculpted nacelle + accent intake lip ring + dark
+      // inlet disc + dark exhaust + pylon up into the wing
       for (const sgn of [-1, 1]) {
-        const wing = new THREE.Mesh(new THREE.BoxGeometry(8, 0.5, 15), bodyMat);
-        wing.position.set(-1, R + 0.9, sgn * 7.0); wing.rotation.y = sgn * 0.28; wing.castShadow = true; g.add(wing);
-        // winglet (upturned tip)
-        const wl = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.0, 0.4), tailMat);
-        wl.position.set(-2.8, R + 1.7, sgn * 14.0); wl.rotation.x = sgn * 0.0; wl.rotation.z = sgn * 0.25; g.add(wl);
-        // underwing engine on a short pylon, slung ahead of/below the wing
-        const eng = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 0.95, 3.4, 12), darkMat);
-        eng.rotation.z = Math.PI / 2; eng.position.set(1.0, R - 0.4, sgn * 8.5); g.add(eng);
-        const intake = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.4, 12), tailMat);
-        intake.rotation.z = Math.PI / 2; intake.position.set(2.75, R - 0.4, sgn * 8.5); g.add(intake);
-        const pylon = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.0, 0.4), darkMat);
-        pylon.position.set(1.0, R + 0.3, sgn * 8.5); g.add(pylon);
+        const nz = sgn * 5.6;
+        K.put(FLEET.white, fuseGeo(4.0, 1.5, 1.5, { nose: 0.94, tail: 0.66 }), 2.2, 1.4, nz);
+        K.put(acc, new THREE.BoxGeometry(0.34, 1.68, 1.68), 4.15, 1.4, nz);
+        K.put(FLEET.dark, new THREE.BoxGeometry(0.2, 1.22, 1.22), 4.3, 1.4, nz);
+        K.put(FLEET.dark, new THREE.BoxGeometry(0.5, 0.92, 0.92), 0.28, 1.42, nz);
+        K.put(FLEET.white, new THREE.BoxGeometry(1.9, 1.0, 0.42), 1.4, 2.25, nz);
       }
-      // tail fin (swept up from the rear barrel, base sunk into the body)
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(4.5, 6.5, 0.5), tailMat);
-      fin.position.set(-L / 2 - 0.5, CY + 4.0, 0); fin.castShadow = true; g.add(fin);
-      // horizontal stabilisers (root buried in the tailcone so they meet the body)
+
+      // tail: swept accent fin + two-tone geometric logo block + tailplane
+      K.put(acc, finGeo(6.2, 5.2, 2.6, 0.5, 2.6), -16.5, 7.8, 0);
+      K.put(FLEET.white, new THREE.BoxGeometry(1.6, 1.6, 0.62), -18.3, 9.2, 0);
+      K.put(FLEET.navy, new THREE.BoxGeometry(0.95, 0.95, 0.7), -17.9, 8.8, 0);
+      K.put(FLEET.white, wingGeo(11, 3.4, 1.5, 0.4, 1.8, 0.35), -17.6, CY + 1.1, 0);
+
+      // gear: 2-wheel nose leg + two 4-wheel main bogies, chunky struts.
+      // Wheel pairs are axle-spanning cylinders; every wheel bottoms at y=0.
+      K.put(FLEET.metal, new THREE.BoxGeometry(0.36, 1.4, 0.36), 10, 1.0, 0);
+      for (const sgn of [-1, 1]) K.put(FLEET.tire, new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10), 10, 0.42, sgn * 0.34, Math.PI / 2);
       for (const sgn of [-1, 1]) {
-        const hs = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.35, 6), bodyMat);
-        hs.position.set(-L / 2 - 1.2, CY + 1.0, sgn * 2.4); hs.rotation.y = sgn * 0.22; g.add(hs);
+        const mz = sgn * 3.1;
+        K.put(FLEET.metal, new THREE.BoxGeometry(0.42, 1.2, 0.42), -2.2, 1.15, mz);   // strut into the belly
+        K.put(FLEET.metal, new THREE.BoxGeometry(2.6, 0.4, 0.5), -2.2, 0.72, mz);     // bogie beam
+        for (const bx of [-3.05, -1.35]) K.put(FLEET.tire, new THREE.CylinderGeometry(0.55, 0.55, 1.34, 10), bx, 0.55, mz, Math.PI / 2);
       }
-      // landing gear — legs rise from the wheels up INTO the belly (R+1.6 ≈ belly y)
-      for (const gp of [[10, 0, 1], [-5, 3.0, 2], [-5, -3.0, 2]]) {
-        for (let wi = 0; wi < gp[2]; wi++) {
-          const wx = gp[0] + (gp[2] > 1 ? (wi - 0.5) * 0 : 0);
-          const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.5, 6), darkMat);
-          leg.position.set(gp[0], 0.95, gp[1]); g.add(leg);
-          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.5, 10), tireMat);
-          wheel.rotation.x = Math.PI / 2; wheel.position.set(wx, 0.6, gp[1] + (wi - (gp[2] - 1) / 2) * 0.7); g.add(wheel);
-        }
-      }
+      K.bake(g);
+
+      // nav lights: port red / starboard green wingtips, white tail, beacon
+      navBox(g, FLEET.navR, -4.0, 3.1, -14.05);
+      navBox(g, FLEET.navG, -4.0, 3.1, 14.05);
+      navBox(g, FLEET.navW, -20.35, 10.5, 0);
+      navBox(g, FLEET.beacon, -2, 5.55, 0, 0.3);
+
       root.add(g);
       // body collider (fuselage footprint), oriented-agnostic AABB approx
       const span = Math.max(L, 18);
@@ -419,51 +543,67 @@
     function buildPrivateJet(x, z, heading, livery) {
       const g = new THREE.Group();
       g.position.set(x, 0, z); g.rotation.y = heading;
-      const bodyMat = mat(0xe6e9ec), darkMat = mat(C_DKMET), tailMat = mat(livery || 0x355c8a);
-      const winMat = mat(0x12161c, { emissive: 0x0a0d12, ei: 0.35 });
-      const tireMat = mat(0x202327);
-      const L = 14, R = 1.1;
-      const CY = R + 1.0;        // fuselage centreline height
-      const fus = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L, 12), bodyMat);
-      fus.rotation.z = Math.PI / 2; fus.position.set(0, CY, 0); fus.castShadow = true; g.add(fus);
-      // sleek nose (cone base = R, sunk into barrel so the join is seamless)
-      const nose = new THREE.Mesh(new THREE.ConeGeometry(R, 3.0, 12), bodyMat);
-      nose.rotation.z = -Math.PI / 2; nose.position.set(L / 2 + 1.0, CY, 0); g.add(nose);
-      // tapered tail cone tucked into the rear of the barrel
-      const tailcone = new THREE.Mesh(new THREE.ConeGeometry(R, 3.4, 12), bodyMat);
-      tailcone.rotation.z = Math.PI / 2; tailcone.position.set(-L / 2 - 1.0, CY + 0.3, 0); g.add(tailcone);
-      // cabin window stripe + livery band hugging the flanks
+      const acc = accentMat(livery || 0x355c8a);
+      const K = partKit();
+      const L = 11, R = 1.1;      // barrel length / legacy radius (collider height stays R+3)
+      const FH = 2.2, FW = 2.0;   // fuselage box cross-section
+      const CY = R + 1.0;         // centreline height — UNCHANGED (2.1)
+      const BELLY = CY - FH / 2;  // 1.0
+
+      // fuselage: white barrel + LOW drooped nose taper + upswept tailcone
+      K.put(FLEET.white, new THREE.BoxGeometry(L, FH, FW, 2, 1, 1), 0, CY, 0);
+      K.put(FLEET.white, fuseGeo(3.6, FH, FW, { nose: 0.22, noseY: -0.62 }), L / 2 + 1.75, CY, 0);
+      K.put(FLEET.white, fuseGeo(3.8, FH, FW, { tail: 0.18, tailY: 0.8 }), -L / 2 - 1.85, CY, 0);
+      // dark cockpit glass band at the nose root
+      K.put(FLEET.glass, new THREE.BoxGeometry(1.5, 0.72, FW + 0.08), L / 2 + 0.55, CY + 0.42, 0);
+      // exec livery: angled accent swoosh rising to the nose + thin midnight
+      // echo line under it; oval-ish cabin windows as ONE inset strip a side
       for (const sgn of [-1, 1]) {
-        const win = new THREE.Mesh(new THREE.BoxGeometry(L - 3, 0.35, 0.08), winMat);
-        win.position.set(1.0, CY + 0.4, sgn * (R - 0.02)); g.add(win);
-        const band = new THREE.Mesh(new THREE.BoxGeometry(L - 1, 0.4, 0.05), tailMat);
-        band.position.set(0, CY - 0.35, sgn * (R + 0.01)); g.add(band);
+        const fz = sgn * (FW / 2 + 0.02);
+        K.put(acc, new THREE.BoxGeometry(7.5, 0.5, 0.06), 0.8, CY - 0.25, fz, 0, 0, 0.09);
+        K.put(FLEET.navy, new THREE.BoxGeometry(6.2, 0.16, 0.05), 0.2, CY - 0.62, fz, 0, 0, 0.09);
+        K.put(FLEET.glass, new THREE.BoxGeometry(6.4, 0.3, 0.06), 0.9, CY + 0.55, fz);
       }
-      // low-mounted swept wings, root inset into the belly so it overlaps
+      // stair-door hint: inset dark panel on the front-left (port) flank
+      K.put(FLEET.dark, new THREE.BoxGeometry(0.95, 1.3, 0.07), 3.5, CY - 0.1, -(FW / 2 + 0.03));
+
+      // low swept wing pair + accent winglets
+      K.put(FLEET.white, wingGeo(13.5, 3.0, 1.2, 0.32, 2.4, 0.5), -0.6, BELLY + 0.35, 0);
+      for (const sgn of [-1, 1]) K.put(acc, new THREE.BoxGeometry(0.8, 1.05, 0.3), -3.0, 2.2, sgn * 6.65);
+
+      // aft-mounted twin engine pods: sculpted pod + accent intake lip +
+      // dark inlet disc + dark exhaust, on a stub pylon off the tail barrel
       for (const sgn of [-1, 1]) {
-        const wing = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.3, 7.5), bodyMat);
-        wing.position.set(-1, R + 0.4, sgn * 3.4); wing.rotation.y = sgn * 0.22; wing.castShadow = true; g.add(wing);
-        // winglet (upturned tip)
-        const wl = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.25), tailMat);
-        wl.position.set(-1.9, R + 0.9, sgn * 6.9); wl.rotation.z = sgn * 0.25; g.add(wl);
-        // rear fuselage-mounted engine on a stub pylon (overlaps the tail barrel)
-        const eng = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.5, 2.2, 10), darkMat);
-        eng.rotation.z = Math.PI / 2; eng.position.set(-L / 2 + 1.4, CY + 0.5, sgn * 1.4); g.add(eng);
-        const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.3), darkMat);
-        pylon.position.set(-L / 2 + 1.4, CY + 0.2, sgn * 0.9); g.add(pylon);
+        const ez = sgn * (FW / 2 + 0.62);
+        K.put(FLEET.white, fuseGeo(2.6, 1.0, 1.0, { nose: 0.92, tail: 0.6 }), -5.2, CY + 0.55, ez);
+        K.put(acc, new THREE.BoxGeometry(0.26, 1.12, 1.12), -4.0, CY + 0.55, ez);
+        K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.8, 0.8), -3.9, CY + 0.55, ez);
+        K.put(FLEET.dark, new THREE.BoxGeometry(0.4, 0.6, 0.6), -6.4, CY + 0.55, ez);
+        K.put(FLEET.white, new THREE.BoxGeometry(1.3, 0.5, 0.5), -5.1, CY + 0.35, sgn * (FW / 2 + 0.18));
       }
-      // T-tail: fin sunk into the rear barrel, horizontal stab perched on top
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(2.6, 3.6, 0.35), tailMat);
-      fin.position.set(-L / 2 - 0.4, CY + 2.6, 0); fin.castShadow = true; g.add(fin);
-      const tee = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.25, 4.0), bodyMat);
-      tee.position.set(-L / 2 - 0.4, CY + 4.3, 0); g.add(tee);
-      // tricycle landing gear — legs reach from wheels up into the belly
-      for (const gp of [[4.6, 0], [-2.6, 1.4], [-2.6, -1.4]]) {
-        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 1.0, 6), darkMat);
-        leg.position.set(gp[0], 0.55, gp[1]); g.add(leg);
-        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.3, 10), tireMat);
-        wheel.rotation.x = Math.PI / 2; wheel.position.set(gp[0], 0.35, gp[1]); g.add(wheel);
+
+      // refined T-tail: swept accent fin, white logo block, tailplane on top
+      K.put(acc, finGeo(3.4, 2.6, 1.2, 0.3, 1.4), -8.0, 4.4, 0);
+      K.put(FLEET.white, new THREE.BoxGeometry(0.55, 0.55, 0.42), -8.95, 5.25, 0);
+      K.put(FLEET.white, wingGeo(4.6, 1.5, 0.9, 0.3, 0.7, 0), -9.0, 6.2, 0);
+
+      // tricycle gear with belly cover plates; wheels bottom at y=0
+      K.put(FLEET.metal, new THREE.BoxGeometry(0.24, 0.8, 0.24), 4.4, 0.7, 0);
+      K.put(FLEET.tire, new THREE.CylinderGeometry(0.3, 0.3, 0.3, 10), 4.4, 0.3, 0, Math.PI / 2);
+      K.put(FLEET.white, new THREE.BoxGeometry(0.8, 0.6, 0.08), 4.4, 0.78, 0.24);      // nose gear door
+      for (const sgn of [-1, 1]) {
+        K.put(FLEET.metal, new THREE.BoxGeometry(0.28, 0.7, 0.28), -1.7, 0.75, sgn * 1.05);
+        K.put(FLEET.tire, new THREE.CylinderGeometry(0.35, 0.35, 0.32, 10), -1.7, 0.35, sgn * 1.05, Math.PI / 2);
+        K.put(FLEET.white, new THREE.BoxGeometry(0.85, 0.65, 0.08), -1.7, 0.75, sgn * 1.34); // gear covers
       }
+      K.bake(g);
+
+      // nav lights: port red / starboard green wingtips, white tail, beacon
+      navBox(g, FLEET.navR, -3.0, 1.95, -6.6, 0.2);
+      navBox(g, FLEET.navG, -3.0, 1.95, 6.6, 0.2);
+      navBox(g, FLEET.navW, -10.0, 5.9, 0, 0.2);
+      navBox(g, FLEET.beacon, 0.4, 3.32, 0, 0.22);
+
       root.add(g);
       g.userData.worldCollider = solid(x, z, 14, 12, 0, R + 3, g);
       return g;
@@ -491,6 +631,10 @@
       const jet = buildAirliner(-160, TAX_Z - 6, Math.PI / 2, 0x444b55);
       // a baggage tug shoved up against the nose
       const tug = box(-160 + 16, 0.8, TAX_Z - 6, 3, 1.4, 2, 0xe8c020, { cast: true });
+      // the tug ANIMATES (position.z below): tag it so the static batcher /
+      // matrix freeze never bake it (an untagged plain mesh gets merged and
+      // the pushback would visibly freeze).
+      tug.userData.dynamic = true;
       const z0 = TAX_Z - 6, z1 = TAX_Z - 30, speed = 0.7;
       let t = 0, dir = 1;
       CBZ.onUpdate(40, function (dt) {
@@ -523,6 +667,17 @@
     fuelTruck(40, APRON_Z + 18, Math.PI / 2);
     stairTruck(-120, APRON_Z - 24);
     stairTruck(-10, APRON_Z - 24);
+    // jet-bridge stubs at the two EMPTY gate slots between the parked
+    // airliners (occupied gates board by stair truck — the airliners park
+    // tail-to-terminal, so a bridge at their gate would skewer the tail).
+    // Elevated corridors off the terminal face: constants only, NO colliders
+    // (underside 2.1u+, everything walks under), clear of every plane
+    // collider (x ±15 around gates) and of the stolen-plane roll-out path.
+    function jetBridge(bx) {
+      box(bx, 3.4, 4.5, 3.0, 2.2, 13, 0x9fb4c4, { cast: true });     // corridor from the terminal
+      box(bx, 3.4, -2.8, 3.6, 2.6, 2.6, 0x7d8894, { cast: true });   // gate-end head block
+    }
+    jetBridge(-92.5); jetBridge(-37.5);
     // baggage carts: ONE instanced mesh chain near the terminal
     (function baggageCarts() {
       const geo = new THREE.BoxGeometry(2.0, 1.0, 1.4);

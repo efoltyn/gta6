@@ -60,6 +60,7 @@
     if (mode === "escape") {
     const role = g.role === "cop" ? "cop" : "inmate";
     g.cigs = 0; g.caughtCount = 0; g.trades = 0; g.hasKey = false;
+    g.strikeHeatFloor = 0; g.cellWatch = false;   // three-strikes arc (systems/capture.js)
     g.complaints = 0; g.role = role;
     g.gangStanding = [0, 0];
     g.gangDebt = [0, 0];
@@ -118,7 +119,7 @@
     }
 
     CBZ.guards.forEach((gd) => {
-      gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.approach = null; gd.investigate = null; gd.approachCD = 3 + Math.random() * 5;
+      gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.approach = null; gd.investigate = null; gd.state = "patrol"; gd.approachCD = 3 + Math.random() * 5;
       gd.group.position.copy(gd.start); gd.group.rotation.z = 0; gd.flashlightOn = false; gd.flashlightReason = ""; gd.wedge.visible = false;
     });
     CBZ.npcs.forEach((n) => {
@@ -163,10 +164,52 @@
     }
   }
 
+  // the #survlose card ships survival-flavored in index.html; each loss
+  // relabels it via JS at show time so JAIL transfers and DISASTER deaths
+  // share one screen without touching the markup. (The stat labels are the
+  // sibling .l divs of the #sl* value nodes.)
+  function styleLossCard(jail, reason) {
+    const box = screens.survlose;
+    if (!box) return;
+    const logo = box.querySelector(".logo");
+    const sub = box.querySelector(".sub");
+    const timeEl = document.getElementById("slTime");
+    const disEl = document.getElementById("slDis");
+    const timeLabel = timeEl && timeEl.nextElementSibling;
+    const disLabel = disEl && disEl.nextElementSibling;
+    if (jail) {
+      if (logo) logo.textContent = "TRANSFERRED";
+      if (sub) sub.textContent = reason === "transferred"
+        ? "Strike three — shipped to max security"
+        : "The escape is over";
+      setText("slPlace", String(Math.min(3, g.caughtCount || 3)));
+      setText("slTotal", "strikes");
+      setText("slTime", CBZ.fmtTime(g.elapsed));
+      if (timeLabel) timeLabel.textContent = "On the run";
+      setText("slDis", g.cigs || 0);
+      if (disLabel) disLabel.textContent = "Cigs left";
+    } else {
+      if (logo) logo.textContent = "ELIMINATED";
+      // survival owns its own .sub line (modes/survival.js finishRound writes
+      // the cause/winner/record flavor BEFORE calling loseGame) — only clear
+      // it if a previous JAIL loss left our transfer copy behind.
+      if (sub && (sub.textContent === "Strike three — shipped to max security" || sub.textContent === "The escape is over")) {
+        sub.textContent = "The disasters claimed you";
+      }
+      if (timeLabel) timeLabel.textContent = "Survived";
+      if (disLabel) disLabel.textContent = "Disasters";
+    }
+  }
+
   function loseGame(reason) {
     if (g.state === "won" || g.state === "lost") return;
     setState("lost"); if (CBZ.sfx) CBZ.sfx("ko");
+    // JAIL (escape): three-strikes transfer to max security — capture.js is
+    // the caller. Survival keeps its placement stats (and relabels the card
+    // back in case a jail loss restyled it earlier in the session).
+    if (g.mode === "escape") { styleLossCard(true, reason); return; }
     fillSurvResult(false);
+    styleLossCard(false);
   }
   CBZ.loseGame = loseGame;
 

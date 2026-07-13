@@ -71,6 +71,11 @@
   }
 
   function tagSprite(text, color, sx, sy) {
+    // PROPS_PURPOSE (owner order): NO floating words over shop items — the
+    // displays speak for themselves and the walk-up prompt carries the price.
+    // Every call site already null-guards (the makeLabelSprite-absent path),
+    // so returning null degrades cleanly. Revert: CBZ.CONFIG.PROPS_PURPOSE=false.
+    if (!CBZ.CONFIG || CBZ.CONFIG.PROPS_PURPOSE !== false) return null;
     if (!CBZ.makeLabelSprite) return null;
     const s = CBZ.makeLabelSprite(text, { color: color || "#ffd166" });
     s.scale.set(sx || 2.3, sy || 0.55, 1);

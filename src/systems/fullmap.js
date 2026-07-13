@@ -286,6 +286,13 @@
     if (CBZ.game.state !== "playing" && CBZ.game.state !== "paused") return false;
     if (CBZ.simView && CBZ.simView.active && CBZ.setSimulationView) CBZ.setSimulationView(false);
     map.active = true;
+    // MUTUAL EXCLUSION with the phone(s): the map and a raised handset never
+    // share the screen. map.active is set first so their close() paths skip
+    // the pointer-relock (the map owns the cursor now).
+    if (CBZ.campaignPhoneOpen && CBZ.campaignUI && CBZ.campaignUI.close) {
+      try { CBZ.campaignUI.close(); } catch (e) {}
+    }
+    if (CBZ.cityClosePhone) { try { CBZ.cityClosePhone(); } catch (e) {} }
     clearMoveKeys();
     plates.a = null;   // re-render the static city plates fresh each open (ownership/renovations may have moved)
     if (mode() === "city") setCityView(false);   // drop the view on the player, zoomed-in
@@ -1371,13 +1378,17 @@
   addEventListener("keydown", function (e) {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === "m" && CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
-      // Campaign navigation lives on the diegetic phone; never cover the world
-      // with a separate prose-heavy map overlay.
-      if (CBZ.campaignUI && CBZ.campaignUI.open) CBZ.campaignUI.open("missions");
-      e.preventDefault();
+    // M ALWAYS toggles the full map (owner's order: the binding is M, layout-safe
+    // via e.code; e.key kept for the gamepad's synthetic tapKey("m") which carries
+    // no code). The old campaign branch that hijacked M to open the phone's
+    // missions app is gone — map and phone are mutually exclusive instead: opening
+    // the map puts the phone away first, so the two overlays never collide.
+    if (e.code === "KeyM" || k === "m") {
+      if (!map.active && CBZ.campaignUI && CBZ.campaignUI.isOpen && CBZ.campaignUI.isOpen()) {
+        try { CBZ.campaignUI.close(); } catch (err) {}
+      }
+      map.toggle(); e.preventDefault();
     }
-    else if (k === "m") { map.toggle(); e.preventDefault(); }
     else if (map.active && e.key === "Escape") { close(); e.preventDefault(); }
     else if (map.active && (e.key === "Backspace" || e.key === "Delete")) { clearWaypoint(); e.preventDefault(); }
     else if (map.active && mode() === "city" && k === "f") { setCityView(true); draw(); e.preventDefault(); }   // F = fit the whole archipelago

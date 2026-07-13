@@ -299,6 +299,7 @@
     let size = 0;
     for (let id = 0; id < TOTAL; id++) {
       if (S.dead[id]) continue;                         // killed inmates leave the live crowd
+      if (S.parked[id]) continue;                       // locked down in a cell → never selected
       if (!S.explicit[id]) S.materialize(id, simTime);
       const dx = S.posX[id] - p.x, dz = S.posZ[id] - p.z, d2 = dx * dx + dz * dz;
       if (size < want) { heapId[size] = id; heapD2[size] = d2; heapUp(size++); }
@@ -358,6 +359,10 @@
     for (let z = 0; z < flowTTL.length; z++) if (flowTTL[z] > 0) flowTTL[z] = Math.max(0, flowTTL[z] - dt);
     for (let slot = 0; slot < activeCount; slot++) {
       const id = activeId[slot], zoneId = S.zone[id], zone = S.zones[zoneId];
+      // locked down mid-selection (parked before chooseNearby's next sweep):
+      // frozen at the bunk — the zone clamp below would otherwise drag the
+      // cell-block position back into the yard rectangle in plain sight.
+      if (S.parked[id]) continue;
       if (S.contactCD[id] > 0) S.contactCD[id] = Math.max(0, S.contactCD[id] - dt);
       // a promoted agent that's held at gunpoint / KO'd / dead is owned by the
       // rig + the interaction systems — don't let the crowd sim drag it around.
@@ -372,8 +377,19 @@
       S.brainT[id] -= dt;
       let dx = S.goalX[id] - S.posX[id], dz = S.goalZ[id] - S.posZ[id];
       if (S.brainT[id] <= 0 || dx * dx + dz * dz < 0.8) {
-        S.randomPoint(id, S.zone[id], tempPoint);
-        S.goalX[id] = tempPoint.x; S.goalZ[id] = tempPoint.z; S.brainT[id] = 2.4 + S.rnd(id) * 5.6;
+        // NPC_SCHEDULES: the daily regime proposes this hour's goal — a lap
+        // corner, a chow-line slot, a stand-circle spot, a wall post. A HELD
+        // post (jg 2) re-arms the same point on a short brain timer, so the
+        // body walks there once and then STANDS (velocity decays at the goal)
+        // instead of brownian-pacing. No proposal → the old wander.
+        const jg = jailGoal(id, tempPoint);
+        if (jg) {
+          S.goalX[id] = tempPoint.x; S.goalZ[id] = tempPoint.z;
+          S.brainT[id] = jg === 2 ? 2.5 + S.rnd(id) * 2 : 4 + S.rnd(id) * 4;
+        } else {
+          S.randomPoint(id, S.zone[id], tempPoint);
+          S.goalX[id] = tempPoint.x; S.goalZ[id] = tempPoint.z; S.brainT[id] = 2.4 + S.rnd(id) * 5.6;
+        }
         dx = S.goalX[id] - S.posX[id]; dz = S.goalZ[id] - S.posZ[id];
       }
       const d = Math.sqrt(dx * dx + dz * dz) || 1;
@@ -416,8 +432,10 @@
       const bob = down ? 0 : Math.abs(Math.sin(S.phase[id])) * 0.035, swing = down ? 0 : Math.sin(S.phase[id]) * 0.42;
       rootDummy.position.set(S.prevX[id] + (S.posX[id] - S.prevX[id]) * alpha, bob, S.prevZ[id] + (S.posZ[id] - S.prevZ[id]) * alpha);
       rootDummy.rotation.set(0, S.heading[id], down ? Math.PI / 2 : 0); rootDummy.scale.set(1, 1, 1); rootDummy.updateMatrix();
-      // promoted to a real face-rig? hide this instanced copy (the rig is drawn instead)
-      if (rigOf[id] >= 0) { for (let mi = 0; mi < meshes.length; mi++) put(meshes[mi], slot, 0, 0, 0, 0.0001, 0.0001, 0.0001, 0); continue; }
+      // promoted to a real face-rig? hide this instanced copy (the rig is drawn
+      // instead). Parked (night lockdown, in a cell) hides the same way until
+      // chooseNearby's next sweep deselects it.
+      if (rigOf[id] >= 0 || S.parked[id]) { for (let mi = 0; mi < meshes.length; mi++) put(meshes[mi], slot, 0, 0, 0, 0.0001, 0.0001, 0.0001, 0); continue; }
       // WOMEN IN THE CROWD (W3): S.fem[id] (ambientstate.js, rolled ~48% off the
       // same deterministic rnd(id) stream as skin/hair) narrows the torso, trims
       // the head, slims + closes in the arms/legs, and stretches the hair box
@@ -598,6 +616,97 @@
     societyWorker.postMessage({ type: "init", count: TOTAL, visible: activeCount, positions: first.positions, sharedPositionBuffers: S.sharedPositionBuffers, sharedPositionMeta: S.sharedPositionMeta, sharedIndex: first.sharedIndex, roles: S.role, factions: S.faction, nerve: S.nerve, empathy: S.empathy, greed: S.greed, facts: S.facts }, transfer);
   } catch (_) { societyWorker = null; }
 
+  // ============================================================
+  // NPC_SCHEDULES — the jail's DAILY REGIME (owner: "mobs of npcs especially
+  // in jail doing nothing… at night they should almost all be in bed").
+  // Simple math only: the hour comes off the canonical sun (S.jailHour), the
+  // regime is a 6-slot table (S.jailAct), and every agent's part in it is a
+  // pure hash of its id — no pathfinding, no new arrays beyond S.parked.
+  //   07-09 yard laps   09-12 stand-circles   12-13 chow line
+  //   13-18 mixed (circles / wall posts / wander)   18-21 wind-down
+  //   21-07 LOCKDOWN — ~85% march to the cells (parked, staggered), the
+  //   night-owl slice stays out. Dawn marches them back. Headcount unchanged.
+  // ============================================================
+  let _jailAct = 3, _schedAcc = 9, _lockOn = false, _lockStart = -1e9;
+  const LOCK_FRAC = 0.85;          // share of the crowd that beds down at night
+  const MARCH_WIN = 18;            // sim-seconds over which the march staggers
+  function schedOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES); }
+  // may a body (dis)appear at (x,z) right now? Rejects close-and-on-camera
+  // and anything inside peripheral range — mirrors city/crowd.js placeSafe.
+  function seatSafe(x, z) {
+    if (!CBZ.CONFIG || !CBZ.CONFIG.NPC_SPAWN_HIDE) return true;
+    const P = CBZ.player; if (!P) return true;
+    const rx = x - P.pos.x, rz = z - P.pos.z, d2 = rx * rx + rz * rz;
+    if (d2 < 12 * 12) return false;              // too close even off-camera
+    if (d2 >= 45 * 45) return true;
+    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0), rd = Math.sqrt(d2) || 1;
+    return ((rx / rd) * -Math.sin(yaw) + (rz / rd) * -Math.cos(yaw)) < 0.35;
+  }
+  // this hour's goal for one agent. Returns 0 = no proposal (wander),
+  // 1 = far waypoint (lap corner), 2 = HELD post (queue/circle/wall).
+  function jailGoal(id, out) {
+    if (!schedOn()) return 0;
+    const act = _jailAct, zn = S.zones[S.zone[id]];
+    if (act === 0) {               // morning laps: corner-to-corner circuits
+      const k = ((S.idHash(id, 0x2C0) * 4) | 0) + ((simTime / 30) | 0) & 3;
+      out.x = (k === 1 || k === 2) ? zn.x1 - 3 : zn.x0 + 3;
+      out.z = k >= 2 ? zn.z1 - 3 : zn.z0 + 3;
+      return 1;
+    }
+    if (act === 2 && S.zone[id] === 0 && (id & 3) === 0) {
+      // CHOW LINE: two columns along the mess hall's east wall (room is
+      // x[-29,-19] z[6,22]; the line forms OUTSIDE it at x≈-18, clear of the
+      // walls — the mass sim has no collider pass, so posts stay in the open).
+      const k = (id >> 2) % 26;
+      out.x = -18.1 + (k >= 13 ? 0.9 : 0);
+      out.z = 6.8 + (k % 13) * 1.6;
+      return 2;
+    }
+    if (act === 1 || act === 3) {
+      const r = S.idHash(id, 0x2C4);
+      if (r < 0.45) {              // stand-circles: knots of small talk
+        const grp = (id % 10) + S.zone[id] * 16;
+        const cx = zn.x0 + 4 + S.idHash(grp, 0x2C1) * (zn.x1 - zn.x0 - 8);
+        const cz = zn.z0 + 4 + S.idHash(grp, 0x2C2) * (zn.z1 - zn.z0 - 8);
+        const a = S.idHash(id, 0x2C3) * Math.PI * 2;
+        out.x = cx + Math.cos(a) * 1.6; out.z = cz + Math.sin(a) * 1.6;
+        return 2;
+      }
+      if (r < 0.7) {               // posted up along the west wall
+        const rows = Math.max(4, ((zn.z1 - zn.z0 - 4) / 1.5) | 0);
+        out.x = zn.x0 + 0.9;
+        out.z = zn.z0 + 2 + (id % rows) * 1.5;
+        return 2;
+      }
+      return 0;                    // the rest wander — yard texture
+    }
+    return 0;                      // wind-down / lockdown leftovers: wander
+  }
+  // ~2Hz: advance the regime + run the staggered lockdown march in/out.
+  function jailRegimeTick() {
+    _jailAct = S.jailAct(S.jailHour());
+    const lock = _jailAct === 5;
+    if (lock !== _lockOn) { _lockOn = lock; _lockStart = simTime; }
+    for (let id = 0; id < TOTAL; id++) {
+      if (S.dead[id]) continue;
+      const delay = S.idHash(id, 0x1A11) * MARCH_WIN;
+      if (lock) {
+        if (S.parked[id]) continue;
+        if (S.idHash(id, 0x1A12) >= LOCK_FRAC) continue;   // night owls stay out
+        if (simTime - _lockStart < delay) continue;        // staggered lights-out
+        if (rigOf[id] >= 0) continue;                      // a real face-rig never blinks out
+        if (S.downT[id] > 0) continue;                     // KO'd bodies stay where they fell
+        if (!seatSafe(S.posX[id], S.posZ[id])) continue;   // never vanish on camera
+        S.park(id);
+      } else if (S.parked[id]) {
+        if (simTime - _lockStart < delay) continue;        // staggered march-out
+        S.randomPoint(id, S.zone[id], tempPoint);
+        if (!seatSafe(tempPoint.x, tempPoint.z)) continue; // seat in view → retry next tick
+        S.unpark(id, simTime, tempPoint.x, tempPoint.z);
+      }
+    }
+  }
+
   function step(dt) {
     const escape = CBZ.game.mode === "escape"; root.visible = escape;
     if (!escape) { if (facePool.length) freeAllRigs(); return; }
@@ -607,6 +716,9 @@
       const t0 = performance.now();
       simTime += dt * ((CBZ.simView && CBZ.simView.active) ? Math.min(16, societyStats.timeScale || 1) : 1);
       S.clock = simTime;
+      // the jail's daily regime — cheap (140 hash compares, 2Hz), runs even in
+      // overview so the sped-up sim shows the lockdown/march like everything else
+      if (schedOn()) { _schedAcc += dt; if (_schedAcc >= 0.5) { _schedAcc = 0; jailRegimeTick(); } }
       if (!societyOverview) {
         selectAcc += dt; chooseNearby(false);
         fixedAcc = Math.min(FIXED * 3, fixedAcc + dt);

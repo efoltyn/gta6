@@ -73,15 +73,37 @@
         center: null,
       };
     }
-    return g.playerGang;
+    // a ledger-restored gang is a SAFE SHELL ({id,name,color,founded,order} —
+    // worldstate.js can't carry live ped/lot refs): heal the live-ref fields
+    // here so every caller can trust the arrays exist. The GANG_PERSIST blob
+    // (gangs.js → cityPlayerGangRestore) then refills turf + members.
+    const pg = g.playerGang;
+    if (!pg.id) pg.id = "player";
+    if (!pg.members) pg.members = [];
+    if (!pg.turf) pg.turf = [];
+    if (pg.order == null) pg.order = "follow";
+    return pg;
   }
   CBZ.cityPlayerGangEnsure = ensure;
 
   function exists() { return !!(g.playerGang && g.playerGang.founded); }
   CBZ.cityPlayerGangExists = exists;
 
+  // ---- THE one canonical "which crew does the player ride with" read.
+  //      Order: patched into an NPC crew (g.cityMembership) → your own founded
+  //      gang → the legacy g.playerGangId mirror. gangs.js (sanctioned-kill
+  //      gate, vendetta own-crew check) and turf.js read THIS instead of
+  //      re-deriving the old three-field ambiguity (the g.playerGangAffiliation
+  //      orphan is dead — nothing writes it any more). ----
+  CBZ.cityPlayerGangId = function () {
+    const m = g.cityMembership;
+    if (m && m.gangId) return m.gangId;
+    if (g.playerGang && g.playerGang.founded) return g.playerGang.id;
+    return g.playerGangId || null;
+  };
+
   function liveMembers() {
-    const pg = g.playerGang; if (!pg) return [];
+    const pg = g.playerGang ? ensure() : null; if (!pg) return [];   // ensure(): heal a ledger shell's missing arrays
     // drop anyone dead, despawned, or who quit (careers.js walks a companion off
     // the job when you miss payroll — that clears recruited/faction)
     pg.members = pg.members.filter((m) => m && !m.dead && !m.collected && m.recruited && (m.gang === pg.id || m.faction === "player"));
@@ -127,6 +149,7 @@
     if (CBZ.cityMemberStats) { const s = CBZ.cityMemberStats(ped); s.loyalty = Math.max(s.loyalty, 0.7); }
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
     styleMember(ped, pg.color);
+    registerInGangList();   // keep the CBZ.cityGangs mirror in step (one sync path)
   }
   CBZ.cityPlayerGangEnlist = enlist;
 
@@ -186,9 +209,15 @@
   }
   CBZ.cityPlayerGangClaimTurf = claimTurfAt;
 
-  // mirror g.playerGang into CBZ.cityGangs so shared systems treat it as a gang
+  // mirror g.playerGang into CBZ.cityGangs so shared systems treat it as a gang.
+  // THIS is the single sync point between the two shapes (the plain rec shares
+  // the SAME turf/members arrays, so pushes propagate; only identity fields —
+  // name/color/center — need re-stamping). Exposed as CBZ.cityPlayerGangSync so
+  // every mutation site (here, gangs.js restore, future callers) uses one path
+  // instead of remembering the mirror by hand.
   function registerInGangList() {
-    const pg = g.playerGang; if (!pg || !pg.founded) return;
+    const pg = g.playerGang && g.playerGang.founded ? ensure() : null;   // ensure(): heal a ledger shell
+    if (!pg) return;
     if (!CBZ.cityGangs) return;
     let rec = CBZ.cityGangs.find((x) => x.id === pg.id);
     if (!rec) {
@@ -198,6 +227,64 @@
       rec.name = pg.name; rec.color = pg.color; rec.turf = pg.turf; rec.members = pg.members; rec.center = pg.center || rec.center;
     }
   }
+  CBZ.cityPlayerGangSync = registerInGangList;
+
+  // ---- RESTORE (GANG_PERSIST) — rebuild your founded crew from the saved
+  //      safe shell in gangs.js's ledger blob: {founded,name,color,order,
+  //      turf:[lot indices],roster:{rank:count}}. Called by gangs.js's restore
+  //      pass right after the per-seed world spawns, so lot indices resolve
+  //      against the same deterministic city.arena.lots. Members are FRESH
+  //      bodies through the shared ped factory + the normal enlist path (the
+  //      exact pipeline a live recruit takes) — never revived ped refs. ----
+  CBZ.cityPlayerGangRestore = function (rec) {
+    if (!rec || !rec.founded) return false;
+    const A = CBZ.city && CBZ.city.arena; if (!A || !A.lots || !A.lots.length) return false;
+    const pg = ensure();
+    pg.founded = true;
+    if (rec.name) pg.name = rec.name;
+    if (rec.color != null) pg.color = rec.color;
+    // turf back from stable per-seed lot indices (repaint = claimTurfAt's stamp)
+    pg.turf.length = 0;
+    for (const li of rec.turf || []) {
+      const lot = A.lots[li]; if (!lot) continue;
+      pg.turf.push(lot);
+      lot.building = lot.building || {};
+      lot.building.gang = pg.id; lot.building.gangColor = pg.color; lot.building.playerTurf = true;
+      if (lot.building.stash) lot.building.stash.gang = pg.id;
+    }
+    if (pg.turf.length) pg.center = { x: pg.turf[0].cx, z: pg.turf[0].cz };
+    g.career = g.career || "gangster";
+    // crew back up to the saved rank counts
+    const want = rec.roster || {};
+    if (CBZ.cityMakePed) {
+      for (const rk in want) {
+        for (let k = 0, n = want[rk] | 0; k < n; k++) {
+          const lot = pg.turf.length ? pg.turf[k % pg.turf.length] : null;
+          const cx = lot ? lot.cx : (pg.center ? pg.center.x : 0);
+          const cz = lot ? lot.cz : (pg.center ? pg.center.z : 0);
+          const ped = CBZ.cityMakePed(cx + (rnd() - 0.5) * 6, cz + (rnd() - 0.5) * 6, rnd, {
+            kind: "gang", gang: pg.id, faction: "player",
+            guard: lot ? { x: lot.cx, z: lot.cz } : null,
+            outfit: pg.color, aggr: 0.92, archetype: "gangster", job: "crew",
+            armed: true, weapon: "Pistol", hp: 160,
+          });
+          if (!ped) continue;
+          A.root.add(ped.group);
+          CBZ.cityPeds.push(ped);
+          enlist(ped, rk);
+          if (lot) ped.homeGuard = { x: lot.cx, z: lot.cz };
+        }
+      }
+    }
+    pg.order = rec.order || pg.order || "disperse";
+    registerInGangList();
+    applyOrder();
+    g.cityCrew = liveMembers().length;
+    if (CBZ.cityRefreshTurfHud) CBZ.cityRefreshTurfHud();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    renderHud();
+    return true;
+  };
 
   // ---- TAKE OVER a rival gang (its boss just died to the player) ----
   // gangs.js calls this with the dead boss's gang record.
@@ -696,6 +783,46 @@
     return best;
   }
 
+  // nearest unlooted RIVAL stash block (the gangs.js stash metadata) — the
+  // target for the RAID STASH order. Allies' stashes are off the table.
+  function nearestRivalStashLot(x, z) {
+    let best = null, bd = Infinity;
+    for (const gn of CBZ.cityGangs || []) {
+      if (!gn || gn.isPlayer || gn.absorbed) continue;
+      if (CBZ.cityAreAllied && CBZ.cityAreAllied("player", gn.id)) continue;
+      for (const lot of gn.turf || []) {
+        if (lot.demolished) continue;
+        const st = lot.building && lot.building.stash;
+        if (!st || st.looted) continue;
+        const dx = lot.cx - x, dz = lot.cz - z, dd = dx * dx + dz * dz;
+        if (dd < bd) { bd = dd; best = lot; }
+      }
+    }
+    return best;
+  }
+
+  // the crew cracked a rival stash: same consequences as robbing it yourself
+  // (gangs.js cityRobStash — provoke, standing, heat), but the take is CREW
+  // money, so it banks (like the turf payday) instead of hitting your pocket.
+  function crewCrackStash(lot, foe) {
+    const st = lot && !lot.demolished && lot.building && lot.building.stash;
+    let take = 0;
+    if (st && !st.looted) {
+      st.looted = true;
+      take = st.cash || 0;
+      if (st.mesh && st.mesh.material && st.mesh.material.color) { try { st.mesh.material.color.setHex(0x202020); } catch (e) {} }
+    }
+    if (take > 0) { g.cityBank = (g.cityBank || 0) + take; }
+    CBZ.city.big("🎒 STASH RAIDED" + (take ? " +$" + take : ""));
+    CBZ.city.note(take ? "Your crew cracked the stash — $" + take + " banked. They hold the block." : "The stash was already empty — the crew holds the block anyway.", 3);
+    CBZ.city.addRespect(8);
+    if (foe && CBZ.cityGangProvoke) CBZ.cityGangProvoke(foe.id, 1);
+    if (foe && CBZ.cityGangAddStanding) CBZ.cityGangAddStanding(foe.id, -10);
+    if (CBZ.cityCrime) CBZ.cityCrime(50, { x: lot.cx, z: lot.cz, type: "burglary" });
+    if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+
   // ---- the order system ----
   function issueOrder(kind) {
     const pg = ensure();
@@ -723,6 +850,24 @@
       CBZ.city.note("Crew falls in with you.", 1.6);
     } else if (kind === "disperse") {
       CBZ.city.note("Crew melts back to the turf.", 1.6);
+    } else if (kind === "raid") {
+      // RAID STASH: send the crew at the nearest rival stash block. Reuses the
+      // gangs.js stash/raid fields (raidT/raidLot/raidGang) so the existing
+      // return infra walks everyone home if the push stalls.
+      const P = CBZ.player;
+      const lot = nearestRivalStashLot(P.pos.x, P.pos.z);
+      if (!lot) { CBZ.city.note("No rival stash in reach to raid.", 2); pg.order = "follow"; applyOrder(); return; }
+      pg.raidLot = lot; pg.raidGangId = (lot.building && lot.building.gang) || null; pg.raidClock = 40;
+      const foe = pg.raidGangId ? gangRecById(pg.raidGangId) : null;
+      const zn = CBZ.cityZoneAt ? CBZ.cityZoneAt(lot.cx, lot.cz) : null;
+      CBZ.city.note("Crew rolls on the " + (foe ? foe.name : "rival") + " stash" + (zn ? " in " + zn.name : "") + ". Clear the block and they crack it.", 3);
+      if (CBZ.fullMap && CBZ.fullMap.setWaypoint) CBZ.fullMap.setWaypoint(lot.cx, lot.cz, "RAID");
+      if (pg.raidGangId && CBZ.cityGangProvoke) CBZ.cityGangProvoke(pg.raidGangId, 0.8);
+    } else if (kind === "fortify") {
+      // FORTIFY: spread the crew across YOUR blocks as standing guards (the
+      // same hold/guard plumbing, one post per member round-robin over turf).
+      if (!pg.turf.length) { CBZ.city.note("No turf to fortify — claim a block first.", 2); pg.order = "follow"; applyOrder(); return; }
+      CBZ.city.note("Crew spreads out to fortify your " + pg.turf.length + " block" + (pg.turf.length > 1 ? "s" : "") + ".", 2.2);
     }
     applyOrder();
     showOrdersHud();
@@ -735,6 +880,7 @@
     const pg = g.playerGang; if (!pg || !pg.founded) return;
     const mem = liveMembers();
     const P = CBZ.player;
+    let fi = 0;   // fortify: round-robin post index over pg.turf
     for (const m of mem) {
       if (pg.order === "follow") {
         m.companion = true; m.guard = null; m.rage = null;
@@ -751,6 +897,24 @@
         const h = m.homeGuard || pg.center || { x: P.pos.x, z: P.pos.z };
         m.guard = { x: h.x, z: h.z };
         m.target.set(h.x + (Math.random() - 0.5) * 6, 0, h.z + (Math.random() - 0.5) * 6); m.pause = 0; m.path = null;
+      } else if (pg.order === "raid") {
+        m.companion = false;
+        const lot = pg.raidLot;
+        if (lot) {
+          m.homeGuard = m.homeGuard || (m.guard ? { x: m.guard.x, z: m.guard.z } : (pg.center ? { x: pg.center.x, z: pg.center.z } : null));
+          m.guard = { x: lot.cx + (Math.random() - 0.5) * 6, z: lot.cz + (Math.random() - 0.5) * 6 };
+          m.raidT = 26 + Math.random() * 8; m.raidLot = lot; m.raidGang = pg.raidGangId || null;
+          m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
+        }
+      } else if (pg.order === "fortify") {
+        m.companion = false; m.rage = null;
+        const lot = pg.turf[fi++ % pg.turf.length];
+        if (lot) {
+          // the post IS the new home — a fortified member stays garrisoned
+          m.guard = { x: lot.cx + (Math.random() - 0.5) * 4, z: lot.cz + (Math.random() - 0.5) * 4 };
+          m.homeGuard = { x: m.guard.x, z: m.guard.z };
+          m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
+        }
       }
     }
     g.cityCrew = mem.length;
@@ -812,7 +976,7 @@
     }
     const mem = liveMembers();
     const lts = mem.filter((m) => m.rank === "lt").length;
-    const orderName = { follow: "FOLLOW", attack: "ATTACK", hold: "HOLD", disperse: "DISPERSE" }[pg.order] || "—";
+    const orderName = { follow: "FOLLOW", attack: "ATTACK", hold: "HOLD", disperse: "DISPERSE", raid: "RAID STASH", fortify: "FORTIFY" }[pg.order] || "—";
     hudEl.innerHTML =
       "<div style='font-weight:700;color:" + hex6(pg.color) + "'>🩸 " + (pg.name || "Your Gang") + "</div>" +
       "<div style='color:#aeb6c2'>Crew <b style='color:#e8eef7'>" + mem.length + "</b> · Lts " + lts + " · Turf " + pg.turf.length + "</div>" +
@@ -897,6 +1061,11 @@
       add("hold", "🛡 HOLD HERE — claim + defend this block");
       add("follow", "🏃 FOLLOW me");
       add("disperse", "🚶 DISPERSE to turf");
+      // RAID STASH: only offered when a rival stash is actually out there
+      if (nearestRivalStashLot(CBZ.player.pos.x, CBZ.player.pos.z)) {
+        add("raidstash", "🎒 RAID the nearest rival stash — crew hits it", "#ffd166");
+      }
+      if (pg.turf.length) add("fortify", "🏰 FORTIFY — post crew across your turf", "#7fd0ff");
       add("promote", "⬆ PROMOTE nearest crew → Lieutenant", "#7fd0ff");
       add("claimturf", "📍 CLAIM this block as turf");
       // ---- takeover meta (turf.js): buy a weakly-held district, broker pacts ----
@@ -928,6 +1097,8 @@
     else if (act === "hold") issueOrder("hold");
     else if (act === "follow") issueOrder("follow");
     else if (act === "disperse") issueOrder("disperse");
+    else if (act === "raidstash") issueOrder("raid");
+    else if (act === "fortify") issueOrder("fortify");
     else if (act === "claimturf") claimTurfAt(CBZ.player.pos.x, CBZ.player.pos.z);
     else if (act === "promote") {
       const px = CBZ.player.pos.x, pz = CBZ.player.pos.z;
@@ -1122,11 +1293,45 @@
     } else if (pg.order === "follow") {
       // make sure followers stay on the companion brain (a fight may have flipped one)
       for (const m of mem) if (!m.companion) { m.companion = true; m.rage = null; m.guard = null; }
-    } else if (pg.order === "hold" || pg.order === "disperse") {
+    } else if (pg.order === "hold" || pg.order === "disperse" || pg.order === "fortify") {
       // re-assert the guard post for any member that drifted off it (unless mid-fight)
       for (const m of mem) {
         if (m.companion) m.companion = false;
         if (!m.guard) { const gp = (pg.order === "hold" ? (pg.holdPoint || pg.center) : (m.homeGuard || pg.center)); if (gp) m.guard = { x: gp.x, z: gp.z }; }
+      }
+    } else if (pg.order === "raid") {
+      // RAID STASH resolution: the crew standing on the stash block with the
+      // defenders cleared cracks it (then holds the block — a wiped owner's
+      // zone can flip through turf.js's existing wipe resolution).
+      const lot = pg.raidLot;
+      if (!lot) { pg.order = "follow"; applyOrder(); }
+      else {
+        pg.raidClock = (pg.raidClock == null ? 40 : pg.raidClock) - dt;
+        let onLot = 0;
+        for (const m of mem) {
+          const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz;
+          if (dx * dx + dz * dz < 11 * 11) onLot++;
+        }
+        let defenders = 0;
+        const foe = pg.raidGangId ? gangRecById(pg.raidGangId) : null;
+        if (foe && !foe.absorbed) {
+          for (const m of foe.members) {
+            if (!m || m.dead || m.ko > 0) continue;
+            const dx = m.pos.x - lot.cx, dz = m.pos.z - lot.cz;
+            if (dx * dx + dz * dz < 13 * 13) defenders++;
+          }
+        }
+        if (onLot >= 2 && defenders === 0) {
+          crewCrackStash(lot, foe);
+          pg.raidLot = null; pg.raidGangId = null;
+          pg.order = "hold"; pg.holdPoint = { x: lot.cx, z: lot.cz };
+          applyOrder(); showOrdersHud();
+        } else if (pg.raidClock <= 0) {
+          CBZ.city.note("The raid stalled — crew pulls back.", 2.2);
+          if (CBZ.fullMap && CBZ.fullMap.clearWaypoint) CBZ.fullMap.clearWaypoint("city");
+          pg.raidLot = null; pg.raidGangId = null;
+          pg.order = "disperse"; applyOrder(); showOrdersHud();
+        }
       }
     }
 

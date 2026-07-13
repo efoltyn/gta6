@@ -27,9 +27,15 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  // deterministic-ish rng, distinct stream from gangs.js
+  // deterministic rng, distinct stream from gangs.js. GANG_SEEDED (gangs.js
+  // self-defaults it true): a named world-seed stream (CBZ.seedStream("turf"))
+  // replaces the magic literal so alliances/director rolls vary with ?seed=N —
+  // same draw ORDER either way; flag off keeps the classic 0x51ed7 LCG.
   let _s = 0x51ed7;
-  function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  let _sStream = null;                 // (re)derived at every zone build
+  function rng() { if (_sStream) return _sStream(); _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
+  function seededOn() { return (!CBZ.CONFIG || CBZ.CONFIG.GANG_SEEDED !== false) && !!CBZ.seedStream; }
+  function persistOn() { return !CBZ.CONFIG || CBZ.CONFIG.GANG_PERSIST !== false; }
   function pick(a) { return a[(rng() * a.length) | 0]; }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
@@ -45,6 +51,8 @@
     "Westend", "Midtown", "Harborside",
     "Southside", "Ironworks", "Dockyard",
   ];
+  // two-letter chips for the always-on zones bar (indexed like ZONE_NAMES)
+  const ZONE_ABBR = ["NP", "CH", "EG", "WE", "MT", "HS", "SS", "IW", "DY"];
   let zones = [];            // [{id,name,cx,cz,lots:[],owner,strength,heldStr,t}]
   let zonesBuilt = false;
   let mapN = 6;              // grid size (config.blocks), read at build
@@ -53,6 +61,9 @@
     zones = []; zonesBuilt = false;
     const A = CBZ.city && CBZ.city.arena;
     if (!A || !A.lots || !A.lots.length) return;
+    // GANG_SEEDED: this build's stream derives from the world seed
+    if (seededOn()) _sStream = CBZ.seedStream("turf");
+    else _sStream = null;
     mapN = (CBZ.CITY && CBZ.CITY.blocks) || 6;
     // 3×3 districts over the i/j grid
     const span = Math.ceil(mapN / 3);
@@ -61,6 +72,7 @@
       const di = q % 3, dj = (q / 3) | 0;
       grid[q] = {
         id: "z" + q, name: ZONE_NAMES[q] || ("Zone " + q),
+        abbr: ZONE_ABBR[q] || ("Z" + q),
         di, dj, lots: [], cx: 0, cz: 0,
         owner: null, strength: 0, heldStr: 0, t: 0, contestedBy: null,
       };
@@ -139,18 +151,42 @@
   function gangName(id) { const x = (CBZ.cityGangs || []).find((y) => y.id === id); return x ? x.name : null; }
   function gangColorOf(id) { const x = (CBZ.cityGangs || []).find((y) => y.id === id); return x ? x.color : 0x8a93a3; }
 
+  // ---- ZONE-FLIP MOMENTS: every change of hands is a readable beat — a
+  //      minimap-adjacent toast under the zones bar ("EASTGATE falls to the
+  //      Vipers — 3/9 districts"), a kill-feed line, and a flash on the chip.
+  //      flipMuteT silences the announcements while a saved board is being
+  //      re-applied on reload (the ownership snap isn't news).
+  let flipMuteT = 0;
+  const flipFeed = [];               // [{html, t}] merged into the kill feed
+  CBZ.cityTurfMuteFlips = function (sec) { flipMuteT = Math.max(flipMuteT, sec || 3); };
+
   function onZoneFlip(z, prevId, newId) {
     if (!newId) return;
-    const nm = gangName(newId) || "A crew";
-    const near = nearPlayer(z.cx, z.cz, 160);
-    const playerInvolved = newId === "player" || prevId === "player";
-    if (near || playerInvolved) {
-      CBZ.city && CBZ.city.note("🏴 " + nm + " took " + z.name + ".", 2.4);
-    }
-    // turf flip toward the player: respect, but NO jingle (no-jingle rule).
-    if (newId === "player") { CBZ.city && CBZ.city.addRespect(12); }
+    z._flashT = CBZ.now || 0;        // the chip flashes even on a muted flip
     hudDirty = true;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (flipMuteT > 0) return;
+    const you = newId === "player";
+    const nm = you ? "YOU" : (gangName(newId) || "A crew");
+    const ctrl = CBZ.cityZoneControl();
+    const held = (ctrl.byGang && ctrl.byGang[newId]) || 0;
+    const score = held + "/" + ctrl.total + " districts";
+    const col = hex6(gangColorOf(newId));
+    const line = you
+      ? z.name.toUpperCase() + " is YOURS — " + score
+      : z.name.toUpperCase() + " falls to the " + nm + " — " + score;
+    showZoneToast(line, col);
+    flipFeed.push({
+      html: "<div class='kfrow zflip' style='border-right-color:" + col + "'><b>" + esc(z.name.toUpperCase()) + "</b> — " + (you ? "yours" : "taken by " + esc(nm)) + " (" + held + "/" + ctrl.total + ")</div>",
+      t: CBZ.now || 0,
+    });
+    if (flipFeed.length > 8) flipFeed.splice(0, flipFeed.length - 8);
+    const playerInvolved = you || prevId === "player";
+    if (playerInvolved) {
+      CBZ.city && CBZ.city.note(you ? "🏴 You took " + z.name + "." : "🏴 " + nm + " took " + z.name + " from you.", 2.4);
+    }
+    // turf flip toward the player: respect, but NO jingle (no-jingle rule).
+    if (you) { CBZ.city && CBZ.city.addRespect(12); }
   }
 
   // gangs.js calls this after an NPC↔NPC lot capture / playergang on claim —
@@ -750,14 +786,14 @@
   CBZ.cityPlayerBuyZone = function () {
     const P = CBZ.player; if (!P) return false;
     const z = CBZ.cityZoneAt(P.pos.x, P.pos.z);
-    if (!z) { CBZ.city && CBZ.city.note("No district here.", 1.6); return false; }
-    if (z.owner === "player") { CBZ.city && CBZ.city.note("You already hold " + z.name + ".", 1.8); return false; }
+    if (!z) { CBZ.city && CBZ.city.note("No district at your location.", 1.6, { from: "Maps", app: "system" }); return false; }
+    if (z.owner === "player") { CBZ.city && CBZ.city.note(z.name + " already flies our colors, boss.", 1.8, { from: "Crew" }); return false; }
     if (z.owner && CBZ.cityGangById(z.owner) && CBZ.cityGangById(z.owner).isPlayer) return false;
     if (z.strength > 0.7) { CBZ.city && CBZ.city.note(z.name + " is too strongly held to buy — take it by force.", 2.4); return false; }
     const owner = z.owner ? CBZ.cityGangById(z.owner) : null;
     const cost = 1500 + z.heldStr * 400;
     if (!CBZ.cityPlayerGangExists || !CBZ.cityPlayerGangExists()) { CBZ.city && CBZ.city.note("Found a gang first ([O]).", 2); return false; }
-    if ((g.cash || 0) < cost) { CBZ.city && CBZ.city.note("Need $" + cost + " to buy out " + z.name + ".", 2.4); return false; }
+    if ((g.cash || 0) < cost) { CBZ.city && CBZ.city.note("We'd need $" + cost + " on hand to buy out " + z.name + ".", 2.4, { from: "Crew" }); return false; }
     g.cash -= cost; if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     const pg = CBZ.cityGangById("player");
     if (owner) { owner.treasury = (owner.treasury || 0) + cost * 0.4; if (pg) flipZoneLots(pg, owner, z); }
@@ -782,13 +818,32 @@
     return true;
   };
 
-  // DEFECT / switch the player to a rival gang (joins as a member, abandons own)
+  // DEFECT / switch the player to a rival gang (joins as a member). Writes the
+  // CANONICAL membership fields playergang.js's patch-in flow owns
+  // (g.cityMembership + g.playerGangId) — the old g.playerGangAffiliation
+  // orphan (written here, read nowhere that mattered) is gone. Never fires
+  // while you run your own founded crew.
   CBZ.cityPlayerDefectTo = function (gangId) {
     const rec = CBZ.cityGangById(gangId);
-    if (!rec || rec.isPlayer) return false;
-    CBZ.city && CBZ.city.big("↩ JOINED " + rec.name);
-    CBZ.city && CBZ.city.note("You ride with the " + rec.name + " now.", 2.6);
-    g.playerGangAffiliation = gangId;
+    if (!rec || rec.isPlayer || rec.absorbed) return false;
+    if (CBZ.cityPlayerGangExists && CBZ.cityPlayerGangExists()) {
+      CBZ.city && CBZ.city.note("You run your own crew — you don't defect, you conquer.", 2.4);
+      return false;
+    }
+    const prev = g.cityMembership && g.cityMembership.gangId;
+    if (prev === gangId) return false;                 // already ride with them
+    // leaving the old crew sours them (same consequence as cityLeaveGang)
+    if (prev && CBZ.cityGangSetPlayerFriendly) CBZ.cityGangSetPlayerFriendly(prev, false);
+    if (prev && CBZ.cityGangProvoke) CBZ.cityGangProvoke(prev, 0.7);
+    if (CBZ.cityJoinGang) {
+      CBZ.cityJoinGang(rec, "defect");                 // canonical patch-in (membership, waypoints, friendly flag)
+    } else {
+      g.cityMembership = { gangId: gangId, rank: "prospect", standing: 0, bodies: 0, contrib: 0, loyalty: 0.6, how: "defect" };
+      g.playerGangId = gangId;
+      if (CBZ.cityGangSetPlayerFriendly) CBZ.cityGangSetPlayerFriendly(gangId, true);
+      CBZ.city && CBZ.city.big("↩ JOINED " + rec.name);
+      CBZ.city && CBZ.city.note("You ride with the " + rec.name + " now.", 2.6);
+    }
     CBZ.citySetRelation("player", gangId, "ally");
     hudDirty = true;
     return true;
@@ -802,6 +857,20 @@
   // ============================================================
   let hudRoot = null, zoneBarEl = null, headEl = null, allyEl = null, leadEl = null, feedEl = null;
   let hudDirty = true, feedSig = "";
+  let toastEl = null, toastT = 0;
+
+  // the minimap-adjacent flip toast under the zones bar (one at a time; the
+  // freshest flip wins). Restarting the CSS animation makes repeats readable.
+  function showZoneToast(txt, color) {
+    buildHud();
+    if (!toastEl) return;
+    toastEl.textContent = txt;
+    toastEl.style.color = color || "#e8eef7";
+    toastEl.style.display = "none";
+    void toastEl.offsetWidth;             // restart the ztIn animation
+    toastEl.style.display = "block";
+    toastT = 4.5;
+  }
   function buildHud() {
     if (hudRoot) return;
     if (!document.getElementById("cTurfMetaCss")) {
@@ -810,8 +879,16 @@
       st.textContent =
         "#cTurfMeta{position:fixed;left:0;right:0;top:6px;z-index:21;pointer-events:none;font-family:Fredoka,system-ui,sans-serif;display:none}" +
         "#cTurfMeta .wrap{width:min(560px,72vw);margin:0 auto;text-align:center}" +
-        "#cTurfMeta .zbar{display:flex;height:13px;border-radius:7px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.08)}" +
+        "#cTurfMeta .zbar{display:flex;height:15px;border-radius:7px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.08)}" +
         "#cTurfMeta .zseg{flex:1 1 0;min-width:2px;transition:background .3s}" +
+        "#cTurfMeta .zchip{display:flex;align-items:center;justify-content:center}" +
+        "#cTurfMeta .zchip span{font-size:9px;font-weight:800;color:#f2f6ff;text-shadow:0 1px 2px rgba(0,0,0,.9);letter-spacing:.4px;line-height:1}" +
+        "#cTurfMeta .zchip.zmine{box-shadow:inset 0 0 0 1px rgba(255,255,255,.6)}" +
+        "@keyframes zflash{0%{filter:brightness(2.8)}100%{filter:brightness(1)}}" +
+        "#cTurfMeta .zchip.zflash{animation:zflash 1.5s ease-out}" +
+        "#cTurfMeta .ztoast{margin-top:4px;font-size:13px;font-weight:700;letter-spacing:.3px;text-shadow:0 1px 3px rgba(0,0,0,.9);animation:ztIn .25s ease-out;display:none}" +
+        "@keyframes ztIn{0%{opacity:0;transform:translateY(-6px)}100%{opacity:1;transform:translateY(0)}}" +
+        "#cKillFeed .kfrow.zflip{background:rgba(10,16,26,.68)}" +
         "#cTurfMeta .head{margin-top:3px;font-size:13px;font-weight:700;color:#e8eef7;text-shadow:0 1px 3px rgba(0,0,0,.8);letter-spacing:.3px}" +
         "#cTurfMeta .head b{color:#ff8b6b}" +
         "#cTurfMeta .lead{font-size:12px;margin-top:1px;text-shadow:0 1px 3px rgba(0,0,0,.85)}" +
@@ -829,12 +906,14 @@
     hudRoot.innerHTML =
       "<div class='wrap'>" +
       "<div class='zbar' id='cZBar'></div>" +
+      "<div class='ztoast' id='cZToast'></div>" +
       "<div class='head' id='cHead'></div>" +
       "<div class='lead' id='cLead'></div>" +
       "<div class='ally' id='cAlly'></div>" +
       "</div>";
     document.body.appendChild(hudRoot);
     zoneBarEl = hudRoot.querySelector("#cZBar");
+    toastEl = hudRoot.querySelector("#cZToast");
     headEl = hudRoot.querySelector("#cHead");
     leadEl = hudRoot.querySelector("#cLead");
     allyEl = hudRoot.querySelector("#cAlly");
@@ -849,11 +928,18 @@
   function renderZoneBar() {
     if (!zoneBarEl) return;
     let html = "";
+    const now = CBZ.now || 0;
     for (const z of zones) {
       const col = z.owner ? hex6(gangColorOf(z.owner)) : "#3a4151";
       // strength → opacity (darker shade = stronger hold, GTA-SA style)
-      const op = z.owner ? (0.5 + z.strength * 0.5).toFixed(2) : "0.6";
-      html += "<div class='zseg' title='" + z.name + "' style='background:" + col + ";opacity:" + op + "'></div>";
+      const op = z.owner ? (0.55 + z.strength * 0.45).toFixed(2) : "0.55";
+      // each district is a CHIP: initials on the owner's colour, a white inner
+      // ring on YOUR districts, a flash when it just changed hands.
+      const cls = "zseg zchip" +
+        (z.owner === "player" ? " zmine" : "") +
+        ((z._flashT && now - z._flashT < 1600) ? " zflash" : "");
+      const tip = z.name + " — " + (z.owner ? (z.owner === "player" ? "yours" : (gangName(z.owner) || "held")) : "unclaimed");
+      html += "<div class='" + cls + "' title='" + esc(tip) + "' style='background:" + col + ";opacity:" + op + "'><span>" + (z.abbr || "") + "</span></div>";
     }
     zoneBarEl.innerHTML = html;
   }
@@ -877,23 +963,31 @@
   }
   function shortName(n) { if (!n) return "?"; const w = n.split(" "); return w.length > 1 ? w[w.length - 1] : n; }
 
-  // KILL FEED — reads CBZ.cityRecentDeaths (populated by killfeed.js). Shows the
-  // last few "<Name> — <cause>" entries; the player's own death glows gold.
+  // KILL FEED — reads CBZ.cityRecentDeaths (populated by killfeed.js) and
+  // merges in this file's own ZONE-FLIP lines, time-ordered, capped to 6 rows.
   function renderKillFeed() {
     if (!feedEl) return;
+    // age out stale flip lines (same lifetime the death feed uses)
+    const now = CBZ.now || 0;
+    while (flipFeed.length && now - (flipFeed[0].t || 0) > 22000) flipFeed.shift();
     const deaths = CBZ.cityRecentDeaths || [];
-    if (!deaths.length) { if (feedEl.style.display !== "none") feedEl.style.display = "none"; return; }
-    const recent = deaths.slice(-5);
-    const sig = recent.map((d) => (d.name || "") + (d.cause || "") + (d.t || "")).join("|");
+    if (!deaths.length && !flipFeed.length) { if (feedEl.style.display !== "none") feedEl.style.display = "none"; return; }
+    const rows = [];
+    for (const d of deaths.slice(-5)) {
+      rows.push({
+        t: d.t || 0,
+        k: (d.name || "") + (d.cause || "") + (d.t || ""),
+        html: "<div class='" + (d.you ? "kfrow you" : "kfrow") + "'><b>" + esc(d.name || "Someone") + "</b> — " + esc(d.cause || "killed") + "</div>",
+      });
+    }
+    for (const f of flipFeed.slice(-4)) rows.push({ t: f.t || 0, k: "z" + f.t, html: f.html });
+    rows.sort((a, b) => a.t - b.t);
+    const recent = rows.slice(-6);
+    const sig = recent.map((r) => r.k).join("|");
     if (sig === feedSig) return;                         // nothing new
     feedSig = sig;
     let html = "";
-    for (const d of recent) {
-      const cls = d.you ? "kfrow you" : "kfrow";
-      const nm = d.name || "Someone";
-      const cause = d.cause || "killed";
-      html += "<div class='" + cls + "'><b>" + esc(nm) + "</b> — " + esc(cause) + "</div>";
-    }
+    for (const r of recent) html += r.html;
     feedEl.innerHTML = html;
     feedEl.style.display = "block";
   }
@@ -906,6 +1000,67 @@
   }
 
   // ============================================================
+  //  PERSISTENCE (rides gangs.js's GANG_PERSIST flag) — the relations graph +
+  //  the win latch, stamped under led.turfrel with the same worldstate.js
+  //  commit/collect wrap idiom as the sibling blobs (cwar / war / mil /
+  //  gangwar). Zones themselves are DERIVED from turf lots, so ownership
+  //  needs no blob of its own — gangs.js's gangwar blob restores the turf
+  //  and the next recompute re-derives the zone map from it.
+  // ============================================================
+  let _relWrapsDone = false, _relHydrated = null, _relBlob = null, _relNeedApply = false;
+
+  function serializeRel() {
+    const R = {};
+    for (const k in rel) R[k] = Math.round(rel[k] * 1000) / 1000;
+    return { v: 1, seed: CBZ.WORLD_SEED >>> 0, rel: R, won: !!won };
+  }
+  function stampRel() {
+    if (!persistOn()) return;
+    const led = g.cityWorld;
+    if (!led || typeof led !== "object") return;
+    if (_relNeedApply) return;                 // never clobber a not-yet-applied save
+    if (!zonesBuilt || g.mode !== "city") return;
+    led.turfrel = serializeRel();
+    _relBlob = led.turfrel;
+  }
+  function ensureRelSaveWraps() {
+    if (_relWrapsDone) return;
+    const commit = CBZ.cityWorldCommit;
+    if (typeof commit !== "function") return;  // worldstate.js not up yet — retry next tick
+    _relWrapsDone = true;
+    if (!commit._turfWrap) {
+      const w = function () { stampRel(); return commit.apply(this, arguments); };
+      w._turfWrap = true; CBZ.cityWorldCommit = w;
+    }
+    if (CBZ.cityWorldCollect && !CBZ.cityWorldCollect._turfWrap) {
+      const col = CBZ.cityWorldCollect;
+      const wc = function () { stampRel(); return col.apply(this, arguments); };
+      wc._turfWrap = true; CBZ.cityWorldCollect = wc;
+    }
+  }
+  function hydrateRelLedger() {
+    const led = g.cityWorld;
+    if (!led || led === _relHydrated) return;
+    _relHydrated = led;
+    if (!persistOn()) return;
+    const b = led.turfrel;
+    if (b && b.v === 1) { _relBlob = b; _relNeedApply = true; }
+    else _relBlob = null;                      // fresh/wiped ledger → seeded graph
+  }
+  // called right after every zone build + seedAlliances: overwrite the seeded
+  // graph with the SAVED one (same world only) and restore the win latch.
+  function applyRelBlob() {
+    _relNeedApply = false;
+    const b = _relBlob;
+    if (!persistOn() || !b || b.v !== 1 || (b.seed >>> 0) !== (CBZ.WORLD_SEED >>> 0)) return;
+    for (const k in rel) delete rel[k];
+    for (const k in (b.rel || {})) rel[k] = clamp(+b.rel[k] || 0, -1, 1);
+    won = !!b.won;
+    flipMuteT = Math.max(flipMuteT, 3);        // the restored board isn't news
+    hudDirty = true;
+  }
+
+  // ============================================================
   //  RESET (mode.js / careers reset path) — clear meta state for a fresh run
   // ============================================================
   CBZ.cityTurfReset = function () {
@@ -913,6 +1068,8 @@
     for (const k in rel) delete rel[k];
     _rallyCool = 0;
     feedSig = "";
+    flipFeed.length = 0; toastT = 0; flipMuteT = 0;
+    if (toastEl) toastEl.style.display = "none";
     if (hudRoot) hudRoot.style.display = "none";
     if (feedEl) { feedEl.style.display = "none"; feedEl.innerHTML = ""; }
     hudDirty = true;
@@ -934,6 +1091,11 @@
   CBZ.onUpdate(34.6, function (dt) {
     if (g.mode !== "city") { if (hudRoot && hudRoot.style.display !== "none") showHud(false); return; }
 
+    // persistence plumbing (rides GANG_PERSIST): install the ledger stamp
+    // wraps once; adopt a changed ledger reference.
+    ensureRelSaveWraps();
+    hydrateRelLedger();
+
     // (re)build zones once the city + gangs are spawned
     if (!zonesBuilt) {
       buildT -= dt;
@@ -941,12 +1103,20 @@
         buildT = 0.5;
         if (CBZ.cityGangs && CBZ.cityGangs.length) {
           buildZones();
-          if (zonesBuilt) { seedAlliances(); startPop = liveHeadcount(); showHud(true); }
+          if (zonesBuilt) {
+            seedAlliances();
+            applyRelBlob();                    // saved relations/win latch beat the seeded graph
+            startPop = liveHeadcount(); showHud(true);
+          }
         }
       }
       return;
     }
     showHud(true);
+    if (_relNeedApply) applyRelBlob();   // ledger adopted mid-run (MP adopt) with zones already built
+    // zone-flip announcement timers (toast fade + the restore mute window)
+    if (flipMuteT > 0) flipMuteT -= dt;
+    if (toastT > 0) { toastT -= dt; if (toastT <= 0 && toastEl) toastEl.style.display = "none"; }
 
     // --- ownership recompute (cheap-ish; every ~1.2s) ---
     recomputeT -= dt;

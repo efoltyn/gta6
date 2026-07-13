@@ -16,7 +16,8 @@
    their walls as height-gated CBZ.colliders, so the new vertical physics
    lets you go inside and up. None of them are safe: the earthquake
    topples each one as a single piece (walls, floors AND roof) — there is
-   no safe building and no safe zone, only the disasters.
+   no safe building, only high ground, luck, and the shrinking safe zone
+   (systems/safezone.js) squeezing everyone toward the centre.
 
    CBZ.buildDisasterArena() builds once and returns the arena descriptor.
 ============================================================ */
