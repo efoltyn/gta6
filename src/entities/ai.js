@@ -32,7 +32,7 @@
     }
     if (!actor._emote) {
       actor._emote = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true }));
-      actor._emote.scale.set(0.9, 0.9, 1); actor._emote.position.y = 3.1; actor.group.add(actor._emote);
+      actor._emote.scale.set(0.9, 0.9, 1); actor._emote.position.y = CBZ.charHeadY ? CBZ.charHeadY(actor) : 1.97; actor.group.add(actor._emote);
     }
     actor._emote.material.map = emoteTex[ch];
     actor._emote.visible = true; actor._emoteT = 1.6;
@@ -62,7 +62,7 @@
         new THREE.MeshBasicMaterial({ color: GANG_COLORS[g], transparent: true, opacity: 0.1, depthWrite: false })
       );
       disc.rotation.x = -Math.PI / 2; disc.position.set(t.x, 0.04, t.z);
-      CBZ.scene.add(disc);
+      (CBZ.prisonRoot || CBZ.scene).add(disc);
     });
   }
   const leaders = {};

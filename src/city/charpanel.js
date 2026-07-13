@@ -592,9 +592,12 @@
     const rig = PORT.rig;
     rig.group.rotation.y = -0.32;
     if (rig.neck) rig.neck.rotation.set(0, 0, 0);
-    // frame the upper body — the fit is what we're confirming
-    PORT.cam.position.set(0, 2.35, 5.6);
-    PORT.cam.lookAt(0, 2.0, 0);
+    // frame the upper body — the fit is what we're confirming. Framing scaled
+    // by HUMAN_SCALE (0.70) to match the shrunk ~1.82m rig: the rig scales about
+    // its feet (y=0), so scaling cam height + distance by the same 0.70 keeps the
+    // exact composition (character no longer sits small/low in the card).
+    PORT.cam.position.set(0, 1.64, 3.92);
+    PORT.cam.lookAt(0, 1.40, 0);
 
     PORT.rend.setSize(px, px, false);
     if (canvas.width !== px || canvas.height !== px) { canvas.width = px; canvas.height = px; }
@@ -905,8 +908,9 @@
     applyPortraitArmor(PORT.rig);                  // + worn vest/plate/helmet on the big model
     applyPortraitEyewear(PORT.rig);                // + worn sunglasses/designer shades on the big model
     PORT.rig.group.rotation.y = -0.3;
-    PORT.cam.position.set(0, 2.0, 7.4);
-    PORT.cam.lookAt(0, 1.55, 0);
+    // full-body framing scaled by HUMAN_SCALE (0.70) for the shrunk ~1.82m rig.
+    PORT.cam.position.set(0, 1.40, 5.18);
+    PORT.cam.lookAt(0, 1.09, 0);
     const W = 230, H = 300;
     PORT.cam.aspect = W / H; PORT.cam.updateProjectionMatrix();
     PORT.rend.setSize(W, H, false);
@@ -994,8 +998,11 @@
     if (CBZ.cityMenuOpen) return;
     if (CBZ.fullMap && CBZ.fullMap.active) return;
     if (CBZ.player && (CBZ.player.dead || CBZ.player.driving)) {
-      // still allow the hide-HUD toggle while driving/dead; [I] is gated to on-foot
-      if (k !== "o") return;
+      // [O] hide-HUD always works here; [I] stays available while DRIVING
+      // (owner's rule: I must always open the inventory — only death, a menu,
+      // or a live "i" world-interaction may claim the key).
+      const isI = (k === "i" || e.code === "KeyI") && !CBZ.player.dead;
+      if (k !== "o" && !isI) return;
     }
     if (k === "i" || e.code === "KeyI") {
       // CONTEXT PRIORITY: if a world interaction is currently offered on the

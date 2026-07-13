@@ -249,13 +249,13 @@
   //  stalk/burst/crouch  big cats: creep-in trigger, pounce-charge trigger,
   //                      crouch speed multiplier
   const CLASSES = {
-    herd_prey:  { stepFreq: 2.6, bob: 0.05, hop: 0.16, sway: 0,    grazeP: 0.60, grazeT: [3, 7],   wanderM: 0.6, fleeM: 2.6, fleeT: 5,   hearR: 45 },
-    small_game: { stepFreq: 4.2, bob: 0.04, hop: 0.24, sway: 0,    grazeP: 0.50, grazeT: [1.5, 4], wanderM: 0.7, fleeM: 3.0, fleeT: 3.5, hearR: 55 },
-    farm:       { stepFreq: 2.4, bob: 0.04, hop: 0,    sway: 0.03, grazeP: 0.70, grazeT: [4, 9],   wanderM: 0.4, fleeM: 1.8, fleeT: 3,   hearR: 30 },
-    big_neutral:{ stepFreq: 2.0, bob: 0.05, hop: 0,    sway: 0.05, grazeP: 0.60, grazeT: [4, 8],   wanderM: 0.5, fleeM: 1.6, fleeT: 2,   hearR: 38, aggro: 16, giveUp: 45, atkM: 2.2 },
-    lumberer:   { stepFreq: 2.1, bob: 0.07, hop: 0,    sway: 0.10, grazeP: 0.40, grazeT: [4, 8],   wanderM: 0.5, fleeM: 1.8, fleeT: 2,   hearR: 35, aggro: 20, giveUp: 40, atkM: 2.0 },
-    stalker:    { stepFreq: 2.8, bob: 0.05, hop: 0,    sway: 0,    grazeP: 0.30, grazeT: [3, 6],   wanderM: 0.5, fleeM: 2.0, fleeT: 3,   hearR: 60, aggro: 12, giveUp: 60, atkM: 2.2, stalk: 55, burst: 18, crouch: 0.35 },
-    pack:       { stepFreq: 3.2, bob: 0.05, hop: 0.08, sway: 0,    grazeP: 0.35, grazeT: [3, 6],   wanderM: 0.6, fleeM: 2.0, fleeT: 3,   hearR: 55, aggro: 30, giveUp: 50, atkM: 2.2 },
+    herd_prey:  { stepFreq: 2.6, stepCap: 15, bob: 0.05, hop: 0.16, sway: 0,    grazeP: 0.60, grazeT: [3, 7],   wanderM: 0.6, fleeM: 2.6, fleeT: 5,   hearR: 45 },
+    small_game: { stepFreq: 4.2, stepCap: 22, bob: 0.04, hop: 0.24, sway: 0,    grazeP: 0.50, grazeT: [1.5, 4], wanderM: 0.7, fleeM: 3.0, fleeT: 3.5, hearR: 55 },
+    farm:       { stepFreq: 2.4, stepCap: 13, bob: 0.04, hop: 0,    sway: 0.03, grazeP: 0.70, grazeT: [4, 9],   wanderM: 0.4, fleeM: 1.8, fleeT: 3,   hearR: 30 },
+    big_neutral:{ stepFreq: 2.0, stepCap: 10, bob: 0.05, hop: 0,    sway: 0.05, grazeP: 0.60, grazeT: [4, 8],   wanderM: 0.5, fleeM: 1.6, fleeT: 2,   hearR: 38, aggro: 16, giveUp: 45, atkM: 2.2 },
+    lumberer:   { stepFreq: 2.1, stepCap: 11, bob: 0.07, hop: 0,    sway: 0.10, grazeP: 0.40, grazeT: [4, 8],   wanderM: 0.5, fleeM: 1.8, fleeT: 2,   hearR: 35, aggro: 20, giveUp: 40, atkM: 2.0 },
+    stalker:    { stepFreq: 2.8, stepCap: 16, bob: 0.05, hop: 0,    sway: 0,    grazeP: 0.30, grazeT: [3, 6],   wanderM: 0.5, fleeM: 2.0, fleeT: 3,   hearR: 60, aggro: 12, giveUp: 60, atkM: 2.2, stalk: 55, burst: 18, crouch: 0.35 },
+    pack:       { stepFreq: 3.2, stepCap: 18, bob: 0.05, hop: 0.08, sway: 0,    grazeP: 0.35, grazeT: [3, 6],   wanderM: 0.6, fleeM: 2.0, fleeT: 3,   hearR: 55, aggro: 30, giveUp: 50, atkM: 2.2 },
   };
   function classify(sp) {
     if (sp._bclass) return sp._bclass;
@@ -320,6 +320,7 @@
     if (cols.length < 2 || cols.length > 8) return;      // no readable legs — glide
     // sweep 2: feet / pads / leg stripes stacked on a column ride with it
     const head = [];
+    let headMesh = null, headVol = 0;
     for (let i = 0; i < rest.length; i++) {
       const r = rest[i], m = r.m;
       let joined = false;
@@ -334,6 +335,9 @@
       // head cluster (for the graze dip): far forward, up off the ground
       if (!joined && maxX > 0.4 && m.position.x >= maxX * 0.55 && r.bottom >= 0.3) {
         head.push({ m: m, bx: m.position.x, by: m.position.y, bottom: r.bottom });
+        // THE head box (for the aggro eyes): the biggest far-forward block.
+        const vol = r.d.w * r.d.w * r.d.h;
+        if (m.position.x >= maxX * 0.62 && vol > headVol) { headVol = vol; headMesh = m; }
       }
     }
     // diagonal-gait phase: FL+RR swing together, FR+RL oppose (a trot). Two
@@ -352,11 +356,52 @@
     }
     const cls = classify(sp);
     a.gait = {
-      cols: cols, head: head.length ? head : null, dip: dip,
+      cols: cols, head: head.length ? head : null, dip: dip, headMesh: headMesh,
       amp: Math.max(0.04, Math.min(0.3, legH * 0.32)),
       freq: Math.max(1.4, Math.min(9, (cls.stepFreq * 2.2) / Math.max(0.22, legH * (sp.scale || 1)))),
       step: 0, k: 0, grazeK: 0,
     };
+  }
+
+  // ============================================================
+  //  AGGRO EYES — the Minecraft-wolf moment: the eyes of a hunting predator
+  //  GLOW RED. Unlit MeshBasicMaterial so they read at gameplay distance in
+  //  any light; created lazily on the discovered head box the first time an
+  //  animal aggros, swollen slightly bigger the moment it commits to the
+  //  charge. Off in stalk-free states and on death.
+  // ============================================================
+  let eyeMat = null;
+  function aggroEyeMat() {
+    if (!eyeMat) eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2015 });
+    return eyeMat;
+  }
+  function makeEyes(a) {
+    const hm = a.gait && a.gait.headMesh;
+    if (!hm || !hm.geometry) return null;
+    const p = hm.geometry.parameters || {};
+    const w = p.width || 0.4, h = p.height || 0.4, dep = p.depth || 0.4;
+    const s = Math.max(0.07, Math.min(0.17, dep * 0.26));
+    const eyes = [];
+    for (let sgn = -1; sgn <= 1; sgn += 2) {
+      const e = new THREE.Mesh(CBZ.boxGeom(s, s, s), aggroEyeMat());
+      // straddle the front-top CORNERS so the glow pokes out of the front
+      // AND side faces — readable head-on, in profile, and three-quarter.
+      e.position.set(w / 2 - s * 0.1, h * 0.22, sgn * (dep / 2 - s * 0.1));
+      e.visible = false;
+      hm.add(e);                                   // rides every head dip/turn
+      eyes.push(e);
+    }
+    return eyes;
+  }
+  function setAggroEyes(a, mode) {   // 0 off · 1 stalking (lit) · 2 charging (lit + swollen)
+    if (a._eyeMode === mode) return;
+    a._eyeMode = mode;
+    if (!a._eyes && mode) a._eyes = makeEyes(a);
+    const eyes = a._eyes; if (!eyes) return;
+    for (let i = 0; i < eyes.length; i++) {
+      eyes[i].visible = mode > 0;
+      eyes[i].scale.setScalar(mode === 2 ? 1.5 : 1);
+    }
   }
 
   // ---- the per-frame gait: legs swing by DISTANCE ACTUALLY MOVED (so every
@@ -369,9 +414,20 @@
     const moved = (a._gpx == null) ? 0 : Math.hypot(mx - a._gpx, mz - a._gpz);
     a._gpx = mx; a._gpz = mz;
     const walking = moved > 0.0025;
-    // stride rate rides distance moved, but is CAPPED (~2.4 strides/s): at a
-    // flat-out sprint animals lengthen their stride, they don't blur it.
-    if (walking) gt.step += Math.min(Math.min(moved, 1.5) * gt.freq, dt * 15);
+    // stride rate rides distance moved, but is CAPPED per class (a sprinting
+    // animal lengthens its stride, it doesn't blur its legs): elephants top
+    // out ~1.6 strides/s, rabbits ~3.5.
+    if (walking) gt.step += Math.min(Math.min(moved, 1.5) * gt.freq, dt * (cls.stepCap || 15));
+    // TERRAIN SLOPE: pitch the body to the ground it actually walks over —
+    // read from the rise along the path (zero extra floorAt calls). At this
+    // point grp.position.y is still the CLEAN ground height (flourishes are
+    // added below), so d(y)/d(travel) IS the slope under the feet.
+    const gy = grp.position.y;
+    if (!a.ridden && a._gpy != null && moved > 0.01) {
+      const rawS = Math.max(-0.45, Math.min(0.45, Math.atan2(gy - a._gpy, moved)));
+      a._slope = (a._slope || 0) + (rawS - (a._slope || 0)) * Math.min(1, dt * 5);
+    }                                                  // parked: HOLD the slope it stopped on
+    a._gpy = gy;
     // ease the swing weight in/out so legs settle instead of snapping
     gt.k += ((walking ? 1 : 0) - gt.k) * Math.min(1, dt * 8);
     if (gt.k > 0.02) {
@@ -402,11 +458,12 @@
       } else if (cls.bob) {
         grp.position.y += Math.abs(Math.sin(gt.step)) * cls.bob * (sp.scale || 1) * gt.k;
       }
-      if (cls.sway && (a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
-        grp.rotation.z = Math.sin(gt.step * 0.5) * cls.sway * gt.k;                              // the LUMBER
-      }
-    } else if (cls.sway && grp.rotation.z !== 0 && (a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
-      grp.rotation.z *= Math.max(0, 1 - dt * 6);                 // settle the roll when it stops
+    }
+    // body pitch = terrain slope + the lumbering rock (bears) — one composed
+    // write, and only while no flinch/attack owns the transform.
+    if ((a._flinchT || 0) <= 0 && (a._atkAnim == null || a._atkAnim < 0)) {
+      const swayV = (walking && cls.sway) ? Math.sin(gt.step * 0.5) * cls.sway * gt.k : 0;
+      grp.rotation.z = (a._slope || 0) + swayV;
     }
     // graze dip: the head cluster eases down to the grass and back up
     if (gt.head) {
@@ -663,6 +720,9 @@
   // ============================================================
   CBZ.cityWildlifeHit = function (a, hit, w) {
     if (!a || a.dead) return { head: false, down: false, dmg: 0 };
+    // EXTERNAL actors (dogs) ride the CBZ.cityWildlife registry so the same
+    // guns hit them, but their own module owns the reaction — delegate whole.
+    if (a.onShot) return a.onShot(hit, w);
     // same range falloff the human targets get (WILDLIFE_LIVE only — flag
     // off keeps the old flat multiply). Callers that pass a bare {damage:n}
     // (dogs, companions) have no hit.dist and skip the falloff.
@@ -706,6 +766,7 @@
   function killAnimal(a, hit) {
     a.dead = true; a.ko = 0; a.state = "dead"; a.hp = 0;
     a.skinnable = true; a.skinT = CARCASS_LINGER;
+    if (LIVE()) setAggroEyes(a, 0);          // the light goes out
     // topple onto its side (feet were at y=0; drop + roll the group).
     const grp = a.group;
     if (LIVE()) {
@@ -908,6 +969,9 @@
 
   function landLive(a, dt, P) {
     const sp = a.species, grp = a.group, cls = classify(sp);
+    // the Minecraft read: hunting eyes glow red (BEFORE the flinch return, so
+    // a shot wolf lights up on the very frame it turns on you).
+    setAggroEyes(a, a.state === "charge" ? 2 : (a.state === "stalk" ? 1 : 0));
     // hit recoil owns the transform while it lasts; the state resumes after.
     if ((a._flinchT || 0) > 0) { if (CBZ.creatureAnimateFlinch) CBZ.creatureAnimateFlinch(a, dt); return; }
     if (a.alarm > 0) a.alarm -= dt;
@@ -957,11 +1021,7 @@
       else if (nearP < sq(st.burst || cls.burst || 18)) { a.state = "charge"; a.alarm = 6; a._burstT = st.burstT || 3.5; }
       else {
         spd = (sp.spd || 1.4) * (cls.crouch || 0.35);
-        // curve in on the target — a hunt, not a beeline
-        let want = Math.atan2(-dpz, -dpx), d = want - a.heading;
-        while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
-        const mt = dt * 2; if (d > mt) d = mt; else if (d < -mt) d = -mt;
-        a.heading += d;
+        a.heading = Math.atan2(-dpz, -dpx);   // the faceH turn clamp below arcs it in
       }
     } else if (a.state === "charge") {
       const giveUp = (sp._stalk && sp._stalk.giveUp) || cls.giveUp || 55;
@@ -993,6 +1053,7 @@
               if (sp.id === "cheetah") o.rate = 0.9;
             }
             CBZ.creatureFight(a, PT, dt, o);
+            a.faceH = a.heading;                       // it steers facing itself — stay in sync
             return;                                    // creatureFight owns the transform this frame
           }
           spd = (sp.spd || 1.4) * (cls.atkM || 2.0) * (a._burstT != null ? 1.2 : 1);
@@ -1047,14 +1108,27 @@
       a.heading += dd * Math.min(1, dt * (a.state === "wander" ? 2.2 : 5.0));
     }
 
-    // integrate + home fence + ground + facing + the gait layer
+    // ---- FACING: a.heading is only the DESIRE. The body turns toward it at
+    //      a clamped rate (slower for big animals, faster in a panic) and the
+    //      animal MOVES ALONG ITS FACING — so every direction change is an
+    //      arc, never a pivot-slide, a moonwalk, or a sideways glide.
+    if (a.faceH == null) a.faceH = a.heading;
+    let fd = a.heading - a.faceH;
+    while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
+    const panicTurn = a.state === "flee" || a.state === "charge";
+    const trMax = ((panicTurn ? 6.5 : 3.0) / (1 + (sp.scale || 1) * 0.3)) * dt;
+    if (fd > trMax) fd = trMax; else if (fd < -trMax) fd = -trMax;
+    a.faceH += fd;
+
+    // integrate ALONG THE FACING + home fence + ground + the gait layer
     if (spd > 0) {
-      const nx = grp.position.x + Math.cos(a.heading) * spd * dt;
-      const nz = grp.position.z + Math.sin(a.heading) * spd * dt;
+      const nx = grp.position.x + Math.cos(a.faceH) * spd * dt;
+      const nz = grp.position.z + Math.sin(a.faceH) * spd * dt;
       const reg = CBZ.cityNearestRegion && CBZ.cityNearestRegion(ARENA(), nx, nz, 40);
       const onHome = reg && (reg.biome === sp.biome) && CBZ.cityRegionHit(reg, nx, nz, 6);
       if (!onHome && a.state !== "charge") {
-        // steer back toward home anchor instead of leaving the biome.
+        // steer back toward home anchor instead of leaving the biome (the
+        // clamped facing turns the step into an arc back inside).
         a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6;
       } else {
         grp.position.x = nx; grp.position.z = nz;
@@ -1062,7 +1136,7 @@
     }
     grp.position.y = groundY(grp.position.x, grp.position.z);
     if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
-    grp.rotation.y = -a.heading + Math.PI / 2;
+    grp.rotation.y = -a.faceH + Math.PI / 2;
     // settle any leftover attack pitch back to rest while roaming
     if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
     gaitAnimate(a, dt);
@@ -1081,7 +1155,7 @@
     const extra = 0.8 * Math.min(SHOT.n, 5);           // sustained fire extends the panic
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species;
-      if (a.dead || a.tamed || a.ridden || sp.aquatic) continue;
+      if (a.dead || a.tamed || a.ridden || a.external || sp.aquatic) continue;
       const cls = classify(sp), danger = sp.danger || 0;
       const hearR = cls.hearR || 45;
       const dx = a.pos.x - x, dz = a.pos.z - z, d2 = dx * dx + dz * dz;
@@ -1170,7 +1244,7 @@
     if (LIVE()) {
       for (let i = 0; i < animals.length; i++) {
         const st = animals[i].state;
-        if (!animals[i].dead && (st === "charge" || st === "stalk")) hunters++;
+        if (!animals[i].dead && !animals[i].external && (st === "charge" || st === "stalk")) hunters++;
       }
     }
     // LOD visibility rides the ONE quality knob (the pause-menu perf/quality
@@ -1181,6 +1255,7 @@
     const visR = ANIMAL_VIS[Math.max(0, Math.min(ANIMAL_VIS.length - 1, q))];
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species, grp = a.group;
+      if (a.external) continue;      // dogs: in the registry for the GUNS, driven by dogs.js
       if (P) {
         const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
         const vr = visR * ((sp.scale || 1) >= 1.3 ? 1.6 : 1);

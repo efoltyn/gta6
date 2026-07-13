@@ -3,6 +3,7 @@
 
    Enable with:
      ?profile=1&scenario=calm&seconds=12
+     ?profile=1&scenario=jail&seconds=12
      ?profile=1&scenario=wanted5&seconds=12
      ?profile=1&scenario=chaos&seconds=12
 
@@ -197,6 +198,7 @@
     const cars = (CBZ.cityCars || []).map(function (c) { return c && c.group; }).filter(Boolean);
     const crowd = CBZ.scene.getObjectByName ? CBZ.scene.getObjectByName("city-crowd") : null;
     const cityRoot = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    const prisonRoot = CBZ.prisonRoot || null;
     const allDynamic = peds.concat(cars); if (crowd) allDynamic.push(crowd);
     const result = {
       full: sample([]),
@@ -205,10 +207,12 @@
       withoutAmbientCrowd: sample(crowd ? [crowd] : []),
       withoutCityDynamic: sample(allDynamic),
       withoutCityRoot: sample(cityRoot ? [cityRoot] : []),
+      withoutPrisonRoot: sample(prisonRoot ? [prisonRoot] : []),
     };
     renderer.shadowMap.enabled = shadowEnabled;
     renderer.shadowMap.autoUpdate = shadowAuto;
-    renderer.shadowMap.needsUpdate = true;
+    if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
+    else renderer.shadowMap.needsUpdate = true;
     return result;
   }
 
@@ -321,10 +325,17 @@
         peds: (CBZ.cityPeds || []).length, cops: (CBZ.cityCops || []).length,
         cars: (CBZ.cityCars || []).length,
         crowd: CBZ.cityCrowdCount ? CBZ.cityCrowdCount() : null,
+        guards: (CBZ.guards || []).length,
+        inmates: (CBZ.npcs || []).filter(function (a) { return a && !a._crowd; }).length,
+        prisonCrowdActive: CBZ.crowdStats && CBZ.crowdStats.active != null ? CBZ.crowdStats.active : null,
         colliders: (CBZ.colliders || []).length, platforms: (CBZ.platforms || []).length,
         losBlockers: (CBZ.losBlockers || []).length,
       },
       scene: sceneCounts(),
+      qualityLevel: CBZ.qualityLevel == null ? null : CBZ.qualityLevel,
+      qualityAutoStats: CBZ.qualityAutoStats || null,
+      timing: { droppedWorldSeconds: +(CBZ.droppedWorldTime || 0).toFixed(3) },
+      shadows: CBZ.shadowUpdateStats || null,
       renderAttribution: renderAttribution(),
       cityRootCensus: cityRootCensus(),
       batch: CBZ.batchStats || null,
@@ -358,12 +369,17 @@
   addEventListener("load", function () {
     setTimeout(function () {
       try {
-        CBZ.setMode("city");
-        CBZ.resetGame();
-        // test-only hook: ?qforce=N pins a quality tier BEFORE the scenario
-        // spawns peds/cars, so population-scaling perf A/B tests are reproducible.
+        // Pin before setMode(): city construction consumes quality-dependent
+        // budgets, so applying qforce after build made tier A/B incomparable.
         const qforce = params.get("qforce");
         if (qforce !== null && CBZ.setQualityLevel) CBZ.setQualityLevel(parseInt(qforce, 10));
+        CBZ.setMode(scenario === "jail" ? "escape" : "city");
+        CBZ.resetGame();
+        CBZ.droppedWorldTime = 0;
+        if (CBZ.shadowUpdateStats) {
+          CBZ.shadowUpdateStats.requests = 0; CBZ.shadowUpdateStats.forced = 0;
+          CBZ.shadowUpdateStats.commits = 0; CBZ.shadowUpdateStats.movingCommits = 0;
+        }
         applyScenario();
         CBZ.setState("playing");
         startedAt = performance.now();

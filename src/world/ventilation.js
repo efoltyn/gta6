@@ -5,7 +5,7 @@
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.scene) return;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const { addBox } = CBZ;
 
   CBZ.vents = [];

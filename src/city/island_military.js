@@ -226,7 +226,10 @@
     navBox(g, -4.3, cy + 0.05, -2.55, 0.16, 0xff4a3d);
     navBox(g, 4.3, cy + 0.05, -2.55, 0.16, 0x37d67a);
     navBox(g, 0, cy + 0.45, -5.35, 0.14, 0xf2f4ff);
-    return { group: g, footW: 9.0, footL: 12.4, height: 3.5 };
+    const scale = 1.5;
+    const dims = { family: "F-22-class", length: 18.6, span: 13.5, height: 5.25 };
+    g.scale.setScalar(scale); g.userData.aircraftDims = dims;
+    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
   }
 
   // HEAVY BOMBER — round body, sculpted swept wings, 4 DIFFERENTIATED engine
@@ -286,7 +289,10 @@
     navBox(g, -13.4, cy + 0.15, -2.15, 0.2, 0xff4a3d);
     navBox(g, 13.4, cy + 0.15, -2.15, 0.2, 0x37d67a);
     navBox(g, 0, 6.6, -12.3, 0.18, 0xf2f4ff);
-    return { group: g, footW: 27, footL: 28, height: 6.9 };
+    const scale = 1.5;
+    const dims = { family: "heavy-bomber", length: 42, span: 40.5, height: 10.35 };
+    g.scale.setScalar(scale); g.userData.aircraftDims = dims;
+    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
   }
 
   // HELICOPTER — sculpted cabin + glass greenhouse nose, tapered tail boom,
@@ -347,7 +353,10 @@
     navBox(g, -0.84, 1.7, 1.5, 0.14, 0xff4a3d);
     navBox(g, 0.84, 1.7, 1.5, 0.14, 0x37d67a);
     navBox(g, 0, 3.4, -6.05, 0.14, 0xf2f4ff);
-    return { group: g, footW: 2.4, footL: 9.3, height: 3.6 };
+    const scale = 1.45;
+    const dims = { family: "utility-helicopter", length: 17.55, span: 13.92, height: 5.22 };
+    g.scale.setScalar(scale); g.userData.aircraftDims = dims;
+    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
   }
 
   // MAIN BATTLE TANK — hull with side skirts over rubber track runs, road
@@ -606,8 +615,8 @@
     if (CBZ.buildHighway) {
       CBZ.buildHighway(root, {
         path: [{ x: CW_MINX, z: CW_CZ }, { x: CW_MAXX, z: CW_CZ }],
-        width: 24, lanesPerDir: 2, laneW: 3.6, theme: "asphalt",
-        guardrail: true, lights: true, elevated: false, rng: rng,
+        width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
+        guardrail: true, elevated: false, rng: rng,
       });
     } else {
       // ---- fallback: bespoke narrow deck (only if buildHighway absent) ----
@@ -746,6 +755,7 @@
     if (kind) {
       made.group.userData.milKind = kind;
       made.group.userData.milName = name || kind;
+      if (made.aircraftDims) made.group.userData.aircraftDims = made.aircraftDims;
       placed.push({
         group: made.group, pos: made.group.position, heading: rotY || 0,
         kind: kind, model: { name: name || kind },
@@ -758,6 +768,7 @@
         // these models face +Z = flight forward (no yaw offset) and park on
         // their gear/tracks at y=0 (no ground offset).
         modelYawOffset: 0, groundOffset: 0,
+        aircraftDims: made.aircraftDims || null,
         footW: fw, footL: fl, taken: false, hot: true,
       });
     }
@@ -926,6 +937,18 @@
     [gateGuard1, gateGuard2].forEach(function (g) {
       if (g) { g.state = "idle"; g.pause = 9e9; g._stationed = { x: g.pos.x, z: g.pos.z }; }
     });
+    // NO-SPAWN keep-out: the active runway strip (owner's rule — nobody
+    // spawns or idles on a runway, not even patrols). Registered BEFORE the
+    // patrol scatter below so cityScatterInRegion already steers around it.
+    // Rect recomputed from the same anchors the runway build uses
+    // (RW_X=CEN_X, RW_Z=MAXZ-70, RW_L=360, RW_W=26) plus a small margin.
+    if (CBZ.registerNoSpawnZone) {
+      CBZ.registerNoSpawnZone(city, {
+        minX: CEN_X - 188, maxX: CEN_X + 188,
+        minZ: (MAXZ - 70) - 17, maxZ: (MAXZ - 70) + 17,
+        label: "military-runway",
+      });
+    }
     // patrolling soldiers scattered across the base
     if (CBZ.cityScatterInRegion) {
       const reg = { kind: "rect", minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, pad: 0 };
@@ -986,7 +1009,7 @@
     });
     // give traffic a road across the causeway (runs along X → not vertical)
     if (city.roads) {
-      city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: CW_CZ, vertical: false, len: CW_MAXX - CW_MINX, district: "highway" });
+      city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: CW_CZ, vertical: false, len: CW_MAXX - CW_MINX, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
 
     // ========================================================================

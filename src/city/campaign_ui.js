@@ -16,9 +16,9 @@
    PHONE_NOTIS_V2 (CBZ.CONFIG flag): notifications are real-phone pushes from
    in-world senders (contacts / Bank / News / Bounty / missed calls). With the
    phone raised, a banner drops in from the top of the glass; stowed, the
-   handset buzzes (glyph shake + LED) and a compact banner rises beside it.
-   Flag off restores the old behavior: copy only on the raised phone, the
-   stowed signal being just the glyph + LED.
+   ONLY signal is the handset buzz (glyph shake + LED) — notification copy
+   never renders beside the stowed phone (owner rule). Flag off restores the
+   pre-V2 behavior (plain lists, no in-glass banners).
 ============================================================ */
 (function () {
   "use strict";
@@ -76,7 +76,6 @@
   let bannerState = "idle";                 // idle | hold | out
   let bannerTimer = 0;
   let bannerEl = null;                      // in-phone banner (drops from screen top)
-  let sliverEl = null;                      // stowed compact banner by the peek glyph
 
   function notisV2() { return !!(CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2); }
   function appTab(app) { return app === "news" ? "news" : (app === "missions" ? "missions" : "messages"); }
@@ -285,7 +284,7 @@
   function markRead(app) {
     if (app === "missions") state.unread.missions = false;
     else if (app === "messages" || app === "news") state.unread[app] = 0;
-    // reading a tab retires its queued banners — no stale sliver later
+    // reading a tab retires its queued banners — no stale banner replays
     if (bannerQueue.length) {
       bannerQueue = bannerQueue.filter(function (q) { return appTab(q.app) !== app; });
     }
@@ -472,16 +471,6 @@
     bannerEl = root.querySelector(".campaign-noti-banner");
     if (bannerEl) bannerEl.addEventListener("click", notiTap);
 
-    // stowed-phone notification sliver: rises beside the peek glyph when the
-    // handset buzzes; tapping it raises the phone on the notice's app.
-    sliverEl = make("button", "campaign-noti-sliver");
-    sliverEl.id = "campaignNotiSliver";
-    sliverEl.type = "button";
-    sliverEl.setAttribute("aria-live", "polite");
-    sliverEl.innerHTML = "<i class='campaign-noti-badge' aria-hidden='true'>▢</i><div class='campaign-noti-copy'><div class='campaign-noti-toprow'><b class='campaign-noti-from'></b><small class='campaign-noti-app'></small></div><span class='campaign-noti-text'></span></div>";
-    sliverEl.addEventListener("click", notiTap);
-    document.body.appendChild(sliverEl);
-
     root.querySelector(".campaign-phone-scrim").addEventListener("click", close);
     root.querySelector(".campaign-phone-close").addEventListener("click", close);
     root.querySelector(".campaign-phone-home").addEventListener("click", close);
@@ -547,7 +536,6 @@
     root.classList.add("open");
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("campaign-phone-open");
-    retargetBanner();   // a stowed sliver mid-flight re-presents inside the glass
     selectApp(app || state.app);
     return true;
   }
@@ -563,7 +551,7 @@
       root.setAttribute("aria-hidden", "true");
     }
     document.body.classList.remove("campaign-phone-open");
-    retargetBanner();   // an in-glass banner mid-flight re-presents as a sliver
+    dropBanners();   // banners live only inside the glass — stowing ends them
     syncUnread();
     if (CBZ.requestLock && g.state === "playing" && !CBZ.touchMode &&
         !(CBZ.fullMap && CBZ.fullMap.active)) {
@@ -602,9 +590,9 @@
   }
 
   // ---- V2 banner machine ------------------------------------------------------
-  // One banner on screen at a time (real-phone feel). Raised phone → it drops in
-  // from the top of the glass, over the current app. Stowed phone → the handset
-  // buzzes (glyph shake + LED via pulsePeek) and a compact banner rises by it.
+  // One banner on screen at a time (real-phone feel), and ONLY inside the
+  // raised phone's glass (owner rule: nothing renders beside the stowed
+  // handset — stowed pushes are buzz + LED alone, via pulsePeek).
   function bannerSuppressed() {
     if (!notisV2()) return true;
     if (CBZ.fullMap && CBZ.fullMap.active) return true;   // never banner over the map
@@ -636,7 +624,7 @@
       // repeated pushes from the same sender collapse: "Lena · 3 new"
       tail.text = item.text; tail.body = item.body;
       tail._n = (tail._n || 1) + 1;
-      if (tail === bannerCurrent) fillNotiEl(state.open ? bannerEl : sliverEl, coalesceView(tail));
+      if (tail === bannerCurrent) fillNotiEl(bannerEl, coalesceView(tail));
       return;
     }
     if ((item.priority | 0) >= 2 && bannerState === "hold") {
@@ -653,14 +641,29 @@
   }
   function pumpBanner() {
     if (bannerState !== "idle" || !bannerQueue.length || bannerSuppressed()) return;
+    if (!state.open) return;   // stowed phone: no on-screen banner, ever
     ensureDom();
-    const el = state.open ? bannerEl : sliverEl;
+    const el = bannerEl;
     if (!el) return;
     bannerCurrent = bannerQueue.shift();
     fillNotiEl(el, coalesceView(bannerCurrent));
-    void el.offsetWidth;   // restart the slide transition
+    el.style.transition = "";   // restore the slide for environments that animate
+    void el.offsetWidth;        // settle the base state so the slide restarts clean
     el.classList.add("in");
-    if (el === sliverEl) pulsePeek();   // the buzz: glyph shake + LED
+    void el.offsetWidth;        // flush so the transition actually starts
+    // WATCHDOG: correctness must not depend on the animation clock. Some
+    // environments (headless new-mode BeginFrame scheduling) leave freshly
+    // created CSS transitions pending forever, which would visually hold the
+    // banner at opacity 0. If the slide hasn't progressed shortly after the
+    // class landed, snap to the final state by disabling the transition.
+    setTimeout(function () {
+      try {
+        if (bannerState === "hold" && el.classList.contains("in") &&
+            parseFloat(getComputedStyle(el).opacity) < 0.5) {
+          el.style.transition = "none";
+        }
+      } catch (e) {}
+    }, 300);
     bannerState = "hold";
     const hold = bannerCurrent.ttl > 0 ? bannerCurrent.ttl : BANNER_HOLD[Math.max(0, Math.min(2, bannerCurrent.priority | 0))];
     if (bannerTimer) clearTimeout(bannerTimer);
@@ -670,19 +673,22 @@
     if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = 0; }
     if (bannerState === "idle") return;
     bannerState = "out";
-    if (bannerEl) bannerEl.classList.remove("in");
-    if (sliverEl) sliverEl.classList.remove("in");
+    if (bannerEl) {
+      bannerEl.classList.remove("in");
+      void bannerEl.offsetWidth;   // start the exit transition immediately (see pumpBanner)
+    }
     setTimeout(function () {
       bannerCurrent = null;
       bannerState = "idle";
       setTimeout(pumpBanner, fast ? 30 : BANNER_GAP_MS);
     }, fast ? 40 : BANNER_OUT_MS);
   }
-  // phone raised/stowed (or the map opened) mid-banner: requeue the current
-  // banner so it re-presents on the correct surface once allowed again.
-  function retargetBanner() {
-    if (bannerState === "idle" || !bannerCurrent) return;
-    bannerQueue.unshift(bannerCurrent);
+  // stowing the phone (or a takeover/map claiming the screen) ends the banner
+  // flow: clear the queue and hide the current one. Items already live in the
+  // app lists + unread dots, so nothing is lost — and nothing renders beside
+  // the stowed handset.
+  function dropBanners() {
+    bannerQueue.length = 0;
     hideBanner(true);
   }
   function notiTap() {
@@ -755,7 +761,9 @@
     render();
     const seen = state.open && state.app === appTab(app);
     if (!seen) {
-      if (notisV2()) enqueueBanner(item);
+      // raised phone on another app → in-glass banner; stowed phone → buzz +
+      // LED only (owner rule: nothing renders beside the handset).
+      if (notisV2() && state.open) enqueueBanner(item);
       else pulsePeek();
     }
     return item;
@@ -1008,9 +1016,9 @@
     // V2 body stamp: campaign.css gates the map/minimap restore + banner styles
     // on this class so CBZ.CONFIG.PHONE_NOTIS_V2 stays a one-line revert.
     document.body.classList.toggle("notis-v2", notisV2());
-    // banner upkeep: flush queued notices once suppression (map open, takeover,
-    // pause) clears; shelve a held banner if suppression starts mid-hold.
-    if (bannerState === "hold" && bannerSuppressed()) retargetBanner();
+    // banner upkeep: flush queued notices once suppression (takeover, pause)
+    // clears; drop the flow if suppression starts mid-hold.
+    if (bannerState === "hold" && bannerSuppressed()) dropBanners();
     else if (bannerState === "idle" && bannerQueue.length) pumpBanner();
     // ENDLESS free time re-opens the ambient gang-game surfaces (turf meta,
     // kill feed, orders, interact card) that scripted beats keep dark —

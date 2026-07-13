@@ -22,11 +22,25 @@
   if (g.cityBounty == null) g.cityBounty = 0;
   CBZ.cityBounty = function () { return g.cityBounty || 0; };
 
+  // ---- WANTED_STARS_V2 — theft tiers + military jurisdiction (self-defaulted
+  // here; config.js is owned by a parallel agent). Master flag off ⇒ every V2
+  // behavior below (theft floors, carjack/boost split, military 5★ lane, the
+  // base-trespass lockdown, the campaign-HUD star exemption) reverts to legacy.
+  if (CBZ.CONFIG && CBZ.CONFIG.WANTED_STARS_V2 == null) CBZ.CONFIG.WANTED_STARS_V2 = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.WANTED_MIL_ZONE_GRACE == null) CBZ.CONFIG.WANTED_MIL_ZONE_GRACE = 0;    // base sensors trigger 5★ on entry
+  if (CBZ.CONFIG && CBZ.CONFIG.WANTED_MIL_ZONE_INSET == null) CBZ.CONFIG.WANTED_MIL_ZONE_INSET = 8;    // u inset on the base AABB (edge-flicker guard)
+  if (CBZ.CONFIG && CBZ.CONFIG.WANTED_THEFT_COOLDOWN == null) CBZ.CONFIG.WANTED_THEFT_COOLDOWN = 2000; // ms double-fire guard per theft type
+  function v2() { return !!(CBZ.CONFIG && CBZ.CONFIG.WANTED_STARS_V2); }
+
   // cop response per star (read by police.js maintain() as g.cityCopTarget).
   // Steeper at the top: the now-RARE 5★ floods the streets with heavy units so it
   // FEELS overwhelming — a brutal crescendo to match the much harder wanted climb.
   const COP_TARGET = [0, 2, 4, 8, 12, 20];
   let lastCrimeT = 0, busting = false;
+  // V2 module state: the base-trespass lock, the "military hardware just got
+  // stolen" stamp (lets forceStars escalate an air theft to a real 5★), and the
+  // per-type theft cooldown. All module-local — never serialized.
+  let milLock = false, milWarnT = 0, _milTheftT = -1e9, _milHostileT = -1e9, _theftCtx = null, _theftCoolT = {}, _v2Body = null;
   // de-stack multi-witness reports of the SAME act: every ped in earshot of one
   // crime would otherwise call in its OWN full charge (N witnesses → N stacks).
   // A corroborating witness inside this space/time window only adds a small bump.
@@ -80,8 +94,28 @@
     "armed-robbery":     { stars: 2, label: "Armed Robbery" },
     "robbery":           { stars: 2, label: "Robbery" },
     "burglary":          { stars: 2, label: "Burglary" },
+    "red-light":         { stars: 1, label: "Traffic Violation" },
+    "trespass":          { stars: 1, label: "Trespassing" },
+    "dealing":           { stars: 1, label: "Drug Dealing" },
+    "chop":              { stars: 1, label: "Vehicle Trafficking" },
+    "till grab":         { stars: 2, label: "Robbery" },
+    "gang-assault":      { stars: 2, label: "Gang Assault" },
+    "planting-explosives": { stars: 2, label: "Planting Explosives" },
+    "bombing":           { stars: 4, label: "Bombing" },
     "kidnapping":        { stars: 3, label: "Kidnapping" },
-    "grand-theft-aircraft":{ stars: 4, label: "Stolen Military Aircraft" },
+    // ---- WANTED_STARS_V2 theft ladder: 1★ boost < 2★ hijack < 3★ cruiser <
+    // 4★ aircraft < 5★ military aircraft. `floor` snaps heat to that tier the
+    // moment the theft is REPORTED (a single witnessed theft used to charge
+    // ~96 heat — below even the 1★ band — so stealing a car NEVER showed a
+    // star). `mil` marks the military lane: sensors, not witnesses — a mask
+    // doesn't beat radar. Floors/mil are read only while the V2 flag is on.
+    "boosting":          { stars: 1, floor: 1, label: "Grand Theft Auto" },
+    "carjacking":        { stars: 2, floor: 2, label: "Carjacking" },
+    "grand-theft-police":{ stars: 3, floor: 3, label: "Stolen Police Cruiser" },
+    "aircraft-hijacking":{ stars: 4, floor: 4, label: "Stolen Aircraft" },
+    "grand-theft-military":{ stars: 4, floor: 4, mil: true, label: "Stolen Military Hardware" },
+    "store robbery":     { stars: 2, label: "Armed Robbery" },   // shops.js fires this exact type — it was a silent no-op
+    "grand-theft-aircraft":{ stars: 4, floor: 5, mil: true, label: "Stolen Military Aircraft" },
     "escaped-convict":   { stars: 3, label: "Escaped Convict" },
     "assault-officer":   { stars: 3, label: "Assaulting an Officer" },
     "murder":            { stars: 3, label: "Murder", kill: true },
@@ -93,19 +127,30 @@
   function crimeInfo(type, sev) {
     const c = CRIME[type];
     if (c) return c;
+    // Unknown identifiers used to disappear silently, so a typo could disable
+    // an entire crime/wanted path. Keep production play resilient but make the
+    // broken contract visible once per identifier in development and audits.
+    crimeInfo._warned = crimeInfo._warned || {};
+    if (type && !crimeInfo._warned[type]) {
+      crimeInfo._warned[type] = true;
+      try { console.warn("[wanted] unknown crime id:", type); } catch (_) {}
+    }
     return { stars: 0, label: "Disturbance" };   // unknown type fallback — NOT a chargeable crime
   }
+  CBZ.cityCrimeTypes = Object.freeze(Object.keys(CRIME));
 
   // the ONLY thing that raises your stars: a crime gets REPORTED (a witness calls
   // it in, or a cop sees it). If you're MASKED, nobody can ID you → no stars.
   function report(sev, opts) {
     opts = opts || {};
-    if (g.cityMasked) return;                        // shiesty/bandana on → unidentified
+    const T = CBZ.CITY.starHeat;
+    const info = crimeInfo(opts.type, sev);
+    // masked (shiesty/bandana) → witnesses can't ID you… EXCEPT the military
+    // lane (V2): base sensors and radar track the MACHINE, not your face.
+    if (g.cityMasked && !(v2() && info.mil)) return;
     // (CUT: "🎭 A masked suspect was reported — not ID'd as you." — you can't
     // hear a stranger's phone call. The mask's [T] toggle line already taught
     // the mechanic; the stars not climbing IS the feedback.)
-    const T = CBZ.CITY.starHeat;
-    const info = crimeInfo(opts.type, sev);
     // a non-crime (unknown/"Disturbance") never charges heat or grants a star —
     // and it prints NOTHING ("Disturbance reported" cut: a phone call you
     // can't hear, about nothing, going nowhere). Bail before any heat math.
@@ -162,6 +207,27 @@
     }
     g.heat = Math.max(g.heat || 0, Math.min(ceil, gain));
     g.wanted = starsFromHeat(g.heat);
+    // ---- V2 THEFT FLOOR: a REPORTED theft snaps heat 20% INTO its tier band.
+    // Without this, a single witnessed car theft charged ~96 heat — below even
+    // the 1★ band — so "stealing a car" never visibly raised the wanted level.
+    // 20% in (not the bare threshold+1) so the earned star survives more than
+    // one decay tick once you slip out of sight — petty theft still cools off
+    // in ~10s of laying low. Floors only fire on a report that already passed
+    // the witness/mask gates, so an UNSEEN boost in an empty lot still stays
+    // clean (the stealth reward).
+    if (v2() && info.floor) {
+      const f = Math.min(5, info.floor);
+      const pad = ((T[f + 1] || T[5] * 1.4) - T[f]) * 0.2;   // top tier: a synthetic band cap
+      g.heat = Math.max(g.heat, T[f] + pad);
+      g.wanted = starsFromHeat(g.heat);
+    }
+    if (v2() && info.mil) _milTheftT = CBZ.now;   // lets forceStars escalate a military AIR theft to 5★
+    // any reported crime INSIDE the base wire = hostile incursion — the zone
+    // lock (militaryZone below) skips its grace period on a fresh stamp.
+    if (v2()) {
+      const MB = CBZ._militaryBase;
+      if (MB && x > MB.minX && x < MB.maxX && z > MB.minZ && z < MB.maxZ) _milHostileT = CBZ.now;
+    }
     // ---- BOUNTY ($ on your head): rises with every REPORTED crime, scaled by how
     // bad the reported act is. Petty (1★) reports add ~$500; a serious act several
     // thousand; a cop-killing spree (target 5) drops a big chunk each report — so a
@@ -190,6 +256,13 @@
   CBZ.cityReport = report;
 
   function forceStars(n) {
+    // V2 MILITARY-AIR ESCALATION: militaryvehicles.js boards a machine as
+    // cityCrime(type:"grand-theft-military") + cityForceStars(ground?3:4) — the
+    // fresh mil-theft stamp plus an AIR-tier (4) force means a military
+    // aircraft just left the wire ⇒ the owner-mandated hard 5★. Ground
+    // hardware forces 3 and stays at its 4★ report floor; civilian aircraft
+    // ("aircraft-hijacking") never stamp, so they cap at 4★ as before.
+    if (v2() && n >= 4 && (CBZ.now - _milTheftT) < 800) { _milTheftT = -1e9; raiseStars(5, "Stolen Military Aircraft"); return; }
     // empire raids / wealth heat / heists can crank you to 4★ but NEVER hand a
     // free 5★ — the top star is reserved for an earned spree (see report()).
     n = Math.min(4, n);
@@ -200,6 +273,30 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   CBZ.cityForceStars = forceStars;
+
+  // ---- V2 PUBLIC STAR API (guard-callable by jail escape / minimap / any
+  // system agent). raiseStars is the one grant primitive: "ensure at least
+  // `tier` stars" as REAL heat (so it decays normally and never lowers
+  // anything). Reasons naming the military (case-insensitive "military")
+  // may grant the top star — every other caller clamps at 4, preserving the
+  // "5★ is earned" law for ordinary scripted grants.
+  function raiseStars(tier, reason) {
+    const maxTier = (reason && /military/i.test(String(reason))) ? 5 : 4;
+    tier = Math.max(0, Math.min(maxTier, tier | 0));
+    if (tier <= 0) return g.wanted | 0;
+    const prev = g.wanted | 0;
+    g.heat = Math.max(g.heat || 0, CBZ.CITY.starHeat[tier] + 5);
+    g.wanted = starsFromHeat(g.heat);
+    lastCrimeT = CBZ.now;
+    if (CBZ.player && CBZ.player.pos) g.cityLastKnown = { x: CBZ.player.pos.x, z: CBZ.player.pos.z, t: CBZ.now };
+    if (reason) g.cityCrimeLabel = String(reason);
+    g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
+    if (g.wanted > prev) CBZ.city && CBZ.city.big("★".repeat(g.wanted) + " WANTED" + (reason ? " · " + reason : ""));
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    return g.wanted;
+  }
+  CBZ.cityStars = function () { return g.wanted | 0; };
+  CBZ.cityAddStars = function (n, reason) { return raiseStars((g.wanted | 0) + (n == null ? 1 : (n | 0)), reason); };
 
   // ---- SCRIPTED ARREST SETUP (campaign/director API) -------------------------
   // A scripted beat that must END IN CUFFS (the campaign's rooftop trap) cannot
@@ -259,6 +356,30 @@
   // it radios immediately; opts.instant reports now (used for face-to-face acts).
   function crime(amount, opts) {
     opts = opts || {};
+    // ---- V2 THEFT TIERS: vehicles.js fires every player car entry as a flat
+    // cityCrime(60, "gta"). The cityEnterVehicle wrap below stamps _theftCtx
+    // with what the door ACTUALLY was — a parked boost stays a witnessed 1★
+    // misdemeanor, dragging a driver out is a face-to-face 2★ (the victim IS
+    // the witness → instant), and a police cruiser is a 3★ (an occupied one
+    // radios in immediately). Legacy behavior when the flag is off.
+    if (v2() && _theftCtx && opts.type === "gta") {
+      const t = _theftCtx; _theftCtx = null;   // consume — one theft, one charge
+      opts = Object.assign({}, opts);
+      if (t.police) { opts.type = "grand-theft-police"; amount = Math.max(amount, 130); if (t.occupied) opts.instant = true; }
+      else if (t.occupied) { opts.type = "carjacking"; amount = Math.max(amount, 120); opts.instant = true; }
+      else { opts.type = "boosting"; opts.instant = true; }
+    }
+    // V2 double-fire guard: a re-fired theft of the same type inside the window
+    // (board/eject glitches, double interact) charges nothing.
+    if (v2()) {
+      const inf = CRIME[opts.type];
+      if (inf && inf.floor) {
+        if (inf.mil) _milTheftT = CBZ.now;   // stamp BEFORE any gate — radar saw the machine move
+        const cd = +CBZ.CONFIG.WANTED_THEFT_COOLDOWN || 0;
+        if (CBZ.now - (_theftCoolT[opts.type] || -1e9) < cd) return;
+        _theftCoolT[opts.type] = CBZ.now;
+      }
+    }
     // THE UNIFORM READS (outfits.js): police colors buy trust on the street —
     // civilians don't call the law on "an officer" doing minor work. VIOLENCE
     // in uniform blows the costume, and impersonation makes the charge burn
@@ -276,6 +397,29 @@
     if (CBZ.cityTagWitnesses) CBZ.cityTagWitnesses(x, z, amount, opts.type);   // witnesses remember WHAT they saw
     if (copWitness(x, z)) report(amount, opts);
   }
+
+  // ---- V2: see the door for what it is. vehicles.js (loads after us) owns
+  // CBZ.cityEnterVehicle and ejects the driver BEFORE it fires the "gta" crime,
+  // so occupancy is unreadable by the time crime() runs. This wrap (the
+  // cityKillPlayer lazy-wrap pattern below) captures occupied/police at the
+  // door handle and hands it to crime() via _theftCtx. Idempotent, flag-guarded.
+  function wrapEnterVehicle() {
+    if (typeof CBZ.cityEnterVehicle !== "function") return false;   // not loaded yet → retry
+    if (CBZ.cityEnterVehicle._starsWrapped) return true;
+    const orig = CBZ.cityEnterVehicle;
+    const wrapped = function (car) {
+      if (!v2() || !car || car.stolen || car.owned || car.player) return orig.apply(this, arguments);
+      _theftCtx = { occupied: !!car.npcDriver, police: !!(car._patrolCar || car.cop || car.police) };
+      try { return orig.apply(this, arguments); } finally { _theftCtx = null; }
+    };
+    // copy EVERY *Wrapped marker forward (the explosion-wrapper law) so other
+    // modules' idempotence guards (e.g. modshop's _modPerfWrapped) survive us.
+    for (const k in orig) { if (/Wrapped$/.test(k)) wrapped[k] = orig[k]; }
+    wrapped._starsWrapped = true;
+    CBZ.cityEnterVehicle = wrapped;
+    return true;
+  }
+  if (!wrapEnterVehicle()) { const ivEV = setInterval(function () { if (wrapEnterVehicle()) clearInterval(ivEV); }, 0); }
 
   function addHeat(n) { g.heat = Math.max(0, (g.heat || 0) + n); g.wanted = starsFromHeat(g.heat); if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
   function clearWanted() { g.heat = 0; g.wanted = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
@@ -525,6 +669,58 @@
   CBZ.cityContractPing = function () { if (contract) pingContract(true); };
   CBZ.cityContractAbandon = function () { if (contract) failContract("abandoned"); };
 
+  // ============================================================
+  //  V2 MILITARY JURISDICTION — Fort Brandt is a SPECIAL zone (owner: "entering
+  //  the military base should make stars go to max"). The base AABB comes from
+  //  island_military.js (CBZ._militaryBase). Walk inside the wire and you get a
+  //  short spoken grace ("RESTRICTED — TURN BACK"); linger past it (or commit
+  //  ANY crime inside — a hostile act skips the grace) and the sensor grid
+  //  locks a hard 5★ floor, re-asserted every tick like convictFloor. It
+  //  bypasses witnesses AND the mask — radar tracks bodies, not faces. Leave
+  //  the zone and a PURE-trespass 5★ demotes to the top of the 4★ band (a
+  //  manhunt that decays normally); a GENUINE 5★ (a stolen military aircraft's
+  //  higher heat) survives the exit. Busts/scripted arrests always win: the
+  //  floor stands down while a bust is in motion.
+  // ============================================================
+  function releaseMilZone() {
+    milLock = false; milWarnT = 0; _milHostileT = -1e9;
+    if ((g.wanted | 0) >= 5 && (g.heat || 0) <= CBZ.CITY.starHeat[5] + 2) {   // only the floor was holding it
+      g.heat = CBZ.CITY.starHeat[5] - 1;                                      // top of the 4★ band → decays normally
+      g.wanted = starsFromHeat(g.heat);
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    }
+  }
+  function militaryZone(dt) {
+    if (!v2()) { milLock = false; milWarnT = 0; return; }
+    const B = CBZ._militaryBase, P = CBZ.player;
+    if (!B || !P || !P.pos || g.state !== "playing" || P.dead || g.busted || busting) {
+      if (milLock) releaseMilZone(); else milWarnT = 0;
+      return;
+    }
+    const inset = +CBZ.CONFIG.WANTED_MIL_ZONE_INSET || 0;
+    const x = P.pos.x, z = P.pos.z;
+    const inside = x > B.minX + inset && x < B.maxX - inset && z > B.minZ + inset && z < B.maxZ - inset;
+    if (!inside) { if (milLock) releaseMilZone(); else milWarnT = 0; return; }
+    if (!milLock) {
+      if (milWarnT === 0 && CBZ.city && CBZ.city.big) CBZ.city.big("⚠ RESTRICTED AREA — TURN BACK");
+      milWarnT += dt;
+      // a fresh crime reported INSIDE the wire (report() stamps _milHostileT)
+      // = hostile incursion, no grace. 10s window: generous enough that a
+      // slow frame can't let the stamp lapse before this tick reads it.
+      const hostile = (CBZ.now - _milHostileT) < 10000;
+      const configuredGrace = Number(CBZ.CONFIG.WANTED_MIL_ZONE_GRACE);
+      const grace = Number.isFinite(configuredGrace) ? Math.max(0, configuredGrace) : 0;
+      if (milWarnT < grace && !hostile) return;
+      milLock = true;
+      if (CBZ.city && CBZ.city.big) CBZ.city.big("★★★★★ MILITARY INCURSION");
+    }
+    // the re-asserted floor (convictFloor pattern): never lowers a higher heat
+    if ((g.heat || 0) < CBZ.CITY.starHeat[5] + 1) g.heat = CBZ.CITY.starHeat[5] + 1;
+    if ((g.wanted | 0) < 5) g.wanted = 5;
+    g.cityCrimeLabel = "Military Incursion";
+    lastCrimeT = CBZ.now;   // the grid tracks you — no heat decay inside the wire
+  }
+
   // ---- BUST: cuffed by police → off to the jail (escape) game ----
   // opts.bigLabel / opts.note (city/origins.js, the EXEC fraud arrest): an
   // optional custom big-text + overlay sub-line for a scripted bust that
@@ -575,6 +771,12 @@
     // an active manhunt for an escaped convict never falls below 3★ on its own
     // (only CBZ.cityClearConvict lifts it). Re-assert AFTER any decay this frame.
     convictFloor();
+    // V2 military jurisdiction AFTER the convict floor: inside the wire, the
+    // 5★ sensor lock outranks the 3★ convict band. Also stamps the body class
+    // css/campaign.css keys on to exempt the star meter from the campaign
+    // declutter (flag off → class off → legacy hidden-HUD behavior returns).
+    militaryZone(dt);
+    if (_v2Body !== v2()) { _v2Body = v2(); try { document.body.classList.toggle("wanted-stars-v2", _v2Body); } catch (e) {} }
     g.cityCopTarget = COP_TARGET[Math.min(5, g.wanted | 0)];
     // BOUNTIES_V2 contract brain rides this same tick (no new update order)
     try { bountyTick(dt); } catch (e) {}
@@ -583,7 +785,7 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + hitman contracts die with the run
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
 
   // ---- DEATH RESET (PROG owns): on player death, drop the player's STREET INFAMY
   // back toward Lv.1 so the level/title visibly falls and the player re-climbs.
@@ -598,6 +800,7 @@
   function infamyResetOnDeath() {
     if (g.mode !== "city") return;
     g.heat = 0; g.wanted = 0; g.cityCopTarget = 0;
+    milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9;   // the sensor lock dies with you (respawn is outside the wire)
     g.cityMurders = 0; g.cityCopKills = 0; g.cityCrimeLabel = null;
     g.cityBounty = 0;                       // the price on your head dies with you
     g.kills = 0;                            // body count infamy resets (assets untouched)

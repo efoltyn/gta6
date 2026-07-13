@@ -527,10 +527,34 @@
 
       // place the player — on a rooftop (wealth-scaled), falling back to the
       // street spawn only if no buildings exist yet.
+      // ESCAPED CONVICT (owner: "you should be at the jail door with a wanted
+      // level, not just spawn into the world"): a jailbreak entry starts ON THE
+      // STREET at the law's intake door — CBZ.cityPoliceStation() (the City
+      // Hall/bank stand-in every custody flow already uses; there is no
+      // dedicated jail building in city coordinates) — stepped a couple of
+      // metres out the door along its outward normal. The 3★ manhunt was
+      // already stamped above; cityAddStars is guard-called on top (a newer
+      // wanted API may own the stamp — the inline heat floor stays the
+      // fallback either way, so stars are ≥3 with or without it).
       const P = CBZ.player;
-      const roof = pickSpawnRoof(game.cash || 0);
-      if (roof) P.pos.set(roof.x, roof.y, roof.z);
-      else { const sp = A.spawn; P.pos.set(sp.x, 0, sp.z); }
+      let placedAtGate = false, gateX = 0, gateZ = 0;      // gate coords saved for the post-origin re-assert
+      if (game.escapedConvict && CBZ.cityPoliceStation) {
+        const st = CBZ.cityPoliceStation();
+        const d = st && st.lot && st.lot.building && st.lot.building.door;
+        if (st) {
+          const nx = d && d.nx != null ? d.nx : 0, nz = d && d.nz != null ? d.nz : 1;
+          const nl = Math.hypot(nx, nz) || 1;
+          gateX = st.x + (nx / nl) * 2.4; gateZ = st.z + (nz / nl) * 2.4;
+          P.pos.set(gateX, 0, gateZ);
+          placedAtGate = true;
+          if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
+        }
+      }
+      if (!placedAtGate) {
+        const roof = pickSpawnRoof(game.cash || 0);
+        if (roof) P.pos.set(roof.x, roof.y, roof.z);
+        else { const sp = A.spawn; P.pos.set(sp.x, 0, sp.z); }
+      }
       P.vy = 0; P.grounded = true; P.maxHp = 200; P.hp = 200; P._hurtT = 0; P.dead = false; P.ko = 0; P.stun = 0;
       P.driving = false; P._vehicle = null; P._death = null;
       P.captureState = "normal"; P.captureT = 0;
@@ -558,6 +582,26 @@
       // needs third-person for its front-reveal/orbit; onIntroComplete flips
       // to FP the same way the escape game does.
       const originResult = CBZ.cityOriginApply ? CBZ.cityOriginApply(game) : null;
+      // JAILBREAK OVERRIDE-GUARD (owner: "at the jail door with a wanted level"):
+      // cityOriginApply above RE-POSITIONS the player — a returning character is
+      // sent to their last SAVED spot (restorePos), a fresh/switched ledger runs
+      // the scripted origin opener — and either can rewind the manhunt off the
+      // persistent ledger. That silently undoes the gate placement + stars stamped
+      // earlier in this reset. Re-assert them AFTER origin, keyed on the LOCAL
+      // placedAtGate flag (game.escapedConvict itself may have just been rewound by
+      // the ledger restore, so it is NOT a reliable condition here). A jailbreak is
+      // a continuation of THIS character, so re-stamping is always correct.
+      if (placedAtGate) {
+        P.pos.set(gateX, 0, gateZ);
+        game.escapedConvict = true; game.escapedFromJail = true;
+        const HT = (CBZ.CITY && CBZ.CITY.starHeat) || [0, 300, 650, 1100, 3200, 12000];
+        game.heat = Math.max(game.heat || 0, (HT[3] || 1100) + 5);
+        if ((game.wanted | 0) < 3) game.wanted = 3;
+        game.cityCrimeLabel = "Escaped Convict";
+        if (originResult) originResult.introActive = false;
+        if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
+        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      }
       // CITY defaults to FIRST-PERSON (the jail's fpsmode); [V] toggles to 3rd-person.
       if (campaignMode) {
         // The campaign is authored and verified around the shoulder camera;

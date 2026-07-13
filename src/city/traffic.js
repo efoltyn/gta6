@@ -144,10 +144,13 @@
 
   const TR = () => (CBZ.CITY && CBZ.CITY.traf) || {};
   // multi-lane geometry: lane index → signed lateral offset from the centreline.
-  // dir is ±1, idx in [0..lanesPerDir-1]; centre of lane idx = laneW*(idx+0.5).
-  const lanesPerDir = () => Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0);
+  // dir is ±1, idx in [0..lanesPerDir-1]. ROAD-AWARE via CBZ.roadLaneCenter(r,..)
+  // so lane targets honour a road's real 3+3 + median cross-section; guard-called
+  // fallback keeps the old global-2-lane math. laneWidth() stays global — it's a
+  // proximity threshold for "car ahead in my lane" gates, not a lane target.
+  const lanesPerDir = (r) => (CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0));
   const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
-  const laneOffset = (dir, idx) => dir * laneWidth() * (idx + 0.5);
+  const laneOffset = (r, dir, idx) => (CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidth() * (idx + 0.5));
 
   // ---- driver personalities ---------------------------------------------
   // A car's aggression stat already lives on c.driver.aggr (0..1) and c.reckless.
@@ -245,10 +248,10 @@
     const dir = c.dirSign || 1;
     const idx = c.laneIdx != null ? c.laneIdx : 0;
     const cand = [];
-    if (idx + 1 < lanesPerDir()) cand.push(idx + 1);   // prefer pulling outboard
+    if (idx + 1 < lanesPerDir(c.road)) cand.push(idx + 1);   // prefer pulling outboard
     if (idx - 1 >= 0) cand.push(idx - 1);
     for (const ni of cand) {
-      const lat = laneOffset(dir, ni);
+      const lat = laneOffset(c.road, dir, ni);
       if (laneFree(c, lat)) return { idx: ni, lat };
     }
     return null;
@@ -323,8 +326,8 @@
       const r = A.roads[(Math.random() * A.roads.length) | 0];
       const along = (Math.random() - 0.5) * r.len * 0.8;
       const dir = Math.random() < 0.5 ? 1 : -1;
-      const laneIdx = (Math.random() * lanesPerDir()) | 0;
-      const lane = laneOffset(dir, laneIdx);
+      const laneIdx = (Math.random() * lanesPerDir(r)) | 0;
+      const lane = laneOffset(r, dir, laneIdx);
       const x = r.vertical ? r.x + lane : r.x + along;
       const z = r.vertical ? r.z + along : r.z + lane;
       const dpx = x - P.x, dpz = z - P.z, dp = dpx * dpx + dpz * dpz;
@@ -381,8 +384,8 @@
   // end). Returns true. Keeps vehicles.js order-37 in sync.
   function placeOnRoad(c, r) {
     const dir = Math.random() < 0.5 ? 1 : -1;
-    const laneIdx = (Math.random() * lanesPerDir()) | 0;
-    const lane = laneOffset(dir, laneIdx);
+    const laneIdx = (Math.random() * lanesPerDir(r)) | 0;
+    const lane = laneOffset(r, dir, laneIdx);
     // clamp the spread so a 600m highway doesn't drop the car a single fixed
     // distance from its mid — use up to ±45% of length, capped at ±90m.
     const spread = Math.min(r.len * 0.45, 90);
@@ -552,7 +555,7 @@
           // overtake reads as the city's worst driver, not a polite queue.
           if (!ot && (c.trafArch === "reckless" || (c.driver && c.driver.aggr >= 0.82))) {
             const dir = c.dirSign || 1;
-            const onLat = laneOffset(-dir, 0);             // oncoming INNER lane (across the centreline)
+            const onLat = laneOffset(c.road, -dir, 0);     // oncoming INNER lane (across the centreline)
             if (laneFree(c, onLat)) ot = { idx: 0, lat: onLat, oncoming: true };
           }
           if (!ot) {
@@ -733,6 +736,9 @@
       const w = new THREE.Mesh(gg.wheel, tireMat);
       w.rotation.z = Math.PI / 2;
       w.position.set(i % 2 === 0 ? -1.05 : 1.05, 0.5, i < 2 ? 1.7 : -1.7);
+      // EMERGENCY_STEALABLE: tagged so a stolen truck spins its wheels while
+      // driven (cityPromotePlayerCar's collectWheels finds playerWheel meshes).
+      w.userData.playerWheel = true;
       grp.add(w);
     }
     // No floating "AMBULANCE"/"FIRE" word: the shape, livery (red truck / white
@@ -746,7 +752,7 @@
     // enter from the city edge along a road far from the incident
     const r = A.roads[(Math.random() * A.roads.length) | 0];
     const dir = Math.random() < 0.5 ? 1 : -1;
-    const lane = laneOffset(dir, 0);   // emergency runs the inner lane
+    const lane = laneOffset(r, dir, 0);   // emergency runs the inner lane
     let sx, sz;
     if (r.vertical) { sx = r.x + lane; sz = r.z - dir * (r.len / 2 - 4); }
     else { sx = r.x - dir * (r.len / 2 - 4); sz = r.z + lane; }
@@ -759,9 +765,34 @@
       siren: 0, target: null,
       // dims feed vehicles.js's shared wall resolver (cityCollideVehicle) so the
       // truck hull collides exactly like every other driven car in the city.
-      dims: { width: 2.2, length: 5.4 },
+      dims: { width: 2.2, length: 5.4, height: 2.6, wheelbase: 3.4 },
       cx: null, cz: null, stuckT: 0,
     };
+    // EMERGENCY_STEALABLE: the truck is ALSO a first-class CBZ.cityCars record
+    // (same object — one identity). That makes it (a) visible to the interact
+    // system ("Boost it"/"Get in" via cityNearestCar), (b) SOLID to all other
+    // traffic via resolveCars — no more ghosting through cars — and (c) fully
+    // drivable by the order-11 player loop once entered. While it's still on
+    // duty the bespoke dispatch AI below keeps the wheel (e.ai stays false, so
+    // vehicles.js's order-37 lane AI never fights it).
+    if ((!CBZ.CONFIG || CBZ.CONFIG.EMERGENCY_STEALABLE !== false) && CBZ.cityRegisterVehicle) {
+      CBZ.cityRegisterVehicle(built.grp, {
+        record: e, body: "van", style: "van",
+        // persist: a mid-life spawnCityTraffic/clearCars sweep must never
+        // dispose a truck the dispatch loop is still driving (despawnEmergency
+        // owns the real teardown, incl. the cityCars splice).
+        persist: true,
+        // modest chop value — an ambulance is a joke payday, not a jackpot
+        model: { name: kind === "firetruck" ? "Fire Engine" : "Ambulance", value: 3800, rarity: 0.5, body: "van" },
+        dims: { width: 2.2, length: 5.4, height: 2.6, wheelbase: 3.4 },
+        color: kind === "firetruck" ? 0xc4231b : 0xeef3f6,
+      });
+      e._emergency = kind;
+      // the lightbar's red beacon material matches the brake-light detector —
+      // setBrake would swap it to a frozen "brake" clone mid-strobe and fight
+      // flashBeacon. The truck has no authored brake lamps: let the beacon own it.
+      e._tailMeshes = [];
+    }
     emg.push(e);
     return e;
   }
@@ -772,10 +803,22 @@
       // dispose only the per-instance materials we built (geoms are _shared)
       ["body", "cab", "redMat", "bluMat", "bar"].forEach(function (k) { const m = e.mats[k]; if (m && m.dispose && !m._shared) m.dispose(); });
     }
+    // EMERGENCY_STEALABLE: drop the cityCars registration with the truck, or a
+    // ghost record keeps colliding/getting offered as enterable.
+    if (CBZ.cityCars) { const ci = CBZ.cityCars.indexOf(e); if (ci >= 0) CBZ.cityCars.splice(ci, 1); }
   }
+  // stolen units: no longer dispatch-driven (vehicles.js owns them as ordinary
+  // cars), but their beacons keep flashing — a lit-up stolen ambulance IS the joke.
+  const stolenEmg = [];
   CBZ.cityEmergencyReset = function () {
     for (let i = emg.length - 1; i >= 0; i--) despawnEmergency(emg[i]);
     emg.length = 0;
+    // stolen units: despawn any the player ISN'T currently driving (they're
+    // cityCars records — but persist:true means clearCars won't reap them, so
+    // this reset owns their teardown). A player-driven one stays with the
+    // player; vehicles.js owns that lifecycle from here.
+    for (let i = stolenEmg.length - 1; i >= 0; i--) { const e = stolenEmg[i]; if (!e.player) despawnEmergency(e); }
+    stolenEmg.length = 0;
     for (let i = liveHonks.length - 1; i >= 0; i--) { const s = liveHonks[i].s; if (s && s.parent) s.parent.remove(s); }
     liveHonks.length = 0;
   };
@@ -887,8 +930,33 @@
     const want = Math.atan2(adx, adz);
     e.heading = CBZ.lerpAngle ? CBZ.lerpAngle(e.heading, want, 1 - Math.pow(0.0009, dt)) : want;
     // emergency vehicles roll fast — they have right of way (ignore the lights)
-    const topV = Math.max(11, (TR().cruise ? TR().cruise[1] : 12) * 1.3);
-    e.v += Math.min(14 * dt, topV - e.v);
+    let topV = Math.max(11, (TR().cruise ? TR().cruise[1] : 12) * 1.3);
+    // ...but a real unit BRAKES for whoever's in its path instead of plowing
+    // through the scene it came to help ("just drive through shit"): scan the
+    // lane ahead for peds and cars and ease off. Cheap: ≤2 trucks alive, ever.
+    const bfx = Math.sin(e.heading), bfz = Math.cos(e.heading);
+    function brakeFor(px, pz, latTol) {
+      const bdx = px - e.pos.x, bdz = pz - e.pos.z;
+      const ah = bdx * bfx + bdz * bfz;
+      if (ah > 0.5 && ah < 15 && Math.abs(bdx * -bfz + bdz * bfx) < latTol) {
+        topV = Math.min(topV, Math.max(0, (ah - 3.2) * 1.1));
+      }
+    }
+    // (skipped on final approach — inside ~12u it's crawling in to park at the
+    //  scene, and a bystander at the curb must not stall the arrival check)
+    if (dist > 12) {
+      if (CBZ.cityPeds) for (let i = 0; i < CBZ.cityPeds.length; i++) {
+        const p = CBZ.cityPeds[i];
+        if (p.dead || p.inCar) continue;
+        brakeFor(p.pos.x, p.pos.z, 2.2);
+      }
+      if (CBZ.cityCars) for (let i = 0; i < CBZ.cityCars.length; i++) {
+        const c = CBZ.cityCars[i];
+        if (c === e || c.dead) continue;
+        brakeFor(c.pos.x, c.pos.z, 2.6);
+      }
+    }
+    e.v += Math.max(-26 * dt, Math.min(14 * dt, topV - e.v));
     const px = e.pos.x, pz = e.pos.z;
     e.pos.x += Math.sin(e.heading) * e.v * dt;
     e.pos.z += Math.cos(e.heading) * e.v * dt;
@@ -918,6 +986,18 @@
     if (!P || P.dead) return;
     const speed = Math.abs(e.v || 0);
     if (!P.driving) {
+      emgFootPush(e, speed);
+      return;
+    }
+    // registered as a real cityCars record (EMERGENCY_STEALABLE) → vehicles.js
+    // resolveCars already owns truck-vs-car separation/crashes; a second
+    // hand-rolled push here would double-shove the player's car every frame.
+    if (e._emergency) return;
+    emgCarPush(e, speed);
+  }
+  function emgFootPush(e, speed) {
+    const P = CBZ.player;
+    {
       const hw = 1.1 + (P.radius || 0.45), hl = 2.7 + (P.radius || 0.45);
       const s = Math.sin(e.heading), c = Math.cos(e.heading);
       const dx = P.pos.x - e.pos.x, dz = P.pos.z - e.pos.z;
@@ -939,6 +1019,9 @@
       }
       return;
     }
+  }
+  function emgCarPush(e, speed) {
+    const P = CBZ.player;
     // your car vs the truck: push apart + kill the closing speed (a wall of
     // steel with right of way — you bounce off, it barely notices)
     const car = P._vehicle;
@@ -1017,8 +1100,31 @@
     emgScanT -= dt;
     if (emgScanT <= 0) { emgScanT = 1.5; dispatchScan(); }
 
+    // stolen trucks: dispatch AI is off them — just keep the lightbar alive.
+    for (let i = stolenEmg.length - 1; i >= 0; i--) {
+      const e = stolenEmg[i];
+      if (!e.grp || !e.grp.parent || e.dead || e._reap) { stolenEmg.splice(i, 1); continue; }   // chopped / exploded / cleared
+      flashBeacon(e, dt);
+    }
     for (let i = emg.length - 1; i >= 0; i--) {
       const e = emg[i];
+      // DESTROYED while on duty (splash damage at a car fire → explodeCar sets
+      // dead/_reap and the order-38 reaper pulls it from cityCars): stop
+      // driving the corpse — release the scene and drop the record.
+      if (e.dead || e._reap) {
+        if (e.target) { e.target._emgClaimed = false; e.target = null; }
+        emg.splice(i, 1);
+        continue;
+      }
+      // STOLEN (player grabbed it, or it got jacked flagged): hand the wheel to
+      // vehicles.js for good — release the scene claim so another unit can
+      // respond, and stop steering/parking/despawning it from here.
+      if (e.player || e.stolen) {
+        if (e.target) { e.target._emgClaimed = false; e.target = null; }
+        stolenEmg.push(e);
+        emg.splice(i, 1);
+        continue;
+      }
       flashBeacon(e, dt);
       // wail the siren on a long cooldown while en route (one-shot in the bank)
       e.siren -= dt;

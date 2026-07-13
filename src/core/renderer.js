@@ -26,13 +26,38 @@
   CBZ.renderer = renderer;
   CBZ.canvas = renderer.domElement;
 
-  // Refresh the shadow map below frame rate. At the sun's angular speed this
-  // is visually close to per-frame shadows but avoids a duplicate scene pass
-  // on most frames. Lower adaptive-quality tiers use a gentler cadence.
-  let _shadowTick = 0;
+  // One scheduler owns shadow refreshes. Previously this file requested a
+  // shadow pass every 2-3 frames while daynight.js independently requested one
+  // whenever the player crossed a ~7cm shadow texel; together those paths often
+  // restored a full shadow-scene render every frame. Wall-clock scheduling is
+  // stable at any display refresh rate: 18Hz while moving, 10Hz while still.
+  let shadowDirty = true;
+  let shadowForce = true;
+  let lastShadowMs = -Infinity;
+  const shadowStats = CBZ.shadowUpdateStats = { requests: 0, forced: 0, commits: 0, movingCommits: 0 };
+  CBZ.requestShadowUpdate = function (force) {
+    shadowStats.requests++;
+    shadowDirty = true;
+    if (force) { shadowForce = true; shadowStats.forced++; }
+  };
   CBZ.onAlways(1, function () {
-    const stride = CBZ.qualityLevel != null && CBZ.qualityLevel < 2 ? 3 : 2;
-    if ((_shadowTick++ % stride) === 0) renderer.shadowMap.needsUpdate = true;
+    if (!renderer.shadowMap.enabled || !CBZ.sun || !CBZ.sun.castShadow) return;
+    const p = CBZ.player;
+    const moving = !!(p && ((p.speed || 0) > 0.08 || Math.abs(p.vy || 0) > 0.08 || p.driving));
+    const interval = 1000 / (moving ? 18 : 10);
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    // Periodic refresh carries the slowly moving sun even when no producer is
+    // dirty. Dirty producers still respect the same cap; force is reserved for
+    // teleports, mode/tier changes and rebuilt geometry.
+    if (!shadowForce && now - lastShadowMs < interval) return;
+    if (shadowForce || shadowDirty || now - lastShadowMs >= interval) {
+      renderer.shadowMap.needsUpdate = true;
+      shadowDirty = false;
+      shadowForce = false;
+      lastShadowMs = now;
+      shadowStats.commits++;
+      if (moving) shadowStats.movingCommits++;
+    }
   });
 
   addEventListener("resize", () => {

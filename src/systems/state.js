@@ -35,6 +35,10 @@
   }
 
   function setMode(id) {
+    // Momentary hit-stop / finisher slow-mo must never survive an arrest,
+    // escape, retry, or mode transition.
+    CBZ.hitstop = 0;
+    CBZ.slowmo = 0;
     g.mode = id === "survival" ? "survival" : (id === "city" ? "city" : "escape");
     if (g.mode !== "escape" && CBZ.setSimulationView) CBZ.setSimulationView(false);
     modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === g.mode));
@@ -42,6 +46,7 @@
     document.body.classList.toggle("mode-city", g.mode === "city");
     const m = CBZ.modes[g.mode];
     if ((g.mode === "survival" || g.mode === "city") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
+    if (CBZ.prisonRoot) CBZ.prisonRoot.visible = g.mode === "escape";
     if (g.mode !== "survival" && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = false;
     if (g.mode !== "city" && CBZ.city && CBZ.city.arena) CBZ.city.arena.root.visible = false;
     // leaving city cleanly cancels any in-progress WASTED/spectate state so the
@@ -51,6 +56,8 @@
   CBZ.setMode = setMode;
 
   function resetGame() {
+    CBZ.hitstop = 0;
+    CBZ.slowmo = 0;
     const mode = g.mode === "survival" ? "survival" : (g.mode === "city" ? "city" : "escape");
     if (CBZ.setSimulationView) CBZ.setSimulationView(false);
     if (CBZ.clearGore) CBZ.clearGore();   // wipe blood/gibs from the prior match

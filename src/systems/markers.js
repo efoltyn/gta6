@@ -148,6 +148,12 @@
     return { ch: "?", bg: "#f7f1df", fg: "#111827" };
   }
 
+  // overhead-marker height: just above the (unscaled-root) character's head.
+  // Post HUMAN_SCALE=0.70 the old 3.55–3.85 literals (tuned to the 2.60u rig)
+  // floated a metre high; CBZ.charHeadY(a) resolves to ~1.97 (head 1.82 + margin).
+  // Guard-called so a missing helper falls back to the old flush-head value.
+  const headY = (a) => (CBZ.charHeadY ? CBZ.charHeadY(a) : 1.97);
+
   function tick() {
     // hunt/snitch/approach chevrons ride the PRISON rosters (CBZ.guards/npcs);
     // the city has its own actors. Skip in city — the concat below allocated a
@@ -164,18 +170,18 @@
       if (guardish(a) && a.wedge) a.wedge.visible = !!a.flashlightOn;
       const on = hunting(a) && (!guardish(a) || !!a.flashlightOn);
       a._marker.visible = on;
-      if (on) a._marker.position.y = 3.7 + bob;
+      if (on) a._marker.position.y = headY(a) + bob;
       const softAlert = !on && guardish(a) && (a.alert || 0) > 0.15 && !a.flashlightOn && !a.dead && !(a.ko > 0);
       a._alertMarker.visible = !!softAlert;
-      if (softAlert) a._alertMarker.position.y = 3.48 + bob * 0.55;
+      if (softAlert) a._alertMarker.position.y = headY(a) + bob * 0.55;
       const tip = !on && CBZ.game && CBZ.game.role === "cop" && a.copMarked > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
       a._tipMarker.visible = !!tip;
-      if (tip) a._tipMarker.position.y = 3.8 + bob;
+      if (tip) a._tipMarker.position.y = headY(a) + bob;
       const knownReport = (a.reportedPlayerT || 0) > 0;
       const snitch = !on && !tip && (a.aiState === "snitch" || knownReport) && !a.dead && !(a.ko > 0) && !a.escaped;
       a._snitchMarker.visible = !!snitch;
       if (snitch) {
-        a._snitchMarker.position.y = (knownReport ? 3.65 : 3.85) + bob;
+        a._snitchMarker.position.y = headY(a) + bob;
         a._snitchMarker.scale.setScalar(knownReport ? 0.56 : 0.66);
       }
       const offer = !on && !tip && !snitch && a.approach && a.approach.t > 0 && !a.dead && !(a.ko > 0) && !a.escaped;
@@ -183,7 +189,7 @@
       if (offer) {
         const s = approachStyle(a.approach.kind);
         a._approachMarker.material.map = makeOfferTexture(s.ch, s.bg, s.fg);
-        a._approachMarker.position.y = 3.55 + bob;
+        a._approachMarker.position.y = headY(a) + bob;
       }
     }
   }

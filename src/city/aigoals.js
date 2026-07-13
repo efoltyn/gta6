@@ -236,7 +236,7 @@
     if (P && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) > 30) return;   // only near the camera
     const s = CBZ.makeLabelSprite(text, { color: color || "#dfe7ff" });
     if (!s) return;
-    s.position.y = 3.7; s.scale.set(Math.min(7, 2.6 + text.length * 0.16), 0.8, 1);
+    s.position.y = CBZ.charHeadY ? CBZ.charHeadY(ped) : 1.97; s.scale.set(Math.min(7, 2.6 + text.length * 0.16), 0.8, 1);
     s.userData.transient = true;
     ped.group.add(s);
     _bubbles.push({ s, ped, t: secs || 2.2 });

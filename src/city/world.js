@@ -227,28 +227,18 @@
     // ---- THE TWO ARTERIAL AVENUES (xLines[2]/xLines[4]) ----------------------
     // WHY: road "hierarchy" used to be pure paint (double-yellow, zero geometry
     // difference) — every street drove identically. A real downtown has a couple
-    // of avenues that are GENUINELY bigger: more lanes, a hard median. We can't
-    // widen the asphalt itself (ROAD is baked into xLines/step — every block
-    // position and the fast nearestIntersection() lookup assume a UNIFORM step,
-    // and city.maxX anchors expansion.js's bridge/island; reflowing the grid to
-    // free real width is exactly the regen this task forbids). So we spend the
-    // EXISTING ROAD envelope differently at just these 2 lines: narrower lanes
-    // (2.35m vs the ordinary 3.6m) buy room for a THIRD lane per direction plus
-    // a permanent physical median, all still inside the same ROAD=16 footprint
-    // (3 lanes * 2.35m * 2 sides + a 0.7m median = 14.8m, under ROAD with a
-    // 0.3m shoulder to spare before the curb edge-line). AVE_LANES/AVE_LANEW
-    // are stamped onto these two road records (avenue:true) for any future
-    // traffic.js pass that wants to read a per-segment lane count; today's
-    // vehicles.js/traffic.js only read the GLOBAL CBZ.CITY.traf.lanesPerDir/
-    // laneW (verified: lanesPerDir()/laneWidth() in traffic.js and vehicles.js
-    // take no road argument), so ambient AI still cruises these avenues at the
-    // ordinary global lane count — the extra lane is real, walkable/driveable
-    // pavement with its own paint, just not yet AI-claimed. That wiring is a
-    // traffic.js change, out of this file's scope; flagged here rather than
-    // silently faked.
+    // of avenues with a hard median. The old pass squeezed THREE 2.35m lanes per
+    // direction into a 16m envelope: narrower than the 3.6m lanes used by every
+    // traffic controller, so the painted road and driven road disagreed. CITY.road
+    // is now a real 18m four-lane cross-section; avenues keep those same 3.6m
+    // travel lanes and add a 0.7m median inside the remaining clear zone.
+    // AVE_LANES/AVE_LANEW
+    // are stamped onto these two road records (avenue:true), although they now
+    // deliberately equal the global traffic contract. Paint and AI therefore
+    // agree on lane count and width; the median is the avenue's hierarchy cue.
     const AVENUE_LINES = [2, 4];
     function isAvenueLine(i) { return AVENUE_LINES.indexOf(i) >= 0; }
-    const AVE_LANES = 3, AVE_LANEW = 2.35, AVE_MEDIAN = 0.7;
+    const AVE_LANES = lanesPerDir, AVE_LANEW = laneW, AVE_MEDIAN = 0.7;
     const whiteRects = [], yellowRects = [];   // {x,z,w,d}
     // one centred white DASHED line down a span (axis: 'v' along z, 'h' along x)
     function pushDashes(cx, cz, vertical, len, off) {
@@ -266,11 +256,9 @@
       if (vertical) arr.push({ x: cx + off, z: cz, w: 0.18, d: len });
       else arr.push({ x: cx, z: cz + off, w: len, d: 0.18 });
     }
-    // paint the whole lane set for ONE street centred at (cx,cz). `avenue` swaps
-    // in the wider-capacity 3-lanes-per-direction layout (narrower lane width,
-    // a hard median gap) instead of the ordinary lanesPerDir/laneW pair — it is
-    // the ONLY caller of the double-yellow-with-median centreline now (ordinary
-    // streets keep the original single-yellow centreline).
+    // Paint the whole lane set for one street. Avenues retain the same legal
+    // lane contract as traffic but use a hard median/double-yellow centreline;
+    // ordinary streets keep the single-yellow centreline.
     function paintStreet(cx, cz, vertical, len, avenue) {
       const nLanes = avenue ? AVE_LANES : lanesPerDir, lw = avenue ? AVE_LANEW : laneW;
       // centre line: avenues get a wider double-yellow straddling the median;
@@ -286,22 +274,42 @@
         pushSolid(cx, cz, vertical, len, s * (ROAD / 2 - 0.3), false);
       }
     }
+    // ROADS_V2: markings STOP at every intersection (real streets don't run a
+    // yellow centreline straight through a junction box — the owner's screenshot
+    // of a "floating yellow line" was that continuous centreline crossing the
+    // raised intersection patch). Paint each street as per-block segments that
+    // end just behind the stop bar (ROAD/2 + 3.0 from each crossing centre);
+    // the crossing itself stays bare asphalt + zebra/stop-bar furniture.
+    const ROADS_V2 = !CBZ.CONFIG || CBZ.CONFIG.ROADS_V2 !== false;
+    const PAINT_SETBACK = ROAD / 2 + 3.0;
+    function paintStreetSegmented(fixed, vertical, crossings, avenue) {
+      for (let j = 0; j < crossings.length - 1; j++) {
+        const c0 = crossings[j] + PAINT_SETBACK, c1 = crossings[j + 1] - PAINT_SETBACK;
+        const segLen = c1 - c0;
+        if (segLen < 3) continue;
+        const mid = (c0 + c1) / 2;
+        if (vertical) paintStreet(fixed, mid, true, segLen, avenue);
+        else paintStreet(mid, fixed, false, segLen, avenue);
+      }
+    }
     const aveRects = [], crossRects = [];
     xLines.forEach((x, i) => {              // avenues (run along z)
       const ave = isAvenueLine(i);
       aveRects.push({ x, z: (minZ + maxZ) / 2, w: ROAD, d: spanZ });
-      paintStreet(x, (minZ + maxZ) / 2, true, spanZ, ave);
+      if (ROADS_V2) paintStreetSegmented(x, true, zLines, ave);
+      else paintStreet(x, (minZ + maxZ) / 2, true, spanZ, ave);
       // stamp the avenue's real per-segment lane data (lanesPerDir/laneW/avenue)
       // alongside the ordinary {x,z,vertical,len} shape every consumer expects —
       // a plain additive field, invisible to anything that doesn't look for it.
-      const seg = { x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ };
+      const seg = { x, z: (minZ + maxZ) / 2, vertical: true, len: spanZ, w: ROAD };
       if (ave) { seg.avenue = true; seg.lanesPerDir = AVE_LANES; seg.laneW = AVE_LANEW; }
       roads.push(seg);
     });
     zLines.forEach((z) => {                 // cross-streets (run along x)
       crossRects.push({ x: (minX + maxX) / 2, z, w: spanX, d: ROAD });
-      paintStreet((minX + maxX) / 2, z, false, spanX, false);
-      roads.push({ x: (minX + maxX) / 2, z, vertical: false, len: spanX });
+      if (ROADS_V2) paintStreetSegmented(z, false, xLines, false);
+      else paintStreet((minX + maxX) / 2, z, false, spanX, false);
+      roads.push({ x: (minX + maxX) / 2, z, vertical: false, len: spanX, w: ROAD });
     });
     quadField(aveRects, roadMat, 0.04);
     quadField(crossRects, roadMat, 0.045);
@@ -318,6 +326,13 @@
       if (!rects.length) return;
       const m = quadField(rects, paintMat(color), y);
       m.receiveShadow = false;
+      // BATCH-EXEMPT (the floating-yellow-line root cause): core/batch.js's V2
+      // merge re-materials its buckets with a shared plain material, silently
+      // DROPPING polygonOffset — the paint then z-fights/parallax-hovers over
+      // the asphalt. Non-empty userData spares the mesh (same guard highways.js
+      // uses: userData.roadPaint); renderOrder keeps paint drawn after decks.
+      m.renderOrder = 1;
+      m.userData.roadPaint = true;
       return m;
     }
     paintMesh(whiteRects, 0xeef1f5, 0.055);
@@ -364,6 +379,10 @@
     // ONE shared polygonOffset decal material for every zebra stripe in the
     // city (was a fresh MeshBasicMaterial per stripe) — paint, not geometry.
     const zebraM = paintMat(0xeef1f5);
+    // ALL zebra stripes accumulate into one merged quadField (was ~60 separate
+    // planes PER intersection — thousands of meshes the batcher merged while
+    // stripping their polygonOffset, the same float bug as the centrelines).
+    const zebraRects = [];
     xLines.forEach((x, i) => zLines.forEach((z, j) => {
       plane(x, z, ROAD, ROAD, 0x202227, 0.05);   // darker box at the crossing
       // zebra stripes on all four approaches — stripe COUNT scales with the
@@ -372,12 +391,16 @@
       const zk = Math.max(2, Math.ceil(ROAD / 1.2) >> 1);
       for (let s = -1; s <= 1; s += 2) {
         for (let k = -zk; k <= zk; k++) {
-          plane(x + k * 1.1, z + s * (ROAD / 2 + 1.2), 0.7, 2.0, 0xeef1f5, 0.063, true, zebraM);
-          plane(x + s * (ROAD / 2 + 1.2), z + k * 1.1, 2.0, 0.7, 0xeef1f5, 0.063, true, zebraM);
+          zebraRects.push({ x: x + k * 1.1, z: z + s * (ROAD / 2 + 1.2), w: 0.7, d: 2.0 });
+          zebraRects.push({ x: x + s * (ROAD / 2 + 1.2), z: z + k * 1.1, w: 2.0, d: 0.7 });
         }
       }
       intersections.push({ x, z, i, j, phase: (i + j) % 2 === 0 ? 0 : 1, t: rng() * 6, ns: true, light: null });
     }));
+    if (zebraRects.length) {
+      const zm = quadField(zebraRects, zebraM, 0.063);
+      zm.receiveShadow = false; zm.renderOrder = 1; zm.userData.roadPaint = true;
+    }
 
     // ---- blocks: a sidewalk slab + a DISTRICT-flavoured lot pad ----
     // GROUND IDENTITY (why: you should know WHERE you are — and where the
@@ -412,13 +435,14 @@
       const bz = (zLines[j] + zLines[j + 1]) / 2;
       const dq = districtQ(i, j);
       const dk = (DISTRICTS[dq] && DISTRICTS[dq].kind) || "";
-      // sidewalk ring (concrete) frames the block but must NOT pave over
-      // the road gap — BLK+ROAD covered the streets, so the dark asphalt read as
-      // beige/white. Keep it to the block + a ~2m walk so the roads show.
-      plane(bx, bz, BLK + 4, BLK + 4,
+      // The sidewalk belongs INSIDE the block envelope. BLK+4 stole two metres
+      // from each side of every road: a nominal 18m four-lane street became 14m
+      // of visible asphalt, narrower than its four 3.6m traffic lanes. Keeping
+      // the slab at BLK and insetting the lot produces a real 2m sidewalk band.
+      plane(bx, bz, BLK, BLK,
         (dk === "projects" || dk === "industrial") ? 0xa39a7e : 0xc2b896, 0.08);
       // lot/yard pad in the centre (buildings sit on it)
-      const lotW = BLK - 1.5, lotD = BLK - 1.5;
+      const lotW = BLK - 4, lotD = BLK - 4;
       if (dk === "core" || dk === "commercial") plane(bx, bz, lotW, lotD, 0xaab0b6, 0.10);   // poured plaza
       else if (dk === "industrial") plane(bx, bz, lotW, lotD, 0x767064, 0.10);               // dusty work yard
       else grassRects.push({ x: bx, z: bz, w: lotW, d: lotD });                              // grass yard
@@ -746,11 +770,15 @@
       }
 
       // ---- 1) curbs ringing every block (just inside the sidewalk band) ----
-      // The sidewalk slab is BLK+4 wide; the kerb runs along the road-facing edge
-      // a touch in from the asphalt so cars visibly mount it but it never blocks.
-      const sidewalkHalf = (BLK + 4) / 2;
+      // The sidewalk slab is BLK wide (the road-width pass pulled it back so the
+      // full 18m of asphalt shows); the kerb runs along the road-facing edge a
+      // touch in from the asphalt so cars visibly mount it but it never blocks.
+      // (Was (BLK+4)/2 — that left every kerb box stranded 1.8m OUT in the
+      // carriageway once the slab shrank: raised strips lining every street that
+      // read as walls and visually narrowed the road.)
+      const sidewalkHalf = BLK / 2;
       for (const lot of lots) {
-        const cx2 = lot.cx, cz2 = lot.cz, e = sidewalkHalf - 0.2, span = BLK + 3.2;
+        const cx2 = lot.cx, cz2 = lot.cz, e = sidewalkHalf - 0.2, span = BLK - 0.8;
         curb(cx2, cz2 - e, span, false);
         curb(cx2, cz2 + e, span, false);
         curb(cx2 - e, cz2, span, true);

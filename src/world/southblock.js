@@ -10,7 +10,8 @@
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.addBox || !CBZ.roomShell || !CBZ.scene) return;
-  const { addBox, roomShell, scene } = CBZ;
+  const { addBox, roomShell } = CBZ;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const S = CBZ.WORLD.southBlock;
 
   // ---- ground: a worn asphalt apron + the walkway leading to the gate ----

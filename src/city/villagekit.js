@@ -90,6 +90,50 @@
 
   function pick(arr, r) { return arr[(r() * arr.length) | 0]; }
 
+  // ---- ENTERABLE HUT (SETTLEMENTS_V2) ---------------------------------------
+  // A real village hut is a place you can walk INTO and sleep — not a solid
+  // decorative lump. towngen's asset path would otherwise drop ONE full-
+  // footprint collider (the hut header FINDING) making the hut a sealed block.
+  // These defs set noCollide:true to suppress that, and build() calls
+  // hutInterior(): a ring of thin wall colliders with a DOORWAY GAP (rotation-
+  // aware — the gap follows the hut's 90°-quantized facing so it lines up with
+  // the visual doorway), plus a sleepable bedroll (CBZ.propRegisterBed →
+  // "Crash on the bedroll"). With SETTLEMENTS_V2 off, it reproduces the exact
+  // legacy single full-footprint collider so the world is byte-identical.
+  function v2On() { return !CBZ.CONFIG || CBZ.CONFIG.SETTLEMENTS_V2 !== false; }
+  function hutInterior(ctx, fhx, fhz, y1) {
+    const g = ctx.group, wx = ctx.x, wz = ctx.z;
+    const push = function (minX, maxX, minZ, maxZ) {
+      if (CBZ.colliders) CBZ.colliders.push({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, y0: 0, y1: y1, ref: g });
+    };
+    if (!v2On()) { push(wx - fhx, wx + fhx, wz - fhz, wz + fhz); return; }  // legacy solid
+    const tw = 0.35, gap = 0.78;
+    const k = (((Math.round((ctx.rot || 0) / (Math.PI / 2)) % 4) + 4) % 4);  // 0..3
+    const gapSide = ["S", "W", "N", "E"][k];   // local -Z door, rotated into world
+    function wallZ(sign, split) {               // N(+Z)/S(-Z) wall spanning X
+      const z0 = sign > 0 ? wz + fhz - tw : wz - fhz, z1 = sign > 0 ? wz + fhz : wz - fhz + tw;
+      if (!split) { push(wx - fhx, wx + fhx, z0, z1); return; }
+      push(wx - fhx, wx - gap, z0, z1); push(wx + gap, wx + fhx, z0, z1);
+    }
+    function wallX(sign, split) {               // E(+X)/W(-X) wall spanning Z
+      const x0 = sign > 0 ? wx + fhx - tw : wx - fhx, x1 = sign > 0 ? wx + fhx : wx - fhx + tw;
+      if (!split) { push(x0, x1, wz - fhz, wz + fhz); return; }
+      push(x0, x1, wz - fhz, wz - gap); push(x0, x1, wz + gap, wz + fhz);
+    }
+    wallZ(1, gapSide === "N"); wallZ(-1, gapSide === "S");
+    wallX(1, gapSide === "E"); wallX(-1, gapSide === "W");
+    // doorway accent (local -Z → rides the group's rotation onto the gap side)
+    const doorway = new THREE.Mesh(new THREE.BoxGeometry(gap * 2, y1 * 0.7, 0.08), cmat(0x1a140e));
+    doorway.position.set(0, y1 * 0.35, -fhz + 0.05); g.add(doorway);
+    // a bedroll at the hut centre (rotation-invariant so the anchor matches the
+    // visual regardless of facing) — the reason a hut is a HOME, not a box.
+    const roll = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, 0.74), cmat(0x6a5236));
+    roll.position.set(0, 0.12, 0); roll.receiveShadow = true; g.add(roll);
+    const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.42), cmat(0xd8c8a8));
+    pillow.position.set(0, 0.2, -0.62); g.add(pillow);
+    if (CBZ.propRegisterBed) CBZ.propRegisterBed(wx, 0, wz, 0, 1, 1.9, 0.2, "bedroll", null);
+  }
+
   // ============================================================
   //  ASSETS — real geometry, real colliders, modest poly counts, all
   //  build(ctx) deterministic off ctx.rng (owner rule #5 — no
@@ -101,7 +145,7 @@
   // thatch roof. ~4m footprint.
   CBZ.assets.define("hut_round", {
     footprint: { hx: 2.1, hz: 2.1 }, clearance: 0.4, y1: 4.3, zone: "village",
-    instanceable: true,
+    instanceable: true, noCollide: true,
     geom: function () {
       const wallH = 2.3, roofH = 1.7;
       const wall = new THREE.CylinderGeometry(1.55, 1.8, wallH, 10); wall.translate(0, wallH / 2, 0);
@@ -117,6 +161,7 @@
       const roofH = 1.7 * s;
       const roof = new THREE.Mesh(new THREE.ConeGeometry(2.15 * s, roofH, 10), cmat(pick(THATCH, r)));
       roof.position.y = wallH + roofH / 2 - 0.05; roof.castShadow = true; g.add(roof);
+      hutInterior(ctx, 2.1, 2.1, 4.3);
     },
   });
 
@@ -124,7 +169,7 @@
   // slab roof (rusted tint). ~3.8m footprint.
   CBZ.assets.define("hut_square", {
     footprint: { hx: 2.0, hz: 2.0 }, clearance: 0.4, y1: 2.6, zone: "village",
-    instanceable: true,
+    instanceable: true, noCollide: true,
     geom: function () {
       const wall = new THREE.BoxGeometry(3.3, 2.1, 3.3); wall.translate(0, 1.05, 0);
       const roof = new THREE.BoxGeometry(3.8, 0.22, 3.8); roof.translate(0, 2.1 + 0.11, 0);
@@ -138,6 +183,7 @@
       wall.position.y = wallH / 2; wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
       const roof = new THREE.Mesh(new THREE.BoxGeometry(3.8 * s, 0.22 * s, 3.8 * s), cmat(pick(CORR, r)));
       roof.position.y = wallH + 0.11 * s; roof.castShadow = true; g.add(roof);
+      hutInterior(ctx, 2.0, 2.0, 2.6);
     },
   });
 
@@ -145,7 +191,7 @@
   // ~3.4m footprint.
   CBZ.assets.define("shack_lean", {
     footprint: { hx: 1.8, hz: 1.8 }, clearance: 0.35, y1: 2.5, zone: "village",
-    instanceable: true,
+    instanceable: true, noCollide: true,
     geom: function () {
       const wall = new THREE.BoxGeometry(3.0, 2.0, 3.0); wall.translate(0, 1.0, 0);
       const roof = new THREE.BoxGeometry(3.4, 0.16, 3.4); roof.rotateX(0.16); roof.translate(0, 2.15, 0);
@@ -160,6 +206,7 @@
       // single-slope (lean-to) roof: tilt one axis so it reads high-to-low.
       const roof = new THREE.Mesh(new THREE.BoxGeometry(3.4 * s, 0.16 * s, 3.4 * s), cmat(pick(CORR, r)));
       roof.position.y = wallH + 0.15 * s; roof.rotation.x = 0.16; roof.castShadow = true; g.add(roof);
+      hutInterior(ctx, 1.8, 1.8, 2.5);
     },
   });
 

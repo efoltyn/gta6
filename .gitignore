@@ -9,3 +9,7 @@ rust/**/target/
 # bundle (legacy tree + dist/assets/bootstrap.js), regenerable via
 # `npm run build`. Never the source of truth; not committed.
 dist/
+
+# generated world-audit artifacts
+tools/audit/
+aircraft-current-orbit.png

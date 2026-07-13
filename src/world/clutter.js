@@ -27,7 +27,7 @@
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.addBox || !CBZ.scene) return;
   const { addBox, mat } = CBZ;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
 
   // --- keep-out zones (axis-aligned rects in x/z) -------------------
   // We reject any candidate prop centre that lands inside these, plus a

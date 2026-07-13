@@ -94,7 +94,8 @@
       // since last frame — that's the one condition that actually needs a
       // fresh shadow pass; renderer.js's stride throttle still gates the rest.
       if (CBZ.renderer && (Math.abs(ox - _snapX) >= (texel || 0.001) || Math.abs(oz - _snapZ) >= (texel || 0.001))) {
-        CBZ.renderer.shadowMap.needsUpdate = true;
+        if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(false);
+        else CBZ.renderer.shadowMap.needsUpdate = true;
       }
       _snapX = ox; _snapZ = oz;
     }

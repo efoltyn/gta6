@@ -52,6 +52,12 @@
 
   // hash: "ix,iz" → array of reserved rects.
   var hash = {};
+  // Canonical reservation list. The spatial hash stores the same rectangle in
+  // every touched cell, which is ideal for collision queries but unusable for
+  // diagnostics (a large runway can appear hundreds of times). Keep each
+  // reservation exactly once so the world-audit tool can inspect the real
+  // placement plan without reverse-engineering hash buckets.
+  var reservations = [];
   // seedFromColliders() is called by several independently-authored biome
   // builders.  Re-inserting the same collider every time made the hash grow
   // with duplicate rectangles and, more importantly, meant generator order
@@ -65,6 +71,7 @@
 
   P.reset = function () {
     hash = {};
+    reservations = [];
     seededColliders = new WeakSet();
   };
 
@@ -134,10 +141,25 @@
     var r = {
       minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ,
       minY: rect.minY, maxY: rect.maxY,              // F5: optional Y band, passed through as-is (undefined if absent — overlaps() defaults it)
-      stackable: !!rect.stackable, zone: rect.zone || null, ref: rect.ref || null
+      stackable: !!rect.stackable, zone: rect.zone || null, ref: rect.ref || null,
+      id: rect.id || null, kind: rect.kind || null, source: rect.source || null
     };
+    reservations.push(r);
     forCells(r, function (key) { (hash[key] || (hash[key] = [])).push(r); });
     return r;
+  };
+
+  // Read-only, serialisable placement snapshot for tools. References are
+  // represented by a useful name only; callers cannot mutate the live hash.
+  P.snapshot = function () {
+    return reservations.map(function (r) {
+      return {
+        minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ,
+        minY: r.minY, maxY: r.maxY, stackable: r.stackable,
+        zone: r.zone, id: r.id, kind: r.kind, source: r.source,
+        refName: r.ref && (r.ref.name || (r.ref.constructor && r.ref.constructor.name)) || null
+      };
+    });
   };
 
   /* ---- seedFromColliders --------------------------------------
@@ -339,6 +361,30 @@
   ------------------------------------------------------------------- */
   var L = CBZ.worldLayout || (CBZ.worldLayout = {});
   var layoutIds = {};
+  var layoutEntries = [];
+
+  // ── MAP-LEVEL RESERVATION LEDGER (MAP_RESERVE_V1) ─────────────────
+  // A SECOND, deliberately-separate ledger from the prop hash above. It records
+  // the TRUE footprint of every hand-authored *landmass* (a biome floor, its
+  // feather skirt, a mountain massif, an island POI) so the world build can
+  // answer "do two peer landmasses interpenetrate?" — the overlap the owner
+  // complained about. It is intentionally NOT wired into isFree()/scatter(): a
+  // whole biome floor must never block that biome's own trees/props, so the map
+  // ledger only feeds mapAudit()/mapConflict() and never the placement hash.
+  // Result: adopting it is byte-identical for worldgen (pure bookkeeping).
+  var mapEntries = [];
+  // The fixed, constant-placed landmasses this guard governs. Procedural land
+  // (countries/settlements/mini-cities that legitimately NEST inside a parent
+  // country region, and the continent "wilds" underlay that overlaps everything
+  // by design) is excluded — it manages its own spacing via CBZ.placement.
+  var MAP_PEERS = { farmland: 1, desert: 1, forest: 1, snow: 1,
+                    arena: 1, speedway: 1, airport: 1, military: 1 };
+  function mapArea(r) { return Math.max(0, r.maxX - r.minX) * Math.max(0, r.maxZ - r.minZ); }
+  function mapOverlapArea(a, b) {
+    var ox = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+    var oz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+    return (ox > 0 && oz > 0) ? ox * oz : 0;
+  }
 
   function copyRect(rect, extra) {
     var out = {
@@ -352,7 +398,86 @@
     return out;
   }
 
-  L.reset = function () { layoutIds = {}; };
+  L.reset = function () { layoutIds = {}; layoutEntries = []; mapEntries = []; };
+
+  /* ---- map-level landmass reservation + overlap audit ------------- *
+     mapReserve(id, rect, opts): record a landmass footprint. opts.owner groups
+       all layers of ONE feature (region + skirt + massif share an owner so they
+       never flag against each other); opts.kind is descriptive ("region",
+       "terrain", "massif"); opts.underlay marks intentional-overlap underlays.
+     mapConflict(rect, opts): does `rect` (owner opts.owner) interpenetrate a
+       DIFFERENT peer landmass beyond opts.minContain? Returns {entry,contain} or
+       null — the query a future POI/biome placer runs before committing.
+     mapAudit(): every peer-vs-peer interpenetration, ranked by containment of
+       the smaller footprint (the metric the world-audit tool uses). Same-owner
+       layers, non-peers and underlays are skipped, so legitimate nesting
+       (country ⊃ settlement, skirt over own floor) never appears.            */
+  L.mapReserve = function (id, rect, opts) {
+    if (!rect || rect.minX == null || rect.maxX == null || rect.minZ == null || rect.maxZ == null) return null;
+    if (!(rect.maxX > rect.minX && rect.maxZ > rect.minZ)) return null;
+    opts = opts || {};
+    var owner = opts.owner != null ? opts.owner : (id || null);
+    var e = {
+      id: id || ('map:' + mapEntries.length),
+      minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ,
+      owner: owner, kind: opts.kind || 'region',
+      peer: opts.peer != null ? !!opts.peer : !!MAP_PEERS[owner],
+      underlay: !!opts.underlay
+    };
+    mapEntries.push(e);
+    return e;
+  };
+
+  L.mapConflict = function (rect, opts) {
+    opts = opts || {};
+    if (!rect) return null;
+    var owner = opts.owner != null ? opts.owner : null;
+    var lo = opts.minContain == null ? 0.08 : opts.minContain;
+    var self = mapArea(rect);
+    for (var i = 0; i < mapEntries.length; i++) {
+      var e = mapEntries[i];
+      if (!e.peer || e.underlay) continue;
+      if (owner != null && e.owner === owner) continue;
+      var ov = mapOverlapArea(rect, e); if (ov <= 0) continue;
+      var C = ov / Math.max(1, Math.min(self, mapArea(e)));
+      if (C >= lo) return { entry: e, overlap: ov, contain: C };
+    }
+    return null;
+  };
+
+  L.mapAudit = function (opts) {
+    opts = opts || {};
+    var lo = opts.minContain == null ? 0.08 : opts.minContain;  // < this = mere edge-graze
+    var out = [];
+    for (var i = 0; i < mapEntries.length; i++) {
+      var a = mapEntries[i];
+      if (!a.peer || a.underlay) continue;
+      for (var j = i + 1; j < mapEntries.length; j++) {
+        var b = mapEntries[j];
+        if (!b.peer || b.underlay) continue;
+        if (a.owner != null && a.owner === b.owner) continue;   // one feature's own layers
+        var ov = mapOverlapArea(a, b); if (ov <= 0) continue;
+        var C = ov / Math.max(1, Math.min(mapArea(a), mapArea(b)));
+        if (C < lo) continue;
+        out.push({
+          a: a.owner, aKind: a.kind, b: b.owner, bKind: b.kind,
+          area: Math.round(ov), contain: Math.round(C * 1000) / 10,
+          tier: C > 0.5 ? 'ERROR' : 'WARN',
+          at: { x: Math.round((Math.max(a.minX, b.minX) + Math.min(a.maxX, b.maxX)) / 2),
+                z: Math.round((Math.max(a.minZ, b.minZ) + Math.min(a.maxZ, b.maxZ)) / 2) }
+        });
+      }
+    }
+    out.sort(function (p, q) { return q.contain - p.contain; });
+    return out;
+  };
+
+  L.mapSnapshot = function () {
+    return mapEntries.map(function (e) {
+      return { id: e.id, owner: e.owner, kind: e.kind, peer: e.peer, underlay: e.underlay,
+               minX: e.minX, maxX: e.maxX, minZ: e.minZ, maxZ: e.maxZ };
+    });
+  };
 
   // Named protected footprint. Repeating a declaration is harmless, which
   // lets a biome state its roads/landmarks beside the code that uses them.
@@ -367,8 +492,22 @@
       minY: rect.minY, maxY: rect.maxY,
       zone: (opts && opts.zone) || rect.zone
     }, opts);
+    r.id = id;
+    r.kind = (opts && opts.kind) || "feature";
+    r.source = (opts && opts.source) || "worldLayout";
     layoutIds[id] = P.reserve(r);
+    layoutEntries.push(layoutIds[id]);
     return layoutIds[id];
+  };
+
+  L.snapshot = function () {
+    return layoutEntries.map(function (r) {
+      return {
+        id: r.id, kind: r.kind, source: r.source, zone: r.zone,
+        minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ,
+        minY: r.minY, maxY: r.maxY
+      };
+    });
   };
 
   L.reserveCircle = function (id, x, z, radius, opts) {

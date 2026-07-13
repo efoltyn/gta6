@@ -42,6 +42,17 @@
 
   function mode() { return CBZ.game.mode || "escape"; }
 
+  // ---- MAP_V2 (owner's overhaul flag) + the wanted-star read -----------------
+  // MAP_V2 on ⇒ icons/marks/labels draw LIVE at the current zoom (never baked
+  // into the zoom-magnified plate) and the map draws the REAL road network +
+  // registered settlements. Wanted level always comes through CBZ.cityStars()
+  // when the wanted system exposes it (guard-called — another module owns it).
+  function MAP_V2() { return !CBZ.CONFIG || CBZ.CONFIG.MAP_V2 !== false; }
+  function starCount() {
+    try { if (CBZ.cityStars) return CBZ.cityStars() | 0; } catch (e) {}
+    return (CBZ.game && CBZ.game.wanted) | 0;
+  }
+
   function boundsFor(which) {
     if (which === "survival") {
       const A = CBZ.surv && CBZ.surv.arena;
@@ -429,6 +440,124 @@
     ctx.strokeStyle = "rgba(156,168,182,.48)"; ctx.lineWidth = Math.max(2, (A.ROAD || 6) * p.sc * 0.62);
     for (const x of A.xLines || []) line(x, A.minZ, x, A.maxZ, p, ctx.strokeStyle, ctx.lineWidth);
     for (const z of A.zLines || []) line(A.minX, z, A.maxX, z, p, ctx.strokeStyle, ctx.lineWidth);
+  }
+
+  // ---- REAL ROAD NETWORK (MAP_V2) ------------------------------------------
+  // The rebuilt world stamps every drivable segment onto A.roads with its own
+  // width (r.w) + lane data; highways/avenues carry district==="highway" or
+  // r.avenue. We draw the ACTUAL segments (not the coarse xLines/zLines grid)
+  // as a GTA-style two-pass ribbon: dark casing under a lighter fill, round
+  // caps so junctions merge. Highways read gold + wider so arterials dominate.
+  // Baked into the base plate, so the 12fps composite pays nothing per frame.
+  function roadSpan(r) {
+    const half = (r.len || 0) / 2;
+    return r.vertical ? [r.x, r.z - half, r.x, r.z + half] : [r.x - half, r.z, r.x + half, r.z];
+  }
+  function drawArenaRoads(A, p) {
+    const roads = A.roads || [];
+    if (!roads.length) { drawRoads(A, p); return; }
+    ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const ROAD = A.ROAD || 18;
+    // two global passes (all casings, then all fills) so crossings knit cleanly
+    for (const pass of [0, 1]) {
+      for (const r of roads) {
+        const hwy = r.district === "highway" || r.avenue;
+        const wWorld = (r.w != null ? r.w : ROAD) * (hwy ? 1 : 0.82);
+        const wpx = Math.max(hwy ? 3 : 1.6, wWorld * p.sc);
+        const [x1, z1, x2, z2] = roadSpan(r);
+        if (pass === 0) { ctx.strokeStyle = "rgba(11,16,21,.82)"; ctx.lineWidth = wpx + Math.max(2, wpx * 0.28); }
+        else { ctx.strokeStyle = hwy ? "rgba(201,164,77,.82)" : "rgba(150,161,177,.72)"; ctx.lineWidth = wpx; }
+        ctx.beginPath(); ctx.moveTo(p.x(x1), p.z(z1)); ctx.lineTo(p.x(x2), p.z(z2)); ctx.stroke();
+      }
+    }
+    // dashed centreline on the wider arterials only (skip the tight streets)
+    ctx.strokeStyle = "rgba(240,214,110,.4)"; ctx.setLineDash([5, 6]);
+    for (const r of roads) {
+      const hwy = r.district === "highway" || r.avenue;
+      if (!hwy) continue;
+      const wpx = Math.max(3, (r.w != null ? r.w : ROAD) * p.sc);
+      if (wpx < 8) continue;
+      ctx.lineWidth = Math.max(1, wpx * 0.05);
+      const [x1, z1, x2, z2] = roadSpan(r);
+      ctx.beginPath(); ctx.moveTo(p.x(x1), p.z(z1)); ctx.lineTo(p.x(x2), p.z(z2)); ctx.stroke();
+    }
+    ctx.setLineDash([]); ctx.restore();
+  }
+
+  // ---- SETTLEMENTS (MAP_V2) -------------------------------------------------
+  // The 17 registered towns (CBZ.settlements) are real places out in the
+  // biomes — a named marker + a shop/home tally so "there's a town in the
+  // desert" is legible. A casino town gets a gold pip. Drawn LIVE at fixed
+  // size so the marker never balloons at zoom.
+  function drawSettlementsLive(p) {
+    const list = CBZ.settlements || [];
+    if (!list.length) return;
+    const A = CBZ.city && CBZ.city.arena;
+    const boxes = [];   // placed label AABBs (greedy declutter, like the POI labels)
+    const hit = (x0, y0, x1, y1) => { for (let i = 0; i < boxes.length; i++) { const b = boxes[i]; if (x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0) return true; } return false; };
+    // SEED with the baked region/biome name boxes so towns never overwrite the
+    // geography labels ("Redhollow Woods", "The Sands"…) — those win the space.
+    if (A) for (const rg of A.regions || []) {
+      if (isLink(rg) || rg.underlay) continue;
+      const name = rg.name || rg.biome || ""; if (!name) continue;
+      const c = regionCentroid(rg);
+      const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
+      const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
+      const half = name.length * size * 0.28, nx = p.x(c.x), ny = p.z(c.z);
+      boxes.push({ x0: nx - half, y0: ny - size, x1: nx + half, y1: ny + size * (rg.subtitle ? 2 : 1) });
+    }
+    for (const s of list) {
+      if (!s || !Number.isFinite(s.cx)) continue;
+      // skip towns that sit inside the mainland footprint (the city itself owns
+      // that ink) — settlements are the OUT-OF-CITY places worth naming.
+      if (A && s.cx > A.minX && s.cx < A.maxX && s.cz > A.minZ && s.cz < A.maxZ) continue;
+      const mx = p.x(s.cx), mz = p.z(s.cz);
+      if (mx < -40 || mx > W + 40 || mz < -40 || mz > H + 40) continue;
+      // house-shaped marker (always drawn — it's the town's anchor)
+      ctx.fillStyle = "#e6c069"; ctx.strokeStyle = "rgba(0,0,0,.72)"; ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(mx, mz - 6.5); ctx.lineTo(mx + 5.5, mz - 1.5); ctx.lineTo(mx + 5.5, mz + 5);
+      ctx.lineTo(mx - 5.5, mz + 5); ctx.lineTo(mx - 5.5, mz - 1.5); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      if (s.casino) { ctx.fillStyle = "#fff2c0"; ctx.beginPath(); ctx.arc(mx, mz + 1.5, 1.6, 0, Math.PI * 2); ctx.fill(); }
+      const name = s.name || "Town";
+      ctx.font = "700 11px Fredoka, sans-serif"; ctx.textAlign = "center";
+      const tw = ctx.measureText(name).width, ty = mz - 9;
+      const x0 = mx - tw / 2 - 1, x1 = mx + tw / 2 + 1, y0 = ty - 11, y1 = ty + 2;
+      if (hit(x0, y0, x1, y1)) continue;   // a nearer town already owns this label space
+      boxes.push({ x0, y0, x1, y1 });
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.78)"; ctx.strokeText(name, mx, ty);
+      ctx.fillStyle = "#ffe9b0"; ctx.fillText(name, mx, ty);
+    }
+  }
+
+  // ---- WANTED STARS on the chart (MAP_V2): only ever shown when > 0. --------
+  function drawWantedStars(wanted) {
+    if (!(wanted > 0)) return;
+    const n = 5, gap = 19, x0 = W / 2 - ((n - 1) * gap) / 2, y = 26;
+    const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.006);
+    for (let i = 0; i < n; i++) {
+      const lit = i < wanted;
+      starGlyph(x0 + i * gap, y, 8, lit ? "#ffd451" : "rgba(120,132,150,.35)", lit);
+    }
+    if (wanted >= 4) {   // molten label at high heat
+      ctx.font = "800 11px Fredoka, sans-serif"; ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(255,120,90," + pulse.toFixed(2) + ")";
+      ctx.fillText("WANTED", W / 2, y + 15);
+    }
+  }
+  function starGlyph(cx, cy, r, color, glow) {
+    ctx.save();
+    if (glow) { ctx.shadowColor = "rgba(255,190,60,.9)"; ctx.shadowBlur = 6; }
+    ctx.fillStyle = color; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.44 : r;
+      const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
   }
 
   function drawLots(lots, p) {
@@ -831,6 +960,37 @@
   function drawPoiGlyphs(lots, p) {
     for (const lot of lots || []) { const info = poiInfo(lot); if (info) drawPoi(lot.cx, lot.cz, p, info.color, "", info.key); }
   }
+  // ---- LOD + DECLUTTERED POI GLYPHS (MAP_V2) -------------------------------
+  // WHY: drawing all ~180 shops at fit-zoom is a rainbow "measles map". So we
+  // TIER by zoom (the design-ref LOD rule): zoomed OUT ⇒ only landmarks
+  // (casinos/banks/hospital/civic/venues + your HOME); zoomed IN ⇒ every shop.
+  // Then a cheap min-distance dedup drops glyphs that would stack into mush.
+  // Landmarks and HOME/casinos never dedup away. Drawn live at fixed size.
+  const NOTABLE_POI = { casino: 1, bank: 1, hospital: 1, guns: 1, cityhall: 1, transit: 1, arena: 1, raceway: 1, racepark: 1, airfield: 1, carlot: 1, chop: 1, realtor: 1, security: 1 };
+  function poiKindOf(lot) {
+    const b = lot.building;
+    return (b && b.shop && b.shop.kind) || lot.kind || null;
+  }
+  function drawCityPoisLive(p, A) {
+    const zoomAll = map.view.z >= 1.8;   // zoomed in ⇒ reveal ordinary shops too
+    const placed = [];
+    const near = (x, y, d) => { for (let i = 0; i < placed.length; i++) { const q = placed[i]; if (Math.abs(q.x - x) < d && Math.abs(q.y - y) < d) return true; } return false; };
+    const collect = (lots) => {
+      for (const lot of lots || []) {
+        const info = poiInfo(lot); if (!info) continue;
+        const k = poiKindOf(lot);
+        const anchor = info.key || k === "casino" || NOTABLE_POI[k];   // never hidden/deduped
+        if (!zoomAll && !anchor) continue;
+        const mx = p.x(lot.cx), my = p.z(lot.cz);
+        if (mx < -20 || mx > W + 20 || my < -20 || my > H + 20) continue;
+        if (!anchor && near(mx, my, 9)) continue;
+        placed.push({ x: mx, y: my });
+        drawPoi(lot.cx, lot.cz, p, info.color, "", info.key || k === "casino");
+        if (k === "casino") { ctx.strokeStyle = "rgba(201,162,39,.92)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, my, 8.5, 0, Math.PI * 2); ctx.stroke(); }
+      }
+    };
+    collect(A.lots); if (A.annex) collect(A.annex.lots);
+  }
   // shared so the corner minimap (city/hud.js) colours shops by the SAME trade
   // palette as the full map — bank=blue, guns=green, hospital=red, HOME=lime…
   map.poi = poiInfo;
@@ -1001,7 +1161,7 @@
         ctx.fillStyle = "rgba(190,216,255," + (0.03 + 0.10 * busy).toFixed(3) + ")";
         ctx.fillRect(mx - w / 2, mz - h / 2, w, h);
       });
-      drawRoads(A, p);
+      if (MAP_V2()) drawArenaRoads(A, p); else drawRoads(A, p);   // real per-road network vs the coarse grid
       if (A.annex) {
         for (const r of A.annex.roads || []) line(r.vertical ? r.x : r.x - r.len / 2, r.vertical ? r.z - r.len / 2 : r.z, r.vertical ? r.x : r.x + r.len / 2, r.vertical ? r.z + r.len / 2 : r.z, p, "rgba(156,168,182,.55)", Math.max(2, 5 * p.sc));
       }
@@ -1036,8 +1196,14 @@
     onPlate(plates.marks, function () {
       // POI DIAMONDS only (no text) — labels are a dynamic, decluttered pass in
       // drawCity so they don't pile into unreadable mush at the fit zoom.
-      drawPoiGlyphs(A.lots, p);
-      if (A.annex) drawPoiGlyphs(A.annex.lots, p);
+      // MAP_V2: fixed-size glyphs (POI icons, climb marks, board ticks) are NOT
+      // baked here — the plate is composited at up to 12x zoom, which used to
+      // balloon roof-lift ▲ to ~66px. They draw LIVE in drawCity instead; only
+      // the region NAMES (which size to region width) stay on the plate.
+      if (!MAP_V2()) {
+        drawPoiGlyphs(A.lots, p);
+        if (A.annex) drawPoiGlyphs(A.annex.lots, p);
+      }
       // REGION / BIOME NAMES at each island's centroid (the map's geography
       // legend — "where is the desert / the snow / the speedway"). Sized to the
       // region's on-screen width so a small island gets a small name.
@@ -1065,8 +1231,7 @@
         }
         if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
       }
-      drawClimbMarks(p, A);
-      drawBoardTicks(p);
+      if (!MAP_V2()) { drawClimbMarks(p, A); drawBoardTicks(p); }
     });
   }
 
@@ -1137,7 +1302,7 @@
     if (!A) { text("CITY DISTRICT", 0, (CBZ.CITY && CBZ.CITY.center.z) || -700, p, "rgba(235,245,255,.5)", 18); return; }
     // bake the static plates ONCE at the base fit (NOT the panned/zoomed view)
     if (plates.a !== A) buildCityPlates(baseProjection(p.bounds), A);
-    const wanted = (CBZ.game && CBZ.game.wanted) || 0;
+    const wanted = MAP_V2() ? starCount() : ((CBZ.game && CBZ.game.wanted) || 0);
     compositePlate(plates.base, p);   // districts + roads + lettering (rescaled)
     // THE BRIDGE — the sole chokepoint between mainland and island. WHY it matters
     // mechanically: at 3★+ the cops seal it (roadblocks), so it turns red + SEALED
@@ -1162,7 +1327,15 @@
     }
     for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
     for (const cop of CBZ.cityCops || []) if (!cop.dead) dot(cop.pos.x, cop.pos.z, p, "#5bd0ff", 2.7);
-    compositePlate(plates.marks, p);  // POI diamonds + region names + climb points + board ticks
+    compositePlate(plates.marks, p);  // region/biome names (glyphs draw live below)
+    // ---- MAP_V2 LIVE GLYPH LAYER: fixed-size at the current zoom so nothing
+    //      balloons. POI icons + settlements always; climb marks + board ticks
+    //      only once you've zoomed IN (planning detail, not fit-view clutter). ----
+    if (MAP_V2()) {
+      drawCityPoisLive(p, A);        // LOD + decluttered shop/landmark icons
+      drawSettlementsLive(p);        // named towns (labels collision-avoided)
+      if (map.view.z >= 2.6 || map._cursor) { drawClimbMarks(p, A); drawBoardTicks(p); }
+    }
     drawCityLabels(p, A);             // DECLUTTERED dynamic POI labels (tiered, collision-avoided)
     drawRentedBoards(p);                // the gold $ over the boards that are YOURS
     // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
@@ -1230,6 +1403,7 @@
     if (which === "city") {
       drawCompassRose();
       drawScaleBar(p);
+      if (MAP_V2()) drawWantedStars(starCount());   // only rendered when > 0
     } else {
       ctx.fillStyle = "rgba(223,250,255,.82)"; ctx.font = "700 14px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("N", W / 2, 18);
     }

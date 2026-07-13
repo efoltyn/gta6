@@ -23,9 +23,8 @@
 
   CBZ.registerPropType({
     id: "coin",
-    // no `modes` filter — the original coin block in interactions.js ran
-    // unconditionally (no CBZ.game.mode check), so this keeps ticking
-    // regardless of the active mode, same as before.
+    // Prison pickup: it lives under prisonRoot and does no spin/proximity work
+    // while another mode owns the screen.
     build(pos, opts) {
       const value = (opts && opts.value) || 5;
 
@@ -53,6 +52,7 @@
       // both keep their own absolute-coordinate transforms, so this is
       // visually identical to two top-level scene.add() calls.
       const container = new THREE.Group();
+      container.userData.dynamic = true;
       container.add(grp, ring);
 
       return {
@@ -61,6 +61,7 @@
         data: { group: grp, ring, collected: false, baseY: pos.y, anim: 0, value },
       };
     },
+    modes: ["escape"],
     onUpdate(dt, inst) {
       const c = inst.data;
       if (c.collected) {
@@ -89,7 +90,10 @@
   });
 
   function addPack(x, z, value) {
-    const inst = CBZ.spawnProp("coin", x, 1.0, z, { value: value || 5 });
+    const inst = CBZ.spawnProp("coin", x, 1.0, z, {
+      value: value || 5,
+      parent: CBZ.prisonRoot || CBZ.scene,
+    });
     if (inst && inst.data) CBZ.coins.push(inst.data);
     return inst;
   }

@@ -371,15 +371,16 @@
     // TAIL ROTOR (spins about X) — hub + two crossed bars of small blades on the fin
     const thub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.14, 6), a.mGrey); thub.rotation.z = Math.PI / 2; thub.position.set(0.24, 0.95, -5.45); grp.add(thub);
     function tailBar() {
-      // tail-rotor disc sized to the reference ratio (~0.15x the main disc —
-      // undersized tail rotors are the classic toy-helicopter tell)
+      // tail-rotor disc at the reference ratio (~0.17x the main disc: main
+      // dia 9.2 → tail dia ~1.6). Verified against the orbit sheet — bigger
+      // scrapes the ground on a flare, smaller is the toy-helicopter tell.
       const bar = new THREE.Group(); bar.position.set(0.24, 0.95, -5.45);
       [-1, 1].forEach((s) => {
-        const bg = new THREE.BoxGeometry(0.06, 1.28, 0.26, 1, 4, 1);
+        const bg = new THREE.BoxGeometry(0.06, 0.8, 0.24, 1, 4, 1);
         const pos = bg.attributes.position;
-        for (let i = 0; i < pos.count; i++) { const ty = pos.getY(i); pos.setZ(i, pos.getZ(i) * (1 - 0.4 * Math.abs(ty) / 0.64)); }
+        for (let i = 0; i < pos.count; i++) { const ty = pos.getY(i); pos.setZ(i, pos.getZ(i) * (1 - 0.4 * Math.abs(ty) / 0.4)); }
         pos.needsUpdate = true; bg.computeVertexNormals();
-        const bl = new THREE.Mesh(bg, a.bladeMat); bl.position.y = s * 0.64; bar.add(bl);
+        const bl = new THREE.Mesh(bg, a.bladeMat); bl.position.y = s * 0.4; bar.add(bl);
       });
       return bar;
     }
@@ -1507,6 +1508,9 @@
     if (craft.onGround) {
       craft.airspeed -= 2.2 * dt;                          // rolling friction
       if (thr < 0) craft.airspeed -= C.gacc * 0.6 * dt;    // wheel brakes on S
+      // PARKING DEADBAND: with no throttle a slow rollout snaps dead still —
+      // a parked/idle plane must never creep or dither on its own
+      if (thr <= 0 && craft.airspeed < 0.6) craft.airspeed = 0;
     }
     craft.airspeed = Math.max(0, Math.min(C.vmax * 1.05, craft.airspeed));
 

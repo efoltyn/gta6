@@ -158,14 +158,20 @@
   CBZ.SPAWN = null;  // THREE.Vector3, set once THREE is up (entities/player.js)
   CBZ.EXIT = null;   // THREE.Vector3 (world/exit.js)
 
+  // ---- physical scale contract ------------------------------------------
+  // World units are metres. The authored voxel rig was ~2.60 units tall;
+  // render it at 70% so an average adult is ~1.82m and size every dependent
+  // interaction from that same fact instead of compensating with giant doors.
+  CBZ.HUMAN_SCALE = 0.70;
+
   // ---- player tuning ----
   CBZ.TUNE = {
-    walkSpeed: 7.0,     // a touch quicker on foot — reinforces the faster feel
-    crouchSpeed: 3.0,   // sneak unchanged (stealth pacing)
-    jumpVel: 8.2,
+    walkSpeed: 2.0,     // brisk adult walk; SHIFT multiplies this to a 6.4m/s sprint
+    crouchSpeed: 1.2,
+    jumpVel: 6.5,       // ~0.96m ballistic apex at gravity=22
     gravity: 22,
-    playerRadius: 0.55,
-    camDist: 7.6,       // behind-the-back third-person framing (closer, less zoomed out)
+    playerRadius: 0.38,
+    camDist: 6.5,
     sens: 0.0024,
   };
 
@@ -200,7 +206,7 @@
   CBZ.SURV = {
     arena: { cx: 0, cz: 600, radius: 120 }, // far from the prison; own ground+sun
     playerHpRegen: 0,        // no passive regen — disasters are deadly
-    sprintMul: 1.7,
+    sprintMul: 3.2,
     staminaMax: 100,
     staminaDrain: 24,        // per second while sprinting
     staminaRegen: 14,        // per second while not
@@ -223,7 +229,7 @@
     center: { x: 0, z: -700 },
     blocks: 6,             // 6×6 grid of city blocks (room for shops + homes + turf)
     block: 34,             // block size (building lot)
-    road: 16,              // street width between blocks (US 4-lane arterial; block stays 34 so buildings don't move)
+    road: 18,              // four 3.6m lanes + 1.8m curb/clear zone per side
     // Full per-rig peds are ~16 draw calls EACH — the single biggest GPU cost in
     // the city. The instanced ambient crowd (city/crowd.js, ~6 draw calls for
     // hundreds of bodies) carries street DENSITY, and walking up promotes nearby
@@ -244,7 +250,7 @@
     tireNight: 1.15,       // tiredness/s gained while up & about at deep night
     tireRest: 5.0,         // tiredness/s recovered while resting (sleeping)
     tireExhaustDmg: 1.4,   // hp/s once you're fully exhausted and still awake
-    sprintMul: 1.7,
+    sprintMul: 3.2,
     staminaMax: 100, staminaDrain: 22, staminaRegen: 14,
     // wanted: heat needed to reach each star, and the cop response per star.
     // The top is a CLIFF: 4★ already costs a sustained rampage, and 4→5 is an
@@ -438,6 +444,64 @@
     },
   };
 
+  // ---- CBZ.roadLanes(r): the ONE lane-geometry contract -----------------------
+  // Every consumer (traffic lane-keeping, prop placement, world-audit) reads a
+  // road's REAL cross-section through this helper instead of assuming the city-
+  // grid default. Per-road fields (stamped at registration: r.w / r.lanesPerDir
+  // / r.laneW / r.median / r.medianW) win; missing fields fall back to the
+  // global traffic contract. Lane centres match vehicles.js's historical
+  // laneOffset() exactly when a road carries no per-road data (safe superset):
+  //   with a median: dir * (medianHalf + (idx+0.5)*laneW)
+  //   without:       dir * ((idx+0.5)*laneW)
+  CBZ.roadLanes = function (r) {
+    const traf = (CBZ.CITY && CBZ.CITY.traf) || {};
+    r = r || {};
+    const lanesPerDir = (r.lanesPerDir != null ? r.lanesPerDir : (traf.lanesPerDir != null ? traf.lanesPerDir : 2)) | 0;
+    const laneW = r.laneW != null ? r.laneW : (traf.laneW != null ? traf.laneW : 3.6);
+    const median = !!r.median;
+    const medianHalf = median ? (r.medianW != null ? r.medianW : 1.2) / 2 : 0;
+    const width = r.w != null ? r.w : (CBZ.CITY && CBZ.CITY.road != null ? CBZ.CITY.road : 18);
+    // signed lane-centre offsets from the road centreline, inner→outer per side
+    const offsets = [];
+    for (let s = -1; s <= 1; s += 2) {
+      for (let i = 0; i < lanesPerDir; i++) offsets.push(s * (medianHalf + (i + 0.5) * laneW));
+    }
+    return { lanesPerDir, laneW, width, median, medianHalf, offsets };
+  };
+
+  // ---- CBZ.roadLaneCenter(r, dir, idx) / CBZ.roadLanesPerDir(r) ----------------
+  // Convenience wrappers over roadLanes() for the NPC-car lane-keepers. Every
+  // driver system (vehicles/traffic/police/armored/gigfleet) historically owned
+  // an identical `laneOffset(dir,idx)=dir*laneW*(idx+0.5)` closure that read only
+  // the GLOBAL 2-lane traffic contract — so cars hugged the centreline on 3+3
+  // highways and kissed the median. These read the road's REAL cross-section:
+  //   center = dir * (medianHalf + (idx+0.5)*laneW)   [idx 0 = innermost lane]
+  // and fall back to the global contract for roads with no per-road data (that
+  // fallback lives inside roadLanes()). Lane-TARGET geometry only — physics and
+  // collision are untouched.
+  CBZ.roadLaneCenter = function (r, dir, idx) {
+    const L = CBZ.roadLanes(r);
+    const per = Math.max(1, L.lanesPerDir | 0);
+    const i = Math.min(Math.max((idx | 0), 0), per - 1);
+    return (dir < 0 ? -1 : 1) * (L.medianHalf + (i + 0.5) * L.laneW);
+  };
+  CBZ.roadLanesPerDir = function (r) { return Math.max(1, CBZ.roadLanes(r).lanesPerDir | 0); };
+
+  // ---- CBZ.charHeadY(ch): overhead-marker height above a character ------------
+  // After HUMAN_SCALE=0.70 an adult rig stands ~1.82m (metric.height), so any
+  // sprite/tag/marker parented to the UNSCALED character group belongs at
+  // ~head + a small margin (~1.97), NOT the legacy 3.0–3.85 that suited the old
+  // 2.60u rig. Reads the per-character metric stamped by character.js when
+  // present so fem/scaled bodies get the right height; falls back to the global
+  // HUMAN_SCALE. Matches the peds.js/police.js nametags (already 1.97).
+  CBZ.charHeadY = function (ch) {
+    const g = ch && (ch.group || ch);
+    const m = g && g.userData && g.userData.characterMetric;
+    const hs = (CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70;
+    const h = (m && m.height > 0) ? m.height : (2.60 * hs);
+    return h + 0.15;
+  };
+
   // ---- feature switches (CBZ.CONFIG) ------------------------------------------
   // Reversible behaviour flags read across the city build. Kept distinct from
   // CBZ.CITY's tuning numbers: these flip whole rendering/identity behaviours on
@@ -456,6 +520,39 @@
       });
     }
   } catch (e) {}
+  // ROADS OVERHAUL V2: real lane proportions (highways 3+3 with a hard median,
+  // island/side streets widened to fit two cars), markings gapped at every
+  // intersection (no centreline running through junction boxes), per-road
+  // width stamped on road records + CBZ.roadLanes() lane-centre data.
+  if (CBZ.CONFIG.ROADS_V2 == null) CBZ.CONFIG.ROADS_V2 = true;
+  // MAP OVERHAUL V2 (owner's ask: "make the map way cooler — not just how it
+  // looks but WHAT is mapped"). On → the full map [M] and the bottom-left
+  // minimap draw from the REAL rebuilt world: the actual road network
+  // (CBZ.city.arena.roads with per-road widths), the 180 shops / 6 casinos as
+  // categorised POI icons, the 17 registered settlements (CBZ.settlements) by
+  // name, land vs water/harbor, wanted stars via CBZ.cityStars(), and the
+  // police search-radius/heat. Fixed-size icons/marks/labels are drawn LIVE at
+  // the current zoom (never baked into the zoom-magnified static plate, which
+  // used to blow roof-lift glyphs up to ~12x). Flip false to restore the prior
+  // plate-baked glyph map + the game.wanted read.
+  if (CBZ.CONFIG.MAP_V2 == null) CBZ.CONFIG.MAP_V2 = true;
+  // BRIDGE WALL RULES: causeway guardrails + curb fall-guard colliders are
+  // GAPPED wherever the deck crosses a registered road, so bridge walls only
+  // exist over real water/gap spans — never across intersections/mouths.
+  if (CBZ.CONFIG.BRIDGE_WALL_RULES == null) CBZ.CONFIG.BRIDGE_WALL_RULES = true;
+  // Highway deck streetlights (the owner called them dumb): default OFF —
+  // real highways here run unlit; flip true to restore the old 40m poles.
+  if (CBZ.CONFIG.HWY_LAMPS == null) CBZ.CONFIG.HWY_LAMPS = false;
+  // MAP RESERVE V1 (owner's #1 map gripe: "tons of terrain overlaps each other").
+  // Each hand-authored landmass (biome floor + feather skirt + mountain massif +
+  // island POI) registers its true footprint into a map-level AABB ledger
+  // (CBZ.worldLayout.mapReserve). A post-build pass (mapAudit) flags any two
+  // PEER landmasses that interpenetrate — the class of bug the pixel world-audit
+  // misses when the offending geometry (e.g. the Mount Mercy massif) isn't a
+  // tagged worldSurface. Also clamps the Mercy massif's forest/arena-facing
+  // ridges so tall peaks stop standing inside Redhollow Woods and on the Ironjaw
+  // island. Flip false for a one-line revert to the prior massif + no ledger.
+  if (CBZ.CONFIG.MAP_RESERVE_V1 == null) CBZ.CONFIG.MAP_RESERVE_V1 = true;
   // Canonical authored game: one hitman campaign owns the city/prison handoff,
   // communicates through a diegetic phone, and continually assigns a mission.
   // Flip false to expose the legacy multi-mode sandbox during development.
@@ -538,6 +635,46 @@
   // the player never watches a body materialize. Off → old placement.
   if (CBZ.CONFIG.NPC_SPAWN_HIDE == null) CBZ.CONFIG.NPC_SPAWN_HIDE = true;
 
+  // ---- DRIVING WAVE (city/vehicles.js + police.js + props.js) --------------
+  // DRIVE_FEEL_V2: recovers the "out of control" handling — raises the lateral
+  // grip floor (0.42 → 1.6) so a broken-loose slide recovers in a beat instead
+  // of carrying with a ~1.7s half-life, trims the steer-at-speed grip penalty
+  // (−2.25 → −1.3) and scales it by ACTUAL steering input (the old code keyed
+  // off `car._steerInput &&` — a decaying float that never re-reaches exactly
+  // 0, so after your first turn the penalty applied FOREVER). Handbrake drift
+  // untouched.
+  if (CBZ.CONFIG.DRIVE_FEEL_V2 == null) CBZ.CONFIG.DRIVE_FEEL_V2 = true;
+  // VEH_COLLIDE_FIX: anti-tunnel sweep — a fast car's per-frame displacement
+  // can exceed its collision radius, jumping clean over thin colliders (signal
+  // poles, lampposts) with both endpoints outside them. Sweep the segment.
+  // Also: traffic-signal poles register a solid collider like lampposts do.
+  if (CBZ.CONFIG.VEH_COLLIDE_FIX == null) CBZ.CONFIG.VEH_COLLIDE_FIX = true;
+  // EMERGENCY_STEALABLE: police cruisers/ambulances etc. can be entered/jacked
+  // like any other car (stealing one guard-calls cityAddStars).
+  if (CBZ.CONFIG.EMERGENCY_STEALABLE == null) CBZ.CONFIG.EMERGENCY_STEALABLE = true;
+  // CARS_NO_WATER: a road car that noses past wheel depth into open water cuts
+  // its engine, sinks, and dumps the driver into a swim — no driving on the sea.
+  if (CBZ.CONFIG.CARS_NO_WATER == null) CBZ.CONFIG.CARS_NO_WATER = true;
+  // FARM_EQUIPMENT_REAL: the farm tractor/combine register as real parked,
+  // enterable, drivable vehicles (solid to traffic) instead of decoration.
+  if (CBZ.CONFIG.FARM_EQUIPMENT_REAL == null) CBZ.CONFIG.FARM_EQUIPMENT_REAL = true;
+
+  // ---- SETTLEMENTS + CASINOS (city/settlements.js + city/casino.js) --------
+  // SETTLEMENTS_V2: every biome/country/minicity settlement is COMPOSED — a
+  // per-site flavored anchor plan guarantees purposeful, furnished shops (food,
+  // general store, then rolled bar/bank/clinic/gunsmith/pawn/clothing/casino)
+  // on its central lots, town shops/homes/roads reach the arena (vendors,
+  // Zillow, minimap, traffic), and every settlement is registered in
+  // CBZ.settlements. OFF → legacy: towns build geometry only, world byte-
+  // identical to the pre-V2 baseline (arena.lots/roads == mainland only).
+  if (CBZ.CONFIG.SETTLEMENTS_V2 == null) CBZ.CONFIG.SETTLEMENTS_V2 = true;
+  // CASINOS_V1: an order-90 pass turns every casino LOT (mainland Golden Ace +
+  // composed town casinos) into a real gaming house — marquee + mast sign
+  // exterior, felt tables with sittable seats + an "[E] Sit at the table" that
+  // opens the casino floor, slot bank, bar and cashier cage. OFF → the plain
+  // casino retail shell (no dress pass, no table interaction).
+  if (CBZ.CONFIG.CASINOS_V1 == null) CBZ.CONFIG.CASINOS_V1 = true;
+
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous
   // updater functions without adding any normal-game stack-capture overhead.
@@ -547,7 +684,8 @@
     const stack = (new Error()).stack || "";
     const lines = stack.split("\n");
     for (let i = 2; i < lines.length; i++) {
-      const m = lines[i].match(/(src\/[^:)]+\.js):(\d+)/);
+      // Script cachebusters appear in stacks as file.js?v=tag:line:col.
+      const m = lines[i].match(/(src\/[^:?)]+\.js)(?:\?[^:)\s]+)?:(\d+)/);
       if (m && m[1] !== "src/config.js") return m[1] + ":" + m[2];
     }
     return "";

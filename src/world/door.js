@@ -10,12 +10,14 @@
   const mesh = addBox(0, 3.5, -8, 6, 7, 0.7, 0xb43b2c, {
     solid: true, blockLOS: true, emissive: 0x3a0d06, ei: 0.4,
   });
+  mesh.userData.mover = true;
 
   // window slats + a keycard reader panel beside it
   addBox(0, 5.0, -7.6, 3.2, 0.3, 0.1, 0x2a2f38, { cast: false });
   addBox(0, 4.4, -7.6, 3.2, 0.3, 0.1, 0x2a2f38, { cast: false });
   const reader = addBox(2.6, 3.6, -7.6, 0.5, 0.7, 0.12, 0x222831, { cast: false });
   const readerLight = addBox(2.6, 3.8, -7.5, 0.18, 0.18, 0.06, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false });
+  readerLight.userData.mover = true;
 
   const door = {
     mesh, reader, readerLight,

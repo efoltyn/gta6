@@ -448,6 +448,9 @@ onmessage = function (e) {
     rebuildGrid();
   } else if (m.type === "running") {
     running = !!m.value;
+    // Do not fold time spent paused or in another mode into the next society
+    // tick. Society time advances only while jail play is actually running.
+    lastTickAt = Date.now();
   } else if (m.type === "speed") {
     timeScale = Math.max(1, Math.min(64, m.value | 0));
     schedule();

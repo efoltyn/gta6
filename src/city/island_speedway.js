@@ -311,8 +311,8 @@
     CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: 482, minZ: -459, maxZ: -435, pad: 1 });
     // give traffic a road down each leg so cars actually drive the causeway
     if (city.roads) {
-      city.roads.push({ x: 348, z: -516, vertical: true, len: 150, district: "highway" });
-      city.roads.push({ x: 409, z: -447, vertical: false, len: 134, district: "highway" });
+      city.roads.push({ x: 348, z: -516, vertical: true, len: 150, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      city.roads.push({ x: 409, z: -447, vertical: false, len: 134, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
   }, 20);
 
@@ -448,8 +448,8 @@
     if (CBZ.buildHighway) {
       CBZ.buildHighway(root, {
         path: [{ x: 348, z: -585 }, { x: 348, z: -447 }, { x: 470, z: -447 }],
-        width: 24, lanesPerDir: 2, laneW: 3.6, theme: "asphalt",
-        guardrail: true, lights: true, elevated: false, rng: rng,
+        width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
+        guardrail: true, elevated: false, rng: rng,
       });
       return;
     }

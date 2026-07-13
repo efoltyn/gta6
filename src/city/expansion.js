@@ -261,7 +261,7 @@
 
     // the deck barriers run the full span; AABB matches the curb edges (cz±SIDE)
     city.bridge = { minX: bridgeStart - 2, maxX: bridgeEnd + 5, minZ: cz - (SIDE + 0.5), maxZ: cz + (SIDE + 0.5) };
-    city.roads.push({ x: bridgeX, z: cz, vertical: false, len: bridgeLen, district: "bridge" });
+    city.roads.push({ x: bridgeX, z: cz, vertical: false, len: bridgeLen, district: "bridge", w: ROADW, lanesPerDir: 1, laneW: 3.0 });
 
     // ---- landmark towers: every former mountain position becomes skyline ----
     const towers = [];
@@ -490,7 +490,7 @@
           dmesh.userData.roadPaint = true;   // batch-exempt: keeps the decal material, culls with its segment
           root.add(dmesh);
         }
-        const seg = { x, z, len, vertical, district: "island" };
+        const seg = { x, z, len, vertical, district: "island", w: ROADW, lanesPerDir: 1, laneW: 3.0 };
         roadSegs.push(seg); city.roads.push(seg);
       }
     }

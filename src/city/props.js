@@ -904,6 +904,9 @@
       head.position.set(px + sx, 0, pz + sz); head.rotation.y = rotY;
       const pole = new THREE.Mesh(sigPoleG, sigPoleM);
       pole.position.y = 2.6; pole.castShadow = true; head.add(pole);
+      // VEH_COLLIDE_FIX: the pole is solid street furniture like the lamppost
+      // below — without this, cars drove straight through every signal.
+      if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) solidCollider(px + sx, pz + sz, 0.25, pole);
       const box = new THREE.Mesh(sigBoxG, sigBoxM);
       box.position.set(0, 4.6, 0); head.add(box);
       // lamp world position: head's world xz + its face offset (local z=0.28
@@ -975,6 +978,21 @@
       for (const c of lines) if (Math.abs(coord - c) < crossClear) return true;
       return false;
     }
+    // Region builders append roads after the mainland grid lines are frozen.
+    // Those causeways therefore do not exist in allXLines/allZLines and the
+    // line-only test above missed them. Test the actual rendered travel boxes
+    // as well so a lamp from one road can never land in another road's lane.
+    function inOtherTravelLane(x, z, own) {
+      for (const road of city.roads) {
+        if (road === own) continue;
+        const half = road.len / 2 + 0.7;
+        const travelHalf = ((road.lanesPerDir || 2) * (road.laneW || 3.6)) + 0.7;
+        if (road.vertical) {
+          if (Math.abs(x - road.x) < travelHalf && Math.abs(z - road.z) < half) return true;
+        } else if (Math.abs(z - road.z) < travelHalf && Math.abs(x - road.x) < half) return true;
+      }
+      return false;
+    }
     // shared lamp-post geometry/material — a tall pole, a curved arm reaching out
     // over the road, and a cobra-head lamp facing DOWN (real LA streetlamp shape).
     const lampPoleG = geo("lampPole", () => new THREE.CylinderGeometry(0.11, 0.15, 5.6, 6));
@@ -1035,15 +1053,24 @@
       return g;
     }
     for (const r of city.roads) {
+      // NO STREET LAMPS ON HIGHWAYS/BRIDGES (owner: "dumb useless props like
+      // streetlights on the highway and bridges"). This loop is the SECOND lamp
+      // source — HWY_LAMPS only gates highways.js's own deck poles; this one
+      // walked EVERY road including causeways. Real highways/spans here run
+      // unlit, so skip those districts outright.
+      if (r.district === "highway" || r.district === "bridge") continue;
       const n = Math.max(2, Math.floor(r.len / 26));
       for (let i = 0; i <= n; i++) {
         const t = -r.len / 2 + i * (r.len / n);
         if (inCrossRoad(t, r.vertical, r)) continue;     // would sit in a cross-street
         const sgn = (i % 2 === 0 ? 1 : -1);
-        const side = sgn * (city.ROAD / 2 + 1.0);
+        // per-road offset: a lamp beside a wide highway (r.w=24) must clear the
+        // real carriageway, not the city-grid default — else it sits on the deck.
+        const side = sgn * ((r.w != null ? r.w : city.ROAD) / 2 + 1.0);
         const x = r.vertical ? r.x + side : r.x + t;
         const z = r.vertical ? r.z + t : r.z + side;
         if (Math.abs(x) > 9999) continue;
+        if (inOtherTravelLane(x, z, r)) continue;
         if (nearDoor(x, z, 1.8)) continue;
         // arm reaches toward the road centre (opposite the sidewalk side)
         const fx = r.vertical ? -sgn : 0, fz = r.vertical ? 0 : -sgn;
@@ -1091,12 +1118,44 @@
 
     // small helper: where a sidewalk edge sits, with a yaw facing the building
     // (so signs/meters face the street). edge 0..3 = N,S,W,E of a lot.
+    // ROAD-SURFACE REJECTION (owner: "some roads have props just in the road"):
+    // two placement bugs put street furniture out in the carriageway —
+    //   (1) the N/S band offset used lot.w/2 where the lot's z half-extent is
+    //       lot.d/2, so any lot wider than deep threw its N/S props clean past
+    //       the sidewalk into the street;
+    //   (2) the tangent offset `t` was never clamped to the edge length, so a
+    //       long meter/tree row overshot the corner into the cross-street.
+    // Fix the math AND, as the systematic guard, pull any point that still
+    // lands on a road carriageway back to the kerb (deterministic — pure
+    // geometry against city.roads, no rng draws touched).
+    function clearOfRoadSurface(p) {
+      for (const r of city.roads) {
+        // per-road half-width: a prop near a 24m highway was only ejected the
+        // city-grid 9m before and could still sit on the deck. Use the road's
+        // own stamped width when present.
+        const half = (r.w != null ? r.w : city.ROAD) / 2 + 0.35;   // carriageway + a kerb margin
+        if (r.vertical) {
+          if (Math.abs(p.z - r.z) > r.len / 2 + 1 || Math.abs(p.x - r.x) >= half) continue;
+          p.x = r.x + (p.x >= r.x ? half : -half);   // eject to the near kerb
+        } else {
+          if (Math.abs(p.x - r.x) > r.len / 2 + 1 || Math.abs(p.z - r.z) >= half) continue;
+          p.z = r.z + (p.z >= r.z ? half : -half);
+        }
+      }
+      return p;
+    }
     function edgePoint(lot, edge, t, outBand) {
-      const off = lot.w / 2 + (outBand == null ? 1.4 : outBand);
-      if (edge === 0) return { x: lot.cx + t, z: lot.cz - off, yaw: 0 };
-      if (edge === 1) return { x: lot.cx + t, z: lot.cz + off, yaw: Math.PI };
-      if (edge === 2) return { x: lot.cx - off, z: lot.cz + t, yaw: Math.PI / 2 };
-      return { x: lot.cx + off, z: lot.cz + t, yaw: -Math.PI / 2 };
+      const band = outBand == null ? 1.4 : outBand;
+      const w2 = lot.w / 2, d2 = (lot.d != null ? lot.d : lot.w) / 2;
+      // clamp the along-edge offset to this edge's actual half-length
+      const tx = Math.max(-(w2 - 0.6), Math.min(w2 - 0.6, t));
+      const tz = Math.max(-(d2 - 0.6), Math.min(d2 - 0.6, t));
+      let p;
+      if (edge === 0) p = { x: lot.cx + tx, z: lot.cz - (d2 + band), yaw: 0 };
+      else if (edge === 1) p = { x: lot.cx + tx, z: lot.cz + (d2 + band), yaw: Math.PI };
+      else if (edge === 2) p = { x: lot.cx - (w2 + band), z: lot.cz + tz, yaw: Math.PI / 2 };
+      else p = { x: lot.cx + (w2 + band), z: lot.cz + tz, yaw: -Math.PI / 2 };
+      return clearOfRoadSurface(p);
     }
 
     // ----- FIRE HYDRANT: squat body, dome cap, two side outlets ------------

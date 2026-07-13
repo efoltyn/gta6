@@ -147,7 +147,7 @@
     if (!ped || !ped.tag || !ped.char || !ped.char.group || !CBZ.makeLabelSprite) return;
     const txt = (ped.name || "Manager") + " · Manager";
     const lbl = CBZ.makeLabelSprite(txt, { color: "#ffd166" });
-    lbl.position.y = ped.tag.position.y || 3.0; lbl.scale.copy(ped.tag.scale);
+    lbl.position.y = ped.tag.position.y || (CBZ.charHeadY ? CBZ.charHeadY(ped.char) : 1.97); lbl.scale.copy(ped.tag.scale);
     if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
     ped.char.group.add(lbl); ped.tag = lbl; ped.tag.visible = false;
   }
@@ -157,7 +157,7 @@
     // so just rebuild a plain one the same way tagWithRank's callers do.
     if (!ped || !ped.tag || !ped.char || !ped.char.group || !CBZ.makeLabelSprite) return;
     const lbl = CBZ.makeLabelSprite(ped.name || "Worker");
-    lbl.position.y = ped.tag.position.y || 3.0; lbl.scale.copy(ped.tag.scale);
+    lbl.position.y = ped.tag.position.y || (CBZ.charHeadY ? CBZ.charHeadY(ped.char) : 1.97); lbl.scale.copy(ped.tag.scale);
     if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
     ped.char.group.add(lbl); ped.tag = lbl; ped.tag.visible = false;
   }

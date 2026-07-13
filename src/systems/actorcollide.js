@@ -34,8 +34,8 @@
     for (let i = 0; i < CBZ.npcs.length; i++) { const n = CBZ.npcs[i]; if (standing(n) && !n._crowd) list.push(n); }
     if (!CBZ.player.dead) { playerEntry.pos = CBZ.player.pos; playerEntry.r = CBZ.player.radius; list.push(playerEntry); }
 
-    // Shared human-contact rules block ordinary movement and turn a committed
-    // prison shoulder charge into a real knockdown + social reaction.
+    // Shared human-contact rules block ordinary movement. A prison knockdown
+    // requires an explicit combat action, never merely sprinting into someone.
     if (CBZ.humanContact) {
       CBZ.humanContact.resolve(list, dt, {
         mode: "escape",

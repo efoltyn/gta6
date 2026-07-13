@@ -5,7 +5,7 @@
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.scene) return;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const { addBox, mat } = CBZ;
 
   CBZ.cameras = [];
@@ -17,6 +17,7 @@
     const offset = options.offset != null ? options.offset : 0;
 
     const grp = new THREE.Group();
+    grp.userData.dynamic = true;
     grp.position.set(x, y, z);
     scene.add(grp);
 
@@ -91,6 +92,7 @@
 
   // Camera animation loop
   CBZ.onUpdate(25, function (dt) {
+    if (CBZ.game.mode !== "escape") return;
     const breaker = CBZ.breaker;
     const powerOut = breaker && breaker.sabotaged;
 

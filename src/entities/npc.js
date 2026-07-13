@@ -10,7 +10,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const { makeCharacter, animChar, lerpAngle, econ } = CBZ;
 
   // ---- floating name tag (billboard sprite) ----
@@ -37,10 +37,11 @@
     }
     return m;
   }
-  function nameTag(text, color) {
+  function nameTag(text, color, ch) {
     const spr = new THREE.Sprite(tagMaterial(text, color));
     spr.scale.set(3.2, 0.8, 1);
-    spr.position.y = 3.2;
+    // just above the (unscaled-root) head post HUMAN_SCALE; was 3.2 for 2.6u rig.
+    spr.position.y = CBZ.charHeadY ? CBZ.charHeadY(ch) : 1.97;
     return spr;
   }
 
@@ -52,8 +53,9 @@
     let tag = opts.tagText;
     const beh = opts.behavior && CBZ.BEHAVIORS && CBZ.BEHAVIORS[opts.behavior];
     if (beh) tag = beh.emoji + " " + tag;
-    const tagSprite = nameTag(tag, opts.tagColor);
+    const tagSprite = nameTag(tag, opts.tagColor, ch);
     ch.group.add(tagSprite);
+    ch.group.userData.dynamic = true;
     scene.add(ch.group);
 
     const n = {

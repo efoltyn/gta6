@@ -40,6 +40,24 @@
 
   const dogs = CBZ.cityDogs = [];
   let root = null, built = false, arena = null;
+  const PACK_R = 30;          // shoot one stray → every stray this close turns with it
+  const AGGRO_GIVEUP = 80;    // an angry dog chases you this far before losing you
+  const ENGAGE_R = 4.5;       // hand-off distance to creature_combat's maul choreography
+
+  // wildlife-facade species: dogs ride the CBZ.cityWildlife registry so the
+  // SAME guns that hunt deer hit dogs (fpsmode scans that list), while dogs.js
+  // keeps driving them (a.external makes wildlife.js skip them; a.onShot
+  // routes cityWildlifeHit back here). respawn:false keeps them out of the
+  // wildlife breeding pass.
+  const DOG_SPECIES = { id: "stray_dog", name: "Dog", danger: 0.6, scale: 0.75, spd: 6.2, bite: 8, respawn: false, rarity: "common" };
+  function LIVEDOGS() { return !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_LIVE === false); }
+
+  // the Minecraft angry-wolf eyes: unlit red so they READ at gameplay range.
+  let redMat = null;
+  function redEyeMat() {
+    if (!redMat) redMat = new THREE.MeshBasicMaterial({ color: 0xff2015 });
+    return redMat;
+  }
   // during buildCity() the global CBZ.city.arena isn't assigned yet — use the
   // arena handed to our builder for any region lookup (see wildlife.js).
   function ARENA() { return arena || (CBZ.city && CBZ.city.arena); }
@@ -89,8 +107,15 @@
     const head = box(HEAD, HEAD, HEAD, coat); head.position.set(HEAD_X, HEAD_Y, 0); gp.add(head);
     const snout = box(0.22, 0.16, 0.22, coat); snout.position.set(HEAD_X + 0.24, HEAD_Y - 0.05, 0); gp.add(snout);
     const nose = box(0.09, 0.08, 0.12, dark); nose.position.set(HEAD_X + 0.37, HEAD_Y - 0.02, 0); gp.add(nose);
-    // eyes — tiny dark blocks give it a face (MC-skin detailing).
-    [-1, 1].forEach(function (s) { const e = box(0.06, 0.08, 0.05, dark); e.position.set(HEAD_X + 0.15, HEAD_Y + 0.06, s * 0.11); gp.add(e); });
+    // eyes — tiny dark blocks give it a face (MC-skin detailing). Kept on
+    // userData so aggro can swap them RED + swell them (Minecraft angry wolf).
+    const eyes = [];
+    [-1, 1].forEach(function (s) {
+      const e = box(0.06, 0.08, 0.05, dark); e.position.set(HEAD_X + 0.15, HEAD_Y + 0.06, s * 0.11);
+      e.userData.calmMat = e.material;
+      gp.add(e); eyes.push(e);
+    });
+    gp.userData.eyes = eyes;
     // ears — perked ("up") or folded ("flop"), each with a pink inner block.
     [-1, 1].forEach(function (s) {
       let ear, ex, ey, rot = 0;
@@ -145,7 +170,12 @@
       collar: COLLARS[(rng() * COLLARS.length) | 0],
       heading: rng() * 6.283, turnT: rng() * 3, feeds: 0, wag: rng() * 6.283,
       target: null, biteT: 0, dead: false, blinkT: 0,
+      // ---- wildlife-registry facade: makes the dog SHOOTABLE ----
+      animal: true, external: true, state: "wander", aggro: false,
+      species: DOG_SPECIES, ko: 0, escaped: false,
     };
+    d.onShot = function (hit, w) { return dogShot(d, hit, w); };
+    if (LIVEDOGS() && CBZ.cityWildlife) CBZ.cityWildlife.push(d);
     if (tamed) { addCollar(d); }
     dogs.push(d);
     return d;
@@ -307,6 +337,96 @@
   }
 
   // ============================================================
+  //  SHOT / AGGRO / DEATH — the Minecraft-wolf moment. Shoot a stray and its
+  //  eyes flash RED (swollen, unlit — readable across the street), it turns
+  //  and attacks relentlessly, and every stray in its pack radius turns with
+  //  it. Your own tamed dog stays loyal (shooting it is on you). Damage
+  //  arrives through the wildlife registry delegate (cityWildlifeHit →
+  //  d.onShot), so guns, dog bites and explosion blasts all land here.
+  // ============================================================
+  function setDogEyes(d, on) {
+    const eyes = d.group.userData && d.group.userData.eyes; if (!eyes) return;
+    for (let i = 0; i < eyes.length; i++) {
+      eyes[i].material = on ? redEyeMat() : eyes[i].userData.calmMat;
+      eyes[i].scale.setScalar(on ? 1.8 : 1);
+    }
+  }
+  function dogAggro(d) {
+    if (d.aggro || d.dead || d.tamed) return;
+    d.aggro = true; d.state = "charge";               // "charge" also flags it as a threat to pet defenders
+    setDogEyes(d, true);
+  }
+  function dogCalm(d) {
+    if (!d.aggro) return;
+    d.aggro = false; d.state = "wander";
+    setDogEyes(d, false);
+  }
+  function dogShot(d, hit, w) {
+    if (d.dead) return { head: false, down: false, dmg: 0 };
+    const fall = (CBZ.weaponFalloffMul && hit && hit.dist != null && w && w.damage != null)
+      ? (CBZ.weaponFalloffMul(w, hit.dist) || 1) : 1;
+    const dmg = Math.max(1, Math.round((w && w.damage || 20) * (hit && hit.head ? (w && w.headMult || 2) : 1) * fall));
+    d.hp -= dmg;
+    if (hit && hit.point && CBZ.gore && CBZ.gore.spray) { try { CBZ.gore.spray(hit.point, 1); } catch (e) {} }
+    if (d.hp <= 0) { dogDie(d); return { head: !!(hit && hit.head), down: true, dmg: dmg }; }
+    if (!d.tamed) {
+      const first = !d.aggro;
+      dogAggro(d);
+      // PACK RIPPLE — the whole street pack turns on you together.
+      for (let i = 0; i < dogs.length; i++) {
+        const o = dogs[i];
+        if (o === d || o.dead || o.tamed || o.aggro) continue;
+        const ox = o.pos.x - d.pos.x, oz = o.pos.z - d.pos.z;
+        if (ox * ox + oz * oz < PACK_R * PACK_R) dogAggro(o);
+      }
+      if (first && CBZ.city && CBZ.city.note) {
+        CBZ.city.note("The " + d.breed.name + "'s eyes flash RED — it's coming for you!", 2.4, { urgent: true });
+      }
+    }
+    return { head: !!(hit && hit.head), down: false, dmg: dmg };
+  }
+  function dogDie(d) {
+    d.dead = true; d.hp = 0; d.state = "dead"; d.aggro = false;
+    setDogEyes(d, false);
+    d._dieT = 0.5;
+    d._toppleTo = (Math.random() < 0.5 ? 1 : -1) * 1.25;
+    d._dieZ0 = d.group.rotation.z;
+    d.fadeT = 26;
+    if (CBZ.city && CBZ.city.note) {
+      CBZ.city.note(d.tamed ? ("💔 " + d.name + " is gone.") : (d.name + " goes down."), d.tamed ? 3.4 : 2, d.tamed ? { urgent: true } : undefined);
+    }
+  }
+  function removeDog(d) {
+    const i = dogs.indexOf(d); if (i >= 0) dogs.splice(i, 1);
+    const wl = CBZ.cityWildlife;
+    if (wl) { const wi = wl.indexOf(d); if (wi >= 0) wl.splice(wi, 1); }
+    if (d.group && d.group.parent) d.group.parent.remove(d.group);
+  }
+
+  // ---- movement with a CLAMPED TURN: d.heading is the desire, the body
+  //      turns toward it at a bounded rate and always moves along its FACING
+  //      — arcs, never pivot-slides or sideways glides (same model as the
+  //      wildlife engine).
+  function dogMove(d, spd, dt, panic) {
+    const grp = d.group;
+    if (d.faceH == null) d.faceH = d.heading;
+    let fd = d.heading - d.faceH;
+    while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
+    const mx = (panic ? 8 : 4) * dt;
+    if (fd > mx) fd = mx; else if (fd < -mx) fd = -mx;
+    d.faceH += fd;
+    if (spd > 0) {
+      grp.position.x += Math.cos(d.faceH) * spd * dt;
+      grp.position.z += Math.sin(d.faceH) * spd * dt;
+    }
+    grp.position.y = groundY(grp.position.x, grp.position.z);
+    grp.rotation.y = -d.faceH + Math.PI / 2;
+  }
+
+  // reusable creature_combat target for the aggro maul (never per-frame allocated)
+  const DTGT = { pos: null, group: { position: null }, dead: false, hp: 1e9 };
+
+  // ============================================================
   //  UPDATE — follow / heel / sit / hunt-threats / wag / teleport.
   // ============================================================
   function tick(dt) {
@@ -314,7 +434,19 @@
     const P = CBZ.player && CBZ.player.pos;
     for (let i = 0; i < dogs.length; i++) {
       const d = dogs[i], grp = d.group;
-      if (d.dead) continue;
+      if (d.dead) {
+        // animated topple, then the body fades out of the world.
+        if (d._dieT != null) {
+          d._dieT -= dt;
+          const k = Math.max(0, Math.min(1, 1 - d._dieT / 0.5));
+          const e = 1 - (1 - k) * (1 - k);
+          grp.rotation.z = (d._dieZ0 || 0) + (d._toppleTo - (d._dieZ0 || 0)) * e;
+          if (d._dieT <= 0) d._dieT = null;
+        }
+        d.fadeT -= dt;
+        if (d.fadeT <= 0) { removeDog(d); i--; }
+        continue;
+      }
       if (d.biteT > 0) d.biteT -= dt;
       // wag the tail (a little life)
       d.wag += dt * (6 + (d.wagBoost || 0) * 4); if (d.wagBoost) d.wagBoost = Math.max(0, d.wagBoost - dt);
@@ -331,7 +463,9 @@
         const moved = Math.hypot(grp.position.x - px0, grp.position.z - pz0);
         d.prevX = grp.position.x; d.prevZ = grp.position.z;
         const walking = moved > 0.004;
-        if (walking) d.step = (d.step || 0) + dt * 11;
+        // stride rides DISTANCE moved (rate-capped) so a saunter reads slow
+        // and a sprint reads fast — never one fixed cadence for both.
+        if (walking) d.step = (d.step || 0) + Math.min(moved * 3.2, dt * 16);
         const sw = walking ? Math.sin(d.step || 0) : 0, amp = 0.10;
         for (let li = 0; li < legs.length; li++) {
           const L = legs[li], diag = (li === 0 || li === 3) ? 1 : -1;   // FL+RR vs FR+RL
@@ -340,14 +474,34 @@
         }
       }
 
+      // ---- AGGRO (shot stray): relentless Minecraft-wolf attack ----------
+      if (d.aggro && !d.tamed) {
+        const PP = CBZ.player && CBZ.player.pos;
+        if (!PP || (CBZ.player && CBZ.player.dead)) { dogCalm(d); continue; }
+        const adx = PP.x - grp.position.x, adz = PP.z - grp.position.z;
+        const adp = Math.hypot(adx, adz);
+        if (adp > AGGRO_GIVEUP) { dogCalm(d); continue; }        // finally lost you
+        if (adp <= ENGAGE_R && CBZ.creatureFight) {
+          // the last stretch + the bite: creature_combat's maul choreography
+          // (lunge, shake, recover), damage through onHit → cityHurtPlayer.
+          DTGT.pos = PP; DTGT.group.position = PP; DTGT.dead = false; DTGT.hp = 1e9;
+          CBZ.creatureFight(d, DTGT, dt, d._atkOpts || (d._atkOpts = {
+            reach: 1.7, rate: 0.95, dmg: DOG_SPECIES.bite, speed: SPEED, style: "maul",
+            onHit: function (dm) { if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(dm, d); } catch (e) {} } },
+          }));
+          d.faceH = d.heading;                                   // it steers facing itself
+        } else {
+          d.heading = Math.atan2(adz, adx);
+          dogMove(d, SPEED, dt, true);                           // sprint in, clamped arc
+        }
+        continue;
+      }
+
       if (!d.tamed) {
         // strays mill about a little, deterministic-ish idle wander.
         d.turnT -= dt;
         if (d.turnT <= 0) { d.heading += (Math.random() - 0.5) * 1.4; d.turnT = 2 + Math.random() * 3; }
-        const nx = grp.position.x + Math.cos(d.heading) * 0.8 * dt;
-        const nz = grp.position.z + Math.sin(d.heading) * 0.8 * dt;
-        grp.position.x = nx; grp.position.z = nz; grp.position.y = groundY(nx, nz);
-        grp.rotation.y = -d.heading + Math.PI / 2;
+        dogMove(d, 0.8, dt, false);
         continue;
       }
 
@@ -370,25 +524,23 @@
         const tx = threat.pos ? threat.pos.x : threat.group.position.x;
         const tz = threat.pos ? threat.pos.z : threat.group.position.z;
         const tdx = tx - grp.position.x, tdz = tz - grp.position.z, td = Math.hypot(tdx, tdz);
-        if (td <= BITE_R) { if (d.biteT <= 0) { dogBite(d, threat); d.biteT = 0.8; } }
-        else {
-          grp.position.x += (tdx / td) * SPEED * dt;
-          grp.position.z += (tdz / td) * SPEED * dt;
-          grp.position.y = groundY(grp.position.x, grp.position.z);
-          grp.rotation.y = -Math.atan2(tdz, tdx) + Math.PI / 2;
+        if (td <= BITE_R) {
+          d.heading = Math.atan2(tdz, tdx); dogMove(d, 0, dt, true);   // square up
+          if (d.biteT <= 0) { dogBite(d, threat); d.biteT = 0.8; }
+        } else {
+          d.heading = Math.atan2(tdz, tdx);
+          dogMove(d, SPEED, dt, true);
         }
         continue;
       }
 
-      if (d.sit) { grp.rotation.y = -Math.atan2(toPz, toPx) + Math.PI / 2; continue; }  // stays put, faces you
+      if (d.sit) { d.heading = Math.atan2(toPz, toPx); dogMove(d, 0, dt, false); continue; }  // stays put, turns to face you
 
       // heel: trot to the owner, stop within HEEL_R.
       if (distP > HEEL_R) {
         const spd = distP > 10 ? SPEED : SPEED * 0.7;
-        grp.position.x += (toPx / distP) * spd * dt;
-        grp.position.z += (toPz / distP) * spd * dt;
-        grp.position.y = groundY(grp.position.x, grp.position.z);
-        grp.rotation.y = -Math.atan2(toPz, toPx) + Math.PI / 2;
+        d.heading = Math.atan2(toPz, toPx);
+        dogMove(d, spd, dt, distP > 10);
       }
     }
   }

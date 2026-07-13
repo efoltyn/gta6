@@ -32,6 +32,15 @@
   const THREE = window.THREE;
   const mat = CBZ.mat;
   const cmat = CBZ.cmat || CBZ.mat;
+  // One unit is one metre. The airliner follows the published A320 envelope;
+  // business-jet values describe the actual low-poly model below. Keeping the
+  // dimensions on the group gives boarding, collision, flight and audit code a
+  // single source of truth instead of five unrelated footprint literals.
+  const AIRCRAFT_DIMS = Object.freeze({
+    airliner: Object.freeze({ family: "A320-class", length: 37.57, span: 35.80, height: 11.76, fuselage: 3.95 }),
+    privatejet: Object.freeze({ family: "business-jet", length: 21.50, span: 13.50, height: 6.35, fuselage: 2.00 }),
+  });
+  CBZ.CITY_AIRCRAFT_DIMS = AIRCRAFT_DIMS;
 
   // ---- deterministic LCG: same airfield every run ----
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
@@ -54,6 +63,7 @@
     grp.userData.milKind = "plane";
     grp.userData.milName = name || "Aircraft";
     grp.userData.hijackable = true;
+    const dims = grp.userData.aircraftDims || null;
     placed.push({
       group: grp, pos: grp.position, heading: heading || 0,
       kind: "plane", model: { name: name || "Aircraft" },
@@ -67,13 +77,262 @@
       modelYawOffset: -Math.PI / 2,
       groundOffset: 0,
       collider: grp.userData.worldCollider || null,
-      footW: footW || 18, footL: footL || 18, taken: false, hot: true,
+      aircraftDims: dims,
+      footW: dims ? dims.length : (footW || 18),
+      footL: dims ? dims.span : (footL || 18), taken: false, hot: true,
     });
     return grp;
   }
 
+  // ============================================================
+  //  CABIN BOARDING — the elevator-grammar door flow for the parked
+  //  airliners (owner request): walk to the forward port door → prompt →
+  //  the panel SLIDES open → step inside a real cabin (aisle, seat rows,
+  //  seated passengers, cockpit door) → exit the same way, or take a seat
+  //  (CBZ.propSit, guard-called). While the player is inside we detach the
+  //  plane's solid hull AABB (the same rec.collider the theft flow
+  //  detaches, same flag) and stand them on a temporary CBZ.platforms deck
+  //  record; both are restored/removed on exit, on death, on mode change,
+  //  and when the plane is stolen out from under us. All geometry math is
+  //  done in PLANE-LOCAL space so it works at any parked heading.
+  // ============================================================
+  const cabinState = { inside: false, rec: null, platform: null, pending: null, zonesReg: false };
+
+  function cabinLocal(rec, wx, wz) {
+    const th = rec.group.rotation.y, c = Math.cos(th), s = Math.sin(th);
+    const dx = wx - rec.group.position.x, dz = wz - rec.group.position.z;
+    return { x: dx * c - dz * s, z: dx * s + dz * c };
+  }
+  function cabinWorld(rec, lx, lz) {
+    const th = rec.group.rotation.y, c = Math.cos(th), s = Math.sin(th);
+    return {
+      x: rec.group.position.x + lx * c + lz * s,
+      z: rec.group.position.z - lx * s + lz * c,
+    };
+  }
+  function cabinDoorWorld(rec) {
+    const cab = rec.group.userData.cabin;
+    return cabinWorld(rec, cab.doorX, cab.doorZ);
+  }
+  function cabinRemovePlatform() {
+    if (cabinState.platform && CBZ.platforms) {
+      const i = CBZ.platforms.indexOf(cabinState.platform);
+      if (i >= 0) CBZ.platforms.splice(i, 1);
+    }
+    cabinState.platform = null;
+  }
+  // restoreCollider=true → put the hull AABB back (normal exit). false → the
+  // plane was stolen out from under us; the flight system owns the collider
+  // lifecycle now (its restorePropCollider reattaches on park).
+  function cabinForceClear(restoreCollider) {
+    const rec = cabinState.rec;
+    cabinRemovePlatform();
+    if (rec) {
+      if (restoreCollider && rec._cabinDetached && rec.collider && !rec.taken) {
+        if (CBZ.colliders && CBZ.colliders.indexOf(rec.collider) < 0) CBZ.colliders.push(rec.collider);
+        rec._colliderDetached = false;
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
+      rec._cabinDetached = false;
+    }
+    cabinState.inside = false; cabinState.rec = null; cabinState.pending = null;
+  }
+  function cabinReset() { cabinForceClear(false); }
+
+  function cabinCompleteBoard(rec) {
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving || P._aircraft) return;
+    if (!rec || rec.taken || !rec.group || !rec.group.parent) return;
+    const cab = rec.group.userData.cabin; if (!cab) return;
+    // hull AABB off (same detach the theft flow uses — shared flag, so the
+    // two systems can hand the collider to each other without double-work)
+    if (rec.collider && !rec._colliderDetached) {
+      const i = CBZ.colliders ? CBZ.colliders.indexOf(rec.collider) : -1;
+      if (i >= 0) CBZ.colliders.splice(i, 1);
+      rec._colliderDetached = true; rec._cabinDetached = true;
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    // standable cabin deck (oriented-extent AABB, same trick as the
+    // collider restore in playeraircraft.js)
+    const th = rec.group.rotation.y;
+    const ca = Math.abs(Math.cos(th)), sa = Math.abs(Math.sin(th));
+    const hx = 12.4, hz = 1.6;                            // cabin local half-extents
+    const ctr = cabinWorld(rec, -0.2, 0);
+    const ex = ca * hx + sa * hz, ez = sa * hx + ca * hz;
+    cabinState.platform = {
+      minX: ctr.x - ex, maxX: ctr.x + ex, minZ: ctr.z - ez, maxZ: ctr.z + ez,
+      top: rec.group.position.y + cab.floorTop,
+    };
+    if (CBZ.platforms) CBZ.platforms.push(cabinState.platform);
+    // step in at the door row
+    const inPt = cabinWorld(rec, 9.4, -0.6);
+    P.pos.set(inPt.x, cabinState.platform.top, inPt.z);
+    P.vy = 0; P.grounded = true;
+    if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
+    cabinState.inside = true; cabinState.rec = rec;
+    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+  }
+
+  function cabinCompleteExit(rec) {
+    const P = CBZ.player;
+    if (CBZ.propStand && P && P._propSeat) { try { CBZ.propStand(P); } catch (e) {} }
+    if (P && rec && rec.group) {
+      const out = cabinWorld(rec, rec.group.userData.cabin.doorX, -4.4);
+      const gy = CBZ.floorAt ? CBZ.floorAt(out.x, out.z) : 0;
+      P.pos.set(out.x, gy, out.z);
+      P.vy = 0; P.grounded = true;
+      if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
+    }
+    cabinForceClear(true);
+    if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
+  }
+
+  function cabinSitNearest() {
+    const P = CBZ.player, rec = cabinState.rec;
+    if (!P || !rec || !CBZ.propSit) return;
+    const cab = rec.group.userData.cabin;
+    if (!cab || !cab.seats || !cab.seats.length) return;
+    const l = cabinLocal(rec, P.pos.x, P.pos.z);
+    let best = null, bd = Infinity;
+    for (let i = 0; i < cab.seats.length; i++) {
+      const s0 = cab.seats[i];
+      const d = (s0.x - l.x) * (s0.x - l.x) + (s0.z - l.z) * (s0.z - l.z);
+      if (d < bd) { bd = d; best = s0; }
+    }
+    if (!best) return;
+    const w = cabinWorld(rec, best.x, best.z);
+    const th = rec.group.rotation.y;
+    // seated body faces along (sin f, cos f) — aim it down the nose (+X local)
+    try {
+      CBZ.propSit(P, {
+        x: w.x, y: rec.group.position.y + cab.floorTop + 0.45, z: w.z,
+        face: th + Math.PI / 2, kind: "chair", lot: null, occupant: null,
+      });
+    } catch (e) {}
+  }
+
+  function cabinZones() {
+    if (cabinState.zonesReg || !CBZ.interactions || !CBZ.interactions.registerZone || !CBZ.interactions.register) return;
+    cabinState.zonesReg = true;
+    // BOARD THE CABIN — walk-in boarding lives as a SECOND verb on the SAME
+    // "milvehicle" candidate the theft flow uses, NOT a separate interaction
+    // zone. A zone is its own candidate, and the interaction registry only ever
+    // surfaces ONE candidate's options at a time (interactions.js scores a
+    // single `current` target) — so a door zone right on the hull was always
+    // shadowed by militaryvehicles.js's HIJACK option and never reachable
+    // (proved by a CDP probe: pressing E hijacked the plane instead). Riding
+    // the milvehicle layer means the airliner card shows BOTH verbs together:
+    //   [E] Hijack the airliner  (fly it — militaryvehicles.js, loud, 4★)
+    //   [I] Board the cabin       (this — elevator-style walk-in, harmless)
+    // Slot I never collides with the E hijack, so both are always offered when
+    // you walk up to a parked airliner. The board reach is the milvehicle
+    // candidate's own 5.5m footprint reach (militaryvehicles.js) — NOT the door
+    // itself: the solid hull AABB spans the whole wing/fuselage footprint, so
+    // on foot you're stopped ~17m out at the wingtip and can never actually
+    // touch the forward port door. Pressing I arms the board; the per-frame
+    // door-ease below force-opens the panel for the 0.55s pending window
+    // (wantOpen keys off cabinState.pending), THEN cabinCompleteBoard steps you
+    // into the cabin — the same "walk up → door slides → step in" elevator
+    // grammar, without demanding a door-touch the collider forbids.
+    CBZ.interactions.register("milvehicle", {
+      id: "airliner_board", slot: "i", prio: 1,
+      canShow: function (v, ctx) {
+        if (!v || v.flightKind !== "airliner" || v.taken) return false;
+        if (!v.group || !v.group.parent || !v.group.userData || !v.group.userData.cabin) return false;
+        if (cabinState.inside || cabinState.pending) return false;
+        const P = CBZ.player;
+        if (!P || P.dead || P.driving || P._aircraft) return false;
+        return true;
+      },
+      label: "Board the cabin",
+      onSelect: function (v) {
+        if (!v || v.taken || cabinState.inside || cabinState.pending) return;
+        cabinState.pending = { rec: v, t: 0.55, dir: "in" };   // door slides, then you step in
+      },
+    });
+    CBZ.interactions.registerZone({
+      id: "airliner_cabin", kind: "airliner_cabin", prio: 6,
+      find: function (px, pz) {
+        if (!cabinState.inside || cabinState.pending) return null;
+        const P = CBZ.player;
+        return P ? { x: px, z: pz } : null;
+      },
+      options: [
+        {
+          id: "airliner_exit", slot: "e", label: "Exit the airliner",
+          onSelect: function () {
+            if (!cabinState.inside) return;
+            cabinState.pending = { rec: cabinState.rec, t: 0.5, dir: "out" };
+          },
+        },
+        { id: "airliner_sit", slot: "i", label: "Take a seat", onSelect: cabinSitNearest },
+      ],
+    });
+  }
+
+  // per-frame: door easing, delayed board/exit, and inside upkeep (clamp the
+  // player to the aisle box in plane-local space; bail out cleanly if the
+  // plane is stolen, the player dies, or the mode changes)
+  CBZ.onUpdate(55.2, function (dt) {
+    if (!CBZ.game || CBZ.game.mode !== "city") {
+      if (cabinState.inside || cabinState.pending) cabinForceClear(true);
+      return;
+    }
+    cabinZones();
+    const P = CBZ.player;
+    // door panels ease toward open near the player / while boarding / inside
+    for (let i = 0; i < placed.length; i++) {
+      const rec = placed[i];
+      const cab = rec.group && rec.group.userData && rec.group.userData.cabin;
+      if (!cab || !cab.panel) continue;
+      let wantOpen = false;
+      if (!rec.taken && rec.group.parent) {
+        if ((cabinState.inside && cabinState.rec === rec) ||
+            (cabinState.pending && cabinState.pending.rec === rec)) wantOpen = true;
+        else if (P && !P.dead && !P.driving && !P._aircraft) {
+          const d = cabinDoorWorld(rec);
+          wantOpen = Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 3.4;
+        }
+      }
+      const tgt = wantOpen ? 1 : 0;
+      if (Math.abs(cab.doorT - tgt) > 0.001) {
+        cab.doorT += (tgt - cab.doorT) * Math.min(1, dt * 3.2);
+        cab.panel.position.x = cab.doorX - 1.18 * cab.doorT;   // slide aft along the hull
+      }
+    }
+    // pending board/exit resolves once the door has had time to slide
+    if (cabinState.pending) {
+      cabinState.pending.t -= dt;
+      if (cabinState.pending.t <= 0) {
+        const pend = cabinState.pending;
+        cabinState.pending = null;
+        if (pend.dir === "in") cabinCompleteBoard(pend.rec);
+        else cabinCompleteExit(pend.rec);
+      }
+    }
+    // inside upkeep
+    if (cabinState.inside) {
+      const rec = cabinState.rec;
+      if (!P || P.dead || !rec || !rec.group || !rec.group.parent) { cabinForceClear(true); return; }
+      if (P._aircraft || P.driving) { cabinForceClear(false); return; }   // stole it from the cockpit
+      if (!P._propSeat) {
+        const l = cabinLocal(rec, P.pos.x, P.pos.z);
+        const lx = Math.max(-12.2, Math.min(11.8, l.x));
+        const lz = Math.max(-1.42, Math.min(1.42, l.z));
+        if (lx !== l.x || lz !== l.z) {
+          const w = cabinWorld(rec, lx, lz);
+          P.pos.x = w.x; P.pos.z = w.z;
+        }
+      }
+    }
+  });
+
   // ---- region geometry ----
-  const A_MINX = -370, A_MAXX = 290, A_MINZ = -280, A_MAXZ = 40;
+  // The west side is deliberately the long side of the field: Neon Reef ends
+  // at x=-950, leaving a clean 50 m water/terrain seam before this footprint.
+  // That unused land lets the airport carry a runway which actually reads at
+  // aircraft scale without pushing east into Diamond Speedway.
+  const A_MINX = -900, A_MAXX = 290, A_MINZ = -280, A_MAXZ = 40;
   // causeway widened to the 24m highway deck (x∈[-12,12])
   const CW_MINX = -12, CW_MAXX = 12, CW_MINZ = -566, CW_MAXZ = -280;
 
@@ -93,8 +352,10 @@
     const root = city.root;
     armRng();
     // a city rebuild re-runs this builder → fresh plane groups. Clear the capture
-    // + one-shot guard so the rebuilt fleet re-registers as boardable.
-    placed.length = 0; _reg = false;
+    // + one-shot guard so the rebuilt fleet re-registers as boardable, and
+    // drop any stale cabin-boarding state (platform/collider refs die with
+    // the old groups).
+    placed.length = 0; _reg = false; cabinReset();
 
     const BGU = THREE.BufferGeometryUtils;
 
@@ -117,6 +378,13 @@
       if (y1 != null) c.y1 = y1;
       CBZ.colliders.push(c);
       return c;
+    }
+    function aircraftSolid(group, dims) {
+      const h = group.rotation.y || 0;
+      const ca = Math.abs(Math.cos(h)), sa = Math.abs(Math.sin(h));
+      const w = ca * dims.length + sa * dims.span;
+      const d = sa * dims.length + ca * dims.span;
+      return solid(group.position.x, group.position.z, w, d, 0, dims.height, group);
     }
     // a flat painted quad lying on the ground (collected for merging)
     function quadGeo(x, z, w, d, y) {
@@ -152,13 +420,13 @@
     })();
 
     // =====================================================================
-    //  2) RUNWAY 09/27 — E-W, ~540 long × 30 wide, centred north of mid.
+    //  2) RUNWAY 09/27 — E-W, 1,090 long × 30 wide, centred north of mid.
     //     Real markings: solid edge lines, dashed centreline, threshold
     //     "piano keys", runway designator numbers, aiming-point bars.
     // =====================================================================
     const RWY_Z = -90;            // runway centre line (z)
     const RWY_W = 30;             // width
-    const RWY_X0 = -340, RWY_X1 = 200, RWY_LEN = RWY_X1 - RWY_X0;  // 540 long
+    const RWY_X0 = -850, RWY_X1 = 240, RWY_LEN = RWY_X1 - RWY_X0;  // 1,090 long
     const RWY_CX = (RWY_X0 + RWY_X1) / 2;
     (function runway() {
       // asphalt strip
@@ -470,13 +738,108 @@
       return b;
     }
 
+    // =====================================================================
+    //  CABIN INTERIOR (owner: "planes should, like elevators, have a door
+    //  and a real place inside, and real passengers sitting"). Every
+    //  airliner gets a real cabin baked into the same merged part-kit:
+    //  BackSide liner shell (visible only from inside), a raised deck over
+    //  the wing carry-through, 11 rows of two-across benches, SEATED VOXEL
+    //  PASSENGERS (deterministic via the airport rng stream), interior
+    //  window strips, ceiling light strips, an aft pressure wall and a
+    //  cockpit bulkhead with door + a two-seat cockpit behind it. The
+    //  boarding door is a separate SLIDING panel mesh (animated by the
+    //  boarding system below — tagged dynamic so the freezer spares it).
+    //  Costs a handful of merged draws per plane; zero per-frame work when
+    //  nobody is near.
+    // =====================================================================
+    const CABIN_FLOOR = 2.5;             // deck top (clears the wing box at 2.42)
+    const CABIN_DOOR_X = 10.5;           // door local x (forward, port side)
+    const paxShirts = [0xb04a3a, 0x3a6fb0, 0x4a8a4f, 0xc7a03a, 0x8a5aa0, 0xd8dde2].map(function (c) { return mat(c); });
+    const paxSkins = [0xe8b48c, 0xc98d62, 0x8a5a3a].map(function (c) { return mat(c); });
+    const paxHair = mat(0x2a2320);
+    const paxLegs = mat(0x2e3644);
+    const linerMat = new THREE.MeshLambertMaterial({ color: 0xe8eaee, side: THREE.BackSide });
+    const cabinFloorMat = mat(0x33383f);
+    const cabinLightMat = mat(0xfff2d8, { emissive: 0xffe9b8, ei: 0.75 });
+
+    // one seated voxel passenger facing the nose (+X), hips on a cushion top
+    function paxAt(K, x, z) {
+      const shirt = paxShirts[(rng() * paxShirts.length) | 0];
+      const skin = paxSkins[(rng() * paxSkins.length) | 0];
+      K.put(shirt, new THREE.BoxGeometry(0.34, 0.6, 0.5), x - 0.05, 3.27, z);   // torso
+      K.put(skin, new THREE.BoxGeometry(0.26, 0.26, 0.26), x - 0.05, 3.72, z);  // head
+      K.put(paxHair, new THREE.BoxGeometry(0.28, 0.09, 0.28), x - 0.05, 3.89, z); // hair cap
+      K.put(paxLegs, new THREE.BoxGeometry(0.42, 0.16, 0.44), x + 0.22, 3.0, z);  // lap/thighs
+      K.put(paxLegs, new THREE.BoxGeometry(0.16, 0.4, 0.4), x + 0.42, 2.74, z);   // shins
+      K.put(shirt, new THREE.BoxGeometry(0.11, 0.46, 0.12), x - 0.02, 3.22, z - 0.3); // arms
+      K.put(shirt, new THREE.BoxGeometry(0.11, 0.46, 0.12), x - 0.02, 3.22, z + 0.3);
+    }
+
+    function buildCabin(K, g, acc) {
+      // liner shell + deck + aisle carpet
+      K.put(linerMat, new THREE.BoxGeometry(25.2, 2.9, 3.2), -0.2, 3.9, 0);
+      K.put(cabinFloorMat, new THREE.BoxGeometry(25.2, 0.14, 3.1), -0.2, CABIN_FLOOR - 0.07, 0);
+      K.put(FLEET.navy, new THREE.BoxGeometry(23.4, 0.03, 0.8), -0.2, CABIN_FLOOR + 0.02, 0);
+      // aft pressure wall + cockpit bulkhead with a dark cockpit door
+      K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), -12.7, 3.9, 0);
+      K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), 12.1, 3.9, 0);
+      K.put(FLEET.dark, new THREE.BoxGeometry(0.08, 1.78, 0.8), 12.0, 3.42, 0);
+      // interior window strips + ceiling light strips
+      for (const sgn of [-1, 1]) {
+        K.put(FLEET.dark, new THREE.BoxGeometry(21, 0.5, 0.05), -0.7, 4.15, sgn * 1.55);
+        K.put(cabinLightMat, new THREE.BoxGeometry(22, 0.05, 0.28), -0.5, 5.24, sgn * 0.5);
+      }
+      // cockpit behind the bulkhead: console block + two pilot seats
+      K.put(FLEET.dark, new THREE.BoxGeometry(1.0, 0.85, 2.4), 14.2, 3.25, 0);
+      for (const sgn of [-1, 1]) {
+        K.put(FLEET.navy, new THREE.BoxGeometry(0.55, 0.16, 0.55), 13.1, 2.86, sgn * 0.58);
+        K.put(FLEET.navy, new THREE.BoxGeometry(0.16, 0.8, 0.55), 12.75, 3.3, sgn * 0.58);
+      }
+      // seat rows (two-across benches both sides, aisle |z|<0.45 clear) +
+      // deterministic seated passengers; empty seats are recorded so the
+      // boarding system can offer the player a real "take a seat"
+      const seats = [];
+      for (let rx = -11.2; rx <= 8.8; rx += 2.0) {
+        for (const s of [-1, 1]) {
+          const zc = s * 1.0;
+          K.put(FLEET.navy, new THREE.BoxGeometry(0.62, 0.16, 1.1), rx, 2.87, zc);       // cushion
+          K.put(FLEET.navy, new THREE.BoxGeometry(0.18, 0.85, 1.1), rx - 0.34, 3.32, zc); // back
+          K.put(FLEET.dark, new THREE.BoxGeometry(0.5, 0.32, 0.95), rx, 2.66, zc);        // pedestal
+          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.36, 3.85, zc - 0.28); // headrests
+          K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.36, 3.85, zc + 0.28);
+          // window + aisle seat: passenger or bookable empty seat
+          if (rng() < 0.6) paxAt(K, rx, s * 1.28); else seats.push({ x: rx + 0.03, z: s * 1.28 });
+          if (rng() < 0.3) paxAt(K, rx, s * 0.72); else seats.push({ x: rx + 0.03, z: s * 0.72 });
+        }
+      }
+      // DOORWAY (port, forward): dark recess in the hull + warm sill light
+      K.put(FLEET.dark, new THREE.BoxGeometry(1.14, 1.92, 0.1), CABIN_DOOR_X, 3.46, -1.64);
+      K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.06, 0.06), CABIN_DOOR_X, 4.48, -1.68);
+      // sliding DOOR PANEL — a separate live mesh the boarding system eases
+      // aft along the hull; dynamic-tagged so batcher/freezer leave it alone
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.86, 0.1), FLEET.white);
+      panel.position.set(CABIN_DOOR_X, 3.45, -1.73);
+      panel.userData.dynamic = true;
+      const panelBand = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.3, 0.04), acc);
+      panelBand.position.set(0, -0.35, -0.04);
+      panel.add(panelBand);
+      g.add(panel);
+      g.userData.cabin = {
+        floorTop: CABIN_FLOOR,
+        doorX: CABIN_DOOR_X, doorZ: -1.7,
+        seats, panel, doorT: 0,
+      };
+    }
+
     function buildAirliner(x, z, heading, livery) {
       const g = new THREE.Group();
       g.position.set(x, 0, z); g.rotation.y = heading;
       const acc = accentMat(livery || 0x2d5fb0);
       const K = partKit();
-      const L = 30, R = 1.9;      // barrel length / legacy radius (collider height stays R+3)
-      const FH = 3.8, FW = 3.4;   // fuselage box cross-section (old barrel's silhouette)
+      const DIMS = AIRCRAFT_DIMS.airliner;
+      // 27.9m centre barrel + 4.2m nose + 5.6m tail = 37.55m end-to-end.
+      const L = 27.9, R = 1.9;
+      const FH = DIMS.fuselage, FW = DIMS.fuselage;
       const CY = R + 1.6;         // fuselage centreline height — UNCHANGED (flight/camera anchors)
       const BELLY = CY - FH / 2;  // 1.6 — struts rise to here, wheels touch y=0
 
@@ -495,8 +858,8 @@
       }
 
       // ONE swept tapered wing pair + upturned accent winglets
-      K.put(FLEET.white, wingGeo(28, 5.5, 2.2, 0.55, 4.5, 0.9), 0.5, BELLY + 0.55, 0);
-      for (const sgn of [-1, 1]) K.put(acc, new THREE.BoxGeometry(1.5, 2.1, 0.32), -4.2, 3.95, sgn * 13.9);
+      K.put(FLEET.white, wingGeo(DIMS.span, 5.5, 2.2, 0.55, 4.5, 0.9), 0.5, BELLY + 0.55, 0);
+      for (const sgn of [-1, 1]) K.put(acc, new THREE.BoxGeometry(1.5, 2.1, 0.32), -4.2, 3.95, sgn * (DIMS.span / 2 - 0.2));
 
       // underwing engines: sculpted nacelle + accent intake lip ring + dark
       // inlet disc + dark exhaust + pylon up into the wing
@@ -510,9 +873,9 @@
       }
 
       // tail: swept accent fin + two-tone geometric logo block + tailplane
-      K.put(acc, finGeo(6.2, 5.2, 2.6, 0.5, 2.6), -16.5, 7.8, 0);
-      K.put(FLEET.white, new THREE.BoxGeometry(1.6, 1.6, 0.62), -18.3, 9.2, 0);
-      K.put(FLEET.navy, new THREE.BoxGeometry(0.95, 0.95, 0.7), -17.9, 8.8, 0);
+      K.put(acc, finGeo(6.2, 5.2, 2.6, 0.5, 2.6), -16.5, 8.65, 0);
+      K.put(FLEET.white, new THREE.BoxGeometry(1.6, 1.6, 0.62), -18.3, 10.05, 0);
+      K.put(FLEET.navy, new THREE.BoxGeometry(0.95, 0.95, 0.7), -17.9, 9.65, 0);
       K.put(FLEET.white, wingGeo(11, 3.4, 1.5, 0.4, 1.8, 0.35), -17.6, CY + 1.1, 0);
 
       // gear: 2-wheel nose leg + two 4-wheel main bogies, chunky struts.
@@ -525,18 +888,18 @@
         K.put(FLEET.metal, new THREE.BoxGeometry(2.6, 0.4, 0.5), -2.2, 0.72, mz);     // bogie beam
         for (const bx of [-3.05, -1.35]) K.put(FLEET.tire, new THREE.CylinderGeometry(0.55, 0.55, 1.34, 10), bx, 0.55, mz, Math.PI / 2);
       }
+      buildCabin(K, g, acc);        // real interior + sliding boarding door
       K.bake(g);
 
       // nav lights: port red / starboard green wingtips, white tail, beacon
-      navBox(g, FLEET.navR, -4.0, 3.1, -14.05);
-      navBox(g, FLEET.navG, -4.0, 3.1, 14.05);
-      navBox(g, FLEET.navW, -20.35, 10.5, 0);
+      navBox(g, FLEET.navR, -4.0, 3.1, -DIMS.span / 2);
+      navBox(g, FLEET.navG, -4.0, 3.1, DIMS.span / 2);
+      navBox(g, FLEET.navW, -19.35, 11.55, 0);
       navBox(g, FLEET.beacon, -2, 5.55, 0, 0.3);
 
       root.add(g);
-      // body collider (fuselage footprint), oriented-agnostic AABB approx
-      const span = Math.max(L, 18);
-      g.userData.worldCollider = solid(x, z, span, span * 0.7, 0, R + 3, g);
+      g.userData.aircraftDims = DIMS;
+      g.userData.worldCollider = aircraftSolid(g, DIMS);
       return g;
     }
 
@@ -605,7 +968,8 @@
       navBox(g, FLEET.beacon, 0.4, 3.32, 0, 0.22);
 
       root.add(g);
-      g.userData.worldCollider = solid(x, z, 14, 12, 0, R + 3, g);
+      g.userData.aircraftDims = AIRCRAFT_DIMS.privatejet;
+      g.userData.worldCollider = aircraftSolid(g, AIRCRAFT_DIMS.privatejet);
       return g;
     }
 
@@ -629,21 +993,58 @@
     // =====================================================================
     (function pushback() {
       const jet = buildAirliner(-160, TAX_Z - 6, Math.PI / 2, 0x444b55);
+      const jetCollider = jet.userData.worldCollider;
+      let jetSolid = true;
+      function setJetSolid(on) {
+        if (!jetCollider || jetSolid === on || !CBZ.colliders) return;
+        const i = CBZ.colliders.indexOf(jetCollider);
+        if (on && i < 0) CBZ.colliders.push(jetCollider);
+        else if (!on && i >= 0) CBZ.colliders.splice(i, 1);
+        jetSolid = on;
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
       // a baggage tug shoved up against the nose
       const tug = box(-160 + 16, 0.8, TAX_Z - 6, 3, 1.4, 2, 0xe8c020, { cast: true });
       // the tug ANIMATES (position.z below): tag it so the static batcher /
       // matrix freeze never bake it (an untagged plain mesh gets merged and
       // the pushback would visibly freeze).
       tug.userData.dynamic = true;
-      const z0 = TAX_Z - 6, z1 = TAX_Z - 30, speed = 0.7;
-      let t = 0, dir = 1;
+      // One-way ground operation: dwell → push once → taxi away → reset only
+      // while hidden. The old implementation eventually reversed the visible
+      // airliner back into its start pose, even after a long pause.
+      const z0 = TAX_Z - 6, z1 = TAX_Z - 30;
+      const pushSeconds = 34, taxiSpeed = 3.2;
+      let state = "dwell", phase = 0, dwellT = 12;
       CBZ.onUpdate(40, function (dt) {
         if (!jet || !jet.parent) return;
-        t += dt * speed * dir;
-        if (t > 1) { t = 1; dir = -1; }
-        else if (t < 0) { t = 0; dir = 1; }
-        const z = z0 + (z1 - z0) * t;
-        jet.position.z = z; tug.position.z = z + 16;
+        if (state === "dwell") {
+          dwellT -= dt;
+          if (dwellT <= 0) { setJetSolid(false); state = "push"; }
+          return;
+        }
+        if (state === "push") {
+          phase = Math.min(1, phase + dt / pushSeconds);
+          const e = phase * phase * (3 - 2 * phase);
+          const z = z0 + (z1 - z0) * e;
+          jet.position.z = z; tug.position.z = z + 16;
+          if (phase >= 1) { state = "taxi"; tug.visible = false; }
+          return;
+        }
+        if (state === "taxi") {
+          jet.position.z -= taxiSpeed * dt;
+          // Clear the visible airport before recycling. The next lifecycle
+          // begins parked, never driving backward through the player's view.
+          if (jet.position.z < A_MINZ - 90) {
+            jet.visible = false;
+            jet.position.z = z0; tug.position.z = z0 + 16;
+            phase = 0; dwellT = 45; state = "hidden";
+          }
+          return;
+        }
+        if (state === "hidden") {
+          dwellT -= dt;
+          if (dwellT <= 0) { jet.visible = true; tug.visible = true; setJetSolid(true); dwellT = 18; state = "dwell"; }
+        }
       });
     })();
 
@@ -787,8 +1188,8 @@
       if (CBZ.buildHighway) {
         CBZ.buildHighway(root, {
           path: [{ x: cx, z: CW_MINZ }, { x: cx, z: CW_MAXZ }],
-          width: 24, lanesPerDir: 2, laneW: 3.6, theme: "asphalt",
-          guardrail: true, lights: true, elevated: false, rng: rng,
+          width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
+          guardrail: true, elevated: false, rng: rng,
         });
         return;
       }
@@ -886,9 +1287,31 @@
       name: "Halloran Causeway", subtitle: "International Airport", kind: "rect",
       minX: CW_MINX, maxX: CW_MAXX, minZ: CW_MINZ, maxZ: CW_MAXZ, pad: 1,
     });
+    // NO-SPAWN keep-outs (owner: "NPCs spawning all over the runway and
+    // inside the airport — they belong in terminal areas/curbs"). Every
+    // scatter/relocation path (worldmap.js citySpawnBlocked) refuses these:
+    //   • AIRSIDE — everything south of the terminal frontage: the runway
+    //     (z≈-90), taxiway (z≈-40) and the open apron/ramp.
+    //   • the terminal building's own footprint (tx=-40,tz=24,tw=150,td=26 →
+    //     x[-115,35] z[11,37]) so nobody materializes inside the concourse.
+    // Hand-placed staff (populate()'s ground crew/passengers) don't route
+    // through the scatter paths, so the authored airport life is untouched.
+    if (CBZ.registerNoSpawnZone) {
+      CBZ.registerNoSpawnZone(city, { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9, label: "airport-airside" });
+      CBZ.registerNoSpawnZone(city, { minX: -116, maxX: 36, minZ: 10, maxZ: 38, label: "airport-terminal" });
+    }
+    city.airportAudit = {
+      bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
+      runway: { minX: RWY_X0, maxX: RWY_X1, minZ: RWY_Z - RWY_W / 2, maxZ: RWY_Z + RWY_W / 2 },
+      noSpawn: [
+        { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: 9, label: "airport-airside" },
+        { minX: -116, maxX: 36, minZ: 10, maxZ: 38, label: "airport-terminal" },
+      ],
+      aircraft: AIRCRAFT_DIMS,
+    };
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway" });
+      city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
 
     // ---- MAKE THE PARKED FLEET STEALABLE (deferred — militaryvehicles.js loads

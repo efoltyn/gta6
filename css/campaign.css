@@ -558,7 +558,19 @@ body.campaign-active.mode-city #cityWasted > * { display: none !important; }
 
 /* Hide every top-level city instrument except the weapon/ammo anchor and the
    crosshair. Then remove the weapon-name/loot prose while retaining live ammo. */
-body.campaign-active.mode-city #cityHud #cHud > :not(#cWpn):not(#cCross) {
+body.campaign-active.mode-city #cityHud #cHud > :not(#cWpn):not(#cCross):not(#cTopRight) {
+  display: none !important;
+}
+/* WANTED_STARS_V2 (wanted.js stamps body.wanted-stars-v2): the wanted-star
+   meter is an INSTRUMENT, not narration — it survives the campaign declutter.
+   Only the stars: every other child of the top-right column (money / crew /
+   level / world) stays hidden, so the declutter contract still holds. The
+   root cause of "no stars ever show" was this very block hiding the column.
+   Flag off → class off → the column is fully hidden again (legacy). */
+body.campaign-active.mode-city #cityHud #cHud > #cTopRight > :not(#cStarsWrap) {
+  display: none !important;
+}
+body:not(.wanted-stars-v2).campaign-active.mode-city #cityHud #cHud > #cTopRight {
   display: none !important;
 }
 body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
@@ -651,9 +663,9 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
 }
 
 /* ---------- PHONE_NOTIS_V2: diegetic push-notification banners ----------
-   campaign_ui.js drives these. One banner at a time. Raised phone: the banner
-   drops in from the top of the glass, over the current app. Stowed phone: the
-   handset buzzes (glyph shake + LED) and a compact "sliver" rises beside it.
+   campaign_ui.js drives these. One banner at a time, ONLY inside the raised
+   phone's glass; a stowed phone signals with buzz + LED alone (owner rule:
+   nothing renders beside the handset).
    Badges are voxel-look: a colored rounded square + one geometric glyph. */
 .campaign-noti-badge {
   flex: 0 0 auto;
@@ -732,36 +744,6 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
   pointer-events: auto;
 }
 
-/* stowed sliver: rises above the closed-phone glyph, lock-screen style */
-.campaign-noti-sliver {
-  position: fixed;
-  z-index: 128; /* peek 115 < sliver < raised layer 130 */
-  right: calc(18px + env(safe-area-inset-right, 0px));
-  bottom: calc(72px + env(safe-area-inset-bottom, 0px)); /* clears the 45px peek + gap */
-  display: flex;
-  width: min(300px, calc(100vw - 40px));
-  align-items: center;
-  gap: 9px;
-  padding: 9px 11px;
-  border: 1px solid rgba(225, 239, 246, .18);
-  border-radius: 15px;
-  background: linear-gradient(145deg, rgba(37, 45, 53, .96), rgba(8, 12, 17, .97));
-  box-shadow: 0 14px 32px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .08);
-  color: inherit;
-  text-align: left;
-  transform: translateY(14px) scale(.96);
-  opacity: 0;
-  pointer-events: none;
-  cursor: pointer;
-  transition: transform .22s cubic-bezier(.18, .82, .2, 1), opacity .18s ease;
-  font-family: Fredoka, ui-rounded, system-ui, sans-serif;
-}
-.campaign-noti-sliver.in {
-  transform: translateY(0) scale(1);
-  opacity: 1;
-  pointer-events: auto;
-}
-
 /* the Messages/News history rows carry a smaller per-app badge */
 .campaign-feed-top .campaign-noti-badge {
   width: 20px;
@@ -773,17 +755,10 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
 /* MUTUAL EXCLUSION with the full map: while the map owns the screen, the
    closed-phone glyph and any stowed banner step aside (JS also closes a
    raised phone before the map opens, and vice versa). */
-body.full-map-open #campaignPhonePeek,
-body.full-map-open .campaign-noti-sliver {
+body.full-map-open #campaignPhonePeek {
   display: none !important;
 }
 
-@media (max-width: 720px), (max-height: 650px) {
-  .campaign-noti-sliver { right: 50%; transform: translate(50%, 14px) scale(.96); }
-  .campaign-noti-sliver.in { transform: translate(50%, 0) scale(1); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .campaign-noti-banner,
-  .campaign-noti-sliver { transition: none; }
+  .campaign-noti-banner { transition: none; }
 }

@@ -32,8 +32,12 @@
   //        the GPU absolutely can (it stops drawing entire building shells +
   //        their un-batchable glass). Tiers 3-4 keep cull OFF = today, exactly.
   const QUALITY = [
-    { pr: 0.28, shadow: 512, crowd: 24,   ped: { vis: 20,  shadow: 0  }, sunShadow: false, fog: 170, cull: 235 },  // 0 — emergency: sun shadows OFF, minimal render budget/radius/res
-    { pr: 0.8, shadow: 1024, crowd: 360,  ped: { vis: 70,  shadow: 28 }, fog: 260, cull: 330 },  // 1
+    // Even emergency mode remains legible. The city is dominated by draw
+    // submission/shadow work, so crushing DPR to 0.28 blurred the image without
+    // reliably moving the bottleneck. Emergency instead disables the sun pass
+    // and trims render distance/actors while keeping a sane resolution floor.
+    { pr: 0.72, shadow: 512, crowd: 180,  ped: { vis: 45,  shadow: 0  }, sunShadow: false, fog: 260, cull: 330 },  // 0 — emergency
+    { pr: 0.85, shadow: 1024, crowd: 360, ped: { vis: 70,  shadow: 28 }, fog: 300, cull: 370 },  // 1
     { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 }, fog: 350, cull: 430 },  // 2
     // Tiers 3-4 now cull too (at 500, past their 430 fog wall): profiling shows
     // the top-tier frame is DRAW-CALL bound (~2.8k calls, 78% of render CPU in
@@ -49,6 +53,9 @@
   // Start from the coherent High presentation; the adaptive sampler still
   // steps down immediately when a device genuinely needs it.
   let qLevel = 3;
+  // Changing DPR/shadow storage can itself hitch. Do not feed that transition
+  // back into the sampler and trigger a downgrade cascade.
+  let qualitySettlingUntil = 0;
 
   // ---- manual override (pause-screen Performance↔Quality slider) ----------
   // Default is full auto (the adaptive sampler below). Dragging the slider
@@ -130,13 +137,9 @@
 
   // host-aware eligible-top-tier cap. Live-evaluated so promotion is handled.
   function topTier() {
-    let top = QUALITY.length - 1;
-    if (CBZ.qualityV2) {
-      let hosting = false;
-      try { hosting = !!(CBZ.net && CBZ.net.isHost && CBZ.net.isHost()); } catch (e) {}
-      if (hosting) top = Math.max(0, top - 1); // one notch down while hosting
-    }
-    return top;
+    // Hosting is measured by the same frame sampler as everything else. A good
+    // GPU must not be denied Best quality merely because this client is host.
+    return QUALITY.length - 1;
   }
   CBZ.qualityTopTier = topTier; // exposed so the settings panel can grey out / cap its slider
 
@@ -182,7 +185,8 @@
     CBZ.pedLOD = q.ped;
     if (CBZ.refreshPedLOD) CBZ.refreshPedLOD();
     renderer.setPixelRatio(q.pr);
-    renderer.setSize(innerWidth, innerHeight);
+    // Three r128 setPixelRatio() already reapplies the cached logical size.
+    // A second setSize() repeated the drawing-buffer reset/allocation work.
     if (sun.shadow.mapSize.x !== q.shadow) {
       sun.shadow.mapSize.set(q.shadow, q.shadow);
       if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
@@ -191,7 +195,8 @@
     // GPU cost in the scene (a full shadow-map render every frame), way more
     // impactful than shrinking its resolution.
     sun.castShadow = q.sunShadow !== false;
-    renderer.shadowMap.needsUpdate = true;
+    if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
+    else renderer.shadowMap.needsUpdate = true;
     // per-tier draw distance: city fog range + the farcull radius. Published
     // as plain numbers; city/mode.js reads cityFogFar on reset and
     // core/farcull.js reads cityCullRadius every sweep. Survival/prison fog
@@ -203,6 +208,8 @@
       CBZ.scene.fog.near = Math.round(80 * q.fog / 430);   // keep today's 80/430 shape
     }
     for (const fn of qListeners) { try { fn(qLevel); } catch (e) { console.error("[quality listener]", e); } }
+    const stamp = typeof performance !== "undefined" ? performance.now() : Date.now();
+    qualitySettlingUntil = stamp + 800;
   }
   applyQuality();
 
@@ -213,7 +220,7 @@
   // _vPrev is the wall-clock timestamp of the previous sampleFPS call; the gap
   // between calls IS the true frame time (loop.js calls us once per frame, near
   // the top, BEFORE the world updates — so this is the full real frame delta).
-  const V_WIN = 0.5;          // s — shorter window: catch a slump ~2× faster
+  const V_WIN = 0.75;         // s — enough frames to distinguish load from a hitch
   const V_FPS_DOWN = 50;      // mean-fps step-down threshold (matches old 50)
   const V_FPS_UP = 58;        // mean-fps step-up threshold (matches old 58)
   const V_GOOD_NEED = 4;      // up-step needs 4 good 0.5s windows (~2s) — strong
@@ -227,6 +234,19 @@
                               // (p95 ≈ 2nd-worst → the single outlier is ignored)
   let _vCool = 0;             // step-up cooldown (windows) after any step-down
   let _vSpikeRun = 0;         // consecutive spiky windows
+  let _vBadRun = 0;           // sustained mean-load windows (one is never enough)
+  let _vEmergencyRun = 0;     // very-low-fps windows before tier 0 is allowed
+
+  function resetVWindow(resetPrev) {
+    _accum = 0; _frames = 0; _window = 0; _vWorst = 0; _v2nd = 0;
+    if (resetPrev) _vPrev = 0;
+  }
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", function () {
+      resetVWindow(true);
+      _vBadRun = 0; _vEmergencyRun = 0; _vSpikeRun = 0;
+    });
+  }
 
   function sampleFPS(dt) {
     // manual pin — user's choice, no auto-adjustment. Two flags feed this:
@@ -249,13 +269,20 @@
 
     // ---- V2 path : true frame time + p95 spike trigger + host bias ---------
     const now = (typeof performance !== "undefined") ? performance.now() : Date.now();
+    if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") {
+      resetVWindow(true);
+      return;
+    }
     if (_vPrev === 0) { _vPrev = now; return; }   // first call: no prior stamp
     let trueMs = now - _vPrev;                     // REAL wall-clock frame time
     _vPrev = now;
-    // Reject pathological gaps (tab-switch / debugger pause) so they neither
-    // pollute the mean nor masquerade as a render spike — they're not the GPU.
-    if (trueMs > 1000) trueMs = 0;                 // drop, don't count this frame
-    if (trueMs <= 0) return;
+    // Tab switches, debugger pauses, loading/GC cliffs and a tier's own buffer
+    // realloc are not sustained rendering load. One such frame must not strip
+    // several quality levels.
+    if (trueMs <= 0 || trueMs > 250 || now < qualitySettlingUntil) {
+      resetVWindow(false);
+      return;
+    }
     const trueDt = trueMs / 1000;
 
     if (_warmup > 0) { _warmup -= trueDt; return; } // first 1.5s upload jank
@@ -273,6 +300,7 @@
     // window done — reset accumulators
     _accum = 0; _frames = 0; _window = 0; _vWorst = 0; _v2nd = 0;
     if (_vCool > 0) _vCool--;
+    CBZ.qualityAutoStats = { fps, p95, level: qLevel, badWindows: _vBadRun, emergencyWindows: _vEmergencyRun };
 
     // SPIKY? p95 frame time too high → the session reads as stutter even if the
     // mean is acceptable. Require it to persist (V_SPIKE_NEED) so a lone hitch
@@ -283,13 +311,21 @@
     // 1) if we're above the host-aware ceiling, drop toward it immediately.
     if (qLevel > top) { qLevel--; applyQuality(); _good = 0; _vCool = 4; return; }
 
-    // 2) mean too low → step down (fast, this is the primary guard).
-    if (fps < V_FPS_DOWN && qLevel > 0) {
-      qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 4; return;
+    if (fps < V_FPS_DOWN) _vBadRun++; else _vBadRun = 0;
+    if (fps < 22) _vEmergencyRun++; else _vEmergencyRun = 0;
+
+    // 2) sustained mean load. Auto quality normally stops at Balanced: a
+    // 30/40Hz display or CPU-bound draw stream should not destroy presentation
+    // chasing an impossible 60. Fast is allowed below 28fps; the shadow-off
+    // emergency tier requires four genuinely dire windows below 22fps.
+    let autoFloor = fps < 28 ? 1 : 2;
+    if (fps < 22 && _vEmergencyRun >= 4) autoFloor = 0;
+    if (_vBadRun >= 2 && qLevel > autoFloor) {
+      qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 4; _vBadRun = 0; return;
     }
 
     // 3) steady-beats-spiky: sustained p95 spikes → shed a tier even if mean ok.
-    if (_vSpikeRun >= V_SPIKE_NEED && qLevel > 0) {
+    if (_vSpikeRun >= V_SPIKE_NEED && qLevel > 2) {
       qLevel--; applyQuality(); _good = 0; _vSpikeRun = 0; _vCool = 6; return;
     }
 

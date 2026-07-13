@@ -63,22 +63,19 @@
   let _decalSeed = 61819;
   function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
 
-  // FLOOR-TO-FLOOR — sized off the CHARACTER, not habit. The rig in
-  // entities/character.js crowns at ~2.5 (head top 2.48, hair/cap ~2.6), so a
-  // storey needs ~1.7-1.9x that in CLEAR air to read as a real floor: 4.6
-  // minus the 0.2 interior slab = 4.4 clear ≈ 1.76x. (The old 4.0 left ~1.5x —
-  // ceilings grazed heads and towers read as stacked shoeboxes next to people.)
+  // FLOOR-TO-FLOOR — world units are metres and the converted character is
+  // ~1.82m. 3.2m yields a plausible apartment/office floor with a 0.2m slab,
+  // instead of the former 4.6m floors that made every six-storey block read
+  // like a twelve-storey tower.
   // Mirrored by city/elevators.js (fire-escape flights); everything in this
   // file derives from FH — never hardcode a multiple of it.
-  const FH = 4.6;      // floor-to-floor
+  const FH = 3.2;      // floor-to-floor
   // pedestrian DOORWAY/HEADER height — PERSON-scaled on purpose, so it does
-  // NOT ride FH: a door ~1.3x the 2.5 person reads right whatever the ceiling
-  // does. 3.3 equals the old FH-0.7 opening, so door leafs, colliders and the
-  // entrance dressing all sit exactly where they always did.
-  const DOORH = 3.3;
+  // NOT ride FH. 2.25m clears the 1.82m body and matches common real doors.
+  const DOORH = 2.25;
   const WT = 0.4;      // wall thickness
-  const SW = 5.6;      // two generous stair lanes; narrow stairs snag characters at speed
-  const DOORW = 2.2;   // doorway width — original proportions (owner-approved; the 1.15 narrowing was overdone). Garage/showroom vehicle openings use GW, not this.
+  const SW = 4.2;      // two generous stair lanes for a 0.76m-wide actor
+  const DOORW = 1.6;   // generous double-clear pedestrian door; garages use GW
   const GLASS = 0x9fd8ee;
 
   // ---- SHATTERABLE GLASS (city-wide) ------------------------------------
@@ -192,7 +189,11 @@
     const im = new THREE.InstancedMesh(geo, mat, recs.length);
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.castShadow = false; im.receiveShadow = false; im.renderOrder = 1;
-    im.userData.glassPool = true;   // frustumCulled stays true — the sphere is correct
+    // Three r128 defaults InstancedMesh.frustumCulled to false. We built the
+    // tight sector sphere above specifically so off-screen glass sectors can
+    // skip their whole draw and vertex workload.
+    im.frustumCulled = true;
+    im.userData.glassPool = true;
     return im;
   }
   function buildGlassPools() {
@@ -2060,14 +2061,14 @@
     const GKIND = opts.glassKind ? opts.glassKind : ((opts.retail || opts.showroom) ? "clear" : "reflective");
 
     // ===== FACADE TYPE =======================================================
-    // Keep the city on the style that reads clean in first person: glass office
-    // shells and see-through retail. The old residential/fortified archetypes
-    // produced solid, wrong-facing brick blocks that visually crowded storefronts
-    // like Pawn & Loan from the inside, so city generation normalizes them away.
+    // Facade follows PURPOSE. Offices get curtain wall, retail gets a transparent
+    // storefront, homes get masonry with punched windows, and fortified uses its
+    // smaller security openings. Rewriting every purpose to "office" made homes
+    // look like floating floor slabs inside a transparent cage (the exact failure
+    // visible in the owner's screenshot) and erased district identity.
     let FACADE = opts.facade ||
       (opts.retail || opts.showroom ? "retail"
-        : "office");
-    if (FACADE === "residential" || FACADE === "fortified") FACADE = "office";
+        : (opts.office ? "office" : "residential"));
     // RESIDENTIAL gets a warm brick/masonry wall color (overrides the cool
     // tower palette the caller passed) + punched windows; office keeps the
     // caller's cool curtain-wall tint. Fortified keeps the wall, drops glass.
@@ -2075,8 +2076,8 @@
       ? BRICK_PALETTE[((vhash * 977) | 0) % BRICK_PALETTE.length]
       : color;
     // shade trims off the ACTUAL wall color we'll render (brick or tower).
-    const punched = false;                      // residential brick shell exterminated
-    const fortified = false;                    // sealed shell exterminated
+    const punched = FACADE === "residential";
+    const fortified = FACADE === "fortified";
     // ADOPT the facade wall color from here on — every wall box + trim/plinth/
     // pilaster derives from `color`, so reassigning it once paints the whole
     // building brick (residential) or keeps the cool curtain tint (office).
@@ -5179,10 +5180,27 @@
       }
     }
 
+    // Reserve enough REAL parcels for every gameplay-critical trade before the
+    // park/hideout rolls run. The old queue put essentials first but still let
+    // those parcels disappear earlier in this loop; on abandonment-heavy seeds
+    // the queue simply ran out of buildings before reaching the casino, bank,
+    // arena, etc. Spread the slots across the deterministic lot order so the
+    // businesses do not collapse into one corner. No random draw is added.
+    const essentialSlots = new Set();
+    {
+      const pool = city.lots.filter((l) => l !== lux && l !== civicLot && !reserved.has(l));
+      const n = Math.min(nEssential, pool.length);
+      for (let t = 0; t < n; t++) {
+        const idx = Math.min(pool.length - 1, Math.floor((t + 0.5) / n * pool.length));
+        essentialSlots.add(pool[idx]);
+      }
+    }
+
     for (const lot of city.lots) {
       const isLux = lot === lux;
       const isCivic = lot === civicLot;              // the reserved City Hall anchor
       const forcedTier = reserved.get(lot) || null;   // a reserved listed-level lot
+      const essentialSlot = essentialSlots.has(lot);  // cannot be consumed by park/hideout rolls
       const r = rng();
       // CH-PLAN: the SAME r draw, but compared against a per-lot threshold that
       // falls/rises with distance from the centre (parkProbFor/abandonedProbFor)
@@ -5194,7 +5212,7 @@
       // "dumb unowned corner": no collider/door requirement. We still give it a
       // benign lot.building stub so the city has NO unowned lots — owned by the
       // city. Downstream that touches lot.building.door already null-guards it.
-      if (!isLux && !isCivic && !forcedTier && r < parkP) {
+      if (!isLux && !isCivic && !forcedTier && !essentialSlot && r < parkP) {
         lot.kind = "park"; makePark(root, lot, rng);
         // A park needs NO collider/door. But a few downstream lot.building.door
         // consumers (careers' courier drop, lotDoor) read .door unguarded once a
@@ -5225,7 +5243,7 @@
       // threshold shifts with the lot's geometry.
       const lv = city.landValue ? city.landValue(lot.cx || 0, lot.cz || 0) : 0.5;
       const abandonedMul = Math.max(0.5, Math.min(1.5, 1 + (0.5 - lv) * 0.8));
-      if (!isLux && !isCivic && !forcedTier && r < parkP + Math.min(0.6, abandonedP * abandonedMul)) {
+      if (!isLux && !isCivic && !forcedTier && !essentialSlot && r < parkP + Math.min(0.6, abandonedP * abandonedMul)) {
         // Keep the gang turf/stash gameplay, but remove the old boarded derelict
         // visual shell. Those near-windowless boxes were clipping into the read of
         // shops like Cluckin' Diner / The Trap House and made good glass blocks feel
@@ -5255,8 +5273,8 @@
         // never double-placed by the random draw below).
         shop = CITYHALL_SHOP;
       } else if (!isLux && !isCivic && !forcedTier) {
-        if (shopIdx < nEssential) { shop = dealBestFor(lot, shopIdx, nEssential); shopIdx++; }
-        else if (shopIdx < shopQueue.length && rng() < 0.4 * extraShopMulFor(lot)) { shop = dealBestFor(lot, shopIdx, shopQueue.length); shopIdx++; }
+        if (essentialSlot && shopIdx < nEssential) { shop = dealBestFor(lot, shopIdx, nEssential); shopIdx++; }
+        else if (!essentialSlot && shopIdx >= nEssential && shopIdx < shopQueue.length && rng() < 0.4 * extraShopMulFor(lot)) { shop = dealBestFor(lot, shopIdx, shopQueue.length); shopIdx++; }
       }
 
       if (shop) {

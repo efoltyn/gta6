@@ -282,20 +282,25 @@
   function spawnPointNear(reg, px, pz) {
     // try a few candidate points on the spawn ring around the player that also
     // land ON the region; fall back to the region's shared scatter helper.
+    // no-spawn zones (worldmap.js): a ring point that lands on a runway/
+    // taxiway, inside the terminal footprint, or mid-road is refused — the
+    // airport's flavour rigs belong on the terminal/curb strip, not airside.
+    var blocked = CBZ.citySpawnBlocked || null;
     for (var i = 0; i < 8; i++) {
       var a = Math.random() * Math.PI * 2;
       var d = SPAWN_RING_IN + Math.random() * (SPAWN_RING_OUT - SPAWN_RING_IN);
       var x = px + Math.cos(a) * d, z = pz + Math.sin(a) * d;
+      if (blocked && blocked(x, z, 1, true)) continue;
       if (CBZ.cityRegionHit && CBZ.cityRegionHit(reg, x, z, 1.5)) return { x: x, z: z };
     }
     // fallback: any scattered region point that's at least SPAWN_RING_IN away.
     if (CBZ.cityScatterInRegion) {
       var pts = CBZ.cityScatterInRegion(reg, 6, Math.random, 8);
       for (var j = 0; j < pts.length; j++) {
+        if (blocked && blocked(pts[j].x, pts[j].z, 1, true)) continue;
         var dx = pts[j].x - px, dz = pts[j].z - pz;
         if (dx * dx + dz * dz >= SPAWN_RING_IN * SPAWN_RING_IN) return pts[j];
       }
-      if (pts.length) return pts[0];
     }
     return null;
   }
@@ -304,9 +309,12 @@
   function strollGoal(ped, reg) {
     if (!CBZ.cityScatterInRegion) return;
     var pts = CBZ.cityScatterInRegion(reg, 3, Math.random, 8);
-    // prefer a point within a comfortable stroll radius so they don't sprint off
+    // prefer a point within a comfortable stroll radius so they don't sprint
+    // off — and never hand out a goal inside a no-spawn zone (a legally
+    // placed ped must not WALK onto the runway either).
     var best = null, bestD = Infinity;
     for (var i = 0; i < pts.length; i++) {
+      if (CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(pts[i].x, pts[i].z, 1, true)) continue;
       var dx = pts[i].x - ped.pos.x, dz = pts[i].z - ped.pos.z;
       var dd = dx * dx + dz * dz;
       if (dd < bestD) { bestD = dd; best = pts[i]; }

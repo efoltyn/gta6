@@ -194,7 +194,7 @@
     const list = animals();
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
-      if (a.dead || a.ridden || a.species.aquatic) continue;   // carcasses/mount/sea have their own flows
+      if (a.dead || a.ridden || a.external || a.species.aquatic) continue;   // carcasses/mount/sea/dogs have their own flows
       const dx = a.pos.x - px, dz = a.pos.z - pz, q = dx * dx + dz * dz;
       if (q < bd) { bd = q; best = a; }
     }

@@ -168,6 +168,15 @@
   const _hgZero = new THREE.Vector3(0, 0, 0), _hgUp = new THREE.Vector3(0, 1, 0);
   const _hgMat = new THREE.Matrix4();
   const _hgWorldQ = new THREE.Quaternion(), _hgParentQ = new THREE.Quaternion();
+  const _hgBodyQ = new THREE.Quaternion();
+  // low-ready barrel directions in BODY space (+Z = facing, +X = right):
+  // muzzle down-forward and OUT to the RIGHT so the barrel hangs past the right
+  // thigh/knee (the gun-hand now rides beside the right hip — character.js
+  // long-gun carry). The stock swings up-back-left toward the shoulder. Both
+  // ends break the torso silhouette from the rear chase cam (round-2 fix: the
+  // old across-the-body -X vector kept the whole rifle inside the torso box).
+  const LOWREADY_LONG = new THREE.Vector3(0.34, -0.82, 0.36).normalize();
+  const LOWREADY_PISTOL = new THREE.Vector3(0.20, -0.90, 0.38).normalize();  // hangs down the lowered arm beside the thigh, slight forward cant
 
   if (CBZ.onAlways) CBZ.onAlways(54, function () {
     const hand = mounts.hand;
@@ -182,7 +191,17 @@
       g && (g.mode === "city" || g.mode === "escape") &&
       CBZ.player && !CBZ.player.dead && !CBZ.player.driving &&
       CBZ.playerArmed && CBZ.playerArmed();
-    const heldId = show ? (CBZ.currentWeaponId || null) : null;
+    // heldId: currentWeaponId is the canonical drawn id, but fpsmode's
+    // normalizeWeapon() can leave it null while fps.weapon still points at a
+    // real owned weapon (stale legacy-"Gun" fallback path) — fall back to the
+    // fps slot id, gated on actually OWNING weapons so a ghost "Gun" item
+    // never conjures a prop the character canonically doesn't have.
+    let heldId = show ? (CBZ.currentWeaponId || null) : null;
+    if (!heldId && show && CBZ.weaponInventory && CBZ.weaponInventory.length &&
+        CBZ.fps && CBZ.FPS_WEAPONS && CBZ.FPS_WEAPONS[CBZ.fps.weapon]) {
+      const fid = CBZ.FPS_WEAPONS[CBZ.fps.weapon].id;
+      if (CBZ.weaponInventory.indexOf(fid) >= 0) heldId = fid;
+    }
     if (!heldId) {
       if (hand.prop) hand.prop.visible = false;
       return;
@@ -205,8 +224,8 @@
         hand.long = isLongSlot(hand.prop.userData && hand.prop.userData.weaponSlot);
         // TP guns read BIGGER than build scale (standard third-person trick:
         // the over-shoulder camera sits metres away — at NPC scale the held
-        // gun vanished into the blocky hand).
-        hand.prop.scale.setScalar(hand.long ? 1.12 : 0.98);
+        // gun vanished into the blocky hand; screenshot-tuned).
+        hand.prop.scale.setScalar(hand.long ? 1.25 : 1.15);
       }
     }
     if (!hand.prop) return;
@@ -230,10 +249,22 @@
       socket.getWorldQuaternion(_hgParentQ);
       hand.prop.quaternion.copy(_hgParentQ.invert()).multiply(_hgWorldQ);
     } else {
-      // low-ready: buildActorWeapon's own hand-mount orientation (barrel down
-      // the forearm) — with animChar's carryPose arm the gun rides at the hip
-      // pointing down-forward.
-      hand.prop.rotation.set(Math.PI / 2, Math.PI, 0);
+      // LOW-READY (screenshot-diagnosed): the old socket-local pose pointed
+      // the barrel straight down the lowered forearm — dead away from the
+      // chase camera and buried inside the arm boxes, so from behind the gun
+      // rendered as NOTHING (the owner's "can't see it in hand"). Orient in
+      // WORLD space off the BODY's facing instead, like the barrel-lock:
+      //   · long guns lie ACROSS the body (muzzle down-left past the hip —
+      //     the Fortnite two-hand low carry; a 1.9u rifle breaks the body
+      //     silhouette on both sides from any angle);
+      //   · pistols hang muzzle-down BESIDE the right thigh, nudged outward
+      //     so the flank shows at the silhouette edge from behind.
+      ch.body.getWorldQuaternion(_hgBodyQ);
+      _hgDir.copy(hand.long ? LOWREADY_LONG : LOWREADY_PISTOL).applyQuaternion(_hgBodyQ);
+      _hgMat.lookAt(_hgZero, _hgDir, _hgUp);
+      _hgWorldQ.setFromRotationMatrix(_hgMat);
+      socket.getWorldQuaternion(_hgParentQ);
+      hand.prop.quaternion.copy(_hgParentQ.invert()).multiply(_hgWorldQ);
     }
   });
 })();

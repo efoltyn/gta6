@@ -521,7 +521,8 @@
     });
 
     // the shadow map was baked from the pre-merge scene; force one refresh
-    if (CBZ.renderer) CBZ.renderer.shadowMap.needsUpdate = true;
+    if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(true);
+    else if (CBZ.renderer) CBZ.renderer.shadowMap.needsUpdate = true;
     const prev = CBZ.batchStats || { mergedMeshes: 0, removed: 0, wallMerged: 0, wallHidden: 0 };
     CBZ.batchStats = {
       mergedMeshes: (prev.mergedMeshes || 0) + mergedMeshes,
@@ -546,7 +547,19 @@
   // The window 'load' event fires once all scripts have executed, so the
   // scene is fully built. Guard so it can only ever collapse once.
   let done = false;
-  function runOnce() { if (done) return; done = true; run(); }
+  function runOnce() {
+    if (done) return;
+    done = true;
+    // The jail is a real mode root now, so recurse through it exactly like the
+    // lazily-built city. Dynamic inmate/guard subtrees carry userData.dynamic
+    // and are skipped; static prison decoration is merged, then matrix-frozen.
+    if (CBZ.prisonRoot) {
+      CBZ.batchStaticUnder(CBZ.prisonRoot);
+      if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(CBZ.prisonRoot);
+    }
+    // Keep the conservative top-level pass for shared/global scene objects.
+    run();
+  }
   if (document.readyState === "complete") runOnce();
   else addEventListener("load", runOnce, { once: true });
   CBZ.runStaticBatch = runOnce;

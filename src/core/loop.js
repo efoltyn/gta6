@@ -21,13 +21,11 @@
   CBZ.doSlowmo = function (s) { CBZ.slowmo = Math.max(CBZ.slowmo, s); };
 
   // ---- FEEL-DT (the slow-motion-under-load fix) ---------------------------
-  // The heavy WORLD sim runs on `dt` clamped to 0.05 — that clamp is the
-  // spiral-of-death guard (Gaffer "Fix Your Timestep": a frame that takes
-  // M>N to simulate must NOT advance N seconds or it falls further behind
-  // forever). On the weak Mac we render at ~5 FPS (~0.2s/frame), so the
-  // world correctly advances only 50ms/frame — but that ALSO drags the
-  // PLAYER, camera and projectiles to ~25% wall-clock speed: the world
-  // feels like slow-motion under load.
+  // The heavy WORLD sim uses one bounded delta (never a catch-up loop). The
+  // former 0.05 ceiling made the entire jail run at 25% time at 5fps and split
+  // it from the player/camera clock. A 0.10 ceiling remains stable without
+  // multiplying callback work, while keeping world and feel motion aligned on
+  // genuinely slow frames.
   //
   // The fix is NOT to sub-step the world (multiplying the 27ms sim by 4
   // would spiral the weak Mac). Instead we publish a SECOND, real-wall-clock
@@ -57,6 +55,7 @@
   // "ultra slow" wade is lighter. JAIL/SURVIVAL keep the ORIGINAL 0.10 verbatim so
   // those modes stay byte-identical (only the open-city path may change). OFF
   // (feelMotion===false) → feelDt = world dt = unchanged in every mode.
+  const WORLD_MAX = 0.10;
   const FEEL_MAX_CITY = 0.12, FEEL_MAX_OTHER = 0.10;
   if (CBZ.feelMotion === undefined) CBZ.feelMotion = true;  // default ON;
                           // honour an owner-set value (don't clobber a toggle)
@@ -64,16 +63,20 @@
   function loop(t) {
     CBZ.now = t;
     let dt = (t - last) / 1000;
-    let realDt = dt;       // untouched wall-clock delta (pre-clamp) for feel
+    let realDt = Math.max(0, dt); // untouched wall-clock delta (pre-clamp)
     last = t;
-    dt = Math.min(dt, 0.05); // clamp big tab-switch gaps
+    dt = Math.min(realDt, WORLD_MAX); // bounded single-step world delta
+    CBZ.wallDt = Math.min(realDt, 0.25);
+    if (g.state === "playing") CBZ.droppedWorldTime = (CBZ.droppedWorldTime || 0) + Math.max(0, realDt - dt);
 
-    CBZ.sampleFPS(dt);
+    CBZ.sampleFPS(CBZ.wallDt);
 
     // time dilation: hit-stop wins, then slow-mo. Timers tick in real time.
     let scale = 1;
-    if (CBZ.hitstop > 0) { CBZ.hitstop -= dt; scale = 0.06; }
-    else if (CBZ.slowmo > 0) { CBZ.slowmo -= dt; scale = 0.32; }
+    // Effect duration is wall time. The old capped decrement stretched a 0.5s
+    // finisher to ~2s at 5fps and could make jail appear stuck in slow motion.
+    if (CBZ.hitstop > 0) { CBZ.hitstop = Math.max(0, CBZ.hitstop - realDt); scale = 0.06; }
+    else if (CBZ.slowmo > 0) { CBZ.slowmo = Math.max(0, CBZ.slowmo - realDt); scale = 0.32; }
     dt *= scale;
 
     // FEEL-DT: a real-wall-clock delta for the present path. Clamp to its own

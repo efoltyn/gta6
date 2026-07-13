@@ -1,8 +1,9 @@
 /* ============================================================
    entities/decals.js — Ground decals (blood / scuff).
 
-   Whenever a guard or inmate NEWLY goes down — knocked out (ko>0) or
-   dead — we stamp a flat, dark-red splat on the floor where they fell.
+   Whenever a guard or inmate is actually killed, we stamp a flat,
+   dark-red splat on the floor where they fell. A clean KO is not proof of
+   an open wound and must never manufacture a blood pool.
    The splats are CircleGeometry planes laid flat (rotation.x = -PI/2),
    floating a hair above ground (y=0.03) to dodge z-fighting, each with
    a random scale + spin so no two read the same.
@@ -29,7 +30,7 @@
   if (!CBZ || !CBZ.scene || typeof CBZ.onAlways !== "function") return;
   if (typeof THREE === "undefined" || !THREE.CircleGeometry) return;
 
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
 
   // ---- tuning ----
   // hard pool cap (oldest recycled when full) — now rides the quality tier,
@@ -70,6 +71,7 @@
     m.position.y = Y;
     m.visible = false;
     m.renderOrder = -1;              // draw under most decals/sprites
+    m.userData.mover = true;
     scene.add(m);
     return m;
   }
@@ -109,7 +111,7 @@
   let downState = new WeakMap();
 
   function isDown(a) {
-    return !!(a && (a.dead || (a.ko > 0)));
+    return !!(a && a.dead);
   }
 
   function actorPos(a) {
@@ -132,7 +134,7 @@
         // (if it spawned already-down we conservatively skip the splat)
         downState.set(a, down);
       } else if (down && prev === false) {
-        // newly went down -> stamp a splat under them
+        // newly died -> stamp a splat under them
         const p = actorPos(a);
         if (p) drop(p.x, p.z);
         downState.set(a, true);
@@ -188,6 +190,7 @@
   // but stamping on a paused frame is harmless too.
   CBZ.onAlways(78, function (dt) {
     const g = CBZ.game;
+    if (g && g.mode !== "escape") return;
     if (g) {
       const el = g.elapsed || 0;
       // elapsed resets to 0 on a new run; a meaningful drop = fresh run

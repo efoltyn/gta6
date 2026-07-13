@@ -15,7 +15,8 @@
   const DOT_COLORS = [0xd8d2c4, 0x8bdeff, 0xffcf70, 0xff756b, 0x9eea96, 0xc9a6ff];
   const root = new THREE.Group();
   root.name = "mass-crowd";
-  CBZ.scene.add(root);
+  root.userData.dynamic = true;
+  (CBZ.prisonRoot || CBZ.scene).add(root);
 
   const unit = CBZ.boxGeom(1, 1, 1);
   // r128 quirk: per-instance setColorAt() only tints a Lambert/Phong fragment
@@ -90,6 +91,13 @@
   let lastOverview = null, lastDensity = null, densityCount = 0;
   let societyWorker = null, societyAcc = 0, societyRunning = false, societyOverview = false, sharedWrite = 0;
   const tint = new THREE.Color(), rootDummy = new THREE.Object3D(), partDummy = new THREE.Object3D(), worldMatrix = new THREE.Matrix4();
+  // HUMAN SCALE (scale-agent handoff): this prison ambient mass shares the SAME
+  // ~2.6m voxel part layout as city/crowd.js drawParts (torso 1.42, head 2.18…).
+  // The player rig renders at CBZ.HUMAN_SCALE (0.70). Mirror it as one uniform
+  // scale on the per-agent root (parts offset up from the ground-level root, so
+  // every offset + height shrinks proportionally and feet stay grounded). Kept
+  // byte-in-lockstep with crowd.js. One-line revert: CBZ.CONFIG.CHAR_SCALE_REAL=false.
+  const HUMAN_S = (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SCALE_REAL !== false) ? (CBZ.HUMAN_SCALE || 0.70) : 1;
   const tempPoint = { x: 0, z: 0 };
   const flowX = new Float32Array(S.zones.length), flowZ = new Float32Array(S.zones.length);
   const flowStrength = new Float32Array(S.zones.length), flowTTL = new Float32Array(S.zones.length);
@@ -184,6 +192,7 @@
     const vcol = S.itemColor(id); a._chain.visible = !!vcol; if (vcol) a._chain.material = CBZ.cmat(vcol);
     rig.group.rotation.set(0, S.heading[id], 0);
     rig.group.position.set(S.posX[id], 0, S.posZ[id]);
+    rig.phase = S.phase[id];
     rig.group.visible = true;
   }
   function freeRig(e) {
@@ -192,6 +201,7 @@
       if (!S.dead[id]) { S.posX[id] = a.group.position.x; S.posZ[id] = a.group.position.z; }
       S.grudge[id] = Math.max(S.grudge[id], Math.min(255, ((a.playerGrudge || 0) * 32) | 0));
       S.downT[id] = Math.max(S.downT[id], a.ko || 0);
+      S.phase[id] = e.rig.phase;
       rigOf[id] = -1;
     }
     e.id = -1; a._id = -1; a.dead = true; a.intimidMode = null; a.poseHandsUp = false; a.poseAimBack = false;
@@ -415,7 +425,8 @@
       S.posZ[id] = Math.max(zone.z0, Math.min(zone.z1, S.posZ[id]));
       S.updateDensityCell(id);
       S.heading[id] = CBZ.lerpAngle(S.heading[id], Math.atan2(S.velX[id], S.velZ[id]), 1 - Math.pow(0.001, dt));
-      S.phase[id] += dt * (2.2 + Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]) * 1.4);
+      const moveSpeed = Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]);
+      S.phase[id] += CBZ.gaitPhaseDelta ? CBZ.gaitPhaseDelta(moveSpeed, dt) : dt * (2.2 + moveSpeed * 1.4);
       S.avoidX[id] *= Math.pow(0.025, dt); S.avoidZ[id] *= Math.pow(0.025, dt); S.panic[id] = Math.max(0, S.panic[id] - dt * 0.22);
     }
     separate();
@@ -429,9 +440,11 @@
     const t0 = performance.now();
     for (let slot = 0; slot < activeCount; slot++) {
       const id = activeId[slot], down = S.downT[id] > 0;
-      const bob = down ? 0 : Math.abs(Math.sin(S.phase[id])) * 0.035, swing = down ? 0 : Math.sin(S.phase[id]) * 0.42;
+      const moving = Math.hypot(S.velX[id], S.velZ[id]) > 0.2;
+      const bob = down || !moving ? 0 : Math.abs(Math.sin(S.phase[id])) * 0.035;
+      const swing = down || !moving ? 0 : Math.sin(S.phase[id]) * 0.42;
       rootDummy.position.set(S.prevX[id] + (S.posX[id] - S.prevX[id]) * alpha, bob, S.prevZ[id] + (S.posZ[id] - S.prevZ[id]) * alpha);
-      rootDummy.rotation.set(0, S.heading[id], down ? Math.PI / 2 : 0); rootDummy.scale.set(1, 1, 1); rootDummy.updateMatrix();
+      rootDummy.rotation.set(0, S.heading[id], down ? Math.PI / 2 : 0); rootDummy.scale.set(HUMAN_S, HUMAN_S, HUMAN_S); rootDummy.updateMatrix();
       // promoted to a real face-rig? hide this instanced copy (the rig is drawn
       // instead). Parked (night lockdown, in a cell) hides the same way until
       // chooseNearby's next sweep deselects it.
@@ -711,7 +724,6 @@
     const escape = CBZ.game.mode === "escape"; root.visible = escape;
     if (!escape) { if (facePool.length) freeAllRigs(); return; }
     const playing = CBZ.game.state === "playing";
-    if (societyWorker && societyRunning !== playing) { societyRunning = playing; societyWorker.postMessage({ type: "running", value: playing }); }
     if (playing) {
       const t0 = performance.now();
       simTime += dt * ((CBZ.simView && CBZ.simView.active) ? Math.min(16, societyStats.timeScale || 1) : 1);
@@ -752,5 +764,16 @@
     if (societyWorker) { societyWorker.postMessage({ type: "reset" }); syncSociety(); }
   };
   chooseNearby(true); refreshRenderMode(true);
+  // onUpdate does not run while paused, and the mode branch above returns
+  // before touching the worker outside jail. Keep the background society
+  // explicitly tied to live jail play so it cannot consume CPU in city/title
+  // screens or accumulate a giant wall-clock catch-up across a pause.
+  CBZ.onAlways(23.5, function () {
+    const shouldRun = CBZ.game.mode === "escape" && CBZ.game.state === "playing";
+    if (societyWorker && societyRunning !== shouldRun) {
+      societyRunning = shouldRun;
+      societyWorker.postMessage({ type: "running", value: shouldRun });
+    }
+  });
   CBZ.onUpdate(23.5, step);
 })();

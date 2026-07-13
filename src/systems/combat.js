@@ -61,7 +61,7 @@
     if (hpShownT > 0 && hpTarget && !hpTarget.dead) {
       hpShownT -= dt;
       hpBar.visible = true;
-      hpBar.position.set(hpTarget.group.position.x, (hpTarget.group.position.y || 0) + 3.4, hpTarget.group.position.z);
+      hpBar.position.set(hpTarget.group.position.x, (hpTarget.group.position.y || 0) + 2.1, hpTarget.group.position.z);
       hpBar.material.opacity = Math.min(1, hpShownT);
     } else hpBar.visible = false;
   });
@@ -159,7 +159,7 @@
     const heavy = combo % 3 === 0;
     const kind = heavy ? "hook" : (combo % 2 ? "jab" : "cross");
     const yaw = hasTarget ? facingYawTo(actor) : cameraFacingYaw();
-    const reach = heavy ? 3.25 : (kind === "cross" ? 3.02 : 2.86);
+    const reach = heavy ? 2.25 : (kind === "cross" ? 2.08 : 1.98);
     const arcDot = heavy ? 0.14 : (kind === "cross" ? 0.26 : 0.34);
     const baseDmg = 11 + (CBZ.econ.hasItem("Shiv") ? 9 : 0);
     stamina = Math.max(0, stamina - (heavy ? 0.34 : 0.22));

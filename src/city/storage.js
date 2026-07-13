@@ -342,29 +342,6 @@
   }
 
   // ============================================================
-  //  STEAL THE F-22  (military base parked jet)
-  // ------------------------------------------------------------
-  //  Boarding the base jet spawns a HOT flyable F-22 (playeraircraft.js owns the
-  //  craft + keep-gate), commits the grand-theft-aircraft crime (4★), and forces
-  //  the manhunt. WHY: the jet is a trophy you risk your life to lift — keep it by
-  //  landing in a hangar you own. Until then it despawns if you bail.
-  // ============================================================
-  const JET_SPOT = { x: -770, z: -542 };   // first parked jet on island_military
-  let _baseJetTaken = false;
-  function stealBaseJet() {
-    if (g.cityOwnsJet) { note("You already have an F-22 — it's in your hangar.", 2.4); return; }
-    if (CBZ.player && CBZ.player._aircraft) { note("Already airborne.", 1.4); return; }
-    let craft = null;
-    if (CBZ.citySpawnStolenJet) { try { craft = CBZ.citySpawnStolenJet(JET_SPOT.x, JET_SPOT.z, Math.PI, {}); } catch (e) {} }
-    if (!craft) { note("The jet won't start — try again.", 1.8); return; }
-    _baseJetTaken = true;
-    if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { type: "grand-theft-aircraft", x: JET_SPOT.x, z: JET_SPOT.z, instant: true }); } catch (e) {} }
-    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(4); } catch (e) {} }
-    big("✈ F-22 STOLEN — get it to a hangar to keep it!");
-    sfx("alarm");
-  }
-
-  // ============================================================
   //  [G] MENU  (proximity-gated overlay; number keys act)
   // ============================================================
   let panel = null, open_ = false, curSpot = null, actions = [];
@@ -434,8 +411,9 @@
   };
 
   // ============================================================
-  //  INPUT — [G] near a property; number keys in the menu. Also the steal-jet
-  //  prompt+key at the base jet (separate proximity so it never collides).
+  //  INPUT — [G] near a property; number keys in the menu. Military aircraft
+  //  use the shared physical-vehicle interaction in militaryvehicles.js, so the
+  //  parked prop, collider, taken state and flyable are one authoritative object.
   // ============================================================
   function activeCtx() { return g.mode === "city" && g.state === "playing"; }
   addEventListener("keydown", function (e) {
@@ -449,18 +427,10 @@
     if (e.repeat) return;
     const P = CBZ.player; if (!P) return;
     if (k === "g" && !CBZ.cityMenuOpen) {
-      // [G] at a property opens it; [G] at the base jet steals it
-      if (!P._aircraft && !P.driving && nearBaseJet(P.pos.x, P.pos.z)) { e.preventDefault(); stealBaseJet(); return; }
       const s = nearestSpot(P.pos.x, P.pos.z);
       if (s) { e.preventDefault(); open(s); }
     }
   });
-
-  function nearBaseJet(x, z) {
-    if (g.cityOwnsJet) return false;
-    const dx = JET_SPOT.x - x, dz = JET_SPOT.z - z;
-    return (dx * dx + dz * dz) < 7 * 7;
-  }
 
   // ============================================================
   //  ON-FOOT PROMPT  (cheap; only when not flying/driving/menu-open)
@@ -489,7 +459,6 @@
     const P = CBZ.player;
     if (!P || P.dead || P._aircraft || CBZ.cityMenuOpen || g.state !== "playing") { hidePrompt(); return; }
     const x = P.pos.x, z = P.pos.z;
-    if (!P.driving && nearBaseJet(x, z)) { showPrompt("[G] STEAL the F-22 ✈ (4★ — fly it to a hangar you own)"); return; }
     const s = nearestSpot(x, z);
     if (s) {
       const prop = s.prop;
@@ -508,7 +477,6 @@
   // ============================================================
   function teardown() {
     g._cityStorageHydrated = false;
-    _baseJetTaken = false;
     _spots = null; _spotsRoot = null;
     if (panel) panel.style.display = "none";
     open_ = false; curSpot = null;
@@ -543,7 +511,7 @@
     owns, buy, state,
     storeVehicle: storeCurrentVehicle, retrieveVehicle, vehCapTotal, storedVehicleCount,
     buyAmmo, loadOut, stashCount, ammoCapTotal,
-    stealBaseJet, open: CBZ.cityOpenStorage, close,
+    open: CBZ.cityOpenStorage, close,
     spots: buildSpots,
   };
 })();

@@ -11,7 +11,8 @@
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.scene || !CBZ.addBox) return;
   const THREE = window.THREE;
-  const { addBox, scene } = CBZ;
+  const { addBox } = CBZ;
+  const scene = CBZ.prisonRoot || CBZ.scene;
 
   CBZ.vents = CBZ.vents || [];
   CBZ.altExitZones = CBZ.altExitZones || [];

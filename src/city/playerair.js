@@ -260,6 +260,11 @@
     // nav lights: port red / stbd green low on the cab, white beacon on the fin
     const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
     nL(a.navR, -0.74, -0.3, 0.5); nL(a.navG, 0.74, -0.3, 0.5); nL(a.navW, 0, 1.32, -4.45);
+    // tag the spinnables on the group too, so external consumers (the campaign
+    // prologue reuses this exact airframe via CBZ.debugBuildPlayerAir) can
+    // spin the blades without holding our internal refs
+    grp.userData.rotor = rotor;
+    grp.userData.trotor = trotor;
     return { grp, rotor, trotor };
   }
 

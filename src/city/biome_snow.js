@@ -132,8 +132,8 @@
       // made the biome visibly overlap the sea/terrain as a square tile.
       if (CBZ.makeBiomeEdgeRing) {
         CBZ.makeBiomeEdgeRing(root, {
-          cx: CX, cz: CZ, hx: HX + 20, hz: HZ + 20, feather: 108, segments: 20,
-          inner: COL.snowShade, outer: 0xb7a878, y: 0.006, seed: 0x53170,
+          cx: CX, cz: CZ, hx: HX + 20, hz: HZ + 20, feather: 20, segments: 20,
+          inner: COL.snowShade, outer: 0xb7a878, y: 0.006, seed: 0x53170, owner: "snow",
         });
       }
     })();
@@ -249,18 +249,32 @@
 
       // -- RANGE LAYOUT: foreground ring (carries colliders) + distant -
       // foreground spines run along each rect edge, depthDir points OUT.
+      // MAP_RESERVE_V1: the W ridge faces Redhollow Woods and the S ridge faces
+      // the Ironjaw island; at full 150u depth their peaks stood INSIDE those
+      // neighbours (the overlap the pixel-audit misses — massifs aren't tagged
+      // worldSurface). Clamp only those two projections so the range still walls
+      // the valley on all sides but stops short of the forest floor / arena
+      // deck. N and E still project boldly over open water. This changes no rng
+      // draw (peakAmp/seedOff below are untouched) → byte-identical per seed
+      // aside from the deliberately shortened W/S ridge depth. Flag off = 150u.
+      const RESV = !!(CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1);
+      // Coyle Valley farmland's north edge is z=-1280 and it shares Mercy's
+      // z-band; keep the E-rim ridge's SOUTH end north of it so tall peaks stop
+      // short of the farm's NW corner (the pixel-audit-invisible spill the map
+      // ledger flagged). -1290 = 10u clear of the farm.
+      const SEZ = -1300;
       const INSET = 10;                          // spine sits just outside rim
       const fgEdges = [
-        { p0: { x: MINX, z: MINZ - INSET }, p1: { x: MAXX, z: MINZ - INSET }, dir: { x: 0, z: -1 }, name: "N" },
-        { p0: { x: MINX, z: MAXZ + INSET }, p1: { x: MAXX, z: MAXZ + INSET }, dir: { x: 0, z: 1 }, name: "S" },
-        { p0: { x: MINX - INSET, z: MINZ }, p1: { x: MINX - INSET, z: MAXZ }, dir: { x: -1, z: 0 }, name: "W" },
-        { p0: { x: MAXX + INSET, z: MINZ }, p1: { x: MAXX + INSET, z: MAXZ }, dir: { x: 1, z: 0 }, name: "E" },
+        { p0: { x: MINX, z: MINZ - INSET }, p1: { x: MAXX, z: MINZ - INSET }, dir: { x: 0, z: -1 }, name: "N", depthLen: 150 },
+        { p0: { x: MINX, z: MAXZ + INSET }, p1: { x: MAXX, z: MAXZ + INSET }, dir: { x: 0, z: 1 }, name: "S", depthLen: RESV ? 30 : 150 },
+        { p0: { x: MINX - INSET, z: MINZ }, p1: { x: MINX - INSET, z: MAXZ }, dir: { x: -1, z: 0 }, name: "W", depthLen: RESV ? 44 : 150 },
+        { p0: { x: MAXX + INSET, z: MINZ }, p1: { x: MAXX + INSET, z: RESV ? SEZ : MAXZ }, dir: { x: 1, z: 0 }, name: "E", depthLen: 150 },
       ];
       const fgGeoms = [], spines = [];
       for (let ei = 0; ei < fgEdges.length; ei++) {
         const e = fgEdges[ei];
         const cfg = {
-          cols: 56, rows: 6, depthLen: 150,
+          cols: 56, rows: 6, depthLen: e.depthLen,
           peakAmp: 100 + rng() * 20,             // ~100-120
           seedOff: 1000 + ei * 137 + rng() * 50,
           noiseScale: 0.012,
@@ -272,17 +286,25 @@
         spines.push({ edge: e, spine: built.spine, peakAmp: cfg.peakAmp });
       }
 
-      // distant backdrop ring: 2-3 longer/taller ridges pushed further out
+      // distant backdrop ring: 2-3 longer/taller ridges pushed further out.
+      // MAP_RESERVE_V1: the W distant ridge's BASE sat at x=MINX-200 (-270) —
+      // already deep inside Redhollow Woods (x -950..-170) — throwing a 200u+
+      // peak into the forest. Pull its base back to the rim and shorten it so it
+      // reads as the valley's west wall, not a mountain in the trees. (E/N over
+      // open water are untouched.) No rng draw changes.
+      const dWx = RESV ? (MINX - 24) : (MINX - 200);
+      const dWlen = RESV ? 30 : 230;
+      const dEsz = RESV ? SEZ : (MAXZ + 60);     // E backdrop south end (clear of farm)
       const dEdges = [
-        { p0: { x: MINX - 60, z: MINZ - 200 }, p1: { x: MAXX + 60, z: MINZ - 200 }, dir: { x: 0, z: -1 } },
-        { p0: { x: MINX - 200, z: MINZ - 60 }, p1: { x: MINX - 200, z: MAXZ + 60 }, dir: { x: -1, z: 0 } },
-        { p0: { x: MAXX + 200, z: MINZ - 60 }, p1: { x: MAXX + 200, z: MAXZ + 60 }, dir: { x: 1, z: 0 } },
+        { p0: { x: MINX - 60, z: MINZ - 200 }, p1: { x: MAXX + 60, z: MINZ - 200 }, dir: { x: 0, z: -1 }, depthLen: 230 },
+        { p0: { x: dWx, z: MINZ - 60 }, p1: { x: dWx, z: MAXZ + 60 }, dir: { x: -1, z: 0 }, depthLen: dWlen },
+        { p0: { x: MAXX + 200, z: MINZ - 60 }, p1: { x: MAXX + 200, z: dEsz }, dir: { x: 1, z: 0 }, depthLen: 230 },
       ];
       const distGeoms = [];
       for (let di = 0; di < dEdges.length; di++) {
         const e = dEdges[di];
         const cfg = {
-          cols: 60, rows: 4, depthLen: 230,
+          cols: 60, rows: 4, depthLen: e.depthLen,
           peakAmp: 190 + rng() * 30,             // ~190-220
           seedOff: 5000 + di * 211 + rng() * 80,
           noiseScale: 0.009,
@@ -290,6 +312,27 @@
           palette: rangePalette,
         };
         distGeoms.push(build(THREE, e.p0, e.p1, e.dir, cfg).geo);
+      }
+
+      // MAP_RESERVE_V1: record the massif's TRUE footprint so the post-build
+      // audit sees the mountain range, not just the flat feather skirt. Reserve
+      // each ridge as its OWN rect (base segment extruded by its depth) rather
+      // than one union box — a single AABB would falsely claim the empty SE
+      // corner where the S ridge's x-span crosses the E ridge's z-span. All
+      // share owner "snow", so they only ever flag against a DIFFERENT landmass.
+      if (RESV && CBZ.worldLayout && CBZ.worldLayout.mapReserve) {
+        const edgeRect = (e) => {
+          const ax = e.p0.x, az = e.p0.z, bx = e.p1.x, bz = e.p1.z;
+          const ex = e.dir.x * e.depthLen, ez = e.dir.z * e.depthLen;
+          return {
+            minX: Math.min(ax, bx, ax + ex, bx + ex), maxX: Math.max(ax, bx, ax + ex, bx + ex),
+            minZ: Math.min(az, bz, az + ez, bz + ez), maxZ: Math.max(az, bz, az + ez, bz + ez),
+          };
+        };
+        const all = fgEdges.concat(dEdges);
+        for (let mi = 0; mi < all.length; mi++) {
+          CBZ.worldLayout.mapReserve("massif:snow:" + mi, edgeRect(all[mi]), { owner: "snow", kind: "massif" });
+        }
       }
 
       // -- MERGE: foreground -> 1 mesh, distant -> 1 mesh (2 draw calls)
@@ -730,8 +773,8 @@
         // it only matters if the deck ever extends nearer the backdrop rim).
         CBZ.buildHighway(root, {
           path: [{ x: cxMid, z: rMinZ }, { x: cxMid, z: rMaxZ }],
-          width: 24, lanesPerDir: 2, laneW: 3.6, theme: "concrete",
-          guardrail: true, lights: true, elevated: false, rng: rng,
+          width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "concrete",
+          guardrail: true, elevated: false, rng: rng,
           heightAt: CBZ.terrainHeight,
         });
         // snow berms flanking the wider deck (visual edge + read)
@@ -894,7 +937,7 @@
     });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: 470, z: -825, vertical: true, len: 590, district: "highway" });
+      city.roads.push({ x: 470, z: -825, vertical: true, len: 590, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
   }, 30);
 })();

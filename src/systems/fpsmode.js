@@ -23,8 +23,8 @@
   const THREE = window.THREE;
 
   const SENS = (CBZ.TUNE && CBZ.TUNE.sens) || 0.0024;
-  const MELEE = 2.7;
-  const BODY_R = 0.85;
+  const MELEE = 1.9;
+  const BODY_R = 0.60;
 
   // ---- DETERMINISM (owner rule): every roll in this file — shot spread,
   // recoil jitter, casing tumble, the death-drop toss — goes through this
@@ -1077,7 +1077,7 @@
   // checked FIRST and wins outright — if the ray passes through it the shot
   // is a headshot regardless of the body behind it, so aiming at the head
   // connects cleanly instead of the body "stealing" the hit.
-  const HEAD_Y = 2.12, TORSO_Y = 1.42, LEG_Y = 0.66;
+  const HEAD_Y = 1.50, TORSO_Y = 1.00, LEG_Y = 0.46;
 
   // distance at which a ray ENTERS a sphere (or -1 if it misses)
   function sphereEntry(origin, dir, cx, cy, cz, r, maxT) {
@@ -1350,7 +1350,7 @@
     aimForward(fwd);
     const p = CBZ.player;
     if (shoulderActive()) eye.copy(CBZ.camera.position);
-    else eye.set(p.pos.x, p.pos.y + (p.crouch ? 1.45 : 2.05), p.pos.z);
+    else eye.set(p.pos.x, p.pos.y + (p.crouch ? 1.18 : 1.65), p.pos.z);
     const w = armed() ? weapon() : { range: maxRange, bodyRadius: BODY_R, headRadius: 0.32 };
     const wall = wallDistance(eye, fwd, maxRange);
     return findActorHit(eye, fwd, wall ? Math.max(0.1, wall.distance - 0.04) : maxRange, w);
@@ -1832,10 +1832,10 @@
         const r = gunHit(hit, w);
         head = head || r.head;
         down = down || r.down;
-        spawnImpact(hit.point, true, w.key === "shotgun");
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun");
         // a real wet blood puff on flesh (the survival gore kit) — directional,
         // sprayed away from the shooter along the bullet path.
-        if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
+        if (!w.nonlethal && CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
           dir: shotDir, amount: (r.head ? 1.4 : 0.8) * (w.key === "shotgun" ? 1.5 : 1), player: true,
         });
         // the body CARRIES the hit: a dark entry wound stamped on the struck
@@ -1852,10 +1852,10 @@
         const force = (w.pellets ? 11 : 5.5) * (0.6 + 0.5 * cal);
         if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
         else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal });
-        spawnImpact(hit.point, true, w.key === "shotgun");
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun");
         // wet blood off the corpse along the shot line (same gore kit, smaller —
         // a body already bled out, so this is spatter, not a fresh kill burst).
-        if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
+        if (!w.nonlethal && CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
           dir: shotDir, amount: (hit.head ? 0.9 : 0.55) * (w.key === "shotgun" ? 1.5 : 1), player: true,
         });
         // a SHOTGUN/sniper HEADSHOT on the head end takes it OFF even post-mortem
@@ -1871,8 +1871,8 @@
         hitSomething = true;
         if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); down = true; }
         head = head || hit.head;
-        spawnImpact(hit.point, true, w.key === "shotgun");
-        if (CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: shotDir, amount: hit.head ? 1.2 : 0.7, player: true });
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun");
+        if (!w.nonlethal && CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: shotDir, amount: hit.head ? 1.2 : 0.7, player: true });
       } else if (hit.aircraft) {
         // bullets chip the gunship — sparks off the hull, damage routed to the heli
         hitSomething = true;
@@ -2456,7 +2456,7 @@
     let bobY = 0, bobX = 0;
     const p = CBZ.player;
     if (fps.active) {
-      const eyeH = p.crouch ? 1.45 : 2.05;
+      const eyeH = p.crouch ? 1.18 : 1.65;
       if (p.grounded && p.speed > 0.6 && (p.stun || 0) <= 0) {
         bobPhase += dt * (6 + p.speed * 1.1);
         bobY = Math.sin(bobPhase * 2) * 0.035;

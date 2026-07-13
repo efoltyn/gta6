@@ -179,12 +179,19 @@
       r = A.roads[(rng() * A.roads.length) | 0];
       along = (rng() - 0.5) * r.len * 0.8;
       dirSign = rng() < 0.5 ? 1 : -1;
-      // ride the outer (curb) lane, scaled to the new multi-lane geometry
-      const traf = (CBZ.CITY && CBZ.CITY.traf) || {};
-      const lpd = Math.max(1, (traf.lanesPerDir != null ? traf.lanesPerDir : 2) | 0);
-      const lw = traf.laneW != null ? traf.laneW : 3.6;
-      laneIdx = lpd - 1;
-      lane = dirSign * lw * (laneIdx + 0.5);
+      // ride the outer (curb) lane — ROAD-AWARE via CBZ.roadLanes so a highway
+      // truck sits in the REAL outermost lane (past the median), not the global-2
+      // guess. Guard-called fallback keeps the old global math if the helper's gone.
+      if (CBZ.roadLaneCenter) {
+        laneIdx = CBZ.roadLanesPerDir(r) - 1;
+        lane = CBZ.roadLaneCenter(r, dirSign, laneIdx);
+      } else {
+        const traf = (CBZ.CITY && CBZ.CITY.traf) || {};
+        const lpd = Math.max(1, (traf.lanesPerDir != null ? traf.lanesPerDir : 2) | 0);
+        const lw = traf.laneW != null ? traf.laneW : 3.6;
+        laneIdx = lpd - 1;
+        lane = dirSign * lw * (laneIdx + 0.5);
+      }
       x = r.vertical ? r.x + lane : r.x + along;
       z = r.vertical ? r.z + along : r.z + lane;
       heading = r.vertical ? (dirSign > 0 ? 0 : Math.PI) : (dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);

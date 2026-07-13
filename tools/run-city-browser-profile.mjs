@@ -5,18 +5,21 @@
 // Usage:
 //   node tools/run-city-browser-profile.mjs calm 90
 //   node tools/run-city-browser-profile.mjs wanted5 90
+//   node tools/run-city-browser-profile.mjs calm 90 3   # pin quality tier 3
 
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
 
 const scenario = process.argv[2] || "calm";
 const frames = Math.max(30, Number(process.argv[3]) || 90);
+const forcedQuality = process.argv[4] == null ? null : Math.max(0, Math.min(4, Number(process.argv[4]) | 0));
 const server = process.env.CBZ_PROFILE_URL || "http://127.0.0.1:8765/";
 const commandTimeout = Math.max(10000, Number(process.env.CBZ_CDP_TIMEOUT_MS) || 60000);
 const port = 9300 + Math.floor(Math.random() * 500);
 const profileDir = `/tmp/cbz-browser-profile-${port}`;
 const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const url = `${server}?profile=1&scenario=${encodeURIComponent(scenario)}&frames=${frames}&seconds=120`;
+const forceQuery = forcedQuality == null ? "" : `&qforce=${forcedQuality}`;
+const url = `${server}?profile=1&scenario=${encodeURIComponent(scenario)}&frames=${frames}&seconds=120${forceQuery}`;
 
 await rm(profileDir, { recursive: true, force: true });
 const chrome = spawn(chromePath, [

@@ -282,6 +282,15 @@
   // every part below), so this blob IS what glues the mass to the pavement.
   let shadowQ = null;
   const rootD = new THREE.Object3D(), partD = new THREE.Object3D(), col = new THREE.Color();
+  // HUMAN SCALE (scale-agent handoff): the instanced body parts in drawParts are
+  // laid out at the OLD ~2.6m voxel-rig proportions (torso 1.42, head 2.18…). The
+  // player rig now renders at CBZ.HUMAN_SCALE (0.70) via a uniform group scale on
+  // its 'model' node so an adult stands ~1.82m. Mirror that here as a single
+  // UNIFORM scale on the per-agent root (feet sit at the root origin, so every
+  // part offset + height shrinks proportionally and stays ground-anchored) — the
+  // cleanest equivalent of the rig's group scale, no per-offset edits. One-line
+  // revert shared with the rig: CBZ.CONFIG.CHAR_SCALE_REAL = false.
+  const HUMAN_S = (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SCALE_REAL !== false) ? (CBZ.HUMAN_SCALE || 0.70) : 1;
   const shadD = new THREE.Object3D();    // shadow-quad matrix compose scratch (zero per-frame alloc)
 
   // ---- ONE shared blob-shadow texture/material for the whole city ----
@@ -425,6 +434,21 @@
     legL = part(pants, unitP); legR = part(pants, unitP);
     eyeL = part(dark, unitP); eyeR = part(dark, unitP); mouth = part(dark, unitP);
     meshes = [torso, hd, hair, armL, armR, legL, legR, eyeL, eyeR, mouth];
+    // WHITE-POP HARDENING (owner: "white people far away then they become
+    // normal skin color"): a tinted InstancedMesh renders flat WHITE
+    // (material 0xffffff × the white vertex-color attribute) for any
+    // instance drawn before its first setColorAt() upload. Pre-seed EVERY
+    // slot with plausible defaults at build time, before the group can ever
+    // render, so no call path (re-seed, mode re-entry, a future refactor
+    // that renders before paintColors()) can draw an unpainted white body.
+    // paintColors()/castTint overwrite these per agent as usual.
+    col.setHex(SKINS[1]);
+    for (let i = 0; i < CAP; i++) { hd.setColorAt(i, col); armL.setColorAt(i, col); armR.setColorAt(i, col); }
+    col.setHex(SHIRTS[4]);
+    for (let i = 0; i < CAP; i++) torso.setColorAt(i, col);
+    col.setHex(HAIRS[0]);
+    for (let i = 0; i < CAP; i++) hair.setColorAt(i, col);
+    [torso, hd, hair, armL, armR].forEach(function (m) { if (m.instanceColor) m.instanceColor.needsUpdate = true; });
     // the ground-contact blob layer: one more instanced draw for the whole mass
     const smat = CBZ.blobShadowMat ? CBZ.blobShadowMat() : null;
     if (smat && THREE.PlaneGeometry) {
@@ -475,7 +499,23 @@
   // the city-wide draw for the CURRENT hour: pop-weighted by day, night-field
   // weighted after dusk. ALL spawn/reseed/relocation positions come through
   // here, so flipping ONE flag re-shapes where the whole street lives.
+  // NO-SPAWN GATE for the MAINLAND relocation draw (the biome-bubble path
+  // regionPoint already tests citySpawnBlocked; the airport/military keep-outs
+  // are bubble regions so they route through there). This closes the last
+  // mainland gap: a DRAIN/reseed draw that lands MID-ROAD (or on any registered
+  // keep-out that overlaps the city lot grid) is redrawn. Sidewalk draws sit
+  // ~6.4u off a 16u road centre — clear of the 5.5u lane bar — so the common
+  // case passes on the first try (zero extra cost); only a genuinely blocked
+  // point spends a redraw, and the last draw is kept so a caller always gets a
+  // point. Math.random is already this function's rng (runtime relocation, not a
+  // seeded world build), so the retries change no determinism guarantee.
   function drawPoint(out) {
+    for (let t = 0; t < 3; t++) {
+      drawPointRaw(out);
+      if (!CBZ.citySpawnBlocked || !CBZ.citySpawnBlocked(out.x, out.z, 0.6, true)) return;
+    }
+  }
+  function drawPointRaw(out) {
     const A = arena(); if (!A) { out.x = 0; out.z = 0; return; }
     if (nightShift && A.lots && A.lots.length && A.districts) {
       const nc = nightCum(A);
@@ -513,9 +553,13 @@
     if (bubbleOn() && Math.random() < BIOME_BUBBLE_SHARE) {
       const reg = _activeReg, far2 = BUBBLE_FAR * BUBBLE_FAR;
       // a few region scatter tries, keep the first that lands inside the bubble
+      // AND clear of the no-spawn zones (runways/aprons/terminal footprints —
+      // scatter already dodges them internally; the explicit civilian check
+      // also honors civ-only restricted zones).
       for (let t = 0; t < 6; t++) {
         const pts = CBZ.cityScatterInRegion(reg, 1, Math.random, 4);
         if (!pts || !pts.length) break;
+        if (CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(pts[0].x, pts[0].z, 0.6, true)) continue;
         const dx = pts[0].x - ppx, dz = pts[0].z - ppz;
         if (dx * dx + dz * dz <= far2) {
           out.x = pts[0].x; out.z = pts[0].z;
@@ -524,13 +568,18 @@
         }
       }
       // fallback: a ring point around the player, clamped onto the region so it
-      // can never land in the sea even when the bubble overhangs the edge.
-      const a = Math.random() * Math.PI * 2, d = BUBBLE_NEAR + Math.random() * (BUBBLE_FAR - BUBBLE_NEAR);
-      let rx = ppx + Math.cos(a) * d, rz = ppz + Math.sin(a) * d;
-      if (CBZ.cityRegionClamp) { const c = CBZ.cityRegionClamp(reg, rx, rz, 0.6); rx = c.x; rz = c.z; }
-      out.x = rx; out.z = rz;
-      if (A.clampToCity) A.clampToCity(out, 0.6);
-      return;
+      // can never land in the sea even when the bubble overhangs the edge —
+      // re-drawn a few times if it lands on a runway/road; if every try is
+      // blocked, this draw falls through to the mainland field instead.
+      for (let t = 0; t < 4; t++) {
+        const a = Math.random() * Math.PI * 2, d = BUBBLE_NEAR + Math.random() * (BUBBLE_FAR - BUBBLE_NEAR);
+        let rx = ppx + Math.cos(a) * d, rz = ppz + Math.sin(a) * d;
+        if (CBZ.cityRegionClamp) { const c = CBZ.cityRegionClamp(reg, rx, rz, 0.6); rx = c.x; rz = c.z; }
+        if (CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(rx, rz, 0.6, true)) continue;
+        out.x = rx; out.z = rz;
+        if (A.clampToCity) A.clampToCity(out, 0.6);
+        return;
+      }
     }
     drawPoint(out);
   }
@@ -576,7 +625,9 @@
     // mainland bodies are untouched (bubbleOn false → skipped entirely).
     if (ax !== undefined && bubbleOn() && CBZ.cityRegionHit && CBZ.cityRegionHit(_activeReg, ax, az, 0)) {
       const pts = CBZ.cityScatterInRegion(_activeReg, 1, Math.random, 4);
-      if (pts && pts.length) {
+      // no-spawn zones bar STROLL GOALS too — a legally-placed walker must
+      // not be handed a target in the middle of the runway and walk there.
+      if (pts && pts.length && !(CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(pts[0].x, pts[0].z, 0.6, true))) {
         out.x = pts[0].x; out.z = pts[0].z;
         if (A.clampToCity) A.clampToCity(out, 0.6);
         return;
@@ -729,6 +780,13 @@
     buildMeshes();
     const A = arena(); if (!A) { count = 0; return 0; }
     count = Math.max(0, Math.min(CAP, n | 0));
+    // r128 draws InstancedMesh.count instances, not merely the slots whose
+    // matrices we touched. Keep the ten body pools + shadow pool at the live
+    // population so unused CAP slots never consume vertex work.
+    if (ready) {
+      for (let m = 0; m < meshes.length; m++) meshes[m].count = count;
+      if (shadowQ) shadowQ.count = count;
+    }
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
     stagT.fill(0); collapsedQ.fill(0); panicT.fill(0); pauseT.fill(0);
@@ -1051,14 +1109,15 @@
         // parts (head/torso, ~0.27 half-depth) set how high the whole body must
         // ride so NOTHING sinks below the surface — lift the lying body to ~0.42
         // above the floor so it rests cleanly ON the ground, not bisected by it.
-        const fy = (CBZ.floorAt ? CBZ.floorAt(px[i], pz[i]) : 0) + 0.42;
+        const floorY = (CBZ.floorAt ? CBZ.floorAt(px[i], pz[i]) : 0);
+        const fy = floorY + 0.42 * HUMAN_S;          // lying lift scales with the shrunk body depth
         rootD.position.set(px[i], fy, pz[i]);
         rootD.rotation.set(Math.PI / 2, heading[i], 0);
-        rootD.scale.set(1, 1, 1);
+        rootD.scale.set(HUMAN_S, HUMAN_S, HUMAN_S);
         rootD.updateMatrix();
         drawParts(i, 0, 0);
         if (shadowQ) {                               // the dead still touch the ground:
-          shadD.position.set(px[i], fy - 0.38, pz[i]);   // floor + 0.04 (fy carries the 0.42 lying lift)
+          shadD.position.set(px[i], floorY + 0.04, pz[i]);   // grounded regardless of body scale
           shadD.rotation.set(-Math.PI / 2, 0, heading[i]);   // long smear aligned under the lying body
           shadD.scale.set(1.5, 2.3, 1);
           shadD.updateMatrix();
@@ -1082,7 +1141,7 @@
         const lean = Math.min(0.55, stagT[i] * 1.1);
         rootD.rotation.set(lean, Math.atan2(stagX[i], stagZ[i]) + Math.PI, 0);
       } else rootD.rotation.set(0, heading[i], 0);
-      rootD.scale.set(1, 1, 1);
+      rootD.scale.set(HUMAN_S, HUMAN_S, HUMAN_S);   // shrink the ambient body to match the ~1.82m player rig
       rootD.updateMatrix();
       // STOP THE FAR-TIER LEG STROBE: a far body's matrices are only rewritten
       // every 4th frame, but phase[i] keeps advancing every frame — so on each
@@ -1254,11 +1313,14 @@
     // waypoint within a stride; this just bridges the one-frame identity hand-off.)
     const AHEAD = 4;
     ped.target.set(px[i] + dirX[i] * AHEAD, 0, pz[i] + dirZ[i] * AHEAD);
-    ped.group.visible = true;
     ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.pause = 0;
     const shirtHex = SHIRTS[shirt[i]];
     // CLEAN SLATE FIRST: drop the prior occupant's role/outfit and adopt the
     // instanced body's exact shirt, so what walks up matches what you saw.
+    // (visible flips ON only AFTER the paint below — never expose a rig that
+    // still wears the previous occupant's look, or no look at all, even for
+    // a frame: this ordering is the guarantee against the white/wrong-clothes
+    // promotion pop.)
     resetToPlain(ped, shirtHex);
     setLook(ped, SKINS[skin[i]], shirtHex, HAIRS[hairC[i]]);
     // a remembered identity DUE at this spot (a banked dealer/regular walking back
@@ -1269,6 +1331,7 @@
     // off-screen margins pass (VIS_D2-gated), so nobody ever changes clothes as you
     // approach. cityRecastForHour still runs there for the behavioural turnover.
     if (CBZ.cityPedDeal) CBZ.cityPedDeal(ped);
+    ped.group.visible = true;    // fully dressed — NOW it may render
   }
   function releaseAll() {
     if (!poolBuilt) return;
@@ -1550,7 +1613,19 @@
   // skid below (zero allocation), so the chain keeps propagating — just cheaper.
   const PROMO_CAP_FRAME = 4;
   let _promoBudget = PROMO_CAP_FRAME;        // remaining rig promotions THIS frame (reset in bumpPass)
+  // FRAIL/ELDERLY slice (owner's on-foot rule): a hash-stable ~8% of the crowd
+  // can still be bowled over by a hard sprint — the comedy exception. Everyone
+  // else takes a stagger/shove from foot contact, never a ragdoll (cars keep
+  // their own, unchanged lethality path in vehicles.js).
+  function frailAgent(i) { return CBZ.hash01(i, 3, 0xF7A1) < 0.08; }
   function bumpAgent(i, nx, nz, sp, kd, ref) {
+    // ON-FOOT GATE (owner: "when I just run through someone they fall over —
+    // walking it's dumb"): a PLAYER-sourced foot charge (ref == null — rig
+    // movers pass their actor, instanced movers pass _npcSrc) only ragdolls
+    // the frail slice; everyone else downgrades to the hard stumble below.
+    // NPC chain-reaction shoves are untouched (they self-limit and only ever
+    // start from an already-violent event).
+    if (kd && !ref && !frailAgent(i)) kd = false;
     const guest = CBZ.net && CBZ.net.noSim();          // guests never spawn real peds
     if (kd && !guest && _promoBudget > 0) {
       // promote → real rig → real knockdown physics (the comedy payoff)
@@ -1595,7 +1670,13 @@
     // 1) gather movers: the player on foot + any fast rig near the camera
     let nm = 0;
     if (!P.dead && !P.driving && (P.speed || 0) > 1.5) {
-      _mvX[nm] = ppx; _mvZ[nm] = ppz; _mvS[nm] = P.speed || 0;
+      // WALKING IS NOT A TACKLE (owner): base WASD speed is 7.0 — over the
+      // 3.0 stumble threshold — so plain walking used to skid every body it
+      // touched. Un-sprinted contact now registers below the stumble line
+      // (a polite sidestep nudge in bumpAgent); sprinting keeps the stagger,
+      // and the ragdoll is gated to the frail slice inside bumpAgent.
+      const pSpeed = P.sprint ? (P.speed || 0) : Math.min(P.speed || 0, 2.4);
+      _mvX[nm] = ppx; _mvZ[nm] = ppz; _mvS[nm] = pSpeed;
       _mvKD[nm] = (P.sprint && (P.speed || 0) >= 6.2) ? 1 : 0;   // same charge gate as humancontact
       _mvRef[nm] = null; _mvAgent[nm] = -1; nm++;
     }

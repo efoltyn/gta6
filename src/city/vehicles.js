@@ -135,9 +135,13 @@
   let _trafficStopNoteT = 0;   // global cooldown for the ambient "traffic stop nearby" feed line
   const TR = () => (CBZ.CITY && CBZ.CITY.traf) || {};
   // multi-lane geometry (mirrors traffic.js): lane index → signed lateral offset.
-  const lanesPerDir = () => Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0);
+  // ROAD-AWARE via CBZ.roadLaneCenter(r,dir,idx) / CBZ.roadLanesPerDir(r): a car
+  // on a 3+3 highway now targets the right lane count/centres and sits outboard
+  // of the median, instead of the old global-2-lane guess that hugged the centre-
+  // line. Guard-called so a missing helper falls back to the old global math.
+  const lanesPerDir = (r) => (CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0));
   const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
-  const laneOffset = (dir, idx) => dir * laneWidth() * (idx + 0.5);
+  const laneOffset = (r, dir, idx) => (CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidth() * (idx + 0.5));
 
   // ---- ambient car MODEL builder ----------------------------------------
   // Cars read as real vehicles: a low body with a chamfered roof/hood, a
@@ -764,8 +768,8 @@
       const r = A.roads[(rng() * A.roads.length) | 0];
       const along = (rng() - 0.5) * r.len * 0.85;
       const dirSign = rng() < 0.5 ? 1 : -1;
-      const laneIdx = (rng() * lanesPerDir()) | 0;
-      const lane = laneOffset(dirSign, laneIdx);
+      const laneIdx = (rng() * lanesPerDir(r)) | 0;
+      const lane = laneOffset(r, dirSign, laneIdx);
       const x = r.vertical ? r.x + lane : r.x + along;
       const z = r.vertical ? r.z + along : r.z + lane;
       const heading = r.vertical ? (dirSign > 0 ? 0 : Math.PI) : (dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
@@ -780,7 +784,12 @@
   };
 
   function clearCars() {
+    const keep = [];
     for (const c of CBZ.cityCars) {
+      // _persist records (farm tractor/combine — world fixtures registered via
+      // cityRegisterVehicle) are built ONCE at world build; a traffic reset
+      // must not strip their visuals out of the biome. They keep their slot.
+      if (c._persist) { keep.push(c); continue; }
       if (CBZ.cityDemotePlayerCar) CBZ.cityDemotePlayerCar(c);
       if (c.group && c.group.parent) c.group.parent.remove(c.group);
       if (c.group) c.group.traverse(function (o) {
@@ -789,8 +798,52 @@
       });
     }
     CBZ.cityCars.length = 0;
+    for (const c of keep) CBZ.cityCars.push(c);
   }
   CBZ.clearCityCars = clearCars;
+
+  // ---- CUSTOM-VISUAL VEHICLE REGISTRATION ---------------------------------
+  // Turn an already-built THREE.Group (emergency truck, farm tractor) into a
+  // first-class CBZ.cityCars record: enterable via the interaction system
+  // (cityNearestCar scans cityCars), solid to all traffic (resolveCars), and
+  // drivable by the order-11 player loop. The group is registered as its OWN
+  // "carVisual" so cityPromotePlayerCar keeps the custom body instead of
+  // swapping in a procedural silhouette; wheel meshes the caller tagged with
+  // userData.playerWheel spin while driven. opts:
+  //   record   — augment THIS object in place (e.g. traffic.js's emergency
+  //              record keeps a single identity) instead of a fresh one.
+  //   body     — bodyKind for handling/mass ("van", "pickup", ...).
+  //   style    — playercars FEEL style for the driven feel (default "van").
+  //   model    — {name, value, rarity, body} for HUD/chop-shop/handling tier.
+  //   dims     — {width, length, height, wheelbase} collision + visual dims.
+  //   heading, color, persist (survive traffic resets — world fixtures).
+  CBZ.cityRegisterVehicle = function (grp, opts) {
+    if (!grp || !CBZ.cityCars) return null;
+    opts = opts || {};
+    const body = opts.body || "van";
+    const prof = vehicleProfile(opts.model || null, body);
+    const dims = opts.dims || { width: 2.2, length: 5.4, height: 2.2, wheelbase: 3.2 };
+    grp.userData.carVisual = grp;
+    grp.userData.carStyle = opts.style || "van";
+    grp.userData.bodyKind = body;
+    grp.userData.vehicleDims = dims;
+    const c = opts.record || {};
+    const defaults = {
+      group: grp, pos: grp.position, heading: opts.heading || 0, vertical: false,
+      model: opts.model || null, v: 0, vx: 0, vz: 0,
+      color: opts.color != null ? opts.color : 0xdde3e8,
+      stolen: false, player: false, ai: false, lane: 0, road: null, dirSign: 1, dead: false,
+      driver: { aggr: 0.2 }, pullover: 0, ranRedCD: 0, turnCD: 2, npcWanted: 0, npcDriver: null,
+      dwell: 0, stopT: 0, roadRageTarget: null, roadRageT: 0, playerHitCD: 0,
+      engineHp: 100, _bk: body, dims: dims,
+      mass: prof.mass, armor: prof.armor, repair: prof.repair,
+    };
+    for (const k in defaults) if (c[k] == null) c[k] = defaults[k];
+    c._persist = !!opts.persist;
+    tagTailMeshes(c);
+    if (CBZ.cityCars.indexOf(c) < 0) CBZ.cityCars.push(c);
+    return c;
+  };
 
   // a car the player bought / pulled from a garage — owned, full value
   CBZ.citySpawnOwnedCar = function (x, z, modelName) {
@@ -804,7 +857,9 @@
 
   CBZ.cityNearestCar = function (x, z, maxd) {
     let best = null, bd = maxd || 4;
-    for (const c of CBZ.cityCars) { if (c.player) continue; const d = Math.hypot(c.pos.x - x, c.pos.z - z); if (d < bd) { bd = d; best = c; } }
+    // c.dead skip: a sunk (CARS_NO_WATER) or exploded-awaiting-reap wreck must
+    // never offer "Get in"/"Boost it" — you can't drive a dead hull.
+    for (const c of CBZ.cityCars) { if (c.player || c.dead) continue; const d = Math.hypot(c.pos.x - x, c.pos.z - z); if (d < bd) { bd = d; best = c; } }
     return best;
   };
 
@@ -1263,7 +1318,7 @@
       if (car.lane) {                                          // hug the curb (scaled to road width)
         const rd = (CBZ.CITY && CBZ.CITY.road) || 9;
         car.lane = (car.lane < 0 ? -1 : 1) * Math.max(2.2, rd / 2 - 1.5);
-        car.laneIdx = lanesPerDir() - 1;
+        car.laneIdx = lanesPerDir(car.road) - 1;
       }
       car.reckless = false;
     }
@@ -1341,6 +1396,14 @@
       car.stolen = true;
       CBZ.cityCrime && CBZ.cityCrime(60, { x: car.pos.x, z: car.pos.z, type: "gta" });
       if (anyWitness(car.pos.x, car.pos.z, 22)) CBZ.city && CBZ.city.note("🚗 Grand Theft Auto!", 1.6);
+      // EMERGENCY_STEALABLE: boosting a marked unit (police cruiser, ambulance,
+      // fire engine) is instant heat — the force notices its own ride leaving.
+      // cityAddStars is the star API another system publishes; fall back to the
+      // wanted.js floor-to-N call so the stars land either way.
+      if ((car._patrolCar || car._emergency) && (!CBZ.CONFIG || CBZ.CONFIG.EMERGENCY_STEALABLE !== false)) {
+        if (CBZ.cityAddStars) CBZ.cityAddStars(2, "emergency vehicle theft");
+        else if (CBZ.cityForceStars) CBZ.cityForceStars(2);
+      }
     }
     car.v = 0;
     CBZ.playerChar.group.visible = false;
@@ -1716,6 +1779,7 @@
     const d = vehicleDims(car);
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
   }
+  const _sweepPt = { x: 0, y: 0, z: 0 };   // scratch — zero per-call allocation
   function collideVehicle(car) {
     if (!CBZ.collide || !car || !car.pos) return 0;
     // MARINE: a boat out on open water has no buildings/seawall to bump — skip
@@ -1724,8 +1788,37 @@
     // hull sitting at y=0) instead of crunching to a stop at the dock like it
     // hit a building. Still resolves normally over land (a beached/marooned
     // boat, or the moment it noses back toward the quay, behaves like any car).
-    if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) return 0;
+    if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) {
+      car._sweepX = car.pos.x; car._sweepZ = car.pos.z;   // keep the sweep anchor fresh over water
+      return 0;
+    }
     const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
+    // ---- ANTI-TUNNEL SWEEP (VEH_COLLIDE_FIX): every caller integrates
+    // position FIRST and only then depenetrates here, so a frame whose
+    // displacement exceeds the body radius could jump clean over a thin
+    // collider (signal poles, lampposts — 0.5m boxes) with both endpoints
+    // outside it. Walk the segment from the LAST resolved position and stop
+    // the car at the first sample a collider pushes back. Skipped for small
+    // steps (can't tunnel) and huge ones (teleport/spawn/respawn, not motion).
+    if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) {
+      const px0 = car._sweepX, pz0 = car._sweepZ;
+      if (px0 != null) {
+        const sdx = ox - px0, sdz = oz - pz0;
+        const sdist = Math.hypot(sdx, sdz), step = radius * 0.8;
+        if (sdist > step && sdist < 12) {
+          const n = Math.min(8, Math.ceil(sdist / step));
+          for (let i = 1; i < n; i++) {
+            _sweepPt.x = px0 + sdx * (i / n); _sweepPt.z = pz0 + sdz * (i / n); _sweepPt.y = car.pos.y || 0;
+            const sx = _sweepPt.x, sz = _sweepPt.z;
+            CBZ.collide(_sweepPt, radius);
+            if (_sweepPt.x !== sx || _sweepPt.z !== sz) {
+              car.pos.x = _sweepPt.x; car.pos.z = _sweepPt.z;   // hit mid-frame: stop AT the obstacle
+              break;
+            }
+          }
+        }
+      }
+    }
     CBZ.collide(car.pos, radius);
     const d = vehicleDims(car);
     const reach = Math.max(0, d.length * 0.5 - radius * 0.45);
@@ -1738,6 +1831,7 @@
       car.pos.x += probe.x - px;
       car.pos.z += probe.z - pz;
     }
+    car._sweepX = car.pos.x; car._sweepZ = car.pos.z;   // anchor for next frame's sweep
     return Math.hypot(car.pos.x - ox, car.pos.z - oz);
   }
   CBZ.cityCollideVehicle = collideVehicle;
@@ -1754,6 +1848,9 @@
     let throttle = 0;
     if (k["w"]) throttle += 1;
     if (k["s"]) throttle -= 1;
+    // CARS_NO_WATER: a flooded engine takes no throttle (set in the water block
+    // below once the grace window passes — during grace you can reverse out).
+    if (car._flooded && (!CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false)) throttle = 0;
     const handbrake = !!k[" "];   // SPACE = handbrake → break grip and DRIFT
     if (throttle > 0) {
       if (car.v < 0) car.v += D.brake * dt;           // brake out of reverse first
@@ -1860,13 +1957,30 @@
     const rearLoadGrip = 1 - Math.max(-0.22, Math.min(0.3, accelG * 0.18)) - brakeDemand;   // dive/brake steals rear grip
     // Tire force peaks at modest slip, then falls once the tire is sliding. It
     // makes a drift recoverable without the rear snapping unrealistically back.
-    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(0.38, 1 - (slipRatio - 0.18) * 1.75);
+    // DRIVE_FEEL_V2 raises the sliding-tire floor 0.38→0.5 (a fully lit-up
+    // tire still finds half its grip — arcade-GTA recoverability, not ice).
+    const feel2 = !CBZ.CONFIG || CBZ.CONFIG.DRIVE_FEEL_V2 !== false;
+    const slideGrip = slipRatio <= 0.18 ? 1 : Math.max(feel2 ? 0.5 : 0.38, 1 - (slipRatio - 0.18) * 1.75);
     // D.grip already carries SURFACE (asphalt/dirt/sand/snow/rain) and
     // LOCALIZED CORNER DAMAGE (carDynamics folds both in — see surfaceGripMul
     // + cornerGripMul there) — this block only adds the per-frame DYNAMIC
     // terms (weight transfer / friction circle / slip curve) on top.
+    // DRIVE_FEEL_V2 ("driving feels too out of control"):
+    //   • grip floor 0.42 → 1.6: the old floor let a broken-loose car keep its
+    //     slide with a ~1.7s half-life — every clipped corner turned into a
+    //     runaway drift. Slides still happen (steer penalty + power-oversteer)
+    //     but recover in a beat unless the handbrake deliberately holds them.
+    //   • steer-at-speed penalty −2.25 → −1.3, and scaled by the ACTUAL
+    //     steering input: the old gate was `car._steerInput &&` — truthiness
+    //     of an exponentially-decaying float that never re-reaches exactly 0,
+    //     so after your first-ever turn the full penalty applied FOREVER
+    //     (plain straight-line cruising drove on buttered rears).
+    const steerMag = Math.abs(car._steerInput || 0);
+    const steerPen = feel2
+      ? (steerMag > 0.05 && vmag > 8 ? -1.3 * driftMul * Math.min(1, steerMag) : 0)
+      : (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0);
     const gripFactor = handbrake ? 0.75 * D.surfMul
-      : Math.max(0.42, (D.grip * rearLoadGrip + (car._steerInput && vmag > 8 ? -2.25 * driftMul : 0) - power) * slideGrip);
+      : Math.max(feel2 ? 1.6 : 0.42, (D.grip * rearLoadGrip + steerPen - power) * slideGrip);
     const latKeep = handbrake ? Math.min(0.95, 0.9 + driftMul * 0.02 + (1 - D.surfMul) * 0.5) : Math.max(0, 1 - gripFactor * dt);
     latX *= latKeep; latZ *= latKeep;
     const velX = fwdX * car.v + latX, velZ = fwdZ * car.v + latZ;
@@ -2062,9 +2176,43 @@
     // ride at the water surface instead of the flat car-height y=0 (this
     // engine has no terrain-following suspension — every car sits at y=0 — so
     // this is the one place a vehicle's Y ever moves off it).
-    const marine = isMarineCar(car) && overWater(car.pos.x, car.pos.z);
-    if (!marine && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
-    car.group.position.set(car.pos.x, marine ? WATER_Y : 0, car.pos.z);
+    const onWater = overWater(car.pos.x, car.pos.z);
+    const marine = isMarineCar(car) && onWater;
+    // ---- CARS_NO_WATER: a road car is not a boat. Past a grace window (a
+    // quick nose-dip can still reverse straight back out), open water floods
+    // the engine: throttle dies (cut at the top of this loop), all momentum
+    // hard-decays, the hull visibly SINKS, and after a beat the driver bails
+    // into a swim (swim.js owns the water the frame P.driving turns false).
+    // The drowned hull is marked dead — never enterable, never smoking (the
+    // damage stager returns on dead, so no underwater fire/explosion).
+    const noWater = !CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false;
+    let sinkY = 0;
+    if (noWater && !marine && onWater) {
+      const GRACE = 0.35, SINK_T = 2.2, BAIL = 1.3, DEPTH = -1.6;
+      car._waterT = (car._waterT || 0) + dt;
+      if (car._waterT > GRACE) {
+        car._flooded = true;
+        const dec = Math.pow(0.05, dt);
+        car.v *= dec; car.vx *= dec; car.vz *= dec;
+        sinkY = DEPTH * Math.min(1, (car._waterT - GRACE) / SINK_T);
+        if (CBZ.carAudio && !car._engineCutNoted) { car._engineCutNoted = true; CBZ.carAudio.stop(); CBZ.city && CBZ.city.note("🌊 Engine flooded!", 1.4); }
+        if (car._waterT > GRACE + BAIL) {
+          // driver bails: the car is a drowned wreck for good
+          car.dead = true;
+          car.group.position.set(car.pos.x, sinkY, car.pos.z);
+          CBZ.cityExitVehicle();
+          CBZ.city && CBZ.city.note("The car went under — swim!", 2.0);
+          return;
+        }
+      }
+    } else if (car._waterT) { car._waterT = 0; car._flooded = false; car._engineCutNoted = false; }
+    // clampToCity would yank a car back ashore the moment it's over water —
+    // resetting the grace timer every frame and making the flood unreachable
+    // (clamp's land union sits strictly INSIDE cityWaterAt's, so a clamped car
+    // can never stand on oracle-water). Once over water, the water mechanic
+    // owns the position: sink where you swamped, don't teleport to the quay.
+    if (!marine && !(noWater && onWater) && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
+    car.group.position.set(car.pos.x, marine ? WATER_Y : sinkY, car.pos.z);
     car.group.rotation.set(car._pitch || 0, car.heading, car._roll || 0);   // y=heading, x/z = weight-transfer lean
     if (vmag > 6) runOver(car, vmag);
     P.pos.set(car.pos.x, 0, car.pos.z);
@@ -2564,6 +2712,14 @@
         c.pos.x += c.vx * dt; c.pos.z += c.vz * dt;
         const pushed = collideVehicle(c);
         if (A.clampToCity) A.clampToCity(c.pos, wallRadius(c));
+        // CARS_NO_WATER: a spun-out AI car that slides past a region gap onto
+        // open water doesn't float at y=0 forever — it drowns where it stopped.
+        if ((!CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false) && overWater(c.pos.x, c.pos.z)) {
+          c.dead = true; c.abandoned = true; c.ai = false;
+          if (c.npcDriver) ejectNpcDriver(c);
+          c.group.position.set(c.pos.x, -1.1, c.pos.z);
+          continue;
+        }
         // slammed a building / lamppost mid-spin: crumple the car (the structure
         // only sheds some glass), and a fast hit kills whoever's driving.
         if (pushed > 0.05 && c.v > 11) {
@@ -2714,7 +2870,7 @@
       // their lane this frame. WHY: right-hand driving is the law of the road;
       // recklessness is the deviation ON TOP, not the default.
       if (!c.reckless && (c._rageT || 0) <= 0 && !c.turning && !c.pullover && !c.roadRageTarget) {
-        const want = laneOffset(c.dirSign, c.laneIdx != null ? c.laneIdx : 0);
+        const want = laneOffset(r, c.dirSign, c.laneIdx != null ? c.laneIdx : 0);
         if (c.lane * want < 0 || Math.abs(c.lane) < 0.2) c.lane = want;   // crossed over (or zeroed) → back to the right
       }
       const latWant = c.lane + sway;
@@ -2786,6 +2942,20 @@
       if (c.pullover === 4) {
         const cop = copNear(c.pos.x, c.pos.z, 3.2);
         if (cop) busted(c);
+      }
+
+      // VEH_COLLIDE_FIX: walls are walls for AI traffic too. Ordinary lane-
+      // following historically never consulted CBZ.colliders at all — the lane
+      // math kept cars clear of buildings only as long as nothing (a botched
+      // turn restore, a resolveCars shove, a prop dropped in the road) pushed
+      // them off the centerline; then they clipped straight through geometry
+      // with zero reaction. Near the camera (where it's visible) resolve the
+      // hull like every driven car; a real push bleeds speed so the car reads
+      // as having hit the thing, and the lane-keep above steers it back out.
+      if ((!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) &&
+          (_cdx * _cdx + _cdz * _cdz) < 110 * 110 && c.v > 0.5) {
+        const pushedAI = collideVehicle(c);
+        if (pushedAI > 0.04) c.v *= Math.max(0.25, 1 - pushedAI * 2);
       }
 
       c.group.position.set(c.pos.x, 0, c.pos.z);
@@ -2882,7 +3052,7 @@
     if (road.len / 2 - intAlong * newDir < 30) newDir = -newDir;
     // keep the car's lane INDEX through the turn → its offset on the new road.
     const idx = c.laneIdx != null ? c.laneIdx : 0;
-    const newLane = laneOffset(newDir, idx);
+    const newLane = laneOffset(road, newDir, idx);
     const lead = A.ROAD / 2 + 1.2;
 
     // P0: where we are now, snapped onto the current lane's lateral line

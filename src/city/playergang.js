@@ -124,7 +124,7 @@
       const pip = rankPip(ped.rank);
       const txt = (ped.name || "Crew") + (pip && pip !== "Soldier" ? " · " + pip : (ped.rank === "soldier" ? " · Soldier" : ""));
       const lbl = CBZ.makeLabelSprite(txt, { color: hex6(color) });
-      lbl.position.y = ped.tag.position.y || 3.0; lbl.scale.copy(ped.tag.scale);
+      lbl.position.y = ped.tag.position.y || (CBZ.charHeadY ? CBZ.charHeadY(ped.char) : 1.97); lbl.scale.copy(ped.tag.scale);
       if (ped.tag.parent) ped.tag.parent.remove(ped.tag);
       ped.char.group.add(lbl); ped.tag = lbl; ped.tag.visible = false;
     }

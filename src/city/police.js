@@ -635,7 +635,7 @@
     // when .tag is null), so it must exist — nulling it removed the level tag
     // entirely (regression). LOD toggles its visibility below.
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(swat ? "SWAT" : "POLICE", { color: "#7fd0ff" }) : null;
-    if (tag) { tag.position.y = 3.0; tag.scale.set(2.6, 0.7, 1); ch.group.add(tag); }
+    if (tag) { tag.position.y = 1.97; tag.scale.set(2.2, 0.55, 1); ch.group.add(tag); }   // ~rig head (1.82m × HUMAN_SCALE) + margin; tag sits on the UNSCALED group, was 2.12 for the old 2.6m rig
     const cop = {
       char: ch, group: ch.group, pos: ch.group.position, name: swat ? "SWAT" : "Officer",
       // hp TRIMMED (swat 160→120, cop 110→90): durability now has a VISIBLE
@@ -1204,8 +1204,8 @@
     const r = nearestRoadSeg(A, p.x, p.z); if (!r) return null;
     const dir = (p.vertical != null ? p.vertical : r.vertical) ? (rng() < 0.5 ? 1 : -1)
                                                                : (rng() < 0.5 ? 1 : -1);
-    const laneIdx = (rng() * lanesPerDirP()) | 0;
-    const lane = dir * laneWidthP() * (laneIdx + 0.5);
+    const laneIdx = (rng() * lanesPerDirP(r)) | 0;
+    const lane = laneCenterP(r, dir, laneIdx);
     const along = (rng() - 0.5) * Math.min(r.len * 0.8, 120);
     const x = r.vertical ? r.x + lane : r.x + along;
     const z = r.vertical ? r.z + along : r.z + lane;
@@ -1243,10 +1243,14 @@
     const cap = patrolCap();
     if (_patrolCars.length < cap) spawnPatrolCar(A);        // one per maintain beat (1.1s) — eases them in
   }
-  // local lane geometry mirrors (vehicles.js/traffic.js use the same CBZ.CITY.traf)
+  // local lane geometry mirrors (vehicles.js/traffic.js use the same CBZ.CITY.traf).
+  // ROAD-AWARE: lanesPerDirP(r) / laneCenterP(r,dir,idx) read the road's real
+  // cross-section (3+3 + median) via CBZ.roadLanes; guard-called fallback keeps
+  // the old global-2-lane math for roads with no per-road data.
   function TRP() { return (CBZ.CITY && CBZ.CITY.traf) || {}; }
-  function lanesPerDirP() { return Math.max(1, (TRP().lanesPerDir != null ? TRP().lanesPerDir : 2) | 0); }
+  function lanesPerDirP(r) { return CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TRP().lanesPerDir != null ? TRP().lanesPerDir : 2) | 0); }
   function laneWidthP() { return TRP().laneW != null ? TRP().laneW : 3.6; }
+  function laneCenterP(r, dir, idx) { return CBZ.roadLaneCenter ? CBZ.roadLaneCenter(r, dir, idx) : dir * laneWidthP() * (idx + 0.5); }
   // reset hook: clear the registry on a fresh run (the cars themselves are
   // disposed by vehicles.js clearCars). Called from clearCityCops.
   function patrolCarsReset() { for (const c of _patrolCars) if (c) c._patrolCar = false; _patrolCars.length = 0; }
@@ -1333,7 +1337,7 @@
     if (!pt || Math.hypot(pt.x - P.pos.x, pt.z - P.pos.z) > 130) return;   // nothing near this beat — retry next
     const r = nearestRoadSeg(A, pt.x, pt.z); if (!r) return;
     const dir = rng() < 0.5 ? 1 : -1;
-    const lane = dir * laneWidthP() * ((lanesPerDirP() - 1) + 0.5);   // curb lane
+    const lane = laneCenterP(r, dir, lanesPerDirP(r) - 1);   // curb (outer) lane
     const half = (r.len || 0) / 2;
     const along = Math.max(-half * 0.8, Math.min(half * 0.8, r.vertical ? pt.z - r.z : pt.x - r.x));
     const x = r.vertical ? r.x + lane : r.x + along;

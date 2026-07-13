@@ -32,13 +32,15 @@ var mat=CBZ.cmat||CBZ.mat;
 if(!mat||typeof CBZ.addLandmass!=="function"||typeof CBZ.onUpdate!=="function")return;
 
 // ---------------------------------------------------------------- footprint
-var CX=820, CZ=-560, R=120;      // arena island (open water NE of city; clear
-                                 // of speedway 470,-330 r200, annex 348,-700,
-                                 // desert x[670..1430] z[-320..280])
+// Dedicated island in the open channel between Mercy, Commerce and Coyle.
+// The former (820,-560) footprint was 62% inside Coyle Valley, so two land
+// surfaces and their buildings occupied the same physical space.
+var CX=640, CZ=-950, R=120;
+var CW_X0=482, CW_X1=CX-R+7, CW_CX=(CW_X0+CW_X1)/2;
 var PY=1.1;                      // plaza (octagon deck) top height
-var RX=788, RZ=CZ, RY=PY+0.9;    // boxing ring centre + canvas height
-var CGX=852, CGZ=CZ, CGY=PY+0.5; // MMA cage centre + mat height
-var PX=820, PZ=CZ+54, PITY=PY-0.5; // beast pit centre + sand height (sunken)
+var RX=CX-32, RZ=CZ, RY=PY+0.9;    // boxing ring centre + canvas height
+var CGX=CX+32, CGZ=CZ, CGY=PY+0.5; // MMA cage centre + mat height
+var PX=CX, PZ=CZ+54, PITY=PY-0.5; // beast pit centre + sand height (sunken)
 
 var arenaRoot=null;
 var redCh=null, blueCh=null, refCh=null;
@@ -80,14 +82,14 @@ CBZ.addLandmass(function(city){
   island.position.set(CX,-2.8,CZ); root.add(island);
 
   var concrete=[];
-  concrete.push({x:679,y:-0.15,z:CZ,sx:56,sy:1.2,sz:16});          // causeway deck
-  concrete.push({x:679,y:0.75,z:CZ-7.6,sx:56,sy:0.7,sz:0.5});      // rails
-  concrete.push({x:679,y:0.75,z:CZ+7.6,sx:56,sy:0.7,sz:0.5});
+  concrete.push({x:CW_CX,y:-0.15,z:CZ,sx:CW_X1-CW_X0,sy:1.2,sz:16});          // causeway deck
+  concrete.push({x:CW_CX,y:0.75,z:CZ-7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});      // rails
+  concrete.push({x:CW_CX,y:0.75,z:CZ+7.6,sx:CW_X1-CW_X0,sy:0.7,sz:0.5});
 
   // ---- raised octagonal plaza (the arena floor)
   var plaza=new THREE.Mesh(new THREE.CylinderGeometry(70,74,0.9,8),mat(0x84888f));
   plaza.rotation.y=Math.PI/8; plaza.position.set(CX,PY-0.45,CZ); root.add(plaza);
-  concrete.push({x:712,y:PY-0.6,z:CZ,sx:18,sy:0.6,sz:12});         // entry ramp
+  concrete.push({x:CX-R+12,y:PY-0.6,z:CZ,sx:18,sy:0.6,sz:12});         // entry ramp
 
   // ---- BOXING RING -------------------------------------------------------
   var plat=new THREE.Mesh(unitBox,mat(0x3a3f4a));
@@ -184,8 +186,8 @@ CBZ.addLandmass(function(city){
     heads.push({x:fx,y:PY+26.4,z:fz,sx:4.6,sy:1.8,sz:1.8,ry:-fa+Math.PI/2});
   }
   // sign posts
-  dark.push({x:704,y:PY+7,z:CZ-6,sx:0.7,sy:14,sz:0.7});
-  dark.push({x:704,y:PY+7,z:CZ+6,sx:0.7,sy:14,sz:0.7});
+  dark.push({x:CX-R+4,y:PY+7,z:CZ-6,sx:0.7,sy:14,sz:0.7});
+  dark.push({x:CX-R+4,y:PY+7,z:CZ+6,sx:0.7,sy:14,sz:0.7});
 
   instBoxes(concrete,mat(0x9094a0));
   instBoxes(gold,mat(0xd8a020));
@@ -223,7 +225,7 @@ CBZ.addLandmass(function(city){
         var tex=new THREE.CanvasTexture(cv);
         var sign=new THREE.Mesh(new THREE.PlaneGeometry(28,5.3),
           new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide}));
-        sign.position.set(704,PY+15.2,CZ); sign.rotation.y=-Math.PI/2;
+        sign.position.set(CX-R+4,PY+15.2,CZ); sign.rotation.y=-Math.PI/2;
         root.add(sign);
       }
     }catch(e){}
@@ -245,7 +247,7 @@ CBZ.addLandmass(function(city){
     CBZ.registerCityRegion(city,{name:"Ironjaw Arena",subtitle:"Fight Complex",biome:"arena",
       kind:"circle",cx:CX,cz:CZ,r:R,pad:6});
     CBZ.registerCityRegion(city,{name:"Ironjaw Causeway",subtitle:"Arena Approach",biome:"arena",
-      kind:"rect",minX:651,maxX:707,minZ:CZ-10,maxZ:CZ+10,cx:679,cz:CZ,pad:4});
+      kind:"rect",minX:CW_X0,maxX:CW_X1,minZ:CZ-10,maxZ:CZ+10,cx:CW_CX,cz:CZ,pad:4});
   }
   return null;
 },40);

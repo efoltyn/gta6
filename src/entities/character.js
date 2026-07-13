@@ -84,6 +84,24 @@
 
   function makeCharacter(c) {
     const g = new THREE.Group();
+    // Keep the world/physics root at scale 1: ragdoll, KO, child rigs and mode
+    // reset code legitimately animate `group.scale`. The authored voxel model
+    // lives under a stable metre conversion node, so those systems compose with
+    // the 1.82m body instead of accidentally erasing the conversion.
+    const model = new THREE.Group();
+    // HUMAN-RATIO PASS (owner: "make ratios right to human size"). The authored
+    // voxel rig is ~2.60u tall; render it at HUMAN_SCALE so an adult stands
+    // ~1.82m beside the real-scaled cars/aircraft (audit: player was 4.65u, TALLER
+    // than the parked fighter jet). One-line revert: CBZ.CONFIG.CHAR_SCALE_REAL=false
+    // restores the legacy 2.60u rig. The eye/camera/aim/hit/mount constants are
+    // co-tuned for the ON path (fpsmode eye 1.65, camera pivot 1.7, hit HEAD_Y 1.50,
+    // combat aim ~1.5–1.8) — a full revert flips them back too; see the report.
+    const charReal = !CBZ.CONFIG || CBZ.CONFIG.CHAR_SCALE_REAL !== false;
+    const humanScale = !charReal ? 1.0 : ((CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70);
+    model.name = "character-model";
+    model.userData.characterModel = true;
+    g.userData.humanScale = humanScale;
+    g.add(model);
 
     // ---- BUILD param (c.build: "m" default | "f") -----------------------
     // A single boolean gate read at every dimension below. Every fem-only
@@ -96,6 +114,12 @@
     // pivots slightly; it does not restructure the rig — no part is
     // renamed or added/removed except the optional long-hair mesh below.
     const fem = c.build === "f";
+    const metric = {
+      height: 2.60 * humanScale * (fem ? 0.97 : 1),
+      width: (fem ? 1.34 : 1.54) * humanScale,
+      depth: 0.70 * humanScale,
+    };
+    g.userData.characterMetric = metric;
 
     // ---- legs (children of root: feet stay planted) ----
     const legW = fem ? 0.30 : 0.34;
@@ -103,7 +127,7 @@
     const ll = limb(legW, LEG_UP, LEG_LO, legW, c.legs, c.shoes, 0.2);
     const rl = limb(legW, LEG_UP, LEG_LO, legW, c.legs, c.shoes, 0.2);
     ll.position.set(-hipX, 0.95, 0); rl.position.set(hipX, 0.95, 0);
-    g.add(ll, rl);
+    model.add(ll, rl);
 
     // subtle overall height trim for fem builds. Safe for foot-planting:
     // the legs are the ONLY thing that reaches this group's local y=0
@@ -111,12 +135,12 @@
     // scaling g.scale.y multiplies every child's local y by the same
     // factor about that same local origin — a point already at y=0 stays
     // at y=0 regardless of scale, so feet neither sink nor float.
-    if (fem) g.scale.y = 0.97;
+    model.scale.set(humanScale, humanScale * (fem ? 0.97 : 1), humanScale);
 
     // ---- body (everything above the hips) ----
     const body = new THREE.Group();
     body.position.y = 0; // bob/sway/lean applied here
-    g.add(body);
+    model.add(body);
 
     const torso = new THREE.Mesh(boxGeom(fem ? 0.78 : 0.92, 0.95, fem ? 0.44 : 0.5), cmat(c.torso));
     torso.position.y = 1.42; torso.castShadow = torso.receiveShadow = true;
@@ -234,7 +258,7 @@
     tagCloth(rl.userData.lower, [0.31, LEG_LO + 0.06, 0.31], [0, (LEG_LO + 0.06) / 0.95]);
 
     const rig = {
-      group: g, body, neck, head,
+      group: g, model, metric, body, neck, head,
       parts: { ll, rl, la, ra },
       low: { ll: ll.userData.low, rl: rl.userData.low, la: la.userData.low, ra: ra.userData.low },
       sockets: { leftHand, rightHand, weapon: rightHand, thirdPersonWeapon },
@@ -281,6 +305,18 @@
   }
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
+  // Shared by full character rigs and the instanced jail crowd. Phase is in
+  // radians; PI radians is one alternating footfall. Distance, not frame count,
+  // owns cadence so a metre travelled looks the same at every refresh rate.
+  function gaitPhaseDelta(speed, dt, walkRef) {
+    walkRef = walkRef || ((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4);
+    const moving = speed > 0.2;
+    const norm = Math.min(speed / walkRef, 1);
+    const run = clamp01((speed - walkRef) / (walkRef * 0.7));
+    const stepLen = 1.15 + 0.10 * norm + 0.55 * run;
+    return moving ? (speed * dt / stepLen) * Math.PI : dt * 0.9;
+  }
+
   /* ---- the layered animation update ----
      speed: current planar speed (units/s). dt: seconds.
 
@@ -320,10 +356,14 @@
       return;   // seated pose owns the whole rig
     }
 
-    // gait advances with DISTANCE TRAVELLED, not a wall clock — one stride per
-    // STRIDE_LEN metres so feet plant instead of sliding (see git history).
-    const STRIDE_LEN = 1.15;
-    ch.phase += dt * 0.9 + (speed * dt) / STRIDE_LEN;
+    // Gait advances with DISTANCE TRAVELLED, not frame count. `phase` is an
+    // angle in radians and alternate footfalls are PI radians apart. The old
+    // code added distance/stepLength directly, accidentally treating ONE
+    // radian as a complete step. Its distance term alone implied ~3.6m between
+    // footfalls, which made every actor read as a slow-motion jogger at full FPS.
+    // Convert travelled steps to radians, and lengthen the step modestly as a
+    // run opens up so sprint cadence stays quick without turning into a buzz.
+    ch.phase += gaitPhaseDelta(speed, dt, walkRef);
     const sinP = Math.sin(ch.phase), cosP = Math.cos(ch.phase);
     // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
     // not the old whole-group scale.y accordion squash. cb eases 0→1 so
@@ -424,9 +464,27 @@
       // (rotation.y / position.z stay owned by the !aimingPose reset below.)
       const cr = 12;
       const carryBob = moving ? swing * 0.10 : Math.sin(ch.breath * 2.2) * 0.02;
-      ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.55 + carryBob, cr, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.14, cr, dt);   // slight tuck across the hip
-      setElbow(J.ra, -0.42, cr);                       // forearm angles the gun down-forward
+      if (ch.aimLong === false) {
+        // PISTOL carry (screenshot-diagnosed): the tucked across-the-hip arm
+        // hid a holstered-size gun completely behind the torso from the chase
+        // camera. Sidearms hang LOW BESIDE the thigh instead — arm nearly
+        // straight, hand pushed just clear of the leg so the gun silhouettes
+        // against the ground from behind (GTA/Fortnite pistol walk).
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.18 + carryBob * 0.5, cr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.16, cr, dt);  // out from the thigh
+        setElbow(J.ra, -0.12, cr);
+      } else {
+        // LONG-GUN carry (screenshot-diagnosed, round 2): the old tuck-across-
+        // the-hip (rotation.z -0.14) parked the gun-hand at the body's CENTRE,
+        // so the whole rifle's AABB fell INSIDE the torso box and rendered as
+        // nothing from the chase cam (owner: "can't see the drawn gun in hand").
+        // Push the gun-hand OUT beside the right thigh — same fix that made the
+        // pistol carry read — so the rifle's mass clears the torso silhouette;
+        // holsterprops.js then hangs the barrel down-forward-right past the leg.
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.30 + carryBob * 0.7, cr, dt);
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.20, cr, dt);   // OUT from the thigh (was -0.14 tuck-in → rifle buried in the body)
+        setElbow(J.ra, -0.34, cr);                       // forearm angles the gun down-forward
+      }
       const armAmp = hipAmp * (0.95 + 0.25 * run2);
       const laTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
@@ -919,6 +977,7 @@
 
   CBZ.makeCharacter = makeCharacter;
   CBZ.animChar = animChar;
+  CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;
   CBZ.charMounts = charMounts;
   CBZ.lerpAngle = lerpAngle;

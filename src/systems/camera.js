@@ -670,7 +670,9 @@
 
     // ---- INTRO: far push-in, then orbit 180 degrees at the final zoom ----
     if (introT > 0) {
-      introT -= dt;
+      // Cinematic duration is presentation time, not the bounded world clock;
+      // a low frame rate must not turn the 3.55s arrival into a 14s lockout.
+      introT -= (CBZ.wallDt != null ? CBZ.wallDt : fdt);
       const p = 1 - introT / INTRO;
       const introDist = Math.min(camDist, 7.6);
       const frontPitch = Math.max(cam.pitch, 0.18);

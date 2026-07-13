@@ -277,6 +277,27 @@
   }
 
   function makeHelicopter() {
+    // OWNER FIX ("the start-of-game helicopter isn't even the same looking
+    // helicopter we have in the game"): the prologue/insertion transport now
+    // reuses the EXACT in-game personal-chopper airframe (playerair.js's
+    // builder, exposed on CBZ.debugBuildPlayerAir) — one helicopter design
+    // across the whole game. Wrapped in an outer group whose origin sits at
+    // skid-bottom level, matching the old box model's ground contract, so
+    // every existing position.set/landing offset keeps working unchanged.
+    if (CBZ.debugBuildPlayerAir && CBZ.debugBuildPlayerAir.chopper) {
+      try {
+        const inner = CBZ.debugBuildPlayerAir.chopper();
+        if (inner) {
+          const group = new THREE.Group();
+          inner.position.y = 1.05;                 // skid bottoms → outer origin
+          group.add(inner);
+          group.userData.rotor = inner.userData.rotor;
+          group.userData.trotor = inner.userData.trotor;
+          return group;
+        }
+      } catch (e) {}
+    }
+    // fallback: the legacy box stand-in (only if playerair.js failed to load)
     const group = new THREE.Group();
     box(group, 0, 1.25, 0.6, 3.2, 2.0, 5.2, 0x202a34);
     box(group, 0, 1.45, -3.2, 0.75, 0.75, 4.0, 0x26313b);
@@ -644,6 +665,8 @@
     R.t += dt;
     const rotor = R.helicopter.userData.rotor;
     if (rotor) rotor.rotation.y += dt * 17;
+    const trotor = R.helicopter.userData.trotor;
+    if (trotor) trotor.rotation.x += dt * 26;
     if (R.t < 3.4) {
       const q = Math.min(1, R.t / 3.4);
       const ease = q * q * (3 - 2 * q);
@@ -813,6 +836,8 @@
     R.t += dt;
     const rotor = R.helicopter.userData.rotor;
     if (rotor) rotor.rotation.y += dt * 18;
+    const trotor = R.helicopter.userData.trotor;
+    if (trotor) trotor.rotation.x += dt * 28;
     const duration = 4.2;
     if (R.t < duration) {
       const q = Math.min(1, R.t / duration);

@@ -244,7 +244,9 @@
       // top-right stack — dropped to top:54px so it never collides with the
       // takeover meta bar (turf.js #cTurfMeta sits at top:6px, ~48px tall).
       // The whole column idles at chrome opacity; money lifts on change.
-      "<div style='position:absolute;top:54px;right:var(--hud-pad-r);text-align:right;max-width:248px'>" +
+      // #cTopRight: named so css/campaign.css can exempt the WANTED star meter
+      // from the campaign declutter (the stars live in this column).
+      "<div id='cTopRight' style='position:absolute;top:54px;right:var(--hud-pad-r);text-align:right;max-width:248px'>" +
       "  <div class='cPop oM' id='cPop' style='display:none'><span class='dot'></span><b id='cPopN'>0</b><span class='tot' id='cPopTot'></span></div>" +
       "  <div style='position:relative;display:inline-block;margin-top:6px'>" +
       "    <div id='cMoney' class='oC' style='font-size:32px;font-weight:700;color:var(--money);text-shadow:0 2px 0 #1f5a2a,0 0 14px rgba(126,217,87,.35)'>$0</div>" +
@@ -675,7 +677,10 @@
     const sc = (W / 2) / R, cx = W / 2, cy = H / 2;
     const px = P.pos.x, pz = P.pos.z;
     const g = CBZ.game, now = CBZ.now || 0;
-    const wanted = (g && g.wanted) || 0;
+    // wanted stars through the public accessor when present (guard-called — the
+    // wanted system owns it); falls back to game.wanted. MAP_V2 default-on.
+    let wanted = (g && g.wanted) || 0;
+    try { if (CBZ.cityStars) wanted = CBZ.cityStars() | 0; } catch (e) {}
     const pulse = 0.5 + 0.5 * Math.sin(now * 6);
     // heading-up rotation: rotMap === camera yaw makes the player's forward
     // point to screen-up (derivation in commit msg). Blips rotate as POINTS in
@@ -828,6 +833,29 @@
     function tri(x, y, col, r) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.9, y + r * 0.7); ctx.lineTo(x - r * 0.9, y + r * 0.7); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1; ctx.stroke(); }
     function diamond(x, y, col, r) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1; ctx.stroke(); }
 
+    // ---- NOTABLE POIs near you (MAP_V2): mirrors the full map's icon language
+    //      so the radar answers "what's around me" — casinos/banks/hospital/
+    //      guns/gas/civic/venues as small trade-coloured diamonds (the same
+    //      CBZ.fullMap.poi palette). Ordinary shops stay OFF the radar (they're
+    //      the [M] map's job) so the instrument doesn't turn to measles. ----
+    const MAPV2 = !CBZ.CONFIG || CBZ.CONFIG.MAP_V2 !== false;
+    const NOTABLE = { casino: 1, bank: 1, hospital: 1, guns: 1, gas: 1, cityhall: 1, transit: 1, arena: 1, raceway: 1, racepark: 1, airfield: 1 };
+    const poiFn = CBZ.fullMap && CBZ.fullMap.poi;
+    if (MAPV2 && poiFn) {
+      const shopLots = (A.shopLots && A.shopLots.length) ? A.shopLots : A.lots;
+      for (const lot of shopLots || []) {
+        if (!lot || !lot.building) continue;
+        const k = (lot.building.shop && lot.building.shop.kind) || lot.kind;
+        const info = poiFn(lot);
+        if (!info || !(info.key || k === "casino" || NOTABLE[k])) continue;
+        const dx = lot.cx - px, dz = lot.cz - pz; if (dx * dx + dz * dz > R2) continue;
+        S(lot.cx, lot.cz);
+        const big = info.key || k === "casino";
+        diamond(_p[0], _p[1], info.color, big ? 3.6 : 2.6);
+        if (k === "casino") { ctx.strokeStyle = "rgba(201,162,39,.9)"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(_p[0], _p[1], 5.2, 0, 6.28); ctx.stroke(); }
+      }
+    }
+
     // ---- crew HQ stars (rivals) — quiet anchors, only when near ----
     if (CBZ.cityGangs) for (const gang of CBZ.cityGangs) {
       if (!gang || gang.isPlayer || gang.absorbed) continue;
@@ -908,6 +936,14 @@
     ctx.fillStyle = "#ff6b6b"; ctx.font = "bold 10px Fredoka,sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText("N", nx, ny);
 
+    // ---- WANTED STARS (MAP_V2): a compact gold row pinned to the TOP of the
+    //      instrument — only ever drawn when wanted > 0, so 0★ leaves the radar
+    //      clean. Fixed at screen-top (not rotated) so the heat read is instant.
+    if (MAPV2 && wanted > 0) {
+      const gap = 9, x0 = cx - ((wanted - 1) * gap) / 2, sy = 13;
+      for (let i = 0; i < wanted; i++) radarStar(ctx, x0 + i * gap, sy, 3.6, "#ffd451");
+    }
+
     // ---- PLAYER: a fixed up-pointing chevron at centre + a translucent VIEW CONE
     //      so "where I am AND what I'm looking at" is unmistakable. Up === forward. ----
     ctx.save();
@@ -937,6 +973,14 @@
   }
   function ringMark(ctx, x, y, col, r) { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r || 5, 0, 6.28); ctx.stroke(); }
   function markStar(ctx, x, y, col, r) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r || 4, 0, 6.28); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1; ctx.stroke(); }
+  // 5-point wanted star for the radar's heat row
+  function radarStar(ctx, cx, cy, r, col) {
+    ctx.save(); ctx.shadowColor = "rgba(255,190,60,.85)"; ctx.shadowBlur = 4;
+    ctx.fillStyle = col; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.44 : r; const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
 
   CBZ.cityHudDirty = function () { dirty = true; };
 

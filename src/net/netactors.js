@@ -51,7 +51,7 @@
     const tagText = R.name + (roleName && roleName !== "civ" ? " · " + roleName.toUpperCase() : "");
     if (CBZ.makeLabelSprite) {
       R.tag = CBZ.makeLabelSprite(tagText, { color: s.color });
-      R.tag.position.y = 3.05;
+      R.tag.position.y = CBZ.charHeadY ? CBZ.charHeadY(ch) : 1.97;   // just above head (post HUMAN_SCALE), was 3.05 for the 2.6u rig
       R.tag.scale.set(3.4, 0.85, 1);
       ch.group.add(R.tag);
     }
@@ -106,7 +106,7 @@
   CBZ.netSetSpeaking = function (R, on) {
     if (on && !R.speakTag && R.group && CBZ.makeLabelSprite) {
       R.speakTag = CBZ.makeLabelSprite("🔊", { color: "#7fe0a0" });
-      R.speakTag.position.y = 3.7;
+      R.speakTag.position.y = CBZ.charHeadY ? CBZ.charHeadY(R) : 1.97;
       R.speakTag.scale.set(0.9, 0.9, 1);
       R.group.add(R.speakTag);
     }

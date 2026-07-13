@@ -247,6 +247,12 @@
   let fleetRoot = null;    // the arena root the fleet was built into
   let clock = 0;
 
+  // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots ----
+  CBZ.debugBuildAirTraffic = {
+    plane: function (c) { return buildGAPlane(accent(c != null ? c : GA_ACCENTS[0])); },
+    heli: function (c) { return buildLightHeli(accent(c != null ? c : HELI_BODIES[0])); },
+  };
+
   function arenaRoot() {
     const a = CBZ.city && CBZ.city.arena;
     return a ? a.root : null;
@@ -294,6 +300,7 @@
     fleetRoot = null;
   }
   CBZ.cityClearAirTraffic = teardown;
+  CBZ.cityAirTrafficList = function () { return fleet ? fleet.slice() : []; };
 
   CBZ.onUpdate(42.7, function (dt) {
     if (g.mode !== "city" || (CBZ.CONFIG && CBZ.CONFIG.AIR_TRAFFIC_AMBIENT === false)) {

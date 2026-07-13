@@ -423,7 +423,7 @@
     };
     if (CBZ.makeLabelSprite) {
       P.tag = CBZ.makeLabelSprite(info.nm, { color: cop ? "#9fc3ff" : "#e7ecf6" });
-      P.tag.position.y = 3.0; P.tag.scale.set(2.6, 0.65, 1); P.tag.visible = false;
+      P.tag.position.y = CBZ.charHeadY ? CBZ.charHeadY(ch) : 1.97; P.tag.scale.set(2.6, 0.65, 1); P.tag.visible = false;
       ch.group.add(P.tag);
     }
     const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;

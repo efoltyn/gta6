@@ -73,15 +73,6 @@
     return m;
   }
 
-  // a buyable owner stamp matching buildings.js stampOwner, for the skyline
-  // tower lots the placer hand-adds (so they SELL like every other lot).
-  const TOWER_OWNERS = ["Apex Holdings", "Meridian Estates", "Skyline Group", "V. Castellano",
-    "Crownpoint LLC", "Harborline Trust", "Northgate Capital", "T. Okonkwo"];
-  function stampTowerOwner(b, seed) {
-    const nm = TOWER_OWNERS[(seed >>> 3) % TOWER_OWNERS.length];
-    b.owner = { type: "landlord", id: null, name: nm, buyable: true, _acct: { cash: 1200 + (b.storeys || 1) * 120 } };
-  }
-
   // ---- build ONE mini-city from a placement record + its template -----------
   function buildMiniCity(city, place) {
     const tpl = CBZ.CITY_TEMPLATES && CBZ.CITY_TEMPLATES[place.id];
@@ -102,62 +93,12 @@
     const town = CBZ.buildTown(root, Object.assign({}, tpl, {
       cx: cx, cz: cz, rng: rng, region: rect,
       name: tpl.name, district: place.id,
+      // towngen chooses central skyline lots before it creates geometry. This
+      // replaces the former post-build pass that constructed a second shell at
+      // the exact same lot centre and guaranteed interpenetrating buildings.
+      integratedSkyline: true,
     }));
     if (!town) return;
-
-    // (d) SKYLINE — pick the most-CENTRAL few built lots and raise TALL towers so
-    //     the city has a real silhouette. Heights come from template.skyline and
-    //     are CAPPED under the mainland core (CH3/CH6: maxStoreys < Midtown 20+),
-    //     so the main downtown always reads as THE downtown. The central lot may
-    //     get a taller "mega-ish" spire (reuse cityMakeBuilding — NOT the mainland
-    //     singleton cityMegaTower). Each new tower lot is owner-stamped so it sells.
-    const sky = tpl.skyline || {};
-    const mk = CBZ.cityMakeBuilding;
-    if (mk && town.lots && town.lots.length) {
-      // sort built lots by distance from the town centre (closest first)
-      const byCentre = town.lots.slice().sort(function (a, b) {
-        return (Math.hypot(a.cx - cx, a.cz - cz)) - (Math.hypot(b.cx - cx, b.cz - cz));
-      });
-      const towerFrac = sky.towerFrac != null ? sky.towerFrac : 0.2;
-      const wantTowers = Math.max(1, Math.round(byCentre.length * towerFrac));
-      const minS = sky.minStoreys || 4, maxS = sky.maxStoreys || 8;
-      let made = 0;
-      const A = (CBZ.city && CBZ.city.arena) || null;
-      for (let i = 0; i < byCentre.length && made < wantTowers; i++) {
-        const lt = byCentre[i];
-        // only re-tower a SHOP/commercial lot (homes keep their domestic scale);
-        // the most-central lot becomes the spire if the recipe allows a mega.
-        if (lt.building && lt.building.home) continue;
-        const w = Math.max(10, lt.w), d = Math.max(10, lt.d);
-        let storeys;
-        if (made === 0 && sky.megaChance) {
-          // the central SPIRE — the tallest in THIS city's skyline, but a HARD
-          // cap (CH3/CH6) keeps every mini-city clearly UNDER the mainland: the
-          // mainland's regular towers reach ~12 and the ONE flagship mega-tower
-          // is 30, so a mini-city spire tops out at 18 — taller than its own
-          // blocks, never rivaling the center core/flagship. Height hierarchy
-          // reads: main downtown is THE downtown.
-          storeys = Math.min(18, maxS + 2);
-        } else {
-          const t = made / Math.max(1, wantTowers - 1);
-          storeys = Math.round(maxS - (maxS - minS) * t);
-        }
-        storeys = Math.max(minS, Math.min(18, storeys));   // hard mini-city ceiling (< mainland flagship 30)
-        const color = (lt.building && lt.building.sign != null) ? lt.building.sign : (tpl.palette && tpl.palette.accent) || 0x556070;
-        const side = (lt.building && lt.building.side) || 0;
-        let tb = null;
-        try { tb = mk(root, lt.cx, lt.cz, w, d, storeys, color, side, { glassKind: "reflective" }); } catch (e) { tb = null; }
-        if (!tb) continue;
-        // register the tower as its OWN sellable lot (kind:'tower') on the arena
-        const trec = {
-          cx: lt.cx, cz: lt.cz, w: w, d: d, kind: "tower", district: place.id,
-          building: Object.assign({}, tb, { name: tpl.name + " Tower", sign: color, side: side }),
-        };
-        stampTowerOwner(trec.building, (lt.cx | 0) * 31 + (lt.cz | 0) * 17);
-        if (A) (A.lots = A.lots || []).push(trec);
-        made++;
-      }
-    }
 
     // (e) REGISTER the walkable region + a causeway toward the nearest road, so
     //     the placement reads as a real landmass and you can drive there. The
@@ -193,7 +134,7 @@
         name: tpl.name + " Causeway", subtitle: tpl.subtitle || "Mini-City", biome: place.id, kind: "rect",
         minX: cMinX, maxX: cMaxX, minZ: cMinZ, maxZ: cMaxZ, pad: 1,
       });
-      if (city.roads) city.roads.push({ x: midX, z: midZ, vertical: vertical, len: len, district: "highway" });
+      if (city.roads) city.roads.push({ x: midX, z: midZ, vertical: vertical, len: len, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
 
     // (f) WORK-ANCHORS — the central shops are jobs people commute to (the SAME

@@ -412,7 +412,7 @@
     ch.group.rotation.y = r() * 6.28;
     const nm = opts.name || (demo && demo.name) || name(r, gender);
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
-    if (tag) { tag.position.y = 3.0; tag.scale.set(3, 0.75, 1); tag.visible = false; ch.group.add(tag); }
+    if (tag) { tag.position.y = 1.97; tag.scale.set(2.2, 0.55, 1); tag.visible = false; ch.group.add(tag); }   // ~rig head (1.82m × HUMAN_SCALE) + margin; tag sits on the UNSCALED group, was 2.12 for the old 2.6m rig
     let aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
     // ---- THE NEIGHBORHOOD NIGHTMARE: ~1 ped per city is a violent, NON-gang
     //      crook packing an AK-47. WHY: the status rifle can't only live on gang
@@ -1129,24 +1129,15 @@
       // roster mid-drain. finishSpawn weaves the COMPLETE list below.
       CBZ.citySpawnDraining = false;
       spawnVagrants(A, nVagrant);
-      if (A.shopLots) for (const lot of A.shopLots) {
-        const vs = lot.building.vendorSpot;
-        // the Ammu-Nation gunsmith (and the security firm) keep a gun behind the
-        // counter — of course. Robbing/downing them drops it for the taking. A
-        // higher nerve makes them stand their ground rather than flee.
-        const packsHeat = lot.kind === "guns" || lot.kind === "security";
-        const ped = makePed(vs.x, vs.z, rng, {
-          vendor: lot, kind: "vendor", wealth: 0.7, cash: 80 + ((rng() * 200) | 0),
-          name: vendorName(lot), aggr: packsHeat ? 0.55 : 0.3,
-          archetype: "merchant", job: vendorName(lot).toLowerCase(),
-          armed: packsHeat, weapon: packsHeat ? (lot.kind === "guns" ? "Carbine" : "Pistol") : null,
-        });
-        if (packsHeat) { ped.nerve = 0.85; ped.ammo = 40; }
-        ped.group.rotation.y = vs.face;
-        A.root.add(ped.group);
-        CBZ.cityPeds.push(ped);
-        lot.building.vendor = ped;
-      }
+      // VENDOR STAFFING is now LAZY + proximity-gated — see the cityStaffVendors
+      // tick below. The old eager "post a body at all ~180 vendorSpots here"
+      // loop (a) built 180 full rigs in one synchronous burst, and (b) RACED the
+      // settlement/biome shopLots, which towngen pushes onto A.shopLots AFTER
+      // buildCity() returns — so at finishSpawn time most counters were empty and
+      // came up 0/180. The tick posts a real, robbable vendor only when the shop
+      // is near the player and off-camera, recycles them behind you, and honours
+      // citystaff's day-open / night-closed. (citystaff.js still deliberately does
+      // NOT double-staff stores — that contract is preserved.)
       if (CBZ.spawnCityGangs) CBZ.spawnCityGangs();
       if (CBZ.spawnCitySecurity) CBZ.spawnCitySecurity();
       if (CBZ.citySocialInit) CBZ.citySocialInit();
@@ -1316,6 +1307,101 @@
     CBZ.cityDrops.length = 0;
     if (CBZ.citySecurity) CBZ.citySecurity.length = 0;
   };
+
+  // ===== LAZY VENDOR STAFFING (proximity + NPC_SPAWN_HIDE + day/night) =========
+  // A real, killable, robbable vendor ped stands at each shop's vendorSpot — but
+  // only the handful of shops NEAR the player at any moment carry a body, built a
+  // few per frame (never 180 at once) and recycled once they drift behind you.
+  // This replaces finishSpawn's old eager loop (which raced the settlement
+  // shopLots build and left every counter empty). Reversible: CBZ.CONFIG.LAZY_VENDORS.
+  if (CBZ.CONFIG.LAZY_VENDORS == null) CBZ.CONFIG.LAZY_VENDORS = true;
+  const VEND_IN2 = 55 * 55;     // post a vendor when the counter is within 55m
+  const VEND_OUT2 = 80 * 80;    // recycle it once beyond 80m (hysteresis vs IN)
+  const VEND_POST_BUDGET = 3;   // full rigs built per tick — spreads the cost
+  let _vendScan = 0;
+  // dedicated rng: the per-frame post cadence is player-relative (already
+  // non-deterministic per client), so it must NOT draw on the shared seeded
+  // `rng()` stream that world/civilian spawns depend on (order-fragile).
+  let _vseed = 0x51ed;
+  function vrng() { _vseed = (_vseed * 1103515245 + 12345) & 0x7fffffff; return _vseed / 0x7fffffff; }
+  // NPC_SPAWN_HIDE: reject a placement only when it'd land close AND inside the
+  // camera's forward cone (mirrors crowd.js placeSafe / citystaff flipSafe).
+  function vendorPlaceSafe(x, z) {
+    if (!CBZ.CONFIG || !CBZ.CONFIG.NPC_SPAWN_HIDE) return true;
+    const P = CBZ.player; if (!P || P.dead) return true;
+    const yaw = (CBZ.cam ? CBZ.cam.yaw : 0);
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const rx = x - P.pos.x, rz = z - P.pos.z, d2 = rx * rx + rz * rz;
+    if (d2 >= 45 * 45) return true;                    // far enough — always safe
+    const rd = Math.sqrt(d2) || 1;
+    return ((rx / rd) * fx + (rz / rd) * fz) < 0.35;   // safe only if NOT on camera
+  }
+  function postVendor(lot) {
+    const b = lot.building, vs = b && b.vendorSpot; if (!vs) return null;
+    // the Ammu-Nation gunsmith (and the security firm) keep a gun behind the
+    // counter — of course. Robbing/downing them drops it for the taking. A
+    // higher nerve makes them stand their ground rather than flee.
+    const packsHeat = lot.kind === "guns" || lot.kind === "security";
+    const ped = makePed(vs.x, vs.z, vrng, {
+      vendor: lot, kind: "vendor", wealth: 0.7, cash: 80 + ((vrng() * 200) | 0),
+      name: vendorName(lot), aggr: packsHeat ? 0.55 : 0.3,
+      archetype: "merchant", job: vendorName(lot).toLowerCase(),
+      armed: packsHeat, weapon: packsHeat ? (lot.kind === "guns" ? "Carbine" : "Pistol") : null,
+    });
+    if (packsHeat) { ped.nerve = 0.85; ped.ammo = 40; }
+    ped.group.rotation.y = vs.face;
+    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    root.add(ped.group);
+    CBZ.cityPeds.push(ped);
+    b.vendor = ped;
+    return ped;
+  }
+  function removeVendor(ped) {
+    const i = CBZ.cityPeds.indexOf(ped);
+    if (i >= 0) CBZ.cityPeds.splice(i, 1);
+    if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
+    if (ped.group) ped.group.traverse(function (o) {
+      if (o.isSprite) return;   // sprites share an r128 geometry singleton — never dispose
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
+      if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+    });
+  }
+  CBZ.onUpdate(35.4, function () {
+    if (!CBZ.CONFIG.LAZY_VENDORS) return;
+    if (CBZ.game && CBZ.game.mode !== "city") return;
+    const A = CBZ.city && CBZ.city.arena;
+    const shops = A && A.shopLots;
+    if (!shops || !shops.length) return;
+    const P = CBZ.player; if (!P || !P.pos || P.dead) return;
+    const night = (CBZ.nightAmount == null ? 0 : CBZ.nightAmount);
+    const open = night < 0.5;                            // day-open / night-closed (matches citystaff)
+    const n = shops.length;
+    let posted = 0;
+    // round-robin a slice of shops each tick so the scan cost stays flat
+    const SCAN = Math.min(n, 64);
+    for (let k = 0; k < SCAN; k++) {
+      const lot = shops[(_vendScan + k) % n];
+      const b = lot && lot.building; if (!b || !b.vendorSpot || lot.demolished) continue;
+      const vs = b.vendorSpot;
+      const dx = vs.x - P.pos.x, dz = vs.z - P.pos.z, d2 = dx * dx + dz * dz;
+      const want = open && d2 <= VEND_IN2;
+      const v = b.vendor;
+      if (v) {
+        if (v.dead) continue;                            // robbed/downed — leave the body, don't churn it
+        // let go of a vendor the shop no longer wants (closed, or you've walked
+        // off) — but only once it's far OR safely off-camera, so a counter you're
+        // standing at is never emptied in your face.
+        if (!want && (d2 > VEND_OUT2 || vendorPlaceSafe(vs.x, vs.z))) { removeVendor(v); b.vendor = null; }
+        continue;
+      }
+      if (want && posted < VEND_POST_BUDGET && vendorPlaceSafe(vs.x, vs.z)) {
+        if (postVendor(lot)) posted++;
+      }
+    }
+    _vendScan = (_vendScan + SCAN) % n;
+  });
+  // let other systems force a full re-check / initial fill (e.g. after a rebuild).
+  CBZ.cityStaffVendors = function () { _vendScan = 0; };
 
   // ---- alarm everyone near (x,z); offender lets witnesses remember who ----
   CBZ.cityAlarm = function (x, z, radius, intensity, offender) {

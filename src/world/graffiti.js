@@ -32,7 +32,7 @@
       !THREE.CanvasTexture || !THREE.PlaneGeometry || !THREE.MeshBasicMaterial) return;
   if (typeof document === "undefined" || !document.createElement) return;
 
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const YH = (CBZ.DIM && CBZ.DIM.YH) || 11;   // yard wall height
   const WH = (CBZ.DIM && CBZ.DIM.WH) || 9;    // cell-block wall height
   const rnd = Math.random;

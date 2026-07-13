@@ -5,7 +5,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const YH = CBZ.DIM.YH;
   const W = CBZ.WORLD;
   const N = W.northYard, S = W.southBlock, gap = W.exit.gap;

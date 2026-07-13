@@ -87,7 +87,17 @@
       c.copy(inner).lerp(outer, 0.86 + wobble);
       return c;
     }
-    function band(x0, z0, x1, z1, ox, oz, side) {
+    // A shared edge (for example desert -> speedway) must not throw a 100 m
+    // decorative skirt underneath its neighbour. `opts.feathers` lets a biome
+    // collapse just that side to its coastline while retaining the broad blend
+    // on its exposed edges. Zero is deliberate and is not clamped to the global
+    // eight-metre minimum.
+    const sideFeathers = opts.feathers || {};
+    function sideFeather(name) {
+      return Object.prototype.hasOwnProperty.call(sideFeathers, name)
+        ? Math.max(0, +sideFeathers[name] || 0) : feather;
+    }
+    function band(x0, z0, x1, z1, ox, oz, side, distance) {
       const innerPts = [], outerPts = [];
       for (let i = 0; i <= seg; i++) {
         const t = i / seg;
@@ -95,7 +105,7 @@
         const z = z0 + (z1 - z0) * t;
         const n = noise(side, t);
         innerPts.push({ x: x + ox * n * 4, z: z + oz * n * 4, c: tint(t, side) });
-        outerPts.push({ x: x + ox * (feather + n * feather * 0.28), z: z + oz * (feather + n * feather * 0.28), c: outerTint(t, side) });
+        outerPts.push({ x: x + ox * (distance + n * distance * 0.28), z: z + oz * (distance + n * distance * 0.28), c: outerTint(t, side) });
       }
       for (let i = 0; i < seg; i++) {
         const a = innerPts[i], b = innerPts[i + 1], c = outerPts[i + 1], d = outerPts[i];
@@ -104,10 +114,10 @@
       }
       return { first: { inner: innerPts[0], outer: outerPts[0] }, last: { inner: innerPts[seg], outer: outerPts[seg] } };
     }
-    const north = band(cx - hx, cz - hz, cx + hx, cz - hz, 0, -1, 0);
-    const east = band(cx + hx, cz - hz, cx + hx, cz + hz, 1, 0, 1);
-    const south = band(cx + hx, cz + hz, cx - hx, cz + hz, 0, 1, 2);
-    const west = band(cx - hx, cz + hz, cx - hx, cz - hz, -1, 0, 3);
+    const north = band(cx - hx, cz - hz, cx + hx, cz - hz, 0, -1, 0, sideFeather("north"));
+    const east = band(cx + hx, cz - hz, cx + hx, cz + hz, 1, 0, 1, sideFeather("east"));
+    const south = band(cx + hx, cz + hz, cx - hx, cz + hz, 0, 1, 2, sideFeather("south"));
+    const west = band(cx - hx, cz + hz, cx - hx, cz - hz, -1, 0, 3, sideFeather("west"));
     function corner(a, b) {
       // Close the small diagonal corner wedge between the two orthogonal bands.
       vert(a.inner.x, a.inner.z, a.inner.c);
@@ -134,6 +144,16 @@
     mesh.userData.worldSurface = true;
     mesh.updateMatrix();
     root.add(mesh);
+    // MAP_RESERVE_V1: reserve the feather skirt's TRUE extent (per-side, so a
+    // collapsed edge like feathers:{west:0} is respected — no phantom keep-out
+    // toward a neighbour). Owner = the biome key, shared with its region entry.
+    if (CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1 && opts.owner &&
+        CBZ.worldLayout && CBZ.worldLayout.mapReserve) {
+      CBZ.worldLayout.mapReserve('terrain:' + opts.owner, {
+        minX: cx - hx - sideFeather('west'), maxX: cx + hx + sideFeather('east'),
+        minZ: cz - hz - sideFeather('north'), maxZ: cz + hz + sideFeather('south'),
+      }, { owner: opts.owner, kind: 'terrain' });
+    }
     return mesh;
   };
 
@@ -150,6 +170,16 @@
       reg.minZ = reg.cz - reg.r; reg.maxZ = reg.cz + reg.r;
     }
     city.regions.push(reg);
+    // MAP_RESERVE_V1: record this landmass footprint in the map-level ledger so
+    // the post-build audit can see peer landmasses interpenetrate. Grouped by
+    // biome (a POI + its causeway share a biome → never flag each other); the
+    // continent "wilds" underlay is tagged so it is skipped. Pure bookkeeping —
+    // does not touch the placement hash, so worldgen stays byte-identical.
+    if (CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1 && CBZ.worldLayout && CBZ.worldLayout.mapReserve && reg.biome) {
+      CBZ.worldLayout.mapReserve('region:' + (reg.name || reg.biome), reg, {
+        owner: reg.biome, kind: 'region', underlay: reg.underlay === true,
+      });
+    }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return reg;
   };
@@ -214,19 +244,69 @@
     return reg && reg.biome ? reg.biome : "city";
   };
 
+  // ============================================================
+  //  NO-SPAWN ZONES — places a person must never spawn or idle (owner:
+  //  "NPCs spawning all over the runway and inside the airport").
+  //  Pure data on the live city descriptor (rebuild-safe, like regions):
+  //  each zone is a rect {minX,maxX,minZ,maxZ} or circle {cx,cz,r}, plus an
+  //  optional `civ: true` for zones that only bar CIVILIAN placement
+  //  (restricted areas where posted staff/patrols still belong). Builders
+  //  register their own hazards (island_airport's airside, the military
+  //  runway); every scatter/relocation path tests citySpawnBlocked.
+  // ============================================================
+  CBZ.registerNoSpawnZone = function (city, zone) {
+    if (!city) city = CBZ.city && CBZ.city.arena;
+    if (!city || !zone) return zone;
+    (city.noSpawn = city.noSpawn || []).push(zone);
+    return zone;
+  };
+  // is (x,z) inside any keep-out? `civilian` also honors civ-only zones.
+  // Additionally rejects MID-ROAD points (within the driving lanes of any
+  // road centreline segment): sidewalk draws sit ~6.4u off a 16u road's
+  // centre, so the 5.5u half-width bars the lanes without touching them.
+  CBZ.citySpawnBlocked = function (x, z, pad, civilian) {
+    const A = CBZ.city && CBZ.city.arena; if (!A) return false;
+    pad = pad || 0;
+    const zs = A.noSpawn;
+    if (zs) for (let i = 0; i < zs.length; i++) {
+      const s = zs[i];
+      if (s.civ && !civilian) continue;
+      if (s.r != null) {
+        const dx = x - s.cx, dz = z - s.cz, rr = s.r + pad;
+        if (dx * dx + dz * dz <= rr * rr) return true;
+      } else if (x >= s.minX - pad && x <= s.maxX + pad && z >= s.minZ - pad && z <= s.maxZ + pad) return true;
+    }
+    const roads = A.roads;
+    if (roads) for (let i = 0; i < roads.length; i++) {
+      const r = roads[i], half = (r.len || 0) / 2;
+      const along = r.vertical ? z - r.z : x - r.x;
+      const perp = r.vertical ? x - r.x : z - r.z;
+      if (along > -half && along < half && perp > -5.5 && perp < 5.5) return true;
+    }
+    return false;
+  };
+
   // a deterministic scatter helper every biome module can share — returns
-  // n {x,z} points inside a region, avoiding a keep-out list (roads/pads).
+  // n {x,z} points inside a region, avoiding the keep-out zones above (the
+  // promise this comment always made is now real: up to 8 redraws per point
+  // steer around runways/pads/roads; if every redraw lands blocked the last
+  // draw is kept, so callers always get exactly n points). Deterministic:
+  // the zones are build data, so a seeded rng consumes the same draw count
+  // on every client.
   CBZ.cityScatterInRegion = function (reg, n, rng, margin) {
     margin = margin || 6;
     const out = [];
     for (let i = 0; i < n; i++) {
       let x, z;
-      if (reg.kind === "circle") {
-        const a = rng() * Math.PI * 2, rr = Math.sqrt(rng()) * (reg.r - margin);
-        x = reg.cx + Math.cos(a) * rr; z = reg.cz + Math.sin(a) * rr;
-      } else {
-        x = reg.minX + margin + rng() * (reg.maxX - reg.minX - margin * 2);
-        z = reg.minZ + margin + rng() * (reg.maxZ - reg.minZ - margin * 2);
+      for (let t = 0; t < 8; t++) {
+        if (reg.kind === "circle") {
+          const a = rng() * Math.PI * 2, rr = Math.sqrt(rng()) * (reg.r - margin);
+          x = reg.cx + Math.cos(a) * rr; z = reg.cz + Math.sin(a) * rr;
+        } else {
+          x = reg.minX + margin + rng() * (reg.maxX - reg.minX - margin * 2);
+          z = reg.minZ + margin + rng() * (reg.maxZ - reg.minZ - margin * 2);
+        }
+        if (!CBZ.citySpawnBlocked(x, z, 0.6)) break;
       }
       out.push({ x, z });
     }
@@ -392,6 +472,21 @@
     const list = CBZ._landmassBuilders.slice().sort((a, b) => a.order - b.order);
     for (const b of list) { try { b.fn(city); } catch (e) { console.error("[landmass]", e); } }
     if (CBZ.buildArchipelagoDressing) CBZ.buildArchipelagoDressing(city);
+    // MAP_RESERVE_V1: regression alarm. After every landmass is placed, report
+    // any two PEER landmasses (biome floors, skirts, massifs, island POIs) that
+    // interpenetrate — the owner's "terrain overlaps terrain" complaint. This
+    // catches overlaps the pixel world-audit misses (e.g. a mountain massif that
+    // isn't a tagged worldSurface). A clean world logs nothing.
+    if (CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1 && CBZ.worldLayout && CBZ.worldLayout.mapAudit) {
+      try {
+        const hits = CBZ.worldLayout.mapAudit();
+        for (const h of hits) {
+          console.warn("[map-reserve] " + h.tier + " overlap: " + h.a + " (" + h.aKind + ") x " +
+            h.b + " (" + h.bKind + ") — " + h.area + " m2, " + h.contain + "% of smaller @ (" +
+            h.at.x + "," + h.at.z + ")");
+        }
+      } catch (e) { console.error("[map-reserve]", e); }
+    }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
 })();

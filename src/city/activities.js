@@ -327,6 +327,9 @@
     openModal();
     renderCasino();
   }
+  // Public handle so a casino-floor TABLE interaction (city/casino.js) can open
+  // the felt directly, not just via the Betting activity board.
+  CBZ.cityOpenCasino = openCasino;
   // HIGH-ROLLER GATE (E9): members-only VIP tables at 10x stakes — gated by
   // wealth tier (baller+) OR max DRIP (the club's own VIP threshold).
   const STAKE_MAX_NORMAL = 5000, STAKE_MAX_HIGH = 50000;

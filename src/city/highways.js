@@ -167,8 +167,12 @@
   // how long the road — every dash/line accumulates into shared arrays then builds
   // once (the world.js paintMesh discipline). Lane offsets match the lanes the
   // traffic AI drives (±k·laneW dividers, ±(width/2−0.4) edge lines).
-  function buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt) {
+  function buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt, medianW) {
     const white = [], yellow = [], yOff = 0.015;
+    // half-width of the physical median band: every lane offset shifts outward
+    // by this, so lane 1 is a full laneW wide instead of being squeezed between
+    // the median edge and a divider still sitting at ±1·laneW (the old bug).
+    const medHalf = median ? (medianW != null ? medianW : 1.2) / 2 : 0;
     // grade-following: sample the same terrain height the deck used, plus the
     // fixed clearance above it, so painted lines never float off / sink into
     // a sloped deck. Flat callers (heightAt omitted) keep the old constant y.
@@ -196,11 +200,11 @@
         for (let t = 0; t + 2.4 <= L; t += 7) quad(arr, a.x + dx * t, a.z + dz * t, a.x + dx * (t + 2.4), a.z + dz * (t + 2.4), dx, dz, off, hw);
       }
     }
-    if (median) solid(yellow, 0, laneW * 0.25);                       // a median band
+    if (median) solid(yellow, 0, medHalf);                            // the median band, full physical width
     else { solid(yellow, -0.26, 0.08); solid(yellow, 0.26, 0.08); }   // double yellow centreline
     for (let s = -1; s <= 1; s += 2) {
-      for (let k = 1; k < lanesPerDir; k++) dashed(white, s * k * laneW, 0.07);   // lane dividers
-      solid(white, s * (width / 2 - 0.4), 0.08);                                  // edge/fog line
+      for (let k = 1; k < lanesPerDir; k++) dashed(white, s * (medHalf + k * laneW), 0.07);   // lane dividers
+      solid(white, s * (width / 2 - 0.4), 0.08);                                              // edge/fog line
     }
     const out = [];
     function mesh(arr, color) {
@@ -406,11 +410,22 @@
     opts = opts || {};
     const path = (opts.path && opts.path.length >= 2) ? opts.path : [{ x: 0, z: 0 }, { x: 0, z: 100 }];
     const width = opts.width != null ? opts.width : 24;
-    const lanesPerDir = Math.max(1, (opts.lanesPerDir != null ? opts.lanesPerDir : 2) | 0);
+    // ROADS_V2 (owner: "never many lanes or wide highways"): a paved highway
+    // defaults to a REAL 3+3 cross-section with a hard median — 6×3.6m lanes +
+    // 1.2m median + 0.4m edge margins = 23.2m, inside the 24m deck with a 0.4m
+    // shoulder per side. Dirt tracks keep 2 lanes and get NO paint (below).
+    const V2 = !CBZ.CONFIG || CBZ.CONFIG.ROADS_V2 !== false;
+    const isDirt = opts.theme === "dirt";
+    const lanesPerDir = Math.max(1, (opts.lanesPerDir != null ? opts.lanesPerDir
+      : (V2 && !isDirt && width >= 23) ? 3 : 2) | 0);
     const laneW = opts.laneW != null ? opts.laneW : 3.6;
     const elevated = !!opts.elevated;
     const theme = THEME[opts.theme] || THEME.asphalt;
-    const median = !!opts.median;
+    const median = opts.median != null ? !!opts.median : (V2 && !isDirt && lanesPerDir >= 3);
+    const medianW = opts.medianW != null ? opts.medianW : 1.2;
+    // dirt tracks have no painted markings — a yellow centreline on a dirt
+    // causeway was one of the "same look, dup code" offenders.
+    const markings = opts.markings != null ? !!opts.markings : !isDirt;
     // NOTE: opts.rng (the caller's seeded fn) is accepted for API compat /
     // future jitter use, but nothing in this function currently consumes it
     // — removed the old `|| Math.random` fallback (dead code that was also
@@ -446,8 +461,10 @@
     const vRepeatPerM = tex ? (1 / 8) : 0.0625;        // tile every ~8m along (U tiles via tex.repeat.x)
     const deck = buildDeck(path, width, deckY, deckMat, vRepeatPerM, heightAt);
     group.add(deck.mesh);
-    const lanePaint = buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt);
-    for (let i = 0; i < lanePaint.length; i++) group.add(lanePaint[i]);
+    if (markings) {
+      const lanePaint = buildLanePaint(path, width, lanesPerDir, laneW, deckY, median, heightAt, medianW);
+      for (let i = 0; i < lanePaint.length; i++) group.add(lanePaint[i]);
+    }
     // per-point grade sample used by every prop below (colliders/rails/poles/
     // pylons/ramps) so the WHOLE highway — not just the deck mesh — rises and
     // falls together; flat callers (heightAt null) get the old constant deckY.
@@ -475,9 +492,35 @@
       }
     }
 
-    // ---- ONE continuous curb collider per side (the fall-guard) + a thin
-    //      visible curb strip baked into the deck edge is enough; we only add
-    //      colliders, not a mesh per post. ----
+    // ---- BRIDGE_WALL_RULES: edge walls (guardrail posts + the curb fall-guard
+    //      colliders) belong ONLY on real spans — wherever the deck CROSSES a
+    //      registered road (a grid mouth, an island street, a connector) the
+    //      wall must open, or the intersection grows invisible/visible walls
+    //      (the owner's complaint: causeway ends overlap the city grid and
+    //      their side walls ran straight across the avenue). Parallel /
+    //      overlapping segments (the deck's own registered centreline, the
+    //      caller's own push) never gap anything — only true crossings do. ----
+    const wallRules = !CBZ.CONFIG || CBZ.CONFIG.BRIDGE_WALL_RULES !== false;
+    const _cityRoads = opts.cityRoads || (CBZ.city && CBZ.city.roads) || null;
+    const defRoadW = (CBZ.CITY && CBZ.CITY.road) || 18;
+    function onCrossingRoad(x, z, legVertical) {
+      if (!wallRules || !_cityRoads) return false;
+      for (let i = 0; i < _cityRoads.length; i++) {
+        const r = _cityRoads[i];
+        if (!!r.vertical === !!legVertical) continue;      // parallel — never gaps
+        const half = (r.w != null ? r.w : defRoadW) / 2 + 1.2;   // carriageway + apron
+        if (r.vertical) {
+          if (Math.abs(x - r.x) < half && Math.abs(z - r.z) <= r.len / 2 + 0.5) return true;
+        } else {
+          if (Math.abs(z - r.z) < half && Math.abs(x - r.x) <= r.len / 2 + 0.5) return true;
+        }
+      }
+      return false;
+    }
+
+    // ---- curb fall-guard colliders per side — CONTINUOUS runs between road
+    //      crossings (was one unbroken band per leg; with BRIDGE_WALL_RULES the
+    //      band opens over every crossing so cars/peds pass the intersection). ----
     function addCurbColliders() {
       if (!CBZ.colliders) return;
       const hw = width / 2;
@@ -486,17 +529,31 @@
         let dx = b.x - a.x, dz = b.z - a.z;
         const L = Math.hypot(dx, dz) || 1e-3; dx /= L; dz /= L;
         const px = -dz, pz = dx;            // unit perpendicular
+        const legVert = Math.abs(dz) >= Math.abs(dx);
         for (let s = -1; s <= 1; s += 2) {
-          const x0 = a.x + s * px * hw, z0 = a.z + s * pz * hw;
-          const x1 = b.x + s * px * hw, z1 = b.z + s * pz * hw;
-          // grade-following: sample at the segment's own deck height so the
-          // fall-guard band tracks a sloped causeway instead of a flat layer.
-          const segY = Math.max(gradeAt(x0, z0), gradeAt(x1, z1));
-          CBZ.colliders.push({
-            minX: Math.min(x0, x1) - 0.25, maxX: Math.max(x0, x1) + 0.25,
-            minZ: Math.min(z0, z1) - 0.25, maxZ: Math.max(z0, z1) + 0.25,
-            y0: segY, y1: segY + (opts.guardrail ? 1.1 : 0.4)
-          });
+          const flush = (t0, t1) => {
+            if (t1 - t0 < 0.5) return;
+            const x0 = a.x + dx * t0 + s * px * hw, z0 = a.z + dz * t0 + s * pz * hw;
+            const x1 = a.x + dx * t1 + s * px * hw, z1 = a.z + dz * t1 + s * pz * hw;
+            // grade-following: sample at the segment's own deck height so the
+            // fall-guard band tracks a sloped causeway instead of a flat layer.
+            const segY = Math.max(gradeAt(x0, z0), gradeAt(x1, z1));
+            CBZ.colliders.push({
+              minX: Math.min(x0, x1) - 0.25, maxX: Math.max(x0, x1) + 0.25,
+              minZ: Math.min(z0, z1) - 0.25, maxZ: Math.max(z0, z1) + 0.25,
+              y0: segY, y1: segY + (opts.guardrail ? 1.1 : 0.4)
+            });
+          };
+          const n = Math.max(1, Math.ceil(L / 4));
+          let runStart = null;
+          for (let k = 0; k < n; k++) {
+            const tm = (k + 0.5) * (L / n);
+            const mx = a.x + dx * tm + s * px * hw, mz = a.z + dz * tm + s * pz * hw;
+            const open = onCrossingRoad(mx, mz, legVert);
+            if (!open && runStart == null) runStart = k * (L / n);
+            else if (open && runStart != null) { flush(runStart, k * (L / n)); runStart = null; }
+          }
+          if (runStart != null) flush(runStart, L);
         }
       }
     }
@@ -508,8 +565,11 @@
       const spots = [];
       alongPath(4, (x, z, dx, dz) => {
         const px = -dz, pz = dx, h = Math.atan2(dx, dz);
-        spots.push({ x: x - px * hw, z: z - pz * hw, h });
-        spots.push({ x: x + px * hw, z: z + pz * hw, h });
+        const legVert = Math.abs(dz) >= Math.abs(dx);
+        // BRIDGE_WALL_RULES: no rail post where the deck crosses a road
+        const lx = x - px * hw, lz = z - pz * hw, rx = x + px * hw, rz = z + pz * hw;
+        if (!onCrossingRoad(lx, lz, legVert)) spots.push({ x: lx, z: lz, h });
+        if (!onCrossingRoad(rx, rz, legVert)) spots.push({ x: rx, z: rz, h });
       });
       if (spots.length) {
         const railGeo = new THREE.BoxGeometry(0.12, 0.9, 3.8);
@@ -527,7 +587,10 @@
     }
 
     // ---- ONE InstancedMesh light poles (~40m), emissive head ----
-    if (opts.lights) {
+    // HWY_LAMPS default OFF (owner: "dumb useless props like streetlights on
+    // the highway and bridges" — 62 deck lamps audited). Real highways here
+    // run unlit; the old poles come back only if the flag is flipped true.
+    if (opts.lights && CBZ.CONFIG && CBZ.CONFIG.HWY_LAMPS === true) {
       const hw = width / 2 - 0.6, poles = [];
       let toggle = 0;
       alongPath(40, (x, z, dx, dz) => {
@@ -646,7 +709,6 @@
     //      a caller that still pushes its own (until HWY-7 retires those) never
     //      ends up with double segments. Pure data — no extra draw calls. -------
     const builtRoads = [];
-    const _cityRoads = opts.cityRoads || (CBZ.city && CBZ.city.roads);
     if (opts.registerRoads !== false && _cityRoads) {
       const roads = _cityRoads;
       for (let i = 0; i < path.length - 1; i++) {
@@ -657,6 +719,11 @@
         let seg;
         if (adx > adz) seg = { x: (ax + bx) / 2, z: az, vertical: false, len: adx, district: "highway" };
         else seg = { x: ax, z: (az + bz) / 2, vertical: true, len: adz, district: "highway" };
+        // ROADS_V2 lane data: every consumer (traffic lane-keeping, prop
+        // placement, CBZ.roadLanes) can read the REAL cross-section instead
+        // of assuming the city-grid default.
+        seg.w = width; seg.lanesPerDir = lanesPerDir; seg.laneW = laneW;
+        if (median) { seg.median = true; seg.medianW = medianW; }
         // dedupe against any existing identical centre-line (caller push or a
         // prior buildHighway over the same axis) — match by axis + the two
         // coords within a tight tolerance so we never carpet city.roads.
@@ -714,7 +781,15 @@
       z: opts.z != null ? opts.z : -558,
       vertical: opts.vertical != null ? !!opts.vertical : true,
       len: opts.len != null ? opts.len : 24,
-      district: "highway"
+      district: "highway",
+      // carry the causeway cross-section onto the join segment so every lane-
+      // aware consumer (props clearance, roadLanes, world-audit) reads a real
+      // width here too — a connector overlaps a 24m 3+3 causeway.
+      w: opts.w != null ? opts.w : 24,
+      lanesPerDir: opts.lanesPerDir != null ? opts.lanesPerDir : 3,
+      laneW: opts.laneW != null ? opts.laneW : 3.6,
+      median: opts.median != null ? !!opts.median : true,
+      medianW: opts.medianW != null ? opts.medianW : 1.2,
     };
     return pushConnector(roads, seg);
   };
@@ -743,8 +818,8 @@
     //     the grid (x≈-150) to the causeway east end (x=-133).
     // (Speedway/other islands reached by their OWN bridges — already internally
     //  connected at their L-corner — are out of this connector's scope.)
-    CBZ.buildHighwayConnector({ x: 0, z: -558, vertical: true, len: 24 }, roads);            // airport
-    CBZ.buildHighwayConnector({ x: -141, z: -700, vertical: false, len: 24 }, roads);        // military
+    CBZ.buildHighwayConnector({ x: 0, z: -558, vertical: true, len: 24, w: 24, district: "highway" }, roads);            // airport
+    CBZ.buildHighwayConnector({ x: -141, z: -700, vertical: false, len: 24, w: 24, district: "highway" }, roads);        // military
 
     // The desert is already connected by real, authored infrastructure:
     // city bridge -> commerce annex -> Diamond Speedway causeway -> Saltlands

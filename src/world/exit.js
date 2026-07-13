@@ -5,7 +5,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const { addBox, COL, WORLD } = CBZ;
   const { GLOW, GLOW_E } = COL;
   const EX = WORLD.exit.x, EZ = WORLD.exit.z;

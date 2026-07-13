@@ -495,10 +495,15 @@
     const stunned = player.stun > 0;
 
     const len = Math.hypot(mx, mz);
-    // In survival/city SHIFT is sprint (stamina-gated); in prison it's crouch.
-    const surv = CBZ.game.mode !== "escape";
-    player.crouch = !overview && !mapOpen && !surv && !stunned && !!keys["shift"];
-    player.sprint = !mapOpen && surv && !stunned && !!keys["shift"] && len > 0 && (player.stamina === undefined || player.stamina > 0);
+    // One movement language in every mode: Shift runs. Jail used to steal
+    // Shift for crouch, so the 2m/s human-scale walk was the fastest possible
+    // movement there while city/survival could reach 6.4m/s. Keep jail stealth
+    // on Ctrl (or C) instead, which also matches standard PC controls.
+    const escape = CBZ.game.mode === "escape";
+    const sneakHeld = !!(keys["control"] || keys["c"]);
+    player.crouch = !overview && !mapOpen && escape && !stunned && sneakHeld;
+    player.sprint = !overview && !mapOpen && !stunned && !player.crouch &&
+      !!keys["shift"] && len > 0 && (player.stamina === undefined || player.stamina > 0);
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.

@@ -26,7 +26,7 @@
   if (!CBZ || !CBZ.scene || typeof THREE === "undefined") return;
   if (typeof CBZ.onAlways !== "function" || typeof CBZ.mat !== "function") return;
 
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
 
   // ---- play-area bounds (yard + a margin). Dust recycles inside here. ----
   const B = { minX: -30, maxX: 30, minZ: -8, maxZ: 52, floor: 0.4, ceil: 8.5 };
@@ -67,6 +67,7 @@
 
   function makeCrow() {
     const group = new THREE.Group();
+    group.userData.dynamic = true;
 
     const body = new THREE.Mesh(crowBodyGeo, crowBodyMat);
     body.castShadow = body.receiveShadow = false;
@@ -317,6 +318,7 @@
      DRIVER — one onAlways tick (animates on menus too). Cheap.
   ============================================================ */
   CBZ.onAlways(78, function (dt) {
+    if (CBZ.game.mode !== "escape") return;
     // guard against absurd / non-finite dt (the loop already clamps real
     // dt to 0.05 and scales it, but stay defensive for stable motion).
     if (!(dt > 0)) dt = 0;

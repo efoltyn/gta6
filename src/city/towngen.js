@@ -96,6 +96,12 @@
     if (Math.abs(nx) > Math.abs(nz)) return nx > 0 ? "east" : "west";
     return nz > 0 ? "south" : "north";
   }
+  // SETTLEMENTS_V2 FINDING: cityMakeBuilding's doorInfo() takes a NUMERIC side
+  // (0=-z,1=+z,2=-x,3=+x — buildings.js:3075) but towngen always passed the
+  // STRING ("north"/"south"/...), which matches none of 0/1/2 and falls through
+  // to the +x branch — so every town building's REAL door gap sat on the +x
+  // face while the sign/vendor/door-record used the computed side. Map it.
+  const SIDE_IDX = { north: 0, south: 1, west: 2, east: 3 };
 
   // =========================================================================
   //  THE GENERATOR
@@ -111,8 +117,39 @@
     // vendor staffing. `A` is the real arena; every later push targets A. The
     // `if (A)` guard keeps a headless / no-arena call building geometry + returning
     // the descriptor (zero regression for the desert fallback path).
-    const A = (CBZ.city && CBZ.city.arena) || (CBZ.cityState && CBZ.cityState.arena) || null;
+    // SETTLEMENTS_V2 KEYSTONE FIX: mode.js only assigns CBZ.city.arena AFTER
+    // buildCity() RETURNS (mode.js:213), but every town builds DURING buildCity
+    // (world.js:865 cityWorldGeo) — so the old chain below resolved to null for
+    // every town ever built and ALL town lots/shops/roads were silently dropped
+    // (towns were economically dead: no vendors, no Zillow, no map POIs, no
+    // traffic on their streets). settlements.js wraps cityWorldGeo and stashes
+    // the LIVE under-construction city object here; cfg.arena is a per-call
+    // override for direct callers.
+    const A = cfg.arena || CBZ._settlementArena
+      || (CBZ.city && CBZ.city.arena) || (CBZ.cityState && CBZ.cityState.arena) || null;
+    const V2 = !CBZ.CONFIG || CBZ.CONFIG.SETTLEMENTS_V2 !== false;
     const cx = cfg.cx, cz = cfg.cz;
+    // SETTLEMENT COMPOSITION (V2). A per-SITE rng (CBZ.lcgFromHash folds
+    // WORLD_SEED + position — NEVER the shared cfg.rng determinism depends on)
+    // composes a flavored ANCHOR PLAN: guaranteed purposeful shops (food +
+    // general store, then rolled bar/bank/clinic/gunsmith/pawn/clothing/casino)
+    // on the most-central lots. Pure — it does not draw a single cfg.rng value,
+    // so the 2-draws-per-lot fill cadence below is untouched and the world stays
+    // byte-identical per seed. The caller's authored prefabs/palette WIN; comp
+    // only fills gaps (so Dry Gulch still reads Old-West) and supplies the
+    // anchors' flavored names + sign tints. anchorPlan (built once lots[] exist)
+    // is consulted by the fill loop to FORCE those lots to build the plan.
+    let comp = null, siteRng = null, anchorPlan = null;
+    if (V2 && CBZ.settlementsCompose && CBZ.lcgFromHash) {
+      try {
+        siteRng = CBZ.lcgFromHash(cx, cz, "settlement");
+        comp = CBZ.settlementsCompose(cfg, siteRng);
+        if (comp) {
+          if (!cfg.prefabs && comp.prefabs) cfg = Object.assign({}, cfg, { prefabs: comp.prefabs });
+          if (!cfg.palette && comp.palette) cfg = Object.assign({}, cfg, { palette: comp.palette });
+        }
+      } catch (e) { comp = null; }
+    }
     const cols = Math.max(1, (cfg.cols || 3) | 0);
     const rows = Math.max(1, (cfg.rows || 3) | 0);
     const BW = cfg.blockW || 36, BD = cfg.blockD || 36;
@@ -156,7 +193,13 @@
     function roadSeg(x, z, vertical, len, wide) {
       const w = wide || ROAD;
       roadGeoms.push(vertical ? planeGeo(x, z, w, len, 0.05) : planeGeo(x, z, len, w, 0.05));
-      const seg = { x, z, vertical, len, district: cfg.district || "town" };
+      // Publish the same cross-section we just rendered. Without this metadata
+      // traffic/props inherited the mainland's 18 m four-lane default on a
+      // 7-12 m village street, putting AI lanes off the asphalt and making
+      // correctly placed sidewalk lamps look like lane intrusions.
+      const lanesPerDir = w >= 13 ? 2 : 1;
+      const laneW = Math.min(3.6, w / (lanesPerDir * 2));
+      const seg = { x, z, vertical, len, district: cfg.district || "town", w, lanesPerDir, laneW };
       townRoads.push(seg);
       // T1: push town streets onto the REAL arena road list (traffic/citynav read
       // arena.roads), not the empty CBZ.city.roads.
@@ -261,6 +304,12 @@
     }
     mergeAdd(root, sidewalkGeoms, cmat(SIDEWALK), { receive: true });
 
+    // ANCHOR PLAN — now that lots[] exist, ask the composer which central lots
+    // must become which purposeful shop. Deterministic (siteRng only). The fill
+    // loop below FORCES these; every one is furnished into a real trade so no
+    // anchor is ever a hollow box.
+    if (comp && comp.planAnchors) { try { anchorPlan = comp.planAnchors(lots, cx, cz); } catch (e) { anchorPlan = null; } }
+
     // =====================================================================
     //  4) FILL LOTS — density falls off from the centre; each lot rolls a
     //     buildProb, then places a prefab from its zone's weighted recipe.
@@ -339,7 +388,31 @@
     // 20+ floors). Derived purely from lt.ring + the prefab — no new rng draw, so
     // the deterministic world build / MP stay byte-identical.
     const TOWN_MAX_STOREYS = Math.max(1, (cfg.skyline && cfg.skyline.townMax) || cfg.townMaxStoreys || 4);
-    function storeysFor(base, ring) {
+
+    // Some placed towns need a visible centre skyline. That decision must happen
+    // BEFORE geometry is built: the old mini-city placer built a normal shell,
+    // then called cityMakeBuilding again on the same lot to make it taller. Both
+    // shells, stairs, floors, doors and colliders survived at identical bounds.
+    // An opt-in skyline plan selects central non-residential lots here and gives
+    // their one-and-only shell its final height. No extra RNG draws are involved.
+    const skylinePlan = new Map();
+    if (cfg.integratedSkyline && cfg.skyline) {
+      const sky = cfg.skyline;
+      const candidates = lots.filter(function (lt) { return lt.zone !== "residential"; })
+        .slice().sort(function (a, b) {
+          const da = Math.hypot(a.cx - cx, a.cz - cz), db = Math.hypot(b.cx - cx, b.cz - cz);
+          return da - db || a.cx - b.cx || a.cz - b.cz;
+        });
+      const count = Math.min(candidates.length, Math.max(1, Math.round(lots.length * (sky.towerFrac == null ? 0.2 : sky.towerFrac))));
+      const minSky = Math.max(1, sky.minStoreys || 3);
+      const maxSky = Math.max(minSky, Math.min(18, (sky.maxStoreys || 8) + (sky.megaChance ? 2 : 0)));
+      for (let i = 0; i < count; i++) {
+        const t = i / Math.max(1, count - 1);
+        skylinePlan.set(candidates[i], Math.max(minSky, Math.round(maxSky - (maxSky - minSky) * t)));
+      }
+    }
+    function storeysFor(base, ring, lot, isShop) {
+      if (isShop && skylinePlan.has(lot)) return skylinePlan.get(lot);
       const fall = ring <= 0 ? 1 : ring === 1 ? 0.7 : 0.5;
       return Math.min(TOWN_MAX_STOREYS, Math.max(1, Math.round((base || 1) * fall)));
     }
@@ -366,22 +439,38 @@
       }
     }
     for (const lt of lots) {
-      if (rng() > buildProbFor(lt.ring)) continue;
+      // DETERMINISM-SACRED: exactly the same two cfg.rng() draws per lot as the
+      // baseline — draw #1 (density roll) then, if not skipped, draw #2 (wpick).
+      // An anchor lot is FORCED to build (skips the density-skip) and then has
+      // its pick OVERRIDDEN by the plan AFTER wpick has drawn, so a forced lot
+      // consumes the identical draw count. With no anchorPlan (V2 off) this is
+      // byte-identical to the original loop.
+      const roll = rng();                                   // draw #1
+      const forced = anchorPlan && anchorPlan.has(lt);
+      if (roll > buildProbFor(lt.ring) && !forced) continue;
       const recipe = (cfg.prefabs && cfg.prefabs[lt.zone]) || (cfg.prefabs && cfg.prefabs.default) || null;
-      const pick = wpick(recipe, rng);
+      let pick = wpick(recipe, rng);                        // draw #2
+      if (forced) pick = anchorPlan.get(lt) || pick;
       if (!pick) continue;
       // building shell?  (kind:'building' or no explicit asset key)
       const isBuilding = !pick.asset || pick.building || pick.kind === "building";
       if (isBuilding && mk) {
         const w = Math.max(8, lt.w - 1.5), d = Math.max(8, lt.d - 1.5);
-        const storeys = storeysFor(pick.storeys, lt.ring);   // CH6 ring-falloff + town cap
+        // Decide the program before construction. Integrated skyline lots are
+        // still the same shop/home records; only their final shell height differs.
+        const isShop = (pick.lotKind || (lt.zone === "residential" ? "home" : "shop")) === "shop";
+        const storeys = storeysFor(pick.storeys, lt.ring, lt, isShop); // one shell, final height
         const color = pick.color != null ? pick.color : WOOD;
         let b = null;
-        try { b = mk(root, lt.cx, lt.cz, w, d, storeys, color, lt.doorSide, pick.opts || { retail: true }); } catch (e) { b = null; }
+        // V2: numeric door side (see SIDE_IDX finding) + homes default to the
+        // RESIDENTIAL facade (masonry + punched windows) instead of a glass
+        // retail storefront — a town house should read as a house.
+        const sideArg = V2 && SIDE_IDX[lt.doorSide] != null ? SIDE_IDX[lt.doorSide] : lt.doorSide;
+        const shellOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
+        try { b = mk(root, lt.cx, lt.cz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }
         if (!b) continue;
         const doorPt = { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
         // is this a commercial lot or a home? (zone default, prefab override)
-        const isShop = (pick.lotKind || (lt.zone === "residential" ? "home" : "shop")) === "shop";
         // CONTRACT: shops.js reads lot.kind DIRECTLY (no b.shop.kind fallback) and
         // the mainland sets lot.kind = the TRADE (buildings.js:4788). So a town
         // shop's lot.kind must be the real trade key (food/bank/bar/...), or its
@@ -392,6 +481,7 @@
         const lotRec = {
           cx: lt.cx, cz: lt.cz, w, d, kind, district,
           ring: lt.ring, zone: lt.zone, town: cfg.name,
+          skylineStoreys: skylinePlan.get(lt) || null,
           building: { ...b, name: pick.name || "Building", sign: color, side: lt.doorSide, door: doorPt, shop: isShop },
         };
         const bb = lotRec.building;
@@ -408,12 +498,54 @@
           if (sk === "hospital") bb.hospital = true;
           if (sk === "realtor") bb.realtor = true;
           stampShopOwner(bb, sk, storeys);
+          // V2 — NO HOLLOW SHELLS: a real sales counter just inside the back
+          // wall (mirrors buildings.js's mainland counter math incl. the stair-
+          // strip clamp) + the full trade-specific interior dresser + dressed
+          // upper floors. Town shops were bare boxes before this.
+          if (V2 && b.lbox) {
+            const inx = -lt.door.nx, inz = -lt.door.nz;              // inward unit
+            const wt = b.wt != null ? b.wt : 0.6;
+            let ccx = inx * (w / 2 - 2.8), ccz = inz * (d / 2 - 2.8);
+            let cw = inx ? 0.8 : Math.min(w - 2, 4.5);
+            const cdp = inz ? 0.8 : Math.min(d - 2, 4.5);
+            if (b.hasStairs) {
+              const stairRight = -w / 2 + wt + (b.stairW || 4.2);
+              if (cw > 1) {
+                const roomRight = w / 2 - wt;
+                cw = Math.min(cw, Math.max(1.8, roomRight - stairRight - 1.0));
+                ccx = (stairRight + roomRight) / 2;
+              } else if (ccx - cw / 2 < stairRight + 0.5) {
+                ccx = stairRight + 0.5 + cw / 2;
+              }
+              ccx = Math.max(ccx, stairRight + 0.4 - inx * 1.2);
+            }
+            b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp, 0x6b4a2a, { solid: true });
+            // vendor stands BEHIND the real counter (replaces the estimate above)
+            bb.vendorSpot = { x: lt.cx + ccx + inx * 1.2, z: lt.cz + ccz + inz * 1.2, face: Math.atan2(lt.door.nx, lt.door.nz) };
+            if (CBZ.cityFurnishInterior) { try { CBZ.cityFurnishInterior(b, sk, { nx: inx, nz: inz }); } catch (e) {} }
+            if (CBZ.cityFurnishApartment) {
+              const fh = b.FH || 3.2;
+              for (let k = 1; k < (b.storeys || storeys); k++) {
+                try { CBZ.cityFurnishApartment(b, k * fh, (((lt.cx | 0) * 7 + (lt.cz | 0)) ^ k) & 0x7fffffff); } catch (e) {}
+              }
+            }
+          }
         } else {
           // cheap MICRO-unit home so a town resident can actually afford one;
           // listed:false → off the buy-ladder by default, but still a real home
           // with a landlord float whose owner getter flips on home.owned (T2).
           bb.home = { tier: 0, name: pick.name || "Home", price: 0, rent: pick.rent != null ? pick.rent : 90, listed: false, owned: false, floorY: 0, door: doorPt };
           stampHomeOwner(bb, storeys);
+          // V2 — a LIVED-IN home: every storey dressed as a real flat, which
+          // auto-registers sleepable beds/sittable seats (propRegisterBed/Seat
+          // → the generic "Sleep til morning"/sit prompts). Minecraft-village
+          // rule: a house is a place with a bed, not a decorated box.
+          if (V2 && CBZ.cityFurnishApartment) {
+            const fh = b.FH || 3.2;
+            for (let k = 0; k < (b.storeys || storeys); k++) {
+              try { CBZ.cityFurnishApartment(b, k * fh, (((lt.cx | 0) + (lt.cz | 0) * 3) ^ (k * 7)) & 0x7fffffff); } catch (e) {}
+            }
+          }
         }
         // T1 — expose to the REAL arena arrays so Zillow/shops/careers/vendor
         // staffing/minimap all see the town's lots (guarded; A may be null in a
@@ -448,7 +580,13 @@
         const def = CBZ.assets.get(pick.asset);
         if (def) {
           try {
-            const rot = pick.rot != null ? pick.rot : rng() * Math.PI * 2;
+            // V2: QUANTIZE prop facing to 90° multiples (one rng() draw either
+            // way — draw count unchanged, so determinism holds). This keeps
+            // enterable-hut wall AABBs axis-aligned with the hut mesh (their
+            // doorway gap follows this quantized facing). V2 off → the original
+            // free rotation, byte-identical.
+            const rot = pick.rot != null ? pick.rot
+              : (V2 ? (Math.floor(rng() * 4) * Math.PI / 2) : rng() * Math.PI * 2);
             const scale = pick.scale || 1;
             const grp = new THREE.Group();
             def.build({ group: grp, x: lt.cx, z: lt.cz, rot, rng, scale });
@@ -499,8 +637,27 @@
         dummy.updateMatrix(); benchIM.setMatrixAt(i, dummy.matrix);
       });
       benchIM.instanceMatrix.needsUpdate = true; benchIM.matrixAutoUpdate = false; benchIM.castShadow = true; root.add(benchIM);
-      // the town-name sign
-      if (CBZ.makeLabelSprite && cfg.name) { const s = CBZ.makeLabelSprite(cfg.name, { color: pal.sign || "#f4e7c2" }); if (s) { s.position.set(sx, 5.5, sz); s.scale.set(Math.min(14, cfg.name.length * 1.3 + 4), 3, 1); root.add(s); } }
+      // the town-name sign. V2: a PHYSICAL welcome board on two posts at the
+      // square's edge (owner rule: no floating word labels) — the cached name
+      // sprite sits pressed tight against the board face, same convention as
+      // the storefront sign boards above.
+      if (CBZ.makeLabelSprite && cfg.name) {
+        if (V2) {
+          const bw2 = Math.min(11, cfg.name.length * 0.72 + 3.2);
+          const bx = sx, bz = sz + sd / 2 - 2.0;
+          mergeAdd(root, [
+            (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx - bw2 / 2 + 0.3, 1.6, bz); return g; })(),
+            (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx + bw2 / 2 - 0.3, 1.6, bz); return g; })(),
+            (function () { const g = new THREE.BoxGeometry(bw2, 1.5, 0.18); g.translate(bx, 2.7, bz); return g; })(),
+          ], cmat(ACCENT), { cast: true });
+          solid(bx, bz, bw2, 0.5, 3.5);
+          const s = CBZ.makeLabelSprite(cfg.name, { color: pal.sign || "#f4e7c2" });
+          if (s) { s.position.set(bx, 2.7, bz + 0.16); s.scale.set(Math.min(bw2 - 0.6, cfg.name.length * 0.6 + 1.6), 1.1, 1); root.add(s); }
+        } else {
+          const s = CBZ.makeLabelSprite(cfg.name, { color: pal.sign || "#f4e7c2" });
+          if (s) { s.position.set(sx, 5.5, sz); s.scale.set(Math.min(14, cfg.name.length * 1.3 + 4), 3, 1); root.add(s); }
+        }
+      }
       square = { x: sx, z: sz, w: sw, d: sd };
     }
 
@@ -533,6 +690,31 @@
         dummy2.updateMatrix(); railIM.setMatrixAt(i, dummy2.matrix);
       }
       railIM.instanceMatrix.needsUpdate = true; railIM.matrixAutoUpdate = false; railIM.castShadow = true; root.add(railIM);
+    }
+
+    // SETTLEMENT REGISTRY — record this place so the world knows every
+    // settlement, its flavor/tier, and that it carries PURPOSE (shops with
+    // vendors, homes with beds, an optional casino). Reset per rebuild by
+    // settlements.js's cityWorldGeo wrapper.
+    if (V2) {
+      let shopsN = 0, homesN = 0, casinoN = false;
+      for (const l of filled) {
+        if (l.kind === "home") homesN++; else shopsN++;
+        if (l.kind === "casino") casinoN = true;
+      }
+      let bedsN = 0;
+      if (CBZ.propBeds) for (const bd of CBZ.propBeds) {
+        if (bd.x >= rect.minX && bd.x <= rect.maxX && bd.z >= rect.minZ && bd.z <= rect.maxZ) bedsN++;
+      }
+      (CBZ.settlements = CBZ.settlements || []).push({
+        name: cfg.name || "Town", cx: cx, cz: cz, rect: rect,
+        biome: cfg.biome || cfg.district || null,
+        flavor: comp ? comp.flavor : null,
+        tier: comp ? comp.tier : (CBZ.settlementTier ? CBZ.settlementTier(cfg) : null),
+        lots: filled, square: square,
+        counts: { shops: shopsN, homes: homesN, vendors: shopsN, beds: bedsN },
+        casino: casinoN,
+      });
     }
 
     return { name: cfg.name || "Town", cx, cz, rect, lots: filled, square, roads: townRoads };

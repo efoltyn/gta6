@@ -369,6 +369,11 @@
       if (car.v < 0) car.v = 0;
       car.pos.x += Math.sin(car.heading) * car.v * dt;
       car.pos.z += Math.cos(car.heading) * car.v * dt;
+      // VEH_COLLIDE_FIX: gig targets sit off the road grid near buildings/lots —
+      // without the shared wall resolver this car drove straight through any
+      // building in its beeline (same bug class steerEmergency/police already
+      // patched; pattern matches racedrivers.js/police.js).
+      if ((!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) && CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(car);
       if (A.clampToCity) A.clampToCity(car.pos, 1.4);
       car.group.position.set(car.pos.x, 0, car.pos.z);
       car.group.rotation.y = car.heading;

@@ -17,10 +17,12 @@
 
   // the locked gate filling the doorway gap
   const gate = addBox(19, 3, 1, 0.6, 6, 3.0, 0x2a2f38, { solid: true, blockLOS: true, emissive: 0x111418, ei: 0.4 });
+  gate.userData.mover = true;
   // cross-bars on the gate
   addBox(19, 4.2, 1, 0.7, 0.18, 3.0, 0x4a525c, { cast: false });
   addBox(19, 2.0, 1, 0.7, 0.18, 3.0, 0x4a525c, { cast: false });
   const lamp = addBox(20, 4.4, 1, 0.18, 0.18, 0.18, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false });
+  lamp.userData.mover = true;
 
   const armory = { gate, lamp, collider: gate.userData.collider, open: false, t: 0, slots: [] };
 
@@ -88,8 +90,11 @@
   function makeSlot(data) {
     const pad = addBox(27.25, data.y - 0.52, data.z, 0.12, 0.09, 1.55, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
     const model = buildRackModel(data.id);
+    // Slot ownership changes this model's scale at runtime. Keep its parent
+    // matrix live when the rest of the static prison set is frozen.
+    model.userData.dynamic = true;
     model.position.set(27.18, data.y, data.z + 0.46);
-    CBZ.scene.add(model);
+    (CBZ.prisonRoot || CBZ.scene).add(model);
     const slot = { id: data.id, name: data.name, pad, model, taken: false, cool: 0, x: 26.2, z: data.z };
     armory.slots.push(slot);
     return slot;

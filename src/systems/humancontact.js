@@ -3,7 +3,7 @@
 
    All three games use the same physical contract:
      - ordinary contact blocks the player instead of letting bodies phase;
-     - a committed sprint (or prison shoulder charge) knocks a person down;
+     - ordinary on-foot contact never becomes a free prison knockdown;
      - the victim remembers it and reacts through the abilities their mode has.
 
    Temperament controls how strongly an NPC reacts. Inventory remains a
@@ -15,7 +15,7 @@
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.makeGrid) return;
 
-  const CELL = 2.4, PERSON_R = 0.5;
+  const CELL = 2.4, PERSON_R = 0.36;
   const grids = Object.create(null);
   const cityList = [];
   const cityPlayer = { _p: true, isPlayer: true, pos: null, r: 0.55 };
@@ -156,8 +156,28 @@
 
   function hardPlayerContact(playerEntry, human, mode, nx, nz, overlap) {
     if (!playerCanCharge(mode, human) || (human._contactUntil || 0) > clock) return false;
+    // Running is movement, not an attack. In jail, let the normal separation
+    // path stop both bodies; knockdowns must come from an explicit punch,
+    // grapple, weapon, or other damaging action.
+    if (mode === "escape") return false;
     human._contactUntil = clock + 0.75;
     const hp = posOf(human);
+    // ON-FOOT GATE (owner: "run through someone and they fall over — in a car
+    // it makes sense, walking it's dumb"): in the CITY a sprint charge only
+    // ragdolls the frail/elderly slice (~8%, rolled once per ped — the comedy
+    // exception); everyone else takes a hard SHOVE — displaced, staggered by
+    // the react brain (curse/swing/flee per aggr), but stays on their feet.
+    // Vehicle hits never come through here (vehicles.js owns them).
+    if (mode === "city") {
+      if (human._frail == null) human._frail = Math.random() < 0.08;
+      if (!human._frail) {
+        hp.x += nx * (overlap + 0.45); hp.z += nz * (overlap + 0.45);
+        react(human, { mode, source: playerEntry, kind: "shoved", severity: 0.6 });
+        if (CBZ.shake) CBZ.shake(0.05);
+        hardHits++;
+        return true;
+      }
+    }
     hp.x += nx * (overlap + 0.15); hp.z += nz * (overlap + 0.15);
     knockdown(human, { mode, source: playerEntry, nx, nz, severity: 1 });
     react(human, { mode, source: playerEntry, kind: "run-over", severity: 1 });
@@ -235,7 +255,9 @@
     if (d2 >= min * min) return;
     const d = Math.sqrt(d2) || 1, nx = d2 > 1e-8 ? dx / d : 1, nz = d2 > 1e-8 ? dz / d : 0;
     const overlap = min - Math.min(d, min);
-    const charge = P.speed >= 6.2 && (CBZ.game.mode === "escape" || P.sprint) && S.contactCD[id] <= 0;
+    // The typed-array prison crowd follows the same rule as named actors:
+    // sprinting into a body blocks movement; it is not a zero-input attack.
+    const charge = CBZ.game.mode !== "escape" && P.speed >= 6.2 && P.sprint && S.contactCD[id] <= 0;
     if (charge) {
       S.posX[id] += nx * (overlap + 0.28); S.posZ[id] += nz * (overlap + 0.28);
       S.velX[id] += nx * 5; S.velZ[id] += nz * 5;

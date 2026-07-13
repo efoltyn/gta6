@@ -42,7 +42,8 @@
       legs: 0x232c47, torso: 0x2b3a67, collar: 0x1d2a4d, arms: 0x2b3a67,
       skin: 0xe7b58c, cap: 0x1d2a4d, shoes: 0x141414, belt: 0x14182a, badge: true,
     });
-    CBZ.scene.add(ch.group);
+    ch.group.userData.dynamic = true;
+    (CBZ.prisonRoot || CBZ.scene).add(ch.group);
 
     const wedge = visionWedge(viewDist, half, 18, 0xffe14d);
     wedge.visible = false;

@@ -45,8 +45,11 @@
   // sprawls EAST to the flat limit and DEEP to the south (flat maxZ was
   // pushed to 760 in terrain.js to hold it). ~1.8x the old footprint — a
   // genuinely vast empty tan basin you drive across, not a lobby.
-  const CX = 1115, CZ = 150, HX = 445, HZ = 470;
-  const MINX = CX - HX, MAXX = CX + HX;   // 670 .. 1560
+  // Leave a real ten-metre shoreline between the speedway's east rim (x=670)
+  // and the basin. The causeway spans that water; the old shared x=670 edge
+  // let the desert feather render underneath almost a quarter of the stadium.
+  const CX = 1120, CZ = 150, HX = 440, HZ = 470;
+  const MINX = CX - HX, MAXX = CX + HX;   // 680 .. 1560
   const MINZ = CZ - HZ, MAXZ = CZ + HZ;   // -320 .. 620
 
   // ---- causeway (land-bridge to the speedway island) -----------------------
@@ -227,7 +230,7 @@
     CBZ.registerCityRegion(city, { name: "Saltlands Causeway", subtitle: "Desert Mesa", kind: "rect", minX: Math.min(CW_X0, CW_X1), maxX: Math.max(CW_X0, CW_X1), minZ: CW_Z - 12, maxZ: CW_Z + 12, pad: 1 });
     // give traffic a road across the causeway (runs along X → not vertical)
     if (city.roads) {
-      city.roads.push({ x: (CW_X0 + CW_X1) / 2, z: CW_Z, vertical: false, len: Math.abs(CW_X1 - CW_X0), district: "highway" });
+      city.roads.push({ x: (CW_X0 + CW_X1) / 2, z: CW_Z, vertical: false, len: Math.abs(CW_X1 - CW_X0), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
 
     // =====================================================================
@@ -263,6 +266,7 @@
     if (CBZ.makeBiomeEdgeRing) {
       CBZ.makeBiomeEdgeRing(root, {
         cx: CX, cz: CZ, hx: HX, hz: HZ, feather: 100, segments: 20,
+        feathers: { west: 0 }, owner: "desert",
         inner: SAND, outer: 0x8a8a5c, y: 0.005, seed: 0x5dec7,
       });
     }
@@ -559,8 +563,8 @@
       // flat playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
         path: [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }],
-        width: 24, lanesPerDir: 2, laneW: 3.6, theme: "asphalt",
-        guardrail: true, lights: true, elevated: false, rng: rng,
+        width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
+        guardrail: true, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
       });
     } else {

@@ -26,7 +26,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
+  // Jail geometry belongs to one mode-owned root. Survival's builder reparents
+  // the handful of addBox results it creates into its own arena immediately.
+  const scene = CBZ.prisonRoot || CBZ.scene;
 
   // basic lambert material with optional emissive glow. FRESH every call —
   // use this when something will MUTATE the material per-instance (e.g.

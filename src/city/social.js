@@ -294,7 +294,7 @@
     // makeLabelSprite hands back a SHARED, cached material; clone it so our
     // per-bubble fade-out never touches every other sprite using that label.
     if (s.material && s.material._shared) { s.material = s.material.clone(); s.material._shared = false; }
-    s.position.y = 3.7; s.scale.set(Math.min(7, 2.6 + text.length * 0.16), 0.8, 1);
+    s.position.y = CBZ.charHeadY ? CBZ.charHeadY(ped) : 1.97; s.scale.set(Math.min(7, 2.6 + text.length * 0.16), 0.8, 1);
     s.userData.transient = true; ped.group.add(s);
     BUBBLES.push({ sprite: s, ped, t: secs || 2.4 });
   }

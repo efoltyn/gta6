@@ -77,7 +77,7 @@
     });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: _cwCX, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway" });
+      city.roads.push({ x: _cwCX, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6 });
     }
 
     // ================================================================
@@ -125,8 +125,8 @@
     // plane looked like a hard rectangular map layer from the air.
     if (CBZ.makeBiomeEdgeRing) {
       CBZ.makeBiomeEdgeRing(root, {
-        cx: CX, cz: CZ, hx: HX + 8, hz: HZ + 8, feather: 92, segments: 18,
-        inner: 0x35451f, outer: 0x6a7a4a, y: 0.008, seed: 0x0f02e57,
+        cx: CX, cz: CZ, hx: HX + 8, hz: HZ + 8, feather: 20, segments: 18,
+        inner: 0x35451f, outer: 0x6a7a4a, y: 0.008, seed: 0x0f02e57, owner: "forest",
       });
     }
 
@@ -142,7 +142,7 @@
       CBZ.buildHighway(root, {
         path: [{ x: cwCX, z: CW_MINZ }, { x: cwCX, z: CW_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
-        guardrail: true, lights: true, elevated: false, rng: rng,
+        guardrail: true, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
       });
     } else {

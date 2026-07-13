@@ -269,22 +269,71 @@
   //  loop never mishandles an item record. Shared geometry, pooled cmat.
   // ============================================================
   CBZ.cityItemDrops = CBZ.cityItemDrops || [];
-  const DROP_GEO = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+  const DROP_GEO = new THREE.BoxGeometry(0.55, 0.55, 0.55);
   const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
   function dropMat(payload) {
-    if (payload.weaponId || payload.melee) return cmat(0x23262d, { emissive: 0x39ff66, ei: 0.3 });
-    return cmat(0x2a2438, { emissive: 0xffd166, ei: 0.3 });
+    if (payload.weaponId || payload.melee) return cmat(0x23262d, { emissive: 0x39ff66, ei: 0.55 });
+    return cmat(0x2a2438, { emissive: 0xffd166, ei: 0.55 });
   }
+
+  // ---- UNMISSABLE-DROP kit: a glow shell hugging the cube + a tall additive
+  //      light column, pulsing (the modshop.js/playeraircraft.js additive-
+  //      basic-material pattern — our OWN materials, never a pooled cmat, so
+  //      the per-frame opacity pulse can't bleed into anyone else's mesh).
+  //      GREEN column = weapon, GOLD column = item — readable from a firefight
+  //      away. Shared geometry + 4 shared materials across ALL drops.
+  const SHELL_GEO = new THREE.BoxGeometry(0.78, 0.78, 0.78);
+  const BEAM_CORE_GEO = new THREE.BoxGeometry(0.22, 5.4, 0.22);
+  const BEAM_HALO_GEO = new THREE.BoxGeometry(0.52, 5.4, 0.52);
+  function beaconMat(color, opacity, additive) {
+    return new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity,
+      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      depthWrite: false,
+    });
+  }
+  // the beacon is a Minecraft-style light column: a near-SOLID saturated CORE
+  // (normal blending — additive alone disappears against bright daylight)
+  // wrapped in an ADDITIVE halo, plus an additive shell hugging the cube.
+  const MAT_CORE_W = beaconMat(0x17e04e, 0.95), MAT_CORE_I = beaconMat(0xffb81f, 0.95);
+  const MAT_HALO_W = beaconMat(0x39ff66, 0.35, true), MAT_HALO_I = beaconMat(0xffd166, 0.35, true);
+  const MAT_SHELL_W = beaconMat(0x39ff66, 0.3, true), MAT_SHELL_I = beaconMat(0xffd166, 0.3, true);
+  // attach the glow kit to a drop mesh (children ride its bob/spin). scaleComp
+  // un-scales the kit when the parent mesh itself is scaled (NPC gun planks).
+  function attachBeacon(mesh, isWeapon, scaleComp) {
+    if (!mesh || mesh._inv2Beacon) return;
+    mesh._inv2Beacon = true;
+    const k = scaleComp || 1;
+    const shell = new THREE.Mesh(SHELL_GEO, isWeapon ? MAT_SHELL_W : MAT_SHELL_I);
+    shell.scale.setScalar(k);
+    const core = new THREE.Mesh(BEAM_CORE_GEO, isWeapon ? MAT_CORE_W : MAT_CORE_I);
+    core.scale.setScalar(k);
+    core.position.y = 2.7 * k;
+    const halo = new THREE.Mesh(BEAM_HALO_GEO, isWeapon ? MAT_HALO_W : MAT_HALO_I);
+    halo.scale.setScalar(k);
+    halo.position.y = 2.7 * k;
+    mesh.add(shell); mesh.add(core); mesh.add(halo);
+  }
+  // one global pulse — every drop breathes together (6 material writes/frame)
+  function pulseBeacons() {
+    const s = Math.sin((CBZ.now || 0) * 3.2);
+    MAT_CORE_W.opacity = 0.88 + 0.1 * s; MAT_CORE_I.opacity = 0.88 + 0.1 * s;
+    MAT_HALO_W.opacity = 0.26 + 0.16 * s; MAT_HALO_I.opacity = 0.26 + 0.16 * s;
+    MAT_SHELL_W.opacity = 0.24 + 0.14 * s; MAT_SHELL_I.opacity = 0.24 + 0.14 * s;
+  }
+
   CBZ.cityDropItem = function (x, z, payload) {
     payload = payload || {};
     let mesh = null;
     const root = arenaRoot();
-    const y0 = (payload.y != null ? payload.y : floorY(x, z)) + 0.45;
+    const y0 = (payload.y != null ? payload.y : floorY(x, z)) + 0.5;
+    const isWeapon = !!(payload.weaponId || payload.melee);
     if (root) {
       mesh = new THREE.Mesh(DROP_GEO, dropMat(payload));
       mesh.position.set(x, y0, z);
       mesh.rotation.y = (x * 7 + z * 13) % 6.28;   // deterministic-ish cosmetic spin seed
       mesh.userData.transient = true;
+      attachBeacon(mesh, isWeapon);
       root.add(mesh);
     }
     CBZ.cityItemDrops.push({
@@ -294,6 +343,33 @@
       melee: payload.melee || null,
     });
   };
+
+  // ---- NPC gun drops (peds.js CBZ.cityDrops) get the SAME beacon: wrap
+  //      CBZ.cityDropWeapon (peds.js untouched). Their pickup path removes
+  //      the whole mesh subtree, so the kit leaves with the drop; my tick
+  //      bobs/spins their (otherwise static) plank too.
+  function installDropWeaponWrap() {
+    if (typeof CBZ.cityDropWeapon !== "function" || CBZ.cityDropWeapon._inv2BeaconWrap) return;
+    const orig = CBZ.cityDropWeapon;
+    const wrapped = function (x, z, weapon, ammo) {
+      const r = orig.apply(this, arguments);
+      try {
+        if (on()) {
+          const arr = CBZ.cityDrops;
+          const d = arr && arr[arr.length - 1];
+          if (d && d.mesh && !d.mesh._inv2Beacon && d.x === x && d.z === z) {
+            d.mesh.scale.setScalar(1.5);              // the 0.7u plank reads at distance now
+            attachBeacon(d.mesh, true, 1 / 1.5);
+            d._inv2Y0 = d.mesh.position.y;
+          }
+        }
+      } catch (e) {}
+      return r;
+    };
+    for (const k in orig) if (Object.prototype.hasOwnProperty.call(orig, k)) wrapped[k] = orig[k];
+    wrapped._inv2BeaconWrap = true;
+    CBZ.cityDropWeapon = wrapped;
+  }
   function removeItemDrop(i) {
     const d = CBZ.cityItemDrops[i];
     if (d && d.mesh && d.mesh.parent) d.mesh.parent.remove(d.mesh);   // pooled mat + shared geo: never dispose
@@ -317,14 +393,35 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   function tickItemDrops(dt) {
+    pulseBeacons();
+    // beacon-ize + bob/spin EVERY NPC gun drop. LAZY SWEEP, not just the
+    // cityDropWeapon wrap: cityKillPed calls peds.js's INTERNAL dropWeapon()
+    // directly (the global alias never runs), so records can land in
+    // CBZ.cityDrops without passing any wrappable function — this sweep
+    // catches them all within a frame. Idempotent via mesh._inv2Beacon.
+    const npcDrops = CBZ.cityDrops;
+    if (npcDrops && npcDrops.length) {
+      for (let i = 0; i < npcDrops.length; i++) {
+        const d = npcDrops[i];
+        if (!d.mesh) continue;
+        if (!d.mesh._inv2Beacon && on()) {
+          d.mesh.scale.setScalar(1.5);
+          attachBeacon(d.mesh, true, 1 / 1.5);
+          d._inv2Y0 = d.mesh.position.y;
+        }
+        if (!d.mesh._inv2Beacon) continue;
+        d.mesh.position.y = (d._inv2Y0 != null ? d._inv2Y0 : 0.25) + 0.18 + Math.sin((d.t || 0) * 2.6) * 0.16;
+        d.mesh.rotation.y += dt * 2.0;
+      }
+    }
     const drops = CBZ.cityItemDrops;
     if (!drops.length) return;
     const P = CBZ.player;
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       d.t += dt;
-      if (d.mesh) { d.mesh.position.y = d.y0 + Math.sin(d.t * 2.4) * 0.09; d.mesh.rotation.y += dt * 1.4; }
-      if (P && !P.dead && !P.driving && Math.abs(P.pos.y - (d.y0 - 0.45)) < 2.5 &&
+      if (d.mesh) { d.mesh.position.y = d.y0 + 0.1 + Math.sin(d.t * 2.6) * 0.16; d.mesh.rotation.y += dt * 2.0; }
+      if (P && !P.dead && !P.driving && Math.abs(P.pos.y - (d.y0 - 0.5)) < 2.5 &&
           Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 1.5) {
         pickupItemDrop(d);
         removeItemDrop(i);
@@ -926,6 +1023,16 @@
   function hudBarPresent() {
     const el = document.getElementById("cSlots");
     if (!el) return false;
+    // COMPUTED visibility, not existence: the campaign's declutter CSS hides
+    // #cSlots with display:none !important (css/campaign.css) while the node
+    // stays in the DOM — the owner's session had NO hotbar because this check
+    // used to stop at "the element exists".
+    try {
+      const cs = getComputedStyle(el);
+      if (cs.display === "none" || cs.visibility === "hidden") return false;
+      const r = el.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) return false;
+    } catch (e) {}
     const wrap = document.getElementById("cityHud");
     if (wrap && wrap.style.display === "none") return false;
     return true;
@@ -986,6 +1093,7 @@
     }
     if (root) hydrateChests();
     installDeathWrap();          // death.js defines cityKillPlayer before us, but stay lazy-safe
+    installDropWeaponWrap();     // peds.js defines cityDropWeapon before us, ditto
 
     tickItemDrops(dt);
 
@@ -1034,6 +1142,7 @@
   }
 
   installDeathWrap();
+  installDropWeaponWrap();
   registerChestItem();
 
   // ============================================================

@@ -17,6 +17,16 @@
   // Camera children are used for first-person viewmodels.
   scene.add(camera);
 
+  // Prison content used to be attached directly to the global scene. That
+  // meant every guard, inmate and prison prop was still submitted while the
+  // city was active (and the prison collider/render world leaked into the
+  // other modes). Give the jail one ownership root, matching the city and
+  // survival arenas, so a mode switch can reject the entire subtree at once.
+  const prisonRoot = new THREE.Group();
+  prisonRoot.name = "prison-world";
+  scene.add(prisonRoot);
+
   CBZ.scene = scene;
   CBZ.camera = camera;
+  CBZ.prisonRoot = prisonRoot;
 })();

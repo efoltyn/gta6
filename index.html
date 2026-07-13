@@ -120,7 +120,8 @@
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sneak</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Ctrl / C</span></span><span class="lab">Sneak</span></div>
           <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
           <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact</span></div>
           <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire · reload</span></div>
@@ -319,10 +320,13 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-<script src="src/entities/character.js?v=mounts1"></script>
+<script src="src/entities/character.js?v=mounts2"></script>
 <script src="src/entities/player.js?v=scale1"></script>
 <script src="src/entities/coins.js"></script>
-<script src="src/entities/decals.js"></script>
+<!-- Legacy down-state decals intentionally disabled. They inferred blood from
+     `ko`/pooled-rig sentinel state, so clean tackles, sprints, tasers and even
+     crowd LOD demotion manufactured pools. systems/gore.js + wounds.js own
+     blood from explicit damage events instead. -->
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
@@ -346,7 +350,7 @@
 <script src="src/weapons/appearances/sniper.js"></script>
 <script src="src/weapons/appearances/lmg.js"></script>
 <script src="src/systems/actorweapons.js?v=gunorigin1"></script>
-<script src="src/systems/holsterprops.js?v=mounts1"></script>
+<script src="src/systems/holsterprops.js?v=mounts2"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
@@ -487,6 +491,10 @@
      towers.js): they now need spawnPiece to exist at parse time. -->
 <script src="src/world/crates.js"></script>
 <script src="src/world/props.js"></script>
+<!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
+     wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
+     and after worldmap.js (whose cityWorldGeo it wraps). -->
+<script src="src/city/settlements.js?v=settle1"></script>
 <script src="src/city/towngen.js?v=sims1"></script>
 <script src="src/city/island_speedway.js?v=arch1"></script>
 <script src="src/city/island_airport.js?v=arch3"></script>
@@ -649,13 +657,13 @@
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
-<script src="src/city/charpanel.js?v=cp1"></script>
+<script src="src/city/charpanel.js?v=cp2"></script>
 <!-- INVENTORY V2 (CBZ.CONFIG.INVENTORY_V2): the Minecraft-like city inventory —
      renders the interactive [I] slot grid into charpanel's overlay, owns world
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=inv1"></script>
+<script src="src/city/inventory.js?v=inv2"></script>
 <script src="src/city/phone.js?v=story1"></script>
 <script src="src/city/killfeed.js?v=night3"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
@@ -666,7 +674,7 @@
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=story1"></script>
-<script src="src/city/campaign.js?v=story6"></script>
+<script src="src/city/campaign.js?v=story7"></script>
 <script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
@@ -786,6 +794,11 @@
      honest for any future eager caller. -->
 <script src="src/city/villagekit.js?v=world1"></script>
 <script src="src/city/countries.js?v=world1"></script>
+<!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
+     Ace + composed town casinos): marquee/mast exterior, felt tables with
+     seats + an "[E] Sit at the table" that opens the casino floor. Loads after
+     countries.js and its deps (interactions.js, activities.js, worldmap). -->
+<script src="src/city/casino.js?v=casino1"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
 <script src="src/city/continent.js?v=1"></script>

@@ -401,7 +401,7 @@
 
   // find a guard-broken OR downed foe in finisher range (close, in front)
   function finisherTarget() {
-    const t = aimTarget(2.6, 0.1);
+    const t = aimTarget(1.82, 0.1);
     if (!t || t.animal) return null;   // animals aren't execution targets — land() routes them
     const open = (t._broken || 0) > 0 || (t.ko > 0 && !t.dead) ||
                  (CBZ.body && CBZ.body.busy && CBZ.body.busy(t) && t.hp <= (t.maxHp || 100) * 0.45);
@@ -452,7 +452,7 @@
     animSwing(kind, finisher);
     spend(finisher ? 9 : 5);
 
-    const t = aimTarget(finisher ? 3.1 : 2.7, 0.3);
+    const t = aimTarget(finisher ? 2.17 : 1.89, 0.3);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     const base = it() ? it().dmg : 16;
     // jab/cross scale up through the chain; the hook (3rd) is the big one
@@ -488,7 +488,7 @@
     animSwing("upper", true);                 // a big rising/overhand blow
     spend(16);
 
-    const t = aimTarget(3.0, 0.2);
+    const t = aimTarget(2.1, 0.2);
     if (CBZ.sfx) CBZ.sfx("whoosh");
     const base = it() ? it().dmg : 16;
     const dmg = Math.round(base * 2.4);
@@ -532,7 +532,7 @@
       // the actorMuzzle wrap; here we make the damage agree with the visual.
       if (attacker && attacker._losBlocked && fromX != null && !attacker.isPlayer) return;
       // only melee-range threats are parryable/blockable (guns/cars unaffected)
-      const meleeRange = (fromX != null) && (Math.hypot((fromX) - P.pos.x, (fromZ) - P.pos.z) < 3.2);
+      const meleeRange = (fromX != null) && (Math.hypot((fromX) - P.pos.x, (fromZ) - P.pos.z) < 2.25);
       if (guardT > 0 && !headshot && meleeRange && !P.dead && pBrokenT <= 0) {
         if (parryT > 0) {
           // PERFECT PARRY / DEFLECT → negate, slam the attacker's POSTURE (Sekiro:
@@ -644,7 +644,7 @@
   const AIM_ELEV_MAX = 0.70;   // rad (~40°) arm pitch clamp (reactions used 0.55; raised for rooftops)
   const AIM_DAMP = 0.0008;     // damp base → ~130ms acquire/release blend (k = 1 - AIM_DAMP^dt)
   const AIM_HOLD = 1.2;        // s the arm holds its aim after the last shot (> max NPC fire cadence)
-  const AIM_SHOULDER_Y = 1.84; // shoulder height above actor.pos.y (character.js arm socket)
+  const AIM_SHOULDER_Y = 1.29; // shoulder height above actor.pos.y — character.js collar (1.84 local) × HUMAN_SCALE 0.70 for the shrunk ~1.82m rig (was 1.84, aimed the gun-arm ~0.55m high)
   const RA_BASE = -1.45, RA_BASE_LONG = -1.50, LA_BASE_LONG = -1.20; // MUST match actorweapons setReadyPose
   // per-slot tracer spread half-angle (rad); table lives with the weapon data
   const SPREAD_DEF = { pistol: 0.065, rifle: 0.040, auto: 0.090, long: 0.075, utility: 0.055, _def: 0.055 };
@@ -674,7 +674,7 @@
     const t = a._aimTgt;
     if (!t || !t.pos || t.dead || (a._aimTgtT || 0) <= 0) return 0;
     const hd = Math.hypot(t.pos.x - a.pos.x, t.pos.z - a.pos.z) || 0.001;
-    const ty = (t.pos.y || 0) + (t.isPlayer ? 1.5 : 1.3);
+    const ty = (t.pos.y || 0) + (t.isPlayer ? 1.05 : 0.91);  // target chest height × HUMAN_SCALE (was 1.5 / 1.3)
     let armC = -Math.atan2(ty - ((a.pos.y || 0) + AIM_SHOULDER_Y), hd);
     if (armC > AIM_ELEV_MAX) armC = AIM_ELEV_MAX;
     else if (armC < -AIM_ELEV_MAX) armC = -AIM_ELEV_MAX;

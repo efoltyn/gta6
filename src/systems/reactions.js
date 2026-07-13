@@ -749,12 +749,12 @@
           if (aimT) {
             const tdx = aimT.pos.x - a.pos.x, tdz = aimT.pos.z - a.pos.z;
             const th = Math.hypot(tdx, tdz) || 0.001;
-            const ty = (aimT.pos.y || 0) + (aimT.isPlayer ? 1.5 : 1.35);
+            const ty = (aimT.pos.y || 0) + (aimT.isPlayer ? 1.05 : 0.95);  // chest height × HUMAN_SCALE 0.70 (was 1.5 / 1.35)
             let relY = Math.atan2(tdx, tdz) - ry;
             relY = ((relY + Math.PI) % (Math.PI * 2)) - Math.PI;
             if (relY < -Math.PI) relY += Math.PI * 2;
             if (relY > AIM_HEAD_YAW) relY = AIM_HEAD_YAW; else if (relY < -AIM_HEAD_YAW) relY = -AIM_HEAD_YAW;
-            const elev = Math.atan2(ty - ((a.pos.y || 0) + 1.84), th);  // shoulder → target
+            const elev = Math.atan2(ty - ((a.pos.y || 0) + 1.29), th);  // shoulder → target (1.84 local collar × HUMAN_SCALE 0.70)
             let hp2 = -elev * 0.7;                                      // facial convention: -x looks up
             if (hp2 > AIM_HEAD_PIT) hp2 = AIM_HEAD_PIT; else if (hp2 < -AIM_HEAD_PIT) hp2 = -AIM_HEAD_PIT;
             let armC = -elev;                                           // more negative = barrel raised

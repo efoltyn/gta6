@@ -6,7 +6,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
 
   // searchlights are real SENSORS when this is on: systems/detection.js
   // consumes CBZ.litBySearchlight (heat + guard pings), and down in update()
@@ -27,6 +27,7 @@
     const spot = new THREE.SpotLight(0xfff3c0, 1.4, 60, 0.5, 0.5, 1.2);
     spot.position.set(towerX, 6.2, towerZ);
     const tgt = new THREE.Object3D();
+    tgt.userData.mover = true;
     scene.add(tgt);
     spot.target = tgt;
     scene.add(spot);
@@ -36,6 +37,7 @@
       new THREE.CylinderGeometry(0.4, 6, 14, 18, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false })
     );
+    cone.userData.mover = true;
     cone.position.set(towerX, 6.2, towerZ);
     scene.add(cone);
 
@@ -44,6 +46,7 @@
       new THREE.CircleGeometry(5, 24),
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.22, depthWrite: false })
     );
+    pool.userData.mover = true;
     pool.rotation.x = -Math.PI / 2;
     pool.position.y = 0.06;
     scene.add(pool);
@@ -131,7 +134,11 @@
     return false;
   };
 
-  CBZ.onUpdate(21, update);
+  CBZ.onUpdate(21, function (dt) {
+    if (CBZ.game.mode === "escape") update(dt);
+  });
   // keep them sweeping on the title screen too, for atmosphere
-  CBZ.onAlways(7, function (dt) { if (CBZ.game.state !== "playing") update(dt); });
+  CBZ.onAlways(7, function (dt) {
+    if (CBZ.game.mode === "escape" && CBZ.game.state !== "playing") update(dt);
+  });
 })();

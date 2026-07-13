@@ -482,7 +482,15 @@
     if (!res.want) return;
     const ch = CBZ.playerChar;
     if (!ch) { _pSig = ""; return; }           // rig not up — retry next tick
-    const an = { body: ch.body, neck: ch.neck, la: ch.parts && ch.parts.la, ra: ch.parts && ch.parts.ra };
+    // wristL(watch)/wristR(bracelet)/ring hang from the "la"/"ra" slot, which on
+    // the two-segment rig MUST resolve to the ELBOW group (forearm frame) — the
+    // watch offset (y -0.20) reads at the wrist there. Resolving to ch.parts.la
+    // (the SHOULDER pivot) instead put the player's watch up at the ARMPIT while
+    // every ped + the portrait card (charpanel.js) used the elbow. Mirror
+    // anchorsOf() exactly so all three paths agree.
+    const laA = (ch.low && ch.low.la) || (ch.parts && ch.parts.la && ch.parts.la.userData.low) || (ch.parts && ch.parts.la);
+    const raA = (ch.low && ch.low.ra) || (ch.parts && ch.parts.ra && ch.parts.ra.userData.low) || (ch.parts && ch.parts.ra);
+    const an = { body: ch.body, neck: ch.neck, la: laA, ra: raA };
     const meshes = [];
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];

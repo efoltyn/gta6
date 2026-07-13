@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const scene = CBZ.scene;
+  const scene = CBZ.prisonRoot || CBZ.scene;
   const { mat, addBox, checkerTex, concreteTex } = CBZ;
 
   // huge base ground so the world continues past the exit gate

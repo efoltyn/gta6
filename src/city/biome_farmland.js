@@ -190,6 +190,8 @@
       CBZ.makeBiomeEdgeRing(root, {
         cx: CX, cz: CZ, hx: (MAXX - MINX) / 2 + 8, hz: (MAXZ - MINZ) / 2 + 8,
         feather: 104, segments: 20, inner: 0x6b4f33, outer: 0x6e7a48,
+        feathers: (CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1) ? { west: 0, north: 0 } : { west: 0 },
+        owner: "farmland",
         y: 0.006, seed: 0xfa411,
       });
     }
@@ -415,7 +417,10 @@
     // collider you bump into.
     const wtx = HX + 4, wtz = HZ + 34;
     for (const lx of [-3, 3]) for (const lz of [-3, 3]) {
-      const leg = box(wtx + lx, 5, wtz + lz, 0.4, 10, 0.4, M.metal, false);
+      // VEH_COLLIDE_FIX: legs are solid steel — the tank above was already a
+      // collider but a car could drive clean through its supports.
+      const legSolid = !CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false;
+      const leg = box(wtx + lx, 5, wtz + lz, 0.4, 10, 0.4, M.metal, legSolid);
       leg.rotation.z = -lx * 0.04; leg.rotation.x = lz * 0.04;
     }
     cyl(wtx, 11.5, wtz, 3, 3, 4, M.metal, true);
@@ -549,6 +554,12 @@
         _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);   // lay cylinder on side
         _p.set(pt.x, 0.7, pt.z); _scl.set(1, 1, 1);
         _m.compose(_p, _q, _scl); baleMats.push(_m.clone());
+        // VEH_COLLIDE_FIX: a 1.4m round bale is a half-ton of packed hay — it
+        // looked solid but was pure InstancedMesh decoration a car ghosted
+        // through. AABB matches the side-lying cylinder's footprint.
+        if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) {
+          cols.push({ minX: pt.x - 0.85, maxX: pt.x + 0.85, minZ: pt.z - 0.85, maxZ: pt.z + 0.85 });
+        }
       }
     }
     buildInstanced(new THREE.CylinderGeometry(0.7, 0.7, 1.6, 10), M.hay, baleMats, true);
@@ -592,26 +603,60 @@
     // 8) TRACTOR + COMBINE — try traffic-car models so they read as vehicles;
     //    fall back to simple static boxes so the farm never looks empty.
     // =====================================================================
-    function staticTractor(x, z, bodyMat) {
+    // FARM EQUIPMENT IS REAL now (owner: "farm has fake equipment"): each rig
+    // registers as a first-class parked vehicle via CBZ.cityRegisterVehicle —
+    // enterable/drivable ("Boost it" like any parked car), solid to traffic
+    // (resolveCars), keeping its own custom body. persist:true so a traffic
+    // reset never strips the farm. Fallback (helper absent / flag off): the
+    // old static AABB collider, so the rigs are at minimum solid.
+    const equipReal = (!CBZ.CONFIG || CBZ.CONFIG.FARM_EQUIPMENT_REAL !== false) && !!CBZ.cityRegisterVehicle;
+    function staticTractor(x, z, bodyMat, name) {
+      // HUMAN-RATIO PASS: real farm-tractor envelope is ~4.6L x 2.4W x ~2.9H to
+      // the cab roof (John Deere 8530-class chassis is ~3.25m but the owner
+      // wanted the toy read pulled down toward a mid-size utility tractor so it
+      // sits believably beside a 1.82m driver). Was 2.4x4.2 body + a 3.4-tall
+      // cab and ~3.1-wide wheel stance — a full head-and-shoulders too tall/wide
+      // next to the shrunk human. Members stay chunky (>=0.3u) and every box
+      // overlaps its neighbour in y so the rig is support-connected to the wheels.
       const g = new THREE.Group(); g.position.set(x, 0, z);
-      const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.4, 4.2), bodyMat);
-      body.position.y = 1.3; body.castShadow = true; g.add(body);
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(2, 1.6, 2), M.metal);
-      cab.position.set(0, 2.6, -0.4); g.add(cab);
-      // big rear wheels, small front
-      for (const [wx, wz, wr] of [[-1.3, -1.2, 1.1], [1.3, -1.2, 1.1], [-1.1, 1.5, 0.6], [1.1, 1.5, 0.6]]) {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.25, 4.0), bodyMat);
+      body.position.y = 1.15; body.castShadow = true; g.add(body);   // top 1.775
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.4, 1.8), M.metal);
+      cab.position.set(0, 2.2, -0.4); g.add(cab);                    // top 2.9, base 1.5 overlaps body
+      // non-empty userData spares every panel from the static batch merge —
+      // a driven rig must take its whole body with it, not leave a baked ghost.
+      if (equipReal) { body.userData.vehiclePart = true; cab.userData.vehiclePart = true; }
+      // big rear wheels, small front — stance trimmed so the outer tyre face
+      // lands at |x|=1.2 (0.95 hub + 0.25 half-tread) → 2.4u track.
+      for (const [wx, wz, wr] of [[-0.95, -1.2, 0.9], [0.95, -1.2, 0.9], [-0.85, 1.5, 0.55], [0.85, 1.5, 0.55]]) {
         const w = new THREE.Mesh(new THREE.CylinderGeometry(wr, wr, 0.5, 12), M.tire);
         w.rotation.z = Math.PI / 2; w.position.set(wx, wr, wz); g.add(w);
+        // tagged so the driven rig spins its wheels — the non-empty userData
+        // also spares these meshes from the static batch merge.
+        if (equipReal) w.userData.playerWheel = true;
       }
       root.add(g);
-      cols.push({ minX: x - 1.5, maxX: x + 1.5, minZ: z - 2.4, maxZ: z + 2.4 });
+      if (equipReal) {
+        g.userData.farmRig = name || "Tractor";   // spares the group's meshes' parent from batching by ref
+        CBZ.cityRegisterVehicle(g, {
+          body: "pickup", style: "van", persist: true, heading: 0,
+          model: { name: name || "Tractor", value: 2600, rarity: 0.05, body: "pickup" },
+          dims: { width: 2.4, length: 4.6, height: 2.9, wheelbase: 2.5 },
+          color: 0x2e7d32,
+        });
+      } else {
+        // static fallback: at least a solid obstacle, never a ghost
+        cols.push({ minX: x - 1.2, maxX: x + 1.2, minZ: z - 2.3, maxZ: z + 2.3 });
+      }
       return g;
     }
-    staticTractor(HX - 4, HZ + 4, M.tractorGreen);
-    // combine: bigger yellow body with a header up front
-    const comb = staticTractor(HX - 12, HZ + 6, M.tractorYellow);
-    const header = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.8, 1.4), M.metal);
-    header.position.set(0, 0.8, 2.8); comb.add(header);
+    staticTractor(HX - 4, HZ + 4, M.tractorGreen, "Tractor");
+    // combine: bigger yellow body with a header up front (the header is what
+    // reads it as a harvester; the chassis matches the tractor envelope above).
+    const comb = staticTractor(HX - 12, HZ + 6, M.tractorYellow, "Combine Harvester");
+    const header = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.7, 1.4), M.metal);
+    header.position.set(0, 0.75, 2.6); comb.add(header);   // inner edge overlaps the 4.0-long body
+    if (equipReal) header.userData.vehiclePart = true;
 
     // =====================================================================
     // 8b) HARVEST MARKET — the farm county's market town, grown from the
@@ -662,7 +707,7 @@
       CBZ.buildHighway(root, {
         path: [{ x: ROAD_X, z: ROAD_MINZ }, { x: ROAD_X, z: ROAD_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
-        guardrail: true, lights: true, elevated: false, rng: rng,
+        guardrail: true, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
       });
       // soft soil shoulder so the deck reads as raised land over the sea
@@ -777,7 +822,7 @@
     CBZ.registerCityRegion(city, { name: "Coyle Causeway", subtitle: "Farm County", kind: "rect", minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: ROAD_MINZ, maxZ: ROAD_MAXZ, pad: 1 });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: ROAD_X, z: (ROAD_MINZ + ROAD_MAXZ) / 2, vertical: true, len: ROAD_MAXZ - ROAD_MINZ, district: "highway" });
+      city.roads.push({ x: ROAD_X, z: (ROAD_MINZ + ROAD_MAXZ) / 2, vertical: true, len: ROAD_MAXZ - ROAD_MINZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6 });
     }
   }, 33);
 })();
