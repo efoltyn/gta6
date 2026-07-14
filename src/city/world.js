@@ -96,7 +96,15 @@
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(spanX + 58, spanZ + 58),
       baseTex ? new THREE.MeshLambertMaterial({ map: baseTex }) : mat(0x3a3e45));
     ground.rotation.x = -Math.PI / 2; ground.position.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
-    ground.receiveShadow = true; root.add(ground);
+    ground.receiveShadow = true;
+    // A land floor is not disposable scenery.  Far-distance culling can keep
+    // the measured building LOD alive after hiding an ordinary top-level mesh;
+    // exempting the authored surface prevents the skyline from appearing to
+    // stand directly in the harbour when viewed from aircraft or a boat.
+    ground.userData.terrain = true;
+    ground.userData.worldSurface = true;
+    ground.name = "mainland-city-surface";
+    root.add(ground);
 
     // ---- THE SEA: one giant water plane under city + island, so every map
     //      edge reads as COASTLINE instead of void (the perimeter wall becomes
@@ -116,9 +124,10 @@
     //      Revert: CBZ.CONFIG.SEA_OVERHAUL = false (old plane returns). ----
     const CFGW = (CBZ.CONFIG = CBZ.CONFIG || {});
     if (CFGW.SEA_OVERHAUL == null) CFGW.SEA_OVERHAUL = true;
-    const SEA_Y = -0.48;                 // mean surface (waves ride ±0.055)
+    const SEA_Y = -0.48;                 // mean surface (waves ride ±0.135)
     CBZ.SEA_Y = SEA_Y;                   // single source of truth for tooling
     let seaMat2 = null;                  // the animated sea material (below)
+    let seaNormalTex = null;             // one tiny generated, tiled ripple normal
     const seaTimeU = { value: 0 };       // shared shader clock (runtime-only FX)
     if (CFGW.SEA_OVERHAUL === false) {
       // legacy path: one giant flat plane, widened to 6200 so the whole
@@ -127,17 +136,7 @@
       sea.rotation.x = -Math.PI / 2; sea.position.set(cx + 150, -0.5, cz - 200);
       sea.receiveShadow = false; root.add(sea);
     }
-    // ---- PROCEDURAL BACKDROP TERRAIN (world/terrain.js): a snow-capped
-    //      mountain range + rolling hills in the FAR ring around the map.
-    //      It is EXACTLY flat (y=0) across the whole playable archipelago, so
-    //      physics is untouched where anyone walks/drives — relief only rises
-    //      out past the seawall ring on the horizon. Parented to root so it
-    //      hides with the city in other modes. One relief mesh + one merged
-    //      hero-peak mesh (≈3 draw calls). No-ops if terrain.js / window.noise
-    //      is absent or CBZ.PROC_TERRAIN === false. ----
-    if (CBZ.buildTerrain) { try { CBZ.buildTerrain(root); } catch (e) { console.error("[city terrain]", e); } }
-
-    const seaDay = new THREE.Color(0x2f6f9e), seaNight = new THREE.Color(0x0e2233), seaDusk = new THREE.Color(0x6b5a78);
+    const seaDay = new THREE.Color(0x15445f), seaNight = new THREE.Color(0x071722), seaDusk = new THREE.Color(0x403e58);
     CBZ.onAlways(93, function () {
       if (!root.visible) return;                 // city hidden → other modes untouched
       const k = CBZ.dayness != null ? CBZ.dayness : 1;
@@ -149,6 +148,12 @@
         seaMat2.color.copy(seaMat.color);
         const tNow = (typeof performance !== "undefined" ? performance.now() : Date.now());
         seaTimeU.value = (tNow * 0.001) % 3600;
+        // Drift the small normal field across the large geometric swells. Two
+        // unequal axes avoid a conveyor-belt read; the texture is only 96².
+        if (seaNormalTex) {
+          seaNormalTex.offset.x = (seaTimeU.value * 0.0075) % 1;
+          seaNormalTex.offset.y = (seaTimeU.value * -0.0048) % 1;
+        }
       }
     });
 
@@ -695,12 +700,13 @@
       // builds sand/boardwalk/pier inside this span; the wall above skips it)
       shore: { EW, EE, ES, EN, beach: { x0: BX0, x1: BX1 } },
       // Universal ground-height oracle (mode.js routes CBZ.floorAt here in
-      // city mode). The procedural backdrop terrain returns EXACTLY 0 over the
-      // whole playable region (city + biomes + islands + roads + spawns), so
-      // this is byte-identical to flat anywhere a person/vehicle can stand —
-      // only the far backdrop ring has relief. Falls back to flat 0 if
-      // terrain.js / PROC_TERRAIN is off.
-      groundHeightAt(x, z) { return (window.CBZ.terrainHeight ? CBZ.terrainHeight(x, z) : 0); },
+      // city mode). Decorative backdrop terrain is disabled; only registered,
+      // reachable landmasses may raise the floor. Mount Mercy is the first
+      // provider, and its render mesh samples the exact same function.
+      groundHeightAt(x, z) {
+        const real = CBZ.cityGroundHeightAt ? (+CBZ.cityGroundHeightAt(x, z) || 0) : 0;
+        return Math.max(0, real);
+      },
       // land-value field (PROCGEN.md roadmap #3): distance-to-centre falloff +
       // waterfront proximity bonus + low-freq deterministic noise, ~[0,1].
       // Sampled by buildings.js (height gradient, abandoned-lot gate) — cheap
@@ -902,6 +908,8 @@
     // landmasses (desert/forest/farmland/snow). Runs AFTER the original island
     // so it can read city.maxX/annex and register its own walkable regions.
     if (CBZ.cityWorldGeo) try { CBZ.cityWorldGeo(city); } catch (e) { console.error("[city worldgeo]", e); }
+    // No procedural horizon/backdrop terrain is built. Elevation must be owned
+    // by a reachable registered landmass and its shared ground-height oracle.
     if (CBZ.cityProps) try { CBZ.cityProps(city); } catch (e) { console.error("[city props]", e); }
 
     // ---- RED CURBS at hydrants (props.js just placed them): paint the curb
@@ -1073,17 +1081,19 @@
     // =====================================================================
     //  THE SEA, REBUILT (CBZ.CONFIG.SEA_OVERHAUL, default on). Runs LAST so
     //  every landmass/region exists and the shore tint can be baked from the
-    //  real land extent. One indexed grid mesh (~21k verts), ONE Lambert
+    //  real land extent. One indexed grid mesh (~21k verts), ONE Phong
     //  material with a tiny onBeforeCompile vertex program:
     //    • baked per-vertex DEPTH TINT (bright turquoise shallows at the
     //      coast → open-sea mid tone → dark deep water) as a multiplier
     //      around 1.0, so the existing day/night material.color lerp still
     //      drives the whole sea;
-    //    • three world-space sine swells (λ ≈ 120/155/570u, total ±0.055u)
+    //    • three world-space sine swells (λ ≈ 120/155/570u, total ±0.135u)
     //      displace the surface and tilt the per-vertex normal (exaggerated
-    //      ×60 — the honest slope of a 5cm swell is invisible) so the water
+    //      ×48 — enough to catch light without turning swells into chrome) so
+    //      the water
     //      MOVES under the sun instead of sitting like painted glass;
-    //    • wave crests brighten vColor slightly — cheap sparkle, no Phong.
+    //    • wave crests brighten vColor slightly while Phong supplies a single
+    //      physically legible sun glint.
     //  Determinism: vertex bake uses CBZ.hash01 only; the wave clock is
     //  runtime-only FX (allowed). userData.terrain spares it from the batch
     //  pass and farcull. Costs 1 draw call.
@@ -1105,43 +1115,148 @@
       const pos = geo.attributes.position;
       const colors = new Float32Array(pos.count * 3);
       // depth-tint ramp: multipliers around 1.0 so material.color still rules
-      const shR = 1.34, shG = 1.32, shB = 1.10;    // sunlit sandy shallows
-      const dpR = 0.55, dpG = 0.72, dpB = 0.92;    // cold open deep
+      const shR = 0.76, shG = 1.02, shB = 1.12;    // green-blue coastal shallows
+      const dpR = 0.34, dpG = 0.56, dpB = 0.80;    // cold open deep
+      const shoreAt = city.mapTerrain && typeof city.mapTerrain.shoreAt === "function"
+        ? city.mapTerrain.shoreAt : null;
       function smoothT(a, b, x) { let t = (x - a) / (b - a); t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
       for (let i = 0; i < pos.count; i++) {
         const wx = pos.getX(i), wz = pos.getZ(i);
-        const dx = Math.max(lminX - wx, 0, wx - lmaxX);
-        const dz = Math.max(lminZ - wz, 0, wz - lmaxZ);
-        const d = Math.sqrt(dx * dx + dz * dz);    // 0 at/inside the landmass
+        let d;
+        if (shoreAt) {
+          // Exact signed coast distance from continent.js, including the city
+          // harbor. The previous union AABB classified every bay inside the
+          // world's rectangular bounds as zero-depth shallows.
+          let s = -1;
+          try { s = +shoreAt(wx, wz); } catch (e) { s = -1; }
+          d = s < 0 ? -s : 0;
+        } else {
+          const dx = Math.max(lminX - wx, 0, wx - lmaxX);
+          const dz = Math.max(lminZ - wz, 0, wz - lmaxZ);
+          d = Math.sqrt(dx * dx + dz * dz);
+        }
         const t1 = smoothT(4, 120, d);             // shallows fade out by ~120u
         const t2 = smoothT(140, 480, d);           // deep begins past ~140u
         let r = shR + (1 - shR) * t1, g = shG + (1 - shG) * t1, b = shB + (1 - shB) * t1;
         r += (dpR - 1) * t2; g += (dpG - 1) * t2; b += (dpB - 1) * t2;
-        // low-freq deterministic dither so the ramp never bands
-        const dth = 1 + ((CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 60), Math.floor(wz / 60), 9101) : 0.5) - 0.5) * 0.08;
-        colors[i * 3] = r * dth; colors[i * 3 + 1] = g * dth; colors[i * 3 + 2] = b * dth;
+        // Do not dither per grid vertex: the old 8% variation exposed each
+        // 48m triangle as a giant cyan polygon when viewed from the water.
+        // The tiled normal field supplies fine variation without colour seams.
+        colors[i * 3] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b;
       }
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      seaMat2 = new THREE.MeshLambertMaterial({ color: 0x2f6f9e, vertexColors: true, fog: true });
+      // Depth offsets correctly keep the country underlay behind authored
+      // roads/runways, but at a 2.8km flight frustum they can also quantise
+      // valid land behind the sea. Bake the SAME shore oracle into one small
+      // mask and reject sea fragments over dry land outright. Water and ground
+      // no longer fight for depth ownership, so there is no green flicker and
+      // no apparent ocean growing around correctly placed trees.
+      let seaLandMaskTex = null;
+      const seaLandBounds = new THREE.Vector4(0, 0, 1, 1);
+      if (shoreAt && city.mapTerrain && city.mapTerrain.bounds) {
+        const mb = city.mapTerrain.bounds;
+        seaLandBounds.set(mb.minX, mb.minZ, mb.maxX, mb.maxZ);
+        const MS = 512;
+        const mask = new Uint8Array(MS * MS * 4);
+        for (let mz = 0; mz < MS; mz++) {
+          const wz = mb.minZ + (mb.maxZ - mb.minZ) * (mz + 0.5) / MS;
+          for (let mx = 0; mx < MS; mx++) {
+            const wx = mb.minX + (mb.maxX - mb.minX) * (mx + 0.5) / MS;
+            const land = +shoreAt(wx, wz) >= 15 ? 255 : 0;
+            const q = (mz * MS + mx) * 4;
+            mask[q] = mask[q + 1] = mask[q + 2] = land;
+            mask[q + 3] = 255;
+          }
+        }
+        seaLandMaskTex = new THREE.DataTexture(mask, MS, MS, THREE.RGBAFormat);
+        seaLandMaskTex.wrapS = seaLandMaskTex.wrapT = THREE.ClampToEdgeWrapping;
+        seaLandMaskTex.magFilter = seaLandMaskTex.minFilter = THREE.LinearFilter;
+        seaLandMaskTex.generateMipmaps = false;
+        seaLandMaskTex.needsUpdate = true;
+      }
+      // A periodic procedural normal map supplies metre-scale ripples between
+      // the 48m grid vertices. It is generated once, tiles cleanly and moves by
+      // changing two texture offsets—no particles, extra meshes or draw calls.
+      (function buildSeaNormal() {
+        const N = 256, data = new Uint8Array(N * N * 4); // power-of-two for Safari/WebGL1 repeat+mips
+        const waves = [
+          [2, 1, 0.34, 0.2], [3, -2, 0.23, 1.1], [5, 4, 0.14, 2.4],
+          [7, -3, 0.09, 0.7], [11, 5, 0.055, 1.8], [13, -8, 0.035, 2.9],
+        ];
+        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+          const u = x / N * Math.PI * 2, v = y / N * Math.PI * 2;
+          // A multi-directional periodic height field. Integer vectors keep
+          // every edge seamless, while six incommensurate directions prevent
+          // the obvious repeating circular cells made by the old three waves.
+          let dx = 0, dz = 0;
+          for (let k = 0; k < waves.length; k++) {
+            const w = waves[k], c = Math.cos(w[0] * u + w[1] * v + w[3]) * w[2];
+            dx += w[0] * c; dz += w[1] * c;
+          }
+          const nx = -dx * 0.12, nz = -dz * 0.12, inv = 1 / Math.sqrt(nx * nx + 1 + nz * nz);
+          const q = (y * N + x) * 4;
+          data[q] = Math.round((nx * inv * 0.5 + 0.5) * 255);
+          data[q + 1] = Math.round((nz * inv * 0.5 + 0.5) * 255);
+          data[q + 2] = Math.round((inv * 0.5 + 0.5) * 255);
+          data[q + 3] = 255;
+        }
+        seaNormalTex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+        seaNormalTex.wrapS = seaNormalTex.wrapT = THREE.RepeatWrapping;
+        seaNormalTex.repeat.set(72, 72);
+        seaNormalTex.magFilter = THREE.LinearFilter;
+        seaNormalTex.minFilter = THREE.LinearMipmapLinearFilter;
+        seaNormalTex.generateMipmaps = true;
+        seaNormalTex.needsUpdate = true;
+      })();
+      // One Phong draw gives the moving normal field real sun glints instead of
+      // the old matte painted-floor read. The tiny map adds no pass or draw.
+      seaMat2 = new THREE.MeshPhongMaterial({
+        color: 0x1b557a, vertexColors: true, fog: true,
+        specular: 0x416b78, shininess: 34,
+        normalMap: seaNormalTex,
+        normalScale: new THREE.Vector2(0.30, 0.30),
+      });
       seaMat2.onBeforeCompile = function (shader) {
         shader.uniforms.uSeaTime = seaTimeU;
-        shader.vertexShader = "uniform float uSeaTime;\n" + shader.vertexShader
+        shader.uniforms.uSeaLandMask = { value: seaLandMaskTex };
+        shader.uniforms.uSeaLandBounds = { value: seaLandBounds };
+        shader.uniforms.uSeaHasLandMask = { value: seaLandMaskTex ? 1 : 0 };
+        shader.vertexShader = "uniform float uSeaTime;\nvarying vec3 vSeaWorld;\n" + shader.vertexShader
           .replace("#include <color_vertex>",
             "float _p1 = position.x * 0.052 + position.z * 0.030 + uSeaTime * 1.1;\n" +
             "float _p2 = position.x * -0.020 + position.z * 0.041 + uSeaTime * 0.7;\n" +
             "float _p3 = (position.x + position.z) * 0.011 - uSeaTime * 0.4;\n" +
-            "float _wY = sin(_p1) * 0.018 + sin(_p2) * 0.022 + sin(_p3) * 0.015;\n" +
+            "float _wY = sin(_p1) * 0.045 + sin(_p2) * 0.055 + sin(_p3) * 0.035;\n" +
             "#include <color_vertex>\n" +
-            "#ifdef USE_COLOR\n vColor.xyz *= (1.0 + max(_wY, 0.0) * 3.0);\n#endif")
+            "#ifdef USE_COLOR\n vColor.xyz *= (1.0 + max(_wY, 0.0) * 1.8);\n#endif")
           .replace("#include <beginnormal_vertex>",
             "#include <beginnormal_vertex>\n" +
-            "float _dx = 0.018*cos(_p1)*0.052 - 0.022*cos(_p2)*0.020 + 0.015*cos(_p3)*0.011;\n" +
-            "float _dz = 0.018*cos(_p1)*0.030 + 0.022*cos(_p2)*0.041 + 0.015*cos(_p3)*0.011;\n" +
-            "objectNormal = normalize(vec3(-_dx * 60.0, 1.0, -_dz * 60.0));")
+            "float _dx = 0.045*cos(_p1)*0.052 - 0.055*cos(_p2)*0.020 + 0.035*cos(_p3)*0.011;\n" +
+            "float _dz = 0.045*cos(_p1)*0.030 + 0.055*cos(_p2)*0.041 + 0.035*cos(_p3)*0.011;\n" +
+            "objectNormal = normalize(vec3(-_dx * 48.0, 1.0, -_dz * 48.0));")
           .replace("#include <begin_vertex>",
-            "#include <begin_vertex>\ntransformed.y += _wY;");
+            "#include <begin_vertex>\ntransformed.y += _wY;\nvSeaWorld = vec3(position.x, position.y + _wY, position.z);");
+        // Fine moving luminance and crest tint remain visible even under flat
+        // ambient light (where a normal map alone can read as one cyan slab).
+        // World-space periods never swim with the camera and add zero geometry.
+        shader.fragmentShader = "uniform float uSeaTime;\nuniform sampler2D uSeaLandMask;\nuniform vec4 uSeaLandBounds;\nuniform float uSeaHasLandMask;\nvarying vec3 vSeaWorld;\n" + shader.fragmentShader
+          .replace("#include <color_fragment>",
+            "vec2 _landUV = (vSeaWorld.xz - uSeaLandBounds.xy) / (uSeaLandBounds.zw - uSeaLandBounds.xy);\n" +
+            "if (uSeaHasLandMask > 0.5 && all(greaterThanEqual(_landUV, vec2(0.0))) && all(lessThanEqual(_landUV, vec2(1.0))) && texture2D(uSeaLandMask, _landUV).r > 0.5) discard;\n" +
+            "#include <color_fragment>\n" +
+            "float _r1 = sin(vSeaWorld.x * 0.19 + vSeaWorld.z * 0.083 + uSeaTime * 1.05);\n" +
+            "float _r2 = sin(vSeaWorld.x * -0.071 + vSeaWorld.z * 0.23 + uSeaTime * 0.73);\n" +
+            "float _r3 = sin(vSeaWorld.x * 0.37 - vSeaWorld.z * 0.29 + uSeaTime * 1.48);\n" +
+            "float _rip = _r1 * 0.52 + _r2 * 0.31 + _r3 * 0.17;\n" +
+            "float _band = abs(sin(vSeaWorld.x * 0.071 + vSeaWorld.z * 0.044 + uSeaTime * 0.55));\n" +
+            "float _break = 0.5 + 0.5 * sin(vSeaWorld.x * 0.013 - vSeaWorld.z * 0.017 + uSeaTime * 0.16);\n" +
+            "float _break2 = 0.5 + 0.5 * sin(vSeaWorld.x * -0.021 - vSeaWorld.z * 0.009 + uSeaTime * 0.11);\n" +
+            "float _crest = smoothstep(0.996, 0.9995, _band) * smoothstep(0.80, 0.95, _break) * smoothstep(0.76, 0.93, _break2);\n" +
+            "diffuseColor.rgb *= 0.97 + _rip * 0.018;\n" +
+            "diffuseColor.rgb += vec3(0.010, 0.018, 0.022) * _crest;");
       };
       const sea = new THREE.Mesh(geo, seaMat2);
+      sea.name = "world-sea";
       sea.receiveShadow = false; sea.castShadow = false;
       sea.frustumCulled = false;                   // the horizon is everywhere
       sea.matrixAutoUpdate = false;                // identity — verts are world-space

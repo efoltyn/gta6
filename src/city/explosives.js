@@ -219,7 +219,7 @@
     planted.push(ch);
     syncHud();
     if (CBZ.sfx) CBZ.sfx("clank");
-    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // the reach-and-press arm motion
+    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim(true); // reach-and-press pose, not a punch sound
     // kneeling on a bumper wiring a bomb is NOT subtle — witnesses report it
     const wp = chargeWorldPos(ch, _v);
     if (CBZ.cityCrime) CBZ.cityCrime(50, { x: wp.x, z: wp.z, type: "planting-explosives" });

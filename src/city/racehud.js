@@ -147,10 +147,10 @@
       if (bestEl._t !== b) { bestEl.textContent = b; bestEl._t = b; }
       gapAEl.innerHTML = s.gapA && s.gapA.name
         ? "<span class='dn'>▲</span> <span class='nm'>" + esc(s.gapA.name) + "</span> <b>+" + s.gapA.s.toFixed(1) + "s</b>"
-        : "<span class='up'>LEADER</span>";
+        : "<span class='up'>▲ —</span>";
       gapBEl.innerHTML = s.gapB && s.gapB.name
         ? "<span class='up'>▼</span> <span class='nm'>" + esc(s.gapB.name) + "</span> <b>−" + s.gapB.s.toFixed(1) + "s</b>"
-        : "<span class='dn'>LAST</span>";
+        : "<span class='dn'>▼ —</span>";
     },
     results: function (rows, opts) {
       build();

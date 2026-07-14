@@ -173,6 +173,13 @@
       shake: 1.1, heat: 70, knock: 3.0, flash: 0.9,
       sfx: "explosion", tracer: 0.03, auto: false,
       explosive: true, blastPower: 1.9, blastRadius: 13,
+      // X cycles the loaded guidance package while this weapon is shouldered.
+      // Both consume the same physical rocket inventory; only the seeker and
+      // flight tuning differ, so inventory code does not need a parallel gun.
+      ammoTypes: [
+        { id: "standard", label: "HE", homing: false },
+        { id: "homing", label: "HOMING", homing: true, lockRange: 260, lockConeDeg: 18, turnRate: 2.6, speed: 82 },
+      ],
       // REAL PROJECTILE FLIGHT (b): muzzle velocity (m/s) and gravity (m/s^2)
       // for the visible travel arc fpsmode.js now flies the rocket along
       // instead of resolving impact the instant the trigger is pulled.

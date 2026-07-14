@@ -304,6 +304,37 @@
     return function () { return (best && best.pos && !(best.downed)) ? { x: best.pos.x, y: best.pos.y, z: best.pos.z } : null; };
   }
 
+  // Shared seeker hookup for handheld/vehicle launchers. It returns a live
+  // position getter rather than the private craft object, so other weapon
+  // systems can guide toward police air without learning this module's entity
+  // layout or holding a stale position after the target is shot down.
+  CBZ.cityAircraftAcquireTarget = function (fx, fy, fz, nx, ny, nz, range, coneCos) {
+    range = range || LOCK_RANGE;
+    coneCos = coneCos != null ? coneCos : LOCK_CONE;
+    let best = null, bestDot = coneCos, bestDist = Infinity, bestRadius = 3.2;
+    const consider = function (obj, radius) {
+      if (!obj || obj.downed || !obj.pos) return;
+      const dx = obj.pos.x - fx, dy = obj.pos.y - fy, dz = obj.pos.z - fz;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < 1 || d > range) return;
+      const dot = (dx * nx + dy * ny + dz * nz) / d;
+      if (dot < bestDot || (Math.abs(dot - bestDot) < 0.002 && d >= bestDist)) return;
+      best = obj; bestDot = dot; bestDist = d; bestRadius = radius;
+    };
+    consider(heli, 3.6);
+    for (let i = 0; i < jets.length; i++) consider(jets[i], 3.2);
+    if (!best) return null;
+    const target = best;
+    return {
+      kind: "aircraft", dot: bestDot, distance: bestDist, radius: bestRadius,
+      seek: function () {
+        return target && target.pos && !target.downed
+          ? { x: target.pos.x, y: target.pos.y, z: target.pos.z }
+          : null;
+      },
+    };
+  };
+
   // ---- PUBLIC: player-fired missile (the F-22 / chopper salvo) --------------
   // Fire a REAL missile from (x,y,z) travelling along the direction (dx,dy,dz).
   // It reuses the exact gunship missile pool + trail + detonate(cityExplosion)
@@ -588,6 +619,32 @@
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(50);
     if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a police gunship!", "#ff8b6b");
   }
+  function dynamicAircraftCollider(c) {
+    let o = c && c.ref;
+    while (o) {
+      if (o.userData && (o.userData.aircraftDims || o.userData.hijackable || o.userData.craft)) return true;
+      o = o.parent;
+    }
+    return false;
+  }
+  function crashFacadeAt(x, y, z) {
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (dynamicAircraftCollider(c)) continue;
+      if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
+      const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
+      if (y >= y0 && y <= y1 - 0.2) return c;
+    }
+    return null;
+  }
+  function wreckImpact(x, y, z, building) {
+    if (CBZ.cityExplosion) CBZ.cityExplosion(x, z, { power: building ? 1.9 : 1.5, radius: building ? 9 : 7, byPlayer: false, y });
+    else detonate(x, y, z);
+    if (building && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(x, y, z, 2.2); } catch (e) {} }
+    if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, building ? 12 : 8); } catch (e) {} }
+    if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(x, y, z); } catch (e) {} }
+  }
   function fallHeli(dt) {
     if (!heli) return;
     heli.vy -= 17 * dt;                                     // gravity takes over
@@ -615,8 +672,7 @@
       // A crashing wreck is a CONTAINED fuel + ordnance fireball — NOT a block-leveling
       // airstrike. That massive blast (detonate -> cityAirstrikeExplosion, power 3/r16)
       // is reserved for missiles + called-in airstrikes; a crash is a fraction of it.
-      if (CBZ.cityExplosion) CBZ.cityExplosion(ix, iz, { power: 1.5, radius: 7, byPlayer: false, y: iy });
-      else detonate(ix, iy, iz);
+      wreckImpact(ix, iy, iz, surf > ground + 0.5);
       if (CBZ.shake) CBZ.shake(0.6);
       despawnHeli();
     }
@@ -709,9 +765,18 @@
       j.smokeCD = 0.05;
       if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(j.pos.x, j.pos.y, j.pos.z); } catch (e) {} }
     }
+    // A dying fast mover hits a facade at its actual altitude. The previous
+    // roof-only sample teleported every side impact to the roofline, making
+    // jets appear to pass through the building before exploding on top.
+    const facade = crashFacadeAt(j.pos.x, j.pos.y, j.pos.z);
+    if (facade) {
+      wreckImpact(j.pos.x, j.pos.y, j.pos.z, true);
+      if (CBZ.shake) CBZ.shake(0.8);
+      return true;
+    }
     const surf = Math.max(CBZ.floorAt ? CBZ.floorAt(j.pos.x, j.pos.z) : 0, roofTopAt(j.pos.x, j.pos.z));
     if (j.pos.y <= surf + 1.2) {
-      if (CBZ.cityExplosion) CBZ.cityExplosion(j.pos.x, j.pos.z, { power: 1.5, radius: 7, byPlayer: false, y: surf + 1.0 });
+      wreckImpact(j.pos.x, surf + 1.0, j.pos.z, surf > (CBZ.floorAt ? CBZ.floorAt(j.pos.x, j.pos.z) : 0) + 0.5);
       if (CBZ.shake) CBZ.shake(0.6);
       return true;
     }

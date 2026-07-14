@@ -143,7 +143,9 @@
   }
 
   function faceHeading(a) {
-    if (a.group) a.group.rotation.y = -a.heading + Math.PI / 2;
+    a.faceH = a.heading;
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(a, a.heading);
+    else if (a.group) a.group.rotation.y = -a.heading;
   }
 
   function baseSpeed(a) {

@@ -1741,50 +1741,11 @@
     }
     for (const s of [-1, 1]) { coreBoard(vAve, s); coreBoard(hAve, s); }
 
-    // ----- ROOFTOP DETAIL: AC, vents, tanks, dishes, stair-hut, skylights,
-    //       antenna masts, parapet rails + a RARE rooftop billboard -----------
-    // Building lots get a cluster of mechanical gear on the roof — pure silhouette
-    // detail, no colliders. Everything reuses the shared geo()/smat() caches, so
-    // a hundred roofs add geometry/material instances but stay draw-call cheap.
-    // Budget stays a modest 2..5 units/roof; the bigger landmark pieces (stair
-    // hut, billboard) are gated behind size/height + low odds so counts don't balloon.
-    const acM = smat(0x9aa0a8), ventM = smat(0x6a7079), tankM = smat(0x7a5a3a), pipeM = smat(0x4a4f57);
-    const dishM = smat(0xd7dade), hutM = smat(0x6b6f77), hutRoofM = smat(0x33373e);
-    const railM = smat(0x42474f), mastM = smat(0x2c2f35), beaconM = lampMat(0xff3b3b);
-    // skylight glass: a faint emissive pane so lit interiors read at night.
-    const skyGlassM = smat(0x9fb6cc, { emissive: 0xbfe0ff, ei: 0.18 });
-    skyGlassM._sky = true;
-    nightAds.push(skyGlassM);   // ride the night driver's glow ramp (treated like an ad panel)
-
-    // a satellite dish: a small mast, a shallow parabolic-ish bowl + feed arm.
-    function roofDish(ux, uz, h) {
-      const post = new THREE.Mesh(geo("dishPost", () => new THREE.CylinderGeometry(0.06, 0.06, 0.5, 5)), pipeM);
-      post.position.set(ux, h + 0.25, uz); root.add(post);
-      const bowl = new THREE.Mesh(geo("dishBowl", () => new THREE.SphereGeometry(0.42, 9, 6, 0, 6.3, 0, 0.9)), dishM);
-      bowl.position.set(ux, h + 0.6, uz); bowl.rotation.x = -1.0; bowl.rotation.y = rng() * 6.28; root.add(bowl);
-      const arm = new THREE.Mesh(geo("dishArm", () => new THREE.CylinderGeometry(0.025, 0.025, 0.4, 4)), pipeM);
-      arm.position.set(ux, h + 0.7, uz); arm.rotation.x = 0.6; root.add(arm);
-    }
-    // a skylight: a low frame + an emissive glass quad facing up.
-    function roofSkylight(ux, uz, h) {
-      const frame = new THREE.Mesh(geo("skyFrame", () => new THREE.BoxGeometry(1.2, 0.14, 0.9)), hutRoofM);
-      frame.position.set(ux, h + 0.07, uz); root.add(frame);
-      const glass = new THREE.Mesh(geo("skyGlass", () => new THREE.PlaneGeometry(1.04, 0.74)), skyGlassM);
-      glass.rotation.x = -Math.PI / 2; glass.position.set(ux, h + 0.15, uz); root.add(glass);
-    }
-    // an antenna mast: thin pole + a couple of cross arms (+ a red beacon up top).
-    function roofMast(ux, uz, h) {
-      const tall = 2.2 + rng() * 2.6;
-      const pole = new THREE.Mesh(geo("mastPole", () => new THREE.CylinderGeometry(0.05, 0.07, 1, 5)), mastM);
-      pole.scale.y = tall; pole.position.set(ux, h + tall / 2, uz); root.add(pole);
-      const armG = geo("mastArm", () => new THREE.BoxGeometry(0.9, 0.04, 0.04));
-      for (const fy of [0.55, 0.78]) {
-        const arm = new THREE.Mesh(armG, mastM); arm.position.set(ux, h + tall * fy, uz); arm.rotation.y = rng() * 6.28; root.add(arm);
-      }
-      const beacon = new THREE.Mesh(geo("mastBeacon", () => new THREE.SphereGeometry(0.08, 6, 5)), beaconM);
-      beacon.position.set(ux, h + tall + 0.06, uz); root.add(beacon);
-      nightLamps.push(beacon);   // night driver pulses its emissive
-    }
+    // ----- PURPOSEFUL ROOFTOPS ---------------------------------------------
+    // Generic AC/vent/tank/dish/mast clutter was pure silhouette noise and has
+    // been removed. Keep only fall-prevention rails and the rare rentable ad:
+    // both have a direct gameplay reason to exist.
+    const railM = smat(0x42474f);
     for (const lot of lots) {
       const b = lot.building; if (!b || b.park) continue;   // parks carry a stub building (owner only) but have NO structure — no roof gear floats over them
       // roof height + extent + the gear-clear roof centre (away from the stairwell)
@@ -1794,42 +1755,17 @@
       const halfW = (b.w ? b.w / 2 : lot.w / 2) - 1.5;
       const halfD = (b.d ? b.d / 2 : lot.d / 2) - 1.5;
       if (halfW < 1.5 || halfD < 1.5) continue;
+      // Consume the former clutter stream without building anything, preserving
+      // every downstream seeded billboard/rail/world-layout decision.
       const units = 2 + ((rng() * 4) | 0);
       for (let u = 0; u < units; u++) {
-        const ux = rcx + (rng() - 0.5) * halfW * 1.4;
-        const uz = rcz + (rng() - 0.5) * halfD * 1.4;
+        rng(); // former x
+        rng(); // former z
         const t = rng();
-        if (t < 0.40) {
-          const ac = new THREE.Mesh(geo("acUnit", () => new THREE.BoxGeometry(1.3, 0.7, 1.0)), acM);
-          ac.position.set(ux, h + 0.35, uz); ac.castShadow = true; root.add(ac);
-          const fan = new THREE.Mesh(geo("acFan", () => new THREE.CylinderGeometry(0.32, 0.32, 0.06, 8)), ventM);
-          fan.position.set(ux, h + 0.72, uz); root.add(fan);
-        } else if (t < 0.58) {
-          const v = new THREE.Mesh(geo("roofVent", () => new THREE.CylinderGeometry(0.22, 0.26, 0.6, 7)), ventM);
-          v.position.set(ux, h + 0.3, uz); root.add(v);
-          const cap = new THREE.Mesh(geo("roofVentCap", () => new THREE.CylinderGeometry(0.3, 0.3, 0.12, 7)), pipeM);
-          cap.position.set(ux, h + 0.62, uz); root.add(cap);
-        } else if (t < 0.72) {
-          const tank = new THREE.Mesh(geo("roofTank", () => new THREE.CylinderGeometry(0.6, 0.6, 1.4, 9)), tankM);
-          tank.position.set(ux, h + 0.9, uz); tank.castShadow = true; root.add(tank);
-          for (let lg = 0; lg < 3; lg++) {
-            const a = lg / 3 * 6.28;
-            const leg = new THREE.Mesh(geo("tankLeg", () => new THREE.CylinderGeometry(0.05, 0.05, 0.5, 4)), pipeM);
-            leg.position.set(ux + Math.cos(a) * 0.5, h + 0.25, uz + Math.sin(a) * 0.5); root.add(leg);
-          }
-        } else if (t < 0.85) {
-          roofDish(ux, uz, h);
-        } else if (t < 0.95) {
-          roofSkylight(ux, uz, h);
-        } else {
-          roofMast(ux, uz, h);
-        }
+        if (t >= 0.72 && t < 0.85) rng();       // former dish heading
+        else if (t >= 0.95) { rng(); rng(); rng(); } // former mast size/arms
       }
-      // a long roof-edge parapet vent pipe for taller buildings
-      if (h > 14 && rng() < 0.5) {
-        const pipe = new THREE.Mesh(geo("roofPipe", () => new THREE.CylinderGeometry(0.12, 0.12, 1.8, 6)), pipeM);
-        pipe.position.set(rcx + halfW * 0.8, h + 0.9, rcz - halfD * 0.8); root.add(pipe);
-      }
+      if (h > 14) rng(); // former roof-edge pipe chance
       // ROOFTOP STAIR-HUT bulkhead REMOVED (owner-filmed): a plain box with a
       // door read as a "fake elevator" you'd expect to enter but can't. The draw
       // call below is preserved (same short-circuit as the old `&& rng() < 0.45`)

@@ -47,6 +47,8 @@
 
   // ---- build & register one NPC ----
   function makeNpc(opts) {
+    const lifeDef = CBZ.npcLife ? CBZ.npcLife.resolve("jailInmate") : { id: "jailInmate", actor: {}, life: { routine: true } };
+    opts = Object.assign({}, lifeDef.actor, opts || {});
     const ch = makeCharacter(opts.skin);
     ch.group.position.set(opts.pos[0], 0, opts.pos[1]);
     // prefix the floating tag with the temperament glyph when it's known
@@ -70,6 +72,9 @@
       target: new THREE.Vector3(opts.pos[0], 0, opts.pos[1]),
       pause: 0, speed: opts.speed || 2.2, bribed: 0,
       data: opts.data,
+      _npcProfile: lifeDef.id,
+      _npcLife: Object.assign({}, lifeDef.life),
+      activityState: "idle",
       _tag: tagSprite,                 // hidden at distance by the LOD
       slice: CBZ.npcs.length & 15,     // round-robin phase for time-sliced AI
     };
@@ -138,6 +143,68 @@
     n._lastX = gp.x; n._lastZ = gp.z;
   }
 
+  // Purposeful calm-time routine for named/full-rig inmates. The combat brain
+  // remains authoritative: the moment it chooses fight, flee, approach,
+  // socialize, etc. this layer yields. While genuinely calm, actors alternate
+  // between walking somewhere, holding a post, and a visible in-place task.
+  function calmForRoutine(n, imp) {
+    const s = n.aiState;
+    return !imp && !n.dead && !(n.ko > 0) && !n.rage && !n.approach && !n.intimidMode &&
+      (!s || s === "wander");
+  }
+
+  function chooseRoutine(n, gp) {
+    const roll = econ.rng();
+    const posted = n.role === "merchant" || n.role === "dealer" || n.crewRole === "lookout";
+    const standCut = posted ? 0.50 : 0.28;
+    const actionCut = posted ? 0.70 : 0.50;
+    if (roll < standCut) {
+      n._lifeActivity = "stand";
+      n._lifeT = 4 + econ.rng() * (posted ? 10 : 6);
+      n._lifeX = gp.x; n._lifeZ = gp.z;
+      // Look toward the centre of the inmate's own patch while posted.
+      const r = n.region;
+      const tx = r ? (r[0] + r[1]) * 0.5 : 0, tz = r ? (r[2] + r[3]) * 0.5 : 35;
+      n._lifeHeading = Math.atan2(tx - gp.x, tz - gp.z);
+    } else if (roll < actionCut) {
+      n._lifeActivity = "activity";       // stretch, shadow-box, work a bench
+      n._lifeT = 3.5 + econ.rng() * 6.5;
+      n._lifeX = gp.x; n._lifeZ = gp.z;
+      n._lifeHeading = n.group.rotation.y;
+    } else {
+      n._lifeActivity = "walk";
+      n._lifeT = 6 + econ.rng() * 10;
+      pickTarget(n);
+    }
+  }
+
+  function purposefulRoutine(n, dt, speed, gp, imp, curfew) {
+    if (curfew || !calmForRoutine(n, imp)) {
+      n._lifeActivity = null; n._lifeT = 0;
+      n.activityState = n.aiState || "idle";
+      return speed;
+    }
+    n._lifeT = Math.max(0, (n._lifeT || 0) - dt);
+    const close = n.target ? Math.hypot(n.target.x - gp.x, n.target.z - gp.z) < 0.65 : true;
+    if (!n._lifeActivity || n._lifeT <= 0 || (n._lifeActivity === "walk" && close)) chooseRoutine(n, gp);
+    n.activityState = n._lifeActivity;
+    if (n._lifeActivity === "stand" || n._lifeActivity === "activity") {
+      n.target.set(n._lifeX, 0, n._lifeZ);
+      n.group.rotation.y = lerpAngle(n.group.rotation.y, n._lifeHeading, 1 - Math.pow(0.001, dt));
+      return 0;
+    }
+    return speed * 0.78;                   // calm transit, not perpetual sprinting
+  }
+
+  function poseRoutine(n, dt) {
+    if (n.activityState !== "activity" || !n.char || !n.char.parts) return;
+    n._lifePhase = (n._lifePhase || 0) + dt * 3.2;
+    const sw = Math.sin(n._lifePhase) * 0.34;
+    const la = n.char.parts.la, ra = n.char.parts.ra;
+    if (la) la.rotation.x = CBZ.damp(la.rotation.x, -0.78 + sw, 10, dt);
+    if (ra) ra.rotation.x = CBZ.damp(ra.rotation.x, -0.78 - sw, 10, dt);
+  }
+
   function updateNpc(n, dt, cx, cz) {
     // crowd.js owns the mass-crowd's promoted face-rigs (movement + anim);
     // the prison brain loop must not also drive them.
@@ -156,7 +223,7 @@
       n._detailOn = wantDetail;
       const det = n.char.detail;
       if (det) for (let k = 0; k < det.length; k++) det[k].visible = wantDetail;
-      if (n._tag) n._tag.visible = wantDetail;
+      if (n._tag) n._tag.visible = false;
     }
 
     // dead: stay sprawled forever (flop into place)
@@ -189,17 +256,16 @@
         speed = n._spd != null ? n._spd : n.speed;
       }
     } else speed = n.speed;
-    recoverStuck(n, dt, speed, gp);
-
     // NPC_SCHEDULES — jail nights: ordinary named inmates drift to the cell-
     // block side of their own patch after dark and post up there (long
     // pauses), so the yard reads asleep instead of pacing at 3am. The gang
     // crews and the merchant/dealer/thief cast keep their night hustle
     // (owner's rule: gangsters stay out), and any real brain state — fight,
     // flee, hunt, snitch — outranks the curfew via the calm-state gate.
-    if (CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && !n.gang && !imp &&
+    const curfew = !!(CBZ.CONFIG && CBZ.CONFIG.NPC_SCHEDULES && n.role === "inmate" && !n.gang && !imp &&
         (CBZ.nightAmount || 0) > 0.72 &&
-        (!n.aiState || n.aiState === "wander" || n.aiState === "socialize")) {
+        (!n.aiState || n.aiState === "wander" || n.aiState === "socialize"));
+    if (curfew) {
       if (n._bedX == null) {          // one bunk spot per night, rolled once (runtime-only)
         const r = n.region;
         n._bedX = r ? r[0] + 0.5 + Math.random() * Math.max(1, r[1] - r[0] - 1) : gp.x;
@@ -211,6 +277,9 @@
     } else if (n._bedX != null && (CBZ.nightAmount || 0) < 0.5) {
       n._bedX = n._bedZ = null;       // dawn — back to the day routine
     }
+
+    speed = purposefulRoutine(n, dt, speed, gp, imp, curfew);
+    recoverStuck(n, dt, speed, gp);
 
     if (n.pause > 0) { n.pause -= dt; if (near) animChar(n.char, 0, dt); }
     else {
@@ -228,6 +297,7 @@
         if (near) animChar(n.char, speed, dt);
       }
     }
+    if (near) poseRoutine(n, dt);
 
     // thieves still try to pickpocket the player when close (near only)
     if (n.role === "thief" && d2 < 400) {
@@ -237,6 +307,7 @@
     }
   }
   CBZ.npcPickTarget = pickTarget;
+  CBZ.spawnJailNpc = makeNpc;
 
   /* ---------- the cast ---------- */
 

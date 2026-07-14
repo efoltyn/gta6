@@ -15,7 +15,7 @@
    the count truth for items; CBZ.weaponInventory (engine id strings) +
    g.cityMeleeWeapon are the truth for weapons. Rearranging slots never
    touches truth; truth only moves on the three real operations:
-     • drop to ground  → CBZ.cityDropItem world pickup (bobbing box)
+     • drop to ground  → CBZ.cityDropItem world pickup (physical prop)
      • chest transfer  → cityEcon.take/add or weaponInventory splice/unlock
      • death drop      → cityKillPlayer wrap (guns leave the corpse)
    resync() reconciles the grid against truth with STABLE placement (the
@@ -264,92 +264,153 @@
 
   // ============================================================
   //  WORLD ITEM DROPS — CBZ.cityDropItem(x, z, payload)
-  //  payload: { name, count } | { weaponId, ammo } | { melee } (+ y?, ttl?)
+  //  payload: { name, count } | { weaponId, ammo } | { melee } | { cash }
+  //           (+ y?, ttl?)
   //  Kept SEPARATE from peds.js's CBZ.cityDrops so its weapon-only pickup
   //  loop never mishandles an item record. Shared geometry, pooled cmat.
   // ============================================================
   CBZ.cityItemDrops = CBZ.cityItemDrops || [];
-  const DROP_GEO = new THREE.BoxGeometry(0.55, 0.55, 0.55);
+  // Drops use recognizable, non-emissive props. No green cube, no light beam,
+  // no spinning/bobbing pickup marker: the object on the pavement is the item.
+  const DROP_GEO = new Map();
+  const DROP_MAT = {};
   const cmat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
-  function dropMat(payload) {
-    if (payload.weaponId || payload.melee) return cmat(0x23262d, { emissive: 0x39ff66, ei: 0.55 });
-    return cmat(0x2a2438, { emissive: 0xffd166, ei: 0.55 });
+  function sharedMat(key, color) {
+    if (!DROP_MAT[key]) {
+      DROP_MAT[key] = new THREE.MeshLambertMaterial({ color: color });
+      DROP_MAT[key]._shared = true;
+    }
+    return DROP_MAT[key];
   }
+  function boxGeo(sx, sy, sz) {
+    const key = "b|" + sx + "|" + sy + "|" + sz;
+    let geo = DROP_GEO.get(key);
+    if (!geo) { geo = new THREE.BoxGeometry(sx, sy, sz); geo._shared = true; DROP_GEO.set(key, geo); }
+    return geo;
+  }
+  function cylGeo(r, len) {
+    const key = "c|" + r + "|" + len;
+    let geo = DROP_GEO.get(key);
+    if (!geo) { geo = new THREE.CylinderGeometry(r, r, len, 10); geo._shared = true; DROP_GEO.set(key, geo); }
+    return geo;
+  }
+  function propBox(parent, sx, sy, sz, mat, x, y, z, rx, ry, rz) {
+    const m = new THREE.Mesh(boxGeo(sx, sy, sz), mat);
+    m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
+    m.castShadow = true; parent.add(m); return m;
+  }
+  function propCyl(parent, r, len, mat, x, y, z, rx, ry, rz) {
+    const m = new THREE.Mesh(cylGeo(r, len), mat);
+    m.position.set(x || 0, y || 0, z || 0); m.rotation.set(rx || 0, ry || 0, rz || 0);
+    m.castShadow = true; parent.add(m); return m;
+  }
+  const PM = {
+    case: sharedMat("case", 0x3a2719), trim: sharedMat("trim", 0x17191d),
+    metal: sharedMat("metal", 0xb5a56a), cloth: sharedMat("cloth", 0x354553),
+    cloth2: sharedMat("cloth2", 0x1f2b35), leather: sharedMat("leather", 0x241a14),
+    steel: sharedMat("steel", 0x929ba5), wood: sharedMat("wood", 0x7a4d2a),
+    paper: sharedMat("paper", 0xd8d0ad),
+  };
 
-  // ---- UNMISSABLE-DROP kit: a glow shell hugging the cube + a tall additive
-  //      light column, pulsing (the modshop.js/playeraircraft.js additive-
-  //      basic-material pattern — our OWN materials, never a pooled cmat, so
-  //      the per-frame opacity pulse can't bleed into anyone else's mesh).
-  //      GREEN column = weapon, GOLD column = item — readable from a firefight
-  //      away. Shared geometry + 4 shared materials across ALL drops.
-  const SHELL_GEO = new THREE.BoxGeometry(0.78, 0.78, 0.78);
-  const BEAM_CORE_GEO = new THREE.BoxGeometry(0.22, 5.4, 0.22);
-  const BEAM_HALO_GEO = new THREE.BoxGeometry(0.52, 5.4, 0.52);
-  function beaconMat(color, opacity, additive) {
-    return new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-      depthWrite: false,
-    });
+  function makeBriefcase(small) {
+    const g0 = new THREE.Group(), k = small ? 0.72 : 1;
+    propBox(g0, 0.82 * k, 0.38 * k, 0.22 * k, PM.case, 0, 0.22 * k, 0);
+    propBox(g0, 0.84 * k, 0.045 * k, 0.24 * k, PM.trim, 0, 0.22 * k, 0);
+    propBox(g0, 0.24 * k, 0.05 * k, 0.07 * k, PM.trim, 0, 0.46 * k, 0);
+    propBox(g0, 0.05 * k, 0.16 * k, 0.06 * k, PM.trim, -0.12 * k, 0.42 * k, 0);
+    propBox(g0, 0.05 * k, 0.16 * k, 0.06 * k, PM.trim, 0.12 * k, 0.42 * k, 0);
+    propBox(g0, 0.07 * k, 0.08 * k, 0.025 * k, PM.metal, -0.18 * k, 0.23 * k, -0.125 * k);
+    propBox(g0, 0.07 * k, 0.08 * k, 0.025 * k, PM.metal, 0.18 * k, 0.23 * k, -0.125 * k);
+    return g0;
   }
-  // the beacon is a Minecraft-style light column: a near-SOLID saturated CORE
-  // (normal blending — additive alone disappears against bright daylight)
-  // wrapped in an ADDITIVE halo, plus an additive shell hugging the cube.
-  const MAT_CORE_W = beaconMat(0x17e04e, 0.95), MAT_CORE_I = beaconMat(0xffb81f, 0.95);
-  const MAT_HALO_W = beaconMat(0x39ff66, 0.35, true), MAT_HALO_I = beaconMat(0xffd166, 0.35, true);
-  const MAT_SHELL_W = beaconMat(0x39ff66, 0.3, true), MAT_SHELL_I = beaconMat(0xffd166, 0.3, true);
-  // attach the glow kit to a drop mesh (children ride its bob/spin). scaleComp
-  // un-scales the kit when the parent mesh itself is scaled (NPC gun planks).
-  function attachBeacon(mesh, isWeapon, scaleComp) {
-    if (!mesh || mesh._inv2Beacon) return;
-    mesh._inv2Beacon = true;
-    const k = scaleComp || 1;
-    const shell = new THREE.Mesh(SHELL_GEO, isWeapon ? MAT_SHELL_W : MAT_SHELL_I);
-    shell.scale.setScalar(k);
-    const core = new THREE.Mesh(BEAM_CORE_GEO, isWeapon ? MAT_CORE_W : MAT_CORE_I);
-    core.scale.setScalar(k);
-    core.position.y = 2.7 * k;
-    const halo = new THREE.Mesh(BEAM_HALO_GEO, isWeapon ? MAT_HALO_W : MAT_HALO_I);
-    halo.scale.setScalar(k);
-    halo.position.y = 2.7 * k;
-    mesh.add(shell); mesh.add(core); mesh.add(halo);
+  function makeBackpack() {
+    const g0 = new THREE.Group();
+    propBox(g0, 0.56, 0.66, 0.28, PM.cloth, 0, 0.36, 0);
+    propBox(g0, 0.50, 0.23, 0.06, PM.cloth2, 0, 0.58, -0.17, -0.18, 0, 0);
+    propBox(g0, 0.38, 0.22, 0.09, PM.cloth2, 0, 0.22, -0.19);
+    propBox(g0, 0.07, 0.54, 0.05, PM.leather, -0.20, 0.37, 0.17, 0, 0, -0.10);
+    propBox(g0, 0.07, 0.54, 0.05, PM.leather, 0.20, 0.37, 0.17, 0, 0, 0.10);
+    return g0;
   }
-  // one global pulse — every drop breathes together (6 material writes/frame)
-  function pulseBeacons() {
-    const s = Math.sin((CBZ.now || 0) * 3.2);
-    MAT_CORE_W.opacity = 0.88 + 0.1 * s; MAT_CORE_I.opacity = 0.88 + 0.1 * s;
-    MAT_HALO_W.opacity = 0.26 + 0.16 * s; MAT_HALO_I.opacity = 0.26 + 0.16 * s;
-    MAT_SHELL_W.opacity = 0.24 + 0.14 * s; MAT_SHELL_I.opacity = 0.24 + 0.14 * s;
+  function makeMelee(name) {
+    const g0 = new THREE.Group(), n = String(name || "").toLowerCase();
+    if (/knife|blade/.test(n)) {
+      propBox(g0, 0.14, 0.06, 0.58, PM.steel, 0, 0.08, -0.20, 0, 0, 0.04);
+      propBox(g0, 0.18, 0.10, 0.34, PM.leather, 0, 0.08, 0.25);
+    } else {
+      propCyl(g0, 0.07, 1.15, /bat/.test(n) ? PM.wood : PM.steel, 0, 0.10, 0, 0, 0, Math.PI / 2);
+      propCyl(g0, 0.095, 0.34, PM.leather, -0.42, 0.10, 0, 0, 0, Math.PI / 2);
+    }
+    return g0;
+  }
+  function makeWeapon(nameOrId) {
+    let model = null;
+    try { if (CBZ.buildActorWeapon) model = CBZ.buildActorWeapon(nameOrId); } catch (e) {}
+    if (!model) {
+      const g0 = new THREE.Group();
+      propBox(g0, 0.18, 0.14, 0.72, PM.steel, 0, 0.13, -0.22);
+      propBox(g0, 0.15, 0.32, 0.16, PM.trim, 0, -0.03, 0.12, -0.2, 0, 0);
+      model = g0;
+    } else {
+      // buildActorWeapon returns a hand-mounted transform; the appearance
+      // itself is already authored along the ground plane, so unmount it.
+      model.position.set(0, 0, 0);
+      model.rotation.set(0, 0, 0);
+      model.scale.setScalar(model.userData && model.userData.weaponSlot === "pistol" ? 1.2 : 1.0);
+    }
+    return model;
+  }
+  function makePhysicalDrop(payload) {
+    let prop;
+    if (payload.weaponId) prop = makeWeapon(payload.weaponId);
+    else if (payload.melee) prop = makeMelee(payload.melee);
+    else if (payload.cash != null) prop = makeBriefcase((payload.cash | 0) < 250);
+    else if (/^(?:briefcase of cash|cash stack)$/i.test(payload.name || "")) prop = makeBriefcase(false);
+    else if (/^wallet$/i.test(payload.name || "")) prop = makeBriefcase(true);
+    else prop = makeBackpack();
+    prop.userData.transient = true;
+    prop.userData._invPhysicalDrop = true;
+    return prop;
   }
 
   CBZ.cityDropItem = function (x, z, payload) {
     payload = payload || {};
     let mesh = null;
     const root = arenaRoot();
-    const y0 = (payload.y != null ? payload.y : floorY(x, z)) + 0.5;
-    const isWeapon = !!(payload.weaponId || payload.melee);
+    const y0 = payload.y != null ? payload.y : floorY(x, z);
     if (root) {
-      mesh = new THREE.Mesh(DROP_GEO, dropMat(payload));
-      mesh.position.set(x, y0, z);
-      mesh.rotation.y = (x * 7 + z * 13) % 6.28;   // deterministic-ish cosmetic spin seed
-      mesh.userData.transient = true;
-      attachBeacon(mesh, isWeapon);
+      mesh = makePhysicalDrop(payload);
+      mesh.position.set(x, y0 + (payload.weaponId || payload.melee ? 0.18 : 0.03), z);
+      mesh.rotation.y = (x * 7 + z * 13) % 6.28;
       root.add(mesh);
     }
     CBZ.cityItemDrops.push({
       x, z, y0, t: 0, ttl: payload.ttl != null ? payload.ttl : 120, mesh,
       name: payload.name || null, count: payload.count || 1,
       weaponId: payload.weaponId || null, ammo: payload.ammo != null ? payload.ammo : 30,
-      melee: payload.melee || null,
+      melee: payload.melee || null, cash: Math.max(0, Math.round(payload.cash || 0)),
     });
   };
 
-  // ---- NPC gun drops (peds.js CBZ.cityDrops) get the SAME beacon: wrap
-  //      CBZ.cityDropWeapon (peds.js untouched). Their pickup path removes
-  //      the whole mesh subtree, so the kit leaves with the drop; my tick
-  //      bobs/spins their (otherwise static) plank too.
+  function physicalizeNpcDrop(d) {
+    if (!d || d._inv2Physical || !d.mesh) return;
+    const old = d.mesh, parent = old.parent || arenaRoot();
+    if (!parent) return;
+    const y = floorY(d.x, d.z);
+    if (old.parent) old.parent.remove(old);
+    if (old.geometry && old.geometry.dispose && !old.geometry._shared) old.geometry.dispose();
+    if (old.material && old.material.dispose && !old.material._shared) old.material.dispose();
+    const prop = makeWeapon((CBZ.weaponIdFromName && CBZ.weaponIdFromName(d.weapon)) || d.weapon || "Pistol");
+    prop.userData.transient = true; prop.userData._invPhysicalDrop = true;
+    prop.position.set(d.x, y + 0.18, d.z);
+    prop.rotation.y = (d.x * 7 + d.z * 13) % 6.28;
+    parent.add(prop);
+    d.mesh = prop; d._inv2Physical = true;
+  }
+
+  // NPC gun drops use the same real weapon appearance as carried actors.
   function installDropWeaponWrap() {
-    if (typeof CBZ.cityDropWeapon !== "function" || CBZ.cityDropWeapon._inv2BeaconWrap) return;
+    if (typeof CBZ.cityDropWeapon !== "function" || CBZ.cityDropWeapon._inv2PhysicalWrap) return;
     const orig = CBZ.cityDropWeapon;
     const wrapped = function (x, z, weapon, ammo) {
       const r = orig.apply(this, arguments);
@@ -357,17 +418,13 @@
         if (on()) {
           const arr = CBZ.cityDrops;
           const d = arr && arr[arr.length - 1];
-          if (d && d.mesh && !d.mesh._inv2Beacon && d.x === x && d.z === z) {
-            d.mesh.scale.setScalar(1.5);              // the 0.7u plank reads at distance now
-            attachBeacon(d.mesh, true, 1 / 1.5);
-            d._inv2Y0 = d.mesh.position.y;
-          }
+          if (d && d.x === x && d.z === z) physicalizeNpcDrop(d);
         }
       } catch (e) {}
       return r;
     };
     for (const k in orig) if (Object.prototype.hasOwnProperty.call(orig, k)) wrapped[k] = orig[k];
-    wrapped._inv2BeaconWrap = true;
+    wrapped._inv2PhysicalWrap = true;
     CBZ.cityDropWeapon = wrapped;
   }
   function removeItemDrop(i) {
@@ -377,7 +434,11 @@
   }
   function pickupItemDrop(d) {
     const E = econ();
-    if (d.weaponId) {
+    if (d.cash > 0) {
+      if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(d.cash);
+      else g.cash = Math.max(0, (g.cash || 0) + d.cash);
+      note("Recovered $" + d.cash.toLocaleString() + ".", 1.4);
+    } else if (d.weaponId) {
       if (CBZ.unlockWeapon) CBZ.unlockWeapon(d.weaponId, { select: false });
       if (d.ammo > 0 && CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(d.ammo, d.weaponId); } catch (e) {} }
       note("Picked up " + gunName(d.weaponId), 1.4);
@@ -393,25 +454,17 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   function tickItemDrops(dt) {
-    pulseBeacons();
-    // beacon-ize + bob/spin EVERY NPC gun drop. LAZY SWEEP, not just the
+    // Replace EVERY NPC gun placeholder. LAZY SWEEP, not just the
     // cityDropWeapon wrap: cityKillPed calls peds.js's INTERNAL dropWeapon()
     // directly (the global alias never runs), so records can land in
     // CBZ.cityDrops without passing any wrappable function — this sweep
-    // catches them all within a frame. Idempotent via mesh._inv2Beacon.
+    // catches them before the frame renders.
     const npcDrops = CBZ.cityDrops;
     if (npcDrops && npcDrops.length) {
       for (let i = 0; i < npcDrops.length; i++) {
         const d = npcDrops[i];
         if (!d.mesh) continue;
-        if (!d.mesh._inv2Beacon && on()) {
-          d.mesh.scale.setScalar(1.5);
-          attachBeacon(d.mesh, true, 1 / 1.5);
-          d._inv2Y0 = d.mesh.position.y;
-        }
-        if (!d.mesh._inv2Beacon) continue;
-        d.mesh.position.y = (d._inv2Y0 != null ? d._inv2Y0 : 0.25) + 0.18 + Math.sin((d.t || 0) * 2.6) * 0.16;
-        d.mesh.rotation.y += dt * 2.0;
+        if (on()) physicalizeNpcDrop(d);
       }
     }
     const drops = CBZ.cityItemDrops;
@@ -420,8 +473,7 @@
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       d.t += dt;
-      if (d.mesh) { d.mesh.position.y = d.y0 + 0.1 + Math.sin(d.t * 2.6) * 0.16; d.mesh.rotation.y += dt * 2.0; }
-      if (P && !P.dead && !P.driving && Math.abs(P.pos.y - (d.y0 - 0.5)) < 2.5 &&
+      if (P && !P.dead && !P.driving && Math.abs(P.pos.y - d.y0) < 2.5 &&
           Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 1.5) {
         pickupItemDrop(d);
         removeItemDrop(i);
@@ -431,6 +483,67 @@
     }
   }
   function clearItemDrops() { for (let i = CBZ.cityItemDrops.length - 1; i >= 0; i--) removeItemDrop(i); }
+
+  // Corpse contents get a physical container beside the body. A meaningful
+  // cash haul reads as a briefcase; carried belongings read as a backpack.
+  // The corpse remains the interaction target, so all existing loot rules and
+  // economy debits stay authoritative.
+  function clearCorpseProp(ped) {
+    const prop = ped && ped._invLootProp;
+    if (prop && prop.parent) prop.parent.remove(prop);
+    if (ped) ped._invLootProp = null;
+  }
+  function mountCorpseProp(ped) {
+    if (!ped || !ped.dead || !ped.deadLoot || ped.deadLoot.looted) { clearCorpseProp(ped); return; }
+    if (ped._invLootProp && ped._invLootProp.parent) return;
+    const root = arenaRoot(); if (!root || !ped.pos) return;
+    const dl = ped.deadLoot, hasItems = Array.isArray(dl.items) && dl.items.some(Boolean);
+    if (!(dl.cash > 0) && !hasItems) return;
+    const payload = dl.cash >= 250 ? { cash: dl.cash } : hasItems ? { name: "Backpack" } : { cash: dl.cash };
+    const prop = makePhysicalDrop(payload);
+    const a = ((ped.pos.x * 5 + ped.pos.z * 11) % 6.28);
+    prop.position.set(ped.pos.x + Math.cos(a) * 0.48, floorY(ped.pos.x, ped.pos.z) + 0.03, ped.pos.z + Math.sin(a) * 0.48);
+    prop.rotation.y = a;
+    root.add(prop);
+    ped._invLootProp = prop;
+  }
+  function installCorpseLootWraps() {
+    if (typeof CBZ.cityKillPed === "function" && !CBZ.cityKillPed._invLootWrap) {
+      const origKill = CBZ.cityKillPed;
+      const wrappedKill = function (ped) {
+        const wasDead = !ped || ped.dead;
+        const r = origKill.apply(this, arguments);
+        if (!wasDead && ped && ped.dead) mountCorpseProp(ped);
+        return r;
+      };
+      for (const k in origKill) if (Object.prototype.hasOwnProperty.call(origKill, k)) wrappedKill[k] = origKill[k];
+      wrappedKill._invLootWrap = true;
+      CBZ.cityKillPed = wrappedKill;
+    }
+    if (typeof CBZ.cityLootCorpse === "function" && !CBZ.cityLootCorpse._invLootWrap) {
+      const origLoot = CBZ.cityLootCorpse;
+      const wrappedLoot = function (ped) {
+        const r = origLoot.apply(this, arguments);
+        if (ped && ped.deadLoot && ped.deadLoot.looted) clearCorpseProp(ped);
+        return r;
+      };
+      for (const k in origLoot) if (Object.prototype.hasOwnProperty.call(origLoot, k)) wrappedLoot[k] = origLoot[k];
+      wrappedLoot._invLootWrap = true;
+      CBZ.cityLootCorpse = wrappedLoot;
+    }
+  }
+  let corpsePropT = 0;
+  function tickCorpseProps(dt) {
+    corpsePropT -= dt; if (corpsePropT > 0) return;
+    corpsePropT = 0.5;
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p) continue;
+      if (p.culled || !p.dead || !p.deadLoot || p.deadLoot.looted) clearCorpseProp(p);
+      else mountCorpseProp(p);
+    }
+  }
 
   // drop the cursor stack (or a grid slot) to the ground at the player's feet
   function dropEntryToGround(entry) {
@@ -448,7 +561,8 @@
 
   // ============================================================
   //  PLAYER DEATH DROP — wrap CBZ.cityKillPlayer: the guns leave the body
-  //  as REAL pickups (Minecraft rule: go back for your gear). Items stay.
+  //  as REAL pickups (Minecraft rule: go back for your gear). Items stay and
+  //  carried cash hits the pavement; money deposited in g.cityBank survives.
   //  Stowed guns (police stop, g._copStow) are the effective loadout and
   //  must not resurrect via cityRedrawWeapon — snapshot then null it.
   // ============================================================
@@ -464,6 +578,12 @@
           const stow = g._copStow;
           const ids = (stow && stow.inv && stow.inv.length ? stow.inv : (CBZ.weaponInventory || [])).slice();
           const px = P.pos.x, pz = P.pos.z, py = P.pos.y;
+          const carriedCash = Math.max(0, Math.round(g.cash || 0));
+          if (carriedCash > 0) {
+            CBZ.cityDropItem(px + (Math.random() - 0.5) * 0.8, pz + (Math.random() - 0.5) * 0.8,
+              { cash: carriedCash, y: py, ttl: 300 });
+            g.cash = 0; // g.cityBank is deliberately untouched
+          }
           for (let i = 0; i < ids.length; i++) {
             // ammo:0 — reserves live per-weapon inside fpsmode and survive the
             // drop/re-pickup round-trip; a bonus here would be a death-farm.
@@ -474,13 +594,14 @@
             CBZ.cityDropItem(px + (Math.random() - 0.5) * 1.6, pz + (Math.random() - 0.5) * 1.6,
               { melee: g.cityMeleeWeapon, y: py, ttl: 300 });
           }
-          if (ids.length || g.cityMeleeWeapon) note("💀 Your weapons hit the pavement — go back for them.", 3);
+          if (ids.length || g.cityMeleeWeapon || carriedCash) note("Your carried gear and cash are still at the scene.", 3);
           // strip truth so a hospital respawn (or cityRedrawWeapon) can't dupe
           if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
           CBZ.currentWeaponId = null;
           g.cityMeleeWeapon = null;
           g._copStow = null; g.cityStowedWeapon = null;
           if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+          commit();
         }
       } catch (e) {}
       return orig.apply(this, arguments);
@@ -1089,6 +1210,8 @@
     if (root && root !== _chestRoot) {
       teardownChests();
       clearItemDrops();
+      const oldPeds = CBZ.cityPeds || [];
+      for (let i = 0; i < oldPeds.length; i++) clearCorpseProp(oldPeds[i]);
       _chestRoot = root;
     }
     if (root) hydrateChests();
@@ -1096,6 +1219,7 @@
     installDropWeaponWrap();     // peds.js defines cityDropWeapon before us, ditto
 
     tickItemDrops(dt);
+    tickCorpseProps(dt);
 
     // fallback hotbar (throttled ~5 Hz; it's signature-gated inside)
     _hotT += dt;
@@ -1143,6 +1267,7 @@
 
   installDeathWrap();
   installDropWeaponWrap();
+  installCorpseLootWraps();
   registerChestItem();
 
   // ============================================================

@@ -227,6 +227,10 @@
   // and difficulty knobs live here; lower CITY_PEDS/CITY_COPS on weak HW.
   CBZ.CITY = {
     center: { x: 0, z: -700 },
+    // Player start/return location. The airport builder publishes the exact
+    // safe apron anchor; city/mode.js resolves this symbolic choice after the
+    // whole archipelago exists, so these coordinates never drift apart.
+    playerSpawn: "airport",
     blocks: 6,             // 6×6 grid of city blocks (room for shops + homes + turf)
     block: 34,             // block size (building lot)
     road: 18,              // four 3.6m lanes + 1.8m curb/clear zone per side
@@ -553,10 +557,34 @@
   // ridges so tall peaks stop standing inside Redhollow Woods and on the Ironjaw
   // island. Flip false for a one-line revert to the prior massif + no ledger.
   if (CBZ.CONFIG.MAP_RESERVE_V1 == null) CBZ.CONFIG.MAP_RESERVE_V1 = true;
-  // Canonical authored game: one hitman campaign owns the city/prison handoff,
-  // communicates through a diegetic phone, and continually assigns a mission.
-  // Flip false to expose the legacy multi-mode sandbox during development.
-  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
+  // CONTINENT EXPANSION V2: the old coast stopped just 40 m beyond whichever
+  // authored biome happened to be outermost. That made a multi-kilometre world
+  // read like a tightly packed board: every destination sat on the map frame and
+  // there was no country beyond it. Keep every existing placement unchanged,
+  // but extend the REAL rendered/walkable continent around their union. The
+  // margin is total coast-plate padding (legacy = 40); continent.js also builds
+  // a mapped rural loop and four dry-land navigation beacons in this new belt.
+  // URL A/B: ?cfg_CONTINENT_EXPANSION_V2=0 or
+  // ?cfg_CONTINENT_COUNTRY_MARGIN=240.
+  if (CBZ.CONFIG.CONTINENT_EXPANSION_V2 == null) CBZ.CONFIG.CONTINENT_EXPANSION_V2 = true;
+  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null) CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = 360;
+  // PROCEDURAL BACKDROP TERRAIN. Default OFF: decorative horizon mountains are
+  // not geography. Real elevation belongs to registered, reachable landmasses
+  // (Mount Mercy publishes an actual ground-height field); no fake skyline ring.
+  CBZ.PROC_TERRAIN = false;
+  // The old wild-nature belt depended on that decorative terrain mesh.  With
+  // the fake backdrop gone it would otherwise plant trees over open water.
+  CBZ.WILD_NATURE = false;
+  // DYNAMIC WEATHER (systems/weather.js). Default OFF: the pooled rain Points
+  // cloud read as bright white dots stuck to the HUD, and because weather ticks
+  // globally it also appeared inside jail. Flip true (or ?cfg_DYNAMIC_WEATHER=1)
+  // to restore rain, storm fog, lightning and wet-road grip as one coherent set.
+  if (CBZ.CONFIG.DYNAMIC_WEATHER == null) CBZ.CONFIG.DYNAMIC_WEATHER = false;
+  // Sandbox/testing is the default: start directly at the configured city
+  // spawn (Halloran Airport) instead of forcing the helicopter arrest and a
+  // jail chapter on every fresh run. The complete authored campaign remains
+  // available by setting this flag true before Play.
+  if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
   // REAL-PHONE NOTIFICATIONS V2 (owner rule: no 4th-wall notification copy).
   // Every phone notice is a diegetic push from someone/something in-world — a
   // contact texting, the Bank app ("$500 received"), News, the Bounty board, a

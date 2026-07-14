@@ -74,6 +74,16 @@
     const a = CBZ.cityRecentDeaths;
     a.push(e);
     if (a.length > CAP) a.splice(0, a.length - CAP);
+    // Deaths stay available as diegetic city news. The population counter still
+    // pulses immediately, while the old red/white kill prose never paints over
+    // the world. Your own death is already communicated by the WASTED card.
+    if (!e.you && typeof CBZ.cityPhoneNotify === "function") {
+      CBZ.cityPhoneNotify({
+        app: "news",
+        from: "City Desk",
+        text: e.name + " was reported dead. Cause: " + e.cause + ".",
+      });
+    }
     return e;
   }
 

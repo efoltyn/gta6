@@ -175,16 +175,9 @@
     const line = you
       ? z.name.toUpperCase() + " is YOURS — " + score
       : z.name.toUpperCase() + " falls to the " + nm + " — " + score;
-    showZoneToast(line, col);
-    flipFeed.push({
-      html: "<div class='kfrow zflip' style='border-right-color:" + col + "'><b>" + esc(z.name.toUpperCase()) + "</b> — " + (you ? "yours" : "taken by " + esc(nm)) + " (" + held + "/" + ctrl.total + ")</div>",
-      t: CBZ.now || 0,
-    });
-    if (flipFeed.length > 8) flipFeed.splice(0, flipFeed.length - 8);
-    const playerInvolved = you || prevId === "player";
-    if (playerInvolved) {
-      CBZ.city && CBZ.city.note(you ? "🏴 You took " + z.name + "." : "🏴 " + nm + " took " + z.name + " from you.", 2.4);
-    }
+    const notice = { app: "news", from: "City Desk", text: line };
+    if (typeof CBZ.cityPhoneNotify === "function") CBZ.cityPhoneNotify(notice);
+    else if (typeof CBZ.phoneNotify === "function") CBZ.phoneNotify(notice);
     // turf flip toward the player: respect, but NO jingle (no-jingle rule).
     if (you) { CBZ.city && CBZ.city.addRespect(12); }
   }
@@ -862,14 +855,8 @@
   // the minimap-adjacent flip toast under the zones bar (one at a time; the
   // freshest flip wins). Restarting the CSS animation makes repeats readable.
   function showZoneToast(txt, color) {
-    buildHud();
-    if (!toastEl) return;
-    toastEl.textContent = txt;
-    toastEl.style.color = color || "#e8eef7";
-    toastEl.style.display = "none";
-    void toastEl.offsetWidth;             // restart the ztIn animation
-    toastEl.style.display = "block";
-    toastT = 4.5;
+    // Kept as an internal compatibility seam; zone changes now live in News.
+    if (toastEl) { toastEl.textContent = ""; toastEl.style.display = "none"; }
   }
   function buildHud() {
     if (hudRoot) return;
@@ -938,28 +925,19 @@
       const cls = "zseg zchip" +
         (z.owner === "player" ? " zmine" : "") +
         ((z._flashT && now - z._flashT < 1600) ? " zflash" : "");
-      const tip = z.name + " — " + (z.owner ? (z.owner === "player" ? "yours" : (gangName(z.owner) || "held")) : "unclaimed");
-      html += "<div class='" + cls + "' title='" + esc(tip) + "' style='background:" + col + ";opacity:" + op + "'><span>" + (z.abbr || "") + "</span></div>";
+      // Ownership is already communicated by colour and the player's outline;
+      // district initials and hover tooltips were another permanent strip of
+      // HUD words. The phone/map carry the named ownership record.
+      html += "<div class='" + cls + "' aria-hidden='true' style='background:" + col + ";opacity:" + op + "'></div>";
     }
     zoneBarEl.innerHTML = html;
   }
 
   function renderHeadAndAllies() {
     if (!headEl) return;
-    const ctrl = CBZ.cityZoneControl();
-    // minimal: just districts held (the alive headcount is the top-right pill).
-    headEl.innerHTML = "<b>" + (ctrl.total - ctrl.neutral) + "/" + ctrl.total + "</b> districts held";
-    // leader line (concise — the full standings live on the Tab board)
-    const ldr = CBZ.cityTakeoverLeader();
-    if (leadEl) {
-      if (ldr) {
-        const isYou = ldr.id === "player";
-        leadEl.innerHTML = "Leading: <b style='color:" + hex6(gangColorOf(ldr.id)) + "'>" + (isYou ? "YOU" : ldr.name) + "</b> " + ldr.zones + "/" + ldr.total;
-      } else leadEl.textContent = "City up for grabs.";
-    }
-    // per-gang scores + the alliance strip were too wordy for an always-on HUD —
-    // they now live ONLY on the Tab takeover board. Keep the bar clean.
-    if (allyEl) allyEl.innerHTML = "";
+    headEl.innerHTML = ""; headEl.style.display = "none";
+    if (leadEl) { leadEl.innerHTML = ""; leadEl.style.display = "none"; }
+    if (allyEl) { allyEl.innerHTML = ""; allyEl.style.display = "none"; }
   }
   function shortName(n) { if (!n) return "?"; const w = n.split(" "); return w.length > 1 ? w[w.length - 1] : n; }
 
@@ -967,29 +945,9 @@
   // merges in this file's own ZONE-FLIP lines, time-ordered, capped to 6 rows.
   function renderKillFeed() {
     if (!feedEl) return;
-    // age out stale flip lines (same lifetime the death feed uses)
-    const now = CBZ.now || 0;
-    while (flipFeed.length && now - (flipFeed[0].t || 0) > 22000) flipFeed.shift();
-    const deaths = CBZ.cityRecentDeaths || [];
-    if (!deaths.length && !flipFeed.length) { if (feedEl.style.display !== "none") feedEl.style.display = "none"; return; }
-    const rows = [];
-    for (const d of deaths.slice(-5)) {
-      rows.push({
-        t: d.t || 0,
-        k: (d.name || "") + (d.cause || "") + (d.t || ""),
-        html: "<div class='" + (d.you ? "kfrow you" : "kfrow") + "'><b>" + esc(d.name || "Someone") + "</b> — " + esc(d.cause || "killed") + "</div>",
-      });
-    }
-    for (const f of flipFeed.slice(-4)) rows.push({ t: f.t || 0, k: "z" + f.t, html: f.html });
-    rows.sort((a, b) => a.t - b.t);
-    const recent = rows.slice(-6);
-    const sig = recent.map((r) => r.k).join("|");
-    if (sig === feedSig) return;                         // nothing new
-    feedSig = sig;
-    let html = "";
-    for (const r of recent) html += r.html;
-    feedEl.innerHTML = html;
-    feedEl.style.display = "block";
+    feedSig = "";
+    feedEl.innerHTML = "";
+    feedEl.style.display = "none";
   }
   function esc(s) { return String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
 

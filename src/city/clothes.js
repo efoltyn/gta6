@@ -767,24 +767,15 @@
     const skin = (c && c.skin != null) ? c.skin : 0xcf9a72;      // shared-atlas approximation — see note above
     const T = P.T, A = P.A;
     const wc = hx(white), sk = hx(skin), rib = tone(white, -0.09), grime = "rgba(40,34,24,0.16)";
-    // base the whole torso row in skin — the low neckline + open armholes
-    // (both left unpainted below) show straight through to this.
-    T.fill(sk);
-    // FRONT: wide straps over the shoulders, a low scoop neckline dips a
-    // triangular notch of bare skin into the top of the panel below them.
-    T.rect("front", 0.12, 0, 0.18, 0.2, wc);
-    T.rect("front", 0.70, 0, 0.18, 0.2, wc);
-    T.rect("front", 0.12, 0.16, 0.76, 0.8, wc);                    // the tank body
-    T.poly("front", [[0.30, 0.16], [0.70, 0.16], [0.5, 0.36]], sk); // scoop cut back to skin
-    // BACK: straps + a modest scoop of its own (bare shoulder blades)
-    T.rect("back", 0.12, 0, 0.18, 0.22, wc);
-    T.rect("back", 0.70, 0, 0.18, 0.22, wc);
-    T.rect("back", 0.12, 0.2, 0.76, 0.76, wc);
-    T.poly("back", [[0.32, 0.2], [0.68, 0.2], [0.5, 0.34]], sk);
-    // SIDE: the open armhole — bare up top, fabric only from the waist down
-    T.rect("side", 0, 0.3, 1, 0.66, wc);
+    // The torso is one rectangular solid; exposing its entire top band as skin
+    // creates a broad flesh-coloured shelf around the neck. Keep that solid
+    // fabric and cut only a compact neckline into the front/back. Bare skin is
+    // already represented by the actual arm geometry below.
+    T.fill(wc);
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.22]], sk);
+    T.poly("back", [[0.39, 0], [0.61, 0], [0.5, 0.14]], sk);
     // ribbed texture: thin vertical lines through the fabric only
-    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.34, 0.014, 0.56, rib);
+    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.24, 0.014, 0.66, rib);
     T.rect("front", 0.2, 0.5, 0.16, 0.1, grime); T.rect("back", 0.5, 0.55, 0.2, 0.1, grime);   // a couple of grubby smudges
     T.rect("front", 0, 0.92, 1, 0.08, tone(white, -0.18));         // hem
     T.rect("back", 0, 0.92, 1, 0.08, tone(white, -0.18));

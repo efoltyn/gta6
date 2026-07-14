@@ -435,11 +435,6 @@
     }
 
     addParapets(lot, null);
-    addRoofProps(lot, [
-      { x: roofPad.x, z: roofPad.z, r: 2.4 },
-      { x: ox + P(0, CD + 0.07).x, z: oz + P(0, CD + 0.07).z, r: 2.0 },
-    ]);
-
     // ---- per-end local frames: lat (across the door) / dep (from the back
     //      wall toward the door plane). The two cabs are now built in the SAME
     //      lobby frame (f/P), so the roof end reuses the ground frame verbatim —
@@ -591,7 +586,6 @@
     box(grp, m * w / 2, h + 0.69, bz, X1 - (w / 2 - 1.35), 0.12, 1.6, LAND);
     box(grp, m * (w / 2 - 1.6), h + 0.3, bz, 0.7, 0.3, 1.3, 0x59616c);      // step block on the roof side
     addParapets(lot, { z0: oz + bz - 0.9, z1: oz + bz + 0.9, side: m });    // rim colliders, gap at the bridge
-    addRoofProps(lot, [{ x: ox + m * w / 2, z: oz + bz, r: 2.0 }]);
     lot.building.fireEscape = { x: ox + m * X1, z: oz + bz, topY: h, side: m };
   }
 
@@ -614,41 +608,6 @@
       } else {
         solid(y0, y1, x0, x1, oz + S.izMin, oz + S.izMax);
       }
-    }
-  }
-
-  // 1-2 cheap shared-geometry props so a reached roof reads as a PLACE you
-  // arrived at, not a bare slab: an AC unit + a ducted vent. Skipped where
-  // they'd crowd the helipad / headhouse / arrival spot.
-  function addRoofProps(lot, avoid) {
-    const b = lot.building, ox = b.ox, oz = b.oz, h = b.h;
-    const S = slabInfo(b);
-    const cx = b.roofCx != null ? b.roofCx : ox, cz = b.roofCz != null ? b.roofCz : oz;
-    const hp = lot.building.helipad;
-    const blocked = (x, z) => {
-      if (hp && Math.hypot(x - hp.x, z - hp.z) < (hp.r || 6) + 1.4) return true;
-      for (const a of avoid || []) if (Math.hypot(x - a.x, z - a.z) < a.r) return true;
-      return false;
-    };
-    const spots = [
-      { x: cx - S.slabW * 0.27, z: cz + S.slabD * 0.27 },
-      { x: cx + S.slabW * 0.27, z: cz + S.slabD * 0.27 },
-    ];
-    let placedN = 0;
-    for (const sp of spots) {
-      if (blocked(sp.x, sp.z)) continue;
-      const lx = sp.x - ox, lz = sp.z - oz;
-      if (placedN === 0) {   // AC unit: grey body + dark grill stripe
-        box(b.group, lx, h + 0.45, lz, 1.3, 0.9, 1.0, 0x9aa3ad, { cast: true });
-        box(b.group, lx, h + 0.78, lz, 1.34, 0.18, 1.04, 0x3a3f46);
-        solid(h, h + 0.9, sp.x - 0.65, sp.x + 0.65, sp.z - 0.5, sp.z + 0.5);
-      } else {               // ducted vent: stack + hood
-        box(b.group, lx, h + 0.55, lz, 0.7, 1.1, 0.7, 0x7c858f, { cast: true });
-        box(b.group, lx, h + 1.2, lz, 1.0, 0.25, 1.0, 0x5a626c);
-        solid(h, h + 1.3, sp.x - 0.35, sp.x + 0.35, sp.z - 0.35, sp.z + 0.35);
-      }
-      placedN++;
-      if (placedN >= 2) break;
     }
   }
 

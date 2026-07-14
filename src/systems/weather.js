@@ -26,6 +26,19 @@
   const CBZ = window.CBZ;
   // Never throw at load: bail unless the engine + THREE + scene/camera exist.
   if (!CBZ || !window.THREE || !CBZ.scene || !CBZ.camera) return;
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  // Bright camera-centred point sprites looked like dots painted on the HUD and
+  // this onAlways system also followed the camera into jail. Keep the complete
+  // weather stack behind one explicit opt-in instead of leaving invisible rain
+  // to affect fog/lightning/vehicle grip after merely hiding its particles.
+  if (CFG.DYNAMIC_WEATHER !== true) {
+    CBZ.weather = {
+      get intensity() { return 0; },
+      get raining() { return false; },
+      get wind() { return 0; }
+    };
+    return;
+  }
   const THREE = window.THREE;
 
   const scene = CBZ.scene;

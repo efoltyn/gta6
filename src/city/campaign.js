@@ -29,7 +29,10 @@
       if (legacyFlags[i] != null) { CFG.CITY_HITMAN_CAMPAIGN = !!legacyFlags[i]; break; }
     }
   }
-  if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = true;
+  // config.js defaults to sandbox for rapid world testing. Preserve that when
+  // this director is embedded without the normal config load; an explicit true
+  // still enables the complete story.
+  if (CFG.CITY_HITMAN_CAMPAIGN == null) CFG.CITY_HITMAN_CAMPAIGN = false;
   // Endless-line archetypes (sniper/disguise/vehicle/high-value contracts).
   if (CFG.CAMPAIGN_CONTRACT_VARIETY == null) CFG.CAMPAIGN_CONTRACT_VARIETY = true;
   // Ambient scenedirector set-pieces during ENDLESS free time (scripted phases
@@ -277,13 +280,23 @@
   }
 
   function makeHelicopter() {
-    // OWNER FIX ("the start-of-game helicopter isn't even the same looking
-    // helicopter we have in the game"): the prologue/insertion transport now
-    // reuses the EXACT in-game personal-chopper airframe (playerair.js's
-    // builder, exposed on CBZ.debugBuildPlayerAir) — one helicopter design
-    // across the whole game. Wrapped in an outer group whose origin sits at
-    // skid-bottom level, matching the old box model's ground contract, so
-    // every existing position.set/landing offset keeps working unchanged.
+    // Use the most detailed in-game light-helicopter art pass: tapered pod and
+    // boom, bubble canopy, cowl/exhaust, real skids, four-blade main rotor,
+    // tail rotor, livery, and navigation lights. It is the same asset players
+    // can see in the vehicle catalog, not a prologue-only approximation.
+    if (CBZ.debugBuildPlayerVehicle && CBZ.debugBuildPlayerVehicle.helicopter) {
+      try {
+        const inner = CBZ.debugBuildPlayerVehicle.helicopter();
+        if (inner) {
+          const group = new THREE.Group();
+          group.add(inner);
+          group.userData.rotor = inner.userData.mainRotor || inner.getObjectByName("heli_mainRotor");
+          group.userData.trotor = inner.userData.tailRotor || inner.getObjectByName("heli_tailRotor");
+          return group;
+        }
+      } catch (e) {}
+    }
+    // First fallback is the flyable personal-chopper asset.
     if (CBZ.debugBuildPlayerAir && CBZ.debugBuildPlayerAir.chopper) {
       try {
         const inner = CBZ.debugBuildPlayerAir.chopper();
@@ -872,11 +885,11 @@
     setMission({
       id: "quiet-channel",
       title: "QUIET CHANNEL",
-      briefing: "A relay case beneath Halloran's taxiway beacon contains the production manifest. Reach it and hold E to copy the names without firing a shot.",
+      briefing: "A relay case beneath Halloran's taxiway beacon contains the production manifest. Stay at the relay while it copies the names without firing a shot.",
       target: "Production manifest",
       location: "Halloran Field — taxiway relay",
       status: "active",
-      objectives: [{ id: "intel", text: "Recover the manifest — hold E at the relay", done: false }],
+      objectives: [{ id: "intel", text: "Recover the manifest from the relay", done: false }],
     });
     say("WARDEN", "That case maps the studios financing the ambush. Bring me the names; then you get a target.", 5.0);
   }

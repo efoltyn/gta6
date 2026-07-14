@@ -54,7 +54,10 @@
     box(g, 0.05, 0.05, 0.012, mat.steel, -0.04, 0.225, -0.42);
     // hand on the fire grip
     box(g, 0.15, 0.11, 0.13, mat.skin, 0, -0.13, -0.02, -0.10);
-    g.userData.muzzle = new THREE.Vector3(0, 0.05, -1.4);
+    // The projectile originates at the fuze tip, not inside the launcher's
+    // bell.  Keeping this socket on the authored nose also keeps recoil from
+    // making the first rocket frame look like it came through the weapon.
+    g.userData.muzzle = new THREE.Vector3(0, 0.05, -1.995);
     return g;
   };
 })();

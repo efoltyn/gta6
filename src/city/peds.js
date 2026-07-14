@@ -1279,6 +1279,10 @@
   }
 
   CBZ.clearCityPeds = function () {
+    // Release moving-parent placements (aircraft seats, authored posts) before
+    // disposing the roster. The shared NPC-life layer drops its cabin/actor
+    // references here so a rebuilt city never points at disposed character rigs.
+    if (CBZ.npcLife && CBZ.npcLife.resetCity) CBZ.npcLife.resetCity();
     for (const p of CBZ.cityPeds) {
       // HOME-BOND release (H2): a recycled/wiped body must let go of its leased
       // unit so the next city's tenants aren't blocked. Prefer the housing.js
@@ -1777,7 +1781,10 @@
   function dropWeapon(x, z, weapon, ammo) {
     let mesh = null;
     if (CBZ.city && CBZ.city.arena) {
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.22), CBZ.mat(0x1c1f24, { emissive: 0x39ff66, ei: 0.25 }));
+      // Inventory V2 swaps this compatibility proxy for the authored weapon
+      // model before presentation. Keep even the fallback neutral: a dropped
+      // gun must never become a glowing green pickup marker for one frame.
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.16, 0.22), CBZ.mat(0x1c1f24));
       mesh.position.set(x, 0.25, z); mesh.userData.transient = true;
       CBZ.city.arena.root.add(mesh);
     }
@@ -4195,17 +4202,41 @@
         if ((p.collected || p.deadT > 75) && !p.culled) { p.culled = true; if (p.group.parent) p.group.parent.remove(p.group); }
         continue;
       }
+      // A reusable placement owns actors seated on a moving parent (currently
+      // commercial-aircraft passengers/pilots). npclife.js already synced their
+      // world-space actor.pos before this tick; ordinary routine/path movement
+      // must not pull the local rig out of its seat. They remain in cityPeds, so
+      // combat, interaction, names, inventory and death all use the real actor.
+      if (p._npcAttached) {
+        p.speed = 0;
+        if (p.tag) p.tag.visible = false;
+        continue;
+      }
       if (p.inCar) continue;     // vehicles.js owns it while it drives
       const dx = p.pos.x - camx, dz = p.pos.z - camz, d2 = dx * dx + dz * dz;
-      if (p.tag) p.tag.visible = !(CBZ.cityCampaignActive && CBZ.cityCampaignActive()) && d2 < TAG_D2;
+      // Names, levels and job titles belong in conversation/phone surfaces,
+      // never as billboard prose over a person's head.
+      if (p.tag) p.tag.visible = false;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(p)) continue;
       if (p.ko > 0) { p.speed = 0; if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
       const near = d2 < ANIM_D2;
+      // `important` is a SIMULATION policy, not permission to draw forever.
+      // Passive guards and anybody who happens to own a gun must keep thinking
+      // off-screen, but the old shared flag also rendered their 20-ish mesh rig
+      // (plus a multi-mesh weapon) at unlimited distance. In a populated city
+      // that leaked thousands of draw calls. Preserve global presentation only
+      // for actors explicitly owned/scripted by the player; every other actor
+      // remains a full, hittable rig throughout the existing 95m q3 contract.
       const important = p.rage || p.guard || p.controlled || (p.npcWanted | 0) >= 1 || p.armed || p.reportState || p.approach;
+      const renderImportant = p.controlled || p.companion || p.recruited || p.faction === "player" || p === g.cityPartner;
       const active = near || important;
       // render LOD: peds far from the camera stop drawing entirely (the single
-      // biggest GPU saving with ~90 rigs). enterT owns visibility while inside.
-      const vis = active || d2 < VIS_D2;
+      // biggest GPU saving with ~90 rigs). Simulation proximity is deliberately
+      // separate: a tier whose VIS_D2 is below ANIM_D2 may keep a nearby ped's
+      // brain/movement responsive without forcing its 16-20 mesh rig to draw.
+      // Important actors remain visible regardless of distance; enterT owns
+      // visibility while inside.
+      const vis = renderImportant || d2 < VIS_D2;
       if (p.enterT <= 0) p.group.visible = vis;
       // far rigs stop casting shadows (their shadow is sub-pixel anyway); flip
       // only on a threshold crossing so the per-frame cost is a single compare.
@@ -4236,9 +4267,9 @@
       // trick as the think() stride above). Visible/important peds are
       // untouched — this only trims the invisible mass.
       const q = CBZ.qualityLevel == null ? 4 : CBZ.qualityLevel;
-      const moveStride = (vis || important) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : 1);
+      const moveStride = (active || vis) ? 1 : (q === 0 ? 8 : q === 1 ? 4 : q === 2 ? 2 : 1);
       if (moveStride === 1 || (frame + p.slice) % moveStride === 0) {
-        move(p, dt * moveStride, near || important || visAnim);
+        move(p, dt * moveStride, visAnim);
       }
       // ---- diegetic witness tells (post-anim, so animChar's damping can't
       //      pull them back): a dialing witness holds the phone to their EAR,

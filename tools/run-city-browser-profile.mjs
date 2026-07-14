@@ -24,8 +24,16 @@ const url = `${server}?profile=1&scenario=${encodeURIComponent(scenario)}&frames
 await rm(profileDir, { recursive: true, force: true });
 const chrome = spawn(chromePath, [
   "--headless=new",
+  "--no-sandbox",
+  "--disable-dev-shm-usage",
+  "--use-gl=angle",
+  "--use-angle=swiftshader",
   "--enable-unsafe-swiftshader",
+  "--enable-webgl",
   "--disable-background-networking",
+  "--disable-background-timer-throttling",
+  "--disable-backgrounding-occluded-windows",
+  "--disable-renderer-backgrounding",
   "--disable-component-update",
   "--disable-default-apps",
   "--disable-extensions",
@@ -35,7 +43,13 @@ const chrome = spawn(chromePath, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${profileDir}`,
   url,
-], { stdio: "ignore" });
+], { stdio: ["ignore", "ignore", "pipe"] });
+let chromeStderr = "";
+chrome.stderr.on("data", (chunk) => {
+  // Keep startup diagnostics bounded; this is surfaced only if CDP never
+  // exposes the requested profile page.
+  if (chromeStderr.length < 12000) chromeStderr += String(chunk);
+});
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let ws, nextId = 1;
@@ -50,15 +64,19 @@ async function json(path) {
 
 async function waitForPage() {
   const deadline = Date.now() + 30000;
+  let lastPages = [];
   while (Date.now() < deadline) {
     try {
       const pages = await json("/json/list");
+      lastPages = pages;
       const page = pages.find((p) => p.type === "page" && p.url.includes("profile=1"));
       if (page) return page;
     } catch (_) {}
+    if (chrome.exitCode != null) break;
     await sleep(250);
   }
-  throw new Error("Chrome DevTools page did not become available");
+  const pageSummary = lastPages.map((p) => `${p.type}:${p.url}`).join(", ");
+  throw new Error(`Chrome DevTools page did not become available (exit=${chrome.exitCode}; pages=${pageSummary || "none"}; stderr=${chromeStderr.trim() || "none"})`);
 }
 
 function send(method, params = {}) {

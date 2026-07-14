@@ -61,12 +61,14 @@
   }
 
   function setMeter() {
-    meter.style.display = (CBZ.game && CBZ.game.state === "playing" && streak > 0) ? "block" : "none";
+    const city = CBZ.game && CBZ.game.mode === "city";
+    meter.style.display = (!city && CBZ.game && CBZ.game.state === "playing" && streak > 0) ? "block" : "none";
     meter.textContent = "STREAK " + streak + (best > streak ? "  BEST " + best : "");
     meter.classList.toggle("armed", nukeReady && !nukeUsed);
   }
 
   function showKill(actor) {
+    if (CBZ.game && CBZ.game.mode === "city") return;
     title.textContent = streak >= 2 ? streak + " KILL STREAK!" : "";
     sub.textContent = "";
     points.textContent = "+50";
@@ -75,6 +77,7 @@
   }
 
   function showReward(r) {
+    if (CBZ.game && CBZ.game.mode === "city") return;
     title.textContent = r.n + " KILL STREAK!";
     sub.textContent = r.name + (r.n === 25 ? " - Press " + NUKE_KEY + " for TACTICAL NUKE." : "");
     points.textContent = "+50";
@@ -90,7 +93,7 @@
   }
 
   function onDown(actor, source) {
-    if (!CBZ.game || CBZ.game.state !== "playing" || nukeUsed) return;
+    if (!CBZ.game || CBZ.game.mode === "city" || CBZ.game.state !== "playing" || nukeUsed) return;
     streak++;
     best = Math.max(best, streak);
     CBZ.game.killstreak = streak;
@@ -120,6 +123,7 @@
 
   function breakStreak(reason) {
     if (streak <= 0) return;
+    if (CBZ.game && CBZ.game.mode === "city") { reset(); return; }
     title.textContent = "STREAK ENDED";
     sub.textContent = reason || "Captured";
     points.textContent = "";
@@ -133,7 +137,7 @@
   }
 
   function detonateNuke() {
-    if (!nukeReady || nukeUsed || !CBZ.game || CBZ.game.state !== "playing") return;
+    if (!nukeReady || nukeUsed || !CBZ.game || CBZ.game.mode === "city" || CBZ.game.state !== "playing") return;
     nukeUsed = true;
     nukeReady = false;
     title.textContent = "TACTICAL NUKE INBOUND";
@@ -189,7 +193,11 @@
   CBZ.killstreakBreak = breakStreak;
 
   CBZ.onAlways(94, function () {
-    if (CBZ.game.mode === "survival") return;   // killstreaks / tactical-nuke are a prison thing
+    if (CBZ.game.mode === "survival" || CBZ.game.mode === "city") {
+      meter.style.display = "none";
+      box.classList.remove("pop", "nuke", "ended");
+      return;   // killstreaks / tactical-nuke are a prison thing
+    }
     const el = (CBZ.game && CBZ.game.elapsed) || 0;
     if (el + 0.001 < lastElapsed) reset();
     lastElapsed = el;

@@ -1244,9 +1244,9 @@
   //     raked fin + stabilizer, 4-blade tapered main rotor on a real hub/mast,
   //     2-blade tapered tail rotor, skid gear with cross-tubes, and a two-tone
   //     accent livery that survives recolor. Ground-driven cosmetic skin by
-  //     design (it never flies); rotor groups keep their names so
-  //     makeProcedural re-resolves them and cityUpdatePlayerCarVisual spins
-  //     them per instance. ---
+  //     design for the garage cycler; the campaign also reuses this exact art
+  //     asset as its flying prologue transport. Rotor groups keep their names
+  //     so every cloned instance resolves and spins its own blades. ---
   // tapered rotor blade: a box along +X (root at the origin) whose chord (z)
   // and thickness (y) shrink toward the tip. Cached + _shared so clone
   // disposal never eats it; pure arithmetic, fully deterministic.
@@ -1549,6 +1549,13 @@
     if (color != null) recolorBody(clone, color);
     return clone;
   }
+
+  // Pure visual builders for authored scenes. The campaign prologue asks for
+  // this instead of maintaining a separate lower-detail helicopter stand-in.
+  CBZ.debugBuildPlayerVehicle = CBZ.debugBuildPlayerVehicle || {};
+  CBZ.debugBuildPlayerVehicle.helicopter = function () {
+    return makeProcedural("helicopter", null, null);
+  };
 
   function markFerrariShared(root) {
     root.traverse(function (o) {

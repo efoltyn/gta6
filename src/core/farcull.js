@@ -3,16 +3,15 @@
 
    WHY: at low quality tiers the fog is pulled in hard (quality.js
    publishes CBZ.cityFogFar), so everything beyond fog.far renders as a
-   flat fog-coloured silhouette — invisible, yet still fully drawn.
+   fully fog-coloured silhouette — invisible, yet still fully drawn.
    Frustum culling can't reject what's IN FRONT of the camera, and the
    glass/emissive window meshes can't be batch-merged (they shatter
    individually), so a distant tower still costs hundreds of draw calls
    to paint pure fog. This module hides whole top-level city groups
    (building shells + their windows + towns + islands) once they sit
-   entirely past the cull radius. Radius comes from the quality tier
-   (CBZ.cityCullRadius — every tier culls now: 235..430 low tiers, 500 at
-   tiers 3-4, always a hair past that tier's fog.far so nothing visible
-   pops; see core/quality.js's QUALITY table).
+   entirely past the full-detail radius. Real lot buildings continue through
+   the atmospheric range as the measured instanced LOD below; only their
+   unseen panes/interiors are removed (see core/quality.js's QUALITY table).
 
    SAFETY RULES (why this can't break gameplay):
      • visible=false does NOT affect r128 raycasts (LOS keeps hitting),
@@ -40,6 +39,98 @@
   const bounds = new WeakMap();     // group -> {x,z,r,px,pz,dynamic}
   const _box = new THREE.Box3();
   const _v = new THREE.Vector3();
+
+  // ---- REAL DISTANT-BUILDING LOD ----------------------------------------
+  // The old 430m fog wall hid every distant building. Merely lifting it made
+  // the renderer submit every pane, room and prop from a kilometre away
+  // (~8k calls at q3). Keep the *real* skyline cheaply instead: one box per
+  // actual lot building, instanced in a single draw. Full enterable/glass
+  // groups remain untouched nearby and are culled only once this measured
+  // proxy is already present. Nothing is invented: position, footprint and
+  // height all come from the live lot.building record.
+  let proxyArena = null, proxyMesh = null, proxyRecords = [];
+  const proxyDummy = new THREE.Object3D();
+  const proxyColor = new THREE.Color();
+
+  function disposeProxy() {
+    if (proxyMesh && proxyMesh.parent) proxyMesh.parent.remove(proxyMesh);
+    if (proxyMesh && proxyMesh.geometry) proxyMesh.geometry.dispose();
+    if (proxyMesh && proxyMesh.material) proxyMesh.material.dispose();
+    proxyMesh = null; proxyRecords = []; proxyArena = null;
+  }
+
+  function ensureProxy(A) {
+    if (proxyArena === A && proxyMesh) return;
+    disposeProxy();
+    if (!A || !A.root || !THREE.InstancedMesh) return;
+    const seen = new Set(), lots = A.lots || [];
+    for (let i = 0; i < lots.length; i++) {
+      const lot = lots[i], b = lot && lot.building;
+      if (!b || b.park || !b.group || seen.has(b.group)) continue;
+      const w = +b.w, d = +b.d, h = +b.h;
+      if (!(w > 1 && d > 1 && h > 1)) continue;
+      seen.add(b.group);
+      const x = Number.isFinite(b.ox) ? b.ox : (+lot.cx || 0);
+      const z = Number.isFinite(b.oz) ? b.oz : (+lot.cz || 0);
+      proxyRecords.push({ lot, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false });
+    }
+    if (!proxyRecords.length) { proxyArena = A; return; }
+
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, fog: true });
+    proxyMesh = new THREE.InstancedMesh(geo, mat, proxyRecords.length);
+    proxyMesh.name = "real-building-distance-lod";
+    proxyMesh.userData.dynamic = true;       // batch/farcull must not consume its one draw
+    proxyMesh.frustumCulled = false;          // prototype bounds do not span all instances in r128
+    proxyMesh.castShadow = false; proxyMesh.receiveShadow = false;
+    proxyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < proxyRecords.length; i++) {
+      const r = proxyRecords[i];
+      proxyDummy.position.set(r.x, -10000, r.z);
+      proxyDummy.scale.set(0.001, 0.001, 0.001);
+      proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
+      proxyMesh.setMatrixAt(i, proxyDummy.matrix);
+      // Cool glass/concrete variants keep the actual skyline readable without
+      // duplicating the full facade material graph in the distance pass.
+      const n = CBZ.hash01 ? CBZ.hash01(r.x, r.z, 0xd157) : ((i * 0.61803398875) % 1);
+      proxyColor.setHex(n < 0.34 ? 0x7899a2 : (n < 0.68 ? 0x8aa6aa : 0x71858f));
+      proxyMesh.setColorAt(i, proxyColor);
+    }
+    proxyMesh.instanceMatrix.needsUpdate = true;
+    if (proxyMesh.instanceColor) proxyMesh.instanceColor.needsUpdate = true;
+    A.root.add(proxyMesh);
+    proxyArena = A;
+    CBZ.realBuildingLOD = { total: proxyRecords.length, visible: 0, drawCalls: 1, detailRadius: 0 };
+  }
+
+  function updateProxy(A, P, R) {
+    ensureProxy(A);
+    if (!proxyMesh || !P) return;
+    let dirty = false, visible = 0;
+    const enter = Math.max(0, R - 20); // overlap while inset: proxy is hidden inside the full shell
+    for (let i = 0; i < proxyRecords.length; i++) {
+      const r = proxyRecords[i];
+      const d = Math.hypot(r.x - P.x, r.z - P.z) - r.r;
+      const show = !!R && !r.lot.demolished && d > enter;
+      if (show) visible++;
+      if (show === r.shown) continue;
+      r.shown = show; dirty = true;
+      if (show) {
+        // A slight inset makes the transition overlap depth-safe: while the
+        // detailed shell still exists, it fully covers this proxy.
+        proxyDummy.position.set(r.x, r.h * 0.49, r.z);
+        proxyDummy.scale.set(r.w * 0.92, r.h * 0.98, r.d * 0.92);
+      } else {
+        proxyDummy.position.set(r.x, -10000, r.z);
+        proxyDummy.scale.set(0.001, 0.001, 0.001);
+      }
+      proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
+      proxyMesh.setMatrixAt(i, proxyDummy.matrix);
+    }
+    proxyMesh.visible = !!R;
+    if (dirty) proxyMesh.instanceMatrix.needsUpdate = true;
+    CBZ.realBuildingLOD = { total: proxyRecords.length, visible, drawCalls: visible ? 1 : 0, detailRadius: R };
+  }
 
   function boundsFor(o) {
     let b = bounds.get(o);
@@ -113,11 +204,14 @@
       ? (CBZ.player.pos || CBZ.player.position)
       : (CBZ.camera ? CBZ.camera.position : null);
     const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
-    // A city block can be fog-invisible from a sidewalk yet fully visible from
-    // above. Never apply the street-level static culler to an aircraft view.
-    const R = (!airborne && CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false && g && g.mode === "city")
+    // Aircraft see farther, but they no longer need every room/window from the
+    // entire world. Keep a wider full-detail bubble in flight and let the real
+    // measured building proxies carry the rest of the skyline in one draw.
+    const baseR = (CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false && g && g.mode === "city")
       ? (CBZ.cityCullRadius || 0) : 0;
+    const R = airborne && baseR ? Math.max(700, baseR + 180) : baseR;
     if (!root) return;
+    updateProxy(CBZ.city && CBZ.city.arena, P, R);
     if (!R) {                       // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
       return;

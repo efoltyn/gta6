@@ -8,11 +8,12 @@
 // NPC bout (the showcase for the improved fight poses: kicks, blocks, dodges,
 // staggers, KO crumples), an MMA cage the player can step into, a sunken
 // beast pit that stages creature-vs-creature bouts via CBZ.creatureFight,
-// and an instanced grandstand crowd watching it all.
+// and a bounded cast of live grandstand spectators watching it all.
 //
 // PERF NOTES:
-//  - Static venue is draw-call disciplined: grandstand slabs, seats and the
-//    spectator crowd are 3 InstancedMeshes (~1900 boxes -> 3 draw calls);
+//  - Static venue is draw-call disciplined: grandstand slabs and seats are
+//    InstancedMeshes; spectators are ordinary interactive NPCs in a bounded
+//    set of seats (the rest stay honestly empty, never proxy boxes);
 //    ropes / cage panels / posts / masts / pit wall are batched into a
 //    handful of per-material InstancedMeshes via instBoxes(). Materials come
 //    from the shared CBZ.cmat cache.
@@ -158,23 +159,22 @@ CBZ.addLandmass(function(city){
   }
   instBoxes(slabItems,mat(0x7a7f88));
   instBoxes(seatItems,mat(0xb02030));
-  // spectators: own material so per-instance color never touches the shared cache
+  // Spectators are standard city actors fixed to real seat anchors.  The old
+  // coloured boxes looked populated but could not react, take damage or drop
+  // loot. Keep a representative live cast spread across all three stands and
+  // leave every unfilled seat visibly empty.
   (function(){
-    var sm=new THREE.MeshLambertMaterial({color:0xffffff});
-    var crowd=new THREE.InstancedMesh(unitBox,sm,specItems.length);
-    var M=new THREE.Matrix4(),q=new THREE.Quaternion(),e=new THREE.Euler(),
-        p=new THREE.Vector3(),s=new THREE.Vector3(),col=new THREE.Color();
-    var palette=[0xc0392b,0x2980b9,0xd8c27a,0x7f8c8d,0x27ae60,0xe8e4d8,0x8a5a3a,0x3a3f4a,0xe0a020];
-    for(var i=0;i<specItems.length;i++){
+    if(!CBZ.npcLife||!specItems.length)return;
+    var anchors=[],want=Math.min(42,specItems.length),stride=Math.max(1,Math.floor(specItems.length/want));
+    for(var i=0;i<specItems.length&&anchors.length<want;i+=stride){
       var it=specItems[i];
-      e.set(0,it.ry||0,0); q.setFromEuler(e);
-      p.set(it.x,it.y,it.z); s.set(it.sx,it.sy,it.sz);
-      M.compose(p,q,s); crowd.setMatrixAt(i,M);
-      if(crowd.setColorAt){ col.setHex(palette[(rng()*palette.length)|0]); crowd.setColorAt(i,col); }
+      anchors.push({x:it.x,y:it.y-0.38,z:it.z,yaw:(it.ry||0)+Math.PI,pose:"sit",state:"sit"});
     }
-    crowd.instanceMatrix.needsUpdate=true;
-    if(crowd.instanceColor)crowd.instanceColor.needsUpdate=true;
-    root.add(crowd);
+    var entries=anchors.map(function(a){return {
+      profile:"venueSpectator",placement:{anchor:a,rng:rng},overrides:{job:"fight fan"},
+      configure:function(p){p._venueRole="arena-spectator";}
+    };});
+    if(CBZ.npcLife.definePopulation)CBZ.npcLife.definePopulation("arena-audience",{root:root,entries:entries});
   })();
 
   // ---- floodlight masts + heads (instanced) -------------------------------

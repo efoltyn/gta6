@@ -35,8 +35,8 @@
   // squad, getting busted, an active deadline) while demoting ambient chatter.
   const NOTE_URGENT = /⚠|on fire|burning|starv|hungry|wanted|busted|jail|cops?|police|hit squad|drive-?by|hostile|warn|danger|surrender|bleeding|critical|dying|deadline|escape|robbed|alarm|shootout|ambush/i;
 
-  // FOURTH-WALL FILTER (owner directive): the ONLY hovering/floating text the
-  // world is allowed is the Lv.N tag over a head. Ambient NARRATION toasts —
+  // FOURTH-WALL FILTER (owner directive): no prose is allowed to hover in the
+  // world. Ambient NARRATION toasts —
   // a stranger "saw that", "reported you", a "Traffic stop nearby", a rival gang
   // "moving into" a district, a soldier who "defected"/"seized control", a
   // bouncer barking at someone ELSE in the line, chapter-rank flavor — all break
@@ -73,13 +73,73 @@
   // LMB place", "press [Z]" are interface mechanics — a real phone never pushes
   // them. They are dropped from the campaign handset at this chokepoint (the
   // interact/hint surfaces own that job).
-  const NOTE_KEYBIND = /\[[A-Za-z0-9/\- ]{1,7}\]|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/;
+  const NOTE_KEYBIND = /\[[A-Za-z0-9/\- ]{1,7}\]|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b|\b(?:press|click|tap|hold)\s+(?:(?:the|a)\s+)?(?:[A-Z0-9]|key|button|screen|mouse|trigger)\b/i;
+
+  // A phone is not a replacement for every old toast. Only information that a
+  // real contact, bank, dispatcher or newsroom would actually send belongs in
+  // it. Moment-to-moment mechanics stay visual/audible (the pickup sound, the
+  // weapon in-hand, a guard animation, the cash counter changing) instead of
+  // becoming a backlog of "Picked up", "Blocked" and "Equipped" messages.
+  const NOTE_PHONE_IMPORTANT = new RegExp([
+    // money that affects an account/obligation, not every loose-cash pickup
+    "bank", "deposit", "withdr(?:aw|ew)", "account", "loan", "mortgage",
+    "payment", "payout", "payroll", "refund", "transfer", "wired",
+    "foreclos", "rent due", "tax bill", "insurance",
+    // assignments and direct threats
+    "contract (?:accepted|complete|completed|failed|blown|paid)",
+    "assignment", "dispatch", "bounty", "hit squad", "ambush",
+    // public-safety/city news
+    "wanted", "police", "swat", "airstrike", "lockdown", "raid",
+    "gang war", "civil war", "coup", "reconquest", "partition",
+    "warlord", "earthquake", "storm warning", "terror", "shootout",
+    // durable world-state changes
+    "property", "deed", "home (?:bought|sold|lost)", "business (?:bought|sold)",
+  ].join("|"), "i");
+  const NOTE_PHONE_MECHANICAL = /\b(?:picked up|recovered|looted|equipped|blocked|winded|guard (?:broken|recovered)|armor gone|wide open|caught him|finished|executed|reloading|dry|combo|headshot|kill ?streak)\b/i;
+  const NOTE_PHONE_META = /\b(?:NPC|HUD|UI|reticle|crosshair|respawn(?:ing)?|game over|tutorial|keybind|hotbar|controller|keyboard|mouse|frame ?rate|FPS|first[- ]person|third[- ]person)\b/i;
+
+  function phoneWorthy(msg, opts, headline) {
+    const s = String(msg == null ? "" : msg).trim();
+    if (!s || NOTE_KEYBIND.test(s) || NOTE_PHONE_META.test(s) || NOTE_FOURTH_WALL.test(s)) return false;
+    opts = opts || null;
+    // An explicitly named in-world source/app is an authored communication.
+    // Generic compatibility labels are not real senders and get classified.
+    const from = opts && opts.from != null ? String(opts.from).trim() : "";
+    const realSender = from && !/^(?:status|alert|system|objective|messages?)$/i.test(from);
+    if (realSender || (opts && opts.app && !/^(?:system|status)$/i.test(String(opts.app)))) return true;
+    if (NOTE_PHONE_MECHANICAL.test(s)) return false;
+    if (NOTE_PHONE_IMPORTANT.test(s)) return true;
+    // big() is the authored headline channel. Keep genuine headlines, but not
+    // combat-mechanic shouts that happened to use it historically.
+    return !!headline;
+  }
+  CBZ.cityPhoneWorthy = phoneWorthy;
   function noteCategory(msg) {
     if (/saw that|reported you|Reported:|👀|🗣️/i.test(msg)) return "witness";
     if (/Traffic stop|🚓|🎫|ticketed|fleeing the police|🚨/i.test(msg)) return "traffic";
     if (/dispatched|🚒|🚑/i.test(msg)) return "dispatch";
     if (/Picked up|Looted|\+\$|cash/i.test(msg)) return "loot";
     return "_default";
+  }
+
+  function routeLegacyCityPhone(msg, opts, urgent) {
+    if (typeof CBZ.cityPhoneNotify !== "function") return null;
+    const s = String(msg || "");
+    const supplied = opts || null;
+    let app = supplied && supplied.app;
+    let from = supplied && supplied.from;
+    if (!app || !from) {
+      if (/bank|deposit|withdr(?:aw|ew)|account|loan|mortgage|payment|payroll|transfer|wired|foreclos|insurance/i.test(s)) {
+        app = app || "bank"; from = from || "Meridian Trust";
+      } else if (/contract|assignment|dispatch|bounty|hit squad|ambush/i.test(s)) {
+        app = app || "missions"; from = from || "Dispatch";
+      } else if (/wanted|police|swat|manhunt|lockdown|raid|shootout/i.test(s)) {
+        app = app || "news"; from = from || "Scanner";
+      } else {
+        app = app || "news"; from = from || "City Desk";
+      }
+    }
+    return CBZ.cityPhoneNotify({ app: app, from: from, text: s, priority: urgent ? 2 : 0 });
   }
 
   const city = {
@@ -108,29 +168,26 @@
       if (r > 0) city.addRespect(r); else if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
 
-    // a short toast. Two channels feed it across the city code, with NO throttle
-    // historically → spam. note() now buckets each LOW-PRIORITY note by CATEGORY
-    // (witness/traffic/dispatch/loot) and rate-limits per bucket — the old exact-
-    // string de-dup couldn't catch witness floods that embed a unique ped name —
-    // routing the survivors into the self-pruning left stack (CBZ.cityFeed, which
-    // collapses repeats into "(xN)"). URGENT warnings (fire, starving, wanted,
-    // hostile, busted…) skip the throttle and stay on the centre flashHint. big()
-    // stays the headline channel (flashToast) untouched.
+    // Legacy callers still use note(), but city prose now has one destination:
+    // an in-world sender/app on the phone. Sounds, animation and the minimal
+    // numeric/icon HUD carry immediate mechanics; nothing writes a centre hint,
+    // toast or left-side feed.
     note(msg, sec, opts) {
       if (!msg) return;
+      const force = !!(opts && opts.urgent);
+      if (!phoneWorthy(msg, opts, false)) return;
       if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
         // Campaign information belongs to the player's phone. The closed phone
         // only buzzes; prose never floats over the world.
         if (!CBZ.campaignUI || !CBZ.campaignUI.notify) return;
         if (CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2) {
           const s = String(msg);
-          const force = !!(opts && opts.urgent);
           // The same 4th-wall drop the ambient path runs below — world
           // narration never reaches the handset either.
-          if (!force && NOTE_FOURTH_WALL.test(s)) return;
+          if (NOTE_FOURTH_WALL.test(s) || NOTE_PHONE_META.test(s)) return;
           // Keybinding/control-legend prose ("[E] Pay …", "LMB place") is UI
           // mechanics, not something a person would text — never a phone push.
-          if (!force && NOTE_KEYBIND.test(s)) return;
+          if (NOTE_KEYBIND.test(s)) return;
           // Callers can name the in-world sender/app:
           //   city.note(msg, sec, { from: "Zillow", app: "messages" })
           // Unnamed notes are auto-classified (money → Bank, police →
@@ -145,16 +202,11 @@
         CBZ.campaignUI.notify("personal", "FIELD PHONE", String(msg));
         return;
       }
-      const force = !!(opts && opts.urgent);
-      // FOURTH-WALL DROP: kill ambient world-narration toasts outright (owner
-      // rule). Runs first so "reported you"/"running from police" can't sneak
-      // through NOTE_URGENT. An explicit opts.urgent caller can still force a
-      // message past the filter (none of the ambient origins set it).
-      if (!force && NOTE_FOURTH_WALL.test(msg)) return;
+      // FOURTH-WALL DROP: neither the world nor the handset accepts these.
+      if (NOTE_FOURTH_WALL.test(msg) || NOTE_PHONE_META.test(msg) || NOTE_KEYBIND.test(msg)) return;
       const now = (CBZ.now != null ? CBZ.now : performance.now());   // ms
       const urgent = force || NOTE_URGENT.test(msg);
-      if (urgent) { if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2); return; }
-      // ---- non-urgent: category throttle BEFORE the feed ----
+      // ---- category throttle BEFORE the phone ----
       // Witness/traffic/dispatch chatter carries a unique ped name each time, so
       // the exact-string de-dup can't see the repeat. Gate by category cooldown
       // and, when we drop a flooded note, ask the feed to bump a "(xN)" counter
@@ -162,32 +214,27 @@
       const cat = noteCategory(msg);
       const cd = NOTE_CAT_CD[cat] || NOTE_CAT_CD._default;
       const catT = (city._catT || (city._catT = {}));
-      if ((now - (catT[cat] || -9999)) < cd) {
-        if (CBZ.cityFeed) CBZ.cityFeed(msg, "#9fb0c6", { collapseOnly: true });
-        return;
-      }
+      if ((now - (catT[cat] || -9999)) < cd) return;
       catT[cat] = now;
       // de-dup fallback: drop an identical message seen within ~1.2s. Only the
       // _default bucket relies on this now; the others are already cooled above.
       if (cat === "_default" && msg === city._lastNote && (now - (city._lastNoteT || -9999)) < 1200) return;
       city._lastNote = msg; city._lastNoteT = now;
-      // low-priority: prefer the tidy left feed; fall back to flashHint if the
-      // feed isn't mounted (so a message is never silently lost).
-      if (CBZ.cityFeed) CBZ.cityFeed(msg, "#9fb0c6");
-      else if (CBZ.flashHint) CBZ.flashHint(msg, sec || 2.2);
+      routeLegacyCityPhone(msg, opts, urgent);
     },
     big(msg) {
+      if (!phoneWorthy(msg, null, true)) return;
+      const s = String(msg);
+      const bankish = /[+\-]?\$\s?[\d,]|\bPAID\b|\bDEPOSIT|\bPAYOUT|\bLOAN\b|\bMORTGAGE\b/i.test(s);
+      const scannerish = /wanted|police|swat|manhunt|busted|surrender|curfew|lockdown|airstrike/i.test(s);
       if (CBZ.cityCampaignActive && CBZ.cityCampaignActive()) {
         if (!CBZ.campaignUI || !CBZ.campaignUI.notify) return;
         if (CBZ.CONFIG && CBZ.CONFIG.PHONE_NOTIS_V2 && CBZ.phoneNotify) {
           // Headline channel → the phone's News app (City Desk), except money
           // headlines, which read as Bank pushes ("$X received"), and control
           // legends, which are UI mechanics and never a push at all.
-          const s = String(msg);
           if (NOTE_KEYBIND.test(s)) return;
-          const bankish = /[+\-]?\$\s?[\d,]|\bPAID\b|\bDEPOSIT|\bPAYOUT/i.test(s);
           // police-flavored headlines read from the Scanner app, not the paper
-          const scannerish = /wanted|police|swat|manhunt|busted|surrender|curfew|lockdown|airstrike/i.test(s);
           CBZ.phoneNotify(bankish
             ? { app: "bank", text: s, meta: { source: "city.big" } }
             : { app: "news", from: scannerish ? "Scanner" : null, text: s, priority: 1, meta: { source: "city.big" } });
@@ -196,7 +243,11 @@
         CBZ.campaignUI.notify("news", "CITY DESK", String(msg));
         return;
       }
-      if (CBZ.flashToast) CBZ.flashToast(msg);
+      if (typeof CBZ.cityPhoneNotify === "function") {
+        CBZ.cityPhoneNotify(bankish
+          ? { app: "bank", from: "Liberty Bank", text: s }
+          : { app: "news", from: scannerish ? "Scanner" : "City Desk", text: s });
+      }
     },
 
     forEachActor(fn) {
@@ -268,13 +319,9 @@
     }
     if (CBZ.sunTarget) CBZ.sunTarget.position.set(focus.x, 4, focus.z);
     if (CBZ.hemi) { CBZ.hemi.intensity = 0.38 + (0.95 - 0.38) * k; }
-    // fog pulled IN (60/620 → 80/430): far == the near skyline ring radius,
-    // so the SEA and ground are 100% dissolved into fog exactly where the
-    // painted silhouettes + haze band (core/sky.js) take over — at 460 a
-    // not-quite-fogged blue water strip stayed visible between the rings.
-    // The RANGE now rides the perf/quality slider (core/quality.js publishes
-    // cityFogFar; tier 4 = the same 430 as always, low tiers pull it in so
-    // farcull.js can stop drawing what the fog has already dissolved).
+    // Fog is atmospheric depth over the REAL coast, terrain and buildings.
+    // It no longer meets or hides a painted skyline ring. The range rides the
+    // quality tier and farcull starts only after full fog dissolution.
     // Aircraft are explicitly an aerial sightseeing mode. Keeping the normal
     // street-level fog/cull envelope while the player is 70m up made whole
     // districts disappear outside a small bubble — the "Truman Show" effect
@@ -282,12 +329,24 @@
     // ground play keeps the normal quality-tier budget.
     const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
     if (CBZ.scene.fog) {
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 430, 1100) : (CBZ.cityFogFar || 430);
-      CBZ.scene.fog.near = Math.round(80 * ff / 430); CBZ.scene.fog.far = ff;
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 1800) : (CBZ.cityFogFar || 1000);
+      CBZ.scene.fog.near = Math.max(90, Math.round(ff * 0.16)); CBZ.scene.fog.far = ff;
     }
     if (CBZ.camera) {
-      const wantFar = airborne ? 2200 : 1000;
-      if (CBZ.camera.far !== wantFar) {
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 1800) : (CBZ.cityFogFar || 1000);
+      // Distant landmarks may request projection room without widening city
+      // fog or the full-detail cull bubble. Mount Mercy is a single terrain
+      // draw; keeping it through the airfield view has negligible scene cost.
+      const landmarkFar = CBZ.cityDistantLandmarkFar || 0;
+      const wantFar = airborne ? Math.max(2800, ff + 500, landmarkFar) : Math.max(1400, ff + 180, landmarkFar);
+      // A 0.1m near plane paired with a 2800m flight far plane throws away
+      // most depth precision. At altitude the 0.42m land/sea separation then
+      // quantises to the same value and water wins over valid ground. Nothing
+      // in the chase camera lives within half a metre, so tighten the flight
+      // frustum while retaining the close first-person near plane on foot.
+      const wantNear = airborne ? 0.5 : 0.1;
+      if (CBZ.camera.far !== wantFar || CBZ.camera.near !== wantNear) {
+        CBZ.camera.near = wantNear;
         CBZ.camera.far = wantFar;
         CBZ.camera.updateProjectionMatrix();
       }
@@ -337,6 +396,37 @@
     // pick.x/z is already the centre of the solid roof slab (clear of the -x
     // stairwell), so spawn dead-centre on the roof — no edge/corner offset
     return { x: pick.x, y: pick.y, z: pick.z };
+  }
+
+  // Resolve + place the configured city spawn only after buildCity has run:
+  // island_airport.js owns the real geometry and publishes this safe anchor.
+  // Keeping the config symbolic avoids duplicating airport coordinates here.
+  function preferredAirportSpawn(A) {
+    if (!CBZ.CITY || CBZ.CITY.playerSpawn !== "airport") return null;
+    const s = A && A.airportSpawn;
+    return s && Number.isFinite(s.x) && Number.isFinite(s.z) ? s : null;
+  }
+  function placePreferredCitySpawn(A, persistRespawn) {
+    const s = preferredAirportSpawn(A), P = CBZ.player;
+    if (!s || !P || !P.pos) return false;
+    const y = Number.isFinite(s.y) ? s.y : (A && A.groundHeightAt ? A.groundHeightAt(s.x, s.z) : 0);
+    P.pos.set(s.x, y, s.z); P.vy = 0; P.grounded = true;
+    const ch = CBZ.playerChar && CBZ.playerChar.group;
+    if (ch) {
+      ch.position.copy(P.pos);
+      if (Number.isFinite(s.yaw)) ch.rotation.y = s.yaw;
+    }
+    if (CBZ.cam && Number.isFinite(s.yaw)) CBZ.cam.yaw = s.yaw + Math.PI;
+    // An owned home remains an intentional respawn choice. Without one, make
+    // the airport the actual WASTED/respawn anchor as well as the entry point.
+    if (persistRespawn && !g.cityHome) {
+      g.citySpawnPoint = { x: s.x, z: s.z };
+      if (g.cityWorld && typeof g.cityWorld === "object") {
+        g.cityWorld.spawnPoint = { x: s.x, z: s.z };
+        g.cityWorld.lastPos = { x: s.x, y: y, z: s.z };
+      }
+    }
+    return true;
   }
 
   // Campaign observation gate. Geometry is always built, but the rooftop
@@ -537,8 +627,10 @@
       // wanted API may own the stamp — the inline heat floor stays the
       // fallback either way, so stars are ≥3 with or without it).
       const P = CBZ.player;
+      const airportSpawn = preferredAirportSpawn(A);
+      const jailbreakEntry = !!game.escapedConvict;
       let placedAtGate = false, gateX = 0, gateZ = 0;      // gate coords saved for the post-origin re-assert
-      if (game.escapedConvict && CBZ.cityPoliceStation) {
+      if (!airportSpawn && jailbreakEntry && CBZ.cityPoliceStation) {
         const st = CBZ.cityPoliceStation();
         const d = st && st.lot && st.lot.building && st.lot.building.door;
         if (st) {
@@ -551,9 +643,12 @@
         }
       }
       if (!placedAtGate) {
-        const roof = pickSpawnRoof(game.cash || 0);
-        if (roof) P.pos.set(roof.x, roof.y, roof.z);
-        else { const sp = A.spawn; P.pos.set(sp.x, 0, sp.z); }
+        if (airportSpawn) P.pos.set(airportSpawn.x, airportSpawn.y || 0, airportSpawn.z);
+        else {
+          const roof = pickSpawnRoof(game.cash || 0);
+          if (roof) P.pos.set(roof.x, roof.y, roof.z);
+          else { const sp = A.spawn; P.pos.set(sp.x, 0, sp.z); }
+        }
       }
       P.vy = 0; P.grounded = true; P.maxHp = 200; P.hp = 200; P._hurtT = 0; P.dead = false; P.ko = 0; P.stun = 0;
       P.driving = false; P._vehicle = null; P._death = null;
@@ -571,28 +666,19 @@
       if (CBZ.cam) { CBZ.cam.yaw = CBZ.playerChar.group.rotation.y + Math.PI; CBZ.cam.pitch = CBZ.CITY_TP ? CBZ.CITY_TP.PITCH : 0.06; }
       if (CBZ.resetZoom) CBZ.resetZoom();
       if (CBZ.cityDeathReset) CBZ.cityDeathReset();
-      // ORIGIN: a fresh character (or one who just picked a different origin
-      // than their saved one) gets a one-time scripted opening scene — the
-      // exec's raid, the barfly's toss, the tenant's mattress — staged by
-      // city/origins.js, which may override the position/cash/outfit/weapon
-      // set above. A returning character with an origin already played is a
-      // no-op here (default rooftop spawn above stands). When an origin
-      // intro IS active we must NOT force first-person yet — the jail-style
-      // cinematic (CBZ.startIntro, armed by systems/state.js's startRun)
-      // needs third-person for its front-reveal/orbit; onIntroComplete flips
-      // to FP the same way the escape game does.
+      // ORIGIN: grants + ledger selection land here. The legacy one-time scene
+      // may temporarily reposition a fresh character, and a returning one may
+      // restore lastPos; the explicit airport preference is reapplied below and
+      // cancels only that origin staging. Campaign missions wrap reset later and
+      // can still own authored positions. Without a configured preference, the
+      // original intro/return behavior remains intact.
       const originResult = CBZ.cityOriginApply ? CBZ.cityOriginApply(game) : null;
-      // JAILBREAK OVERRIDE-GUARD (owner: "at the jail door with a wanted level"):
-      // cityOriginApply above RE-POSITIONS the player — a returning character is
-      // sent to their last SAVED spot (restorePos), a fresh/switched ledger runs
-      // the scripted origin opener — and either can rewind the manhunt off the
-      // persistent ledger. That silently undoes the gate placement + stars stamped
-      // earlier in this reset. Re-assert them AFTER origin, keyed on the LOCAL
-      // placedAtGate flag (game.escapedConvict itself may have just been rewound by
-      // the ledger restore, so it is NOT a reliable condition here). A jailbreak is
-      // a continuation of THIS character, so re-stamping is always correct.
-      if (placedAtGate) {
-        P.pos.set(gateX, 0, gateZ);
+      // JAILBREAK OVERRIDE-GUARD: cityOriginApply above RE-POSITIONS the player
+      // and may rewind the manhunt from its persistent ledger. Re-assert the
+      // wanted state after origin whether this build uses the legacy jail-door
+      // spawn or the configured airport spawn.
+      if (placedAtGate || (airportSpawn && jailbreakEntry)) {
+        if (placedAtGate) P.pos.set(gateX, 0, gateZ);
         game.escapedConvict = true; game.escapedFromJail = true;
         const HT = (CBZ.CITY && CBZ.CITY.starHeat) || [0, 300, 650, 1100, 3200, 12000];
         game.heat = Math.max(game.heat || 0, (HT[3] || 1100) + 5);
@@ -601,6 +687,16 @@
         if (originResult) originResult.introActive = false;
         if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      }
+      // Returning characters normally restore their last saved coordinates,
+      // while a first character gets one-time origin staging. The explicit
+      // airport preference wins over both (grants + ledger stamps already
+      // landed). Campaign missions wrap this reset later and remain free to own
+      // a required set-piece position such as the prologue helipad.
+      if (airportSpawn) {
+        if (originResult && originResult.introActive && CBZ.cityOriginCancelIntro) CBZ.cityOriginCancelIntro();
+        if (originResult) originResult.introActive = false;
+        placePreferredCitySpawn(A, true);
       }
       // CITY defaults to FIRST-PERSON (the jail's fpsmode); [V] toggles to 3rd-person.
       if (campaignMode) {

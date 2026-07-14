@@ -326,14 +326,20 @@ function analyzeLint(objects, extras) {
     }
   }
 
-  // B. structure / feature center in water (outside every landmass), non-dock
+  // B. structure / feature in water.  A centre-only probe misses the exact
+  // failure players notice: a wide building whose centre is legal while one
+  // wall and its NPC pavement hang over the shore.  Live structure records
+  // therefore carry a 3x3 footprint sample from the rendered coast oracle.
   const inWater = [];
   for (const s of [...structures, ...features]) {
     if (DOCKY.test((s.name || "") + " " + (s.type || ""))) continue;
     const cx = (s.minX + s.maxX) / 2, cz = (s.minZ + s.maxZ) / 2;
     let onLand = false;
     for (const l of landUnion) if (pointInObj(cx, cz, l, l.pad == null ? 2 : l.pad)) { onLand = true; break; }
-    if (!onLand) inWater.push({ layer: s.layer, type: s.type, name: s.name, x: R2(cx), z: R2(cz) });
+    if (!onLand || (Number.isFinite(s.shoreMin) && s.shoreMin < -0.25)) {
+      inWater.push({ layer: s.layer, type: s.type, name: s.name, x: R2(cx), z: R2(cz),
+        reason: !onLand ? "center-off-land" : "footprint-crosses-shore", shoreMin: s.shoreMin });
+    }
   }
 
   // C. highway-mounted streetlights (buildHighway opts.lights InstancedMesh —
@@ -344,15 +350,31 @@ function analyzeLint(objects, extras) {
   for (const l of hwyLights) hwyLightCounts["highway-" + l.hwy] = (hwyLightCounts["highway-" + l.hwy] || 0) + 1;
   const allOnHighway = propsOnHighway.concat(hwyLights);
 
+  // World-size regression: this is physical geography, so a wider camera FOV
+  // cannot satisfy it. Expansion V2 must add substantial walkable area, a long
+  // traversable circuit, four landmarks, and keep all of it on dry terrain.
+  const ws = extras.worldScale || null, worldScaleFailures = [];
+  if (ws && ws.enabled) {
+    if (!(ws.areaGainPct >= 30)) worldScaleFailures.push("playable area gain <30%");
+    if (!(ws.frontierLoopMeters >= 10000)) worldScaleFailures.push("frontier loop <10km");
+    if (!(ws.frontierLandmarks >= 4)) worldScaleFailures.push("fewer than four frontier landmarks");
+    if (!(ws.frontierRoadMinShore >= 20)) worldScaleFailures.push("frontier road approaches water");
+    if (!(ws.frontierLandmarkMinShore >= 20)) worldScaleFailures.push("frontier landmark approaches water");
+  }
+
   return {
     propsInRoad, propsOnHighway: allOnHighway, highwayLightCounts: hwyLightCounts,
     structuresInWater: inWater,
+    worldScaleFailures,
     pedsOnRunway: extras.pedsOnRunway || [],
+    pedsInOpenWater: extras.pedsInOpenWater || [],
     roadMismatches: extras.roadMismatches || 0,
     colliderSummary: extras.colliderSummary || null,
     counts: {
       propsInRoad: propsInRoad.length, propsOnHighway: allOnHighway.length,
       structuresInWater: inWater.length, pedsOnRunway: (extras.pedsOnRunway || []).length,
+      pedsInOpenWater: (extras.pedsInOpenWater || []).length,
+      worldScaleFailures: worldScaleFailures.length,
     },
   };
 }
@@ -462,6 +484,18 @@ const COLLECT = String.raw`(() => {
   let oid = 0;
   const push = (o) => { o.id = oid++; objects.push(o); return o; };
   const rectOf = (cx, cz, w, d) => ({ minX: R2(cx - w / 2), maxX: R2(cx + w / 2), minZ: R2(cz - d / 2), maxZ: R2(cz + d / 2) });
+  const shoreAt = A.mapTerrain && typeof A.mapTerrain.shoreAt === "function" ? A.mapTerrain.shoreAt : null;
+  const footprintShoreMin = (r) => {
+    if (!shoreAt) return null;
+    let mn = Infinity;
+    for (let iz = 0; iz < 3; iz++) for (let ix = 0; ix < 3; ix++) {
+      const x = r.minX + (r.maxX - r.minX) * ix / 2;
+      const z = r.minZ + (r.maxZ - r.minZ) * iz / 2;
+      let s = Infinity; try { s = +shoreAt(x, z); } catch (_) {}
+      if (Number.isFinite(s) && s < mn) mn = s;
+    }
+    return Number.isFinite(mn) ? R2(mn) : null;
+  };
 
   // ---- land (mainland grid + annex) ----
   push({ layer: "land", type: "mainland", name: "Mainland", shape: "rect",
@@ -488,8 +522,10 @@ const COLLECT = String.raw`(() => {
   const lotRec = (l, src) => {
     if (!l || !Number.isFinite(l.cx) || !Number.isFinite(l.w)) return;
     const b = l.building;
+    const footprint = rectOf(l.cx, l.cz, l.w, l.d);
     push(Object.assign({ layer: "structure", type: l.kind || (b && b.shop ? "shop" : b ? "building" : "lot"),
       name: (b && b.name) || null, shape: "rect", district: l.district || null,
+      shoreMin: footprintShoreMin(footprint),
       y0: 0, y1: (b && Number.isFinite(b.h)) ? R2(b.h) : 8,
       storeys: (b && b.storeys) || null, FH: (b && R2(b.FH)) || null,
       // A generated mini-city lot may be a "tower" structurally while its
@@ -498,7 +534,7 @@ const COLLECT = String.raw`(() => {
       purpose: (b && b.shop && b.shop.kind) || (b && b.office ? "office" : null)
         || (b && b.home ? "residential" : null) || (b && b.purpose) || l.kind || (b && b.park ? "park" : null),
       enclosed: !!(b && b.group), hasDoor: !!(b && b.door),
-      enterable: !!(b && b.group && b.door && !b.park), source: src }, rectOf(l.cx, l.cz, l.w, l.d)));
+      enterable: !!(b && b.group && b.door && !b.park), source: src }, footprint));
   };
   (A.lots || []).forEach((l) => lotRec(l, "city/buildings"));
   if (A.annex && Array.isArray(A.annex.lots)) A.annex.lots.forEach((l) => lotRec(l, "city/expansion"));
@@ -555,6 +591,15 @@ const COLLECT = String.raw`(() => {
     push({ layer: "feature", type: f.kind || "feature", name: f.id, zone: f.zone || null,
       shape: "rect", minX: f.minX, maxX: f.maxX, minZ: f.minZ, maxZ: f.maxZ,
       y0: f.minY, y1: f.maxY, source: f.source || "worldLayout" });
+  });
+  // Continent V2's scale landmarks are intentionally outside A.lots (they are
+  // open navigation shelters, not pretend enterable businesses). Publish their
+  // real footprints so the same structure-in-water lint still proves them safe.
+  (A.frontierLandmarks || []).forEach((l) => {
+    const fp = { minX: l.minX, maxX: l.maxX, minZ: l.minZ, maxZ: l.maxZ };
+    push(Object.assign({ layer: "feature", type: "frontier-landmark", name: l.name,
+      zone: "frontier", shape: "rect", shoreMin: footprintShoreMin(fp),
+      y0: 0, y1: 31.5, source: "city/continent" }, fp));
   });
 
   // ---- terrain surface meshes (userData.terrain / worldSurface) ----
@@ -640,6 +685,16 @@ const COLLECT = String.raw`(() => {
   const pedsOnRunway = !hasAirport ? [] : (CBZ.cityPeds || [])
     .filter((p) => runway && p && p.pos && !p.dead && p.pos.x >= runway.minX && p.pos.x <= runway.maxX && p.pos.z >= runway.minZ && p.pos.z <= runway.maxZ)
     .map((p) => ({ name: p.name || null, job: p.job || null, x: R2(p.pos.x), z: R2(p.pos.z) }));
+  // Ground-level people over the rendered coast's negative field are the
+  // exact "NPC standing in open water" failure. Ignore moving-parent actors
+  // (aircraft passengers) and elevated occupants; those can legitimately be
+  // above the ocean without being a water population.
+  const pedsInOpenWater = !shoreAt ? [] : (CBZ.cityPeds || [])
+    .filter((p) => {
+      if (!p || !p.pos || p.dead || p._parked || p._npcAttached || (p.pos.y || 0) > 1.5) return false;
+      try { return +shoreAt(p.pos.x, p.pos.z) < -0.25; } catch (_) { return false; }
+    })
+    .map((p) => ({ name: p.name || null, job: p.job || null, x: R2(p.pos.x), z: R2(p.pos.z), shore: R2(+shoreAt(p.pos.x, p.pos.z)) }));
 
   // ---- collider sanity ----
   const cols = CBZ.colliders || [];
@@ -701,6 +756,7 @@ const COLLECT = String.raw`(() => {
       noSpawn: (A.noSpawn || []).map((z) => ({ label: z.label || null, minX: z.minX, maxX: z.maxX, minZ: z.minZ, maxZ: z.maxZ })),
       airportAudit,
       runwayPeds: pedsOnRunway.length,
+      openWaterPeds: pedsInOpenWater.length,
     },
     population: {
       namedPeds: (CBZ.cityPeds || []).filter((p) => p && typeof p.name === "string" && p.name.trim()).length,
@@ -708,16 +764,18 @@ const COLLECT = String.raw`(() => {
       dailySchedule: typeof CBZ.citySchedProposal === "function" && typeof CBZ.citySunHour === "function",
       wildlife: wild.length, livingWildlife: wild.filter((a) => a && !a.dead).length,
       species: [...new Set(wild.map((a) => a && a.species && (a.species.id || a.species.name)).filter(Boolean))],
+      wildlifeMotion: typeof CBZ.cityWildlifeMotionStats === "function" ? CBZ.cityWildlifeMotionStats() : null,
       dogs: dogs.length, livingDogs: dogs.filter((d) => d && !d.dead).length,
       traffic: aiCars.length, roadDistricts, ambientAircraft: air.length,
     },
+    worldScale: A.worldScale ? Object.assign({}, A.worldScale) : null,
   };
 
   return {
     generatedAt: new Date().toISOString(), seed: CBZ.WORLD_SEED,
     bounds, objects, measures, floorHeights, highwayLamps,
     laneW: Number.isFinite(T.laneW) ? T.laneW : 3.6, roadW: RW,
-    runway: hasAirport && runway ? runway : null, pedsOnRunway,
+    runway: hasAirport && runway ? runway : null, pedsOnRunway, pedsInOpenWater,
     colliderSummary, gameplay,
     roadMismatches: (A.roads || []).filter((r) => {
       const width = Number.isFinite(r.width) ? r.width : (Number.isFinite(r.w) ? r.w : RW);
@@ -900,6 +958,18 @@ function makeReport(dump, overlaps, ratios, lint) {
   const L = [];
   L.push("WORLD AUDIT — seed " + dump.seed + "  (" + dump.generatedAt + ")");
   L.push("counts: " + JSON.stringify(dump.counts));
+  const ws = dump.gameplay && dump.gameplay.worldScale;
+  if (ws) {
+    const km2 = (n) => Number.isFinite(n) ? (n / 1e6).toFixed(2) : "?";
+    const m0 = (n) => Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "?";
+    L.push("world scale: " + m0(ws.authoredWidth) + "x" + m0(ws.authoredDepth) + "m authored -> "
+      + m0(ws.playableWidth) + "x" + m0(ws.playableDepth) + "m playable; "
+      + km2(ws.authoredArea) + " -> " + km2(ws.playableArea) + " km2 bounding area (+"
+      + (Number.isFinite(ws.areaGainPct) ? ws.areaGainPct.toFixed(1) : "?") + "%)");
+    L.push("frontier: " + m0(ws.frontierLoopMeters) + "m road loop, " + (ws.frontierLandmarks || 0)
+      + " landmarks; shore clearance road/landmark=" + [ws.frontierRoadMinShore, ws.frontierLandmarkMinShore]
+        .map((n) => Number.isFinite(n) ? n.toFixed(1) + "m" : "?").join(" / "));
+  }
   L.push("");
   L.push("== TOP 20 OVERLAPS (ranked by containment of the smaller object) ==");
   if (!overlaps.length) L.push("  none above thresholds");
@@ -928,7 +998,11 @@ function makeReport(dump, overlaps, ratios, lint) {
   L.push("  structures in water:        " + lint.counts.structuresInWater
     + (lint.structuresInWater.length ? "   e.g. " + lint.structuresInWater.slice(0, 5).map((s) => (s.name || s.type) + "@(" + s.x + "," + s.z + ")").join(" ") : ""));
   L.push("  peds on runway:             " + lint.counts.pedsOnRunway);
+  L.push("  peds in open water:         " + lint.counts.pedsInOpenWater
+    + (lint.pedsInOpenWater.length ? "   e.g. " + lint.pedsInOpenWater.slice(0, 5).map((p) => (p.name || p.job || "ped") + "@(" + p.x + "," + p.z + ")").join(" ") : ""));
   L.push("  road width<travel mismatches: " + (dump.roadMismatches || 0));
+  L.push("  world-scale contract failures: " + ((lint.worldScaleFailures && lint.worldScaleFailures.length) || 0)
+    + (lint.worldScaleFailures && lint.worldScaleFailures.length ? "   " + lint.worldScaleFailures.join("; ") : ""));
   L.push("  colliders: " + JSON.stringify(dump.colliderSummary));
   if (dump.gameplay) {
     const g = dump.gameplay;
@@ -1044,8 +1118,9 @@ async function auditSeed(seed) {
     const overlaps = analyzeOverlaps(dump.objects);
     const ratios = analyzeRatios(dump);
     const lint = analyzeLint(dump.objects, {
-      pedsOnRunway: dump.pedsOnRunway, roadMismatches: dump.roadMismatches,
+      pedsOnRunway: dump.pedsOnRunway, pedsInOpenWater: dump.pedsInOpenWater, roadMismatches: dump.roadMismatches,
       colliderSummary: dump.colliderSummary, highwayLamps: dump.highwayLamps,
+      worldScale: dump.gameplay && dump.gameplay.worldScale,
     });
     overlaps.forEach((o) => { if (!o.tier) o.tier = "WARN"; });
 
@@ -1084,8 +1159,9 @@ async function reanalyzeSeed(seed) {
   const overlaps = analyzeOverlaps(dump.objects);
   const ratios = analyzeRatios(dump);
   const lint = analyzeLint(dump.objects, {
-    pedsOnRunway: dump.pedsOnRunway, roadMismatches: dump.roadMismatches,
+    pedsOnRunway: dump.pedsOnRunway, pedsInOpenWater: dump.pedsInOpenWater, roadMismatches: dump.roadMismatches,
     colliderSummary: dump.colliderSummary, highwayLamps: dump.highwayLamps,
+    worldScale: dump.gameplay && dump.gameplay.worldScale,
   });
   overlaps.forEach((o) => { if (!o.tier) o.tier = "WARN"; });
   await writeFile(path.join(outDir, "overlaps.json"), JSON.stringify(overlaps, null, 1));

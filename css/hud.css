@@ -201,16 +201,21 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 #flash.go{animation:flashfade .5s ease forwards;}
 @keyframes flashfade{0%{opacity:.55;}100%{opacity:0;}}
 
-/* first-person crosshair */
+/* firearm reticle — shared by first- and third-person gun presentation */
 #crosshair{
-  position:absolute; left:50%; top:50%; width:22px; height:22px; transform:translate(-50%,-50%);
-  display:none; pointer-events:none;
+  position:absolute; left:50%; top:50%; width:24px; height:24px; transform:translate(-50%,-50%);
+  display:none; pointer-events:none; border:2px solid rgba(255,255,255,.82);
+  border-radius:50%; box-sizing:border-box;
+  background:radial-gradient(circle,rgba(255,255,255,.95) 0 1.5px,transparent 2px);
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));
 }
 #crosshair::before, #crosshair::after{
-  content:""; position:absolute; background:rgba(255,255,255,.85); box-shadow:0 0 2px rgba(0,0,0,.7);
+  content:""; position:absolute; background:rgba(255,255,255,.9); box-shadow:0 0 2px rgba(0,0,0,.8);
 }
-#crosshair::before{ left:50%; top:0; width:2px; height:100%; margin-left:-1px; }
-#crosshair::after{ top:50%; left:0; height:2px; width:100%; margin-top:-1px; }
+#crosshair::before{ left:50%; top:-5px; width:2px; height:32px; margin-left:-1px; }
+#crosshair::after{ top:50%; left:-5px; height:2px; width:32px; margin-top:-1px; }
+#crosshair.hot{border-color:#ff3b3b;background:radial-gradient(circle,#ff3b3b 0 1.5px,transparent 2px)}
+#crosshair.dry{border-color:#ffd451;background:radial-gradient(circle,#ffd451 0 1.5px,transparent 2px)}
 #crosshair.hot::before, #crosshair.hot::after{ background:#ff3b3b; }
 #crosshair.dry::before, #crosshair.dry::after{ background:#ffd451; }
 

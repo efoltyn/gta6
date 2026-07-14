@@ -57,6 +57,7 @@
     reloading: 0,
     rounds: WEAPONS.map((w) => w.mag),
     reserves: WEAPONS.map((w) => w.reserve),
+    rocketAmmoType: "standard",
   };
 
   // ---- reusable math temporaries ----
@@ -109,6 +110,33 @@
     }
   }
   function weapon() { normalizeWeapon(); return WEAPONS[fps.weapon] || WEAPONS[0]; }
+  function rocketAmmoSpec(w, id) {
+    const modes = w && w.ammoTypes;
+    if (!modes || !modes.length) return null;
+    id = id || fps.rocketAmmoType;
+    for (let i = 0; i < modes.length; i++) if (modes[i].id === id) return modes[i];
+    return modes[0];
+  }
+  function setRocketAmmoType(id) {
+    const w = weapon(), spec = rocketAmmoSpec(w, id);
+    if (!w.explosive || !spec) return false;
+    fps.rocketAmmoType = spec.id;
+    if (typeof document !== "undefined" && typeof CustomEvent !== "undefined") {
+      document.dispatchEvent(new CustomEvent("cbz-rocket-ammo", { detail: { id: spec.id, label: spec.label || spec.id } }));
+    }
+    setAmmoHud();
+    return true;
+  }
+  function cycleRocketAmmoType() {
+    const w = weapon(), modes = w.ammoTypes;
+    if (!w.explosive || !modes || modes.length < 2) return false;
+    let idx = 0;
+    for (let i = 0; i < modes.length; i++) if (modes[i].id === fps.rocketAmmoType) { idx = i; break; }
+    return setRocketAmmoType(modes[(idx + 1) % modes.length].id);
+  }
+  CBZ.fpsRocketAmmoType = function () { return fps.rocketAmmoType; };
+  CBZ.fpsSetRocketAmmoType = setRocketAmmoType;
+  CBZ.fpsCycleRocketAmmoType = cycleRocketAmmoType;
   // HOLSTER (city-only de-escalation): when the player holsters, armed() reads
   // FALSE so the EXISTING fists viewmodel shows and every cityHasGun()/witness/
   // wanted/panic system automatically treats the player as unarmed — the
@@ -197,6 +225,7 @@
     fps.rounds = WEAPONS.map((w, i) => magOf(i));
     fps.reserves = WEAPONS.map((w) => w.reserve);
     fps.reloading = 0;
+    fps.rocketAmmoType = "standard";
     shotCD = 0;
     dryCD = 0;
     triggerHeld = false;
@@ -460,10 +489,12 @@
   // audio file, different character, zero new assets.
   const shotSfxOpts = { pitch: 1, volume: 1 };
 
-  function triggerFistPunch() {
+  function triggerFistPunch(silent) {
     punchT = PUNCH_DUR;
     vmPunch = 0.5;                    // small viewmodel kick
-    CBZ.sfx && CBZ.sfx("whoosh");
+    // One restrained cloth movement per real swing. Callers that reuse the
+    // hand animation for pressing/placing objects can request a silent pose.
+    if (!silent && CBZ.sfx) CBZ.sfx("whoosh");
   }
   // disaster grapple-punch (grapple.js) triggers the same hand swing
   CBZ.fpsPunchAnim = triggerFistPunch;
@@ -548,12 +579,76 @@
       ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0,   // origin + impact point (straight-line endpoints)
       sagY: 0,                                     // peak mid-flight gravity sag (world units, visual only)
       detonate: null,                               // bound closure: () => runs the exact old detonation block
+      homing: false, seek: null, speed: 0, turnRate: 0, life: 0, maxLife: 0, targetRadius: 2,
+      velocity: new THREE.Vector3(), impactPoint: null, onImpact: null,
     });
   }
   let rocketIdx = 0;
   // launch a projectile from `from`→`to` over `dur` seconds, sagging under
   // `sag` world-units of (visual) gravity at the midpoint, then call `onArrive`.
-  function launchRocket(from, to, dur, sag, onArrive) {
+  function acquireHomingTarget(from, dir, spec) {
+    const range = (spec && spec.lockRange) || 240;
+    const cone = Math.cos((((spec && spec.lockConeDeg) || 18) * Math.PI) / 180);
+    let best = null, bestScore = Infinity;
+    if (CBZ.game.mode === "city" && CBZ.cityAircraftAcquireTarget) {
+      const a = CBZ.cityAircraftAcquireTarget(from.x, from.y, from.z, dir.x, dir.y, dir.z, range, cone);
+      if (a) { best = a; bestScore = (1 - a.dot) * 8 + a.distance / range * 0.08; }
+    }
+    // Passenger aircraft use the same live records that boarding and flight
+    // consume. Include them in lock-on instead of inventing a target proxy.
+    if (CBZ.game.mode === "city" && CBZ.cityCivilAircraftAcquireTarget) {
+      const a = CBZ.cityCivilAircraftAcquireTarget(from.x, from.y, from.z, dir.x, dir.y, dir.z, range, cone);
+      if (a) {
+        let covered = false;
+        const p = a.seek && a.seek();
+        if (p) {
+          _rocketWant.set(p.x - from.x, p.y - from.y, p.z - from.z);
+          const d = _rocketWant.length();
+          if (d > 1e-5) {
+            _rocketWant.multiplyScalar(1 / d);
+            const cover = wallDistance(from, _rocketWant, d);
+            covered = !!(cover && cover.distance < d - 1.2);
+          }
+        }
+        const score = (1 - a.dot) * 8 + a.distance / range * 0.08;
+        if (!covered && score < bestScore) { best = a; bestScore = score; }
+      }
+    }
+    const cars = CBZ.game.mode === "city" && CBZ.cityCars;
+    if (cars) for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if (!c || c.dead || c.player || !c.pos || !c.group || c.group.visible === false) continue;
+      const dims = c.dims || {};
+      const cy = (c.pos.y || 0) + (dims.height || 1.8) * 0.5;
+      const dx = c.pos.x - from.x, dy = cy - from.y, dz = c.pos.z - from.z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < 5 || d > range) continue;
+      const dot = (dx * dir.x + dy * dir.y + dz * dir.z) / d;
+      if (dot < cone) continue;
+      // Do not lock a car through a building; acquisition only runs once per
+      // trigger pull, so this single raycast per plausible candidate is cheap.
+      _rocketWant.set(dx / d, dy / d, dz / d);
+      const cover = wallDistance(from, _rocketWant, d);
+      if (cover && cover.distance < d - 1.2) continue;
+      const score = (1 - dot) * 8 + d / range * 0.08;
+      if (score >= bestScore) continue;
+      const target = c;
+      bestScore = score;
+      best = {
+        kind: "car", dot, distance: d,
+        radius: Math.max(1.4, Math.min(3.0, (dims.length || 4.6) * 0.45)),
+        seek: function () {
+          if (!target || target.dead || !target.pos || !target.group || target.group.visible === false) return null;
+          const td = target.dims || {};
+          return { x: target.pos.x, y: (target.pos.y || 0) + (td.height || 1.8) * 0.5, z: target.pos.z };
+        },
+      };
+    }
+    return best;
+  }
+
+  function launchRocket(from, to, dur, sag, onArrive, opts) {
+    opts = opts || {};
     const r = rockets[rocketIdx];
     rocketIdx = (rocketIdx + 1) % rockets.length;
     r.active = true; r.t = 0; r.dur = Math.max(0.02, dur);
@@ -561,6 +656,18 @@
     r.dx = to.x; r.dy = to.y; r.dz = to.z;
     r.sagY = sag;
     r.detonate = onArrive;
+    r.homing = !!(opts.homing && opts.seek);
+    r.seek = r.homing ? opts.seek : null;
+    r.speed = opts.speed || 0;
+    r.turnRate = opts.turnRate || 2.4;
+    r.life = 0;
+    r.maxLife = opts.maxLife || Math.max(3.2, r.dur + 2.0);
+    r.targetRadius = opts.targetRadius || 2;
+    r.impactPoint = opts.impactPoint || null;
+    r.onImpact = typeof opts.onImpact === "function" ? opts.onImpact : null;
+    r.velocity.set(to.x - from.x, to.y - from.y, to.z - from.z);
+    if (r.velocity.lengthSq() < 1e-6) r.velocity.set(0, 0, -1);
+    r.velocity.normalize().multiplyScalar(r.speed || (from.distanceTo(to) / r.dur));
     r.mesh.position.copy(from);
     r.mesh.visible = true;
     return r;
@@ -569,11 +676,58 @@
   // at both ends) — reads as gravity without a full ballistic re-solve, and
   // the rocket still ARRIVES exactly at the pre-resolved impact point.
   const _rocketPos = new THREE.Vector3(), _rocketPrev = new THREE.Vector3();
+  const _rocketDir = new THREE.Vector3(), _rocketWant = new THREE.Vector3();
+  function finishRocket(r, point, wallHit) {
+    if (point && r.impactPoint && r.impactPoint.copy) r.impactPoint.copy(point);
+    if (r.onImpact) { try { r.onImpact(point || r.mesh.position, wallHit || null); } catch (e) {} }
+    r.active = false; r.mesh.visible = false;
+    const fn = r.detonate;
+    r.detonate = null; r.seek = null; r.onImpact = null; r.impactPoint = null; r.homing = false;
+    if (fn) fn();
+  }
   function updateRockets(dt) {
     for (let i = 0; i < rockets.length; i++) {
       const r = rockets[i];
       if (!r.active) continue;
       _rocketPrev.copy(r.mesh.position);
+      if (r.homing) {
+        r.t += dt; r.life += dt;
+        const target = r.seek ? r.seek() : null;
+        if (target) {
+          _rocketDir.copy(r.velocity).normalize();
+          _rocketWant.set(target.x - r.mesh.position.x, target.y - r.mesh.position.y, target.z - r.mesh.position.z);
+          if (_rocketWant.lengthSq() > 1e-6) {
+            _rocketWant.normalize();
+            const dot = Math.max(-1, Math.min(1, _rocketDir.dot(_rocketWant)));
+            const angle = Math.acos(dot), maxTurn = r.turnRate * dt;
+            if (angle <= maxTurn || angle < 1e-4) _rocketDir.copy(_rocketWant);
+            else _rocketDir.lerp(_rocketWant, maxTurn / angle).normalize();
+            r.velocity.copy(_rocketDir).multiplyScalar(r.speed);
+          }
+        }
+        r.mesh.position.addScaledVector(r.velocity, dt);
+        _rocketPos.copy(r.mesh.position);
+        _rocketDir.copy(_rocketPos).sub(_rocketPrev);
+        const stepLen = _rocketDir.length();
+        let wallHit = null, impact = null;
+        if (stepLen > 1e-5) {
+          _rocketDir.multiplyScalar(1 / stepLen);
+          wallHit = wallDistance(_rocketPrev, _rocketDir, stepLen + 0.12);
+          if (wallHit && wallHit.distance <= stepLen + 0.1) impact = wallHit.point;
+        }
+        const gy = CBZ.floorAt ? (+CBZ.floorAt(_rocketPos.x, _rocketPos.z) || 0) : 0;
+        if (!impact && _rocketPos.y <= gy + 0.1) {
+          _rocketPos.y = gy + 0.1; impact = _rocketPos; wallHit = null;
+        }
+        if (!impact && target) {
+          const dx = target.x - _rocketPos.x, dy = target.y - _rocketPos.y, dz = target.z - _rocketPos.z;
+          if (dx * dx + dy * dy + dz * dz <= Math.pow(r.targetRadius + Math.min(2, stepLen), 2)) impact = _rocketPos;
+        }
+        if (!impact && r.life >= r.maxLife) impact = _rocketPos;
+        if (stepLen > 1e-6) r.mesh.quaternion.setFromUnitVectors(UP, _rocketDir);
+        if (impact) finishRocket(r, impact, wallHit);
+        continue;
+      }
       r.t += dt;
       const k = Math.min(1, r.t / r.dur);
       const sag = r.sagY * 4 * k * (1 - k);
@@ -588,9 +742,7 @@
       tmp.copy(_rocketPos).sub(_rocketPrev);
       if (tmp.lengthSq() > 1e-6) r.mesh.quaternion.setFromUnitVectors(UP, tmp.normalize());
       if (k >= 1) {
-        r.active = false; r.mesh.visible = false;
-        const fn = r.detonate; r.detonate = null;
-        if (fn) fn();
+        finishRocket(r, _rocketPos, null);
       }
     }
   }
@@ -731,39 +883,24 @@
     clearWorldDrop();
   };
 
-  // The bullet ORIGIN must stay pinned to the GUN, not swing with recoil. The
-  // viewmodel kicks up AND rolls sideways under sustained fire, and with the
-  // barrel tip ~2m out on that pivot the muzzle socket flings far up + left after
-  // the first burst — so tracers streak out of your head / two feet to your left.
-  // The first burst looks perfect because recoil is zero; the fix is to BOUND the
-  // origin to a tight gun-region BOX in camera space, so the clean rest-pose
-  // values pass through untouched but recoil drift is clamped to the box edge.
-  // The gun model + muzzle FLASH still climb (they read the raw socket); only the
-  // world bullet/tracer/casing origin is held steady.
+  // The model socket is the source of truth. Previous camera-space component
+  // clamps could silently relocate a perfectly valid socket, so the flash stayed
+  // on the barrel while the bullet began beside it. Keep only a catastrophic-rig
+  // fallback; every healthy shot leaves the exact rendered front tip.
   const _muzM = new THREE.Matrix4();
-  // camera-space bounds: down-and-right of the lens, out in front, never at the eye.
-  // FIRST-PERSON ONLY — this box is "the gun region" solely when the camera IS the
-  // shooter's eye. The shoulder cam clamps to the gun HAND instead (see below).
-  // WIDE enough that every healthy rest pose passes through UNTOUCHED — the
-  // old box (up max -0.16, right max 0.62) was tighter than the current
-  // viewmodels' real barrel tips, so the clamp engaged at REST and shifted the
-  // bullet origin up-left of the visible muzzle (user-filmed ~cm overlap).
-  // Recoil drift this box exists for flings way beyond these bounds.
-  const MUZ_UP = [-1.05, -0.1], MUZ_RIGHT = [0.04, 0.9], MUZ_FWD = [0.45, 3.2];
-  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
   function clampMuzzleBelowEye(out) {
     const cam = CBZ.camera; if (!cam) return out;
     if (cam.updateWorldMatrix) cam.updateWorldMatrix(true, false);
     const e = _muzM.extractRotation(cam.matrixWorld).elements;
     const rx = e[0], ry = e[1], rz = e[2], ux = e[4], uy = e[5], uz = e[6], fx = -e[8], fy = -e[9], fz = -e[10];
     const dx = out.x - cam.position.x, dy = out.y - cam.position.y, dz = out.z - cam.position.z;
-    const f = clamp(dx * fx + dy * fy + dz * fz, MUZ_FWD[0], MUZ_FWD[1]);
-    const u = clamp(dx * ux + dy * uy + dz * uz, MUZ_UP[0], MUZ_UP[1]);
-    const r = clamp(dx * rx + dy * ry + dz * rz, MUZ_RIGHT[0], MUZ_RIGHT[1]);
-    return out.set(
-      cam.position.x + fx * f + ux * u + rx * r,
-      cam.position.y + fy * f + uy * u + ry * r,
-      cam.position.z + fz * f + uz * u + rz * r);
+    const f = dx * fx + dy * fy + dz * fz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (Number.isFinite(d2) && d2 > 0.02 && d2 < 36 && f > 0.08) return out;
+    return out.set(cam.position.x, cam.position.y, cam.position.z)
+      .addScaledVector({ x: rx, y: ry, z: rz }, 0.18)
+      .addScaledVector({ x: ux, y: uy, z: uz }, -0.34)
+      .addScaledVector({ x: fx, y: fy, z: fz }, 0.5);
   }
 
   // THIRD-PERSON (shoulder cam) clamp: the camera-space box above is wrong out
@@ -780,9 +917,12 @@
   function clampMuzzleToHand(out, model) {
     carriedGun.getWorldPosition(_handPos);   // r128: refreshes parent matrices itself
     const sc = (model.scale && model.scale.x) || 1;
-    const r = model.userData.muzzle.length() * sc + 0.5;  // bazooka 1.4*1.05 ≈ 1.47 still passes
+    const r = model.userData.muzzle.length() * sc * 2.5 + 1.0;
     const d = out.distanceTo(_handPos);
-    if (d > r) out.sub(_handPos).multiplyScalar(r / d).add(_handPos);
+    if (!Number.isFinite(d) || d > r) {
+      aimForward(fwd);
+      out.copy(_handPos).addScaledVector(fwd, Math.min(2.2, model.userData.muzzle.length() * sc));
+    }
     return out;
   }
 
@@ -934,14 +1074,23 @@
     if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed()) {
       const w = weapon();
       ammoEl.style.display = "block";
-      const campaignMinimal = !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
+      // City play is always instrumentation-only.  This cannot depend on a
+      // campaign mission being active: sandbox/side-job weapons were still
+      // writing weapon names, RELOADING and RES over the world.
+      const campaignMinimal = CBZ.game.mode === "city" ||
+        !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
+      const rocketSpec = w.explosive ? rocketAmmoSpec(w) : null;
+      const rocketMode = rocketSpec ? (rocketSpec.label || rocketSpec.id || "").toUpperCase() : "";
       if (campaignMinimal) {
         // Prison shares the engine ammo panel rather than city/hud.js. Keep the
         // same campaign rule here: reload is a glyph and every other character
         // is numeric, with no weapon/reserve labels floating over the world.
-        ammoEl.textContent = (fps.reloading > 0 ? "↻\n" : "") + fps.ammo + " / " + fps.mag + " · " + fps.reserve;
+        // One compact lock glyph is enough to reveal that homing is armed; no
+        // floating tutorial prose is introduced into the minimal campaign HUD.
+        ammoEl.textContent = (fps.reloading > 0 ? "↻\n" : "") + (rocketSpec && rocketSpec.homing ? "◎ " : "") + fps.ammo + " / " + fps.mag + " · " + fps.reserve;
       } else {
-        const top = fps.reloading > 0 ? "RELOADING " + w.short : w.label;
+        const held = rocketMode ? w.short + " · " + rocketMode : w.label;
+        const top = fps.reloading > 0 ? "RELOADING " + w.short : held;
         ammoEl.textContent = top + "\n" + fps.ammo + " / " + fps.mag + "   RES " + fps.reserve;
       }
     } else ammoEl.style.display = "none";
@@ -950,6 +1099,14 @@
 
   function setWeaponStrip() {
     if (!stripEl) return;
+    // The city owns one unified boxed inventory/hotbar.  The engine strip was
+    // a second row of FIST / 9MM / 556 / RPG words, and inline display writes
+    // could resurrect it despite the city stylesheet.
+    if (CBZ.game.mode === "city") {
+      stripEl.innerHTML = "";
+      stripEl.style.display = "none";
+      return;
+    }
     if (!(fps.active || shoulderActive()) || !armed()) {
       stripEl.style.display = "none";
       return;
@@ -983,6 +1140,20 @@
       return h;
     }
     return null;
+  }
+
+  // Long-lived wall wounds belong only to static architecture. A raycast can
+  // also hit a parked/moving aircraft or other dynamic prop; stamping that
+  // world-space point left a dark disc hanging in empty air after the object
+  // moved — the filmed RPG "painting thin air" bug.
+  function canLeaveBlastScar(hit) {
+    let o = hit && hit.object;
+    while (o) {
+      const u = o.userData || {};
+      if (u.aircraftDims || u.hijackable || u.craft || u.milKind || u.dynamic || u.transient) return false;
+      o = o.parent;
+    }
+    return !!hit;
   }
 
   // ---- ray vs the CAR fleet (cars were invisible to bullets before this) ----
@@ -1172,9 +1343,15 @@
     const hit = findActorHit(eye, dir, maxT, w);
     // the police gunship overhead is a valid target — ray-test it (no damage here;
     // the shoot loop / rocket splash applies it) and take it if it's the nearest.
-    const air = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    const policeAir = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    const civilAir = (CBZ.game.mode === "city" && CBZ.cityCivilAircraftRayTest) ? CBZ.cityCivilAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
+    let air = policeAir;
+    let civil = false;
+    if (civilAir && (!air || civilAir.dist < air.dist)) { air = civilAir; civil = true; }
     if (hit && (!air || hit.dist <= air.dist)) return hit;
-    if (air) return { actor: null, aircraft: true, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) };
+    if (air) return civil
+      ? { actor: null, civilAircraft: air.rec, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) }
+      : { actor: null, aircraft: true, dist: air.dist, point: new THREE.Vector3(air.x, air.y, air.z) };
     // a DOWNED body in the path (city-only): only when NO live actor was hit, so a
     // corpse never shadows a living target. Competes on distance with car/wall —
     // shoot it for more holes + a jerk; wins only if it's nearer than those.
@@ -1502,7 +1679,7 @@
   }
 
   function shoot() {
-    if (!(fps.active || shoulderActive()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || CBZ.player.driving) return;
+    if (!(fps.active || shoulderActive()) || CBZ.game.state !== "playing" || CBZ.player.dead || (CBZ.player.stun || 0) > 0 || CBZ.player.driving || CBZ.player._swim) return;
     if (!armed()) {
       if (CBZ.game.mode === "city") return;   // city/combat.js owns unarmed melee in the city
       const hit = aimedActor(MELEE);
@@ -1536,7 +1713,7 @@
     syncAmmo();
     setAmmoHud();
 
-    const RK = 0.45;  // global recoil dampener — the guns were kicking too hard
+    const RK = 0.32;  // controlled climb; view kick still sells weapon weight
     // BURST RESET: a fire gap > 0.25s wipes the ramp + pattern position, so the
     // next round is a fresh first-shot (soft, dead-centre). sinceShot was
     // accumulated by the frame loop; reset it now that we've fired.
@@ -1562,8 +1739,8 @@
       const pitchKick = basePitch * ramp * firstShot * jitter * adsK * modRec;
       const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
       const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK * modRec;
-      recoilPitch = Math.min(0.5, recoilPitch + pitchKick);   // cap so a mag-dump tops out
-      recoilYaw = Math.max(-0.32, Math.min(0.32, recoilYaw + yawKick));
+      recoilPitch = Math.min(0.12, recoilPitch + pitchKick);
+      recoilYaw = Math.max(-0.07, Math.min(0.07, recoilYaw + yawKick));
       shotsInBurst++;
     }
     pumpT = w.pump ? 1 : pumpT;
@@ -1619,6 +1796,8 @@
     // The BLAST is the kill, so the normal per-pellet damage loop is skipped.
     if (w.explosive) {
       const MIN_DET = 4;
+      const ammoSpec = rocketAmmoSpec(w) || { id: "standard", homing: false };
+      const guidedTarget = ammoSpec.homing ? acquireHomingTarget(origin, fwd, ammoSpec) : null;
       // a rocket REACHES across the whole map — its detonation must not be capped
       // at the gun's per-pellet `range` (200), or a tower you aim at 250u down a
       // boulevard shows the fireball in empty air SHORT of the wall and the facade
@@ -1636,15 +1815,15 @@
       // The ground-crossing is the original "far-away" fix; the far-wall trace is
       // the new one — together a rocket lands ON whatever it's pointed at, near or
       // far, and the big blast radius does the rest.
-      let detT = (hit.wall || hit.actor || hit.car || hit.aircraft) && hit.dist ? Math.max(0.1, hit.dist) : FAR;
+      let detT = (hit.wall || hit.actor || hit.car || hit.aircraft || hit.civilAircraft) && hit.dist ? Math.max(0.1, hit.dist) : FAR;
       if (farWall && farWall.distance < detT) detT = Math.max(0.1, farWall.distance);
       if (fwd.y < -0.01) { const gt = (0 - eye.y) / fwd.y; if (gt > 0 && gt < detT) detT = gt; }  // ground (street ≈ y0)
       detT = Math.max(MIN_DET, Math.min(detT, FAR));   // never on the shooter, never past the map
       // the wall the rocket actually lands on (close hit OR the far facade) — used
       // below to stamp the struck face's scar at the real impact point.
-      const wallStruck = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.wallHit
+      let wallStruck = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.wallHit
         : (farWall && Math.abs(farWall.distance - detT) < 0.6) ? farWall : null;
-      const wallPoint = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.point
+      let wallPoint = (hit.wall && hit.wallHit && hit.dist <= detT + 0.6) ? hit.point
         : (farWall && Math.abs(farWall.distance - detT) < 0.6 && farWall.point) ? farWall.point.clone() : null;
       const pt = eye.clone().addScaledVector(fwd, detT);
       // pre-resolved shot direction + origin for the detonation closure below.
@@ -1691,7 +1870,7 @@
           // the wound, a parapet block near the roofline, concrete dust. NO carve
           // (cityBlastWall is flavor only — the real hole is the cityExplosion chain).
           // DEGATED: now fires for a far facade too, not just a near-wall hit.
-          if (wallStruck && CBZ.cityBlastWall) {
+          if (wallStruck && canLeaveBlastScar(wallStruck) && CBZ.cityBlastWall) {
             // wall-face normal: the raycast's struck face rotated to world (the
             // exact face-entry normal, same idea as findCarHit's AABB slabs);
             // falls back to the reflected horizontal shot direction.
@@ -1710,6 +1889,9 @@
           }
           // a rocket that lands on/near the gunship nearly halves it (≈2 rockets kill)
           if (CBZ.cityAircraftSplash) CBZ.cityAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
+          // Civil aircraft are the real boardable plane records, not disposable
+          // target dummies. A direct RPG wrecks one; a near miss falls off.
+          if (CBZ.cityCivilAircraftSplash) CBZ.cityCivilAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 520, { byPlayer: true });
         }
         // kick scales with how close the blast is to the lens — a rocket at your
         // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates
@@ -1723,16 +1905,34 @@
       // pulled. Weapons without projSpeed (defensive default) keep the OLD
       // instant-detonate behaviour so this never silently breaks a future
       // explosive that doesn't carry the new fields.
-      const projSpeed = w.projSpeed || 0;
+      const projSpeed = (guidedTarget && ammoSpec.speed) || w.projSpeed || 0;
       if (projSpeed > 0) {
-        const flightDist = origin.distanceTo(pt);
+        const lockPoint = guidedTarget && guidedTarget.seek ? guidedTarget.seek() : null;
+        const flightDist = lockPoint
+          ? Math.hypot(lockPoint.x - origin.x, lockPoint.y - origin.y, lockPoint.z - origin.z)
+          : origin.distanceTo(pt);
         const flightDur = Math.max(0.04, flightDist / projSpeed);
         // visual sag: how far the arc dips at its midpoint under projGravity
         // over the flight time (s = 1/8 * g * t^2 for a midpoint sag — the
         // peak of a parabola released over the full duration), capped so a
         // very long shot doesn't sag the rocket into the ground mid-flight.
-        const sag = Math.min(flightDist * 0.18, 0.125 * (w.projGravity || 0) * flightDur * flightDur);
-        launchRocket(origin, pt, flightDur, sag, detonate);
+        const sag = guidedTarget ? 0 : Math.min(flightDist * 0.18, 0.125 * (w.projGravity || 0) * flightDur * flightDur);
+        const guideOpts = guidedTarget ? {
+          homing: true,
+          seek: guidedTarget.seek,
+          speed: projSpeed,
+          turnRate: ammoSpec.turnRate || 2.4,
+          targetRadius: guidedTarget.radius || 2,
+          maxLife: Math.max(3.8, Math.min(8, flightDur + 2.5)),
+          impactPoint: pt,
+          onImpact: function (actualPoint, actualWall) {
+            pt.copy(actualPoint);
+            detT = launchEye.distanceTo(pt);
+            wallStruck = actualWall || null;
+            wallPoint = actualWall && actualWall.point ? actualWall.point.clone() : null;
+          },
+        } : null;
+        launchRocket(origin, pt, flightDur, sag, detonate, guideOpts);
         // a brief launch flare only (the flying mesh IS the tracer now) — no
         // fireTracer() instant line all the way to `pt`, which would visibly
         // spoil the flight by drawing the whole path before the rocket arrives.
@@ -1879,6 +2079,13 @@
         if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
         spawnImpact(hit.point, false, true);
         if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
+      } else if (hit.civilAircraft) {
+        // The parked gate plane itself takes the round. Damage, boarding and
+        // later flight all share this record, so a wreck can never be hijacked.
+        hitSomething = true;
+        if (CBZ.cityDamageCivilAircraft) CBZ.cityDamageCivilAircraft(hit.civilAircraft, w.damage, hit.point, { byPlayer: true });
+        spawnImpact(hit.point, false, true);
+        if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.35, z: -shotDir.z }, { kind: "spark", power: Math.max(1, cal) });
       } else if (hit.car) {
         // CALIBER vs SHEET METAL: real engine damage (rifle rounds punch panels
         // ~2x harder than a 9mm; heavy rounds also dent), a panel shudder, paint
@@ -2276,6 +2483,11 @@
     const k = e.key.toLowerCase();
     if (k === "v" && CBZ.game.mode !== "city") CBZ.toggleFPS();   // city owns [V] via city/view.js
     else if (k === "r" && (fps.active || shoulderActive())) reload();
+    else if (k === "x" && (fps.active || shoulderActive()) && weapon().explosive &&
+      !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active) &&
+      !(CBZ.buildMode && CBZ.buildMode.active)) {
+      if (cycleRocketAmmoType()) { e.preventDefault(); if (CBZ.sfx) CBZ.sfx("rack", { volume: 0.35 }); }
+    }
     // NOTE: Q (swap gun) is intentionally NOT handled here. Browsers buffer
     // keydown events during a lag spike and drain them over the following
     // frames, which produced "leftover" weapon switches after you stopped
@@ -2561,11 +2773,9 @@
       // must not linger on the rig (animChar reads these flags). Clear here.
       if (CBZ.playerChar) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
       if (armed()) {
-        // Sustained-fire climb is kept SMALL on purpose: the bullet origin is
-        // clamped to a tight camera-space box (muzzleWorld), so if the visible
-        // barrel pivots far under recoil, tracers visibly stop leaving the gun.
-        // The per-shot KICK reads through vmPunch (snappy, decays in ~0.1s);
-        // the accumulated recoil only nudges. Kick feel without the detach.
+        // Sustained-fire climb stays small; bullets now use the exact live
+        // muzzle socket, so the rendered barrel and projectile remain welded
+        // together through the kick instead of diverging under an origin clamp.
         vm.position.set(
           0.36 - bobX * 0.5 + recoilSide * 0.55,
           -0.34 + bobY * 0.5 - recoil * 0.08 - vmPunch * 0.18 - reloadDip,
@@ -2582,7 +2792,7 @@
       carriedGun.visible = false;
     } else {
       attachCarriedGun();
-      carriedGun.visible = armed();
+      carriedGun.visible = armed() && !CBZ.player._swim;
       const longGun = w.slot === "long" || w.slot === "rifle" || w.slot === "auto";
       const util = w.slot === "utility";
       // Two carry stances: a relaxed LOW-READY (gun lowered and tucked to

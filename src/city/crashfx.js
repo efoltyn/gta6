@@ -35,6 +35,7 @@
   const blastPieceSeen = new Set();
   const chunkGeo = new THREE.BoxGeometry(0.28, 0.18, 0.42);
   chunkGeo._shared = true;
+  const debrisBox = new THREE.Box3(), debrisSize = new THREE.Vector3();
   // base box half-height (the 0.18 dim above ÷2) — a chunk must rest with its
   // BOTTOM on the road, so y_rest = floor + halfHeight*scale, never center=0.1
   // (which buried half the box into the asphalt — the user-filmed sink).
@@ -275,17 +276,30 @@
   // scene.remove()s it (no dispose — donated geo/materials stay owned by the
   // car systems that built them).
   CBZ.cityDebrisAdopt = function (mesh, vx, vy, vz) {
-    if (!mesh) return;
+    if (!mesh) return false;
+    // Never let a whole facade/window-wall enter the flying-debris pool. This
+    // API is for car panels and small fragments; oversized donations are culled
+    // immediately instead of hanging as giant angled planes in the world.
+    try {
+      mesh.updateWorldMatrix(true, true);
+      debrisBox.setFromObject(mesh).getSize(debrisSize);
+      if (Math.max(debrisSize.x, debrisSize.y, debrisSize.z) > 3.0) {
+        if (mesh.parent) mesh.parent.remove(mesh);
+        return false;
+      }
+    } catch (e) {}
     while (chunks.length > CHUNK_CAP - 1) recycleChunk();
     scene.add(mesh);
+    mesh.userData.fractureShard = true;
     // a torn-off panel is built around its own origin; bbox half-height seats it
     // on the road so it lies flat instead of sinking through.
     let hh = 0.12;
     try { mesh.geometry.computeBoundingBox(); const bb = mesh.geometry.boundingBox; if (bb) hh = Math.max(0.04, (bb.max.y - bb.min.y) * 0.5 * (mesh.scale.y || 1)); } catch (e) {}
     chunks.push({
       mesh, vx: vx || 0, vy: vy == null ? 3 : vy, vz: vz || 0, hh,
-      spin: (rng() - 0.5) * 9, t: 0, life: 2.6 + rng() * 1.2, rest: 0, settled: false, trail: -1,
+      spin: (rng() - 0.5) * 9, t: 0, life: 1.8 + rng() * 0.8, rest: 0, settled: false, trail: -1,
     });
+    return true;
   };
 
   // ---- ground SCORCH decal (a dark radial disc that snaps in + lingers) ----
@@ -486,6 +500,30 @@
       }
     }
   }
+
+  // A bounded reusable wreck plume for aircraft modules. Several callers have
+  // long feature-detected this hook; defining it here keeps those crashes on
+  // the same pooled smoke sprites as explosions instead of silently doing
+  // nothing. Each call is capped at six puffs and they return to puffPool.
+  CBZ.cityCrashSmoke = function (x, y, z, opts) {
+    opts = opts || {};
+    const cy = Number.isFinite(+y) ? +y : 0.8;
+    const count = Math.max(1, Math.min(6, opts.count == null ? 5 : opts.count | 0));
+    const scale = Math.max(0.5, Math.min(2.2, opts.scale || 1));
+    for (let i = 0; i < count; i++) {
+      const a = rng() * 6.2832, drift = 0.25 + rng() * 0.5;
+      spawnPuff(x + (rng() - 0.5) * 1.5 * scale,
+        cy + 0.3 + rng() * 0.8 * scale,
+        z + (rng() - 0.5) * 1.5 * scale, {
+          additive: false, smoke: true, base: 1.3 * scale,
+          pop: (4.8 + rng() * 2.6) * scale,
+          life: 4.0 + rng() * 2.6, maxOp: 0.44,
+          shade: 0.09 + rng() * 0.06, spin: (rng() - 0.5),
+          vx: Math.cos(a) * drift, vy: 1.2 + rng() * 1.0,
+          vz: Math.sin(a) * drift, delay: i * 0.08 + rng() * 0.1,
+        });
+    }
+  };
 
   CBZ.cityCrashFX = function (x, z, opts) {
     opts = opts || {};
@@ -1019,7 +1057,7 @@
       // mound height: tall against the wall, thinning outward, plus jitter
       const mound = Math.max(0, (1 - out / (spread + 0.01))) * size * 0.9;
       const big = rng() < 0.28;
-      const sc = (big ? 1.3 + rng() * 1.1 : 0.6 + rng() * 0.8) * size;
+      const sc = Math.min(1.8, (big ? 1.1 + rng() * 0.7 : 0.55 + rng() * 0.65) * Math.min(1.25, size));
       const mesh = new THREE.Mesh(big ? rubbleGeo : chunkGeo, rng() < 0.5 ? rubbleMat : rubbleMat2);
       mesh.scale.set(sc, sc * (0.6 + rng() * 0.5), sc * (0.8 + rng() * 0.5));
       const hh = (big ? 0.2 : CHUNK_HH) * sc;
@@ -1398,8 +1436,8 @@
   function parapetChunk(x, topY, z, nx, nz) {
     while (chunks.length > CHUNK_CAP - 1) recycleChunk();
     const mesh = new THREE.Mesh(chunkGeo, chunkMat);
-    const sy = 3 + rng() * 2;
-    mesh.scale.set(4 + rng() * 2.5, sy, 4 + rng() * 2.5);  // a ~1.2–1.8u coping block
+    const sy = 2.0 + rng() * 0.8;
+    mesh.scale.set(2.4 + rng() * 0.7, sy, 2.4 + rng() * 0.7);  // bounded coping fragments, never facade slabs
     mesh.position.set(x + nx * 0.8, topY + 0.5, z + nz * 0.8);
     mesh.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     scene.add(mesh);
@@ -1567,7 +1605,7 @@
         // a RUBBLE-HEAP piece is the permanent ruin — it persists far longer
         // (the population-pool recycle still evicts it if space is needed AND
         // it's off-screen, so it never pops out under the player's eye).
-        if (c.rest > (c.heap ? 600 : 60)) { scene.remove(c.mesh); chunks.splice(i, 1); }
+        if (c.rest > (c.heap ? 180 : 18)) { scene.remove(c.mesh); chunks.splice(i, 1); }
         continue;
       }
       c.vy -= grav * 0.8 * dt; // mild gravity so shrapnel hangs
@@ -1599,7 +1637,7 @@
       }
       // safety: an in-flight piece that never found ground (flung off the map)
       // still retires so it can't leak the pool.
-      if (!c.settled && c.t > c.life + 8) { scene.remove(c.mesh); chunks.splice(i, 1); }
+      if (!c.settled && c.t > c.life + 2.5) { scene.remove(c.mesh); chunks.splice(i, 1); }
     }
     for (let i = scorches.length - 1; i >= 0; i--) {
       const s = scorches[i]; s.t += dt;

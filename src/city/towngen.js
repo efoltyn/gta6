@@ -462,9 +462,9 @@
         const storeys = storeysFor(pick.storeys, lt.ring, lt, isShop); // one shell, final height
         const color = pick.color != null ? pick.color : WOOD;
         let b = null;
-        // V2: numeric door side (see SIDE_IDX finding) + homes default to the
-        // RESIDENTIAL facade (masonry + punched windows) instead of a glass
-        // retail storefront — a town house should read as a house.
+        // V2: numeric door side (see SIDE_IDX finding). Homes use the shared
+        // clean glass shell; buildings.js deliberately normalizes the removed
+        // residential/fortified punched-window archetypes to office glass.
         const sideArg = V2 && SIDE_IDX[lt.doorSide] != null ? SIDE_IDX[lt.doorSide] : lt.doorSide;
         const shellOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
         try { b = mk(root, lt.cx, lt.cz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }

@@ -25,13 +25,42 @@
     interactOpts: document.getElementById("interactOpts"),
   };
 
+  // City prose belongs on the handset, not over the world. Control legends are
+  // not notifications at all, so they are simply suppressed here. Campaign
+  // mode installs its own phone wrapper later; the legacy city phone exposes
+  // cityPhoneNotify for the non-campaign world.
+  const CITY_CONTROL_RE = /\[[A-Za-z0-9/\- ]{1,8}\]|\b(?:press|click|hold|tap)\b|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/i;
+  function routeCityText(t, app, from) {
+    if (!CBZ.game || CBZ.game.mode !== "city") return false;
+    const text = String(t == null ? "" : t).trim();
+    if (!text || CITY_CONTROL_RE.test(text)) return true;
+    // mode.js owns the importance/diegesis policy once it has loaded. Direct
+    // legacy flashToast/flashHint callers must pass that same gate instead of
+    // filling the handset with every old combat/status toast.
+    if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(text, null, app === "news")) return true;
+    if (typeof CBZ.cityPhoneNotify === "function") {
+      CBZ.cityPhoneNotify({ app: app || "messages", from: from || "City Desk", text: text });
+    } else if (CBZ.cityCampaignActive && CBZ.cityCampaignActive() && typeof CBZ.phoneNotify === "function") {
+      CBZ.phoneNotify({ app: app || "messages", from: from || "City Desk", text: text });
+    }
+    return true;
+  }
+
   function setObjective(t) {
+    if (routeCityText(t, "missions", "Dispatch")) {
+      if (el.objText) el.objText.textContent = "";
+      if (objEl) objEl.style.display = "none";
+      return;
+    }
     // a normal objective string also exits kill-feed mode (e.g. starting an
     // escape match after a survival one) so the panel reads correctly again
     if (objEl && objEl.classList.contains("killfeed")) { objEl.classList.remove("killfeed"); if (objTag) objTag.textContent = "Objective"; }
     el.objText.textContent = t;
   }
-  function showHint(t) { el.hint.textContent = t; el.hint.classList.add("show"); }
+  function showHint(t) {
+    if (routeCityText(t, "messages", "City Desk")) { hideHint(); return; }
+    el.hint.textContent = t; el.hint.classList.add("show");
+  }
   function hideHint() { el.hint.classList.remove("show"); }
 
   // ---- survival KILL FEED: the objective panel becomes a running list of
@@ -47,6 +76,10 @@
     if (objEl) objEl.classList.add("killfeed");
   }
   function pushKill(text, color, big) {
+    // City deaths are recorded by city/killfeed.js and delivered to News. The
+    // prison/survival objective panel must never leak a second kill line into
+    // the city HUD.
+    if (CBZ.game && CBZ.game.mode === "city") return;
     if (!el.objText) return;
     const line = document.createElement("div");
     line.className = "kfeed" + (big ? " kfeed-you" : "");
@@ -81,6 +114,11 @@
   });
 
   function flashToast(t) {
+    if (routeCityText(t, "news", "City Desk")) {
+      el.toast.classList.remove("pop");
+      el.toast.textContent = "";
+      return;
+    }
     el.toast.textContent = t;
     el.toast.classList.remove("pop");
     void el.toast.offsetWidth; // reflow to restart the animation

@@ -1,9 +1,9 @@
 /* ============================================================
-   entities/crowd.js - bounded close rigs + mathematical crowd tier.
+   entities/crowd.js - bounded real inmates + mathematical society tier.
 
    Total population is independent from render capacity. Nearby rows are
-   promoted into animated InstancedMesh slots. Hidden rows remain analytical
-   route segments in ambientstate.js and are never frame-stepped.
+   promoted into ordinary registered makeCharacter actors. Hidden rows remain
+   analytical route segments in ambientstate.js and are never drawn as people.
 ============================================================ */
 (function () {
   "use strict";
@@ -11,6 +11,7 @@
   if (!CBZ || !S || !S.total || !THREE.InstancedMesh || !THREE.Points) return;
 
   const TOTAL = S.total, RIG_CAP = S.rigCapacity, FIXED = 1 / 20;
+  const ACT = S.ACTIVITY || { WALK: 0, STAND: 1, SOCIAL: 2, ACTION: 3, FIGHT: 4, FLEE: 5 };
   const ROLE_NAMES = ["drifter", "runner", "lookout", "enforcer", "trader", "mediator"];
   const DOT_COLORS = [0xd8d2c4, 0x8bdeff, 0xffcf70, 0xff756b, 0x9eea96, 0xc9a6ff];
   const root = new THREE.Group();
@@ -46,6 +47,10 @@
   // FACES (so the crowd reads as people, not faceless boxes) + a worn valuable
   const eyeL = makePart(dark), eyeR = makePart(dark), mouth = makePart(dark), valuable = makePart(valMat, tintUnit);
   const meshes = [torso, head, hair, legL, legR, armL, armR, eyeL, eyeR, mouth, valuable];
+  // NO FAKE PEOPLE: these legacy shared meshes remain allocated only because a
+  // few old debug helpers reference them. They never receive a visible count;
+  // every inmate the player can see is one of the normal registered rigs below.
+  for (let i = 0; i < meshes.length; i++) { meshes[i].count = 0; meshes[i].visible = false; }
 
   // Aerial tier: compact GPU point buffers, not one matrix per dot.
   const POINT_CAP = Math.min(TOTAL, Math.max(0, (CBZ.SIM_OVERVIEW_BUDGET || 12000) | 0));
@@ -113,28 +118,27 @@
   CBZ.crowdPerformance = { simTimeMs: 0, renderTimeMs: 0 };
 
   // ============================================================
-  // INTERACTABLE FACE-RIG TIER — the closest agents become REAL makeCharacter
-  // rigs (full faces + skin tones, just like the named cast) registered in
-  // CBZ.npcs, so EVERY existing system lets you hold them at gunpoint, beat, KO,
-  // KILL and LOOT them. Far agents stay instanced/points (you can't read a face
-  // at distance anyway). Looting + death persist into the analytical store, so
-  // it sticks and the same named inmate remembers you (worker PLAYER_SEEN).
+  // STANDARD ACTOR TIER — every visible agent is a REAL makeCharacter rig
+  // registered in CBZ.npcs, so EVERY existing system lets you hold them at
+  // gunpoint, beat, KO, kill and loot them. The greater society remains an
+  // invisible analytical population; it is never rendered as boxes or points.
+  // Looting + death persist into that store, so the same inmate remembers you.
   // ============================================================
   // Pool is allocated ONCE at the biggest count the live budget can ever ask
   // for (tier-4 value, or the explicit CBZ.CROWD_FACE_RIGS override); the
   // per-frame budget below rides the quality tier, so spare rigs just idle.
-  const FACE_POOL = Math.max(0, Math.min(RIG_CAP, CBZ.CROWD_FACE_RIGS == null ? 72 : CBZ.CROWD_FACE_RIGS | 0));
+  const STANDARD_ACTOR_CAP = Math.max(0, Math.min(TOTAL, RIG_CAP,
+    CBZ.CROWD_REAL_ACTORS == null ? 48 : CBZ.CROWD_REAL_ACTORS | 0));
+  const FACE_POOL = STANDARD_ACTOR_CAP;
   // LIVE face-rig budget + promotion range: defaults ride the quality tier
   // (CBZ.qScale, read at use time each frame — pause-menu perf/quality
   // slider; mid-tier ≈ the old fixed 40 rigs / 30u). Explicit
   // CBZ.CROWD_FACE_RIGS / CBZ.CROWD_FACE_DIST overrides still win.
   function faceBudget() {
-    const n = (CBZ.CROWD_FACE_RIGS != null ? CBZ.CROWD_FACE_RIGS : (CBZ.qScale ? CBZ.qScale(20, 72) : 40)) | 0;
-    return Math.max(0, Math.min(FACE_POOL, n));
+    return FACE_POOL;
   }
   function faceDist2() {
-    const d = CBZ.CROWD_FACE_DIST != null ? +CBZ.CROWD_FACE_DIST : (CBZ.qScale ? CBZ.qScale(20, 42) : 30);
-    return d * d;
+    return Infinity;
   }
   const FAR_AWAY = -1000;
   const rigOf = new Int32Array(TOTAL); rigOf.fill(-1);
@@ -185,7 +189,7 @@
     a.playerGrudge = (S.grudge[id] || 0) / 32;
     a.ratings.fighting = 28 + (S.nerve[id] || 50) * 0.45; a.ratings.toughness = 30 + (S.nerve[id] || 50) * 0.4;
     a._intimidInit = false; a.hasGun = undefined; a.intimidMode = null; a.poseHandsUp = false; a.poseAimBack = false;
-    a.aiState = "wander";
+    a.aiState = "wander"; a.foe = null;
     a.loadout = { cigs: S.cigs[id], items: S.item[id] ? [S.itemName(id)] : [] };
     if (CBZ.econ && CBZ.econ.pickOffer && !a.data.offer) a.data.offer = CBZ.econ.pickOffer("goods");
     setRigSkin(rig, S.skin[id], S.hair[id]);
@@ -205,6 +209,7 @@
       rigOf[id] = -1;
     }
     e.id = -1; a._id = -1; a.dead = true; a.intimidMode = null; a.poseHandsUp = false; a.poseAimBack = false;
+    a.aiState = "wander"; a.foe = null;
     a._chain.visible = false; a.group.position.y = FAR_AWAY; a.group.visible = true;
   }
   function freeAllRigs() { for (let i = 0; i < facePool.length; i++) if (facePool[i].id >= 0) freeRig(facePool[i]); }
@@ -270,12 +275,37 @@
         rig.group.rotation.z = CBZ.damp(rig.group.rotation.z, 0, 9, dt);
         if (Math.abs(rig.group.rotation.z) < 0.02) rig.group.rotation.z = 0;
       }
+      const activity = S.activity[id] || ACT.WALK;
+      if (!a.intimidMode && a.ko <= 0) {
+        a.aiState = activity === ACT.FIGHT ? "fight"
+          : activity === ACT.SOCIAL ? "socialize"
+            : activity === ACT.ACTION ? "activity"
+              : activity === ACT.STAND ? "idle"
+                : activity === ACT.FLEE ? "flee" : "wander";
+        const partner = S.partner[id];
+        const partnerRig = partner >= 0 && partner < TOTAL ? rigOf[partner] : -1;
+        a.foe = activity === ACT.FIGHT && partnerRig >= 0 ? facePool[partnerRig].actor : null;
+      }
       const frozen = !!a.intimidMode || a.ko > 0;     // held at gunpoint / knocked out -> crowd sim lets go
       if (!frozen) {
-        const bob = Math.abs(Math.sin(S.phase[id])) * 0.035;
+        const moveSpeed = Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]);
+        const moving = moveSpeed > 0.08;
+        const bob = moving ? Math.abs(Math.sin(S.phase[id])) * 0.035 : 0;
         rig.group.position.set(S.prevX[id] + (S.posX[id] - S.prevX[id]) * alpha, bob, S.prevZ[id] + (S.posZ[id] - S.prevZ[id]) * alpha);
         rig.group.rotation.y = S.heading[id];
-        if (CBZ.animChar) CBZ.animChar(rig, Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]), dt);
+        if (CBZ.animChar) CBZ.animChar(rig, moving ? moveSpeed : 0, dt);
+        // The promoted actor uses the same readable in-place vocabulary as
+        // its instanced counterpart. These writes happen after animChar so a
+        // held inmate cannot silently fall back into the walk-cycle pose.
+        if (rig.parts && activity === ACT.ACTION) {
+          const sw = Math.sin(S.phase[id]) * 0.32;
+          if (rig.parts.la) rig.parts.la.rotation.x = -0.78 + sw;
+          if (rig.parts.ra) rig.parts.ra.rotation.x = -0.78 - sw;
+        } else if (rig.parts && activity === ACT.FIGHT) {
+          const sw = Math.sin(S.phase[id]);
+          if (rig.parts.la) rig.parts.la.rotation.x = -0.45 - Math.max(0, -sw) * 1.05;
+          if (rig.parts.ra) rig.parts.ra.rotation.x = -0.45 - Math.max(0, sw) * 1.05;
+        }
       } else {
         if (a.intimidMode) { const w = Math.atan2(p.x - rig.group.position.x, p.z - rig.group.position.z); rig.group.rotation.y = CBZ.lerpAngle(rig.group.rotation.y, w, 1 - Math.pow(0.0006, dt)); }
         if (CBZ.animChar) CBZ.animChar(rig, 0, dt);
@@ -284,7 +314,8 @@
   }
 
   function desiredRigs() {
-    return Math.max(0, Math.min(TOTAL, RIG_CAP, CBZ.crowdRenderBudget == null ? RIG_CAP : CBZ.crowdRenderBudget | 0));
+    const budget = CBZ.crowdRenderBudget == null ? STANDARD_ACTOR_CAP : CBZ.crowdRenderBudget | 0;
+    return Math.max(0, Math.min(TOTAL, STANDARD_ACTOR_CAP, budget));
   }
   function heapSwap(a, b) {
     let v = heapId[a]; heapId[a] = heapId[b]; heapId[b] = v;
@@ -364,8 +395,65 @@
     }
   }
 
+  // A restrained close-crowd scuffle director. Rich named inmates already run
+  // the full ai.js combat brain; this gives the instanced population the same
+  // visible vocabulary without promoting hundreds of actors or running pairwise
+  // combat scans every frame. At most one new pair is selected every ~14-28s,
+  // only from the already-active local set. The loser takes a real persistent
+  // crowd knockdown (S.downT), so it is an action with a consequence, not a looped
+  // decorative animation.
+  let _scuffleCD = 8;
+  function clearActivity(id) {
+    const p = S.partner[id];
+    S.activity[id] = ACT.WALK; S.activityT[id] = 0; S.partner[id] = -1; S.strikeT[id] = 0;
+    if (p >= 0 && p < TOTAL && S.partner[p] === id) {
+      S.activity[p] = ACT.WALK; S.activityT[p] = 0; S.partner[p] = -1; S.strikeT[p] = 0;
+    }
+  }
+  function resolveScuffle(id, other) {
+    if (other < 0 || other >= TOTAL) { clearActivity(id); return; }
+    const a = (S.nerve[id] || 50) + S.idHash(id, 0xF17E) * 35;
+    const b = (S.nerve[other] || 50) + S.idHash(other, 0xF17E) * 35;
+    const loser = a >= b ? other : id;
+    S.downT[loser] = Math.max(S.downT[loser], 4.5 + S.idHash(loser, 0xD04A) * 4);
+    S.panic[loser] = 0;
+    const ri = rigOf[loser];
+    if (ri >= 0) facePool[ri].actor.ko = Math.max(facePool[ri].actor.ko || 0, S.downT[loser]);
+    clearActivity(id);
+  }
+  function startScuffle() {
+    if (!schedOn() || activeCount < 2 || _jailAct === 0 || _jailAct === 2 || _jailAct === 5) return false;
+    for (let s = 0; s < activeCount; s++) {
+      const id = activeId[(s + (frame % activeCount)) % activeCount];
+      if (S.dead[id] || S.parked[id] || S.downT[id] > 0 || S.panic[id] > 0.2 || S.activity[id] === ACT.FIGHT) continue;
+      if ((S.nerve[id] || 0) < 62 || S.idHash(id, (simTime / 16) | 0) > 0.28) continue;
+      let best = -1, bd = 6.5 * 6.5;
+      for (let t = 0; t < activeCount; t++) {
+        const other = activeId[t];
+        if (other === id || S.zone[other] !== S.zone[id] || S.dead[other] || S.parked[other] || S.downT[other] > 0 || S.activity[other] === ACT.FIGHT) continue;
+        // Rival crews are the usual spark; a very reactive loner can also start it.
+        if (S.faction[id] === S.faction[other] && (S.reactivity[id] || 0) < 210) continue;
+        const dx = S.posX[other] - S.posX[id], dz = S.posZ[other] - S.posZ[id], d2 = dx * dx + dz * dz;
+        if (d2 > 1.8 * 1.8 && d2 < bd) { bd = d2; best = other; }
+      }
+      if (best < 0) continue;
+      const dur = 4.5 + S.idHash(id + best, 0xB4A1) * 3.5;
+      S.activity[id] = S.activity[best] = ACT.FIGHT;
+      S.activityT[id] = S.activityT[best] = dur;
+      S.partner[id] = best; S.partner[best] = id;
+      S.strikeT[id] = 0.2; S.strikeT[best] = 0.55;
+      return true;
+    }
+    return false;
+  }
+
   function fixedStep(dt) {
     const player = CBZ.player, armed = CBZ.playerArmed && CBZ.playerArmed();
+    _scuffleCD -= dt;
+    if (_scuffleCD <= 0) {
+      startScuffle();
+      _scuffleCD = 14 + Math.random() * 14;
+    }
     for (let z = 0; z < flowTTL.length; z++) if (flowTTL[z] > 0) flowTTL[z] = Math.max(0, flowTTL[z] - dt);
     for (let slot = 0; slot < activeCount; slot++) {
       const id = activeId[slot], zoneId = S.zone[id], zone = S.zones[zoneId];
@@ -384,9 +472,29 @@
         S.velX[id] *= Math.pow(0.01, dt); S.velZ[id] *= Math.pow(0.01, dt);
         continue;
       }
+      let activity = S.activity[id] || ACT.WALK;
+      if (S.activityT[id] > 0) S.activityT[id] = Math.max(0, S.activityT[id] - dt);
+      if (activity === ACT.FIGHT) {
+        const other = S.partner[id];
+        if (other < 0 || other >= TOTAL || S.dead[other] || S.parked[other] || S.downT[other] > 0 || S.partner[other] !== id) {
+          clearActivity(id); activity = ACT.WALK;
+        } else if (S.activityT[id] <= 0) {
+          resolveScuffle(id, other); activity = ACT.WALK;
+        } else {
+          S.goalX[id] = S.posX[other]; S.goalZ[id] = S.posZ[other]; S.brainT[id] = 0.25;
+          const fd = Math.hypot(S.goalX[id] - S.posX[id], S.goalZ[id] - S.posZ[id]);
+          if (fd < 1.8) {
+            S.strikeT[id] -= dt;
+            if (S.strikeT[id] <= 0) { S.strikeT[id] = 0.65 + S.idHash(id, (simTime * 4) | 0) * 0.45; S.phase[id] += 0.9; }
+          }
+        }
+      }
+      if (S.panic[id] > 0.45 && activity !== ACT.FIGHT) { activity = S.activity[id] = ACT.FLEE; }
+      else if (activity === ACT.FLEE && S.panic[id] <= 0.08) { activity = S.activity[id] = ACT.WALK; }
+
       S.brainT[id] -= dt;
       let dx = S.goalX[id] - S.posX[id], dz = S.goalZ[id] - S.posZ[id];
-      if (S.brainT[id] <= 0 || dx * dx + dz * dz < 0.8) {
+      if (activity !== ACT.FIGHT && (S.brainT[id] <= 0 || dx * dx + dz * dz < 0.8)) {
         // NPC_SCHEDULES: the daily regime proposes this hour's goal — a lap
         // corner, a chow-line slot, a stand-circle spot, a wall post. A HELD
         // post (jg 2) re-arms the same point on a short brain timer, so the
@@ -396,14 +504,23 @@
         if (jg) {
           S.goalX[id] = tempPoint.x; S.goalZ[id] = tempPoint.z;
           S.brainT[id] = jg === 2 ? 2.5 + S.rnd(id) * 2 : 4 + S.rnd(id) * 4;
+          S.activity[id] = tempPoint.activity == null ? ACT.WALK : tempPoint.activity;
+          S.activityHeading[id] = tempPoint.heading || 0;
+          if (S.activity[id] !== ACT.FIGHT) S.partner[id] = -1;
         } else {
           S.randomPoint(id, S.zone[id], tempPoint);
           S.goalX[id] = tempPoint.x; S.goalZ[id] = tempPoint.z; S.brainT[id] = 2.4 + S.rnd(id) * 5.6;
+          S.activity[id] = ACT.WALK; S.partner[id] = -1;
         }
+        activity = S.activity[id];
         dx = S.goalX[id] - S.posX[id]; dz = S.goalZ[id] - S.posZ[id];
       }
       const d = Math.sqrt(dx * dx + dz * dz) || 1;
-      let wantX = dx / d * S.speed[id], wantZ = dz / d * S.speed[id];
+      const held = (activity === ACT.STAND || activity === ACT.SOCIAL || activity === ACT.ACTION) && dx * dx + dz * dz < 0.9;
+      const fightingClose = activity === ACT.FIGHT && dx * dx + dz * dz < 1.75 * 1.75;
+      let wantX = (held || fightingClose) ? 0 : dx / d * S.speed[id];
+      let wantZ = (held || fightingClose) ? 0 : dz / d * S.speed[id];
+      if (activity === ACT.FIGHT && !fightingClose) { wantX *= 1.25; wantZ *= 1.25; }
       if (flowTTL[zoneId] > 0) {
         wantX += flowX[zoneId] * flowStrength[zoneId];
         wantZ += flowZ[zoneId] * flowStrength[zoneId];
@@ -424,9 +541,13 @@
       S.posX[id] = Math.max(zone.x0, Math.min(zone.x1, S.posX[id]));
       S.posZ[id] = Math.max(zone.z0, Math.min(zone.z1, S.posZ[id]));
       S.updateDensityCell(id);
-      S.heading[id] = CBZ.lerpAngle(S.heading[id], Math.atan2(S.velX[id], S.velZ[id]), 1 - Math.pow(0.001, dt));
+      const face = held ? S.activityHeading[id]
+        : fightingClose ? Math.atan2(dx, dz)
+          : Math.atan2(S.velX[id], S.velZ[id]);
+      S.heading[id] = CBZ.lerpAngle(S.heading[id], face, 1 - Math.pow(0.001, dt));
       const moveSpeed = Math.sqrt(S.velX[id] * S.velX[id] + S.velZ[id] * S.velZ[id]);
-      S.phase[id] += CBZ.gaitPhaseDelta ? CBZ.gaitPhaseDelta(moveSpeed, dt) : dt * (2.2 + moveSpeed * 1.4);
+      if (activity === ACT.FIGHT || activity === ACT.ACTION) S.phase[id] += dt * (activity === ACT.FIGHT ? 8.5 : 3.2);
+      else if (moveSpeed > 0.08) S.phase[id] += CBZ.gaitPhaseDelta ? CBZ.gaitPhaseDelta(moveSpeed, dt) : dt * (2.2 + moveSpeed * 1.4);
       S.avoidX[id] *= Math.pow(0.025, dt); S.avoidZ[id] *= Math.pow(0.025, dt); S.panic[id] = Math.max(0, S.panic[id] - dt * 0.22);
     }
     separate();
@@ -437,12 +558,28 @@
     worldMatrix.multiplyMatrices(rootDummy.matrix, partDummy.matrix); mesh.setMatrixAt(slot, worldMatrix);
   }
   function renderRigs(alpha) {
+    // The historical part-instance path is intentionally hard-disabled.  Real
+    // character rigs are positioned and animated by syncFaceRigs below.
+    for (let i = 0; i < meshes.length; i++) { meshes[i].count = 0; meshes[i].visible = false; }
+    CBZ.crowdPerformance.renderTimeMs = 0;
+    return;
+    /* istanbul ignore next -- retained only for old debug-state compatibility */
     const t0 = performance.now();
     for (let slot = 0; slot < activeCount; slot++) {
       const id = activeId[slot], down = S.downT[id] > 0;
+      const activity = S.activity[id] || ACT.WALK;
       const moving = Math.hypot(S.velX[id], S.velZ[id]) > 0.2;
-      const bob = down || !moving ? 0 : Math.abs(Math.sin(S.phase[id])) * 0.035;
+      const doing = activity === ACT.ACTION, fighting = activity === ACT.FIGHT;
+      const bob = down ? 0 : doing ? -Math.abs(Math.sin(S.phase[id])) * 0.11
+        : (!moving ? 0 : Math.abs(Math.sin(S.phase[id])) * 0.035);
       const swing = down || !moving ? 0 : Math.sin(S.phase[id]) * 0.42;
+      // In-place activities have a readable silhouette: ACTION alternates a
+      // squat/stretch; FIGHT throws short opposing punches. Stationary social
+      // and stand states keep relaxed arms instead of the old walk loop.
+      const armLX = down ? 0 : fighting ? (-0.45 - Math.max(0, -Math.sin(S.phase[id])) * 1.0)
+        : doing ? (-0.75 + Math.sin(S.phase[id]) * 0.38) : -swing * 0.82;
+      const armRX = down ? 0 : fighting ? (-0.45 - Math.max(0, Math.sin(S.phase[id])) * 1.0)
+        : doing ? (-0.75 - Math.sin(S.phase[id]) * 0.38) : swing * 0.82;
       rootDummy.position.set(S.prevX[id] + (S.posX[id] - S.prevX[id]) * alpha, bob, S.prevZ[id] + (S.posZ[id] - S.prevZ[id]) * alpha);
       rootDummy.rotation.set(0, S.heading[id], down ? Math.PI / 2 : 0); rootDummy.scale.set(HUMAN_S, HUMAN_S, HUMAN_S); rootDummy.updateMatrix();
       // promoted to a real face-rig? hide this instanced copy (the rig is drawn
@@ -457,13 +594,13 @@
       if (S.fem[id]) {
         put(torso, slot, 0, 1.42, 0, 0.82 * 0.85, 0.88, 0.44 * 0.88, 0); put(head, slot, 0, 2.18, 0, 0.54 * 0.92, 0.54 * 0.92, 0.54 * 0.92, 0);
         put(hair, slot, 0, 2.15, 0, 0.58, 0.62, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, swing);
-        put(legR, slot, 0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, -swing); put(armL, slot, -0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, -swing * 0.82);
-        put(armR, slot, 0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, swing * 0.82);
+        put(legR, slot, 0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, -swing); put(armL, slot, -0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, armLX);
+        put(armR, slot, 0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, armRX);
       } else {
         put(torso, slot, 0, 1.42, 0, 0.82, 0.88, 0.44, 0); put(head, slot, 0, 2.18, 0, 0.54, 0.54, 0.54, 0);
         put(hair, slot, 0, 2.50, 0, 0.58, 0.14, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28, 0.92, 0.28, swing);
-        put(legR, slot, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -swing); put(armL, slot, -0.55, 1.40, 0, 0.24, 0.78, 0.24, -swing * 0.82);
-        put(armR, slot, 0.55, 1.40, 0, 0.24, 0.78, 0.24, swing * 0.82);
+        put(legR, slot, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -swing); put(armL, slot, -0.55, 1.40, 0, 0.24, 0.78, 0.24, armLX);
+        put(armR, slot, 0.55, 1.40, 0, 0.24, 0.78, 0.24, armRX);
       }
       // FACE — two eyes + a mouth on the front of the head (z+ = forward)
       put(eyeL, slot, -0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);
@@ -545,19 +682,24 @@
   }
   function refreshRenderMode(force) {
     const overview = !!(CBZ.simView && CBZ.simView.active);
-    const isA = CBZ.AB_TEST === "A";
     const density = densityMode();
     if (force || overview !== lastOverview || density !== lastDensity || CBZ.lastABTest !== CBZ.AB_TEST) {
-      overviewPoints.visible = overview && !density && !isA;
-      overviewBoxes.visible = overview && !density && isA;
-      densityPoints.visible = overview && density;
-      for (let i = 0; i < meshes.length; i++) meshes[i].visible = !overview;
-      if (overview) renderPoints(true);
+      overviewPoints.visible = false;
+      overviewBoxes.visible = false;
+      densityPoints.visible = false;
+      for (let i = 0; i < meshes.length; i++) { meshes[i].visible = false; meshes[i].count = 0; }
       lastOverview = overview;
       lastDensity = density;
       CBZ.lastABTest = CBZ.AB_TEST;
     }
-    CBZ.crowdStats = { total: TOTAL, rigs: activeCount, rigCapacity: RIG_CAP, visible: overview ? (density ? densityCount : POINT_CAP) : activeCount, active: activeCount, drawCalls: overview ? 1 : 7, mode: overview ? (density ? "density" : "overview") : "close", shared: S.shared, abMode: CBZ.AB_TEST };
+    let realActors = 0;
+    for (let i = 0; i < facePool.length; i++) if (facePool[i].id >= 0 && !facePool[i].actor.dead) realActors++;
+    CBZ.crowdStats = {
+      total: TOTAL, rigs: realActors, rigCapacity: STANDARD_ACTOR_CAP,
+      visible: realActors, active: activeCount, drawCalls: realActors,
+      mode: "standard-actors", proxyVisible: false, realActors: realActors,
+      shared: S.shared, abMode: CBZ.AB_TEST,
+    };
   }
   CBZ.refreshCrowdBudget = function () {
     if (!societyOverview) chooseNearby(true);
@@ -634,7 +776,9 @@
   // in jail doing nothing… at night they should almost all be in bed").
   // Simple math only: the hour comes off the canonical sun (S.jailHour), the
   // regime is a 6-slot table (S.jailAct), and every agent's part in it is a
-  // pure hash of its id — no pathfinding, no new arrays beyond S.parked.
+  // pure hash of its id — no pathfinding. The compact typed activity fields
+  // in ambientstate.js let a post mean stand/talk/work instead of "arrive,
+  // immediately pick another random destination".
   //   07-09 yard laps   09-12 stand-circles   12-13 chow line
   //   13-18 mixed (circles / wall posts / wander)   18-21 wind-down
   //   21-07 LOCKDOWN — ~85% march to the cells (parked, staggered), the
@@ -660,6 +804,8 @@
   function jailGoal(id, out) {
     if (!schedOn()) return 0;
     const act = _jailAct, zn = S.zones[S.zone[id]];
+    out.activity = ACT.WALK;
+    out.heading = S.heading[id];
     if (act === 0) {               // morning laps: corner-to-corner circuits
       const k = ((S.idHash(id, 0x2C0) * 4) | 0) + ((simTime / 30) | 0) & 3;
       out.x = (k === 1 || k === 2) ? zn.x1 - 3 : zn.x0 + 3;
@@ -673,22 +819,39 @@
       const k = (id >> 2) % 26;
       out.x = -18.1 + (k >= 13 ? 0.9 : 0);
       out.z = 6.8 + (k % 13) * 1.6;
+      out.activity = ACT.ACTION;             // eat / lean over a tray in place
+      out.heading = Math.PI / 2;
       return 2;
     }
-    if (act === 1 || act === 3) {
+    if (act === 1 || act === 3 || act === 4) {
       const r = S.idHash(id, 0x2C4);
-      if (r < 0.45) {              // stand-circles: knots of small talk
+      const socialCut = act === 4 ? 0.35 : 0.45;
+      const postCut = act === 4 ? 0.64 : 0.70;
+      const actionCut = act === 4 ? 0.82 : 0.84;
+      if (r < socialCut) {          // stand-circles: knots of small talk
         const grp = (id % 10) + S.zone[id] * 16;
         const cx = zn.x0 + 4 + S.idHash(grp, 0x2C1) * (zn.x1 - zn.x0 - 8);
         const cz = zn.z0 + 4 + S.idHash(grp, 0x2C2) * (zn.z1 - zn.z0 - 8);
         const a = S.idHash(id, 0x2C3) * Math.PI * 2;
         out.x = cx + Math.cos(a) * 1.6; out.z = cz + Math.sin(a) * 1.6;
+        out.activity = ACT.SOCIAL;
+        out.heading = Math.atan2(cx - out.x, cz - out.z); // face the conversation
         return 2;
       }
-      if (r < 0.7) {               // posted up along the west wall
+      if (r < postCut) {            // posted up along the west wall
         const rows = Math.max(4, ((zn.z1 - zn.z0 - 4) / 1.5) | 0);
         out.x = zn.x0 + 0.9;
         out.z = zn.z0 + 2 + (id % rows) * 1.5;
+        out.activity = ACT.STAND;
+        out.heading = Math.PI / 2;  // look into the yard, not through the wall
+        return 2;
+      }
+      if (r < actionCut) {          // pushups / stretching / tending a work spot
+        const col = id % 5, row = ((id / 5) | 0) % 4;
+        out.x = zn.x0 + 5 + col * Math.max(2.2, (zn.x1 - zn.x0 - 10) / 5);
+        out.z = zn.z0 + 5 + row * Math.max(2.4, (zn.z1 - zn.z0 - 10) / 4);
+        out.activity = ACT.ACTION;
+        out.heading = (id & 1) ? 0 : Math.PI;
         return 2;
       }
       return 0;                    // the rest wander — yard texture
@@ -720,6 +883,33 @@
     }
   }
 
+  // Browser-test/read-only instrumentation for the exact failure this regime
+  // fixes. Consumers can verify that the active jail contains held posts,
+  // conversations, activities and bounded fights instead of inferring life
+  // from a screenshot or merely counting bodies.
+  CBZ.jailCrowdActivityStats = function () {
+    const out = { walk: 0, stand: 0, socialize: 0, action: 0, fight: 0, flee: 0, parked: 0, down: 0, active: activeCount, regime: _jailAct };
+    for (let id = 0; id < TOTAL; id++) {
+      if (S.dead[id]) continue;
+      if (S.parked[id]) { out.parked++; continue; }
+      if (S.downT[id] > 0) out.down++;
+      const a = S.activity[id] || ACT.WALK;
+      if (a === ACT.STAND) out.stand++;
+      else if (a === ACT.SOCIAL) out.socialize++;
+      else if (a === ACT.ACTION) out.action++;
+      else if (a === ACT.FIGHT) out.fight++;
+      else if (a === ACT.FLEE) out.flee++;
+      else out.walk++;
+    }
+    return out;
+  };
+  CBZ.jailCrowdStartScuffle = function () { return startScuffle(); };
+  CBZ.jailCrowdRenderMode = function () {
+    let realActors = 0;
+    for (let i = 0; i < facePool.length; i++) if (facePool[i].id >= 0 && !facePool[i].actor.dead) realActors++;
+    return { mode: "standard-actors", active: activeCount, realActors: realActors, proxyVisible: false };
+  };
+
   function step(dt) {
     const escape = CBZ.game.mode === "escape"; root.visible = escape;
     if (!escape) { if (facePool.length) freeAllRigs(); return; }
@@ -744,15 +934,12 @@
       const every = societyOverview ? (densityMode() ? 3.2 : 1.2) : 6;
       if (societyAcc >= every) { societyAcc %= every; syncSociety(); }
     }
-    const overview = !!(CBZ.simView && CBZ.simView.active);
     pointsAcc += dt; renderAcc += dt;
-    if (overview) { renderPoints(false); if (facePool.length) freeAllRigs(); }
-    else {
-      const every = CBZ.qualityLevel != null && CBZ.qualityLevel < 2 ? 1 / 30 : 1 / 60;
-      if (renderAcc >= every) { renderAcc %= every; renderRigs(fixedAcc / FIXED); }
-      // real face-rigs follow the sim every frame (smooth) and own gunpoint/KO/death
-      syncFaceRigs(fixedAcc / FIXED, dt);
-    }
+    const every = CBZ.qualityLevel != null && CBZ.qualityLevel < 2 ? 1 / 30 : 1 / 60;
+    if (renderAcc >= every) { renderAcc %= every; renderRigs(fixedAcc / FIXED); }
+    // Standard actors follow the simulation in every camera mode; overview no
+    // longer swaps them for point-cloud or box people.
+    syncFaceRigs(fixedAcc / FIXED, dt);
     frame++; refreshRenderMode(false);
   }
 

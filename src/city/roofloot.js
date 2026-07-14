@@ -90,7 +90,7 @@
   // everything already standing on a reachable roof that a stash (or a drop
   // spot) must keep clear of: helipad, lift headhouse + arrival pad (big radius
   // so the lift's [E] and the stash's [E] can never both be in reach), the
-  // fire-escape bridge landing, and elevators.js's AC/vent prop spots.
+  // and the fire-escape bridge landing.
   function avoidList(lot) {
     const b = lot.building, ox = b.ox, oz = b.oz, S = slabInfo(b);
     const a = [];
@@ -100,9 +100,6 @@
       a.push({ x: ox + S.ixMax - 1.7, z: oz + S.izMin + 1.7, r: 2.8 });             // headhouse
     }
     if (b.fireEscape) a.push({ x: ox + b.w / 2 - 1.3, z: b.fireEscape.z, r: 3.0 }); // bridge landing
-    const cx = b.roofCx != null ? b.roofCx : ox, cz = b.roofCz != null ? b.roofCz : oz;
-    a.push({ x: cx - S.slabW * 0.27, z: cz + S.slabD * 0.27, r: 1.7 });             // AC unit spot
-    a.push({ x: cx + S.slabW * 0.27, z: cz + S.slabD * 0.27, r: 1.7 });             // vent spot
     return a;
   }
   function clear(avoid, x, z, r) {

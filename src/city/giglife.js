@@ -29,7 +29,7 @@
         it alone and WE steer it toward car._gigTarget each frame (mirrors
         vehicles.js advanceRoadRage: lerp heading, throttle, clamp to the
         arena). It carries a visible prop: a package box (courier) or a
-        seated passenger silhouette (cab). Concurrency is hard-capped so the
+        seated live passenger actor (cab). Concurrency is hard-capped so the
         streets never fill with gig cars (perf + it stays an EVENT you read).
 
      3) HELPERS FOR gigfleet.js — cityGigClaimPickup / cityGigNearestDrop /
@@ -227,17 +227,14 @@
 
   // ============================================================
   //  VISIBLE PROPS — the WHY you can SEE. A courier's package rides in the
-  //  car (and is shown only when on-screen via the car's own visibility);
-  //  a cab's fare is a seated silhouette beside the driver. Both are tiny
-  //  meshes parented to the car group (so they move + cull with it for free)
-  //  and disposed when the run ends. Shared geometry/material = draw-call cheap.
+  //  car (and is shown only when on-screen via the car's own visibility).
+  //  A cab fare is a standard city actor attached to the rear seat through
+  //  npcLife, not a capsule pretending to be a person. The driver uses the
+  //  same attachment contract, so the real driver is visible at the wheel.
   // ============================================================
-  let _pkgGeo = null, _pkgMat = null, _faGeo = null, _faMat = null, _faHeadGeo = null;
+  let _pkgGeo = null, _pkgMat = null;
   function pkgGeo() { return _pkgGeo || (_pkgGeo = new THREE.BoxGeometry(0.5, 0.45, 0.4)); }
   function pkgMat() { return _pkgMat || (_pkgMat = new THREE.MeshLambertMaterial({ color: 0xb98a4b })); }
-  function faGeo() { return _faGeo || (_faGeo = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.22, 0.5, 3, 6) : new THREE.CylinderGeometry(0.24, 0.24, 0.9, 6)); }
-  function faMat() { return _faMat || (_faMat = new THREE.MeshLambertMaterial({ color: 0x33384a })); }
-  function faHeadGeo() { return _faHeadGeo || (_faHeadGeo = new THREE.SphereGeometry(0.17, 8, 6)); }
 
   function addPackageProp(car) {
     if (car._gigProp || !car.group) return;
@@ -247,22 +244,56 @@
     car.group.add(m);
     car._gigProp = m;
   }
-  function addFareProp(car) {
-    if (car._gigProp || !car.group) return;
-    const grp = new THREE.Group();
-    const body = new THREE.Mesh(faGeo(), faMat());
-    body.position.y = 0.55;
-    grp.add(body);
-    const head = new THREE.Mesh(faHeadGeo(), faMat());
-    head.position.y = 1.05;
-    grp.add(head);
-    // SEAT-SNAP: passenger sits in the right-rear seat, slightly reclined
-    grp.position.set(0.42, 0.55, -0.35);
-    grp.rotation.x = 0.18;
-    car.group.add(grp);
-    car._gigProp = grp;
+  function safeFareDraft(p, driver) {
+    if (!p || p === driver || !CBZ.npcLife || !CBZ.npcLife.draftableCity(p)) return false;
+    const P = CBZ.player; if (!P || !P.pos) return true;
+    const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d2 = dx * dx + dz * dz;
+    if (d2 >= 90 * 90) return true;
+    if (d2 < 40 * 40) return false;
+    const d = Math.sqrt(d2) || 1, yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+    return (dx / d) * -Math.sin(yaw) + (dz / d) * -Math.cos(yaw) < -0.15;
+  }
+  function addFareActor(car, driver) {
+    if (!car || car._gigFare || !car.group || !CBZ.npcLife) return null;
+    const anchor = { x: 0.42, y: 0.55, z: -0.35, pitch: 0.18, yaw: 0, pose: "sit", state: "sit" };
+    const placement = { parent: car.group, anchor: anchor };
+    let fare = CBZ.npcLife.claimCity("cabPassenger", placement, function (p) { return safeFareDraft(p, driver); });
+    let spawned = false;
+    if (!fare) {
+      fare = CBZ.npcLife.spawnCity("cabPassenger", Object.assign({ rng: rng }, placement));
+      spawned = !!fare;
+    }
+    if (!fare) return null;
+    fare.inCar = car; fare.controlled = true; fare._gigPassenger = true;
+    fare._gigFareSpawned = spawned;
+    car._gigFare = fare;
+    return fare;
+  }
+  function releaseFareActor(car) {
+    const fare = car && car._gigFare;
+    if (!fare) return;
+    const A = arena(), root = (A && A.root) || CBZ.scene;
+    const spawned = !!fare._gigFareSpawned;
+    fare._gigFareSpawned = false;
+    if (CBZ.npcLife) {
+      if (spawned && CBZ.npcLife.destroyCity) {
+        CBZ.npcLife.destroyCity(fare);
+        car._gigFare = null;
+        return;
+      }
+      CBZ.npcLife.release(fare, { parent: root, state: "walk" });
+    }
+    fare.inCar = null; fare.controlled = false; fare._gigPassenger = false;
+    if (!fare.dead && fare.group && car.pos) {
+      fare.group.position.set(car.pos.x - 1.7, 0, car.pos.z);
+      fare.pos = fare.group.position;
+      if (fare.target && fare.target.copy) fare.target.copy(fare.pos);
+      fare.state = "walk"; fare.pause = Math.max(fare.pause || 0, 0.5);
+    }
+    car._gigFare = null;
   }
   function clearProp(car) {
+    releaseFareActor(car);
     if (car && car._gigProp) {
       if (car._gigProp.parent) car._gigProp.parent.remove(car._gigProp);
       car._gigProp = null;
@@ -272,7 +303,7 @@
   // ============================================================
   //  SPAWN / RETURN a gig car. cityMakeCar gives a real, detailed car; we
   //  set road:null + npcDriver=ped (the carjack pattern) so vehicles.js'
-  //  ambient AI leaves it for US to steer. The driver ped rides hidden.
+  //  ambient AI leaves it for US to steer. The real driver rides visibly.
   // ============================================================
   CBZ.cityGigSpawnCar = function (ped, dropAnchor, opts) {
     if (!ped || ped.dead || !inCity() || noSim()) return null;
@@ -294,11 +325,14 @@
     car._gig = true;
     car._gigKind = (ped.job === "cab driver") ? "cab" : "courier";
     car._gigCompany = opts.company || null;     // gigfleet.js tags employer rides
-    // ride the ped: hidden, controlled (so aigoals/peds won't fight us for it)
+    // Ride the real driver: controlled so aigoals/peds won't fight us for it,
+    // but visibly attached at the wheel instead of hidden while the car moves.
     ped.inCar = car; ped.controlled = true;
-    if (ped.group) ped.group.visible = false;
+    if (CBZ.npcLife && CBZ.npcLife.attach(ped, car.group, { x: -0.42, y: 0.55, z: 0.38, yaw: 0, pose: "sit", state: "sit" })) {
+      if (ped.group) ped.group.visible = true;
+    } else if (ped.group) ped.group.visible = false;
     // the visible cargo / fare
-    if (car._gigKind === "cab") addFareProp(car); else addPackageProp(car);
+    if (car._gigKind === "cab") addFareActor(car, ped); else addPackageProp(car);
     _gigCars.push(car);
     return car;
   };
@@ -315,6 +349,7 @@
     car.npcDriver = null; car._gig = false; car._gigTarget = null;
     const i = _gigCars.indexOf(car); if (i >= 0) _gigCars.splice(i, 1);
     if (ped) {
+      if (ped._npcAttached && CBZ.npcLife) CBZ.npcLife.detach(ped, { parent: (arena() && arena().root) || CBZ.scene, state: "walk" });
       ped.inCar = null; ped.controlled = false;
       if (ped.group) ped.group.visible = true;
       ped.pos.set(car.pos.x + 1.7, 0, car.pos.z);
@@ -350,8 +385,8 @@
       // self-heal: a gig car that died / lost its driver / got picked up by the
       // player leaves the pool (drop the prop so it doesn't ghost).
       if (!car || car.dead || car.player || !car.group || !car.group.parent) {
-        if (car) clearProp(car);
-        _gigCars.splice(i, 1);
+        if (car && !car.player) CBZ.cityGigReturnCar(car, false);
+        else { if (car) clearProp(car); _gigCars.splice(i, 1); }
         continue;
       }
       const ped = car.npcDriver;
@@ -377,7 +412,7 @@
       if (A.clampToCity) A.clampToCity(car.pos, 1.4);
       car.group.position.set(car.pos.x, 0, car.pos.z);
       car.group.rotation.y = car.heading;
-      if (ped.pos) ped.pos.set(car.pos.x, 0, car.pos.z);    // body rides with the car
+      if (ped.pos && !ped._npcAttached) ped.pos.set(car.pos.x, 0, car.pos.z); // fallback hidden driver
       // distance cull (match vehicles.js' 150m group-visibility budget)
       if (cam) {
         const cdx = car.pos.x - cam.position.x, cdz = car.pos.z - cam.position.z;

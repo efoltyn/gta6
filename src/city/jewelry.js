@@ -371,7 +371,7 @@
   function setTaken(p, on) {
     p.taken = !!on;
     if (p.model) p.model.visible = !on;
-    if (p.tag) p.tag.visible = !on;
+    if (p.tag) p.tag.visible = false;
   }
   function piecesLeft(cs) { let n = 0; for (const p of cs.pieces) if (!p.taken) n++; return n; }
   function caseEmptied(cs) { cs.restockT = RESTOCK * (0.9 + Math.random() * 0.3); }

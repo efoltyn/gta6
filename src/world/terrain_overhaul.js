@@ -12,11 +12,11 @@
 
      • folds ALL mountain mass into the one continuous heightfield —
        a closed-from-every-angle solid surface. No sheets, ever.
-     • raises the ridge amplitude (150→320) and pulls the crest mask
-       IN (crests now start ~380u past the flat edge) so a real range
-       stands inside the visibility envelope.
-     • pulls the two signature giants in from r~2050/2380 (clipped!)
-       to r~1950/2150 as gaussian×ridged-noise bumps IN the field.
+     • keeps relief in two open northern ranges with a broad pass between
+       them. Relief no longer follows all four sides of the playable AABB —
+       that closed perimeter read as a hollow mountain bowl from aircraft.
+     • keeps the two signature giants as gaussian×ridged-noise bumps in those
+       northern ranges, so each mountain is solid without enclosing the map.
      • fogs terrain on its OWN scale: a tiny onBeforeCompile multiplies
        the r128 `fogDepth` varying by uFogScale (0.33), so mountains
        fog at ~3× distance — solid, gently receding — while still
@@ -95,12 +95,30 @@
   }
 
   // ---- the two signature giants: gaussian × crag bumps IN the field -----
-  const CX = (FLAT.minX + FLAT.maxX) / 2;   // 310
-  const CZ = (FLAT.minZ + FLAT.maxZ) / 2;   // -515
+  // Their layout follows the live playable bounds. Countries are registered
+  // after this file loads, so freezing these coordinates at parse time put
+  // mountains through later settlements and made the old flat rectangle read
+  // like a walled bowl.
+  let CX = (FLAT.minX + FLAT.maxX) / 2;
+  let CZ = (FLAT.minZ + FLAT.maxZ) / 2;
+  let RANGE_WEST_X = CX - 850;
+  let RANGE_EAST_X = CX + 1050;
   const HEROES = [
-    { name: "Mount Colossus", x: CX + Math.cos(-Math.PI / 2) * 1950, z: CZ + Math.sin(-Math.PI / 2) * 1950, amp: 650, sig: 220, ns: 0.006 },
-    { name: "Mount Everest", x: CX + Math.cos(-Math.PI / 2 + 0.62) * 2150, z: CZ + Math.sin(-Math.PI / 2 + 0.62) * 2150, amp: 900, sig: 330, ns: 0.0048 },
+    { name: "Mount Colossus", x: RANGE_WEST_X, z: FLAT.minZ - 720, amp: 650, sig: 260, ns: 0.006 },
+    { name: "Mount Everest", x: RANGE_EAST_X, z: FLAT.minZ - 820, amp: 900, sig: 350, ns: 0.0048 },
   ];
+  function layoutRanges() {
+    CX = (FLAT.minX + FLAT.maxX) / 2;
+    CZ = (FLAT.minZ + FLAT.maxZ) / 2;
+    const width = FLAT.maxX - FLAT.minX;
+    RANGE_WEST_X = CX - Math.min(980, width * 0.2);
+    RANGE_EAST_X = CX + Math.min(1180, width * 0.24);
+    HEROES[0].x = RANGE_WEST_X; HEROES[0].z = FLAT.minZ - 720;
+    HEROES[1].x = RANGE_EAST_X; HEROES[1].z = FLAT.minZ - 820;
+    CBZ.MOUNT_COLOSSUS = { name: HEROES[0].name, x: HEROES[0].x, z: HEROES[0].z, height: HEROES[0].amp };
+    CBZ.MOUNT_EVEREST = { name: HEROES[1].name, x: HEROES[1].x, z: HEROES[1].z, height: HEROES[1].amp };
+  }
+  layoutRanges();
   function heroBump(x, z, P) {
     const dx = x - P.x, dz = z - P.z;
     const g = Math.exp(-(dx * dx + dz * dz) / (2 * P.sig * P.sig));
@@ -108,23 +126,45 @@
     const crag = 0.55 + 0.45 * rfbm(x * P.ns + SO1, z * P.ns - SO2);
     return P.amp * g * crag;
   }
-  CBZ.MOUNT_COLOSSUS = { name: "Mount Colossus", x: HEROES[0].x, z: HEROES[0].z, height: HEROES[0].amp };
-  CBZ.MOUNT_EVEREST = { name: "Mount Everest", x: HEROES[1].x, z: HEROES[1].z, height: HEROES[1].amp };
+  function bell(x, centre, sigma) {
+    const q = (x - centre) / sigma;
+    return Math.exp(-0.5 * q * q);
+  }
+
+  // Only two broken northern ranges get relief. The wide centre pass and the
+  // completely open west/east/south sides are intentional: from the air this
+  // reads as geography, not as the inside of a rectangular mountain shell.
+  function rangeMask(x, z) {
+    const north = FLAT.minZ - z;
+    if (north <= MARGIN + 20) return 0;
+    const depth = smooth(MARGIN + 20, MARGIN + RAMP * 0.9, north) *
+      (1 - smooth(1250, 1850, north));
+    if (depth <= 0) return 0;
+    const lobes = Math.max(
+      bell(x, RANGE_WEST_X, 500),
+      bell(x, RANGE_EAST_X, 430) * 0.96
+    );
+    return depth * smooth(0.16, 0.58, lobes);
+  }
+  CBZ.terrainRangeMask = rangeMask;
 
   // ---- THE ORACLE — exact flat contract preserved ------------------------
   function solidHeight(x, z) {
     const d = distOutsideFlat(x, z);
     if (d <= MARGIN) return 0;                       // dead flat — physics-safe
-    const fo = smooth(MARGIN, MARGIN + RAMP, d);
-    const outer = 1 - smooth(1500, 2000, d);         // field sinks to sea, no open rim
-    if (outer <= 0) return 0;                        // physics-flat far out (visual sinks it)
-    const hills = fbm(x, z);
-    const mtn = ridged(x, z) * smooth(MARGIN + 80, MARGIN + RAMP, d);
+    const range = rangeMask(x, z);
     let hero = 0;
     for (let i = 0; i < HEROES.length; i++) hero += heroBump(x, z, HEROES[i]);
-    return (hills + mtn + hero) * fo * outer;
+    if (range <= 0 && hero <= 0.01) return 0;         // open sea on three sides + the central pass
+    const north = Math.max(0, FLAT.minZ - z);
+    const outer = 1 - smooth(1450, 1950, north);     // sink the far back of each range into sea
+    if (outer <= 0) return 0;                        // physics-flat far out (visual sinks it)
+    const hills = Math.max(0, 18 + fbm(x, z) * 0.72) * range;
+    const mtn = ridged(x, z) * range;
+    return Math.max(0, hills + mtn + hero) * outer;
   }
   CBZ.terrainHeight = function (x, z) {
+    if (CBZ.PROC_TERRAIN === false) return 0;
     if (CFG.TERRAIN_SOLID === false) return orig.height(x, z);
     return solidHeight(x, z);
   };
@@ -153,13 +193,16 @@
   }
 
   // ---- HEIGHT-BAND COLOUR (retuned for the taller solid range) ----------
-  const COL_DEEP = new THREE.Color(0x1d4a68);
-  const COL_SAND = new THREE.Color(0xc8b385);
-  const COL_GRASS = new THREE.Color(0x4f7d3f);
-  const COL_GRASS2 = new THREE.Color(0x38622f);
-  const COL_ROCK = new THREE.Color(0x6f6a63);
-  const COL_ROCKH = new THREE.Color(0x8a8378);
-  const COL_SNOW = new THREE.Color(0xeef3f8);
+  // Grounded, lower-saturation rock palette. The former bright green/white
+  // height bands looked like painted plastic from the air and the pale peaks
+  // disappeared into the sky. These values keep readable geology through fog.
+  const COL_DEEP = new THREE.Color(0x183f59);
+  const COL_SAND = new THREE.Color(0x92795d);
+  const COL_GRASS = new THREE.Color(0x4d6242);
+  const COL_GRASS2 = new THREE.Color(0x354637);
+  const COL_ROCK = new THREE.Color(0x4b4845);
+  const COL_ROCKH = new THREE.Color(0x756f67);
+  const COL_SNOW = new THREE.Color(0xd9e0e5);
   function bandColor(y, slope, wob, out) {
     // wob (0..1, low-freq hash) raggeds the band lines so nothing rules a
     // straight contour across the range.
@@ -179,12 +222,16 @@
     }
     out.copy(COL_SNOW);
     if (slope > 0.62) out.lerp(COL_ROCKH, smooth(0.62, 0.95, slope));
+    // Break the last synthetic horizontal band with subtle stone variation.
+    out.multiplyScalar(0.90 + wob * 0.12);
   }
 
   // ---- the fogDepth scale — terrain reads solid past the city fog wall.
   //      r128: fog_vertex sets `fogDepth = -mvPosition.z` (varying). Shared
   //      helper so the snow biome's massif pads can use the same trick.
-  const FOG_SCALE = 0.33;
+  // Mountains still track weather/day colour, but no longer dissolve into a
+  // semi-transparent-looking silhouette at normal aircraft distances.
+  const FOG_SCALE = 0.16;
   CBZ.terrainFogScale = function (mat, scale) {
     mat.onBeforeCompile = function (sh) {
       sh.uniforms.uFogScale = { value: scale == null ? FOG_SCALE : scale };
@@ -203,10 +250,17 @@
     if (_built) return _built;
     const root = parent || CBZ.scene;
     if (!root) return null;
+    if (CBZ.syncTerrainFlat) CBZ.syncTerrainFlat(CBZ.city && CBZ.city.arena);
+    layoutRanges();
 
-    const SPAN = 6000, TILES = 4, TSPAN = SPAN / TILES, TSEG = 76;
+    // Cover the live world plus enough northern sea for both open ranges. The
+    // old fixed 6000u field predated the outer countries and clipped their side.
+    const liveSpan = Math.max(FLAT.maxX - FLAT.minX, FLAT.maxZ - FLAT.minZ) + 1500;
+    const SPAN = Math.max(6000, Math.ceil(liveSpan / 500) * 500);
+    const TILES = 4, TSPAN = SPAN / TILES, TSEG = 76;
     const terrMat = CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
       color: 0xffffff, vertexColors: true, flatShading: true, fog: true,
+      transparent: false, opacity: 1, depthTest: true, depthWrite: true,
     }));
     const _c = new THREE.Color();
     const terrainTiles = [];
@@ -254,12 +308,11 @@
       const scat = CBZ.scatterRocks(root, {
         count: 90,
         pick: function (rng) {
-          // rejection-sample the mountain shoulder band around the flat rect
+          // rejection-sample only the two northern mountain shoulders
           for (let tries = 0; tries < 12; tries++) {
-            const x = FLAT.minX - 1300 + rng() * ((FLAT.maxX - FLAT.minX) + 2600);
-            const z = FLAT.minZ - 1300 + rng() * ((FLAT.maxZ - FLAT.minZ) + 2600);
-            const d = distOutsideFlat(x, z);
-            if (d < 260 || d > 1200) continue;
+            const x = FLAT.minX - 180 + rng() * ((FLAT.maxX - FLAT.minX) + 360);
+            const z = FLAT.minZ - 240 - rng() * 1080;
+            if (rangeMask(x, z) < 0.08) continue;
             if (CBZ.terrainHeight(x, z) < 25) continue;
             return { x, z };
           }

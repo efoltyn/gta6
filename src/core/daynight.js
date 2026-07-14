@@ -64,7 +64,7 @@
   // so we only poke renderer.shadowMap.needsUpdate when the light truly moved
   // by a full texel (a sub-texel wobble is invisible; flagging it anyway would
   // just fight core/renderer.js's own tier-based update cadence for nothing).
-  let _snapX = 0, _snapZ = 0;
+  let _snapX = 0, _snapZ = 0, _snapWidth = 0;
   const sunTarget = CBZ.sunTarget;
 
   CBZ.onAlways(2, function (dt) {
@@ -90,14 +90,20 @@
       if (texel > 0) { ox = Math.floor(ox / texel) * texel; oz = Math.floor(oz / texel) * texel; }
       sun.position.x += ox; sun.position.z += oz;
       sunTarget.position.x += ox; sunTarget.position.z += oz;
-      // the light only visibly MOVED (by a full texel) if this offset changed
-      // since last frame — that's the one condition that actually needs a
-      // fresh shadow pass; renderer.js's stride throttle still gates the rest.
-      if (CBZ.renderer && (Math.abs(ox - _snapX) >= (texel || 0.001) || Math.abs(oz - _snapZ) >= (texel || 0.001))) {
-        if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(false);
+      // Normal movement marks the map dirty and lets renderer.js coalesce it.
+      // A teleport or a mode-owned shadow-frustum resize must bypass that cap:
+      // otherwise the old shadow projection can remain visible for up to one
+      // cadence interval after an abrupt scene change.
+      const dx = Math.abs(ox - _snapX), dz = Math.abs(oz - _snapZ);
+      const width = info && info.width > 0 ? info.width : 140;
+      const widthChanged = _snapWidth > 0 && Math.abs(width - _snapWidth) > 0.001;
+      const moved = dx >= (texel || 0.001) || dz >= (texel || 0.001);
+      const jumped = Math.max(dx, dz) > Math.max(8, width * 0.1);
+      if (CBZ.renderer && (moved || widthChanged)) {
+        if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(_snapWidth === 0 || widthChanged || jumped);
         else CBZ.renderer.shadowMap.needsUpdate = true;
       }
-      _snapX = ox; _snapZ = oz;
+      _snapX = ox; _snapZ = oz; _snapWidth = width;
     }
 
     const up = Math.sin(ang);                 // -1 night .. 1 noon

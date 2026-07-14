@@ -629,11 +629,8 @@
       skin: 0xe8b58c, hair: 0x101820, shoes: 0x101216,
     });
     ch.group.position.set(x, 0, z);
-    // HEAD TAG: seeded as "POLICE"/"SWAT" but the street-read system (level.js
-    // retag) repaints it to the ALLOWED Lv.N head tag — "Lv.20 Officer" /
-    // "Lv.35 SWAT". This sprite IS that level tag (level.js retag early-returns
-    // when .tag is null), so it must exist — nulling it removed the level tag
-    // entirely (regression). LOD toggles its visibility below.
+    // Keep the label object as compatibility metadata for level/identity code,
+    // but never draw floating names, jobs or levels over a person.
     const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(swat ? "SWAT" : "POLICE", { color: "#7fd0ff" }) : null;
     if (tag) { tag.position.y = 1.97; tag.scale.set(2.2, 0.55, 1); ch.group.add(tag); }   // ~rig head (1.82m × HUMAN_SCALE) + margin; tag sits on the UNSCALED group, was 2.12 for the old 2.6m rig
     const cop = {
@@ -1652,7 +1649,7 @@
         else if (!c._armorKit && rng() < 0.5) CBZ.cityArmorDressPed(c, ["softVest"]);
         else if (c._armorKit) CBZ.cityArmorDressPed(c, c._armorKit.slice());
       }
-      if (c.tag) c.tag.visible = !(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+      if (c.tag) c.tag.visible = false;
     } else c = makeCop(x, z, swat, false);
     A.root.add(c.group);
     if (CBZ.cityCops.indexOf(c) < 0) CBZ.cityCops.push(c);

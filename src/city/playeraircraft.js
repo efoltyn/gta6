@@ -190,6 +190,29 @@
   const FLARE_HEIGHT   = 9;        // metres above ground where a flare starts cushioning the touchdown
   const FLARE_SINK     = 2.2;      // m/s sink rate the flare bleeds you down to right at the ground
 
+  // Fixed-wing touchdowns are graded, not a binary nose-angle tripwire. The
+  // former `sink >= 10 || pitch < -0.35` made ordinary approaches explode on
+  // contact because a mild descent naturally holds some negative pitch. Only
+  // catastrophic slams are certain; hard landings carry a rising crash chance
+  // and otherwise damage the airframe so a rough arrival still has consequence.
+  function touchdownRisk(sink, pitch) {
+    sink = Math.max(0, sink || 0); pitch = pitch || 0;
+    const sinkSeverity = Math.max(0, Math.min(1, (sink - 6) / 16));
+    const noseSeverity = Math.max(0, Math.min(1, (-pitch - 0.30) / 0.70));
+    const severity = Math.max(sinkSeverity, noseSeverity);
+    return {
+      severity,
+      chance: severity >= 1 ? 1 : severity * severity * 0.72,
+      damage: severity > 0 ? 10 + severity * 65 : 0,
+    };
+  }
+  let touchdownSeed = 0x6d2b79f5;
+  function touchdownRoll() {
+    touchdownSeed = (Math.imul(touchdownSeed ^ (touchdownSeed >>> 15), 1 | touchdownSeed) + 0x9e3779b9) | 0;
+    return (touchdownSeed >>> 0) / 4294967296;
+  }
+  CBZ.aircraftTouchdownRisk = touchdownRisk;
+
   // ---- module state --------------------------------------------------------
   let heli = null;                 // the helicopter craft object (or null)
   let jet = null;                  // the F-22 craft object (or null)
@@ -212,9 +235,16 @@
     try { return CBZ.cityMegaTower(); } catch (e) { return null; }
   }
   function floorY(x, z) {
+    // `floorAt` intentionally returns the fallback city datum (0) outside land.
+    // Aircraft need the physical surface instead: over open water that is the
+    // rendered sea, otherwise a hidden y=0 landing plane appears beneath them.
+    if (CBZ.cityWaterAt) {
+      try { if (CBZ.cityWaterAt(x, z)) return CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48; } catch (e) {}
+    }
     if (CBZ.floorAt) { try { return CBZ.floorAt(x, z) || 0; } catch (e) { return 0; } }
     return 0;
   }
+  CBZ.aircraftSurfaceY = floorY;   // read-only gameplay oracle used by audits
   function campaignActive() {
     try { return !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive()); } catch (e) { return false; }
   }
@@ -757,8 +787,8 @@
     // anywhere after a hijack, so the original gate bounds are no longer valid.
     const a = rec.group.rotation.y || 0;
     const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
-    const hw = Math.max(0.5, rec.footW || 3) * 0.5;
-    const hl = Math.max(0.5, rec.footL || 5) * 0.5;
+    const hw = Math.max(0.5, rec.colliderW || rec.footW || 3) * 0.5;
+    const hl = Math.max(0.5, rec.colliderL || rec.footL || 5) * 0.5;
     const ex = ca * hw + sa * hl, ez = sa * hw + ca * hl;
     col.minX = rec.pos.x - ex; col.maxX = rec.pos.x + ex;
     col.minZ = rec.pos.z - ez; col.maxZ = rec.pos.z + ez;
@@ -775,6 +805,7 @@
   function parkExternalCraft(craft) {
     if (!craft || !craft.externalGroup || !craft.sourceRec) return false;
     const rec = craft.sourceRec;
+    if (rec.destroyed || craft.destroyed) return false;
     const gy = floorY(craft.pos.x, craft.pos.z);
     craft.pitch = craft.roll = 0;
     craft.vx = craft.vy = craft.vz = 0;
@@ -806,7 +837,7 @@
   // mid-air. Everything lives in the separate `stolenAir` slot so the owned
   // heli/Raptor singletons are untouched.
   function spawnFlyableFromProp(rec) {
-    if (!rec || !rec.pos) return null;
+    if (!rec || !rec.pos || rec.destroyed) return null;
     const root = arenaRoot(); if (!root) return null;
     if (CBZ.player && CBZ.player._aircraft) return null;       // already airborne
     const kind = rec.kind === "heli" ? "heli" : "jet";
@@ -902,12 +933,9 @@
     // point the chase-cam down the craft's nose
     if (CBZ.cam) CBZ.cam.yaw = craft.heading + Math.PI;
     if (CBZ.sfx) { try { CBZ.sfx("door"); } catch (e) {} }
-    const ctrl = craft.civilian
-      ? "W/S throttle · A/D bank · SPACE/CTRL climb/dive · [F] land"
-      : craft.kind === "jet"
-        ? "W/S throttle · A/D bank · SPACE/CTRL climb/dive · L-click missiles · [F] eject"
-        : "W/S thrust · A/D yaw · SPACE/CTRL up/down · mouse look · L-click missiles · [F] land";
-    aircraftNote("Flying the " + craftLabel(craft) + " — " + ctrl, 3.2, "Flight Ops");
+    // Controls belong in pause/settings, not in a floating toast and definitely
+    // not as a fake in-world phone message. Entry is self-evident from the live
+    // instrument strip; the door cue confirms the action without prose.
     return true;
   }
 
@@ -1112,9 +1140,32 @@
   //  FLIGHT UPDATE — runs AFTER physics (order 12, just past vehicles' 11) and
   //  OWNS the aircraft + player transform while flying.
   // ============================================================
-  function clampToCity(pos, r) {
-    const A = CBZ.city && CBZ.city.arena;
-    if (A && A.clampToCity) { try { A.clampToCity(pos, r); } catch (e) {} }
+  // Aircraft own AIRSPACE, not the walkable-land union. The old land clamp
+  // snapped a plane back to the nearest island the instant it crossed a shore,
+  // making the surrounding ocean unflyable. Bound flight to the rendered sea
+  // instead (with a cached world AABB) so the whole archipelago and open water
+  // are usable while still preventing an endless flight into unloaded space.
+  let airspaceSea = null, airspaceBounds = null;
+  function clampToAirspace(craft, r) {
+    const pos = craft && craft.pos ? craft.pos : craft;
+    if (!pos) return;
+    r = r || 2;
+    const sea = CBZ.citySea;
+    if (sea && sea !== airspaceSea) {
+      airspaceSea = sea;
+      try {
+        sea.updateMatrixWorld(true);
+        airspaceBounds = new THREE.Box3().setFromObject(sea);
+      } catch (e) { airspaceBounds = null; }
+    }
+    // The overhaul sea is 7km centred (310,-750). This fallback also safely
+    // encloses the legacy 6.2km sea and every registered island.
+    const b = airspaceBounds || { min: { x: -3190, z: -4250 }, max: { x: 3810, z: 2750 } };
+    const minX = b.min.x + r, maxX = b.max.x - r, minZ = b.min.z + r, maxZ = b.max.z - r;
+    if (pos.x < minX) { pos.x = minX; if (craft && craft.vx < 0) craft.vx = 0; }
+    else if (pos.x > maxX) { pos.x = maxX; if (craft && craft.vx > 0) craft.vx = 0; }
+    if (pos.z < minZ) { pos.z = minZ; if (craft && craft.vz < 0) craft.vz = 0; }
+    else if (pos.z > maxZ) { pos.z = maxZ; if (craft && craft.vz > 0) craft.vz = 0; }
   }
 
   // ---- spin every rotor a craft owns: the builder bars on OUR heli (group
@@ -1408,7 +1459,7 @@
     const udI = craft.group.userData;
     if (udI && udI.gear) udI.gear.visible = (craft.pos.y - gy) < 9;
     // keep inside the world bounds
-    clampToCity(craft.pos, 2.0);
+    clampToAirspace(craft, 2.0);
     // apply transform
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
@@ -1428,13 +1479,15 @@
   // tallest collider top at/below the craft's belly — the surface it can land
   // on (terrain OR a rooftop). Same CBZ.colliders data aircraft.js's AI uses.
   function roofUnder(craft) {
-    let topY = 0;
+    // null means "no roof". Zero is a legitimate authored deck height, so it
+    // cannot also be the sentinel — especially with the sea at -0.48.
+    let topY = null;
     const cols = CBZ.colliders || [];
     const x = craft.pos.x, z = craft.pos.z;
     const yRef = craft.pos.y - craft.belly + 0.6;    // only tops at/under the belly count
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
-      if (c.y1 == null || c.y1 <= topY || c.y1 > yRef) continue;
+      if (c.y1 == null || (topY != null && c.y1 <= topY) || c.y1 > yRef) continue;
       if (x < c.minX - 0.5 || x > c.maxX + 0.5 || z < c.minZ - 0.5 || z > c.maxZ + 0.5) continue;
       topY = c.y1;
     }
@@ -1445,7 +1498,16 @@
   // are safely above never triggers, because the y-range test fails there)
   function wallAhead(craft) {
     const cols = CBZ.colliders || [];
-    const reach = 2.5 + (craft.speed || 0) * 0.06;
+    const dims = (craft.sourceRec && craft.sourceRec.aircraftDims) || (craft.group && craft.group.userData && craft.group.userData.aircraftDims);
+    const hullLength = dims && dims.length ? dims.length : Math.max(
+      (craft.sourceRec && craft.sourceRec.footW) || 0,
+      (craft.sourceRec && craft.sourceRec.footL) || 0,
+      craft.kind === "jet" ? 8 : 5
+    );
+    // Probe the actual nose, not a fixed 2.5m point from the centre. The old
+    // probe put an A320's sensor inside its own cabin, so its nose could pass
+    // deep into a tower before the centre finally registered a collision.
+    const reach = Math.max(2.5 + (craft.speed || 0) * 0.06, hullLength * 0.5 - 0.35);
     const cp = Math.cos(craft.pitch || 0);
     const nx = craft.pos.x + Math.sin(craft.heading) * cp * reach;
     const ny = craft.pos.y + Math.sin(craft.pitch || 0) * reach;
@@ -1454,27 +1516,108 @@
       const c = cols[i];
       if (nx < c.minX || nx > c.maxX || nz < c.minZ || nz > c.maxZ) continue;
       const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
-      if (ny >= y0 && ny <= y1) return true;
+      if (ny >= y0 && ny <= y1) return { x: nx, y: ny, z: nz, collider: c };
+    }
+    return null;
+  }
+
+  function aircraftColliderRef(c) {
+    let o = c && c.ref;
+    while (o) {
+      if (o.userData && (o.userData.aircraftDims || o.userData.hijackable || o.userData.craft)) return true;
+      o = o.parent;
     }
     return false;
   }
 
-  // the fireball ending: blast, zero the airframe, dump the pilot. Owned craft
-  // are disposed so the self-heal watchdog respawns a fresh one at base; hot /
-  // external craft ride the existing exitAircraft despawn/park paths.
-  function crashCraft(craft) {
+  function charAircraftWreck(group) {
+    if (!group || (group.userData && group.userData.charred)) return;
+    group.userData.charred = true;
+    group.traverse(function (o) {
+      if (!o.material) return;
+      function charOne(src) {
+        const m = src && src.clone ? src.clone() : src;
+        if (m && m.color) m.color.multiplyScalar(0.22);
+        if (m && m.emissive) m.emissive.multiplyScalar(0.08);
+        if (m) { m.transparent = false; m.opacity = 1; m.needsUpdate = true; }
+        return m;
+      }
+      o.material = Array.isArray(o.material) ? o.material.map(charOne) : charOne(o.material);
+    });
+  }
+
+  // The fireball ending. An adopted external airframe becomes a persistent,
+  // non-boardable wreck; it must never ride the normal F-exit path because that
+  // path deliberately restores a pristine parked aircraft and its collider.
+  function crashCraft(craft, impact) {
     if (!craft || craft.destroyed) return;
     craft.destroyed = true;
-    const x = craft.pos.x, y = craft.pos.y, z = craft.pos.z;
-    if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power: 2.4, radius: 13, byPlayer: true, y }); } catch (e) {} }
-    else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: 2.0, radius: 10, byPlayer: true }); } catch (e) {} }
-    if (CBZ.shake) { try { CBZ.shake(1.2); } catch (e) {} }
+    const x = impact && impact.x != null ? impact.x : craft.pos.x;
+    const y = impact && impact.y != null ? impact.y : craft.pos.y;
+    const z = impact && impact.z != null ? impact.z : craft.pos.z;
+    const heavy = craft.airClass === "airliner";
+    const power = heavy ? 3.2 : 2.4, radius = heavy ? 18 : 13;
+    if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
+    else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: heavy ? 2.7 : 2.0, radius: heavy ? 15 : 10, byPlayer: true, y }); } catch (e) {} }
+    if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, radius + 5); } catch (e) {} }
+    if (impact && !aircraftColliderRef(impact.collider) && CBZ.cityDamageBuilding) {
+      try { CBZ.cityDamageBuilding(x, y, z, heavy ? 3.4 : 2.4); } catch (e) {}
+    }
+    if (CBZ.cityCrashSmoke) {
+      try { CBZ.cityCrashSmoke(x, y, z); CBZ.cityCrashSmoke(x - 1.2, y + 0.5, z + 0.8); } catch (e) {}
+    }
+    if (CBZ.shake) { try { CBZ.shake(heavy ? 1.8 : 1.2); } catch (e) {} }
     craft.hp = 0;
-    exitAircraft();                             // handles hot-craft despawn / external park
-    if (heli === craft) { disposeGroup(heli.group); heli = null; placeHeli(); }
+    craft.vx = craft.vy = craft.vz = 0;
+
+    const P = CBZ.player;
+    if (P && P._aircraft === craft) {
+      P.driving = false; P._aircraft = null;
+      // Put the pilot beside the impact on the real surface; the blast itself
+      // decides whether they survive. Never bury them in the fuselage/wall.
+      const side = heavy ? 7 : 3.5;
+      const px = craft.pos.x + Math.cos(craft.heading) * side;
+      const pz = craft.pos.z - Math.sin(craft.heading) * side;
+      const gy = floorY(px, pz);
+      P.pos.set(px, gy, pz); P.vy = 0; P.grounded = true;
+      if (CBZ.playerChar && CBZ.playerChar.group) {
+        CBZ.playerChar.group.visible = !P.dead;
+        CBZ.playerChar.group.position.copy(P.pos);
+      }
+    }
+
+    if (craft.externalGroup && craft.sourceRec) {
+      const rec = craft.sourceRec;
+      rec.destroyed = true; rec.taken = true; rec.hot = false;
+      rec.hijackable = false; rec.hp = 0;
+      detachPropCollider(rec);
+      if (rec.group && rec.group.userData) {
+        rec.group.userData.craft = null;
+        rec.group.userData.destroyed = true;
+        rec.group.userData.hijackable = false;
+        rec.group.userData.milKind = null;
+        const cabin = rec.group.userData.cabin && rec.group.userData.cabin.passengerCabin;
+        if (cabin) { cabin.state = "destroyed"; cabin.active = false; }
+      }
+      charAircraftWreck(rec.group || craft.group);
+      // A little final list/roll keeps a dead hull from reading as a pristine
+      // airliner paused in mid-flight while the impact fire burns.
+      craft.roll += heavy ? 0.28 : 0.42;
+      craft.pitch -= heavy ? 0.10 : 0.18;
+      setCraftRotation(craft, craft.pitch, craft.heading, craft.roll);
+      if (stolenAir === craft) stolenAir = null;
+    } else if (heli === craft) { disposeGroup(heli.group); heli = null; placeHeli(); }
     else if (jet === craft) { disposeGroup(jet.group); jet = null; placeJet(); }
-    aircraftNote("Airframe destroyed.", 2.4, "Flight Ops");
+    else { disposeGroup(craft.group); if (stolenAir === craft) stolenAir = null; }
   }
+  // Shared crash entry for disasters/tests and other city systems: it always
+  // routes through the same persistent-wreck transition as a physical impact.
+  CBZ.cityCrashPlayerAircraft = function (impact) {
+    const craft = _aircraftFlying();
+    if (!craft || craft.destroyed) return false;
+    crashCraft(craft, impact || { x: craft.pos.x, y: craft.pos.y, z: craft.pos.z });
+    return true;
+  };
 
   // ---- V2 FIXED-WING (jet / private jet / airliner share the math, the
   // per-class WING_V2 row is the personality) --------------------------------
@@ -1495,7 +1638,7 @@
     // measured against the craft's REST height (owned craft park GROUND_PAD
     // above the floor, so a raw belly-AGL test would never read "down")
     const gy = floorY(craft.pos.x, craft.pos.z);
-    const surfY = Math.max(gy, craft._roof || 0);
+    const surfY = craft._roof == null ? gy : Math.max(gy, craft._roof);
     const restY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     const agl = Math.max(0, craft.pos.y - restY);
     craft.onGround = agl < 0.3;
@@ -1628,7 +1771,8 @@
 
     // shared aero core: six-axis drag + ETL + ground effect (rooftop-aware AGL,
     // measured against the skids' REST height — see flyWingV2's note)
-    const groundY = Math.max(floorY(craft.pos.x, craft.pos.z), craft._roof || 0);
+    const baseY = floorY(craft.pos.x, craft.pos.z);
+    const groundY = craft._roof == null ? baseY : Math.max(baseY, craft._roof);
     const restY = groundY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     const agl = Math.max(0, craft.pos.y - restY);
     let etl = 1, groundMul = 1, aoaDeg = 0, stalled = false;
@@ -1716,11 +1860,12 @@
     craft._surfT = (craft._surfT || 0) - dt;
     if (craft._surfT <= 0) { craft._surfT = 0.12; craft._roof = roofUnder(craft); }
     const gy = floorY(craft.pos.x, craft.pos.z);
-    const surfY = Math.max(gy, craft._roof || 0);
+    const surfY = craft._roof == null ? gy : Math.max(gy, craft._roof);
     const minY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     // WALL STRIKE: burying the nose in a building face at speed is a crash
-    if (craft.speed > 14 && craft.pos.y - craft.belly > surfY + 1.5 && wallAhead(craft)) {
-      crashCraft(craft);
+    const wall = craft.speed > 14 && craft.pos.y - craft.belly > surfY + 1.5 ? wallAhead(craft) : null;
+    if (wall) {
+      crashCraft(craft, wall);
       return;
     }
     if (craft.pos.y < minY) {
@@ -1729,9 +1874,10 @@
         // hard landing: flaring the collective near the deck is a real skill
         if (sink > FLARE_SINK * 1.6) damageCraft(craft, Math.min(60, (sink - FLARE_SINK) * 4));
       } else if (wasAir) {
-        // fixed-wing touchdown judgement: slam it in or arrive nose-first and
-        // it's a fireball; grease it on and you roll out
-        if (sink >= 10 || (craft.pitch || 0) < -0.35) { crashCraft(craft); return; }
+        const td = touchdownRisk(sink, craft.pitch || 0);
+        craft.lastTouchdown = { sink, pitch: craft.pitch || 0, severity: td.severity, crashChance: td.chance };
+        if (td.chance > 0 && touchdownRoll() < td.chance) { crashCraft(craft); return; }
+        if (td.damage > 0) damageCraft(craft, td.damage);
         craft.pitch = Math.max(0, craft.pitch || 0) * 0.3;
         craft.sag = 0;
       }
@@ -1745,7 +1891,7 @@
     // prop-spin hook: any craft whose builder tags a spinner (userData.prop,
     // spins about local Z) gets throttle-proportional prop animation for free
     if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
-    clampToCity(craft.pos, 2.0);
+    clampToAirspace(craft, 2.0);
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
   }
@@ -1828,7 +1974,7 @@
     d.id = "cityFlightHud";
     d.style.cssText = "position:fixed;left:50%;bottom:96px;transform:translateX(-50%);" +
       "font:600 13px/1.4 ui-monospace,Menlo,monospace;color:#cfe6ff;text-align:center;" +
-      "background:rgba(8,12,18,0.55);padding:6px 14px;border-radius:8px;border:1px solid rgba(120,180,255,0.25);" +
+      "background:rgba(8,12,18,0.48);padding:4px 9px;border-radius:7px;border:1px solid rgba(120,180,255,0.20);" +
       "pointer-events:none;z-index:60;display:none;text-shadow:0 1px 2px #000";
     document.body.appendChild(d);
     _hudEl = d;
@@ -1840,16 +1986,17 @@
     const alt = Math.max(0, craft.pos.y - floorY(craft.pos.x, craft.pos.z));
     el.style.display = "block";
     const hpPct = craft.maxHp > 0 ? Math.round(100 * craft.hp / craft.maxHp) : 100;
-    const hpTag = craft.autorotating ? "AUTOROTATING" : (craft.stalled ? "STALL" : (hpPct + "%"));
-    el.innerHTML = "✈ " + craftLabel(craft).toUpperCase() +
-      "  ·  ALT " + alt.toFixed(0) + "m" +
-      "  ·  SPD " + (craft.speed || 0).toFixed(0) +
-      (craft.armed === false ? "" : "  ·  MISSILES " + craft.ammo + "/" + craft.maxAmmo) +
-      "  ·  HP " + hpTag;
+    const warning = craft.autorotating ? "  ⚠↻" : (craft.stalled ? "  ⚠↘" : "");
+    // Instrument grammar, not a sentence: altitude, speed, ordnance, integrity.
+    // No craft-name/ALT/SPD/MISSILES/HP label wall across the playfield.
+    el.textContent = "↥" + alt.toFixed(0) + "m  ›" + (craft.speed || 0).toFixed(0) +
+      (craft.armed === false ? "" : "  ◉" + craft.ammo + "/" + craft.maxAmmo) +
+      "  ♥" + hpPct + "%" + warning;
   }
   function hideHud() { if (_hudEl) _hudEl.style.display = "none"; }
 
-  // a separate on-foot proximity prompt ("[F] Fly the Heli" / buy the F-22)
+  // A tiny icon-only proximity affordance. Boarding still uses the normal
+  // interaction key, but no control legend or mission prose floats in-world.
   let _promptEl = null;
   function promptEl() {
     if (_promptEl) return _promptEl;
@@ -1876,14 +2023,14 @@
     if (campaignActive() || !P || P.dead || P._aircraft || P.driving || g.state !== "playing") { hidePrompt(); return; }
     const x = P.pos.x, z = P.pos.z;
     const c = nearestBoardable(x, z, 6.5);
-    if (c) { showPrompt("[F] Fly the " + (c.kind === "jet" ? "F-22 RAPTOR" : "Missile Heli")); return; }
+    if (c) { showPrompt("✈"); return; }
     // A correct, in-place note ONLY when you're standing AT a hangar you OWN
     // (penthouse deck OR the airport Private Hangar) but haven't bagged the jet
     // yet — it tells you the next step. No persistent nag for the unowned case:
     // the way to GET a hangar lives in the [P] phone / [G] storage menu, not a
     // sticky on-screen prompt.
     if (!g.cityOwnsJet && atHangar(x, z) && ownsAnyHangar()) {
-      showPrompt("Empty hangar — STEAL an F-22 from the military base & land it here to keep it");
+      showPrompt("◌");
       return;
     }
     hidePrompt();
@@ -1929,7 +2076,11 @@
         // airframe and restore its detached collider before returning its registry
         // record; simply clearing `taken` left a boardable jet hanging in mid-air
         // with no physical hull after the handoff.
-        if (stolenAir.group && stolenAir.group.parent && stolenAir.sourceRec) {
+        if (stolenAir.sourceRec && stolenAir.sourceRec.destroyed) {
+          detachPropCollider(stolenAir.sourceRec);
+          stolenAir.sourceRec.taken = true;
+          if (stolenAir.group && stolenAir.group.userData) stolenAir.group.userData.craft = null;
+        } else if (stolenAir.group && stolenAir.group.parent && stolenAir.sourceRec) {
           parkExternalCraft(stolenAir);
         } else {
           if (stolenAir.sourceRec) stolenAir.sourceRec.taken = false;

@@ -19,7 +19,7 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const SURF_Y = -0.38;      // chest-deep: head and shoulders above the water
+  const BODY_SUBMERGE = 1.28; // feet below mean sea level: water crosses the chest
   const QUAY = 28;           // land extends this far past the road grid (world.js ground)
   const DRAG = 0.45;         // swimming keeps this fraction of your walk step
   // mode.js REGENS stamina 14/s whenever you're not sprinting, so the swim
@@ -91,6 +91,7 @@
   function enterWater(P) {
     swimming = true;
     P._swim = true;
+    if (CBZ.playerChar) CBZ.playerChar.swimming = true;
     P.vy = 0;
     px = P.pos.x; pz = P.pos.z;   // anchor the drag HERE — never against the
     // last on-land spot (a bail-out/teleport into water would snap you back)
@@ -102,11 +103,13 @@
   function exitWater(P, spot) {
     swimming = false;
     P._swim = false;
+    if (CBZ.playerChar) CBZ.playerChar.swimming = false;
     if (spot) {
       P.pos.x = spot.x; P.pos.z = spot.z;
       // the haul-up: pop above the seawall cap's height gate (y1=0.8) so the
       // wall collider can't shove you back off the lip mid-climb
-      P.pos.y = 1.0; P.vy = 2.2; P.grounded = false;
+      const gy = CBZ.floorAt ? (CBZ.floorAt(spot.x, spot.z) || 0) : 0;
+      P.pos.y = gy + 1.0; P.vy = 2.2; P.grounded = false;
       if (CBZ.sfx) { try { CBZ.sfx("step"); } catch (e) {} }
     }
   }
@@ -116,8 +119,14 @@
   CBZ.onUpdate(45.8, function (dt) {
     const A = arena();
     const P = CBZ.player;
-    if (!A || !P || A.minX == null) { if (swimming) { swimming = false; if (P) P._swim = false; } return; }
-    if (P.dead || P.driving) { if (swimming) { swimming = false; P._swim = false; } return; }
+    if (!A || !P || A.minX == null) {
+      if (swimming) { swimming = false; if (P) P._swim = false; if (CBZ.playerChar) CBZ.playerChar.swimming = false; }
+      return;
+    }
+    if (P.dead || P.driving) {
+      if (swimming) { swimming = false; P._swim = false; if (CBZ.playerChar) CBZ.playerChar.swimming = false; }
+      return;
+    }
 
     const inWater = waterAt(A, P.pos.x, P.pos.z) && P.pos.y <= 0.6;
     if (inWater && !swimming) enterWater(P);
@@ -129,14 +138,39 @@
       return;
     }
 
-    // ---- the swim: half-submerged, heavy ----
+    // ---- the swim: genuinely chest-deep, heavy, and visibly animated ----
     P.pos.x = px + (P.pos.x - px) * DRAG;
     P.pos.z = pz + (P.pos.z - pz) * DRAG;
     px = P.pos.x; pz = P.pos.z;
-    P.pos.y = SURF_Y;
+    P._swimPhase = (P._swimPhase || 0) + dt * (2.6 + Math.min(3, P.speed || 0) * 0.22);
+    const seaY = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+    P.pos.y = seaY - BODY_SUBMERGE + Math.sin(P._swimPhase * 2) * 0.045;
     P.vy = 0;
     P.grounded = true;          // no fall-damage bookkeeping while floating
     P.sprint = false;
+
+    // Physics synced the rig before the water pass, so the old implementation
+    // left the visible character standing on its pre-swim floor. Water owns the
+    // final pose and transform for this frame.
+    const ch = CBZ.playerChar;
+    if (ch && ch.group) {
+      ch.swimming = true;
+      ch.group.position.copy(P.pos);
+      const sw = Math.sin(P._swimPhase);
+      if (ch.body) { ch.body.rotation.x = 0.22; ch.body.position.y = Math.sin(P._swimPhase * 2) * 0.025; }
+      if (ch.parts) {
+        if (ch.parts.la) { ch.parts.la.rotation.x = -1.20 + sw * 0.62; ch.parts.la.rotation.z = -0.28; }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = -1.20 - sw * 0.62; ch.parts.ra.rotation.z = 0.28; }
+        if (ch.parts.ll) ch.parts.ll.rotation.x = sw * 0.30;
+        if (ch.parts.rl) ch.parts.rl.rotation.x = -sw * 0.30;
+      }
+      if (ch.low) {
+        if (ch.low.la) ch.low.la.rotation.x = -0.45;
+        if (ch.low.ra) ch.low.ra.rotation.x = -0.45;
+        if (ch.low.ll) ch.low.ll.rotation.x = 0.35 + Math.max(0, -sw) * 0.25;
+        if (ch.low.rl) ch.low.rl.rotation.x = 0.35 + Math.max(0, sw) * 0.25;
+      }
+    }
 
     // ---- tiring out ----
     if (P.stamina != null) {

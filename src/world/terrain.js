@@ -56,7 +56,7 @@
   //    city mainland ......... ~ x[-176,176]  z[-876,524-]  (centre 0,-700)
   //    commerce annex ........ x[228,469]      z[-820,-580]
   //    speedway island ....... x[270,670]      z[-530,-130]
-  //    airport island ........ x[-370,290]     z[-280,40]
+  //    airport island ........ x[-900,290]     z[-280,40]
   //    military island ....... x[-860,-380]    z[-950,-450]
   //    desert biome .......... x[670,1560]     z[-320,620]   (MASSIVE south basin)
   //    forest biome .......... x[-950,-170]    z[-1680,-1020]
@@ -76,6 +76,36 @@
 
   // expose the flat extents for tooling / other agents
   CBZ.TERRAIN_FLAT = FLAT;
+
+  // The world no longer fits inside the original hand-written archipelago
+  // rectangle: countries and settlements register live regions well beyond it.
+  // Grow (never shrink) the flat oracle to the actual built world before the
+  // visual terrain is sampled. Mutating this shared object is deliberate — both
+  // this fallback terrain and terrain_overhaul.js close over the same bounds.
+  CBZ.syncTerrainFlat = function (city) {
+    city = city || (CBZ.city && CBZ.city.arena);
+    if (!city) return FLAT;
+    function grow(x0, x1, z0, z1) {
+      if (![x0, x1, z0, z1].every(Number.isFinite)) return;
+      FLAT.minX = Math.min(FLAT.minX, x0); FLAT.maxX = Math.max(FLAT.maxX, x1);
+      FLAT.minZ = Math.min(FLAT.minZ, z0); FLAT.maxZ = Math.max(FLAT.maxZ, z1);
+    }
+    grow(city.minX, city.maxX, city.minZ, city.maxZ);
+    const annex = city.annex;
+    if (annex && Number.isFinite(annex.cx) && Number.isFinite(annex.cz) && Number.isFinite(annex.radius)) {
+      grow(annex.cx - annex.radius, annex.cx + annex.radius,
+        annex.cz - annex.radius, annex.cz + annex.radius);
+    }
+    const regs = city.regions || [];
+    for (let i = 0; i < regs.length; i++) {
+      const r = regs[i];
+      if (!r) continue;
+      if (r.kind === "circle" && Number.isFinite(r.cx) && Number.isFinite(r.cz) && Number.isFinite(r.r)) {
+        grow(r.cx - r.r, r.cx + r.r, r.cz - r.r, r.cz + r.r);
+      } else grow(r.minX, r.maxX, r.minZ, r.maxZ);
+    }
+    return FLAT;
+  };
 
   // ----------------------------------------------------------------------
   //  ANALYTIC NOISE FIELD — all pure functions, zero allocation.
@@ -149,6 +179,7 @@
   //  THE ORACLE — CBZ.terrainHeight(x,z). Returns 0 over the flat region.
   // ----------------------------------------------------------------------
   CBZ.terrainHeight = function (x, z) {
+    if (CBZ.PROC_TERRAIN === false) return 0;
     const fo = CBZ.terrainFalloff(x, z);
     if (fo <= 0) return 0;                 // dead flat — physics-safe
     const hills = fbm(x, z);
@@ -210,6 +241,7 @@
 
     const root = parent || CBZ.scene;
     if (!root) return null;
+    CBZ.syncTerrainFlat(CBZ.city && CBZ.city.arena);
 
     // --- 1) the big relief field --------------------------------------
     // PERF: this used to be ONE 6000×6000 mesh at 280×280 segments —

@@ -87,8 +87,8 @@
   let shatteredPanes = 0;   // live count of open holes (fast-path for cityShotHole)
   let _gmat = null, _shardGeo = null, _shardGeoBig = null, _crackTex = null;
   function glassMat() { return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 })); }
-  function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.22, 0.3, 0.05)); }
-  function shardGeoBig() { return _shardGeoBig || (_shardGeoBig = new THREE.BoxGeometry(0.4, 0.52, 0.05)); }
+  function shardGeo() { return _shardGeo || (_shardGeo = new THREE.BoxGeometry(0.18, 0.25, 0.035)); }
+  function shardGeoBig() { return _shardGeoBig || (_shardGeoBig = new THREE.BoxGeometry(0.30, 0.40, 0.04)); }
 
   // ---- INSTANCED GLASS POOLS ---------------------------------------------
   // Window panes are all axis-aligned boxes, so the whole city's glass folds
@@ -442,7 +442,7 @@
     if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
     // clear any lingering crack decal for this pane
     for (let i = crackQuads.length - 1; i >= 0; i--) if (crackQuads[i].gp === gp) { CBZ.scene.remove(crackQuads[i].mesh); crackQuads.splice(i, 1); }
-    if (cityShards.length > 360) return;
+    if (cityShards.length > 180) return;
     // raining shards: a mix of big jagged plates and small chips, span-scaled,
     // biased to fall outward from the pane plane for a real "blown out" look.
     const big = Math.max(2, Math.min(7, Math.round(gp.span * 1.6)));
@@ -451,8 +451,9 @@
     for (let i = 0; i < big + small; i++) {
       const isBig = i < big;
       const sh = new THREE.Mesh(isBig ? shardGeoBig() : shardGeo(), glassMat());
-      const sc = isBig ? 0.8 + Math.random() * 0.7 : 0.6 + Math.random() * 0.5;
+      const sc = isBig ? 0.65 + Math.random() * 0.35 : 0.5 + Math.random() * 0.35;
       sh.scale.set(sc, sc * (0.7 + Math.random() * 0.8), 1);
+      sh.userData.fractureShard = true;
       sh.position.set(gp.x + (Math.random() - 0.5) * gp.span * 2, gp.y + (Math.random() - 0.5) * Math.max(0.7, gp.span), gp.z + (Math.random() - 0.5) * 0.4);
       sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
       CBZ.scene.add(sh);
@@ -462,7 +463,7 @@
         vx: lateral + (horiz ? (Math.random() - 0.5) * 3 : outN * (0.8 + Math.random() * 2.2)),
         vy: 0.8 + Math.random() * 3.0,
         vz: lateralZ + (horiz ? outN * (0.8 + Math.random() * 2.2) : (Math.random() - 0.5) * 3),
-        spin: (Math.random() - 0.5) * 11, life: 1.2 + Math.random() * 0.8,
+        spin: (Math.random() - 0.5) * 11, life: 0.75 + Math.random() * 0.55,
       });
     }
   }
@@ -566,14 +567,15 @@
   };
   // one or two tiny shards spit off the impact point of a single bullet
   function spawnGlassChip(x, y, z) {
-    if (cityShards.length > 360) return;
+    if (cityShards.length > 180) return;
     const n = 1 + ((Math.random() * 2) | 0);
     for (let i = 0; i < n; i++) {
       const sh = new THREE.Mesh(shardGeo(), glassMat());
       sh.scale.setScalar(0.5 + Math.random() * 0.4);
+      sh.userData.fractureShard = true;
       sh.position.set(x, y, z); sh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
       CBZ.scene.add(sh);
-      cityShards.push({ mesh: sh, vx: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 1.4, vz: (Math.random() - 0.5) * 2, spin: (Math.random() - 0.5) * 10, life: 0.9 });
+      cityShards.push({ mesh: sh, vx: (Math.random() - 0.5) * 2, vy: 0.6 + Math.random() * 1.4, vz: (Math.random() - 0.5) * 2, spin: (Math.random() - 0.5) * 10, life: 0.75 });
     }
   }
   // ---- OPEN-WINDOW SHOT HOLES --------------------------------------------
@@ -1575,6 +1577,79 @@
     }
   }
 
+  // Read-only regression probe for the filmed "glass planes across a missing
+  // wall" failure. It checks the actual pooled instance matrices as well as
+  // logical flags: an intact record with a zero matrix is still a lifecycle
+  // bug, and a shattered record whose matrix remains non-zero is still visible.
+  const _openingAuditM = new THREE.Matrix4();
+  function pooledRecordDrawn(r, pool, inst) {
+    if (!r) return false;
+    if (!pool && r.mesh) return r.mesh.visible !== false;
+    pool = pool || r.pool; inst = inst == null ? r.inst : inst;
+    if (!pool || inst == null || inst < 0) return false;
+    pool.getMatrixAt(inst, _openingAuditM);
+    const e = _openingAuditM.elements;
+    // A hidden instance uses makeScale(0,0,0): all three basis vectors vanish.
+    return Math.abs(e[0]) + Math.abs(e[1]) + Math.abs(e[2]) +
+      Math.abs(e[4]) + Math.abs(e[5]) + Math.abs(e[6]) +
+      Math.abs(e[8]) + Math.abs(e[9]) + Math.abs(e[10]) > 1e-7;
+  }
+  function openingOwnsRecord(r, g) {
+    if (!r || !g) return false;
+    const u = g.horiz ? r.x : r.z, f = g.horiz ? r.z : r.x;
+    const hu = g.horiz ? r.hw : r.hd;
+    const minU = g.minU != null ? g.minU : g.u0, maxU = g.maxU != null ? g.maxU : g.u1;
+    const offTol = g.thick / 2 + 0.62;
+    return Math.abs(f - g.fixed) <= offTol &&
+      u + hu >= minU - 0.2 && u - hu <= maxU + 0.2 &&
+      r.y + r.hh >= g.y0 - 0.2 && r.y - r.hh <= g.y1 + 0.2;
+  }
+  CBZ.cityWindowOpeningAudit = function () {
+    const out = { openings: winOpenings.length, hostWallsVisible: 0, intactPanes: 0, renderedPanes: 0, visibleDeco: 0, ok: true };
+    for (let wi = 0; wi < winOpenings.length; wi++) {
+      const rec = winOpenings[wi] && winOpenings[wi].rec, g = rec && rec.gap;
+      if (!rec || !g) continue;
+      if (rec.wall && rec.wall.visible !== false) out.hostWallsVisible++;
+      for (let i = 0; i < cityGlass.length; i++) {
+        const gp = cityGlass[i]; if (!openingOwnsRecord(gp, g)) continue;
+        if (!gp.shattered) out.intactPanes++;
+        if (pooledRecordDrawn(gp)) out.renderedPanes++;
+        if (gp.lit && gp.litPool && gp.litId >= 0) {
+          if (pooledRecordDrawn(gp, gp.litPool, gp.litId)) out.renderedPanes++;
+        }
+      }
+      for (let i = 0; i < roomDeco.length; i++) {
+        const rd = roomDeco[i]; if (!openingOwnsRecord(rd, g)) continue;
+        if (!rd.hidden || pooledRecordDrawn(rd)) out.visibleDeco++;
+      }
+    }
+    out.ok = out.hostWallsVisible === 0 && out.intactPanes === 0 && out.renderedPanes === 0 && out.visibleDeco === 0;
+    return out;
+  };
+  // Dev/test-only mutator: open the nearest eligible real pooled window, then
+  // return the same audit a manual gunshot would. Gameplay never calls this.
+  CBZ.debugWindowOpeningProbe = function (x, z) {
+    const candidates = cityGlass.filter(function (gp) {
+      return gp && !gp.mesh && !gp.shattered && gp.pool && gp.y >= 1 && Math.max(gp.hw, gp.hd) * 2 >= 0.7;
+    });
+    if (Number.isFinite(x) && Number.isFinite(z)) {
+      candidates.sort(function (a, b) {
+        return ((a.x - x) * (a.x - x) + (a.z - z) * (a.z - z)) - ((b.x - x) * (b.x - x) + (b.z - z) * (b.z - z));
+      });
+    }
+    for (let i = 0; i < candidates.length; i++) {
+      const gp = candidates[i], before = winOpenings.length;
+      burstPane(gp); tryWindowOpening(gp);
+      if (winOpenings.length <= before) continue;
+      const audit = CBZ.cityWindowOpeningAudit();
+      audit.target = { x: gp.x, y: gp.y, z: gp.z };
+      return audit;
+    }
+    const audit = CBZ.cityWindowOpeningAudit();
+    audit.error = "no eligible unbreached pooled window";
+    return audit;
+  };
+
   // PUBLIC: blast a passable hole through the nearest ground-floor wall to (x,z).
   // `r` ~ the breach half-reach in metres (an RPG blastRadius 13 → r≈3.6, a
   // satisfying car-sized hole). Returns true if a wall actually opened. Now a
@@ -1620,11 +1695,18 @@
   function structuralBlast(x, z, opts) {
     try {
       const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6) * power;
-      CBZ.cityScorch(x, z, R * 0.5);
-      CBZ.cityChunk(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 0.6, z, { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
-      CBZ.cityDamageBuilding(x, (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.4, z, Math.min(3, power));
+      const groundY = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+      const impactY = opts && opts.y != null ? +opts.y : groundY + 1.4;
+      const elevated = impactY > groundY + 3;
+      // A rocket 30m up a tower must not paint the road or damage a phantom
+      // ground-floor wall. Debris and building damage stay at the actual seat;
+      // only a blast physically coupled to the surface receives ground scorch.
+      if (!elevated) CBZ.cityScorch(x, z, R * 0.5);
+      CBZ.cityChunk(x, elevated ? impactY : groundY + 0.6, z,
+        { count: Math.round(4 + 3 * power), force: 4 + 2 * power });
+      CBZ.cityDamageBuilding(x, impactY, z, Math.min(3, power));
       if (CBZ.cityFracture && CBZ.cityFracture.blastAt && power >= 0.85 && !(opts && opts.noDamage)) {
-        const hy = (opts && opts.y) || 1.4;
+        const hy = impactY;
         const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
         CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power });
       }
@@ -1933,20 +2015,6 @@
     { kind: "racepark", name: "Downs Racetrack", sign: 0xb98a5a, storeys: 1 },
   ];
   const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
-  // BRICK / MASONRY palette for residential apartment facades — warm reds,
-  // tans, browns, a buff limestone and a grey-stone, the real NYC walk-up mix
-  // (cooperatornews "common facades = brick, limestone, sandstone, brownstone").
-  // Muted so they sit next to the cool glass towers without screaming.
-  const BRICK_PALETTE = [
-    0x8a4b3a,  // red brick
-    0x9c5a44,  // warm terracotta brick
-    0x7a4334,  // deep brownstone
-    0xa9836a,  // tan / buff brick
-    0xb8a487,  // limestone buff
-    0x8f6f57,  // sandstone brown
-    0x95604a,  // rust brick
-    0x837a72,  // grey stone
-  ];
   const ABANDONED_PALETTE = [0x4a4438, 0x3f4640, 0x534a44, 0x46423c, 0x4c4640];
   const BOARD = 0x6b4a2a;
 
@@ -2061,27 +2129,20 @@
     const GKIND = opts.glassKind ? opts.glassKind : ((opts.retail || opts.showroom) ? "clear" : "reflective");
 
     // ===== FACADE TYPE =======================================================
-    // Facade follows PURPOSE. Offices get curtain wall, retail gets a transparent
-    // storefront, homes get masonry with punched windows, and fortified uses its
-    // smaller security openings. Rewriting every purpose to "office" made homes
-    // look like floating floor slabs inside a transparent cage (the exact failure
-    // visible in the owner's screenshot) and erased district identity.
+    // Only the proven glass shells remain. The later residential/fortified
+    // archetypes generated the giant brown/solid punched-window envelopes seen
+    // intersecting the normal curtain-wall skyline. Treat those legacy requests
+    // as aliases for the clean office shell instead of creating another visual
+    // class. This preserves the one real building's rooms, stairs, doors,
+    // ownership and colliders; only the offending exterior grammar is gone.
     let FACADE = opts.facade ||
       (opts.retail || opts.showroom ? "retail"
-        : (opts.office ? "office" : "residential"));
-    // RESIDENTIAL gets a warm brick/masonry wall color (overrides the cool
-    // tower palette the caller passed) + punched windows; office keeps the
-    // caller's cool curtain-wall tint. Fortified keeps the wall, drops glass.
-    const wallColor = FACADE === "residential"
-      ? BRICK_PALETTE[((vhash * 977) | 0) % BRICK_PALETTE.length]
-      : color;
-    // shade trims off the ACTUAL wall color we'll render (brick or tower).
-    const punched = FACADE === "residential";
-    const fortified = FACADE === "fortified";
-    // ADOPT the facade wall color from here on — every wall box + trim/plinth/
-    // pilaster derives from `color`, so reassigning it once paints the whole
-    // building brick (residential) or keeps the cool curtain tint (office).
-    color = wallColor;
+        : "office");
+    if (FACADE === "residential" || FACADE === "fortified") FACADE = "office";
+    // Keep the old branches hard-off as a second guard: no caller can resurrect
+    // the punched masonry or mostly-solid facade through an option value.
+    const punched = false;
+    const fortified = false;
     // DISTRICT WALL KIT: hue-locked jitter so buildings in the same district
     // read as a coherent palette family (core cool/clean, projects/industrial
     // grimier/desaturated) while still varying building-to-building. Applied

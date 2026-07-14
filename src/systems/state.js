@@ -95,6 +95,11 @@
     player.pos.copy(spawn); player.vy = 0; player.grounded = true;
     player.hp = 100; player.dead = false; player.ko = 0;
     player.stun = 0; player.subdue = 0; player.gang = null; player.captureState = "normal"; player.captureT = 0;
+    // Escape has no stamina updater of its own. Always start it full so a
+    // depleted city/survival save cannot leak into jail, while physics also
+    // treats jail sprint as unlimited for the duration of the run.
+    player.stamina = (CBZ.SURV && CBZ.SURV.staminaMax) || 100;
+    player.sprint = false; player.crouch = false;
     if (CBZ.applyPlayerRole) CBZ.applyPlayerRole(role);
     if (player._bandMesh) player._bandMesh.visible = false; // drop gang colours
     if (playerChar.cuffed) playerChar.cuffed = false;
@@ -342,7 +347,14 @@
     }
     let introOpts = cityIntro && CBZ.cityOriginIntroOpts ? CBZ.cityOriginIntroOpts() : undefined;
     if (campaignEscapeTP) introOpts = Object.assign({}, introOpts || {}, { keepThirdPerson: true });
-    CBZ.startIntro(introOpts); CBZ.requestLock();
+    // A normal CITY sandbox start is already placed and camera-initialized by
+    // city/mode.js. Do not launch the generic prison/origin reveal and rely on
+    // fpsmode to cancel it one frame later: that produced a visible far-camera
+    // flash and made a direct test start feel like another forced intro. Real
+    // authored origin scenes and explicit prison runs still use the cinematic.
+    const plainCitySandbox = g.mode === "city" && !cityIntro && !campaignEscapeTP;
+    if (!plainCitySandbox) CBZ.startIntro(introOpts);
+    CBZ.requestLock();
   }
   CBZ.startRun = startRun;
   bindButton("playBtn", startRun);

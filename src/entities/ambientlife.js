@@ -164,9 +164,13 @@
   }
 
   /* ============================================================
-     2. DUST — one Points cloud of ~120 motes drifting & recycling.
+     2. DUST — disabled.
+     The tiny white Points read as fake snow/weather stuck to the HUD in
+     both jail and city play.  They added no gameplay information and cost a
+     permanent update loop, so keep the section inert instead of allocating
+     visible particles.
   ============================================================ */
-  const DUST_N = 120;
+  const DUST_N = 0;
   const dustPos = new Float32Array(DUST_N * 3);
   // per-mote velocity + a little individual sway so they don't move in lockstep
   const dvx = new Float32Array(DUST_N);
@@ -198,6 +202,8 @@
     fog: true,
   });
   const dust = new THREE.Points(dustGeo, dustMat);
+  dust.name = "ambient-dust-disabled";
+  dust.visible = false;
   dust.frustumCulled = false; // it spans the whole yard; skip the cull test
   scene.add(dust);
 

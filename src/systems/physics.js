@@ -502,8 +502,12 @@
     const escape = CBZ.game.mode === "escape";
     const sneakHeld = !!(keys["control"] || keys["c"]);
     player.crouch = !overview && !mapOpen && escape && !stunned && sneakHeld;
+    // Jail has no stamina drain/regeneration loop, so a zero carried over from
+    // city/survival (or written by the hunger system) must never turn Shift
+    // back into a 2m/s walk. Stamina remains authoritative in modes that own it.
+    const staminaReady = escape || player.stamina === undefined || player.stamina > 0;
     player.sprint = !overview && !mapOpen && !stunned && !player.crouch &&
-      !!keys["shift"] && len > 0 && (player.stamina === undefined || player.stamina > 0);
+      !!keys["shift"] && len > 0 && staminaReady;
     const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.

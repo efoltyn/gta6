@@ -18,8 +18,11 @@
       SURVIVAL + ESCAPE modes had NO hunger mechanic before this file —
       this file adds the whole Minecraft loop for them (start 80, drains
       1.2/in-game-hour idle x2 sprinting, eating restores it, hunger<30
-      blocks sprint, hunger===0 starves — fully lethal, no mercy floor,
-      per the plan's "survival mode: full lethal"). CBZ.player.hunger is
+      blocks sprint in stamina-managed modes, hunger===0 starves — fully
+      lethal, no mercy floor, per the plan's "survival mode: full lethal").
+      Escape/jail intentionally has unlimited sprint because it has no stamina
+      update loop; hunger still drains and starvation still applies there.
+      CBZ.player.hunger is
       kept in sync every frame for ANY mode (city mirrors g.hunger;
       survival/escape read this file's own g._oocHunger) — one field any
       consumer can read regardless of which mode is live.
@@ -129,7 +132,7 @@
   const PLAYER_START = 80;
   const DRAIN_PER_HR = 1.2;      // hunger points/in-game-hour, idle
   const SPRINT_MULT = 2;         // sprinting burns through food twice as fast
-  const HUNGRY_SPRINT_GATE = 30; // below this, sprint is gated off entirely
+  const HUNGRY_SPRINT_GATE = 30; // below this, stamina-managed sprint is gated off
   const STARVE_DMG_PER_SEC = 0.25; // 1 hp per 4s at hunger===0 (non-city; city keeps its own C.starveDmg rate)
 
   // FOOD_FILL: the "hungerFill field default" the plan calls for — systems/
@@ -168,9 +171,10 @@
     }
     // ---- cross-mode effects, driven by the just-synced CBZ.player.hunger ----
     const h = CBZ.player.hunger;
-    if (h != null && h < HUNGRY_SPRINT_GATE) {
-      // physics.js:491 gates sprint on `player.stamina > 0` — draining it to 0
-      // is the cleanest read-only seam into that gate from outside physics.js.
+    if (g.mode !== "escape" && h != null && h < HUNGRY_SPRINT_GATE) {
+      // City/survival own stamina drain + regeneration, so zero is their
+      // explicit hungry-sprint gate. Escape owns no stamina loop and must not
+      // inherit a permanent zero that disables movement for the whole jail run.
       P.stamina = 0;
     }
     // city/death.js's out-of-combat regen reads this flag (one guarded line

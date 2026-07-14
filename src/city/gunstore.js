@@ -313,7 +313,7 @@
   function setSold(s, on) {
     s.sold = !!on;
     if (s.model) s.model.visible = !on;
-    if (s.tag) s.tag.visible = !on;
+    if (s.tag) s.tag.visible = false;
     if (on) {
       if (!s.soldTag) {
         s.soldTag = tagSprite("SOLD — restock soon", "#ff7a7a", 2.0, 0.5);

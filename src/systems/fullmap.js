@@ -30,7 +30,7 @@
   const arrow = document.getElementById("waypointArrow");
   const distEl = document.getElementById("waypointDist");
   const labelEl = document.getElementById("waypointLabel");
-  const MODE_TITLE = { escape: "PRISON MAP", survival: "ISLAND MAP", city: "GANG LIFE MAP" };
+  const MODE_TITLE = { escape: "PRISON MAP", survival: "ISLAND MAP", city: "WORLD MAP" };
 
   const map = {
     active: false,
@@ -65,6 +65,11 @@
       const A = CBZ.city && CBZ.city.arena;
       if (A) {
         let minX = A.minX, maxX = A.maxX, minZ = A.minZ, maxZ = A.maxZ;
+        const mt = A.mapTerrain && A.mapTerrain.bounds;
+        if (mt) {
+          minX = Math.min(minX, mt.minX); maxX = Math.max(maxX, mt.maxX);
+          minZ = Math.min(minZ, mt.minZ); maxZ = Math.max(maxZ, mt.maxZ);
+        }
         if (A.annex) {
           minX = Math.min(minX, A.annex.cx - A.annex.radius);
           maxX = Math.max(maxX, A.annex.cx + A.annex.radius);
@@ -76,7 +81,11 @@
           minX = Math.min(minX, rg.minX); maxX = Math.max(maxX, rg.maxX);
           minZ = Math.min(minZ, rg.minZ); maxZ = Math.max(maxZ, rg.maxZ);
         }
-        return { minX: minX - 10, maxX: maxX + 10, minZ: minZ - 10, maxZ: maxZ + 10 };
+        // Leave an honest strip of navigable water around the surveyed coast.
+        // Ten metres was effectively no margin at the whole-world scale and
+        // made the terrain look like a board filling the map frame.
+        const waterMargin = 90;
+        return { minX: minX - waterMargin, maxX: maxX + waterMargin, minZ: minZ - waterMargin, maxZ: maxZ + waterMargin };
       }
       const C = CBZ.CITY || { center: { x: 0, z: -700 }, blocks: 6, block: 34, road: 9 };
       const step = (C.block || 34) + (C.road || 9);
@@ -490,9 +499,19 @@
   // desert" is legible. A casino town gets a gold pip. Drawn LIVE at fixed
   // size so the marker never balloons at zoom.
   function drawSettlementsLive(p) {
-    const list = CBZ.settlements || [];
+    // Larger, more important settlements get first claim on label space.  The
+    // source registry is build-order data, not cartographic priority, so using
+    // it verbatim made tiny hamlets hide actual cities at the fit view.
+    const list = (CBZ.settlements || []).slice().sort(function (a, b) {
+      const an = (a && a.counts ? (a.counts.shops || 0) + (a.counts.homes || 0) : 0);
+      const bn = (b && b.counts ? (b.counts.shops || 0) + (b.counts.homes || 0) : 0);
+      return bn - an;
+    });
     if (!list.length) return;
     const A = CBZ.city && CBZ.city.arena;
+    const settlementNames = new Set(list.map(function (s) {
+      return String((s && s.name) || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    }));
     const boxes = [];   // placed label AABBs (greedy declutter, like the POI labels)
     const hit = (x0, y0, x1, y1) => { for (let i = 0; i < boxes.length; i++) { const b = boxes[i]; if (x0 < b.x1 && x1 > b.x0 && y0 < b.y1 && y1 > b.y0) return true; } return false; };
     // SEED with the baked region/biome name boxes so towns never overwrite the
@@ -500,6 +519,10 @@
     if (A) for (const rg of A.regions || []) {
       if (isLink(rg) || rg.underlay) continue;
       const name = rg.name || rg.biome || ""; if (!name) continue;
+      // A mini-city registers both a terrain footprint and a settlement.  Its
+      // terrain record is intentionally not lettered on the baked plate, so it
+      // must not reserve an invisible label box here either.
+      if (settlementNames.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
       const c = regionCentroid(rg);
       const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
       const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
@@ -587,6 +610,7 @@
   const BIOME_FILL = {
     city: { fill: "#3d4859", edge: "#93a7c4" },
     commerce: { fill: "#3e4c3a", edge: "#a7c186" },
+    wilds: { fill: "#526f43", edge: "#89a66d" },
     speedway: { fill: "#4a4150", edge: "#c99a66" },
     airport: { fill: "#3a3f4a", edge: "#98a3b5" },
     military: { fill: "#414833", edge: "#7e8f5a" },
@@ -666,6 +690,192 @@
   function shade(hex, f, a) {   // f>0 lighten toward white, f<0 darken
     const c = hexRgb(hex).map(function (v) { return Math.round(f >= 0 ? v + (255 - v) * f : v * (1 + f)); });
     return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + (a == null ? 1 : a) + ")";
+  }
+
+  // ---- REAL TERRAIN BASEMAP -----------------------------------------------
+  // Sample the exact coast field exported by continent.js and the same real
+  // ground-height oracle used by player physics.  This is a cached plate bake,
+  // so a ~3px raster costs nothing while the map is open.  Negative coast
+  // distance becomes real shallow/deep water; dry land gets biome colour, a
+  // sand edge and 20m elevation bands.  No roads, synthetic coast rectangles
+  // or backdrop terrain functions enter this map.
+  function drawTerrainBasemap(A, p) {
+    const mt = A && A.mapTerrain;
+    if (!mt || typeof mt.shoreAt !== "function") return false;
+    const regs = A.regions || [];
+    const STEP = 3;
+    const img = ctx.createImageData(W, H), data = img.data;
+    const x0 = Math.max(0, Math.floor(p.x(p.bounds.minX)));
+    const x1 = Math.min(W, Math.ceil(p.x(p.bounds.maxX)));
+    const y0 = Math.max(0, Math.floor(p.z(p.bounds.minZ)));
+    const y1 = Math.min(H, Math.ceil(p.z(p.bounds.maxZ)));
+    const sand = [170, 156, 108], high = [224, 230, 232];
+    const shallow = [39, 126, 143], shelf = [18, 70, 96], deep = [7, 31, 51];
+    const wild = hexRgb(BIOME_FILL.wilds.fill);
+    const natural = { desert: 1, forest: 1, farmland: 1, snow: 1 };
+
+    function mix(a, b, t) { return Math.round(a + (b - a) * t); }
+    function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+    function smooth01(v) { v = clamp01(v); return v * v * (3 - 2 * v); }
+
+    // Position-hash value noise: deterministic, allocation-free and independent
+    // of worldgen RNG streams. It shades LAND COVER only; elevation and contour
+    // placement continue to come exclusively from A.groundHeightAt below.
+    function hash2(ix, iz, salt) {
+      let h = Math.imul(ix | 0, 0x1f123bb5) ^ Math.imul(iz | 0, 0x5f356495) ^ (salt | 0);
+      h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+      h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+      return ((h ^ (h >>> 15)) >>> 0) / 4294967295;
+    }
+    function coverNoise(x, z, cell, salt) {
+      const gx = x / cell, gz = z / cell;
+      const ix = Math.floor(gx), iz = Math.floor(gz);
+      const fx = smooth01(gx - ix), fz = smooth01(gz - iz);
+      const a = hash2(ix, iz, salt), b = hash2(ix + 1, iz, salt);
+      const c = hash2(ix, iz + 1, salt), d = hash2(ix + 1, iz + 1, salt);
+      return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fz;
+    }
+    function signedRegionDistance(r, x, z) {
+      if (r.kind === "circle") return r.r + (r.pad || 0) - Math.hypot(x - r.cx, z - r.cz);
+      const pad = r.pad || 0;
+      const minX = r.minX - pad, maxX = r.maxX + pad;
+      const minZ = r.minZ - pad, maxZ = r.maxZ + pad;
+      const ox = Math.max(minX - x, 0, x - maxX);
+      const oz = Math.max(minZ - z, 0, z - maxZ);
+      if (ox || oz) return -Math.hypot(ox, oz);
+      return Math.min(x - minX, maxX - x, z - minZ, maxZ - z);
+    }
+
+    // Natural biome records are authored as rectangles for gameplay. Convert
+    // each to a soft, warped influence for cartography so no rectangular zoning
+    // plate survives on the terrain map. Facilities and settlements stay labels.
+    const covers = [];
+    for (let i = 0; i < regs.length; i++) {
+      const r = regs[i];
+      if (!r || r.underlay || isLink(r) || !natural[r.biome]) continue;
+      const spanX = r.kind === "circle" ? r.r * 2 : r.maxX - r.minX;
+      const spanZ = r.kind === "circle" ? r.r * 2 : r.maxZ - r.minZ;
+      covers.push({
+        r: r, biome: r.biome, rgb: hexRgb(biomePal(r.biome).fill),
+        salt: hashStr((r.name || r.biome) + "#cover"),
+        feather: Math.max(52, Math.min(118, Math.min(spanX, spanZ) * 0.14)),
+      });
+    }
+
+    function landCoverAt(x, z) {
+      // Broad temperate variation keeps the continent from becoming a single
+      // flat green fill: greener hollows, dry scrub and loam are colour texture,
+      // not invented relief.
+      const broad = coverNoise(x, z, 330, 0x41a7);
+      const mid = coverNoise(x, z, 92, 0x73d1);
+      let r = wild[0] + (broad - 0.5) * 25 + (mid - 0.5) * 8;
+      let g = wild[1] + (broad - 0.5) * 12 + (mid - 0.5) * 10;
+      let b = wild[2] - (broad - 0.5) * 10 + (mid - 0.5) * 5;
+      let sum = 0, rr = 0, gg = 0, bb = 0;
+      let forest = 0, farm = 0, desert = 0, snow = 0;
+      for (let i = 0; i < covers.length; i++) {
+        const c = covers[i], f = c.feather;
+        // Two independent low-frequency offsets bend straight edges and round
+        // corners. A finer signed-distance wobble prevents a smooth blur box.
+        const wx = (coverNoise(x, z, 230, c.salt) - 0.5) * f * 1.25;
+        const wz = (coverNoise(x, z, 230, c.salt ^ 0x6d2b79f5) - 0.5) * f * 1.25;
+        const edge = (coverNoise(x, z, 76, c.salt ^ 0x27d4eb2d) - 0.5) * f * 0.7;
+        const d = signedRegionDistance(c.r, x + wx, z + wz) + edge;
+        const w = smooth01((d + f) / (f * 2));
+        if (w <= 0.001) continue;
+        const ww = w * w; // deep biome owns its hue; feather stays understated
+        sum += ww; rr += c.rgb[0] * ww; gg += c.rgb[1] * ww; bb += c.rgb[2] * ww;
+        if (c.biome === "forest") forest += ww;
+        else if (c.biome === "farmland") farm += ww;
+        else if (c.biome === "desert") desert += ww;
+        else if (c.biome === "snow") snow += ww;
+      }
+      if (sum > 0) {
+        const t = smooth01(Math.min(1, sum));
+        r += (rr / sum - r) * t; g += (gg / sum - g) * t; b += (bb / sum - b) * t;
+      }
+
+      // Biome-specific MICRO texture is blended by the same organic influence.
+      // It reads as canopy/field/dune/scree grain, never as a symbol or icon.
+      const denom = Math.max(1, sum);
+      const fw = Math.min(1, forest / denom), aw = Math.min(1, farm / denom);
+      const dw = Math.min(1, desert / denom), sw = Math.min(1, snow / denom);
+      const canopy = coverNoise(x, z, 34, 0x18b3);
+      const fields = 0.5 + 0.5 * Math.sin(x * 0.032 + z * 0.009 + coverNoise(x, z, 150, 0x99e1) * 2.4);
+      const dunes = 0.5 + 0.5 * Math.sin(x * 0.022 - z * 0.013 + coverNoise(x, z, 180, 0x5a17) * 3.2);
+      let grain = 0.96 + (mid - 0.5) * 0.12;
+      grain *= 1 + fw * ((canopy - 0.5) * 0.25 - 0.04);
+      grain *= 1 + aw * ((fields - 0.5) * 0.12);
+      grain *= 1 + dw * ((dunes - 0.5) * 0.1);
+      grain *= 1 + sw * ((canopy - 0.5) * 0.08);
+      return { r: r * grain, g: g * grain, b: b * grain };
+    }
+
+    for (let py = y0; py < y1; py += STEP) {
+      const wz = p.wz(py + STEP * 0.5);
+      for (let px = x0; px < x1; px += STEP) {
+        const wx = p.wx(px + STEP * 0.5);
+        let shore;
+        try { shore = +mt.shoreAt(wx, wz); } catch (e) { shore = -1; }
+        if (!(shore >= 0)) {
+          // shoreAt is a signed distance-like field.  Its negative magnitude
+          // is therefore useful bathymetry: turquoise at the beach, blue on
+          // the shelf and dark water offshore.  This is the exact playable
+          // coast, not an invented island outline.
+          const d = Number.isFinite(shore) ? Math.max(0, -shore) : 999;
+          const t0 = Math.min(1, d / 90);
+          const t1 = Math.min(1, Math.max(0, (d - 90) / 260));
+          let r = mix(shallow[0], shelf[0], t0);
+          let g = mix(shallow[1], shelf[1], t0);
+          let b = mix(shallow[2], shelf[2], t0);
+          r = mix(r, deep[0], t1); g = mix(g, deep[1], t1); b = mix(b, deep[2], t1);
+          const waterGrain = 0.97 + coverNoise(wx, wz, 135, 0x2ad5) * 0.055;
+          r = Math.round(r * waterGrain); g = Math.round(g * waterGrain); b = Math.round(b * waterGrain);
+          // Subtle 50m depth contours make the water navigable without wave
+          // doodles or fake roads. Keep them narrow so they remain terrain.
+          if (d > 18 && d % 50 < 3.5) { r = Math.round(r * 1.12); g = Math.round(g * 1.12); b = Math.round(b * 1.12); }
+          for (let oy = 0; oy < STEP && py + oy < H; oy++) {
+            for (let ox = 0; ox < STEP && px + ox < W; ox++) {
+              const q = ((py + oy) * W + px + ox) * 4;
+              data[q] = r; data[q + 1] = g; data[q + 2] = b; data[q + 3] = 255;
+            }
+          }
+          continue;
+        }
+        const cover = landCoverAt(wx, wz);
+        let r = cover.r, g = cover.g, b = cover.b;
+        if (shore < 16) {
+          const t = smooth01(shore / 16);
+          r = mix(sand[0], r, t); g = mix(sand[1], g, t); b = mix(sand[2], b, t);
+        }
+        const h = A.groundHeightAt ? Math.max(0, +A.groundHeightAt(wx, wz) || 0) : 0;
+        if (h > 0.5) {
+          const t = Math.min(0.88, h / 180);
+          r = mix(r, high[0], t); g = mix(g, high[1], t); b = mix(b, high[2], t);
+          // Real-height hillshade (light from NW) gives the massif form between
+          // its exact 20m contours. No procedural/backdrop height enters here.
+          const eps = 12;
+          const hW = Math.max(0, +A.groundHeightAt(wx - eps, wz) || 0);
+          const hE = Math.max(0, +A.groundHeightAt(wx + eps, wz) || 0);
+          const hN = Math.max(0, +A.groundHeightAt(wx, wz - eps) || 0);
+          const hS = Math.max(0, +A.groundHeightAt(wx, wz + eps) || 0);
+          let k = Math.max(0.72, Math.min(1.2, 0.98 + (hW - hE + hS - hN) * 0.008));
+          const rem = h % 20, contour = Math.min(rem, 20 - rem);
+          if (contour < 2.4) k *= 0.72;
+          r = Math.max(0, Math.min(255, Math.round(r * k)));
+          g = Math.max(0, Math.min(255, Math.round(g * k)));
+          b = Math.max(0, Math.min(255, Math.round(b * k)));
+        }
+        for (let oy = 0; oy < STEP && py + oy < H; oy++) {
+          for (let ox = 0; ox < STEP && px + ox < W; ox++) {
+            const q = ((py + oy) * W + px + ox) * 4;
+            data[q] = r; data[q + 1] = g; data[q + 2] = b; data[q + 3] = 255;
+          }
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return true;
   }
   // pass 1 (UNDER): shadow + shallow-water halo for every landmass FIRST, so
   // no island's glow smears over a neighbour's finished land.
@@ -831,9 +1041,10 @@
     ctx.fillText(m + " m", x0 + px + 7, y0 + 2);
     ctx.restore();
   }
-  // links (causeways/bridges between islands) draw as thin tan connectors, NOT
-  // filled land + named — so they don't clutter the map with "desert-causeway".
-  function isLink(rg) { return /causeway|bridge/i.test(rg.name || "") || (rg.pad != null && rg.pad <= 1); }
+  // Only explicitly named links are links. `pad<=1` used to misclassify the
+  // continent's five underlay bands as roads, creating the giant grey/yellow
+  // bars seen on the map.
+  function isLink(rg) { return /causeway|bridge|link/i.test(rg.name || ""); }
   function regionCentroid(rg) {
     if (rg.kind === "circle") return { x: rg.cx, z: rg.cz };
     return { x: (rg.minX + rg.maxX) * 0.5, z: (rg.minZ + rg.maxZ) * 0.5 };
@@ -1130,51 +1341,21 @@
     const mainRg = { kind: "rect", minX: A.minX, maxX: A.maxX, minZ: A.minZ, maxZ: A.maxZ, name: "Port Vance", biome: "city" };
     const annexRg = A.annex ? { kind: "circle", cx: A.annex.cx, cz: A.annex.cz, r: A.annex.radius, name: "Commerce Annex", biome: "commerce" } : null;
     onPlate(plates.base, function () {
-      // ---- LAND pass 1: every landmass drops its shadow + shallow-water halo
-      //      onto the open sea first, so no island's glow smears a neighbour.
-      // continental underlay (city/continent.js) paints FIRST, as the ground
-      // every specific place sits on — sort is stable for everything else.
-      const landRegions = (A.regions || []).filter(function (r) { return !isLink(r); })
-        .sort(function (a, b) { return (b.underlay ? 1 : 0) - (a.underlay ? 1 : 0); });
-      for (const rg of landRegions) paintLandUnder(rg, p);
-      paintLandUnder(mainRg, p);
-      if (annexRg) paintLandUnder(annexRg, p);
-      // ---- HIGHWAYS: causeways/bridges drawn as connected ROADS (casing +
-      //      asphalt + dashed centerline), endpoints snapped onto each shore so
-      //      the tarmac visibly touches both landmasses instead of floating.
-      //      Drawn between the passes so their ends tuck UNDER the coastlines.
-      const mainRect = { kind: "rect", minX: A.minX, maxX: A.maxX, minZ: A.minZ, maxZ: A.maxZ, pad: 4 };
-      for (const rg of A.regions || []) {
-        if (!isLink(rg)) continue;
-        const ax = linkAxis(rg);
-        const others = (A.regions || []).filter(function (r) { return r !== rg && !r.underlay; });
-        const a = snapEndpointToLand(ax.ax, ax.az, (ax.ax + ax.bx) / 2, (ax.az + ax.bz) / 2, others, mainRect);
-        const b = snapEndpointToLand(ax.bx, ax.bz, (ax.ax + ax.bx) / 2, (ax.az + ax.bz) / 2, others, mainRect);
-        drawHighway(a.x, a.z, b.x, b.z, ax.wWorld, p, true);
+      // Primary path: exact coast + real elevation.  The fallback exists only
+      // for modes/builds without continent.js; it excludes underlay registry
+      // bands because those are bookkeeping rectangles, not geography.
+      if (!drawTerrainBasemap(A, p)) {
+        const landRegions = (A.regions || []).filter(function (r) { return !isLink(r) && !r.underlay; });
+        for (const rg of landRegions) paintLandUnder(rg, p);
+        paintLandUnder(mainRg, p);
+        if (annexRg) paintLandUnder(annexRg, p);
+        for (const rg of landRegions) paintLandTop(rg, p, rg.biome);
+        paintLandTop(mainRg, p, "city");
+        if (annexRg) paintLandTop(annexRg, p, "commerce");
       }
-      // ---- LAND pass 2: gradient fill + beach ring + biome texture + surf.
-      for (const rg of landRegions) paintLandTop(rg, p, rg.biome);
-      paintLandTop(mainRg, p, "city");
-      if (annexRg) paintLandTop(annexRg, p, "commerce");
-      // busy-ness wash under the roads (brightness = pop weight)
-      eachDistrict(p, A, function (d, mx, mz, w, h, busy) {
-        ctx.fillStyle = "rgba(190,216,255," + (0.03 + 0.10 * busy).toFixed(3) + ")";
-        ctx.fillRect(mx - w / 2, mz - h / 2, w, h);
-      });
-      if (MAP_V2()) drawArenaRoads(A, p); else drawRoads(A, p);   // real per-road network vs the coarse grid
-      if (A.annex) {
-        for (const r of A.annex.roads || []) line(r.vertical ? r.x : r.x - r.len / 2, r.vertical ? r.z - r.len / 2 : r.z, r.vertical ? r.x : r.x + r.len / 2, r.vertical ? r.z + r.len / 2 : r.z, p, "rgba(156,168,182,.55)", Math.max(2, 5 * p.sc));
-      }
-      // big lettered district names over the roads (faint, lots sit on top).
-      // No letter-spacing smear — multi-word names stay legible.
-      eachDistrict(p, A, function (d, mx, mz, w) {
-        const name = (d.name || "").toUpperCase();
-        if (!name) return;
-        const size = Math.max(10, Math.min(16, (w * 0.9) / Math.max(6, name.length * 0.55)));
-        ctx.font = "700 " + size.toFixed(1) + "px Fredoka, sans-serif"; ctx.textAlign = "center";
-        ctx.fillStyle = "rgba(222,236,255,.22)";
-        ctx.fillText(name, mx, mz + size * 0.35);
-      });
+      // District names used to collapse into an unreadable knot underneath
+      // PORT VANCE at the geographic fit. The named city is the correct scale
+      // for this terrain map; block-level identity remains in the live world.
       // ---- METROPOLIS TITLE: the mainland city is a named place too, equal to
       //      the islands. A large faint banner sits just above the district grid.
       {
@@ -1194,6 +1375,9 @@
       if (A.annex) drawLots(A.annex.lots, p);
     });
     onPlate(plates.marks, function () {
+      const settlementNames = new Set((CBZ.settlements || []).map(function (s) {
+        return String((s && s.name) || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+      }));
       // POI DIAMONDS only (no text) — labels are a dynamic, decluttered pass in
       // drawCity so they don't pile into unreadable mush at the fit zoom.
       // MAP_V2: fixed-size glyphs (POI icons, climb marks, board ticks) are NOT
@@ -1216,6 +1400,9 @@
         const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
         const name = rg.name || rg.biome || "";
         if (!name) continue;
+        // Mini-city builders register both a terrain region and a settlement.
+        // Let the collision-aware settlement layer draw that city once.
+        if (settlementNames.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
         const size = Math.max(11, Math.min(20, wpx / Math.max(6, name.length * 0.55)));
         const nx = p.x(c.x), ny = p.z(c.z);
         ctx.textAlign = "center";
@@ -1303,43 +1490,46 @@
     // bake the static plates ONCE at the base fit (NOT the panned/zoomed view)
     if (plates.a !== A) buildCityPlates(baseProjection(p.bounds), A);
     const wanted = MAP_V2() ? starCount() : ((CBZ.game && CBZ.game.wanted) || 0);
-    compositePlate(plates.base, p);   // districts + roads + lettering (rescaled)
+    compositePlate(plates.base, p);   // real terrain + geographic lettering
+    const detail = map.view.z >= 2.4;
     // THE BRIDGE — the sole chokepoint between mainland and island. WHY it matters
     // mechanically: at 3★+ the cops seal it (roadblocks), so it turns red + SEALED
     // — the map tells you your island escape is cut off.
     if (A.bridge) {
       const b = A.bridge, mz = (b.minZ + b.maxZ) / 2, sealed = wanted >= 3;
-      // proper road casing for the bridge too; turns red overlay when sealed
-      drawHighway(b.minX, mz, b.maxX, mz, (b.maxZ - b.minZ), p, true);
-      if (sealed) {
-        ctx.save(); ctx.lineCap = "round";
-        ctx.strokeStyle = "rgba(255,80,70,.7)"; ctx.lineWidth = Math.max(5, (b.maxZ - b.minZ) * p.sc);
-        ctx.beginPath(); ctx.moveTo(p.x(b.minX), p.z(mz)); ctx.lineTo(p.x(b.maxX), p.z(mz)); ctx.stroke();
-        ctx.restore();
+      // A small cartographic crossing marker carries the gameplay fact without
+      // drawing another giant road ribbon across the terrain.
+      if (sealed || detail) {
+        const bx = (b.minX + b.maxX) / 2, by = mz;
+        dot(bx, by, p, sealed ? "#ff5a4c" : "rgba(220,232,240,.72)", sealed ? 5 : 3);
+        text(sealed ? "BRIDGE — SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
+          sealed ? "#ff8b7a" : "rgba(225,240,255,.58)", 10);
       }
-      text(sealed ? "BRIDGE — SEALED" : "BRIDGE", (b.minX + b.maxX) / 2, mz - (b.maxZ - b.minZ) * 0.9, p, sealed ? "#ff8b7a" : "rgba(225,240,255,.42)", 11);
     }
-    drawGangTurf(p);   // district control board + HQ crests UNDER the lot/POI layer
-    compositePlate(plates.lots, p);   // lot blocks over the turf paint
-    // live actors UNDER the labels
-    for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
-      const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p, "rgba(232,238,245,.62)", 1.6);
+    // Tactical block/actor ink is useful only when zoomed into a city. At the
+    // geographic fit it disappears so terrain and named cities own the map.
+    if (detail) {
+      drawGangTurf(p);
+      compositePlate(plates.lots, p);
+      for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
+        const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p, "rgba(232,238,245,.62)", 1.6);
+      }
+      for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
+      for (const cop of CBZ.cityCops || []) if (!cop.dead) dot(cop.pos.x, cop.pos.z, p, "#5bd0ff", 2.7);
     }
-    for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
-    for (const cop of CBZ.cityCops || []) if (!cop.dead) dot(cop.pos.x, cop.pos.z, p, "#5bd0ff", 2.7);
     compositePlate(plates.marks, p);  // region/biome names (glyphs draw live below)
     // ---- MAP_V2 LIVE GLYPH LAYER: fixed-size at the current zoom so nothing
     //      balloons. POI icons + settlements always; climb marks + board ticks
     //      only once you've zoomed IN (planning detail, not fit-view clutter). ----
     if (MAP_V2()) {
-      drawCityPoisLive(p, A);        // LOD + decluttered shop/landmark icons
+      if (detail) drawCityPoisLive(p, A); // city services only at city scale
       drawSettlementsLive(p);        // named towns (labels collision-avoided)
       if (map.view.z >= 2.6 || map._cursor) { drawClimbMarks(p, A); drawBoardTicks(p); }
     }
-    drawCityLabels(p, A);             // DECLUTTERED dynamic POI labels (tiered, collision-avoided)
-    drawRentedBoards(p);                // the gold $ over the boards that are YOURS
+    if (detail) drawCityLabels(p, A);
+    if (detail) drawRentedBoards(p);
     // ---- EMPIRE: ring every lot YOU own in gold so the economy is spatial ----
-    if (CBZ.cityOwnsLot) {
+    if (detail && CBZ.cityOwnsLot) {
       ctx.strokeStyle = "#ffd451"; ctx.lineWidth = 2;
       const ring = (lots) => { for (const lot of lots || []) { if (lot.building && CBZ.cityOwnsLot(lot)) { ctx.beginPath(); ctx.arc(p.x(lot.cx), p.z(lot.cz), 9, 0, Math.PI * 2); ctx.stroke(); } } };
       ring(A.lots); if (A.annex) ring(A.annex.lots);
@@ -1394,7 +1584,9 @@
     } else {
       ctx.fillStyle = "#08111d"; ctx.fillRect(0, 0, W, H);
     }
-    drawGrid(p);
+    // The city view is a geographic terrain map, not graph paper. Prison and
+    // survival retain their small tactical grid.
+    if (which !== "city") drawGrid(p);
     if (which === "survival") drawSurvival(p);
     else if (which === "city") drawCity(p);
     else drawEscape(p);
@@ -1417,6 +1609,14 @@
       } else if (which === "survival") {
         legend.innerHTML = common + "<span><i style='background:#ffe38a'></i>High ground</span><span><i style='background:#e8eef5'></i>Survivor</span>";
       } else {
+        if (map.view.z < 2.4) {
+          legend.innerHTML = common +
+            "<span><i style='background:#e6c069'></i>Cities</span>" +
+            "<span><i style='background:#526f43'></i>Terrain</span>" +
+            "<span><i style='background:#d9e1e5'></i>Elevation</span>" +
+            "<span><i style='background:#277e8f'></i>Water depth</span>";
+          return;
+        }
         // grouped by WHY: Navigation, Threats, Your empire, then the clickable
         // Territory swatches (each routes to that crew's HQ).
         const grp = (t) => "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>" + t + "</span>";

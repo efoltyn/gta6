@@ -41,6 +41,10 @@
     if (force) { shadowForce = true; shadowStats.forced++; }
   };
   CBZ.onAlways(1, function () {
+    // A background tab can still receive very sparse animation callbacks on
+    // some browsers. Do not spend one of those callbacks rebuilding a shadow
+    // map; the elapsed interval guarantees an immediate refresh on return.
+    if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") return;
     if (!renderer.shadowMap.enabled || !CBZ.sun || !CBZ.sun.castShadow) return;
     const p = CBZ.player;
     const moving = !!(p && ((p.speed || 0) > 0.08 || Math.abs(p.vy || 0) > 0.08 || p.driving));

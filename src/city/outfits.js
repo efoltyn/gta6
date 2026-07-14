@@ -55,14 +55,12 @@
                  colors: { legs: 0x20242c, torso: 0x2bb673, collar: 0xeef3f7, arms: 0x2bb673, shoes: 0xf2f2f2 } },
     // ---- NEW STREETWEAR (painted ids in clothes.js; feature-detected — a
     //      missing painter falls back to the flat colors below, never a crash) ----
-    // wifebeater: PAINT.wifebeater bares the shoulders/arms (a shared-atlas
-    // skin-tone approximation — see the painter's own comment), so collar AND
-    // arms are set to that same tone here too: if clothes.js is ever missing,
-    // recolorRig's flat fallback (city/outfits.js recolorRig()) paints the
-    // collar box and arm sleeves with these colors.arms/collar hexes directly,
-    // and this keeps that fallback reading as bare skin instead of a shirt.
+    // The tank keeps the arms bare, but the structural collar stays fabric.
+    // Painting that wide collar box skin-coloured made it read as a rigid slab
+    // wrapped around the character's neck (especially in the portrait card).
+    // The atlas owns the small neckline cutout; only the actual arms use skin.
     wifebeater: { id: "wifebeater", name: "Ribbed Tank",   tier: "street", who: "corner regulars",   price: 8,    drip: 1,
-                 colors: { legs: 0x35383f, torso: 0xe6e3d9, collar: 0xcf9a72, arms: 0xcf9a72, shoes: 0x2b2b2b } },
+                 colors: { legs: 0x35383f, torso: 0xe6e3d9, collar: 0xe6e3d9, arms: 0xcf9a72, shoes: 0x2b2b2b } },
     puffer:    { id: "puffer",    name: "Block Puffer",     tier: "street", who: "corner crews",     price: 220,  drip: 4,
                  colors: { legs: 0x20242c, torso: 0x1d1f26, collar: 0x14161b, arms: 0x1d1f26, shoes: 0x101216 } },
     denim_jacket: { id: "denim_jacket", name: "Denim Jacket", tier: "street", who: "the block",      price: 160,  drip: 3,

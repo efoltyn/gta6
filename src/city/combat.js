@@ -418,7 +418,6 @@
     spend(7);
     const feel = weaponFeel();
     animSwing(feel.name === "blade" ? "cross" : "upper", true);
-    if (CBZ.sfx) CBZ.sfx("whoosh");
     const fx = P.pos.x, fz = P.pos.z;
     if (CBZ.city) CBZ.city.note(feel.name === "blade" ? "EXECUTED" : "FINISHED", 1.0);
     if (CBZ.doSlowmo) CBZ.doSlowmo(0.55);
@@ -453,7 +452,6 @@
     spend(finisher ? 9 : 5);
 
     const t = aimTarget(finisher ? 2.17 : 1.89, 0.3);
-    if (CBZ.sfx) CBZ.sfx("whoosh");
     const base = it() ? it().dmg : 16;
     // jab/cross scale up through the chain; the hook (3rd) is the big one
     const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (combo - 1) * 0.18));
@@ -489,7 +487,6 @@
     spend(16);
 
     const t = aimTarget(2.1, 0.2);
-    if (CBZ.sfx) CBZ.sfx("whoosh");
     const base = it() ? it().dmg : 16;
     const dmg = Math.round(base * 2.4);
     if (t) land(t, dmg, "heavy", { kind: "upper" });
@@ -1268,7 +1265,6 @@
     const oy = P.pos.y + 1.55;
     lobExplosive(ox, oy, oz, dir.x, dir.y, dir.z, {});
     syncGrenadeHud();
-    if (CBZ.sfx) CBZ.sfx("whoosh");
     if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();   // a quick throwing arm swing
     throwCD = GREN.throwCD;
   }

@@ -74,6 +74,15 @@
     downT: array(Float32Array, total), contactCD: array(Float32Array, total),
     item: array(Uint8Array, total, true), cigs: array(Uint8Array, total, true),
     dead: array(Uint8Array, total, true),   // 1 = killed by the player; removed from the live crowd
+    // Explicit close-crowd activity. Movement used to be inferred solely from
+    // a changing goal, which made the jail read as one perpetual random run.
+    // These compact rows let the renderer/sim agree on what a person is doing:
+    // 0 walk, 1 stand, 2 socialize, 3 action/workout, 4 fight, 5 flee.
+    activity: array(Uint8Array, total, true),
+    activityT: array(Float32Array, total),
+    activityHeading: array(Float32Array, total),
+    partner: array(Int32Array, total),
+    strikeT: array(Float32Array, total),
     // NPC_SCHEDULES night lockdown: 1 = "in their cell" — frozen at a per-id
     // bunk spot inside the cell block, skipped by selection/sim (still a dot
     // on the overview map, so the cells READ full at night). Not dead; dawn
@@ -248,6 +257,7 @@
     S.mood[id] = 50; S.skin[id] = SKIN[(rnd(id) * SKIN.length) | 0]; S.hair[id] = HAIR[(rnd(id) * HAIR.length) | 0];
     S.fem[id] = rnd(id) < 0.48 ? 1 : 0;
     rollInventory(id);
+    S.partner[id] = -1;
     randomPoint(id, zone, point);
     S.posX[id] = point.x; S.posZ[id] = point.z;
     updateDensityCell(id);
@@ -287,6 +297,7 @@
     x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
     return (x >>> 0) / 4294967296;
   };
+  S.ACTIVITY = Object.freeze({ WALK: 0, STAND: 1, SOCIAL: 2, ACTION: 3, FIGHT: 4, FLEE: 5 });
   // LOCKDOWN: freeze this agent at a per-id bunk spot inside the cell block
   // (CBZ.WORLD.cellBlock) — off the zone graph, so it must be skipped by the
   // sim/selection while parked (entities/crowd.js guards on S.parked).
@@ -297,6 +308,7 @@
     S.posX[id] = CELLS.x0 + 2 + S.idHash(id, 0xCE11) * (CELLS.x1 - CELLS.x0 - 4);
     S.posZ[id] = CELLS.z0 + 2 + S.idHash(id, 0xCE12) * (CELLS.z1 - CELLS.z0 - 4);
     S.velX[id] = S.velZ[id] = S.panic[id] = 0;
+    S.activity[id] = 1; S.activityT[id] = 0; S.partner[id] = -1; S.strikeT[id] = 0;
     updateDensityCell(id);
   };
   // dawn: back into the yard. (x,z) optional — the caller pre-checks the seat
@@ -306,6 +318,7 @@
     S.parked[id] = 0;
     if (x == null) { randomPoint(id, S.zone[id], point); x = point.x; z = point.z; }
     S.posX[id] = x; S.posZ[id] = z;
+    S.activity[id] = 0; S.activityT[id] = 0; S.partner[id] = -1; S.strikeT[id] = 0;
     updateDensityCell(id);
     planRoute(id, now, x, z);
   };
@@ -314,6 +327,7 @@
   S.respawnAll = function () {
     for (let id = 0; id < total; id++) {
       S.dead[id] = 0; S.grudge[id] = 0; S.downT[id] = 0; S.contactCD[id] = 0;
+      S.activity[id] = 0; S.activityT[id] = 0; S.partner[id] = -1; S.strikeT[id] = 0;
       if (S.parked[id]) {                 // lockdown doesn't survive a restart
         S.parked[id] = 0;
         randomPoint(id, S.zone[id], point);

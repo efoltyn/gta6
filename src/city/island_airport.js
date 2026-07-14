@@ -42,6 +42,34 @@
   });
   CBZ.CITY_AIRCRAFT_DIMS = AIRCRAFT_DIMS;
 
+  // Real passenger hookup. Aircraft geometry only owns seats and cabin bounds;
+  // actual people are ordinary live NPCs supplied by the shared life system.
+  // Keeping this as a registry (rather than baking voxel bodies into each
+  // model) lets one NPC implementation populate every present/future cabin.
+  const passengerCabins = CBZ.aircraftPassengerCabins || (CBZ.aircraftPassengerCabins = []);
+  const passengerCabinListeners = new Set();
+  CBZ.onAircraftPassengerCabinState = function (fn) {
+    if (typeof fn !== "function") return function () {};
+    passengerCabinListeners.add(fn);
+    return function () { passengerCabinListeners.delete(fn); };
+  };
+  function emitPassengerCabin(type, cabin, rec) {
+    passengerCabinListeners.forEach(function (fn) {
+      try { fn({ type, cabin: cabin || null, rec: rec || (cabin && cabin.rec) || null }); } catch (e) {}
+    });
+  }
+  function resetPassengerCabins() {
+    let changed = false;
+    for (let i = passengerCabins.length - 1; i >= 0; i--) {
+      const cab = passengerCabins[i];
+      if (!cab || cab.provider !== "airport") continue;
+      cab.active = false;
+      passengerCabins.splice(i, 1);
+      changed = true;
+    }
+    if (changed) emitPassengerCabin("reset", null, null);
+  }
+
   // ---- deterministic LCG: same airfield every run ----
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
   // — one world-seed knob instead of a per-file magic literal. rng() is
@@ -64,7 +92,7 @@
     grp.userData.milName = name || "Aircraft";
     grp.userData.hijackable = true;
     const dims = grp.userData.aircraftDims || null;
-    placed.push({
+    const rec = {
       group: grp, pos: grp.position, heading: heading || 0,
       kind: "plane", model: { name: name || "Aircraft" },
       // Civil airport aircraft are not military-jet stand-ins. The player-air
@@ -79,10 +107,210 @@
       collider: grp.userData.worldCollider || null,
       aircraftDims: dims,
       footW: dims ? dims.length : (footW || 18),
-      footL: dims ? dims.span : (footL || 18), taken: false, hot: true,
-    });
+      footL: dims ? dims.span : (footL || 18),
+      // Full span remains the interaction/flight footprint. Physical collision
+      // is only the fuselage, so a wing no longer creates a giant invisible
+      // wall while the body itself remains solid.
+      colliderW: dims ? dims.length : (footW || 18),
+      colliderL: dims ? Math.max(2.2, dims.fuselage + 0.45) : Math.min(5, footL || 5),
+      // Parked civilian aircraft are ordinary damageable world objects. Their
+      // HP lives on this same reusable record so gunfire, RPGs, boarding and
+      // the flight hand-off never create parallel fake copies of the plane.
+      maxHp: name === "Airliner" ? 420 : 250,
+      hp: name === "Airliner" ? 420 : 250,
+      taken: false, destroyed: false, hot: true,
+    };
+    placed.push(rec);
+    const cab = grp.userData.cabin;
+    if (rec.flightKind === "airliner" && cab) {
+      const hook = {
+        id: "airport-airliner-" + passengerCabins.length,
+        provider: "airport", kind: "airliner", group: grp, rec,
+        active: true, state: "parked", floorTop: cab.floorTop,
+        bounds: { minX: -12.2, maxX: 11.8, minZ: -1.42, maxZ: 1.42 },
+        door: { x: cab.doorX, z: cab.doorZ },
+        seats: cab.seats,
+        passengerSeats: cab.seats.filter(function (seat) { return !!seat.reservedForNpc; }),
+      };
+      cab.passengerCabin = hook;
+      passengerCabins.push(hook);
+      emitPassengerCabin("registered", hook, rec);
+    }
     return grp;
   }
+
+  // ============================================================
+  //  CIVIL AIRCRAFT TARGETING / DAMAGE
+  //
+  //  The old gun path only knew about the police gunship. Parked passenger
+  //  aircraft therefore swallowed no bullets and an RPG could paint a blast
+  //  in empty space behind one. These APIs expose the SAME `placed` records
+  //  used by boarding/flight. Narrow phase is an oriented FUSELAGE box — full
+  //  wingspan is deliberately excluded, preserving the no-invisible-wing-wall
+  //  rule for movement and weapons alike.
+  // ============================================================
+  function civilBodyBounds(rec) {
+    const dims = rec && (rec.aircraftDims || (rec.group && rec.group.userData && rec.group.userData.aircraftDims));
+    if (!dims) return null;
+    const liner = rec.flightKind === "airliner";
+    return {
+      hx: Math.max(1, dims.length * 0.5),
+      hz: Math.max(1.1, (dims.fuselage + 0.45) * 0.5),
+      // Landing gear is not a span-wide target. This brackets the actual body
+      // barrel (airliner CY=3.5/FH=3.95; private jet CY=2.1/FH=2.2).
+      minY: liner ? 1.45 : 0.9,
+      maxY: liner ? 5.55 : 3.25,
+    };
+  }
+
+  function slabAxis(origin, dir, lo, hi, span) {
+    if (Math.abs(dir) < 1e-8) return origin >= lo && origin <= hi;
+    let a = (lo - origin) / dir, b = (hi - origin) / dir;
+    if (a > b) { const q = a; a = b; b = q; }
+    if (a > span.min) span.min = a;
+    if (b < span.max) span.max = b;
+    return span.min <= span.max;
+  }
+
+  function civilRayEntry(rec, ox, oy, oz, dx, dy, dz, maxT) {
+    if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || rec.group.visible === false) return -1;
+    const b = civilBodyBounds(rec); if (!b) return -1;
+    const g = rec.group, h = g.rotation.y || 0, c = Math.cos(h), s = Math.sin(h);
+    const rx = ox - g.position.x, rz = oz - g.position.z;
+    // World -> model-local. Airport aircraft point along local +X.
+    const lx = rx * c - rz * s, lz = rx * s + rz * c;
+    const ldx = dx * c - dz * s, ldz = dx * s + dz * c;
+    const span = { min: 0, max: maxT == null ? Infinity : maxT };
+    if (!slabAxis(lx, ldx, -b.hx, b.hx, span)) return -1;
+    if (!slabAxis(oy - g.position.y, dy, b.minY, b.maxY, span)) return -1;
+    if (!slabAxis(lz, ldz, -b.hz, b.hz, span)) return -1;
+    return span.min >= 0 && span.min <= span.max ? span.min : -1;
+  }
+
+  CBZ.cityCivilAircraftRayTest = function (ox, oy, oz, dx, dy, dz, maxT) {
+    let best = null, bd = maxT == null ? Infinity : maxT;
+    for (let i = 0; i < placed.length; i++) {
+      const rec = placed[i];
+      const d = civilRayEntry(rec, ox, oy, oz, dx, dy, dz, bd);
+      if (d < 0 || d >= bd) continue;
+      bd = d;
+      best = { rec, dist: d, x: ox + dx * d, y: oy + dy * d, z: oz + dz * d };
+    }
+    return best;
+  };
+
+  CBZ.cityCivilAircraftAcquireTarget = function (ox, oy, oz, dx, dy, dz, range, coneDot) {
+    range = range || 260; coneDot = coneDot == null ? Math.cos(Math.PI / 10) : coneDot;
+    let best = null, bestScore = Infinity;
+    for (let i = 0; i < placed.length; i++) {
+      const rec = placed[i];
+      if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || rec.group.visible === false) continue;
+      const b = civilBodyBounds(rec); if (!b) continue;
+      const targetY = rec.group.position.y + (b.minY + b.maxY) * 0.5;
+      const tx = rec.group.position.x - ox, ty = targetY - oy, tz = rec.group.position.z - oz;
+      const distance = Math.hypot(tx, ty, tz);
+      if (distance < 5 || distance > range) continue;
+      const dot = (tx * dx + ty * dy + tz * dz) / distance;
+      if (dot < coneDot) continue;
+      const score = (1 - dot) * 8 + distance / range * 0.08;
+      if (score >= bestScore) continue;
+      const target = rec;
+      bestScore = score;
+      best = {
+        kind: "civil-aircraft", rec: target, dot, distance,
+        radius: target.flightKind === "airliner" ? 3.4 : 2.1,
+        seek: function () {
+          if (!target || target.destroyed || target.taken || !target.group || !target.group.parent || target.group.visible === false) return null;
+          const tb = civilBodyBounds(target);
+          return tb ? { x: target.group.position.x, y: target.group.position.y + (tb.minY + tb.maxY) * 0.5, z: target.group.position.z } : null;
+        },
+      };
+    }
+    return best;
+  };
+
+  function detachCivilCollider(rec) {
+    const col = rec && rec.collider;
+    if (!col || rec._colliderDetached) return;
+    const i = CBZ.colliders ? CBZ.colliders.indexOf(col) : -1;
+    if (i >= 0) CBZ.colliders.splice(i, 1);
+    rec._colliderDetached = true;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
+  function charAircraft(group) {
+    if (!group || group.userData.charred) return;
+    group.userData.charred = true;
+    group.traverse(function (o) {
+      if (!o.material) return;
+      function charOne(src) {
+        const m = src && src.clone ? src.clone() : src;
+        if (m && m.color) m.color.multiplyScalar(0.22);
+        if (m && m.emissive) m.emissive.multiplyScalar(0.08);
+        if (m) { m.transparent = false; m.opacity = 1; m.needsUpdate = true; }
+        return m;
+      }
+      o.material = Array.isArray(o.material) ? o.material.map(charOne) : charOne(o.material);
+    });
+  }
+
+  CBZ.cityDamageCivilAircraft = function (rec, amount, point, opts) {
+    opts = opts || {};
+    if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || !(amount > 0)) return false;
+    rec.hp = Math.max(0, (rec.hp == null ? rec.maxHp || 250 : rec.hp) - amount);
+    if (rec.hp > 0) return false;
+
+    rec.destroyed = true; rec.taken = true; rec.hot = false;
+    detachCivilCollider(rec);
+    const grp = rec.group, b = civilBodyBounds(rec);
+    const x = point && point.x != null ? point.x : grp.position.x;
+    const y = point && point.y != null ? point.y : grp.position.y + (b ? (b.minY + b.maxY) * 0.5 : 2.5);
+    const z = point && point.z != null ? point.z : grp.position.z;
+    grp.userData.hijackable = false;
+    grp.userData.milKind = null;
+    grp.userData.destroyed = true;
+    grp.userData.craft = null;
+    charAircraft(grp);
+    // Leave the actual model as a wreck; a small permanent list/settle keeps it
+    // from reading as an untouched aircraft paused behind the fireball.
+    grp.rotation.x += rec.flightKind === "airliner" ? -0.04 : -0.09;
+    grp.rotation.z += rec.flightKind === "airliner" ? 0.12 : 0.20;
+    grp.position.y -= rec.flightKind === "airliner" ? 0.18 : 0.12;
+    if (cabinState.rec === rec) cabinForceClear(false);
+    const hook = grp.userData.cabin && grp.userData.cabin.passengerCabin;
+    if (hook) { hook.state = "destroyed"; hook.active = false; emitPassengerCabin("destroyed", hook, rec); }
+
+    const heavy = rec.flightKind === "airliner";
+    if (CBZ.cityAirstrikeExplosion) {
+      try { CBZ.cityAirstrikeExplosion(x, z, { power: heavy ? 2.4 : 1.8, radius: heavy ? 12 : 9, byPlayer: !!opts.byPlayer, y }); } catch (e) {}
+    } else if (CBZ.cityExplosion) {
+      try { CBZ.cityExplosion(x, z, { power: heavy ? 2.1 : 1.6, radius: heavy ? 11 : 8, byPlayer: !!opts.byPlayer, y }); } catch (e) {}
+    }
+    if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, heavy ? 20 : 14); } catch (e) {} }
+    if (CBZ.cityCrashSmoke) {
+      try { CBZ.cityCrashSmoke(x, y, z); if (heavy) CBZ.cityCrashSmoke(x - 1.4, y + 0.5, z + 0.8); } catch (e) {}
+    }
+    if (CBZ.shake) { try { CBZ.shake(heavy ? 1.5 : 1.0); } catch (e) {} }
+    return true;
+  };
+
+  CBZ.cityCivilAircraftSplash = function (x, y, z, radius, maxDamage, opts) {
+    radius = Math.max(0.1, radius || 10); maxDamage = maxDamage || 0;
+    let hit = 0;
+    for (let i = 0; i < placed.length; i++) {
+      const rec = placed[i];
+      if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent) continue;
+      const b = civilBodyBounds(rec); if (!b) continue;
+      const cy = rec.group.position.y + (b.minY + b.maxY) * 0.5;
+      const d = Math.hypot(rec.group.position.x - x, cy - y, rec.group.position.z - z);
+      // The blast reaches the hull surface, not only the aircraft origin.
+      const hullD = Math.max(0, d - Math.max(b.hz, rec.flightKind === "airliner" ? 3.5 : 2.2));
+      if (hullD > radius) continue;
+      const damage = maxDamage * Math.max(0.18, 1 - hullD / radius);
+      if (damage > 0) { CBZ.cityDamageCivilAircraft(rec, damage, { x, y, z }, opts); hit++; }
+    }
+    return hit;
+  };
 
   // ============================================================
   //  CABIN BOARDING — the elevator-grammar door flow for the parked
@@ -126,6 +354,11 @@
   // lifecycle now (its restorePropCollider reattaches on park).
   function cabinForceClear(restoreCollider) {
     const rec = cabinState.rec;
+    const P = CBZ.player;
+    if (P && P._aircraftCabinSeat) {
+      if (P._aircraftCabinSeat.occupant === P) P._aircraftCabinSeat.occupant = null;
+      P._aircraftCabinSeat = null;
+    }
     cabinRemovePlatform();
     if (rec) {
       if (restoreCollider && rec._cabinDetached && rec.collider && !rec.taken) {
@@ -196,6 +429,7 @@
     let best = null, bd = Infinity;
     for (let i = 0; i < cab.seats.length; i++) {
       const s0 = cab.seats[i];
+      if (s0.occupant) continue;
       const d = (s0.x - l.x) * (s0.x - l.x) + (s0.z - l.z) * (s0.z - l.z);
       if (d < bd) { bd = d; best = s0; }
     }
@@ -204,10 +438,11 @@
     const th = rec.group.rotation.y;
     // seated body faces along (sin f, cos f) — aim it down the nose (+X local)
     try {
-      CBZ.propSit(P, {
+      const sat = CBZ.propSit(P, {
         x: w.x, y: rec.group.position.y + cab.floorTop + 0.45, z: w.z,
         face: th + Math.PI / 2, kind: "chair", lot: null, occupant: null,
       });
+      if (sat) { best.occupant = P; P._aircraftCabinSeat = best; }
     } catch (e) {}
   }
 
@@ -284,6 +519,14 @@
     for (let i = 0; i < placed.length; i++) {
       const rec = placed[i];
       const cab = rec.group && rec.group.userData && rec.group.userData.cabin;
+      const hook = cab && cab.passengerCabin;
+      if (hook) {
+        const state = rec.destroyed ? "destroyed" : (rec.taken ? "taken" : "parked");
+        if (state !== hook.state) {
+          hook.state = state; hook.active = state !== "destroyed";
+          emitPassengerCabin(state, hook, rec);
+        }
+      }
       if (!cab || !cab.panel) continue;
       let wantOpen = false;
       if (!rec.taken && rec.group.parent) {
@@ -315,6 +558,10 @@
       const rec = cabinState.rec;
       if (!P || P.dead || !rec || !rec.group || !rec.group.parent) { cabinForceClear(true); return; }
       if (P._aircraft || P.driving) { cabinForceClear(false); return; }   // stole it from the cockpit
+      if (P._aircraftCabinSeat && !P._propSeat) {
+        if (P._aircraftCabinSeat.occupant === P) P._aircraftCabinSeat.occupant = null;
+        P._aircraftCabinSeat = null;
+      }
       if (!P._propSeat) {
         const l = cabinLocal(rec, P.pos.x, P.pos.z);
         const lx = Math.max(-12.2, Math.min(11.8, l.x));
@@ -355,7 +602,7 @@
     // + one-shot guard so the rebuilt fleet re-registers as boardable, and
     // drop any stale cabin-boarding state (platform/collider refs die with
     // the old groups).
-    placed.length = 0; _reg = false; cabinReset();
+    placed.length = 0; _reg = false; cabinReset(); resetPassengerCabins();
 
     const BGU = THREE.BufferGeometryUtils;
 
@@ -382,8 +629,9 @@
     function aircraftSolid(group, dims) {
       const h = group.rotation.y || 0;
       const ca = Math.abs(Math.cos(h)), sa = Math.abs(Math.sin(h));
-      const w = ca * dims.length + sa * dims.span;
-      const d = sa * dims.length + ca * dims.span;
+      const bodyW = dims.length, bodyD = Math.max(2.2, dims.fuselage + 0.45);
+      const w = ca * bodyW + sa * bodyD;
+      const d = sa * bodyW + ca * bodyD;
       return solid(group.position.x, group.position.z, w, d, 0, dims.height, group);
     }
     // a flat painted quad lying on the ground (collected for merging)
@@ -416,6 +664,8 @@
       grass.rotation.x = -Math.PI / 2;
       grass.position.set((A_MINX + A_MAXX) / 2, 0.0, (A_MINZ + A_MAXZ) / 2);
       grass.receiveShadow = true; grass.matrixAutoUpdate = false; grass.updateMatrix();
+      grass.userData.terrain = true; grass.userData.worldSurface = true;
+      grass.name = "airport-island-surface";
       root.add(grass);
     })();
 
@@ -743,8 +993,8 @@
     //  and a real place inside, and real passengers sitting"). Every
     //  airliner gets a real cabin baked into the same merged part-kit:
     //  BackSide liner shell (visible only from inside), a raised deck over
-    //  the wing carry-through, 11 rows of two-across benches, SEATED VOXEL
-    //  PASSENGERS (deterministic via the airport rng stream), interior
+    //  the wing carry-through, 11 rows of two-across benches, modular LIVE-NPC
+    //  seat anchors (deterministic via the airport rng stream), interior
     //  window strips, ceiling light strips, an aft pressure wall and a
     //  cockpit bulkhead with door + a two-seat cockpit behind it. The
     //  boarding door is a separate SLIDING panel mesh (animated by the
@@ -754,26 +1004,9 @@
     // =====================================================================
     const CABIN_FLOOR = 2.5;             // deck top (clears the wing box at 2.42)
     const CABIN_DOOR_X = 10.5;           // door local x (forward, port side)
-    const paxShirts = [0xb04a3a, 0x3a6fb0, 0x4a8a4f, 0xc7a03a, 0x8a5aa0, 0xd8dde2].map(function (c) { return mat(c); });
-    const paxSkins = [0xe8b48c, 0xc98d62, 0x8a5a3a].map(function (c) { return mat(c); });
-    const paxHair = mat(0x2a2320);
-    const paxLegs = mat(0x2e3644);
     const linerMat = new THREE.MeshLambertMaterial({ color: 0xe8eaee, side: THREE.BackSide });
     const cabinFloorMat = mat(0x33383f);
     const cabinLightMat = mat(0xfff2d8, { emissive: 0xffe9b8, ei: 0.75 });
-
-    // one seated voxel passenger facing the nose (+X), hips on a cushion top
-    function paxAt(K, x, z) {
-      const shirt = paxShirts[(rng() * paxShirts.length) | 0];
-      const skin = paxSkins[(rng() * paxSkins.length) | 0];
-      K.put(shirt, new THREE.BoxGeometry(0.34, 0.6, 0.5), x - 0.05, 3.27, z);   // torso
-      K.put(skin, new THREE.BoxGeometry(0.26, 0.26, 0.26), x - 0.05, 3.72, z);  // head
-      K.put(paxHair, new THREE.BoxGeometry(0.28, 0.09, 0.28), x - 0.05, 3.89, z); // hair cap
-      K.put(paxLegs, new THREE.BoxGeometry(0.42, 0.16, 0.44), x + 0.22, 3.0, z);  // lap/thighs
-      K.put(paxLegs, new THREE.BoxGeometry(0.16, 0.4, 0.4), x + 0.42, 2.74, z);   // shins
-      K.put(shirt, new THREE.BoxGeometry(0.11, 0.46, 0.12), x - 0.02, 3.22, z - 0.3); // arms
-      K.put(shirt, new THREE.BoxGeometry(0.11, 0.46, 0.12), x - 0.02, 3.22, z + 0.3);
-    }
 
     function buildCabin(K, g, acc) {
       // liner shell + deck + aisle carpet
@@ -795,10 +1028,22 @@
         K.put(FLEET.navy, new THREE.BoxGeometry(0.55, 0.16, 0.55), 13.1, 2.86, sgn * 0.58);
         K.put(FLEET.navy, new THREE.BoxGeometry(0.16, 0.8, 0.55), 12.75, 3.3, sgn * 0.58);
       }
-      // seat rows (two-across benches both sides, aisle |z|<0.45 clear) +
-      // deterministic seated passengers; empty seats are recorded so the
-      // boarding system can offer the player a real "take a seat"
+      // Every physical seat is a reusable anchor. `reservedForNpc` preserves
+      // the exact old deterministic occupancy map, but the occupant is now a
+      // normal live NPC rather than model geometry. Consume the two old
+      // shirt/skin RNG draws when reserved so later airport generation remains
+      // byte-for-byte deterministic after removing the baked bodies.
       const seats = [];
+      let seatId = 0;
+      function addSeat(x, z, chance) {
+        const reserved = rng() < chance;
+        if (reserved) { rng(); rng(); }
+        seats.push({
+          id: "seat-" + (seatId++), x: x + 0.03, y: CABIN_FLOOR + 0.45, z,
+          heading: Math.PI / 2, kind: "aircraft-seat",
+          reservedForNpc: reserved, occupant: null,
+        });
+      }
       for (let rx = -11.2; rx <= 8.8; rx += 2.0) {
         for (const s of [-1, 1]) {
           const zc = s * 1.0;
@@ -807,9 +1052,8 @@
           K.put(FLEET.dark, new THREE.BoxGeometry(0.5, 0.32, 0.95), rx, 2.66, zc);        // pedestal
           K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.36, 3.85, zc - 0.28); // headrests
           K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.2, 0.32), rx - 0.36, 3.85, zc + 0.28);
-          // window + aisle seat: passenger or bookable empty seat
-          if (rng() < 0.6) paxAt(K, rx, s * 1.28); else seats.push({ x: rx + 0.03, z: s * 1.28 });
-          if (rng() < 0.3) paxAt(K, rx, s * 0.72); else seats.push({ x: rx + 0.03, z: s * 0.72 });
+          addSeat(rx, s * 1.28, 0.6);   // window
+          addSeat(rx, s * 0.72, 0.3);   // aisle
         }
       }
       // DOORWAY (port, forward): dark recess in the hull + warm sill light
@@ -1226,23 +1470,54 @@
     // =====================================================================
     (function populate() {
       if (!CBZ.cityMakePed) return;
+      const populationEntries = [];
+      // One registration path for every authored airport person.  The old
+      // block called cityMakePed and threw the returned rig away, so the
+      // terminal's alleged passengers/crew never entered the scene or the
+      // interactive city roster.  npcLife owns the normal path; this fallback
+      // mirrors its registerCity contract for builds that omit that module.
+      function airportActor(profile, x, z, opts, role) {
+        if (CBZ.npcLife && CBZ.npcLife.definePopulation) {
+          populationEntries.push({
+            profile: profile, placement: { x: x, z: z, rng: rng }, overrides: opts || {},
+            configure: function (p) { p._airportRole = role; },
+          });
+          return null;
+        }
+        if (CBZ.npcLife) {
+          const p = CBZ.npcLife.spawnCity(profile, {
+            x: x, z: z, parent: root, rng: rng,
+          }, opts || {});
+          if (p) p._airportRole = role;
+          return p;
+        }
+        const p = CBZ.cityMakePed(x, z, rng, opts || {});
+        if (!p || !p.group) return null;
+        root.add(p.group);
+        if (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
+        p._airportRole = role;
+        return p;
+      }
       // passengers in the terminal (carry-on, low aggression travellers)
       for (let i = 0; i < 14; i++) {
         const sx = -40 + (rng() - 0.5) * 130;
         const sz = 24 + (rng() - 0.5) * 18;
-        CBZ.cityMakePed(sx, sz, rng, {
+        airportActor("terminalTraveller", sx, sz, {
           kind: "civilian", archetype: "tourist", job: "traveller",
           wealth: 0.4 + rng() * 0.4, aggr: 0.06 + rng() * 0.08,
-        });
+        }, "traveller");
       }
       // ground crew in hi-vis on the apron near the jets
       for (let i = 0; i < 6; i++) {
         const sx = -120 + rng() * 220;
         const sz = APRON_Z - 18 + (rng() - 0.5) * 18;
-        CBZ.cityMakePed(sx, sz, rng, {
+        airportActor("groundCrew", sx, sz, {
           kind: "worker", archetype: "laborer", job: "ground crew",
           outfit: 0xffc81f, wealth: 0.25, aggr: 0.12 + rng() * 0.06,
-        });
+        }, "ground-crew");
+      }
+      if (populationEntries.length && CBZ.npcLife && CBZ.npcLife.definePopulation) {
+        CBZ.npcLife.definePopulation("airport-authored", { root: root, entries: populationEntries });
       }
     })();
 
@@ -1287,6 +1562,13 @@
       name: "Halloran Causeway", subtitle: "International Airport", kind: "rect",
       minX: CW_MINX, maxX: CW_MAXX, minZ: CW_MINZ, maxZ: CW_MAXZ, pad: 1,
     });
+    // Canonical PLAYER spawn: open apron between the terminal wall (z=11)
+    // and the parked gate aircraft (z=-14). It is on solid airport ground,
+    // outside every building/aircraft collider, and faces the airliners/runway.
+    // Also replace the arena's old downtown fallback so every generic city
+    // spawn consumer (origin fallback, rented room, no-hospital fallback) agrees.
+    city.airportSpawn = { x: -40, y: 0, z: 7, yaw: Math.PI, place: "Halloran Field apron" };
+    city.spawn = { x: city.airportSpawn.x, z: city.airportSpawn.z };
     // NO-SPAWN keep-outs (owner: "NPCs spawning all over the runway and
     // inside the airport — they belong in terminal areas/curbs"). Every
     // scatter/relocation path (worldmap.js citySpawnBlocked) refuses these:

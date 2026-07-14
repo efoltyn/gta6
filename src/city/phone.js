@@ -32,7 +32,12 @@
   // ---- palette --------------------------------------------------------------
   const GREEN = "#7ed957", GOLD = "#ffd451", RED = "#ff5b5b", CYAN = "#7fd0ff", DIM = "#8a93a3";
 
-  let panel = null, body = null, open_ = false, lastRender = 0;
+  let panel = null, body = null, noticeBadge = null, open_ = false, lastRender = 0;
+  const noticeLog = [];
+  let noticeUnread = 0;
+  const NOTICE_CAP = 40;
+  const CONTROL_COPY_RE = /\[[A-Za-z0-9/\- ]{1,8}\]|\b(?:press|click|hold|tap)\b|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/i;
+  const META_COPY_RE = /\b(?:NPC|HUD|UI|reticle|crosshair|respawn(?:ing)?|game over|tutorial|keybind|hotbar|controller|keyboard|mouse|frame ?rate|FPS|first[- ]person|third[- ]person)\b/i;
   // E6: which stock ticker (if any) has its detail view expanded in the
   // MARKETS app right now — null when every row is collapsed. A transient
   // one-line status message (trade success/failure) rides alongside it.
@@ -51,6 +56,49 @@
   function money(n) { return "$" + Math.round(num(n)).toLocaleString(); }
   function hex6(c) { return "#" + (num(c) >>> 0).toString(16).padStart(6, "0"); }
   function pct(v) { return Math.max(0, Math.min(100, Math.round(num(v)))) + "%"; }
+  function clockLabel() {
+    try { return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+    catch (e) { return "now"; }
+  }
+  function phoneSender(from, app) {
+    const s = String(from || "").trim();
+    if (!s || /^(status|alert|system)$/i.test(s)) return app === "news" ? "City Desk" : "Messages";
+    if (/^objective$/i.test(s)) return "Dispatch";
+    return s;
+  }
+  function updateNoticeBadge() {
+    if (!noticeBadge) return;
+    noticeBadge.textContent = noticeUnread > 0 ? String(Math.min(99, noticeUnread)) : "";
+    noticeBadge.style.display = noticeUnread > 0 ? "inline-flex" : "none";
+  }
+
+  // Canonical non-campaign notification sink. It only writes into the handset;
+  // it never creates a banner, toast, floating caption or world-space label.
+  CBZ.cityPhoneNotify = function (payload) {
+    if (typeof payload === "string") payload = { text: payload };
+    payload = payload || {};
+    const text = String(payload.text != null ? payload.text : (payload.body != null ? payload.body : "")).trim();
+    if (!text || CONTROL_COPY_RE.test(text) || META_COPY_RE.test(text)) return null;
+    if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(text, payload, false)) return null;
+    const app = String(payload.app || "messages").toLowerCase();
+    const from = phoneSender(payload.from, app);
+    const now = Date.now();
+    const last = noticeLog.length ? noticeLog[noticeLog.length - 1] : null;
+    if (last && last.text === text && last.from === from && now - last.born < 5000) {
+      last.born = now; last.time = clockLabel();
+      if (open_) render();
+      return last;
+    }
+    const item = { app: app, from: from, text: text, time: clockLabel(), born: now };
+    noticeLog.push(item);
+    if (noticeLog.length > NOTICE_CAP) noticeLog.splice(0, noticeLog.length - NOTICE_CAP);
+    if (!open_) noticeUnread++;
+    updateNoticeBadge();
+    if (open_) render();
+    return item;
+  };
+  // Read-only seam for tests and other phone surfaces that want the same news.
+  CBZ.cityPhoneNews = noticeLog;
 
   // a label / value row
   function row(label, value, color) {
@@ -73,6 +121,19 @@
     return "<div style='background:rgba(255,255,255,.04);border-radius:10px;padding:10px 12px;margin-bottom:8px'>" +
       "<div style='color:" + CYAN + ";font-weight:700;font-size:13px;letter-spacing:.4px;margin-bottom:6px'>" + esc(header) + "</div>" +
       inner + "</div>";
+  }
+  function noticesApp() {
+    if (!noticeLog.length) return "";
+    let inner = "";
+    const recent = noticeLog.slice(-14).reverse();
+    for (let i = 0; i < recent.length; i++) {
+      const n = recent[i];
+      inner += "<div style='padding:7px 0;border-top:" + (i ? "1px solid rgba(255,255,255,.06)" : "0") + "'>" +
+        "<div style='display:flex;justify-content:space-between;gap:10px;font-size:11px;color:" + DIM + "'>" +
+        "<b style='color:" + (n.app === "news" ? CYAN : "#c9d2df") + "'>" + esc(n.from) + "</b><span>" + esc(n.time) + "</span></div>" +
+        "<div style='font-size:13px;color:#e8eef7;line-height:1.3;margin-top:2px'>" + esc(n.text) + "</div></div>";
+    }
+    return card("📰 NEWS & MESSAGES", inner);
   }
   function stars(n) {
     n = Math.max(0, Math.min(5, Math.round(num(n))));
@@ -154,7 +215,7 @@
       if (home.sqft) h += " · " + esc(home.sqft) + " sqft";
       inner += row("Home", h, CYAN);
     } else {
-      inner += row("Home", "None (rent/buy with [Z])", DIM);
+      inner += row("Home", "None", DIM);
     }
     const biz = g.cityCarBiz;
     if (biz && (biz.owned || (biz.cars && biz.cars.length) || biz.notoriety)) {
@@ -523,7 +584,7 @@
       return card("👥 CREW", inner);
     }
     return card("👥 CREW",
-      "<div style='font-size:13px;color:" + DIM + "'>No crew yet — found one with <b style='color:" + CYAN + "'>[O]</b>.</div>");
+      "<div style='font-size:13px;color:" + DIM + "'>No crew yet.</div>");
   }
 
   // ---- SERVICES: the phone's first ACTION app. Everything here is a real verb
@@ -568,13 +629,13 @@
       if (ownsAirportHangar) {
         inner += svcBtn("", "🛩 Private Hangar — owned", false, "Empty hangar at the airport apron. STEAL the F-22 from the military base, then land it inside to keep it.");
       } else if (CBZ.cityStorage && CBZ.cityStorage.buy) {
-        inner += svcBtn("buyhangar", "🛩 Buy Private Hangar — " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar — the home a stolen F-22 needs. (Or buy the penthouse deck hangar at home [H].)");
+        inner += svcBtn("buyhangar", "🛩 Buy Private Hangar — " + money(hangarProp ? hangarProp.cost : 1200000), true, "An airport apron hangar — the home a stolen F-22 needs. The penthouse also offers a deck hangar.");
       }
     }
     // AIRSTRIKE — needs a based F-22 (own a hangar, then steal & land the jet)
     if (!s || !s.hangar) {
       inner += svcBtn("", "🎯 Call Airstrike", false,
-        "Locked — buy a hangar (above, or penthouse deck [H]), STEAL the F-22, and land it inside to base it.");
+        "Locked — buy a private or penthouse hangar, steal the F-22, and land it inside to base it.");
     } else if (s.strikeCD > 0) {
       inner += svcBtn("", "🎯 Jet rearming", false, "Ready in " + s.strikeCD + "s.");
     } else {
@@ -650,7 +711,7 @@
     }
     // 2) FRESH OFFERS — if the player has fetched offers for a line, list them.
     if (gigOffers.length) {
-      inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Available jobs — tap to accept:</div>";
+      inner += "<div style='font-size:11px;color:" + DIM + ";margin-bottom:4px'>Available jobs:</div>";
       gigOffers.forEach(function (def, i) {
         const lbl = (def && (def.label || def.title)) || "Job #" + (i + 1);
         const sub = (def && (def.sub || def.desc)) || (def && def.pay ? money(def.pay) : "");
@@ -698,7 +759,7 @@
   // ---- render ---------------------------------------------------------------
   function render() {
     if (!body) return;
-    let html = "";
+    let html = noticesApp();
     let marketRows = [];
     let fxRows = [];
     try { html += servicesApp(); } catch (e) {}
@@ -754,9 +815,12 @@
 
     const head = document.createElement("div");
     head.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:12px";
-    head.innerHTML = "<div style='font-size:20px;font-weight:800;letter-spacing:.5px'>📱 PHONE</div>" +
-      "<div style='font-size:12px;color:" + DIM + "'>Close <b style='color:" + CYAN + "'>[P]</b></div>";
+    head.innerHTML = "<div style='display:flex;align-items:center;gap:8px;font-size:20px;font-weight:800;letter-spacing:.5px'>📱 PHONE" +
+      "<span id='cityPhoneUnread' style='display:none;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 5px;box-sizing:border-box;border-radius:10px;background:#d64545;color:white;font-size:10px'>0</span></div>" +
+      "<div style='font-size:12px;color:" + DIM + "'>" + esc(clockLabel()) + "</div>";
     panel.appendChild(head);
+    noticeBadge = head.querySelector("#cityPhoneUnread");
+    updateNoticeBadge();
 
     body = document.createElement("div");
     panel.appendChild(body);
@@ -877,6 +941,8 @@
     if (CBZ.cityMenuOpen) return;
     open_ = true; CBZ.cityMenuOpen = true;
     el().style.display = "block";
+    noticeUnread = 0;
+    updateNoticeBadge();
     render();
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
   }

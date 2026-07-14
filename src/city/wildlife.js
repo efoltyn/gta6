@@ -46,6 +46,17 @@
 
   const mat = CBZ.cmat || CBZ.mat || function (c) { return new THREE.MeshLambertMaterial({ color: c }); };
 
+  // Every species asset is authored nose-forward on local +X. Three.js yaw
+  // rotates that axis toward (cos(yaw), -sin(yaw)), so a world heading
+  // (cos(h), sin(h)) maps to yaw=-h — there is no quarter-turn offset. Keep
+  // this convention public so tame/companion/biome drivers cannot reintroduce
+  // the old sideways-slide independently.
+  function faceAnimalHeading(actorOrGroup, heading) {
+    const group = actorOrGroup && (actorOrGroup.group || actorOrGroup);
+    if (group && group.rotation) group.rotation.y = -heading;
+  }
+  CBZ.faceAnimalHeading = faceAnimalHeading;
+
   // ---- WILDLIFE_LIVE — the one-line revert for the living-wildlife overhaul.
   // ON (default): animal groups are tagged userData.dynamic so the static
   // batcher (core/batch.js) and matrix freezer (core/staticfreeze.js) leave
@@ -172,7 +183,8 @@
     const s = sp.scale || 1;
     grp.scale.setScalar(s);
     grp.position.set(x, sp.aquatic ? 0 : groundY(x, z), z);
-    grp.rotation.y = rng() * 6.283;
+    const initialHeading = rng() * 6.283;
+    faceAnimalHeading(grp, initialHeading);
     // castShadow for the read; leave frustumCulled at its DEFAULT (true) so the
     // dozens of animals scattered across the map only draw when actually on
     // screen — never force ~1000 wildlife meshes to render every frame.
@@ -191,7 +203,7 @@
       species: sp, kind: "animal", animal: true,
       group: grp, pos: grp.position,      // fpsmode/interactions read .group.position and .pos
       hp: sp.hp || 40, maxHp: sp.hp || 40, dead: false, ko: 0, escaped: false,
-      heading: rng() * 6.283, turnT: rng() * 3, spd: sp.spd || 1.4,
+      heading: initialHeading, faceH: initialHeading, turnT: rng() * 3, spd: sp.spd || 1.4,
       state: "wander", alarm: 0, home: { x: x, z: z },
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
       stateT: 0,                          // seconds left in the current timed behavior
@@ -411,9 +423,19 @@
     const gt = a.gait; if (!gt) return;
     const grp = a.group, sp = a.species, cls = classify(sp);
     const mx = grp.position.x, mz = grp.position.z;
-    const moved = (a._gpx == null) ? 0 : Math.hypot(mx - a._gpx, mz - a._gpz);
+    const mdx = a._gpx == null ? 0 : mx - a._gpx;
+    const mdz = a._gpz == null ? 0 : mz - a._gpz;
+    const moved = Math.hypot(mdx, mdz);
     a._gpx = mx; a._gpz = mz;
     const walking = moved > 0.0025;
+    // Keep a cheap observable invariant for audits: any visible land animal
+    // that moved should travel along the direction its nose faces. 1.0 means
+    // exact alignment, 0 means the old sideways slide, -1 means moonwalking.
+    a._motionMoved = walking ? moved : 0;
+    if (walking) {
+      const h = a.faceH == null ? a.heading : a.faceH;
+      a._motionAlignment = (mdx / moved) * Math.cos(h) + (mdz / moved) * Math.sin(h);
+    } else a._motionAlignment = 1;
     // stride rate rides distance moved, but is CAPPED per class (a sprinting
     // animal lengthens its stride, it doesn't blur its legs): elephants top
     // out ~1.6 strides/s, rabbits ~3.5.
@@ -950,7 +972,7 @@
       if (onHome) { grp.position.x = nx; grp.position.z = nz; grp.position.y = groundY(nx, nz); }
       else { a.heading = Math.atan2(a.home.z - grp.position.z, a.home.x - grp.position.x) + (Math.random() - 0.5) * 0.6; a.moving = false; }
     }
-    grp.rotation.y = -a.heading + Math.PI / 2;
+    faceAnimalHeading(grp, a.heading);
     snakeAnimate(a, dt);
   }
 
@@ -983,14 +1005,14 @@
     const playerGone = !P || (CBZ.player && CBZ.player.dead);
 
     // HERD PANIC RIPPLE — one spooked member carries the whole herd.
-    if (hr && hr.panic > 0.3 && (a.state === "wander" || a.state === "graze") && a.alarm <= 0.1) {
+    if (hr && hr.panic > 0.3 && (a.state === "wander" || a.state === "graze" || a.state === "idle") && a.alarm <= 0.1) {
       a.alarm = Math.max(a.alarm, hr.panic * 0.85);
       if (danger >= 0.5) { a.state = "charge"; }
       else { a.state = "flee"; a.stateT = cls.fleeT; a.heading = hr.heading; }   // flee WITH the herd
     }
 
     // SENSES — calm animals notice you: prey bolts, hunters commit (capped).
-    if (!playerGone && (a.state === "wander" || a.state === "graze")) {
+    if (!playerGone && (a.state === "wander" || a.state === "graze" || a.state === "idle")) {
       const spookR = sp.spook || 26;
       if (danger < 0.5 && nearP < spookR * spookR) {
         a.state = "flee"; a.stateT = cls.fleeT; a.alarm = Math.max(a.alarm, 4);
@@ -1006,6 +1028,14 @@
     let spd = 0;
     if (a.state === "graze") {
       if (a.stateT <= 0) { a.state = "wander"; a.stateT = 2 + Math.random() * 3; }
+    } else if (a.state === "idle") {
+      // A real pause: feet and gait settle while the body can make one small,
+      // gradual look-turn. Threat sensing above still interrupts instantly.
+      if (!a._idleTurned && a.stateT > 0) {
+        a._idleTurned = true;
+        a.heading += (Math.random() - 0.5) * 0.7;
+      }
+      if (a.stateT <= 0) { a._idleTurned = false; a.state = "wander"; a.stateT = 1.5 + Math.random() * 2.5; }
     } else if (a.state === "flee") {
       spd = (sp.spd || 1.4) * cls.fleeM;
       if (!playerGone && nearP < sq((sp.spook || 26) * 1.2)) {   // still on your heels — keep running
@@ -1070,9 +1100,15 @@
     if (a.state === "wander") {
       spd = a.spd;
       if (a.stateT <= 0) {
-        if (Math.random() < cls.grazeP && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
+        const stopRoll = Math.random();
+        if (stopRoll < cls.grazeP && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
           a.state = "graze";                           // stop & put the head down
           a.stateT = cls.grazeT[0] + Math.random() * (cls.grazeT[1] - cls.grazeT[0]);
+          spd = 0;
+        } else if (stopRoll < Math.min(0.92, cls.grazeP + 0.18) && (!hr || hr.panic <= 0.3) && a.alarm <= 0) {
+          a.state = "idle";                            // stand, listen, turn, then continue
+          a.stateT = 1.4 + Math.random() * 3.2;
+          a._idleTurned = false;
           spd = 0;
         } else {
           a.stateT = 2 + Math.random() * 4;
@@ -1136,7 +1172,7 @@
     }
     grp.position.y = groundY(grp.position.x, grp.position.z);
     if (a.state === "stalk") grp.position.y -= 0.09 * (sp.scale || 1);   // the crouch
-    grp.rotation.y = -a.faceH + Math.PI / 2;
+    faceAnimalHeading(grp, a.faceH);
     // settle any leftover attack pitch back to rest while roaming
     if (grp.rotation.x !== 0 && (a._atkAnim == null || a._atkAnim < 0)) grp.rotation.x *= Math.max(0, 1 - dt * 6);
     gaitAnimate(a, dt);
@@ -1311,7 +1347,7 @@
         if (rr < AQUATIC_R0 || rr > AQUATIC_R1) a.heading += Math.PI * 0.6;      // turn back into the band
         else { grp.position.x = nx; grp.position.z = nz; }
         grp.position.y = Math.sin(a.bob) * 0.12 * (sp.scale || 1);
-        grp.rotation.y = -a.heading + Math.PI / 2;
+        faceAnimalHeading(grp, a.heading);
         continue;
       }
       // ---- FAR + CALM land animals FREEZE (no per-frame steering) so a big
@@ -1319,7 +1355,7 @@
       //      They resume instantly when you approach, or if their herd panics.
       //      Hot states (flee/charge/stalk) keep running off-screen so a shot
       //      herd genuinely LEAVES instead of pausing at the horizon.
-      if (grp.visible === false && (a.state === "wander" || a.state === "graze") &&
+      if (grp.visible === false && (a.state === "wander" || a.state === "graze" || a.state === "idle") &&
           (a.alarm || 0) <= 0 &&
           (!a.herd || a.herd.panic <= 0.3)) { a.turnT -= dt; continue; }
       // ---- WILDLIFE_LIVE: the living state machine ------------------------
@@ -1327,7 +1363,7 @@
         // AI throttle: calm animals beyond 90u think at half rate (with dt
         // doubled so speeds stay true); the gait only shows when visible.
         let edt = dt;
-        if (P && (a.state === "wander" || a.state === "graze") && (a.alarm || 0) <= 0 &&
+        if (P && (a.state === "wander" || a.state === "graze" || a.state === "idle") && (a.alarm || 0) <= 0 &&
             (!a.herd || a.herd.panic <= 0.3)) {
           const ddx = grp.position.x - P.x, ddz = grp.position.z - P.z;
           if (ddx * ddx + ddz * ddz > 8100) {
@@ -1422,7 +1458,7 @@
         grp.position.x = nx; grp.position.z = nz;
         grp.position.y = groundY(nx, nz);
       }
-      grp.rotation.y = -a.heading + Math.PI / 2;
+      faceAnimalHeading(grp, a.heading);
     }
   }
 
@@ -1456,4 +1492,22 @@
   // public: let other systems (dogs.js) read/kill wildlife.
   CBZ.cityWildlifeList = function () { return animals; };
   CBZ.cityWildlifeSkin = skin;
+  CBZ.cityWildlifeMotionStats = function () {
+    const out = { livingLand: 0, visibleLand: 0, moving: 0, idle: 0, sideways: 0, worstAlignment: 1 };
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (!a || a.dead || a.external || (a.species && a.species.aquatic)) continue;
+      out.livingLand++;
+      if (!a.group || a.group.visible === false) continue;
+      out.visibleLand++;
+      if (a.state === "idle" || a.state === "graze") out.idle++;
+      if ((a._motionMoved || 0) > 0) {
+        out.moving++;
+        const al = Number.isFinite(a._motionAlignment) ? a._motionAlignment : -1;
+        if (al < out.worstAlignment) out.worstAlignment = al;
+        if (al < 0.8) out.sideways++;
+      }
+    }
+    return out;
+  };
 })();

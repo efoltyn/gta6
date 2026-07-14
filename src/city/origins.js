@@ -877,6 +877,12 @@
   };
   CBZ.cityOriginIntroActive = function () { return !!introActiveFlag; };
   CBZ.cityOriginIntroOpts = function () { return introOptsCache; };
+  // A configured world spawn may intentionally replace the one-time visual
+  // origin staging after its grants/ledger stamps have landed. Keep that
+  // cancellation explicit instead of having mode.js reach into private state.
+  CBZ.cityOriginCancelIntro = function () {
+    clearScene(); introActiveFlag = false; introOptsCache = null;
+  };
 
   // ========================================================================
   // [U] — THE CHARACTER WHEEL (GTA5-style in-game switching).

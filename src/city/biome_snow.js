@@ -2,10 +2,10 @@
    city/biome_snow.js — THE SNOWY MOUNTAIN RANGE biome.
 
    An archipelago landmass module (see worldmap.js CONTRACT). Builds a
-   flat snowy VALLEY/PLATEAU (ground stays y=0, the world contract) ringed
-   by a dramatic backdrop of TALL snow-capped PEAKS (cones with snow caps)
-   that you walk AROUND — each peak base gets a collider so the range reads
-   as a solid massif and the playable area is the valley between them. A
+   snowy valley rising into one REAL northern massif. The mountain mesh and
+   city floor oracle share the same analytic height function, so the slopes
+   can be walked, landed on and used by physics — no decorative skyline ring.
+   A
    frozen LAKE (icy plane), instanced snowy PINES, rocky outcrops and
    snowdrifts fill it; the WHY-justified landmarks are a cozy enterable SKI
    LODGE (fireplace), a moving CHAIRLIFT up a slope, a slalom SKI RUN, a
@@ -13,10 +13,9 @@
    south edge down toward the speedway island.
 
    DRAW-CALL DISCIPLINE: pines / rocks / drifts / lift-chairs / guardrail
-   posts are InstancedMesh (one draw call each); peaks share one material;
-   snowfall is a single THREE.Points cloud that is only VISIBLE while the
-   player stands in this biome (CBZ.cityBiomeAt === 'snow'), so it costs
-   nothing elsewhere. Everything is deterministic from a local seeded rng.
+   posts are InstancedMesh (one draw call each); the massif is one mesh.
+   Bright point-sprite snowfall is disabled: from aircraft it read as dots
+   stuck to the HUD. Everything is deterministic from a local seeded rng.
 ============================================================ */
 (function () {
   "use strict";
@@ -29,6 +28,7 @@
   // path builds closed "massif pads" whose height envelope reaches the
   // ground on every border. Revert: CBZ.CONFIG.SNOW_SOLID_RANGE = false.
   if (CFGS.SNOW_SOLID_RANGE == null) CFGS.SNOW_SOLID_RANGE = true;
+  if (CFGS.SNOWFALL_POINTS == null) CFGS.SNOWFALL_POINTS = false;
 
   // ---- footprint (per spec): rect center (350,-1450), half (420,330) ------
   const CX = 350, CZ = -1450, HX = 420, HZ = 330;
@@ -119,6 +119,7 @@
     }
     function claimNature(x, z, r) { return !layout || layout.claimNature(x, z, r, { pad: 0.35 }); }
     function openNature(x, z, r) { return !layout || layout.canPlaceNature(x, z, r, { pad: 0.2 }); }
+    let mountainHeightAt = function () { return 0; };
 
     // ---- snowy GROUND plane (flat valley, y just above 0) ----------------
     (function ground() {
@@ -127,6 +128,9 @@
       g.rotation.x = -Math.PI / 2;
       g.position.set(CX, 0.02, CZ);
       g.receiveShadow = true;
+      g.userData.terrain = true;
+      g.userData.worldSurface = true;
+      g.name = "snow-valley-surface";
       root.add(g);
       // Feather only beyond the snow plateau; a larger full plane underneath
       // made the biome visibly overlap the sea/terrain as a square tile.
@@ -170,11 +174,11 @@
 
       // ----------------------------------------------------------------
       //  CLOSED MASSIF PAD (the SOLID path): same noise/shading family as
-      //  buildRidgedRange, but the height envelope is
-      //      eu (0 at both ridge ENDS)  ×  sin(π·v) (0 at the valley edge
-      //      AND at the back edge)
-      //  so the pad sits closed on the flat ground from every angle —
-      //  no hanging back edge, no hollow shell. Faces are emitted with a
+      //  buildRidgedRange, but three broad 2-D peak lobes and their saddles
+      //  are multiplied by a sin border falloff (zero on all four edges), so
+      //  this reads as a mountain group rather than one long triangular wall.
+      //  The pad still closes on flat ground from every angle — no hanging
+      //  back edge, no hollow shell. Faces are emitted with a
       //  consistent up-winding so the default FrontSide material works
       //  (half the fragment cost of the old DoubleSide sheets).
       //  Same call/return shape as buildRidgedRange: {geo, spine}.
@@ -184,6 +188,33 @@
         const peakAmp = cfg.peakAmp, depthLen = cfg.depthLen;
         const seedOff = cfg.seedOff, ns = cfg.noiseScale;
         const dx = p1.x - p0.x, dz = p1.z - p0.z;
+        function sampleHeight(u, v, bx, bz) {
+          if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+          // Smoothstep the closed border. The old sub-linear power climbed
+          // almost vertically at the footprint edge, which made the whole
+          // massif read as one giant triangular mound from the airfield.
+          const edge = Math.max(0, Math.sin(Math.PI * u) * Math.sin(Math.PI * v));
+          const border = edge * edge * (3 - 2 * edge);
+          function lobe(cu, cv, su, sv, amp) {
+            const du = (u - cu) / su, dv = (v - cv) / sv;
+            return amp * Math.exp(-0.5 * (du * du + dv * dv));
+          }
+          // Five asymmetric peaks create a recognisable range silhouette. Max
+          // (rather than sum) preserves real saddles between the summits; one
+          // low broad lobe underneath joins them into walkable foothills.
+          const base = lobe(0.51, 0.53, 0.50, 0.46, 0.11);
+          const peaks = Math.max(
+            lobe(0.15, 0.56, 0.13, 0.23, 0.65),
+            lobe(0.35, 0.44, 0.15, 0.22, 0.82),
+            lobe(0.56, 0.57, 0.15, 0.23, 1.00),
+            lobe(0.76, 0.45, 0.14, 0.21, 0.78),
+            lobe(0.89, 0.62, 0.10, 0.17, 0.52)
+          );
+          const crag = 0.74 + 0.26 * NZ.rangeRidgedFbm(
+            (bx + seedOff) * ns, (bz - seedOff) * ns);
+          const shoulder = 0.04 + base + peaks;
+          return peakAmp * border * shoulder * crag;
+        }
         const gx = [], gz = [], gy = [];
         for (let r = 0; r <= rows; r++) {
           gx[r] = []; gz[r] = []; gy[r] = [];
@@ -191,12 +222,8 @@
             const u = c / cols, v = r / rows;
             const bx = p0.x + dx * u + depthDir.x * (v * depthLen);
             const bz = p0.z + dz * u + depthDir.z * (v * depthLen);
-            const eu = 1 - Math.pow(Math.abs(2 * u - 1), 3);
-            const ev = Math.sin(Math.PI * v);
-            const env = 0.45 + 0.55 * NZ.rangeVnoise(u * 3.3 + seedOff * 0.01, seedOff * 0.02);
-            const crag = 0.4 + 0.6 * NZ.rangeRidgedFbm((bx + seedOff) * ns, (bz - seedOff) * ns);
             gx[r][c] = bx; gz[r][c] = bz;
-            gy[r][c] = peakAmp * eu * ev * env * crag;
+            gy[r][c] = sampleHeight(u, v, bx, bz);
           }
         }
         const spine = [];
@@ -209,20 +236,31 @@
         const posA = new Float32Array(tris * 9), colA = new Float32Array(tris * 9);
         let pi = 0, ci = 0;
         const up = new T.Vector3(), e1 = new T.Vector3(), e2 = new T.Vector3();
+        // A fixed high southern light is baked into the vertex colours. This
+        // keeps the one-draw Basic material stable at every time of day while
+        // still giving each low-poly face a readable light/dark direction.
+        const lightDir = new T.Vector3(0.38, 0.82, 0.42).normalize();
         const A = new T.Vector3(), B = new T.Vector3(), Cc = new T.Vector3(), Dd = new T.Vector3();
         const _cu = new T.Color();
         const palette = cfg.palette;
         function emitTri(a, b, c2) {
           e1.subVectors(b, a); e2.subVectors(c2, a);
           up.crossVectors(e1, e2);
-          if (up.y < 0) { const t = b; b = c2; c2 = t; up.y = -up.y; }   // consistent up-winding
-          const upDot = up.y / (up.length() || 1);
+          if (up.y < 0) { const t = b; b = c2; c2 = t; up.multiplyScalar(-1); } // consistent up-winding
+          up.normalize();
+          const upDot = up.y;
+          const faceLight = Math.max(0.52, Math.min(1.03, 0.68 + 0.38 * up.dot(lightDir)));
           const verts = [a, b, c2];
           for (let k = 0; k < 3; k++) {
             const vv = verts[k];
             posA[pi++] = vv.x; posA[pi++] = vv.y; posA[pi++] = vv.z;
             const wob = NZ.rangeVnoise(vv.x * 0.02 + seedOff, vv.z * 0.02 - seedOff);
-            NZ.rangeShadeVert(palette, vv.y, peakAmp, upDot, wob, 0, _cu);
+            // This local range is lower than the distant world giants. Feed a
+            // taller shading reference so snow stays on the actual crowns;
+            // using raw peakAmp painted almost every gentle slope pale blue,
+            // visually merging the entire mountain into the snowfield.
+            NZ.rangeShadeVert(palette, vv.y, peakAmp * 1.28, upDot, wob, 0, _cu);
+            _cu.multiplyScalar(faceLight);
             colA[ci++] = _cu.r; colA[ci++] = _cu.g; colA[ci++] = _cu.b;
           }
         }
@@ -237,45 +275,49 @@
         g.setAttribute("position", new T.BufferAttribute(posA, 3));
         g.setAttribute("color", new T.BufferAttribute(colA, 3));
         g.computeVertexNormals();
-        return { geo: g, spine };
+        const len2 = dx * dx + dz * dz || 1;
+        const dir2 = depthDir.x * depthDir.x + depthDir.z * depthDir.z || 1;
+        function heightAt(x, z) {
+          const rx = x - p0.x, rz = z - p0.z;
+          const u = (rx * dx + rz * dz) / len2;
+          if (u < 0 || u > 1) return 0;
+          const bx = p0.x + dx * u, bz = p0.z + dz * u;
+          const v = ((x - bx) * depthDir.x + (z - bz) * depthDir.z) / (depthLen * dir2);
+          return sampleHeight(u, v, bx + depthDir.x * v * depthLen, bz + depthDir.z * v * depthLen);
+        }
+        return { geo: g, spine, heightAt };
       }
       const build = SOLID ? buildPad : buildRidge;
 
-      // -- palette: rock / ragged snow / cliff (this biome's own COL set) --
+      // -- palette: rock / ragged snow / cliff -----------------------------
+      // Cool granite + blue-shadow snow keep the reachable massif distinct
+      // from both pale sky and white valley. The former orange-brown palette
+      // and brown material tint made every face look like the same clay mound.
       const rangePalette = {
-        rock: new THREE.Color(COL.rock), rockDark: new THREE.Color(COL.rockDark),
-        snow: new THREE.Color(COL.snow), snowShade: new THREE.Color(COL.snowShade),
+        // These are authored in the renderer's linear colour space. Keeping
+        // granite well below mid-grey prevents the final sRGB conversion from
+        // washing the entire lower mountain into the snow-white valley.
+        rock: new THREE.Color(0x3d474e), rockDark: new THREE.Color(0x151b21),
+        snow: new THREE.Color(0xbfcfd9), snowShade: new THREE.Color(0x657987),
       };
 
-      // -- RANGE LAYOUT: foreground ring (carries colliders) + distant -
-      // foreground spines run along each rect edge, depthDir points OUT.
-      // MAP_RESERVE_V1: the W ridge faces Redhollow Woods and the S ridge faces
-      // the Ironjaw island; at full 150u depth their peaks stood INSIDE those
-      // neighbours (the overlap the pixel-audit misses — massifs aren't tagged
-      // worldSurface). Clamp only those two projections so the range still walls
-      // the valley on all sides but stops short of the forest floor / arena
-      // deck. N and E still project boldly over open water. This changes no rng
-      // draw (peakAmp/seedOff below are untouched) → byte-identical per seed
-      // aside from the deliberately shortened W/S ridge depth. Flag off = 150u.
+      // -- REAL MASSIF LAYOUT ------------------------------------------------
+      // One broad mountain occupies the northern half of Mount Mercy itself.
+      // Its full footprint lies inside the registered landmass and its southern
+      // edge returns to y=0 before the lake/resort valley. No edge walls, no
+      // distant sheets, no fake horizon geometry.
       const RESV = !!(CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1);
-      // Coyle Valley farmland's north edge is z=-1280 and it shares Mercy's
-      // z-band; keep the E-rim ridge's SOUTH end north of it so tall peaks stop
-      // short of the farm's NW corner (the pixel-audit-invisible spill the map
-      // ledger flagged). -1290 = 10u clear of the farm.
-      const SEZ = -1300;
-      const INSET = 10;                          // spine sits just outside rim
       const fgEdges = [
-        { p0: { x: MINX, z: MINZ - INSET }, p1: { x: MAXX, z: MINZ - INSET }, dir: { x: 0, z: -1 }, name: "N", depthLen: 150 },
-        { p0: { x: MINX, z: MAXZ + INSET }, p1: { x: MAXX, z: MAXZ + INSET }, dir: { x: 0, z: 1 }, name: "S", depthLen: RESV ? 30 : 150 },
-        { p0: { x: MINX - INSET, z: MINZ }, p1: { x: MINX - INSET, z: MAXZ }, dir: { x: -1, z: 0 }, name: "W", depthLen: RESV ? 44 : 150 },
-        { p0: { x: MAXX + INSET, z: MINZ }, p1: { x: MAXX + INSET, z: RESV ? SEZ : MAXZ }, dir: { x: 1, z: 0 }, name: "E", depthLen: 150 },
+        // Leave the cabin and outpost on usable flat shoulders while the ski
+        // run occupies the broad centre of the massif.
+        { p0: { x: MINX + 180, z: MINZ + 25 }, p1: { x: MAXX - 180, z: MINZ + 25 }, dir: { x: 0, z: 1 }, name: "Mount Mercy", depthLen: 315 },
       ];
-      const fgGeoms = [], spines = [];
+      const fgGeoms = [], spines = [], groundFns = [];
       for (let ei = 0; ei < fgEdges.length; ei++) {
         const e = fgEdges[ei];
         const cfg = {
-          cols: 56, rows: 6, depthLen: e.depthLen,
-          peakAmp: 100 + rng() * 20,             // ~100-120
+          cols: 72, rows: 24, depthLen: e.depthLen,
+          peakAmp: 156 + rng() * 18,             // grounded multi-summit range, not a giant wall
           seedOff: 1000 + ei * 137 + rng() * 50,
           noiseScale: 0.012,
           footGuard: 0.28,                       // valleyGuard: y->0 by row ~28% (flat floor)
@@ -284,35 +326,22 @@
         const built = build(THREE, e.p0, e.p1, e.dir, cfg);
         fgGeoms.push(built.geo);
         spines.push({ edge: e, spine: built.spine, peakAmp: cfg.peakAmp });
+        if (built.heightAt) groundFns.push(built.heightAt);
       }
 
-      // distant backdrop ring: 2-3 longer/taller ridges pushed further out.
-      // MAP_RESERVE_V1: the W distant ridge's BASE sat at x=MINX-200 (-270) —
-      // already deep inside Redhollow Woods (x -950..-170) — throwing a 200u+
-      // peak into the forest. Pull its base back to the rim and shorten it so it
-      // reads as the valley's west wall, not a mountain in the trees. (E/N over
-      // open water are untouched.) No rng draw changes.
-      const dWx = RESV ? (MINX - 24) : (MINX - 200);
-      const dWlen = RESV ? 30 : 230;
-      const dEsz = RESV ? SEZ : (MAXZ + 60);     // E backdrop south end (clear of farm)
-      const dEdges = [
-        { p0: { x: MINX - 60, z: MINZ - 200 }, p1: { x: MAXX + 60, z: MINZ - 200 }, dir: { x: 0, z: -1 }, depthLen: 230 },
-        { p0: { x: dWx, z: MINZ - 60 }, p1: { x: dWx, z: MAXZ + 60 }, dir: { x: -1, z: 0 }, depthLen: dWlen },
-        { p0: { x: MAXX + 200, z: MINZ - 60 }, p1: { x: MAXX + 200, z: dEsz }, dir: { x: 1, z: 0 }, depthLen: 230 },
-      ];
-      const distGeoms = [];
-      for (let di = 0; di < dEdges.length; di++) {
-        const e = dEdges[di];
-        const cfg = {
-          cols: 60, rows: 4, depthLen: e.depthLen,
-          peakAmp: 190 + rng() * 30,             // ~190-220
-          seedOff: 5000 + di * 211 + rng() * 80,
-          noiseScale: 0.009,
-          footGuard: 0.28,
-          palette: rangePalette,
-        };
-        distGeoms.push(build(THREE, e.p0, e.p1, e.dir, cfg).geo);
+      mountainHeightAt = function (x, z) {
+        let h = 0;
+        for (let i = 0; i < groundFns.length; i++) h = Math.max(h, groundFns[i](x, z));
+        return h;
+      };
+      if (CBZ.registerCityGroundHeight) {
+        CBZ.registerCityGroundHeight(mountainHeightAt, { name: "Mount Mercy", biome: "snow" });
       }
+      const massifBounds = {
+        minX: fgEdges[0].p0.x, maxX: fgEdges[0].p1.x,
+        minZ: fgEdges[0].p0.z, maxZ: fgEdges[0].p0.z + fgEdges[0].depthLen,
+      };
+      if (layout && layout.reserve) layout.reserve("snow:real-massif", massifBounds, { pad: 2 });
 
       // MAP_RESERVE_V1: record the massif's TRUE footprint so the post-build
       // audit sees the mountain range, not just the flat feather skirt. Reserve
@@ -329,30 +358,40 @@
             minZ: Math.min(az, bz, az + ez, bz + ez), maxZ: Math.max(az, bz, az + ez, bz + ez),
           };
         };
-        const all = fgEdges.concat(dEdges);
+        const all = fgEdges;
         for (let mi = 0; mi < all.length; mi++) {
           CBZ.worldLayout.mapReserve("massif:snow:" + mi, edgeRect(all[mi]), { owner: "snow", kind: "massif" });
         }
       }
 
-      // -- MERGE: foreground -> 1 mesh, distant -> 1 mesh (2 draw calls)
+      // -- MERGE: the one real ground mass -> one draw call -----------------
       // Vertex colour is the authored mountain shading. Keep it independent of
       // one-sided normals / sun direction so the range cannot collapse into a
       // black silhouette at night or when viewed from aircraft height.
-      // SOLID pads have real up-facing normals → Lambert lights the massifs
-      // (the hemisphere floor keeps them from ever going black at night) and
-      // the shared fogDepth scale keeps them SOLID past the city fog wall
-      // instead of dissolving into pale sky-colored cutouts. Legacy sheets
-      // keep their old Basic material (they have no usable normals).
+      // Vertex colours bake both geology bands and per-face slope shading.
+      // Use them directly: the city's stacked Lambert lights flattened the
+      // whole broad slope into one dark fog-coloured sheet at dusk. The baked
+      // palette is held below white so the final sRGB pass cannot clip it.
+      // This remains opaque/depth-writing. The reachable local massif opts out
+      // of city-block fog: even a scaled fog pass was turning its full surface
+      // into the horizon colour and recreating the see-through-sheet read.
       const rangeMat = SOLID
-        ? (CBZ.terrainFogScale || function (m) { return m; })(new THREE.MeshLambertMaterial({
-            color: 0xffffff, vertexColors: true, flatShading: true, fog: true,
+        ? (CBZ.terrainFogScale || function (m) { return m; })(new THREE.MeshBasicMaterial({
+            // Vertex colours carry the complete granite/snow palette and the
+            // directional face light. A white base avoids muddying it brown.
+            color: 0xffffff, vertexColors: true, fog: false,
+            // The pad is generated as independently wound non-indexed facets.
+            // Render both faces so no camera quadrant can lose half the mass;
+            // it is still fully opaque and depth-writing below.
+            side: THREE.DoubleSide,
+            transparent: false, opacity: 1, depthTest: true, depthWrite: true,
           }))
         : new THREE.MeshBasicMaterial({
             color: 0xffffff, vertexColors: true, flatShading: true,
             side: THREE.DoubleSide, fog: true,
           });
       function mergeAddRange(geoms, cast) {
+        if (!geoms.length) return null;
         let mesh;
         if (BGU && BGU.mergeBufferGeometries) {
           mesh = new THREE.Mesh(BGU.mergeBufferGeometries(geoms), rangeMat);
@@ -373,34 +412,30 @@
           mesh = new THREE.Mesh(merged, rangeMat);
         }
         mesh.castShadow = !!cast; mesh.receiveShadow = true;
+        mesh.name = "mount-mercy-ground";
+        // This one mesh spans the whole reachable massif. Treat it like every
+        // other world surface so far-culling cannot hide the mountain while
+        // leaving its ski-run/lift dressing floating in the distance.
+        mesh.userData.terrain = true;
+        mesh.userData.worldSurface = true;
+        mesh.userData.realGround = true;
+        mesh.userData.distantLandmark = true;
         // verts are baked in WORLD space, so a computed bounding sphere is
-        // correct — let the range frustum-cull instead of always drawing.
+        // correct for auditing/raycasting. This is one draw and a permanent
+        // city landmark, so skip object-sphere frustum toggles; the projection
+        // plane remains the sole distance authority and cannot flicker around
+        // oblique camera edges.
         if (mesh.geometry && !mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+        mesh.frustumCulled = false;
         mesh.matrixAutoUpdate = false; mesh.updateMatrix();
         root.add(mesh);
+        // Projection-only request: fog and city far-culling keep their normal
+        // budgets. This merely lets the explicitly registered one-draw landmark
+        // survive the airport/city distance instead of hard-clipping at 1400m.
+        CBZ.cityDistantLandmarkFar = Math.max(CBZ.cityDistantLandmarkFar || 0, 2200);
         return mesh;
       }
-      mergeAddRange(distGeoms, false);             // distant backdrop (no shadow)
-      mergeAddRange(fgGeoms, true);                // foreground craggy ring
-
-      // -- COLLIDERS: crest boxes along each FOREGROUND spine every ~80u
-      //    (full peak height), skipping the SOUTH causeway gap (~x=470).
-      for (const sp of spines) {
-        const s = sp.spine;
-        const isSouth = sp.edge.name === "S";
-        let lastX = -1e9, lastZ = -1e9;
-        for (let i = 0; i < s.length; i++) {
-          const pt = s[i];
-          if (pt.h < 12) continue;                 // too low to bother
-          // keep the causeway mouth clear of colliders
-          if (isSouth && Math.abs(pt.x - 470) < 75) continue;
-          // sample roughly every ~80u along the spine
-          if (Math.hypot(pt.x - lastX, pt.z - lastZ) < 80) continue;
-          lastX = pt.x; lastZ = pt.z;
-          const hw = 42;                            // collider half-footprint
-          pushCol(pt.x - hw, pt.x + hw, pt.z - hw, pt.z + hw, 0, pt.h, null);
-        }
-      }
+      mergeAddRange(fgGeoms, true);
     })();
 
     // ---- frozen LAKE (icy plane, slight blue tint) -----------------------
@@ -646,28 +681,33 @@
 
     // ---- CHAIRLIFT line up a slope (towers + cable + moving chairs) ------
     // WHY: it carries skiers up to the ski run; chairs glide on the cable.
-    const lift = { chairIM: null, baseX: 240, baseZ: -1180, topX: 470, topZ: -1720, towerTopY: 16, chairY: 10, n: 8, t: 0 };
+    const lift = { chairIM: null, baseX: 240, baseZ: -1180, topX: 470, topZ: -1585, towerTopY: 16, chairY: 10, n: 8, t: 0 };
     (function chairlift() {
       const dx = lift.topX - lift.baseX, dz = lift.topZ - lift.baseZ;
       const span = Math.hypot(dx, dz);
       const ux = dx / span, uz = dz / span;
-      // towers
+      const cableY0 = mountainHeightAt(lift.baseX, lift.baseZ) + 12.6;
+      const cableY1 = mountainHeightAt(lift.topX, lift.topZ) + 18.6;
+      lift.cableY0 = cableY0; lift.cableY1 = cableY1;
+      // Towers start on the same sampled mountain surface used by player
+      // physics and reach the cable above it.
       const towers = 5;
       for (let i = 0; i <= towers; i++) {
         const t = i / towers;
         const x = lift.baseX + dx * t, z = lift.baseZ + dz * t;
-        const h = 12 + 6 * t;          // climbs toward the top
-        box(x, h / 2, z, 0.8, h, 0.8, mSteel, true);
-        // cross-arm
-        box(x, h, z, 4, 0.4, 0.4, mSteel, false);
+        const groundY = mountainHeightAt(x, z);
+        const cableY = cableY0 + (cableY1 - cableY0) * t;
+        const h = Math.max(7, cableY - groundY);
+        box(x, groundY + h / 2, z, 0.8, h, 0.8, mSteel, true);
+        box(x, cableY, z, 4, 0.4, 0.4, mSteel, false);
       }
       lift.span = span; lift.ux = ux; lift.uz = uz;
       // CABLE: a thin tube from base-top to top-top (two strands = up/down)
       const cableMat = new THREE.MeshLambertMaterial({ color: COL.cable });
       for (const off of [-1.4, 1.4]) {
         const path = new THREE.LineCurve3(
-          new THREE.Vector3(lift.baseX + uz * off, 12.6, lift.baseZ - ux * off),
-          new THREE.Vector3(lift.topX + uz * off, 18.6, lift.topZ - ux * off));
+          new THREE.Vector3(lift.baseX + uz * off, cableY0, lift.baseZ - ux * off),
+          new THREE.Vector3(lift.topX + uz * off, cableY1, lift.topZ - ux * off));
         const tube = new THREE.Mesh(new THREE.TubeGeometry(path, 1, 0.08, 4, false), cableMat);
         root.add(tube);
       }
@@ -689,7 +729,7 @@
         let f = ((i / lift.n) + t) % 1;
         const off = (i % 2 === 0) ? 1.4 : -1.4;        // alternate strands
         const x = lift.baseX + (lift.topX - lift.baseX) * f + lift.uz * off;
-        const y = 12.4 + (18.4 - 12.4) * f - 1.2;       // hang below cable
+        const y = lift.cableY0 + (lift.cableY1 - lift.cableY0) * f - 1.2;
         const z = lift.baseZ + (lift.topZ - lift.baseZ) * f - lift.ux * off;
         v.set(x, y, z); m4.compose(v, q, s); lift.chairIM.setMatrixAt(i, m4);
       }
@@ -698,11 +738,28 @@
 
     // ---- SKI RUN with slalom gates (red/blue poles down the slope) -------
     (function skiRun() {
-      const sx = 470, sz0 = -1720, sz1 = -1300;     // top to bottom along z
-      // groomed snow strip (slightly brighter)
-      const run = new THREE.Mesh(new THREE.PlaneGeometry(26, sz1 - sz0),
-        new THREE.MeshLambertMaterial({ color: 0xf6fbff }));
-      run.rotation.x = -Math.PI / 2; run.position.set(sx, 0.04, (sz0 + sz1) / 2); run.receiveShadow = true;
+      const sx = 470, sz0 = -1585, sz1 = -1300;     // summit to resort valley
+      // A segmented groomed strip follows the exact real-ground oracle. It is
+      // world-space geometry, so there is no flat plane cutting through the hill.
+      const segZ = 48, halfW = 13;
+      const runGeo = new THREE.PlaneGeometry(halfW * 2, sz1 - sz0, 2, segZ);
+      runGeo.rotateX(-Math.PI / 2);
+      const pa = runGeo.attributes.position;
+      for (let i = 0; i < pa.count; i++) {
+        const wx = sx + pa.getX(i), wz = (sz0 + sz1) / 2 + pa.getZ(i);
+        pa.setXYZ(i, wx, mountainHeightAt(wx, wz) + 0.14, wz);
+      }
+      pa.needsUpdate = true; runGeo.computeVertexNormals(); runGeo.computeBoundingSphere();
+      const runMat = new THREE.MeshLambertMaterial({
+        color: 0xeaf2f7,
+        // Coplanar snow flickered into disconnected white scraps at airfield
+        // distance. Bias this authored groomed strip toward the camera in depth
+        // without lifting its walkable geometry off the real mountain oracle.
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      });
+      const run = new THREE.Mesh(runGeo, runMat);
+      run.userData.mountMercySkiRun = true;
+      run.receiveShadow = true;
       root.add(run);
       // slalom gate poles (instanced — alternating sides)
       const gates = 9;
@@ -713,7 +770,7 @@
         const t = (i + 0.5) / gates;
         const z = sz0 + (sz1 - sz0) * t;
         const x = sx + (i % 2 === 0 ? -7 : 7);
-        v.set(x, 1.2, z); m4.compose(v, q, s); poleIM.setMatrixAt(i, m4);
+        v.set(x, mountainHeightAt(x, z) + 1.2, z); m4.compose(v, q, s); poleIM.setMatrixAt(i, m4);
       }
       poleIM.instanceMatrix.needsUpdate = true;
       root.add(poleIM);
@@ -825,14 +882,28 @@
         { x: 190, z: -1430 },                            // by the lake
       ];
       const lr = mulberry(0xA17 ^ (CX | 0));
+      const populationEntries = [];
       for (const sp of spots) {
         try {
-          const ped = CBZ.cityMakePed(sp.x, sp.z, lr, {
+          const opts = {
             job: "hiker", archetype: "resident", behavior: "wander",
             wealth: 0.4 + lr() * 0.3, armed: false,
-          });
-          if (ped) CBZ.cityPeds.push(ped);
+          };
+          if (CBZ.npcLife && CBZ.npcLife.definePopulation) {
+            populationEntries.push({ profile: "cityResident", placement: { x: sp.x, z: sp.z, rng: lr }, overrides: opts });
+            continue;
+          }
+          const ped = CBZ.npcLife
+            ? CBZ.npcLife.spawnCity("cityResident", { x: sp.x, z: sp.z, parent: root, rng: lr }, opts)
+            : CBZ.cityMakePed(sp.x, sp.z, lr, opts);
+          if (ped && !CBZ.npcLife) {
+            root.add(ped.group);
+            if (CBZ.cityPeds.indexOf(ped) < 0) CBZ.cityPeds.push(ped);
+          }
         } catch (e) { /* one bad ped can't sink the biome */ }
+      }
+      if (populationEntries.length && CBZ.npcLife && CBZ.npcLife.definePopulation) {
+        CBZ.npcLife.definePopulation("snow-authored", { root: root, entries: populationEntries });
       }
     })();
 
@@ -842,6 +913,7 @@
     //  free everywhere else (no per-frame work when hidden).
     // ============================================================
     (function snowfall() {
+      if (CFGS.SNOWFALL_POINTS !== true) return;
       const N = 420, SPAN = 120, TOP = 70;
       const pos = new Float32Array(N * 3);
       const vel = new Float32Array(N);       // fall speed per flake

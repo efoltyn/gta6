@@ -126,10 +126,14 @@
     // island ocean and the new coast-to-horizon plane read as the same water.
     if (CBZ.city && CBZ.city.seaMat) ocean.material = CBZ.city.seaMat;
     const beach = new THREE.Mesh(new THREE.CircleGeometry(R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
-    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz); beach.receiveShadow = true; root.add(beach);
+    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz); beach.receiveShadow = true;
+    beach.userData.terrain = true; beach.userData.worldSurface = true; beach.name = "annex-beach-surface";
+    root.add(beach);
     const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
     const island = new THREE.Mesh(new THREE.CircleGeometry(R, 64), new THREE.MeshLambertMaterial({ map: grassTex }));
-    island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz); island.receiveShadow = true; root.add(island);
+    island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz); island.receiveShadow = true;
+    island.userData.terrain = true; island.userData.worldSurface = true; island.name = "annex-island-surface";
+    root.add(island);
 
     const bridgeStart = city.xLines[city.xLines.length - 1] - 2;
     const bridgeEnd = cx - R + 12;

@@ -37,6 +37,11 @@
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
   function animals() { return CBZ.cityWildlife || []; }
   function note(msg, sec, o) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec, o); }
+  function faceAnimal(a, heading) {
+    a.heading = heading; a.faceH = heading;
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(a, heading);
+    else if (a.group) a.group.rotation.y = -heading;
+  }
 
   const NAMES = ["Willow", "Atlas", "Clover", "Ember", "Biscuit", "Storm", "Maple", "Titan", "Pepper", "Juniper", "Boulder", "Honey", "Comet", "Sage", "Thunder", "Mochi"];
 
@@ -121,14 +126,14 @@
     const dx = P.x - grp.position.x, dz = P.z - grp.position.z;
     const d = Math.hypot(dx, dz);
     if (a.stay || d <= HEEL_R) {                    // parked / at heel: face you
-      grp.rotation.y = -Math.atan2(dz, dx) + Math.PI / 2;
+      faceAnimal(a, Math.atan2(dz, dx));
       return;
     }
     const spd = (sp.spd || 1.6) * FOLLOW_MULT * (a.grow != null ? 0.8 : 1);
     grp.position.x += (dx / d) * spd * dt;
     grp.position.z += (dz / d) * spd * dt;
     grp.position.y = groundY(grp.position.x, grp.position.z);
-    grp.rotation.y = -Math.atan2(dz, dx) + Math.PI / 2;
+    faceAnimal(a, Math.atan2(dz, dx));
   };
 
   // ============================================================
@@ -180,7 +185,7 @@
     const bob = moving ? Math.abs(Math.sin(ride.phase)) * 0.09 * (a.species.scale || 1) : 0;
     const gy = groundY(gx, gz);
     a.group.position.set(gx, gy + bob, gz);
-    a.group.rotation.y = -ride.head + Math.PI / 2;
+    faceAnimal(a, ride.head);
     // seat the rider on the back (after physics grounded them at floor level)
     P.pos.y = gy + R.y * 0.82 + bob;
     P.vy = 0; P.grounded = true;

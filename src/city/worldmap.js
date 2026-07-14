@@ -36,6 +36,27 @@
   const THREE = window.THREE;
 
   CBZ._landmassBuilders = CBZ._landmassBuilders || [];
+  CBZ._cityGroundHeightProviders = CBZ._cityGroundHeightProviders || [];
+
+  // Real, reachable landmasses publish their analytic ground here. This keeps
+  // elevation tied to actual map geometry instead of a decorative backdrop:
+  // player physics, wildlife, projectiles and aircraft all read the same floor.
+  CBZ.registerCityGroundHeight = function (fn, meta) {
+    if (typeof fn !== "function") return null;
+    const rec = { fn, meta: meta || null };
+    CBZ._cityGroundHeightProviders.push(rec);
+    return rec;
+  };
+  CBZ.cityGroundHeightAt = function (x, z) {
+    let best = 0;
+    const list = CBZ._cityGroundHeightProviders || [];
+    for (let i = 0; i < list.length; i++) {
+      let h = 0;
+      try { h = +list[i].fn(x, z) || 0; } catch (e) { h = 0; }
+      if (h > best) best = h;
+    }
+    return best;
+  };
 
   // island/biome modules register a builder here at load time.
   CBZ.addLandmass = function (fn, order) {
@@ -54,6 +75,12 @@
   // of the core is double-rendered or z-fights.
   CBZ.makeBiomeEdgeRing = function (root, opts) {
     if (!root || !opts) return null;
+    // The continuous continent already owns the terrain between biome pads.
+    // Keeping the old decorative feather rings as well left broad, perfectly
+    // flat green shelves above the sea and under neighboring ground; from an
+    // aircraft those shelves flickered as a checkerboard. They remain useful
+    // only for the legacy separated-archipelago mode.
+    if (!CBZ.CONFIG || CBZ.CONFIG.CITY_CONTINENT !== false) return null;
     const cx = +opts.cx || 0, cz = +opts.cz || 0;
     const hx = Math.max(1, +opts.hx || 1), hz = Math.max(1, +opts.hz || 1);
     const feather = Math.max(8, +opts.feather || 72);
@@ -459,6 +486,7 @@
   // one bad biome can never take down the rest of the world.
   CBZ.cityWorldGeo = function (city) {
     city.regions = city.regions || [];
+    CBZ._cityGroundHeightProviders.length = 0;
     CBZ.cityWorkAnchorsReset();        // anchors are rebuilt by the biome builders
     // World geometry is assembled by several modules. Start every pass with
     // one shared, idempotent occupancy view seeded from the already-built

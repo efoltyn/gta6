@@ -465,6 +465,15 @@
   //  cap) so a uniform/tux portrait reads identically to the in-world body.
   //  No parallel wardrobe — we call the engine's own dress functions.
   // ============================================================
+  function portraitHasStructuredCollar(w) {
+    const compItems = w && w.composite && Array.isArray(w.composite.items) ? w.composite.items : null;
+    const outfitId = String(w && (w.id || w.name) || "");
+    return !!(w && w.cop ||
+      /collar|blazer|jacket|bomber|tie|tux|suit|uniform|coat|puffer|tracksuit|varsity/i.test(outfitId) ||
+      (compItems && compItems.some(function (id) {
+        return /collar|blazer|jacket|bomber|tie|tux|suit/i.test(String(id || ""));
+      })));
+  }
   function dressPortrait(rig) {
     if (!rig || !rig.skinSlots) return;
     // use the EFFECTIVE worn record (mirrors applyPlayer's PLAIN_BASE->composite
@@ -499,8 +508,15 @@
     };
     const cop = !!(w && w.cop);
     const beltHex = (w && w.colors && w.colors.belt != null) ? w.colors.belt : 0x17191f;
+    // The base rig's broad collar box is useful under a uniform/jacket, but on
+    // a plain tee it reads as a rigid white ring around the neck. Composite
+    // clothing that actually includes a collar/jacket keeps it; a bare tee does
+    // not. This is the portrait-only copy — the player's worn record remains
+    // the single clothing source of truth.
+    const structuredCollar = portraitHasStructuredCollar(w);
     setP(s.stripes, null, false);          // no city fit has jail stripes
     setP(s.belt, beltHex, true);
+    setP(s.collar, null, structuredCollar);
     setP(s.badge, null, cop);              // the badge rides the uniform
     setP(s.cap, null, cop);
     setP(s.hair, null, !cop);
@@ -616,12 +632,12 @@
     const st = document.createElement("style");
     st.id = "cpCss";
     st.textContent =
-      "#cpPanel{position:fixed;left:14px;top:14px;z-index:60;width:128px;font-family:inherit;color:#e8ecf2;pointer-events:none;user-select:none}" +
-      "#cpPanel .cpCard{position:relative;background:rgba(8,11,17,.55);border:1px solid rgba(232,236,242,.12);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);overflow:hidden;box-shadow:0 3px 12px rgba(0,0,0,.4)}" +
+      "#cpPanel{position:fixed;left:max(10px,env(safe-area-inset-left,0px));top:max(10px,env(safe-area-inset-top,0px));z-index:60;width:min(128px,calc(100vw - 20px));max-height:calc(100dvh - max(10px,env(safe-area-inset-top,0px)) - 10px);box-sizing:border-box;font-family:inherit;color:#e8ecf2;pointer-events:none;user-select:none}" +
+      "#cpPanel .cpCard{position:relative;width:100%;box-sizing:border-box;background:rgba(8,11,17,.55);border:1px solid rgba(232,236,242,.12);border-radius:10px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);overflow:hidden;box-shadow:0 3px 12px rgba(0,0,0,.4)}" +
       "#cpPanel .cpHide{position:absolute;right:4px;top:4px;z-index:2;width:20px;height:20px;line-height:18px;text-align:center;font-size:15px;font-weight:700;color:#9fb0c6;background:rgba(8,11,17,.6);border:1px solid rgba(232,236,242,.16);border-radius:6px;cursor:pointer;padding:0;pointer-events:auto;font-family:inherit}" +
       "#cpPanel .cpHide:hover{color:#fff;background:rgba(255,90,90,.32);border-color:rgba(255,120,120,.5)}" +
-      "#cpPanel canvas{display:block;width:128px;height:128px;background:radial-gradient(ellipse at 50% 38%,rgba(60,74,98,.35),rgba(8,11,17,.0) 70%)}" +
-      "#cpPanel .cpMeta{padding:6px 8px 7px}" +
+      "#cpPanel canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;background:radial-gradient(ellipse at 50% 38%,rgba(60,74,98,.35),rgba(8,11,17,.0) 70%)}" +
+      "#cpPanel .cpMeta{display:block;box-sizing:border-box;padding:6px 8px 7px;border-top:1px solid rgba(232,236,242,.08)}" +
       "#cpPanel .cpLvl{font-size:13px;font-weight:700;letter-spacing:.2px;line-height:1.15;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7)}" +
       "#cpPanel .cpLvl .n{color:#ffd166}" +
       "#cpPanel .cpStars{font-size:13px;line-height:1.1;margin-top:3px;letter-spacing:1px}" +
@@ -687,7 +703,7 @@
     panel.id = "cpPanel";
     panel.innerHTML =
       "<div class='cpCard'>" +
-      "<button type='button' class='cpHide' title='Hide HUD ([O])' aria-label='Hide HUD'>×</button>" +
+      "<button type='button' class='cpHide' aria-label='Hide HUD'>×</button>" +
       "<canvas width='128' height='128'></canvas>" +
       "<div class='cpMeta'>" +
       "<div class='cpLvl'>Lv.<span class='n'>1</span> <span class='ti'>Nobody</span></div>" +
@@ -777,7 +793,7 @@
       "<div class='cpRight'>" +
       "<div><div class='cpH'>Worn</div><div class='cpAcc'></div></div>" +
       "<div><div class='cpH'>Carried</div><div class='cpGrid'></div></div>" +
-      "<div><div class='cpH'>Hotbar</div><div class='cpHot'></div></div>" +
+      "<div class='cpHotSection'><div class='cpH'>Hotbar</div><div class='cpHot'></div></div>" +
       "</div>" +
       "</div>";
     document.body.appendChild(inv);
@@ -870,6 +886,16 @@
 
   function renderHot() {
     if (!invHot) return;
+    const section = invHot.closest ? invHot.closest(".cpHotSection") : invHot.parentNode;
+    // V2's Carried grid already contains guns and items in identical slots.
+    // Repeating a separate weapon/item strip made the inventory look like two
+    // incompatible systems; the in-world hotbar remains available after close.
+    if (CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false) {
+      if (section) section.style.display = "none";
+      invHot.innerHTML = "";
+      return;
+    }
+    if (section) section.style.display = "";
     const bar = (CBZ.cityHotbar && CBZ.cityHotbar()) || [];
     if (!bar.length) { invHot.innerHTML = "<div class='cpEmpty'>—</div>"; return; }
     let html = "";
@@ -1075,5 +1101,9 @@
     isOpen: function () { return invOpen; },
     hideHud: setHudHidden, hudHidden: function () { return hudHidden; },
     slots: function () { return SLOTS.map((s) => ({ key: s.key, worn: slotLabel(s) || null })); },
+    portraitHasStructuredCollar: portraitHasStructuredCollar,
+    // Read-only harness seam: proves that the actual 0.94-wide structural mesh
+    // is hidden for collarless looks, rather than merely recoloured.
+    portraitRig: function () { return PORT.rig || null; },
   };
 })();

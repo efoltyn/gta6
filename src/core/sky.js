@@ -197,7 +197,10 @@
      aircraft. The horizon is the real sea plane melting into the fog
      and the dome's fog band. DO NOT ADD RING MESHES BACK. */
 
-  /* ---------------- 3. stars (ALL modes — night is universal) -------- */
+  /* ---------------- 3. stars -----------------------------------------
+     Disabled by design.  Screen-space Points read as white weather/dust
+     floating in front of the HUD and terrain from an aircraft.  The authored
+     sky gradient, sun and moon carry time-of-day without fake specks. */
   const STARS = 800;
   const starGeo = new THREE.BufferGeometry();
   (function () {
@@ -479,10 +482,9 @@
       lastPaintAt = CBZ.now; forcePaint = false;
     }
 
-    // stars
-    const so = Math.max(0, night - 0.25) * 1.2;
-    stars.visible = so > 0.01;
-    if (stars.visible) starMat.opacity = Math.min(1, so);
+    // No floating point-stars: keep the object inert so no per-frame scene
+    // rebuild is needed and older save/config state cannot turn it back on.
+    stars.visible = false;
 
     // sun + moon ride daynight's angle
     _p.set(Math.cos(a) * 80, Math.sin(a) * 95, -10).normalize();

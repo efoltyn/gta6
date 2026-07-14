@@ -156,8 +156,8 @@
     if (!col || !rec.group) return;
     const a = rec.group.rotation.y || 0;
     const ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
-    const hw = Math.max(0.5, rec.footW || 3) * 0.5;
-    const hl = Math.max(0.5, rec.footL || 5) * 0.5;
+    const hw = Math.max(0.5, rec.colliderW || rec.footW || 3) * 0.5;
+    const hl = Math.max(0.5, rec.colliderL || rec.footL || 5) * 0.5;
     const ex = ca * hw + sa * hl, ez = sa * hw + ca * hl;
     col.minX = rec.pos.x - ex; col.maxX = rec.pos.x + ex;
     col.minZ = rec.pos.z - ez; col.maxZ = rec.pos.z + ez;
@@ -222,10 +222,9 @@
     return true;
   }
 
-  // Campaign CSS deliberately keeps the legacy interaction card hidden. Give
-  // the first nearby passenger aircraft a one-time diegetic phone tip instead:
-  // no prose floats over the apron, while the unchanged [E] registry action is
-  // still discoverable before the player reaches the hull interaction radius.
+  // Campaign CSS deliberately keeps the legacy interaction card hidden. A
+  // one-time gate update can still establish that a flight is ready, but must
+  // read like an in-world message rather than a keyboard tutorial.
   let campaignAircraftTipShown = false;
   if (CBZ.onUpdate) CBZ.onUpdate(14.65, function () {
     if (campaignAircraftTipShown || !campaignActive() || !activeCtx()) return;
@@ -235,7 +234,7 @@
     if (!rec) return;
     campaignAircraftTipShown = true;
     const airliner = rec.flightKind === "airliner";
-    campaignNotify("GHOSTLINE", (airliner ? "The gate airliner" : "The private jet") + " is live. Walk to the hull and use [E] to board.");
+    campaignNotify("GHOSTLINE", (airliner ? "The gate airliner" : "The private jet") + " is fueled and ready at the gate.");
   });
 
   // ============================================================

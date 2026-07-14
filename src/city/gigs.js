@@ -467,27 +467,50 @@
     enterCarry(gig);
   }
 
-  // find / snap an NPC passenger near the pickup into the car (best-effort).
+  const RIDER_SEAT = { x: 0.42, y: 0.55, z: -0.35, pitch: 0.18, yaw: 0, pose: "sit", state: "sit" };
+  function seatPassenger(gig, p, car) {
+    if (!p || !car || !car.group || !CBZ.npcLife) return false;
+    if (p._npcAttached && p._npcAttached.parent === car.group) return true;
+    if (p._npcAttached) CBZ.npcLife.detach(p, { parent: (arena() && arena().root) || CBZ.scene, state: "walk" });
+    if (!CBZ.npcLife.attach(p, car.group, RIDER_SEAT)) return false;
+    p.inCar = car; p.controlled = true;
+    if (p.group) p.group.visible = true;
+    gig.passengerCar = car;
+    return true;
+  }
+
+  // Find a real nearby citizen and put that same visible body in the rear seat.
+  // The old implementation hid the actor and teleported only its position to
+  // the car centre, which was still a fake passenger even though a ped record
+  // existed behind it.
   function boardPassenger(gig) {
     const peds = CBZ.cityPeds || [];
     let best = null, bd = 16 * 16;
     for (const p of peds) {
-      if (!p || p.dead || p.vendor || p.gang || p.recruited || p.companion || p._gigRider) continue;
+      if (!p || p.dead || p.vendor || p.gang || p.recruited || p.companion || p._gigRider ||
+          p._npcAttached || p.inCar || p.controlled || p._scene) continue;
       const dd = (p.pos.x - gig.pickup.x) * (p.pos.x - gig.pickup.x) + (p.pos.z - gig.pickup.z) * (p.pos.z - gig.pickup.z);
       if (dd < bd) { bd = dd; best = p; }
     }
     if (best) {
       best._gigRider = true;
       best.seekPlayer = false; best.state = "ride"; best.pause = 9999;
-      if (best.group) best.group.visible = false;   // they "get in" — hidden during the ride
+      // If the player arrived in a car, seat immediately. If not, this real
+      // actor remains visibly waiting and carryTick seats them on entry.
+      if (!seatPassenger(gig, best, drivenCar()) && best.group) best.group.visible = true;
     }
     return best;
   }
-  function dropPassenger(gig) {
+  function dropPassenger(gig, point) {
     const p = gig.passenger; if (!p) return;
+    const root = (arena() && arena().root) || CBZ.scene;
+    if (p._npcAttached && CBZ.npcLife) CBZ.npcLife.detach(p, { parent: root, state: "walk" });
+    p.inCar = null; p.controlled = false;
     p._gigRider = false; p.pause = 0; p.state = "walk"; p.seekPlayer = false;
-    if (p.pos) p.pos.set(gig.dest.x, 0, gig.dest.z);
-    if (p.group) { p.group.position.set(gig.dest.x, 0, gig.dest.z); p.group.visible = true; }
+    point = point || (gig.passengerCar && gig.passengerCar.pos) || playerPos();
+    if (p.pos) p.pos.set(point.x, 0, point.z);
+    if (p.group) { p.group.position.set(point.x, 0, point.z); p.group.visible = true; }
+    gig.passengerCar = null;
   }
 
   // ---------------------------------------------------------
@@ -505,9 +528,9 @@
       }
       gig.intact = clamp(gig.intact - dt * 0.0018, 0, 1);   // soft time factor
       const car = drivenCar(); if (car) gig.topSpeed = Math.max(gig.topSpeed, Math.abs(car.v || 0));
-      showBar("CARGO " + Math.round(gig.intact * 100) + "%", gig.intact,
+      showBar("📦 " + Math.round(gig.intact * 100) + "%", gig.intact,
         gig.intact > 0.66 ? "#7ed957" : gig.intact > 0.33 ? "#ffd166" : "#ff6b6b",
-        (streak() > 1 ? "STREAK ×" + streak().toFixed(1) : "") + (gig.insulated ? "  ❄INSULATED" : ""));
+        (streak() > 1 ? "×" + streak().toFixed(1) : "") + (gig.insulated ? "  ❄" : ""));
 
     } else if (gig.kind === "taxi" || gig.kind === "uber") {
       // TIP BAR decays ~3%/30s and on every crash/damage; near-misses build a
@@ -522,12 +545,20 @@
         if (nm) { gig.combo = Math.min(99, gig.combo + 1); gig.lastNearT = now(); }
         else if (gig.lastNearT && now() - gig.lastNearT > 2500) { gig.combo = Math.max(0, gig.combo - 0); }
       }
-      // keep the (hidden) rider riding with the car
+      // Keep the visible rider in a real car-local seat. Reattach if the
+      // player legitimately changes vehicles during the run.
       const car = drivenCar();
-      if (gig.passenger && car && gig.passenger.pos) gig.passenger.pos.set(car.pos.x, 0, car.pos.z);
-      showBar("TIP " + Math.round(gig.tip * 100) + "%", gig.tip,
+      if (gig.passenger && car) {
+        if (!seatPassenger(gig, gig.passenger, car) && gig.passenger.pos) {
+          // Compatibility fallback for builds without npcLife: preserve the
+          // old logical follow but never hide the citizen.
+          gig.passenger.pos.set(car.pos.x, 0, car.pos.z);
+          if (gig.passenger.group) gig.passenger.group.visible = true;
+        }
+      }
+      showBar("💵 " + Math.round(gig.tip * 100) + "%", gig.tip,
         gig.tip > 0.6 ? "#7ed957" : gig.tip > 0.3 ? "#ffd166" : "#ff6b6b",
-        gig.combo >= 2 ? "COMBO ×" + gig.combo : "");
+        gig.combo >= 2 ? "×" + gig.combo : "");
 
     } else if (gig.kind === "smuggle") {
       // CARRY = rising HEAT. Holding/selling at NIGHT bleeds it; cops nearby
@@ -541,9 +572,9 @@
       } else {
         gig.heat = clamp(gig.heat - dt * 0.02, 0, 1);
       }
-      showBar((gig.stashed ? "STASHED · HEAT " : "HEAT ") + Math.round(gig.heat * 100) + "%", gig.heat,
+      showBar((gig.stashed ? "▣  " : "") + "♨ " + Math.round(gig.heat * 100) + "%", gig.heat,
         gig.heat < 0.4 ? "#7ed957" : gig.heat < 0.75 ? "#ffd166" : "#ff6b6b",
-        gig.stashed ? "" : (isNight() ? "🌙 cooler" : ""));
+        gig.stashed ? "" : (isNight() ? "🌙" : ""));
     }
   }
 
@@ -611,7 +642,7 @@
       completeInternal(gig);
 
     } else if (gig.kind === "taxi" || gig.kind === "uber") {
-      dropPassenger(gig);
+      dropPassenger(gig, gig.dest);
       const distKm = gig.distM / 100;
       const fare = Math.round(gig.base * (0.9 + distKm * 0.25));
       const car = drivenCar();

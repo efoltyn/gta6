@@ -582,6 +582,8 @@
     // base dirt/tarmac apron (flat at y≈0; engine world is flat, this is visual)
     const apron = new THREE.Mesh(bg(MAXX - MINX, 0.1, MAXZ - MINZ), cm(M.dirt));
     apron.position.set(CEN_X, -0.02, CEN_Z); apron.receiveShadow = true; apron.castShadow = false;
+    apron.userData.terrain = true; apron.userData.worldSurface = true;
+    apron.name = "military-island-surface";
     root.add(apron);
     // RUNWAY: long tarmac strip down the south part of the island, with
     // centreline dashes (merged into one dash material).
@@ -698,34 +700,22 @@
   }
 
   // ========================================================================
-  //   PARADE GROUND FORMATION — instanced static soldiers standing in ranks.
-  //   WHY instanced: a formation is dozens of identical figures; one draw call.
-  //   These are scenery (no AI); a handful of LIVE soldiers patrol separately.
+  //   PARADE GROUND FORMATION — reusable REAL-ACTOR anchors.
+  //   Identity/build belongs to npcLife + cityMakePed; this function expresses
+  //   only where a formation member stands. The old InstancedMesh silhouettes
+  //   looked human but could not react, fight, die, or leave their post.
   // ========================================================================
-  function paradeFormation(root, cx, cz) {
-    // a simple blocky standing soldier as ONE merged geometry, then instanced.
-    const parts = [];
-    function add(w, h, d, x, y, z) { const gg = bg(w, h, d); gg.translate(x, y, z); parts.push(gg); }
-    add(0.6, 0.9, 0.35, 0, 0.95, 0);     // torso
-    add(0.28, 0.85, 0.28, -0.18, 0.43, 0); // left leg
-    add(0.28, 0.85, 0.28, 0.18, 0.43, 0);  // right leg
-    add(0.18, 0.7, 0.18, -0.42, 1.05, 0);  // left arm
-    add(0.18, 0.7, 0.18, 0.42, 1.05, 0);   // right arm
-    add(0.32, 0.32, 0.32, 0, 1.6, 0);      // head
-    add(0.36, 0.14, 0.38, 0, 1.78, 0);     // helmet
-    let merged;
-    const BGU = THREE.BufferGeometryUtils;
-    if (BGU && BGU.mergeBufferGeometries) { merged = BGU.mergeBufferGeometries(parts); parts.forEach(function (p) { p.dispose(); }); }
-    else { merged = parts[0]; }            // fallback: torso only (still reads)
+  function paradeFormation(cx, cz) {
     const ROWS = 4, COLS = 8, GAP = 1.6;
-    const im = new THREE.InstancedMesh(merged, cm(M.olive), ROWS * COLS);
-    im.castShadow = true; im.receiveShadow = true;
-    const d = new THREE.Object3D(); let idx = 0;
+    const anchors = [];
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      d.position.set(cx - (COLS - 1) * GAP / 2 + c * GAP, 0, cz - (ROWS - 1) * GAP / 2 + r * GAP);
-      d.rotation.y = 0; d.updateMatrix(); im.setMatrixAt(idx++, d.matrix);
+      anchors.push({
+        x: cx - (COLS - 1) * GAP / 2 + c * GAP,
+        z: cz - (ROWS - 1) * GAP / 2 + r * GAP,
+        yaw: 0, row: r, column: c,
+      });
     }
-    im.instanceMatrix.needsUpdate = true; root.add(im);
+    return anchors;
   }
 
   // ========================================================================
@@ -910,8 +900,8 @@
     dish.position.set(radX, 8, radZ); dish.rotation.x = -0.6; dish.castShadow = true; root.add(dish);
     col(radX, radZ, 1.2, 1.2, 0, 8);
 
-    // ---- PARADE GROUND with a static instanced formation ----
-    paradeFormation(root, CEN_X - 90, CEN_Z + 40);
+    // ---- PARADE GROUND — anchors are filled by real troops below ----
+    const paradeAnchors = paradeFormation(CEN_X - 90, CEN_Z + 40);
 
     // ========================================================================
     //   TROOPS — live soldiers via cityMakePed: armed, olive patrol cap (the
@@ -920,23 +910,55 @@
     //   keeps them inside the wire. A few are STATIONED idle at posts (gate,
     //   towers) by parking their target on the spot and idling them.
     // ========================================================================
-    const troops = [];
-    function trooper(x, z, opts) {
+    const troops = [], troopSpecs = [];
+    let troopRespawn = -1;
+    function spawnTrooper(spec) {
       if (!CBZ.cityMakePed) return null;
-      opts = opts || {};
-      const p = CBZ.cityMakePed(x, z, rng, Object.assign({
+      const opts = spec.opts || {};
+      const actorOpts = Object.assign({
         job: "soldier", kind: "civilian", armed: true, weapon: "AK-47",
         aggr: 0.45, hp: 140,
-      }, opts));
-      if (p) { CBZ.cityPeds.push(p); troops.push(p); }
+      }, opts);
+      const p = CBZ.npcLife
+        ? CBZ.npcLife.spawnCity(spec.profile || "militarySoldier", { x: spec.x, z: spec.z, parent: root, rng: rng }, actorOpts)
+        : CBZ.cityMakePed(spec.x, spec.z, rng, actorOpts);
+      if (p && !CBZ.npcLife) { root.add(p.group); CBZ.cityPeds.push(p); }
+      if (p) {
+        troops.push(p);
+        if (spec.setup) spec.setup(p);
+      }
       return p;
     }
+    function trooper(x, z, opts, profile, setup) {
+      const spec = { x: x, z: z, opts: opts || {}, profile: profile || "militarySoldier", setup: setup || null };
+      troopSpecs.push(spec);
+      return spawnTrooper(spec);
+    }
+    // Every former proxy slot is now an ordinary live soldier. The formation
+    // metadata controls only the post/drill; normal ped combat and damage can
+    // interrupt it, after which a survivor returns to the same reusable anchor.
+    let paradeCursor = 0;
+    function fillParade(budget) {
+      let made = 0;
+      while (paradeCursor < paradeAnchors.length && made < budget) {
+        const i = paradeCursor++, a = paradeAnchors[i];
+        const p = trooper(a.x, a.z, { aggr: 0.35 }, "militaryDrill", function (p) {
+          p.group.rotation.y = a.yaw;
+          p.state = "idle"; p.pause = 2;
+          p._stationed = { x: a.x, z: a.z, yaw: a.yaw };
+          p._drill = { index: i, row: a.row, column: a.column, phase: (i % 8) * 0.35 };
+          p.activityState = "stand";
+        });
+        if (!p) continue;
+        made++;
+      }
+      return made;
+    }
+    fillParade(2);                       // establish the post; finish incrementally
     // gate guards (stationed — stand the post)
-    const gateGuard1 = trooper(cw.gx + 2, CW_MINZ + 2, { aggr: 0.35 });
-    const gateGuard2 = trooper(cw.gx + 2, CW_MAXZ - 2, { aggr: 0.35 });
-    [gateGuard1, gateGuard2].forEach(function (g) {
-      if (g) { g.state = "idle"; g.pause = 9e9; g._stationed = { x: g.pos.x, z: g.pos.z }; }
-    });
+    const guardSetup = function (g) { g.state = "idle"; g.pause = 9e9; g._stationed = { x: g.pos.x, z: g.pos.z }; };
+    trooper(cw.gx + 2, CW_MINZ + 2, { aggr: 0.35 }, null, guardSetup);
+    trooper(cw.gx + 2, CW_MAXZ - 2, { aggr: 0.35 }, null, guardSetup);
     // NO-SPAWN keep-out: the active runway strip (owner's rule — nobody
     // spawns or idles on a runway, not even patrols). Registered BEFORE the
     // patrol scatter below so cityScatterInRegion already steers around it.
@@ -958,18 +980,51 @@
 
     // light patrol nudge: stationed guards drift back to their post if shoved.
     if (CBZ.onUpdate) {
-      CBZ.onUpdate(38.7, function () {
+      CBZ.onUpdate(38.7, function (dt) {
         const g = window.CBZ.game || window.g;
         if (g && g.mode !== "city") return;
+        // clearCityPeds removes the bodies but the authored formation persists.
+        // Detect that reset boundary and refill the SAME specs incrementally;
+        // the updater is registered once with this landmass, so it never stacks.
+        const roster = CBZ.cityPeds || [];
+        let liveOwned = 0;
+        for (let i = 0; i < troops.length; i++) if (roster.indexOf(troops[i]) >= 0) liveOwned++;
+        if (troops.length && liveOwned === 0 && troopSpecs.length) { troops.length = 0; troopRespawn = 0; }
+        if (!CBZ.citySpawnDraining && troopRespawn >= 0) {
+          let budget = 2;
+          while (troopRespawn < troopSpecs.length && budget-- > 0) spawnTrooper(troopSpecs[troopRespawn++]);
+          if (troopRespawn >= troopSpecs.length) troopRespawn = -1;
+        }
+        // Finish replaying the already-authored specs before authoring the
+        // remaining parade rows. Otherwise a reset during incremental build
+        // lets the replay cursor chase newly appended specs and spawn each new
+        // drill soldier twice.
+        if (!CBZ.citySpawnDraining && troopRespawn < 0 && paradeCursor < paradeAnchors.length) fillParade(2);
         for (let i = 0; i < troops.length; i++) {
           const t = troops[i];
-          if (!t || t.dead || t.rage) continue;
+          if (!t || t.dead) continue;
+          const combat = !!(t.rage || t.npcWanted || t.state === "fight" || t.state === "flee" || t.state === "shoot");
+          if (combat) { t.pause = 0; t.activityState = t.state; continue; }
           if (t._stationed) {
             const dx = t._stationed.x - t.pos.x, dz = t._stationed.z - t.pos.z;
-            if (dx * dx + dz * dz > 9) {                   // wandered/shoved off post
+            const postRadius2 = t._drill ? 0.16 : 9;
+            if (dx * dx + dz * dz > postRadius2) {          // wandered/shoved off post
               if (t.target && t.target.set) t.target.set(t._stationed.x, 0, t._stationed.z);
-              t.state = "walk"; t.pause = 0;
-            } else { t.state = "idle"; t.pause = Math.max(t.pause, 2); }
+              t.state = "walk"; t.pause = 0; t.activityState = "return-to-post";
+            } else {
+              t.state = "idle"; t.pause = Math.max(t.pause, 2);
+              t.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(t.group.rotation.y, t._stationed.yaw || 0, 0.14) : (t._stationed.yaw || 0);
+              t.activityState = t._drill ? "drill" : "stand";
+              // One rank at a time moves through a short inspection/salute
+              // beat. The rest remain at attention; legs never run in place.
+              if (t._drill && t.char && t.char.parts) {
+                t._drill.phase += (dt || 0) * 0.75;
+                const salute = ((t._drill.phase + t._drill.row * 0.7) % 6) < 1.2;
+                const ra = t.char.parts.ra, la = t.char.parts.la;
+                if (ra) { ra.rotation.x = salute ? -1.45 : 0; ra.rotation.z = salute ? -0.28 : 0; }
+                if (la) { la.rotation.x = 0; la.rotation.z = 0; }
+              }
+            }
           }
         }
       });

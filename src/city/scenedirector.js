@@ -61,6 +61,22 @@
     const dx = x - c.position.x, dz = z - c.position.z;
     return dx * dx + dz * dz;
   }
+  // Close scenes cannot use the director's normal 55m offscreen ring: a
+  // jumpscare that starts 55m away is not a jumpscare.  Use the actual camera
+  // forward cone for nearby casting instead.  A negative dot is behind the
+  // player, so a body may be claimed/spawned there without popping into view.
+  function behindCamera(x, z, minD, maxD) {
+    const c = CBZ.camera && CBZ.camera.position;
+    const P = playerActor();
+    const ox = c ? c.x : (P && P.pos ? P.pos.x : 0);
+    const oz = c ? c.z : (P && P.pos ? P.pos.z : 0);
+    const dx = x - ox, dz = z - oz, d2 = dx * dx + dz * dz;
+    if (d2 < minD * minD || d2 > maxD * maxD) return false;
+    const d = Math.sqrt(d2) || 1;
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    return (dx / d) * fx + (dz / d) * fz < -0.16;
+  }
   function playerActor() { return CBZ.city && CBZ.city.playerActor; }
 
   // staging budgets. OFFSCREEN2 = pop just out of view (then walk/run in);
@@ -84,6 +100,7 @@
   //      millionaires.js draftableCiv (kept in lock-step so we never grab a body
   //      another director already owns).
   function draftableCiv(p) {
+    if (CBZ.npcLife && !CBZ.npcLife.draftableCity(p)) return false;
     if (!p || p.dead || p.isPlayer || p.vendor || p.gang || p.kind !== "civilian") return false;
     if (p.controlled || p.companion || p.recruited || p.vagrant || p._crowd || p._parked || p.inCar || p.enterT > 0) return false;
     if (p.vip || p._vipGuard || p._vipStash || p._milli || p._milliGuard) return false;
@@ -93,35 +110,60 @@
     return true;
   }
   // draft a body OFFSCREEN and (optionally) near a staging point. Returns the
-  // ped or null. We pull from a bounded random sample so it's cheap on a big
-  // roster; prefer one closest to the staging point so the cast clusters.
+  // ped or null. Incident staging is infrequent, so inspect the complete roster:
+  // a short random window made valid nearby actors easy to miss in a large city
+  // and caused otherwise-ready incidents to silently fail. Prefer the closest
+  // eligible body so the cast clusters without teleporting or creating a proxy.
   function draftNear(sx, sz, maxR) {
     const peds = CBZ.cityPeds || [];
     const n = peds.length; if (!n) return null;
     let best = null, bestD = Infinity;
     const start = (rng() * n) | 0;
-    let scanned = 0;
-    for (let i = 0; i < n && scanned < 60; i++) {
+    for (let i = 0; i < n; i++) {
       const p = peds[(start + i) % n];
       if (!draftableCiv(p)) continue;
       if (camD2(p.pos.x, p.pos.z) <= OFFSCREEN2) continue;   // never morph in view
-      scanned++;
       const d = hyp(p.pos.x - sx, p.pos.z - sz);
       if (maxR && d > maxR) continue;
       if (d < bestD) { bestD = d; best = p; }
     }
     return best;
   }
+  // Existing vagrants are the first choice for the close scare: their ongoing
+  // street identity is preserved by npcLife.apply/releaseProfile.  A regular
+  // free civilian is an acceptable recast, but only when already behind the
+  // camera and inside the playable close band.  Nobody is teleported.
+  function draftHoboClose() {
+    const P = playerActor(), peds = CBZ.cityPeds || [];
+    if (!P || !P.pos) return null;
+    let best = null, bestScore = Infinity;
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      const plain = draftableCiv(p);
+      const vagrant = !!(p && p.vagrant && p.group && !p.dead && !p._scene && !p.controlled &&
+        !p.companion && !p.recruited && !p.inCar && !(p.ko > 0) && !p.rage && !p.reportState);
+      if (!plain && !vagrant) continue;
+      if (!behindCamera(p.pos.x, p.pos.z, 10, 36)) continue;
+      const d = hyp(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
+      const score = d - (vagrant ? 20 : 0);
+      if (score < bestScore) { bestScore = score; best = p; }
+    }
+    return best;
+  }
   // a capped fresh-body fallback (only when the pool is short), like vips/milli.
   let _fresh = 0;
   const MAX_FRESH = 4;
-  function makeAt(x, z, opts) {
+  function makeAt(x, z, opts, profile) {
     const A = arena(); if (!A || !A.root || !CBZ.cityMakePed) return null;
     if (_fresh >= MAX_FRESH) return null;
     try {
-      const p = CBZ.cityMakePed(x, z, rng, opts || {});
+      const p = CBZ.npcLife
+        ? CBZ.npcLife.spawnCity(profile || "cityResident", { x: x, z: z, parent: A.root, rng: rng }, opts || {})
+        : CBZ.cityMakePed(x, z, rng, opts || {});
       if (!p) return null;
-      A.root.add(p.group); CBZ.cityPeds.push(p); _fresh++;
+      if (!CBZ.npcLife) { A.root.add(p.group); CBZ.cityPeds.push(p); }
+      p._sceneFresh = true;
+      _fresh++;
       return p;
     } catch (e) { return null; }
   }
@@ -131,34 +173,77 @@
   function restore(p) {
     if (!p) return;
     p._scene = null; p._sceneRole = null;
+    // Fresh fallbacks are owned by this director, unlike claimed citizens.
+    // Remove a surviving fallback when its scene ends so repeated incidents
+    // never grow the roster. A dead fallback stays for the normal corpse/loot
+    // pipeline—the player must not watch a body or its gun vanish.
+    if (p._sceneFresh && !p.dead) {
+      p._sceneFresh = false;
+      _fresh = Math.max(0, _fresh - 1);
+      if (CBZ.npcLife && CBZ.npcLife.destroyCity) CBZ.npcLife.destroyCity(p);
+      else {
+        if (p.group && p.group.parent) p.group.parent.remove(p.group);
+        const i = CBZ.cityPeds ? CBZ.cityPeds.indexOf(p) : -1;
+        if (i >= 0) CBZ.cityPeds.splice(i, 1);
+      }
+      return;
+    }
+    const old = p._sceneRestore || {};
+    const had = function (k) { return Object.prototype.hasOwnProperty.call(old, k); };
+    const managedProfile = !!(CBZ.npcLife && p._npcLifeRestore);
+    if (managedProfile) CBZ.npcLife.releaseProfile(p);
     if (p.dead) return;
-    p.rampage = false; p._rampArmed = 0;
-    p.rage = null; p.approach = null; p.vagrant = false; p._beg = null;
-    p.armed = !!p._sceneArmed0; p.weapon = p._sceneWeapon0 || null;
-    p._sceneArmed0 = undefined; p._sceneWeapon0 = undefined;
-    p.npcWanted = 0; p.npcHeat = 0;
-    p.kind = "civilian"; p.archetype = "resident";
-    p.aggr = (p._sceneAggr0 != null) ? p._sceneAggr0 : 0.24; p._sceneAggr0 = undefined;
-    p.state = "walk"; p.path = null; p.pause = 0.3 + rng();
-    p.fear = 0; p.alarmed = 0; p.surrender = false; p.target && p.target.set && p.target.set(p.pos.x, 0, p.pos.z);
+    p.rampage = had("rampage") ? old.rampage : false;
+    p._rampArmed = had("_rampArmed") ? old._rampArmed : 0;
+    p.rage = had("rage") ? old.rage : null;
+    p.approach = had("approach") ? old.approach : null;
+    p.vagrant = had("vagrant") ? old.vagrant : false;
+    p._beg = had("_beg") ? old._beg : null;
+    p._role = had("_role") ? old._role : p._role;
+    if (!managedProfile) { p.armed = !!p._sceneArmed0; p.weapon = p._sceneWeapon0 || null; }
+    p._sceneArmed0 = undefined; p._sceneWeapon0 = undefined; p._sceneWeaponSaved = undefined;
+    p.npcWanted = had("npcWanted") ? old.npcWanted : 0;
+    p.npcHeat = had("npcHeat") ? old.npcHeat : 0;
+    if (!managedProfile) {
+      p.kind = "civilian"; p.archetype = "resident";
+      p.aggr = (p._sceneAggr0 != null) ? p._sceneAggr0 : 0.24;
+      p.state = "walk";
+    }
+    p._sceneAggr0 = undefined;
+    p.path = null; p.pause = 0.3 + rng();
+    p.fear = had("fear") ? old.fear : 0;
+    p.alarmed = had("alarmed") ? old.alarmed : 0;
+    p.surrender = had("surrender") ? old.surrender : false;
+    p._sceneRestore = null;
+    p.target && p.target.set && p.target.set(p.pos.x, 0, p.pos.z);
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
   }
   function armBody(p, weapon, ammo) {
     if (!p) return;
-    p._sceneArmed0 = !!p.armed; p._sceneWeapon0 = p.weapon || null;
+    if (p._sceneArmed0 == null) p._sceneArmed0 = !!p.armed;
+    if (!p._sceneWeaponSaved) { p._sceneWeapon0 = p.weapon || null; p._sceneWeaponSaved = true; }
     p.armed = true; p.weapon = weapon || "Pistol"; p.ammo = ammo || 24;
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(p);
   }
-  function tagScene(p, role) {
+  function tagScene(p, role, profile, overrides) {
+    if (!p._sceneRestore) {
+      p._sceneRestore = {};
+      const keys = ["rampage", "_rampArmed", "rage", "approach", "vagrant", "_beg", "_role",
+        "npcWanted", "npcHeat", "fear", "alarmed", "surrender"];
+      for (let i = 0; i < keys.length; i++) p._sceneRestore[keys[i]] = p[keys[i]];
+    }
     p._scene = SCENE; p._sceneRole = role;
     if (p._sceneAggr0 == null) p._sceneAggr0 = (p.aggr != null ? p.aggr : 0.24);
+    if (p._sceneArmed0 == null) p._sceneArmed0 = !!p.armed;
+    if (!p._sceneWeaponSaved) { p._sceneWeapon0 = p.weapon || null; p._sceneWeaponSaved = true; }
+    if (profile && CBZ.npcLife) CBZ.npcLife.apply(p, profile, overrides, true);
   }
 
   // ============================================================
   //  ONE LIVE SCENE — the director's state. Only one set-piece runs at a time.
   // ============================================================
   const SCENE = {
-    kind: null,        // 'robbery' | 'shooter' | 'mugging' | 'hobo' | null
+    kind: null,        // 'robbery' | 'shooter' | 'mugging' | 'hobo' | 'hitman' | null
     actors: [],        // drafted bodies (restored on disband)
     anchor: null,      // {x,z} staging/target point
     t: 0,              // seconds the scene has been live
@@ -262,9 +347,9 @@
   function stageRobbery() {
     const lot = nearRobbableShop(); if (!lot) return false;
     const vs = lot.building.vendorSpot;
-    const robber = draftNear(vs.x, vs.z, 60) || makeAt(vs.x + (rng() - 0.5) * 4, vs.z + 6, { armed: true, aggr: 0.85, archetype: "thug" });
+    const robber = draftNear(vs.x, vs.z, 60) || makeAt(vs.x + (rng() - 0.5) * 4, vs.z + 6, {}, "cityResident");
     if (!robber) return false;
-    tagScene(robber, "robber");
+    tagScene(robber, "robber", "hostileAttacker", { weapon: "Pistol", ammo: 18 });
     armBody(robber, "Pistol", 18);
     robber.aggr = 0.9; robber.kind = "civilian"; robber.archetype = "thug";
     robber.fear = 0; robber.alarmed = 0; robber.surrender = false;
@@ -287,10 +372,11 @@
     const sp = stagePoint(); if (!sp) return false;
     const shooter = draftNear(sp.x, sp.z, 70);
     if (!shooter) return false;             // no fresh fallback: a rampage needs a real body
+    tagScene(shooter, "shooter", "terrorAttacker");
     // hand it to aigoals — it sets rampage, self-wanted, the spree pathing.
     if (CBZ.cityStartRampage) {
       const ok = CBZ.cityStartRampage(shooter);
-      if (!ok) return false;
+      if (!ok) { restore(shooter); return false; }
     } else {
       // aigoals absent → drive a minimal rampage ourselves so the scene still reads
       armBody(shooter, "AK-47", 90);
@@ -299,7 +385,6 @@
       if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(shooter, 90, "active-shooter");
       if ((shooter.npcWanted | 0) < 3) shooter.npcWanted = 3;
     }
-    tagScene(shooter, "shooter");
     SCENE.kind = "shooter"; SCENE.actors = [shooter];
     SCENE.anchor = { x: sp.x, z: sp.z };
     SCENE.t = 0; SCENE.ttl = 28; SCENE.beatCD = 0.4;
@@ -319,7 +404,7 @@
     if (camD2(mx, mz) <= OFFSCREEN2) return false;
     const mugger = draftNear(mx, mz, 40);
     if (!mugger || mugger === mark) return false;
-    tagScene(mark, "mark"); tagScene(mugger, "mugger");
+    tagScene(mark, "mark"); tagScene(mugger, "mugger", "hostileAttacker", { weapon: "Knife", ammo: 0 });
     // the mugger advances on the mark with a knife-out menace (uses ped approach)
     armBody(mugger, "Knife", 0);
     mugger.aggr = 0.85; mugger.kind = "civilian"; mugger.archetype = "thug";
@@ -342,19 +427,26 @@
   function stageHobo() {
     if (!isNight()) return false;
     const P = playerActor(); if (!P) return false;
-    // a staging point CLOSE (the jumpscare needs to be near) but still offscreen.
+    // Prefer a real homeless resident already close behind the player. If the
+    // local cast has none, pick a behind-camera sidewalk and build one through
+    // the same standard actor factory used everywhere else. The former test
+    // required a point to be both <28m from the player and >55m from the camera,
+    // making this entire scene mathematically unreachable in normal play.
     const A = arena(); if (!A) return false;
-    let sp = null;
-    for (let t = 0; t < 12; t++) {
-      const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : (A.randomSidewalkPoint ? A.randomSidewalkPoint() : null);
-      if (!p) break;
-      const d = hyp(p.x - P.pos.x, p.z - P.pos.z);
-      if (nearCampaignContract(p.x, p.z)) continue;
-      if (d < 28 && camD2(p.x, p.z) > OFFSCREEN2) { sp = { x: p.x, z: p.z }; break; }
+    let hobo = draftHoboClose();
+    let sp = hobo ? { x: hobo.pos.x, z: hobo.pos.z } : null;
+    if (!sp) {
+      for (let t = 0; t < 24; t++) {
+        const p = A.weightedSidewalkPoint ? A.weightedSidewalkPoint(rng) : (A.randomSidewalkPoint ? A.randomSidewalkPoint() : null);
+        if (!p) break;
+        if (nearCampaignContract(p.x, p.z) || !behindCamera(p.x, p.z, 12, 32)) continue;
+        sp = { x: p.x, z: p.z }; break;
+      }
+      if (!sp) return false;
+      hobo = makeAt(sp.x, sp.z, {}, "homelessScare");
     }
-    if (!sp) return false;
-    const hobo = draftNear(sp.x, sp.z, 30); if (!hobo) return false;
-    tagScene(hobo, "hobo");
+    if (!hobo) return false;
+    tagScene(hobo, "hobo", "homelessScare");
     hobo.vagrant = true; hobo._role = "panhandler";
     hobo._beg = { x: sp.x, z: sp.z };
     hobo.archetype = "vagrant"; hobo.job = "panhandling";
@@ -368,6 +460,28 @@
     return true;
   }
 
+  // (e) CONTRACT HIT — a rare, contained hit between two ordinary residents.
+  // It uses the same reusable profile/cast pipeline as every other incident;
+  // no dedicated hitman body exists and only one scene can ever run at once.
+  function stageHitman() {
+    const sp = stagePoint(); if (!sp) return false;
+    const mark = draftNear(sp.x, sp.z, 55); if (!mark) return false;
+    tagScene(mark, "contract-mark");       // reserve it before drafting the killer
+    const killer = draftNear(mark.pos.x, mark.pos.z, 45);
+    if (!killer || killer === mark) { restore(mark); return false; }
+    tagScene(killer, "hitman", "hitman");
+    killer.rage = mark; killer.state = "fight"; killer.path = null;
+    killer.fear = 0; killer.alarmed = 0; killer.surrender = false;
+    if (killer.target && killer.target.set) killer.target.set(mark.pos.x, 0, mark.pos.z);
+    mark.state = "walk"; mark.pause = 0;
+    SCENE.kind = "hitman"; SCENE.actors = [killer, mark];
+    SCENE.anchor = { x: mark.pos.x, z: mark.pos.z };
+    SCENE.t = 0; SCENE.ttl = 22; SCENE.beatCD = 0;
+    if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(killer, 65, "contract-hit");
+    if ((killer.npcWanted | 0) < 2) killer.npcWanted = 2;
+    return true;
+  }
+
   // weighted scene draw. Night unlocks mugging + hobo; day is robbery/shooter.
   function tryStage() {
     const night = isNight();
@@ -375,7 +489,7 @@
     // two intimate scares. Build a small weighted menu, then attempt in order.
     const menu = [];
     menu.push("robbery", "robbery");
-    menu.push("shooter");
+    menu.push("shooter", "hitman");
     if (night) { menu.push("mugging", "mugging", "hobo"); }
     // try up to 3 distinct picks so one failed stage (no shop/no body) still
     // gives another scene a shot this tick.
@@ -388,6 +502,7 @@
       else if (kind === "shooter") ok = stageShooter();
       else if (kind === "mugging") ok = stageMugging();
       else if (kind === "hobo") ok = stageHobo();
+      else if (kind === "hitman") ok = stageHitman();
       if (ok) return true;
     }
     return false;
@@ -472,6 +587,22 @@
       if (SCENE.t > 10) disband();
       return;
     }
+
+    if (SCENE.kind === "hitman") {
+      const killer = SCENE.actors[0], mark = SCENE.actors[1];
+      if (!mark || mark.dead || (CBZ.cityPeds && CBZ.cityPeds.indexOf(mark) < 0)) { disband(); return; }
+      const d = hyp(killer.pos.x - mark.pos.x, killer.pos.z - mark.pos.z);
+      killer.rage = mark; killer.state = "fight";
+      if (killer.target && killer.target.set) killer.target.set(mark.pos.x, 0, mark.pos.z);
+      if (!SCENE._popped && d < 15) {
+        SCENE._popped = true;
+        gunshotAt(killer.pos.x, killer.pos.z, 28, 0.9);
+        mark.fear = Math.max(mark.fear || 0, 4); mark.state = "flee";
+        if (CBZ.cityFleeFrom) CBZ.cityFleeFrom(mark, killer.pos.x, killer.pos.z);
+      }
+      if (SCENE.t > 16 && camD2(killer.pos.x, killer.pos.z) > OFFSCREEN2) disband();
+      return;
+    }
   }
 
   // ============================================================
@@ -532,9 +663,39 @@
   // when the roster rebuilds; drop our refs + reset the cadence). Best-effort
   // hook into the spawn reset chain if a sibling exposes one.
   CBZ.citySceneReset = function () {
+    for (let i = 0; i < SCENE.actors.length; i++) restore(SCENE.actors[i]);
     SCENE.actors.length = 0;
     SCENE.kind = null; SCENE.anchor = null; SCENE.t = 0; SCENE.ttl = 0;
     SCENE._popped = false; SCENE._fled = false; SCENE._broke = false;
     _fresh = 0; _cooldown = 12 + rng() * 18;
+  };
+
+  // Focused, read-mostly instrumentation for browser regressions.  `stage` is
+  // intentionally explicit (never called by gameplay) so tests can prove each
+  // authored incident assembles real actors instead of waiting through a
+  // random 35-70 second pacing window.
+  CBZ.citySceneDirector = {
+    status: function () {
+      return {
+        kind: SCENE.kind,
+        actorCount: SCENE.actors.length,
+        actorProfiles: SCENE.actors.map(function (a) { return a && a._npcProfile || null; }),
+        actorRoles: SCENE.actors.map(function (a) { return a && a._sceneRole || null; }),
+        cooldown: _cooldown,
+        tension: _tension,
+      };
+    },
+    stage: function (kind) {
+      if (liveScene()) disband();
+      const fn = kind === "robbery" ? stageRobbery
+        : kind === "shooter" ? stageShooter
+          : kind === "mugging" ? stageMugging
+            : kind === "hobo" ? stageHobo
+              : kind === "hitman" ? stageHitman : null;
+      const ok = !!(fn && fn());
+      if (ok) { SCENE._popped = false; SCENE._fled = false; SCENE._broke = false; }
+      return ok;
+    },
+    clear: function () { if (liveScene()) disband(); },
   };
 })();

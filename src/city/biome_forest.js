@@ -109,6 +109,9 @@
     const floor = new THREE.Mesh(floorGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     floor.position.set(CX, 0.02, CZ);
     floor.receiveShadow = true;
+    floor.userData.terrain = true;
+    floor.userData.worldSurface = true;
+    floor.name = "redhollow-forest-surface";
     root.add(floor);
 
     // a few darker "duff" patches so the floor isn't a flat slab.
@@ -759,6 +762,10 @@
     //  forest feels alive and hunters have prey. No physics, no colliders.
     // ================================================================
     const deer = [];
+    // The shared wildlife system owns real, hittable whitetail actors. Do not
+    // layer a second decorative-only herd over them; the legacy mini-deer below
+    // remains solely as a fallback when that system/species is unavailable.
+    const sharedDeer = !!(CBZ.cityWildlife && CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.whitetail_deer);
     function makeDeer(x, z) {
       const g = new THREE.Group();
       const bodyMat = mat(0x8a5a32);
@@ -770,15 +777,17 @@
         leg.position.set(o[0], 0.5, o[1]); g.add(leg);
       });
       body.castShadow = head.castShadow = true;
-      g.position.set(x, 0, z); g.rotation.y = rng() * 6.28;
+      const heading = rng() * 6.28;
+      g.position.set(x, 0, z);
+      if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(g, heading); else g.rotation.y = -heading;
       root.add(g);
-      deer.push({ g, heading: rng() * 6.28, turnT: 0, spd: 1.2 + rng() * 1.0 });
+      deer.push({ g, heading, turnT: 0, spd: 1.2 + rng() * 1.0 });
     }
     const deerSpots = [
       [lakeX + 40, lakeZ - 30], [-480, -1480], [-720, -1400],
       [-360, -1300], [-620, -1180], [-820, -1560],
     ];
-    for (let i = 0; i < deerSpots.length; i++) makeDeer(deerSpots[i][0], deerSpots[i][1]);
+    if (!sharedDeer) for (let i = 0; i < deerSpots.length; i++) makeDeer(deerSpots[i][0], deerSpots[i][1]);
 
     if (CBZ.onUpdate && deer.length) {
       // WHY rng (not Math.random): owner determinism contract — every other
@@ -804,7 +813,7 @@
           if (ok && d2(nx, nz, lakeX, lakeZ) < (lakeR + 6) * (lakeR + 6)) ok = false;
           if (!ok) { d.heading += Math.PI * (0.6 + rng() * 0.4); continue; }
           d.g.position.x = nx; d.g.position.z = nz;
-          d.g.rotation.y = -d.heading + Math.PI / 2;
+          if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(d.g, d.heading); else d.g.rotation.y = -d.heading;
         }
       });
     }

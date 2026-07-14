@@ -154,7 +154,7 @@
     // jerk direction: straight back along current facing
     var g = actor.group;
     if (g) {
-      actor._flinchH = -g.rotation.y + Math.PI / 2; // recover heading from rot
+      actor._flinchH = -g.rotation.y; // +X-authored creature: recover world heading from yaw
     }
   }
 
@@ -174,7 +174,7 @@
     actor._flinchT = t;
     _amt = t / FLINCH_DUR; // 1 -> 0
     // sharp backward jerk (against facing), strongest at start, damping out
-    var h = (actor._flinchH !== undefined) ? actor._flinchH : (-g.rotation.y + Math.PI / 2);
+    var h = (actor._flinchH !== undefined) ? actor._flinchH : -g.rotation.y;
     var jerk = 2.2 * _amt * _amt * dt; // integrated backward slide
     g.position.x -= Math.cos(h) * jerk;
     g.position.z -= Math.sin(h) * jerk;
@@ -290,7 +290,7 @@
     var g = actor.group;
     var prevL = actor._lungeAmt || 0;
     if (g && prevL !== 0) {
-      var h = -g.rotation.y + Math.PI / 2;
+      var h = -g.rotation.y;
       g.position.x -= Math.cos(h) * prevL;
       g.position.z -= Math.sin(h) * prevL;
     }
@@ -335,16 +335,17 @@
       // FACE: turn heading toward target
       if (_dist > 0.001) {
         _h = Math.atan2(_dz, _dx);
-        var cur = (typeof attacker.heading === 'number') ? attacker.heading : (-g.rotation.y + Math.PI / 2);
+        var cur = (typeof attacker.heading === 'number') ? attacker.heading : -g.rotation.y;
         var diff = shortestAngle(_h - cur);
         var maxTurn = TURN_RATE * dt;
         if (diff > maxTurn) diff = maxTurn; else if (diff < -maxTurn) diff = -maxTurn;
         cur += diff;
         attacker.heading = cur;
-        g.rotation.y = -cur + Math.PI / 2;
+        if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(attacker, cur);
+        else g.rotation.y = -cur;
         _h = cur; // heading actually used this frame
       } else {
-        _h = (typeof attacker.heading === 'number') ? attacker.heading : (-g.rotation.y + Math.PI / 2);
+        _h = (typeof attacker.heading === 'number') ? attacker.heading : -g.rotation.y;
       }
 
       // scratch init

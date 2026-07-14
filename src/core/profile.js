@@ -4,6 +4,7 @@
    Enable with:
      ?profile=1&scenario=calm&seconds=12
      ?profile=1&scenario=jail&seconds=12
+     ?profile=1&scenario=airportspawn&seconds=12
      ?profile=1&scenario=wanted5&seconds=12
      ?profile=1&scenario=chaos&seconds=12
 
@@ -171,6 +172,42 @@
     return dups.size;
   }
 
+  // Runtime regression census for the removed solid/punched-window archetypes.
+  // Count unique building groups because some registries intentionally expose
+  // the same building through more than one gameplay list.
+  function buildingFacadeCensus() {
+    const arena = CBZ.city && CBZ.city.arena;
+    if (!arena) return null;
+    const out = { total: 0, office: 0, retail: 0, residential: 0, fortified: 0, other: 0, legacySolid: 0 };
+    const seen = new Set();
+    for (const lot of (arena.lots || [])) {
+      const b = lot && lot.building;
+      if (!b || !b.group) continue;
+      const key = b.group.uuid || b.group.id || b.group;
+      if (seen.has(key)) continue;
+      seen.add(key); out.total++;
+      if (Object.prototype.hasOwnProperty.call(out, b.facade)) out[b.facade]++;
+      else out.other++;
+    }
+    out.legacySolid = out.residential + out.fortified;
+    return out;
+  }
+
+  function citySpawnCensus() {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A) return null;
+    function point(p) {
+      return p && Number.isFinite(p.x) && Number.isFinite(p.z)
+        ? { x: +p.x.toFixed(2), y: Number.isFinite(p.y) ? +p.y.toFixed(2) : null, z: +p.z.toFixed(2) }
+        : null;
+    }
+    return {
+      configured: CBZ.CITY && CBZ.CITY.playerSpawn || null,
+      arenaDefault: point(A.spawn), airport: point(A.airportSpawn),
+      respawn: point(CBZ.game && CBZ.game.citySpawnPoint), player: point(CBZ.player && CBZ.player.pos),
+    };
+  }
+
   // Query-only render attribution. These extra renders run after measurement
   // has finished and temporarily hide one category at a time, so normal play
   // pays nothing and the report can distinguish a static-world draw-call
@@ -336,6 +373,9 @@
       qualityAutoStats: CBZ.qualityAutoStats || null,
       timing: { droppedWorldSeconds: +(CBZ.droppedWorldTime || 0).toFixed(3) },
       shadows: CBZ.shadowUpdateStats || null,
+      buildingFacades: buildingFacadeCensus(),
+      realBuildingLOD: CBZ.realBuildingLOD || null,
+      citySpawn: citySpawnCensus(),
       renderAttribution: renderAttribution(),
       cityRootCensus: cityRootCensus(),
       batch: CBZ.batchStats || null,
@@ -373,6 +413,9 @@
         // budgets, so applying qforce after build made tier A/B incomparable.
         const qforce = params.get("qforce");
         if (qforce !== null && CBZ.setQualityLevel) CBZ.setQualityLevel(parseInt(qforce, 10));
+        // Isolate the ordinary city spawn contract from the campaign prologue,
+        // whose authored rooftop mission deliberately owns player placement.
+        if (scenario === "airportspawn" && CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
         CBZ.setMode(scenario === "jail" ? "escape" : "city");
         CBZ.resetGame();
         CBZ.droppedWorldTime = 0;

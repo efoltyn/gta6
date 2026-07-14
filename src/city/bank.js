@@ -44,7 +44,7 @@
   // ---- money helpers (mirror mode.js + shops.js semantics exactly) ----------
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
   function num(n, d) { n = +n; return isFinite(n) ? n : (d || 0); }
-  function note(t, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s); }
+  function note(t, s, opts) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s, opts); }
   function big(t) { if (CBZ.city && CBZ.city.big) CBZ.city.big(t); }
   function econ() { return CBZ.cityEcon || null; }
   // net worth drives underwriting (the engine's "income proxy"); fall back to
@@ -738,7 +738,7 @@
     if (c <= 0) { note("No cash on you to deposit.", 1.4); return; }
     g.cityBank = num(g.cityBank, 0) + c; g.cash = 0;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Deposited " + fmt$(c) + " — safe on death (bank: " + fmt$(g.cityBank) + ").", 2.2);
+    note("Deposited " + fmt$(c) + " — insured account balance " + fmt$(g.cityBank) + ".", 2.2, { from: "Meridian Trust", app: "bank" });
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
@@ -748,7 +748,7 @@
     g.cityBank = num(g.cityBank, 0) - amt;
     if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(amt); else g.cash = num(g.cash, 0) + amt;
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Withdrew " + fmt$(amt) + ".", 1.6);
+    note("Withdrew " + fmt$(amt) + ".", 1.6, { from: "Meridian Trust", app: "bank" });
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
   function bribe() {
@@ -844,7 +844,7 @@
         "</div>" +
       "</div>" +
       "<div style='background:#161b22;border:1px solid #2a313c;border-radius:10px;padding:10px;font-size:13px;color:#9fb0c8'>" +
-        "🏠 <b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or the [Z] market books it through us — 20% down, ~6% on the balance, auto-paid each cycle." +
+        "🏠 <b style='color:#bcd0ff'>Mortgage pre-approval:</b> financing a home? The realtor desk or property market books it through us — 20% down, ~6% on the balance, auto-paid each cycle." +
       "</div>" +
       openRows +
       "<div style='display:flex;justify-content:flex-end;gap:8px;margin-top:16px'>" +
@@ -872,20 +872,12 @@
 
   // ---- the in-world prompt for the looked-at station -------------------------
   function promptText(st) {
-    if (st.kind === "teller") {
-      const c = num(g.cash, 0), b = num(g.cityBank, 0), stars = num(g.wanted, 0) | 0;
-      let s = "<b style='color:#5b8bff'>[E]</b> Deposit all" + (c > 0 ? " (" + fmt$(c) + ")" : "") + " <span style='color:#7f8794'>· safe on death</span>";
-      s += "<br><span style='color:#7f8794'>Bank " + fmt$(b) + (stars > 0 ? " · the teller can quietly pay your fines down" : "") + "</span>";
-      return s;
-    }
-    if (st.kind === "atm") {
-      const b = num(g.cityBank, 0);
-      return "<b style='color:#9fe0ff'>[E]</b> ATM — withdraw " + fmt$(Math.min(500, b)) + " <span style='color:#7f8794'>· cash for the street</span>";
-    }
-    if (st.kind === "loan") {
-      const cap = personalCapacity();
-      return "<b style='color:#bcffd0'>[E]</b> Apply for a loan <span style='color:#7f8794'>· up to " + fmt$(cap) + " personal · mortgage pre-approval</span>";
-    }
+    // The physical teller window, ATM and loan desk already identify the
+    // station. Use only a quiet symbol—account details live in the bank panel
+    // and phone, not in a paragraph pasted over the world.
+    if (st.kind === "teller") return "◆";
+    if (st.kind === "atm") return "▣";
+    if (st.kind === "loan") return "◇";
     return "";
   }
   function actOn(st) {

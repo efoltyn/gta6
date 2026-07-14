@@ -128,6 +128,9 @@
         // chip frame with a tiny ×count badge so the unified bar reads as one row.
         "#cHud .cSlot{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;height:42px;padding:3px 7px;border-radius:var(--radius);background:var(--panel-bg);border:1px solid var(--hud-line);box-shadow:0 2px 8px rgba(0,0,0,.4);pointer-events:auto;cursor:pointer}" +
         "#cHud .cSlot .s{font-size:14px;font-weight:700;color:var(--hud-dim);line-height:1.1;letter-spacing:.3px}" +
+        "#cHud .cSlot .key{position:absolute;left:3px;top:1px;font-size:8px;font-weight:800;color:var(--hud-dim);line-height:1}" +
+        "#cHud .cSlot>.ic{font-size:18px;line-height:1}" +
+        "#cHud .cSlot .ic.gun{font-size:20px;line-height:1;color:var(--hud-ink);transform:scaleX(1.25)}" +
         "#cHud .cSlot .a{font-size:10px;color:var(--hud-dim);line-height:1.1;margin-top:1px}" +
         "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
         // item chip: a glyph (or short name) over a small ×count badge, sharing
@@ -260,7 +263,7 @@
       "  <div id='cCrew' class='oC' style='font-size:13px;color:var(--hud-dim);margin-top:3px'></div>" +
       // YOUR street read (level.js): the same LEVEL N the city floats over
       // everyone else's head, derived live from worth/heat/crew/bodies.
-      "  <div id='cLvl' class='oC' style='font-size:14px;font-weight:800;color:var(--hud-ink);letter-spacing:1px;margin-top:2px;text-shadow:0 1px 3px rgba(0,0,0,.6)'></div>" +
+      "  <div id='cLvl' class='oC' style='display:none'></div>" +
       "  <div id='cWorld' class='oC' style='font-size:12px;color:var(--hud-dim);margin-top:2px;display:none'></div>" +
       "  <div id='cKill' class='oM' style='margin-top:7px;display:none'></div>" +
       "</div>" +
@@ -269,14 +272,14 @@
       // instrument (map + body state) instead of a pile. Bars are content-level;
       // they stay clear of the bottom-centre hotbar (capped width + media shrink).
       "<div id='cVitals' class='oM' style='position:absolute;left:calc(var(--hud-pad-l) + 200px);bottom:calc(var(--hud-pad-b) + 12px);width:124px'>" +
-      "  <div class='vRow'><span class='vLab' style='color:#ffb3b3'>HP</span><div class='vSlot' style='height:7px'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div></div>" +
+      "  <div class='vRow'><span class='vLab' style='color:#ffb3b3'>♥</span><div class='vSlot' style='height:7px'><div id='cHp' style='height:100%;width:100%;background:linear-gradient(90deg,#ff5b5b,#ff9e6b);transition:width .12s linear'></div></div></div>" +
       // ARMOR — the GTA-style outer layer: a distinct steel/blue plate gauge that
       // sits just under HP, shown ONLY when the player is wearing armor (driven by
       // CBZ.player._armor / ._armorMax). The 🛡 label carries the equipped tier name
       // (+ a ⛑ helmet glyph when _armorKit.head is set). Hidden whole when no armor.
       "  <div id='cArmRow' class='vRow' style='display:none'><span class='vLab' id='cArmLab' style='color:#a9c7ff'>🛡</span><div class='vSlot' style='height:7px'><div id='cArm' style='height:100%;width:100%;background:linear-gradient(90deg,#5b86c9,#a9c7ff);transition:width .12s linear'></div></div></div>" +
-      "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'>FOOD</span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
-      "  <div class='vRow'><span class='vLab' style='color:#a8e0ff'>STAM</span><div class='vSlot' style='height:5px'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div></div>" +
+      "  <div class='vRow'><span class='vLab' style='color:#ffd9a8'>🍖</span><div class='vSlot' style='height:6px'><div id='cFood' style='height:100%;width:100%;background:linear-gradient(90deg,#e8a23c,#ffd166)'></div></div></div>" +
+      "  <div class='vRow'><span class='vLab' style='color:#a8e0ff'>↯</span><div class='vSlot' style='height:5px'><div id='cStam' style='height:100%;width:100%;background:linear-gradient(90deg,#39c0d0,#7fe0ff)'></div></div></div>" +
       "</div>" +
       // WEAPON HOTBAR + carried-loot readout (bottom-centre). The hotbar is the
       // jail-clarity loadout: every gun you OWN as a slot, the held one lit, live
@@ -299,7 +302,7 @@
       "  <div id='cSlots' class='cSlots oC'></div>" +
       "  <div id='cAmmo' class='cAmmo oM'></div>" +
       "</div>" +
-      "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span><span style='font-size:12px;color:var(--hud-dim)'> mph</span></div>" +
+      "<div id='cSpeed' class='oM' style='position:absolute;right:var(--hud-pad-r);bottom:74px;text-align:right;color:var(--hud-ink);display:none'><span aria-hidden='true' style='font-size:16px;color:var(--hud-dim)'>↠</span> <span id='cSpeedN' style='font-size:30px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,.6)'>0</span></div>" +
       "<div id='cJob' class='cPanel oM' style='position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);text-align:center;color:var(--hud-ink);font-size:14px;max-width:60%;padding:5px 14px;display:none'></div>" +
       // Retired prospect objective shell. Kept hidden so older references stay
       // harmless, but default story/prospect checklist text no longer reaches HUD.
@@ -382,24 +385,18 @@
   function feedBase(msg) { return String(msg).replace(/ \(x\d+\)$/, ""); }
   CBZ.cityFeed = function (msg, color, opts) {
     if (!msg) return;
-    const nowMs = performance.now();
-    const base = feedBase(msg);
-    // REPEAT-COLLAPSE: a near-identical line arriving within ~5s of the most
-    // recent row bumps that row's count to "(xN)" instead of stacking a new one.
-    // (mode.js's category throttle passes {collapseOnly} for flooded notes so a
-    // dropped repeat still ticks the visible counter rather than vanishing.)
-    const last = feed.length ? feed[feed.length - 1] : null;
-    if (last && last.base === base && nowMs - last.born < 5000) {
-      last.count = (last.count || 1) + 1;
-      last.msg = base + " (x" + last.count + ")";
-      last.born = nowMs; last.t = CBZ.now || 0;   // refresh so it survives the burst
+    if (opts && opts.collapseOnly) return;
+    if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(msg, opts, false)) {
       renderFeed();
       return;
     }
-    if (opts && opts.collapseOnly) return;   // throttled note, nothing to collapse onto
-    // default edge is neutral — money-green is reserved for actual cash events
-    feed.push({ msg: msg, base: base, count: 1, color: color || "#9fb0c6", t: CBZ.now || 0, born: nowMs });
-    if (feed.length > 5) feed.shift();
+    const payload = {
+      app: (opts && opts.app) || "news",
+      from: (opts && opts.from) || "City Desk",
+      text: feedBase(msg),
+    };
+    if (typeof CBZ.cityPhoneNotify === "function") CBZ.cityPhoneNotify(payload);
+    else if (CBZ.cityCampaignActive && CBZ.cityCampaignActive() && typeof CBZ.phoneNotify === "function") CBZ.phoneNotify(payload);
     renderFeed();
   };
   // world-FLAVOR lines (lore/ambience, nothing to act on) — a separate channel
@@ -410,12 +407,8 @@
   };
   function renderFeed() {
     if (!feedEl) return;
-    let html = "";
-    for (let i = 0; i < feed.length; i++) {
-      const f = feed[i];
-      html += "<div class='cFeedRow' style='border-left-color:" + f.color + "'>" + f.msg + "</div>";
-    }
-    feedEl.innerHTML = html;
+    feedEl.innerHTML = "";
+    feedEl.style.display = "none";
   }
   let feedAcc = 0;
   function pruneFeed(dt) {
@@ -445,7 +438,7 @@
     const n = p.alive | 0;
     const nEl = popEl.querySelector("#cPopN"), totEl = popEl.querySelector("#cPopTot");
     if (nEl) nEl.textContent = n.toLocaleString();
-    if (totEl) totEl.textContent = "/" + (p.total | 0) + " alive";
+    if (totEl) totEl.textContent = "";
     // a quick pulse whenever the count drops, so a massacre reads at a glance
     // (the count IS the signal — the old bar under it restated the same number)
     if (lastPopN >= 0 && n < lastPopN) { popEl.style.animation = "none"; void popEl.offsetWidth; popEl.style.animation = "cPopPulse .4s ease-out"; }
@@ -460,25 +453,9 @@
   }
   function renderKill() {
     if (!killEl) return;
-    const deaths = CBZ.cityRecentDeaths;
-    // defer to turf.js's feed when it's the one on screen (no duplicate)
-    if (!deaths || !deaths.length || turfFeedLive()) {
-      if (killEl.style.display !== "none") { killEl.style.display = "none"; killEl.innerHTML = ""; killSig = ""; }
-      return;
-    }
-    const recent = deaths.slice(-5);
-    let sig = "";
-    for (let i = 0; i < recent.length; i++) { const d = recent[i]; sig += (d.name || "") + "~" + (d.cause || "") + "~" + (d.t || "") + "|"; }
-    if (sig === killSig) return;
-    killSig = sig;
-    let html = "";
-    for (let i = 0; i < recent.length; i++) {
-      const d = recent[i];
-      const cls = d.you ? "cKillRow you" : "cKillRow";
-      html += "<div class='" + cls + "'><b>" + esc(d.name || "Someone") + "</b> — " + esc(d.cause || "killed") + "</div>";
-    }
-    killEl.innerHTML = html;
-    killEl.style.display = "block";
+    killSig = "";
+    killEl.innerHTML = "";
+    killEl.style.display = "none";
   }
   function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
   function hex6(c) { return "#" + ("000000" + ((c >>> 0).toString(16))).slice(-6); }
@@ -497,7 +474,7 @@
     const perMin = Math.round(perSec * 60);
     // the RATE is the payoff; the zone count lives on the [M] territory board
     // where holding/taking turf is actually played (F5)
-    turfPayEl.textContent = "+$" + perMin.toLocaleString() + "/min";
+    turfPayEl.textContent = "+$" + perMin.toLocaleString() + " ◷";
     turfPayEl.style.display = "inline-flex";
   }
 
@@ -1053,19 +1030,24 @@
     if (tag && LOOT_ICON[tag]) return LOOT_ICON[tag];
     return "";
   }
-  function campaignAmmoMinimal() {
-    try { return !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission()); }
-    catch (e) { return false; }
+  // The model in the player's hands and the full inventory panel carry weapon
+  // names.  The moving HUD uses only a compact silhouette family so it never
+  // recreates the old FIST / 9MM / 556 / RPG word strip.
+  function hotbarGunGlyph(meta) {
+    const w = meta && meta.w;
+    const id = String((w && (w.id || w.key || w.label || w.short)) || "").toLowerCase();
+    if (/rocket|rpg|bazooka|launcher/.test(id)) return "◎";
+    if (/shotgun|12/.test(id)) return "═";
+    if (/smg|machine|uzi/.test(id)) return "≋";
+    if (/rifle|carbine|556|5\.56/.test(id)) return "▰";
+    if (/pistol|sidearm|9mm/.test(id)) return "◒";
+    return "◆";
   }
   function ammoReadout(cur, mag, reserve, reloading) {
-    if (campaignAmmoMinimal()) {
-      // The campaign HUD is instrumentation, not narration: a rotating-arrow
-      // glyph carries reload state and every remaining character is numeric.
-      return (reloading ? "<span class='rl'>↻</span> " : "") +
-        "<b>" + cur + "</b><span class='res'> / " + mag + " · " + reserve + "</span>";
-    }
-    return (reloading ? "<span class='rl'>RELOADING…</span> " : "") +
-      "<b>" + cur + "</b><span class='res'> / " + mag + " · " + reserve + " res</span>";
+    // Instrumentation only: reload is a glyph and all remaining characters are
+    // numbers. The old RELOADING/RES prose repeated what the animation conveys.
+    return (reloading ? "<span class='rl'>↻</span> " : "") +
+      "<b>" + cur + "</b><span class='res'> / " + mag + " · " + reserve + "</span>";
   }
   function renderHotbar() {
     if (!slotsEl) return;
@@ -1085,32 +1067,29 @@
           const e = bar[bi];
           const held = !!e.active;
           if (e.kind === "holster") {
-            // leading fists/holster chip — the unarmed/de-escalated state.
+            // Leading empty-hand chip. Slot number + pose glyph, no label.
             html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              "<span class='s'>" + esc(e.short || e.label || "Fists") + "</span></div>";
+              "<span class='key'>" + (bi + 1) + "</span><span class='ic'>✊</span></div>";
           } else if (e.kind === "gun") {
-            // gun chips EXACTLY as before: short label, lit when held, plus a DRY
-            // flag when stone-empty. Live mag/reserve for the held gun goes in the
-            // big #cAmmo line below (one source of truth, no per-chip counts).
-            const lbl = e.short || e.label || "Gun";
+            // Weapon silhouette + slot number. Empty is ∅; live rounds stay in
+            // the numeric ammo instrument below.
             const m = weaponMetaByLabel(e.label, e.short);
             let ammoTxt = "";
             if (!held && m && fps && fps.rounds && fps.reserves) {
               const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
               const res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-              if (cur + res <= 0) ammoTxt = "<span class='a dry'>DRY</span>";
+              if (cur + res <= 0) ammoTxt = "<span class='a dry'>∅</span>";
             }
             html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              "<span class='s'>" + esc(lbl) + "</span>" + ammoTxt + "</div>";
+              "<span class='key'>" + (bi + 1) + "</span><span class='ic gun'>" + hotbarGunGlyph(m) + "</span>" + ammoTxt + "</div>";
           } else if (e.kind === "item") {
-            // usable-item chip: glyph (or short name) + a small ×count badge.
+            // Usable item: catalog glyph + count. Unknowns deliberately use a
+            // neutral pack icon instead of falling back to an item name.
             const glyph = hotbarItemGlyph(e.item || e.label, ITEMS[e.item || e.label]);
             const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
-            const face = glyph
-              ? "<span class='ic'>" + glyph + "</span>"
-              : "<span class='s'>" + esc(e.short || e.label || "Item") + "</span>";
+            const face = "<span class='ic'>" + (glyph || "▣") + "</span>";
             html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              face + cnt + "</div>";
+              "<span class='key'>" + (bi + 1) + "</span>" + face + cnt + "</div>";
           }
         }
         slotsEl.innerHTML = html;
@@ -1142,18 +1121,25 @@
     const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
     const melee = g.cityMeleeWeapon || null;        // Bat/Knife — a held melee, not a gun
     const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
+    const minimalCity = g.mode === "city";
     let html = "";
     // a Fists slot is the baseline — shown when you own no guns, or as the unarmed
     // fallback. It's the HELD slot only when you're carrying neither gun nor melee.
     const fistsHeld = !melee && !heldGun;
     if (!inv.length && !melee) {
-      html += "<div class='cSlot held'><span class='s'>Fists</span></div>";
+      html += minimalCity
+        ? "<div class='cSlot held'><span class='ic'>✊</span></div>"
+        : "<div class='cSlot held'><span class='s'>Fists</span></div>";
     } else {
       // melee chip first (it's the one in hand when set) so the loadout reads L→R
       if (melee) {
-        html += "<div class='cSlot melee held'><span class='s'>" + esc(melee) + "</span></div>";
+        html += minimalCity
+          ? "<div class='cSlot melee held'><span class='ic'>⚔</span></div>"
+          : "<div class='cSlot melee held'><span class='s'>" + esc(melee) + "</span></div>";
       } else if (fistsHeld) {
-        html += "<div class='cSlot held'><span class='s'>Fists</span></div>";
+        html += minimalCity
+          ? "<div class='cSlot held'><span class='ic'>✊</span></div>"
+          : "<div class='cSlot held'><span class='s'>Fists</span></div>";
       }
       for (let k = 0; k < inv.length; k++) {
         const id = inv[k];
@@ -1169,10 +1155,10 @@
         if (!held && fps && fps.rounds && fps.reserves) {
           const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
           const res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-          if (cur + res <= 0) ammoTxt = "<span class='a dry'>DRY</span>";
+          if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (minimalCity ? "∅" : "DRY") + "</span>";
         }
         html += "<div class='cSlot" + (held ? " held" : "") + "'>" +
-          "<span class='s'>" + esc(lbl) + "</span>" + ammoTxt + "</div>";
+          (minimalCity ? "<span class='ic gun'>" + hotbarGunGlyph(m) + "</span>" : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
       }
     }
     slotsEl.innerHTML = html;
@@ -1217,38 +1203,10 @@
   };
   function renderLoot() {
     if (!lootEl) return;
-    const econ = CBZ.cityEcon, inv = g.cityInv;
-    if (!econ || !econ.ITEMS || !inv) { lootEl.style.display = "none"; return; }
-    const ITEMS = econ.ITEMS;
-    const rows = [];
-    for (const name in inv) {
-      const n = inv[name] | 0;
-      if (n <= 0) continue;
-      const it = ITEMS[name];
-      const tag = it && it.tag;
-      // guns + their ammo are the hotbar's job; melee weapons live in the hotbar
-      // (as the held melee chip) too — keep loot to carry-able valuables/consumables.
-      if (tag === "weapon" || tag === "ammo") continue;
-      // unknown items go bare — a meaningless "•" placeholder is noise (F11)
-      const icon = LOOT_ITEM_ICON[name] || (tag && LOOT_ICON[tag]) || "";
-      rows.push({ name: name, n: n, icon: icon, val: (it && it.value) || 0 });
-    }
-    if (!rows.length) { lootEl.style.display = "none"; lootEl.innerHTML = ""; return; }
-    // lead with the most valuable loot; cap the row so it never sprawls across the
-    // screen — a "+N more" chip rolls up the tail.
-    rows.sort((a, b) => (b.val - a.val) || (b.n - a.n));
-    const MAX = 4;   // one clean line always — the row may NEVER wrap into the toast above
-    let html = "";
-    for (let i = 0; i < rows.length && i < MAX; i++) {
-      const r = rows[i];
-      // name only — the ✨ luxe suffix was decoration; value-sorting already
-      // puts the jackpot first (F11)
-      const cnt = r.n > 1 ? " <span class='x'>×" + r.n + "</span>" : "";
-      html += "<span class='it'>" + (r.icon ? r.icon + " " : "") + "<b>" + esc(r.name) + "</b>" + cnt + "</span>";
-    }
-    if (rows.length > MAX) html += "<span class='it'><span class='x'>+" + (rows.length - MAX) + " more</span></span>";
-    lootEl.innerHTML = html;
-    lootEl.style.display = "flex";
+    // Carried items and guns share the boxed hotbar/inventory model. A second
+    // row of loose item names was the "floating outside the boxes" UI bug.
+    lootEl.innerHTML = "";
+    lootEl.style.display = "none";
   }
 
   // ============================================================
@@ -1321,16 +1279,11 @@
       if (el.className !== cn) el.className = cn;
     }
   }
-  // the 🛡 tier label text — shared verbatim with the classic bar HUD's label
+  // Armor is an instrument, not an outfit caption.  The inventory/character
+  // panel names the kit; live play only needs the chest/helmet glyphs.
   function armorLabel(P) {
     const kit = P._armorKit || null;
-    const KITS = CBZ.ARMOR_KITS || null;
-    let nm = "";
-    if (kit && KITS) {
-      const ck = kit.chest, c = ck != null ? KITS[ck] : null;
-      nm = (c && (c.short || c.name)) || (typeof ck === "string" ? ck : "");
-    }
-    return "🛡" + (kit && kit.head ? "⛑" : "") + (nm ? " " + nm : "");
+    return "🛡" + (kit && kit.head ? "⛑" : "");
   }
   // flip the skin (root .mc class drives ALL the CSS swaps) + reset the render
   // guards so every MC surface repaints on the next frame.
@@ -1478,8 +1431,7 @@
     // leaderboard and DRIP reads at the boutique mirror + the club rope — the
     // always-on duplicates here were stat wallpaper, and a second ★ two inches
     // from the wanted meter read as heat.
-    const crew = g.cityCrew || 0;
-    crewEl.textContent = crew ? "crew " + crew : "";
+    crewEl.textContent = "";
     if (worldEl) { worldEl.textContent = ""; worldEl.style.display = "none"; }
     // WEAPON HOTBAR + carried loot — reads the engine's authoritative weapon state
     // (CBZ.weaponInventory / currentWeaponId / CBZ.fps ammo) so the city loadout is
@@ -1494,7 +1446,9 @@
       let dist = "";
       if (j.dest) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.dest.x, CBZ.player.pos.z - j.dest.z)) + "m";
       else if ((j.type === "hit" || j.type === "hitman") && j.target && !j.target.dead) dist = "  ·  " + Math.round(Math.hypot(CBZ.player.pos.x - j.target.pos.x, CBZ.player.pos.z - j.target.pos.z)) + "m";
-      jobEl.innerHTML = "🎯 " + j.desc + " <span style='color:var(--money,#7ed957)'>($" + j.reward + ")</span>" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist + "</span>" : "");
+      // Full contract prose/pay lives in the phone. The live HUD only carries
+      // the one piece of navigation state that matters while moving.
+      jobEl.innerHTML = "🎯" + (dist ? "<span style='color:var(--hud-dim,#9fb0c6)'>" + dist.replace(/^\s*·\s*/, " ") + "</span>" : "");
       jobEl.style.display = "block";
       if (objEl) objEl.style.display = "none";   // a real job pre-empts the gang-join objective
     } else {
@@ -1576,16 +1530,12 @@
     // canvas redraw is the HUD's priciest CPU line), Best keeps today's 14Hz.
     if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); }
     if (turfEl) {
-      const gang = CBZ.cityGangOf ? CBZ.cityGangOf(P.pos.x, P.pos.z) : null;
-      if (gang) { const prov = gang.provoke > 0.4; turfEl.innerHTML = "<span style='color:#" + ("000000" + gang.color.toString(16)).slice(-6) + "'>" + gang.name.toUpperCase() + " TURF</span>" + (prov ? " <span style='color:#ff5b5b'>⚠ HOSTILE</span>" : ""); }
-      else turfEl.textContent = "";
+      turfEl.textContent = "";
+      turfEl.style.display = "none";
     }
     if (homeLineEl) {
-      const parts = [];
-      if (g.cityHome) parts.push("🏠 " + g.cityHome.name);
-      else if (g.cityRentTier != null) parts.push("🏠 renting");
-      if (g.cityPartner) parts.push((g.citySpouse ? "💍 " : "💕 ") + g.cityPartner.name + (g.cityPartner.kidnapped ? " (TAKEN!)" : ""));
-      homeLineEl.textContent = parts.join("   ");
+      homeLineEl.textContent = "";
+      homeLineEl.style.display = "none";
     }
     // aiming reticle when holding a firearm on foot — but the engine gun system
     // (fpsmode) draws its OWN reticle whenever it's presenting a weapon, so only

@@ -154,7 +154,10 @@
     const armX = fem ? 0.54 : 0.62;
     const la = limb(armW, ARM_UP, ARM_LO, armW, c.arms, c.skin, 0.2, c.shortSleeve ? c.skin : null);
     const ra = limb(armW, ARM_UP, ARM_LO, armW, c.arms, c.skin, 0.2, c.shortSleeve ? c.skin : null);
-    la.position.set(-armX, 1.84, 0); ra.position.set(armX, 1.84, 0);
+    // The chase camera sees the old +X "right" socket on the player's visible
+    // left flank. Mirror the arm roots so the semantic right hand — and every
+    // weapon attached to it — is actually on the player's right in third person.
+    la.position.set(armX, 1.84, 0); ra.position.set(-armX, 1.84, 0);
     body.add(la, ra);
     const leftHand = new THREE.Group();
     const rightHand = new THREE.Group();
@@ -430,12 +433,12 @@
       const pitch = (CBZ.cam && typeof CBZ.cam.pitch === "number") ? CBZ.cam.pitch : 0;
       const ar = 16;
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.571 - pitch * 0.8 - recoil * 0.16, ar, dt);
-      ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, -0.18 + recoilSide * 0.22, ar, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.34, ar, dt);
+      ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0.18 - recoilSide * 0.22, ar, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.34, ar, dt);
       ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.14, ar, dt);
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (longGun ? -1.55 : -1.45) - pitch * 0.8, ar - 1, dt);
-      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, longGun ? 0.34 : 0.22, ar - 1, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? 0.42 : 0.30, ar - 1, dt);
+      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, longGun ? -0.34 : -0.22, ar - 1, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, longGun ? -0.42 : -0.30, ar - 1, dt);
       ch.parts.la.position.z = damp(ch.parts.la.position.z, longGun ? 0.24 : 0.14, ar - 1, dt);
       // gun arm nearly locked; the support elbow closes onto the handguard.
       // recoil folds the elbow a touch — the arm absorbs the kick.
@@ -444,8 +447,8 @@
     } else if (ch.cuffed) {
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, 0.5, 10, dt);
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, 0.5, 10, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.5, 10, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.5, 10, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.5, 10, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.5, 10, dt);
       setElbow(J.la, -0.55, 10); setElbow(J.ra, -0.55, 10);
     } else if (ch.surrender || ch.handsUp) {
       // the hands-up layer below OWNS the arms — if the idle counter-swing
@@ -471,7 +474,7 @@
         // straight, hand pushed just clear of the leg so the gun silhouettes
         // against the ground from behind (GTA/Fortnite pistol walk).
         ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.18 + carryBob * 0.5, cr, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.16, cr, dt);  // out from the thigh
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.16, cr, dt);  // out from the actual right thigh
         setElbow(J.ra, -0.12, cr);
       } else {
         // LONG-GUN carry (screenshot-diagnosed, round 2): the old tuck-across-
@@ -482,28 +485,38 @@
         // pistol carry read — so the rifle's mass clears the torso silhouette;
         // holsterprops.js then hangs the barrel down-forward-right past the leg.
         ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.30 + carryBob * 0.7, cr, dt);
-        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.20, cr, dt);   // OUT from the thigh (was -0.14 tuck-in → rifle buried in the body)
+        ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.20, cr, dt);   // OUT from the actual right thigh
         setElbow(J.ra, -0.34, cr);                       // forearm angles the gun down-forward
       }
-      const armAmp = hipAmp * (0.95 + 0.25 * run2);
-      const laTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
-      ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.08, 6, dt);
-      const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
-      const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;
-      setElbow(J.la, -(elbBase + foldL), armRate - 2);
+      if (ch.aimLong === true) {
+        // Rifles and shotguns remain two-hand objects even at low ready: the
+        // support forearm stays under the handguard instead of swinging loose.
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.72 + carryBob * 0.35, cr, dt);
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.30, cr, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.38, cr, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.18, cr, dt);
+        setElbow(J.la, -0.82, cr);
+      } else {
+        const armAmp = hipAmp * (0.95 + 0.25 * run2);
+        const laTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
+        ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.08, 6, dt);
+        const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
+        const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;
+        setElbow(J.la, -(elbBase + foldL), armRate - 2);
+      }
     } else {
       // counter-swing with an elbow that deepens with pace: relaxed ~14° at
       // idle, a soft 35-45° at a walk, a real ~90° runner's pump at sprint.
       // The elbow also folds a little extra as the arm swings FORWARD (a
       // straight back-swing + bent fore-swing is what reads "human").
       const armAmp = hipAmp * (0.95 + 0.25 * run2);
-      const laTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
-      const raTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
+      const laTarget = moving ? swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
+      const raTarget = moving ? -swing * armAmp / hipAmp * (0.55 + 0.45 * hipAmp) : 0;
       ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, laTarget, armRate, dt);
       ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, raTarget, armRate, dt);
-      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.08, 6, dt);
-      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.08, 6, dt);
+      ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.08, 6, dt);
+      ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, 0.08, 6, dt);
       const elbBase = moving ? 0.30 + 0.42 * norm + 0.62 * run2 : 0.22 + Math.sin(ch.breath * 2.2) * 0.02;
       const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;   // forward swing folds
       const foldR = moving ? Math.max(0, -raTarget) * 0.8 : 0;
@@ -511,9 +524,11 @@
       setElbow(J.ra, -(elbBase + foldR), armRate - 2);
     }
     if (!ch.aimingPose) {
-      ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, 10, dt);
+      if (!(ch.carryPose && ch.aimLong === true)) {
+        ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, 10, dt);
+        ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, 12, dt);
+      }
       ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, 10, dt);
-      ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, 12, dt);
       ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0, 12, dt);
     }
 

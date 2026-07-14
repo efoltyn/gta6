@@ -108,18 +108,20 @@
     // jumping is near-silent in reality — just a soft cloth/effort, NO arcade
     // whoosh (that cartoon swoosh was the "retarded" jump sound).
     jump: fx([K + "cloth1.m4a", K + "cloth2.m4a"], 0.2, 0.08),
-    // fists: a REAL recorded punch + Kenney's real impact foley. Dropped the
-    // cartoony rse "punch" pack and the synthy oga "hit" tones.
-    punch: fx([
-      W + "punch_real.m4a", K + "impactPunch_medium_000.m4a",
-      K + "impactPunch_medium_001.m4a", K + "impactPunch_medium_002.m4a",
-    ], 0.6, 0.045),
-    hit: fx([W + "thud_real.m4a", K + "impactPunch_medium_000.m4a", K + "impactPunch_medium_002.m4a"], 0.46, 0.035),
+    // Fists use the recorded body hit only. The old randomized game-foley bank
+    // made identical contact alternate between unrelated arcade slaps.
+    punch: layers([
+      part([W + "punch_real.m4a"], 0.62, 0.94, 1.04),
+      part([W + "thud_real.m4a"], 0.18, 0.88, 0.98, 0.012),
+    ], 0.035),
+    hit: fx([W + "thud_real.m4a"], 0.44, 0.025),
     ko: layers([
       part([K + "impactPunch_heavy_000.m4a", K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.8, 0.92, 1.04),
       part([W + "thud_real.m4a"], 0.42, 0.84, 0.96, 0.03),
     ], 0.09),
-    whoosh: fx([O + "sfx100v2_air_02.m4a", O + "sfx100v2_air_03.m4a"], 0.4, 0.05),
+    // A fist cutting air is mostly sleeve movement. Keep this quiet and dry;
+    // the recorded body impact above supplies the weight only on contact.
+    whoosh: fx([K + "cloth1.m4a", K + "cloth2.m4a"], 0.14, 0.025),
     headshot: layers([
       part([K + "impactPunch_heavy_001.m4a", K + "impactPunch_heavy_002.m4a"], 0.66, 1.08, 1.18),
       part([O + "sfx100v2_misc_04.m4a", K + "impactMetal_light_001.m4a"], 0.26, 1.1, 1.24, 0.012),

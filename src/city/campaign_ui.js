@@ -91,9 +91,10 @@
     return "Unknown";
   }
   // Keybinding/control-legend prose ("[E] Pay …", "W/S throttle · LMB fire")
-  // is interface mechanics — a real phone never pushes it. Non-mission pushes
-  // carrying it are dropped at the door (mission briefs keep authored text).
-  const KEYBIND_RE = /\[[A-Za-z0-9/\- ]{1,7}\]|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/;
+  // is interface mechanics — a real phone never pushes it. Every app, including
+  // Missions, drops control/meta prose at the door.
+  const KEYBIND_RE = /\[[A-Za-z0-9/\- ]{1,7}\]|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b|\b(?:press|click|tap|hold)\s+(?:(?:the|a)\s+)?(?:[A-Z0-9]|key|button|screen|mouse|trigger)\b/i;
+  const PHONE_META_RE = /\b(?:NPC|HUD|UI|reticle|crosshair|respawn(?:ing)?|game over|tutorial|keybind|hotbar|controller|keyboard|mouse|frame ?rate|FPS|first[- ]person|third[- ]person)\b/i;
   // Legacy single-string calls get auto-classified into an in-world app +
   // sender so an unmigrated caller still reads like a real push, never like
   // game-system prose. Mirrors mode.js's noteCategory() heuristics.
@@ -732,9 +733,11 @@
     if (APPS_V2.indexOf(app) < 0) app = "messages";
     const text = textOf(payload.text != null ? payload.text : (payload.body != null ? payload.body : payload.message), "");
     if (!text) return null;
-    // control legends / key prompts are UI mechanics, never a push (V2 only;
-    // mission briefs keep their authored text untouched)
-    if (notisV2() && app !== "missions" && KEYBIND_RE.test(text)) return null;
+    // No app is allowed to break the fourth wall. Mission updates are still
+    // authored in-world dispatches; a control legend belongs to the interaction
+    // surface, never inside the handset.
+    if (notisV2() && (KEYBIND_RE.test(text) || PHONE_META_RE.test(text))) return null;
+    if (typeof CBZ.cityPhoneWorthy === "function" && !CBZ.cityPhoneWorthy(text, payload, app === "news")) return null;
     const item = {
       id: "notice-" + Date.now() + "-" + (++serial),
       type: payload.type || app,
@@ -750,11 +753,13 @@
       born: Date.now(),
       meta: payload.meta || null,
     };
-    // No handset outside the campaign: fall back to the street feed so the
-    // notice is never silently lost (new systems can call phoneNotify blind).
+    // Outside the campaign, hand the notice to the legacy city phone. It must
+    // never fall back to floating street text (and doing so can recurse once
+    // cityFeed itself is phone-backed).
     if (!campaignEnabled() || !playableMode()) {
-      const feed = CBZ.cityFeed && CBZ.cityFeed._campaignOriginal ? CBZ.cityFeed._campaignOriginal : CBZ.cityFeed;
-      if (typeof feed === "function") { try { feed(item.from + ": " + item.text); } catch (e) {} }
+      if (typeof CBZ.cityPhoneNotify === "function") {
+        try { CBZ.cityPhoneNotify(item); } catch (e) {}
+      }
       return item;
     }
     logItem(item);
@@ -979,7 +984,6 @@
         "  <h1 class='campaign-title campaign-takeover-title'></h1>" +
         "  <div class='campaign-title campaign-takeover-sub'></div>" +
         "  <p class='campaign-takeover-body'></p>" +
-        "  <div class='campaign-takeover-hint'>click to continue</div>" +
         "</div>";
       takeoverEl.addEventListener("click", hideTakeover);
       document.body.appendChild(takeoverEl);
@@ -1114,7 +1118,15 @@
   // Programmatic callers of the old status phone land on the campaign phone.
   // Keep the legacy reference for debugging without leaving two visible phones.
   if (CBZ.cityOpenPhone && CBZ.cityOpenPhone !== open) CBZ.legacyCityOpenPhone = CBZ.cityOpenPhone;
-  CBZ.cityOpenPhone = open;
+  CBZ.cityOpenPhone = function (app) {
+    // Outside the campaign, notices are stored by cityPhoneNotify(), so the
+    // same handset must own programmatic opens as well. This keeps the news
+    // history reachable without reviving a street banner or split phone UI.
+    if ((!campaignEnabled() || !playableMode()) && typeof CBZ.legacyCityOpenPhone === "function") {
+      return CBZ.legacyCityOpenPhone();
+    }
+    return open(app);
+  };
 
   installCompatibilityWrappers();
 

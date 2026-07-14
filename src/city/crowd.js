@@ -1,5 +1,5 @@
 /* ============================================================
-   city/crowd.js — instanced BACKGROUND mass crowd for the city.
+   city/crowd.js — bounded, fully-real ambient city population.
 
    Reuses the jail crowd's InstancedMesh body-part technique
    (entities/crowd.js) but is written NATIVELY in city coordinates — no
@@ -52,7 +52,14 @@
   const CBZ = window.CBZ, THREE = window.THREE;
   if (!CBZ || !THREE) return;
 
-  const CAP = 760;                       // hard ceiling on instanced bodies (~1000-alive city)
+  // NO FAKE PEOPLE: the old 760-body box/instance layer made distant citizens
+  // look like frozen sliding stand-ins.  Keep the useful flat-array population
+  // brain, but bound its visible population and seat every live row in the same
+  // ordinary cityMakePed rig used everywhere else.  The legacy proxy renderer is
+  // left as a compatibility fallback below, but this shipping path never builds
+  // or displays one of its InstancedMeshes.
+  const STANDARD_ACTORS_ONLY = true;
+  const CAP = 48;                        // bounded real actors; never 760 full rigs
   let count = 0, built = false, ready = false;
 
   // --- agent state (flat arrays; index 0..count-1) ---
@@ -281,6 +288,11 @@
   // ONE draw call. The crowd never casts real sun shadows (castShadow=false on
   // every part below), so this blob IS what glues the mass to the pavement.
   let shadowQ = null;
+  function syncInstanceCount() {
+    const drawCount = Math.max(0, Math.min(CAP, count | 0));
+    if (meshes) for (let i = 0; i < meshes.length; i++) meshes[i].count = drawCount;
+    if (shadowQ) shadowQ.count = drawCount;
+  }
   const rootD = new THREE.Object3D(), partD = new THREE.Object3D(), col = new THREE.Color();
   // HUMAN SCALE (scale-agent handoff): the instanced body parts in drawParts are
   // laid out at the OLD ~2.6m voxel-rig proportions (torso 1.42, head 2.18…). The
@@ -327,7 +339,7 @@
   // work on them) as you walk up, then get parked back to instanced density
   // when you walk away. Without this the city crowd was render-only and dead to
   // interaction — you could walk into someone and nothing happened.
-  const PROMO = 22;                              // pool of interactive peds kept near you
+  const PROMO = CAP;                             // every visible ambient row is a real ped
                                                  // (a few slots of slack so bump-knockdowns
                                                  //  can promote victims mid-sprint)
   const PROMO_IN2 = 22 * 22;                     // promote-in radius (any direction)
@@ -393,7 +405,7 @@
   // construction we just moved off the hot path. (An optional renderer.compile()
   // warm-up would be a core/main hook, not ours — reported, not required.)
   const PREWARM_POOL = true;                       // ON: amortized pre-build at load. OFF → exact old lazy path.
-  const PREWARM_PER_FRAME = 2;                      // rigs to construct per frame while warming (≈11 frames to fill 22 — invisible)
+  const PREWARM_PER_FRAME = 4;                      // amortized: the full real crowd is warm in ~12 frames
   let prewarming = false;                           // armed by spawnCityCrowd, spent by prewarmTick()
   promotedBy.fill(-1);
 
@@ -409,6 +421,18 @@
 
   function buildMeshes() {
     if (built) return;
+    if (STANDARD_ACTORS_ONLY) {
+      built = true;
+      root = new THREE.Group();
+      root.name = "city-crowd-standard-actors";
+      root.visible = false;
+      CBZ.scene.add(root);
+      // Deliberately do not allocate proxy bodies, faces, shadows, or points.
+      // Actual character groups are owned by the city arena through makePooled.
+      meshes = [];
+      ready = false;
+      return;
+    }
     if (!THREE.InstancedMesh) return;    // headless / no-instancing → sim only, no render
     built = true;
     wm = new THREE.Matrix4();
@@ -434,6 +458,7 @@
     legL = part(pants, unitP); legR = part(pants, unitP);
     eyeL = part(dark, unitP); eyeR = part(dark, unitP); mouth = part(dark, unitP);
     meshes = [torso, hd, hair, armL, armR, legL, legR, eyeL, eyeR, mouth];
+    syncInstanceCount();
     // WHITE-POP HARDENING (owner: "white people far away then they become
     // normal skin color"): a tinted InstancedMesh renders flat WHITE
     // (material 0xffffff × the white vertex-color attribute) for any
@@ -461,6 +486,7 @@
       for (let i = 0; i < CAP; i++) shadowQ.setMatrixAt(i, wm);
       shadowQ.instanceMatrix.needsUpdate = true;
       root.add(shadowQ);
+      syncInstanceCount();
     }
     ready = true;
   }
@@ -771,22 +797,19 @@
     shirt[i] = pool ? pool[(Math.random() * pool.length) | 0] : ((Math.random() * 10) | 0);
   }
   function repaintShirt(i) {              // recolour one recycled body in-place
-    if (!ready) return;
+    if (STANDARD_ACTORS_ONLY || !ready) return;
     col.setHex(SHIRTS[shirt[i]]); torso.setColorAt(i, col);
     if (torso.instanceColor) torso.instanceColor.needsUpdate = true;
   }
 
   CBZ.spawnCityCrowd = function (n) {
     buildMeshes();
-    const A = arena(); if (!A) { count = 0; return 0; }
+    const A = arena(); if (!A) { count = 0; syncInstanceCount(); return 0; }
     count = Math.max(0, Math.min(CAP, n | 0));
     // r128 draws InstancedMesh.count instances, not merely the slots whose
     // matrices we touched. Keep the ten body pools + shadow pool at the live
     // population so unused CAP slots never consume vertex work.
-    if (ready) {
-      for (let m = 0; m < meshes.length; m++) meshes[m].count = count;
-      if (shadowQ) shadowQ.count = count;
-    }
+    syncInstanceCount();
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
     stagT.fill(0); collapsedQ.fill(0); panicT.fill(0); pauseT.fill(0);
@@ -843,9 +866,14 @@
   // tiny debug accessors (used by the headless harness; cheap, read-only)
   CBZ.cityCrowdCount = function () { return count; };
   CBZ.cityCrowdAgent = function (i) { return { x: px[i], z: pz[i], tx: tx[i], tz: tz[i], heading: heading[i], leader: groupLeader[i] }; };
+  CBZ.cityCrowdRenderMode = function () {
+    let activeReal = 0;
+    for (let i = 0; i < pool.length; i++) if (pool[i].idx >= 0 && !pool[i].ped.dead) activeReal++;
+    return { mode: "standard-actors", population: count, activeReal: activeReal, proxyVisible: false, proxyObjects: 0 };
+  };
 
   function paintColors() {
-    if (!ready) return;
+    if (STANDARD_ACTORS_ONLY || !ready) return;
     for (let i = 0; i < count; i++) {
       col.setHex(SHIRTS[shirt[i]]); torso.setColorAt(i, col);
       col.setHex(SKINS[skin[i]]); hd.setColorAt(i, col); armL.setColorAt(i, col); armR.setColorAt(i, col);
@@ -1078,7 +1106,7 @@
   let _wroteMatrices = false;   // perf: skip the needsUpdate re-upload (12 buffers,
                                 // ~570KB) on frames where no matrix changed at all
   function render() {
-    if (!ready || !count) return;
+    if (STANDARD_ACTORS_ONLY || !ready || !count) return;
     const frame = _simFrame;
     const P = CBZ.player;
     const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
@@ -1341,9 +1369,49 @@
     // multiplayer guest: the crowd is pure local set-dressing — never promote
     // an agent into a real simulated ped (the host owns the real population)
     if (CBZ.net && CBZ.net.noSim()) return;
-    if (!poolBuilt) { buildPool(); if (!poolBuilt) return; }
+    // The real-only population warms four ordinary rigs per frame.  Until that
+    // bounded pool is complete there is simply no stand-in to draw: an empty
+    // sidewalk for a fraction of a second is preferable to showing a fake body.
+    if (!poolBuilt) {
+      if (STANDARD_ACTORS_ONLY && prewarming) return;
+      buildPool();
+      if (!poolBuilt) return;
+    }
     const P = CBZ.player; if (!P) return;
     const ppx = P.pos.x, ppz = P.pos.z;
+    if (STANDARD_ACTORS_ONLY) {
+      // Reconcile all currently-seated standard actors.  They stay real at any
+      // range and while driving/dead; only an actual population suppression,
+      // death, teardown, or observation gate releases one.
+      for (let s = 0; s < pool.length; s++) {
+        const e = pool[s]; if (e.idx < 0) continue;
+        const i = e.idx, ped = e.ped;
+        if (ped.dead) {
+          ungroup(i);
+          deadAgent[i] = 1;
+          promotedBy[i] = -1;
+          pool[s] = { ped: makePooled(), idx: -1 };
+          continue;
+        }
+        px[i] = ped.pos.x;
+        pz[i] = ped.pos.z;
+        heading[i] = ped.char.group.rotation.y;
+        if (suppressed[i] || deadAgent[i]) {
+          promotedBy[i] = -1;
+          park(e);
+        }
+      }
+
+      // Every on-street analytical row gets one ordinary registered character.
+      // Fill the bounded pool in one cheap pass (no distance sort, no proxy LOD).
+      for (let i = 0; i < count; i++) {
+        if (promotedBy[i] >= 0 || deadAgent[i] || suppressed[i]) continue;
+        const slotIdx = pickFreeSlot(!!fem[i]);
+        if (slotIdx < 0) break;
+        assign(pool[slotIdx], slotIdx, i);
+      }
+      return;
+    }
     // 1) reconcile currently-promoted slots
     for (let s = 0; s < pool.length; s++) {
       const e = pool[s]; if (e.idx < 0) continue;
@@ -2107,11 +2175,16 @@
         let scanned = 0;
         while (need > 0 && scanned < count) {
           const i = _thinScan; _thinScan = (_thinScan + 1) % Math.max(1, count); scanned++;
-          if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || promotedBy[i] >= 0) continue;
+          if (deadAgent[i] || suppressed[i] || corpseT[i] > 0 || (!STANDARD_ACTORS_ONLY && promotedBy[i] >= 0)) continue;
           if (pickSleepers && !asleepNow(i)) continue;   // spare the awake this pass
           const dx = px[i] - ppx, dz = pz[i] - ppz;
           if (dx * dx + dz * dz < FAR2) continue;  // close enough to see → leave it alone
           ungroup(i);                              // off-street → drop any walking-group link
+          if (STANDARD_ACTORS_ONLY && promotedBy[i] >= 0) {
+            const s = promotedBy[i];
+            promotedBy[i] = -1;
+            if (pool[s]) park(pool[s]);
+          }
           suppressed[i] = 1; pauseT[i] = 0; need--;
         }
         if (!schedOn()) break;                     // old behavior: single any-agent pass

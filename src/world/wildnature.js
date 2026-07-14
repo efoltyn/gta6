@@ -80,7 +80,11 @@
   //  world.js's cityWorldGeo runs it automatically (after terrain exists).
   // ============================================================
   CBZ.buildWildNature = function (city) {
-    if (CBZ.WILD_NATURE === false) return null;
+    // This scatter is only valid when its matching procedural terrain mesh is
+    // actually rendered.  Testing for the sampler function is insufficient:
+    // the function remains defined when PROC_TERRAIN is disabled, which used
+    // to leave trees floating over ocean where the deleted backdrop had been.
+    if (CBZ.WILD_NATURE === false || CBZ.PROC_TERRAIN === false) return null;
     if (_built) return null;                          // build exactly once per world
     city = city || (CBZ.city && CBZ.city.arena);
     if (!city || !city.root) return null;

@@ -70,6 +70,65 @@ body.mode-city #disasterBanner { display: none !important; }
 body.mode-city #interact { display: none; }
 
 /* ============================================================
+   CITY LIVE-WORLD DECLUTTER
+
+   The world keeps instruments (reticle, map, vitals, wanted stars, money,
+   population and numeric route/ammo state), but it is not a tutorial panel.
+   These are passive walk-up/control chips owned by otherwise independent
+   modules.  Most of them write display:block inline every frame, hence the
+   deliberate !important at this single policy boundary.  Their keyboard/click
+   handlers stay installed, so hiding the prose never disables the action.
+============================================================ */
+body.mode-city.state-playing #hint,
+body.mode-city.state-playing #toast,
+body.mode-city.state-playing #interact,
+body.mode-city.state-playing #cityStoragePrompt,
+body.mode-city.state-playing #roofStashChip,
+body.mode-city.state-playing #beachLootChip,
+body.mode-city.state-playing #clothingPrompt,
+body.mode-city.state-playing #gunstorePrompt,
+body.mode-city.state-playing #elevChip,
+body.mode-city.state-playing #adChip,
+body.mode-city.state-playing #realtyPrompt,
+body.mode-city.state-playing #pawnPrompt,
+body.mode-city.state-playing #jewelryPrompt,
+body.mode-city.state-playing #ci2Chip,
+body.mode-city.state-playing #fxPrompt,
+body.mode-city.state-playing #modshopHud,
+body.mode-city.state-playing #cityOrders,
+body.mode-city.state-playing #cityHeistHud,
+body.mode-city.state-playing #invHotbar,
+body.mode-city.state-playing #cFeed,
+body.mode-city.state-playing #cKill,
+body.mode-city.state-playing #cKillFeed,
+body.mode-city.state-playing #cRel,
+body.mode-city.state-playing #cMemb,
+body.mode-city.state-playing #cTurfMeta,
+body.mode-city.state-playing #streakHud,
+body.mode-city.state-playing #streakMeter,
+body.mode-city.state-playing > .panel[style*="bottom: 78px"],
+body.mode-city.state-playing > .panel[style*="bottom:78px"],
+body.mode-city.state-playing > div[style*="bottom: 132px"][style*="z-index: 15"],
+body.mode-city.state-playing > div[style*="bottom:132px"][style*="z-index:15"] {
+  display: none !important;
+}
+
+/* Route guidance remains useful while moving, but only as direction + range.
+   The destination sentence and the old "[M] map" legend belong on the map. */
+body.mode-city.state-playing #waypointLabel,
+body.mode-city.state-playing #waypointGuide .waypoint-mapkey {
+  display: none !important;
+}
+
+/* Posture is a physical meter.  Names, YOU/OPEN captions are narration. */
+body.mode-city.state-playing #cPost .lbl { display: none !important; }
+
+/* Race telemetry is still present as numbers, lamps and arrows. */
+body.mode-city.state-playing #raceHud .rLab,
+body.mode-city.state-playing #raceHud .rGap .nm,
+body.mode-city.state-playing #raceLights .go { display: none !important; }
+
+/* ============================================================
    Zillow — the city property + business marketplace ([Z])
 ============================================================ */
 #cityZillow.zwrap {
@@ -192,3 +251,10 @@ body.mode-city #interact { display: none; }
 #cityActivities .ca-name { font-size: 15px; font-weight: 700; }
 #cityActivities .ca-desc { font-size: 12px; color: #9fb0c6; margin: 2px 0 7px; line-height: 1.25; }
 #cityActivities .ca-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; color: var(--money, #7ed957); font-variant-numeric: tabular-nums; }
+
+/* Pausing is a clean break in the world view. City overlays used to keep
+   drawing through the pause card (including the portrait in screenshot #1). */
+body:not(.state-playing) #cityHud,
+body:not(.state-playing) #cpPanel,
+body:not(.state-playing) #cTurfMeta,
+body:not(.state-playing) #cKillFeed { display: none !important; }

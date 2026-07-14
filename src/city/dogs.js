@@ -161,14 +161,15 @@
     const breed = BREEDS[(rng() * BREEDS.length) | 0];
     const grp = buildDog(breed);
     grp.position.set(x, groundY(x, z), z);
-    grp.rotation.y = rng() * 6.283;
+    const initialHeading = rng() * 6.283;
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(grp, initialHeading); else grp.rotation.y = -initialHeading;
     root.add(grp);
     const d = {
       breed: breed, group: grp, pos: grp.position, kind: "dog",
       name: tamed ? NAMES[(rng() * NAMES.length) | 0] : "Stray " + breed.name,
       tamed: !!tamed, sit: false, hp: 40, maxHp: 40,
       collar: COLLARS[(rng() * COLLARS.length) | 0],
-      heading: rng() * 6.283, turnT: rng() * 3, feeds: 0, wag: rng() * 6.283,
+      heading: initialHeading, faceH: initialHeading, turnT: rng() * 3, idleT: rng() * 1.5, feeds: 0, wag: rng() * 6.283,
       target: null, biteT: 0, dead: false, blinkT: 0,
       // ---- wildlife-registry facade: makes the dog SHOOTABLE ----
       animal: true, external: true, state: "wander", aggro: false,
@@ -198,6 +199,18 @@
         makeDog(regs[i].maxX - 40, regs[i].minZ + 40, false);
         break;
       }
+    }
+    // Authored places request the SAME live dog actor instead of constructing
+    // decorative lookalikes. Requests are anchors only; behavior/gait/combat
+    // remain here in the shared system.
+    const requested = CBZ.cityDogSpawnRequests || [];
+    for (let i = 0; i < requested.length; i++) {
+      const req = requested[i]; if (!req || req._spawned) continue;
+      const d = makeDog(req.x, req.z, !!req.tamed); if (!d) continue;
+      d.name = req.name || d.name;
+      d.home = { x: req.x, z: req.z };
+      d.homeRadius = Math.max(4, req.homeRadius || 14);
+      req._spawned = true;
     }
   }
 
@@ -420,7 +433,7 @@
       grp.position.z += Math.sin(d.faceH) * spd * dt;
     }
     grp.position.y = groundY(grp.position.x, grp.position.z);
-    grp.rotation.y = -d.faceH + Math.PI / 2;
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(d, d.faceH); else grp.rotation.y = -d.faceH;
   }
 
   // reusable creature_combat target for the aggro maul (never per-frame allocated)
@@ -498,9 +511,22 @@
       }
 
       if (!d.tamed) {
-        // strays mill about a little, deterministic-ish idle wander.
+        // Strays mill about with true pauses. Authored working dogs also keep
+        // to their home anchor instead of tracing a canned circle.
+        if (d.home) {
+          const hdx = d.home.x - grp.position.x, hdz = d.home.z - grp.position.z;
+          if (hdx * hdx + hdz * hdz > d.homeRadius * d.homeRadius) {
+            d.heading = Math.atan2(hdz, hdx); d.idleT = 0;
+            dogMove(d, 1.0, dt, false);
+            continue;
+          }
+        }
         d.turnT -= dt;
-        if (d.turnT <= 0) { d.heading += (Math.random() - 0.5) * 1.4; d.turnT = 2 + Math.random() * 3; }
+        if (d.idleT > 0) { d.idleT -= dt; dogMove(d, 0, dt, false); continue; }
+        if (d.turnT <= 0) {
+          d.heading += (Math.random() - 0.5) * 1.4; d.turnT = 2 + Math.random() * 3;
+          if (Math.random() < 0.34) { d.idleT = 1 + Math.random() * 2.8; dogMove(d, 0, dt, false); continue; }
+        }
         dogMove(d, 0.8, dt, false);
         continue;
       }

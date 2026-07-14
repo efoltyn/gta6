@@ -180,9 +180,13 @@
     // =====================================================================
     // 1) GROUND — earthy soil/grass valley floor under everything.
     // =====================================================================
-    plane(CX, CZ, (MAXX - MINX) + 16, (MAXZ - MINZ) + 16, M.soil, 0.01);
+    const farmSoilSurface = plane(CX, CZ, (MAXX - MINX) + 16, (MAXZ - MINZ) + 16, M.soil, 0.01);
+    farmSoilSurface.userData.terrain = true; farmSoilSurface.userData.worldSurface = true;
+    farmSoilSurface.name = "farmland-soil-surface";
     // a few grass tinted overlays so the bare lanes read as soil, the rest green
-    plane(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, M.grass, 0.012);
+    const farmGrassSurface = plane(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, M.grass, 0.012);
+    farmGrassSurface.userData.terrain = true; farmGrassSurface.userData.worldSurface = true;
+    farmGrassSurface.name = "farmland-grass-surface";
 
     // A true exterior feather replaces the old larger full rectangle, so the
     // valley no longer reads as an overlapping square layer from the air.
@@ -788,29 +792,21 @@
       });
     }
 
-    // farm dog — simple low-poly that trots near the homestead
-    const dog = new THREE.Group();
-    dog.position.set(HX + 6, 0, HZ + 8);
-    const dbody = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.4, 1.0), M.dog);
-    dbody.position.y = 0.5; dbody.castShadow = true; dog.add(dbody);
-    const dhead = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), M.dog);
-    dhead.position.set(0, 0.62, 0.6); dog.add(dhead);
-    root.add(dog);
+    // Request a normal dogs.js actor at the homestead. The old two-box prop
+    // slid around a circle with frozen legs and could not be hurt, fed or
+    // tamed; this anchor is consumed after the shared dog system owns its root.
+    (CBZ.cityDogSpawnRequests || (CBZ.cityDogSpawnRequests = [])).push({
+      x: HX + 6, z: HZ + 8, name: "Farm Dog", homeRadius: 12,
+    });
 
     // =====================================================================
-    // 11) ANIMATION — windmill spin + dog trot. ONE onUpdate, cheap.
+  // 11) ANIMATION — windmill spin. The real farm dog animates in dogs.js.
     // =====================================================================
     if (CBZ.onUpdate) {
       let t = 0;
-      const dogHome = new THREE.Vector3(HX + 6, 0, HZ + 8);
       CBZ.onUpdate(33.3, function (dt) {
         t += dt || 0.016;
         millHub.rotation.z = t * 0.6;
-        // dog ambles in a small loop near the farmhouse
-        const a = t * 0.4;
-        dog.position.x = dogHome.x + Math.cos(a) * 6;
-        dog.position.z = dogHome.z + Math.sin(a) * 6;
-        dog.rotation.y = -a + Math.PI / 2;
       });
     }
 

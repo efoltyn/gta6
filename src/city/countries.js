@@ -357,6 +357,9 @@
     g.translate(cx, y == null ? 0.02 : y, cz);
     const m = new THREE.Mesh(g, cmat(color));
     m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+    m.userData.terrain = true;
+    m.userData.worldSurface = true;
+    m.name = "country-settlement-surface";
     root.add(m);
     return m;
   }

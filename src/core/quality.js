@@ -25,26 +25,26 @@
   // single most effective thing a weak tier can do is render FEWER full rigs —
   // pulling in their visibility radius and killing their shadows. Resolution
   // scaling (pr) alone never fixed it because pixels were never the bottleneck.
-  // fog  = city fog.far per tier (near scales with it). Tier 4 = today's 430.
-  // cull = distance-cull radius for whole static city groups (core/farcull.js);
-  //        0 = off. Set a hair past the tier's fog.far so everything culled is
-  //        ALREADY 100% fog-dissolved — the player can't see the difference,
-  //        the GPU absolutely can (it stops drawing entire building shells +
-  //        their un-batchable glass). Tiers 3-4 keep cull OFF = today, exactly.
+  // fog  = city fog.far per tier (near scales with it). These are honest view
+  //        distances: the world has real distant buildings/coast/terrain now,
+  //        so fog is atmosphere rather than a curtain hiding fake skyline art.
+  // cull = FULL-DETAIL radius for static city groups (core/farcull.js); beyond
+  //        it real buildings continue as one measured instanced skyline draw,
+  //        while invisible rooms/windows stop consuming thousands of calls.
   const QUALITY = [
     // Even emergency mode remains legible. The city is dominated by draw
     // submission/shadow work, so crushing DPR to 0.28 blurred the image without
     // reliably moving the bottleneck. Emergency instead disables the sun pass
     // and trims render distance/actors while keeping a sane resolution floor.
-    { pr: 0.72, shadow: 512, crowd: 180,  ped: { vis: 45,  shadow: 0  }, sunShadow: false, fog: 260, cull: 330 },  // 0 — emergency
-    { pr: 0.85, shadow: 1024, crowd: 360, ped: { vis: 70,  shadow: 28 }, fog: 300, cull: 370 },  // 1
-    { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 }, fog: 350, cull: 430 },  // 2
-    // Tiers 3-4 now cull too (at 500, past their 430 fog wall): profiling shows
-    // the top-tier frame is DRAW-CALL bound (~2.8k calls, 78% of render CPU in
-    // per-draw uniform uploads) and everything past full fog dissolution is
-    // invisible anyway. Aircraft views stay exempt via farcull's own gate.
-    { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 430, cull: 500 },  // 3
-    { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 430, cull: 500 },  // 4 — full fat
+    { pr: 0.72, shadow: 512, crowd: 180,  ped: { vis: 45,  shadow: 0  }, sunShadow: false, fog: 420,  cull: 230 },  // 0 — emergency
+    { pr: 0.85, shadow: 1024, crowd: 360, ped: { vis: 70,  shadow: 28 }, fog: 580,  cull: 300 },  // 1
+    { pr: 1.0, shadow: 1024, crowd: 520,  ped: { vis: 85,  shadow: 38 }, fog: 760,  cull: 390 },  // 2
+    // The actor visibility leak used to spend ~2.3k calls before the scenery
+    // was considered. With that fixed, High/Best can show the real skyline and
+    // landforms while farcull still rejects geometry only after it is fogged.
+    // Aircraft use a wider full-detail bubble and the same measured proxies.
+    { pr: Math.min(devicePixelRatio, 1.25), shadow: 2048, crowd: 720,  ped: { vis: 95,  shadow: 42 }, fog: 1000, cull: 500 },  // 3
+    { pr: Math.min(devicePixelRatio, 1.5),  shadow: 2048, crowd: 1000, ped: { vis: 110, shadow: 50 }, fog: 1400, cull: 700 },  // 4 — full world
   ];
   const QUALITY_LABELS = ["Fastest", "Fast", "Balanced", "High", "Best"];
   // A fresh session is a first impression, not a benchmark screen. Starting at
@@ -87,9 +87,9 @@
   CBZ.qualityLabels = QUALITY_LABELS;
 
   // ---- QUALITY-V2 (smarter FEEL-aware tier control) -----------------------
-  // Gated behind CBZ.qualityV2 (default ON). When OFF we run the ORIGINAL
-  // sampler verbatim (see the `else` branch of sampleFPS) → today's behaviour
-  // byte-for-byte. V2 fixes three things the old sampler got wrong for FEEL:
+  // Gated behind CBZ.qualityV2 (default ON). When OFF we retain the legacy
+  // visible-frame sampler, with the same background-visibility safety guard.
+  // V2 fixes three things the old sampler got wrong for FEEL:
   //
   //   1) TRUE frame time. loop.js calls sampleFPS(dt) with the WORLD dt, which
   //      is clamped to 0.05 and further scaled by hit-stop/slow-mo. Under load
@@ -205,7 +205,7 @@
     CBZ.cityCullRadius = q.cull;
     if (CBZ.game && CBZ.game.mode === "city" && CBZ.scene && CBZ.scene.fog) {
       CBZ.scene.fog.far = q.fog;
-      CBZ.scene.fog.near = Math.round(80 * q.fog / 430);   // keep today's 80/430 shape
+      CBZ.scene.fog.near = Math.max(90, Math.round(q.fog * 0.16));
     }
     for (const fn of qListeners) { try { fn(qLevel); } catch (e) { console.error("[quality listener]", e); } }
     const stamp = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -223,7 +223,7 @@
   const V_WIN = 0.75;         // s — enough frames to distinguish load from a hitch
   const V_FPS_DOWN = 50;      // mean-fps step-down threshold (matches old 50)
   const V_FPS_UP = 58;        // mean-fps step-up threshold (matches old 58)
-  const V_GOOD_NEED = 4;      // up-step needs 4 good 0.5s windows (~2s) — strong
+  const V_GOOD_NEED = 4;      // up-step needs 4 good 0.75s windows (~3s) — strong
                               // hysteresis so we rise cautiously, never twitchy
   const V_SPIKE_MS = 90;      // p95 frame-time over this = "spiky" → step down
                               // even if the mean looks fine (steady beats spiky)
@@ -236,6 +236,7 @@
   let _vSpikeRun = 0;         // consecutive spiky windows
   let _vBadRun = 0;           // sustained mean-load windows (one is never enough)
   let _vEmergencyRun = 0;     // very-low-fps windows before tier 0 is allowed
+  let _vLongRun = 0;          // consecutive visible >250ms frames (real severe load)
 
   function resetVWindow(resetPrev) {
     _accum = 0; _frames = 0; _window = 0; _vWorst = 0; _v2nd = 0;
@@ -244,7 +245,7 @@
   if (typeof document !== "undefined" && document.addEventListener) {
     document.addEventListener("visibilitychange", function () {
       resetVWindow(true);
-      _vBadRun = 0; _vEmergencyRun = 0; _vSpikeRun = 0;
+      _vBadRun = 0; _vEmergencyRun = 0; _vSpikeRun = 0; _vLongRun = 0; _good = 0;
     });
   }
 
@@ -253,8 +254,16 @@
     // qualityAuto=false (pause-screen slider) and qualityLocked=true (settings
     // panel); either one wins over the auto-tuner.
     if (!CBZ.qualityAuto || CBZ.qualityLocked) return;
+    // Visibility is a correctness guard for both V2 and the opt-in legacy
+    // sampler. Some browsers deliver sparse background callbacks; accumulating
+    // those as render frames would manufacture a low-FPS window.
+    if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") {
+      resetVWindow(true);
+      _vBadRun = 0; _vEmergencyRun = 0; _vSpikeRun = 0; _vLongRun = 0; _good = 0;
+      return;
+    }
 
-    // ---- legacy path (flag off) : EXACTLY today's behaviour ----------------
+    // ---- legacy path (flag off): original visible-frame timing --------------
     if (!CBZ.qualityV2) {
       if (_warmup > 0) { _warmup -= dt; return; } // ignore first 1.5s of upload jank
       _accum += dt; _frames++; _window += dt;
@@ -269,23 +278,39 @@
 
     // ---- V2 path : true frame time + p95 spike trigger + host bias ---------
     const now = (typeof performance !== "undefined") ? performance.now() : Date.now();
-    if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") {
-      resetVWindow(true);
-      return;
-    }
     if (_vPrev === 0) { _vPrev = now; return; }   // first call: no prior stamp
     let trueMs = now - _vPrev;                     // REAL wall-clock frame time
     _vPrev = now;
-    // Tab switches, debugger pauses, loading/GC cliffs and a tier's own buffer
-    // realloc are not sustained rendering load. One such frame must not strip
-    // several quality levels.
-    if (trueMs <= 0 || trueMs > 250 || now < qualitySettlingUntil) {
+    // A tier's own drawing-buffer/shadow-map realloc must not feed back into
+    // another downgrade. Likewise, a multi-second debugger/tab gap is not GPU
+    // load (hidden documents were already rejected above).
+    if (trueMs <= 0 || trueMs > 5000 || now < qualitySettlingUntil) {
       resetVWindow(false);
+      _vLongRun = 0;
       return;
     }
     const trueDt = trueMs / 1000;
 
-    if (_warmup > 0) { _warmup -= trueDt; return; } // first 1.5s upload jank
+    // Advance warmup with a capped wall delta so a genuinely slow machine can
+    // eventually leave warmup, without letting one loading pause consume it.
+    if (_warmup > 0) { _warmup -= Math.min(trueDt, 0.25); resetVWindow(false); return; }
+
+    // One 250-5000ms frame is a load/GC/debugger hitch and is ignored. Three in
+    // succession while the document is visible is unambiguously sustained,
+    // severe load; step only one tier, then let applyQuality's settle window
+    // absorb the resize. This closes the old <4fps blind spot without allowing
+    // a single hitch to cascade through quality levels.
+    if (trueMs > 250) {
+      resetVWindow(false);
+      _vBadRun = 0; _vSpikeRun = 0; _good = 0;
+      _vLongRun++;
+      CBZ.qualityAutoStats = { fps: 1000 / trueMs, p95: trueMs, level: qLevel, longFrames: _vLongRun };
+      if (_vLongRun >= 3 && qLevel > 0) {
+        qLevel--; applyQuality(); _vCool = 4; _vEmergencyRun = 0; _vLongRun = 0;
+      }
+      return;
+    }
+    _vLongRun = 0;
 
     _accum += trueDt; _frames++; _window += trueDt;
     // track worst + 2nd-worst frame this window for a cheap p95 (no array)

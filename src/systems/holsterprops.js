@@ -189,7 +189,7 @@
     const inTP = !(CBZ.fps && CBZ.fps.active);
     const show = ch && ch.sockets && inTP &&
       g && (g.mode === "city" || g.mode === "escape") &&
-      CBZ.player && !CBZ.player.dead && !CBZ.player.driving &&
+      CBZ.player && !CBZ.player.dead && !CBZ.player.driving && !CBZ.player._swim &&
       CBZ.playerArmed && CBZ.playerArmed();
     // heldId: currentWeaponId is the canonical drawn id, but fpsmode's
     // normalizeWeapon() can leave it null while fps.weapon still points at a

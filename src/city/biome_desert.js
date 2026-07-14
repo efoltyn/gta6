@@ -60,11 +60,11 @@
   const CW_X1 = MINX + 6;                 // tuck into the desert's west edge
 
   // ---- palette (warm tan basin; one shared material per color) -------------
-  const SAND      = 0xd9bd86;             // warm tan ground
-  const SAND_DK   = 0xc4a874;             // dune-shadow / riverbed
-  const SAND_PALE = 0xe4cf9c;             // sun-bleached dune crest
-  const RED_ROCK  = 0xa0522d;             // mesa sandstone
-  const RED_DK    = 0x8a4423;             // mesa shadow band
+  const SAND      = 0xcdb486;             // sun-worn ochre, not yellow plastic
+  const SAND_DK   = 0xb49a70;             // dune-shadow / riverbed
+  const SAND_PALE = 0xdcc99f;             // sun-bleached dune crest
+  const RED_ROCK  = 0x946044;             // muted mesa sandstone
+  const RED_DK    = 0x684637;             // mesa shadow band
   const ROCK_GREY = 0x8c7d68;             // boulders
   const CACTUS    = 0x4f7a43;             // saguaro green
   const SCRUB     = 0x8a8a4a;             // dry desert brush
@@ -246,6 +246,8 @@
     const groundMesh = new THREE.Mesh(groundGeo, duneMat);
     groundMesh.castShadow = false; groundMesh.receiveShadow = true;
     groundMesh.matrixAutoUpdate = false; groundMesh.updateMatrix();
+    groundMesh.userData.terrain = true; groundMesh.userData.worldSurface = true;
+    groundMesh.name = "saltlands-desert-surface";
     root.add(groundMesh);
     // wind-streak patches (two tones, two merged meshes — 2 draw calls)
     const patchDk = [], patchPale = [];
@@ -500,19 +502,24 @@
 
     // =====================================================================
     //  8) RED-ROCK MESAS — the only big individually-placed solids. Each =
-    //     a stepped stack of two boxes (broad base + narrower cap) in a red
-    //     sandstone tone with a darker shadow band, plus a full-height
+    //     two low-poly eroded frustums in a muted sandstone tone with a darker
+    //     shadow stratum, plus a full-height
     //     collider you WALK AROUND. A handful, spaced as landmarks so the
     //     basin has orientation cues from far off.
     // =====================================================================
     const mesaBase = [], mesaCap = [], mesaBand = [];
-    MESAS.forEach(m => {
-      const bh = m.h * 0.7, ch = m.h - bh;
-      const gb = new THREE.BoxGeometry(m.w, bh, m.d); gb.translate(m.x, bh / 2, m.z); mesaBase.push(gb);
-      const gc = new THREE.BoxGeometry(m.w * 0.7, ch, m.d * 0.7); gc.translate(m.x, bh + ch / 2, m.z); mesaCap.push(gc);
-      // a thin darker shadow band near the base (stratum read)
-      const gd = new THREE.BoxGeometry(m.w + 0.4, bh * 0.18, m.d + 0.4); gd.translate(m.x, bh * 0.32, m.z); mesaBand.push(gd);
-      solid(m.x, m.z, m.w, m.d, m.h);
+    MESAS.forEach((m, mi) => {
+      const bh = m.h * 0.68, ch = m.h - bh;
+      const sides = 7 + (mi % 3), yaw = (mi * 2.399963) % Math.PI;
+      // Elliptical frustums read as weathered rock from every angle. The old
+      // stacked boxes looked like buildings accidentally dropped in the sand.
+      const gb = new THREE.CylinderGeometry(0.40, 0.52, bh, sides, 1, false);
+      gb.scale(m.w, 1, m.d); gb.rotateY(yaw); gb.translate(m.x, bh / 2, m.z); mesaBase.push(gb);
+      const gc = new THREE.CylinderGeometry(0.30, 0.41, ch, Math.max(6, sides - 1), 1, false);
+      gc.scale(m.w, 1, m.d); gc.rotateY(yaw + 0.13); gc.translate(m.x, bh + ch / 2, m.z); mesaCap.push(gc);
+      const gd = new THREE.CylinderGeometry(0.505, 0.515, bh * 0.14, sides, 1, false);
+      gd.scale(m.w, 1, m.d); gd.rotateY(yaw); gd.translate(m.x, bh * 0.30, m.z); mesaBand.push(gd);
+      solid(m.x, m.z, m.w * 0.94, m.d * 0.94, m.h);
     });
     mergeAdd(mesaBase, cmat(RED_ROCK), { cast: true, receive: true });
     mergeAdd(mesaCap, cmat(RED_ROCK), { cast: true, receive: true });
@@ -752,11 +759,23 @@
     //     Lean on the instanced scenery for the SENSE of scale, not bodies.
     // =====================================================================
     if (CBZ.cityMakePed && CBZ.cityPeds) {
+      const populationEntries = [];
       const ped = function (x, z, opts) {
         try {
-          const p = CBZ.cityMakePed(x, z, rng, opts || {});
-          if (p) CBZ.cityPeds.push(p);
+          if (CBZ.npcLife && CBZ.npcLife.definePopulation) {
+            populationEntries.push({ profile: "cityResident", placement: { x: x, z: z, rng: rng }, overrides: opts || {} });
+            return null;
+          }
+          const p = CBZ.npcLife
+            ? CBZ.npcLife.spawnCity("cityResident", { x: x, z: z, parent: root, rng: rng }, opts || {})
+            : CBZ.cityMakePed(x, z, rng, opts || {});
+          if (p && !CBZ.npcLife) {
+            root.add(p.group);
+            if (CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
+          }
+          return p;
         } catch (e) { /* one bad ped never kills the biome */ }
+        return null;
       };
       // gas station / diner: a drifter + a mechanic
       ped(GAS_X - 4, HWY_Z + 12, { name: "Drifter", wealth: 0.15 });
@@ -768,6 +787,9 @@
       ped(CX - 216, CZ + 58, { name: "Prospector", wealth: 0.25 });
       // one wanderer out in the dunes
       ped(CX + 40, CZ + 100, { name: "Wanderer", wealth: 0.1 });
+      if (populationEntries.length && CBZ.npcLife && CBZ.npcLife.definePopulation) {
+        CBZ.npcLife.definePopulation("desert-authored", { root: root, entries: populationEntries });
+      }
     }
 
     // a couple of cars out on the highway (one parked at gas, one cruising)

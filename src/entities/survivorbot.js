@@ -207,7 +207,7 @@
       }
       const dx = b.pos.x - camx, dz = b.pos.z - camz;
       const dist2 = dx * dx + dz * dz;
-      if (b.tag) b.tag.visible = dist2 < TAG_DIST2;      // float the name when you're close
+      if (b.tag) b.tag.visible = false;                  // identity stays in interaction UI, not over the head
       if (CBZ.body && CBZ.body.busy(b)) continue;       // thrown / knocked down / held → body owns it
       const near = dist2 < ANIM_DIST2;
       // think: near bots every 3rd frame, far every 7th (round-robin by index)

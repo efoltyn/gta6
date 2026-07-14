@@ -336,7 +336,7 @@
       });
     }
     const sub = goCard.querySelector("#cityGameOverSub");
-    if (sub) sub.textContent = (line ? line + ". " : "") + "There is no hospital for this one. The save is gone — the city starts over without you.";
+    if (sub) sub.textContent = line || "Your story ends here.";
     goCard.style.display = "flex";
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
   }
@@ -421,7 +421,15 @@
     // it's not a cityDrop so nobody can walk off with it). When the FP tumble
     // plays, hold the orbit cam ~half a beat so the drop reads from YOUR eye
     // before the replay pulls out; the exterior blast cinematic keeps priority.
-    const fpDrop = CBZ.fpsDeathDrop ? CBZ.fpsDeathDrop() : false;
+    const physicalDrop = !!(CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false && CBZ.cityDropItem);
+    let fpDrop = false;
+    if (CBZ.fpsDeathDrop) {
+      fpDrop = CBZ.fpsDeathDrop();
+      // Inventory V2 already placed the authoritative, lootable weapon model.
+      // Retire fpsmode's second cosmetic copy immediately while preserving the
+      // carried-gun release it performs on the corpse.
+      if (physicalDrop && CBZ.fpsDeathDropReset) { CBZ.fpsDeathDropReset(); fpDrop = false; }
+    }
     if (fpDrop && extBeat <= 0 && CBZ.cityCam && CBZ.cityCam.death) {
       pendingDeathCam = CBZ.cityCam.death;
       CBZ.cityCam.death = null;
@@ -513,7 +521,6 @@
       });
     }
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-    const where = g.citySpawnPoint ? "home" : "the hospital";
     const killer = (g._cityKiller && (CBZ.now || 0) - (g._cityKillerT || 0) < 6) ? g._cityKiller : null;
     // a live, on-map NPC actor we can SPECTATE after the WASTED beat (only set when
     // an actor — not a string — dealt the blow). Held for the post-WASTED kill-cam.
@@ -548,9 +555,9 @@
     if (finalDeath) {
       finalDeathLine = line;
       pendingSpecKiller = null; g._citySpecTarget = null;
-      pendingWasted = line + "  ·  no coming back from this one";
+      pendingWasted = line;
     } else {
-      pendingWasted = line + "  ·  respawning at " + where + "…";
+      pendingWasted = line;
     }
     const titleDelay = extBeat > 0 ? (extBeat + 0.6) : 1.8;
     wastedT = titleDelay;
@@ -573,9 +580,6 @@
     specHUD.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:54;display:none;flex-direction:column;align-items:center;padding:0 0 30px;pointer-events:none;font-family:Fredoka,system-ui,sans-serif";
     const card = document.createElement("div");
     card.style.cssText = "min-width:300px;max-width:78vw;background:linear-gradient(180deg,rgba(10,13,20,.82),rgba(10,13,20,.93));border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:12px 20px 14px;box-shadow:0 8px 30px rgba(0,0,0,.55);text-align:center";
-    const top = document.createElement("div");
-    top.style.cssText = "font-size:12px;letter-spacing:3px;color:#9fb0c6;font-weight:600";
-    top.textContent = "▶ SPECTATING YOUR KILLER";
     specName = document.createElement("div");
     specName.style.cssText = "font-size:26px;font-weight:700;color:#fff;margin:3px 0 9px;text-shadow:0 2px 8px rgba(0,0,0,.6)";
     const hpWrap = document.createElement("div");
@@ -593,7 +597,9 @@
     specStateEl.style.cssText = "font-size:14px;color:#cdd6e2;margin-top:9px;font-weight:600";
     specFoot = document.createElement("div");
     specFoot.style.cssText = "font-size:12px;color:#8a93a3;margin-top:11px";
-    card.appendChild(top); card.appendChild(specName); card.appendChild(hpWrap); card.appendChild(specStats); card.appendChild(specStateEl); card.appendChild(specFoot);
+    // The camera already says that we are following the killer. Keep only the
+    // person's real name and a visual health bar; no spectator/tutorial prose.
+    card.appendChild(specName); card.appendChild(hpWrap);
     specHUD.appendChild(card);
     document.body.appendChild(specHUD);
   }
@@ -654,16 +660,10 @@
     const hp = Math.max(0, k.hp || 0), ratio = Math.max(0, Math.min(1, hp / (specKillerMax || 1)));
     if (specName) specName.textContent = killerName(k) || "your killer";
     if (specHpFill) { specHpFill.style.width = (ratio * 100).toFixed(0) + "%"; specHpFill.style.background = ratio > 0.5 ? "linear-gradient(90deg,#37d67a,#7ed957)" : ratio > 0.22 ? "linear-gradient(90deg,#e7a93a,#ffd451)" : "linear-gradient(90deg,#c9202a,#ff5a4a)"; }
-    if (specHpTxt) specHpTxt.textContent = Math.ceil(hp) + " HP";
-    if (specStats) {
-      const w = killerWorth(k), b = killerBodies(k);
-      specStats.innerHTML =
-        (w == null ? "" : "<span>💰 $" + w.toLocaleString() + "</span>") +
-        (b == null ? "" : "<span style='color:#ff7a7a'>💀 " + b + (b === 1 ? " body" : " bodies") + "</span>") +
-        (k.bounty > 0 ? "<span style='color:#7ed957'>🎯 $" + (k.bounty | 0).toLocaleString() + " bounty</span>" : "");
-    }
-    if (specStateEl) specStateEl.textContent = killerStateText(k);
-    if (specFoot) specFoot.textContent = "Press [SPACE] or click to respawn  ·  auto in " + Math.max(0, Math.ceil(specMax - specT)) + "s";
+    if (specHpTxt) specHpTxt.textContent = "";
+    if (specStats) specStats.innerHTML = "";
+    if (specStateEl) specStateEl.textContent = "";
+    if (specFoot) specFoot.textContent = "";
     if (specT >= specMax) { endSpectate(); return; }
   }
   // SPACE / Enter / click ends the kill-cam early (Fortnite "respawn now")

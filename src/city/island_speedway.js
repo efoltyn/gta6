@@ -20,8 +20,8 @@
    a trophy hall (why you race) and a trackside sports bar (where the
    crowd that can't get a seat watches) round it out.
 
-   PERF: the grandstand seat rows + the packed spectator crowd are
-   ONE InstancedMesh each (thousands of fans, two draw calls). The
+   PERF: grandstand seat rows remain one InstancedMesh; a bounded sample
+   of seats holds real city actors and every other seat is honestly empty. The
    SAFER barrier, lane lines, catch-fence posts and floodlight masts
    are merged / instanced. One shared Lambert per colour (CBZ.mat
    pool). The race AI cars are animated procedurally around the oval
@@ -111,7 +111,9 @@
     }
 
     // ---- 1. ground: circular grass island --------------------------------
-    flat(new THREE.CircleGeometry(R, 64), mat(C_GRASS), 0.02);
+    const speedwaySurface = flat(new THREE.CircleGeometry(R, 64), mat(C_GRASS), 0.02);
+    speedwaySurface.userData.terrain = true; speedwaySurface.userData.worldSurface = true;
+    speedwaySurface.name = "speedway-island-surface";
 
     // ---- 2. the asphalt oval ring (track surface) ------------------------
     // Build a triangle strip ring between inner & outer edges of the centreline.
@@ -288,8 +290,8 @@
       root.add(im2);
     }
 
-    // ---- 7. GRANDSTANDS + instanced crowd along the front straight -------
-    buildGrandstand(root, mat, ovalFrame, { CX, CZ, TRACK_W, C_STAND, C_SEAT, C_STEEL });
+    // ---- 7. GRANDSTANDS + live crowd along the front straight ------------
+    const grandstandAudience = buildGrandstand(root, mat, ovalFrame, { CX, CZ, TRACK_W, C_STAND, C_SEAT, C_STEEL });
 
     // ---- 8. scoring pylon + floodlight masts -----------------------------
     buildPylonAndLights(root, mat, ovalFrame, rng);
@@ -301,7 +303,7 @@
     buildComplex(root, rng);
 
     // ---- 11. populate: spectators, pit crew, parked cars -----------------
-    populate(root, rng, city);
+    populate(root, rng, city, grandstandAudience);
 
     // ---- regions: register the island + causeway -------------------------
     CBZ.registerCityRegion(city, { name: "Diamond Speedway", subtitle: "Motorsports Park", biome: "speedway", kind: "circle", cx: CX, cz: CZ, r: R, pad: 6 });
@@ -337,15 +339,13 @@
     const seatMat = mat(P.C_SEAT);
     const totalSeats = ROWS * SEATS;
     const seatIM = new THREE.InstancedMesh(seatGeo, seatMat, totalSeats);
-    // crowd: one capsule-ish figure per seat, instanced (the packed house)
-    const fanGeo = new THREE.CylinderGeometry(0.22, 0.26, 0.95, 5);
-    const fanMat = mat(0xd8d2c4);
-    const fanIM = new THREE.InstancedMesh(fanGeo, fanMat, totalSeats);
-    fanIM.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(totalSeats * 3), 3);
-    const FAN_COLORS = [0xc23a36, 0x3a66c2, 0x3ba24a, 0xe0a92e, 0xeef2f6, 0x8a4ec2, 0x2b2d31, 0xd66a2e];
+    // A venue may have hundreds of seats without inventing hundreds of fake
+    // cylinder-people. Keep most seats visibly empty and publish a bounded,
+    // well-distributed set of anchors for ordinary live actors below.
+    const audience = [];
 
     const M = new THREE.Matrix4(), q = new THREE.Quaternion(),
-      one = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
+      one = new THREE.Vector3(1, 1, 1);
     const standHeading = Math.atan2(tx, tz);
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), standHeading);
 
@@ -366,26 +366,20 @@
         // seat
         M.compose(new THREE.Vector3(sx, up + 0.32, sz), q, one);
         seatIM.setMatrixAt(si, M);
-        // fan sitting in it (deterministic-ish gap: ~12% empty seats read as real)
-        const occupied = ((r * 31 + c * 17) % 8) !== 0;
-        if (occupied) {
-          M.compose(new THREE.Vector3(sx, up + 0.85, sz), q, one);
-          fanIM.setMatrixAt(si, M);
-          col.setHex(FAN_COLORS[(r * 7 + c * 3) % FAN_COLORS.length]);
-        } else {
-          M.compose(new THREE.Vector3(sx, -50, sz), q, one); // park empties below
-          fanIM.setMatrixAt(si, M);
-          col.setHex(0x000000);
+        // Roughly three live people per row, staggered across the stand. They
+        // use standard character rigs and remain hittable/lootable; every
+        // other physical seat is honestly empty.
+        if (((c + r * 7) % 19) === 2 && audience.length < 48) {
+          audience.push({
+            x: sx, y: up + 0.52, z: sz,
+            yaw: Math.atan2(-nx, -nz), pose: "sit", state: "sit",
+          });
         }
-        fanIM.setColorAt(si, col);
         si++;
       }
     }
     seatIM.instanceMatrix.needsUpdate = true;
-    fanIM.instanceMatrix.needsUpdate = true;
-    if (fanIM.instanceColor) fanIM.instanceColor.needsUpdate = true;
     root.add(seatIM);
-    root.add(fanIM);
 
     // back wall / grandstand structure with support columns + a roof canopy
     const topUp = 1.2 + ROWS * TIER_RISE;
@@ -398,6 +392,7 @@
     canopy.position.set((baseX + bwx) / 2, topUp + 2.5, (baseZ + bwz) / 2);
     canopy.rotation.y = standHeading;
     root.add(canopy);
+    return audience;
   }
 
   // ====================================================================== //
@@ -605,25 +600,57 @@
   // ====================================================================== //
   //  POPULATE                                                              //
   // ====================================================================== //
-  function populate(root, rng, city) {
+  function populate(root, rng, city, audience) {
     const makePed = CBZ.cityMakePed;
-    // a handful of LIVE interactive peds on the concourse (perf: keep it small —
-    // the big crowd is the instanced grandstand)
+    const populationEntries = [];
+    const modular = !!(CBZ.npcLife && CBZ.npcLife.definePopulation);
+    function liveActor(profile, x, z, opts, anchor, role) {
+      if (modular) {
+        populationEntries.push({
+          profile: profile,
+          placement: anchor ? { anchor: anchor, rng: rng } : { x: x, z: z, rng: rng },
+          overrides: opts || {},
+          configure: role ? function (p) { p._venueRole = role; } : null,
+        });
+        return null;
+      }
+      if (CBZ.npcLife) {
+        const p = CBZ.npcLife.spawnCity(profile, anchor
+          ? { parent: root, anchor: anchor, rng: rng }
+          : { x: x, z: z, parent: root, rng: rng }, opts || {});
+        if (p && role) p._venueRole = role;
+        return p;
+      }
+      if (!makePed || anchor) return null; // empty seat beats a decorative proxy
+      const p = makePed(x, z, rng, opts || {});
+      if (!p || !p.group) return null;
+      root.add(p.group);
+      if (CBZ.cityPeds && CBZ.cityPeds.indexOf(p) < 0) CBZ.cityPeds.push(p);
+      if (role) p._venueRole = role;
+      return p;
+    }
+    // Every live seat is a reusable population entry. The shared life layer
+    // fills it incrementally and recreates the same bounded cast after reset.
+    for (let i = 0; audience && i < audience.length; i++) {
+      liveActor("venueSpectator", 0, 0, { job: "race fan" }, audience[i], "speedway-spectator");
+    }
+    // a handful of LIVE interactive peds on the concourse (perf: keep it small)
     if (makePed) {
       // concourse fans on the OUTER ring only (radius 165..192) — clear of the
       // oval racing surface (which spans ~150m in X from centre).
       for (let i = 0; i < 14; i++) {
         const a = rng() * Math.PI * 2, rr = 165 + rng() * 27;
         const px = CX + Math.cos(a) * rr, pz = CZ + Math.sin(a) * rr;
-        try { makePed(px, pz, rng, { kind: "civilian", job: "race fan" }); } catch (e) { /* headless */ }
+        try { liveActor("venueSpectator", px, pz, { kind: "civilian", job: "race fan" }, null, "speedway-concourse"); } catch (e) { /* headless */ }
       }
       // pit crew near pit road
       const fc = ovalFrame(0);
       const px = fc.x - fc.nx * (TRACK_W / 2 + 5), pz = fc.z - fc.nz * (TRACK_W / 2 + 5);
       for (let i = 0; i < 5; i++) {
-        try { makePed(px + (i - 2) * 6 * fc.tx, pz + (i - 2) * 6 * fc.tz, rng, { kind: "worker", job: "pit crew" }); } catch (e) { /* */ }
+        try { liveActor("venueWorker", px + (i - 2) * 6 * fc.tx, pz + (i - 2) * 6 * fc.tz, { kind: "worker", job: "pit crew" }, null, "speedway-worker"); } catch (e) { /* */ }
       }
     }
+    if (modular) CBZ.npcLife.definePopulation("speedway-authored", { root: root, entries: populationEntries });
     // a few parked cars in a lot near the showroom (south-ish exterior)
     if (CBZ.cityMakeCar && CBZ.cityEcon && CBZ.cityEcon.CARS) {
       const CARS = CBZ.cityEcon.CARS;

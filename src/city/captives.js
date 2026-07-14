@@ -264,7 +264,6 @@
       "border-left:4px solid #ff5a5a;border-radius:8px;padding:6px 10px;" +
       "cursor:pointer;display:none;backdrop-filter:blur(3px);" +
       "box-shadow:0 3px 12px rgba(0,0,0,0.5);user-select:none;");
-    badge.title = "Open captives panel  [" + KEY_LABEL + "]";
     badge.addEventListener("click", function () { open(); });
     document.body.appendChild(badge);
 
@@ -434,10 +433,9 @@
     // ---- persistent badge -------------------------------------------------
     if (badge) {
       if (held.length || taken.length) {
-        var parts = [];
-        if (held.length) parts.push(held.length + " held");
-        if (taken.length) parts.push(taken.length + " taken");
-        badge.textContent = "🔒 " + parts.join(" · ");
+        // Compact custody instrument: the full names/status/verbs live in the
+        // panel opened by the existing click/U action, not over the world.
+        badge.textContent = "🔒 " + held.length + (taken.length ? "  ⚠ " + taken.length : "");
         badge.style.display = "block";
         // pulse red harder when family is out there.
         badge.style.borderLeftColor = taken.length ? "#ff3030" : "#ff7a5a";
