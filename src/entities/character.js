@@ -128,6 +128,12 @@
     const rl = limb(legW, LEG_UP, LEG_LO, legW, c.legs, c.shoes, 0.2);
     ll.position.set(-hipX, 0.95, 0); rl.position.set(hipX, 0.95, 0);
     model.add(ll, rl);
+    // A shallow pelvis overlaps both leg caps and the bottom of the torso.
+    // Besides reading anatomically, it hides sub-frame gaps when gait, hit
+    // reaction and body lean all blend on the same frame.
+    const pelvis = new THREE.Mesh(boxGeom(fem ? 0.72 : 0.84, 0.20, fem ? 0.43 : 0.48), cmat(c.legs));
+    pelvis.position.set(0, 0.98, 0); pelvis.castShadow = pelvis.receiveShadow = true;
+    model.add(pelvis);
 
     // subtle overall height trim for fem builds. Safe for foot-planting:
     // the legs are the ONLY thing that reaches this group's local y=0
@@ -270,6 +276,7 @@
         collar: [collar],
         legs: [ll.userData.main, rl.userData.main],
         legsLower: [ll.userData.lower, rl.userData.lower],
+        pelvis: [pelvis],
         shoes: [ll.userData.cap, rl.userData.cap].filter(Boolean),
         arms: [la.userData.main, ra.userData.main],
         armsLower: [la.userData.lower, ra.userData.lower],
@@ -308,6 +315,32 @@
   }
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
+  // The torso and legs are siblings authored from the feet, but anatomically
+  // meet at this socket. Every pose writer may rotate the torso; these two
+  // helpers make that rotation happen around the hip in full 3D. Compensation
+  // is delta-tracked so reaction/grapple layers can safely re-lock after they
+  // add their own pitch/roll without accumulating translation frame to frame.
+  const CHARACTER_HIP_Y = 0.95;
+  const _hipPivot = new THREE.Vector3();
+  function beginCharacterHipFrame(ch) {
+    if (!ch || !ch.body) return;
+    ch.body.position.x -= ch._hipCompX || 0;
+    ch.body.position.y -= ch._hipCompY || 0;
+    ch.body.position.z -= ch._hipCompZ || 0;
+    ch._hipCompX = ch._hipCompY = ch._hipCompZ = 0;
+  }
+  function lockCharacterHips(ch) {
+    if (!ch || !ch.body) return;
+    _hipPivot.set(0, CHARACTER_HIP_Y, 0).applyEuler(ch.body.rotation);
+    const nx = -_hipPivot.x;
+    const ny = CHARACTER_HIP_Y - _hipPivot.y;
+    const nz = -_hipPivot.z;
+    ch.body.position.x += nx - (ch._hipCompX || 0);
+    ch.body.position.y += ny - (ch._hipCompY || 0);
+    ch.body.position.z += nz - (ch._hipCompZ || 0);
+    ch._hipCompX = nx; ch._hipCompY = ny; ch._hipCompZ = nz;
+  }
+
   // Shared by full character rigs and the instanced jail crowd. Phase is in
   // radians; PI radians is one alternating footfall. Distance, not frame count,
   // owns cadence so a metre travelled looks the same at every refresh rate.
@@ -331,6 +364,7 @@
        Arms counter-swing the legs; elbows carry a base bend that deepens
        with speed (jogger's ~90° pump at sprint) and on the forward swing. */
   function animChar(ch, speed, dt) {
+    beginCharacterHipFrame(ch);
     const moving = speed > 0.2;
     const walkRef = (CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4;
     const norm = Math.min(speed / walkRef, 1);          // 0..1 stand→brisk
@@ -356,6 +390,7 @@
       if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
       setElbow(J.la, -0.72, sr); setElbow(J.ra, -0.72, sr);
       if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+      lockCharacterHips(ch);
       return;   // seated pose owns the whole rig
     }
 
@@ -538,6 +573,14 @@
     const idleBreath = moving ? 0 : Math.sin(ch.breath * 2.2) * 0.012;
     ch.bob = damp(ch.bob, bobTarget, 12, dt);
     ch.body.position.y = ch.bob + idleBreath;
+    // The upper-body group is authored in model space with its origin at the
+    // feet, while the legs pivot at the hips.  Pitching that group to create a
+    // run lean therefore used to swing the whole chest forward around the
+    // ankles — at a sprint the torso visibly detached and ran in front of the
+    // legs.  Reset the longitudinal channel every locomotion frame; after the
+    // lean is known below we compensate the foot-origin transform so it behaves
+    // exactly like a rotation about the shared hip socket instead.
+    ch.body.position.z = 0;
 
     // weight shifts over the stance foot; a touch of idle sway keeps a
     // standing rig alive instead of statue-frozen. Turning while moving BANKS
@@ -561,7 +604,6 @@
     const leanTarget = norm * 0.12 + run2 * 0.10 + cb * 0.16;   // lean into the run / hunch the crouch
     ch.lean = damp(ch.lean, leanTarget, 8, dt);
     ch.body.rotation.x = ch.lean;
-
     // shoulders counter-rotate the stride (right shoulder leads the left
     // foot): subtle at a walk, pronounced at a sprint. The punch layer OWNS
     // body.rotation.y while active, so only write it here when not punching.
@@ -590,6 +632,7 @@
       if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -1.5 - crawl * 0.6, 10, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.2, 10, dt); }
       setElbow(J.la, -0.7 - crawl * 0.25, 10); setElbow(J.ra, -0.7 + crawl * 0.25, 10);
       if (ch.neck) ch.neck.rotation.x = damp(ch.neck.rotation.x, -0.5, 9, dt);
+      lockCharacterHips(ch);
       return;   // a one-legged crawl owns the whole rig
     }
 
@@ -896,6 +939,9 @@
       ch.koLift = 0;
       ch.koK = 0;
     }
+    // LAST inside the base animator: KO, stagger, punch and surrender all get
+    // their final Euler before the shared socket is solved.
+    lockCharacterHips(ch);
   }
 
   // ---- dramatic death sprawl (seeded variety; caller owns group topple).
@@ -903,6 +949,7 @@
   //      arms — no more plank limbs on corpses. ----
   function deathPose(ch, seed, fall) {
     if (!ch || !ch.parts) return;
+    beginCharacterHipFrame(ch);
     ch.sitting = false;
     const s = seed || 0;
     const p = ch.parts;
@@ -945,6 +992,7 @@
       if (ch.body) { ch.body.rotation.set(0.12 * j(1.9), 0, 0.1 * j(2.5)); ch.body.position.y = 0; }
       if (ch.neck) ch.neck.rotation.set(-0.55, 0.5 * j(1.5), 0.3 * j(2.2));
     }
+    lockCharacterHips(ch);
   }
 
   /* ---- WEAPON MOUNT POINTS (Fortnite-style stow rig) ---------------------
@@ -992,6 +1040,7 @@
 
   CBZ.makeCharacter = makeCharacter;
   CBZ.animChar = animChar;
+  CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;
   CBZ.charMounts = charMounts;

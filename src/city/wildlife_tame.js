@@ -155,6 +155,46 @@
     P._rideScale = RIDEABLE[a.species.id].mult;
     note("Riding " + (a.petName || a.species.name) + " — E to dismount.", 2.4);
   }
+  // One public route for direct-touch/controller helpers. Tamed animals mount
+  // immediately; a wild animal can be attempted, but strength/danger matters.
+  // Failure does not show a fake lock: the animal reacts in-world and may turn
+  // on the player. Success is deliberately uncommon for dangerous wildlife and
+  // establishes the same persistent tame relationship as feeding.
+  function attemptMount(a) {
+    if (!a || a.dead || a.external || a.species.aquatic || !RIDEABLE[a.species.id] || a.grow != null) return false;
+    if (ride.mount) { if (ride.mount === a) dismount(); return true; }
+    if (a.tamed) { mount(a); return ride.mount === a; }
+
+    const level = Math.max(1, (g.level || g.cityLevel || 1) | 0);
+    const danger = Math.max(0, Math.min(1, a.species.danger || 0));
+    const size = Math.max(0.7, a.species.scale || 1);
+    const chance = Math.max(0.035, Math.min(0.42, 0.13 + level * 0.004 - danger * 0.16 - Math.max(0, size - 1.3) * 0.055));
+    if (Math.random() <= chance) {
+      a.tamed = true;
+      a.petName = a.petName || NAMES[(Math.random() * NAMES.length) | 0];
+      a.stay = false;
+      note("You hold on. " + a.petName + " accepts you — for now.", 2.5, { urgent: true });
+      mount(a);
+      return ride.mount === a;
+    }
+
+    a.alarm = Math.max(a.alarm || 0, 5);
+    a.state = danger >= 0.28 ? "attack" : "flee";
+    if (CBZ.faceAnimalHeading && CBZ.player && CBZ.player.pos) {
+      const dx = CBZ.player.pos.x - a.pos.x, dz = CBZ.player.pos.z - a.pos.z;
+      faceAnimal(a, Math.atan2(dz, dx));
+    }
+    note((danger >= 0.28 ? "It throws you off and wheels around!" : "It bucks free and bolts."), 2.1, { urgent: danger >= 0.28 });
+    if (CBZ.player && danger >= 0.35) {
+      const dx = CBZ.player.pos.x - a.pos.x, dz = CBZ.player.pos.z - a.pos.z;
+      const d = Math.max(0.2, Math.hypot(dx, dz));
+      CBZ.player.pos.x += dx / d * 0.7;
+      CBZ.player.pos.z += dz / d * 0.7;
+      CBZ.player.vy = Math.max(CBZ.player.vy || 0, 2.2 + danger * 2.5);
+      CBZ.player.grounded = false;
+    }
+    return true;
+  }
   function dismount() {
     const a = ride.mount; if (!a) return;
     const P = CBZ.player;
@@ -165,6 +205,8 @@
     a.group.position.set(a.pos.x, groundY(a.pos.x, a.pos.z), a.pos.z);
   }
   CBZ.cityDismount = dismount;   // other systems (death, cars) can force it
+  CBZ.cityCanRideAnimal = function (a) { return !!(a && !a.dead && !a.external && !a.species.aquatic && RIDEABLE[a.species.id] && a.grow == null); };
+  CBZ.cityMountAnimal = attemptMount;
 
   // runs AFTER physics (order 10) each frame: seat the rider, glue the mount.
   CBZ.onUpdate(47.2, function (dt) {

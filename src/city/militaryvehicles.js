@@ -78,25 +78,81 @@
     return Math.hypot(ox, oz);
   }
 
+  const _boardPoint = new THREE.Vector3();
+  const _boardBox = new THREE.Box3();
+  const _boardRay = new THREE.Raycaster();
+  const _boardDir = new THREE.Vector3();
+
+  // Aircraft are not rectangles. Their full-span footprint is useful as a
+  // broad phase, but it can select empty air (or a neighboring gate plane).
+  // Measure from the rendered airframe while its parked root is unchanged.
+  function vehicleSurfaceDistance(v, x, z, y) {
+    if (!v || !v.group) return Infinity;
+    if (v.kind !== "plane" && v.kind !== "heli") return footprintDistance(v, x, z);
+    const p = v.group.position, r = v.group.rotation;
+    const stamp = [p.x, p.y, p.z, r.x, r.y, r.z].join("/");
+    if (!v._boardBounds || v._boardBoundsStamp !== stamp) {
+      v.group.updateWorldMatrix(true, true);
+      _boardBox.setFromObject(v.group);
+      v._boardBounds = v._boardBounds || new THREE.Box3();
+      v._boardBounds.copy(_boardBox);
+      v._boardBoundsStamp = stamp;
+    }
+    const py = y == null ? ((CBZ.player && CBZ.player.pos && CBZ.player.pos.y) || 0) + 0.9 : y;
+    return v._boardBounds.distanceToPoint(_boardPoint.set(x, py, z));
+  }
+  CBZ.cityVehicleSurfaceDistance = vehicleSurfaceDistance;
+
+  function vehicleRayMeshes(v) {
+    if (v._boardRayMeshes) return v._boardRayMeshes;
+    const a = [];
+    v.group.traverse(function (o) { if (o && o.isMesh && o.geometry) a.push(o); });
+    v._boardRayMeshes = a;
+    return a;
+  }
+
+  // Keyboard/controller boarding follows the same visible mesh authority as
+  // touch and bullets.  The aimed airframe wins before proximity fallbacks.
+  function aimedVehicle(P, maxRay, maxSurface) {
+    if (!P || !P.pos || !CBZ.camera || !CBZ.camera.getWorldDirection) return null;
+    _boardRay.set(CBZ.camera.position, CBZ.camera.getWorldDirection(_boardDir).normalize());
+    _boardRay.near = 0; _boardRay.far = maxRay == null ? 24 : maxRay;
+    let best = null, bd = _boardRay.far;
+    for (let i = 0; i < props.length; i++) {
+      const v = props[i];
+      if (!v || v.destroyed || !v.group || !v.group.parent || v.group.visible === false) continue;
+      if (vehicleSurfaceDistance(v, P.pos.x, P.pos.z, P.pos.y + 0.9) > (maxSurface == null ? 10.5 : maxSurface)) continue;
+      _boardRay.far = bd;
+      const hits = _boardRay.intersectObjects(vehicleRayMeshes(v), false);
+      for (let h = 0; h < hits.length; h++) {
+        const q = hits[h];
+        if (!q.object || q.object.visible === false || q.distance >= bd) continue;
+        bd = q.distance; best = v; break;
+      }
+    }
+    return best;
+  }
+  CBZ.cityAimedMilitaryVehicle = function () { return aimedVehicle(CBZ.player, 24, 10.5); };
+
   // nearest NON-taken boardable within maxd (mirrors CBZ.cityNearestCar)
-  function nearestVehicle(x, z, maxd) {
+  function nearestVehicle(x, z, maxd, y) {
     let best = null, bd = (maxd == null ? 5.5 : maxd);
     for (let i = 0; i < props.length; i++) {
       const v = props[i];
-      if (!v || v.taken || !v.group || !v.group.parent) continue;
-      const d = footprintDistance(v, x, z);
+      if (!v || v.taken || v.destroyed || !v.group || !v.group.parent) continue;
+      const d = vehicleSurfaceDistance(v, x, z, y);
       if (d < bd) { bd = d; best = v; }
     }
     return best;
   }
   CBZ.cityNearestMilitaryVehicle = nearestVehicle;
 
-  function nearestCivilAircraft(x, z, maxd) {
+  function nearestCivilAircraft(x, z, maxd, y) {
     let best = null, bd = maxd == null ? 10 : maxd;
     for (let i = 0; i < props.length; i++) {
       const v = props[i];
       if (!v || !v.civilian || v.kind !== "plane" || v.taken || !v.group || !v.group.parent) continue;
-      const d = footprintDistance(v, x, z);
+      const d = vehicleSurfaceDistance(v, x, z, y);
       if (d < bd) { bd = d; best = v; }
     }
     return best;
@@ -171,6 +227,40 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
 
+  // AI dispatch uses the exact same ownership/collider protocol as theft.  A
+  // parked machine becomes unavailable to the player while a named soldier is
+  // in its seat, and returning it to the authored pad restores both the solid
+  // footprint and the ordinary boarding verb.  Aircraft.js owns the flight;
+  // this module remains the single authority for the parked registry.
+  CBZ.cityClaimMilitaryVehicle = function (rec, pilot) {
+    if (!rec || rec.taken || rec._aiActive || !rec.group || !rec.group.parent || !pilot || pilot.dead) return false;
+    rec.taken = true; rec._aiActive = true; rec._aiPilot = pilot;
+    rec._aiHome = {
+      x: rec.pos.x, y: rec.pos.y || 0, z: rec.pos.z,
+      heading: rec.group.rotation.y || rec.heading || 0,
+    };
+    detachParkedCollider(rec);
+    return true;
+  };
+  CBZ.cityReleaseMilitaryVehicle = function (rec, destroyed) {
+    if (!rec) return;
+    rec._aiActive = false; rec._aiPilot = null;
+    if (destroyed) {
+      // A shot-down airframe remains spent; it never silently respawns on a pad.
+      rec.taken = true;
+      return;
+    }
+    const h = rec._aiHome;
+    if (h && rec.group) {
+      rec.pos.set(h.x, h.y, h.z);
+      rec.group.position.copy(rec.pos);
+      rec.group.rotation.set(0, h.heading, 0);
+      rec.heading = h.heading;
+    }
+    rec.taken = false;
+    restoreParkedCollider(rec);
+  };
+
   // ============================================================
   //  BOARD VERB — self-registered into the ONE interaction registry (no
   //  interact.js edit). A source feeds the nearest non-taken machine when you're
@@ -185,8 +275,9 @@
     I.registerSource({
       id: "src-milveh", kind: "milvehicle", layers: ["milvehicle"], prio: 3, driving: false,
       find: function (px, pz, ctx, push) {
-        const v = CBZ.cityNearestMilitaryVehicle && CBZ.cityNearestMilitaryVehicle(px, pz, 5.5);
-        if (v) push(v, footprintDistance(v, px, pz));
+        const py = ctx && ctx.pos && ctx.pos.y != null ? ctx.pos.y + 0.9 : null;
+        const v = CBZ.cityNearestMilitaryVehicle && CBZ.cityNearestMilitaryVehicle(px, pz, 5.5, py);
+        if (v) push(v, vehicleSurfaceDistance(v, px, pz, py));
       },
     });
     if (I.describe) {
@@ -230,7 +321,7 @@
     if (campaignAircraftTipShown || !campaignActive() || !activeCtx()) return;
     const P = CBZ.player;
     if (!P || !P.pos || P.dead || P.driving || P._aircraft) return;
-    const rec = nearestCivilAircraft(P.pos.x, P.pos.z, 10);
+    const rec = nearestCivilAircraft(P.pos.x, P.pos.z, 10, P.pos.y + 0.9);
     if (!rec) return;
     campaignAircraftTipShown = true;
     const airliner = rec.flightKind === "airliner";
@@ -243,12 +334,17 @@
   //  to AIR (flyable stand-in) or GROUND (armor drive sim).
   // ============================================================
   function boardVehicle(rec) {
-    if (!rec || rec.taken) return;
-    if (!activeCtx()) return;
-    const P = CBZ.player; if (!P || P.dead) return;
-    if (P.driving || P._vehicle) { note("Get out of your vehicle first.", 1.4); return; }
-    if (aircraftFlying()) { note("Already airborne.", 1.4); return; }
-    if (armor) { return; }                          // already commanding a ground machine
+    if (!rec) return false;
+    if (rec.destroyed) { note("The airframe is wrecked.", 1.5); return false; }
+    if (rec.taken) {
+      note(rec._aiActive ? "A crew is already moving this aircraft." : "That seat is occupied.", 1.5);
+      return false;
+    }
+    if (!activeCtx()) return false;
+    const P = CBZ.player; if (!P || P.dead) return false;
+    if (P.driving || P._vehicle) { note("Get out of your vehicle first.", 1.4); return false; }
+    if (aircraftFlying()) { note("Already airborne.", 1.4); return false; }
+    if (armor) { return false; }                    // already commanding a ground machine
 
     const name = vehName(rec);
     const air = rec.kind === "heli" || rec.kind === "plane";
@@ -260,7 +356,7 @@
     } else {
       took = driveArmor(rec);
     }
-    if (!took) { note("It won't start — try again.", 1.6); return; }
+    if (!took) { note("It won't start — try again.", 1.6); return false; }
 
     rec.taken = true;
     // the parked solid leaves with the machine (idempotent — the air path may
@@ -272,6 +368,7 @@
     if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" ? 3 : 4); } catch (e) {} }
     big(rec.civilian ? "Tower reports a " + name + " departing with no clearance — owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
     sfx("alarm");
+    return true;
   }
   CBZ.cityBoardMilitaryVehicle = boardVehicle;
 
@@ -373,6 +470,38 @@
     sfx("door");
   }
   CBZ.cityExitArmor = exitArmor;
+  // Read-only seat ownership probe for controllers/touch. Armor intentionally
+  // does not use P._vehicle, so callers cannot infer it from the car system.
+  CBZ.cityArmorActive = function () { return !!armor; };
+
+  // One input route for every stealable machine. Pressing E/Y exits the
+  // current seat or attempts the nearest parked ride; there is no artificial
+  // ownership lock. Aircraft use footprint distance, so touching a door or
+  // wing root works even when the model centre is many metres away.
+  CBZ.cityTryNearestRide = function () {
+    const P = CBZ.player;
+    if (!P || !P.pos || P.dead || !activeCtx()) return false;
+    if (P._aircraft && CBZ.cityPlayerAircraftExit) { CBZ.cityPlayerAircraftExit(); return true; }
+    if (P._vehicle && CBZ.cityExitVehicle) { CBZ.cityExitVehicle(); return true; }
+    if (armor) { exitArmor(); return true; }
+    if (P.driving) return false; // boats/animals keep their owning controller
+
+    const aimed = aimedVehicle(P, 24, 10.5);
+    if (aimed) {
+      // Consume this use press even if the specifically aimed machine is
+      // already crewed; otherwise a failed theft can fire an unrelated nearby
+      // interaction and feels like the plane randomly ignored E/Y.
+      boardVehicle(aimed);
+      return true;
+    }
+    const machine = nearestVehicle(P.pos.x, P.pos.z, 9.5, P.pos.y + 0.9);
+    if (machine) return boardVehicle(machine);
+    if (CBZ.cityNearestCar && CBZ.cityEnterVehicle) {
+      const car = CBZ.cityNearestCar(P.pos.x, P.pos.z, 4.8);
+      if (car) return CBZ.cityEnterVehicle(car) !== false;
+    }
+    return false;
+  };
 
   // [E] steps OUT of armor (the interaction registry owns boarding; this is the
   // single dedicated exit key, mirroring the aircraft [F] eject). Only acts while

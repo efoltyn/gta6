@@ -329,22 +329,26 @@
     // ground play keeps the normal quality-tier budget.
     const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
     if (CBZ.scene.fog) {
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 1800) : (CBZ.cityFogFar || 1000);
+      // A 1.8km fog wall is inside the authored Mercy range and painted dry
+      // land into a uniform cyan sheet. Aircraft need continental visibility;
+      // static detail still obeys farcull/LOD, so this mostly reveals the one
+      // country mesh, one ocean mesh and the landmark terrain draws.
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 4200) : (CBZ.cityFogFar || 1000);
       CBZ.scene.fog.near = Math.max(90, Math.round(ff * 0.16)); CBZ.scene.fog.far = ff;
     }
     if (CBZ.camera) {
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 1800) : (CBZ.cityFogFar || 1000);
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 4200) : (CBZ.cityFogFar || 1000);
       // Distant landmarks may request projection room without widening city
       // fog or the full-detail cull bubble. Mount Mercy is a single terrain
       // draw; keeping it through the airfield view has negligible scene cost.
       const landmarkFar = CBZ.cityDistantLandmarkFar || 0;
-      const wantFar = airborne ? Math.max(2800, ff + 500, landmarkFar) : Math.max(1400, ff + 180, landmarkFar);
+      const wantFar = airborne ? Math.max(7000, ff + 900, landmarkFar) : Math.max(1400, ff + 180, landmarkFar);
       // A 0.1m near plane paired with a 2800m flight far plane throws away
       // most depth precision. At altitude the 0.42m land/sea separation then
       // quantises to the same value and water wins over valid ground. Nothing
       // in the chase camera lives within half a metre, so tighten the flight
       // frustum while retaining the close first-person near plane on foot.
-      const wantNear = airborne ? 0.5 : 0.1;
+      const wantNear = airborne ? 0.75 : 0.1;
       if (CBZ.camera.far !== wantFar || CBZ.camera.near !== wantNear) {
         CBZ.camera.near = wantNear;
         CBZ.camera.far = wantFar;
@@ -688,14 +692,14 @@
         if (CBZ.cityAddStars) { try { CBZ.cityAddStars(3, "jailbreak"); } catch (e) {} }
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       }
-      // Returning characters normally restore their last saved coordinates,
-      // while a first character gets one-time origin staging. The explicit
-      // airport preference wins over both (grants + ledger stamps already
-      // landed). Campaign missions wrap this reset later and remain free to own
-      // a required set-piece position such as the prologue helipad.
-      if (airportSpawn) {
-        if (originResult && originResult.introActive && CBZ.cityOriginCancelIntro) CBZ.cityOriginCancelIntro();
-        if (originResult) originResult.introActive = false;
+      // Returning characters restore lastPos; a first character gets one-time
+      // origin staging (exec crash, barfly toss, tenant flat). The airport
+      // preference is the sandbox default for everyone ELSE — it must NOT
+      // cancel a live origin intro (that used to wipe the exec laptop beat
+      // and drop a suited millionaire at the runway with cash still intact).
+      // Campaign missions wrap this reset later and remain free to own a
+      // required set-piece position such as the prologue helipad.
+      if (airportSpawn && !(originResult && originResult.introActive)) {
         placePreferredCitySpawn(A, true);
       }
       // CITY defaults to FIRST-PERSON (the jail's fpsmode); [V] toggles to 3rd-person.

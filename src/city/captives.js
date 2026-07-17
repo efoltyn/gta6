@@ -432,13 +432,13 @@
 
     // ---- persistent badge -------------------------------------------------
     if (badge) {
-      if (held.length || taken.length) {
-        // Compact custody instrument: the full names/status/verbs live in the
-        // panel opened by the existing click/U action, not over the world.
-        badge.textContent = "🔒 " + held.length + (taken.length ? "  ⚠ " + taken.length : "");
+      if (taken.length) {
+        // A captive count looked exactly like a failed vehicle-lock counter.
+        // Ordinary custody remains in its panel; only the urgent family-
+        // abduction state earns persistent HUD space.
+        badge.textContent = "⚠ " + taken.length;
         badge.style.display = "block";
-        // pulse red harder when family is out there.
-        badge.style.borderLeftColor = taken.length ? "#ff3030" : "#ff7a5a";
+        badge.style.borderLeftColor = "#ff3030";
       } else {
         badge.style.display = "none";
       }

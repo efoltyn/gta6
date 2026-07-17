@@ -120,13 +120,13 @@
     }
 
     // ---- island and the bridge from the original city's east-wall gate ----
-    const ocean = plane(cx, cz, R * 3.4, R * 3.4, 0x2f6f9e, -0.44);
-    ocean.receiveShadow = false;
-    // ONE sea: share the mainland's day/night-tinted water material so the
-    // island ocean and the new coast-to-horizon plane read as the same water.
-    if (CBZ.city && CBZ.city.seaMat) ocean.material = CBZ.city.seaMat;
-    const beach = new THREE.Mesh(new THREE.CircleGeometry(R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
-    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz); beach.receiveShadow = true;
+    // The world owns one coast-to-horizon ocean mesh. The old island-local flat
+    // disk sat above its waves and produced a visibly different second kind of
+    // water, so no local ocean geometry is created here.
+    // Sand is an annulus, not a larger full disc hidden under the grass. The
+    // old pair overlapped across the whole island and depth-flickered from air.
+    const beach = new THREE.Mesh(new THREE.RingGeometry(R, R + 14, 64), new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
+    beach.rotation.x = -Math.PI / 2; beach.position.set(cx, 0, cz); beach.receiveShadow = true;
     beach.userData.terrain = true; beach.userData.worldSurface = true; beach.name = "annex-beach-surface";
     root.add(beach);
     const grassTex = CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2); grassTex.repeat.set(28, 28);
@@ -278,8 +278,8 @@
       return rec;
     }
 
-    tower(cx - 13, cz, 19, 20, 15, 0x667991, "TWIN TOWER WEST");
-    tower(cx + 13, cz, 19, 20, 15, 0x71849d, "TWIN TOWER EAST");
+    tower(cx - 13, cz, 19, 20, 38, 0x667991, "TWIN TOWER WEST");
+    tower(cx + 13, cz, 19, 20, 32, 0x71849d, "TWIN TOWER EAST");
     tower(cx - 52, cz - 30, 14, 15, 8, 0x596b82, "NORTHWEST TOWER");
     tower(cx + 48, cz + 40, 15, 15, 9, 0x7a6f8c, "SOUTHEAST TOWER");
     tower(cx + 40, cz - 48, 14, 14, 7, 0x5e7d86, "NORTHEAST TOWER");

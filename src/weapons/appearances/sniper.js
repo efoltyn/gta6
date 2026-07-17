@@ -30,15 +30,16 @@
     // BOLT handle: stem out the right side, knob swept down (the cycle you pay for)
     cyl(g, 0.016, 0.085, mat.steel, 0.085, 0.045, 0.005, 0, 0, Math.PI / 2 - 0.5);
     cyl(g, 0.030, 0.045, mat.steel, 0.125, 0.015, 0.005, 0, 0, Math.PI / 2 - 0.5);
-    // THE SCOPE — fat tube high over the bore on two tall rings,
-    // flared objective bell forward + ocular bell at the eye
-    box(g, 0.030, 0.060, 0.035, mat.black, 0, 0.135, -0.215);
-    box(g, 0.030, 0.060, 0.035, mat.black, 0, 0.135, -0.045);
-    cyl(g, 0.042, 0.34, mat.black, 0, 0.185, -0.13, Math.PI / 2);
-    cyl(g, 0.060, 0.10, mat.dark, 0, 0.185, -0.325, Math.PI / 2);
-    cyl(g, 0.052, 0.075, mat.dark, 0, 0.185, 0.065, Math.PI / 2);
-    // windage/elevation turret on top of the tube
-    cyl(g, 0.020, 0.035, mat.steel, 0, 0.245, -0.13);
+    // THE SCOPE — the same complete optic factory used by fitted gun mods:
+    // glass, reticle, two clamped rings, rail, focus rings and both turrets.
+    if (CBZ.createWeaponOptic) {
+      const optic = CBZ.createWeaponOptic({
+        name: "_baseOptic", x: 0, y: 0.185, z: -0.13,
+        length: 0.43, radius: 0.042, objectiveRadius: 0.066,
+        highMag: true, tint: "#a9d8ff", materials: { dark: mat.black, steel: mat.steel },
+      });
+      g.add(optic);
+    }
     // LONG thin free-floated barrel + muzzle brake at the very end
     cyl(g, 0.024, 0.92, mat.black, 0, 0.050, -0.77, Math.PI / 2);
     cyl(g, 0.034, 0.10, mat.steel, 0, 0.050, -1.26, Math.PI / 2);

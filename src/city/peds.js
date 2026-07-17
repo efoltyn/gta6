@@ -411,8 +411,9 @@
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
     const nm = opts.name || (demo && demo.name) || name(r, gender);
-    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(nm) : null;
-    if (tag) { tag.position.y = 1.97; tag.scale.set(2.2, 0.55, 1); tag.visible = false; ch.group.add(tag); }   // ~rig head (1.82m × HUMAN_SCALE) + margin; tag sits on the UNSCALED group, was 2.12 for the old 2.6m rig
+    // Identity is read through the aim dossier / interaction UI. Never attach
+    // a name, job, bounty or level board to a living person's skeleton.
+    const tag = null;
     let aggr = opts.aggr != null ? opts.aggr : rollAggr(ag.meanCivilian != null ? ag.meanCivilian : 0.24, ag.spreadCivilian);
     // ---- THE NEIGHBORHOOD NIGHTMARE: ~1 ped per city is a violent, NON-gang
     //      crook packing an AK-47. WHY: the status rifle can't only live on gang
@@ -1608,8 +1609,8 @@
     // bodies carry WAY more than you'd lift off the living — loot the corpse
     rollDeadLoot(ped);
     if (CBZ.gore && ped.pos) {
-      let dir = null;
-      if (imp && imp.fromX != null) dir = { x: ped.pos.x - imp.fromX, z: ped.pos.z - imp.fromZ };
+      let dir = imp && imp.dir ? { x: imp.dir.x || 0, z: imp.dir.z || 0 } : null;
+      if (!dir && imp && imp.fromX != null) dir = { x: ped.pos.x - imp.fromX, z: ped.pos.z - imp.fromZ };
       // an explosion tears a body apart — heavier mist/spray/gibs than a clean shot.
       const goreAmt = cause === "explosion" ? 1.9 : 1.0;
       CBZ.gore(ped.pos.x, ped.pos.y + 1.0, ped.pos.z, { dir, amount: goreAmt, cloth: ped.outfit, skin: ped.skin });
@@ -1649,7 +1650,11 @@
       } else if (cause === "stabbed" || cause === "beaten" || cause === "executed" || cause === "finished off") mag = 5 + (f0 || 6) * 0.25;
       else if (cause === "bled out") mag = 2.5;
       else mag = f0 || 6;
-      if (imp && imp.fromX != null) {
+      if (imp && imp.dir) {
+        _ragD.x = imp.dir.x || 0; _ragD.y = imp.dir.y || 0; _ragD.z = imp.dir.z || 0;
+        const rl = Math.hypot(_ragD.x, _ragD.y, _ragD.z) || 1;
+        _ragD.x /= rl; _ragD.y /= rl; _ragD.z /= rl;
+      } else if (imp && imp.fromX != null) {
         const rl = Math.hypot(ped.pos.x - imp.fromX, ped.pos.z - imp.fromZ) || 1;
         _ragD.x = (ped.pos.x - imp.fromX) / rl; _ragD.y = 0; _ragD.z = (ped.pos.z - imp.fromZ) / rl;
       } else { const ra = rng() * 6.28; _ragD.x = Math.cos(ra); _ragD.y = 0; _ragD.z = Math.sin(ra); }
@@ -1671,7 +1676,7 @@
     // off-chance a fling can't resolve (e.g. body already at floor), so we never
     // depend on the airborne path alone.
     if (CBZ.body && !ragged) {
-      if (imp && imp.fromX != null) CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, force: imp.force || 7, fling: imp.fling || 4 });
+      if (imp && (imp.fromX != null || imp.dir)) CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 7, fling: imp.fling || 4 });
       else { const a = rng() * 6.28; CBZ.body.hit(ped, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 3, fling: 5 }); }
       // belt-and-braces: force a hard knockdown too. hit(knockdown) sets _phys.down,
       // so even if the fling lands the same frame the body is already flagged DOWN

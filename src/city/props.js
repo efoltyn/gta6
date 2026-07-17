@@ -19,16 +19,34 @@
   const THREE = window.THREE;
   const mat = CBZ.mat;
 
-  // ---- shared cached label sprite (storefront signs, ped names, markers) ----
+  // ---- shared cached DIEGETIC sign panel ---------------------------------
+  // Historical callers still use the makeLabelSprite name, but this is no
+  // longer a Sprite.  A Sprite always turns to face the camera and ignores the
+  // wall/fixture it supposedly belongs to, which is exactly the floating-text
+  // look we do not want.  Return a real, depth-tested plane instead: callers
+  // can mount it on a facade, pylon, counter or display just like any other
+  // prop.  Character/dialogue systems intentionally do not call this helper.
   const labelCache = new Map();
+  const labelPlane = new THREE.PlaneGeometry(1, 1);
+  const labelBack = new THREE.BoxGeometry(1.035, 1.08, 0.055);
+  const labelBackMat = new THREE.MeshLambertMaterial({ color: 0x151a20 });
+  labelPlane._shared = true;
+  labelBack._shared = true;
+  labelBackMat._shared = true;
   CBZ.makeLabelSprite = function (text, opts) {
     opts = opts || {};
-    const key = text + "|" + (opts.color || "#eef4ff");
+    const key = text + "|" + (opts.color || "#eef4ff") + "|" + (opts.board || "#111821");
     let m = labelCache.get(key);
     if (!m) {
       const c = document.createElement("canvas");
       c.width = 256; c.height = 64;
       const x = c.getContext("2d");
+      // Opaque board + rim: the lettering now visibly belongs to an object.
+      x.fillStyle = opts.board || "#111821";
+      x.fillRect(1, 1, 254, 62);
+      x.strokeStyle = "rgba(235,244,255,.48)";
+      x.lineWidth = 3;
+      x.strokeRect(2.5, 2.5, 251, 59);
       // auto-fit: long labels ("MOB BOSS · 24", storefront names) shrink to the
       // canvas instead of clipping at the edges. Cached per text, so it's free.
       let fs = 30;
@@ -41,11 +59,25 @@
       x.fillStyle = opts.color || "#eef4ff";
       x.fillText(text, 128, 34);
       const tex = new THREE.CanvasTexture(c);
-      m = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+      tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+      m = new THREE.MeshBasicMaterial({
+        map: tex, side: THREE.DoubleSide, transparent: false,
+        depthTest: true, depthWrite: true, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2,
+      });
       m._shared = true;
       labelCache.set(key, m);
     }
-    const s = new THREE.Sprite(m);
+    const s = new THREE.Mesh(labelPlane, m);
+    s.name = "diegetic-sign";
+    s.userData.diegeticSign = true;
+    // A shallow solid back makes even freestanding placards read as objects in
+    // profile.  The front sits clear of it, so there is no coplanar flicker.
+    const back = new THREE.Mesh(labelBack, labelBackMat);
+    back.position.z = -0.034;
+    back.name = "diegetic-sign-board";
+    back.userData.diegeticSign = true;
+    s.add(back);
     s.scale.set(4, 1, 1);
     return s;
   };

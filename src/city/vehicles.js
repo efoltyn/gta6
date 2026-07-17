@@ -725,6 +725,10 @@
       _bk: grp.userData && grp.userData.bodyKind, dims: grp.userData && grp.userData.vehicleDims,
       mass: prof.mass, armor: prof.armor, repair: prof.repair,
     };
+    // A tiny fraction of genuine halo cars leave the factory/tuner scene with
+    // the same purchasable chop-shop booster already fitted. This is rarity,
+    // not random clutter: only the top catalog tier can roll it.
+    if (model && model.rarity >= 0.975 && rng() < 0.10) c.mods = { booster: true, factoryBooster: true };
     tagTailMeshes(c);                     // one traverse per car, at build time
     CBZ.cityCars.push(c);
     return c;
@@ -2070,9 +2074,39 @@
     car._pitch = (car._pitch || 0) + (pitchT2 - (car._pitch || 0)) * Math.min(1, dt * 7);
     car._roll = (car._roll || 0) + (rollTarget - (car._roll || 0)) * Math.min(1, dt * 6);
     car.vx = velX; car.vz = velZ;
+    const moveFromX = car.pos.x, moveFromZ = car.pos.z;
     car.pos.x += velX * dt; car.pos.z += velZ * dt;
+    // Authored stunt ramps launch the whole vehicle into a proper ballistic
+    // state. Horizontal momentum continues untouched; gravity, pitch/roll and
+    // landing impulse are integrated here by the same car controller.
+    if (!car._airborne && CBZ.cityStuntRampHit) {
+      const launch = CBZ.cityStuntRampHit(car, moveFromX, moveFromZ, car.pos.x, car.pos.z, vmag);
+      if (launch) {
+        car._airborne = true; car._airY = Math.max(0.12, car._airY || 0);
+        car._airVy = launch.vy; car._airPitch = -0.16; car._airRoll = 0;
+        if (CBZ.sfx) CBZ.sfx("jump");
+        if (CBZ.shake) CBZ.shake(0.32);
+      }
+    }
+    if (car._airborne) {
+      car._airVy -= 19.2 * dt;
+      car._airY += car._airVy * dt;
+      const flightPitch = Math.max(-0.34, Math.min(0.30, -car._airVy * 0.026));
+      car._airPitch += (flightPitch - (car._airPitch || 0)) * Math.min(1, dt * 4.5);
+      const flightRoll = Math.max(-0.24, Math.min(0.24, -(car._steerInput || 0) * Math.min(1, vmag / 16) * 0.18));
+      car._airRoll += (flightRoll - (car._airRoll || 0)) * Math.min(1, dt * 3.5);
+      if (car._airY <= 0 && car._airVy < 0) {
+        const impactV = -car._airVy;
+        car._airY = 0; car._airVy = 0; car._airborne = false;
+        if (impactV > 10) {
+          damageEngine(car, Math.max(0, (impactV - 9) * 1.8), false);
+          if (CBZ.shake) CBZ.shake(Math.min(1.4, impactV * 0.07));
+          if (CBZ.sfx) CBZ.sfx(impactV > 15 ? "ko" : "clank");
+        }
+      }
+    }
     const before = { x: car.pos.x, z: car.pos.z };
-    const moved = collideVehicle(car);
+    const moved = car._airborne && car._airY > 0.55 ? 0 : collideVehicle(car);
     if (moved > 0.05 && vmag > 5) {
       // CRASH — far cooler at speed: the car PILES INTO the wall, sheds nearly all
       // its forward momentum but RICOCHETS back along the surface (keeps a chunk of
@@ -2212,10 +2246,15 @@
     // can never stand on oracle-water). Once over water, the water mechanic
     // owns the position: sink where you swamped, don't teleport to the quay.
     if (!marine && !(noWater && onWater) && CBZ.city.arena) CBZ.city.arena.clampToCity(car.pos, wallRadius(car));
-    car.group.position.set(car.pos.x, marine ? WATER_Y : sinkY, car.pos.z);
-    car.group.rotation.set(car._pitch || 0, car.heading, car._roll || 0);   // y=heading, x/z = weight-transfer lean
+    const rideY = (marine ? WATER_Y : sinkY) + (car._airY || 0);
+    car.group.position.set(car.pos.x, rideY, car.pos.z);
+    car.group.rotation.set((car._pitch || 0) + (car._airPitch || 0), car.heading, (car._roll || 0) + (car._airRoll || 0));
+    if (!car._airborne) {
+      car._airPitch = (car._airPitch || 0) * Math.max(0, 1 - dt * 7);
+      car._airRoll = (car._airRoll || 0) * Math.max(0, 1 - dt * 7);
+    }
     if (vmag > 6) runOver(car, vmag);
-    P.pos.set(car.pos.x, 0, car.pos.z);
+    P.pos.set(car.pos.x, rideY, car.pos.z);
     CBZ.playerChar.group.position.copy(P.pos);
     CBZ.playerChar.group.visible = false;   // keep the driver's body hidden every frame (FPS/view toggles kept re-showing it → head poked out the roof)
     P.speed = vmag;

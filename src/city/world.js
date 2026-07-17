@@ -124,8 +124,23 @@
     //      Revert: CBZ.CONFIG.SEA_OVERHAUL = false (old plane returns). ----
     const CFGW = (CBZ.CONFIG = CBZ.CONFIG || {});
     if (CFGW.SEA_OVERHAUL == null) CFGW.SEA_OVERHAUL = true;
-    const SEA_Y = -0.48;                 // mean surface (waves ride ±0.135)
+    const SEA_Y = -0.48;                 // mean surface (three swells ride ±0.355)
     CBZ.SEA_Y = SEA_Y;                   // single source of truth for tooling
+    // Publish the actual rendered sea footprint before cityWorldGeo runs.
+    // Wildlife is built inside that pass, before the sea mesh itself is added,
+    // and must never fall back to a pre-expansion hard-coded ocean coordinate.
+    // Keep the sole ocean mesh beyond the longest city camera frustum. The old
+    // 7km square ended inside aircraft sight range, so its hard edge exposed
+    // the fog-coloured background and read as a second, flat kind of water.
+    const SEA_WORLD_SPAN = CFGW.SEA_OVERHAUL !== false ? 16000 : 12000;
+    const SEA_WORLD_CX = CFGW.SEA_OVERHAUL !== false ? 310 : cx + 150;
+    const SEA_WORLD_CZ = CFGW.SEA_OVERHAUL !== false ? -750 : cz - 200;
+    CBZ.SEA_WORLD_BOUNDS = {
+      minX: SEA_WORLD_CX - SEA_WORLD_SPAN / 2,
+      maxX: SEA_WORLD_CX + SEA_WORLD_SPAN / 2,
+      minZ: SEA_WORLD_CZ - SEA_WORLD_SPAN / 2,
+      maxZ: SEA_WORLD_CZ + SEA_WORLD_SPAN / 2,
+    };
     let seaMat2 = null;                  // the animated sea material (below)
     let seaNormalTex = null;             // one tiny generated, tiled ripple normal
     const seaTimeU = { value: 0 };       // shared shader clock (runtime-only FX)
@@ -136,7 +151,7 @@
       sea.rotation.x = -Math.PI / 2; sea.position.set(cx + 150, -0.5, cz - 200);
       sea.receiveShadow = false; root.add(sea);
     }
-    const seaDay = new THREE.Color(0x15445f), seaNight = new THREE.Color(0x071722), seaDusk = new THREE.Color(0x403e58);
+    const seaDay = new THREE.Color(0x0d3b58), seaNight = new THREE.Color(0x04131d), seaDusk = new THREE.Color(0x34364d);
     CBZ.onAlways(93, function () {
       if (!root.visible) return;                 // city hidden → other modes untouched
       const k = CBZ.dayness != null ? CBZ.dayness : 1;
@@ -1087,7 +1102,7 @@
     //      coast → open-sea mid tone → dark deep water) as a multiplier
     //      around 1.0, so the existing day/night material.color lerp still
     //      drives the whole sea;
-    //    • three world-space sine swells (λ ≈ 120/155/570u, total ±0.135u)
+    //    • three world-space sine swells (λ ≈ 120/155/570u, total ±0.355u)
     //      displace the surface and tilt the per-vertex normal (exaggerated
     //      ×48 — enough to catch light without turning swells into chrome) so
     //      the water
@@ -1107,42 +1122,20 @@
         if (r.minX < lminX) lminX = r.minX; if (r.maxX > lmaxX) lmaxX = r.maxX;
         if (r.minZ < lminZ) lminZ = r.minZ; if (r.maxZ > lmaxZ) lmaxZ = r.maxZ;
       }
-      const SPAN = 7000, SEG = 144;
-      const CXs = 310, CZs = -750;      // world/terrain.js relief-field centre
+      const SPAN = SEA_WORLD_SPAN, SEG = 144;
+      const CXs = SEA_WORLD_CX, CZs = SEA_WORLD_CZ; // world/terrain.js relief-field centre
       const geo = new THREE.PlaneGeometry(SPAN, SPAN, SEG, SEG);
       geo.rotateX(-Math.PI / 2);
       geo.translate(CXs, SEA_Y, CZs);   // verts are FINAL world coords (mesh at identity)
       const pos = geo.attributes.position;
       const colors = new Float32Array(pos.count * 3);
-      // depth-tint ramp: multipliers around 1.0 so material.color still rules
-      const shR = 0.76, shG = 1.02, shB = 1.12;    // green-blue coastal shallows
-      const dpR = 0.34, dpG = 0.56, dpB = 0.80;    // cold open deep
       const shoreAt = city.mapTerrain && typeof city.mapTerrain.shoreAt === "function"
         ? city.mapTerrain.shoreAt : null;
-      function smoothT(a, b, x) { let t = (x - a) / (b - a); t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
+      // One ocean means one colour treatment. Depth still exists for movement
+      // and shore foam, but it no longer selects a second cyan/dark palette.
+      // Natural view-angle reflection and fog can vary; the material cannot.
       for (let i = 0; i < pos.count; i++) {
-        const wx = pos.getX(i), wz = pos.getZ(i);
-        let d;
-        if (shoreAt) {
-          // Exact signed coast distance from continent.js, including the city
-          // harbor. The previous union AABB classified every bay inside the
-          // world's rectangular bounds as zero-depth shallows.
-          let s = -1;
-          try { s = +shoreAt(wx, wz); } catch (e) { s = -1; }
-          d = s < 0 ? -s : 0;
-        } else {
-          const dx = Math.max(lminX - wx, 0, wx - lmaxX);
-          const dz = Math.max(lminZ - wz, 0, wz - lmaxZ);
-          d = Math.sqrt(dx * dx + dz * dz);
-        }
-        const t1 = smoothT(4, 120, d);             // shallows fade out by ~120u
-        const t2 = smoothT(140, 480, d);           // deep begins past ~140u
-        let r = shR + (1 - shR) * t1, g = shG + (1 - shG) * t1, b = shB + (1 - shB) * t1;
-        r += (dpR - 1) * t2; g += (dpG - 1) * t2; b += (dpB - 1) * t2;
-        // Do not dither per grid vertex: the old 8% variation exposed each
-        // 48m triangle as a giant cyan polygon when viewed from the water.
-        // The tiled normal field supplies fine variation without colour seams.
-        colors[i * 3] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b;
+        colors[i * 3] = 1; colors[i * 3 + 1] = 1; colors[i * 3 + 2] = 1;
       }
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
       // Depth offsets correctly keep the country underlay behind authored
@@ -1162,9 +1155,20 @@
           const wz = mb.minZ + (mb.maxZ - mb.minZ) * (mz + 0.5) / MS;
           for (let mx = 0; mx < MS; mx++) {
             const wx = mb.minX + (mb.maxX - mb.minX) * (mx + 0.5) / MS;
-            const land = +shoreAt(wx, wz) >= 15 ? 255 : 0;
+            const signed = +shoreAt(wx, wz);
+            // R: hard land ownership; G: water-side shore proximity (surf);
+            // B: normalized deep-water distance. One texture now drives the
+            // cutout, shallows and foam instead of being a binary stencil.
+            const land = signed >= 3 ? 255 : 0;
+            // Surf is a narrow waterline treatment, not a 58m-wide second
+            // pale-water band. The wider field covered most of Redhollow Lake
+            // and visibly split it into alternating blue/white slabs.
+            const shoreNear = signed < 0 ? Math.max(0, Math.min(1, 1 - (-signed) / 22)) : 1;
+            const deep = signed < 0 ? Math.max(0, Math.min(1, (-signed) / 420)) : 0;
             const q = (mz * MS + mx) * 4;
-            mask[q] = mask[q + 1] = mask[q + 2] = land;
+            mask[q] = land;
+            mask[q + 1] = Math.round(shoreNear * 255);
+            mask[q + 2] = Math.round(deep * 255);
             mask[q + 3] = 255;
           }
         }
@@ -1173,6 +1177,7 @@
         seaLandMaskTex.magFilter = seaLandMaskTex.minFilter = THREE.LinearFilter;
         seaLandMaskTex.generateMipmaps = false;
         seaLandMaskTex.needsUpdate = true;
+        CBZ.citySeaFieldTexture = seaLandMaskTex;
       }
       // A periodic procedural normal map supplies metre-scale ripples between
       // the 48m grid vertices. It is generated once, tiles cleanly and moves by
@@ -1208,59 +1213,126 @@
         seaNormalTex.generateMipmaps = true;
         seaNormalTex.needsUpdate = true;
       })();
-      // One Phong draw gives the moving normal field real sun glints instead of
-      // the old matte painted-floor read. The tiny map adds no pass or draw.
-      seaMat2 = new THREE.MeshPhongMaterial({
-        color: 0x1b557a, vertexColors: true, fog: true,
-        specular: 0x416b78, shininess: 34,
-        normalMap: seaNormalTex,
-        normalScale: new THREE.Vector2(0.30, 0.30),
+      // One custom ocean draw, adapted to the same ingredients used by the
+      // official Three.js Water/Water2 examples: dual scrolling normal fields,
+      // view-angle Fresnel, sun specular, flow, refraction-like depth colour
+      // and a shore mask. It avoids Water2's extra reflector/refractor passes
+      // (too costly for this full 7km world) while retaining the cues that make
+      // water read as water rather than a blue floor.
+      const seaUniforms = THREE.UniformsUtils.merge([
+        THREE.UniformsLib.fog,
+        {
+          uSeaTime: seaTimeU,
+          uSeaColor: { value: new THREE.Color(0x0d3b58) },
+          uSeaNormal: { value: seaNormalTex },
+          uSeaLandMask: { value: seaLandMaskTex },
+          uSeaLandBounds: { value: seaLandBounds },
+          uSeaHasLandMask: { value: seaLandMaskTex ? 1 : 0 },
+        },
+      ]);
+      seaMat2 = new THREE.ShaderMaterial({
+        name: "CBZ Ocean Water",
+        uniforms: seaUniforms,
+        vertexColors: true,
+        fog: true,
+        depthWrite: true,
+        depthTest: true,
+        transparent: false,
+        vertexShader: [
+          "uniform float uSeaTime;",
+          "varying vec3 vSeaWorld;",
+          "varying vec3 vSeaNormal;",
+          "varying vec3 vSeaColor;",
+          "varying float vSeaHeight;",
+          "#include <fog_pars_vertex>",
+          "void main() {",
+          "  float p1 = position.x * 0.052 + position.z * 0.030 + uSeaTime * 1.1;",
+          "  float p2 = position.x * -0.020 + position.z * 0.041 + uSeaTime * 0.7;",
+          "  float p3 = (position.x + position.z) * 0.011 - uSeaTime * 0.4;",
+          "  float wy = sin(p1) * 0.145 + sin(p2) * 0.125 + sin(p3) * 0.085;",
+          "  float dx = 0.145*cos(p1)*0.052 - 0.125*cos(p2)*0.020 + 0.085*cos(p3)*0.011;",
+          "  float dz = 0.145*cos(p1)*0.030 + 0.125*cos(p2)*0.041 + 0.085*cos(p3)*0.011;",
+          "  vec3 displaced = position + vec3(0.0, wy, 0.0);",
+          "  vec4 world = modelMatrix * vec4(displaced, 1.0);",
+          "  vSeaWorld = world.xyz;",
+          "  vSeaNormal = normalize(mat3(modelMatrix) * vec3(-dx * 15.0, 1.0, -dz * 15.0));",
+          "  vSeaColor = color * (1.0 + max(wy, 0.0) * 0.52);",
+          "  vSeaHeight = wy;",
+          "  vec4 mvPosition = viewMatrix * world;",
+          "  gl_Position = projectionMatrix * mvPosition;",
+          "  #include <fog_vertex>",
+          // Ocean atmosphere accumulates more slowly than city-block fog.
+          // Without this, near water stayed richly shaded while the same mesh
+          // became a flat baby-blue sheet only a kilometre away.
+          "  #ifdef USE_FOG",
+          "    fogDepth *= 0.66;",
+          "  #endif",
+          "}",
+        ].join("\n"),
+        fragmentShader: [
+          "uniform float uSeaTime;",
+          "uniform vec3 uSeaColor;",
+          "uniform sampler2D uSeaNormal;",
+          "uniform sampler2D uSeaLandMask;",
+          "uniform vec4 uSeaLandBounds;",
+          "uniform float uSeaHasLandMask;",
+          "varying vec3 vSeaWorld;",
+          "varying vec3 vSeaNormal;",
+          "varying vec3 vSeaColor;",
+          "varying float vSeaHeight;",
+          "#include <fog_pars_fragment>",
+          "void main() {",
+          "  vec2 fieldUV = (vSeaWorld.xz - uSeaLandBounds.xy) / max(vec2(1.0), uSeaLandBounds.zw - uSeaLandBounds.xy);",
+          "  vec4 field = vec4(0.0, 0.0, 1.0, 1.0);",
+          "  if (uSeaHasLandMask > 0.5 && all(greaterThanEqual(fieldUV, vec2(0.0))) && all(lessThanEqual(fieldUV, vec2(1.0)))) {",
+          "    field = texture2D(uSeaLandMask, fieldUV);",
+          "    if (field.r > 0.5) discard;",
+          "  }",
+          "  vec2 flow0 = vSeaWorld.xz * 0.036 + vec2(uSeaTime * 0.027, -uSeaTime * 0.018);",
+          "  vec2 flow1 = vec2(vSeaWorld.z, -vSeaWorld.x) * 0.061 + vec2(-uSeaTime * 0.019, uSeaTime * 0.023);",
+          "  vec3 n0s = texture2D(uSeaNormal, flow0).rgb * 2.0 - 1.0;",
+          "  vec3 n1s = texture2D(uSeaNormal, flow1).rgb * 2.0 - 1.0;",
+          "  vec3 fineN = normalize(vec3((n0s.r + n1s.r) * 0.34, 1.0, (n0s.g + n1s.g) * 0.34));",
+          "  vec3 N = normalize(vSeaNormal + fineN * 0.46 - vec3(0.0, 0.46, 0.0));",
+          "  vec3 V = normalize(cameraPosition - vSeaWorld);",
+          "  vec3 L = normalize(vec3(-0.34, 0.84, 0.42));",
+          "  float ndl = max(dot(N, L), 0.0);",
+          "  float fresnel = 0.035 + 0.965 * pow(1.0 - max(dot(N, V), 0.0), 4.2);",
+          "  float spec = pow(max(dot(reflect(-L, N), V), 0.0), 92.0);",
+          "  vec3 base = uSeaColor * vec3(0.96, 1.04, 1.09) + vec3(0.003, 0.012, 0.020);",
+          "  base *= clamp(vSeaColor, vec3(0.24), vec3(1.22));",
+          "  base *= 0.67 + ndl * 0.33;",
+          "  vec3 skyReflection = uSeaColor * 1.28 + vec3(0.055, 0.115, 0.175);",
+          "  vec3 outColor = mix(base, skyReflection, fresnel * 0.62);",
+          "  outColor += vec3(1.0, 0.88, 0.66) * spec * (0.42 + fresnel * 0.75);",
+          "  float rip = sin(vSeaWorld.x * 0.19 + vSeaWorld.z * 0.083 + uSeaTime * 1.05) * 0.52",
+          "            + sin(vSeaWorld.x * -0.071 + vSeaWorld.z * 0.23 + uSeaTime * 0.73) * 0.31",
+          "            + sin(vSeaWorld.x * 0.37 - vSeaWorld.z * 0.29 + uSeaTime * 1.48) * 0.17;",
+          "  outColor *= 0.94 + rip * 0.035;",
+          "  float surfBand = 0.5 + 0.5 * sin(vSeaWorld.x * 0.29 + vSeaWorld.z * 0.17 + uSeaTime * 1.62 + rip * 0.7);",
+          "  float shoreFoam = pow(field.g, 7.5) * smoothstep(0.72, 0.94, surfBand);",
+          "  float whitecap = smoothstep(0.305, 0.352, vSeaHeight + rip * 0.018) * smoothstep(0.62, 0.94, surfBand) * (0.20 + fresnel * 0.80);",
+          "  outColor = mix(outColor, vec3(0.70, 0.86, 0.89), clamp(shoreFoam * 0.38 + whitecap * 0.10, 0.0, 0.42));",
+          "  gl_FragColor = vec4(outColor, 1.0);",
+          "  #include <tonemapping_fragment>",
+          "  #include <encodings_fragment>",
+          "  #include <fog_fragment>",
+          "}",
+        ].join("\n"),
       });
-      seaMat2.onBeforeCompile = function (shader) {
-        shader.uniforms.uSeaTime = seaTimeU;
-        shader.uniforms.uSeaLandMask = { value: seaLandMaskTex };
-        shader.uniforms.uSeaLandBounds = { value: seaLandBounds };
-        shader.uniforms.uSeaHasLandMask = { value: seaLandMaskTex ? 1 : 0 };
-        shader.vertexShader = "uniform float uSeaTime;\nvarying vec3 vSeaWorld;\n" + shader.vertexShader
-          .replace("#include <color_vertex>",
-            "float _p1 = position.x * 0.052 + position.z * 0.030 + uSeaTime * 1.1;\n" +
-            "float _p2 = position.x * -0.020 + position.z * 0.041 + uSeaTime * 0.7;\n" +
-            "float _p3 = (position.x + position.z) * 0.011 - uSeaTime * 0.4;\n" +
-            "float _wY = sin(_p1) * 0.045 + sin(_p2) * 0.055 + sin(_p3) * 0.035;\n" +
-            "#include <color_vertex>\n" +
-            "#ifdef USE_COLOR\n vColor.xyz *= (1.0 + max(_wY, 0.0) * 1.8);\n#endif")
-          .replace("#include <beginnormal_vertex>",
-            "#include <beginnormal_vertex>\n" +
-            "float _dx = 0.045*cos(_p1)*0.052 - 0.055*cos(_p2)*0.020 + 0.035*cos(_p3)*0.011;\n" +
-            "float _dz = 0.045*cos(_p1)*0.030 + 0.055*cos(_p2)*0.041 + 0.035*cos(_p3)*0.011;\n" +
-            "objectNormal = normalize(vec3(-_dx * 48.0, 1.0, -_dz * 48.0));")
-          .replace("#include <begin_vertex>",
-            "#include <begin_vertex>\ntransformed.y += _wY;\nvSeaWorld = vec3(position.x, position.y + _wY, position.z);");
-        // Fine moving luminance and crest tint remain visible even under flat
-        // ambient light (where a normal map alone can read as one cyan slab).
-        // World-space periods never swim with the camera and add zero geometry.
-        shader.fragmentShader = "uniform float uSeaTime;\nuniform sampler2D uSeaLandMask;\nuniform vec4 uSeaLandBounds;\nuniform float uSeaHasLandMask;\nvarying vec3 vSeaWorld;\n" + shader.fragmentShader
-          .replace("#include <color_fragment>",
-            "vec2 _landUV = (vSeaWorld.xz - uSeaLandBounds.xy) / (uSeaLandBounds.zw - uSeaLandBounds.xy);\n" +
-            "if (uSeaHasLandMask > 0.5 && all(greaterThanEqual(_landUV, vec2(0.0))) && all(lessThanEqual(_landUV, vec2(1.0))) && texture2D(uSeaLandMask, _landUV).r > 0.5) discard;\n" +
-            "#include <color_fragment>\n" +
-            "float _r1 = sin(vSeaWorld.x * 0.19 + vSeaWorld.z * 0.083 + uSeaTime * 1.05);\n" +
-            "float _r2 = sin(vSeaWorld.x * -0.071 + vSeaWorld.z * 0.23 + uSeaTime * 0.73);\n" +
-            "float _r3 = sin(vSeaWorld.x * 0.37 - vSeaWorld.z * 0.29 + uSeaTime * 1.48);\n" +
-            "float _rip = _r1 * 0.52 + _r2 * 0.31 + _r3 * 0.17;\n" +
-            "float _band = abs(sin(vSeaWorld.x * 0.071 + vSeaWorld.z * 0.044 + uSeaTime * 0.55));\n" +
-            "float _break = 0.5 + 0.5 * sin(vSeaWorld.x * 0.013 - vSeaWorld.z * 0.017 + uSeaTime * 0.16);\n" +
-            "float _break2 = 0.5 + 0.5 * sin(vSeaWorld.x * -0.021 - vSeaWorld.z * 0.009 + uSeaTime * 0.11);\n" +
-            "float _crest = smoothstep(0.996, 0.9995, _band) * smoothstep(0.80, 0.95, _break) * smoothstep(0.76, 0.93, _break2);\n" +
-            "diffuseColor.rgb *= 0.97 + _rip * 0.018;\n" +
-            "diffuseColor.rgb += vec3(0.010, 0.018, 0.022) * _crest;");
-      };
+      // Preserve the old material.color update contract used by the day/night
+      // loop above; it aliases the actual shader uniform.
+      seaMat2.color = seaUniforms.uSeaColor.value;
+      seaMat2.userData.waterMode = "fresnel-flow-shore";
       const sea = new THREE.Mesh(geo, seaMat2);
       sea.name = "world-sea";
       sea.receiveShadow = false; sea.castShadow = false;
       sea.frustumCulled = false;                   // the horizon is everywhere
       sea.matrixAutoUpdate = false;                // identity — verts are world-space
       sea.userData.terrain = true;                 // batch + farcull exempt
+      sea.userData.waterSurface = true;
+      sea.userData.surfaceOwner = "world-water";
+      sea.userData.unifiedSurface = true;
       root.add(sea);
       CBZ.citySea = sea;
       // the island annex's own flat ocean plane (expansion.js, y=-0.44) sat

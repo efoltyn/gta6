@@ -211,23 +211,19 @@
     const railY = barrelY + (pistol ? 0.055 : 0.085);
     const railZ = mz.z * (pistol ? 0.5 : 0.26);
 
-    // ---- OPTIC on the top rail ----
+    // ---- OPTIC on the top rail — shared with the sniper's factory glass ----
     if (r.scope && MODS[r.scope]) {
       const sp = MODS[r.scope].scope || {};
       const high = !!sp.highMag;
       const rTube = (high ? 0.05 : 0.036) * sK;
       const len = (high ? 0.34 : 0.15) * sK;
-      // small mount base bridging rail → scope
-      const base = box(0.05 * sK, (railY - barrelY) + 0.02, 0.06 * sK, M.dark);
-      base.position.set(0, (barrelY + railY) / 2, railZ);
-      grp.add(base);
-      const tube = cyl(rTube, len, M.dark);
-      tube.position.set(0, railY, railZ);
-      grp.add(tube);
-      // objective (front) + ocular lens (rear, glowing the reticle tint)
-      const front = cyl(rTube * 1.28, 0.03 * sK, M.steel); front.position.set(0, railY, railZ - len / 2); grp.add(front);
-      const lens = cyl(rTube * 1.05, 0.02 * sK, lensMat(sp.tint)); lens.position.set(0, railY, railZ + len / 2); grp.add(lens);
-      if (high) { const turret = cyl(0.018 * sK, 0.05 * sK, M.steel); turret.rotation.x = 0; turret.position.set(0, railY + rTube + 0.02, railZ); grp.add(turret); }
+      if (CBZ.createWeaponOptic) {
+        grp.add(CBZ.createWeaponOptic({
+          name: "fitted-" + r.scope, x: 0, y: railY, z: railZ,
+          length: len, radius: rTube, highMag: high, tint: sp.tint,
+          materials: { dark: M.dark, steel: M.steel },
+        }));
+      }
     }
 
     // ---- MUZZLE device (suppressor OR brake) ----
@@ -269,6 +265,11 @@
     if (!model) return;
     const old = model.getObjectByName && model.getObjectByName("_gmods");
     if (old) model.remove(old);
+    // A fitted optic replaces the sniper's factory scope instead of clipping
+    // through it. Removing the mod restores the complete factory optic.
+    const baseOptic = model.getObjectByName && model.getObjectByName("_baseOptic");
+    const rec = store()[id];
+    if (baseOptic) baseOptic.visible = !(rec && rec.scope);
     const grp = buildAttachGroup(id, model);
     if (grp) model.add(grp);
   }

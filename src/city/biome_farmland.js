@@ -178,23 +178,22 @@
     }
 
     // =====================================================================
-    // 1) GROUND — earthy soil/grass valley floor under everything.
+    // 1) GROUND OWNERSHIP — the actual skin is built after parcel selection
+    //    below, so soil, grass, crop rows, lanes and irrigation can all live in
+    //    ONE texture on ONE mesh. No hidden full-size substrate remains.
     // =====================================================================
-    const farmSoilSurface = plane(CX, CZ, (MAXX - MINX) + 16, (MAXZ - MINZ) + 16, M.soil, 0.01);
-    farmSoilSurface.userData.terrain = true; farmSoilSurface.userData.worldSurface = true;
-    farmSoilSurface.name = "farmland-soil-surface";
-    // a few grass tinted overlays so the bare lanes read as soil, the rest green
-    const farmGrassSurface = plane(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, M.grass, 0.012);
-    farmGrassSurface.userData.terrain = true; farmGrassSurface.userData.worldSurface = true;
-    farmGrassSurface.name = "farmland-grass-surface";
 
     // A true exterior feather replaces the old larger full rectangle, so the
     // valley no longer reads as an overlapping square layer from the air.
     if (CBZ.makeBiomeEdgeRing) {
       CBZ.makeBiomeEdgeRing(root, {
         cx: CX, cz: CZ, hx: (MAXX - MINX) / 2 + 8, hz: (MAXZ - MINZ) / 2 + 8,
-        feather: 104, segments: 20, inner: 0x6b4f33, outer: 0x6e7a48,
+        feather: 104, segments: 20,
         feathers: (CBZ.CONFIG && CBZ.CONFIG.MAP_RESERVE_V1) ? { west: 0, north: 0 } : { west: 0 },
+        // The working parcels remain deliberately rectilinear, but the farm
+        // COUNTY around them now extends for kilometres as rolling pasture.
+        spread: { west: 70, east: 560, north: 440, south: 150 },
+        inner: 0x647847, outer: 0x567048, featherNorm: 0.22,
         owner: "farmland",
         y: 0.006, seed: 0xfa411,
       });
@@ -244,15 +243,10 @@
         if (c === homesteadCol && r === homesteadRow) { parcels.push({ px, pz, crop: null, homestead: true }); continue; }
         if (parcelTouchesTown(px, pz, cellW, cellD)) continue; // town gets a clean block, never crop fragments under it
         const crop = pick(CROPS);
-        // striped bulk quad — the field "body" in one draw call
-        const tex = stripeTex(crop.base, crop.row, crop.gap, crop.period);
-        const tm = new THREE.MeshLambertMaterial({ map: tex.clone() });
-        tm.map.repeat.set(Math.max(1, cellW / 6), Math.max(1, cellD / 6));
-        tm.map.needsUpdate = true;
-        // alternate stripe direction per parcel so the patchwork reads
+        // Alternate row direction per parcel. The rows are baked into the
+        // unified ground after this deterministic selection pass.
         const rotY = (rng() < 0.5) ? Math.PI / 2 : 0;
-        plane(px, pz, cellW, cellD, tm, 0.03, rotY);
-        parcels.push({ px, pz, crop, w: cellW, d: cellD });
+        parcels.push({ px, pz, crop, w: cellW, d: cellD, rotY });
 
         // close-up density: scatter a few hundred plant instances inside it.
         if (crop.plant) {
@@ -267,6 +261,63 @@
         }
       }
     }
+
+    // One physical/rendered farm surface. Parcel colours and row direction are
+    // still deterministic, but they are texels rather than coplanar quads.
+    (function buildUnifiedFarmSurface() {
+      const x0 = MINX - 8, z0 = MINZ - 8;
+      const W = (MAXX - MINX) + 16, D = (MAXZ - MINZ) + 16;
+      const canvas = document.createElement("canvas"); canvas.width = canvas.height = 2048;
+      const ctx = canvas.getContext("2d");
+      function css(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); }
+      function rx(x) { return (x - x0) / W * canvas.width; }
+      function rz(z) { return (z - z0) / D * canvas.height; }
+      function rect(x, z, w, d, color) {
+        ctx.fillStyle = css(color);
+        ctx.fillRect(rx(x - w / 2), rz(z - d / 2), w / W * canvas.width, d / D * canvas.height);
+      }
+      // Pastoral verge matches the continent's organic farm influence. Fields
+      // remain intentionally rectangular inside it (real agriculture is), but
+      // the COUNTY no longer ends at one giant square soil border.
+      ctx.fillStyle = css(0x647847); ctx.fillRect(0, 0, canvas.width, canvas.height);
+      rect(CX, CZ, (MAXX - MINX) - 14, (MAXZ - MINZ) - 14, 0x6b4f33);
+      rect(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, 0x5f8248);
+      // real dirt access lanes
+      for (let c = 1; c < COLS; c++) {
+        const x = fieldArea.minX + c * cellW + (c - 0.5) * LANE;
+        rect(x, CZ, LANE, fieldArea.maxZ - fieldArea.minZ, 0x6b4f33);
+      }
+      for (let r = 1; r < ROWS; r++) {
+        const z = fieldArea.minZ + r * cellD + (r - 0.5) * LANE;
+        rect(CX, z, fieldArea.maxX - fieldArea.minX, LANE, 0x6b4f33);
+      }
+      // crop bodies + rows
+      for (const p of parcels) {
+        if (!p.crop) continue;
+        rect(p.px, p.pz, p.w, p.d, p.crop.base);
+        const spacing = 6, band = Math.max(1.2, spacing * p.crop.gap);
+        if (p.rotY) {
+          for (let z = p.pz - p.d / 2 + spacing / 2; z < p.pz + p.d / 2; z += spacing) rect(p.px, z, p.w, band, p.crop.row);
+        } else {
+          for (let x = p.px - p.w / 2 + spacing / 2; x < p.px + p.w / 2; x += spacing) rect(x, p.pz, band, p.d, p.crop.row);
+        }
+      }
+      // irrigation is part of the same farm skin, not a second blue plane
+      rect(CX, fieldArea.minZ + cellD + LANE / 2, MAXX - MINX - 80, 1.4, 0x3f8196);
+      rect(fieldArea.minX + cellW + LANE / 2, CZ, 1.4, MAXZ - MINZ - 80, 0x3f8196);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.generateMipmaps = true;
+      tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
+      mesh.rotation.x = -Math.PI / 2; mesh.position.set(CX, 0, CZ);
+      mesh.receiveShadow = true;
+      mesh.userData.terrain = true; mesh.userData.worldSurface = true;
+      mesh.userData.surfaceOwner = "farmland"; mesh.userData.unifiedSurface = true;
+      mesh.name = "farmland-unified-surface";
+      root.add(mesh);
+      CBZ.farmlandSurface = mesh;
+    })();
 
     // ---- instanced plant prototypes -------------------------------------
     function buildInstanced(geo, material, mats, castShadow) {
@@ -320,12 +371,7 @@
     buildInstanced(new THREE.BoxGeometry(0.12, 1.1, 0.12), M.wood, postMats, false);
     buildInstanced(new THREE.BoxGeometry(0.06, 0.08, 1), M.woodLt, railMats, false);
 
-    // =====================================================================
-    // 4) IRRIGATION — thin water channels along two dirt lanes (low alpha-free
-    //    flat quads, a couple of draw calls).
-    // =====================================================================
-    plane(CX, fieldArea.minZ + cellD + LANE / 2, MAXX - MINX - 80, 1.4, M.water, 0.05);
-    plane(fieldArea.minX + cellW + LANE / 2, CZ, 1.4, MAXZ - MINZ - 80, M.water, 0.05);
+    // Irrigation channels are painted into the unified surface above.
 
     // =====================================================================
     // 5) THE FARMSTEAD — enterable barn + farmhouse, silos, windmill/water
@@ -339,7 +385,10 @@
     // -- BIG RED BARN (enterable: registered as a building lot) --
     let barnLot = null;
     if (build) {
-      const bx = HX - 28, bz = HZ - 18, bw = 22, bd = 16;
+      // A working county barn, not a house-sized prop. The reserved parcel is
+      // nearly 190m across, so this remains comfortably separated from the
+      // silo line while reading correctly from the road and from aircraft.
+      const bx = HX - 31, bz = HZ - 16, bw = 38, bd = 24;
       const b = build(root, bx, bz, bw, bd, 1, 0xa33327, 0);
       // gable roof on top of the barn shell
       const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, bw * 0.62, 6, 4, 1), M.barnRoof);
@@ -364,11 +413,11 @@
     // z-axis-interpolated rig the fire lookout tower / building stairs use)
     // up to a small standable cap platform, plus a work-anchor so a farmhand
     // is actually seen tending the silo line, not just walking past it.
-    const siloTop = 14 + 0.2;                 // just above the cone cap's base
-    for (let i = 0; i < 3; i++) {
-      const sx = HX - 6 + i * 7, sz = HZ - 30, sr = 2.6;
-      cyl(sx, 7, sz, sr, sr, 14, M.silo, true);
-      cyl(sx, 14 + 1.2, sz, 0.2, 2.7, 2.6, M.siloCap, false);
+    const siloH = 21, siloR = 3.7, siloTop = siloH + 0.2;
+    for (let i = 0; i < 4; i++) {
+      const sx = HX - 4 + i * 9.5, sz = HZ - 34, sr = siloR;
+      cyl(sx, siloH / 2, sz, sr, sr, siloH, M.silo, true);
+      cyl(sx, siloH + 1.7, sz, 0.2, sr + 0.1, 3.4, M.siloCap, false);
       // exterior rung ladder up the +z face (clear of the silo's own AABB, a
       // thin z-aligned ramp so groundAt sees a real climbable surface)
       const lz0 = sz + sr + 0.02, lz1 = sz + sr + 0.9;
@@ -379,26 +428,29 @@
       // small round cap platform (stand on the roof hatch)
       CBZ.platforms.push({ minX: sx - 1.6, maxX: sx + 1.6, minZ: sz - 1.6, maxZ: sz + 1.6, top: siloTop });
       // rung visuals (instanced-free — only 3 silos, cheap as plain meshes)
-      for (let r = 0; r < 10; r++) {
-        const ry = 0.8 + r * 1.3;
+      for (let r = 0; r < 15; r++) {
+        const ry = 0.8 + r * 1.32;
         const rung = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.06), M.metal);
         rung.position.set(sx, ry, sz + sr + 0.35); root.add(rung);
       }
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 14, 0.06), M.metal);
-      rail.position.set(sx - 0.32, 7, sz + sr + 0.35); root.add(rail);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, siloH, 0.06), M.metal);
+      rail.position.set(sx - 0.32, siloH / 2, sz + sr + 0.35); root.add(rail);
       const rail2 = rail.clone(); rail2.position.x = sx + 0.32; root.add(rail2);
     }
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "farmland", kind: "silo", role: "farmhand",
-        x: HX, z: HZ - 30, cap: 1, home: { x: HX + 22, z: HZ + 6 },
-        spots: [{ x: HX - 6, z: HZ - 30 }, { x: HX + 1, z: HZ - 30 }, { x: HX + 8, z: HZ - 30 }],
+        x: HX + 10, z: HZ - 34, cap: 2, home: { x: HX + 27, z: HZ + 8 },
+        spots: [
+          { x: HX - 4, z: HZ - 34 }, { x: HX + 5.5, z: HZ - 34 },
+          { x: HX + 15, z: HZ - 34 }, { x: HX + 24.5, z: HZ - 34 },
+        ],
       });
     }
 
     // -- FARMHOUSE (enterable, where the farm family lives) --
     if (build) {
-      const fx = HX + 22, fz = HZ + 6, fw = 14, fd = 12;
+      const fx = HX + 29, fz = HZ + 11, fw = 22, fd = 17;
       const fb = build(root, fx, fz, fw, fd, 2, 0xe7ddc9, 0);
       const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, fw * 0.62, 4.5, 4, 1), M.houseRoof);
       roof.rotation.y = Math.PI / 4;
@@ -419,7 +471,7 @@
     // one leg to a small catwalk ring platform under the tank, registered as
     // a real climbable/standable surface (CBZ.platforms), not just a solid
     // collider you bump into.
-    const wtx = HX + 4, wtz = HZ + 34;
+    const wtx = HX + 5, wtz = HZ + 38;
     for (const lx of [-3, 3]) for (const lz of [-3, 3]) {
       // VEH_COLLIDE_FIX: legs are solid steel — the tank above was already a
       // collider but a car could drive clean through its supports.
@@ -479,7 +531,7 @@
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "farmland", kind: "coop", role: "farmhand",
-        x: coopX, z: coopZ, cap: 1, home: { x: HX + 22, z: HZ + 6 },
+        x: coopX, z: coopZ, cap: 1, home: { x: HX + 29, z: HZ + 11 },
         spots: [{ x: coopX - 2, z: coopZ + 3 }, { x: coopX + 2, z: coopZ + 3 }],
       });
     }
@@ -661,6 +713,11 @@
     const header = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.7, 1.4), M.metal);
     header.position.set(0, 0.75, 2.6); comb.add(header);   // inner edge overlaps the 4.0-long body
     if (equipReal) header.userData.vehiclePart = true;
+    // Exact official Three.js 3MF sample truck: its loader/model/materials are
+    // preserved and the shared vehicle registrar makes it stealable/drivable.
+    // The procedural tractor/combine remain because they are different farm
+    // machines, not placeholders for this road truck.
+    if (CBZ.spawnOfficialFarmTruck) CBZ.spawnOfficialFarmTruck(root, HX + 11, HZ - 8, Math.PI * 0.08);
 
     // =====================================================================
     // 8b) HARVEST MARKET — the farm county's market town, grown from the
@@ -674,7 +731,7 @@
       if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
       const town = CBZ.buildTown(root, Object.assign({}, CBZ.CITY_TEMPLATES.harvestmarket, {
         cx: TOWN_CX, cz: TOWN_CZ, region: TOWN, rng: rng,
-        name: "Harvest Market", district: "farmland",
+        name: "Harvest Market", district: "farmland", integratedSkyline: true,
       }));
       // WORK-ANCHORS at the grocer + co-op bank so county NPCs commute to the
       // market (the same schedule/goal brain the mainland uses). Feature-detected.
@@ -711,7 +768,7 @@
       CBZ.buildHighway(root, {
         path: [{ x: ROAD_X, z: ROAD_MINZ }, { x: ROAD_X, z: ROAD_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
-        guardrail: true, elevated: false, rng: rng,
+        guardrail: false, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
       });
       // soft soil shoulder so the deck reads as raised land over the sea
@@ -724,17 +781,8 @@
       // soft soil shoulders so the deck reads as raised land over the sea
       plane(ROAD_X, (ROAD_MINZ + ROAD_MAXZ) / 2, ROAD_HW * 2 + 8, ROAD_MAXZ - ROAD_MINZ, M.soil, 0.025);
     }
-    // guard posts along the causeway (instanced) — only for the bespoke
-    // fallback deck; the real highway supplies its own guardrails.
-    if (!CBZ.buildHighway) {
-      const guardMats = [];
-      for (let z = ROAD_MINZ; z <= ROAD_MAXZ; z += 10) for (const side of [-1, 1]) {
-        _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0);
-        _p.set(ROAD_X + side * (ROAD_HW + 0.6), 0.5, z); _scl.set(1, 1, 1);
-        _m.compose(_p, _q, _scl); guardMats.push(_m.clone());
-      }
-      buildInstanced(new THREE.BoxGeometry(0.16, 1, 0.16), M.wood, guardMats, false);
-    }
+    // Country roads are intentionally open: no guard posts or hidden edge
+    // blocks.  Drivers, horses and wildlife can leave the road anywhere.
 
     // =====================================================================
     // 10) LIVE PEDS — a small cast: farmer + farmhands + a farm dog. Kept
@@ -764,7 +812,7 @@
     //  them through the day. The farmhouse is everyone's home. (NO new geometry.)
     // =====================================================================
     if (CBZ.registerWorkAnchor) {
-      const farmHome = { x: HX + 22, z: HZ + 6 };          // the farmhouse door area
+      const farmHome = { x: HX + 29, z: HZ + 11 };          // the farmhouse door area
       // each cropped parcel is a FIELD a farmer tends (3 task points inside it)
       for (const p of parcels) {
         if (!p.crop) continue;

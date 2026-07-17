@@ -51,7 +51,10 @@
   // palette keyframes across the day (0..1): [fog, sunColor, sunInt, hemiInt].
   // dusk fog is a touch deeper than the old 0xff9e6b pastel — the haze near
   // the streets goes warm, while the actual horizon BURN lives in sky.js.
-  const day   = { fog: 0xbfe0ff, sun: 0xfff4e0, si: 1.05, hi: 0.85 };
+  // Neutral blue-grey aerial perspective. The former saturated baby-blue fog
+  // turned every fully fogged dry surface and distant mountain into what looked
+  // like a second flat water material from aircraft.
+  const day   = { fog: 0xb6c4c8, sun: 0xfff4e0, si: 1.05, hi: 0.85 };
   const dusk  = { fog: 0xf09a68, sun: 0xff8a3a, si: 0.7,  hi: 0.6 };
   const night = { fog: 0x16243f, sun: 0x6f86c0, si: 0.18, hi: 0.4 };
 

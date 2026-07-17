@@ -70,6 +70,11 @@
   const tmp2 = new THREE.Vector3();
   const tmpMuzzle = new THREE.Vector3();
   const hitPoint = new THREE.Vector3();
+  const preKickAim = new THREE.Vector3();
+  const sightPoint = new THREE.Vector3();
+  const reticleOrigin = new THREE.Vector3();
+  const reticleDir = new THREE.Vector3();
+  const reticlePoint = new THREE.Vector3();
   const UP = new THREE.Vector3(0, 1, 0);
   const ray = new THREE.Raycaster();
   const wallQ = new THREE.Quaternion();   // rocket impacts: raycast face normal → world
@@ -110,9 +115,10 @@
     }
   }
   function weapon() { normalizeWeapon(); return WEAPONS[fps.weapon] || WEAPONS[0]; }
+  const DEFAULT_ROCKET_SPEC = Object.freeze({ id: "guided", label: "GUIDED", homing: true, lockRange: 280, lockConeDeg: 22, turnRate: 2.8, speed: 92 });
   function rocketAmmoSpec(w, id) {
     const modes = w && w.ammoTypes;
-    if (!modes || !modes.length) return null;
+    if (!modes || !modes.length) return w && w.explosive ? DEFAULT_ROCKET_SPEC : null;
     id = id || fps.rocketAmmoType;
     for (let i = 0; i < modes.length; i++) if (modes[i].id === id) return modes[i];
     return modes[0];
@@ -451,15 +457,10 @@
   // and-gun and the cone opens up. recoilHold delays recoil recovery slightly
   // for a snappier kick-then-settle (instead of an instant rubber-band).
   let bloom = 0, recoilHold = 0;
-  // ---- RECOIL OFFSET CHANNELS (CoD/Apex model) ----------------------------
-  // The "missing high" ROOT FIX: the per-shot vertical/horizontal kick lives in
-  // its OWN transient offset channel (radians) that is ADDED to the shot
-  // direction only and is GUARANTEED to spring back to 0 every frame — it NEVER
-  // mutates the player's stored aim (fps.fp / CBZ.cam.pitch). So a mag-dump
-  // climbs along a learnable pattern then re-centres exactly on the crosshair;
-  // tapped/burst shots land where aimed instead of permanently drifting up.
-  // Identical in FPS and 3PS, and in jail/survival/city (strict improvement).
-  let recoilPitch = 0, recoilYaw = 0;     // transient aim offset (rad), trends to 0
+  // View-return debt. A shot kicks the actual first/third-person aim, then a
+  // damped spring returns most (not all) of that impulse. There is no hidden
+  // bullet-only recoil channel: what moves on screen is what moves the shot.
+  let recoilPitch = 0, recoilYaw = 0;
   let shotsInBurst = 0;                    // pattern position; reset by a fire gap
   let sinceShot = 99;                      // s since last shot — drives the burst reset
   // deterministic L/R yaw weave (signed fractions of basePitch): straight up for
@@ -476,6 +477,25 @@
   // ADS multiplier: holding RMB (CBZ.isADS) softens recoil ~0.55x. Applies in
   // ALL modes (strict feel improvement); RMB is already wired (aimHeld).
   function adsRecoilMul() { return aimHeld ? 0.55 : 1; }
+  // The M249's authored legs are a real support, not decoration.  Crouch,
+  // shoulder the gun, and stop on a solid surface to load the receiver into the
+  // bipod: recoil, yaw and cone tighten hard.  Moving/airborne/swimming breaks
+  // the support immediately; no hidden toggle or fourth-wall prompt.
+  function bipodActive(w) {
+    const p = CBZ.player;
+    return !!(w && w.key === "lmg" && aimHeld && p && p.crouch && p.grounded !== false &&
+      !p._swim && Math.abs(p.speed || 0) < 0.8);
+  }
+  CBZ.fpsBipodActive = function () { return bipodActive(weapon()); };
+  function kickView(pitchKick, yawKick) {
+    if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp + pitchKick));
+    else if (CBZ.cam) CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch - pitchKick));
+    if (CBZ.cam) CBZ.cam.yaw += yawKick;
+    // Return about 72%; the remaining displacement is player-controllable
+    // muzzle climb instead of a rubber-band that erases every burst.
+    recoilPitch = Math.min(0.10, recoilPitch + pitchKick * 0.72);
+    recoilYaw = Math.max(-0.065, Math.min(0.065, recoilYaw + yawKick * 0.72));
+  }
   // FPS ADS zoom: fpsmode owns the FPS camera (runs after systems/camera.js), so
   // the slight zoom-on-RMB lives here. We track the HIP fov (whatever camera.js
   // set this frame, captured only while NOT aiming so it never ratchets) and ease
@@ -561,17 +581,29 @@
   // shoot()'s explosive branch builds a `detonate` closure that runs the
   // EXACT same FX call sequence the old instant branch ran and passes it in
   // as onArrive — see (b) there for the full original-vs-new diff explanation.
-  const rocketGeo = new THREE.CylinderGeometry(0.06, 0.07, 0.42, 8);
+  const rocketGeo = new THREE.CylinderGeometry(0.065, 0.075, 0.46, 10);
   const rocketMat = new THREE.MeshLambertMaterial({ color: 0x2a2e22 });
   const rockets = [];
   for (let i = 0; i < 3; i++) {
     const body = new THREE.Mesh(rocketGeo, rocketMat);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.16, 10), new THREE.MeshLambertMaterial({ color: 0x485042 }));
+    nose.position.y = 0.31; body.add(nose);
+    const finMat = new THREE.MeshLambertMaterial({ color: 0x20251f });
+    for (let f = 0; f < 4; f++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.15, 0.14), finMat);
+      fin.position.y = -0.16; fin.rotation.y = f * Math.PI * 0.5; body.add(fin);
+    }
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending, opacity: 0.85,
     }));
-    glow.scale.setScalar(0.5);
-    glow.position.z = 0.24;   // exhaust glow trails the tail
+    glow.scale.set(0.34, 0.72, 1);
+    glow.position.y = -0.46;  // body points +Y; fire leaves the actual tail
     body.add(glow);
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flashTex, color: 0xff9b35, transparent: true, depthTest: false,
+      blending: THREE.AdditiveBlending, opacity: 1,
+    }));
+    core.scale.set(0.18, 0.42, 1); core.position.y = -0.34; body.add(core);
     body.visible = false;
     CBZ.scene.add(body);
     rockets.push({
@@ -581,7 +613,34 @@
       detonate: null,                               // bound closure: () => runs the exact old detonation block
       homing: false, seek: null, speed: 0, turnRate: 0, life: 0, maxLife: 0, targetRadius: 2,
       velocity: new THREE.Vector3(), impactPoint: null, onImpact: null,
+      smokeT: 0,
     });
+  }
+  const rocketSmokeTex = (function () {
+    const c = document.createElement("canvas"); c.width = c.height = 48;
+    const x = c.getContext("2d"), g = x.createRadialGradient(24, 24, 2, 24, 24, 23);
+    g.addColorStop(0, "rgba(195,195,185,.75)"); g.addColorStop(.42, "rgba(105,108,105,.48)"); g.addColorStop(1, "rgba(55,58,60,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 48, 48); return new THREE.CanvasTexture(c);
+  })();
+  const rocketSmoke = [];
+  let rocketSmokeIdx = 0;
+  for (let i = 0; i < 42; i++) {
+    const mesh = new THREE.Sprite(new THREE.SpriteMaterial({ map: rocketSmokeTex, transparent: true, depthWrite: false, opacity: 0 }));
+    mesh.visible = false; CBZ.scene.add(mesh); rocketSmoke.push({ mesh, life: 0, max: 0.72 });
+  }
+  function emitRocketSmoke(pos) {
+    const s = rocketSmoke[rocketSmokeIdx]; rocketSmokeIdx = (rocketSmokeIdx + 1) % rocketSmoke.length;
+    s.mesh.position.copy(pos); s.mesh.position.y += (rng() - 0.5) * 0.04;
+    s.mesh.scale.setScalar(0.16 + rng() * 0.08); s.mesh.material.opacity = 0.62;
+    s.mesh.visible = true; s.life = s.max = 0.62 + rng() * 0.18;
+  }
+  function updateRocketSmoke(dt) {
+    for (let i = 0; i < rocketSmoke.length; i++) {
+      const s = rocketSmoke[i]; if (s.life <= 0) continue;
+      s.life -= dt; s.mesh.position.y += dt * 0.16; s.mesh.scale.multiplyScalar(1 + dt * 1.8);
+      s.mesh.material.opacity = Math.max(0, s.life / s.max) * 0.5;
+      if (s.life <= 0) s.mesh.visible = false;
+    }
   }
   let rocketIdx = 0;
   // launch a projectile from `from`→`to` over `dur` seconds, sagging under
@@ -661,6 +720,7 @@
     r.speed = opts.speed || 0;
     r.turnRate = opts.turnRate || 2.4;
     r.life = 0;
+    r.smokeT = 0;
     r.maxLife = opts.maxLife || Math.max(3.2, r.dur + 2.0);
     r.targetRadius = opts.targetRadius || 2;
     r.impactPoint = opts.impactPoint || null;
@@ -690,6 +750,8 @@
       const r = rockets[i];
       if (!r.active) continue;
       _rocketPrev.copy(r.mesh.position);
+      r.smokeT += dt;
+      if (r.smokeT >= 0.035) { r.smokeT = 0; emitRocketSmoke(_rocketPrev); }
       if (r.homing) {
         r.t += dt; r.life += dt;
         const target = r.seek ? r.seek() : null;
@@ -790,13 +852,14 @@
     impacts.push({ mesh, life: 0, max: 0.14 });
   }
 
-  function spawnImpact(pos, blood, big) {
+  function spawnImpact(pos, blood, big, power) {
     const p = impacts[impactIdx];
     impactIdx = (impactIdx + 1) % impacts.length;
     p.mesh.material.map = blood ? dustTex : sparkTex;
     p.mesh.material.blending = blood ? THREE.NormalBlending : THREE.AdditiveBlending;
     p.mesh.position.copy(pos);
-    p.mesh.scale.setScalar(big ? 1.1 : 0.62);
+    const k = Math.max(0.55, Math.min(1.7, power == null ? 1 : power));
+    p.mesh.scale.setScalar((big ? 0.92 : 0.5) * k);
     p.mesh.material.opacity = 1;
     p.mesh.visible = true;
     p.life = blood ? 0.18 : 0.12;
@@ -994,25 +1057,43 @@
     return forward(out);
   }
 
-  // The SHOT direction: the TRUE crosshair (aimForward) with the transient
-  // recoil offset added on top — pitched UP by recoilPitch and swayed sideways
-  // by recoilYaw. forward()/aimForward() stay PURE (casing eject, muzzle origin,
-  // reticle target, FPS camera all keep reading the clean aim); only bullets
-  // carry the climb. Small-angle add about the freshly-built basis; the caps
-  // keep the approximation sub-degree and it self-corrects as it recenters.
+  // Recoil now moves the visible view, so a bullet never receives an invisible
+  // second aim offset. The reticle, lens and round always agree.
   function aimWithRecoil(out) {
-    aimForward(out);
-    if (recoilPitch || recoilYaw) {
-      buildBasis(out);   // sets `right` (out×UP) and `aimUp` (right×out)
-      out.addScaledVector(aimUp, recoilPitch).addScaledVector(right, recoilYaw).normalize();
-    }
-    return out;
+    return aimForward(out);
   }
 
   // ---- HUD ----
   const cross = document.getElementById("crosshair");
   const ammoEl = document.getElementById("ammo");
   const stripEl = document.getElementById("weaponStrip");
+  // One reticle element serves both camera modes. Keep the cached visibility
+  // beside the element so setActive() can invalidate/update it when V toggles
+  // between first person and the third-person shoulder owner.
+  let _crossShown = null;
+  const reticleState = { blocked: false, target: "", x: 50, y: 50, conePx: 16 };
+  CBZ.fpsReticleState = function () {
+    return { blocked: reticleState.blocked, target: reticleState.target, x: reticleState.x, y: reticleState.y, conePx: reticleState.conePx };
+  };
+
+  function reticleHitIdentity(hit) {
+    if (!hit) return null;
+    return hit.actor || hit.corpse || hit.car || hit.civilAircraft || (hit.aircraft ? "response-aircraft" : null) ||
+      (hit.wallHit && hit.wallHit.object) || null;
+  }
+  function reticleHitKind(hit) {
+    if (!hit) return "";
+    if (hit.actor) return "person";
+    if (hit.corpse) return "body";
+    if (hit.car) return "vehicle";
+    if (hit.civilAircraft) return "aircraft";
+    if (hit.aircraft) return "aircraft";
+    if (hit.wall) return "surface";
+    return "";
+  }
+  function reticleDamageable(hit) {
+    return !!(hit && (hit.actor || hit.corpse || hit.car || hit.civilAircraft || hit.aircraft));
+  }
 
   // ---- HIT MARKER ----------------------------------------------------------
   // Built entirely in JS (no index.html/CSS edits): four angled ticks that
@@ -1061,6 +1142,10 @@
     hitMarkerKill = !!kill;
     hitMarkerDur = kill ? 0.42 : 0.18;
     hitMarkerT = hitMarkerDur;
+    if (cross) {
+      hitMarker.wrap.style.left = cross.style.left || "50%";
+      hitMarker.wrap.style.top = cross.style.top || "50%";
+    }
     hitMarker.wrap.style.display = "block";
     hitMarker.wrap.style.opacity = "1";
   }
@@ -1332,8 +1417,8 @@
     return { corpse: best, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
-  function resolveShot(w, dir) {
-    eye.copy(CBZ.camera.position);
+  function resolveShot(w, dir, rayOrigin) {
+    eye.copy(rayOrigin || CBZ.camera.position);
     const wall = wallDistance(eye, dir, w.range);
     let maxT = wall ? Math.max(0.1, wall.distance - 0.04) : w.range;
     // CARS are hard cover AND targets: the nearest car along the ray clamps the
@@ -1381,10 +1466,10 @@
   // so the bend amount always matches how far the round actually travels,
   // not a guess. Returns the hit (possibly the original, undropped one) plus
   // the flight delay (seconds, 0 for non-snipers / under `start`).
-  function resolveShotSniper(w, dir) {
+  function resolveShotSniper(w, dir, rayOrigin) {
     const drop = w.sniperDrop;
-    if (!drop) return { hit: resolveShot(w, dir), delay: 0 };
-    const probe = resolveShot(w, dir);
+    if (!drop) return { hit: resolveShot(w, dir, rayOrigin), delay: 0 };
+    const probe = resolveShot(w, dir, rayOrigin);
     const dist = probe.dist != null ? probe.dist : w.range;
     if (dist <= drop.start) return { hit: probe, delay: 0 };
     const over = Math.min(dist - drop.start, (w.range - drop.start) || dist);
@@ -1399,7 +1484,7 @@
     buildBasis(dir);
     const ang = Math.atan2(dropAmt, Math.max(1, dist));
     hitPoint.copy(dir).addScaledVector(aimUp, -ang).normalize();   // aimUp is "up" from buildBasis; bend DOWN
-    const dropped = resolveShot(w, hitPoint);
+    const dropped = resolveShot(w, hitPoint, rayOrigin);
     dir.copy(hitPoint);   // caller's shotDir must reflect the bent path (tracer, glass-shatter ray, etc. all read it after this call)
     const flight = Math.min(0.55, dist * (drop.flightPerM || 0));   // capped — a delay, not a simulated arc
     return { hit: dropped, delay: flight };
@@ -1480,9 +1565,9 @@
         // pre-multiplied down for the energy the wall already ate.
         const exitHit = { actor: beyondActor.actor, head: beyondActor.head, dist: hit.dist + thickness + beyondActor.dist, point: beyondActor.point };
         const penW = Object.create(w); penW.damage = w.damage * PEN_DMG_MUL;   // cheap prototype override — never mutates the shared weapon table
-        gunHit(exitHit, penW);
-        spawnImpact(beyondActor.point, true, false);
-        if (CBZ.gore) CBZ.gore(beyondActor.point.x, beyondActor.point.y, beyondActor.point.z, { dir: shotDir, amount: 0.45, player: true });
+        gunHit(exitHit, penW, shotDir);
+        spawnImpact(beyondActor.point, true, false, cal * 0.75);
+        if (CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(beyondActor.point, 0.4, shotDir);
         fireTracer(exitPt, beyondActor.point, w.tracer * 0.8, 0.05);
       } else {
         // nothing behind it: still show the round carrying through the cover —
@@ -1516,8 +1601,8 @@
         const strayHit = findActorHit(hit.point, deflectDir, 9, w);
         if (strayHit && strayHit.actor) {
           const strayW = Object.create(w); strayW.damage = RICOCHET_STRAY_DMG; strayW.headMult = 1;
-          gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW);
-          spawnImpact(strayHit.point, true, false);
+          gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW, deflectDir);
+          spawnImpact(strayHit.point, true, false, 0.65);
         }
       }
     }
@@ -1536,7 +1621,8 @@
   // ---- damage ----
   // CITY mode reuses this exact hitscan but routes the hit into the city's own
   // death/loot/crime systems (cops, gangs, wanted) instead of the prison AI.
-  function cityGunHit(a, hit, w) {
+  function cityGunHit(a, hit, w, shotDir) {
+    if (shotDir) hit.dir = shotDir; // wildlife + downstream death physics read the same resolved trajectory
     // WILDLIFE: an animal routes into the hunting system (its own damage/skin
     // path — never the human death/wanted/gore chain). See city/wildlife.js.
     if (a.animal && CBZ.cityWildlifeHit) return CBZ.cityWildlifeHit(a, hit, w);
@@ -1551,21 +1637,33 @@
     const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
     const lethalHead = hit.head && !w.nonlethal;
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
+    const cal = caliber(w);
+    const dir = shotDir ? { x: shotDir.x, y: shotDir.y, z: shotDir.z } : null;
+    // One coherent impulse record follows the round into survivors, deaths and
+    // cops. Weapon knock, caliber and remaining range energy now affect the
+    // reaction; the exact ray direction replaces generic "away from player".
+    const force = (3.0 + ((w.knock || 1) * 2.7)) * (0.72 + cal * 0.28) * Math.sqrt(Math.max(0.25, fall));
+    const fling = w.key === "shotgun" && hit.dist <= 7 ? 6.5 : Math.max(1.4, force * 0.38);
+    const imp = {
+      fromX: fx, fromZ: fz, dir: dir, force: force, fling: fling,
+      cal: cal, wkey: w.key, dist: hit.dist, point: hit.point,
+      headshot: !!hit.head, byPlayer: true,
+    };
     if (a.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(a.gang, 0.4);
     let down = false;
     if (a.kind === "cop") {
-      CBZ.cityHurtCop && CBZ.cityHurtCop(a, lethalHead ? 9999 : dmg, { fromX: fx, fromZ: fz });
+      CBZ.cityHurtCop && CBZ.cityHurtCop(a, lethalHead ? 9999 : dmg, imp);
       down = !!a.dead;
     } else if (w.nonlethal) {
       CBZ.cityKOPed && CBZ.cityKOPed(a, fx, fz); down = true;       // taser → KO
     } else {
       if (lethalHead) a.hp = 0; else a.hp -= dmg;
-      if (a.hp <= 0) { CBZ.cityKillPed && CBZ.cityKillPed(a, { fromX: fx, fromZ: fz, force: 6, fling: 3, cal: caliber(w), wkey: w.key, dist: hit.dist, point: hit.point }, hit.head ? "headshot" : "shot"); down = true; }
+      if (a.hp <= 0) { CBZ.cityKillPed && CBZ.cityKillPed(a, imp, hit.head ? "headshot" : "shot"); down = true; }
       else {
         // a suppressed round barely carries — far fewer bystanders snap to it
         const supp = !!(CBZ.gunModsSuppressed && CBZ.gunModsSuppressed(CBZ.currentWeaponId));
         CBZ.cityAlarm && CBZ.cityAlarm(a.pos.x, a.pos.z, supp ? 6 : 16, 1, CBZ.city.playerActor);
-        CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, force: (hit.head ? 6.5 : 4.5) * (0.6 + 0.45 * caliber(w)) });
+        CBZ.body && CBZ.body.hit(a, { fromX: fx, fromZ: fz, dir: dir, force: force * (hit.head ? 1.2 : 1) });
         // getting shot provokes fight-or-flight. ANYONE HOLDING A GUN shoots BACK —
         // a person who's strapped and gets hit draws and returns fire (self-defence),
         // even a normally-meek civilian. Only the UNARMED + non-bold flee.
@@ -1585,9 +1683,9 @@
     return { head: hit.head, down, dmg };
   }
 
-  function gunHit(hit, w) {
+  function gunHit(hit, w, shotDir) {
     const a = hit.actor;
-    if (CBZ.game.mode === "city") return cityGunHit(a, hit, w);
+    if (CBZ.game.mode === "city") return cityGunHit(a, hit, w, shotDir);
     const guardish = a.kind === "guard" || a.kind === "warden";
     if (a.hp == null) a.hp = maxHpOf(a);
     // (e) same shared per-class falloff evaluator as cityGunHit above.
@@ -1713,6 +1811,10 @@
     syncAmmo();
     setAmmoHud();
 
+    // Sample intent before the discharge kicks the view. The first round leaves
+    // on the aim the player saw; the next round naturally reads the kicked view.
+    aimForward(preKickAim);
+
     const RK = 0.32;  // controlled climb; view kick still sells weapon weight
     // BURST RESET: a fire gap > 0.25s wipes the ramp + pattern position, so the
     // next round is a fresh first-shot (soft, dead-centre). sinceShot was
@@ -1720,14 +1822,15 @@
     if (sinceShot > 0.25) shotsInBurst = 0;
     sinceShot = 0;
     const adsK = adsRecoilMul();
+    const supportK = bipodActive(w) ? 0.34 : 1;
     // cosmetic accumulators (viewmodel kick + reticle bloom) — unchanged feel,
     // just softened under ADS so holding RMB visibly settles the gun.
-    recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK * modRec);
-    recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK * modRec;
+    recoil = Math.min(w.maxRecoil, recoil + w.recoil * RK * adsK * supportK * modRec);
+    recoilSide += (rng() * 2 - 1) * w.sideKick * RK * adsK * supportK * modRec;
     recoilHold = 0.06;   // brief hold before recovery kicks in (snappy kick → settle)
     // each shot pumps bloom; auto fire stacks fast, single shots barely at all.
     // capped so even mag-dumps stay usable. moving adds extra below in the loop.
-    bloom = Math.min(w.spread * 2.6, bloom + w.spread * (w.auto ? 0.9 : 0.45) * adsK);
+    bloom = Math.min(w.spread * 2.6, bloom + w.spread * (w.auto ? 0.9 : 0.45) * adsK * supportK);
     if (!w.noRecoil) {
       // AIM-OFFSET kick (the part that decides where bullets go) — into the
       // dedicated recoilPitch/recoilYaw channels, NOT the player's stored aim.
@@ -1736,11 +1839,10 @@
       const firstShot = shotsInBurst === 0 ? 0.6 : 1;
       const basePitch = w.climb * RK;
       const jitter = 0.92 + rng() * 0.16;                       // <=8% noise
-      const pitchKick = basePitch * ramp * firstShot * jitter * adsK * modRec;
+      const pitchKick = basePitch * ramp * firstShot * jitter * adsK * supportK * modRec;
       const pat = YAW_PATTERN[shotsInBurst % YAW_PATTERN.length];
-      const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK * modRec;
-      recoilPitch = Math.min(0.12, recoilPitch + pitchKick);
-      recoilYaw = Math.max(-0.07, Math.min(0.07, recoilYaw + yawKick));
+      const yawKick = (pat * (w.yawWeave || 0.6) + (rng() * 2 - 1) * 0.15) * basePitch * ramp * adsK * supportK * modRec;
+      kickView(pitchKick, yawKick);
       shotsInBurst++;
     }
     pumpT = w.pump ? 1 : pumpT;
@@ -1778,11 +1880,15 @@
     ejectCasing(w);
 
     const origin = muzzleWorld(tmp2);
-    // GUNS fire along the recoil-carried direction (climbs the pattern). The
-    // ROCKET fires STRAIGHT down the TRUE crosshair — no recoil bias, ever — so
-    // it lands exactly under the reticle and the SAME straight fwd is what the
-    // net sends to remote clients (they must see the same straight rocket).
-    if (w.explosive) aimForward(fwd); else aimWithRecoil(fwd);
+    // Two-ray shoulder aim: camera ray establishes intent, then the actual ray
+    // starts at the rendered muzzle and converges on that point. Close cover can
+    // therefore catch the barrel-side shot (truthful parallax), while open-space
+    // rounds still land exactly under the reticle instead of leaving the chest.
+    fwd.copy(preKickAim);
+    const sight = resolveShot(w, fwd);
+    if (sight && sight.point) sightPoint.copy(sight.point);
+    else sightPoint.copy(CBZ.camera.position).addScaledVector(fwd, w.range);
+    fwd.copy(sightPoint).sub(origin).normalize();
     if (CBZ.net && CBZ.net.active && CBZ.net.onShot) CBZ.net.onShot(origin, fwd, w);
 
     // EXPLOSIVE (RPG/bazooka) — REAL PROJECTILE FLIGHT (b): the impact POINT is
@@ -1805,7 +1911,7 @@
       // diagonal: long enough to reach any facade, the trace is the same cheap
       // losBlockers raycast regardless of distance.
       const FAR = 450;
-      const hit = resolveShot(w, fwd);   // sets `eye` to the camera; resolves wall/actor along fwd (clamped to w.range)
+      const hit = resolveShot(w, fwd, origin);
       // A DEDICATED long-range wall trace so a distant facade beyond w.range is
       // actually struck — resolveShot only looks out to w.range, so a far tower
       // returns wall:false and the rocket used to die at 200u in open air.
@@ -1956,7 +2062,8 @@
     // effective cone = base spread, opened by recoil + accumulated bloom, with
     // a hipfire/movement penalty (moving fast while shooting throws shots wide).
     // Standing still + tapping ≈ the gun's tight base cone for precise shots.
-    const moving = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
+    const supported = bipodActive(w);
+    const moving = supported ? 0 : (CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6));
     // per-weapon movement penalty: heavy rifles (AK moveSpread 2.3) punish
     // run-and-gun harder than the 1.4 default — plant your feet for the payoff.
     const moveBloom = w.spread * moving * (w.moveSpread || 1.4);
@@ -1971,7 +2078,8 @@
     // detected so this file degrades gracefully if gunfx.js isn't loaded.
     // modSpr = the equipped scope/grip's spread multiplier (gun-mods branch).
     const suppressK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
-    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK * suppressK * modSpr;
+    const cone = (w.spread * (1 + recoil * 0.18) + bloom + moveBloom) * adsSpreadK *
+      (supported ? 0.32 : 1) * suppressK * modSpr;
     const cal = caliber(w);   // round weight, threaded into every surface impact below
     let head = false, down = false, hitSomething = false;
     let wallThudDist = -1, carThudDist = -1;   // one thud per trigger pull, not per pellet
@@ -1985,7 +2093,7 @@
       // BEFORE resolveShot runs, so every system below (glass shatter ray,
       // wall pock, gore, etc.) reads the SAME dropped trajectory — there's
       // only one resolved path per shot, not a cosmetic one and a real one.
-      const sniperShot = resolveShotSniper(w, shotDir);
+      const sniperShot = resolveShotSniper(w, shotDir, origin);
       const hit = sniperShot.hit;
       feedbackDelay = sniperShot.delay;
       const end = hit.point || eye.clone().addScaledVector(shotDir, w.range);
@@ -2029,19 +2137,21 @@
       }
       if (hit.actor) {
         hitSomething = true;
-        const r = gunHit(hit, w);
+        const r = gunHit(hit, w, shotDir);
         head = head || r.head;
         down = down || r.down;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun");
-        // a real wet blood puff on flesh (the survival gore kit) — directional,
-        // sprayed away from the shooter along the bullet path.
-        if (!w.nonlethal && CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
-          dir: shotDir, amount: (r.head ? 1.4 : 0.8) * (w.key === "shotgun" ? 1.5 : 1), player: true,
-        });
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        // One small flesh response per round/pellet. The death path already emits
+        // its single full gore event; calling that here as well used to create a
+        // pool-sized explosion for every pellet in a shotgun blast.
+        if (!w.nonlethal && !hit.actor.animal && CBZ.gore && CBZ.gore.spray) {
+          const wet = w.pellets ? 0.34 : (r.head ? 0.95 : 0.58) * Math.max(0.7, cal);
+          CBZ.gore.spray(hit.point, wet, shotDir);
+        }
         // the body CARRIES the hit: a dark entry wound stamped on the struck
         // part + blood soaking into the clothing (systems/wounds.js). Per
         // pellet — a shotgun blast scatters wounds (wounds.js caps the burst).
-        if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal });
+        if (CBZ.bodyWound && !w.nonlethal && !hit.actor.animal && (!r.down || hit.actor.kind === "cop")) CBZ.bodyWound(hit.actor, hit.point, { head: hit.head, cal });
       } else if (hit.corpse) {
         // DOWNED BODY (city-only): keep shooting it — it accumulates holes AND
         // jerks. cityCorpseHit (ragdoll.js) wakes the verlet slot on-hit only,
@@ -2049,21 +2159,17 @@
         // NOT call bodyWound here (that would double-stamp). Force scales with
         // caliber on the same scale cityRagdoll uses (~6 pistol .. ~14 shotgun).
         hitSomething = true;
-        const force = (w.pellets ? 11 : 5.5) * (0.6 + 0.5 * cal);
+        const force = (w.pellets ? 5.2 : 4.4) * (0.65 + 0.42 * cal) * (w.knock || 1);
         if (CBZ.cityCorpseHit) CBZ.cityCorpseHit(hit.corpse, hit.point, shotDir, force);
         else if (CBZ.bodyWound && !w.nonlethal) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal });
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun");
-        // wet blood off the corpse along the shot line (same gore kit, smaller —
-        // a body already bled out, so this is spatter, not a fresh kill burst).
-        if (!w.nonlethal && CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, {
-          dir: shotDir, amount: (hit.head ? 0.9 : 0.55) * (w.key === "shotgun" ? 1.5 : 1), player: true,
-        });
-        // a SHOTGUN/sniper HEADSHOT on the head end takes it OFF even post-mortem
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir);
+        // Only a muzzle-close shotgun headshot can sever even post-mortem
         // (gore.js's decap read), guarded so one head only severs once. Live kills
         // route this through cityKillPed's killCtx; a corpse has no kill ctx, so we
         // drive the public sever directly. Non-heavy guns never reach here.
         if (CBZ.game.mode === "city" && hit.head && !w.nonlethal && !hit.corpse._decapped
-            && CBZ.goreSever && (w.key === "shotgun" || w.key === "sniper")) {
+            && CBZ.goreSever && w.key === "shotgun" && hit.dist <= 5.5) {
           if (CBZ.goreSever(hit.corpse, "head", { dir: shotDir })) hit.corpse._decapped = true;
         }
       } else if (hit.crowd != null) {
@@ -2071,8 +2177,8 @@
         hitSomething = true;
         if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); down = true; }
         head = head || hit.head;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun");
-        if (!w.nonlethal && CBZ.gore) CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: shotDir, amount: hit.head ? 1.2 : 0.7, player: true });
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir);
       } else if (hit.aircraft) {
         // bullets chip the gunship — sparks off the hull, damage routed to the heli
         hitSomething = true;
@@ -2268,7 +2374,7 @@
     bar.push({ kind: "holster", label: "FISTS", short: "FIST", active: !!CBZ.game.cityHolstered || guns.length === 0 });
     for (let s = 0; s < guns.length; s++) {
       const w = WEAPONS[guns[s]];
-      bar.push({ kind: "gun", gunSlot: s, label: w.label, short: w.short, active: !CBZ.game.cityHolstered && guns[s] === fps.weapon });
+      bar.push({ kind: "gun", id: w.id || w.key, gunSlot: s, label: w.label, short: w.short, active: !CBZ.game.cityHolstered && guns[s] === fps.weapon });
     }
     const items = hotbarItemNames(), inv = CBZ.game.cityInv || {};
     for (let i = 0; i < items.length; i++) {
@@ -2322,7 +2428,15 @@
     fps.active = on;
     if (CBZ.playerChar) CBZ.playerChar.group.visible = !on;
     vm.visible = on;
-    if (cross) cross.style.display = on && CBZ.game.state === "playing" ? "block" : "none";
+    if (cross) {
+      // Leaving FP used to write display:none even though shoulderActive()
+      // became true in the same call. The per-frame change-only cache still
+      // remembered `true`, so it never restored the element in third person.
+      // Resolve the final shared owner now and keep the cache honest.
+      const show = (fps.active || shoulderActive()) && CBZ.game.state === "playing";
+      cross.style.display = show ? "block" : "none";
+      _crossShown = show;
+    }
     document.body.classList.toggle("fps", on);
     setAmmoHud();
     if (on && fps.fp === 0) fps.fp = 0.06;
@@ -2517,9 +2631,8 @@
   }
 
   // ---- camera override and effects update ----
-  let _crossShown = null;   // change-only style write: a per-frame style.display
-                            // set (even to the same value) invalidates style and
-                            // measured milliseconds across a session (perf pass)
+  // change-only style write: setting style.display every frame invalidates
+  // style and measured milliseconds across a session (perf pass)
   CBZ.onAlways(52, function (dt) {
     checkReset();
     const aiming = fps.active || shoulderActive();
@@ -2546,6 +2659,7 @@
       }
     }
     updateRockets(dt);   // (b) in-flight RPG projectiles: fly the arc, detonate on arrival
+    updateRocketSmoke(dt);
     updateDeferred(dt);  // (b) sniper travel-time feedback queue
     for (let i = 0; i < impacts.length; i++) {
       const p = impacts[i];
@@ -2729,14 +2843,8 @@
       const rk = 1 - Math.pow(0.0004, dt);          // ~smooth critically-damped feel (settles a touch faster — mag dumps recenter)
       recoil += (0 - recoil) * rk;
     }
-    // ---- AUTO-CENTERING (the "missing high" FIX) ----------------------------
-    // Spring the recoil OFFSET channels back to 0 every frame, UN-gated by the
-    // cosmetic `recoil` accumulator (the old gate was the bug — it collapsed to
-    // a trickle and the climb stalled, leaving permanent up-drift). Released
-    // trigger recenters ~4x faster than while firing, so a tap fully re-centres
-    // in ~RECENTER and the next shot is dead-accurate; a held burst climbs the
-    // pattern then settles the instant you let go. Works in FPS AND 3PS, jail/
-    // survival/city alike (strict improvement). Per-weapon RECENTER from w.recenter.
+    // Return the visible camera impulse. Recovery moves the same pitch/yaw the
+    // shot kicked; it cannot silently bend a bullet away from the reticle.
     {
       const wNow = armed() ? weapon() : null;
       const recenter = (wNow && wNow.recenter) || 0.18;     // seconds to settle
@@ -2745,8 +2853,13 @@
       const firing = recoilHold > 0 || (triggerHeld && wNow && wNow.auto && fps.rounds[fps.weapon] > 0);
       const recoverK = firing ? 0.25 : 1.0;
       const settle = recoverK * (1 - Math.exp(-dt / recenter));
-      recoilPitch -= recoilPitch * settle;
-      recoilYaw -= recoilYaw * settle;
+      const rp = recoilPitch * settle;
+      const ry = recoilYaw * settle;
+      if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - rp));
+      else if (CBZ.cam) CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch + rp));
+      if (CBZ.cam) CBZ.cam.yaw -= ry;
+      recoilPitch -= rp;
+      recoilYaw -= ry;
       if (Math.abs(recoilPitch) < 1e-5) recoilPitch = 0;
       if (Math.abs(recoilYaw) < 1e-5) recoilYaw = 0;
       // BURST RESET: a fire gap of >0.25s wipes the ramp + pattern position so
@@ -2901,12 +3014,54 @@
       // into the actual cone, so a rattled player SEES why they're missing).
       const mv = CBZ.player.grounded === false ? 0.6 : Math.min(1, (CBZ.player.speed || 0) / 6);
       const suppK = CBZ.suppressionAccuracyMul ? CBZ.suppressionAccuracyMul(CBZ.player) : 1;
+      const adsReticleK = aimHeld ? 0.58 : 1;
+      const bipodK = bipodActive(w) ? 0.48 : 1;
       const size = armed()
-        ? (18 + w.spread * 280 + bloom * 300 + recoil * 34 + mv * 10 + (fps.reloading > 0 ? 8 : 0)) * suppK
-        : 22;
+        ? Math.min(30, Math.max(16, (12 + w.spread * 180 + bloom * 240 + recoil * 16 + mv * 7 + (fps.reloading > 0 ? 6 : 0)) * suppK * adsReticleK * bipodK))
+        : 18;
       cross.style.width = size.toFixed(1) + "px";
       cross.style.height = size.toFixed(1) + "px";
-      cross.classList.toggle("hot", !!aim);
+      reticleState.conePx = size;
+
+      // Project the REAL muzzle ray's nearest impact. In open space this sits
+      // at screen centre; beside a wall it shifts to expose shoulder parallax
+      // instead of promising a shot the barrel cannot physically make.
+      let cameraHit = null, muzzleHit = null, muzzleBlocked = false;
+      if (armed() && CBZ.camera) {
+        aimForward(reticleDir);
+        cameraHit = resolveShot(w, reticleDir);
+        if (cameraHit && cameraHit.point) reticlePoint.copy(cameraHit.point);
+        else reticlePoint.copy(CBZ.camera.position).addScaledVector(reticleDir, w.range);
+        muzzleWorld(reticleOrigin);
+        const intendedDistance = reticleOrigin.distanceTo(reticlePoint);
+        reticleDir.copy(reticlePoint).sub(reticleOrigin).normalize();
+        muzzleHit = resolveShot(w, reticleDir, reticleOrigin);
+        const cameraIdentity = reticleHitIdentity(cameraHit);
+        const muzzleIdentity = reticleHitIdentity(muzzleHit);
+        // Camera intent and barrel truth are allowed to disagree beside cover,
+        // but the HUD must SAY so. Amber means the actual muzzle ray is caught
+        // by something nearer than the object under the centre sight.
+        muzzleBlocked = !!(cameraIdentity && muzzleIdentity !== cameraIdentity && muzzleHit &&
+          muzzleHit.dist + 0.22 < intendedDistance && (muzzleHit.wall || reticleDamageable(muzzleHit)));
+        if (muzzleHit && muzzleHit.point) reticlePoint.copy(muzzleHit.point);
+        reticlePoint.project(CBZ.camera);
+        if (Number.isFinite(reticlePoint.x) && Number.isFinite(reticlePoint.y) && reticlePoint.z > -1 && reticlePoint.z < 1) {
+          const sx = Math.max(4, Math.min(96, (reticlePoint.x * 0.5 + 0.5) * 100));
+          const sy = Math.max(4, Math.min(96, (-reticlePoint.y * 0.5 + 0.5) * 100));
+          cross.style.left = sx.toFixed(2) + "%";
+          cross.style.top = sy.toFixed(2) + "%";
+          reticleState.x = sx; reticleState.y = sy;
+        } else {
+          cross.style.left = cross.style.top = "50%";
+          reticleState.x = reticleState.y = 50;
+        }
+      } else {
+        reticleState.x = reticleState.y = 50;
+      }
+      reticleState.blocked = muzzleBlocked;
+      reticleState.target = reticleHitKind(muzzleHit || cameraHit);
+      cross.classList.toggle("hot", !muzzleBlocked && (!!aim || reticleDamageable(muzzleHit)));
+      cross.classList.toggle("blocked", muzzleBlocked);
       cross.classList.toggle("dry", armed() && fps.ammo <= 0);
     }
   });

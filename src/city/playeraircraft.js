@@ -498,17 +498,25 @@
     const burn = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), a.mWarn);
     burn.scale.set(0.7, 0.7, 1.6); burn.position.set(0, -0.05, -5.0); grp.add(burn);
     grp.userData.burn = burn;
-    // AFTERBURNER PLUMES — one additive cone per can, base anchored at the
-    // nozzle mouth so scaling only stretches AFT. Invisible cold; flyJet drives
-    // length/brightness from the throttle. Per-craft material (never _shared)
-    // so the disposer frees it and the opacity animation can't leak to a twin.
-    const plumeMat = new THREE.MeshBasicMaterial({ color: 0xff8c3a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    // AFTERBURNER PLUMES — the same reusable hot-core / shock-diamond exhaust
+    // used by the base fighters and chop-shop car boosters.  Keeping one power
+    // contract matters: a better rocket effect now upgrades every propelled
+    // machine instead of leaving three slightly different fake flame cones.
+    let plumeMat = null;
     const plume = [];
     [-0.5, 0.5].forEach((s) => {
-      const pg = new THREE.ConeGeometry(0.3, 1.5, 10);
-      pg.translate(0, 0.75, 0);                       // base at the mesh origin
-      const p = new THREE.Mesh(pg, plumeMat);
-      p.rotation.x = -Math.PI / 2;                    // apex points -Z (astern)
+      let p;
+      if (CBZ.createRocketPlume) {
+        p = CBZ.createRocketPlume({ name: "player-jet-afterburner", lightRange: 12 });
+        if (!plumeMat && p.userData) plumeMat = p.userData.outerMaterial;
+        if (CBZ.setRocketPlume) CBZ.setRocketPlume(p, 0, 0);
+      } else {
+        plumeMat = plumeMat || new THREE.MeshBasicMaterial({ color: 0xff8c3a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+        const pg = new THREE.ConeGeometry(0.3, 1.5, 10);
+        pg.translate(0, 0.75, 0);                     // base at the mesh origin
+        p = new THREE.Mesh(pg, plumeMat);
+        p.rotation.x = -Math.PI / 2;                  // apex points -Z (astern)
+      }
       p.position.set(s, -0.05, -4.9); grp.add(p); plume.push(p);
     });
     grp.userData.plume = plume; grp.userData.plumeMat = plumeMat;
@@ -535,6 +543,30 @@
     addMuzzle(grp, 0, 0, 5.6);
     grp.userData.belly = 0.6;
     return grp;
+  }
+
+  // Shared runtime adapter for owned jets and adopted airport/base aircraft.
+  // Modern exhausts use the reusable component; the tiny legacy branch keeps
+  // third-party/older groups flyable without silently losing their effect.
+  function powerJetPlumes(ud, power, time, lengthMul, radiusMul) {
+    if (!ud || !ud.plume) return false;
+    power = Math.max(0, Math.min(1, +power || 0));
+    let modern = false;
+    for (let i = 0; i < ud.plume.length; i++) {
+      const p = ud.plume[i];
+      if (CBZ.setRocketPlume && CBZ.setRocketPlume(p, power, time, lengthMul, radiusMul)) modern = true;
+    }
+    if (modern) return true;
+    if (!ud.plumeMat) return false;
+    const flick = 0.92 + Math.sin((+time || 0) * 1.7) * 0.08;
+    const len = (0.35 + 1.5 * power) * flick * (lengthMul || 1);
+    const rad = (0.55 + 0.45 * power) * (radiusMul || 1);
+    for (let i = 0; i < ud.plume.length; i++) {
+      ud.plume[i].visible = power > 0.01;
+      ud.plume[i].scale.set(rad, len, rad);
+    }
+    ud.plumeMat.opacity = power > 0.01 ? 0.10 + 0.75 * power * power : 0;
+    return true;
   }
 
   // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots
@@ -995,7 +1027,7 @@
       craft.airspeed = 0; craft.thr = null; craft.sag = 0; craft.onGround = true;
       const udX = craft.group && craft.group.userData;
       if (udX && udX.gear) udX.gear.visible = true;         // parked = gear down
-      if (udX && udX.plumeMat) udX.plumeMat.opacity = 0;    // engines back to cold
+      powerJetPlumes(udX, 0, 0);                            // engines back to cold
       const gy = floorY(craft.pos.x, craft.pos.z);
       const ox = Math.sin(craft.heading) * 2.2, oz = Math.cos(craft.heading) * 2.2;
       P.pos.set(craft.pos.x + ox, Math.max(gy, craft.pos.y - craft.belly), craft.pos.z + oz);
@@ -1419,16 +1451,10 @@
     // afterburner pulse
     const ud = craft.group.userData;
     if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (thr > 0 ? 0.6 : 0);
-    // throttle-driven plume cones: a faint shimmer at idle cruise, stretching
-    // and brightening toward full burner (opacity ramps quadratically so the
-    // glow only really blooms in the top half of the throttle range).
-    if (ud.plume && ud.plumeMat) {
-      const frac = Math.max(0, Math.min(1, (craft.throttle - JET_MIN) / (JET_MAX - JET_MIN)));
-      const flick = 0.92 + Math.sin(craft.rotorSpin * 1.7) * 0.08;
-      const len = (0.35 + 1.5 * frac) * flick, rad = 0.55 + 0.45 * frac;
-      for (let i = 0; i < ud.plume.length; i++) ud.plume[i].scale.set(rad, len, rad);
-      ud.plumeMat.opacity = 0.10 + 0.75 * frac * frac;
-    }
+    // Hot exhaust is faint at idle and becomes a long, shock-diamond burner at
+    // full throttle. Both cans stay nozzle-anchored while their fire extends aft.
+    const plumePower = Math.max(0, Math.min(1, (craft.throttle - JET_MIN) / (JET_MAX - JET_MIN)));
+    powerJetPlumes(ud, 0.08 + plumePower * 0.92, craft.rotorSpin, 1.55, 0.92);
   }
 
   function integrate(craft, dt) {
@@ -1530,6 +1556,221 @@
     return false;
   }
 
+  function airframeDims(craft) {
+    const rec = craft && craft.sourceRec;
+    const d = (rec && rec.aircraftDims) || (craft && craft.group && craft.group.userData && craft.group.userData.aircraftDims);
+    if (d) return {
+      length: Math.max(4, d.length || rec.footL || rec.footW || 8),
+      span: Math.max(3, d.span || rec.footW || rec.footL || 7),
+      height: Math.max(2, d.height || 3),
+      fuselage: Math.max(1.1, d.fuselage || Math.min(3.2, (d.span || 8) * 0.16)),
+    };
+    if (craft && craft.kind === "heli") return { length: 8.2, span: 8.4, height: 3.0, fuselage: 2.0 };
+    return { length: 10.2, span: 8.0, height: 2.5, fuselage: 1.6 };
+  }
+
+  function recordAirframeDims(rec) {
+    const d = rec && (rec.aircraftDims || (rec.group && rec.group.userData && rec.group.userData.aircraftDims));
+    if (d) return {
+      length: Math.max(4, d.length || rec.footL || rec.footW || 8),
+      span: Math.max(3, d.span || rec.footW || rec.footL || 7),
+      height: Math.max(2, d.height || 3),
+      fuselage: Math.max(1.1, d.fuselage || Math.min(3.2, (d.span || 8) * 0.16)),
+    };
+    const fw = Math.max(3, rec.footW || 5), fl = Math.max(4, rec.footL || 8);
+    return rec.kind === "heli"
+      ? { length: fl, span: Math.max(fw, fl), height: 3, fuselage: Math.min(2.4, fw * 0.55) }
+      : { length: fl, span: fw, height: 2.8, fuselage: Math.min(2.2, fw * 0.28) };
+  }
+
+  // Segment against an axis-aligned box. Bounds may already be expanded by a
+  // sample radius. Only allocate when a hit exists; the normal is the entry
+  // face and therefore the physically useful bounce/crash normal.
+  function segmentBox(x0, y0, z0, x1, y1, z1, minX, maxX, minY, maxY, minZ, maxZ) {
+    let enter = 0, exit = 1, nx = 0, ny = 0, nz = 0;
+    const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    let a, b, n;
+    if (Math.abs(dx) < 1e-8) { if (x0 < minX || x0 > maxX) return null; }
+    else {
+      a = (minX - x0) / dx; b = (maxX - x0) / dx; n = -1;
+      if (a > b) { const q = a; a = b; b = q; n = 1; }
+      if (a > enter) { enter = a; nx = n; ny = nz = 0; }
+      if (b < exit) exit = b; if (enter > exit) return null;
+    }
+    if (Math.abs(dy) < 1e-8) { if (y0 < minY || y0 > maxY) return null; }
+    else {
+      a = (minY - y0) / dy; b = (maxY - y0) / dy; n = -1;
+      if (a > b) { const q = a; a = b; b = q; n = 1; }
+      if (a > enter) { enter = a; ny = n; nx = nz = 0; }
+      if (b < exit) exit = b; if (enter > exit) return null;
+    }
+    if (Math.abs(dz) < 1e-8) { if (z0 < minZ || z0 > maxZ) return null; }
+    else {
+      a = (minZ - z0) / dz; b = (maxZ - z0) / dz; n = -1;
+      if (a > b) { const q = a; a = b; b = q; n = 1; }
+      if (a > enter) { enter = a; nz = n; nx = ny = 0; }
+      if (b < exit) exit = b; if (enter > exit) return null;
+    }
+    if (enter < 0 || enter > 1 || exit < 0) return null;
+    // A step that begins barely embedded still gets a usable outward normal.
+    if (!nx && !ny && !nz) {
+      if (Math.abs(dx) >= Math.abs(dy) && Math.abs(dx) >= Math.abs(dz)) nx = dx > 0 ? -1 : 1;
+      else if (Math.abs(dy) >= Math.abs(dz)) ny = dy > 0 ? -1 : 1;
+      else nz = dz > 0 ? -1 : 1;
+    }
+    return { t: Math.max(0, enter), nx: nx, ny: ny, nz: nz };
+  }
+
+  // Five real airframe seats: body mass, nose, tail and both wing tips. A
+  // single post-step nose point let fast jets tunnel and let wings ghost right
+  // through buildings; sweeping these seats turns the plane into an airframe.
+  const AIRFRAME_SAMPLES = [
+    { f: 0, r: 0, rad: 0.45, part: "fuselage" },
+    { f: 0.46, r: 0, rad: 0.32, part: "nose" },
+    { f: -0.42, r: 0, rad: 0.28, part: "tail" },
+    { f: -0.04, r: -0.46, rad: 0.20, part: "left-wing" },
+    { f: -0.04, r: 0.46, rad: 0.20, part: "right-wing" },
+  ];
+
+  function sampleSeat(pos, craft, dims, spec, out) {
+    const pitch = craft.pitch || 0, roll = craft.roll || 0, h = craft.heading || 0;
+    const f = spec.f * dims.length, r = spec.r * dims.span;
+    const cp = Math.cos(pitch), sh = Math.sin(h), ch = Math.cos(h);
+    out.x = pos.x + sh * cp * f + ch * r;
+    out.z = pos.z + ch * cp * f - sh * r;
+    out.y = pos.y + dims.height * 0.31 + Math.sin(pitch) * f + Math.sin(roll) * r;
+    return out;
+  }
+
+  const _seat0 = { x: 0, y: 0, z: 0 }, _seat1 = { x: 0, y: 0, z: 0 };
+
+  function sweepWorld(craft, from, to, dims, best) {
+    const cols = CBZ.colliders || [];
+    for (let s = 0; s < AIRFRAME_SAMPLES.length; s++) {
+      const spec = AIRFRAME_SAMPLES[s];
+      sampleSeat(from, craft, dims, spec, _seat0); sampleSeat(to, craft, dims, spec, _seat1);
+      const radius = Math.max(0.35, dims.fuselage * spec.rad);
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        if (!c || c.noAircraft || aircraftColliderRef(c) || c === (craft.sourceRec && craft.sourceRec.collider)) continue;
+        const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
+        // Tiny road/kerb slabs stay below an aircraft's body and are already
+        // owned by touchdown/terrain; never turn painted infrastructure into a
+        // mid-air crash wall.
+        if (y1 - y0 < 0.7 && y1 < Math.min(_seat0.y, _seat1.y) - radius) continue;
+        const q = segmentBox(_seat0.x, _seat0.y, _seat0.z, _seat1.x, _seat1.y, _seat1.z,
+          c.minX - radius, c.maxX + radius, y0 - radius, y1 + radius, c.minZ - radius, c.maxZ + radius);
+        if (!q || (best && q.t >= best.t)) continue;
+        const px = _seat0.x + (_seat1.x - _seat0.x) * q.t;
+        const py = _seat0.y + (_seat1.y - _seat0.y) * q.t;
+        const pz = _seat0.z + (_seat1.z - _seat0.z) * q.t;
+        best = { t: q.t, x: px, y: py, z: pz, nx: q.nx, ny: q.ny, nz: q.nz, collider: c, part: spec.part };
+      }
+    }
+    return best;
+  }
+
+  function sweepAircraft(craft, from, to, dims, best) {
+    const list = CBZ.cityMilitaryVehicles || [];
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
+      if (!rec || rec === craft.sourceRec || rec.destroyed || !rec.group || !rec.group.parent ||
+          (rec.kind !== "plane" && rec.kind !== "heli") || (rec.taken && !rec._aiActive)) continue;
+      const od = recordAirframeDims(rec), op = rec.pos || rec.group.position;
+      const opx = rec._airSweepX == null ? op.x : rec._airSweepX;
+      const opy = rec._airSweepY == null ? op.y : rec._airSweepY;
+      const opz = rec._airSweepZ == null ? op.z : rec._airSweepZ;
+      rec._airSweepX = op.x; rec._airSweepY = op.y; rec._airSweepZ = op.z;
+      const oh = (rec.group.rotation.y || 0) - (rec.modelYawOffset || 0);
+      const osh = Math.sin(oh), och = Math.cos(oh);
+      const ocy = od.height * 0.31;
+      for (let s = 0; s < AIRFRAME_SAMPLES.length; s++) {
+        const spec = AIRFRAME_SAMPLES[s];
+        sampleSeat(from, craft, dims, spec, _seat0); sampleSeat(to, craft, dims, spec, _seat1);
+        // Relative-motion sweep: subtract the other plane's previous/current
+        // roots before transforming into its OBB. Two fast planes crossing in
+        // one frame therefore cannot pass through each other.
+        let dx0 = _seat0.x - opx, dz0 = _seat0.z - opz;
+        let dx1 = _seat1.x - op.x, dz1 = _seat1.z - op.z;
+        const lx0 = dx0 * och - dz0 * osh, lz0 = dx0 * osh + dz0 * och;
+        const lx1 = dx1 * och - dz1 * osh, lz1 = dx1 * osh + dz1 * och;
+        const ly0 = _seat0.y - (opy + ocy), ly1 = _seat1.y - (op.y + ocy);
+        const radius = Math.max(0.3, dims.fuselage * spec.rad);
+        const body = segmentBox(lx0, ly0, lz0, lx1, ly1, lz1,
+          -od.fuselage * 0.5 - radius, od.fuselage * 0.5 + radius,
+          -ocy - radius, od.height - ocy + radius,
+          -od.length * 0.5 - radius, od.length * 0.5 + radius);
+        const wing = segmentBox(lx0, ly0, lz0, lx1, ly1, lz1,
+          -od.span * 0.5 - radius, od.span * 0.5 + radius,
+          -0.65 - radius, 0.65 + radius,
+          -od.length * 0.19 - radius, od.length * 0.19 + radius);
+        let q = body;
+        if (wing && (!q || wing.t < q.t)) q = wing;
+        if (!q || (best && q.t >= best.t)) continue;
+        const nx = q.nx * och + q.nz * osh;
+        const nz = -q.nx * osh + q.nz * och;
+        const px = _seat0.x + (_seat1.x - _seat0.x) * q.t;
+        const py = _seat0.y + (_seat1.y - _seat0.y) * q.t;
+        const pz = _seat0.z + (_seat1.z - _seat0.z) * q.t;
+        best = { t: q.t, x: px, y: py, z: pz, nx: nx, ny: q.ny, nz: nz,
+          otherRec: rec, part: spec.part, otherPart: q === wing ? "wing" : "fuselage" };
+      }
+    }
+    return best;
+  }
+
+  function sweptAirframeImpact(craft, from, to) {
+    if (!craft || !from || !to) return null;
+    const travel = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+    if (travel < 0.015) return null;
+    const dims = airframeDims(craft);
+    let best = sweepWorld(craft, from, to, dims, null);
+    best = sweepAircraft(craft, from, to, dims, best);
+    return best;
+  }
+  CBZ.cityAircraftSweepProbe = function (craft, from, to) {
+    const h = sweptAirframeImpact(craft, from, to);
+    return h ? { t: h.t, x: h.x, y: h.y, z: h.z, nx: h.nx, ny: h.ny, nz: h.nz,
+      part: h.part, building: !!h.collider, aircraft: !!h.otherRec, otherRec: h.otherRec || null, collider: h.collider || null } : null;
+  };
+
+  function resolveAirframeImpact(craft, from, attempted, impact) {
+    if (!impact) return false;
+    const speed = Math.max(craft.speed || 0, Math.hypot(craft.vx || 0, craft.vy || 0, craft.vz || 0));
+    const rootT = Math.max(0, impact.t - 0.008);
+    craft.pos.set(from.x + (attempted.x - from.x) * rootT,
+      from.y + (attempted.y - from.y) * rootT,
+      from.z + (attempted.z - from.z) * rootT);
+
+    const catastrophic = speed >= (craft.kind === "heli" ? 15 : (craft.airClass === "airliner" ? 17 : 20));
+    if (impact.otherRec) {
+      const damage = catastrophic ? 9999 : Math.max(18, speed * 3.2);
+      if (impact.otherRec.civilian && CBZ.cityDamageCivilAircraft) {
+        try { CBZ.cityDamageCivilAircraft(impact.otherRec, damage, impact, { byPlayer: true, collision: true }); } catch (e) {}
+      } else if (CBZ.cityAircraftCollisionImpact) {
+        try { CBZ.cityAircraftCollisionImpact(impact.otherRec, damage, impact); } catch (e) {}
+      }
+    }
+
+    if (catastrophic) { crashCraft(craft, impact); return true; }
+
+    // Taxi/slow contact: resolve to the time of impact, dent the airframe and
+    // reflect the normal component instead of exploding for a parking bump.
+    const vn = craft.vx * impact.nx + craft.vy * impact.ny + craft.vz * impact.nz;
+    if (vn < 0) {
+      craft.vx -= 1.35 * vn * impact.nx;
+      craft.vy -= 1.15 * vn * impact.ny;
+      craft.vz -= 1.35 * vn * impact.nz;
+    }
+    craft.vx *= 0.28; craft.vy *= 0.22; craft.vz *= 0.28;
+    craft.airspeed = Math.hypot(craft.vx, craft.vz);
+    craft.speed = craft.airspeed;
+    craft.roll += impact.part === "left-wing" ? 0.18 : impact.part === "right-wing" ? -0.18 : 0;
+    damageCraft(craft, Math.max(4, speed * 1.35));
+    if (craft.hp <= 0) { crashCraft(craft, impact); return true; }
+    return false;
+  }
+
   function charAircraftWreck(group) {
     if (!group || (group.userData && group.userData.charred)) return;
     group.userData.charred = true;
@@ -1551,20 +1792,51 @@
   // path deliberately restores a pristine parked aircraft and its collider.
   function crashCraft(craft, impact) {
     if (!craft || craft.destroyed) return;
+    const impactSpeed = Math.max(craft.speed || 0, Math.hypot(craft.vx || 0, craft.vy || 0, craft.vz || 0));
     craft.destroyed = true;
     const x = impact && impact.x != null ? impact.x : craft.pos.x;
     const y = impact && impact.y != null ? impact.y : craft.pos.y;
     const z = impact && impact.z != null ? impact.z : craft.pos.z;
     const heavy = craft.airClass === "airliner";
+    const buildingHit = !!(impact && impact.collider && !aircraftColliderRef(impact.collider) &&
+      ((impact.collider.y1 == null ? 18 : impact.collider.y1) - (impact.collider.y0 || 0)) > 2.5);
+    const major = buildingHit && impactSpeed >= (heavy ? 24 : 30);
     const power = heavy ? 3.2 : 2.4, radius = heavy ? 18 : 13;
     if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
     else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: heavy ? 2.7 : 2.0, radius: heavy ? 15 : 10, byPlayer: true, y }); } catch (e) {} }
     if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, radius + 5); } catch (e) {} }
-    if (impact && !aircraftColliderRef(impact.collider) && CBZ.cityDamageBuilding) {
-      try { CBZ.cityDamageBuilding(x, y, z, heavy ? 3.4 : 2.4); } catch (e) {}
+    if (buildingHit && CBZ.cityDamageBuilding) {
+      try {
+        // One deep primary wound plus neighboring facade seats. A heavy
+        // airliner does not leave a single bullet-sized scorch in a tower: its
+        // nose/body/wing mass tears a broad, persistent structural scar.
+        CBZ.cityDamageBuilding(x, y, z, heavy ? 4.4 : 3.0);
+        if (major) {
+          const rx = Math.cos(craft.heading || 0), rz = -Math.sin(craft.heading || 0);
+          CBZ.cityDamageBuilding(x + rx * 2.4, y + 2.0, z + rz * 2.4, heavy ? 3.1 : 2.1);
+          CBZ.cityDamageBuilding(x - rx * 2.4, Math.max(1, y - 1.8), z - rz * 2.4, heavy ? 2.8 : 1.9);
+        }
+      } catch (e) {}
+    }
+    if (CBZ.cityChunk) {
+      try {
+        const fx = Math.sin(craft.heading || 0), fz = Math.cos(craft.heading || 0);
+        CBZ.cityChunk(x, y, z, { count: heavy ? 16 : 10, force: Math.min(16, 7 + impactSpeed * 0.08),
+          dirx: fx, dirz: fz, color: 0x747b82 });
+      } catch (e) {}
+    }
+    if (buildingHit && impactSpeed > 16 && CBZ.cityReportMajorIncident) {
+      try { CBZ.cityReportMajorIncident(x, y, z, { kind: "aircraft-building-impact", severity: Math.min(2.5, (heavy ? 1.15 : 0.8) + impactSpeed / 70) }); } catch (e) {}
+    }
+    if (major && CBZ.cityCrime) {
+      try { CBZ.cityCrime(260, { type: "catastrophic-aircraft-impact", x: x, z: z, instant: true }); } catch (e) {}
+      if (CBZ.cityForceStars) { try { CBZ.cityForceStars(5); } catch (e) {} }
     }
     if (CBZ.cityCrashSmoke) {
-      try { CBZ.cityCrashSmoke(x, y, z); CBZ.cityCrashSmoke(x - 1.2, y + 0.5, z + 0.8); } catch (e) {}
+      try {
+        CBZ.cityCrashSmoke(x, y, z); CBZ.cityCrashSmoke(x - 1.2, y + 0.5, z + 0.8);
+        if (heavy) CBZ.cityCrashSmoke(x + 2.4, y + 1.1, z - 1.6);
+      } catch (e) {}
     }
     if (CBZ.shake) { try { CBZ.shake(heavy ? 1.8 : 1.2); } catch (e) {} }
     craft.hp = 0;
@@ -1602,8 +1874,9 @@
       charAircraftWreck(rec.group || craft.group);
       // A little final list/roll keeps a dead hull from reading as a pristine
       // airliner paused in mid-flight while the impact fire burns.
-      craft.roll += heavy ? 0.28 : 0.42;
-      craft.pitch -= heavy ? 0.10 : 0.18;
+      const wingTorque = impact && impact.part === "left-wing" ? 0.34 : impact && impact.part === "right-wing" ? -0.34 : 0;
+      craft.roll += (heavy ? 0.28 : 0.42) + wingTorque;
+      craft.pitch -= (heavy ? 0.10 : 0.18) + Math.min(0.18, impactSpeed * 0.002);
       setCraftRotation(craft, craft.pitch, craft.heading, craft.roll);
       if (stolenAir === craft) stolenAir = null;
     } else if (heli === craft) { disposeGroup(heli.group); heli = null; placeHeli(); }
@@ -1727,13 +2000,7 @@
     // engine visuals: burner glow + throttle-driven plume off the V2 throttle
     const ud = craft.group.userData;
     if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (thr > 0 ? 0.6 : 0);
-    if (ud.plume && ud.plumeMat) {
-      const frac = craft.thr;
-      const flick = 0.92 + Math.sin(craft.rotorSpin * 1.7) * 0.08;
-      const len = (0.35 + 1.5 * frac) * flick, rad = 0.55 + 0.45 * frac;
-      for (let i = 0; i < ud.plume.length; i++) ud.plume[i].scale.set(rad, len, rad);
-      ud.plumeMat.opacity = 0.10 + 0.75 * frac * frac;
-    }
+    powerJetPlumes(ud, 0.08 + craft.thr * 0.92, craft.rotorSpin, 1.55, 0.92);
     // legacy throttle field kept in the old m/s scale for HUD/exit paths
     craft.throttle = JET_MIN + craft.thr * (JET_MAX - JET_MIN);
   }
@@ -1853,21 +2120,21 @@
   // judgement (slam/nose-first = crash), gear + prop-spin animation hooks ----
   function integrateV2(craft, dt) {
     const wasAir = !craft.onGround;
+    const sweepFrom = craft._sweepFrom || (craft._sweepFrom = new THREE.Vector3());
+    const attempted = craft._sweepAttempt || (craft._sweepAttempt = new THREE.Vector3());
+    sweepFrom.copy(craft.pos);
     craft.pos.x += craft.vx * dt;
     craft.pos.y += craft.vy * dt;
     craft.pos.z += craft.vz * dt;
+    attempted.copy(craft.pos);
+    const airframeHit = sweptAirframeImpact(craft, sweepFrom, attempted);
+    if (airframeHit && resolveAirframeImpact(craft, sweepFrom, attempted, airframeHit)) return;
     // landing surface: terrain OR the tallest rooftop under us (throttled scan)
     craft._surfT = (craft._surfT || 0) - dt;
     if (craft._surfT <= 0) { craft._surfT = 0.12; craft._roof = roofUnder(craft); }
     const gy = floorY(craft.pos.x, craft.pos.z);
     const surfY = craft._roof == null ? gy : Math.max(gy, craft._roof);
     const minY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
-    // WALL STRIKE: burying the nose in a building face at speed is a crash
-    const wall = craft.speed > 14 && craft.pos.y - craft.belly > surfY + 1.5 ? wallAhead(craft) : null;
-    if (wall) {
-      crashCraft(craft, wall);
-      return;
-    }
     if (craft.pos.y < minY) {
       const sink = -(craft.vy || 0);
       if (craft.kind === "heli") {

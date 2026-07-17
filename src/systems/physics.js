@@ -403,6 +403,10 @@
     //      the (hidden) character rig, so we bail out of on-foot physics. ----
     if (player.driving) return;
 
+    // A strapped-in snowboard owns the player transform just like a vehicle.
+    // The controller is installed by city/snowboard.js after this module.
+    if (CBZ.citySnowboardStep && CBZ.citySnowboardStep(dt)) return;
+
     // ---- physical reactions: thrown / knocked down by a disaster, throw,
     //      push or blast. Reads the shared body state (grapple.js / body). ----
     const ph = player._phys;
@@ -492,7 +496,8 @@
 
     // stunned (baton / taser): no input this frame, gravity still applies
     if (player.stun > 0) { player.stun -= dt; mx = mz = 0; }
-    const stunned = player.stun > 0;
+    if (player._cityArrested) mx = mz = 0;
+    const stunned = player.stun > 0 || !!player._cityArrested;
 
     const len = Math.hypot(mx, mz);
     // One movement language in every mode: Shift runs. Jail used to steal

@@ -825,6 +825,57 @@
 
   function countKind(kind) { let n = 0; for (const e of emg) if (e.kind === kind) n++; return n; }
 
+  function incidentTarget(kind, x, z, opts) {
+    opts = opts || {};
+    return {
+      pos: { x: x, y: opts.y || 0, z: z },
+      dead: kind === "ambulance",
+      collected: false, culled: false,
+      _onFire: kind === "firetruck", _smoking: kind === "firetruck",
+      _exploded: false, _majorIncident: true, _emgClaimed: true,
+    };
+  }
+
+  // Public 911-style dispatch for systems whose incident is not represented by
+  // an ordinary burning-car/dead-ped record (notably an aircraft into a tower).
+  // Re-task the existing unit when the hard cap is occupied; a major impact
+  // must not be ignored because one engine was finishing a minor car fire.
+  CBZ.cityDispatchEmergencyAt = function (kind, x, z, opts) {
+    if (kind !== "firetruck" && kind !== "ambulance") return null;
+    if (g.mode !== "city" || !CBZ.city || !CBZ.city.arena) return null;
+    let e = null;
+    for (let i = 0; i < emg.length; i++) {
+      if (emg[i] && emg[i].kind === kind && !emg[i].player && !emg[i].dead) { e = emg[i]; break; }
+    }
+    const target = incidentTarget(kind, x, z, opts);
+    if (!e) e = spawnEmergency(kind, x, z);
+    if (!e) return null;
+    if (e.target) e.target._emgClaimed = false;
+    e.target = target; e.tx = x; e.tz = z; e.state = "drive"; e.t = 0; e.stuckT = 0;
+    return e;
+  };
+
+  CBZ.cityReportMajorIncident = function (x, y, z, opts) {
+    opts = opts || {};
+    const fire = CBZ.cityDispatchEmergencyAt("firetruck", x, z, { y: y });
+    const ambulance = CBZ.cityDispatchEmergencyAt("ambulance", x, z, { y: y });
+    CBZ.cityLastMajorIncident = {
+      kind: opts.kind || "aircraft-impact", x: x, y: y, z: z,
+      severity: opts.severity || 1, fireDispatched: !!fire, ambulanceDispatched: !!ambulance,
+      at: g.elapsed || 0,
+    };
+    if (CBZ.cityEvent) {
+      try {
+        CBZ.cityEvent("disaster", {
+          label: "Major aircraft impact", panic: 12 + 8 * (opts.severity || 1),
+          damage: 8 + 8 * (opts.severity || 1), fire: 1, emergency: 18,
+          confidence: -4,
+        }, { throttle: 4 });
+      } catch (e) {}
+    }
+    return CBZ.cityLastMajorIncident;
+  };
+
   // find a fresh body that has nobody responding yet
   function findBodyIncident() {
     const peds = CBZ.cityPeds; if (!peds) return null;

@@ -22,9 +22,10 @@
    to grow the central towers. Every prefab field maps 1:1 to the towngen
    prefab shape: { name, storeys, color, shopKind, lotKind, opts }.
 
-   HEIGHT HIERARCHY (CH3/CH6): each recipe's skyline.maxStoreys stays WELL
-   under the mainland core (Midtown towers 20+); a mini-city's tallest lot
-   tops out mid-rise so the main downtown always reads as THE downtown.
+   HEIGHT HIERARCHY: each place keeps its low/mid-rise fabric, but every city has
+   a coherent cluster of related towers. The varied landmarkStoreys values keep
+   the main 52-storey downtown crown dominant without dropping lone needles into
+   otherwise tiny settlements.
 ============================================================ */
 (function () {
   "use strict";
@@ -38,7 +39,7 @@
   //   id, name, biome, pattern, density, cols, rows, blockW, blockD, roadW,
   //   palette{ ground, sidewalk, road, line, wood, accent, stone, sign,
   //            signBoard, plaza, lamp },
-  //   skyline{ minStoreys, maxStoreys, towerFrac, megaChance, townMax },
+  //   skyline{ minStoreys, maxStoreys, landmarkStoreys, towerFrac, megaChance, townMax },
   //   squarePrefab, prefabs{ civic, commercial, residential, default }.
   //
   // skyline.townMax is forwarded to towngen's TOWN_MAX_STOREYS (CH6 cap), so
@@ -57,7 +58,7 @@
       palette: { ground: 0x7d8794, sidewalk: 0x9aa3ad, road: 0x42474d, line: 0xc9bf8e,
         wood: 0x5a6b78, accent: 0x37607a, stone: 0x8a929b, sign: "#dfeaff",
         signBoard: 0x1f2730, plaza: 0x8f99a3, lamp: 0xbfe0ff },
-      skyline: { minStoreys: 3, maxStoreys: 8, towerFrac: 0.18, megaChance: false, townMax: 4 },
+      skyline: { minStoreys: 3, maxStoreys: 8, landmarkStoreys: 30, towerFrac: 0.18, megaChance: false, townMax: 4 },
       prefabs: {
         civic: [
           { name: "HARBOR CUSTOMS", storeys: 3, color: 0x46586a, shopKind: "bank", opts: { retail: true, facade: "office" }, lotKind: "shop" },
@@ -91,8 +92,7 @@
       palette: { ground: 0x6f7480, sidewalk: 0x9498a2, road: 0x3c3f46, line: 0xd8c98a,
         wood: 0x556070, accent: 0xc9a44a, stone: 0xb8bcc6, sign: "#ffe9a8",
         signBoard: 0x232838, plaza: 0xa6aab4, lamp: 0xffe9a8 },
-      // tallest mini-city, but maxStoreys 16 < Midtown's 20+ so downtown wins
-      skyline: { minStoreys: 8, maxStoreys: 16, towerFrac: 0.6, megaChance: true, townMax: 4 },
+      skyline: { minStoreys: 8, maxStoreys: 16, landmarkStoreys: 44, towerFrac: 0.6, megaChance: true, townMax: 4 },
       prefabs: {
         civic: [
           { name: "FIRST CAPITAL BANK", storeys: 4, color: 0x3c4658, shopKind: "bank", opts: { retail: true, facade: "office", glassKind: "reflective" }, lotKind: "shop" },
@@ -126,7 +126,7 @@
       palette: { ground: 0x2a2440, sidewalk: 0x3a3358, road: 0x201a30, line: 0xff5ab0,
         wood: 0x6a3a78, accent: 0xff36c0, stone: 0x4a4068, sign: "#ff8ae0",
         signBoard: 0x140f22, plaza: 0x3a3358, lamp: 0xff66cc },
-      skyline: { minStoreys: 5, maxStoreys: 12, towerFrac: 0.5, megaChance: true, townMax: 4 },
+      skyline: { minStoreys: 5, maxStoreys: 12, landmarkStoreys: 38, towerFrac: 0.5, megaChance: true, townMax: 4 },
       prefabs: {
         civic: [
           { name: "ROYAL FLUSH CASINO", storeys: 5, color: 0x7a2a6a, shopKind: "casino", opts: { retail: true, facade: "office" }, lotKind: "shop" },
@@ -158,7 +158,7 @@
       palette: { ground: 0x55514a, sidewalk: 0x6a655c, road: 0x3a3833, line: 0xd0a850,
         wood: 0x6a5a44, accent: 0xb5662a, stone: 0x736d63, sign: "#f0c060",
         signBoard: 0x201d18, plaza: 0x6a655c, lamp: 0xffb060 },
-      skyline: { minStoreys: 2, maxStoreys: 5, towerFrac: 0.12, megaChance: false, townMax: 4 },
+      skyline: { minStoreys: 2, maxStoreys: 5, landmarkStoreys: 0, towerFrac: 0, megaChance: false, townMax: 4 },
       prefabs: {
         civic: [
           { name: "FOUNDRY HARDWARE", storeys: 1, color: 0x6b5a44, shopKind: "hardware", opts: RET, lotKind: "shop", w: 3 },
@@ -190,7 +190,7 @@
       palette: { ground: 0xb59a66, sidewalk: 0xc2ad7e, road: 0x6a5a40, line: 0xcdb98a,
         wood: 0x8a6b3a, accent: 0x7a5a30, stone: 0x9a8d72, sign: "#f4e7c2",
         signBoard: 0x2a2418, plaza: 0xc6b079, lamp: 0xf3d68a },
-      skyline: { minStoreys: 1, maxStoreys: 3, towerFrac: 0.08, megaChance: false, townMax: 3 },
+      skyline: { minStoreys: 1, maxStoreys: 3, landmarkStoreys: 0, towerFrac: 0, megaChance: false, townMax: 3 },
       prefabs: {
         civic: [
           { name: "FARMERS CO-OP BANK", storeys: 2, color: 0xb7a279, shopKind: "bank", opts: { retail: true, facade: "office" }, lotKind: "shop" },
@@ -222,7 +222,7 @@
       palette: { ground: 0xdde6ef, sidewalk: 0xc7d2dc, road: 0x3b3f45, line: 0xeaf2ff,
         wood: 0x7a5638, accent: 0x5e4129, stone: 0x9aa6b2, sign: "#eaf2ff",
         signBoard: 0x2a2018, plaza: 0xcdd8e2, lamp: 0xfff0d0 },
-      skyline: { minStoreys: 2, maxStoreys: 5, towerFrac: 0.1, megaChance: false, townMax: 4 },
+      skyline: { minStoreys: 2, maxStoreys: 5, landmarkStoreys: 0, towerFrac: 0, megaChance: false, townMax: 4 },
       prefabs: {
         civic: [
           { name: "GRAND LODGE", storeys: 3, color: 0x7a5638, shopKind: "bar", opts: RET, lotKind: "shop" },

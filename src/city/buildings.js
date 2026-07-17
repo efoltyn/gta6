@@ -2022,25 +2022,25 @@
   // Wall palette + glass-tint bias + split-grammar terminal weights, keyed by
   // district kind (city/config.js CITY.districts[].kind, read via the city's
   // districtKind(lot) and threaded into makeBuilding as opts.district). Same
-  // shell code, different NEIGHBOURHOOD READ per district: core glassy/clean,
-  // commercial a notch busier, residential balconied, projects/industrial
-  // boarded + AC-heavy. `terminals` weights are read in a fixed accumulation
-  // order (blankPanel → balconyWindow → acUnit); whatever probability mass is
-  // left over falls through to "window" — the required default terminal.
+  // shell code, different NEIGHBOURHOOD READ per district. Window cells are
+  // always intentional glazing: no random grey blank panels and no facade AC
+  // boxes. Residential balconies remain possible because their opening is
+  // still a real glass window. Whole windowless service floors are authored at
+  // the building level rather than sprinkled randomly across a facade.
   const DISTRICT_KITS = {
     core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0,
-                   terminals: { blankPanel: 0.03, balconyWindow: 0.02, acUnit: 0.04 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.02, acUnit: 0 } },
     commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1,
-                   terminals: { blankPanel: 0.06, balconyWindow: 0.05, acUnit: 0.08 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.05, acUnit: 0 } },
     residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0,
-                   terminals: { blankPanel: 0.08, balconyWindow: 0.24, acUnit: 0.08 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.24, acUnit: 0 } },
     projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2,
-                   terminals: { blankPanel: 0.22, balconyWindow: 0.04, acUnit: 0.24 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.04, acUnit: 0 } },
     industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2,
-                   terminals: { blankPanel: 0.25, balconyWindow: 0.02, acUnit: 0.26 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.02, acUnit: 0 } },
   };
   const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0,
-                         terminals: { blankPanel: 0.08, balconyWindow: 0.06, acUnit: 0.07 } };
+                         terminals: { blankPanel: 0, balconyWindow: 0.06, acUnit: 0 } };
 
   // hue-locked wall jitter: keep the district's hue family but jitter sat/light
   // a touch per-building so a whole block isn't one flat colour. Position-hashed
@@ -2060,17 +2060,12 @@
     return c.getHex();
   }
 
-  // weighted terminal pick for one (floor,bay) facade cell. Fixed accumulation
-  // order; "window" is whatever probability mass is left over (the required
-  // default). balconyWindow only rolls on upper floors (floorK >= 1).
+  // Window-cell terminal. The only variation is an authored upper-floor
+  // balcony; every opening behind it remains glass.
   function pickFacadeTerminal(kit, wx, wz, salt, floorK) {
     const r = CBZ.hash01(wx, wz, salt);
     const T = kit.terminals;
-    let acc = T.blankPanel || 0;
-    if (r < acc) return "blankPanel";
-    if (floorK >= 1) { acc += T.balconyWindow || 0; if (r < acc) return "balconyWindow"; }
-    acc += T.acUnit || 0;
-    if (r < acc) return "acUnit";
+    if (floorK >= 1 && r < (T.balconyWindow || 0)) return "balconyWindow";
     return "window";
   }
 
@@ -4728,7 +4723,7 @@
   // Returns { b, penthouseDoor } for the worldgen caller + CBZ.cityMegaTower().
   let _megaTower = null;   // { lot, penthouseDoor } cached for CBZ.cityMegaTower()
   function makeMegaTower(root, lot, w, d, side, door, doorPt, FLAGSHIP) {
-    const STOREYS = 30;                                  // double the 15-storey Twin Towers
+    const STOREYS = 52;                                  // massive skyline anchor (~166m at FH=3.2)
     const color = 0x223040;                              // dark glass-tower mullion tone
     // reuse the proven shell: tall enough that makeBuilding's `modern` (storeys>=3)
     // curtain-wall path lights up on every floor; garageGround makes the ground a
@@ -4742,7 +4737,7 @@
     furnishPenthouse(b, topY);
     deckCars(b, w, d);                                   // a few parked cars so the hangar deck reads as one
     // every floor between the garage deck and the penthouse is a dressed flat —
-    // 28 storeys of stairwell views into OTHER people's homes is what makes the
+    // dozens of storeys of stairwell views into OTHER people's homes makes the
     // penthouse on top read as the apex (merged tris; no extra draw calls).
     // the storey just below the penthouse is the mansion NATATORIUM (indoor pool);
     // every other floor is a dressed flat (merged tris; no extra draw calls).
@@ -5077,7 +5072,7 @@
       const kind = districtKind(lot);
       // draw the EXISTING rng() exactly as before (preserve RNG order), THEN add
       // the geometry-only core bonus and clamp so non-flagship towers never rival
-      // the 30-storey mega-tower.
+      // the 52-storey mega-tower.
       let base;
       if (kind === "core") base = 4 + ((rng() * 5) | 0);          // 4-8
       else if (kind === "commercial") base = 3 + ((rng() * 3) | 0);    // 3-5
@@ -5535,7 +5530,7 @@
         }
       } else if (isLux) {
         // ===== THE MEGA-TOWER — the flagship, the TALLEST building in the city =====
-        // Built by makeMegaTower(): ~30 storeys (double the island Twin Towers),
+        // Built by makeMegaTower(): 52 storeys — a genuine super-tall city anchor,
         // a glass curtain wall on EVERY floor, a ground/podium HANGAR deck you
         // drive into from any side, a lavish top-floor PENTHOUSE, a clean
         // penthouse door, and a rooftop HELIPAD. It tags lot.building.home (the

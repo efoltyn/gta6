@@ -500,7 +500,7 @@
           DTGT.pos = PP; DTGT.group.position = PP; DTGT.dead = false; DTGT.hp = 1e9;
           CBZ.creatureFight(d, DTGT, dt, d._atkOpts || (d._atkOpts = {
             reach: 1.7, rate: 0.95, dmg: DOG_SPECIES.bite, speed: SPEED, style: "maul",
-            onHit: function (dm) { if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(dm, d); } catch (e) {} } },
+            onHit: function (dm) { if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(dm, d.pos.x, d.pos.z, "mauled by a dog", false, d, false); } catch (e) {} } },
           }));
           d.faceH = d.heading;                                   // it steers facing itself
         } else {

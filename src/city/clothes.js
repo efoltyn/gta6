@@ -1271,6 +1271,49 @@
     return m;
   }
 
+  // Neckties are a silhouette, not a painted stripe or a stack of cuboids.
+  // Build the knot/blade as shallow cloth prisms: they still match the game's
+  // low-poly language, but have the real wide-at-the-bottom blade and pointed
+  // tip. Geometries are shared by every outfit/rack preview.
+  function clothPrism(points, depth) {
+    const s = new THREE.Shape();
+    s.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) s.lineTo(points[i][0], points[i][1]);
+    s.closePath();
+    const g = new THREE.ExtrudeGeometry(s, {
+      depth: depth, steps: 1,
+      bevelEnabled: true, bevelSegments: 1,
+      bevelSize: 0.006, bevelThickness: 0.006,
+    });
+    g.translate(0, 0, -depth / 2);
+    g.computeVertexNormals();
+    g._shared = true;
+    return g;
+  }
+  const TIE_KNOT_GEO = clothPrism([
+    [-0.062, 0.46], [0.062, 0.46], [0.043, 0.34], [-0.043, 0.34],
+  ], 0.04);
+  const TIE_BLADE_GEO = clothPrism([
+    [-0.034, 0.34], [0.034, 0.34], [0.062, -0.23], [0, -0.35], [-0.062, -0.23],
+  ], 0.035);
+  const BOW_GEO = clothPrism([
+    [0, 0.395], [-0.075, 0.35], [-0.17, 0.365], [-0.18, 0.47],
+    [-0.075, 0.49], [0, 0.445], [0.075, 0.49], [0.18, 0.47],
+    [0.17, 0.365], [0.075, 0.35],
+  ], 0.045);
+  const BOW_KNOT_GEO = clothPrism([
+    [-0.045, 0.465], [0.045, 0.465], [0.052, 0.375], [-0.052, 0.375],
+  ], 0.052);
+  function shapedPiece(group, geo, z, hex, name) {
+    const m = new THREE.Mesh(geo, cmat(hex));
+    m.position.z = z;
+    m.castShadow = false; m.receiveShadow = false;
+    m.name = name || "neckwear";
+    m.userData.clothingPart = name || "neckwear";
+    group.add(m);
+    return m;
+  }
+
   // visualId → spec. draw(group, ctx) places sample meshes at the chest-front
   // origin (group is expected to sit at the torso); ctx.hex overrides color.
   const COMP = {};
@@ -1297,8 +1340,8 @@
   function mkTie(hex) {
     return { slot: "neck", drip: 2, color: hex, label: "Tie",
       draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : hex;
-        piece(group, 0.1, 0.1, 0.04, 0, 0.42, 0.26, tone2(c, -0.2));   // knot
-        piece(group, 0.08, 0.5, 0.04, 0, 0.12, 0.27, c); } };          // body
+        shapedPiece(group, TIE_KNOT_GEO, 0.278, tone2(c, -0.2), "tie-knot");
+        shapedPiece(group, TIE_BLADE_GEO, 0.276, c, "tie-blade"); } };
   }
   function tone2(n, amt) {                          // hex-int → hex-int tone (for cmat keys)
     let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
@@ -1321,9 +1364,8 @@
   });
   COMP.bowtie_black = { slot: "neck", drip: 2, color: NAMED.black, label: "Bow Tie",
     draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : NAMED.black;
-      piece(group, 0.1, 0.12, 0.05, -0.08, 0.42, 0.26, c, { rotZ: 0.35 });
-      piece(group, 0.1, 0.12, 0.05, 0.08, 0.42, 0.26, c, { rotZ: -0.35 });
-      piece(group, 0.05, 0.07, 0.06, 0, 0.42, 0.27, tone2(c, 0.2)); } };  // knot
+      shapedPiece(group, BOW_GEO, 0.278, c, "bow-tie-wings");
+      shapedPiece(group, BOW_KNOT_GEO, 0.284, tone2(c, 0.18), "bow-tie-knot"); } };
   COMP.pants_white = { slot: "legs", drip: 1, color: NAMED.white, label: "White Pants",
     legsHex: NAMED.white,                          // applied as a flat legs color
     draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : NAMED.white;
@@ -1444,6 +1486,8 @@
         const sp = COMP[items[i]];
         if (!sp || sp.shell || sp.painted || sp.legsHex != null) continue; // shells/legs handled above
         const grp = new THREE.Group();
+        grp.name = "wearable-" + items[i];
+        grp.userData.clothingSlot = sp.slot || "item";
         sp.draw(grp, {});
         grp.children.forEach((m) => bin.push(m));
         host.add(grp);

@@ -42,8 +42,8 @@
     // to the tight over-shoulder. That's why the AIM_BASE tier below equals
     // this relaxed frame instead of being its own third framing.
     HEIGHT: 1.7,       // rig pivot above feet — a touch above the head so the street reads ahead
-    DIST: 4.0,         // behind-the-back distance — Fortnite default: char large enough to matter, world still open
-    SIDE: 0.55,        // camera lateral offset RIGHT — subtle: char just left of centre (1.0 pinned him to the edge)
+    DIST: 4.35,        // three-pivot follow boom: readable body without crowding the weapon
+    SIDE: 0.68,        // explicit right-shoulder offset; the body no longer masks the gun hand
     PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze, horizon high
     LOOK_Y: 1.52,      // look-target height above feet — with the mild pitch this centres the char vertically
     LEAD: 4.6,         // forward look-ahead — breathing room down-street
@@ -59,8 +59,8 @@
     // Scoping (RMB/ADS) = the image-2 frame: ~2m over the RIGHT shoulder at
     // shoulder height, character waist-up on the left third, gun on the
     // crosshair, a real (moderate) lens zoom. SmoothDamp eases the punch-in.
-    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.4,   // armed = default distance; RMB punches to a close over-shoulder
-    SIDE_AIM_BASE: 0.55, SIDE_AIM_ADS: 0.85,  // armed = default offset; RMB rides further over the shoulder (char left third)
+    DIST_AIM_BASE: 4.35, DIST_AIM_ADS: 2.65,  // stable boom, then a deliberate ADS shoulder push
+    SIDE_AIM_BASE: 0.68, SIDE_AIM_ADS: 1.12,  // clear the firing-side shoulder and expose the carried weapon
     FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,     // armed = default lens; RMB = moderate zoom toward the aim
     // HEIGHT_AIM: rig-pivot height while armed. ADS sits at shoulder height so
     // the raised gun + crosshair line up (image 2: camera level with the head).

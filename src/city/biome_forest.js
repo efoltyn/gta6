@@ -40,6 +40,7 @@
   // causeway: a 14-wide dirt logging road from forest north edge up to the
   // military island's south edge (z=-950). Centered on x=-560.
   const CW_MINX = -567, CW_MAXX = -553, CW_MINZ = -1020, CW_MAXZ = -950;
+  const LAKE_X = CX - 150, LAKE_Z = CZ + 90, LAKE_R = 95;
 
   // ---- a tiny local seeded RNG (owner rule #5) --------------------------
   // mulberry32 — deterministic so the same forest grows every run.
@@ -75,6 +76,10 @@
       name: "Redhollow Bridge", subtitle: "State Forest", kind: "rect",
       minX: _cwCX - 12, maxX: _cwCX + 12, minZ: CW_MINZ, maxZ: CW_MAXZ, pad: 1,
     });
+    if (CBZ.registerCityWaterBody) CBZ.registerCityWaterBody(city, {
+      id: "redhollow-lake", name: "Redhollow Lake", kind: "circle",
+      cx: LAKE_X, cz: LAKE_Z, r: LAKE_R, inland: true,
+    });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
       city.roads.push({ x: _cwCX, z: (CW_MINZ + CW_MAXZ) / 2, vertical: true, len: CW_MAXZ - CW_MINZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6 });
@@ -87,24 +92,48 @@
     // baked hash-colour variation (moss / fern / leaf-litter / duff patches)
     // so kilometres of floor stop reading as one flat slab. Deterministic per
     // seed (position hash only — the biome's rng stream is untouched).
-    const floorGeo = new THREE.PlaneGeometry(HX * 2 + 16, HZ * 2 + 16, 56, 44);
+    const floorGeo = new THREE.PlaneGeometry(HX * 2 + 16, HZ * 2 + 16, 80, 68);
     floorGeo.rotateX(-Math.PI / 2);
     {
       const fpos = floorGeo.attributes.position;
       const fcol = new Float32Array(fpos.count * 3);
       const cMoss = new THREE.Color(0x35451f), cDuffC = new THREE.Color(0x2c3a18);
       const cLeaf = new THREE.Color(0x4a5526), cFern = new THREE.Color(0x3b5a28);
-      const fc = new THREE.Color();
+      const cLakeBed = new THREE.Color(0x343b32), cLakeMud = new THREE.Color(0x665d40);
+      const cLakeShore = new THREE.Color(0x7a6a44);
+      const cForestEdge = new THREE.Color(0x4b6338);
+      const fc = new THREE.Color(), edgeColor = new THREE.Color();
       for (let i = 0; i < fpos.count; i++) {
         const wx = fpos.getX(i) + CX, wz = fpos.getZ(i) + CZ;
         const h1 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 34), Math.floor(wz / 34), 8821) : 0.5;
         const h2 = CBZ.hash01 ? CBZ.hash01(Math.floor(wx / 11), Math.floor(wz / 11), 8822) : 0.5;
         fc.copy(h1 < 0.5 ? cMoss : (h1 < 0.78 ? cFern : cLeaf));
         if (h2 > 0.88) fc.copy(cDuffC);
+        const lakeD = Math.hypot(wx - LAKE_X, wz - LAKE_Z);
+        if (lakeD <= LAKE_R) {
+          // A real basin exposes the ONE world-ocean mesh below. Keep every
+          // underwater vertex beneath the lowest 0.355m swell so green ground
+          // can never flash through a trough.
+          const t = Math.max(0, Math.min(1, lakeD / LAKE_R));
+          const sm = t * t * (3 - 2 * t);
+          fpos.setY(i, -1.72 + sm * 0.62);
+          fc.copy(cLakeBed).lerp(cLakeMud, sm * 0.72);
+        } else if (lakeD < LAKE_R + 14) {
+          // The dry bank is part of this same heightfield, not another circle
+          // laid on top. It rises from the submerged edge to the forest floor.
+          let t = (lakeD - LAKE_R) / 14; t = t * t * (3 - 2 * t);
+          fpos.setY(i, -1.10 + t * 1.10);
+          fc.copy(cLakeShore).lerp(cMoss, t);
+        }
+        const edgeDist = Math.min(wx - (MINX - 8), (MAXX + 8) - wx, wz - (MINZ - 8), (MAXZ + 8) - wz);
+        edgeColor.copy(cForestEdge).lerp(fc, Math.max(0, Math.min(1, edgeDist / 82)));
+        fc.copy(edgeColor);
         const shade = 0.9 + h2 * 0.14;
         fcol[i * 3] = fc.r * shade; fcol[i * 3 + 1] = fc.g * shade; fcol[i * 3 + 2] = fc.b * shade;
       }
       floorGeo.setAttribute("color", new THREE.BufferAttribute(fcol, 3));
+      floorGeo.attributes.position.needsUpdate = true;
+      floorGeo.computeVertexNormals();
     }
     const floor = new THREE.Mesh(floorGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     floor.position.set(CX, 0.02, CZ);
@@ -114,22 +143,19 @@
     floor.name = "redhollow-forest-surface";
     root.add(floor);
 
-    // a few darker "duff" patches so the floor isn't a flat slab.
-    for (let i = 0; i < 10; i++) {
-      const px = MINX + 30 + rng() * (HX * 2 - 60);
-      const pz = MINZ + 30 + rng() * (HZ * 2 - 60);
-      const r = 18 + rng() * 34;
-      const p = new THREE.Mesh(new THREE.CircleGeometry(r, 12), mat(0x2c3a18));
-      p.rotation.x = -Math.PI / 2; p.position.set(px, 0.03, pz);
-      p.receiveShadow = true; root.add(p);
-    }
+    // Duff variation is already baked into the heightfield vertex colours.
+    // The former ten coplanar circles were redundant and flickered from air.
 
     // Only draw the feather OUTSIDE the forest floor. A second, larger full
     // plane looked like a hard rectangular map layer from the air.
     if (CBZ.makeBiomeEdgeRing) {
       CBZ.makeBiomeEdgeRing(root, {
         cx: CX, cz: CZ, hx: HX + 8, hz: HZ + 8, feather: 20, segments: 18,
-        inner: 0x35451f, outer: 0x6a7a4a, y: 0.008, seed: 0x0f02e57, owner: "forest",
+        // Redhollow can grow mostly west into open country and feather into
+        // the alpine foothills north/east without swallowing their core.
+        spread: { west: 600, east: 90, north: 320, south: 280 },
+        inner: 0x4b6338, outer: 0x45684e, featherNorm: 0.22,
+        y: 0.008, seed: 0x0f02e57, owner: "forest",
       });
     }
 
@@ -145,7 +171,7 @@
       CBZ.buildHighway(root, {
         path: [{ x: cwCX, z: CW_MINZ }, { x: cwCX, z: CW_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
-        guardrail: true, elevated: false, rng: rng,
+        guardrail: false, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
       });
     } else {
@@ -157,18 +183,12 @@
     }
 
     // ================================================================
-    //  LAKE — water plane + a sandy/mud shore ring. A real landmark.
+    //  LAKE — the basin was carved into the forest heightfield above and its
+    //  footprint registered with the shared coast oracle. The sole world-sea
+    //  mesh now flows through it, so there is no second lake-water material or
+    //  overlapping shore disc here.
     // ================================================================
-    const lakeX = CX - 150, lakeZ = CZ + 90, lakeR = 95;
-    const shore = new THREE.Mesh(new THREE.CircleGeometry(lakeR + 14, 36), mat(0x7a6a44));
-    shore.rotation.x = -Math.PI / 2; shore.position.set(lakeX, 0.05, lakeZ);
-    shore.receiveShadow = true; root.add(shore);
-    const water = new THREE.Mesh(
-      new THREE.CircleGeometry(lakeR, 40),
-      new THREE.MeshLambertMaterial({ color: 0x2a5566, transparent: true, opacity: 0.86 })
-    );
-    water.rotation.x = -Math.PI / 2; water.position.set(lakeX, 0.12, lakeZ);
-    root.add(water);
+    const lakeX = LAKE_X, lakeZ = LAKE_Z, lakeR = LAKE_R;
 
     // ================================================================
     //  TRAILS — winding thin dirt planes so the woods are navigable.
@@ -190,12 +210,19 @@
         const nx = bx + wob * (rng() - 0.5);
         const nz = bz + wob * (rng() - 0.5);
         const dx = nx - px, dz = nz - pz, len = Math.hypot(dx, dz) || 1;
+        const mx = (px + nx) / 2, mz = (pz + nz) / 2;
+        // A trail may approach the bank but never become a coplanar dirt road
+        // across the lake. The old centre-origin branch produced the tan slabs
+        // visible all over the water in the aerial QA shot.
+        if (d2(mx, mz, LAKE_X, LAKE_Z) < (LAKE_R + 2) * (LAKE_R + 2)) {
+          px = nx; pz = nz; continue;
+        }
         const seg = new THREE.Mesh(new THREE.PlaneGeometry(wid, len + 1.5), mat(0x5a4a2e));
         seg.rotation.x = -Math.PI / 2;
         seg.rotation.z = -Math.atan2(dx, dz);
         seg.position.set((px + nx) / 2, 0.06, (pz + nz) / 2);
         seg.receiveShadow = true; root.add(seg);
-        trailPts.push({ x: (px + nx) / 2, z: (pz + nz) / 2 });
+        trailPts.push({ x: mx, z: mz });
         if (layout) {
           // AABB intentionally covers the rotated ribbon plus shoulder: tree
           // placement is conservative around a path, never clipped through it.
@@ -210,7 +237,10 @@
     // main spine from the causeway mouth down into the interior, plus branches.
     trail(-560, -1015, lakeX, lakeZ - lakeR, 5.5, 26);
     trail(-560, -1015, -820, -1500, 4.5, 34);
-    trail(lakeX, lakeZ, -300, -1560, 4.0, 30);
+    (function lakeShoreBranch() {
+      const tx = -300, tz = -1560, dx = tx - lakeX, dz = tz - lakeZ, inv = 1 / Math.hypot(dx, dz);
+      trail(lakeX + dx * inv * (lakeR + 5), lakeZ + dz * inv * (lakeR + 5), tx, tz, 4.0, 30);
+    })();
     trail(-820, -1500, -360, -1300, 3.6, 28);
 
     function nearTrail(x, z) {

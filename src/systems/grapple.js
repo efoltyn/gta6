@@ -608,6 +608,7 @@
     const p = a && a._phys; if (!p || !p._lateWrite) return;
     if (p.air || p.down > 0 || p.heldBy) return;   // owned bodies wrote at step()
     writeRag(a, p);
+    if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(a.char || (a.isPlayer ? CBZ.playerChar : null));
   }
   //      Registry-driven: iterate only the actors poseActor armed this frame
   //      (lateSet, usually empty or a handful) instead of every bot/ped/cop.

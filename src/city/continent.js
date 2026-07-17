@@ -18,7 +18,7 @@
    THE COAST PASS (CBZ.CONFIG.CONTINENT_COAST, default on) — the plate used
    to be a RAZOR-STRAIGHT rectangle meeting the sea: a game board, not a
    landmass. Now a deterministic noise field carves an IRREGULAR coastline
-   into the plate's outer rim (the outermost 8-42u), slopes it down through
+   into the plate's outer rim, slopes it down through
    a dry-sand → wet-sand rim into the water, and drops the sea floor below
    the (world.js) animated sea surface. A merged strip of foam "breakers"
    is marched along the true zero-crossing of the shore field, so the foam
@@ -50,11 +50,13 @@
   if (CFG.CONTINENT_COAST == null) CFG.CONTINENT_COAST = true;
   if (CFG.CONTINENT_HARBOR == null) CFG.CONTINENT_HARBOR = true;
   if (CFG.CONTINENT_EXPANSION_V2 == null) CFG.CONTINENT_EXPANSION_V2 = true;
-  if (CFG.CONTINENT_COUNTRY_MARGIN == null) CFG.CONTINENT_COUNTRY_MARGIN = 360;
+  if (CFG.CONTINENT_COUNTRY_MARGIN == null) CFG.CONTINENT_COUNTRY_MARGIN = 1200;
+  if (CFG.CONTINENT_RELIEF_V1 == null) CFG.CONTINENT_RELIEF_V1 = true;
 
   CBZ.addLandmass(function (city) {
     if (CFG.CITY_CONTINENT === false) return;
     const regs = (city.regions || []).slice();
+    const waterBodies = (city.waterBodies || []).slice();
     if (!regs.length) return;
     const COAST = CFG.CONTINENT_COAST !== false;
     const HARBOR = COAST && CFG.CONTINENT_HARBOR !== false;
@@ -75,7 +77,7 @@
     const LEGACY_PAD = 40;
     const requestedMargin = Number(CFG.CONTINENT_COUNTRY_MARGIN);
     const PAD = CFG.CONTINENT_EXPANSION_V2 === false ? LEGACY_PAD
-      : Math.max(180, Math.min(640, Number.isFinite(requestedMargin) ? requestedMargin : 360));
+      : Math.max(180, Math.min(1800, Number.isFinite(requestedMargin) ? requestedMargin : 1200));
     minX -= PAD; maxX += PAD; minZ -= PAD; maxZ += PAD;
     const W = maxX - minX, D = maxZ - minZ;
     if (!isFinite(W) || W <= 0 || W > 12000) return;
@@ -102,12 +104,26 @@
     // backdrop is intentionally built after this pass and cannot enter the set.
     const authoredSurfaceBounds = [];
     const surfaceBox = new THREE.Box3();
+    // Most biome builders position a parent group after creating its local
+    // floor. Box3.setFromObject updates the mesh itself but does not guarantee
+    // a stale ancestor chain is refreshed. The former ordering therefore
+    // recorded translated floors (most visibly Saltlands) at local origin and
+    // carved country out of the wrong part of the map beside the speedway.
+    // Resolve the complete hierarchy once before collecting world footprints.
+    city.root.updateMatrixWorld(true);
     city.root.traverse(function (o) {
       if (!o || !o.isMesh || !o.userData || !o.userData.worldSurface) return;
+      // Circle/Ring bounds are rectangles, not coverage. Treating those AABBs
+      // as filled floors carved four clear-colour corners around every round
+      // island. Sparse heightfields likewise own only their indexed mountain
+      // faces; their unused rectangular attribute extent is not land cover.
+      const gt = o.geometry && o.geometry.type;
+      if (o.userData.sparseTerrain || o.userData.nonRectSurface || gt === "CircleGeometry" || gt === "RingGeometry") return;
       try {
         surfaceBox.setFromObject(o);
         if ([surfaceBox.min.x, surfaceBox.max.x, surfaceBox.min.z, surfaceBox.max.z].every(Number.isFinite)) {
           authoredSurfaceBounds.push({
+            name: o.name || "(unnamed)", geometry: gt || "",
             minX: surfaceBox.min.x, maxX: surfaceBox.max.x,
             minZ: surfaceBox.min.z, maxZ: surfaceBox.max.z,
           });
@@ -116,24 +132,28 @@
     });
     function insideAuthoredSurface(x, z, margin) {
       margin = margin || 0;
-      // world.js's mainland floor extends 29u past the simulation rectangle.
-      if (isFinite(city.minX) && x >= city.minX - 29 - margin && x <= city.maxX + 29 + margin &&
-          z >= city.minZ - 29 - margin && z <= city.maxZ + 29 + margin) return true;
+      // Only actual rendered surfaces may carve geometry. Region records are
+      // gameplay/label bounds and are often deliberately broader than their
+      // floor mesh; using them here created dry-land holes where the ocean then
+      // correctly discarded itself. The mainland plane is already captured
+      // below with its real 29u apron, so no synthetic city AABB is needed.
       const annex = city.annex;
       if (annex && Number.isFinite(annex.cx) && Number.isFinite(annex.cz) && Number.isFinite(annex.radius) &&
           Math.hypot(x - annex.cx, z - annex.cz) <= annex.radius + 2 + margin) return true;
+      for (const b of authoredSurfaceBounds) {
+        if (x >= b.minX - margin && x <= b.maxX + margin &&
+            z >= b.minZ - margin && z <= b.maxZ + margin) return true;
+      }
+      return false;
+    }
+    function insideTerrainGrade(x, z, margin) {
+      margin = margin || 0;
       for (const r of regs) {
-        // Whole-country records describe open country whose visible floor IS
-        // this plate. Precise settlement records above them own real pads.
-        if (!r || r.underlay || r.subtitle === "Country") continue;
+        if (!r || !r.terrainGrade) continue;
         const p = (r.pad || 0) + margin;
         if (r.kind === "circle") {
           if (Math.hypot(x - r.cx, z - r.cz) <= r.r + p) return true;
         } else if (x >= r.minX - p && x <= r.maxX + p && z >= r.minZ - p && z <= r.maxZ + p) return true;
-      }
-      for (const b of authoredSurfaceBounds) {
-        if (x >= b.minX - margin && x <= b.maxX + margin &&
-            z >= b.minZ - margin && z <= b.maxZ + margin) return true;
       }
       return false;
     }
@@ -157,10 +177,27 @@
       const a = h00 + (h10 - h00) * fx, b = h01 + (h11 - h01) * fx;
       return a + (b - a) * fz;
     }
-    // coast inset: how far inside the plate rect the waterline sits (8-42u,
-    // two blended wavelengths so headlands + small notches both appear)
+    // Signed distance inside a rounded continental frame. The old min-to-four-
+    // edges field made the whole world a perfect square in orbital views even
+    // after noise was added. A broad corner radius changes the land silhouette
+    // while the expanded margin keeps the full authored union untouched.
+    const coastCX = (minX + maxX) * 0.5, coastCZ = (minZ + maxZ) * 0.5;
+    const coastRadius = Math.min(320, Math.min(W, D) * 0.12);
+    function plateInsideDistance(x, z) {
+      const qx = Math.abs(x - coastCX) - (W * 0.5 - coastRadius);
+      const qz = Math.abs(z - coastCZ) - (D * 0.5 - coastRadius);
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qz, 0));
+      const inside = Math.min(Math.max(qx, qz), 0);
+      return -(outside + inside - coastRadius);
+    }
+    // Broad headlands/bays plus a smaller notch field; these amplitudes remain
+    // below the relocated frontier loop's dry-land clearance.
     function coastInset(x, z) {
-      return 8 + (noise2(x, z, 260, 8810) * 0.72 + noise2(x, z, 90, 8811) * 0.28) * 34;
+      return 10 + (
+        noise2(x, z, 620, 8809) * 0.46 +
+        noise2(x, z, 220, 8810) * 0.36 +
+        noise2(x, z, 82, 8811) * 0.18
+      ) * 64;
     }
     const BAY0 = 28, BAY1 = 95;          // bay ring: QUAY line → 95u out
     const hasCity = isFinite(city.minX);
@@ -185,8 +222,21 @@
       }
       return false;
     }
+    function waterBodyField(b, x, z) {
+      if (!b) return Infinity;
+      if (b.kind === "circle") return Math.hypot(x - b.cx, z - b.cz) - b.r;
+      const dx = Math.max(b.minX - x, 0, x - b.maxX);
+      const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
+      if (dx > 0 || dz > 0) return Math.hypot(dx, dz);
+      return -Math.min(x - b.minX, b.maxX - x, z - b.minZ, b.maxZ - z);
+    }
+    function inlandWaterField(x, z) {
+      let nearest = Infinity;
+      for (let i = 0; i < waterBodies.length; i++) nearest = Math.min(nearest, waterBodyField(waterBodies[i], x, z));
+      return nearest;
+    }
     function shoreField(x, z) {
-      const e = Math.min(x - minX, maxX - x, z - minZ, maxZ - z);  // inset in plate rect
+      const e = plateInsideDistance(x, z);
       let s = e - coastInset(x, z);
       if (HARBOR) {
         const bd = bayDist(x, z);
@@ -195,7 +245,58 @@
         if (sBay < s) s = sBay;
       }
       if (s < 12 && inSolidRegion(x, z, 8)) s = 12;   // POIs are never carved
+      // Explicit inland water wins over its enclosing biome region. This same
+      // signed result drives the sea cutout, swimmers, boats, wildlife and map.
+      const inland = inlandWaterField(x, z);
+      if (inland < s) s = inland;
       return s;
+    }
+
+    // ================= CONTINUOUS COUNTRY RELIEF =========================
+    // The old continent only changed Y inside the 20m beach rim.  Everywhere
+    // else its 100k vertices were mathematically flat, so even a huge map read
+    // as a tabletop.  This height oracle is shared by the plate, floorAt and
+    // country dressing.  Authored towns/airports/biomes remain graded pads;
+    // broad hills rise only in the land between them.
+    function countryFbm(x, z) {
+      let sum = 0, amp = 0.58, freq = 1;
+      for (let o = 0; o < 4; o++) {
+        sum += (noise2(x * freq, z * freq, 310, 8890 + o) - 0.5) * amp;
+        freq *= 2.07; amp *= 0.5;
+      }
+      return sum;
+    }
+    const FUTURE_ROUTE_IN = COAST ? 190 : 36;
+    const futureX0 = minX + FUTURE_ROUTE_IN, futureX1 = maxX - FUTURE_ROUTE_IN;
+    const futureZ0 = minZ + FUTURE_ROUTE_IN, futureZ1 = maxZ - FUTURE_ROUTE_IN;
+    function frontierDistance(x, z) {
+      if (CFG.CONTINENT_EXPANSION_V2 === false || PAD <= LEGACY_PAD + 80) return 1e9;
+      let best = 1e9;
+      if (x >= futureX0 - 28 && x <= futureX1 + 28) best = Math.min(best, Math.abs(z - futureZ0), Math.abs(z - futureZ1));
+      if (z >= futureZ0 - 28 && z <= futureZ1 + 28) best = Math.min(best, Math.abs(x - futureX0), Math.abs(x - futureX1));
+      return best;
+    }
+    function countryHeightAt(x, z) {
+      if (CFG.CONTINENT_RELIEF_V1 === false) return 0;
+      if (x < minX || x > maxX || z < minZ || z > maxZ) return 0;
+      if (insideAuthoredSurface(x, z, 8) || insideTerrainGrade(x, z, 8)) return 0;
+      const shore = COAST ? shoreField(x, z) : 100;
+      if (shore <= 38) return 0;
+      const coastFade = smooth01((shore - 38) / 74);
+      const n = countryFbm(x + 1400, z - 900);
+      const broad = noise2(x, z, 540, 8896);
+      const ridge = 1 - Math.abs(2 * noise2(x + 700, z - 300, 250, 8897) - 1);
+      let h = (2.0 + Math.max(0, n + 0.18) * 17 + Math.pow(ridge, 2.4) * broad * 8) * coastFade;
+      // Frontier highways are cut into the landscape with broad shoulders;
+      // their visible planes never hover over a noisy heightfield.
+      const fd = frontierDistance(x, z);
+      h *= smooth01((fd - 10) / 36);
+      return Math.max(0, h);
+    }
+    function smooth01(v) { v = v < 0 ? 0 : (v > 1 ? 1 : v); return v * v * (3 - 2 * v); }
+    CBZ.countryTerrainHeightAt = countryHeightAt;
+    if (CBZ.registerCityGroundHeight) {
+      CBZ.registerCityGroundHeight(countryHeightAt, { name: "Backcountry relief", biome: "wilds" });
     }
 
     // Publish the exact coast oracle used by the rendered continent.  The
@@ -205,6 +306,8 @@
     city.mapTerrain = {
       bounds: { minX, maxX, minZ, maxZ },
       shoreAt: COAST ? shoreField : function () { return 1; },
+      waterBodies: waterBodies,
+      inlandWaterAt: function (x, z) { return inlandWaterField(x, z) < 0; },
     };
 
     // ---- the ground plate: one draw call, vertex-coloured country ---------
@@ -228,13 +331,41 @@
     const cSand = new THREE.Color(0xdcc794), cWet = new THREE.Color(0xbfa877);
     const cBed = new THREE.Color(0x8a8a6b);                  // submerged seabed
     const c = new THREE.Color(), c2 = new THREE.Color();
+    const biomeBlends = (city.biomeBlends || CBZ._biomeBlendSpecs || []).slice();
+    const biomePalettes = biomeBlends.map(function (spec) {
+      return {
+        spec: spec,
+        inner: new THREE.Color(spec.inner == null ? 0x65724c : spec.inner),
+        outer: new THREE.Color(spec.outer == null ? 0x58704c : spec.outer),
+      };
+    });
+    function applyBiomeLandCover(base, x, z) {
+      if (!biomePalettes.length || !CBZ.biomeBlendWeightAt) return;
+      let sum = 0, rr = 0, gg = 0, bb = 0;
+      for (let j = 0; j < biomePalettes.length; j++) {
+        const p = biomePalettes[j];
+        const w = CBZ.biomeBlendWeightAt(p.spec, x, z);
+        if (w <= 0.002) continue;
+        const ww = w * w;
+        const r = p.outer.r + (p.inner.r - p.outer.r) * w;
+        const g = p.outer.g + (p.inner.g - p.outer.g) * w;
+        const b = p.outer.b + (p.inner.b - p.outer.b) * w;
+        sum += ww; rr += r * ww; gg += g * ww; bb += b * ww;
+      }
+      if (sum <= 0) return;
+      c2.setRGB(rr / sum, gg / sum, bb / sum);
+      // Multiple neighboring influences mix by weight instead of one biome
+      // painting over another. Their overlap becomes a real ecotone.
+      base.lerp(c2, blendSmooth(Math.min(1, sum)) * 0.94);
+    }
+    function blendSmooth(v) { return v * v * (3 - 2 * v); }
     const cx0 = (minX + maxX) / 2, cz0 = (minZ + maxZ) / 2;
     const GROUND_Y = -0.06;                                   // interior land level
     const SEA_Y = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
-    // The shader sea reaches roughly ±0.135m after the water pass below. Keep
-    // submerged coast vertices below even its trough so two opaque surfaces
-    // can never exchange depth ownership and flicker.
-    const SUBMERGED_Y = SEA_Y - 0.18;
+    // world.js's current swell reaches ±0.355m. Keep submerged coast vertices
+    // below the *real* trough with margin; the stale 0.18m offset let every
+    // trough reveal the continent mesh through the water.
+    const SUBMERGED_Y = SEA_Y - 0.44;
     // cache the shore field per vertex — the foam pass re-reads it below
     const sGrid = COAST ? new Float32Array(pos.count) : null;
     for (let i = 0; i < pos.count; i++) {
@@ -250,7 +381,9 @@
       const drift = noise2(wx, wz, 300, 8812) - 0.5;
       c.lerp(cDry, Math.max(0, drift) * 0.5);
       c.lerp(cLush, Math.max(0, -drift) * 0.4);
-      let y = GROUND_Y;
+      applyBiomeLandCover(c, wx, wz);
+      const reliefY = countryHeightAt(wx, wz);
+      let y = GROUND_Y + reliefY;
       if (COAST) {
         const s = shoreField(wx, wz);
         sGrid[i] = s;
@@ -265,7 +398,7 @@
           // Shore rim: the exact zero crossing starts safely under the moving
           // surface, then rises through wet/dry sand onto solid country. Wave
           // wash can cover the first metres without exposing a coplanar slab.
-          y = SUBMERGED_Y + sm(Math.min(1, s / 26)) * (GROUND_Y - SUBMERGED_Y);
+          y = SUBMERGED_Y + sm(Math.min(1, s / 26)) * (GROUND_Y + reliefY - SUBMERGED_Y);
           if (s < 6) c.copy(cWet).lerp(cSand, sm(s / 6));
           else if (s < 15) c.copy(cSand);
           else c2.copy(c), c.copy(cSand).lerp(c2, sm((s - 15) / 11));
@@ -284,25 +417,46 @@
     // authored floor. Border triangles stay as a continuous seam and receive
     // a GPU depth bias below; the large interiors no longer overdraw at all.
     let carvedTriangles = 0;
+    // A triangle is removed only when its *entire footprint* is safely under
+    // an authored surface.  The old centroid-only test carved right up to a
+    // region boundary.  On this ~17m grid a removed triangle can extend over
+    // 20m beyond its centre, so circular pads (most visibly Diamond Speedway)
+    // were left with a saw-toothed ring containing neither country nor ocean:
+    // the sea shader correctly discarded "land" there and the clear/fog colour
+    // showed through as fake blue water.  Keep one grid diagonal of underlay
+    // beneath every authored edge; its lower Y + polygon offset make the real
+    // pad win while guaranteeing continuous earth at the seam.
+    const CARVE_SEAM_INSET = Math.min(32, Math.hypot(W / SEG, D / SEG) + 2);
     if (geo.index) {
       const src = geo.index.array, kept = [];
       for (let i = 0; i < src.length; i += 3) {
         const ia = src[i], ib = src[i + 1], ic = src[i + 2];
         const tx = (pos.getX(ia) + pos.getX(ib) + pos.getX(ic)) / 3 + cx0;
         const tz = (pos.getZ(ia) + pos.getZ(ib) + pos.getZ(ic)) / 3 + cz0;
-        if (insideAuthoredSurface(tx, tz)) { carvedTriangles++; continue; }
+        if (insideAuthoredSurface(tx, tz, -CARVE_SEAM_INSET)) { carvedTriangles++; continue; }
         kept.push(ia, ib, ic);
       }
       geo.setIndex(kept);
     }
-    if (COAST) geo.computeVertexNormals();                 // the rim slopes want real shading
-    const plate = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+    if (COAST || CFG.CONTINENT_RELIEF_V1 !== false) geo.computeVertexNormals(); // coast + country slopes want real shading
+    let plateMat = new THREE.MeshLambertMaterial({
       vertexColors: true,
       // Positive polygon offset pushes this UNDERLAY away in depth space. It
       // protects the few seam triangles even when 0.06 world units quantise to
       // the same aircraft-distance depth value as a runway or road.
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 8,
-    }));
+    });
+    // Keep the dry continent's colour identity through aerial haze. Normal fog
+    // made every point beyond the short city fog wall equal the sky's cyan and
+    // therefore indistinguishable from flat water. This retains atmospheric
+    // depth at distance while keeping grass/dirt legible from aircraft.
+    // Aircraft regularly sees several kilometres of this mesh.  At the normal
+    // city fog rate (and even the former 0.40 multiplier) its green/brown
+    // vertex colours still converged to the horizon grey, creating the exact
+    // visual illusion of a second flat water sheet.  Eight percent keeps a
+    // light atmospheric veil while preserving an unmistakably dry hue.
+    if (CBZ.terrainFogScale) plateMat = CBZ.terrainFogScale(plateMat, 0.08);
+    const plate = new THREE.Mesh(geo, plateMat);
     // interior sits just under the islands' y=0 slabs (no z-fight), well
     // above the sea; carved verts carry their own absolute depth.
     plate.position.set(cx0, COAST ? 0 : -0.06, cz0);
@@ -312,18 +466,25 @@
     plate.userData.terrain = true;         // farcull: backdrop class, never culled
     plate.userData.underlay = true;
     plate.userData.carvedTriangles = carvedTriangles;
+    plate.userData.carveSeamInset = CARVE_SEAM_INSET;
+    // Kept as compact build-time evidence for the visual terrain audit. Some
+    // official assets replace their loading shell asynchronously; recording
+    // the exact carve inputs makes those transient bounds diagnosable later.
+    plate.userData.authoredSurfaceBounds = authoredSurfaceBounds.map(function (b) {
+      return { name: b.name, geometry: b.geometry, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ };
+    });
     city.root.add(plate);
 
     // ---- FRONTIER EXPANSION: real travel distance, not a camera trick -------
     // Four long rural highway legs live wholly OUTSIDE the old authored union,
-    // 104m inside the new plate. Since coastInset() is capped at 42m, even the
-    // road edge retains >50m of signed dry-land clearance. Four navigation
+    // 190m inside the rounded/noisy coast, keeping the road shoulders dry at
+    // straight shores and broad corners. Four navigation
     // beacons sit on the INLAND side of that loop: tall enough to provide scale
     // while approaching, physically reachable, and named on the real map.
     const WALK_IN = COAST ? 44 : -4;
     let frontier = null;
     if (CFG.CONTINENT_EXPANSION_V2 !== false && PAD > LEGACY_PAD + 80) frontier = (function buildFrontier() {
-      const ROAD_W = 12, ROUTE_IN = COAST ? 104 : 36;
+      const ROAD_W = 12, ROUTE_IN = COAST ? 190 : 36;
       const x0 = minX + ROUTE_IN, x1 = maxX - ROUTE_IN;
       const z0 = minZ + ROUTE_IN, z1 = maxZ - ROUTE_IN;
       if (!(x1 - x0 > 600 && z1 - z0 > 600)) return null;
@@ -472,6 +633,11 @@
       frontierRoadMinShore: frontier ? frontier.roadMinShore : null,
       frontierLandmarkMinShore: frontier && frontier.landmarks.length ? Math.min.apply(null, frontier.landmarks.map(l => l.shoreMin)) : null,
       frontierLandmarks: frontier ? frontier.landmarks.length : 0,
+      biomeBlends: biomeBlends.map(function (b) {
+        return { biome: b.biome, name: b.name || b.owner, minX: b.minX, maxX: b.maxX,
+          minZ: b.minZ, maxZ: b.maxZ, areaScale: b.areaScale || null,
+          sources: b.sources ? b.sources.length : 0 };
+      }),
       terrainVertices: pos.count,
     };
 
@@ -481,7 +647,11 @@
     // to the field gradient). One merged mesh, one Basic material whose
     // opacity pulses in onAlways — the shoreline visibly breathes.
     let foamMat = null;
-    if (COAST && CBZ.hash01) (function foam() {
+    // The overhauled ocean shader already owns shore wash/whitecaps using the
+    // same signed field. A second transparent foam mesh was literally another
+    // water-looking surface at a fixed height and crossed the moving waves.
+    // Retain it only for the explicitly selected legacy sea.
+    if (COAST && CBZ.hash01 && CFG.SEA_OVERHAUL === false) (function foam() {
       const wCells = SEG + 1;
       const quads = [];
       function vAt(ix, iz) { return iz * wCells + ix; }
@@ -539,6 +709,7 @@
         depthWrite: false, fog: true,
       });
       const foamMesh = new THREE.Mesh(fgeo, foamMat);
+      foamMesh.name = "legacy-continent-foam";
       foamMesh.renderOrder = 2;
       foamMesh.frustumCulled = false;
       foamMesh.matrixAutoUpdate = false;
@@ -558,7 +729,18 @@
     for (let gx = minX + CELL / 2; gx < maxX; gx += CELL) {
       for (let gz = minZ + CELL / 2; gz < maxZ; gz += CELL) {
         const h = CBZ.hash01 ? CBZ.hash01(Math.floor(gx), Math.floor(gz), 8803) : 1;
-        if (h > 0.34) continue;                              // sparse country, not a forest
+        const coverHit = CBZ.biomeBlendDominantAt ? CBZ.biomeBlendDominantAt(biomeBlends, gx, gz) : null;
+        // Land-cover expansion changes ecology as well as colour: forest and
+        // alpine transitions thicken with trees, farm verges stay sparse, and
+        // the desert opens up. Density fades naturally with the same weight.
+        let density = 0.34;
+        if (coverHit) {
+          if (coverHit.biome === "forest") density += 0.48 * coverHit.weight;
+          else if (coverHit.biome === "snow") density += 0.20 * coverHit.weight;
+          else if (coverHit.biome === "farmland") density -= 0.11 * coverHit.weight;
+          else if (coverHit.biome === "desert") density -= 0.22 * coverHit.weight;
+        }
+        if (h > Math.max(0.08, Math.min(0.84, density))) continue;
         const jx = gx + ((CBZ.hash01 ? CBZ.hash01(gx, gz, 8804) : 0.5) - 0.5) * CELL * 0.8;
         const jz = gz + ((CBZ.hash01 ? CBZ.hash01(gx, gz, 8805) : 0.5) - 0.5) * CELL * 0.8;
         if (insideAnything(jx, jz, 14)) continue;            // never dress a place
@@ -570,14 +752,19 @@
         // over a removed triangle and appear to grow straight out of the sea.
         if (insideAuthoredSurface(jx, jz, 12)) continue;
         if (COAST && shoreField(jx, jz) < 16) continue;      // never dress the water/sand
-        spots.push({ x: jx, z: jz, h });
+        spots.push({ x: jx, z: jz, h, cover: coverHit });
       }
     }
     if (spots.length) {
       const dummy = new THREE.Object3D();
-      const nTree = spots.filter((s) => s.h < 0.24).length;
+      function isTreeSpot(s) {
+        if (s.cover && (s.cover.biome === "forest" || s.cover.biome === "snow")) return true;
+        if (s.cover && s.cover.biome === "desert") return false;
+        return s.h < (s.cover && s.cover.biome === "farmland" ? 0.14 : 0.24);
+      }
+      const nTree = spots.filter(isTreeSpot).length;
       const trunkG = new THREE.BoxGeometry(0.5, 2.6, 0.5);
-      const canopyG = new THREE.BoxGeometry(2.6, 2.6, 2.6);
+      const canopyG = new THREE.ConeGeometry(2.0, 4.4, 6);
       const rockG = new THREE.BoxGeometry(1.6, 1.1, 1.4);
       const trunks = new THREE.InstancedMesh(trunkG, new THREE.MeshLambertMaterial({ color: 0x6b4a2a }), Math.max(1, nTree));
       const canopies = new THREE.InstancedMesh(canopyG, new THREE.MeshLambertMaterial({ color: 0x3f7a3f }), Math.max(1, nTree));
@@ -589,14 +776,15 @@
       for (const s of spots) {
         const scale = 0.8 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8806) : 0.5) * 0.7;
         const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8807) : 0.3) * Math.PI * 2;
-        if (s.h < 0.24) {
-          dummy.position.set(s.x, 1.3 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
+        if (isTreeSpot(s)) {
+          const gy = countryHeightAt(s.x, s.z);
+          dummy.position.set(s.x, gy + 1.3 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
           dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
-          dummy.position.y = (2.6 + 1.3) * scale - 0.06;
+          dummy.position.y = (2.6 + 2.15) * scale - 0.06;
           dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
           ti++;
         } else {
-          dummy.position.set(s.x, 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
+          dummy.position.set(s.x, countryHeightAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
           dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
           ri++;
         }

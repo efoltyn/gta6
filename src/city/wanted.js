@@ -36,7 +36,7 @@
   // Steeper at the top: the now-RARE 5★ floods the streets with heavy units so it
   // FEELS overwhelming — a brutal crescendo to match the much harder wanted climb.
   const COP_TARGET = [0, 2, 4, 8, 12, 20];
-  let lastCrimeT = 0, busting = false;
+  let lastCrimeT = 0, busting = false, arrestScene = null;
   // V2 module state: the base-trespass lock, the "military hardware just got
   // stolen" stamp (lets forceStars escalate an air theft to a real 5★), and the
   // per-type theft cooldown. All module-local — never serialized.
@@ -731,18 +731,66 @@
     if (busting || g.busted) return;
     opts = opts || {};
     busting = true; g.busted = true;
-
+    const P = CBZ.player;
+    if (P && P.driving && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+    if (P) { P._cityArrested = true; P.speed = 0; }
+    if (CBZ.playerChar) { CBZ.playerChar.handsUp = true; CBZ.playerChar.cuffed = false; }
+    // Prefer the officer who made contact; cooperative/scripted arrests still
+    // pick the nearest real officer instead of inventing an invisible captor.
+    let cop = opts.cop || null;
+    if (!cop && P) {
+      let bd = 14;
+      for (const c of CBZ.cityCops || []) {
+        if (!c || c.dead) continue;
+        const d = Math.hypot(c.pos.x - P.pos.x, c.pos.z - P.pos.z);
+        if (d < bd) { bd = d; cop = c; }
+      }
+    }
+    if (cop) {
+      cop._arrestingPlayer = true; cop.curTarget = null; cop.npcTarget = null;
+      cop.sees = true; cop.speed = 0; cop.state = "arrest";
+    }
+    arrestScene = { t: 0, dur: opts.peaceful ? 2.2 : 3.0, opts: opts, cop: cop, finished: false };
+  }
+  function finishBustScene(sc) {
+    if (!sc || sc.finished) return;
+    sc.finished = true;
+    const opts = sc.opts || {};
     CBZ.city && CBZ.city.big(opts.bigLabel || (opts.peaceful ? "SURRENDERED" : "BUSTED"));
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     // cooperating (hands up) costs you less than getting dragged in violently
     const frac = opts.peaceful ? 0.25 : 0.5;
     const lost = Math.round((g.cash || 0) * frac);
-    if (lost > 0) { g.cash -= lost; }
+    if (lost > 0) g.cash -= lost;
     if (CBZ.cityEvent) CBZ.cityEvent("arrest", { lost, peaceful: !!opts.peaceful, debt: opts.peaceful ? 0 : 25 }, { noWanted: true });
     if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: opts.note });
     else toJail();
   }
+  CBZ.onUpdate(32.8, function (dt) {
+    const sc = arrestScene;
+    if (!sc || sc.finished || g.mode !== "city") return;
+    sc.t += dt;
+    const P = CBZ.player, ch = CBZ.playerChar, c = sc.cop;
+    if (P) { P._cityArrested = true; P.speed = 0; }
+    if (ch) {
+      ch.handsUp = sc.t < 0.75;
+      ch.cuffed = sc.t >= 0.62;
+      if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+    }
+    // The arresting officer remains a physical participant: close the last
+    // metre, face the player and hold position while the cuffs go on.
+    if (c && !c.dead && P) {
+      c._arrestingPlayer = true; c.curTarget = null; c.npcTarget = null; c.speed = 0;
+      const dx = P.pos.x - c.pos.x, dz = P.pos.z - c.pos.z;
+      if (c.group) c.group.rotation.y = Math.atan2(dx, dz);
+    }
+    if (sc.t >= sc.dur) finishBustScene(sc);
+  });
   function toJail() {
+    if (arrestScene && arrestScene.cop) arrestScene.cop._arrestingPlayer = false;
+    arrestScene = null;
+    if (CBZ.player) CBZ.player._cityArrested = false;
+    if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; }
     busting = false;
     if (CBZ.setMode) CBZ.setMode("escape");
     if (CBZ.setRole) CBZ.setRole("inmate");
@@ -785,7 +833,7 @@
 
   CBZ.cityCrime = crime;
   CBZ.cityBust = bust;
-  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
+  CBZ.cityWantedReset = function () { g.heat = 0; g.wanted = 0; g.busted = false; busting = false; if (arrestScene && arrestScene.cop) arrestScene.cop._arrestingPlayer = false; arrestScene = null; if (CBZ.player) CBZ.player._cityArrested = false; if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; } lastCrimeT = 0; g.cityLastKnown = null; g.cityCopTarget = 0; g.cityMurders = 0; g.cityCopKills = 0; g.cityMasked = false; g.cityCrimeLabel = null; g.cityBounty = 0; g._copsFiredUponT = 0; g._copWoundT = 0; milLock = false; milWarnT = 0; _milTheftT = -1e9; _milHostileT = -1e9; _theftCtx = null; _theftCoolT = {}; if (contract) { clearOurBounty(contract); contract = null; } bountyBoard = []; bountyCooldown = 0; boardT = 0; };   // fired-upon stamps (police.js arrest-first) + V2 military lock/theft stamps + hitman contracts die with the run
 
   // ---- DEATH RESET (PROG owns): on player death, drop the player's STREET INFAMY
   // back toward Lv.1 so the level/title visibly falls and the player re-climbs.

@@ -224,31 +224,11 @@
     if (ped.group) ped.group.rotation.y = Math.atan2(x - ped.pos.x, z - ped.pos.z);
   }
 
-  // ---- speech: prefer social.js' pooled bubbles when exported (CBZ.citySay);
-  //      else a tiny bounded fallback so chats still read. The fallback never
-  //      disposes makeLabelSprite's shared cached materials and never fades.
-  const _bubbles = [];
+  // ---- speech: social.js owns the attributed subtitle surface. There is no
+  //      world-space fallback; if that UI is unavailable, actors simply speak
+  //      without manufacturing a label over their heads.
   function bark(ped, text, color, secs) {
     if (CBZ.citySay) { CBZ.citySay(ped, text, color, secs); return; }
-    if (!ped || ped.dead || !ped.group || !CBZ.makeLabelSprite) return;
-    if (_bubbles.length >= 5) return;                       // hard budget
-    const P = CBZ.player;
-    if (P && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) > 30) return;   // only near the camera
-    const s = CBZ.makeLabelSprite(text, { color: color || "#dfe7ff" });
-    if (!s) return;
-    s.position.y = CBZ.charHeadY ? CBZ.charHeadY(ped) : 1.97; s.scale.set(Math.min(7, 2.6 + text.length * 0.16), 0.8, 1);
-    s.userData.transient = true;
-    ped.group.add(s);
-    _bubbles.push({ s, ped, t: secs || 2.2 });
-  }
-  function tickBubbles(dt) {
-    for (let i = _bubbles.length - 1; i >= 0; i--) {
-      const b = _bubbles[i]; b.t -= dt;
-      if (b.t <= 0 || !b.ped || b.ped.dead || !b.s.parent) {
-        if (b.s.parent) b.s.parent.remove(b.s);             // material is shared/cached — never disposed
-        _bubbles.splice(i, 1);
-      }
-    }
   }
 
   // ---- THE JOB TABLE: every job string the casters deal, mapped onto the city
@@ -456,7 +436,6 @@
       }
       if (!q.peds.length || q.t <= 0) _queues.splice(i, 1);
     }
-    tickBubbles(dt);
   }
 
   // is this ped free to be pulled INTO a chat / held a beat? (the mirror of
@@ -1931,10 +1910,8 @@
     _rampTipT = -1e9;            // a new run starts with a quiet phone
     _rampCD = 12 + rng() * 18;   // a short grace before the first shooter pops
     // a fresh run also clears the somewhere-to-be street furniture: queues/
-    // pairs/moments hold refs/budgets from the OLD city, bubbles hold sprites.
+    // pairs/moments hold refs/budgets from the OLD city.
     _queues = []; _pairs = []; _moments = [];
-    for (let i = _bubbles.length - 1; i >= 0; i--) { const b = _bubbles[i]; if (b.s && b.s.parent) b.s.parent.remove(b.s); }
-    _bubbles.length = 0;
     // fresh city → release the ledger's live bindings (the BOOK itself survives:
     // remembered identities re-deal onto the new population at their spots)
     if (CBZ.cityScheduleNewRun) CBZ.cityScheduleNewRun();

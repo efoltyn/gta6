@@ -48,15 +48,28 @@
   function st(p) { return p && p.restraint ? p.restraint.state : null; }
   function pa() { return CBZ.city && CBZ.city.playerActor; }
 
-  // ---- the cuff look: a steel band on each wrist (bling.js's cuff geometry
-  //      precedent), pooled so a night of collars never re-allocates ----------
-  const CUFF_GEO = CBZ.boxGeom ? CBZ.boxGeom(0.34, 0.07, 0.34) : new THREE.BoxGeometry(0.34, 0.07, 0.34);
-  const CUFF_MAT = CBZ.cmat ? CBZ.cmat(0x8d949e) : new THREE.MeshLambertMaterial({ color: 0x8d949e });
+  // ---- real zip-tie look: a narrow polymer loop at each WRIST plus the short
+  //      bridge joining both hands behind the back. The old 0.34m solid steel
+  //      cubes sat halfway up each forearm and never connected, so the pose read
+  //      as two floating bracelets rather than tied hands. --------------------
+  const CUFF_MAT = CBZ.cmat ? CBZ.cmat(0xd7dbe0) : new THREE.MeshLambertMaterial({ color: 0xd7dbe0 });
+  const ZIP_RING_GEO = new THREE.TorusGeometry(0.155, 0.022, 4, 10);
+  ZIP_RING_GEO._shared = true;
+  const ZIP_LATCH_GEO = CBZ.boxGeom ? CBZ.boxGeom(0.08, 0.055, 0.07) : new THREE.BoxGeometry(0.08, 0.055, 0.07);
+  const ZIP_LINK_GEO = CBZ.boxGeom ? CBZ.boxGeom(0.24, 0.035, 0.035) : new THREE.BoxGeometry(0.24, 0.035, 0.035);
   const cuffPool = [];
   function cuffMesh() {
-    const m = cuffPool.pop() || new THREE.Mesh(CUFF_GEO, CUFF_MAT);
-    m.visible = true;
-    return m;
+    let g = cuffPool.pop();
+    if (!g) {
+      g = new THREE.Group(); g.name = "zip-tie-wrist";
+      const ring = new THREE.Mesh(ZIP_RING_GEO, CUFF_MAT);
+      ring.rotation.x = Math.PI / 2; ring.castShadow = false;
+      const latch = new THREE.Mesh(ZIP_LATCH_GEO, CUFF_MAT);
+      latch.position.set(0.15, 0, 0); latch.castShadow = false;
+      g.add(ring, latch);
+    }
+    g.visible = true;
+    return g;
   }
   function addCuffs(ped) {
     const ch = ped.char; if (!ch || !ch.parts || ped._cuffMeshes) return;
@@ -68,9 +81,19 @@
       // there so the cuff rides the forearm when the elbow bends. Falls back
       // to the old shoulder-frame offset on a legacy single-segment rig.
       const low = arm.userData && arm.userData.low;
-      if (low) { m.position.set(0, -0.22, 0); low.add(m); }
+      if (low) { m.position.set(0, -0.42, 0); low.add(m); }
       else { m.position.set(0, -0.66, 0); arm.add(m); }
       out.push(m);
+    }
+    // The bridge is body-local because cuffPose solves both wrist centres to
+    // this fixed point every frame. It therefore follows running/lean/ragdoll
+    // transforms without a second world-space animation writer.
+    if (ch.body && !ch._zipTieLink) {
+      const link = new THREE.Mesh(ZIP_LINK_GEO, CUFF_MAT);
+      link.name = "zip-tie-bridge";
+      link.position.set(0, 1.26, -0.33);
+      link.castShadow = false; link.receiveShadow = false;
+      ch.body.add(link); ch._zipTieLink = link;
     }
     ped._cuffMeshes = out;
   }
@@ -78,15 +101,51 @@
     if (!ped._cuffMeshes) return;
     for (const m of ped._cuffMeshes) { if (m.parent) m.parent.remove(m); cuffPool.push(m); }
     ped._cuffMeshes = null;
+    const ch = ped.char;
+    if (ch && ch._zipTieLink) {
+      if (ch._zipTieLink.parent) ch._zipTieLink.parent.remove(ch._zipTieLink);
+      ch._zipTieLink = null;
+    }
   }
 
-  // hands pinned behind the back — applied AFTER the anim pass each frame so
-  // animChar's damping can't tug the arms back to idle (the hands-up lesson).
+  // Exact two-bone solve for a wrist target behind the lower back. This runs
+  // AFTER animChar, so gait cannot pull the hands apart. Both targets sit only
+  // 12cm apart on the zip-tie bridge; elbows use an outward pole so shoulders
+  // remain anatomical instead of folding through the torso.
+  const DOWN = new THREE.Vector3(0, -1, 0);
+  const ikU = new THREE.Vector3(), ikPole = new THREE.Vector3();
+  const ikElbow = new THREE.Vector3(), ikDir = new THREE.Vector3();
+  const ikInv = new THREE.Quaternion();
+  function pinArm(arm, side) {
+    if (!arm) return;
+    const low = arm.userData && arm.userData.low;
+    if (!low) return;
+    arm.position.z = 0;
+    const sx = arm.position.x, sy = arm.position.y, sz = arm.position.z;
+    const tx = side * 0.06, ty = 1.24, tz = -0.34;
+    const L1 = 0.44, L2 = 0.46;
+    ikU.set(tx - sx, ty - sy, tz - sz);
+    let d = Math.max(0.05, Math.min(L1 + L2 - 0.002, ikU.length()));
+    ikU.multiplyScalar(1 / Math.max(ikU.length(), 1e-5));
+    const along = (L1 * L1 - L2 * L2 + d * d) / (2 * d);
+    const bend = Math.sqrt(Math.max(0, L1 * L1 - along * along));
+    ikPole.set(side, 0, 0).addScaledVector(ikU, -side * ikU.x);
+    if (ikPole.lengthSq() < 1e-5) ikPole.set(0, 1, 0);
+    ikPole.normalize();
+    ikElbow.set(sx, sy, sz).addScaledVector(ikU, along).addScaledVector(ikPole, bend);
+    ikDir.copy(ikElbow).sub(arm.position).normalize();
+    arm.quaternion.setFromUnitVectors(DOWN, ikDir);
+    // Desired forearm direction in the shoulder group's local frame.
+    ikDir.set(tx, ty, tz).sub(ikElbow).normalize();
+    ikInv.copy(arm.quaternion).invert();
+    ikDir.applyQuaternion(ikInv).normalize();
+    low.quaternion.setFromUnitVectors(DOWN, ikDir);
+  }
   function cuffPose(ped) {
     const ch = ped.char; if (!ch || !ch.parts) return;
     const la = ch.parts.la, ra = ch.parts.ra;
-    if (la) { la.rotation.set(0.55, 0, 0.42); la.position.z = -0.08; }
-    if (ra) { ra.rotation.set(0.55, 0, -0.42); ra.position.z = -0.08; }
+    pinArm(la, 1);
+    pinArm(ra, -1);
   }
 
   // ---- who's actually GOT a charge coming (the desk only pays for real

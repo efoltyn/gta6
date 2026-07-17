@@ -131,6 +131,24 @@
     return (a.hunt > 0 || a.huntPlayer > 0) && !a.dead && !(a.ko > 0) && !a.escaped;
   }
 
+  // One binary fact for every tactical surface: is this LIVE actor currently
+  // committed to harming/capturing the player?  Cops, gangs, terrorists,
+  // soldiers and predators all publish through their real brain state; map and
+  // overhead UI no longer guess from costume ("all cops red") or weapon alone.
+  function cityTargetsPlayer(a) {
+    if (!a || a.dead || (a.ko || 0) > 0 || a.escaped) return false;
+    const pa = CBZ.city && CBZ.city.playerActor;
+    if (a.animal) return a.state === "charge" || a.state === "stalk" || a.attackPlayer === true || a.targetPlayer === true || a.target === pa;
+    if (a.curTarget === pa || a.npcTarget === pa || a.rage === pa || a.target === pa || a.targetActor === pa || a._aimTgt === pa) return true;
+    if (a.huntPlayer > 0 || a.attackPlayer === true || a.targetPlayer === true) return true;
+    // Some faction brains store the literal player record instead of the city
+    // adapter.  Accept those explicit pointers, but never infer hostility just
+    // because an actor is armed or belongs to an organization.
+    if (a.curTarget === CBZ.player || a.rage === CBZ.player || a.target === CBZ.player || a.targetActor === CBZ.player) return true;
+    return false;
+  }
+  CBZ.cityTargetsPlayer = cityTargetsPlayer;
+
   function guardish(a) {
     return !!(a && (a.wedge || a.kind === "guard" || a.kind === "warden"));
   }
@@ -158,7 +176,25 @@
     // hunt/snitch/approach chevrons ride the PRISON rosters (CBZ.guards/npcs);
     // the city has its own actors. Skip in city — the concat below allocated a
     // fresh array every frame in every mode for nothing.
-    if (CBZ.game && CBZ.game.mode === "city") return;
+    if (CBZ.game && CBZ.game.mode === "city") {
+      const bob = 0.10 * Math.sin(CBZ.now * 0.006);
+      function markCity(a) {
+        if (!a || !a.group) return;
+        if (!a._marker) { a._marker = makeMarker(); a.group.add(a._marker); }
+        const on = cityTargetsPlayer(a);
+        a._marker.visible = on;
+        if (on) {
+          const ay = a.animal ? Math.max(1.1, ((a.species && a.species.scale) || 1) * 2.1) : headY(a);
+          a._marker.position.y = ay + bob;
+          a._marker.scale.setScalar(a.animal ? 0.62 : 0.72);
+        }
+      }
+      const peds = CBZ.cityPeds || [], cops = CBZ.cityCops || [], wild = CBZ.cityWildlife || [];
+      for (let i = 0; i < peds.length; i++) markCity(peds[i]);
+      for (let i = 0; i < cops.length; i++) markCity(cops[i]);
+      for (let i = 0; i < wild.length; i++) markCity(wild[i]);
+      return;
+    }
     const bob = 0.12 * Math.sin(CBZ.now * 0.006);
     const all = CBZ.guards.concat(CBZ.npcs);
     for (const a of all) {

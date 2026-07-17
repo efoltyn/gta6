@@ -42,8 +42,8 @@
   if (!CBZ.CITY_TP) CBZ.CITY_TP = {
     // (values mirror src/city/camera.js — the authoritative copy; keep in sync)
     HEIGHT: 1.7,       // rig pivot height — a touch above the head
-    DIST: 4.0,         // behind-the-back distance (Fortnite default frame)
-    SIDE: 0.55,        // subtle lateral offset RIGHT — char just left of centre
+    DIST: 4.35,        // three-pivot follow boom
+    SIDE: 0.68,        // explicit right-shoulder offset
     PITCH: 0.10,       // default orbit pitch on city entry — mild down-gaze
     LOOK_Y: 1.52,      // look-target height above feet
     LEAD: 4.6,         // forward look-ahead
@@ -53,8 +53,8 @@
     FOV: 60,           // base FOV
     // ARMED / ADS tier: armed-at-rest = the SAME frame as relaxed (holding a gun
     // doesn't move the camera); only RMB/ADS punches to the tight over-shoulder.
-    DIST_AIM_BASE: 4.0,  DIST_AIM_ADS: 2.4,
-    SIDE_AIM_BASE: 0.55, SIDE_AIM_ADS: 0.85,
+    DIST_AIM_BASE: 4.35, DIST_AIM_ADS: 2.65,
+    SIDE_AIM_BASE: 0.68, SIDE_AIM_ADS: 1.12,
     FOV_AIM_BASE: 60,    FOV_AIM_ADS: 50,
     HEIGHT_AIM_BASE: 1.7, HEIGHT_AIM_ADS: 1.58,
     PITCH_LOOK: 1.0,   // how strongly the armed look target follows player pitch (FIX 1: aim vertically + stable framing)
@@ -561,7 +561,7 @@
     if (frontK > 0) { yaw += Math.PI * frontK; yawView += Math.PI * frontK; }
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
-    const targetSide = TP ? TP.SIDE * 0.25 : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
+    const targetSide = TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
     const camSide = TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0));
     const baseX = tx + rightX * targetSide;
     const baseY = ty + (!TP && shoulder ? 0.08 : 0);

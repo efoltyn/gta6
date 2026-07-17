@@ -112,6 +112,12 @@
   };
   const TAG_ICON = { weapon: "🔫", food: "🍔", drug: "💊", wearable: "💎", valuable: "💰", throwable: "🧨", tool: "🧰", ammo: "📦", resource: "📦" };
   function iconFor(name) { return ICON[name] || TAG_ICON[itemTag(name)] || "▪"; }
+  function weaponFace(id, name, className) {
+    let src = "";
+    try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {}
+    return src ? "<img class='" + (className || "gunThumb") + "' src='" + src + "' alt=''>"
+      : "<span class='ic'>" + iconFor(name) + "</span>";
+  }
 
   // ============================================================
   //  SLOT MODEL — entries are plain JSON (never a mesh / THREE ref):
@@ -770,6 +776,7 @@
       "display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none}" +
       ".ci2Slot:hover{box-shadow:inset 0 0 0 2px rgba(125,231,255,.55),inset 2px 2px 0 rgba(0,0,0,.35)}" +
       ".ci2Slot .ic{font-size:22px;line-height:1;pointer-events:none;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}" +
+      ".ci2Slot .gunThumb{display:block;width:42px;height:30px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
       ".ci2Slot .ct{position:absolute;right:2px;bottom:1px;font-size:11px;font-weight:800;color:#fff;pointer-events:none;text-shadow:1px 1px 0 #000,0 0 3px #000}" +
       ".ci2Slot .eq{position:absolute;left:2px;top:1px;font-size:9px;font-weight:800;color:#7de7ff;pointer-events:none;text-shadow:0 1px 2px #000}" +
       ".ci2Slot.equipped{box-shadow:0 0 0 2px rgba(125,231,255,.8),inset 2px 2px 0 rgba(0,0,0,.35)}" +
@@ -780,6 +787,7 @@
       ".ci2Hint{grid-column:1/-1;font-size:10px;color:#7f8ba0;margin-top:2px}" +
       // cursor ghost
       "#ci2Cursor{position:fixed;z-index:250;pointer-events:none;display:none;transform:translate(-50%,-50%);font-size:24px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.7))}" +
+      "#ci2Cursor .gunThumb{width:64px;height:40px;object-fit:contain}" +
       "#ci2Cursor .ct{font-size:12px;font-weight:800;color:#fff;text-shadow:1px 1px 0 #000;vertical-align:bottom}" +
       // chest panel
       "#ci2Chest{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:130;display:none;flex-direction:column;gap:10px;" +
@@ -809,7 +817,7 @@
     let inner = "";
     if (e) {
       const equipped = isGun(e) ? (CBZ.currentWeaponId === e.id && !g.cityHolstered) : (isMelee(e) && g.cityMeleeWeapon === e.name);
-      inner = "<span class='ic'>" + iconFor(e.name) + "</span>" +
+      inner = (isGun(e) ? weaponFace(e.id, e.name) : "<span class='ic'>" + iconFor(e.name) + "</span>") +
         (e.kind === "item" && e.count > 1 ? "<span class='ct'>" + e.count + "</span>" : "") +
         (equipped ? "<span class='eq'>EQ</span>" : "");
       return "<div class='ci2Slot" + (equipped ? " equipped" : "") + "' data-g='" + gridKey + "' data-i='" + i + "' title='" +
@@ -830,14 +838,7 @@
     let html = "";
     for (let i = 0; i < grid.length; i++) html += cellHtml(grid[i], gridKey, i);
     if (withFooter) {
-      const E = econ();
-      const owned = E ? E.count("Chest") : 0;
-      html += "<div class='ci2Foot'>" +
-        (owned > 0
-          ? "<button type='button' class='ci2Btn' data-act='place'>🧰 Place Chest (" + owned + " owned)</button>"
-          : "<button type='button' class='ci2Btn' data-act='buy'>🧰 Buy &amp; Place Chest — $" + CHEST_COST + "</button>") +
-        "</div>" +
-        "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
+      html += "<div class='ci2Hint'>Click: move stack · Right-click: half / place one · Weapons: right-click equips · Shift-click: quick-move · Click backdrop with an item held: drop it</div>";
     }
     el.innerHTML = html;
   }
@@ -863,7 +864,8 @@
     }
     if (cursor) {
       cursorEl.style.display = "block";
-      cursorEl.innerHTML = iconFor(cursor.name) + (cursor.kind === "item" && cursor.count > 1 ? "<span class='ct'>" + cursor.count + "</span>" : "");
+      cursorEl.innerHTML = (isGun(cursor) ? weaponFace(cursor.id, cursor.name) : iconFor(cursor.name)) +
+        (cursor.kind === "item" && cursor.count > 1 ? "<span class='ct'>" + cursor.count + "</span>" : "");
       cursorEl.style.left = ptr.x + "px"; cursorEl.style.top = ptr.y + "px";
     } else cursorEl.style.display = "none";
   }
@@ -1011,8 +1013,6 @@
     const btn = e.target.closest && e.target.closest(".ci2Btn");
     if (btn) {
       e.preventDefault(); e.stopPropagation();
-      if (btn.dataset.act === "place") placeChest({});
-      else if (btn.dataset.act === "buy") placeChest({ buy: true });
       renderAllGrids();
     }
   }
@@ -1185,6 +1185,7 @@
     for (let i = 0; i < bar.length && i < 9; i++) {
       const b = bar[i];
       const face = b.kind === "item" ? "<span class='ic'>" + iconFor(b.item || b.label) + "</span>"
+        : b.kind === "gun" ? weaponFace(b.id, b.label)
         : "<span class='s'>" + String(b.short || b.label || "?").slice(0, 6) + "</span>";
       html += "<div class='ci2Slot" + (b.active ? " sel" : "") + "' data-i='" + i + "'>" + face +
         (b.count != null && b.count > 1 ? "<span class='ct'>" + (b.count | 0) + "</span>" : "") + "</div>";

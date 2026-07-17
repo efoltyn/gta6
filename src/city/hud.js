@@ -131,6 +131,7 @@
         "#cHud .cSlot .key{position:absolute;left:3px;top:1px;font-size:8px;font-weight:800;color:var(--hud-dim);line-height:1}" +
         "#cHud .cSlot>.ic{font-size:18px;line-height:1}" +
         "#cHud .cSlot .ic.gun{font-size:20px;line-height:1;color:var(--hud-ink);transform:scaleX(1.25)}" +
+        "#cHud .cSlot .gunModel{display:block;width:42px;height:27px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
         "#cHud .cSlot .a{font-size:10px;color:var(--hud-dim);line-height:1.1;margin-top:1px}" +
         "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700;letter-spacing:.5px}" +
         // item chip: a glyph (or short name) over a small ×count badge, sharing
@@ -855,20 +856,25 @@
       const dx = pd.pos.x - px, dz = pd.pos.z - pz; if (dx * dx + dz * dz > R * R) continue;
       S(pd.pos.x, pd.pos.z); dot(_p[0], _p[1], "#5ad17a", 2.4);
     }
-    // armed offenders & rampagers (orange) and mob bosses (gold) — danger you can hunt or flee
+    // Threats are red only while their LIVE brain targets the player. Merely
+    // carrying a gun or wearing gang colours is not the same thing as attacking.
     if (CBZ.cityPeds) for (const pd of CBZ.cityPeds) {
       if (pd.dead || pd.gang === "player" || pd.companion) continue;
       const dx = pd.pos.x - px, dz = pd.pos.z - pz; const d2 = dx * dx + dz * dz; if (d2 > R2) continue;
       if (pd.isBoss || pd.rank === "boss") { blip(pd.pos.x, pd.pos.z, (x, y) => diamond(x, y, "#ffd451", 4 + pulse), true); continue; }
-      const rampage = (pd.npcWanted | 0) >= 2 || (pd.rage && pd.armed);
-      if (rampage) { blip(pd.pos.x, pd.pos.z, (x, y) => tri(x, y, "#ff7a2a", 4), true); continue; }
-      if (pd.armed && d2 < 60 * 60) { S(pd.pos.x, pd.pos.z); dot(_p[0], _p[1], "#ff5b5b", 2.2); }
+      if (CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(pd)) { blip(pd.pos.x, pd.pos.z, (x, y) => tri(x, y, "#ff3b35", 4), true); continue; }
     }
-    // cops (cyan) — when you're wanted they tint hot-red and off-map ones clamp to
-    // the rim so you can read where the heat is coming from.
+    // Cops turn red only once that specific officer is assigned to you; idle
+    // beat cops stay cyan even while another unit owns the chase.
     for (const c of CBZ.cityCops) {
-      if (c.dead) continue; const col = wanted > 0 ? "#ff6a5a" : "#5bd0ff";
-      blip(c.pos.x, c.pos.z, (x, y, rim) => { dot(x, y, col, rim ? 2.6 : 2.4); }, wanted > 0);
+      if (c.dead) continue; const hot = !!(CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(c));
+      const col = hot ? "#ff3b35" : "#5bd0ff";
+      blip(c.pos.x, c.pos.z, (x, y, rim) => { dot(x, y, col, hot ? (rim ? 3.0 : 2.8) : 2.2); }, hot);
+    }
+    // Predators/charging herd animals use the exact same red threat language.
+    for (const a of CBZ.cityWildlife || []) {
+      if (!a || a.dead || !(CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(a))) continue;
+      blip(a.pos.x, a.pos.z, (x, y, rim) => { dot(x, y, "#ff3b35", rim ? 3.0 : 2.7); }, true);
     }
 
     // ---- objective + waypoint ----
@@ -1043,6 +1049,17 @@
     if (/pistol|sidearm|9mm/.test(id)) return "◒";
     return "◆";
   }
+  function hotbarGunFace(meta, directId) {
+    const w = meta && meta.w;
+    // Unified hotbar entries already carry the canonical engine id. Prefer it
+    // over a label round-trip so every gun gets the exact same procedural
+    // thumbnail used by the full I inventory.
+    const id = directId || (w && (w.id || w.key));
+    let src = "";
+    try { if (id && CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id); } catch (e) {}
+    return src ? "<img class='gunModel' src='" + src + "' alt=''>"
+      : "<span class='ic gun'>" + hotbarGunGlyph(meta) + "</span>";
+  }
   function ammoReadout(cur, mag, reserve, reloading) {
     // Instrumentation only: reload is a glyph and all remaining characters are
     // numbers. The old RELOADING/RES prose repeated what the animation conveys.
@@ -1073,7 +1090,7 @@
           } else if (e.kind === "gun") {
             // Weapon silhouette + slot number. Empty is ∅; live rounds stay in
             // the numeric ammo instrument below.
-            const m = weaponMetaByLabel(e.label, e.short);
+            const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
             let ammoTxt = "";
             if (!held && m && fps && fps.rounds && fps.reserves) {
               const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
@@ -1081,7 +1098,7 @@
               if (cur + res <= 0) ammoTxt = "<span class='a dry'>∅</span>";
             }
             html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              "<span class='key'>" + (bi + 1) + "</span><span class='ic gun'>" + hotbarGunGlyph(m) + "</span>" + ammoTxt + "</div>";
+              "<span class='key'>" + (bi + 1) + "</span>" + hotbarGunFace(m, e.id) + ammoTxt + "</div>";
           } else if (e.kind === "item") {
             // Usable item: catalog glyph + count. Unknowns deliberately use a
             // neutral pack icon instead of falling back to an item name.
@@ -1098,7 +1115,7 @@
         for (let bi = 0; bi < bar.length; bi++) {
           const e = bar[bi];
           if (e.kind !== "gun" || !e.active) continue;
-          const m = weaponMetaByLabel(e.label, e.short);
+          const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
           let cur = 0, mag = 0, res = 0, reloading = false;
           // effective mag capacity respects a fitted extended/drum mag (gunmods.js)
           const magCap = m ? (CBZ.gunModsMag ? CBZ.gunModsMag(m.w.id || m.w.key, m.w.mag || 0) : (m.w.mag || 0)) : 0;
@@ -1158,7 +1175,7 @@
           if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (minimalCity ? "∅" : "DRY") + "</span>";
         }
         html += "<div class='cSlot" + (held ? " held" : "") + "'>" +
-          (minimalCity ? "<span class='ic gun'>" + hotbarGunGlyph(m) + "</span>" : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
+          (minimalCity ? hotbarGunFace(m, id) : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
       }
     }
     slotsEl.innerHTML = html;
@@ -1350,7 +1367,7 @@
       s += "|" + (e.kind || "") + ":" + (e.short || e.label || "") + (e.active ? "*" : "");
       if (e.kind === "item") s += "#" + (e.count | 0);
       if (e.kind === "gun" && e.active && fps && fps.rounds && fps.reserves) {
-        const m = weaponMetaByLabel(e.label, e.short);
+        const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
         const k = m ? m.i : -1;
         s += "@" + (k >= 0 ? fps.rounds[k] : "") + "/" + (k >= 0 ? fps.reserves[k] : "") + (fps.reloading > 0 ? "r" : "");
       }

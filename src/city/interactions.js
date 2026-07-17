@@ -171,8 +171,51 @@
   }
   function labelOf(o, t, ctx) { return typeof o.label === "function" ? o.label(t, ctx) : o.label; }
 
-  // resolve the visible rows for a candidate: slot winners + tap/hold pairs.
-  // Returns [{key, hold, label, bad, opt}, ...] or null when nothing applies.
+  // ---- social weight: does this person consider the player worth hearing? ---
+  // Level is the loudest signal (a Lv.1 nobody cannot walk up to a Lv.80 boss
+  // and issue meaningful requests), but an existing relationship and permanent
+  // named-identity history can earn a hearing.  This is one shared read so the
+  // prompt, the dossier and future dialogue all agree about who matters.
+  function interactionStanding(t) {
+    const pl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1;
+    const tl = CBZ.cityLevel ? CBZ.cityLevel(t) : 1;
+    const r = t && (t.relPlayer || (CBZ.cityRel && CBZ.cityRel(t)));
+    let score = 50 + (pl - tl) * 2.25;
+    if (r) score += (r.respect || 0) * 0.28 + (r.loyalty || 0) * 0.22 +
+      (r.affection || 0) * 0.10 + (r.fear || 0) * 0.06 - (r.grudge || 0) * 0.25;
+    let ident = null;
+    if (t && t._identityId && CBZ.cityIdentities && CBZ.cityIdentities.get) ident = CBZ.cityIdentities.get(t._identityId);
+    if (ident && ident.history) score += Math.min(12, ident.history.length * 2);
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const gap = tl - pl;
+    let tier = "commands attention";
+    if (score < 15) tier = "ignored";
+    else if (score < 32) tier = "unlikely to listen";
+    else if (score < 55) tier = "heard";
+    else if (score < 75) tier = "matters";
+    return { playerLevel: pl, targetLevel: tl, gap, score, tier, canInfluence: score >= 25 || (r && (r.loyalty >= 55 || r.affection >= 65)) };
+  }
+  CBZ.cityInteractionStanding = interactionStanding;
+
+  // Only consensual/social asks are standing-gated.  Getting in a vehicle,
+  // buying an item, surrendering, arresting, looting or committing violence is
+  // a physical action and must never become impossible because of a level gap.
+  const SOCIAL_ID = /(talk|chat|flirt|propose|recruit|hire|directions|compliment|fan|favor|prospect|claim-crew|patch-in|payroll|promote|roll|lead|smoke|alibi|license|range|meet|ask)/i;
+  function isHuman(t) { return !!(t && !t.animal && (t.kind === "cop" || t.kind === "security" || t.char || t.vendor || t.relPlayer)); }
+  function standingGates(o, t) { return isHuman(t) && !o.bad && SOCIAL_ID.test(String(o.id || "") + " " + String(o.label || "")); }
+  function rememberChoice(t, verb, yes) {
+    if (!t || !t._identityId || !CBZ.cityIdentities || !CBZ.cityIdentities.get) return;
+    const rec = CBZ.cityIdentities.get(t._identityId);
+    if (!rec || !Array.isArray(rec.history)) return;
+    rec.history.push({ t: yes ? "interaction-yes" : "interaction-no", at: Date.now ? Date.now() : 0, verb: String(verb || "") });
+    // Identity history is durable, not an unbounded telemetry log.
+    if (rec.history.length > 40) rec.history.splice(0, rec.history.length - 40);
+  }
+
+  // Resolve ONE context proposal.  Every interaction in the city now has the
+  // same grammar: E = YES, I = NO.  Authored registries may still contribute
+  // many possible verbs; priority/context chooses the one that makes sense now
+  // instead of dumping a five-key action list on the player.
   function resolveRows(cand, ctx) {
     const t = cand.t, gp = !!cand.gunpoint;
     let pool = [];
@@ -182,30 +225,28 @@
     const pass = [];
     for (const o of pool) if (passes(o, t, ctx, gp, cand.d, cand)) pass.push(o);
     if (!pass.length) return null;
-    // slot winners: per (slot, tap/hold) keep the highest prio
-    const win = Object.create(null);      // "e0"/"e1"… -> option
-    const free = [];                       // unslotted, placed afterwards by prio
-    for (const o of pass) {
-      if (!o.slot) { free.push(o); continue; }
-      const k = o.slot + (o.hold ? 1 : 0);
-      if (!win[k] || o.prio > win[k].prio) win[k] = o;
+    function choiceScore(o, i) {
+      let s = (o.prio || 0) * 10 - i * 0.001;
+      if (o.slot === "e") s += 18;                 // authored primary remains primary
+      if (!gp && o.bad) s -= 240;                   // conversation before random assault
+      if (gp) {
+        if (o.id === "gp-rob") s += 500;           // least-destructive demand first
+        if (/execute|kill/i.test(o.id || "")) s -= 500;
+      }
+      return s;
     }
-    free.sort((a, b) => b.prio - a.prio);
-    const rows = [];
-    const usedTap = Object.create(null);
-    for (const key of KEYS) {
-      if (win[key + 0]) { rows.push(row(win[key + 0], key)); usedTap[key] = true; }
-      if (win[key + 1]) rows.push(row(win[key + 1], key));
+    let chosen = pass[0], best = choiceScore(chosen, 0);
+    for (let i = 1; i < pass.length; i++) {
+      const s = choiceScore(pass[i], i);
+      if (s > best) { best = s; chosen = pass[i]; }
     }
-    for (const o of free) {       // pour leftovers into untaken tap slots, in key order
-      const key = KEYS.find((k) => !usedTap[k]);
-      if (!key) break;
-      usedTap[key] = true; rows.push(row(o, key));
-    }
-    // keep E first, then I J K L, hold after tap on the same key
-    rows.sort((a, b) => KEYS.indexOf(a.key) - KEYS.indexOf(b.key) || (a.hold ? 1 : 0) - (b.hold ? 1 : 0));
-    return rows.length ? rows : null;
-    function row(o, key) { return { key, hold: !!o.hold, label: labelOf(o, t, ctx), bad: !!o.bad, opt: o }; }
+    const proposal = String(labelOf(chosen, t, ctx) || "Continue").replace(/[?.!]+$/, "");
+    const standing = standingGates(chosen, t) ? interactionStanding(t) : null;
+    const rows = [
+      { key: "e", hold: false, label: "YES", bad: false, opt: chosen, decision: "yes", proposal, standing },
+      { key: "i", hold: false, label: "NO", bad: false, opt: chosen, decision: "no", proposal, standing },
+    ];
+    return rows;
   }
 
   // ---- the shared panel (same DOM + look as the jail card — keep it) ---------
@@ -215,6 +256,7 @@
   let currentScore = -1;
   let fingerprint = "";
   let detAcc = 0;
+  let dismissedTarget = null, dismissT = 0;
 
   function dom() {
     if (panel) return;
@@ -243,7 +285,31 @@
     // which a row resolved before a campaign/state change could otherwise fire
     // from the cached panel or a held key.
     if (!campaignAllows(r.opt, current.t, current)) { dirty = true; return; }
-    r.opt.onSelect(current.t, ctx);
+    const t = current.t, verb = r.proposal || labelOf(r.opt, t, ctx);
+    if (r.decision === "no") {
+      rememberChoice(t, verb, false);
+      if (isHuman(t) && CBZ.cityRelShift) CBZ.cityRelShift(t, current.gunpoint ? "spared" : "snubbed", current.gunpoint ? 0.35 : 0.12);
+      if (r.opt.onDecline) r.opt.onDecline(t, ctx);
+      dismissedTarget = t; dismissT = 1.35;
+      hidePanel();
+      dirty = true;
+      return;
+    }
+    const standing = standingGates(r.opt, t) ? interactionStanding(t) : null;
+    // Force / violence / deal-taking options always land (punch is separate;
+    // tribute/tax/handouts are economic, not "please listen to my speech").
+    const forceYes = !!(r.opt && (r.opt.bad || r.opt.forceYes || /street-offer|gp-|mug|rob|shake|pick/i.test(String(r.opt.id || ""))));
+    if (standing && !standing.canInfluence && !forceYes) {
+      rememberChoice(t, verb, true);
+      if (CBZ.cityRelShift) CBZ.cityRelShift(t, "snubbed", 0.35);
+      if (CBZ.city && CBZ.city.note) CBZ.city.note((t.name || "They") + " ignores you · Lv." + standing.playerLevel + " vs Lv." + standing.targetLevel, 2.0);
+      dismissedTarget = t; dismissT = 2.2;
+      hidePanel(); dirty = true;
+      return;
+    }
+    rememberChoice(t, verb, true);
+    if (standing && CBZ.cityRelShift && /talk|chat|compliment|meet|directions/i.test(String(r.opt.id || ""))) CBZ.cityRelShift(t, "greeted", 0.4);
+    r.opt.onSelect(t, ctx);
     dirty = true;              // verbs change state → re-resolve next pass
   }
 
@@ -266,6 +332,7 @@
   CBZ.onUpdate(39, function (dt) {
     if (g.mode !== "city") { if (current || (panel && panel.style.display)) releasePanel(); return; }
     if (g.state !== "playing" || CBZ.cityMenuOpen || CBZ.player.dead) { if (current) hidePanel(); holdKey = ""; return; }
+    if (dismissT > 0) { dismissT -= dt; if (dismissT <= 0) dismissedTarget = null; }
     pumpHold(dt);
     detAcc += dt; if (detAcc < 1 / 12) return; detAcc = 0;   // ~12 Hz is plenty for a prompt
     const ctx = buildCtx();
@@ -276,6 +343,7 @@
     cands.length = 0;
     const push = (src) => (t, d, extra) => {
       if (!t) return;
+      if (dismissT > 0 && t === dismissedTarget) return;
       cands.push({
         t, d: d == null ? 0 : d, kind: (extra && extra.kind) || src.kind,
         layers: (extra && extra.layers) || src.layers || [], base: src.prio || 0,
@@ -323,18 +391,23 @@
 
     const desc = (descs[pick.kind] && descs[pick.kind](t, ctx)) || { label: "—", note: "" };
     // fingerprint = target + the resolved rows; rebuild DOM only on a real change
-    let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "|";
+    let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "|" +
+      (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
     for (const r of rows) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
     current = pick; currentRows = rows; currentScore = pick.score;
     dom();
-    if (noteEl) noteEl.textContent = desc.note;    // the note refreshes every pass
+    if (noteEl) {
+      const st = rows[0] && rows[0].standing;
+      const weight = st ? " · Lv." + st.playerLevel + "→" + st.targetLevel + " · " + st.tier : "";
+      noteEl.textContent = (rows[0].proposal || "Continue") + "?" + weight;
+    }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;
       if (nameEl) nameEl.textContent = desc.label;
-      // same row style as the jail panel: a key chip + a clean line; hold verbs
-      // say so on the chip; malicious options tint red.
+      // Exactly two decisions everywhere.  The proposition lives in the note;
+      // these rows never mutate into a hidden action wheel.
       if (optsEl) optsEl.innerHTML = rows.map((r, i) =>
-        `<div class="iopt" data-i="${i}"><span class="ikey">${r.hold ? "HOLD " : ""}${r.key.toUpperCase()}</span>` +
+        `<div class="iopt" data-i="${i}"><span class="ikey">${r.key.toUpperCase()}</span>` +
         `<span class="ilab"${r.bad ? " style=\"color:#ff9a9a\"" : ""}>${r.label}</span></div>`
       ).join("");
       showPanel();
@@ -363,6 +436,15 @@
     if (g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || CBZ.player.dead) return;
     const k = e.key.toLowerCase();
+    // E/Y is the physical "use this ride" button. Do this before consulting
+    // the prompt candidate: a pedestrian standing beside an aircraft used to
+    // steal the interaction and could even cuff them while the player was
+    // plainly trying to board the plane. The router also owns vehicle exits.
+    if (k === "e" && CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) {
+      e.preventDefault();
+      holdKey = ""; holdT = 0; holdFired = false;
+      return;
+    }
     if (KEYS.indexOf(k) < 0 || !current || !currentRows.length) return;
     if (e.repeat) { if (k === holdKey) e.preventDefault(); return; }
     const { tap, hold } = rowsFor(k);
@@ -400,7 +482,7 @@
     REACH,
     register, registerFor, registerZone, registerSource, describe, unregister,
     ctx: buildCtx,
-    current: function () { return current ? { target: current.t, kind: current.kind, gunpoint: !!current.gunpoint } : null; },
+    current: function () { return current ? { target: current.t, kind: current.kind, gunpoint: !!current.gunpoint, proposal: currentRows[0] && currentRows[0].proposal } : null; },
     hasSlot: hasSlot,
     refresh: function () { dirty = true; },
     hide: hidePanel,

@@ -23,7 +23,6 @@
 
   const BOT_RADIUS = 0.5;
   const ANIM_DIST2 = 62 * 62;     // beyond this, freeze animation
-  const TAG_DIST2 = 34 * 34;      // beyond this, hide the floating name tag
   let frame = 0;
 
   // bright Roblox-lobby palette so the crowd reads as 100 distinct players
@@ -45,29 +44,6 @@
   const LAST_I = "ABCDEFGHJKLMNPRSTVW";
   function pickName(r) { return pick(FIRST, r()) + " " + LAST_I[(r() * LAST_I.length) | 0] + "."; }
 
-  // billboard name tag, CACHED by text so the crowd shares textures/materials.
-  // Sprites are cheap and LOD-hidden far from the camera (see the update loop).
-  const tagCache = new Map();
-  function tagMaterial(text) {
-    let m = tagCache.get(text);
-    if (!m) {
-      const c = document.createElement("canvas");
-      c.width = 256; c.height = 64;
-      const x = c.getContext("2d");
-      x.font = "bold 28px Fredoka, sans-serif";
-      x.textAlign = "center"; x.textBaseline = "middle";
-      x.lineWidth = 6; x.strokeStyle = "rgba(0,0,0,.72)";
-      x.strokeText(text, 128, 34);
-      x.fillStyle = "#eef4ff";
-      x.fillText(text, 128, 34);
-      const tex = new THREE.CanvasTexture(c);
-      m = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
-      m._shared = true;                 // survives clearSurvivorBots disposal
-      tagCache.set(text, m);
-    }
-    return m;
-  }
-
   function makeBot(x, z, r) {
     const outfit = pick(OUTFIT, r());
     const skin = pick(SKIN, r());
@@ -79,12 +55,9 @@
     ch.group.position.set(x, gy, z);
     ch.group.rotation.y = r() * 6.28;
     const name = pickName(r);
-    const tag = new THREE.Sprite(tagMaterial(name));
-    tag.scale.set(3.0, 0.75, 1); tag.position.y = 3.1; tag.visible = false;
-    ch.group.add(tag);
     const b = {
       char: ch, group: ch.group, pos: ch.group.position,
-      name: name, tag: tag, outfit: outfit, skin: skin,
+      name: name, tag: null, outfit: outfit, skin: skin,
       hp: 100, dead: false, deadT: 0, culled: false,
       baseSpeed: 2.0 + r() * 1.0, speed: 0,
       target: new THREE.Vector3(x, 0, z),

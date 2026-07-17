@@ -14,5 +14,8 @@
   "devDependencies": {
     "three": "^0.164.1",
     "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "web-ifc": "^0.0.77"
   }
 }

@@ -296,7 +296,8 @@
   // the world ledger the first time a character is actually started.
   const originButtons = Array.from(document.querySelectorAll(".origin-btn"));
   function setOrigin(id) {
-    g.cityOrigin = (id === "exec" || id === "barfly") ? id : "tenant";
+    // Exec is the main story path (crash → street → jail risk).
+    g.cityOrigin = (id === "barfly" || id === "tenant") ? id : "exec";
     originButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.origin === g.cityOrigin));
   }
   CBZ.setCityOrigin = setOrigin;
@@ -306,7 +307,7 @@
     // reset, so a plain click is all the intent we need.
     btn.addEventListener("click", () => setOrigin(btn.dataset.origin));
   });
-  setOrigin(g.cityOrigin || "tenant");
+  setOrigin(g.cityOrigin || "exec");
 
   function bindButton(id, fn) {
     const btn = document.getElementById(id);

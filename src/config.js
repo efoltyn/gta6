@@ -565,9 +565,11 @@
   // margin is total coast-plate padding (legacy = 40); continent.js also builds
   // a mapped rural loop and four dry-land navigation beacons in this new belt.
   // URL A/B: ?cfg_CONTINENT_EXPANSION_V2=0 or
-  // ?cfg_CONTINENT_COUNTRY_MARGIN=240.
+  // ?cfg_CONTINENT_COUNTRY_MARGIN=360.  The production default deliberately
+  // leaves about 1.2 km of real, driveable country beyond the authored POI
+  // union; the old 360 m belt still made an aerial world read like a diorama.
   if (CBZ.CONFIG.CONTINENT_EXPANSION_V2 == null) CBZ.CONFIG.CONTINENT_EXPANSION_V2 = true;
-  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null) CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = 360;
+  if (CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN == null) CBZ.CONFIG.CONTINENT_COUNTRY_MARGIN = 1200;
   // PROCEDURAL BACKDROP TERRAIN. Default OFF: decorative horizon mountains are
   // not geography. Real elevation belongs to registered, reachable landmasses
   // (Mount Mercy publishes an actual ground-height field); no fake skyline ring.
@@ -585,6 +587,13 @@
   // jail chapter on every fresh run. The complete authored campaign remains
   // available by setting this flag true before Play.
   if (CBZ.CONFIG.CITY_HITMAN_CAMPAIGN == null) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false;
+  // STREET TALK V2: every civilian is YES / NO / PUNCH. Offer math uses level
+  // gap + max cash they can spare. Flip false to restore the crowded verb menu.
+  if (CBZ.CONFIG.STREET_TALK_V2 == null) CBZ.CONFIG.STREET_TALK_V2 = true;
+  // BADWORDS: dialogue uses {{TOKEN}} placeholders resolved from badwords.env.
+  // Default ON for the full uncensored street voice. Flip false (or
+  // ?cfg_BADWORDS_UNCENSORED=0) to force the censored FILL_* masks.
+  if (CBZ.CONFIG.BADWORDS_UNCENSORED == null) CBZ.CONFIG.BADWORDS_UNCENSORED = true;
   // REAL-PHONE NOTIFICATIONS V2 (owner rule: no 4th-wall notification copy).
   // Every phone notice is a diegetic push from someone/something in-world — a
   // contact texting, the Bank app ("$500 received"), News, the Bounty board, a

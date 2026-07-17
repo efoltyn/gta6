@@ -750,7 +750,16 @@
     // each to a soft, warped influence for cartography so no rectangular zoning
     // plate survives on the terrain map. Facilities and settlements stay labels.
     const covers = [];
-    for (let i = 0; i < regs.length; i++) {
+    const registeredBlends = (A && A.biomeBlends) || [];
+    if (registeredBlends.length && CBZ.biomeBlendWeightAt) {
+      // Use the exact world land-cover oracle: the map and the rendered earth
+      // now share the same enlarged, irregular biome boundaries.
+      for (let i = 0; i < registeredBlends.length; i++) {
+        const s = registeredBlends[i];
+        if (!s || !natural[s.biome]) continue;
+        covers.push({ spec: s, biome: s.biome, rgb: hexRgb(biomePal(s.biome).fill) });
+      }
+    } else for (let i = 0; i < regs.length; i++) {
       const r = regs[i];
       if (!r || r.underlay || isLink(r) || !natural[r.biome]) continue;
       const spanX = r.kind === "circle" ? r.r * 2 : r.maxX - r.minX;
@@ -774,14 +783,18 @@
       let sum = 0, rr = 0, gg = 0, bb = 0;
       let forest = 0, farm = 0, desert = 0, snow = 0;
       for (let i = 0; i < covers.length; i++) {
-        const c = covers[i], f = c.feather;
-        // Two independent low-frequency offsets bend straight edges and round
-        // corners. A finer signed-distance wobble prevents a smooth blur box.
-        const wx = (coverNoise(x, z, 230, c.salt) - 0.5) * f * 1.25;
-        const wz = (coverNoise(x, z, 230, c.salt ^ 0x6d2b79f5) - 0.5) * f * 1.25;
-        const edge = (coverNoise(x, z, 76, c.salt ^ 0x27d4eb2d) - 0.5) * f * 0.7;
-        const d = signedRegionDistance(c.r, x + wx, z + wz) + edge;
-        const w = smooth01((d + f) / (f * 2));
+        const c = covers[i], f = c.feather || 80;
+        let w;
+        if (c.spec && CBZ.biomeBlendWeightAt) {
+          w = CBZ.biomeBlendWeightAt(c.spec, x, z);
+        } else {
+          // Legacy fallback for builds that have no world blend registry.
+          const wx = (coverNoise(x, z, 230, c.salt) - 0.5) * f * 1.25;
+          const wz = (coverNoise(x, z, 230, c.salt ^ 0x6d2b79f5) - 0.5) * f * 1.25;
+          const edge = (coverNoise(x, z, 76, c.salt ^ 0x27d4eb2d) - 0.5) * f * 0.7;
+          const d = signedRegionDistance(c.r, x + wx, z + wz) + edge;
+          w = smooth01((d + f) / (f * 2));
+        }
         if (w <= 0.001) continue;
         const ww = w * w; // deep biome owns its hue; feather stays understated
         sum += ww; rr += c.rgb[0] * ww; gg += c.rgb[1] * ww; bb += c.rgb[2] * ww;
@@ -1394,12 +1407,16 @@
       // REGION names: the real place name (no letter-spacing smear so multi-word
       // names like "Redhollow Woods" stay readable), with a smaller, fainter
       // subtitle below (e.g. "International Airport"). Sized to the region width.
+      const labelledRegions = new Set();
       for (const rg of A.regions || []) {
-        if (isLink(rg) || rg.underlay) continue;
+        if (isLink(rg) || rg.underlay || rg.mapLabel === false) continue;
         const c = regionCentroid(rg);
         const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
         const name = rg.name || rg.biome || "";
         if (!name) continue;
+        const labelKey = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (labelledRegions.has(labelKey)) continue;
+        labelledRegions.add(labelKey);
         // Mini-city builders register both a terrain region and a settlement.
         // Let the collision-aware settlement layer draw that city once.
         if (settlementNames.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
@@ -1410,7 +1427,9 @@
         if ("letterSpacing" in ctx) ctx.letterSpacing = "1.5px";   // map-label tracking (no-op on old canvas)
         ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.strokeText(name, nx, ny);
         ctx.fillStyle = "rgba(228,238,250,.92)"; ctx.fillText(name, nx, ny);
-        if (rg.subtitle) {
+        // Subtitles are useful only after zooming into the city. At the world
+        // fit they duplicated the legend and turned geography into paragraphs.
+        if (rg.subtitle && map.view.z >= 1.65) {
           const ssize = Math.max(8, size * 0.8);
           ctx.font = "600 " + ssize.toFixed(1) + "px Fredoka, sans-serif";
           ctx.lineWidth = 2.4; ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.strokeText(rg.subtitle, nx, ny + size * 0.95);
@@ -1512,10 +1531,16 @@
       drawGangTurf(p);
       compositePlate(plates.lots, p);
       for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
-        const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p, "rgba(232,238,245,.62)", 1.6);
+        const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p,
+          CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(ped) ? "#ff3b35" : "rgba(232,238,245,.62)",
+          CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(ped) ? 3.0 : 1.6);
       }
       for (const car of CBZ.cityCars || []) if (!car.dead) dot(car.pos.x, car.pos.z, p, "rgba(245,245,255,.7)", 2);
-      for (const cop of CBZ.cityCops || []) if (!cop.dead) dot(cop.pos.x, cop.pos.z, p, "#5bd0ff", 2.7);
+      for (const cop of CBZ.cityCops || []) if (!cop.dead) {
+        const hot = CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(cop);
+        dot(cop.pos.x, cop.pos.z, p, hot ? "#ff3b35" : "#5bd0ff", hot ? 3.2 : 2.7);
+      }
+      for (const a of CBZ.cityWildlife || []) if (a && !a.dead && CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(a)) dot(a.pos.x, a.pos.z, p, "#ff3b35", 3.0);
     }
     compositePlate(plates.marks, p);  // region/biome names (glyphs draw live below)
     // ---- MAP_V2 LIVE GLYPH LAYER: fixed-size at the current zoom so nothing
@@ -1611,10 +1636,12 @@
       } else {
         if (map.view.z < 2.4) {
           legend.innerHTML = common +
-            "<span><i style='background:#e6c069'></i>Cities</span>" +
-            "<span><i style='background:#526f43'></i>Terrain</span>" +
-            "<span><i style='background:#d9e1e5'></i>Elevation</span>" +
-            "<span><i style='background:#277e8f'></i>Water depth</span>";
+            "<span><i style='background:#e6c069'></i>City</span>" +
+            "<span><i style='background:#6f9a48'></i>Farm</span>" +
+            "<span><i style='background:#d4a04c'></i>Desert</span>" +
+            "<span><i style='background:#3f7043'></i>Forest</span>" +
+            "<span><i style='background:#e7f2fb'></i>Snow</span>" +
+            "<span><i style='background:#277e8f'></i>Water</span>";
           return;
         }
         // grouped by WHY: Navigation, Threats, Your empire, then the clickable

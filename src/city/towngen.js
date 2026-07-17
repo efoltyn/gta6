@@ -403,16 +403,30 @@
           const da = Math.hypot(a.cx - cx, a.cz - cz), db = Math.hypot(b.cx - cx, b.cz - cz);
           return da - db || a.cx - b.cx || a.cz - b.cz;
         });
-      const count = Math.min(candidates.length, Math.max(1, Math.round(lots.length * (sky.towerFrac == null ? 0.2 : sky.towerFrac))));
+      const frac = sky.towerFrac == null ? 0.2 : sky.towerFrac;
       const minSky = Math.max(1, sky.minStoreys || 3);
-      const maxSky = Math.max(minSky, Math.min(18, (sky.maxStoreys || 8) + (sky.megaChance ? 2 : 0)));
+      const maxSky = Math.max(minSky, Math.min(20, (sky.maxStoreys || 8) + (sky.megaChance ? 2 : 0)));
+      // A real skyline is a CLUSTER, never one absurd needle dropped into a
+      // little town. Only recipes that are actually urban opt in; ports get at
+      // least eight related towers and major finance/casino cores get ten. Farm,
+      // factory and alpine settlements keep their authored low-rise scale.
+      const wantsTall = (sky.landmarkStoreys || 0) >= 12 && (sky.maxStoreys || 0) >= 7 && frac >= 0.16;
+      const requested = wantsTall
+        ? Math.max(sky.megaChance ? 10 : 8, Math.round(lots.length * frac))
+        : 0;
+      const count = Math.min(candidates.length, requested);
+      const landmark = Math.max(maxSky, Math.min(48, sky.landmarkStoreys || maxSky));
       for (let i = 0; i < count; i++) {
+        // Dense crown: the second/third towers remain substantial, then the
+        // cluster tapers into its surrounding mid-rise fabric. This removes the
+        // lonely-super-tall silhouette without making every roof identical.
         const t = i / Math.max(1, count - 1);
-        skylinePlan.set(candidates[i], Math.max(minSky, Math.round(maxSky - (maxSky - minSky) * t)));
+        const crown = Math.round(landmark * (0.96 - 0.54 * Math.pow(t, 0.82)));
+        skylinePlan.set(candidates[i], Math.max(minSky, Math.max(maxSky, crown)));
       }
     }
     function storeysFor(base, ring, lot, isShop) {
-      if (isShop && skylinePlan.has(lot)) return skylinePlan.get(lot);
+      if (skylinePlan.has(lot)) return skylinePlan.get(lot);
       const fall = ring <= 0 ? 1 : ring === 1 ? 0.7 : 0.5;
       return Math.min(TOWN_MAX_STOREYS, Math.max(1, Math.round((base || 1) * fall)));
     }
@@ -446,11 +460,11 @@
       // consumes the identical draw count. With no anchorPlan (V2 off) this is
       // byte-identical to the original loop.
       const roll = rng();                                   // draw #1
-      const forced = anchorPlan && anchorPlan.has(lt);
+      const forced = (anchorPlan && anchorPlan.has(lt)) || skylinePlan.has(lt);
       if (roll > buildProbFor(lt.ring) && !forced) continue;
       const recipe = (cfg.prefabs && cfg.prefabs[lt.zone]) || (cfg.prefabs && cfg.prefabs.default) || null;
       let pick = wpick(recipe, rng);                        // draw #2
-      if (forced) pick = anchorPlan.get(lt) || pick;
+      if (anchorPlan && anchorPlan.has(lt)) pick = anchorPlan.get(lt) || pick;
       if (!pick) continue;
       // building shell?  (kind:'building' or no explicit asset key)
       const isBuilding = !pick.asset || pick.building || pick.kind === "building";

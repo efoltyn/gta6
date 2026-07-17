@@ -159,7 +159,8 @@
     // ---- START = pause ----
     if (edge(pad, B.START) && CBZ.setState) { CBZ.setState("paused"); return; }
 
-    const driving = !!(CBZ.player && CBZ.player.driving);
+    const P = CBZ.player;
+    const driving = !!(P && P.driving);
     const lx = dz(axis(pad, 0), DEAD_MOVE), ly = dz(axis(pad, 1), DEAD_MOVE);
     let rx = dz(axis(pad, 2), DEAD_LOOK), ry = dz(axis(pad, 3), DEAD_LOOK);
     const lt = trigger(pad, B.LT, 4), rt = trigger(pad, B.RT, 5);
@@ -185,7 +186,17 @@
       if (rt > TRIG_ON) want["w"] = true;       // accelerate
       if (lt > TRIG_ON) want["s"] = true;       // brake / reverse
       if (down(pad, B.RB) || down(pad, B.A)) want[" "] = true;   // handbrake
-      if (edge(pad, B.Y)) tapKey("e");          // get out
+      if (edge(pad, B.Y)) {
+        // Do not synthesize E here. Cars, aircraft and armor each own a
+        // different seat lifecycle, and the interaction panel is deliberately
+        // suppressed while several of those systems have control. Call the
+        // current ride's real exit function so controller Y is symmetrical:
+        // one press gets in, one press gets out.
+        if (P && P._aircraft && CBZ.cityPlayerAircraftExit) CBZ.cityPlayerAircraftExit();
+        else if (P && P._vehicle && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
+        else if (CBZ.cityArmorActive && CBZ.cityArmorActive() && CBZ.cityExitArmor) CBZ.cityExitArmor();
+        else tapKey("e");
+      }
       // keep non-driving edges fresh
       edge(pad, B.LB); edge(pad, B.B); edge(pad, B.X); edge(pad, B.DUP); edge(pad, B.BACK);
       setAim(false); setFire(false);
@@ -207,7 +218,12 @@
       if (edge(pad, B.B) && CBZ.fpsReload) CBZ.fpsReload();          // reload
       if (edge(pad, B.LB) && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); // next weapon
       if (edge(pad, B.RB) && CBZ.fpsPrevWeapon) CBZ.fpsPrevWeapon(); // prev weapon
-      if (edge(pad, B.Y)) tapKey("e");                              // enter vehicle / interact
+      if (edge(pad, B.Y)) {
+        // Large-animal riding does not set P.driving, so dismount it directly;
+        // otherwise Y remains the normal binary interact/board button.
+        if (P && P._rideScale > 1 && CBZ.cityDismount) CBZ.cityDismount();
+        else tapKey("e");
+      }
       if (edge(pad, B.DUP)) tapKey("m");                            // map
       if (edge(pad, B.BACK)) tapKey("Tab");                        // city power
     }

@@ -58,6 +58,21 @@
     return best;
   };
 
+  // Inland lakes use the same rendered ocean, shoreline oracle and movement
+  // rules as the coast. Biomes register only their basin footprint here; the
+  // late continent pass folds every record into its signed water field. This
+  // prevents a biome from inventing a second flat blue material that looks and
+  // behaves differently from the rest of the world's water.
+  CBZ.registerCityWaterBody = function (city, rec) {
+    if (!city || !rec) return null;
+    if (rec.kind === "circle") {
+      if (![rec.cx, rec.cz, rec.r].every(Number.isFinite) || rec.r <= 0) return null;
+    } else if (![rec.minX, rec.maxX, rec.minZ, rec.maxZ].every(Number.isFinite)) return null;
+    city.waterBodies = city.waterBodies || [];
+    city.waterBodies.push(rec);
+    return rec;
+  };
+
   // island/biome modules register a builder here at load time.
   CBZ.addLandmass = function (fn, order) {
     if (typeof fn !== "function") return;
@@ -67,6 +82,116 @@
   // -----------------------------------------------------------------------
   // VISUAL LAND EDGE — a real ring, not another full rectangular plane.
   // -----------------------------------------------------------------------
+  // In the continuous-continent build a separate feather mesh is the wrong
+  // primitive: even a well-shaped skirt can fight the one true ground plate.
+  // Biomes instead register broad ORGANIC land-cover influences here. The
+  // late continent pass bakes those colours into its existing vertices, and
+  // cityBiomeAt uses the same field for grip/weather/wildlife. One surface,
+  // one shape oracle, no square zoning pad and no coplanar overlay.
+  CBZ._biomeBlendSpecs = CBZ._biomeBlendSpecs || [];
+
+  function blendSmooth01(v) {
+    v = v < 0 ? 0 : (v > 1 ? 1 : v);
+    return v * v * (3 - 2 * v);
+  }
+  function blendNoise2(x, z, cell, salt) {
+    const gx = x / cell, gz = z / cell;
+    const ix = Math.floor(gx), iz = Math.floor(gz);
+    const fx = blendSmooth01(gx - ix), fz = blendSmooth01(gz - iz);
+    function h(px, pz) {
+      if (CBZ.hash01) return CBZ.hash01(px, pz, salt);
+      const n = Math.sin(px * 127.1 + pz * 311.7 + salt * 0.017) * 43758.5453;
+      return n - Math.floor(n);
+    }
+    const a = h(ix, iz), b = h(ix + 1, iz), c = h(ix, iz + 1), d = h(ix + 1, iz + 1);
+    const ab = a + (b - a) * fx, cd = c + (d - c) * fx;
+    return ab + (cd - ab) * fz;
+  }
+
+  CBZ.registerBiomeBlend = function (opts) {
+    if (!opts || !opts.owner) return null;
+    const spec = Object.assign({}, opts);
+    spec.biome = spec.biome || spec.owner;
+    spec.seed = Number.isFinite(+spec.seed) ? +spec.seed : 1;
+    spec.inner = spec.inner == null ? 0x65724c : spec.inner;
+    spec.outer = spec.outer == null ? 0x58704c : spec.outer;
+    spec.roundness = Math.max(2, Math.min(6, +spec.roundness || 3.35));
+    spec.featherNorm = Math.max(0.08, Math.min(0.38, +spec.featherNorm || 0.20));
+
+    if (Array.isArray(spec.sources) && spec.sources.length) {
+      spec.sources = spec.sources.map(function (s) {
+        return { x: +s.x || 0, z: +s.z || 0, rx: Math.max(20, +s.rx || 80), rz: Math.max(20, +s.rz || 80) };
+      });
+      spec.minX = Math.min.apply(null, spec.sources.map(function (s) { return s.x - s.rx * 1.28; }));
+      spec.maxX = Math.max.apply(null, spec.sources.map(function (s) { return s.x + s.rx * 1.28; }));
+      spec.minZ = Math.min.apply(null, spec.sources.map(function (s) { return s.z - s.rz * 1.28; }));
+      spec.maxZ = Math.max.apply(null, spec.sources.map(function (s) { return s.z + s.rz * 1.28; }));
+      spec.cx = (spec.minX + spec.maxX) * 0.5; spec.cz = (spec.minZ + spec.maxZ) * 0.5;
+      spec.hx = (spec.maxX - spec.minX) * 0.5; spec.hz = (spec.maxZ - spec.minZ) * 0.5;
+    } else {
+      const cx = +spec.cx || 0, cz = +spec.cz || 0;
+      const hx = Math.max(1, +spec.hx || 1), hz = Math.max(1, +spec.hz || 1);
+      const spread = spec.spread || {};
+      // north is negative-Z on this map; south is positive-Z.
+      spec.coreArea = hx * 2 * hz * 2;
+      spec.minX = cx - hx - Math.max(0, +spread.west || 0);
+      spec.maxX = cx + hx + Math.max(0, +spread.east || 0);
+      spec.minZ = cz - hz - Math.max(0, +spread.north || 0);
+      spec.maxZ = cz + hz + Math.max(0, +spread.south || 0);
+      spec.cx = (spec.minX + spec.maxX) * 0.5; spec.cz = (spec.minZ + spec.maxZ) * 0.5;
+      spec.hx = (spec.maxX - spec.minX) * 0.5; spec.hz = (spec.maxZ - spec.minZ) * 0.5;
+      spec.expandedArea = (spec.maxX - spec.minX) * (spec.maxZ - spec.minZ);
+      spec.areaScale = spec.coreArea > 0 ? spec.expandedArea / spec.coreArea : 1;
+    }
+    CBZ._biomeBlendSpecs.push(spec);
+    return spec;
+  };
+
+  CBZ.biomeBlendWeightAt = function (spec, x, z) {
+    if (!spec) return 0;
+    // Fast reject includes the feather/noise allowance.
+    const margin = Math.max(spec.hx || 0, spec.hz || 0) * 0.34 + 24;
+    if (x < spec.minX - margin || x > spec.maxX + margin || z < spec.minZ - margin || z > spec.maxZ + margin) return 0;
+    const seed = spec.seed || 1;
+    const cell = Math.max(110, Math.min(spec.hx || 300, spec.hz || 300) * 0.48);
+    const warp = Math.max(18, Math.min(spec.hx || 200, spec.hz || 200) * 0.13);
+    const wx = (blendNoise2(x, z, cell, seed ^ 0x51f2) - 0.5) * warp * 2;
+    const wz = (blendNoise2(x, z, cell, seed ^ 0x9e37) - 0.5) * warp * 2;
+    const edge = (blendNoise2(x, z, Math.max(56, cell * 0.38), seed ^ 0x27d4) - 0.5) * 0.22;
+    const p = spec.roundness || 3.35;
+    let signed = -Infinity;
+    if (Array.isArray(spec.sources) && spec.sources.length) {
+      // Smooth union of mountain/forest lobes: their feet merge organically,
+      // but empty corners between distant peaks stay ordinary country.
+      let sum = 0;
+      for (let i = 0; i < spec.sources.length; i++) {
+        const s = spec.sources[i];
+        const dx = Math.abs((x + wx - s.x) / s.rx), dz = Math.abs((z + wz - s.z) / s.rz);
+        const q = Math.pow(Math.pow(dx, p) + Math.pow(dz, p), 1 / p);
+        const v = Math.max(0, 1.16 - q);
+        sum += v * v * v;
+      }
+      signed = Math.pow(sum, 1 / 3) - 0.16 + edge;
+    } else {
+      const dx = Math.abs((x + wx - spec.cx) / Math.max(1, spec.hx));
+      const dz = Math.abs((z + wz - spec.cz) / Math.max(1, spec.hz));
+      const q = Math.pow(Math.pow(dx, p) + Math.pow(dz, p), 1 / p);
+      signed = 1 - q + edge;
+    }
+    const f = spec.featherNorm || 0.20;
+    return blendSmooth01((signed + f) / (f * 2));
+  };
+
+  CBZ.biomeBlendDominantAt = function (specs, x, z) {
+    specs = specs || CBZ._biomeBlendSpecs;
+    let best = null, weight = 0;
+    for (let i = 0; i < specs.length; i++) {
+      const w = CBZ.biomeBlendWeightAt(specs[i], x, z);
+      if (w > weight) { weight = w; best = specs[i]; }
+    }
+    return best ? { spec: best, biome: best.biome, weight: weight } : null;
+  };
+
   // Each biome used to lay a larger, vertex-coloured *rectangle* under its
   // main floor as an "edge blend". From an aircraft that reads as exactly
   // what it is: a stack of overlapping map sections. This helper emits only
@@ -80,7 +205,10 @@
     // flat green shelves above the sea and under neighboring ground; from an
     // aircraft those shelves flickered as a checkerboard. They remain useful
     // only for the legacy separated-archipelago mode.
-    if (!CBZ.CONFIG || CBZ.CONFIG.CITY_CONTINENT !== false) return null;
+    if (!CBZ.CONFIG || CBZ.CONFIG.CITY_CONTINENT !== false) {
+      CBZ.registerBiomeBlend(opts);
+      return null;
+    }
     const cx = +opts.cx || 0, cz = +opts.cz || 0;
     const hx = Math.max(1, +opts.hx || 1), hz = Math.max(1, +opts.hz || 1);
     const feather = Math.max(8, +opts.feather || 72);
@@ -268,6 +396,13 @@
   CBZ.cityBiomeAt = function (x, z) {
     const A = CBZ.city && CBZ.city.arena; if (!A) return "city";
     const reg = CBZ.cityAnyRegion(A, x, z, 0);
+    // Authored facilities/biome cores keep priority. The late continent's
+    // "wilds" bands are only ownership underlay, so allow the organic biome
+    // influence to extend through them. This makes the enlarged land cover
+    // real to traction, weather, wildlife and snowfall—not merely a paint job.
+    if (reg && reg.biome && reg.biome !== "wilds") return reg.biome;
+    const hit = CBZ.biomeBlendDominantAt(A.biomeBlends || CBZ._biomeBlendSpecs, x, z);
+    if (hit && hit.weight >= 0.42) return hit.biome;
     return reg && reg.biome ? reg.biome : "city";
   };
 
@@ -486,6 +621,8 @@
   // one bad biome can never take down the rest of the world.
   CBZ.cityWorldGeo = function (city) {
     city.regions = city.regions || [];
+    CBZ._biomeBlendSpecs.length = 0;
+    city.biomeBlends = CBZ._biomeBlendSpecs;
     CBZ._cityGroundHeightProviders.length = 0;
     CBZ.cityWorkAnchorsReset();        // anchors are rebuilt by the biome builders
     // World geometry is assembled by several modules. Start every pass with

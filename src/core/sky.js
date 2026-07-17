@@ -20,10 +20,9 @@
      (the old daynight skyC multiply) mathematically cannot do this;
      daynight now leaves the dome tint white and this file owns colour.
    - the sun disc grows a big soft additive halo at golden hour/dusk.
-   BUDGET: everything here is ≤8 draw calls (haze band: city only,
-   halo: dusk only) — the old clouds (~36 meshes, one per puff) are ONE
-   InstancedMesh, so the net draw-call count is still DOWN vs the
-   pre-dome build.
+   BUDGET: the authored daylight photograph is the one cloud source. Procedural
+   box/billboard layers are retained only as dormant fallback code and are not
+   mounted or updated, avoiding both the visual double-cloud and two draw calls.
    - assets/sky/day.jpg (2:1 equirect) is used as the day layer when it
      loads; it crossfades OUT at golden hour (the photo has no sunset
      in it) and the procedural gradient takes over.
@@ -106,8 +105,19 @@
   const skyTex = new THREE.CanvasTexture(skyCanvas);
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(850, 32, 20),
-    new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
+    // This is a background, never world geometry. The old depth-tested sphere
+    // sat only 850 m from the camera; once aircraft draw distance grew to
+    // kilometres its lower hemisphere passed the depth test in front of dry
+    // land and painted a fake light-blue/grey "second water" over the map.
+    // Draw it first without touching/testing depth so every real land, ocean,
+    // mountain and building deterministically overwrites it afterward.
+    new THREE.MeshBasicMaterial({
+      map: skyTex, side: THREE.BackSide, fog: false,
+      depthWrite: false, depthTest: false,
+    })
   );
+  dome.renderOrder = -10000;
+  dome.frustumCulled = false;
   rig.add(dome);
   CBZ.skyDome = dome; // modes/survival.js tints this for disaster moods
 
@@ -265,7 +275,14 @@
     [0, "rgba(255,210,150,0.5)"], [0.4, "rgba(255,165,95,0.26)"], [1, "rgba(255,120,60,0)"],
   ]), 200);
 
-  /* ---------------- 5. clouds — ONE InstancedMesh -------------------
+  /* ---------------- 5. legacy procedural clouds (disabled) ---------
+     The daylight photograph already contains the coherent cloud field. The
+     block-puff and radial-plane layers looked synthetic beside it, so do not
+     render a second weather system over the authored sky. Keeping construction
+     code dormant makes missing-photo fallback work easy to revisit without
+     putting mixed cloud styles on screen now. */
+  const PROCEDURAL_CLOUDS = false;
+  /* ---------------- legacy box cloud pool ---------------------------
      The old clouds were ~36 separate meshes (one draw call per puff) and
      only covered the prison + survival island — the city had an empty
      ceiling. Now every puff in every region is one instanced draw call,
@@ -303,9 +320,10 @@
   const cloudInst = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 0.6, 1), cloudMat, clusters.length * PUFFS.length
   );
+  cloudInst.name = "procedural-box-clouds";
   cloudInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   cloudInst.frustumCulled = false; // clusters span all three worlds
-  scene.add(cloudInst);            // world-anchored — NOT on the camera rig
+  if (PROCEDURAL_CLOUDS) scene.add(cloudInst); // world-anchored — NOT on the camera rig
 
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(),
         _q = new THREE.Quaternion(), _s = new THREE.Vector3();
@@ -324,7 +342,7 @@
     }
     cloudInst.instanceMatrix.needsUpdate = true;
   }
-  writeClouds(0);
+  if (PROCEDURAL_CLOUDS) writeClouds(0);
 
   /* ---------------- 5b. billboard cloud layer (Technique 1) ---------
      mrdoob's classic clouds example merged a pile of plane meshes into
@@ -378,10 +396,11 @@
   });
   const bcGeo = new THREE.PlaneGeometry(1, 1);
   const bcInst = new THREE.InstancedMesh(bcGeo, bcMat, BCLOUD_N);
+  bcInst.name = "procedural-billboard-clouds";
   bcInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   bcInst.frustumCulled = false; // camera-relative pool — never off-screen-culled away wrongly
   bcInst.renderOrder = -3;      // behind sun/moon/halo sprites, in front of the dome
-  scene.add(bcInst);            // world-space, NOT parented to the camera rig — mirrors rain's `scene.add`
+  if (PROCEDURAL_CLOUDS) scene.add(bcInst); // world-space, NOT parented to the camera rig
 
   // per-puff scratch (positions/scale only — no per-instance rotation
   // state needed since ALL puffs share one camera-facing quaternion,
@@ -426,7 +445,7 @@
     }
     bcInst.instanceMatrix.needsUpdate = true;
   }
-  writeBillboardClouds(0);
+  if (PROCEDURAL_CLOUDS) writeBillboardClouds(0);
 
   /* ---------------- per-frame sync ----------------------------------
      Runs at order 99 — AFTER daynight (@2), weather's fog lerp (@90),
@@ -436,7 +455,7 @@
   let forcePaint = true, lastPaintAt = -1e9;
   const lastFog = new THREE.Color(-1, -1, -1), lastTint = new THREE.Color(-1, -1, -1);
   let lastKDay = -1, lastGlowK = -1, lastGlowU = -1, lastPhotoK = -1;
-  const _fogFallback = new THREE.Color(0xbfe0ff);
+  const _fogFallback = new THREE.Color(0xb6c4c8);
   function moved(a, b) {
     return Math.abs(a.r - b.r) > 0.006 || Math.abs(a.g - b.g) > 0.006 || Math.abs(a.b - b.b) > 0.006;
   }
@@ -516,20 +535,14 @@
     moonSpr.visible = mop > 0.01;
     if (moonSpr.visible) moonSpr.material.opacity = mop;
 
-    // clouds: drift + day/night shading (white by day, sunset-lit at dusk,
-    // dimmed and pushed toward the haze colour at night)
-    writeClouds(dt);
-    cloudMat.color.setScalar(0.35 + 0.65 * dayness).lerp(fog, 0.12 + night * 0.2 + duskness * 0.25);
-
-    // billboard cloud layer: same day/night/dusk tint recipe as the box-puff
-    // clusters above (one shared look, two techniques) plus a storm-darken
-    // pass so the high layer reads as "weather" too — feature-detected since
-    // weather.js loads AFTER this file in index.html and may not exist yet
-    // on the very first frames (or at all, in a stripped-down build).
-    writeBillboardClouds(dt);
-    const rainI = (CBZ.weather && typeof CBZ.weather.intensity === "number") ? CBZ.weather.intensity : 0;
-    bcMat.color.setScalar(0.35 + 0.65 * dayness).lerp(fog, 0.12 + night * 0.2 + duskness * 0.25);
-    bcMat.color.multiplyScalar(1 - rainI * 0.35); // storm clouds read darker/heavier, not just wetter streets
-    bcMat.opacity = 0.9 - rainI * 0.15; // slightly thins the soft edge in a downpour rather than solid overcast
+    if (PROCEDURAL_CLOUDS) {
+      writeClouds(dt);
+      cloudMat.color.setScalar(0.35 + 0.65 * dayness).lerp(fog, 0.12 + night * 0.2 + duskness * 0.25);
+      writeBillboardClouds(dt);
+      const rainI = (CBZ.weather && typeof CBZ.weather.intensity === "number") ? CBZ.weather.intensity : 0;
+      bcMat.color.setScalar(0.35 + 0.65 * dayness).lerp(fog, 0.12 + night * 0.2 + duskness * 0.25);
+      bcMat.color.multiplyScalar(1 - rainI * 0.35);
+      bcMat.opacity = 0.9 - rainI * 0.15;
+    }
   });
 })();

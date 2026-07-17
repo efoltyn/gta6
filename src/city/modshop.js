@@ -207,9 +207,11 @@
       noz.rotation.x = Math.PI / 2;
       noz.position.set(sx * dims.width * 0.28, dims.height * 0.34, -hl - 0.22);
       grp.add(noz);
-      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.9, 8), M.flame);
-      flame.rotation.x = -Math.PI / 2;
-      flame.position.set(sx * dims.width * 0.28, dims.height * 0.34, -hl - 0.85);
+      const flame = CBZ.createRocketPlume
+        ? CBZ.createRocketPlume({ name: "car-rocket-booster", lightRange: 6 })
+        : new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.9, 8), M.flame);
+      if (!(flame.userData && flame.userData.rocketPlume)) flame.rotation.x = -Math.PI / 2;
+      flame.position.set(sx * dims.width * 0.28, dims.height * 0.34, -hl - 0.48);
       flame.visible = false;
       grp.add(flame);
       flames.push(flame);
@@ -754,9 +756,13 @@
       const fwdX = Math.sin(car.heading), fwdZ = Math.cos(car.heading);
       if (car.vx != null) car.vx += fwdX * add;
       if (car.vz != null) car.vz += fwdZ * add;
-      if (flames) for (let i = 0; i < flames.length; i++) flames[i].visible = true;
+      if (flames) for (let i = 0; i < flames.length; i++) {
+        if (!(CBZ.setRocketPlume && CBZ.setRocketPlume(flames[i], 1, (CBZ.now || performance.now()) * 0.001, 0.9, 0.72))) flames[i].visible = true;
+      }
     } else if (flames) {
-      for (let i = 0; i < flames.length; i++) flames[i].visible = false;
+      for (let i = 0; i < flames.length; i++) {
+        if (!(CBZ.setRocketPlume && CBZ.setRocketPlume(flames[i], 0, 0))) flames[i].visible = false;
+      }
     }
   }
 

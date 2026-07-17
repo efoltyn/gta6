@@ -4,13 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Gang Life</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=route1">
+<link rel="stylesheet" href="css/hud.css?v=diegetictext1">
 <link rel="stylesheet" href="css/screens.css?v=intro1">
 <link rel="stylesheet" href="css/mobile.css?v=ctrl1">
 <link rel="stylesheet" href="css/dashboard.css?v=ranks1">
@@ -157,18 +158,19 @@
            applies the pick at run-start — see that file's header). -->
       <div class="origin-label">CHOOSE YOUR STORY</div>
       <div id="originSelect" class="origin-select" aria-label="Choose your story">
-        <button class="origin-btn" type="button" data-origin="exec"><b>💼 The Executive</b><span>Top floor. Millions. None of it real.</span></button>
+        <button class="origin-btn active" type="button" data-origin="exec"><b>💼 The Executive</b><span>Top floor. Crash. Street. Jail if you slip.</span></button>
         <button class="origin-btn" type="button" data-origin="barfly"><b>🍺 The Barfly</b><span>Thrown out at closing time. In debt.</span></button>
-        <button class="origin-btn active" type="button" data-origin="tenant"><b>🔫 The Tenant</b><span>$12, an air mattress, and a pistol.</span></button>
+        <button class="origin-btn" type="button" data-origin="tenant"><b>🔫 The Tenant</b><span>$12, an air mattress, and a pistol.</span></button>
       </div>
-      <div class="origin-hint">Each life keeps its own money, gear and record. <span class="kbd">U</span> switches in game.</div>
+      <div class="origin-hint">Main path: suit → market crash → level 1. Talk is YES / NO / PUNCH. <span class="kbd">U</span> switches life.</div>
       <details class="controls">
         <summary>Controls</summary>
         <div class="keys">
           <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move · drive</span></div>
           <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch · fire</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact (hold = rough)</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">I J K L</span></span><span class="lab">Card options</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">YES — take the offer</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">NO — refuse</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">PUNCH — start a fight</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map · waypoint</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Z</span></span><span class="lab">Zillow</span></div>
@@ -252,6 +254,11 @@
 <script src="src/vendor/DRACOLoader.js"></script>
 <script src="src/vendor/GLTFLoader.js"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
+<!-- Official Three.js sample loaders used by the farm truck / BIM campus.
+     fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
+<script src="src/vendor/fflate.min.js"></script>
+<script src="src/vendor/3MFLoader.js"></script>
+<script src="src/vendor/RGBELoader.js"></script>
 <!-- procedural backdrop terrain: noise (public-domain simplex/perlin) then
      the terrain builder. BOTH must load before city/world.js runs, since
      buildCity() calls CBZ.buildTerrain() and routes groundHeightAt →
@@ -281,17 +288,17 @@
   } catch (e) {}
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=abandon4"></script>
+<script src="src/config.js?v=worldphysics2"></script>
 <script src="src/core/seed.js"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/interfaces.js?v=arch2"></script>
 
 <!-- 1. core engine -->
-<script src="src/core/scene.js"></script>
+<script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/renderer.js?v=scale3"></script>
 <script src="src/core/lights.js"></script>
-<script src="src/core/sky.js?v=norings1"></script>
-<script src="src/core/daynight.js"></script>
+<script src="src/core/sky.js?v=neutralhaze2"></script>
+<script src="src/core/daynight.js?v=neutralhaze1"></script>
 
 <!-- 2. world geometry -->
 <script src="src/world/materials.js?v=scale1"></script>
@@ -319,7 +326,7 @@
 <script src="src/systems/proptypes.js?v=arch2"></script>
 
 <!-- 3. entities -->
-<script src="src/entities/character.js?v=mounts2"></script>
+  <script src="src/entities/character.js?v=riglock6"></script>
 <script src="src/entities/player.js?v=scale1"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals intentionally disabled. They inferred blood from
@@ -334,7 +341,8 @@
 <script src="src/systems/economy.js?v=pick1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/weapon-data.js?v=guns3"></script>
+<script src="src/weapons/weapon-data.js?v=homing4"></script>
+<script src="src/weapons/optics.js?v=optic1"></script>
 <script src="src/weapons/appearances/sidearm.js?v=fix3"></script>
 <script src="src/weapons/appearances/shotgun.js"></script>
 <script src="src/weapons/appearances/carbine.js"></script>
@@ -346,9 +354,10 @@
 <script src="src/weapons/appearances/revolver.js"></script>
 <script src="src/weapons/appearances/deagle.js"></script>
 <script src="src/weapons/appearances/uzi.js"></script>
-<script src="src/weapons/appearances/sniper.js"></script>
-<script src="src/weapons/appearances/lmg.js"></script>
+<script src="src/weapons/appearances/sniper.js?v=optic2"></script>
+<script src="src/weapons/appearances/lmg.js?v=bipod3"></script>
 <script src="src/systems/actorweapons.js?v=gunorigin1"></script>
+<script src="src/city/weapon_thumbnails.js?v=gunthumb1"></script>
 <script src="src/systems/holsterprops.js?v=mounts2"></script>
 
 <!-- 2c. rooms (use addBox + addPack) -->
@@ -369,7 +378,7 @@
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
 <script src="src/entities/npclife.js?v=life3"></script>
-<script src="src/entities/npc.js?v=scale4"></script>
+<script src="src/entities/npc.js?v=notags1"></script>
 <script src="src/entities/ai.js?v=gore1"></script>
 
 <!-- 4b. remaining systems -->
@@ -377,8 +386,8 @@
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=tpv2"></script>
-<script src="src/systems/physics.js?v=map3"></script>
+<script src="src/systems/camera.js?v=shoulder3"></script>
+<script src="src/systems/physics.js?v=impact4"></script>
 <script src="src/systems/actorcollide.js?v=contact1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life3"></script>
@@ -386,12 +395,12 @@
 <script src="src/systems/detection.js?v=npcgoal51"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <script src="src/systems/capture.js?v=npc-react1"></script>
-<script src="src/systems/markers.js?v=npcgoal54"></script>
+<script src="src/systems/markers.js?v=threats55"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js"></script>
 <script src="src/systems/lockdown.js"></script>
 <script src="src/systems/difficulty.js"></script>
-<script src="src/systems/reactions.js?v=hit1"></script>
+<script src="src/systems/reactions.js?v=hiplock1"></script>
 <script src="src/systems/facial.js?v=glance1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=samples1"></script>
@@ -403,14 +412,14 @@
 <script src="src/systems/interact.js?v=lines3"></script>
 <script src="src/systems/interactions.js?v=mapflow2"></script>
 <script src="src/systems/inventory.js?v=loot1"></script>
-<script src="src/systems/state.js?v=gore3"></script>
+<script src="src/systems/state.js?v=arrest4"></script>
 <script src="src/systems/save.js"></script>
-<script src="src/systems/touch.js?v=camera14"></script>
+<script src="src/systems/touch.js?v=worldtap15"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=pad1"></script>
-<script src="src/systems/fpsmode.js?v=barrel6"></script>
+<script src="src/systems/gamepad.js?v=rideexit2"></script>
+<script src="src/systems/fpsmode.js?v=sharedreticle3"></script>
 <script src="src/systems/gunfx.js?v=shoot2"></script>
 <script src="src/systems/intimidate.js?v=npc-react1"></script>
 
@@ -420,8 +429,8 @@
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=glass1"></script>
 <script src="src/world/disaster_arena.js?v=samples1"></script>
-<script src="src/systems/grapple.js?v=crash5"></script>
-<script src="src/entities/survivorbot.js?v=contact1"></script>
+<script src="src/systems/grapple.js?v=hiplock1"></script>
+<script src="src/entities/survivorbot.js?v=notags1"></script>
 <script src="src/modes/survival.js?v=gore1"></script>
 <script src="src/systems/disasters.js?v=samples1"></script>
 <script src="src/systems/safezone.js?v=zone1"></script>
@@ -433,8 +442,8 @@
      world lazily far from the other two. Must load BEFORE loop.js so its
      frame-work is included in the sort. mode.js defines CBZ.city first; the
      rest augment it. -->
-<script src="src/city/world.js?v=beach1"></script>
-<script src="src/city/buildings.js?v=glasspool2"></script>
+<script src="src/city/world.js?v=terrain7"></script>
+<script src="src/city/buildings.js?v=glassfacades4"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=room1"></script>
 <script src="src/city/citynav.js?v=brains1"></script>
@@ -444,15 +453,20 @@
 <script src="src/city/escalators.js?v=esc1"></script>
 <script src="src/city/roofloot.js?v=roof1"></script>
 <script src="src/city/beach.js?v=beach1"></script>
-<script src="src/city/expansion.js?v=realcars1"></script>
+<script src="src/city/expansion.js?v=waterunify4"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=arch2"></script>
-<script src="src/city/highways.js?v=hwy2"></script>
+<script src="src/city/worldmap.js?v=organicbiomes3"></script>
+<!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
+     the landmass registry so rendering, swimmers, boats and aquatic wildlife
+     all consult the same coast instead of inventing separate radius tests. -->
+<script src="src/city/waterfield.js?v=water3"></script>
+<script src="src/city/highways.js?v=openroads3"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=sims1"></script>
 <script src="src/city/placement.js?v=sims2"></script>
+<script src="src/city/official_assets.js?v=official3"></script>
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
      sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
      findSupport built on top of it + the CBZ.assets/physics.js contracts
@@ -497,14 +511,15 @@
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=settle1"></script>
-<script src="src/city/towngen.js?v=sims1"></script>
-<script src="src/city/island_speedway.js?v=arch2"></script>
-<script src="src/city/island_airport.js?v=arch5"></script>
-<script src="src/city/island_military.js?v=arch3"></script>
-<script src="src/city/biome_desert.js?v=bigdesert4"></script>
-<script src="src/city/biome_forest.js?v=arch2"></script>
-<script src="src/city/biome_farmland.js?v=arch2"></script>
-<script src="src/city/biome_snow.js?v=cull4"></script>
+<script src="src/city/towngen.js?v=skylinecluster4"></script>
+<script src="src/city/island_speedway.js?v=diegetictext1"></script>
+<script src="src/city/island_airport.js?v=airfieldpaint3"></script>
+<script src="src/city/island_military.js?v=livebase4"></script>
+<script src="src/city/biome_desert.js?v=organicdesert7"></script>
+<script src="src/city/biome_forest.js?v=organicforest4"></script>
+<script src="src/city/biome_farmland.js?v=organicfields6"></script>
+<script src="src/city/biome_snow.js?v=organicmountain15"></script>
+<script src="src/city/snowboard.js?v=terrain2"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -523,34 +538,34 @@
 <script src="src/city/wildlife/small_game.js?v=wild1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
 <script src="src/city/wildlife/aquatic.js?v=wild1"></script>
-<script src="src/city/wildlife.js?v=wild3"></script>
-<script src="src/city/wildlife_tame.js?v=wild1"></script>
-<script src="src/city/dogs.js?v=blocky2"></script>
+<script src="src/city/wildlife.js?v=physics5"></script>
+<script src="src/city/wildlife_tame.js?v=mounttap2"></script>
+<script src="src/city/dogs.js?v=physics3"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <script src="src/city/creature_combat.js?v=fight1"></script>
 <script src="src/city/companions.js?v=fight1"></script>
 <script src="src/city/arena_fights.js?v=fight2"></script>
-<script src="src/city/props.js?v=shoot1"></script>
+<script src="src/city/props.js?v=diegetictext1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=purpose1"></script>
 <script src="src/city/adboard.js?v=ad1"></script>
-<script src="src/city/mode.js?v=phone5"></script>
+<script src="src/city/mode.js?v=flightfog6"></script>
 <script src="src/city/economy.js?v=grenade1"></script>
-<script src="src/city/clothes.js?v=fit4"></script>
+<script src="src/city/clothes.js?v=fit5"></script>
 <script src="src/city/outfits.js?v=fits2"></script>
 <script src="src/city/hunger.js?v=roof1"></script>
-<script src="src/city/wanted.js?v=city3"></script>
+<script src="src/city/wanted.js?v=arrest4"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=hub2"></script>
 <script src="src/city/gangs.js?v=citysec1"></script>
-<script src="src/city/social.js?v=city3"></script>
+<script src="src/city/social.js?v=subtitle1"></script>
 <script src="src/city/realestate.js?v=city3"></script>
 <script src="src/city/view.js?v=cityfix2"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=citysec1"></script>
-<script src="src/city/peds.js?v=brains3"></script>
+<script src="src/city/peds.js?v=notags1"></script>
 <script src="src/city/level.js?v=lvl2"></script>
 <script src="src/city/sizeup.js?v=lvl1"></script>
 <script src="src/city/bling.js?v=fit3"></script>
@@ -560,19 +575,19 @@
 <script src="src/city/medics.js?v=medic2"></script>
 <script src="src/city/security.js?v=citysec1"></script>
 <script src="src/city/vips.js?v=vip1"></script>
-<script src="src/city/police.js?v=beam2"></script>
+<script src="src/city/police.js?v=localheli1"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
-<script src="src/city/aircraft.js?v=beam2"></script>
-<script src="src/city/traffic.js?v=smart1"></script>
+<script src="src/city/aircraft.js?v=localheli1"></script>
+<script src="src/city/traffic.js?v=air911-1"></script>
 <script src="src/city/carparts.js?v=brands1"></script>
 <script src="src/city/playercars.js?v=brands1"></script>
 <script src="src/city/crashfx.js?v=ruin1"></script>
 <script src="src/city/crashdeform.js?v=deform1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/vehicles.js?v=smartai1"></script>
+<script src="src/city/vehicles.js?v=boostjump2"></script>
 <script src="src/city/playerair.js?v=air2"></script>
-<script src="src/city/playeraircraft.js?v=air6"></script>
+<script src="src/city/playeraircraft.js?v=swepthull2"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -581,15 +596,15 @@
 <script src="src/city/gunstore.js?v=mods1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips — sold at the
      gunsmith bench in the gun store; scopeview does the zoom + scope overlay -->
-<script src="src/city/gunmods.js?v=mods1"></script>
+<script src="src/city/gunmods.js?v=optic3"></script>
 <script src="src/city/scopeview.js?v=mods1"></script>
 <script src="src/city/jewelry.js?v=ice1"></script>
 <script src="src/city/careers.js?v=citysec2"></script>
 <script src="src/city/activities.js?v=hub2"></script>
 <script src="src/city/heists.js?v=night5"></script>
-<script src="src/city/interactions.js?v=registry2"></script>
+<script src="src/city/interactions.js?v=binary3"></script>
 <script src="src/city/interact.js?v=registry1"></script>
-<script src="src/city/restrain.js?v=collar1"></script>
+<script src="src/city/restrain.js?v=collar2"></script>
 <script src="src/city/combat.js?v=punch2"></script>
 <!-- B7 — RESOURCES & CRAFTING: harvest nodes (needs CBZ.assets/placement/
      CBZ.CITY already loaded, and CBZ.cityEcon's new Wood/Stone/Scrap/
@@ -601,8 +616,8 @@
 <script src="src/systems/craft.js?v=bld1"></script>
 <script src="src/city/explosives.js?v=c4-2"></script>
 <script src="src/city/armored.js?v=brinks1"></script>
-<script src="src/city/death.js?v=drop3"></script>
-<script src="src/city/camera.js?v=tpgun1"></script>
+<script src="src/city/death.js?v=arrest4"></script>
+<script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=fall1"></script>
 <script src="src/city/leaderboard.js?v=city3"></script>
 <script src="src/city/zillow.js?v=zillow1"></script>
@@ -612,7 +627,7 @@
 <script src="src/city/clothingstore.js?v=cloth1"></script>
 <script src="src/city/realtyoffice.js?v=realty1"></script>
 <script src="src/city/family.js?v=fam2"></script>
-<script src="src/city/swim.js?v=swim1"></script>
+<script src="src/city/swim.js?v=wateronly2"></script>
 <script src="src/city/empire.js?v=empire1"></script>
 <script src="src/city/construction.js?v=build1"></script>
 <script src="src/city/companies.js?v=co1"></script>
@@ -620,7 +635,7 @@
 <script src="src/city/playergang.js?v=night1"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=sched1"></script>
-<script src="src/city/aigoals.js?v=night1"></script>
+<script src="src/city/aigoals.js?v=subtitle1"></script>
 <script src="src/city/officejobs.js?v=living1"></script>
 <script src="src/city/cityevents.js?v=panic1"></script>
 <script src="src/city/story.js?v=night1"></script>
@@ -628,7 +643,7 @@
 <script src="src/city/turf.js?v=hudmin2"></script>
 <script src="src/city/gangops.js?v=living1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
-<script src="src/city/militaryvehicles.js?v=sim2"></script>
+<script src="src/city/militaryvehicles.js?v=meshboard2"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=sim1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -643,19 +658,24 @@
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <script src="src/city/racedrivers.js?v=race1"></script>
 <script src="src/city/racehud.js?v=race2"></script>
+<!-- badwords + street talk (one contextual YES/NO decision) — after the registry -->
+<script src="src/systems/badwords.js?v=bw1"></script>
+<script src="src/city/street_talk.js?v=binary3"></script>
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
 <script src="src/city/interactions_rich.js?v=arch1"></script>
-<script src="src/city/captives.js?v=arch3"></script>
+<script src="src/city/aim_dossier.js?v=streetread3"></script>
+<script src="src/city/captives.js?v=diegetic4"></script>
 <script src="src/city/millionaires.js?v=arch1"></script>
 <script src="src/city/regionlife.js?v=arch1"></script>
 <script src="src/city/modshop.js?v=veh1"></script>
+<script src="src/city/stuntjumps.js?v=ballistic2"></script>
 <script src="src/city/storage.js?v=veh1"></script>
 <script src="src/city/armor.js?v=armor1"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
 <script src="src/city/gigs.js?v=gig4"></script>
 <script src="src/city/gigfleet.js?v=gig1"></script>
 <script src="src/city/giglife.js?v=gig2"></script>
-<script src="src/city/hud.js?v=hudmin2"></script>
+<script src="src/city/hud.js?v=gunthumb3"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=drink1"></script>
@@ -665,14 +685,14 @@
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=inv3"></script>
+<script src="src/city/inventory.js?v=gunthumb3"></script>
 <script src="src/city/phone.js?v=story3"></script>
 <script src="src/city/killfeed.js?v=deathphone1"></script>
 <!-- character-origin scenes (title-screen picker payoff): needs mode.js,
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=origins2"></script>
+<script src="src/city/origins.js?v=binary3"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=story3"></script>
@@ -680,11 +700,11 @@
 <script src="src/city/cinematics.js?v=1"></script>
 <script src="src/systems/humancontact.js?v=contact2"></script>
 <script src="src/systems/navigation.js?v=route1"></script>
-<script src="src/systems/fullmap.js?v=route2"></script>
+<script src="src/systems/fullmap.js?v=organicmap4"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=rest1"></script>
+<script src="src/systems/gore.js?v=bodyphysics1"></script>
 <script src="src/systems/wounds.js?v=soak4"></script>
 
 <!-- multiplayer (host-your-own RP servers) — inert when offline/solo; loads
@@ -803,7 +823,7 @@
 <script src="src/city/casino.js?v=casino1"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=2"></script>
+<script src="src/city/continent.js?v=ecotones15"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

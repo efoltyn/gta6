@@ -342,20 +342,17 @@
   }
 
   // ---- does YOUR fatal headshot take the head OFF? ----
-  // Same rule gore.js applies to NPCs (a 9mm head wound is a snap + blood
-  // burst, never a decapitation): sniper always, a shotgun in your face
-  // always, rifle rounds occasionally, everything pistol-class never. The
+  // Same strict rule gore.js applies to NPCs: ordinary bullets keep the body
+  // intact; only a shotgun blast inside muzzle distance can sever. The
   // killer's gun is read off the live attacker actor (cityHurtPlayer parks it
   // on g._cityKillerActor before the kill lands).
   function headPopsPlayer(imp) {
     const k = ("" + ((g._cityKillerActor && g._cityKillerActor.weapon) || (imp && imp.wkey) || "")).toLowerCase();
-    if (k.indexOf("sniper") >= 0) return true;
     if (k.indexOf("shotgun") >= 0) {
-      if (!imp || imp.fromX == null) return true;
+      if (!imp || imp.fromX == null) return false;
       const P = CBZ.player;
-      return Math.hypot(P.pos.x - imp.fromX, P.pos.z - imp.fromZ) < 6;
+      return Math.hypot(P.pos.x - imp.fromX, P.pos.z - imp.fromZ) <= 5.5;
     }
-    if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) return Math.random() < 0.15;
     return false;
   }
 
@@ -489,11 +486,12 @@
     if (CBZ.sfx) CBZ.sfx("ko");
     if (CBZ.doSlowmo) CBZ.doSlowmo(splatDeath ? 0.55 : 0.5);
     if (CBZ.doHitstop && splatDeath) CBZ.doHitstop(0.2);
-    let gdir = imp && imp.fromX != null ? { x: P.pos.x - imp.fromX, z: P.pos.z - imp.fromZ } : null;
+    let gdir = imp && imp.dir ? { x: imp.dir.x || 0, z: imp.dir.z || 0 }
+      : (imp && imp.fromX != null ? { x: P.pos.x - imp.fromX, z: P.pos.z - imp.fromZ } : null);
     // REAL DISMEMBERMENT: the corpse the death cam orbits is genuinely MISSING
     // what came off — but ONLY ordnance that actually removes heads pops YOURS
-    // (headPopsPlayer: sniper / face-range shotgun / the odd rifle round — a
-    // pistol headshot is a snap and a blood burst, the head stays on). A blast
+    // (headPopsPlayer: face-range shotgun only; every ordinary bullet keeps the
+    // head attached and uses wounds + ragdoll force). A blast
     // tears 1-2 limbs. respawn() hands the rig back whole via goreRestoreBody.
     let popped = false;
     if (CBZ.goreSever && CBZ.city && CBZ.city.playerActor && !splatDeath) {

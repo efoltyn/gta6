@@ -158,7 +158,7 @@
   let copClock = 0;            // module clock for cheap cooldown stamps (vagrant shoo timers)
   let barkCD = 0;              // ONE global small-talk cooldown → barks stay rare, never spam
   let dutyScanT = 0, dutyIdx = 0, dutyCop = null;          // single move-along assignment
-  let dispatchHoldT = 0, lastStars = 0, lastWant = 0;   // radio-beat state
+  let dispatchHoldT = 0, responseDeployT = 0, lastStars = 0, lastWant = 0;   // radio-beat + real precinct deployment cadence
   let convictHailed = false;   // one-shot "escaped convict" all-points bulletin per run
 
   // beat small-talk — strictly diegetic procedure/street flavor, only worth
@@ -337,17 +337,15 @@
 
   function stopOpts() {
     return [
-      { key: "i", label: "“It's licensed — I've got a permit.”", fn: stopExcuseLicense },
-      { key: "j", label: "“Just heading to the range, officer.”", fn: stopExcuseRange },
-      { key: "k", label: "Put the weapon away (comply)", fn: stopComply },
-      { key: "l", label: "Draw and shoot the officer", bad: true, fn: stopExecute },
+      { key: "e", label: "YES", fn: stopComply },
+      { key: "i", label: "NO", bad: true, fn: stopRefuse },
     ];
   }
   function stopNote() {
     const s = STOP.susp;
-    if (s >= 2.2) return "👮 Last warning — drop it NOW";
-    if (s >= 1.2) return "👮 Getting suspicious · talk fast";
-    return "👮 \"Is that a weapon? Let me see your hands.\"";
+    if (s >= 2.2) return "Put the weapon down and surrender? · FINAL WARNING";
+    if (s >= 1.2) return "Holster the weapon and comply? · Officer is losing patience";
+    return "Holster the weapon and comply?";
   }
   function stopRefreshPanel() {
     const c = STOP.cop; if (!c) return;
@@ -410,6 +408,24 @@
   }
   function stopExcuseLicense() { stopAttempt(stopTalkChance(0.6), "“It's licensed — I carry legal.”"); }
   function stopExcuseRange()   { stopAttempt(stopTalkChance(0.5), "“On my way to the range, that's all.”"); }
+
+  // The stop uses the same binary grammar as every other interaction.  NO is
+  // not a cosmetic close button: the officer remembers the refusal, shortens
+  // the next warning, and turns a repeated refusal into a real armed arrest.
+  function stopRefuse() {
+    const c = STOP.cop; if (!c) return;
+    STOP.asked++;
+    STOP.susp += STOP.susp >= 1.2 ? 1.25 : 1.05;
+    if (STOP.susp >= 3) {
+      if (CBZ.city) CBZ.city.note("“Refusing a lawful order — HANDS!”", 1.8);
+      if (CBZ.cityCrime) CBZ.cityCrime(45, { instant: true, x: c.pos.x, z: c.pos.z, type: "armed-refusal" });
+      c.curTarget = CBZ.city.playerActor; c.sees = true; c.retarget = 1.5;
+      endStop(false);
+      return;
+    }
+    if (CBZ.city) CBZ.city.note("“That was not a request. Holster it.”", 1.7);
+    stopRefreshPanel();
+  }
 
   // COMPLY — actually put the shared engine loadout away. You still own the
   // guns: the inventory/current selection are snapshotted and restored on draw.
@@ -502,14 +518,14 @@
     }
   });
 
-  // capture-phase key handler: while a stop is live, I/J/K/L drive the stop FIRST
+  // capture-phase key handler: while a stop is live, E/I drive the stop FIRST
   // (and we swallow the event so interact.js doesn't also act on it). Cheap; only
   // does anything when a stop is actually on screen.
   addEventListener("keydown", function (e) {
     if (!stopActive() || g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.player.driving || CBZ.cityMenuOpen) return;
     const k = (e.key || "").toLowerCase();
-    if (k !== "i" && k !== "j" && k !== "k" && k !== "l") return;
+    if (k !== "e" && k !== "i") return;
     const o = STOP.optList && STOP.optList.find((x) => x.key === k);
     if (o) { e.preventDefault(); e.stopImmediatePropagation(); o.fn(); }
   }, true);
@@ -629,10 +645,9 @@
       skin: 0xe8b58c, hair: 0x101820, shoes: 0x101216,
     });
     ch.group.position.set(x, 0, z);
-    // Keep the label object as compatibility metadata for level/identity code,
-    // but never draw floating names, jobs or levels over a person.
-    const tag = CBZ.makeLabelSprite ? CBZ.makeLabelSprite(swat ? "SWAT" : "POLICE", { color: "#7fd0ff" }) : null;
-    if (tag) { tag.position.y = 1.97; tag.scale.set(2.2, 0.55, 1); ch.group.add(tag); }   // ~rig head (1.82m × HUMAN_SCALE) + margin; tag sits on the UNSCALED group, was 2.12 for the old 2.6m rig
+    // Uniforms identify officers. The dossier carries exact identity/level;
+    // there is never a world-space board hovering over a person's head.
+    const tag = null;
     const cop = {
       char: ch, group: ch.group, pos: ch.group.position, name: swat ? "SWAT" : "Officer",
       // hp TRIMMED (swat 160→120, cop 110→90): durability now has a VISIBLE
@@ -673,8 +688,21 @@
     if (forcePool <= 0) return null;
     const P = CBZ.player;
     let x, z, tries = 0;
-    do { const p = A.randomRoadPoint(); x = p.x; z = p.z; tries++; } while (tries < 8 && !ambient && Math.hypot(x - P.pos.x, z - P.pos.z) < 24);
+    // Ambient officers are already out walking their beats.  A NEW response
+    // officer, however, must leave the physical precinct and cross the city;
+    // never roll a random road point around the suspect.  The outward nudge
+    // places the body just beyond the door collider rather than inside City Hall.
+    let station = !ambient && CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+    if (station) {
+      const lot = station.lot || {}, ox = station.x - (lot.cx == null ? station.x : lot.cx), oz = station.z - (lot.cz == null ? station.z : lot.cz);
+      const ol = Math.hypot(ox, oz) || 1;
+      x = station.x + ox / ol * 1.8 + (rng() - 0.5) * 1.2;
+      z = station.z + oz / ol * 1.8 + (rng() - 0.5) * 1.2;
+    } else {
+      do { const p = A.randomRoadPoint(); x = p.x; z = p.z; tries++; } while (tries < 8 && !ambient && Math.hypot(x - P.pos.x, z - P.pos.z) < 90);
+    }
     const c = makeCop(x, z, swat, ambient);
+    if (!ambient) { c._dispatched = true; c._dispatchOrigin = station ? { x: station.x, z: station.z, name: "precinct" } : { x, z, name: "remote post" }; }
     c._force = true;            // drawn from the finite roster (vs scripted guards)
     forcePool--;               // one officer moves from reserve → deployed
     // 0★ baseline: a fresh beat cop hits the street with the sidearm ON THE BELT
@@ -712,7 +740,7 @@
     swatVanReset();      // drop the SWAT-van handle (the van itself is a cityCars record — clearCars owns it)
     if (typeof despawnChopper === "function") despawnChopper();
     pitCD = 0;
-    dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
+    dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; responseDeployT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
     convictHailed = false;   // re-arm the escaped-convict APB for the next run
   };
 
@@ -860,24 +888,98 @@
     const pool = new THREE.Mesh(new THREE.CircleGeometry(5, 22),
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.24, depthWrite: false }));
     pool.rotation.x = -Math.PI / 2; pool.position.y = 0.07;
+    // The aircraft arrives from outside the action. Its searchlight stays dark
+    // until it reaches the orbit, preventing the old one-frame pool/cone pop at
+    // the world origin (and preventing an inbound helicopter from spotting you).
+    cone.visible = false; pool.visible = false;
     A.root.add(pool);
     A.root.add(grp);
     // NO floating "AIR-1" billboard over the police chopper — a role label on an
     // aircraft breaks the fourth wall (same rule as the cop/vehicle labels). The
     // searchlight + rotor already read it as a police helicopter.
     const tag = null;
-    const sp = A.randomRoadPoint();
-    grp.position.set(sp.x, CHOP_Y, sp.z);
+    const P = CBZ.player;
+    const station = CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+    const lot = station && station.lot;
+    const building = lot && lot.building;
+    const homeX = lot && lot.cx != null ? lot.cx : (station ? station.x : ((A.minX + A.maxX) * 0.5));
+    const homeZ = lot && lot.cz != null ? lot.cz : (station ? station.z : A.minZ + 20);
+    const homeY = Math.max(1.2, ((building && +building.h) || groundYForChopper(homeX, homeZ)) + 1.15);
+    let fx = 0, fz = -1;
+    if (station && lot) {
+      fx = station.x - (lot.cx == null ? homeX : lot.cx); fz = station.z - (lot.cz == null ? homeZ : lot.cz);
+      const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+    }
+    const cruiseY = chopperCruiseY(homeX, homeZ, homeY);
+    grp.position.set(homeX, homeY, homeZ);
+    grp.rotation.y = Math.atan2(fx, fz);
+    // A visible rooftop landing mark makes the aircraft's home legible even
+    // when it is airborne.  It is presentation only; the building roof remains
+    // the real physical support/collider.
+    const pad = new THREE.Mesh(new THREE.RingGeometry(2.7, 3.5, 24),
+      new THREE.MeshBasicMaterial({ color: 0xe8eef5, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    pad.rotation.x = -Math.PI / 2; pad.position.set(homeX, homeY - 1.1 + 0.025, homeZ); A.root.add(pad);
+    const px = P && P.pos ? P.pos.x : homeX, pz = P && P.pos ? P.pos.z : homeZ;
     return {
-      group: grp, body, rotor, cone, pool, tag,
-      pos: grp.position, target: new THREE.Vector3(sp.x, 0, sp.z),
-      heading: 0, orbit: rng() * 6.28, shootCD: 1.2, leaveT: 0, spotR: 5,
+      group: grp, body, rotor, cone, pool, tag, pad,
+      pos: grp.position, target: new THREE.Vector3(px, cruiseY, pz),
+      heading: Math.atan2(fx, fz), orbit: rng() * 6.28, shootCD: 1.2, leaveT: 0, spotR: 5,
+      phase: "idle", cruiseY: cruiseY, homeX, homeY, homeZ, launchT: 0, pilot: null,
+      exitX: homeX, exitZ: homeZ,
     };
   }
-  // Cruise altitude of the searchlight chopper. The tallest tower (The Spire,
-  // 9 storeys @4m) tops out near y≈36 and a player on its roof sits ~y38, so the
-  // chopper flies WELL above that — it is never below a rooftop target it hunts.
-  const CHOP_Y = 49;   // floors grew to FH=4.6 — tallest walk-up roof ≈37.9; keep a real down-angle
+
+  function assignChopperPilot() {
+    if (!chopper || chopper.pilot) return;
+    let pilot = null, bd = Infinity;
+    for (const c of CBZ.cityCops) {
+      if (!c || c.dead || c.swat || c._post || c._airPilot || c.gunstop || (CBZ.body && CBZ.body.busy && CBZ.body.busy(c))) continue;
+      const d = Math.hypot(c.pos.x - chopper.homeX, c.pos.z - chopper.homeZ);
+      if (d < bd) { bd = d; pilot = c; }
+    }
+    // If every beat officer is occupied, dispatch one real roster officer from
+    // the same precinct and seat that person — still no anonymous vehicle AI.
+    if (!pilot && forcePool > 0) pilot = spawnCop(false, false);
+    if (!pilot) return;
+    pilot._airPilot = true; pilot._airPilotPrev = { ambient: !!pilot.ambient, state: pilot.state };
+    pilot.curTarget = null; pilot.npcTarget = null; pilot.sees = false; pilot.speed = 0;
+    pilot.pos.set(chopper.homeX, 0, chopper.homeZ);
+    pilot.group.visible = false;
+    chopper.pilot = pilot;
+  }
+  function releaseChopperPilot() {
+    if (!chopper || !chopper.pilot) return;
+    const p = chopper.pilot; chopper.pilot = null;
+    p._airPilot = false; p.state = "patrol"; p.curTarget = null; p.npcTarget = null; p.sees = false;
+    p.pos.set(chopper.homeX + 3.2, 0, chopper.homeZ + 1.5);
+    p.group.visible = true;
+    if ((g.wanted | 0) === 0 && !p.swat) holsterGun(p);
+  }
+  // Search at a local street altitude, not above the tallest object anywhere
+  // in the world. The old global skyline scan made Air-1 effectively
+  // unshootable whenever an unrelated city happened to contain a super-tall.
+  const CHOP_AGL = 26;
+  const CHOP_ROOF_CLEAR = 7;
+  function groundYForChopper(x, z) {
+    const y = CBZ.floorAt ? +CBZ.floorAt(x, z) : 0;
+    return isFinite(y) ? y : 0;
+  }
+  function roofYForChopper(x, z, pad) {
+    pad = pad == null ? 5 : pad;
+    let top = groundYForChopper(x, z);
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i]; if (!c) continue;
+      if (x + pad < c.minX || x - pad > c.maxX || z + pad < c.minZ || z - pad > c.maxZ) continue;
+      const h = +c.y1;
+      if (isFinite(h) && h > top && h < 310) top = h;
+    }
+    return top;
+  }
+  function chopperCruiseY(x, z, homeY) {
+    const ground = groundYForChopper(x, z);
+    return Math.max(ground + CHOP_AGL, (homeY || ground) + 8);
+  }
   // a target this far BELOW the chopper is a plausible down/level shot; a player
   // higher than the chopper can't be hit (a door gunner can't fire straight up).
   const CHOP_FIRE_MARGIN = 3;
@@ -886,7 +988,7 @@
   // the belly to the player. If false, the chopper can't paint or hit them — it
   // must climb/orbit back overhead first (the cruise altitude does the climbing).
   function chopperEngage(P) {
-    if (!chopper || !P || P.dead) return false;
+    if (!chopper || chopper.phase !== "orbit" || !P || P.dead) return false;
     const ay = chopper.pos.y - 0.5;                    // door-gun height (just below belly)
     const py = (P.pos.y || 0) + 1.4;                   // ~chest height
     if (py > ay - CHOP_FIRE_MARGIN) return false;      // player at/above us → no down-angle
@@ -900,7 +1002,7 @@
   // HIGHER than the chopper — or behind a wall — is NOT painted, so nothing can
   // magically tag or shoot them until the chopper climbs back overhead.
   CBZ.cityChopperPaints = function () {
-    if (!chopper) return false;
+    if (!chopper || chopper.phase !== "orbit") return false;
     const P = CBZ.player; if (!P || P.dead) return false;
     const dx = P.pos.x - chopper.pool.position.x, dz = P.pos.z - chopper.pool.position.z;
     const r = chopper.spotR * (P.crouch ? 0.7 : 1);
@@ -915,8 +1017,10 @@
   };
   function despawnChopper() {
     if (!chopper) return;
+    releaseChopperPilot();
     if (chopper.group && chopper.group.parent) chopper.group.parent.remove(chopper.group);
     if (chopper.pool && chopper.pool.parent) chopper.pool.parent.remove(chopper.pool);
+    if (chopper.pad && chopper.pad.parent) chopper.pad.parent.remove(chopper.pad);
     // free the chopper's own (non-shared) geometry + materials — sprites share an
     // r128 geometry singleton, so leave those alone (same rule as clearCityCops).
     const disp = function (o) {
@@ -926,32 +1030,107 @@
     };
     if (chopper.group) chopper.group.traverse(disp);
     disp(chopper.pool);
+    disp(chopper.pad);
     chopper = null;
   }
   function updateChopper(dt) {
     const stars = g.wanted | 0;
-    if (stars < 3 || g.state !== "playing") { if (chopper) { chopper.leaveT += dt; if (chopper.leaveT > 4) despawnChopper(); } return; }
+    // Air-1 exists at its precinct pad before a chase begins.  Dispatch changes
+    // its state; it never pops into existence relative to the player.
+    if (!chopper && g.state !== "playing") return;
     if (!chopper) { chopper = makeChopper(); if (!chopper) return; }
-    chopper.leaveT = 0;
     const P = CBZ.player;
+    if (!P || !P.pos) return;
+    if (chopper.phase === "idle") {
+      chopper.pos.set(chopper.homeX, chopper.homeY, chopper.homeZ);
+      chopper.group.rotation.z = 0; chopper.rotor.rotation.y += dt * 1.5;
+      chopper.pool.visible = false; chopper.cone.visible = false;
+      if (stars >= 3 && g.state === "playing") {
+        assignChopperPilot();
+        chopper.phase = "spool"; chopper.launchT = 4.5;
+      }
+      return;
+    }
+    if (chopper.phase === "spool") {
+      if (stars < 3 || g.state !== "playing") { chopper.phase = "idle"; releaseChopperPilot(); return; }
+      chopper.launchT -= dt;
+      const k = 1 - Math.max(0, chopper.launchT) / 4.5;
+      chopper.rotor.rotation.y += dt * (3 + k * 37);
+      if (chopper.launchT <= 0) chopper.phase = "takeoff";
+      return;
+    }
+    if (chopper.phase === "takeoff") {
+      if (stars < 3 || g.state !== "playing") { chopper.phase = "return"; return; }
+      chopper.rotor.rotation.y += dt * 40;
+      const liftY = Math.min(chopper.cruiseY, chopper.homeY + 30);
+      chopper.pos.y += Math.min(12 * dt, liftY - chopper.pos.y);
+      if (chopper.pos.y >= liftY - 0.5) chopper.phase = "inbound";
+      return;
+    }
+    // Heat lost: Air-1 flies all the way back, descends onto its visible pad,
+    // and returns the specific pilot to foot duty.
+    if ((stars < 3 || g.state !== "playing") && chopper.phase !== "return") {
+      chopper.phase = "return"; chopper.pool.visible = false; chopper.cone.visible = false;
+    }
+    if (chopper.phase === "return") {
+      if (stars >= 3 && g.state === "playing") { chopper.phase = "inbound"; }
+      else {
+        const rx = chopper.homeX - chopper.pos.x, rz = chopper.homeZ - chopper.pos.z;
+        const rd = Math.hypot(rx, rz) || 1;
+        const safeY = chopper.homeY + 18;
+        if (rd > 3.5) {
+          const step = Math.min(rd, 34 * dt); chopper.pos.x += rx / rd * step; chopper.pos.z += rz / rd * step;
+          chopper.pos.y += (Math.max(safeY, chopper.pos.y) - chopper.pos.y) * Math.min(1, dt * 1.2);
+        } else {
+          chopper.pos.x += rx * Math.min(1, dt * 2); chopper.pos.z += rz * Math.min(1, dt * 2);
+          chopper.pos.y += (chopper.homeY - chopper.pos.y) * Math.min(1, dt * 0.65);
+        }
+        chopper.heading = Math.atan2(rx, rz);
+        chopper.group.rotation.y = lerpAngle(chopper.group.rotation.y, chopper.heading, 1 - Math.pow(0.01, dt));
+        chopper.group.rotation.z += (0 - chopper.group.rotation.z) * Math.min(1, dt * 2.5);
+        chopper.rotor.rotation.y += dt * 40;
+        if (rd < 0.8 && Math.abs(chopper.pos.y - chopper.homeY) < 0.35) { chopper.phase = "idle"; releaseChopperPilot(); }
+        return;
+      }
+    }
+    chopper.leaveT = 0;
     const lk = g.cityLastKnown;
     // orbit the suspect's last-known position; tighter + faster the more stars
     const cx = lk ? lk.x : P.pos.x, cz = lk ? lk.z : P.pos.z;
     chopper.orbit += dt * (0.45 + stars * 0.07);
     const R = 18 - stars * 1.5;
     const tx = cx + Math.cos(chopper.orbit) * R, tz = cz + Math.sin(chopper.orbit) * R;
-    // cruise high (above the tallest tower). If the player has climbed ABOVE us
-    // (up on a roof), CLIMB to get back over them — a gunner can't fire straight
-    // up, so we reposition to regain altitude + line of fire before engaging.
+    // Hold a shootable street-search height and climb only for the roof directly
+    // under the next orbit point (or a player who genuinely got above us).
     const needY = (P.pos.y || 0) + 1.4 + CHOP_FIRE_MARGIN + 6;
-    const ty = Math.max(CHOP_Y - stars, needY);
-    chopper.pos.x += (tx - chopper.pos.x) * Math.min(1, dt * 1.4);
-    chopper.pos.z += (tz - chopper.pos.z) * Math.min(1, dt * 1.4);
-    chopper.pos.y += (ty - chopper.pos.y) * Math.min(1, dt * 1.2);
-    chopper.heading = Math.atan2(tx - chopper.pos.x, tz - chopper.pos.z);
-    chopper.group.rotation.y += (chopper.heading - chopper.group.rotation.y) * Math.min(1, dt * 3) * 0.3 + 0;
-    chopper.group.rotation.z = Math.sin(chopper.orbit) * 0.12;
+    const localGround = groundYForChopper(tx, tz);
+    const localRoof = roofYForChopper(tx, tz, 5);
+    const ty = Math.max(localGround + CHOP_AGL - Math.min(3, stars - 3), localRoof + CHOP_ROOF_CLEAR, needY);
+    const mdx = tx - chopper.pos.x, mdz = tz - chopper.pos.z;
+    const md = Math.hypot(mdx, mdz);
+    if (chopper.phase === "inbound") {
+      const step = Math.min(md, 36 * dt);
+      if (md > 0.01) { chopper.pos.x += mdx / md * step; chopper.pos.z += mdz / md * step; }
+      const vy = Math.max(-18 * dt, Math.min(18 * dt, ty - chopper.pos.y));
+      chopper.pos.y += vy;
+      if (md < 34 && Math.abs(chopper.pos.y - ty) < 14) {
+        chopper.phase = "orbit";
+        chopper.pool.position.set(P.pos.x, groundYForChopper(P.pos.x, P.pos.z) + 0.07, P.pos.z);
+        chopper.pool.visible = true; chopper.cone.visible = true;
+      }
+    } else {
+      chopper.pos.x += mdx * Math.min(1, dt * 1.4);
+      chopper.pos.z += mdz * Math.min(1, dt * 1.4);
+      chopper.pos.y += (ty - chopper.pos.y) * Math.min(1, dt * 1.2);
+    }
+    chopper.heading = Math.atan2(mdx, mdz);
+    let yd = chopper.heading - chopper.group.rotation.y;
+    while (yd > Math.PI) yd -= Math.PI * 2; while (yd < -Math.PI) yd += Math.PI * 2;
+    chopper.group.rotation.y += yd * Math.min(1, dt * 2.8);
+    const bank = chopper.phase === "orbit" ? Math.sin(chopper.orbit) * 0.12 : Math.max(-0.16, Math.min(0.16, yd * 0.16));
+    chopper.group.rotation.z += (bank - chopper.group.rotation.z) * Math.min(1, dt * 3);
     chopper.rotor.rotation.y += dt * 40;
+    if (chopper.phase !== "orbit") return;
     // spotlight tracks toward the player but lags (so you can outrun the beam)
     const beam = chopper.pool.position;
     beam.x += (P.pos.x - beam.x) * Math.min(1, dt * (0.7 + stars * 0.18));
@@ -1084,7 +1263,7 @@
       cop._armor -= soak; dmg -= soak;
       if (dmg <= 0) {
         // shot stopped by armor — still react to the impact, but no flesh damage
-        if (CBZ.body && imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 2 });
+        if (CBZ.body && imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: Math.min(3, (imp.force || 2) * 0.35) });
         return;
       }
     }
@@ -1097,13 +1276,22 @@
       if (CBZ.cityDropWeapon) CBZ.cityDropWeapon(cop.pos.x, cop.pos.z, cop.swat ? "SMG" : "Pistol", 30);   // disarmed
       cop.armed = false; cop.weapon = null;
       if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
-      if (CBZ.gore) { let dir = imp && imp.fromX != null ? { x: cop.pos.x - imp.fromX, z: cop.pos.z - imp.fromZ } : null; CBZ.gore(cop.pos.x, cop.pos.y + 1.0, cop.pos.z, { dir, amount: 1.1, player: false }); }
-      let copRagged = false;
-      if (CBZ.cityRagdoll && imp && imp.fromX != null) {
-        const rl = Math.hypot(cop.pos.x - imp.fromX, cop.pos.z - imp.fromZ) || 1;
-        copRagged = CBZ.cityRagdoll(cop, null, { x: (cop.pos.x - imp.fromX) / rl, y: 0, z: (cop.pos.z - imp.fromZ) / rl }, 8);
+      if (CBZ.gore) {
+        let dir = imp && imp.dir ? { x: imp.dir.x || 0, z: imp.dir.z || 0 }
+          : (imp && imp.fromX != null ? { x: cop.pos.x - imp.fromX, z: cop.pos.z - imp.fromZ } : null);
+        CBZ.gore(cop.pos.x, cop.pos.y + 1.0, cop.pos.z, { dir, amount: imp && imp.headshot ? 1.3 : 1.0, head: !!(imp && imp.headshot), player: false });
       }
-      if (CBZ.body && !copRagged) { if (imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 8, fling: 5 }); else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 }); }
+      let copRagged = false;
+      if (CBZ.cityRagdoll && imp) {
+        let rx, ry, rz;
+        if (imp.dir) { rx = imp.dir.x || 0; ry = imp.dir.y || 0; rz = imp.dir.z || 0; }
+        else if (imp.fromX != null) { rx = cop.pos.x - imp.fromX; ry = 0; rz = cop.pos.z - imp.fromZ; }
+        else { const ra = rng() * 6.28; rx = Math.cos(ra); ry = 0; rz = Math.sin(ra); }
+        const rl = Math.hypot(rx, ry, rz) || 1;
+        const mag = Math.max(4.5, Math.min(18, (imp.force || 7) * (imp.headshot ? 1.18 : 1)));
+        copRagged = CBZ.cityRagdoll(cop, imp.point || null, { x: rx / rl, y: ry / rl, z: rz / rl }, mag);
+      }
+      if (CBZ.body && !copRagged) { if (imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 7, fling: imp.fling || 4 }); else CBZ.body.hit(cop, { dir: { x: rng() - 0.5, z: rng() - 0.5 }, force: 4, fling: 5 }); }
       // who killed the officer? player → automatic 5 stars; another NPC → that
       // NPC's offense; a cop / driverless car → nobody is charged.
       const att = imp && imp.attacker && imp.attacker.pos ? imp.attacker : null;
@@ -1117,7 +1305,7 @@
         else if (CBZ.cityCrime) CBZ.cityCrime(120, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "cop-kill" });
       }
       if (CBZ.pushKill) CBZ.pushKill("An officer was killed", "#ff6b6b");
-    } else if (CBZ.body && imp && imp.fromX != null) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, force: 3 });
+    } else if (CBZ.body && imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 3 });
   };
 
   // GTA wanted-tier ramp: how many of the responders to you should be SWAT/NOOSE.
@@ -1253,14 +1441,13 @@
   function patrolCarsReset() { for (const c of _patrolCars) if (c) c._patrolCar = false; _patrolCars.length = 0; }
 
   // ============================================================
-  //  SWAT VAN (city-swat-van) — at 4★+ the heavy units arrive AS A UNIT: a
-  //  dark "SWAT"-liveried van parks at a curb a block out and an entry team
-  //  (up to 4 SWAT, drawn from the SAME finite roster as any dispatch)
-  //  deploys around its rear doors, then hunts through the normal cop AI.
-  //  V1 is deliberately simple: the van spawns PARKED near the player (no
-  //  bespoke driving AI to entangle with lane logic); it's a real cityCars
-  //  record, so it can be rammed, torched — or stolen, at which point it's
-  //  just a very black van. Runtime-only spawn (rng/Math.random-safe zone).
+  //  SWAT VAN (city-swat-van) — at 4★+ the heavy units leave the physical
+  //  precinct AS A UNIT.  A named driver and up to three named passengers are
+  //  seated in a real cityCars van, the normal lane AI drives it across town,
+  //  and the team deploys only after that same van reaches the suspect.  No
+  //  vehicle or officer is created around the player.  Destroying the van on
+  //  the way forces its living occupants out at the wreck; stealing it does
+  //  the same.  The finite-force pool therefore remains literal at every stage.
   // ============================================================
   const SWAT_VAN_MODEL = { name: "SWAT Van", value: 12000, color: 0x181c1f, s: 1.16, body: "van", detailStyle: "van", designStyle: "armored" };
   let swatVan = null, swatVanCD = 0, svFlashT = 0;
@@ -1311,70 +1498,138 @@
     blue.position.set(0.34, h + 0.18, l * 0.16); c.group.add(blue);
     c._rbBar = { red, blue, phase: 0 };
   }
-  // one van at a time, on the maintain beat (1.1s). Only rolls when there's a
-  // genuine SWAT deficit to fill — the van IS the dispatch wave, not a bonus.
+  function seatSwat(cop, van, driver) {
+    cop._swatPassenger = van;
+    cop._swatDriver = !!driver;
+    cop.inCar = true; cop.speed = 0; cop.sees = false;
+    cop.curTarget = null; cop.npcTarget = null;
+    cop.group.visible = false;
+    if (driver) van.npcDriver = cop;
+  }
+
+  function deploySwatTeam(van, forced) {
+    if (!van || van._swatDeployed) return 0;
+    van._swatDeployed = true; van.ai = false; van.v = 0;
+    const team = van._swatTeam || [];
+    const h = van.heading || 0;
+    const bx = -Math.sin(h), bz = -Math.cos(h);             // rear of van
+    const px = Math.cos(h), pz = -Math.sin(h);              // right side
+    const L = ((van.dims && van.dims.length) || 4.9) * 0.5;
+    let n = 0;
+    for (let i = 0; i < team.length; i++) {
+      const cop = team[i]; if (!cop || cop.dead) continue;
+      const back = L + 1.0 + (i >> 1) * 1.15;
+      const side = (i & 1 ? 1 : -1) * (0.85 + (i >> 1) * 0.35);
+      cop._swatPassenger = null; cop._swatDriver = false; cop.inCar = false;
+      cop.pos.set(van.pos.x + bx * back + px * side, 0, van.pos.z + bz * back + pz * side);
+      cop.group.visible = true; cop.state = "fight"; cop.pause = 0;
+      cop.curTarget = CBZ.city && CBZ.city.playerActor; cop.sees = false;
+      if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
+      n++;
+    }
+    van.npcDriver = null;
+    if (n && !forced && CBZ.city && CBZ.city.note && CBZ.player &&
+        Math.hypot(van.pos.x - CBZ.player.pos.x, van.pos.z - CBZ.player.pos.z) < 90) {
+      CBZ.city.note("🚨 A SWAT van arrives — the entry team deploys.", 2.2);
+    }
+    return n;
+  }
+
+  // One van at a time, on the maintain beat (1.1s). It starts at the nearest
+  // drivable lane to the precinct door and carries the real roster officers.
   function maintainSwatVan(stars) {
     if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_VAN)) return;
     if (swatVanCD > 0) swatVanCD -= 1.1;
-    if (swatVan && (swatVan.dead || swatVan._exploded || swatVan.player || CBZ.cityCars.indexOf(swatVan) < 0)) swatVan = null;
+    if (swatVan && (swatVan.dead || swatVan._exploded || swatVan.player || CBZ.cityCars.indexOf(swatVan) < 0)) {
+      deploySwatTeam(swatVan, true); swatVan = null;
+    }
     if (stars < 4 || g.state !== "playing" || swatVan || swatVanCD > 0) return;
     if (!CBZ.cityMakeCar || forcePool < 2) return;
     const A = CBZ.city && CBZ.city.arena; if (!A || !A.randomRoadPoint) return;
     const swatTarget = Math.round((g.cityCopTarget || 0) * (SWAT_FRAC[Math.min(5, stars)] || 0));
     if (liveSwat() >= swatTarget) return;
     const P = CBZ.player;
-    // a curb point ~55u out: close enough to join the fight, far enough that
-    // the team visibly ARRIVES rather than materialising on your shoulder.
-    let pt = null, bs = 1e9;
-    for (let t = 0; t < 8; t++) {
-      const p = A.randomRoadPoint(); if (!p) break;
-      const sc = Math.abs(Math.hypot(p.x - P.pos.x, p.z - P.pos.z) - 55);
-      if (sc < bs) { bs = sc; pt = p; }
-    }
-    if (!pt || Math.hypot(pt.x - P.pos.x, pt.z - P.pos.z) > 130) return;   // nothing near this beat — retry next
-    const r = nearestRoadSeg(A, pt.x, pt.z); if (!r) return;
-    const dir = rng() < 0.5 ? 1 : -1;
+    const station = CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+    if (!station) return;                                  // no precinct, no magic van
+    const r = nearestRoadSeg(A, station.x, station.z); if (!r) return;
+    // Face whichever lane direction initially reduces distance to the suspect.
+    const posAlong = r.vertical ? station.z - r.z : station.x - r.x;
+    const targetAlong = r.vertical ? P.pos.z - r.z : P.pos.x - r.x;
+    const dir = targetAlong >= posAlong ? 1 : -1;
     const lane = laneCenterP(r, dir, lanesPerDirP(r) - 1);   // curb (outer) lane
     const half = (r.len || 0) / 2;
-    const along = Math.max(-half * 0.8, Math.min(half * 0.8, r.vertical ? pt.z - r.z : pt.x - r.x));
+    const along = Math.max(-half * 0.8, Math.min(half * 0.8, posAlong));
     const x = r.vertical ? r.x + lane : r.x + along;
     const z = r.vertical ? r.z + along : r.z + lane;
     const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     const van = CBZ.cityMakeCar(x, z, heading, r.vertical, SWAT_VAN_MODEL, 0.2);
     if (!van) return;
     try { dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
-    van.ai = false; van.v = 0; van._swatVan = true;
+    van.road = r; van.lane = lane; van.dirSign = dir;
+    van.laneIdx = lanesPerDirP(r) - 1; van.vertical = !!r.vertical;
+    van.baseV = Math.max(13, ((TRP().cruise && TRP().cruise[1]) || 12) + 2);
+    van.v = 0; van.ai = true; van.reckless = false; van._swatVan = true;
+    van._swatPhase = "enroute"; van._swatAge = 0;
+    // Keep immutable dispatch evidence on the record.  Apart from making the
+    // response easy to audit, this prevents later systems from treating a van
+    // that happened to pass the player as if it had magically spawned there.
+    van._swatOrigin = { x: x, z: z, stationX: station.x, stationZ: station.z };
+    van.destX = P.pos.x; van.destZ = P.pos.z;
     swatVan = van; swatVanCD = 42 + rng() * 26;
-    // the ENTRY TEAM deploys around the rear doors — real roster officers (a
-    // wiped force fields no van teams; every one of these is killable-for-keeps)
-    const bx = -Math.sin(heading), bz = -Math.cos(heading);           // rear of the van
-    const px2 = Math.cos(heading), pz2 = -Math.sin(heading);          // perpendicular
-    const L2 = ((van.dims && van.dims.length) || 4.9) / 2;
-    let deployed = 0;
+    // Build the team at the precinct and seat it.  The hidden rigs remain the
+    // exact actors in cityCops; police AI explicitly yields while they are seated.
+    van._swatTeam = [];
     for (let i = 0; i < 4 && forcePool > 0; i++) {
-      const back = L2 + 1.0 + (i >> 1) * 1.2;
-      const side = (i % 2 ? 1 : -1) * (0.9 + (i >> 1) * 0.4);
-      const cop = makeCop(van.pos.x + bx * back + px2 * side, van.pos.z + bz * back + pz2 * side, true, false);
+      const cop = makeCop(station.x, station.z, true, false);
       cop._force = true; forcePool--;
       A.root.add(cop.group);
       CBZ.cityCops.push(cop);
-      deployed++;
+      van._swatTeam.push(cop); seatSwat(cop, van, i === 0);
     }
-    if (deployed && CBZ.city && CBZ.city.note && Math.hypot(x - P.pos.x, z - P.pos.z) < 85) CBZ.city.note("🚨 A SWAT van screeches in — an entry team pours out.", 2.2);
   }
-  // per-frame: flash the mini bar; release the handle the moment the van stops
-  // being ours (wrecked, reaped, or stolen — a stolen van is just a black van).
+  // Per-frame: flash the bar, keep its destination current at a sane cadence,
+  // and open the rear doors only after the vehicle physically gets close.
   function updateSwatVan(dt) {
     const v = swatVan;
     if (!v) return;
-    if (v.dead || v._exploded || v.player || CBZ.cityCars.indexOf(v) < 0) { swatVan = null; return; }
+    if (v.dead || v._exploded || v.player || CBZ.cityCars.indexOf(v) < 0) {
+      deploySwatTeam(v, true); swatVan = null; return;
+    }
     if (v._rbBar) {
       svFlashT += dt;
       const on = ((svFlashT * 5) | 0) & 1;
       v._rbBar.red.visible = !!on; v._rbBar.blue.visible = !on;
     }
+    if (v._swatPhase === "enroute") {
+      v._swatAge = (v._swatAge || 0) + dt;
+      v._swatRetarget = (v._swatRetarget || 0) - dt;
+      if (v._swatRetarget <= 0 && CBZ.player) {
+        v._swatRetarget = 1.2; v.destX = CBZ.player.pos.x; v.destZ = CBZ.player.pos.z;
+      }
+      const d = CBZ.player ? Math.hypot(v.pos.x - CBZ.player.pos.x, v.pos.z - CBZ.player.pos.z) : 1e9;
+      if (d < 28) { v._swatPhase = "braking"; v.ai = false; }
+    } else if (v._swatPhase === "braking") {
+      v.v = Math.max(0, (v.v || 0) - 18 * dt);
+      if (v.v <= 0.4) { v.v = 0; v._swatPhase = "deployed"; deploySwatTeam(v, false); }
+    }
   }
   function swatVanReset() { swatVan = null; swatVanCD = 0; svFlashT = 0; }
+
+  // Read-only dispatch telemetry used by the gameplay contract harness and by
+  // debug overlays.  The actual actors/vehicle remain private and authoritative.
+  CBZ.citySwatResponse = function () {
+    const v = swatVan;
+    if (!v) return null;
+    const o = v._swatOrigin || {};
+    return {
+      phase: v._swatPhase, x: v.pos.x, z: v.pos.z,
+      originX: o.x, originZ: o.z, stationX: o.stationX, stationZ: o.stationZ,
+      distanceDriven: o.x == null ? 0 : Math.hypot(v.pos.x - o.x, v.pos.z - o.z),
+      driver: v.npcDriver && v.npcDriver.name,
+      seated: (v._swatTeam || []).filter(function (c) { return c && c._swatPassenger === v; }).length,
+      deployed: !!v._swatDeployed,
+    };
+  };
 
   // ---- maintain the right number of cops --------------------------------
   function maintain(dt) {
@@ -1403,6 +1658,7 @@
     // Bounded: one caller per step, the hold spans ≤2 maintain ticks, and with
     // no cop nearby there's no hold at all (dispatch heard the shots itself).
     if (dispatchHoldT > 0) dispatchHoldT -= 1.1;
+    if (responseDeployT > 0) responseDeployT -= 1.1;
     const escalated = stars > lastStars || (playerWant | 0) > (lastWant | 0);
     lastStars = stars; lastWant = playerWant;
     if (escalated && stars >= 1 && g.state === "playing" && dispatchHoldT <= 0) {
@@ -1435,10 +1691,18 @@
       const fillAmbient = liveAmbient() < ambientWant;          // patrol slot open?
       // patrol fills are always regular beat cops; only player-response slots are
       // SWAT — and RESPONSE units wait out the call-in beat (patrol fills never do).
-      if (dispatchHoldT <= 0 || fillAmbient) {
+      if (fillAmbient) {
+        // Vacant beat positions are staffed at startup/calm time; they are not
+        // part of the wanted response and remain ordinary random patrol origins.
+        spawnCop(false, true);
+      } else if (dispatchHoldT <= 0 && responseDeployT <= 0) {
         const newIsSwat = !fillAmbient && stars >= 2 && wantSwat < swatTarget;
-        spawnCop(newIsSwat, fillAmbient);
-        if (have + 1 < total && dispatchHoldT <= 0) spawnCop(stars >= 2 && (wantSwat + (newIsSwat ? 1 : 0)) < swatTarget, false);
+        if (spawnCop(newIsSwat, false)) {
+          // One real body leaves the precinct at a time.  Higher tiers dispatch
+          // faster, but even 5★ cannot manufacture two officers every 1.1 sec.
+          const cadence = [9, 8, 7, 6, 5, 4][Math.max(0, Math.min(5, stars))];
+          responseDeployT = cadence + rng() * 2.5;
+        }
       }
     } else if (have > total) {
       // retire surplus non-ambient cops when the heat is gone (never a cop who's
@@ -1935,6 +2199,13 @@
         if (c.deadT > 8 && !c.culled) { c.culled = true; if (c.group.parent) c.group.parent.remove(c.group); cops.splice(i, 1); }
         continue;
       }
+      // The helicopter's pilot is still this exact roster NPC, seated in Air-1.
+      // Keep the hidden foot rig out of patrol/targeting until the aircraft has
+      // physically landed and releaseChopperPilot returns them to the precinct.
+      if (c._airPilot) { c.sees = false; c.curTarget = null; c.speed = 0; continue; }
+      // Same contract for the SWAT van: these are real, named roster actors,
+      // but the van owns their transform until its rear doors open.
+      if (c._swatPassenger) { c.sees = false; c.curTarget = null; c.npcTarget = null; c.speed = 0; continue; }
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) { c.sees = false; continue; }
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.
@@ -2123,7 +2394,7 @@
             if (c.sees && !P.driving && !P.dead && P.speed < 3 && dist < 6) {
               if (c.arrestT === 0 && challengeNoteCD <= 0 && CBZ.city && CBZ.city.note) { challengeNoteCD = 2.5; CBZ.city.note("🚔 \"Easy now — hold still.\"", 1.2); }
               c.arrestT += dt;
-              if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust(); return; }
+              if (c.arrestT > 2.5 && dist < 3.2) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; }
               // close the last stretch slowly, cuffs out; square up on top
               if (dist > 2.0) stepTo(c, dx, dz, c.baseSpeed * 0.62, dt, near);
               else { c.speed = 0; c.group.rotation.y = lerpAngle(c.group.rotation.y, Math.atan2(dx, dz), 1 - Math.pow(0.002, dt)); finalizeMove(c); if (near) animChar(c.char, 0, dt); }
@@ -2134,7 +2405,7 @@
           if (isPlayer) {
             if (P.speed < 2.4 && !P._fighting) {
               if (c.arrestT === 0 && CBZ.city && CBZ.city.note) CBZ.city.note("🚔 \"FREEZE! Hands where I can see them!\"", 1.0);
-              c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust(); return; } if (near) animChar(c.char, 0, dt); continue;
+              c.arrestT += dt; c.speed = 0; if (c.arrestT > 1.0) { CBZ.cityBust && CBZ.cityBust({ cop: c }); return; } if (near) animChar(c.char, 0, dt); continue;
             } else c.arrestT = 0;
           } else { c.arrestT += dt; c.speed = 0; if (c.arrestT > 0.8) { CBZ.cityNpcArrest(tgt); c.npcTarget = null; c.curTarget = null; } if (near) animChar(c.char, 0, dt); continue; }
         } else c.arrestT = 0;

@@ -37,9 +37,32 @@
     // hooded FRONT sight post + rear sight block on the feed cover
     box(g, 0.020, 0.075, 0.020, mat.black, 0, 0.115, -1.04);
     box(g, 0.055, 0.045, 0.055, mat.black, 0, 0.145, -0.06);
-    // deployed BIPOD: two legs splayed forward-down from the gas block
-    cyl(g, 0.011, 0.30, mat.steel, -0.085, -0.155, -0.93, 0.35, 0, 0.42);
-    cyl(g, 0.011, 0.30, mat.steel, 0.085, -0.155, -0.93, 0.35, 0, -0.42);
+    // Deployed BIPOD.  Build each strut from explicit hinge/end points so the
+    // legs physically begin inside the gas-block yoke; Euler-guess cylinders
+    // were visibly floating several centimetres below the barrel.
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    function rod(a, b, r, material) {
+      const d = new THREE.Vector3().subVectors(b, a), len = d.length();
+      const m = cyl(g, r, len, material, 0, 0, 0);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(yAxis, d.normalize());
+      return m;
+    }
+    const hingeL = new THREE.Vector3(-0.042, -0.020, -0.805);
+    const hingeR = new THREE.Vector3(0.042, -0.020, -0.805);
+    const footL = new THREE.Vector3(-0.165, -0.285, -1.015);
+    const footR = new THREE.Vector3(0.165, -0.285, -1.015);
+    box(g, 0.125, 0.070, 0.075, mat.steel, 0, -0.020, -0.805); // gas-block yoke
+    cyl(g, 0.024, 0.145, mat.black, 0, -0.020, -0.805, 0, 0, Math.PI / 2); // hinge pin
+    rod(hingeL, footL, 0.012, mat.steel);
+    rod(hingeR, footR, 0.012, mat.steel);
+    // rubber feet sit perpendicular to the legs and touch the same ground line
+    rod(new THREE.Vector3(-0.195, -0.286, -1.015), new THREE.Vector3(-0.135, -0.286, -1.015), 0.016, mat.black);
+    rod(new THREE.Vector3(0.135, -0.286, -1.015), new THREE.Vector3(0.195, -0.286, -1.015), 0.016, mat.black);
+    g.userData.bipod = {
+      attached: true, functional: true,
+      hinges: [hingeL.clone(), hingeR.clone()], feet: [footL.clone(), footR.clone()],
+    };
     // heat shield slab over the barrel root
     box(g, 0.110, 0.035, 0.24, mat.dark, 0, 0.085, -0.54);
     // pistol grip + trigger guard

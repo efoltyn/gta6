@@ -38,6 +38,8 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const cmat = CBZ.cmat || CBZ.mat;
+  const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
+  if (CFG.DESERT_TERRAIN_V2 == null) CFG.DESERT_TERRAIN_V2 = true;
 
   // ---- footprint (MASSIVE basin) -------------------------------------------
   // North edge stays anchored at z-320 (the causeway tuck to the speedway
@@ -111,6 +113,86 @@
     return HAS_TOWN && x > TOWN.minX - 6 && x < TOWN.maxX + 6 && z > TOWN.minZ - 6 && z < TOWN.maxZ + 6;
   }
 
+  function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+  function smooth01(v) { v = clamp01(v); return v * v * (3 - 2 * v); }
+  function terrainNoise(x, z) {
+    const N = window.noise;
+    if (N && N.rangeVnoise) return N.rangeVnoise(x, z);
+    const h = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+    return h - Math.floor(h);
+  }
+  function flatRectFactor(x, z, cx, cz, hx, hz, feather) {
+    const dx = Math.abs(x - cx) - hx, dz = Math.abs(z - cz) - hz;
+    const outside = Math.hypot(Math.max(0, dx), Math.max(0, dz));
+    if (Math.max(dx, dz) <= 0) return 0;
+    return smooth01(outside / Math.max(1, feather));
+  }
+
+  // Weathered buttes are part of the heightfield now.  A broad talus skirt
+  // connects each cap to the basin; noisy elliptical distance keeps the edge
+  // from looking like a perfect cylinder while preserving a readable plateau.
+  function desertMesaHeightAt(x, z) {
+    let best = 0;
+    for (let i = 0; i < MESAS.length; i++) {
+      const m = MESAS[i];
+      const edgeNoise = (terrainNoise(x * 0.027 + i * 17, z * 0.027 - i * 9) - 0.5) * 0.13;
+      const dx = (x - m.x) / (m.w * 0.54), dz = (z - m.z) / (m.d * 0.54);
+      const d = Math.hypot(dx, dz) + edgeNoise;
+      const cap = 1 - smooth01((d - 0.48) / 0.38);
+      const talus = 1 - smooth01((d - 0.76) / 0.62);
+      const strata = 0.96 + 0.04 * Math.sin((x + z) * 0.09 + i * 2.1);
+      const h = m.h * 1.45 * Math.max(cap, talus * 0.16) * strata;
+      if (h > best) best = h;
+    }
+    return best;
+  }
+
+  function desertDuneHeightAt(x, z) {
+    // Two wind-aligned wavelengths, domain-warped at field scale.  The second
+    // harmonic makes the windward side broad and the lee side short, avoiding
+    // the old scatter of identical half-spheres.
+    const warp = (terrainNoise(x * 0.0042 + 31, z * 0.0042 - 18) - 0.5) * 86;
+    const u = x * 0.79 + z * 0.61 + warp;
+    const v = -x * 0.61 + z * 0.79;
+    const p = u * (Math.PI * 2 / 66);
+    const q = (u * 0.58 + v * 0.24) * (Math.PI * 2 / 118);
+    let ridge = 0.5 + 0.5 * (Math.sin(p) * 0.72 + Math.sin(p * 2 + 0.85) * 0.21 + Math.sin(q + 1.6) * 0.18);
+    ridge = clamp01(ridge);
+    const macro = 0.55 + terrainNoise(x * 0.008 - 11, z * 0.008 + 7) * 0.75;
+    // These are landforms, not bump-map decoration: crests rise roughly
+    // 19-31m across the open erg. A slightly broader exponent makes the
+    // windward face occupy real driving distance while the harmonic still
+    // drops sharply on the lee side; from ground level this now reads as an
+    // actual dune sea instead of a tan plane carrying scattered props.
+    const transverse = Math.pow(ridge, 1.90) * (12 + 14 * macro);
+    const rippledFloor = terrainNoise(x * 0.021 + 2, z * 0.021 - 5) * 1.65;
+    return transverse + rippledFloor;
+  }
+
+  function desertHeightAt(x, z) {
+    if (x < MINX || x > MAXX || z < MINZ || z > MAXZ) return 0;
+    let h = Math.max(desertDuneHeightAt(x, z), desertMesaHeightAt(x, z));
+
+    // Roads and settlements sit on broad graded benches, not on hovering
+    // planes.  The terrain eases into every bench over tens of metres.
+    h *= smooth01((Math.abs(z - HWY_Z) - 9) / 35);
+    h *= flatRectFactor(x, z, TOWN_CX, TOWN_CZ, TOWN_HX + 8, TOWN_HZ + 8, 42);
+    h *= flatRectFactor(x, z, GAS_X + 10, GAS_Z, 42, 30, 34);
+    h *= flatRectFactor(x, z, MOTEL_X, MOTEL_Z, 36, 26, 38);
+    h *= flatRectFactor(x, z, CX - 220, CZ + 60, 48, 36, 34);
+    const edge = Math.min(x - MINX, MAXX - x, z - MINZ, MAXZ - z);
+    h *= smooth01(edge / 34);
+    return Math.max(0, h);
+  }
+
+  function desertNormalAt(x, z, out) {
+    out = out || new THREE.Vector3();
+    const e = 2.4;
+    const dx = desertHeightAt(x + e, z) - desertHeightAt(x - e, z);
+    const dz = desertHeightAt(x, z + e) - desertHeightAt(x, z - e);
+    return out.set(-dx / (2 * e), 1, -dz / (2 * e)).normalize();
+  }
+
   // ---- deterministic LCG ---------------------------------------------------
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
   // — one world-seed knob instead of a per-file magic literal. rng() is
@@ -143,11 +225,11 @@
         const y = row + Math.sin((x + row * 0.45) * 0.055) * 2.8 + Math.sin(x * 0.018 + row) * 1.4;
         if (x < -12) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = "rgba(112,80,42,0.10)";
+      ctx.strokeStyle = "rgba(112,80,42,0.16)";
       ctx.lineWidth = 2.2;
       ctx.stroke();
       ctx.translate(0, 2.3);
-      ctx.strokeStyle = "rgba(255,245,205,0.09)";
+      ctx.strokeStyle = "rgba(255,245,205,0.13)";
       ctx.lineWidth = 0.8;
       ctx.stroke();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -158,7 +240,7 @@
     tex.magFilter = THREE.LinearFilter;
     tex.minFilter = THREE.LinearMipMapLinearFilter;
     tex.generateMipmaps = true;
-    return new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex });
+    return new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex, vertexColors: true });
   }
 
   CBZ.addLandmass(function (city) {
@@ -218,7 +300,8 @@
     // a solid AABB collider (mesas + buildings you must walk around)
     function solid(x, z, w, d, y1) {
       if (!CBZ.colliders) return;
-      CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: 0, y1: y1 == null ? 30 : y1 });
+      const gy = CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(x, z) : 0;
+      CBZ.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: gy, y1: gy + (y1 == null ? 30 : y1) });
     }
 
     // =====================================================================
@@ -241,17 +324,69 @@
     // The main sand plane keeps its own UVs for the low-frequency canvas
     // surface above. Built directly rather than through mergeAdd because it
     // is one mesh and needs its repeatable texture coordinates intact.
-    const groundGeo = plane(CX, CZ, HX * 2, HZ * 2, 0.02);
+    const groundGeo = CFG.DESERT_TERRAIN_V2 !== false
+      ? new THREE.PlaneGeometry(HX * 2, HZ * 2, 176, 188)
+      : plane(CX, CZ, HX * 2, HZ * 2, 0.02);
+    if (CFG.DESERT_TERRAIN_V2 !== false) {
+      groundGeo.rotateX(-Math.PI / 2);
+      const pa = groundGeo.attributes.position;
+      const colors = new Float32Array(pa.count * 3);
+      const c = new THREE.Color(), edgeC = new THREE.Color(), sand = new THREE.Color(SAND), crest = new THREE.Color(SAND_PALE);
+      const lee = new THREE.Color(SAND_DK), red = new THREE.Color(RED_ROCK), redDk = new THREE.Color(RED_DK);
+      const desertEdge = new THREE.Color(0x9b8b5f);
+      const n = new THREE.Vector3(), sun = new THREE.Vector3(-0.55, 0.74, 0.39).normalize();
+      for (let i = 0; i < pa.count; i++) {
+        const wx = CX + pa.getX(i), wz = CZ + pa.getZ(i);
+        const y = desertHeightAt(wx, wz), mesaY = desertMesaHeightAt(wx, wz);
+        pa.setY(i, y);
+        desertNormalAt(wx, wz, n);
+        const light = Math.max(0, n.dot(sun)), slope = 1 - n.y;
+        if (mesaY > 2.2) {
+          c.copy(red).lerp(redDk, smooth01((slope - 0.08) / 0.5));
+          c.multiplyScalar(0.90 + 0.08 * Math.sin(y * 0.42));
+        } else {
+          c.copy(lee).lerp(sand, 0.42 + light * 0.44);
+          c.lerp(crest, smooth01((n.y - 0.72) / 0.25) * 0.24);
+        }
+        // The dune sea dies into dry sage over a broad interior band. The
+        // continent continues this exact hue through its organic influence,
+        // so the allocation rectangle has no visible colour seam from above.
+        const edgeDist = Math.min(wx - MINX, MAXX - wx, wz - MINZ, MAXZ - wz);
+        edgeC.copy(desertEdge).lerp(c, smooth01(edgeDist / 105));
+        c.copy(edgeC);
+        colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+      }
+      pa.needsUpdate = true;
+      groundGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      groundGeo.computeVertexNormals();
+      groundGeo.computeBoundingSphere();
+    }
     const duneMat = makeDuneRippleMaterial(SAND);
     const groundMesh = new THREE.Mesh(groundGeo, duneMat);
     groundMesh.castShadow = false; groundMesh.receiveShadow = true;
+    // Freeze only after applying the world translation. Updating the matrix at
+    // local origin and then mutating position left the renderer/build audit
+    // disagreeing about where this 880x940m floor lived, carving a blue-looking
+    // dry hole beside Diamond Speedway.
+    if (CFG.DESERT_TERRAIN_V2 !== false) groundMesh.position.set(CX, 0, CZ);
     groundMesh.matrixAutoUpdate = false; groundMesh.updateMatrix();
     groundMesh.userData.terrain = true; groundMesh.userData.worldSurface = true;
+    groundMesh.userData.realGround = true;
     groundMesh.name = "saltlands-desert-surface";
     root.add(groundMesh);
+    if (CFG.DESERT_TERRAIN_V2 !== false && CBZ.registerCityGroundHeight) {
+      CBZ.registerCityGroundHeight(desertHeightAt, { name: "Saltlands dunes and mesas", biome: "desert" });
+      CBZ.desertTerrainHeightAt = desertHeightAt;
+      CBZ.desertTerrainNormalAt = desertNormalAt;
+      // Read-only component probes keep screenshot/physics QA honest: a dune
+      // camera can deliberately inspect the erg instead of accidentally
+      // selecting a mesa talus and declaring the whole biome good.
+      CBZ.desertDuneHeightAt = desertDuneHeightAt;
+      CBZ.desertMesaHeightAt = desertMesaHeightAt;
+    }
     // wind-streak patches (two tones, two merged meshes — 2 draw calls)
     const patchDk = [], patchPale = [];
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < (CFG.DESERT_TERRAIN_V2 !== false ? 0 : 90); i++) {
       const x = rr(MINX + 20, MAXX - 20), z = rr(MINZ + 20, MAXZ - 20);
       const w = rr(10, 34), d = rr(8, 26);
       const g = new THREE.PlaneGeometry(w, d);
@@ -269,7 +404,12 @@
       CBZ.makeBiomeEdgeRing(root, {
         cx: CX, cz: CZ, hx: HX, hz: HZ, feather: 100, segments: 20,
         feathers: { west: 0 }, owner: "desert",
-        inner: SAND, outer: 0x8a8a5c, y: 0.005, seed: 0x5dec7,
+        // The core stays tucked against the speedway to the west, while the
+        // actual erg now sprawls into the expanded eastern/southern country.
+        // This is land-cover influence baked into the continent, not a plane.
+        spread: { west: 70, east: 620, north: 170, south: 520 },
+        inner: 0x9b8b5f, outer: 0x68744e, featherNorm: 0.23,
+        y: 0.005, seed: 0x5dec7,
       });
     }
 
@@ -279,7 +419,7 @@
     //     A pale crest cap mesh on top for the sun-hit ridge read.
     // =====================================================================
     const duneGeoms = [], crestGeoms = [];
-    for (let i = 0; i < 180; i++) {   // scaled up for the ~1.8x larger basin
+    for (let i = 0; i < (CFG.DESERT_TERRAIN_V2 !== false ? 0 : 180); i++) {   // legacy prop dunes only
       const x = rr(MINX + 14, MAXX - 14), z = rr(MINZ + 14, MAXZ - 14);
       const r = rr(7, 22), h = rr(1.0, 3.0);
       const stretch = rr(0.7, 1.3), turn = rng() * Math.PI;
@@ -313,7 +453,7 @@
     // =====================================================================
     const riverGeoms = [];
     let rxz = { x: MINX + 60, z: MINZ + 40 };
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < (CFG.DESERT_TERRAIN_V2 !== false ? 0 : 30); i++) {
       const g = new THREE.CircleGeometry(rr(5, 9), 8);
       g.rotateX(-Math.PI / 2);
       g.translate(rxz.x, 0.035, rxz.z);
@@ -345,7 +485,8 @@
     armIM.castShadow = true;
     let ti = 0, ai = 0;
     cactusSpots.forEach(c => {
-      dummy.position.set(c.x, c.h / 2, c.z);
+      const gy = CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(c.x, c.z) : 0;
+      dummy.position.set(c.x, gy + c.h / 2, c.z);
       dummy.scale.set(1, c.h, 1); dummy.rotation.set(0, rng() * Math.PI, 0);
       dummy.updateMatrix(); trunkIM.setMatrixAt(ti++, dummy.matrix);
       for (let a = 0; a < c.arms; a++) {
@@ -353,7 +494,7 @@
         const ay = c.h * rr(0.45, 0.62);
         const len = c.h * rr(0.3, 0.45);
         // vertical arm offset to the side (low-poly elbow read)
-        dummy.position.set(c.x + side * 0.5, ay + len / 2, c.z);
+        dummy.position.set(c.x + side * 0.5, gy + ay + len / 2, c.z);
         dummy.scale.set(1, len, 1); dummy.rotation.set(0, 0, side * 0.15);
         dummy.updateMatrix(); armIM.setMatrixAt(ai++, dummy.matrix);
       }
@@ -379,7 +520,7 @@
     const rockIM = new THREE.InstancedMesh(rockGeo, cmat(ROCK_GREY), boulders.length);
     rockIM.castShadow = true; rockIM.receiveShadow = true;
     boulders.forEach((b, i) => {
-      dummy.position.set(b.x, b.s * 0.4, b.z);
+      dummy.position.set(b.x, (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(b.x, b.z) : 0) + b.s * 0.4, b.z);
       dummy.scale.set(b.s, b.s * rr(0.6, 0.9), b.s * rr(0.8, 1.2));
       dummy.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
       dummy.updateMatrix(); rockIM.setMatrixAt(i, dummy.matrix);
@@ -424,8 +565,8 @@
       CBZ.scatterRocks(root, {
         count: 22,
         pick: pickTownOutskirt,
-        heightAt: function () { return 0; },        // desert basin is flat (no terrain relief here)
-        normalAt: function (x, z, out) { return out.set(0, 1, 0); },
+        heightAt: CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt : function () { return 0; },
+        normalAt: CFG.DESERT_TERRAIN_V2 !== false ? desertNormalAt : function (x, z, out) { return out.set(0, 1, 0); },
         repeatAngleDeg: 38,
         minSize: 0.6, maxSize: 1.8,                  // desert-scale clusters — smaller than mountain boulders
         baseRadius: 1, detail: 0,                    // cheaper/lower-poly than the mountain rock (desert reads small anyway)
@@ -449,7 +590,7 @@
       // Keep the instance count/rng stream stable, but hide any candidate that
       // lands on a shared protected footprint or one of the solid natural
       // claims above. This clears roads and landmark yards as well as town lots.
-      dummy.position.set(sx, (inTown(sx, sz) || !openNature(sx, sz, s * 0.7)) ? -50 : 0.3, sz);
+      dummy.position.set(sx, (inTown(sx, sz) || !openNature(sx, sz, s * 0.7)) ? -50 : (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(sx, sz) : 0) + 0.3, sz);
       dummy.scale.set(s, s * 0.7, s); dummy.rotation.set(0, rot, 0);
       dummy.updateMatrix(); scrubIM.setMatrixAt(i, dummy.matrix);
     }
@@ -461,7 +602,7 @@
     for (let i = 0; i < 24; i++) {
       const tx = rr(MINX + 10, MAXX - 10), tz = rr(MINZ + 10, MAXZ - 10);
       const s = rr(0.6, 1.1); const rx = rng() * Math.PI, ry = rng() * Math.PI, rz = rng() * Math.PI;   // draw rng FIRST
-      dummy.position.set(tx, (inTown(tx, tz) || !openNature(tx, tz, s * 0.8)) ? -50 : 0.6, tz);
+      dummy.position.set(tx, (inTown(tx, tz) || !openNature(tx, tz, s * 0.8)) ? -50 : (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(tx, tz) : 0) + 0.6, tz);
       dummy.scale.set(s, s, s); dummy.rotation.set(rx, ry, rz);
       dummy.updateMatrix(); tumbleIM.setMatrixAt(i, dummy.matrix);
     }
@@ -481,19 +622,21 @@
     const carcasses = [{ x: rr(MINX + 60, CX), z: rr(MINZ + 40, CZ) }, { x: rr(CX, MAXX - 60), z: rr(CZ, MAXZ - 40) }];
     carcasses.forEach(c => {
       for (let r = 0; r < 7 && bi < 30; r++) {           // a curved row of ribs
-        dummy.position.set(c.x + r * 0.4 - 1.4, 0.1, c.z + Math.sin(r) * 0.2);
+        const bx = c.x + r * 0.4 - 1.4, bz = c.z + Math.sin(r) * 0.2;
+        dummy.position.set(bx, (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(bx, bz) : 0) + 0.1, bz);
         dummy.scale.set(1, rr(0.8, 1.4), 1);
         dummy.rotation.set(0, 0, 1.1 + Math.sin(r) * 0.15);
         dummy.updateMatrix(); boneIM.setMatrixAt(bi++, dummy.matrix);
       }
       if (bi < 30) {                                       // a long spine bone
-        dummy.position.set(c.x - 2.2, 0.1, c.z); dummy.scale.set(1.2, 2.4, 1.2);
+        dummy.position.set(c.x - 2.2, (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(c.x - 2.2, c.z) : 0) + 0.1, c.z); dummy.scale.set(1.2, 2.4, 1.2);
         dummy.rotation.set(0, 0, Math.PI / 2); dummy.updateMatrix();
         boneIM.setMatrixAt(bi++, dummy.matrix);
       }
     });
     for (; bi < 30; bi++) {                                // a few lone scattered bones
-      dummy.position.set(rr(MINX + 20, MAXX - 20), 0.08, rr(MINZ + 20, MAXZ - 20));
+      const bx = rr(MINX + 20, MAXX - 20), bz = rr(MINZ + 20, MAXZ - 20);
+      dummy.position.set(bx, (CFG.DESERT_TERRAIN_V2 !== false ? desertHeightAt(bx, bz) : 0) + 0.08, bz);
       dummy.scale.set(1, rr(0.5, 1.0), 1); dummy.rotation.set(0, rng() * Math.PI, Math.PI / 2);
       dummy.updateMatrix(); boneIM.setMatrixAt(bi, dummy.matrix);
     }
@@ -508,7 +651,7 @@
     //     basin has orientation cues from far off.
     // =====================================================================
     const mesaBase = [], mesaCap = [], mesaBand = [];
-    MESAS.forEach((m, mi) => {
+    (CFG.DESERT_TERRAIN_V2 !== false ? [] : MESAS).forEach((m, mi) => {
       const bh = m.h * 0.68, ch = m.h - bh;
       const sides = 7 + (mi % 3), yaw = (mi * 2.399963) % Math.PI;
       // Elliptical frustums read as weathered rock from every angle. The old
@@ -571,7 +714,7 @@
       CBZ.buildHighway(root, {
         path: [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }],
         width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
-        guardrail: true, elevated: false, rng: rng,
+        guardrail: false, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
       });
     } else {

@@ -31,11 +31,17 @@
   let swimming = false;
   let px = 0, pz = 0;        // last on-foot position (pre-drag reference)
   let hintT = 0, hurtT = 0;
+  const swimCurrent = { x: 0, z: 0 };
 
   function arena() { return g.mode === "city" ? (CBZ.city && CBZ.city.arena) : null; }
 
   // is (x,z) over open water? (outside every walkable land mass)
   function waterAt(A, x, z) {
+    // waterfield.js owns the rendered continent's exact signed coast.  Keep
+    // the rect/circle branch only as a boot/legacy fallback.
+    if (CBZ.waterField && CBZ.waterField.isSurfaceWater) {
+      return CBZ.waterField.isSurfaceWater(x, z, 0);
+    }
     if (x >= A.minX - QUAY && x <= A.maxX + QUAY && z >= A.minZ - QUAY && z <= A.maxZ + QUAY) return false;
     const B = A.bridge;
     if (B && x >= B.minX && x <= B.maxX && z >= B.minZ && z <= B.maxZ) return false;
@@ -141,9 +147,19 @@
     // ---- the swim: genuinely chest-deep, heavy, and visibly animated ----
     P.pos.x = px + (P.pos.x - px) * DRAG;
     P.pos.z = pz + (P.pos.z - pz) * DRAG;
+    // A weak coastline-aware current makes the sea feel like a moving body of
+    // water. waterfield removes any shoreward component near land, so it can
+    // drift a swimmer along a beach but never conveyor-belt them through it.
+    if (CBZ.waterField && CBZ.waterField.currentAt) {
+      const cur = CBZ.waterField.currentAt(P.pos.x, P.pos.z, undefined, swimCurrent);
+      const nx = P.pos.x + cur.x * dt * 0.34, nz = P.pos.z + cur.z * dt * 0.34;
+      if (CBZ.waterField.isSurfaceWater(nx, nz, 0.5)) { P.pos.x = nx; P.pos.z = nz; }
+    }
     px = P.pos.x; pz = P.pos.z;
     P._swimPhase = (P._swimPhase || 0) + dt * (2.6 + Math.min(3, P.speed || 0) * 0.22);
-    const seaY = CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48;
+    const seaY = CBZ.citySeaHeightAt
+      ? CBZ.citySeaHeightAt(P.pos.x, P.pos.z)
+      : (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48);
     P.pos.y = seaY - BODY_SUBMERGE + Math.sin(P._swimPhase * 2) * 0.045;
     P.vy = 0;
     P.grounded = true;          // no fall-damage bookkeeping while floating
@@ -196,7 +212,9 @@
   CBZ.citySwimming = function () { return swimming; };
   // is this point over open water? (humancontact's land clamp + anything else
   // that needs to leave a swimmer alone)
-  CBZ.cityWaterAt = function (x, z) {
+  // waterfield.js normally publishes this before swim.js loads. Preserve a
+  // standalone fallback for old pages/tests that load only this module.
+  if (!CBZ.waterField) CBZ.cityWaterAt = function (x, z) {
     const A = arena();
     return !!(A && A.minX != null && waterAt(A, x, z));
   };

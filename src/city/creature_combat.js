@@ -108,7 +108,12 @@
     var id = String(species.id || species.name || '').toLowerCase();
     if (/cat|leopard|cheetah|lion|tiger|panther|jaguar|cougar|puma|lynx/.test(id)) return 'pounce';
     if (/wolf|dog|coyote|fox|bear|hyena/.test(id)) return 'maul';
-    if (/rhino|bison|boar|bull|moose|elephant|buffalo/.test(id)) return 'gore';
+    // Heavy horned/shouldered animals do not "bite" at contact: they lower the
+    // head, drive through the target and hand the actual body impulse to their
+    // caller. Keep boars/elephants on the shorter gore animation; the big bovine
+    // charge gets a longer, unmistakable RAM silhouette.
+    if (/rhino|bison|bull|buffalo/.test(id)) return 'ram';
+    if (/boar|moose|elephant/.test(id)) return 'gore';
     if (/horse|deer|goat|elk|donkey|mule|ram/.test(id)) return 'stomp';
     if (/bird|hawk|eagle|crow|raven|gull|owl|vulture|chicken|rooster|ostrich/.test(id) || species.bird) return 'peck';
     if (/snake|viper|cobra|python|rattler/.test(id)) return 'strike';
@@ -119,6 +124,7 @@
     var st = creatureStyleFor(species);
     if (st === 'pounce') return 7;
     if (st === 'maul') return (/bear/.test(String(species && (species.id || species.name) || '').toLowerCase())) ? 4.5 : 6;
+    if (st === 'ram') return 6.5;
     if (st === 'gore' || st === 'stomp') return 4;
     if (st === 'strike') return 5;
     if (st === 'peck') return 5;
@@ -232,6 +238,24 @@
           var gp = (p - STRIKE_AT) / (1 - STRIKE_AT);
           // hard THRUST forward at strike, then knock back on recover
           lunge = reachHint * 0.9 * Math.sin(Math.min(gp * 2, 1) * Math.PI * 0.5) * (1 - ease(Math.max(0, gp - 0.5) / 0.5) * 1.3);
+        }
+        break;
+      case 'ram':
+        // A real shoulder charge: head stays tucked through contact and the
+        // whole mass accelerates forward. Unlike the generic gore jab this
+        // carries THROUGH the strike instead of looking like a bite/nod.
+        pitch = 0.26 + 0.24 * (p < STRIKE_AT ? wind : env);
+        if (head) head.rotation.x = head.userData._cbzRX + 0.62 * (p < STRIKE_AT ? wind : Math.max(0.45, env));
+        if (p < STRIKE_AT) {
+          lunge = -0.12 * sc * wind;                    // plant and lower
+          yOff = -0.05 * sc * wind;
+        } else {
+          var rp = (p - STRIKE_AT) / (1 - STRIKE_AT);
+          // Fast step-function drive followed by a controlled recovery. The hit
+          // callback owns the target's launch; this only moves the bison body.
+          lunge = reachHint * 1.05 * ease(Math.min(1, rp * 3.2)) * (1 - ease(Math.max(0, rp - 0.62) / 0.38));
+          yOff = Math.sin(Math.min(1, rp * 2.2) * Math.PI) * 0.07 * sc;
+          roll = Math.sin(rp * Math.PI) * 0.035;
         }
         break;
       case 'stomp':

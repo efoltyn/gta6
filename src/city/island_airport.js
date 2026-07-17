@@ -172,29 +172,43 @@
     return span.min <= span.max;
   }
 
-  function civilRayEntry(rec, ox, oy, oz, dx, dy, dz, maxT) {
-    if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || rec.group.visible === false) return -1;
-    const b = civilBodyBounds(rec); if (!b) return -1;
-    const g = rec.group, h = g.rotation.y || 0, c = Math.cos(h), s = Math.sin(h);
-    const rx = ox - g.position.x, rz = oz - g.position.z;
-    // World -> model-local. Airport aircraft point along local +X.
-    const lx = rx * c - rz * s, lz = rx * s + rz * c;
-    const ldx = dx * c - dz * s, ldz = dx * s + dz * c;
-    const span = { min: 0, max: maxT == null ? Infinity : maxT };
-    if (!slabAxis(lx, ldx, -b.hx, b.hx, span)) return -1;
-    if (!slabAxis(oy - g.position.y, dy, b.minY, b.maxY, span)) return -1;
-    if (!slabAxis(lz, ldz, -b.hz, b.hz, span)) return -1;
-    return span.min >= 0 && span.min <= span.max ? span.min : -1;
-  }
+  const civilRaycaster = new THREE.Raycaster();
+  const civilRayOrigin = new THREE.Vector3();
+  const civilRayDirection = new THREE.Vector3();
 
   CBZ.cityCivilAircraftRayTest = function (ox, oy, oz, dx, dy, dz, maxT) {
     let best = null, bd = maxT == null ? Infinity : maxT;
+    civilRayOrigin.set(ox, oy, oz);
+    civilRayDirection.set(dx, dy, dz).normalize();
     for (let i = 0; i < placed.length; i++) {
       const rec = placed[i];
-      const d = civilRayEntry(rec, ox, oy, oz, dx, dy, dz, bd);
-      if (d < 0 || d >= bd) continue;
-      bd = d;
-      best = { rec, dist: d, x: ox + dx * d, y: oy + dy * d, z: oz + dz * d };
+      if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || rec.group.visible === false) continue;
+      civilRaycaster.ray.origin.copy(civilRayOrigin);
+      civilRaycaster.ray.direction.copy(civilRayDirection);
+      civilRaycaster.near = 0;
+      civilRaycaster.far = bd;
+      // Raycast the visible fuselage/wing meshes themselves. The old oriented
+      // box let bullets paint holes in empty air at the corners and looked like
+      // a glass wall wrapped around every aircraft.
+      // Cache only renderable TRIANGLE meshes. Recursive group raycasting also
+      // visits label sprites; Sprite.raycast requires Raycaster.camera and was
+      // throwing every frame for ordinary muzzle rays. It also made UI labels
+      // into physical aircraft targets. Mesh transforms remain live, so this
+      // cache does not freeze the parked/moving aircraft pose.
+      if (!rec._rayMeshes) {
+        rec._rayMeshes = [];
+        rec.group.traverse(function (o) { if (o && o.isMesh && o.geometry) rec._rayMeshes.push(o); });
+      }
+      const hits = civilRaycaster.intersectObjects(rec._rayMeshes, false);
+      let hit = null;
+      for (let h = 0; h < hits.length; h++) {
+        const q = hits[h];
+        if (q.distance >= bd || !q.object || q.object.visible === false || (q.object.material && q.object.material.visible === false)) continue;
+        hit = q; break;
+      }
+      if (!hit) continue;
+      bd = hit.distance;
+      best = { rec, dist: hit.distance, x: hit.point.x, y: hit.point.y, z: hit.point.z, object: hit.object };
     }
     return best;
   };
@@ -258,6 +272,10 @@
     opts = opts || {};
     if (!rec || rec.destroyed || rec.taken || !rec.group || !rec.group.parent || !(amount > 0)) return false;
     rec.hp = Math.max(0, (rec.hp == null ? rec.maxHp || 250 : rec.hp) - amount);
+    if (point && point.x != null) rec._lastDamagePoint = { x: point.x, y: point.y, z: point.z };
+    const hpFrac = rec.maxHp > 0 ? rec.hp / rec.maxHp : 0;
+    if (hpFrac <= 0.58) rec._damaged = true;
+    if (hpFrac <= 0.24) { rec._burning = true; rec._burnT = Math.min(rec._burnT || 0, 0.05); }
     if (rec.hp > 0) return false;
 
     rec.destroyed = true; rec.taken = true; rec.hot = false;
@@ -293,6 +311,29 @@
     if (CBZ.shake) { try { CBZ.shake(heavy ? 1.5 : 1.0); } catch (e) {} }
     return true;
   };
+
+  // Parked planes now share the readable damage ladder cars have: rounds first
+  // chip the skin, low integrity starts an engine/fuselage smoke trail, and an
+  // ignored burning airframe eventually cooks off into the same persistent
+  // wreck transition. The currently flown record is excluded because its live
+  // craft controller owns HP and crash physics.
+  if (CBZ.onUpdate) CBZ.onUpdate(35.64, function (dt) {
+    if (CBZ.game.mode !== "city" || CBZ.game.state !== "playing") return;
+    for (let i = 0; i < placed.length; i++) {
+      const rec = placed[i];
+      if (!rec || !rec._burning || rec.destroyed || rec.taken || !rec.group || !rec.group.parent) continue;
+      rec._burnT = (rec._burnT || 0) - dt;
+      if (rec._burnT <= 0) {
+        rec._burnT = 0.16 + rng() * 0.12;
+        const p = rec._lastDamagePoint || {
+          x: rec.group.position.x, y: rec.group.position.y + (rec.flightKind === "airliner" ? 3.6 : 2.2), z: rec.group.position.z,
+        };
+        if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(p.x, p.y, p.z); } catch (e) {} }
+      }
+      rec.hp = Math.max(0, rec.hp - dt * (rec.flightKind === "airliner" ? 2.5 : 3.8));
+      if (rec.hp <= 0) CBZ.cityDamageCivilAircraft(rec, 1, rec._lastDamagePoint, { byPlayer: false, fire: true });
+    }
+  });
 
   CBZ.cityCivilAircraftSplash = function (x, y, z, radius, maxDamage, opts) {
     radius = Math.max(0.1, radius || 10); maxDamage = maxDamage || 0;
@@ -627,12 +668,11 @@
       return c;
     }
     function aircraftSolid(group, dims) {
-      const h = group.rotation.y || 0;
-      const ca = Math.abs(Math.cos(h)), sa = Math.abs(Math.sin(h));
-      const bodyW = dims.length, bodyD = Math.max(2.2, dims.fuselage + 0.45);
-      const w = ca * bodyW + sa * bodyD;
-      const d = sa * bodyW + ca * bodyD;
-      return solid(group.position.x, group.position.z, w, d, 0, dims.height, group);
+      // No broad-phase rectangle around parked aircraft. It was necessarily
+      // larger than the tapered visual hull, blocking the player before they
+      // reached the door and catching bullets in mid-air. Boarding uses the
+      // oriented footprint and gunfire now raycasts the actual meshes.
+      return null;
     }
     // a flat painted quad lying on the ground (collected for merging)
     function quadGeo(x, z, w, d, y) {
@@ -643,28 +683,99 @@
     }
     function mergePaint(geoms, color, y) {
       if (!geoms.length) return;
+      const pm = mat(color).clone();
+      pm.polygonOffset = true; pm.polygonOffsetFactor = -2; pm.polygonOffsetUnits = -6;
       if (BGU && BGU.mergeBufferGeometries) {
-        const m = new THREE.Mesh(BGU.mergeBufferGeometries(geoms), mat(color));
+        const m = new THREE.Mesh(BGU.mergeBufferGeometries(geoms), pm);
         m.receiveShadow = true; m.castShadow = false; m.matrixAutoUpdate = false;
         root.add(m);
       } else {
-        for (const gm of geoms) { const m = new THREE.Mesh(gm, mat(color)); m.receiveShadow = true; root.add(m); }
+        for (const gm of geoms) { const m = new THREE.Mesh(gm, pm); m.receiveShadow = true; root.add(m); }
       }
     }
 
+    const RWY_Z = -90;            // runway centre line (z)
+    const RWY_W = 30;             // width
+    const RWY_X0 = -850, RWY_X1 = 240, RWY_LEN = RWY_X1 - RWY_X0;
+    const RWY_CX = (RWY_X0 + RWY_X1) / 2;
+    const TAX_Z = RWY_Z + 50;     // taxiway centre
+    const APRON_Z = 0;            // ramp/apron centre (south, by terminal)
+
     // =====================================================================
-    //  1) GROUND — grass infield slab + concrete apron pad. Sits a hair
-    //     above the sea plane (y=0 world floor). The runway/taxiways are
-    //     darker asphalt strips laid on top.
+    //  1) ONE AIRFIELD SURFACE — grass, runway, taxiway and apron are baked
+    //     into one texture on one plane.  The old five nearly-coplanar slabs
+    //     were the airport flicker: at flight distance their 0.1m separation
+    //     collapsed to the same depth value and green won through asphalt.
     // =====================================================================
     (function ground() {
-      // grass infield covering the whole footprint
       const gw = A_MAXX - A_MINX, gd = A_MAXZ - A_MINZ;
-      const grass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), mat(C_GRASS));
+      const canvas = document.createElement("canvas");
+      canvas.width = 2048; canvas.height = 1024;
+      const ctx = canvas.getContext("2d");
+      function css(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); }
+      function rect(x, z, w, d, color) {
+        ctx.fillStyle = css(color);
+        ctx.fillRect((x - w / 2 - A_MINX) / gw * canvas.width,
+          (z - d / 2 - A_MINZ) / gd * canvas.height,
+          w / gw * canvas.width, d / gd * canvas.height);
+      }
+      function runwayText(text, x, z, worldSize, rotation) {
+        ctx.save();
+        ctx.translate((x - A_MINX) / gw * canvas.width, (z - A_MINZ) / gd * canvas.height);
+        ctx.rotate(rotation || 0);
+        ctx.fillStyle = css(C_PAINT);
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.font = "900 " + Math.max(14, worldSize / gd * canvas.height) + "px Arial Black, sans-serif";
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
+      }
+      ctx.fillStyle = css(C_GRASS); ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // restrained mowing bands add scale without another geometry layer
+      ctx.globalAlpha = 0.08; ctx.fillStyle = "#8aa96b";
+      for (let z = A_MINZ; z < A_MAXZ; z += 28) rect((A_MINX + A_MAXX) / 2, z + 7, gw, 14, 0x8aa96b);
+      ctx.globalAlpha = 1;
+      rect(RWY_CX, RWY_Z, RWY_LEN, RWY_W, C_RUNWAY);
+      rect(RWY_CX, TAX_Z, RWY_LEN - 20, 18, C_TARMAC);
+      rect(-40, APRON_Z + 6, 260, 80, C_TARMAC);
+      for (const cx of [-160, 80]) rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 16, TAX_Z - APRON_Z + 30, C_TARMAC);
+
+      // runway white paint
+      rect(RWY_CX, RWY_Z - RWY_W / 2 + 0.6, RWY_LEN - 8, 0.6, C_PAINT);
+      rect(RWY_CX, RWY_Z + RWY_W / 2 - 0.6, RWY_LEN - 8, 0.6, C_PAINT);
+      const dashL = 6, step = 12;
+      for (let x = RWY_X0 + 24; x < RWY_X1 - 24; x += step) rect(x + dashL / 2, RWY_Z, dashL, 0.5, C_PAINT);
+      for (const endSgn of [-1, 1]) {
+        const baseX = endSgn < 0 ? RWY_X0 + 5 : RWY_X1 - 19;
+        for (let k = 0; k < 8; k++) rect(baseX + 7, RWY_Z - RWY_W / 2 + 2.2 + k * 3.4, 14, 1.4, C_PAINT);
+      }
+      for (const ax of [RWY_X0 + 60, RWY_X1 - 60]) {
+        rect(ax, RWY_Z - 4.5, 18, 2.2, C_PAINT);
+        rect(ax, RWY_Z + 4.5, 18, 2.2, C_PAINT);
+      }
+      // Designators are PAINT in the same authoritative surface texture, not
+      // floating sprites hovering above the runway.
+      runwayText("09", RWY_X0 + 29, RWY_Z, 9, Math.PI / 2);
+      runwayText("27", RWY_X1 - 29, RWY_Z, 9, -Math.PI / 2);
+      // taxiway yellow centrelines and hold bars
+      rect(RWY_CX, TAX_Z, RWY_LEN - 24, 0.5, C_YELLOW);
+      for (const cx of [-160, 80]) {
+        rect(cx, (TAX_Z + APRON_Z) / 2 - 10, 0.5, TAX_Z - APRON_Z + 24, C_YELLOW);
+        for (let i = 0; i < 4; i++) rect(cx, TAX_Z - 14 - i * 0.9, 14, 0.4, C_YELLOW);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.LinearFilter;
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.generateMipmaps = true;
+      tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+      const grass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
       grass.rotation.x = -Math.PI / 2;
-      grass.position.set((A_MINX + A_MAXX) / 2, 0.0, (A_MINZ + A_MAXZ) / 2);
+      // Keep one deliberate depth layer above the continent underlay. 8cm is
+      // visually flush but remains separable in the far camera's depth buffer.
+      grass.position.set((A_MINX + A_MAXX) / 2, 0.08, (A_MINZ + A_MAXZ) / 2);
       grass.receiveShadow = true; grass.matrixAutoUpdate = false; grass.updateMatrix();
       grass.userData.terrain = true; grass.userData.worldSurface = true;
+      grass.userData.surfaceOwner = "airport";
+      grass.userData.unifiedSurface = true;
       grass.name = "airport-island-surface";
       root.add(grass);
     })();
@@ -674,51 +785,7 @@
     //     Real markings: solid edge lines, dashed centreline, threshold
     //     "piano keys", runway designator numbers, aiming-point bars.
     // =====================================================================
-    const RWY_Z = -90;            // runway centre line (z)
-    const RWY_W = 30;             // width
-    const RWY_X0 = -850, RWY_X1 = 240, RWY_LEN = RWY_X1 - RWY_X0;  // 1,090 long
-    const RWY_CX = (RWY_X0 + RWY_X1) / 2;
-    (function runway() {
-      // asphalt strip
-      const strip = new THREE.Mesh(new THREE.PlaneGeometry(RWY_LEN, RWY_W), mat(C_RUNWAY));
-      strip.rotation.x = -Math.PI / 2;
-      strip.position.set(RWY_CX, 0.01, RWY_Z);
-      strip.receiveShadow = true; strip.matrixAutoUpdate = false; strip.updateMatrix();
-      root.add(strip);
-
-      // --- white paint, all merged into ONE mesh ---
-      const paint = [];
-      // edge lines (full length, both sides)
-      paint.push(quadGeo(RWY_CX, RWY_Z - RWY_W / 2 + 0.6, RWY_LEN - 8, 0.6));
-      paint.push(quadGeo(RWY_CX, RWY_Z + RWY_W / 2 - 0.6, RWY_LEN - 8, 0.6));
-      // dashed centreline — 6 long dash + 6 gap pattern
-      const dashL = 6, gap = 6, step = dashL + gap;
-      for (let x = RWY_X0 + 24; x < RWY_X1 - 24; x += step) paint.push(quadGeo(x + dashL / 2, RWY_Z, dashL, 0.5));
-      // threshold "piano keys" at each end (8 longitudinal bars)
-      for (const endSgn of [-1, 1]) {
-        const baseX = endSgn < 0 ? RWY_X0 + 5 : RWY_X1 - 5 - 14;
-        for (let k = 0; k < 8; k++) {
-          const z = RWY_Z - RWY_W / 2 + 2.2 + k * 3.4;
-          paint.push(quadGeo(baseX + 7, z, 14, 1.4));
-        }
-      }
-      // aiming-point bars (two thick bars ~30m in from each threshold)
-      for (const ax of [RWY_X0 + 60, RWY_X1 - 60]) {
-        paint.push(quadGeo(ax, RWY_Z - 4.5, 18, 2.2));
-        paint.push(quadGeo(ax, RWY_Z + 4.5, 18, 2.2));
-      }
-      mergePaint(paint, C_PAINT);
-
-      // runway designator numbers ("09" west-facing, "27" east-facing) as
-      // label sprites laid above the threshold paint — cheap, readable.
-      if (CBZ.makeLabelSprite) {
-        const mk = (txt, x) => {
-          const s = CBZ.makeLabelSprite(txt, { color: "#eef1f4" });
-          if (!s) return; s.position.set(x, 0.6, RWY_Z); s.scale.set(10, 6, 1); root.add(s);
-        };
-        mk("09", RWY_X0 + 22); mk("27", RWY_X1 - 22);
-      }
-    })();
+    // Runway numbers are already painted into the unified surface above.
 
     // =====================================================================
     //  3) EDGE LIGHTS — ONE InstancedMesh down both runway edges + the
@@ -751,36 +818,7 @@
     //  4) TAXIWAY (parallel to runway, to its south) + APRON pad in front
     //     of the terminal. Asphalt strips with yellow centrelines.
     // =====================================================================
-    const TAX_Z = RWY_Z + 50;     // taxiway centre
-    const APRON_Z = 0;            // ramp/apron centre (south, by terminal)
-    (function taxiAndApron() {
-      // taxiway strip
-      const tx = new THREE.Mesh(new THREE.PlaneGeometry(RWY_LEN - 20, 18), mat(C_TARMAC));
-      tx.rotation.x = -Math.PI / 2; tx.position.set(RWY_CX, 0.008, TAX_Z);
-      tx.receiveShadow = true; tx.matrixAutoUpdate = false; tx.updateMatrix(); root.add(tx);
-
-      // big apron / ramp pad in front of the terminal
-      const ax = new THREE.Mesh(new THREE.PlaneGeometry(260, 80), mat(C_TARMAC));
-      ax.rotation.x = -Math.PI / 2; ax.position.set(-40, 0.006, APRON_Z + 6);
-      ax.receiveShadow = true; ax.matrixAutoUpdate = false; ax.updateMatrix(); root.add(ax);
-
-      // two connector taxiways linking apron→taxiway→runway
-      for (const cx of [-160, 80]) {
-        const c = new THREE.Mesh(new THREE.PlaneGeometry(16, TAX_Z - APRON_Z + 30), mat(C_TARMAC));
-        c.rotation.x = -Math.PI / 2; c.position.set(cx, 0.007, (TAX_Z + APRON_Z) / 2 - 10);
-        c.receiveShadow = true; c.matrixAutoUpdate = false; c.updateMatrix(); root.add(c);
-      }
-
-      // yellow centrelines/hold-bars merged into one mesh
-      const yel = [];
-      yel.push(quadGeo(RWY_CX, TAX_Z, RWY_LEN - 24, 0.5, 0.03));     // taxiway centreline
-      for (const cx of [-160, 80]) {
-        yel.push(quadGeo(cx, (TAX_Z + APRON_Z) / 2 - 10, 0.5, TAX_Z - APRON_Z + 24, 0.03)); // connector line
-        // runway hold-position bars (two solid + two dashed across connector)
-        for (let i = 0; i < 4; i++) yel.push(quadGeo(cx, TAX_Z - 14 - i * 0.9, 14, 0.4, 0.03));
-      }
-      mergePaint(yel, C_YELLOW);
-    })();
+    // Taxiway/apron asphalt and paint are part of the unified ground texture.
 
     // =====================================================================
     //  5) TERMINAL — enterable concourse via cityMakeBuilding. A long, low
@@ -1293,25 +1331,10 @@
     })();
 
     // =====================================================================
-    //  9) GROUND SUPPORT EQUIPMENT — fuel truck, stair trucks, baggage
-    //     carts. Static boxes (cheap), with colliders. Stair trucks parked
-    //     at the airliner doors complete the "ready to board" read.
+    //  9) GATE EQUIPMENT — only equipment physically tied to the terminal.
+    //     The former loose fuel/stair/cart box cluster read as placeholder
+    //     geometry and obstructed approaches, so it is intentionally gone.
     // =====================================================================
-    function fuelTruck(x, z, ry) {
-      box(x, 1.0, z, 6, 2.0, 2.4, 0xb0b6bc, { cast: true, ry });   // tank body
-      box(x + (ry ? 0 : 3.6), 1.2, z + (ry ? 3.6 : 0), 2.4, 2.4, 2.2, 0x394049, { cast: true }); // cab
-      solid(x, z, ry ? 2.4 : 8, ry ? 8 : 2.4, 0, 2.2);
-      if (CBZ.makeLabelSprite) { const s = CBZ.makeLabelSprite("JET A-1", { color: "#ffd451" }); if (s) { s.position.set(x, 2.8, z); s.scale.set(4, 1.2, 1); root.add(s); } }
-    }
-    function stairTruck(x, z) {
-      box(x, 1.6, z, 2.4, 3.2, 2.2, 0xdfe3e7, { cast: true });    // stair tower
-      box(x, 0.6, z + 1.6, 2.4, 1.2, 1.6, 0x394049, { cast: true }); // truck cab
-      solid(x, z, 2.6, 4.4, 0, 3.4);
-    }
-    fuelTruck(-95, APRON_Z - 26, 0);
-    fuelTruck(40, APRON_Z + 18, Math.PI / 2);
-    stairTruck(-120, APRON_Z - 24);
-    stairTruck(-10, APRON_Z - 24);
     // jet-bridge stubs at the two EMPTY gate slots between the parked
     // airliners (occupied gates board by stair truck — the airliners park
     // tail-to-terminal, so a bridge at their gate would skewer the tail).
@@ -1323,14 +1346,6 @@
       box(bx, 3.4, -2.8, 3.6, 2.6, 2.6, 0x7d8894, { cast: true });   // gate-end head block
     }
     jetBridge(-92.5); jetBridge(-37.5);
-    // baggage carts: ONE instanced mesh chain near the terminal
-    (function baggageCarts() {
-      const geo = new THREE.BoxGeometry(2.0, 1.0, 1.4);
-      const n = 8, inst = new THREE.InstancedMesh(geo, mat(0x4a5158), n);
-      inst.castShadow = true; const dm = new THREE.Object3D();
-      for (let i = 0; i < n; i++) { dm.position.set(-30 + i * 2.4, 0.55, APRON_Z + 24); dm.updateMatrix(); inst.setMatrixAt(i, dm.matrix); }
-      inst.instanceMatrix.needsUpdate = true; root.add(inst);
-    })();
 
     // =====================================================================
     //  10) PERIMETER FENCE — the WHY you can't drive into the sea except via
@@ -1347,19 +1362,10 @@
       // causeway side (south) keeps its full fence + checkpoint gate.
       const PG = 3;                                  // pedestrian gap half-span ≈1.5m
       const midX = (A_MINX + A_MAXX) / 2, midZ = (A_MINZ + A_MAXZ) / 2;
-      // north (z=A_MAXZ): split around a centre gap
-      solid((A_MINX + (midX - PG)) / 2, A_MAXZ, (midX - PG) - A_MINX, T, 0, H);
-      solid(((midX + PG) + A_MAXX) / 2, A_MAXZ, A_MAXX - (midX + PG), T, 0, H);
-      // west (x=A_MINX): split around a centre gap
-      solid(A_MINX, (A_MINZ + (midZ - PG)) / 2, T, (midZ - PG) - A_MINZ, 0, H);
-      solid(A_MINX, ((midZ + PG) + A_MAXZ) / 2, T, A_MAXZ - (midZ + PG), 0, H);
-      // east (x=A_MAXX): split around a centre gap
-      solid(A_MAXX, (A_MINZ + (midZ - PG)) / 2, T, (midZ - PG) - A_MINZ, 0, H);
-      solid(A_MAXX, ((midZ + PG) + A_MAXZ) / 2, T, A_MAXZ - (midZ + PG), 0, H);
-      // south, left of the causeway gate
-      solid((A_MINX + gapX0) / 2, A_MINZ, gapX0 - A_MINX, T, 0, H);
-      // south, right of the causeway gate
-      solid((gapX1 + A_MAXX) / 2, A_MINZ, A_MAXX - gapX1, T, 0, H);
+      // The perimeter stays visually fenced but has no world-sized collision
+      // slabs. Those slabs were the repeated "invisible wall outside the
+      // airport" report; gameplay boundaries must come from visible geometry,
+      // terrain and water, never a hundreds-of-metres AABB.
 
       // decorative sand/ramp APRONS (no collider) at each seaward gap so it
       // reads as a slipway/beach down to the water.
@@ -1412,7 +1418,12 @@
         // south split around causeway gate
         panelRun(A_MINX, A_MINZ, gapX0, A_MINZ);
         panelRun(gapX1, A_MINZ, A_MAXX, A_MINZ);
-        const fm = new THREE.MeshLambertMaterial({ color: C_FENCE, transparent: true, opacity: 0.18, depthWrite: false });
+        // This is collision-bearing security fencing, so it must remain plainly
+        // visible against bright sea/sky.  At 0.18 opacity the collider read as
+        // an invisible wall anywhere between the widely spaced posts.  A darker,
+        // depth-writing mesh keeps the chain-link feel while making every solid
+        // span agree with what the player can actually see.
+        const fm = new THREE.MeshLambertMaterial({ color: 0x66717d, transparent: true, opacity: 0.52, depthWrite: true, side: THREE.DoubleSide });
         const fmesh = new THREE.Mesh(BGU.mergeBufferGeometries(panels), fm);
         fmesh.matrixAutoUpdate = false; root.add(fmesh);
       }
@@ -1433,7 +1444,7 @@
         CBZ.buildHighway(root, {
           path: [{ x: cx, z: CW_MINZ }, { x: cx, z: CW_MAXZ }],
           width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
-          guardrail: true, elevated: false, rng: rng,
+          guardrail: false, elevated: false, rng: rng,
         });
         return;
       }
@@ -1441,11 +1452,7 @@
       const deck = new THREE.Mesh(new THREE.PlaneGeometry(CW_MAXX - CW_MINX, len), mat(0x44484d));
       deck.rotation.x = -Math.PI / 2; deck.position.set(cx, 0.02, cz);
       deck.receiveShadow = true; deck.matrixAutoUpdate = false; deck.updateMatrix(); root.add(deck);
-      // kerbs — low solid colliders both sides
-      solid(CW_MINX - 0.4, cz, 0.8, len, 0, 0.6);
-      solid(CW_MAXX + 0.4, cz, 0.8, len, 0, 0.6);
-      box(CW_MINX - 0.4, 0.3, cz, 0.8, 0.6, len, C_CONC, { cast: false });
-      box(CW_MAXX + 0.4, 0.3, cz, 0.8, 0.6, len, C_CONC, { cast: false });
+      // no curb/rail collision: the open deck is jumpable and traversable
       // dashed centre line (merged)
       const dl = [];
       for (let z = CW_MINZ + 4; z < CW_MAXZ - 4; z += 8) dl.push(quadGeo(cx, z, 0.4, 4, 0.04));

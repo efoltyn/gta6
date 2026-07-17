@@ -13,50 +13,12 @@
   const scene = CBZ.prisonRoot || CBZ.scene;
   const { makeCharacter, animChar, lerpAngle, econ } = CBZ;
 
-  // ---- floating name tag (billboard sprite) ----
-  // The material/texture is CACHED by text+colour, so a crowd of 150 "Inmate"
-  // tags shares ONE texture+material (only the lightweight Sprite differs).
-  const tagCache = new Map();
-  function tagMaterial(text, color) {
-    const key = text + "|" + (color || "#fff");
-    let m = tagCache.get(key);
-    if (!m) {
-      const c = document.createElement("canvas");
-      c.width = 256; c.height = 64;
-      const x = c.getContext("2d");
-      x.font = "bold 30px Fredoka, sans-serif";
-      x.textAlign = "center"; x.textBaseline = "middle";
-      x.lineWidth = 6; x.strokeStyle = "rgba(0,0,0,.7)";
-      x.strokeText(text, 128, 32);
-      x.fillStyle = color || "#fff";
-      x.fillText(text, 128, 32);
-      const tex = new THREE.CanvasTexture(c);
-      m = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
-      m._shared = true;
-      tagCache.set(key, m);
-    }
-    return m;
-  }
-  function nameTag(text, color, ch) {
-    const spr = new THREE.Sprite(tagMaterial(text, color));
-    spr.scale.set(3.2, 0.8, 1);
-    // just above the (unscaled-root) head post HUMAN_SCALE; was 3.2 for 2.6u rig.
-    spr.position.y = CBZ.charHeadY ? CBZ.charHeadY(ch) : 1.97;
-    return spr;
-  }
-
   // ---- build & register one NPC ----
   function makeNpc(opts) {
     const lifeDef = CBZ.npcLife ? CBZ.npcLife.resolve("jailInmate") : { id: "jailInmate", actor: {}, life: { routine: true } };
     opts = Object.assign({}, lifeDef.actor, opts || {});
     const ch = makeCharacter(opts.skin);
     ch.group.position.set(opts.pos[0], 0, opts.pos[1]);
-    // prefix the floating tag with the temperament glyph when it's known
-    let tag = opts.tagText;
-    const beh = opts.behavior && CBZ.BEHAVIORS && CBZ.BEHAVIORS[opts.behavior];
-    if (beh) tag = beh.emoji + " " + tag;
-    const tagSprite = nameTag(tag, opts.tagColor, ch);
-    ch.group.add(tagSprite);
     ch.group.userData.dynamic = true;
     scene.add(ch.group);
 
@@ -75,7 +37,7 @@
       _npcProfile: lifeDef.id,
       _npcLife: Object.assign({}, lifeDef.life),
       activityState: "idle",
-      _tag: tagSprite,                 // hidden at distance by the LOD
+      _tag: null,                      // identity lives in interaction dialogue/UI
       slice: CBZ.npcs.length & 15,     // round-robin phase for time-sliced AI
     };
     CBZ.npcs.push(n);

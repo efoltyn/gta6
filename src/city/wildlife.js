@@ -164,8 +164,36 @@
     };
   }
 
-  function oceanPoint(r) {
-    // a point in the open-sea band, clear of every land region.
+  function aquaticClearance(sp) {
+    if (!sp) return 18;
+    if (sp.id === "megalodon") return 88;
+    if (sp.id === "humpback_whale") return 58;
+    if (sp.id === "great_white_shark") return 34;
+    return 16 + Math.min(22, (sp.scale || 1) * 8);
+  }
+
+  // How far the authored model origin sits below the animated surface. Big
+  // animals retain a dorsal/back read; little fish remain genuinely submerged.
+  function aquaticBodyDepth(sp) {
+    if (!sp) return 1;
+    if (sp.id === "megalodon") return 7.8;
+    if (sp.id === "humpback_whale") return 2.8;
+    if (sp.id === "great_white_shark") return 2.45;
+    if (sp.id === "dolphin") return 1.55;
+    return 0.72;
+  }
+
+  function oceanPoint(r, sp) {
+    // Spawn from the same signed coast the visible sea uses. This is the
+    // water equivalent of navmesh random-point sampling: a radius candidate
+    // is accepted only when its whole body has shoreline clearance.
+    if (CBZ.waterField && CBZ.waterField.randomWaterPoint) {
+      return CBZ.waterField.randomWaterPoint(r, {
+        cx: FIELD_CX, cz: FIELD_CZ, r0: AQUATIC_R0, r1: AQUATIC_R1,
+        clearance: aquaticClearance(sp),
+      });
+    }
+    // Legacy fallback for isolated tests that omit waterfield.js.
     for (let tries = 0; tries < 24; tries++) {
       const a = r() * Math.PI * 2;
       const rad = AQUATIC_R0 + r() * (AQUATIC_R1 - AQUATIC_R0);
@@ -175,6 +203,12 @@
     return { x: FIELD_CX + 900, z: FIELD_CZ };
   }
 
+  function wetPointNear(x, z, sp, radius) {
+    const wf = CBZ.waterField;
+    if (!wf || !wf.nearestWater) return { x: x, z: z };
+    return wf.nearestWater(x, z, aquaticClearance(sp), radius || 240);
+  }
+
   function makeActor(sp, x, z) {
     let grp;
     try { grp = sp.build({ THREE: THREE, mat: mat, rng: rng }); }
@@ -182,7 +216,9 @@
     if (!grp) grp = fallbackMesh(sp);
     const s = sp.scale || 1;
     grp.scale.setScalar(s);
-    grp.position.set(x, sp.aquatic ? 0 : groundY(x, z), z);
+    const swimDepth = sp.aquatic ? aquaticBodyDepth(sp) : 0;
+    const waterY = sp.aquatic && CBZ.citySeaHeightAt ? CBZ.citySeaHeightAt(x, z) - swimDepth : 0;
+    grp.position.set(x, sp.aquatic ? waterY : groundY(x, z), z);
     const initialHeading = rng() * 6.283;
     faceAnimalHeading(grp, initialHeading);
     // castShadow for the read; leave frustumCulled at its DEFAULT (true) so the
@@ -208,6 +244,11 @@
       bob: rng() * 6.283, hitCount: 0, cleanKill: false,
       stateT: 0,                          // seconds left in the current timed behavior
     };
+    if (sp.aquatic) {
+      a.waterClearance = aquaticClearance(sp);
+      a.swimDepth = swimDepth;
+      a._waterMove = { x: x, z: z, heading: initialHeading, blocked: false, shore: -999 };
+    }
     if (LIVE()) buildGaitRig(a);          // discover legs/head for the gait & graze reads
     // snakes carry a segment chain the engine undulates (slither) — cache the
     // parts the build() registered on userData so the anim loop is allocation-free.
@@ -554,13 +595,19 @@
     while (placed < count && guard++ < 400) {
       const regs = sp.aquatic ? null : biomeRegions(sp.biome);
       if (!sp.aquatic && (!regs || !regs.length)) return placed;
-      const anchor = sp.aquatic ? oceanPoint(rng) : regionPoint(regs[(rng() * regs.length) | 0], rng);
+      const anchor = sp.aquatic ? oceanPoint(rng, sp) : regionPoint(regs[(rng() * regs.length) | 0], rng);
+      if (!anchor) return placed;          // no validated water means no aquatic spawn
       let herd = sp.herd ? (sp.herd[0] + ((rng() * (sp.herd[1] - sp.herd[0] + 1)) | 0)) : 1;
       herd = Math.min(herd, count - placed);
       const hr = newHerd(sp);            // this cluster moves & panics as ONE unit
       for (let h = 0; h < herd; h++) {
-        const jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
-        const jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        let jx = anchor.x + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        let jz = anchor.z + (rng() - 0.5) * (sp.aquatic ? 60 : 22);
+        if (sp.aquatic) {
+          const wet = wetPointNear(jx, jz, sp, 260);
+          if (!wet) continue;
+          jx = wet.x; jz = wet.z;
+        }
         const a = makeActor(sp, jx, jz); placed++;
         joinHerd(a, hr);
         // a herd of 2+ trails a BABY (a tiny scaled-down copy — see grow logic).
@@ -663,8 +710,9 @@
     for (const id in S) {
       const sp = S[id]; if (sp.rarity !== "legendary") continue;
       let pt;
-      if (sp.aquatic) pt = oceanPoint(rng);
+      if (sp.aquatic) pt = oceanPoint(rng, sp);
       else { const regs = biomeRegions(sp.biome); if (!regs.length) continue; pt = regionPoint(regs[(rng() * regs.length) | 0], rng); }
+      if (!pt) continue;
       const a = makeActor(sp, pt.x, pt.z); a.legendary = true;
     }
   }
@@ -722,8 +770,13 @@
       for (let b = 0; b < births; b++) {
         const parent = herd[(Math.random() * herd.length) | 0];
         const jit = sp.aquatic ? 26 : 8;
-        const nx = parent.pos.x + (Math.random() - 0.5) * jit;
-        const nz = parent.pos.z + (Math.random() - 0.5) * jit;
+        let nx = parent.pos.x + (Math.random() - 0.5) * jit;
+        let nz = parent.pos.z + (Math.random() - 0.5) * jit;
+        if (sp.aquatic) {
+          const wet = wetPointNear(nx, nz, sp, 180);
+          if (!wet) continue;
+          nx = wet.x; nz = wet.z;
+        }
         // don't pop a newborn in right under the player's nose
         if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
         const kid = makeActor(sp, nx, nz);
@@ -755,13 +808,13 @@
     a.hp -= dmg;
     // blood spritz where reachable (reuse the shared gore if present).
     if (hit && hit.point && CBZ.gore && CBZ.gore.spray) {
-      try { CBZ.gore.spray(hit.point, 1); } catch (e) {}
+      try { CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, hit.dir || null); } catch (e) {}
     }
     if (a.hp <= 0) {
       // a PRISTINE pelt needs a clean kill: down in one or two hits, ideally a
       // headshot. Sloppy magazine-dumps ruin the hide (RDR2 rewards precision).
       a.cleanKill = (a.hitCount <= 1) || (a.hitCount <= 2 && !!(hit && hit.head));
-      killAnimal(a, hit);
+      killAnimal(a, hit, w);
       return { head: !!(hit && hit.head), down: true, dmg: dmg };
     }
     // WOUNDED — predators charge, prey bolts. (A TAMED animal never turns on
@@ -785,22 +838,55 @@
     return { head: !!(hit && hit.head), down: false, dmg: dmg };
   };
 
-  function killAnimal(a, hit) {
+  function killAnimal(a, hit, w) {
     a.dead = true; a.ko = 0; a.state = "dead"; a.hp = 0;
     a.skinnable = true; a.skinT = CARCASS_LINGER;
     if (LIVE()) setAggroEyes(a, 0);          // the light goes out
-    // topple onto its side (feet were at y=0; drop + roll the group).
+    // BULLET-DRIVEN CARCASS PHYSICS. The old death pose eased every species to
+    // the same feet-up roll around its root, then froze. Carry the killing round
+    // into a short rigid-body flight/tumble instead: mass damps big animals,
+    // gravity/bounces move the root, and the final rest is side-biased with a
+    // little pitch/yaw variance so a herd never becomes a row of identical toys.
     const grp = a.group;
     if (LIVE()) {
-      // ANIMATED fall (~0.55s ease-out) instead of an instant snap — the
-      // dead branch of tick() drives it. Skinnable immediately, as before.
-      a._dieT = 0.55;
-      a._toppleTo = (Math.random() < 0.5 ? 1 : -1) * (1.15 + Math.random() * 0.25);
-      a._dieZ0 = grp.rotation.z; a._dieX0 = grp.rotation.x;
-      grp.position.y = Math.max(0, grp.position.y) + 0.05;
+      let dx = hit && hit.dir ? (+hit.dir.x || 0) : 0;
+      let dy = hit && hit.dir ? (+hit.dir.y || 0) : 0;
+      let dz = hit && hit.dir ? (+hit.dir.z || 0) : 0;
+      let dl = Math.hypot(dx, dz);
+      if (dl < 0.01) {
+        const P = CBZ.player && CBZ.player.pos;
+        if (P) { dx = grp.position.x - P.x; dz = grp.position.z - P.z; dl = Math.hypot(dx, dz); }
+      }
+      if (dl < 0.01) { const ah = Math.random() * Math.PI * 2; dx = Math.cos(ah); dz = Math.sin(ah); dl = 1; }
+      dx /= dl; dz /= dl;
+      const scale = Math.max(0.35, a.species.scale || 1);
+      const mass = Math.max(0.75, scale * scale * 1.7);
+      const shotK = Math.max(0.55, (w && w.knock) || 1) * (w && w.pellets ? 1.22 : 1);
+      const impulse = Math.min(8.5, (3.2 + shotK * 2.7) / Math.sqrt(mass));
+      const side = (hit && hit.point)
+        ? Math.sign((hit.point.x - grp.position.x) * -dz + (hit.point.z - grp.position.z) * dx) || (Math.random() < 0.5 ? -1 : 1)
+        : (Math.random() < 0.5 ? -1 : 1);
+      a._deathPhys = {
+        vx: dx * impulse, vy: Math.max(1.2, 1.6 + Math.max(-0.2, dy) * impulse * 0.7), vz: dz * impulse,
+        wx: (Math.random() - 0.5) * 2.1 + dy * 0.8,
+        wy: (Math.random() - 0.5) * 1.8,
+        wz: side * (2.7 + Math.random() * 1.9) + dx * 0.5,
+        restRoll: side * (1.38 + Math.random() * 0.14),
+        restPitch: (Math.random() - 0.5) * 0.32,
+        restYaw: grp.rotation.y + (Math.random() - 0.5) * 0.25,
+        t: 0, groundT: 0, bounces: 0,
+      };
+      a._dieT = null;
+      grp.position.y = Math.max(groundY(grp.position.x, grp.position.z) + 0.08 * scale, grp.position.y);
     } else {
       grp.rotation.z = (Math.random() < 0.5 ? 1 : -1) * (1.15 + Math.random() * 0.25);
       grp.position.y = Math.max(0, grp.position.y) + 0.05;
+    }
+    // A kill gets one full, direction-aware bleed event (pool + mist, no human
+    // body-part logic); the connecting bullet already emitted its small entry
+    // spray. This mirrors the one-impact/one-death split used for people.
+    if (hit && hit.point && CBZ.gore) {
+      try { CBZ.gore(hit.point.x, hit.point.y, hit.point.z, { dir: hit.dir || null, amount: hit.head ? 1.05 : 0.72, player: false }); } catch (e) {}
     }
     carcasses.push(a);
     // score/notify — a kill is a kill.
@@ -811,6 +897,44 @@
     if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", a.species.name, "hunted"); } catch (e) {} }
     // let a following dog notice the kill too (dogs.js reads this list).
   }
+
+  // Contact damage with a real source position. Heavy rammers additionally
+  // launch the player through the shared player physics state, so gravity,
+  // collisions and landing/knockdown are handled by systems/physics.js instead
+  // of a canned camera shove.
+  function animalStrikePlayer(a, dmg, style) {
+    const P = CBZ.player;
+    if (!a || !P || !P.pos || P.dead) return;
+    const sp = a.species || {};
+    if (CBZ.cityHurtPlayer) {
+      try {
+        const label = (sp.name || sp.id || "animal").toLowerCase();
+        CBZ.cityHurtPlayer(dmg, a.pos.x, a.pos.z,
+          style === "ram" ? "rammed by a " + label : "attacked by a " + label,
+          false, a, false);
+      } catch (e) {}
+    }
+    if (style !== "ram" || P.dead) return;
+    let dx = P.pos.x - a.pos.x, dz = P.pos.z - a.pos.z;
+    let dl = Math.hypot(dx, dz);
+    if (dl < 0.01) { dx = Math.cos(a.heading || 0); dz = Math.sin(a.heading || 0); dl = 1; }
+    dx /= dl; dz /= dl;
+    const scale = Math.max(1, sp.scale || 1);
+    const charge = Math.max(1, sp.spd || 2.2);
+    const horiz = Math.min(14.5, 7.2 + scale * 2.5 + charge * 0.8);
+    const ph = P._phys = P._phys || {};
+    ph.air = true; ph.down = 0; ph.kx = ph.kz = 0;
+    ph.vx = dx * horiz; ph.vz = dz * horiz;
+    ph.vy = Math.min(10.5, 6.6 + scale * 2.0);
+    ph.spin = (Math.random() < 0.5 ? -1 : 1) * (4.6 + scale * 1.2);
+    ph.spin2 = (Math.random() - 0.5) * 4;
+    P.grounded = false; P.vy = 0;
+    if (CBZ.shake) CBZ.shake(0.85 + scale * 0.18);
+    if (CBZ.doHitstop) CBZ.doHitstop(0.045);
+    if (CBZ.sfx) CBZ.sfx("ko");
+  }
+  // Shared contact contract for authored animals/companions and diagnostics.
+  CBZ.cityAnimalStrikePlayer = animalStrikePlayer;
 
   // ============================================================
   //  SKINNING — the payoff. Grants the pelt (quality-scaled) + a field bounty.
@@ -890,7 +1014,7 @@
   function venomTick(dt) {
     const v = g._venom; if (!v || v.t <= 0) return;
     v.t -= dt; v.acc += dt;
-    if (v.acc >= 1) { v.acc -= 1; if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(v.dps, (v.name || "Venom") + " venom"); } catch (e) {} } }
+    if (v.acc >= 1) { v.acc -= 1; if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(v.dps, null, null, (v.name || "Venom") + " venom", false, null, false); } catch (e) {} } }
     if (v.t <= 0 && CBZ.city && CBZ.city.note) CBZ.city.note("The venom wears off.", 2);
   }
 
@@ -936,7 +1060,7 @@
         // ANACONDA — ambush hunter: close the gap, then CONSTRICT on contact.
         if (nearP < strikeR * strikeR) {
           if (a.grabT <= 0) {
-            if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(sp.bite || 20, a); } catch (e) {} }
+            animalStrikePlayer(a, sp.bite || 20, "constrict");
             a.grabT = 0.9;
             if (CBZ.city && CBZ.city.note) CBZ.city.note("The " + sp.name + " coils around you — thrash free!", 1.6, { urgent: true });
           }
@@ -947,7 +1071,7 @@
           a.reared = !!a.rear; a.heading = towardP;
           if (a.strikeT <= 0) {
             a.strikeAnim = 1; a.strikeT = 1.6;
-            if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(sp.bite || 12, a); } catch (e) {} }
+            animalStrikePlayer(a, sp.bite || 12, "strike");
             if (sp.venom) applyVenom(sp);
           }
         } else if ((sp.spd || 0) >= 3 && nearP > (strikeR + 3) * (strikeR + 3)) {
@@ -1073,13 +1197,15 @@
             PT.pos = P; PT.group.position = P; PT.dead = false; PT.hp = 1e9;
             let o = a._atkOpts;
             if (!o) {
+              const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : null;
               o = a._atkOpts = {
                 reach: reach, rate: 1.1, dmg: sp.bite || 12,
                 speed: (sp.spd || 1.4) * (cls.atkM || 2.0),
-                onHit: function (d2) { if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(d2, a); } catch (e) {} } },
+                style: style,
+                onHit: function (d2) { animalStrikePlayer(a, d2, style); },
               };
-              const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : null;
-              if (style === "gore" || style === "stomp") o.rate = 1.3;   // heavy hitters swing slower
+              if (style === "ram") { o.rate = 1.45; o.speed *= 1.12; }
+              else if (style === "gore" || style === "stomp") o.rate = 1.3;   // heavy hitters swing slower
               if (sp.id === "cheetah") o.rate = 0.9;
             }
             CBZ.creatureFight(a, PT, dt, o);
@@ -1088,9 +1214,10 @@
           }
           spd = (sp.spd || 1.4) * (cls.atkM || 2.0) * (a._burstT != null ? 1.2 : 1);
           a.heading = Math.atan2(-dpz, -dpx);
-          // fallback contact bite if creature_combat isn't around (legacy rule)
+          // fallback contact strike if creature_combat isn't around.
           if (!CBZ.creatureFight && nearP < 3.2 * 3.2 && CBZ.cityHurtPlayer && (a._biteT || 0) <= 0) {
-            try { CBZ.cityHurtPlayer(sp.bite || 10, a); } catch (e) {}
+            const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : null;
+            animalStrikePlayer(a, sp.bite || 10, style);
             a._biteT = 1.1;
           }
           if (a._biteT > 0) a._biteT -= dt;
@@ -1270,6 +1397,7 @@
   function tick(dt) {
     if (!dt || dt > 0.5) dt = 0.05;
     const P = CBZ.player && CBZ.player.pos;
+    const waterTime = ((typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001) % 3600;
     venomTick(dt);                 // poison keeps draining after a venomous bite
     updateHerds(dt);               // live centroid + mean heading + herd alarm
     if (!wrapsOk) installWraps();  // retry until the combat hooks exist (idempotent)
@@ -1301,8 +1429,50 @@
       // (the saving staticfreeze.js was after) and thaw the moment they show.
       if (LIVE()) setLiveMats(a, grp.visible !== false);
       if (a.dead) {
-        // animated death topple (WILDLIFE_LIVE): ease onto the side.
-        if (a._dieT != null) {
+        // Killing impulse drives a short, damped rigid-body tumble. It can slide,
+        // bounce once and rotate on every axis before friction settles it onto a
+        // side. This deliberately runs even when the mesh is LOD-hidden so the
+        // carcass is in the right place/pose when the player approaches again.
+        if (a._deathPhys) {
+          const ph = a._deathPhys;
+          const step = Math.min(0.04, dt);
+          const scale = Math.max(0.35, sp.scale || 1);
+          ph.t += step;
+          ph.vy -= 20.5 * step;
+          grp.position.x += ph.vx * step;
+          grp.position.y += ph.vy * step;
+          grp.position.z += ph.vz * step;
+          grp.rotation.x += ph.wx * step;
+          grp.rotation.y += ph.wy * step;
+          grp.rotation.z += ph.wz * step;
+          const restY = groundY(grp.position.x, grp.position.z) + 0.08 * scale;
+          if (grp.position.y <= restY && ph.vy < 0) {
+            grp.position.y = restY;
+            ph.bounces++;
+            if (ph.bounces <= 1 && Math.abs(ph.vy) > 2.2) ph.vy = -ph.vy * 0.18;
+            else ph.vy = 0;
+            ph.vx *= 0.48; ph.vz *= 0.48;
+            ph.wx *= 0.28; ph.wy *= 0.38; ph.wz *= 0.3;
+            ph.groundT += step;
+          } else ph.groundT = 0;
+          const drag = Math.pow(0.3, step);
+          ph.vx *= drag; ph.vz *= drag;
+          ph.wx *= Math.pow(0.24, step); ph.wy *= Math.pow(0.2, step); ph.wz *= Math.pow(0.24, step);
+          if (ph.vy === 0 || ph.t > 1.55) {
+            const settle = Math.min(1, step * (ph.t > 2.2 ? 10 : 4.2));
+            grp.rotation.x += (ph.restPitch - grp.rotation.x) * settle;
+            grp.rotation.y += (ph.restYaw - grp.rotation.y) * settle;
+            grp.rotation.z += (ph.restRoll - grp.rotation.z) * settle;
+          }
+          if ((ph.t > 2.7) || (ph.t > 1.45 && ph.vy === 0 && Math.hypot(ph.vx, ph.vz, ph.wx, ph.wy, ph.wz) < 0.45)) {
+            grp.position.y = restY;
+            grp.rotation.x = ph.restPitch;
+            grp.rotation.y = ph.restYaw;
+            grp.rotation.z = ph.restRoll;
+            a._deathPhys = null;
+          }
+        } else if (a._dieT != null) {
+          // legacy fallback for a carcass created before the new state existed.
           a._dieT -= dt;
           const k = Math.max(0, Math.min(1, 1 - a._dieT / 0.55));
           const e = 1 - (1 - k) * (1 - k);                       // ease-out
@@ -1335,18 +1505,39 @@
       }
       // ---- SNAKES slither (own locomotion + strike/rear/constrict logic) --
       if (a.snake) { snakeTick(a, dt, P); continue; }
-      // ---- aquatic: cruise the sea band, dorsal bob, loop back inward -----
+      // ---- aquatic: water-mask navigation + synced wave/depth lanes -------
       if (sp.aquatic) {
         if (grp.visible === false) continue;          // far sea life idles (no sim)
         a.bob += dt * (1.2 + a.spd * 0.2);
         a.turnT -= dt;
         if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 0.8; a.turnT = 3 + Math.random() * 4; }
-        const nx = grp.position.x + Math.cos(a.heading) * a.spd * dt * 6;
-        const nz = grp.position.z + Math.sin(a.heading) * a.spd * dt * 6;
-        const rr = Math.hypot(nx - FIELD_CX, nz - FIELD_CZ);
-        if (rr < AQUATIC_R0 || rr > AQUATIC_R1) a.heading += Math.PI * 0.6;      // turn back into the band
-        else { grp.position.x = nx; grp.position.z = nz; }
-        grp.position.y = Math.sin(a.bob) * 0.12 * (sp.scale || 1);
+        const wf = CBZ.waterField;
+        if (wf && wf.moveInWater) {
+          // Recover any actor authored/saved on dry ground by projecting it to
+          // the closest valid water cell. Afterwards, three forward feelers
+          // follow bays and islands instead of crossing their terrain.
+          if (!wf.isNavigableWater(grp.position.x, grp.position.z, (a.waterClearance || 12) * 0.45)) {
+            const wet = wf.nearestWater(grp.position.x, grp.position.z, a.waterClearance || 12, 520);
+            if (wet) { grp.position.x = wet.x; grp.position.z = wet.z; a.home.x = wet.x; a.home.z = wet.z; }
+          }
+          const nav = wf.moveInWater(
+            grp.position.x, grp.position.z, a.heading, a.spd * dt * 6,
+            a.waterClearance || 12, waterTime, a._waterMove
+          );
+          a.heading = nav.heading;
+          grp.position.x = nav.x; grp.position.z = nav.z;
+          if (nav.blocked) { a.heading += 0.28; a.turnT = Math.min(a.turnT, 0.45); }
+          grp.position.y = wf.surfaceY(grp.position.x, grp.position.z, waterTime)
+            - (a.swimDepth || 1) + Math.sin(a.bob) * 0.055;
+        } else {
+          // Legacy radial-band fallback when this module is unit-loaded alone.
+          const nx = grp.position.x + Math.cos(a.heading) * a.spd * dt * 6;
+          const nz = grp.position.z + Math.sin(a.heading) * a.spd * dt * 6;
+          const rr = Math.hypot(nx - FIELD_CX, nz - FIELD_CZ);
+          if (rr < AQUATIC_R0 || rr > AQUATIC_R1) a.heading += Math.PI * 0.6;
+          else { grp.position.x = nx; grp.position.z = nz; }
+          grp.position.y = Math.sin(a.bob) * 0.12 * (sp.scale || 1);
+        }
         faceAnimalHeading(grp, a.heading);
         continue;
       }
@@ -1402,9 +1593,10 @@
       a.turnT -= dt;
       if (a.state === "charge" && P) {
         a.heading = Math.atan2(P.z - grp.position.z, P.x - grp.position.x);
-        // a charging predator that reaches you bites (light contact damage).
+        // A charging animal that reaches you makes a species-appropriate strike.
         if (nearP < 3.2 * 3.2 && CBZ.cityHurtPlayer && (a._biteT || 0) <= 0) {
-          try { CBZ.cityHurtPlayer((sp.bite || 10), a); } catch (e) {}
+          const style = CBZ.creatureStyleFor ? CBZ.creatureStyleFor(sp) : null;
+          animalStrikePlayer(a, sp.bite || 10, style);
           a._biteT = 1.1;
         }
         if (a._biteT > 0) a._biteT -= dt;
@@ -1463,7 +1655,9 @@
   }
 
   // ============================================================
-  //  BUILD — stock the world once, after every biome region exists.
+  //  BUILD — stock the world once, after every biome AND the order-97 signed
+  //  continent shoreline exist. Aquatic spawn validation therefore reads the
+  //  exact final coast, not an incomplete region list.
   // ============================================================
   CBZ.addLandmass(function (city) {
     if (CBZ.WILDLIFE === false) return null;
@@ -1487,7 +1681,7 @@
       if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
     });
     return null;
-  }, 95);
+  }, 98);
 
   // public: let other systems (dogs.js) read/kill wildlife.
   CBZ.cityWildlifeList = function () { return animals; };

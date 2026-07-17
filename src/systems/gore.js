@@ -21,10 +21,9 @@
    points — they must land hard, read directional, and leave evidence):
      • a lazy tap on CBZ.cityKillPed reads the CAUSE of every city kill, so
        gore knows HOW someone died without any caller changing a line:
-       - HEADSHOT  → a distinct heavier pop: tighter/faster exit spray, dry
-         skull-fragment gibs, and an INSTANT wall splat behind the head; in
-         CITY a SHOTGUN (or sniper / point-blank rifle) headshot is a FULL
-         DECAPITATION — the head mesh comes OFF, a flying head gib tumbles and
+       - HEADSHOT  → a distinct tighter/faster exit spray and an instant wall
+         splat behind the head. In CITY, only a muzzle-close SHOTGUN can cause
+         a full decapitation — the head mesh comes OFF, a flying head tumbles and
          settles, and the neck STUMP geysers a heavy arterial spurt (the
          restore-on-reuse audit regrows the head on any rig recycle). A
          pistol/SMG headshot never decapitates.
@@ -56,8 +55,8 @@
   // floor in permanent clothing-colored boxes — "not realistic"). A real kill
   // DROPS the person (ragdoll.js already does the intact body); it does not
   // explode them into cubes. So in CITY mode only: a normal gunshot leaves
-  // little-to-no flying gib (reserve dismemberment for explosions / extreme
-  // overkill + a tasteful headshot pop), and any gib that DOES spawn FADES OUT
+  // little-to-no flying gib (reserve dismemberment for explosions or an actual
+  // close-shotgun sever), and any gib that DOES spawn FADES OUT
   // and despawns over a few seconds so the battlefield clears. Jail/survival
   // gore stays byte-identical (this flag is read live at every spawn site).
   function cityMode() { return !!(CBZ.game && CBZ.game.mode === "city"); }
@@ -397,36 +396,24 @@
   // (user-filmed: every pistol headshot popped the skull — that's not how a
   // handgun works). The kill context carries the player's weapon key (imp.wkey,
   // fpsmode threads it) or an NPC/cop attacker whose .weapon names the gun:
-  // sniper always pops, a shotgun headshot ALWAYS takes the head off (full
-  // decapitation in city, see headDecaps), rifle rounds only sometimes —
-  // everything pistol-class snaps the head and bursts blood at the entry
-  // instead (wound decal + localized splatter stay).
+  // Body parts stay attached for every ordinary bullet. Only a muzzle-close
+  // shotgun has enough distributed impulse to sever; sniper/rifle/pistol rounds
+  // still get direction, a wound, mist and a hard ragdoll reaction.
   function weaponKey(imp) {
     let k = imp ? (imp.wkey || (imp.attacker && imp.attacker.weapon) || "") : "";
     return ("" + k).toLowerCase();
   }
   function headPops(imp) {
     const k = weaponKey(imp);
-    if (k.indexOf("sniper") >= 0) return true;
-    if (k.indexOf("shotgun") >= 0) return true; // a shotgun headshot takes the head OFF (decap, below)
-    if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) return Math.random() < 0.15;
-    return false;
+    const d = imp && imp.dist != null ? imp.dist : 99;
+    return k.indexOf("shotgun") >= 0 && d <= 5.5;
   }
-  // FULL DECAPITATION (owner: a SHOTGUN headshot takes the head fully OFF, leaving
-  // a neck stump + heavy spurt) — reserved for HEAVY weapons so a pistol never
-  // decapitates. A shotgun decaps at any range a headshot lands; a sniper always;
-  // a point-blank rifle round (<3u, the muzzle in the face) sometimes. Used to
-  // drive the heavy neck-stump spurt; the head mesh is removed by severBody either
-  // way, but only a decap gets the geyser. City-only is enforced at the call site.
+  // FULL DECAPITATION: same strict close-shotgun gate as the actual sever. Used
+  // to drive the neck-stump spurt; city-only is enforced at the call site.
   function headDecaps(imp) {
     const k = weaponKey(imp);
-    if (k.indexOf("shotgun") >= 0) return true;
-    if (k.indexOf("sniper") >= 0) return true;
-    if (/ak|rifle|carbine|lmg|m4|556|762/.test(k)) {
-      const d = imp && imp.dist != null ? imp.dist : 99;
-      return d < 3 && Math.random() < 0.5;
-    }
-    return false;
+    const d = imp && imp.dist != null ? imp.dist : 99;
+    return k.indexOf("shotgun") >= 0 && d <= 5.5;
   }
   // HEAVY NECK-STUMP SPURT: a real decapitation geysers from the open neck — a
   // dense fan of bright arterial droplets up + along the shot line, plus a thick
@@ -618,7 +605,10 @@
     // grab the part's world transform BEFORE anything moves this frame
     part.updateWorldMatrix(true, false);
     if (!r) {
-      if (severed.length >= SEV_CAP) restoreRecord(severed.shift()); // oldest grows back (off-screen by now)
+      // Never make an existing corpse visibly regrow just to free a pool slot.
+      // At the cap the new cosmetic sever is suppressed; the older body stays
+      // anatomically consistent until its normal corpse/recycle cleanup.
+      if (severed.length >= SEV_CAP) return false;
       r = { actor, ch, items: [] };
       severed.push(r);
     }
@@ -635,6 +625,25 @@
       parent.add(stump);
     }
     r.items.push({ key, part, stump });
+    // The open joint pumps a couple of diminishing pulses while the corpse is
+    // still present. This is tied to the real stump transform and stops the
+    // instant the part is restored/recycled; it never creates free-floating FX.
+    if (stump && cityMode()) {
+      [0.38, 0.92].forEach(function (delay, pulse) {
+        after(delay, function () {
+          if (!stump.parent || part.visible !== false || (actor && actor.culled)) return;
+          const wp = new THREE.Vector3(); stump.getWorldPosition(wp);
+          const n = pulse ? 2 : 4;
+          for (let i = 0; i < n; i++) {
+            const a = Math.random() * Math.PI * 2, sp = 0.6 + Math.random() * 1.8;
+            spawnBit(wp.x, wp.y, wp.z, Math.cos(a) * sp, 1.6 + Math.random() * 2.4,
+              Math.sin(a) * sp, 0.045 + Math.random() * 0.045,
+              Math.random() < 0.55 ? BLOOD_BRT : BLOOD, "blood");
+          }
+          if (pulse) spawnSplat(wp.x, wp.z, 0.32, BLOOD_D, true);
+        });
+      });
+    }
     // a severed LEG = the rig can't stand: flag the char so entities/character.js
     // drops it into a one-legged collapse/crawl (limpSpeedMul → 0) instead of
     // walking on a missing limb. -1 = left leg gone, +1 = right. Cleared on the
@@ -796,11 +805,9 @@
     const cloth = opts.cloth != null ? opts.cloth : 0xd24a32;
 
     // --- REAL DISMEMBERMENT (severity follows WHAT actually hit them) --------
-    //   sniper / point-blank shotgun headshot → the head POPS (the body
-    //   collapses headless, face flies with the skull); rifle headshot → a
-    //   small chance; pistol/SMG headshot → a hard snap + entry burst, head
-    //   stays ON; explosion → 1-3 limbs torn off BY PROXIMITY; shotgun
-    //   point-blank body hit → an arm comes off at the shoulder. Falls/blunt/
+    //   muzzle-close shotgun headshot → the head can sever; every other round
+    //   keeps the body intact; explosion → 1-3 limbs torn off BY PROXIMITY;
+    //   muzzle-close shotgun body hit → rarely an arm at the shoulder. Falls/blunt/
     //   blade keep the body whole.
     let popHead = !!opts.pop;          // explicit (death.js drives the player's corpse)
     if (ctx && ctx.ped && !ctx.ped.isPlayer) {
@@ -809,16 +816,18 @@
       // for the mist/spray) — severing the actual head trusts only the explicit
       // signals, or an RPG would decapitate every victim it ALSO de-limbs.
       if (boom || cause === "explosion") {
-        // limbs lost scale with how close the blast seat was — point-blank
-        // shreds, the rim of the radius takes one
+        // Limbs lost scale with proximity, but ordinary blast deaths stay
+        // whole. Only the blast seat can take two; edge victims usually keep
+        // every joint and simply ragdoll from the pressure wave.
         let bd = 99;
         if (ctx.imp && ctx.imp.fromX != null && ctx.ped.pos) bd = Math.hypot(ctx.ped.pos.x - ctx.imp.fromX, ctx.ped.pos.z - ctx.imp.fromZ);
-        const n = bd < 2.5 ? 3 : (bd < 5 ? 1 + (Math.random() < 0.6 ? 1 : 0) : 1);
+        const n = bd < 2.2 ? 1 + (Math.random() < 0.35 ? 1 : 0)
+          : (bd < 4.8 ? (Math.random() < 0.55 ? 1 : 0) : (Math.random() < 0.16 ? 1 : 0));
         for (let i = 0; i < n; i++) severBody(ctx.ped, SEV_LIMBS[(Math.random() * 4) | 0], { dir: sevDir, boom: true });
       } else if (opts.head || cause === "headshot") {
         if (headPops(ctx.imp)) {
           popHead = severBody(ctx.ped, "head", { dir: sevDir });
-          // CITY: a SHOTGUN (or sniper/point-blank) headshot is a FULL
+          // CITY: only a muzzle-close SHOTGUN headshot is a FULL
           // DECAPITATION — the head mesh is already OFF (severBody hid the neck
           // group, launched the flying head + seated the stump cap); now open the
           // neck with a heavy arterial geyser so the stump reads visceral. The
@@ -831,7 +840,7 @@
         }
         // no pop: the ragdoll kick already whips the skull with the round —
         // the entry burst/wound below is the rest of the read
-      } else if (ctx.imp && ctx.imp.wkey === "shotgun" && (ctx.imp.dist == null ? 99 : ctx.imp.dist) < 7 && Math.random() < 0.75) {
+      } else if (ctx.imp && ctx.imp.wkey === "shotgun" && (ctx.imp.dist == null ? 99 : ctx.imp.dist) <= 4.5 && Math.random() < 0.10) {
         severBody(ctx.ped, Math.random() < 0.5 ? "la" : "ra", { dir: sevDir });
       }
     }
@@ -878,12 +887,11 @@
     // --- LAYER 3: chunky GIBS — limbs/torso, heavier, tumble then settle ------
     // CITY REALISM: a normal gunshot DROPS the person (ragdoll.js leaves an
     // intact body) — it does not blow them into clothing cubes. So reserve the
-    // multi-gib spray for EXPLOSIONS and extreme overkill (amount >= 1.8); a
-    // headshot gets a small tasteful pop; an ordinary kill gets ZERO flying
-    // boxes. Jail/survival keep the original chunky spray on every kill.
-    const overkill = amt >= 1.8;
+    // multi-gib spray for EXPLOSIONS. Actual close-shotgun severing launches the
+    // cloned body part above; an ordinary kill gets ZERO generic flying boxes.
+    // Jail/survival keep the original chunky spray on every kill.
     let ng = Math.round((big ? 7 : 5) * amt * lod);
-    if (cityMode()) ng = boom ? Math.round(6 * amt * lod) : (overkill ? Math.round(4 * lod) : (head ? 2 : 0));
+    if (cityMode()) ng = boom ? Math.round(6 * amt * lod) : 0;
     const cols = [skin, cloth, BLOOD, cloth, skin, 0xb8443a, BLOOD_D];
     for (let i = 0; i < ng; i++) {
       const side = (Math.random() - 0.5) * 2, a = Math.random() * 6.28, sp = 3 + Math.random() * 5;
@@ -930,6 +938,35 @@
     flashV = Math.max(flashV, 0.32 * amt + (opts.player ? 0.18 : 0));
     if (opts.slowmo && CBZ.doSlowmo) CBZ.doSlowmo(opts.slowmo);
     if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
+  };
+
+  // LOCALIZED FLESH IMPACT — intentionally not a death event. It emits a small
+  // directional wet spray/mist with no pool, gibs, flash, slow-mo or kill-context
+  // consumption. fpsmode uses this once per connecting pellet; the actual death
+  // pipeline calls CBZ.gore exactly once if that hit puts the actor down.
+  CBZ.gore.spray = function (point, amount, dir) {
+    if (!point || !CBZ.scene) return;
+    const d2 = dist2Cam(point.x, point.z);
+    if (CBZ.camera && CBZ.camera.position && d2 > 65 * 65) return;
+    const amt = Math.max(0.25, Math.min(1.4, amount == null ? 0.7 : amount));
+    let dx = dir ? (+dir.x || 0) : 0, dy = dir ? (+dir.y || 0) : 0, dz = dir ? (+dir.z || 0) : 0;
+    const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    const drops = Math.max(2, Math.round(5 * amt));
+    for (let i = 0; i < drops; i++) {
+      spawnBit(point.x, point.y, point.z,
+        dx * (2.2 + Math.random() * 3.2) + (Math.random() - 0.5) * 1.8,
+        dy * 2 + 0.7 + Math.random() * 2.2,
+        dz * (2.2 + Math.random() * 3.2) + (Math.random() - 0.5) * 1.8,
+        0.035 + Math.random() * 0.045, Math.random() < 0.35 ? BLOOD_BRT : BLOOD, "blood");
+    }
+    const mist = Math.max(1, Math.round(2 * amt));
+    for (let i = 0; i < mist; i++) {
+      spawnBit(point.x, point.y, point.z,
+        dx * (1.5 + Math.random() * 2) + (Math.random() - 0.5),
+        dy + 0.5 + Math.random() * 1.3,
+        dz * (1.5 + Math.random() * 2) + (Math.random() - 0.5),
+        0.035 + Math.random() * 0.035, BLOOD, "mist");
+    }
   };
 
   // one always-updater drives gibs + mist + pools + wall splats + the red jolt

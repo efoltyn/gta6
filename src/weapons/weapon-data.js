@@ -177,7 +177,7 @@
       // Both consume the same physical rocket inventory; only the seeker and
       // flight tuning differ, so inventory code does not need a parallel gun.
       ammoTypes: [
-        { id: "standard", label: "HE", homing: false },
+        { id: "standard", label: "HE-GUIDED", homing: true, lockRange: 250, lockConeDeg: 20, turnRate: 2.35, speed: 95 },
         { id: "homing", label: "HOMING", homing: true, lockRange: 260, lockConeDeg: 18, turnRate: 2.6, speed: 82 },
       ],
       // REAL PROJECTILE FLIGHT (b): muzzle velocity (m/s) and gravity (m/s^2)

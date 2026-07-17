@@ -408,6 +408,11 @@
 
   CBZ.buildHighway = function (root, opts) {
     opts = opts || {};
+    // Resolve this before any optional visual branch.  The old declaration
+    // lived beside the guardrail code, so removing those rails could leave a
+    // cached buildHighway revision with HWY-3 still referencing a variable
+    // that no longer existed.  Keep road publication independent of scenery.
+    const cityRoads = opts.cityRoads || (CBZ.city && CBZ.city.roads) || null;
     const path = (opts.path && opts.path.length >= 2) ? opts.path : [{ x: 0, z: 0 }, { x: 0, z: 100 }];
     const width = opts.width != null ? opts.width : 24;
     // ROADS_V2 (owner: "never many lanes or wide highways"): a paved highway
@@ -431,7 +436,14 @@
     // — removed the old `|| Math.random` fallback (dead code that was also
     // a determinism-contract violation) rather than leave an unused random
     // source lying around.
-    const deckY = elevated ? 2.5 : 0.05;
+    // Every ribbon gets a tiny deterministic render layer.  Separate road
+    // builders frequently meet or cross at the exact same elevation; putting
+    // two coplanar quads there made the dirt roads flash and look like one road
+    // was carelessly pasted over another.  The sub-centimetre layer is far
+    // below suspension/vehicle tolerances, but gives the depth buffer one
+    // unambiguous winner at junctions.
+    const deckLayer = elevated ? 0 : ((_highways.length % 8) * 0.0008);
+    const deckY = (elevated ? 2.5 : 0.05) + deckLayer;
 
     // ---- TERRAIN-FOLLOWING GRADE (optional): long causeways cross genuinely
     //      non-flat world/terrain.js relief near the map rim. opts.heightAt
@@ -492,99 +504,14 @@
       }
     }
 
-    // ---- BRIDGE_WALL_RULES: edge walls (guardrail posts + the curb fall-guard
-    //      colliders) belong ONLY on real spans — wherever the deck CROSSES a
-    //      registered road (a grid mouth, an island street, a connector) the
-    //      wall must open, or the intersection grows invisible/visible walls
-    //      (the owner's complaint: causeway ends overlap the city grid and
-    //      their side walls ran straight across the avenue). Parallel /
-    //      overlapping segments (the deck's own registered centreline, the
-    //      caller's own push) never gap anything — only true crossings do. ----
-    const wallRules = !CBZ.CONFIG || CBZ.CONFIG.BRIDGE_WALL_RULES !== false;
-    const _cityRoads = opts.cityRoads || (CBZ.city && CBZ.city.roads) || null;
-    const defRoadW = (CBZ.CITY && CBZ.CITY.road) || 18;
-    function onCrossingRoad(x, z, legVertical) {
-      if (!wallRules || !_cityRoads) return false;
-      for (let i = 0; i < _cityRoads.length; i++) {
-        const r = _cityRoads[i];
-        if (!!r.vertical === !!legVertical) continue;      // parallel — never gaps
-        const half = (r.w != null ? r.w : defRoadW) / 2 + 1.2;   // carriageway + apron
-        if (r.vertical) {
-          if (Math.abs(x - r.x) < half && Math.abs(z - r.z) <= r.len / 2 + 0.5) return true;
-        } else {
-          if (Math.abs(z - r.z) < half && Math.abs(x - r.x) <= r.len / 2 + 0.5) return true;
-        }
-      }
-      return false;
-    }
-
-    // ---- curb fall-guard colliders per side — CONTINUOUS runs between road
-    //      crossings (was one unbroken band per leg; with BRIDGE_WALL_RULES the
-    //      band opens over every crossing so cars/peds pass the intersection). ----
-    function addCurbColliders() {
-      if (!CBZ.colliders) return;
-      const hw = width / 2;
-      for (let i = 0; i < path.length - 1; i++) {
-        const a = path[i], b = path[i + 1];
-        let dx = b.x - a.x, dz = b.z - a.z;
-        const L = Math.hypot(dx, dz) || 1e-3; dx /= L; dz /= L;
-        const px = -dz, pz = dx;            // unit perpendicular
-        const legVert = Math.abs(dz) >= Math.abs(dx);
-        for (let s = -1; s <= 1; s += 2) {
-          const flush = (t0, t1) => {
-            if (t1 - t0 < 0.5) return;
-            const x0 = a.x + dx * t0 + s * px * hw, z0 = a.z + dz * t0 + s * pz * hw;
-            const x1 = a.x + dx * t1 + s * px * hw, z1 = a.z + dz * t1 + s * pz * hw;
-            // grade-following: sample at the segment's own deck height so the
-            // fall-guard band tracks a sloped causeway instead of a flat layer.
-            const segY = Math.max(gradeAt(x0, z0), gradeAt(x1, z1));
-            CBZ.colliders.push({
-              minX: Math.min(x0, x1) - 0.25, maxX: Math.max(x0, x1) + 0.25,
-              minZ: Math.min(z0, z1) - 0.25, maxZ: Math.max(z0, z1) + 0.25,
-              y0: segY, y1: segY + (opts.guardrail ? 1.1 : 0.4)
-            });
-          };
-          const n = Math.max(1, Math.ceil(L / 4));
-          let runStart = null;
-          for (let k = 0; k < n; k++) {
-            const tm = (k + 0.5) * (L / n);
-            const mx = a.x + dx * tm + s * px * hw, mz = a.z + dz * tm + s * pz * hw;
-            const open = onCrossingRoad(mx, mz, legVert);
-            if (!open && runStart == null) runStart = k * (L / n);
-            else if (open && runStart != null) { flush(runStart, k * (L / n)); runStart = null; }
-          }
-          if (runStart != null) flush(runStart, L);
-        }
-      }
-    }
-    addCurbColliders();
-
-    // ---- ONE InstancedMesh W-beam guardrail per side (decorative posts+beam) ----
-    if (opts.guardrail) {
-      const hw = width / 2 - 0.2;
-      const spots = [];
-      alongPath(4, (x, z, dx, dz) => {
-        const px = -dz, pz = dx, h = Math.atan2(dx, dz);
-        const legVert = Math.abs(dz) >= Math.abs(dx);
-        // BRIDGE_WALL_RULES: no rail post where the deck crosses a road
-        const lx = x - px * hw, lz = z - pz * hw, rx = x + px * hw, rz = z + pz * hw;
-        if (!onCrossingRoad(lx, lz, legVert)) spots.push({ x: lx, z: lz, h });
-        if (!onCrossingRoad(rx, rz, legVert)) spots.push({ x: rx, z: rz, h });
-      });
-      if (spots.length) {
-        const railGeo = new THREE.BoxGeometry(0.12, 0.9, 3.8);
-        const railMat = new THREE.MeshLambertMaterial({ color: 0xbfc4cb });
-        const im = new THREE.InstancedMesh(railGeo, railMat, spots.length);
-        const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
-        const v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
-        spots.forEach((s, i) => {
-          e.set(0, s.h, 0); q.setFromEuler(e); v.set(s.x, gradeAt(s.x, s.z) + 0.55, s.z);
-          m4.compose(v, q, one); im.setMatrixAt(i, m4);
-        });
-        im.instanceMatrix.needsUpdate = true; im.castShadow = false;
-        group.add(im);
-      }
-    }
+    // Open-road contract: no edge rails and, crucially, no invisible curb
+    // collider bands.  Those bands turned every dirt track and causeway into a
+    // chute that vehicles and mounted animals could not leave.  A visible
+    // bridge tower/cable may still dress a true suspension span below, but the
+    // drivable road surface itself is completely open on both sides.
+    // HWY-3 below still publishes each visible ribbon as a road traffic can
+    // actually drive; its registry was resolved at function entry so it never
+    // depends on optional scenery branches.
 
     // ---- ONE InstancedMesh light poles (~40m), emissive head ----
     // HWY_LAMPS default OFF (owner: "dumb useless props like streetlights on
@@ -709,8 +636,8 @@
     //      a caller that still pushes its own (until HWY-7 retires those) never
     //      ends up with double segments. Pure data — no extra draw calls. -------
     const builtRoads = [];
-    if (opts.registerRoads !== false && _cityRoads) {
-      const roads = _cityRoads;
+    if (opts.registerRoads !== false && cityRoads) {
+      const roads = cityRoads;
       for (let i = 0; i < path.length - 1; i++) {
         const a = path[i], b = path[i + 1];
         const ax = a.x, az = a.z, bx = b.x, bz = b.z;

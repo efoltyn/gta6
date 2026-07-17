@@ -16,7 +16,7 @@
    gossip + reactions spread through the social graph (witnessed kills turn
    the block against you, a date / proposal / breakup ripples out); and an
    ambient-event director plays little street vignettes (arguments, proposals,
-   buskers, friends greeting) with cheap pooled speech bubbles. New exports:
+   buskers, friends greeting) through one attributed subtitle surface. New exports:
    cityGossip(x,z,topic,weight), citySocialWitnessKill(victim,byPlayer).
 ============================================================ */
 (function () {
@@ -280,37 +280,51 @@
   //  without the per-frame cost of a real crowd sim.
   // ===========================================================================
 
-  // pooled speech-bubble sprites: a tiny set of labels reused for everyone so
-  // ambient chatter / gossip / reactions cost ~nothing. We hang one on a ped's
-  // group, swap its texture (via makeLabelSprite's cache), and retire it.
-  const BUBBLES = [];                 // {sprite, ped, t} active bubbles
-  const BUBBLE_MAX = 7;               // hard cap on simultaneous bubbles (cheap)
+  // Dialogue belongs to the speaker, but not to their skeleton. One bottom-
+  // centre subtitle identifies who spoke and carries the line; new nearby
+  // speech replaces the prior line instead of filling the scene with bubbles.
+  let speechEl = null, speechNameEl = null, speechTextEl = null;
+  let speechT = 0, speechPed = null;
+  function ensureSpeech() {
+    if (speechEl) return speechEl;
+    speechEl = document.createElement("div");
+    speechEl.id = "citySpeech";
+    speechEl.className = "citySpeech";
+    speechEl.setAttribute("role", "status");
+    speechEl.setAttribute("aria-live", "polite");
+    speechEl.innerHTML = "<div class='citySpeechSpeaker'></div><div class='citySpeechLine'></div>";
+    document.body.appendChild(speechEl);
+    speechNameEl = speechEl.querySelector(".citySpeechSpeaker");
+    speechTextEl = speechEl.querySelector(".citySpeechLine");
+    return speechEl;
+  }
+  function speakerName(ped) {
+    if (!ped) return "Stranger";
+    if (ped.name) return ped.name;
+    if (ped.swat) return "SWAT Officer";
+    if (ped.kind === "cop") return "Police Officer";
+    if (ped.job) return String(ped.job).replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    return "Stranger";
+  }
   function say(ped, text, color, secs) {
-    if (!ped || ped.dead || !ped.group || !CBZ.makeLabelSprite) return;
-    if (BUBBLES.length >= BUBBLE_MAX) return;        // budget hit; skip silently
+    if (!ped || ped.dead || !ped.group || !text) return;
     // only show near the camera so we don't pay for the whole map
     const P = CBZ.player; if (P && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) > 34) return;
-    const s = CBZ.makeLabelSprite(text, { color: color || "#dfe7ff" });
-    // makeLabelSprite hands back a SHARED, cached material; clone it so our
-    // per-bubble fade-out never touches every other sprite using that label.
-    if (s.material && s.material._shared) { s.material = s.material.clone(); s.material._shared = false; }
-    s.position.y = CBZ.charHeadY ? CBZ.charHeadY(ped) : 1.97; s.scale.set(Math.min(7, 2.6 + text.length * 0.16), 0.8, 1);
-    s.userData.transient = true; ped.group.add(s);
-    BUBBLES.push({ sprite: s, ped, t: secs || 2.4 });
+    ensureSpeech();
+    speechPed = ped;
+    speechT = secs || 2.4;
+    speechNameEl.textContent = speakerName(ped);
+    speechTextEl.textContent = String(text).replace(/^[“\"]|[”\"]$/g, "");
+    speechEl.style.setProperty("--speaker-color", color || "#dfe7ff");
+    speechEl.classList.add("show");
   }
   function tickBubbles(dt) {
-    for (let i = BUBBLES.length - 1; i >= 0; i--) {
-      const b = BUBBLES[i]; b.t -= dt;
-      if (b.t <= 0 || !b.ped || b.ped.dead || !b.sprite.parent) {
-        retireBubble(b); BUBBLES.splice(i, 1);
-      } else if (b.t < 0.4) { b.sprite.material.opacity = b.t / 0.4; }   // fade out
+    if (speechT <= 0) return;
+    speechT -= dt;
+    if (speechT <= 0 || !speechPed || speechPed.dead) {
+      speechT = 0; speechPed = null;
+      if (speechEl) speechEl.classList.remove("show");
     }
-  }
-  function retireBubble(b) {
-    if (!b || !b.sprite) return;
-    if (b.sprite.parent) b.sprite.parent.remove(b.sprite);
-    const m = b.sprite.material;
-    if (m && !m._shared && m.dispose) m.dispose();    // free the per-bubble clone
   }
   // peds.js leans on the same pooled bubbles for its relationship barks (the
   // cross-street mutter, the by-name greeting, the snitch point-out) — same
@@ -446,7 +460,8 @@
   CBZ.citySocialInit = function () {
     g.cityPartner = null; g.citySpouse = false; g.cityHostage = null;
     clearBeacon(); kidnapCD = 12;
-    BUBBLES.length = 0; clubT = 0; queueT = 0; gossipT = 2; eventT = 6; routineT = 1.5;
+    speechT = 0; speechPed = null; if (speechEl) speechEl.classList.remove("show");
+    clubT = 0; queueT = 0; gossipT = 2; eventT = 6; routineT = 1.5;
     // fresh run: the prior spawn's family bodies were already disposed by
     // clearCityPeds (they live in CBZ.cityPeds); just drop our stale refs.
     _familySpawns.length = 0;
@@ -706,9 +721,9 @@
   CBZ.citySocialReset = function () {
     g.cityPartner = null; g.citySpouse = false; g.cityHostage = null;
     clearBeacon(); kidnapCD = 12;
-    // retire any live speech bubbles + pending rumors
-    for (const b of BUBBLES) retireBubble(b);
-    BUBBLES.length = 0; RUMORS.length = 0;
+    // retire any live subtitle + pending rumors
+    speechT = 0; speechPed = null; if (speechEl) speechEl.classList.remove("show");
+    RUMORS.length = 0;
     // drop refs to spawned family bodies — they're disposed with the rest of the
     // population by the clearCityPeds that follows on a fresh spawn.
     _familySpawns.length = 0;

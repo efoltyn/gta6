@@ -203,21 +203,31 @@ body.show-minimap #minimap{ opacity:1; pointer-events:auto; }
 
 /* firearm reticle — shared by first- and third-person gun presentation */
 #crosshair{
-  position:absolute; left:50%; top:50%; width:24px; height:24px; transform:translate(-50%,-50%);
-  display:none; pointer-events:none; border:2px solid rgba(255,255,255,.82);
-  border-radius:50%; box-sizing:border-box;
-  background:radial-gradient(circle,rgba(255,255,255,.95) 0 1.5px,transparent 2px);
-  filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));
+  position:absolute; left:50%; top:50%; width:16px; height:16px; transform:translate(-50%,-50%);
+  display:none; pointer-events:none; border:0; box-sizing:border-box;
+  color:rgba(255,255,255,.92);
+  /* A pin-point centre with four short floating ticks.  Width/height still
+     communicate the live weapon cone, but the marks no longer stretch into
+     the giant plus-sign seen against the airport airliner. */
+  background:radial-gradient(circle,currentColor 0 1px,transparent 1.35px);
+  filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.95));
+  transition:color 55ms linear,opacity 55ms linear;
 }
 #crosshair::before, #crosshair::after{
-  content:""; position:absolute; background:rgba(255,255,255,.9); box-shadow:0 0 2px rgba(0,0,0,.8);
+  content:""; position:absolute; border-radius:2px;
+  box-shadow:0 0 1.5px rgba(0,0,0,.95);
 }
-#crosshair::before{ left:50%; top:-5px; width:2px; height:32px; margin-left:-1px; }
-#crosshair::after{ top:50%; left:-5px; height:2px; width:32px; margin-top:-1px; }
-#crosshair.hot{border-color:#ff3b3b;background:radial-gradient(circle,#ff3b3b 0 1.5px,transparent 2px)}
-#crosshair.dry{border-color:#ffd451;background:radial-gradient(circle,#ffd451 0 1.5px,transparent 2px)}
-#crosshair.hot::before, #crosshair.hot::after{ background:#ff3b3b; }
-#crosshair.dry::before, #crosshair.dry::after{ background:#ffd451; }
+#crosshair::before{
+  left:50%; top:0; bottom:0; width:1.5px; margin-left:-.75px;
+  background:linear-gradient(to bottom,currentColor 0 4px,transparent 4px calc(100% - 4px),currentColor calc(100% - 4px));
+}
+#crosshair::after{
+  top:50%; left:0; right:0; height:1.5px; margin-top:-.75px;
+  background:linear-gradient(to right,currentColor 0 4px,transparent 4px calc(100% - 4px),currentColor calc(100% - 4px));
+}
+#crosshair.hot{color:#ff4a42;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}
+#crosshair.blocked{color:#ffb33f;opacity:.94}
+#crosshair.dry{color:#ffd451;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}
 
 /* ammo readout (first-person, armed) */
 #ammo{
@@ -305,6 +315,27 @@ body.full-map-open #fullMap{display:flex;}
 body.full-map-open #waypointGuide{display:none;}
 body.full-map-open #crosshair,
 body.full-map-open #interact{display:none !important;}
+
+/* Attributed character speech. Dialogue is screen-space UI, never a label
+   parented to a head or a camera-facing billboard in the world. */
+#citySpeech{
+  --speaker-color:#dfe7ff;
+  position:fixed; left:50%; bottom:clamp(92px,13vh,150px); z-index:47;
+  width:min(620px,calc(100vw - 36px)); box-sizing:border-box;
+  transform:translate(-50%,10px); opacity:0; pointer-events:none;
+  padding:10px 16px 11px; border-left:3px solid var(--speaker-color);
+  border-radius:4px 10px 10px 4px; background:rgba(8,12,18,.86);
+  box-shadow:0 8px 24px rgba(0,0,0,.35); backdrop-filter:blur(4px);
+  transition:opacity .14s ease,transform .14s ease;
+  font-family:Fredoka,system-ui,sans-serif; text-shadow:0 1px 2px #000;
+}
+#citySpeech.show{opacity:1;transform:translate(-50%,0);}
+#citySpeech .citySpeechSpeaker{
+  color:var(--speaker-color); font-size:11px; font-weight:800;
+  letter-spacing:1.1px; text-transform:uppercase;
+}
+#citySpeech .citySpeechLine{margin-top:3px;color:#f3f6f9;font-size:17px;line-height:1.3;}
+body.full-map-open #citySpeech,body.city-menu-open #citySpeech{opacity:0!important;}
 
 /* ============================================================
    SURVIVAL (natural-disaster) mode HUD — shown only when the body

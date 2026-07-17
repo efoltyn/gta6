@@ -963,6 +963,10 @@
           const ROLL = 0.6;       // ~34°: a deep side-keel, still upright
           if (body.rotation.z > ROLL) body.rotation.z = ROLL;
           else if (body.rotation.z < -ROLL) body.rotation.z = -ROLL;
+          // Reactions run after animChar and legitimately replace the torso's
+          // final pitch/roll. Re-solve the shared hip socket after those late
+          // writes so a fleeing hit reaction cannot pull the waist off the legs.
+          if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(a.char || (a.isPlayer ? CBZ.playerChar : null));
         }
 
         // ---- FLASH: fade the emissive boost back to rest ----

@@ -4,10 +4,12 @@
    On the title screen (index.html #originSelect, wired in systems/state.js)
    the player picks ONE of three starting characters before hitting Play:
 
-     • THE EXEC     — top-floor office suit, millions on the books. A few
-                       seconds into the run, police (incl. SWAT) storm the
-                       floor and arrest him for securities fraud — every
-                       dollar wiped, then off to the jail (escape) game.
+     • THE EXEC     — THE main story beat. Top floor of the tallest office
+                       tower, suit + gold watch + sunglasses. Laptop + phone
+                       show the market crash; every dollar is gone. Objective:
+                       get down to level 1 / the street. Jail is still the
+                       real endgame if the cops cuff you later — not an
+                       instant scripted raid on frame one.
      • THE BARFLY    — starts getting bounced out of a small-town bar by
                        the doorman: a shove, a tumble, a screen shake, and
                        he's in the gutter $45 to his name and $350 in debt.
@@ -66,17 +68,23 @@
   // ========================================================================
   const ORIGIN_TUNING = {
     exec: {
-      startCash: 2000000,        // "millions on the books" — wiped by the bust
+      // Paper wealth flashes on the laptop, then dies in the crash beat.
+      startCash: 2000000,
       startBank: 8000000,
-      waitSec: 7,                 // seconds standing on the top floor before the raid announces
-      copSpeed: 3.8,               // m/s the scripted raid cops close at
-      bustRadius: 2.2,             // metres — first cop within this range triggers the cuff
-      raidMinSec: 0.6,             // raid phase must run at least this long before it CAN resolve
-      raidTimeoutSec: 6,           // raid force-resolves by this point even if nobody got close
-      copCount: 2,                 // regular officers (kept separate from the SWAT lead below)
-      swatCount: 1,                // exactly one SWAT lead — no coin flip
-      untouchableBarkCooldown: 2.5, // seconds between "Don't make this worse." barks on a wasted shot
-      missedLotFeed: "The firm's tower is being watched — you got out just ahead of the raid.",
+      laptopSec: 5.5,              // stock-crash laptop + phone beat before free movement
+      crashAfterSec: 2.2,          // when during laptop phase the numbers actually zero
+      descendHintSec: 1.2,         // after crash, beat before "go downstairs" objective
+      groundYSlop: 2.8,            // within this of ground floor Y => "reached street level"
+      // Legacy raid knobs kept so old saves/tools poking them don't NaN; unused by the crash path.
+      waitSec: 7,
+      copSpeed: 3.8,
+      bustRadius: 2.2,
+      raidMinSec: 0.6,
+      raidTimeoutSec: 6,
+      copCount: 2,
+      swatCount: 1,
+      untouchableBarkCooldown: 2.5,
+      missedLotFeed: "The firm's tower is locked for the night — you ride the freight elevator down broke.",
     },
     barfly: {
       startCash: 45,
@@ -114,7 +122,7 @@
   // ========================================================================
   const ORIGINS = {
     exec: {
-      meta: { icon: "💼", name: "The Executive", blurb: "fraud, allegedly" },
+      meta: { icon: "💼", name: "The Executive", blurb: "suit, gold watch, zero dollars" },
       get tuning() { return ORIGIN_TUNING.exec; },
       findSpawn: function () { return findOfficeLot(); },
       grants: function (game) { return grantExec(game); },
@@ -138,7 +146,7 @@
   // hard-wired to the registry's own keys (defect #5) — no second literal
   // id list to keep in sync when a 4th protagonist ships.
   const IDS = Object.keys(ORIGINS).reduce(function (o, k) { o[k] = 1; return o; }, {});
-  function normOrigin(id) { return IDS[id] ? id : "tenant"; }
+  function normOrigin(id) { return IDS[id] ? id : "exec"; }
   CBZ.cityOriginNormalize = normOrigin;
 
   // ---- boot-time ledger peek --------------------------------------------
@@ -504,19 +512,118 @@
   }
 
   // ---------------------------------------------------------------
-  // EXEC — top-floor office, millions on the books, busted for fraud
+  // EXEC — top floor, suit/watch/shades, MARKET CRASH, descend to L1
   // ---------------------------------------------------------------
-  // GRANTS (defect #3): cash/bank/outfit/weapon-strip apply unconditionally,
-  // whether or not a real office lot can be found for the scripted raid.
+  // GRANTS (defect #3): cash/bank/outfit/weapon-strip + ice apply
+  // unconditionally, whether or not a real office lot can be found.
   function grantExec(game) {
     const T = ORIGIN_TUNING.exec;
-    stripLoadout();                                 // a fraudster carries a pen, not an RPG
-    game.cash = T.startCash; game.cityBank = T.startBank;  // cityOriginApply commits right after
+    stripLoadout();                                 // a pen, not an RPG
+    game.cash = T.startCash; game.cityBank = T.startBank;
     if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("suit", { silent: true });
+    // Gold watch + designer shades — owned + worn so bling + drip read live.
+    try {
+      const e = CBZ.cityEcon;
+      if (e && e.add) {
+        e.add("Gold Watch", 1);
+        e.add("Designer Shades", 1);
+      }
+      if (CBZ.cityGrantItem) CBZ.cityGrantItem("watch_gold");
+      if (CBZ.cityEquip) CBZ.cityEquip("Designer Shades");
+      if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();
+    } catch (err) {}
   }
-  // SCENE (may fail — bad procedural luck, no office lot this run): stages
-  // the top-floor spawn + scripted raid beat. Returns null (never throws) so
-  // the dispatcher can fall back to a generic safe spawn + cover story.
+
+  // Laptop HUD: a diegetic "office terminal" showing the portfolio die.
+  let laptopEl = null;
+  function ensureLaptop() {
+    if (laptopEl) return laptopEl;
+    laptopEl = document.createElement("div");
+    laptopEl.id = "originLaptop";
+    laptopEl.style.cssText =
+      "position:fixed;left:50%;top:46%;transform:translate(-50%,-50%) scale(.96);z-index:55;display:none;" +
+      "width:min(520px,92vw);background:linear-gradient(180deg,#0d1118 0%,#151b24 100%);border:1px solid #2a3342;" +
+      "border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.65),0 0 0 1px rgba(255,90,90,.08);" +
+      "color:#e8edf4;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;padding:0;overflow:hidden;" +
+      "opacity:0;transition:opacity .35s ease,transform .35s ease;pointer-events:none;";
+    laptopEl.innerHTML =
+      "<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#0a0d12;border-bottom:1px solid #232a36'>" +
+      "<span style='width:10px;height:10px;border-radius:50%;background:#ff5b5b'></span>" +
+      "<span style='width:10px;height:10px;border-radius:50%;background:#ffd451'></span>" +
+      "<span style='width:10px;height:10px;border-radius:50%;background:#7ed957'></span>" +
+      "<span style='margin-left:8px;color:#8a93a3;font-size:11px;letter-spacing:.4px'>STERLING · MARGIN TERMINAL</span></div>" +
+      "<div style='padding:16px 18px 18px'>" +
+      "<div style='color:#8a93a3;font-size:11px;margin-bottom:6px'>PORTFOLIO · LIVE</div>" +
+      "<div id='olNet' style='font-size:28px;font-weight:800;color:#7ed957;letter-spacing:.5px'>$10,000,000</div>" +
+      "<div id='olDelta' style='margin-top:4px;font-size:13px;color:#7ed957'>+0.00%  pre-market</div>" +
+      "<div style='margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px'>" +
+      "<div style='background:#0a0d12;border:1px solid #232a36;border-radius:8px;padding:8px 10px'><div style='color:#8a93a3'>Cash</div><div id='olCash'>$2,000,000</div></div>" +
+      "<div style='background:#0a0d12;border:1px solid #232a36;border-radius:8px;padding:8px 10px'><div style='color:#8a93a3'>Brokerage</div><div id='olBank'>$8,000,000</div></div>" +
+      "</div>" +
+      "<div id='olAlert' style='margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(255,91,91,.08);border:1px solid rgba(255,91,91,.25);color:#ff9e9e;font-size:12px;display:none'>" +
+      "⚠ MARGIN CALL · positions liquidated · accounts frozen</div>" +
+      "<div style='margin-top:10px;color:#5c6573;font-size:10px'>Not financial advice. Definitely financial ruin.</div>" +
+      "</div>";
+    document.body.appendChild(laptopEl);
+    return laptopEl;
+  }
+  function showLaptop(show) {
+    const el = ensureLaptop();
+    if (show) {
+      el.style.display = "block";
+      requestAnimationFrame(function () {
+        el.style.opacity = "1";
+        el.style.transform = "translate(-50%,-50%) scale(1)";
+      });
+    } else {
+      el.style.opacity = "0";
+      el.style.transform = "translate(-50%,-50%) scale(.96)";
+      setTimeout(function () { if (el) el.style.display = "none"; }, 380);
+    }
+  }
+  function paintLaptop(cash, bank, crashed) {
+    ensureLaptop();
+    const net = (cash | 0) + (bank | 0);
+    const netEl = document.getElementById("olNet");
+    const dEl = document.getElementById("olDelta");
+    const cEl = document.getElementById("olCash");
+    const bEl = document.getElementById("olBank");
+    const aEl = document.getElementById("olAlert");
+    const fmt = function (n) { return "$" + Math.round(n || 0).toLocaleString(); };
+    if (netEl) { netEl.textContent = fmt(net); netEl.style.color = crashed ? "#ff5b5b" : "#7ed957"; }
+    if (dEl) {
+      dEl.textContent = crashed ? "−100.00%  LIQUIDATED" : "−0.4%  pre-market wobble";
+      dEl.style.color = crashed ? "#ff5b5b" : "#ffd451";
+    }
+    if (cEl) cEl.textContent = fmt(cash);
+    if (bEl) bEl.textContent = fmt(bank);
+    if (aEl) aEl.style.display = crashed ? "block" : "none";
+  }
+
+  function fireExecCrash() {
+    g.cash = 0;
+    g.cityBank = 0;
+    if (g.cityDebt == null || g.cityDebt < 250000) g.cityDebt = 250000;  // margin loan still due
+    paintLaptop(0, 0, true);
+    if (CBZ.cityWorldCommit) try { CBZ.cityWorldCommit(); } catch (e) {}
+    if (CBZ.cityPhoneNotify) {
+      try {
+        CBZ.cityPhoneNotify({
+          app: "bank",
+          from: "Apex Brokerage",
+          text: "MARGIN CALL: portfolio liquidated. Balance $0. Outstanding margin loan due immediately.",
+        });
+      } catch (e) {}
+    }
+    if (CBZ.city) {
+      CBZ.city.big("📉 EVERYTHING IS GONE");
+      CBZ.city.note("Phone buzzes. Brokerage. You just became the poorest man in a suit.", 3.2, { urgent: true });
+    }
+    if (CBZ.sfx) try { CBZ.sfx("empty"); } catch (e) {}
+  }
+
+  // SCENE: top floor of the tallest office, laptop crash, then free-roam
+  // descent to street level (elevators/stairs already work in the city).
   function sceneExec(game) {
     const lot = findOfficeLot();
     if (!lot || !lot.building) return null;
@@ -524,13 +631,9 @@
     const FH = b.FH || 4.6;
     const storeys = b.storeys || 1;
     const floorY = (b.floorTops && b.floorTops[storeys - 1] != null) ? b.floorTops[storeys - 1] : (storeys - 1) * FH;
+    const groundY = (b.floorTops && b.floorTops[0] != null) ? b.floorTops[0] : 0;
     const w = b.w || (lot.w || 24);
     const bx = (b.ox != null) ? b.ox : lot.cx, bz = (b.oz != null) ? b.oz : lot.cz;
-    // The raid arrives the way anyone reaches an upper floor — the STAIRWELL,
-    // which makeBuilding always runs along the local -X edge (buildings.js's
-    // roofCx comment: "clear of the -x stairwell"). Entry = just past the
-    // stair run; the exec stands across the plate by the far window wall.
-    // Both points are validated open (walls/desks/shaft) by clearSpot.
     const entry = clearSpot(b, floorY, bx - w / 2 + (b.stairW || 3.2) + 1.4, bz);
     const spot = clearSpot(b, floorY, bx + w / 2 - 2.4, bz);
 
@@ -540,77 +643,100 @@
     if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, facing, 0); }
     if (CBZ.cam) { CBZ.cam.yaw = facing + Math.PI; CBZ.cam.pitch = 0.32; }
 
-    if (CBZ.city) CBZ.city.note("💼 Marcus Sterling. Top floor. On paper, worth more than the building.", 3);
+    // Home spawn = this tower's door so dying later doesn't yeet you to the airport.
+    try {
+      if (b.door) g.citySpawnPoint = { x: b.door.x, z: b.door.z };
+      else g.citySpawnPoint = { x: lot.cx, z: lot.cz };
+    } catch (e) {}
+
+    if (CBZ.city) CBZ.city.note("💼 Marcus Sterling. Top floor. Suit, gold watch, shades. On paper — a god.", 3.2);
+
+    const T = ORIGIN_TUNING.exec;
+    paintLaptop(T.startCash, T.startBank, false);
+    showLaptop(true);
 
     scene = {
-      kind: "exec", t: 0, phase: "wait", cops: [], floorY, entry, barkT: -99,
-      cleanup: function () { for (const c of this.cops) despawnActor(c); this.cops.length = 0; },
+      kind: "exec", t: 0, phase: "laptop", crashed: false, hinted: false,
+      floorY: floorY, groundY: groundY, lot: lot, entry: entry,
+      cops: [], barkT: -99,
+      // Wall-clock anchor: headless SwiftShader crawls sim-dt ~60×, so the
+      // laptop/phone beat must not depend on accumulated game dt alone.
+      wall0: (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(),
+      cleanup: function () {
+        showLaptop(false);
+        for (const c of this.cops) despawnActor(c);
+        this.cops.length = 0;
+      },
     };
     return { compact: true };
   }
 
-  function fireExecBust() {
-    g.cash = 0; g.cityBank = 0;
-    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-    if (CBZ.city) CBZ.city.note("🚨 Federal accounts frozen pending investigation.", 2.6, { urgent: true });
-    if (CBZ.cityBust) {
-      CBZ.cityBust({ peaceful: true, bigLabel: "BUSTED — SECURITIES FRAUD", note: "Accounts frozen. Every dollar, gone." });
-    }
-    // he does NOT resume on the raided top floor when he's out of jail — drop
-    // the resume position (bust() already set g.busted, so the commit wrap
-    // won't re-stamp it) and persist the cleared ledger.
-    if (g.cityWorld) { g.cityWorld.lastPos = null; }
-    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-    clearScene();
-  }
-
-  // EXEC SCENE AGENCY (defect #6): the raid cops are genuinely untouchable —
-  // this is a scripted arrest, not a fight the player can win or lose their
-  // way out of — but "untouchable" has to be LEGIBLE, not just a giant hp
-  // number that silently no-sells damage. Every tick we check each cop's hp
-  // against what we stamped it to last frame; if something knocked it down
-  // (a bullet, a car, anything), we snap it back to full AND surface the
-  // beat with a bark line + a light shake, throttled so unloading a mag
-  // doesn't spam the line every frame.
-  function holdUntouchable(s, c, dt) {
-    if (c.hp !== 999999) {
-      if (s.t - s.barkT > ORIGIN_TUNING.exec.untouchableBarkCooldown) {
-        s.barkT = s.t;
-        if (CBZ.city) CBZ.city.note("👮 \"Don't make this worse.\"", 2.2, { urgent: true });
-        if (CBZ.shake) CBZ.shake(0.15);
-      }
-      c.hp = 999999;
-    }
-    c.dead = false;
+  function execWallSec(s) {
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    return Math.max(0, (now - (s.wall0 || now)) / 1000);
   }
 
   function tickExec(dt) {
     const s = scene;
     const T = ORIGIN_TUNING.exec;
     s.t += dt;
-    if (s.phase === "wait") {
-      if (s.t < T.waitSec) return;
-      s.phase = "raid"; s.t = 0;
-      // deterministic count (defect #6): no coin flip — always copCount
-      // regulars + exactly one SWAT lead.
-      for (let i = 0; i < T.copCount + T.swatCount; i++) {
-        const jx = (Math.random() - 0.5) * 3, jz = (Math.random() - 0.5) * 3;
-        const c = scriptedCop(s.entry.x + jx, s.entry.z + jz, s.floorY, i === 0);
-        if (c) s.cops.push(c);
+    const P = CBZ.player;
+    // Prefer wall-clock for the staged laptop beat; sim dt still drives descend.
+    const wt = execWallSec(s);
+
+    if (s.phase === "laptop") {
+      // Pre-crash wobble on the numbers for a beat, then wipe.
+      if (!s.crashed && wt >= T.crashAfterSec) {
+        s.crashed = true;
+        fireExecCrash();
+      } else if (!s.crashed) {
+        // soft red drift so the laptop feels live before the knife drops
+        const wobble = Math.max(0, 1 - wt / T.crashAfterSec);
+        paintLaptop(Math.floor(T.startCash * (0.7 + 0.3 * wobble)), Math.floor(T.startBank * (0.7 + 0.3 * wobble)), false);
       }
-      if (CBZ.city) CBZ.city.big("👮 POLICE! DON'T MOVE!");
+      if (wt >= T.laptopSec) {
+        showLaptop(false);
+        s.phase = "descend"; s.t = 0;
+        s.wall0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+        if (CBZ.city) {
+          CBZ.city.note("Take the elevator or stairs. Get to level 1. The street doesn't care who you were.", 4.0, { urgent: true });
+          if (CBZ.city.big) CBZ.city.big("↓ GROUND FLOOR");
+        }
+        // Waypoint the building door if we can.
+        try {
+          const door = s.lot && s.lot.building && s.lot.building.door;
+          if (door && CBZ.fullMap && CBZ.fullMap.setWaypoint) {
+            CBZ.fullMap.setWaypoint(door.x, door.z, "STREET");
+          }
+        } catch (e) {}
+      }
       return;
     }
-    if (s.phase === "raid") {
-      const P = CBZ.player;
-      let minD = 1e9;
-      for (const c of s.cops) {
-        if (!c) continue;
-        holdUntouchable(s, c, dt);
-        const gd = stepScriptedTo(c, s.floorY, P.pos.x, P.pos.z, T.copSpeed, dt);
-        if (gd < minD) minD = gd;
+
+    if (s.phase === "descend") {
+      if (!s.hinted && s.t >= T.descendHintSec) {
+        s.hinted = true;
+        if (CBZ.city) CBZ.city.note("Every stranger gives you one YES / NO choice. Jail if the cops catch you.", 3.6);
       }
-      if (s.t > T.raidMinSec && (minD <= T.bustRadius || s.t >= T.raidTimeoutSec)) { s.phase = "bust"; fireExecBust(); }
+      // Free movement — player can already use elevators/stairs. End the
+      // scripted beat once they're near ground floor of this tower OR far
+      // enough from the top plate that they clearly left the penthouse.
+      if (!P || !P.pos) return;
+      const nearGround = P.pos.y <= (s.groundY + T.groundYSlop);
+      const leftTop = P.pos.y < (s.floorY - 3.5);
+      if (nearGround || leftTop) {
+        s.phase = "street"; s.t = 0;
+        if (CBZ.city) {
+          CBZ.city.big("LEVEL 1");
+          CBZ.city.note("Broke. Suited. Dangerous only on paper. Make money or get cuffed — jail is still the game.", 4.2);
+        }
+        // Soft heat: margin fraud flag as a story breadcrumb (1★ optional).
+        // Not a full bust — you have to earn the jail the normal way.
+        if (CBZ.cityAddStars && Math.random() < 0.35) {
+          try { CBZ.cityAddStars(1, "margin inquiry"); } catch (e) {}
+        }
+        clearScene();
+      }
     }
   }
 
@@ -967,8 +1093,8 @@
     if (!P || P.dead || g.busted) return;
     if (P.driving) { if (CBZ.city) CBZ.city.note("Park it first — no switching from the driver's seat.", 1.8); return; }
     if ((g.wanted | 0) > 0) { if (CBZ.city) CBZ.city.note("🚔 Can't switch while the heat's on.", 1.8); return; }
-    // a live origin beat can't be walked out on — switching mid-raid would
-    // let the exec keep the fraud millions and never meet the handcuffs.
+    // a live origin beat can't be walked out on — switching mid-crash would
+    // let the exec keep the paper millions forever.
     if (scene) { if (CBZ.city) CBZ.city.note("Not now — see it through.", 1.8); return; }
     if (CBZ.cityDrunk && CBZ.cityDrunk.blackout) return;   // nobody switches while unconscious
     ensureWheel(); renderWheel();

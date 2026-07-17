@@ -5,12 +5,10 @@
    the heavy military escalation that GTA reserves for the top of the wanted
    meter:
 
-     • 4 STARS — an ATTACK HELICOPTER joins the hunt: a low-poly gunship with a
-       spinning rotor and a tracking spotlight that circles overhead and rakes
-       you with a door-gun (visible tracers).
-     • 5 STARS — the gunship arms its MISSILE pods (a real projectile + smoke
-       trail, BIG explosion on impact) AND fighter JETS scream across the map on
-       straight strafe runs, salvoing missiles at your last-known.
+     • 5 STARS — named soldiers leave their existing posts, board the helicopters
+       and fighters already parked at Fort Brandt, spool, roll/lift from the real
+       base, and only then join the hunt.  No anonymous aircraft is spawned near
+       the player.  Surviving crews fly the same airframes back to their pads.
 
    Everything is hard-gated to high wanted, pooled, distance/time-sliced, and
    torn down the instant the heat drops. Every cross-module hook is feature-
@@ -74,12 +72,12 @@
   }
 
   // ---- tunables (kept conservative so phones survive a 5-star firefight) ----
-  const HELI_STAR   = 4;      // attack heli joins at 4 stars
+  const HELI_STAR   = 5;      // military owns only the rare top wanted tier
   const JET_STAR    = 5;      // jets + missiles at 5 stars
-  // The tallest tower (The Spire, 9 storeys @4m) tops out near y≈36 and a player
-  // standing on its roof is ~y38, so cruise altitudes sit WELL above that: a
-  // gunship/jet is never below a rooftop target it's hunting.
-  const HELI_Y      = 44;     // cruise altitude of the gunship (clears the tallest roof + a player on it)
+  // Street-search baseline. Local terrain/roof clearance below raises the
+  // gunship only where needed, instead of making every pass unshootably high.
+  const HELI_Y      = 26;
+  const HELI_AGL    = 24;
   const HELI_CLEAR  = 4;      // min air gap kept over any rooftop the gunship passes over (no fly-through)
   const HELI_R      = 22;     // orbit radius around last-known
   const HELI_SPEED  = 14;     // m/s lateral chase toward orbit point
@@ -194,8 +192,84 @@
     return A_root;
   }
 
+  function angleDelta(a, b) {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  function turnToward(a, b, maxStep) {
+    const d = angleDelta(a, b);
+    return a + Math.max(-maxStep, Math.min(maxStep, d));
+  }
+
+  // Pick an authored parked airframe and a specific living soldier.  The
+  // military-vehicle registry owns availability/collider bookkeeping; this
+  // module only flies the claimed object.  There is deliberately no procedural
+  // fallback: if the base has no available aircraft or pilot, no air response
+  // materialises from nowhere.
+  function parkedMilitary(kind) {
+    const list = CBZ.cityMilitaryVehicles || [];
+    for (let i = 0; i < list.length; i++) {
+      const v = list[i];
+      if (!v || v.civilian || v.kind !== kind || v.taken || v._aiActive || !v.group || !v.group.parent) continue;
+      if (kind === "plane" && v.model && /bomber/i.test(v.model.name || "")) continue;
+      return v;
+    }
+    return null;
+  }
+  function militaryPilot(rec) {
+    const troops = CBZ.cityMilitaryPersonnel || [];
+    let best = null, bd = Infinity;
+    for (let i = 0; i < troops.length; i++) {
+      const p = troops[i];
+      if (!p || p.dead || p._milPilot || p._airPilot || (CBZ.body && CBZ.body.busy && CBZ.body.busy(p))) continue;
+      const d = Math.hypot(p.pos.x - rec.pos.x, p.pos.z - rec.pos.z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  }
+  function claimMilitary(kind) {
+    const rec = parkedMilitary(kind); if (!rec) return null;
+    const pilot = militaryPilot(rec); if (!pilot) return null;
+    if (!CBZ.cityClaimMilitaryVehicle || !CBZ.cityClaimMilitaryVehicle(rec, pilot)) return null;
+    pilot._milPilot = rec; pilot._milPilotPrev = { state: pilot.state, pause: pilot.pause };
+    pilot.rage = null; pilot.targetActor = null; pilot.speed = 0;
+    pilot.state = "pilot"; pilot.inCar = true; pilot.group.visible = false;
+    return { rec, pilot, home: Object.assign({}, rec._aiHome) };
+  }
+  function releaseMilitary(craft, crashed) {
+    if (!craft) return;
+    const rec = craft.sourceRec, p = craft.pilot;
+    if (p) {
+      p._milPilot = null; p.inCar = false;
+      p.pos.set(crashed ? craft.pos.x : craft.home.x + 3,
+        0,
+        crashed ? craft.pos.z : craft.home.z + 2);
+      p.group.visible = true;
+      if (crashed) {
+        // The pilot is a real roster person, so losing the aircraft also loses
+        // its crew instead of quietly returning an invisible NPC to the base.
+        if (!p.dead && CBZ.cityKillPed) CBZ.cityKillPed(p, {
+          fromX: craft.pos.x - 1, fromZ: craft.pos.z - 1,
+          force: 12, fling: 6, byPlayer: false,
+        }, "killed in an aircraft crash");
+      } else {
+        p.state = p._stationed ? "walk" : ((p._milPilotPrev && p._milPilotPrev.state) || "idle");
+        p.pause = 0; p.rage = null; p.targetActor = null;
+      }
+    }
+    if (rec && CBZ.cityReleaseMilitaryVehicle) CBZ.cityReleaseMilitaryVehicle(rec, !!crashed);
+    craft.pilot = null;
+  }
+
   // ---------------------------------------------------------------- helpers --
   function player() { const P = CBZ.player; return P && !P.dead ? P : null; }
+  function craftRadius(craft, fallback) {
+    const r = craft && craft.sourceRec;
+    if (!r) return fallback;
+    return Math.max(fallback, Math.min(11, Math.max(r.footW || 0, r.footL || 0) * 0.42));
+  }
 
   function aimPoint() {
     // prefer the player's actual position if the chopper has eyes on them
@@ -244,8 +318,14 @@
     const body = new THREE.Mesh(a.missile, a.missileMat);
     body.rotation.x = Math.PI / 2;     // point the cylinder along +Z (local fwd)
     grp.add(body);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.42, 8), a.missileMat);
+    nose.rotation.x = -Math.PI / 2; nose.position.z = 0.9; grp.add(nose);
+    for (let i = 0; i < 2; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.035, 0.30), a.matDark);
+      fin.position.z = -0.58; fin.rotation.z = i * Math.PI / 2; grp.add(fin);
+    }
     const flame = new THREE.Mesh(a.smoke, a.flameMat);
-    flame.scale.set(0.5, 0.5, 0.9); flame.position.z = -0.9; grp.add(flame);
+    flame.scale.set(0.42, 0.42, 1.45); flame.position.z = -1.05; grp.add(flame);
     return { group: grp, flame, live: true, trail: [], dir: new THREE.Vector3(), life: 0, byPlayer: false, seek: null };
   }
   function freeMissile(m) {
@@ -321,8 +401,8 @@
       if (dot < bestDot || (Math.abs(dot - bestDot) < 0.002 && d >= bestDist)) return;
       best = obj; bestDot = dot; bestDist = d; bestRadius = radius;
     };
-    consider(heli, 3.6);
-    for (let i = 0; i < jets.length; i++) consider(jets[i], 3.2);
+    consider(heli, craftRadius(heli, 3.6));
+    for (let i = 0; i < jets.length; i++) consider(jets[i], craftRadius(jets[i], 3.2));
     if (!best) return null;
     const target = best;
     return {
@@ -553,35 +633,46 @@
 
   function makeHeli() {
     const r = root(); if (!r) return null;
+    const claim = claimMilitary("heli"); if (!claim) return null;
     const a = assets();
-    const built = buildGunshipGroup();
-    const grp = built.grp, rotor = built.rotor, trotor = built.trotor, cone = built.cone;
+    const grp = claim.rec.group;
+    const rotor = grp.userData && grp.userData.rotor;
+    const trotor = grp.userData && grp.userData.tailRotor;
+    if (!rotor || !trotor) {
+      releaseMilitary({ sourceRec: claim.rec, pilot: claim.pilot, home: claim.home, pos: grp.position }, false);
+      return null;
+    }
+    // World-space beam geometry avoids inheriting the authored model's 1.45x
+    // scale.  The actual parked helicopter remains the moving visual.
+    const cone = new THREE.Mesh(a.cone, a.lightMat); r.add(cone);
     const pool = new THREE.Mesh(a.pool, a.poolMat); pool.rotation.x = -Math.PI / 2; pool.position.y = 0.08;
     r.add(pool);
-    // No floating "GUNSHIP" word over the helicopter — the armoured silhouette,
-    // missile pods, spotlight and rotor read as a police gunship without a label
-    // (a hovering word broke the fourth wall).
-    r.add(grp);
-    // spawn at a rooftop helipad if buildings.js gave us one, else fly in from edge
-    let sp = null;
-    if (CBZ.cityHelipad) { try { sp = CBZ.cityHelipad(); } catch (e) { sp = null; } }
-    if (!sp) sp = edgePoint(rng() * 6.28, HELI_Y);
-    grp.position.set(sp.x, sp.y != null ? Math.max(sp.y, 6) : HELI_Y, sp.z);
+    pool.visible = false; cone.visible = false;
+    grp.visible = true;
+    grp.position.set(claim.home.x, claim.home.y, claim.home.z);
+    grp.rotation.set(0, claim.home.heading, 0);
     return {
       group: grp, rotor, trotor, cone, pool,
       pos: grp.position, orbit: rng() * 6.28,
       missileCD: 3.5, gunCD: 1.0, leaveT: 0, spotR: 6, climb: 0,
       hp: 140, maxHp: 140, downed: false,           // armoured — ~2 rockets / a sustained burst
       spin: 0, vy: 0, yawRate: 0, smokeCD: 0,
+      sourceRec: claim.rec, pilot: claim.pilot, home: claim.home,
+      phase: "spool", launchT: 4.5, _worldCone: true,
     };
   }
 
-  function despawnHeli() {
+  function despawnHeli(crashed) {
     if (!heli) return;
-    if (heli.group && heli.group.parent) heli.group.parent.remove(heli.group);
+    const old = heli;
     if (heli.pool && heli.pool.parent) heli.pool.parent.remove(heli.pool);
-    disposeGroup(heli.group);
-    disposeGroup(heli.pool);
+    if (heli.cone && heli.cone.parent) heli.cone.parent.remove(heli.cone);
+    if (!heli.sourceRec) {
+      if (heli.group && heli.group.parent) heli.group.parent.remove(heli.group);
+      disposeGroup(heli.group);
+    }
+    disposeGroup(heli.pool); disposeGroup(heli.cone);
+    releaseMilitary(old, !!crashed);
     heli = null;
   }
 
@@ -617,7 +708,7 @@
     if (CBZ.shake) CBZ.shake(0.4);
     // (no banner — the falling fireball IS the message)
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(50);
-    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a police gunship!", "#ff8b6b");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a military helicopter!", "#ff8b6b");
   }
   function dynamicAircraftCollider(c) {
     let o = c && c.ref;
@@ -674,7 +765,7 @@
       // is reserved for missiles + called-in airstrikes; a crash is a fraction of it.
       wreckImpact(ix, iy, iz, surf > ground + 0.5);
       if (CBZ.shake) CBZ.shake(0.6);
-      despawnHeli();
+      despawnHeli(true);
     }
   }
   // ray-test the police AIR — gunship AND jets — for the player's hitscan (NO
@@ -694,8 +785,8 @@
       bestT = t; bestCraft = craft;
       best = { x: ox + dx * t, y: oy + dy * t, z: oz + dz * t, dist: t };
     };
-    test(heli, 3.6);
-    for (let i = 0; i < jets.length; i++) test(jets[i], 3.2);
+    test(heli, craftRadius(heli, 3.6));
+    for (let i = 0; i < jets.length; i++) test(jets[i], craftRadius(jets[i], 3.2));
     lastRayCraft = bestCraft;
     return best;
   };
@@ -725,6 +816,24 @@
     return any;
   };
 
+  // Physical aircraft-to-aircraft impacts identify the authored vehicle record
+  // (the same object claimed from Fort Brandt). Route that impulse to the live
+  // response craft instead of damaging a stale parked shell or a generic heli.
+  CBZ.cityAircraftCollisionImpact = function (rec, dmg, point) {
+    if (!rec || !(dmg > 0)) return false;
+    if (heli && !heli.downed && heli.sourceRec === rec) {
+      damageHeli(dmg, point && point.x, point && point.z);
+      return true;
+    }
+    for (let i = 0; i < jets.length; i++) {
+      const j = jets[i];
+      if (!j || j.downed || j.sourceRec !== rec) continue;
+      damageJet(j, dmg);
+      return true;
+    }
+    return false;
+  };
+
   // ---- JET SHOOT-DOWN: mirrors the gunship's damage→down→fall→detonate arc.
   //      Same design rationale as damageHeli: a 5★ jet you could only hide from
   //      was a wall; one you can swat out of its strafe run is a power fantasy.
@@ -745,7 +854,7 @@
     if (CBZ.sfx) CBZ.sfx("explosion");
     if (CBZ.shake) CBZ.shake(0.4);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(60);
-    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a police fighter jet!", "#ff8b6b");
+    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down a military fighter jet!", "#ff8b6b");
   }
   // ballistic wreck ride-down (same shape as fallHeli): momentum bleeds off,
   // gravity + roll take over, smoke trails, and it detonates ON whatever it
@@ -802,11 +911,52 @@
   function updateHeli(dt, r) {
     if (heli && heli.downed) { fallHeli(dt); return; }     // a dying heli ignores all AI
     const stars = g.wanted | 0;
-    if (stars < HELI_STAR || g.state !== "playing") {
-      if (heli) { heli.leaveT += dt; heli.pos.y += dt * 6; if (heli.leaveT > 4) despawnHeli(); }
+    if (!heli) {
+      if (stars < HELI_STAR || g.state !== "playing") return;
+      heli = makeHeli(); if (!heli) return;
+    }
+    if ((stars < HELI_STAR || g.state !== "playing") && heli.phase !== "return") {
+      heli.phase = "return"; heli.pool.visible = false; heli.cone.visible = false;
+    }
+    // Real spool at the authored helipad: the rotors gather speed for several
+    // seconds before the skids ever leave the concrete.
+    if (heli.phase === "spool") {
+      if (stars < HELI_STAR || g.state !== "playing") { despawnHeli(false); return; }
+      heli.launchT -= dt;
+      const k = 1 - Math.max(0, heli.launchT) / 4.5;
+      heli.rotor.rotation.y += dt * (2 + k * 40);
+      heli.trotor.rotation.x += dt * (3 + k * 57);
+      if (heli.launchT <= 0) heli.phase = "takeoff";
       return;
     }
-    if (!heli) { heli = makeHeli(); if (!heli) return; }
+    if (heli.phase === "takeoff") {
+      if (stars < HELI_STAR || g.state !== "playing") { heli.phase = "return"; }
+      else {
+        heli.rotor.rotation.y += dt * 42; heli.trotor.rotation.x += dt * 60;
+        const launchY = Math.max(22, heli.home.y + 22);
+        heli.pos.y += Math.min(9 * dt, launchY - heli.pos.y);
+        if (heli.pos.y >= launchY - 0.35) heli.phase = "inbound";
+        return;
+      }
+    }
+    if (heli.phase === "return") {
+      const dx = heli.home.x - heli.pos.x, dz = heli.home.z - heli.pos.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const safeY = Math.max(heli.home.y + 20, roofTopAt(heli.pos.x, heli.pos.z) + HELI_CLEAR + 2);
+      if (d > 4) {
+        const step = Math.min(d, HELI_SPEED * 1.8 * dt);
+        heli.pos.x += dx / d * step; heli.pos.z += dz / d * step;
+        heli.pos.y += (Math.max(safeY, heli.pos.y) - heli.pos.y) * Math.min(1, dt * 1.2);
+      } else {
+        heli.pos.x += dx * Math.min(1, dt * 2); heli.pos.z += dz * Math.min(1, dt * 2);
+        heli.pos.y += (heli.home.y - heli.pos.y) * Math.min(1, dt * 0.65);
+      }
+      heli.group.rotation.y = turnToward(heli.group.rotation.y, Math.atan2(dx, dz), dt * 1.8);
+      heli.group.rotation.z += (0 - heli.group.rotation.z) * Math.min(1, dt * 2.5);
+      heli.rotor.rotation.y += dt * 42; heli.trotor.rotation.x += dt * 60;
+      if (d < 0.8 && Math.abs(heli.pos.y - heli.home.y) < 0.3) despawnHeli(false);
+      return;
+    }
     heli.leaveT = 0;
     const aim = aimPoint();
     const cx = aim ? aim.x : heli.pos.x, cz = aim ? aim.z : heli.pos.z;
@@ -814,13 +964,16 @@
     heli.orbit += dt * (0.5 + (stars - HELI_STAR) * 0.12);
     const R = HELI_R - (stars - HELI_STAR) * 3;
     const tx = cx + Math.cos(heli.orbit) * R, tz = cz + Math.sin(heli.orbit) * R;
-    // base cruise — kept high so we clear the tallest tower. If the player has
-    // climbed ABOVE us (on a rooftop), CLIMB to get back over them before we can
-    // shoot (a gunner can't fire straight up). This is the "reposition" behaviour.
+    // Local AGL cruise: climb for the roof under this orbit point, or for a
+    // player who has genuinely climbed above the gunship.
     const P0 = player();
     const needY = P0 ? (P0.pos.y || 0) + 1.4 + FIRE_MARGIN + 6 : 0;   // stay this far over the player
-    const ty = Math.max(HELI_Y - (stars - HELI_STAR) * 2, needY);
-    const lat = Math.min(1, dt * (HELI_SPEED / Math.max(R, 6)));
+    const localGround = CBZ.floorAt ? (+CBZ.floorAt(tx, tz) || 0) : 0;
+    const localRoof = roofTopAt(tx, tz);
+    const ty = Math.max(HELI_Y, localGround + HELI_AGL, localRoof + HELI_CLEAR, needY);
+    const inbound = heli.phase === "inbound";
+    const lat = inbound ? Math.min(1, dt * (HELI_SPEED * 1.7 / Math.max(Math.hypot(tx - heli.pos.x, tz - heli.pos.z), 1)))
+                        : Math.min(1, dt * (HELI_SPEED / Math.max(R, 6)));
     const prevX = heli.pos.x, prevY = heli.pos.y, prevZ = heli.pos.z;
     heli.pos.x += (tx - heli.pos.x) * lat;
     heli.pos.z += (tz - heli.pos.z) * lat;
@@ -863,6 +1016,13 @@
     heli.group.rotation.z = Math.sin(heli.orbit) * 0.14;
     heli.rotor.rotation.y += dt * 42;
     heli.trotor.rotation.x += dt * 60;
+    if (inbound) {
+      if (Math.hypot(heli.pos.x - tx, heli.pos.z - tz) < 38) {
+        heli.phase = "orbit";
+        heli.pool.position.set(cx, 0.08, cz);
+        heli.pool.visible = true; heli.cone.visible = true;
+      } else return;
+    }
     // spotlight chases the player but lags (so you can break the beam)
     const P = player();
     const beam = heli.pool.position;
@@ -889,8 +1049,13 @@
     }
     beam.y = (heli._beamY || 0) + 0.08;
     const len = Math.max(2, heli.pos.y - beam.y);
-    heli.cone.position.set(0, -len / 2 - 0.4, 0);
-    heli.cone.scale.set(1, len, 1);
+    if (heli._worldCone) {
+      heli.cone.position.set(heli.pos.x, beam.y + len * 0.5, heli.pos.z);
+      heli.cone.scale.set(1, len, 1);
+    } else {
+      heli.cone.position.set(0, -len / 2 - 0.4, 0);
+      heli.cone.scale.set(1, len, 1);
+    }
 
     // ---- WEAPONS ---------------------------------------------------------
     if (!aim || !P) return;
@@ -995,7 +1160,7 @@
     // burst), so a 5-star air rake stays survivable (the hitstop/missile caps are
     // unchanged). Hit chance rises when our lead actually tracked your motion.
     if (rng() < 0.55 && CBZ.cityHurtPlayer) {
-      CBZ.cityHurtPlayer(6 + rng() * 6, heli.pos.x, heli.pos.z, "raked by a gunship", rng() < 0.02, "a police gunship");
+      CBZ.cityHurtPlayer(6 + rng() * 6, heli.pos.x, heli.pos.z, "raked by a gunship", rng() < 0.02, "a military gunship");
     }
   }
 
@@ -1056,38 +1221,84 @@
 
   function makeJet() {
     const r = root(); if (!r) return null;
-    const built = buildPoliceJetGroup();
-    const grp = built.grp, burn = built.burn;
-    r.add(grp);
-    // a straight pass: pick a heading toward the target, start far off one edge
+    const claim = claimMilitary("plane"); if (!claim) return null;
+    const grp = claim.rec.group;
+    const plumes = (grp.userData && grp.userData.plume) || [];
+    const burn = plumes[0] || null;
+    grp.visible = true;
+    grp.position.set(claim.home.x, claim.home.y, claim.home.z);
+    grp.rotation.set(0, claim.home.heading, 0);
+    if (burn) { burn.visible = true; if (burn.material) burn.material.opacity = 0; }
+    // Destination is live, but departure always starts from the authored runway.
     const aim = aimPoint();
     const arena = CBZ.city && CBZ.city.arena;
     const cx = aim ? aim.x : (arena && arena.center ? arena.center.x : 0);
     const cz = aim ? aim.z : (arena && arena.center ? arena.center.z : 0);
-    const ang = rng() * 6.28;
-    const span = edgePoint(ang, JET_Y);   // entry point far on the edge
-    grp.position.set(span.x, JET_Y + (rng() - 0.5) * 4, span.z);
-    // velocity straight at (a bit past) the target, level flight
-    const dir = new THREE.Vector3(cx - span.x, 0, cz - span.z).normalize();
-    grp.rotation.y = Math.atan2(dir.x, dir.z);
+    const dir = new THREE.Vector3(Math.sin(claim.home.heading), 0, Math.cos(claim.home.heading));
     return {
       group: grp, burn, dir, pos: grp.position, life: 0, fired: false, target: { x: cx, z: cz },
       // shoot-down state — mirrors the gunship's (hp / downed / falling wreck).
       // Lighter than the heli: one rocket splash (90) or a sustained rifle rake
       // drops it, which is fair for a target you only have a ~6s window on.
       hp: 70, maxHp: 70, downed: false, vy: 0, rollRate: 0, smokeCD: 0, crashSpd: JET_SPEED,
+      sourceRec: claim.rec, pilot: claim.pilot, home: claim.home,
+      phase: "spool", launchT: 3.2, heading: claim.home.heading,
+      speed: 0, phaseT: 0,
     };
   }
 
-  function despawnJet(j) {
+  function despawnJet(j, crashed) {
     if (!j) return;
-    if (j.group && j.group.parent) j.group.parent.remove(j.group);
-    disposeGroup(j.group);
+    if (!j.sourceRec) {
+      if (j.group && j.group.parent) j.group.parent.remove(j.group);
+      disposeGroup(j.group);
+    }
+    releaseMilitary(j, !!crashed);
   }
 
   function updateJets(dt, r) {
     const stars = g.wanted | 0;
-    // spawn cadence handled in the main tick; here we just fly + strafe + reap
+    function plume(j, power) {
+      if (!j.burn) return;
+      if (CBZ.setRocketPlume && j.burn.userData && j.burn.userData.rocketPlume) {
+        CBZ.setRocketPlume(j.burn, power, j.life, 1.2, 1.05);
+        return;
+      }
+      j.burn.visible = power > 0.01;
+      if (j.burn.material) j.burn.material.opacity = Math.max(0, Math.min(0.95, power));
+      j.burn.scale.z = 0.75 + power * 1.8 + Math.sin(j.life * 34) * 0.16;
+    }
+    function setHeading(j, want, rate) {
+      j.heading = turnToward(j.heading, want, rate * dt);
+      j.dir.set(Math.sin(j.heading), 0, Math.cos(j.heading));
+      j.group.rotation.y = j.heading;
+    }
+    function fly(j, speed) {
+      const step = speed * dt;
+      j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
+    }
+    function seekPoint(j, tx, tz, rate) {
+      setHeading(j, Math.atan2(tx - j.pos.x, tz - j.pos.z), rate);
+    }
+    function fireJet(j) {
+      if (j.fired) return;
+      j.fired = true;
+      const t = aimPoint(); if (!t) return;
+      const seekJet = function () {
+        const SP = player(); if (!SP) return null;
+        const py = (SP.pos.y || 0) + 1.2;
+        if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(j.pos.x, j.pos.y - 0.5, j.pos.z, SP.pos.x, py, SP.pos.z)) return null;
+        return { x: SP.pos.x, y: py, z: SP.pos.z };
+      };
+      // Launch from the authored fighter's visible nose/rail area, not a remote
+      // invisible origin.  The projectile supplies its own flame and smoke.
+      launchMissile(j.pos.x + j.dir.x * 5.8, j.pos.y - 0.35, j.pos.z + j.dir.z * 5.8, t, false, seekJet);
+      if (CBZ.sfx && CBZ.player) {
+        const d = Math.hypot(j.pos.x - CBZ.player.pos.x, j.pos.z - CBZ.player.pos.z);
+        CBZ.sfx("rumble", { dist: d, ghost: true });
+      }
+    }
+
     for (let i = jets.length - 1; i >= 0; i--) {
       const j = jets[i];
       j.life += dt;
@@ -1096,54 +1307,102 @@
       // is exempt from the live-jet reaping below so the crash always lands —
       // the life>25 clamp is only a can't-happen safety net.
       if (j.downed) {
-        if (fallJet(j, dt) || j.life > 25) { despawnJet(j); jets.splice(i, 1); }
+        if (fallJet(j, dt) || j.life > 45) { despawnJet(j, true); jets.splice(i, 1); }
         continue;
       }
-      const step = JET_SPEED * dt;
-      j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
-      // gentle bob so it doesn't look perfectly rigid
-      j.pos.y += Math.sin(j.life * 6) * dt * 0.6;
-      // ---- AERO LAYER: same shared core as the gunship. The jet's heading/speed
-      // stay scripted (a screaming straight pass is the intended read), but ground
-      // effect now genuinely cushions a low pass over a rooftop, and a deep-AoA bob
-      // (from the existing sinusoidal wobble) reads through the real stall curve —
-      // so a jet skimming a tower visibly "feels" the air instead of free-floating.
-      if (CBZ.aeroPhysics) {
+      if ((stars < JET_STAR || g.state !== "playing") && j.phase !== "return" && j.phase !== "landing" && j.phase !== "taxiHome") {
+        if (j.phase === "spool") { despawnJet(j, false); jets.splice(i, 1); continue; }
+        j.phase = "return"; j.phaseT = 0;
+      }
+
+      j.phaseT = (j.phaseT || 0) + dt;
+      if (j.phase === "spool") {
+        j.launchT -= dt;
+        plume(j, 0.15 + (1 - Math.max(0, j.launchT) / 3.2) * 0.55);
+        if (j.launchT <= 0) { j.phase = "taxi"; j.phaseT = 0; }
+        continue;
+      }
+      if (j.phase === "taxi") {
+        // Turn toward +Z, taxi the same parked fighter onto the runway, then
+        // line up eastbound.  Landing gear stays at y=0 through both phases.
+        setHeading(j, 0, 0.75); j.speed += (8 - j.speed) * Math.min(1, dt * 1.8);
+        if (Math.abs(angleDelta(j.heading, 0)) < 0.22) fly(j, j.speed);
+        plume(j, 0.5);
+        if (j.pos.z >= j.home.z + 20 || j.phaseT > 8) { j.phase = "lineup"; j.phaseT = 0; }
+        continue;
+      }
+      if (j.phase === "lineup") {
+        setHeading(j, Math.PI / 2, 0.7); j.speed += (7 - j.speed) * Math.min(1, dt * 2);
+        if (Math.abs(angleDelta(j.heading, Math.PI / 2)) < 0.12) { j.phase = "takeoff"; j.phaseT = 0; j._rollX = j.pos.x; }
+        plume(j, 0.62);
+        continue;
+      }
+      if (j.phase === "takeoff") {
+        setHeading(j, Math.PI / 2, 0.35);
+        j.speed = Math.min(78, j.speed + 22 * dt); fly(j, j.speed);
+        if (j.speed > 42) j.pos.y += Math.min(8.5 * dt, 18 - j.pos.y);
+        j.group.rotation.x += ((j.speed > 42 ? -0.12 : 0) - j.group.rotation.x) * Math.min(1, dt * 2.5);
+        plume(j, 0.92);
+        if (j.pos.y > 14 || j.pos.x - (j._rollX || j.pos.x) > 125) { j.phase = "inbound"; j.phaseT = 0; }
+        continue;
+      }
+
+      const liveAim = aimPoint();
+      if (liveAim) { j.target.x = liveAim.x; j.target.z = liveAim.z; }
+      if (j.phase === "inbound" || j.phase === "attack") {
+        const d = Math.hypot(j.target.x - j.pos.x, j.target.z - j.pos.z);
+        seekPoint(j, j.target.x, j.target.z, j.phase === "attack" ? 0.48 : 0.62);
+        j.speed += (JET_SPEED - j.speed) * Math.min(1, dt * 0.9); fly(j, j.speed);
+        const safe = Math.max(JET_Y, roofTopAt(j.pos.x, j.pos.z) + 10,
+          liveAim ? (liveAim.y || 0) + 18 : 0);
+        j.pos.y += (safe - j.pos.y) * Math.min(1, dt * 0.8);
+        j.group.rotation.x += (0 - j.group.rotation.x) * Math.min(1, dt * 2);
+        j.group.rotation.z = Math.max(-0.42, Math.min(0.42, angleDelta(j.group.rotation.y, Math.atan2(j.target.x - j.pos.x, j.target.z - j.pos.z)) * -0.8));
+        plume(j, 0.95);
+        if (j.phase === "inbound" && d < 105) { j.phase = "attack"; j.phaseT = 0; }
+        if (j.phase === "attack" && d < 68) fireJet(j);
+        if (j.phase === "attack" && ((j.fired && j.phaseT > 2.6) || j.phaseT > 9)) { j.phase = "egress"; j.phaseT = 0; }
+      } else if (j.phase === "egress") {
+        j.speed += (JET_SPEED - j.speed) * Math.min(1, dt); fly(j, j.speed);
+        j.pos.y += (JET_Y + 12 - j.pos.y) * Math.min(1, dt * 0.7);
+        j.group.rotation.z *= Math.pow(0.05, dt); plume(j, 0.92);
+        if (j.phaseT > 3.5) { j.phase = "return"; j.phaseT = 0; }
+      } else if (j.phase === "return") {
+        const ax = j.home.x - 95, az = j.home.z + 22;
+        const d = Math.hypot(ax - j.pos.x, az - j.pos.z);
+        seekPoint(j, ax, az, 0.72);
+        j.speed += (82 - j.speed) * Math.min(1, dt * 0.8); fly(j, j.speed);
+        const safe = Math.max(36, roofTopAt(j.pos.x, j.pos.z) + 10);
+        j.pos.y += (safe - j.pos.y) * Math.min(1, dt * 0.65); plume(j, 0.72);
+        if (d < 80) { j.phase = "landing"; j.phaseT = 0; }
+      } else if (j.phase === "landing") {
+        const runwayZ = j.home.z + 22;
+        const tx = j.home.x + 8, tz = runwayZ;
+        seekPoint(j, tx, tz, 0.58);
+        const d = Math.hypot(tx - j.pos.x, tz - j.pos.z);
+        const targetSpeed = Math.max(16, Math.min(48, d * 0.55));
+        j.speed += (targetSpeed - j.speed) * Math.min(1, dt * 1.2); fly(j, j.speed);
+        const wantY = Math.max(0, Math.min(14, d * 0.11));
+        j.pos.y += (wantY - j.pos.y) * Math.min(1, dt * 0.9);
+        j.group.rotation.x += ((j.pos.y > 1 ? 0.08 : 0) - j.group.rotation.x) * Math.min(1, dt * 2);
+        plume(j, 0.42);
+        if (d < 8 && j.pos.y < 1.3) { j.pos.y = 0; j.phase = "taxiHome"; j.phaseT = 0; j.speed = 7; }
+      } else if (j.phase === "taxiHome") {
+        const d = Math.hypot(j.home.x - j.pos.x, j.home.z - j.pos.z);
+        seekPoint(j, j.home.x, j.home.z, 0.7);
+        j.speed += (Math.min(7, d * 0.8) - j.speed) * Math.min(1, dt * 2); fly(j, Math.max(0, j.speed));
+        j.pos.y = 0; j.group.rotation.x *= Math.pow(0.03, dt); plume(j, 0.25);
+        if (d < 0.8) { despawnJet(j, false); jets.splice(i, 1); continue; }
+      }
+
+      // The aero layer still supplies ground-effect/AoA telemetry while the
+      // route state machine supplies the actual authored departure/return path.
+      if (CBZ.aeroPhysics && j.pos.y > 0.5) {
         const A = CBZ.aeroPhysics;
         const groundY = Math.max(CBZ.floorAt ? CBZ.floorAt(j.pos.x, j.pos.z) : 0, roofTopAt(j.pos.x, j.pos.z));
-        const agl = Math.max(0, j.pos.y - groundY);
-        const gMul = A.groundEffectMul(agl, 10.8);   // ~10.8m wingspan
-        const local = { x: 0, y: Math.cos(j.life * 6) * 0.6, z: JET_SPEED };
-        const aero = A.aeroForces(local, { liftScale: 0.0009, groundMul: gMul });
-        // ground effect very gently floats a low pass up off the roofline
-        j.pos.y += (gMul - 1) * 2.2 * dt;
-        j._aoa = aero.aoaDeg;
-      }
-      if (j.burn) j.burn.scale.z = 1.4 + Math.sin(j.life * 30) * 0.4;
-      // fire a missile salvo near closest approach to the target
-      if (!j.fired) {
-        const dx = j.pos.x - j.target.x, dz = j.pos.z - j.target.z;
-        if (dx * dx + dz * dz < 60 * 60) {
-          j.fired = true;
-          const t = aimPoint();
-          // HOMING, same lock-or-lose-it rule as the gunship: only tracks while
-          // there's a clear line of fire to the player's live position, so
-          // ducking into cover breaks the lock and the missile goes ballistic.
-          const seekJet = function () {
-            const SP = player();
-            if (!SP) return null;
-            const py = (SP.pos.y || 0) + 1.2;
-            if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(j.pos.x, j.pos.y - 0.5, j.pos.z, SP.pos.x, py, SP.pos.z)) return null;
-            return { x: SP.pos.x, y: py, z: SP.pos.z };
-          };
-          launchMissile(j.pos.x, j.pos.y - 0.5, j.pos.z, t, false, seekJet);
-          // (no banner — you HEAR the jet; diegetic roar below)
-          if (CBZ.sfx && CBZ.player) { const dj = Math.hypot(j.pos.x - CBZ.player.pos.x, j.pos.z - CBZ.player.pos.z); CBZ.sfx("rumble", { dist: dj, ghost: true }); }
-        }
-      }
-      // reap once well past / too long aloft (despawn if heat dropped)
-      if (j.life > 6.5 || stars < JET_STAR || g.state !== "playing") {
-        despawnJet(j); jets.splice(i, 1);
+        const gMul = A.groundEffectMul(Math.max(0, j.pos.y - groundY), 10.8);
+        const aero = A.aeroForces({ x: 0, y: 0, z: Math.max(1, j.speed) }, { liftScale: 0.0009, groundMul: gMul });
+        j.pos.y += (gMul - 1) * 1.4 * dt; j._aoa = aero.aoaDeg;
       }
     }
   }
@@ -1164,6 +1423,17 @@
     missiles.length = 0;
     jetCD = 6;
   }
+  function recall() {
+    if (heli && !heli.downed) { heli.phase = "return"; heli.pool.visible = false; heli.cone.visible = false; }
+    for (let i = 0; i < jets.length; i++) if (jets[i] && !jets[i].downed) {
+      if (jets[i].phase === "spool") {
+        // Still on its parking spot: shut it down immediately; nothing moved.
+        despawnJet(jets[i], false); jets.splice(i--, 1);
+      } else { jets[i].phase = "return"; jets[i].phaseT = 0; }
+    }
+    for (let i = missiles.length - 1; i >= 0; i--) freeMissile(missiles[i]);
+    missiles.length = 0; jetCD = 5;
+  }
   // expose a clean kill switch (wanted-reset / mode-exit can call it)
   CBZ.cityClearAircraft = teardown;
 
@@ -1174,10 +1444,10 @@
     const r = root(); if (!r) return;
     if (!cleanupBound) {
       cleanupBound = true;
-      // chain onto wanted-reset if it exists so aircraft vanish when you go clean
+      // Wanted reset recalls surviving crews; it does not erase them mid-flight.
       if (CBZ.cityWantedReset && !CBZ.cityWantedReset._airWrapped) {
         const orig = CBZ.cityWantedReset;
-        CBZ.cityWantedReset = function () { teardown(); return orig.apply(this, arguments); };
+        CBZ.cityWantedReset = function () { const out = orig.apply(this, arguments); recall(); return out; };
         CBZ.cityWantedReset._airWrapped = true;
       }
     }
@@ -1186,7 +1456,7 @@
 
     updateHeli(dt, r);
 
-    // JETS: spawn a fresh strafing pass every few seconds at 5 stars
+    // JETS: request another real base airframe every few seconds at 5 stars.
     if (stars >= JET_STAR && playing) {
       jetCD -= dt;
       if (jetCD <= 0 && jets.length < MAX_JETS && aimPoint()) {
@@ -1199,4 +1469,25 @@
     updateJets(dt, r);
     updateMissiles(dt, r);
   });
+
+  // Read-only runtime evidence for the gameplay QA harness and minimap/debug
+  // tooling.  It exposes identity + phase, never mutable craft internals.
+  CBZ.cityMilitaryAirResponse = function () {
+    return {
+      helicopter: heli ? {
+        phase: heli.phase, pilot: heli.pilot && heli.pilot.name,
+        source: heli.sourceRec && vehLabel(heli.sourceRec),
+        x: heli.pos.x, y: heli.pos.y, z: heli.pos.z,
+      } : null,
+      jets: jets.map(function (j) { return {
+        phase: j.phase, pilot: j.pilot && j.pilot.name,
+        source: j.sourceRec && vehLabel(j.sourceRec),
+        x: j.pos.x, y: j.pos.y, z: j.pos.z,
+      }; }),
+    };
+  };
+
+  function vehLabel(rec) {
+    return rec && rec.model && rec.model.name || rec && rec.kind || "aircraft";
+  }
 })();

@@ -121,6 +121,70 @@
   function navBox(parent, x, y, z, s, hex) {
     return box(parent, x, y, z, s, s, s, hex, { matOpts: { emissive: hex, ei: 0.9 }, cast: false });
   }
+
+  // ONE reusable rocket exhaust component for every propelled machine in the
+  // game.  The military fighter defines it early; playeraircraft.js and the
+  // chop-shop booster consume the same geometry/power contract later.  A hot
+  // white core, translucent orange envelope, shock diamonds and nozzle light
+  // replace the old single opaque cone while keeping the cheap primitive look.
+  if (!CBZ.createRocketPlume) {
+    CBZ.createRocketPlume = function (opts) {
+      opts = opts || {};
+      const grp = new THREE.Group();
+      grp.name = opts.name || "rocket-exhaust";
+      grp.rotation.x = -Math.PI / 2; // local +Y extends aft along world/local -Z
+      const outerMat = new THREE.MeshBasicMaterial({
+        color: opts.outer == null ? 0xff7a24 : opts.outer,
+        transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: opts.core == null ? 0xfff4c7 : opts.core,
+        transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      // Base stays exactly on the nozzle; scaling Y only lengthens aft.
+      const outerGeo = new THREE.ConeGeometry(0.34, 1, 12, 1, true); outerGeo.translate(0, 0.5, 0);
+      const coreGeo = new THREE.ConeGeometry(0.16, 0.72, 10, 1, true); coreGeo.translate(0, 0.36, 0);
+      const outer = new THREE.Mesh(outerGeo, outerMat), core = new THREE.Mesh(coreGeo, coreMat);
+      grp.add(outer); grp.add(core);
+      const diamonds = [];
+      for (let i = 0; i < 3; i++) {
+        const d = new THREE.Mesh(new THREE.OctahedronGeometry(0.12 - i * 0.018, 0), coreMat);
+        d.position.y = 0.24 + i * 0.23; d.scale.y = 1.7; grp.add(d); diamonds.push(d);
+      }
+      const light = new THREE.PointLight(opts.light == null ? 0xff8a35 : opts.light, 0, opts.lightRange || 9, 2);
+      light.position.y = 0.08; grp.add(light);
+      grp.visible = false;
+      grp.userData.rocketPlume = true;
+      grp.userData.outer = outer; grp.userData.core = core; grp.userData.diamonds = diamonds;
+      grp.userData.outerMaterial = outerMat; grp.userData.coreMaterial = coreMat; grp.userData.light = light;
+      return grp;
+    };
+    CBZ.setRocketPlume = function (grp, power, time, lengthMul, radiusMul) {
+      if (!grp || !grp.userData || !grp.userData.rocketPlume) return false;
+      power = Math.max(0, Math.min(1, +power || 0));
+      grp.visible = power > 0.015;
+      const u = grp.userData;
+      if (!grp.visible) {
+        u.outerMaterial.opacity = 0; u.coreMaterial.opacity = 0; u.light.intensity = 0;
+        return true;
+      }
+      time = +time || 0;
+      const flick = 0.94 + Math.sin(time * 37) * 0.045 + Math.sin(time * 71) * 0.018;
+      const len = (0.42 + power * 1.58) * flick * (lengthMul || 1);
+      const rad = (0.62 + power * 0.42) * (radiusMul || 1);
+      grp.scale.set(rad, len, rad);
+      u.outerMaterial.opacity = 0.18 + power * 0.48;
+      u.coreMaterial.opacity = 0.34 + power * 0.62;
+      for (let i = 0; i < u.diamonds.length; i++) {
+        const d = u.diamonds[i];
+        d.scale.x = d.scale.z = 0.82 + Math.sin(time * 46 + i * 1.7) * 0.12;
+      }
+      u.light.intensity = 0.35 + power * 2.8;
+      return true;
+    };
+  }
   // SHAPE HELPERS (r128 idiom — sculpt the position attribute, recompute
   // normals; same pattern as aircraft.js taperBox/bladeGeo). Fully constant
   // per inputs → deterministic worlds.
@@ -189,11 +253,17 @@
     const g = new THREE.Group();
     const cy = 1.15;                                        // body centreline (on gear)
     const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    // fuselage tube + tapered nose + afterbody (round flanks the wings sink into)
+    // fuselage tube + faceted forebody + afterbody. A radar radome resolves to
+    // a continuous point, not the old long cylinder with a blunt round cap.
     cyl(g, 0, cy, 0.2, 0.5, 0.5, 8.6, M.jetGrey, 14).rotation.x = Math.PI / 2;
-    cyl(g, 0, cy, 4.9, 0.06, 0.5, 2.6, M.jetGrey, 14).rotation.x = Math.PI / 2;    // nose cone
+    tbox(g, 0, cy, 4.35, 0.92, 0.78, 2.7, { nz: 0.18, tz: 0.98, top: 0.72, bot: 0.66, segD: 6 }, cm(M.jetGrey));
+    const radome = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.95, 10), cm(M.jetGreyD));
+    radome.rotation.x = -Math.PI / 2; radome.position.set(0, cy - 0.01, 6.15); radome.castShadow = true; g.add(radome);
     cyl(g, 0, cy, -4.6, 0.42, 0.5, 2.0, M.jetGreyD, 14).rotation.x = Math.PI / 2;  // afterbody
     mcyl(g, 0, cy, -5.85, 0.3, 0.38, 0.6, GUN, 12).rotation.x = Math.PI / 2;       // nozzle
+    const plume = CBZ.createRocketPlume({ name: "fighter-afterburner", lightRange: 13 });
+    plume.position.set(0, cy, -6.12); g.add(plume); CBZ.setRocketPlume(plume, 0, 0);
+    g.userData.plume = [plume]; g.userData.plumeMat = plume.userData.outerMaterial;
     // glass canopy (tapers to the windscreen) + spine fairing flowing aft
     tbox(g, 0, cy + 0.5, 1.7, 0.72, 0.5, 2.2, { nz: 0.45, tz: 0.85, top: 0.55 }, GLASS);
     tbox(g, 0, cy + 0.38, -1.9, 0.55, 0.45, 4.6, { tz: 0.6 }, cm(M.jetGreyD));
@@ -207,6 +277,13 @@
     [-1, 1].forEach(function (s) {
       wing(g, s * 0.5, cy + 0.05, -0.4, s, 3.9, 3.6, 0.22, 2.2, 0.62, 0.35, M.jetGreyD);
       wing(g, s * 0.45, cy + 0.1, -4.7, s, 1.8, 1.6, 0.16, 1.0, 0.5, 0.3, M.jetGreyD); // tailplane
+      box(g, s * 2.25, cy - 0.25, 0.1, 0.12, 0.18, 1.25, M.jetGreyD); // launch rail
+      const mb = cyl(g, s * 2.25, cy - 0.47, 0.15, 0.10, 0.10, 1.65, 0xd4d9df, 8);
+      mb.rotation.x = Math.PI / 2;
+      const mc = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.38, 8), cm(0xd4d9df));
+      mc.rotation.x = -Math.PI / 2; mc.position.set(s * 2.25, cy - 0.47, 1.16); g.add(mc);
+      box(g, s * 2.25, cy - 0.47, -0.58, 0.54, 0.035, 0.26, M.dark);
+      box(g, s * 2.25, cy - 0.47, -0.58, 0.035, 0.54, 0.26, M.dark);
     });
     // TWIN FINS — a sculpted "wing" stood upright (rotation.z), raked by its
     // sweep, canted outboard; root wedge buried in the afterbody so no float.
@@ -226,6 +303,11 @@
     navBox(g, -4.3, cy + 0.05, -2.55, 0.16, 0xff4a3d);
     navBox(g, 4.3, cy + 0.05, -2.55, 0.16, 0x37d67a);
     navBox(g, 0, cy + 0.45, -5.35, 0.14, 0xf2f4ff);
+    // Exact visible launch socket. The generic fallback multiplied the already
+    // world-sized footprint by this group's 1.5 scale and spawned missiles far
+    // in front of the jet, which looked like no rocket left the aircraft.
+    const muzzle = new THREE.Object3D(); muzzle.position.set(0, cy, 6.48); g.add(muzzle);
+    g.userData.muzzle = muzzle; g.userData.muzzleLocal = muzzle.position.clone();
     const scale = 1.5;
     const dims = { family: "F-22-class", length: 18.6, span: 13.5, height: 5.25 };
     g.scale.setScalar(scale); g.userData.aircraftDims = dims;
@@ -579,17 +661,40 @@
   //   GROUND PLANES — dirt apron over the whole island, tarmac runway/pads.
   // ========================================================================
   function buildGround(root) {
-    // base dirt/tarmac apron (flat at y≈0; engine world is flat, this is visual)
-    const apron = new THREE.Mesh(bg(MAXX - MINX, 0.1, MAXZ - MINZ), cm(M.dirt));
-    apron.position.set(CEN_X, -0.02, CEN_Z); apron.receiveShadow = true; apron.castShadow = false;
+    // One textured plane owns dirt and runway. The former dirt box plus asphalt
+    // box remained overlapping even after their tops were separated by 8cm;
+    // the flight frustum quantised that gap and produced the recurring runway
+    // flicker. Baking the runway into the land skin removes the hidden faces.
+    const W = MAXX - MINX, D = MAXZ - MINZ;
+    const RW_X = CEN_X, RW_Z = MAXZ - 70, RW_L = 360, RW_W = 26;
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1024;
+    const ctx = canvas.getContext("2d");
+    function css(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); }
+    function rect(x, z, w, d, color) {
+      ctx.fillStyle = css(color);
+      ctx.fillRect((x - w / 2 - MINX) / W * canvas.width,
+        (z - d / 2 - MINZ) / D * canvas.height,
+        w / W * canvas.width, d / D * canvas.height);
+    }
+    ctx.fillStyle = css(M.dirt); ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 0.08;
+    for (let z = MINZ; z < MAXZ; z += 34) rect(CEN_X, z + 8, W, 16, 0x8a7754);
+    ctx.globalAlpha = 1;
+    rect(RW_X, RW_Z, RW_L, RW_W, M.runway);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+    const apron = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
+    apron.rotation.x = -Math.PI / 2;
+    apron.position.set(CEN_X, 0, CEN_Z); apron.receiveShadow = true; apron.castShadow = false;
     apron.userData.terrain = true; apron.userData.worldSurface = true;
+    apron.userData.surfaceOwner = "military";
+    apron.userData.unifiedSurface = true;
     apron.name = "military-island-surface";
     root.add(apron);
     // RUNWAY: long tarmac strip down the south part of the island, with
     // centreline dashes (merged into one dash material).
-    const RW_X = CEN_X, RW_Z = MAXZ - 70, RW_L = 360, RW_W = 26;
-    const rw = new THREE.Mesh(bg(RW_L, 0.06, RW_W), cm(M.runway));
-    rw.position.set(RW_X, 0.0, RW_Z); rw.receiveShadow = true; rw.castShadow = false; root.add(rw);
     // dashed centreline via InstancedMesh (frugal repeat)
     const nDash = 18, dashGeo = bg(8, 0.02, 0.6);
     const dim = new THREE.InstancedMesh(dashGeo, cm(M.paint), nDash);
@@ -618,7 +723,7 @@
       CBZ.buildHighway(root, {
         path: [{ x: CW_MINX, z: CW_CZ }, { x: CW_MAXX, z: CW_CZ }],
         width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
-        guardrail: true, elevated: false, rng: rng,
+        guardrail: false, elevated: false, rng: rng,
       });
     } else {
       // ---- fallback: bespoke narrow deck (only if buildHighway absent) ----
@@ -745,6 +850,10 @@
     if (kind) {
       made.group.userData.milKind = kind;
       made.group.userData.milName = name || kind;
+      // Parked hardware can become a live, moving machine under a named pilot.
+      // Keep the authored group out of the static world merger so dispatch can
+      // move THIS helicopter/tank instead of spawning a visual copy.
+      made.group.userData.dynamic = true;
       if (made.aircraftDims) made.group.userData.aircraftDims = made.aircraftDims;
       placed.push({
         group: made.group, pos: made.group.position, heading: rotY || 0,
@@ -911,6 +1020,7 @@
     //   towers) by parking their target on the spot and idling them.
     // ========================================================================
     const troops = [], troopSpecs = [];
+    CBZ.cityMilitaryPersonnel = troops;
     let troopRespawn = -1;
     function spawnTrooper(spec) {
       if (!CBZ.cityMakePed) return null;
@@ -924,6 +1034,8 @@
         : CBZ.cityMakePed(spec.x, spec.z, rng, actorOpts);
       if (p && !CBZ.npcLife) { root.add(p.group); CBZ.cityPeds.push(p); }
       if (p) {
+        p.organization = "military";
+        p.organizationLoyalty = 100;
         troops.push(p);
         if (spec.setup) spec.setup(p);
       }
@@ -1003,6 +1115,7 @@
         for (let i = 0; i < troops.length; i++) {
           const t = troops[i];
           if (!t || t.dead) continue;
+          if (t._milPilot) { t.speed = 0; t.group.visible = false; continue; }
           const combat = !!(t.rage || t.npcWanted || t.state === "fight" || t.state === "flee" || t.state === "shoot");
           if (combat) { t.pause = 0; t.activityState = t.state; continue; }
           if (t._stationed) {
@@ -1025,6 +1138,37 @@
                 if (la) { la.rotation.x = 0; la.rotation.z = 0; }
               }
             }
+          }
+        }
+
+        // Military escalation is deliberately the rare top tier.  Soldiers do
+        // not care about a 1–4 star city police case; at 5★ (or the base's own
+        // incursion floor, which is also 5★) a LIMITED squad receives the order
+        // and physically travels from wherever it was already standing.
+        const stars = (window.CBZ.game && window.CBZ.game.wanted) | 0;
+        const playerActor = CBZ.city && CBZ.city.playerActor;
+        let responders = 0;
+        for (let i = 0; i < troops.length; i++) {
+          const t = troops[i];
+          if (!t || t.dead || t._milPilot) continue;
+          if (t._milResponding) responders++;
+        }
+        if (stars >= 5 && playerActor) {
+          for (let i = 0; i < troops.length && responders < 8; i++) {
+            const t = troops[i];
+            if (!t || t.dead || t._milPilot || t._milResponding) continue;
+            t._milResponding = true; t.rage = playerActor; t.state = "fight";
+            t.pause = 0; t.targetActor = playerActor; t.alarmed = Math.max(t.alarmed || 0, 20);
+            responders++;
+          }
+        } else {
+          for (let i = 0; i < troops.length; i++) {
+            const t = troops[i];
+            if (!t || !t._milResponding) continue;
+            t._milResponding = false;
+            if (t.rage === playerActor) t.rage = null;
+            if (t.targetActor === playerActor) t.targetActor = null;
+            if (!t.dead) { t.state = t._stationed ? "walk" : "idle"; t.pause = 0; }
           }
         }
       });
