@@ -9,7 +9,11 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 #game, #game > canvas { touch-action: none; }
 
 #touch { position: fixed; inset: 0; z-index: 22; pointer-events: none; display: none; }
-#touch button, #tstick { pointer-events: auto; }
+/* Only the on-screen buttons capture touches. The joystick is a WINDOW-level
+   gesture (touch.js listens on window, not on #tstick), so #tstick must NOT
+   capture — an invisible pointer-events:auto disc used to sit over the #interact
+   card and swallow its option taps. It stays pointer-events:none (inherited). */
+#touch button { pointer-events: auto; }
 
 /* dynamic left-thumb joystick (recenters to where you press) */
 #tstick {
@@ -56,6 +60,9 @@ body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height:
 body.touch #interact {
   left: 50%; right: auto; bottom: 168px; margin-left: -118px; width: 236px;
   bottom: calc(168px + env(safe-area-inset-bottom, 0px));
+  /* above the #touch control layer (z-22) so the YES/NO options are always
+     tappable; still below the big city modals (z-40+). */
+  z-index: 30;
   pointer-events: auto; transform: translateY(8px) scale(.96);
 }
 body.touch #interact.show { transform: translateY(0) scale(1); }

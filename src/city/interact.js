@@ -43,7 +43,14 @@
   // reuse dist()/nearest() above as-is). types is an array of type strings
   // ("bin","newsbox",…); pass null/omit to match ANY street prop.
   CBZ.cityNearestStreetProp = function (px, pz, maxd, types) {
-    const list = CBZ.city && CBZ.city.streetProps;
+    // streetProps live on the built ARENA level (props.js furnishes CBZ.city.
+    // arena), exactly like lots live at CBZ.city.arena.lots — the mode wrapper
+    // (CBZ.city) has no streetProps of its own. Read the arena, falling back to
+    // a flat CBZ.city.streetProps for any config that keeps them there. (This
+    // also un-breaks the existing bin/newsbox "Check it" zone, which read the
+    // empty wrapper field and thus never surfaced.)
+    const A = CBZ.city && (CBZ.city.arena || CBZ.city);
+    const list = A && A.streetProps;
     if (!list || !list.length) return null;
     let best = null, bd = (maxd || REACH) * (maxd || REACH);
     for (let i = 0; i < list.length; i++) {

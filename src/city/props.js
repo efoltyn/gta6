@@ -1479,7 +1479,13 @@
       const topG = geo("cageTop", () => new THREE.BoxGeometry(1.4, 0.05, 0.8));
       const topf = new THREE.Mesh(topG, cageBarM); topf.position.y = 0.96; g.add(topf);
       root.add(g);
-      solidCollider(x, z, 0.55, base);
+      // WIRED: point the collider at the GROUP (like every other knockable —
+      // cans/cones/meters), which core/batch.js spares from the city-wide inert
+      // merge (liveGroups). That keeps ALL of the cage's meshes live under one
+      // group so the explosion below can hide the WHOLE cage with g.visible=false
+      // and leave nothing floating. Flag OFF keeps the original base ref (merged
+      // decor) byte-for-byte — the one-line revert.
+      solidCollider(x, z, 0.55, CBZ.CONFIG.PROPS_WIRED_V1 ? g : base);
       city.streetProps.push({ x, z, type: "propane" });
       // PROPS_WIRED_V1: a shot cage COOKS OFF. Register it as a shootable so
       // gunfire (CBZ.cityShootProp → hitProp) whittles its hp and, on the last
