@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="icon" href="data:," />
+<title>PACKAGE DEV HARNESS</title>
+<!-- games/dev.html — boot the REAL engine, mount ONE game package, iterate.
+     Usage:  PORT=8877 python3 tools/devserver.py
+             http://127.0.0.1:8877/games/dev.html?pkg=casino
+     This is the anti-fork: package development happens on the live engine
+     (its renderer, input, NPCs, money, interactions), never in a from-scratch
+     copy. It fetches ../index.html, replays its script tags in order, presses
+     PLAY, then CBZ.games.devMount(<pkg>) on a flat pad at the spawn. -->
+<style>
+  #devhud{position:fixed;left:10px;bottom:10px;z-index:99;color:#ffd977;background:rgba(10,22,17,.8);
+    padding:8px 12px;border-radius:10px;font:700 13px 'Trebuchet MS',Verdana,sans-serif;pointer-events:none;}
+</style>
+</head>
+<body>
+<div id="devhud">loading engine…</div>
+<script>
+(function () {
+  "use strict";
+  var pkg = (location.search.match(/[?&]pkg=([^&]+)/) || [])[1] || "casino";
+  var hud = function (m) { var el = document.getElementById("devhud"); if (el) el.textContent = m; };
+
+  function injectSequential(srcs, done) {
+    var i = 0;
+    (function next() {
+      if (i >= srcs.length) { done(); return; }
+      var s = document.createElement("script");
+      s.src = "../" + srcs[i++];
+      s.onload = next;
+      s.onerror = function () { console.error("dev-harness: failed to load", s.src); next(); };
+      document.body.appendChild(s);
+    })();
+  }
+
+  fetch("../index.html").then(function (r) { return r.text(); }).then(function (html) {
+    // replay the game's own <script src> list, in order (skip nothing: the
+    // engine IS the dependency; forks rot, the real script list can't)
+    var srcs = [];
+    html.replace(/<script src="([^"]+)"><\/script>/g, function (_, src) { srcs.push(src); return _; });
+    // the page shell (canvas containers, HUD nodes) — engine scripts expect index.html's DOM
+    var bodyMatch = html.match(/<body>([\s\S]*?)<script/);
+    if (bodyMatch) {
+      var shell = document.createElement("div");
+      shell.innerHTML = bodyMatch[1];
+      document.body.insertBefore(shell, document.body.firstChild);
+    }
+    hud("engine: " + srcs.length + " scripts…");
+    injectSequential(srcs, function () {
+      hud("booting…");
+      var tries = 0;
+      (function boot() {
+        var b = document.getElementById("playBtn");
+        if (b) b.click();
+        var playing = window.CBZ && CBZ.game && CBZ.game.state === "playing";
+        if (!playing && ++tries < 120) { setTimeout(boot, 400); return; }
+        if (!playing) { hud("engine did not reach playing state"); return; }
+        var ok = CBZ.games && CBZ.games.devMount(pkg);
+        if (ok && CBZ.player) { CBZ.player.x = 0; CBZ.player.z = 6; }
+        hud(ok ? "package '" + pkg + "' mounted — walk in. [" + (CBZ.games.list().join(", ")) + "]"
+               : "unknown package '" + pkg + "' — registered: " + (CBZ.games ? CBZ.games.list().join(", ") : "none"));
+      })();
+    });
+  }).catch(function (e) { hud("failed to fetch index.html: " + e); });
+})();
+</script>
+</body>
+</html>

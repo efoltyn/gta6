@@ -917,6 +917,11 @@
      day one (localStorage-only) behavior is untouched. -->
 <script src="src/net/sqlitedb.js?v=sql1"></script>
 
+<!-- 4b. game packages: engine registry first, then each packaged venue game
+     (after every city system they facade: interactions, worldmap, economy) -->
+<script src="src/core/packages.js?v=pkg1"></script>
+<script src="src/games/casino.js?v=pkg1"></script>
+
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=scale6"></script>
 <script src="src/core/farcull.js?v=fc2"></script>

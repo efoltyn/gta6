@@ -155,6 +155,9 @@
     if (!lot || !lot.building || lot._casinoDressed) return;
     lot._casinoDressed = true;
     try { dressExterior(root, lot); } catch (e) {}
+    // a game package (core/packages.js, order-88 claim) owns this interior —
+    // exterior marquee still ours, interior furniture is the package's.
+    if (lot._gamePkg) return;
     try { dressInterior(lot); } catch (e) {}
   }
 
