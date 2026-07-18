@@ -246,7 +246,11 @@
         const rstream = ctx.stream("npc:" + role + ":" + Math.round(wx) + ":" + Math.round(wz));
 
         // ---- ENGINE PED PATH: the real thing (the point of the shared engine) ----
-        if (CBZ.cityMakePed && CBZ.city && CBZ.city.arena && CBZ.city.arena.root) {
+        // root: packages mount at order 88, DURING buildCity — CBZ.city.arena.root
+        // isn't published yet. The venue group's parent IS that build root (set at
+        // claim time), so build-time npc() calls parent there and never fall back.
+        const pedRoot = (venue.group && venue.group.parent) || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+        if (CBZ.cityMakePed && pedRoot) {
           // outfit directive: a STRING that names an exact catalog fit ("valet",
           // "waiter", "hoodie", "security"…) is PAINTED on after makePed via the
           // shared wardrobe (cityRecolorRig honors its painter/composite); any
@@ -262,7 +266,7 @@
           }
           const ped = CBZ.cityMakePed(wx, wz, rstream, npcOptsFor(role, specForOpts, pinned));
           ped.group.rotation.y = face;
-          CBZ.city.arena.root.add(ped.group);
+          pedRoot.add(ped.group);
           (CBZ.cityPeds || (CBZ.cityPeds = [])).push(ped);
           if (fitRec && CBZ.cityRecolorRig) { try { CBZ.cityRecolorRig(ped.char, fitRec.colors, fitRec); ped._castFit = fitRec.id; } catch (e) {} }
           // PIN posted staff to their station: peds.js's brain respects

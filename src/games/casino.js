@@ -400,11 +400,34 @@
      role, role-relevant outfit, and in-world dialogue. If the engine facade
      hasn't landed yet, each call falls back to today's package-local rig at the
      SAME spot/pose so the venue still boots clean (Rule 1: backward-tolerant).
-     Handles are parked on V.npcs so refs don't leak; teardown is engine-side. */
+     Handles are parked on V.npcs so refs don't leak; teardown is engine-side.
+
+     SPAWN TIMING: real peds need the LIVE arena (brain, gunpoint, death funnel),
+     but a package builds at order 88 — during world-geometry assembly, BEFORE
+     the arena root is published — so a build-time ctx.npc would fall back to a
+     brainless dummy. So we QUEUE the cast at build and DRAIN it once the sim is
+     live: on the first update() tick, or right away if the arena is already up
+     (a world rebuild) or there's no facade at all (a bare harness → rig dummy). */
   function castNPC(ctx, spec, fallback) {
     const h = ctx.npc ? ctx.npc(spec) : (fallback ? fallback() : null);
     if (h && V && V.npcs) V.npcs.push(h);
     return h;
+  }
+  function arenaLive() { return !!(CBZ.city && CBZ.city.arena && CBZ.city.arena.root); }
+  function queueCast(spec, fallback, tag) { if (V && V.pendingCast) V.pendingCast.push({ spec: spec, fallback: fallback, tag: tag }); }
+  function drainCast(ctx) {
+    if (!V || !V.pendingCast) return;
+    const pend = V.pendingCast; V.pendingCast = null;   // null first → idempotent, never double-spawns
+    for (let i = 0; i < pend.length; i++) {
+      const h = castNPC(ctx, pend[i].spec, pend[i].fallback);
+      if (pend[i].tag === "pitboss") V.pitBoss = h;
+      else if (pend[i].tag === "shark") V.shark = h;
+    }
+  }
+  function tryDrainCast(ctx) {
+    if (!V || !V.pendingCast || !V.pendingCast.length) return;
+    if (ctx.npc && !arenaLive()) return;                // real peds need the live arena — wait for a tick
+    drainCast(ctx);
   }
   // Dialogue: [E] Talk cycles these lines via the engine's interaction system.
   // Golden Ace register — the house always wins, politely. Two dealers get
@@ -563,7 +586,7 @@
 
   function buildVenue(ctx, venue) {
     const g = venue.group, PAL = { wood: 0x4a2e1c, woodD: 0x33200f, brass: 0xc9a227, feltG: 0x1c6e46, wine: 0x6e1524, slot: 0x232c38 };
-    V = { bj: [], rl: null, slots: [], gCards: new ctx.THREE.Group(), gChips: new ctx.THREE.Group(), npcs: [], pitBoss: null, shark: null };
+    V = { bj: [], rl: null, slots: [], gCards: new ctx.THREE.Group(), gChips: new ctx.THREE.Group(), npcs: [], pitBoss: null, shark: null, pendingCast: [], _venue: venue };
     g.add(V.gCards); g.add(V.gChips);
     const lot = venue.lot;
     const hx = lot ? Math.max(5, Math.min(8, lot.w / 2 - 1.6)) : 8;
@@ -601,7 +624,7 @@
       }
       const T = { cx, cz, dealerSpot: [cx, 0.94, cz + 0.35], playerSpot: [cx, 0.94, cz - 0.42], splitSpot: [cx + 1.05, 0.94, cz - 0.42], betSpot: [cx, 0.94, cz - 0.72] };
       V.bj.push(T);
-      castNPC(ctx, {
+      queueCast({
         // role "dealer" → the facade dresses house waiter-blacks (the vest-and-collar
         // dealer read) and pins them behind the felt, hands over the table.
         role: "dealer", name: which ? "Dealer Vega" : "Dealer Marchetti",
@@ -644,7 +667,7 @@
       ball.position.set(cx - 1.55, 1.21, cz + 0.72); g.add(ball);
       ctx.solid(cx - 2.7, cz - 1.15, cx + 2.7, cz + 1.15);
       V.rl = { disc, turret, ball, theta: 0, cx: cx - 1.55, cz, by: 1.2 };
-      castNPC(ctx, {
+      queueCast({
         // role "croupier" → house waiter-blacks at the wheel (seeded appearance
         // keeps him a distinct person from the blackjack dealers across the room).
         role: "croupier", name: "Croupier Dubois",
@@ -654,7 +677,7 @@
         const croup = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx, cz + 1.5, Math.PI).deal();
         g.add(croup.g); ctx.idle(croup, 2.4); return croup;
       });
-      V.pitBoss = castNPC(ctx, {
+      queueCast({
         // role "pitboss" → charcoal exec suit (the facade's archetype path); folds
         // his arms over the pit and barks state-keyed lines (pitBossBark, below).
         role: "pitboss", name: "Mr. Calloway", post: "pinned", pose: "foldarms",
@@ -663,7 +686,7 @@
       }, function () {
         const boss = ctx.rig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(cx + 2.6, cz - 0.6, 2.6).fold();
         g.add(boss.g); ctx.idle(boss, 4.1); return boss;
-      });
+      }, "pitboss");
       ctx.zone({ id: "roulette", label: "European Roulette [The Golden Ace]", pos: [cx, cz - 1.9], r: 1.9, onUse: renderRL });
       ctx.light(cx, 3.3, cz, 0xffca72, 0.85, 9);
     }
@@ -702,7 +725,7 @@
       for (let bz = -1.6; bz <= 1.6; bz += 0.3) { if (Math.abs(bz) < 0.5) continue; ctx.cyl(g, cx + 0.6, 1.95, cz + bz, 0.035, 0.035, 1.6, ctx.mat(PAL.brass), 8); }
       ctx.box(g, cx + 0.6, 2.8, cz, 0.16, 0.14, 3.6, ctx.mat(PAL.brass));
       ctx.solid(cx + 0.25, cz - 1.8, cx + 0.95, cz + 1.8);
-      castNPC(ctx, {
+      queueCast({
         // "banker" job-hint → formal business fit (bizRecord) AND a sensible cage
         // occupation: the cage IS the house bank. Formal, distinct from floor staff.
         role: "cashier", name: "Cage — Okafor", outfit: "banker",
@@ -712,7 +735,7 @@
         const cashier = ctx.rig({ shirt: 0xe8dcc0, pants: 0x22262c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx - 0.2, cz, Math.PI / 2);
         g.add(cashier.g); ctx.idle(cashier, 1.1); return cashier;
       });
-      castNPC(ctx, {
+      queueCast({
         // role "guard" → job "security guard" → Guard Blacks, which carry NO cop
         // flag (cityOutfitIsCop stays false), so he never reads as police. Watchful.
         role: "guard", name: "Security",
@@ -737,13 +760,13 @@
       // flavor is delivered via sharkBark() when that panel opens, so the panel
       // always wins the interaction. role "shark" → the facade's high-roller look,
       // seated in the booth.
-      V.shark = castNPC(ctx, {
+      queueCast({
         role: "shark", name: "The Shark", post: "pinned", pose: "sit",
         at: [cx, cz + 0.35], face: Math.PI,
       }, function () {
         const shark = ctx.rig({ shirt: 0x39424e, pants: 0x14100c, skin: 0xb87c4c, hair: 0x555a60, shades: true }).at(cx, cz + 0.35, Math.PI).sit();
         shark.g.position.y -= 0.28; g.add(shark.g); ctx.idle(shark, 5.2); return shark;
-      });
+      }, "shark");
       ctx.zone({ id: "shark", label: "The Shark [The Golden Ace]", pos: [cx, cz - 1.3], r: 1.5, onUse: renderShark });
       ctx.light(cx, 1.7, cz - 0.1, 0xff9a4e, 0.6, 5.5);
     }
@@ -760,8 +783,12 @@
         { at: [hx * 0.7, -hz * 0.05], face: Math.PI * 0.5 },      // by the slot bank
         { at: [hx * 0.28, hz * 0.16], face: Math.PI },            // fronting the wheel
         { at: [-hx * 0.28, -hz * 0.04], face: -Math.PI * 0.5 },   // open floor between tables
-      ].forEach((p) => castNPC(ctx, { role: "patron", at: p.at, face: p.face, post: "ambient" }, null));
+      ].forEach((p) => queueCast({ role: "patron", at: p.at, face: p.face, post: "ambient" }, null));
     }
+    // Spawn the queued cast now if the sim is already live (rebuild) or there's no
+    // facade (bare harness → rig dummies); otherwise the first update() tick drains
+    // it once the arena is published (real peds — see the CAST section note).
+    tryDrainCast(ctx);
   }
 
   /* ======================= REGISTER ======================================= */
@@ -771,7 +798,9 @@
     id: "casino", title: "THE GOLDEN ACE",
     venue: { lotKind: "casino" },
     build(ctx, venue) { C = C || ctx; buildVenue(ctx, venue); buildShoe(); },
-    update() {},
+    // Drain the queued cast into REAL peds on the first live tick (the arena root
+    // is published by now, so ctx.npc requisitions real peds instead of dummies).
+    update(ctx) { if (V && ctx && ctx.venue === V._venue) tryDrainCast(ctx); },
     api: {
       rules: { handValue, settleBJ, rlPayout, slotPay, slotRTP, wheel: WHEEL_ORDER, red: RED_SET, strip: SLOT_STRIP },
       open: () => { if (C) openHub(); },
