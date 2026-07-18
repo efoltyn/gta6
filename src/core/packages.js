@@ -413,10 +413,27 @@
         group.position.set(best.cx, 0, best.cz);
         root.add(group);
         mount(def, { group, origin: { x: best.cx, z: best.cz }, lot: best, kind: "lot" });
+      } else if (def.venue && def.venue.site) {
+        trySiteMount(def, root);
       }
-      // site-venues (ocean etc.) mount only via devMount or a package-provided
-      // resolve hook in a later wave — keep v1 surface small and correct.
     }
+  }
+
+  /* site venues (open water, wilderness…): the package supplies
+     venue.resolve(CBZ) -> { x, z, [waterY], [bounds] } | null. Tried at the
+     order-88 pass and retried lazily from the update tick (some anchors — water
+     level, map edges — only exist after the world finishes building). */
+  function trySiteMount(def, root) {
+    if (live.some((L) => L.def === def)) return;
+    let anchor = null;
+    try { anchor = def.venue.resolve ? def.venue.resolve(CBZ) : null; } catch (_) { anchor = null; }
+    if (!anchor) return;
+    const parent = root || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    if (!parent) return;
+    const group = new THREE.Group();
+    group.position.set(anchor.x || 0, 0, anchor.z || 0);
+    parent.add(group);
+    mount(def, { group, origin: { x: anchor.x || 0, z: anchor.z || 0 }, lot: null, kind: "site", anchor });
   }
 
   /* dev harness: mount ONE package on a flat pad at the origin (games/dev.html) */
@@ -439,10 +456,18 @@
     if (CBZ.addLandmass) CBZ.addLandmass(function (city) { claimAndMount(city); }, 88);
     if (CBZ.onUpdate && CBZ.PRIO) {
       // GAMEPLAY band: package sims tick with the rest of the activity layer
+      let siteRetryT = 0;
       CBZ.onUpdate(CBZ.PRIO.after(CBZ.PRIO.GAMEPLAY, 50), function (dt) {
         animT += dt;
         for (let i = animators.length - 1; i >= 0; i--) { try { if (animators[i](dt, animT) === false) animators.splice(i, 1); } catch (err) { animators.splice(i, 1); console.error("[gamepkg anim]", err); } }
         for (const L of live) { if (L.def.update) { try { L.def.update(L.ctx, dt); } catch (err) { console.error("[gamepkg:" + L.def.id + "] update", err); } } }
+        siteRetryT += dt;
+        if (siteRetryT > 1.2) { // lazy site mounting: anchors may appear only after world build
+          siteRetryT = 0;
+          if (CBZ.CONFIG.GAME_PACKAGES) for (const def of defs) {
+            if (def.venue && def.venue.site && CBZ.CONFIG["PKG_" + def.id.toUpperCase()] !== false) trySiteMount(def, null);
+          }
+        }
       });
     }
   }
