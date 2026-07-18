@@ -52,6 +52,16 @@
   if (CFG.CONTINENT_EXPANSION_V2 == null) CFG.CONTINENT_EXPANSION_V2 = true;
   if (CFG.CONTINENT_COUNTRY_MARGIN == null) CFG.CONTINENT_COUNTRY_MARGIN = 1200;
   if (CFG.CONTINENT_RELIEF_V1 == null) CFG.CONTINENT_RELIEF_V1 = true;
+  // Adopted terrain/forest techniques from the reference generators (see
+  // tools/adoption-terrain-forest.md). Both default ON, one-line revert each.
+  //  RELIEF_EROSION — derivative-damped ("Quilez erosion") octaves + domain
+  //   warp + per-octave domain rotation replace the plain value-fbm hill core
+  //   in countryHeightAt, giving weathered ridgelines and meandering valleys.
+  //  FOREST_V2 — the backcountry dressing becomes an ecological instanced
+  //   forest: squashed-icosphere blob canopy with baked AO, per-instance
+  //   colour, and slope/treeline/clearing rejection sampling.
+  if (CFG.CONTINENT_RELIEF_EROSION == null) CFG.CONTINENT_RELIEF_EROSION = true;
+  if (CFG.CONTINENT_FOREST_V2 == null) CFG.CONTINENT_FOREST_V2 = true;
 
   CBZ.addLandmass(function (city) {
     if (CFG.CITY_CONTINENT === false) return;
