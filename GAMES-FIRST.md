@@ -106,6 +106,27 @@ in isolation — but the package is what ships.
   reference and its gate (rules asserts, rigged rounds, RTP enumeration,
   arc endings, floating-geometry check). The package reuses its exact math.
 
+## Roles, not one-shots (the platform rule)
+
+The owner's framing: this is "Roblox but even more recursive" — the endgame is
+agents composing NEW games from the engine's prebuilt sim and architecture.
+What blocks that today is the one-shot shape: the jail mode and disaster mode
+are *entire simulations* you enter once, not games ON the sim. A game needs
+the sim already standing — then it's just a ROLE, a goal, and an arc:
+
+- jail: be the **inmate** (escape) or the **jailor** (keep order) — same
+  prison sim, two games.
+- ocean: **swim from the sharks** or **be the shark** — same food-chain sim.
+- casino: **beat the house** or (later) **run the pit** — same floor.
+
+A role-package needs almost nothing new: the sim runs, `ctx.npc` casts the
+other side, and the package adds an outfit, a few animations (into the ENGINE
+pose layer), a goal and a scoreboard. That's the whole point of the ctx
+facade — the marginal cost of the *second* game on any sim should be a
+few hundred lines, not a rebuild. When a mode is worth keeping (jail,
+disaster), the migration is: fold its sim into the engine layer, re-ship its
+gameplay as role packages.
+
 ## Domain roadmap (each = one package, one file, same contract)
 
 | id | venue | the game (compressed brief) |
