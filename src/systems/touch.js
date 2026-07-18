@@ -269,6 +269,11 @@
       kind === "animal" ? "Get closer before you try to mount it." :
       kind === "ped" ? "Get closer to talk." : "Get closer to take that vehicle.";
   }
+  // Testability hook: fire a world-tap at screen coordinates (x,y) exactly as a
+  // real tap would, so the headless CDP probes can exercise the tap-to-interact
+  // path directly (a synthesized touchstart/touchend pair is unreliable under
+  // SwiftShader's long frames, which trip touch.js's 330 ms tap window).
+  CBZ.cityTapWorld = tapWorld;
 
   // ---- walk-to-then-trigger --------------------------------------------------
   function startWalk(kind, rec) { walk.on = true; walk.kind = kind; walk.rec = rec; walk.t = 0; }

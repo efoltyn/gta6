@@ -68,6 +68,13 @@ body.touch #interact {
 body.touch #interact.show { transform: translateY(0) scale(1); }
 body.touch .iopt { padding: 7px 4px; }     /* fatter tap targets */
 body.touch .ikey { width: 24px; height: 24px; }
+/* City mode HIDES the #interact card for keyboard players (css/city.css declutter
+   policy: display:none !important — they act with the E/I/J keys + street prose).
+   Touch players have no keys: the tappable YES/NO card is their ONLY way to act on
+   a contextual prompt, so restore it — but ONLY while the interaction system marks
+   it active (.show), so it still follows the same show/hide as everywhere else.
+   Higher specificity + !important beats the city.css hide; desktop is untouched. */
+body.touch.mode-city.state-playing #interact.show { display: block !important; }
 
 /* ---- coarse-pointer (iPad / touch): every pop-up stays pressable ---------- */
 /* touch-action:manipulation removes the 300 ms tap delay + double-tap zoom on
