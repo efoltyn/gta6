@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:," />
+<title>SOUTHPAW PALACE — Fight Night</title>
+<!--
+SOUTHPAW PALACE — one fight-night arc in a small boxing hall. Standalone game,
+built the house way: a complete game FIRST (like cell-block-z was jail before it
+became the city), so the fight system it proves can later move into the arena.
+
+EVERY MAJOR OBJECT AND ITS WHY (no prop without a job):
+  RING (platform+posts+sagging ropes) . the stage; ropes are gameplay — back up
+      too far mid-round and they bounce you back into range (spring + ticker).
+  CORNER STOOLS + BUCKETS ............ between rounds you SIT on yours; the
+      cutman works you over them ($ = health/stamina/swelling). Opp mirrors.
+  JUDGES' TABLE + 3 JUDGE NPCS ....... 10-point-must is real: judges accumulate
+      per-round scores with per-judge noise and physically HOLD UP cards
+      (CanvasTexture "10-9") between rounds. Decisions come from these cards.
+  BELL + BELLMAN ..................... every round start/end is a person
+      swinging a hammer at ringside; the bell flash/sound is his job.
+  LIGHT TRUSS PORTAL (grounded) ...... carries the ring cans + the SpotLight
+      pool: dark hall / bright ring is the whole look. Ground-supported truss
+      (not hung) so the floating-geometry gate can prove connectivity.
+  CROWD RISERS + INSTANCED CROWD ..... two banks that watch the ring; crowd
+      excitement rises per landed punch (bounce) and everyone STANDS on a
+      knockdown. Seated/standing are two instanced meshes swapped live.
+  BELT CASE (glass, by the door) ..... THE GOAL OBJECT, visible from the
+      entrance: win 3 bouts and the case opens; claiming the belt ends the arc.
+  BETTING WINDOW + BOOKIE ............ the economy: bet on YOUR bout at odds
+      from your record, or on the AI undercard bout (same combat sim running
+      live in the ring — watch it ringside, which proves the system is real).
+  WEIGH-IN SCALE (at entry) .......... first walk-on sets your class flavor and
+      names you the southpaw. One-time ritual that starts fight night.
+  EXIT DOOR + CASH-OUT SIGN .......... the third ending: leave between bouts
+      with your money and your health.
+  BANNERS / APRON LOGOS .............. venue identity (Ironjaw League nod) and
+      shot-readability: they tell the camera where it is.
+
+ARC: $200 nobody -> undercard -> co-main -> TITLE. Lose = journeyman ending
+(rematch costs that bout's purse). Leave = cash out. Win 3 = take the belt.
+
+TECH: three.js r128 UMD only (../src/vendor/three.r128.min.js), zero other
+network requests. All textures canvas-generated. Static world merges to TWO
+draw calls (lit vertex-color Lambert + glow Basic). Deterministic geometry via
+mulberry32(fixed seed); ALL gameplay randomness flows through one nextRand()
+funnel with a rig queue (window.__boxing.rig). Fight logic is a pure state
+machine (stepFight) shared by the player bout, the ringside AI undercard and
+the headless simBout(n) used by tools/boxing-check.mjs.
+-->
+<style>
+  :root{
+    --ink:#101318; --gold:#f4c34a; --red:#e2483d; --blue:#3d7de2;
+    --paper:#f2e9d8; --panel:rgba(12,15,22,.82);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;overflow:hidden;background:#07080c;
+    font-family:"Arial Black",Arial,Helvetica,sans-serif;color:#eee;}
+  #game{position:fixed;inset:0;} canvas{display:block;}
+  .panel{background:var(--panel);border:2px solid rgba(244,195,74,.35);
+    border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.55);}
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;user-select:none;}
+  #objective{position:absolute;top:14px;left:14px;max-width:380px;padding:10px 14px;
+    font-size:13px;line-height:1.35;font-weight:700;}
+  #objective .tag{display:block;font-size:10px;letter-spacing:3px;color:var(--gold);margin-bottom:2px;}
+  #cashPill{position:absolute;top:14px;right:14px;padding:9px 14px;font-size:16px;color:var(--gold);}
+  #recPill{position:absolute;top:56px;right:14px;padding:6px 12px;font-size:12px;color:#cfd6e4;}
+  #roundHud{position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;
+    padding:8px 22px;display:none;}
+  #roundHud .rd{font-size:12px;letter-spacing:3px;color:var(--gold);}
+  #roundHud .clk{font-size:26px;font-variant-numeric:tabular-nums;}
+  .fbars{position:absolute;width:min(430px,42vw);}
+  .fbars .nm{font-size:12px;letter-spacing:1px;margin-bottom:3px;display:flex;justify-content:space-between;}
+  .bar{height:13px;border-radius:6px;background:rgba(0,0,0,.55);overflow:hidden;
+    border:1px solid rgba(255,255,255,.18);margin-bottom:4px;}
+  .bar>div{height:100%;width:100%;transition:width .12s linear;}
+  .hp>div{background:linear-gradient(180deg,#ff6a5e,#c22b21);}
+  .st{height:8px;} .st>div{background:linear-gradient(180deg,#ffe08a,#d99b1e);}
+  .kdpips{font-size:11px;color:#ff8a80;letter-spacing:2px;height:13px;}
+  #oppBars{top:76px;right:14px;text-align:right;display:none;}
+  #youBars{bottom:64px;left:14px;display:none;}
+  #swell{font-size:10px;color:#c9a;letter-spacing:1px;}
+  #ticker{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);
+    width:min(720px,90vw);padding:7px 14px;font-size:13px;font-weight:700;
+    color:#ffd; text-align:center;opacity:.95;}
+  #ticker .t2{opacity:.45;font-size:11px;}
+  #prompt{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);
+    padding:8px 16px;font-size:14px;color:#fff;display:none;}
+  #prompt b{color:var(--gold);}
+  #toast{position:absolute;left:50%;top:34%;transform:translate(-50%,-50%);
+    font-size:56px;letter-spacing:4px;color:#fff;opacity:0;pointer-events:none;
+    text-shadow:0 4px 0 #90111d,0 10px 26px rgba(0,0,0,.6);}
+  #toast.pop{animation:tpop 1.15s ease forwards;}
+  @keyframes tpop{0%{opacity:0;transform:translate(-50%,-50%) scale(.6) rotate(-3deg);}
+    16%{opacity:1;transform:translate(-50%,-50%) scale(1.07);}30%{transform:translate(-50%,-50%) scale(1);}
+    82%{opacity:1;}100%{opacity:0;transform:translate(-50%,-58%) scale(1);}}
+  #vig{position:fixed;inset:0;pointer-events:none;transition:box-shadow .3s;}
+  /* ---------- overlays ---------- */
+  .ov{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(4,6,10,.55);z-index:20;pointer-events:auto;}
+  .ov.show{display:flex;}
+  .ov .card{width:min(640px,92vw);padding:22px 26px;}
+  .ov h2{font-size:20px;letter-spacing:2px;color:var(--gold);margin-bottom:10px;}
+  .ov p{font-size:13px;line-height:1.5;font-family:Arial,Helvetica,sans-serif;font-weight:400;}
+  .ov .opt{margin:8px 0;padding:9px 12px;border:1px solid rgba(255,255,255,.2);border-radius:8px;
+    font-size:13px;cursor:pointer;background:rgba(255,255,255,.05);}
+  .ov .opt:hover{background:rgba(244,195,74,.15);}
+  .ov .opt b{color:var(--gold);}
+  .ov .opt.dis{opacity:.35;cursor:default;}
+  table.cards{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px;}
+  table.cards td,table.cards th{border:1px solid rgba(255,255,255,.18);padding:5px 8px;text-align:center;}
+  table.cards th{color:var(--gold);font-size:11px;letter-spacing:1px;}
+  #getup{ text-align:center;}
+  #getupCount{font-size:84px;color:var(--red);text-shadow:0 6px 0 #400;}
+  #getupBarBg{width:320px;height:22px;margin:14px auto;background:rgba(0,0,0,.6);
+    border-radius:8px;position:relative;border:1px solid #666;}
+  #getupZone{position:absolute;top:0;height:100%;background:rgba(80,220,120,.45);border-radius:6px;}
+  #getupMark{position:absolute;top:-4px;width:6px;height:30px;background:#fff;border-radius:3px;}
+  #getupNeed{font-size:13px;color:#cfe;}
+  /* ---------- screens ---------- */
+  .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:30;
+    text-align:center;padding:24px;background:
+    radial-gradient(90% 70% at 50% 20%, #232a3d 0%, #10131d 55%, #05060a 100%);}
+  .screen.hidden{display:none;}
+  .logo{font-size:64px;letter-spacing:6px;color:var(--paper);line-height:.95;
+    text-shadow:0 5px 0 #8e2b23,0 11px 0 #4c130f,0 20px 40px rgba(0,0,0,.7);}
+  .logo small{display:block;font-size:20px;letter-spacing:14px;color:var(--gold);margin-top:8px;}
+  .blurb{max-width:560px;margin:18px auto 6px;font-size:14px;line-height:1.55;color:#cfd6e4;
+    font-family:Arial,Helvetica,sans-serif;}
+  .keys{display:inline-block;margin:14px auto;padding:12px 18px;font-size:12px;line-height:1.8;
+    color:#9fb0c8;text-align:left;font-family:Arial,Helvetica,sans-serif;}
+  .keys b{color:#fff;display:inline-block;min-width:118px;font-family:"Arial Black";}
+  .bigbtn{display:inline-block;margin-top:10px;padding:14px 54px;font-size:22px;letter-spacing:3px;
+    font-family:"Arial Black";color:#1a1206;background:linear-gradient(180deg,#ffd76a,#e2a52e);
+    border:none;border-radius:12px;cursor:pointer;box-shadow:0 6px 0 #8a5d0e,0 12px 26px rgba(0,0,0,.5);}
+  .bigbtn:active{transform:translateY(3px);box-shadow:0 3px 0 #8a5d0e;}
+  .statgrid{display:grid;grid-template-columns:auto auto;gap:4px 26px;margin:16px auto;font-size:14px;
+    text-align:left;width:max-content;font-family:Arial,Helvetica,sans-serif;}
+  .statgrid b{color:var(--gold);font-family:"Arial Black";}
+  #endTitle{font-size:46px;letter-spacing:4px;}
+  .sub{font-size:13px;color:#9fb0c8;margin-top:6px;font-family:Arial,Helvetica,sans-serif;}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+  <div id="objective" class="panel"><span class="tag">FIGHT NIGHT</span><span id="objTxt">Walk in.</span></div>
+  <div id="cashPill" class="panel">$<span id="cashV">200</span></div>
+  <div id="recPill" class="panel">RECORD <span id="recV">0-0</span></div>
+  <div id="roundHud" class="panel"><div class="rd">ROUND <span id="roundV">1</span> / 3</div><div class="clk" id="clockV">1:00</div></div>
+  <div id="oppBars" class="fbars"><div class="nm"><span id="oppKd" class="kdpips"></span><span id="oppNm">OPPONENT</span></div>
+    <div class="bar hp"><div id="oppHp"></div></div><div class="bar st"><div id="oppSt"></div></div></div>
+  <div id="youBars" class="fbars"><div class="nm"><span>YOU — THE SOUTHPAW</span><span id="youKd" class="kdpips"></span></div>
+    <div class="bar hp"><div id="youHp"></div></div><div class="bar st"><div id="youSt"></div></div>
+    <div id="swell"></div></div>
+  <div id="prompt" class="panel"></div>
+  <div id="ticker" class="panel"><div id="tick1">Welcome to the Palace.</div><div class="t2" id="tick2"></div></div>
+  <div id="toast"></div>
+  <div id="vig"></div>
+</div>
+
+<div id="betOv" class="ov"><div class="card panel">
+  <h2>BETTING WINDOW</h2>
+  <p id="betInfo"></p><div id="betRows"></div>
+  <p class="sub">[1]/[2]/[3] pick a line &middot; [-]/[+] stake &middot; [ENTER] place &middot; [E] close</p>
+</div></div>
+
+<div id="cornerOv" class="ov"><div class="card panel">
+  <h2 id="cornerH">YOUR CORNER</h2>
+  <p id="advice"></p><div id="cornerOpts"></div>
+  <p class="sub">[1]/[2]/[3] spend &middot; [SPACE] answer the bell (<span id="cornerT">12</span>s)</p>
+</div></div>
+
+<div id="cardsOv" class="ov"><div class="card panel">
+  <h2 id="cardsH">JUDGES' SCORECARDS</h2><div id="cardsTbl"></div>
+</div></div>
+
+<div id="getupOv" class="ov"><div id="getup">
+  <div id="getupCount">1</div>
+  <div id="getupBarBg"><div id="getupZone"></div><div id="getupMark"></div></div>
+  <div id="getupNeed">Press SPACE in the green — <span id="getupHits">3</span> to rise</div>
+</div></div>
+
+<div id="title" class="screen">
+  <div>
+    <div class="logo">SOUTHPAW<br>PALACE<small>FIGHT NIGHT</small></div>
+    <p class="blurb">You're the undercard nobody with $200 and a wrong-way stance.
+      Three bouts stand between you and the strap in the glass case by the door:
+      the undercard, the co-main, the TITLE. Watch the tells. Slip, counter, get paid —
+      or cash out and walk. Nobody walks.</p>
+    <div class="keys panel">
+      <b>J / K / L / U</b> jab &middot; cross &middot; hook &middot; body<br>
+      <b>SPACE (hold)</b> guard &nbsp;&nbsp; <b>A / D</b> slip left / right (counters do DOUBLE)<br>
+      <b>W / S</b> step in / out &nbsp;&nbsp; <b>E</b> talk / bet / start bouts<br>
+      <b>WASD</b> walk the hall between bouts
+    </div><br>
+    <button id="playBtn" class="bigbtn">FIGHT NIGHT</button>
+  </div>
+</div>
+
+<div id="end" class="screen hidden">
+  <div>
+    <div id="endTitle" class="logo" style="font-size:46px;">&nbsp;</div>
+    <p class="sub" id="endSub"></p>
+    <div class="statgrid panel" style="padding:16px 22px;" id="endStats"></div>
+    <div id="endBtns"></div>
+  </div>
+</div>
+
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>
+/* eslint-disable */
+"use strict";
+// ============================== 1. RANDOM ==================================
+// World geometry: its own fixed stream (byte-identical hall every load).
+// Gameplay: ONE funnel, nextRand(), rig-able from tests via __boxing.rig([..]).
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
+  var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return((t^t>>>14)>>>0)/4294967296;};}
+var grand=mulberry32(0x50A1CE);          // geometry-only stream
+var gameRng=mulberry32(0xB0B0CE);        // gameplay stream behind the funnel
+var RIGQ=[];
+function nextRand(){ if(RIGQ.length) return RIGQ.shift(); return gameRng(); }
+
+// ============================== 2. RULES ===================================
+var RULES={ROUNDS:3, ROUND_SEC:60, KD_LIMIT:3, COUNTER_MULT:2, ST_FLOOR:0.25,
+  ST_FLOOR_DMG:0.5, ST_FLOOR_WU:1.5, EVEN_EPS:2.5, CARD_MIN:7, VIG:94};
+var PUNCH={ // wu=windup s, act=active s, rc=recover s, dmg, st cost, reach, stDmg extra to victim
+  jab:  {wu:0.20, act:0.09, rc:0.24, dmg:3.2, st:4.5, reach:2.05, stDmg:0},
+  cross:{wu:0.32, act:0.10, rc:0.34, dmg:6.0, st:8,   reach:2.0,  stDmg:2},
+  hook: {wu:0.46, act:0.10, rc:0.42, dmg:9.0, st:11,  reach:1.75, stDmg:3},
+  body: {wu:0.36, act:0.10, rc:0.36, dmg:4.5, st:9,   reach:1.85, stDmg:9}};
+var SLIP_DUR=0.42, SLIP_CD=0.6, SLIP_ST=4, COUNTER_WIN=1.15, HITSTUN=0.3;
+var BLOCK_MULT=0.15, BLOCK_BODY_MULT=0.45, REGEN_GUARD=11, REGEN_IDLE=6;
+
+// pure damage/stamina math — exposed to the checker as unit hooks
+function punchDamage(type,opts){opts=opts||{};var p=PUNCH[type];var d=p.dmg;
+  if(opts.counter)d*=RULES.COUNTER_MULT;
+  if(opts.stPct!=null&&opts.stPct<RULES.ST_FLOOR)d*=RULES.ST_FLOOR_DMG;
+  if(opts.pow)d*=opts.pow; return d;}
+function windupMult(stPct){return stPct<RULES.ST_FLOOR?RULES.ST_FLOOR_WU:1;}
+// 10-point-must: winner 10 loser 9 (even 10-10), minus 1 per knockdown suffered
+function tenPointMust(a,b){var ra=10,rb=10;
+  if(Math.abs(a.score-b.score)>=RULES.EVEN_EPS){if(a.score>b.score)rb=9;else ra=9;}
+  ra-=(a.kd||0); rb-=(b.kd||0);
+  return [Math.max(RULES.CARD_MIN,ra),Math.max(RULES.CARD_MIN,rb)];}
+function oddsFromProb(p){p=Math.min(0.92,Math.max(0.08,p));return Math.round(RULES.VIG/p)/100;}
+function payout(stake,odds){return Math.round(stake*odds);}
+
+// ============================== 3. FIGHTERS ================================
+// Personalities: pattern = the sequence they fall in love with (drives both AI
+// and the corner advice), defense/iq = how often they answer your leather.
+var DEFS={
+  you:  {name:"THE SOUTHPAW", short:"you", hp:100, pow:1.0, spd:1.0, chin:1.0, heart:0.85,
+         southpaw:true, trunks:0x2e9e57, skin:0xc98d5f},
+  sonny:{name:'Sonny Malone', short:"Malone", hp:92, pow:0.72, spd:1.08, chin:0.95, heart:0.45,
+         iq:0.30, aggression:0.62, pattern:["jab","jab","cross"], trunks:0x3d7de2, skin:0xe0b08a,
+         blurb:"jab-happy club fighter out of the Ironjaw stable"},
+  kane: {name:'Dee "Cobra" Kane', short:"Kane", hp:104, pow:0.95, spd:1.0, chin:1.0, heart:0.6,
+         iq:0.55, aggression:0.5, pattern:["jab","hook","hook"], counterpuncher:true,
+         trunks:0x8438c9, skin:0x7a4a2a, blurb:"counter-puncher; blocks, then whips hooks"},
+  vega: {name:'Rico "Hammer" Vega', short:"Vega", hp:118, pow:1.3, spd:0.88, chin:1.2, heart:0.8,
+         iq:0.62, aggression:0.7, pattern:["body","hook","cross"], bodyHunter:true,
+         trunks:0xc9a13c, skin:0x9c6b41, blurb:"the champ; breaks bodies, then drops the hammer"},
+  // undercard pair — deliberately mismatched so simBout stats prove out
+  stone:{name:"Marek Stone", short:"Stone", hp:108, pow:1.05, spd:1.02, chin:1.05, heart:0.7,
+         iq:0.55, aggression:0.62, pattern:["jab","cross","hook"], trunks:0xd44a3a, skin:0xd8a878, rating:78},
+  okoro:{name:'Felix "Bricks" Okoro', short:"Okoro", hp:88, pow:0.8, spd:0.86, chin:0.85, heart:0.5,
+         iq:0.28, aggression:0.5, pattern:["cross","cross"], trunks:0x3a66d4, skin:0x6b3d20, rating:46}};
+var BOUTS=[ // steep purse growth; your odds lengthen for the champ
+  {opp:"sonny", label:"UNDERCARD",  purse:400,   youWinProb:0.30},
+  {opp:"kane",  label:"CO-MAIN",    purse:2200,  youWinProb:0.44},
+  {opp:"vega",  label:"TITLE FIGHT",purse:12000, youWinProb:0.32}];
+function oddsFor(boutIdx){return oddsFromProb(BOUTS[boutIdx].youWinProb);}
+
+// ============================== 4. FIGHT CORE ==============================
+// Pure state machine. No THREE, no DOM. Player bout, ringside undercard and
+// headless simBout(n) all run THIS code — one sim, provably.
+function mkSide(defKey,dir){var d=DEFS[defKey];
+  return {key:defKey,def:d,dir:dir, hp:d.hp,hpMax:d.hp, st:100,
+    x:dir*1.35, act:"idle", pT:0, punch:null, resolved:false,
+    slipT:0, slipCd:0, slipDir:0, blockT:0, counterT:0, stunT:0,
+    downT:0, downCount:0, getupOk:false, riseHits:0, kdBout:0, kdRound:0,
+    roundPts:0, headHits:0, swell:0, cutmanLeft:2, aiT:0.4+nextRand()*0.4, patI:0,
+    stats:{thrown:0,landed:0,byType:{jab:0,cross:0,hook:0,body:0},counters:0,kdFor:0}};}
+function mkBout(aKey,bKey,live){
+  return {a:mkSide(aKey,-1), b:mkSide(bKey,1), live:!!live,
+    round:1, clock:RULES.ROUND_SEC, phase:"intro", phaseT:1.4,
+    cards:[[],[],[]], over:false, winner:null, method:null, endRound:0,
+    events:[], time:0};}
+function other(bout,s){return s===bout.a?bout.b:bout.a;}
+function dist(bout){return Math.abs(bout.a.x-bout.b.x);}
+function ev(bout,type,data){bout.events.push({t:type,d:data||{}});}
+
+function startPunch(bout,s,type){var p=PUNCH[type];
+  if(s.act!=="idle"&&s.act!=="block")return false;
+  if(s.st<p.st*0.6)return false;
+  s.act="punch";s.punch=type;s.pT=0;s.resolved=false;
+  s.st=Math.max(0,s.st-p.st);s.stats.thrown++;s.stats.byType[type]++;
+  ev(bout,"throw",{s:s.dir,type:type});return true;}
+function startSlip(bout,s,dir){ if(s.slipCd>0||s.act==="punch"||s.st<SLIP_ST)return false;
+  s.slipT=SLIP_DUR;s.slipCd=SLIP_CD;s.slipDir=dir;s.st-=SLIP_ST;return true;}
+
+function resolvePunch(bout,s){var o=other(bout,s),p=PUNCH[s.punch];
+  var d=dist(bout);
+  if(d>p.reach){ev(bout,"whiff",{s:s.dir,type:s.punch});return;}
+  if(o.act==="down"||o.act==="getup")return;
+  if(o.slipT>0){ // timed slip: clean dodge + counter window
+    o.counterT=COUNTER_WIN; ev(bout,"slip",{s:o.dir,type:s.punch}); return;}
+  var counter=s.counterT>0;
+  var dmg=punchDamage(s.punch,{counter:counter,stPct:s.st/100,pow:s.def.pow});
+  dmg/= (o.def.chin||1);
+  if(o.act==="block"){
+    var m=(s.punch==="body")?BLOCK_BODY_MULT:BLOCK_MULT;
+    o.hp-=dmg*m; o.st=Math.max(0,o.st-(p.stDmg+2.5));
+    o.roundPtsBlockedTaken=(o.roundPtsBlockedTaken||0)+1;
+    s.roundPts+=dmg*m; ev(bout,"blocked",{s:s.dir,type:s.punch});
+  }else{
+    o.hp-=dmg; o.st=Math.max(0,o.st-p.stDmg);
+    o.stunT=HITSTUN; if(o.act==="punch"&&o.pT<PUNCH[o.punch].wu*windupMult(o.st/100)){o.act="idle";o.punch=null;} // counters cancel windups
+    s.stats.landed++; s.roundPts+=dmg;
+    if(counter){s.stats.counters++; s.counterT=0;}
+    if(s.punch!=="body")o.headHits++;
+    ev(bout,"land",{s:s.dir,type:s.punch,dmg:dmg,counter:counter});
+    if(o.hp<=0)knockdown(bout,o);
+  }}
+function knockdown(bout,o){var w=other(bout,o);
+  o.kdBout++;o.kdRound++;o.act="down";o.downT=0;o.downCount=0;o.getupOk=false;o.riseHits=0;
+  o.hp=0; w.stats.kdFor++;
+  ev(bout,"knockdown",{s:o.dir,count:o.kdBout});
+  if(o.kdBout>=RULES.KD_LIMIT){finish(bout,w,"TKO");}}
+function getUp(bout,o){o.act="getup";o.pT=0;
+  o.hp=Math.max(18,o.hpMax*0.28);o.st=Math.min(100,o.st+20);
+  ev(bout,"getup",{s:o.dir});}
+function finish(bout,winSide,method){if(bout.over)return;
+  bout.over=true;bout.phase="over";bout.winner=winSide?(winSide===bout.a?"A":"B"):"draw";
+  bout.method=method;bout.endRound=bout.round;
+  ev(bout,"over",{winner:bout.winner,method:method});}
+
+// judges: per-judge noise via the funnel, then pure 10-point-must
+function judgeRound(bout){var a=bout.a,b=bout.b;
+  for(var j=0;j<3;j++){
+    var na=0.9+0.2*nextRand(),nb=0.9+0.2*nextRand();
+    var c=tenPointMust({score:a.roundPts*na,kd:a.kdRound},{score:b.roundPts*nb,kd:b.kdRound});
+    bout.cards[j].push(c);}
+  ev(bout,"cards",{round:bout.round});
+  a.lastRoundPts=a.roundPts;b.lastRoundPts=b.roundPts;
+  a.lastHeadHits=a.headHits;b.lastHeadHits=b.headHits;
+  if(a.headHits>=7)a.swell=Math.min(3,a.swell+1);
+  if(b.headHits>=7)b.swell=Math.min(3,b.swell+1);
+  a.roundPts=0;b.roundPts=0;a.kdRound=0;b.kdRound=0;a.headHits=0;b.headHits=0;}
+function decide(bout){var ja=0,jb=0;
+  for(var j=0;j<3;j++){var ta=0,tb=0;
+    for(var r=0;r<bout.cards[j].length;r++){ta+=bout.cards[j][r][0];tb+=bout.cards[j][r][1];}
+    if(ta>tb)ja++;else if(tb>ta)jb++;}
+  if(ja>jb)finish(bout,bout.a,ja===3?"UD":"SD");
+  else if(jb>ja)finish(bout,bout.b,jb===3?"UD":"SD");
+  else finish(bout,null,"DRAW");}
+function cardTotals(bout){var out=[];for(var j=0;j<3;j++){var ta=0,tb=0;
+  for(var r=0;r<bout.cards[j].length;r++){ta+=bout.cards[j][r][0];tb+=bout.cards[j][r][1];}
+  out.push([ta,tb]);}return out;}
+
+// AI brain — used by opponents, the undercard pair, and simBout
+function aiStep(bout,s,dt){var o=other(bout,s),d=dist(bout);
+  s.aiT-=dt; if(s.act!=="idle"&&s.act!=="block")return;
+  // read the incoming punch during ITS windup — block or slip by iq
+  if(o.act==="punch"&&o.pT<PUNCH[o.punch].wu*windupMult(o.st/100)){
+    if(s.aiT<=0.12){var r=nextRand();
+      if(r<s.def.iq){ if(nextRand()<(s.def.counterpuncher?0.65:0.35)&&s.slipCd<=0)startSlip(bout,s,nextRand()<0.5?-1:1);
+        else {s.act="block";s.blockT=0.5;} s.aiT=0.24+nextRand()*0.3;return;}}}
+  if(s.aiT>0)return;
+  s.aiT=(0.32+nextRand()*0.38)/(s.def.spd||1);
+  if(s.st<18){s.act="block";s.blockT=0.7;return;} // gas tank management
+  if(s.counterT>0&&d<=1.95){startPunch(bout,s,s.def.counterpuncher?"hook":"cross");return;}
+  if(d>2.05){s.x-=s.dir*Math.min(0.5,(d-1.8))*0.8;return;} // walk them down
+  if(o.act==="punch"&&o.pT>PUNCH[o.punch].wu){return;} // don't trade into active frames
+  var agg=s.def.aggression||0.5;
+  if(nextRand()<agg){var t=s.def.pattern[s.patI%s.def.pattern.length];s.patI++;
+    startPunch(bout,s,t);}
+  else if(nextRand()<0.4){s.act="block";s.blockT=0.35+nextRand()*0.3;}}
+
+function stepFight(bout,dt,inputA){ // inputA: null => side A is AI too
+  if(bout.over)return;
+  bout.time+=dt; bout.a.roundPtsBlockedTaken=0;
+  if(bout.phase==="intro"){bout.phaseT-=dt;if(bout.phaseT<=0){bout.phase="round";ev(bout,"bell",{round:bout.round});}return;}
+  if(bout.phase==="rest"){bout.phaseT-=dt;
+    if(bout.phaseT<=0){bout.round++;bout.clock=RULES.ROUND_SEC;bout.phase="round";
+      restRecover(bout.a);restRecover(bout.b);ev(bout,"bell",{round:bout.round});}return;}
+  if(bout.phase!=="round")return;
+  bout.clock-=dt;
+  var sides=[bout.a,bout.b];
+  for(var i=0;i<2;i++){var s=sides[i],o=sides[1-i];
+    s.slipCd=Math.max(0,s.slipCd-dt); s.counterT=Math.max(0,s.counterT-dt);
+    s.stunT=Math.max(0,s.stunT-dt);
+    if(s.slipT>0){s.slipT-=dt;if(s.slipT<=0)s.slipDir=0;}
+    if(s.act==="down"){s.downT+=dt;
+      var cadence=0.85;
+      var newCount=Math.min(10,1+Math.floor(s.downT/cadence));
+      if(newCount!==s.downCount){s.downCount=newCount;ev(bout,"count",{s:s.dir,n:newCount});
+        if(!bout.live||s!==bout.a){ // AI heart check from count 4
+          if(newCount>=4&&newCount<10&&nextRand()<(s.def.heart||0.5)*(1-0.22*(s.kdBout-1)))s.getupOk=true;}
+        if(s.getupOk&&newCount>=4){getUp(bout,s);continue;}
+        if(newCount>=10){finish(bout,o,"KO");}}
+      continue;}
+    if(s.act==="getup"){s.pT+=dt;if(s.pT>0.8){s.act="idle";s.pT=0;}continue;}
+    if(s.act==="punch"){
+      if(s.stunT>0){} // active/recover frames can't be interrupted; windup cancel handled in resolvePunch
+      var p=PUNCH[s.punch],wu=p.wu*windupMult(s.st/100)/(s.def.spd||1);
+      s.pT+=dt;
+      if(!s.resolved&&s.pT>=wu){s.resolved=true;resolvePunch(bout,s);}
+      if(s.pT>=wu+p.act+p.rc){s.act="idle";s.punch=null;s.pT=0;}
+      continue;}
+    if(s.act==="block"){s.st=Math.min(100,s.st+REGEN_GUARD*dt);
+      if(!s.holdBlock){s.blockT-=dt;if(s.blockT<=0)s.act="idle";}}
+    else if(s.act==="idle"){s.st=Math.min(100,s.st+REGEN_IDLE*dt);}
+    // ring geometry: ropes bounce you back toward center
+    var lim=2.9;
+    if(Math.abs(s.x)>lim){s.x=s.dir*lim; if(!s.ropeCd||s.ropeCd<=0){ev(bout,"ropes",{s:s.dir});s.ropeCd=1.2;}}
+    s.ropeCd=Math.max(0,(s.ropeCd||0)-dt);
+    if(!(bout.live&&s===bout.a))aiStep(bout,s,dt);}
+  if(inputA)inputA(bout,dt);
+  if(bout.clock<=0&&bout.a.act!=="down"&&bout.b.act!=="down"){
+    judgeRound(bout);ev(bout,"bellEnd",{round:bout.round});
+    if(bout.round>=RULES.ROUNDS){decide(bout);}
+    else{bout.phase=bout.live?"cornerWait":"rest";bout.phaseT=bout.live?0:2.0;}}}
+function restRecover(s){s.hp=Math.min(s.hpMax,s.hp+6);s.st=Math.min(100,s.st+35);}
+
+// headless AI-vs-AI sim — the checker's proof that the system is real
+function simBout(n,aKey,bKey){var out=[];n=n||1;
+  for(var i=0;i<n;i++){var bt=mkBout(aKey||"stone",bKey||"okoro",false);
+    var guard=0;
+    while(!bt.over&&guard++<20000)stepFight(bt,1/30,null);
+    out.push({winner:bt.winner,method:bt.method,rounds:bt.endRound||bt.round,
+      cards:bt.cards,totals:cardTotals(bt),
+      statsA:{landed:bt.a.stats.landed,thrown:bt.a.stats.thrown,kd:bt.a.kdBout},
+      statsB:{landed:bt.b.stats.landed,thrown:bt.b.stats.thrown,kd:bt.b.kdBout}});}
+  return out;}
+
+// ============================== 5. THREE SETUP =============================
+var W=window.innerWidth,H=window.innerHeight;
+var renderer=new THREE.WebGLRenderer({antialias:false});
+renderer.setPixelRatio(1);renderer.setSize(W,H);
+document.getElementById("game").appendChild(renderer.domElement);
+var scene=new THREE.Scene();scene.background=new THREE.Color(0x07080c);
+scene.fog=new THREE.Fog(0x07080c,30,70);
+var camera=new THREE.PerspectiveCamera(58,W/H,0.1,120);
+window.addEventListener("resize",function(){W=window.innerWidth;H=window.innerHeight;
+  camera.aspect=W/H;camera.updateProjectionMatrix();renderer.setSize(W,H);});
+// dark hall + one hot pool over the ring = the whole look
+scene.add(new THREE.AmbientLight(0x39404e,0.85));
+var ringSpot=new THREE.SpotLight(0xfff1d8,1.7,26,0.62,0.5,1.1);
+ringSpot.position.set(0,6.1,0);ringSpot.target.position.set(0,1,0);
+scene.add(ringSpot);scene.add(ringSpot.target);
+var caseLight=new THREE.PointLight(0xffd77a,0.9,7,1.6);caseLight.position.set(5.2,2.6,12.8);scene.add(caseLight);
+var betLight=new THREE.PointLight(0x7ad9ff,0.7,8,1.6);betLight.position.set(-9.5,3.0,15.2);scene.add(betLight);
+
+// ============================== 6. WORLD BUILD =============================
+// B() collects boxes; buildMerged() bakes them into ONE lit mesh + ONE glow
+// mesh (SwiftShader-friendly). Every box records its world AABB into PROPS so
+// tools/boxing-check.mjs can run the demolition-style support-chain gate.
+var LIT=[],GLOW=[],PROPS=[],COLS=[];
+var _boxGeos={};
+function boxGeo(w,h,d){var k=w+"_"+h+"_"+d;if(!_boxGeos[k])_boxGeos[k]=new THREE.BoxGeometry(w,h,d);return _boxGeos[k];}
+function B(x,y,z,w,h,d,color,opts){opts=opts||{};
+  var m=new THREE.Matrix4();
+  if(opts.ry){m.makeRotationY(opts.ry);m.setPosition(x,y,z);}else m.makeTranslation(x,y,z);
+  var it={g:boxGeo(w,h,d),m:m,c:new THREE.Color(color)};
+  (opts.glow?GLOW:LIT).push(it);
+  if(!opts.noprop){ // AABB (rotate-aware via corners)
+    var hw=w/2,hh=h/2,hd=d/2,mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];
+    for(var i=0;i<8;i++){var v=new THREE.Vector3(i&1?hw:-hw,i&2?hh:-hh,i&4?hd:-hd).applyMatrix4(m);
+      mn[0]=Math.min(mn[0],v.x);mn[1]=Math.min(mn[1],v.y);mn[2]=Math.min(mn[2],v.z);
+      mx[0]=Math.max(mx[0],v.x);mx[1]=Math.max(mx[1],v.y);mx[2]=Math.max(mx[2],v.z);}
+    PROPS.push({n:opts.name||"box",min:mn,max:mx});
+    if(opts.col)COLS.push({min:mn,max:mx});}}
+function mergeItems(items){var pos=[],nor=[],col=[],idx=[],base=0;
+  var v=new THREE.Vector3(),nm=new THREE.Matrix3();
+  for(var k=0;k<items.length;k++){var it=items[k];
+    var p=it.g.attributes.position,n=it.g.attributes.normal;nm.getNormalMatrix(it.m);
+    for(var i=0;i<p.count;i++){
+      v.fromBufferAttribute(p,i).applyMatrix4(it.m);pos.push(v.x,v.y,v.z);
+      v.fromBufferAttribute(n,i).applyNormalMatrix(nm);nor.push(v.x,v.y,v.z);
+      col.push(it.c.r,it.c.g,it.c.b);}
+    var ix=it.g.index;for(var i2=0;i2<ix.count;i2++)idx.push(base+ix.getX(i2));
+    base+=p.count;}
+  var G=new THREE.BufferGeometry();
+  G.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));
+  G.setAttribute("normal",new THREE.Float32BufferAttribute(nor,3));
+  G.setAttribute("color",new THREE.Float32BufferAttribute(col,3));
+  G.setIndex(idx);return G;}
+
+var HALL={x:23,z:17,h:7.4};
+var RING={cx:0,cz:0,half:4.3,matY:1.02,postR:0.34};
+(function buildWorld(){
+  var g=grand; // deterministic jitter
+  // hall shell
+  B(0,HALL.h/2,-HALL.z-0.3, HALL.x*2+1.2,HALL.h,0.6, 0x232833,{name:"wallN",col:1});
+  B(0,HALL.h/2, HALL.z+0.3, HALL.x*2+1.2,HALL.h,0.6, 0x232833,{name:"wallS",col:1});
+  B(-HALL.x-0.3,HALL.h/2,0, 0.6,HALL.h,HALL.z*2+1.2, 0x20242e,{name:"wallW",col:1});
+  B( HALL.x+0.3,HALL.h/2,0, 0.6,HALL.h,HALL.z*2+1.2, 0x20242e,{name:"wallE",col:1});
+  B(0,HALL.h+0.25,0, HALL.x*2+1.2,0.5,HALL.z*2+1.2, 0x14161d,{name:"ceiling"});
+  // door slab visual (south wall opening is faked with a lit frame + sign)
+  B(0,2.6,HALL.z+0.02, 3.2,4.4,0.28, 0x101319,{name:"doorSlab"});
+  B(0,4.62,HALL.z-0.12, 3.6,0.5,0.24, 0x3aff9d,{glow:1,name:"exitSign"});
+  // ring platform + mat trim + posts + corner pads
+  B(RING.cx,0.5,RING.cz, RING.half*2,1.0,RING.half*2, 0x27447c,{name:"ringPlatform",col:1});
+  var pc=[[-1,-1,0x3d7de2],[1,1,0xe2483d],[-1,1,0xcfd3da],[1,-1,0xcfd3da]];
+  for(var i=0;i<4;i++){var px=pc[i][0]*(RING.half-0.35),pz=pc[i][1]*(RING.half-0.35);
+    B(px,1.0+0.8,pz, RING.postR,1.6,RING.postR, 0x8a919e,{name:"ringPost"});
+    B(px,1.0+0.85,pz, RING.postR+0.14,1.1,RING.postR+0.14, pc[i][2],{name:"cornerPad"});}
+  // sagging ropes: 5 segments per side per height, dip biggest on the bottom
+  var ropeCols=[0xd23b3b,0xe8e4da,0x3d6fd2],ropeY=[2.32,1.95,1.58],dip=[0.07,0.11,0.16];
+  var span=RING.half-0.35;
+  for(var side=0;side<4;side++){
+    for(var rr=0;rr<3;rr++){
+      var y0=ropeY[rr],SEG=5;
+      for(var sgi=0;sgi<SEG;sgi++){
+        var t0=sgi/SEG,t1=(sgi+1)/SEG,tm=(t0+t1)/2;
+        var sag=dip[rr]*Math.sin(Math.PI*tm);
+        var a0=-span+t0*span*2,a1=-span+t1*span*2,am=(a0+a1)/2;
+        var len=(a1-a0)+0.14; // overlap neighbours so the support chain holds
+        if(side<2){var z=side===0?-span:span;
+          B(am,y0-sag,z, len,0.3,0.3, ropeCols[rr],{name:"rope"});}
+        else{var x=side===2?-span:span;
+          B(x,y0-sag,a0+ (a1-a0)/2, 0.3,0.3,len, ropeCols[rr],{name:"rope"});}}}}
+  // ring steps (your corner, SW) — how you climb in
+  B(-RING.half-0.55,0.25,RING.half-0.9, 1.1,0.5,1.3, 0x39404c,{name:"ringStepLo",col:1});
+  B(-RING.half-0.15,0.6,RING.half-0.9, 0.7,0.8,1.3, 0x39404c,{name:"ringStepHi",col:1});
+  // grounded light truss portal straddling the ring (carries the cans)
+  B(0,3.3,-7.6, 0.5,6.6,0.5, 0x3c414c,{name:"trussColN",col:1});
+  B(0,3.3, 7.6, 0.5,6.6,0.5, 0x3c414c,{name:"trussColS",col:1});
+  B(0,6.35,0, 0.5,0.5,15.7, 0x464c58,{name:"trussBeam"});
+  for(var c=0;c<4;c++){var cz=-2.4+c*1.6;
+    B(0,6.0,cz, 0.42,0.4,0.42, 0x23262e,{name:"lightCan"});
+    B(0,5.78,cz, 0.34,0.1,0.34, 0xfff3cf,{glow:1,name:"lightLens"});}
+  // judges' table (west) — three seats behind, cards face the ring
+  B(-7.4,0.85,0, 1.2,0.14,5.2, 0x5c4630,{name:"judgesTop"});
+  B(-7.4,0.4,-2.3, 1.0,0.8,0.3, 0x4a3826,{name:"judgesLegN"});
+  B(-7.4,0.4, 2.3, 1.0,0.8,0.3, 0x4a3826,{name:"judgesLegS"});
+  B(-7.4,0.4, 0,   1.0,0.8,0.3, 0x4a3826,{name:"judgesLegC"});
+  B(-7.4,1.06,0, 1.24,0.3,5.24, 0x233046,{name:"judgesSkirt"});
+  for(var jj=0;jj<3;jj++){B(-8.3,0.3,(jj-1)*1.7, 0.7,0.6,0.7, 0x333945,{name:"judgeChair"});}
+  // bell table + bell (timekeeper station beside the judges)
+  B(-7.2,0.55,3.9, 0.9,1.1,0.9, 0x4a3826,{name:"bellTable",col:1});
+  B(-7.2,1.35,3.9, 0.5,0.5,0.5, 0xd8a83a,{glow:1,name:"bell"});
+  // weigh-in scale just inside the door
+  B(-4.5,0.09,13.6, 1.4,0.18,1.4, 0x39404c,{name:"scalePlate",col:1});
+  B(-4.5,0.95,14.35, 0.24,1.9,0.24, 0x596070,{name:"scalePost"});
+  B(-4.5,1.95,14.28, 0.9,0.6,0.3, 0x11141a,{name:"scaleHead"});
+  B(-4.5,1.95,14.12, 0.66,0.38,0.3, 0x9dff6a,{glow:1,name:"scaleDial"});
+  // belt case — THE goal, sightline from the door
+  B(5.2,0.55,12.8, 1.5,1.1,1.5, 0x2b2f3a,{name:"casePlinth",col:1});
+  B(5.2,1.16,12.8, 1.34,0.12,1.34, 0x777f8e,{name:"caseShelf"});
+  B(5.2,2.24,12.8, 1.5,0.16,1.5, 0x777f8e,{name:"caseLid"});
+  for(var cp=0;cp<4;cp++){B(5.2+(cp&1?0.63:-0.63),1.7,12.8+(cp&2?0.63:-0.63),0.14,1.0,0.14,0x8a919e,{name:"casePost"});}
+  // betting window: booth against the south wall + neon
+  B(-9.5,0.9,16.0, 3.6,1.8,1.6, 0x2c3442,{name:"betBooth",col:1});
+  B(-9.5,1.86,16.0, 3.7,0.16,1.7, 0x3a4address:0,noprop:0}); // (placeholder removed below)
+  B(-9.5,2.9,16.55, 3.0,1.4,0.3, 0x1a1f29,{name:"betSignBack"});
+  B(-9.5,2.9,16.38, 2.6,0.9,0.12, 0x35e0ff,{glow:1,name:"betNeon"});
+  B(-11.1,1.7,16.0, 0.3,3.4,1.5, 0x232a36,{name:"betPostW",col:1});
+  B(-7.9,1.7,16.0, 0.3,3.4,1.5, 0x232a36,{name:"betPostE",col:1});
+  // crowd risers: EAST bank (4 steps) and NORTH bank (4 steps)
+  for(var s2=0;s2<4;s2++){
+    B(12.6+s2*2.5,0.31+s2*0.62/1+ s2*0, 0, 2.5,0.62+s2*0.62,22, 0x262b36,{name:"riserE"+s2,col:1});
+    B(0,0.31+0,-12.4-s2*1.9, 24,0.62+s2*0.62,1.9, 0x262b36,{name:"riserN"+s2,col:1,y:0});}
+  // stools + buckets live as DYNAMIC props (moved between rounds) — built later
+})();
+</script>
+<script>
+"use strict";
+throw new Error("placeholder");
+</script>
+</body>
+</html>

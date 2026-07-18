@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:," />
+<title>APEX NIGHT — Diamond Island Speedway</title>
+<!-- ============================================================
+  APEX NIGHT — a complete racing game in one file.
+  Same method that built this repo: cell-block-z.original.html was JAIL
+  as its own finished game before it became the city. This is RACING as
+  its own finished game before it becomes the speedway's race night.
+  Lore matches the city: Diamond Island Speedway, the championship
+  roster of racing.js (Voss, Mercer, Royce, ...) under the floodlights.
+
+  Every object answers WHY (the rule: no answer, no prop):
+    track ribbon + curbs   -> the racing surface; curbs mark the apexes
+                              the AI racing line actually clips
+    edge glow studs        -> night track readability at speed
+    braking boards (3/2/1) -> braking points are a core skill; boards
+                              give you the reference the AI already has
+    start gantry           -> runs the REAL F1 sequence (5 lights x 1s +
+                              held pause); throttle before lights-out is
+                              a JUMP START: +5s penalty
+    tire walls             -> SOFT collision on corner exits (less damage
+                              than concrete wall); concrete elsewhere
+    pit lane + boxes       -> the one strategy call: ~5s lost for fresh
+                              tires; you must STOP in YOUR lit box
+    timing tower (3D+HUD)  -> live positions/gaps/laps every frame
+    bookmaker booth        -> takes the side bet on yourself at odds set
+                              by your grid slot (camera visits it to bet)
+    grandstand + crowd     -> REACTS: wave + roar on any pass for P1 and
+                              at the finish; the stand earns its seats
+    podium + trophy        -> race wins get a ceremony; champion gets
+                              the night
+    floodlight masts       -> why you can race at night at all
+    minimap                -> position tracker readability
+  CUT by the same rule: fuel rigs (no refuel mechanic), marshals with
+  flags (no flag rules beyond the start), big-screen TV (tower already
+  shows the race), skid-mark decals (squeal + wear carry the feel).
+
+  THE ARC — one race night, three races, seven named rivals:
+    garage (3 car classes, honestly different) -> entry fee -> one
+    flying qualifying lap -> side bet at grid odds -> lights -> 5 laps
+    of slipstream, tire wear, damage and one optional pit stop ->
+    purse by finish -> points -> podium if you win.
+    WIN  = most points after race 3: champion + $1200 bonus.
+    LOSE = broke (can't pay entry / bust) or outpointed at the end.
+    LEAVE= cash out between races and walk.
+
+  Tech: three.js r128 (vendored UMD global; the ONLY external file),
+  no CDN, no fonts, no images — all textures canvas-generated. World
+  geometry is deterministic (mulberry32 fixed seed); ALL gameplay
+  randomness flows through ONE nextRand() funnel with a rig queue so
+  the check tool can script outcomes. Static geometry is merged into
+  a handful of vertex-coloured buckets (SwiftShader-friendly), with a
+  per-box prop registry so the floating-geometry AABB gate can prove
+  every member is support-connected to the ground.
+  Debug API: window.__racing (state/warp/aim/props/rig/tick/simRace...).
+  Gate: node tools/racing-check.mjs
+============================================================ -->
+<style>
+  :root{
+    --ink:#0b0e16; --panel:rgba(10,14,24,.82); --line:rgba(120,160,255,.22);
+    --neon:#5ad1ff; --amber:#ffb45e; --gold:#e8b64c; --red:#ff5a5a; --grn:#59e08b;
+    --font:"Segoe UI",system-ui,Verdana,sans-serif;
+    --mono:ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#05070e;font-family:var(--font);color:#e8eefc}
+  #game{position:fixed;inset:0} canvas{display:block}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(4px)}
+  #hud{position:fixed;inset:0;pointer-events:none;user-select:none}
+
+  /* top-left: phase / objective */
+  #phaseCard{position:absolute;top:14px;left:14px;padding:10px 14px;max-width:min(46vw,420px)}
+  #phaseCard .tag{font-size:10px;font-weight:800;letter-spacing:2.6px;color:var(--neon);text-transform:uppercase}
+  #phaseCard .body{font-size:14px;font-weight:600;line-height:1.35;margin-top:2px}
+
+  /* top-right: cash + night */
+  #topRight{position:absolute;top:14px;right:14px;display:flex;gap:8px}
+  #topRight .pill{padding:8px 13px;font-weight:800;font-size:15px}
+  #cashPill{color:var(--gold)} #racePill{color:#bcd2ff}
+
+  /* timing tower */
+  #tower{position:absolute;left:14px;top:96px;padding:8px 10px;font-family:var(--mono);font-size:12px;line-height:1.55;min-width:172px;display:none}
+  #tower .hd{font-weight:800;color:var(--amber);letter-spacing:1px;font-size:11px;margin-bottom:3px}
+  #tower .row{display:flex;gap:7px;white-space:pre}
+  #tower .row.you{color:var(--neon);font-weight:800}
+  #tower .row .p{width:20px;color:#7f92b8} #tower .row .n{width:38px} #tower .row .g{flex:1;text-align:right;color:#9fb4dd}
+
+  /* bottom center: speed + bars + lap */
+  #drive{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:none;align-items:flex-end;gap:14px}
+  #speedBox{padding:8px 16px;text-align:center}
+  #speedNum{font-size:34px;font-weight:900;font-family:var(--mono);line-height:1}
+  #speedLbl{font-size:10px;letter-spacing:2px;color:#7f92b8}
+  .meter{width:130px;padding:7px 10px}
+  .meter .lbl{display:flex;justify-content:space-between;font-size:10px;letter-spacing:1.4px;color:#7f92b8;font-weight:700}
+  .meter .bar{height:7px;border-radius:4px;background:#141a2a;margin-top:4px;overflow:hidden}
+  .meter .bar i{display:block;height:100%;width:0%;border-radius:4px;background:var(--grn);transition:width .2s}
+  #lapBox{padding:8px 14px;font-family:var(--mono);font-size:12px;line-height:1.5;text-align:right}
+  #posBig{font-size:26px;font-weight:900;color:var(--neon)}
+
+  /* center banner + hint */
+  #banner{position:absolute;left:50%;top:22%;transform:translateX(-50%);padding:10px 26px;font-size:24px;font-weight:900;letter-spacing:1px;opacity:0;transition:opacity .25s;text-align:center}
+  #banner.show{opacity:1}
+  #hint{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);padding:8px 16px;font-weight:700;font-size:14px;opacity:0;transition:opacity .2s;white-space:nowrap}
+  #hint.show{opacity:1}
+
+  /* minimap */
+  #mapWrap{position:absolute;right:14px;bottom:14px;padding:6px;display:none}
+  #minimap{display:block;width:150px;height:150px}
+
+  /* modal overlays (title / garage / bet / results / endings) */
+  .overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 38%,rgba(10,16,34,.62),rgba(4,6,12,.9));pointer-events:auto;z-index:5}
+  .overlay.show{display:flex}
+  .sheet{max-width:760px;width:min(92vw,760px);padding:26px 30px;text-align:center}
+  .logo{font-size:56px;font-weight:900;letter-spacing:6px;line-height:1;background:linear-gradient(180deg,#9fe2ff 0%,#3f9fff 55%,#c66bff 100%);-webkit-background-clip:text;background-clip:text;color:transparent;text-shadow:0 0 34px rgba(80,160,255,.35)}
+  .logoSub{font-size:12px;letter-spacing:6px;color:var(--amber);font-weight:800;margin-top:6px}
+  .blurb{margin:16px auto 4px;font-size:15px;line-height:1.5;color:#c4d4f4;max-width:560px}
+  .keys{margin:14px auto 2px;font-family:var(--mono);font-size:12.5px;color:#8fa5cc;line-height:1.7}
+  .btn{pointer-events:auto;cursor:pointer;border:1px solid rgba(120,180,255,.5);background:linear-gradient(180deg,#12325e,#0b1c38);color:#eaf3ff;font-weight:800;font-size:16px;letter-spacing:1.6px;border-radius:9px;padding:12px 34px;margin-top:18px}
+  .btn:hover{filter:brightness(1.25)}
+  .btn.small{font-size:13px;padding:9px 18px;margin:8px 6px 0}
+  .btn.gold{border-color:rgba(232,182,76,.6);background:linear-gradient(180deg,#5e4712,#38290b);color:#ffe9b0}
+  .btn.red{border-color:rgba(255,110,110,.5);background:linear-gradient(180deg,#5e1212,#380b0b);color:#ffd2d2}
+  .btn:disabled{opacity:.35;cursor:default}
+  h2.ovTitle{font-size:26px;font-weight:900;letter-spacing:2px;margin-bottom:4px}
+  .sub{color:#8fa5cc;font-size:13px;margin-bottom:12px}
+  .cards{display:flex;gap:14px;justify-content:center;margin-top:14px}
+  .card{flex:1;max-width:210px;padding:14px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(16,24,44,.65);cursor:pointer;pointer-events:auto}
+  .card.sel{border-color:var(--neon);box-shadow:0 0 18px rgba(90,209,255,.25)}
+  .card h3{font-size:16px;letter-spacing:1px} .card .cls{font-size:10px;letter-spacing:2px;color:var(--amber);font-weight:800;margin-bottom:8px}
+  .stat{display:flex;align-items:center;gap:6px;font-size:10px;color:#8fa5cc;margin-top:5px;font-weight:700}
+  .stat b{width:30px;text-align:left} .stat .sb{flex:1;height:5px;background:#141a2a;border-radius:3px;overflow:hidden}
+  .stat .sb i{display:block;height:100%;background:var(--neon)}
+  table.res{margin:12px auto 0;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+  table.res td,table.res th{padding:3px 12px;text-align:left}
+  table.res tr.you td{color:var(--neon);font-weight:800}
+  table.res th{color:#7f92b8;font-size:10px;letter-spacing:1.6px}
+  .statGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+  .statGrid .sg{padding:10px 6px;border:1px solid var(--line);border-radius:8px}
+  .statGrid .v{font-size:22px;font-weight:900;font-family:var(--mono)} .statGrid .k{font-size:9px;letter-spacing:1.8px;color:#7f92b8;font-weight:800;margin-top:2px}
+  .verdict{font-size:44px;font-weight:900;letter-spacing:4px}
+  .verdict.win{color:var(--gold);text-shadow:0 0 30px rgba(232,182,76,.5)}
+  .verdict.lose{color:var(--red)} .verdict.leave{color:var(--neon)}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+  <div id="phaseCard" class="panel"><div class="tag" id="phaseTag">APEX NIGHT</div><div class="body" id="phaseBody">—</div></div>
+  <div id="topRight">
+    <div class="pill panel" id="cashPill">$0</div>
+    <div class="pill panel" id="racePill">RACE 1/3</div>
+  </div>
+  <div id="tower" class="panel"><div class="hd" id="towerHd">TIMING</div><div id="towerRows"></div></div>
+  <div id="drive">
+    <div id="lapBox" class="panel"><div id="posBig">P8</div><div id="lapLine">LAP 1/5</div><div id="timeLine">--:--.-</div><div id="bestLine">BEST --.-</div></div>
+    <div id="speedBox" class="panel"><div id="speedNum">0</div><div id="speedLbl">KM/H</div></div>
+    <div>
+      <div class="meter panel"><div class="lbl"><span>TIRES</span><span id="tireVal">100%</span></div><div class="bar"><i id="tireBar"></i></div></div>
+      <div class="meter panel" style="margin-top:8px"><div class="lbl"><span>DAMAGE</span><span id="dmgVal">0%</span></div><div class="bar"><i id="dmgBar" style="background:var(--red)"></i></div></div>
+    </div>
+  </div>
+  <div id="banner" class="panel"></div>
+  <div id="hint" class="panel"></div>
+  <div id="mapWrap" class="panel"><canvas id="minimap" width="150" height="150"></canvas></div>
+</div>
+
+<!-- TITLE -->
+<div id="ovTitle" class="overlay show"><div class="sheet panel">
+  <div class="logo">APEX NIGHT</div>
+  <div class="logoSub">DIAMOND ISLAND SPEEDWAY</div>
+  <div class="blurb">One night. Three races. Seven named rivals under the floodlights.
+    Qualify, bet on yourself at the booth, nurse your tires, use the tow —
+    take the championship purse or go home broke.</div>
+  <div class="keys">W / &uarr; throttle &nbsp;&middot;&nbsp; S / &darr; brake &nbsp;&middot;&nbsp; A D / &larr; &rarr; steer<br/>
+    R recover to track &nbsp;&middot;&nbsp; M mute &nbsp;&middot;&nbsp; ENTER confirm menus<br/>
+    Pit: turn into the lit pit lane on the main straight, stop in YOUR box.</div>
+  <button class="btn" id="playBtn">START RACE NIGHT</button>
+</div></div>
+
+<!-- GARAGE -->
+<div id="ovGarage" class="overlay"><div class="sheet panel">
+  <h2 class="ovTitle">PICK YOUR CAR</h2>
+  <div class="sub" id="garageSub">Entry fee $250 — Race 1 of 3</div>
+  <div class="cards" id="classCards"></div>
+  <button class="btn" id="garageGo">PAY ENTRY &amp; QUALIFY</button>
+  <div><button class="btn small red" id="garageLeave" style="display:none">CASH OUT &amp; LEAVE</button></div>
+</div></div>
+
+<!-- BET -->
+<div id="ovBet" class="overlay"><div class="sheet panel">
+  <h2 class="ovTitle">THE BOOKMAKER'S BOOTH</h2>
+  <div class="sub" id="betSub">—</div>
+  <div id="betBtns"></div>
+  <div class="sub" style="margin-top:12px">A win pays stake &times; odds. Anything else loses the stake.</div>
+</div></div>
+
+<!-- RESULTS -->
+<div id="ovResults" class="overlay"><div class="sheet panel">
+  <h2 class="ovTitle" id="resTitle">RACE RESULT</h2>
+  <div class="sub" id="resSub"></div>
+  <div id="resTable"></div>
+  <button class="btn" id="resNext">CONTINUE</button>
+</div></div>
+
+<!-- INTERMISSION -->
+<div id="ovInter" class="overlay"><div class="sheet panel">
+  <h2 class="ovTitle">CHAMPIONSHIP STANDINGS</h2>
+  <div class="sub" id="interSub"></div>
+  <div id="interTable"></div>
+  <button class="btn gold" id="interNext">NEXT RACE</button>
+  <button class="btn small red" id="interLeave">CASH OUT &amp; LEAVE</button>
+</div></div>
+
+<!-- ENDING -->
+<div id="ovEnd" class="overlay"><div class="sheet panel">
+  <div class="verdict" id="endVerdict">—</div>
+  <div class="sub" id="endSub" style="margin-top:6px"></div>
+  <div class="statGrid" id="endStats"></div>
+  <button class="btn" id="endRestart">RACE ANOTHER NIGHT</button>
+</div></div>
+
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>
+(function () {
+"use strict";
+/* ============================ 0. RNG ================================= */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+var worldRand = mulberry32(0x51CEB07);          // geometry/liveries: NEVER gameplay
+var _gameRand = mulberry32(0x9E3779B9), _rig = [];
+function nextRand(){ return _rig.length ? _rig.shift() : _gameRand(); } // THE gameplay funnel
+var clamp=function(v,a,b){return v<a?a:(v>b?b:v);}, lerp=function(a,b,t){return a+(b-a)*t;};
+function angDiff(a,b){var d=a-b;while(d>Math.PI)d-=Math.PI*2;while(d<-Math.PI)d+=Math.PI*2;return d;}
+function fmtT(t){ if(t==null||!isFinite(t))return"--.-"; var m=Math.floor(t/60),s=t-m*60; return (m>0?m+":":"")+(s<10&&m>0?"0":"")+s.toFixed(2); }
+
+/* ============================ 1. CONSTANTS ============================ */
+var CLASSES=[ // three genuinely different hands
+  {id:0,name:"VANDAL GT",  cls:"MUSCLE",  top:57, accel:14.5, brake:17.5, grip:0.88, tireUse:1.25, color:0xc0392b, accent:0xf2b133,
+   blurb:"Monster straight-line pace. Greasy in the corners, eats tires."},
+  {id:1,name:"COMET S",    cls:"BALANCED",top:53, accel:13.0, brake:19.5, grip:1.00, tireUse:1.0,  color:0x2f7fd6, accent:0xeef2f6,
+   blurb:"Honest all-rounder. Fast everywhere, spectacular nowhere."},
+  {id:2,name:"KESTREL R",  cls:"GRIP",    top:49, accel:12.0, brake:21.5, grip:1.14, tireUse:0.85, color:0x8a46e8, accent:0x2ec4d6,
+   blurb:"Corner-speed scalpel. Gentle on rubber, hungry for apexes."}];
+var ROSTER=[ // championship names straight from the city's racing.js lore
+  {name:"Dario Voss", code:"VOS", team:0xc0392b, accent:0xf2b133, skill:0.97},
+  {name:"Kai Mercer", code:"MER", team:0x1b6ec8, accent:0xeef2f6, skill:0.95},
+  {name:"Lena Royce", code:"ROY", team:0x6a2bd6, accent:0x2ec4d6, skill:0.93},
+  {name:"Tomas Reyes",code:"REY", team:0x2ba24a, accent:0xf2e23a, skill:0.91},
+  {name:"Nico Bishop",code:"BIS", team:0xd66a2e, accent:0x101317, skill:0.90},
+  {name:"Aria Stone", code:"STO", team:0x272b33, accent:0xc0392b, skill:0.88},
+  {name:"Sasha Kerr", code:"KER", team:0xdfe4ec, accent:0x14171f, skill:0.86}];
+var ECON={ startCash:600, entry:250, purse:[700,400,250,120,60,0,0,0],
+  odds:[1.8,2.4,3.2,4.0,5.0,6.5,8.0,10.0], stakes:[0,100,200,400],
+  points:[10,7,5,3,2,1,0,0], championBonus:1200,
+  settleBet:function(stake,grid,pos){ return pos===1 ? Math.round(stake*ECON.odds[clamp(grid-1,0,7)]) : 0; } };
+var LAPS=5, RACES=3, HW=6.5;                    // half track width
+var PIT_VMAX=24, PIT_STOP_T=2.2;
+var JUMP_PENALTY=5;
+
+/* ============================ 2. THREE SETUP ========================== */
+var W_W=window.innerWidth, W_H=window.innerHeight;
+var renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:"low-power"});
+renderer.setSize(W_W,W_H); renderer.setPixelRatio(1);
+document.getElementById("game").appendChild(renderer.domElement);
+var scene=new THREE.Scene();
+scene.background=new THREE.Color(0x05070e);
+scene.fog=new THREE.Fog(0x05070e, 190, 640);
+var camera=new THREE.PerspectiveCamera(62, W_W/W_H, 0.3, 900);
+camera.position.set(-35,4,-20);
+window.addEventListener("resize",function(){ W_W=window.innerWidth;W_H=window.innerHeight; camera.aspect=W_W/W_H; camera.updateProjectionMatrix(); renderer.setSize(W_W,W_H); });
+scene.add(new THREE.HemisphereLight(0x2b3f66,0x0b0d12,0.85));
+var amb=new THREE.AmbientLight(0x1d2536,0.7); scene.add(amb);
+var dir1=new THREE.DirectionalLight(0xdfe8ff,0.85); dir1.position.set(120,220,60); scene.add(dir1);
+var dir2=new THREE.DirectionalLight(0xffd9a0,0.32); dir2.position.set(-160,180,-120); scene.add(dir2);
+// stars (Points — not a mesh, exempt from the float gate by nature)
+(function(){ var n=420,p=new Float32Array(n*3);
+  for(var i=0;i<n;i++){var a=worldRand()*Math.PI*2,r=250+worldRand()*420;p[i*3]=Math.cos(a)*r;p[i*3+1]=110+worldRand()*300;p[i*3+2]=Math.sin(a)*r;}
+  var g=new THREE.BufferGeometry(); g.setAttribute("position",new THREE.BufferAttribute(p,3));
+  scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xbfd2ff,size:1.6,sizeAttenuation:false})));})();
+
+/* =================== 3. MERGED BUILDER + PROP REGISTRY ================ */
+var PROPS=[];                                   // {name,min:[3],max:[3]} static boxes
+var _buckets={};                                // colorKey -> {pos:[],nor:[],col:[]}
+var _emitBuckets={};                            // emissive merges
+var _tmpM=new THREE.Matrix4(), _tmpQ=new THREE.Quaternion(), _tmpE=new THREE.Euler(), _one=new THREE.Vector3(1,1,1);
+function _pushGeo(bucket,geo,m,color){
+  var g=geo.toNonIndexed(); g.applyMatrix4(m);
+  var p=g.attributes.position.array, n=g.attributes.normal.array;
+  var c=new THREE.Color(color), i;
+  for(i=0;i<p.length;i++) bucket.pos.push(p[i]);
+  for(i=0;i<n.length;i++) bucket.nor.push(n[i]);
+  for(i=0;i<p.length/3;i++){ bucket.col.push(c.r,c.g,c.b); }
+  g.dispose();
+}
+function _bucket(map,key){ return map[key]||(map[key]={pos:[],nor:[],col:[],key:key}); }
+// register + merge one chunky box. ry = yaw. emissive: {c,i} routes to a glow bucket.
+function pbox(name,w,h,d,x,y,z,color,ry,emissive){
+  var geo=new THREE.BoxGeometry(w,h,d);
+  _tmpE.set(0,ry||0,0); _tmpQ.setFromEuler(_tmpE);
+  _tmpM.compose(new THREE.Vector3(x,y,z),_tmpQ,_one);
+  if(emissive) _pushGeo(_bucket(_emitBuckets,emissive.c+"_"+emissive.i),geo,_tmpM,emissive.c);
+  else _pushGeo(_bucket(_buckets,"static"),geo,_tmpM,color);
+  // conservative AABB of the rotated box
+  var ca=Math.abs(Math.cos(ry||0)), sa=Math.abs(Math.sin(ry||0));
+  var ex=(w*ca+d*sa)/2, ez=(w*sa+d*ca)/2;
+  PROPS.push({name:name,min:[x-ex,y-h/2,z-ez],max:[x+ex,y+h/2,z+ez]});
+  geo.dispose();
+}
+function pcyl(name,rT,rB,h,x,y,z,color,emissive){
+  var geo=new THREE.CylinderGeometry(rT,rB,h,8);
+  _tmpM.makeTranslation(x,y,z);
+  if(emissive) _pushGeo(_bucket(_emitBuckets,emissive.c+"_"+emissive.i),geo,_tmpM,emissive.c);
+  else _pushGeo(_bucket(_buckets,"static"),geo,_tmpM,color);
+  var r=Math.max(rT,rB);
+  PROPS.push({name:name,min:[x-r,y-h/2,z-r],max:[x+r,y+h/2,z+r]});
+  geo.dispose();
+}
+function finalizeBuckets(){
+  Object.keys(_buckets).forEach(function(k){
+    var b=_buckets[k],g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.Float32BufferAttribute(b.pos,3));
+    g.setAttribute("normal",new THREE.Float32BufferAttribute(b.nor,3));
+    g.setAttribute("color",new THREE.Float32BufferAttribute(b.col,3));
+    scene.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true})));
+  });
+  Object.keys(_emitBuckets).forEach(function(k){
+    var b=_emitBuckets[k],g=new THREE.BufferGeometry();
+    g.setAttribute("position",new THREE.Float32BufferAttribute(b.pos,3));
+    g.setAttribute("normal",new THREE.Float32BufferAttribute(b.nor,3));
+    var parts=k.split("_"),c=parseInt(parts[0],10),ei=parseFloat(parts[1]);
+    scene.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({color:c,emissive:c,emissiveIntensity:ei})));
+  });
+  _buckets={}; _emitBuckets={};
+}
+
+/* ============================ 4. THE TRACK ============================ */
+var PTS=[[-140,0],[-60,0],[10,0],[70,0],[115,8],[145,35],[152,78],[140,108],[105,122],
+ [40,124],[-25,122],[-68,132],[-82,158],[-88,185],[-102,205],[-124,206],[-134,185],
+ [-130,150],[-128,112],[-138,82],[-158,66],[-184,58],[-197,40],[-196,18],[-180,4]];
+var curve=new THREE.CatmullRomCurve3(PTS.map(function(p){return new THREE.Vector3(p[0],0,p[1]);}),true,"catmullrom",0.5);
+var NS=420, S=[], TRACKLEN=0;
+(function buildSamples(){
+  var raw=[],i;
+  for(i=0;i<NS;i++){ var t=i/NS,p=curve.getPointAt(t),tg=curve.getTangentAt(t);
+    raw.push({x:p.x,z:p.z,tx:tg.x,tz:tg.z,nx:-tg.z,nz:tg.x}); } // n = RIGHT of travel
+  // rotate so index 0 == start/finish (nearest sample to x=-35,z=0 on the straight)
+  var best=0,bd=1e9;
+  for(i=0;i<NS;i++){var d=(raw[i].x+35)*(raw[i].x+35)+raw[i].z*raw[i].z; if(d<bd){bd=d;best=i;}}
+  for(i=0;i<NS;i++) S.push(raw[(best+i)%NS]);
+  var cum=0;
+  for(i=0;i<NS;i++){ S[i].s=cum; var j=(i+1)%NS,dx=S[j].x-S[i].x,dz=S[j].z-S[i].z; cum+=Math.hypot(dx,dz); }
+  TRACKLEN=cum;
+  for(i=0;i<NS;i++){ // curvature: signed yaw rate per meter
+    var a=S[(i-2+NS)%NS],b=S[(i+2)%NS];
+    var ya=Math.atan2(a.tx,a.tz),yb=Math.atan2(b.tx,b.tz);
+    S[i].curv=angDiff(yb,ya)/Math.max(1e-3,(4*TRACKLEN/NS));
+  }
+  for(i=0;i<NS;i++){ // smooth curvature
+    var sum=0,k; for(k=-3;k<=3;k++)sum+=S[(i+k+NS)%NS].curv; S[i].curvS=sum/7;
+  }
+})();
+function sampleAt(i){ return S[((i%NS)+NS)%NS]; }
+function nearestSample(x,z,hintI,win){
+  var bi=0,bd=1e18,i;
+  if(hintI!=null&&win){ for(i=hintI-win;i<=hintI+win;i++){var s=sampleAt(i),d=(s.x-x)*(s.x-x)+(s.z-z)*(s.z-z); if(d<bd){bd=d;bi=((i%NS)+NS)%NS;}}
+    if(bd<40*40) return bi; }
+  bd=1e18; for(i=0;i<NS;i++){var s2=S[i],d2=(s2.x-x)*(s2.x-x)+(s2.z-z)*(s2.z-z); if(d2<bd){bd=d2;bi=i;}}
+  return bi;
+}
+// racing line lateral offsets + per-class corner speed targets
+var LINE=[], TV=[];
+(function buildLine(){
+  var i,k,raw=[];
+  for(i=0;i<NS;i++){ raw.push(clamp(-Math.sign(S[i].curvS)*Math.abs(S[i].curvS)*260,-(HW-2.3),HW-2.3)); }
+  for(i=0;i<NS;i++){ var sum=0; for(k=-14;k<=14;k++)sum+=raw[(i+k+NS)%NS]; LINE.push(sum/29); }
+  for(var c=0;c<CLASSES.length;c++){
+    var cls=CLASSES[c],latMax=cls.grip*9.81,v=[],ds=TRACKLEN/NS;
+    for(i=0;i<NS;i++){ var kk=Math.max(Math.abs(S[i].curvS),1e-4); v.push(Math.min(cls.top,Math.sqrt(latMax/kk))); }
+    for(var pass=0;pass<3;pass++){
+      for(i=NS*2-1;i>=0;i--){var a=i%NS,b=(i+1)%NS; v[a]=Math.min(v[a],Math.sqrt(v[b]*v[b]+2*cls.brake*ds)); }
+      for(i=0;i<NS*2;i++){var a2=i%NS,b2=(i+1)%NS; v[b2]=Math.min(v[b2],Math.sqrt(v[a2]*v[a2]+2*cls.accel*ds)); }
+    }
+    TV.push(v);
+  }
+})();
+// ---- track geometry: ribbon + paint + curbs + studs + walls ----------
+(function buildTrackGeo(){
+  var i;
+  // ground island + water (WHY: it IS an island; the void reads as a bug)
+  var ground=new THREE.Mesh(new THREE.CylinderGeometry(400,400,0.1,28),new THREE.MeshLambertMaterial({color:0x14261a}));
+  ground.position.set(-25,-0.05,95); scene.add(ground);
+  PROPS.push({name:"island",min:[-425,-0.1,-305],max:[375,0,495]});
+  var water=new THREE.Mesh(new THREE.BoxGeometry(1800,0.1,1800),new THREE.MeshLambertMaterial({color:0x081826}));
+  water.position.set(-25,-0.65,95); scene.add(water);
+  PROPS.push({name:"sea",min:[-925,-0.7,-805],max:[875,-0.6,995]});
+  // asphalt ribbon
+  var pos=[],nor=[],col=[],c=new THREE.Color();
+  function quad(ax,az,bx,bz,cx,cz,dx,dz,y,color){
+    c.setHex(color);
+    var vs=[ax,y,az,bx,y,bz,cx,y,cz, ax,y,az,cx,y,cz,dx,y,dz];
+    for(var k=0;k<vs.length;k+=3){pos.push(vs[k],vs[k+1],vs[k+2]);nor.push(0,1,0);col.push(c.r,c.g,c.b);}
+  }
+  for(i=0;i<NS;i++){
+    var a=S[i],b=sampleAt(i+1);
+    var shade=0x2e3138+(((worldRand()*3)|0)*0x010101);
+    quad(a.x-a.nx*HW,a.z-a.nz*HW, b.x-b.nx*HW,b.z-b.nz*HW, b.x+b.nx*HW,b.z+b.nz*HW, a.x+a.nx*HW,a.z+a.nz*HW, 0.05, shade);
+    // edge lines
+    quad(a.x-a.nx*HW,a.z-a.nz*HW, b.x-b.nx*HW,b.z-b.nz*HW, b.x+b.nx*(-HW+0.4),b.z+b.nz*(-HW+0.4), a.x+a.nx*(-HW+0.4),a.z+a.nz*(-HW+0.4), 0.062, 0x8d97a5);
+    quad(a.x+a.nx*(HW-0.4),a.z+a.nz*(HW-0.4), b.x+b.nx*(HW-0.4),b.z+b.nz*(HW-0.4), b.x+b.nx*HW,b.z+b.nz*HW, a.x+a.nx*HW,a.z+a.nz*HW, 0.062, 0x8d97a5);
+  }
+  var g=new THREE.BufferGeometry();
+  g.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute("normal",new THREE.Float32BufferAttribute(nor,3));
+  g.setAttribute("color",new THREE.Float32BufferAttribute(col,3));
+  scene.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true})));
+  PROPS.push({name:"ribbon",min:[-230,0,-40],max:[190,0.07,245]});
+  // start/finish checker strip
+  for(i=0;i<10;i++){ for(var r=0;r<2;r++){
+    var e=-HW+0.65+i*(HW*2-1.3)/9;
+    pbox("sfchecker",1.25,0.05,0.8, S[0].x+S[0].nx*e - S[0].tx*(r*0.85), 0.075, S[0].z+S[0].nz*e - S[0].tz*(r*0.85), ((i+r)%2)?0xe8ecf2:0x14161c, Math.atan2(S[0].tx,S[0].tz));
+  }}
+  // curbs at real corners (inside edge, where the line clips)
+  for(i=0;i<NS;i+=2){
+    var sc=S[i]; if(Math.abs(sc.curvS)<0.012) continue;
+    var side=-Math.sign(sc.curvS); // inside of the corner
+    var e2=side*(HW-0.55);
+    pbox("curb",1.15,0.14,TRACKLEN/NS*2.05, sc.x+sc.nx*e2,0.07,sc.z+sc.nz*e2, ((i/2)%2)?0xc23a36:0xe8e8ea, Math.atan2(sc.tx,sc.tz));
+  }
+  // night glow studs both edges (readability)
+  for(i=0;i<NS;i+=5){
+    var ss=S[i];
+    pbox("stud",0.32,0.3,0.32, ss.x-ss.nx*(HW+0.55),0.15,ss.z-ss.nz*(HW+0.55), 0xffb45e,0,{c:0xffb45e,i:0.9});
+    pbox("stud",0.32,0.3,0.32, ss.x+ss.nx*(HW+0.55),0.15,ss.z+ss.nz*(HW+0.55), 0x59c2ff,0,{c:0x59c2ff,i:0.7});
+  }
+  // walls: tire stacks (SOFT) on high-curvature outsides, concrete elsewhere
+  for(i=0;i<NS;i+=2){
+    var sw=S[i],yaw=Math.atan2(sw.tx,sw.tz),len=TRACKLEN/NS*2.1;
+    var soft=trackSoft(i); // 1 = tire wall zone
+    for(var sgn=-1;sgn<=1;sgn+=2){
+      // pit lane opening: skip LEFT wall along the pit straight
+      if(sgn<0 && sw.z<25 && sw.x>-142 && sw.x<62 && Math.abs(sw.nz)>0.7) continue;
+      var wx=sw.x+sw.nx*sgn*(HW+1.15), wz=sw.z+sw.nz*sgn*(HW+1.15);
+      var outside = (sgn===Math.sign(sw.curvS)) ? 0 : 1; // wall opposite curve center
+      if(soft && outside){
+        pbox("tirewall",1.05,0.62,len,wx,0.31,wz,0x17191d,yaw);
+        pbox("tirewall",1.05,0.6,len,wx,0.9,wz,((i%8)<2)?0xdadee2:0x1d2026,yaw); // top row w/ white blocks
+      } else {
+        pbox("wall",0.9,1.05,len,wx,0.52,wz,0xb9bfc7,yaw);
+      }
+    }
+  }
+})();
+function trackSoft(i){ // tire-wall zones: near corners (by |curv| in a window ahead/behind)
+  for(var k=-8;k<=16;k++){ if(Math.abs(sampleAt(i+k).curvS)>0.02) return 1; }
+  return 0;
+}
+
+/* ===================== 5. PIT LANE + WORLD PROPS ====================== */
+var dynMeshes=[]; // dynamic/textured meshes: included in props() via live traverse
+function hexCss(c){ return "#"+("00000"+(c>>>0).toString(16)).slice(-6); }
+function texCanvas(w,h,draw){ var cv=document.createElement("canvas"); cv.width=w; cv.height=h; draw(cv.getContext("2d")); var t=new THREE.CanvasTexture(cv); t.minFilter=THREE.LinearFilter; return {tex:t,canvas:cv}; }
+
+// ---- pit path (open spline south of the main straight) ----
+var PITPTS=[[-134,-5.6],[-122,-9.5],[-108,-13.5],[-92,-15.3],[-60,-15.5],[-30,-15.5],[-5,-15.3],[12,-14],[28,-11],[44,-6.6],[56,-2.6],[63,-0.6]];
+var pitCurve=new THREE.CatmullRomCurve3(PITPTS.map(function(p){return new THREE.Vector3(p[0],0,p[1]);}),false,"catmullrom",0.5);
+var NP=120, PIT=[], PITLEN=0, PIT_MERGE_SI=0;
+(function(){
+  var i,cum=0;
+  for(i=0;i<NP;i++){ var t=i/(NP-1),p=pitCurve.getPointAt(t),tg=pitCurve.getTangentAt(Math.min(t,0.999));
+    PIT.push({x:p.x,z:p.z,tx:tg.x,tz:tg.z,s:0}); }
+  for(i=1;i<NP;i++){ cum+=Math.hypot(PIT[i].x-PIT[i-1].x,PIT[i].z-PIT[i-1].z); PIT[i].s=cum; }
+  PITLEN=cum;
+  PIT_MERGE_SI=nearestSample(63,-0.6,null,0);
+})();
+var PIT_BOX_X=[], PIT_BOX_S=[], PLAYER_BOX=3;
+(function(){ for(var i=0;i<8;i++){ var x=-78+i*9; PIT_BOX_X.push(x);
+  var bi=0,bd=1e9; for(var j=0;j<NP;j++){var d=Math.abs(PIT[j].x-x)+Math.abs(PIT[j].z+15.5);if(d<bd){bd=d;bi=j;}}
+  PIT_BOX_S.push(PIT[bi].s); } })();
+function nearestPit(x,z){ var bi=0,bd=1e18; for(var i=0;i<NP;i++){var d=(PIT[i].x-x)*(PIT[i].x-x)+(PIT[i].z-z)*(PIT[i].z-z); if(d<bd){bd=d;bi=i;}} return bi; }
+
+(function buildPitGeo(){
+  var i, pos=[],nor=[],col=[],c=new THREE.Color(0x25272e);
+  for(i=0;i<NP-1;i++){ var a=PIT[i],b=PIT[i+1],an=[-a.tz,a.tx],bn=[-b.tz,b.tx],w=3.4;
+    var vs=[a.x-an[0]*w,a.z-an[1]*w, b.x-bn[0]*w,b.z-bn[1]*w, b.x+bn[0]*w,b.z+bn[1]*w, a.x+an[0]*w,a.z+an[1]*w];
+    var tri=[0,1,2,0,2,3];
+    for(var k=0;k<6;k++){ pos.push(vs[tri[k]*2],0.045,vs[tri[k]*2+1]); nor.push(0,1,0); col.push(c.r,c.g,c.b); }
+  }
+  var g=new THREE.BufferGeometry();
+  g.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute("normal",new THREE.Float32BufferAttribute(nor,3));
+  g.setAttribute("color",new THREE.Float32BufferAttribute(col,3));
+  scene.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true})));
+  PROPS.push({name:"pitlane",min:[-140,0,-20],max:[66,0.05,0]});
+  // pit wall between lane and track
+  for(var x=-104;x<=34;x+=4){ pbox("pitwall",4.1,1.05,0.55,x,0.52,-9.7,0xb9bfc7,0); }
+  // painted boxes + stall boards + tire stacks + carts
+  for(i=0;i<8;i++){
+    var bx=PIT_BOX_X[i];
+    pbox("boxpaint",2.9,0.05,5.0,bx,0.07,-17.0,0x3a3f4a,0);
+    pbox("boxline",3.1,0.06,0.34,bx,0.08,-19.4,0xe8ecf2,0);
+    pbox("boxline",0.34,0.06,4.9,bx-1.45,0.08,-17.0,0xe8ecf2,0);
+    pbox("boxline",0.34,0.06,4.9,bx+1.45,0.08,-17.0,0xe8ecf2,0);
+    // stall board on the pit wall (number + team colour), sits piercing wall top
+    var team=(i===PLAYER_BOX)?0x59c2ff:ROSTER[i<PLAYER_BOX?i:i-1] ? ROSTER[i<PLAYER_BOX?i:i-1].team : 0x666a72;
+    var nb=texCanvas(96,96,function(ctx){ ctx.fillStyle=hexCss(team); ctx.fillRect(0,0,96,96);
+      ctx.fillStyle="#fff"; ctx.font="900 62px Verdana"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(String(i+1),48,52); });
+    var bm=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.8,0.3),new THREE.MeshLambertMaterial({map:nb.tex,emissive:0xffffff,emissiveMap:nb.tex,emissiveIntensity:0.35}));
+    bm.position.set(bx,1.32,-9.7); scene.add(bm); dynMeshes.push(bm);
+    // tire stacks + tool cart behind the box
+    pcyl("pittire",0.5,0.5,0.55,bx-1.0,0.28,-20.3,0x17191d);
+    pcyl("pittire",0.5,0.5,0.55,bx-1.0,0.83,-20.3,0x24262b);
+    pcyl("pittire",0.5,0.5,0.55,bx+0.2,0.28,-20.5,0x17191d);
+    pbox("pitcart",1.05,0.95,0.65,bx+1.3,0.48,-20.3,0x8a2f2f,0);
+  }
+  // player box glow pad (dynamic emissive — pulses when you must stop here)
+  var glowMat=new THREE.MeshLambertMaterial({color:0x0d2233,emissive:0x59c2ff,emissiveIntensity:0.25});
+  var glow=new THREE.Mesh(new THREE.BoxGeometry(2.7,0.05,4.8),glowMat);
+  glow.position.set(PIT_BOX_X[PLAYER_BOX],0.09,-17.0); scene.add(glow); dynMeshes.push(glow);
+  window.__pitGlowMat=glowMat;
+  // crew figures at three boxes (voxel pose: 90-degree joints, no zombie arms)
+  mkFigureStatic(PIT_BOX_X[2]-1.6,-18.6, Math.PI/2,0x38506e,0xffb45e,"crew");
+  mkFigureStatic(PIT_BOX_X[PLAYER_BOX]+1.7,-18.4,-Math.PI/2,0x59c2ff,0xe8ecf2,"crew");
+  mkFigureStatic(PIT_BOX_X[5]-1.5,-18.8, Math.PI/2,0x6a2bd6,0x2ec4d6,"crew");
+})();
+
+// voxel figure merged into the static buckets (crew / booth attendant)
+function mkFigureStatic(x,z,yaw,body,accent,pose){
+  var n="fig-"+pose;
+  pbox(n,0.18,0.55,0.18,x-0.12,0.28,z,0x1d222b,yaw);
+  pbox(n,0.18,0.55,0.18,x+0.12,0.28,z,0x1d222b,yaw);
+  pbox(n,0.46,0.58,0.28,x,0.84,z,body,yaw);
+  pbox(n,0.26,0.26,0.26,x,1.28,z,0xd9a066,yaw);
+  if(pose==="crew"){ // arms down, forearms forward carrying a tire
+    pbox(n,0.13,0.4,0.13,x-0.29,0.85,z,body,yaw);
+    pbox(n,0.13,0.4,0.13,x+0.29,0.85,z,body,yaw);
+    pbox(n,0.13,0.13,0.4,x-0.29,0.66,z+0.2,accent,yaw);
+    pbox(n,0.13,0.13,0.4,x+0.29,0.66,z+0.2,accent,yaw);
+    pcyl(n,0.3,0.3,0.3,x,0.62,z+0.45,0x17191d);
+  } else { // attendant: one arm up waving punters in
+    pbox(n,0.13,0.4,0.13,x-0.29,0.85,z,body,yaw);
+    pbox(n,0.13,0.52,0.13,x+0.29,1.28,z,accent,yaw);
+  }
+}
+
+// ---- grandstand + instanced crowd (north of the main straight) --------
+var CROWD={bodies:null,heads:null,n:0,bx:[],by:[],bz:[],react:0,reactT:0,mode:"wave"};
+(function buildStand(){
+  var x0=-80,x1=12,len=x1-x0,cx=(x0+x1)/2, zF=10, rows=8, i,r;
+  for(r=0;r<rows;r++){ // solid stepped blocks, every one grounded
+    var h=1.15+r*0.62, z=zF+r*1.7+0.85;
+    pbox("standstep",len+4,h,1.7,cx,h/2,z,(r%2)?0x39404b:0x333a44,0);
+  }
+  var topH=1.15+(rows-1)*0.62, backZ=zF+rows*1.7;
+  pbox("standback",len+4,7.2,0.7,cx,3.6,backZ+0.6,0x2a2f38,0);
+  // roof columns ON the back block, canopy ON the columns
+  for(i=0;i<4;i++){ var colX=x0-1+ (len+2)*i/3;
+    pbox("standcol",0.5,3.4,0.5,colX,topH+1.7,backZ-0.6,0x4a515c,0); }
+  pbox("standroof",len+6,0.5,12.5,cx,topH+3.55,zF+6.1,0x22262c,0);
+  pbox("roofglow",len+5.6,0.3,0.3,cx,topH+3.2,zF+0.35,0x59c2ff,0,{c:0x59c2ff,i:0.8});
+  // APEX NIGHT sign on the roof
+  var sg=texCanvas(512,64,function(ctx){ ctx.fillStyle="#0a0f1a";ctx.fillRect(0,0,512,64);
+    ctx.font="900 44px Verdana"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillStyle="#5ad1ff"; ctx.fillText("APEX NIGHT",256,34); });
+  var sm=new THREE.Mesh(new THREE.BoxGeometry(26,3.2,0.5),new THREE.MeshLambertMaterial({map:sg.tex,emissive:0xffffff,emissiveMap:sg.tex,emissiveIntensity:0.85}));
+  sm.position.set(cx,topH+5.3,zF+7); scene.add(sm); dynMeshes.push(sm);
+  // crowd: instanced bodies + heads seated on the steps (fill ~60%)
+  var seats=[], palette=[0xc0392b,0x2f7fd6,0xe8b64c,0x59e08b,0x8a46e8,0xdfe4ec,0xd66a2e,0x2ec4d6];
+  for(r=0;r<rows;r++){ var top=1.15+r*0.62, zz=zF+r*1.7+0.85;
+    for(var sx=x0+1;sx<x1-0.5;sx+=1.15){ if(worldRand()<0.62) seats.push({x:sx+worldRand()*0.24-0.12,y:top,z:zz,c:palette[(worldRand()*palette.length)|0]}); } }
+  var n=seats.length;
+  var bodyG=new THREE.BoxGeometry(0.36,0.58,0.32), headG=new THREE.BoxGeometry(0.24,0.24,0.24);
+  var bodies=new THREE.InstancedMesh(bodyG,new THREE.MeshLambertMaterial({color:0xffffff}),n);
+  var heads=new THREE.InstancedMesh(headG,new THREE.MeshLambertMaterial({color:0xd9a066}),n);
+  var M=new THREE.Matrix4();
+  for(i=0;i<n;i++){ var st=seats[i];
+    M.makeTranslation(st.x,st.y+0.29,st.z); bodies.setMatrixAt(i,M); bodies.setColorAt(i,new THREE.Color(st.c));
+    M.makeTranslation(st.x,st.y+0.70,st.z); heads.setMatrixAt(i,M);
+    CROWD.bx.push(st.x); CROWD.by.push(st.y); CROWD.bz.push(st.z);
+    PROPS.push({name:"fan",min:[st.x-0.18,st.y,st.z-0.16],max:[st.x+0.18,st.y+0.58,st.z+0.16]});
+    PROPS.push({name:"fanhead",min:[st.x-0.12,st.y+0.58,st.z-0.12],max:[st.x+0.12,st.y+0.82,st.z+0.12]});
+  }
+  bodies.instanceMatrix.needsUpdate=true; heads.instanceMatrix.needsUpdate=true;
+  if(bodies.instanceColor) bodies.instanceColor.needsUpdate=true;
+  scene.add(bodies); scene.add(heads);
+  CROWD.bodies=bodies; CROWD.heads=heads; CROWD.n=n;
+})();
+function crowdReact(mode){ CROWD.react=3.2; CROWD.reactT=0; CROWD.mode=mode||"wave"; sfx.roar(); }
+function crowdUpdate(dt){
+  if(CROWD.react<=0) return;
+  CROWD.react-=dt; CROWD.reactT+=dt;
+  var M=new THREE.Matrix4(), done=CROWD.react<=0;
+  for(var i=0;i<CROWD.n;i++){
+    var ph=CROWD.mode==="wave" ? Math.sin(CROWD.bx[i]*0.14 - CROWD.reactT*5.2) : Math.sin(i*1.7+CROWD.reactT*11);
+    var lift=done?0:Math.max(0,ph); lift=lift*lift*0.5;
+    M.makeTranslation(CROWD.bx[i],CROWD.by[i]+0.29+lift,CROWD.bz[i]); CROWD.bodies.setMatrixAt(i,M);
+    M.makeTranslation(CROWD.bx[i],CROWD.by[i]+0.70+lift*1.15,CROWD.bz[i]); CROWD.heads.setMatrixAt(i,M);
+  }
+  CROWD.bodies.instanceMatrix.needsUpdate=true; CROWD.heads.instanceMatrix.needsUpdate=true;
+}
+
+// ---- start gantry with live F1 light pods ----
+var GANTRY={mats:[]};
+(function buildGantry(){
+  var s0=S[0], x=s0.x, z=s0.z, ny=Math.atan2(s0.tx,s0.tz);
+  pbox("gantrypost",0.55,7.6,0.55,x+s0.nx*(HW+1.7),3.8,z+s0.nz*(HW+1.7),0x3a4048,ny);
+  pbox("gantrypost",0.55,7.6,0.55,x-s0.nx*(HW+1.7),3.8,z-s0.nz*(HW+1.7),0x3a4048,ny);
+  pbox("gantrybeam",0.85,0.85,(HW+1.7)*2+0.6,x,7.2,z,0x2a2f38,ny);
+  for(var i=0;i<5;i++){
+    var off=(i-2)*2.2, px=x+s0.nx*off, pz=z+s0.nz*off;
+    pbox("gantrypod",0.72,1.5,0.72,px,6.6,pz,0x14161a,ny);
+    var m=new THREE.MeshLambertMaterial({color:0x330b0b,emissive:0xff2d2d,emissiveIntensity:0.05});
+    GANTRY.mats.push(m);
+    var bg=new THREE.BoxGeometry(0.52,0.52,1.0);
+    var bm=new THREE.Mesh(bg,m); bm.position.set(px,6.35,pz); bm.rotation.y=ny;
+    scene.add(bm); dynMeshes.push(bm);
+  }
+})();
+function setGantry(n,green){
+  for(var i=0;i<5;i++){ var m=GANTRY.mats[i];
+    if(green){ m.emissive.setHex(0x2dff6a); m.emissiveIntensity=1.8; m.color.setHex(0x0b3318); }
+    else { m.emissive.setHex(0xff2d2d); m.color.setHex(0x330b0b); m.emissiveIntensity=i<n?1.7:0.05; } }
+}
+
+// ---- timing pylon with live canvas screen ----
+var TOWER3D=null;
+(function buildTower(){
+  pbox("towercol",1.6,14,1.6,48,7,16,0x23262b,0);
+  pbox("towercap",2.2,0.7,2.2,48,14.35,16,0xc23a36,0,{c:0xc23a36,i:0.8});
+  var t=texCanvas(256,512,function(ctx){ ctx.fillStyle="#0a0f1a"; ctx.fillRect(0,0,256,512); });
+  var m=new THREE.Mesh(new THREE.BoxGeometry(4.6,7.4,0.35),new THREE.MeshLambertMaterial({map:t.tex,emissive:0xffffff,emissiveMap:t.tex,emissiveIntensity:0.85}));
+  m.position.set(48,9.4,15.1); scene.add(m); dynMeshes.push(m);
+  TOWER3D={tex:t.tex,ctx:t.canvas.getContext("2d"),cv:t.canvas,mesh:m,dirty:0};
+})();
+function towerScreenDraw(rows,lapStr){
+  if(!TOWER3D) return; var ctx=TOWER3D.ctx;
+  ctx.fillStyle="#0a0f1a"; ctx.fillRect(0,0,256,512);
+  ctx.fillStyle="#ffb45e"; ctx.font="900 30px Verdana"; ctx.textAlign="center"; ctx.fillText("APEX",128,40);
+  ctx.fillStyle="#5ad1ff"; ctx.font="700 22px Verdana"; ctx.fillText(lapStr||"",128,72);
+  ctx.textAlign="left"; ctx.font="700 26px Consolas,monospace";
+  for(var i=0;i<rows.length&&i<8;i++){ var r=rows[i];
+    ctx.fillStyle=r.you?"#5ad1ff":"#e8eefc"; ctx.fillText((i+1)+" "+r.code,18,116+i*46);
+    ctx.fillStyle="#9fb4dd"; ctx.font="700 20px Consolas,monospace"; ctx.fillText(r.gap,140,116+i*46);
+    ctx.font="700 26px Consolas,monospace"; }
+  TOWER3D.tex.needsUpdate=true;
+}
+
+// ---- bookmaker booth ----
+(function buildBooth(){
+  pbox("booth",4.2,2.9,3.2,22,1.45,12.4,0x1c2634,0);
+  pbox("boothroof",4.8,0.42,3.8,22,3.05,12.4,0x2a3546,0);
+  pbox("boothcounter",4.2,1.1,0.55,22,0.55,10.55,0x8a6a3a,0);
+  var sg=texCanvas(256,64,function(ctx){ ctx.fillStyle="#120a18"; ctx.fillRect(0,0,256,64);
+    ctx.font="900 40px Verdana"; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillStyle="#ff4fa3"; ctx.fillText("BETS · ODDS",128,34); });
+  var sm=new THREE.Mesh(new THREE.BoxGeometry(3.8,0.95,0.16),new THREE.MeshLambertMaterial({map:sg.tex,emissive:0xffffff,emissiveMap:sg.tex,emissiveIntensity:1.0}));
+  sm.position.set(22,3.35,10.7); scene.add(sm); dynMeshes.push(sm);
+  var ob=texCanvas(128,192,function(ctx){ ctx.fillStyle="#0a0f1a"; ctx.fillRect(0,0,128,192);
+    ctx.font="700 17px Consolas,monospace"; ctx.textAlign="left"; ctx.fillStyle="#e8eefc";
+    for(var i=0;i<8;i++){ ctx.fillStyle=i<3?"#ffb45e":"#9fb4dd"; ctx.fillText("P"+(i+1)+"  "+ECON.odds[i].toFixed(1)+"x",14,26+i*21); } });
+  var om=new THREE.Mesh(new THREE.BoxGeometry(1.7,2.2,0.14),new THREE.MeshLambertMaterial({map:ob.tex,emissive:0xffffff,emissiveMap:ob.tex,emissiveIntensity:0.6}));
+  om.position.set(20.2,1.9,10.62); scene.add(om); dynMeshes.push(om);
+  mkFigureStatic(22,12.0,Math.PI,0x8c1a2c,0xe8b64c,"attendant");
+})();
+
+// ---- podium + backdrop (ceremony figures are staged dynamically) ------
+var CEREMONY=new THREE.Group(); CEREMONY.visible=false; scene.add(CEREMONY);
+(function buildPodium(){
+  pbox("podium1",1.7,1.05,1.7,-95,0.52,11,0xdfe4ec,0);
+  pbox("podium2",1.6,0.72,1.6,-96.8,0.36,11,0xb9bfc7,0);
+  pbox("podium3",1.6,0.5,1.6,-93.2,0.25,11,0xb9bfc7,0);
+  pbox("podback",6.4,3.1,0.45,-95,1.55,12.9,0x14171f,0);
+  pbox("podglow",6.0,0.3,0.3,-95,3.0,12.62,0xe8b64c,0,{c:0xe8b64c,i:0.9});
+  pcyl("flagpole",0.16,0.16,4.6,-98.6,2.3,12.2,0x6a6d72);
+  pcyl("flagpole",0.16,0.16,4.6,-91.4,2.3,12.2,0x6a6d72);
+  pbox("flag",1.15,0.75,0.3,-98.0,4.2,12.2,0x5ad1ff,0);
+  pbox("flag",1.15,0.75,0.3,-90.8,4.2,12.2,0xe8b64c,0);
+})();
+function mkFigureDyn(parent,x,z,yaw,team,accent,armsUp){
+  var g=new THREE.Group(); g.position.set(x,0,z); g.rotation.y=yaw;
+  function part(w,h,d,px,py,pz,c){ var m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color:c})); m.position.set(px,py,pz); g.add(m); return m; }
+  part(0.18,0.55,0.18,-0.12,0.28,0,0x1d222b); part(0.18,0.55,0.18,0.12,0.28,0,0x1d222b);
+  part(0.46,0.58,0.28,0,0.84,0,team); part(0.26,0.26,0.26,0,1.28,0,0xd9a066);
+  if(armsUp){ part(0.13,0.62,0.13,-0.29,1.42,0,accent); part(0.13,0.62,0.13,0.29,1.42,0,accent); }
+  else { part(0.13,0.44,0.13,-0.29,0.86,0,accent); part(0.13,0.44,0.13,0.29,0.86,0,accent); }
+  parent.add(g); return g;
+}
+function stageCeremony(order){ // order: array of car objects, [0] is the winner
+  while(CEREMONY.children.length) CEREMONY.remove(CEREMONY.children[0]);
+  var w=order[0]; var winFig=mkFigureDyn(CEREMONY,-95,11,-0.1+Math.PI,w.team,w.accent,true);
+  winFig.position.y=1.05;
+  if(order[1]){ var f2=mkFigureDyn(CEREMONY,-96.8,11,Math.PI,order[1].team,order[1].accent,false); f2.position.y=0.72; }
+  if(order[2]){ var f3=mkFigureDyn(CEREMONY,-93.2,11,Math.PI,order[2].team,order[2].accent,false); f3.position.y=0.5; }
+  var trophy=new THREE.Group();
+  var tb=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.14,0.3),new THREE.MeshLambertMaterial({color:0x2a2d33}));
+  var tc=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.09,0.4,8),new THREE.MeshLambertMaterial({color:0xe8b64c,emissive:0xe8b64c,emissiveIntensity:0.5}));
+  tb.position.y=0; tc.position.y=0.3; trophy.add(tb); trophy.add(tc);
+  trophy.position.set(-95,1.05+1.85,11.02); CEREMONY.add(trophy);
+  CEREMONY.visible=true;
+}
+
+// ---- floodlight masts + braking boards ----
+(function(){
+  var masts=[[-35,-38],[120,-24],[178,86],[52,152],[-113,242],[-216,20]];
+  for(var i=0;i<masts.length;i++){ var m=masts[i];
+    pcyl("mast",0.5,0.68,19,m[0],9.5,m[1],0x4a515c);
+    pbox("masthead",3.2,1.15,1.5,m[0],19.1,m[1],0xfff4d0,0,{c:0xfff4d0,i:0.9});
+  }
+  function board(x,z,yaw,bars){
+    pbox("board",0.3,1.5,0.3,x,0.75,z,0x3a4048,yaw);
+    pbox("boardplate",1.5,1.15,0.3,x,2.0,z,0x14161c,yaw);
+    for(var b=0;b<bars;b++) pbox("boardbar",0.3,0.85,0.34,x+(b-(bars-1)/2)*0.42,2.0,z,0xff5a5a,yaw,{c:0xff5a5a,i:1.1});
+  }
+  board(-5,-8.9,0,3); board(45,-8.9,0,2); board(70,-8.9,0,1);           // into T1
+  board(-72.5,132,Math.PI/2,3); board(-76,150,Math.PI/2,2); board(-77.5,168,Math.PI/2,1); // into hairpin
+})();
+finalizeBuckets();
+
+/* ============================ 6. CARS ================================ */
+var WHEEL_GEO=new THREE.CylinderGeometry(0.36,0.36,0.34,10); WHEEL_GEO.rotateZ(Math.PI/2);
+var HEADLIGHT_MAT=new THREE.MeshLambertMaterial({color:0xfff2cf,emissive:0xfff2cf,emissiveIntensity:1.1});
+var WHEEL_MAT=new THREE.MeshLambertMaterial({color:0x1a1c20});
+function carLocalMerge(parts){
+  var pos=[],nor=[],col=[],c=new THREE.Color();
+  for(var i=0;i<parts.length;i++){ var p=parts[i];
+    var g=new THREE.BoxGeometry(p[0],p[1],p[2]).toNonIndexed();
+    g.translate(p[3],p[4],p[5]);
+    var pa=g.attributes.position.array,na=g.attributes.normal.array;
+    c.setHex(p[6]);
+    for(var k=0;k<pa.length;k++){pos.push(pa[k]);nor.push(na[k]);}
+    for(k=0;k<pa.length/3;k++) col.push(c.r,c.g,c.b);
+    g.dispose();
+  }
+  var geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute("normal",new THREE.Float32BufferAttribute(nor,3));
+  geo.setAttribute("color",new THREE.Float32BufferAttribute(col,3));
+  return geo;
+}
+function buildCarMesh(cls,team,accent,num){
+  var root=new THREE.Group(), body=new THREE.Group(); root.add(body);
+  var dark=0x14171d;
+  var geo=carLocalMerge([
+    [2.05,0.5,4.5, 0,0.45,0, team],          // hull
+    [2.12,0.34,0.9, 0,0.32,2.1, team],       // nose step
+    [1.5,0.3,0.7, 0,0.36,2.48, accent],      // nose tip
+    [2.2,0.3,0.55, 0,0.2,2.42, dark],        // splitter
+    [1.5,0.42,2.3, 0,0.9,0.4, team],         // mid deck
+    [1.4,0.36,0.5, 0,1.06,1.28, 0x10141c],   // windshield
+    [1.3,0.4,1.5, 0,0.95,-1.2, team],        // engine cover
+    [2.14,0.34,1.15, 0,0.55,-1.6, accent],   // rear haunch stripe
+    [0.3,0.5,0.3, -0.55,0.95,-2.0, dark],    // wing posts
+    [0.3,0.5,0.3, 0.55,0.95,-2.0, dark],
+    [1.95,0.3,0.62, 0,1.3,-2.05, accent],    // wing
+    [0.44,0.5,0.4, 0,1.05,-0.15, 0x272b33],  // driver torso
+    [0.3,0.3,0.3, 0,1.42,-0.15, accent],     // helmet
+    [0.13,0.13,0.5, -0.24,1.05,0.25, 0x272b33], // arms to the wheel
+    [0.13,0.13,0.5, 0.24,1.05,0.25, 0x272b33],
+    [0.6,0.3,0.3, 0,1.0,0.6, dark]           // dash + wheel block
+  ]);
+  body.add(new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true})));
+  // lights
+  var hl=carLocalMerge([[0.36,0.24,0.16,-0.62,0.5,2.44,0xfff2cf],[0.36,0.24,0.16,0.62,0.5,2.44,0xfff2cf]]);
+  body.add(new THREE.Mesh(hl,HEADLIGHT_MAT));
+  var tailMat=new THREE.MeshLambertMaterial({color:0xff3b30,emissive:0xff3b30,emissiveIntensity:0.7});
+  var tl=carLocalMerge([[1.6,0.2,0.14,0,0.62,-2.32,0xff3b30]]);
+  body.add(new THREE.Mesh(tl,tailMat));
+  // number plates (canvas: team bg, white number)
+  var nc=texCanvas(96,96,function(ctx){ ctx.fillStyle=hexCss(team); ctx.fillRect(0,0,96,96);
+    ctx.strokeStyle="#fff"; ctx.lineWidth=5; ctx.strokeRect(4,4,88,88);
+    ctx.fillStyle="#fff"; ctx.font="900 56px Verdana"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(String(num),48,52); });
+  var pm=new THREE.MeshLambertMaterial({map:nc.tex,emissive:0xffffff,emissiveMap:nc.tex,emissiveIntensity:0.25});
+  var plates=new THREE.Group();
+  var pg=new THREE.BoxGeometry(0.08,0.55,0.7);
+  var p1=new THREE.Mesh(pg,pm); p1.position.set(-1.06,0.72,0.4); plates.add(p1);
+  var p2=new THREE.Mesh(pg,pm); p2.position.set(1.06,0.72,0.4); plates.add(p2);
+  var p3=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.55,0.08),pm); p3.position.set(0,0.55,2.56); plates.add(p3);
+  body.add(plates);
+  // wheels
+  var wheels=[];
+  var wp=[[-0.88,0.36,1.45],[0.88,0.36,1.45],[-0.88,0.36,-1.45],[0.88,0.36,-1.45]];
+  for(var i=0;i<4;i++){ var w=new THREE.Mesh(WHEEL_GEO,WHEEL_MAT); w.position.set(wp[i][0],wp[i][1],wp[i][2]); root.add(w); wheels.push(w); }
+  scene.add(root);
+  return {root:root,body:body,wheels:wheels,tailMat:tailMat};
+}
+</script>
+</body>
+</html>

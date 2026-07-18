@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PRECINCT 13 — GET YOUR BOY OUT</title>
+<style>
+  /* civic-grim: navy night, fluorescent green-white, evidence-tape amber. No external fonts. */
+  :root{
+    --ink:#0c1118; --amber:#e8b23a; --amber-d:#a87a14; --fluoro:#d9ecdc;
+    --navy:#16233a; --paper:#e8e4d4; --red:#c8402f; --green:#5db87a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; overflow:hidden; background:#05070c;
+    font-family:"Arial Narrow", "Franklin Gothic Medium", Arial, sans-serif;}
+  #game{position:fixed; inset:0;}
+  canvas{display:block;}
+  #hud{position:fixed; inset:0; pointer-events:none; color:#e6ecf2; user-select:none;}
+  .panel{background:rgba(10,16,24,.72); border:1px solid rgba(216,236,220,.22);
+    border-radius:6px; box-shadow:0 3px 0 rgba(0,0,0,.35);}
+  #objectives{position:absolute; top:14px; left:14px; padding:10px 14px; min-width:220px;}
+  #objectives .tag{font-size:10px; letter-spacing:3px; color:var(--amber); font-weight:700;}
+  #objectives .ob{margin-top:5px; font-size:14px; letter-spacing:.4px;}
+  #objectives .ob b{color:#fff;}
+  #objectives .st{color:#9fb2c4;}
+  #objectives .done{color:var(--green);}
+  #clockWrap{position:absolute; top:14px; left:50%; transform:translateX(-50%);
+    padding:8px 20px; text-align:center;}
+  #clockWrap .lab{font-size:10px; letter-spacing:3px; color:#9fb2c4;}
+  #clock{font-size:26px; font-weight:700; letter-spacing:2px; color:var(--amber);
+    font-variant-numeric:tabular-nums;}
+  #clock.late{color:var(--red); animation:blink 1s steps(2) infinite;}
+  @keyframes blink{50%{opacity:.35;}}
+  #right{position:absolute; top:14px; right:14px; display:flex; flex-direction:column; gap:8px; width:212px;}
+  .meter{padding:8px 12px 10px;}
+  .meter .lab{display:flex; justify-content:space-between; font-size:10px; letter-spacing:2px;
+    color:#9fb2c4; margin-bottom:5px; font-weight:700;}
+  .meter .bg{height:10px; border-radius:5px; background:rgba(0,0,0,.55); overflow:hidden;}
+  .meter .bar{height:100%; width:0%; border-radius:5px; transition:width .12s linear;}
+  #heatBar{background:var(--green);}
+  #chargeBar{background:#7a8fb0;}
+  #cashPill{padding:8px 12px; font-size:18px; font-weight:700; color:var(--green); text-align:right;}
+  #talking{color:var(--red); font-weight:700;}
+  #inv{position:absolute; bottom:14px; left:14px; display:flex; gap:6px; flex-wrap:wrap; max-width:44vw;}
+  .chip{padding:5px 10px; font-size:11px; letter-spacing:1.5px; font-weight:700; color:#cfe0d2;}
+  .chip.metal{border-color:rgba(232,178,58,.7); color:var(--amber);}
+  #prompt{position:absolute; left:50%; bottom:74px; transform:translateX(-50%);
+    padding:9px 16px; font-size:15px; letter-spacing:.5px; opacity:0; transition:opacity .15s; white-space:nowrap;}
+  #prompt.show{opacity:1;}
+  #prompt .k{display:inline-block; background:#e6ecf2; color:#0c1118; font-weight:700;
+    border-radius:4px; padding:1px 7px; margin-right:8px;}
+  #say{position:absolute; left:50%; bottom:118px; transform:translateX(-50%); max-width:60vw;
+    padding:8px 14px; font-size:14px; font-style:italic; color:#ffe9b8; opacity:0; transition:opacity .3s; text-align:center;}
+  #say.show{opacity:1;}
+  #toast{position:absolute; left:50%; top:34%; transform:translate(-50%,-50%);
+    font-size:52px; font-weight:900; letter-spacing:4px; color:#fff;
+    text-shadow:0 3px 0 #7c1d10, 0 6px 0 #45100a, 0 12px 26px rgba(0,0,0,.6); opacity:0; pointer-events:none;}
+  #toast.pop{animation:tpop 1.2s ease forwards;}
+  @keyframes tpop{0%{opacity:0; transform:translate(-50%,-50%) scale(.7);}
+    14%{opacity:1; transform:translate(-50%,-50%) scale(1.06);} 28%{transform:translate(-50%,-50%) scale(1);}
+    78%{opacity:1;} 100%{opacity:0; transform:translate(-50%,-56%) scale(1);}}
+  #vignette{position:fixed; inset:0; pointer-events:none;
+    box-shadow:inset 0 0 190px 40px rgba(200,64,47,0); transition:box-shadow .2s;}
+  .screen{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(130% 120% at 50% -10%, #1c2f4d 0%, #101a2c 46%, #05080f 100%);
+    z-index:30; text-align:center; color:#e6ecf2; padding:24px;}
+  .screen.hidden{display:none;}
+  .card{pointer-events:auto; width:min(600px,94vw); padding:30px 32px 26px;
+    background:#101722; border:1px solid rgba(232,178,58,.4); border-radius:10px;
+    box-shadow:0 10px 0 rgba(0,0,0,.4), 0 22px 60px rgba(0,0,0,.6); position:relative;}
+  .card:before{content:""; position:absolute; left:0; right:0; top:0; height:8px; border-radius:10px 10px 0 0;
+    background:repeating-linear-gradient(-45deg, var(--amber) 0 14px, #10151d 14px 28px);} /* evidence tape */
+  .logo{font-size:clamp(38px,7vw,58px); font-weight:900; letter-spacing:3px; color:#e6ecf2;
+    text-shadow:0 3px 0 #0a0e14, 0 6px 0 #060a10;}
+  .logo .n13{color:var(--amber); text-shadow:0 3px 0 var(--amber-d), 0 6px 0 #6b4c0a;}
+  .sub{margin-top:6px; font-weight:700; letter-spacing:6px; font-size:13px; color:#8fa3b8;}
+  .blurb{margin:16px auto 4px; max-width:470px; font-size:15px; line-height:1.55; color:#b7c4cf; text-align:left;}
+  .keys{display:grid; grid-template-columns:repeat(2,1fr); gap:7px 16px; margin:16px auto 4px; max-width:470px; text-align:left;}
+  .keys .row{display:flex; align-items:center; gap:9px; font-size:13px; color:#cdd8e2;}
+  .kbd{display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:26px; padding:0 8px;
+    background:#e6ecf2; border-bottom:3px solid #7c8894; border-radius:5px; font-weight:700; font-size:12px; color:#10161e;}
+  .btn{pointer-events:auto; margin-top:20px; cursor:pointer; border:none; font-family:inherit;
+    font-weight:900; font-size:19px; letter-spacing:2px; color:#0c1118; background:var(--amber);
+    padding:14px 44px; border-radius:8px; box-shadow:0 5px 0 var(--amber-d), 0 9px 18px rgba(0,0,0,.4);
+    transition:transform .07s, box-shadow .07s; text-transform:uppercase;}
+  .btn:hover{transform:translateY(-1px);}
+  .btn:active{transform:translateY(4px); box-shadow:0 1px 0 var(--amber-d);}
+  .stats{display:flex; gap:10px; justify-content:center; margin:18px auto 2px; flex-wrap:wrap;}
+  .stat{background:#0b1018; border:1px solid #26303e; border-radius:8px; padding:10px 16px; min-width:110px;}
+  .stat .v{font-size:24px; font-weight:900; color:var(--amber);}
+  .stat .l{font-size:9px; font-weight:700; letter-spacing:2px; color:#7c8ea0; margin-top:5px;}
+  .smallnote{margin-top:12px; font-size:11px; color:#6d7f91; letter-spacing:.5px;}
+  #endTitle.win{color:var(--green);} #endTitle.lose{color:var(--red);} #endTitle.partial{color:var(--amber);}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+  <div id="objectives" class="panel">
+    <div class="tag">BEFORE SHIFT CHANGE</div>
+    <div class="ob"><b>THE BOY</b> — <span id="obBoy" class="st">in holding</span></div>
+    <div class="ob"><b>THE STASH</b> — <span id="obStash" class="st">in the evidence cage</span></div>
+  </div>
+  <div id="clockWrap" class="panel"><div class="lab">SHIFT CHANGE IN</div><div id="clock">20:00</div></div>
+  <div id="right">
+    <div id="cashPill" class="panel">$800</div>
+    <div class="meter panel"><div class="lab"><span>HEAT</span><span id="heatState">COLD</span></div>
+      <div class="bg"><div id="heatBar" class="bar"></div></div></div>
+    <div class="meter panel"><div class="lab"><span>CHARGES</span><span id="chargeState">POSSESSION</span></div>
+      <div class="bg"><div id="chargeBar" class="bar"></div></div>
+      <div class="lab" style="margin-top:4px"><span id="talking"></span><span id="bailQ"></span></div></div>
+  </div>
+  <div id="inv"></div>
+  <div id="say" class="panel"></div>
+  <div id="prompt" class="panel"><span class="k">E</span><span id="promptText"></span></div>
+  <div id="toast"></div>
+</div>
+<div id="vignette"></div>
+
+<div id="title" class="screen">
+  <div class="card">
+    <div class="logo">PRECINCT <span class="n13">13</span></div>
+    <div class="sub">GET YOUR BOY OUT</div>
+    <p class="blurb">Your lieutenant got pinched with the crew's stash. You walk in the front door,
+      legally — the weapon tonight is paperwork. Before the 20:00 shift change: get him released
+      (cash bail is steep; the bondsman next door knows a cheaper word) and pull the bag out of the
+      evidence cage before it's logged to the DA. Carry nothing metal through the detector.
+      Watch the coffee machine — it pulls cops off their posts. Read the nameplates.</p>
+    <div class="keys">
+      <div class="row"><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> Move</div>
+      <div class="row"><span class="kbd">Mouse</span> Look</div>
+      <div class="row"><span class="kbd">Shift</span> Sneak</div>
+      <div class="row"><span class="kbd">E</span> Interact / hold to work</div>
+      <div class="row"><span class="kbd">H</span> Hood up / down</div>
+      <div class="row"><span class="kbd">Space</span> Jump</div>
+    </div>
+    <button class="btn" id="playBtn">Clock In</button>
+    <div class="smallnote">The flickering tube over the evidence cage is not a maintenance problem. It is a window.</div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="card"><div class="logo" style="font-size:38px">PAUSED</div>
+  <p class="blurb" style="text-align:center">The desk sergeant is watching the clock. So should you.</p>
+  <button class="btn" id="resumeBtn">Back In</button></div>
+</div>
+
+<div id="end" class="screen hidden">
+  <div class="card">
+    <div class="logo" id="endTitle">—</div>
+    <div class="sub" id="endSub">—</div>
+    <p class="blurb" id="endBlurb" style="text-align:center">—</p>
+    <div class="stats">
+      <div class="stat"><div class="v" id="sTime">--</div><div class="l">TIME LEFT</div></div>
+      <div class="stat"><div class="v" id="sCash">--</div><div class="l">CASH SPENT</div></div>
+      <div class="stat"><div class="v" id="sHeat">--</div><div class="l">HEAT PEAK</div></div>
+      <div class="stat"><div class="v" id="sSteak">--</div><div class="l">STEAK DEPLOYED</div></div>
+    </div>
+    <button class="btn" id="againBtn">Run It Back</button>
+  </div>
+</div>
+
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>
+(function(){
+"use strict";
+/* ============================================================================
+   PRECINCT 13 — GET YOUR BOY OUT
+   One-file police-station heist where the weapon is paperwork. Standalone
+   prototype for the city's future precinct interior (src/city/police.js has
+   chase-AI only and a decorative station — this is the real thing, built as
+   its own complete game per the cell-block-z method).
+
+   EVERY MAJOR OBJECT AND ITS WHY (no prop without a job):
+   • METAL DETECTOR (lobby gate) — the entry contract: carry metal in and it
+     beeps, heat spikes, lockpicks are confiscated. Makes the planter matter.
+   • PLANTER (outside, loose soil) — stash the picks before screening, come
+     back for them through the rear door. The detector's counter-move.
+   • DESK SERGEANT KOWALCZYK (front desk, bulky rig) — corrupt IF you learned
+     the password from the bondsman: $250 and the arrest sheet gets "lost"
+     (charges kicked). The cheap-but-dirty release path. Never leaves post:
+     he is the anchor the lobby is balanced around.
+   • BAIL WINDOW + CLERK DA SILVA — the legal release path: bail = 400 + 8 x
+     charges. Steep, and it CLOSES ("RICO referral") if charges hit 100.
+   • BONDSMAN LOU (office next door) — sells the sergeant's password ($200)
+     and bail loans at 40% vig ($500 now, $700 on the score sheet). WHY the
+     building exists: both money paths start here.
+   • DUTY ROSTER BOARD (bullpen wall) — live-redrawn canvas: full shift
+     schedule + who is ON POST RIGHT NOW. The heist is read off this board.
+   • COFFEE MACHINE (bullpen, brew light) — the timer you can watch: FRESH
+     POT pulls the scheduled officer off post ~55s. Every theft window in the
+     game is downstream of this machine.
+   • DET. REYES' DESK + CASE FILE — the valid case number (4471-B) evidence
+     sign-out requires. Stealable only while Reyes is at coffee/records.
+   • VISITOR SIGN-IN PODIUM + ESCORT BADGE — badge tier 1. Fools the rookie
+     evidence clerk, not the veteran. Liftable when nobody's facing you.
+   • EVIDENCE CAGE + CLERK DESK + NAMEPLATE — chain-of-custody: sign-out
+     needs case number + badge glance. OFC. PYE (rookie, lanky) accepts the
+     escort badge; SGT. MERCER (veteran, bulky) does not — READ THE PLATE.
+     Every sign-out appends to the custody log (state()-inspectable).
+   • FLICKERING FLUORESCENT TUBE (over the cage gate) — the stealth MECHANIC:
+     scheduled dark windows blind the clerk; lockpicking progress advances
+     only while he's blind. Buzz + half-glow telegraphs each drop.
+   • INTERROGATION ROOM + VIEWING WINDOW + DOCUMENT TRAY — your guy talks in
+     there and the charge meter climbs (raising bail, then killing it).
+     Slide the LAWYER CARD through the tray: he shuts up for good.
+   • HOLDING CELLS — the boy sits here first (visible, talks, drops hints);
+     the drunk next door worships the coffee pot out loud; and if your heat
+     tops out YOU end up in cell B — the cell-block-z homage, camera behind
+     bars, "Z WUZ HERE" on the wall.
+   • WANTED BOARD (lobby) — your own poster is on it. When OFC. BRISCO walks
+     over and studies it, cops recognize your bare face 3x for a minute.
+     The hoodie hides your face — but hood-up indoors reads shady up close,
+     and no official will deal with a hood. A real tradeoff, toggled on H.
+   • BOOKING CAMERA (lobby corner, sweeping cone) — your face in the cone
+     raises heat; the hood cuts it. Avoid the sweep or wear the tradeoff.
+   • BREAK FRIDGE + STEAK — the K-9 tool. One steak, one job.
+   • K-9 KENNEL (rear alley, REX the quadruped) — smells the duffel: pass the
+     pen carrying the stash and it's an instant alarm unless REX is busy with
+     the steak. The rear exit's toll booth.
+   • REAR FIRE DOOR — opens from inside only; once ajar it is the detector
+     bypass (loop around the block for the planter picks) and the stash
+     route out — past the dog.
+   • CREW BEATER CAR (curb, lights on) — the extraction zone. Reach it with
+     the boy + the bag = WIN; one of two = PARTIAL; empty = you walked.
+   • POLICE GLOBES / FACADE SIGN / RADIO MAST / PARKED CRUISER — the street
+     reads "precinct" at night from one glance; the mast blink says dispatch
+     is alive; the cruiser lights the lobby camera's blind-side approach.
+   CUT by the WHY rule: armory (demands gunplay), bathrooms/lockers (no
+   mechanic), civilian visitors (would dilute the observation model), west
+   planter (pure symmetry), vending machine (coffee already owns the timer).
+
+   DETERMINISM: geometry/roster/flicker built from mulberry32(1313). All
+   runtime rolls go through nextRand() — one funnel with a rig queue
+   (__police.rig). Debug/verification API: window.__police (state, warp,
+   aim, props, rosterAt, simShift, custodyCheck, act, ...) — see bottom.
+============================================================================ */
+
+/* ---------- RNG: build stream + the one runtime funnel ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const brand = mulberry32(1313);            // build-time: geometry jitter, schedules, posters
+const runStream = mulberry32(707707);      // runtime fallback stream
+const rigQueue = [];
+function nextRand(){ return rigQueue.length ? rigQueue.shift() : runStream(); }
+
+/* ---------- Renderer / scene / atmosphere ---------- */
+const container = document.getElementById('game');
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x070b12, 46, 150);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 400);
+const renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(1);
+renderer.outputEncoding = THREE.sRGBEncoding;   // r128 API
+container.appendChild(renderer.domElement);
+
+// night sky dome — the shift change happens after dark; fluorescents must own the frame
+(function(){
+  const c=document.createElement('canvas'); c.width=8; c.height=256; const g=c.getContext('2d');
+  const grd=g.createLinearGradient(0,0,0,256);
+  grd.addColorStop(0,'#04060c'); grd.addColorStop(0.55,'#0a1322'); grd.addColorStop(1,'#1a2436');
+  g.fillStyle=grd; g.fillRect(0,0,8,256);
+  const dome=new THREE.Mesh(new THREE.SphereGeometry(220,20,12),
+    new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),side:THREE.BackSide,fog:false}));
+  scene.add(dome);
+})();
+const hemi = new THREE.HemisphereLight(0x93a7b8, 0x14171c, 0.42); scene.add(hemi);
+const moon = new THREE.DirectionalLight(0x8fa8c8, 0.22); moon.position.set(-30,60,40); scene.add(moon);
+function fluoroLight(x,y,z,intensity,color){
+  const p=new THREE.PointLight(color||0xdff0e2, intensity, 22, 1.7); p.position.set(x,y,z); scene.add(p); return p;
+}
+fluoroLight(0,4.6,-6,0.85);          // lobby
+fluoroLight(-17,4.6,-6,0.8);         // bullpen
+const flickerLight = fluoroLight(-11,4.3,-18.5,0.9);  // EVIDENCE cage — the mechanic light
+fluoroLight(0,4.6,-25,0.5);          // corridor
+fluoroLight(11,4.2,-29,0.75,0xf2ead2); // interrogation (warmer bulb — the hot seat)
+fluoroLight(10,4.6,-18,0.6);         // holding
+const streetLampE = fluoroLight(15,5.6,9.5,0.85,0xffb35c);  // sodium pool on the beater (extract reads at night)
+fluoroLight(-12,5.6,9.5,0.6,0xffb35c);                      // sodium pool on the cruiser
+
+/* ---------- Static world builder: one merged vertex-colored mesh ---------- */
+const colliders=[]; const losRects=[]; const PROPS=[]; const boxDefs=[];
+const _c = new THREE.Color();
+function addStatic(name,x,y,z,w,h,d,color,o){
+  o=o||{};
+  boxDefs.push({x,y,z,w,h,d,color,ry:o.ry||0,shade:o.shade!=null?o.shade:1});
+  if(o.solid) colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,tag:name});
+  if(o.los) losRects.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2});
+  if(!o.noProp){
+    const r=Math.abs(o.ry||0)>0.01? Math.max(w,d):0;
+    const ww=r?r:w, dd=r?r:d;
+    PROPS.push({name,min:[x-ww/2,y-h/2,z-dd/2],max:[x+ww/2,y+h/2,z+dd/2]});
+  }
+}
+function buildStatic(){
+  const pos=[],nor=[],col=[];
+  for(const b of boxDefs){
+    const g=new THREE.BoxGeometry(b.w,b.h,b.d).toNonIndexed();
+    if(b.ry) g.rotateY(b.ry);
+    g.translate(b.x,b.y,b.z);
+    const p=g.attributes.position.array, n=g.attributes.normal.array;
+    for(let i=0;i<p.length;i++){pos.push(p[i]); nor.push(n[i]);}
+    _c.setHex(b.color);
+    const jitter=0.94+brand()*0.09;
+    for(let i=0;i<p.length/3;i++){
+      const ny=n[i*3+1];
+      const f= ny>0.5?1.06: ny<-0.5?0.62: 0.9;   // fake AO: tops lighter, undersides dark
+      col.push(Math.min(1,_c.r*f*jitter*b.shade),Math.min(1,_c.g*f*jitter*b.shade),Math.min(1,_c.b*f*jitter*b.shade));
+    }
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor,3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
+  const mesh=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true}));
+  mesh.matrixAutoUpdate=false;
+  scene.add(mesh);
+  return mesh;
+}
+
+/* ---------- Canvas-texture helpers (signs, boards, plates — zero net) ---------- */
+function texPlane(w,h,draw,pxw,pxh){
+  const c=document.createElement('canvas'); c.width=pxw||256; c.height=pxh||128;
+  draw(c.getContext('2d'),c.width,c.height);
+  const t=new THREE.CanvasTexture(c); t.magFilter=THREE.LinearFilter; t.minFilter=THREE.LinearFilter;
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),
+    new THREE.MeshBasicMaterial({map:t, transparent:false}));
+  m.userData.ctx=c.getContext('2d'); m.userData.tex=t; m.userData.cw=c.width; m.userData.ch=c.height;
+  return m;
+}
+function signText(g,w,h,bg,fg,lines,size,font){
+  g.fillStyle=bg; g.fillRect(0,0,w,h);
+  g.fillStyle=fg; g.textAlign='center'; g.textBaseline='middle';
+  g.font=(size||40)+'px '+(font||'Arial Black, Arial');
+  const lh=(size||40)*1.2, y0=h/2-(lines.length-1)*lh/2;
+  lines.forEach((L,i)=>g.fillText(L,w/2,y0+i*lh));
+}
+
+/* ============================================================================
+   WORLD LAYOUT  (north = -z; street south; all walls >=0.3u chunky)
+============================================================================ */
+const WALL_H=5.2, T=0.6;
+const C_WALL=0x8e9484, C_WAINS=0x555f57, C_FLOOR=0x63675e, C_FLOOR2=0x585c54,
+      C_CEIL=0x363b41, C_TRIM=0x2e333a, C_DESK=0x6d5b41, C_DESKTOP=0x84765a,
+      C_CAGE=0x7a838e, C_BARS=0x39424e, C_STEEL=0x525a64, C_ASPHALT=0x24272c,
+      C_SIDE=0x4b4f55, C_BRICK=0x5c4a41, C_PAPER=0xd8d4c0;
+
+function wallRun(name,x,z,w,d,color){ // full-height solid wall with wainscot band
+  addStatic(name,x,WALL_H/2,z,w,WALL_H,d,color||C_WALL,{solid:true,los:true});
+  addStatic(name+'-wains',x,0.65,z,w+0.06,1.3,d+0.06,C_WAINS,{noProp:true});
+}
+// ---- shell -----------------------------------------------------------------
+wallRun('front-wall-w',-13.05,-0.3,21.9,T);      // front, west of door gap x[-1.8,1.8]... x from -24 to -2.1 => cx -13.05 w 21.9
+wallRun('front-wall-e',9.9,-0.3,16.2,T);         // x 1.8..18
+addStatic('front-lintel',0,4.35,-0.3,4.2,1.7,T,C_WALL,{los:true});
+wallRun('rear-wall-w',-12.85,-35.7,22.3,T);      // x -24..-1.7
+wallRun('rear-wall-e',9.85,-35.7,16.3,T);        // x 1.7..18
+addStatic('rear-lintel',0,4.35,-35.7,3.4,1.7,T,C_WALL,{los:true});
+wallRun('west-wall',-24,-18,T,36.6);
+wallRun('east-wall',18,-18,T,36.6);
+addStatic('slab-floor',-3,-0.15,-18,42.6,0.3,36.6,C_FLOOR,{noProp:true});
+addStatic('slab-ceiling',-3,WALL_H+0.14,-18,42.6,0.3,36.6,C_CEIL);
+// roofline: parapet + AC + radio mast (street silhouette; mast = dispatch is alive)
+addStatic('parapet-f',-3,WALL_H+0.6,-0.2,42.6,0.7,0.4,C_WALL);
+addStatic('parapet-b',-3,WALL_H+0.6,-35.8,42.6,0.7,0.4,C_WALL);
+addStatic('parapet-w',-23.9,WALL_H+0.6,-18,0.4,0.7,36,C_WALL);
+addStatic('parapet-e',17.9,WALL_H+0.6,-18,0.4,0.7,36,C_WALL);
+addStatic('roof-ac',-14,WALL_H+0.95,-20,3,1.3,2.2,C_STEEL);
+addStatic('roof-ac2',6,WALL_H+0.8,-28,2.2,1,1.8,C_STEEL);
+addStatic('mast-base',12,WALL_H+0.75,-30,1,0.9,1,C_TRIM);
+addStatic('mast',12,WALL_H+3.2,-30,0.34,4.6,0.34,C_TRIM);
+
+// ---- partitions ------------------------------------------------------------
+// Lobby x[-10,10] z[-12,0] | Bail office x[10,18] | Bullpen x[-24,-10]
+wallRun('lobby-w-a',-10,-2.15,T,4.3);            // z 0..-4.3 ; door gap z[-4.3,-7.1] hmm use: gap z[-8.4,-5.6]
+wallRun('lobby-w-b',-10,-10.2,T,3.6);            // z -8.4..-12
+addStatic('lobby-w-lint',-10,4.5,-7,T,1.4,2.9,C_WALL,{los:true});
+wallRun('lobby-w-c',-10,-4.95,T,1.3);            // z -4.3..-5.6
+wallRun('lobby-e-a',10,-4.9,T,9.8);              // z 0..-9.8 (bail window cut below)
+wallRun('lobby-e-b',10,-11.75,T,0.5);            // z -11.5..-12
+addStatic('lobby-e-lint',10,4.5,-10.65,T,1.4,1.7,C_WALL,{los:true}); // bail office door top
+// band wall z=-12 across, gaps: corridor x[-1.6,1.6]
+wallRun('band1-w',-13.05,-12,21.9,T);
+wallRun('band1-e',9.8,-12,16.4,T);
+addStatic('band1-lint',0,4.5,-12,3.2,1.4,T,C_WALL,{los:true});
+// corridor spine walls x=+-2.2 from z-12 to z-36 with room door gaps
+wallRun('corr-w-a',-2.2,-14.2,T,4.4);            // z -12..-16.4
+wallRun('corr-w-b',-2.2,-23.7,T,9.4);            // z -19..-28.4
+wallRun('corr-w-c',-2.2,-33.5,T,5);              // z -31..-36
+addStatic('corr-w-lint1',-2.2,4.5,-17.7,T,1.4,2.6,C_WALL,{los:true});
+addStatic('corr-w-lint2',-2.2,4.5,-29.7,T,1.4,2.6,C_WALL,{los:true});
+wallRun('corr-e-a',2.2,-12.5,T,1);               // z -12..-13
+wallRun('corr-e-b',2.2,-21.3,T,11.4);            // z -15.6..-27
+wallRun('corr-e-c',2.2,-33,T,6);                 // z -30..-36
+addStatic('corr-e-lint1',2.2,4.5,-14.3,T,1.4,2.6,C_WALL,{los:true});
+addStatic('corr-e-lint2',2.2,4.5,-28.5,T,1.4,3,C_WALL,{los:true});
+// band wall z=-24 west (evidence/records split) + east (holding/interrogation)
+wallRun('band2-w',-13.1,-24,21.8,T);
+addStatic('band2-w-lint',-2.6,4.5,-24,0.8,1.4,T,C_WALL,{noProp:true});
+wallRun('band2-e',10.1,-24,15.8,T);
+// records room door (corridor west, z[-31,-28.4] gap handled by corr-w walls)
+// holding cells: bars row x=6, cells x[6,18] z[-24,-12]; cell split z=-18
+wallRun('cell-split',12,-18,12,0.5);
+// interrogation room x[7,15] z[-33,-25] inside east band
+wallRun('inter-n',11,-33,8.6,0.5);
+wallRun('inter-s',11.75,-25,7.1,0.5);            // x 8.2..15.3 door gap x[7,8.2] at z-25
+addStatic('inter-s-lint',7.6,4.5,-25,1.4,1.4,0.5,C_WALL,{los:true});
+wallRun('inter-e',15,-29,0.5,8.5);
+// viewing window wall x=7: solid below 1.1 and above 3.1, glass between (z -31..-27)
+wallRun('inter-w-a',7,-32.2,0.5,2);              // z -31.2..-33
+wallRun('inter-w-b',7,-25.9,0.5,1.9);            // z -25..-26.9? gap z[-26.9,-31.2] window band
+addStatic('inter-w-sill',7,0.55,-29.05,0.5,1.1,4.3,C_WALL,{los:true,solid:true});
+addStatic('inter-w-head',7,4.15,-29.05,0.5,2.1,4.3,C_WALL,{los:true});
+
+/* ---------- floors get room-tone insets (reads as linoleum at a glance) ---- */
+addStatic('floor-lobby',0,0.02,-6,19.4,0.06,11.4,C_FLOOR2,{noProp:true});
+addStatic('floor-corr',0,0.03,-24,4,0.05,23.6,0x5b5f56,{noProp:true});
+for(let i=0;i<6;i++)for(let j=0;j<4;j++)
+  if((i+j)%2===0) addStatic('tile',-7.5+i*3,0.055,-9.5+j*2.4,2.6,0.03,2.1,0x50544c,{noProp:true});
+
+/* ---------- LOBBY furniture ---------- */
+// metal detector — the entry contract
+addStatic('detector-post-w',-1.1,1.25,-2.2,0.45,2.5,0.6,C_STEEL,{solid:true});
+addStatic('detector-post-e',1.1,1.25,-2.2,0.45,2.5,0.6,C_STEEL,{solid:true});
+addStatic('detector-bar',0,2.62,-2.2,2.65,0.34,0.6,C_STEEL);
+const detLamp=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.18,0.18),
+  new THREE.MeshBasicMaterial({color:0x2fd06a})); detLamp.position.set(0,2.9,-2.2); scene.add(detLamp);
+// front desk (sergeant's anchor)
+addStatic('frontdesk',-4.5,0.7,-8.2,5.2,1.4,1.6,C_DESK,{solid:true,los:false});
+addStatic('frontdesk-top',-4.5,1.46,-8.2,5.5,0.12,1.9,C_DESKTOP);
+addStatic('frontdesk-riser',-4.5,1.85,-8.85,5.5,0.65,0.35,C_DESK);
+// visitor sign-in podium + escort badge hook
+addStatic('podium',7.5,0.75,-1.4,1.1,1.5,0.9,C_DESK,{solid:true});
+addStatic('podium-top',7.5,1.56,-1.4,1.3,0.12,1.1,C_DESKTOP);
+// lobby bench (visitors wait; also cover from the camera sweep)
+addStatic('bench-seat',-7.4,0.55,-1.6,4.2,0.3,1,0x6a5335,{solid:true});
+addStatic('bench-leg1',-9.1,0.25,-1.6,0.4,0.5,0.9,0x4a3a26,{noProp:true});
+addStatic('bench-leg2',-5.7,0.25,-1.6,0.4,0.5,0.9,0x4a3a26,{noProp:true});
+// bail window: counter + shade; office behind
+addStatic('bail-counter',10,1.05,-6.7,0.9,0.5,3.4,C_DESKTOP,{solid:true});
+addStatic('bail-under',10,0.4,-6.7,0.7,0.8,3.4,C_DESK,{noProp:true});
+addStatic('bail-glass-frame-top',10,3.6,-6.7,0.5,0.5,3.6,C_STEEL);
+addStatic('bail-post-n',10,2.4,-8.5,0.5,2.3,0.4,C_STEEL,{noProp:true});
+addStatic('bail-post-s',10,2.4,-4.9,0.5,2.3,0.4,C_STEEL,{noProp:true});
+addStatic('bailoffice-desk',13.2,0.7,-6.7,1.8,1.4,3,C_DESK,{solid:true});
+
+/* ---------- BULLPEN ---------- */
+function deskCluster(name,x,z,ry){
+  addStatic(name,x,0.72,z,2.6,0.24,1.5,C_DESKTOP,{ry:ry||0});
+  addStatic(name+'-legA',x-1.1,0.36,z,0.3,0.72,1.4,C_DESK,{ry:ry||0,noProp:true});
+  addStatic(name+'-legB',x+1.1,0.36,z,0.3,0.72,1.4,C_DESK,{ry:ry||0,noProp:true});
+  addStatic(name+'-chair',x,0.42,z+1.25,0.9,0.16,0.9,0x3a4a5c,{ry:ry||0});
+  addStatic(name+'-chair-back',x,0.95,z+1.68,0.9,0.9,0.16,0x33414f,{ry:ry||0,noProp:true});
+  addStatic(name+'-chair-leg',x,0.2,z+1.25,0.3,0.42,0.3,C_TRIM,{ry:ry||0,noProp:true});
+  colliders.push({minX:x-1.45,maxX:x+1.45,minZ:z-0.85,maxZ:z+0.85,tag:name});
+}
+deskCluster('desk-reyes',-14.5,-8.6);      // the case-file desk
+deskCluster('desk-voss',-19.5,-8.6);
+deskCluster('desk-pye',-14.5,-3.2);
+deskCluster('desk-mercer',-19.5,-3.2);
+addStatic('file-tray',-15.2,0.95,-8.9,0.7,0.22,0.5,0xb8a06a);       // Reyes' case file lives here
+addStatic('typewriter',-13.8,0.98,-8.6,0.6,0.28,0.5,C_TRIM,{noProp:true});
+// coffee machine + fridge on the west wall — the timer you can watch
+addStatic('coffee-counter',-23.2,0.55,-2.4,1.3,1.1,2.6,C_STEEL,{solid:true});
+addStatic('coffee-machine',-23.3,1.5,-1.8,0.8,0.8,0.8,0x22262c);
+addStatic('coffee-pot',-23.25,1.28,-1.8,0.5,0.36,0.5,0x151719,{noProp:true});
+addStatic('fridge',-23.2,1.05,-4.6,1.2,2.1,1.2,0xb8bcc0,{solid:true});
+addStatic('fridge-handle',-22.66,1.2,-4.3,0.12,0.8,0.12,C_TRIM,{noProp:true});
+const coffeeLamp=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.14,0.1),
+  new THREE.MeshBasicMaterial({color:0xd23b2a})); coffeeLamp.position.set(-23.3,1.98,-1.36); scene.add(coffeeLamp);
+
+/* ---------- EVIDENCE ROOM: cage + clerk desk + shelves ---------- */
+function cageWall(name,x,z,w,d){ // chunky chain-look: rails + vertical slats
+  addStatic(name+'-rail-b',x,0.35,z,w||0.34,0.34,d||0.34,C_CAGE);
+  addStatic(name+'-rail-t',x,3.3,z,w||0.34,0.34,d||0.34,C_CAGE);
+  addStatic(name+'-rail-m',x,1.85,z,w||0.3,0.22,d||0.3,C_CAGE,{noProp:true});
+  const len=Math.max(w||0,d||0), n=Math.floor(len/0.92);
+  for(let i=0;i<=n;i++){
+    const t=i/n-0.5;
+    if(w>d) addStatic(name+'-slat'+i,x+t*(w-0.3),1.82,z,0.3,3.3,0.3,C_CAGE,{noProp:true});
+    else addStatic(name+'-slat'+i,x,1.82,z+t*(d-0.3),0.3,3.3,0.3,C_CAGE,{noProp:true});
+  }
+  colliders.push({minX:x-(w||0.34)/2,maxX:x+(w||0.34)/2,minZ:z-(d||0.34)/2,maxZ:z+(d||0.34)/2,tag:name});
+  losRects.push({minX:x-(w||0.34)/2,maxX:x+(w||0.34)/2,minZ:z-(d||0.34)/2,maxZ:z+(d||0.34)/2,cage:true});
+}
+cageWall('cage-n',-17,-23,10,0.34);
+cageWall('cage-s',-17,-14.6,10,0.34);
+cageWall('cage-w',-22,-18.8,0.34,8.8);
+cageWall('cage-e-a',-12,-21.2,0.34,3.6);       // gate gap z[-19.4,-17.6]
+cageWall('cage-e-b',-12,-16.1,0.34,3.0);
+// cage gate (dynamic mesh below); clerk desk faces the gate
+addStatic('clerkdesk',-9,0.7,-18.5,1.5,1.4,2.6,C_DESK,{solid:true});
+addStatic('clerkdesk-top',-9,1.46,-18.5,1.8,0.12,2.9,C_DESKTOP);
+function shelf(name,x,z,ry){
+  addStatic(name+'-postA',x-1.5,1.1,z,0.3,2.2,0.6,C_STEEL,{ry,noProp:true});
+  addStatic(name+'-postB',x+1.5,1.1,z,0.3,2.2,0.6,C_STEEL,{ry,noProp:true});
+  addStatic(name+'-sh1',x,0.5,z,3.3,0.14,0.8,C_STEEL,{ry});
+  addStatic(name+'-sh2',x,1.25,z,3.3,0.14,0.8,C_STEEL,{ry,noProp:true});
+  addStatic(name+'-sh3',x,2.0,z,3.3,0.14,0.8,C_STEEL,{ry,noProp:true});
+  for(let i=0;i<4;i++){ const bx=x-1.1+i*0.75, by=[0.72,1.47,2.2][Math.floor(brand()*3)];
+    addStatic(name+'-box'+i,bx,by,z,0.55,0.42,0.55,[0x8a6f4a,0x74604a,0x9a7f55][i%3],{ry,noProp:true}); }
+  colliders.push({minX:x-1.65,maxX:x+1.65,minZ:z-0.4,maxZ:z+0.4,tag:name});
+}
+shelf('ev-shelf1',-17,-21.6);
+shelf('ev-shelf2',-17,-18.7);
+shelf('ev-shelf3',-17,-15.9);
+// records room dressing (Reyes' records run destination)
+shelf('rec-shelf1',-16,-31);
+shelf('rec-shelf2',-16,-33.5);
+shelf('rec-shelf3',-8,-31);
+
+/* ---------- HOLDING: bars row x=6, two cells ---------- */
+function barRun(name,z0,z1){
+  addStatic(name+'-rail-b',6,0.3,(z0+z1)/2,0.4,0.3,z1-z0,C_BARS);
+  addStatic(name+'-rail-t',6,3.55,(z0+z1)/2,0.4,0.3,z1-z0,C_BARS);
+  const n=Math.floor((z1-z0)/0.62);
+  for(let i=0;i<=n;i++) addStatic(name+'-bar'+i,6,1.92,z0+0.15+i*(z1-z0-0.3)/n,0.3,3.3,0.3,C_BARS,{noProp:true});
+  colliders.push({minX:5.8,maxX:6.2,minZ:z0,maxZ:z1,tag:name});
+}
+barRun('cellA-bars',-24,-20.4);   // door gap z[-20.4,-19.2]
+barRun('cellA-bars2',-19.2,-18);
+barRun('cellB-bars',-18,-14.6);   // door gap z[-14.6,-13.4]
+barRun('cellB-bars2',-13.4,-12);
+function bunk(x,z){
+  addStatic('bunk-frame',x,0.5,z,2.4,0.28,1.2,C_STEEL);
+  addStatic('bunk-mat',x,0.72,z,2.2,0.18,1.05,0x8a8878,{noProp:true});
+  addStatic('bunk-legA',x-1,0.18,z,0.3,0.4,1.1,C_TRIM,{noProp:true});
+  addStatic('bunk-legB',x+1,0.18,z,0.3,0.4,1.1,C_TRIM,{noProp:true});
+  colliders.push({minX:x-1.2,maxX:x+1.2,minZ:z-0.6,maxZ:z+0.6,tag:'bunk'});
+}
+bunk(15.5,-22.5); bunk(15.5,-13.6);
+addStatic('cell-toilet',16.8,0.45,-19.2,0.8,0.9,0.8,0xaab2b8);
+
+/* ---------- INTERROGATION room furniture ---------- */
+addStatic('inter-table',11,0.78,-29,2.6,0.2,1.4,C_STEEL,{solid:true});
+addStatic('inter-table-leg',11,0.4,-29,0.5,0.78,0.5,C_TRIM,{noProp:true});
+addStatic('inter-chairA',9.4,0.5,-29,0.9,0.16,0.9,C_STEEL);
+addStatic('inter-chairA-back',8.95,1,-29,0.16,0.9,0.9,C_STEEL,{noProp:true});
+addStatic('inter-chairB',12.6,0.5,-29,0.9,0.16,0.9,C_STEEL);
+addStatic('inter-chairB-back',13.05,1,-29,0.16,0.9,0.9,C_STEEL,{noProp:true});
+// document tray through the observation wall — where the lawyer card goes
+addStatic('doc-tray',7,1.22,-27.6,0.9,0.14,0.7,C_STEEL);
+
+/* ---------- EXTERIOR: street, planter, cars, bondsman, alley, kennel ------- */
+addStatic('sidewalk',-1,-0.06,2.5,66,0.24,5,C_SIDE,{noProp:true});
+addStatic('road',-1,-0.1,11,66,0.12,12,C_ASPHALT,{noProp:true});
+for(let i=0;i<11;i++) addStatic('lane-dash',-29+i*6,-0.02,11,2.2,0.06,0.3,0xb8b442,{noProp:true});
+addStatic('curb',-1,0.08,5.15,66,0.16,0.35,0x6a6e74,{noProp:true});
+// planter — the pick stash (loose soil on top)
+addStatic('planter',3.6,0.55,1.6,1.6,1.1,1.3,0x707a80,{solid:true});
+addStatic('planter-soil',3.6,1.12,1.6,1.3,0.1,1,0x39302a,{noProp:true});
+addStatic('planter-shrub',3.6,1.62,1.6,0.9,0.9,0.75,0x3d5c34);
+addStatic('planter-shrub2',3.6,2.2,1.6,0.55,0.5,0.45,0x466a3a,{noProp:true});
+// POLICE globes flank the door (the landmark that says precinct at night)
+function globe(x){
+  addStatic('globe-post'+x,x,1.5,0.9,0.34,3,0.34,0x1c2733,{solid:true});
+  const gl=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.75,0.62),
+    new THREE.MeshBasicMaterial({color:0x9fd0ff})); gl.position.set(x,3.3,0.9); scene.add(gl);
+  const cap=new THREE.Mesh(new THREE.BoxGeometry(0.72,0.14,0.72),
+    new THREE.MeshLambertMaterial({color:0x1c2733})); cap.position.set(x,3.75,0.9); scene.add(cap);
+}
+globe(-2.6); globe(2.6);
+// street lamps (sodium pools: one lights the cruiser, one the beater/extract)
+function lamp(x){
+  addStatic('lamp-post'+x,x,2.6,8.6,0.34,5.2,0.34,0x2a2f36,{solid:true});
+  addStatic('lamp-arm'+x,x,5.1,9.4,0.3,0.3,1.6,0x2a2f36,{noProp:true});
+  const h=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.24,0.7),
+    new THREE.MeshBasicMaterial({color:0xffc476})); h.position.set(x,4.98,10); scene.add(h);
+}
+lamp(-12); lamp(15);
+// parked cruiser (white/navy per city lore) — police presence, dresses the facade
+function cruiser(x,z,ry){
+  addStatic('cruiser-body',x,0.62,z,4.4,0.75,1.9,0xe9edf2,{ry,solid:true});
+  addStatic('cruiser-cab',x-0.2,1.3,z,2.2,0.65,1.7,0x161a24,{ry});
+  addStatic('cruiser-stripe',x,0.62,z,4.42,0.24,1.92,0x161a24,{ry,noProp:true});
+  addStatic('cruiser-bar',x-0.2,1.75,z,0.9,0.26,1.2,0x20242c,{ry});
+  const r=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.2,0.5),new THREE.MeshBasicMaterial({color:0xc03a3a}));
+  r.position.set(x-0.45,1.76,z); scene.add(r);
+  const b=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.2,0.5),new THREE.MeshBasicMaterial({color:0x3a5ac0}));
+  b.position.set(x+0.05,1.76,z); scene.add(b);
+  [[-1.5,-0.85],[1.5,-0.85],[-1.5,0.85],[1.5,0.85]].forEach((o,i)=>
+    addStatic('cruiser-wheel'+i,x+o[0],0.34,z+o[1],0.68,0.68,0.34,0x111318,{ry,noProp:true}));
+}
+cruiser(-12,7.6,0);
+// the crew's beater — extraction zone; headlights ON = it's idling for you
+const EXTRACT={x:15,z:7.6,r:3.6};
+addStatic('beater-body',15,0.6,7.6,4.2,0.7,1.85,0x6b4f3a,{solid:true});
+addStatic('beater-cab',15.1,1.24,7.6,2.1,0.6,1.65,0x3a332c);
+addStatic('beater-rust',14.2,0.62,8.5,1,0.72,0.1,0x503a28,{noProp:true});
+[[-1.4,-0.8],[1.4,-0.8],[-1.4,0.8],[1.4,0.8]].forEach((o,i)=>
+  addStatic('beater-wheel'+i,15+o[0],0.32,7.6+o[1],0.64,0.64,0.32,0x111318,{noProp:true}));
+const beaterHL=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.24,0.5),
+  new THREE.MeshBasicMaterial({color:0xffe9b0})); beaterHL.position.set(12.9,0.62,7.15); scene.add(beaterHL);
+const beaterHL2=beaterHL.clone(); beaterHL2.position.set(12.9,0.62,8.05); scene.add(beaterHL2);
+// bondsman office (x[23,31] z[-8,0]) — both money paths start here
+wallRun('bond-front-w',23.8,-0.25,1.6,0.5,C_BRICK);
+wallRun('bond-front-e',29.25,-0.25,3.5,0.5,C_BRICK);
+addStatic('bond-lintel',26,4.4,-0.25,3,1.6,0.5,C_BRICK,{los:true});
+wallRun('bond-w',23,-4,0.5,8,C_BRICK);
+wallRun('bond-e',31,-4,0.5,8,C_BRICK);
+wallRun('bond-n',27,-8,8.5,0.5,C_BRICK);
+addStatic('bond-floor',27,0.02,-4,7.6,0.08,7.6,0x4a4238,{noProp:true});
+addStatic('bond-ceil',27,WALL_H+0.1,-4,8.5,0.3,8.5,C_CEIL);
+addStatic('bond-desk',27.5,0.7,-5,2.6,1.4,1.4,C_DESK,{solid:true});
+addStatic('bond-desk-top',27.5,1.46,-5,2.9,0.12,1.7,C_DESKTOP);
+addStatic('bond-safe',30,0.8,-6.9,1.3,1.6,1.3,0x2e3540,{solid:true});
+addStatic('bond-safe-dial',29.4,0.9,-6.9,0.14,0.3,0.3,0x9aa2ac,{noProp:true});
+addStatic('bond-phone',26.6,1.62,-5.2,0.4,0.2,0.3,0x1a1d22,{noProp:true});
+fluoroLight(27,4.2,-4,0.6,0xf2e2c2);
+// alley: behind precinct z[-40.5,-36] and east side x[18,22.6] down to street
+addStatic('alley-floor',-1,-0.08,-38.2,46,0.16,4.6,0x2c2f34,{noProp:true});
+addStatic('alley-floor-e',20.3,-0.08,-16,4.6,0.16,49,0x2c2f34,{noProp:true});
+addStatic('alley-back-fence',-1,1.5,-40.4,46,3,0.4,0x3d444c,{solid:true,los:true});
+addStatic('alley-e-fence',22.6,1.5,-17,0.4,3,47,0x3d444c,{solid:true,los:true});
+addStatic('dumpster',-21.5,0.85,-38.2,2.6,1.7,1.7,0x2e4438,{solid:true});
+addStatic('dumpster-lid',-21.5,1.78,-38.2,2.7,0.16,1.8,0x243a2e,{noProp:true});
+addStatic('dumpster2',-18.4,0.75,-38.6,2,1.5,1.5,0x44342a,{solid:true});
+addStatic('alley-deadend',-24,1.4,-38.2,0.5,2.8,4.4,0x3d444c,{solid:true,los:true}); // west dead end: east is THE way
+// K-9 kennel pen — the rear exit's toll booth
+function penFence(name,x,z,w,d){
+  addStatic(name+'-rail-b',x,0.25,z,w,0.3,d,C_CAGE);
+  addStatic(name+'-rail-t',x,1.35,z,w,0.3,d,C_CAGE,{noProp:true});
+  const len=Math.max(w,d), n=Math.floor(len/0.75);
+  for(let i=0;i<=n;i++){ const t=i/n-0.5;
+    if(w>d) addStatic(name+'-p'+i,x+t*(w-0.3),0.8,z,0.3,1.4,0.3,C_CAGE,{noProp:true});
+    else addStatic(name+'-p'+i,x,0.8,z+t*(d-0.3),0.3,1.4,0.3,C_CAGE,{noProp:true});}
+  colliders.push({minX:x-w/2,maxX:x+w/2,minZ:z-d/2,maxZ:z+d/2,tag:name});
+}
+penFence('pen-s',5.2,-36.6,5.6,0.34);
+penFence('pen-e',8,-38.4,0.34,4);
+penFence('pen-w',2.4,-38.4,0.34,4);
+addStatic('doghouse',6.6,0.65,-39.4,1.5,1.3,1.4,0x5c422e,{});
+addStatic('doghouse-roof',6.6,1.4,-39.4,1.7,0.22,1.6,0x462f1e);
+addStatic('dog-bowl',3.4,0.12,-39,0.55,0.24,0.55,0x8f9aa4);
+// world bounds fences (west + street ends) so the map is watertight
+addStatic('bound-w',-30,1.4,-10,0.5,2.8,62,0x3d444c,{solid:true,los:true});
+addStatic('bound-e',33.5,1.4,-10,0.5,2.8,62,0x3d444c,{solid:true,los:true});
+addStatic('bound-s',1.5,1.4,17.5,64,2.8,0.5,0x30353c,{solid:true,los:true});
+
+/* ---------- fluorescent fixtures (tubes flush to ceiling; one FLICKERS) ---- */
+const tubeMatOn = new THREE.MeshBasicMaterial({color:0xeaf7ec});
+const tubeMatOff = new THREE.MeshBasicMaterial({color:0x3c443f});
+const tubeMatBuzz = new THREE.MeshBasicMaterial({color:0x93a695});
+const flickTubes=[];
+function fixture(x,z,ry,flick){
+  addStatic('fix-frame',x,5.06,z,2.5,0.22,0.66,0x444b52,{ry:ry||0});
+  for(let k=-1;k<=1;k+=2){
+    const t=new THREE.Mesh(new THREE.BoxGeometry(2.3,0.12,0.16),flick?tubeMatBuzz:tubeMatOn);
+    t.position.set(x,4.93,z+k*0.17);
+    if(ry) t.rotation.y=ry;
+    scene.add(t); if(flick) flickTubes.push(t);
+  }
+}
+fixture(0,-6,0); fixture(0,-2.5,0);
+fixture(-17,-6,0); fixture(-17,-2.5,0);
+fixture(-11,-18.5,0,true);          // THE flicker — over the cage gate + clerk
+fixture(-17,-28,0);                  // records? no: evidence rear
+fixture(0,-16,Math.PI/2); fixture(0,-24,Math.PI/2); fixture(0,-32,Math.PI/2);
+fixture(11,-29,0); fixture(10,-18,0); fixture(-14,-31.5,0);
+
+/* ---------- signs / boards / plates (canvas textures) ---------- */
+function mountSign(mesh,x,y,z,ry){ mesh.position.set(x,y,z); mesh.rotation.y=ry||0; scene.add(mesh); return mesh; }
+mountSign(texPlane(6.4,1.05,(g,w,h)=>{signText(g,w,h,'#10151d','#e8ecf2',['13TH  PRECINCT'],54,'Arial Black');
+  g.strokeStyle='#e8b23a'; g.lineWidth=6; g.strokeRect(6,6,w-12,h-12);},512,96), 0,4,0.05,Math.PI);
+mountSign(texPlane(2.4,0.5,(g,w,h)=>signText(g,w,h,'#1c2733','#dfe8f0',['POLICE  DEPT.'],30),256,56), 0,3.1,0.05,Math.PI);
+mountSign(texPlane(2.6,0.55,(g,w,h)=>signText(g,w,h,'#2a2016','#e8b23a',['EVIDENCE'],44),256,64), -6.2,3.9,-12.31,Math.PI);
+mountSign(texPlane(2.6,0.55,(g,w,h)=>signText(g,w,h,'#16202a','#cfe0ea',['HOLDING'],44),256,64), 4.5,3.9,-12.31,Math.PI);
+mountSign(texPlane(2.2,0.5,(g,w,h)=>signText(g,w,h,'#16202a','#cfe0ea',['BAIL / FINES'],30),256,56), 9.69,3.35,-6.7,-Math.PI/2);
+mountSign(texPlane(2.4,0.5,(g,w,h)=>signText(g,w,h,'#241a12','#e0c890',['INTERVIEW  1'],30),256,56), 2.51,3.9,-28.5,Math.PI/2);
+mountSign(texPlane(2.9,0.6,(g,w,h)=>signText(g,w,h,'#3a1712','#f2d2c2',['NO METAL PAST','THIS POINT'],26),256,80), 0,3.62,-1.6,0);
+mountSign(texPlane(2.2,0.5,(g,w,h)=>signText(g,w,h,'#132015','#cde6d0',['FIRE EXIT'],34),256,56), 0,3.85,-35.35,0);
+mountSign(texPlane(1.6,0.4,(g,w,h)=>signText(g,w,h,'#1c2430','#b8c6d2',['K-9  UNIT'],30),256,52), 5.2,1.7,-36.42,0);
+mountSign(texPlane(2.4,0.55,(g,w,h)=>signText(g,w,h,'#20180e','#e8d0a0',['RECORDS'],40),256,60), -2.51,3.9,-29.7,Math.PI/2);
+// wall clock over the front desk (the shift clock, diegetic twin of the HUD)
+const wallClock=mountSign(texPlane(1.15,1.15,(g,w,h)=>{},128,128), -4.5,3.6,-11.65,0);
+// cell graffiti — cell-block-z homage
+mountSign(texPlane(2.6,1.2,(g,w,h)=>{g.fillStyle='#5a6058'; g.fillRect(0,0,w,h);
+  g.fillStyle='#39413b'; g.font='42px Courier New'; g.textAlign='center';
+  g.fillText('Z WUZ HERE',w/2,52); g.font='26px Courier New';
+  for(let i=0;i<9;i++) g.fillRect(30+i*22,72,4,30); g.fillRect(24,86,190,4);},256,110), 17.68,1.9,-15.5,-Math.PI/2);
+// bondsman neon — flickers alive (it has one job: pull your eye next door)
+const neon=mountSign(texPlane(4.4,1.1,(g,w,h)=>{g.fillStyle='#0c0a14'; g.fillRect(0,0,w,h);
+  g.font='60px Arial Black'; g.textAlign='center'; g.textBaseline='middle';
+  g.shadowColor='#ff4fd2'; g.shadowBlur=22; g.fillStyle='#ff9fe8'; g.fillText('BAIL BOND$',w/2,h/2-8);
+  g.shadowBlur=0; g.font='24px Arial'; g.fillStyle='#7fe8ff'; g.fillText('O P E N   A L L   N I G H T',w/2,h-22);},512,128), 26,3.5,0.06,Math.PI);
+neon.material.transparent=false;
+// wanted board (lobby west wall): 4 posters, one of them is YOU
+function pixelMug(g,x,y,s,skin,hood,seed){
+  const r=mulberry32(seed);
+  g.fillStyle='#20242c'; g.fillRect(x,y,s,s*1.2);
+  g.fillStyle=skin; g.fillRect(x+s*0.25,y+s*0.28,s*0.5,s*0.55);
+  g.fillStyle='#101318';
+  g.fillRect(x+s*0.32,y+s*0.45,s*0.1,s*0.08); g.fillRect(x+s*0.58,y+s*0.45,s*0.1,s*0.08);
+  if(hood){ g.fillStyle='#2e2f36'; g.fillRect(x+s*0.15,y+s*0.14,s*0.7,s*0.26);
+    g.fillRect(x+s*0.15,y+s*0.14,s*0.14,s*0.6); g.fillRect(x+s*0.71,y+s*0.14,s*0.14,s*0.6);}
+  else { g.fillStyle=['#3a2e1e','#14161a','#5a4a2e'][Math.floor(r()*3)];
+    g.fillRect(x+s*0.22,y+s*0.16,s*0.56,s*0.18);}
+  g.fillStyle=skin; g.fillRect(x+s*0.38,y+s*0.66,s*0.24,s*0.1);
+}
+const wantedBoard=mountSign(texPlane(3.6,2.4,(g,w,h)=>{
+  g.fillStyle='#6a5335'; g.fillRect(0,0,w,h);
+  g.fillStyle='#4e3c24'; g.fillRect(0,0,w,26);
+  g.fillStyle='#f2e2b8'; g.font='22px Arial Black'; g.textAlign='center'; g.fillText('WANTED — 13TH PCT',w/2,20);
+  const names=['R. CALDERA','"KNUCKLES"','UNKNOWN ASSOCIATE','M. OKAFOR'];
+  for(let i=0;i<4;i++){ const px=18+i*92;
+    g.fillStyle='#e8e2cc'; g.fillRect(px,42,80,120);
+    pixelMug(g,px+8,50,64,['#c89878','#e8b088','#caa27e','#8a5c3e'][i], i===2, 40+i);
+    g.fillStyle='#1a1a1a'; g.font='11px Arial'; g.fillText(names[i],px+40,152);
+    if(i===2){ g.strokeStyle='#c8402f'; g.lineWidth=3; g.strokeRect(px-3,39,86,126);
+      g.fillStyle='#c8402f'; g.font='10px Arial Black'; g.fillText('SEEN NEAR PCT',px+40,164);} }
+},384,256), -9.68,2.4,-5,Math.PI/2);
+// duty roster board — LIVE canvas: schedule + who's on post right now
+const dutyBoard=mountSign(texPlane(3.9,2.6,()=>{},416,288), -23.68,2.55,-7.5,Math.PI/2);
+// evidence-cage nameplate — swaps texture with the clerk shift: READ IT
+const namePlate=mountSign(texPlane(1.15,0.34,()=>{},256,72), -8.2,1.62,-18.5,Math.PI/2);
+namePlate.rotation.x=-0.35;
+// custody log clipboard on the clerk desk
+mountSign(texPlane(0.62,0.85,(g,w,h)=>{g.fillStyle='#c8c0a4'; g.fillRect(0,0,w,h);
+  g.fillStyle='#2a2a2a'; g.font='13px Courier New'; g.textAlign='left';
+  g.fillText('CHAIN OF CUSTODY',8,20); for(let i=0;i<7;i++){g.fillRect(8,34+i*13,w-40,2);}
+  g.fillStyle='#5a2020'; g.fillText('E-3312 ... HOLD',8,132);},128,160), -9.35,1.56,-17.4,0);
+
+/* ---------- dynamic meshes: doors, gate, cone, dressing ---------- */
+const glassMat=new THREE.MeshLambertMaterial({color:0x9fc8d8,transparent:true,opacity:0.32});
+const doorL=new THREE.Mesh(new THREE.BoxGeometry(1.7,3.4,0.16),glassMat); doorL.position.set(-0.88,1.7,-0.3); scene.add(doorL);
+const doorR=doorL.clone(); doorR.position.x=0.88; scene.add(doorR);
+addStatic('door-frame-l',-1.83,2.15,-0.3,0.34,4.3,0.5,C_STEEL,{noProp:true});
+addStatic('door-frame-r',1.83,2.15,-0.3,0.34,4.3,0.5,C_STEEL,{noProp:true});
+// interrogation viewing glass (one-way: lambert tinted dark from corridor side)
+const viewGlass=new THREE.Mesh(new THREE.BoxGeometry(0.18,2,4.1),
+  new THREE.MeshLambertMaterial({color:0x24303a,transparent:true,opacity:0.55}));
+viewGlass.position.set(7,2.1,-29.05); scene.add(viewGlass);
+// rear fire door (hinged; opens from inside; stays ajar = detector bypass)
+const fireDoor=new THREE.Group(); fireDoor.position.set(-1.4,0,-35.7);
+const fdPanel=new THREE.Mesh(new THREE.BoxGeometry(2.7,3.6,0.22),new THREE.MeshLambertMaterial({color:0x7a3f34}));
+fdPanel.position.set(1.35,1.8,0); fireDoor.add(fdPanel);
+const fdBar=new THREE.Mesh(new THREE.BoxGeometry(2.1,0.18,0.3),new THREE.MeshLambertMaterial({color:0xc8ccd2}));
+fdBar.position.set(1.35,1.5,0.2); fireDoor.add(fdBar);
+scene.add(fireDoor);
+const fireDoorCollider={minX:-1.5,maxX:1.5,minZ:-36,maxZ:-35.4,tag:'fire-door'};
+colliders.push(fireDoorCollider);
+// evidence cage gate (hinged at z=-17.6... gap z[-19.4,-17.6] on x=-12)
+const cageGate=new THREE.Group(); cageGate.position.set(-12,0,-17.6);
+(function(){
+  const m=new THREE.MeshLambertMaterial({color:C_CAGE});
+  for(let i=0;i<4;i++){const b=new THREE.Mesh(new THREE.BoxGeometry(0.26,3.2,0.26),m);
+    b.position.set(0,1.75,-0.25-i*0.44); cageGate.add(b);}
+  const rt=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.26,1.8),m); rt.position.set(0,3.25,-0.9); cageGate.add(rt);
+  const rb=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.26,1.8),m); rb.position.set(0,0.35,-0.9); cageGate.add(rb);
+  const lock=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.4,0.3),new THREE.MeshLambertMaterial({color:0xb8a24a}));
+  lock.position.set(0,1.5,-1.55); cageGate.add(lock);
+})();
+scene.add(cageGate);
+const cageGateCollider={minX:-12.2,maxX:-11.8,minZ:-19.4,maxZ:-17.6,tag:'cage-gate'};
+colliders.push(cageGateCollider);
+// cell doors (barred, slide open on release/booking)
+function cellDoor(z0){
+  const g=new THREE.Group(); g.position.set(6,0,z0);
+  const m=new THREE.MeshLambertMaterial({color:C_BARS});
+  for(let i=0;i<3;i++){const b=new THREE.Mesh(new THREE.BoxGeometry(0.26,3.2,0.26),m);
+    b.position.set(0,1.75,0.2+i*0.4); g.add(b);}
+  const rt=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.24,1.3),m); rt.position.set(0,3.2,0.6); g.add(rt);
+  const rb=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.24,1.3),m); rb.position.set(0,0.35,0.6); g.add(rb);
+  scene.add(g); return g;
+}
+const cellDoorA=cellDoor(-20.4), cellDoorB=cellDoor(-14.6);
+const cellDoorACol={minX:5.8,maxX:6.2,minZ:-20.4,maxZ:-19.2,tag:'cellA-door'};
+const cellDoorBCol={minX:5.8,maxX:6.2,minZ:-14.6,maxZ:-13.4,tag:'cellB-door'};
+colliders.push(cellDoorACol,cellDoorBCol);
+// booking camera + sweeping cone (avoid it, or wear the hood tradeoff)
+const bookCam=new THREE.Group(); bookCam.position.set(9.3,4.5,-11.3);
+(function(){
+  const arm=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.7,0.24),new THREE.MeshLambertMaterial({color:C_TRIM}));
+  arm.position.set(0,0.45,0); bookCam.add(arm);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.44,0.36,0.8),new THREE.MeshLambertMaterial({color:0x1e232a}));
+  body.position.set(0,0,0.2); bookCam.add(body);
+  const lens=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.2,0.2),new THREE.MeshBasicMaterial({color:0x66d8ff}));
+  lens.position.set(0,0,0.66); bookCam.add(lens);
+  const rec=new THREE.Mesh(new THREE.BoxGeometry(0.1,0.1,0.1),new THREE.MeshBasicMaterial({color:0xff4040}));
+  rec.position.set(0.18,0.16,0.45); bookCam.add(rec); bookCam.userData.rec=rec;
+})();
+scene.add(bookCam);
+const camCone=(function(){
+  const geo=new THREE.ConeGeometry(3.1,11,4,1,true);
+  const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:0xffe08a,transparent:true,opacity:0.09,
+    side:THREE.DoubleSide,depthWrite:false}));
+  m.rotation.x=Math.PI/2; // cone points +z after this? cone axis y -> rotate to lie forward
+  const grp=new THREE.Group(); m.position.set(0,0,5.5); grp.add(m); scene.add(grp);
+  grp.position.copy(bookCam.position); return grp;
+})();
+// duffel (the stash) on a cage shelf — evidence tag hanging off it
+const duffel=new THREE.Group();
+(function(){
+  const b=new THREE.Mesh(new THREE.BoxGeometry(1.15,0.55,0.5),new THREE.MeshLambertMaterial({color:0x274536}));
+  b.position.y=0.28; duffel.add(b);
+  const strap=new THREE.Mesh(new THREE.BoxGeometry(1.17,0.14,0.52),new THREE.MeshLambertMaterial({color:0x14241c}));
+  strap.position.y=0.42; duffel.add(strap);
+  const tag=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.3,0.05),new THREE.MeshBasicMaterial({color:0xe8b23a}));
+  tag.position.set(0.62,0.2,0); duffel.add(tag);
+})();
+duffel.position.set(-17,1.32,-18.7); scene.add(duffel);
+// steak (fridge -> your hand -> the dog bowl)
+const steakMesh=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.14,0.34),new THREE.MeshLambertMaterial({color:0x8e3a34}));
+steakMesh.position.set(3.4,0.28,-39); steakMesh.visible=false; scene.add(steakMesh);
+
+/* ============================================================================
+   RIGS — voxel people (sergeant bulk / rookie lanky / K-9 quadruped)
+============================================================================ */
+const matCache={};
+function rmat(c){ if(!matCache[c]) matCache[c]=new THREE.MeshLambertMaterial({color:c}); return matCache[c]; }
+function limb(w,h,d,c,jy){ const g=new THREE.Group(); g.position.y=jy;
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),rmat(c)); m.position.y=-h/2; g.add(m); return g; }
+function makeHuman(cfg){
+  // cfg: torso,legs,arms,skin,hair,cap,capColor,bulk,lanky,belt,badge,hood,mustache,tie
+  const bulk=cfg.bulk?1.22:1, lank=cfg.lanky?0.84:1, tall=cfg.lanky?1.07:1;
+  const g=new THREE.Group();
+  const ll=limb(0.34*bulk,0.95*tall,0.34,cfg.legs,0.95*tall), rl=limb(0.34*bulk,0.95*tall,0.34,cfg.legs,0.95*tall);
+  ll.position.x=-0.23*bulk; rl.position.x=0.23*bulk;
+  const torso=new THREE.Mesh(new THREE.BoxGeometry(0.92*bulk*lank,0.95,0.52*bulk),rmat(cfg.torso));
+  torso.position.y=1.42*tall;
+  const collar=new THREE.Mesh(new THREE.BoxGeometry(0.94*bulk*lank,0.18,0.54*bulk),rmat(cfg.collar||cfg.torso));
+  collar.position.y=1.86*tall;
+  const la=limb(0.3,0.92,0.3,cfg.arms,1.84*tall), ra=limb(0.3,0.92,0.3,cfg.arms,1.84*tall);
+  la.position.x=-(0.62*bulk*lank); ra.position.x=0.62*bulk*lank;
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6),rmat(cfg.skin)); head.position.y=2.2*tall;
+  g.add(ll,rl,torso,collar,la,ra,head);
+  if(cfg.belt){ const b=new THREE.Mesh(new THREE.BoxGeometry(0.96*bulk*lank,0.18,0.56*bulk),rmat(0x14171c));
+    b.position.y=1.0*tall; g.add(b);
+    const hol=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.34,0.24),rmat(0x14171c));
+    hol.position.set(0.5*bulk,0.88*tall,0.1); g.add(hol); }
+  if(cfg.badge){ const bd=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.16,0.08),rmat(0xd8b84a));
+    bd.position.set(-0.24*bulk,1.62*tall,0.28*bulk); g.add(bd); }
+  if(cfg.tie){ const t=new THREE.Mesh(new THREE.BoxGeometry(0.16,0.5,0.08),rmat(cfg.tie));
+    t.position.set(0,1.5*tall,0.28*bulk); g.add(t); }
+  let hoodMesh=null,hairMesh=null;
+  if(cfg.cap){ const cap=new THREE.Mesh(new THREE.BoxGeometry(0.66,0.2,0.66),rmat(cfg.capColor||0x1b2a44));
+    cap.position.y=2.56*tall; g.add(cap);
+    const brim=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.1,0.32),rmat(cfg.capColor||0x1b2a44));
+    brim.position.set(0,2.47*tall,0.42); g.add(brim); }
+  else { hairMesh=new THREE.Mesh(new THREE.BoxGeometry(0.64,0.2,0.64),rmat(cfg.hair||0x2e2318));
+    hairMesh.position.y=2.54*tall; g.add(hairMesh); }
+  if(cfg.hood){ hoodMesh=new THREE.Group();
+    const hb=new THREE.Mesh(new THREE.BoxGeometry(0.74,0.5,0.74),rmat(cfg.hoodColor||0x2e2f36)); hb.position.y=2.42*tall;
+    const hs=new THREE.Mesh(new THREE.BoxGeometry(0.74,0.34,0.2),rmat(cfg.hoodColor||0x2e2f36));
+    hs.position.set(0,2.12*tall,-0.3); hoodMesh.add(hb,hs); hoodMesh.visible=false; g.add(hoodMesh); }
+  if(cfg.mustache){ const mu=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.1,0.1),rmat(0x3a2c1c));
+    mu.position.set(0,2.08*tall,0.31); g.add(mu); }
+  const cup=new THREE.Mesh(new THREE.BoxGeometry(0.18,0.22,0.18),rmat(0xe8e4d4));
+  cup.position.set(0,-0.75,-0.14); cup.visible=false; ra.add(cup);
+  return {group:g,parts:{ll,rl,la,ra,head,torso},cup,hoodMesh,hairMesh,phase:brand()*6,tall};
+}
+function makeDog(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.15,0.55,0.5),rmat(0x6b5232)); body.position.y=0.72; g.add(body);
+  const saddle=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.2,0.52),rmat(0x14171c)); saddle.position.set(-0.05,1.0,0); g.add(saddle);
+  const headG=new THREE.Group(); headG.position.set(0.62,0.95,0);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.4,0.4),rmat(0x5c4526)); headG.add(head);
+  const snout=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.2,0.24),rmat(0x2a2018)); snout.position.set(0.3,-0.06,0); headG.add(snout);
+  const earL=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.24,0.1),rmat(0x2a2018)); earL.position.set(-0.08,0.3,0.13); headG.add(earL);
+  const earR=earL.clone(); earR.position.z=-0.13; headG.add(earR);
+  g.add(headG);
+  const legs=[];
+  [[0.42,0.18],[0.42,-0.18],[-0.42,0.18],[-0.42,-0.18]].forEach(o=>{
+    const l=limb(0.3,0.5,0.3,0x4a3a24,0.5); l.position.set(o[0],0,o[1]); g.add(l); legs.push(l); });
+  const tail=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.14,0.14),rmat(0x4a3a24));
+  tail.position.set(-0.72,0.86,0); tail.rotation.z=0.5; g.add(tail);
+  return {group:g,head:headG,legs,tail,phase:0};
+}
+function animHuman(ch,speed,dt,vt){
+  const target=Math.min(speed/5,1)*0.62;
+  ch.phase+=dt*(3.6+speed*1.2);
+  const sw=Math.sin(ch.phase)*(speed>0.2?target:0);
+  const k=1-Math.pow(0.001,dt);
+  ch.parts.ll.rotation.x+=((speed>0.2? sw:0)-ch.parts.ll.rotation.x)*k;
+  ch.parts.rl.rotation.x+=((speed>0.2?-sw:0)-ch.parts.rl.rotation.x)*k;
+  if(!ch.lockArms){
+    ch.parts.la.rotation.x+=((speed>0.2?-sw*0.8:0)-ch.parts.la.rotation.x)*k;
+    ch.parts.ra.rotation.x+=((speed>0.2? sw*0.8:0)-ch.parts.ra.rotation.x)*k;
+  }
+  if(speed<=0.2&&!ch.lockArms){ const idle=Math.sin(vt*1.4+ch.phase)*0.03;
+    ch.parts.la.rotation.z=idle; ch.parts.ra.rotation.z=-idle; }
+}
+function poseSit(ch){ ch.parts.ll.rotation.x=-1.45; ch.parts.rl.rotation.x=-1.45;
+  ch.parts.la.rotation.x=-0.5; ch.parts.ra.rotation.x=-0.5; ch.lockArms=true; }
+function poseStand(ch){ ch.lockArms=false; ch.cup.visible=false;
+  ch.parts.la.rotation.set(0,0,0); ch.parts.ra.rotation.set(0,0,0);
+  ch.parts.ll.rotation.set(0,0,0); ch.parts.rl.rotation.set(0,0,0); }
+function poseSip(ch,vt){ ch.lockArms=true; ch.cup.visible=true;
+  ch.parts.ra.rotation.x=-2.1+Math.sin(vt*1.1)*0.12; ch.parts.la.rotation.x=-0.15; }
+function poseStudy(ch){ ch.lockArms=true; ch.parts.la.rotation.x=-0.4; ch.parts.ra.rotation.x=-0.9;
+  ch.parts.ra.rotation.z=-0.35; }
+function poseCuffed(ch){ ch.lockArms=true; ch.parts.ll.rotation.x=-1.45; ch.parts.rl.rotation.x=-1.45;
+  ch.parts.la.rotation.x=-0.75; ch.parts.ra.rotation.x=-0.75;
+  ch.parts.la.rotation.z=0.28; ch.parts.ra.rotation.z=-0.28; }
+
+/* ============================================================================
+   PEOPLE — roster, schedules, routes
+============================================================================ */
+const POSTS={
+  frontDesk:{x:-4.5,z:-9.6,yaw:Math.atan2(4.5,9.6)},          // faces the door
+  bail:{x:11.4,z:-6.7,yaw:Math.PI/2},                          // faces west through window
+  cage:{x:-7.9,z:-18.5,yaw:-Math.PI/2},                        // stands east of his desk, faces the gate (west)
+  reyesDesk:{x:-14.5,z:-7.0,yaw:Math.PI},                      // sits facing his desk (north)
+  vossDesk:{x:-19.5,z:-7.0,yaw:Math.PI},
+  pyeDesk:{x:-14.5,z:-1.6,yaw:Math.PI},
+  mercerDesk:{x:-19.5,z:-1.6,yaw:Math.PI},
+  interrogation:{x:12.4,z:-29,yaw:-Math.PI/2},                 // Voss faces west at table
+  coffee:{x:-22.2,z:-2.2,yaw:-Math.PI/2},
+  wanted:{x:-8.8,z:-5,yaw:-Math.PI/2},
+  records:{x:-12,z:-31.8,yaw:Math.PI},
+  lobbyA:{x:5.5,z:-9.2,yaw:0.4}, lobbyB:{x:-6.5,z:-2.6,yaw:2.6},
+};
+POSTS.cage.yaw=-Math.PI/2;
+// coffee pulls: [t, officer] — FRESH POT chime, walk, 40s sip, walk back (~55s away)
+const COFFEE=[[160,'REYES'],[320,'PYE'],[480,'VOSS'],[640,'DASILVA'],[800,'MERCER'],[960,'PYE'],[1120,'REYES']];
+const AWAY=55;
+const RECORDS_RUN=[520,585];               // Reyes leaves his desk for records
+const STUDY=[[200,212],[650,662],[1000,1012]]; // Brisco reads the wanted board (+60s memory)
+const CAGE_SHIFTS=[[0,420,'PYE'],[420,840,'MERCER'],[840,1200,'PYE']];
+const SHIFT_LEN=1200, CASE_NO='4471-B';
+function cageClerkAt(t){
+  for(const s of CAGE_SHIFTS) if(t>=s[0]&&t<s[1]){
+    for(const c of COFFEE) if(c[1]===s[2]&&t>=c[0]&&t<c[0]+AWAY) return null;
+    return s[2];
+  } return null;
+}
+function awayAt(name,t){ for(const c of COFFEE) if(c[1]===name&&t>=c[0]&&t<c[0]+AWAY) return true; return false; }
+function rosterAt(t){
+  t=Math.max(0,Math.min(SHIFT_LEN,t));
+  return {
+    frontDesk:'KOWALCZYK',
+    lobby: 'BRISCO',
+    bail: awayAt('DASILVA',t)?null:'DASILVA',
+    cage: cageClerkAt(t),
+    bullpenDesk: (awayAt('REYES',t)||(t>=RECORDS_RUN[0]&&t<RECORDS_RUN[1]))?null:'REYES',
+    interrogation: (t<120)?null:(awayAt('VOSS',t)?null:(S&&S.lawyered?null:'VOSS')),
+    k9:'REX',
+  };
+}
+const officers={};
+function addOfficer(name,rig,post){
+  const o={name,rig,post,pos:new THREE.Vector3(POSTS[post].x,0,POSTS[post].z),
+    yaw:POSTS[post].yaw,mode:'post',walkQ:[],speed:2.7,seen:false,onDuty:true};
+  rig.group.position.copy(o.pos); rig.group.rotation.y=o.yaw;
+  scene.add(rig.group); officers[name]=o; return o;
+}
+const NAVY={torso:0x24407a,legs:0x1b2a44,collar:0x16264a,arms:0x24407a,skin:0xe8b58c,belt:true,badge:true,cap:true};
+addOfficer('KOWALCZYK',makeHuman({...NAVY,bulk:true,mustache:true,cap:true,capColor:0x14213a,skin:0xdca87e,hair:0x2a2016}),'frontDesk');
+addOfficer('BRISCO',makeHuman({...NAVY,skin:0x9a6a48}),'lobbyA');
+addOfficer('DASILVA',makeHuman({torso:0x5a6478,legs:0x2e3440,collar:0x49536a,arms:0x5a6478,skin:0xd8a882,hair:0x1a140e,tie:0x8a2e3c}),'bail');
+addOfficer('PYE',makeHuman({...NAVY,lanky:true,cap:false,skin:0xe8c098,hair:0xc87e3a}),'cage');
+addOfficer('MERCER',makeHuman({...NAVY,bulk:true,cap:false,skin:0xba8a66,hair:0x8a8a8a,mustache:true}),'mercerDesk');
+addOfficer('REYES',makeHuman({torso:0x6a5a48,legs:0x3a3430,collar:0x584a3a,arms:0x6a5a48,skin:0xc08a5e,hair:0x14100c,tie:0x2e4458,badge:true}),'reyesDesk');
+addOfficer('VOSS',makeHuman({torso:0x4a4450,legs:0x2c2830,collar:0x3c3844,arms:0x4a4450,skin:0xe0b090,hair:0x3c342a,tie:0x5c2430,badge:true}),'vossDesk');
+// the boy — LT. DECKER, crew colors, gold chain
+const decker=makeHuman({torso:0x1f6f6a,legs:0x23262c,collar:0x184f4c,arms:0x1f6f6a,skin:0xc89878,hair:0x14161a});
+(function(){ const chain=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.08,0.06),rmat(0xd8b84a));
+  chain.position.set(0,1.72,0.28); decker.group.add(chain); })();
+decker.group.position.set(11,0,-21.5); decker.group.rotation.y=Math.PI/2;
+scene.add(decker.group);
+// MOE the drunk (cell B) — worships the coffee pot out loud
+const moe=makeHuman({torso:0x7a6a3a,legs:0x4a4034,collar:0x6a5a30,arms:0x7a6a3a,skin:0xd8a070,hair:0x3a3428});
+moe.group.position.set(15.5,0.55,-13.6); moe.group.rotation.y=Math.PI; poseSit(moe);
+moe.group.position.y=0.35; scene.add(moe.group);
+// LOU the bondsman — loud shirt, louder vig
+const lou=makeHuman({torso:0xa04a68,legs:0x2e2a34,collar:0xc8a04a,arms:0xa04a68,skin:0xe0b088,hair:0x201a14,bulk:true});
+lou.group.position.set(27.5,0,-6.2); lou.group.rotation.y=0; scene.add(lou.group);
+// REX
+const rex=makeDog(); rex.group.position.set(5.2,0,-38.3); rex.group.rotation.y=-0.6; scene.add(rex.group);
+// player
+const player=makeHuman({torso:0x33363e,legs:0x23252b,collar:0x2a2d34,arms:0x33363e,skin:0xd8a878,hair:0x191512,hood:true,hoodColor:0x2e2f36});
+scene.add(player.group);
+const P={pos:new THREE.Vector3(0,0,9),vy:0,grounded:true,sneak:false,yaw:Math.PI,speed:0};
+player.group.position.copy(P.pos);
+
+/* ---------- officer walk routing (hand-authored waypoint net) ---------- */
+const NAV={
+  lobby:{x:0,z:-6}, lobbyDoorW:{x:-10,z:-7}, bullpen:{x:-17,z:-6}, coffee:{x:-22.2,z:-2.2},
+  corrS:{x:0,z:-13}, corrM:{x:0,z:-20}, corrE1:{x:0,z:-25.8}, corrN:{x:0,z:-33},
+  evDoor:{x:-2.2,z:-17.7}, evRoom:{x:-6,z:-18.5}, holdDoor:{x:2.2,z:-14.3}, holdWalk:{x:4.2,z:-19},
+  cellA:{x:7.2,z:-19.8}, obsDoor:{x:2.2,z:-28.5}, obs:{x:4.6,z:-28.5}, interDoor:{x:7.6,z:-25.6},
+  inter:{x:10.5,z:-27}, recDoor:{x:-2.2,z:-29.7}, records:{x:-12,z:-31.8}, bailGate:{x:10,z:-10.6},
+};
+const ROUTES={ // named routes as waypoint key lists (walked forward; reversed to return)
+  'reyesDesk>coffee':['bullpen','coffee'],
+  'vossDesk>coffee':['bullpen','coffee'],
+  'pyeDesk>coffee':['bullpen','coffee'],
+  'mercerDesk>coffee':['bullpen','coffee'],
+  'cage>coffee':['evRoom','evDoor','corrM','corrS','lobby','lobbyDoorW','bullpen','coffee'],
+  'bail>coffee':['bailGate','lobby','lobbyDoorW','bullpen','coffee'],
+  'cage>pyeDesk':['evRoom','evDoor','corrM','corrS','lobby','lobbyDoorW','bullpen'],
+  'cage>mercerDesk':['evRoom','evDoor','corrM','corrS','lobby','lobbyDoorW','bullpen'],
+  'pyeDesk>cage':['bullpen','lobbyDoorW','lobby','corrS','corrM','evDoor','evRoom'],
+  'mercerDesk>cage':['bullpen','lobbyDoorW','lobby','corrS','corrM','evDoor','evRoom'],
+  'reyesDesk>records':['bullpen','lobbyDoorW','lobby','corrS','corrM','corrN','recDoor','records'],
+  'vossDesk>interrogation':['bullpen','lobbyDoorW','lobby','corrS','corrM','corrE1','obsDoor','obs','interDoor','inter'],
+  'lobbyA>wanted':['lobby'],
+};
+function routePoints(fromPost,toPost){
+  const key=fromPost+'>'+toPost, rev=toPost+'>'+fromPost;
+  let keys=null,flip=false;
+  if(ROUTES[key]) keys=ROUTES[key];
+  else if(ROUTES[rev]){keys=ROUTES[rev].slice().reverse(); flip=true;}
+  const pts=[];
+  if(keys) for(const k of keys) pts.push({x:NAV[k].x,z:NAV[k].z});
+  pts.push({x:POSTS[toPost].x,z:POSTS[toPost].z});
+  return pts;
+}
+function sendOfficer(o,toPost,mode){
+  o.walkQ=routePoints(o.curPost||o.post,toPost);
+  o.curPost=toPost; o.mode=mode||'walk'; o.targetYaw=POSTS[toPost].yaw;
+}
+
+/* ============================================================================
+   SIM STATE + STEP
+============================================================================ */
+const FLICK=(function(){ // deterministic flicker schedule for the whole shift
+  const ev=[]; let t=6;
+  while(t<SHIFT_LEN+40){ const dark=1.6+brand()*0.9; ev.push({warn:t-0.8,off:t,on:t+dark}); t+=6+brand()*7; }
+  return ev;
+})();
+function flickerPhaseAt(t){
+  for(const e of FLICK){ if(t>=e.warn&&t<e.off) return 'warn'; if(t>=e.off&&t<e.on) return 'dark'; }
+  return 'lit';
+}
+let S=null;
+function freshState(){
+  return {
+    t:0, ended:false, ending:null, endWhy:'', detained:false,
+    heat:0, heatPeak:0, cash:800, paid:0, loanGot:0, loanOwed:0,
+    charges:35, chargesKicked:false, lawyered:false, talking:false,
+    custody:[
+      {t:'-1d', item:'E-3298 (9mm pistol)', caseNo:'4466-A', badge:'PCT-STAR', clerk:'MERCER', action:'SIGN-IN'},
+      {t:'-4h', item:'E-3312 (duffel, narcotics)', caseNo:CASE_NO, badge:'PCT-STAR', clerk:'PYE', action:'SIGN-IN'},
+    ],
+    inv:{picks:true,badge:false,caseNo:null,steak:false,duffel:false,card:true},
+    hood:false, planterPicks:false, confiscated:false,
+    password:false, bribed:false, bailPaid:false, releaseAt:null, released:false, following:false,
+    steakDeployed:false, dogEatUntil:0, dogBarkCd:0,
+    rearOpen:false, cageOpen:false, pickProgress:0, camAngle:0,
+    posterMemoryUntil:0, veteranStrikes:0, beeped:false, lastBeepT:-99,
+    deckerLoc:'holding',   // holding|escort|interrogation|walking-free|lobby|out
+    stashLoc:'cage',       // cage|hand
+    coffeeNow:null, camSweep:0, flickOverride:null,
+    detainT:0, extractDone:false,
+    spent:0,
+  };
+}
+function statSpent(){ return S.paid + S.loanOwed - S.loanGot; }
+function bailQuote(){ return (S.charges>=100)?null:Math.round(400+8*Math.round(S.charges)); }
+function chargeTier(){ const c=S.charges;
+  return c>=100?'RICO REFERRAL':c>=70?'TRAFFICKING':c>=45?'POSS. W/ INTENT':'POSSESSION'; }
+function clerkBlind(){ return !rosterAt(S.t).cage || currentFlick()==='dark'; }
+function currentFlick(){ return S.flickOverride || flickerPhaseAt(S.t); }
+function detectorHot(){ return !!S.inv.picks; }
+
+/* ---------- observation model (who can see the player do a crime) ---------- */
+function segBlocked(x0,z0,x1,z1){
+  for(const r of losRects){
+    let t0=0,t1=1; const dx=x1-x0,dz=z1-z0; let ok=true;
+    const p=[-dx,dx,-dz,dz], q=[x0-r.minX,r.maxX-x0,z0-r.minZ,r.maxZ-z0];
+    for(let i=0;i<4;i++){ if(Math.abs(p[i])<1e-9){ if(q[i]<0){ok=false;break;} }
+      else{ const s=q[i]/p[i]; if(p[i]<0){ if(s>t1){ok=false;break;} if(s>t0)t0=s; }
+        else{ if(s<t0){ok=false;break;} if(s<t1)t1=s; } } }
+    if(ok&&t0<t1) return true;
+  }
+  return false;
+}
+function observerOf(x,z,maxD){
+  maxD=maxD||8.5;
+  for(const n in officers){ const o=officers[n];
+    if(!o.onDuty) continue;
+    const dx=x-o.pos.x,dz=z-o.pos.z,d=Math.hypot(dx,dz);
+    if(d>maxD||d<0.01) continue;
+    const fx=Math.sin(o.yaw),fz=Math.cos(o.yaw);
+    if((fx*dx+fz*dz)/d < 0.5) continue;              // 60 degree half-cone
+    if(segBlocked(o.pos.x,o.pos.z,x,z)) continue;
+    return n;
+  }
+  return null;
+}
+
+/* ---------- dialogue ---------- */
+const LINES={
+  deckerHold:[ "Kid. The sheet's on Reyes' desk — my number's 4471-B.",
+    "Lou next door knows what the sarge drinks. Ask him about the word.",
+    "They put the bag in the cage. Rookie runs it till the vet clocks in — read the plate.",
+    "Don't bring metal past that gate. Planter outside has soft dirt. I'm just saying." ],
+  moe:[ "They ALL worship that pot, kid. Chime goes, post empties.",
+    "Third night in here. The tube over the cage still buzzin. Nobody fixes nothin.",
+    "You smell steak? I smell steak." ],
+  lou:[ "Everything's for sale in this precinct, friend. Especially mercy." ],
+  sargeNo:[ "Visiting hours. Bench is there. Sit or don't.",
+    "You lost? Bail window's the glass. Cage is police only." ],
+  clerkHint:[ "Sign-out needs a case number and a badge, pal. No exceptions." ],
+};
+function pick(arr){ return arr[Math.floor(nextRand()*arr.length)%arr.length]; }
+
+/* ---------- audio (tiny synth, gesture-guarded) ---------- */
+let actx=null;
+function initAudio(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+function tone(f,dur,type,vol,slide){
+  try{ if(!actx||actx.state!=='running') return;
+    const o=actx.createOscillator(),g=actx.createGain();
+    o.type=type||'sine'; o.frequency.value=f;
+    if(slide) o.frequency.exponentialRampToValueAtTime(slide,actx.currentTime+dur);
+    g.gain.value=0.0001; g.gain.exponentialRampToValueAtTime(vol||0.15,actx.currentTime+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,actx.currentTime+dur);
+    o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime+dur+0.02);
+  }catch(e){}
+}
+function sfx(n){
+  if(n==='beep'){ tone(1180,0.4,'square',0.22); setTimeout(()=>tone(1180,0.4,'square',0.22),450); }
+  else if(n==='tick'){ tone(640,0.06,'sine',0.1); }
+  else if(n==='chime'){ tone(880,0.12,'triangle',0.16); setTimeout(()=>tone(1174,0.2,'triangle',0.16),130); }
+  else if(n==='buzz'){ tone(120,0.5,'sawtooth',0.05,90); }
+  else if(n==='bark'){ tone(220,0.09,'square',0.2,160); setTimeout(()=>tone(200,0.11,'square',0.2,150),140); }
+  else if(n==='cash'){ tone(1046,0.08,'square',0.14); setTimeout(()=>tone(1318,0.14,'square',0.12),90); }
+  else if(n==='clang'){ tone(180,0.4,'sawtooth',0.2,70); }
+  else if(n==='win'){ [392,523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.2,'triangle',0.16),i*110)); }
+  else if(n==='lose'){ [392,349,311,262].forEach((f,i)=>setTimeout(()=>tone(f,0.3,'sawtooth',0.12),i*160)); }
+}
+
+/* ---------- HUD ---------- */
+const el={};
+['obBoy','obStash','clock','cashPill','heatBar','heatState','chargeBar','chargeState','talking','bailQ',
+ 'inv','prompt','promptText','say','toast','vignette','endTitle','endSub','endBlurb',
+ 'sTime','sCash','sHeat','sSteak'].forEach(id=>el[id]=document.getElementById(id));
+function fmt(s){ s=Math.max(0,s); const m=Math.floor(s/60),ss=Math.floor(s%60);
+  return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0'); }
+let sayT=0;
+function say(who,line){ el.say.textContent=(who?who+': ':'')+'"'+line+'"'; el.say.classList.add('show'); sayT=4.5; }
+function toast(t){ el.toast.textContent=t; el.toast.classList.remove('pop'); void el.toast.offsetWidth; el.toast.classList.add('pop'); }
+function updateHUD(){
+  el.clock.textContent=fmt(SHIFT_LEN-S.t);
+  el.clock.classList.toggle('late',SHIFT_LEN-S.t<180);
+  el.cashPill.textContent='$'+S.cash;
+  el.heatBar.style.width=Math.min(100,S.heat)+'%';
+  el.heatBar.style.background=S.heat>70?'#c8402f':S.heat>35?'#e8b23a':'#5db87a';
+  el.heatState.textContent=S.heat>70?'BURNED':S.heat>35?'NOTICED':'COLD';
+  el.chargeBar.style.width=Math.min(100,S.charges)+'%';
+  el.chargeState.textContent=S.chargesKicked?'KICKED':chargeTier();
+  el.talking.textContent=S.talking?'HE\'S TALKING':' ';
+  const q=bailQuote();
+  el.bailQ.textContent=S.chargesKicked?'':(q==null?'NO BAIL':'BAIL $'+q);
+  el.obBoy.textContent=S.released?(S.following?'with you':'walking free'):
+    S.deckerLoc==='interrogation'?'in the box, talking':'in holding';
+  el.obBoy.className=S.released?'st done':'st';
+  el.obStash.textContent=S.inv.duffel?'in hand':'in the evidence cage';
+  el.obStash.className=S.inv.duffel?'st done':'st';
+  let chips='';
+  if(S.inv.picks) chips+='<span class="chip panel metal">PICKS (METAL)</span>';
+  if(S.planterPicks) chips+='<span class="chip panel">PICKS IN PLANTER</span>';
+  if(S.inv.badge) chips+='<span class="chip panel">ESCORT BADGE</span>';
+  if(S.inv.caseNo) chips+='<span class="chip panel">CASE '+S.inv.caseNo+'</span>';
+  if(S.inv.card) chips+='<span class="chip panel">LAWYER CARD</span>';
+  if(S.inv.steak) chips+='<span class="chip panel">STEAK</span>';
+  if(S.inv.duffel) chips+='<span class="chip panel" style="color:#7fe8a8">THE STASH</span>';
+  if(S.hood) chips+='<span class="chip panel">HOOD UP</span>';
+  if(S.loanOwed) chips+='<span class="chip panel" style="color:#e88a7a">OWE LOU $'+S.loanOwed+'</span>';
+  el.inv.innerHTML=chips;
+  el.vignette.style.boxShadow='inset 0 0 190px 40px rgba(200,64,47,'+(S.heat>55?((S.heat-55)/45*0.6).toFixed(2):0)+')';
+}
+
+/* ---------- actions registry (E + numbered options; __police.act drives same path) ---------- */
+function near(x,z,r){ const dx=P.pos.x-x,dz=P.pos.z-z; return dx*dx+dz*dz<r*r; }
+const ACTIONS=[
+  {id:'planter', label:()=>S.inv.picks?'Stash the picks in the planter':'Dig up the picks',
+   avail:()=>near(3.6,1.6,2)&&(S.inv.picks||S.planterPicks),
+   run(){ if(S.inv.picks){S.inv.picks=false;S.planterPicks=true;toast('STASHED');}
+     else{S.planterPicks=false;S.inv.picks=true;toast('PICKS BACK');} }},
+  {id:'talk', label:()=>S.following?'"Stay on me."':(S.released?'"Let\'s go." (he follows)':'Talk to Decker'),
+   avail:()=>near(decker.group.position.x,decker.group.position.z,3.4)&&(S.deckerLoc==='holding'||S.deckerLoc==='lobby'),
+   run(){ if(S.released){S.following=true; say('DECKER','Right behind you. Walk normal.');}
+     else say('DECKER',pick(LINES.deckerHold)); }},
+  {id:'moe', label:()=>'Listen to the drunk',
+   avail:()=>near(15.5,-13.6,4.6)&&P.pos.x<6,
+   run(){ say('MOE',pick(LINES.moe)); }},
+  {id:'buyPassword', key:'1', label:()=>'Buy the word on the sarge — $200',
+   avail:()=>near(27,-4.4,2.6)&&!S.password,
+   run(){ if(S.cash<200){say('LOU','Short. Loans are the other thing I do.');return;}
+     S.cash-=200;S.paid+=200;S.password=true;sfx('cash');
+     say('LOU','Tell Kowalczyk: "Half-caf, extra vig." He\'ll know his price.'); }},
+  {id:'takeLoan', key:'2', label:()=>'Take a loan — $500 now, $700 owed',
+   avail:()=>near(27,-4.4,2.6)&&!S.loanGot,
+   run(){ S.cash+=500;S.loanGot=500;S.loanOwed=700;sfx('cash');
+     say('LOU','Five now, seven back by Sunday. The vig is how I stay sentimental.'); }},
+  {id:'bribeSarge', key:'1', label:()=>'"Half-caf, extra vig." — $250',
+   avail:()=>near(-4.5,-6.9,2.6)&&S.password&&!S.bribed&&!S.released&&S.releaseAt==null,
+   run(){ if(S.hood){say('KOWALCZYK','Lose the hood when you talk to me.');return;}
+     if(S.cash<250){say('KOWALCZYK','That phrase costs two-fifty. Come back heavy.');return;}
+     S.cash-=250;S.paid+=250;S.bribed=true;S.chargesKicked=true;S.talking=false;sfx('cash');
+     startRelease(); say('KOWALCZYK','Huh. Seems Decker\'s arrest sheet never got filed. Clerical.'); }},
+  {id:'sarge', label:()=>'Talk to the desk sergeant',
+   avail:()=>near(-4.5,-6.9,2.6)&&(!S.password||S.bribed||S.released||S.releaseAt!=null),
+   run(){ say('KOWALCZYK',S.bribed?'Paperwork\'s moving. Slow. Like me.':pick(LINES.sargeNo)); }},
+  {id:'payBail', label:()=>{const q=bailQuote(); return q==null?'Bail (CLOSED — RICO referral)':'Post bail — $'+q;},
+   avail:()=>near(8.6,-6.7,2.4)&&!S.released&&S.releaseAt==null&&!S.chargesKicked,
+   run(){ const q=bailQuote();
+     if(rosterAt(S.t).bail==null){say('','Window shade is down: BACK IN 5.');return;}
+     if(S.hood){say('DA SILVA','No hoods at my window, sir.');return;}
+     if(q==null){say('DA SILVA','It\'s above my pay grade now. DA has the file.');return;}
+     if(S.cash<q){say('DA SILVA','Bail is $'+q+'. You are short.');return;}
+     S.cash-=q;S.paid+=q;S.bailPaid=true;sfx('cash');startRelease();
+     say('DA SILVA','Receipt. Processing takes a minute. Wait by the desk.'); }},
+  {id:'liftBadge', label:()=>'Lift the visitor-escort badge',
+   avail:()=>near(7.5,-1.4,2)&&!S.inv.badge,
+   run(){ const w=observerOf(P.pos.x,P.pos.z);
+     if(w){S.heat+=25;toast('HEY!');say(w,'Hands off the podium.');return;}
+     S.inv.badge=true;toast('BADGE LIFTED'); }},
+  {id:'stealCase', label:()=>'Flip through Reyes\' case file',
+   avail:()=>near(-15,-8.6,2.2)&&!S.inv.caseNo,
+   run(){ if(rosterAt(S.t).bullpenDesk==='REYES'){say('REYES','That desk bites. Walk on.');S.heat+=8;return;}
+     const w=observerOf(P.pos.x,P.pos.z);
+     if(w){S.heat+=25;toast('HEY!');say(w,'Step away from the detective\'s desk.');return;}
+     S.inv.caseNo=CASE_NO;toast('CASE '+CASE_NO); }},
+  {id:'signOut', label:()=>'Sign the duffel out (case no. + badge)',
+   avail:()=>near(-8.6,-17.9,2.6)&&!S.inv.duffel&&S.stashLoc==='cage'&&rosterAt(S.t).cage!=null,
+   run(){ const clerk=rosterAt(S.t).cage;
+     if(S.hood){say(clerk,'Lose the hood in my log room.');return;}
+     if(!S.inv.caseNo){say(clerk,pick(LINES.clerkHint));return;}
+     const r=custodyCheck(S.inv.caseNo,S.inv.badge?1:0);
+     if(!r.accept){
+       if(!r.badgeOk&&clerk==='MERCER'){S.veteranStrikes++;S.heat+=22;
+         say('MERCER','Escort badge? Twenty-two years, son. Walk away.');
+         if(S.veteranStrikes>=2){S.heat=100;} return;}
+       say(clerk,'That does not check out.');S.heat+=10;return;}
+     S.custody.push({t:fmt(S.t),item:'E-3312 (duffel, narcotics)',caseNo:S.inv.caseNo,
+       badge:'VISITOR-ESCORT',clerk,action:'SIGN-OUT'});
+     S.inv.duffel=true;S.stashLoc='hand';duffel.visible=false;sfx('tick');
+     say(clerk==='PYE'?'PYE':'MERCER','Transfer to the DA run, right? Sign here.'); }},
+  {id:'pickCage', hold:true, label:()=>'Work the cage lock ('+Math.floor(S.pickProgress/3*100)+'%)',
+   avail:()=>near(-12,-18.5,2)&&!S.cageOpen&&S.inv.picks,
+   run(){ pickTick(1.1); }},
+  {id:'grabDuffel', label:()=>'Take the duffel',
+   avail:()=>S.cageOpen&&near(-17,-18.7,2)&&S.stashLoc==='cage',
+   run(){ S.inv.duffel=true;S.stashLoc='hand';duffel.visible=false;toast('THE STASH');
+     say('','No signature. No chain. Like it was never here.'); }},
+  {id:'lawyer', label:()=>'Slide the lawyer card through the tray',
+   avail:()=>near(5.6,-27.6,2.6)&&S.inv.card&&!S.lawyered&&S.deckerLoc==='interrogation',
+   run(){ S.inv.card=false;S.lawyered=true;S.talking=false;
+     say('DECKER','...I want my lawyer. Miss Ferro. Now.'); toast('HE SHUT UP'); }},
+  {id:'takeSteak', label:()=>'Take the break-room steak',
+   avail:()=>near(-23.2,-4.6,2.2)&&!S.inv.steak&&!S.steakDeployed,
+   run(){ S.inv.steak=true;toast('STEAK');say('','Somebody\'s Friday dinner. The dog needs it more.'); }},
+  {id:'steak', label:()=>'Toss the steak to REX',
+   avail:()=>near(5.2,-37.4,3.4)&&S.inv.steak,
+   run(){ S.inv.steak=false;S.steakDeployed=true;S.dogEatUntil=S.t+90;
+     steakMesh.visible=true;toast('GOOD BOY');sfx('bark'); }},
+  {id:'rearDoor', label:()=>S.rearOpen?'Slip out the fire door':'Push the fire-door bar',
+   avail:()=>near(0,-34.6,2.4),
+   run(){ if(!S.rearOpen){S.rearOpen=true;sfx('clang');
+       const i=colliders.indexOf(fireDoorCollider); if(i>=0)colliders.splice(i,1);
+       fireDoor.rotation.y=-1.9;toast('DOOR AJAR');} }},
+  {id:'rearDoorOut', label:()=>'Slip in the fire door',
+   avail:()=>near(0,-37,2)&&S.rearOpen&&P.pos.z<-35.7, run(){}},
+  {id:'extract', label:()=>'Slip away in the beater',
+   avail:()=>near(EXTRACT.x,EXTRACT.z,EXTRACT.r),
+   run(){ finishRun(); }},
+];
+let activeAction=null, altAction=null;
+function scanActions(){
+  activeAction=null; altAction=null;
+  for(const a of ACTIONS){ if(!a.avail()) continue;
+    if(!activeAction) activeAction=a; else if(!altAction){altAction=a; break;} }
+}
+function act(id){
+  const a=ACTIONS.find(a=>a.id===id);
+  if(!a) return {ok:false,err:'no such action'};
+  if(!a.avail()) return {ok:false,err:'not available here/now'};
+  a.run(); return {ok:true};
+}
+function pickTick(dt){
+  if(S.cageOpen) return;
+  if(clerkBlind()){ S.pickProgress+=dt;
+    if(S.pickProgress>=3){ S.cageOpen=true; cageGate.rotation.y=1.8;
+      const i=colliders.indexOf(cageGateCollider); if(i>=0)colliders.splice(i,1);
+      toast('CAGE OPEN'); sfx('clang'); } }
+  else { S.heat+=9*dt; if(Math.floor(S.t*2)%8===0) say(rosterAt(S.t).cage||'','Step AWAY from the cage.'); }
+}
+
+/* ---------- release + endings ---------- */
+function startRelease(){ S.releaseAt=S.t+22;
+  if(S.deckerLoc==='holding'){ cellDoorA.position.z=-22.2;
+    const i=colliders.indexOf(cellDoorACol); if(i>=0)colliders.splice(i,1); }
+  S.deckerWalk=null;
+}
+function finishRun(){
+  if(S.ended) return;
+  const boy=S.released&&S.following&&near(decker.group.position.x,decker.group.position.z,9);
+  const stash=S.inv.duffel;
+  if(boy&&stash) endGame('WIN','CLEAN GETAWAY','Boy and bag, gone before the whistle. Nobody even looked up.');
+  else if(boy) endGame('PARTIAL','HALF A JOB','Decker rides shotgun. The stash rides to the DA at shift end. He will not thank you twice.');
+  else if(stash) endGame('PARTIAL','HALF A JOB','The bag is out. Decker watches you drive off through the holding-cell bars.');
+  else endGame('LEAVE','YOU WALKED','Empty hands, clean record. The precinct never knew your name. Decker did.');
+}
+function endGame(kind,title,blurb){
+  if(S.ended) return;
+  S.ended=true;S.ending=kind;
+  el.endTitle.textContent=title;
+  el.endTitle.className='logo '+(kind==='WIN'?'win':kind==='LOSE'?'lose':'partial');
+  el.endSub.textContent=kind==='WIN'?'ALL THE WAY OUT':kind==='LOSE'?'PRECINCT 13 KEEPS YOU':kind==='PARTIAL'?'SCORED — ONE OF TWO':'NO HARM, NO FOUL';
+  el.endBlurb.textContent=blurb;
+  el.sTime.textContent=fmt(SHIFT_LEN-S.t);
+  el.sCash.textContent='$'+statSpent();
+  el.sHeat.textContent=Math.round(S.heatPeak);
+  el.sSteak.textContent=S.steakDeployed?'YES':'NO';
+  setState('end');
+  sfx(kind==='WIN'?'win':kind==='LOSE'?'lose':'chime');
+}
+function detain(){
+  if(S.detained||S.ended) return;
+  S.detained=true;S.heat=100;
+  // the homage: you end the night in cell B, looking at Moe's graffiti
+  P.pos.set(13,0,-14.5);
+  cellDoorB.position.z=-14.6;
+  camOverride={pos:new THREE.Vector3(9.2,2,-14.5),look:new THREE.Vector3(14,1.4,-14.5)};
+  toast('BOOKED');
+  setTimeout(()=>{ if(S.detained) endGame('LOSE','BOOKED','Cuffs, prints, cell B. You know how this ends — you have read the wall. Z was here too.'); },1400);
+}
+
+/* ---------- officer scheduling glue ---------- */
+function officerTick(o,dt){
+  if(o.walkQ.length){
+    const wp=o.walkQ[0];
+    const dx=wp.x-o.pos.x,dz=wp.z-o.pos.z,d=Math.hypot(dx,dz);
+    if(d<0.35){o.walkQ.shift(); if(!o.walkQ.length){o.mode=o.pendingMode||'post';o.pendingMode=null;o.yaw=o.targetYaw!=null?o.targetYaw:o.yaw;}}
+    else{ const sp=o.speed*dt; o.pos.x+=dx/d*sp; o.pos.z+=dz/d*sp; o.yaw=Math.atan2(dx,dz); o.moving=true; return;}
+  }
+  o.moving=false;
+}
+function scheduleOfficers(){
+  const t=S.t;
+  // coffee pulls
+  for(const c of COFFEE){
+    const [ct,name]=c, o=officers[name]; if(!o) continue;
+    if(t>=ct&&t<ct+AWAY){ if(o.sched!=='coffee'+ct){ o.sched='coffee'+ct; o.pendingMode='sip'; sendOfficer(o,'coffee'); sfx('chime'); } }
+    else if(o.sched==='coffee'+ct){ o.sched=null; const hp=homePost(name);
+      o.pendingMode=(hp&&hp.indexOf('Desk')>=0)?'sit':'post'; sendOfficer(o,hp); }
+  }
+  // cage shift swaps
+  const clerkNow=(function(){for(const s of CAGE_SHIFTS) if(t>=s[0]&&t<s[1]) return s[2]; return null;})();
+  for(const nm of ['PYE','MERCER']){ const o=officers[nm];
+    if(o.sched&&o.sched.startsWith('coffee')) continue;
+    const want=(clerkNow===nm)?'cage':(nm==='PYE'?'pyeDesk':'mercerDesk');
+    if(o.wantPost!==want){ o.wantPost=want; o.pendingMode=(want==='cage')?'post':'sit'; sendOfficer(o,want); } }
+  // Reyes records run
+  const rey=officers.REYES;
+  if(!(rey.sched&&rey.sched.startsWith('coffee'))){
+    if(t>=RECORDS_RUN[0]&&t<RECORDS_RUN[1]){ if(rey.wantPost!=='records'){rey.wantPost='records';rey.pendingMode='study';sendOfficer(rey,'records');} }
+    else if(rey.wantPost!=='reyesDesk'){rey.wantPost='reyesDesk';rey.pendingMode='sit';sendOfficer(rey,'reyesDesk');}
+  }
+  // Voss: desk until 120, then interrogation (unless lawyered)
+  const voss=officers.VOSS;
+  if(!(voss.sched&&voss.sched.startsWith('coffee'))){
+    const want=(t>=120&&!S.lawyered&&!S.released&&S.releaseAt==null)?'interrogation':'vossDesk';
+    if(voss.wantPost!==want){voss.wantPost=want;voss.pendingMode='sit';sendOfficer(voss,want);}
+  }
+  // Brisco wanted-board studies + lobby drift
+  const bri=officers.BRISCO;
+  let studying=false;
+  for(const w of STUDY){ if(t>=w[0]&&t<w[1]){studying=true;
+    if(bri.wantPost!=='wanted'){bri.wantPost='wanted';bri.pendingMode='study';sendOfficer(bri,'wanted');}
+    S.posterMemoryUntil=w[1]+60; } }
+  if(!studying&&bri.wantPost!=='lobbyA'&&!bri.walkQ.length){
+    bri.wantPost='lobbyA'; bri.pendingMode='post'; sendOfficer(bri,(Math.floor(t/90)%2)?'lobbyA':'lobbyB'); }
+  // Decker escort to interrogation at t=120
+  if(t>=120&&S.deckerLoc==='holding'&&S.releaseAt==null&&!S.released){
+    S.deckerLoc='escort';
+    S.deckerWalk=[{x:7.2,z:-19.8},{x:4.2,z:-19},{x:2.2,z:-14.3},{x:0,z:-14.3},{x:0,z:-25.8},
+      {x:2.2,z:-28.5},{x:4.6,z:-28.5},{x:7.6,z:-25.6},{x:9.4,z:-27},{x:9.4,z:-29}];
+    cellDoorA.position.z=-22.2;
+    const i=colliders.indexOf(cellDoorACol); if(i>=0)colliders.splice(i,1);
+  }
+}
+function homePost(name){
+  return {KOWALCZYK:'frontDesk',BRISCO:'lobbyA',DASILVA:'bail',PYE:cageClerkAt(S.t)==='PYE'?'cage':'pyeDesk',
+    MERCER:cageClerkAt(S.t)==='MERCER'?'cage':'mercerDesk',REYES:'reyesDesk',VOSS:(S.t>=120&&!S.lawyered)?'interrogation':'vossDesk'}[name];
+}
+function deckerTick(dt){
+  const g=decker.group;
+  if(S.deckerWalk&&S.deckerWalk.length){
+    const wp=S.deckerWalk[0], dx=wp.x-g.position.x,dz=wp.z-g.position.z,d=Math.hypot(dx,dz);
+    if(d<0.3){S.deckerWalk.shift();
+      if(!S.deckerWalk.length){
+        if(S.deckerLoc==='escort'){S.deckerLoc='interrogation';g.rotation.y=Math.PI/2;poseCuffed(decker);g.position.y=-0.4;}
+        if(S.deckerLoc==='walking-free'){S.deckerLoc='lobby';g.rotation.y=Math.PI;}
+      }}
+    else{const sp=2.5*dt;g.position.x+=dx/d*sp;g.position.z+=dz/d*sp;g.rotation.y=Math.atan2(dx,dz);
+      animHuman(decker,2.5,dt,visT);}
+    return;
+  }
+  if(S.following){
+    const dx=P.pos.x-g.position.x,dz=P.pos.z-g.position.z,d=Math.hypot(dx,dz);
+    if(d>2.2){const sp=Math.min(3.4,d)*dt*1.6;g.position.x+=dx/d*sp;g.position.z+=dz/d*sp;
+      g.rotation.y=Math.atan2(dx,dz);animHuman(decker,3,dt,visT);}
+    else animHuman(decker,0,dt,visT);
+    // fire-door clearance: he clips through no walls because he follows your walked line loosely
+  }
+}
+function releaseTick(){
+  if(S.releaseAt!=null&&!S.released&&S.t>=S.releaseAt){
+    S.released=true;S.releaseAt=null;S.talking=false;
+    poseStand(decker); decker.group.position.y=0;
+    // walk him to the lobby wait spot
+    const from=S.deckerLoc;
+    S.deckerLoc='walking-free';
+    S.deckerWalk=from==='interrogation'
+      ? [{x:9.4,z:-27},{x:7.6,z:-25.6},{x:4.6,z:-28.5},{x:2.2,z:-28.5},{x:0,z:-25.8},{x:0,z:-13},{x:0,z:-6},{x:2.5,z:-3}]
+      : [{x:7.2,z:-19.8},{x:4.2,z:-19},{x:2.2,z:-14.3},{x:0,z:-14.3},{x:0,z:-6},{x:2.5,z:-3}];
+    toast('RELEASED');
+  }
+}
+
+/* ---------- custody math (pure; the check gates on this) ---------- */
+function custodyCheck(caseNo,badgeTier){
+  const clerk=rosterAt(S?S.t:0).cage;
+  if(!clerk) return {clerk:null,caseOk:false,badgeOk:false,accept:false,reason:'post empty'};
+  const caseOk=caseNo===CASE_NO;
+  const badgeOk=clerk==='PYE'?badgeTier>=1:badgeTier>=2;
+  return {clerk,caseOk,badgeOk,accept:caseOk&&badgeOk,
+    reason:!caseOk?'bad case number':!badgeOk?(clerk==='MERCER'?'veteran wants a real star':'needs any badge'):'ok'};
+}
+
+/* ---------- core sim step ---------- */
+function stepSim(dt){
+  if(!S||S.ended) return;
+  S.t+=dt;
+  if(S.t>=SHIFT_LEN){
+    if(near(EXTRACT.x,EXTRACT.z,EXTRACT.r)) finishRun();
+    else endGame('LOSE','SHIFT CHANGE','The whistle. Fresh uniforms fill the lobby, the DA van backs up to the cage, and somebody finally reads the wanted board properly.');
+    return;
+  }
+  scheduleOfficers();
+  for(const n in officers) officerTick(officers[n],dt);
+  deckerTick(dt); releaseTick();
+  // charge meter: he talks in the box until lawyered/released
+  S.talking=(S.deckerLoc==='interrogation')&&!S.lawyered&&!S.chargesKicked&&rosterAt(S.t).interrogation==='VOSS';
+  if(S.talking) S.charges=Math.min(100,S.charges+dt*(100/900));
+  // booking camera sweep
+  S.camSweep+=dt*0.5;
+  const camYawNow=Math.atan2(0-9.3,-2-(-11.3))+Math.sin(S.camSweep)*0.5;
+  bookCam.rotation.y=camYawNow; camCone.rotation.y=camYawNow;
+  // heat: camera cone
+  const pdx=P.pos.x-9.3,pdz=P.pos.z-(-11.3),pd=Math.hypot(pdx,pdz);
+  if(P.pos.z>-12&&P.pos.x>-10&&P.pos.x<10&&P.pos.z<0&&pd<13){
+    const fx=Math.sin(camYawNow),fz=Math.cos(camYawNow);
+    if((fx*pdx+fz*pdz)/pd>0.86) S.heat+=dt*(S.hood?1.0:3.2);
+  }
+  // heat: cop proximity recognition (poster memory triples the bare face)
+  const memory=S.t<S.posterMemoryUntil;
+  const obs=observerOf(P.pos.x,P.pos.z,8);
+  if(obs){
+    if(S.hood) S.heat+=dt*0.7;                     // hood up indoors reads shady up close
+    else S.heat+=dt*(memory?3.9:0.55);
+    if(S.inv.duffel&&!(S.bribed&&obs==='KOWALCZYK')) S.heat+=dt*26;  // walking the evidence past a cop
+  }
+  // heat decay
+  S.heat=Math.max(0,S.heat-dt*1.6);
+  S.heatPeak=Math.max(S.heatPeak,S.heat);
+  if(S.heat>=100) detain();
+  // K-9: smells the stash through the duffel canvas
+  if(S.dogBarkCd>0) S.dogBarkCd-=dt;
+  const dogD=Math.hypot(P.pos.x-5.2,P.pos.z-(-38.3));
+  const dogEating=S.t<S.dogEatUntil;
+  if(P.pos.z<-35.4&&dogD<6.5&&!dogEating){
+    if(S.inv.duffel){ S.heat=100; toast('K-9 ALARM'); sfx('bark'); detain(); }
+    else if(S.dogBarkCd<=0){ S.dogBarkCd=15; S.heat+=6; sfx('bark'); }
+  }
+  updateHUD();
+}
+
+/* ============================================================================
+   PLAYER MOVEMENT / DETECTOR / CAMERA
+============================================================================ */
+const keys={};
+let camYaw=Math.PI, camPitch=0.42, pointerLocked=false, camOverride=null;
+const raycaster=new THREE.Raycaster(); let staticMesh=null;
+function resolveCollisions(){
+  for(const c of colliders){
+    const cx=Math.max(c.minX,Math.min(P.pos.x,c.maxX)), cz=Math.max(c.minZ,Math.min(P.pos.z,c.maxZ));
+    let dx=P.pos.x-cx,dz=P.pos.z-cz; const d2=dx*dx+dz*dz, R=0.5;
+    if(d2<R*R){ let d=Math.sqrt(d2);
+      if(d<0.0001){ const penX=Math.min(P.pos.x-c.minX,c.maxX-P.pos.x),penZ=Math.min(P.pos.z-c.minZ,c.maxZ-P.pos.z);
+        if(penX<penZ) P.pos.x+=(P.pos.x<(c.minX+c.maxX)/2?-1:1)*(penX+R);
+        else P.pos.z+=(P.pos.z<(c.minZ+c.maxZ)/2?-1:1)*(penZ+R);
+      } else { const push=(R-d)/d; P.pos.x+=dx*push; P.pos.z+=dz*push; } }
+  }
+  P.pos.x=Math.max(-29,Math.min(33,P.pos.x));
+  P.pos.z=Math.max(-40,Math.min(17,P.pos.z));
+}
+function crossDetector(prevZ){
+  if(prevZ>-2.2&&P.pos.z<=-2.2&&Math.abs(P.pos.x)<1.1){
+    if(detectorHot()){
+      S.heat+=18; S.beeped=true; S.lastBeepT=S.t; sfx('beep'); toast('DETECTOR');
+      if(S.inv.picks){ S.inv.picks=false; S.confiscated=true;
+        say('KOWALCZYK','Picks? Cute. These are mine now. Bench. NOW.'); }
+      detLamp.material.color.setHex(0xd23b2a);
+    } else { sfx('tick'); detLamp.material.color.setHex(0x2fd06a); }
+  }
+}
+function movePlayer(dt){
+  if(S.detained||S.ended) return;
+  const sinY=Math.sin(camYaw),cosY=Math.cos(camYaw);
+  let mx=0,mz=0;
+  if(keys['w']){mx-=sinY;mz-=cosY;} if(keys['s']){mx+=sinY;mz+=cosY;}
+  if(keys['d']){mx+=cosY;mz-=sinY;} if(keys['a']){mx-=cosY;mz+=sinY;}
+  const len=Math.hypot(mx,mz);
+  P.sneak=!!keys['shift'];
+  const sp=P.sneak?2.6:5.6;
+  if(len>0){mx/=len;mz/=len;}
+  const prevZ=P.pos.z;
+  P.pos.x+=mx*sp*dt*(len>0?1:0); P.pos.z+=mz*sp*dt*(len>0?1:0);
+  P.speed=len>0?sp:0;
+  if(keys[' ']&&P.grounded){P.vy=7.4;P.grounded=false;}
+  P.vy-=21*dt; P.pos.y+=P.vy*dt;
+  if(P.pos.y<=0){P.pos.y=0;P.vy=0;P.grounded=true;}
+  resolveCollisions();
+  crossDetector(prevZ);
+  player.group.position.copy(P.pos);
+  if(len>0){ const ty=Math.atan2(mx,mz);
+    let d=((ty-player.group.rotation.y+Math.PI)%(Math.PI*2))-Math.PI; if(d<-Math.PI)d+=Math.PI*2;
+    player.group.rotation.y+=d*(1-Math.pow(0.0004,dt)); P.yaw=player.group.rotation.y; }
+  const cs=P.sneak?0.72:1;
+  player.group.scale.y+=(cs-player.group.scale.y)*(1-Math.pow(0.001,dt));
+  animHuman(player,P.speed,dt,visT);
+  if(player.hoodMesh) player.hoodMesh.visible=S.hood;
+  if(player.hairMesh) player.hairMesh.visible=!S.hood;
+  // stepPlayer used by picking hold
+  if(keys['e']&&activeAction&&activeAction.hold) pickTick(dt);
+}
+const _ro=new THREE.Vector3(),_rd=new THREE.Vector3();
+function updateCamera(dt){
+  if(camOverride){ camera.position.lerp(camOverride.pos,1-Math.pow(0.0001,dt));
+    camera.lookAt(camOverride.look); return; }
+  const ty=P.pos.y+(P.sneak?1.1:1.5);
+  const cp=Math.cos(camPitch),sp=Math.sin(camPitch),dist=5.6;
+  let ox=Math.sin(camYaw)*cp*dist, oy=sp*dist, oz=Math.cos(camYaw)*cp*dist;
+  let cx=P.pos.x+ox, cy=ty+oy, cz=P.pos.z+oz;
+  _ro.set(P.pos.x,ty,P.pos.z); _rd.set(ox,oy,oz).normalize();
+  raycaster.set(_ro,_rd); raycaster.far=dist;
+  if(staticMesh){ const hit=raycaster.intersectObject(staticMesh,false);
+    if(hit.length>0&&hit[0].distance<dist){ const d=Math.max(0.5,hit[0].distance-0.35);
+      cx=P.pos.x+_rd.x*d; cy=ty+_rd.y*d; cz=P.pos.z+_rd.z*d; } }
+  cy=Math.max(cy,0.5); cy=Math.min(cy,4.9);
+  camera.position.lerp(new THREE.Vector3(cx,cy,cz),1-Math.pow(0.00008,dt));
+  camera.lookAt(P.pos.x,ty,P.pos.z);
+}
+
+/* ---------- input ---------- */
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase(); keys[k]=true;
+  if(k===' ') e.preventDefault();
+  if(state!=='playing') return;
+  if(k==='h'){S.hood=!S.hood;toast(S.hood?'HOOD UP':'HOOD DOWN');}
+  if(k==='e'&&activeAction&&!activeAction.hold) activeAction.run();
+  if(k==='1'&&activeAction) activeAction.run();
+  if(k==='2'&&altAction) altAction.run();
+  if(k==='escape'&&!BOOT) setState('paused');
+  if(actx&&actx.state==='suspended'){ try{actx.resume();}catch(err){} }
+});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+const canvas=renderer.domElement;
+function requestLock(){ try{ const p=canvas.requestPointerLock&&canvas.requestPointerLock();
+  if(p&&p.catch) p.catch(()=>{}); }catch(e){} }
+document.addEventListener('pointerlockchange',()=>{ pointerLocked=(document.pointerLockElement===canvas); });
+document.addEventListener('mousemove',e=>{ if(!pointerLocked) return;
+  camYaw-=e.movementX*0.0024; camPitch-=e.movementY*0.0024;
+  camPitch=Math.max(-0.1,Math.min(1.05,camPitch)); camOverride=null; });
+canvas.addEventListener('click',()=>{ if(state==='playing') requestLock(); });
+
+/* ---------- boards that redraw live ---------- */
+function drawDuty(){
+  const g=dutyBoard.userData.ctx,w=dutyBoard.userData.cw,h=dutyBoard.userData.ch;
+  g.fillStyle='#e8e4d4'; g.fillRect(0,0,w,h);
+  g.fillStyle='#16233a'; g.fillRect(0,0,w,34);
+  g.fillStyle='#e8b23a'; g.font='bold 20px Arial Black'; g.textAlign='center';
+  g.fillText('DUTY ROSTER — NIGHT SHIFT',w/2,24);
+  g.textAlign='left'; g.fillStyle='#20242c'; g.font='bold 13px Courier New';
+  const rows=[
+    'CAGE   0:00 PYE   7:00 MERCER  14:00 PYE',
+    'DESK   KOWALCZYK (ALL SHIFT)',
+    'BAIL   DA SILVA          LOBBY  BRISCO',
+    'CID    REYES (RECORDS 8:40)  VOSS (INT.1 2:00)',
+    'K-9    REX — REAR PEN',
+    'COFFEE 2:40 RY  5:20 PY  8:00 VO 10:40 DS',
+    '      13:20 MR 16:00 PY 18:40 RY',
+  ];
+  rows.forEach((r,i)=>g.fillText(r,14,58+i*20));
+  const ro=rosterAt(S?S.t:0);
+  g.fillStyle='#7c1d10'; g.font='bold 14px Courier New';
+  g.fillText('ON POST NOW  ('+fmt(S?S.t:0)+')',14,212);
+  g.fillStyle='#20242c'; g.font='13px Courier New';
+  g.fillText('DESK:'+(ro.frontDesk||'--')+'  BAIL:'+(ro.bail||'--')+'  CAGE:'+(ro.cage||'--'),14,232);
+  g.fillText('CID:'+(ro.bullpenDesk||'--')+'  INT.1:'+(ro.interrogation||'--')+'  LOBBY:'+(ro.lobby||'--'),14,252);
+  dutyBoard.userData.tex.needsUpdate=true;
+}
+function drawNameplate(){
+  const clerk=(function(){const t=S?S.t:0; for(const s of CAGE_SHIFTS) if(t>=s[0]&&t<s[1]) return s[2]; return 'PYE';})();
+  const g=namePlate.userData.ctx,w=namePlate.userData.cw,h=namePlate.userData.ch;
+  g.fillStyle='#2a2620'; g.fillRect(0,0,w,h);
+  g.fillStyle='#d8b84a'; g.fillRect(6,6,w-12,h-12);
+  g.fillStyle='#2a2016'; g.textAlign='center'; g.textBaseline='middle';
+  g.font='bold 22px Arial';
+  g.fillText(clerk==='PYE'?'OFC. D. PYE — TRAINEE':'SGT. R. MERCER — 22 YRS',w/2,h/2);
+  namePlate.userData.tex.needsUpdate=true;
+}
+function drawWallClock(){
+  const g=wallClock.userData.ctx,w=wallClock.userData.cw;
+  g.fillStyle='#1a1e24'; g.fillRect(0,0,w,w);
+  g.fillStyle='#e8e4d4'; g.beginPath(); g.arc(w/2,w/2,w*0.42,0,7); g.fill();
+  const t=S?S.t:0, frac=t/SHIFT_LEN;
+  g.strokeStyle='#20242c'; g.lineWidth=5; g.beginPath(); g.moveTo(w/2,w/2);
+  const a=-Math.PI/2+frac*Math.PI*2;
+  g.lineTo(w/2+Math.cos(a)*w*0.3,w/2+Math.sin(a)*w*0.3); g.stroke();
+  g.strokeStyle='#c8402f'; g.lineWidth=2; g.beginPath(); g.moveTo(w/2,w/2);
+  const a2=-Math.PI/2+(t%60)/60*Math.PI*2;
+  g.lineTo(w/2+Math.cos(a2)*w*0.36,w/2+Math.sin(a2)*w*0.36); g.stroke();
+  wallClock.userData.tex.needsUpdate=true;
+}
+let lastBoardT=-99, lastClerk=null;
+
+/* ---------- visual tick (poses, flicker, coffee lamp, prompt) ---------- */
+let visT=0;
+function visualTick(dt){
+  visT+=dt;
+  // officer rig sync + poses
+  for(const n in officers){ const o=officers[n];
+    o.rig.group.position.set(o.pos.x,0,o.pos.z);
+    let d=((o.yaw-o.rig.group.rotation.y+Math.PI)%(Math.PI*2))-Math.PI; if(d<-Math.PI)d+=Math.PI*2;
+    o.rig.group.rotation.y+=d*(1-Math.pow(0.001,dt));
+    if(o.moving){ poseStand(o.rig); animHuman(o.rig,o.speed,dt,visT); o.rig.group.position.y=0; }
+    else{
+      if(o.mode==='sip'){ poseSip(o.rig,visT); o.rig.group.position.y=0; }
+      else if(o.mode==='sit'){ poseSit(o.rig); o.rig.group.position.y=-0.42; }
+      else if(o.mode==='study'){ poseStudy(o.rig); o.rig.group.position.y=0; }
+      else { animHuman(o.rig,0,dt,visT); o.rig.group.position.y=0; }
+      if(n==='KOWALCZYK'){ poseStand(o.rig); animHuman(o.rig,0,dt,visT); }
+    }
+  }
+  // Decker pose
+  if(S.deckerLoc==='interrogation'&&!S.deckerWalk){ poseCuffed(decker); decker.group.position.y=-0.4; }
+  else if(!S.deckerWalk&&!S.following&&S.deckerLoc==='holding'){ poseStand(decker);
+    animHuman(decker,0,dt,visT); decker.group.rotation.y=Math.PI/2+Math.sin(visT*0.4)*0.3; }
+  // Moe sits forever
+  poseSit(moe);
+  // Lou leans
+  poseStudy(lou); animHuman(lou,0,dt,visT);
+  // dog
+  const eating=S.t<S.dogEatUntil;
+  if(eating){ rex.head.rotation.x=0.6+Math.sin(visT*8)*0.1; rex.tail.rotation.z=0.5+Math.sin(visT*10)*0.4;
+    rex.group.position.x+=(3.6-rex.group.position.x)*dt*2; rex.group.position.z+=(-38.8-rex.group.position.z)*dt*2; }
+  else{ rex.head.rotation.x=Math.sin(visT*0.7)*0.15; rex.tail.rotation.z=0.5+Math.sin(visT*2)*0.15;
+    const wander=Math.sin(visT*0.35); rex.group.position.x=5.2+wander*1.6; rex.group.rotation.y=-0.6-wander*0.7;
+    rex.legs.forEach((l,i)=>l.rotation.x=Math.sin(visT*2+i)*0.25); }
+  // flicker fixture drives light + tubes + HUD-free readability
+  const ph=currentFlick();
+  const lit=ph==='lit'?1:ph==='warn'?(Math.sin(visT*55)>0?0.75:0.25):0.06;
+  flickerLight.intensity=0.9*lit+0.02;
+  flickTubes.forEach(t=>t.material=(ph==='dark')?tubeMatOff:(ph==='warn'?tubeMatBuzz:tubeMatOn));
+  if(ph==='warn'&&Math.floor(visT*10)%7===0) sfx('buzz');
+  // coffee lamp: green when a pull is imminent/active (the watchable timer)
+  let coffActive=false,coffSoon=false;
+  for(const c of COFFEE){ if(S.t>=c[0]&&S.t<c[0]+AWAY) coffActive=true;
+    if(S.t>=c[0]-25&&S.t<c[0]) coffSoon=true; }
+  coffeeLamp.material.color.setHex(coffActive?0x2fd06a:coffSoon?0xe8b23a:0xd23b2a);
+  // camera rec blink
+  bookCam.userData.rec.material.color.setHex(Math.floor(visT*2)%2?0xff4040:0x501010);
+  // sliding front doors
+  const nearDoor=Math.hypot(P.pos.x,P.pos.z+0.3)<3.4;
+  doorL.position.x+=((nearDoor?-2.35:-0.88)-doorL.position.x)*dt*5;
+  doorR.position.x+=((nearDoor?2.35:0.88)-doorR.position.x)*dt*5;
+  // detector lamp cool-down back to green
+  if(S.t-S.lastBeepT>2.5&&!detectorHot()) detLamp.material.color.setHex(0x2fd06a);
+  // boards
+  if(Math.abs(S.t-lastBoardT)>5){ lastBoardT=S.t; drawDuty(); drawWallClock(); }
+  const clerkNow=(function(){for(const s of CAGE_SHIFTS) if(S.t>=s[0]&&S.t<s[1]) return s[2]; return 'PYE';})();
+  if(clerkNow!==lastClerk){ lastClerk=clerkNow; drawNameplate(); }
+  // prompt + say fade
+  scanActions();
+  if(activeAction&&!S.ended&&!S.detained){
+    el.prompt.classList.add('show');
+    let txt=activeAction.label();
+    if(altAction) txt+='   |   [2] '+altAction.label();
+    if(activeAction.key==='1'&&altAction) txt='[1] '+txt;
+    el.promptText.textContent=txt;
+  } else el.prompt.classList.remove('show');
+  if(sayT>0){ sayT-=dt; if(sayT<=0) el.say.classList.remove('show'); }
+}
+
+/* ---------- screens / state ---------- */
+let state='title';
+const screens={title:document.getElementById('title'),pause:document.getElementById('pause'),end:document.getElementById('end')};
+function setState(s){ state=s;
+  screens.title.classList.toggle('hidden',s!=='title');
+  screens.pause.classList.toggle('hidden',s!=='paused');
+  screens.end.classList.toggle('hidden',s!=='end');
+}
+function resetGame(){
+  S=freshState();
+  P.pos.set(0,0,9); P.vy=0; P.yaw=Math.PI; camYaw=Math.PI; camPitch=0.42; camOverride=null;
+  player.group.position.copy(P.pos); player.group.rotation.y=Math.PI;
+  duffel.visible=true; steakMesh.visible=false;
+  cageGate.rotation.y=0; fireDoor.rotation.y=0;
+  cellDoorA.position.z=-20.4; cellDoorB.position.z=-14.6;
+  [cageGateCollider,fireDoorCollider,cellDoorACol,cellDoorBCol].forEach(c=>{
+    if(colliders.indexOf(c)<0) colliders.push(c); });
+  for(const n in officers){ const o=officers[n];
+    o.walkQ=[]; o.sched=null; o.wantPost=null; o.curPost=o.post; o.moving=false;
+    o.pos.set(POSTS[o.post].x,0,POSTS[o.post].z); o.yaw=POSTS[o.post].yaw;
+    o.mode=(o.post==='reyesDesk'||o.post==='vossDesk'||o.post==='pyeDesk'||o.post==='mercerDesk')?'sit':'post';
+    poseStand(o.rig); o.rig.group.rotation.y=o.yaw;
+  }
+  officers.MERCER.mode='sit';
+  decker.group.position.set(11,0,-21.5); decker.group.rotation.y=Math.PI/2; decker.group.position.y=0;
+  poseStand(decker); S.deckerWalk=null;
+  drawDuty(); drawNameplate(); drawWallClock(); updateHUD();
+  el.say.classList.remove('show'); sayT=0;
+}
+document.getElementById('playBtn').onclick=()=>{ initAudio(); resetGame(); setState('playing'); requestLock(); };
+document.getElementById('resumeBtn').onclick=()=>{ setState('playing'); requestLock(); };
+document.getElementById('againBtn').onclick=()=>{ initAudio(); resetGame(); setState('playing'); requestLock(); };
+
+/* ---------- main loop ---------- */
+staticMesh=buildStatic();
+let last=performance.now(), frozen=false;
+function loop(t){
+  let dt=(t-last)/1000; last=t; dt=Math.min(dt,0.05);
+  if(state==='playing'&&!frozen&&S&&!S.ended){ stepSim(dt); }
+  if(state==='playing'&&S){ movePlayer(dt); visualTick(dt); }
+  updateCamera(dt);
+  renderer.render(scene,camera);
+  requestAnimationFrame(loop);
+}
+addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); });
+
+/* ============================================================================
+   DEBUG / VERIFICATION API — window.__police
+============================================================================ */
+const AIMS={
+  street:{pos:[10,3.4,13.5],look:[-1,2.6,0]},
+  lobby:{pos:[6.8,3.2,-10.6],look:[-1.5,1.4,-1.5]},
+  board:{pos:[-16.2,2.6,-6.8],look:[-23.6,1.9,-3.6]},
+  cage:{pos:[-5.6,3.0,-21.6],look:[-13.5,1.5,-17.6]},
+  interrogation:{pos:[3.6,2.3,-27.2],look:[11,1.5,-29.2]},
+  holding:{pos:[2.9,2.6,-14.2],look:[11,1.5,-20.5]},
+  kennel:{pos:[0.4,2.4,-39.3],look:[6.2,0.8,-38.3]},
+  bullpen:{pos:[-10.8,3.4,-1.6],look:[-20,1.2,-8]},
+};
+window.__police={
+  version:'1.0',
+  state(){ return {
+    t:S.t, clock:fmt(SHIFT_LEN-S.t), timeLeft:SHIFT_LEN-S.t, shiftLen:SHIFT_LEN,
+    heat:S.heat, heatPeak:S.heatPeak, cash:S.cash, paid:S.paid,
+    loan:{got:S.loanGot,owed:S.loanOwed}, spent:statSpent(),
+    charges:S.charges, chargeTier:chargeTier(), chargesKicked:S.chargesKicked,
+    talking:S.talking, lawyered:S.lawyered, bailQuote:bailQuote(),
+    custody:S.custody.slice(), inv:{...S.inv}, hood:S.hood,
+    planterPicks:S.planterPicks, confiscated:S.confiscated, beeped:S.beeped,
+    password:S.password, bribed:S.bribed, bailPaid:S.bailPaid,
+    released:S.released, releasePending:S.releaseAt!=null, following:S.following,
+    steakDeployed:S.steakDeployed, dogEating:S.t<S.dogEatUntil,
+    rearOpen:S.rearOpen, cageOpen:S.cageOpen, pickProgress:S.pickProgress,
+    detained:S.detained, ended:S.ended, ending:S.ending,
+    flicker:currentFlick(), posterMemory:S.t<S.posterMemoryUntil,
+    veteranStrikes:S.veteranStrikes, deckerLoc:S.deckerLoc,
+    roster:rosterAt(S.t), player:[P.pos.x,P.pos.y,P.pos.z],
+    officers:Object.fromEntries(Object.keys(officers).map(n=>[n,[+officers[n].pos.x.toFixed(2),+officers[n].pos.z.toFixed(2)]])),
+    decker:[+decker.group.position.x.toFixed(2),+decker.group.position.z.toFixed(2)],
+    state, };
+  },
+  warp(x,z,yaw){ P.pos.set(x,0,z); P.vy=0; camOverride=null;
+    if(yaw!=null){ camYaw=yaw; player.group.rotation.y=yaw; }
+    player.group.position.copy(P.pos); return [x,z]; },
+  aim(name){ const a=AIMS[name]; if(!a) return {ok:false,err:'unknown aim; have '+Object.keys(AIMS).join(',')};
+    camOverride={pos:new THREE.Vector3(...a.pos),look:new THREE.Vector3(...a.look)};
+    camera.position.copy(camOverride.pos); camera.lookAt(camOverride.look);
+    S.flickOverride=(name==='cage')?'dark':null;
+    return {ok:true,name,pos:a.pos,look:a.look}; },
+  aims(){ return Object.keys(AIMS); },
+  props(){ return PROPS.slice(); },
+  rig(arr){ if(Array.isArray(arr)) rigQueue.push(...arr); return rigQueue.length; },
+  rosterAt(t){ return rosterAt(t); },
+  heatAdd(n){ S.heat=Math.max(0,Math.min(100,S.heat+n)); if(S.heat>=100) detain(); return S.heat; },
+  simShift(sec){ const step=0.25; let n=Math.max(0,Math.round(sec/step));
+    for(let i=0;i<n;i++){ if(S.ended) break; stepSim(step);
+      // keep officer rigs' meshes in sync without full visual tick cost
+    }
+    for(const nm in officers){ const o=officers[nm]; o.rig.group.position.set(o.pos.x,0,o.pos.z); o.rig.group.rotation.y=o.yaw; }
+    updateHUD(); return S.t; },
+  custodyCheck(caseNo,badgeTier){ return custodyCheck(caseNo,badgeTier); },
+  detectorHot(){ return detectorHot(); },
+  give(item){ if(item&&item.startsWith('cash:')){ S.cash+=parseInt(item.slice(5),10)||0; return S.cash; }
+    if(item==='duffel'){ S.inv.duffel=true; S.stashLoc='hand'; duffel.visible=false; return true; }
+    if(item in S.inv){ S.inv[item]=item==='caseNo'?CASE_NO:true; return true; } return false; },
+  take(item){ if(item==='duffel'){ S.inv.duffel=false; return true; }
+    if(item in S.inv){ S.inv[item]=item==='caseNo'?null:false; return true; } return false; },
+  act(id){ return act(id); },
+  acts(){ scanActions(); return ACTIONS.filter(a=>a.avail()).map(a=>a.id); },
+  stepPlayer(dx,dz){ const prevZ=P.pos.z; P.pos.x+=dx; P.pos.z+=dz;
+    resolveCollisions(); crossDetector(prevZ); player.group.position.copy(P.pos);
+    return [P.pos.x,P.pos.z]; },
+  flickerSet(ph){ S.flickOverride=ph||null; return currentFlick(); },
+  freeze(f){ frozen=!!f; return frozen; },
+  hood(h){ S.hood=!!h; return S.hood; },
+  reset(){ resetGame(); setState('playing'); return true; },
+  caseNo:CASE_NO,
+};
+
+/* ---------- boot ---------- */
+const BOOT=/[?&]boot=1/.test(location.search);
+resetGame();
+if(BOOT){ setState('playing'); }
+else setState('title');
+camera.position.set(P.pos.x,3.4,P.pos.z+5.4);
+camera.lookAt(P.pos.x,1.6,P.pos.z);
+requestAnimationFrame(t=>{ last=t; requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,2090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="data:," />
+<title>REDEYE INTERNATIONAL</title>
+<style>
+  :root{
+    --red:#ff3b30; --red-d:#b3241c; --amber:#ffb03a; --green:#35ff7d;
+    --ink:#0b0e14; --panel:rgba(10,14,20,.78); --line:rgba(255,255,255,.14);
+    --mono:ui-monospace,'Cascadia Mono','SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#05070d;color:#e8ecf2;
+    font-family:var(--mono);}
+  #game{position:fixed;inset:0}
+  canvas{display:block}
+  #vignette{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 42%,transparent 55%,rgba(2,4,9,.55) 100%);}
+  .hidden{display:none !important}
+
+  /* ---------------- HUD ---------------- */
+  #hud{position:fixed;inset:0;pointer-events:none;user-select:none;font-size:13px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    box-shadow:0 4px 18px rgba(0,0,0,.5)}
+  #topleft{position:absolute;top:14px;left:14px;padding:9px 12px;line-height:1.55;min-width:190px}
+  #topleft .cash{color:#ffd451;font-weight:700;font-size:16px}
+  #topleft .debt{color:#ff6f66}
+  #strikes{letter-spacing:5px;font-size:15px}
+  #strikes .on{color:var(--red)} #strikes .off{color:#3a4150}
+  #clock{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    padding:5px 14px;font-size:14px;color:#9fb4d8;letter-spacing:2px}
+  #jobPanel{position:absolute;top:14px;right:14px;padding:9px 12px;max-width:290px;
+    line-height:1.5;text-align:right}
+  #jobPanel .name{font-weight:700}
+  #jobPanel .hot{color:var(--red);font-weight:700;letter-spacing:1px}
+  #jobPanel .timer{font-size:16px;color:#cfe0ff}
+  #jobPanel .timer.late{color:var(--red)}
+  #bearing{display:inline-block;transition:transform .2s}
+  #objective{position:absolute;top:96px;left:14px;padding:7px 11px;max-width:330px;
+    color:#ffd9a0;font-size:12.5px;line-height:1.45}
+  #objective b{color:#fff}
+
+  /* flight instruments */
+  #instr{position:absolute;left:14px;bottom:14px;padding:10px 13px;line-height:1.6;
+    font-size:14px;min-width:230px}
+  #instr .row{display:flex;justify-content:space-between;gap:14px}
+  #instr .v{color:#bfe3ff;font-weight:700;min-width:86px;text-align:right}
+  #instr .warn{margin-top:5px;display:flex;gap:8px;flex-wrap:wrap}
+  .lamp{padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700;
+    background:#20242c;color:#4a5262;border:1px solid #2a3038}
+  .lamp.on{background:var(--red);color:#fff;border-color:#ff8f88;animation:bl .5s steps(2) infinite}
+  .lamp.on.amberL{background:#8a5a13;border-color:var(--amber);color:#ffe2b0;animation:none}
+  @keyframes bl{50%{opacity:.35}}
+
+  /* radio log */
+  #radio{position:absolute;right:14px;bottom:14px;width:360px;max-width:44vw;
+    padding:9px 12px;font-size:12px;line-height:1.5;color:#7dffa8;pointer-events:none}
+  #radio .line{margin-top:3px;text-shadow:0 0 8px rgba(60,255,140,.25)}
+  #radio .line.you{color:#cfe6ff}
+  #radio .hdr{color:#4a8a62;font-size:10px;letter-spacing:2px;margin-bottom:2px}
+
+  #prompt{position:absolute;left:50%;bottom:104px;transform:translateX(-50%);
+    padding:7px 15px;font-size:14px;color:#fff;background:rgba(8,12,18,.82);
+    border:1px solid var(--line);border-radius:7px}
+  #prompt b{color:var(--amber)}
+  #toast{position:absolute;left:50%;top:33%;transform:translateX(-50%);text-align:center;
+    font-size:34px;font-weight:800;letter-spacing:3px;color:#fff;
+    text-shadow:0 0 26px rgba(255,80,60,.55),0 3px 10px #000;opacity:0;transition:opacity .25s}
+  #toast .sub{font-size:15px;letter-spacing:1px;color:#ffd9a0;margin-top:6px;font-weight:400}
+
+  /* ---------------- modals ---------------- */
+  .modal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:30;
+    background:rgba(9,12,18,.96);border:1px solid var(--line);border-radius:10px;
+    padding:20px 22px;min-width:420px;max-width:560px;box-shadow:0 10px 50px rgba(0,0,0,.7)}
+  .modal h2{font-size:15px;letter-spacing:3px;color:var(--amber);margin-bottom:10px}
+  .modal .sub{color:#93a2b8;font-size:12px;margin-bottom:12px;line-height:1.5}
+  .card{border:1px solid var(--line);border-radius:7px;padding:9px 11px;margin-bottom:8px;
+    cursor:pointer;line-height:1.5;font-size:13px}
+  .card:hover{border-color:var(--amber);background:rgba(255,176,58,.06)}
+  .card .pay{color:#ffd451;font-weight:700}
+  .card .hot{color:var(--red);font-weight:700}
+  .card small{color:#8a97ab}
+  .btnrow{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
+  button{font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:7px;
+    border:1px solid var(--line);background:#161b24;color:#e8ecf2;cursor:pointer}
+  button:hover{border-color:var(--amber);color:#fff}
+  button.danger{border-color:#5e2320;color:#ff9089}
+  button.danger:hover{background:#3a1512}
+  button.buy{border-color:#2c5c3a;color:#8affb0}
+  .kx{color:#67738a;font-size:11px}
+
+  /* ---------------- title ---------------- */
+  #title{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;background:
+    radial-gradient(1100px 500px at 50% 108%,rgba(179,36,28,.28),transparent 60%),
+    linear-gradient(180deg,#05070d 0%,#090d16 60%,#12080a 100%)}
+  #title .logo{font-size:76px;font-weight:900;letter-spacing:10px;color:var(--red);
+    text-shadow:0 0 34px rgba(255,59,48,.55),0 0 90px rgba(255,59,48,.25)}
+  #title .logo2{font-size:22px;letter-spacing:17px;color:#e8ecf2;margin-top:2px}
+  #title .blurb{margin:26px 0 6px;max-width:560px;text-align:center;color:#aab7c9;
+    font-size:13.5px;line-height:1.7}
+  #title .keys{margin:16px 0 24px;color:#67738a;font-size:12px;line-height:1.9;text-align:center}
+  #title .keys b{color:#cfd8e6}
+  #playBtn{font-size:18px;letter-spacing:4px;padding:13px 46px;background:var(--red-d);
+    border-color:#ff6f66;color:#fff;font-weight:800}
+  #playBtn:hover{background:var(--red)}
+  #title .foot{position:absolute;bottom:18px;color:#3d465a;font-size:11px;letter-spacing:2px}
+
+  /* ---------------- end screen ---------------- */
+  #end{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;background:rgba(4,6,11,.93)}
+  #end .big{font-size:56px;font-weight:900;letter-spacing:7px}
+  #end .big.win{color:var(--green);text-shadow:0 0 40px rgba(53,255,125,.4)}
+  #end .big.lose{color:var(--red);text-shadow:0 0 40px rgba(255,59,48,.4)}
+  #end .big.leave{color:var(--amber);text-shadow:0 0 40px rgba(255,176,58,.4)}
+  #end .why{color:#93a2b8;margin:10px 0 22px;font-size:14px}
+  #end .stats{border:1px solid var(--line);border-radius:9px;padding:14px 22px;line-height:2;
+    font-size:14px;min-width:330px}
+  #end .stats .v{float:right;color:#cfe0ff;font-weight:700;margin-left:30px}
+  #end button{margin-top:24px;font-size:15px;padding:11px 30px}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="vignette"></div>
+
+<div id="hud">
+  <div id="topleft" class="panel">
+    <div class="cash">CASH <span id="cashV">$0</span></div>
+    <div class="debt">PLANE DEBT <span id="debtV">$12,000</span></div>
+    <div>LICENSE <span id="strikes"></span></div>
+  </div>
+  <div id="clock" class="panel">23:40</div>
+  <div id="jobPanel" class="panel hidden">
+    <div><span class="hot hidden" id="jobHot">HOT&nbsp;</span><span class="name" id="jobName"></span></div>
+    <div id="jobDest"></div>
+    <div class="timer" id="jobTimer"></div>
+    <div><span id="bearing">&#9650;</span> <span id="distV"></span></div>
+  </div>
+  <div id="objective" class="panel"></div>
+  <div id="instr" class="panel hidden">
+    <div class="row"><span>SPD</span><span class="v" id="iSpd">0 kt</span></div>
+    <div class="row"><span>ALT</span><span class="v" id="iAlt">0 ft</span></div>
+    <div class="row"><span>V/S</span><span class="v" id="iVs">0</span></div>
+    <div class="row"><span>HDG</span><span class="v" id="iHdg">270</span></div>
+    <div class="row"><span>THR</span><span class="v" id="iThr">0%</span></div>
+    <div class="row"><span>FLAPS</span><span class="v" id="iFlp">UP</span></div>
+    <div class="row"><span>FUEL</span><span class="v" id="iFuel">0 gal</span></div>
+    <div class="warn">
+      <span class="lamp" id="lampStall">STALL</span>
+      <span class="lamp" id="lampEng">ENGINE</span>
+      <span class="lamp" id="lampFuel">FUEL</span>
+      <span class="lamp" id="lampDmg">DAMAGE</span>
+    </div>
+  </div>
+  <div id="radio" class="panel"><div class="hdr">COM1 118.30 REDEYE TWR</div></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="toast"></div>
+</div>
+
+<div id="board" class="modal hidden">
+  <h2>CHARTER DESK &mdash; TONIGHT'S RUNS</h2>
+  <div class="sub" id="boardSub"></div>
+  <div id="boardJobs"></div>
+  <div class="btnrow">
+    <button id="payDebt1">PAY DEBT $500</button>
+    <button id="payDebt2">PAY DEBT $2000</button>
+    <button id="payDebtMax">PAY MAX</button>
+  </div>
+  <div class="btnrow">
+    <button class="danger" id="walkAway">WALK AWAY (keep pocket cash)</button>
+    <button id="boardClose">CLOSE <span class="kx">[E]</span></button>
+  </div>
+</div>
+
+<div id="fuelMenu" class="modal hidden">
+  <h2>REDEYE FUEL CO-OP</h2>
+  <div class="sub" id="fuelSub"></div>
+  <div class="btnrow">
+    <button class="buy" data-gal="10">+10 GAL</button>
+    <button class="buy" data-gal="25">+25 GAL</button>
+    <button class="buy" data-gal="fill">FILL TANK</button>
+    <button id="fuelClose">CLOSE <span class="kx">[E]</span></button>
+  </div>
+</div>
+
+<div id="hangarMenu" class="modal hidden">
+  <h2>HANGAR ONE &mdash; PARTS &amp; LABOR</h2>
+  <div class="sub" id="hangarSub"></div>
+  <div class="btnrow" id="hangarBtns"></div>
+  <div class="btnrow"><button id="hangarClose">CLOSE <span class="kx">[E]</span></button></div>
+</div>
+
+<div id="inspectModal" class="modal hidden">
+  <h2>RAMP CHECK &mdash; INSPECTOR VANN</h2>
+  <div class="sub" id="inspectFlavor"></div>
+  <div class="sub" id="inspectCargo"></div>
+  <div class="btnrow">
+    <button class="danger" id="bribeBtn">SLIP HIM $0 <span class="kx">[B]</span></button>
+    <button id="submitBtn">HAND OVER MANIFEST <span class="kx">[N]</span></button>
+  </div>
+</div>
+
+<div id="title">
+  <div class="logo">REDEYE</div>
+  <div class="logo2">I N T E R N A T I O N A L</div>
+  <div class="blurb">You owe <b style="color:#ffd451">$12,000</b> on a rusty Cormorant 240 freighter.
+    The night shift pays double and nobody asks what's in the crates.<br/>
+    Pay off the plane. Keep your license &mdash; three strikes and it's gone.<br/>
+    Or walk away with whatever's in your pocket.</div>
+  <div class="keys">
+    ON FOOT &nbsp; <b>WASD</b> move &middot; <b>SHIFT</b> run &middot; <b>E</b> interact<br/>
+    FLYING &nbsp; <b>SHIFT/CTRL</b> throttle &middot; <b>W/S</b> pitch &middot; <b>A/D</b> steer &middot;
+    <b>F</b> flaps &middot; <b>B</b> brakes &middot; <b>R</b> radio &middot; <b>C</b> camera &middot;
+    <b>L</b> light &middot; <b>E</b> exit<br/>
+    Watch the windsock. Fly the PAPI: two white, two red.
+  </div>
+  <button id="playBtn">CLOCK IN</button>
+  <div class="foot">REDEYE INTL &middot; FIELD ELEV 3 FT &middot; RWY 27 IN USE &middot; NO CONTRACT REFUNDS</div>
+</div>
+
+<div id="end" class="hidden">
+  <div class="big" id="endBig"></div>
+  <div class="why" id="endWhy"></div>
+  <div class="stats" id="endStats"></div>
+  <button id="againBtn">CLOCK BACK IN</button>
+</div>
+
+<script src="../src/vendor/three.r128.min.js"></script>
+<script>
+//__GAME_JS__
+/* ============================================================================
+   REDEYE INTERNATIONAL — a complete night-shift smuggler-pilot game in one file.
+   Built standalone-first (the cell-block-z method): this is the airport as its
+   OWN game before it ever merges into the city.
+
+   EVERY MAJOR OBJECT AND ITS WHY (owner's #1 law — nothing decorative):
+   - RUNWAY 27/09 + edge/threshold lights .. the arena. Lights answer "how do
+     you find asphalt at night"; green = approach end, red = the end you're
+     about to run off. Painted numbers/centerline via one canvas texture.
+   - PAPI (4 lamps, west of touchdown) ..... a REAL glideslope computed from
+     the plane's position (thresholds 2.5/2.83/3.17/3.5 deg). Two white two
+     red = you live. It is the landing tutorial, diegetic.
+   - WINDSOCK ............................. live wind indicator. Wind is rolled
+     per job and physically pushes the plane; the sock's droop/heading is the
+     only honest forecast on the field.
+   - TOWER + ROTATING BEACON + RADAR DISH .. clearances. Taking off without
+     tower's blessing is a strike. The dish spins ONLY while tower is talking
+     to you (radio activity made visible); the beacon sweeps all night because
+     the field is open all night.
+   - CHARTER OFFICE + JOB BOARD ........... the economy. Legit runs vs HOT
+     cargo, deadlines, pay-down-your-debt buttons, and the door out (LEAVE).
+   - CUSTOMS BOOTH + INSPECTOR VANN ....... the heat system. Random ramp checks
+     on return; his MOOD (readable in his body language) sets bribe odds.
+   - FUEL DEPOT + FUEL TRUCK .............. weight economy. You call it, you
+     pay per gallon, and every gallon is 2.7 kg that stretches your takeoff
+     roll (simTakeoffRoll proves it).
+   - HANGAR ONE ........................... repairs + upgrades (engine, gear,
+     radio scrambler that cools inspection odds). Damage over 60 grounds you.
+   - BAGGAGE CARTS ........................ moving taxiway obstacle, spawned
+     ONLY when a job says the ramp is busy. Hit them, pay for it.
+   - N407RD "CORMORANT 240" ............... the only aircraft on the field —
+     every parked plane must be cargo target or purchasable, so the fleet is
+     exactly the one you're in debt for. Nav lights, prop, flaps, blob shadow.
+   - THREE OUTSTATIONS (SALT CAY / MARLIN ROCK / PELICAN REEF) ... the routes.
+     Each is a lit strip + name sign + colored ID beacon (night VFR landmarks),
+     a pallet pad (where cargo goes), a shack (who signs for it).
+   - NPCS (Marla the dispatcher, Bo the fueler, Inspector Vann) ... the three
+     systems with faces: jobs, fuel, heat. Voxel rigs, posed, head-tracking.
+   - SEA + MOON + MOONGLADE + STARS ....... the island answers "why is there
+     nothing past the fence" — there is no fence, there is ocean.
+
+   DETERMINISM: geometry from mulberry32(0x5EED1E) — byte-identical field
+   every boot. ALL gameplay randomness (jobs, wind, defects, inspections,
+   moods, bribes) flows through ONE nextRand() funnel with a rig queue so the
+   check tool can force any outcome.
+
+   DEBUG API: window.__airport — state/warp/aim/props/rig + logic hooks
+   (papiAt, simLanding, simTakeoffRoll, vsFor, payout/fine/bribe math,
+   grantClearance, loadJob, strike, resolveBribe, setAir, reset).
+   ========================================================================= */
+"use strict";
+
+/* ---------------------------------------------------------------- utils -- */
+const Q = new URLSearchParams(location.search);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2, D2R = Math.PI / 180;
+const fmt$ = (n) => (n < 0 ? "-$" : "$") + Math.abs(Math.round(n)).toLocaleString("en-US");
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// GEOMETRY stream: fixed literal seed — the field is byte-identical, always.
+const grand = mulberry32(0x5EED1E);
+// GAMEPLAY funnel: every job roll / wind / defect / inspection / mood / bribe
+// draws from nextRand(); the rig queue lets the check force exact outcomes.
+const gameRng = mulberry32((parseInt(Q.get("seed"), 10) || 0xA1B2) >>> 0);
+const rigQueue = [];
+function nextRand() { return rigQueue.length ? rigQueue.shift() : gameRng(); }
+
+/* ------------------------------------------------------------- constants -- */
+const PHYS = {
+  M0: 1150, FUEL_KG: 2.72, TANK: 60, THRUST: 5200, THRUST_UPG: 6600,
+  KD: 1.7, MU: 0.03, G: 9.8, MREF: 1300,
+  VS_BASE: [21.5, 18.0, 15.5],           // stall speed by flaps 0/1/2, at MREF
+  VR_FLAP: 23.0, VR_CLEAN: 25.8,         // rotate speeds at MREF
+  FLAP_DRAG: [1.0, 1.25, 1.55],
+  GEAR_H: 1.05,
+};
+const ECON = {
+  DEBT0: 12000, CASH0: 300, FUEL_PRICE: 9,
+  BASE: 150, RATE_LEGIT: 280, RATE_HOT: 700, CARGO_LEGIT: 0.5, CARGO_HOT: 1.4,
+  ONTIME_FRAC: 0.15, FINE_BASE: 200, FINE_FRAC: 0.5, BRIBE_FRAC: 0.35,
+  FIX_DEFECT: 150, REPAIR_PT: 8, BUTTER_BONUS: 120,
+  INSPECT_HOT: 0.38, INSPECT_LEGIT: 0.08, SCRAMBLER_CUT: 0.15,
+  UPG: { engine: 2500, gear: 1500, scrambler: 3000 },
+  NOCLR_LAND_FINE: 150, REPO_FLOOR: -500,
+};
+const PAPI_T = [2.5, 2.83, 3.17, 3.5];   // deg thresholds, unit A..D
+const PAPI_REF = { x: 280, z: 0 };       // touchdown aim point on centerline
+// Field geography (metres; +X east, +Z south). Runway 27 = approach from east.
+const HOME = { minX: -520, maxX: 520, minZ: -240, maxZ: 240 };
+const DESTS = [
+  { id: "salt",    name: "SALT CAY",     x: 2450,  z: 850,   col: 0xffb03a },
+  { id: "marlin",  name: "MARLIN ROCK",  x: -2300, z: -1200, col: 0x36e0c8 },
+  { id: "pelican", name: "PELICAN REEF", x: 3300,  z: -900,  col: 0xff5ad0 },
+];
+DESTS.forEach((d) => {
+  d.dist = Math.round(Math.hypot(d.x, d.z));
+  d.rect = { minX: d.x - 320, maxX: d.x + 320, minZ: d.z - 160, maxZ: d.z + 160 };
+  d.strip = { x0: d.x - 200, x1: d.x + 200, z: d.z };
+  d.pad = { x: d.x + 150, z: d.z + 40 };
+});
+const PARK = { x: 200, z: 95 };          // CARGO 1 stand
+const HOLD_SHORT = { x: 170, z: 26 };
+
+/* ------------------------------------------------------- economy math ---- */
+function payoutFor(destId, hot, cargoKg) {
+  const d = DESTS.find((k) => k.id === destId); if (!d) return 0;
+  const nm = d.dist / 1852;
+  return ECON.BASE + Math.round(nm * (hot ? ECON.RATE_HOT : ECON.RATE_LEGIT)) +
+    Math.round(cargoKg * (hot ? ECON.CARGO_HOT : ECON.CARGO_LEGIT));
+}
+function fineFor(payout) { return Math.round(payout * ECON.FINE_FRAC) + ECON.FINE_BASE; }
+function bribeCostFor(payout) { return Math.round(payout * ECON.BRIBE_FRAC); }
+function bribeOdds(mood) { return clamp(0.15 + mood * 0.7, 0, 0.95); }
+/* -------------------------------------------------------- flight math ---- */
+function massNow(fuelGal, cargoKg) { return PHYS.M0 + fuelGal * PHYS.FUEL_KG + cargoKg; }
+function vsFor(flaps, fuelGal, cargoKg) {
+  const m = massNow(fuelGal, cargoKg || 0);
+  return PHYS.VS_BASE[clamp(flaps, 0, 2)] * Math.sqrt(m / PHYS.MREF);
+}
+function vrFor(flaps, m) { return (flaps >= 1 ? PHYS.VR_FLAP : PHYS.VR_CLEAN) * Math.sqrt(m / PHYS.MREF); }
+function groundAccel(v, m, thrN) {
+  return (thrN - PHYS.KD * v * v - PHYS.MU * m * PHYS.G) / m;
+}
+function simTakeoffRoll(fuelGal, cargoKg, flaps) {
+  // pure integration, no wind: proves fuel weight stretches the roll.
+  const m = massNow(clamp(fuelGal, 0, PHYS.TANK), cargoKg || 0);
+  const vr = vrFor(flaps == null ? 1 : flaps, m);
+  const T = S.upgrades.engine ? PHYS.THRUST_UPG : PHYS.THRUST;
+  let v = 0, x = 0;
+  for (let i = 0; i < 4000 && v < vr; i++) { v += groundAccel(v, m, T) * 0.05; x += v * 0.05; }
+  return Math.round(x);
+}
+function papiAt(dist, alt) {
+  const ang = Math.atan2(alt, Math.max(1, dist)) / D2R;
+  let s = "";
+  for (let i = 0; i < 4; i++) s += ang > PAPI_T[i] ? "W" : "R";
+  return s;
+}
+function simLanding(vspeed) {
+  const vs = Math.abs(vspeed);
+  if (vs < 1.2) return { rating: "BUTTER", damage: 0, bonus: ECON.BUTTER_BONUS };
+  if (vs < 2.5) return { rating: "FIRM", damage: 2, bonus: 0 };
+  if (vs < 4.5) return { rating: "HARD", damage: S.upgrades.gear ? 8 : 18, bonus: 0 };
+  return { rating: "CRASH", damage: 100, bonus: 0 };
+}
+
+/* ---------------------------------------------------------- three setup -- */
+const W = window.innerWidth, H = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+document.getElementById("game").appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060a13);
+scene.fog = new THREE.FogExp2(0x060a13, 0.00062);
+const camera = new THREE.PerspectiveCamera(62, W / H, 0.3, 9000);
+camera.position.set(240, 20, 160);
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+scene.add(new THREE.AmbientLight(0x27324a, 0.62));
+const hemi = new THREE.HemisphereLight(0x2a3a5c, 0x0b100c, 0.5); scene.add(hemi);
+const moonDir = new THREE.DirectionalLight(0x8ea2c8, 0.6);
+moonDir.position.set(-1400, 1000, -1900); scene.add(moonDir);
+
+/* --------------------------------------------- merged static world ------- */
+// Two draw calls carry every static solid + every static lamp in the world:
+// one vertex-colored Lambert mesh (structures) and one vertex-colored Basic
+// mesh with fog:false (lamps pierce the night). SwiftShader-friendly.
+const PROPS = [];        // [{name, boxes:[{min,max}]}] for the floating gate
+const SOLIDS = [];       // AABBs the player/plane collide with
+let curProp = null;
+function beginProp(name) { curProp = { name, boxes: [] }; PROPS.push(curProp); }
+function endProp() { curProp = null; }
+const mergeBuf = { solid: { p: [], n: [], c: [] }, glow: { p: [], n: [], c: [] } };
+const tmpColor = new THREE.Color();
+function pushRaw(buf, cx, cy, cz, w, h, d, hex, opt) {
+  opt = opt || {};
+  const g = new THREE.BoxGeometry(w, h, d);
+  if (opt.rz) g.rotateZ(opt.rz);
+  if (opt.rx) g.rotateX(opt.rx);
+  if (opt.yaw) g.rotateY(opt.yaw);
+  g.translate(cx, cy, cz);
+  const ng = g.toNonIndexed();
+  const p = ng.attributes.position.array, n = ng.attributes.normal.array;
+  for (let i = 0; i < p.length; i++) { buf.p.push(p[i]); buf.n.push(n[i]); }
+  tmpColor.setHex(hex);
+  const shade = opt.flat ? 1 : 0.93 + grand() * 0.1;   // subtle per-box variance
+  for (let i = 0; i < p.length; i += 3) buf.c.push(tmpColor.r * shade, tmpColor.g * shade, tmpColor.b * shade);
+  ng.computeBoundingBox();
+  const bb = ng.boundingBox;
+  if (curProp) curProp.boxes.push({ min: [bb.min.x, bb.min.y, bb.min.z], max: [bb.max.x, bb.max.y, bb.max.z] });
+  if (opt.solid) SOLIDS.push({ minX: bb.min.x, maxX: bb.max.x, minY: bb.min.y, maxY: bb.max.y, minZ: bb.min.z, maxZ: bb.max.z });
+  g.dispose(); ng.dispose();
+}
+const box = (cx, cy, cz, w, h, d, hex, opt) => pushRaw(mergeBuf.solid, cx, cy, cz, w, h, d, hex, opt);
+const glow = (cx, cy, cz, w, h, d, hex, opt) => pushRaw(mergeBuf.glow, cx, cy, cz, w, h, d, hex, Object.assign({ flat: true }, opt));
+function bakeMerged() {
+  for (const key of ["solid", "glow"]) {
+    const b = mergeBuf[key];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(b.p, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(b.n, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(b.c, 3));
+    const mat = key === "solid"
+      ? new THREE.MeshLambertMaterial({ vertexColors: true })
+      : new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  }
+}
+
+/* ------------------------------------------------------ sky, sea, moon --- */
+(function skySea() {
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(16000, 16000),
+    new THREE.MeshLambertMaterial({ color: 0x0a1424 }));
+  sea.rotation.x = -Math.PI / 2; sea.position.y = -1.6; scene.add(sea);
+  // moonglade: the moon's reflection lane on the water — reads "sea", cheap.
+  const glCan = document.createElement("canvas"); glCan.width = 64; glCan.height = 256;
+  const g2 = glCan.getContext("2d");
+  const grad = g2.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "rgba(160,190,235,0.30)"); grad.addColorStop(1, "rgba(160,190,235,0)");
+  g2.fillStyle = grad; g2.fillRect(0, 0, 64, 256);
+  const glade = new THREE.Mesh(new THREE.PlaneGeometry(220, 2600),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(glCan), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  glade.rotation.x = -Math.PI / 2;
+  glade.rotation.z = Math.atan2(-1400, -1900);
+  glade.position.set(-750, -1.4, -1000); scene.add(glade);
+  // stars
+  const sp = [];
+  for (let i = 0; i < 460; i++) {
+    const az = grand() * TAU, el = grand() * 0.48 + 0.05, r = 7600;
+    sp.push(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute("position", new THREE.Float32BufferAttribute(sp, 3));
+  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xbfd0e8, size: 2, sizeAttenuation: false, fog: false })));
+  // moon: soft radial sprite
+  const mc = document.createElement("canvas"); mc.width = mc.height = 128;
+  const m2 = mc.getContext("2d");
+  const mg = m2.createRadialGradient(64, 64, 8, 64, 64, 64);
+  mg.addColorStop(0, "rgba(235,240,255,1)"); mg.addColorStop(0.28, "rgba(215,225,250,0.9)");
+  mg.addColorStop(0.45, "rgba(170,190,235,0.25)"); mg.addColorStop(1, "rgba(170,190,235,0)");
+  m2.fillStyle = mg; m2.fillRect(0, 0, 128, 128);
+  const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(mc), transparent: true, depthWrite: false, fog: false }));
+  moon.position.set(-2800, 2100, -3800); moon.scale.set(640, 640, 1); scene.add(moon);
+})();
+// shared halo texture for light glows
+const haloTex = (function () {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d");
+  const g = x.createRadialGradient(32, 32, 2, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.25, "rgba(255,255,255,0.5)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+function halo(x, y, z, hex, size) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, color: hex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, opacity: 0.85 }));
+  s.position.set(x, y, z); s.scale.set(size, size, 1); scene.add(s); return s;
+}
+function textTexture(txt, w, h, opts) {
+  opts = opts || {};
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d");
+  x.fillStyle = opts.bg || "#101318"; x.fillRect(0, 0, w, h);
+  if (opts.border) { x.strokeStyle = opts.border; x.lineWidth = h * 0.06; x.strokeRect(3, 3, w - 6, h - 6); }
+  x.fillStyle = opts.fg || "#ffb03a";
+  x.font = "bold " + Math.floor(h * (opts.fs || 0.52)) + "px monospace";
+  x.textAlign = "center"; x.textBaseline = "middle";
+  x.fillText(txt, w / 2, h / 2 + h * 0.03);
+  const t = new THREE.CanvasTexture(c); t.minFilter = THREE.LinearFilter; return t;
+}
+
+/* -------------------------------------------------------- the airfield --- */
+function island(rect, hex) {
+  beginProp("island");
+  box((rect.minX + rect.maxX) / 2, -1.5, (rect.minZ + rect.maxZ) / 2,
+    rect.maxX - rect.minX, 3, rect.maxZ - rect.minZ, hex, { flat: true });
+  endProp();
+}
+function runwayTexture() {
+  const c = document.createElement("canvas"); c.width = 2048; c.height = 128;
+  const x = c.getContext("2d");
+  x.fillStyle = "#26292e"; x.fillRect(0, 0, 2048, 128);
+  for (let i = 0; i < 900; i++) {                       // asphalt flecks
+    x.fillStyle = grand() > 0.5 ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.16)";
+    x.fillRect(grand() * 2048, grand() * 128, 2.5, 2.5);
+  }
+  const px = (m) => ((m + 430) / 860) * 2048;           // metres → texels
+  x.fillStyle = "#d7dade";
+  for (let m = -390; m < 400; m += 42) x.fillRect(px(m), 61, 44, 6);   // centerline
+  for (const e of [-1, 1]) {                            // piano keys both ends
+    const x0 = e === 1 ? px(404) : px(-428);
+    for (let k = 0; k < 6; k++) x.fillRect(x0, 12 + k * 19, 56, 9);
+  }
+  x.fillRect(px(268), 22, 56, 18); x.fillRect(px(268), 88, 56, 18);     // aiming bars
+  x.save(); x.translate(px(372), 64); x.rotate(Math.PI / 2);
+  x.font = "bold 46px monospace"; x.textAlign = "center"; x.textBaseline = "middle";
+  x.fillText("27", 0, 0); x.restore();
+  x.save(); x.translate(px(-372), 64); x.rotate(-Math.PI / 2);
+  x.font = "bold 46px monospace"; x.fillText("09", 0, 0); x.restore();
+  const t = new THREE.CanvasTexture(c); t.minFilter = THREE.LinearFilter; return t;
+}
+function edgeLightRow(x0, x1, z, step, hex) {
+  for (let x = x0; x <= x1; x += step) glow(x, 0.3, z, 0.42, 0.5, 0.42, hex);
+}
+function buildHome() {
+  island(HOME, 0x14231a);
+  // runway slab (textured, its own mesh — the one painted surface)
+  beginProp("runway");
+  const rwy = new THREE.Mesh(new THREE.BoxGeometry(860, 0.24, 20),
+    new THREE.MeshLambertMaterial({ map: runwayTexture() }));
+  rwy.position.set(0, 0.12, 0); scene.add(rwy);
+  endProp();
+  // edge + threshold lights
+  beginProp("rwy-lights");
+  edgeLightRow(-424, 424, -10.8, 26.5, 0xf2f5ff);
+  edgeLightRow(-424, 424, 10.8, 26.5, 0xf2f5ff);
+  for (let z = -8; z <= 8; z += 3.2) glow(433, 0.3, z, 0.45, 0.5, 0.45, 0x35ff7d); // 27 threshold green
+  for (let z = -8; z <= 8; z += 3.2) glow(-433, 0.3, z, 0.45, 0.5, 0.45, 0xff3b30); // far end red
+  endProp();
+  halo(433, 0.8, -9.5, 0xffffff, 3.4); haloRefs.reilA = arguments; // REIL strobes (animated)
+  // taxiway Alpha + apron
+  beginProp("taxiway");
+  box(170, 0.05, 35, 20, 0.12, 50, 0x2b2f35, { flat: true });
+  box(190, 0.05, 105, 150, 0.12, 90, 0x2e3238, { flat: true });        // apron
+  for (let z = 14; z <= 56; z += 10) { glow(160.6, 0.28, z, 0.36, 0.42, 0.36, 0x3f7bff); glow(179.4, 0.28, z, 0.36, 0.42, 0.36, 0x3f7bff); }
+  box(170, 0.13, 26, 12, 0.05, 0.5, 0xd7b545, { flat: true });         // hold-short bars
+  box(170, 0.13, 27.4, 12, 0.05, 0.5, 0xd7b545, { flat: true });
+  glow(163.5, 0.35, 26.7, 0.4, 0.5, 0.4, 0xffb03a); glow(176.5, 0.35, 26.7, 0.4, 0.5, 0.4, 0xffb03a);
+  // CARGO 1 stand markings
+  box(PARK.x, 0.13, PARK.z, 11, 0.04, 0.5, 0xcfd4da, { flat: true });
+  box(PARK.x, 0.13, PARK.z - 5, 11, 0.04, 0.5, 0xcfd4da, { flat: true });
+  box(PARK.x - 5.5, 0.13, PARK.z - 2.5, 0.5, 0.04, 5.5, 0xcfd4da, { flat: true });
+  box(PARK.x + 5.5, 0.13, PARK.z - 2.5, 0.5, 0.04, 5.5, 0xcfd4da, { flat: true });
+  endProp();
+  buildTower(); buildCharter(); buildHangar(); buildFuelDepot(); buildCustoms();
+  buildPapi(); buildWindsock(330, 30);
+  // apron floodlight poles: two pools of warm light the ground game lives in
+  for (const [px, pz] of [[168, 72], [238, 132]]) {
+    beginProp("floodpole");
+    box(px, 5.5, pz, 0.4, 11, 0.4, 0x20242a, { solid: true });
+    box(px, 11.1, pz, 1.6, 0.5, 0.9, 0x2c313a);
+    glow(px, 10.8, pz, 1.3, 0.22, 0.7, 0xffd9a0);
+    endProp();
+    halo(px, 10.6, pz, 0xffcf8a, 7);
+    const pl = new THREE.PointLight(0xffcf8a, 0.85, 85, 2); pl.position.set(px, 10.5, pz); scene.add(pl);
+  }
+}
+const haloRefs = {};
+function buildTower() {
+  beginProp("tower");
+  const tx = 150, tz = 172;
+  box(tx, 9, tz, 7, 18, 7, 0x454c56, { solid: true });
+  box(tx, 18.6, tz, 8.6, 1.2, 8.6, 0x2c313a);
+  glow(tx, 20.6, tz, 7.6, 2.8, 7.6, 0x9fd8ea);               // lit glass cab
+  box(tx, 20.6, tz, 8.0, 3.0, 8.0, 0x20242a, { flat: true }); // mullion frame (glass shows at faces)
+  glow(tx, 20.6, tz, 8.15, 2.2, 7.0, 0x8fcfe4);
+  glow(tx, 20.6, tz, 7.0, 2.2, 8.15, 0x8fcfe4);
+  box(tx, 22.4, tz, 9, 0.6, 9, 0x1c2026);
+  endProp();
+  // REDEYE sign — the field introduces itself
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 1.5),
+    new THREE.MeshBasicMaterial({ map: textTexture("REDEYE", 512, 116, { fg: "#ff3b30", bg: "#14090a", border: "#5e2320" }), fog: false }));
+  sign.position.set(tx, 15.5, tz - 3.56); sign.rotation.y = Math.PI; scene.add(sign);
+  D.beaconBase = new THREE.Group(); D.beaconBase.position.set(tx, 23.1, tz); scene.add(D.beaconBase);
+  box(tx, 23.0, tz, 0.5, 0.9, 0.5, 0x20242a);                 // beacon pedestal
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }));
+  lamp.position.y = 0.6; D.beaconBase.add(lamp);
+  for (const [hex, rot] of [[0xffffff, 0], [0x2bff7f, Math.PI]]) {
+    const beam = new THREE.Mesh(new THREE.PlaneGeometry(30, 1.1),
+      new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    beam.position.y = 0.6; beam.rotation.y = rot; beam.position.x = Math.cos(rot) * 15; beam.position.z = -Math.sin(rot) * 15;
+    const hold = new THREE.Group(); hold.rotation.y = rot; hold.add(beam);
+    beam.position.set(15, 0.6, 0); D.beaconBase.add(hold);
+  }
+  D.beaconHalo = halo(tx, 23.8, tz, 0xffffff, 6);
+  // radar dish: spins ONLY while tower talks to you
+  D.radar = new THREE.Group(); D.radar.position.set(tx + 3.2, 23.2, tz + 3.2); scene.add(D.radar);
+  const rpost = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.6, 0.35), new THREE.MeshLambertMaterial({ color: 0x2c313a }));
+  rpost.position.y = -0.3; D.radar.add(rpost);
+  const dish = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 0.18), new THREE.MeshLambertMaterial({ color: 0x606a76 }));
+  dish.position.y = 0.7; D.radar.add(dish);
+  const dback = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.55), new THREE.MeshLambertMaterial({ color: 0x3a414c }));
+  dback.position.y = 0.55; D.radar.add(dback);
+  beginProp("tower-radar-static"); box(tx + 3.2, 22.6, tz + 3.2, 0.4, 1.4, 0.4, 0x2c313a); endProp();
+}
+function buildCharter() {
+  beginProp("charter");
+  const cx = 243, cz = 128;
+  box(cx, 1.9, cz, 8, 3.8, 5.4, 0x4a3f36, { solid: true });
+  box(cx, 3.95, cz, 8.8, 0.5, 6.2, 0x33291f);
+  glow(cx - 2.2, 2.1, cz - 2.76, 1.7, 1.3, 0.12, 0xffcf8a);   // warm window
+  box(cx + 2.0, 1.5, cz - 2.75, 1.15, 2.9, 0.18, 0x2b2118);   // door
+  endProp();
+  const sg = new THREE.Mesh(new THREE.PlaneGeometry(6.2, 1.1),
+    new THREE.MeshBasicMaterial({ map: textTexture("CHARTER • AIR FREIGHT", 640, 96, { fg: "#ffd451", bg: "#171208" }), fog: false }));
+  sg.position.set(cx, 4.6, cz - 3.0); sg.rotation.y = Math.PI; scene.add(sg);
+  const bd = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.9),
+    new THREE.MeshBasicMaterial({ map: textTexture("TONIGHT'S RUNS", 256, 190, { fg: "#e8ecf2", bg: "#242017", fs: 0.16, border: "#4a3f2a" }), fog: false }));
+  bd.position.set(cx - 2.2, 1.9, cz - 2.83); bd.rotation.y = Math.PI; scene.add(bd);
+  halo(cx, 4.4, cz - 3.4, 0xffcf8a, 3.4);
+}
+function buildHangar() {
+  beginProp("hangar");
+  const hx = 95, hz = 120, hw = 26, hd = 18, hh = 9;   // opening faces +X (apron)
+  box(hx - hw / 2 + 0.4, hh / 2, hz, 0.8, hh, hd, 0x39404a, { solid: true });          // back wall
+  box(hx, hh / 2, hz - hd / 2 + 0.4, hw, hh, 0.8, 0x39404a, { solid: true });          // side
+  box(hx, hh / 2, hz + hd / 2 - 0.4, hw, hh, 0.8, 0x39404a, { solid: true });          // side
+  box(hx, hh + 0.4, hz, hw + 1.6, 0.8, hd + 1.6, 0x2e343c);                            // roof
+  box(hx, hh - 0.9, hz - hd / 2 + 1.2, hw, 1.8, 1.6, 0x2e343c);                        // lintel trim
+  // interior: workbench, toolbox, drums, tire stack — a shop, not a shed
+  box(hx - 11.5, 1.0, hz + 4.5, 2.2, 0.5, 6.5, 0x5a4634);
+  box(hx - 11.9, 0.45, hz + 4.5, 1.2, 0.9, 6.0, 0x3a2f24);
+  box(hx - 11.5, 1.65, hz + 2.4, 1.6, 0.8, 1.2, 0xb3372e);   // red toolbox
+  for (let i = 0; i < 3; i++) box(hx - 10.8 + i * 1.5, 0.75, hz - 6.2, 1.25, 1.5, 1.25, i === 1 ? 0x39505e : 0x4c5a3a);
+  box(hx - 6.5, 0.5, hz + 6.8, 2.1, 1.0, 2.1, 0x22262c);      // tire stack
+  box(hx - 6.5, 1.25, hz + 6.8, 1.7, 0.5, 1.7, 0x22262c);
+  endProp();
+  const ub = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.2),
+    new THREE.MeshBasicMaterial({ map: textTexture("PARTS & UPGRADES", 320, 208, { fg: "#8affb0", bg: "#101a14", fs: 0.14, border: "#2c5c3a" }), fog: false }));
+  ub.position.set(hx - 12.55, 4.6, hz); ub.rotation.y = Math.PI / 2; scene.add(ub);
+  const hl = new THREE.PointLight(0xffe2b0, 0.9, 40, 2); hl.position.set(hx - 2, 7.2, hz); scene.add(hl);
+  glow(hx - 2, hh - 0.7, hz, 2.6, 0.2, 0.8, 0xffe2b0);
+  const hs = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.2),
+    new THREE.MeshBasicMaterial({ map: textTexture("HANGAR ONE", 512, 90, { fg: "#9fd8ea", bg: "#0d1216" }), fog: false }));
+  hs.position.set(hx + hw / 2 + 0.1, hh - 1.2, hz); hs.rotation.y = Math.PI / 2; scene.add(hs);
+}
+function buildFuelDepot() {
+  beginProp("fuel-depot");
+  const fx = 262, fz = 76;
+  for (const dz of [-2.2, 2.2]) {
+    box(fx, 1.5, fz + dz, 7, 2.6, 3.2, 0x7a2e28, { solid: true });
+    box(fx, 2.95, fz + dz, 6.4, 0.5, 2.4, 0x8a3a32);
+    box(fx - 3.1, 0.6, fz + dz, 0.6, 1.2, 2.6, 0x33261c);
+    box(fx + 3.1, 0.6, fz + dz, 0.6, 1.2, 2.6, 0x33261c);
+  }
+  box(fx - 5.5, 0.9, fz, 1.0, 1.8, 1.0, 0x3a414c, { solid: true });   // pump
+  for (let i = 0; i < 3; i++) box(fx - 7.5, 0.5, fz - 3 + i * 3, 0.4, 1.0, 0.4, 0xd7b545, { solid: true }); // bollards
+  endProp();
+  const fs = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.05),
+    new THREE.MeshBasicMaterial({ map: textTexture("FUEL • $9/GAL", 448, 100, { fg: "#ffb03a", bg: "#181004" }), fog: false }));
+  fs.position.set(fx - 5.5, 2.6, fz); fs.rotation.y = -Math.PI / 2; scene.add(fs);
+  halo(fx - 5.5, 2.6, fz - 0.4, 0xffb03a, 2.6);
+}
+function buildCustoms() {
+  beginProp("customs");
+  const bx = 176, bz = 64;
+  box(bx, 1.7, bz, 3.4, 3.4, 3.4, 0x35414e, { solid: true });
+  box(bx, 3.6, bz, 4.0, 0.4, 4.0, 0x232b34);
+  glow(bx, 2.0, bz - 1.76, 2.0, 1.1, 0.12, 0xcfe8ff);          // cool white window
+  // barrier arm across the service lane — the WHY of "you don't just drive off"
+  box(bx - 2.4, 0.55, bz - 2.6, 0.35, 1.1, 0.35, 0x3a414c, { solid: true });
+  for (let i = 0; i < 5; i++) box(bx - 2.4 + 0.35 + i * 0.86, 1.0, bz - 2.6, 0.95, 0.22, 0.22, i % 2 ? 0xd7d9dd : 0xc2372e, { flat: true });
+  endProp();
+  const cs = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8),
+    new THREE.MeshBasicMaterial({ map: textTexture("CUSTOMS", 384, 90, { fg: "#cfe8ff", bg: "#0a1016" }), fog: false }));
+  cs.position.set(bx, 3.05, bz - 1.83); cs.rotation.y = Math.PI; scene.add(cs);
+}
+function buildPapi() {
+  // 4 lamp units abeam the touchdown bars — the real glideslope, rendered.
+  D.papiUnits = [];
+  beginProp("papi");
+  for (let i = 0; i < 4; i++) {
+    const z = -17 - i * 5, x = PAPI_REF.x;
+    box(x, 0.62, z, 1.0, 0.62, 0.62, 0x22262c);
+    box(x, 0.16, z - 0.1, 0.34, 0.36, 0.34, 0x2c313a);
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.4, 0.62),
+      new THREE.MeshBasicMaterial({ color: 0xff2d20, fog: false }));
+    lens.position.set(x + 0.52, 0.62, z); scene.add(lens);
+    const h = halo(x + 1.0, 0.66, z, 0xff2d20, 4.2);
+    D.papiUnits.push({ lens, halo: h });
+  }
+  endProp();
+}
+function buildWindsock(x, z) {
+  beginProp("windsock");
+  box(x, 3, z, 0.32, 6, 0.32, 0x3a414c);
+  box(x, 6.15, z, 0.9, 0.3, 0.3, 0x3a414c);
+  endProp();
+  glow(x, 6.5, z, 0.3, 0.3, 0.3, 0xfff2d0);
+  halo(x, 6.5, z, 0xffe8c0, 2.8);
+  const pivot = new THREE.Group(); pivot.position.set(x, 5.9, z); scene.add(pivot);
+  const segs = [[0.6, 0.42, 0xff7a1a], [1.35, 0.34, 0xf2f5f8], [2.0, 0.27, 0xff7a1a]];
+  const cone = new THREE.Group();
+  for (const [off, r, hex] of segs) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.95, r * 2, r * 2), new THREE.MeshLambertMaterial({ color: hex }));
+    m.position.x = off; cone.add(m);
+  }
+  const ring = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 1.0), new THREE.MeshLambertMaterial({ color: 0x2c313a }));
+  ring.position.x = -0.05; cone.add(ring);            // overlaps the pole → support chain
+  pivot.add(cone);
+  D.windsocks.push({ pivot, cone });
+}
+function buildDest(d) {
+  island(d.rect, 0x1a2418);
+  beginProp("strip-" + d.id);
+  box(d.x, 0.05, d.z, 420, 0.12, 14, 0x2a2d33, { flat: true });
+  box(d.pad.x, 0.06, d.pad.z, 26, 0.14, 20, 0x30343b, { flat: true });   // pallet pad
+  endProp();
+  beginProp("strip-lights-" + d.id);
+  edgeLightRow(d.strip.x0, d.strip.x1, d.z - 8, 30, 0xf2f5ff);
+  edgeLightRow(d.strip.x0, d.strip.x1, d.z + 8, 30, 0xf2f5ff);
+  for (let dz = -6; dz <= 6; dz += 4) glow(d.strip.x1 + 4, 0.3, d.z + dz, 0.45, 0.5, 0.45, 0x35ff7d);
+  for (let dz = -6; dz <= 6; dz += 4) glow(d.strip.x0 - 4, 0.3, d.z + dz, 0.45, 0.5, 0.45, 0xff3b30);
+  endProp();
+  beginProp("shack-" + d.id);
+  box(d.pad.x + 9, 1.5, d.pad.z + 6, 5, 3, 4, 0x40382e, { solid: true });
+  box(d.pad.x + 9, 3.2, d.pad.z + 6, 5.8, 0.4, 4.8, 0x2c261e);
+  glow(d.pad.x + 9, 1.7, d.pad.z + 3.94, 1.4, 1.0, 0.12, 0xffcf8a);
+  endProp();
+  const sg = new THREE.Mesh(new THREE.PlaneGeometry(14, 2.6),
+    new THREE.MeshBasicMaterial({ map: textTexture(d.name, 1024, 190, { fg: "#" + d.col.toString(16).padStart(6, "0"), bg: "#0c0f14", border: "#2a3038" }), fog: false }));
+  sg.position.set(d.x, 4.2, d.z + 24); sg.rotation.y = Math.PI; scene.add(sg);
+  beginProp("sign-" + d.id);
+  box(d.x - 6.4, 2.1, d.z + 24.2, 0.4, 4.2, 0.4, 0x2c313a);
+  box(d.x + 6.4, 2.1, d.z + 24.2, 0.4, 4.2, 0.4, 0x2c313a);
+  endProp();
+  // colored ID beacon — how you tell islands apart from 3 km out at night
+  const b = halo(d.x, 9, d.z + 24, d.col, 9);
+  D.destBeacons.push({ sprite: b, phase: grand() * TAU });
+  buildWindsock(d.x - 240, d.z + 22);
+}
+
+/* --------------------------------------------------------- voxel dudes --- */
+// Chunky-limb humanoid (≥0.3u members — voxel law). Pivots at shoulders/hips
+// so poses are rotations, not repositions. Every NPC is a system with a face.
+function makeDude(p) {
+  const g = new THREE.Group();
+  const M = (hex) => new THREE.MeshLambertMaterial({ color: hex });
+  const B = (w, h, d, hex) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(hex));
+  const legL = new THREE.Group(), legR = new THREE.Group();
+  for (const [leg, s] of [[legL, -1], [legR, 1]]) {
+    leg.position.set(0.17 * s, 0.9, 0);
+    const m = B(0.32, 0.9, 0.34, p.pants); m.position.y = -0.45; leg.add(m);
+    const boot = B(0.34, 0.18, 0.46, p.boot || 0x1c1e24); boot.position.set(0, -0.86, 0.05); leg.add(boot);
+    g.add(leg);
+  }
+  const torso = B(0.72, 0.68, 0.4, p.shirt); torso.position.y = 1.24; g.add(torso);
+  if (p.vest) { const v = B(0.76, 0.3, 0.44, p.vest); v.position.y = 1.3; g.add(v); }
+  const head = new THREE.Group(); head.position.y = 1.58;
+  const hm = B(0.44, 0.42, 0.44, p.skin); hm.position.y = 0.21; head.add(hm);
+  if (p.cap) { const c = B(0.48, 0.16, 0.48, p.cap); c.position.y = 0.44; head.add(c);
+    const brim = B(0.46, 0.07, 0.24, p.cap); brim.position.set(0, 0.37, 0.32); head.add(brim); }
+  if (p.hair) { const h = B(0.46, 0.14, 0.46, p.hair); h.position.y = 0.43; head.add(h); }
+  g.add(head);
+  const armL = new THREE.Group(), armR = new THREE.Group(), parts = { legL, legR, head, torso };
+  for (const [arm, s, key] of [[armL, -1, "armL"], [armR, 1, "armR"]]) {
+    arm.position.set(0.51 * s, 1.5, 0);
+    const up = B(0.3, 0.55, 0.32, p.shirt); up.position.y = -0.24; arm.add(up);
+    const lo = new THREE.Group(); lo.position.y = -0.5;
+    const lm = B(0.3, 0.5, 0.3, p.sleeve || p.shirt); lm.position.y = -0.2; lo.add(lm);
+    const hand = B(0.28, 0.16, 0.28, p.skin); hand.position.y = -0.5; lo.add(hand);
+    arm.add(lo); g.add(arm); parts[key] = arm; parts[key + "lo"] = lo;
+  }
+  return { group: g, parts, phase: grand() * TAU };
+}
+function poseIdle(d) {
+  d.parts.armL.rotation.set(0.06, 0, 0.05); d.parts.armR.rotation.set(-0.06, 0, -0.05);
+  d.parts.armLlo.rotation.x = -0.15; d.parts.armRlo.rotation.x = -0.15;
+  d.parts.legL.rotation.set(0, 0, 0); d.parts.legR.rotation.set(0, 0, 0);
+}
+
+/* ------------------------------------------------------------ the plane -- */
+// N407RD — high-wing bush freighter. The whole game is paying this thing off.
+function buildPlane() {
+  const g = new THREE.Group();
+  const M = (hex, o) => new THREE.MeshLambertMaterial(Object.assign({ color: hex }, o));
+  const B = (w, h, d, hex, x, y, z, opt) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(hex));
+    m.position.set(x, y, z); if (opt && opt.rz) m.rotation.z = opt.rz; if (opt && opt.rx) m.rotation.x = opt.rx;
+    g.add(m); return m;
+  };
+  const RED = 0xb5322e, CREAM = 0xe8dfc8, DARK = 0x23262b;
+  B(5.6, 1.5, 1.6, RED, -0.4, 1.55, 0);                      // fuselage
+  B(1.6, 1.15, 1.44, RED, 3.0, 1.72, 0, { rz: 0 });          // nose taper
+  B(1.0, 1.0, 1.2, DARK, 3.9, 1.62, 0);                      // cowl
+  B(2.2, 0.5, 1.5, CREAM, -0.4, 2.35, 0);                    // cabin roof strip
+  const glass = B(1.3, 0.62, 1.5, 0x9fc7df, 2.35, 2.25, 0);  // windshield
+  glass.material = new THREE.MeshBasicMaterial({ color: 0x374c5c, fog: false });
+  B(3.4, 1.05, 1.3, RED, -3.6, 1.95, 0, { rz: -0.1 });       // tail boom
+  B(0.35, 1.9, 1.15, RED, -5.15, 3.0, 0, { rz: -0.25 });     // fin
+  B(2.9, 0.16, 1.05, CREAM, -5.1, 2.6, 0);                   // stabilizer
+  // wing: one chunky plank over the cabin + struts (support chain honest)
+  B(1.9, 0.22, 13.4, CREAM, 0.6, 2.95, 0);
+  B(0.55, 0.2, 1.3, RED, 0.6, 2.98, -6.15); B(0.55, 0.2, 1.3, RED, 0.6, 2.98, 6.15); // red tips
+  for (const s of [-1, 1]) {
+    B(0.3, 1.6, 0.3, DARK, 1.15, 1.9, 2.9 * s, { rx: 0.62 * s });
+    D["flap" + (s < 0 ? "L" : "R")] = B(1.0, 0.14, 2.6, 0xd9cfb6, -0.35, 2.9, 3.6 * s);
+  }
+  // fixed gear — chunky struts, the honest kind you can weld in a hangar
+  for (const s of [-1, 1]) {
+    B(0.3, 1.0, 0.32, DARK, 0.4, 0.75, 1.05 * s, { rx: 0.5 * s });
+    const w = B(0.62, 0.62, 0.34, 0x14161a, 0.4, 0.34, 1.35 * s); w.material = M(0x14161a);
+  }
+  B(0.3, 0.9, 0.3, DARK, 3.2, 0.75, 0); B(0.55, 0.55, 0.3, 0x14161a, 3.2, 0.3, 0);
+  B(1.15, 1.05, 0.16, RED, 0.85, 1.6, -0.85).material = M(0x8a2723);  // cargo door
+  // prop: crossed blades + blur disc at speed
+  D.propHub = new THREE.Group(); D.propHub.position.set(4.45, 1.62, 0); g.add(D.propHub);
+  const bl1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 0.3), M(0x1a1c20)); D.propHub.add(bl1);
+  const bl2 = bl1.clone(); bl2.rotation.x = Math.PI / 2; D.propHub.add(bl2);
+  D.propDisc = new THREE.Mesh(new THREE.CircleGeometry(1.32, 20),
+    new THREE.MeshBasicMaterial({ color: 0x9aa4b4, transparent: true, opacity: 0.14, side: THREE.DoubleSide, fog: false }));
+  D.propDisc.rotation.y = Math.PI / 2; D.propDisc.position.set(4.5, 1.62, 0); D.propDisc.visible = false; g.add(D.propDisc);
+  // registration on the fin — she has a name and a lien
+  for (const s of [-1, 1]) {
+    const reg = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.5),
+      new THREE.MeshBasicMaterial({ map: textTexture("N407RD", 256, 76, { fg: "#e8dfc8", bg: "#802420", fs: 0.6 }), fog: false }));
+    reg.position.set(-5.15 + 0.19 * s, 3.0, 0.01 * s); reg.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2;
+    reg.position.z = 0.6 * s; reg.position.x = -5.15; reg.rotation.z = -0.25 * (s > 0 ? 1 : -1) * 0; scene.updateMatrixWorld;
+    reg.position.set(-5.13, 3.05, 0.20 * s); reg.rotation.y = s > 0 ? 0.0 : Math.PI;
+    g.add(reg);
+  }
+  // nav lights: port red / starboard green / tail white / top beacon
+  const nav = (hex, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial({ color: hex, fog: false })); m.position.set(x, y, z); g.add(m); return m; };
+  nav(0xff3b30, 0.6, 2.98, -6.75); nav(0x35ff7d, 0.6, 2.98, 6.75); nav(0xffffff, -5.35, 2.62, 0);
+  D.planeBeacon = nav(0xff3b30, -0.4, 3.12, 0);
+  // landing light — a real SpotLight; night landings are made of this
+  D.landingLight = new THREE.SpotLight(0xfff2d8, 0, 260, 0.42, 0.5, 1.2);
+  D.landingLight.position.set(3.6, 1.4, 0);
+  D.lltarget = new THREE.Object3D(); D.lltarget.position.set(60, -6, 0);
+  g.add(D.lltarget); D.landingLight.target = D.lltarget; g.add(D.landingLight);
+  // blob shadow: grounds the silhouette without shadow maps
+  const sc = document.createElement("canvas"); sc.width = sc.height = 64;
+  const s2 = sc.getContext("2d"); const sg2 = s2.createRadialGradient(32, 32, 4, 32, 32, 30);
+  sg2.addColorStop(0, "rgba(0,0,0,0.5)"); sg2.addColorStop(1, "rgba(0,0,0,0)");
+  s2.fillStyle = sg2; s2.fillRect(0, 0, 64, 64);
+  D.blob = new THREE.Mesh(new THREE.PlaneGeometry(14, 14),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false }));
+  D.blob.rotation.x = -Math.PI / 2; scene.add(D.blob);
+  scene.add(g);
+  return g;
+}
+
+/* ------------------------------------------------- dynamic actors setup -- */
+const D = { windsocks: [], destBeacons: [] };   // dynamic registry (also used by builders above)
+buildHome();
+DESTS.forEach(buildDest);
+bakeMerged();
+
+const plane = buildPlane();
+const P = {   // the flight state — one object, one truth
+  x: PARK.x, y: 0, z: PARK.z, yaw: Math.PI, pitch: 0, roll: 0,
+  speed: 0, vy: 0, throttle: 0, flaps: 0, brakes: false, onGround: true,
+  fuel: 14, damage: 0, stall: false, engineOut: false, thrustFactor: 1,
+  flapsStuck: false, lightOn: false,
+};
+function planeSync() {
+  plane.position.set(P.x, P.y + 0.0, P.z);
+  plane.rotation.set(0, P.yaw - Math.PI / 2, 0);
+  plane.rotateZ(-P.roll); plane.rotateY(0); plane.rotateX(0);
+  plane.rotation.x = 0; // build pitch via rotateOnAxis for correct axis order:
+  plane.rotation.set(0, P.yaw - Math.PI / 2, 0);
+  plane.rotateOnAxis(new THREE.Vector3(0, 0, 1), P.pitch);
+  plane.rotateOnAxis(new THREE.Vector3(1, 0, 0), P.roll);
+  D.blob.position.set(P.x, 0.14, P.z);
+  const sh = clamp(1 - P.y / 55, 0, 1);
+  D.blob.material.opacity = 0.65 * sh; D.blob.visible = P.y < 55 && overIsland(P.x, P.z);
+  const sc = 1 + P.y * 0.1; D.blob.scale.set(sc, sc, 1);
+}
+planeSync();
+
+// NPCs
+const marla = makeDude({ shirt: 0x8a4a3a, pants: 0x3a3f4a, skin: 0xd9a066, hair: 0x2c2020 });
+marla.group.position.set(240.6, 0, 125.4); marla.group.rotation.y = Math.PI * 0.9; scene.add(marla.group);
+const bo = makeDude({ shirt: 0x4a5560, pants: 0x2e333c, skin: 0xc98a5a, cap: 0x2c3138, vest: 0xd7e04a });
+bo.group.position.set(256.5, 0, 79); bo.group.rotation.y = -Math.PI / 2; scene.add(bo.group);
+const vann = makeDude({ shirt: 0x2e3d55, pants: 0x232c3c, skin: 0xe0b080, cap: 0x1f2838 });
+vann.group.position.set(176, 0, 61.4); vann.group.rotation.y = Math.PI; scene.add(vann.group);
+const flash = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), new THREE.MeshBasicMaterial({ color: 0xfff2c0, fog: false }));
+flash.position.set(0, -0.62, 0.3); vann.parts.armRlo.add(flash); flash.visible = false;
+D.vannHome = { x: 176, z: 61.4 };
+// player dude (visible on foot, third person)
+const dude = makeDude({ shirt: 0x6b4a2e, pants: 0x2c3138, skin: 0xd9a066, hair: 0x3a2c1c });
+scene.add(dude.group);
+
+// fuel truck
+const truck = new THREE.Group();
+(function () {
+  const M = (hex) => new THREE.MeshLambertMaterial({ color: hex });
+  const B = (w, h, d, hex, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(hex)); m.position.set(x, y, z); truck.add(m); return m; };
+  B(2.0, 1.5, 2.0, 0x8a6a1c, 1.9, 1.35, 0);      // cab
+  B(1.9, 0.7, 1.9, 0x2c313a, 1.9, 0.4, 0);
+  const ws = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.6, 1.7), new THREE.MeshBasicMaterial({ color: 0x36434f, fog: false }));
+  ws.position.set(2.9, 1.65, 0); truck.add(ws);
+  B(3.4, 1.4, 1.9, 0xa8841f, -1.0, 1.15, 0);     // tank
+  B(3.0, 0.4, 1.6, 0xbf992c, -1.0, 1.95, 0);
+  B(4.6, 0.5, 1.9, 0x33383f, 0.3, 0.35, 0);      // chassis
+  for (const [x, z] of [[1.9, 0.95], [1.9, -0.95], [-1.6, 0.95], [-1.6, -0.95]])
+    B(0.7, 0.7, 0.3, 0x14161a, x, 0.35, z);
+  const sg = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.55),
+    new THREE.MeshBasicMaterial({ map: textTexture("FUEL", 192, 52, { fg: "#181004", bg: "#ffb03a", fs: 0.7 }), fog: false }));
+  sg.position.set(-1.0, 1.5, 0.97); truck.add(sg);
+})();
+truck.position.set(262, 0, 84); truck.rotation.y = Math.PI / 2; scene.add(truck);
+D.truck = { state: "home", t: 0, gal: 0, x: 262, z: 84 };
+
+// baggage train: tug + two carts (spawned live only when the job says so)
+const bagTrain = new THREE.Group();
+(function () {
+  const M = (hex) => new THREE.MeshLambertMaterial({ color: hex });
+  const unit = (hex, crates) => {
+    const u = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 1.3), M(hex)); b.position.y = 0.55; u.add(b);
+    for (const [x, z] of [[0.7, 0.55], [0.7, -0.55], [-0.7, 0.55], [-0.7, -0.55]]) {
+      const w = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.22), M(0x14161a)); w.position.set(x, 0.3, z); u.add(w);
+    }
+    if (crates) for (let i = 0; i < 2; i++) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 1.0), M(i ? 0x5a4634 : 0x4c5a3a));
+      c.position.set(-0.45 + i * 0.9, 1.1, 0); u.add(c);
+    }
+    return u;
+  };
+  const tug = unit(0x9a5a1f, false);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 1.1), M(0x7a4818)); cab.position.set(0.5, 1.2, 0); tug.add(cab);
+  bagTrain.add(tug);
+  for (let i = 1; i <= 2; i++) { const c = unit(0x4a5058, true); c.position.x = -2.4 * i; bagTrain.add(c); }
+})();
+bagTrain.position.set(128, 0, 52); scene.add(bagTrain); bagTrain.visible = false;
+D.bag = { t: 0, dir: 1 };
+
+// cargo pallet at the stand (visible only when a job is loaded, pre-board)
+const pallet = new THREE.Group();
+(function () {
+  const M = (hex) => new THREE.MeshLambertMaterial({ color: hex });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.3, 2.2), M(0x6a5334)); base.position.y = 0.15; pallet.add(base);
+  for (let i = 0; i < 3; i++) {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.8, 0.9), M([0x4c5a3a, 0x5a4634, 0x39505e][i]));
+    c.position.set(-0.5 + (i % 2), 0.7 + Math.floor(i / 2) * 0.8, -0.4 + (i % 2) * 0.8); pallet.add(c);
+  }
+})();
+pallet.position.set(PARK.x + 7.5, 0, PARK.z + 2); scene.add(pallet); pallet.visible = false;
+// walkaround defect visuals
+const oilPuddle = new THREE.Mesh(new THREE.CircleGeometry(0.9, 12), new THREE.MeshBasicMaterial({ color: 0x0c0d10 }));
+oilPuddle.rotation.x = -Math.PI / 2; oilPuddle.position.y = 0.16; scene.add(oilPuddle); oilPuddle.visible = false;
+
+/* ------------------------------------------------------------ game state - */
+const JOB_NAMES_LEGIT = ["MAIL SACKS", "MEDICAL COOLERS", "ENGINE PARTS", "DIVE GEAR", "GENERATOR COILS"];
+const JOB_NAMES_HOT = ["UNMARKED CRATES", "'FISH' — NO MANIFEST", "SEALED DRUMS", "QUIET BOXES", "SPARE PARTS (DON'T ASK)"];
+const DEFECT_NAMES = ["OIL LEAK (nose)", "FUEL CAP OPEN (right wing)", "FLAP HINGE CRACK (left wing)", "ELEVATOR PLAY (tail)"];
+let S = null;
+function freshState() {
+  return {
+    playing: false, ending: null, endReason: "",
+    mode: "foot",                 // foot | plane
+    cash: ECON.CASH0, debt: ECON.DEBT0, strikes: 0,
+    stats: { runs: 0, onTime: 0, bestVs: null, bestRating: "—", bribes: 0, bribesPaid: 0, earned: 0, spent: 0 },
+    board: [], boardN: 0,
+    job: null,                    // active job
+    clr: "none",                  // none|taxi|takeoff|enroute|inbound|land
+    wind: { dir: 0, speed: 0 },
+    inspection: null,             // {mood, resolved}
+    upgrades: { engine: false, gear: false, scrambler: false },
+    walkx: 232, walkz: 120, walkyaw: Math.PI * 0.75,
+    time: 0, clock: 23 * 60 + 40,
+    radarTalkUntil: 0, cineUntil: 0,
+    delivered: false, airborneT: 0, liftedAt: 0,
+  };
+}
+function rollWind() {
+  return { dir: nextRand() * 360, speed: 1 + nextRand() * 8 };
+}
+function makeJob(i) {
+  const hot = nextRand() < 0.45;
+  const dest = DESTS[Math.floor(nextRand() * DESTS.length)];
+  const names = hot ? JOB_NAMES_HOT : JOB_NAMES_LEGIT;
+  const name = names[Math.floor(nextRand() * names.length)];
+  const cargoKg = 150 + Math.round(nextRand() * 45) * 10;
+  const payout = payoutFor(dest.id, hot, cargoKg);
+  const deadline = Math.round(dest.dist / (hot ? 30 : 26)) + (hot ? 105 : 150);
+  const rampBusy = nextRand() < 0.35;
+  const defect = nextRand() < 0.25 ? Math.floor(nextRand() * 4) : -1;
+  return { id: "J" + (S.boardN++) + "-" + (hot ? "H" : "L"), name, destId: dest.id, hot,
+    cargoKg, payout, deadline, rampBusy, defect, defectFound: false, defectFixed: false,
+    accepted: 0, deliveredAt: 0, failureFired: false, stations: [false, false, false, false] };
+}
+function rollBoard() { S.board = [makeJob(0), makeJob(1), makeJob(2)];
+  if (!S.board.some(j => j.hot)) S.board[2].hot = true;      // desk always tempts you
+}
+
+/* ------------------------------------------------------------- radio ----- */
+const radioEl = document.getElementById("radio");
+const radioLines = [];
+let radioQueue = [], radioTimer = 0;
+function radioSay(who, text, delay) {
+  radioQueue.push({ who, text, at: S.time + (delay || 0) });
+}
+function radioFlush() {
+  for (let i = radioQueue.length - 1; i >= 0; i--) {
+    const q = radioQueue[i];
+    if (S.time >= q.at) {
+      radioLines.push(q);
+      if (q.who !== "you") S.radarTalkUntil = S.time + 3.2;
+      radioQueue.splice(i, 1);
+      while (radioLines.length > 5) radioLines.shift();
+      radioRender();
+    }
+  }
+}
+function radioRender() {
+  let h = '<div class="hdr">COM1 118.30 REDEYE TWR</div>';
+  for (const l of radioLines)
+    h += '<div class="line' + (l.who === "you" ? " you" : "") + '">' +
+      (l.who === "you" ? "&raquo; " : "&laquo; ") + l.text + "</div>";
+  radioEl.innerHTML = h;
+}
+function windStr() {
+  const d = Math.round(S.wind.dir / 10) * 10 || 360;
+  return ("00" + d).slice(-3) + " AT " + ("0" + Math.round(S.wind.speed * 1.94)).slice(-2);
+}
+
+/* -------------------------------------------------------------- HUD ------ */
+const $ = (id) => document.getElementById(id);
+const toastEl = $("toast");
+let toastT = 0;
+function toast(main, sub, ms) {
+  toastEl.innerHTML = main + (sub ? '<div class="sub">' + sub + "</div>" : "");
+  toastEl.style.opacity = 1; toastT = S ? S.time + (ms || 2.4) / 1 : 0;
+}
+function promptSet(txt) {
+  const p = $("prompt");
+  if (!txt) { p.classList.add("hidden"); return; }
+  p.innerHTML = txt; p.classList.remove("hidden");
+}
+function objective(txt) { $("objective").innerHTML = txt; }
+function hudMoney() {
+  $("cashV").textContent = fmt$(S.cash);
+  $("debtV").textContent = fmt$(S.debt);
+  let s = "";
+  for (let i = 0; i < 3; i++) s += '<span class="' + (i < S.strikes ? "on" : "off") + '">&#9679;</span>';
+  $("strikes").innerHTML = s;
+}
+function hudJob() {
+  const jp = $("jobPanel");
+  if (!S.job) { jp.classList.add("hidden"); return; }
+  jp.classList.remove("hidden");
+  const j = S.job, d = DESTS.find(k => k.id === j.destId);
+  $("jobName").textContent = j.name;
+  $("jobHot").classList.toggle("hidden", !j.hot);
+  $("jobDest").textContent = (S.delivered ? "RETURN TO REDEYE" : "TO " + d.name) + " · " + j.cargoKg + " KG · " + fmt$(j.payout);
+  const left = Math.max(0, j.accepted + j.deadline - S.time);
+  const tEl = $("jobTimer");
+  if (!S.delivered) {
+    tEl.textContent = "T-" + Math.floor(left / 60) + ":" + ("0" + Math.floor(left % 60)).slice(-2);
+    tEl.classList.toggle("late", left < 40);
+  } else tEl.textContent = j.onTime ? "DELIVERED · ON TIME" : "DELIVERED · LATE";
+  const tx = S.delivered ? 0 : d.x, tz = S.delivered ? 0 : d.z;
+  const dx = tx - P.x, dz = tz - P.z;
+  const brg = Math.atan2(dx, dz);           // vs plane yaw
+  const rel = ((brg - P.yaw) * 180 / Math.PI + 540) % 360 - 180;
+  $("bearing").style.transform = "rotate(" + Math.round(rel) + "deg)";
+  $("distV").textContent = (Math.hypot(dx, dz) / 1000).toFixed(1) + " km";
+}
+function hudInstr() {
+  const el = $("instr");
+  if (S.mode !== "plane") { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  $("iSpd").textContent = Math.round(P.speed * 1.94) + " kt";
+  $("iAlt").textContent = Math.round(P.y * 3.28) + " ft";
+  $("iVs").textContent = (P.vy >= 0 ? "+" : "") + Math.round(P.vy * 197) + " fpm";
+  $("iHdg").textContent = ("00" + Math.round(((P.yaw * 180 / Math.PI % 360) + 360) % 360)).slice(-3);
+  $("iThr").textContent = Math.round(P.throttle * 100) + "%";
+  $("iFlp").textContent = ["UP", "T/O", "FULL"][P.flaps] + (P.flapsStuck ? " (STUCK)" : "");
+  $("iFuel").textContent = P.fuel.toFixed(1) + " gal";
+  $("lampStall").classList.toggle("on", P.stall);
+  $("lampEng").classList.toggle("on", P.engineOut || P.thrustFactor < 1);
+  $("lampFuel").classList.toggle("on", P.fuel < 6);
+  $("lampFuel").classList.toggle("amberL", P.fuel < 6);
+  $("lampDmg").classList.toggle("on", P.damage >= 40);
+}
+
+/* -------------------------------------------------- strikes & endings ---- */
+function strike(reason) {
+  if (S.ending) return S.strikes;
+  S.strikes++;
+  toast("STRIKE " + S.strikes + " / 3", reason, 3.2);
+  radioSay("twr", "N407RD, VIOLATION LOGGED: " + reason.toUpperCase() + ". THAT'S " + S.strikes + " ON YOUR TICKET.", 0.6);
+  if (S.strikes >= 3) setEnding("LOSE", "License pulled: " + reason);
+  hudMoney();
+  return S.strikes;
+}
+function spend(n, why) {
+  S.cash -= n; S.stats.spent += n; hudMoney();
+  if (S.cash < ECON.REPO_FLOOR && !S.ending)
+    setEnding("LOSE", "The bank repossessed N407RD over " + fmt$(-S.cash) + " of bad paper.");
+}
+function earn(n) { S.cash += n; S.stats.earned += n; hudMoney(); }
+function setEnding(kind, why) {
+  if (S.ending) return;
+  S.ending = kind; S.endReason = why;
+  const big = $("endBig");
+  big.textContent = kind === "WIN" ? "PAID OFF." : kind === "LEAVE" ? "YOU WALKED." : "GAME OVER.";
+  big.className = "big " + (kind === "WIN" ? "win" : kind === "LEAVE" ? "leave" : "lose");
+  if (kind === "LOSE") big.textContent = why.indexOf("repossess") >= 0 || why.indexOf("Repossess") >= 0 ? "REPOSSESSED." : "LICENSE PULLED.";
+  $("endWhy").textContent = why;
+  const st = S.stats;
+  const otp = st.runs ? Math.round(100 * st.onTime / st.runs) : 0;
+  $("endStats").innerHTML =
+    "RUNS FLOWN <span class='v'>" + st.runs + "</span><br/>" +
+    "ON-TIME <span class='v'>" + otp + "%</span><br/>" +
+    "BEST LANDING <span class='v'>" + st.bestRating + (st.bestVs != null ? " (" + st.bestVs.toFixed(1) + " m/s)" : "") + "</span><br/>" +
+    "BRIBES PAID <span class='v'>" + st.bribes + " (" + fmt$(st.bribesPaid) + ")</span><br/>" +
+    "PROFIT <span class='v'>" + fmt$(st.earned - st.spent) + "</span>";
+  $("end").classList.remove("hidden");
+}
+
+/* ------------------------------------------------------- job lifecycle --- */
+function acceptJob(j) {
+  S.job = j; j.accepted = S.time; S.delivered = false;
+  S.wind = rollWind();
+  const mood = nextRand();                      // Vann's night, rolled per job
+  S.vannMood = mood;
+  pallet.visible = true;
+  bagTrain.visible = !!j.rampBusy;
+  if (j.defect >= 0) {
+    oilPuddle.visible = j.defect === 0;
+    oilPuddle.position.set(PARK.x + 3.4, 0.16, PARK.z - 3.4);
+  } else oilPuddle.visible = false;
+  S.board = S.board.filter(k => k !== j);
+  radioSay("ops", "OPS: " + j.name + " FOR " + DESTS.find(d => d.id === j.destId).name +
+    ". " + j.cargoKg + " KG ON THE PALLET." + (j.rampBusy ? " RAMP IS BUSY TONIGHT — MIND THE CARTS." : ""), 0.5);
+  if (j.hot) radioSay("ops", "OPS: NO MANIFEST ON THIS ONE. YOU DIDN'T GET IT FROM US.", 3.2);
+  toast("RUN ACCEPTED", j.name + " → " + DESTS.find(d => d.id === j.destId).name, 2.6);
+}
+function completeJob(bonusInfo) {
+  const j = S.job;
+  S.stats.runs++;
+  if (j.onTime) S.stats.onTime++;
+  let pay = j.payout + (j.onTime ? Math.round(j.payout * ECON.ONTIME_FRAC) : 0) + (bonusInfo || 0);
+  earn(pay);
+  toast("PAID " + fmt$(pay), (j.onTime ? "on-time bonus included · " : "late — no bonus · ") + "see the desk to pay down the plane", 3.4);
+  S.job = null; S.delivered = false; pallet.visible = false; bagTrain.visible = false; oilPuddle.visible = false;
+  S.clr = "none";
+  rollBoard();
+  hudJob();
+}
+function failJob(why) {
+  if (!S.job) return;
+  toast("CONTRACT VOID", why, 3);
+  S.job = null; S.delivered = false; pallet.visible = false; bagTrain.visible = false; oilPuddle.visible = false;
+  S.clr = "none"; rollBoard(); hudJob();
+}
+
+/* ----------------------------------------------------------- customs ----- */
+function inspectionChance(hot) {
+  let p = hot ? ECON.INSPECT_HOT : ECON.INSPECT_LEGIT;
+  if (S.upgrades.scrambler) p = Math.max(0.02, p - ECON.SCRAMBLER_CUT);
+  return p;
+}
+function maybeInspect() {
+  const j = S.job;
+  const p = inspectionChance(j.hot);
+  if (nextRand() < p) {
+    S.inspection = { mood: S.vannMood == null ? nextRand() : S.vannMood, resolved: false, walking: true, t: 0 };
+    radioSay("twr", "N407RD, HOLD POSITION. CUSTOMS WOULD LIKE A WORD.", 0.4);
+    return true;
+  }
+  return false;
+}
+function moodFlavor(m) {
+  if (m < 0.34) return "Vann's arms are crossed. He hasn't blinked. “Manifest. Now.”";
+  if (m < 0.67) return "Vann flips his clipboard, even keel. “Evening. Papers, please.”";
+  return "Vann strolls over, hands behind his back. “Slow night, huh. Whatcha hauling?”";
+}
+function openInspection() {
+  const j = S.job, ins = S.inspection;
+  $("inspectFlavor").textContent = moodFlavor(ins.mood);
+  $("inspectCargo").innerHTML = "In the back: <b>" + j.name + "</b>, " + j.cargoKg + " kg" +
+    (j.hot ? ' — <span style="color:var(--red)">this will not survive a manifest check.</span>'
+           : " — paperwork is clean.");
+  $("bribeBtn").innerHTML = "SLIP HIM " + fmt$(bribeCostFor(j.payout)) + ' <span class="kx">[B]</span>';
+  $("bribeBtn").style.display = j.hot ? "" : "none";
+  $("submitBtn").innerHTML = (j.hot ? "HAND OVER MANIFEST" : "SHOW PAPERS") + ' <span class="kx">[N]</span>';
+  $("inspectModal").classList.remove("hidden");
+}
+function resolveBribe(moodOverride) {
+  // pure-ish resolver, riggable via nextRand — the check drives this directly.
+  const j = S.job || { payout: 1000, hot: true };
+  const mood = moodOverride != null ? moodOverride : (S.inspection ? S.inspection.mood : 0.5);
+  const cost = bribeCostFor(j.payout);
+  const odds = bribeOdds(mood);
+  const roll = nextRand();
+  const accepted = roll < odds;
+  spend(cost, "bribe");
+  S.stats.bribes++; S.stats.bribesPaid += cost;
+  let fine = 0;
+  if (!accepted) { fine = fineFor(j.payout); spend(fine, "fine"); strike("attempted bribery of a customs officer"); }
+  return { accepted, odds, roll, cost, fine, strikes: S.strikes };
+}
+function finishInspection(outcome) {
+  $("inspectModal").classList.add("hidden");
+  const j = S.job; if (!j) { S.inspection = null; return; }
+  if (outcome === "bribe") {
+    const r = resolveBribe();
+    if (r.accepted) {
+      toast("HE POCKETS IT", "“Wind must've blown that pallet in. Night.”", 3);
+      S.inspection = { resolved: true, leaving: true, t: 0, mood: S.vannMood };
+      completeJob(0);
+    } else {
+      toast("BUSTED", "cargo seized · fined " + fmt$(r.fine), 3.4);
+      S.inspection = { resolved: true, leaving: true, t: 0, mood: S.vannMood };
+      failJob("cargo confiscated at the ramp");
+    }
+  } else {
+    if (j.hot) {
+      const fine = fineFor(j.payout);
+      spend(fine, "fine");
+      strike("smuggling — hot cargo on the manifest");
+      toast("BUSTED", "cargo seized · fined " + fmt$(fine), 3.4);
+      S.inspection = { resolved: true, leaving: true, t: 0, mood: S.vannMood };
+      failJob("cargo confiscated at the ramp");
+    } else {
+      toast("ALL CLEAR", "“Have a good night.”", 2.4);
+      S.inspection = { resolved: true, leaving: true, t: 0, mood: S.vannMood };
+      completeJob(0);
+    }
+  }
+}
+
+/* ------------------------------------------------------ landing / crash -- */
+function overIsland(x, z) {
+  if (x > HOME.minX && x < HOME.maxX && z > HOME.minZ && z < HOME.maxZ) return "home";
+  for (const d of DESTS) if (x > d.rect.minX && x < d.rect.maxX && z > d.rect.minZ && z < d.rect.maxZ) return d.id;
+  return null;
+}
+function onRunway(x, z) {
+  if (Math.abs(z) < 11 && x > -432 && x < 432) return "home";
+  for (const d of DESTS) if (Math.abs(z - d.z) < 8.5 && x > d.strip.x0 - 6 && x < d.strip.x1 + 6) return d.id;
+  return null;
+}
+function crash(why) {
+  P.damage = 100; P.speed = 0; P.throttle = 0; P.onGround = true;
+  strike("crashed the aircraft (" + why + ")");
+  if (S.ending) return;
+  toast("CRASH", why + " — the night crew tows what's left back to the stand", 4);
+  if (S.job && !S.delivered) failJob("cargo destroyed in the crash");
+  else if (S.job) failJob("cargo scattered across the field");
+  // tow home
+  P.x = PARK.x; P.z = PARK.z; P.y = 0; P.yaw = Math.PI; P.pitch = 0; P.roll = 0; P.vy = 0; P.speed = 0;
+  S.mode = "foot"; S.clr = "none";
+  S.walkx = PARK.x + 8; S.walkz = PARK.z + 6;
+  dude.group.visible = true;
+  radioSay("twr", "N407RD... GROUND CREW IS ON THE WAY. GET IT FIXED AT HANGAR ONE.", 1);
+}
+function touchdown() {
+  const vs = Math.abs(P.vy);
+  const r = simLanding(P.vy);
+  P.onGround = true; P.vy = 0; P.pitch = Math.max(0, P.pitch * 0.2);
+  const where = onRunway(P.x, P.z);
+  if (r.rating === "CRASH") { crash("slammed in at " + vs.toFixed(1) + " m/s"); return; }
+  if (!where) { P.damage += 15; toast("ROUGH FIELD", "that grass is not a runway (+15 damage)", 2.6); }
+  P.damage += r.damage;
+  if (S.stats.bestVs == null || vs < S.stats.bestVs) { S.stats.bestVs = vs; S.stats.bestRating = r.rating; }
+  const msg = r.rating === "BUTTER" ? "BUTTER" : r.rating === "FIRM" ? "FIRM" : "HARD LANDING";
+  toast(msg, vs.toFixed(1) + " m/s" + (r.bonus ? " · +" + fmt$(r.bonus) + " handling bonus" : "") +
+    (r.damage ? " · +" + r.damage + " damage" : ""), 2.4);
+  if (r.bonus) P.pendingBonus = (P.pendingBonus || 0) + r.bonus;
+  if (P.damage >= 100) { crash("the gear folded"); return; }
+  // landing clearance bookkeeping (home only — outstations are uncontrolled)
+  const isl = overIsland(P.x, P.z);
+  if (isl === "home" && S.clr !== "land" && S.mode === "plane") {
+    spend(ECON.NOCLR_LAND_FINE, "fine");
+    radioSay("twr", "N407RD, YOU LANDED WITHOUT CLEARANCE. I HAVE A NUMBER FOR YOU TO COPY. " + fmt$(ECON.NOCLR_LAND_FINE) + " SAYS YOU WON'T DO IT TWICE.", 0.8);
+  }
+  if (isl === "home") S.clr = "none";
+}
+
+/* ------------------------------------------------------------ input ------ */
+const keys = {};
+window.addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  keys[e.code] = true;
+  if (!S || !S.playing || S.ending) return;
+  if (e.code === "KeyE") interact();
+  if (e.code === "KeyF") cycleFlaps();
+  if (e.code === "KeyR") radioCall();
+  if (e.code === "KeyC") D.cockpit = !D.cockpit;
+  if (e.code === "KeyL") { P.lightOn = !P.lightOn; }
+  if (e.code === "KeyB" && !$("inspectModal").classList.contains("hidden")) finishInspection("bribe");
+  if (e.code === "KeyN" && !$("inspectModal").classList.contains("hidden")) finishInspection("submit");
+});
+window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+function cycleFlaps() {
+  if (S.mode !== "plane" || P.flapsStuck) return;
+  P.flaps = (P.flaps + 1) % 3;
+  toast("FLAPS " + ["UP", "T/O", "FULL"][P.flaps], null, 1.1);
+}
+
+/* --------------------------------------------------------- radio calls --- */
+function radioCall() {
+  if (S.mode !== "plane") { radioSay("you", "(the handheld only reaches the tower from the cockpit)", 0); return; }
+  const isl = overIsland(P.x, P.z);
+  if (P.onGround && isl === "home" && S.clr === "none") {
+    radioSay("you", "REDEYE GROUND, N407RD AT CARGO 1, TAXI FOR DEPARTURE.", 0);
+    radioSay("gnd", "N407RD, REDEYE GROUND, TAXI TO RUNWAY 27 VIA ALPHA. HOLD SHORT RUNWAY 27.", 1.6);
+    S.clr = "taxi"; return;
+  }
+  if (P.onGround && isl === "home" && S.clr === "taxi") {
+    const dh = Math.hypot(P.x - HOLD_SHORT.x, P.z - HOLD_SHORT.z);
+    if (dh < 45 && P.speed < 3) {
+      radioSay("you", "TOWER, N407RD HOLDING SHORT RUNWAY 27, READY FOR DEPARTURE.", 0);
+      radioSay("twr", "N407RD, WIND " + windStr() + ", RUNWAY 27, CLEARED FOR TAKEOFF.", 1.8);
+      radioSay("you", "CLEARED FOR TAKEOFF 27, N407RD.", 3.4);
+      S.clr = "takeoff"; return;
+    }
+    radioSay("gnd", "N407RD, CALL ME BACK AT THE HOLD SHORT LINE, STOPPED.", 0.6); return;
+  }
+  if (!P.onGround && S.clr === "enroute") {
+    const dHome = Math.hypot(P.x, P.z);
+    if (dHome < 1800) {
+      radioSay("you", "REDEYE TOWER, N407RD, " + (dHome / 1852 * 1).toFixed(0) + " MILES EAST, INBOUND FULL STOP.", 0);
+      radioSay("twr", "N407RD, WIND " + windStr() + ", RUNWAY 27, CLEARED TO LAND. PAPI ON THE LEFT.", 1.8);
+      radioSay("you", "CLEARED TO LAND 27, N407RD.", 3.4);
+      S.clr = "land"; return;
+    }
+    radioSay("twr", "N407RD, YOU'RE STILL OUTSIDE MY AIRSPACE. CALL INSIDE TEN MILES.", 0.6); return;
+  }
+  radioSay("you", "N407RD... uh, disregard.", 0);
+}
+function grantClearance() {
+  if (P.onGround) { S.clr = "takeoff"; radioSay("twr", "N407RD, CLEARED FOR TAKEOFF RUNWAY 27.", 0.2); }
+  else { S.clr = "land"; radioSay("twr", "N407RD, CLEARED TO LAND RUNWAY 27.", 0.2); }
+  return S.clr;
+}
+
+/* ------------------------------------------------------- interactions ---- */
+function nearest2(x, z, tx, tz) { return Math.hypot(x - tx, z - tz); }
+function walkStations() {
+  // 4 walkaround points in plane space → world (plane parked at stand)
+  const c = Math.sin(P.yaw), s = Math.cos(P.yaw);
+  const pts = [[4.4, 0], [0.6, -6.2], [0.6, 6.2], [-5.2, 0]];   // nose, wingL, wingR, tail
+  return pts.map(([fx, fz]) => ({ x: P.x + c * fx - s * fz * 0, z: P.z + s * 0 + 0, fx, fz }))
+    .map((p, i) => {
+      // proper rotate: forward=(sin yaw, cos yaw), right=(cos yaw, -sin yaw)
+      const wx = P.x + Math.sin(P.yaw) * pts[i][0] + Math.cos(P.yaw) * pts[i][1];
+      const wz = P.z + Math.cos(P.yaw) * pts[i][0] - Math.sin(P.yaw) * pts[i][1];
+      return { x: wx, z: wz, i };
+    });
+}
+const STATION_NAMES = ["NOSE / ENGINE", "LEFT WING", "RIGHT WING", "TAIL"];
+function interactTarget() {
+  if (S.mode !== "foot") return null;
+  const x = S.walkx, z = S.walkz;
+  if (nearest2(x, z, 241, 126) < 4.2) return { kind: "board", label: "charter desk — <b>E</b>" };
+  if (nearest2(x, z, 256.5, 78) < 4.5) return { kind: "fuel", label: "call the fuel truck — <b>E</b>" };
+  if (nearest2(x, z, 95, 120) < 9) return { kind: "hangar", label: "Hangar One: repairs &amp; upgrades — <b>E</b>" };
+  if (S.job && !S.delivered && S.job.accepted >= 0) {
+    const st = walkStations();
+    for (const p of st) {
+      if (!S.job.stations[p.i] && nearest2(x, z, p.x, p.z) < 2.6)
+        return { kind: "station", i: p.i, label: "inspect " + STATION_NAMES[p.i] + " — <b>E</b>" };
+    }
+  }
+  const doorD = nearest2(x, z, P.x + Math.cos(P.yaw) * -0.8, P.z - Math.sin(P.yaw) * -0.8);
+  if (nearest2(x, z, P.x, P.z) < 4.6) return { kind: "boardPlane", label: "board N407RD — <b>E</b>" };
+  if (nearest2(x, z, 176, 63) < 4) return { kind: "vann", label: "Inspector Vann — <b>E</b>" };
+  return null;
+}
+function interact() {
+  if (S.mode === "plane") {
+    if (P.onGround && P.speed < 1) {
+      S.mode = "foot"; D.cockpit = false;
+      S.walkx = P.x + Math.sin(P.yaw + 1.9) * 4; S.walkz = P.z + Math.cos(P.yaw + 1.9) * 4;
+      dude.group.visible = true;
+      toast("ENGINE SHUT DOWN", null, 1.4);
+    }
+    return;
+  }
+  const t = interactTarget();
+  if (!t) return;
+  if (t.kind === "board") openBoard();
+  else if (t.kind === "fuel") openFuel();
+  else if (t.kind === "hangar") openHangar();
+  else if (t.kind === "vann") toast("“Keep it clean tonight.”", "Vann looks straight through you", 2);
+  else if (t.kind === "station") inspectStation(t.i);
+  else if (t.kind === "boardPlane") boardPlane();
+}
+function inspectStation(i) {
+  const j = S.job;
+  j.stations[i] = true;
+  if (j.defect === i && !j.defectFixed) {
+    j.defectFound = true;
+    promptSet(null);
+    toast("FOUND: " + DEFECT_NAMES[i], "fix now for " + fmt$(ECON.FIX_DEFECT) + "? it WILL fail in the air — [E] again at this station", 3.6);
+    j.stations[i] = false;                     // stand here and E again to fix
+    j.fixArmed = i;
+    if (j.fixArmedOnce) {                      // second press = pay the man
+      spend(ECON.FIX_DEFECT, "repair");
+      j.defectFixed = true; j.stations[i] = true; j.fixArmedOnce = false;
+      oilPuddle.visible = false;
+      toast("DEFECT FIXED", DEFECT_NAMES[i] + " squared away", 2);
+      return;
+    }
+    j.fixArmedOnce = true;
+    return;
+  }
+  toast(STATION_NAMES[i] + ": CLEAN", (j.stations.filter(Boolean).length) + "/4 checked", 1.6);
+}
+function boardPlane() {
+  if (P.damage >= 60) { toast("SHE WON'T FLY", "damage " + Math.round(P.damage) + " — repair at Hangar One first", 2.6); return; }
+  S.mode = "plane"; dude.group.visible = false;
+  toast("ENGINE START", S.job && !S.delivered ? "cargo aboard · call ground on R when ready" : "call ground on R when ready", 2.2);
+  if (S.job && !S.delivered) pallet.visible = false;
+}
+
+/* ------------------------------------------------------------- menus ----- */
+function openBoard() {
+  if (S.job) { toast("ONE RUN AT A TIME", "finish or void the current contract", 2); return; }
+  const wrap = $("boardJobs"); wrap.innerHTML = "";
+  $("boardSub").textContent = "Marla slides the clipboard across. Debt left: " + fmt$(S.debt) + ".";
+  S.board.forEach((j) => {
+    const d = DESTS.find(k => k.id === j.destId);
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = (j.hot ? '<span class="hot">HOT · </span>' : "") + "<b>" + j.name + "</b> → " + d.name +
+      ' <span class="pay">' + fmt$(j.payout) + "</span><br/><small>" + j.cargoKg + " kg · " +
+      (d.dist / 1000).toFixed(1) + " km · deadline " + Math.floor(j.deadline / 60) + ":" + ("0" + j.deadline % 60).slice(-2) +
+      (j.rampBusy ? " · ramp busy" : "") + (j.hot ? " · customs risk" : " · clean papers") + "</small>";
+    el.onclick = () => { $("board").classList.add("hidden"); acceptJob(j); };
+    wrap.appendChild(el);
+  });
+  $("board").classList.remove("hidden");
+}
+function payDebt(n) {
+  const amt = Math.min(n, S.debt, Math.max(0, S.cash));
+  if (amt <= 0) { toast("NOT WITH THAT POCKET", null, 1.6); return; }
+  spend(amt, "debt"); S.debt -= amt; hudMoney();
+  $("boardSub").textContent = "Receipt printed. Debt left: " + fmt$(S.debt) + ".";
+  if (S.debt <= 0) {
+    $("board").classList.add("hidden");
+    setEnding("WIN", "Twelve grand, paid in full, in the middle of the night. The Cormorant is yours.");
+  }
+}
+$("payDebt1").onclick = () => payDebt(500);
+$("payDebt2").onclick = () => payDebt(2000);
+$("payDebtMax").onclick = () => payDebt(Math.max(0, S ? S.cash : 0));
+$("walkAway").onclick = () => setEnding("LEAVE", "You left the keys on the desk and walked into the dark with " + fmt$(Math.max(0, S.cash)) + ".");
+$("boardClose").onclick = () => $("board").classList.add("hidden");
+function openFuel() {
+  $("fuelSub").innerHTML = "Tank: <b>" + P.fuel.toFixed(1) + " / " + PHYS.TANK + " gal</b> · " + fmt$(ECON.FUEL_PRICE) +
+    "/gal · every gallon is 2.7 kg of takeoff roll. Bo will drive over.";
+  $("fuelMenu").classList.remove("hidden");
+}
+$("fuelClose").onclick = () => $("fuelMenu").classList.add("hidden");
+document.querySelectorAll("#fuelMenu .buy").forEach((b) => {
+  b.onclick = () => {
+    const want = b.dataset.gal === "fill" ? PHYS.TANK - P.fuel : Math.min(+b.dataset.gal, PHYS.TANK - P.fuel);
+    if (want <= 0.05) { toast("TANK'S FULL", null, 1.4); return; }
+    D.truck.state = "driving"; D.truck.gal = want; D.truck.t = 0;
+    $("fuelMenu").classList.add("hidden");
+    toast("FUEL TRUCK CALLED", want.toFixed(0) + " gal — " + fmt$(want * ECON.FUEL_PRICE), 2);
+  };
+});
+function openHangar() {
+  const u = S.upgrades;
+  $("hangarSub").innerHTML = "Damage: <b>" + Math.round(P.damage) + "</b> (" + fmt$(ECON.REPAIR_PT) + "/pt)" +
+    (P.damage >= 60 ? ' — <span style="color:var(--red)">grounded until repaired</span>' : "") + ".";
+  const btns = $("hangarBtns"); btns.innerHTML = "";
+  const mk = (label, cost, fn, owned) => {
+    const b = document.createElement("button");
+    b.className = owned ? "" : "buy";
+    b.innerHTML = owned ? label + " ✓" : label + " — " + fmt$(cost);
+    b.disabled = !!owned;
+    b.onclick = fn; btns.appendChild(b);
+  };
+  mk("REPAIR ALL", Math.round(P.damage) * ECON.REPAIR_PT, () => {
+    const c = Math.round(P.damage) * ECON.REPAIR_PT;
+    if (c <= 0) { toast("NOTHING TO FIX", null, 1.4); return; }
+    spend(c, "repair"); P.damage = 0; openHangar(); toast("AIRFRAME SQUARED AWAY", null, 1.6);
+  }, false);
+  mk("ENGINE II (+25% thrust)", ECON.UPG.engine, () => { if (buyUpg("engine")) openHangar(); }, u.engine);
+  mk("HEAVY GEAR (halve landing damage)", ECON.UPG.gear, () => { if (buyUpg("gear")) openHangar(); }, u.gear);
+  mk("RADIO SCRAMBLER (−15% inspections)", ECON.UPG.scrambler, () => { if (buyUpg("scrambler")) openHangar(); }, u.scrambler);
+  $("hangarMenu").classList.remove("hidden");
+}
+function buyUpg(k) {
+  if (S.cash < ECON.UPG[k]) { toast("NOT WITH THAT POCKET", null, 1.6); return false; }
+  spend(ECON.UPG[k], "upgrade"); S.upgrades[k] = true;
+  toast(k.toUpperCase() + " INSTALLED", null, 1.8);
+  return true;
+}
+$("hangarClose").onclick = () => $("hangarMenu").classList.add("hidden");
+$("bribeBtn").onclick = () => finishInspection("bribe");
+$("submitBtn").onclick = () => finishInspection("submit");
+$("againBtn").onclick = () => { $("end").classList.add("hidden"); resetGame(); };
+
+/* --------------------------------------------------------- simulation ---- */
+function windVec() {
+  // met convention: wind FROM dir. Blows TOWARD dir+180.
+  const a = (S.wind.dir + 180) * D2R;
+  return { x: Math.sin(a) * S.wind.speed, z: Math.cos(a) * S.wind.speed };
+}
+function simPlane(dt) {
+  const j = S.job;
+  const m = massNow(P.fuel, j && !S.delivered && S.mode === "plane" ? j.cargoKg : 0);
+  const T0 = (S.upgrades.engine ? PHYS.THRUST_UPG : PHYS.THRUST) * (P.engineOut ? 0 : P.thrustFactor);
+  // throttle input
+  if (S.mode === "plane") {
+    if (keys.ShiftLeft || keys.ShiftRight) P.throttle = clamp(P.throttle + dt * 0.55, 0, 1);
+    if (keys.ControlLeft || keys.ControlRight) P.throttle = clamp(P.throttle - dt * 0.7, 0, 1);
+    P.brakes = !!keys.KeyB;
+  }
+  // fuel burn
+  if (!P.engineOut) {
+    P.fuel = Math.max(0, P.fuel - (0.5 + 3.2 * P.throttle) / 60 * dt * (j && j.failureFired && j.defect === 1 ? 4 : 1));
+    if (P.fuel <= 0) { P.engineOut = true; toast("ENGINE OUT", "tanks are dry", 3); }
+  }
+  const wv = windVec();
+  const fwdx = Math.sin(P.yaw), fwdz = Math.cos(P.yaw);
+  const headwind = -(wv.x * fwdx + wv.z * fwdz);
+  const airspeed = Math.max(0, P.speed + (P.onGround ? headwind * 0.6 : headwind));
+  const vs = vsFor(P.flaps, P.fuel, j && !S.delivered ? j.cargoKg : 0);
+  if (P.onGround) {
+    // ground roll / taxi
+    const thrN = T0 * P.throttle;
+    let a = groundAccel(P.speed, m, thrN);
+    if (P.brakes) a -= 4.5;
+    if (P.speed < 0.4 && thrN < 300) { P.speed = Math.max(0, P.speed - 2 * dt); a = 0; }
+    P.speed = Math.max(0, P.speed + a * dt);
+    const steer = (keys.KeyA ? -1 : 0) + (keys.KeyD ? 1 : 0);
+    P.yaw += steer * dt * clamp(2.4 - P.speed * 0.055, 0.35, 2.4) * (P.speed > 0.2 ? 1 : 0);
+    P.roll = lerp(P.roll, 0, dt * 4);
+    P.pitch = lerp(P.pitch, 0, dt * 4);
+    // rotate
+    const vr = vrFor(P.flaps, m);
+    const pull = keys.KeyS || keys.ArrowDown;
+    if (pull && airspeed >= vr) {
+      P.onGround = false; P.pitch = 0.12; P.vy = 2.2;
+      const isl = overIsland(P.x, P.z);
+      if (isl === "home") {
+        if (S.clr !== "takeoff") strike("departed runway 27 without takeoff clearance");
+        else { S.clr = "enroute"; radioSay("twr", "N407RD, AIRBORNE AT " + nightClock() + ". FLY SAFE OUT THERE.", 1.2); }
+        S.liftedAt = S.time;
+      }
+      S.airborneT = 0;
+    }
+  } else {
+    // airborne
+    S.airborneT += dt;
+    const pitchIn = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
+    const steer = (keys.KeyA ? -1 : 0) + (keys.KeyD ? 1 : 0);
+    P.stall = airspeed < vs * 0.98;
+    if (!P.stall) {
+      P.pitch = clamp(P.pitch + pitchIn * dt * 0.55, -0.30, 0.24);
+      P.yaw += steer * dt * 0.72 * clamp(airspeed / 40, 0.3, 1.2);
+      P.roll = lerp(P.roll, steer * 0.42, dt * 3);
+    } else {
+      P.pitch = clamp(P.pitch - dt * 0.5, -0.35, P.pitch);   // nose falls, period
+      P.roll = lerp(P.roll, 0, dt * 2);
+    }
+    const dragMult = PHYS.FLAP_DRAG[P.flaps];
+    const dv = ((T0 * P.throttle - PHYS.KD * airspeed * airspeed * dragMult) / m - PHYS.G * Math.sin(P.pitch) * 0.55) * dt;
+    P.speed = Math.max(0, P.speed + dv);
+    P.vy = P.speed * Math.sin(P.pitch) * 0.95 - (P.stall ? (vs - airspeed) * 0.55 + 3.5 : 0);
+    P.y += P.vy * dt;
+    P.x += wv.x * 0.85 * dt; P.z += wv.z * 0.85 * dt;     // wind drift — the sock matters
+    // seeded defect bites ~15 s after liftoff if you skipped the walkaround
+    if (j && j.defect >= 0 && !j.defectFixed && !j.failureFired && S.airborneT > 15) {
+      j.failureFired = true;
+      if (j.defect === 0) { P.thrustFactor = 0.45; toast("ENGINE ROUGH", "that oil leak you didn't check", 3.4); }
+      else if (j.defect === 1) { toast("FUEL VENTING", "cap's open — burn rate x4", 3.4); }
+      else { P.flapsStuck = true; toast("FLAPS JAMMED", "stuck at " + ["UP", "T/O", "FULL"][P.flaps], 3.4); }
+    }
+    if (P.y > 900) { P.y = 900; P.pitch = Math.min(P.pitch, 0); }
+  }
+  // integrate position along heading
+  const hs = P.onGround ? P.speed : P.speed * Math.cos(P.pitch);
+  P.x += fwdx * hs * dt; P.z += fwdz * hs * dt;
+  // ground contact
+  const isl = overIsland(P.x, P.z);
+  if (!P.onGround && P.y <= 0) {
+    if (!isl) { crash("ditched in the sea"); planeSync(); return; }
+    P.y = 0; touchdown();
+  }
+  if (P.onGround) {
+    P.y = 0;
+    if (!isl) { crash("rolled off the island into the water"); planeSync(); return; }
+    // building collisions while taxiing
+    if (P.speed > 0.5) {
+      for (const c of SOLIDS) {
+        if (P.x > c.minX - 2 && P.x < c.maxX + 2 && P.z > c.minZ - 2 && P.z < c.maxZ + 2 && c.maxY > 0.5) {
+          if (P.speed > 8) { crash("taxied into a structure"); planeSync(); return; }
+          P.speed = 0; P.damage += 4; toast("BUMP", "+4 damage", 1.4);
+          P.x -= fwdx * 2.2; P.z -= fwdz * 2.2;
+          break;
+        }
+      }
+      // baggage carts are physical when the ramp is busy
+      if (bagTrain.visible) {
+        const bd = Math.hypot(P.x - bagTrain.position.x, P.z - bagTrain.position.z);
+        if (bd < 5) { P.speed = Math.min(P.speed, 1); P.damage += 8; D.bag.hitCd = 3; toast("CART STRIKE", "+8 damage — ramp was flagged busy", 2.2); }
+      }
+    }
+  }
+  // stall flag only meaningful airborne
+  if (P.onGround) P.stall = false;
+  // arrivals: delivery + payout logic
+  if (j && !S.delivered && isl === j.destId && P.onGround && P.speed < 0.6) {
+    const d = DESTS.find(k => k.id === j.destId);
+    if (Math.hypot(P.x - d.pad.x, P.z - d.pad.z) < 16) {
+      S.padT = (S.padT || 0) + dt;
+      if (S.padT > 2.2) {
+        S.delivered = true; j.deliveredAt = S.time;
+        j.onTime = (S.time - j.accepted) <= j.deadline;
+        toast("CARGO DELIVERED", j.onTime ? "on time — bonus locked in" : "late — they won't forget", 2.6);
+        radioSay("ops", "OPS: " + d.name + " CONFIRMS THE HANDOFF. COME HOME FOR YOUR ENVELOPE.", 1);
+        S.padT = 0;
+      }
+    } else S.padT = 0;
+  }
+  if (j && !S.delivered && S.time - j.accepted > j.deadline && !j.expiredWarned) {
+    j.expiredWarned = true;
+    radioSay("ops", "OPS: DEADLINE'S BLOWN. DELIVER ANYWAY — LATE PAY, NO BONUS.", 0.5);
+    j.onTime = false;
+  }
+  if (j && S.delivered && isl === "home" && P.onGround && P.speed < 0.5 &&
+      Math.hypot(P.x - PARK.x, P.z - PARK.z) < 9 && S.mode === "plane") {
+    S.parkT = (S.parkT || 0) + dt;
+    if (S.parkT > 1.6 && !S.inspection) {
+      S.parkT = -999;                       // fire once
+      if (!maybeInspect()) {
+        const bonus = P.pendingBonus || 0; P.pendingBonus = 0;
+        completeJob(bonus);
+      }
+    }
+  } else S.parkT = 0;
+  planeSync();
+}
+function simWalk(dt) {
+  const run = keys.ShiftLeft || keys.ShiftRight ? 6.2 : 3.4;
+  let mx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  let mz = (keys.KeyS ? 1 : 0) - (keys.KeyW ? 1 : 0);
+  const camYaw = D.camYaw != null ? D.camYaw : 0;
+  if (mx || mz) {
+    const len = Math.hypot(mx, mz); mx /= len; mz /= len;
+    const wx = (mx * Math.cos(camYaw) + mz * Math.sin(camYaw));
+    const wz = (-mx * Math.sin(camYaw) + mz * Math.cos(camYaw));
+    S.walkx += wx * run * dt; S.walkz += wz * run * dt;
+    S.walkyaw = Math.atan2(wx, wz);
+    D.walkAnim = (D.walkAnim || 0) + dt * (run > 4 ? 10 : 7);
+  } else D.walkAnim = lerp(D.walkAnim || 0, Math.round((D.walkAnim || 0) / Math.PI) * Math.PI, dt * 8);
+  // keep on the home island (the sea is the fence)
+  S.walkx = clamp(S.walkx, HOME.minX + 4, HOME.maxX - 4);
+  S.walkz = clamp(S.walkz, HOME.minZ + 4, HOME.maxZ - 4);
+  // push out of solids
+  for (const c of SOLIDS) {
+    if (c.maxY < 0.6) continue;
+    if (S.walkx > c.minX - 0.5 && S.walkx < c.maxX + 0.5 && S.walkz > c.minZ - 0.5 && S.walkz < c.maxZ + 0.5) {
+      const dxl = S.walkx - (c.minX - 0.5), dxr = (c.maxX + 0.5) - S.walkx;
+      const dzl = S.walkz - (c.minZ - 0.5), dzr = (c.maxZ + 0.5) - S.walkz;
+      const m = Math.min(dxl, dxr, dzl, dzr);
+      if (m === dxl) S.walkx = c.minX - 0.5; else if (m === dxr) S.walkx = c.maxX + 0.5;
+      else if (m === dzl) S.walkz = c.minZ - 0.5; else S.walkz = c.maxZ + 0.5;
+    }
+  }
+  dude.group.position.set(S.walkx, 0, S.walkz);
+  dude.group.rotation.y = S.walkyaw;
+  const sw = Math.sin(D.walkAnim || 0) * 0.55;
+  dude.parts.legL.rotation.x = sw; dude.parts.legR.rotation.x = -sw;
+  dude.parts.armL.rotation.x = -sw * 0.7; dude.parts.armR.rotation.x = sw * 0.7;
+}
+
+/* -------------------------------------------------- ambient animations --- */
+function npcHeadTrack(d, tx, tz) {
+  const g = d.group;
+  const dx = tx - g.position.x, dz = tz - g.position.z;
+  const want = Math.atan2(dx, dz) - g.rotation.y;
+  const w = Math.atan2(Math.sin(want), Math.cos(want));
+  d.parts.head.rotation.y = lerp(d.parts.head.rotation.y, clamp(w, -0.9, 0.9), 0.08);
+}
+function animActors(dt, t) {
+  // beacon sweeps all night; halo throbs as it points at you
+  D.beaconBase.rotation.y = t * 1.5;
+  const bphase = Math.abs(Math.sin(t * 1.5 + 0.4));
+  D.beaconHalo.material.opacity = 0.25 + bphase * 0.5;
+  D.beaconHalo.material.color.setHex(Math.floor(t * 1.5 / Math.PI) % 2 ? 0x2bff7f : 0xffffff);
+  // radar only spins while the tower is talking to you
+  if (S.time < S.radarTalkUntil) D.radar.rotation.y += dt * 2.6;
+  // REIL strobes at the 27 threshold
+  const strobe = (Math.sin(t * 9) > 0.82) ? 1 : 0.06;
+  if (!D.reilA) { D.reilA = halo(433, 0.9, -10.5, 0xffffff, 4); D.reilB = halo(433, 0.9, 10.5, 0xffffff, 4); }
+  D.reilA.material.opacity = strobe; D.reilB.material.opacity = strobe;
+  // destination ID beacons pulse slow
+  for (const b of D.destBeacons) b.sprite.material.opacity = 0.35 + 0.45 * Math.abs(Math.sin(t * 0.9 + b.phase));
+  // windsocks answer the actual wind
+  for (const ws of D.windsocks) {
+    const towards = (S.wind.dir + 180) * D2R;
+    ws.pivot.rotation.y = Math.atan2(Math.sin(towards), Math.cos(towards));
+    ws.pivot.rotation.y = towards; // yaw so +X of cone points downwind
+    ws.pivot.rotation.y = Math.PI / 2 - towards;
+    const droop = lerp(1.15, 0.02, clamp(S.wind.speed / 8, 0, 1));
+    ws.cone.rotation.z = -droop;
+    ws.cone.rotation.x = Math.sin(t * 6) * 0.03 * S.wind.speed;
+  }
+  // plane beacon + prop + landing light + flaps
+  D.planeBeacon.material.color.setHex(Math.sin(t * 6) > 0 ? 0xff3b30 : 0x5a1512);
+  const rpm = P.engineOut ? 0 : 4 + P.throttle * 55;
+  D.propHub.rotation.x += dt * rpm;
+  D.propDisc.visible = rpm > 25; D.propHub.visible = rpm <= 25;
+  D.landingLight.intensity = P.lightOn ? 1.35 : 0;
+  const fl = P.flaps * 0.35;
+  D.flapL.rotation.z = fl; D.flapR.rotation.z = fl;
+  // PAPI — the real glideslope, live from the plane's position
+  const dEast = P.x - PAPI_REF.x;
+  const pat = (!P.onGround && dEast > 40) ? papiAt(dEast, P.y) : (P.onGround ? "WWRR" : "RRRR");
+  for (let i = 0; i < 4; i++) {
+    const on = pat[i] === "W";
+    D.papiUnits[i].lens.material.color.setHex(on ? 0xf8f8ff : 0xff2d20);
+    D.papiUnits[i].halo.material.color.setHex(on ? 0xf0f4ff : 0xff2d20);
+    D.papiUnits[i].halo.material.opacity = 0.9;
+  }
+  // NPC idle life
+  for (const [d, phase] of [[marla, 0], [bo, 2], [vann, 4]]) {
+    d.group.position.y = Math.sin(t * 1.3 + d.phase) * 0.012;
+  }
+  poseIdle(marla); poseIdle(bo);
+  if (S.mode === "foot") { npcHeadTrack(marla, S.walkx, S.walkz); npcHeadTrack(bo, S.walkx, S.walkz); }
+  // Vann's mood is his body language — the bribe odds, readable from 10 metres
+  const mood = S.inspection ? S.inspection.mood : (S.vannMood != null ? S.vannMood : 0.5);
+  if (S.inspection && !S.inspection.resolved) animVannWalk(dt);
+  else if (S.inspection && S.inspection.leaving) animVannLeave(dt);
+  else poseVannMood(mood, t);
+  // fuel truck errands
+  animTruck(dt);
+  // baggage train crosses Alpha only on busy-ramp jobs
+  if (bagTrain.visible) {
+    if (D.bag.hitCd > 0) D.bag.hitCd -= dt;
+    else {
+      D.bag.t += dt * 6.5 * D.bag.dir;
+      if (D.bag.t > 125) D.bag.dir = -1; if (D.bag.t < 0) D.bag.dir = 1;
+    }
+    bagTrain.position.set(128 + D.bag.t, 0, 52);
+    bagTrain.rotation.y = D.bag.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  }
+}
+function poseVannMood(mood, t) {
+  const p = vann.parts;
+  if (mood < 0.34) {           // grumpy: arms crossed, curt head shakes
+    p.armL.rotation.set(0.9, 0, 0.9); p.armLlo.rotation.x = -1.6;
+    p.armR.rotation.set(0.9, 0, -0.9); p.armRlo.rotation.x = -1.6;
+    p.head.rotation.y = Math.sin(t * 5) * 0.14;
+  } else if (mood < 0.67) {    // neutral: clipboard checks, slow nod
+    p.armL.rotation.set(-0.9, 0, 0.15); p.armLlo.rotation.x = -0.9;
+    p.armR.rotation.set(-0.35, 0, -0.1); p.armRlo.rotation.x = -0.5;
+    p.head.rotation.x = 0.22 + Math.sin(t * 1.1) * 0.06; p.head.rotation.y = 0;
+  } else {                     // mellow: hands clasped behind, easy sway
+    p.armL.rotation.set(0.35, 0, -0.25); p.armLlo.rotation.x = 0.7;
+    p.armR.rotation.set(0.35, 0, 0.25); p.armRlo.rotation.x = 0.7;
+    p.head.rotation.y = Math.sin(t * 0.5) * 0.5; p.head.rotation.x = -0.04;
+    vann.group.rotation.z = Math.sin(t * 0.9) * 0.02;
+  }
+}
+function animVannWalk(dt) {
+  const ins = S.inspection;
+  const tx = P.x + Math.sin(P.yaw) * 5.4, tz = P.z + Math.cos(P.yaw) * 5.4;
+  const dx = tx - vann.group.position.x, dz = tz - vann.group.position.z;
+  const dist = Math.hypot(dx, dz);
+  flash.visible = true;
+  if (dist > 1.2) {
+    ins.t += dt;
+    vann.group.position.x += dx / dist * 2.6 * dt;
+    vann.group.position.z += dz / dist * 2.6 * dt;
+    vann.group.rotation.y = Math.atan2(dx, dz);
+    const sw = Math.sin(ins.t * 7) * 0.5;
+    vann.parts.legL.rotation.x = sw; vann.parts.legR.rotation.x = -sw;
+    vann.parts.armR.rotation.set(-1.1, 0, 0); vann.parts.armRlo.rotation.x = -0.4; // flashlight up
+    vann.parts.armL.rotation.x = -sw * 0.5;
+  } else if (!ins.arrived) {
+    ins.arrived = true;
+    vann.parts.legL.rotation.x = 0; vann.parts.legR.rotation.x = 0;
+    vann.group.rotation.y = Math.atan2(P.x - vann.group.position.x, P.z - vann.group.position.z);
+    openInspection();
+  }
+}
+function animVannLeave(dt) {
+  const ins = S.inspection;
+  const dx = D.vannHome.x - vann.group.position.x, dz = D.vannHome.z - vann.group.position.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist > 0.8) {
+    ins.t += dt;
+    vann.group.position.x += dx / dist * 2.2 * dt;
+    vann.group.position.z += dz / dist * 2.2 * dt;
+    vann.group.rotation.y = Math.atan2(dx, dz);
+    const sw = Math.sin(ins.t * 7) * 0.5;
+    vann.parts.legL.rotation.x = sw; vann.parts.legR.rotation.x = -sw;
+  } else { flash.visible = false; S.inspection = null; vann.group.rotation.y = Math.PI; }
+}
+function animTruck(dt) {
+  const tk = D.truck;
+  if (tk.state === "home") return;
+  const target = tk.state === "driving" ? { x: P.x + Math.sin(P.yaw + Math.PI / 2) * 6, z: P.z + Math.cos(P.yaw + Math.PI / 2) * 6 } : { x: 262, z: 84 };
+  const dx = target.x - truck.position.x, dz = target.z - truck.position.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist > 1.5) {
+    truck.position.x += dx / dist * 7.5 * dt;
+    truck.position.z += dz / dist * 7.5 * dt;
+    truck.rotation.y = Math.atan2(dx, dz) + Math.PI / 2;
+  } else if (tk.state === "driving") {
+    tk.state = "fueling"; tk.t = 0;
+    toast("FUELING", null, 1.2);
+  } else if (tk.state === "returning") { tk.state = "home"; }
+  if (tk.state === "fueling") {
+    const rate = 2.0 * dt;
+    const add = Math.min(rate, tk.gal);
+    tk.gal -= add; P.fuel = Math.min(PHYS.TANK, P.fuel + add);
+    spend(add * ECON.FUEL_PRICE, "fuel");
+    if (tk.gal <= 0.01) { tk.state = "returning"; toast("TANKS TOPPED", P.fuel.toFixed(0) + " gal aboard", 1.8); }
+  }
+}
+
+/* ------------------------------------------------------------ camera ----- */
+function camFollow(dt) {
+  if (S.time < S.cineUntil) return;          // aim() owns the camera
+  if (S.mode === "plane") {
+    if (D.cockpit) {
+      const fx = Math.sin(P.yaw), fz = Math.cos(P.yaw);
+      camera.position.set(P.x + fx * 2.1, P.y + 2.42 + Math.sin(P.pitch) * 2, P.z + fz * 2.1);
+      camera.lookAt(P.x + fx * 60, P.y + 2.4 + Math.sin(P.pitch) * 60, P.z + fz * 60);
+      camera.rotation.z += P.roll * 0.9;
+    } else {
+      const fx = Math.sin(P.yaw), fz = Math.cos(P.yaw);
+      const want = new THREE.Vector3(P.x - fx * 16, P.y + 6.2, P.z - fz * 16);
+      camera.position.lerp(want, 1 - Math.exp(-dt * 3.2));
+      camera.lookAt(P.x + fx * 18, P.y + 1.8, P.z + fz * 18);
+    }
+    D.camYaw = P.yaw;
+  } else {
+    const want = new THREE.Vector3(S.walkx - Math.sin(S.walkyaw) * 0.001 - Math.sin(D.camYaw || 0) * 7.5,
+      4.1, S.walkz - Math.cos(D.camYaw || 0) * 7.5);
+    if (D.camYaw == null) D.camYaw = S.walkyaw;
+    D.camYaw += (((S.walkyaw - D.camYaw + Math.PI * 3) % TAU) - Math.PI) * (1 - Math.exp(-dt * 1.6));
+    want.x = S.walkx - Math.sin(D.camYaw) * 7.5; want.z = S.walkz - Math.cos(D.camYaw) * 7.5;
+    camera.position.lerp(want, 1 - Math.exp(-dt * 4));
+    camera.lookAt(S.walkx, 1.9, S.walkz);
+  }
+}
+
+/* ----------------------------------------------------------- objectives -- */
+function currentObjective() {
+  if (!S.job) return "Take a run at the <b>charter desk</b> — the debt isn't paying itself.";
+  const j = S.job, d = DESTS.find(k => k.id === j.destId);
+  if (S.mode === "foot" && !S.delivered) {
+    const checked = j.stations.filter(Boolean).length;
+    return "Cargo's on the pallet. <b>Walkaround " + checked + "/4</b> (optional, but she's old), fuel up, then board N407RD." +
+      (j.rampBusy ? "<br/>Ramp is busy — baggage carts have right of way." : "");
+  }
+  if (S.mode === "plane" && P.onGround && !S.delivered && overIsland(P.x, P.z) === "home") {
+    if (S.clr === "none") return "Call <b>ground [R]</b> for taxi.";
+    if (S.clr === "taxi") return "Taxi via <b>Alpha</b>, stop at the <b>hold-short bars</b>, call tower <b>[R]</b>.";
+    if (S.clr === "takeoff") return "Line up runway <b>27</b>. Full throttle <b>[SHIFT]</b>, rotate <b>[S]</b> at speed.";
+  }
+  if (!S.delivered) return "Fly the arrow to <b>" + d.name + "</b> (" + (d.dist / 1000).toFixed(1) + " km). Land, stop on the lit pad.";
+  if (S.delivered && S.clr !== "land") {
+    const dist = Math.hypot(P.x, P.z);
+    if (S.mode === "plane" && !P.onGround && dist < 1800) return "Call the <b>tower [R]</b> — you need landing clearance.";
+    return "Head home to <b>REDEYE</b>. Call inbound <b>[R]</b> inside 10 miles.";
+  }
+  if (S.clr === "land") return "Runway 27. Fly the <b>PAPI</b>: two white, two red. Flare gently — then taxi to <b>CARGO 1</b>.";
+  return "Park at <b>CARGO 1</b>, shut down, collect.";
+}
+
+/* ------------------------------------------------------------ the loop --- */
+let lastT = performance.now();
+function frame() {
+  requestAnimationFrame(frame);
+  const now = performance.now();
+  const dt = clamp((now - lastT) / 1000, 0.001, 0.05);
+  lastT = now;
+  if (S && S.playing && !S.ending) {
+    S.time += dt;
+    S.clock += dt / 60 * 18;                    // night drifts by
+    radioFlush();
+    if (S.mode === "plane") simPlane(dt); else simWalk(dt);
+    animActors(dt, S.time);
+    camFollow(dt);
+    // HUD
+    hudJob(); hudInstr();
+    $("clock").textContent = nightClock();
+    objective(currentObjective());
+    if (S.time > toastT) toastEl.style.opacity = 0;
+    const t = S.mode === "foot" ? interactTarget() : (S.mode === "plane" && P.onGround && P.speed < 1 ? { label: "shut down &amp; hop out — <b>E</b>" } : null);
+    promptSet(t ? t.label : null);
+  } else if (S && S.ending) {
+    animActors(dt, S.time + dt);
+  }
+  renderer.render(scene, camera);
+}
+function nightClock() {
+  const h = Math.floor(S.clock / 60) % 24, m = Math.floor(S.clock % 60);
+  return ("0" + h).slice(-2) + ":" + ("0" + m).slice(-2);
+}
+
+/* --------------------------------------------------------- boot / reset -- */
+function resetGame() {
+  S = freshState();
+  Object.assign(P, { x: PARK.x, y: 0, z: PARK.z, yaw: Math.PI, pitch: 0, roll: 0, speed: 0, vy: 0, throttle: 0, flaps: 0, onGround: true, fuel: 14, damage: 0, stall: false, engineOut: false, thrustFactor: 1, flapsStuck: false, lightOn: false, pendingBonus: 0 });
+  S.wind = rollWind(); rollBoard();
+  S.playing = true;
+  pallet.visible = false; bagTrain.visible = false; oilPuddle.visible = false;
+  dude.group.visible = true; dude.group.position.set(S.walkx, 0, S.walkz);
+  vann.group.position.set(D.vannHome.x, 0, D.vannHome.z); vann.group.rotation.y = Math.PI;
+  S.inspection = null; flash.visible = false;
+  truck.position.set(262, 0, 84); D.truck.state = "home";
+  radioLines.length = 0; radioQueue = [];
+  radioSay("twr", "REDEYE TOWER ON WATCH. FIELD IS YOURS TONIGHT, N407RD.", 0.8);
+  radioSay("ops", "OPS: TWELVE GRAND, ROOK. THE BANK CALLED TWICE TODAY.", 3.0);
+  hudMoney(); hudJob(); planeSync(); radioRender();
+  $("end").classList.add("hidden");
+}
+function startGame() {
+  $("title").classList.add("hidden");
+  resetGame();
+}
+document.getElementById("playBtn").addEventListener("click", startGame);
+if (Q.get("boot") === "1") startGame();
+frame();
+
+/* ------------------------------------------------------------ debug API -- */
+window.__airport = {
+  state() {
+    return {
+      playing: !!(S && S.playing), ending: S.ending, endReason: S.endReason,
+      mode: S.mode, cash: S.cash, debt: S.debt, strikes: S.strikes,
+      plane: { x: +P.x.toFixed(2), y: +P.y.toFixed(2), z: +P.z.toFixed(2), yaw: +P.yaw.toFixed(3),
+        speed: +P.speed.toFixed(2), vy: +P.vy.toFixed(2), fuel: +P.fuel.toFixed(2), flaps: P.flaps,
+        damage: Math.round(P.damage), onGround: P.onGround, stall: P.stall, throttle: P.throttle },
+      job: S.job ? { id: S.job.id, name: S.job.name, destId: S.job.destId, hot: S.job.hot,
+        cargoKg: S.job.cargoKg, payout: S.job.payout, deadline: S.job.deadline,
+        rampBusy: S.job.rampBusy, defect: S.job.defect } : null,
+      board: S.board.map(j => ({ id: j.id, name: j.name, destId: j.destId, hot: j.hot, cargoKg: j.cargoKg, payout: j.payout })),
+      delivered: S.delivered, clearance: S.clr, wind: { dir: +S.wind.dir.toFixed(1), speed: +S.wind.speed.toFixed(2) },
+      inspection: S.inspection ? { mood: S.inspection.mood, resolved: !!S.inspection.resolved } : null,
+      upgrades: Object.assign({}, S.upgrades),
+      dests: DESTS.map(d => ({ id: d.id, name: d.name, x: d.x, z: d.z, dist: d.dist })),
+      stats: Object.assign({}, S.stats),
+      econ: { BASE: ECON.BASE, RATE_LEGIT: ECON.RATE_LEGIT, RATE_HOT: ECON.RATE_HOT, CARGO_LEGIT: ECON.CARGO_LEGIT, CARGO_HOT: ECON.CARGO_HOT, FINE_BASE: ECON.FINE_BASE, FINE_FRAC: ECON.FINE_FRAC, BRIBE_FRAC: ECON.BRIBE_FRAC },
+    };
+  },
+  warp(x, z, yaw) {
+    P.x = x; P.z = z; if (yaw != null) P.yaw = yaw;
+    P.y = 0; P.vy = 0; P.onGround = true; P.speed = 0; planeSync();
+    return this.state().plane;
+  },
+  setAir(alt, speed, yaw) {
+    S.mode = "plane"; dude.group.visible = false;
+    P.y = alt; P.speed = speed; P.onGround = false; P.pitch = 0; P.vy = 0;
+    if (yaw != null) P.yaw = yaw;
+    P.throttle = 0.5; planeSync();
+    return this.state().plane;
+  },
+  rig(arr) { for (const v of arr) rigQueue.push(v); return rigQueue.length; },
+  grantClearance, papiAt, simLanding,
+  simTakeoffRoll: (fuelGal, cargoKg, flaps) => simTakeoffRoll(fuelGal, cargoKg, flaps),
+  vsFor, payoutFor, fineFor, bribeCostFor, bribeOdds,
+  resolveBribe: (mood) => resolveBribe(mood),
+  strike: (why) => strike(why || "rigged violation"),
+  loadJob(id) {
+    const j = typeof id === "number" ? S.board[id] : S.board.find(k => k.id === id);
+    if (!j) return null;
+    acceptJob(j); return this.state().job;
+  },
+  forceInspection(mood) {
+    S.vannMood = mood != null ? mood : nextRand();
+    S.inspection = { mood: S.vannMood, resolved: false, walking: true, t: 0 };
+    return S.inspection.mood;
+  },
+  reset() { resetGame(); return true; },
+  props() {
+    const out = [];
+    for (const p of PROPS) for (const b of p.boxes) out.push({ name: p.name, min: b.min.slice(), max: b.max.slice() });
+    // dynamic groups, live AABBs per mesh
+    const dyn = [["plane", plane], ["truck", truck], ["marla", marla.group], ["bo", bo.group], ["vann", vann.group]];
+    if (bagTrain.visible) dyn.push(["bagtrain", bagTrain]);
+    if (pallet.visible) dyn.push(["pallet", pallet]);
+    for (const [name, g] of dyn) {
+      g.updateWorldMatrix(true, true);
+      g.traverse((o) => {
+        if (o.isMesh && o.visible) {
+          const bb = new THREE.Box3().setFromObject(o);
+          if (isFinite(bb.min.x)) out.push({ name, min: [bb.min.x, bb.min.y, bb.min.z], max: [bb.max.x, bb.max.y, bb.max.z] });
+        }
+      });
+    }
+    return out;
+  },
+  aim(name) {
+    S.cineUntil = S.time + 3600;
+    const look = (px, py, pz, tx, ty, tz) => { camera.position.set(px, py, pz); camera.lookAt(tx, ty, tz); };
+    if (name === "apron") {
+      // night-wide: stand, tower, hangar, floods, runway lights receding
+      this.warp(PARK.x, PARK.z, Math.PI);
+      look(252, 9, 42, 165, 6, 140);
+      return true;
+    }
+    if (name === "final") {
+      // short final RWY 27, dead on the 3.00° slope → PAPI reads WWRR
+      const dist = 430, alt = Math.tan(3.0 * D2R) * dist;
+      S.mode = "plane"; dude.group.visible = false;
+      P.x = PAPI_REF.x + dist; P.z = 0; P.y = alt; P.yaw = -Math.PI / 2;
+      P.speed = 26; P.onGround = false; P.flaps = 2; P.pitch = -0.05; P.lightOn = true;
+      planeSync(); animActors(0.016, S.time);
+      look(P.x + 26, P.y + 7, P.z + 13, PAPI_REF.x - 60, 0, -6);
+      return true;
+    }
+    if (name === "cockpit") {
+      // takeoff roll from the office: centerline, edge lights streaming
+      S.mode = "plane"; dude.group.visible = false; D.cockpit = true;
+      P.x = 240; P.z = 0; P.y = 0; P.yaw = -Math.PI / 2; P.speed = 31; P.onGround = true;
+      P.throttle = 1; P.flaps = 1; P.lightOn = true; planeSync(); animActors(0.016, S.time);
+      const fx = Math.sin(P.yaw), fz = Math.cos(P.yaw);
+      look(P.x + fx * 2.1, 2.45, P.z + fz * 2.1, P.x + fx * 80, 1.4, P.z + fz * 80);
+      return true;
+    }
+    if (name === "customs") {
+      // ramp check: Vann + flashlight at the nose, pilot facing him
+      this.warp(PARK.x, PARK.z, Math.PI);
+      S.mode = "foot"; dude.group.visible = true;
+      const nx = P.x + Math.sin(P.yaw) * 5.0, nz = P.z + Math.cos(P.yaw) * 5.0;
+      vann.group.position.set(nx - 1.1, 0, nz - 0.2);
+      vann.group.rotation.y = Math.PI * 0.42;
+      S.inspection = { mood: 0.2, resolved: false, walking: true, t: 0, arrived: true };
+      flash.visible = true;
+      vann.parts.armR.rotation.set(-1.15, 0, 0); vann.parts.armRlo.rotation.x = -0.35;
+      vann.parts.armL.rotation.set(0.9, 0, 0.9); vann.parts.armLlo.rotation.x = -1.6;
+      S.walkx = nx + 2.4; S.walkz = nz + 1.4; S.walkyaw = Math.atan2(vann.group.position.x - S.walkx, vann.group.position.z - S.walkz);
+      dude.group.position.set(S.walkx, 0, S.walkz); dude.group.rotation.y = S.walkyaw;
+      look(nx + 4.6, 1.8, nz - 4.2, nx - 0.5, 1.5, nz + 1.5);
+      return true;
+    }
+    if (name === "hangar") {
+      this.warp(PARK.x, PARK.z, Math.PI);
+      S.mode = "foot"; dude.group.visible = true;
+      S.walkx = 101; S.walkz = 123.5; S.walkyaw = -Math.PI / 2;
+      dude.group.position.set(S.walkx, 0, S.walkz); dude.group.rotation.y = S.walkyaw;
+      look(106, 3.1, 128.5, 88, 2.2, 117);
+      return true;
+    }
+    S.cineUntil = 0;
+    return false;
+  },
+  uncine() { S.cineUntil = 0; return true; },
+};
+//__GAME_JS_END__
+</script>
+</body>
+</html>
