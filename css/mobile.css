@@ -1,8 +1,12 @@
 /* ============================================================
-   mobile.css — on-screen touch controls + responsive HUD.
-   Touch controls live in #touch and only matter on `body.touch`.
+   mobile.css — on-screen touch controls + responsive HUD (TOUCH_V2).
+   Touch controls live in #touch and only matter on `body.touch`; the
+   pop-up sizing block is gated to coarse-pointer devices, so desktop is
+   completely unaffected. On-screen controls are ICONS ONLY — no words.
 ============================================================ */
 html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
+/* kill double-tap zoom / scroll-bounce over the 3D canvas itself (iPad Pro) */
+#game, #game > canvas { touch-action: none; }
 
 #touch { position: fixed; inset: 0; z-index: 22; pointer-events: none; display: none; }
 #touch button, #tstick { pointer-events: auto; }
@@ -21,28 +25,60 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   box-shadow: 0 2px 8px rgba(0,0,0,.4);
 }
 
-/* right-hand button cluster */
-#tbtns { position: fixed; right: 16px; bottom: 22px; display: flex; flex-direction: column-reverse; gap: 12px; }
+/* right-hand button cluster — icon-only, safe-area aware */
+#tbtns {
+  position: fixed; right: 16px; bottom: 22px;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column-reverse; align-items: center; gap: 12px;
+}
 .tbtn {
-  pointer-events: auto; width: 70px; height: 70px; border-radius: 50%;
-  border: 2px solid rgba(255,255,255,.3); background: rgba(20,30,46,.55);
-  color: #fff; font-family: inherit; font-weight: 700; font-size: 12px; letter-spacing: 1px;
+  pointer-events: auto; width: 64px; height: 64px; border-radius: 50%; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid rgba(255,255,255,.32); background: rgba(20,30,46,.5); color: #fff;
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
   box-shadow: 0 4px 0 rgba(0,0,0,.3); transition: transform .06s, background .1s;
+  touch-action: none; -webkit-tap-highlight-color: transparent;
 }
-.tbtn.tbig { width: 88px; height: 88px; font-size: 15px; background: rgba(58,209,122,.45); border-color: rgba(58,209,122,.6); }
-.tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.6); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+.tbtn svg {
+  width: 48%; height: 48%; display: block; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.tbtn.tsm { width: 52px; height: 52px; opacity: .9; }
+.tbtn.tbig { width: 84px; height: 84px; }
+.tbtn.tjump { width: 72px; height: 72px; background: rgba(58,209,122,.42); border-color: rgba(58,209,122,.6); }
+.tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65); }
+.tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
 
 /* HUD tweaks while on touch: declutter + reachable interaction panel */
 body.touch #compass { display: none; }
 body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height: 128px; }
 body.touch #interact {
   left: 50%; right: auto; bottom: 168px; margin-left: -118px; width: 236px;
+  bottom: calc(168px + env(safe-area-inset-bottom, 0px));
   pointer-events: auto; transform: translateY(8px) scale(.96);
 }
 body.touch #interact.show { transform: translateY(0) scale(1); }
 body.touch .iopt { padding: 7px 4px; }     /* fatter tap targets */
 body.touch .ikey { width: 24px; height: 24px; }
+
+/* ---- coarse-pointer (iPad / touch): every pop-up stays pressable ---------- */
+/* touch-action:manipulation removes the 300 ms tap delay + double-tap zoom on
+   DOM controls; the click handlers these panels already use fire on tap. */
+@media (pointer: coarse) {
+  .btn, .mode-btn, .role-btn, .origin-btn, .iopt, summary,
+  [data-act], #pkgPanel button, #fullMapClose, #fullMapLegend > * {
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .btn { min-height: 52px; }
+  .mode-btn, .role-btn, .origin-btn { min-height: 48px; }
+  #interactOpts .iopt { min-height: 44px; padding: 10px 8px; }
+  #interact .ikey { width: 26px; height: 26px; }
+  #pkgPanel button, #pkgPanel [data-act] { min-height: 44px; padding: 10px 14px; }
+  #fullMapClose { min-height: 44px; padding: 8px 14px; }
+  /* keep the shared bottom panel clear of the home-indicator / rounded corner */
+  #pkgPanel { bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
+}
 
 /* ---- responsive scaling for small / portrait screens ---- */
 @media (max-width: 820px) {
