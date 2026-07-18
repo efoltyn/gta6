@@ -139,6 +139,31 @@ gameplay as role packages.
 | government | city hall | CITY HALL AFTER DARK: flip a 7-member council before the gavel — dirt from the records room, wants/fears traded, bribes leave a ledger the auditor can catch, press leaks raise scandal. |
 | police | precinct lot | PRECINCT 13: walk in legally; bail vs charge-kicking via the corrupt desk sergeant, evidence-room chain-of-custody heist, K-9 smells the stash unless you brought the steak, out before shift change. |
 
+## How an agent ships a game (the recipe)
+
+`src/games/_template.js` is the scaffold — copy it, don't start blank. The
+loop any agent (or human) follows:
+
+1. **Pick the sim + venue.** The world already has it: a lot kind to claim,
+   or an open-world anchor via `venue.resolve`. Never build a world.
+2. **Write the pure rules first** as plain functions (odds, scoring, AI
+   states) — they're unit-testable through `api` and portable forever.
+3. **Cast with `ctx.npc`.** Roles, fits, posts, dialogue. Missing pose or
+   animation? Add it to `entities/poses.js` / the facade — the engine grows,
+   every later game inherits it.
+4. **Dress only load-bearing props** (WHY rule), deterministic via
+   `ctx.rand`/`ctx.stream`.
+5. **Panels + zones** are the interface; `ctx.wallet` makes it real.
+6. **Ship both roles** when the sim has two sides.
+7. **Gate it:** `node --check`, smoke-play `invariants: ok`, and a CDP probe
+   that asserts your rules through `api` (rig outcomes; never eyeball-only).
+8. One script tag in index.html, one `PKG_<ID>` flag. Done — and the diff is
+   one file the reviewer can hold in their head.
+
+Live packages: casino (reference). In flight: ocean (DEAD WATER, two roles:
+diver/shark), racing (APEX NIGHT), boxing (SOUTHPAW PALACE, two roles:
+fighter/bettor).
+
 ## Killing the dumb props (existing city)
 
 `tools/prop-audit.md` (read-only audit, verified file:line) found the rot
