@@ -389,8 +389,10 @@
   }
   function claimAndMount(city) {
     if (!CBZ.CONFIG.GAME_PACKAGES) return;
-    // same arena/root resolution as the proven order-90 dresser (city/casino.js)
-    const A = city || CBZ._settlementArena || (CBZ.city && CBZ.city.arena) || null;
+    // arena resolution: the PASSED city wins (we're inside its build pass);
+    // otherwise the canonical arena — _settlementArena is a per-settlement
+    // build scratchpad and must not shadow the real world on late retries.
+    const A = city || (CBZ.city && CBZ.city.arena) || CBZ._settlementArena || null;
     const root = (city && city.root) || (A && A.root) || CBZ.scene;
     if (!A || !root) return;
     // worlds REBUILD: drop live instances whose group lost its parent
@@ -456,16 +458,23 @@
     if (CBZ.addLandmass) CBZ.addLandmass(function (city) { claimAndMount(city); }, 88);
     if (CBZ.onUpdate && CBZ.PRIO) {
       // GAMEPLAY band: package sims tick with the rest of the activity layer
-      let siteRetryT = 0;
+      let mountRetryT = 0;
+      CBZ.games._ticks = 0;
       CBZ.onUpdate(CBZ.PRIO.after(CBZ.PRIO.GAMEPLAY, 50), function (dt) {
+        CBZ.games._ticks++;
         animT += dt;
         for (let i = animators.length - 1; i >= 0; i--) { try { if (animators[i](dt, animT) === false) animators.splice(i, 1); } catch (err) { animators.splice(i, 1); console.error("[gamepkg anim]", err); } }
         for (const L of live) { if (L.def.update) { try { L.def.update(L.ctx, dt); } catch (err) { console.error("[gamepkg:" + L.def.id + "] update", err); } } }
-        siteRetryT += dt;
-        if (siteRetryT > 1.2) { // lazy site mounting: anchors may appear only after world build
-          siteRetryT = 0;
-          if (CBZ.CONFIG.GAME_PACKAGES) for (const def of defs) {
-            if (def.venue && def.venue.site && CBZ.CONFIG["PKG_" + def.id.toUpperCase()] !== false) trySiteMount(def, null);
+        // SELF-HEALING MOUNT: the order-88 landmass pass is the fast path, but
+        // build pipelines evolve and site anchors appear late — any def still
+        // unmounted retries here, lots and sites alike. FRAME-counted, not
+        // sim-dt (headless sim time crawls ~60x; a dt-accumulated gate could
+        // starve forever). Cheap: per-def early-outs; stops mattering once
+        // everything is live. Idempotent via live[] + lot._gamePkg claims.
+        if (++mountRetryT >= 3) {
+          mountRetryT = 0;
+          if (CBZ.CONFIG.GAME_PACKAGES && defs.some((d) => !live.some((L) => L.def === d))) {
+            try { claimAndMount(null); } catch (err) { console.error("[gamepkg mount-retry]", err); }
           }
         }
       });
@@ -492,5 +501,6 @@
     hubCtx,
     api,
     _claimAndMount: claimAndMount, // exposed for late/manual mounting from probes
+    _defs: function () { return defs; }, // probe access: inspect venue.resolve etc.
   };
 })();
