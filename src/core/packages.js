@@ -25,7 +25,8 @@
        ctx.THREE ctx.mat/pmat/emat ctx.box/cyl ctx.canvasTex     geometry/materials
        ctx.solid(x1,z1,x2,z2[,y0,y1])                            colliders (#3: auto markCollidersDirty)
        ctx.light(x,y,z,color,i,dist)                             budgeted PointLights (≤8/venue)
-       ctx.rig(opts) ctx.idle(rig)                               THE shared voxel NPC (no per-game rigs)
+       ctx.npc(spec) -> handle                                   REAL city ped: brain+outfit+gunpoint+cityKillPed. USE THIS.
+       ctx.rig(opts) ctx.idle(rig)                               DEPRECATED bare voxel dummy — fallback only (no brain/death)
        ctx.zone({id,label,pos:[x,z],r,onUse,canShow})            interactions (#14 registerZone, slot "e")
        ctx.wallet.cash()/spend(n)/give(n)/canAfford(n)           REAL city money (#6b via CBZ.city)
        ctx.hud.feed/toast/panel(html,handlers)/closePanel        player-facing surface
@@ -78,10 +79,15 @@
     return t;
   }
 
-  /* ---------------- THE shared voxel NPC rig ------------------------------
-     One humanoid for every package: dealers, refs, guards, clerks, patrons.
-     Pose verbs cover the common cases; parts are exposed for package anims
-     (a boxing package animates .armL/.armR itself via ctx.anim). */
+  /* ---------------- DEPRECATED bare voxel dummy ---------------------------
+     DEPRECATED: use ctx.npc(spec) instead — it requisitions a REAL city ped
+     (real brain, cityOutfitFor wardrobe, gunpoint hands-up, cityKillPed death,
+     collision), which is the whole point of a shared engine: less duplication,
+     one NPC that every minigame improves. This bare rig is kept ONLY as the
+     ctx.npc fallback for when the ped system is absent (a bare dev harness) and
+     for the handful of pure-visual props a package animates itself via ctx.anim
+     (a boxing package driving .armL/.armR). It has no brain, no death funnel,
+     no interaction — never reach for it directly in new package code. */
   function rig(o) {
     o = o || {};
     const g = new THREE.Group();
@@ -110,6 +116,65 @@
     R.sit = function () { legL.rotation.x = legR.rotation.x = -1.32; g.position.y += 0.18; armL.rotation.set(-0.6, 0, -0.1); armR.rotation.set(-0.6, 0, 0.1); return R; };
     R.stand();
     return R;
+  }
+
+  /* ---------------- ctx.npc: REAL city peds for packages ------------------
+     A package requisitions the NPC the city already ships instead of hand-
+     coding one: makePed gives it the aggr brain, the cityOutfitFor wardrobe,
+     the gunpoint hands-up, the cityKillPed death funnel (#7) and normal
+     collision (#1). The role map below only picks the CASTING opts (job +
+     archetype) that dress + behave the part — every appearance/behaviour roll
+     still happens inside makePed off the SEEDED stream we hand it, so builds
+     stay byte-identical per seed (determinism law #12; no Math.random here). */
+  const NPC_ROLES = {
+    dealer:   { job: "croupier",       archetype: "merchant" },      // → waiter blacks (dealer read)
+    croupier: { job: "croupier",       archetype: "merchant" },
+    cashier:  { job: "cage cashier",   archetype: "merchant" },      // → vendor apron
+    guard:    { job: "security guard", archetype: "professional" },  // → guard blacks
+    bouncer:  { job: "bouncer",        archetype: "professional" },
+    pitboss:  { job: "pit boss",       archetype: "exec" },          // → charcoal suit (archetype path)
+    shark:    { job: "high roller",    archetype: "exec", wealth: 0.9 },
+    patron:   { job: "patron",         archetype: "nightlife" },     // → club dress/suit mix
+  };
+  function npcOptsFor(role, spec, pinned) {
+    const R = NPC_ROLES[role] || { job: role, archetype: "merchant" };
+    const opts = {
+      // "staff" (pinned) fails the hourly recast's `kind !== "civilian"` test, so
+      // posted staff never get re-cast into a random dealer/tweaker at dusk.
+      kind: pinned ? "staff" : "civilian",
+      name: spec.name || null,
+      job: R.job, archetype: R.archetype,
+      // meek + unarmed → markGunpoint reliably throws the hands up (poise, not a draw-back).
+      aggr: R.aggr != null ? R.aggr : 0.22,
+      armed: false, snitch: 0.08,
+      wealth: R.wealth != null ? R.wealth : 0.55,
+    };
+    // outfit override (cityOutfitFor-compatible): number = plain torso color;
+    // string = a job hint the shared wardrobe (jobFit) dresses; object = raw
+    // makePed opts (advanced — {gang, cop, outfit, ...}).
+    const of = spec.outfit;
+    if (typeof of === "number") opts.outfit = of;
+    else if (typeof of === "string") opts.job = of;
+    else if (of && typeof of === "object") { for (const k in of) opts[k] = of[k]; }
+    return opts;
+  }
+  function npcSetPose(ped, verb) {
+    if (!ped || !ped.char) return;
+    if (CBZ.setCharPose) CBZ.setCharPose(ped.char, verb);
+    else { ped.char.sitting = (verb === "sit"); ped.char.pose = (verb && verb !== "sit" && verb !== "stand") ? verb : null; }
+  }
+  function npcDispose(ped) {
+    if (!ped) return;
+    const arr = CBZ.cityPeds;
+    if (arr) { const i = arr.indexOf(ped); if (i >= 0) arr.splice(i, 1); }
+    ped._iopts = null;                       // drop the [E] Talk options with the ped
+    ped.staffPost = null;
+    if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
+    if (ped.group) ped.group.traverse(function (obj) {
+      if (obj.isSprite) return;              // shared r128 sprite geometry — never dispose
+      if (obj.geometry && !obj.geometry._shared && obj.geometry.dispose) { try { obj.geometry.dispose(); } catch (e) {} }
+      if (obj.material) { const m = obj.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+    });
   }
 
   /* ---------------- the package panel (one DOM overlay, engine-owned) ----- */
@@ -162,6 +227,102 @@
           R.torso.position.y = 1.05 + Math.sin(t * 2.1 + (phase || 0)) * 0.012;
           R.head.position.y = 1.55 + Math.sin(t * 2.1 + (phase || 0)) * 0.012;
         });
+      },
+      // requisition a REAL city ped (brain + outfit + gunpoint + death funnel).
+      // spec: { role, outfit, at:[x,z](venue-LOCAL), face, post:"pinned"|"ambient",
+      //         pose, dialogue:[...], name }. Returns a handle:
+      //   { ped, pose(verb), say(line[,secs]), at(x,z[,face]), remove() }
+      npc(spec) {
+        spec = spec || {};
+        const o = venue.origin;
+        const atv = spec.at || [0, 0];
+        const wx = o.x + (atv[0] || 0), wz = o.z + (atv[1] || 0);
+        const face = spec.face || 0;
+        const role = spec.role || "patron";
+        const pinned = spec.post !== "ambient";      // default: pinned staff
+        // DETERMINISM (#12): every roll keys off a stream seeded by role + POST
+        // POSITION (never Math.random) so build() is byte-identical per client.
+        // ctx.stream already namespaces "pkg:<id>:".
+        const rstream = ctx.stream("npc:" + role + ":" + Math.round(wx) + ":" + Math.round(wz));
+
+        // ---- ENGINE PED PATH: the real thing (the point of the shared engine) ----
+        if (CBZ.cityMakePed && CBZ.city && CBZ.city.arena && CBZ.city.arena.root) {
+          // outfit directive: a STRING that names an exact catalog fit ("valet",
+          // "waiter", "hoodie", "security"…) is PAINTED on after makePed via the
+          // shared wardrobe (cityRecolorRig honors its painter/composite); any
+          // other string is left as a job hint (npcOptsFor). number/object handled
+          // in npcOptsFor. Deterministic — a named fit is a fixed color set.
+          let fitRec = null, specForOpts = spec;
+          if (typeof spec.outfit === "string" && CBZ.cityOutfitCatalog) {
+            const cat = CBZ.cityOutfitCatalog();
+            if (cat && cat[spec.outfit] && cat[spec.outfit].colors) {
+              fitRec = cat[spec.outfit];
+              specForOpts = Object.assign({}, spec, { outfit: null });   // paint below, don't job-hint it
+            }
+          }
+          const ped = CBZ.cityMakePed(wx, wz, rstream, npcOptsFor(role, specForOpts, pinned));
+          ped.group.rotation.y = face;
+          CBZ.city.arena.root.add(ped.group);
+          (CBZ.cityPeds || (CBZ.cityPeds = [])).push(ped);
+          if (fitRec && CBZ.cityRecolorRig) { try { CBZ.cityRecolorRig(ped.char, fitRec.colors, fitRec); ped._castFit = fitRec.id; } catch (e) {} }
+          // PIN posted staff to their station: peds.js's brain respects
+          // ped.staffPost (rooted, no crowd churn, but still gunpoint-aware).
+          // Ambient NPCs keep the normal ped brain (they wander like a resident).
+          if (pinned) { ped.staffPost = { x: wx, z: wz, face: face }; ped.state = "idle"; ped.speed = 0; }
+          // initial pose through the ENGINE pose layer (character.js + poses.js)
+          npcSetPose(ped, spec.pose || (pinned ? "stand" : null));
+          // [E] Talk — cycle the dialogue via the interaction registry (#14). It
+          // rides the ped's own _iopts, so it dies with the ped, zero per-frame cost.
+          if (spec.dialogue && spec.dialogue.length && CBZ.interactions && CBZ.interactions.registerFor) {
+            let di = 0;
+            CBZ.interactions.registerFor(ped, {
+              id: def.id + ":npc-talk:" + Math.round(wx) + ":" + Math.round(wz),
+              slot: "e", prio: 20,
+              label: spec.talkLabel || ("Talk to " + (spec.name || role)),
+              canShow(t) { return t && !t.dead && !t.surrender; },
+              onSelect(t) {
+                const line = spec.dialogue[di % spec.dialogue.length]; di++;
+                if (CBZ.citySay) CBZ.citySay(t, "“" + line + "”", spec.sayColor || "#dfe7ff", 2.8);
+              },
+            });
+          }
+          return {
+            ped: ped,
+            pose(verb) { npcSetPose(ped, verb); return this; },
+            say(line, secs) { if (ped && !ped.dead && CBZ.citySay && line) CBZ.citySay(ped, "“" + line + "”", spec.sayColor || "#dfe7ff", secs || 2.6); return this; },
+            at(x, z, f) {
+              if (ped && ped.group) {
+                const nx = o.x + x, nz = o.z + z;
+                ped.pos.set(nx, 0, nz); ped.group.position.set(nx, 0, nz);
+                if (f != null) ped.group.rotation.y = f;
+                if (ped.staffPost) { ped.staffPost.x = nx; ped.staffPost.z = nz; if (f != null) ped.staffPost.face = f; }
+              }
+              return this;
+            },
+            remove() { npcDispose(ped); },
+          };
+        }
+
+        // ---- FALLBACK: ped system absent (bare dev harness) → a ctx.rig dummy
+        //      with the SAME handle shape so callers never branch. No brain,
+        //      gunpoint, dialogue or death funnel — only crash-avoidance. ----
+        const Rg = rig((spec.outfit && typeof spec.outfit === "object") ? spec.outfit : {});
+        Rg.at(atv[0] || 0, atv[1] || 0, face);
+        venue.group.add(Rg.g);
+        const applyRigPose = (verb) => {
+          if (verb === "sit" && Rg.sit) Rg.sit();
+          else if (verb === "foldarms" && Rg.fold) Rg.fold();
+          else if ((verb === "deal" || verb === "croupier" || verb === "dealer") && Rg.deal) Rg.deal();
+          else if (Rg.stand) Rg.stand();
+        };
+        applyRigPose(spec.pose);
+        return {
+          ped: null, rig: Rg,
+          pose(verb) { applyRigPose(verb); return this; },
+          say(line) { if (line) ctx.hud.feed((spec.name ? spec.name + ": " : "") + line); return this; },
+          at(x, z, f) { Rg.at(x, z, f); return this; },
+          remove() { if (Rg.g && Rg.g.parent) Rg.g.parent.remove(Rg.g); },
+        };
       },
       zone(z) {
         if (!CBZ.interactions || !CBZ.interactions.registerZone) return null;

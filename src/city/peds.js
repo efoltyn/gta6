@@ -1413,7 +1413,7 @@
     radius = radius || 18; intensity = intensity || 1;
     const r2 = radius * radius;
     for (const p of CBZ.cityPeds) {
-      if (p.dead || p.vendor) continue;
+      if (p.dead || p.vendor || p.staffPost) continue;   // posted staff hold their station
       const dx = p.pos.x - x, dz = p.pos.z - z;
       if (dx * dx + dz * dz < r2) {
         p.alarmed = Math.max(p.alarmed, 4 + intensity * 3);
@@ -1441,7 +1441,7 @@
     const dangerR = blast ? (8 + power * 4) : 0, dangerR2 = dangerR * dangerR;
     let scattered = 0;
     for (const p of CBZ.cityPeds) {
-      if (p.dead || p.vendor || p.companion || p.controlled || p._parked || p.recruited) continue;
+      if (p.dead || p.vendor || p.companion || p.controlled || p._parked || p.recruited || p.staffPost) continue;
       const dx = p.pos.x - x, dz = p.pos.z - z, dd = dx * dx + dz * dz;
       if (dd >= r2) continue;
       const close = 1 - Math.sqrt(dd) / radius;            // 0 at edge, 1 at centre
@@ -3202,11 +3202,39 @@
     return true;
   }
 
+  // ============================================================
+  //  POSTED STAFF (ped.staffPost = {x,z,face}) — the "pinned" package NPC.
+  //  A game package (core/packages.js ctx.npc, post:"pinned") stamps this on a
+  //  REAL city ped so it holds its station: a dealer at the felt, a cashier at
+  //  the cage, a guard on the door. It mirrors the VENDOR pin (no wander, no
+  //  routine, no crowd-churn recast — kind:"staff" already fails the hourly
+  //  recast's civilian test, and it's exempted from panic/alarm below) BUT,
+  //  unlike ped.vendor, it is NOT skipped by the gunpoint sweep — so posted
+  //  staff keep their POISE: they stand their post normally and throw their
+  //  hands up the instant a gun is drawn on them (markGunpoint drives it; move()
+  //  renders it). They still die through cityKillPed, collide, and rob normally.
+  //  Additive + flagless: absent the field, every path below is byte-identical.
+  // ============================================================
+  function staffThink(ped, dt) {
+    // gunpoint owns them while covered/surrendering — the per-frame gunpointSweep
+    // + markGunpoint set surrender/hands-up; don't fight it here.
+    if (ped.surrender || ped.state === "surrender" || (ped.surrenderT || 0) > 0) return;
+    ped.state = "idle"; ped.speed = 0; ped.path = null; ped.rage = null; ped.finalGoal = null;
+    const post = ped.staffPost;
+    if (post) {
+      ped.target.set(post.x, 0, post.z);
+      // restore the post facing when calm and not being talked to (interact.js's
+      // _faceT turn-to-look and gunpoint's face-the-threat both own rotation then).
+      if (post.face != null && !ped._covered && (ped._faceT || 0) <= 0) ped.group.rotation.y = post.face;
+    }
+  }
+
   // ---- the brain (time-sliced) ----
   function think(ped, dt, active) {
     if (ped.companion) { companionThink(ped, dt, active); return; }
     if (ped.dead || ped.vendor || ped.ko > 0) return;
     if (ped.controlled) return;     // city/social.js drives companions/hostages/kidnap victims
+    if (ped.staffPost) { staffThink(ped, dt); return; }   // posted package staff: rooted brain, gunpoint-aware
     const B = A0();
     const P = CBZ.player, px = P.pos.x, pz = P.pos.z;
     const ddx = ped.pos.x - px, ddz = ped.pos.z - pz, dpl = Math.hypot(ddx, ddz);
@@ -3975,6 +4003,21 @@
       }
     }
     if (ped.vendor) { if (animate) animChar(ped.char, 0, dt); return; }
+    if (ped.staffPost) {
+      // POSTED STAFF root exactly like a vendor (no movement integration, no
+      // wander) BUT — unlike a vendor — they SHOW the gunpoint hands-up. The
+      // gunpointSweep/markGunpoint set ped.surrender (they aren't ped.vendor, so
+      // the sweep sees them); we return before move()'s own surrender→char.handsUp
+      // translation, so mirror it here. The held pose (ped.char.pose, via animChar)
+      // shows while calm; hands-up overrides it (animChar's arm precedence).
+      if (ped.surrenderT > 0) { ped.surrenderT = Math.max(0, ped.surrenderT - dt); ped.surrender = true; }
+      const surr = ped.surrender || ped.surrenderT > 0 || ped.state === "surrender";
+      if (ped.char) { ped.char.surrender = false; ped.char.handsUp = !!surr; }
+      if (surr) ped.poseHandsUp = true; else if (ped.poseHandsUp && !ped._covered) ped.poseHandsUp = false;
+      ped.speed = 0;
+      if (animate) animChar(ped.char, 0, dt);
+      return;
+    }
     if (ped.inCar) { ped.speed = 0; return; }   // out on the road; vehicles.js drives it
     if (ped.callT > 0) ped.callT -= dt;
     if (ped.chatT > 0) { ped.chatT -= dt; ped.speed = 0; if (animate) animChar(ped.char, 0, dt); if (ped.chatT <= 0) ped.state = "walk"; return; }

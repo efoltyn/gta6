@@ -45,10 +45,27 @@ CBZ.games.register({
   update(ctx, dt),                    // GAMEPLAY band tick
   api,                                // probe surface at CBZ.games.api[id]
 });
-// ctx: THREE mat/pmat/emat box/cyl canvasTex · solid() light() · rig()/idle()
+// ctx: THREE mat/pmat/emat box/cyl canvasTex · solid() light() · npc() -> handle
 //      zone() · wallet.cash/spend/give · hud.feed/toast/panel/closePanel
 //      rand()/stream() (determinism law) · anim() · state()/saveState()
+//      rig()/idle() — DEPRECATED bare voxel dummy; use npc() (real ped)
 ```
+
+**NPCs are real peds.** `ctx.npc(spec)` requisitions the city ped the engine
+already ships — one NPC, improved by every minigame, instead of a hand-coded
+rig per venue. The returned ped has the real `aggr` brain, a `cityOutfitFor`
+uniform (role → dealer blacks / guard blacks / cage apron / pit-boss suit),
+throws its hands up when you draw on it, dies through the one death funnel
+(`cityKillPed`, #7), and collides like anything else (#1). Spec:
+`{ role, outfit, at:[x,z] (venue-LOCAL), face, post:"pinned"|"ambient", pose:
+"stand"|"sit"|"deal"|"foldarms", dialogue:[…], name }` → handle
+`{ ped, pose(verb), say(line), at(x,z,face), remove() }`. `post:"pinned"` roots
+staff at their station (no wander, exempt from crowd churn) while keeping the
+gunpoint poise (`ped.staffPost`); `"ambient"` uses the normal wandering brain.
+Poses live in the ENGINE (`entities/poses.js` + `character.js`), so the same
+`[E] Talk` dialogue, outfit and pose surface serve ped brains and packages
+alike — no duplicate NPC code. The old `ctx.rig` is a bare dummy kept only as
+the fallback when the ped system isn't up (a stripped dev harness).
 
 Rules that keep it honest:
 - `build()` deterministic per seed (position-hash only — multiplayer law).

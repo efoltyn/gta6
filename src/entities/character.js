@@ -540,6 +540,16 @@
         const foldL = moving ? Math.max(0, -laTarget) * 0.8 : 0;
         setElbow(J.la, -(elbBase + foldL), armRate - 2);
       }
+    } else if (ch.pose && !moving && CBZ.charPoses && CBZ.charPoses[ch.pose]) {
+      // ---- HELD POSE (shared registry — entities/poses.js) ----
+      // A planted actor's static pose: a dealer's hands over the felt, folded
+      // arms, hands resting on the table. ONLY when idle — a walk falls through
+      // to the counter-swing below (walk/panic override the pose), and
+      // aiming/cuffed/surrender/carry above all outrank it (HANDS-UP wins). The
+      // pose OWNS the arms this frame, so it reaches its target instead of
+      // equilibrating half-way against the idle damp. ONE system shared by the
+      // ped brain (peds.js sets ch.pose) and game packages (packages.js ctx.npc).
+      CBZ.charPoses[ch.pose](ch, dt);
     } else {
       // counter-swing with an elbow that deepens with pace: relaxed ~14° at
       // idle, a soft 35-45° at a walk, a real ~90° runner's pump at sprint.

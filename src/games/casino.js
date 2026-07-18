@@ -104,7 +104,7 @@
   function chipsHUD() { return "chips <b>" + bag().chips.toLocaleString() + "</b> · cash <b>" + fmt(C.wallet.cash()) + "</b>" + (bag().debt ? " · <span style='color:#ff9aa2'>marker " + fmt(bag().debt) + "</span>" : ""); }
   function winStreak(profit) {
     const s = bag();
-    if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) C.hud.feed("Barman sends one over — on the house. Heater confirmed.", "#ffd166"); }
+    if (profit > 0) { s.streak++; if (profit > s.stats.biggestWin) s.stats.biggestWin = profit; if (s.streak === LIMITS.COMP_STREAK) { C.hud.feed("Barman sends one over — on the house. Heater confirmed.", "#ffd166"); pitBossBark("hot"); } }
     else if (profit < 0) s.streak = 0;
     save();
   }
@@ -112,6 +112,7 @@
     const s = bag();
     if (s.chips >= 5 || C.wallet.cash() >= 15) return;
     C.hud.feed(s.debt > 0 ? "Broke AND carrying the Shark's marker. Bad night." : "Felt's closed to you — unless you visit the booth in the back.", "#ff9aa2");
+    pitBossBark("cold");
   }
 
   /* ---------------- panel UI (engine panel, data-act delegation) ---------- */
@@ -371,6 +372,7 @@
     save(); renderCage();
   }
   function renderShark() {
+    sharkBark();                     // the ped mutters flavor; the loan PANEL below stays the primary [E]
     const s = bag();
     const body = s.debt > 0
       ? "<div style='margin:6px 0'>“You already carry my marker — <b>" + fmt(s.debt) + "</b>. Pay the cage. Then we talk.”</div>" + btn("hub", "Walk away", "#26343c")
@@ -391,6 +393,81 @@
       leave: () => C.hud.closePanel(),
     });
   }
+
+  /* ======================= THE CAST (real city peds) ===================== */
+  /* Every dealer/croupier/cashier/guard/pit boss/shark/patron is a REAL city
+     ped (the ones that put their hands up at gunpoint) requested via ctx.npc —
+     role, role-relevant outfit, and in-world dialogue. If the engine facade
+     hasn't landed yet, each call falls back to today's package-local rig at the
+     SAME spot/pose so the venue still boots clean (Rule 1: backward-tolerant).
+     Handles are parked on V.npcs so refs don't leak; teardown is engine-side. */
+  function castNPC(ctx, spec, fallback) {
+    const h = ctx.npc ? ctx.npc(spec) : (fallback ? fallback() : null);
+    if (h && V && V.npcs) V.npcs.push(h);
+    return h;
+  }
+  // Dialogue: [E] Talk cycles these lines via the engine's interaction system.
+  // Golden Ace register — the house always wins, politely. Two dealers get
+  // distinct sets so a full table doesn't read copy-pasted.
+  const DEALER_LINES = [[
+    "Dealer stands on all seventeens. The shoe doesn't care what you feel.",
+    "Blackjack pays three to two. Insurance pays for the chandeliers.",
+    "Fresh six-deck shoe, cut card's buried. Count it if you like — the pit counts you right back.",
+    "Double when you're sure. This felt has heard a lot of sure.",
+  ], [
+    "Hit sixteen, stand on seventeen, lose with a smile. That's the whole game.",
+    "Cards don't run hot or cold, friend. They run house.",
+    "Nice hand. Now win it eight more times — that's when the felt starts to notice.",
+    "You want a system? Mine's simple: I deal, you pay, we both stay polite.",
+  ]];
+  const CROUPIER_LINES = [
+    "Single zero, true wheel, honest ball. That one green pocket is the whole business model.",
+    "Place your bets... and no more bets. The wheel doesn't take requests.",
+    "Red, black, odd, even — the zero quietly collects from all of them.",
+    "Every system ever devised dies in that little green slot. Yours will keep it company.",
+    "Thirty-six numbers, thirty-five to one. That missing number is the house's whole living.",
+  ];
+  const CASHIER_LINES = [
+    "Chips play, cash doesn't. Nothing touches the felt until it's passed my window.",
+    "Cashing out? If you carry the Shark's marker, the cage settles him first. House policy.",
+    "Buy in here, color up here. Whatever the tables leave you, this is where it lands.",
+    "Big win or bad beat, it all comes back to this counter. Everything here does.",
+  ];
+  const GUARD_LINES = [
+    "Hands where the cameras can see them. Enjoy your evening.",
+    "Cage stays behind the brass. You stay in front of it.",
+    "I watch the floor. The floor watches you.",
+    "No trouble tonight. There's never any trouble here.",
+  ];
+  const PITBOSS_LINES = [
+    "Table three's running warm. We notice warm.",
+    "Win or lose, you're on camera the whole time. Do smile.",
+    "Nobody beats this floor for long. The floor is extremely patient.",
+    "You're up? Wonderful. Stay a while — let it find its way home.",
+    "Comps are for friends of the house. Keep playing; we'll see how friendly you get.",
+  ];
+  // The pit boss also BARKS live lines keyed to the player's night (read straight
+  // off bag()): pointed when you're hot, cold when you're down. Deterministic pick
+  // off the play counters (runtime flavor, no rng churn); guarded so it no-ops off
+  // the flagship or before the facade lands.
+  const PITBOSS_HOT = [
+    "Table's running warm. We notice warm.",
+    "Three on the trot — enjoy it. The wheel has a long memory.",
+    "A heater like that draws eyes. Mostly ours.",
+  ];
+  const PITBOSS_COLD = [
+    "Rough shoe. The cage still honors the Shark's marker, if it comes to that.",
+    "Cold runs happen. To you, tonight, apparently.",
+    "Down to felt lint? There's a booth in the back for exactly that.",
+  ];
+  const SHARK_LINES = [
+    "Vig is vig. Nothing personal — all arithmetic.",
+    "Everybody pays. The house first, me second, you whenever you can.",
+    "Short again? The marker's right here. So am I.",
+  ];
+  function pickLine(pool, salt) { const s = bag().stats; return pool[(s.hands + s.spins + s.pulls + (salt || 0)) % pool.length]; }
+  function pitBossBark(mood) { const h = V && V.pitBoss; if (h && h.say) h.say(pickLine(mood === "hot" ? PITBOSS_HOT : PITBOSS_COLD, mood === "hot" ? 0 : 1)); }
+  function sharkBark() { const h = V && V.shark; if (h && h.say) h.say(pickLine(SHARK_LINES, bag().debt ? 2 : 0)); }
 
   /* ======================= FLAGSHIP VENUE (3D) ============================ */
   /* Card/chip/wheel/reel glue — every fn no-ops without the flagship venue. */
@@ -486,7 +563,7 @@
 
   function buildVenue(ctx, venue) {
     const g = venue.group, PAL = { wood: 0x4a2e1c, woodD: 0x33200f, brass: 0xc9a227, feltG: 0x1c6e46, wine: 0x6e1524, slot: 0x232c38 };
-    V = { bj: [], rl: null, slots: [], gCards: new ctx.THREE.Group(), gChips: new ctx.THREE.Group() };
+    V = { bj: [], rl: null, slots: [], gCards: new ctx.THREE.Group(), gChips: new ctx.THREE.Group(), npcs: [], pitBoss: null, shark: null };
     g.add(V.gCards); g.add(V.gChips);
     const lot = venue.lot;
     const hx = lot ? Math.max(5, Math.min(8, lot.w / 2 - 1.6)) : 8;
@@ -524,8 +601,16 @@
       }
       const T = { cx, cz, dealerSpot: [cx, 0.94, cz + 0.35], playerSpot: [cx, 0.94, cz - 0.42], splitSpot: [cx + 1.05, 0.94, cz - 0.42], betSpot: [cx, 0.94, cz - 0.72] };
       V.bj.push(T);
-      const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 1.05, Math.PI).deal();
-      g.add(dealer.g); ctx.idle(dealer, which * 1.7);
+      castNPC(ctx, {
+        // role "dealer" → the facade dresses house waiter-blacks (the vest-and-collar
+        // dealer read) and pins them behind the felt, hands over the table.
+        role: "dealer", name: which ? "Dealer Vega" : "Dealer Marchetti",
+        at: [cx, cz + 1.05], face: Math.PI, post: "pinned", pose: "deal",
+        dialogue: DEALER_LINES[which],
+      }, function () {
+        const dealer = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: which ? 0x8a5c34 : 0xc2905c, vest: 0x1c6e46 }).at(cx, cz + 1.05, Math.PI).deal();
+        g.add(dealer.g); ctx.idle(dealer, which * 1.7); return dealer;
+      });
       ctx.zone({ id: "bj" + which, label: "Blackjack — $25 min [The Golden Ace]", pos: [cx, cz - 1.65], r: 1.7, onUse: () => { BJ.tableIx = which; BJ.phase = "bet"; renderBJ(); } });
       ctx.light(cx, 3.2, cz, 0xffca72, 0.8, 8);
     });
@@ -559,10 +644,26 @@
       ball.position.set(cx - 1.55, 1.21, cz + 0.72); g.add(ball);
       ctx.solid(cx - 2.7, cz - 1.15, cx + 2.7, cz + 1.15);
       V.rl = { disc, turret, ball, theta: 0, cx: cx - 1.55, cz, by: 1.2 };
-      const croup = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx, cz + 1.5, Math.PI).deal();
-      g.add(croup.g); ctx.idle(croup, 2.4);
-      const boss = ctx.rig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(cx + 2.6, cz - 0.6, 2.6).fold();
-      g.add(boss.g); ctx.idle(boss, 4.1);
+      castNPC(ctx, {
+        // role "croupier" → house waiter-blacks at the wheel (seeded appearance
+        // keeps him a distinct person from the blackjack dealers across the room).
+        role: "croupier", name: "Croupier Dubois",
+        at: [cx, cz + 1.5], face: Math.PI, post: "pinned", pose: "deal",
+        dialogue: CROUPIER_LINES,
+      }, function () {
+        const croup = ctx.rig({ shirt: 0xe8dcc0, pants: 0x14100c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx, cz + 1.5, Math.PI).deal();
+        g.add(croup.g); ctx.idle(croup, 2.4); return croup;
+      });
+      V.pitBoss = castNPC(ctx, {
+        // role "pitboss" → charcoal exec suit (the facade's archetype path); folds
+        // his arms over the pit and barks state-keyed lines (pitBossBark, below).
+        role: "pitboss", name: "Mr. Calloway", post: "pinned", pose: "foldarms",
+        at: [cx + 2.6, cz - 0.6], face: 2.6,
+        dialogue: PITBOSS_LINES,
+      }, function () {
+        const boss = ctx.rig({ shirt: 0x14100c, pants: 0x14100c, skin: 0xd9a066, vest: 0x211a12, hair: 0x777c82 }).at(cx + 2.6, cz - 0.6, 2.6).fold();
+        g.add(boss.g); ctx.idle(boss, 4.1); return boss;
+      });
       ctx.zone({ id: "roulette", label: "European Roulette [The Golden Ace]", pos: [cx, cz - 1.9], r: 1.9, onUse: renderRL });
       ctx.light(cx, 3.3, cz, 0xffca72, 0.85, 9);
     }
@@ -601,10 +702,26 @@
       for (let bz = -1.6; bz <= 1.6; bz += 0.3) { if (Math.abs(bz) < 0.5) continue; ctx.cyl(g, cx + 0.6, 1.95, cz + bz, 0.035, 0.035, 1.6, ctx.mat(PAL.brass), 8); }
       ctx.box(g, cx + 0.6, 2.8, cz, 0.16, 0.14, 3.6, ctx.mat(PAL.brass));
       ctx.solid(cx + 0.25, cz - 1.8, cx + 0.95, cz + 1.8);
-      const cashier = ctx.rig({ shirt: 0xe8dcc0, pants: 0x22262c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx - 0.2, cz, Math.PI / 2);
-      g.add(cashier.g); ctx.idle(cashier, 1.1);
-      const guard = ctx.rig({ shirt: 0x2c3038, pants: 0x14100c, skin: 0x704c28, cap: 0x2c3038 }).at(cx + 1.6, cz + 2.2, 2.4).fold();
-      g.add(guard.g); ctx.idle(guard, 3.3);
+      castNPC(ctx, {
+        // "banker" job-hint → formal business fit (bizRecord) AND a sensible cage
+        // occupation: the cage IS the house bank. Formal, distinct from floor staff.
+        role: "cashier", name: "Cage — Okafor", outfit: "banker",
+        at: [cx - 0.2, cz], face: Math.PI / 2, post: "pinned", pose: "stand",
+        dialogue: CASHIER_LINES,
+      }, function () {
+        const cashier = ctx.rig({ shirt: 0xe8dcc0, pants: 0x22262c, skin: 0xd9a066, vest: 0x6e1524 }).at(cx - 0.2, cz, Math.PI / 2);
+        g.add(cashier.g); ctx.idle(cashier, 1.1); return cashier;
+      });
+      castNPC(ctx, {
+        // role "guard" → job "security guard" → Guard Blacks, which carry NO cop
+        // flag (cityOutfitIsCop stays false), so he never reads as police. Watchful.
+        role: "guard", name: "Security",
+        at: [cx + 1.6, cz + 2.2], face: 2.4, post: "pinned", pose: "foldarms",
+        dialogue: GUARD_LINES,
+      }, function () {
+        const guard = ctx.rig({ shirt: 0x2c3038, pants: 0x14100c, skin: 0x704c28, cap: 0x2c3038 }).at(cx + 1.6, cz + 2.2, 2.4).fold();
+        g.add(guard.g); ctx.idle(guard, 3.3); return guard;
+      });
       ctx.zone({ id: "cage", label: "The Cage — buy in / cash out [The Golden Ace]", pos: [cx + 1.5, cz], r: 1.6, onUse: renderCage });
       ctx.light(cx + 1, 3.0, cz, 0xffd48a, 0.8, 8);
     }
@@ -616,10 +733,34 @@
       ctx.cyl(g, cx, 1.02, cz - 0.4, 0.75, 0.75, 0.08, ctx.mat(PAL.wood), 12);
       ctx.cyl(g, cx, 1.2, cz - 0.15, 0.1, 0.14, 0.24, ctx.emat(0xffab66, 0.9), 8);
       ctx.solid(cx - 1.6, cz - 0.9, cx + 1.6, cz + 0.9);
-      const shark = ctx.rig({ shirt: 0x39424e, pants: 0x14100c, skin: 0xb87c4c, hair: 0x555a60, shades: true }).at(cx, cz + 0.35, Math.PI).sit();
-      shark.g.position.y -= 0.28; g.add(shark.g); ctx.idle(shark, 5.2);
+      // No `dialogue` on purpose: his [E] is the LOAN PANEL (the ctx.zone below);
+      // flavor is delivered via sharkBark() when that panel opens, so the panel
+      // always wins the interaction. role "shark" → the facade's high-roller look,
+      // seated in the booth.
+      V.shark = castNPC(ctx, {
+        role: "shark", name: "The Shark", post: "pinned", pose: "sit",
+        at: [cx, cz + 0.35], face: Math.PI,
+      }, function () {
+        const shark = ctx.rig({ shirt: 0x39424e, pants: 0x14100c, skin: 0xb87c4c, hair: 0x555a60, shades: true }).at(cx, cz + 0.35, Math.PI).sit();
+        shark.g.position.y -= 0.28; g.add(shark.g); ctx.idle(shark, 5.2); return shark;
+      });
       ctx.zone({ id: "shark", label: "The Shark [The Golden Ace]", pos: [cx, cz - 1.3], r: 1.5, onUse: renderShark });
       ctx.light(cx, 1.7, cz - 0.1, 0xff9a4e, 0.6, 5.5);
+    }
+    // --- ambient patrons: real peds milling the slots/roulette so the floor
+    //     breathes. Facade-only (no dialogue, no dummy fallback) — before ctx.npc
+    //     lands the floor reads exactly as today. Spawn spots sit in open aisle,
+    //     clear of the table/slot/cage colliders, and scale with the lot. ---
+    if (ctx.npc) {
+      // role "patron", post "ambient" → real peds that mill the floor with the
+      // normal ped brain (the facade dresses them in the nightlife crowd's dress/
+      // suit mix — the dressed-up casino crowd). Spawn spots sit in open aisle,
+      // clear of the table/slot/cage colliders, and scale with the lot.
+      [
+        { at: [hx * 0.7, -hz * 0.05], face: Math.PI * 0.5 },      // by the slot bank
+        { at: [hx * 0.28, hz * 0.16], face: Math.PI },            // fronting the wheel
+        { at: [-hx * 0.28, -hz * 0.04], face: -Math.PI * 0.5 },   // open floor between tables
+      ].forEach((p) => castNPC(ctx, { role: "patron", at: p.at, face: p.face, post: "ambient" }, null));
     }
   }
 
@@ -635,6 +776,9 @@
       rules: { handValue, settleBJ, rlPayout, slotPay, slotRTP, wheel: WHEEL_ORDER, red: RED_SET, strip: SLOT_STRIP },
       open: () => { if (C) openHub(); },
       state: () => (S ? JSON.parse(JSON.stringify(S)) : null),
+      // roster of the flagship cast (real peds via ctx.npc, or rig fallbacks) —
+      // exposed for tools/probes to assert the cast built.
+      cast: () => (V && V.npcs ? V.npcs.length : 0),
       bj: BJ, rl: RL, sl: SL,
     },
   });

@@ -706,6 +706,11 @@
     if (/janitor|custodian|cleaner|sanitation/i.test(job)) return CAT.janitor || CAT.security;
     if (/\bvalet\b|parking attendant/i.test(job)) return CAT.valet || CAT.security;
     if (/bus driver|transit|trolley|tram driver/i.test(job)) return CAT.busdriver || CAT.security;
+    // casino floor: croupiers/card dealers wear the black-and-whites (the waiter
+    // template reads as the classic vest-and-collar dealer). Specific casino
+    // terms only, so a street "dealer" (drugs) never trips this. (pit boss keeps
+    // the suit via the archetype path — no jobFit here.)
+    if (/croupier|card dealer|casino dealer|blackjack dealer|casino floor/i.test(job)) return CAT.waiter || CAT.vendor;
     if (/clerk|cashier|vendor|barber/i.test(job)) return CAT.vendor;
     if (/construction|builder|hardhat|roadwork/i.test(job)) return CAT.construction;
     if (/mechanic|auto shop|garage/i.test(job)) return CAT.coveralls || CAT.construction;
