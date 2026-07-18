@@ -529,6 +529,21 @@
   // intersection (no centreline running through junction boxes), per-road
   // width stamped on road records + CBZ.roadLanes() lane-centre data.
   if (CBZ.CONFIG.ROADS_V2 == null) CBZ.CONFIG.ROADS_V2 = true;
+  // BUILDING MASSING V2 (reference adoption: SkyscraperGenerator tripartite
+  // grammar). On → taller city/town towers get a base belt cornice, projecting
+  // string courses up the shaft, a two-step roofline cornice, corner pinnacles,
+  // and (storeys >= 6) an inset SETBACK CROWN with chamfered corners + a spire.
+  // All additive DECO or above-roof geometry — no new ground colliders, so
+  // doors/interiors/stairs/roof gameplay are untouched. Deterministic per lot
+  // (CBZ.hash01, never rng()). Flip false to restore the flat-top box massing.
+  if (CBZ.CONFIG.BUILDING_MASSING_V2 == null) CBZ.CONFIG.BUILDING_MASSING_V2 = true;
+  // WINDOW REVEALS V2 (reference adoption: window modules with reveal depth +
+  // warm/cool lit spread). On → upper-floor clear panes recess ~0.09u behind the
+  // outer wall face (real reveal shadow line) with a slim reveal-edge liner, and
+  // each window/room gets a hashed warm-or-cool interior temperature. Pane stays
+  // clear + breakable; collider shifts <=0.1u inside the same wall. Flip false to
+  // restore flush panes + single-temperature glow.
+  if (CBZ.CONFIG.WINDOW_REVEALS_V2 == null) CBZ.CONFIG.WINDOW_REVEALS_V2 = true;
   // MAP OVERHAUL V2 (owner's ask: "make the map way cooler — not just how it
   // looks but WHAT is mapped"). On → the full map [M] and the bottom-left
   // minimap draw from the REAL rebuilt world: the actual road network
@@ -711,6 +726,14 @@
   // opens the casino floor, slot bank, bar and cashier cage. OFF → the plain
   // casino retail shell (no dress pass, no table interaction).
   if (CBZ.CONFIG.CASINOS_V1 == null) CBZ.CONFIG.CASINOS_V1 = true;
+  // WATER_REFLECT: the ONE ocean surface (CBZ.citySea) becomes a real
+  // planar-reflection water plane (src/vendor/WaterReflect.js, wired by
+  // src/world/waterfx.js) — the mirror re-renders the scene into a 256px
+  // target and the shader distorts it with a scrolling normal map + sun
+  // specular + fresnel. Half-rate mirror + auto-off below the Balanced
+  // quality tier keep the cost bounded. OFF → world.js's flat animated sea
+  // renders exactly as before (waterfx never touches CBZ.citySea).
+  if (CBZ.CONFIG.WATER_REFLECT == null) CBZ.CONFIG.WATER_REFLECT = true;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous

@@ -251,6 +251,9 @@
      re-verified against this tree's newest THREE usage, so r128 stays the
      loaded build for now. -->
 <script src="src/vendor/three.r128.min.js"></script>
+<!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
+     wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
+<script src="src/vendor/WaterReflect.js"></script>
 <script src="src/vendor/DRACOLoader.js"></script>
 <script src="src/vendor/GLTFLoader.js"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
@@ -462,6 +465,10 @@
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
 <script src="src/city/waterfield.js?v=water3"></script>
+<!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
+     CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
+     so load order past config.js + WaterReflect.js is all it needs. -->
+<script src="src/world/waterfx.js?v=reflect1"></script>
 <script src="src/city/highways.js?v=openroads3"></script>
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->

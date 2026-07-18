@@ -276,6 +276,40 @@
       }
       return sum;
     }
+    // Derivative-damped fractal ("Quilez erosion") + domain warp + per-octave
+    // domain rotation — adopted from the reference TerrainGenerator (see
+    // tools/adoption-terrain-forest.md). Each octave is divided down where the
+    // running gradient is already steep, so detail collapses on slopes and
+    // concentrates into weathered ridgelines while valley floors flatten; the
+    // domain is warped (ridges meander) and rotated ~37deg per octave (no grid
+    // lock). Same ~[-0.5,0.5] envelope as countryFbm, so the height composition
+    // + coastFade/frontier gating in countryHeightAt are untouched. Analytic,
+    // allocation-free, deterministic (noise2 -> CBZ.hash01; no shared rng stream,
+    // no Math.random) -> byte-identical per seed across clients.
+    const EROS_DAMP = 0.75;   // higher = flatter valleys, sharper ridges
+    const EROS_LAC = 2.03;    // lacunarity (off 2 so octaves do not grid-lock)
+    const EROS_WARP = 120;    // domain-warp amplitude (world units)
+    function countryErodedHills(x, z) {
+      const wx = x + (noise2(x + 130, z + 720, 900, 8898) - 0.5) * EROS_WARP;
+      const wz = z + (noise2(x + 520, z + 130, 900, 8899) - 0.5) * EROS_WARP;
+      let sum = 0, amp = 0.58, dX = 0, dZ = 0, px = wx, pz = wz, freq = 1;
+      for (let o = 0; o < 5; o++) {
+        const cell = 300 / freq;
+        const step = cell * 0.3;
+        const salt = 8890 + o;
+        const n = noise2(px, pz, cell, salt);
+        const nx = noise2(px + step, pz, cell, salt);
+        const nz = noise2(px, pz + step, cell, salt);
+        // per-cell (dimensionless) running gradient across octaves
+        dX += (nx - n) / 0.3;
+        dZ += (nz - n) / 0.3;
+        sum += amp * (n - 0.5) / (1 + EROS_DAMP * (dX * dX + dZ * dZ));
+        const rx = 0.80 * px - 0.60 * pz;   // rotate domain ~37deg per octave
+        pz = 0.60 * px + 0.80 * pz; px = rx;
+        freq *= EROS_LAC; amp *= 0.5;
+      }
+      return sum;
+    }
     const FUTURE_ROUTE_IN = COAST ? 190 : 36;
     const futureX0 = minX + FUTURE_ROUTE_IN, futureX1 = maxX - FUTURE_ROUTE_IN;
     const futureZ0 = minZ + FUTURE_ROUTE_IN, futureZ1 = maxZ - FUTURE_ROUTE_IN;
@@ -293,7 +327,9 @@
       const shore = COAST ? shoreField(x, z) : 100;
       if (shore <= 38) return 0;
       const coastFade = smooth01((shore - 38) / 74);
-      const n = countryFbm(x + 1400, z - 900);
+      const n = (CFG.CONTINENT_RELIEF_EROSION === false)
+        ? countryFbm(x + 1400, z - 900)
+        : countryErodedHills(x + 1400, z - 900);
       const broad = noise2(x, z, 540, 8896);
       const ridge = 1 - Math.abs(2 * noise2(x + 700, z - 300, 250, 8897) - 1);
       let h = (2.0 + Math.max(0, n + 0.18) * 17 + Math.pow(ridge, 2.4) * broad * 8) * coastFade;
@@ -762,44 +798,138 @@
         // over a removed triangle and appear to grow straight out of the sea.
         if (insideAuthoredSurface(jx, jz, 12)) continue;
         if (COAST && shoreField(jx, jz) < 16) continue;      // never dress the water/sand
-        spots.push({ x: jx, z: jz, h, cover: coverHit });
+        // FOREST_V2 ecological rejection (adopted from the reference forest —
+        // see tools/adoption-terrain-forest.md): slope limit / treeline fade /
+        // clearing mask. All hash01/noise2, so adding these gates shifts NO
+        // other placement (nothing rides a sequential rng stream). Steep ground
+        // is kept but flagged so the build turns it into scree, not trees.
+        let steep = false;
+        if (CFG.CONTINENT_FOREST_V2 !== false) {
+          const reliefY = countryHeightAt(jx, jz);
+          const e = 4;                                        // slope: 2-tap finite diff of the SAME height fn the prop sits on
+          const sxg = countryHeightAt(jx + e, jz) - countryHeightAt(jx - e, jz);
+          const szg = countryHeightAt(jx, jz + e) - countryHeightAt(jx, jz - e);
+          const slope = Math.sqrt(sxg * sxg + szg * szg) / (2 * e);   // rise/run
+          steep = slope > 0.85;                               // ridge faces -> rock, not tree
+          const treeline = smooth01((22 - reliefY) / 7);      // canopy thins out on the high ridges
+          const clearing = noise2(jx, jz, 240, 8815);         // low-freq meadow/clearing field
+          const keep = steep ? 0.55 : treeline * smooth01((clearing - 0.30) / 0.22);
+          const die = CBZ.hash01 ? CBZ.hash01(jx, jz, 8816) : 0.5;
+          if (die > 0.05 + keep * 0.9) continue;              // clearing / treeline reject
+        }
+        spots.push({ x: jx, z: jz, h, cover: coverHit, steep: steep });
       }
     }
     if (spots.length) {
+      const V2 = CFG.CONTINENT_FOREST_V2 !== false;
       const dummy = new THREE.Object3D();
+      const col = new THREE.Color();
       function isTreeSpot(s) {
+        if (V2 && s.steep) return false;                     // steep ground -> scree, never a tree
         if (s.cover && (s.cover.biome === "forest" || s.cover.biome === "snow")) return true;
         if (s.cover && s.cover.biome === "desert") return false;
         return s.h < (s.cover && s.cover.biome === "farmland" ? 0.14 : 0.24);
       }
+      // Blob canopy: a low-poly squashed icosahedron (20 faces, non-indexed ->
+      // flat-shaded chunky facets = voxel look) tapered into a teardrop with a
+      // small baked lump, base at y=0. A dark-underside -> bright-crown AO ramp
+      // is baked into the vertex `color` attribute; per-instance green rides
+      // `instanceColor` (r128: vColor = color(AO) *= instanceColor). One draw
+      // call carries the whole forest with depth + per-tree hue.
+      function blobCanopyGeo() {
+        const g = new THREE.IcosahedronGeometry(1, 0);
+        const pos = g.attributes.position, N = pos.count;
+        const colors = new Float32Array(N * 3);
+        for (let i = 0; i < N; i++) {
+          const ux = pos.getX(i), uy = pos.getY(i), uz = pos.getZ(i);
+          const hh = (uy + 1) / 2;                            // 0 base .. 1 crown
+          const taper = 1 - 0.60 * hh;
+          const lump = 1 + 0.16 * Math.sin(ux * 3.1) * Math.sin(uy * 2.7 + 1.3) * Math.sin(uz * 3.5 + 2.1);
+          const r = taper * lump;
+          pos.setXYZ(i, ux * r, hh, uz * r);                 // base y=0, crown y~1
+          const ao = 0.55 + 0.45 * hh;
+          colors[i * 3] = ao; colors[i * 3 + 1] = ao; colors[i * 3 + 2] = ao;
+        }
+        pos.needsUpdate = true;
+        g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        g.computeVertexNormals();
+        g.computeBoundingSphere();
+        return g;
+      }
       const nTree = spots.filter(isTreeSpot).length;
+      const nRock = Math.max(1, spots.length - nTree);
       const trunkG = new THREE.BoxGeometry(0.5, 2.6, 0.5);
-      const canopyG = new THREE.ConeGeometry(2.0, 4.4, 6);
+      const canopyG = V2 ? blobCanopyGeo() : new THREE.ConeGeometry(2.0, 4.4, 6);
       const rockG = new THREE.BoxGeometry(1.6, 1.1, 1.4);
-      const trunks = new THREE.InstancedMesh(trunkG, new THREE.MeshLambertMaterial({ color: 0x6b4a2a }), Math.max(1, nTree));
-      const canopies = new THREE.InstancedMesh(canopyG, new THREE.MeshLambertMaterial({ color: 0x3f7a3f }), Math.max(1, nTree));
-      const rocks = new THREE.InstancedMesh(rockG, new THREE.MeshLambertMaterial({ color: 0x8b8f96 }), Math.max(1, spots.length - nTree));
+      const trunkMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff } : { color: 0x6b4a2a });
+      const canopyMat = new THREE.MeshLambertMaterial(V2
+        ? { color: 0xffffff, vertexColors: true, flatShading: true }
+        : { color: 0x3f7a3f });
+      const rockMat = new THREE.MeshLambertMaterial(V2 ? { color: 0xffffff, flatShading: true } : { color: 0x8b8f96 });
+      const trunks = new THREE.InstancedMesh(trunkG, trunkMat, Math.max(1, nTree));
+      const canopies = new THREE.InstancedMesh(canopyG, canopyMat, Math.max(1, nTree));
+      const rocks = new THREE.InstancedMesh(rockG, rockMat, nRock);
       trunks.name = "backcountry-tree-trunks";
       canopies.name = "backcountry-tree-canopies";
       rocks.name = "backcountry-rocks";
+      const tCol = V2 ? new Float32Array(Math.max(1, nTree) * 3) : null;
+      const cCol = V2 ? new Float32Array(Math.max(1, nTree) * 3) : null;
+      const rCol = V2 ? new Float32Array(nRock * 3) : null;
       let ti = 0, ri = 0;
       for (const s of spots) {
         const scale = 0.8 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8806) : 0.5) * 0.7;
         const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8807) : 0.3) * Math.PI * 2;
         if (isTreeSpot(s)) {
           const gy = countryHeightAt(s.x, s.z);
-          dummy.position.set(s.x, gy + 1.3 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
-          dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
-          dummy.position.y = (2.6 + 2.15) * scale - 0.06;
-          dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
+          if (V2) {
+            const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8808) : 0.5;
+            const sc = 0.75 + hs * hs * 1.15;                // squared-bias scale (biases small)
+            const trunkH = 2.6 * sc;
+            dummy.position.set(s.x, gy + trunkH * 0.5 - 0.06, s.z);
+            dummy.rotation.set(0, rot, 0);
+            dummy.scale.set(sc * 0.9, sc, sc * 0.9);
+            dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
+            const cr = (1.9 + hs * 1.1) * (0.85 + (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8809) : 0.5) * 0.3);
+            const ch = 3.6 + hs * 2.0;
+            dummy.position.set(s.x, gy + trunkH - 0.06, s.z); // blob base sits on the trunk top
+            dummy.rotation.set(0, rot, 0);
+            dummy.scale.set(cr, ch, cr);
+            dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
+            // per-instance colour: low-freq regional green drift + hash jitter
+            const drift = noise2(s.x, s.z, 520, 8817);
+            const gr = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8818) : 0.5;
+            let baseG = 0.46 + drift * 0.14;
+            if (s.cover && s.cover.biome === "snow") baseG -= 0.10; // darker, cooler up high
+            col.setRGB(0.16 + gr * 0.10, baseG + (gr - 0.5) * 0.10, 0.13 + gr * 0.06);
+            cCol[ti * 3] = col.r; cCol[ti * 3 + 1] = col.g; cCol[ti * 3 + 2] = col.b;
+            const bk = 0.30 + gr * 0.16;
+            col.setRGB(bk, bk * 0.62, bk * 0.38);
+            tCol[ti * 3] = col.r; tCol[ti * 3 + 1] = col.g; tCol[ti * 3 + 2] = col.b;
+          } else {
+            dummy.position.set(s.x, gy + 1.3 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
+            dummy.updateMatrix(); trunks.setMatrixAt(ti, dummy.matrix);
+            dummy.position.y = (2.6 + 2.15) * scale - 0.06;
+            dummy.updateMatrix(); canopies.setMatrixAt(ti, dummy.matrix);
+          }
           ti++;
         } else {
           dummy.position.set(s.x, countryHeightAt(s.x, s.z) + 0.45 * scale - 0.06, s.z); dummy.rotation.set(0, rot, 0); dummy.scale.setScalar(scale);
           dummy.updateMatrix(); rocks.setMatrixAt(ri, dummy.matrix);
+          if (V2) {
+            const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8819) : 0.5;
+            const g = 0.42 + hs * 0.22;                      // grey with a warm-brown hint
+            col.setRGB(g, g * (0.94 + hs * 0.08), g * 0.9);
+            rCol[ri * 3] = col.r; rCol[ri * 3 + 1] = col.g; rCol[ri * 3 + 2] = col.b;
+          }
           ri++;
         }
       }
       trunks.count = canopies.count = ti; rocks.count = ri;
+      if (V2) {
+        trunks.instanceColor = new THREE.InstancedBufferAttribute(tCol, 3);
+        canopies.instanceColor = new THREE.InstancedBufferAttribute(cCol, 3);
+        rocks.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
+      }
       trunks.instanceMatrix.needsUpdate = canopies.instanceMatrix.needsUpdate = rocks.instanceMatrix.needsUpdate = true;
       trunks.frustumCulled = canopies.frustumCulled = rocks.frustumCulled = false;
       trunks.userData.terrain = canopies.userData.terrain = rocks.userData.terrain = true;

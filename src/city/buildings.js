@@ -2156,6 +2156,7 @@
     const TRIM = shadeHex(color, 0.72);    // cornice / sill / parapet coping
     const BASE = shadeHex(color, 0.55);    // ground-floor plinth
     const PIL = shadeHex(color, 0.85);     // corner pilasters
+    const REVEAL = shadeHex(color, 1.12);  // bright window-reveal liner (catches light in the recess)
 
     // FACADE DECO accumulator: every flat opaque dressing box (mullion frames,
     // cornices, plinth, pilasters, coping) is collected as raw geometry and
@@ -2606,20 +2607,42 @@
             const ny = Math.max(1, Math.min(3, Math.round(spanH / MOD)));   // rows up the opening
             const pw = spanW / nx, ph = spanH / ny;           // per-pane size
             const t = 0.07;                                   // pane thickness
+            // WINDOW REVEAL DEPTH (reference SkyscraperGenerator: window modules
+            // carry a real reveal). Default the pane 0.01u PROUD of the outer face
+            // (the pre-existing anti-"buried window" seat). With WINDOW_REVEALS_V2
+            // on, RECESS it REV behind the outer face instead: the full-WT sill/
+            // header/jamb boxes already framing the opening become the reveal
+            // returns, so the glass now sits in a real pocket that self-shadows.
+            // The collider rides the pane, still comfortably inside the WT wall.
+            const revealsOn = !(CBZ.CONFIG && CBZ.CONFIG.WINDOW_REVEALS_V2 === false);
+            const REV = 0.09;                                 // reveal depth (m)
+            const paneOff = outSgn * (WT / 2 - (revealsOn ? REV : -0.01));  // face-normal seat of the pane plane
             for (let gx = 0; gx < nx; gx++) {
               for (let gy = 0; gy < ny; gy++) {
                 const ox2 = -spanW / 2 + (gx + 0.5) * pw;     // pane offset within the opening
                 const oy2 = -spanH / 2 + (gy + 0.5) * ph;
                 const py = cy + oy2;
-                // SEAT THE GLASS AT THE STREET FACE, not the wall centre. The wall
-                // is WT (0.4m) thick, centred at f.z; a pane placed at f.z sat
-                // BURIED 0.2m inside the opaque wall while only the proud mullion
-                // trim (at f.z + outSgn*0.25) showed → the "tally marks on a blank
-                // wall" the owner filmed. Push the pane out to the outer wall plane
-                // (matches the working retail-storefront offset), so the glass is
-                // visible with the mullions just in front of it.
-                if (f.horiz) addCityGlass(bgroup, cx + ox2, py, cz + outSgn * (WT / 2 + 0.01), pw, ph, t, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
-                else addCityGlass(bgroup, cx + outSgn * (WT / 2 + 0.01), py, cz + ox2, t, ph, pw, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
+                if (f.horiz) addCityGlass(bgroup, cx + ox2, py, cz + paneOff, pw, ph, t, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
+                else addCityGlass(bgroup, cx + paneOff, py, cz + ox2, t, ph, pw, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
+              }
+            }
+            // REVEAL LINER: four slim bright returns framing the recessed glass
+            // (top / bottom / jambs), spanning the pocket from the outer face in to
+            // the pane so the reveal reads as depth, not a flat sticker. Pure merged
+            // deco (dbox → flushDeco), cast:false, no collider — draw-call cheap.
+            if (revealsOn && spanW > 0.4 && spanH > 0.4) {
+              const linZc = outSgn * (WT / 2 - REV / 2 - 0.012);   // pocket centre, pulled in so no face is coplanar with the wall (no z-fight)
+              const eb = 0.03;                                 // liner bar thickness on the opening face
+              if (f.horiz) {
+                dbox(cx, cy + spanH / 2 + eb / 2, cz + linZc, spanW + 2 * eb, eb, REV, REVEAL);   // head
+                dbox(cx, cy - spanH / 2 - eb / 2, cz + linZc, spanW + 2 * eb, eb, REV, REVEAL);   // sill
+                dbox(cx - spanW / 2 - eb / 2, cy, cz + linZc, eb, spanH, REV, REVEAL);            // left jamb
+                dbox(cx + spanW / 2 + eb / 2, cy, cz + linZc, eb, spanH, REV, REVEAL);            // right jamb
+              } else {
+                dbox(cx + linZc, cy + spanH / 2 + eb / 2, cz, REV, eb, spanW + 2 * eb, REVEAL);
+                dbox(cx + linZc, cy - spanH / 2 - eb / 2, cz, REV, eb, spanW + 2 * eb, REVEAL);
+                dbox(cx + linZc, cy, cz - spanW / 2 - eb / 2, REV, spanH, eb, REVEAL);
+                dbox(cx + linZc, cy, cz + spanW / 2 + eb / 2, REV, spanH, eb, REVEAL);
               }
             }
             // INTERIOR READABILITY: the room seen through the glass. Deterministic
@@ -2630,7 +2653,18 @@
               const wx = ox + cx, wz = oz + cz;
               const hsh = Math.abs(Math.sin(wx * 12.9898 + cy * 4.137 + wz * 78.233) * 43758.5453) % 1;
               const litFrac = punched ? 0.26 : 0.15;
-              const warm = punched ? 0.9 : 0.35;
+              // PER-WINDOW BULB TEMPERATURE (reference: warm/cool lit-room spread).
+              // interiorlight.keyFor buckets warm>=0.5 → "warm" vs "cool", so a
+              // hashed per-room draw costs no extra layers. Offices skew cool
+              // (overheads) with a warm-lamp minority; residential skews warm with
+              // a cool TV/fluorescent minority. Position-hashed (+floor salt) so the
+              // night skyline is stable per seed. Off (flag false) = the old fixed
+              // single temperature, byte-identical.
+              let warm = punched ? 0.9 : 0.35;
+              if (!(CBZ.CONFIG && CBZ.CONFIG.WINDOW_REVEALS_V2 === false) && CBZ.hash01) {
+                const warmShare = punched ? 0.72 : 0.28;       // fraction of rooms lit warm
+                warm = CBZ.hash01(wx, wz, 0x3a7 + k * 17) < warmShare ? 0.8 : 0.22;
+              }
               CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: hsh < litFrac, warm: warm });
             }
           }
@@ -3050,6 +3084,101 @@
       // building. 0.1×0.1 vs the old 0.5×0.5 — ~96% less corner geometry volume.
       for (const sxp of [-1, 1]) for (const szp of [-1, 1])
         dbox(sxp * (w / 2 + 0.01), (rTop + pp) / 2, szp * (d / 2 + 0.01), 0.1, rTop + pp, 0.1, MULL);
+    }
+
+    // ===== TRIPARTITE MASSING + ROOFLINE GRAMMAR (reference SkyscraperGenerator)
+    // Adoption A (CBZ.CONFIG.BUILDING_MASSING_V2, default ON): give city/town
+    // towers a base / shaft / crown reading. EVERYTHING here is merged DECO (dbox
+    // → flushDeco) or a rotated flat-Lambert mesh that core/batch.js folds at load,
+    // and it sits at floor lines or ABOVE the roof — no new ground colliders, so
+    // doors / interiors / stairs / the elevator shaft / roofloot / helipad are all
+    // untouched. Deterministic per lot via CBZ.hash01(ox,oz,salt) — never rng(),
+    // never a shared-stream draw. Skips the bespoke flagship (garageGround).
+    if ((CBZ.CONFIG ? CBZ.CONFIG.BUILDING_MASSING_V2 !== false : true) && !opts.garageGround) {
+      const h01 = (salt) => CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.4;
+      // a projecting horizontal belt wrapping a centred rectangle at world height y.
+      const beltAt = (cx0, cz0, bw, bd, y, proj, th, c) => {
+        const bhw = bw / 2, bhd = bd / 2;
+        dbox(cx0, y, cz0 - bhd - proj / 2, bw + 2 * proj, th, proj, c);   // -z
+        dbox(cx0, y, cz0 + bhd + proj / 2, bw + 2 * proj, th, proj, c);   // +z
+        dbox(cx0 - bhw - proj / 2, y, cz0, proj, th, bd + 2 * proj, c);   // -x
+        dbox(cx0 + bhw + proj / 2, y, cz0, proj, th, bd + 2 * proj, c);   // +x
+      };
+      const belt = (y, proj, th, c) => beltAt(0, 0, w, d, y, proj, th, c);
+      // ---- BASE: a two-step belt cornice capping the podium (storeys >= 3) ----
+      if (storeys >= 3) {
+        const baseFloors = storeys >= 8 ? 2 : 1;
+        const by = baseFloors * FH;
+        belt(by - 0.03, 0.16, 0.30, BASE);        // deep lower course
+        belt(by + 0.15, 0.10, 0.12, TRIM);        // upper lip
+      }
+      // ---- SHAFT: projecting string courses every N floors (storeys >= 4) ----
+      if (storeys >= 4) {
+        const every = 3 + ((h01(0x57c) * 3) | 0);           // 3..5 floors apart
+        const startF = storeys >= 8 ? 2 : 1;
+        for (let L = startF + every; L < storeys; L += every) belt(L * FH - 0.02, 0.09, 0.16, TRIM);
+      }
+      // ---- MAIN ROOFLINE: a two-step projecting cornice under the parapet ----
+      if (storeys >= 2) {
+        belt(rTop - 0.06, 0.14, 0.22, TRIM);
+        belt(rTop + 0.12, 0.22, 0.14, shadeHex(color, 0.80));
+      }
+      // ---- CORNER PINNACLES: chunky parapet-corner caps (finials; storeys >= 3)
+      if (storeys >= 3) {
+        const finH = 0.5 + h01(0x11e) * 0.5;
+        for (const sxp of [-1, 1]) for (const szp of [-1, 1]) {
+          dbox(sxp * (w / 2 - 0.06), rTop + pp + finH / 2, szp * (d / 2 - 0.06), 0.36, finH, 0.36, TRIM);
+          dbox(sxp * (w / 2 - 0.06), rTop + pp + finH + 0.08, szp * (d / 2 - 0.06), 0.30, 0.16, 0.30, shadeHex(color, 0.9));
+        }
+      }
+      // ===== SETBACK CROWN (storeys >= 6): an inset capping volume with 45°
+      // chamfered corners + a stepped spire — the tripartite silhouette. DECO
+      // ONLY (cast shadow, no collider), seated ON the roof slab and inset from
+      // it, so a walkable terrace remains around it (roofloot / helipad / snipers
+      // keep working) and no interior floor is touched.
+      if (storeys >= 6) {
+        // CENTRE THE CROWN ON THE ROOF SLAB (slabCx/slabCz/slabW/slabD — the solid
+        // walkable roof, which already excludes the -x stairwell strip) and rise
+        // from rTop, so the crown base sits ON the roof (never floating above the
+        // parapet, never overhanging the open stairwell) and a terrace remains.
+        const inset = Math.min(slabW, slabD) * (0.18 + h01(0x9a1) * 0.08);   // 18..26%
+        const cw = slabW - 2 * inset, cdp = slabD - 2 * inset;
+        if (cw > 3 && cdp > 3) {
+          const crownH = FH * (1.4 + h01(0x9a2) * 1.6);              // ~1.4..3 floors
+          const cy0 = rTop;                                          // base on the roof surface
+          const cx0 = slabCx, cz0 = slabCz;                          // roof-slab centre
+          const chw = cw / 2, chd = cdp / 2, cyc = cy0 + crownH / 2;
+          const cCol = shadeHex(color, 1.04);                        // crown a touch brighter
+          const crownMat = CBZ.cmat ? CBZ.cmat(cCol) : mat(cCol);
+          dbox(cx0, cyc, cz0 - chd, cw, crownH, WT, cCol);          // four crown walls
+          dbox(cx0, cyc, cz0 + chd, cw, crownH, WT, cCol);
+          dbox(cx0 - chw, cyc, cz0, WT, crownH, cdp, cCol);
+          dbox(cx0 + chw, cyc, cz0, WT, crownH, cdp, cCol);
+          dbox(cx0, cy0 + crownH - 0.12, cz0, cw, 0.24, cdp, cCol);  // solid top (not hollow from distance)
+          // 45° CHAMFERED CORNERS aimed outward: a rotated flat panel bridging each
+          // corner (dbox is axis-aligned, so build these as rotated meshes; opaque
+          // Lambert, no userData → core/batch.js bakes the rotation in at load).
+          const chamW = Math.min(cw, cdp) * 0.30;
+          for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(chamW, crownH, WT), crownMat);
+            m.position.set(cx0 + sx * chw, cyc, cz0 + sz * chd);
+            m.rotation.y = Math.atan2(sx, sz);                       // face the outward diagonal
+            m.castShadow = true; m.receiveShadow = true;
+            bgroup.add(m);
+          }
+          const ctop = cy0 + crownH;
+          beltAt(cx0, cz0, cw, cdp, ctop + 0.10, 0.20, 0.16, TRIM);  // crown cornice
+          beltAt(cx0, cz0, cw, cdp, ctop + 0.36, 0.05, 0.5, cCol);   // crown parapet
+          // stepped spire finial at the crown centre (ziggurat + mast)
+          let sy = ctop + 0.4; const steps = 3, spH = (crownH * 0.7 + 1.4) / steps;
+          for (let s = 0; s < steps; s++) {
+            const ss = 0.95 * (1 - s * 0.26);
+            dbox(cx0, sy + spH / 2, cz0, ss, spH, ss, TRIM);
+            sy += spH;
+          }
+          dbox(cx0, sy + 0.7, cz0, 0.16, 1.4, 0.16, MULL);          // mast
+        }
+      }
     }
     flushDeco();
 
