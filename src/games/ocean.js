@@ -374,6 +374,22 @@
     sign.position.set(kx + ux * 1.4, y0 + 2.15, kz + uz * 1.4);
     sign.rotation.y = Math.atan2(ux, uz);
     g.add(sign);
+    // the dock vendor — a REAL city ped (brain + wardrobe + death funnel),
+    // pinned behind the counter. [E] Talk gives wreck/price flavour; the
+    // Charter zone below is the actual economy panel.
+    if (ctx.npc) ctx.npc({
+      role: "vendor", name: "Mona", outfit: "vendor",
+      at: [kx + ux * 1.1, kz + uz * 1.1], face: Math.atan2(-ux, -uz),
+      post: "pinned", pose: "stand", sayColor: "#9adcb8",
+      talkLabel: "Talk to Mona",
+      dialogue: [
+        "Follow an amber buoy, anchor your nerve, and dive. Deeper wrecks pay better.",
+        "The Aurora's gold sits over the trench. Something down there guards it — I'd know.",
+        "Night salvage pays double. So does a mistake after dark.",
+        "Dolphins near you? Good. They run the whites off. Orcas run everything off.",
+        "Air's your real problem. Sell here, buy a bigger tank, then chase the deep money.",
+      ],
+    });
 
     // ---- PIER + CHUM BUCKET: the dive launch + the chum supply ----
     // posts run from the analytic seabed up to the deck so the pier is
