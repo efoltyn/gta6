@@ -19,6 +19,14 @@
   const THREE = window.THREE;
   const mat = CBZ.mat;
 
+  // PROPS_WIRED_V1 (owner audit — "every prop is interactable or gone"): three
+  // street props stop being decor — a PROPANE CAGE cooks off when shot, a
+  // PARKING METER spills coins when you ram it, and a MAILBOX can be checked
+  // for mail (that verb lives in interact.js). One-line revert. Defaulted here
+  // AND in interact.js — idempotent, whichever script loads first wins.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.PROPS_WIRED_V1 == null) CBZ.CONFIG.PROPS_WIRED_V1 = true;
+
   // ---- shared cached DIEGETIC sign panel ---------------------------------
   // Historical callers still use the makeLabelSprite name, but this is no
   // longer a Sprite.  A Sprite always turns to face the camera and ignores the
@@ -345,6 +353,32 @@
     } else if (s.type === "cone") {
       if (imp) imp(p, n, { kind: "chip", power: 0.6, color: 0xff6a1a });
       tipProp(s, d.x, d.z, 0.3, 1.5);                  // light plastic FLIES
+    } else if (s.type === "propane") {
+      // PROPS_WIRED_V1: a propane cage COOKS OFF. The first rounds ring the
+      // steel and split a tank (spark), and the hit that drops hp to 0 DETONATES
+      // — exactly once, guarded by s.exploded (a second tracer the same frame,
+      // or the blast's own collateral, can't re-pop it: demolition.js's
+      // opts._demoSeen idiom). It routes through the EXACT player-blast chain a
+      // frag/C4 fire (crashfx cityExplosion byPlayer → kills+heat to you, +
+      // shatter + a witnessed crime + a cop alarm). We do NOT fork heat: these
+      // are the same cityCrime/cityAlarm calls combat.js's grenade already makes.
+      if (imp) imp(p, n, { kind: "spark", power: 1.2 });
+      if (hole) hole(p, n, { size: 0.14 });
+      if (!s.exploded) {
+        s.hp = (s.hp || 1) - 1;
+        if (s.hp > 0) {
+          if (CBZ.sfx) CBZ.sfx("clank");               // rings + leaks — not popped yet
+        } else {
+          s.exploded = true;
+          if (s.group) s.group.visible = false;        // the cage is gone in the fireball
+          const ex = s.x, ez = s.z;
+          if (CBZ.cityExplosion) CBZ.cityExplosion(ex, ez, { power: 1.2, radius: 6, byPlayer: true });
+          if (CBZ.cityShatter) CBZ.cityShatter(ex, ez, 8);
+          if (CBZ.cityCrime) CBZ.cityCrime(120, { x: ex, z: ez, type: "shots-fired" });
+          if (CBZ.cityAlarm && CBZ.city) CBZ.cityAlarm(ex, ez, 45, 1.8, CBZ.city.playerActor);
+          if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: { x: ex, z: ez }, radius: 80, intensity: 2.0 });
+        }
+      }
     } else {                                           // mailbox / meter: bolted steel
       if (imp) imp(p, n, { kind: "spark", power: 0.9 });
       if (hole) hole(p, n, { size: 0.13 });
@@ -472,6 +506,20 @@
         tipProp(s, fx, fz, light ? 0.3 : 0.1, light ? 1.4 : 0.55);
         car.v *= 0.94;                              // barely felt — it's a can, not a curb
         if (CBZ.sfx) CBZ.sfx("clank");
+        // PROPS_WIRED_V1: ram a PARKING METER and its coin box spills — but only
+        // when it's YOU behind the wheel (car.player), never NPC traffic clipping
+        // meters all over the city. The outer `if (s.over) continue` above means
+        // this runs on the FIRST topple ONLY (paid once; the meter then stays
+        // down for the session). Haul is deterministic per meter (hash01 on its
+        // position → the coins THAT meter was holding), plus a witnessed
+        // petty-theft charge through the same cityCrime heat API everything uses.
+        if (CBZ.CONFIG.PROPS_WIRED_V1 && s.type === "meter" && car.player) {
+          const coins = 8 + ((CBZ.hash01(s.x, s.z, 4711) * 18) | 0);   // $8–25, fixed per meter
+          if (CBZ.city && CBZ.city.addCash) CBZ.city.addCash(coins);
+          if (CBZ.sfx) CBZ.sfx("coin");
+          if (CBZ.city && CBZ.city.note) CBZ.city.note("Cracked the meter — $" + coins + " in coins.", 1.8);
+          if (CBZ.cityCrime) CBZ.cityCrime(25, { x: s.x, z: s.z, type: "theft" });
+        }
         break;                                       // one car claims the hit this tick
       }
     }
@@ -1433,6 +1481,12 @@
       root.add(g);
       solidCollider(x, z, 0.55, base);
       city.streetProps.push({ x, z, type: "propane" });
+      // PROPS_WIRED_V1: a shot cage COOKS OFF. Register it as a shootable so
+      // gunfire (CBZ.cityShootProp → hitProp) whittles its hp and, on the last
+      // hit, routes into the SAME player blast chain the grenade/C4 fire. Flag
+      // off → never registered, the cage stays inert decor (one-line revert).
+      if (CBZ.CONFIG.PROPS_WIRED_V1)
+        shootables.push({ type: "propane", x, z, y: 0.5, r: 0.7, group: g, hp: 3 });
     }
 
     // ----- PER-SHOP SANDWICH BOARD: an A-frame whose panel reflects the shop --

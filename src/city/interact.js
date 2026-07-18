@@ -26,6 +26,12 @@
 
   const REACH = I.REACH;   // 3.8 — the shared interaction reach
 
+  // PROPS_WIRED_V1 (owner audit — "interactable or gone"): gates the "Check the
+  // mail" mailbox verb below (props.js gates the propane/meter mechanics off the
+  // same flag). Defaulted in both files — idempotent, whichever loads first wins.
+  CBZ.CONFIG = CBZ.CONFIG || {};
+  if (CBZ.CONFIG.PROPS_WIRED_V1 == null) CBZ.CONFIG.PROPS_WIRED_V1 = true;
+
   function dist(a, x, z) { return Math.hypot(a.pos.x - x, a.pos.z - z); }
   function nearest(list, x, z, test) { let best = null, bd = REACH; for (const p of list) { if (!test(p)) continue; const d = dist(p, x, z); if (d < bd) { bd = d; best = p; } } return best; }
 
@@ -379,6 +385,66 @@
     if (CBZ.sfx) CBZ.sfx("coin");
     CBZ.city.note("Jackpot — someone dumped $" + cash + " in there.", 2);
   }
+  // ---- CHECK THE MAIL (mailbox street prop) — searchStreetProp's cousin, but
+  // keyed to a LETTERBOX: mostly junk flavor, sometimes a cash envelope ($5–40),
+  // and rarely a scrap of street intel naming a nearby shop/crew (flavor only —
+  // a single feed line, no new system). Bounded ONCE PER MAILBOX PER DAY
+  // (CBZ.dayCount) so a row of boxes isn't a faucet; falls back to once-per-
+  // session when the day clock is absent. Reuses propRng() (the same city-RNG-
+  // with-Math.random-fallback searchStreetProp uses). Flag: PROPS_WIRED_V1.
+  const MAIL_JUNK = [
+    "Bills, coupons, and a pizza flyer. The usual.",
+    "A jury summons — addressed to someone who moved out.",
+    "Somebody's tax refund check. Not yours, sadly.",
+    "A postcard from nowhere: 'Wish you were here.'",
+    "Nothing but takeout menus and debt collectors.",
+  ];
+  // nearest named shop / gang to a point, for the rare intel line (flavor only).
+  function mailIntelLine(x, z) {
+    let shop = null, sd = 130 * 130;
+    const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      if (!l || !l.building || !l.building.shop) continue;
+      const nm = l.building.name || (l.building.shop && l.building.shop.name);
+      if (!nm) continue;
+      const dx = l.cx - x, dz = l.cz - z, d = dx * dx + dz * dz;
+      if (d < sd) { sd = d; shop = nm; }
+    }
+    let gang = null, gd = 170 * 170;
+    for (const gg of (CBZ.cityGangs || [])) {
+      if (!gg || !gg.center) continue;
+      const dx = gg.center.x - x, dz = gg.center.z - z, d = dx * dx + dz * dz;
+      if (d < gd) { gd = d; gang = gg.name; }
+    }
+    if (shop && (!gang || sd <= gd)) return "A misdelivered invoice — " + shop + " is sitting on a fat week. Worth a look.";
+    if (gang) return "A threat note meant for a neighbor: the " + gang + " are collecting on this block.";
+    return "A tip-off scrawled on a napkin — but the ink's too smeared to read.";
+  }
+  function checkMailbox(sp) {
+    const day = (typeof CBZ.dayCount === "function") ? CBZ.dayCount() : -1;
+    if (day >= 0) {
+      if (sp._mailDay === day) { CBZ.city.note("Already cleared this box today.", 1.6); return; }
+      sp._mailDay = day;
+    } else {
+      if (sp._mailChecked) { CBZ.city.note("Already cleared this box.", 1.6); return; }
+      sp._mailChecked = true;
+    }
+    const r = propRng();
+    if (r < 0.62) {                                  // mostly junk
+      CBZ.city.note(MAIL_JUNK[(propRng() * MAIL_JUNK.length) | 0], 1.8);
+      return;
+    }
+    if (r < 0.93) {                                  // a cash envelope
+      const cash = 5 + ((propRng() * 36) | 0);       // $5–40
+      CBZ.city.addCash(cash);
+      if (CBZ.sfx) CBZ.sfx("coin");
+      CBZ.city.note("A cash envelope in the mail — $" + cash + " inside.", 1.9);
+      return;
+    }
+    // rare: a scrap of street intel (flavor feed line, no new system)
+    CBZ.city.note(mailIntelLine(sp.x, sp.z), 2.4);
+  }
   function robRegister(v) {
     const ped = v;
     const take = 150 + ((Math.random() * 400) | 0) + (ped.cash || 0);
@@ -687,6 +753,19 @@
       label: function (sp) { return sp.type === "newsbox" ? "Check the news box" : "Check the trash can"; },
       onSelect: function (sp) { searchStreetProp(sp); },
     }],
+  });
+  // PROPS_WIRED_V1: MAILBOXES get "[E] Check the mail" — searchStreetProp's
+  // cousin (junk / cash envelope / rare intel), bounded once-per-box-per-day. Its
+  // OWN zone (slot "e", distinct from the [I] bin/newsbox rummage) so a letterbox
+  // reads as a deliberate check, not trash-picking. find() returns null when the
+  // flag is off, so the card never surfaces (one-line revert).
+  I.registerZone({
+    id: "zone-mailbox", kind: "mailbox", prio: 3, driving: false,
+    find: function (px, pz) {
+      if (!CBZ.CONFIG.PROPS_WIRED_V1) return null;
+      return CBZ.cityNearestStreetProp ? CBZ.cityNearestStreetProp(px, pz, REACH, ["mailbox"]) : null;
+    },
+    options: [{ id: "mailbox-check", slot: "e", label: "Check the mail", onSelect: function (sp) { checkMailbox(sp); } }],
   });
 
   // ---- PROPS WITH PURPOSE (city/propuse.js): every chair/bench/couch is a
