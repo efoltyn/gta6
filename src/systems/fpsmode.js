@@ -1403,6 +1403,30 @@
           if (otd >= 0 && otd < bestDist) { bestActor = a; bestDist = otd; bestHead = false; bestOcc = true; }
           continue;
         }
+        // SEATED-IN-PARENT actor (aircraft cabin/cockpit — npclife attach):
+        // group.position is PLANE-LOCAL, so the standing sphere stack below
+        // would test empty air near the parent's local origin — these people
+        // were simply absent from the bullet's world (owner: "you can't shoot
+        // them"). Use the world-pos mirror npclife syncs every tick plus the
+        // LIVE head world point, and hang a seated-height body stack off that
+        // head so the spheres self-adapt to whichever seat pose variant posed
+        // the rig. (CHAR_SEATED_HITTABLE)
+        if (a._npcAttached) {
+          if (CBZ.CONFIG.CHAR_SEATED_HITTABLE === false) continue;
+          const ap = a.pos;
+          if (!ap) continue;
+          let hx = ap.x, hy = ap.y + 0.95, hz = ap.z;   // fallback: seated head guess
+          const hm = a.char && a.char.head;
+          if (hm && hm.getWorldPosition) { hm.getWorldPosition(occPoint); hx = occPoint.x; hy = occPoint.y; hz = occPoint.z; }
+          const shd = sphereEntry(origin, dir, hx, hy, hz, hr, maxT);
+          if (shd >= 0 && shd < bestDist) { bestActor = a; bestDist = shd; bestHead = true; bestOcc = false; continue; }
+          const oy = Math.max(0.4, hy - ap.y);          // head height above the seat anchor
+          const std = sphereEntry(origin, dir, (hx + ap.x) / 2, ap.y + oy * 0.5, (hz + ap.z) / 2, br, maxT);
+          const sld = sphereEntry(origin, dir, ap.x, ap.y + oy * 0.18, ap.z, br * 0.82, maxT);
+          const sbd = Math.min(std < 0 ? Infinity : std, sld < 0 ? Infinity : sld);
+          if (sbd < bestDist) { bestActor = a; bestDist = sbd; bestHead = false; bestOcc = false; }
+          continue;
+        }
         const gp = a.group.position, gy = gp.y || 0;
         // HEAD first — small high sphere, takes priority
         const hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hr, maxT);

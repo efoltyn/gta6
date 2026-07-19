@@ -822,6 +822,28 @@
   if (CBZ.CONFIG.PLAYER_SLIDE == null) CBZ.CONFIG.PLAYER_SLIDE = true;
   if (CBZ.CONFIG.PLAYER_PRONE == null) CBZ.CONFIG.PLAYER_PRONE = true;
 
+  // ---- character/combat reads (owner reports, one flag each) --------------
+  // CHAR_SEAT_POSE_V2 (entities/character.js): REAL chair sit for seats that
+  // declare their geometry (aircraft seat records carry cushion/floor data;
+  // benches/desks/cars don't and keep the legacy fake). The old office pose
+  // kept the feet at the rig's root plane, and aircraft anchors sit ON the
+  // cushion — so passengers read as squatting on top of the seat ("their
+  // feet are on the seat"). V2 sinks the whole model and solves hip/knee so
+  // the butt lands ON the cushion and the soles land ON the cabin FLOOR.
+  if (CBZ.CONFIG.CHAR_SEAT_POSE_V2 == null) CBZ.CONFIG.CHAR_SEAT_POSE_V2 = true;
+  // CHAR_SEATED_HITTABLE (systems/fpsmode.js + peds/npclife): seated cabin
+  // passengers/crew join the bullet's hit-candidate set (their rigs are
+  // parented plane-local, so the world-space sphere stack never saw them —
+  // "you can't shoot them"), and a killed sitter slumps dead IN the seat
+  // instead of ragdolling a plane-local group through world space.
+  if (CBZ.CONFIG.CHAR_SEATED_HITTABLE == null) CBZ.CONFIG.CHAR_SEATED_HITTABLE = true;
+  // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
+  // person must never BRIGHTEN ("they turn super white, which is dumb") —
+  // the hit read becomes a brief blood-dark tint on the struck head while
+  // the existing gore.spray/bodyWound blood carries the impact. Flip false
+  // to restore the legacy emissive white/orange pop.
+  if (CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 == null) CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 = true;
+
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous
   // updater functions without adding any normal-game stack-capture overhead.

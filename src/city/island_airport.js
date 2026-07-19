@@ -527,6 +527,10 @@
       const sat = CBZ.propSit(P, {
         x: w.x, y: rec.group.position.y + cab.floorTop + 0.45, z: w.z,
         face: th + Math.PI / 2, kind: "chair", lot: null, occupant: null,
+        // cushion-top anchor + cushion height (V2 chair sit): the player's own
+        // rig gets the same butt-on-cushion / feet-on-the-deck solve as the
+        // NPC passengers instead of squat-folding on top of the seat.
+        cushionH: 0.45, floorBelow: 0.45,
       });
       if (sat) { best.occupant = P; P._aircraftCabinSeat = best; }
     } catch (e) {}
@@ -1254,6 +1258,12 @@
           id: "seat-" + (seatId++), x: x + 0.03, y: CABIN_FLOOR + 0.45, z,
           heading: Math.PI / 2, kind: "aircraft-seat",
           reservedForNpc: reserved, occupant: null,
+          // seat geometry for the V2 chair sit (entities/character.js): this
+          // anchor sits ON the cushion top (0.45 above the deck), and the
+          // cushion mesh top is that same 0.45 — declaring both lets the pose
+          // put the butt on the cushion and the soles on the FLOOR instead of
+          // squat-folding the whole rig on top of the seat.
+          cushionH: 0.45, floorBelow: 0.45,
         });
       }
       // COCKPIT CREW SEATS — real seat records the shared NPC life system can
@@ -1269,11 +1279,13 @@
           id: "seat-captain", x: 13.13, y: CABIN_FLOOR + 0.45, z: -0.58,
           heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", cockpit: true,
           reservedForNpc: true, occupant: null,
+          cushionH: 0.45, floorBelow: 0.45,   // same cushion-top anchor convention as the rows
         });
         seats.push({
           id: "seat-firstofficer", x: 13.13, y: CABIN_FLOOR + 0.45, z: 0.58,
           heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", cockpit: true,
           reservedForNpc: false, occupant: null,
+          cushionH: 0.45, floorBelow: 0.45,
         });
       }
       for (let rx = -11.2; rx <= 8.8; rx += 2.0) {
@@ -1487,6 +1499,11 @@
             id: "jetseat-" + (jsIdx++), x: sx, y: 1.32 + 0.42, z: sz,
             heading: fx > 0 ? -Math.PI / 2 : Math.PI / 2, kind: "aircraft-seat",
             reservedForNpc: occ, occupant: null,
+            // V2 chair-sit geometry: exec recliner — the cushion mesh tops out
+            // just 0.14 above the 1.37 deck, and this anchor floats 0.37 above
+            // it. Declaring the truth lets the pose pick its low-lounger solve
+            // (knees above hips, feet planted forward) instead of a squat.
+            cushionH: 0.14, floorBelow: 0.37,
           });
         }
       }

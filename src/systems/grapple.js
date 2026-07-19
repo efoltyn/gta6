@@ -75,7 +75,8 @@
       bounce: 0,              // remembers a landing impact for the next bounce
       rag: null,              // lazily-built per-limb ragdoll (angle + ang.vel)
       heldBy: null,
-      flash: 0, flashSaved: -1, flashEi: 1,   // head-impact emissive pop
+      flash: 0, flashSaved: -1, flashEi: 1,   // head-impact pop (legacy emissive)
+      flashCol: -1,                           // resting diffuse hex (V2 blood-dark tint)
     });
   }
   function busy(a) {
@@ -257,16 +258,40 @@
   // since no animChar competes for the rig on a frame we own the actor.
   function applyRag(a, p, dt) { integRag(a, p, dt); writeRag(a, p); }
 
-  // ---- HIT FLASH: pop the head material emissive on every body hit so a
-  //      punch / shot / car / blast reads as a real impact (the same juice the
-  //      prison gets from reactions.js, here for survival bots + city peds/cops).
+  // ---- HIT FLASH: mark the head material on every body hit so a punch /
+  //      shot / car / blast reads as a real impact (the same juice the prison
+  //      gets from reactions.js, here for survival bots + city peds/cops).
+  //      GORE_HIT_FEEDBACK_V2 (owner: hit people "turn super white, which is
+  //      dumb"): the read is a brief BLOOD-DARK tint of the diffuse color —
+  //      per-channel min against rest so no channel can ever rise, emissive
+  //      untouched. Flag false = the legacy emissive white/orange pop.
   //      Per-rig material (character.js builds its own), so it never bleeds. ----
   const FLASH_DUR = 0.22, FLASH_EI = 1.7, FLASH_HEX = 0xff6644;
+  const TINT_HEX = 0x4a1210, TINT_K = 0.72;      // same blood-dark target as reactions.js
+  let _tr = 0, _tg = 0, _tb = 0;                 // scratch channels (allocation-free)
+  function bloodTint(rest) {
+    const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
+    _tr = Math.min(rr, (rr + (((TINT_HEX >> 16) & 255) - rr) * TINT_K) | 0);
+    _tg = Math.min(rg, (rg + (((TINT_HEX >> 8) & 255) - rg) * TINT_K) | 0);
+    _tb = Math.min(rb, (rb + ((TINT_HEX & 255) - rb) * TINT_K) | 0);
+  }
+  function goreV2() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 !== false; }
   function flashHead(a) {
     const o = owner(a), p = phys(o);
     p.flash = FLASH_DUR;
     const m = o.char && o.char.head && o.char.head.material;
-    if (m && m.emissive) {
+    if (!m) return;
+    // V2 blends against the rig's BUILD-TIME skinTone, never the material's
+    // current color — reactions.js's hp-drop flash fires on the same shot,
+    // and reading a head the other writer already tinted is the legacy
+    // stuck-bright double-writer bug. Both writers targeting the same
+    // ground-truth tone converge no matter the frame order.
+    const tone = goreV2() && o.char && o.char.skinTone != null ? o.char.skinTone : null;
+    if (tone != null && m.color) {
+      p.flashCol = tone;                    // marks the V2 tint live for the fade
+      bloodTint(tone);
+      m.color.setRGB(_tr / 255, _tg / 255, _tb / 255);
+    } else if (!goreV2() && m.emissive) {
       if (p.flashSaved < 0) { p.flashSaved = m.emissive.getHex(); p.flashEi = m.emissiveIntensity; }
       m.emissive.setHex(FLASH_HEX); m.emissiveIntensity = FLASH_EI;
     }
@@ -274,12 +299,22 @@
   function fadeFlash(a, p) {
     const o = owner(a);
     const m = o.char && o.char.head && o.char.head.material;
-    if (!m || !m.emissive) { p.flash = 0; p.flashSaved = -1; return; }
+    if (!m || !(m.emissive || m.color)) { p.flash = 0; p.flashSaved = -1; p.flashCol = -1; return; }
     const t = p.flash / FLASH_DUR;                 // 1 → 0
     if (t <= 0) {
-      if (p.flashSaved >= 0) { m.emissive.setHex(p.flashSaved); m.emissiveIntensity = p.flashEi; }
-      p.flashSaved = -1;
-    } else {
+      // restore BOTH channels a flash may have written (a mid-flash flag flip
+      // must never strand a tint on a face)
+      if (p.flashSaved >= 0 && m.emissive) { m.emissive.setHex(p.flashSaved); m.emissiveIntensity = p.flashEi; }
+      if (p.flashCol != null && p.flashCol >= 0 && m.color) m.color.setHex(p.flashCol);
+      p.flashSaved = -1; p.flashCol = -1;
+    } else if (p.flashCol != null && p.flashCol >= 0 && m.color) {
+      // V2: ease the blood-dark tint back out of the diffuse color
+      bloodTint(p.flashCol);
+      const rest = p.flashCol;
+      const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
+      m.color.setRGB((rr + (_tr - rr) * t) / 255, (rg + (_tg - rg) * t) / 255, (rb + (_tb - rb) * t) / 255);
+    } else if (!goreV2() && m.emissive) {
+      // legacy only: V2 must never write emissive (the brighten IS the bug)
       const baseEi = p.flashSaved >= 0 ? p.flashEi : 1;
       m.emissiveIntensity = baseEi + (FLASH_EI - baseEi) * t;
       if (p.flashSaved >= 0) {
@@ -443,6 +478,16 @@
     const p = a._phys; if (!p) return false;
     const grp = a.group; if (!grp) return false;
     if (p.flash > 0) { p.flash = Math.max(0, p.flash - dt); fadeFlash(a, p); }
+    // seated-in-parent actor (npclife attach — aircraft cabins): its group
+    // lives in PLANE-LOCAL space and the seat anchor is the position
+    // authority, so the slide/air/down ownership below would drag the rig
+    // through the cabin (or clamp it to WORLD ground height). Take the hit
+    // flash/tint above, drop every physical channel, never own the body.
+    // (CHAR_SEATED_HITTABLE — reactions.js still animates their flinch.)
+    if (a._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false) {
+      p.kx = p.kz = 0; p.vx = p.vy = p.vz = 0; p.air = false; p.down = 0;
+      return false;
+    }
     if (p.heldBy) { poseActor(a, p, dt); return true; } // position set by the holder
 
     if (p.air) {

@@ -219,7 +219,14 @@
     if (actor.char) {
       actor.char.sitting = anchor.pose !== "stand";
       actor.char.handsUp = false;
+      // seat geometry → the V2 chair sit (character.js). Only anchors that
+      // DECLARE cushion/floor data (aircraft seat records) get the real
+      // solve; undeclared anchors (car interiors) keep the legacy pose.
+      actor.char.seatRef = (anchor.cushionH != null || anchor.floorBelow != null)
+        ? { cushion: anchor.cushionH != null ? anchor.cushionH : 0.45, floorBelow: anchor.floorBelow || 0 }
+        : null;
     }
+    actor._seatSlumped = false;   // fresh claim: the one-shot death slump re-arms
     if (attached.indexOf(actor) < 0) attached.push(actor);
     syncAttached(actor, 0);
     return true;
@@ -241,7 +248,7 @@
     actor._npcAttached = null;
     actor._parked = !!rec.oldParked;
     actor.group.visible = rec.oldVisible !== false;
-    if (actor.char) actor.char.sitting = false;
+    if (actor.char) { actor.char.sitting = false; actor.char.seatRef = null; }
     if (!actor.dead) {
       actor.state = opts.state || rec.oldState || "walk";
       actor.pause = Math.max(actor.pause || 0, 0.4);
@@ -361,8 +368,33 @@
     const rec = actor && actor._npcAttached;
     if (!rec || !actor.group) return;
     if (actor.dead || !rec.parent || !rec.parent.parent) {
-      detach(actor, { parent: cityRoot(), state: actor.dead ? "dead" : "walk" });
-      if (!actor.dead) releaseProfile(actor);
+      // DEAD IN THE SEAT (CHAR_SEATED_HITTABLE): a shot passenger's corpse
+      // SLUMPS where it sat instead of detaching to the city root — the old
+      // detach re-homed a standing-frozen rig at the seat's world point and
+      // orphaned it from a taxiing/flying plane. The rig stays parented, the
+      // world-pos mirror keeps tracking for loot/medic/map consumers, and the
+      // one-shot slump reuses the deathPose idiom (peds.js skips the ragdoll
+      // for these — no new physics). A cabin whose PARENT vanished still
+      // detaches (plane despawned), and the flag restores the old behaviour.
+      const keepSeated = actor.dead && rec.parent && rec.parent.parent &&
+        rec.anchor && rec.anchor.pose !== "stand" &&
+        (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false);
+      if (!keepSeated) {
+        detach(actor, { parent: cityRoot(), state: actor.dead ? "dead" : "walk" });
+        if (!actor.dead) releaseProfile(actor);
+        return;
+      }
+      // the corpse-cull sweep (peds.js deadT > 75) already pulled the rig out
+      // of the plane — stop tracking it; a parentless matrixWorld would feed
+      // plane-LOCAL numbers into the world-pos mirror.
+      if (actor.culled || !actor.group.parent) { actor._npcAttached = null; removeAttached(actor); return; }
+      if (actor.group.updateMatrixWorld) actor.group.updateMatrixWorld(true);
+      if (actor.group.getWorldPosition) actor.group.getWorldPosition(actor.pos);
+      actor.speed = 0;
+      if (actor.char && !actor._seatSlumped) {
+        actor._seatSlumped = true;
+        if (CBZ.charSeatSlump) CBZ.charSeatSlump(actor.char, Math.random() * 9 + 1);
+      }
       return;
     }
     if (actor.group.updateMatrixWorld) actor.group.updateMatrixWorld(true);
@@ -421,6 +453,12 @@
       pose: raw.pose || "sit",
       state: raw.state || "sit",
       role: raw.role || (i < 2 && raw.cockpit ? "pilot" : "passenger"),
+      // seat geometry for the V2 chair sit (entities/character.js): cushion
+      // height above the cabin floor + how far the anchor sits above that
+      // floor. Only seats that declare these get the real feet-on-the-floor
+      // solve; anchors without them keep the legacy pose untouched.
+      cushionH: raw.cushionH != null ? raw.cushionH : null,
+      floorBelow: raw.floorBelow != null ? raw.floorBelow : null,
       source: raw,
     };
   }

@@ -1565,7 +1565,10 @@
     if (ped.reportState) cancelReport(ped);    // knocked out mid-call → no report lands
     leaveSit(ped);                             // a felled desk worker leaves the seat (C3)
     ped.ko = 8; ped.alarmed = 6;
-    if (CBZ.body) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
+    // a plane-seated body's group is PARENT-LOCAL — the knockdown lie-flat
+    // writes world coords onto it and teleports the rig (see cityKillPed's
+    // seated gate); a tased passenger just slumps unconscious where they sit.
+    if (CBZ.body && !(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false)) CBZ.body.hit(ped, { fromX, fromZ, force: 7, knockdown: true });
     if (ped.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
     // laying hands on a boss's wife/kin brings the crew (non-lethal harm).
     if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);
@@ -1640,8 +1643,15 @@
     // ragdoll itself pins _phys.down=9999 (same busy-forever contract as below)
     // and zeroes the fling, so exactly one simulation moves the corpse. Far
     // kills — or any kill while ragdoll.js is absent — keep the cheap path.
+    // A seated cabin passenger/crew corpse SLUMPS IN THE SEAT instead: the rig
+    // is parented PLANE-LOCAL (npclife attach), so the world-space verlet
+    // ragdoll / fling below would simulate against a local transform and hurl
+    // the body through the hull — the same reason inCar bodies already skip
+    // it. npclife.syncAttached keeps the corpse in its chair and applies the
+    // one-shot CBZ.charSeatSlump death pose. (CHAR_SEATED_HITTABLE)
+    const seatedCorpse = !!(ped._npcAttached && CBZ.CONFIG && CBZ.CONFIG.CHAR_SEATED_HITTABLE !== false);
     let ragged = false;
-    if (CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar) {
+    if (CBZ.cityRagdoll && ped.char && ped.char.parts && !ped.inCar && !seatedCorpse) {
       let mag;
       const f0 = (imp && imp.force) || 0;
       if (cause === "explosion") mag = 20 + Math.min(14, (f0 || 10) * 0.8);
@@ -1677,7 +1687,7 @@
     // grounded Y. The knockdown fallback below guarantees a downed state even on the
     // off-chance a fling can't resolve (e.g. body already at floor), so we never
     // depend on the airborne path alone.
-    if (CBZ.body && !ragged) {
+    if (CBZ.body && !ragged && !seatedCorpse) {
       if (imp && (imp.fromX != null || imp.dir)) CBZ.body.hit(ped, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 7, fling: imp.fling || 4 });
       else { const a = rng() * 6.28; CBZ.body.hit(ped, { dir: { x: Math.cos(a), z: Math.sin(a) }, force: 3, fling: 5 }); }
       // belt-and-braces: force a hard knockdown too. hit(knockdown) sets _phys.down,

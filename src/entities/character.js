@@ -381,6 +381,62 @@
     // ---- SEATED (office-jobs): full-rig pose that OWNS the body ----
     if (ch.sitting) {
       const sr = 12;
+      // CHAIR-SIT V2 (owner: plane passengers "sit like their feet are on the
+      // seat instead of their feet on the ground"). Root cause is the ANCHOR
+      // convention meeting a pose that can't reach: aircraft seat anchors sit
+      // ON the cushion top while this legacy pose keeps the feet at the rig's
+      // root plane — so the whole folded body squatted on top of the cushion.
+      // The hip pivots are authored at a FIXED height above the root (legs are
+      // children of the model), so no leg angle alone can ever push the feet
+      // below the root plane: feet-on-the-floor REQUIRES sinking the model.
+      // Seats that DECLARE their geometry (ch.seatRef = { cushion, floorBelow },
+      // world units — aircraft seat records carry it; benches/desks/car
+      // interiors don't and keep the legacy fake byte-identical) get the real
+      // solve: sink the model so the butt lands ON the cushion, then close a
+      // hip/knee chain so the soles land ON the floor. Two closed forms: shin
+      // tucked back under the knee for normal chairs (airliner rows, ~90-110°
+      // knee), legs stretched forward with knees above the hips for low
+      // loungers (the private-jet recliners) where a tuck would demand an
+      // anatomically absurd fold.
+      const ref = ch.seatRef && (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SEAT_POSE_V2 !== false) ? ch.seatRef : null;
+      if (ref && ch.model) {
+        const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
+        const THIGH = 0.46 * hs, SHIN = 0.50 * hs;   // hip→knee pivot, knee→sole
+        // hip pivot above the FLOOR: cushion + a whisker less than the thigh's
+        // half-thickness (~0.12·hs) so the thigh presses INTO the cushion a
+        // touch — a sat-in seat, never a hover. Floor for the low clamp: the
+        // hips can't drop below what a near-vertical shin can span.
+        const hipF = Math.max((ref.cushion != null ? ref.cushion : 0.45) + 0.10 * hs, SHIN * 0.55);
+        const sink = hipF - 0.95 * hs - (ref.floorBelow || 0);
+        ch.model.position.y = damp(ch.model.position.y, sink, sr, dt);
+        ch._seatSunk = 1;
+        const drop = Math.max(0.05, hipF - 0.03 * hs);   // hip → sole, soles a hair above the floor
+        let th = 0.95;                                    // thigh forward of vertical (relaxed slope)
+        let fold;                                         // knee flexion (rotation.x ≥ 0 folds back)
+        const c2 = Math.min(1, (drop - THIGH * Math.cos(th)) / SHIN);
+        const tuck = th + Math.acos(Math.max(-1, c2));    // shin drops near-vertical, foot under the knee
+        if (tuck <= 1.75) fold = tuck;
+        else {
+          // low lounger: knees ride above the hips, feet planted forward
+          const a2 = 0.55;                                // shin leans forward of vertical
+          th = Math.acos(Math.max(-0.45, Math.min(1, (drop - SHIN * Math.cos(a2)) / THIGH)));
+          fold = Math.max(0.3, th - a2);
+        }
+        ch.body.position.y = damp(ch.body.position.y, -0.06, sr, dt);  // small settle, torso stays stacked on the pelvis
+        ch.body.rotation.x = damp(ch.body.rotation.x, 0.1, sr, dt);
+        ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
+        ch.body.rotation.y = damp(ch.body.rotation.y, 0, sr, dt);
+        if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -th, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
+        if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -th, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
+        setKnee(J.ll, fold + 0.03, sr); setKnee(J.rl, fold, sr);       // hair of asymmetry so rows don't read cloned
+        // forearms rest on the thighs/armrests (same relaxed carry as legacy)
+        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+        setElbow(J.la, -0.72, sr); setElbow(J.ra, -0.72, sr);
+        if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+        lockCharacterHips(ch);
+        return;   // seated pose owns the whole rig
+      }
       ch.body.position.y = damp(ch.body.position.y, -0.6, sr, dt);     // hips drop into the chair
       ch.body.rotation.x = damp(ch.body.rotation.x, 0.14, sr, dt);     // slight working lean
       ch.body.rotation.z = damp(ch.body.rotation.z, 0, sr, dt);
@@ -396,6 +452,15 @@
       if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
       lockCharacterHips(ch);
       return;   // seated pose owns the whole rig
+    }
+    // seat-sink blend-out: the V2 chair sit above owns model.position.y while
+    // seated and nothing else ever writes that channel — recover it here (a
+    // few frames of damp) the moment the actor stands, so a vacated seat can't
+    // leave a rig walking around sunk into the ground. Armed only by the V2
+    // sit; every other rig skips at one falsy check.
+    if (ch._seatSunk) {
+      if (ch.model) ch.model.position.y = damp(ch.model.position.y, 0, 10, dt);
+      if (!ch.model || Math.abs(ch.model.position.y) < 0.005) { if (ch.model) ch.model.position.y = 0; ch._seatSunk = 0; }
     }
 
     // ---- STANCE POSES (physics.js stance machine sets slidePose/pronePose
@@ -1079,6 +1144,37 @@
     lockCharacterHips(ch);
   }
 
+  // ---- seated death slump (owner: shot plane passengers die IN the seat).
+  //      A corpse in a chair doesn't sprawl on the deck — it folds over its
+  //      own lap and lolls toward one side. Direct writes in the deathPose
+  //      idiom (animChar stops running on the dead, so the last write holds);
+  //      the LEGS and the V2 model sink are deliberately untouched so the
+  //      body keeps its seated fold and stays IN the chair instead of
+  //      snapping to a standing pose to die. Seed gives per-corpse variety
+  //      exactly like deathPose (runtime cosmetic — never a build path). ----
+  function seatSlumpPose(ch, seed) {
+    if (!ch || !ch.parts) return;
+    beginCharacterHipFrame(ch);
+    const s = seed || 0;
+    const j = (k) => Math.sin(s * k);   // cheap per-corpse jitter in [-1,1]
+    const side = j(3.1) >= 0 ? 1 : -1;
+    if (ch.body) {
+      ch.body.rotation.x = 0.5 + Math.abs(j(1.7)) * 0.32;         // collapse over the lap
+      ch.body.rotation.y = side * 0.14;
+      ch.body.rotation.z = side * (0.16 + Math.abs(j(2.3)) * 0.14); // loll into the seat back / aisle
+      ch.body.position.y = -0.1;                                    // dead weight settles
+    }
+    // arms drop off the armrests and hang loose beside the thighs
+    if (ch.parts.la) { ch.parts.la.rotation.set(-0.12 + j(1.3) * 0.1, 0, 0.16); ch.parts.la.position.z = 0; }
+    if (ch.parts.ra) { ch.parts.ra.rotation.set(-0.18 + j(2.9) * 0.1, 0, -0.16); ch.parts.ra.position.z = 0; }
+    const J = ch.low || {};
+    if (J.la) J.la.rotation.set(-0.22 - Math.abs(j(3.7)) * 0.2, 0, 0);
+    if (J.ra) J.ra.rotation.set(-0.16 - Math.abs(j(4.1)) * 0.2, 0, 0);
+    // POSITIVE neck pitch drops the chin (KO's "lolled back" is the negative)
+    if (ch.neck) ch.neck.rotation.set(0.55 + Math.abs(j(4.3)) * 0.25, side * 0.28, side * 0.22); // chin to chest
+    lockCharacterHips(ch);
+  }
+
   /* ---- WEAPON MOUNT POINTS (Fortnite-style stow rig) ---------------------
      Lazy + idempotent: three empty groups parented to rig.body, so mounted
      props ride the bob/sway/lean and follow every animation for free. Works
@@ -1127,6 +1223,7 @@
   CBZ.lockCharacterHips = lockCharacterHips;
   CBZ.gaitPhaseDelta = gaitPhaseDelta;
   CBZ.deathPose = deathPose;
+  CBZ.charSeatSlump = seatSlumpPose;
   CBZ.charMounts = charMounts;
   CBZ.lerpAngle = lerpAngle;
   CBZ.damp = damp;

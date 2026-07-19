@@ -196,11 +196,17 @@
     CBZ.propSeatRelease(actor);            // moving off a previous seat/bed
     seat.occupant = actor;
     actor._propSeat = seat;
+    // V2 chair-sit geometry (entities/character.js): only seats that DECLARE
+    // cushion/floor data (the airliner cabin passes it) get the real
+    // feet-on-the-floor solve; street benches/chairs stay legacy untouched.
+    const seatRef = (seat.cushionH != null || seat.floorBelow != null)
+      ? { cushion: seat.cushionH != null ? seat.cushionH : 0.45, floorBelow: seat.floorBelow || 0 }
+      : null;
     if (actor === CBZ.player) {
       const P = CBZ.player, ch = CBZ.playerChar;
       P.pos.set(seat.x, seat.y, seat.z);
       P.vy = 0; P.grounded = true;
-      if (ch) { ch.sitting = true; ch.group.rotation.y = seat.face; }
+      if (ch) { ch.sitting = true; ch.group.rotation.y = seat.face; ch.seatRef = seatRef; }
       return true;                         // the onUpdate(42) hold does the rest
     }
     // NPC: the exact office-worker sit mechanism — peds.js's state==="sit"
@@ -210,7 +216,7 @@
     actor.speed = 0; actor.path = null;
     if (actor.pos && actor.pos.set) actor.pos.set(seat.x, seat.y, seat.z);
     if (actor.group) { actor.group.position.set(seat.x, seat.y, seat.z); actor.group.rotation.y = seat.face; }
-    if (actor.char) actor.char.sitting = true;
+    if (actor.char) { actor.char.sitting = true; actor.char.seatRef = seatRef; }
     return true;
   };
   CBZ.propStand = function (actor) {
@@ -219,13 +225,13 @@
     CBZ.propSeatRelease(actor);
     if (actor === CBZ.player) {
       const ch = CBZ.playerChar;
-      if (ch) { ch.sitting = false; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
+      if (ch) { ch.sitting = false; ch.seatRef = null; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
       CBZ.player.stun = 0;
       return;
     }
     if (had) actor._deskAnchor = null;     // only clear OUR anchor, never an office desk claim
     if (actor.state === "sit") actor.state = "walk";
-    if (actor.char) { actor.char.sitting = false; if (actor.group) { actor.group.rotation.z = 0; } }
+    if (actor.char) { actor.char.sitting = false; actor.char.seatRef = null; if (actor.group) { actor.group.rotation.z = 0; } }
   };
 
   // ---- SLEEP / WAKE -----------------------------------------------------------
@@ -274,7 +280,7 @@
     CBZ.propSeatRelease(actor);
     if (actor === CBZ.player) {
       const ch = CBZ.playerChar;
-      if (ch) { ch.sitting = false; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
+      if (ch) { ch.sitting = false; ch.seatRef = null; ch.group.rotation.z = 0; ch.group.rotation.x = 0; }
       CBZ.player.stun = 0;
       return;
     }
