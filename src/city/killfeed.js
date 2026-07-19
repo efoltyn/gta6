@@ -121,7 +121,11 @@
   CBZ.cityKillFeed = function (by, name, cause, opts) {
     opts = opts || {};
     if (by) opts.by = by;
-    return log(name, normCause(cause, opts), opts);
+    // a null/absent name means an ANONYMOUS civilian victim (e.g. the occupants
+    // of a downed ambient aircraft — airtraffic.js) — give them a generated
+    // citizen name exactly like the instanced crowd gets, so the feed reads
+    // "You killed Dave Smith (plane crash)", never a nameless "Someone".
+    return log(name || crowdName(), normCause(cause, opts), opts);
   };
 
   // ---------- WRAP: named-ped kills (peds.js cityKillPed(ped, imp, cause)) ----------

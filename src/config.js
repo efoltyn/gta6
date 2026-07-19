@@ -732,6 +732,14 @@
   // stacked altitude bands, banking into their turns. Pure atmosphere — no
   // colliders, no weapons, no wanted interaction. Flip false to clear the sky.
   if (CBZ.CONFIG.AIR_TRAFFIC_AMBIENT == null) CBZ.CONFIG.AIR_TRAFFIC_AMBIENT = true;
+  // HEAVY-WEAPON AIR DAMAGE (city/police.js + city/airtraffic.js): the lock-on
+  // work made Air-1 and the ambient GA fleet ACQUIRABLE, so a homing missile
+  // would proximity-detonate on them — but neither had a damage model, so the
+  // hit did nothing. These gate the new splash seams + shoot-down arcs
+  // (health, damage-tier smoke, spin-in, crash fireball + scorch, kill-bus
+  // occupant deaths). Flip false to restore the invulnerable set-dressing birds.
+  if (CBZ.CONFIG.POLICE_AIR_DAMAGE == null) CBZ.CONFIG.POLICE_AIR_DAMAGE = true;
+  if (CBZ.CONFIG.AIRTRAFFIC_DAMAGE == null) CBZ.CONFIG.AIRTRAFFIC_DAMAGE = true;
   // REAL COCKPIT DOOR (city/island_airport.js): the airliner cockpit becomes
   // a room you physically enter — the bulkhead gets a genuine doorway with a
   // sliding pocket-door leaf that eases open as you approach (elevator

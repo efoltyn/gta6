@@ -639,6 +639,10 @@
   // here). The chopper is a cheap mesh w/ a sweeping spotlight. ROADBLOCK
   // cruisers are the force's OWN pooled units — see the ROADBLOCK section.
   let chopper = null, pitCD = 0;
+  // seconds before a DESTROYED airframe is replaced on the precinct pad — a
+  // shot-down Air-1 must not pop back into existence the same frame (the
+  // dispatch-hold beat then stacks on top for the actual relaunch).
+  let chopperRebuildT = 0;
 
   function makeCop(x, z, swat, ambient) {
     // SWAT silhouette (city-swat-redesign): dark-OLIVE carrier over graphite
@@ -749,6 +753,7 @@
     swatVanReset();      // drop the SWAT-van handle (the van itself is a cityCars record — clearCars owns it)
     if (typeof despawnChopper === "function") despawnChopper();
     pitCD = 0;
+    chopperRebuildT = 0;   // full teardown (city rebuild) — never delay the fresh city's bird
     dutyCop = null; dutyScanT = 0; dispatchHoldT = 0; responseDeployT = 0; lastStars = 0; lastWant = 0; barkCD = 0;
     convictHailed = false;   // re-arm the escaped-convict APB for the next run
   };
@@ -938,6 +943,12 @@
       phase: "idle", cruiseY: cruiseY, homeX, homeY, homeZ, launchT: 0, pilot: null,
       exitX: homeX, exitZ: homeZ,
       dispatchT: 0, launchCeilY: null,   // POLICE_HELI_SLOW_RESPONSE: dispatch-hold timer + pushed-out launch ceiling
+      // POLICE_AIR_DAMAGE model: a LIGHT police bird, not the armoured 140hp
+      // military gunship — hp sits under the detonation fan-out's 90-point
+      // splash so one clean rocket/homing hit downs it; only glancing blasts
+      // leave it wounded (streaming the damage-tier smoke). `downed` flips the
+      // record into the ballistic fall arc and out of every dispatch phase.
+      hp: 85, maxHp: 85, downed: false, vy: 0, yawRate: 0, spinT: 0, smokeCD: 0, hurtSmokeCD: 0,
     };
   }
 
@@ -1071,6 +1082,101 @@
     }
     cb(c, c._lockSeek, c.pos.x, c.pos.y, c.pos.z, 3.4, "police-air");
   };
+  // ---- SHOOT-DOWN (POLICE_AIR_DAMAGE): Air-1 is killable like the military
+  //      gunship (aircraft.js damageHeli → downHeli → fallHeli — the same arc,
+  //      re-owned here because the chopper record is private to this module).
+  //      WHY: the lock-on seam above made Air-1 ACQUIRABLE, so a homing
+  //      missile would proximity-detonate on an invulnerable prop — a power
+  //      fantasy that fizzled on contact. Splash from the fpsmode detonation
+  //      fan-out is the damage source (same call shape as cityAircraftSplash);
+  //      death FX are runtime-only, so Math.random is sanctioned (never the
+  //      shared rng() stream — no build-path draws may move).
+  CBZ.cityPoliceAirSplash = function (x, y, z, radius, dmg) {
+    if (CBZ.CONFIG && CBZ.CONFIG.POLICE_AIR_DAMAGE === false) return false;
+    const c = chopper;
+    if (!c || c.downed || !c.pos || !c.group || !c.group.parent) return false;
+    // blast reaches the hull surface, not just the origin point (island_airport
+    // grammar; 3.4 is the same hull radius the lock seam quotes) — and damage
+    // FALLS OFF with distance so a direct hit kills while a near miss only
+    // wounds into the tier-smoke state. (aircraft.js applies its 90 flat; the
+    // falloff here is what makes Air-1's wounded tier actually reachable.)
+    const d = Math.hypot(c.pos.x - x, c.pos.y - y, c.pos.z - z);
+    const hullD = Math.max(0, d - 3.4);
+    if (hullD > radius) return false;
+    damageChopper(dmg * Math.max(0.3, 1 - hullD / radius));
+    return true;
+  };
+  function damageChopper(dmg) {
+    if (!chopper || chopper.downed || !(dmg > 0)) return;
+    chopper.hp -= dmg;
+    if (CBZ.bulletImpact) { try { CBZ.bulletImpact({ x: chopper.pos.x, y: chopper.pos.y, z: chopper.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.2 }); } catch (e) {} }
+    if (chopper.hp <= 0) downChopper();
+  }
+  function downChopper() {
+    if (!chopper || chopper.downed) return;                 // idempotent — one death per airframe
+    chopper.downed = true;
+    // a phase no gate recognises: the paint/engage/door-gun logic is all
+    // orbit-only, so the beam dies and the potshots stop the same frame.
+    chopper.phase = "down";
+    chopper.vy = 2.5;                                       // the gunship's sick upward lurch, then it drops
+    chopper.yawRate = (Math.random() < 0.5 ? -1 : 1) * (3.5 + Math.random() * 3);   // tail-rotor-loss death spin
+    if (chopper.cone) chopper.cone.visible = false;
+    if (chopper.pool) chopper.pool.visible = false;
+    if (CBZ.sfx) CBZ.sfx("explosion");
+    if (CBZ.shake) CBZ.shake(0.4);
+    // (no banner — the falling fireball IS the message; same rule as aircraft.js)
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(40);
+    if (CBZ.cityFlavor) CBZ.cityFlavor("You shot down Air-1!", "#ff8b6b");
+  }
+  // The officer flying Air-1 dies where the airframe does. Surface the hidden
+  // foot rig at the wreck and route the death through cityHurtCop, so EVERY
+  // existing cop-kill consequence fires exactly as if you'd shot him on the
+  // street — the _copkill heat spike (cityCopKilled → wanted.js), the
+  // arrest-posture flip, kill/respect/bounty ledgers, weapon + armor drops,
+  // gore/ragdoll — no parallel scoring path. The feed line is ours to log:
+  // cityHurtCop predates the kill bus and never logs deaths itself.
+  function crashKillPilot(ix, surfY, iz) {
+    const p = chopper && chopper.pilot;
+    if (chopper) chopper.pilot = null;   // detach FIRST — despawn's releaseChopperPilot must never resurrect him
+    if (!p || p.dead) return;
+    p._airPilot = false;                 // corpse takes the normal dead-cop path (deadT tick + cull)
+    p.pos.set(ix + 1.6, surfY, iz + 1.1);          // thrown clear of the fireball
+    p.group.visible = true;
+    if (CBZ.cityHurtCop) CBZ.cityHurtCop(p, 99999, { byPlayer: true, fromX: ix, fromZ: iz, force: 13 });
+    else { p.dead = true; p.deadT = 0; }
+    if (CBZ.cityKillFeed) CBZ.cityKillFeed("You", p.name || "Officer", "helicopter crash");   // normalises to the feed's "plane crash" line
+  }
+  // ballistic wreck ride-down (aircraft.js fallHeli shape): gravity + flat
+  // spin + smoke trail, then a CONTAINED crash fireball ON whatever it lands
+  // on — rooftop or street — never a block-leveling airstrike blast.
+  function fallChopper(dt) {
+    const c = chopper;
+    c.vy -= 17 * dt;                                        // gravity takes over
+    c.pos.y += c.vy * dt;
+    c.group.rotation.y += c.yawRate * dt;                   // flat spin
+    c.group.rotation.z += dt * 1.7;                         // roll belly-up as it dies
+    c.group.rotation.x = Math.sin((c.spinT += dt * 4) * 0.6) * 0.45;   // pitch lurch
+    if (c.rotor) c.rotor.rotation.y += dt * 16;             // rotor windmilling down
+    c.smokeCD -= dt;
+    if (c.smokeCD <= 0) {
+      c.smokeCD = 0.045;
+      if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(c.pos.x, c.pos.y, c.pos.z); } catch (e) {} }
+    }
+    const ground = groundYForChopper(c.pos.x, c.pos.z);
+    const surf = Math.max(ground, roofYForChopper(c.pos.x, c.pos.z, 1));   // detonate ON the roof it lands on, not the street below it
+    if (c.pos.y > surf + 1.3) return;
+    const ix = c.pos.x, iz = c.pos.z, iy = surf + 1.0;
+    const onRoof = surf > ground + 0.5;
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(ix, iz, { power: onRoof ? 1.9 : 1.5, radius: onRoof ? 9 : 7, byPlayer: false, y: iy }); } catch (e) {} }
+    if (onRoof && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(ix, iy, iz, 2.2); } catch (e) {} }
+    if (CBZ.cityShatter) { try { CBZ.cityShatter(ix, iz, onRoof ? 12 : 8); } catch (e) {} }
+    if (!onRoof && CBZ.cityScorch) { try { CBZ.cityScorch(ix, iz, 4.5); } catch (e) {} }   // burnt ground under the wreck
+    if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(ix, iy, iz); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(0.6);
+    crashKillPilot(ix, surf, iz);
+    chopperRebuildT = 45 + Math.random() * 30;   // the force takes a while to field a replacement airframe
+    despawnChopper();                            // pilot already detached/dead → release no-ops
+  }
   function despawnChopper() {
     if (!chopper) return;
     releaseChopperPilot();
@@ -1094,7 +1200,20 @@
     // Air-1 exists at its precinct pad before a chase begins.  Dispatch changes
     // its state; it never pops into existence relative to the player.
     if (!chopper && g.state !== "playing") return;
+    if (!chopper && chopperRebuildT > 0) { chopperRebuildT -= dt; return; }   // destroyed airframe: the pad stays empty for a beat
     if (!chopper) { chopper = makeChopper(); if (!chopper) return; }
+    // a dying bird ignores ALL dispatch/orbit AI — it's a ballistic wreck now
+    // (this also runs playerless, so the fall always finishes).
+    if (chopper.downed) { fallChopper(dt); return; }
+    // damage-tier smoke: a wounded airframe streams engine smoke long before
+    // it dies, so a glancing blast visibly COUNTS (the parked-plane burn read).
+    if (chopper.hp < chopper.maxHp * 0.45 && chopper.phase !== "idle" && chopper.phase !== "dispatch") {
+      chopper.hurtSmokeCD -= dt;
+      if (chopper.hurtSmokeCD <= 0) {
+        chopper.hurtSmokeCD = 0.35 + Math.random() * 0.3;
+        if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(chopper.pos.x + (Math.random() - 0.5) * 0.8, chopper.pos.y + 0.55, chopper.pos.z - 0.3 + (Math.random() - 0.5) * 0.8); } catch (e) {} }
+      }
+    }
     const P = CBZ.player;
     if (!P || !P.pos) return;
     if (chopper.phase === "idle") {

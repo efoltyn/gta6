@@ -2099,6 +2099,15 @@
           // Civil aircraft are the real boardable plane records, not disposable
           // target dummies. A direct RPG wrecks one; a near miss falls off.
           if (CBZ.cityCivilAircraftSplash) CBZ.cityCivilAircraftSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 520, { byPlayer: true });
+          // Air-1 + the ambient GA fleet joined the lockable pool (lockon.js)
+          // before they had damage models, so a homing hit detonated ON them
+          // for nothing. Same fan-out, their own seams — police.js /
+          // airtraffic.js own the shoot-down arcs, and both seams no-op
+          // behind POLICE_AIR_DAMAGE / AIRTRAFFIC_DAMAGE. One rocket downs
+          // these light airframes at contact; both seams fall damage off with
+          // distance so a near miss wounds into tier smoke instead.
+          if (CBZ.cityPoliceAirSplash) CBZ.cityPoliceAirSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 90);
+          if (CBZ.cityAirTrafficSplash) CBZ.cityAirTrafficSplash(pt.x, pt.y, pt.z, (w.blastRadius || 7) + 4, 140);
         }
         // kick scales with how close the blast is to the lens — a rocket at your
         // feet rattles, one parked 100u up a tower rumbles (crashfx attenuates

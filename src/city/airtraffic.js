@@ -12,7 +12,9 @@
    angle (tan(bank) = v^2 / (R*g)).
 
    Pure atmosphere: no colliders, no weapons, no wanted interaction, no
-   boarding. Everything about WHERE they fly and WHAT they look like is
+   boarding — though a heavy-weapon blast CAN down one (the shoot-down arc
+   at the bottom of the file; gated by CBZ.CONFIG.AIRTRAFFIC_DAMAGE).
+   Everything about WHERE they fly and WHAT they look like is
    position-hash deterministic (CBZ.hash01 — never Math.random), so every
    client sees the same fleet in the same sky. The only per-frame state is
    one accumulated clock. Gated by CBZ.CONFIG.AIR_TRAFFIC_AMBIENT (one-line
@@ -307,9 +309,8 @@
   // craft like any street car. Identity is the fleet record; the cached seek
   // getter goes null once the craft is ring-culled or the fleet tears down,
   // which breaks a live lock the same frame. cb(...) === false stops the walk
-  // (candidate pool full). NOTE these craft still carry no HP model — a
-  // homing hit proximity-detonates ON them; an actual shoot-down arc is a
-  // follow-up for this module.
+  // (candidate pool full). A homing hit now lands on a REAL damage model —
+  // the AIRTRAFFIC_DAMAGE shoot-down arc below (cityAirTrafficSplash).
   function trafficLockSeek(t) {
     if (!t._lockSeek) {
       t._lockSeek = function () {
@@ -330,6 +331,156 @@
     }
   };
 
+  // ============================================================
+  //  SHOOT-DOWN (AIRTRAFFIC_DAMAGE): the lock seam above made these craft
+  //  ACQUIRABLE, so a homing missile could ride all the way in and
+  //  proximity-detonate — on a prop with no HP, for nothing. This closes
+  //  that gap. Splash from the fpsmode detonation fan-out is the ONLY
+  //  damage source (same call shape as cityAircraftSplash); ambient flight
+  //  is untouched until a craft is actually wounded or downed. The fleet
+  //  has no replenish cycle, so a destroyed craft simply leaves the sky one
+  //  lighter until the next city rebuild re-seeds the full deterministic
+  //  set. Death FX are runtime-only → Math.random is sanctioned here (the
+  //  build path stays pure CBZ.hash01).
+  // ============================================================
+  const CRAFT_HP = { plane: 60, heli: 50 };    // light civilian airframes: one rocket kills
+  function trafficHP(t) { return CRAFT_HP[t.kind] || 55; }
+
+  CBZ.cityAirTrafficSplash = function (x, y, z, radius, dmg) {
+    if (!fleet || (CBZ.CONFIG && CBZ.CONFIG.AIRTRAFFIC_DAMAGE === false)) return 0;
+    let hit = 0;
+    for (let i = 0; i < fleet.length; i++) {
+      const t = fleet[i];
+      // a ring-culled craft holds a STALE mesh position (the orbit math skips
+      // it), so a blast can't meaningfully reach one — same visibility gate
+      // the lock seam uses.
+      if (!t || t.downed || !t.grp || !t.grp.parent || t.grp.visible === false) continue;
+      const p = t.grp.position;
+      // blast reaches the hull surface (island_airport grammar; hull radii
+      // match the lock seam), and damage FALLS OFF with distance: a direct
+      // hit wrecks the airframe, a near miss WOUNDS it into tier smoke.
+      const hullD = Math.max(0, Math.hypot(p.x - x, p.y - y, p.z - z) - (t.kind === "heli" ? 2.6 : 3.2));
+      if (hullD > radius) continue;
+      damageTraffic(t, dmg * Math.max(0.3, 1 - hullD / radius));
+      hit++;
+    }
+    return hit;
+  };
+
+  function damageTraffic(t, dmg) {
+    if (!t || t.downed || !(dmg > 0)) return;
+    if (t.hp == null) t.hp = trafficHP(t);     // lazy — untouched craft carry no combat state
+    t.hp -= dmg;
+    if (CBZ.bulletImpact) { try { CBZ.bulletImpact({ x: t.grp.position.x, y: t.grp.position.y, z: t.grp.position.z }, { x: 0, y: 1, z: 0 }, { kind: "spark", power: 1.1 }); } catch (e) {} }
+    if (t.hp <= 0) downTraffic(t);
+  }
+
+  function downTraffic(t) {
+    if (!t || t.downed) return;                // idempotent — one death per airframe
+    t.downed = true;
+    // freeze the orbit tangent as the crash heading: the wreck flies ON where
+    // it was pointed, it doesn't keep steering the circuit.
+    const ang = t.phase + t.dir * (t.speed / t.radius) * clock;
+    t.crashDir = { x: -Math.sin(ang) * t.dir, z: Math.cos(ang) * t.dir };
+    t.crashHeading = Math.atan2(t.crashDir.x, t.crashDir.z);
+    // a plane carries its speed into the dive (fallJet grammar); a heli mostly
+    // drops where it was hit (fallHeli grammar). Both get the lurch-up beat.
+    t.crashSpd = t.kind === "plane" ? t.speed + 6 : t.speed * 0.4;
+    t.vy = t.kind === "plane" ? 1.2 : 2.2;
+    t.rollRate = t.kind === "plane" ? (Math.random() < 0.5 ? -1 : 1) * (2.0 + Math.random() * 2) : 0;   // wing-loss death roll
+    t.yawRate = t.kind === "heli" ? (Math.random() < 0.5 ? -1 : 1) * (3.5 + Math.random() * 3) : 0;     // tail-rotor-loss flat spin
+    t.spinT = 0; t.smokeCD = 0;
+    if (CBZ.sfx) CBZ.sfx("explosion");
+    if (CBZ.shake) CBZ.shake(0.3);
+    if (CBZ.cityFlavor) CBZ.cityFlavor(t.kind === "heli" ? "You shot down a civilian helicopter!" : "You shot down a civilian plane!", "#ff8b6b");
+    // occupants die with the airframe — route through the KILL BUS so the
+    // corner feed attributes it ("You killed <citizen> · plane crash"; the
+    // bus generates the citizen name for a null victim). GA planes sometimes
+    // carry a passenger, so a second line can follow the pilot's.
+    if (CBZ.cityKillFeed) {
+      const n = t.kind === "plane" && Math.random() < 0.4 ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        try { CBZ.cityKillFeed("You", null, t.kind === "heli" ? "helicopter crash" : "plane crash"); } catch (e) {}
+      }
+    }
+  }
+
+  // local collider-top scan (aircraft.js roofTopAt, per the builders-stay-
+  // self-contained convention): a falling craft detonates ON the roof it
+  // lands on, never the street six storeys below it.
+  function trafficRoofTop(x, z) {
+    let topY = 0;
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.y1 == null || c.y1 <= topY || c.y1 > 310) continue;
+      if (x < c.minX - 1 || x > c.maxX + 1 || z < c.minZ - 1 || z > c.maxZ + 1) continue;
+      topY = c.y1;
+    }
+    return topY;
+  }
+
+  // ballistic wreck ride-down — one function, both silhouettes (the plane
+  // flies fallJet's carried-momentum roll, the heli fallHeli's flat spin).
+  // Returns true once the wreck has impacted (caller removes the craft).
+  function fallTraffic(t, dt) {
+    t.vy -= 17 * dt;                                        // gravity owns it now
+    const p = t.grp.position;
+    if (t.kind === "plane") {
+      t.crashSpd = Math.max(14, t.crashSpd - 22 * dt);      // momentum bleeds off
+      p.x += t.crashDir.x * t.crashSpd * dt;
+      p.z += t.crashDir.z * t.crashSpd * dt;
+      t.grp.rotation.y = t.crashHeading;
+      t.grp.rotation.x += dt * 0.5;                         // nose falls through the horizon
+      t.grp.rotation.z += t.rollRate * dt;                  // death roll
+    } else {
+      p.x += t.crashDir.x * t.crashSpd * dt;
+      p.z += t.crashDir.z * t.crashSpd * dt;
+      t.grp.rotation.y += t.yawRate * dt;                   // flat spin
+      t.grp.rotation.z += dt * 1.7;                         // roll belly-up as it dies
+      t.grp.rotation.x = Math.sin((t.spinT += dt * 4) * 0.6) * 0.45;   // pitch lurch
+    }
+    p.y += t.vy * dt;
+    const ud = t.grp.userData;                              // engine dead — everything windmills
+    if (ud.prop) ud.prop.rotation.z += dt * 9;
+    if (ud.rotorGroup) ud.rotorGroup.rotation.y += dt * 13;
+    if (ud.tailRotorGroup) ud.tailRotorGroup.rotation.x += dt * 10;
+    t.smokeCD -= dt;
+    if (t.smokeCD <= 0) {
+      t.smokeCD = 0.05;                                     // black smoke trail down the arc
+      if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(p.x, p.y, p.z); } catch (e) {} }
+    }
+    const groundRaw = CBZ.floorAt ? +CBZ.floorAt(p.x, p.z) : 0;
+    const ground = isFinite(groundRaw) ? groundRaw : 0;
+    const surf = Math.max(ground, trafficRoofTop(p.x, p.z));
+    if (p.y > surf + 1.2) return false;
+    // CONTAINED crash fireball (aircraft.js wreckImpact grammar at light-
+    // airframe scale) + a scorch where it couples to true ground — never the
+    // block-leveling airstrike blast.
+    const onRoof = surf > ground + 0.5;
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(p.x, p.z, { power: onRoof ? 1.5 : 1.2, radius: onRoof ? 7 : 6, byPlayer: false, y: surf + 1.0 }); } catch (e) {} }
+    if (onRoof && CBZ.cityDamageBuilding) { try { CBZ.cityDamageBuilding(p.x, surf + 1.0, p.z, 1.6); } catch (e) {} }
+    if (CBZ.cityShatter) { try { CBZ.cityShatter(p.x, p.z, onRoof ? 9 : 7); } catch (e) {} }
+    if (!onRoof && CBZ.cityScorch) { try { CBZ.cityScorch(p.x, p.z, 4); } catch (e) {} }
+    if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(p.x, surf + 1.0, p.z); } catch (e) {} }
+    if (CBZ.shake) CBZ.shake(0.5);
+    return true;
+  }
+
+  // single-craft teardown (same dispose rules as teardown()); the parent
+  // removal also nulls the cached lock seek, breaking any live lock.
+  function removeTraffic(t) {
+    const gi = fleet ? fleet.indexOf(t) : -1;
+    if (gi >= 0) fleet.splice(gi, 1);
+    if (!t.grp) return;
+    if (t.grp.parent) t.grp.parent.remove(t.grp);
+    t.grp.traverse(function (o) {
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) { try { o.geometry.dispose(); } catch (e) {} }
+      const m = o.material;
+      if (m && !m._shared && m.dispose) { try { m.dispose(); } catch (e) {} }
+    });
+  }
+
   CBZ.onUpdate(42.7, function (dt) {
     if (g.mode !== "city" || (CBZ.CONFIG && CBZ.CONFIG.AIR_TRAFFIC_AMBIENT === false)) {
       if (fleet) teardown();
@@ -344,6 +495,13 @@
     const P = CBZ.player;
     for (let i = 0; i < fleet.length; i++) {
       const t = fleet[i];
+      // a downed craft is a ballistic wreck: no orbit math, and NO ring cull —
+      // the fall must finish (and detonate) even if the player drives away.
+      if (t.downed) {
+        t.grp.visible = true;
+        if (fallTraffic(t, dt)) { removeTraffic(t); i--; }
+        continue;
+      }
       const ang = t.phase + t.dir * (t.speed / t.radius) * clock;
       const x = t.cx + Math.cos(ang) * t.radius;
       const z = t.cz + Math.sin(ang) * t.radius;
@@ -365,6 +523,15 @@
       if (ud.prop) ud.prop.rotation.z += dt * 42;
       if (ud.rotorGroup) ud.rotorGroup.rotation.y += dt * 30;
       if (ud.tailRotorGroup) ud.tailRotorGroup.rotation.x += dt * 48;
+      // damage-tier smoke: a wounded engine streams smoke while the craft
+      // still flies its circuit — a glancing blast visibly COUNTS.
+      if (t.hp != null && t.hp <= trafficHP(t) * 0.5) {
+        t.hurtSmokeCD = (t.hurtSmokeCD || 0) - dt;
+        if (t.hurtSmokeCD <= 0) {
+          t.hurtSmokeCD = 0.4 + Math.random() * 0.35;
+          if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(x + (Math.random() - 0.5), t.alt - 0.2, z + (Math.random() - 0.5)); } catch (e) {} }
+        }
+      }
     }
   });
 })();
