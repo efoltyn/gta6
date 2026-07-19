@@ -607,6 +607,7 @@
   function showPrompt(txt) {
     const el = promptEl();
     if (!el) return;
+    if (CBZ.touchPromptHTML) txt = CBZ.touchPromptHTML(txt);   // touch: [E] → tappable verb pill
     if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
     if (el.style.display !== "block") el.style.display = "block";
   }

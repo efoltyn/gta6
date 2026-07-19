@@ -1075,6 +1075,20 @@
     CBZ.aircraftDoorArc.exitCraft(craft, exitAircraft);
   }
   CBZ.cityPlayerAircraftExit = exitAircraftWithDoors;
+  // TOUCH hooks (touch.js verb pills + touch_vehicle.js buttons): the [F] and
+  // left-click handlers below are pointer-lock-gated, which a tablet never
+  // satisfies — these call the same private functions those handlers end in.
+  // Boarding routes through the same door arc the keyboard path uses.
+  CBZ.cityAircraftFireMissile = function () { const c = _aircraftFlying(); if (c) fireMissile(c); };
+  CBZ.cityAircraftBoardNearest = function () {
+    const P = CBZ.player;
+    if (!P || P._aircraft || P.driving || g.mode !== "city" || g.state !== "playing") return false;
+    const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
+    if (!c) return false;
+    const doors = CBZ.aircraftDoorArc;
+    if (!(doors && !doors.active && doors.boardCraft(c, enterAircraft))) enterAircraft(c);
+    return true;
+  };
 
   // nearest owned, on-ground aircraft to the player (on foot)
   function nearestBoardable(x, z, maxd) {
@@ -2334,7 +2348,8 @@
     if (campaignActive() || !P || P.dead || P._aircraft || P.driving || g.state !== "playing") { hidePrompt(); return; }
     const x = P.pos.x, z = P.pos.z;
     const c = nearestBoardable(x, z, 6.5);
-    if (c) { showPrompt("✈"); return; }
+    // touch: the glyph becomes a BOARD pill (desktop keeps the bare "✈")
+    if (c) { showPrompt(CBZ.touchActionPrompt ? CBZ.touchActionPrompt("@cityAircraftBoardNearest", "BOARD ✈", "✈") : "✈"); return; }
     // A correct, in-place note ONLY when you're standing AT a hangar you OWN
     // (penthouse deck OR the airport Private Hangar) but haven't bagged the jet
     // yet — it tells you the next step. No persistent nag for the unowned case:

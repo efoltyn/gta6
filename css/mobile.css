@@ -1,8 +1,24 @@
 /* ============================================================
-   mobile.css — on-screen touch controls + responsive HUD (TOUCH_V2).
-   Touch controls live in #touch and only matter on `body.touch`; the
-   pop-up sizing block is gated to coarse-pointer devices, so desktop is
-   completely unaffected. On-screen controls are ICONS ONLY — no words.
+   mobile.css — on-screen touch controls + responsive HUD (TOUCH_V2 +
+   TOUCH_VERB_PROMPTS + TOUCH_VEHICLE + TOUCH_HUD_TIDY).
+
+   Touch controls live in #touch/#tveh and only matter on `body.touch`;
+   the pop-up sizing block is gated to coarse-pointer devices, so
+   desktop is completely unaffected.
+
+   Doctrine: the MOVEMENT/COMBAT cluster is icons; INTERACTION surfaces
+   carry WORDS ("HIJACK THE AIRLINER"), never keyboard letters — every
+   [E]/[G]/[I] glyph is hidden on touch and replaced by tappable verb
+   pills (.tpill, and the #interact card's .tverb rows).
+
+   SCREEN ZONES (landscape iPad, the anti-overlap contract):
+     top-left      #cpPanel chip, #cRadar minimap under it
+     top-center    objective / job lines
+     top-right     #cTopRight money+wanted column (jail: #minimap)
+     mid-bottom    walk-up prompt band (bottom:158) → #interact card (224)
+     bottom-center #cWpn hotbar + MC vitals
+     bottom-left   dynamic joystick (transient)
+     bottom-right  #tbtns on foot ⇄ #tveh dial+buttons in a vehicle
 ============================================================ */
 html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 /* kill double-tap zoom / scroll-bounce over the 3D canvas itself (iPad Pro) */
@@ -54,27 +70,157 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65); }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
 
-/* HUD tweaks while on touch: declutter + reachable interaction panel */
+/* ============================================================
+   VERB PILLS (TOUCH_VERB_PROMPTS) — the owner's "button that SAYS
+   HIJACK". touch.js/CBZ.touchActionPrompt renders these in place of
+   "[G] …" key strings; a tap fires the same logical keypress.
+============================================================ */
+body.touch .tpill {
+  pointer-events: auto; display: inline-flex; align-items: center; justify-content: center;
+  min-height: 46px; min-width: 64px; padding: 10px 20px; margin: 2px 4px;
+  border-radius: 26px; border: 2px solid rgba(125,231,255,.55);
+  background: rgba(13,26,40,.85); color: #eaf6ff;
+  font: 700 15px/1.25 Fredoka, system-ui, sans-serif; letter-spacing: .4px;
+  box-shadow: 0 4px 0 rgba(0,0,0,.35); cursor: pointer;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+body.touch .tpill:active {
+  transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.35);
+  background: rgba(35,90,130,.92);
+}
+body.touch .tpill-sm { min-height: 38px; min-width: 48px; padding: 7px 14px; font-size: 13px; opacity: .92; }
+
+/* keyboard-letter chips never render on a touch screen — anywhere */
+body.touch .ikey { display: none !important; }
+
+/* ---- the walk-up prompt band: one consistent slot above the hotbar ------- */
+/* The module prompt divs (each owns its own fixed div) all collapse to a
+   transparent anchor whose PILL is the button. Their inline bottom values
+   (118/140/150/186) are unified so prompts never sit inside the hotbar or
+   under the #interact card. Container stops capturing: only pills tap. */
+body.touch #cityStoragePrompt, body.touch #cityAircraftPrompt, body.touch #bankPrompt,
+body.touch #pawnPrompt, body.touch #jewelryPrompt, body.touch #clothingPrompt,
+body.touch #gunstorePrompt, body.touch #shopliftPrompt {
+  bottom: calc(158px + env(safe-area-inset-bottom, 0px)) !important;
+  background: transparent !important; border: none !important; padding: 0 !important;
+  pointer-events: none !important; max-width: 78vw;
+}
+/* city.css's LIVE-WORLD DECLUTTER hides these five for keyboard players (they
+   act with keys + street prose). Touch players have no keys: restore each one
+   WHILE ITS MODULE SHOWS IT (the [style*=…] trick mirrors the inline
+   display:block the modules write — same pattern city.css itself uses). */
+body.touch.mode-city.state-playing #cityStoragePrompt[style*="display: block"],
+body.touch.mode-city.state-playing #pawnPrompt[style*="display: block"],
+body.touch.mode-city.state-playing #jewelryPrompt[style*="display: block"],
+body.touch.mode-city.state-playing #clothingPrompt[style*="display: block"],
+body.touch.mode-city.state-playing #gunstorePrompt[style*="display: block"] {
+  display: block !important;
+}
+
+/* ============================================================
+   HUD zones while on touch: declutter + reachable interaction card
+============================================================ */
 body.touch #compass { display: none; }
-body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height: 128px; }
+/* jail minimap: top-right chip, tappable (tap opens the full map) */
+body.touch #minimap { top: 64px; bottom: auto; right: 14px; width: 86px; height: 128px; pointer-events: auto; cursor: pointer; }
+/* city radar: moves out of the left-thumb arc to the TOP-LEFT (under the
+   character chip), shrinks, and becomes the tap-to-open-map surface. */
+body.touch #cRadar {
+  left: calc(10px + env(safe-area-inset-left, 0px)) !important;
+  top: 64px !important; bottom: auto !important;
+  width: 128px !important; height: 128px !important;
+  pointer-events: auto !important; cursor: pointer;
+}
 body.touch #interact {
-  left: 50%; right: auto; bottom: 168px; margin-left: -118px; width: 236px;
-  bottom: calc(168px + env(safe-area-inset-bottom, 0px));
-  /* above the #touch control layer (z-22) so the YES/NO options are always
+  left: 50%; right: auto; margin-left: -135px; width: 270px;
+  bottom: calc(224px + env(safe-area-inset-bottom, 0px));
+  /* above the #touch control layer (z-22) so the verb pills are always
      tappable; still below the big city modals (z-40+). */
   z-index: 30;
   pointer-events: auto; transform: translateY(8px) scale(.96);
 }
 body.touch #interact.show { transform: translateY(0) scale(1); }
-body.touch .iopt { padding: 7px 4px; }     /* fatter tap targets */
-body.touch .ikey { width: 24px; height: 24px; }
+body.touch .iopt { padding: 7px 4px; }     /* fatter tap targets (jail card rows) */
 /* City mode HIDES the #interact card for keyboard players (css/city.css declutter
    policy: display:none !important — they act with the E/I/J keys + street prose).
-   Touch players have no keys: the tappable YES/NO card is their ONLY way to act on
+   Touch players have no keys: the tappable verb card is their ONLY way to act on
    a contextual prompt, so restore it — but ONLY while the interaction system marks
    it active (.show), so it still follows the same show/hide as everywhere else.
    Higher specificity + !important beats the city.css hide; desktop is untouched. */
 body.touch.mode-city.state-playing #interact.show { display: block !important; }
+
+/* ---- the #interact card's touch rows: verb-first buttons ---- */
+body.touch #interact .iopt.tverb {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  min-height: 52px; margin-top: 9px; padding: 8px 12px;
+  border-radius: 13px; border: 2px solid rgba(125,231,255,.65);
+  background: rgba(16,42,60,.9); box-shadow: 0 4px 0 rgba(0,0,0,.35);
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  transition: transform .06s, background .1s;
+}
+body.touch #interact .iopt.tverb:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.35); }
+body.touch #interact .iopt.tverb .ilab { flex: none; font-size: 16.5px; font-weight: 800; letter-spacing: .8px; }
+body.touch #interact .iopt.tverb.tyes { background: linear-gradient(180deg, rgba(38,110,150,.92), rgba(20,60,90,.92)); }
+body.touch #interact .iopt.tverb.tno { min-height: 40px; opacity: .82; border-color: rgba(255,255,255,.3); background: rgba(22,28,36,.72); }
+body.touch #interact .iopt.tverb.tno .ilab { font-size: 13.5px; font-weight: 700; color: #c8d2de; }
+
+/* ============================================================
+   TOUCH_VEHICLE (#tveh, touch_vehicle.js): contextual drive/fly
+   cluster — labeled hold-buttons + a racing-dial speedometer.
+============================================================ */
+#tveh {
+  position: fixed; z-index: 23; display: none; pointer-events: none;
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+#tveh #tvDial { position: absolute; right: 140px; bottom: 4px; width: 128px; height: 128px; pointer-events: none; }
+#tveh #tvBtns { display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 10px; }
+#tveh .tvbtn {
+  pointer-events: auto; display: flex; align-items: center; justify-content: center;
+  min-width: 108px; min-height: 54px; padding: 8px 18px;
+  border-radius: 16px; border: 2px solid rgba(255,255,255,.4);
+  background: rgba(20,30,46,.6); color: #fff;
+  font: 800 17px/1 Fredoka, system-ui, sans-serif; letter-spacing: 1.2px;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  box-shadow: 0 5px 0 rgba(0,0,0,.35); transition: transform .06s, background .1s;
+  touch-action: none; -webkit-tap-highlight-color: transparent;
+}
+#tveh .tvbtn.on, #tveh .tvbtn:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,.35); background: rgba(255,122,26,.62); }
+#tveh .tv-big { min-height: 72px; min-width: 128px; font-size: 20px; }
+#tveh .tv-sm { min-height: 46px; min-width: 92px; font-size: 14px; opacity: .92; }
+#tveh .tv-warn { border-color: rgba(255,160,90,.7); background: rgba(150,60,20,.55); }
+#tveh .tv-go { border-color: rgba(90,220,140,.65); background: rgba(30,110,60,.5); }
+#tveh .tv-fire {
+  width: 64px; min-width: 64px; height: 64px; min-height: 64px; padding: 0;
+  border-radius: 50%; background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65);
+  position: relative;
+}
+#tveh .tv-fire svg { width: 48%; height: 48%; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#tveh .tvAmmo {
+  position: absolute; right: -5px; top: -5px; min-width: 22px; padding: 2px 5px;
+  border-radius: 11px; background: #0d1a28; border: 1px solid rgba(255,255,255,.35);
+  font: 700 11px/1.4 Fredoka, system-ui, sans-serif; text-align: center;
+}
+/* while a vehicle layout is live: the on-foot cluster yields the corner, and
+   the dial replaces the HUD's text speed + the floating flight readout */
+body.tveh-on #tbtns { display: none !important; }
+body.tveh-on #cSpeed { display: none !important; }
+body.tveh-on #cityFlightHud { display: none !important; }
+
+/* ============================================================
+   TOUCH_HUD_TIDY (body.touch-tidy): the character card collapses to a
+   compact tappable chip; tap = expand (class cpOpen, charpanel.js).
+============================================================ */
+body.touch-tidy #cpPanel { pointer-events: auto; width: auto; max-width: 168px; }
+body.touch-tidy #cpPanel .cpCard { width: auto; min-width: 96px; }
+body.touch-tidy #cpPanel:not(.cpOpen) canvas,
+body.touch-tidy #cpPanel:not(.cpOpen) .cpStars,
+body.touch-tidy #cpPanel:not(.cpOpen) .cpRow,
+body.touch-tidy #cpPanel:not(.cpOpen) .cpHide,
+body.touch-tidy #cpPanel:not(.cpOpen) .cpHint { display: none; }
+body.touch-tidy #cpPanel:not(.cpOpen) .cpMeta { border-top: none; padding: 11px 14px; }
+body.touch-tidy #cpPanel.cpOpen { width: 148px; }
+body.touch-tidy #cpPanel.cpOpen .cpHint { margin-top: 8px; }
 
 /* ---- coarse-pointer (iPad / touch): every pop-up stays pressable ---------- */
 /* touch-action:manipulation removes the 300 ms tap delay + double-tap zoom on
@@ -87,7 +233,6 @@ body.touch.mode-city.state-playing #interact.show { display: block !important; }
   .btn { min-height: 52px; }
   .mode-btn, .role-btn, .origin-btn { min-height: 48px; }
   #interactOpts .iopt { min-height: 44px; padding: 10px 8px; }
-  #interact .ikey { width: 26px; height: 26px; }
   #pkgPanel button, #pkgPanel [data-act] { min-height: 44px; padding: 10px 14px; }
   #fullMapClose { min-height: 44px; padding: 8px 14px; }
   /* keep the shared bottom panel clear of the home-indicator / rounded corner */
@@ -103,6 +248,9 @@ body.touch.mode-city.state-playing #interact.show { display: block !important; }
   #hitfx { font-size: 42px; }
   #toast { font-size: 44px; }
   .card-box { padding: 24px 20px 22px; }
+  /* tighter vehicle cluster so dial + buttons still fit beside the stick */
+  #tveh #tvDial { right: 118px; width: 108px; height: 108px; }
+  #tveh .tv-big { min-width: 108px; font-size: 17px; }
 }
 @media (max-width: 520px) {
   #objective { max-width: 58vw; font-size: 13px; }

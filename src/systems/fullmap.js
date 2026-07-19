@@ -319,6 +319,8 @@
     map._cursor = null;
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("full-map-open");
+    // touch: no M key exists — the close chip drops the key hint
+    if (CBZ.touchMode && closeBtn && closeBtn.textContent !== "✕ Close") closeBtn.textContent = "✕ Close";
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
     draw();
     updateGuide();
@@ -1775,6 +1777,18 @@
     draw();
   }, { passive: false });
   if (closeBtn) closeBtn.addEventListener("click", function () { close(); });
+  // TOUCH (owner ask): tapping the minimap opens the map. Covers the city
+  // radar canvas (#cRadar, city/hud.js) and the jail minimap (#minimap) —
+  // both opt back into pointer-events under body.touch (css/mobile.css).
+  // Same toggle the M key drives; gated so a stray tap never fires it while
+  // a menu overlay is up.
+  document.addEventListener("click", function (e) {
+    if (!CBZ.touchMode) return;
+    if (!e.target || !e.target.closest || !e.target.closest("#cRadar, #minimap")) return;
+    if (CBZ.game.state !== "playing" || CBZ.cityMenuOpen) return;
+    e.preventDefault();
+    map.toggle();
+  });
 
   addEventListener("keydown", function (e) {
     if (e.repeat) return;
