@@ -922,6 +922,24 @@
   // corpse still flows through the normal kill bus/killfeed. Flip false → a
   // close shotgun headshot keeps the head on (intact ragdoll + wound), revert.
   if (CBZ.CONFIG.GORE_DECAP_SHOTGUN == null) CBZ.CONFIG.GORE_DECAP_SHOTGUN = true;
+  // CHAR_BELT_V2 (entities/character.js): the 3D belt band was a fixed
+  // boxGeom(0.96,0.16,0.54) that ignored the `fem` build gate — on a fem torso
+  // (0.78 wide) the 0.96 band flared 0.09/side into a clown ring, and even on
+  // male builds it sat WIDER than the torso (0.92) and far wider than the hips
+  // (pelvis 0.84), reading as a protruding shelf from every angle the front-
+  // facing charpanel portrait happened to hide. V2 sizes the band per build to
+  // tuck ~0.01/side inside the shirt and sit proud of the hips (all offsets
+  // 0.01–0.03 → nothing coplanar with the torso/pelvis faces it overlaps, so no
+  // TBDR z-fight), slims it to the collar/stripe band grammar (H 0.14), and
+  // seats the buckle half-in/half-proud of the band's front face so it can't
+  // float. Build-path only, deterministic. OFF → the legacy fixed band.
+  if (CBZ.CONFIG.CHAR_BELT_V2 == null) CBZ.CONFIG.CHAR_BELT_V2 = true;
+  // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
+  // person must never BRIGHTEN ("they turn super white, which is dumb") —
+  // the hit read becomes a brief blood-dark tint on the struck head while
+  // the existing gore.spray/bodyWound blood carries the impact. Flip false
+  // to restore the legacy emissive white/orange pop.
+  if (CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 == null) CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 = true;
   // ---- AIM FEEL (owner: make aiming + shooting EASIER, especially on iPad) --
   // Five independent, reversible knobs. Four default to the improved behaviour;
   // the fifth (LOCKON_SQUARE_SPIN) defaults OFF because the owner asked to kill

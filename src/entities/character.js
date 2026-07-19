@@ -214,10 +214,30 @@
     }
     const beltParts = [], badgeParts = [], capParts = [], hairParts = [];
     if (c.belt) {
-      const belt = new THREE.Mesh(boxGeom(0.96, 0.16, 0.54), cmat(c.belt));
-      belt.position.y = 1.02; body.add(belt); beltParts.push(belt);
-      const buckle = new THREE.Mesh(boxGeom(0.18, 0.16, 0.06), cmat(0xffd451));
-      buckle.position.set(0, 1.02, 0.29); body.add(buckle); beltParts.push(buckle);
+      if (CBZ.CONFIG.CHAR_BELT_V2 !== false) {
+        // Build-aware waist band straddling the torso→pelvis seam, so it is
+        // sized off BOTH boxes of the CURRENT build: a hair NARROWER than the
+        // shirt (torso W 0.92/0.78) so it tucks in instead of shelving past the
+        // silhouette, and PROUD of the hips (pelvis W 0.84/0.72, D 0.48/0.43) so
+        // it hugs the waist. Every offset is 0.01–0.03 — nothing coplanar with
+        // the torso/pelvis faces it overlaps (TBDR z-fight guard) — and the band
+        // follows the collar/stripe grammar (H 0.14) instead of a fat 0.16 slab.
+        // The old fixed 0.96 band ignored `fem` entirely (see CHAR_BELT_V2).
+        const beltW = fem ? 0.76 : 0.90;
+        const beltD = fem ? 0.46 : 0.52;
+        const belt = new THREE.Mesh(boxGeom(beltW, 0.14, beltD), cmat(c.belt));
+        belt.position.y = 1.02; body.add(belt); beltParts.push(belt);
+        // Buckle plate: shorter than the band (H 0.10, seated within it) and
+        // straddling the band's front face (beltD/2 → half its depth buried in
+        // the band, half proud) so it reads raised and never floats off.
+        const buckle = new THREE.Mesh(boxGeom(fem ? 0.16 : 0.18, 0.10, 0.06), cmat(0xffd451));
+        buckle.position.set(0, 1.02, beltD / 2); body.add(buckle); beltParts.push(buckle);
+      } else {
+        const belt = new THREE.Mesh(boxGeom(0.96, 0.16, 0.54), cmat(c.belt));
+        belt.position.y = 1.02; body.add(belt); beltParts.push(belt);
+        const buckle = new THREE.Mesh(boxGeom(0.18, 0.16, 0.06), cmat(0xffd451));
+        buckle.position.set(0, 1.02, 0.29); body.add(buckle); beltParts.push(buckle);
+      }
     }
     if (c.badge) {
       const badge = new THREE.Mesh(boxGeom(0.16, 0.16, 0.05), cmat(0xffd451));
