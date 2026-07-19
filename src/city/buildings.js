@@ -3294,6 +3294,7 @@
 
     return { group: bgroup, ox, oz, w, d, h: storeys * FH, storeys, facade: FACADE, boarded: !!opts.boarded, office: !!opts.office, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
       hasStairs, stairW, clearFloorPoint, wt: WT,   // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
+      localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
       floorSlabs,                                   // intermediate floor slabs (carvable for an elevator shaft — see CBZ.cityCarveShaft)
       floorTops,                                    // per-floor arrival Y (ground..roof) — elevators.js multi-stop contract
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
@@ -4438,6 +4439,17 @@
   function furnishApartmentFloor(b, baseY, idx) {
     const W = b.w, D = b.d, Y = baseY || 0;
     idx = idx | 0;
+    // INTERIORS INTENTIONALITY: one building is ONE design. The plan/palette
+    // key stops rotating per storey — every floor of a tower repeats the SAME
+    // flat exactly (the sanctioned monotony); variety lives BETWEEN buildings
+    // via a per-building hash. And a slice of towers is simply VACANT: every
+    // under-floor an intentionally empty, lit shell — clean floor, windows,
+    // light, nothing else — instead of a scatter pretending to be a home.
+    // (The listed top-floor HOME and pool floors are dressed elsewhere and
+    // keep their tier program.) Seed-stable; flag-off restores idx rotation.
+    const doctrine = CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 !== false && CBZ.hash01;
+    const vacant = doctrine && CBZ.hash01(b.ox || 0, b.oz || 0, 0x0A97) < 0.34;
+    if (doctrine) idx = (CBZ.hash01(b.ox || 0, b.oz || 0, 0x0A98) * 4) | 0;
     function put(x, y, z, w, h, d, color, pad) {
       if (!b.clearFloorPoint || b.clearFloorPoint(x, z, pad)) { b.lbox(x, Y + y, z, w, h, d, color, { cast: false }); return true; }
       return false;
@@ -4451,6 +4463,8 @@
     b.lbox((k.xLo + k.xHi) / 2, Y + (b.FH || FH) - 0.28, 0, 1.8, 0.1, 0.5, 0xffd9a0, { emissive: 0xffd9a0, ei: 0.4, cast: false });
     // tinted hardwood FLOOR slab over the solid plate (-x stair strip stays open).
     b.lbox((k.xLo + k.xHi) / 2, Y + 0.02, 0, Math.max(1, k.xHi - k.xLo), 0.04, k.zHi - k.zLo, 0x33373f, { cast: false });
+    // VACANT building: the shell above (light + finished floor) IS the design.
+    if (vacant) return;
 
     // ---- PROGRAMMED FLAT (only when the plate is big enough to zone) ----------
     // 1 vertical + 1 horizontal partition split the solid half into: entry/hall
@@ -4506,6 +4520,36 @@
   // but has no dresser of its own — this is its furnishing hook.
   CBZ.cityFurnishApartment = function (b, baseY, idx) { furnishApartmentFloor(b, baseY, idx); };
 
+  // ---- INTERIORS INTENTIONALITY (owner doctrine) ----------------------------
+  // "It should be empty, or it should be designed, or it should be a dystopian
+  // feeling — intentionally monotonous. I don't want things designed because
+  // they have to be." Every office interior is now ONE of: an intentionally
+  // EMPTY lit shell (most of them), a DESIGNED PROGRAM (the desk-farm / one
+  // meeting room / uniform racks — city/interior_programs.js), or that program
+  // repeated floor-for-floor with ZERO variation. The archetype is a
+  // per-BUILDING, floor-invariant hash (seed-stable, multiplayer-safe): a
+  // tower is ONE thing all the way up — never a different scatter per storey,
+  // and never the old reception/meeting/break partition mishmash whose walls
+  // read as nobody's plan. Flag-off restores the legacy furnisher verbatim.
+  function interiorsV2() { return CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 !== false && !!CBZ.interiorProgram; }
+  function officeArchetype(b) {
+    if (!CBZ.hash01) return "deskfarm";
+    const r = CBZ.hash01(b.ox || 0, b.oz || 0, 0x0FF1);
+    if (r < 0.46) return "empty";      // MOST interiors: the clean shell
+    if (r < 0.82) return "deskfarm";   // the flagship: rows of desks + working AIs
+    if (r < 0.93) return "meeting";    // one room, one table, space
+    return "storage";                  // uniform archive racks
+  }
+  function furnishOfficeFloorV2(b, baseY) {
+    const k = roomKit(b, baseY);       // bounds only — the program draws everything
+    const res = CBZ.interiorProgram(officeArchetype(b),
+      { x0: k.xLo, x1: k.xHi, z0: k.zLo, z1: k.zHi, y: baseY },
+      // the door orients the program (the meeting divider sits in the far
+      // half with its doorway on the approach line — never across the walk-in)
+      { b: b, opts: { door: b.localDoor || null } });
+    return (res && res.anchors) || [];
+  }
+
   // ---- THE GENERIC PER-FLOOR OFFICE -----------------------------------------
   // WHY: an OFFICE tower full of seated workers is a living floor you see through
   // the curtain wall, a payroll to rob, and witnesses who panic + call cops when
@@ -4522,6 +4566,10 @@
   // building's seats once via CBZ.cityRegisterOfficeDesks (officejobs.js seats
   // workers there; a seated worker = an AI working a job, not decoration).
   function furnishOfficeFloor(b, baseY, idx) {
+    // DOCTRINE PATH: one archetype per building, identical on every floor.
+    // (idx — the per-floor palette/scatter rotator — is deliberately unused
+    // there: variation between storeys is exactly what the owner killed.)
+    if (interiorsV2()) return furnishOfficeFloorV2(b, baseY);
     const W = b.w, D = b.d, FHl = b.FH || FH, Y = baseY || 0;
     idx = idx | 0;
     const anchors = [];
@@ -5851,16 +5899,60 @@
           // collect the seat anchors building-wide, then register them ONCE so
           // city/officejobs.js can seat a payroll of workers (witnesses + cash).
           const deskAnchors = [];
+          const v2 = interiorsV2();
+          // ground-floor LOBBY (the arrival program: one desk facing the door,
+          // a waiting row, planters) for every archetype EXCEPT the empty
+          // shell — an intentionally empty tower gets nothing, that's the point.
+          let reception = null;
+          if (v2 && officeArchetype(b) !== "empty") {
+            const kg = roomKit(b, 0);
+            const lr = CBZ.interiorProgram("lobby", { x0: kg.xLo, x1: kg.xHi, z0: kg.zLo, z1: kg.zHi, y: 0 },
+              { b: b, opts: { door: b.localDoor || { x: door.x - b.ox, z: door.z - b.oz, nx: door.nx, nz: door.nz } } });
+            if (lr && lr.anchors && lr.anchors.length) reception = lr.anchors[0];
+          }
           for (let k = 1; k < storeys; k++) {
             const fa = furnishOfficeFloor(b, k * FH, (lot.i | 0) * 5 + (lot.j | 0) * 3 + k);
             if (fa && fa.length) for (let a = 0; a < fa.length; a++) deskAnchors.push(fa[a]);
           }
+          // INTENTIONALITY STAFFING: a SPARSE, deterministic crew of REAL peds
+          // seated AT their desks via npclife's population layer (attached rigs
+          // at true floor height — they type, they stay put, they die like
+          // anyone). Only the low, meaningful floors (1..3), ≤2 a floor, ≤6 a
+          // building incl. the receptionist; a citywide cap in interiorStaff
+          // keeps the roster honest. One desk, one owner: a staffed desk never
+          // enters the walk-in registry below.
+          if (v2 && (reception || deskAnchors.length) && CBZ.interiorStaff && CBZ.hash01) {
+            const seats = [];
+            if (reception) { reception._staffed = true; seats.push(reception); }
+            const perFloor = {};
+            for (let a = 0; a < deskAnchors.length && seats.length < 6; a++) {
+              const an = deskAnchors[a];
+              if (an.y > FH * 3 + 0.1) break;                    // anchors arrive in floor order
+              const fk = Math.round(an.y / FH);
+              if ((perFloor[fk] | 0) >= 2) continue;             // sparse: ≤2 seated workers a floor
+              if (CBZ.hash01(an.x, an.z, 0x5EA7) >= 0.3) continue;
+              perFloor[fk] = (perFloor[fk] | 0) + 1;
+              an._staffed = true; seats.push(an);
+            }
+            if (seats.length) CBZ.interiorStaff("interior:office:" + (lot.i | 0) + ":" + (lot.j | 0), b.group,
+              seats.map(function (s) {
+                const sy = s.y || 0;
+                // ground seats ride the 0.14-top foundation slab; upper floors
+                // ride their own 0.04-top floor covering.
+                return { x: s.lx != null ? s.lx : s.x - b.ox, y: sy + (sy < 0.1 ? 0.15 : 0.05),
+                         z: s.lz != null ? s.lz : s.z - b.oz, yaw: s.face || 0 };
+              }));
+          }
           // C2: officejobs.js DEFINES CBZ.cityRegisterOfficeDesks and stores the
           // anchors; optional-chained so the office still BUILDS if that file is
           // absent (just no seated workers — never a dead floor either way).
-          if (deskAnchors.length) CBZ.cityRegisterOfficeDesks && CBZ.cityRegisterOfficeDesks(lot, deskAnchors);
+          // Staffed desks are excluded — the street-side walk-in pipeline
+          // (schedule → claim → sit) keeps every remaining desk exactly as before.
+          const walkIns = [];
+          for (let a = 0; a < deskAnchors.length; a++) if (!deskAnchors[a]._staffed) walkIns.push(deskAnchors[a]);
+          if (walkIns.length) CBZ.cityRegisterOfficeDesks && CBZ.cityRegisterOfficeDesks(lot, walkIns);
           lot.kind = "office";
-          lot.building = { ...b, name: "Office Tower", sign: color, side, door: doorPt, office: true, deskCount: deskAnchors.length };
+          lot.building = { ...b, name: "Office Tower", sign: color, side, door: doorPt, office: true, deskCount: walkIns.length };
           placed.push(lot);
           continue;
         }

@@ -4055,6 +4055,7 @@
     // also let go of the claimed desk so it frees up (optional-chain; officejobs.js).
     if (ped.char && ped.char.sitting && st !== "sit") {
       ped.char.sitting = false;
+      ped.char.typing = false;   // stood up → hands off the keys (character.js tap loop)
       if (CBZ.cityReleaseDesk) CBZ.cityReleaseDesk(ped);
     }
     const surrendering = st === "surrender" || ped.surrender || ped.surrenderT > 0;
@@ -4130,7 +4131,13 @@
         ped._deskAnchor = { x: anc.x, y: anc.y || 0, z: anc.z, face: anc.face, lot: anc.lot };
         ped.path = null; ped.speed = 0; ped.pause = 0;
         ped.state = "sit";
-        if (ped.char) ped.char.sitting = true;
+        if (ped.char) {
+          ped.char.sitting = true;
+          // a DESK seat is a WORKING seat: the seated pose runs the typing
+          // tap loop (character.js) so an office floor visibly works, not
+          // just sits. Flag-gated with the interiors doctrine.
+          ped.char.typing = CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 !== false;
+        }
         if (animate) animChar(ped.char, 0, dt);
         return;
       }

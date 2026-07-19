@@ -786,6 +786,23 @@
   // the player never watches a body materialize. Off → old placement.
   if (CBZ.CONFIG.NPC_SPAWN_HIDE == null) CBZ.CONFIG.NPC_SPAWN_HIDE = true;
 
+  // INTERIORS INTENTIONALITY (owner: "it should be empty, or designed, or a
+  // dystopian feeling — intentionally monotonous. Not designed because it has
+  // to be."). Every generated office interior is ONE thing, per building,
+  // identical on every floor: an intentionally EMPTY lit shell (most), the
+  // DESK-FARM (ordered rows of identical desks/terminals with real seated
+  // peds typing at them), ONE meeting room behind one aligned divider, or
+  // uniform archive racks — the archetype kit in city/interior_programs.js
+  // (reusable by any structure builder via CBZ.interiorProgram). Apartment
+  // towers stop rotating their flat plan per storey (one plan per building)
+  // and a slice go intentionally VACANT. Kills the old reception/meeting/
+  // break partition scatter. Off → the legacy furnishers, verbatim.
+  if (CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 == null) CBZ.CONFIG.INTERIORS_INTENTIONAL_V1 = true;
+  // citywide cap on npclife-seated interior staff (REAL ped rigs, so budgeted:
+  // ≤6 a building — receptionist + ≤2 a floor on floors 1-3 — and this many
+  // total across all interiors).
+  if (CBZ.CONFIG.INTERIOR_STAFF_MAX == null) CBZ.CONFIG.INTERIOR_STAFF_MAX = 48;
+
   // ---- DRIVING WAVE (city/vehicles.js + police.js + props.js) --------------
   // DRIVE_FEEL_V2: recovers the "out of control" handling — raises the lateral
   // grip floor (0.42 → 1.6) so a broken-loose slide recovers in a beat instead

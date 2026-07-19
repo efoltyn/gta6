@@ -445,11 +445,16 @@
       if (ch.parts.ll) { ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, -1.3, sr, dt); ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, 0.06, sr, dt); ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, sr, dt); ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, sr, dt); }
       if (ch.parts.rl) { ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -1.3, sr, dt); ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -0.06, sr, dt); ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, sr, dt); ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, sr, dt); }
       setKnee(J.ll, 1.42, sr); setKnee(J.rl, 1.38, sr);
-      // forearms rest toward the desktop
-      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
-      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
-      setElbow(J.la, -0.72, sr); setElbow(J.ra, -0.72, sr);
-      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
+      // forearms rest toward the desktop — and a WORKING seat (ch.typing, set
+      // only by the desk-sit paths) actually TYPES: a small alternating
+      // forearm tap + a touch more head-down focus. Pure target modulation:
+      // every write stays a damp toward an absolute pose, so entering/leaving
+      // the loop can never accumulate (the grapple brace-pose lesson).
+      const tw = ch.typing ? Math.sin(ch.breath * 9) * 0.055 : 0;
+      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34 + tw, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34 - tw, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+      setElbow(J.la, -0.72 - tw, sr); setElbow(J.ra, -0.72 + tw, sr);
+      if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, ch.typing ? 0.11 : 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
       lockCharacterHips(ch);
       return;   // seated pose owns the whole rig
     }
@@ -462,6 +467,7 @@
       if (ch.model) ch.model.position.y = damp(ch.model.position.y, 0, 10, dt);
       if (!ch.model || Math.abs(ch.model.position.y) < 0.005) { if (ch.model) ch.model.position.y = 0; ch._seatSunk = 0; }
     }
+    if (ch.typing) ch.typing = false;   // typing exists only while seated (stale-flag guard)
 
     // ---- STANCE POSES (physics.js stance machine sets slidePose/pronePose
     //      on the player rig only). Both OWN the whole rig like the seated
