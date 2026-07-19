@@ -403,7 +403,11 @@
     let k = imp ? (imp.wkey || (imp.attacker && imp.attacker.weapon) || "") : "";
     return ("" + k).toLowerCase();
   }
+  // GORE_DECAP_SHOTGUN: the head-off read is independently revertible. Flag off
+  // → a muzzle-close shotgun headshot keeps the head on (intact ragdoll + wound).
+  function decapShotgunOn() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_DECAP_SHOTGUN !== false; }
   function headPops(imp) {
+    if (!decapShotgunOn()) return false;
     const k = weaponKey(imp);
     const d = imp && imp.dist != null ? imp.dist : 99;
     return k.indexOf("shotgun") >= 0 && d <= 5.5;
@@ -411,6 +415,7 @@
   // FULL DECAPITATION: same strict close-shotgun gate as the actual sever. Used
   // to drive the neck-stump spurt; city-only is enforced at the call site.
   function headDecaps(imp) {
+    if (!decapShotgunOn()) return false;
     const k = weaponKey(imp);
     const d = imp && imp.dist != null ? imp.dist : 99;
     return k.indexOf("shotgun") >= 0 && d <= 5.5;
@@ -793,7 +798,14 @@
     // (player, ped-vs-ped, cops) stamp an entry wound + clothing soak with
     // zero changes at the kill sites. Guarded + self-gating (distance/caps).
     if (ctx && ctx.ped && CBZ.bodyWound) {
-      CBZ.bodyWound(ctx.ped, { x, y, z }, { head, cal: amt, melee: blunt ? "blunt" : (blade ? "blade" : null) });
+      // ANCHOR AT THE REAL IMPACT POINT: the kill impulse carries the actual ray
+      // hit point (fpsmode threads imp.point) and caliber, so seat the wound THERE
+      // on the struck body part — not at the generic gore centre (ped.pos + 1.0)
+      // the kill site handed us. Falls back to the gore centre / amount for kills
+      // that carry no ray (NPC-vs-NPC rolls, melee, disasters).
+      const wp = (ctx.imp && ctx.imp.point && ctx.imp.point.x != null) ? ctx.imp.point : { x, y, z };
+      const wcal = (ctx.imp && ctx.imp.cal != null) ? ctx.imp.cal : amt;
+      CBZ.bodyWound(ctx.ped, wp, { head, cal: wcal, melee: blunt ? "blunt" : (blade ? "blade" : null) });
     }
 
     let dx = 0, dz = 0, hasDir = false;

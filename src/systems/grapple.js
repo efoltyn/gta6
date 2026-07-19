@@ -258,72 +258,32 @@
   // since no animChar competes for the rig on a frame we own the actor.
   function applyRag(a, p, dt) { integRag(a, p, dt); writeRag(a, p); }
 
-  // ---- HIT FLASH: mark the head material on every body hit so a punch /
-  //      shot / car / blast reads as a real impact (the same juice the prison
-  //      gets from reactions.js, here for survival bots + city peds/cops).
-  //      GORE_HIT_FEEDBACK_V2 (owner: hit people "turn super white, which is
-  //      dumb"): the read is a brief BLOOD-DARK tint of the diffuse color —
-  //      per-channel min against rest so no channel can ever rise, emissive
-  //      untouched. Flag false = the legacy emissive white/orange pop.
-  //      Per-rig material (character.js builds its own), so it never bleeds. ----
-  const FLASH_DUR = 0.22, FLASH_EI = 1.7, FLASH_HEX = 0xff6644;
-  const TINT_HEX = 0x4a1210, TINT_K = 0.72;      // same blood-dark target as reactions.js
-  let _tr = 0, _tg = 0, _tb = 0;                 // scratch channels (allocation-free)
-  function bloodTint(rest) {
-    const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
-    _tr = Math.min(rr, (rr + (((TINT_HEX >> 16) & 255) - rr) * TINT_K) | 0);
-    _tg = Math.min(rg, (rg + (((TINT_HEX >> 8) & 255) - rg) * TINT_K) | 0);
-    _tb = Math.min(rb, (rb + ((TINT_HEX & 255) - rb) * TINT_K) | 0);
-  }
-  function goreV2() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 !== false; }
-  function flashHead(a) {
-    const o = owner(a), p = phys(o);
-    p.flash = FLASH_DUR;
-    const m = o.char && o.char.head && o.char.head.material;
+  // ---- HIT COLOR: RETIRED (owner doctrine: "Shot players shouldn't change
+  //      colors — they should just have a HOLE from getting shot... It's just
+  //      physics"). A body hit changes NOTHING about material color, ever — no
+  //      emissive pop, no blood-dark tint. The impact reads through gore.spray +
+  //      the wounds.js entry hole. flashHead/fadeFlash stay as the public hit
+  //      hook but do ONLY the SAFETY normalize: snap the head to its BUILD-TIME
+  //      skinTone ground truth (per-rig material — character.js builds its own,
+  //      never shared) so a hit can never strand a stray tint. That is the
+  //      surviving stuck-bright-face fix. ----
+  function normalizeHead(a) {
+    const o = owner(a);
+    const m = o && o.char && o.char.head && o.char.head.material;
     if (!m) return;
-    // V2 blends against the rig's BUILD-TIME skinTone, never the material's
-    // current color — reactions.js's hp-drop flash fires on the same shot,
-    // and reading a head the other writer already tinted is the legacy
-    // stuck-bright double-writer bug. Both writers targeting the same
-    // ground-truth tone converge no matter the frame order.
-    const tone = goreV2() && o.char && o.char.skinTone != null ? o.char.skinTone : null;
-    if (tone != null && m.color) {
-      p.flashCol = tone;                    // marks the V2 tint live for the fade
-      bloodTint(tone);
-      m.color.setRGB(_tr / 255, _tg / 255, _tb / 255);
-    } else if (!goreV2() && m.emissive) {
-      if (p.flashSaved < 0) { p.flashSaved = m.emissive.getHex(); p.flashEi = m.emissiveIntensity; }
-      m.emissive.setHex(FLASH_HEX); m.emissiveIntensity = FLASH_EI;
-    }
+    const tone = o.char && o.char.skinTone != null ? o.char.skinTone : null;
+    if (m.color && tone != null && m.color.getHex() !== tone) m.color.setHex(tone);
+    if (m.emissive && m.emissiveIntensity !== 1) m.emissiveIntensity = 1;
+    if (m.emissive && m.emissive.getHex() !== 0) m.emissive.setHex(0x000000);
+  }
+  function flashHead(a) {
+    // physics-only: no color write — just guarantee the head is on-tone.
+    normalizeHead(a);
   }
   function fadeFlash(a, p) {
-    const o = owner(a);
-    const m = o.char && o.char.head && o.char.head.material;
-    if (!m || !(m.emissive || m.color)) { p.flash = 0; p.flashSaved = -1; p.flashCol = -1; return; }
-    const t = p.flash / FLASH_DUR;                 // 1 → 0
-    if (t <= 0) {
-      // restore BOTH channels a flash may have written (a mid-flash flag flip
-      // must never strand a tint on a face)
-      if (p.flashSaved >= 0 && m.emissive) { m.emissive.setHex(p.flashSaved); m.emissiveIntensity = p.flashEi; }
-      if (p.flashCol != null && p.flashCol >= 0 && m.color) m.color.setHex(p.flashCol);
-      p.flashSaved = -1; p.flashCol = -1;
-    } else if (p.flashCol != null && p.flashCol >= 0 && m.color) {
-      // V2: ease the blood-dark tint back out of the diffuse color
-      bloodTint(p.flashCol);
-      const rest = p.flashCol;
-      const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
-      m.color.setRGB((rr + (_tr - rr) * t) / 255, (rg + (_tg - rg) * t) / 255, (rb + (_tb - rb) * t) / 255);
-    } else if (!goreV2() && m.emissive) {
-      // legacy only: V2 must never write emissive (the brighten IS the bug)
-      const baseEi = p.flashSaved >= 0 ? p.flashEi : 1;
-      m.emissiveIntensity = baseEi + (FLASH_EI - baseEi) * t;
-      if (p.flashSaved >= 0) {
-        const rest = p.flashSaved;
-        const fr = (FLASH_HEX >> 16) & 255, fg = (FLASH_HEX >> 8) & 255, fb = FLASH_HEX & 255;
-        const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
-        m.emissive.setRGB((rr + (fr - rr) * t) / 255, (rg + (fg - rg) * t) / 255, (rb + (fb - rb) * t) / 255);
-      }
-    }
+    // FLASH RETIRED: nothing to fade; keep the head on-tone and clear the state.
+    normalizeHead(a);
+    if (p) { p.flash = 0; p.flashSaved = -1; p.flashCol = -1; }
   }
 
   // universal hit: knockback + flinch, optionally a knockdown or an

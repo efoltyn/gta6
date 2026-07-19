@@ -75,32 +75,14 @@
   // --- tunables ---
   const RECOIL_DUR = 0.25;      // seconds for the flinch to ease back
   const RECOIL_AMP = 0.55;      // radians of body pitch at peak flinch
-  const FLASH_DUR = 0.22;       // seconds for the emissive flash to fade
-  const FLASH_EI = 1.6;         // peak emissive intensity boost
-  const FLASH_HEX = 0xff6644;   // warm impact tint (legacy path only)
-  // GORE_HIT_FEEDBACK_V2 (owner: "when you shoot characters they brighten up /
-  // turn super white, which is dumb"): a hit must never ADD light. The V2 read
-  // darkens the struck head's DIFFUSE color toward a deep venous red for the
-  // same FLASH_DUR beat — per-channel min against the resting tone so no
-  // channel can ever rise — and leaves emissive alone entirely. The wet part
-  // of the read (gore.spray droplets + wounds.js entry decals) already fires
-  // from the shot pipeline; this is only the skin's part of the story.
-  // GROUND-TRUTH REST: the tint blends against ch.skinTone (the color the head
-  // material was BUILT with), never against the material's current color —
-  // grapple.js's body.flash and this detector both fire on the same shot, and
-  // saving "rest" from a head the other writer already tinted is exactly the
-  // legacy double-writer bug that left faces stuck bright. Both writers
-  // targeting the same build-time tone converge no matter the order.
-  const TINT_HEX = 0x4a1210;    // deep blood-dark target the rest tone leans toward
-  const TINT_K = 0.72;          // how far toward TINT_HEX the peak tint goes
-  let _tr = 0, _tg = 0, _tb = 0; // scratch channels (allocation-free hot loop)
-  function bloodTint(rest) {
-    const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
-    _tr = Math.min(rr, (rr + (((TINT_HEX >> 16) & 255) - rr) * TINT_K) | 0);
-    _tg = Math.min(rg, (rg + (((TINT_HEX >> 8) & 255) - rg) * TINT_K) | 0);
-    _tb = Math.min(rb, (rb + ((TINT_HEX & 255) - rb) * TINT_K) | 0);
-  }
-  function goreV2() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 !== false; }
+  // HIT COLOR — RETIRED (owner doctrine: "Shot players shouldn't change colors —
+  // they should just have a HOLE from getting shot... It's just physics"). A hit
+  // changes NOTHING about material color, ever: no emissive pop, no diffuse tint.
+  // The impact reads purely through gore.spray + the wounds.js entry hole. All
+  // that survives here is the SAFETY below (restoreHead): if anything ever leaves
+  // a head off-tone, snap it back to the rig's BUILD-TIME skinTone GROUND TRUTH
+  // (never a saved "rest" value — the legacy double-writer bug poisoned those and
+  // stranded faces bright).
   function headTone(a) {
     const ch = a && a.char;
     return ch && ch.skinTone != null ? ch.skinTone : null;
@@ -219,15 +201,20 @@
     return h && h.material ? h.material : null;
   }
 
-  // restore a head we left tinted (and forget we touched it). Restores BOTH
-  // channels a flash may have written — the legacy emissive pop and the V2
-  // diffuse darken — so a mid-flash flag flip can never strand a tint.
+  // SAFETY — the surviving stuck-bright-face fix. Physics-only means a hit never
+  // writes head color, but if ANY path ever leaves the head off-tone, snap it
+  // back to the rig's BUILD-TIME skinTone GROUND TRUTH (never a saved "rest"
+  // value — the legacy double-writer poisoned those). Emissive is forced neutral
+  // for the same reason. A no-op in the common case (color already == tone).
   function restoreHead(r, a) {
-    if (r.savedEm < 0 && (r.savedCol == null || r.savedCol < 0)) return;
     const m = headMat(a);
-    if (m && m.emissive && r.savedEm >= 0) { m.emissive.setHex(r.savedEm); m.emissiveIntensity = r.savedEi; }
-    if (m && m.color && r.savedCol != null && r.savedCol >= 0) m.color.setHex(r.savedCol);
-    r.savedEm = -1; r.savedCol = -1;
+    if (m) {
+      const tone = headTone(a);
+      if (m.color && tone != null && m.color.getHex() !== tone) m.color.setHex(tone);
+      if (m.emissive && m.emissiveIntensity !== 1) m.emissiveIntensity = 1;
+      if (m.emissive && m.emissive.getHex() !== 0) m.emissive.setHex(0x000000);
+    }
+    if (r) { r.savedEm = -1; r.savedCol = -1; }
   }
 
   // force a wide-eyed, open-mouthed FEAR face. We run after facial.js (88), so
@@ -248,7 +235,6 @@
   // fire a fresh recoil + flash for `a`, flinching away from the player.
   function trigger(a, r) {
     r.recoil = RECOIL_DUR;
-    r.flash = FLASH_DUR;
 
     // direction: pitch the upper body AWAY from the player. The player
     // standing in front (+z relative to facing) should push them back
@@ -279,23 +265,11 @@
       CBZ.alertCrowd(gp.x, gp.z, 10, 1);
     }
 
-    // prime the flash. V2 (GORE_HIT_FEEDBACK_V2): push the head's DIFFUSE
-    // color toward blood-dark — never brighter — blending from the rig's
-    // build-time skinTone (see headTone above: material-current reads are
-    // poisoned by the other flash writer). Legacy: the old emissive
-    // white/orange pop, saved once (a re-hit mid-flash must not clobber the
-    // true resting value with the tint).
-    const m = headMat(a);
-    const tone = goreV2() ? headTone(a) : null;
-    if (m && tone != null && m.color) {
-      r.savedCol = tone;                    // marks the V2 tint live for the fade
-      bloodTint(tone);
-      m.color.setRGB(_tr / 255, _tg / 255, _tb / 255);
-    } else if (m && !goreV2() && m.emissive) {
-      if (r.savedEm < 0) { r.savedEm = m.emissive.getHex(); r.savedEi = m.emissiveIntensity; }
-      m.emissive.setHex(FLASH_HEX);
-      m.emissiveIntensity = FLASH_EI;
-    }
+    // PHYSICS-ONLY: a hit writes NO head color and NO emissive, ever (owner
+    // doctrine). We affirmatively snap the head to its skinTone ground truth so
+    // the hit can never strand a stray tint — the wound hole + spray carry the
+    // read. (restoreHead is a no-op when the head is already on-tone.)
+    restoreHead(r, a);
   }
 
   function update(dt) {
@@ -1011,45 +985,10 @@
           if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(a.char || (a.isPlayer ? CBZ.playerChar : null));
         }
 
-        // ---- FLASH: fade the hit read back to rest (V2 blood-dark tint on
-        //      the diffuse color, or the legacy emissive boost) ----
-        if (r.flash > 0) {
-          r.flash = Math.max(0, r.flash - dt);
-          const m = headMat(a);
-          if (m && (m.emissive || m.color)) {
-            const t = r.flash / FLASH_DUR;            // 1 → 0
-            if (t <= 0) {
-              restoreHead(r, a);                       // fully back to rest
-            } else if (r.savedCol != null && r.savedCol >= 0 && m.color) {
-              // V2: ease the blood-dark tint back OUT of the diffuse color —
-              // recomputed from the ground-truth tone each frame, no drift.
-              bloodTint(r.savedCol);
-              const rest = r.savedCol;
-              const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
-              m.color.setRGB((rr + (_tr - rr) * t) / 255, (rg + (_tg - rg) * t) / 255, (rb + (_tb - rb) * t) / 255);
-            } else if (!goreV2() && m.emissive) {
-              // legacy only: V2 must never write emissive (the brighten is the
-              // reported bug); a legacy leftover mid-flag-flip just snaps back
-              // via restoreHead when the timer runs out.
-              const baseEi = r.savedEm >= 0 ? r.savedEi : 1;
-              m.emissiveIntensity = baseEi + (FLASH_EI - baseEi) * t;
-              // blend the emissive color from FLASH_HEX back toward rest
-              if (r.savedEm >= 0) {
-                const rest = r.savedEm;
-                const fr = (FLASH_HEX >> 16) & 255, fg = (FLASH_HEX >> 8) & 255, fb = FLASH_HEX & 255;
-                const rr = (rest >> 16) & 255, rg = (rest >> 8) & 255, rb = rest & 255;
-                const cr = (rr + (fr - rr) * t) | 0;
-                const cg = (rg + (fg - rg) * t) | 0;
-                const cb = (rb + (fb - rb) * t) | 0;
-                m.emissive.setRGB(cr / 255, cg / 255, cb / 255);
-              }
-            }
-          } else {
-            // head/material vanished mid-flash: drop the flash and forget
-            // we ever saved anything so we never try to restore it.
-            r.flash = 0; r.savedEm = -1; r.savedCol = -1;
-          }
-        }
+        // ---- FLASH RETIRED (physics-only doctrine) ----
+        // A hit never writes head color or emissive, so there is nothing to fade
+        // back. The skinTone ground-truth safety runs from trigger()/run-reset
+        // via restoreHead(); r.flash is never armed.
       }
     }
   }

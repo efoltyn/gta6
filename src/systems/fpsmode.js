@@ -1729,6 +1729,28 @@
   // ---- damage ----
   // CITY mode reuses this exact hitscan but routes the hit into the city's own
   // death/loot/crime systems (cops, gangs, wanted) instead of the prison AI.
+  // ---- GORE_LOCATIONAL: hit LOCATION drives lethality (owner: "depending
+  //   where, be DEAD... It's just physics"). A head hit is already a one-shot
+  //   kill (lethalHead, below); this adds the LIMB read — an arm/leg round
+  //   carries far less energy into the vitals than a torso hit, so it does
+  //   reduced damage. Torso keeps the weapon's baseline. Flag off → flat body
+  //   damage (pre-flag behaviour), a one-line revert. ----
+  function locational() { return !CBZ.CONFIG || CBZ.CONFIG.GORE_LOCATIONAL !== false; }
+  const LIMB_DMG_MULT = 0.55;        // arms/legs bleed the round's lethality
+  const _locV = new THREE.Vector3();
+  // classify a NON-head body hit as "torso" or "limb" from the world hit point,
+  // in the actor ROOT local frame — the SAME rig bands wounds.js pickPart() uses,
+  // so the damage and the visible hole always agree. Trustworthy only for a
+  // normal standing rig; the caller gates on that.
+  function bodyRegionAt(a, wp) {
+    const g = a.group; if (!g) return "torso";
+    g.updateWorldMatrix(true, false);
+    _locV.copy(wp); g.worldToLocal(_locV);
+    const x = _locV.x, y = _locV.y;
+    if (y < 1.02) return "limb";                          // below the hips → leg
+    if (y <= 1.98 && Math.abs(x) > 0.47) return "limb";   // lateral in the torso band → arm
+    return "torso";
+  }
   function cityGunHit(a, hit, w, shotDir) {
     if (shotDir) hit.dir = shotDir; // wildlife + downstream death physics read the same resolved trajectory
     // WILDLIFE: an animal routes into the hunting system (its own damage/skin
@@ -1742,7 +1764,15 @@
     // shooter (this + the prison gunHit below) calls the same evaluator.
     const fall = CBZ.weaponFalloffMul ? CBZ.weaponFalloffMul(w, hit.dist)
       : (hit.dist <= w.dropStart ? 1 : Math.max(w.minDamage, 1 - ((hit.dist - w.dropStart) / Math.max(1, w.range - w.dropStart)) * (1 - w.minDamage)));
-    const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall));
+    // GORE_LOCATIONAL limb falloff — trustworthy only for a normal standing rig
+    // (a seated/occupant/hidden rig's local frame can't be trusted → treat as
+    // torso). Headshots (lethalHead) are unaffected; torso keeps the baseline.
+    let locMult = 1;
+    if (locational() && !hit.head && hit.point && !hit.occupant && !a._npcAttached &&
+        a.group && a.group.visible !== false && bodyRegionAt(a, hit.point) === "limb") {
+      locMult = LIMB_DMG_MULT;
+    }
+    const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall * locMult));
     const lethalHead = hit.head && !w.nonlethal;
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     const cal = caliber(w);

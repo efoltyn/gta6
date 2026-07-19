@@ -864,12 +864,28 @@
   // "you can't shoot them"), and a killed sitter slumps dead IN the seat
   // instead of ragdolling a plane-local group through world space.
   if (CBZ.CONFIG.CHAR_SEATED_HITTABLE == null) CBZ.CONFIG.CHAR_SEATED_HITTABLE = true;
-  // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js): a shot
-  // person must never BRIGHTEN ("they turn super white, which is dumb") —
-  // the hit read becomes a brief blood-dark tint on the struck head while
-  // the existing gore.spray/bodyWound blood carries the impact. Flip false
-  // to restore the legacy emissive white/orange pop.
-  if (CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 == null) CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 = true;
+  // GORE_HIT_FEEDBACK_V2 (systems/reactions.js + systems/grapple.js) — RETIRED.
+  // Owner doctrine: "Shot players shouldn't change colors — they should just
+  // have a HOLE from getting shot... It's just physics." A hit now changes
+  // NOTHING about material color, EVER: both the legacy emissive white/orange
+  // pop AND the V2 blood-dark diffuse tint are gone. PHYSICS-ONLY is the only
+  // mode — the impact reads purely through gore.spray droplets + the wounds.js
+  // entry hole. This flag is kept for config-compat and is now INERT (no code
+  // branches on it to write color); the surviving skinTone-ground-truth safety
+  // keeps a head from ever being left off-tone. Default false = "no color."
+  if (CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 == null) CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 = false;
+  // GORE_LOCATIONAL (systems/fpsmode.js cityGunHit): hit LOCATION drives
+  // lethality — a headshot is a one-shot kill (already enforced via lethalHead),
+  // a torso hit does the weapon's baseline damage, and an arm/leg hit carries
+  // LESS lethality (reduced damage). Flip false → flat body damage everywhere
+  // (pre-flag behaviour), a one-line revert.
+  if (CBZ.CONFIG.GORE_LOCATIONAL == null) CBZ.CONFIG.GORE_LOCATIONAL = true;
+  // GORE_DECAP_SHOTGUN (systems/gore.js): a muzzle-close SHOTGUN headshot kill
+  // (<=5.5u) takes the head clean off via the existing dismemberment tech (the
+  // neck group hides, a flying head tumbles, the neck stump geysers) — the
+  // corpse still flows through the normal kill bus/killfeed. Flip false → a
+  // close shotgun headshot keeps the head on (intact ragdoll + wound), revert.
+  if (CBZ.CONFIG.GORE_DECAP_SHOTGUN == null) CBZ.CONFIG.GORE_DECAP_SHOTGUN = true;
   // ---- AIM FEEL (owner: make aiming + shooting EASIER, especially on iPad) --
   // Five independent, reversible knobs. Four default to the improved behaviour;
   // the fifth (LOCKON_SQUARE_SPIN) defaults OFF because the owner asked to kill
