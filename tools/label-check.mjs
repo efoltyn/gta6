@@ -89,7 +89,7 @@ const diag = await evl(`(() => {
   const panel = document.getElementById("cityAimDossier");
   const panelShown = !!(panel && panel.style.display !== "none" && panel.offsetParent !== null);
   let sprite = null;
-  if (grp) for (const c of grp.children) { if (c && c.type === "Sprite" && c.material && c.material.map) { sprite = c; break; } }
+  if (grp) for (const c of grp.children) { if (c && c.type === "Sprite" && c.renderOrder === 999) { sprite = c; break; } }
   return JSON.stringify({
     hasTarget: !!t, targetIsChosen: t === (window.__lc && window.__lc.p),
     labelString: t ? ("Lv." + C.cityLevel(t) + " " + C.cityTitle(t)) : null,
@@ -114,7 +114,8 @@ await evl(`(() => {
     C.renderer.__lc = true;
   }
   const gp = grp.position, hy = C.charHeadY(window.__lc.p.char || window.__lc.p);
-  window.__lcCam = { px: gp.x + 0.6, py: gp.y + hy + 0.1, pz: gp.z + 3.6, lx: gp.x, ly: gp.y + hy - 0.1, lz: gp.z };
+  // realistic aim distance (~7m) so the plaque size reads like gameplay
+  window.__lcCam = { px: gp.x + 0.8, py: gp.y + hy - 0.1, pz: gp.z + 7.0, lx: gp.x, ly: gp.y + 1.25, lz: gp.z };
   return true;
 })()`);
 await sleep(600);

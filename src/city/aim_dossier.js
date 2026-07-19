@@ -175,13 +175,13 @@
     if (!labelSprite) {
       labelSprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, depthWrite: false, transparent: true, toneMapped: false }));
       labelSprite.renderOrder = 999;
-      labelSprite.scale.set(2.5, 0.62, 1);
+      labelSprite.scale.set(1.9, 0.475, 1);   // 4:1 plaque, tasteful over a head
     }
     if (a !== labelActor) {
       const og = groupOf(labelActor);
       if (og) og.remove(labelSprite);
       grp.add(labelSprite);
-      labelSprite.position.set(0, CBZ.charHeadY(a.char || a) + 0.32, 0);
+      labelSprite.position.set(0, CBZ.charHeadY(a.char || a) + 0.28, 0);
       labelActor = a; labelKey = "";
     }
     const key = lvl + "|" + title + "|" + col;
