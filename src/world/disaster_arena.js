@@ -15,9 +15,9 @@
    stand on. They register their floors/stairs/roof as CBZ.platforms and
    their walls as height-gated CBZ.colliders, so the new vertical physics
    lets you go inside and up. None of them are safe: the earthquake
-   topples each one as a single piece (walls, floors AND roof) — there is
-   no safe building, only high ground, luck, and the shrinking safe zone
-   (systems/safezone.js) squeezing everyone toward the centre.
+   topples each one as a single piece (walls, floors AND roof) — there
+   is no safe building, only the right KIND of shelter for each hazard,
+   high ground, and luck. (No zones — the disasters are the pressure.)
 
    CBZ.buildDisasterArena() builds once and returns the arena descriptor.
 ============================================================ */
@@ -439,11 +439,29 @@
     // ---- STREETS: dark asphalt running in flat, contiguous runs along grid
     // lines, with a dashed centre line. Hills/mountain break the runs so roads
     // never float. roadSegs feeds the car scatter below. ----
-    // polygonOffset floats the road decals clear of the island disc so they
-    // don't shimmer/z-fight at distance (same numbers the city decals use);
-    // the dashes offset one step further so they win over the asphalt too.
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0x33363d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    // SURV_ROAD_LAYERS (round 2 of the flicker fix): the polygonOffset pass
+    // did NOT hold on real hardware (iPad) — mobile TBDR GPUs map offset
+    // factor/units to depth precision differently than SwiftShader, and the
+    // arena laid BOTH road directions at the same y (0.05) with the SAME
+    // material, so every avenue/cross-street intersection was two coplanar
+    // opaque planes z-fighting. The city never flickers because it separates
+    // by GEOMETRY, copying its exact proven constants here:
+    //   ground 0 → avenues +0.04 → cross-streets +0.045 → paint +0.057.
+    // Roads carry NO polygonOffset (pure y-separation, like city asphalt);
+    // only the paint dashes keep the city's decal recipe (offset -2/-2 +
+    // renderOrder 1 + userData.roadPaint so a batch pass can never strip the
+    // offset — the exact guard city/world.js documents). No two planes that
+    // can overlap ever share a y. false = the old 0.05/0.07 offset stack.
+    const LAYERS = !CBZ.CONFIG || CBZ.CONFIG.SURV_ROAD_LAYERS !== false;
+    const ROAD_Y_AVE = LAYERS ? 0.04 : 0.05;     // avenues (run along z)
+    const ROAD_Y_CROSS = LAYERS ? 0.045 : 0.05;  // cross-streets (run along x)
+    const PAINT_Y = LAYERS ? 0.057 : 0.07;       // centre-line dashes
+    const roadMat = LAYERS
+      ? new THREE.MeshLambertMaterial({ color: 0x33363d })
+      : new THREE.MeshLambertMaterial({ color: 0x33363d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const lineMat = LAYERS
+      ? new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+      : new THREE.MeshBasicMaterial({ color: 0xf2d14a, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     const roadSegs = [];
     const ROADW = 7;
     function layRoadLine(fixed, vertical) {
@@ -464,13 +482,16 @@
         const midT = (a + bb) / 2, len = bb - a;
         const x = vertical ? fixed : cx + midT, z = vertical ? cz + midT : fixed;
         const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
-        m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.receiveShadow = true; root.add(m);
+        // avenues and cross-streets on SPLIT y levels (city constants) so the
+        // planes overlapping at every intersection can never z-fight
+        m.rotation.x = -Math.PI / 2; m.position.set(x, vertical ? ROAD_Y_AVE : ROAD_Y_CROSS, z); m.receiveShadow = true; root.add(m);
         const dashes = Math.max(1, Math.floor(len / 6));
         for (let i = 0; i < dashes; i++) {
           const tt = a + (i + 0.5) * (len / dashes);
           const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
           const dm = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? 0.3 : 2.4, vertical ? 2.4 : 0.3), lineMat);
-          dm.rotation.x = -Math.PI / 2; dm.position.set(lx, 0.07, lz); root.add(dm);
+          dm.rotation.x = -Math.PI / 2; dm.position.set(lx, PAINT_Y, lz); root.add(dm);
+          if (LAYERS) { dm.renderOrder = 1; dm.userData.roadPaint = true; }
         }
         roadSegs.push({ x, z, len, vertical });
       });
@@ -503,8 +524,12 @@
     // roof is a height-gated collider so you drive/walk under it freely. ----
     function makeGasStation(ox, oz) {
       const gy = groundHeightAt(ox, oz);
-      const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), new THREE.MeshLambertMaterial({ color: 0x41464d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-      pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + 0.05, oz); pad.receiveShadow = true; root.add(pad);
+      const pad = new THREE.Mesh(new THREE.PlaneGeometry(20, 16), LAYERS
+        ? new THREE.MeshLambertMaterial({ color: 0x41464d })
+        : new THREE.MeshLambertMaterial({ color: 0x41464d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      // the forecourt apron rides the avenue level: pure geometric separation
+      // from the ground, same as every road plane (SURV_ROAD_LAYERS)
+      pad.rotation.x = -Math.PI / 2; pad.position.set(ox, gy + (LAYERS ? ROAD_Y_AVE : 0.05), oz); pad.receiveShadow = true; root.add(pad);
       const CH = 5.2;
       [[-6, -3.4], [6, -3.4], [-6, 3.4], [6, 3.4]].forEach(([px, pz]) => box(ox + px, gy + CH / 2, oz + pz, 0.55, CH, 0.55, 0xeef1f4, { solid: true }));
       box(ox, gy + CH + 0.45, oz, 14.5, 0.9, 9.5, 0xfbfcfe, { solid: true, y0: gy + CH, y1: gy + CH + 0.9 });
