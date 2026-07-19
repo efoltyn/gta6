@@ -472,8 +472,13 @@
       // clutter that read like a debug overlay; level now floats over the head
       // (aim_dossier), and the standing still gates the verb underneath.
       // A verb card (airliner BOARD/HIJACK) carries NO question line at all —
-      // the rows ARE the proposition.
-      noteEl.textContent = rows.dualRide ? "" : (rows[0].proposal || "Continue") + "?";
+      // the rows ARE the proposition. Same on TOUCH (owner: the card read
+      // "Zip tie them?" with a ZIP TIE pill right under it — say it ONCE):
+      // verb pills carry the proposal themselves, so the question line only
+      // exists for the keyboard's YES/NO rows.
+      const touchVerbsNote = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
+      noteEl.textContent = (rows.dualRide || touchVerbsNote) ? "" : (rows[0].proposal || "Continue") + "?";
+      noteEl.style.display = (rows.dualRide || touchVerbsNote) ? "none" : "";
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;
