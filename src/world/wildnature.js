@@ -748,6 +748,101 @@
       wingIM.instanceColor = new THREE.InstancedBufferAttribute(wCol, 3);
       root.add(bodyIM); root.add(wingIM);
 
+      // ============================================================
+      //  LIVE BIRDS (ANIMALS_ALL_CONTROLLABLE) — the flocks stop being pure
+      //  scenery: every bird carries a lightweight record on the shared
+      //  CBZ.cityWildlife registry (the dogs-facade pattern: external:true so
+      //  wildlife.js never drives it; onShot routes cityWildlifeHit damage
+      //  back here), which makes each one a REAL hitscan target — shoot one
+      //  and it tumbles out of the sky while its whole flock bursts apart;
+      //  any nearby gunshot scatters them too (standard capture-and-wrap on
+      //  CBZ.cityAlarm, markers copied forward). Placement stays 100%
+      //  deterministic — records add ZERO draws on this file's seeded rng;
+      //  panic + respawn are runtime-only FX (Math.random is legal there).
+      // ============================================================
+      const CTL = !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false);
+      const BIRD_SPECIES = {
+        id: "songbird", name: "Songbird", rarity: "common", biome: "wilderness",
+        hp: 4, spd: 6.5, danger: 0, scale: 0.35, respawn: false,   // never in the breeding pass
+      };
+      function scatterFlocks(x, z, r) {
+        for (let f = 0; f < flocks.length; f++) {
+          const fl = flocks[f];
+          let near = false;
+          for (let i = 0; i < fl.birds.length && !near; i++) {
+            const b = fl.birds[i];
+            if (b.parked || b.falling) continue;
+            const dx = b.x - x, dz = b.z - z;
+            if (dx * dx + dz * dz < r * r) near = true;
+          }
+          if (near) { fl.panicT = Math.max(fl.panicT || 0, 4); fl.panicX = x; fl.panicZ = z; }
+        }
+      }
+      function birdShot(b, hit, w) {
+        const rec = b.rec;
+        if (!rec || rec.dead) return { head: false, down: false, dmg: 0 };
+        const dmg = Math.max(1, Math.round((w && w.damage) || 20));
+        rec.hp -= dmg;
+        scatterFlocks(b.x, b.z, 70);                     // the hit panics the sky
+        if (rec.hp <= 0) {
+          rec.dead = true; rec.state = "dead";
+          b.falling = true; b.vy = Math.min(b.vy || 0, -1);
+          b.spin = (Math.random() - 0.5) * 9;
+          if (CBZ.cityKillFeed) { try { CBZ.cityKillFeed("You", "Songbird", "hunted"); } catch (e) {} }
+          return { head: !!(hit && hit.head), down: true, dmg: dmg };
+        }
+        return { head: !!(hit && hit.head), down: false, dmg: dmg };
+      }
+      if (CTL && CBZ.cityWildlife) {
+        for (let f = 0; f < flocks.length; f++) {
+          const fl = flocks[f];
+          for (let i = 0; i < fl.birds.length; i++) {
+            const b = fl.birds[i];
+            // proxy "group": a REAL (never-rendered, never-scene-added)
+            // THREE.Group — fpsmode's sphere scan reads .position/.visible,
+            // and systems/markers.js eagerly a.group.add()s an overhead
+            // marker into every wildlife record's group (a plain object here
+            // crashed its tick). The torso sphere sits at group.y + 1.0, so
+            // the proxy rides 1.0 BELOW the bird to land the sphere on it.
+            const gproxy = new THREE.Group();
+            gproxy.position.set(b.x, b.y - 1.0, b.z);
+            const rec = {
+              animal: true, external: true, bird: true, kind: "bird",
+              species: BIRD_SPECIES, dead: false, hp: BIRD_SPECIES.hp, maxHp: BIRD_SPECIES.hp,
+              ko: 0, escaped: false, state: "fly", alarm: 0,
+              pos: { x: b.x, y: b.y, z: b.z },
+              group: gproxy,
+            };
+            rec.onShot = (function (bb) { return function (hit, w) { return birdShot(bb, hit, w); }; })(b);
+            b.rec = rec;
+            CBZ.cityWildlife.push(rec);
+          }
+        }
+      }
+      function setBirdRecsVisible(v) {
+        for (let f = 0; f < flocks.length; f++) {
+          const birds = flocks[f].birds;
+          for (let i = 0; i < birds.length; i++) if (birds[i].rec) birds[i].rec.group.visible = v;
+        }
+      }
+      // gunshot panic hook — retried from the tick until CBZ.cityAlarm exists.
+      let birdAlarmOk = !CTL;
+      function installBirdAlarm() {
+        if (birdAlarmOk) return;
+        const alarm = CBZ.cityAlarm;
+        if (typeof alarm !== "function") return;
+        if (alarm._birdScatterWrapped) { birdAlarmOk = true; return; }
+        const wrap = function (x, z) {
+          try { scatterFlocks(x, z, 95); } catch (e) {}
+          return alarm.apply(this, arguments);
+        };
+        for (const k in alarm) wrap[k] = alarm[k];       // carry other wrappers' markers forward
+        wrap._birdScatterWrapped = true;
+        CBZ.cityAlarm = wrap;
+        birdAlarmOk = true;
+      }
+      installBirdAlarm();
+
       // ---- BOIDS TUNING (small weights summed per rule, exactly the classic
       //      recipe) — tuned so the emergent motion reads as a loose wheeling
       //      flock, not a rigid formation or a scatter. --------------------
@@ -768,6 +863,8 @@
       function updateFlock(fl, dt) {
         const birds = fl.birds;
         const n = birds.length;
+        const panicked = (fl.panicT || 0) > 0;           // gunshot scatter window
+        if (panicked) fl.panicT -= dt;
 
         // flock-centre wander: occasionally retarget a point within wanderR
         // of home (deterministic rng-driven heading change, deer-style).
@@ -783,12 +880,14 @@
         // unordered pairs; trivially cheap, no spatial grid needed at this scale).
         for (let i = 0; i < n; i++) {
           const bi = birds[i];
+          if (bi.falling || bi.parked) continue;         // shot birds are out of the boids
           let sepX = 0, sepY = 0, sepZ = 0;
           let aliX = 0, aliY = 0, aliZ = 0, aliN = 0;
           let cohX = 0, cohY = 0, cohZ = 0, cohN = 0;
           for (let j = 0; j < n; j++) {
             if (j === i) continue;
             const bj = birds[j];
+            if (bj.falling || bj.parked) continue;
             const dx = bj.x - bi.x, dy = bj.y - bi.y, dz = bj.z - bi.z;
             const d2 = dx * dx + dy * dy + dz * dz;
             if (d2 > NEIGHBOR_R2) continue;
@@ -822,21 +921,80 @@
           az += (targetZ - bi.z) * W_HOME * 0.01;
           ay += (fl.homeY - bi.y) * W_HOME * 0.02;
 
+          // GUNSHOT PANIC — a hard burst up & away from the bang; the boids
+          // terms keep running so the scatter still reads as a FLOCK exploding
+          // outward, then re-knitting itself as the panic decays.
+          if (panicked) {
+            const pdx = bi.x - fl.panicX, pdz = bi.z - fl.panicZ;
+            const pd = Math.hypot(pdx, pdz) || 1;
+            ax += (pdx / pd) * 16; az += (pdz / pd) * 16; ay += 7;
+          }
+
           bi.vx += ax * dt; bi.vy += ay * dt; bi.vz += az * dt;
+          const maxSp = panicked ? MAX_SPEED * 1.8 : MAX_SPEED;
           const sp = Math.hypot(bi.vx, bi.vy, bi.vz) || 0.0001;
-          const clamped = sp > MAX_SPEED ? MAX_SPEED : (sp < MIN_SPEED ? MIN_SPEED : sp);
+          const clamped = sp > maxSp ? maxSp : (sp < MIN_SPEED ? MIN_SPEED : sp);
           const scale = clamped / sp;
           bi.vx *= scale; bi.vy *= scale; bi.vz *= scale;
         }
         for (let i = 0; i < n; i++) {
           const bi = birds[i];
+          if (bi.parked) {
+            // resting where it fell; after a while it "recovers" and rejoins
+            // the flock at altitude (runtime-only FX — Math.random is legal).
+            bi.respawnT = (bi.respawnT || 40) - dt;
+            if (bi.respawnT <= 0 && bi.rec) {
+              bi.parked = false; bi.falling = false;
+              bi.rec.dead = false; bi.rec.hp = bi.rec.maxHp; bi.rec.state = "fly";
+              bi.x = fl.homeX + (Math.random() - 0.5) * 10;
+              bi.z = fl.homeZ + (Math.random() - 0.5) * 10;
+              bi.y = fl.homeY + (Math.random() - 0.5) * 4;
+              const h2 = Math.random() * Math.PI * 2;
+              bi.vx = Math.cos(h2) * 3; bi.vz = Math.sin(h2) * 3; bi.vy = 0;
+            }
+            continue;
+          }
+          if (bi.falling) {
+            // shot out of the sky: gravity + tumble until the ground takes it.
+            bi.vy -= 22 * dt;
+            bi.x += bi.vx * dt * 0.3; bi.z += bi.vz * dt * 0.3; bi.y += bi.vy * dt;
+            bi.tumble = (bi.tumble || 0) + (bi.spin || 7) * dt;
+            // module groundY (terrainHeight) — the wilderness ground the trees
+            // use, NOT the city floorAt (which would sink a carcass into hills)
+            const gy = groundY(bi.x, bi.z) || 0;
+            if (bi.y <= gy + 0.06) {
+              bi.y = gy + 0.06;
+              bi.falling = false; bi.parked = true;
+              bi.respawnT = 40 + Math.random() * 40;
+            }
+            continue;
+          }
           bi.x += bi.vx * dt; bi.y += bi.vy * dt; bi.z += bi.vz * dt;
-          bi.flapPhase += bi.flapSpeed * dt;
+          bi.flapPhase += bi.flapSpeed * (panicked ? 1.7 : 1) * dt;
         }
 
         // ---- write matrices for this flock's birds only ----
         for (let i = 0; i < n; i++) {
           const bi = birds[i];
+          if (bi.rec) {                                   // keep the hit target ON the bird
+            bi.rec.pos.x = bi.x; bi.rec.pos.y = bi.y; bi.rec.pos.z = bi.z;
+            const rp = bi.rec.group.position;
+            rp.x = bi.x; rp.y = bi.y - 1.0; rp.z = bi.z;
+          }
+          if (bi.falling || bi.parked) {
+            // tumbling out of the sky / lying where it fell; wings folded.
+            wm.position.set(bi.x, bi.y, bi.z);
+            wm.rotation.set(bi.parked ? Math.PI / 2 : (bi.tumble || 0),
+              (bi.tumble || 0) * 0.7, bi.parked ? 0.4 : (bi.tumble || 0) * 0.5);
+            wm.scale.set(1, 1, 1.6);
+            wm.updateMatrix();
+            bodyIM.setMatrixAt(bi.bodyIdx, wm.matrix);
+            wm.scale.set(0.25, 1, 0.25);
+            wm.updateMatrix();
+            wingIM.setMatrixAt(bi.wingIdxL, wm.matrix);
+            wingIM.setMatrixAt(bi.wingIdxR, wm.matrix);
+            continue;
+          }
           const heading = Math.atan2(bi.vx, bi.vz);         // yaw so the body nose follows velocity
           const pitch = -Math.atan2(bi.vy, Math.hypot(bi.vx, bi.vz) || 0.0001) * 0.6;
 
@@ -860,6 +1018,7 @@
 
       CBZ.onUpdate(99.25, function (dt) {
         if (!dt || dt > 0.5) dt = 0.05;        // clamp pauses / first frame (deer-style)
+        if (!birdAlarmOk) installBirdAlarm();  // retry until the combat hook exists
 
         // reuse the tree distanceLOD's near/far thresholds so birds freeze
         // (matrices simply stop being touched — cheapest possible "off")
@@ -868,8 +1027,8 @@
         if (P && P.pos) {
           const d = Math.hypot(P.pos.x - fieldCX, P.pos.z - fieldCZ);
           const LOD_FAR = fieldR + RING * 0.65, LOD_NEAR = fieldR + RING * 0.45;
-          if (detailed && d > LOD_FAR) detailed = false;
-          else if (!detailed && d < LOD_NEAR) detailed = true;
+          if (detailed && d > LOD_FAR) { detailed = false; setBirdRecsVisible(false); }   // frozen birds can't be shot
+          else if (!detailed && d < LOD_NEAR) { detailed = true; setBirdRecsVisible(true); }
         }
         if (!detailed) return;
 

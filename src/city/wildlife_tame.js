@@ -34,6 +34,15 @@
   const HEEL_R = 6.5;            // tamed follower stops this close
   const FOLLOW_MULT = 2.1;       // tamed follower hustle (× species wander spd)
 
+  // ---- ANIMALS_ALL_CONTROLLABLE — the one-line revert for the "every animal
+  // can be controlled" overhaul. ON (default): deer-class + farm stock join
+  // the rideable roster, WILD rideable animals offer a bronco "try to mount",
+  // tamed animals take a GO-TO command ("send ahead"), and aquatic life is
+  // interactive (feed/tame/pet when you swim up to it; a tamed dolphin swims
+  // with you — see wildlife.js). OFF: exactly the old tame/ride behavior.
+  if (CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE == null) CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE = true;
+  function ALLCTL() { return !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false); }
+
   function groundY(x, z) { return (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) || 0; }
   function animals() { return CBZ.cityWildlife || []; }
   function note(msg, sec, o) { if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, sec, o); }
@@ -74,6 +83,22 @@
     white_lion:       { y: 1.25, mult: 2.3 },
     snow_leopard:     { y: 0.95, mult: 2.5 },
   };
+  // deer-class + the rest of the farm stock (ANIMALS_ALL_CONTROLLABLE): every
+  // land animal big enough to take a rider is a mount — a whitetail is a
+  // skittish fast ride, a pig/sheep a slow barnyard joke that still WORKS.
+  // Saddle heights read off each build's actual back line (× species scale).
+  const RIDEABLE_EXTRA = {
+    whitetail_deer: { y: 1.4,  mult: 2.15 },
+    pig:            { y: 0.9,  mult: 1.35 },
+    sheep:          { y: 1.2,  mult: 1.35 },
+    goat:           { y: 0.95, mult: 1.55 },
+  };
+  // THE one rideable lookup — every gate below goes through this, so the
+  // extra roster is a single-flag revert.
+  function rideDef(sp) {
+    if (!sp || !sp.id) return null;
+    return RIDEABLE[sp.id] || (ALLCTL() ? RIDEABLE_EXTRA[sp.id] : null) || null;
+  }
 
   // ============================================================
   //  FEEDING / TAMING — predators take hunted MEAT, herbivores any food.
@@ -105,7 +130,7 @@
       a.tamed = true; a.petName = NAMES[(Math.random() * NAMES.length) | 0];
       a.stay = false;
       note("❤ The " + sp.name + " is yours! Meet " + a.petName +
-        (RIDEABLE[sp.id] ? (a.grow != null ? " — rideable once it grows up." : " — you can RIDE it.") : "."),
+        (rideDef(sp) ? (a.grow != null ? " — rideable once it grows up." : " — you can RIDE it.") : "."),
         3.6, sp.rarity === "legendary" ? { urgent: true } : undefined);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(sp.rarity === "legendary" ? 10 : 2);
     } else {
@@ -117,6 +142,26 @@
   //  TAMED FOLLOW — called from wildlife.js's tick for every tamed land
   //  animal. NEVER teleports: however far you get, it runs your way.
   // ============================================================
+  // clamped-turn step toward a point: the body swings toward the target at a
+  // bounded rate and always MOVES ALONG ITS FACING — arcs, never pivot-snaps
+  // or sideways glides (the same facing model the wild state machine uses).
+  function steppedMove(a, tx, tz, spd, dt, panic) {
+    const grp = a.group, sp = a.species;
+    const dx = tx - grp.position.x, dz = tz - grp.position.z;
+    const want = Math.atan2(dz, dx);
+    if (a.faceH == null) a.faceH = want;
+    let fd = want - a.faceH;
+    while (fd > Math.PI) fd -= 2 * Math.PI; while (fd < -Math.PI) fd += 2 * Math.PI;
+    const mx = ((panic ? 7 : 4.2) / (1 + (sp.scale || 1) * 0.25)) * dt;
+    if (fd > mx) fd = mx; else if (fd < -mx) fd = -mx;
+    a.faceH += fd; a.heading = a.faceH;
+    grp.position.x += Math.cos(a.faceH) * spd * dt;
+    grp.position.z += Math.sin(a.faceH) * spd * dt;
+    grp.position.y = groundY(grp.position.x, grp.position.z);
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(a, a.faceH);
+    else grp.rotation.y = -a.faceH;
+  }
+
   CBZ.cityTameFollow = function (a, dt) {
     // companions.js takes over movement while the pet is actively fighting a
     // threat or fleeing one (trait-driven defense) — yield to it this frame.
@@ -125,11 +170,26 @@
     if (!P) return;
     const dx = P.x - grp.position.x, dz = P.z - grp.position.z;
     const d = Math.hypot(dx, dz);
+    // GO-TO (ANIMALS_ALL_CONTROLLABLE): sent to a spot, it RUNS there (real
+    // locomotion, never a teleport), then waits — stay — until called back.
+    if (a.goTo) {
+      const gd = Math.hypot(a.goTo.x - grp.position.x, a.goTo.z - grp.position.z);
+      if (gd <= 1.7) {
+        a.goTo = null; a.stay = true;
+        note((a.petName || sp.name) + " waits there.", 1.6);
+        faceAnimal(a, Math.atan2(dz, dx));
+      } else {
+        steppedMove(a, a.goTo.x, a.goTo.z, (sp.spd || 1.6) * FOLLOW_MULT * (a.grow != null ? 0.8 : 1), dt, true);
+      }
+      return;
+    }
     if (a.stay || d <= HEEL_R) {                    // parked / at heel: face you
       faceAnimal(a, Math.atan2(dz, dx));
       return;
     }
     const spd = (sp.spd || 1.6) * FOLLOW_MULT * (a.grow != null ? 0.8 : 1);
+    if (ALLCTL()) { steppedMove(a, P.x, P.z, spd, dt, d > 20); return; }
+    // legacy beeline (flag off): the exact old follow
     grp.position.x += (dx / d) * spd * dt;
     grp.position.z += (dz / d) * spd * dt;
     grp.position.y = groundY(grp.position.x, grp.position.z);
@@ -142,17 +202,17 @@
   const ride = { mount: null, head: 0, phase: 0, lx: 0, lz: 0 };
 
   function canRide(a) {
-    return !!(a && a.tamed && !a.dead && RIDEABLE[a.species.id] && a.grow == null);
+    return !!(a && a.tamed && !a.dead && rideDef(a.species) && a.grow == null);
   }
   function mount(a) {
     if (!canRide(a) || ride.mount) return;
     const P = CBZ.player;
-    ride.mount = a; a.ridden = true; a.stay = false;
+    ride.mount = a; a.ridden = true; a.stay = false; a.goTo = null;
     ride.lx = P.pos.x; ride.lz = P.pos.z; ride.phase = 0;
     ride.head = Math.atan2(P.pos.z - a.pos.z, P.pos.x - a.pos.x);
     // step onto the animal (you walk to IT, it doesn't snap to you)
     P.pos.x = a.pos.x; P.pos.z = a.pos.z;
-    P._rideScale = RIDEABLE[a.species.id].mult;
+    P._rideScale = rideDef(a.species).mult;
     note("Riding " + (a.petName || a.species.name) + " — E to dismount.", 2.4);
   }
   // One public route for direct-touch/controller helpers. Tamed animals mount
@@ -161,7 +221,7 @@
   // on the player. Success is deliberately uncommon for dangerous wildlife and
   // establishes the same persistent tame relationship as feeding.
   function attemptMount(a) {
-    if (!a || a.dead || a.external || a.species.aquatic || !RIDEABLE[a.species.id] || a.grow != null) return false;
+    if (!a || a.dead || a.external || a.species.aquatic || !rideDef(a.species) || a.grow != null) return false;
     if (ride.mount) { if (ride.mount === a) dismount(); return true; }
     if (a.tamed) { mount(a); return ride.mount === a; }
 
@@ -179,7 +239,10 @@
     }
 
     a.alarm = Math.max(a.alarm || 0, 5);
-    a.state = danger >= 0.28 ? "attack" : "flee";
+    // real state-machine states only: "charge" turns on you and later gives up
+    // on its own; the old "attack" label had no handler and froze the animal.
+    a.state = danger >= 0.28 ? "charge" : "flee";
+    a.stateT = 5;
     if (CBZ.faceAnimalHeading && CBZ.player && CBZ.player.pos) {
       const dx = CBZ.player.pos.x - a.pos.x, dz = CBZ.player.pos.z - a.pos.z;
       faceAnimal(a, Math.atan2(dz, dx));
@@ -200,12 +263,19 @@
     const P = CBZ.player;
     ride.mount = null; a.ridden = false;
     P._rideScale = 1;
-    // slide off beside the mount, feet on the ground, no fall.
-    P.pos.x += 1.4; P.pos.y = groundY(P.pos.x, P.pos.z); P.vy = 0; P.grounded = true;
+    // slide off beside the mount — a SIDE-step perpendicular to its facing,
+    // scaled by the species' bulk so you land next to an elephant's flank
+    // instead of inside it. Feet on the ground, no fall.
+    if (ALLCTL()) {
+      const side = ride.head + Math.PI / 2;
+      const off = 1.1 + (a.species.scale || 1) * 0.55;
+      P.pos.x += Math.cos(side) * off; P.pos.z += Math.sin(side) * off;
+    } else P.pos.x += 1.4;                            // legacy fixed step (flag off)
+    P.pos.y = groundY(P.pos.x, P.pos.z); P.vy = 0; P.grounded = true;
     a.group.position.set(a.pos.x, groundY(a.pos.x, a.pos.z), a.pos.z);
   }
   CBZ.cityDismount = dismount;   // other systems (death, cars) can force it
-  CBZ.cityCanRideAnimal = function (a) { return !!(a && !a.dead && !a.external && !a.species.aquatic && RIDEABLE[a.species.id] && a.grow == null); };
+  CBZ.cityCanRideAnimal = function (a) { return !!(a && !a.dead && !a.external && !a.species.aquatic && rideDef(a.species) && a.grow == null); };
   CBZ.cityMountAnimal = attemptMount;
 
   // runs AFTER physics (order 10) each frame: seat the rider, glue the mount.
@@ -215,12 +285,24 @@
     const P = CBZ.player;
     // forced dismount: death, cars, the mount dying under you
     if (!P || P.dead || P.driving || a.dead) { dismount(); return; }
-    const R = RIDEABLE[a.species.id];
+    const R = rideDef(a.species);
+    if (!R) { dismount(); return; }                     // roster flag flipped mid-ride
     P._rideScale = R.mult;                              // republish (wounds etc. can't stick)
     const gx = P.pos.x, gz = P.pos.z;
     const mdx = gx - ride.lx, mdz = gz - ride.lz;
     const moving = (mdx * mdx + mdz * mdz) > 1e-6;
-    if (moving) ride.head = Math.atan2(mdz, mdx);
+    if (moving) {
+      if (ALLCTL()) {
+        // the mount TURNS toward the travel direction at a clamped rate (big
+        // animals swing slower) instead of pivot-snapping under the rider.
+        const want = Math.atan2(mdz, mdx);
+        let hd = want - ride.head;
+        while (hd > Math.PI) hd -= 2 * Math.PI; while (hd < -Math.PI) hd += 2 * Math.PI;
+        const trMax = (7.5 / (1 + (a.species.scale || 1) * 0.35)) * dt;
+        if (hd > trMax) hd = trMax; else if (hd < -trMax) hd = -trMax;
+        ride.head += hd;
+      } else ride.head = Math.atan2(mdz, mdx);        // legacy snap (flag off)
+    }
     ride.lx = gx; ride.lz = gz;
     // gallop bob only while moving
     ride.phase += dt * (moving ? 9 : 0.6);
@@ -241,7 +323,9 @@
     const list = animals();
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
-      if (a.dead || a.ridden || a.external || a.species.aquatic) continue;   // carcasses/mount/sea/dogs have their own flows
+      // carcasses/mount/dogs have their own flows. Aquatic life IS interactive
+      // under ANIMALS_ALL_CONTROLLABLE — swim up to a dolphin and feed it.
+      if (a.dead || a.ridden || a.external || (a.species.aquatic && !ALLCTL())) continue;
       const dx = a.pos.x - px, dz = a.pos.z - pz, q = dx * dx + dz * dz;
       if (q < bd) { bd = q; best = a; }
     }
@@ -261,7 +345,7 @@
       const sp = a.species;
       const baby = a.grow != null ? "baby " : "";
       if (a.ridden) return { label: "🐎 Riding " + (a.petName || sp.name), note: "hold on" };
-      if (a.tamed) return { label: "❤ " + a.petName + " the " + baby + sp.name, note: RIDEABLE[sp.id] ? (a.grow != null ? "too young to ride" : "your loyal mount") : "your companion" };
+      if (a.tamed) return { label: "❤ " + a.petName + " the " + baby + sp.name, note: rideDef(sp) ? (a.grow != null ? "too young to ride" : "your loyal mount") : "your companion" };
       return {
         label: (a.legendary ? "★ " : "") + "A " + baby + sp.name,
         note: feedItemFor(sp) ? ("hold food out to tame (" + (a.feeds || 0) + "/" + feedsNeeded(sp) + ")") : (isPredator(sp) ? "tameable — bring MEAT" : "tameable — bring food"),
@@ -293,6 +377,33 @@
       canShow: function (a) { return canRide(a) && !ride.mount; },
       label: function (a) { return "Ride " + a.petName; },
       onSelect: function (a) { mount(a); },
+    });
+    // BRONCO-BREAK a WILD mount (ANIMALS_ALL_CONTROLLABLE): same gamble the
+    // touch helpers already take — succeed and it's tamed under you, fail and
+    // it bucks you off (a dangerous one turns on you).
+    I.register("animal", {
+      id: "animal-break", slot: "i", prio: 21,
+      canShow: function (a) {
+        return ALLCTL() && !ride.mount && a && !a.tamed && !a.dead && !a.species.aquatic &&
+          !!rideDef(a.species) && a.grow == null;
+      },
+      label: function (a) { return "Try to mount the " + a.species.name; },
+      onSelect: function (a) { attemptMount(a); },
+    });
+    // SEND (go-to command): point where you're looking, the companion runs
+    // there and waits. Works on every tamed land animal, snake or pet.
+    I.register("animal", {
+      id: "animal-send", slot: "l", prio: 15,
+      canShow: function (a) { return ALLCTL() && a.tamed && !a.ridden && !a.species.aquatic; },
+      label: function (a) { return a.goTo ? (a.petName + ", forget it — heel") : ("Send " + a.petName + " ahead"); },
+      onSelect: function (a) {
+        if (a.goTo) { a.goTo = null; a.stay = false; note(a.petName + " falls back in.", 1.4); return; }
+        const P = CBZ.player && CBZ.player.pos; if (!P) return;
+        const yaw = CBZ.cam ? (CBZ.cam.yaw || 0) : 0;
+        a.goTo = { x: P.x - Math.sin(yaw) * 16, z: P.z - Math.cos(yaw) * 16 };
+        a.stay = false;
+        note(a.petName + " runs ahead!", 1.6);
+      },
     });
     // STAY / FOLLOW
     I.register("animal", {

@@ -817,7 +817,10 @@
       [lakeX + 40, lakeZ - 30], [-480, -1480], [-720, -1400],
       [-360, -1300], [-620, -1180], [-820, -1560],
     ];
-    if (!sharedDeer) for (let i = 0; i < deerSpots.length; i++) makeDeer(deerSpots[i][0], deerSpots[i][1]);
+    if (!sharedDeer) {
+      for (let i = 0; i < deerSpots.length; i++) makeDeer(deerSpots[i][0], deerSpots[i][1]);
+      CBZ.cityDecorAnimals = (CBZ.cityDecorAnimals || 0) + deerSpots.length;   // audit: decorative animal count
+    }
 
     if (CBZ.onUpdate && deer.length) {
       // WHY rng (not Math.random): owner determinism contract — every other

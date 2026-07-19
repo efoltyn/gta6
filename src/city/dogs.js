@@ -309,6 +309,21 @@
       label: function (d) { return "Feed " + d.name; },
       onSelect: function (d) { feedOwn(d); },
     });
+    // SEND (go-to command, ANIMALS_ALL_CONTROLLABLE): point where you're
+    // looking; the dog runs there and sits until called back.
+    I.register("dog", {
+      id: "dog-send", slot: "l", prio: 15,
+      canShow: function (d) { return d && d.tamed && !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false); },
+      label: function (d) { return d.goTo ? (d.name + ", forget it — heel") : ("Send " + d.name + " ahead"); },
+      onSelect: function (d) {
+        if (d.goTo) { d.goTo = null; d.sit = false; if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + " falls back in.", 1.4); return; }
+        const P = CBZ.player && CBZ.player.pos; if (!P) return;
+        const yaw = CBZ.cam ? (CBZ.cam.yaw || 0) : 0;
+        d.goTo = { x: P.x - Math.sin(yaw) * 16, z: P.z - Math.cos(yaw) * 16 };
+        d.sit = false;
+        if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + " races ahead!", 1.5);
+      },
+    });
   }
 
   // ============================================================
@@ -535,6 +550,21 @@
       if (!P) continue;
       const toPx = P.x - grp.position.x, toPz = P.z - grp.position.z;
       const distP = Math.hypot(toPx, toPz);
+
+      // GO-TO (ANIMALS_ALL_CONTROLLABLE): sent to a spot — sprint there on
+      // real legs, then sit and hold it until called back to heel.
+      if (d.goTo) {
+        const gdx = d.goTo.x - grp.position.x, gdz = d.goTo.z - grp.position.z;
+        const gd = Math.hypot(gdx, gdz);
+        if (gd <= 1.4) {
+          d.goTo = null; d.sit = true;
+          if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + " waits there.", 1.5);
+        } else {
+          d.heading = Math.atan2(gdz, gdx);
+          dogMove(d, SPEED, dt, true);
+          continue;
+        }
+      }
 
       // NO TELEPORTING. However far you get, the dog just runs flat-out toward
       // you at full dog speed and closes the gap on foot — the chase IS the
