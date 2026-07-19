@@ -61,15 +61,21 @@
   //     bank vault becomes a heist SURFACE (the runtime blocks near the bottom
   //     of this file + city/heists.js read it). Flag off → the shelves are inert
   //     decor again and the vault is board-only, exactly as before.
-  //   FACADES_V2 — per-window lit-room variation at night, window AC units on a
-  //     hashed facade subset, and roofline/parapet trim for the plain tops the
-  //     BUILDING_MASSING_V2 pass leaves on low blocks. All deterministic
-  //     (CBZ.hash01), flat-Lambert, batch-mergeable, zero new colliders.
+  //   FACADES_V2 — per-window lit-room variation at night and roofline/parapet
+  //     trim for the plain tops the BUILDING_MASSING_V2 pass leaves on low
+  //     blocks. All deterministic (CBZ.hash01), flat-Lambert, batch-mergeable,
+  //     zero new colliders.
+  //   FACADE_AC_UNITS — the old through-the-wall window AC boxes (owner-cut:
+  //     they covered shop signage). Default OFF = no AC boxes; true restores
+  //     them. Placement is position-hashed (CBZ.hash01, no shared rng draws),
+  //     so toggling emits/skips meshes without shifting any other stream.
   // Self-defaulted here (config.js may also set them); every read uses the
-  // `!== false` idiom so an unset value still counts as ON.
+  // `!== false` idiom so an unset value still counts as ON (FACADE_AC_UNITS
+  // is the exception: default OFF, read with `=== true`).
   if (CBZ.CONFIG) {
     if (CBZ.CONFIG.SHOPS_ROBBABLE_V1 == null) CBZ.CONFIG.SHOPS_ROBBABLE_V1 = true;
     if (CBZ.CONFIG.FACADES_V2 == null) CBZ.CONFIG.FACADES_V2 = true;
+    if (CBZ.CONFIG.FACADE_AC_UNITS == null) CBZ.CONFIG.FACADE_AC_UNITS = false;
   }
   // Deterministic LCG (owner rule: no Math.random) for the runtime decal
   // helpers below (cityBulletHole/cityScorch) -- everything else in this file
@@ -2049,18 +2055,18 @@
   // the building level rather than sprinkled randomly across a facade.
   const DISTRICT_KITS = {
     core:        { hueJitter: 4,  satMul: [1.00, 1.05], lightMul: [1.00, 1.05], glassTintBias: 0,
-                   terminals: { blankPanel: 0, balconyWindow: 0.02, acUnit: 0 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.02 } },
     commercial:  { hueJitter: 8,  satMul: [0.95, 1.08], lightMul: [0.96, 1.06], glassTintBias: 1,
-                   terminals: { blankPanel: 0, balconyWindow: 0.05, acUnit: 0 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.05 } },
     residential: { hueJitter: 14, satMul: [0.90, 1.12], lightMul: [0.92, 1.08], glassTintBias: 0,
-                   terminals: { blankPanel: 0, balconyWindow: 0.24, acUnit: 0 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.24 } },
     projects:    { hueJitter: 10, satMul: [0.55, 0.82], lightMul: [0.76, 0.92], glassTintBias: 2,
-                   terminals: { blankPanel: 0, balconyWindow: 0.04, acUnit: 0 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.04 } },
     industrial:  { hueJitter: 10, satMul: [0.60, 0.86], lightMul: [0.78, 0.94], glassTintBias: 2,
-                   terminals: { blankPanel: 0, balconyWindow: 0.02, acUnit: 0 } },
+                   terminals: { blankPanel: 0, balconyWindow: 0.02 } },
   };
   const DEFAULT_KIT = { hueJitter: 10, satMul: [0.92, 1.08], lightMul: [0.94, 1.06], glassTintBias: 0,
-                         terminals: { blankPanel: 0, balconyWindow: 0.06, acUnit: 0 } };
+                         terminals: { blankPanel: 0, balconyWindow: 0.06 } };
 
   // hue-locked wall jitter: keep the district's hue family but jitter sat/light
   // a touch per-building so a whole block isn't one flat colour. Position-hashed
@@ -2703,12 +2709,14 @@
               if (lit) _facadeLit++;                            // deterministic tally (gate)
               CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: lit, warm: warm });
             }
-            // WINDOW AC UNIT (FACADES_V2): a hashed minority of residential windows
-            // wear a chunky through-the-wall AC box on the outer sill. Merged deco
-            // (dbox → flushDeco, cast:false, no collider); ≥0.3u members so it never
-            // reads as floating trim. Wall-mounted flush to the pane face, below the
-            // opening. Deterministic (CBZ.hash01, position + floor salt).
-            if (punched && !(CBZ.CONFIG && CBZ.CONFIG.FACADES_V2 === false) && CBZ.hash01
+            // WINDOW AC UNIT (FACADE_AC_UNITS, default OFF — owner-cut: the boxes
+            // covered shop signage). When re-enabled, a hashed minority of
+            // residential windows wear a chunky through-the-wall AC box on the
+            // outer sill. Merged deco (dbox → flushDeco, cast:false, no collider).
+            // Placement is a pure position-hash (CBZ.hash01) — no shared rng()
+            // stream draws — so skipping emission never reorders anything else.
+            if (punched && CBZ.CONFIG && CBZ.CONFIG.FACADE_AC_UNITS === true
+                && !(CBZ.CONFIG.FACADES_V2 === false) && CBZ.hash01
                 && spanW > 0.7 && CBZ.hash01(ox + cx, oz + cz, 0x2ac1 + k * 13) < 0.22) {
               const acW = Math.min(0.9, spanW * 0.66), acH = 0.42, acD = 0.4;   // chunky box
               const acY = cy - spanH / 2 + acH / 2 + 0.04;                       // seated on the sill
@@ -2845,13 +2853,12 @@
             //   window        — the default (plain curtain-wall pane, as before)
             //   blankPanel    — solid wall-coloured infill, breaks the grid
             //   balconyWindow — window + a thin projecting slab & rail (upper floors)
-            //   acUnit        — window + a small AC box tucked under the sill
             // Weighted per DISTRICT_KITS (opts.district) so core reads glassy/
-            // clean, projects/industrial read boarded + AC-heavy, residential gets
-            // balconies. Contiguous plain "window" bays are merged back into ONE
-            // glazeOpening call (same pooled-pane grid + interior glow as the old
-            // single curtain-wall band) so the common case is draw-call IDENTICAL;
-            // only the accent bays (balcony/AC/blank) get individual treatment.
+            // clean and residential gets balconies. Contiguous plain "window"
+            // bays are merged back into ONE glazeOpening call (same pooled-pane
+            // grid + interior glow as the old single curtain-wall band) so the
+            // common case is draw-call IDENTICAL; only the accent bays
+            // (balcony/blank) get individual treatment.
             const sillH = modern ? 0.55 : 0.9;                  // sill top above floor
             const hdrH = modern ? 0.45 : 0.7;                   // header depth below ceiling
             const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
@@ -2905,7 +2912,8 @@
                 glazeOpening(rcx, winCy, rcz, runW - 0.04, winPh);
                 bi = bj;
               } else {
-                // balconyWindow / acUnit: an individually-glazed bay + accessory
+                // balconyWindow: an individually-glazed bay + slab/rail accessory.
+                // (The acUnit terminal is gone — owner-cut with FACADE_AC_UNITS.)
                 glazeOpening(cx, winCy, cz, bayW - 0.04, winPh);
                 if (term === "balconyWindow") {
                   const bw = bayW - 0.2, projD = 0.55, railH = 0.85, slabY = winY0 - 0.35;
@@ -2916,10 +2924,6 @@
                     dbox(f.x + outSgn * (WT / 2 + projD / 2), slabY, t, projD, 0.08, bw, TRIM);
                     dbox(f.x + outSgn * (WT / 2 + projD - 0.03), slabY + railH / 2, t, 0.05, railH, bw, MULL);
                   }
-                } else {
-                  const acw = Math.min(0.6, bayW * 0.35), ach = 0.32, acd = 0.28, acY = winY0 - ach / 2 - 0.08;
-                  if (f.horiz) dbox(t, acY, f.z + outSgn * (WT / 2 + acd / 2), acw, ach, acd, 0x8a8f96);
-                  else dbox(f.x + outSgn * (WT / 2 + acd / 2), acY, t, acd, ach, acw, 0x8a8f96);
                 }
                 bi++;
               }
@@ -3485,14 +3489,24 @@
       k.seatAt(cx + s * 0.9, cz, -s * Math.PI / 2, "chair");   // face the little table
   }
   function setBackroom(k, r) {
-    // tall shelving runs + crates: a stockroom that reads as the back of house
-    for (const s of [-1, 1]) {
-      const x = s < 0 ? r.x0 + 0.6 : r.x1 - 0.6;
-      k.put(x, 1.2, rcz(r), 0.6, 2.2, Math.min(r.z1 - r.z0 - 0.8, 4.0), 0x55606e, 0.8);  // tall shelving
+    // SPACE DOCTRINE (owner): a separate back room is an OFFICE — ONE desk
+    // with a lit screen, one chair, ONE shelf run, and SPACE. The old fill
+    // (two tall shelving runs + three crate stacks, squatting right on the
+    // doorway line) read as a junk cage. Everything hugs a wall or corner
+    // now; the centre — the walking line through the partition gap — is OPEN.
+    const hor = (r.x1 - r.x0) >= (r.z1 - r.z0);        // long axis of the room
+    // ONE tall shelf run against a short-end wall, clear of the centre line
+    if (hor) k.put(r.x0 + 0.6, 1.2, rcz(r), 0.6, 2.2, Math.min(r.z1 - r.z0 - 0.8, 3.2), 0x55606e, 0.8);
+    else     k.put(rcx(r), 1.2, r.z0 + 0.6, Math.min(r.x1 - r.x0 - 0.8, 3.2), 2.2, 0.6, 0x55606e, 0.8);
+    // ONE desk in the far corner (long side along the wall), screen lit
+    const dx = hor ? r.x1 - 1.2 : r.x1 - 0.75, dz = hor ? r.z1 - 0.75 : r.z1 - 1.2;
+    const dw = hor ? 1.6 : 0.8, dd = hor ? 0.8 : 1.6;
+    if (k.put(dx, 0.4, dz, dw, 0.8, dd, 0x6b4a2a, 0.8)) {
+      k.glow(dx, 0.95, dz, hor ? 0.5 : 0.08, 0.3, hor ? 0.08 : 0.5, 0x9fd8ee, 0.5, 0.8);   // desk monitor (seated on the 0.8 desktop)
+      const cx2 = hor ? dx : dx - 1.05, cz2 = hor ? dz - 1.05 : dz;
+      if (k.put(cx2, 0.45, cz2, 0.45, 0.9, 0.45, 0x2a2f37, 0.7))
+        k.seatAt(cx2, cz2, Math.atan2(dx - cx2, dz - cz2), "chair");   // face the desk
     }
-    k.put(rcx(r), 0.4, r.z0 + 0.8, 1.0, 0.8, 1.0, 0x6b5a3a, 0.9);                    // crate stack
-    k.put(rcx(r), 1.1, r.z0 + 0.8, 0.9, 0.6, 0.9, 0x5a4a2e, 0.9);                    // crate stack
-    k.put(rcx(r) + 1.2, 0.45, rcz(r), 1.0, 0.9, 1.0, 0x6b5a3a, 0.9);                 // crate
   }
 
   // ---- interior furnishing ------------------------------------------------
@@ -3613,35 +3627,34 @@
       }
     }
 
-    // ---- shared BASE CLUTTER every shop gets (stools/chair, waste bin, a wall
-    // clock plane, a potted plant, an emissive ceiling-tile strip). Cheap, and
-    // every piece is gated by pt()'s clearFloorPoint so the aisle stays open.
-    function baseClutter(accent) {
+    // ---- shared BASE DRESSING every shop gets (a waste bin, a potted plant,
+    // an emissive ceiling-tile strip). SPACE DOCTRINE: the entrance zone stays
+    // OPEN — the old pair of customer stools that crowded every doorway is CUT
+    // (trades that genuinely seat people — bar/food/barber — place their own
+    // seating), and the plant/bin gate with a 1.2u pad so nothing squeezes the
+    // door aisle. Every piece is gated by pt()'s clearFloorPoint.
+    function baseClutter() {
       // an emissive ceiling-tile STRIP running the room (extra light line)
       const cs = pt(halfIn, 0, 1.4);
       if (cs) b.lbox(cs.x, FHl - 0.18, cs.z, along ? 0.22 : halfTan * 1.2, 0.05, along ? halfTan * 1.2 : 0.22, 0xf2f4f8, { emissive: 0xf2f4f8, ei: 0.3, cast: false });
       // a potted PLANT in a front corner (planter box + green foliage cube)
-      const pl = pt(4.4, halfTan - 1.1, 0.7);
+      const pl = pt(4.4, halfTan - 1.1, 1.2);
       if (pl) { decor(pl, 0.25, 0.5, 0.5, 0.5, 0x6b4a2a); decor(pl, 0.85, 0.6, 0.7, 0.6, 0x3f9a4f); }
       // a WASTE BIN by the far front corner
-      const wb = pt(4.0, -(halfTan - 0.9), 0.6);
+      const wb = pt(4.0, -(halfTan - 0.9), 1.2);
       if (wb) decor(wb, 0.32, 0.42, 0.64, 0.42, 0x3a4048);
       // (a purely-decorative wall clock used to hang here — CUT: no time read,
-      //  no purpose. The space stays open instead of carrying a dumb prop.)
-      // a couple of customer STOOLS / a waiting CHAIR near the entrance
-      for (const side of [-1, 1]) {
-        const s = pt(3.4, side * (halfTan - 1.0), 0.6);
-        if (s) { decor(s, 0.45, 0.5, 0.9, 0.5, 0x2a2f37); decor(s, 0.92, 0.55, 0.1, 0.55, accent || 0x55606e); seatP(s, Math.atan2(-side * tx, -side * tz), "stool"); }  // face the room
-      }
+      //  no purpose. Same fate for the two entrance stools: the doorway is a
+      //  walking lane, not a waiting room. The space stays open.)
     }
-    baseClutter(kindAccent(kind));
+    baseClutter();
 
     // ---- UNIVERSAL BACK-OF-HOUSE PARTITION (every non-showroom trade) ----------
     // WHY: a shop is a SALES FLOOR (front) backed by a STOCKROOM the customer
     // never sees — the old single-box interior had no such read. A thin full-height
     // partition runs across the room behind the counter (at backDepth from the door
     // wall), with a ≥1.6u doorway gap so the clerk can reach the back. The back
-    // band is filled with shelving/crates (setBackroom). Showroom trades
+    // band holds a small back OFFICE (setBackroom). Showroom trades
     // (carlot/chop/realtor) keep their open display floor — they return early below.
     const backWalled = kind !== "carlot" && kind !== "chop" && kind !== "realtor"
       && (2 * halfTan) >= 8 && (2 * halfIn) >= 13;
@@ -3662,7 +3675,7 @@
       // lintel over the doorway
       const llx = inx * (-halfIn + backDepth), llz = inz * (-halfIn + backDepth);
       b.lbox(llx, WALLH - 0.18, llz, along ? PWT : gapW, 0.36, along ? gapW : PWT, PCOL, { cast: false });
-      // STOCKROOM fill behind the wall (setBackroom: tall shelving + crates). The
+      // BACK-OFFICE fill behind the wall (setBackroom: one desk + one shelf). The
       // back band runs from the partition (backDepth) to the back wall, across the
       // tangent — convert those IN-frame corners to a building-local axis rect.
       const k = roomKit(b, 0);
@@ -3675,7 +3688,7 @@
     switch (kind) {
       case "guns": {
         // gun racks: tall pegboard cabinets with stylised rifles hung in rows
-        wallShelves({ body: 0x32363d, top: 0x44505c, h: 2.2, count: 3, glassFront: true });
+        wallShelves({ body: 0x32363d, top: 0x44505c, h: 2.2, count: 2, glassFront: true });   // 2/side (space doctrine)
         for (const st of shelfTops) {
           for (let r = 0; r < 2; r++) {
             const y = 0.85 + r * 0.7, n = 3, gap = (st.across - 0.4) / n;
@@ -3687,26 +3700,16 @@
             }
           }
         }
-        // TWO lit glass pistol display cases as freestanding islands, pistols inside
-        for (const sideLat of [halfTan - 2.2, -(halfTan - 2.2)]) {
-          const inD = 2 * halfIn - 5.2;
-          island(inD, sideLat, along ? 1.0 : 2.6, 1.0, along ? 2.6 : 1.0, 0x2a2f37, { cast: false });
-          const isl = pt(inD, sideLat, 0.8);
-          if (isl) {
-            decor(isl, 0.92, along ? 0.9 : 2.4, 0.55, along ? 2.4 : 0.9, GLASS);
-            glow({ x: isl.x, z: isl.z }, 1.02, along ? 0.8 : 2.2, 0.04, along ? 2.2 : 0.8, 0x7ed957, 0.3);   // case under-light
-            for (let g = -1; g <= 1; g++) { const lat = g * (along ? 0 : 0.6); const lx = isl.x + tx * (along ? g * 0.6 : 0), lz = isl.z + tz * (along ? 0 : g * 0.6); b.lbox(lx, 0.95, lz, along ? 0.5 : 0.07, 0.06, along ? 0.07 : 0.5, 0x1c1f22, { cast: false }); }  // pistols
-          }
-        }
-        // stacked ammo CRATES against the back wall
-        const ac = pt(2 * halfIn - 2.2, -(halfTan - 1.4), 0.7);
-        if (ac) { decor(ac, 0.3, 1.2, 0.6, 0.8, 0x4a5232); decor(ac, 0.85, 0.9, 0.5, 0.6, 0x5a6240); }
+        // (The two freestanding deco pistol-case islands + the deco ammo crates
+        //  are CUT — space doctrine: gunstore.js stands the REAL counter case,
+        //  rack wall, ammo crates and armor row on this lot, and the deco twins
+        //  doubled all of it while pinching the counter approach.)
         break;
       }
       case "jewelry":
       case "pawn": {
         // lit GLASS display cases along the walls, sparkling stock on top
-        wallShelves({ body: 0x3a2f1c, top: 0xcaa64a, h: 1.1, count: 3, glassFront: true, span: 2.2 });
+        wallShelves({ body: 0x3a2f1c, top: 0xcaa64a, h: 1.1, count: 2, glassFront: true, span: 2.2 });   // 2/side (space doctrine)
         for (const st of shelfTops) { glow(st.p, st.top + 0.05, st.across, 0.06, st.deep, 0xffe08a, 0.6); stockRow(st, [0xfff2b0, 0x9fe0ff, 0xff9ad0, 0xb9ffb0], 5, 0.16, 0.18); }
         if (kind === "pawn") island(2 * halfIn - 5.4, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.3, along ? 2.4 : 1.0, 0x55606e, { cast: false }); // pawned junk pile
         break;
@@ -3785,7 +3788,7 @@
       }
       case "food": {
         // diner: produce/serving tables down the room + a back kitchen line
-        wallShelves({ body: 0x6b7078, top: 0xe8e8ee, h: 1.0, count: 3, span: 2.2 });
+        wallShelves({ body: 0x6b7078, top: 0xe8e8ee, h: 1.0, count: 2, span: 2.2 });   // 2/side (space doctrine)
         for (const st of shelfTops) stockRow(st, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0xff9a5a], 5, 0.2, 0.22);   // produce
         for (let i = 0; i < 2; i++) {                                          // two booth tables w/ bench seats
           for (const side of [-1, 1]) {
@@ -3808,29 +3811,28 @@
       }
       case "bank":
       case "cityhall": {
-        // a row of TELLER windows: a long counter the player faces, glass above
-        const lat0 = -(halfTan - 1.8);
-        for (let i = 0; i < 3; i++) {
-          const p = pt(2 * halfIn - 3.0, lat0 + i * 1.8, 0.5);
-          if (!p) continue;
-          decor(p, 0.8, 1.5, 1.6, 0.6, 0x44505c);          // teller desk
-          decor(p, 1.9, 1.5, 1.0, 0.06, GLASS);            // teller glass
-          glow({ x: p.x, z: p.z }, 1.0, 0.3, 0.1, 0.06, 0x5b8bff, 0.7);  // counter screen
+        // a row of TELLER windows — CITYHALL ONLY now (space doctrine): the real
+        // bank branch (bank.js) builds its own teller counter + glass + screens
+        // just behind where this deco row stood, so on bank lots the deco row
+        // doubled the counter and walled off its own approach.
+        if (kind === "cityhall") {
+          const lat0 = -(halfTan - 1.8);
+          for (let i = 0; i < 3; i++) {
+            const p = pt(2 * halfIn - 3.0, lat0 + i * 1.8, 0.5);
+            if (!p) continue;
+            decor(p, 0.8, 1.5, 1.6, 0.6, 0x44505c);          // teller desk
+            decor(p, 1.9, 1.5, 1.0, 0.06, GLASS);            // teller glass
+            glow({ x: p.x, z: p.z }, 1.0, 0.3, 0.1, 0.06, 0x5b8bff, 0.7);  // counter screen
+          }
         }
         // a velvet queue rope (two short posts + a sagging rope) by the entrance
         for (const side of [-1, 1]) { const p = pt(4.6, side * 1.4, 0.6); if (p) { decor(p, 0.5, 0.16, 1.0, 0.16, 0xcaa64a); decor(p, 1.02, 0.22, 0.18, 0.22, 0x2a2f37); } }
         { const rp = pt(4.6, 0, 0.6); if (rp) decor(rp, 0.85, along ? 0.04 : 2.6, 0.06, along ? 2.6 : 0.04, 0x8a1f2b); }   // the rope span
-        if (kind === "bank") {
-          // a steel VAULT recessed into the back corner: thick frame + round door
-          const vp = pt(2 * halfIn - 1.6, halfTan - 1.9, 0.7);
-          if (vp) {
-            solidBox(vp, 1.4, along ? 0.4 : 2.6, 2.8, along ? 2.6 : 0.4, 0x39414d);      // vault wall
-            decor(vp, 1.4, along ? 0.12 : 2.0, 2.0, along ? 2.0 : 0.12, 0x6a7480);        // door face
-            b.lbox(vp.x, 1.4, vp.z + (along ? 0 : 0.0), 0.34, 0.34, 0.34, 0xb9c0c8, { cast: false });  // wheel handle hub
-            for (let s = 0; s < 4; s++) { const a = s / 4 * 6.28; b.lbox(vp.x + Math.cos(a) * 0.45, 1.4 + Math.sin(a) * 0.45, vp.z, 0.1, 0.4, 0.1, 0xb9c0c8, { cast: false }); }  // spokes
-            glow({ x: vp.x, z: vp.z }, 1.4, 0.12, 0.12, 0.12, 0x5b8bff, 0.6);            // lock light
-          }
-        }
+        // (The deco steel vault — solid wall + round door + spokes — is CUT on
+        //  bank lots: bank.js stands the REAL heist vault (CBZ.cityBankVault is
+        //  the drill point) in that same corner, and the partition accents below
+        //  wall it into a proper vault room. Three vault reads in one corner
+        //  was cram, not security.)
         break;
       }
       case "gym": {
@@ -3856,8 +3858,9 @@
       case "clothing":
       case "barber": {
         if (kind === "clothing") {
-          // round clothing racks (rounders) down the room, stocked with garments
-          for (let i = 0; i < 2; i++) for (const side of [-1, 1]) {
+          // round clothing racks (rounders): ONE per side (space doctrine — the
+          // old two-per-side quartet crowded the floor), stocked with garments
+          for (let i = 0; i < 1; i++) for (const side of [-1, 1]) {
             const p = pt(5.2 + i * 3.0, side * (halfTan - 1.9), 0.9);
             if (!p) continue;
             decor(p, 0.75, 0.1, 1.5, 0.1, 0x8a939c);                    // post
@@ -3865,16 +3868,11 @@
             const cols = [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e, 0xe85d8a];
             for (let g = 0; g < 6; g++) { const a = g / 6 * Math.PI * 2, lx = p.x + Math.cos(a) * 0.6, lz = p.z + Math.sin(a) * 0.6; b.lbox(lx, 1.0, lz, 0.22, 0.9, 0.1, cols[g % cols.length], { cast: false }); }
           }
-          wallShelves({ body: 0x55606e, top: 0x8a939c, h: 1.6, count: 3, span: 2.0 });
+          wallShelves({ body: 0x55606e, top: 0x8a939c, h: 1.6, count: 2, span: 2.0 });   // 2/side (space doctrine)
           for (const st of shelfTops) stockRow(st, [0xc792ea, 0x5b8bff, 0xff9e6b, 0x4caf6e], 4, 0.3, 0.16);  // folded stacks
-          // a pair of dressed MANNEQUINS flanking the entrance display
-          for (const side of [-1, 1]) {
-            const p = pt(4.4, side * (halfTan - 1.4), 0.7);
-            if (!p) continue;
-            decor(p, 0.1, 0.5, 0.2, 0.5, 0x2a2f37);                 // base
-            decor(p, 0.95, 0.34, 1.5, 0.22, side > 0 ? 0xc792ea : 0x5b8bff);  // torso/outfit
-            decor(p, 1.85, 0.2, 0.26, 0.2, 0xd8c2a8);               // head
-          }
+          // (The deco entrance mannequins are CUT — space doctrine: the walk-in
+          //  store (clothingstore.js) stands REAL buyable mannequins across the
+          //  entrance, and the deco pair just crowded the same floor.)
         } else {
           // barber: two chairs facing wall mirrors
           for (const side of [-1, 1]) {
@@ -3904,7 +3902,7 @@
         break;
       }
       case "electronics": {
-        wallShelves({ body: 0x2b2f33, top: 0x44505c, h: 1.7, count: 3, glassFront: true });
+        wallShelves({ body: 0x2b2f33, top: 0x44505c, h: 1.7, count: 2, glassFront: true });   // 2/side (space doctrine)
         for (const st of shelfTops) for (let r = 0; r < 2; r++) {           // glowing screens on two levels
           const lat0 = -st.across / 2 + 0.3, gap = (st.across - 0.6) / 3;
           for (let i = 0; i < 3; i++) { const lat = lat0 + i * gap, lx = st.p.x + tx * lat, lz = st.p.z + tz * lat, y = 0.8 + r * 0.55; b.lbox(lx, y, lz, along ? 0.05 : 0.34, 0.26, along ? 0.34 : 0.05, 0x39d0c0, { emissive: 0x39d0c0, ei: 0.6, cast: false }); }
@@ -3918,7 +3916,7 @@
       }
       case "hardware": {
         // tall industrial racks with crates/cans
-        wallShelves({ body: 0x4a4034, top: 0x6b5a3a, h: 2.0, count: 3, span: 2.4 });
+        wallShelves({ body: 0x4a4034, top: 0x6b5a3a, h: 2.0, count: 2, span: 2.4 });   // 2/side (space doctrine)
         for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.65, across: st.across }, [0xffd166, 0x8a5a2b, 0xb9bec6, 0x66d9c0], 5, 0.26, 0.34);
         island(2 * halfIn - 5.0, -(halfTan - 2.0), along ? 1.0 : 2.4, 1.1, along ? 2.4 : 1.0, 0x6b5a3a, { cast: false });
         // a leaning STACK OF LUMBER + a hung tool pegboard on a side wall
@@ -3944,7 +3942,7 @@
       }
       case "gas": {
         // convenience aisles inside + a cooler wall (showroom front handled outside)
-        wallShelves({ body: 0x44505c, top: 0x6a7078, h: 1.5, count: 3, span: 2.2 });
+        wallShelves({ body: 0x44505c, top: 0x6a7078, h: 1.5, count: 2, span: 2.2 });   // 2/side (space doctrine)
         for (const st of shelfTops) for (let r = 0; r < 2; r++) stockRow({ p: st.p, top: 0.7 + r * 0.55, across: st.across }, [0xff6b5a, 0x6bbf4a, 0xffc94a, 0x5a8aff], 5, 0.18, 0.34);
         // a glowing cooler against the back wall
         const cp = pt(2 * halfIn - 2.6, 0, 0.6);
@@ -4068,17 +4066,20 @@
         // generic store: stocked wall shelving + a central GONDOLA aisle of
         // product the customer walks BETWEEN to the counter — a real shop floor,
         // not bare walls. The gondola is gated so it never crosses the door aisle.
-        wallShelves({ count: 3 });
+        wallShelves({ count: 2 });   // 2/side (space doctrine)
         for (const st of shelfTops) stockRow(st, [0xff9e6b, 0x6bb6ff, 0x4caf6e, 0xc792ea], 4, 0.24, 0.24);
-        // 2-3 GONDOLA ROWS the customer walks between (a denser sales floor).
-        for (const gd of [halfIn - 2.2, halfIn + 0.6, halfIn + 3.4]) {
-          if (gd > 2 * halfIn - 6.0) break;            // stop short of the back-of-house wall
-          const g = pt(gd, 0, 1.0);
+        // ONE GONDOLA ROW, shifted OFF the door→counter line (space doctrine:
+        // the old three centre-line rows made every generic store a slalom —
+        // now the approach lane to the counter stays ≥1.2u clear and the one
+        // stocked island reads placed, not crammed). Still shopliftable.
+        const gd = halfIn + 0.6;
+        if (gd <= 2 * halfIn - 6.0) {                  // only when it clears the back-of-house wall
+          const g = pt(gd, 1.9, 1.2);
           if (g) {
-            decor(g, 0.55, along ? 1.2 : 3.0, 1.1, along ? 3.0 : 1.2, 0x55606e);
-            const gtop = { p: g, top: 1.16, across: along ? 1.0 : 2.6, deep: along ? 2.6 : 1.0 };
-            stockRow(gtop, [0x4caf6e, 0xff9e6b, 0x6bb6ff], 5, 0.22, 0.3);
-            recordStock(g, 1.16, along ? 1.0 : 2.6, along ? 2.6 : 1.0);
+            decor(g, 0.55, along ? 1.2 : 2.4, 1.1, along ? 2.4 : 1.2, 0x55606e);
+            const gtop = { p: g, top: 1.16, across: along ? 1.0 : 2.2, deep: along ? 2.2 : 1.0 };
+            stockRow(gtop, [0x4caf6e, 0xff9e6b, 0x6bb6ff], 4, 0.22, 0.3);
+            recordStock(g, 1.16, along ? 1.0 : 2.2, along ? 2.2 : 1.0);
           }
         }
       }
@@ -4120,15 +4121,27 @@
         const kp = pt(2 * halfIn - 3.0, halfTan - 1.6, 0.8);
         if (kp) decor(kp, 0.55, along ? 0.9 : 2.0, 1.0, along ? 2.0 : 0.9, 0x6a7078);  // a steel prep counter inside
       } else if (kind === "bank") {
-        // a walled VAULT room in the back corner + a manager office beside it
+        // a walled VAULT room in the back corner + a manager office beside it.
+        // SPACE DOCTRINE: the vault room's read is bank.js's REAL steel vault
+        // (the heist drill point) standing inside these walls — the old floating
+        // deco door slab that doubled it mid-room is cut.
         const vd0 = 2 * halfIn - 6.0, vlat = halfTan - 2.0;
-        partAlong(vd0, vlat - 2.2, vlat + 2.2);                      // vault front wall (no gap — vault door is the read)
+        partAlong(vd0, vlat - 2.2, vlat + 2.2);                      // vault front wall (no gap — the steel vault is the read)
         partIn(vd0, 2 * halfIn - 0.5, vlat - 2.2);                   // vault -side wall
-        const vp = pt(2 * halfIn - 3.0, vlat, 0.8);
-        if (vp) { decor(vp, 1.0, along ? 1.4 : 1.4, 2.0, along ? 1.4 : 1.4, 0x3a4250); glow(vp, 1.0, 0.3, 0.6, 0.3, 0x5b8bff, 0.4); }  // vault door
-        // manager office on the opposite side (a glass-front cell)
-        partIn(5.0, 9.0, -(halfTan - 2.0));
-        partAlong(9.0, -(halfTan - 0.6), -(halfTan - 4.0), GLASS);
+        // manager office on the opposite side: a glass-front cell holding ONE
+        // desk with a lit screen, one chair, and SPACE (owner doctrine — a
+        // separate room is an office with one desk, not a cram). Cell widened
+        // 2.0→3.0u so the desk breathes; the glass front keeps a door gap.
+        const oLat = -(halfTan - 3.0);                               // office inner wall
+        partIn(5.0, 9.0, oLat);
+        partAlong(9.0, -(halfTan - 0.6), -(halfTan - 1.8), GLASS);   // glass front (the 1.2u gap beside it = the way in)
+        const od = pt(6.6, -(halfTan - 1.05), 0.8);
+        if (od) {
+          decor(od, 0.4, 0.8, 0.8, 1.6, 0x6b4a2a);                   // the ONE desk (long side on the wall)
+          glow({ x: od.x, z: od.z }, 0.95, 0.08, 0.3, 0.5, 0x5b8bff, 0.5);   // desk screen (seated on the 0.8 desktop)
+          const oc = pt(6.6, -(halfTan - 2.05), 0.7);
+          if (oc) { decor(oc, 0.45, 0.45, 0.9, 0.45, 0x2a2f37); seatP(oc, Math.atan2(-tx, -tz), "chair"); }  // chair faces the desk
+        }
       } else if (kind === "hospital") {
         // partitioned EXAM ROOMS along one side wall (2-3 curtained bays)
         const lat = halfTan - 1.8;
