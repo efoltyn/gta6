@@ -1353,7 +1353,11 @@
     for (let i = animals.length - 1; i >= 0; i--) {
       const a = animals[i];
       if (a.dead || a.ridden) continue;
-      const dx = a.pos.x - x, dz = a.pos.z - z, d2 = dx * dx + dz * dz;
+      const dx = a.pos.x - x, dz = a.pos.z - z;
+      let d2 = dx * dx + dz * dz;
+      // flying records (wildnature's live birds) count their ALTITUDE above
+      // the ground blast — a grenade on the grass can't swat a flock 40u up.
+      if (a.bird && a.pos.y != null) { const dy = a.pos.y - groundY(x, z); d2 += dy * dy; }
       if (d2 > kr * kr) continue;
       const dmg = Math.round(140 * Math.max(0.15, 1 - Math.sqrt(d2) / kr));
       CBZ.cityWildlifeHit(a, { head: false, point: null }, { damage: dmg });
@@ -1511,6 +1515,21 @@
         a.bob += dt * (1.2 + a.spd * 0.2);
         a.turnT -= dt;
         if (a.turnT <= 0) { a.heading += (Math.random() - 0.5) * 0.8; a.turnT = 3 + Math.random() * 4; }
+        // TAMED sea life (ANIMALS_ALL_CONTROLLABLE): your dolphin swims WITH
+        // you — heading steers toward wherever you are (the water nav below
+        // still owns shoreline clearance, so it holds just offshore when you
+        // walk the beach) instead of drifting away on the random wander.
+        if (a.tamed && !a.stay && P &&
+            !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false)) {
+          const tdx = P.x - grp.position.x, tdz = P.z - grp.position.z;
+          const td2 = tdx * tdx + tdz * tdz;
+          if (td2 > 64 && td2 < 220 * 220) {          // courteous 8u standoff
+            const want = Math.atan2(tdz, tdx);
+            let hd = want - a.heading;
+            while (hd > Math.PI) hd -= 2 * Math.PI; while (hd < -Math.PI) hd += 2 * Math.PI;
+            a.heading += hd * Math.min(1, dt * 2.5);
+          }
+        }
         const wf = CBZ.waterField;
         if (wf && wf.moveInWater) {
           // Recover any actor authored/saved on dry ground by projecting it to
