@@ -66,8 +66,17 @@
   // SWAT VAN (city-swat-van): at 4★+ the heavy units arrive AS a unit — a dark
   // liveried van parks a block out and an entry team deploys around its doors.
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_SWAT_VAN == null) CBZ.CONFIG.CITY_SWAT_VAN = true;
+  // POLICE HELI SLOW RESPONSE (owner: "police helicopters are responding way
+  // too fast"): Air-1 now gets a real dispatch beat — a runtime spin-up DELAY
+  // between the wanted level tripping 3★ and the airframe ever leaving the pad,
+  // then an inbound leg launched from a point pushed out toward the map edge —
+  // instead of popping in overhead a couple of seconds after the star hits.
+  // false restores the exact old instant-response behavior (immediate spool,
+  // launch from the real precinct distance, no dispatch hold).
+  if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE == null) CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE = true;
   function arrestFirst() { return !!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST); }
   function swatRedesign() { return !CBZ.CONFIG || CBZ.CONFIG.CITY_SWAT_REDESIGN !== false; }
+  function heliSlowResponse() { return !!(CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_SLOW_RESPONSE); }
   // MORE BOOTS ON THE BEAT: a city this big read EMPTY of police with only 3
   // ambient cops. Raise the standing foot patrol to ~7 (the streets are policed
   // everywhere, not just where you stand) — comfortably under POLICE_FORCE_MAX
@@ -751,7 +760,9 @@
   function liveSwat() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && c.swat) n++; return n; }
 
   // ---- POLICE HELICOPTER (3+ stars): a maverick that orbits your last-known and
-  //      paints you with a searchlight, keeping cops fed your position. ----------
+  //      paints you with a searchlight, keeping cops fed your position. Dispatch
+  //      now takes a real spin-up beat + a pushed-out launch distance (config:
+  //      POLICE_HELI_SLOW_RESPONSE) before it ever reaches "orbit". -------------
   // r128 sculpt helper — LOCAL copy of aircraft.js's taperBox (builders stay
   // self-contained per file). Scales each vertex's X/Y by a factor of its Z
   // (nose=+Z → nz, tail=-Z → tz) with optional roofline/keel narrowing.
@@ -926,6 +937,7 @@
       heading: Math.atan2(fx, fz), orbit: rng() * 6.28, shootCD: 1.2, leaveT: 0, spotR: 5,
       phase: "idle", cruiseY: cruiseY, homeX, homeY, homeZ, launchT: 0, pilot: null,
       exitX: homeX, exitZ: homeZ,
+      dispatchT: 0, launchCeilY: null,   // POLICE_HELI_SLOW_RESPONSE: dispatch-hold timer + pushed-out launch ceiling
     };
   }
 
@@ -979,6 +991,32 @@
   function chopperCruiseY(x, z, homeY) {
     const ground = groundYForChopper(x, z);
     return Math.max(ground + CHOP_AGL, (homeY || ground) + 8);
+  }
+  // POLICE_HELI_SLOW_RESPONSE (b): push the dispatch OFF the actual precinct
+  // distance and out toward the map edge, so the inbound leg is a real, visible
+  // flight instead of however close the nearest station happens to be. Reuses
+  // the SAME station bearing makeChopper() already anchors on (Air-1 still
+  // "comes from" its real precinct, direction-wise) — it just refuses to launch
+  // any closer than a big cross-city span. Also returns a safe local ground/
+  // cruise altitude for the pushed point (groundYForChopper/chopperCruiseY, both
+  // above) so a hilly launch point can't leave the takeoff climb clipping terrain.
+  function policeHeliLaunchPoint(P) {
+    const A = CBZ.city.arena;
+    const px = P.pos.x, pz = P.pos.z;
+    let dx = chopper.homeX - px, dz = chopper.homeZ - pz;
+    let d = Math.hypot(dx, dz);
+    if (d < 1) { const a = rng() * Math.PI * 2; dx = Math.sin(a); dz = Math.cos(a); d = 1; }
+    dx /= d; dz /= d;
+    let span = 260;                     // floor: always a real cross-map flight
+    if (A && A.minX != null) span = Math.max(span, Math.max(A.maxX - A.minX, A.maxZ - A.minZ) * 0.42);
+    const dist = Math.max(d, span);
+    let lx = px + dx * dist, lz = pz + dz * dist;
+    if (A && A.minX != null) {
+      lx = Math.max(A.minX + 15, Math.min(A.maxX - 15, lx));
+      lz = Math.max(A.minZ + 15, Math.min(A.maxZ - 15, lz));
+    }
+    const ly = groundYForChopper(lx, lz) + 1.2;
+    return { x: lx, y: ly, z: lz, cruiseY: chopperCruiseY(lx, lz, ly) };
   }
   // a target this far BELOW the chopper is a plausible down/level shot; a player
   // higher than the chopper can't be hit (a door gunner can't fire straight up).
@@ -1045,10 +1083,41 @@
       chopper.pos.set(chopper.homeX, chopper.homeY, chopper.homeZ);
       chopper.group.rotation.z = 0; chopper.rotor.rotation.y += dt * 1.5;
       chopper.pool.visible = false; chopper.cone.visible = false;
+      chopper.launchCeilY = null;
       if (stars >= 3 && g.state === "playing") {
-        assignChopperPilot();
-        chopper.phase = "spool"; chopper.launchT = 4.5;
+        if (heliSlowResponse()) {
+          // DISPATCH (a): the call just came in — Air-1 sits on the pad, rotor
+          // idle, for a real dispatch beat before anyone even boards it. This is
+          // a runtime-only timer (not a world-build draw), independently rolled
+          // per dispatch so a shot-down/re-escalation redispatch never lands on
+          // a fixed, predictable cadence — (c)'s "stagger" for this single-unit
+          // system. The +stars jitter widens the spread specifically at 4-5★,
+          // where the separate 5★ military escalation (aircraft.js) may also be
+          // inbound on its own independent timer.
+          chopper.phase = "dispatch";
+          chopper.dispatchT = 25 + rng() * 20 + (stars >= 4 ? rng() * 10 : 0);
+        } else {
+          assignChopperPilot();
+          chopper.phase = "spool"; chopper.launchT = 4.5;
+        }
       }
+      return;
+    }
+    if (chopper.phase === "dispatch") {
+      chopper.pos.set(chopper.homeX, chopper.homeY, chopper.homeZ);
+      chopper.group.rotation.z = 0; chopper.rotor.rotation.y += dt * 1.5;
+      chopper.pool.visible = false; chopper.cone.visible = false;
+      if (stars < 3 || g.state !== "playing") { chopper.phase = "idle"; return; }
+      chopper.dispatchT -= dt;
+      if (chopper.dispatchT > 0) return;
+      // (b) push the launch point out toward the map edge along Air-1's real
+      // precinct bearing, so the inbound leg below is a genuine cross-city
+      // flight instead of however close the nearest station happens to sit.
+      const launch = policeHeliLaunchPoint(P);
+      chopper.pos.set(launch.x, launch.y, launch.z);
+      chopper.launchCeilY = launch.cruiseY;
+      assignChopperPilot();
+      chopper.phase = "spool"; chopper.launchT = 4.5;
       return;
     }
     if (chopper.phase === "spool") {
@@ -1062,7 +1131,11 @@
     if (chopper.phase === "takeoff") {
       if (stars < 3 || g.state !== "playing") { chopper.phase = "return"; return; }
       chopper.rotor.rotation.y += dt * 40;
-      const liftY = Math.min(chopper.cruiseY, chopper.homeY + 30);
+      // launchCeilY (set above when POLICE_HELI_SLOW_RESPONSE pushed the launch
+      // out) climbs relative to THAT point's own local terrain; the plain
+      // home-relative cap is the original formula, unchanged for the flag-off
+      // instant-response path where pos.x/z never moved off the home pad.
+      const liftY = chopper.launchCeilY != null ? chopper.launchCeilY : Math.min(chopper.cruiseY, chopper.homeY + 30);
       chopper.pos.y += Math.min(12 * dt, liftY - chopper.pos.y);
       if (chopper.pos.y >= liftY - 0.5) chopper.phase = "inbound";
       return;
