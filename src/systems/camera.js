@@ -33,6 +33,19 @@
   if (CBZ.CONFIG.CAM_TP_V2 == null) CBZ.CONFIG.CAM_TP_V2 = true;
   if (CBZ.CONFIG.CAM_VEHICLE_RESTORE == null) CBZ.CONFIG.CAM_VEHICLE_RESTORE = true;
 
+  // ---- CAMERA POLISH PASS (2026-07-19) — each item behind its own flag, all
+  // one-line reverts. The V2 personality (rigid boom, constant lens, decisive
+  // clamp) is PRESERVED; these remove its rough edges, they don't soften it.
+  if (CBZ.CONFIG.CAM_TOUCH_PITCH == null) CBZ.CONFIG.CAM_TOUCH_PITCH = true;         // widened touch-look pitch range hook (touch.js consults it)
+  if (CBZ.CONFIG.CAM_OCCLUDE_FADE == null) CBZ.CONFIG.CAM_OCCLUDE_FADE = true;       // occlusion: follow the wall below the old floor + fade the wall, never balloon-or-clip
+  if (CBZ.CONFIG.CAM_TOGGLE_BLEND == null) CBZ.CONFIG.CAM_TOGGLE_BLEND = true;       // FP<->TP toggle: short eased dolly instead of a teleport
+  if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK == null) CBZ.CONFIG.CAM_VEHICLE_FREELOOK = true; // driving: mouse-look suspends auto-recenter; hold MMB = look back
+  if (CBZ.CONFIG.CAM_AIR_BANK == null) CBZ.CONFIG.CAM_AIR_BANK = true;               // chase cam leans into a fraction of aircraft roll (cars stay level)
+  if (CBZ.CONFIG.CAM_SPRINT_FOV == null) CBZ.CONFIG.CAM_SPRINT_FOV = false;          // opt-in sprint FOV swell (+7° over 0.4s). SHIPS DARK — owner disliked auto-zoom; one flag flip to try it
+  if (CBZ.CONFIG.CAM_SHOULDER_SWAP == null) CBZ.CONFIG.CAM_SHOULDER_SWAP = true;     // MMB click on foot flips the over-shoulder side (smooth ~0.2s through centre)
+  if (CBZ.CONFIG.CAM_FACING_BLEND == null) CBZ.CONFIG.CAM_FACING_BLEND = true;       // draw/holster: body-facing ease ramps in over 0.25s instead of whipping to the new target
+  if (CBZ.CONFIG.CAM_TP_BREATHE == null) CBZ.CONFIG.CAM_TP_BREATHE = false;          // taste flag: 0.07s TP position smoothing (rigid 0.02s stays default)
+
   // ---- CITY THIRD-PERSON FRAMING (Fortnite over-shoulder) — guarded FALLBACK ----
   // src/city/camera.js IS loaded by index.html (later than this file) and is the
   // AUTHORITATIVE tuning surface: it re-assigns CBZ.CITY_TP unconditionally, so
