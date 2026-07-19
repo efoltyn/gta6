@@ -461,6 +461,9 @@
   // damped spring returns most (not all) of that impulse. There is no hidden
   // bullet-only recoil channel: what moves on screen is what moves the shot.
   let recoilPitch = 0, recoilYaw = 0;
+  // FPS_ADS_SIGHTS: 0..1 blend of the FP viewmodel from its corner carry to a
+  // centered, down-the-sights pose while aiming. Eased at the FOV-drop rate.
+  let adsSightK = 0;
   let shotsInBurst = 0;                    // pattern position; reset by a fire gap
   let sinceShot = 99;                      // s since last shot — drives the burst reset
   // deterministic L/R yaw weave (signed fractions of basePitch): straight up for
@@ -3036,7 +3039,13 @@
       // (so the kick reads); otherwise recover full speed (4x).
       const firing = recoilHold > 0 || (triggerHeld && wNow && wNow.auto && fps.rounds[fps.weapon] > 0);
       const recoverK = firing ? 0.25 : 1.0;
-      const settle = recoverK * (1 - Math.exp(-dt / recenter));
+      // ADS_RECOIL_SETTLE: while aiming, recover the view-return debt faster so
+      // the reticle SETTLES back onto the target between shots instead of
+      // wandering up-screen. Reuses adsRecoilMul()'s aimHeld predicate as the ADS
+      // gate; the recoil KICK is untouched — only the recentering RATE is tuned.
+      // Clamped ≤1 so a fast burst can't over-correct past true centre.
+      const adsSettle = (CBZ.CONFIG.ADS_RECOIL_SETTLE !== false && adsRecoilMul() < 1) ? 1.7 : 1.0;
+      const settle = Math.min(1, recoverK * adsSettle * (1 - Math.exp(-dt / recenter)));
       const rp = recoilPitch * settle;
       const ry = recoilYaw * settle;
       if (fps.active) fps.fp = Math.max(-1.3, Math.min(1.3, fps.fp - rp));
@@ -3070,17 +3079,32 @@
       // must not linger on the rig (animChar reads these flags). Clear here.
       if (CBZ.playerChar) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
       if (armed()) {
+        // FPS_ADS_SIGHTS: while aiming (and NOT down a real optic), ease the
+        // viewmodel from its corner carry (0.36,-0.34) to a centered, down-the-
+        // sights pose (0.00,-0.05). Only X/Y shift — Z is held at the carry
+        // depth so the gun never travels FORWARD across the near plane (no clip),
+        // and the depth-clear sentinel still owns occlusion. Bullets are
+        // unchanged (they fly the camera ray, not the viewmodel). Skipped when a
+        // scope FOV owns the view (sniper / gunsmith optic overlay) so a centered
+        // receiver can't intrude into the scope glass.
+        const scopeUp = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
+        const wantSight = CBZ.CONFIG.FPS_ADS_SIGHTS !== false && aimHeld && !scopeUp;
+        adsSightK += ((wantSight ? 1 : 0) - adsSightK) * Math.min(1, dt * 12);
+        if (adsSightK < 1e-3) adsSightK = 0;
+        const sightX = 0.36 * (1 - adsSightK);      // 0.36 → 0.00 (centered)
+        const sightY = -0.34 + 0.29 * adsSightK;    // -0.34 → -0.05 (up to line of sight)
         // Sustained-fire climb stays small; bullets now use the exact live
         // muzzle socket, so the rendered barrel and projectile remain welded
         // together through the kick instead of diverging under an origin clamp.
         vm.position.set(
-          0.36 - bobX * 0.5 + recoilSide * 0.55,
-          -0.34 + bobY * 0.5 - recoil * 0.08 - vmPunch * 0.18 - reloadDip,
+          sightX - bobX * 0.5 + recoilSide * 0.55,
+          sightY + bobY * 0.5 - recoil * 0.08 - vmPunch * 0.18 - reloadDip,
           -0.72 + recoil * 0.12 - vmPunch * 0.3
         );
         vm.rotation.x = -0.10 + recoil * 0.26 + vmPunch * 0.4 + reloadDip * 0.8;   // level the barrel forward (was tilted up)
         vm.rotation.z = recoilSide * 0.7 - bobX * 0.18;
       } else {
+        adsSightK = 0;   // sighted pose is armed-only; reset so a re-draw eases up clean
         // unarmed single hand sits low and to the right (Minecraft-style)
         vm.position.set(0.12 + bobX * 0.4, -0.30 + bobY * 0.5 - vmPunch * 0.05, -0.66 - vmPunch * 0.05);
         vm.rotation.x = vmPunch * 0.10;

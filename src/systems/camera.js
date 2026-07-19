@@ -106,7 +106,12 @@
   // the touch boom at extreme up-pitch near walls is less recoverable without
   // a scroll-wheel escape hatch.
   CBZ.camTouchPitchRange = function () {
-    return CBZ.CONFIG.CAM_TOUCH_PITCH !== false ? [-0.85, 0.75] : [-0.18, 0.60];
+    if (CBZ.CONFIG.CAM_TOUCH_PITCH === false) return [-0.18, 0.60];
+    // CAM_ADS_PITCH_WIDE: while AIMING on touch, open the envelope toward the
+    // desktop range so an iPad can raise/drop the reticle onto high or low
+    // targets. Touch-only (this clamp is consumed only by touch.js applyLookDelta).
+    if (CBZ.CONFIG.CAM_ADS_PITCH_WIDE !== false && CBZ.isADS && CBZ.isADS()) return [-1.0, 0.9];
+    return [-0.85, 0.75];
   };
   // Vehicle free-look (suspends the behind-the-car auto-recenter) + look-back.
   let flHold = false, flT = 0, lookBackHeld = false, lookBackK = 0, bankK = 0;

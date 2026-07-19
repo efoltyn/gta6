@@ -85,6 +85,14 @@
   const AIMDRAG = () => !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_DRAG !== false;
 
   const SENS = 0.006, MAXR = 74, DEAD = 0.28;   // MAXR matches the enlarged 168px disc (owner: bigger pad, less corner)
+  // TOUCH_AIM_ASSIST tuning (touch-only aim help off the lock-on candidate pool):
+  //   FRICTION — look sensitivity eases to *_MIN as the crosshair (screen centre)
+  //     comes within *_NDC of a candidate, so the reticle "sticks" a little.
+  //   MAGNETISM — a rate-capped pull toward the nearest candidate WITHIN *_NDC of
+  //     the crosshair while aiming; RATE is the settle strength, CAP the hard
+  //     per-second angular ceiling. Deliberately mild — assist, not autolock.
+  const AIM_FRICTION_NDC = 0.14, AIM_FRICTION_MIN = 0.55;
+  const AIM_MAG_NDC = 0.09, AIM_MAG_RATE = 2.2, AIM_MAG_CAP = 0.35;
   const STICK_ZONE = 1.6;      // catch zone = this × the visible disc radius
   const SPRINT_HI = 0.85, SPRINT_LO = 0.70;   // stick-rim sprint band (on/off)
   const SLIDE_PAD_IN = 12;     // fire's hit-rect grows this much for ENTRY —
@@ -113,6 +121,10 @@
   const tapRay = window.THREE ? new THREE.Raycaster() : null;
   const tapNdc = window.THREE ? new THREE.Vector2() : null;
   const tapBox = window.THREE ? new THREE.Box3() : null;
+  // TOUCH_AIM_ASSIST magnetism scratch (reused; no per-frame allocation).
+  const _amEye = window.THREE ? new THREE.Vector3() : null;
+  const _amDir = window.THREE ? new THREE.Vector3() : null;
+  const _ncHolder = { e: null, r: 0 };
 
   // ---- wordless glyphs (inline SVG so they render identically on iPad) -------
   const SVG = {
@@ -404,6 +416,25 @@
     if (look.free) { look.free = false; try { if (CBZ.camFreeLook) CBZ.camFreeLook(false); } catch (err) {} }
   }
 
+  // TOUCH_AIM_ASSIST: nearest lock-on candidate to the crosshair (screen centre)
+  // in NDC, read from the live lock-on candidate pool (missile / vehicle targets)
+  // that lockon.js projects. Returns null when the assist is off, this isn't a
+  // touch session, or the pool is empty — a safe no-op. Reuses one holder object.
+  function nearestAimCand() {
+    if (!enabled || (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_ASSIST === false) || !CBZ.lockonCandidateScreen) return null;
+    const c = CBZ.lockonCandidateScreen();
+    if (!c || !c.n) return null;
+    let best = null, bestR = 1e9;
+    for (let i = 0; i < c.n; i++) {
+      const e = c.arr[i];
+      const r = Math.hypot(e.nx, e.ny);
+      if (r < bestR) { bestR = r; best = e; }
+    }
+    if (!best) return null;
+    _ncHolder.e = best; _ncHolder.r = bestR;
+    return _ncHolder;
+  }
+
   // THE camera-turn math, shared by the look-drag slot and the aim/scope
   // finger's fine-aim drag (TOUCH_AIM_DRAG) so the two can never diverge:
   // same SENS, same fpsLookSensMul scoped/ADS scaling (without it, scoped
@@ -412,16 +443,60 @@
   // first-person aim-pitch ride.
   function applyLookDelta(dx, dy) {
     const sMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
-    CBZ.cam.yaw -= dx * SENS * sMul;
-    CBZ.cam.pitch -= dy * SENS * sMul;
+    // TOUCH_AIM_ASSIST — reticle FRICTION: ease look sensitivity down while the
+    // crosshair sits over/near a lock-on candidate so the reticle sticks a touch
+    // instead of sliding past. Mild + touch-only; identity (1) with no pool.
+    let fMul = 1;
+    const nc = nearestAimCand();
+    if (nc && nc.r < AIM_FRICTION_NDC) fMul = AIM_FRICTION_MIN + (1 - AIM_FRICTION_MIN) * (nc.r / AIM_FRICTION_NDC);
+    CBZ.cam.yaw -= dx * SENS * sMul * fMul;
+    CBZ.cam.pitch -= dy * SENS * sMul * fMul;
     // third-person pitch range: the camera agent's hook decides (it knows
     // the collision-safe envelope); fallback still allows a REAL look-up —
     // the old -0.18 floor meant an iPad could barely raise its eyes.
     const pr = (CBZ.camTouchPitchRange && CBZ.camTouchPitchRange()) || [-0.6, 0.60];
     CBZ.cam.pitch = Math.max(pr[0], Math.min(pr[1], CBZ.cam.pitch));
     // in first-person, vertical drag drives the (wider) FPS aim pitch
-    if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - dy * SENS * sMul));
+    if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - dy * SENS * sMul * fMul));
   }
+
+  // TOUCH_AIM_ASSIST — MAGNETISM: a small, rate-capped pull toward the nearest
+  // on-screen lock-on candidate while AIMING on touch, so the reticle settles
+  // onto a target you're already close to. Mirrors the shipped soft-lock's sign
+  // convention (fpsmode applyAimLock) using the LIVE camera as the aim reference,
+  // so the correction moves the candidate's projected centre toward the
+  // crosshair. Runs after lockon.js's tick (onAlways 54) so the pool is fresh.
+  // Stands down on desktop (enabled=touch only), when not ADS, with an empty
+  // pool, or when the actor soft-lock already owns the aim (no double-pull).
+  CBZ.onAlways(54.6, function (dt) {
+    if (!enabled || (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_ASSIST === false)) return;
+    if (!CBZ.camera || !CBZ.cam || !CBZ.game || CBZ.game.state !== "playing") return;
+    if (!(CBZ.isADS && CBZ.isADS())) return;
+    if (CBZ.aimLockTarget && CBZ.aimLockTarget()) return;   // actor soft-lock owns the aim
+    if (!_amEye || !_amDir) return;
+    const nc = nearestAimCand();
+    if (!nc || nc.r > AIM_MAG_NDC) return;
+    const e = nc.e;
+    CBZ.camera.getWorldPosition(_amEye);
+    CBZ.camera.getWorldDirection(_amDir); _amDir.normalize();
+    const dx = e.x - _amEye.x, dy = e.y - _amEye.y, dz = e.z - _amEye.z;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    let dHead = Math.atan2(dx / dl, dz / dl) - Math.atan2(_amDir.x, _amDir.z);
+    while (dHead > Math.PI) dHead -= 2 * Math.PI;
+    while (dHead < -Math.PI) dHead += 2 * Math.PI;
+    const dPitch = Math.asin(Math.max(-1, Math.min(1, dy / dl))) - Math.asin(Math.max(-1, Math.min(1, _amDir.y)));
+    // proximity fade: strongest when the candidate is already near the crosshair,
+    // zero at the engage edge → assist that helps you settle, never a snap-lock.
+    const prox = 1 - nc.r / AIM_MAG_NDC;
+    const kFrac = 1 - Math.exp(-AIM_MAG_RATE * prox * dt);
+    const cap = AIM_MAG_CAP * dt;
+    let sh = dHead * kFrac, sp = dPitch * kFrac;
+    sh = Math.max(-cap, Math.min(cap, sh));
+    sp = Math.max(-cap, Math.min(cap, sp));
+    CBZ.cam.yaw += sh;
+    if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp + sp));
+    else CBZ.cam.pitch = Math.max(-1.0, Math.min(0.9, CBZ.cam.pitch + sp));
+  });
 
   function note(s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, 1.5); }
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);

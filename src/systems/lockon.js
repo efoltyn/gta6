@@ -13,7 +13,7 @@
       plural cityXxxEnumTargets(cb) twins beside their old single-best
       acquire APIs). Three-state color grammar, NO words on screen:
         GREEN  = candidate (in range, roughly on screen)
-        YELLOW = acquiring (aim held near it — the square spins/tightens in)
+        YELLOW = acquiring (aim held near it — the square tightens in)
         RED    = LOCKED (steady, hard corners, lock tone)
       Exactly ONE lock at a time; nearest-to-crosshair wins with hysteresis
       (same idiom as city/interactions.js targeting: the current target keeps
@@ -573,10 +573,14 @@
       projectSlot(s, fovTan);
       if (!s.inView) continue;
       if (!lockObj && aimObj && (s.obj === aimObj || s.key === aimKey)) {
-        // YELLOW: the acquisition reads as a square spinning/tightening onto
-        // the target — scale 1.75→1 and 135°→0 as progress walks to the lock.
+        // YELLOW: the acquiring square TIGHTENS onto the target (scale 1.75→1 as
+        // progress walks to the lock). The old build ALSO spun it 135°→0°, which
+        // the owner killed ("goes yellow→red and spins the square — really
+        // stupid"): the color flip, the corner ticks and the lock tone carry the
+        // acquire read now. Set LOCKON_SQUARE_SPIN=true to restore the rotation.
         const k = Math.max(0, Math.min(1, aimProgress));
-        styleSquare(squares[qi++], "y", s.sx, s.sy, s.px, (1 - k) * 135, 1 + (1 - k) * 0.75);
+        const spin = CBZ.CONFIG.LOCKON_SQUARE_SPIN === true ? (1 - k) * 135 : 0;
+        styleSquare(squares[qi++], "y", s.sx, s.sy, s.px, spin, 1 + (1 - k) * 0.75);
       } else {
         styleSquare(squares[qi++], "", s.sx, s.sy, s.px, 0, 1);
       }
@@ -652,6 +656,30 @@
     };
   };
   CBZ.lockonLastLaunch = function () { return launchAt >= 0 ? { t: launchAt, kind: launchKind } : null; };
+  // TOUCH_AIM_ASSIST read surface (systems/touch.js): project the LIVE candidate
+  // pool to screen so the touch layer can add gentle reticle friction + a small
+  // magnetism nudge. PURE READ — never mutates aim / lock / acquire state (no
+  // acquisition change). Each entry carries the NDC centre (nx,ny in -1..1, y
+  // up), the world anchor (x,y,z) and the range (dist). Returns a REUSED array
+  // (no per-call allocation) + a live count `n`. The pool is populated ONLY when
+  // a missile platform is live (RPG on foot / armed aircraft / tank / rocket
+  // car) — regular guns never fill it, so n===0 and the assist is a safe no-op.
+  const _candScreen = [];
+  for (let _ci = 0; _ci < MAX_CANDS; _ci++) _candScreen.push({ nx: 0, ny: 0, x: 0, y: 0, z: 0, dist: 0 });
+  CBZ.lockonCandidateScreen = function () {
+    let n = 0;
+    if (platKey && CBZ.camera && slotCount > 0) {
+      for (let i = 0; i < slotCount; i++) {
+        const s = slots[i];
+        if (!s.used || s.losBlocked) continue;      // behind a wall → not a target
+        _v.set(s.x, s.y, s.z).project(CBZ.camera);
+        if (!(_v.z > -1 && _v.z < 1)) continue;      // behind the camera / clipped
+        const e = _candScreen[n++];
+        e.nx = _v.x; e.ny = _v.y; e.x = s.x; e.y = s.y; e.z = s.z; e.dist = s.dist;
+      }
+    }
+    return { n: n, arr: _candScreen };
+  };
 
   /* ==========================================================================
      2) REAL SNIPER SCOPE

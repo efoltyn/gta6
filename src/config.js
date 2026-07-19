@@ -870,6 +870,47 @@
   // the existing gore.spray/bodyWound blood carries the impact. Flip false
   // to restore the legacy emissive white/orange pop.
   if (CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 == null) CBZ.CONFIG.GORE_HIT_FEEDBACK_V2 = true;
+  // ---- AIM FEEL (owner: make aiming + shooting EASIER, especially on iPad) --
+  // Five independent, reversible knobs. Four default to the improved behaviour;
+  // the fifth (LOCKON_SQUARE_SPIN) defaults OFF because the owner asked to kill
+  // that animation. Flip any one to revert its feel in a single line.
+  //
+  // FPS_ADS_SIGHTS (systems/fpsmode.js): holding aim in FIRST person eases the
+  // weapon viewmodel from its corner carry to a CENTERED, down-the-sights pose,
+  // paired with the existing ADS FOV drop. Bullets still fly the camera ray
+  // (unchanged) and the depth-clear viewmodel can't wall-clip; forward travel is
+  // capped (Z held at the carry depth) so the gun never crosses the near plane.
+  // Skipped while a real optic (sniper scope / fitted gunsmith optic) owns the
+  // view. Flip false → the gun stays corner-pinned while aiming (prior look).
+  if (CBZ.CONFIG.FPS_ADS_SIGHTS == null) CBZ.CONFIG.FPS_ADS_SIGHTS = true;
+  // CAM_ADS_PITCH_WIDE (systems/camera.js): while AIMING on TOUCH, open the
+  // third-person touch pitch clamp from [-0.85,0.75] toward desktop's [-1.0,0.9]
+  // so an iPad can actually put the reticle on high/low targets. Touch-only (the
+  // clamp is consumed only by touch.js). Flip false → the standard touch pitch
+  // range even while aiming.
+  if (CBZ.CONFIG.CAM_ADS_PITCH_WIDE == null) CBZ.CONFIG.CAM_ADS_PITCH_WIDE = true;
+  // ADS_RECOIL_SETTLE (systems/fpsmode.js): while aiming, the view-return spring
+  // recenters faster so the reticle SETTLES back onto the target between shots
+  // instead of wandering up-screen. Tunes the existing recenter (gated on the
+  // same aimHeld predicate as adsRecoilMul); the recoil KICK itself is
+  // unchanged. Flip false → the hip recentering rate while aiming.
+  if (CBZ.CONFIG.ADS_RECOIL_SETTLE == null) CBZ.CONFIG.ADS_RECOIL_SETTLE = true;
+  // TOUCH_AIM_ASSIST (systems/touch.js, reads systems/lockon.js candidates):
+  // mild, TOUCH-ONLY aim help. Reticle FRICTION (look sensitivity eases down as
+  // the crosshair nears a lock-on candidate) plus a small, rate-capped MAGNETISM
+  // nudge toward the nearest on-screen candidate while aiming. Reads the live
+  // lock-on candidate pool (missile / vehicle targets); a no-op whenever that
+  // pool is empty. Never runs for a desktop mouse, and stands down whenever the
+  // actor soft-lock (AIM_LOCK_ASSIST) already owns the aim. Flip false → no
+  // touch friction/magnetism.
+  if (CBZ.CONFIG.TOUCH_AIM_ASSIST == null) CBZ.CONFIG.TOUCH_AIM_ASSIST = true;
+  // LOCKON_SQUARE_SPIN (systems/lockon.js): owner asked to kill the acquire
+  // square's rotation ("when the homing thing goes yellow→red it spins the
+  // square — really stupid"). Default FALSE = the yellow acquiring square
+  // tightens onto the target with NO rotation (the color flip, corner ticks and
+  // lock tone are untouched). Flip true to restore the old 135°→0° acquisition
+  // SPIN.
+  if (CBZ.CONFIG.LOCKON_SQUARE_SPIN == null) CBZ.CONFIG.LOCKON_SQUARE_SPIN = false;
 
   // Small helper used everywhere for registering frame work. In profiling
   // sessions only, retain the callsite so the benchmark can name anonymous
