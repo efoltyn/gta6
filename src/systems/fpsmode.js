@@ -1348,26 +1348,70 @@
     return entry;
   }
 
+  // ---- VEHICLE/AIRCRAFT OCCUPANTS as aim candidates ------------------------
+  // OWNER: "if there's a person in a helicopter, autoscoping should scope for
+  // the person in that helicopter, just like it works for a person in front of
+  // me." The acquire stack (assist spheres, hot crosshair, CBZ.aimedActor
+  // consumers) only scanned ON-FOOT lists, so people seated inside vehicles /
+  // aircraft were invisible to it even when you could SEE them through the
+  // real glass. Two halves, one flag:
+  //   • findActorHit: a hidden-body actor seated in a LIVE car (hijackers and
+  //     scripted riders use the `a.inCar = <car record>` convention) presents
+  //     seated head/torso spheres at the cabin — the PERSON acquires, and car
+  //     glass never blocks the snap (car meshes are not LOS blockers).
+  //   • aimedActor: the police gunship/jets + civil planes join via their
+  //     published ray tests, so aiming at a visible pilot acquires a live
+  //     person-grade target.
+  // DAMAGE IS UNCHANGED — exactly what a direct manual shot does today:
+  // resolveShot already ray-tests the same craft (hull/canopy hit →
+  // cityAircraftDamage / cityDamageCivilAircraft) and findCarHit clamps
+  // cabin-bound rounds at the panel (the car takes the hit). No new damage
+  // systems; the acquire just stops being blind to people inside vehicles.
+  if (CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS == null) CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS = true;
+  const OCC_HEAD_Y = 1.12, OCC_TORSO_Y = 0.78;   // seated heights above the cabin floor
+  const occPoint = new THREE.Vector3();
+  // one cached pseudo-record for aircraft crew: enough shape (kind/pos) for
+  // generic consumers, deliberately WITHOUT char/vendor/relPlayer fields so
+  // aim_dossier's person filter skips it instead of pinning UI to a proxy.
+  const occPilot = { kind: "pilot", occupant: true, name: "Pilot", pos: new THREE.Vector3() };
+
   function findActorHit(origin, dir, maxT, w) {
     // generous-but-fair aim assist (bigger from the third-person shoulder cam)
     const headAssist = shoulderActive() ? 0.22 : (fps.active ? 0.13 : 0);
     const bodyAssist = shoulderActive() ? 0.40 : (fps.active ? 0.16 : 0);
     const hr = (w.headRadius || 0.33) + headAssist;
     const br = (w.bodyRadius || BODY_R) + bodyAssist;
-    let bestActor = null, bestDist = maxT, bestHead = false;
+    let bestActor = null, bestDist = maxT, bestHead = false, bestOcc = false;
     const scan = function (list) {
       for (let i = 0; i < list.length; i++) {
         const a = list[i];
-        if (!a || a.dead || a.ko > 0 || a.escaped || !a.group || a.group.visible === false) continue;
+        if (!a || a.dead || a.ko > 0 || a.escaped || !a.group) continue;
+        if (a.group.visible === false) {
+          // SEATED OCCUPANT (hidden body, live vehicle): only LIVE riders whose
+          // record links the actual car object. (AIM_VEHICLE_OCCUPANTS)
+          if (CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS === false) continue;
+          const car = a.inCar;
+          if (!car || typeof car !== "object" || !car.pos || car.dead) continue;
+          const cy = car.pos.y || 0;
+          // refresh the rider's dead-while-driving pos so anything reading it
+          // (overhead tags, map dots) points at the car, not the sidewalk spot
+          // where they got in (eject rewrites it from car.pos anyway).
+          if (a.pos && a.pos.set) a.pos.set(car.pos.x, cy, car.pos.z);
+          const ohd = sphereEntry(origin, dir, car.pos.x, cy + OCC_HEAD_Y, car.pos.z, hr, maxT);
+          if (ohd >= 0 && ohd < bestDist) { bestActor = a; bestDist = ohd; bestHead = true; bestOcc = true; continue; }
+          const otd = sphereEntry(origin, dir, car.pos.x, cy + OCC_TORSO_Y, car.pos.z, br, maxT);
+          if (otd >= 0 && otd < bestDist) { bestActor = a; bestDist = otd; bestHead = false; bestOcc = true; }
+          continue;
+        }
         const gp = a.group.position, gy = gp.y || 0;
         // HEAD first — small high sphere, takes priority
         const hd = sphereEntry(origin, dir, gp.x, gy + HEAD_Y, gp.z, hr, maxT);
-        if (hd >= 0 && hd < bestDist) { bestActor = a; bestDist = hd; bestHead = true; continue; }
+        if (hd >= 0 && hd < bestDist) { bestActor = a; bestDist = hd; bestHead = true; bestOcc = false; continue; }
         // BODY — torso + legs spheres
         const td = sphereEntry(origin, dir, gp.x, gy + TORSO_Y, gp.z, br, maxT);
         const ld = sphereEntry(origin, dir, gp.x, gy + LEG_Y, gp.z, br * 0.82, maxT);
         let bd = Math.min(td < 0 ? Infinity : td, ld < 0 ? Infinity : ld);
-        if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; }
+        if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; bestOcc = false; }
       }
     };
     if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); }   // same gun, city targets (wildlife are huntable too)
@@ -1379,10 +1423,10 @@
     let crowdIdx = -1;
     if (CBZ.game.mode === "city" && CBZ.cityCrowdRayHit) {
       const ch = CBZ.cityCrowdRayHit(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist, hr, br);
-      if (ch) { bestActor = null; crowdIdx = ch.i; bestDist = ch.dist; bestHead = ch.head; }
+      if (ch) { bestActor = null; crowdIdx = ch.i; bestDist = ch.dist; bestHead = ch.head; bestOcc = false; }
     }
     if (!bestActor && crowdIdx < 0) return null;
-    return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
+    return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
   // ---- ray vs the DOWNED (CITY-ONLY) -----------------------------------------
@@ -1615,7 +1659,30 @@
     else eye.set(p.pos.x, p.pos.y + (p.crouch ? 1.18 : 1.65), p.pos.z);
     const w = armed() ? weapon() : { range: maxRange, bodyRadius: BODY_R, headRadius: 0.32 };
     const wall = wallDistance(eye, fwd, maxRange);
-    return findActorHit(eye, fwd, wall ? Math.max(0.1, wall.distance - 0.04) : maxRange, w);
+    const lim = wall ? Math.max(0.1, wall.distance - 0.04) : maxRange;
+    const hit = findActorHit(eye, fwd, lim, w);
+    // AIRCRAFT CREW (AIM_VEHICLE_OCCUPANTS): the police gunship/jets and civil
+    // planes fly with real pilots visible through real canopy glass, but they
+    // live outside the on-foot lists, so the acquire was blind to them. Ray-
+    // test the SAME published craft volumes resolveShot fires against — the
+    // nearest wins against any on-foot hit, walls still occlude (lim), and the
+    // canopy glass IS the craft: a snap onto it routes today's manual damage
+    // (cityAircraftDamage / cityDamageCivilAircraft), no new damage path.
+    if (CBZ.CONFIG.AIM_VEHICLE_OCCUPANTS !== false && CBZ.game.mode === "city") {
+      const cap = hit ? hit.dist : lim;
+      const pol = CBZ.cityAircraftRayTest ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, fwd.x, fwd.y, fwd.z, cap) : null;
+      const civ = CBZ.cityCivilAircraftRayTest ? CBZ.cityCivilAircraftRayTest(eye.x, eye.y, eye.z, fwd.x, fwd.y, fwd.z, cap) : null;
+      let air = pol, civil = false;
+      if (civ && (!air || civ.dist < air.dist)) { air = civ; civil = true; }
+      if (air && (!hit || air.dist < hit.dist)) {
+        occPilot.pos.set(air.x, air.y, air.z);   // live cockpit point for pos consumers
+        occPoint.set(air.x, air.y, air.z);
+        return civil
+          ? { actor: null, occupant: occPilot, civilAircraft: air.rec, dist: air.dist, head: false, point: occPoint }
+          : { actor: null, occupant: occPilot, aircraft: true, dist: air.dist, head: false, point: occPoint };
+      }
+    }
+    return hit;
   }
 
   // ---- damage ----

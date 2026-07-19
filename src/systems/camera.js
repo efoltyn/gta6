@@ -568,7 +568,15 @@
         // back toward hip — the "left-click unzooms while holding RMB" bug. Easing
         // toward the SAME 56° target during ADS makes both writers converge, so the
         // zoom holds rock-steady through firing. (Hip 70 / drop 14 mirror fpsmode.)
-        const fpHipFov = (CBZ.isADS && CBZ.isADS()) ? 70 - 14 : 70;
+        // A LIVE SCOPE outranks the hip/ADS pair for the same reason: while the
+        // factory sniper's real scope (lockon.js, fpsScopeFov) or a fitted
+        // gunsmith optic (scopeview.js, cityScopeFov) is up, easing toward 70/56
+        // here while fpsmode eased toward the scope's lens was the EXACT same
+        // tug-of-war — the zoom never landed, "holding the scope but just looking
+        // down the sights". Same precedence as fpsmode's block: lockon returns
+        // null whenever a gunsmith optic owns the weapon, so exactly one wins.
+        const fpScopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
+        const fpHipFov = fpScopeF ? fpScopeF : ((CBZ.isADS && CBZ.isADS()) ? 70 - 14 : 70);
         fov = smoothDamp(fov, fpHipFov, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
         applyToggleBlend();          // ease in from the third-person boom on toggle
         return;
@@ -947,9 +955,16 @@
       sprintFovK += ((sprintingNow ? 1 : 0) - sprintFovK) * (1 - Math.exp(-6 * fdt));
       targetFov += 7 * sprintFovK;
     } else sprintFovK = 0;
-    // a fitted optic (city/gunmods.js + city/scopeview.js) overrides the aimed
-    // lens with its own magnification while you're holding aim on foot.
-    const scopeF = CBZ.cityScopeFov && CBZ.cityScopeFov();
+    // a LIVE SCOPE overrides the aimed lens with its own magnification while
+    // you're holding aim on foot: the factory sniper's real scope (lockon.js,
+    // fpsScopeFov — e.g. still engaged after a [V] toggle back to third person)
+    // outranks nothing but itself, because it returns null whenever a fitted
+    // gunsmith optic (city/gunmods.js + city/scopeview.js, cityScopeFov) owns
+    // the weapon — the fitted optic wins its magnification, exactly one is
+    // ever non-null (same precedence as fpsmode.js's FP FOV block). This tail
+    // honoring only cityScopeFov was the third-person half of the fake-scope
+    // bug: overlay up, lens easing back to the 50° ADS chase every frame.
+    const scopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
     if (scopeF) targetFov = scopeF;
     // V2: snappier ADS lens punch (~0.12s, Fortnite's targeting transition)
     fov = smoothDamp(fov, targetFov, fovV, TP && CBZ.CONFIG.CAM_TP_V2 ? 0.12 : 0.18, fdt);
