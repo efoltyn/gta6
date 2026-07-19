@@ -306,10 +306,31 @@
     if (ped.job) return String(ped.job).replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     return "Stranger";
   }
+  // Subtitles read as conversation, not surveillance: by default a line only
+  // shows when the player is basically beside the speaker (~9.5u), so distant
+  // street chatter no longer fills the subtitle bar. The ped you are actually
+  // DEALING with — the live interaction-panel target, or one approaching /
+  // pointing you out — keeps slack beyond interaction reach (~4-6u) so a menu
+  // exchange never drops its line over a half-step. false restores the old
+  // 34u wide gate.
+  if (CBZ.CONFIG.SPEECH_CLOSE_RANGE == null) CBZ.CONFIG.SPEECH_CLOSE_RANGE = true;
+  const SPEECH_D_WIDE = 34, SPEECH_D_AMBIENT = 9.5, SPEECH_D_ENGAGED = 12;
+  function speechEngaged(ped) {
+    if (ped.approach || ped.reportState) return true;  // walking up to / snitching on the player
+    const reg = CBZ.interactions;
+    const cur = reg && reg.current ? reg.current() : null;
+    return !!(cur && cur.target === ped);              // the ped you're mid-interaction with
+  }
   function say(ped, text, color, secs) {
     if (!ped || ped.dead || !ped.group || !text) return;
     // only show near the camera so we don't pay for the whole map
-    const P = CBZ.player; if (P && Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z) > 34) return;
+    const P = CBZ.player;
+    if (P && ped !== P) {
+      const d = Math.hypot(ped.pos.x - P.pos.x, ped.pos.z - P.pos.z);
+      const lim = CBZ.CONFIG.SPEECH_CLOSE_RANGE === false ? SPEECH_D_WIDE
+        : speechEngaged(ped) ? SPEECH_D_ENGAGED : SPEECH_D_AMBIENT;
+      if (d > lim) return;
+    }
     ensureSpeech();
     speechPed = ped;
     speechT = secs || 2.4;
