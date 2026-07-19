@@ -537,6 +537,10 @@
 <script src="src/city/biome_farmland.js?v=organicfields7"></script>
 <script src="src/city/biome_snow.js?v=organicmountain16"></script>
 <script src="src/city/snowboard.js?v=terrain2"></script>
+<!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
+     w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
+     the military island (22) and both biome height fields (30/31). -->
+<script src="src/city/bunkers.js?v=strat1"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -673,6 +677,10 @@
 <script src="src/city/gangops.js?v=living1"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=meshboard2"></script>
+<!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
+     seam above), the bunker-buster and the nuke. Every blast routes through
+     the WRAPPED cityExplosion chain; deaths route through the kill bus. -->
+<script src="src/city/strategic.js?v=strat1"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=sim1"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->

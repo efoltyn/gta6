@@ -865,6 +865,25 @@
   // dormant and desktop/touch behave exactly as before.
   if (CBZ.CONFIG.PLAYER_SLIDE == null) CBZ.CONFIG.PLAYER_SLIDE = true;
   if (CBZ.CONFIG.PLAYER_PRONE == null) CBZ.CONFIG.PLAYER_PRONE = true;
+  // ---- strategic-weapons layer (city/bunkers.js + city/strategic.js) ------
+  // STRAT_BUNKERS: hardened shelters — the Fort Brandt command bunker
+  // (armory crate, seated officers, the nuclear vault) + two deterministic
+  // wilderness finds (mountain early-warning post, desert fallout shelter).
+  // An INTACT bunker shelters anyone inside from the nuke; a blast door is
+  // the only way in. OFF → none of it builds.
+  // STRAT_B2: the B-2 flying wing on the military apron — boardable/lockable
+  // like all base hardware, flies the heavy/stable class, carries the bay.
+  // STRAT_BUNKER_BUSTER: the penetrator payload — the ONLY weapon that
+  // kills through a bunker roof (and one-shots a building through its roof).
+  // OFF → a buster impact resolves as a plain heavy bomb.
+  // STRAT_NUKE: the one-per-world device (military vault) — B-2 drop or a
+  // planted 45s timer; staged city-flattening blast, kill-bus deaths
+  // ("nuclear blast" in the corner feed), 5★, lingering radiation zone.
+  // OFF → a nuke impact resolves as a plain heavy blast.
+  if (CBZ.CONFIG.STRAT_BUNKERS == null) CBZ.CONFIG.STRAT_BUNKERS = true;
+  if (CBZ.CONFIG.STRAT_B2 == null) CBZ.CONFIG.STRAT_B2 = true;
+  if (CBZ.CONFIG.STRAT_BUNKER_BUSTER == null) CBZ.CONFIG.STRAT_BUNKER_BUSTER = true;
+  if (CBZ.CONFIG.STRAT_NUKE == null) CBZ.CONFIG.STRAT_NUKE = true;
 
   // ---- character/combat reads (owner reports, one flag each) --------------
   // CHAR_SEAT_POSE_V2 (entities/character.js): REAL chair sit for seats that

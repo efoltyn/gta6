@@ -56,6 +56,9 @@
     // ORDER MATTERS: more-specific causes win. "gunfire" contains "fire" and
     // "car bomb" contains "car", so bombs/explosions are tested BEFORE both the
     // vehicle and the bare-fire checks, and gunfire is word-bounded.
+    // nuclear (city/strategic.js) — outranks even terrorism: the owner wants
+    // the feed to read "X killed Y in a nuclear blast", not a generic label
+    if (/nuclear|nuke|atomic/.test(s)) return "nuclear blast";
     // terrorism (bombs) — most specific
     if (/terror|suicide bomb|car bomb|\bbomb\b|\bc4\b|detonat/.test(s)) return "terrorist attack";
     // an aircraft going DOWN (distinct from a called-in airstrike ON you) — the
@@ -298,7 +301,7 @@
         : (cause === "explosion" || cause === "terrorist attack") ? "blew up"
         : "killed";
       let chip = "";
-      if (verb === "killed" && /airstrike|plane crash|police/.test(cause)) chip = ' <span class="kf-m">' + esc(cause) + '</span>';
+      if (verb === "killed" && /airstrike|plane crash|police|nuclear/.test(cause)) chip = ' <span class="kf-m">' + esc(cause) + '</span>';
       return '<span class="kf-by">' + esc(e.by) + '</span><span class="kf-v">' + verb + '</span><span class="kf-t">' + vic + '</span>' + chip;
     }
     // no attributed killer → environmental / unknown cause
