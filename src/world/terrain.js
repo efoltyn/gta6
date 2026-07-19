@@ -36,8 +36,12 @@
 ============================================================ */
 (function () {
   "use strict";
-  const CBZ = window.CBZ;
-  if (!CBZ || !window.THREE) return;
+  // This script loads BEFORE config.js/seed.js (index.html order), so it must
+  // self-create the namespace (core/seed.js's exact idiom). The old
+  // `if (!CBZ) return;` guard silently killed this whole module — and with it
+  // terrain_overhaul.js, which needs the oracle/builder defined here.
+  const CBZ = (window.CBZ = window.CBZ || {});
+  if (!window.THREE) return;
   const THREE = window.THREE;
   if (!window.noise) { /* noise.js must load first */ }
 
@@ -46,8 +50,11 @@
   // ----------------------------------------------------------------------
   // derived from the one world-seed knob (core/seed.js); 1337 is the legacy
   // fallback so a partial load without seed.js still builds the same backdrop.
+  // NOTE: window.noise.seed(SEED) is deliberately NOT called at parse time —
+  // seed.js hasn't loaded yet and re-seeding the shared simplex perm table is
+  // a side effect only this file's legacy build path wants (it seeds inside
+  // buildTerrain, right before displacing).
   const SEED = (window.CBZ && CBZ.hashN) ? (CBZ.hashN(1337) % 65536) : 1337;
-  if (window.noise && window.noise.seed) window.noise.seed(SEED);
 
   // ----------------------------------------------------------------------
   //  THE FLAT (PLAYABLE) REGION — the union AABB of every walkable
