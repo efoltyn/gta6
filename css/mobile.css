@@ -17,7 +17,8 @@
      top-right     #cTopRight money+wanted column (jail: #minimap)
      mid-bottom    walk-up prompt band (bottom:158) → #interact card (224)
      bottom-center #cWpn hotbar + MC vitals
-     bottom-left   dynamic joystick (transient)
+     bottom-left   FIXED joystick (faint till touched; rim = sprint,
+                   quick press = crouch — TOUCH_FIXED_STICK)
      bottom-right  #tbtns on foot ⇄ #tveh dial+buttons in a vehicle
 ============================================================ */
 html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
@@ -31,7 +32,11 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
    card and swallow its option taps. It stays pointer-events:none (inherited). */
 #touch button { pointer-events: auto; }
 
-/* dynamic left-thumb joystick (recenters to where you press) */
+/* left-thumb joystick. DEFAULT (TOUCH_FIXED_STICK, .tfixed): pinned to the
+   bottom-left corner and always faintly visible while playing — a movement
+   touch must BEGIN inside its catch zone (touch.js checks 1.6× the radius),
+   so taps anywhere else on the left half (radar, HUD, world) never move you.
+   Without .tfixed it's the legacy dynamic disc that recentres to the press. */
 #tstick {
   position: fixed; width: 124px; height: 124px; margin: -62px 0 0 -62px;
   border-radius: 50%; border: 2px solid rgba(255,255,255,.22);
@@ -39,11 +44,21 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   touch-action: none;
 }
 #tstick.on { opacity: 1; }
+#tstick.tfixed {
+  margin: 0; top: auto;
+  left: calc(26px + env(safe-area-inset-left, 0px));
+  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  opacity: .35;
+}
+#tstick.tfixed.on { opacity: 1; }
 #tknob {
   position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px;
   border-radius: 50%; background: rgba(255,255,255,.32);
   box-shadow: 0 2px 8px rgba(0,0,0,.4);
 }
+/* stick-press (L3) crouch latch: amber knob says "you're crouched" */
+#tstick.tcrouch #tknob { background: rgba(255,209,102,.55); }
+#tstick.tcrouch { border-color: rgba(255,209,102,.45); }
 
 /* right-hand button cluster — icon-only, safe-area aware */
 #tbtns {
@@ -66,6 +81,13 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
 }
 .tbtn.tsm { width: 52px; height: 52px; opacity: .9; }
 .tbtn.tbig { width: 84px; height: 84px; }
+/* TOUCH_AIM_SLIDE (.tslide, touch.js): AIM and SCOPE leave the column and sit
+   right BESIDE the trigger, so the thumb rolls aim→fire in one short slide —
+   press aim, drag onto fire to shoot, aim stays held (touch.js owns the
+   gesture; its fire hit-rect is inflated so the 12px gap is no dead zone). */
+#tbtns.tslide #taim, #tbtns.tslide #tscope { position: absolute; right: calc(100% + 12px); }
+#tbtns.tslide #taim { bottom: 16px; }     /* shoulder-to-shoulder with FIRE  */
+#tbtns.tslide #tscope { bottom: 80px; }   /* stacked just above AIM          */
 .tbtn.tjump { width: 72px; height: 72px; background: rgba(58,209,122,.42); border-color: rgba(58,209,122,.6); }
 .tbtn.tfire { background: rgba(226,74,58,.5); border-color: rgba(255,120,100,.65); }
 .tbtn.on { transform: translateY(3px); background: rgba(255,122,26,.62); box-shadow: 0 1px 0 rgba(0,0,0,.3); }

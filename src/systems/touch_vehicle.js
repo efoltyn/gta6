@@ -92,6 +92,20 @@
   function clearHeld() {
     for (const k in held) { if (held[k]) { held[k] = false; if (CBZ.keys) CBZ.keys[k] = false; } }
   }
+  // Losing the page mid-hold (app switch, phone lock, edge swipe) can swallow
+  // a touchend — BRAKE/UP/THR would stay latched through the refocus. Drop
+  // every held key + lit button the moment the page leaves the foreground.
+  // Desktop never builds this layer (root stays null), so it is untouched.
+  function releaseAllHeld() {
+    if (!root) return;
+    clearHeld();
+    if (btnWrap) btnWrap.querySelectorAll(".tvbtn.on").forEach((el) => el.classList.remove("on"));
+  }
+  window.addEventListener("blur", releaseAllHeld);
+  window.addEventListener("pagehide", releaseAllHeld);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible") releaseAllHeld();
+  });
 
   // fire reticle (same glyph language as touch.js's icon cluster)
   const FIRE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>';

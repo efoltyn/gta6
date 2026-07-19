@@ -2,7 +2,12 @@
    systems/touch.js — iPad / phone controls (TOUCH_V2).
 
    The whole touch layer in one thumb-vocabulary:
-     • LEFT-thumb dynamic joystick (recenters to where you press) = move.
+     • LEFT-thumb joystick = move. FIXED in the bottom-left corner (faint
+       until touched): a movement touch must BEGIN inside its catch zone,
+       so taps anywhere else on the left half (radar, HUD, world) are
+       never mistaken for a move — they fall through exactly like
+       right-half touches. TOUCH_FIXED_STICK=false restores the old
+       recenter-to-the-press dynamic disc.
      • RIGHT-half drag = look. Two fingers = pinch the chase cam.
      • TAP THE WORLD = THE VERB. A quick tap raycasts the real rendered
        meshes; if it hits a car / plane / rideable animal / ped it either
@@ -10,16 +15,18 @@
        WALKS the player there and triggers on arrival. Tapping a car gets
        you in / steals it, a plane boards it, a ped opens the contextual
        #interact card (whose YES/NO rows are already click-driven).
-     • MOVEMENT/COMBAT buttons are ICONS (fire reticle, jump arc, walk
-       chevrons, first-person eye, weapon swap, reload, scope). But
+     • MOVEMENT/COMBAT buttons are ICONS (fire reticle, jump arc,
+       first-person eye, weapon swap, reload, aim, scope). But
        INTERACTION prompts carry WORDS: the owner wants a button that
        SAYS "HIJACK", so contextual verb pills (the #interact card, the
        walk-up shop/property prompts) spell out the action itself —
        never a keyboard letter. That supersedes the old "no words ever"
        rule, which now applies only to the movement cluster.
-     • AUTO-SPRINT: on touch, moving defaults to a sprint whenever
-       stamina allows (the desktop shift-to-run doctrine assumes a key a
-       tablet doesn't have). The chevron button becomes a WALK toggle.
+     • GAIT LIVES IN THE STICK: sprint is not a button — ramming the
+       stick to its rim sprints (stamina permitting, with hysteresis so
+       the gait never flaps), easing back drops to a run. A quick PRESS
+       on the stick base (the console L3 gesture) toggles crouch through
+       the same Ctrl/C sneak-key path physics.js already reads.
 
    WHY tap-to-interact can't drift from the keyboard: for rides it calls
    the very functions CBZ.cityTryNearestRide() terminates in
@@ -38,9 +45,13 @@
    URL-overridable via ?cfg_X=0):
      TOUCH_V2           — ped-tap + walk-to layer
      TOUCH_VERB_PROMPTS — worded verb pills replacing key glyphs
-     TOUCH_AUTOSPRINT   — stamina-gated default sprint
+     TOUCH_AUTOSPRINT   — stick-rim deflection sprint (the gait pump)
      TOUCH_HUD_TIDY     — body.touch-tidy declutter CSS (mobile.css)
      TOUCH_VEHICLE      — drive/heli/wing button layer (touch_vehicle.js)
+     TOUCH_FIXED_STICK  — joystick anchored bottom-left (false = dynamic)
+     TOUCH_AIM_SLIDE    — hold AIM/SCOPE and SLIDE onto FIRE to shoot
+                          while the hold stays down; also seats those two
+                          buttons beside the trigger (mobile.css .tslide)
 ============================================================ */
 (function () {
   "use strict";
@@ -52,21 +63,37 @@
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_VERB_PROMPTS == null) CBZ.CONFIG.TOUCH_VERB_PROMPTS = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AUTOSPRINT == null) CBZ.CONFIG.TOUCH_AUTOSPRINT = true;
   if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_HUD_TIDY == null) CBZ.CONFIG.TOUCH_HUD_TIDY = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_FIXED_STICK == null) CBZ.CONFIG.TOUCH_FIXED_STICK = true;
+  if (CBZ.CONFIG && CBZ.CONFIG.TOUCH_AIM_SLIDE == null) CBZ.CONFIG.TOUCH_AIM_SLIDE = true;
   const V2 = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_V2 !== false;
+  const FIXED = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_FIXED_STICK !== false;
+  const SLIDE = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AIM_SLIDE !== false;
 
   const SENS = 0.006, MAXR = 55, DEAD = 0.28;
+  const STICK_ZONE = 1.6;      // catch zone = this × the visible disc radius
+  const SPRINT_HI = 0.85, SPRINT_LO = 0.70;   // stick-rim sprint band (on/off)
+  const SLIDE_PAD_IN = 12;     // fire's hit-rect grows this much for ENTRY —
+                               // exactly bridges the 12px gap to AIM/SCOPE so
+                               // there is NO dead zone between the buttons
+  const SLIDE_PAD_OUT = 26;    // …and this much before a slide LEAVES fire
+  const LOOK_STALE_MS = 3000;  // look watchdog: no move this long = ghost
   const WALK_MAX = 46;        // don't set off on a cross-map trek from one tap
   const WALK_TIMEOUT = 14;    // give up (moving target / stuck) after this many s
 
   let built = false, enabled = false;
-  // AUTO-SPRINT state: on touch the default gait while the stick is deflected
-  // is a sprint, easing off when stamina runs dry (hysteresis so it never
-  // flaps at a threshold). walkMode is the chevron button's toggle — ON means
-  // the player asked to stay slow. Desktop never runs any of this.
-  let walkMode = false, stamOk = true, shiftOwned = false;
+  // GAIT/STANCE state: sprint lives in the stick (rim deflection = shift) and
+  // crouch is the L3 stick-press latch; both are pumped per frame below with
+  // hysteresis so nothing flaps at a boundary. Desktop never runs any of this.
+  let stamOk = true, shiftOwned = false, sprintBand = false, stickMag = 0;
+  let crouchLatch = false, crouchOwned = false;
   const stick = { id: null, cx: 0, cy: 0, sx: 0, sy: 0, t0: 0, moved: 0 };
-  const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0, t0: 0, moved: 0, free: false };
+  const look = { id: null, lx: 0, ly: 0, sx: 0, sy: 0, t0: 0, moved: 0, free: false, seen: 0 };
   const walk = { on: false, kind: null, rec: null, t: 0 };
+  // slide-hold touches (aim/scope fingers), keyed by touch identifier — each
+  // record knows how to fully release itself (used by end, the stale sweep,
+  // and the page-blur clear). fireHolds refcounts every way FIRE can be down.
+  const slideTouches = new Map();
+  let fireHolds = 0, fireOn = false;
   let baseEl, knobEl;
   const tapRay = window.THREE ? new THREE.Raycaster() : null;
   const tapNdc = window.THREE ? new THREE.Vector2() : null;
@@ -76,7 +103,6 @@
   const SVG = {
     fire: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
     jump: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 21h16"/></svg>',
-    sprint: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l7 7-7 7"/><path d="M12 5l7 7-7 7"/></svg>',
     eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
     swap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 12l-3 3 3 3"/></svg>',
     reload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/></svg>',
@@ -108,7 +134,6 @@
       '<div id="tbtns">' +
       btn("tfire", "tbtn tbig tfire", SVG.fire, "Fire") +
       btn("tjump", "tbtn tjump", SVG.jump, "Jump") +
-      btn("tsprint", "tbtn tsprint", SVG.sprint, "Walk / auto-sprint toggle") +
       btn("tview", "tbtn tsm", SVG.eye, "First-person view") +
       btn("tswap", "tbtn tsm", SVG.swap, "Next weapon") +
       btn("treload", "tbtn tsm", SVG.reload, "Reload") +
@@ -120,38 +145,34 @@
     knobEl = document.getElementById("tknob");
 
     holdBtn("tjump", (down) => { CBZ.keys[" "] = down; });
-    // FIRE: in first-person it shoots/punches via the FPS module; otherwise
-    // it's the third-person panic-fire / unarmed melee (matches desktop L-click).
-    holdBtn("tfire", (down) => {
-      if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
-      else if (down) {
-        if (CBZ.game.mode === "survival") { if (CBZ.grapple) CBZ.grapple.punch(); }
-        else if (CBZ.punch) CBZ.punch();
-      }
-    });
+    // FIRE goes through the refcounted fireHold so the physical button and an
+    // aim/scope finger that has SLID onto it can overlap without cutting each
+    // other's trigger (fireAction sees one down on 0→1, one up on 1→0).
+    holdBtn("tfire", fireHold);
     tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
-    // WALK toggle. Auto-sprint (below) makes sprint the DEFAULT gait, so the
-    // chevron button flipped meaning: lit = "stay at a walk" (stealth, aiming,
-    // squeezing through a crowd). With TOUCH_AUTOSPRINT off it degrades to the
-    // old manual sprint-hold semantics.
-    const sb = document.getElementById("tsprint");
-    tapBtn(sb, () => { walkMode = !walkMode; sb.classList.toggle("on", walkMode); });
     // AIM (ADS) — the missing iPad right-mouse: hold pulls the camera in /
     // tightens FOV / steadies recoil via the EXISTING CBZ.fpsSetAim hook the
     // gamepad triggers use. Hold = aim, release = unaim.
-    holdBtn("taim", (down) => { if (CBZ.fpsSetAim) CBZ.fpsSetAim(down); });
     // SCOPE — sibling system (sniper scope + lock-on) exposes feature-detected
     // hooks; every call is guarded so this button is correct whether that API
     // is present, absent, or lands under a slightly different shape. Hold =
     // scope while pressed (CBZ.fpsScope(down)); tap with only a toggle API =
     // CBZ.fpsScopeToggle(). Distinct from AIM: scope = true sniper zoom.
     // Visibility for both is driven from the armed check below.
-    holdBtn("tscope", (down) => {
+    // Both are SLIDE-holds (TOUCH_AIM_SLIDE): the touch keeps aim/scope down
+    // for its whole life, and rolling onto FIRE shoots without lifting —
+    // press aim, DRAG to shoot (mobile.css .tslide seats them beside FIRE).
+    const aimFn = (down) => { if (CBZ.fpsSetAim) CBZ.fpsSetAim(down); };
+    const scopeFn = (down) => {
       if (CBZ.fpsScope) CBZ.fpsScope(down);
       else if (down && CBZ.fpsScopeToggle) CBZ.fpsScopeToggle();
-    });
+    };
+    if (SLIDE) { slideHoldBtn("taim", aimFn); slideHoldBtn("tscope", scopeFn); }
+    else { holdBtn("taim", aimFn); holdBtn("tscope", scopeFn); }
+    if (SLIDE) document.getElementById("tbtns").classList.add("tslide");
+    if (FIXED) baseEl.classList.add("tfixed");
   }
 
   // press-and-hold button (jump/fire)
@@ -168,6 +189,87 @@
   function tapBtn(b, fn) {
     b.addEventListener("touchstart", (e) => { e.preventDefault(); fn(); }, { passive: false });
     b.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
+  }
+
+  // The trigger itself: in first-person it shoots/punches via the FPS module;
+  // otherwise it's the third-person panic-fire / unarmed melee (desktop L-click).
+  function fireAction(down) {
+    if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
+    else if (down) {
+      if (CBZ.game.mode === "survival") { if (CBZ.grapple) CBZ.grapple.punch(); }
+      else if (CBZ.punch) CBZ.punch();
+    }
+  }
+  // Refcounted trigger: every way FIRE can be down (the physical button, each
+  // aim/scope finger currently slid onto it) holds one count; the weapon sees
+  // exactly one clean down on 0→1 and one clean up on 1→0, so one finger
+  // lifting can never cut another finger's burst.
+  function fireHold(down) {
+    fireHolds = Math.max(0, fireHolds + (down ? 1 : -1));
+    const want = fireHolds > 0;
+    if (want === fireOn) return;
+    fireOn = want;
+    const fb = document.getElementById("tfire");
+    if (fb) fb.classList.toggle("on", want);
+    fireAction(want);
+  }
+  // slide-hold (TOUCH_AIM_SLIDE) — the owner's "press aim, DRAG to shoot":
+  // like holdBtn, but the touch KEEPS the hold for its entire life wherever
+  // the finger roams (touchmove/touchend keep firing on the START target —
+  // touch implicit capture — so no window listeners are needed), and while
+  // held the finger can slide onto FIRE:
+  //   • start on AIM  → aim held until the finger lifts, wherever it goes
+  //   • slide onto FIRE (hit-rect inflated SLIDE_PAD_IN, closing the gap
+  //     between the adjacent buttons — no dead zone) → fire begins
+  //   • slide off FIRE (rect + SLIDE_PAD_OUT, hysteresis so a finger resting
+  //     on the edge never stutters the trigger) → fire stops, aim still held
+  //   • lift → fire (if engaged) and aim released together
+  // A separate finger pressing FIRE directly keeps working throughout — see
+  // fireHold. SCOPE gets the same grammar.
+  function slideHoldBtn(id, fn) {
+    const b = document.getElementById(id);
+    let holds = 0;   // fingers currently holding THIS button's verb
+    const down = () => { if (++holds === 1) { b.classList.add("on"); fn(true); } };
+    const up = () => { if (holds > 0 && --holds === 0) { b.classList.remove("on"); fn(false); } };
+    b.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      const fb = document.getElementById("tfire");
+      const fr = fb && fb.style.display !== "none" ? fb.getBoundingClientRect() : null;
+      for (const t of e.changedTouches) {
+        if (slideTouches.has(t.identifier)) continue;
+        const tid = t.identifier;
+        const rec = { fireIn: false, rect: fr, release: null };
+        rec.release = function () {
+          if (!slideTouches.delete(tid)) return;   // already gone (sweep vs touchend)
+          if (rec.fireIn) { rec.fireIn = false; fireHold(false); }
+          up();
+        };
+        slideTouches.set(tid, rec);
+        down();
+      }
+    }, { passive: false });
+    b.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        const rec = slideTouches.get(t.identifier);
+        if (!rec || !rec.rect) continue;
+        const r = rec.rect, p = rec.fireIn ? SLIDE_PAD_OUT : SLIDE_PAD_IN;
+        const inFire = t.clientX >= r.left - p && t.clientX <= r.right + p &&
+                       t.clientY >= r.top - p && t.clientY <= r.bottom + p;
+        if (inFire !== rec.fireIn) { rec.fireIn = inFire; fireHold(inFire); }
+      }
+    }, { passive: false });
+    const end = (e) => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        const rec = slideTouches.get(t.identifier);
+        if (rec) rec.release();
+      }
+    };
+    b.addEventListener("touchend", end, { passive: false });
+    b.addEventListener("touchcancel", end, { passive: false });
+    b.addEventListener("mousedown", (e) => { e.preventDefault(); down(); });
+    b.addEventListener("mouseup", () => up());
   }
 
   // ---- verb-first prompts (the owner's "button that SAYS HIJACK") -----------
@@ -245,8 +347,29 @@
   function setMove(nx, ny) {
     const k = CBZ.keys;
     k["w"] = ny < -DEAD; k["s"] = ny > DEAD; k["a"] = nx < -DEAD; k["d"] = nx > DEAD;
+    stickMag = Math.hypot(nx, ny);   // the gait pump maps this to walk/sprint
   }
-  function clearMove() { const k = CBZ.keys; k["w"] = k["a"] = k["s"] = k["d"] = false; }
+  function clearMove() { const k = CBZ.keys; k["w"] = k["a"] = k["s"] = k["d"] = false; stickMag = 0; }
+
+  // deflect the knob + movement keys from the stick centre (fixed: the anchor;
+  // dynamic: wherever the press recentred it) — shared by touchstart/touchmove
+  function stickDeflect(x, y) {
+    const dx = x - stick.cx, dy = y - stick.cy;
+    const len = Math.hypot(dx, dy) || 1, cl = Math.min(len, MAXR);
+    knobEl.style.transform = "translate(" + (dx / len * cl) + "px," + (dy / len * cl) + "px)";
+    setMove(dx / MAXR, dy / MAXR);
+  }
+  // Slot releases must NEVER fail halfway: ids clear FIRST, feature hooks are
+  // fenced — a throwing camera hook must not leave a slot claimed forever.
+  function releaseStick() {
+    stick.id = null; clearMove();
+    if (knobEl) knobEl.style.transform = "";
+    if (baseEl) baseEl.classList.remove("on");
+  }
+  function releaseLook() {
+    look.id = null;
+    if (look.free) { look.free = false; try { if (CBZ.camFreeLook) CBZ.camFreeLook(false); } catch (err) {} }
+  }
 
   function note(s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, 1.5); }
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -425,50 +548,75 @@
     k["shift"] = dist > 5;    // jog most of the way, ease to a walk for the last few metres
   });
 
-  // ---- AUTO-SPRINT (the touch default gait) ---------------------------------
-  // Owns CBZ.keys["shift"] ON FOOT while the touch layer is live: deflecting
-  // the stick sprints whenever stamina is healthy (30/8 hysteresis so the gait
-  // never flaps at a threshold), the chevron button holds you to a walk, and
-  // away from foot travel shift is RELEASED — the old sprint TOGGLE left shift
-  // latched, which a heli reads as collective-down the moment you lift off.
-  // Registered after the walk-to updater (same order 9): while walk.on the
-  // walk-to steering owns the gait and this pump stands aside.
+  // ---- GAIT + STANCE PUMP (the stick IS the sprint button) ------------------
+  // Owner: "hold the movement control all the way aggressively → sprint".
+  // Deflection magnitude maps to gait: inside the rim nothing, RAMMED to the
+  // rim shift goes down — band hysteresis (SPRINT_HI on / SPRINT_LO off) AND
+  // the old stamina hysteresis (30/8) so neither boundary ever flaps. Off
+  // foot or stick-up shift is RELEASED (a latched shift reads as collective-
+  // down in a heli). While walk-to steers, it owns the gait and this pump
+  // stands aside. The L3 crouch latch is pumped here too: it holds the REAL
+  // sneak key ("c" — physics.js's sneakHeld; "control" would collide with the
+  // heli collective) and auto-stands when you leave your feet, so a stale
+  // crouch can never follow you into a car. TOUCH_AUTOSPRINT=false → touch
+  // never writes shift (crouch latch still honoured).
   CBZ.onUpdate(9, function () {
     if (!enabled || walk.on) return;
     const k = CBZ.keys, P = CBZ.player;
     const auto = !CBZ.CONFIG || CBZ.CONFIG.TOUCH_AUTOSPRINT !== false;
     const onFoot = CBZ.game.state === "playing" && P && P.pos && !P.dead && !P.driving && !P._aircraft;
-    if (!auto) {
-      // flag off → the chevron degrades to the OLD manual sprint toggle (lit =
-      // hold shift), still released the moment you leave your feet.
-      const manual = onFoot && walkMode;
-      if (manual !== shiftOwned) { k["shift"] = manual; shiftOwned = manual; }
-      return;
+    if (!onFoot && crouchLatch) crouchLatch = false;
+    const wantC = onFoot && crouchLatch;
+    if (wantC !== crouchOwned) {
+      crouchOwned = wantC; k["c"] = wantC;
+      if (baseEl) baseEl.classList.toggle("tcrouch", wantC);   // amber knob = crouched
     }
-    if (!onFoot) {
+    if (!auto || !onFoot) {
       if (shiftOwned) { k["shift"] = false; shiftOwned = false; }
       return;
     }
     const st = P.stamina == null ? 100 : P.stamina;
     stamOk = stamOk ? st > 8 : st > 30;
-    const moving = !!(k["w"] || k["a"] || k["s"] || k["d"]);
-    k["shift"] = shiftOwned = !!(moving && !walkMode && stamOk);
+    sprintBand = stick.id !== null && (sprintBand ? stickMag > SPRINT_LO : stickMag >= SPRINT_HI);
+    k["shift"] = shiftOwned = !!(sprintBand && stamOk);
   });
 
   // ---- touch input -----------------------------------------------------------
   window.addEventListener("touchstart", (e) => {
     enable();
+    sweepStale(e);
     for (const t of e.changedTouches) {
       if (inUI(t.target)) continue;
       cancelWalk();   // any deliberate touch takes back manual control
-      if (t.clientX < innerWidth * 0.5 && stick.id === null) {
-        stick.id = t.identifier; stick.cx = t.clientX; stick.cy = t.clientY;
+      let grab = false;
+      if (stick.id === null) {
+        if (FIXED) {
+          // FIXED stick: only a touch BORN inside the catch zone (STICK_ZONE ×
+          // the visible disc) drives movement; every other left-half touch
+          // falls through to look/world-tap exactly like the right half — so
+          // a radar / HUD / world tap can never be mistaken for a move.
+          const r = baseEl ? baseEl.getBoundingClientRect() : null;
+          if (r && r.width > 0) {
+            const ax = r.left + r.width / 2, ay = r.top + r.height / 2;
+            if (Math.hypot(t.clientX - ax, t.clientY - ay) <= (r.width / 2) * STICK_ZONE) {
+              grab = true; stick.cx = ax; stick.cy = ay;
+            }
+          }
+        } else if (t.clientX < innerWidth * 0.5) {
+          // dynamic stick (TOUCH_FIXED_STICK=false): recentres to the press
+          grab = true; stick.cx = t.clientX; stick.cy = t.clientY;
+          baseEl.style.left = t.clientX + "px"; baseEl.style.top = t.clientY + "px";
+        }
+      }
+      if (grab) {
+        stick.id = t.identifier;
         stick.sx = t.clientX; stick.sy = t.clientY; stick.t0 = performance.now(); stick.moved = 0;
-        baseEl.style.left = t.clientX + "px"; baseEl.style.top = t.clientY + "px";
         baseEl.classList.add("on"); knobEl.style.transform = "";
+        if (FIXED) stickDeflect(t.clientX, t.clientY);   // rim-press moves at once
       } else if (look.id === null) {
         look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
         look.sx = t.clientX; look.sy = t.clientY; look.t0 = performance.now(); look.moved = 0;
+        look.seen = performance.now();
         // in a vehicle, tell the camera agent to suspend auto-recenter while
         // this finger drags (glancing sideways at speed); feature-detected.
         const P = CBZ.player;
@@ -479,6 +627,7 @@
 
   let pinchPrev = 0;
   window.addEventListener("touchmove", (e) => {
+    sweepStale(e);
     // two fingers = pinch-zoom the third-person camera
     if (e.touches.length >= 2 && !(CBZ.fps && CBZ.fps.active)) {
       const a = e.touches[0], b = e.touches[1];
@@ -490,12 +639,10 @@
     pinchPrev = 0;
     for (const t of e.changedTouches) {
       if (t.identifier === stick.id) {
-        const dx = t.clientX - stick.cx, dy = t.clientY - stick.cy;
         stick.moved = Math.max(stick.moved, Math.hypot(t.clientX - stick.sx, t.clientY - stick.sy));
-        const len = Math.hypot(dx, dy) || 1, cl = Math.min(len, MAXR);
-        knobEl.style.transform = "translate(" + (dx / len * cl) + "px," + (dy / len * cl) + "px)";
-        setMove(dx / MAXR, dy / MAXR);
+        stickDeflect(t.clientX, t.clientY);
       } else if (t.identifier === look.id) {
+        look.seen = performance.now();
         look.moved = Math.max(look.moved, Math.hypot(t.clientX - look.sx, t.clientY - look.sy));
         CBZ.cam.yaw -= (t.clientX - look.lx) * SENS;
         CBZ.cam.pitch -= (t.clientY - look.ly) * SENS;
@@ -507,6 +654,19 @@
         // in first-person, vertical drag drives the (wider) FPS aim pitch
         if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - (t.clientY - look.ly) * SENS));
         look.lx = t.clientX; look.ly = t.clientY;
+      } else if (look.id === null && !inUI(t.target) && !slideTouches.has(t.identifier)) {
+        // ADOPT a mid-flight drag: if the look slot freed while this finger
+        // was already down (watchdog/sweep recovery, or the slot was wedged
+        // when the finger landed), its next move takes the slot instead of
+        // dying — the view can ALWAYS be dragged by something. touchmove's
+        // target is the START target, so UI/button touches stay excluded;
+        // the stick finger was matched above. Adopted = mid-drag: t0/moved
+        // are poisoned so a quick lift can never read as a world-tap.
+        look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
+        look.sx = t.clientX; look.sy = t.clientY; look.t0 = -1e9; look.moved = 999;
+        look.seen = performance.now();
+        const P = CBZ.player;
+        if (CBZ.camFreeLook && P && (P.driving || P._aircraft)) { look.free = true; CBZ.camFreeLook(true); }
       }
     }
   }, { passive: true });
@@ -514,20 +674,82 @@
   function endTouch(e) {
     for (const t of e.changedTouches) {
       if (t.identifier === stick.id) {
-        const wasTap = stick.moved < 12 && performance.now() - stick.t0 < 330;
-        stick.id = null; clearMove();
-        knobEl.style.transform = ""; baseEl.classList.remove("on");
-        if (wasTap) tapWorld(t.clientX, t.clientY);
+        const dtms = performance.now() - stick.t0;
+        // L3 grammar on the fixed stick: a quick PRESS (no drag) = crouch
+        // toggle, committed only on release so drag-to-move never trips it.
+        const press = FIXED && stick.moved < 10 && dtms < 250;
+        const wasTap = !FIXED && stick.moved < 12 && dtms < 330;   // dynamic stick keeps the legacy world-tap
+        releaseStick();
+        if (press) crouchLatch = !crouchLatch;   // the gait/stance pump applies it
+        else if (wasTap) { try { tapWorld(t.clientX, t.clientY); } catch (err) {} }
       } else if (t.identifier === look.id) {
         const wasTap = look.moved < 12 && performance.now() - look.t0 < 330;
-        look.id = null;
-        if (look.free) { look.free = false; if (CBZ.camFreeLook) CBZ.camFreeLook(false); }
-        if (wasTap) tapWorld(t.clientX, t.clientY);
+        releaseLook();
+        if (wasTap) { try { tapWorld(t.clientX, t.clientY); } catch (err) {} }
       }
     }
   }
   window.addEventListener("touchend", endTouch, { passive: true });
   window.addEventListener("touchcancel", endTouch, { passive: true });
+
+  // ---- stale-touch hygiene (the "can't look around any more" wedge) ---------
+  // If a touchend/touchcancel is swallowed (system edge swipe, notification
+  // shade, screenshot chord, multi-touch churn) a slot could stay claimed
+  // forever and every new finger would bounce off it. Three recovery layers:
+  //  (a) every touchstart/touchmove validates the tracked ids against the
+  //      LIVE e.touches list and frees any ghost. On touchstart, an id that
+  //      matches only a JUST-BORN touch is still a ghost (platforms recycle
+  //      identifiers) — newborns are excluded so the slot frees and the new
+  //      finger claims it cleanly.
+  //  (b) watchdog: a look slot that hasn't produced a touchmove for
+  //      LOOK_STALE_MS while OTHER touch traffic arrives is force-released
+  //      even if the platform still lists its id. The slot's own events
+  //      exempt it, so a parked-but-live finger is never robbed — and if one
+  //      ever is, its next move is ADOPTED straight back (see touchmove).
+  //      No stick watchdog: holding the stick at full tilt without moving
+  //      for many seconds is NORMAL (running in a straight line).
+  //  (c) blur / hidden tab / pagehide drops every claim, latch and held key.
+  function sweepStale(e) {
+    if (stick.id === null && look.id === null && slideTouches.size === 0) return;
+    const born = e.type === "touchstart" ? e.changedTouches : null;
+    const alive = (id) => {
+      if (born) for (let i = 0; i < born.length; i++) if (born[i].identifier === id) return false;
+      const L = e.touches;
+      for (let i = 0; i < L.length; i++) if (L[i].identifier === id) return true;
+      return false;
+    };
+    if (stick.id !== null && !alive(stick.id)) releaseStick();
+    if (look.id !== null && !alive(look.id)) releaseLook();
+    if (slideTouches.size) { for (const [id, rec] of slideTouches) if (!alive(id)) rec.release(); }
+    if (look.id !== null && performance.now() - look.seen > LOOK_STALE_MS) {
+      let own = false;
+      const C = e.changedTouches;
+      for (let i = 0; i < C.length; i++) if (C[i].identifier === look.id) { own = true; break; }
+      if (!own) releaseLook();
+    }
+  }
+  // Losing the page mid-touch (app switch, tab change, phone lock) drops
+  // every claim and held control — nothing may survive a refocus.
+  function clearAllTouchState() {
+    if (!enabled) return;   // layer never armed → desktop stays byte-identical
+    releaseStick(); releaseLook(); pinchPrev = 0;
+    for (const rec of Array.from(slideTouches.values())) rec.release();
+    fireHolds = 0;
+    if (fireOn) {
+      fireOn = false;
+      const fb = document.getElementById("tfire");
+      if (fb) fb.classList.remove("on");
+      try { fireAction(false); } catch (err) {}
+    }
+    if (CBZ.keys) CBZ.keys[" "] = false;   // tjump's element-level hold too
+    const jb = document.getElementById("tjump");
+    if (jb) jb.classList.remove("on");
+  }
+  window.addEventListener("blur", clearAllTouchState);
+  window.addEventListener("pagehide", clearAllTouchState);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible") clearAllTouchState();
+  });
 
   // coarse-pointer device (phone/tablet): turn it on right away
   if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) enable();
@@ -539,7 +761,7 @@
     const show = enabled && CBZ.game.state === "playing";
     root.style.display = show ? "block" : "none";
     if (!show) {
-      if (stick.id !== null) { stick.id = null; clearMove(); }
+      if (stick.id !== null) releaseStick();
       if (walk.on) cancelWalk();
       return;
     }
