@@ -25,15 +25,29 @@ const argv = process.argv.slice(2);
 const argn = (flag, def) => { const i = argv.indexOf(flag); return i >= 0 && argv[i + 1] != null ? Number(argv[i + 1]) : def; };
 const SEED = argn("--seed", 90210), STEP = argn("--step", 40), MTN = argn("--mtn", 25), SPAN = argn("--span", 3200);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const port = 8700 + Math.floor(Math.random() * 80);
+const T0 = Date.now();
+const tmark = (label) => console.log(`[t+${((Date.now() - T0) / 1000).toFixed(1)}s] ${label}`);
+// wide, mutually disjoint random port windows (smoke uses 8950+/9950+): parallel
+// tool runs — worktree agents run their own gates — must not collide on the http
+// OR debug port; a debug-port clash once cross-attached a probe to the WRONG
+// chromium's page (the 57-lot anomaly).
+const port = 8400 + Math.floor(Math.random() * 300);
 const server = spawn("python3", [path.join(ROOT, "tools/devserver.py")], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
-const base = `http://127.0.0.1:${port}/?seed=${SEED}`;
-const dbg = 9700 + Math.floor(Math.random() * 80);
+const origin = `http://127.0.0.1:${port}/`;
+const base = `${origin}?seed=${SEED}`;
+const dbg = 9550 + Math.floor(Math.random() * 300);
 await rm(`/tmp/cbz-tmap-${dbg}`, { recursive: true, force: true });
-await sleep(700);
-const chrome = spawn("/opt/pw-browsers/chromium", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-tmap-${dbg}`, base], { stdio: "ignore" });
+// poll the devserver instead of a blind grace sleep
+{ let up = false;
+  for (let i = 0; i < 40 && !up; i++) { try { await fetch(origin); up = true; } catch (_) { await sleep(100); } }
+  if (!up) { console.error("FAIL: devserver never came up on :" + port); server.kill("SIGTERM"); process.exit(1); } }
+// small viewport: the audit is PURE NUMBERS (no screenshot) and SwiftShader
+// frame cost scales with pixels — menu boot + the settle frames run ~3x faster.
+const chrome = spawn("/opt/pw-browsers/chromium", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl", "--mute-audio", "--window-size=640,400", `--remote-debugging-port=${dbg}`, `--user-data-dir=/tmp/cbz-tmap-${dbg}`, base], { stdio: "ignore" });
 let pg = null;
-for (let i = 0; i < 80 && !pg; i++) { try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); pg = ps.find((p) => p.type === "page" && p.url.includes("seed")); } catch (_) {} if (!pg) await sleep(250); }
+// match the page by THIS run's exact origin, never a loose substring — a
+// colliding debug port must read as "no page", not someone else's world.
+for (let i = 0; i < 150 && !pg; i++) { try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); pg = ps.find((p) => p.type === "page" && p.url.startsWith(origin)); } catch (_) {} if (!pg) await sleep(100); }
 const ws = new WebSocket(pg.webSocketDebuggerUrl);
 await new Promise((res, rej) => { ws.addEventListener("open", res, { once: true }); ws.addEventListener("error", rej, { once: true }); });
 let id = 1; const pend = new Map();
@@ -41,12 +55,19 @@ ws.addEventListener("message", (ev) => { const m = JSON.parse(ev.data); if (m.id
 const send = (method, params = {}) => new Promise((r) => { const i = id++; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const evl = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true }); if (r.result && r.result.exceptionDetails) { console.error("EVAL ERR:", JSON.stringify(r.result.exceptionDetails).slice(0, 300)); } return r.result && r.result.result && r.result.result.value; };
 await send("Runtime.enable");
-for (let i = 0; i < 60; i++) { if (await evl("!!(window.CBZ && CBZ.game && document.getElementById('playBtn'))")) break; await sleep(500); }
+for (let i = 0; i < 200; i++) { if (await evl("!!(window.CBZ && CBZ.game && document.getElementById('playBtn'))")) break; await sleep(150); }
 await evl("(() => { if (window.CBZ && CBZ.CONFIG) CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = false; return true; })()");
 let playing = false;
-for (let i = 0; i < 120 && !playing; i++) { await evl("(() => { const b = document.getElementById('playBtn'); if (b) b.click(); return true; })()"); await sleep(600); playing = await evl("!!(CBZ.game && CBZ.game.state === 'playing')"); }
+for (let i = 0; i < 240 && !playing; i++) { await evl("(() => { const b = document.getElementById('playBtn'); if (b) b.click(); return true; })()"); await sleep(250); playing = await evl("!!(CBZ.game && CBZ.game.state === 'playing')"); }
 if (!playing) { console.error("never reached playing"); process.exit(1); }
-await sleep(4000);
+tmark("world built, playing");
+// settle on FRAMES, not wall time — the audit reads build-time state + pure
+// oracles (terrainHeight/cityBiomeAt); 20 update ticks is generous, and the
+// old blind sleep(4000) proved nothing extra on a 60x-slowed headless sim.
+await evl("(() => { window.__tmapFrames = 0; const loop = () => { window.__tmapFrames++; requestAnimationFrame(loop); }; requestAnimationFrame(loop); return true; })()");
+{ const s = Date.now();
+  while (Date.now() - s < 5000) { await sleep(250); if (Date.now() - s >= 1000 && ((await evl("window.__tmapFrames || 0")) || 0) >= 20) break; } }
+tmark("settled");
 
 // ---- ONE in-page grid sweep: biome + relief at every cell ----
 const SAMPLER = `(() => {
