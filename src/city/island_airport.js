@@ -511,15 +511,17 @@
     // single `current` target) — so a door zone right on the hull was always
     // shadowed by militaryvehicles.js's HIJACK option and never reachable
     // (proved by a CDP probe: pressing E hijacked the plane instead). Riding
-    // the milvehicle layer means the airliner card shows BOTH verbs together:
-    //   [E] Hijack the airliner  (fly it — militaryvehicles.js, loud, 4★)
-    //   [I] Board the cabin       (this — elevator-style walk-in, harmless)
-    // Slot I never collides with the E hijack, so both are always offered when
-    // you walk up to a parked airliner. The board reach is the milvehicle
+    // the milvehicle layer means interactions.js's dualRideRows builds the
+    // airliner's two-verb card from this option + militaryvehicles.js's
+    // "milveh-take" (the ONE ride that keeps a card — verbs, never YES/NO):
+    //   [E] BOARD   (this — elevator-style walk-in, harmless; the E-router
+    //               yields to the card so E boards instead of hijacking)
+    //   [I] HIJACK  (fly it — militaryvehicles.js, loud, 4★)
+    // Both rows fire the options' own onSelect. The board reach is the milvehicle
     // candidate's own 5.5m footprint reach (militaryvehicles.js) — NOT the door
     // itself: the solid hull AABB spans the whole wing/fuselage footprint, so
     // on foot you're stopped ~17m out at the wingtip and can never actually
-    // touch the forward port door. Pressing I arms the board; the per-frame
+    // touch the forward port door. Firing BOARD arms the board; the per-frame
     // door-ease below force-opens the panel for the 0.55s pending window
     // (wantOpen keys off cabinState.pending), THEN cabinCompleteBoard steps you
     // into the cabin — the same "walk up → door slides → step in" elevator

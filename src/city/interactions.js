@@ -58,6 +58,18 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.CITY_RIDE_SILENT == null) CBZ.CONFIG.CITY_RIDE_SILENT = true;
   const SILENT_RIDE = { vehicle: 1, "vehicle:inside": 1, milvehicle: 1 };
+  // THE ONE RIDE EXCEPTION (owner spec): a parked CIVIL AIRLINER genuinely
+  // offers two verbs — walk-in cabin boarding (island_airport.js
+  // "airliner_board") and the hijack/fly-it theft (militaryvehicles.js
+  // "milveh-take"), both riding the same "milvehicle" candidate. That single
+  // case keeps a card, but it is a VERB card: exactly two rows, BOARD and
+  // HIJACK — never YES/NO, never a "Board the cabin?" question line, never a
+  // "— HIJACKABLE" name suffix. Every single-verb ride (cars, helis, fighters,
+  // private jets) stays fully silent: press E / tap it and you take it.
+  // Flip CITY_AIRLINER_DUAL_CARD=false to fold the airliner back into the
+  // silent set (E hijacks via the router, walk-in boarding unoffered — the
+  // exact pre-card behaviour).
+  if (CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD == null) CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD = true;
 
   // ---- storage -------------------------------------------------------------
   const layers = Object.create(null);   // layer name -> [option, ...]
@@ -256,7 +268,34 @@
       { key: "e", hold: false, label: "YES", bad: false, opt: chosen, decision: "yes", proposal, standing },
       { key: "i", hold: false, label: "NO", bad: false, opt: chosen, decision: "no", proposal, standing },
     ];
+    rows._pass = pass;   // the full gated pool — the airliner verb card picks from it
     return rows;
+  }
+
+  // A civil airliner with a live walk-in cabin is the one ride with TWO verbs.
+  // Rebuild the card rows from the candidate's already-gated option pool:
+  //   [E] BOARD  — island_airport.js "airliner_board" (door slides, step in)
+  //   [I] HIJACK — militaryvehicles.js "milveh-take" (fly it; loud, 4★)
+  // Both rows are decision:"yes" — fire() runs each option's own onSelect, so
+  // the two existing trigger paths are reused verbatim. Returns null when the
+  // target isn't a civil airliner or the cabin verb isn't live right now
+  // (inside/pending/taken) — the ride then stays silent like every other.
+  function dualRideRows(pick, rows) {
+    if (CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD === false) return null;
+    const t = pick.t, pass = rows && rows._pass;
+    if (!pass || pick.kind !== "milvehicle" || !t || !t.civilian || t.flightKind !== "airliner") return null;
+    let board = null, take = null;
+    for (const o of pass) {
+      if (o.id === "airliner_board") board = o;
+      else if (o.id === "milveh-take") take = o;
+    }
+    if (!board || !take) return null;
+    const out = [
+      { key: "e", hold: false, label: "BOARD", bad: false, opt: board, decision: "yes", proposal: "Board", standing: null },
+      { key: "i", hold: false, label: "HIJACK", bad: true, opt: take, decision: "yes", proposal: "Hijack", standing: null },
+    ];
+    out.dualRide = true;   // render as a verb card; E-router yields to the E row
+    return out;
   }
 
   // ---- the shared panel (same DOM + look as the jail card — keep it) ---------
@@ -406,10 +445,11 @@
 
     // RIDES: no card. You just press E / tap to take it (cityTryNearestRide and
     // touch-tap both fire the board verb without this panel). Keeps the HUD from
-    // announcing "you may now board" like a tutorial.
+    // announcing "you may now board" like a tutorial. Sole exception: the civil
+    // airliner's two-verb BOARD/HIJACK card (dualRideRows above).
     if (SILENT_RIDE[pick.kind] && CBZ.CONFIG.CITY_RIDE_SILENT !== false) {
-      if (current) hidePanel();
-      return;
+      rows = dualRideRows(pick, rows);
+      if (!rows) { if (current) hidePanel(); return; }
     }
 
     // whoever the panel is offering interactions on turns to LOOK at you
@@ -431,11 +471,17 @@
       // Just the proposition. The old "· Lv.6→3 · heard" stat suffix was HUD
       // clutter that read like a debug overlay; level now floats over the head
       // (aim_dossier), and the standing still gates the verb underneath.
-      noteEl.textContent = (rows[0].proposal || "Continue") + "?";
+      // A verb card (airliner BOARD/HIJACK) carries NO question line at all —
+      // the rows ARE the proposition.
+      noteEl.textContent = rows.dualRide ? "" : (rows[0].proposal || "Continue") + "?";
     }
     if (fp !== fingerprint || dirty) {
       fingerprint = fp; dirty = false;
-      if (nameEl) nameEl.textContent = desc.label;
+      // The verb card drops describe()'s "— HIJACKABLE" advertisement suffix:
+      // the HIJACK row already says it, and the suffix broke the fourth wall.
+      if (nameEl) nameEl.textContent = rows.dualRide
+        ? String(desc.label || "").replace(/\s*—\s*HIJACKABLE\s*$/i, "")
+        : desc.label;
       // Exactly two decisions everywhere.  The proposition lives in the note;
       // these rows never mutate into a hidden action wheel.
       // TOUCH (TOUCH_VERB_PROMPTS): no keyboard letters — the YES row becomes
@@ -483,7 +529,12 @@
     // the prompt candidate: a pedestrian standing beside an aircraft used to
     // steal the interaction and could even cuff them while the player was
     // plainly trying to board the plane. The router also owns vehicle exits.
-    if (k === "e" && CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) {
+    // EXCEPTION: while the airliner's BOARD/HIJACK verb card is live, its E
+    // row (BOARD, the innocent walk-in) must win — the router would hijack.
+    // The card only exists on foot beside a parked civil airliner, so no exit
+    // or other-ride press can be shadowed by this yield.
+    if (k === "e" && !(currentRows && currentRows.dualRide) &&
+        CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) {
       e.preventDefault();
       holdKey = ""; holdT = 0; holdFired = false;
       return;

@@ -10,8 +10,12 @@
    saved and called through, so all current behaviour is preserved; we only
    read the outcome and push one feed entry on a confirmed kill.
 
-   The HUD agent (turf.js) RENDERS CBZ.cityRecentDeaths — we own the DATA only:
-   entries are {name, cause, t, you?, gang?}, newest at the END, capped ~12.
+   This file owns the DATA (CBZ.cityRecentDeaths: {name, cause, t, you?,
+   gang?, by?}, newest at the END, capped ~12) AND the on-screen renderer
+   (#cityKillFeed, bottom of file). The old turf.js/hud.js #cKillFeed
+   renderers were gutted to stubs in the living-world overhaul (69e83cd) —
+   from then until the fourth-wall pass (4d1c46d) deaths only reached the
+   phone news app, which is exactly the era of "the feed never shows".
    ============================================================ */
 (function () {
   const CBZ = window.CBZ;
@@ -109,8 +113,21 @@
 
   CBZ.killFeedReset = function () { CBZ.cityRecentDeaths.length = 0; };
 
+  // DIRECT "X killed Y" one-liner for modules that already know all three
+  // parts. wildlife.js's hunting path has called this exact name since before
+  // the bus existed — nothing ever defined it, so its guarded call was a
+  // silent no-op and hunts never reached the feed. Defining it here plugs
+  // that hole and gives future systems a one-call feed line.
+  CBZ.cityKillFeed = function (by, name, cause, opts) {
+    opts = opts || {};
+    if (by) opts.by = by;
+    return log(name, normCause(cause, opts), opts);
+  };
+
   // ---------- WRAP: named-ped kills (peds.js cityKillPed(ped, imp, cause)) ----------
-  if (typeof CBZ.cityKillPed === "function" && !CBZ.cityKillPed._kfWrapped) {
+  function hookPedKills() {
+    if (typeof CBZ.cityKillPed !== "function") return false;
+    if (CBZ.cityKillPed._kfWrapped) return true;
     const orig = CBZ.cityKillPed;
     CBZ.cityKillPed = function (ped, imp, cause) {
       const wasDead = !ped || ped.dead;          // already dead → orig no-ops, don't double-log
@@ -129,10 +146,13 @@
       return r;
     };
     CBZ.cityKillPed._kfWrapped = true;
+    return true;
   }
 
   // ---------- WRAP: ambient crowd kills (crowd.js cityCrowdKill(i, opts)) ----------
-  if (typeof CBZ.cityCrowdKill === "function" && !CBZ.cityCrowdKill._kfWrapped) {
+  function hookCrowdKills() {
+    if (typeof CBZ.cityCrowdKill !== "function") return false;
+    if (CBZ.cityCrowdKill._kfWrapped) return true;
     const orig = CBZ.cityCrowdKill;
     CBZ.cityCrowdKill = function (i, opts) {
       const killed = orig.apply(this, arguments);   // truthy only on a CONFIRMED fresh kill
@@ -152,13 +172,15 @@
       return killed;
     };
     CBZ.cityCrowdKill._kfWrapped = true;
+    return true;
   }
 
   // ---------- HOOK: the PLAYER death (death.js cityKillPlayer(reason, imp)) ----------
   // We don't edit death.js — we wrap its public entry and read the cause/killer it
   // records (reason string + g._cityKiller, set ~6s before death in cityHurtPlayer).
   function hookPlayerDeath() {
-    if (typeof CBZ.cityKillPlayer !== "function" || CBZ.cityKillPlayer._kfWrapped) return true;
+    if (typeof CBZ.cityKillPlayer !== "function") return false;
+    if (CBZ.cityKillPlayer._kfWrapped) return true;
     const orig = CBZ.cityKillPlayer;
     CBZ.cityKillPlayer = function (reason, imp) {
       const wasDead = CBZ.player && CBZ.player.dead;
@@ -185,10 +207,17 @@
     CBZ.cityKillPlayer._kfWrapped = true;
     return true;
   }
-  // death.js loads before us in boot order, but hook defensively (and re-try if not).
-  if (!hookPlayerDeath()) {
+  // peds.js/crowd.js/death.js all load before us in boot order (index.html), so
+  // every hook lands on the first try today — but hook defensively and RE-TRY
+  // any that miss, so a future script reshuffle degrades to a 250ms-late wrap
+  // instead of a silently dead feed (the owner's exact bug class).
+  function hookAllKillPaths() {
+    const a = hookPedKills(), b = hookCrowdKills(), c = hookPlayerDeath();
+    return a && b && c;
+  }
+  if (!hookAllKillPaths()) {
     let tries = 0;
-    const iv = setInterval(function () { if (hookPlayerDeath() || ++tries > 40) clearInterval(iv); }, 250);
+    const iv = setInterval(function () { if (hookAllKillPaths() || ++tries > 40) clearInterval(iv); }, 250);
   }
 
   // ---------- light prune (cheap, no per-frame allocs): drop stale entries ----------
@@ -224,18 +253,27 @@
     if (typeof document === "undefined" || !document.body) return null;
     const style = document.createElement("style");
     style.textContent =
+      // TINY, IN THE CORNER (owner's words) — one thin right-aligned strip per
+      // death with a coloured right edge: the disaster-game/turf feed grammar,
+      // not a chunky chat card. Red edge = a death, gold = you're involved.
       "#cityKillFeed{position:fixed;right:14px;top:150px;z-index:70;pointer-events:none;display:flex;" +
-      "flex-direction:column;align-items:flex-end;gap:5px;font:800 13px/1.15 Inter,system-ui,Arial,sans-serif}" +
-      "#cityKillFeed .kf{background:rgba(10,14,19,.78);border:1px solid rgba(183,207,225,.26);border-radius:7px;" +
-      "padding:5px 10px;color:#e8edf2;box-shadow:0 3px 10px rgba(0,0,0,.4);letter-spacing:.01em;" +
-      "-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:kfIn .16s ease-out}" +
-      "#cityKillFeed .kf.you{border-color:rgba(231,189,85,.6)}" +
-      "#cityKillFeed .kf.dead{border-color:rgba(255,120,110,.55)}" +
-      "#cityKillFeed .kf-by{color:#fff}#cityKillFeed .kf-v{color:#9fb0bf;font-weight:700;margin:0 5px}" +
+      "flex-direction:column;align-items:flex-end;gap:3px;font:700 11px/1.3 Inter,system-ui,Arial,sans-serif}" +
+      "#cityKillFeed .kf{background:rgba(8,11,17,.62);border-right:3px solid rgba(255,90,80,.85);border-radius:4px;" +
+      "padding:2px 8px;color:#dfe6f0;text-align:right;letter-spacing:.01em;text-shadow:0 1px 2px rgba(0,0,0,.55);" +
+      "animation:kfLife " + SHOW_MS + "ms linear both}" +
+      "#cityKillFeed .kf.you{border-right-color:#e7bd55;background:rgba(40,30,8,.7)}" +
+      "#cityKillFeed .kf.dead{border-right-color:#ff3b3b}" +
+      "#cityKillFeed .kf-by{color:#fff;font-weight:800}#cityKillFeed .kf-v{color:#9fb0bf;margin:0 4px}" +
       "#cityKillFeed .kf-t{color:#ff9a83}#cityKillFeed .kf.you .kf-t{color:#e7bd55}" +
-      "#cityKillFeed .kf-m{color:#8fa0af;font-weight:700;margin-left:7px;font-size:11px;text-transform:uppercase;letter-spacing:.05em}" +
-      "@keyframes kfIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}" +
-      "@media(max-width:720px){#cityKillFeed{top:124px;font-size:12px}}" +
+      "#cityKillFeed .kf-m{color:#8fa0af;margin-left:5px;font-size:9px;text-transform:uppercase;letter-spacing:.05em}" +
+      // one lifetime animation per row: pop in fast, hold, fade over the last
+      // fifth of SHOW_MS. The renderer stamps each row's REAL age as a negative
+      // animation-delay, so a row rebuilt mid-life (the list repaints whenever
+      // the visible set changes) resumes at the right point instead of
+      // restarting — the fade needs zero per-frame JS.
+      "@keyframes kfLife{0%{opacity:0;transform:translateX(10px)}3%{opacity:1;transform:none}" +
+      "80%{opacity:1}100%{opacity:0}}" +
+      "@media(max-width:720px){#cityKillFeed{top:124px;font-size:10px}}" +
       // touch zone map (css/mobile.css): top-right is the money+wanted column —
       // the feed stacks BELOW it, clear of the tap targets.
       "body.touch #cityKillFeed{top:170px}";
@@ -278,7 +316,9 @@
     feedFP = fp;
     const el = ensureFeed(); if (!el) return;
     el.innerHTML = show.map(function (e) {
-      return '<div class="kf' + (e.you ? " you" : "") + (e.by === "You" ? " dead" : "") + '">' + lineHTML(e) + "</div>";
+      const age = Math.max(0, now - (e.t || 0)) | 0;   // resume kfLife mid-fade
+      return '<div class="kf' + (e.you ? " you" : "") + (e.by === "You" ? " dead" : "") +
+        '" style="animation-delay:-' + age + 'ms">' + lineHTML(e) + "</div>";
     }).join("");
   });
 })();
