@@ -2272,7 +2272,7 @@
     // free off player.pos + cam.yaw. The HELI steers BY the mouse (look=heading)
     // so we leave cam.yaw to the mouse. The JET turns via A/D too, so gently ease
     // the cam back behind its nose so a long A/D turn doesn't lose the craft.
-    if (CBZ.cam && craft.kind === "jet" && CBZ.lerpAngle) {
+    if (CBZ.cam && craft.kind === "jet" && CBZ.lerpAngle && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
       CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, craft.heading + Math.PI, 1 - Math.pow(0.15, dt));
     }
     // resupply if you settle back onto the base

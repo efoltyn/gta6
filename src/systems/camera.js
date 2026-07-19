@@ -37,7 +37,7 @@
   // one-line reverts. The V2 personality (rigid boom, constant lens, decisive
   // clamp) is PRESERVED; these remove its rough edges, they don't soften it.
   if (CBZ.CONFIG.CAM_TOUCH_PITCH == null) CBZ.CONFIG.CAM_TOUCH_PITCH = true;         // widened touch-look pitch range hook (touch.js consults it)
-  if (CBZ.CONFIG.CAM_OCCLUDE_FADE == null) CBZ.CONFIG.CAM_OCCLUDE_FADE = true;       // occlusion: follow the wall below the old floor + fade the wall, never balloon-or-clip
+  if (CBZ.CONFIG.CAM_OCCLUDE_FADE == null) CBZ.CONFIG.CAM_OCCLUDE_FADE = true;       // occlusion: FOLLOW the wall (floor 3.0→1.6) instead of ballooning; true occluder fade deferred (merged-batch materials can't fade per-group)
   if (CBZ.CONFIG.CAM_TOGGLE_BLEND == null) CBZ.CONFIG.CAM_TOGGLE_BLEND = true;       // FP<->TP toggle: short eased dolly instead of a teleport
   if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK == null) CBZ.CONFIG.CAM_VEHICLE_FREELOOK = true; // driving: mouse-look suspends auto-recenter; hold MMB = look back
   if (CBZ.CONFIG.CAM_AIR_BANK == null) CBZ.CONFIG.CAM_AIR_BANK = true;               // chase cam leans into a fraction of aircraft roll (cars stay level)
@@ -96,6 +96,53 @@
   CBZ.CAM_DEFAULT_PITCH = DEFAULT_PITCH;
   const cam = { yaw: 0, pitch: DEFAULT_PITCH, locked: false };
   CBZ.cam = cam;
+
+  // ============================================================
+  //  CAMERA POLISH state + public hooks (the CAM_* flags above).
+  //  touch.js / touch_vehicle.js consume these by feature-detection.
+  // ============================================================
+  // Touch third-person pitch range: iPad could barely look up (touch.js's old
+  // hard [-0.18, 0.60]); widen toward desktop's [-1.0, 0.9] but stop short —
+  // the touch boom at extreme up-pitch near walls is less recoverable without
+  // a scroll-wheel escape hatch.
+  CBZ.camTouchPitchRange = function () {
+    return CBZ.CONFIG.CAM_TOUCH_PITCH !== false ? [-0.85, 0.75] : [-0.18, 0.60];
+  };
+  // Vehicle free-look (suspends the behind-the-car auto-recenter) + look-back.
+  let flHold = false, flT = 0, lookBackHeld = false, lookBackK = 0, bankK = 0;
+  CBZ.camFreeLook = function (on) { flHold = !!on; if (on) flT = 0.8; };
+  CBZ.camLookBack = function (down) { lookBackHeld = !!down; };
+  CBZ.camRecenterSuspended = function () {
+    if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK === false) return false;
+    return flHold || flT > 0 || lookBackHeld || lookBackK > 0.03;
+  };
+  // Shoulder swap: MMB on foot (or CBZ.camSetShoulder from touch) flips the
+  // over-shoulder side; shoulderK eases through centre so the swap sweeps.
+  let shoulderSign = 1, shoulderK = 1;
+  CBZ.camSetShoulder = function (v) {
+    if (CBZ.CONFIG.CAM_SHOULDER_SWAP === false) return shoulderSign;
+    shoulderSign = (v === -1 || v === 1) ? v : -shoulderSign;
+    return shoulderSign;
+  };
+  // FP<->TP toggle blend state (a short eased dolly instead of a teleport).
+  let fpPrev = null, blendT = 0;
+  const BLEND_T = 0.30;
+  const blendFrom = new THREE.Vector3(), blendLook = new THREE.Vector3(), _blScratch = new THREE.Vector3();
+  // Draw/holster body-facing ramp: 0→1 over 0.25s after an armed flip, so the
+  // body-yaw ease RATE ramps in instead of whipping to its new owner's target.
+  let facingArmedPrev = null, facingT = 1, sprintFovK = 0;
+  CBZ.camFacingEase = function () {
+    if (CBZ.CONFIG.CAM_FACING_BLEND === false) return 1;
+    return Math.min(1, Math.max(0.12, facingT / 0.25));
+  };
+  // MMB: look-back while driving/flying, shoulder swap on foot.
+  addEventListener("mousedown", function (e) {
+    if (e.button !== 1 || !cam.locked) return;
+    const P = CBZ.player;
+    if (P && (P.driving || P._aircraft)) { e.preventDefault(); CBZ.camLookBack(true); }
+    else if (CBZ.game && CBZ.game.mode === "city" && CBZ.CONFIG.CAM_SHOULDER_SWAP !== false) { e.preventDefault(); CBZ.camSetShoulder(); }
+  });
+  addEventListener("mouseup", function (e) { if (e.button === 1) CBZ.camLookBack(false); });
 
   // ---- FEEL-CAM (de-lagged, real-time follow) -----------------------------
   // Two coupled feel fixes, both reversible via CBZ.feelCam (default ON):
@@ -163,6 +210,11 @@
     const sensMul = CBZ.fpsLookSensMul ? CBZ.fpsLookSensMul() : 1;
     cam.yaw -= e.movementX * SENS * sensMul;
     cam.pitch -= e.movementY * SENS * sensMul;
+    // driving/flying: a deliberate mouse glance suspends the behind-the-vehicle
+    // auto-recenter for a beat (CAM_VEHICLE_FREELOOK), so you can actually look
+    // sideways at speed; it decays back to the chase ~0.8s after you stop.
+    if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK !== false && CBZ.player && (CBZ.player.driving || CBZ.player._aircraft) &&
+        (Math.abs(e.movementX) + Math.abs(e.movementY)) > 1) flT = 0.8;
     // soft tier clamp, then a hard safety so |pitch| can never reach π/2
     cam.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, cam.pitch));
     cam.pitch = Math.max(-PITCH_SAFETY, Math.min(PITCH_SAFETY, cam.pitch));
@@ -312,6 +364,24 @@
     return best;
   }
 
+  // FP<->TP TOGGLE BLEND (CAM_TOGGLE_BLEND): the eye and the 4m boom used to
+  // hard-teleport on [V]/the touch eye button. While blendT runs, the frame
+  // eases from the captured outgoing transform to the incoming rig's live
+  // target (smoothstep) — a ~0.3s dolly. Runs on the wall clock so a low frame
+  // rate can't stretch it into a cutscene.
+  function applyToggleBlend() {
+    if (blendT <= 0) return;
+    blendT -= (CBZ.wallDt != null ? CBZ.wallDt : 0.016);
+    if (blendT <= 0) { blendT = 0; return; }
+    const p = 1 - blendT / BLEND_T;
+    const k = p * p * (3 - 2 * p);
+    _blScratch.copy(camera.position);
+    camera.position.copy(blendFrom).lerp(_blScratch, k);
+    _blScratch.copy(look);
+    look.copy(blendLook).lerp(_blScratch, k);
+    camera.lookAt(look);
+  }
+
   function updateCamera(dt) {
     // FEEL-DT: the real-wall-clock present delta for camera settle (graceful —
     // falls back to the passed world dt if loop.js hasn't published feelDt or
@@ -320,6 +390,17 @@
     // Used ONLY for time-integration of the damps/exp-chase below; the velocity
     // calc keeps the world dt so look-ahead/FOV pacing is unchanged.
     const fdt = (CBZ.feelCam && CBZ.feelDt != null) ? CBZ.feelDt : dt;
+    // ---- CAMERA POLISH per-frame state (cheap, runs in every branch) ----
+    if (flT > 0 && !flHold) flT = Math.max(0, flT - fdt);          // free-look decay after the glance
+    lookBackK += ((lookBackHeld ? 1 : 0) - lookBackK) * (1 - Math.exp(-11 * fdt));
+    if (lookBackK < 0.001) lookBackK = 0;
+    shoulderK += ((CBZ.CONFIG.CAM_SHOULDER_SWAP === false ? 1 : shoulderSign) - shoulderK) * (1 - Math.exp(-9 * fdt));
+    {  // draw/holster facing ramp: reset on the armed flip, ramp back over 0.25s
+      const armedNow = !!(CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive());
+      if (facingArmedPrev === null) facingArmedPrev = armedNow;
+      else if (armedNow !== facingArmedPrev) { facingArmedPrev = armedNow; facingT = 0; }
+      if (facingT < 1) facingT = Math.min(1, facingT + fdt);
+    }
     // ---- VEHICLE VIEW MEMORY: city/view.js force-drops FP the moment you
     // drive (the car owns the camera) and nothing ever restored it — every
     // car ride silently dumped an FP player into third person. Track the
@@ -398,7 +479,11 @@
     // (Yaw is auto-steered behind the car by city/vehicles.js.)
     if (CBZ.game.mode === "city" && player.driving && !player.dead) {
       introT = 0; prev.copy(player.pos);
-      const cfx = -Math.sin(cam.yaw), cfz = -Math.cos(cam.yaw);   // = the car's forward
+      // LOOK-BACK (CAM_VEHICLE_FREELOOK): lookBackK eases 0↔1 and swings the
+      // whole chase 180° — hold MMB (or the touch LOOK BACK pill) to check your
+      // six, release to whip forward again.
+      const vyaw = cam.yaw + Math.PI * lookBackK;
+      const cfx = -Math.sin(vyaw), cfz = -Math.cos(vyaw);   // = the chase forward
       // Aircraft publish framing dimensions. A fixed car-sized 9.5m boom sat
       // inside a 30m commercial airliner, so the "third-person" hijack view was
       // mostly tail/fuselage. Cars and older craft keep the exact defaults.
@@ -416,6 +501,15 @@
       camera.lookAt(look);
       if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, fdt); if (shakeAmt < 0.01) shakeAmt = 0; }
       fov = smoothDamp(fov, 66, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+      // AIRCRAFT BANK (CAM_AIR_BANK): lean the chase camera into a fraction of
+      // the craft's roll — you feel the bank without the horizon whipping.
+      // Cars publish no roll → bankK eases back to level. rotateZ runs AFTER
+      // lookAt, so it tilts about the live view axis.
+      if (CBZ.CONFIG.CAM_AIR_BANK !== false) {
+        const tBank = craft ? Math.max(-0.35, Math.min(0.35, (craft.roll || 0) * 0.42)) : 0;
+        bankK += (tBank - bankK) * (1 - Math.exp(-7 * fdt));
+        if (Math.abs(bankK) > 0.0006) camera.rotateZ(bankK);
+      } else bankK = 0;
       return;
     }
 
@@ -424,6 +518,18 @@
     // hop in a car. city/view.js owns the cityCam state + rig visibility.
     if (CBZ.game.mode === "city" && CBZ.cityCam) {
       const cc = CBZ.cityCam;
+      // arm the FP<->TP blend on the toggle edge (never during death/intro/scope)
+      if (CBZ.CONFIG.CAM_TOGGLE_BLEND !== false) {
+        const fpNow = !!(cc.fp && !player.dead && !player.driving);
+        if (fpPrev === null) fpPrev = fpNow;
+        else if (fpNow !== fpPrev) {
+          fpPrev = fpNow;
+          const scoped = CBZ.fpsScoped && CBZ.fpsScoped();
+          if (!cc.death && introT <= 0 && !scoped) {
+            blendT = BLEND_T; blendFrom.copy(camera.position); blendLook.copy(look);
+          }
+        }
+      } else { fpPrev = null; blendT = 0; }
       if (cc.death) {                              // cinematic death replay: orbit your body — or your KILLER while spectating
         introT = 0; shakeAmt = 0; cc.death.t += dt;
         // city/death.js sets cc.death.spectate to the live actor that killed you
@@ -464,6 +570,7 @@
         // zoom holds rock-steady through firing. (Hip 70 / drop 14 mirror fpsmode.)
         const fpHipFov = (CBZ.isADS && CBZ.isADS()) ? 70 - 14 : 70;
         fov = smoothDamp(fov, fpHipFov, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
+        applyToggleBlend();          // ease in from the third-person boom on toggle
         return;
       }
     }
@@ -576,8 +683,12 @@
     if (frontK > 0) { yaw += Math.PI * frontK; yawView += Math.PI * frontK; }
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
-    const targetSide = TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0));
-    const camSide = TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0));
+    // SHOULDER SWAP (CAM_SHOULDER_SWAP): shoulderK eases -1↔1 through centre,
+    // flipping the whole side-offset family (framing AND aim offsets together
+    // so the ADS punch-in lands over whichever shoulder is active).
+    const sK = TP ? shoulderK : 1;
+    const targetSide = (TP ? (shoulder ? TP.SIDE_AIM * 0.22 : TP.SIDE * 0.25) : (shoulder ? 0.26 : (meleeFocus ? 0.12 : 0))) * sK;
+    const camSide = (TP ? (shoulder ? TP.SIDE_AIM : TP.SIDE) : (shoulder ? 0.86 : (meleeFocus ? 0.32 : 0))) * sK;
     const baseX = tx + rightX * targetSide;
     const baseY = ty + (!TP && shoulder ? 0.08 : 0);
     const baseZ = tz + rightZ * targetSide;
@@ -625,8 +736,15 @@
       // NOT collapse tight (a wall behind you in the dense street would yank the
       // boom from 4.8 → ~1.1, ballooning the character + dropping the angle low —
       // THE main 3PS framing bug). Only RMB/ADS may ride in close for the punch-in.
+      // CAM_OCCLUDE_FADE: the old floors (3.0/2.6) refused to follow the wall,
+      // so a wall behind you BALLOONED the character (boom pinned at floor) or
+      // clipped. Under the flag the boom FOLLOWS the wall down to a tight 1.5
+      // instead — Minecraft-style "the camera respects walls" — which kills the
+      // balloon pop. (A true occluder fade is deferred: per-group opacity isn't
+      // affordable on merged batch materials; follow-the-wall is the honest v1.)
+      const noBalloon = CBZ.CONFIG.CAM_OCCLUDE_FADE !== false && TP;
       const minCam = (CBZ.game.mode === "city" && !player.driving)
-        ? (tpPresent ? ((CBZ.isADS && CBZ.isADS()) ? 1.8 : 2.6) : 3.0)
+        ? (tpPresent ? ((CBZ.isADS && CBZ.isADS()) ? (noBalloon ? 1.5 : 1.8) : (noBalloon ? 1.5 : 2.6)) : (noBalloon ? 1.6 : 3.0))
         : 0.28;
       const d = Math.max(minCam, occ - 0.25);
       dx = baseX + _rd.x * d; dy = baseY + _rd.y * d; dz = baseZ + _rd.z * d;
@@ -774,9 +892,12 @@
     // positional lag, and the rigidity is ALSO what makes the collision clamp
     // engage/release instantly instead of the old 0.18s drift that read as
     // "the camera zooms in and out on its own" next to every wall.
-    const posS = TP ? (CBZ.CONFIG.CAM_TP_V2 ? 0.02 : (tpPresent ? 0.07 : TP.DAMP_POS)) : 0.085;
+    // CAM_TP_BREATHE (taste flag, ships dark): 0.07s smoothing gives the rigid
+    // V2 boom a slight breath; default stays the decisive 0.02s.
+    const breathe = TP && CBZ.CONFIG.CAM_TP_V2 && CBZ.CONFIG.CAM_TP_BREATHE;
+    const posS = TP ? (CBZ.CONFIG.CAM_TP_V2 ? (breathe ? 0.07 : 0.02) : (tpPresent ? 0.07 : TP.DAMP_POS)) : 0.085;
     camera.position.x = smoothDamp(camera.position.x, dx, camV.x, posS, fdt);
-    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (CBZ.CONFIG.CAM_TP_V2 ? 0.025 : (tpPresent ? 0.08 : TP.DAMP_POS * 1.1)) : 0.10, fdt);
+    camera.position.y = smoothDamp(camera.position.y, dy, camV.y, TP ? (CBZ.CONFIG.CAM_TP_V2 ? (breathe ? 0.075 : 0.025) : (tpPresent ? 0.08 : TP.DAMP_POS * 1.1)) : 0.10, fdt);
     camera.position.z = smoothDamp(camera.position.z, dz, camV.z, posS, fdt);
 
     // The look target carries the view DIRECTION (its target already tracks live
@@ -791,6 +912,7 @@
     look.y = smoothDamp(look.y, lty, lookV.y, lookS * 1.2, fdt);
     look.z = smoothDamp(look.z, ltz, lookV.z, lookS, fdt);
     camera.lookAt(look);
+    applyToggleBlend();          // ease out from the first-person eye on toggle
 
     // screen shake offset, decaying (applied after positioning). City on-foot
     // TP takes shake at 60% unless actively presenting a weapon — FP never
@@ -816,6 +938,15 @@
     let targetFov = TP
       ? (tpADS ? TP.FOV_AIM : (CBZ.CONFIG.CAM_TP_V2 ? TP.FOV : TP.FOV + Math.min(spd / 6, 1) * 5))
       : (shoulder ? 58 + Math.min(spd / 6, 1) * 2.5 : (meleeFocus ? 59 : 61 + Math.min(spd / 6, 1) * 6));
+    // CAM_SPRINT_FOV (ships dark — flip to try): the Fortnite-style lens
+    // breath — while genuinely sprinting the FOV swells +7° over ~0.4s and
+    // eases back on stop. Decoupled from the collision clamp (the coupling was
+    // what made the old speed-kick read as "zooms on its own"). Never during ADS.
+    if (TP && CBZ.CONFIG.CAM_SPRINT_FOV && !tpADS) {
+      const sprintingNow = !!(CBZ.keys && CBZ.keys["shift"]) && spd > 4.2 && !player.crouch;
+      sprintFovK += ((sprintingNow ? 1 : 0) - sprintFovK) * (1 - Math.exp(-6 * fdt));
+      targetFov += 7 * sprintFovK;
+    } else sprintFovK = 0;
     // a fitted optic (city/gunmods.js + city/scopeview.js) overrides the aimed
     // lens with its own magnification while you're holding aim on foot.
     const scopeF = CBZ.cityScopeFov && CBZ.cityScopeFov();

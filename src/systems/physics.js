@@ -597,7 +597,11 @@
     playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
     if (len > 0) {
       const tYaw = Math.atan2(mx, mz);
-      playerChar.group.rotation.y = lerpAngle(playerChar.group.rotation.y, tYaw, 1 - Math.pow(0.0006, fdt));
+      // CAM_FACING_BLEND: after a draw/holster the body-yaw owner changes; the
+      // turn RATE ramps in over ~0.25s (camera.js camFacingEase) so the body
+      // sweeps to its new target instead of whipping.
+      const faceEase = CBZ.camFacingEase ? CBZ.camFacingEase() : 1;
+      playerChar.group.rotation.y = lerpAngle(playerChar.group.rotation.y, tYaw, 1 - Math.pow(0.0006, fdt * faceEase));
     }
     // crouch: a real pose (knees/hips fold — entities/character.js) instead of
     // the old scale.y accordion squash; ease any legacy squash back out.

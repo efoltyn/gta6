@@ -2972,7 +2972,11 @@
       }
       if (CBZ.playerChar) {
         const yaw = Math.atan2(-Math.sin(CBZ.cam.yaw), -Math.cos(CBZ.cam.yaw));
-        CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, yaw, 1 - Math.pow(0.00008, dt));
+        // CAM_FACING_BLEND: ramp the ease rate in after a draw (see physics.js's
+        // twin on the unarmed side) so drawing a gun sweeps the body to camera-
+        // forward instead of snapping it.
+        const faceEase = CBZ.camFacingEase ? CBZ.camFacingEase() : 1;
+        CBZ.playerChar.group.rotation.y = CBZ.lerpAngle(CBZ.playerChar.group.rotation.y, yaw, 1 - Math.pow(0.00008, dt * faceEase));
         // HAND OFF the arm pose to animChar (the single owner of the arms — see
         // entities/character.js). fpsmode no longer writes ra/la directly: it
         // only RAISES the flag + feeds the data the pose needs, so the per-frame

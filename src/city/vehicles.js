@@ -2442,7 +2442,7 @@
     CBZ.playerChar.group.visible = false;   // keep the driver's body hidden every frame (FPS/view toggles kept re-showing it → head poked out the roof)
     P.speed = vmag;
     if (CBZ.cityUpdatePlayerCarVisual) CBZ.cityUpdatePlayerCarVisual(car, dt);
-    if (CBZ.cam && vmag > 3) {
+    if (CBZ.cam && vmag > 3 && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
       const target = car.heading + Math.PI;
       CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, target, 1 - Math.pow(0.02, dt));
     }
