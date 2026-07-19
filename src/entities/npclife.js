@@ -443,7 +443,10 @@
     const profile = seat.role === "pilot" ? "aircraftPilot" : "aircraftPassenger";
     // Reassign a normal existing pedestrian first. A tiny fresh fallback keeps
     // authored cabins complete when low quality reduces the street roster.
-    let actor = claimCity(profile, { parent: e.group, anchor: seat }, function (p) {
+    // EXCEPT flight crew: the captain's uniform (jobFit wardrobe + cap slot)
+    // only exists on a rig BUILT with job "pilot" — drafting a street tourist
+    // would seat civvies on the flight deck, so pilots always spawn fresh.
+    let actor = seat.role === "pilot" ? null : claimCity(profile, { parent: e.group, anchor: seat }, function (p) {
       return safeCabinDraft(p) && (p.archetype === "tourist" || p.job === "traveller" || p.job === "between jobs" || p.archetype === "resident");
     });
     let spawned = false;

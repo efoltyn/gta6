@@ -430,8 +430,13 @@
     // collider restore in playeraircraft.js)
     const th = rec.group.rotation.y;
     const ca = Math.abs(Math.cos(th)), sa = Math.abs(Math.sin(th));
-    const hx = 12.4, hz = 1.6;                            // cabin local half-extents
-    const ctr = cabinWorld(rec, -0.2, 0);
+    // cabin local half-extents; with the real cockpit door the standable deck
+    // runs on through the bulkhead doorway to the cockpit front (local
+    // x -12.8..14.6 instead of -12.6..12.2 — the wall clamp below is what
+    // actually shapes the rooms, the platform just has to underlie them)
+    const cock = !!cab.cockpitLeaf;
+    const hx = cock ? 13.7 : 12.4, hz = 1.6;
+    const ctr = cabinWorld(rec, cock ? 0.9 : -0.2, 0);
     const ex = ca * hx + sa * hz, ez = sa * hx + ca * hz;
     cabinState.platform = {
       minX: ctr.x - ex, maxX: ctr.x + ex, minZ: ctr.z - ez, maxZ: ctr.z + ez,
@@ -583,6 +588,22 @@
         cab.doorT += (tgt - cab.doorT) * Math.min(1, dt * 3.2);
         cab.panel.position.x = cab.doorX - 1.18 * cab.doorT;   // slide aft along the hull
       }
+      // cockpit pocket door: eases open as the boarded player nears the
+      // bulkhead (~2u out), holds while they stand anywhere on the flight
+      // deck, eases shut behind them — the same proximity grammar as the
+      // boarding panel. Zero work unless the player is inside THIS cabin.
+      if (cab.cockpitLeaf) {
+        let wantCock = false;
+        if (cabinState.inside && cabinState.rec === rec && P && !P.dead && !P.driving && !P._aircraft) {
+          const lp = cabinLocal(rec, P.pos.x, P.pos.z);
+          wantCock = lp.x > 10.1 && lp.x < 14.5 && Math.abs(lp.z) < 1.6;
+        }
+        const tc = wantCock ? 1 : 0;
+        if (Math.abs(cab.cockpitT - tc) > 0.001) {
+          cab.cockpitT += (tc - cab.cockpitT) * Math.min(1, dt * 5.5);
+          cab.cockpitLeaf.position.z = 0.98 * cab.cockpitT;   // pocket into the starboard bulkhead
+        }
+      }
     }
     // pending board/exit resolves once the door has had time to slide
     if (cabinState.pending) {
@@ -605,8 +626,23 @@
       }
       if (!P._propSeat) {
         const l = cabinLocal(rec, P.pos.x, P.pos.z);
-        const lx = Math.max(-12.2, Math.min(11.8, l.x));
-        const lz = Math.max(-1.42, Math.min(1.42, l.z));
+        // two rooms + a doorway: cabin aisle box, cockpit box, and a bulkhead
+        // band (x 11.9..12.3) you can only cross through the door aperture
+        // (|z| ≤ 0.34) while the leaf is mostly open — the walls are real.
+        const cabU = rec.group.userData.cabin;
+        const cock = cabU && cabU.cockpitLeaf;
+        let lx = Math.max(-12.2, Math.min(cock ? 13.4 : 11.8, l.x));
+        let lz;
+        if (!cock || lx < 11.9) {
+          lz = Math.max(-1.42, Math.min(1.42, l.z));           // cabin aisle box
+        } else if (lx > 12.3) {
+          lz = Math.max(-1.28, Math.min(1.28, l.z));           // cockpit room (narrower shell)
+        } else if (Math.abs(l.z) <= 0.34 && cabU.cockpitT > 0.5) {
+          lz = l.z;                                            // clean pass through the open leaf
+        } else {
+          lx = l.x < 12.1 ? 11.9 : 12.3;                       // solid bulkhead / shut leaf
+          lz = Math.max(-1.42, Math.min(1.42, l.z));
+        }
         if (lx !== l.x || lz !== l.z) {
           const w = cabinWorld(rec, lx, lz);
           P.pos.x = w.x; P.pos.z = w.z;
@@ -1048,13 +1084,59 @@
 
     function buildCabin(K, g, acc) {
       // liner shell + deck + aisle carpet
-      K.put(linerMat, new THREE.BoxGeometry(25.2, 2.9, 3.2), -0.2, 3.9, 0);
+      const realDoor = !!CBZ.CONFIG.COCKPIT_REAL_DOOR;
+      if (realDoor) {
+        // OPEN-ENDED liner: five zero-thickness planes with OUTWARD normals —
+        // linerMat is BackSide, so from inside they render exactly like the
+        // old box. No +x face: a box face can't take a doorway hole, and it
+        // would wall off the cockpit the moment the bulkhead is cut. The -z
+        // wall splits around a REAL boarding-door aperture (matching hull
+        // carve in buildAirliner) so the open door is an opening, not paint.
+        K.put(linerMat, new THREE.PlaneGeometry(3.2, 2.9), -12.8, 3.9, 0, 0, -Math.PI / 2);
+        K.put(linerMat, new THREE.PlaneGeometry(24.9, 3.2), -0.35, 2.45, 0, Math.PI / 2, 0);
+        K.put(linerMat, new THREE.PlaneGeometry(24.9, 3.2), -0.35, 5.35, 0, -Math.PI / 2, 0);
+        K.put(linerMat, new THREE.PlaneGeometry(24.9, 2.9), -0.35, 3.9, 1.6);
+        K.put(linerMat, new THREE.PlaneGeometry(22.75, 2.9), -1.425, 3.9, -1.6, 0, Math.PI);
+        K.put(linerMat, new THREE.PlaneGeometry(1.05, 2.9), 11.575, 3.9, -1.6, 0, Math.PI);
+        K.put(linerMat, new THREE.PlaneGeometry(1.1, 0.95), CABIN_DOOR_X, 4.875, -1.6, 0, Math.PI);
+      } else {
+        K.put(linerMat, new THREE.BoxGeometry(25.2, 2.9, 3.2), -0.2, 3.9, 0);
+      }
       K.put(cabinFloorMat, new THREE.BoxGeometry(25.2, 0.14, 3.1), -0.2, CABIN_FLOOR - 0.07, 0);
       K.put(FLEET.navy, new THREE.BoxGeometry(23.4, 0.03, 0.8), -0.2, CABIN_FLOOR + 0.02, 0);
-      // aft pressure wall + cockpit bulkhead with a dark cockpit door
+      // aft pressure wall + cockpit bulkhead
       K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), -12.7, 3.9, 0);
-      K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), 12.1, 3.9, 0);
-      K.put(FLEET.dark, new THREE.BoxGeometry(0.08, 1.78, 0.8), 12.0, 3.42, 0);
+      let cockpitLeaf = null;
+      if (realDoor) {
+        // REAL bulkhead doorway (0.9 wide, deck to 4.4) + a sliding pocket
+        // LEAF that tucks into the starboard bulkhead segment when open. The
+        // leaf is a live dynamic mesh (batcher/freezer spare it), eased open
+        // by the cabin updater below exactly like the boarding panel. Widened
+        // to z ±1.62 so the segments seal against the liner walls at ±1.6.
+        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 1.17), 12.1, 3.9, -1.035);
+        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 1.17), 12.1, 3.9, 1.035);
+        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 0.95, 0.94), 12.1, 4.875, 0);
+        cockpitLeaf = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.95, 0.98), FLEET.dark);
+        cockpitLeaf.position.set(12.1, 3.425, 0);
+        cockpitLeaf.userData.dynamic = true;
+        g.add(cockpitLeaf);
+        // COCKPIT ROOM behind the doorway — its own smaller BackSide shell,
+        // open toward the bulkhead so the sight-line runs room-to-room both
+        // ways. Sized (y 2.45..4.8, z ±1.5, front wall x 14.45) to stay well
+        // inside the tapering nose hull; the exterior windshield glass band
+        // pokes through the top front and reads as the windshield from
+        // inside. Deck-height floor + a short ceiling light strip.
+        K.put(linerMat, new THREE.PlaneGeometry(3.0, 2.35), 14.45, 3.625, 0, 0, Math.PI / 2);
+        K.put(linerMat, new THREE.PlaneGeometry(2.35, 3.0), 13.275, 4.8, 0, -Math.PI / 2, 0);
+        K.put(linerMat, new THREE.PlaneGeometry(2.35, 2.35), 13.275, 3.625, 1.5);
+        K.put(linerMat, new THREE.PlaneGeometry(2.35, 2.35), 13.275, 3.625, -1.5, 0, Math.PI);
+        K.put(cabinFloorMat, new THREE.BoxGeometry(2.5, 0.14, 3.0), 13.3, CABIN_FLOOR - 0.07, 0);
+        K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.05, 0.24), 12.8, 4.77, 0);
+      } else {
+        // legacy: solid bulkhead with a painted dark cockpit door
+        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), 12.1, 3.9, 0);
+        K.put(FLEET.dark, new THREE.BoxGeometry(0.08, 1.78, 0.8), 12.0, 3.42, 0);
+      }
       // interior window strips + ceiling light strips
       for (const sgn of [-1, 1]) {
         K.put(FLEET.dark, new THREE.BoxGeometry(21, 0.5, 0.05), -0.7, 4.15, sgn * 1.55);
@@ -1082,6 +1164,26 @@
           reservedForNpc: reserved, occupant: null,
         });
       }
+      // COCKPIT CREW SEATS — real seat records the shared NPC life system can
+      // claim. The captain's chair (port/left, z=-0.58) is reserved so a live
+      // pilot is cast there (seat.role "pilot" → npclife's aircraftPilot
+      // profile, uniformed via the job-cast wardrobe); the first officer's
+      // chair stays free for the player to take. Pushed FIRST so the flight
+      // deck fills before the rows. NO rng() here — the airport build stream
+      // must keep the exact draw sequence the addSeat rows below consume
+      // (determinism law: byte-identical worlds per seed).
+      if (realDoor) {
+        seats.push({
+          id: "seat-captain", x: 13.13, y: CABIN_FLOOR + 0.45, z: -0.58,
+          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", cockpit: true,
+          reservedForNpc: true, occupant: null,
+        });
+        seats.push({
+          id: "seat-firstofficer", x: 13.13, y: CABIN_FLOOR + 0.45, z: 0.58,
+          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", cockpit: true,
+          reservedForNpc: false, occupant: null,
+        });
+      }
       for (let rx = -11.2; rx <= 8.8; rx += 2.0) {
         for (const s of [-1, 1]) {
           const zc = s * 1.0;
@@ -1094,9 +1196,15 @@
           addSeat(rx, s * 0.72, 0.3);   // aisle
         }
       }
-      // DOORWAY (port, forward): dark recess in the hull + warm sill light
-      K.put(FLEET.dark, new THREE.BoxGeometry(1.14, 1.92, 0.1), CABIN_DOOR_X, 3.46, -1.64);
-      K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.06, 0.06), CABIN_DOOR_X, 4.48, -1.68);
+      // DOORWAY (port, forward): with the real hull aperture the old dark
+      // recess box would blank the opening, so it exists only in the legacy
+      // branch; the warm sill light tucks under the aperture header instead.
+      if (realDoor) {
+        K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.05, 0.05), CABIN_DOOR_X, 4.31, -1.79);
+      } else {
+        K.put(FLEET.dark, new THREE.BoxGeometry(1.14, 1.92, 0.1), CABIN_DOOR_X, 3.46, -1.64);
+        K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.06, 0.06), CABIN_DOOR_X, 4.48, -1.68);
+      }
       // sliding DOOR PANEL — a separate live mesh the boarding system eases
       // aft along the hull; dynamic-tagged so batcher/freezer leave it alone
       const panel = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.86, 0.1), FLEET.white);
@@ -1110,6 +1218,7 @@
         floorTop: CABIN_FLOOR,
         doorX: CABIN_DOOR_X, doorZ: -1.7,
         seats, panel, doorT: 0,
+        cockpitLeaf, cockpitT: 0,
       };
     }
 
@@ -1127,7 +1236,26 @@
 
       // fuselage: white barrel + sculpted drooped nose + upswept tailcone
       // (pieces butt-join at full cross-section with a 0.05 overlap — seamless)
-      K.put(FLEET.white, new THREE.BoxGeometry(L, FH, FW, 2, 1, 1), 0, CY, 0);
+      if (CBZ.CONFIG.COCKPIT_REAL_DOOR) {
+        // HOLLOW barrel — four skin slabs instead of one solid box, so the
+        // boarding doorway can be a REAL aperture seen through from both
+        // sides. Every inner slab face hides behind the BackSide cabin liner
+        // (ceiling 5.35 / floor 2.45 / walls ±1.6) — naively splitting the
+        // solid box would paint its cut faces as white walls ACROSS the
+        // cabin. The port wall carries the carved door hole (x 9.95..11.05,
+        // y 2.5..4.4, matching the liner aperture in buildCabin); the
+        // sliding boarding panel pockets into this wall cavity when open.
+        const ST = CY + FH / 2, SB = CY - FH / 2;                 // skin top / bottom
+        K.put(FLEET.white, new THREE.BoxGeometry(L, ST - 5.37, FW), 0, (ST + 5.37) / 2, 0);       // roof
+        K.put(FLEET.white, new THREE.BoxGeometry(L, 2.43 - SB, FW), 0, (2.43 + SB) / 2, 0);       // belly
+        K.put(FLEET.white, new THREE.BoxGeometry(L, 2.94, 0.355), 0, 3.9, (FW - 0.355) / 2);      // starboard wall
+        K.put(FLEET.white, new THREE.BoxGeometry(23.9, 2.94, 0.355), -2.0, 3.9, -(FW - 0.355) / 2);   // port wall aft of door
+        K.put(FLEET.white, new THREE.BoxGeometry(2.9, 2.94, 0.355), 12.5, 3.9, -(FW - 0.355) / 2);    // port wall fwd of door
+        K.put(FLEET.white, new THREE.BoxGeometry(1.1, 0.97, 0.355), 10.5, 4.885, -(FW - 0.355) / 2);  // door header
+        K.put(FLEET.white, new THREE.BoxGeometry(1.1, 0.07, 0.355), 10.5, 2.465, -(FW - 0.355) / 2);  // door sill
+      } else {
+        K.put(FLEET.white, new THREE.BoxGeometry(L, FH, FW, 2, 1, 1), 0, CY, 0);
+      }
       K.put(FLEET.white, fuseGeo(4.2, FH, FW, { nose: 0.24, noseY: -1.0 }), L / 2 + 2.05, CY, 0);
       K.put(FLEET.white, fuseGeo(5.6, FH, FW, { tail: 0.16, tailY: 1.25 }), -L / 2 - 2.75, CY, 0);
       // dark cockpit glass band wrapping the nose root
@@ -1135,8 +1263,15 @@
       // livery: coloured belly stripe wrapping under the white upper fuselage,
       // and the cabin windows as ONE long inset glass strip per side
       K.put(acc, new THREE.BoxGeometry(L, 0.95, FW + 0.12), 0, BELLY + 0.42, 0);
-      for (const sgn of [-1, 1]) {
-        K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, sgn * (FW / 2 + 0.02));
+      if (CBZ.CONFIG.COCKPIT_REAL_DOOR) {
+        // port window strip splits around the real doorway aperture
+        K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, FW / 2 + 0.02);
+        K.put(FLEET.glass, new THREE.BoxGeometry(20.4, 0.42, 0.1), -0.25, CY + 0.7, -(FW / 2 + 0.02));
+        K.put(FLEET.glass, new THREE.BoxGeometry(0.4, 0.42, 0.1), 11.25, CY + 0.7, -(FW / 2 + 0.02));
+      } else {
+        for (const sgn of [-1, 1]) {
+          K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, sgn * (FW / 2 + 0.02));
+        }
       }
 
       // ONE swept tapered wing pair + upturned accent winglets
