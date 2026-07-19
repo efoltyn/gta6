@@ -112,6 +112,7 @@
     const PAD = CFG2.CONTINENT_EXPANSION_V2 === false ? 40
       : Math.max(180, Math.min(2400, Number.isFinite(reqMargin) ? reqMargin : 2200));
     PLATE_G = PAD + 120;
+    CBZ.TERRAIN_PLATE_CLEAR = PLATE_G;   // terrain_overhaul's V3 oracle reads this (its own falloff/ring gates)
   }
   // Private plate clearance for this file's relief falloff + ring radii:
   // 0 in the authored world (flag off → growToEnlargeSeed never runs), so

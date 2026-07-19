@@ -113,9 +113,19 @@
     if (t < 0) t = 0; else if (t > 1) t = 1;
     return t * t * (3 - 2 * t);
   }
+  // Stage-2: the walkable continent plate extends past the shared FLAT rect
+  // by the continent margin; terrain.js publishes the exact clearance as
+  // CBZ.TERRAIN_PLATE_CLEAR at build time (0 in the authored world, so the
+  // compact world stays byte-identical). Both the relief gate AND the
+  // ring-of-ranges band ride this distance, so subtracting the clearance
+  // recedes the whole offshore composition past the plate edge — ranges can
+  // never stand on walkable wilds. Read lazily (this file loads before the
+  // value exists; it is set inside buildTerrain, before any field sample).
+  function plateClear() { return CBZ.TERRAIN_PLATE_CLEAR || 0; }
   function distOutsideFlat(x, z) {
-    const dx = Math.max(FLAT.minX - x, 0, x - FLAT.maxX);
-    const dz = Math.max(FLAT.minZ - z, 0, z - FLAT.maxZ);
+    const g = plateClear();
+    const dx = Math.max((FLAT.minX - g) - x, 0, x - (FLAT.maxX + g));
+    const dz = Math.max((FLAT.minZ - g) - z, 0, z - (FLAT.maxZ + g));
     return Math.sqrt(dx * dx + dz * dz);
   }
 
@@ -370,8 +380,9 @@
   //      excess so corners transition smoothly.
   const SIDE_N = 1.0, SIDE_W = 0.68, SIDE_E = 0.68, SIDE_S = 0.40;
   function sideWeight(x, z) {
-    const eW = Math.max(0, FLAT.minX - x), eE = Math.max(0, x - FLAT.maxX);
-    const eN = Math.max(0, FLAT.minZ - z), eS = Math.max(0, z - FLAT.maxZ);
+    const g = plateClear();
+    const eW = Math.max(0, (FLAT.minX - g) - x), eE = Math.max(0, x - (FLAT.maxX + g));
+    const eN = Math.max(0, (FLAT.minZ - g) - z), eS = Math.max(0, z - (FLAT.maxZ + g));
     const sum = eW + eE + eN + eS;
     if (sum <= 1e-6) return 0;
     return (eW * SIDE_W + eE * SIDE_E + eN * SIDE_N + eS * SIDE_S) / sum;
@@ -388,8 +399,10 @@
   function layoutV3() {
     CX = (FLAT.minX + FLAT.maxX) / 2;
     CZ = (FLAT.minZ + FLAT.maxZ) / 2;
-    HEROES3[0].x = CX - 1250; HEROES3[0].z = FLAT.minZ - 780;
-    HEROES3[1].x = CX + 950;  HEROES3[1].z = FLAT.minZ - 1150;
+    // titans anchor to the RECEDED ring (plate clearance included), not the
+    // raw flat edge — otherwise they'd stand where ringMask is now zero.
+    HEROES3[0].x = CX - 1250; HEROES3[0].z = FLAT.minZ - plateClear() - 780;
+    HEROES3[1].x = CX + 950;  HEROES3[1].z = FLAT.minZ - plateClear() - 1150;
     // exported peak info (crest heights measured from the shaped field —
     // ±10% by seed since the fbm crest rides on the altitude bump)
     CBZ.MOUNT_COLOSSUS = { name: HEROES3[0].name, x: HEROES3[0].x, z: HEROES3[0].z, height: 950 };
@@ -609,7 +622,7 @@
     // masks guarantee the field is back under the sea before the tile edge;
     // world.js's 16 km SEA_OVERHAUL ocean underlies the whole span).
     const liveSpan = Math.max(FLAT.maxX - FLAT.minX, FLAT.maxZ - FLAT.minZ);
-    const SPAN = Math.ceil((liveSpan + 4400) / 500) * 500;
+    const SPAN = Math.ceil((liveSpan + 4400 + 2 * plateClear()) / 500) * 500;   // ring receded by the plate clearance must still fit inside the tile field
     const TILES = 4, TSPAN = SPAN / TILES, TSEG = 76;
     const terrMat = CBZ.terrainFogScale(new THREE.MeshLambertMaterial({
       color: 0xffffff, vertexColors: true, flatShading: true, fog: true,
