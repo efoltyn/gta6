@@ -89,6 +89,9 @@ body.touch .ikey { display: none; }
 body.touch #interact .iopt { gap: 0; }                 /* no badge → no gap */
 body.touch #cpPanel .cpHint { display: none; }
 body.touch #cHud .cSlot .key { display: none; }
+/* the portrait card is tappable on touch — it opens the inventory (charpanel.js).
+   Higher specificity than the injected #cpPanel{pointer-events:none}, so it wins. */
+body.touch #cpPanel { pointer-events: auto; cursor: pointer; }
 
 /* ---- coarse-pointer (iPad / touch): every pop-up stays pressable ---------- */
 /* touch-action:manipulation removes the 300 ms tap delay + double-tap zoom on

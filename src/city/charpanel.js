@@ -726,6 +726,15 @@
       if (e.stopPropagation) e.stopPropagation();
       setHudHidden(true);
     });
+    // TOUCH: with the "[I] Inventory" caption hidden on iPad there is no key to
+    // press, so the portrait card ITSELF is the affordance — tap it to open the
+    // inventory. css/mobile.css grants the panel pointer-events on body.touch;
+    // desktop keeps pointer-events:none, so this can never eat mouse clicks.
+    // The [×] handler above stopPropagation()s, so hiding still works.
+    panel.addEventListener("click", function () {
+      if (!CBZ.touchMode || hudHidden) return;
+      if (invOpen) closeInv(); else openInv();
+    });
   }
 
   function starsHtml(w) {

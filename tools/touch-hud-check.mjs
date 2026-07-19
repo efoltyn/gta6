@@ -55,6 +55,17 @@ const check = await evl(`(() => {
   });
 })()`);
 console.log("check:", check);
+// tap the portrait card → inventory must open (the touch affordance replacing [I])
+const invTap = await evl(`(() => {
+  const panel = document.getElementById("cpPanel"); if (!panel) return { panel: false };
+  const pe = getComputedStyle(panel).pointerEvents;
+  panel.click();
+  const open1 = !!(CBZ.cityCharPanel && CBZ.cityCharPanel.isOpen());
+  panel.click();   // second tap toggles closed
+  const open2 = !!(CBZ.cityCharPanel && CBZ.cityCharPanel.isOpen());
+  return { panel: true, pointerEvents: pe, opensOnTap: open1, closesOnTap: !open2 };
+})()`);
+console.log("invTap:", JSON.stringify(invTap));
 const shot = await send("Page.captureScreenshot", { format: "png" });
 await writeFile(OUT, Buffer.from(shot.result.data, "base64"));
 console.log("shot:", OUT);

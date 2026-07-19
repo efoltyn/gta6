@@ -2638,10 +2638,11 @@
   // follow for free. One-line revert: CBZ.CONFIG.AIM_LOCK_ASSIST = false.
   if (CBZ.CONFIG.AIM_LOCK_ASSIST == null) CBZ.CONFIG.AIM_LOCK_ASSIST = true;
   let lockTarget = null, lockScanT = 0;
-  const _lockEye = new THREE.Vector3(), _lockDir = new THREE.Vector3();
+  const _lockEye = new THREE.Vector3(), _lockDir = new THREE.Vector3(), _lockRay = new THREE.Vector3();
+  const _lockCands = [];
   function lockValid(a) { return a && !a.dead && (a.ko || 0) <= 0 && !a.escaped && a.group && a.group.visible !== false; }
   function pickLockActor(eye, fwd, range, coneCos) {
-    let best = null, bestScore = Infinity;
+    _lockCands.length = 0;
     const consider = function (list) {
       if (!list) return;
       for (let i = 0; i < list.length; i++) {
@@ -2652,12 +2653,23 @@
         const dist = Math.hypot(tx, ty, tz); if (dist < 0.6 || dist > range) continue;
         const dot = (tx * fwd.x + ty * fwd.y + tz * fwd.z) / dist;
         if (dot < coneCos) continue;                       // outside the acquire cone
-        const score = (1 - dot) * 8 + (dist / range) * 0.08;   // most on-axis wins, nearness breaks ties
-        if (score < bestScore) { bestScore = score; best = a; }
+        _lockCands.push({ a: a, dist: dist, nx: tx / dist, ny: ty / dist, nz: tz / dist,
+          score: (1 - dot) * 8 + (dist / range) * 0.08 }); // most on-axis wins, nearness breaks ties
       }
     };
     consider(CBZ.cityPeds); consider(CBZ.cityCops); if (CBZ.cityMedics) consider(CBZ.cityMedics);
-    return best;
+    _lockCands.sort(function (p, q) { return p.score - q.score; });
+    // Best-first, first candidate with a clear line of sight wins — the same
+    // no-lock-through-walls contract as the rocket acquisition above. Capped
+    // raycasts (rescans run at 10Hz, so keep the per-tick cost bounded).
+    for (let i = 0; i < _lockCands.length && i < 4; i++) {
+      const c = _lockCands[i];
+      _lockRay.set(c.nx, c.ny, c.nz);
+      const cover = wallDistance(eye, _lockRay, c.dist);
+      if (cover && cover.distance < c.dist - 1.2) continue;   // behind a wall
+      return c.a;
+    }
+    return null;
   }
   // Ease the live aim toward the locked target's chest. Corrects against the
   // ACTUAL aim direction, so it works identically in FPS and 3rd-person shoulder
@@ -2669,8 +2681,10 @@
     lockScanT -= dt;
     if (!lockValid(lockTarget) || lockScanT <= 0) {
       lockScanT = 0.1;
-      const cand = pickLockActor(_lockEye, _lockDir, 70, Math.cos(0.62));   // ~35° cone, 70m
-      if (cand) lockTarget = cand; else if (!lockValid(lockTarget)) lockTarget = null;
+      // The pick embeds the occlusion test, so re-running it every tick also
+      // BREAKS the lock when the held target ducks behind cover — no tracking
+      // people through walls (matches the dossier's aim contract).
+      lockTarget = pickLockActor(_lockEye, _lockDir, 55, Math.cos(0.45));   // ~26° cone, 55m
     }
     if (!lockValid(lockTarget)) return;
     const gp = lockTarget.group.position, gy = gp.y || 0;
@@ -3123,6 +3137,7 @@
       cross.classList.toggle("hot", !muzzleBlocked && (!!aim || reticleDamageable(muzzleHit)));
       cross.classList.toggle("blocked", muzzleBlocked);
       cross.classList.toggle("dry", armed() && fps.ammo <= 0);
+      cross.classList.toggle("locked", !!lockTarget);   // soft aim-lock is tracking someone
     }
   });
 
